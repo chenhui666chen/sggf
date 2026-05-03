@@ -3,7 +3,7 @@ import logging
 import asyncio
 from fastapi import APIRouter, Depends, HTTPException, status, Body, BackgroundTasks
 from sqlalchemy.orm import Session
-from typing import Dict, Any, Optional, Tuple, List
+from typing import Dict, Any, Optional, Tuple, List, Sequence
 from pydantic import BaseModel, ConfigDict
 from datetime import datetime
 import json
@@ -27,6 +27,21 @@ from core.model_resolution import normalize_model_id
 from core.model_runtime import ensure_model_hub_initialized, resolve_model_for_task
 from app.services.prompts.stages.world_building import CharacterDesignPrompts, get_genre_character_fields
 from app.services.auto_system_detector import auto_create_system_collections
+from app.services.points_usage_pricing import (
+    build_points_billing_precheck,
+    build_points_billing_precheck_error_detail,
+    build_points_usage_charge_estimate,
+    estimate_story_expansion_request_basis_yuan,
+    estimate_story_expansion_result_basis_yuan,
+    supports_points_billing_session,
+)
+from app.services.user_center_points_events import (
+    POINTS_BILLING_MODULE_NOVEL,
+    build_points_billing_key,
+    record_points_billing_freeze,
+    record_points_billing_release,
+    record_points_billing_settle,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -89,6 +104,115 @@ def _apply_story_expansion_duration_calibration_safely(
             estimate_error,
         )
         return analysis
+
+
+def _build_story_expansion_billing_key(task_id: str) -> str:
+    return build_points_billing_key(POINTS_BILLING_MODULE_NOVEL, f"expand-story:{task_id}")
+
+
+def _safe_user_name(user: object) -> str:
+    return str(getattr(user, "username", None) or getattr(user, "email", None) or "system").strip() or "system"
+
+
+def _release_story_expansion_billing_safely(
+    *,
+    db: Session,
+    user_id: int,
+    username: str,
+    task_id: str,
+    reason: str,
+    project_id: int,
+) -> None:
+    if not supports_points_billing_session(db):
+        return
+    try:
+        try:
+            db.rollback()
+        except Exception:
+            pass
+        record_points_billing_release(
+            db=db,
+            actor_user_id=user_id,
+            actor_username=username,
+            target_user_id=user_id,
+            billing_key=_build_story_expansion_billing_key(task_id),
+            module_key=POINTS_BILLING_MODULE_NOVEL,
+            reason=reason,
+            default_request_path=f"/internal/workflow/expand-story/{task_id}/billing-release",
+            extra_payload={
+                "project_id": int(project_id or 0),
+                "task_id": task_id,
+            },
+        )
+    except Exception as billing_error:
+        logger.warning("小说协同扩展积分释放失败: task_id=%s, error=%s", task_id, billing_error)
+
+
+def _settle_story_expansion_billing_safely(
+    *,
+    db: Session,
+    user_id: int,
+    username: str,
+    task_id: str,
+    project_id: int,
+    project_title: str | None,
+    initial_chapter_count: int,
+    final_chapter_count: int,
+    initial_character_count: int,
+    final_character_count: int,
+    execution_mode: str | None,
+    execution_rounds: Sequence[object] | None,
+    epic_total_volumes: int | None,
+) -> None:
+    if not supports_points_billing_session(db):
+        return
+    try:
+        basis_yuan = estimate_story_expansion_result_basis_yuan(
+            initial_chapter_count=initial_chapter_count,
+            final_chapter_count=final_chapter_count,
+            initial_character_count=initial_character_count,
+            final_character_count=final_character_count,
+            execution_mode=execution_mode,
+            execution_rounds=execution_rounds,
+            epic_total_volumes=epic_total_volumes,
+        )
+        estimate = build_points_usage_charge_estimate(
+            db=db,
+            module_key=POINTS_BILLING_MODULE_NOVEL,
+            basis_yuan=basis_yuan,
+            include_freeze_buffer=False,
+        )
+        record_points_billing_settle(
+            db=db,
+            actor_user_id=user_id,
+            actor_username=username,
+            target_user_id=user_id,
+            billing_key=_build_story_expansion_billing_key(task_id),
+            module_key=POINTS_BILLING_MODULE_NOVEL,
+            amount_points=estimate.estimated_points,
+            amount_yuan=estimate.basis_yuan,
+            title=f"小说协同扩展：{project_title or project_id}",
+            summary=(
+                f"协同扩展已完成，章节 {initial_chapter_count} → {final_chapter_count}，"
+                f"人物 {initial_character_count} → {final_character_count}。"
+            ),
+            action_path=f"/workflow?project_id={int(project_id or 0)}",
+            action_label="查看小说项目",
+            default_request_path=f"/internal/workflow/expand-story/{task_id}/billing-settle",
+            extra_payload={
+                "project_id": int(project_id or 0),
+                "task_id": task_id,
+                "execution_mode": execution_mode,
+                "initial_chapter_count": int(initial_chapter_count or 0),
+                "final_chapter_count": int(final_chapter_count or 0),
+                "initial_character_count": int(initial_character_count or 0),
+                "final_character_count": int(final_character_count or 0),
+                "execution_round_count": len(list(execution_rounds or [])),
+            },
+            require_active_freeze=True,
+        )
+    except Exception as billing_error:
+        logger.warning("小说协同扩展积分结算失败: task_id=%s, error=%s", task_id, billing_error)
 
 @router.get("/epic-framework-state/{project_id}")
 async def get_epic_framework_state(
@@ -493,13 +617,61 @@ async def expand_story(
     db: Session = Depends(get_db),
 ):
     """协同拓展大纲与人物，采用真正的 delta 策略异步执行。"""
+    task_id: str | None = None
+    billing_frozen = False
     try:
         _validate_expand_story_request(request)
 
-        _ensure_project_owned(request.project_id, current_user.id, db)
+        project = _ensure_project_owned(request.project_id, current_user.id, db)
         _validate_story_framework_mode_switch(request, db)
 
         task_id = f"expand-story-{uuid.uuid4()}"
+        if supports_points_billing_session(db):
+            billing_key = _build_story_expansion_billing_key(task_id)
+            basis_yuan = estimate_story_expansion_request_basis_yuan(request)
+            module_label = "小说协同"
+            precheck = build_points_billing_precheck(
+                db=db,
+                user_id=current_user.id,
+                billing_key=billing_key,
+                module_key=POINTS_BILLING_MODULE_NOVEL,
+                module_label=module_label,
+                basis_yuan=basis_yuan,
+            )
+            if not precheck.allowed:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=build_points_billing_precheck_error_detail(
+                        precheck=precheck,
+                        default_message="小说协同扩展积分预检未通过",
+                    ),
+                )
+            record_points_billing_freeze(
+                db=db,
+                actor_user_id=current_user.id,
+                actor_username=_safe_user_name(current_user),
+                target_user_id=current_user.id,
+                billing_key=billing_key,
+                module_key=POINTS_BILLING_MODULE_NOVEL,
+                amount_points=precheck.required_frozen_points,
+                amount_yuan=precheck.estimated_yuan,
+                title=f"小说协同扩展：{getattr(project, 'title', None) or request.project_id}",
+                summary="小说协同扩展任务已启动，积分已按预估消耗冻结。",
+                action_path=f"/workflow?project_id={int(request.project_id or 0)}",
+                action_label="查看小说项目",
+                request_context=None,
+                default_request_method="POST",
+                default_request_path="/api/v1/workflow/expand-story",
+                operation_desc=f"小说协同扩展冻结积分 {precheck.required_frozen_points:.2f}",
+                extra_payload={
+                    "project_id": int(request.project_id or 0),
+                    "task_id": task_id,
+                    "expansion_mode": request.expansion_mode,
+                    "target_total_chapters": request.target_total_chapters,
+                    "target_total_characters": request.target_total_characters,
+                },
+            )
+            billing_frozen = True
 
         _create_story_expansion_history_record(
             db,
@@ -522,8 +694,26 @@ async def expand_story(
         return response_payload.model_dump(mode="python", exclude_none=True)
 
     except HTTPException:
+        if billing_frozen and task_id:
+            _release_story_expansion_billing_safely(
+                db=db,
+                user_id=int(getattr(current_user, "id", 0) or 0),
+                username=_safe_user_name(current_user),
+                task_id=task_id,
+                reason="小说协同扩展启动失败，已释放冻结积分。",
+                project_id=request.project_id,
+            )
         raise
     except Exception as e:
+        if billing_frozen and task_id:
+            _release_story_expansion_billing_safely(
+                db=db,
+                user_id=int(getattr(current_user, "id", 0) or 0),
+                username=_safe_user_name(current_user),
+                task_id=task_id,
+                reason="小说协同扩展启动异常，已释放冻结积分。",
+                project_id=request.project_id,
+            )
         logger.error(f"❌ 启动协同拓展任务失败: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -964,6 +1154,29 @@ async def execute_expand_story_task(
             }
         ).model_dump(mode="python", exclude_none=True)
 
+        project_title = None
+        if supports_points_billing_session(db):
+            try:
+                project_row = db.query(Project).filter(Project.id == project_id).first()
+                project_title = getattr(project_row, "title", None)
+            except Exception:
+                project_title = None
+        _settle_story_expansion_billing_safely(
+            db=db,
+            user_id=user_id,
+            username=f"user-{user_id}",
+            task_id=task_id,
+            project_id=project_id,
+            project_title=project_title,
+            initial_chapter_count=initial_chapter_count,
+            final_chapter_count=final_chapter_count,
+            initial_character_count=initial_character_count,
+            final_character_count=final_character_count,
+            execution_mode=task_result_payload.get("execution_mode"),
+            execution_rounds=task_result_payload.get("execution_rounds"),
+            epic_total_volumes=task_result_payload.get("epic_total_volumes"),
+        )
+
         _update_story_expansion_history_record(
             db,
             task_id=task_id,
@@ -978,6 +1191,14 @@ async def execute_expand_story_task(
 
     except Exception as e:
         logger.error(f"❌ 后台协同拓展失败: {str(e)}")
+        _release_story_expansion_billing_safely(
+            db=db,
+            user_id=user_id,
+            username=f"user-{user_id}",
+            task_id=task_id,
+            reason="小说协同扩展任务失败，已释放冻结积分。",
+            project_id=project_id,
+        )
         _update_story_expansion_history_record(
             db,
             task_id=task_id,

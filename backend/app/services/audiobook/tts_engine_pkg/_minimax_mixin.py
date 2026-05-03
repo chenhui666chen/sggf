@@ -89,6 +89,8 @@ from app.services.audiobook.tts_engine_pkg._constants import (
     MINIMAX_EMOTIONS,
 )
 
+_TTS_CACHE_VALIDATION_VERSION = "tts_output_validator_v1"
+
 class MinimaxMixin:
     def _apply_interjections(
         self,
@@ -128,6 +130,36 @@ class MinimaxMixin:
             try:
                 audio = await self._call_minimax_tts(text, voice_params)
                 if audio and len(audio) > 0:
+                    validation = self._validate_tts_output(audio, text)
+                    self._record_tts_output_validation(validation)
+                    if not validation.passed:
+                        if attempt < self.retry_config.max_retries - 1:
+                            delay = self.retry_config.calculate_delay(attempt)
+                            logger.warning(
+                                "MiniMax TTS 输出质量未通过，等待 %.1f秒后重试 "
+                                "(reason=%s duration=%sms expected=%sms attempt %s/%s)",
+                                delay,
+                                validation.reason,
+                                validation.duration_ms,
+                                validation.expected_duration_ms,
+                                attempt + 1,
+                                self.retry_config.max_retries,
+                            )
+                            if METRICS_ENABLED:
+                                metrics_collector.increment_counter(
+                                    "tts.retries",
+                                    labels={"provider": "minimax", "reason": "output_validation"}
+                                )
+                            await asyncio.sleep(delay)
+                            continue
+                        logger.error(
+                            "MiniMax TTS 输出质量未通过且已耗尽重试: reason=%s duration=%sms expected=%sms",
+                            validation.reason,
+                            validation.duration_ms,
+                            validation.expected_duration_ms,
+                        )
+                        return b""
+
                     if attempt > 0:
                         logger.info(
                             "MiniMax重试成功 (attempt %s/%s)",
@@ -537,7 +569,15 @@ class MinimaxMixin:
     ) -> str:
         """生成缓存key"""
         # 组合关键参数
+        fallback_values = [
+            str(getattr(provider, "value", provider))
+            for provider in getattr(self, "fallback_providers", []) or []
+        ]
         key_parts = [
+            str(getattr(self, "model", "")),
+            str(getattr(getattr(self, "primary_provider", ""), "value", getattr(self, "primary_provider", ""))),
+            ",".join(fallback_values),
+            _TTS_CACHE_VALIDATION_VERSION,
             text,
             str(voice_params.get("speaker", "")),
             str(voice_params.get("pitch", "")),

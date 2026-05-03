@@ -11,6 +11,8 @@ import re
 from typing import Optional
 from dataclasses import dataclass
 
+from app.services.book_parser.text_metrics import count_readable_units
+
 
 @dataclass
 class CleanResult:
@@ -18,7 +20,7 @@ class CleanResult:
     text: str                    # 清洗后的文本
     original_length: int         # 原始长度
     cleaned_length: int          # 清洗后长度
-    word_count: int              # 中文字数（不含空格标点）
+    word_count: int              # 可朗读文本单位（中文按字，英文/数字按词）
     paragraph_count: int         # 段落数
     has_bom: bool               # 是否有BOM头
     detected_encoding: str       # 检测到的编码
@@ -51,6 +53,10 @@ class TextCleaner:
         self._multi_space_pattern = re.compile(r'[ \t]{2,}')
         self._leading_space_pattern = re.compile(r'^[ \t]+', re.MULTILINE)
         self._empty_line_pattern = re.compile(r'\n[ \t]*\n')
+        self._hyphenated_line_break_pattern = re.compile(r'(?<=[A-Za-z])-\n(?=[A-Za-z])')
+        self._isbn_line_pattern = re.compile(
+            r'(?im)^[^\n]{0,40}\bISBN(?:-1[03])?\b[-: \t]*[0-9Xx][0-9Xx\- \t]{8,}[^\n]*$'
+        )
         
     def clean(self, text: str, preserve_paragraphs: bool = True) -> CleanResult:
         """
@@ -81,6 +87,12 @@ class TextCleaner:
         
         # 3. 统一换行符
         text = text.replace('\r\n', '\n').replace('\r', '\n')
+
+        # 移除独立 ISBN/书号元数据行，避免被读成正文
+        text = self._isbn_line_pattern.sub('', text)
+
+        # 修复英文 PDF/EPUB 中常见的断词换行: "exam-\nple" -> "example"
+        text = self._hyphenated_line_break_pattern.sub('', text)
         
         # 4. 处理全角/半角空格
         text = text.replace('\u3000', '  ')  # 全角空格转两个半角
@@ -119,7 +131,7 @@ class TextCleaner:
         
         # 计算统计信息
         cleaned_length = len(text)
-        word_count = self._count_chinese_words(text)
+        word_count = self._count_readable_units(text)
         paragraph_count = self._count_paragraphs(text)
         
         return CleanResult(
@@ -132,15 +144,11 @@ class TextCleaner:
             detected_encoding=detected_encoding
         )
     
-    def _count_chinese_words(self, text: str) -> int:
+    def _count_readable_units(self, text: str) -> int:
         """
-        统计中文字数
-        
-        只计算中文字符，不含空格、标点、英文等
+        统计可朗读文本单位
         """
-        # 匹配中文字符
-        chinese_chars = re.findall(r'[\u4e00-\u9fff]', text)
-        return len(chinese_chars)
+        return count_readable_units(text)
     
     def _count_paragraphs(self, text: str) -> int:
         """

@@ -1,111 +1,92 @@
 from __future__ import annotations
 
-import asyncio
 import logging
-import os
 import json
-import math
-from pathlib import Path
-from urllib.parse import quote
 from typing import List, Optional, Dict, Any
 
-from fastapi import APIRouter, Body, Depends, HTTPException, status, Response, Query, UploadFile, File, Request
-from fastapi.responses import FileResponse
+from fastapi import Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.core.security import get_current_user
 from app.db.base import get_db
 from app.models.user import User
-from app.models.project import Project, Chapter
+from app.models.project import Project
 from app.models.audiobook import AudiobookProject, ChapterAudio
-from app.models.audiobook_delete_audit import AudiobookDeleteAudit
-from app.models.character import Character
-from app.models.audiobook_task import AudiobookTask
 from app.schemas.audiobook import (
-    AudiobookProjectCreate,
-    GenerateAudioFromScriptsRequest,
-    ChapterScriptUpdateRequest,
-    AudiobookProjectResponse,
-    ChapterAudioResponse,
-    CharacterVoiceConfig,
-    TTSPreviewRequest,
-    ScriptSegmentPreviewRequest,
     SegmentRegenerateRequest,
     SegmentReviewRequest,
-    AudiobookTaskStatus,
-    CosyVoiceCloneCreateRequest,
-    ChapterReviewStatus,
-    NarrationStylePreset,
-    SubtitleDownloadResponse,
-    GenerationCheckpointResponse,
-    SmartChunkConfig,
-    ChunkStats,
-    ChunkPreviewResponse,
-    VoiceTypePresetResponse,
-    VoiceTypeRecommendationRequest,
-    VoiceTypeRecommendationResponse,
 )
-from app.celery_app import celery_app
-from app.services.audiobook import AudiobookEngine
-from app.services.audiobook.audio_mixer import AudioMixer
-from app.services.audiobook.agents import SoundEffectDesigner
-from app.services.audiobook.tts_engine import RetryConfig
-from app.services.audiobook.voice_manager import VoiceManager
-from app.services.audiobook.voice_manager_factory import create_voice_manager
-from app.services.audiobook.voice_catalog import get_voice_entry, load_voice_catalog_for_model
-from app.services.audiobook.project_audio_config import (
-    parse_project_audio_config,
-    get_characters_for_model,
-    get_audio_fx,
+from app.services.audiobook.tts_engine import RetryConfig as TTSRetryConfig
+from app.services.audiobook.tts_model_ids import (
+    MINIMAX_SPEECH_28_HD_MODEL,
+    MINIMAX_SPEECH_28_TURBO_MODEL,
+    normalize_audiobook_tts_model,
 )
-from app.services.audiobook.cosyvoice_clone_client import (
-    CosyVoiceCloneError,
-    create_cosyvoice_v3_plus_clone,
-    delete_cosyvoice_clone,
-    get_clone_display_name,
-    list_cosyvoice_v3_plus_clones,
-    save_clone_display_name,
-    upload_cosyvoice_v3_plus_clone_sample,
-)
-from app.services.audiobook.narration_styles import get_all_narration_styles, get_narration_style_preset, apply_narration_style_to_tts_params
-from app.services.audiobook.subtitle_generator import SubtitleGenerator, SubtitleEntry
-from app.services.audiobook.smart_chunker import SmartChunker, TextChunk
-from app.services.audiobook.voice_types import (
-    get_all_voice_types,
-    get_voice_type_preset,
-    recommend_voice_type,
-    apply_voice_type_to_tts_params,
-    create_character_voice_profile,
-)
-from app.services.audiobook.sse_progress import sse_tracker, create_progress_handler
-from app.services.audiobook.smart_retrier import SmartRetrier, RetryConfig, retry_tts_call
-from app.services.audiobook.preview_generator import PreviewGenerator, default_preview_generator
-from app.services.audiobook.app_service import AudiobookAppService
-from app.services.audiobook.repository import (
-    AudiobookProjectRepository,
-    ChapterAudioRepository,
-    ProjectRepository,
-    AudiobookTaskRepository,
-)
-from app.services.audiobook.task_support import (
-    build_generation_checkpoint_payload as _build_generation_checkpoint_payload,
-    build_task_status_response,
-    enqueue_chapter_runs as _enqueue_chapter_runs,
-    ensure_audiobook_points_precheck_passed as _ensure_audiobook_points_precheck_passed,
-)
-from app.services.points_task_precheck import (
-    build_audiobook_task_points_precheck,
-)
-from app.services.user_center_points_events import (
-    record_audiobook_billing_freeze,
-)
+from app.services.audiobook.temp_segment_store import save_segment_audio_map
 from app.utils.datetime_utils import utc_now
-from core.model_resolution import normalize_model_id
 from core.unified_media_runtime import synthesize_speech as runtime_synthesize_speech
 
 from app.api.v1.audiobook_api import router
 
 logger = logging.getLogger(__name__)
+
+DEFAULT_SEGMENT_REGEN_VOICE_ID = "Neil"
+DEFAULT_MINIMAX_SEGMENT_REGEN_VOICE_ID = "male-qn-qingse"
+
+
+def _load_chapter_segments(chapter_audio: ChapterAudio) -> List[Dict[str, Any]]:
+    try:
+        segments = json.loads(chapter_audio.script_json or "[]")
+    except Exception:
+        raise HTTPException(status_code=500, detail="章节剧本数据损坏")
+
+    if not isinstance(segments, list):
+        raise HTTPException(status_code=500, detail="章节剧本数据损坏")
+
+    return segments
+
+
+def _get_segment_or_404(segments: List[Dict[str, Any]], segment_index: int) -> Dict[str, Any]:
+    if segment_index < 0 or segment_index >= len(segments):
+        raise HTTPException(status_code=404, detail="片段索引无效")
+
+    segment = segments[segment_index]
+    if not isinstance(segment, dict):
+        raise HTTPException(status_code=500, detail="章节剧本片段数据损坏")
+
+    return segment
+
+
+def _validate_body_segment_index(request_segment_index: Optional[int], path_segment_index: int) -> None:
+    if request_segment_index is not None and request_segment_index != path_segment_index:
+        raise HTTPException(status_code=400, detail="请求体片段索引与路径不一致")
+
+
+def _resolve_segment_regen_voice_id(
+    *,
+    tts_model: str,
+    requested_voice_id: Optional[str],
+    segment_voice_params: Dict[str, Any],
+    segment: Dict[str, Any],
+) -> str:
+    voice_id = (
+        requested_voice_id
+        or segment_voice_params.get("speaker")
+        or segment.get("voice_id")
+        or ""
+    )
+    if voice_id:
+        return str(voice_id)
+
+    if tts_model in {MINIMAX_SPEECH_28_HD_MODEL, MINIMAX_SPEECH_28_TURBO_MODEL}:
+        return DEFAULT_MINIMAX_SEGMENT_REGEN_VOICE_ID
+    if tts_model == "cosyvoice-v3.5-plus":
+        raise HTTPException(
+            status_code=400,
+            detail="cosyvoice-v3.5-plus 片段重生成需要显式选择复刻或设计音色",
+        )
+    return DEFAULT_SEGMENT_REGEN_VOICE_ID
+
 
 @router.post("/projects/{audiobook_project_id:int}/chapters/{chapter_id:int}/segments/{segment_index:int}/regenerate")
 async def regenerate_segment(
@@ -123,6 +104,8 @@ async def regenerate_segment(
     2. 替换原有的片段音频
     3. 可选：使用不同的 TTS 模型/音色/情感
     """
+    _validate_body_segment_index(request.segment_index, segment_index)
+
     audiobook_project = db.query(AudiobookProject).filter(
         AudiobookProject.id == audiobook_project_id
     ).first()
@@ -140,65 +123,86 @@ async def regenerate_segment(
         ChapterAudio.audiobook_project_id == audiobook_project_id,
         ChapterAudio.chapter_id == chapter_id,
     ).first()
-    checkpoint_payload = _build_generation_checkpoint_payload(
-        chapter_id=chapter_id,
-        chapter_audio=chapter_audio,
-        run_type=None,
-        db=db,
-        audiobook_project_id=audiobook_project_id,
-    )
     if not chapter_audio:
         raise HTTPException(status_code=404, detail="章节音频记录不存在")
     
     # 加载剧本片段
-    try:
-        segments = json.loads(chapter_audio.script_json)
-    except:
-        raise HTTPException(status_code=500, detail="章节剧本数据损坏")
+    segments = _load_chapter_segments(chapter_audio)
+    segment = _get_segment_or_404(segments, segment_index)
     
-    if segment_index < 0 or segment_index >= len(segments):
-        raise HTTPException(status_code=404, detail="片段索引无效")
-    
-    segment = segments[segment_index]
-    
+    segment_voice_params = segment.get("voice_params") or {}
+    if not isinstance(segment_voice_params, dict):
+        segment_voice_params = {}
+
     # 构建 TTS 请求参数
-    tts_model = normalize_model_id(request.tts_model or (chapter_audio.tts_model or "qwen3-tts-instruct-flash")) or "qwen3-tts-instruct-flash"
-    voice_id = request.voice_id or segment.get("voice_id", "longxiaochun")
-    emotion = request.emotion or segment.get("emotion", "neutral")
-    
-    # 创建 TTS 引擎
-    engine = create_tts_engine(
-        model=tts_model,
-        retry_config=RetryConfig(max_retries=3, base_delay=1.0),
+    tts_model = normalize_audiobook_tts_model(request.tts_model)
+    voice_id = _resolve_segment_regen_voice_id(
+        tts_model=tts_model,
+        requested_voice_id=request.voice_id,
+        segment_voice_params=segment_voice_params,
+        segment=segment,
     )
-    
-    voice_params = {
-        "speaker": voice_id,
-        "emotion": emotion,
-    }
-    
+    emotion = (
+        request.emotion
+        or segment.get("instruct_emotion")
+        or segment.get("emotion")
+        or "neutral"
+    )
+    text = str(segment.get("text") or "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="片段文本不能为空")
+
+    voice_params = dict(segment_voice_params)
+    voice_params["speaker"] = voice_id
+    voice_params["emotion"] = emotion
+    voice_params["segment_speaker"] = segment.get("speaker", "")
+    voice_params["segment_type"] = segment.get("type", "")
+    voice_params["instruct_emotion"] = segment.get("instruct_emotion") or emotion
+    voice_params["instruct_scene"] = segment.get("instruct_scene") or ""
+    voice_params["instruct_role"] = segment.get("instruct_role") or ""
+    voice_params["instruct_identity"] = segment.get("instruct_identity") or ""
+    performance_notes = str(segment.get("performance_notes") or "").strip()
+    if performance_notes:
+        voice_params["performance_notes"] = performance_notes
+    if (
+        voice_params.get("instruct_emotion")
+        or voice_params.get("instruct_scene")
+        or voice_params.get("instruct_role")
+        or voice_params.get("instruct_identity")
+        or performance_notes
+    ):
+        voice_params["use_instruct_mode"] = True
+
     # 调用 TTS
-    text = segment.get("text", "")
-    audio_bytes = await engine.synthesize(text, voice_params=voice_params)
+    audio_bytes = await runtime_synthesize_speech(
+        text=text,
+        voice_params=voice_params,
+        emotion=emotion,
+        model_id=tts_model,
+        enable_cache=False,
+        max_concurrent=1,
+        request_delay=0.0,
+        retry_config=TTSRetryConfig(max_retries=3, base_delay=1.0, max_delay=8.0),
+    )
     
     if not audio_bytes:
         raise HTTPException(status_code=500, detail="TTS 生成失败")
     
     # 保存新音频（覆盖原音频）
     try:
-        output_dir = chapter_audio.get_audio_dir()
-        os.makedirs(output_dir, exist_ok=True)
-        
-        audio_filename = f"segment_{segment_index}_regenerated.mp3"
-        audio_path = os.path.join(output_dir, audio_filename)
-        
-        with open(audio_path, "wb") as f:
-            f.write(audio_bytes)
+        output_format = "wav" if audio_bytes.startswith(b"RIFF") else "mp3"
+        temp_segment_cache = save_segment_audio_map(
+            run_id=f"segment_regen_{chapter_audio.id}",
+            chapter_id=chapter_id,
+            audio_map={segment_index: audio_bytes},
+            format=output_format,
+        )
+        audio_path = (temp_segment_cache.get("cached_audio_paths") or {}).get(segment_index)
         
         # 更新 segment 中的音频路径
         segment["audio_path"] = audio_path
         segment["regenerated"] = True
-        segment["regenerated_at"] = datetime.utcnow().isoformat()
+        segment["regenerated_at"] = utc_now().isoformat()
         if request.reason:
             segment["regenerate_reason"] = request.reason
         
@@ -215,6 +219,7 @@ async def regenerate_segment(
             "success": True,
             "segment_index": segment_index,
             "audio_path": audio_path,
+            "temp_segment_cache": temp_segment_cache,
             "audio_size": len(audio_bytes),
             "model_used": tts_model,
         }
@@ -240,6 +245,8 @@ async def review_segment(
     2. 标记需要重新生成的片段
     3. 更新章节整体审查状态
     """
+    _validate_body_segment_index(request.segment_index, segment_index)
+
     audiobook_project = db.query(AudiobookProject).filter(
         AudiobookProject.id == audiobook_project_id
     ).first()
@@ -259,14 +266,19 @@ async def review_segment(
     ).first()
     if not chapter_audio:
         raise HTTPException(status_code=404, detail="章节音频记录不存在")
+
+    segments = _load_chapter_segments(chapter_audio)
+    _get_segment_or_404(segments, segment_index)
     
     # 加载审查记录
     review_data = {}
     if chapter_audio.segment_reviews_json:
         try:
-            review_data = json.loads(chapter_audio.segment_reviews_json)
-        except:
-            pass
+            loaded_review_data = json.loads(chapter_audio.segment_reviews_json)
+            if isinstance(loaded_review_data, dict):
+                review_data = loaded_review_data
+        except Exception:
+            review_data = {}
     
     # 记录审查结果
     review_key = str(segment_index)
@@ -274,7 +286,7 @@ async def review_segment(
         "quality_score": request.quality_score,
         "notes": request.notes,
         "needs_regenerate": request.needs_regenerate,
-        "reviewed_at": datetime.utcnow().isoformat(),
+        "reviewed_at": utc_now().isoformat(),
         "reviewed_by": current_user.id,
     }
     

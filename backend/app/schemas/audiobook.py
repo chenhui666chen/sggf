@@ -154,7 +154,7 @@ class ScriptSegmentPreviewRequest(BaseModel):
 
 class SegmentRegenerateRequest(BaseModel):
     """单个片段重新生成请求"""
-    segment_index: int  # 片段在章节中的索引
+    segment_index: Optional[int] = None  # 片段在章节中的索引；路径参数已携带时可省略
     reason: Optional[str] = None  # 重新生成原因（可选，用于记录）
     tts_model: Optional[str] = None  # 可选：指定使用不同的 TTS 模型
     voice_id: Optional[str] = None  # 可选：使用不同的音色
@@ -163,7 +163,7 @@ class SegmentRegenerateRequest(BaseModel):
 
 class SegmentReviewRequest(BaseModel):
     """片段审查/评分请求"""
-    segment_index: int
+    segment_index: Optional[int] = None
     quality_score: Optional[float] = None  # 质量评分 1-5
     notes: Optional[str] = None  # 审查备注
     needs_regenerate: Optional[bool] = False  # 是否需要重新生成
@@ -282,6 +282,7 @@ class GenerationCheckpointResponse(BaseModel):
     run_status: Optional[str] = None
     current_stage: Optional[str] = None
     celery_task_id: Optional[str] = None
+    generate_subtitle: bool = True
     checkpoint_source: Optional[str] = None
     checkpoint_schema_version: Optional[int] = None
     checkpoint_updated_at: Optional[str] = None

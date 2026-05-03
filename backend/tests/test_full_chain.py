@@ -12,7 +12,6 @@ import os
 import io
 import json
 import logging
-import importlib.util
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -25,22 +24,9 @@ except ImportError:
     print("pydub unavailable")
     sys.exit(1)
 
-def load_module(name, path):
-    spec = importlib.util.spec_from_file_location(name, path)
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
-
-base = os.path.join(os.path.dirname(__file__), '..', 'app', 'services', 'audiobook')
-
-audio_mixer_mod = load_module("audio_mixer", os.path.join(base, "audio_mixer.py"))
-AudioMixer = audio_mixer_mod.AudioMixer
-
-interjection_mod = load_module("interjection_parser", os.path.join(base, "interjection_parser.py"))
-InterjectionParser = interjection_mod.InterjectionParser
-
-catalog_mod = load_module("voice_catalog", os.path.join(base, "voice_catalog.py"))
-load_voice_catalog = catalog_mod.load_voice_catalog_for_model
+from app.services.audiobook.audio_mixer import AudioMixer
+from app.services.audiobook.interjection_parser import InterjectionParser
+from app.services.audiobook.voice_catalog import load_voice_catalog_for_model as load_voice_catalog
 
 
 def test_m4b_format_generation():
@@ -74,7 +60,6 @@ def test_m4b_format_generation():
     assert wav_audio[:4] == b'RIFF', "WAV should start with RIFF"
     
     print("  PASS: M4B format generation")
-    return True
 
 
 def test_interjection_injection():
@@ -102,7 +87,6 @@ def test_interjection_injection():
     assert result3 == text1, "Non-MiniMax model should not inject interjections"
     
     print("  PASS: Interjection injection chain")
-    return True
 
 
 def test_voice_model_auto_match():
@@ -134,7 +118,6 @@ def test_voice_model_auto_match():
     assert minimax_voice_id in minimax_lookup.get("voices_by_id", {}), "MiniMax voice should exist"
     
     print("  PASS: Voice-model auto matching")
-    return True
 
 
 def test_output_format_selection():
@@ -158,7 +141,6 @@ def test_output_format_selection():
         assert len(audio_bytes) > 0, f"{fmt} should not be empty"
     
     print("  PASS: Output format selection chain")
-    return True
 
 
 def test_segment_review_api_schema():
@@ -180,9 +162,11 @@ def test_segment_review_api_schema():
         assert f"class {class_name}" in content, f"Schema {class_name} not found"
         print(f"  Found schema: {class_name}")
     
-    api_path = os.path.join(os.path.dirname(__file__), '..', 'app', 'api', 'v1', 'audiobook.py')
-    with open(api_path, 'r', encoding='utf-8') as f:
-        api_content = f.read()
+    api_dir = os.path.join(os.path.dirname(__file__), '..', 'app', 'api', 'v1', 'audiobook_api')
+    api_content = ""
+    for filename in ("routes_segment_regen.py", "routes_review.py"):
+        with open(os.path.join(api_dir, filename), 'r', encoding='utf-8') as f:
+            api_content += "\n" + f.read()
     
     required_endpoints = [
         "/regenerate",
@@ -195,7 +179,6 @@ def test_segment_review_api_schema():
         print(f"  Found endpoint: {endpoint}")
     
     print("  PASS: Segment review API schema validation")
-    return True
 
 
 def test_database_model_extension():
@@ -211,7 +194,6 @@ def test_database_model_extension():
     print("  Found column: segment_reviews_json")
     
     print("  PASS: Database model extension")
-    return True
 
 
 def run_all_tests():
@@ -233,8 +215,8 @@ def run_all_tests():
     
     for name, test_func in tests:
         try:
-            if test_func():
-                passed += 1
+            test_func()
+            passed += 1
         except Exception as e:
             print(f"  FAIL: {name}: {str(e)}")
             import traceback

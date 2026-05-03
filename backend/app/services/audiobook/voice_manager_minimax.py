@@ -5,9 +5,10 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
-from .voice_manager import VoiceManager
+from .tts_model_ids import MINIMAX_SPEECH_28_HD_MODEL
+from .voice_manager import VoiceManager, VoiceProfile
 from .voice_catalog import load_voice_catalog_for_model
 
 logger = logging.getLogger(__name__)
@@ -26,10 +27,12 @@ class MiniMaxVoiceManager(VoiceManager):
     3. 19种语气词标签（(laughs)/(sighs)/(gasps)等）
     4. 混合音色（最多4种按比例混合）
     """
-    
+    DEFAULT_NARRATOR_VOICE_ID = "male-qn-qingse"
+    DEFAULT_FEMALE_VOICE_ID = "female-shaonv"
+
     def __init__(self):
         super().__init__()
-        self.model = "minimax-speech-2.8"
+        self.model = MINIMAX_SPEECH_28_HD_MODEL
         self.voice_catalog = None
         self._load_catalog()
         logger.info("MiniMax VoiceManager initialized with %s voices", len(self.voice_catalog.get("voices", [])))
@@ -46,9 +49,75 @@ class MiniMaxVoiceManager(VoiceManager):
         """获取 MiniMax 支持的音色列表"""
         return self.voice_catalog.get("voices", [])
 
-    def get_voice(self, voice_id: str) -> Optional[Dict[str, Any]]:
+    def get_voice_entry(self, voice_id: str) -> Optional[Dict[str, Any]]:
         """获取指定音色信息"""
         return self.voice_catalog.get("voices_by_id", {}).get(voice_id)
+
+    def _build_profile(
+        self,
+        character_name: str,
+        voice_id: str,
+        voice_config: Optional[Dict[str, Any]] = None,
+    ) -> VoiceProfile:
+        entry = self.get_voice_entry(voice_id) or self.get_voice_entry(self.DEFAULT_NARRATOR_VOICE_ID)
+        if not entry:
+            raise ValueError("MiniMax voice catalog is empty")
+
+        defaults = entry.get("default_params") or {}
+        config = voice_config or {}
+        return VoiceProfile(
+            voice_id=str(entry.get("id") or voice_id),
+            character_name=character_name,
+            gender=str(entry.get("gender") or "neutral").lower(),
+            age_group=str(entry.get("category") or "adult"),
+            personality=str(entry.get("style") or "calm"),
+            tts_model=self.model,
+            tts_speaker_id=str(entry.get("speaker") or entry.get("id") or voice_id),
+            pitch_base=int(config.get("pitch", defaults.get("pitch", 50)) or 50),
+            speed_base=float(config.get("speed", defaults.get("speed", 1.0)) or 1.0),
+            volume_base=int(config.get("volume", defaults.get("volume", 50)) or 50),
+            default_emotion="calm",
+        )
+
+    def get_narrator_voice(self) -> VoiceProfile:
+        """鑾峰彇 MiniMax 鏃佺櫧闊宠壊"""
+        if "旁白" not in self.character_voices:
+            self.character_voices["旁白"] = self._build_profile("旁白", self.DEFAULT_NARRATOR_VOICE_ID)
+        return self.character_voices["旁白"]
+
+    def get_voice(self, character_name: str) -> Optional[VoiceProfile]:
+        """鑾峰彇瑙掕壊闊宠壊妗ｆ"""
+        return self.character_voices.get(character_name)
+
+    def assign_voice(
+        self,
+        character_name: str,
+        character_info: Optional[Dict[str, Any]] = None,
+    ) -> VoiceProfile:
+        """涓鸿鑹插垎閰?MiniMax 闊宠壊妗ｆ"""
+        voice_id = self.select_voice_for_character(character_name, character_info)
+        profile = self._build_profile(character_name, voice_id)
+        self.character_voices[character_name] = profile
+        self.used_voice_ids.add(profile.voice_id)
+        return profile
+
+    def apply_project_voice_mapping(
+        self,
+        voice_mapping: Dict[str, Any],
+        character_profiles: Optional[List[Dict[str, Any]]] = None,
+    ):
+        """搴旂敤椤圭洰绾?MiniMax 闊宠壊鏄犲皠"""
+        del character_profiles
+        for character_name, raw_config in (voice_mapping or {}).items():
+            if not character_name:
+                continue
+            config = raw_config if isinstance(raw_config, dict) else {"voice_id": raw_config}
+            voice_id = str(config.get("voice_id") or config.get("speaker") or "").strip()
+            if not voice_id or not self.validate_voice(voice_id):
+                voice_id = self.select_voice_for_character(str(character_name))
+            profile = self._build_profile(str(character_name), voice_id, config)
+            self.character_voices[str(character_name)] = profile
+            self.used_voice_ids.add(profile.voice_id)
 
     def select_voice_for_character(
         self,
@@ -107,7 +176,7 @@ class MiniMaxVoiceManager(VoiceManager):
             return best_voice["id"]
         
         # 默认返回标准音色
-        default_voice = "male-qingnian" if gender == "male" else "female-qingnian"
+        default_voice = self.DEFAULT_NARRATOR_VOICE_ID if gender != "female" else self.DEFAULT_FEMALE_VOICE_ID
         logger.warning(
             f"No matching MiniMax voice for character '{character_name}', using default: {default_voice}"
         )

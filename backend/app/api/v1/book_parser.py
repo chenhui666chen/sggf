@@ -8,7 +8,9 @@ import json
 import asyncio
 import threading
 import logging
+import re
 from datetime import datetime
+from pathlib import Path
 from typing import Dict, Any, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form, BackgroundTasks
 from sqlalchemy.orm import Session
@@ -18,6 +20,20 @@ from app.db.base import get_db
 from app.core.security import get_current_user
 from app.models.book_parser import BookSource, BookChapter, BookAnalysis, ParseStatus, AnalysisType as DBAnalysisType
 from app.models.project import Project
+from app.services.points_usage_pricing import (
+    build_points_billing_precheck,
+    build_points_billing_precheck_error_detail,
+    build_points_usage_charge_estimate,
+    estimate_book_analyze_basis_yuan,
+    estimate_book_parse_basis_yuan,
+)
+from app.services.user_center_points_events import (
+    POINTS_BILLING_MODULE_BOOK_PARSER,
+    build_points_billing_key,
+    record_points_billing_freeze,
+    record_points_billing_release,
+    record_points_billing_settle,
+)
 from app.services.book_parser import (
     ChapterSplitter, 
     TextCleaner, 
@@ -31,6 +47,7 @@ from app.services.book_parser import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/book-parser", tags=["book-parser"])
+_REPO_ROOT = Path(__file__).resolve().parents[4]
 
 
 # ==================== 请求/响应模型 ====================
@@ -59,8 +76,61 @@ class BookResponse(BaseModel):
     total_volumes: int
     created_at: str
     imported_project_id: Optional[int]
+    cover_url: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)
+
+
+def _build_book_response(book: BookSource) -> BookResponse:
+    return BookResponse(
+        id=book.id,
+        title=book.title,
+        author=book.author,
+        genre=book.genre,
+        description=book.description,
+        source_type=book.source_type,
+        status=book.status,
+        parse_progress=book.parse_progress,
+        total_words=book.total_words,
+        total_chapters=book.total_chapters,
+        total_volumes=book.total_volumes,
+        created_at=book.created_at.isoformat() if book.created_at else "",
+        imported_project_id=book.imported_project_id,
+        cover_url=book.cover_url,
+    )
+
+
+def _save_parsed_cover_image(parsed: ParsedContent, book_id: int) -> Optional[str]:
+    metadata = parsed.metadata or {}
+    cover_bytes = metadata.get("cover_image_bytes")
+    if not isinstance(cover_bytes, (bytes, bytearray)) or not cover_bytes:
+        return None
+
+    extension = str(metadata.get("cover_image_extension") or ".jpg").lower()
+    if extension not in {".jpg", ".jpeg", ".png", ".webp"}:
+        extension = ".jpg"
+
+    cover_dir = _REPO_ROOT / "backend" / "data" / "book_covers"
+    cover_dir.mkdir(parents=True, exist_ok=True)
+    cover_path = cover_dir / f"book_{int(book_id)}{extension}"
+    cover_path.write_bytes(bytes(cover_bytes))
+    try:
+        return cover_path.relative_to(_REPO_ROOT).as_posix()
+    except Exception:
+        return cover_path.as_posix()
+
+
+def _parse_optional_publish_year(value: Any) -> Optional[int]:
+    if value is None:
+        return None
+    try:
+        year = int(value)
+    except (TypeError, ValueError):
+        match = re.search(r"\b(19|20)\d{2}\b", str(value))
+        if not match:
+            return None
+        year = int(match.group(0))
+    return year if 1000 <= year <= 9999 else None
 
 
 class ChapterResponse(BaseModel):
@@ -143,6 +213,141 @@ def _build_task_status_payload(
         "error": error,
         "updated_at": datetime.now().isoformat()
     }
+
+
+def _book_parser_billing_key(book_id: int, stage: str) -> str:
+    return build_points_billing_key(POINTS_BILLING_MODULE_BOOK_PARSER, f"{stage}:{int(book_id or 0)}")
+
+
+def _book_parser_username(user: object) -> str:
+    return str(getattr(user, "username", None) or getattr(user, "email", None) or "system").strip() or "system"
+
+
+def _freeze_book_parser_billing(
+    *,
+    db: Session,
+    book: BookSource,
+    current_user: object,
+    stage: str,
+    basis_yuan: float,
+    summary: str,
+) -> None:
+    module_label = "拆书分析"
+    billing_key = _book_parser_billing_key(book.id, stage)
+    precheck = build_points_billing_precheck(
+        db=db,
+        user_id=int(book.user_id or 0),
+        billing_key=billing_key,
+        module_key=POINTS_BILLING_MODULE_BOOK_PARSER,
+        module_label=module_label,
+        basis_yuan=basis_yuan,
+    )
+    if not precheck.allowed:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=build_points_billing_precheck_error_detail(
+                precheck=precheck,
+                default_message="拆书任务积分预检未通过",
+            ),
+        )
+
+    record_points_billing_freeze(
+        db=db,
+        actor_user_id=int(getattr(current_user, "id", book.user_id) or book.user_id or 0),
+        actor_username=_book_parser_username(current_user),
+        target_user_id=int(book.user_id or 0),
+        billing_key=billing_key,
+        module_key=POINTS_BILLING_MODULE_BOOK_PARSER,
+        amount_points=precheck.required_frozen_points,
+        amount_yuan=precheck.estimated_yuan,
+        title=f"拆书{('章节切分' if stage == 'parse' else 'AI分析')}：{book.title}",
+        summary=summary,
+        action_path=f"/book-parser/{int(book.id or 0)}",
+        action_label="查看拆书任务",
+        default_request_method="POST",
+        default_request_path=f"/api/v1/book-parser/{int(book.id or 0)}/{stage}",
+        operation_desc=f"拆书{stage}任务冻结积分 {precheck.required_frozen_points:.2f}",
+        extra_payload={
+            "book_id": int(book.id or 0),
+            "stage": stage,
+            "total_words": int(book.total_words or 0),
+            "total_chapters": int(book.total_chapters or 0),
+        },
+    )
+
+
+def _settle_book_parser_billing_safely(
+    *,
+    db: Session,
+    book: BookSource,
+    stage: str,
+    basis_yuan: float,
+    summary: str,
+) -> None:
+    try:
+        estimate = build_points_usage_charge_estimate(
+            db=db,
+            module_key=POINTS_BILLING_MODULE_BOOK_PARSER,
+            basis_yuan=basis_yuan,
+            include_freeze_buffer=False,
+        )
+        record_points_billing_settle(
+            db=db,
+            actor_user_id=int(book.user_id or 0),
+            actor_username=f"user-{int(book.user_id or 0)}",
+            target_user_id=int(book.user_id or 0),
+            billing_key=_book_parser_billing_key(book.id, stage),
+            module_key=POINTS_BILLING_MODULE_BOOK_PARSER,
+            amount_points=estimate.estimated_points,
+            amount_yuan=estimate.basis_yuan,
+            title=f"拆书{('章节切分' if stage == 'parse' else 'AI分析')}：{book.title}",
+            summary=summary,
+            action_path=f"/book-parser/{int(book.id or 0)}",
+            action_label="查看拆书任务",
+            default_request_path=f"/internal/book-parser/{int(book.id or 0)}/{stage}/billing-settle",
+            extra_payload={
+                "book_id": int(book.id or 0),
+                "stage": stage,
+                "total_words": int(book.total_words or 0),
+                "total_chapters": int(book.total_chapters or 0),
+            },
+            require_active_freeze=True,
+        )
+    except Exception as billing_error:
+        logger.warning("拆书任务积分结算失败: book_id=%s, stage=%s, error=%s", book.id, stage, billing_error)
+
+
+def _release_book_parser_billing_safely(
+    *,
+    db: Session,
+    book: BookSource | None,
+    book_id: int,
+    stage: str,
+    reason: str,
+) -> None:
+    if book is None:
+        return
+    try:
+        try:
+            db.rollback()
+        except Exception:
+            pass
+        record_points_billing_release(
+            db=db,
+            actor_user_id=int(book.user_id or 0),
+            actor_username=f"user-{int(book.user_id or 0)}",
+            target_user_id=int(book.user_id or 0),
+            billing_key=_book_parser_billing_key(book_id, stage),
+            module_key=POINTS_BILLING_MODULE_BOOK_PARSER,
+            reason=reason,
+            default_request_path=f"/internal/book-parser/{int(book_id or 0)}/{stage}/billing-release",
+            extra_payload={
+                "book_id": int(book_id or 0),
+                "stage": stage,
+            },
+        )
+    except Exception as billing_error:
+        logger.warning("拆书任务积分释放失败: book_id=%s, stage=%s, error=%s", book_id, stage, billing_error)
 
 
 def get_task_status(book_id: int) -> Optional[Dict[str, Any]]:
@@ -340,21 +545,7 @@ async def upload_text(
     
     logger.info(f"✅ 书籍文本上传成功: {book.title} (ID: {book.id})")
     
-    return BookResponse(
-        id=book.id,
-        title=book.title,
-        author=book.author,
-        genre=book.genre,
-        description=book.description,
-        source_type=book.source_type,
-        status=book.status,
-        parse_progress=book.parse_progress,
-        total_words=book.total_words,
-        total_chapters=book.total_chapters,
-        total_volumes=book.total_volumes,
-        created_at=book.created_at.isoformat() if book.created_at else "",
-        imported_project_id=book.imported_project_id,
-    )
+    return _build_book_response(book)
 
 
 @router.post("/upload-file", response_model=BookResponse)
@@ -369,7 +560,7 @@ async def upload_file(
     """
     上传文件
     
-    支持 TXT、EPUB、PDF 格式文件
+    支持 TXT、Markdown、EPUB、PDF 格式文件
     """
     # 验证文件名
     if not file.filename:
@@ -378,10 +569,10 @@ async def upload_file(
     filename = file.filename.lower()
     
     # 验证文件格式
-    if not any(filename.endswith(ext) for ext in ['.txt', '.epub', '.pdf']):
+    if not any(filename.endswith(ext) for ext in ['.txt', '.md', '.markdown', '.epub', '.pdf']):
         raise HTTPException(
             status_code=400, 
-            detail="仅支持 TXT、EPUB、PDF 格式文件"
+            detail="仅支持 TXT、Markdown、EPUB、PDF 格式文件"
         )
     
     # 读取文件内容
@@ -403,6 +594,7 @@ async def upload_file(
     
     # 元数据提取（优先使用文件内提取的元数据）
     metadata = cleaner.extract_metadata_from_header(parsed.text)
+    parsed_metadata = parsed.metadata or {}
     
     # 确定书名和作者（优先级：用户输入 > 文件元数据 > 文本元数据 > 文件名）
     book_title = (
@@ -423,8 +615,12 @@ async def upload_file(
         user_id=current_user.id,
         title=book_title,
         author=book_author,
+        publisher=parsed_metadata.get("publisher"),
+        publish_year=_parse_optional_publish_year(
+            parsed_metadata.get("publish_year") or parsed_metadata.get("publish_date")
+        ),
         genre=genre,
-        description=metadata.get("description"),
+        description=metadata.get("description") or parsed_metadata.get("description"),
         source_type=parsed.format.value,  # txt/epub/pdf
         total_words=clean_result.word_count,
         status=ParseStatus.PENDING.value,
@@ -443,25 +639,12 @@ async def upload_file(
         f.write(clean_result.text)
     
     book.file_path = text_path
+    book.cover_url = _save_parsed_cover_image(parsed, book.id)
     db.commit()
     
     logger.info(f"✅ 书籍文件上传成功: {book.title} (ID: {book.id}, 格式: {parsed.format.value})")
     
-    return BookResponse(
-        id=book.id,
-        title=book.title,
-        author=book.author,
-        genre=book.genre,
-        description=book.description,
-        source_type=book.source_type,
-        status=book.status,
-        parse_progress=book.parse_progress,
-        total_words=book.total_words,
-        total_chapters=book.total_chapters,
-        total_volumes=book.total_volumes,
-        created_at=book.created_at.isoformat() if book.created_at else "",
-        imported_project_id=book.imported_project_id,
-    )
+    return _build_book_response(book)
 
 
 @router.get("/list", response_model=List[BookResponse])
@@ -476,24 +659,7 @@ async def list_books(
         BookSource.user_id == current_user.id
     ).order_by(BookSource.created_at.desc()).all()
     
-    return [
-        BookResponse(
-            id=book.id,
-            title=book.title,
-            author=book.author,
-            genre=book.genre,
-            description=book.description,
-            source_type=book.source_type,
-            status=book.status,
-            parse_progress=book.parse_progress,
-            total_words=book.total_words,
-            total_chapters=book.total_chapters,
-            total_volumes=book.total_volumes,
-            created_at=book.created_at.isoformat() if book.created_at else "",
-            imported_project_id=book.imported_project_id,
-        )
-        for book in books
-    ]
+    return [_build_book_response(book) for book in books]
 
 
 @router.get("/{book_id}", response_model=BookResponse)
@@ -513,21 +679,7 @@ async def get_book(
     if not book:
         raise HTTPException(status_code=404, detail="书籍不存在")
     
-    return BookResponse(
-        id=book.id,
-        title=book.title,
-        author=book.author,
-        genre=book.genre,
-        description=book.description,
-        source_type=book.source_type,
-        status=book.status,
-        parse_progress=book.parse_progress,
-        total_words=book.total_words,
-        total_chapters=book.total_chapters,
-        total_volumes=book.total_volumes,
-        created_at=book.created_at.isoformat() if book.created_at else "",
-        imported_project_id=book.imported_project_id,
-    )
+    return _build_book_response(book)
 
 
 @router.get("/{book_id}/chapters", response_model=List[ChapterResponse])
@@ -632,6 +784,15 @@ async def parse_book(
             "status": "parsing"
         }
 
+    _freeze_book_parser_billing(
+        db=db,
+        book=book,
+        current_user=current_user,
+        stage="parse",
+        basis_yuan=estimate_book_parse_basis_yuan(book.total_words),
+        summary="拆书章节切分任务已启动，积分已按原文字数冻结。",
+    )
+
     # 更新状态
     book.status = ParseStatus.PARSING.value
     book.parse_progress = 0
@@ -716,6 +877,14 @@ def _do_parse_book(book_id: int):
         
         db.commit()
         
+        _settle_book_parser_billing_safely(
+            db=db,
+            book=book,
+            stage="parse",
+            basis_yuan=estimate_book_parse_basis_yuan(book.total_words),
+            summary=f"拆书章节切分已完成，共识别 {len(result.chapters)} 章。",
+        )
+
         update_task_status(book_id, "chapters_done", 100, f"章节解析完成，共 {len(result.chapters)} 章")
         logger.info(f"✅ 书籍章节解析完成: {book.title} ({len(result.chapters)} 章)")
         
@@ -730,6 +899,13 @@ def _do_parse_book(book_id: int):
                 book.parse_progress = 0
                 book.error_message = str(e)
                 db.commit()
+                _release_book_parser_billing_safely(
+                    db=db,
+                    book=book,
+                    book_id=book_id,
+                    stage="parse",
+                    reason="拆书章节切分失败，已释放冻结积分。",
+                )
         except Exception:
             pass
     finally:
@@ -770,6 +946,15 @@ async def analyze_book(
     ]:
         raise HTTPException(status_code=400, detail="请先完成章节切分")
     
+    _freeze_book_parser_billing(
+        db=db,
+        book=book,
+        current_user=current_user,
+        stage="analyze",
+        basis_yuan=estimate_book_analyze_basis_yuan(book.total_words, book.total_chapters),
+        summary="拆书 AI 分析任务已启动，积分已按原文字数与章节数冻结。",
+    )
+
     # 更新状态
     book.status = ParseStatus.ANALYZING.value
     book.parse_progress = 0
@@ -814,6 +999,17 @@ async def _do_analyze_book(book_id: int):
         
         if not chapters_db:
             update_task_status(book_id, "failed", 0, "没有章节数据", "请先执行章节切分")
+            book.status = ParseStatus.FAILED.value
+            book.parse_progress = 0
+            book.error_message = "请先执行章节切分"
+            db.commit()
+            _release_book_parser_billing_safely(
+                db=db,
+                book=book,
+                book_id=book_id,
+                stage="analyze",
+                reason="拆书 AI 分析缺少章节数据，已释放冻结积分。",
+            )
             return
         
         # 转换为 ChapterInfo 对象
@@ -904,6 +1100,14 @@ async def _do_analyze_book(book_id: int):
         book.error_message = None
         db.commit()
         
+        _settle_book_parser_billing_safely(
+            db=db,
+            book=book,
+            stage="analyze",
+            basis_yuan=estimate_book_analyze_basis_yuan(book.total_words, book.total_chapters),
+            summary=f"拆书 AI 分析已完成，共提取 {len(results)} 类信息。",
+        )
+
         update_task_status(book_id, "completed", 100, f"分析完成，提取了 {len(results)} 类信息")
         logger.info(f"✅ 书籍AI分析完成: {book.title}")
         
@@ -920,6 +1124,13 @@ async def _do_analyze_book(book_id: int):
                 book.parse_progress = 0
                 book.error_message = str(e)
                 db.commit()
+                _release_book_parser_billing_safely(
+                    db=db,
+                    book=book,
+                    book_id=book_id,
+                    stage="analyze",
+                    reason="拆书 AI 分析失败，已释放冻结积分。",
+                )
         except Exception:
             pass
     finally:

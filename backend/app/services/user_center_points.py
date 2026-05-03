@@ -19,6 +19,16 @@ POINTS_BILLING_EVENT_KIND_FREEZE = "freeze"
 POINTS_BILLING_EVENT_KIND_SETTLE = "settle"
 POINTS_BILLING_EVENT_KIND_RELEASE = "release"
 
+POINTS_SOURCE_LABELS = {
+    "audiobook": "有声书完成",
+    "dreamweaver": "短剧运行",
+    "novel": "小说协同",
+    "book_parser": "拆书分析",
+    "asset_studio": "资产生成",
+    "user_assets": "用户资产沉淀",
+    "manual_adjustment": "人工补发 / 充值 / 扣减",
+}
+
 POINTS_RULES_OPERATION_TYPE = "POINTS_RULES_UPDATE"
 POINTS_RULES_RESOURCE_TYPE = "SYSTEM_POINTS_RULES"
 POINTS_RULES_RESOURCE_ID = 0

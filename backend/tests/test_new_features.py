@@ -23,13 +23,14 @@ def test_narration_style_presets(backend_services_dir):
     spec.loader.exec_module(module)
 
     all_styles = module.get_all_narration_styles()
-    assert len(all_styles) == 4
+    assert len(all_styles) == 5
 
     style_ids = [s["id"] for s in all_styles]
     assert "professional" in style_ids
     assert "dramatic" in style_ids
     assert "relaxing" in style_ids
     assert "expressive" in style_ids
+    assert "custom" in style_ids
 
     preset = module.get_narration_style_preset("professional")
     assert preset["id"] == "professional"
@@ -41,6 +42,11 @@ def test_narration_style_presets(backend_services_dir):
     assert "speed" in params
     assert "emotion" in params
     assert "system_prompt" in params
+    assert "instructions" in params
+
+    custom_params = module.apply_narration_style_to_tts_params("custom", {}, "  慢速温柔  ")
+    assert custom_params["system_prompt"] == "慢速温柔"
+    assert custom_params["instructions"] == "慢速温柔"
 
 
 def test_subtitle_generator_srt(backend_services_dir):
@@ -115,7 +121,7 @@ def test_subtitle_generator_vtt(backend_services_dir):
 
     assert "WEBVTT" in content
     assert "00:00:00.000 --> 00:00:02.500" in content
-    assert "<v.Narrator>VTT 测试文本</v>" in content
+    assert "<v Narrator>VTT 测试文本</v>" in content
 
     os.remove(output_path)
 

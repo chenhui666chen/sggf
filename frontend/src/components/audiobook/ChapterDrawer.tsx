@@ -23,6 +23,7 @@ import PauseIcon from '@mui/icons-material/Pause'
 import PlayIcon from '@mui/icons-material/PlayArrow'
 import SwapVertIcon from '@mui/icons-material/SwapVert'
 import MiniPlayer from './MiniPlayer'
+import { audiobookColors } from '../../pages/audiobook/audiobookTheme'
 import type {
   AudiobookProjectSummary,
   Chapter,
@@ -225,7 +226,7 @@ export default function ChapterDrawer({
                         sx={{
                           alignItems: 'flex-start',
                           py: 1.25,
-                          ...(isActive ? { backgroundColor: 'rgba(156, 39, 176, 0.06)' } : null),
+                          ...(isActive ? { backgroundColor: audiobookColors.brandSoft } : null),
                         }}
                       >
                         <ListItemText
@@ -233,7 +234,7 @@ export default function ChapterDrawer({
                             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, minWidth: 0 }}>
                               <Typography
                                 variant="body2"
-                                sx={{ fontWeight: 800, color: isActive ? '#7b1fa2' : 'text.primary', flexShrink: 0 }}
+                                sx={{ fontWeight: 800, color: isActive ? audiobookColors.brand : 'text.primary', flexShrink: 0 }}
                               >
                                 第{chapter.chapter_number}章
                               </Typography>
@@ -243,7 +244,7 @@ export default function ChapterDrawer({
                                   overflow: 'hidden',
                                   textOverflow: 'ellipsis',
                                   whiteSpace: 'nowrap',
-                                  color: isActive ? '#7b1fa2' : 'text.primary',
+                                  color: isActive ? audiobookColors.brand : 'text.primary',
                                 }}
                               >
                                 {chapter.title}
@@ -259,8 +260,8 @@ export default function ChapterDrawer({
                                   sx={{
                                     height: 4,
                                     borderRadius: 999,
-                                    backgroundColor: 'rgba(156, 39, 176, 0.10)',
-                                    '& .MuiLinearProgress-bar': { backgroundColor: '#9c27b0' },
+                                    backgroundColor: audiobookColors.brandSoft,
+                                    '& .MuiLinearProgress-bar': { backgroundColor: audiobookColors.brand },
                                   }}
                                 />
                                 <Box sx={{ mt: 0.5, display: 'flex', justifyContent: 'space-between' }}>
@@ -302,7 +303,7 @@ export default function ChapterDrawer({
         anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
         transformOrigin={{ vertical: 'top', horizontal: 'right' }}
       >
-        <MenuItem onClick={handleRequestDeleteAudiobook} sx={{ color: '#f44336' }}>
+        <MenuItem onClick={handleRequestDeleteAudiobook} sx={{ color: audiobookColors.dangerMain }}>
           <DeleteIcon sx={{ mr: 1 }} />
           删除整本有声书
         </MenuItem>
@@ -315,7 +316,7 @@ export default function ChapterDrawer({
         anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
         transformOrigin={{ vertical: 'top', horizontal: 'right' }}
       >
-        <MenuItem onClick={handleRequestDeleteChapterAudio} sx={{ color: '#f44336' }}>
+        <MenuItem onClick={handleRequestDeleteChapterAudio} sx={{ color: audiobookColors.dangerMain }}>
           <DeleteIcon sx={{ mr: 1 }} />
           删除本章音频
         </MenuItem>

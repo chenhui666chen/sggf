@@ -1,41 +1,202 @@
 from __future__ import annotations
 
-import asyncio
 import logging
-import time
-import math
-import json
-from typing import List, Dict, Any, Optional, Callable
-from pathlib import Path
-from dataclasses import asdict, is_dataclass
+from typing import List, Dict, Any, Optional, Callable, Set
 
-from ..script_adapter import AudiobookScriptAgent, ScriptSegment, ChapterStructure
-from ..voice_manager_factory import create_voice_manager
-from ..audio_mixer import AudioMixer
-from app.services.chapter_adaptation_assets import build_audio_adaptation_hint
-from app.services.audiobook.temp_segment_store import load_cached_segment_audio
-from core.unified_media_runtime import create_tts_engine
+from ..prompt_normalizer import normalize_tts_prompt
+from ..pause_tags import strip_pause_tags
+from ..tts_language import apply_detected_language_type
+from app.services.audiobook.render_plan import (
+    RENDER_PLAN_VERSION,
+    RenderChunk,
+    build_render_plan,
+    extract_render_signatures,
+    render_chunks_to_timing_segments_payload,
+    render_plan_to_payload,
+)
+from app.services.audiobook.temp_segment_store import (
+    extract_cached_segment_paths,
+    load_cached_segment_audio,
+)
 
 try:
     from ..agent_dispatch_client import client as tts_dispatch_client
-    from ..agent_dispatch_client import TTSDispatchResult
     TTS_DISPATCH_AVAILABLE = True
 except ImportError:
     TTS_DISPATCH_AVAILABLE = False
     tts_dispatch_client = None
-    TTSDispatchResult = None
-
-# 导入专业Agent
-from ..agents import (
-    AudioDirector,
-    VoiceDesigner,
-    SoundEffectDesigner,
-    MusicComposer,
-)
 
 logger = logging.getLogger(__name__)
 
+
+def _build_segment_statuses(
+    *,
+    total_segments: int,
+    completed_indices: List[int],
+    reused_indices: List[int],
+    synthesized_indices: List[int],
+    failed_indices: Optional[List[int]] = None,
+    failed_segment_errors: Optional[Dict[int, Any]] = None,
+) -> Dict[str, Dict[str, Any]]:
+    completed_set = _normalize_segment_indices(completed_indices)
+    reused_set = _normalize_segment_indices(reused_indices)
+    synthesized_set = _normalize_segment_indices(synthesized_indices)
+    failed_set = _normalize_segment_indices(failed_indices)
+    failed_errors = dict(failed_segment_errors or {})
+    statuses: Dict[str, Dict[str, Any]] = {}
+
+    for index in range(max(int(total_segments or 0), 0)):
+        if index in failed_set and index not in completed_set:
+            status_payload = {
+                "index": index,
+                "status": "failed",
+                "source": "tts_synthesis",
+                "recovery_stage": "failed",
+            }
+            error_payload = failed_errors.get(index) or failed_errors.get(str(index))
+            if isinstance(error_payload, dict) and error_payload:
+                status_payload["error"] = error_payload
+            statuses[str(index)] = status_payload
+        elif index in completed_set:
+            if index in reused_set:
+                source = "resume_cache"
+                recovery_stage = "cache_loaded"
+            elif index in synthesized_set:
+                source = "tts_synthesis"
+                recovery_stage = "synthesized"
+            else:
+                source = "checkpoint_cache"
+                recovery_stage = "cache_loaded"
+            statuses[str(index)] = {
+                "index": index,
+                "status": "cached",
+                "source": source,
+                "recovery_stage": recovery_stage,
+            }
+        else:
+            statuses[str(index)] = {
+                "index": index,
+                "status": "pending",
+                "source": None,
+                "recovery_stage": "pending",
+            }
+
+    return statuses
+
+
+def _normalize_segment_indices(values: Any) -> Set[int]:
+    normalized: Set[int] = set()
+    for value in values or []:
+        try:
+            index = int(value)
+        except Exception:
+            continue
+        if index >= 0:
+            normalized.add(index)
+    return normalized
+
+
+def _mark_temp_asset_saved_segment_statuses(
+    *,
+    segment_statuses: Any,
+    cached_audio_paths: Any,
+) -> Any:
+    if not isinstance(segment_statuses, dict) or not isinstance(cached_audio_paths, dict):
+        return segment_statuses
+
+    saved_indices = _normalize_segment_indices(cached_audio_paths.keys())
+    if not saved_indices:
+        return segment_statuses
+
+    updated: Dict[str, Any] = {}
+    for raw_key, raw_status in segment_statuses.items():
+        key = str(raw_key)
+        if not isinstance(raw_status, dict):
+            updated[key] = raw_status
+            continue
+
+        status = dict(raw_status)
+        try:
+            index = int(status.get("index", raw_key))
+        except Exception:
+            updated[key] = status
+            continue
+
+        if index in saved_indices and status.get("status") == "cached":
+            status["recovery_stage"] = "temp_asset_saved"
+        updated[key] = status
+
+    return updated
+
+
 class TTSMixin:
+    def _build_render_chunks(self, script_segments) -> List[RenderChunk]:
+        items = list(script_segments or [])
+        if all(isinstance(item, RenderChunk) for item in items):
+            return items
+        return build_render_plan(items)
+
+    def _build_tts_batch_item(self, seg) -> Dict[str, Any]:
+        original_text = str(getattr(seg, "text", "") or "")
+        pause_result = strip_pause_tags(original_text)
+        raw_voice_params = getattr(seg, "voice_params", None)
+        voice_params = dict(raw_voice_params) if isinstance(raw_voice_params, dict) else {}
+        normalized_text = normalize_tts_prompt(
+            pause_result.text,
+            substitutions=_extract_tts_substitutions(voice_params),
+            protected_words=_extract_tts_protected_words(voice_params),
+        )
+        voice_params = apply_detected_language_type(voice_params, normalized_text)
+        performance_notes = str(getattr(seg, "performance_notes", "") or "").strip()
+        if performance_notes:
+            voice_params.setdefault("performance_notes", performance_notes)
+
+        if pause_result.applied:
+            voice_params.setdefault("original_tts_text", original_text)
+            voice_params["pause_tag_applied"] = True
+        if pause_result.pause_after_ms is not None:
+            voice_params.setdefault("pause_after_ms", pause_result.pause_after_ms)
+
+        if normalized_text != original_text:
+            voice_params.setdefault("original_tts_text", original_text)
+            voice_params["normalized_text_applied"] = True
+
+        return {
+            "text": normalized_text,
+            "voice_params": voice_params,
+            "emotion": (
+                getattr(seg, "instruct_emotion", "")
+                or voice_params.get("instruct_emotion")
+                or voice_params.get("emotion")
+                or getattr(seg, "emotion", "neutral")
+            ),
+        }
+
+    def _attach_render_plan_metadata(
+        self,
+        temp_segment_cache: Optional[Dict[str, Any]],
+        metadata: Optional[Dict[str, Any]],
+    ) -> Optional[Dict[str, Any]]:
+        if not isinstance(temp_segment_cache, dict) or not isinstance(metadata, dict):
+            return temp_segment_cache
+        for key in (
+            "render_plan_version",
+            "render_chunk_count",
+            "render_plan",
+            "segment_statuses",
+            "failed_segment_indices",
+            "failed_segment_errors",
+        ):
+            if key in metadata:
+                temp_segment_cache[key] = metadata[key]
+        segment_statuses = temp_segment_cache.get("segment_statuses")
+        if isinstance(segment_statuses, dict):
+            temp_segment_cache["segment_statuses"] = _mark_temp_asset_saved_segment_statuses(
+                segment_statuses=segment_statuses,
+                cached_audio_paths=temp_segment_cache.get("cached_audio_paths"),
+            )
+        return temp_segment_cache
+
     async def _synthesize_segments(
         self,
         script_segments,
@@ -45,14 +206,8 @@ class TTSMixin:
     ) -> List[bytes]:
         """批量合成剧本片段"""
         # 准备批量数据
-        batch_data = [
-            {
-                "text": seg.text,
-                "voice_params": seg.voice_params if hasattr(seg, 'voice_params') else {},
-                "emotion": (getattr(seg, "instruct_emotion", "") or getattr(seg, "emotion", "neutral"))
-            }
-            for seg in script_segments
-        ]
+        render_chunks = self._build_render_chunks(script_segments)
+        batch_data = [self._build_tts_batch_item(chunk) for chunk in render_chunks]
         
         # 批量合成（使用分批策略）
         audio_list = await self.tts_engine.synthesize_batch(
@@ -72,7 +227,13 @@ class TTSMixin:
         *,
         resume_checkpoint: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
-        total_segments = len(script_segments or [])
+        render_chunks = self._build_render_chunks(script_segments)
+        total_segments = len(render_chunks)
+        current_signatures = {
+            chunk.index: chunk.cache_key
+            for chunk in render_chunks
+            if chunk.cache_key
+        }
         empty_plan = {
             "audio_by_index": {},
             "reused_indices": [],
@@ -96,7 +257,9 @@ class TTSMixin:
             except Exception:
                 checkpoint_total_segments = None
 
-            if checkpoint_total_segments not in {None, 0, total_segments}:
+            checkpoint_signatures = extract_render_signatures(checkpoint_candidate)
+
+            if checkpoint_total_segments not in {None, 0, total_segments} and not checkpoint_signatures:
                 logger.info(
                     "Skip resume cache from %s due to total_segments mismatch: checkpoint=%s current=%s",
                     source_name,
@@ -105,10 +268,27 @@ class TTSMixin:
                 )
                 continue
 
-            audio_by_index = load_cached_segment_audio(
-                checkpoint_candidate,
-                max_segment_count=total_segments,
-            )
+            if checkpoint_signatures:
+                cached_paths = extract_cached_segment_paths(checkpoint_candidate)
+                signature_to_path: Dict[str, str] = {}
+                for old_index, signature in checkpoint_signatures.items():
+                    path_value = cached_paths.get(old_index)
+                    if signature and path_value:
+                        signature_to_path.setdefault(signature, path_value)
+                remapped_paths = {
+                    current_index: signature_to_path[signature]
+                    for current_index, signature in current_signatures.items()
+                    if signature in signature_to_path
+                }
+                audio_by_index = load_cached_segment_audio(
+                    {"cached_audio_paths": remapped_paths},
+                    max_segment_count=total_segments,
+                )
+            else:
+                audio_by_index = load_cached_segment_audio(
+                    checkpoint_candidate,
+                    max_segment_count=total_segments,
+                )
             if not audio_by_index:
                 continue
 
@@ -137,13 +317,17 @@ class TTSMixin:
         debug_output_dir: Optional[str] = None,
         progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
     ) -> Dict[str, Any]:
+        render_chunks = self._build_render_chunks(script_segments)
+        render_plan_payload = render_plan_to_payload(render_chunks)
         resume_plan = self._build_resume_audio_plan(
-            script_segments,
+            render_chunks,
             resume_checkpoint=resume_checkpoint,
         )
         audio_by_index = dict(resume_plan.get("audio_by_index") or {})
         missing_indices = list(resume_plan.get("missing_indices") or [])
         synthesized_indices: List[int] = []
+        failed_segment_indices: List[int] = []
+        failed_segment_errors: Dict[int, Dict[str, Any]] = {}
 
         def emit_progress_payload(
             *,
@@ -155,21 +339,41 @@ class TTSMixin:
             if not progress_callback:
                 return
             try:
+                completed_indices = sorted(audio_by_index.keys())
+                reused_indices = list(resume_plan.get("reused_indices") or [])
+                failed_indices = sorted(set(failed_segment_indices) - set(completed_indices))
                 progress_callback(
                     {
-                        "total_segments": len(script_segments or []),
-                        "completed_segment_indices": sorted(audio_by_index.keys()),
+                        "total_segments": len(render_chunks),
+                        "completed_segment_indices": completed_indices,
+                        "failed_segment_indices": failed_indices,
+                        "failed_segment_errors": {
+                            str(index): failed_segment_errors[index]
+                            for index in failed_indices
+                            if index in failed_segment_errors
+                        },
                         "audio_by_index": dict(audio_by_index),
                         "resume_source": resume_plan.get("resume_source"),
-                        "reused_indices": list(resume_plan.get("reused_indices") or []),
+                        "reused_indices": reused_indices,
                         "reused_count": len(resume_plan.get("reused_indices") or []),
                         "synthesized_indices": list(synthesized_indices),
                         "synthesized_count": len(synthesized_indices),
+                        "segment_statuses": _build_segment_statuses(
+                            total_segments=len(render_chunks),
+                            completed_indices=completed_indices,
+                            reused_indices=reused_indices,
+                            synthesized_indices=list(synthesized_indices),
+                            failed_indices=failed_indices,
+                            failed_segment_errors=failed_segment_errors,
+                        ),
                         "progress": (
-                            len(audio_by_index) / len(script_segments)
-                            if script_segments
+                            len(audio_by_index) / len(render_chunks)
+                            if render_chunks
                             else 1.0
                         ),
+                        "render_plan_version": RENDER_PLAN_VERSION,
+                        "render_chunk_count": len(render_chunks),
+                        "render_plan": render_plan_payload,
                         "batch_index": batch_index,
                         "num_batches": num_batches,
                         "start_idx": start_idx,
@@ -183,7 +387,7 @@ class TTSMixin:
             emit_progress_payload()
 
         if missing_indices:
-            missing_segments = [script_segments[index] for index in missing_indices]
+            missing_segments = [render_chunks[index] for index in missing_indices]
             missing_audio_by_index: Dict[int, bytes] = {}
 
             def handle_missing_progress(payload: Dict[str, Any]) -> None:
@@ -199,6 +403,16 @@ class TTSMixin:
                     if payload_bytes:
                         missing_audio_by_index[global_index] = payload_bytes
                         audio_by_index[global_index] = payload_bytes
+                        failed_segment_errors.pop(global_index, None)
+                        if global_index in failed_segment_indices:
+                            failed_segment_indices.remove(global_index)
+                    else:
+                        if global_index not in failed_segment_indices:
+                            failed_segment_indices.append(global_index)
+                        failed_segment_errors[global_index] = {
+                            "error_message": str(payload.get("error_message") or "tts_segment_failed"),
+                            "error_type": str(payload.get("error_type") or "TTSSegmentError"),
+                        }
                     synthesized_indices.clear()
                     synthesized_indices.extend(sorted(missing_audio_by_index.keys()))
                     emit_progress_payload(
@@ -239,23 +453,56 @@ class TTSMixin:
             for index, audio_bytes in zip(missing_indices, synthesized_audio_list):
                 payload_bytes = bytes(audio_bytes or b"")
                 if not payload_bytes:
+                    if index not in failed_segment_indices:
+                        failed_segment_indices.append(index)
+                    failed_segment_errors.setdefault(
+                        index,
+                        {
+                            "error_message": "tts_segment_failed",
+                            "error_type": "TTSSegmentError",
+                        },
+                    )
                     continue
                 audio_by_index[index] = payload_bytes
                 if index not in synthesized_indices:
                     synthesized_indices.append(index)
+                failed_segment_errors.pop(index, None)
+                if index in failed_segment_indices:
+                    failed_segment_indices.remove(index)
 
         synthesized_indices = sorted(set(synthesized_indices))
         if progress_callback and (audio_by_index or not missing_indices):
             emit_progress_payload()
 
-        audio_list = [bytes(audio_by_index.get(index, b"")) for index in range(len(script_segments or []))]
+        audio_list = [bytes(audio_by_index.get(index, b"")) for index in range(len(render_chunks))]
+        completed_indices = sorted(audio_by_index.keys())
+        reused_indices = list(resume_plan.get("reused_indices") or [])
+        failed_indices = sorted(set(failed_segment_indices) - set(completed_indices))
         return {
             "audio_list": audio_list,
             "resume_source": resume_plan.get("resume_source"),
-            "reused_indices": list(resume_plan.get("reused_indices") or []),
+            "reused_indices": reused_indices,
             "reused_count": len(resume_plan.get("reused_indices") or []),
             "synthesized_indices": synthesized_indices,
             "synthesized_count": len(synthesized_indices),
+            "failed_segment_indices": failed_indices,
+            "failed_segment_errors": {
+                str(index): failed_segment_errors[index]
+                for index in failed_indices
+                if index in failed_segment_errors
+            },
+            "segment_statuses": _build_segment_statuses(
+                total_segments=len(render_chunks),
+                completed_indices=completed_indices,
+                reused_indices=reused_indices,
+                synthesized_indices=synthesized_indices,
+                failed_indices=failed_indices,
+                failed_segment_errors=failed_segment_errors,
+            ),
+            "render_plan_version": RENDER_PLAN_VERSION,
+            "render_chunk_count": len(render_chunks),
+            "render_plan": render_plan_payload,
+            "timing_segments_payload": render_chunks_to_timing_segments_payload(render_chunks),
         }
 
     def get_tts_dispatch_models(self) -> List[Dict[str, Any]]:
@@ -309,11 +556,9 @@ class TTSMixin:
                 debug_output_dir=debug_output_dir,
             )
 
-        texts = [seg.text for seg in script_segments]
-        voice_ids = [
-            seg.voice_params.get("speaker") if hasattr(seg, "voice_params") else None
-            for seg in script_segments
-        ]
+        batch_data = [self._build_tts_batch_item(seg) for seg in script_segments]
+        texts = [seg["text"] for seg in batch_data]
+        voice_ids = [seg["voice_params"].get("speaker") for seg in batch_data]
 
         dispatch_results = tts_dispatch_client.synthesize_batch(
             texts=texts,
@@ -364,4 +609,70 @@ class TTSMixin:
                     logger.error("保存片段 %03d 失败: %s", i, e)
 
         return audio_list
+
+
+def _extract_tts_substitutions(voice_params: Dict[str, Any]) -> Optional[Dict[str, str]]:
+    for key in (
+        "tts_substitutions",
+        "word_substitutions",
+        "pronunciation_substitutions",
+        "pronunciation_dictionary",
+    ):
+        parsed = _coerce_substitution_mapping(voice_params.get(key))
+        if parsed:
+            return parsed
+    return None
+
+
+def _coerce_substitution_mapping(value: Any) -> Dict[str, str]:
+    if isinstance(value, dict):
+        return {
+            str(key).strip(): str(raw_value).strip()
+            for key, raw_value in value.items()
+            if str(key).strip() and str(raw_value).strip()
+        }
+    if isinstance(value, list):
+        output: Dict[str, str] = {}
+        for item in value:
+            if not isinstance(item, dict):
+                continue
+            source = (
+                item.get("source")
+                or item.get("from")
+                or item.get("word")
+                or item.get("pattern")
+                or item.get("term")
+            )
+            target = (
+                item.get("target")
+                or item.get("to")
+                or item.get("replacement")
+                or item.get("pronunciation")
+                or item.get("reading")
+            )
+            source_text = str(source or "").strip()
+            target_text = str(target or "").strip()
+            if source_text and target_text:
+                output[source_text] = target_text
+        return output
+    return {}
+
+
+def _extract_tts_protected_words(voice_params: Dict[str, Any]) -> Optional[Set[str]]:
+    protected_words: Set[str] = set()
+    for key in (
+        "tts_protected_words",
+        "protected_words",
+        "pronunciation_protected_words",
+    ):
+        protected_words.update(_coerce_word_set(voice_params.get(key)))
+    return protected_words or None
+
+
+def _coerce_word_set(value: Any) -> Set[str]:
+    if isinstance(value, str):
+        return {item.strip() for item in value.split(",") if item.strip()}
+    if isinstance(value, (list, tuple, set)):
+        return {str(item).strip() for item in value if str(item).strip()}
+    return set()
 

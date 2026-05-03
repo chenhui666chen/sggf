@@ -123,7 +123,48 @@ class TimelineMixin:
         if not audio_list or not script_segments:
             return
 
+        actual_durations = self._audio_durations_for_segments(script_segments, audio_list)
+        self._realign_timelines_with_durations(script_segments, actual_durations)
+
+    def _realign_timelines_with_render_chunks(
+        self,
+        script_segments: List[ScriptSegment],
+        render_chunks: List[Any],
+        audio_list: List[bytes],
+    ) -> None:
+        if not audio_list or not script_segments or not render_chunks:
+            return
+
         estimated_durations = self._estimate_segment_durations(script_segments)
+        source_durations = [0.0 for _ in script_segments]
+        chunk_durations = self._audio_durations_for_segments(render_chunks, audio_list)
+
+        for chunk_index, chunk in enumerate(render_chunks):
+            if chunk_index >= len(chunk_durations):
+                break
+            source_indices = getattr(chunk, "source_segment_indices", None) or []
+            if not source_indices:
+                continue
+            try:
+                source_index = int(source_indices[0])
+            except Exception:
+                continue
+            if source_index < 0 or source_index >= len(source_durations):
+                continue
+            source_durations[source_index] += max(0.0, float(chunk_durations[chunk_index] or 0.0))
+
+        for index, duration in enumerate(source_durations):
+            if duration <= 0:
+                source_durations[index] = estimated_durations[index] if index < len(estimated_durations) else 0.2
+
+        self._realign_timelines_with_durations(script_segments, source_durations)
+
+    def _audio_durations_for_segments(
+        self,
+        segments: List[Any],
+        audio_list: List[bytes],
+    ) -> List[float]:
+        estimated_durations = self._estimate_segment_durations(segments)
         actual_durations: List[float] = []
         for idx, audio in enumerate(audio_list):
             if not audio:
@@ -134,7 +175,17 @@ class TimelineMixin:
             if duration <= 0 and idx < len(estimated_durations):
                 duration = estimated_durations[idx]
             actual_durations.append(duration)
+        return actual_durations
 
+    def _realign_timelines_with_durations(
+        self,
+        script_segments: List[ScriptSegment],
+        actual_durations: List[float],
+    ) -> None:
+        if not actual_durations or not script_segments:
+            return
+
+        estimated_durations = self._estimate_segment_durations(script_segments)
         estimated_offsets = self._build_segment_offsets(estimated_durations)
         actual_offsets = self._build_segment_offsets(actual_durations)
         total_actual = sum(actual_durations)

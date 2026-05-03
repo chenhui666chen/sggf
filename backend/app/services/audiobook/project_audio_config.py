@@ -3,11 +3,13 @@ from __future__ import annotations
 import json
 from typing import Any, Dict, List, Optional
 
-from core.model_resolution import normalize_model_id
+from .tts_model_ids import DEFAULT_AUDIOBOOK_TTS_MODEL, normalize_audiobook_tts_model
 
 
 _LEGACY_MODEL_KEYS = {
     "cosyvoice-v3.5-plus": ("cosyvoice-v3-plus",),
+    "minimax-speech-2.8-hd": ("MiniMax/speech-2.8-hd", "minimax-speech-2.8"),
+    "minimax-speech-2.8-turbo": ("MiniMax/speech-2.8-turbo",),
 }
 
 
@@ -27,7 +29,7 @@ def get_audio_fx(config: Dict[str, Any]) -> Optional[dict]:
 
 
 def get_characters_for_model(config: Dict[str, Any], tts_model: str) -> List[dict]:
-    requested_model = (normalize_model_id(tts_model) or "").strip() or "qwen3-tts-instruct-flash"
+    requested_model = normalize_audiobook_tts_model(tts_model)
     tts_models = config.get("tts_models")
     if isinstance(tts_models, dict):
         candidate_keys = (requested_model, *_LEGACY_MODEL_KEYS.get(requested_model, ()))
@@ -43,7 +45,7 @@ def get_characters_for_model(config: Dict[str, Any], tts_model: str) -> List[dic
 
 
 def set_characters_for_model(config: Dict[str, Any], tts_model: str, characters: List[dict]) -> Dict[str, Any]:
-    tts_model = (normalize_model_id(tts_model) or "").strip() or "qwen3-tts-instruct-flash"
+    tts_model = normalize_audiobook_tts_model(tts_model)
     tts_models = config.get("tts_models")
     if not isinstance(tts_models, dict):
         tts_models = {}
@@ -57,7 +59,7 @@ def set_characters_for_model(config: Dict[str, Any], tts_model: str, characters:
     model_cfg["characters"] = list(characters or [])
 
     # backward-compat: keep the default model mirrored at top-level
-    if tts_model in {"qwen3-tts-instruct-flash", "qwen3-tts-flash"}:
+    if tts_model == DEFAULT_AUDIOBOOK_TTS_MODEL:
         config["characters"] = list(characters or [])
 
     return config

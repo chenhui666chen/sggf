@@ -7,11 +7,7 @@ from typing import Sequence
 
 from sqlalchemy.orm import Session
 
-from app.models.admin_log import AdminOperationLog
-from app.models.audiobook import AudiobookProject
-from app.models.dreamweaver import DreamweaverProject
-from app.models.project import Chapter, Project
-from app.models.user_asset_record import UserAssetRecord
+from app.models.project import Chapter
 from app.schemas.dreamweaver_contract import DREAMWEAVER_SCHEMA_VERSION
 from app.services.dreamweaver.persistence import build_contract_from_payload
 from app.services.points_pricing_policy import (
@@ -22,7 +18,6 @@ from app.services.points_pricing_policy import (
 from app.services.user_center_points import (
     RUNNING_STATUSES,
     UserCenterPointsAccountSnapshot,
-    build_user_center_points_account,
     get_user_center_points_rule_snapshot,
 )
 from app.services.user_center_points_events import (
@@ -30,9 +25,9 @@ from app.services.user_center_points_events import (
     POINTS_BILLING_MODULE_DREAMWEAVER,
     build_audiobook_billing_key,
     get_active_points_billing_freeze_amount,
-    list_user_points_billing_logs,
 )
 from app.services.user_center_task_billing import build_user_center_task_billing_overview
+from app.services.user_points_read_model import build_user_points_read_model
 from app.utils.datetime_utils import utc_now
 
 
@@ -128,77 +123,6 @@ def _to_non_negative_int(value: object | None) -> int:
     return max(amount, 0)
 
 
-def _list_user_asset_rows(*, db: Session, user_id: int) -> list[UserAssetRecord]:
-    return (
-        db.query(UserAssetRecord)
-        .filter(UserAssetRecord.user_id == user_id)
-        .order_by(UserAssetRecord.updated_at.desc(), UserAssetRecord.created_at.desc(), UserAssetRecord.id.desc())
-        .all()
-    )
-
-
-def _list_user_audiobook_rows(*, db: Session, user_id: int) -> list[object]:
-    return (
-        db.query(
-            AudiobookProject.id.label("id"),
-            AudiobookProject.project_id.label("project_id"),
-            Project.title.label("project_title"),
-            AudiobookProject.status.label("status"),
-            AudiobookProject.tts_provider.label("tts_provider"),
-            AudiobookProject.total_chapters.label("total_chapters"),
-            AudiobookProject.completed_chapters.label("completed_chapters"),
-            AudiobookProject.total_cost.label("total_cost"),
-            AudiobookProject.created_at.label("created_at"),
-            AudiobookProject.updated_at.label("updated_at"),
-        )
-        .join(Project, Project.id == AudiobookProject.project_id)
-        .filter(
-            Project.user_id == user_id,
-            AudiobookProject.deleted_at.is_(None),
-        )
-        .order_by(
-            AudiobookProject.updated_at.desc(),
-            AudiobookProject.created_at.desc(),
-            AudiobookProject.id.desc(),
-        )
-        .all()
-    )
-
-
-def _list_user_dreamweaver_rows(*, db: Session, user_id: int) -> list[object]:
-    return (
-        db.query(
-            DreamweaverProject.id.label("id"),
-            DreamweaverProject.run_id.label("run_id"),
-            DreamweaverProject.source_project_id.label("source_project_id"),
-            Project.title.label("project_title"),
-            DreamweaverProject.status.label("status"),
-            DreamweaverProject.stage.label("stage"),
-            DreamweaverProject.contract_json.label("contract_json"),
-            DreamweaverProject.created_at.label("created_at"),
-            DreamweaverProject.updated_at.label("updated_at"),
-        )
-        .join(Project, Project.id == DreamweaverProject.source_project_id)
-        .filter(DreamweaverProject.user_id == user_id)
-        .order_by(DreamweaverProject.updated_at.desc(), DreamweaverProject.created_at.desc(), DreamweaverProject.id.desc())
-        .all()
-    )
-
-
-def _list_manual_adjustment_logs(*, db: Session, user_id: int) -> list[AdminOperationLog]:
-    return (
-        db.query(AdminOperationLog)
-        .filter(
-            AdminOperationLog.operation_type == "POINTS_ADJUST",
-            AdminOperationLog.resource_type == "USER_POINTS",
-            AdminOperationLog.resource_id == user_id,
-            AdminOperationLog.response_status < 400,
-        )
-        .order_by(AdminOperationLog.created_at.desc(), AdminOperationLog.id.desc())
-        .all()
-    )
-
-
 def _list_project_chapter_rows(
     *,
     db: Session,
@@ -283,22 +207,8 @@ def _build_user_points_account_snapshot(
     db: Session,
     user_id: int,
 ) -> tuple[UserCenterPointsAccountSnapshot, list[object]]:
-    user_asset_rows = _list_user_asset_rows(db=db, user_id=user_id)
-    audiobook_rows = _list_user_audiobook_rows(db=db, user_id=user_id)
-    dreamweaver_rows = _list_user_dreamweaver_rows(db=db, user_id=user_id)
-    manual_adjustment_logs = _list_manual_adjustment_logs(db=db, user_id=user_id)
-    billing_event_logs = list_user_points_billing_logs(db=db, target_user_id=user_id)
-    points_rule_snapshot = get_user_center_points_rule_snapshot(db=db)
-
-    account_snapshot = build_user_center_points_account(
-        user_assets=user_asset_rows,
-        audiobook_rows=list(audiobook_rows),
-        dreamweaver_rows=list(dreamweaver_rows),
-        manual_adjustment_logs=manual_adjustment_logs,
-        billing_event_logs=billing_event_logs,
-        config=points_rule_snapshot.config,
-    )
-    return account_snapshot, list(audiobook_rows)
+    read_model = build_user_points_read_model(db=db, user_id=user_id)
+    return read_model.points_bundle.account, list(read_model.audiobook_rows)
 
 
 def _resolve_reclaimable_running_frozen_points(

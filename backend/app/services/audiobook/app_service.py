@@ -275,10 +275,16 @@ class AudiobookAppService:
 
         logger.info("有声书项目创建成功 audiobook_project_id=%s", audiobook_project.id)
 
-        # 5. 复用最近一次的剧本，除非用户稍后重新生成
-        try:
-            self._clone_existing_scripts(audiobook_project, request.chapter_ids)
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("复用已有剧本失败：%s", exc)
+        # 5. 复用最近一次的剧本，除非用户要求强制重新生成剧本
+        if request.force_regenerate_script:
+            logger.info(
+                "跳过复用已有剧本: audiobook_project_id=%s force_regenerate_script=true",
+                audiobook_project.id,
+            )
+        else:
+            try:
+                self._clone_existing_scripts(audiobook_project, request.chapter_ids)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("复用已有剧本失败：%s", exc)
 
         return audiobook_project

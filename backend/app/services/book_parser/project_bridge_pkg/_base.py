@@ -33,6 +33,12 @@ from app.services.book_parser.project_bridge_pkg._constants import (
 )
 
 class ProjectBridgeBase:
+    ANALYSIS_TO_COLLECTION = ANALYSIS_TO_COLLECTION
+    STRUCTURED_MEMORY_LIMITS = STRUCTURED_MEMORY_LIMITS
+    CANONICAL_STORY_STANCES = CANONICAL_STORY_STANCES
+    CANONICAL_ROLE_POSITIONS = CANONICAL_ROLE_POSITIONS
+    GENERIC_ROLE_POSITIONS = GENERIC_ROLE_POSITIONS
+
     def __init__(self, db: Session):
         self.db = db
 
@@ -89,6 +95,18 @@ class ProjectBridgeBase:
             genre=book.genre,
             status="draft",
         )
+        if book.cover_url:
+            project.audio_config = json.dumps(
+                {
+                    "source_book": {
+                        "book_id": book.id,
+                        "title": book.title,
+                        "author": book.author,
+                        "cover_path": book.cover_url,
+                    }
+                },
+                ensure_ascii=False,
+            )
         self.db.add(project)
         self.db.flush()  # 获取project.id
         

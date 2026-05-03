@@ -12,6 +12,7 @@ from dataclasses import asdict, is_dataclass
 from ..script_adapter import AudiobookScriptAgent, ScriptSegment, ChapterStructure
 from ..voice_manager_factory import create_voice_manager
 from ..audio_mixer import AudioMixer
+from ..task_tracker import StageType
 from app.services.chapter_adaptation_assets import build_audio_adaptation_hint
 from core.unified_media_runtime import create_tts_engine
 

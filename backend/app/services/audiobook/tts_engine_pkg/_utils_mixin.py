@@ -94,4 +94,4 @@ class UtilsMixin:
     
     def reset_cost_tracker(self):
         """重置成本统计"""
-        self.cost_tracker = TTSCost()
+        self.cost_tracker = TTSCost(price_per_10k=getattr(self, "price_per_10k", 1.0))

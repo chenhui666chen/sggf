@@ -7,6 +7,8 @@ import logging
 from typing import List, Dict, Any, Optional, Callable
 
 from ._dataclasses import ScriptSegment, ChapterStructure
+from ._llm_review import review_script_segments_with_llm
+from app.services.audiobook.llm_config import is_audiobook_script_review_enabled
 from app.services.chapter_adaptation_assets import format_audio_adaptation_brief
 
 logger = logging.getLogger(__name__)
@@ -31,6 +33,7 @@ class AudiobookScriptAgentBase:
         self.llm_client = llm_client
         self.tts_model = tts_model
         self.strategy = strategy
+        self.last_script_review: Optional[Dict[str, Any]] = None
     
     async def adapt_chapter(
         self,
@@ -43,6 +46,7 @@ class AudiobookScriptAgentBase:
         adaptation_context: Optional[Dict[str, Any]] = None,
         progress_callback: Optional[Callable[[float, Optional[Dict[str, Any]]], None]] = None,
         character_profiles: Optional[List[Dict[str, Any]]] = None,
+        enable_llm_script_review: Optional[bool] = None,
     ) -> List[ScriptSegment]:
         """
         将章节改编为有声剧本
@@ -106,6 +110,34 @@ class AudiobookScriptAgentBase:
         )
         report_progress(0.94, {"phase": "transform_done"})
         logger.info(f"   转化完成: {len(script_segments)} 个片段")
+
+        self.last_script_review = None
+        configured_review_enabled = is_audiobook_script_review_enabled()
+        should_review = (
+            configured_review_enabled
+            if enable_llm_script_review is None
+            else bool(enable_llm_script_review) and configured_review_enabled
+        )
+        if should_review and script_segments:
+            report_progress(0.945, {"phase": "llm_script_review"})
+            review_result = await review_script_segments_with_llm(
+                self.llm_client,
+                script_segments,
+                source_text=chapter_content,
+            )
+            self.last_script_review = review_result.report
+            if review_result.report.get("applied"):
+                logger.info(
+                    "   LLM审稿已应用: %s -> %s 个片段, coverage=%.3f",
+                    review_result.report.get("original_count"),
+                    review_result.report.get("reviewed_count"),
+                    float(review_result.report.get("coverage_ratio") or 0.0),
+                )
+                script_segments = review_result.segments
+            else:
+                logger.info("   LLM审稿未改动: %s", review_result.report.get("reason"))
+        elif not should_review:
+            self.last_script_review = {"attempted": False, "applied": False, "reason": "disabled"}
         
         if enable_chapter_structure:
             chapter_structure = self._build_chapter_structure(

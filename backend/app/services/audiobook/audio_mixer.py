@@ -35,6 +35,8 @@ from dataclasses import dataclass
 from enum import Enum
 import shutil
 
+from .pause_tags import coerce_pause_ms
+
 logger = logging.getLogger(__name__)
 
 # 检查 FFmpeg 是否可用
@@ -48,9 +50,11 @@ FFMPEG_AVAILABLE = _check_ffmpeg_available()
 try:
     from pydub import AudioSegment
     from pydub.effects import normalize
+    from pydub.silence import detect_silence
     PYDUB_AVAILABLE = True
 except ImportError:
     PYDUB_AVAILABLE = False
+    detect_silence = None
 
 # 输出可用的音频处理引擎
 if PYDUB_AVAILABLE:
@@ -107,6 +111,8 @@ class AudioMixer:
         enable_silence_trim: bool = True,
         silence_trim_threshold: int = -40,  # dBFS，静音检测阈值
         silence_trim_min_silence: int = 100,  # 最小静音长度（ms）
+        enable_internal_silence_limit: bool = True,
+        max_internal_silence_ms: int = 2500,  # 单段内部最长静音，避免 TTS 异常拖长
         # 🆕 新增：响度标准化参数
         enable_loudness_norm: bool = True,
         target_loudness_lufs: float = -16.0,  # EBU R128 标准响度
@@ -124,6 +130,8 @@ class AudioMixer:
         self.enable_silence_trim = enable_silence_trim
         self.silence_trim_threshold = silence_trim_threshold
         self.silence_trim_min_silence = silence_trim_min_silence
+        self.enable_internal_silence_limit = enable_internal_silence_limit
+        self.max_internal_silence_ms = max_internal_silence_ms
 
         self.enable_loudness_norm = enable_loudness_norm
         self.target_loudness_lufs = target_loudness_lufs
@@ -161,7 +169,9 @@ class AudioMixer:
         self,
         audio_segments: List[bytes],
         output_format: str = "mp3",
-        bitrate: str = "128k"
+        bitrate: str = "128k",
+        segment_types: Optional[List[str]] = None,
+        pause_after_ms: Optional[List[Optional[int]]] = None,
     ) -> bytes:
         """
         混合章节音频（纯pydub模式）
@@ -183,13 +193,21 @@ class AudioMixer:
         # 🔥 优先级 1: pydub（主要方案）
         if self.pydub_available:
             try:
-                return self._mix_with_pydub(audio_segments, output_format, bitrate)
+                return self._mix_with_pydub(
+                    audio_segments,
+                    output_format,
+                    bitrate,
+                    segment_types=segment_types,
+                    pause_after_ms=pause_after_ms,
+                )
             except Exception as e:
                 logger.error(f"❌ pydub 混音失败: {e}")
                 import traceback
                 traceback.print_exc()
                 
                 if not self.enable_fallback:
+                    raise
+                if self._normalize_output_format(output_format) == "m4b":
                     raise
                 logger.warning("⚠️ 降级到简单拼接模式")
         
@@ -205,6 +223,58 @@ class AudioMixer:
             logger.error(f"❌ 音频混合失败: {e}")
             return b""
     
+    def transcode_audio(
+        self,
+        audio_data: bytes,
+        output_format: str = "mp3",
+        bitrate: str = "128k",
+    ) -> bytes:
+        if not audio_data:
+            return b""
+        normalized = self._normalize_output_format(output_format)
+        if normalized == "mp3":
+            return audio_data
+        if not self.pydub_available:
+            raise RuntimeError("pydub is required for audiobook output transcoding")
+        audio = AudioSegment.from_file(io.BytesIO(audio_data))
+        return self._export_audio_segment(audio, normalized, bitrate)
+
+    def build_segment_timeline(
+        self,
+        audio_segments: List[bytes],
+        segment_types: Optional[List[str]] = None,
+        pause_after_ms: Optional[List[Optional[int]]] = None,
+    ) -> List[Dict[str, float]]:
+        """Build segment timings with the same loading, trimming, and pause rules as mix_chapter."""
+        if not self.pydub_available or not audio_segments:
+            return []
+
+        loaded_segments = self._load_audio_segments_for_mix(
+            audio_segments,
+            segment_types,
+            pause_after_ms=pause_after_ms,
+        )
+        timeline: List[Dict[str, float]] = []
+        cursor_ms = 0
+
+        for idx, item in enumerate(loaded_segments):
+            source_index, segment, seg_type, pause_override_ms = item
+            start_ms = cursor_ms
+            end_ms = start_ms + len(segment)
+            timeline.append(
+                {
+                    "index": int(source_index),
+                    "start": round(start_ms / 1000.0, 6),
+                    "end": round(end_ms / 1000.0, 6),
+                    "duration": round(max(0, end_ms - start_ms) / 1000.0, 6),
+                }
+            )
+            cursor_ms = end_ms
+            if idx < len(loaded_segments) - 1:
+                cursor_ms += self._pause_duration_after_segment(seg_type, pause_override_ms)
+
+        return timeline
+
     def add_background_music(
         self,
         voice_audio: bytes,
@@ -539,12 +609,85 @@ class AudioMixer:
             logger.warning(f"⚠️ 响度标准化失败: {e}，返回原始音频")
             return audio
 
+    def _limit_internal_silence(self, audio: AudioSegment) -> AudioSegment:
+        """限制单段 TTS 内部的异常长静音，不影响混音阶段主动插入的段间停顿。"""
+        if (
+            not self.enable_internal_silence_limit
+            or not self.pydub_available
+            or detect_silence is None
+        ):
+            return audio
+
+        try:
+            max_silence_ms = int(self.max_internal_silence_ms or 0)
+        except (TypeError, ValueError):
+            max_silence_ms = 0
+        if max_silence_ms <= 0 or len(audio) <= max_silence_ms:
+            return audio
+
+        min_silence_len = max(int(self.silence_trim_min_silence or 100), 100)
+        try:
+            silence_ranges = detect_silence(
+                audio,
+                min_silence_len=min_silence_len,
+                silence_thresh=float(self.silence_trim_threshold),
+                seek_step=10,
+            )
+        except Exception as exc:
+            logger.warning("⚠️ 内部静音检测失败: %s", exc)
+            return audio
+
+        long_silences = [
+            (start, end)
+            for start, end in silence_ranges
+            if end > start and (end - start) > max_silence_ms
+        ]
+        if not long_silences:
+            return audio
+
+        pieces = []
+        cursor = 0
+        for start, end in silence_ranges:
+            start = max(0, min(int(start), len(audio)))
+            end = max(start, min(int(end), len(audio)))
+            if cursor < start:
+                pieces.append(audio[cursor:start])
+
+            silence_duration = end - start
+            if silence_duration > max_silence_ms:
+                middle = (start + end) // 2
+                keep_start = max(start, middle - max_silence_ms // 2)
+                keep_end = min(end, keep_start + max_silence_ms)
+                pieces.append(audio[keep_start:keep_end])
+            else:
+                pieces.append(audio[start:end])
+            cursor = end
+
+        if cursor < len(audio):
+            pieces.append(audio[cursor:])
+
+        if not pieces:
+            return audio
+
+        limited = AudioSegment.empty()
+        for piece in pieces:
+            limited += piece
+
+        logger.debug(
+            "✂️ 内部静音限制完成: 原始%sms -> %sms, 限制%s处",
+            len(audio),
+            len(limited),
+            len(long_silences),
+        )
+        return limited
+
     def _mix_with_pydub(
         self,
         audio_segments: List[bytes],
         output_format: str = "mp3",
         bitrate: str = "128k",
-        segment_types: Optional[List[str]] = None
+        segment_types: Optional[List[str]] = None,
+        pause_after_ms: Optional[List[Optional[int]]] = None,
     ) -> bytes:
         """
         使用pydub混音（主要方案）
@@ -554,21 +697,17 @@ class AudioMixer:
             output_format: 输出格式
             bitrate: 比特率
             segment_types: 每个片段的类型（paragraph/sentence/phrase），用于语义停顿
+            pause_after_ms: 每个片段后的显式停顿（毫秒），优先级高于语义停顿
         """
         # 1. 加载所有音频片段
-        segments = []
-        for audio_bytes in audio_segments:
-            if not audio_bytes:
-                continue
-            try:
-                segment = AudioSegment.from_file(io.BytesIO(audio_bytes))
-                
-                if self.enable_silence_trim:
-                    segment = self._trim_silence(segment)
-                
-                segments.append(segment)
-            except Exception as e:
-                logger.warning(f"⚠️ 无法加载音频片段: {e}")
+        loaded_segments = self._load_audio_segments_for_mix(
+            audio_segments,
+            segment_types,
+            pause_after_ms=pause_after_ms,
+        )
+        segments = [item[1] for item in loaded_segments]
+        loaded_segment_types = [item[2] for item in loaded_segments]
+        loaded_pause_after_ms = [item[3] for item in loaded_segments]
         
         if not segments:
             logger.warning("⚠️ 没有有效的音频片段")
@@ -579,16 +718,13 @@ class AudioMixer:
         for i, segment in enumerate(segments):
             combined += segment
             if i < len(segments) - 1:
-                if self.enable_semantic_pause and segment_types and i < len(segment_types):
-                    seg_type = segment_types[i].lower()
-                    if seg_type == "paragraph":
-                        pause = AudioSegment.silent(duration=self.paragraph_pause_ms)
-                    elif seg_type == "sentence":
-                        pause = AudioSegment.silent(duration=self.sentence_pause_ms)
-                    elif seg_type == "phrase":
-                        pause = AudioSegment.silent(duration=self.phrase_pause_ms)
-                    else:
-                        pause = AudioSegment.silent(duration=self.silence_duration)
+                pause_override_ms = loaded_pause_after_ms[i] if i < len(loaded_pause_after_ms) else None
+                if pause_override_ms is not None:
+                    pause = AudioSegment.silent(duration=pause_override_ms)
+                    logger.debug("🔇 显式停顿: %sms", pause_override_ms)
+                elif self.enable_semantic_pause and loaded_segment_types and i < len(loaded_segment_types):
+                    seg_type = loaded_segment_types[i].lower()
+                    pause = AudioSegment.silent(duration=self._pause_duration_for_segment_type(seg_type))
                     
                     logger.debug(
                         f"🔇 语义停顿: {seg_type} -> {pause.duration_seconds*1000:.0f}ms"
@@ -606,15 +742,7 @@ class AudioMixer:
             logger.debug("✅ 音量归一化完成")
         
         # 4. 输出
-        output_buffer = io.BytesIO()
-        combined.export(
-            output_buffer,
-            format=output_format,
-            bitrate=bitrate,
-            parameters=["-q:a", "2"]  # 质量参数
-        )
-        
-        result = output_buffer.getvalue()
+        result = self._export_audio_segment(combined, output_format, bitrate)
         
         logger.info(
             f"✅ pydub混音完成: "
@@ -623,6 +751,89 @@ class AudioMixer:
         )
         
         return result
+
+    def _export_audio_segment(
+        self,
+        audio: Any,
+        output_format: str = "mp3",
+        bitrate: str = "128k",
+    ) -> bytes:
+        normalized = self._normalize_output_format(output_format)
+        export_format, codec, parameters = self._resolve_export_settings(normalized)
+        output_buffer = io.BytesIO()
+        export_kwargs: Dict[str, Any] = {"format": export_format}
+        if normalized in {"mp3", "m4b"}:
+            export_kwargs["bitrate"] = bitrate
+        if codec:
+            export_kwargs["codec"] = codec
+        if parameters:
+            export_kwargs["parameters"] = parameters
+        audio.export(output_buffer, **export_kwargs)
+        return output_buffer.getvalue()
+
+    @staticmethod
+    def _normalize_output_format(output_format: str) -> str:
+        normalized = str(output_format or "mp3").strip().lower().lstrip(".")
+        if normalized == "m4a":
+            normalized = "m4b"
+        if normalized not in {"mp3", "wav", "m4b"}:
+            return "mp3"
+        return normalized
+
+    @staticmethod
+    def _resolve_export_settings(output_format: str) -> Tuple[str, Optional[str], List[str]]:
+        if output_format == "m4b":
+            return "mp4", "aac", ["-movflags", "+faststart"]
+        if output_format == "mp3":
+            return "mp3", None, ["-q:a", "2"]
+        return output_format, None, []
+
+    def _load_audio_segments_for_mix(
+        self,
+        audio_segments: List[bytes],
+        segment_types: Optional[List[str]] = None,
+        pause_after_ms: Optional[List[Optional[int]]] = None,
+    ) -> List[Tuple[int, Any, str, Optional[int]]]:
+        loaded_segments: List[Tuple[int, Any, str, Optional[int]]] = []
+        segment_types = segment_types or []
+        pause_after_ms = pause_after_ms or []
+        for source_index, audio_bytes in enumerate(audio_segments or []):
+            if not audio_bytes:
+                continue
+            try:
+                segment = AudioSegment.from_file(io.BytesIO(audio_bytes))
+
+                if self.enable_silence_trim:
+                    segment = self._trim_silence(segment)
+                segment = self._limit_internal_silence(segment)
+
+                seg_type = ""
+                if source_index < len(segment_types):
+                    seg_type = str(segment_types[source_index] or "")
+                pause_override_ms = None
+                if source_index < len(pause_after_ms):
+                    pause_override_ms = coerce_pause_ms(pause_after_ms[source_index])
+                loaded_segments.append((source_index, segment, seg_type, pause_override_ms))
+            except Exception as e:
+                logger.warning(f"⚠️ 无法加载音频片段: {e}")
+        return loaded_segments
+
+    def _pause_duration_after_segment(self, seg_type: str, pause_after_ms: Optional[int]) -> int:
+        if pause_after_ms is not None:
+            return int(max(0, pause_after_ms))
+        return self._pause_duration_for_segment_type(seg_type)
+
+    def _pause_duration_for_segment_type(self, seg_type: str) -> int:
+        if not self.enable_semantic_pause:
+            return int(self.silence_duration)
+        normalized = str(seg_type or "").strip().lower()
+        if normalized in {"section", "paragraph"}:
+            return int(self.paragraph_pause_ms)
+        if normalized == "sentence":
+            return int(self.sentence_pause_ms)
+        if normalized == "phrase":
+            return int(self.phrase_pause_ms)
+        return int(self.silence_duration)
 
     def create_silence(self, duration_ms: int, output_format: str = "mp3", bitrate: str = "128k") -> bytes:
         """创建指定时长的静音音频（pydub 版）。"""

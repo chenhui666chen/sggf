@@ -1,110 +1,214 @@
 from __future__ import annotations
 
-import asyncio
 import logging
 import os
-import json
-import math
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import quote
-from typing import List, Optional, Dict, Any
 
-from fastapi import APIRouter, Body, Depends, HTTPException, status, Response, Query, UploadFile, File, Request
+from fastapi import Depends, HTTPException, Query, status
 from fastapi.responses import FileResponse
+from jose import JWTError, jwt
 from sqlalchemy.orm import Session
 
-from app.core.security import get_current_user
+from app.core.config import settings
+from app.core.security import get_current_user, get_current_user_optional
 from app.db.base import get_db
 from app.models.user import User
 from app.models.project import Project, Chapter
 from app.models.audiobook import AudiobookProject, ChapterAudio
-from app.models.audiobook_delete_audit import AudiobookDeleteAudit
-from app.models.character import Character
-from app.models.audiobook_task import AudiobookTask
-from app.schemas.audiobook import (
-    AudiobookProjectCreate,
-    GenerateAudioFromScriptsRequest,
-    ChapterScriptUpdateRequest,
-    AudiobookProjectResponse,
-    ChapterAudioResponse,
-    CharacterVoiceConfig,
-    TTSPreviewRequest,
-    ScriptSegmentPreviewRequest,
-    SegmentRegenerateRequest,
-    SegmentReviewRequest,
-    AudiobookTaskStatus,
-    CosyVoiceCloneCreateRequest,
-    ChapterReviewStatus,
-    NarrationStylePreset,
-    SubtitleDownloadResponse,
-    GenerationCheckpointResponse,
-    SmartChunkConfig,
-    ChunkStats,
-    ChunkPreviewResponse,
-    VoiceTypePresetResponse,
-    VoiceTypeRecommendationRequest,
-    VoiceTypeRecommendationResponse,
-)
-from app.celery_app import celery_app
-from app.services.audiobook import AudiobookEngine
-from app.services.audiobook.audio_mixer import AudioMixer
-from app.services.audiobook.agents import SoundEffectDesigner
-from app.services.audiobook.tts_engine import RetryConfig
-from app.services.audiobook.voice_manager import VoiceManager
-from app.services.audiobook.voice_manager_factory import create_voice_manager
-from app.services.audiobook.voice_catalog import get_voice_entry, load_voice_catalog_for_model
-from app.services.audiobook.project_audio_config import (
-    parse_project_audio_config,
-    get_characters_for_model,
-    get_audio_fx,
-)
-from app.services.audiobook.cosyvoice_clone_client import (
-    CosyVoiceCloneError,
-    create_cosyvoice_v3_plus_clone,
-    delete_cosyvoice_clone,
-    get_clone_display_name,
-    list_cosyvoice_v3_plus_clones,
-    save_clone_display_name,
-    upload_cosyvoice_v3_plus_clone_sample,
-)
-from app.services.audiobook.narration_styles import get_all_narration_styles, get_narration_style_preset, apply_narration_style_to_tts_params
-from app.services.audiobook.subtitle_generator import SubtitleGenerator, SubtitleEntry
-from app.services.audiobook.smart_chunker import SmartChunker, TextChunk
-from app.services.audiobook.voice_types import (
-    get_all_voice_types,
-    get_voice_type_preset,
-    recommend_voice_type,
-    apply_voice_type_to_tts_params,
-    create_character_voice_profile,
-)
-from app.services.audiobook.sse_progress import sse_tracker, create_progress_handler
-from app.services.audiobook.smart_retrier import SmartRetrier, RetryConfig, retry_tts_call
-from app.services.audiobook.preview_generator import PreviewGenerator, default_preview_generator
-from app.services.audiobook.app_service import AudiobookAppService
-from app.services.audiobook.repository import (
-    AudiobookProjectRepository,
-    ChapterAudioRepository,
-    ProjectRepository,
-    AudiobookTaskRepository,
-)
-from app.services.audiobook.task_support import (
-    build_generation_checkpoint_payload as _build_generation_checkpoint_payload,
-    build_task_status_response,
-    enqueue_chapter_runs as _enqueue_chapter_runs,
-    ensure_audiobook_points_precheck_passed as _ensure_audiobook_points_precheck_passed,
-)
-from app.services.points_task_precheck import (
-    build_audiobook_task_points_precheck,
-)
-from app.services.user_center_points_events import (
-    record_audiobook_billing_freeze,
-)
-from app.utils.datetime_utils import utc_now
-from core.unified_media_runtime import synthesize_speech as runtime_synthesize_speech
+from app.services.audiobook.safe_filename import build_safe_filename
 
 from app.api.v1.audiobook_api import router
 
 logger = logging.getLogger(__name__)
+
+STREAM_TOKEN_PURPOSE = "audiobook_stream"
+STREAM_TOKEN_TTL_SECONDS = 2 * 60 * 60
+
+
+def _get_audio_media_type(file_path: str) -> str:
+    extension = Path(file_path).suffix.lstrip(".").lower() or "mp3"
+    return {
+        "mp3": "audio/mpeg",
+        "wav": "audio/wav",
+        "m4b": "audio/mp4",
+        "m4a": "audio/mp4",
+    }.get(extension, "application/octet-stream")
+
+
+def _create_stream_access_token(
+    *,
+    user_id: int,
+    audiobook_project_id: int,
+    chapter_id: int,
+) -> tuple[str, datetime]:
+    expires_at = datetime.now(timezone.utc) + timedelta(seconds=STREAM_TOKEN_TTL_SECONDS)
+    payload = {
+        "sub": str(user_id),
+        "purpose": STREAM_TOKEN_PURPOSE,
+        "audiobook_project_id": audiobook_project_id,
+        "chapter_id": chapter_id,
+        "exp": expires_at,
+    }
+    token = jwt.encode(
+        payload,
+        settings.JWT_SECRET,
+        algorithm=settings.JWT_ALGORITHM,
+    )
+    return token, expires_at
+
+
+def _resolve_stream_token_user(
+    *,
+    db: Session,
+    token: str,
+    audiobook_project_id: int,
+    chapter_id: int,
+) -> User:
+    try:
+        payload = jwt.decode(
+            token,
+            settings.JWT_SECRET,
+            algorithms=[settings.JWT_ALGORITHM],
+        )
+    except JWTError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid stream token",
+        ) from exc
+
+    try:
+        token_project_id = int(payload.get("audiobook_project_id") or 0)
+        token_chapter_id = int(payload.get("chapter_id") or 0)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid stream token",
+        ) from exc
+
+    if (
+        payload.get("purpose") != STREAM_TOKEN_PURPOSE
+        or token_project_id != audiobook_project_id
+        or token_chapter_id != chapter_id
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid stream token",
+        )
+
+    try:
+        user_id = int(payload.get("sub") or 0)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid stream token",
+        ) from exc
+
+    if user_id <= 0:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid stream token",
+        )
+
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user or not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid stream token",
+        )
+    return user
+
+
+def _resolve_owned_chapter_audio_file(
+    *,
+    db: Session,
+    current_user: User,
+    audiobook_project_id: int,
+    chapter_id: int,
+) -> tuple[ChapterAudio, Chapter | None, str, str]:
+    audiobook_project = db.query(AudiobookProject).filter(
+        AudiobookProject.id == audiobook_project_id
+    ).first()
+
+    if not audiobook_project:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="有声书项目不存在"
+        )
+
+    project = db.query(Project).filter(
+        Project.id == audiobook_project.project_id,
+        Project.user_id == current_user.id
+    ).first()
+
+    if not project:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="无权限访问"
+        )
+
+    chapter_audio = db.query(ChapterAudio).filter(
+        ChapterAudio.audiobook_project_id == audiobook_project_id,
+        ChapterAudio.chapter_id == chapter_id
+    ).first()
+
+    if not chapter_audio:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="章节音频不存在"
+        )
+
+    if not chapter_audio.audio_path:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="音频文件路径不存在"
+        )
+
+    file_path = chapter_audio.audio_path
+    if not os.path.exists(file_path):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"音频文件不存在: {file_path}"
+        )
+
+    chapter = db.query(Chapter).filter(Chapter.id == chapter_id).first()
+    return chapter_audio, chapter, file_path, _get_audio_media_type(file_path)
+
+
+@router.get("/stream-url/{audiobook_project_id}/{chapter_id}")
+async def create_chapter_audio_stream_url(
+    audiobook_project_id: int,
+    chapter_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    创建短期签名播放 URL。
+
+    原生 audio 标签无法携带 Bearer header，因此播放器需要一个短期 token URL。
+    """
+    _, _, _, _ = _resolve_owned_chapter_audio_file(
+        db=db,
+        current_user=current_user,
+        audiobook_project_id=audiobook_project_id,
+        chapter_id=chapter_id,
+    )
+    token, expires_at = _create_stream_access_token(
+        user_id=current_user.id,
+        audiobook_project_id=audiobook_project_id,
+        chapter_id=chapter_id,
+    )
+    encoded_token = quote(token, safe="")
+    return {
+        "stream_url": (
+            f"/api/v1/audiobook/stream/{audiobook_project_id}/{chapter_id}"
+            f"?play_token={encoded_token}"
+        ),
+        "expires_at": expires_at.isoformat(),
+        "expires_in_seconds": STREAM_TOKEN_TTL_SECONDS,
+    }
+
 
 @router.get("/download/{audiobook_project_id}/{chapter_id}")
 async def download_chapter_audio(
@@ -120,58 +224,23 @@ async def download_chapter_audio(
     """
     logger.info(f"🎧 用户 {current_user.id} 下载音频: audiobook_project_id={audiobook_project_id}, chapter_id={chapter_id}")
     
-    # 1. 验证有声书项目权限
-    audiobook_project = db.query(AudiobookProject).filter(
-        AudiobookProject.id == audiobook_project_id
-    ).first()
-    
-    if not audiobook_project:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="有声书项目不存在"
+    _, chapter, file_path, media_type = _resolve_owned_chapter_audio_file(
+        db=db,
+        current_user=current_user,
+        audiobook_project_id=audiobook_project_id,
+        chapter_id=chapter_id,
+    )
+
+    # 获取章节标题作为文件名
+    extension = Path(file_path).suffix.lstrip(".").lower() or "mp3"
+    if chapter:
+        filename = build_safe_filename(
+            f"第{chapter.chapter_number}章-{chapter.title}",
+            extension,
+            fallback=f"chapter_{chapter_id}",
         )
-    
-    # 验证原始项目权限
-    project = db.query(Project).filter(
-        Project.id == audiobook_project.project_id,
-        Project.user_id == current_user.id
-    ).first()
-    
-    if not project:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="无权限访问"
-        )
-    
-    # 2. 获取章节音频记录
-    chapter_audio = db.query(ChapterAudio).filter(
-        ChapterAudio.audiobook_project_id == audiobook_project_id,
-        ChapterAudio.chapter_id == chapter_id
-    ).first()
-    
-    if not chapter_audio:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="章节音频不存在"
-        )
-    
-    # 3. 检查文件是否存在
-    if not chapter_audio.audio_path:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="音频文件路径不存在"
-        )
-    
-    file_path = chapter_audio.audio_path
-    if not os.path.exists(file_path):
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"音频文件不存在: {file_path}"
-        )
-    
-    # 4. 获取章节标题作为文件名
-    chapter = db.query(Chapter).filter(Chapter.id == chapter_id).first()
-    filename = f"第{chapter.chapter_number}章-{chapter.title}.mp3" if chapter else f"chapter_{chapter_id}.mp3"
+    else:
+        filename = build_safe_filename(f"chapter_{chapter_id}", extension, fallback="chapter")
     
     # URL编码文件名（支持中文）
     encoded_filename = quote(filename)
@@ -181,7 +250,7 @@ async def download_chapter_audio(
     # 5. 返回文件
     return FileResponse(
         path=file_path,
-        media_type="audio/mpeg",
+        media_type=media_type,
         filename=filename,  # 保留原始文件名（供浏览器显示）
         headers={
             "Content-Disposition": f"attachment; filename*=UTF-8''{encoded_filename}",
@@ -194,7 +263,8 @@ async def download_chapter_audio(
 async def stream_chapter_audio(
     audiobook_project_id: int,
     chapter_id: int,
-    current_user: User = Depends(get_current_user),
+    play_token: str | None = Query(default=None),
+    current_user: User | None = Depends(get_current_user_optional),
     db: Session = Depends(get_db)
 ):
     """
@@ -202,55 +272,36 @@ async def stream_chapter_audio(
     
     返回：音频文件流（支持Range请求）
     """
-    logger.info(f"🎵 用户 {current_user.id} 在线播放: audiobook_project_id={audiobook_project_id}, chapter_id={chapter_id}")
-    
-    # 1. 验证权限（同下载接口）
-    audiobook_project = db.query(AudiobookProject).filter(
-        AudiobookProject.id == audiobook_project_id
-    ).first()
-    
-    if not audiobook_project:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="有声书项目不存在"
+    if play_token:
+        resolved_user = _resolve_stream_token_user(
+            db=db,
+            token=play_token,
+            audiobook_project_id=audiobook_project_id,
+            chapter_id=chapter_id,
         )
-    
-    project = db.query(Project).filter(
-        Project.id == audiobook_project.project_id,
-        Project.user_id == current_user.id
-    ).first()
-    
-    if not project:
+    elif current_user:
+        resolved_user = current_user
+    else:
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="无权限访问"
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing stream credentials",
         )
+
+    logger.info(f"🎵 用户 {resolved_user.id} 在线播放: audiobook_project_id={audiobook_project_id}, chapter_id={chapter_id}")
     
-    # 2. 获取音频文件路径
-    chapter_audio = db.query(ChapterAudio).filter(
-        ChapterAudio.audiobook_project_id == audiobook_project_id,
-        ChapterAudio.chapter_id == chapter_id
-    ).first()
-    
-    if not chapter_audio or not chapter_audio.audio_path:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="章节音频不存在"
-        )
-    
-    file_path = chapter_audio.audio_path
-    if not os.path.exists(file_path):
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"音频文件不存在: {file_path}"
-        )
+    _, _, file_path, media_type = _resolve_owned_chapter_audio_file(
+        db=db,
+        current_user=resolved_user,
+        audiobook_project_id=audiobook_project_id,
+        chapter_id=chapter_id,
+    )
     
     logger.info(f"✅ 流式播放文件: {file_path}")
-    
-    # 3. 返回文件流（inline模式，浏览器直接播放）
+
+    # 返回文件流（inline模式，浏览器直接播放；Bearer 鉴权场景下前端仍需要 fetch Blob）
     return FileResponse(
         path=file_path,
-        media_type="audio/mpeg",
+        media_type=media_type,
         headers={
             "Content-Disposition": "inline",
             "Accept-Ranges": "bytes",

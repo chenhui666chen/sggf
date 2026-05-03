@@ -3,6 +3,7 @@ Helpers for persisting Celery audiobook job progress.
 """
 from __future__ import annotations
 
+from datetime import timedelta
 from typing import Any, Dict, Optional
 
 from sqlalchemy.orm import Session
@@ -10,11 +11,14 @@ from sqlalchemy.orm import Session
 from app.db.base import SessionLocal
 from app.models.audiobook import ChapterAudioRun
 from app.models.audiobook_task import AudiobookTask
+from app.services.audiobook.sse_progress import sse_tracker
 from app.utils.datetime_utils import utc_now
 
 
 class AudiobookJobTracker:
     """Lightweight DB helper used by Celery tasks/background jobs."""
+
+    _TERMINAL_CHAPTER_RUN_STATUSES = {"completed", "failed", "cancelled", "canceled"}
 
     def __init__(self, task_db_id: int):
         self.task_db_id = task_db_id
@@ -43,18 +47,44 @@ class AudiobookJobTracker:
                     return int(value)
         return 0
 
-    def _update(self, **changes) -> None:
+    def _update(self, **changes) -> Optional[Dict[str, Any]]:
         session = self._with_session()
         try:
             task = session.query(AudiobookTask).filter(AudiobookTask.id == self.task_db_id).first()
             if not task:
-                return
+                return None
             for key, value in changes.items():
                 setattr(task, key, value)
             task.updated_at = utc_now()
             session.commit()
+            return {
+                "celery_task_id": task.celery_task_id,
+                "status": task.status,
+                "current_stage": task.current_stage,
+                "progress": task.progress,
+                "detail_json": task.detail_json or {},
+                "error_message": task.error_message,
+            }
         finally:
             session.close()
+
+    @staticmethod
+    def _emit_sse_progress(task_snapshot: Optional[Dict[str, Any]]) -> None:
+        if not task_snapshot:
+            return
+        task_id = task_snapshot.get("celery_task_id")
+        if not task_id:
+            return
+        sse_tracker.emit_progress(
+            str(task_id),
+            {
+                "stage": task_snapshot.get("current_stage"),
+                "progress": task_snapshot.get("progress"),
+                "detail": task_snapshot.get("detail_json") or {},
+                "status": task_snapshot.get("status"),
+                "error_message": task_snapshot.get("error_message"),
+            },
+        )
 
     def _update_chapter_run(
         self,
@@ -79,15 +109,24 @@ class AudiobookJobTracker:
             if not task:
                 return
 
-            run = (
-                session.query(ChapterAudioRun)
-                .filter(
-                    ChapterAudioRun.audiobook_project_id == task.audiobook_project_id,
-                    ChapterAudioRun.chapter_id == chapter_id,
-                )
-                .order_by(ChapterAudioRun.created_at.desc(), ChapterAudioRun.id.desc())
-                .first()
+            run_query = session.query(ChapterAudioRun).filter(
+                ChapterAudioRun.audiobook_project_id == task.audiobook_project_id,
+                ChapterAudioRun.chapter_id == chapter_id,
+                ChapterAudioRun.run_type == task.task_type,
             )
+            run = None
+            if task.celery_task_id:
+                run = (
+                    run_query.filter(ChapterAudioRun.celery_task_id == task.celery_task_id)
+                    .order_by(ChapterAudioRun.created_at.desc(), ChapterAudioRun.id.desc())
+                    .first()
+                )
+            if not run:
+                run = (
+                    run_query
+                    .order_by(ChapterAudioRun.created_at.desc(), ChapterAudioRun.id.desc())
+                    .first()
+                )
             if not run:
                 run = ChapterAudioRun(
                     audiobook_project_id=task.audiobook_project_id,
@@ -135,6 +174,56 @@ class AudiobookJobTracker:
         finally:
             session.close()
 
+    def _mark_unfinished_chapter_runs_failed(self, error_message: str) -> None:
+        from app.services.audiobook.task_support import (
+            RESUME_WINDOW_HOURS,
+            build_run_checkpoint_document,
+        )
+
+        session = self._with_session()
+        try:
+            task = session.query(AudiobookTask).filter(AudiobookTask.id == self.task_db_id).first()
+            if not task or not task.celery_task_id:
+                return
+
+            run_query = session.query(ChapterAudioRun).filter(
+                ChapterAudioRun.audiobook_project_id == task.audiobook_project_id,
+                ChapterAudioRun.run_type == task.task_type,
+                ChapterAudioRun.celery_task_id == task.celery_task_id,
+                ~ChapterAudioRun.status.in_(self._TERMINAL_CHAPTER_RUN_STATUSES),
+            )
+            if task.chapter_id is not None:
+                run_query = run_query.filter(ChapterAudioRun.chapter_id == task.chapter_id)
+
+            runs = run_query.all()
+            if not runs:
+                return
+
+            failed_at = utc_now()
+            for run in runs:
+                if run.expires_at is None:
+                    run.expires_at = failed_at + timedelta(hours=RESUME_WINDOW_HOURS)
+                checkpoint_payload = build_run_checkpoint_document(
+                    session,
+                    run=run,
+                    chapter_id=run.chapter_id,
+                    audiobook_project_id=run.audiobook_project_id,
+                    status="failed",
+                    current_stage="failed",
+                    error_message=error_message,
+                )
+                run.status = "failed"
+                run.current_stage = "failed"
+                run.error_message = error_message
+                run.finished_at = failed_at
+                run.updated_at = failed_at
+                run.checkpoint_json = checkpoint_payload
+                session.add(run)
+
+            session.commit()
+        finally:
+            session.close()
+
     def mark_running(self, celery_task_id: Optional[str] = None) -> None:
         """Persist the running state."""
         changes = {
@@ -144,7 +233,7 @@ class AudiobookJobTracker:
         }
         if celery_task_id:
             changes["celery_task_id"] = celery_task_id
-        self._update(**changes)
+        self._emit_sse_progress(self._update(**changes))
 
     def update_stage(
         self,
@@ -167,7 +256,7 @@ class AudiobookJobTracker:
         if message:
             payload.setdefault("detail_json", detail or {})
             payload["detail_json"] = {**payload.get("detail_json", {}), "message": message}
-        self._update(**payload)
+        task_snapshot = self._update(**payload)
         run_status = "running"
         run_finished = False
         if isinstance(payload.get("detail_json"), dict):
@@ -182,6 +271,7 @@ class AudiobookJobTracker:
             status=run_status,
             finished=run_finished,
         )
+        self._emit_sse_progress(task_snapshot)
 
     def mark_completed(self, detail: Optional[Dict[str, Any]] = None) -> None:
         payload = {
@@ -192,7 +282,7 @@ class AudiobookJobTracker:
         }
         if detail is not None:
             payload["detail_json"] = detail
-        self._update(**payload)
+        task_snapshot = self._update(**payload)
         self._update_chapter_run(
             stage="completed",
             progress=1.0,
@@ -200,11 +290,15 @@ class AudiobookJobTracker:
             status="completed",
             finished=True,
         )
+        self._emit_sse_progress(task_snapshot)
 
     def mark_failed(self, error_message: str) -> None:
-        self._update(
+        task_snapshot = self._update(
             status="failed",
             error_message=error_message,
             finished_at=utc_now(),
             current_stage="failed",
+            progress=1.0,
         )
+        self._mark_unfinished_chapter_runs_failed(error_message)
+        self._emit_sse_progress(task_snapshot)

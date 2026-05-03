@@ -308,6 +308,67 @@ def test_admin_can_create_and_list_user_points_adjustments():
     assert items[0]["operator_username"] == admin.username
 
 
+def test_admin_points_account_reflects_positive_manual_adjustment():
+    client, session_factory = build_test_client()
+
+    admin = create_user(session_factory, username="admin_user", email="admin@example.com")
+    target_user = create_user(session_factory, username="target_user", email="target@example.com")
+    admin_role = create_role(session_factory, name="管理员", code="admin")
+    assign_role(session_factory, user_id=admin.id, role_id=admin_role.id)
+
+    create_adjustment_response = client.post(
+        f"/api/v1/admin/users/{target_user.id}/points-adjustments",
+        headers=build_auth_headers(admin.id),
+        json={
+            "delta": 20,
+            "reason": "补发活动积分",
+            "adjustment_type": "manual_grant",
+        },
+    )
+    assert create_adjustment_response.status_code == 201
+
+    account_response = client.get(
+        f"/api/v1/admin/users/{target_user.id}/points-account",
+        headers=build_auth_headers(admin.id),
+    )
+    assert account_response.status_code == 200
+    payload = account_response.json()
+
+    assert payload["target_user_id"] == target_user.id
+    assert payload["status"] == "partial"
+    assert payload["balance"] == 20.0
+    assert payload["frozen"] == 0.0
+    assert payload["available"] == 20.0
+    assert payload["connected_source_count"] == 1
+    assert len(payload["entries"]) == 1
+    assert payload["entries"][0]["source_label"] == "人工补发 / 充值 / 扣减"
+    assert payload["entries"][0]["amount"] == 20.0
+    assert payload["entries"][0]["direction"] == "income"
+
+
+def test_admin_points_adjustment_rejects_expired_positive_grant():
+    client, session_factory = build_test_client()
+
+    admin = create_user(session_factory, username="admin_user", email="admin@example.com")
+    target_user = create_user(session_factory, username="target_user", email="target@example.com")
+    admin_role = create_role(session_factory, name="管理员", code="admin")
+    assign_role(session_factory, user_id=admin.id, role_id=admin_role.id)
+
+    response = client.post(
+        f"/api/v1/admin/users/{target_user.id}/points-adjustments",
+        headers=build_auth_headers(admin.id),
+        json={
+            "delta": 20,
+            "reason": "过期补发不应入账",
+            "adjustment_type": "manual_grant",
+            "expires_at": (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat(),
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "正向积分调整的过期时间必须晚于当前时间"
+
+
 def test_admin_can_list_user_points_billing_events():
     client, session_factory = build_test_client()
     now = datetime.now(timezone.utc)
@@ -907,7 +968,13 @@ def test_points_pricing_policy_response_includes_operating_snapshots():
         payload = response.json()
         operating_snapshots = {item["module_key"]: item for item in payload["operating_snapshots"]}
 
-        assert set(operating_snapshots.keys()) == {"audiobook", "dreamweaver"}
+        assert set(operating_snapshots.keys()) == {
+            "audiobook",
+            "dreamweaver",
+            "novel",
+            "book_parser",
+            "asset_studio",
+        }
 
         audiobook_snapshot = operating_snapshots["audiobook"]
         assert audiobook_snapshot["module_label"] == "有声书"
@@ -928,6 +995,10 @@ def test_points_pricing_policy_response_includes_operating_snapshots():
         assert dreamweaver_snapshot["platform_margin_rate"] == 0.2
         assert dreamweaver_snapshot["margin_status"] == "healthy"
         assert dreamweaver_snapshot["negative_margin_blocked"] is False
+
+        assert operating_snapshots["novel"]["module_label"] == "小说协同"
+        assert operating_snapshots["book_parser"]["module_label"] == "拆书分析"
+        assert operating_snapshots["asset_studio"]["module_label"] == "资产生成"
     finally:
         if original_audiobook_discount_env is None:
             os.environ.pop("POINTS_POLICY_AUDIOBOOK_PROVIDER_DISCOUNT_RATE_DEFAULT", None)

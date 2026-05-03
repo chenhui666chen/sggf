@@ -10,10 +10,19 @@ from pathlib import Path
 from dataclasses import asdict, is_dataclass
 
 from ..script_adapter import AudiobookScriptAgent, ScriptSegment, ChapterStructure
+from ..script_adapter_pkg._llm_review import summarize_script_review_report
 from ..voice_manager_factory import create_voice_manager
 from ..audio_mixer import AudioMixer
+from ..task_tracker import StageType
 from app.services.chapter_adaptation_assets import build_audio_adaptation_hint
 from core.unified_media_runtime import create_tts_engine
+
+try:
+    from app.websocket.manager import ws_manager
+    WEBSOCKET_AVAILABLE = True
+except Exception:  # pragma: no cover - WebSocket is optional for generation workers.
+    ws_manager = None
+    WEBSOCKET_AVAILABLE = False
 
 try:
     from ..agent_dispatch_client import client as tts_dispatch_client
@@ -149,10 +158,12 @@ class ScriptPrepMixin:
             adapted_result = await self.script_adapter.adapt_chapter(
                 chapter_content=chapter_content,
                 character_list=character_list,
+                character_profiles=character_profiles,
                 chapter_title=chapter_title or f"Chapter {chapter_id}",
                 genre=novel_genre,
                 adaptation_context=audio_adaptation_context,
                 progress_callback=on_script_progress,
+                enable_llm_script_review=enable_quality_review,
             )
 
             if isinstance(adapted_result, ChapterStructure):
@@ -164,13 +175,19 @@ class ScriptPrepMixin:
                 script_segments = adapted_result
                 segments_count = len(script_segments)
 
+            llm_script_review = getattr(self.script_adapter, "last_script_review", None)
+            llm_script_review_summary = summarize_script_review_report(llm_script_review)
+            script_stage_metrics = {
+                "segments_count": segments_count,
+                "text_length": len(chapter_content),
+            }
+            if llm_script_review_summary:
+                script_stage_metrics["llm_script_review"] = llm_script_review_summary
+
             self.task_tracker.complete_stage(
                 task_id,
                 StageType.SCRIPT_ADAPTATION,
-                metrics={
-                    "segments_count": segments_count,
-                    "text_length": len(chapter_content),
-                },
+                metrics=script_stage_metrics,
             )
             logger.info(f"   ✅ 生成 {segments_count} 个剧本片段")
             
@@ -276,6 +293,7 @@ class ScriptPrepMixin:
                         for i in quality_report_obj.issues
                     ],
                     "auto_revision": auto_revision if auto_revision.get("applied") else None,
+                    "llm_script_review": llm_script_review,
                 }
 
                 issues_preview = quality_report["issues"][:20]
@@ -291,6 +309,8 @@ class ScriptPrepMixin:
                 }
                 if auto_revision.get("applied"):
                     stage_metrics["auto_revision"] = auto_revision
+                if llm_script_review_summary:
+                    stage_metrics["llm_script_review"] = llm_script_review_summary
                 self.task_tracker.complete_stage(
                     task_id,
                     StageType.QUALITY_REVIEW,
@@ -351,6 +371,8 @@ class ScriptPrepMixin:
                     if (getattr(seg, "instruct_emotion", "") or getattr(seg, "instruct_scene", "") or getattr(seg, "instruct_role", "") or getattr(seg, "instruct_identity", ""))
                 ),
             }
+            if llm_script_review_summary:
+                prompt_metrics["llm_script_review"] = llm_script_review_summary
             self.task_tracker.complete_stage(task_id, StageType.AUDIO_PROMPT_REVIEW, metrics=prompt_metrics)
 
             if WEBSOCKET_AVAILABLE and audiobook_project_id:
@@ -386,6 +408,7 @@ class ScriptPrepMixin:
                         "narration_count": narration_count,
                     },
                     "characters": len(character_list or []),
+                    "llm_script_review": llm_script_review_summary,
                 },
                 "script_segments": output_segments,
                 "quality_report": quality_report,

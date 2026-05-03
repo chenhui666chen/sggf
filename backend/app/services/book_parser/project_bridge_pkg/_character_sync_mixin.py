@@ -434,14 +434,14 @@ class CharacterSyncMixin:
 
         return created_collections
 
-    @staticmethod
-    def _build_character_system_role_label(character: Character) -> str:
+    @classmethod
+    def _build_character_system_role_label(cls, character: Character) -> str:
         """将人物档案映射为角色体系中的角色定位标签。"""
-        role_position = ProjectBridge._normalize_role_position_value(getattr(character, "role_position", None))
+        role_position = cls._normalize_role_position_value(getattr(character, "role_position", None))
         if role_position:
             return role_position
 
-        story_stance = ProjectBridge._normalize_story_stance_value(character.role)
+        story_stance = cls._normalize_story_stance_value(character.role)
         importance = str(character.importance_level or "").strip()
         if story_stance == "主角方":
             if "主角" in importance:

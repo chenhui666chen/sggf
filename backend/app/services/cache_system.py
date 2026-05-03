@@ -122,10 +122,9 @@ class RedisCache(CacheLayer):
             self.enabled = False
     
     async def get(self, key: str) -> Optional[Any]:
+        await self._ensure_connection()
         if not self.enabled:
             return None
-        
-        await self._ensure_connection()
         
         try:
             value = await self.redis_client.get(key)
@@ -138,10 +137,9 @@ class RedisCache(CacheLayer):
             return None
     
     async def set(self, key: str, value: Any, ttl: int = 300) -> bool:
+        await self._ensure_connection()
         if not self.enabled:
             return False
-        
-        await self._ensure_connection()
         
         try:
             serialized = json.dumps(value, ensure_ascii=False)
@@ -153,10 +151,9 @@ class RedisCache(CacheLayer):
             return False
     
     async def delete(self, key: str) -> bool:
+        await self._ensure_connection()
         if not self.enabled:
             return False
-        
-        await self._ensure_connection()
         
         try:
             await self.redis_client.delete(key)
@@ -166,10 +163,9 @@ class RedisCache(CacheLayer):
             return False
     
     async def clear(self) -> bool:
+        await self._ensure_connection()
         if not self.enabled:
             return False
-        
-        await self._ensure_connection()
         
         try:
             await self.redis_client.flushdb()

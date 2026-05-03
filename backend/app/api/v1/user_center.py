@@ -8,12 +8,8 @@ from sqlalchemy.orm import Session
 
 from app.core.security import get_current_user
 from app.db.base import get_db
-from app.models.admin_log import AdminOperationLog
-from app.models.audiobook import AudiobookProject
-from app.models.dreamweaver import DreamweaverProject
 from app.models.project import Chapter, Project
 from app.models.user import User
-from app.models.user_asset_record import UserAssetRecord
 from app.schemas.user_center import (
     UserCenterBenefitItem,
     UserCenterBenefitsOverview,
@@ -31,14 +27,12 @@ from app.schemas.user_center import (
 )
 from app.services.points_pricing_policy import get_points_pricing_policy_snapshot
 from app.services.user_center_points import (
+    POINTS_SOURCE_LABELS,
     UserCenterPointsAccountSnapshot,
     UserCenterPointsBundleSnapshot,
     UserCenterPointsEntrySnapshot,
     UserCenterPointsRuleSnapshot,
-    build_user_center_points_bundle,
-    get_user_center_points_rule_snapshot,
 )
-from app.services.user_center_points_events import list_user_points_billing_logs
 from app.services.user_center_task_billing import (
     UserCenterPricingPolicyOverviewSnapshot,
     UserCenterTaskBillingItemSnapshot,
@@ -46,17 +40,10 @@ from app.services.user_center_task_billing import (
     build_user_center_pricing_policy_overview,
     build_user_center_task_billing_overview,
 )
+from app.services.user_points_read_model import build_user_points_read_model
 
 
 router = APIRouter(prefix="/api/v1/user-center", tags=["user-center"])
-
-
-POINTS_SOURCE_LABELS = {
-    "audiobook": "有声书完成",
-    "dreamweaver": "短剧运行",
-    "user_assets": "用户资产沉淀",
-    "manual_adjustment": "人工补发 / 充值 / 扣减",
-}
 
 
 def _to_finite_float(value: object | None) -> float:
@@ -337,82 +324,17 @@ async def get_user_center_points_overview(
         or 0
     )
 
-    user_asset_rows = (
-        db.query(UserAssetRecord)
-        .filter(UserAssetRecord.user_id == current_user.id)
-        .order_by(UserAssetRecord.updated_at.desc(), UserAssetRecord.created_at.desc(), UserAssetRecord.id.desc())
-        .all()
-    )
+    points_read_model = build_user_points_read_model(db=db, user_id=current_user.id)
+    user_asset_rows = list(points_read_model.user_asset_rows)
     user_asset_count = len(user_asset_rows)
 
-    dreamweaver_rows = (
-        db.query(
-            DreamweaverProject.id.label("id"),
-            DreamweaverProject.run_id.label("run_id"),
-            DreamweaverProject.source_project_id.label("source_project_id"),
-            Project.title.label("project_title"),
-            DreamweaverProject.status.label("status"),
-            DreamweaverProject.stage.label("stage"),
-            DreamweaverProject.contract_json.label("contract_json"),
-            DreamweaverProject.created_at.label("created_at"),
-            DreamweaverProject.updated_at.label("updated_at"),
-        )
-        .join(Project, Project.id == DreamweaverProject.source_project_id)
-        .filter(DreamweaverProject.user_id == current_user.id)
-        .order_by(DreamweaverProject.updated_at.desc(), DreamweaverProject.created_at.desc(), DreamweaverProject.id.desc())
-        .all()
-    )
+    dreamweaver_rows = list(points_read_model.dreamweaver_rows)
     dreamweaver_run_count = len(dreamweaver_rows)
 
-    audiobook_rows = (
-        db.query(
-            AudiobookProject.id.label("id"),
-            AudiobookProject.project_id.label("project_id"),
-            Project.title.label("project_title"),
-            AudiobookProject.status.label("status"),
-            AudiobookProject.tts_provider.label("tts_provider"),
-            AudiobookProject.total_chapters.label("total_chapters"),
-            AudiobookProject.completed_chapters.label("completed_chapters"),
-            AudiobookProject.total_cost.label("total_cost"),
-            AudiobookProject.created_at.label("created_at"),
-            AudiobookProject.updated_at.label("updated_at"),
-        )
-        .join(Project, Project.id == AudiobookProject.project_id)
-        .filter(
-            Project.user_id == current_user.id,
-            AudiobookProject.deleted_at.is_(None),
-        )
-        .order_by(
-            AudiobookProject.updated_at.desc(),
-            AudiobookProject.created_at.desc(),
-            AudiobookProject.id.desc(),
-        )
-        .all()
-    )
-
-    manual_adjustment_logs = (
-        db.query(AdminOperationLog)
-        .filter(
-            AdminOperationLog.operation_type == "POINTS_ADJUST",
-            AdminOperationLog.resource_type == "USER_POINTS",
-            AdminOperationLog.resource_id == current_user.id,
-            AdminOperationLog.response_status < 400,
-        )
-        .order_by(AdminOperationLog.created_at.desc(), AdminOperationLog.id.desc())
-        .all()
-    )
-    billing_event_logs = list_user_points_billing_logs(db=db, target_user_id=current_user.id)
-
-    points_rule_snapshot = get_user_center_points_rule_snapshot(db=db)
+    audiobook_rows = list(points_read_model.audiobook_rows)
+    points_rule_snapshot = points_read_model.points_rule_snapshot
     pricing_policy_snapshot = get_points_pricing_policy_snapshot(db=db)
-    points_bundle: UserCenterPointsBundleSnapshot = build_user_center_points_bundle(
-        user_assets=user_asset_rows,
-        audiobook_rows=list(audiobook_rows),
-        dreamweaver_rows=list(dreamweaver_rows),
-        manual_adjustment_logs=manual_adjustment_logs,
-        billing_event_logs=billing_event_logs,
-        config=points_rule_snapshot.config,
-    )
+    points_bundle: UserCenterPointsBundleSnapshot = points_read_model.points_bundle
     pricing_policy_overview = build_user_center_pricing_policy_overview(pricing_policy_snapshot)
     points_snapshot = points_bundle.account
 

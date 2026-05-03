@@ -211,6 +211,7 @@ def _build_segment_payload(
         "status": "cached",
         "output_format": extension,
         "file_size": len(audio_bytes),
+        "content_sha1": hashlib.sha1(audio_bytes).hexdigest(),
         "temp_object_key": asset_ref,
     }
 
@@ -752,6 +753,69 @@ def extract_cached_segment_paths(checkpoint_data: Optional[Dict[str, Any]]) -> D
     return dict(sorted(merged.items(), key=lambda item: item[0]))
 
 
+def _extract_segment_integrity_metadata(
+    checkpoint_data: Optional[Dict[str, Any]],
+    *,
+    index: int,
+    asset_ref: str,
+) -> Dict[str, Any]:
+    checkpoint = dict(checkpoint_data or {})
+    segments = checkpoint.get("segments") or {}
+    if not isinstance(segments, dict):
+        return {}
+
+    segment_payload = segments.get(str(index))
+    if not isinstance(segment_payload, dict):
+        segment_payload = None
+        for raw_index, candidate in segments.items():
+            if not isinstance(candidate, dict):
+                continue
+            candidate_index = _normalize_segment_index(candidate.get("index", raw_index))
+            if candidate_index == index:
+                segment_payload = candidate
+                break
+
+    if not isinstance(segment_payload, dict):
+        return {}
+
+    payload_ref = str(segment_payload.get("temp_object_key") or "").strip()
+    if payload_ref and payload_ref != str(asset_ref or "").strip():
+        return {}
+
+    metadata: Dict[str, Any] = {}
+    raw_file_size = segment_payload.get("file_size")
+    try:
+        file_size = int(raw_file_size)
+    except Exception:
+        file_size = None
+    if file_size is not None and file_size >= 0:
+        metadata["file_size"] = file_size
+
+    content_sha1 = str(segment_payload.get("content_sha1") or "").strip().lower()
+    if re.fullmatch(r"[a-f0-9]{40}", content_sha1):
+        metadata["content_sha1"] = content_sha1
+
+    return metadata
+
+
+def _segment_audio_matches_integrity_metadata(
+    audio_bytes: bytes,
+    metadata: Optional[Dict[str, Any]],
+) -> bool:
+    if not metadata:
+        return True
+
+    expected_file_size = metadata.get("file_size")
+    if isinstance(expected_file_size, int) and len(audio_bytes) != expected_file_size:
+        return False
+
+    expected_sha1 = str(metadata.get("content_sha1") or "").strip().lower()
+    if expected_sha1 and hashlib.sha1(audio_bytes).hexdigest() != expected_sha1:
+        return False
+
+    return True
+
+
 def load_cached_segment_audio(
     checkpoint_data: Optional[Dict[str, Any]],
     *,
@@ -764,6 +828,13 @@ def load_cached_segment_audio(
         backend = _resolve_backend_for_asset_ref(asset_ref)
         audio_bytes = backend.load_bytes(asset_ref)
         if not audio_bytes:
+            continue
+        integrity_metadata = _extract_segment_integrity_metadata(
+            checkpoint_data,
+            index=index,
+            asset_ref=asset_ref,
+        )
+        if not _segment_audio_matches_integrity_metadata(audio_bytes, integrity_metadata):
             continue
         loaded_audio[index] = audio_bytes
     return loaded_audio

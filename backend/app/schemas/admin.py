@@ -5,6 +5,8 @@ from datetime import datetime
 from typing import Literal, Optional, List
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.schemas.user_center import UserCenterPointsEntry
+
 
 class RoleBase(BaseModel):
     name: str = Field(..., min_length=1, max_length=50)
@@ -186,6 +188,17 @@ class UserListResponse(PaginatedResponse):
 
 class UserPointsAdjustmentListResponse(BaseModel):
     items: List[UserPointsAdjustmentResponse]
+
+
+class UserPointsAccountOverviewResponse(BaseModel):
+    target_user_id: int
+    balance: Optional[float] = None
+    frozen: Optional[float] = None
+    available: Optional[float] = None
+    expiring_soon: Optional[float] = None
+    status: Literal["planned", "partial"] = "planned"
+    connected_source_count: int = 0
+    entries: List[UserCenterPointsEntry] = Field(default_factory=list)
 
 
 SystemPointsRuleSource = Literal["default", "admin_log"]

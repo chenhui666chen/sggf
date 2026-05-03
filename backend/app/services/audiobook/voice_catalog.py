@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from .constants import QWEN3_TTS_INSTRUCT_SUPPORTED_VOICES
+from .tts_model_ids import DEFAULT_AUDIOBOOK_TTS_MODEL, normalize_audiobook_tts_model
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +37,7 @@ def _resolve_voice_library_path(filename: str) -> Path:
 
 
 def _filename_for_model(model: str) -> str:
-    model = (model or "").strip()
+    model = normalize_audiobook_tts_model(model)
     if model in VOICE_FILENAMES_BY_MODEL:
         return VOICE_FILENAMES_BY_MODEL[model]
     # 兼容别名匹配
@@ -52,7 +53,7 @@ class VoiceCatalogError(RuntimeError):
 
 
 def _filter_voices_for_model(model: str, voices: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    normalized_model = (model or "").strip()
+    normalized_model = normalize_audiobook_tts_model(model)
     if normalized_model.startswith("qwen3-tts"):
         supported = QWEN3_TTS_INSTRUCT_SUPPORTED_VOICES
         return [
@@ -65,7 +66,8 @@ def _filter_voices_for_model(model: str, voices: List[Dict[str, Any]]) -> List[D
 
 
 def _read_catalog_for_model(model: str) -> Dict[str, Any]:
-    filename = _filename_for_model(model)
+    normalized_model = normalize_audiobook_tts_model(model)
+    filename = _filename_for_model(normalized_model)
     library_path = _resolve_voice_library_path(filename)
     if not library_path.exists():
         raise VoiceCatalogError(f"Voice catalog not found at {library_path}")
@@ -79,7 +81,7 @@ def _read_catalog_for_model(model: str) -> Dict[str, Any]:
     voices = _filter_voices_for_model(model, raw_voices)
     voices_by_id: Dict[str, Dict[str, Any]] = {voice["id"]: voice for voice in voices if voice.get("id")}
     meta = {
-        "model": raw.get("model", model or "qwen3-tts-instruct-flash"),
+        "model": normalized_model or raw.get("model", DEFAULT_AUDIOBOOK_TTS_MODEL),
         "updated_at": raw.get("updated_at"),
         "source": raw.get("source"),
         "voice_count": len(voices),

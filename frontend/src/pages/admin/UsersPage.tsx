@@ -77,6 +77,32 @@ interface UserPointsAdjustmentListResponse {
   items: UserPointsAdjustment[]
 }
 
+interface UserPointsAccountEntry {
+  key: string
+  source_key: string
+  source_label: string
+  title: string
+  summary: string
+  amount: number
+  direction: 'income' | 'expense' | 'hold'
+  status: 'active' | 'expired' | 'frozen'
+  occurred_at?: string | null
+  expires_at?: string | null
+  action_path?: string | null
+  action_label?: string | null
+}
+
+interface UserPointsAccountOverview {
+  target_user_id: number
+  balance?: number | null
+  frozen?: number | null
+  available?: number | null
+  expiring_soon?: number | null
+  status: 'planned' | 'partial'
+  connected_source_count: number
+  entries: UserPointsAccountEntry[]
+}
+
 interface UserPointsBillingOperatingSnapshot {
   module_key: string
   module_label: string
@@ -182,6 +208,25 @@ function formatCurrency(value?: number | null) {
   return `CNY ${value.toFixed(2)}`
 }
 
+function formatPoints(value?: number | null) {
+  if (typeof value !== 'number' || Number.isNaN(value)) {
+    return '-'
+  }
+  return value.toFixed(2)
+}
+
+function formatPointsEntryStatus(status: UserPointsAccountEntry['status']) {
+  if (status === 'expired') return '已过期'
+  if (status === 'frozen') return '冻结中'
+  return '有效'
+}
+
+function getPointsEntryColor(direction: UserPointsAccountEntry['direction']): 'success' | 'warning' | 'primary' {
+  if (direction === 'income') return 'success'
+  if (direction === 'expense') return 'warning'
+  return 'primary'
+}
+
 function formatPercent(value?: number | null) {
   if (typeof value !== 'number' || Number.isNaN(value)) {
     return '-'
@@ -208,6 +253,7 @@ export default function AdminUsersPage() {
   const [selectedRoleIds, setSelectedRoleIds] = useState<number[]>([])
   const [pointsSubmitting, setPointsSubmitting] = useState(false)
   const [pointsLoading, setPointsLoading] = useState(false)
+  const [pointsAccount, setPointsAccount] = useState<UserPointsAccountOverview | null>(null)
   const [pointsAdjustments, setPointsAdjustments] = useState<UserPointsAdjustment[]>([])
   const [pointsBillingEvents, setPointsBillingEvents] = useState<UserPointsBillingEvent[]>([])
   const [pointsForm, setPointsForm] = useState({
@@ -260,12 +306,21 @@ export default function AdminUsersPage() {
     try {
       setPointsLoading(true)
 
-      const [adjustmentsResult, billingEventsResult] = await Promise.allSettled([
+      const [accountResult, adjustmentsResult, billingEventsResult] = await Promise.allSettled([
+        apiClient.get(`/api/v1/admin/users/${userId}/points-account`),
         apiClient.get(`/api/v1/admin/users/${userId}/points-adjustments?limit=10`),
         apiClient.get(`/api/v1/admin/users/${userId}/points-billing-events?limit=10`),
       ])
 
       let nextError: string | null = null
+
+      if (accountResult.status === 'fulfilled') {
+        const data: UserPointsAccountOverview = accountResult.value.data
+        setPointsAccount(data && typeof data === 'object' ? data : null)
+      } else {
+        setPointsAccount(null)
+        nextError = '获取积分账户余额失败'
+      }
 
       if (adjustmentsResult.status === 'fulfilled') {
         const data: UserPointsAdjustmentListResponse = adjustmentsResult.value.data
@@ -385,6 +440,7 @@ export default function AdminUsersPage() {
     setSelectedUser(user)
     setPointsDialogOpen(true)
     setPointsAdjustments([])
+    setPointsAccount(null)
     setPointsBillingEvents([])
     setPointsForm({
       delta: '',
@@ -565,6 +621,77 @@ export default function AdminUsersPage() {
           <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
             正数表示补发或充值，负数表示扣减。提交后会直接反映到用户中心积分账户。
           </Typography>
+
+          <Paper variant="outlined" sx={{ mt: 2, p: 2 }}>
+            <Box sx={{ display: 'grid', gap: 1.5, gridTemplateColumns: { xs: '1fr 1fr', sm: 'repeat(4, 1fr)' } }}>
+              <Box>
+                <Typography variant="caption" color="text.secondary">
+                  账户余额
+                </Typography>
+                <Typography variant="h6">{formatPoints(pointsAccount?.balance)}</Typography>
+              </Box>
+              <Box>
+                <Typography variant="caption" color="text.secondary">
+                  冻结积分
+                </Typography>
+                <Typography variant="h6">{formatPoints(pointsAccount?.frozen)}</Typography>
+              </Box>
+              <Box>
+                <Typography variant="caption" color="text.secondary">
+                  可用积分
+                </Typography>
+                <Typography variant="h6">{formatPoints(pointsAccount?.available)}</Typography>
+              </Box>
+              <Box>
+                <Typography variant="caption" color="text.secondary">
+                  即将过期
+                </Typography>
+                <Typography variant="h6">{formatPoints(pointsAccount?.expiring_soon)}</Typography>
+              </Box>
+            </Box>
+            <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', mt: 1.5 }}>
+              <Chip
+                size="small"
+                color={pointsAccount?.status === 'partial' ? 'success' : 'default'}
+                label={pointsAccount?.status === 'partial' ? '已接入积分读模型' : '暂无积分来源'}
+              />
+              <Chip
+                size="small"
+                variant="outlined"
+                label={`来源 ${pointsAccount?.connected_source_count ?? 0} 类`}
+              />
+            </Box>
+            {pointsAccount?.entries?.length ? (
+              <Box sx={{ mt: 2, display: 'grid', gap: 1 }}>
+                {pointsAccount.entries.slice(0, 5).map((entry) => (
+                  <Box
+                    key={entry.key}
+                    sx={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      gap: 1.5,
+                      flexWrap: 'wrap',
+                      alignItems: 'center',
+                    }}
+                  >
+                    <Box sx={{ minWidth: 0 }}>
+                      <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                        {entry.title}
+                      </Typography>
+                      <Typography variant="caption" color="text.secondary">
+                        {entry.source_label} · {formatPointsEntryStatus(entry.status)}
+                      </Typography>
+                    </Box>
+                    <Chip
+                      size="small"
+                      color={getPointsEntryColor(entry.direction)}
+                      label={`${entry.direction === 'income' ? '+' : entry.direction === 'expense' ? '-' : ''}${formatPoints(Math.abs(entry.amount))}`}
+                    />
+                  </Box>
+                ))}
+              </Box>
+            ) : null}
+          </Paper>
 
           <Box sx={{ display: 'grid', gap: 2, mt: 2, gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' } }}>
             <TextField

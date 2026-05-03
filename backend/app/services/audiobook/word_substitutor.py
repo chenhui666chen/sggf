@@ -6,12 +6,10 @@
 2. 文本预处理时自动替换易错词
 3. 支持自定义替换规则
 4. 专有名词保护（不被错误替换）
-
-参考 tts-audiobook-tool 的 word substitution 逻辑实现
 """
 import re
 import logging
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Dict, List, Match, Optional, Set, Tuple
 from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
@@ -168,14 +166,20 @@ class WordSubstitutor:
                 if new_text != processed_text:
                     substitutions.append((rule.pattern, rule.replacement))
                     processed_text = new_text
+            elif _is_latin_word_rule(rule.pattern):
+                new_text, replaced = _replace_latin_word(
+                    processed_text,
+                    rule.pattern,
+                    rule.replacement,
+                )
+                if replaced:
+                    substitutions.append((rule.pattern, rule.replacement))
+                    processed_text = new_text
             else:
-                # 简单字符串替换，避免替换占位符中的内容
-                if rule.pattern in processed_text:
-                    # 检查是否在占位符内
-                    new_text = processed_text.replace(rule.pattern, rule.replacement)
-                    if new_text != processed_text:
-                        substitutions.append((rule.pattern, rule.replacement))
-                        processed_text = new_text
+                new_text = processed_text.replace(rule.pattern, rule.replacement)
+                if new_text != processed_text:
+                    substitutions.append((rule.pattern, rule.replacement))
+                    processed_text = new_text
         
         # 恢复保护的专有名词
         for placeholder, word in placeholders.items():
@@ -202,3 +206,58 @@ class WordSubstitutor:
             "protected_words": len(self.protected_words),
             "rules": list(self.rules.keys())[:10],  # 返回前10条规则
         }
+
+
+def _is_latin_word_rule(pattern: str) -> bool:
+    return bool(re.fullmatch(r"[A-Za-z][A-Za-z0-9'-]*", str(pattern or "")))
+
+
+def _replace_latin_word(text: str, pattern: str, replacement: str) -> Tuple[str, bool]:
+    escaped = re.escape(pattern)
+    matcher = re.compile(
+        rf"(?<![A-Za-z0-9_])(?P<word>{escaped})(?P<suffix>es|s|'s|s')?(?![A-Za-z0-9_])",
+        re.IGNORECASE,
+    )
+    replaced = False
+
+    def repl(match: Match[str]) -> str:
+        nonlocal replaced
+        replaced = True
+        return _apply_word_case_and_suffix(
+            matched_word=match.group("word"),
+            replacement=replacement,
+            suffix=match.group("suffix") or "",
+        )
+
+    return matcher.sub(repl, text), replaced
+
+
+def _apply_word_case_and_suffix(
+    *,
+    matched_word: str,
+    replacement: str,
+    suffix: str,
+) -> str:
+    output = str(replacement or "")
+    if _is_latin_replacement(output) and matched_word[:1].isupper() and output[:1].islower():
+        output = output[:1].upper() + output[1:]
+
+    if not suffix:
+        return output
+    if _contains_cjk(output):
+        if suffix in {"'s", "s'"}:
+            return output + "的"
+        return output
+
+    if suffix in {"s", "es"} and " " in output:
+        head, tail = output.rsplit(" ", 1)
+        return f"{head} {tail}{suffix}"
+    return output + suffix
+
+
+def _is_latin_replacement(value: str) -> bool:
+    return bool(value) and bool(re.search(r"[A-Za-z]", value))
+
+
+def _contains_cjk(value: str) -> bool:
+    return bool(re.search(r"[\u3400-\u4dbf\u4e00-\u9fff]", value or ""))

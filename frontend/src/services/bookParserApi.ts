@@ -55,6 +55,7 @@ export interface BookSource {
   total_volumes: number
   created_at: string
   imported_project_id: number | null
+  cover_url?: string | null
 }
 
 export interface BookChapter {

@@ -19,6 +19,9 @@ POINTS_PRICING_POLICY_PREVIEW_BASIS_YUAN = 1.0
 POINTS_PRICING_POLICY_OPERATING_MODULES: tuple[tuple[str, str], ...] = (
     ("audiobook", "有声书"),
     ("dreamweaver", "短剧"),
+    ("novel", "小说协同"),
+    ("book_parser", "拆书分析"),
+    ("asset_studio", "资产生成"),
 )
 
 POINTS_PRICING_BASIS_OPTIONS = {"public_list_price", "standard_price_table"}

@@ -33,6 +33,7 @@ from app.services.book_parser.project_bridge_pkg._constants import (
 )
 
 class BuildersMixin:
+    @staticmethod
     def _stringify_style_value(value: Any) -> str:
         """将风格字段规范成适合展示的单行文本。"""
         if value is None:

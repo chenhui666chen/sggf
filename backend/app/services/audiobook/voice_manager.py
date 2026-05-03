@@ -13,6 +13,8 @@ from dataclasses import dataclass, field, asdict
 import json
 
 from .constants import INSTRUCT_SPEAKER_IDS, normalize_speaker_id
+from .llm_client import call_audiobook_llm_sync
+from .llm_json import LLMJsonParseError, parse_llm_json_object
 from .voice_catalog import load_voice_catalog
 
 logger = logging.getLogger(__name__)
@@ -594,7 +596,6 @@ class VoiceManager:
 """
         
         try:
-            from core.model_resolution import TaskType
             import json
             import asyncio
             
@@ -606,20 +607,19 @@ class VoiceManager:
                 
                 # 为同步上下文提供异步调用方法
                 import concurrent.futures
-                import threading
-                
                 def run_llm_call():
                     # 创建新的事件循环用于LLM调用
                     new_loop = asyncio.new_event_loop()
                     asyncio.set_event_loop(new_loop)
                     try:
-                        return asyncio.run(self.llm_client.chat(
+                        return call_audiobook_llm_sync(
+                            self.llm_client,
                             messages=[{"role": "user", "content": prompt}],
-                            task_type=TaskType.AUDIOBOOK_SCRIPT,
                             max_tokens=500,
                             response_format={"type": "json_object"},
                             use_cache=True,  # 启用缓存，相同名字不重复调用
-                        ))
+                            timeout_seconds=30,
+                        )
                     finally:
                         new_loop.close()
                 
@@ -631,16 +631,17 @@ class VoiceManager:
             except RuntimeError:
                 # 如果没有运行中的事件循环，则可以直接使用 asyncio.run
                 logger.debug("🔄 当前无事件循环，直接运行LLM调用")
-                response = asyncio.run(self.llm_client.chat(
+                response = call_audiobook_llm_sync(
+                    self.llm_client,
                     messages=[{"role": "user", "content": prompt}],
-                    task_type=TaskType.AUDIOBOOK_SCRIPT,
                     max_tokens=500,
                     response_format={"type": "json_object"},
                     use_cache=True,  # 启用缓存，相同名字不重复调用
-                ))
+                    timeout_seconds=30,
+                )
             
             # 解析JSON
-            result = json.loads(response.strip())
+            result = parse_llm_json_object(response)
             logger.debug(f"🤖 LLM响应解析结果: {result}")
             
             # 验证结果
@@ -672,7 +673,7 @@ class VoiceManager:
             
             return None
             
-        except json.JSONDecodeError as e:
+        except (json.JSONDecodeError, LLMJsonParseError) as e:
             logger.warning(f"⚠️ LLM返回非JSON格式: {e}")
             return None
         except Exception as e:
@@ -826,38 +827,16 @@ class VoiceManager:
         ) + "\n---\n".join(context_parts)
 
         try:
-            import asyncio
-            from config import TaskType
+            response = call_audiobook_llm_sync(
+                self.llm_client,
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=1000,
+                response_format={"type": "json_object"},
+                use_cache=False,
+                timeout_seconds=60,
+            )
 
-            try:
-                loop = asyncio.get_event_loop()
-                if loop.is_running():
-                    future = asyncio.ensure_future(self.llm_client.chat(
-                        messages=[{"role": "user", "content": prompt}],
-                        task_type=TaskType.AUDIOBOOK_SCRIPT,
-                        max_tokens=1000,
-                        response_format={"type": "json_object"},
-                        use_cache=False,
-                    ))
-                    response = loop.run_until_complete(future)
-                else:
-                    response = asyncio.run(self.llm_client.chat(
-                        messages=[{"role": "user", "content": prompt}],
-                        task_type=TaskType.AUDIOBOOK_SCRIPT,
-                        max_tokens=1000,
-                        response_format={"type": "json_object"},
-                        use_cache=False,
-                    ))
-            except RuntimeError:
-                response = asyncio.run(self.llm_client.chat(
-                    messages=[{"role": "user", "content": prompt}],
-                    task_type=TaskType.AUDIOBOOK_SCRIPT,
-                    max_tokens=1000,
-                    response_format={"type": "json_object"},
-                    use_cache=False,
-                ))
-
-            result = json.loads(response.strip())
+            result = parse_llm_json_object(response)
             logger.info("🤖 章节角色分析完成，提取了 %d 个角色特征", len(result))
 
             output = {}
@@ -903,7 +882,7 @@ class VoiceManager:
 
             return output
 
-        except json.JSONDecodeError as e:
+        except (json.JSONDecodeError, LLMJsonParseError) as e:
             logger.warning("⚠️ 章节角色分析 LLM 返回非 JSON: %s", e)
             return self._fallback_rule_analysis(character_context, known_characters)
         except Exception as e:

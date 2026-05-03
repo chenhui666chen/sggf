@@ -1,7 +1,21 @@
 """
 叙事风格预设配置
 """
-from typing import Dict, Any
+from typing import Dict, Any, Optional
+
+
+ALL_NARRATION_TTS_MODELS = (
+    "qwen3-tts-instruct-flash",
+    "cosyvoice-v3.5-plus",
+    "minimax-speech-2.8-hd",
+    "minimax-speech-2.8-turbo",
+)
+
+EXPRESSIVE_NARRATION_TTS_MODELS = (
+    "cosyvoice-v3.5-plus",
+    "minimax-speech-2.8-hd",
+    "minimax-speech-2.8-turbo",
+)
 
 
 NARRATION_STYLE_PRESETS: Dict[str, Dict[str, Any]] = {
@@ -25,7 +39,7 @@ NARRATION_STYLE_PRESETS: Dict[str, Dict[str, Any]] = {
             "default": 0,
         },
         "pause_multiplier": 1.0,  # 标准停顿
-        "supported_models": ["qwen3-tts-instruct-flash", "cosyvoice-v3.5-plus", "minimax-speech-2.8-hd", "minimax-speech-2.8-turbo"],
+        "supported_models": list(ALL_NARRATION_TTS_MODELS),
         "system_prompt_template": "请以专业、清晰、客观的语气朗读以下内容。语速适中，情感表达克制。",
     },
     "dramatic": {
@@ -48,7 +62,7 @@ NARRATION_STYLE_PRESETS: Dict[str, Dict[str, Any]] = {
             "default": 0,
         },
         "pause_multiplier": 1.5,  # 增加停顿以增强戏剧效果
-        "supported_models": ["cosyvoice-v3.5-plus", "minimax-speech-2.8-hd", "minimax-speech-2.8-turbo"],
+        "supported_models": list(EXPRESSIVE_NARRATION_TTS_MODELS),
         "system_prompt_template": "请以富有戏剧性和情感张力的方式朗读以下内容。根据情节变化调整语气，对话要有角色感。",
     },
     "relaxing": {
@@ -71,7 +85,7 @@ NARRATION_STYLE_PRESETS: Dict[str, Dict[str, Any]] = {
             "default": -1,
         },
         "pause_multiplier": 1.8,  # 更长停顿
-        "supported_models": ["qwen3-tts-instruct-flash", "cosyvoice-v3.5-plus", "minimax-speech-2.8-hd", "minimax-speech-2.8-turbo"],
+        "supported_models": list(ALL_NARRATION_TTS_MODELS),
         "system_prompt_template": "请以温和、舒缓、放松的语气朗读以下内容。语速较慢，语调轻柔。",
     },
     "expressive": {
@@ -94,15 +108,48 @@ NARRATION_STYLE_PRESETS: Dict[str, Dict[str, Any]] = {
             "default": 1,
         },
         "pause_multiplier": 1.2,
-        "supported_models": ["cosyvoice-v3.5-plus", "minimax-speech-2.8-hd", "minimax-speech-2.8-turbo"],
+        "supported_models": list(EXPRESSIVE_NARRATION_TTS_MODELS),
         "system_prompt_template": "请以生动、活泼、富有表现力的方式朗读以下内容。根据情节变化调整语气，适当夸张情感。",
+    },
+    "custom": {
+        "id": "custom",
+        "name": "自定义",
+        "description": "使用自定义提示词控制旁白语气",
+        "emotion_profile": {
+            "default_emotion": "calm",
+            "emotion_intensity": 0.3,
+            "emotion_variation": False,
+        },
+        "speed_range": {
+            "min": 0.7,
+            "max": 1.4,
+            "default": 1.0,
+        },
+        "pitch_range": {
+            "min": -5,
+            "max": 6,
+            "default": 0,
+        },
+        "pause_multiplier": 1.0,
+        "supported_models": list(ALL_NARRATION_TTS_MODELS),
+        "system_prompt_template": "",
     },
 }
 
 
+def normalize_narration_style_id(style_id: str) -> str:
+    """规范化叙事风格 ID。"""
+    return str(style_id or "").strip().lower()
+
+
+def find_narration_style_preset(style_id: str) -> Optional[Dict[str, Any]]:
+    """严格查找叙事风格预设配置。"""
+    return NARRATION_STYLE_PRESETS.get(normalize_narration_style_id(style_id))
+
+
 def get_narration_style_preset(style_id: str) -> Dict[str, Any]:
-    """获取叙事风格预设配置"""
-    return NARRATION_STYLE_PRESETS.get(style_id, NARRATION_STYLE_PRESETS["professional"])
+    """获取叙事风格预设配置，未知风格回退到专业播报。"""
+    return find_narration_style_preset(style_id) or NARRATION_STYLE_PRESETS["professional"]
 
 
 def get_all_narration_styles() -> list:
@@ -121,7 +168,7 @@ def get_all_narration_styles() -> list:
 def apply_narration_style_to_tts_params(
     style_id: str,
     base_params: Dict[str, Any],
-    custom_prompt: str = None,
+    custom_prompt: Optional[str] = None,
 ) -> Dict[str, Any]:
     """将叙事风格应用到 TTS 参数
 
@@ -158,9 +205,10 @@ def apply_narration_style_to_tts_params(
     updated_params["pause_multiplier"] = preset["pause_multiplier"]
 
     # 应用系统prompt
-    if custom_prompt:
-        updated_params["system_prompt"] = custom_prompt
-    else:
-        updated_params["system_prompt"] = preset.get("system_prompt_template", "")
+    prompt = (custom_prompt or "").strip() or preset.get("system_prompt_template", "")
+    updated_params["system_prompt"] = prompt
+    if prompt:
+        updated_params.setdefault("instructions", prompt)
+        updated_params["use_instruct_mode"] = True
 
     return updated_params

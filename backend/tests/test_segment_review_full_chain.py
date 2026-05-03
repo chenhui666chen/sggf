@@ -35,7 +35,6 @@ def test_database_model_segment_reviews():
     
     print("  Found: segment_reviews_json = Column(Text, nullable=True)")
     print("  PASS: Database model segment_reviews_json")
-    return True
 
 
 def test_api_schema_classes():
@@ -50,7 +49,7 @@ def test_api_schema_classes():
     
     # 验证 SegmentRegenerateRequest
     assert "class SegmentRegenerateRequest" in content, "SegmentRegenerateRequest not found"
-    assert "segment_index: int" in content, "segment_index field not found"
+    assert "segment_index: Optional[int]" in content, "optional segment_index field not found"
     assert "reason: Optional[str]" in content, "reason field not found"
     assert "tts_model: Optional[str]" in content, "tts_model field not found"
     assert "voice_id: Optional[str]" in content, "voice_id field not found"
@@ -74,7 +73,6 @@ def test_api_schema_classes():
     print("  Found: ChapterReviewStatus with all fields")
     
     print("  PASS: API Schema Classes")
-    return True
 
 
 def test_api_endpoints_implementation():
@@ -83,15 +81,18 @@ def test_api_endpoints_implementation():
     print("Test 3: API Endpoint Implementation")
     print("="*60)
     
-    api_path = os.path.join(os.path.dirname(__file__), '..', 'app', 'api', 'v1', 'audiobook.py')
-    with open(api_path, 'r', encoding='utf-8') as f:
+    api_dir = os.path.join(os.path.dirname(__file__), '..', 'app', 'api', 'v1', 'audiobook_api')
+    with open(os.path.join(api_dir, 'routes_segment_regen.py'), 'r', encoding='utf-8') as f:
         content = f.read()
+    with open(os.path.join(api_dir, 'routes_review.py'), 'r', encoding='utf-8') as f:
+        content += "\n" + f.read()
     
     # 验证 regenerate_segment 端点
     assert "async def regenerate_segment" in content, "regenerate_segment function not found"
     assert "/segments/{segment_index:int}/regenerate" in content, "regenerate endpoint path not found"
     assert "SegmentRegenerateRequest" in content, "SegmentRegenerateRequest import not found"
-    assert "engine = create_tts_engine" in content, "TTS engine creation not found"
+    assert "runtime_synthesize_speech" in content, "unified TTS runtime call not found"
+    assert "save_segment_audio_map" in content, "regenerated segment temp storage not found"
     assert "segment[\"audio_path\"] = audio_path" in content, "Audio path update not found"
     assert "segment[\"regenerated\"] = True" in content, "Regenerated flag not found"
     print("  Found: regenerate_segment endpoint with full implementation")
@@ -111,7 +112,6 @@ def test_api_endpoints_implementation():
     print("  Found: get_chapter_review_status endpoint with full implementation")
     
     print("  PASS: API Endpoint Implementation")
-    return True
 
 
 def test_frontend_api_methods():
@@ -140,7 +140,6 @@ def test_frontend_api_methods():
     print("  Found: getChapterReviewStatus method")
     
     print("  PASS: Frontend API Client Methods")
-    return True
 
 
 def test_frontend_ui_components():
@@ -179,7 +178,6 @@ def test_frontend_ui_components():
     print("  Found: Props passed to child components")
     
     print("  PASS: Frontend UI Components")
-    return True
 
 
 def test_api_schema_imports():
@@ -188,9 +186,11 @@ def test_api_schema_imports():
     print("Test 6: API Schema Imports")
     print("="*60)
     
-    api_path = os.path.join(os.path.dirname(__file__), '..', 'app', 'api', 'v1', 'audiobook.py')
-    with open(api_path, 'r', encoding='utf-8') as f:
+    api_dir = os.path.join(os.path.dirname(__file__), '..', 'app', 'api', 'v1', 'audiobook_api')
+    with open(os.path.join(api_dir, 'routes_segment_regen.py'), 'r', encoding='utf-8') as f:
         content = f.read()
+    with open(os.path.join(api_dir, 'routes_review.py'), 'r', encoding='utf-8') as f:
+        content += "\n" + f.read()
     
     assert "SegmentRegenerateRequest" in content, "SegmentRegenerateRequest not imported"
     assert "SegmentReviewRequest" in content, "SegmentReviewRequest not imported"
@@ -199,7 +199,6 @@ def test_api_schema_imports():
     print("  Found: SegmentRegenerateRequest import")
     print("  Found: SegmentReviewRequest import")
     print("  PASS: API Schema Imports")
-    return True
 
 
 def run_all_tests():
@@ -221,8 +220,8 @@ def run_all_tests():
     
     for name, test_func in tests:
         try:
-            if test_func():
-                passed += 1
+            test_func()
+            passed += 1
         except Exception as e:
             print(f"  FAIL: {name}: {str(e)}")
             import traceback

@@ -20,6 +20,8 @@ export interface ChapterAudio {
   has_script?: boolean
 }
 
+export type AudiobookTtsModel = string
+
 export interface AudiobookProjectDetail {
   id: number
   total_chapters?: number

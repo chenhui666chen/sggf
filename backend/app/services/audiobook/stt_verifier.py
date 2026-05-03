@@ -6,17 +6,39 @@ STT 回验模块 - 语音转文本验证 TTS 质量
 2. 对比原始文本和回验文本的相似度
 3. 质量评分和阈值判断
 4. 智能重试决策（低于阈值时标记重试）
-
-参考 tts-audiobook-tool 的 STT verification 逻辑
 """
 import io
 import logging
 import tempfile
 import os
+import re
+import string
+from difflib import SequenceMatcher
 from typing import Optional, Dict, Any, Tuple
 from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
+
+_HOMOPHONE_GROUPS = (
+    ("there", "their", "theyre"),
+    ("to", "too", "two"),
+    ("your", "youre"),
+    ("hear", "here"),
+    ("right", "write"),
+    ("know", "no"),
+    ("knew", "new"),
+    ("peace", "piece"),
+    ("through", "threw"),
+    ("bare", "bear"),
+    ("wait", "weight"),
+    ("week", "weak"),
+    ("passed", "past"),
+)
+_HOMOPHONE_CANONICAL = {
+    word: group[0]
+    for group in _HOMOPHONE_GROUPS
+    for word in group
+}
 
 
 @dataclass
@@ -30,6 +52,7 @@ class STTVerificationResult:
     passed: bool                   # 是否通过质量检查
     confidence: float              # 置信度
     error_message: str = ""        # 错误信息
+    skipped: bool = False
 
 
 class STTVerifier:
@@ -155,52 +178,111 @@ class STTVerifier:
         """
         降级验证方案
         
-        当 Whisper 不可用时，使用简单的启发式验证：
-        - 检查文本长度
-        - 检查是否包含预期关键词
+        当 Whisper 不可用时，不应假定音频正确。返回 skipped，交由上层决定
+        是否允许继续或进入人工审核。
         """
-        text_length = len(original_text)
-        
-        # 简单规则：文本长度合理即认为通过
-        if text_length >= 5:
-            similarity = 0.95  # 假定高分
-            passed = True
-        else:
-            similarity = 0.5
-            passed = False
-        
         return STTVerificationResult(
-            success=True,
+            success=False,
             original_text=original_text,
-            recognized_text=original_text,  # 降级：假设识别正确
-            similarity_score=similarity,
-            word_error_rate=1.0 - similarity,
-            passed=passed,
-            confidence=similarity,
-            error_message="降级验证方案"
+            recognized_text="",
+            similarity_score=0.0,
+            word_error_rate=1.0,
+            passed=False,
+            confidence=0.0,
+            error_message="STT 验证未启用或模型不可用",
+            skipped=True,
         )
     
     def _calculate_similarity(self, text1: str, text2: str) -> float:
         """
         计算两个文本的相似度
         
-        使用简单的字符级 Jaccard 相似度
+        使用顺序敏感的相似度，并先对源文本和 STT 文本执行同一套归一化。
         """
-        if not text1 or not text2:
+        normalized_text1, normalized_text2 = self._normalize_source_and_transcript(text1, text2)
+        if not normalized_text1 or not normalized_text2:
             return 0.0
-        
-        # 转换为字符集合
-        set1 = set(text1)
-        set2 = set(text2)
-        
-        # Jaccard 相似度
-        intersection = len(set1 & set2)
-        union = len(set1 | set2)
-        
-        if union == 0:
-            return 0.0
-        
-        return intersection / union
+
+        return SequenceMatcher(None, normalized_text1, normalized_text2).ratio()
+
+    def _normalize_compare_text(self, text: str) -> str:
+        return self._normalize_common(text)
+
+    def _normalize_source_and_transcript(self, source: str, transcript: str) -> Tuple[str, str]:
+        normalized_source = self._normalize_common(source)
+        normalized_transcript = self._normalize_common(transcript)
+        normalized_transcript = self._normalize_spacing(normalized_source, normalized_transcript)
+        normalized_source = self._normalize_homophones(normalized_source)
+        normalized_transcript = self._normalize_homophones(normalized_transcript)
+        return normalized_source, normalized_transcript
+
+    def _normalize_common(self, text: str) -> str:
+        """
+        归一化 STT 对比文本。
+
+        对源文本和转写文本使用同一规则，尽量消除标点、大小写、emoji、
+        破折号等格式差异，但保留词边界。
+        """
+        value = str(text or "").casefold().strip()
+        if not value:
+            return ""
+
+        value = value.translate({ord(ch): None for ch in "\u200b\u200c\u200d\ufeff"})
+        value = value.replace("\u3000", " ")
+        value = value.replace("’", "'").replace("‘", "'")
+        value = value.replace("“", '"').replace("”", '"')
+        value = re.sub(r"\b'|'\b", "", value)
+
+        punctuation = (
+            string.punctuation
+            + "。！？；：，、"
+            + "（）【】《》「」『』"
+            + "\u2014\u2013…"
+        )
+        value = re.sub(f"[{re.escape(punctuation)}]", " ", value)
+        value = re.sub(r"[^\w\s\u3400-\u4dbf\u4e00-\u9fff]", "", value)
+        return re.sub(r"\s+", " ", value).strip()
+
+    def _normalize_spacing(self, source: str, transcript: str) -> str:
+        """
+        对齐源文本和转写文本中的空格。
+
+        这能处理 STT 常见的英文复合词拆分/合并问题：
+        source=firefly, transcript=fire fly -> firefly；
+        source=high school, transcript=highschool -> high school。
+        """
+        if not source or not transcript:
+            return transcript
+
+        matcher = SequenceMatcher(None, source, transcript, autojunk=False)
+        normalized_parts: list[str] = []
+        for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+            if tag == "equal":
+                normalized_parts.append(transcript[j1:j2])
+            elif tag == "delete":
+                missing_source_part = source[i1:i2]
+                if missing_source_part.isspace():
+                    normalized_parts.append(missing_source_part)
+            elif tag == "insert":
+                inserted_transcript_part = transcript[j1:j2]
+                if not inserted_transcript_part.isspace():
+                    normalized_parts.append(inserted_transcript_part)
+            elif tag == "replace":
+                normalized_parts.append(transcript[j1:j2])
+        return "".join(normalized_parts)
+
+    def _tokenize_for_error_rate(self, text: str) -> list[str]:
+        normalized = self._normalize_compare_text(text)
+        return re.findall(r"[\u3400-\u4dbf\u4e00-\u9fff]|[a-z0-9]+", normalized)
+
+    def _normalize_homophones(self, text: str) -> str:
+        """
+        规范化常见英文同音词，降低 STT 回验误报。
+
+        该逻辑只用于源文本与转写文本的比较，不会改写 TTS 输入文本。
+        """
+        tokens = re.findall(r"[a-z0-9]+|\s+|.", str(text or ""))
+        return "".join(_HOMOPHONE_CANONICAL.get(token, token) for token in tokens)
     
     def _calculate_word_error_rate(self, reference: str, hypothesis: str) -> float:
         """
@@ -213,14 +295,11 @@ class STTVerifier:
         - I: 插入次数
         - N: 参考文本词数
         """
-        if not reference:
+        normalized_reference, normalized_hypothesis = self._normalize_source_and_transcript(reference, hypothesis)
+        ref_words = self._tokenize_for_error_rate(normalized_reference)
+        hyp_words = self._tokenize_for_error_rate(normalized_hypothesis)
+        if not ref_words or not hyp_words:
             return 1.0
-        if not hypothesis:
-            return 1.0
-        
-        # 简单分词（中文按字符，英文按单词）
-        ref_words = list(reference)
-        hyp_words = list(hypothesis)
         
         # 使用动态规划计算编辑距离
         m, n = len(ref_words), len(hyp_words)

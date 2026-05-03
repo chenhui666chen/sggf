@@ -275,7 +275,7 @@ export default function BookParserUploadDialog({
             <input
               id="file-input"
               type="file"
-              accept=".txt,.epub,.pdf"
+              accept=".txt,.md,.markdown,.epub,.pdf"
               hidden
               disabled={loading}
               onChange={(e) => setFile(e.target.files?.[0] || null)}
@@ -286,10 +286,10 @@ export default function BookParserUploadDialog({
               color={file ? 'success.main' : 'text.secondary'}
               sx={file ? { fontWeight: 600 } : undefined}
             >
-              {file ? file.name : '点击选择 TXT / EPUB / PDF 文件'}
+              {file ? file.name : '点击选择 TXT / Markdown / EPUB / PDF 文件'}
             </Typography>
             <Typography variant="caption" color="text.secondary">
-              支持 TXT、EPUB、PDF，TXT 支持 UTF-8、GBK 编码
+              支持 TXT、Markdown、EPUB、PDF，文本支持 UTF-8、GBK 编码
             </Typography>
           </Box>
         )}

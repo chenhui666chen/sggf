@@ -48,6 +48,12 @@ TASK_TYPE_ALIASES = {
 
 MODEL_ALIASES = {
     "deepseek-r1": "deepseek-v4-pro",
+    "deep seek v4 flash": "deepseek-v4-flash",
+    "deepseek v4 flash": "deepseek-v4-flash",
+    "deepseek-v4-flash": "deepseek-v4-flash",
+    "deepseek-v4f": "deepseek-v4-flash",
+    "deep seek v4 pro": "deepseek-v4-pro",
+    "deepseek v4 pro": "deepseek-v4-pro",
     "qwen-max": "qwen3-max",
     "qwen-plus": "qwen-long",
     "qwen2.5-turbo": "qwen-turbo",
@@ -64,6 +70,8 @@ MODEL_ALIASES = {
     # MiniMax TTS 模型别名（前端使用短横线格式，注册中心使用斜杠格式）
     "minimax-speech-2.8-turbo": "MiniMax/speech-2.8-turbo",
     "minimax-speech-2.8-hd": "MiniMax/speech-2.8-hd",
+    "minimax/speech-2.8-turbo": "MiniMax/speech-2.8-turbo",
+    "minimax/speech-2.8-hd": "MiniMax/speech-2.8-hd",
 }
 
 

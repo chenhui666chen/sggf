@@ -197,6 +197,36 @@ class APICallMixin:
             try:
                 audio = await self._synthesize_aliyun(text, voice_params)
                 if audio and len(audio) > 0:
+                    validation = self._validate_tts_output(audio, text)
+                    self._record_tts_output_validation(validation)
+                    if not validation.passed:
+                        if attempt < self.retry_config.max_retries - 1:
+                            delay = self.retry_config.calculate_delay(attempt)
+                            logger.warning(
+                                "阿里云 TTS 输出质量未通过，等待 %.1f秒后重试 "
+                                "(reason=%s duration=%sms expected=%sms attempt %s/%s)",
+                                delay,
+                                validation.reason,
+                                validation.duration_ms,
+                                validation.expected_duration_ms,
+                                attempt + 1,
+                                self.retry_config.max_retries,
+                            )
+                            if METRICS_ENABLED:
+                                metrics_collector.increment_counter(
+                                    "tts.retries",
+                                    labels={"provider": "aliyun", "reason": "output_validation"}
+                                )
+                            await asyncio.sleep(delay)
+                            continue
+                        logger.error(
+                            "阿里云 TTS 输出质量未通过且已耗尽重试: reason=%s duration=%sms expected=%sms",
+                            validation.reason,
+                            validation.duration_ms,
+                            validation.expected_duration_ms,
+                        )
+                        return b""
+
                     if attempt > 0:
                         logger.info(
                             "重试成功 (attempt %s/%s)",

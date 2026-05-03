@@ -1,68 +1,30 @@
 from __future__ import annotations
 
-import asyncio
 import base64
 import logging
-import os
-import json
-import math
-from pathlib import Path
-from urllib.parse import quote
-from typing import List, Optional, Dict, Any
+from typing import Optional
 
-from fastapi import APIRouter, Body, Depends, HTTPException, status, Response, Query, UploadFile, File, Request
-from fastapi.responses import FileResponse
-from sqlalchemy.orm import Session
+from fastapi import Depends, File, HTTPException, Response, UploadFile, status
 
 from app.core.security import get_current_user
-from app.db.base import get_db
 from app.models.user import User
-from app.models.project import Project, Chapter
-from app.models.audiobook import AudiobookProject, ChapterAudio
-from app.models.audiobook_delete_audit import AudiobookDeleteAudit
-from app.models.character import Character
-from app.models.audiobook_task import AudiobookTask
 from app.schemas.audiobook import (
-    AudiobookProjectCreate,
-    GenerateAudioFromScriptsRequest,
-    ChapterScriptUpdateRequest,
-    AudiobookProjectResponse,
-    ChapterAudioResponse,
-    CharacterVoiceConfig,
     TTSPreviewRequest,
     TTSPreviewWithTimestampsRequest,
     TTSPreviewWithTimestampsResponse,
-    ScriptSegmentPreviewRequest,
-    SegmentRegenerateRequest,
-    SegmentReviewRequest,
-    AudiobookTaskStatus,
     CosyVoiceCloneCreateRequest,
     CosyVoiceDesignCreateRequest,
-    ChapterReviewStatus,
-    NarrationStylePreset,
-    SubtitleDownloadResponse,
-    GenerationCheckpointResponse,
-    SmartChunkConfig,
-    ChunkStats,
-    ChunkPreviewResponse,
-    VoiceTypePresetResponse,
-    VoiceTypeRecommendationRequest,
-    VoiceTypeRecommendationResponse,
 )
-from app.celery_app import celery_app
-from app.services.audiobook import AudiobookEngine
-from app.services.audiobook.audio_mixer import AudioMixer
-from app.services.audiobook.agents import SoundEffectDesigner
 from app.services.audiobook.constants import normalize_speaker_id
 from app.services.audiobook.tts_engine import RetryConfig
-from app.services.audiobook.voice_manager import VoiceManager
-from app.services.audiobook.voice_manager_factory import create_voice_manager
-from app.services.audiobook.voice_catalog import get_voice_entry, load_voice_catalog_for_model
-from app.services.audiobook.project_audio_config import (
-    parse_project_audio_config,
-    get_characters_for_model,
-    get_audio_fx,
+from app.services.audiobook.tts_model_ids import (
+    DEFAULT_AUDIOBOOK_TTS_MODEL,
+    get_audiobook_tts_runtime_model_id,
+    get_audiobook_tts_model_metadata,
+    normalize_audiobook_tts_model,
 )
+from app.services.audiobook.voice_manager import VoiceManager
+from app.services.audiobook.voice_catalog import get_voice_entry, load_voice_catalog_for_model
 from app.services.audiobook.cosyvoice_clone_client import (
     COSYVOICE_V35_PLUS_MODEL_ID,
     CosyVoiceCloneError,
@@ -75,42 +37,9 @@ from app.services.audiobook.cosyvoice_clone_client import (
     save_clone_display_name,
     upload_cosyvoice_v3_plus_clone_sample,
 )
-from app.services.audiobook.narration_styles import get_all_narration_styles, get_narration_style_preset, apply_narration_style_to_tts_params
-from app.services.audiobook.subtitle_generator import SubtitleGenerator, SubtitleEntry
-from app.services.audiobook.smart_chunker import SmartChunker, TextChunk
-from app.services.audiobook.voice_types import (
-    get_all_voice_types,
-    get_voice_type_preset,
-    recommend_voice_type,
-    apply_voice_type_to_tts_params,
-    create_character_voice_profile,
-)
-from app.services.audiobook.sse_progress import sse_tracker, create_progress_handler
-from app.services.audiobook.smart_retrier import SmartRetrier, retry_tts_call
-from app.services.audiobook.preview_generator import PreviewGenerator, default_preview_generator
-from app.services.audiobook.app_service import AudiobookAppService
-from app.services.audiobook.repository import (
-    AudiobookProjectRepository,
-    ChapterAudioRepository,
-    ProjectRepository,
-    AudiobookTaskRepository,
-)
-from app.services.audiobook.task_support import (
-    build_generation_checkpoint_payload as _build_generation_checkpoint_payload,
-    build_task_status_response,
-    enqueue_chapter_runs as _enqueue_chapter_runs,
-    ensure_audiobook_points_precheck_passed as _ensure_audiobook_points_precheck_passed,
-)
-from app.services.points_task_precheck import (
-    build_audiobook_task_points_precheck,
-)
-from app.services.user_center_points_events import (
-    record_audiobook_billing_freeze,
-)
-from app.utils.datetime_utils import utc_now
-from core.model_resolution import normalize_model_id
 from core.unified_media_runtime import (
     create_tts_engine as runtime_create_tts_engine,
+    get_media_runtime,
     synthesize_speech as runtime_synthesize_speech,
 )
 
@@ -118,17 +47,11 @@ from app.api.v1.audiobook_api import router
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_TTS_MODEL = "qwen3-tts-instruct-flash"
-SUPPORTED_TTS_MODELS = {
-    "qwen3-tts-instruct-flash",
-    COSYVOICE_V35_PLUS_MODEL_ID,
-    "minimax-speech-2.8-hd",
-    "minimax-speech-2.8-turbo",
-}
+DEFAULT_TTS_MODEL = DEFAULT_AUDIOBOOK_TTS_MODEL
 
 
 def _is_cosyvoice_v35_model(model: str) -> bool:
-    return (normalize_model_id(model) or "").strip() == COSYVOICE_V35_PLUS_MODEL_ID
+    return normalize_audiobook_tts_model(model) == COSYVOICE_V35_PLUS_MODEL_ID
 
 
 def _validate_cosyvoice_v35_voice_id(voice_id: str) -> str:
@@ -144,6 +67,54 @@ def _validate_cosyvoice_v35_voice_id(voice_id: str) -> str:
         status_code=status.HTTP_400_BAD_REQUEST,
         detail="cosyvoice-v3.5-plus 不提供系统音色，请先创建并选择复刻/设计音色",
     )
+
+
+def _build_model_voice_catalog_status(model_name: str) -> tuple[int, str, str | None]:
+    try:
+        catalog = load_voice_catalog_for_model(model_name)
+    except Exception as exc:
+        logger.warning("加载 TTS 模型音色目录失败: model=%s error=%s", model_name, exc)
+        return 0, "unavailable", "音色目录加载失败，请检查后端 voice catalog 配置"
+
+    voices = catalog.get("voices", [])
+    meta = catalog.get("meta", {})
+    raw_voice_count = meta.get("voice_count")
+    voice_count = raw_voice_count if isinstance(raw_voice_count, int) and raw_voice_count >= 0 else len(voices)
+    if model_name == COSYVOICE_V35_PLUS_MODEL_ID:
+        try:
+            clones, _clone_meta = list_cosyvoice_v3_plus_clones()
+            voice_count += len(clones)
+        except CosyVoiceCloneError:
+            pass
+    return voice_count, "ready", None
+
+
+def _build_model_runtime_status(model_name: str) -> tuple[str, str, str | None]:
+    runtime_model_id = get_audiobook_tts_runtime_model_id(model_name)
+    if not runtime_model_id:
+        return "", "unavailable", "TTS 运行时模型未配置"
+
+    try:
+        spec = get_media_runtime().select_model(
+            operation="synthesize_speech",
+            modality="text_to_speech",
+            preferred_model=runtime_model_id,
+        )
+    except Exception as exc:
+        logger.warning("TTS 运行时模型不可用: model=%s runtime_model=%s error=%s", model_name, runtime_model_id, exc)
+        return runtime_model_id, "unavailable", "TTS 运行时模型未注册或不可用"
+
+    if spec.id != runtime_model_id:
+        logger.warning(
+            "TTS 运行时模型被重路由: model=%s runtime_model=%s selected=%s",
+            model_name,
+            runtime_model_id,
+            spec.id,
+        )
+        return runtime_model_id, "unavailable", f"TTS 运行时模型当前不可直用，已被路由到 {spec.id}"
+
+    return runtime_model_id, "ready", None
+
 
 def _build_cosyvoice_voice_prefix(display_name: str, current_user: User) -> str:
     import hashlib
@@ -172,10 +143,7 @@ def _resolve_preview_text(request: TTSPreviewRequest) -> str:
 
 
 def _resolve_preview_model_name(request: TTSPreviewRequest) -> str:
-    model_name = normalize_model_id(request.model or DEFAULT_TTS_MODEL) or DEFAULT_TTS_MODEL
-    if model_name not in SUPPORTED_TTS_MODELS:
-        model_name = DEFAULT_TTS_MODEL
-    return model_name
+    return normalize_audiobook_tts_model(request.model or DEFAULT_TTS_MODEL)
 
 
 def _resolve_preview_speaker_id(request: TTSPreviewRequest, model_name: str) -> str:
@@ -351,100 +319,53 @@ async def list_tts_models(
     current_user: User = Depends(get_current_user),
 ):
     """列出所有支持的 TTS 模型及其基本信息"""
-    from app.services.audiobook.voice_manager_factory import list_all_models, MODEL_VOICE_MAPPING
-    from app.services.audiobook.voice_catalog import load_voice_catalog_for_model
+    from app.services.audiobook.voice_manager_factory import list_all_models
     
     models = []
     for model_name in list_all_models():
-        try:
-            catalog = load_voice_catalog_for_model(model_name)
-            voices = catalog.get("voices", [])
-            meta = catalog.get("meta", {})
-            voice_count = meta.get("voice_count", len(voices))
-            if model_name == COSYVOICE_V35_PLUS_MODEL_ID:
-                try:
-                    clones, _clone_meta = list_cosyvoice_v3_plus_clones()
-                    voice_count += len(clones)
-                except CosyVoiceCloneError:
-                    pass
-            models.append({
-                "id": model_name,
-                "name": _get_model_display_name(model_name),
-                "description": _get_model_description(model_name),
-                "voice_count": voice_count,
-                "price_per_10k": _get_model_price(model_name),
-                "features": _get_model_features(model_name),
-            })
-        except Exception:
-            pass
+        model_meta = get_audiobook_tts_model_metadata(model_name)
+        voice_count, catalog_status, catalog_error = _build_model_voice_catalog_status(model_name)
+        runtime_model_id, runtime_status, runtime_error = _build_model_runtime_status(model_name)
+        models.append({
+            "id": model_name,
+            "name": _get_model_display_name(model_name),
+            "description": _get_model_description(model_name, voice_count),
+            "voice_count": voice_count,
+            "price_per_10k": _get_model_price(model_name),
+            "features": _get_model_features(model_name, voice_count),
+            "cost_level": model_meta.get("cost_level"),
+            "quality_level": model_meta.get("quality_level"),
+            "catalog_note": model_meta.get("catalog_note"),
+            "capabilities": model_meta.get("capabilities") or {},
+            "catalog_status": catalog_status,
+            "catalog_error": catalog_error,
+            "runtime_model_id": runtime_model_id,
+            "runtime_status": runtime_status,
+            "runtime_error": runtime_error,
+        })
     
     return {"models": models}
 
 
 def _get_model_display_name(model: str) -> str:
-    names = {
-        "qwen3-tts-instruct-flash": "Qwen3-TTS Instruct Flash",
-        "qwen3-tts-plus": "Qwen3-TTS Plus",
-        COSYVOICE_V35_PLUS_MODEL_ID: "CosyVoice v3.5 Plus",
-        "minimax-speech-2.8-hd": "MiniMax Speech 2.8 HD",
-        "minimax-speech-2.8-turbo": "MiniMax Speech 2.8 Turbo",
-    }
-    return names.get(model, model)
+    return str(get_audiobook_tts_model_metadata(model).get("name") or model)
 
 
-def _get_model_description(model: str) -> str:
-    descriptions = {
-        "qwen3-tts-instruct-flash": "默认模型，49音色，支持自然语言 instructions",
-        "qwen3-tts-plus": "高质量，支持SSML",
-        COSYVOICE_V35_PLUS_MODEL_ID: "高表现力模型，支持 instruction 与音色复刻/设计，但无系统音色",
-        "minimax-speech-2.8-hd": "最高音质，语气词标签，100+音色",
-        "minimax-speech-2.8-turbo": "优秀音质，高性价比，高并发",
-    }
-    return descriptions.get(model, "")
+def _get_model_description(model: str, voice_count: int = 0) -> str:
+    template = str(get_audiobook_tts_model_metadata(model).get("description") or "")
+    return template.format(voice_count=voice_count) if template else ""
 
 
 def _get_model_price(model: str) -> float:
-    prices = {
-        "qwen3-tts-instruct-flash": 1.0,
-        "qwen3-tts-plus": 2.0,
-        COSYVOICE_V35_PLUS_MODEL_ID: 2.0,
-        "minimax-speech-2.8-hd": 6.0,
-        "minimax-speech-2.8-turbo": 3.0,
-    }
-    return prices.get(model, 1.0)
+    try:
+        return float(get_audiobook_tts_model_metadata(model).get("price_per_10k", 1.0))
+    except (TypeError, ValueError):
+        return 1.0
 
 
-def _get_model_features(model: str) -> list:
-    features_map = {
-        "qwen3-tts-instruct-flash": ["默认模型", "49音色", "自然语言指令"],
-        "qwen3-tts-plus": ["高质量", "SSML支持"],
-        COSYVOICE_V35_PLUS_MODEL_ID: ["高表现力", "instruction", "复刻/设计音色", "无系统音色"],
-        "minimax-speech-2.8-hd": ["最高音质", "语气词标签", "100+音色", "混合音色"],
-        "minimax-speech-2.8-turbo": ["优秀音质", "高性价比", "高并发"],
-    }
-    return features_map.get(model, [])
-
-
-def _get_model_description_legacy(model: str) -> str:
-    descriptions = {
-        "qwen3-tts-instruct-flash": "默认模型，24音色，支持自然语言 instructions",
-        "qwen3-tts-plus": "高质量，支持SSML",
-        COSYVOICE_V35_PLUS_MODEL_ID: "高表现力，支持 instruction，但需先创建复刻/设计音色",
-        "minimax-speech-2.8-hd": "最高音质，语气词标签，100+音色",
-        "minimax-speech-2.8-turbo": "优秀音质，高性价比，高并发",
-    }
-    return descriptions.get(model, "")
-
-
-def _get_model_features_legacy(model: str) -> list:
-    features_map = {
-        "qwen3-tts-instruct-flash": ["默认模型", "24音色", "自然语言指令"],
-        "qwen3-tts-plus": ["高质量", "SSML支持"],
-        COSYVOICE_V35_PLUS_MODEL_ID: ["高表现力", "instruction", "复刻/设计音色", "无系统音色"],
-        "minimax-speech-2.8-hd": ["最高音质", "语气词标签", "100+音色", "混合音色"],
-        "minimax-speech-2.8-turbo": ["优秀音质", "高性价比", "高并发"],
-    }
-    return features_map.get(model, [])
+def _get_model_features(model: str, voice_count: int = 0) -> list:
+    raw_features = get_audiobook_tts_model_metadata(model).get("features") or []
+    return [str(feature).format(voice_count=voice_count) for feature in raw_features]
 
 
 @router.get("/tts/voices")
@@ -453,14 +374,7 @@ async def list_tts_voices(
     current_user: User = Depends(get_current_user),
 ):
     """Expose the supported voices to the frontend (model-specific)."""
-    model = normalize_model_id(model or DEFAULT_TTS_MODEL) or DEFAULT_TTS_MODEL
-    if model not in SUPPORTED_TTS_MODELS:
-        if model.startswith("minimax-speech"):
-            model = "minimax-speech-2.8-hd"
-        elif model.startswith("qwen3-tts"):
-            model = DEFAULT_TTS_MODEL
-        else:
-            model = DEFAULT_TTS_MODEL
+    model = normalize_audiobook_tts_model(model or DEFAULT_TTS_MODEL)
     catalog = load_voice_catalog_for_model(model)
     meta = catalog.get("meta") or {}
     voices = list(catalog.get("voices") or [])

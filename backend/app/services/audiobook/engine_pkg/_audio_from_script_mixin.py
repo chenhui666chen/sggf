@@ -1,37 +1,15 @@
 from __future__ import annotations
 
-import asyncio
 import logging
 import time
-import math
-import json
 from typing import List, Dict, Any, Optional, Callable
-from pathlib import Path
-from dataclasses import asdict, is_dataclass
 
-from ..script_adapter import AudiobookScriptAgent, ScriptSegment, ChapterStructure
-from ..voice_manager_factory import create_voice_manager
-from ..audio_mixer import AudioMixer
-from app.services.chapter_adaptation_assets import build_audio_adaptation_hint
+from ..script_adapter import ScriptSegment
+from ..task_tracker import StageType
+from ..script_adapter_pkg._segment_validation import build_script_segment
+from app.services.audiobook.render_plan import render_chunks_to_timing_segments_payload
 from app.services.audiobook.temp_segment_store import save_segment_audio_batch, save_segment_audio_map
-from core.unified_media_runtime import create_tts_engine
-
-try:
-    from ..agent_dispatch_client import client as tts_dispatch_client
-    from ..agent_dispatch_client import TTSDispatchResult
-    TTS_DISPATCH_AVAILABLE = True
-except ImportError:
-    TTS_DISPATCH_AVAILABLE = False
-    tts_dispatch_client = None
-    TTSDispatchResult = None
-
-# 导入专业Agent
-from ..agents import (
-    AudioDirector,
-    VoiceDesigner,
-    SoundEffectDesigner,
-    MusicComposer,
-)
+from app.services.audiobook.atomic_files import write_bytes_atomic
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +24,7 @@ class AudioFromScriptMixin:
         novel_theme: str = "未知主题",
         enable_quality_review: bool = True,
         audiobook_project_id: Optional[int] = None,
+        output_format: str = "mp3",
         resume_checkpoint: Optional[Dict[str, Any]] = None,
         tts_progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
     ) -> Dict[str, Any]:
@@ -95,28 +74,13 @@ class AudioFromScriptMixin:
 
             # 将dict列表转换为 ScriptSegment 对象列表
             script_segments: List[ScriptSegment] = []
-            for seg_dict in script_segments_data:
-                seg = ScriptSegment(
-                    type=seg_dict.get("type") or "narration",
-                    text=seg_dict.get("text") or "",
-                    speaker=seg_dict.get("speaker") or "旁白",
-                    emotion=seg_dict.get("emotion") or "neutral",
-                    performance_notes=seg_dict.get("performance_notes", ""),
-                    pause_before=float(seg_dict.get("pause_before") or 0.0),
-                    pause_after=float(seg_dict.get("pause_after") or 0.0),
-                    voice_params=seg_dict.get("voice_params"),
-                    instruct_emotion=seg_dict.get("instruct_emotion", ""),
-                    instruct_scene=seg_dict.get("instruct_scene", ""),
-                    instruct_role=seg_dict.get("instruct_role", ""),
-                    instruct_identity=seg_dict.get("instruct_identity", ""),
-                    sound_effects=seg_dict.get("sound_effects") or [],
-                    music_cue=seg_dict.get("music_cue"),
-                    sound_effects_simple=seg_dict.get("sound_effects_simple", []),
-                    music_cue_simple=seg_dict.get("music_cue_simple", ""),
-                    original_text=seg_dict.get("original_text", ""),
-                    adaptation_reason=seg_dict.get("adaptation_reason", ""),
-                )
-                script_segments.append(seg)
+            for index, seg_dict in enumerate(script_segments_data):
+                validated_segment = build_script_segment(seg_dict, index=index)
+                if validated_segment is not None:
+                    script_segments.append(validated_segment)
+
+            if not script_segments:
+                raise ValueError("script_json does not contain valid script segments")
 
             segments_count = len(script_segments)
             self.task_tracker.complete_stage(
@@ -183,6 +147,15 @@ class AudioFromScriptMixin:
                     audio_map=audio_by_index,
                     format="mp3",
                 )
+                temp_segment_cache = self._attach_render_plan_metadata(temp_segment_cache, progress_payload)
+                if isinstance(temp_segment_cache, dict) and isinstance(
+                    temp_segment_cache.get("segment_statuses"),
+                    dict,
+                ):
+                    progress_payload = {
+                        **progress_payload,
+                        "segment_statuses": temp_segment_cache["segment_statuses"],
+                    }
                 completed_segment_indices = sorted(
                     int(index)
                     for index in (progress_payload.get("completed_segment_indices") or [])
@@ -244,6 +217,7 @@ class AudioFromScriptMixin:
                         audio_list=audio_list,
                         format="mp3",
                     )
+                    temp_segment_cache = self._attach_render_plan_metadata(temp_segment_cache, synthesis_result)
                 except Exception as cache_err:
                     logger.warning("⚠️ 保存临时分段音频失败: %s", cache_err)
 
@@ -260,17 +234,67 @@ class AudioFromScriptMixin:
                     "reused_segment_count": len(reused_segment_indices),
                     "synthesized_segment_count": synthesis_result.get("synthesized_count", len(script_segments)),
                     "resume_source": synthesis_result.get("resume_source"),
+                    "render_chunk_count": synthesis_result.get("render_chunk_count"),
                 },
             )
 
+            build_render_chunks = getattr(self, "_build_render_chunks", None)
+            render_chunks = (
+                build_render_chunks(script_segments)
+                if callable(build_render_chunks)
+                else list(script_segments or [])
+            )
+            mixer_segments = render_chunks if len(render_chunks) == len(audio_list) else script_segments
+            timing_segments_payload = synthesis_result.get("timing_segments_payload")
+            if (
+                not isinstance(timing_segments_payload, list)
+                and len(render_chunks) == len(audio_list)
+                and all(hasattr(chunk, "source_segment_indices") for chunk in render_chunks)
+            ):
+                timing_segments_payload = render_chunks_to_timing_segments_payload(render_chunks)
+
             # 基于真实音频时长对齐音效/配乐时间线
-            self._realign_timelines_with_audio(script_segments, audio_list)
+            realign_with_render_chunks = getattr(self, "_realign_timelines_with_render_chunks", None)
+            if (
+                callable(realign_with_render_chunks)
+                and len(render_chunks) == len(audio_list)
+                and all(hasattr(chunk, "source_segment_indices") for chunk in render_chunks)
+            ):
+                realign_with_render_chunks(script_segments, render_chunks, audio_list)
+            else:
+                self._realign_timelines_with_audio(script_segments, audio_list)
 
             # ============ 阶段8：音频混合 ============
             self.task_tracker.start_stage(task_id, StageType.AUDIO_MIXING)
             logger.info("🎧 [8/9] 音频混合中...")
 
-            final_audio = self.audio_mixer.mix_chapter(audio_list)
+            segment_types = self._build_mixer_segment_types(mixer_segments)
+            build_pause_after_ms = getattr(self, "_build_mixer_pause_after_ms", None)
+            pause_after_ms = (
+                build_pause_after_ms(mixer_segments)
+                if callable(build_pause_after_ms)
+                else [None] * len(audio_list)
+            )
+            build_segment_timeline = getattr(self.audio_mixer, "build_segment_timeline", None)
+            segment_timings = []
+            if callable(build_segment_timeline):
+                try:
+                    segment_timings = build_segment_timeline(
+                        audio_list,
+                        segment_types=segment_types,
+                        pause_after_ms=pause_after_ms,
+                    )
+                except TypeError:
+                    segment_timings = build_segment_timeline(audio_list, segment_types=segment_types)
+            try:
+                final_audio = self.audio_mixer.mix_chapter(
+                    audio_list,
+                    output_format=output_format,
+                    segment_types=segment_types,
+                    pause_after_ms=pause_after_ms,
+                )
+            except TypeError:
+                final_audio = self.audio_mixer.mix_chapter(audio_list, segment_types=segment_types)
 
             # 应用音效时间线（如有）
             if self._last_effect_timeline and self._last_effect_timeline.get("timeline"):
@@ -283,6 +307,13 @@ class AudioFromScriptMixin:
                 final_audio = self._apply_background_music(final_audio, self._last_music_timeline)
 
             # 允许空音频（用于MVP测试）
+            transcode_audio = getattr(self.audio_mixer, "transcode_audio", None)
+            if callable(transcode_audio):
+                final_audio = transcode_audio(
+                    final_audio,
+                    output_format=output_format,
+                )
+
             if not final_audio:
                 logger.warning("⚠️ 音频为空，生成占位数据")
                 final_audio = b""  # 空字节
@@ -292,7 +323,10 @@ class AudioFromScriptMixin:
             self.task_tracker.complete_stage(
                 task_id,
                 StageType.AUDIO_MIXING,
-                metrics={"audio_info": audio_info},
+                metrics={
+                    "audio_info": audio_info,
+                    "segment_timing_count": len(segment_timings),
+                },
             )
 
             # ============ 最终音频评审（可选） ============
@@ -303,6 +337,7 @@ class AudioFromScriptMixin:
                     audio_info=audio_info,
                     file_size=len(final_audio),
                     script_quality_report=None,
+                    audio_data=final_audio,
                 )
 
                 self.task_tracker.complete_stage(
@@ -311,17 +346,16 @@ class AudioFromScriptMixin:
                     metrics=final_audio_review,
                 )
             else:
+                final_audio_review = {"skipped": True}
                 self.task_tracker.complete_stage(
                     task_id,
                     StageType.FINAL_AUDIO_REVIEW,
-                    metrics={"skipped": True},
+                    metrics=final_audio_review,
                 )
 
             # ============ 保存文件（可选） ============
             if output_path:
-                Path(output_path).parent.mkdir(parents=True, exist_ok=True)
-                with open(output_path, "wb") as f:
-                    f.write(final_audio)
+                write_bytes_atomic(output_path, final_audio)
 
             # ============ 统计结果 ============
             elapsed_time = time.time() - start_time
@@ -345,6 +379,8 @@ class AudioFromScriptMixin:
                 "audio_data": final_audio,
                 "duration": audio_info.get("duration_seconds", 0),
                 "file_size": len(final_audio),
+                "segment_timings": segment_timings,
+                "timing_segments_payload": timing_segments_payload,
                 "temp_segment_cache": temp_segment_cache,
                 "stats": {
                     "generation_time": f"{elapsed_time:.1f}秒",

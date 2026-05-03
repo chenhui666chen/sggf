@@ -16,6 +16,13 @@ from app.services.chapter_adaptation_assets import build_audio_adaptation_hint
 from core.unified_media_runtime import create_tts_engine
 
 try:
+    from app.websocket.manager import ws_manager
+    WEBSOCKET_AVAILABLE = True
+except Exception:  # pragma: no cover - WebSocket is optional for generation workers.
+    ws_manager = None
+    WEBSOCKET_AVAILABLE = False
+
+try:
     from ..agent_dispatch_client import client as tts_dispatch_client
     from ..agent_dispatch_client import TTSDispatchResult
     TTS_DISPATCH_AVAILABLE = True

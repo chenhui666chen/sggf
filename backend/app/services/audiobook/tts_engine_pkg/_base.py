@@ -11,6 +11,7 @@
 8. 指标埋点（性能监控 + 业务监控）
 """
 import asyncio
+import base64
 import hashlib
 import logging
 import random
@@ -21,6 +22,9 @@ from dataclasses import dataclass
 from enum import Enum
 
 from ..constants import INSTRUCT_SPEAKER_IDS, normalize_speaker_id
+from ..tts_model_ids import normalize_audiobook_tts_model
+from ..tts_batch_planner import plan_tts_batches
+from ..tts_output_validator import TTSValidationResult, validate_tts_audio
 from ..voice_catalog import get_voice_entry
 
 logger = logging.getLogger(__name__)
@@ -86,6 +90,62 @@ from app.services.audiobook.tts_engine_pkg._constants import (
     TTSCost,
 )
 
+
+_TTS_CACHE_NAMESPACE = "audiobook_tts_audio_v1"
+_TTS_CACHE_VALIDATION_VERSION = "tts_output_validator_v1"
+_TTS_CACHE_DEFAULT_TTL_SECONDS = 7 * 24 * 60 * 60
+_TTS_CACHE_BACKEND = None
+
+
+def _env_bool(name: str, default: bool = False) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return str(raw).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _env_positive_int(name: str, default: int) -> int:
+    try:
+        value = int(str(os.getenv(name) or "").strip())
+    except Exception:
+        return default
+    return value if value > 0 else default
+
+
+class _TTSAudioCache:
+    def __init__(self, backend):
+        self.backend = backend
+
+    async def get(self, identifier: str):
+        return await self.backend.get(_TTS_CACHE_NAMESPACE, identifier)
+
+    async def set(self, identifier: str, value: Any, ttl: int) -> bool:
+        return await self.backend.set(_TTS_CACHE_NAMESPACE, identifier, value, ttl=ttl)
+
+    async def delete(self, identifier: str) -> bool:
+        return await self.backend.delete(_TTS_CACHE_NAMESPACE, identifier)
+
+    async def clear_all(self) -> None:
+        await self.backend.clear_all()
+
+
+def _build_tts_audio_cache() -> Optional[_TTSAudioCache]:
+    global _TTS_CACHE_BACKEND
+    try:
+        from app.services.cache_system import MultiLayerCache
+
+        if _TTS_CACHE_BACKEND is None:
+            _TTS_CACHE_BACKEND = MultiLayerCache(
+                enable_memory=True,
+                enable_redis=_env_bool("AUDIOBOOK_TTS_CACHE_REDIS_ENABLED", False),
+                redis_url=os.getenv("AUDIOBOOK_TTS_CACHE_REDIS_URL"),
+                memory_max_size=_env_positive_int("AUDIOBOOK_TTS_CACHE_MAX_SIZE", 500),
+            )
+        return _TTSAudioCache(_TTS_CACHE_BACKEND)
+    except Exception as exc:
+        logger.warning("TTS缓存初始化失败，已降级为无缓存: %s", exc)
+        return None
+
 class TTSEngineBase:
     def __init__(
         self,
@@ -103,8 +163,11 @@ class TTSEngineBase:
         
         self.enable_cache = enable_cache
         self.max_concurrent = max_concurrent
-        self.model = model  # TTS模型版本
+        self.model = normalize_audiobook_tts_model(model)  # TTS模型版本
         self._last_synthesis_metadata: Dict[str, Any] = {}
+        self.output_validation_enabled = str(
+            os.getenv("AUDIOBOOK_TTS_OUTPUT_VALIDATION", "1")
+        ).strip().lower() not in {"0", "false", "no", "off"}
 
         # 根据模型设置单价：不同模型价格不同
         if "plus" in model:
@@ -134,19 +197,12 @@ class TTSEngineBase:
         # 请求间隔控制（每次请求后等待）
         self.request_delay = request_delay
         
-        # 缓存系统
-        if enable_cache:
-            # 暂时禁用缓存，简化实现
-            # from app.services.cache_system import MultiLayerCache
-            # self.cache = MultiLayerCache(
-            #     enable_memory=True,
-            #     enable_redis=True,
-            #     memory_max_size=200  # 缓存200个音频片段
-            # )
-            self.cache = None
-            logger.info("缓存功能暂时禁用")
-        else:
-            self.cache = None
+        # TTS 音频缓存：默认内存缓存，可通过环境变量启用 Redis 二级缓存。
+        self.cache = _build_tts_audio_cache() if enable_cache else None
+        self.cache_ttl_seconds = _env_positive_int(
+            "AUDIOBOOK_TTS_CACHE_TTL_SECONDS",
+            _TTS_CACHE_DEFAULT_TTL_SECONDS,
+        )
         
         provider_list = [self.primary_provider.value] + [p.value for p in self.fallback_providers]
         logger.info(
@@ -166,6 +222,17 @@ class TTSEngineBase:
         """Return provider metadata captured during the most recent synthesis call."""
         return dict(self._last_synthesis_metadata or {})
 
+    def _validate_tts_output(self, audio_bytes: bytes, text: str) -> TTSValidationResult:
+        """Validate one provider output before it is cached or mixed."""
+        if not self.output_validation_enabled:
+            return TTSValidationResult(passed=True, reason="disabled", skipped=True)
+        return validate_tts_audio(audio_bytes, text)
+
+    def _record_tts_output_validation(self, result: TTSValidationResult) -> None:
+        metadata = self.get_last_synthesis_metadata()
+        metadata["output_validation"] = result.to_dict()
+        self._set_last_synthesis_metadata(metadata)
+
     async def synthesize(
         self,
         text: str,
@@ -183,6 +250,8 @@ class TTSEngineBase:
         Returns:
             音频字节流（MP3格式）
         """
+        self._reset_last_synthesis_metadata()
+
         # 📊 埋点：记录请求次数
         if METRICS_ENABLED:
             metrics_collector.increment_counter(
@@ -237,48 +306,82 @@ class TTSEngineBase:
             cached_audio = await self.cache.get(cache_key)
             if cached_audio:
                 logger.debug("缓存命中: %s...", effective_text[:20])
-                self.cost_tracker.add_segment(len(effective_text), is_cached=True)
-                # 缓存的是base64字符串，需要解码
-                import base64
+                try:
+                    decoded_audio = self._decode_cached_audio(cached_audio)
+                except Exception as decode_err:
+                    logger.warning("缓存音频解码失败，删除缓存后重新合成: %s", decode_err)
+                    await self.cache.delete(cache_key)
+                    decoded_audio = b""
+                if not decoded_audio:
+                    cached_audio = None
+            if cached_audio:
+                validation = self._validate_tts_output(decoded_audio, effective_text)
+                self._record_tts_output_validation(validation)
+                if not validation.passed:
+                    logger.warning(
+                        "缓存音频未通过质量校验，重新合成: reason=%s duration=%sms expected=%sms",
+                        validation.reason,
+                        validation.duration_ms,
+                        validation.expected_duration_ms,
+                    )
+                    await self.cache.delete(cache_key)
+                else:
+                    self.cost_tracker.add_segment(len(effective_text), is_cached=True)
                 
-                # 📊 埋点：记录缓存命中
-                if METRICS_ENABLED:
-                    metrics_collector.increment_counter("tts.cache.hits")
-                
-                return base64.b64decode(cached_audio)
+                    # 📊 埋点：记录缓存命中
+                    if METRICS_ENABLED:
+                        metrics_collector.increment_counter("tts.cache.hits")
+
+                    return decoded_audio
         
         # 📊 埋点：记录缓存未命中
         if METRICS_ENABLED:
             metrics_collector.increment_counter("tts.cache.misses")
         
         # 3. 调用TTS API（带并发控制 + 计时）
-        async with self.semaphore:
-            # 📊 埋点：计时器
-            if METRICS_ENABLED:
-                with metrics_collector.timer(
-                    "tts.synthesis",
-                    labels={
-                        "provider": self.primary_provider.value,
-                        "model": self.model
-                    }
-                ):
+        try:
+            async with self.semaphore:
+                # 📊 埋点：计时器
+                if METRICS_ENABLED:
+                    with metrics_collector.timer(
+                        "tts.synthesis",
+                        labels={
+                            "provider": self.primary_provider.value,
+                            "model": self.model
+                        }
+                    ):
+                        audio_bytes = await self._call_tts_api(effective_text, voice_params_with_emotion)
+                else:
                     audio_bytes = await self._call_tts_api(effective_text, voice_params_with_emotion)
-            else:
-                audio_bytes = await self._call_tts_api(effective_text, voice_params_with_emotion)
-            
-            # 每次请求后等待，避免频率限制
-            await asyncio.sleep(self.request_delay)
-        
+
+                # 每次请求后等待，避免频率限制
+                await asyncio.sleep(self.request_delay)
+        except Exception:
+            self.cost_tracker.add_failed_segment(len(effective_text))
+            raise
+
+        if not audio_bytes:
+            self.cost_tracker.add_failed_segment(len(effective_text))
+            return b""
+
         # 4. 更新成本统计
         self.cost_tracker.add_segment(len(effective_text), is_cached=False)
-        
+
         # 5. 缓存结果
         if self.cache and audio_bytes:
-            import base64
             cached_value = base64.b64encode(audio_bytes).decode('utf-8')
-            await self.cache.set(cache_key, cached_value, ttl=604800)  # 缓存7天
+            await self.cache.set(cache_key, cached_value, ttl=self.cache_ttl_seconds)
         
         return audio_bytes
+
+    def _decode_cached_audio(self, cached_audio: Any) -> bytes:
+        if isinstance(cached_audio, bytes):
+            return cached_audio
+        if isinstance(cached_audio, bytearray):
+            return bytes(cached_audio)
+        if isinstance(cached_audio, str):
+            return base64.b64decode(cached_audio.encode("utf-8"))
+        raise TypeError(f"unsupported cached audio type: {type(cached_audio).__name__}")
 
     async def synthesize_with_metadata(
         self,
@@ -316,22 +419,23 @@ class TTSEngineBase:
             音频列表
         """
         total = len(segments)
+        planned_batches = plan_tts_batches(segments, max_items=batch_size)
         logger.debug(f"\n{'='*70}")
         logger.debug(f"[TTS] Starting batch synthesis: {total} segments")
         logger.debug(f"      Batch strategy: {batch_size} per batch, {batch_interval}s interval")
         logger.debug(f"{'='*70}\n")
         logger.info("开始批量TTS合成: %s 个片段", total)
-        logger.info("分批策略: 每批%s个，批次间隔%s秒", batch_size, batch_interval)
+        logger.info("分批策略: %s 批，每批最多%s个，批次间隔%s秒", len(planned_batches), batch_size, batch_interval)
         
         # 分批处理
         audio_list = []
         success_count = 0
-        num_batches = (total + batch_size - 1) // batch_size  # 向上取整
+        num_batches = len(planned_batches)
         
-        for batch_idx in range(num_batches):
-            start_idx = batch_idx * batch_size
-            end_idx = min(start_idx + batch_size, total)
-            batch_segments = segments[start_idx:end_idx]
+        for batch_idx, batch_plan in enumerate(planned_batches):
+            start_idx = batch_plan.start_index
+            end_idx = batch_plan.end_index
+            batch_segments = [segments[index] for index in batch_plan.segment_indices]
             
             logger.info(
                 "批次 %s/%s: 处理片段 %s-%s",
@@ -345,6 +449,8 @@ class TTSEngineBase:
             batch_audio_list: List[bytes] = []
             for i, seg in enumerate(batch_segments):
                 global_idx = start_idx + i
+                error_message = None
+                error_type = None
                 try:
                     result = await self.synthesize(
                         text=seg["text"],
@@ -353,10 +459,14 @@ class TTSEngineBase:
                     )
                 except Exception as e:
                     logger.error("片段 %s 异常: %s", global_idx + 1, e)
+                    error_message = str(e)
+                    error_type = e.__class__.__name__
                     result = Exception(str(e))
 
                 if isinstance(result, Exception):
                     logger.error("片段 %s 失败: %s", global_idx + 1, result)
+                    error_message = error_message or str(result)
+                    error_type = error_type or result.__class__.__name__
                     audio_bytes = b""
                     audio_list.append(audio_bytes)
                     batch_audio_list.append(audio_bytes)
@@ -369,6 +479,8 @@ class TTSEngineBase:
                     success_count += 1
                 else:
                     logger.warning("片段 %s 返回空", global_idx + 1)
+                    error_message = "provider_empty_audio"
+                    error_type = "EmptyAudio"
                     audio_bytes = b""
                     audio_list.append(audio_bytes)
                     batch_audio_list.append(audio_bytes)
@@ -385,6 +497,9 @@ class TTSEngineBase:
                                 "segment_offset": i,
                                 "segment_index": global_idx,
                                 "audio_bytes": audio_bytes,
+                                "segment_status": "succeeded" if audio_bytes else "failed",
+                                "error_message": error_message,
+                                "error_type": error_type,
                                 "completed_segments": len(audio_list),
                                 "total_segments": total,
                                 "successful_segments": success_count,

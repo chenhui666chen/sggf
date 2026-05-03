@@ -1,110 +1,84 @@
 from __future__ import annotations
 
-import asyncio
 import logging
-import os
-import json
-import math
 from pathlib import Path
-from urllib.parse import quote
 from typing import List, Optional, Dict, Any
 
-from fastapi import APIRouter, Body, Depends, HTTPException, status, Response, Query, UploadFile, File, Request
-from fastapi.responses import FileResponse
+from fastapi import Body, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.core.security import get_current_user
 from app.db.base import get_db
 from app.models.user import User
-from app.models.project import Project, Chapter
+from app.models.project import Project
 from app.models.audiobook import AudiobookProject, ChapterAudio
 from app.models.audiobook_delete_audit import AudiobookDeleteAudit
-from app.models.character import Character
-from app.models.audiobook_task import AudiobookTask
-from app.schemas.audiobook import (
-    AudiobookProjectCreate,
-    GenerateAudioFromScriptsRequest,
-    ChapterScriptUpdateRequest,
-    AudiobookProjectResponse,
-    ChapterAudioResponse,
-    CharacterVoiceConfig,
-    TTSPreviewRequest,
-    ScriptSegmentPreviewRequest,
-    SegmentRegenerateRequest,
-    SegmentReviewRequest,
-    AudiobookTaskStatus,
-    CosyVoiceCloneCreateRequest,
-    ChapterReviewStatus,
-    NarrationStylePreset,
-    SubtitleDownloadResponse,
-    GenerationCheckpointResponse,
-    SmartChunkConfig,
-    ChunkStats,
-    ChunkPreviewResponse,
-    VoiceTypePresetResponse,
-    VoiceTypeRecommendationRequest,
-    VoiceTypeRecommendationResponse,
+from app.services.audiobook.project_exporter import (
+    collect_project_export_output_files,
+    resolve_existing_audio_path,
 )
-from app.celery_app import celery_app
-from app.services.audiobook import AudiobookEngine
-from app.services.audiobook.audio_mixer import AudioMixer
-from app.services.audiobook.agents import SoundEffectDesigner
-from app.services.audiobook.tts_engine import RetryConfig
-from app.services.audiobook.voice_manager import VoiceManager
-from app.services.audiobook.voice_manager_factory import create_voice_manager
-from app.services.audiobook.voice_catalog import get_voice_entry, load_voice_catalog_for_model
-from app.services.audiobook.project_audio_config import (
-    parse_project_audio_config,
-    get_characters_for_model,
-    get_audio_fx,
-)
-from app.services.audiobook.cosyvoice_clone_client import (
-    CosyVoiceCloneError,
-    create_cosyvoice_v3_plus_clone,
-    delete_cosyvoice_clone,
-    get_clone_display_name,
-    list_cosyvoice_v3_plus_clones,
-    save_clone_display_name,
-    upload_cosyvoice_v3_plus_clone_sample,
-)
-from app.services.audiobook.narration_styles import get_all_narration_styles, get_narration_style_preset, apply_narration_style_to_tts_params
-from app.services.audiobook.subtitle_generator import SubtitleGenerator, SubtitleEntry
-from app.services.audiobook.smart_chunker import SmartChunker, TextChunk
-from app.services.audiobook.voice_types import (
-    get_all_voice_types,
-    get_voice_type_preset,
-    recommend_voice_type,
-    apply_voice_type_to_tts_params,
-    create_character_voice_profile,
-)
-from app.services.audiobook.sse_progress import sse_tracker, create_progress_handler
-from app.services.audiobook.smart_retrier import SmartRetrier, RetryConfig, retry_tts_call
-from app.services.audiobook.preview_generator import PreviewGenerator, default_preview_generator
-from app.services.audiobook.app_service import AudiobookAppService
 from app.services.audiobook.repository import (
     AudiobookProjectRepository,
     ChapterAudioRepository,
     ProjectRepository,
-    AudiobookTaskRepository,
-)
-from app.services.audiobook.task_support import (
-    build_generation_checkpoint_payload as _build_generation_checkpoint_payload,
-    build_task_status_response,
-    enqueue_chapter_runs as _enqueue_chapter_runs,
-    ensure_audiobook_points_precheck_passed as _ensure_audiobook_points_precheck_passed,
-)
-from app.services.points_task_precheck import (
-    build_audiobook_task_points_precheck,
-)
-from app.services.user_center_points_events import (
-    record_audiobook_billing_freeze,
 )
 from app.utils.datetime_utils import utc_now
-from core.unified_media_runtime import synthesize_speech as runtime_synthesize_speech
 
 from app.api.v1.audiobook_api import router
 
 logger = logging.getLogger(__name__)
+
+
+def _unique_delete_paths(paths: List[Path]) -> List[Path]:
+    unique: List[Path] = []
+    seen: set[str] = set()
+    for path in paths or []:
+        resolved = Path(path).resolve(strict=False)
+        key = resolved.as_posix().lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(resolved)
+    return unique
+
+
+def _collect_chapter_audio_artifact_files(chapter_audio: ChapterAudio) -> List[Path]:
+    files: List[Path] = []
+    audio_path = str(getattr(chapter_audio, "audio_path", "") or "").strip()
+    if audio_path:
+        resolved_audio = resolve_existing_audio_path(audio_path)
+        if resolved_audio:
+            files.append(resolved_audio)
+
+    subtitle_path = str(getattr(chapter_audio, "subtitle_path", "") or "").strip()
+    if subtitle_path:
+        subtitle_candidates = [subtitle_path]
+        subtitle_base = Path(subtitle_path)
+        for suffix in (".srt", ".vtt", ".ass", ".labels.txt"):
+            subtitle_candidates.append(str(subtitle_base.with_suffix(suffix)))
+        for candidate in subtitle_candidates:
+            resolved_subtitle = resolve_existing_audio_path(candidate)
+            if resolved_subtitle:
+                files.append(resolved_subtitle)
+
+    return _unique_delete_paths(files)
+
+
+def _delete_physical_files(paths: List[Path]) -> tuple[int, List[str]]:
+    deleted_files = 0
+    failed_files: List[str] = []
+    for file_path in _unique_delete_paths(paths):
+        if not file_path.exists() or not file_path.is_file():
+            continue
+        try:
+            file_path.unlink()
+            deleted_files += 1
+            logger.info("✅ 删除文件: %s", file_path)
+        except Exception as exc:
+            logger.error("❌ 删除文件失败: %s, 错误: %s", file_path, exc)
+            failed_files.append(file_path.as_posix())
+    return deleted_files, failed_files
+
 
 @router.delete("/projects/{audiobook_project_id:int}")
 async def delete_audiobook_project(
@@ -177,16 +151,17 @@ async def delete_audiobook_project(
         chapter_audios = db.query(ChapterAudio).filter(
             ChapterAudio.audiobook_project_id == audiobook_project_id
         ).all()
-        
+
+        paths_to_delete: List[Path] = []
         for chapter_audio in chapter_audios:
-            if chapter_audio.audio_path and os.path.exists(chapter_audio.audio_path):
-                try:
-                    os.remove(chapter_audio.audio_path)
-                    deleted_files += 1
-                    logger.info(f"✅ 删除文件: {chapter_audio.audio_path}")
-                except Exception as e:
-                    logger.error(f"❌ 删除文件失败: {chapter_audio.audio_path}, 错误: {e}")
-                    failed_files.append(chapter_audio.audio_path)
+            paths_to_delete.extend(_collect_chapter_audio_artifact_files(chapter_audio))
+        paths_to_delete.extend(
+            collect_project_export_output_files(
+                project_id=audiobook_project.project_id,
+                audiobook_project_id=audiobook_project_id,
+            )
+        )
+        deleted_files, failed_files = _delete_physical_files(paths_to_delete)
     
     logger.info(f"✅ 有声书项目软删除成功: audiobook_project_id={audiobook_project_id}, audit_id={audit_log.id}")
     
@@ -282,15 +257,14 @@ async def delete_chapter_audio(
     deleted_file = False
     failed_file = None
     
-    if delete_file and chapter_audio.audio_path:
-        if os.path.exists(chapter_audio.audio_path):
-            try:
-                os.remove(chapter_audio.audio_path)
-                deleted_file = True
-                logger.info(f"✅ 删除文件: {chapter_audio.audio_path}")
-            except Exception as e:
-                logger.error(f"❌ 删除文件失败: {chapter_audio.audio_path}, 错误: {e}")
-                failed_file = chapter_audio.audio_path
+    deleted_files = 0
+    failed_files: List[str] = []
+    if delete_file:
+        deleted_files, failed_files = _delete_physical_files(
+            _collect_chapter_audio_artifact_files(chapter_audio)
+        )
+        deleted_file = deleted_files > 0
+        failed_file = failed_files[0] if failed_files else None
     
     logger.info(f"✅ 章节音频软删除成功: chapter_audio_id={chapter_audio_id}, audit_id={audit_log.id}")
     
@@ -299,7 +273,9 @@ async def delete_chapter_audio(
         "message": "章节音频已删除",
         "audit_id": audit_log.id,
         "deleted_file": deleted_file,
+        "deleted_files": deleted_files,
         "failed_file": failed_file,
+        "failed_files": failed_files,
         "affected_tasks": audit_log.affected_tasks,
         "file_size": audit_log.total_size
     }

@@ -6,8 +6,6 @@
 2. TTS-friendly 长度控制（避免过长文本）
 3. 保持语义完整性（不断开专有名词）
 4. 输出带类型标签的分段结果
-
-参考 tts-audiobook-tool 的分段逻辑实现
 """
 import re
 import logging

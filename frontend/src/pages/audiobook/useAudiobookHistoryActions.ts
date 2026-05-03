@@ -1,0 +1,132 @@
+import { useCallback, useEffect, useState, type Dispatch, type SetStateAction } from 'react'
+
+import { apiClient, extractApiErrorMessage } from '../../services/api'
+import type { SetSnackbar } from './hookTypes'
+import type { AudiobookProjectDetail, AudiobookProjectHistoryItem } from './types'
+
+interface UseAudiobookHistoryActionsParams {
+  selectedProjectId: number | null
+  clearActiveGenerationState: () => void
+  resetBrowserPlayer: () => void
+  setAudiobookProject: Dispatch<SetStateAction<AudiobookProjectDetail | null>>
+  setCurrentAudiobookProjectId: Dispatch<SetStateAction<number | null>>
+  setActiveStep: Dispatch<SetStateAction<number>>
+  setSnackbar: SetSnackbar
+}
+
+const getHttpStatusFromError = (error: unknown): number | null => {
+  if (!error || typeof error !== 'object') {
+    return null
+  }
+
+  const response = (error as { response?: { status?: unknown } }).response
+  return typeof response?.status === 'number' ? response.status : null
+}
+
+export const useAudiobookHistoryActions = ({
+  selectedProjectId,
+  clearActiveGenerationState,
+  resetBrowserPlayer,
+  setAudiobookProject,
+  setCurrentAudiobookProjectId,
+  setActiveStep,
+  setSnackbar,
+}: UseAudiobookHistoryActionsParams) => {
+  const [loadingHistory, setLoadingHistory] = useState(false)
+  const [historyProjects, setHistoryProjects] = useState<AudiobookProjectHistoryItem[]>([])
+  const [showHistory, setShowHistory] = useState(false)
+
+  const fetchHistory = useCallback(
+    async (options?: { projectId?: number | null; showLoading?: boolean }) => {
+      const targetProjectId = options?.projectId ?? selectedProjectId
+      if (!targetProjectId) {
+        setHistoryProjects([])
+        return []
+      }
+
+      const shouldShowLoading = options?.showLoading ?? true
+      if (shouldShowLoading) {
+        setLoadingHistory(true)
+      }
+
+      try {
+        const response = await apiClient.getAudiobookProjectsByProject(targetProjectId)
+        const nextProjects = Array.isArray(response.data) ? response.data : []
+        setHistoryProjects(nextProjects)
+        return nextProjects
+      } catch {
+        return []
+      } finally {
+        if (shouldShowLoading) {
+          setLoadingHistory(false)
+        }
+      }
+    },
+    [selectedProjectId],
+  )
+
+  useEffect(() => {
+    if (!selectedProjectId) {
+      setHistoryProjects([])
+      return
+    }
+
+    void fetchHistory({ projectId: selectedProjectId, showLoading: false })
+  }, [selectedProjectId, fetchHistory])
+
+  const handleOpenHistoryPanel = useCallback(() => {
+    setShowHistory(true)
+    void fetchHistory()
+  }, [fetchHistory])
+
+  const handleCloseHistoryPanel = useCallback(() => {
+    setShowHistory(false)
+  }, [])
+
+  const handleViewHistory = useCallback(async (audiobookProjectId: number) => {
+    try {
+      const response = await apiClient.getAudiobookProject(audiobookProjectId)
+      const data = response.data
+      clearActiveGenerationState()
+      setAudiobookProject(data)
+      resetBrowserPlayer()
+      setCurrentAudiobookProjectId(data.id)
+      setActiveStep(2)
+      setShowHistory(false)
+    } catch {
+      setSnackbar({ open: true, message: '加载失败', severity: 'error' })
+    }
+  }, [
+    clearActiveGenerationState,
+    resetBrowserPlayer,
+    setActiveStep,
+    setAudiobookProject,
+    setCurrentAudiobookProjectId,
+    setSnackbar,
+  ])
+
+  const handleDeleteHistory = useCallback(async (audiobookProjectId: number) => {
+    try {
+      await apiClient.deleteAudiobookProject(audiobookProjectId, { delete_files: true })
+      setSnackbar({ open: true, message: '项目已删除', severity: 'success' })
+      await fetchHistory({ showLoading: false })
+    } catch (error: unknown) {
+      const errorMessage = getHttpStatusFromError(error) === 404
+        ? '项目不存在或已被删除'
+        : await extractApiErrorMessage(error, '删除失败，请重试')
+      setSnackbar({ open: true, message: errorMessage, severity: 'error' })
+    }
+  }, [fetchHistory, setSnackbar])
+
+  return {
+    loadingHistory,
+    historyProjects,
+    showHistory,
+    setShowHistory,
+    fetchHistory,
+    handleOpenHistoryPanel,
+    handleCloseHistoryPanel,
+    handleViewHistory,
+    handleDeleteHistory,
+  }
+}

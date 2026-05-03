@@ -12,6 +12,8 @@ from dataclasses import asdict, is_dataclass
 from ..script_adapter import AudiobookScriptAgent, ScriptSegment, ChapterStructure
 from ..voice_manager_factory import create_voice_manager
 from ..audio_mixer import AudioMixer
+from ..narration_styles import apply_narration_style_to_tts_params
+from ..pause_tags import coerce_pause_ms, strip_pause_tags
 from app.services.chapter_adaptation_assets import build_audio_adaptation_hint
 from core.unified_media_runtime import create_tts_engine
 
@@ -35,6 +37,118 @@ from ..agents import (
 logger = logging.getLogger(__name__)
 
 class ScriptUtilsMixin:
+    def _is_narration_segment(self, segment: ScriptSegment) -> bool:
+        speaker = str(getattr(segment, "speaker", "") or "").strip()
+        segment_type = str(getattr(segment, "type", "") or "").strip().lower()
+        return speaker == "旁白" or segment_type == "narration"
+
+    def _apply_narration_style_to_voice_params(
+        self,
+        segment: ScriptSegment,
+        voice_params: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        style_id = str(getattr(self, "_narration_style_id", "") or "").strip()
+        if not style_id or not self._is_narration_segment(segment):
+            return voice_params
+
+        base_params = dict(voice_params)
+        original_segment_params = getattr(segment, "voice_params", None) or {}
+        if "speed" not in original_segment_params and "rate" not in original_segment_params:
+            base_params.pop("speed", None)
+            base_params.pop("rate", None)
+
+        styled_params = apply_narration_style_to_tts_params(
+            style_id,
+            base_params,
+            custom_prompt=getattr(self, "_narration_style_prompt", None),
+        )
+        styled_params["narration_style"] = style_id
+
+        style_emotion = str(styled_params.get("emotion") or "").strip()
+        if style_emotion == "variable":
+            styled_params.pop("emotion", None)
+        elif style_emotion:
+            try:
+                setattr(segment, "emotion", style_emotion)
+                if not str(getattr(segment, "instruct_emotion", "") or "").strip():
+                    setattr(segment, "instruct_emotion", style_emotion)
+            except Exception:
+                pass
+
+        try:
+            pause_multiplier = float(styled_params.get("pause_multiplier") or 1.0)
+        except (TypeError, ValueError):
+            pause_multiplier = 1.0
+
+        if pause_multiplier != 1.0 and not styled_params.get("narration_style_pause_applied"):
+            for key in ("pause_before", "pause_after"):
+                try:
+                    styled_params[key] = max(0.0, float(styled_params.get(key) or 0.0) * pause_multiplier)
+                except (TypeError, ValueError):
+                    pass
+            pause_after_ms = coerce_pause_ms(styled_params.get("pause_after_ms"))
+            if pause_after_ms is not None:
+                styled_params["pause_after_ms"] = int(max(0, pause_after_ms) * pause_multiplier)
+            styled_params["narration_style_pause_applied"] = True
+
+        return styled_params
+
+    def _build_mixer_segment_types(self, script_segments) -> List[str]:
+        def normalize_type(value: Any) -> str:
+            raw = str(value or "").strip().lower()
+            if raw in {"section", "paragraph", "sentence", "phrase"}:
+                return raw
+            if raw in {"p", "para"}:
+                return "paragraph"
+            if raw in {"s", "sent", "narration", "dialogue", "monologue"}:
+                return "sentence"
+            if raw in {"is", "word"}:
+                return "phrase"
+            return ""
+
+        result: List[str] = []
+        for segment in script_segments or []:
+            voice_params = getattr(segment, "voice_params", None) or {}
+            explicit_type = (
+                normalize_type(getattr(segment, "segment_type", None))
+                or normalize_type(getattr(segment, "reason", None))
+                or normalize_type(voice_params.get("mixer_segment_type"))
+                or normalize_type(voice_params.get("text_segment_type"))
+                or normalize_type(voice_params.get("segment_reason"))
+            )
+            if explicit_type:
+                result.append(explicit_type)
+                continue
+
+            try:
+                pause_after = float(
+                    voice_params.get("pause_after", getattr(segment, "pause_after", 0.0)) or 0.0
+                )
+            except (TypeError, ValueError):
+                pause_after = 0.0
+
+            text = str(getattr(segment, "text", "") or "").rstrip()
+            if pause_after >= 1.0:
+                result.append("paragraph")
+            elif pause_after > 0 and pause_after < 0.35:
+                result.append("phrase")
+            elif text.endswith(("，", "、", ",", ":", "：", ";", "；")):
+                result.append("phrase")
+            else:
+                result.append("sentence")
+
+        return result
+
+    def _build_mixer_pause_after_ms(self, script_segments) -> List[Optional[int]]:
+        result: List[Optional[int]] = []
+        for segment in script_segments or []:
+            voice_params = getattr(segment, "voice_params", None) or {}
+            pause_ms = coerce_pause_ms(voice_params.get("pause_after_ms"))
+            if pause_ms is None:
+                pause_ms = strip_pause_tags(getattr(segment, "text", "") or "").pause_after_ms
+            result.append(pause_ms)
+        return result
+
     def _flatten_chapter_structure(
         self,
         chapter_structure: ChapterStructure,
@@ -141,6 +255,9 @@ class ScriptUtilsMixin:
                 "pause_after",
                 getattr(segment, "pause_after", 0.0),
             )
+            voice_params_dict = self._apply_narration_style_to_voice_params(segment, voice_params_dict)
+            if "rate" not in voice_params_dict and "speed" in voice_params_dict:
+                voice_params_dict["rate"] = voice_params_dict["speed"]
             
             # 🔍 调试：输出最终参数
             logger.info(

@@ -7,6 +7,10 @@ from datetime import datetime
 
 from pipeline.media_presets import normalize_dreamweaver_video_engine
 
+from app.services.audiobook.tts_model_ids import (
+    get_audiobook_tts_model_price_per_10k,
+    is_supported_audiobook_tts_model,
+)
 from app.services.points_pricing_policy import PointsPricingPolicyConfig, PointsPricingPolicySnapshot
 from app.services.user_center_points import COMPLETED_STATUSES, RUNNING_STATUSES
 from app.utils.datetime_utils import ensure_utc_datetime
@@ -65,6 +69,11 @@ def _round_amount(value: float | None) -> float | None:
 
 def _resolve_tts_price_per_10k(provider: object | None) -> float:
     provider_key = str(provider or "").strip().lower()
+    if is_supported_audiobook_tts_model(provider_key):
+        model_price = get_audiobook_tts_model_price_per_10k(provider_key)
+        if model_price is not None:
+            return max(float(model_price), 0.0)
+
     provider_default_map = {
         "aliyun": _env_float("USER_CENTER_AUDIOBOOK_TTS_PRICE_PER_10K_ALIYUN", 1.0),
     }

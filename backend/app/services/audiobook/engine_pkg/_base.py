@@ -12,6 +12,8 @@ from dataclasses import asdict, is_dataclass
 from ..script_adapter import AudiobookScriptAgent, ScriptSegment, ChapterStructure
 from ..voice_manager_factory import create_voice_manager
 from ..audio_mixer import AudioMixer
+from ..agent_message import MessageBus
+from ..task_tracker import TaskTracker
 from app.services.chapter_adaptation_assets import build_audio_adaptation_hint
 from core.unified_media_runtime import create_tts_engine
 
@@ -27,6 +29,7 @@ except ImportError:
 # 导入专业Agent
 from ..agents import (
     AudioDirector,
+    AudioQualityReviewer,
     VoiceDesigner,
     SoundEffectDesigner,
     MusicComposer,
@@ -83,9 +86,11 @@ class AudiobookEngineBase:
         self._last_music_timeline: Optional[Dict[str, Any]] = None
         # 项目级音效/BGM 配置（来自 Project.audio_config.audio_fx）
         self._audio_fx_config: Optional[Dict[str, Any]] = None
+        self._narration_style_id: Optional[str] = None
+        self._narration_style_prompt: Optional[str] = None
         
         # 🆕 智能化模块
-        from .intelligence import ClimaxDetector, EmotionCurveAnalyzer
+        from ..intelligence import ClimaxDetector, EmotionCurveAnalyzer
         self.climax_detector = ClimaxDetector()
         self.emotion_analyzer = EmotionCurveAnalyzer()
         
@@ -120,6 +125,19 @@ class AudiobookEngineBase:
             logger.info(f"🎚 已应用项目级音效/BGM 配置: {self._audio_fx_config}")
         except Exception as e:
             logger.warning(f"⚠️ 设置音效/BGM 配置失败: {e}")
+
+    def apply_narration_style_config(
+        self,
+        narration_style: Optional[str],
+        narration_style_prompt: Optional[str] = None,
+    ) -> None:
+        """应用项目级叙事风格配置，供 TTS 参数生成阶段读取。"""
+        style_id = str(narration_style or "").strip() or None
+        prompt = str(narration_style_prompt or "").strip() or None
+        self._narration_style_id = style_id
+        self._narration_style_prompt = prompt
+        if style_id:
+            logger.info("🎙 已应用叙事风格配置: style=%s, custom_prompt=%s", style_id, bool(prompt))
     
     def _apply_audio_fx_to_strategy(self, strategy) -> None:
         """根据项目级音效/BGM 配置调整导演策略中的 sound_effect_density / music_density。"""

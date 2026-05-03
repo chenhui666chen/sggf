@@ -17,10 +17,25 @@ from urllib.request import Request, urlopen
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
+from sqlalchemy.orm import Session
 
 from app.core.security import get_current_user
 from app.models.user import User
 from app.services.audiobook.ai_music import MusicGenerationRequest, MusicStyle, create_music_generator
+from app.services.points_usage_pricing import (
+    PointsBillingPrecheckSnapshot,
+    build_points_billing_metadata,
+    build_points_billing_precheck,
+    build_points_billing_precheck_error_detail,
+    build_points_usage_charge_estimate,
+)
+from app.services.user_center_points_events import (
+    POINTS_BILLING_MODULE_ASSET_STUDIO,
+    build_points_billing_key,
+    record_points_billing_freeze,
+    record_points_billing_release,
+    record_points_billing_settle,
+)
 from core.model_catalog_runtime import get_model_catalog_runtime_index
 from core.model_resolution import normalize_model_id
 from core.unified_media_runtime import UnifiedMediaResult, media_runtime
@@ -55,6 +70,160 @@ from app.api.v1.asset_studio_api._constants import (
     AssetStudioVisionCriterionScore,
     AssetStudioVisionReviewResponse,
 )
+
+
+def _asset_studio_user_name(user: object) -> str:
+    return str(getattr(user, "username", None) or getattr(user, "email", None) or "system").strip() or "system"
+
+
+def _reserve_asset_studio_billing(
+    *,
+    db: Session,
+    current_user: User,
+    kind: str,
+    mode: str,
+    basis_yuan: float,
+    model_id: str,
+    request_path: str,
+    summary: str,
+    extra_payload: dict[str, Any] | None = None,
+) -> PointsBillingPrecheckSnapshot:
+    billing_key = build_points_billing_key(POINTS_BILLING_MODULE_ASSET_STUDIO, f"{kind}:{uuid.uuid4().hex}")
+    module_label = "资产生成"
+    precheck = build_points_billing_precheck(
+        db=db,
+        user_id=int(current_user.id or 0),
+        billing_key=billing_key,
+        module_key=POINTS_BILLING_MODULE_ASSET_STUDIO,
+        module_label=module_label,
+        basis_yuan=basis_yuan,
+        provider_key=model_id,
+    )
+    if not precheck.allowed:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=build_points_billing_precheck_error_detail(
+                precheck=precheck,
+                default_message="资产生成积分预检未通过",
+            ),
+        )
+
+    payload = {
+        "asset_kind": kind,
+        "asset_mode": mode,
+        "model_id": model_id,
+    }
+    if extra_payload:
+        payload.update(extra_payload)
+    record_points_billing_freeze(
+        db=db,
+        actor_user_id=int(current_user.id or 0),
+        actor_username=_asset_studio_user_name(current_user),
+        target_user_id=int(current_user.id or 0),
+        billing_key=billing_key,
+        module_key=POINTS_BILLING_MODULE_ASSET_STUDIO,
+        amount_points=precheck.required_frozen_points,
+        amount_yuan=precheck.estimated_yuan,
+        title=f"资产生成：{kind}",
+        summary=summary,
+        action_path="/asset-studio",
+        action_label="打开资产工作台",
+        default_request_method="POST",
+        default_request_path=request_path,
+        operation_desc=f"资产生成冻结积分 {precheck.required_frozen_points:.2f}",
+        provider_key=model_id,
+        extra_payload=payload,
+    )
+    return precheck
+
+
+def _settle_asset_studio_billing(
+    *,
+    db: Session,
+    current_user: User,
+    precheck: PointsBillingPrecheckSnapshot,
+    kind: str,
+    mode: str,
+    basis_yuan: float,
+    model_id: str,
+    summary: str,
+    extra_payload: dict[str, Any] | None = None,
+) -> None:
+    estimate = build_points_usage_charge_estimate(
+        db=db,
+        module_key=POINTS_BILLING_MODULE_ASSET_STUDIO,
+        basis_yuan=basis_yuan,
+        provider_key=model_id,
+        include_freeze_buffer=False,
+    )
+    payload = {
+        "asset_kind": kind,
+        "asset_mode": mode,
+        "model_id": model_id,
+    }
+    if extra_payload:
+        payload.update(extra_payload)
+    record_points_billing_settle(
+        db=db,
+        actor_user_id=int(current_user.id or 0),
+        actor_username=_asset_studio_user_name(current_user),
+        target_user_id=int(current_user.id or 0),
+        billing_key=precheck.billing_key,
+        module_key=POINTS_BILLING_MODULE_ASSET_STUDIO,
+        amount_points=estimate.estimated_points,
+        amount_yuan=estimate.basis_yuan,
+        title=f"资产生成：{kind}",
+        summary=summary,
+        action_path="/asset-studio",
+        action_label="打开资产工作台",
+        default_request_path=f"/internal/asset-studio/{kind}/billing-settle",
+        provider_key=model_id,
+        extra_payload=payload,
+        require_active_freeze=True,
+    )
+
+
+def _release_asset_studio_billing_safely(
+    *,
+    db: Session,
+    current_user: User,
+    precheck: PointsBillingPrecheckSnapshot | None,
+    reason: str,
+    kind: str,
+    mode: str,
+) -> None:
+    if precheck is None:
+        return
+    try:
+        try:
+            db.rollback()
+        except Exception:
+            pass
+        record_points_billing_release(
+            db=db,
+            actor_user_id=int(current_user.id or 0),
+            actor_username=_asset_studio_user_name(current_user),
+            target_user_id=int(current_user.id or 0),
+            billing_key=precheck.billing_key,
+            module_key=POINTS_BILLING_MODULE_ASSET_STUDIO,
+            reason=reason,
+            default_request_path=f"/internal/asset-studio/{kind}/billing-release",
+            extra_payload={
+                "asset_kind": kind,
+                "asset_mode": mode,
+            },
+        )
+    except Exception:
+        return
+
+
+def _merge_points_billing_metadata(
+    metadata: dict[str, Any] | None,
+    precheck: PointsBillingPrecheckSnapshot,
+) -> dict[str, Any]:
+    merged = dict(metadata or {})
+    merged.update(build_points_billing_metadata(precheck))
+    return merged
 
 def _normalize_criterion_name(value: str) -> str:
     normalized = str(value or "").strip().lower().replace("-", "_").replace(" ", "_")

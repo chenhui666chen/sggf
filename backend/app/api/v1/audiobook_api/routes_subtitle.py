@@ -1,15 +1,11 @@
 from __future__ import annotations
 
-import asyncio
 import logging
 import os
 import json
-import math
 from pathlib import Path
-from urllib.parse import quote
-from typing import List, Optional, Dict, Any
 
-from fastapi import APIRouter, Body, Depends, HTTPException, status, Response, Query, UploadFile, File, Request
+from fastapi import Depends, HTTPException, Query, Request
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
@@ -18,84 +14,20 @@ from app.db.base import get_db
 from app.models.user import User
 from app.models.project import Project, Chapter
 from app.models.audiobook import AudiobookProject, ChapterAudio
-from app.models.audiobook_delete_audit import AudiobookDeleteAudit
-from app.models.character import Character
-from app.models.audiobook_task import AudiobookTask
 from app.schemas.audiobook import (
-    AudiobookProjectCreate,
-    GenerateAudioFromScriptsRequest,
-    ChapterScriptUpdateRequest,
-    AudiobookProjectResponse,
-    ChapterAudioResponse,
-    CharacterVoiceConfig,
-    TTSPreviewRequest,
-    ScriptSegmentPreviewRequest,
-    SegmentRegenerateRequest,
-    SegmentReviewRequest,
-    AudiobookTaskStatus,
-    CosyVoiceCloneCreateRequest,
-    ChapterReviewStatus,
-    NarrationStylePreset,
-    SubtitleDownloadResponse,
     GenerationCheckpointResponse,
-    SmartChunkConfig,
-    ChunkStats,
-    ChunkPreviewResponse,
-    VoiceTypePresetResponse,
-    VoiceTypeRecommendationRequest,
-    VoiceTypeRecommendationResponse,
 )
-from app.celery_app import celery_app
-from app.services.audiobook import AudiobookEngine
-from app.services.audiobook.audio_mixer import AudioMixer
-from app.services.audiobook.agents import SoundEffectDesigner
-from app.services.audiobook.tts_engine import RetryConfig
-from app.services.audiobook.voice_manager import VoiceManager
-from app.services.audiobook.voice_manager_factory import create_voice_manager
-from app.services.audiobook.voice_catalog import get_voice_entry, load_voice_catalog_for_model
-from app.services.audiobook.project_audio_config import (
-    parse_project_audio_config,
-    get_characters_for_model,
-    get_audio_fx,
-)
-from app.services.audiobook.cosyvoice_clone_client import (
-    CosyVoiceCloneError,
-    create_cosyvoice_v3_plus_clone,
-    delete_cosyvoice_clone,
-    get_clone_display_name,
-    list_cosyvoice_v3_plus_clones,
-    save_clone_display_name,
-    upload_cosyvoice_v3_plus_clone_sample,
-)
-from app.services.audiobook.narration_styles import get_all_narration_styles, get_narration_style_preset, apply_narration_style_to_tts_params
-from app.services.audiobook.subtitle_generator import SubtitleGenerator, SubtitleEntry
-from app.services.audiobook.smart_chunker import SmartChunker, TextChunk
-from app.services.audiobook.voice_types import (
-    get_all_voice_types,
-    get_voice_type_preset,
-    recommend_voice_type,
-    apply_voice_type_to_tts_params,
-    create_character_voice_profile,
-)
-from app.services.audiobook.sse_progress import sse_tracker, create_progress_handler
-from app.services.audiobook.smart_retrier import SmartRetrier, RetryConfig, retry_tts_call
-from app.services.audiobook.preview_generator import PreviewGenerator, default_preview_generator
-from app.services.audiobook.app_service import AudiobookAppService
+from app.services.audiobook.safe_filename import build_safe_filename
 from app.services.audiobook.repository import (
-    AudiobookProjectRepository,
-    ChapterAudioRepository,
     ChapterAudioRunRepository,
-    ProjectRepository,
-    AudiobookTaskRepository,
 )
 from app.services.audiobook.task_support import (
     build_generation_checkpoint_payload as _build_generation_checkpoint_payload,
     build_run_checkpoint_document as _build_run_checkpoint_document,
-    build_task_status_response,
     enqueue_audiobook_task as _enqueue_audiobook_task,
-    enqueue_chapter_runs as _enqueue_chapter_runs,
     ensure_audiobook_points_precheck_passed as _ensure_audiobook_points_precheck_passed,
 )
+from app.services.audiobook.tts_model_ids import normalize_audiobook_tts_model
 from app.services.points_task_precheck import (
     build_audiobook_task_points_precheck,
 )
@@ -103,8 +35,6 @@ from app.services.user_center_points_events import (
     record_audiobook_billing_freeze,
 )
 from app.utils.datetime_utils import utc_now
-from core.model_resolution import normalize_model_id
-from core.unified_media_runtime import synthesize_speech as runtime_synthesize_speech
 
 from app.api.v1.audiobook_api import router
 
@@ -114,7 +44,7 @@ logger = logging.getLogger(__name__)
 async def get_chapter_subtitle(
     audiobook_project_id: int,
     chapter_id: int,
-    format: str = Query("srt", regex="^(srt|vtt|ass)$"),
+    format: str = Query("srt", pattern="^(srt|vtt|ass|labels|audacity)$"),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -144,17 +74,26 @@ async def get_chapter_subtitle(
     
     subtitle_file = chapter_audio.subtitle_path
     if format == "vtt":
-        subtitle_file = subtitle_file.replace(".srt", ".vtt")
+        subtitle_file = str(Path(subtitle_file).with_suffix(".vtt"))
     elif format == "ass":
-        subtitle_file = subtitle_file.replace(".srt", ".ass")
+        subtitle_file = str(Path(subtitle_file).with_suffix(".ass"))
+    elif format in {"labels", "audacity"}:
+        subtitle_file = str(Path(subtitle_file).with_suffix(".labels.txt"))
     
     if not os.path.exists(subtitle_file):
         raise HTTPException(status_code=404, detail="字幕文件不存在")
     
+    download_extension = ".labels.txt" if format in {"labels", "audacity"} else f".{format}"
+    download_filename = build_safe_filename(
+        f"chapter_{chapter_id}",
+        download_extension,
+        fallback="chapter",
+    )
+
     return FileResponse(
         subtitle_file,
         media_type="text/plain",
-        filename=f"chapter_{chapter_id}.{format}",
+        filename=download_filename,
     )
 
 
@@ -239,10 +178,11 @@ async def resume_chapter_generation(
         raise HTTPException(status_code=400, detail=detail)
 
     resume_task_type = str(checkpoint_payload.get("resume_task_type") or "full").strip().lower()
-    tts_model = normalize_model_id(checkpoint_payload.get("tts_model") or "qwen3-tts-instruct-flash") or "qwen3-tts-instruct-flash"
+    tts_model = normalize_audiobook_tts_model(checkpoint_payload.get("tts_model"))
     output_format = checkpoint_payload.get("output_format")
     narration_style = checkpoint_payload.get("narration_style")
     narration_style_prompt = checkpoint_payload.get("narration_style_prompt")
+    generate_subtitle = checkpoint_payload.get("generate_subtitle", True) is not False
 
     if resume_task_type != "script_only":
         precheck = build_audiobook_task_points_precheck(
@@ -251,28 +191,26 @@ async def resume_chapter_generation(
             project_id=project.id,
             project_title=project.title,
             chapter_ids=[chapter_id],
-            tts_provider=audiobook_project.tts_provider or "aliyun",
+            tts_provider=tts_model,
         )
         _ensure_audiobook_points_precheck_passed(precheck)
 
-    _, async_result = _enqueue_audiobook_task(
-        db,
-        audiobook_project_id=audiobook_project_id,
-        chapter_ids=[chapter_id],
-        job_type=resume_task_type,
-        tts_model=tts_model,
-        output_format=output_format,
-        narration_style=narration_style,
-        narration_style_prompt=narration_style_prompt,
-    )
+    def bind_resume_checkpoint_before_dispatch(_task_record, celery_task_id: str) -> None:
+        latest_run = ChapterAudioRunRepository.get_latest_run(
+            db,
+            audiobook_project_id=audiobook_project_id,
+            chapter_id=chapter_id,
+            run_type=resume_task_type,
+        )
+        if not latest_run or latest_run.celery_task_id != celery_task_id:
+            logger.warning(
+                "跳过断点恢复绑定: chapter_id=%s, expected_task=%s, actual_task=%s",
+                chapter_id,
+                celery_task_id,
+                getattr(latest_run, "celery_task_id", None),
+            )
+            return
 
-    latest_run = ChapterAudioRunRepository.get_latest_run(
-        db,
-        audiobook_project_id=audiobook_project_id,
-        chapter_id=chapter_id,
-        run_type=resume_task_type,
-    )
-    if latest_run:
         resumed_checkpoint_json = _build_run_checkpoint_document(
             db,
             run=latest_run,
@@ -303,6 +241,19 @@ async def resume_chapter_generation(
             checkpoint_json=resumed_checkpoint_json,
         )
 
+    _, async_result = _enqueue_audiobook_task(
+        db,
+        audiobook_project_id=audiobook_project_id,
+        chapter_ids=[chapter_id],
+        job_type=resume_task_type,
+        tts_model=tts_model,
+        output_format=output_format,
+        narration_style=narration_style,
+        narration_style_prompt=narration_style_prompt,
+        generate_subtitle=generate_subtitle,
+        before_dispatch=bind_resume_checkpoint_before_dispatch,
+    )
+
     if resume_task_type != "script_only":
         try:
             record_audiobook_billing_freeze(
@@ -312,6 +263,7 @@ async def resume_chapter_generation(
                 audiobook_project_id=audiobook_project_id,
                 chapter_ids=[chapter_id],
                 request_context=raw_request,
+                tts_pricing_key=tts_model,
             )
         except Exception as exc:
             logger.warning(
@@ -383,6 +335,7 @@ async def get_browser_player_data(
             "duration": chapter_audio.duration,
             "has_subtitle": bool(chapter_audio.subtitle_path and os.path.exists(chapter_audio.subtitle_path)),
             "subtitle_url": f"/api/v1/audiobook/projects/{audiobook_project_id}/chapters/{chapter_audio.chapter_id}/subtitle" if chapter_audio.subtitle_path else None,
+            "audacity_labels_url": f"/api/v1/audiobook/projects/{audiobook_project_id}/chapters/{chapter_audio.chapter_id}/subtitle?format=labels" if chapter_audio.subtitle_path else None,
         }
         
         if chapter_audio.script_json:

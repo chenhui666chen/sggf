@@ -1,6 +1,7 @@
 """
 用户管理 API
 """
+import math
 from datetime import datetime
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Request, status, Query
@@ -23,12 +24,17 @@ from app.schemas.admin import (
     UserPointsAdjustmentCreate,
     UserPointsAdjustmentListResponse,
     UserPointsAdjustmentResponse,
+    UserPointsAccountOverviewResponse,
     UserPointsBillingEventListResponse,
 )
+from app.schemas.user_center import UserCenterPointsEntry
 from app.services.admin_points_billing import points_billing_log_to_response
+from app.services.user_center_points import POINTS_SOURCE_LABELS
 from app.services.user_center_points_events import (
     list_user_points_billing_logs,
 )
+from app.services.user_points_read_model import UserPointsReadModelSnapshot, build_user_points_read_model
+from app.utils.datetime_utils import ensure_utc_datetime, utc_now
 
 router = APIRouter()
 
@@ -45,6 +51,51 @@ def _points_adjustment_log_to_response(log: AdminOperationLog) -> UserPointsAdju
         adjustment_type=str(payload.get("adjustment_type") or "manual_grant").strip() or "manual_grant",
         expires_at=payload.get("expires_at"),
         created_at=log.created_at,
+    )
+
+
+def _points_entry_snapshot_to_response(snapshot: object) -> UserCenterPointsEntry:
+    source_key = str(getattr(snapshot, "source_key", "") or "").strip()
+    return UserCenterPointsEntry(
+        key=str(getattr(snapshot, "key", "") or "").strip(),
+        source_key=source_key,
+        source_label=POINTS_SOURCE_LABELS.get(source_key, source_key),
+        title=str(getattr(snapshot, "title", "") or "").strip(),
+        summary=str(getattr(snapshot, "summary", "") or "").strip(),
+        amount=float(getattr(snapshot, "amount", 0) or 0),
+        direction=getattr(snapshot, "direction", "income"),
+        status=getattr(snapshot, "status", "active"),
+        occurred_at=getattr(snapshot, "occurred_at", None),
+        expires_at=getattr(snapshot, "expires_at", None),
+        action_path=getattr(snapshot, "action_path", None),
+        action_label=getattr(snapshot, "action_label", None),
+    )
+
+
+def _points_account_overview_to_response(
+    *,
+    target_user_id: int,
+    read_model: UserPointsReadModelSnapshot,
+) -> UserPointsAccountOverviewResponse:
+    account = read_model.points_bundle.account
+    account_is_live = account.connected_source_count > 0
+    balance = round(float(account.balance), 2) if account_is_live else None
+    frozen = round(float(account.frozen), 2) if account_is_live else None
+    available = round(float(account.balance - account.frozen), 2) if account_is_live else None
+    expiring_soon = round(float(account.expiring_soon), 2) if account_is_live else None
+
+    return UserPointsAccountOverviewResponse(
+        target_user_id=target_user_id,
+        balance=balance,
+        frozen=frozen,
+        available=available,
+        expiring_soon=expiring_soon,
+        status="partial" if account_is_live else "planned",
+        connected_source_count=account.connected_source_count,
+        entries=[
+            _points_entry_snapshot_to_response(entry)
+            for entry in read_model.points_bundle.entries[:20]
+        ],
     )
 
 @router.get("", response_model=UserListResponse)
@@ -298,6 +349,24 @@ async def list_user_points_adjustments(
     )
 
 
+@router.get("/{user_id}/points-account", response_model=UserPointsAccountOverviewResponse)
+async def get_user_points_account(
+    user_id: int,
+    _current_user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """查询目标用户当前积分账户读模型"""
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="用户不存在",
+        )
+
+    read_model = build_user_points_read_model(db=db, user_id=user_id)
+    return _points_account_overview_to_response(target_user_id=user_id, read_model=read_model)
+
+
 @router.get("/{user_id}/points-billing-events", response_model=UserPointsBillingEventListResponse)
 async def list_user_points_billing_events(
     user_id: int,
@@ -340,18 +409,26 @@ async def create_user_points_adjustment(
             detail="用户不存在",
         )
 
-    if abs(float(adjustment_data.delta)) <= 0:
+    delta = float(adjustment_data.delta)
+    if not math.isfinite(delta) or delta == 0:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="积分调整值不能为 0",
         )
 
+    expires_at = ensure_utc_datetime(adjustment_data.expires_at)
+    if delta > 0 and expires_at is not None and expires_at <= utc_now():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="正向积分调整的过期时间必须晚于当前时间",
+        )
+
     payload = {
         "target_user_id": target_user.id,
-        "delta": round(float(adjustment_data.delta), 2),
+        "delta": round(delta, 2),
         "reason": adjustment_data.reason.strip(),
         "adjustment_type": adjustment_data.adjustment_type.strip() or "manual_grant",
-        "expires_at": adjustment_data.expires_at.isoformat() if adjustment_data.expires_at else None,
+        "expires_at": expires_at.isoformat() if expires_at else None,
     }
     sign = "+" if payload["delta"] > 0 else ""
 

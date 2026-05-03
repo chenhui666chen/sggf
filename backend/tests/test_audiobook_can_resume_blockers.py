@@ -7,6 +7,7 @@
 - {script_hash|voice_config_hash|audio_fx_hash|tts_model|output_format}_mismatch
 - checkpoint_expired
 - missing_temp_assets
+- inconsistent_temp_asset_refs
 - no_checkpoint_material
 """
 from __future__ import annotations
@@ -185,6 +186,16 @@ def test_missing_temp_assets_from_cached_paths(patch_resume_context, monkeypatch
     result = _invoke(chapter_run=_make_run(), checkpoint_data=checkpoint)
     assert "missing_temp_assets" in result["blockers"]
     assert result["checks"]["missing_temp_assets"], "should list the missing asset ref"
+    assert result["checks"]["segment_asset_checks"] == [
+        {
+            "index": 0,
+            "asset_ref": "storage/audiobook_temp/run/ch1/seg_00000.mp3",
+            "storage_driver": "local_fs",
+            "sources": ["cached_audio_paths"],
+            "exists": False,
+            "reason": "missing_temp_asset",
+        }
+    ]
 
 
 def test_missing_temp_assets_from_segment_temp_object_key(
@@ -197,6 +208,126 @@ def test_missing_temp_assets_from_segment_temp_object_key(
     )
     result = _invoke(chapter_run=_make_run(), checkpoint_data=checkpoint)
     assert "missing_temp_assets" in result["blockers"]
+    assert result["checks"]["segment_asset_checks"][0]["storage_driver"] == "dashscope_oss"
+    assert result["checks"]["segment_asset_checks"][0]["sources"] == ["segments"]
+
+
+def test_segment_asset_checks_are_deduplicated_and_provider_aware(
+    patch_resume_context, monkeypatch
+):
+    patch_resume_context(_base_context())
+    checked_paths = []
+
+    def fake_path_exists(path_value):
+        checked_paths.append(path_value)
+        return True
+
+    monkeypatch.setattr(task_support, "_checkpoint_path_exists", fake_path_exists)
+    checkpoint = _base_checkpoint(
+        cached_audio_paths={
+            "0": "oss://bucket/run/ch1/seg_00000.mp3",
+            "1": "backend/data/tmp/audiobook_runs/run/ch1/seg_00001.mp3",
+        },
+        segments={
+            "0": {
+                "index": 0,
+                "temp_object_key": "oss://bucket/run/ch1/seg_00000.mp3",
+            },
+            "1": {
+                "index": 1,
+                "temp_object_key": "backend/data/tmp/audiobook_runs/run/ch1/seg_00001.mp3",
+            },
+        },
+    )
+
+    result = _invoke(chapter_run=_make_run(), checkpoint_data=checkpoint)
+
+    assert result["blockers"] == []
+    assert checked_paths == [
+        "oss://bucket/run/ch1/seg_00000.mp3",
+        "backend/data/tmp/audiobook_runs/run/ch1/seg_00001.mp3",
+    ]
+    assert result["checks"]["segment_asset_checks"] == [
+        {
+            "index": 0,
+            "asset_ref": "oss://bucket/run/ch1/seg_00000.mp3",
+            "storage_driver": "dashscope_oss",
+            "sources": ["cached_audio_paths", "segments"],
+            "exists": True,
+            "reason": None,
+        },
+        {
+            "index": 1,
+            "asset_ref": "backend/data/tmp/audiobook_runs/run/ch1/seg_00001.mp3",
+            "storage_driver": "local_fs",
+            "sources": ["cached_audio_paths", "segments"],
+            "exists": True,
+            "reason": None,
+        },
+    ]
+
+
+def test_strict_checkpoint_blocks_inconsistent_temp_asset_refs(
+    patch_resume_context,
+    patch_path_exists,
+):
+    patch_resume_context(_base_context())
+    checkpoint = _base_checkpoint(
+        cached_audio_paths={"0": "backend/data/tmp/audiobook_runs/run/ch1/seg_00000_a.mp3"},
+        segments={
+            "0": {
+                "index": 0,
+                "temp_object_key": "backend/data/tmp/audiobook_runs/run/ch1/seg_00000_b.mp3",
+            }
+        },
+    )
+
+    result = _invoke(chapter_run=_make_run(), checkpoint_data=checkpoint)
+
+    assert "inconsistent_temp_asset_refs" in result["blockers"]
+    assert result["checks"]["inconsistent_temp_asset_refs"] == [
+        {
+            "index": 0,
+            "asset_refs": [
+                {
+                    "asset_ref": "backend/data/tmp/audiobook_runs/run/ch1/seg_00000_a.mp3",
+                    "storage_driver": "local_fs",
+                    "sources": ["cached_audio_paths"],
+                    "exists": True,
+                },
+                {
+                    "asset_ref": "backend/data/tmp/audiobook_runs/run/ch1/seg_00000_b.mp3",
+                    "storage_driver": "local_fs",
+                    "sources": ["segments"],
+                    "exists": True,
+                },
+            ],
+            "reason": "multiple_asset_refs_for_segment",
+        }
+    ]
+
+
+def test_legacy_checkpoint_reports_inconsistent_refs_without_blocking(
+    patch_resume_context,
+    patch_path_exists,
+):
+    patch_resume_context(_base_context())
+    checkpoint = _base_checkpoint(
+        schema_version=None,
+        cached_audio_paths={"0": "backend/data/tmp/audiobook_runs/run/ch1/seg_00000_a.mp3"},
+        segments={
+            "0": {
+                "index": 0,
+                "temp_object_key": "backend/data/tmp/audiobook_runs/run/ch1/seg_00000_b.mp3",
+            }
+        },
+    )
+
+    result = _invoke(chapter_run=_make_run(), checkpoint_data=checkpoint)
+
+    assert result["mode"] == "legacy_degraded"
+    assert "inconsistent_temp_asset_refs" not in result["blockers"]
+    assert result["checks"]["inconsistent_temp_asset_refs"][0]["index"] == 0
 
 
 def test_no_checkpoint_material_blocker(patch_resume_context, patch_path_exists):

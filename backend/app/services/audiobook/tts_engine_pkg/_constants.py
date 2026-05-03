@@ -152,8 +152,15 @@ class TTSCost:
     total_segments: int = 0
     cache_hits: int = 0
     api_calls: int = 0
+    failed_segments: int = 0
+    failed_characters: int = 0
     estimated_cost: float = 0.0  # 单位：元
     price_per_10k: float = 1.0   # 每万字符价格，默认按 v3-flash 计算
+    cost_scope: str = "usable_audio_estimate"
+    provider_billing_note: str = (
+        "estimated_cost/api_calls only count usable audio outputs; "
+        "the provider may still bill failed, empty, or retried requests."
+    )
     
     def add_segment(self, char_count: int, is_cached: bool = False):
         """添加片段统计"""
@@ -166,6 +173,11 @@ class TTSCost:
             self.api_calls += 1
             # 根据当前模型的单价计算成本
             self.estimated_cost += (char_count / 10000) * self.price_per_10k
+
+    def add_failed_segment(self, char_count: int):
+        """记录未产出可用音频的片段，不计入可用音频成本估算。"""
+        self.failed_segments += 1
+        self.failed_characters += char_count
     
     def get_stats(self) -> Dict[str, Any]:
         """获取统计信息"""
@@ -177,6 +189,11 @@ class TTSCost:
             "cache_hits": self.cache_hits,
             "cache_hit_rate": f"{cache_rate:.1f}%",
             "api_calls": self.api_calls,
-            "estimated_cost": f"¥{self.estimated_cost:.2f}"
+            "api_calls_scope": "usable_audio_outputs_only",
+            "failed_segments": self.failed_segments,
+            "failed_characters": self.failed_characters,
+            "estimated_cost": f"¥{self.estimated_cost:.2f}",
+            "estimated_cost_scope": self.cost_scope,
+            "provider_billing_note": self.provider_billing_note,
         }
 

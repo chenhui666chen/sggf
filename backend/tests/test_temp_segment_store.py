@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import shutil
 import sys
 import uuid
@@ -20,10 +21,17 @@ from app.services.audiobook.background_jobs_shared import (
     compute_audio_project_totals,
 )
 from app.services.audiobook.engine_pkg._tts_mixin import TTSMixin
+from app.services.audiobook.render_plan import (
+    build_render_plan,
+    render_chunks_to_timing_segments_payload,
+    render_plan_to_payload,
+)
+from app.services.audiobook.tts_batch_planner import plan_tts_batches
 from app.services.audiobook.tts_engine_pkg._base import TTSEngineBase
 from app.services.audiobook.task_support import (
     _checkpoint_path_exists,
     _extract_checkpoint_segment_indices,
+    _mark_checkpoint_recorded_segment_statuses,
 )
 from app.services.audiobook.temp_segment_janitor import (
     build_completed_checkpoint_cleanup_document,
@@ -96,6 +104,117 @@ class _DummyResumeTTSMixin(TTSMixin):
         return audio_list
 
 
+class _RecordingResumeTTSMixin(TTSMixin):
+    def __init__(self):
+        self.calls = []
+
+    async def _synthesize_segments(
+        self,
+        script_segments,
+        debug_save_segments=False,
+        debug_output_dir=None,
+        progress_callback=None,
+    ):
+        self.calls.append([getattr(segment, "text", "") for segment in script_segments])
+        audio_list = []
+        total_segments = len(script_segments)
+        batch_audio_list = []
+        for index, segment in enumerate(script_segments):
+            audio_bytes = f"retried::{segment.text}".encode("utf-8")
+            audio_list.append(audio_bytes)
+            batch_audio_list.append(audio_bytes)
+            if progress_callback:
+                progress_callback(
+                    {
+                        "event": "segment",
+                        "batch_index": 0,
+                        "num_batches": 1,
+                        "start_idx": 0,
+                        "end_idx": total_segments,
+                        "segment_offset": index,
+                        "segment_index": index,
+                        "audio_bytes": audio_bytes,
+                        "segment_status": "succeeded",
+                        "completed_segments": len(audio_list),
+                        "total_segments": total_segments,
+                        "successful_segments": len(audio_list),
+                    }
+                )
+        if progress_callback:
+            progress_callback(
+                {
+                    "event": "batch_completed",
+                    "batch_index": 0,
+                    "num_batches": 1,
+                    "start_idx": 0,
+                    "end_idx": total_segments,
+                    "batch_audio_list": batch_audio_list,
+                    "completed_segments": len(audio_list),
+                    "total_segments": total_segments,
+                    "successful_segments": len(audio_list),
+                    "batch_successful_segments": len(audio_list),
+                }
+            )
+        return audio_list
+
+
+class _DummyFailingResumeTTSMixin(TTSMixin):
+    async def _synthesize_segments(
+        self,
+        script_segments,
+        debug_save_segments=False,
+        debug_output_dir=None,
+        progress_callback=None,
+    ):
+        audio_list = []
+        total_segments = len(script_segments)
+        for index, segment in enumerate(script_segments):
+            if index == 1:
+                audio_bytes = b""
+                if progress_callback:
+                    progress_callback(
+                        {
+                            "event": "segment",
+                            "batch_index": 0,
+                            "num_batches": 1,
+                            "start_idx": 0,
+                            "end_idx": total_segments,
+                            "segment_offset": index,
+                            "segment_index": index,
+                            "audio_bytes": audio_bytes,
+                            "segment_status": "failed",
+                            "error_message": "provider_empty_audio",
+                            "error_type": "EmptyAudio",
+                            "completed_segments": index + 1,
+                            "total_segments": total_segments,
+                            "successful_segments": len([item for item in audio_list if item]),
+                        }
+                    )
+                audio_list.append(audio_bytes)
+                continue
+
+            audio_bytes = f"generated::{segment.text}".encode("utf-8")
+            audio_list.append(audio_bytes)
+            if progress_callback:
+                progress_callback(
+                    {
+                        "event": "segment",
+                        "batch_index": 0,
+                        "num_batches": 1,
+                        "start_idx": 0,
+                        "end_idx": total_segments,
+                        "segment_offset": index,
+                        "segment_index": index,
+                        "audio_bytes": audio_bytes,
+                        "segment_status": "succeeded",
+                        "completed_segments": index + 1,
+                        "total_segments": total_segments,
+                        "successful_segments": len([item for item in audio_list if item]),
+                    }
+                )
+        return audio_list
+
+
 class _DummyBatchProgressTTSEngine(TTSEngineBase):
     async def synthesize(
         self,
@@ -103,6 +222,18 @@ class _DummyBatchProgressTTSEngine(TTSEngineBase):
         voice_params,
         emotion="neutral",
     ) -> bytes:
+        return f"audio::{text}".encode("utf-8")
+
+
+class _DummyFailingBatchProgressTTSEngine(TTSEngineBase):
+    async def synthesize(
+        self,
+        text,
+        voice_params,
+        emotion="neutral",
+    ) -> bytes:
+        if text == "seg-fail":
+            raise RuntimeError("provider exploded")
         return f"audio::{text}".encode("utf-8")
 
 
@@ -134,6 +265,7 @@ def test_save_segment_audio_batch_persists_files_and_metadata():
         first_segment = result["segments"]["0"]
         assert first_segment["status"] == "cached"
         assert first_segment["file_size"] == len(audio_list[0])
+        assert first_segment["content_sha1"] == hashlib.sha1(audio_list[0]).hexdigest()
         assert first_segment["temp_object_key"] == first_path.as_posix()
     finally:
         _cleanup_run_assets(run_id=run_id, chapter_id=chapter_id)
@@ -232,6 +364,26 @@ def test_load_cached_segment_audio_reads_safe_temp_files():
         _cleanup_run_assets(run_id=run_id, chapter_id=chapter_id)
 
 
+def test_load_cached_segment_audio_skips_content_mismatch():
+    run_id = f"pytest_{uuid.uuid4().hex}"
+    chapter_id = 668
+
+    try:
+        temp_cache = save_segment_audio_batch(
+            run_id=run_id,
+            chapter_id=chapter_id,
+            audio_list=[b"zero", b"one"],
+            format="mp3",
+        )
+        Path(temp_cache["cached_audio_paths"][0]).write_bytes(b"ZERO")
+
+        loaded = load_cached_segment_audio(temp_cache, max_segment_count=2)
+
+        assert loaded == {1: b"one"}
+    finally:
+        _cleanup_run_assets(run_id=run_id, chapter_id=chapter_id)
+
+
 def test_save_segment_audio_map_persists_sparse_segments():
     run_id = f"pytest_{uuid.uuid4().hex}"
     chapter_id = 67
@@ -285,6 +437,66 @@ def test_extract_checkpoint_segment_indices_derives_from_cached_material():
     assert _extract_checkpoint_segment_indices(checkpoint) == [0, 1, 2]
 
 
+def test_render_plan_builds_stable_tts_signatures():
+    segment = SimpleNamespace(
+        text="seg-0",
+        speaker="Narrator",
+        emotion="neutral",
+        performance_notes="calm delivery",
+        voice_params={"speaker": "voice-a", "pause_after": 1.0},
+        type="narration",
+    )
+
+    first = build_render_plan([segment])
+    second = build_render_plan([segment])
+
+    assert len(first) == 1
+    assert first[0].cache_key == second[0].cache_key
+    assert first[0].voice_params["performance_notes"] == "calm delivery"
+    assert render_plan_to_payload(first)[0]["source_segment_indices"] == [0]
+
+
+def test_render_plan_splits_long_segments_and_keeps_terminal_pause_on_last_chunk():
+    segment = SimpleNamespace(
+        text=("甲" * 36) + "，" + ("乙" * 36) + "，" + ("丙" * 36) + "。[pause:2]",
+        speaker="旁白",
+        emotion="neutral",
+        performance_notes="稳定叙述",
+        voice_params={"speaker": "voice-a", "pause_after": 1.5},
+        type="narration",
+    )
+
+    chunks = build_render_plan([segment], max_chunk_chars=80)
+    timing_payload = render_chunks_to_timing_segments_payload(chunks)
+
+    assert len(chunks) == 2
+    assert [chunk.index for chunk in chunks] == [0, 1]
+    assert all(chunk.source_segment_indices == [0] for chunk in chunks)
+    assert all(len(chunk.text) <= 80 for chunk in chunks)
+    assert chunks[0].voice_params["render_chunk_split"] is True
+    assert chunks[0].voice_params["mixer_segment_type"] == "phrase"
+    assert "pause_after" not in chunks[0].voice_params
+    assert "pause_after_ms" not in chunks[0].voice_params
+    assert chunks[1].voice_params["pause_after"] == 1.5
+    assert chunks[1].voice_params["pause_after_ms"] == 2000
+    assert timing_payload[0]["text"] == chunks[0].text
+    assert timing_payload[1]["speaker"] == "旁白"
+
+
+def test_tts_batch_planner_splits_by_voice_and_char_budget():
+    segments = [
+        {"text": "a" * 10, "voice_params": {"speaker": "voice-a"}},
+        {"text": "b" * 10, "voice_params": {"speaker": "voice-a"}},
+        {"text": "c" * 10, "voice_params": {"speaker": "voice-b"}},
+        {"text": "d" * 50, "voice_params": {"speaker": "voice-b"}},
+    ]
+
+    batches = plan_tts_batches(segments, max_items=10, max_chars=25)
+
+    assert [batch.segment_indices for batch in batches] == [[0, 1], [2], [3]]
+    assert [batch.voice_key for batch in batches] == ["voice-a", "voice-b", "voice-b"]
+
+
 def test_build_checkpoint_patch_from_generation_result_includes_completed_indices():
     patch = build_checkpoint_patch_from_generation_result(
         result={
@@ -292,6 +504,30 @@ def test_build_checkpoint_patch_from_generation_result_includes_completed_indice
                 "temp_asset_prefix": "backend/data/tmp/audiobook_runs/run_x/chapter_00001",
                 "cached_audio_paths": {"2": "c.mp3", 0: "a.mp3"},
                 "segments": {"0": {"temp_object_key": "a.mp3"}},
+                "segment_statuses": {
+                    "0": {
+                        "index": 0,
+                        "status": "cached",
+                        "source": "tts_synthesis",
+                        "recovery_stage": "temp_asset_saved",
+                    },
+                    "1": {
+                        "index": 1,
+                        "status": "pending",
+                        "source": None,
+                        "recovery_stage": "pending",
+                    },
+                },
+                "failed_segment_indices": [1, "bad"],
+                "failed_segment_errors": {
+                    "1": {
+                        "error_message": "provider_empty_audio",
+                        "error_type": "EmptyAudio",
+                    }
+                },
+                "render_plan_version": 1,
+                "render_chunk_count": 2,
+                "render_plan": [{"index": 0, "cache_key": "sig-0"}],
             }
         },
         task_id="task_123",
@@ -301,6 +537,79 @@ def test_build_checkpoint_patch_from_generation_result_includes_completed_indice
     assert patch["engine_task_id"] == "task_123"
     assert patch["output_path"] == "audiobooks/project_1/chapter_001.mp3"
     assert patch["completed_segment_indices"] == [0, 2]
+    assert patch["segment_statuses"]["0"]["status"] == "cached"
+    assert patch["segment_statuses"]["0"]["recovery_stage"] == "temp_asset_saved"
+    assert patch["segment_statuses"]["1"]["status"] == "pending"
+    assert patch["segment_statuses"]["1"]["recovery_stage"] == "pending"
+    assert patch["failed_segment_indices"] == [1]
+    assert patch["failed_segment_errors"]["1"]["error_message"] == "provider_empty_audio"
+    assert patch["render_plan_version"] == 1
+    assert patch["render_chunk_count"] == 2
+    assert patch["render_plan"] == [{"index": 0, "cache_key": "sig-0"}]
+
+
+def test_attach_render_plan_metadata_marks_temp_asset_saved_stage():
+    temp_cache = {
+        "cached_audio_paths": {
+            0: "backend/data/tmp/audiobook_runs/run_x/chapter_00001/segment_00000_cache.mp3",
+        },
+    }
+    metadata = {
+        "segment_statuses": {
+            "0": {
+                "index": 0,
+                "status": "cached",
+                "source": "tts_synthesis",
+                "recovery_stage": "synthesized",
+            },
+            "1": {
+                "index": 1,
+                "status": "pending",
+                "source": None,
+                "recovery_stage": "pending",
+            },
+        }
+    }
+
+    result = TTSMixin()._attach_render_plan_metadata(temp_cache, metadata)
+
+    assert result["segment_statuses"]["0"]["recovery_stage"] == "temp_asset_saved"
+    assert result["segment_statuses"]["0"]["source"] == "tts_synthesis"
+    assert result["segment_statuses"]["1"]["recovery_stage"] == "pending"
+
+
+def test_mark_checkpoint_recorded_segment_statuses_uses_checkpoint_paths():
+    checkpoint = {
+        "cached_audio_paths": {
+            "0": "backend/data/tmp/audiobook_runs/run_x/chapter_00001/segment_00000_cache.mp3",
+        },
+        "segment_statuses": {
+            "0": {
+                "index": 0,
+                "status": "cached",
+                "source": "tts_synthesis",
+                "recovery_stage": "temp_asset_saved",
+            },
+            "1": {
+                "index": 1,
+                "status": "cached",
+                "source": "tts_synthesis",
+                "recovery_stage": "synthesized",
+            },
+            "2": {
+                "index": 2,
+                "status": "pending",
+                "source": None,
+                "recovery_stage": "pending",
+            },
+        },
+    }
+
+    _mark_checkpoint_recorded_segment_statuses(checkpoint)
+
+    assert checkpoint["segment_statuses"]["0"]["recovery_stage"] == "checkpoint_recorded"
+    assert checkpoint["segment_statuses"]["1"]["recovery_stage"] == "synthesized"
+    assert checkpoint["segment_statuses"]["2"]["recovery_stage"] == "pending"
 
 
 def test_build_expired_checkpoint_cleanup_document_clears_resume_material():
@@ -513,6 +822,78 @@ def test_synthesize_segments_with_resume_reuses_cached_audio_and_only_generates_
         _cleanup_run_assets(run_id=run_id, chapter_id=chapter_id)
 
 
+def test_synthesize_segments_with_resume_skips_stale_render_signature():
+    run_id = f"pytest_{uuid.uuid4().hex}"
+    chapter_id = 925
+
+    try:
+        temp_cache = save_segment_audio_batch(
+            run_id=run_id,
+            chapter_id=chapter_id,
+            audio_list=[b"cached-stale"],
+            format="mp3",
+        )
+        stale_plan = render_plan_to_payload(build_render_plan([SimpleNamespace(text="old-text")]))
+        dummy = _DummyResumeTTSMixin()
+
+        result = asyncio.run(
+            dummy._synthesize_segments_with_resume(
+                [SimpleNamespace(text="new-text")],
+                resume_checkpoint={
+                    "total_segments": 1,
+                    "cached_audio_paths": {
+                        "0": temp_cache["cached_audio_paths"][0],
+                    },
+                    "render_plan": stale_plan,
+                },
+            )
+        )
+
+        assert result["reused_indices"] == []
+        assert result["synthesized_indices"] == [0]
+        assert result["audio_list"] == [b"generated::new-text"]
+    finally:
+        _cleanup_run_assets(run_id=run_id, chapter_id=chapter_id)
+
+
+def test_synthesize_segments_with_resume_remaps_cached_audio_by_render_signature():
+    run_id = f"pytest_{uuid.uuid4().hex}"
+    chapter_id = 926
+
+    try:
+        old_segments = [
+            SimpleNamespace(text="removed"),
+            SimpleNamespace(text="kept"),
+        ]
+        temp_cache = save_segment_audio_batch(
+            run_id=run_id,
+            chapter_id=chapter_id,
+            audio_list=[b"cached-removed", b"cached-kept"],
+            format="mp3",
+        )
+        dummy = _DummyResumeTTSMixin()
+
+        result = asyncio.run(
+            dummy._synthesize_segments_with_resume(
+                [SimpleNamespace(text="kept")],
+                resume_checkpoint={
+                    "total_segments": 2,
+                    "cached_audio_paths": {
+                        "0": temp_cache["cached_audio_paths"][0],
+                        "1": temp_cache["cached_audio_paths"][1],
+                    },
+                    "render_plan": render_plan_to_payload(build_render_plan(old_segments)),
+                },
+            )
+        )
+
+        assert result["reused_indices"] == [0]
+        assert result["synthesized_indices"] == []
+        assert result["audio_list"] == [b"cached-kept"]
+    finally:
+        _cleanup_run_assets(run_id=run_id, chapter_id=chapter_id)
+
+
 def test_synthesize_segments_with_resume_falls_back_to_source_checkpoint():
     run_id = f"pytest_{uuid.uuid4().hex}"
     chapter_id = 93
@@ -590,6 +971,18 @@ def test_synthesize_segments_with_resume_reports_incremental_progress_payloads()
         assert len(progress_events) >= 3
         assert progress_events[0]["completed_segment_indices"] == [0]
         assert progress_events[0]["progress"] == (1 / 3)
+        assert progress_events[0]["segment_statuses"]["0"] == {
+            "index": 0,
+            "status": "cached",
+            "source": "resume_cache",
+            "recovery_stage": "cache_loaded",
+        }
+        assert progress_events[0]["segment_statuses"]["1"] == {
+            "index": 1,
+            "status": "pending",
+            "source": None,
+            "recovery_stage": "pending",
+        }
         assert [0, 1] in completed_states
         assert completed_states.index([0, 1]) < completed_states.index([0, 1, 2])
         middle_event = next(
@@ -599,9 +992,128 @@ def test_synthesize_segments_with_resume_reports_incremental_progress_payloads()
         )
         assert middle_event["progress"] == (2 / 3)
         assert middle_event["synthesized_indices"] == [1]
+        assert middle_event["segment_statuses"]["1"] == {
+            "index": 1,
+            "status": "cached",
+            "source": "tts_synthesis",
+            "recovery_stage": "synthesized",
+        }
         assert progress_events[-1]["completed_segment_indices"] == [0, 1, 2]
         assert progress_events[-1]["progress"] == 1.0
         assert progress_events[-1]["synthesized_indices"] == [1, 2]
+        assert progress_events[-1]["segment_statuses"]["2"] == {
+            "index": 2,
+            "status": "cached",
+            "source": "tts_synthesis",
+            "recovery_stage": "synthesized",
+        }
+    finally:
+        _cleanup_run_assets(run_id=run_id, chapter_id=chapter_id)
+
+
+def test_synthesize_segments_with_resume_reports_failed_segment_status():
+    dummy = _DummyFailingResumeTTSMixin()
+    progress_events = []
+    script_segments = [
+        SimpleNamespace(text="seg-0"),
+        SimpleNamespace(text="seg-1"),
+        SimpleNamespace(text="seg-2"),
+    ]
+
+    result = asyncio.run(
+        dummy._synthesize_segments_with_resume(
+            script_segments,
+            resume_checkpoint={},
+            progress_callback=progress_events.append,
+        )
+    )
+
+    assert result["audio_list"] == [
+        b"generated::seg-0",
+        b"",
+        b"generated::seg-2",
+    ]
+    assert result["synthesized_indices"] == [0, 2]
+    assert result["failed_segment_indices"] == [1]
+    assert result["failed_segment_errors"]["1"] == {
+        "error_message": "provider_empty_audio",
+        "error_type": "EmptyAudio",
+    }
+    assert result["segment_statuses"]["1"] == {
+        "index": 1,
+        "status": "failed",
+        "source": "tts_synthesis",
+        "recovery_stage": "failed",
+        "error": {
+            "error_message": "provider_empty_audio",
+            "error_type": "EmptyAudio",
+        },
+    }
+    failed_event = next(
+        event
+        for event in progress_events
+        if event.get("failed_segment_indices") == [1]
+    )
+    assert failed_event["segment_statuses"]["1"]["status"] == "failed"
+    assert failed_event["failed_segment_errors"]["1"]["error_type"] == "EmptyAudio"
+
+
+def test_synthesize_segments_with_resume_retries_only_failed_segment_from_checkpoint():
+    run_id = f"pytest_{uuid.uuid4().hex}"
+    chapter_id = 941
+    script_segments = [
+        SimpleNamespace(text="seg-0"),
+        SimpleNamespace(text="seg-1"),
+        SimpleNamespace(text="seg-2"),
+    ]
+
+    try:
+        failing_dummy = _DummyFailingResumeTTSMixin()
+        first_result = asyncio.run(
+            failing_dummy._synthesize_segments_with_resume(
+                script_segments,
+                resume_checkpoint={},
+            )
+        )
+        temp_cache = save_segment_audio_map(
+            run_id=run_id,
+            chapter_id=chapter_id,
+            audio_map={
+                index: audio_bytes
+                for index, audio_bytes in enumerate(first_result["audio_list"])
+                if audio_bytes
+            },
+            format="mp3",
+        )
+        temp_cache = failing_dummy._attach_render_plan_metadata(temp_cache, first_result)
+        retry_checkpoint = build_checkpoint_patch_from_generation_result(
+            result={"temp_segment_cache": temp_cache},
+            task_id="retry_task",
+            output_path="audiobooks/project_1/chapter_941.mp3",
+        )
+        retry_dummy = _RecordingResumeTTSMixin()
+
+        retry_result = asyncio.run(
+            retry_dummy._synthesize_segments_with_resume(
+                script_segments,
+                resume_checkpoint=retry_checkpoint,
+            )
+        )
+
+        assert retry_dummy.calls == [["seg-1"]]
+        assert retry_result["reused_indices"] == [0, 2]
+        assert retry_result["synthesized_indices"] == [1]
+        assert retry_result["failed_segment_indices"] == []
+        assert retry_result["audio_list"] == [
+            b"generated::seg-0",
+            b"retried::seg-1",
+            b"generated::seg-2",
+        ]
+        assert retry_result["segment_statuses"]["0"]["source"] == "resume_cache"
+        assert retry_result["segment_statuses"]["1"]["source"] == "tts_synthesis"
+        assert retry_result["segment_statuses"]["2"]["source"] == "resume_cache"
+        assert retry_checkpoint["failed_segment_indices"] == [1]
+        assert retry_checkpoint["segment_statuses"]["1"]["recovery_stage"] == "failed"
     finally:
         _cleanup_run_assets(run_id=run_id, chapter_id=chapter_id)
 
@@ -638,7 +1150,68 @@ def test_synthesize_batch_emits_segment_progress_before_batch_completed():
     assert progress_events[1]["segment_index"] == 1
     assert progress_events[1]["audio_bytes"] == b"audio::seg-1"
     assert progress_events[1]["successful_segments"] == 2
-    assert progress_events[2]["batch_audio_list"] == [b"audio::seg-0", b"audio::seg-1"]
+
+
+def test_synthesize_batch_reports_segment_failure_reason():
+    engine = _DummyFailingBatchProgressTTSEngine(
+        enable_cache=False,
+        max_concurrent=1,
+        request_delay=0,
+    )
+    progress_events = []
+
+    audio_list = asyncio.run(
+        engine.synthesize_batch(
+            [
+                {"text": "seg-ok", "voice_params": {}, "emotion": "neutral"},
+                {"text": "seg-fail", "voice_params": {}, "emotion": "neutral"},
+            ],
+            batch_size=2,
+            batch_interval=0,
+            progress_callback=progress_events.append,
+        )
+    )
+
+    assert audio_list == [b"audio::seg-ok", b""]
+    failed_event = progress_events[1]
+    assert failed_event["event"] == "segment"
+    assert failed_event["segment_index"] == 1
+    assert failed_event["segment_status"] == "failed"
+    assert failed_event["error_message"] == "provider exploded"
+    assert failed_event["error_type"] == "RuntimeError"
+    assert failed_event["successful_segments"] == 1
+
+
+def test_synthesize_batch_uses_planned_voice_boundaries():
+    engine = _DummyBatchProgressTTSEngine(
+        enable_cache=False,
+        max_concurrent=1,
+        request_delay=0,
+    )
+    progress_events = []
+
+    audio_list = asyncio.run(
+        engine.synthesize_batch(
+            [
+                {"text": "seg-0", "voice_params": {"speaker": "voice-a"}, "emotion": "neutral"},
+                {"text": "seg-1", "voice_params": {"speaker": "voice-b"}, "emotion": "neutral"},
+            ],
+            batch_size=10,
+            batch_interval=0,
+            progress_callback=progress_events.append,
+        )
+    )
+
+    batch_events = [event for event in progress_events if event["event"] == "batch_completed"]
+
+    assert audio_list == [b"audio::seg-0", b"audio::seg-1"]
+    assert len(batch_events) == 2
+    assert batch_events[0]["start_idx"] == 0
+    assert batch_events[0]["end_idx"] == 1
+    assert batch_events[1]["start_idx"] == 1
+    assert batch_events[1]["end_idx"] == 2
+    assert batch_events[0]["batch_audio_list"] == [b"audio::seg-0"]
+    assert batch_events[1]["batch_audio_list"] == [b"audio::seg-1"]
 
 
 def test_save_segment_audio_batch_supports_dashscope_oss(monkeypatch):

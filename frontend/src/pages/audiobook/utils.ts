@@ -1,19 +1,41 @@
-import { STAGE_KEYS } from './constants'
+import { EXPORT_STAGE_CONFIG, GENERATION_STAGE_CONFIG, STAGE_KEYS } from './constants'
+export { buildAudiobookChapterAssetUuid } from '../../utils/audiobookAssetIds'
 import type {
   NavigationType,
   ScriptReviewDetail,
+  StageConfig,
   StageInfo,
   StageKey,
   StageStatus,
   TaskStatus,
 } from './types'
 
-export function buildAudiobookChapterDownloadUrl(audiobookProjectId: number, chapterId: number): string {
-  return `/api/v1/audiobook/download/${audiobookProjectId}/${chapterId}`
+type ApiRecord = Record<string, unknown>
+
+type LegacyPerformanceNavigation = {
+  type: number
+  TYPE_RELOAD: number
+  TYPE_BACK_FORWARD: number
 }
 
-export function buildAudiobookChapterAssetUuid(audiobookProjectId: number, chapterId: number): string {
-  return `audiobook-${audiobookProjectId}-${chapterId}`
+const isRecord = (value: unknown): value is ApiRecord =>
+  Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+
+const getNumberValue = (record: ApiRecord, key: string): number | undefined => {
+  const value = record[key]
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined
+}
+
+const getStringValue = (record: ApiRecord, key: string): string | undefined => {
+  const value = record[key]
+  return typeof value === 'string' ? value : undefined
+}
+
+const getStringArrayValue = (value: unknown): string[] =>
+  Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : []
+
+export function buildAudiobookChapterDownloadUrl(audiobookProjectId: number, chapterId: number): string {
+  return `/api/v1/audiobook/download/${audiobookProjectId}/${chapterId}`
 }
 
 export function extractDownloadFilename(contentDisposition: string | null | undefined, fallback: string): string {
@@ -47,26 +69,38 @@ export const createEmptyStageMap = (): Record<StageKey, StageInfo> =>
     return acc
   }, {} as Record<StageKey, StageInfo>)
 
-export const coerceStageStatus = (value: any): StageStatus => {
+export const coerceStageStatus = (value: unknown): StageStatus => {
   if (value === 'running' || value === 'completed' || value === 'failed' || value === 'pending') {
     return value
   }
   return 'pending'
 }
 
-export const normalizeStageEntry = (raw: any): StageInfo => ({
-  status: coerceStageStatus(raw?.status),
-  progress: typeof raw?.progress === 'number' ? raw.progress : 0,
-  start_time: raw?.start_time,
-  end_time: raw?.end_time,
-  error_message: raw?.error ?? raw?.error_message,
-  metrics: raw?.metrics,
-  message: raw?.message,
-})
+export const isProjectExportTask = (task: Pick<TaskStatus, 'task_type'> | null | undefined) =>
+  task?.task_type === 'export_m4b' || task?.task_type === 'export_audacity'
 
-export const normalizeTaskStatusResponse = (payload: any): TaskStatus => {
-  const detail = payload?.detail ?? {}
-  const rawStages = (detail?.stages ?? {}) as Record<string, any>
+export const getStageConfigForTask = (task: Pick<TaskStatus, 'task_type'>): readonly StageConfig[] =>
+  isProjectExportTask(task) ? EXPORT_STAGE_CONFIG : GENERATION_STAGE_CONFIG
+
+export const normalizeStageEntry = (raw: unknown): StageInfo => {
+  const entry = isRecord(raw) ? raw : {}
+  const errorMessage = entry.error_message ?? entry.error
+
+  return {
+    status: coerceStageStatus(entry.status),
+    progress: getNumberValue(entry, 'progress') ?? 0,
+    start_time: getStringValue(entry, 'start_time'),
+    end_time: getStringValue(entry, 'end_time'),
+    error_message: typeof errorMessage === 'string' ? errorMessage : undefined,
+    metrics: isRecord(entry.metrics) ? entry.metrics : undefined,
+    message: getStringValue(entry, 'message'),
+  }
+}
+
+export const normalizeTaskStatusResponse = (payload: unknown): TaskStatus => {
+  const task = isRecord(payload) ? payload : {}
+  const detail = isRecord(task.detail) ? task.detail : {}
+  const rawStages = isRecord(detail.stages) ? detail.stages : {}
   const normalizedStages = createEmptyStageMap()
 
   Object.entries(rawStages).forEach(([key, value]) => {
@@ -76,28 +110,63 @@ export const normalizeTaskStatusResponse = (payload: any): TaskStatus => {
     }
   })
 
-  const currentStage = (payload?.current_stage || detail?.current_stage) as string | undefined
+  const currentStageValue = task.current_stage || detail.current_stage
+  const currentStage = typeof currentStageValue === 'string' ? currentStageValue : undefined
   if (currentStage && normalizedStages[currentStage as StageKey]) {
     const stageInfo = normalizedStages[currentStage as StageKey]
-    if (stageInfo.status === 'pending' && payload?.status === 'running') {
+    if (stageInfo.status === 'pending' && task.status === 'running') {
       stageInfo.status = 'running'
     }
   }
 
-  const taskId = payload?.celery_task_id || payload?.task_id || String(payload?.id || '')
+  const rawTaskId = task.celery_task_id || task.task_id || task.id
+  const taskId = typeof rawTaskId === 'string'
+    ? rawTaskId
+    : rawTaskId == null
+      ? ''
+      : String(rawTaskId)
 
   return {
     task_id: taskId,
-    audiobook_project_id: payload?.audiobook_project_id,
-    chapter_id: payload?.chapter_id ?? null,
-    status: coerceStageStatus(payload?.status),
+    audiobook_project_id: getNumberValue(task, 'audiobook_project_id') ?? 0,
+    chapter_id: getNumberValue(task, 'chapter_id') ?? null,
+    task_type: typeof task.task_type === 'string' ? task.task_type : null,
+    status: coerceStageStatus(task.status),
     current_stage: currentStage,
-    progress: typeof payload?.progress === 'number' ? payload.progress : 0,
+    progress: getNumberValue(task, 'progress') ?? 0,
     stages: normalizedStages,
-    created_at: payload?.created_at,
-    updated_at: payload?.updated_at,
+    created_at: getStringValue(task, 'created_at'),
+    updated_at: getStringValue(task, 'updated_at'),
     detail,
-    overall_progress: typeof detail?.overall_progress === 'number' ? detail.overall_progress : undefined,
+    overall_progress: getNumberValue(detail, 'overall_progress'),
+  }
+}
+
+export const buildPendingTaskStatus = ({
+  taskId,
+  audiobookProjectId,
+  taskType,
+  chapterId = null,
+}: {
+  taskId: string
+  audiobookProjectId: number
+  taskType?: string | null
+  chapterId?: number | null
+}): TaskStatus => {
+  const now = new Date().toISOString()
+  return {
+    task_id: taskId,
+    audiobook_project_id: audiobookProjectId,
+    chapter_id: chapterId,
+    task_type: taskType || null,
+    status: 'pending',
+    current_stage: null,
+    progress: 0,
+    stages: createEmptyStageMap(),
+    created_at: now,
+    updated_at: now,
+    detail: {},
+    overall_progress: 0,
   }
 }
 
@@ -114,7 +183,9 @@ export const detectNavigationType = (): NavigationType => {
         return entries[0].type
       }
     }
-    const legacyNavigation = (performance as any).navigation
+    const legacyNavigation = (
+      performance as Performance & { navigation?: LegacyPerformanceNavigation }
+    ).navigation
     if (legacyNavigation) {
       switch (legacyNavigation.type) {
         case legacyNavigation.TYPE_RELOAD:
@@ -164,20 +235,72 @@ export const categoryLabelMap: Record<string, string> = {
   pacing: '节奏',
 }
 
-export const normalizeScriptReview = (raw: any): ScriptReviewDetail | null => {
-  if (!raw || typeof raw !== 'object') return null
-  const safeIssues = Array.isArray(raw.issues) ? raw.issues : []
+const normalizeScriptQualityMetrics = (
+  value: unknown,
+): ScriptReviewDetail['script_quality'] | undefined => {
+  if (!isRecord(value)) return undefined
   return {
-    overall_score: typeof raw.overall_score === 'number' ? raw.overall_score : undefined,
-    overall_grade: raw.overall_grade,
+    naturalness_score: getNumberValue(value, 'naturalness_score'),
+    clarity_score: getNumberValue(value, 'clarity_score'),
+    engagement_score: getNumberValue(value, 'engagement_score'),
+    total_segments: getNumberValue(value, 'total_segments'),
+    average_segment_length: getNumberValue(value, 'average_segment_length'),
+  }
+}
+
+const normalizeScriptAudioBalanceMetrics = (
+  value: unknown,
+): ScriptReviewDetail['audio_balance'] | undefined => {
+  if (!isRecord(value)) return undefined
+  return {
+    sound_effects: getStringValue(value, 'sound_effects'),
+    music: getStringValue(value, 'music'),
+    voice_differentiation: getStringValue(value, 'voice_differentiation'),
+    total_effects: getNumberValue(value, 'total_effects'),
+    total_music_cues: getNumberValue(value, 'total_music_cues'),
+    effects_per_minute: getNumberValue(value, 'effects_per_minute'),
+  }
+}
+
+const normalizeScriptPacingMetrics = (
+  value: unknown,
+): ScriptReviewDetail['pacing'] | undefined => {
+  if (!isRecord(value)) return undefined
+  return {
+    estimated_duration: getStringValue(value, 'estimated_duration'),
+    pacing_issues: getStringArrayValue(value.pacing_issues),
+    average_segment_duration: getStringValue(value, 'average_segment_duration'),
+    total_segments: getNumberValue(value, 'total_segments'),
+  }
+}
+
+const normalizeScriptReviewIssues = (value: unknown): NonNullable<ScriptReviewDetail['issues']> =>
+  Array.isArray(value)
+    ? value
+        .filter(isRecord)
+        .map((issue) => ({
+          location: getStringValue(issue, 'location'),
+          severity: getStringValue(issue, 'severity'),
+          category: getStringValue(issue, 'category'),
+          description: getStringValue(issue, 'description'),
+          suggestion: getStringValue(issue, 'suggestion'),
+        }))
+    : []
+
+export const normalizeScriptReview = (raw: unknown): ScriptReviewDetail | null => {
+  if (!isRecord(raw)) return null
+  const safeIssues = normalizeScriptReviewIssues(raw.issues)
+  return {
+    overall_score: getNumberValue(raw, 'overall_score'),
+    overall_grade: getStringValue(raw, 'overall_grade'),
     issues_count:
-      typeof raw.issues_count === 'number'
+      typeof raw.issues_count === 'number' && Number.isFinite(raw.issues_count)
         ? raw.issues_count
         : safeIssues.length,
-    script_quality: raw.script_quality,
-    audio_balance: raw.audio_balance,
-    pacing: raw.pacing,
-    revision_suggestions: Array.isArray(raw.revision_suggestions) ? raw.revision_suggestions : [],
+    script_quality: normalizeScriptQualityMetrics(raw.script_quality),
+    audio_balance: normalizeScriptAudioBalanceMetrics(raw.audio_balance),
+    pacing: normalizeScriptPacingMetrics(raw.pacing),
+    revision_suggestions: getStringArrayValue(raw.revision_suggestions),
     issues: safeIssues,
   }
 }

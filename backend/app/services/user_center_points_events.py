@@ -36,6 +36,15 @@ POINTS_BILLING_EVENT_KIND_RELEASE = "release"
 
 POINTS_BILLING_MODULE_AUDIOBOOK = "audiobook"
 POINTS_BILLING_MODULE_DREAMWEAVER = "dreamweaver"
+POINTS_BILLING_MODULE_NOVEL = "novel"
+POINTS_BILLING_MODULE_BOOK_PARSER = "book_parser"
+POINTS_BILLING_MODULE_ASSET_STUDIO = "asset_studio"
+
+
+def build_points_billing_key(module_key: str, business_key: str) -> str:
+    normalized_module = str(module_key or "").strip().lower() or "unknown"
+    normalized_business_key = str(business_key or "").strip()
+    return f"{normalized_module}:{normalized_business_key}" if normalized_business_key else f"{normalized_module}:"
 
 
 def build_audiobook_billing_key(audiobook_project_id: int) -> str:
@@ -304,6 +313,303 @@ def _build_operating_snapshot_payload(
     return snapshot.to_payload()
 
 
+def _build_generic_pricing_payload(
+    *,
+    pricing_snapshot: object,
+    module_key: str,
+    basis_yuan: float | None,
+    provider_key: str | None,
+    include_freeze_buffer_rate: bool = False,
+) -> dict[str, object]:
+    config = getattr(pricing_snapshot, "config", None)
+    if config is None:
+        return {}
+
+    payload: dict[str, object] = {
+        "points_per_yuan": int(config.points_per_yuan),
+        "user_price_basis": config.user_price_basis,
+        "user_price_rate": round(float(config.user_price_rate), 4),
+    }
+    if include_freeze_buffer_rate:
+        payload["freeze_buffer_rate"] = round(float(config.freeze_buffer_rate), 4)
+
+    if basis_yuan is not None:
+        payload["operating_snapshot"] = _build_operating_snapshot_payload(
+            pricing_snapshot=pricing_snapshot,
+            module_key=module_key,
+            basis_yuan=_to_non_negative_float(basis_yuan),
+            provider_key=provider_key,
+        )
+    return payload
+
+
+def record_points_billing_freeze(
+    *,
+    db: Session,
+    actor_user_id: int,
+    actor_username: str,
+    target_user_id: int,
+    billing_key: str,
+    module_key: str,
+    amount_points: float,
+    amount_yuan: float | None,
+    title: str,
+    summary: str,
+    action_path: str | None,
+    action_label: str | None,
+    request_context: object | None = None,
+    default_request_method: str = "SYSTEM",
+    default_request_path: str = "/internal/points-billing/freeze",
+    operation_desc: str | None = None,
+    provider_key: str | None = None,
+    extra_payload: dict[str, Any] | None = None,
+) -> AdminOperationLog | None:
+    normalized_billing_key = _safe_text(billing_key, "")
+    normalized_module_key = _safe_text(module_key, "unknown")
+    normalized_amount_points = _to_non_negative_float(amount_points)
+    if not normalized_billing_key or normalized_amount_points <= 0:
+        return None
+
+    existing_logs = _list_billing_logs_for_key(
+        db=db,
+        target_user_id=int(target_user_id or 0),
+        billing_key=normalized_billing_key,
+    )
+    if _has_active_freeze(existing_logs, billing_key=normalized_billing_key):
+        return None
+
+    pricing_snapshot = get_points_pricing_policy_snapshot(db=db)
+    payload = _build_generic_pricing_payload(
+        pricing_snapshot=pricing_snapshot,
+        module_key=normalized_module_key,
+        basis_yuan=amount_yuan,
+        provider_key=provider_key,
+        include_freeze_buffer_rate=True,
+    )
+    if extra_payload:
+        payload.update(extra_payload)
+
+    return _create_points_billing_event_log(
+        db=db,
+        actor_user_id=int(actor_user_id or 0),
+        actor_username=_safe_text(actor_username, "system"),
+        target_user_id=int(target_user_id or 0),
+        billing_key=normalized_billing_key,
+        module_key=normalized_module_key,
+        event_kind=POINTS_BILLING_EVENT_KIND_FREEZE,
+        operation_type=POINTS_BILLING_FREEZE_OPERATION_TYPE,
+        amount_points=normalized_amount_points,
+        amount_yuan=_to_non_negative_float(amount_yuan) if amount_yuan is not None else None,
+        title=_safe_text(title, "任务积分冻结"),
+        summary=_safe_text(summary, "任务已冻结积分。"),
+        action_path=action_path,
+        action_label=action_label,
+        request_context=request_context,
+        default_request_method=default_request_method,
+        default_request_path=default_request_path,
+        operation_desc=operation_desc
+        or f"{_safe_text(title, '任务')} 冻结积分 {normalized_amount_points:.2f}",
+        extra_payload=payload,
+    )
+
+
+def record_points_billing_settle(
+    *,
+    db: Session,
+    actor_user_id: int,
+    actor_username: str,
+    target_user_id: int,
+    billing_key: str,
+    module_key: str,
+    amount_points: float,
+    amount_yuan: float | None,
+    title: str | None = None,
+    summary: str | None = None,
+    action_path: str | None = None,
+    action_label: str | None = None,
+    default_request_method: str = "SYSTEM",
+    default_request_path: str = "/internal/points-billing/settle",
+    operation_desc: str | None = None,
+    provider_key: str | None = None,
+    extra_payload: dict[str, Any] | None = None,
+    require_active_freeze: bool = True,
+) -> AdminOperationLog | None:
+    normalized_billing_key = _safe_text(billing_key, "")
+    normalized_module_key = _safe_text(module_key, "unknown")
+    normalized_amount_points = _to_non_negative_float(amount_points)
+    if not normalized_billing_key:
+        return None
+
+    existing_logs = _list_billing_logs_for_key(
+        db=db,
+        target_user_id=int(target_user_id or 0),
+        billing_key=normalized_billing_key,
+    )
+    if _latest_event_kind(existing_logs, billing_key=normalized_billing_key) == POINTS_BILLING_EVENT_KIND_SETTLE:
+        return None
+
+    active_freeze_log = _resolve_active_freeze_log(existing_logs, billing_key=normalized_billing_key)
+    if require_active_freeze and active_freeze_log is None:
+        return None
+
+    if normalized_amount_points <= 0:
+        return record_points_billing_release(
+            db=db,
+            actor_user_id=actor_user_id,
+            actor_username=actor_username,
+            target_user_id=target_user_id,
+            billing_key=normalized_billing_key,
+            module_key=normalized_module_key,
+            reason=_safe_text(summary, "任务完成但未产生可结算成本，已释放冻结积分。"),
+            default_request_path=default_request_path.replace("settle", "release"),
+            extra_payload=extra_payload,
+        )
+
+    freeze_payload = getattr(active_freeze_log, "request_params", None) or {}
+    merged_extra_payload: dict[str, Any] = {}
+    if isinstance(freeze_payload, dict):
+        for key in (
+            "project_id",
+            "audiobook_project_id",
+            "book_id",
+            "task_id",
+            "run_id",
+            "stage",
+            "asset_kind",
+            "asset_mode",
+        ):
+            if freeze_payload.get(key) is not None:
+                merged_extra_payload[key] = freeze_payload.get(key)
+        if getattr(active_freeze_log, "id", None) is not None:
+            merged_extra_payload["settled_from_billing_log_id"] = int(active_freeze_log.id)
+    if extra_payload:
+        merged_extra_payload.update(extra_payload)
+
+    pricing_snapshot = get_points_pricing_policy_snapshot(db=db)
+    merged_extra_payload.update(
+        _build_generic_pricing_payload(
+            pricing_snapshot=pricing_snapshot,
+            module_key=normalized_module_key,
+            basis_yuan=amount_yuan,
+            provider_key=provider_key,
+            include_freeze_buffer_rate=False,
+        )
+    )
+
+    resolved_title = _safe_text(title, _safe_text(freeze_payload.get("title") if isinstance(freeze_payload, dict) else None, "任务积分结算"))
+    resolved_summary = _safe_text(
+        summary,
+        _safe_text(
+            freeze_payload.get("summary") if isinstance(freeze_payload, dict) else None,
+            "任务已按实际成本完成积分结算。",
+        ),
+    )
+    resolved_action_path = action_path or (
+        _safe_text(freeze_payload.get("action_path"), "") if isinstance(freeze_payload, dict) else ""
+    ) or None
+    resolved_action_label = action_label or (
+        _safe_text(freeze_payload.get("action_label"), "") if isinstance(freeze_payload, dict) else ""
+    ) or None
+
+    return _create_points_billing_event_log(
+        db=db,
+        actor_user_id=int(actor_user_id or 0),
+        actor_username=_safe_text(actor_username, "system"),
+        target_user_id=int(target_user_id or 0),
+        billing_key=normalized_billing_key,
+        module_key=normalized_module_key,
+        event_kind=POINTS_BILLING_EVENT_KIND_SETTLE,
+        operation_type=POINTS_BILLING_SETTLE_OPERATION_TYPE,
+        amount_points=normalized_amount_points,
+        amount_yuan=_to_non_negative_float(amount_yuan) if amount_yuan is not None else None,
+        title=resolved_title,
+        summary=resolved_summary,
+        action_path=resolved_action_path,
+        action_label=resolved_action_label,
+        request_context=None,
+        default_request_method=default_request_method,
+        default_request_path=default_request_path,
+        operation_desc=operation_desc or f"{resolved_title} 结算积分 {normalized_amount_points:.2f}",
+        extra_payload=merged_extra_payload,
+    )
+
+
+def record_points_billing_release(
+    *,
+    db: Session,
+    actor_user_id: int,
+    actor_username: str,
+    target_user_id: int,
+    billing_key: str,
+    module_key: str,
+    reason: str,
+    default_request_method: str = "SYSTEM",
+    default_request_path: str = "/internal/points-billing/release",
+    operation_desc: str | None = None,
+    extra_payload: dict[str, Any] | None = None,
+) -> AdminOperationLog | None:
+    normalized_billing_key = _safe_text(billing_key, "")
+    normalized_module_key = _safe_text(module_key, "unknown")
+    if not normalized_billing_key:
+        return None
+
+    existing_logs = _list_billing_logs_for_key(
+        db=db,
+        target_user_id=int(target_user_id or 0),
+        billing_key=normalized_billing_key,
+    )
+    active_freeze_log = _resolve_active_freeze_log(existing_logs, billing_key=normalized_billing_key)
+    if active_freeze_log is None:
+        return None
+
+    freeze_payload = getattr(active_freeze_log, "request_params", None) or {}
+    amount_points = _to_non_negative_float(freeze_payload.get("amount_points") if isinstance(freeze_payload, dict) else 0)
+    amount_yuan = _to_non_negative_float(freeze_payload.get("amount_yuan") if isinstance(freeze_payload, dict) else 0)
+    resolved_title = _safe_text(freeze_payload.get("title") if isinstance(freeze_payload, dict) else None, "任务积分冻结")
+    action_path = _safe_text(freeze_payload.get("action_path") if isinstance(freeze_payload, dict) else None, "") or None
+    action_label = _safe_text(freeze_payload.get("action_label") if isinstance(freeze_payload, dict) else None, "") or None
+
+    payload: dict[str, Any] = {}
+    if isinstance(freeze_payload, dict):
+        for key in (
+            "project_id",
+            "audiobook_project_id",
+            "book_id",
+            "task_id",
+            "run_id",
+            "stage",
+            "asset_kind",
+            "asset_mode",
+        ):
+            if freeze_payload.get(key) is not None:
+                payload[key] = freeze_payload.get(key)
+    payload["released_from_billing_log_id"] = int(getattr(active_freeze_log, "id", 0) or 0)
+    if extra_payload:
+        payload.update(extra_payload)
+
+    return _create_points_billing_event_log(
+        db=db,
+        actor_user_id=int(actor_user_id or 0),
+        actor_username=_safe_text(actor_username, "system"),
+        target_user_id=int(target_user_id or 0),
+        billing_key=normalized_billing_key,
+        module_key=normalized_module_key,
+        event_kind=POINTS_BILLING_EVENT_KIND_RELEASE,
+        operation_type=POINTS_BILLING_RELEASE_OPERATION_TYPE,
+        amount_points=amount_points,
+        amount_yuan=amount_yuan,
+        title=resolved_title,
+        summary=_safe_text(reason, "任务已释放冻结积分。"),
+        action_path=action_path,
+        action_label=action_label,
+        request_context=None,
+        default_request_method=default_request_method,
+        default_request_path=default_request_path,
+        operation_desc=operation_desc or f"{resolved_title} 释放冻结积分 {amount_points:.2f}",
+        extra_payload=payload,
+    )
+
+
 def record_audiobook_billing_freeze(
     *,
     db: Session,
@@ -312,6 +618,7 @@ def record_audiobook_billing_freeze(
     audiobook_project_id: int,
     chapter_ids: Sequence[int] | None,
     request_context: object | None = None,
+    tts_pricing_key: str | None = None,
 ) -> AdminOperationLog | None:
     row = (
         db.query(
@@ -360,12 +667,13 @@ def record_audiobook_billing_freeze(
     if selected_chapter_count <= 0:
         selected_chapter_count = int(row.total_chapters or 0)
 
+    effective_tts_pricing_key = _safe_text(tts_pricing_key, "") or row.tts_provider
     synthetic_row = SimpleNamespace(
         id=row.id,
         project_id=row.project_id,
         project_title=row.project_title,
         status="pending",
-        tts_provider=row.tts_provider,
+        tts_provider=effective_tts_pricing_key,
         total_chapters=selected_chapter_count,
         completed_chapters=0,
         total_cost=0.0,
@@ -420,7 +728,7 @@ def record_audiobook_billing_freeze(
                 pricing_snapshot=pricing_snapshot,
                 module_key=POINTS_BILLING_MODULE_AUDIOBOOK,
                 basis_yuan=_to_non_negative_float(item.estimated_yuan),
-                provider_key=_safe_text(row.tts_provider, "") or None,
+                provider_key=_safe_text(effective_tts_pricing_key, "") or None,
             ),
         },
     )

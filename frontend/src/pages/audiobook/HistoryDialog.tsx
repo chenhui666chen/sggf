@@ -19,6 +19,7 @@ import {
   Typography,
 } from '@mui/material'
 
+import { audiobookColors } from './audiobookTheme'
 import type { HistoryDialogProps } from './types'
 
 const HistoryDialog = ({
@@ -50,12 +51,31 @@ const HistoryDialog = ({
     }
   }
 
+  const formatProjectCreatedAt = (value: string | null | undefined) => {
+    if (!value) {
+      return '时间未知'
+    }
+
+    const timestamp = Date.parse(value)
+    if (!Number.isFinite(timestamp)) {
+      return '时间未知'
+    }
+
+    return new Date(timestamp).toLocaleString('zh-CN', {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+    })
+  }
+
   return (
     <>
       <Dialog open={open} onClose={onCloseHistory} maxWidth="md" fullWidth>
         <DialogTitle>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-            <HistoryIcon sx={{ color: '#9c27b0' }} />
+            <HistoryIcon sx={{ color: audiobookColors.brand }} />
             <Typography variant="h6">
               {selectedProject?.title} - 历史生成记录
             </Typography>
@@ -78,11 +98,11 @@ const HistoryDialog = ({
                 <ListItem
                   key={project.id}
                   sx={{
-                    border: '1px solid #e0e0e0',
+                    border: `1px solid ${audiobookColors.pendingBorder}`,
                     borderRadius: 2,
                     mb: 2,
                     '&:hover': {
-                      backgroundColor: 'rgba(156, 39, 176, 0.05)',
+                      backgroundColor: audiobookColors.brandSoft,
                       cursor: 'pointer',
                     },
                   }}
@@ -104,23 +124,17 @@ const HistoryDialog = ({
                         sx={{
                           backgroundColor:
                             project.status === 'completed'
-                              ? '#4caf50'
+                              ? audiobookColors.successMain
                               : project.status === 'processing'
-                              ? '#ff9800'
+                              ? audiobookColors.warningMain
                               : project.status === 'failed'
-                              ? '#f44336'
-                              : '#9e9e9e',
+                              ? audiobookColors.dangerMain
+                              : audiobookColors.pendingText,
                           color: 'white',
                         }}
                       />
                       <Typography variant="caption" color="text.secondary">
-                        {new Date(project.created_at).toLocaleString('zh-CN', {
-                          year: 'numeric',
-                          month: '2-digit',
-                          day: '2-digit',
-                          hour: '2-digit',
-                          minute: '2-digit',
-                        })}
+                        {formatProjectCreatedAt(project.created_at)}
                       </Typography>
                     </Box>
                     <Box sx={{ display: 'flex', gap: 2 }}>
@@ -141,7 +155,7 @@ const HistoryDialog = ({
                         event.stopPropagation()
                         onViewHistory(project.id)
                       }}
-                      sx={{ color: '#9c27b0' }}
+                      sx={{ color: audiobookColors.brand }}
                     >
                       <PlayIcon />
                     </IconButton>
@@ -151,7 +165,7 @@ const HistoryDialog = ({
                         event.stopPropagation()
                         handleOpenDeleteDialog(project.id)
                       }}
-                      sx={{ color: '#f44336' }}
+                      sx={{ color: audiobookColors.dangerMain }}
                     >
                       <DeleteIcon />
                     </IconButton>
@@ -169,7 +183,7 @@ const HistoryDialog = ({
       <Dialog open={deleteDialogOpen} onClose={handleCloseDeleteDialog}>
         <DialogTitle>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-            <WarningIcon sx={{ color: '#f44336' }} />
+            <WarningIcon sx={{ color: audiobookColors.dangerMain }} />
             <Typography variant="h6">确认删除</Typography>
           </Box>
         </DialogTitle>
@@ -193,8 +207,8 @@ const HistoryDialog = ({
             onClick={handleConfirmDelete}
             variant="contained"
             sx={{
-              backgroundColor: '#f44336',
-              '&:hover': { backgroundColor: '#d32f2f' },
+              backgroundColor: audiobookColors.dangerMain,
+              '&:hover': { backgroundColor: audiobookColors.dangerHover },
             }}
           >
             确认删除

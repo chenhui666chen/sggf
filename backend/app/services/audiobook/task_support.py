@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+from uuid import uuid4
 from datetime import datetime, timedelta, timezone
 from dataclasses import asdict, is_dataclass
 from typing import Any, Callable, Dict, List, Optional, Protocol, Tuple
@@ -20,6 +21,12 @@ from app.utils.datetime_utils import utc_now
 
 CHECKPOINT_SCHEMA_VERSION = 1
 RESUME_WINDOW_HOURS = 72
+RESUMABLE_RUN_STATUSES = {"", "failed", "paused", "cancelled", "canceled"}
+RESUME_RUN_TYPE_PRIORITY = {
+    "audio_from_scripts": 3,
+    "full": 2,
+    "script_only": 1,
+}
 
 
 class StageTracker(Protocol):
@@ -129,6 +136,13 @@ def _checkpoint_path_exists(path_value: str) -> bool:
     return temp_segment_asset_exists(path_value)
 
 
+def _classify_temp_asset_storage_driver(asset_ref: str) -> str:
+    raw = str(asset_ref or "").strip().lower()
+    if raw.startswith("oss://") or raw.startswith("http://") or raw.startswith("https://"):
+        return "dashscope_oss"
+    return "local_fs"
+
+
 def _normalize_segment_index(value: Any) -> Optional[int]:
     try:
         index = int(value)
@@ -177,6 +191,130 @@ def _extract_checkpoint_segment_indices(checkpoint_data: Optional[Dict[str, Any]
 
     indices.sort()
     return indices
+
+
+def _collect_checkpoint_temp_asset_checks(checkpoint_data: Optional[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    checkpoint = dict(checkpoint_data or {})
+    candidates: Dict[Tuple[int, str], Dict[str, Any]] = {}
+
+    def add_candidate(raw_index: Any, raw_path: Any, source: str) -> None:
+        index = _normalize_segment_index(raw_index)
+        path_value = str(raw_path or "").strip()
+        if index is None or not path_value:
+            return
+        key = (index, path_value)
+        item = candidates.setdefault(
+            key,
+            {
+                "index": index,
+                "asset_ref": path_value,
+                "storage_driver": _classify_temp_asset_storage_driver(path_value),
+                "sources": [],
+            },
+        )
+        if source not in item["sources"]:
+            item["sources"].append(source)
+
+    cached_audio_paths = checkpoint.get("cached_audio_paths") or {}
+    if isinstance(cached_audio_paths, dict):
+        for raw_index, raw_path in cached_audio_paths.items():
+            add_candidate(raw_index, raw_path, "cached_audio_paths")
+
+    segments = checkpoint.get("segments") or {}
+    if isinstance(segments, dict):
+        for raw_index, segment_payload in segments.items():
+            if not isinstance(segment_payload, dict):
+                continue
+            add_candidate(
+                segment_payload.get("index", raw_index),
+                segment_payload.get("temp_object_key"),
+                "segments",
+            )
+
+    checks: List[Dict[str, Any]] = []
+    for item in sorted(candidates.values(), key=lambda value: (value["index"], value["asset_ref"])):
+        exists = _checkpoint_path_exists(item["asset_ref"])
+        checks.append(
+            {
+                **item,
+                "exists": bool(exists),
+                "reason": None if exists else "missing_temp_asset",
+            }
+        )
+    return checks
+
+
+def _find_inconsistent_temp_asset_refs(
+    segment_asset_checks: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    refs_by_index: Dict[int, List[Dict[str, Any]]] = {}
+    for item in segment_asset_checks or []:
+        try:
+            index = int(item.get("index"))
+        except Exception:
+            continue
+        asset_ref = str(item.get("asset_ref") or "").strip()
+        if not asset_ref:
+            continue
+        refs_by_index.setdefault(index, []).append(item)
+
+    inconsistent_refs: List[Dict[str, Any]] = []
+    for index, items in sorted(refs_by_index.items(), key=lambda value: value[0]):
+        refs = []
+        seen_refs: set[str] = set()
+        for item in items:
+            asset_ref = str(item.get("asset_ref") or "").strip()
+            if not asset_ref or asset_ref in seen_refs:
+                continue
+            seen_refs.add(asset_ref)
+            refs.append(
+                {
+                    "asset_ref": asset_ref,
+                    "storage_driver": item.get("storage_driver"),
+                    "sources": list(item.get("sources") or []),
+                    "exists": item.get("exists"),
+                }
+            )
+        if len(refs) > 1:
+            inconsistent_refs.append(
+                {
+                    "index": index,
+                    "asset_refs": refs,
+                    "reason": "multiple_asset_refs_for_segment",
+                }
+            )
+
+    return inconsistent_refs
+
+
+def _mark_checkpoint_recorded_segment_statuses(checkpoint_document: Dict[str, Any]) -> None:
+    segment_statuses = checkpoint_document.get("segment_statuses")
+    if not isinstance(segment_statuses, dict) or not segment_statuses:
+        return
+
+    cached_indices = set(extract_cached_segment_paths(checkpoint_document).keys())
+    if not cached_indices:
+        return
+
+    updated: Dict[str, Any] = {}
+    for raw_key, raw_status in segment_statuses.items():
+        key = str(raw_key)
+        if not isinstance(raw_status, dict):
+            updated[key] = raw_status
+            continue
+
+        status = dict(raw_status)
+        try:
+            index = int(status.get("index", raw_key))
+        except Exception:
+            updated[key] = status
+            continue
+
+        if index in cached_indices and status.get("status") == "cached":
+            status["recovery_stage"] = "checkpoint_recorded"
+        updated[key] = status
+
+    checkpoint_document["segment_statuses"] = updated
 
 
 def _build_resume_input_context(
@@ -367,6 +505,7 @@ def build_run_checkpoint_document(
         int(checkpoint_document.get("completed_segment_count") or 0),
         len(checkpoint_document.get("completed_segment_indices") or []),
     )
+    _mark_checkpoint_recorded_segment_statuses(checkpoint_document)
 
     if (
         resolved_status == "completed"
@@ -441,6 +580,7 @@ def enqueue_chapter_runs(
     output_format: Optional[str] = None,
     narration_style: Optional[str] = None,
     narration_style_prompt: Optional[str] = None,
+    generate_subtitle: Optional[bool] = True,
 ) -> None:
     normalized_ids = [chapter_id for chapter_id in dict.fromkeys(chapter_ids or []) if chapter_id is not None]
     if not normalized_ids:
@@ -467,6 +607,7 @@ def enqueue_chapter_runs(
             audiobook_project_id=audiobook_project_id,
             status=run.status,
             current_stage=run.current_stage,
+            checkpoint_patch={"generate_subtitle": generate_subtitle is not False},
         )
         db.add(run)
     if runs:
@@ -483,7 +624,9 @@ def enqueue_audiobook_task(
     output_format: Optional[str] = None,
     narration_style: Optional[str] = None,
     narration_style_prompt: Optional[str] = None,
+    generate_subtitle: Optional[bool] = True,
     force_regenerate_script: bool = False,
+    before_dispatch: Optional[Callable[[AudiobookTask, str], None]] = None,
 ) -> Tuple[AudiobookTask, Any]:
     normalized_chapter_ids = [chapter_id for chapter_id in dict.fromkeys(chapter_ids or []) if chapter_id is not None]
     if not normalized_chapter_ids:
@@ -532,19 +675,25 @@ def enqueue_audiobook_task(
             ],
         )
 
-    async_result = signature.delay()
-    AudiobookTaskRepository.attach_celery_id(db, task_record.id, async_result.id)
+    celery_task_id = str(uuid4())
+    AudiobookTaskRepository.attach_celery_id(db, task_record.id, celery_task_id)
     enqueue_chapter_runs(
         db,
         audiobook_project_id=audiobook_project_id,
         chapter_ids=normalized_chapter_ids,
         run_type=job_type,
-        celery_task_id=async_result.id,
+        celery_task_id=celery_task_id,
         tts_model=tts_model,
         output_format=output_format,
         narration_style=narration_style,
         narration_style_prompt=narration_style_prompt,
+        generate_subtitle=generate_subtitle,
     )
+
+    if before_dispatch is not None:
+        before_dispatch(task_record, celery_task_id)
+
+    async_result = signature.apply_async(task_id=celery_task_id)
     return task_record, async_result
 
 
@@ -709,24 +858,20 @@ def _validate_resume_checkpoint(
     if expires_at and expires_at <= utc_now():
         blockers.append("checkpoint_expired")
 
-    missing_temp_assets: List[str] = []
-    cached_audio_paths = checkpoint_data.get("cached_audio_paths") or {}
-    if isinstance(cached_audio_paths, dict):
-        for path_value in cached_audio_paths.values():
-            if isinstance(path_value, str) and path_value and not _checkpoint_path_exists(path_value):
-                missing_temp_assets.append(path_value)
-
-    segments = checkpoint_data.get("segments") or {}
-    if isinstance(segments, dict):
-        for segment_payload in segments.values():
-            if not isinstance(segment_payload, dict):
-                continue
-            temp_object_key = segment_payload.get("temp_object_key")
-            if isinstance(temp_object_key, str) and temp_object_key and not _checkpoint_path_exists(temp_object_key):
-                missing_temp_assets.append(temp_object_key)
-
-    unique_missing_assets = list(dict.fromkeys(missing_temp_assets))
+    segment_asset_checks = _collect_checkpoint_temp_asset_checks(checkpoint_data)
+    unique_missing_assets = list(
+        dict.fromkeys(
+            item["asset_ref"]
+            for item in segment_asset_checks
+            if item.get("exists") is False
+        )
+    )
+    checks["segment_asset_checks"] = segment_asset_checks
     checks["missing_temp_assets"] = unique_missing_assets
+    inconsistent_temp_asset_refs = _find_inconsistent_temp_asset_refs(segment_asset_checks)
+    checks["inconsistent_temp_asset_refs"] = inconsistent_temp_asset_refs
+    if validation_mode == "strict" and inconsistent_temp_asset_refs:
+        blockers.append("inconsistent_temp_asset_refs")
     if unique_missing_assets:
         blockers.append("missing_temp_assets")
 
@@ -741,21 +886,99 @@ def _validate_resume_checkpoint(
     }
 
 
-def build_generation_checkpoint_payload(
-    *,
-    chapter_id: int,
-    chapter_audio: Optional[ChapterAudio],
-    run_type: Optional[str],
+def _run_created_sort_value(chapter_run) -> float:
+    created_at = getattr(chapter_run, "created_at", None)
+    if isinstance(created_at, datetime):
+        return created_at.timestamp()
+    return 0.0
+
+
+def _run_status_value(chapter_run) -> str:
+    return str(getattr(chapter_run, "status", "") or "").strip().lower()
+
+
+def _run_completed_count(chapter_run, checkpoint_data: Dict[str, Any]) -> int:
+    completed_indices = _extract_checkpoint_segment_indices(checkpoint_data)
+    completed_count = len(completed_indices)
+    if chapter_run and (chapter_run.completed_segment_count or 0) > completed_count:
+        completed_count = int(chapter_run.completed_segment_count or 0)
+    return completed_count
+
+
+def _run_total_count(chapter_run, checkpoint_data: Dict[str, Any]) -> int:
+    if chapter_run and (chapter_run.total_segment_count or 0) > 0:
+        return int(chapter_run.total_segment_count or 0)
+    return int(checkpoint_data.get("total_segments") or 0)
+
+
+def _run_has_potential_resume_material(chapter_run) -> bool:
+    checkpoint_data = (
+        dict(chapter_run.checkpoint_json)
+        if chapter_run and isinstance(chapter_run.checkpoint_json, dict)
+        else {}
+    )
+    completed_indices = _extract_checkpoint_segment_indices(checkpoint_data)
+    cached_paths = extract_cached_segment_paths(checkpoint_data)
+    completed_count = _run_completed_count(chapter_run, checkpoint_data)
+    total_count = _run_total_count(chapter_run, checkpoint_data)
+    status_allows_resume = _run_status_value(chapter_run) in RESUMABLE_RUN_STATUSES
+    not_completed = total_count == 0 or completed_count < total_count
+    return bool(
+        (completed_indices or cached_paths or checkpoint_data)
+        and bool(getattr(chapter_run, "resumable", True))
+        and status_allows_resume
+        and not_completed
+    )
+
+
+def _sort_resume_candidate_runs(runs: List[Any]) -> List[Any]:
+    def sort_key(chapter_run) -> Tuple[int, int, float, int, int]:
+        status = _run_status_value(chapter_run)
+        status_priority = 2 if status in RESUMABLE_RUN_STATUSES and status else 0
+        return (
+            1 if _run_has_potential_resume_material(chapter_run) else 0,
+            status_priority,
+            _run_created_sort_value(chapter_run),
+            RESUME_RUN_TYPE_PRIORITY.get(str(getattr(chapter_run, "run_type", "") or ""), 0),
+            int(getattr(chapter_run, "id", 0) or 0),
+        )
+
+    return sorted(runs or [], key=sort_key, reverse=True)
+
+
+def _get_resume_candidate_runs(
     db: Session,
+    *,
     audiobook_project_id: int,
-) -> Dict[str, Any]:
-    chapter_run = ChapterAudioRunRepository.get_latest_run(
+    chapter_id: int,
+    run_type: Optional[str],
+) -> List[Any]:
+    if run_type:
+        latest_run = ChapterAudioRunRepository.get_latest_run(
+            db,
+            audiobook_project_id=audiobook_project_id,
+            chapter_id=chapter_id,
+            run_type=run_type,
+        )
+        return [latest_run] if latest_run else []
+
+    runs = ChapterAudioRunRepository.list_runs_for_chapter(
         db,
         audiobook_project_id=audiobook_project_id,
         chapter_id=chapter_id,
-        run_type=run_type,
+        limit=20,
     )
+    return _sort_resume_candidate_runs(runs)
 
+
+def _build_generation_checkpoint_payload_for_run(
+    *,
+    chapter_id: int,
+    chapter_audio: Optional[ChapterAudio],
+    db: Session,
+    audiobook_project_id: int,
+    chapter_run,
+) -> Dict[str, Any]:
     checkpoint_source = "none"
     checkpoint_data: Dict[str, Any] = {}
     if chapter_run and isinstance(chapter_run.checkpoint_json, dict) and chapter_run.checkpoint_json:
@@ -828,6 +1051,7 @@ def build_generation_checkpoint_payload(
         "output_format": chapter_run.output_format if chapter_run else None,
         "narration_style": chapter_run.narration_style if chapter_run else None,
         "narration_style_prompt": chapter_run.narration_style_prompt if chapter_run else None,
+        "generate_subtitle": checkpoint_data.get("generate_subtitle", True) is not False,
         "resume_task_type": resume_task_type,
         "checkpoint_source": checkpoint_source,
         "checkpoint_schema_version": resume_validation.get("schema_version"),
@@ -838,3 +1062,50 @@ def build_generation_checkpoint_payload(
         "resume_validation": resume_validation.get("checks") or {},
         "checkpoint_document": checkpoint_data,
     }
+
+
+def build_generation_checkpoint_payload(
+    *,
+    chapter_id: int,
+    chapter_audio: Optional[ChapterAudio],
+    run_type: Optional[str],
+    db: Session,
+    audiobook_project_id: int,
+) -> Dict[str, Any]:
+    candidate_runs = _get_resume_candidate_runs(
+        db,
+        audiobook_project_id=audiobook_project_id,
+        chapter_id=chapter_id,
+        run_type=run_type,
+    )
+
+    if not candidate_runs:
+        return _build_generation_checkpoint_payload_for_run(
+            chapter_id=chapter_id,
+            chapter_audio=chapter_audio,
+            db=db,
+            audiobook_project_id=audiobook_project_id,
+            chapter_run=None,
+        )
+
+    fallback_payload: Optional[Dict[str, Any]] = None
+    for candidate_run in candidate_runs:
+        payload = _build_generation_checkpoint_payload_for_run(
+            chapter_id=chapter_id,
+            chapter_audio=chapter_audio,
+            db=db,
+            audiobook_project_id=audiobook_project_id,
+            chapter_run=candidate_run,
+        )
+        if fallback_payload is None:
+            fallback_payload = payload
+        if payload.get("can_resume"):
+            return payload
+
+    return fallback_payload or _build_generation_checkpoint_payload_for_run(
+        chapter_id=chapter_id,
+        chapter_audio=chapter_audio,
+        db=db,
+        audiobook_project_id=audiobook_project_id,
+        chapter_run=None,
+    )

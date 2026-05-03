@@ -3,12 +3,18 @@
 
 包含 _transform_to_script 和 _transform_paragraph 方法
 """
-import json
-import re
 import logging
 from typing import List, Dict, Any, Optional, Callable
 
+from app.services.audiobook.llm_client import call_audiobook_llm_async
+from app.services.audiobook.llm_json import (
+    LLMJsonParseError,
+    clean_llm_json_text,
+    parse_llm_json_array,
+)
+
 from ._dataclasses import ScriptSegment
+from ._segment_validation import build_script_segments
 
 logger = logging.getLogger(__name__)
 
@@ -35,10 +41,8 @@ class TransformMixin:
         4. 对话优化 → 删除拗口词汇
         """
         
-        # 分段处理（每次处理500-1000字）
-        paragraphs = content.split('\n')
-        # 过滤空段落
-        paragraphs = [p for p in paragraphs if p.strip() and len(p) >= 10]
+        # 分段处理：仅丢弃空行，短句/短对白必须保留，避免改编前丢失原文。
+        paragraphs = [p.strip() for p in content.splitlines() if p.strip()]
         
         # 合并短段落，减少LLM调用次数
         merged_paragraphs = []
@@ -123,7 +127,17 @@ class TransformMixin:
             tts_block = """**当前TTS模型：Qwen3-TTS Instruct Flash（默认模式）**\n- 适合：长篇连载 / 日更章节 / 成本敏感但需要一定表现力的内容\n- 特性：49 音色、稳定性强、成本低，并支持通过自然语言 instructions 控制语气与演绎\n- 限制：当前链路重点是 instructions，不要输出 SSML 语法\n"""
             instruct_block = """**Qwen3 Instruct 提示**\n- 请输出结构化指令字段：instruct_emotion / instruct_scene / instruct_role / instruct_identity\n- performance_notes 会一并映射到 Qwen instructions，请写成可直接执行的演绎说明\n- qwen3-tts-instruct-flash 不依赖 SSML，请直接描述情绪、场景、身份与语气目标\n"""
 
-        six_step_block = """**有声剧本 6 步听觉化重构流程（请严格遵守）**\n1. 心理活动 → 改写为可听见的独白或用音效/环境暗示呈现，避免长篇抽象描写。\n2. 环境描写 → 提炼为可感知的音效标签（如“雨声渐密”“地铁驶过”），填入 sound_effects。\n3. 动作与场景切换 → 用短句 + 停顿 + 过渡性音效，避免连续大段说明。\n4. 对话优化 → 口语化，必要时拆分过长句子，允许适度长句，去掉拗口表达，保证朗读顺畅。\n5. 节奏控制 → 根据情节紧张度调整句长，并通过 pause_before/pause_after 控制呼吸感。\n6. 音乐与情绪 → 为情绪明显的片段给出 music_cue（如“低频紧张弦乐”），避免整章铺满BGM。\n   - 音效密度建议控制在每分钟 2-6 个，仅保留关键动作/场景的音效。\n   - 配乐覆盖建议 15%-40%，低密度时仅保留开头/结尾/高潮等关键位置。\n"""
+        six_step_block = """**有声剧本 6 步听觉化重构流程（请严格遵守）**
+1. 心理活动 → 改写为可听见的独白或用音效/环境暗示呈现，避免长篇抽象描写。
+2. 环境描写 → 提炼为可感知的音效标签（如“雨声渐密”“地铁驶过”），填入 sound_effects。
+3. 动作与场景切换 → 用短句 + 停顿 + 过渡性音效，避免连续大段说明。
+4. 对话优化 → 口语化，必要时拆分过长句子，允许适度长句，去掉拗口表达，保证朗读顺畅。
+5. 节奏控制 → 根据情节紧张度调整句长，并通过 pause_before/pause_after 控制呼吸感。
+6. 音乐与情绪 → 为情绪明显的片段给出 music_cue（如“低频紧张弦乐”），避免整章铺满BGM。
+   - 音效密度建议控制在每分钟 2-6 个，仅保留关键动作/场景的音效。
+   - 配乐覆盖建议 15%-40%，低密度时仅保留开头/结尾/高潮等关键位置。
+   - 原文中的 [pause:xs]、[break]、%P% 是结构停顿提示，不要当成文字朗读；请转成 pause_before/pause_after，或保留在相邻 text 末尾交给渲染层识别。
+"""
 
         adaptation_block = (
             f"**跨模态改编提示**:\n{audio_adaptation_brief}\n\n"
@@ -276,16 +290,15 @@ class TransformMixin:
 """
         
         try:
-            from core.model_resolution import TaskType
             
-            # 使用AUDIOBOOK_SCRIPT任务类型（自动选择deepseek-v4-pro）
+            # 使用有声书专用 LLM 配置，避免模型路由落到已下线模型
             # 剧本转化可能输出很长的JSON数组，需要设置足够大的max_tokens
             max_tokens_value = 32000
             logger.info(f"🔧 [段落转化] 请求 max_tokens: {max_tokens_value}, 段落长度: {len(paragraph)} 字")
             
-            response = await self.llm_client.chat(
+            response = await call_audiobook_llm_async(
+                self.llm_client,
                 messages=[{"role": "user", "content": prompt}],
-                task_type=TaskType.AUDIOBOOK_SCRIPT,
                 max_tokens=max_tokens_value,
                 use_cache=False,
                 response_format={"type": "json_object"},  # 启用 deepseek JSON 模式
@@ -294,21 +307,12 @@ class TransformMixin:
             logger.info(f"📊 [段落转化] 实际返回: {len(response)} 字符 (JSON截断检测: {'TRUNCATED' if len(response) > 40000 else 'OK'})")
             
             # 提取JSON
-            json_match = response.find("```json")
-            if json_match != -1:
-                json_end = response.find("```", json_match + 7)
-                json_str = response[json_match + 7:json_end].strip()
-            else:
-                json_str = response.strip()
+            json_str = clean_llm_json_text(response)
             
             # 清理JSON字符串（移除注释和多余逗号）
-            import re
             # 移除单行注释 // ...
-            json_str = re.sub(r'//.*?$', '', json_str, flags=re.MULTILINE)
             # 移除多行注释 /* ... */
-            json_str = re.sub(r'/\*.*?\*/', '', json_str, flags=re.DOTALL)
             # 移除数组/对象末尾的多余逗号
-            json_str = re.sub(r',\s*([}\]])', r'\1', json_str)
             
             # 记录清理后的JSON（用于调试）
             if len(json_str) > 500:
@@ -317,30 +321,13 @@ class TransformMixin:
                 logger.debug(f"清理后的JSON: {json_str}")
             
             try:
-                segments_data = json.loads(json_str)
-            except json.JSONDecodeError as json_err:
+                segments_data = parse_llm_json_array(response)
+            except LLMJsonParseError as json_err:
                 logger.error(f"JSON解析失败，原始响应: {response[:1000]}")
                 logger.error(f"清理后JSON: {json_str[:1000]}")
-                # 尝试自动截断到最后一个完整对象来修复 JSON（避免因为尾部被截断导致整个数组不可用）
-                try:
-                    first_bracket = json_str.find("[")
-                    last_brace = json_str.rfind("}")
-                    if first_bracket != -1 and last_brace != -1 and last_brace > first_bracket:
-                        salvage_str = json_str[first_bracket:last_brace + 1]
-                        salvage_str = salvage_str.rstrip()
-                        if salvage_str.endswith(","):
-                            salvage_str = salvage_str[:-1]
-                        salvage_str = salvage_str + "]"
-                        logger.warning("⚠️ 尝试通过截断到最后一个完整对象来修复JSON...")
-                        segments_data = json.loads(salvage_str)
-                        logger.info(f"✅ JSON修复成功，保留片段数: {len(segments_data)}")
-                    else:
-                        raise json_err
-                except Exception:
-                    # 修复失败，再抛出原始错误
-                    raise RuntimeError(f"LLM返回的JSON格式错误: {json_err}")
+                raise RuntimeError(f"LLM返回的JSON格式错误: {json_err}") from json_err
             
-            # 修复：将中文字段名转换为英文（deepseek-v4-pro可能返回中文字段）
+            # 修复：将中文字段名转换为英文（LLM 偶尔会返回中文字段）
             field_mapping = {
                 '类型': 'type',
                 '文本': 'text',
@@ -363,20 +350,30 @@ class TransformMixin:
             
             # 清理字段名
             cleaned_segments = []
+            has_mapped_fields = False
             for seg in segments_data:
+                if not isinstance(seg, dict):
+                    cleaned_segments.append(seg)
+                    continue
+
                 cleaned_seg = {}
                 for key, value in seg.items():
                     # 如果是中文字段名，转换为英文
                     english_key = field_mapping.get(key, key)
+                    has_mapped_fields = has_mapped_fields or english_key != key
                     cleaned_seg[english_key] = value
                 cleaned_segments.append(cleaned_seg)
             
             # 记录字段映射情况（调试）
-            if any(key in field_mapping for seg in segments_data for key in seg.keys()):
+            if has_mapped_fields:
                 logger.warning("⚠️ LLM返回了中文字段名，已自动转换为英文")
             
             # 转换为ScriptSegment对象
-            return [ScriptSegment(**seg) for seg in cleaned_segments]
+            script_segments = build_script_segments(cleaned_segments, fallback_text=paragraph)
+            if not script_segments:
+                raise RuntimeError("LLM returned no valid script segments")
+            return script_segments
             
         except Exception as e:
             logger.error(f"段落转化失败: {e}")
+            return build_script_segments([], fallback_text=paragraph)

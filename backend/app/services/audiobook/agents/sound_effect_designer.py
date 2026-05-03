@@ -12,7 +12,6 @@ import json
 import os
 import hashlib
 import shutil
-import asyncio
 import time
 from pathlib import Path
 from typing import Dict, List, Any, Optional
@@ -23,6 +22,12 @@ import httpx
 import requests
 from app.core.config import settings
 from core.model_resolution import TaskType
+from app.services.audiobook.llm_client import (
+    call_audiobook_llm_async,
+    call_audiobook_llm_sync,
+)
+from app.services.audiobook.llm_config import get_audiobook_llm_model
+from app.services.audiobook.llm_json import parse_llm_json_object
 from app.services.audiobook.ai_music import AIMusicGenerator, MusicGenerationResult, create_music_generator
 from app.services.audiobook.vidu_timing2audio_generator import ViduTiming2AudioGenerator, create_vidu_timing2audio_generator
 
@@ -300,6 +305,17 @@ class SoundEffectDesigner:
 
         return cue
 
+    def _run_llm_chat_sync(self, prompt: str, max_tokens: int) -> str:
+        return call_audiobook_llm_sync(
+            self.llm_client,
+            messages=[{"role": "user", "content": prompt}],
+            task_type=TaskType.AUDIOBOOK_SOUND,
+            max_tokens=max_tokens,
+            response_format={"type": "json_object"},
+            use_cache=True,
+            timeout_seconds=30,
+        )
+
     def _llm_match_effect(self, scene_description: str) -> Optional[str]:
         """使用 LLM 智能匹配音效
         
@@ -322,14 +338,23 @@ class SoundEffectDesigner:
 只返回 JSON，不要其他内容。"""
 
             # 调用 LLM 分析
-            response = self.llm_client.generate(prompt, max_tokens=100)
+            if hasattr(self.llm_client, "chat"):
+                response = self._run_llm_chat_sync(prompt, max_tokens=100)
+            else:
+                try:
+                    response = self.llm_client.generate(
+                        prompt,
+                        max_tokens=100,
+                        model=get_audiobook_llm_model(),
+                    )
+                except TypeError:
+                    response = self.llm_client.generate(prompt, max_tokens=100)
             
             if not response:
                 return None
 
             # 解析 LLM 返回结果
-            import json
-            result = json.loads(response)
+            result = parse_llm_json_object(response)
             recommended = result.get("recommended", [])
             
             if recommended:
@@ -893,7 +918,8 @@ class SoundEffectDesigner:
 
         try:
             # 使用有声小说专用任务类型，自动选择合适模型
-            response = await self.llm_client.chat(
+            response = await call_audiobook_llm_async(
+                self.llm_client,
                 messages=[{"role": "user", "content": prompt}],
                 task_type=TaskType.AUDIOBOOK_SOUND,
                 use_cache=False,
@@ -904,13 +930,7 @@ class SoundEffectDesigner:
 
         # 尝试从响应中提取 JSON
         try:
-            text = response
-            if "```" in text:
-                start = text.find("```")
-                end = text.find("```", start + 3)
-                if end != -1:
-                    text = text[start + 3 : end].strip()
-            data = json.loads(text)
+            data = parse_llm_json_object(response)
             effects = data.get("effects", [])
             if not isinstance(effects, list):
                 return []

@@ -1,5 +1,8 @@
 import axios, { AxiosInstance, AxiosError } from 'axios'
-import type { UserAudiobookProjectOverview } from '@/types/audiobook'
+import type {
+  AudiobookTtsModel,
+  UserAudiobookProjectOverview,
+} from '@/types/audiobook'
 import type { Project, ProjectCreatePayload, ProjectUpdatePayload } from '@/types/project'
 import type {
   SettingCollection,
@@ -121,6 +124,191 @@ interface DreamweaverLibraryAutoRegenerateRolesResponse {
   }>
   review_missing_roles_count: number
   synced?: { created?: number }
+}
+
+export type AudiobookGenerationMode = 'full' | 'script_only'
+export type AudiobookPreviewType = 'voice' | 'sfx' | 'bgm' | 'mix'
+export type AudiobookAudioFxDensity = 'low' | 'medium' | 'high' | 'off'
+export interface AudiobookAudioFxConfigPayload {
+  enable_sound_effects: boolean
+  enable_music: boolean
+  sound_effect_density: AudiobookAudioFxDensity
+  music_density: AudiobookAudioFxDensity
+}
+
+export interface AudiobookProjectAudioCharacterConfigPayload {
+  character_id: number
+  name: string
+  voice_id: string
+  volume: number
+  speed?: number | null
+  pitch?: number | null
+  tts_model?: AudiobookTtsModel | null
+  voice_type?: string | null
+  personality?: string | null
+  emotion_tendency?: string | null
+}
+
+export interface AudiobookProjectAudioConfigPayload {
+  characters: AudiobookProjectAudioCharacterConfigPayload[]
+  audio_fx?: AudiobookAudioFxConfigPayload | null
+}
+
+export interface AudiobookVoiceConfigPayloadItem {
+  character_name: string
+  voice_id: string
+  volume: number
+  speed?: number
+  pitch?: number
+}
+
+export interface CreateAudiobookProjectPayload {
+  project_id: number
+  chapter_ids: number[]
+  tts_provider?: string
+  enable_cache?: boolean
+  voice_config?: AudiobookVoiceConfigPayloadItem[]
+  tts_model?: string
+  output_format?: string
+  generate_subtitle?: boolean
+  generation_mode?: AudiobookGenerationMode
+  narration_style?: string
+  narration_style_prompt?: string
+  force_regenerate_script?: boolean
+}
+
+export interface AudiobookScriptSegmentVoiceParamsPayload {
+  speaker?: string | null
+  speed?: number | null
+  rate?: number | null
+  pitch?: number | null
+  volume?: number | null
+  emotion?: string | null
+}
+
+export interface AudiobookScriptSegmentSoundEffectPayload {
+  id?: string | null
+  effect_id?: string | null
+  name?: string | null
+}
+
+export interface AudiobookScriptSegmentMusicCuePayload {
+  style?: string | null
+  name?: string | null
+}
+
+export interface AudiobookScriptSegmentPayload {
+  index?: number | null
+  type?: string | null
+  speaker?: string | null
+  speaker_name?: string | null
+  character_name?: string | null
+  role_name?: string | null
+  emotion?: string | null
+  text?: string | null
+  performance_notes?: string | null
+  original_text?: string | null
+  adaptation_reason?: string | null
+  pause_before?: number | null
+  pause_after?: number | null
+  instruct_emotion?: string | null
+  instruct_scene?: string | null
+  instruct_role?: string | null
+  instruct_identity?: string | null
+  voice_params?: AudiobookScriptSegmentVoiceParamsPayload | null
+  sound_effects_simple?: string[] | null
+  sound_effects?: Array<AudiobookScriptSegmentSoundEffectPayload | string> | null
+  music_cue_simple?: string | null
+  music_cue?: AudiobookScriptSegmentMusicCuePayload | string | null
+}
+
+export interface UpdateAudiobookChapterScriptPayload {
+  script_segments: AudiobookScriptSegmentPayload[]
+  script_status?: 'pending' | 'reviewed' | 'approved'
+}
+
+export interface GenerateAudioFromScriptsPayload {
+  chapter_ids?: number[]
+  tts_model?: string
+  narration_style?: string
+  narration_style_prompt?: string
+  output_format?: string
+  generate_subtitle?: boolean
+}
+
+export interface PreviewScriptSegmentAudioPayload {
+  segment: AudiobookScriptSegmentPayload
+  tts_model?: string
+  preview_type?: AudiobookPreviewType
+}
+
+export interface AudiobookSmartChunkStats {
+  total_chunks: number
+  total_tokens: number
+  avg_tokens_per_chunk: number
+  max_tokens_in_chunk: number
+  min_tokens_in_chunk: number
+}
+
+export interface AudiobookSmartChunkPreviewResponse {
+  original_segments: number
+  chunked_segments: number
+  total_tokens: number
+  chunks: AudiobookScriptSegmentPayload[]
+  stats: AudiobookSmartChunkStats
+}
+
+export interface AudiobookTextTokenEstimateResponse {
+  text_length: number
+  estimated_tokens: number
+  needs_chunking: boolean
+  max_tokens: number
+}
+
+export interface PreviewTtsPayload {
+  text: string
+  voice_id: string
+  volume?: number
+  speed?: number
+  pitch?: number
+  model?: string
+}
+
+export interface AudiobookTtsModelCatalogItem {
+  id: string
+  name?: string
+  description?: string
+  voice_count?: number
+  price_per_10k?: number
+  features?: string[]
+  cost_level?: string
+  quality_level?: string
+  catalog_note?: string
+  capabilities?: Record<string, unknown>
+}
+
+export interface AudiobookTtsModelCatalogResponse {
+  models: AudiobookTtsModelCatalogItem[]
+}
+
+export interface AudiobookChapterStreamUrlResponse {
+  stream_url: string
+  expires_at: string
+  expires_in_seconds: number
+}
+
+export interface AudiobookQueuedTaskResponse {
+  success?: boolean
+  audiobook_project_id: number
+  job_id?: string
+  task_id?: string
+  task_db_id?: number
+  task_type?: string
+  status?: string
+  message?: string
+  download_url?: string
+  total_chapters?: number
+  chapter_ids?: number[]
 }
 
 interface DreamweaverLibraryPromptSuggestRequest {
@@ -717,6 +905,19 @@ function shouldRedirectToLogin(error: AxiosError): boolean {
   return currentPath !== '/login' && currentPath !== '/register'
 }
 
+function getStoredAccessToken(): string | null {
+  if (typeof localStorage === 'undefined') {
+    return null
+  }
+  return localStorage.getItem('access_token')
+}
+
+function buildApiUrl(baseURL: string | undefined, path: string): string {
+  const normalizedPath = path.startsWith('/') ? path : `/${path}`
+  const normalizedBase = String(baseURL || '').replace(/\/$/, '')
+  return normalizedBase ? `${normalizedBase}${normalizedPath}` : normalizedPath
+}
+
 function extractDetailMessage(detail: any): string | null {
   if (!detail) return null
   if (typeof detail === 'string') return detail.trim() || null
@@ -988,7 +1189,7 @@ class ApiClient {
 
     // 请求拦截器
     this.client.interceptors.request.use((config) => {
-      const token = localStorage.getItem('access_token')
+      const token = getStoredAccessToken()
       if (token) {
         // 确保headers对象存在
         if (!config.headers) {
@@ -1101,20 +1302,24 @@ class ApiClient {
     return this.client.delete(`/api/v1/projects/${projectId}`)
   }
 
-  getProjectAudioConfig(projectId: number, ttsModel?: string) {
-    return this.client.get(`/api/v1/projects/${projectId}/audio-config`, {
+  getProjectAudioConfig(projectId: number, ttsModel?: AudiobookTtsModel) {
+    return this.client.get<AudiobookProjectAudioConfigPayload>(`/api/v1/projects/${projectId}/audio-config`, {
       params: ttsModel ? { tts_model: ttsModel } : undefined,
     })
   }
 
-  updateProjectAudioConfig(projectId: number, data: any, ttsModel?: string) {
+  updateProjectAudioConfig(
+    projectId: number,
+    data: AudiobookProjectAudioConfigPayload,
+    ttsModel?: AudiobookTtsModel,
+  ) {
     return this.client.put(`/api/v1/projects/${projectId}/audio-config`, data, {
       params: ttsModel ? { tts_model: ttsModel } : undefined,
     })
   }
 
-  autoAssignProjectAudioVoices(projectId: number, ttsModel?: string) {
-    return this.client.post(
+  autoAssignProjectAudioVoices(projectId: number, ttsModel?: AudiobookTtsModel) {
+    return this.client.post<AudiobookProjectAudioConfigPayload>(
       `/api/v1/projects/${projectId}/audio-config/auto-voices`,
       null,
       {
@@ -1316,8 +1521,8 @@ class ApiClient {
     return this.client.delete(`/api/v1/chapters/${chapterId}/review`)
   }
 
-  previewTTS(payload: { text: string; voice_id: string; volume?: number; speed?: number; pitch?: number; model?: string }) {
-    return this.client.post('/api/v1/audiobook/tts/preview', payload, { responseType: 'blob' })
+  previewTTS(payload: PreviewTtsPayload) {
+    return this.client.post<Blob>('/api/v1/audiobook/tts/preview', payload, { responseType: 'blob' })
   }
 
   previewTTSWithTimestamps(payload: {
@@ -1337,13 +1542,17 @@ class ApiClient {
   previewScriptSegmentAudio(
     audiobookProjectId: number,
     chapterId: number,
-    payload: { segment: Record<string, any>; tts_model?: string; preview_type?: string }
+    payload: PreviewScriptSegmentAudioPayload,
   ) {
-    return this.client.post(
+    return this.client.post<Blob>(
       `/api/v1/audiobook/projects/${audiobookProjectId}/chapters/${chapterId}/segments/preview`,
       payload,
       { responseType: 'blob' }
     )
+  }
+
+  getTtsModels() {
+    return this.client.get<AudiobookTtsModelCatalogResponse>('/api/v1/audiobook/tts/models')
   }
 
   getTtsVoices(model?: string) {
@@ -1449,11 +1658,83 @@ class ApiClient {
   }
 
   getAudiobookChapterAudioFile(audiobookProjectId: number, chapterId: number) {
-    return this.client.get(`/api/v1/audiobook/download/${audiobookProjectId}/${chapterId}`, {
+    return this.client.get<Blob>(`/api/v1/audiobook/download/${audiobookProjectId}/${chapterId}`, {
       responseType: 'blob',
       timeout: 60000,
       params: { _ts: Date.now() },
       headers: { 'Cache-Control': 'no-cache', Pragma: 'no-cache' },
+    })
+  }
+
+  getAudiobookChapterAudioStreamFile(audiobookProjectId: number, chapterId: number) {
+    return this.client.get<Blob>(`/api/v1/audiobook/stream/${audiobookProjectId}/${chapterId}`, {
+      responseType: 'blob',
+      timeout: 60000,
+      params: { _ts: Date.now() },
+      headers: { 'Cache-Control': 'no-cache', Pragma: 'no-cache' },
+    })
+  }
+
+  async getAudiobookChapterAudioSignedStreamUrl(audiobookProjectId: number, chapterId: number): Promise<string> {
+    const response = await this.client.get<AudiobookChapterStreamUrlResponse>(
+      `/api/v1/audiobook/stream-url/${audiobookProjectId}/${chapterId}`,
+      {
+        params: { _ts: Date.now() },
+        headers: { 'Cache-Control': 'no-cache', Pragma: 'no-cache' },
+      },
+    )
+    return buildApiUrl(this.client.defaults.baseURL, response.data.stream_url)
+  }
+
+  exportAudiobookProjectM4b(audiobookProjectId: number, metadata?: Record<string, unknown>) {
+    return this.client.post<Record<string, unknown>>(
+      `/api/v1/audiobook/projects/${audiobookProjectId}/exports/m4b`,
+      metadata ?? {},
+      { timeout: 1800000 },
+    )
+  }
+
+  queueAudiobookProjectM4bExport(audiobookProjectId: number, metadata?: Record<string, unknown>, force = false) {
+    return this.client.post<AudiobookQueuedTaskResponse>(
+      `/api/v1/audiobook/projects/${audiobookProjectId}/exports/m4b/queue`,
+      metadata ?? {},
+      {
+        params: { force },
+        timeout: 60000,
+      },
+    )
+  }
+
+  downloadAudiobookProjectM4b(audiobookProjectId: number) {
+    return this.client.get<Blob>(`/api/v1/audiobook/projects/${audiobookProjectId}/exports/m4b/download`, {
+      responseType: 'blob',
+      timeout: 60000,
+      params: { _ts: Date.now() },
+    })
+  }
+
+  exportAudiobookProjectAudacity(audiobookProjectId: number) {
+    return this.client.post<Record<string, unknown>>(`/api/v1/audiobook/projects/${audiobookProjectId}/exports/audacity`, {}, {
+      timeout: 1800000,
+    })
+  }
+
+  queueAudiobookProjectAudacityExport(audiobookProjectId: number, force = false) {
+    return this.client.post<AudiobookQueuedTaskResponse>(
+      `/api/v1/audiobook/projects/${audiobookProjectId}/exports/audacity/queue`,
+      {},
+      {
+        params: { force },
+        timeout: 60000,
+      },
+    )
+  }
+
+  downloadAudiobookProjectAudacity(audiobookProjectId: number) {
+    return this.client.get<Blob>(`/api/v1/audiobook/projects/${audiobookProjectId}/exports/audacity/download`, {
+      responseType: 'blob',
+      timeout: 60000,
+      params: { _ts: Date.now() },
     })
   }
 
@@ -1477,17 +1758,8 @@ class ApiClient {
     return this.client.get('/api/v1/audiobook/projects/deleted')
   }
 
-  createAudiobookProject(payload: {
-    project_id: number
-    chapter_ids: number[]
-    tts_provider?: string
-    enable_cache?: boolean
-    voice_config?: any[]
-    tts_model?: string
-    generation_mode?: 'full' | 'script_only'
-    narration_style?: string
-  }) {
-    return this.client.post('/api/v1/audiobook/projects', payload)
+  createAudiobookProject(payload: CreateAudiobookProjectPayload) {
+    return this.client.post<AudiobookQueuedTaskResponse>('/api/v1/audiobook/projects', payload)
   }
 
   getAudiobookChapterScript(audiobookProjectId: number, chapterId: number) {
@@ -1496,15 +1768,19 @@ class ApiClient {
     )
   }
 
-  updateAudiobookChapterScript(audiobookProjectId: number, chapterId: number, payload: any) {
+  updateAudiobookChapterScript(
+    audiobookProjectId: number,
+    chapterId: number,
+    payload: UpdateAudiobookChapterScriptPayload,
+  ) {
     return this.client.put(
       `/api/v1/audiobook/projects/${audiobookProjectId}/chapters/${chapterId}/script`,
       payload
     )
   }
 
-  generateAudioFromScripts(audiobookProjectId: number, payload: any) {
-    return this.client.post(
+  generateAudioFromScripts(audiobookProjectId: number, payload: GenerateAudioFromScriptsPayload) {
+    return this.client.post<AudiobookQueuedTaskResponse>(
       `/api/v1/audiobook/projects/${audiobookProjectId}/generate-audio-from-scripts`,
       payload
     )
@@ -1569,7 +1845,7 @@ class ApiClient {
 
   // 获取章节字幕文件 API
   getChapterSubtitle(audiobookProjectId: number, chapterId: number, format: string = 'srt') {
-    return this.client.get(
+    return this.client.get<Blob>(
       `/api/v1/audiobook/projects/${audiobookProjectId}/chapters/${chapterId}/subtitle?format=${format}`,
       {
         responseType: 'blob',
@@ -1600,8 +1876,12 @@ class ApiClient {
   }
 
   // 智能分块预览 API
-  previewSmartChunking(segments: any[], maxTokens: number = 1800, minTokens: number = 50) {
-    return this.client.post(
+  previewSmartChunking(
+    segments: AudiobookScriptSegmentPayload[],
+    maxTokens: number = 1800,
+    minTokens: number = 50,
+  ) {
+    return this.client.post<AudiobookSmartChunkPreviewResponse>(
       `/api/v1/audiobook/smart-chunk/preview?max_tokens=${maxTokens}&min_tokens=${minTokens}`,
       segments
     )
@@ -1609,7 +1889,7 @@ class ApiClient {
 
   // 估算文本 token 数量 API
   estimateTextTokens(text: string) {
-    return this.client.post('/api/v1/audiobook/smart-chunk/estimate', { text })
+    return this.client.post<AudiobookTextTokenEstimateResponse>('/api/v1/audiobook/smart-chunk/estimate', { text })
   }
 
   // 获取声音类型预设列表 API
@@ -1654,8 +1934,15 @@ class ApiClient {
 
   // 创建 SSE 连接 URL
   getSSEStreamUrl(taskId: string): string {
-    const baseURL = this.client.getUri ? this.client.getUri() : ''
-    return `${baseURL}/api/v1/audiobook/tasks/${taskId}/stream`
+    return buildApiUrl(
+      this.client.defaults.baseURL,
+      `/api/v1/audiobook/tasks/${encodeURIComponent(taskId)}/stream`,
+    )
+  }
+
+  getSSEStreamHeaders(): HeadersInit {
+    const token = getStoredAccessToken()
+    return token ? { Authorization: `Bearer ${token}` } : {}
   }
 
   // 章节逻辑检查API

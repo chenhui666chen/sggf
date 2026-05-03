@@ -1,101 +1,154 @@
-/**
- * 叙事风格选择器组件
- * 
- * 用于在有声书生成配置中选择叙事风格预设
- */
 import {
   Box,
-  Typography,
-  TextField,
-  Tooltip,
   Chip,
+  FormControl,
+  InputLabel,
+  ListItemText,
+  MenuItem,
+  Select,
+  TextField,
+  Typography,
 } from '@mui/material'
-import { styled } from '@mui/material/styles'
+import type { SelectChangeEvent } from '@mui/material/Select'
 
-const StyleCard = styled(Box)(({ theme }) => ({
-  padding: theme.spacing(1.5),
-  borderRadius: theme.shape.borderRadius,
-  border: `1px solid ${theme.palette.divider}`,
-  cursor: 'pointer',
-  transition: 'all 0.2s',
-  '&:hover': {
-    borderColor: theme.palette.primary.main,
-    backgroundColor: theme.palette.action.hover,
-  },
-  '&.selected': {
-    borderColor: theme.palette.primary.main,
-    backgroundColor: theme.palette.primary.light + '20',
-    borderWidth: 2,
-  },
-}))
-
-interface NarrationStyleSelectorProps {
-  styles: any[]
-  selectedStyle: string
-  customPrompt: string
-  onStyleChange: (styleId: string) => void
-  onPromptChange: (prompt: string) => void
+export interface NarrationStylePreset {
+  id: string
+  name: string
+  description: string
+  emotion_profile?: Record<string, unknown>
+  speed_range?: Record<string, unknown>
+  pitch_range?: Record<string, unknown>
+  pause_multiplier?: number
+  color?: string
+  supported_models?: readonly string[]
 }
 
-const NarrationStyleSelector: React.FC<NarrationStyleSelectorProps> = ({
+interface NarrationStyleSelectorProps {
+  styles: readonly NarrationStylePreset[]
+  selectedStyle: string
+  customPrompt?: string
+  onStyleChange: (styleId: string) => void
+  onPromptChange?: (prompt: string) => void
+  disabled?: boolean
+  formatModelLabel?: (modelId: string) => string
+  currentModel?: string
+}
+
+const NarrationStyleSelector = ({
   styles,
   selectedStyle,
   customPrompt,
   onStyleChange,
   onPromptChange,
-}) => {
+  disabled = false,
+  formatModelLabel,
+  currentModel,
+}: NarrationStyleSelectorProps) => {
   const selectedStyleData = styles.find((s) => s.id === selectedStyle)
+  const selectedColor = selectedStyleData?.color
+  const selectedDescription = selectedStyleData?.description
+  const supportedModelText = selectedStyleData?.supported_models?.length
+    ? selectedStyleData.supported_models.map((modelId) => formatModelLabel?.(modelId) || modelId).join(', ')
+    : '全部模型'
+  const isStyleSupported = (style: NarrationStylePreset) =>
+    !currentModel
+    || !style.supported_models?.length
+    || style.supported_models.includes(currentModel)
+  const selectedStyleSupported = selectedStyleData ? isStyleSupported(selectedStyleData) : true
+
+  const handleStyleChange = (event: SelectChangeEvent<string>) => {
+    const nextStyle = event.target.value
+    const nextStyleData = styles.find((style) => style.id === nextStyle)
+    if (!nextStyleData || !isStyleSupported(nextStyleData)) {
+      return
+    }
+    onStyleChange(nextStyle)
+  }
 
   return (
     <Box>
-      <Typography variant="subtitle2" sx={{ mb: 1.5, fontWeight: 600 }}>
-        叙事风格
-      </Typography>
+      {styles.length === 0 ? (
+        <Typography variant="body2" color="text.secondary">
+          暂无可用叙事风格
+        </Typography>
+      ) : (
+        <FormControl fullWidth size="small" disabled={disabled}>
+          <InputLabel id="narration-style-label">叙事风格</InputLabel>
+          <Select
+            labelId="narration-style-label"
+            label="叙事风格"
+            value={selectedStyleData ? selectedStyle : ''}
+            onChange={handleStyleChange}
+            renderValue={() => selectedStyleData?.name || '选择叙事风格'}
+            MenuProps={{
+              PaperProps: {
+                sx: { maxWidth: 420 },
+              },
+            }}
+          >
+            {styles.map((style) => {
+              const styleSupported = isStyleSupported(style)
+              const supportText = styleSupported
+                ? style.description
+                : `当前模型不支持 · ${style.description}`
 
-      <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', mb: 2 }}>
-        {styles.map((style) => (
-          <Tooltip key={style.id} title={style.description} arrow>
-            <StyleCard
-              className={selectedStyle === style.id ? 'selected' : ''}
-              onClick={() => onStyleChange(style.id)}
-              sx={{ flex: '1 1 140px', minWidth: 140 }}
-            >
-              <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                {style.name}
-              </Typography>
-              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
-                {style.description}
-              </Typography>
-            </StyleCard>
-          </Tooltip>
-        ))}
-      </Box>
-
-      {selectedStyle === 'custom' && (
-        <TextField
-          fullWidth
-          multiline
-          rows={3}
-          label="自定义叙事风格提示词"
-          placeholder="例如：请以温柔、富有感情的语气朗读，适当加入停顿以增强情感..."
-          value={customPrompt}
-          onChange={(e) => onPromptChange(e.target.value)}
-          sx={{ mt: 1 }}
-          size="small"
-        />
+              return (
+                <MenuItem key={style.id} value={style.id} disabled={!styleSupported}>
+                  <ListItemText
+                    primary={style.name}
+                    secondary={supportText}
+                    primaryTypographyProps={{
+                      sx: {
+                        color: selectedStyle === style.id && style.color ? style.color : undefined,
+                        fontWeight: selectedStyle === style.id ? 700 : 500,
+                      },
+                    }}
+                    secondaryTypographyProps={{ sx: { whiteSpace: 'normal' } }}
+                  />
+                </MenuItem>
+              )
+            })}
+          </Select>
+        </FormControl>
       )}
 
-      {selectedStyleData && selectedStyle !== 'custom' && (
-        <Box sx={{ mt: 1 }}>
-          <Chip
-            label={`已选择: ${selectedStyleData.name}`}
+      {selectedStyle === 'custom' && onPromptChange && (
+        <Box sx={{ mt: 1.5 }}>
+          <TextField
+            fullWidth
+            multiline
+            rows={3}
+            label="自定义叙事风格提示词"
+            placeholder="例如：温柔、克制，情绪递进时放慢语速并保留长停顿"
+            value={customPrompt ?? ''}
+            onChange={(e) => onPromptChange(e.target.value)}
             size="small"
-            color="primary"
+            disabled={disabled}
+          />
+        </Box>
+      )}
+
+      {selectedStyleData && (
+        <Box sx={{ mt: 1, display: 'flex', flexDirection: 'column', gap: 0.5 }}>
+          <Chip
+            label={`已选择：${selectedStyleData.name}`}
+            size="small"
+            color={selectedStyleSupported ? 'primary' : 'warning'}
             variant="outlined"
+            sx={
+              selectedStyleSupported && selectedColor
+                ? { alignSelf: 'flex-start', borderColor: selectedColor, color: selectedColor }
+                : { alignSelf: 'flex-start' }
+            }
           />
           <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
-            支持模型: {selectedStyleData.supported_models?.join(', ') || '全部'}
+            支持模型：{supportedModelText}
           </Typography>
+          {selectedDescription && selectedStyle !== 'custom' && (
+            <Typography variant="caption" color="text.secondary">
+              {selectedDescription}
+            </Typography>
+          )}
         </Box>
       )}
     </Box>

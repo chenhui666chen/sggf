@@ -3,10 +3,11 @@
 
 包含 _analyze_chapter 方法
 """
-import json
-import re
 import logging
 from typing import Dict, Any, Optional, List
+
+from app.services.audiobook.llm_client import call_audiobook_llm_async
+from app.services.audiobook.llm_json import parse_llm_json_object
 
 logger = logging.getLogger(__name__)
 
@@ -131,14 +132,12 @@ class AnalysisMixin:
 ```"""
         
         try:
-            from core.model_resolution import TaskType
-            
             max_tokens_value = 8000
             logger.info(f"[章节分析] 请求 max_tokens: {max_tokens_value}")
             
-            response = await self.llm_client.chat(
+            response = await call_audiobook_llm_async(
+                self.llm_client,
                 messages=[{"role": "user", "content": prompt}],
-                task_type=TaskType.AUDIOBOOK_SCRIPT,
                 max_tokens=max_tokens_value,
                 use_cache=False,
                 response_format={"type": "json_object"},
@@ -146,18 +145,7 @@ class AnalysisMixin:
             
             logger.info(f"[章节分析] 实际返回: {len(response)} 字符")
             
-            json_match = response.find("```json")
-            if json_match != -1:
-                json_end = response.find("```", json_match + 7)
-                json_str = response[json_match + 7:json_end].strip()
-            else:
-                json_str = response.strip()
-            
-            json_str = re.sub(r'//.*?$', '', json_str, flags=re.MULTILINE)
-            json_str = re.sub(r'/\*.*?\*/', '', json_str, flags=re.DOTALL)
-            json_str = re.sub(r',\s*([}\]])', r'', json_str)
-            
-            return json.loads(json_str)
+            return parse_llm_json_object(response)
         except Exception as e:
             logger.error(f"分析失败: {e}")
             raise RuntimeError(f"LLM章节分析失败: {e}")

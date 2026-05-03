@@ -12,13 +12,22 @@ os.environ.setdefault("DATABASE_URL", "postgresql://test:test@127.0.0.1:5432/tes
 
 from app.models.admin_log import AdminOperationLog
 from app.services.user_center_points_events import (
+    POINTS_BILLING_MODULE_ASSET_STUDIO,
+    build_points_billing_key,
     record_audiobook_billing_freeze,
     record_audiobook_billing_release,
     record_audiobook_billing_settle,
     record_dreamweaver_billing_freeze,
     record_dreamweaver_billing_release,
     record_dreamweaver_billing_settle,
+    record_points_billing_freeze,
+    record_points_billing_settle,
 )
+from app.services.points_usage_pricing import (
+    build_points_billing_precheck,
+    build_points_usage_charge_estimate,
+)
+from app.services.user_points_read_model import build_user_points_read_model
 
 
 CURRENT_DIR = Path(__file__).resolve().parent
@@ -36,6 +45,148 @@ from user_center_test_helpers import (
     create_project,
     create_user,
 )
+
+
+def _create_manual_points_adjustment(
+    session_factory,
+    *,
+    operator_user_id: int,
+    operator_username: str,
+    target_user_id: int,
+    delta: float,
+    created_at: datetime,
+) -> AdminOperationLog:
+    db = session_factory()
+    try:
+        log = AdminOperationLog(
+            user_id=operator_user_id,
+            username=operator_username,
+            operation_type="POINTS_ADJUST",
+            resource_type="USER_POINTS",
+            resource_id=target_user_id,
+            operation_desc="manual points adjustment",
+            request_method="POST",
+            request_path="/api/v1/admin/users/points-adjustments",
+            request_params={
+                "delta": delta,
+                "adjustment_type": "manual_grant",
+                "reason": "测试充值积分",
+                "expires_at": None,
+            },
+            response_status=201,
+            ip_address="127.0.0.1",
+            user_agent="pytest",
+            duration_ms=0,
+            error_message=None,
+            created_at=created_at,
+        )
+        db.add(log)
+        db.commit()
+        db.refresh(log)
+        return log
+    finally:
+        db.close()
+
+
+def test_generic_asset_studio_billing_precheck_freeze_and_settle_updates_account():
+    _, session_factory = build_test_client()
+    now = datetime.now(timezone.utc)
+
+    user = create_user(session_factory, username="asset_points_user", email="asset_points@example.com")
+    operator = create_user(session_factory, username="asset_points_admin", email="asset_points_admin@example.com")
+    create_points_pricing_policy_snapshot(
+        session_factory,
+        operator_user_id=operator.id,
+        operator_username=operator.username,
+        payload={
+            "points_per_yuan": 100,
+            "user_price_basis": "public_list_price",
+            "user_price_rate": 1.0,
+            "provider_discount_capture_rate": 1.0,
+            "freeze_buffer_rate": 0.1,
+            "margin_warning_rate": 0.15,
+            "negative_margin_block_enabled": True,
+        },
+        created_at=now - timedelta(minutes=5),
+    )
+    _create_manual_points_adjustment(
+        session_factory,
+        operator_user_id=operator.id,
+        operator_username=operator.username,
+        target_user_id=user.id,
+        delta=200.0,
+        created_at=now - timedelta(minutes=3),
+    )
+
+    billing_key = build_points_billing_key(POINTS_BILLING_MODULE_ASSET_STUDIO, "image:test-generic")
+    db = session_factory()
+    try:
+        precheck = build_points_billing_precheck(
+            db=db,
+            user_id=user.id,
+            billing_key=billing_key,
+            module_key=POINTS_BILLING_MODULE_ASSET_STUDIO,
+            module_label="资产生成",
+            basis_yuan=1.0,
+            provider_key="test-image-model",
+        )
+        assert precheck.allowed is True
+        assert precheck.estimated_points == 100.0
+        assert precheck.required_frozen_points == 110.0
+
+        freeze_log = record_points_billing_freeze(
+            db=db,
+            actor_user_id=user.id,
+            actor_username=user.username,
+            target_user_id=user.id,
+            billing_key=billing_key,
+            module_key=POINTS_BILLING_MODULE_ASSET_STUDIO,
+            amount_points=precheck.required_frozen_points,
+            amount_yuan=precheck.estimated_yuan,
+            title="资产生成：图片",
+            summary="资产工作台图片生成已冻结积分。",
+            action_path="/asset-studio",
+            action_label="打开资产工作台",
+            provider_key="test-image-model",
+            extra_payload={"asset_kind": "image", "asset_mode": "text_to_image"},
+        )
+        assert freeze_log is not None
+
+        account_after_freeze = build_user_points_read_model(db=db, user_id=user.id).points_bundle.account
+        assert account_after_freeze.balance == 200.0
+        assert account_after_freeze.frozen == 110.0
+
+        settle_estimate = build_points_usage_charge_estimate(
+            db=db,
+            module_key=POINTS_BILLING_MODULE_ASSET_STUDIO,
+            basis_yuan=1.0,
+            provider_key="test-image-model",
+            include_freeze_buffer=False,
+        )
+        settle_log = record_points_billing_settle(
+            db=db,
+            actor_user_id=user.id,
+            actor_username=user.username,
+            target_user_id=user.id,
+            billing_key=billing_key,
+            module_key=POINTS_BILLING_MODULE_ASSET_STUDIO,
+            amount_points=settle_estimate.estimated_points,
+            amount_yuan=settle_estimate.basis_yuan,
+            title="资产生成：图片",
+            summary="资产工作台图片生成已完成。",
+            action_path="/asset-studio",
+            action_label="打开资产工作台",
+            provider_key="test-image-model",
+            extra_payload={"asset_kind": "image", "asset_mode": "text_to_image"},
+        )
+        assert settle_log is not None
+
+        account_after_settle = build_user_points_read_model(db=db, user_id=user.id).points_bundle.account
+        assert account_after_settle.balance == 100.0
+        assert account_after_settle.frozen == 0.0
+        assert "asset_studio" in account_after_settle.connected_source_keys
+    finally:
+        db.close()
 
 
 def test_audiobook_freeze_event_records_expected_payload():
@@ -112,6 +263,67 @@ def test_audiobook_freeze_event_records_expected_payload():
     assert payload["freeze_buffer_rate"] == 0.1
     assert payload["operating_snapshot"]["user_billed_yuan"] == 1.0
     assert payload["operating_snapshot"]["negative_margin_blocked"] is False
+
+
+def test_audiobook_freeze_event_uses_tts_pricing_key_when_provided():
+    _, session_factory = build_test_client()
+    now = datetime.now(timezone.utc)
+
+    user = create_user(session_factory, username="audio_freeze_model_user", email="audio_freeze_model@example.com")
+    operator = create_user(session_factory, username="audio_freeze_model_admin", email="audio_freeze_model_admin@example.com")
+    project = create_project(session_factory, user_id=user.id, display_no=1, title="有声书模型计价冻结项目")
+    chapter = create_chapter(
+        session_factory,
+        project_id=project.id,
+        chapter_number=1,
+        title="第一章",
+        content="乙" * 10000,
+    )
+    audiobook_project = create_audiobook_project(
+        session_factory,
+        project_id=project.id,
+        status="processing",
+        total_chapters=1,
+        completed_chapters=0,
+        total_cost=0.0,
+        created_at=now,
+        updated_at=now,
+    )
+    create_points_pricing_policy_snapshot(
+        session_factory,
+        operator_user_id=operator.id,
+        operator_username=operator.username,
+        payload={
+            "points_per_yuan": 100,
+            "user_price_basis": "public_list_price",
+            "user_price_rate": 1.0,
+            "provider_discount_capture_rate": 1.0,
+            "freeze_buffer_rate": 0.1,
+            "margin_warning_rate": 0.15,
+            "negative_margin_block_enabled": True,
+        },
+        created_at=now - timedelta(minutes=5),
+    )
+
+    db = session_factory()
+    try:
+        log = record_audiobook_billing_freeze(
+            db=db,
+            actor_user_id=user.id,
+            actor_username=user.username,
+            audiobook_project_id=audiobook_project.id,
+            chapter_ids=[chapter.id],
+            tts_pricing_key="minimax-speech-2.8-hd",
+        )
+        assert log is not None
+        payload = log.request_params or {}
+    finally:
+        db.close()
+
+    assert payload["amount_yuan"] == 6.0
+    assert payload["amount_points"] == 660.0
+    assert payload["operating_snapshot"]["provider_key"] == "minimax-speech-2.8-hd"
+    assert payload["operating_snapshot"]["user_billed_yuan"] == 6.0
 
 
 def test_dreamweaver_freeze_event_records_expected_payload():

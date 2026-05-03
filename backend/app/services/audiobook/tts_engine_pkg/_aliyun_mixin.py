@@ -405,6 +405,49 @@ class AliyunMixin:
                 pass
         return parameters
 
+    def _build_cosyvoice_run_task_command(
+        self,
+        *,
+        task_id: str,
+        model: str,
+        parameters: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        return {
+            "header": {
+                "action": "run-task",
+                "task_id": task_id,
+                "streaming": "duplex",
+            },
+            "payload": {
+                "task_group": "audio",
+                "task": "tts",
+                "function": "SpeechSynthesizer",
+                "model": model,
+                "parameters": parameters,
+                "input": {},
+            },
+        }
+
+    def _build_cosyvoice_continue_task_command(self, *, task_id: str, text: str) -> Dict[str, Any]:
+        return {
+            "header": {
+                "action": "continue-task",
+                "task_id": task_id,
+                "streaming": "duplex",
+            },
+            "payload": {"input": {"text": text}},
+        }
+
+    def _build_cosyvoice_finish_task_command(self, *, task_id: str) -> Dict[str, Any]:
+        return {
+            "header": {
+                "action": "finish-task",
+                "task_id": task_id,
+                "streaming": "duplex",
+            },
+            "payload": {"input": {}},
+        }
+
     def _is_cosyvoice_v35_model(self, model: Optional[str] = None) -> bool:
         return str(model or self.model).strip().lower().startswith("cosyvoice-v3.5-plus")
 
@@ -497,21 +540,11 @@ class AliyunMixin:
         state: Dict[str, Any] = {"error": None, "error_code": None}
 
         def on_open(ws) -> None:
-            run_task_cmd = {
-                "header": {
-                    "action": "run-task",
-                    "task_id": task_id,
-                    "streaming": "duplex",
-                },
-                "payload": {
-                    "task_group": "audio",
-                    "task": "tts",
-                    "function": "SpeechSynthesizer",
-                    "model": model,
-                    "parameters": parameters,
-                    "input": {},
-                },
-            }
+            run_task_cmd = self._build_cosyvoice_run_task_command(
+                task_id=task_id,
+                model=model,
+                parameters=parameters,
+            )
             ws.send(json.dumps(run_task_cmd))
 
         def on_message(ws, message) -> None:
@@ -530,22 +563,8 @@ class AliyunMixin:
             event = header.get("event")
 
             if event == "task-started":
-                continue_task_cmd = {
-                    "header": {
-                        "action": "continue-task",
-                        "task_id": task_id,
-                        "streaming": "duplex",
-                    },
-                    "payload": {"input": {"text": text}},
-                }
-                finish_task_cmd = {
-                    "header": {
-                        "action": "finish-task",
-                        "task_id": task_id,
-                        "streaming": "duplex",
-                    },
-                    "payload": {"input": {}},
-                }
+                continue_task_cmd = self._build_cosyvoice_continue_task_command(task_id=task_id, text=text)
+                finish_task_cmd = self._build_cosyvoice_finish_task_command(task_id=task_id)
                 ws.send(json.dumps(continue_task_cmd))
                 ws.send(json.dumps(finish_task_cmd))
                 return
@@ -607,6 +626,56 @@ class AliyunMixin:
         )
         return b"".join(audio_chunks)
 
+    def _build_minimax_voice_candidates(self, voice: str) -> List[str]:
+        known_working_voices = [
+            "male-qn-qingse",
+            "Chinese (Mandarin)_News_Anchor",
+        ]
+        candidates = [str(voice or "").strip()]
+        if candidates[0].startswith("female-qn-"):
+            candidates.append(candidates[0].replace("female-qn-", "female-"))
+        elif candidates[0].startswith("male-qn-"):
+            candidates.append(candidates[0].replace("male-qn-", "male-"))
+
+        if "-" in candidates[0]:
+            parts = candidates[0].split("-")
+            if len(parts) >= 2:
+                candidates.append(parts[-1])
+
+        candidates.extend(known_working_voices)
+        return [item for item in dict.fromkeys(candidates) if item]
+
+    def _build_minimax_http_payload(
+        self,
+        *,
+        model: str,
+        text: str,
+        voice: str,
+        voice_params: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        speed = float(voice_params.get("rate", voice_params.get("speed", 1.0)) or 1.0)
+        volume = int(voice_params.get("volume", 50) or 50)
+        pitch = int(voice_params.get("pitch", 0) or 0)
+        return {
+            "input": {
+                "action": "tts",
+                "text": text,
+                "stream": False,
+                "voice_setting": {
+                    "voice_id": voice,
+                    "speed": max(0.0, min(2.0, speed)),
+                    "vol": max(0.0, min(100.0, volume)) / 100.0,
+                    "pitch": max(-100, min(100, pitch)),
+                },
+                "audio_setting": {
+                    "sample_rate": 16000,
+                    "format": "mp3",
+                    "channel": 1,
+                },
+            },
+            "model": model,
+        }
+
     async def _call_dashscope_minimax_http(
         self,
         model: str,
@@ -618,43 +687,7 @@ class AliyunMixin:
         """调用 MiniMax TTS via DashScope HTTP API"""
         import httpx
 
-        speed = float(voice_params.get("rate", voice_params.get("speed", 1.0)) or 1.0)
-        volume = int(voice_params.get("volume", 50) or 50)
-        pitch = int(voice_params.get("pitch", 0) or 0)
-        vol_normalized = max(0.0, min(100.0, volume)) / 100.0
-
-        # 已知的百炼平台可用的 MiniMax 语音列表
-        KNOWN_WORKING_VOICES = [
-            "male-qn-qingse",  # 已验证可用的语音
-            "Chinese (Mandarin)_News_Anchor",  # 用户提供的语音
-        ]
-
-        # 所有可能的 MiniMax 语音格式
-        all_minimax_voices = [
-            # 原始语音
-            voice,
-            # 去掉 qn- 前缀
-        ]
-
-        if voice.startswith("female-qn-"):
-            all_minimax_voices.append(voice.replace("female-qn-", "female-"))
-        elif voice.startswith("male-qn-"):
-            all_minimax_voices.append(voice.replace("male-qn-", "male-"))
-
-        # 只保留名字
-        if "-" in voice:
-            parts = voice.split("-")
-            if len(parts) >= 2:
-                all_minimax_voices.append(parts[-1])
-
-        # 添加已知的可用语音作为备选
-        for known_voice in KNOWN_WORKING_VOICES:
-            if known_voice not in all_minimax_voices:
-                all_minimax_voices.append(known_voice)
-
-        # 去重
-        voice_formats = list(dict.fromkeys(all_minimax_voices))
-
+        voice_formats = self._build_minimax_voice_candidates(voice)
         logger.info(f"尝试语音格式: {voice_formats}")
 
         async with httpx.AsyncClient(timeout=60.0) as client:
@@ -662,25 +695,12 @@ class AliyunMixin:
                 try:
                     logger.info(f"尝试语音: {try_voice}")
 
-                    payload = {
-                        "input": {
-                            "action": "tts",
-                            "text": text,
-                            "stream": False,
-                            "voice_setting": {
-                                "voice_id": try_voice,
-                                "speed": max(0.0, min(2.0, speed)),
-                                "vol": vol_normalized,
-                                "pitch": max(-100, min(100, pitch)),
-                            },
-                            "audio_setting": {
-                                "sample_rate": 16000,
-                                "format": "mp3",
-                                "channel": 1,
-                            },
-                        },
-                        "model": model,
-                    }
+                    payload = self._build_minimax_http_payload(
+                        model=model,
+                        text=text,
+                        voice=try_voice,
+                        voice_params=voice_params,
+                    )
 
                     response = await client.post(
                         "https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation",
@@ -778,6 +798,28 @@ class AliyunMixin:
 
         return None
 
+    def _build_qwen_http_payload(
+        self,
+        *,
+        model: str,
+        text: str,
+        voice_id: str,
+        voice_params: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        language_type = self._build_qwen_language_type(voice_params)
+        payload: Dict[str, Any] = {
+            "model": model,
+            "input": {
+                "text": text,
+                "voice": voice_id,
+                "language_type": language_type,
+            },
+        }
+        instruct_payload = self._build_qwen_instruction_payload(voice_params)
+        if instruct_payload:
+            payload["parameters"] = instruct_payload
+        return payload
+
     async def _call_dashscope_qwen_http(
         self,
         model: str,
@@ -791,18 +833,14 @@ class AliyunMixin:
 
         # Qwen TTS API 端点（正确）
         endpoint = "https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation"
-        language_type = self._build_qwen_language_type(voice_params)
-        payload = {
-            "model": model,
-            "input": {
-                "text": text,
-                "voice": voice_id,
-                "language_type": language_type,
-            },
-        }
-        instruct_payload = self._build_qwen_instruction_payload(voice_params)
-        if instruct_payload:
-            payload["parameters"] = instruct_payload
+        payload = self._build_qwen_http_payload(
+            model=model,
+            text=text,
+            voice_id=voice_id,
+            voice_params=voice_params,
+        )
+        language_type = str(payload["input"].get("language_type") or "Auto")
+        instruct_payload = payload.get("parameters") or {}
 
         logger.info(
             "调用百炼 Qwen HTTP API: model=%s, voice=%s, language_type=%s, instructions=%s",

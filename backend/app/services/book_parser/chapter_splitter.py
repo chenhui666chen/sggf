@@ -5,6 +5,7 @@
 - 中文数字: 第一章、第十二章
 - 阿拉伯数字: 第1章、第12章
 - 英文格式: Chapter 1、Chapter One
+- 结构标题: Act I、Scene 2、Section III、第三幕
 - 卷/部识别: 第一卷、第一部、Vol.1
 - 特殊章节: 序章、楔子、番外、后记
 """
@@ -12,6 +13,8 @@ import re
 from typing import List, Optional, Tuple, Dict, Any
 from dataclasses import dataclass, field
 from enum import Enum
+
+from app.services.book_parser.text_metrics import count_readable_units
 
 
 class ChapterType(str, Enum):
@@ -105,11 +108,16 @@ class ChapterSplitter:
         'fifteen': 15, 'sixteen': 16, 'seventeen': 17, 'eighteen': 18,
         'nineteen': 19, 'twenty': 20,
     }
+    ROMAN_NUMBERS = {
+        'i': 1, 'v': 5, 'x': 10, 'l': 50, 'c': 100, 'd': 500, 'm': 1000,
+    }
     
     # 章节标题正则模式（按优先级排序）
     CHAPTER_PATTERNS = [
         # 中文格式: 第X章 标题 (支持前缀有Markdown标记或空白)
         (r'^[\*\s#]*第([\u96f6一二三四五六七八九十百千万两\d]+)[章节回][\s：:.]*(.*)$', 'cn_chapter'),
+        # 戏剧/论文结构: 第X幕/场/节 标题
+        (r'^[\*\s#]*第([\u96f6一二三四五六七八九十百千万两\d]+)[幕场节][\s：:.]*(.*)$', 'cn_structural_chapter'),
         # 阻拉伯数字格式: 第1章 标题
         (r'^[\*\s#]*第(\d+)[章节回][\s：:.]*(.*)$', 'num_chapter'),
         # 英文格式: Chapter 1: Title
@@ -118,6 +126,10 @@ class ChapterSplitter:
         (r'^[\*\s#]*[Cc]hapter\s+([A-Za-z]+)\s*[：:.]?\s*(.*)$', 'en_word_chapter'),
         # 简写格式: Ch.1 或 Ch 1
         (r'^[\*\s#]*[Cc]h\.?\s*(\d+)\s*[：:.]?\s*(.*)$', 'ch_short'),
+        # 戏剧/论文结构: Act I、Scene 2、Section III
+        (r'^[\*\s#]*(?:[Aa]ct|[Ss]cene|[Ss]ection)\s+(\d+|[IVXLCDMivxlcdm]+)\s*[：:.]?\s*(.*)$', 'en_structural_chapter'),
+        # 罗马数字格式: IV. Title 或 IV: Title
+        (r'^[\*\s#]*([IVXLCDMivxlcdm]+)\s*[：:.]\s*(.*)$', 'roman_heading'),
         # 纯数字格式: 1. 标题 或 1、标题
         (r'^[\*\s#]*(\d+)\s*[\.\u3001]\s*(.+)$', 'pure_number'),
         # 括号格式: (1) 标题 或 【1】标题
@@ -144,13 +156,21 @@ class ChapterSplitter:
         (r'^第(\d+)[卷部册篇]\s*[：:.]?\s*(.*)$', VolumeType.VOLUME),
         # 英文卷: Volume 1 或 Vol.1
         (r'^[Vv]ol(?:ume)?\.?\s*(\d+)\s*[：:.]?\s*(.*)$', VolumeType.VOLUME),
+        # 英文罗马数字卷: Volume IV / Vol.IV
+        (r'^[Vv]ol(?:ume)?\.?\s*([IVXLCDMivxlcdm]+)\s*[：:.]?\s*(.*)$', VolumeType.VOLUME),
         # 英文部: Part 1
         (r'^[Pp]art\s+(\d+)\s*[：:.]?\s*(.*)$', VolumeType.PART),
+        # 英文罗马数字部: Part IV
+        (r'^[Pp]art\s+([IVXLCDMivxlcdm]+)\s*[：:.]?\s*(.*)$', VolumeType.PART),
         # 英文册: Book 1
         (r'^[Bb]ook\s+(\d+)\s*[：:.]?\s*(.*)$', VolumeType.BOOK),
+        # 英文罗马数字册: Book IV
+        (r'^[Bb]ook\s+([IVXLCDMivxlcdm]+)\s*[：:.]?\s*(.*)$', VolumeType.BOOK),
         # 上中下卷
         (r'^([上中下])[卷部册篇]\s*[：:.]?\s*(.*)$', VolumeType.VOLUME),
     ]
+
+    EXPLICIT_CHAPTER_MARKER_PATTERN = r'^<<CHAPTER_MARKER:(.*?)>>$'
     
     def __init__(self, min_chapter_words: int = 100, max_title_length: int = 100):
         """
@@ -176,6 +196,10 @@ class ChapterSplitter:
             (re.compile(p, re.MULTILINE | re.IGNORECASE), t) 
             for p, t in self.VOLUME_PATTERNS
         ]
+        self._explicit_chapter_marker_pattern = re.compile(
+            self.EXPLICIT_CHAPTER_MARKER_PATTERN,
+            re.IGNORECASE,
+        )
     
     def split(self, text: str) -> SplitResult:
         """
@@ -255,7 +279,29 @@ class ChapterSplitter:
         
         for i, line in enumerate(lines):
             line = line.strip()
-            if not line or len(line) > self.max_title_length:
+            if not line:
+                continue
+
+            explicit_marker = self._explicit_chapter_marker_pattern.match(line)
+            if explicit_marker:
+                chapter_number = len([
+                    marker
+                    for marker in markers
+                    if marker['type'] in ('chapter', 'special')
+                ]) + 1
+                title = self._clean_title(explicit_marker.group(1).strip())
+                markers.append({
+                    'line_num': i,
+                    'type': 'chapter',
+                    'number': chapter_number,
+                    'title': title or f"第{chapter_number}章",
+                    'raw': title or f"第{chapter_number}章",
+                    'pattern_type': 'explicit_marker',
+                    'original_number': str(chapter_number),
+                })
+                continue
+
+            if len(line) > self.max_title_length:
                 continue
             
             marker = None
@@ -530,6 +576,10 @@ class ChapterSplitter:
         if all(c in self.CN_NUMBERS for c in num_str):
             return self._parse_chinese_number(num_str)
         
+        roman_number = self._parse_roman_number(num_str)
+        if roman_number is not None:
+            return roman_number
+
         # 尝试英文数字
         lower = num_str.lower()
         if lower in self.EN_NUMBERS:
@@ -566,6 +616,25 @@ class ChapterSplitter:
         
         result += temp
         return result
+
+    def _parse_roman_number(self, value: str) -> Optional[int]:
+        """
+        解析罗马数字章节号。
+        """
+        token = str(value or "").strip().lower()
+        if not token or not re.fullmatch(r"[ivxlcdm]+", token):
+            return None
+
+        total = 0
+        previous = 0
+        for char in reversed(token):
+            current = self.ROMAN_NUMBERS.get(char, 0)
+            if current < previous:
+                total -= current
+            else:
+                total += current
+                previous = current
+        return total if total > 0 else None
     
     def _clean_title(self, title: str) -> str:
         """
@@ -585,11 +654,9 @@ class ChapterSplitter:
     
     def _count_words(self, text: str) -> int:
         """
-        统计中文字数
+        统计可朗读文本单位
         """
-        # 只计算中文字符
-        chinese_chars = re.findall(r'[\u4e00-\u9fff]', text)
-        return len(chinese_chars)
+        return count_readable_units(text)
     
     def analyze_structure(self, text: str) -> Dict[str, Any]:
         """
