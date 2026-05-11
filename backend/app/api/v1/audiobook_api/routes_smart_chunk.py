@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import List
 
-from fastapi import Body, Depends, HTTPException
+from fastapi import Body, Depends
 
 from app.core.security import get_current_user
 from app.models.user import User
@@ -12,7 +12,6 @@ from app.schemas.audiobook import (
 from app.services.audiobook.smart_chunker import SmartChunker
 from app.services.audiobook.voice_types import (
     get_all_voice_types,
-    get_voice_type_preset,
     recommend_voice_type,
 )
 
@@ -82,32 +81,6 @@ async def list_voice_types(
 ):
     """获取所有声音类型预设列表"""
     return get_all_voice_types()
-
-
-@router.get("/voice-types/{voice_type}")
-async def get_voice_type_detail(
-    voice_type: str,
-    current_user: User = Depends(get_current_user),
-):
-    """获取指定声音类型详情"""
-    preset = get_voice_type_preset(voice_type)
-    if not preset:
-        raise HTTPException(status_code=404, detail="声音类型不存在")
-    return {
-        "voice_type": preset.voice_type,
-        "name": preset.name,
-        "description": preset.description,
-        "speed_modifier": preset.speed_modifier,
-        "pitch_modifier": preset.pitch_modifier,
-        "volume_modifier": preset.volume_modifier,
-        "emotion_intensity": preset.emotion_intensity,
-        "emotion_tendency": preset.emotion_tendency,
-        "default_emotion": preset.default_emotion,
-        "preferred_gender": preset.preferred_gender,
-        "preferred_age_range": preset.preferred_age_range,
-        "compatible_personalities": preset.compatible_personalities,
-        "suitable_scenarios": preset.suitable_scenarios,
-    }
 
 
 @router.post("/voice-types/recommend")

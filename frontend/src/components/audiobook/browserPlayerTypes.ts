@@ -20,6 +20,7 @@ export interface BrowserPlayerChapter {
 
 export interface BrowserPlayerProjectData {
   project_id: number
+  audiobook_project_id?: number
   project_title: string
   chapters: BrowserPlayerChapter[]
   total_duration: number

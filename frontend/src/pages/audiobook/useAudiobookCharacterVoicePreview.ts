@@ -37,6 +37,7 @@ export const useAudiobookCharacterVoicePreview = ({
         speed: cv.speed,
         pitch: cv.pitch,
         model: modelForPreview,
+        voice_type: cv.voiceType,
       })
 
       if (playingChapter) {

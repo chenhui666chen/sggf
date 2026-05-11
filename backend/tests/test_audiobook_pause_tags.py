@@ -9,6 +9,7 @@ from app.services.audiobook.pause_tags import (
     MAX_PAUSE_MS,
     split_pause_tag_text,
     strip_pause_tags,
+    strip_spoken_pause_directives,
 )
 from app.services.audiobook.render_plan import build_render_plan
 
@@ -44,6 +45,39 @@ def test_strip_pause_tags_uses_largest_pause_and_clamps_duration():
 
     assert result.text == "A B C"
     assert result.pause_after_ms == MAX_PAUSE_MS
+
+
+def test_strip_pause_tags_removes_spoken_pause_directives():
+    result = strip_pause_tags("必须走。（停顿一秒）继续。")
+
+    assert result.text == "必须走。继续。"
+    assert result.pause_after_ms == 1000
+    assert result.applied is True
+
+
+def test_strip_pause_tags_splits_standalone_spoken_pause_directives():
+    parts = split_pause_tag_text("必须走。停顿三秒。继续。")
+
+    assert [(part.text, part.pause_after_ms) for part in parts] == [
+        ("必须走。", 3000),
+        ("继续。", None),
+    ]
+
+
+def test_strip_pause_tags_does_not_remove_narrative_pause_verbs():
+    result = strip_pause_tags("他停顿了一下，才开口。")
+
+    assert result.text == "他停顿了一下，才开口。"
+    assert result.pause_after_ms is None
+    assert result.applied is False
+
+
+def test_strip_spoken_pause_directives_preserves_structural_pause_tags():
+    result = strip_spoken_pause_directives("他停下[pause:2s]继续说。（停顿一秒）")
+
+    assert result.text == "他停下[pause:2s]继续说。"
+    assert result.pause_after_ms == 1000
+    assert result.applied is True
 
 
 def test_split_pause_tag_text_keeps_internal_pause_position():

@@ -6,13 +6,43 @@ from typing import Any, Dict, List, Optional
 
 from .cosyvoice_clone_client import (
     COSYVOICE_V35_PLUS_MODEL_ID,
+    CosyVoiceCloneError,
     get_clone_display_name,
     is_legacy_cosyvoice_system_voice,
     list_cosyvoice_v3_plus_clones,
 )
 from .voice_catalog import get_voice_entry, list_supported_voices
+from .voice_types import apply_voice_type_to_tts_params
 
 logger = logging.getLogger(__name__)
+
+
+def _coerce_int_override(value: Any, fallback: int, *, field: str, character_name: str) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError) as exc:
+        logger.debug(
+            "忽略无效 CosyVoice 音色参数: character=%s field=%s value=%r error=%s",
+            character_name,
+            field,
+            value,
+            exc,
+        )
+        return fallback
+
+
+def _coerce_float_override(value: Any, fallback: float, *, field: str, character_name: str) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError) as exc:
+        logger.debug(
+            "忽略无效 CosyVoice 音色参数: character=%s field=%s value=%r error=%s",
+            character_name,
+            field,
+            value,
+            exc,
+        )
+        return fallback
 
 
 @dataclass
@@ -61,9 +91,9 @@ class CosyVoiceV3PlusVoiceManager:
                     if str(c.status or "").strip().upper() == "OK"
                 ]
             )
-        except Exception:
+        except CosyVoiceCloneError as exc:
             # 未配置 API Key 或当前环境无法访问时，保留本地静态目录（v3.5 为空表）
-            pass
+            logger.info("CosyVoice 自定义音色列表不可用，VoiceManager 使用静态目录: error=%s", exc)
         self._voices: List[Dict[str, Any]] = list(voices)
         self._voices_by_id: Dict[str, Dict[str, Any]] = {
             v.get("id"): v for v in self._voices if isinstance(v, dict) and v.get("id")
@@ -146,6 +176,7 @@ class CosyVoiceV3PlusVoiceManager:
                 "volume": cfg.get("volume"),
                 "speed": cfg.get("speed"),
                 "pitch": cfg.get("pitch"),
+                "voice_type": cfg.get("voice_type"),
             }
             self._create_profile(character_name=str(character_name), voice_id=str(voice_id), overrides=overrides)
 
@@ -187,20 +218,46 @@ class CosyVoiceV3PlusVoiceManager:
 
         if overrides:
             if overrides.get("pitch") is not None:
-                try:
-                    pitch = int(overrides["pitch"])
-                except Exception:
-                    pass
+                pitch = _coerce_int_override(
+                    overrides["pitch"],
+                    pitch,
+                    field="pitch",
+                    character_name=character_name,
+                )
             if overrides.get("speed") is not None:
-                try:
-                    speed = float(overrides["speed"])
-                except Exception:
-                    pass
+                speed = _coerce_float_override(
+                    overrides["speed"],
+                    speed,
+                    field="speed",
+                    character_name=character_name,
+                )
             if overrides.get("volume") is not None:
-                try:
-                    volume = int(overrides["volume"])
-                except Exception:
-                    pass
+                volume = _coerce_int_override(
+                    overrides["volume"],
+                    volume,
+                    field="volume",
+                    character_name=character_name,
+                )
+
+        default_emotion = "neutral"
+        voice_type = str((overrides or {}).get("voice_type") or "").strip()
+        if voice_type:
+            enhanced = apply_voice_type_to_tts_params(
+                voice_type,
+                {
+                    "volume": volume,
+                    "speed": speed,
+                    "pitch": pitch,
+                },
+            )
+            if enhanced.get("volume") is not None:
+                volume = int(max(0, min(100, enhanced["volume"])))
+            if enhanced.get("speed") is not None:
+                speed = float(max(0.5, min(2.0, enhanced["speed"])))
+            if enhanced.get("pitch") is not None:
+                pitch = int(max(0, min(100, enhanced["pitch"])))
+            if enhanced.get("emotion"):
+                default_emotion = str(enhanced["emotion"])
 
         profile = CosyVoiceV3PlusProfile(
             voice_id=resolved_voice_id or speaker,
@@ -209,7 +266,7 @@ class CosyVoiceV3PlusVoiceManager:
             pitch_base=pitch,
             speed_base=speed,
             volume_base=volume,
-            default_emotion="neutral",
+            default_emotion=default_emotion,
         )
         self._profiles_by_character[character_name] = profile
         return profile

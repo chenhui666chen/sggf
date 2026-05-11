@@ -1,4 +1,4 @@
-import { Box, IconButton, Slider, Typography } from '@mui/material'
+import { Box, IconButton, Slider, Tooltip, Typography } from '@mui/material'
 import {
   Pause,
   PlayArrow,
@@ -35,42 +35,71 @@ const BrowserPlayerControls: React.FC<BrowserPlayerControlsProps> = ({
   onPlayPause,
   onNext,
   onVolumeChange,
-}) => (
-  <Box sx={{ mt: 'auto' }}>
-    <Slider
-      value={currentTime}
-      max={duration || 100}
-      onChange={onSeek}
-      sx={{ mb: 1 }}
-    />
-    <Box display="flex" alignItems="center" gap={2}>
-      <Typography variant="caption" sx={{ minWidth: 50 }}>
-        {formatBrowserPlayerTime(currentTime)}
-      </Typography>
-      <IconButton onClick={onPrevious} disabled={currentChapterIndex === 0}>
-        <SkipPrevious />
-      </IconButton>
-      <IconButton onClick={onPlayPause} size="large">
-        {isPlaying ? <Pause fontSize="large" /> : <PlayArrow fontSize="large" />}
-      </IconButton>
-      <IconButton onClick={onNext} disabled={currentChapterIndex >= chapterCount - 1}>
-        <SkipNext />
-      </IconButton>
-      <Typography variant="caption" sx={{ minWidth: 50, textAlign: 'right' }}>
-        {formatBrowserPlayerTime(duration)}
-      </Typography>
-      <Box display="flex" alignItems="center" gap={0.5} sx={{ ml: 'auto' }}>
-        <VolumeUp fontSize="small" />
-        <Slider
-          value={volume}
-          step={0.01}
-          max={1}
-          onChange={onVolumeChange}
-          sx={{ width: 100 }}
-        />
+}) => {
+  const previousDisabled = currentChapterIndex === 0
+  const nextDisabled = currentChapterIndex >= chapterCount - 1
+
+  return (
+    <Box sx={{ mt: 'auto' }}>
+      <Slider
+        value={currentTime}
+        max={duration || 100}
+        onChange={onSeek}
+        sx={{ mb: 1 }}
+      />
+      <Box
+        sx={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: { xs: 1, sm: 2 },
+          flexWrap: 'wrap',
+        }}
+      >
+        <Typography variant="caption" sx={{ minWidth: 50 }}>
+          {formatBrowserPlayerTime(currentTime)}
+        </Typography>
+        <Tooltip title={previousDisabled ? '当前已经是第一章' : '上一章'}>
+          <span>
+            <IconButton onClick={onPrevious} disabled={previousDisabled}>
+              <SkipPrevious />
+            </IconButton>
+          </span>
+        </Tooltip>
+        <IconButton onClick={onPlayPause} size="large">
+          {isPlaying ? <Pause fontSize="large" /> : <PlayArrow fontSize="large" />}
+        </IconButton>
+        <Tooltip title={nextDisabled ? '当前已经是最后一章' : '下一章'}>
+          <span>
+            <IconButton onClick={onNext} disabled={nextDisabled}>
+              <SkipNext />
+            </IconButton>
+          </span>
+        </Tooltip>
+        <Typography variant="caption" sx={{ minWidth: 50, textAlign: 'right' }}>
+          {formatBrowserPlayerTime(duration)}
+        </Typography>
+        <Box
+          sx={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 0.5,
+            ml: { xs: 0, sm: 'auto' },
+            width: { xs: '100%', sm: 'auto' },
+            minWidth: { xs: 180, sm: 0 },
+          }}
+        >
+          <VolumeUp fontSize="small" />
+          <Slider
+            value={volume}
+            step={0.01}
+            max={1}
+            onChange={onVolumeChange}
+            sx={{ width: { xs: '100%', sm: 100 } }}
+          />
+        </Box>
       </Box>
     </Box>
-  </Box>
-)
+  )
+}
 
 export default BrowserPlayerControls

@@ -178,6 +178,62 @@ def test_audiobook_precheck_uses_selected_tts_model_price():
     assert precheck.estimated_yuan == 6.0
     assert precheck.estimated_points == 600.0
     assert precheck.required_frozen_points == 660.0
+    assert precheck.cost_precheck_id.startswith("audiobook-precheck-")
+    assert len(precheck.cost_precheck_id) > len("audiobook-precheck-")
+
+
+def test_audiobook_precheck_cost_id_is_stable_for_same_inputs():
+    _, session_factory = build_test_client()
+    now = datetime.now(timezone.utc)
+
+    user = create_user(session_factory, username="precheck_id_user", email="precheck_id@example.com")
+    operator = create_user(session_factory, username="precheck_id_admin", email="precheck_id_admin@example.com")
+    project = create_project(session_factory, user_id=user.id, display_no=1, title="预检 ID 项目")
+    chapter = create_chapter(
+        session_factory,
+        project_id=project.id,
+        chapter_number=1,
+        title="第一章",
+        content="稳" * 10000,
+    )
+    create_user_asset(
+        session_factory,
+        user_id=user.id,
+        title="稳定预检资产",
+        source_uri="https://example.com/asset-precheck-id.png",
+        created_at=now,
+        updated_at=now,
+    )
+    _seed_points_snapshots(
+        session_factory,
+        operator_user_id=operator.id,
+        operator_username=operator.username,
+        now=now,
+        reusable_asset_reward=1000.0,
+    )
+
+    db = session_factory()
+    try:
+        first = build_audiobook_task_points_precheck(
+            db=db,
+            user_id=user.id,
+            project_id=project.id,
+            project_title=project.title,
+            chapter_ids=[chapter.id],
+            tts_provider="minimax-speech-2.8-hd",
+        )
+        second = build_audiobook_task_points_precheck(
+            db=db,
+            user_id=user.id,
+            project_id=project.id,
+            project_title=project.title,
+            chapter_ids=[chapter.id],
+            tts_provider="minimax-speech-2.8-hd",
+        )
+    finally:
+        db.close()
+
+    assert first.cost_precheck_id == second.cost_precheck_id
 
 
 def test_audiobook_precheck_blocks_when_negative_margin_policy_is_hit():

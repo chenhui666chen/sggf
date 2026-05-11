@@ -3,7 +3,7 @@
 """
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class AudiobookProjectCreate(BaseModel):
@@ -37,6 +37,40 @@ class ChapterScriptUpdateRequest(BaseModel):
     """更新章节剧本请求"""
     script_segments: List[dict]
     script_status: Optional[str] = None  # pending/reviewed/approved
+
+
+class AudiobookDeleteRequest(BaseModel):
+    """有声书项目删除请求。"""
+
+    delete_reason: Optional[str] = None
+    delete_files: bool = False
+
+    @field_validator("delete_reason")
+    @classmethod
+    def normalize_delete_reason(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        reason = str(value).strip()
+        return reason or None
+
+
+class ChapterAudioDeleteRequest(AudiobookDeleteRequest):
+    """章节音频删除请求。
+
+    `delete_file` 为旧字段，仅用于兼容旧客户端；新调用统一使用 `delete_files`。
+    """
+
+    delete_file: Optional[bool] = Field(
+        default=None,
+        description="Deprecated: use delete_files.",
+        json_schema_extra={"deprecated": True},
+    )
+
+    @model_validator(mode="after")
+    def apply_deprecated_delete_file(self) -> "ChapterAudioDeleteRequest":
+        if self.delete_file is not None:
+            self.delete_files = bool(self.delete_file)
+        return self
 
 
 class AudiobookProjectResponse(BaseModel):
@@ -74,6 +108,7 @@ class CharacterVoiceConfig(BaseModel):
     volume: int = 50
     speed: Optional[float] = None
     pitch: Optional[int] = None
+    tts_model: Optional[str] = None
     voice_type: Optional[str] = None  # 声音类型（majestic/gentle/lively 等）
     personality: Optional[str] = None  # 性格类型
     emotion_tendency: Optional[str] = None  # 情感倾向
@@ -87,6 +122,7 @@ class TTSPreviewRequest(BaseModel):
     speed: Optional[float] = None
     pitch: Optional[int] = None
     model: Optional[str] = "qwen3-tts-instruct-flash"  # TTS 模型（默认 qwen3-tts-instruct-flash）
+    voice_type: Optional[str] = None  # 声音类型（majestic/gentle/lively 等）
     instruction: Optional[str] = None
 
 

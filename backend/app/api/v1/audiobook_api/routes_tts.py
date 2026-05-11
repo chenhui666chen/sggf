@@ -23,6 +23,7 @@ from app.services.audiobook.tts_model_ids import (
     get_audiobook_tts_model_metadata,
     normalize_audiobook_tts_model,
 )
+from app.services.audiobook.voice_types import apply_voice_type_to_tts_params
 from app.services.audiobook.voice_manager import VoiceManager
 from app.services.audiobook.voice_catalog import get_voice_entry, load_voice_catalog_for_model
 from app.services.audiobook.cosyvoice_clone_client import (
@@ -48,6 +49,13 @@ from app.api.v1.audiobook_api import router
 logger = logging.getLogger(__name__)
 
 DEFAULT_TTS_MODEL = DEFAULT_AUDIOBOOK_TTS_MODEL
+_PREVIEW_RETRY_CONFIG = RetryConfig(
+    max_retries=4,
+    base_delay=1.0,
+    max_delay=8.0,
+    exponential_base=2.0,
+    jitter=True,
+)
 
 
 def _is_cosyvoice_v35_model(model: str) -> bool:
@@ -84,8 +92,12 @@ def _build_model_voice_catalog_status(model_name: str) -> tuple[int, str, str | 
         try:
             clones, _clone_meta = list_cosyvoice_v3_plus_clones()
             voice_count += len(clones)
-        except CosyVoiceCloneError:
-            pass
+        except CosyVoiceCloneError as exc:
+            logger.info(
+                "CosyVoice 自定义音色列表不可用，模型音色计数仅使用静态目录: model=%s error=%s",
+                model_name,
+                exc,
+            )
     return voice_count, "ready", None
 
 
@@ -128,7 +140,7 @@ def _build_cosyvoice_voice_prefix(display_name: str, current_user: User) -> str:
     slug = re.sub(r"[^A-Za-z0-9_]+", "_", cleaned_name).strip("_").lower()
     base = (slug[:4] if slug else "v").strip("_") or "v"
     user_id = str(getattr(current_user, "id", "0"))
-    digest = hashlib.sha1(f"{user_id}:{cleaned_name}".encode("utf-8")).hexdigest()[:6]  # noqa: S324
+    digest = hashlib.sha256(f"{user_id}:{cleaned_name}".encode("utf-8")).hexdigest()[:6]
     suffix = secrets.token_hex(1)
     return f"{base}{digest}{suffix}"[:10]
 
@@ -159,14 +171,33 @@ def _resolve_preview_speaker_id(request: TTSPreviewRequest, model_name: str) -> 
 
 
 def _build_preview_voice_params(request: TTSPreviewRequest, speaker_id: str) -> dict:
+    base_params = {
+        "volume": request.volume,
+        "speed": request.speed,
+        "pitch": request.pitch,
+    }
+    voice_type = str(request.voice_type or "").strip()
+    if voice_type:
+        base_params = apply_voice_type_to_tts_params(
+            voice_type,
+            {
+                "volume": request.volume,
+                "speed": request.speed if request.speed is not None else 1.0,
+                "pitch": request.pitch if request.pitch is not None else 50,
+            },
+        )
+
     voice_params: dict = {
         "speaker": speaker_id,
-        "volume": request.volume,
+        "volume": base_params.get("volume"),
     }
-    if request.speed is not None:
-        voice_params["rate"] = request.speed
-    if request.pitch is not None:
-        voice_params["pitch"] = request.pitch
+    if base_params.get("speed") is not None:
+        voice_params["rate"] = base_params["speed"]
+        voice_params["speed"] = base_params["speed"]
+    if base_params.get("pitch") is not None:
+        voice_params["pitch"] = base_params["pitch"]
+    if base_params.get("emotion"):
+        voice_params["emotion"] = base_params["emotion"]
 
     instruction = str(getattr(request, "instruction", "") or "").strip()
     if instruction:
@@ -178,10 +209,6 @@ def _build_preview_voice_params(request: TTSPreviewRequest, speaker_id: str) -> 
         voice_params["phoneme_timestamp_enabled"] = True
 
     return voice_params
-
-
-def _build_preview_retry_config() -> RetryConfig:
-    return RetryConfig(max_retries=4, base_delay=1.0, max_delay=8.0, exponential_base=2.0, jitter=True)
 
 
 async def _synthesize_preview_payload(
@@ -199,7 +226,8 @@ async def _synthesize_preview_payload(
         request_delay=0.0,
         retry_config=retry_config,
     )
-    payload = await engine.synthesize_with_metadata(text, voice_params, "neutral")
+    emotion = str(voice_params.get("emotion") or "neutral")
+    payload = await engine.synthesize_with_metadata(text, voice_params, emotion)
     if not isinstance(payload, dict):
         raise RuntimeError("TTS 试听未返回有效 payload")
     return payload
@@ -213,7 +241,7 @@ async def tts_preview(
     """合成一小段音频用于前端试听"""
     text = _resolve_preview_text(request)
     model_name = _resolve_preview_model_name(request)
-    preview_retry = _build_preview_retry_config()
+    preview_retry = _PREVIEW_RETRY_CONFIG
     speaker_id = _resolve_preview_speaker_id(request, model_name)
     voice_params = _build_preview_voice_params(request, speaker_id)
 
@@ -221,6 +249,7 @@ async def tts_preview(
         audio_bytes = await runtime_synthesize_speech(
             text=text,
             voice_params=voice_params,
+            emotion=str(voice_params.get("emotion") or "neutral"),
             model_id=model_name,
             enable_cache=False,
             max_concurrent=1,
@@ -257,7 +286,7 @@ async def tts_preview_with_timestamps(
             detail="当前时间戳试听接口仅支持 cosyvoice-v3.5-plus",
         )
 
-    preview_retry = _build_preview_retry_config()
+    preview_retry = _PREVIEW_RETRY_CONFIG
     speaker_id = _resolve_preview_speaker_id(request, model_name)
     voice_params = _build_preview_voice_params(request, speaker_id)
 
@@ -384,9 +413,13 @@ async def list_tts_voices(
         try:
             clones, _clone_meta = list_cosyvoice_v3_plus_clones()
             voices.extend([c.to_voice_preset(get_clone_display_name(c.voice_id)) for c in clones])
-        except CosyVoiceCloneError:
+        except CosyVoiceCloneError as exc:
             # 未配置 API Key 等情况下，不阻塞页面继续使用其他模型
-            pass
+            logger.info(
+                "CosyVoice 自定义音色列表不可用，返回静态音色目录: model=%s error=%s",
+                model,
+                exc,
+            )
     return {
         "model": meta.get("model", DEFAULT_TTS_MODEL),
         "updated_at": meta.get("updated_at"),
@@ -397,7 +430,6 @@ async def list_tts_voices(
 
 
 @router.post("/tts/voices/cosyvoice-v3.5-plus/clones")
-@router.post("/tts/voices/cosyvoice-v3-plus/clones", include_in_schema=False)
 async def create_cosyvoice_v3_plus_voice_clone(
     request: CosyVoiceCloneCreateRequest,
     current_user: User = Depends(get_current_user),
@@ -407,28 +439,11 @@ async def create_cosyvoice_v3_plus_voice_clone(
     说明：DashScope 克隆接口要求 input.url 为公网可访问地址或 oss:// 临时 URL。
     """
     try:
-        import hashlib
-        import re
-        import secrets
-
         display_name = (request.name or "").strip()
         if not display_name:
             raise CosyVoiceCloneError("name 不能为空")
 
         prefix = (request.prefix or "").strip() or _build_cosyvoice_voice_prefix(display_name, current_user)
-        if not prefix:
-            # 生成策略：
-            # - 允许 name 任意字符（含中文），但 prefix 必须满足 SDK 要求：字母/数字/下划线，1~32
-            # - 注意：cosyvoice clone 要求 prefix 最长 10 个字符
-            # - 尽量从 name 提取可读片段，否则退化为 v，再拼接 hash 提升唯一性
-            slug = re.sub(r"[^A-Za-z0-9_]+", "_", display_name).strip("_").lower()
-            base = (slug[:4] if slug else "v").strip("_") or "v"
-            uid = str(getattr(current_user, "id", "0"))
-            # 防碰撞：加一个稳定 hash 片段（避免同名同用户频繁生成完全一致）
-            h = hashlib.sha1(f"{uid}:{display_name}".encode("utf-8")).hexdigest()[:6]  # noqa: S324
-            rand = secrets.token_hex(1)  # 2 hex chars
-            prefix = f"{base}{h}{rand}"[:10]
-
         result = create_cosyvoice_v3_plus_clone(prefix=prefix, audio_url=request.url)
         save_clone_display_name(voice_id=result.get("voice_id", ""), display_name=display_name)
         result["display_name"] = display_name
@@ -463,7 +478,6 @@ async def create_cosyvoice_v3_plus_voice_design(
 
 
 @router.post("/tts/voices/cosyvoice-v3.5-plus/clones/upload")
-@router.post("/tts/voices/cosyvoice-v3-plus/clones/upload", include_in_schema=False)
 async def upload_cosyvoice_v3_plus_clone_audio(
     file: UploadFile = File(...),
     current_user: User = Depends(get_current_user),
@@ -483,12 +497,15 @@ async def upload_cosyvoice_v3_plus_clone_audio(
     finally:
         try:
             await file.close()
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug(
+                "关闭 CosyVoice 上传文件失败，已忽略清理错误: filename=%s error=%s",
+                file.filename,
+                exc,
+            )
 
 
 @router.get("/tts/voices/cosyvoice-v3.5-plus/clones")
-@router.get("/tts/voices/cosyvoice-v3-plus/clones", include_in_schema=False)
 async def list_cosyvoice_v3_plus_voice_clones(
     prefix: Optional[str] = None,
     current_user: User = Depends(get_current_user),
@@ -518,7 +535,6 @@ async def list_cosyvoice_v3_plus_voice_clones(
 
 
 @router.delete("/tts/voices/cosyvoice-v3.5-plus/clones/{voice_id}")
-@router.delete("/tts/voices/cosyvoice-v3-plus/clones/{voice_id}", include_in_schema=False)
 async def delete_cosyvoice_v3_plus_voice_clone(
     voice_id: str,
     current_user: User = Depends(get_current_user),

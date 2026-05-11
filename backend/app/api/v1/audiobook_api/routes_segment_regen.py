@@ -5,13 +5,13 @@ import json
 from typing import List, Optional, Dict, Any
 
 from fastapi import Depends, HTTPException
-from sqlalchemy.orm import Session
 
-from app.core.security import get_current_user
-from app.db.base import get_db
-from app.models.user import User
-from app.models.project import Project
-from app.models.audiobook import AudiobookProject, ChapterAudio
+from app.models.audiobook import ChapterAudio
+from app.api.v1.audiobook_api.dependencies import (
+    OwnedAudiobookProject,
+    get_active_chapter_audio_for_project,
+    get_owned_audiobook_project,
+)
 from app.schemas.audiobook import (
     SegmentRegenerateRequest,
     SegmentReviewRequest,
@@ -22,7 +22,7 @@ from app.services.audiobook.tts_model_ids import (
     MINIMAX_SPEECH_28_TURBO_MODEL,
     normalize_audiobook_tts_model,
 )
-from app.services.audiobook.temp_segment_store import save_segment_audio_map
+from app.services.audiobook.temp_segment_store import TempSegmentStoreError, save_segment_audio_map
 from app.utils.datetime_utils import utc_now
 from core.unified_media_runtime import synthesize_speech as runtime_synthesize_speech
 
@@ -37,10 +37,20 @@ DEFAULT_MINIMAX_SEGMENT_REGEN_VOICE_ID = "male-qn-qingse"
 def _load_chapter_segments(chapter_audio: ChapterAudio) -> List[Dict[str, Any]]:
     try:
         segments = json.loads(chapter_audio.script_json or "[]")
-    except Exception:
+    except (json.JSONDecodeError, TypeError) as exc:
+        logger.warning(
+            "章节剧本 JSON 损坏: chapter_audio_id=%s error=%s",
+            getattr(chapter_audio, "id", None),
+            exc,
+        )
         raise HTTPException(status_code=500, detail="章节剧本数据损坏")
 
     if not isinstance(segments, list):
+        logger.warning(
+            "章节剧本 JSON 不是数组: chapter_audio_id=%s payload_type=%s",
+            getattr(chapter_audio, "id", None),
+            type(segments).__name__,
+        )
         raise HTTPException(status_code=500, detail="章节剧本数据损坏")
 
     return segments
@@ -94,8 +104,7 @@ async def regenerate_segment(
     chapter_id: int,
     segment_index: int,
     request: SegmentRegenerateRequest,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    owned: OwnedAudiobookProject = Depends(get_owned_audiobook_project),
 ):
     """单个片段重新生成
     
@@ -106,25 +115,12 @@ async def regenerate_segment(
     """
     _validate_body_segment_index(request.segment_index, segment_index)
 
-    audiobook_project = db.query(AudiobookProject).filter(
-        AudiobookProject.id == audiobook_project_id
-    ).first()
-    if not audiobook_project:
-        raise HTTPException(status_code=404, detail="有声书项目不存在")
-    
-    project = db.query(Project).filter(
-        Project.id == audiobook_project.project_id,
-        Project.user_id == current_user.id,
-    ).first()
-    if not project:
-        raise HTTPException(status_code=403, detail="无权限访问")
-    
-    chapter_audio = db.query(ChapterAudio).filter(
-        ChapterAudio.audiobook_project_id == audiobook_project_id,
-        ChapterAudio.chapter_id == chapter_id,
-    ).first()
-    if not chapter_audio:
-        raise HTTPException(status_code=404, detail="章节音频记录不存在")
+    db = owned.db
+    chapter_audio = get_active_chapter_audio_for_project(
+        db=db,
+        audiobook_project_id=audiobook_project_id,
+        chapter_id=chapter_id,
+    )
     
     # 加载剧本片段
     segments = _load_chapter_segments(chapter_audio)
@@ -189,44 +185,44 @@ async def regenerate_segment(
         raise HTTPException(status_code=500, detail="TTS 生成失败")
     
     # 保存新音频（覆盖原音频）
+    output_format = "wav" if audio_bytes.startswith(b"RIFF") else "mp3"
     try:
-        output_format = "wav" if audio_bytes.startswith(b"RIFF") else "mp3"
         temp_segment_cache = save_segment_audio_map(
             run_id=f"segment_regen_{chapter_audio.id}",
             chapter_id=chapter_id,
             audio_map={segment_index: audio_bytes},
             format=output_format,
         )
-        audio_path = (temp_segment_cache.get("cached_audio_paths") or {}).get(segment_index)
-        
-        # 更新 segment 中的音频路径
-        segment["audio_path"] = audio_path
-        segment["regenerated"] = True
-        segment["regenerated_at"] = utc_now().isoformat()
-        if request.reason:
-            segment["regenerate_reason"] = request.reason
-        
-        # 保存更新后的剧本
-        chapter_audio.script_json = json.dumps(segments, ensure_ascii=False)
-        db.commit()
-        
-        logger.info(
-            f"✅ 片段重新生成成功: chapter_id={chapter_id}, "
-            f"segment_index={segment_index}, model={tts_model}"
-        )
-        
-        return {
-            "success": True,
-            "segment_index": segment_index,
-            "audio_path": audio_path,
-            "temp_segment_cache": temp_segment_cache,
-            "audio_size": len(audio_bytes),
-            "model_used": tts_model,
-        }
-    
-    except Exception as e:
+    except (OSError, TempSegmentStoreError) as e:
         logger.error(f"❌ 保存重新生成的音频失败: {e}")
         raise HTTPException(status_code=500, detail=f"保存音频失败: {str(e)}")
+
+    audio_path = (temp_segment_cache.get("cached_audio_paths") or {}).get(segment_index)
+
+    # 更新 segment 中的音频路径
+    segment["audio_path"] = audio_path
+    segment["regenerated"] = True
+    segment["regenerated_at"] = utc_now().isoformat()
+    if request.reason:
+        segment["regenerate_reason"] = request.reason
+
+    # 保存更新后的剧本
+    chapter_audio.script_json = json.dumps(segments, ensure_ascii=False)
+    db.commit()
+
+    logger.info(
+        f"✅ 片段重新生成成功: chapter_id={chapter_id}, "
+        f"segment_index={segment_index}, model={tts_model}"
+    )
+
+    return {
+        "success": True,
+        "segment_index": segment_index,
+        "audio_path": audio_path,
+        "temp_segment_cache": temp_segment_cache,
+        "audio_size": len(audio_bytes),
+        "model_used": tts_model,
+    }
 
 
 @router.post("/projects/{audiobook_project_id:int}/chapters/{chapter_id:int}/segments/{segment_index:int}/review")
@@ -235,8 +231,7 @@ async def review_segment(
     chapter_id: int,
     segment_index: int,
     request: SegmentReviewRequest,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    owned: OwnedAudiobookProject = Depends(get_owned_audiobook_project),
 ):
     """片段审查/评分
     
@@ -247,25 +242,13 @@ async def review_segment(
     """
     _validate_body_segment_index(request.segment_index, segment_index)
 
-    audiobook_project = db.query(AudiobookProject).filter(
-        AudiobookProject.id == audiobook_project_id
-    ).first()
-    if not audiobook_project:
-        raise HTTPException(status_code=404, detail="有声书项目不存在")
-    
-    project = db.query(Project).filter(
-        Project.id == audiobook_project.project_id,
-        Project.user_id == current_user.id,
-    ).first()
-    if not project:
-        raise HTTPException(status_code=403, detail="无权限访问")
-    
-    chapter_audio = db.query(ChapterAudio).filter(
-        ChapterAudio.audiobook_project_id == audiobook_project_id,
-        ChapterAudio.chapter_id == chapter_id,
-    ).first()
-    if not chapter_audio:
-        raise HTTPException(status_code=404, detail="章节音频记录不存在")
+    db = owned.db
+    current_user = owned.current_user
+    chapter_audio = get_active_chapter_audio_for_project(
+        db=db,
+        audiobook_project_id=audiobook_project_id,
+        chapter_id=chapter_id,
+    )
 
     segments = _load_chapter_segments(chapter_audio)
     _get_segment_or_404(segments, segment_index)
@@ -277,8 +260,18 @@ async def review_segment(
             loaded_review_data = json.loads(chapter_audio.segment_reviews_json)
             if isinstance(loaded_review_data, dict):
                 review_data = loaded_review_data
-        except Exception:
-            review_data = {}
+            else:
+                logger.warning(
+                    "片段审查 JSON 不是对象，已重置: chapter_audio_id=%s payload_type=%s",
+                    chapter_audio.id,
+                    type(loaded_review_data).__name__,
+                )
+        except (json.JSONDecodeError, TypeError) as exc:
+            logger.warning(
+                "片段审查 JSON 损坏，已重置: chapter_audio_id=%s error=%s",
+                chapter_audio.id,
+                exc,
+            )
     
     # 记录审查结果
     review_key = str(segment_index)

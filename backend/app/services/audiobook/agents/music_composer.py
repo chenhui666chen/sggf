@@ -11,11 +11,17 @@ MusicComposer - 音乐设计师Agent（AI增强版）
 import logging
 import asyncio
 import hashlib
+import json
 from typing import Dict, List, Any, Optional
 from dataclasses import dataclass
 from enum import Enum
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
+
+BACKEND_DIR = Path(__file__).resolve().parents[4]
+AUDIO_LIBRARY_DIR = BACKEND_DIR / "data" / "audio_library"
+DEFAULT_MUSIC_INDEX_PATH = AUDIO_LIBRARY_DIR / "music_index.json"
 
 # 导入AI音乐生成器
 try:
@@ -71,11 +77,12 @@ class MusicComposer:
     支持AI动态生成（Mureka O1）+ 静态音乐库降级
     """
     
-    def __init__(self, ai_generator: Optional[Any] = None, enable_ai: bool = True):
+    def __init__(self, ai_generator: Optional[Any] = None, enable_ai: bool = True, index_path: Optional[str] = None):
         """
         Args:
             ai_generator: AI音乐生成器（可选，默认自动创建）
             enable_ai: 是否启用AI生成（默认True）
+            index_path: 外部音乐索引文件路径（可选），默认使用 DEFAULT_MUSIC_INDEX_PATH
         """
         self.music_library = self._init_music_library()
         self.prompt_library = self._init_prompt_library()
@@ -84,6 +91,10 @@ class MusicComposer:
         self._music_pool_cache: Dict[str, List[str]] = {}
         self.project_theme: Optional[str] = None
         self.project_style: Optional[str] = None
+        
+        self.index_path = Path(index_path) if index_path else DEFAULT_MUSIC_INDEX_PATH
+        self.audio_library_dir = self.index_path.parent
+        self._load_external_music_library()
         
         # AI音乐生成器
         self.enable_ai = enable_ai and AI_MUSIC_AVAILABLE
@@ -203,7 +214,7 @@ class MusicComposer:
         if prompt_key and prompt_key in self.prompt_library:
             return self._apply_project_style_to_prompt(self.prompt_library[prompt_key])
 
-        mood = scene.get("mood", "peaceful")
+        mood = self._normalize_music_mood(scene.get("mood", "peaceful"))
         description = scene.get("description", "")
         text = f"{description}{scene.get('tag', '')}"
 
@@ -257,6 +268,108 @@ class MusicComposer:
             return self._apply_project_style_to_prompt(self.prompt_library.get("daily", ""))
 
         return ""
+
+    def _normalize_music_mood(self, mood: Any) -> str:
+        """将剧本情绪归一到 MusicMood 枚举，避免扩展情绪标签中断配乐设计。"""
+        normalized = str(mood or "").strip().lower()
+        alias_map = {
+            "angry": "tense",
+            "fearful": "tense",
+            "nervous": "tense",
+            "shout": "tense",
+            "surprised": "tense",
+            "suspense": "tense",
+            "excited": "joyful",
+            "happy": "joyful",
+            "calm": "peaceful",
+            "neutral": "peaceful",
+            "tender": "romantic",
+            "solemn": "epic",
+        }
+        normalized = alias_map.get(normalized, normalized)
+        valid_moods = {item.value for item in MusicMood}
+        return normalized if normalized in valid_moods else "peaceful"
+
+    def _music_file_exists(self, file_ref: str) -> bool:
+        """验证音乐文件引用是否可解析到本地素材。"""
+        raw = str(file_ref or "").strip()
+        if not raw:
+            return False
+        path = Path(raw)
+        if path.is_absolute():
+            return path.exists()
+        return (self.audio_library_dir / path).exists()
+
+    def _load_external_music_library(self) -> None:
+        """从外部索引加载音乐库
+
+        支持的索引格式（与 sound_effects_index.json 对齐）：
+        - JSON 数组：[ {"id": ..., "mood": ..., "file_path": ..., ...}, ... ]
+        """
+        index_path = self.index_path
+        if not index_path or not index_path.exists():
+            return
+
+        try:
+            with index_path.open("r", encoding="utf-8") as f:
+                data = json.load(f)
+
+            if isinstance(data, dict):
+                records = list(data.values())
+            else:
+                records = list(data)
+
+            loaded = 0
+            bucket_groups: Dict[str, List[str]] = {}
+
+            for item in records:
+                entry_id = item.get("id") or item.get("name")
+                if not entry_id:
+                    continue
+
+                mood = self._normalize_music_mood(item.get("mood") or "peaceful")
+                file_path = item.get("file_path") or item.get("file")
+                description = item.get("description") or item.get("prompt") or item.get("name") or entry_id
+                bucket = item.get("bucket") or ""
+                music_type = item.get("type") or item.get("music_type") or ""
+
+                if not file_path:
+                    continue
+
+                if not self._music_file_exists(file_path):
+                    logger.warning("⚠️ 音乐索引条目文件不存在: %s", file_path)
+                    continue
+
+                existing = self.music_library.get(entry_id)
+                if existing and self._music_file_exists(existing.get("file", "")):
+                    continue
+
+                self.music_library[entry_id] = {
+                    "mood": mood,
+                    "description": str(description)[:200],
+                    "file": file_path,
+                    "source": item.get("source", "index"),
+                }
+                loaded += 1
+
+                if bucket and file_path:
+                    bucket_groups.setdefault(bucket, []).append(file_path)
+
+            if bucket_groups:
+                for bucket_key, paths in bucket_groups.items():
+                    cache_key_parts = bucket_key.split(":")
+                    if len(cache_key_parts) >= 2:
+                        mood_part = cache_key_parts[-1]
+                        duration = 20
+                        pool_size = len(paths)
+                        cache_key = f"{bucket_key}|{mood_part}|{duration}|{pool_size}"
+                        if cache_key not in self._music_pool_cache:
+                            self._music_pool_cache[cache_key] = paths
+
+            if loaded:
+                logger.info(f"🎵 从外部音乐索引加载 %d 个条目: %s", loaded, index_path)
+        except Exception as e:
+            logger.warning(f"⚠️ 加载音乐索引失败: {e}")
     
     async def design_music(
         self,
@@ -342,7 +455,7 @@ class MusicComposer:
         allow_asset_generation: bool = True,
     ) -> Optional[MusicCue]:
         """创建开场音乐（优先AI，降级静态库）。"""
-        overall_mood = chapter_structure.get("overall_mood", "mysterious")
+        overall_mood = self._normalize_music_mood(chapter_structure.get("overall_mood", "mysterious"))
 
         if allow_asset_generation and self.enable_ai and self.ai_generator:
             try:
@@ -418,9 +531,9 @@ class MusicComposer:
     ) -> Optional[MusicCue]:
         """创建开场音乐"""
         # 根据整体基调选择开场音乐
-        overall_mood = chapter_structure.get("overall_mood", "mysterious")
+        overall_mood = self._normalize_music_mood(chapter_structure.get("overall_mood", "mysterious"))
         
-        music_info = self._match_music(overall_mood)
+        music_info = self._match_music(overall_mood, seed="opening")
         
         cue = MusicCue(
             scene_id="opening",
@@ -444,7 +557,7 @@ class MusicComposer:
         allow_asset_generation: bool = True,
     ) -> Optional[MusicCue]:
         """设计场景音乐（AI增强）"""
-        mood = scene.get("mood", "peaceful")
+        mood = self._normalize_music_mood(scene.get("mood", "peaceful"))
         start_time = scene.get("start_time", 0.0)
         duration = scene.get("duration", 60.0)
         scene_description = scene.get("description", "场景")
@@ -475,10 +588,14 @@ class MusicComposer:
                 logger.warning(f"⚠️ AI生成音乐失败，降级到静态库: {e}")
             
         # 降级到静态音乐库
-        music_info = self._match_music(mood)
+        project_id = str(scene.get("audiobook_project_id") or "")
+        chapter_id = str(scene.get("chapter_id") or "")
+        scene_id = str(scene.get("scene_id") or "scene")
+        seed = f"{project_id}|{chapter_id}|{scene_id}|{start_time}|{mood}"
+        music_info = self._match_music(mood, seed=seed)
             
         cue = MusicCue(
-            scene_id=scene.get("scene_id", "scene"),
+            scene_id=scene_id,
             timestamp=start_time,
             music_type=MusicType.UNDERSCORE,
             mood=MusicMood(mood),
@@ -515,14 +632,18 @@ class MusicComposer:
         
         return cue
     
-    def _match_music(self, mood: str) -> Dict[str, Any]:
-        """匹配音乐库"""
-        # 查找匹配的音乐
-        for music_name, music_info in self.music_library.items():
-            if music_info["mood"] == mood:
-                return music_info
-        
-        # 默认返回平静音乐
+    def _match_music(self, mood: str, seed: str = "") -> Dict[str, Any]:
+        """匹配音乐库，基于 seed 稳定随机选取以增加变化"""
+        matches = [
+            info for info in self.music_library.values()
+            if info.get("mood") == mood
+        ]
+        if matches:
+            if len(matches) == 1:
+                return matches[0]
+            chosen_index = self._stable_choice_index(seed or mood, len(matches))
+            return matches[chosen_index]
+
         return {
             "mood": "peaceful",
             "description": "平静的氛围音乐",
@@ -587,7 +708,7 @@ class MusicComposer:
                 logger.warning(f"⚠️ AI生成主题音乐失败: {e}")
         
         # 降级到静态库
-        music_info = self._match_music(mood.value)
+        music_info = self._match_music(mood.value, seed=f"theme_{character_name}")
         
         cue = MusicCue(
             scene_id=f"theme_{character_name}",
@@ -646,13 +767,16 @@ class MusicComposer:
         }
         
         scene_cues = [c for c in self.music_cues if c.music_type == MusicType.UNDERSCORE]
-        scene_cues.sort(key=lambda x: mood_priority.get(x.mood, 10))
+        scene_cues.sort(key=lambda x: (mood_priority.get(x.mood, 10), x.timestamp))
         
         # 逐个添加，直到达到覆盖率上限
         current_coverage = sum(c.duration for c in optimized_cues)
         max_allowed_duration = max_music_coverage * float(getattr(self, "_chapter_total_duration", 600.0) or 600.0)
         
         for cue in scene_cues:
+            if self._overlaps_existing_music(cue, optimized_cues, min_gap=5.0):
+                logger.debug("   跳过重叠配乐: %s at %.1fs", cue.description, cue.timestamp)
+                continue
             if current_coverage + cue.duration <= max_allowed_duration:
                 optimized_cues.append(cue)
                 current_coverage += cue.duration
@@ -661,6 +785,27 @@ class MusicComposer:
         
         self.music_cues = optimized_cues
         return optimized_cues
+
+    def _overlaps_existing_music(
+        self,
+        cue: MusicCue,
+        existing_cues: List[MusicCue],
+        *,
+        min_gap: float = 5.0,
+    ) -> bool:
+        """避免多个 underscore 在同一时间段叠加，保留优先级更高的先入选配乐。"""
+        if cue.music_type != MusicType.UNDERSCORE:
+            return False
+        cue_start = float(cue.timestamp or 0.0)
+        cue_end = cue_start + max(0.0, float(cue.duration or 0.0))
+        for existing in existing_cues:
+            if existing.music_type != MusicType.UNDERSCORE:
+                continue
+            existing_start = float(existing.timestamp or 0.0)
+            existing_end = existing_start + max(0.0, float(existing.duration or 0.0))
+            if cue_start < existing_end + min_gap and cue_end + min_gap > existing_start:
+                return True
+        return False
     
     def export_music_timeline(self) -> Dict[str, Any]:
         """导出音乐时间线（用于混音）"""
@@ -721,11 +866,138 @@ class MusicComposer:
         
         return stats
 
+    def purge_low_quality_assets(self, min_score: float = 40.0, dry_run: bool = False) -> Dict[str, Any]:
+        """从索引和磁盘删除低质音乐素材。"""
+        return self._purge_assets(
+            predicate=lambda rec: self._is_low_quality_record(rec, min_score),
+            dry_run=dry_run,
+            label="低质素材",
+        )
+
+    def _is_low_quality_record(self, rec: Dict[str, Any], min_score: float) -> bool:
+        """仅清理已有明确质量结论的低质条目，避免误删历史无质量元数据素材。"""
+        if rec.get("quality_status") == "rejected":
+            return True
+        if "quality_score" not in rec:
+            return False
+        try:
+            return float(rec.get("quality_score")) < min_score
+        except (TypeError, ValueError):
+            return False
+
+    def purge_orphan_entries(self, dry_run: bool = False) -> Dict[str, Any]:
+        """清理索引中文件已不存在的孤立条目。"""
+        return self._purge_assets(
+            predicate=lambda rec: not self._music_file_exists(
+                rec.get("file_path") or rec.get("file", "")
+            ),
+            dry_run=dry_run,
+            label="孤立条目",
+        )
+
+    def _purge_assets(
+        self,
+        predicate,
+        dry_run: bool = False,
+        label: str = "",
+    ) -> Dict[str, Any]:
+        """通用素材清理：按 predicate 筛选索引条目并删除索引记录 + 磁盘文件。"""
+        index_path = self.index_path
+        if not index_path or not index_path.exists():
+            return {"purged_count": 0, "freed_bytes": 0, "details": []}
+
+        try:
+            with index_path.open("r", encoding="utf-8") as f:
+                data = json.load(f)
+            if isinstance(data, dict):
+                records = list(data.values())
+            else:
+                records = list(data)
+
+            to_purge = [r for r in records if predicate(r)]
+            to_keep = [r for r in records if not predicate(r)]
+
+            details = []
+            freed_bytes = 0
+            purged_count = 0
+
+            for rec in to_purge:
+                entry_id = rec.get("id", "?")
+                file_ref = rec.get("file_path") or rec.get("file", "")
+                resolved = self._resolve_deletable_asset_path(file_ref)
+                file_size = 0
+                if resolved and resolved.exists():
+                    file_size = resolved.stat().st_size
+                    if not dry_run:
+                        try:
+                            resolved.unlink()
+                        except OSError:
+                            pass
+                freed_bytes += file_size
+                purged_count += 1
+                details.append({"id": entry_id, "file": file_ref, "size": file_size})
+
+                self.music_library.pop(entry_id, None)
+
+            if not dry_run and purged_count > 0:
+                with index_path.open("w", encoding="utf-8") as f:
+                    json.dump(to_keep, f, ensure_ascii=False, indent=2)
+
+            logger.info(
+                "🗑️ %s清理%s: 删除 %d 条, 释放 %d 字节%s",
+                label,
+                "（预演）" if dry_run else "",
+                purged_count,
+                freed_bytes,
+                "" if dry_run else f", 索引剩余 {len(to_keep)} 条",
+            )
+            return {"purged_count": purged_count, "freed_bytes": freed_bytes, "details": details}
+        except Exception as e:
+            logger.warning("⚠️ 素材清理失败: %s", e)
+            return {"purged_count": 0, "freed_bytes": 0, "details": [], "error": str(e)}
+
+    def _resolve_deletable_asset_path(self, file_ref: str) -> Optional[Path]:
+        """仅允许清理当前音乐索引素材库目录内的文件。"""
+        raw = str(file_ref or "").strip()
+        if not raw:
+            return None
+        base_dir = self.audio_library_dir.resolve()
+        path = Path(raw)
+        candidate = path if path.is_absolute() else self.audio_library_dir / path
+        try:
+            resolved = candidate.resolve()
+            resolved.relative_to(base_dir)
+        except (OSError, ValueError):
+            return None
+        return resolved
+
     def _stable_choice_index(self, seed: str, pool_size: int) -> int:
         if pool_size <= 1:
             return 0
         digest = hashlib.md5(seed.encode("utf-8")).hexdigest()
         return int(digest[:8], 16) % pool_size
+
+    def _get_cached_music_pool(
+        self,
+        *,
+        bucket: str,
+        mood: str,
+        duration: int,
+        pool_size: int,
+    ) -> Optional[List[str]]:
+        """返回满足请求数量的预热音乐池，兼容索引中已有更多变体的情况。"""
+        cache_key = f"{bucket}|{mood}|{duration}|{pool_size}"
+        cached = self._music_pool_cache.get(cache_key)
+        if cached:
+            return cached
+
+        prefix = f"{bucket}|{mood}|{duration}|"
+        for existing_key, paths in self._music_pool_cache.items():
+            if existing_key.startswith(prefix) and len(paths) >= pool_size:
+                selected = paths[:pool_size]
+                self._music_pool_cache[cache_key] = selected
+                return selected
+        return None
 
     async def _ensure_music_pool(
         self,
@@ -741,7 +1013,12 @@ class MusicComposer:
             return []
 
         cache_key = f"{bucket}|{mood}|{duration}|{pool_size}"
-        cached = self._music_pool_cache.get(cache_key)
+        cached = self._get_cached_music_pool(
+            bucket=bucket,
+            mood=mood,
+            duration=duration,
+            pool_size=pool_size,
+        )
         if cached:
             return cached
 

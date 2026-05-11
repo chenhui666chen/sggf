@@ -4,7 +4,7 @@ import {
 } from '@mui/material'
 import DeleteIcon from '@mui/icons-material/Delete'
 
-import { audiobookColors } from './audiobookTheme'
+import { audiobookColorRoles } from './audiobookTheme'
 
 interface ChapterActionsMenuProps {
   anchorEl: HTMLElement | null
@@ -30,7 +30,7 @@ const ChapterActionsMenu = ({
       horizontal: 'right',
     }}
   >
-    <MenuItem onClick={onOpenDeleteDialog} sx={{ color: audiobookColors.dangerMain }}>
+    <MenuItem onClick={onOpenDeleteDialog} sx={{ color: audiobookColorRoles.destructiveAction.main }}>
       <DeleteIcon fontSize="small" sx={{ mr: 1 }} />
       删除章节
     </MenuItem>

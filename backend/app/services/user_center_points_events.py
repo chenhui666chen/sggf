@@ -40,6 +40,19 @@ POINTS_BILLING_MODULE_NOVEL = "novel"
 POINTS_BILLING_MODULE_BOOK_PARSER = "book_parser"
 POINTS_BILLING_MODULE_ASSET_STUDIO = "asset_studio"
 
+AUDIOBOOK_BILLING_FREEZE_TRACE_PAYLOAD_KEYS = {
+    "trace_id",
+    "celery_task_id",
+    "task_db_id",
+    "task_type",
+    "stage",
+    "status",
+    "progress",
+    "tts_model",
+    "cost_precheck_id",
+    "billing_freeze_event_id",
+}
+
 
 def build_points_billing_key(module_key: str, business_key: str) -> str:
     normalized_module = str(module_key or "").strip().lower() or "unknown"
@@ -291,6 +304,18 @@ def _create_points_billing_event_log(
     db.commit()
     db.refresh(log)
     return log
+
+
+def _filter_audiobook_billing_freeze_trace_payload(
+    extra_payload: dict[str, Any] | None,
+) -> dict[str, Any]:
+    if not extra_payload:
+        return {}
+    return {
+        key: extra_payload[key]
+        for key in AUDIOBOOK_BILLING_FREEZE_TRACE_PAYLOAD_KEYS
+        if key in extra_payload and extra_payload[key] is not None
+    }
 
 
 def _build_operating_snapshot_payload(
@@ -619,6 +644,7 @@ def record_audiobook_billing_freeze(
     chapter_ids: Sequence[int] | None,
     request_context: object | None = None,
     tts_pricing_key: str | None = None,
+    extra_payload: dict[str, Any] | None = None,
 ) -> AdminOperationLog | None:
     row = (
         db.query(
@@ -695,6 +721,25 @@ def record_audiobook_billing_freeze(
     if amount_points <= 0:
         return None
 
+    billing_payload = {
+        "project_id": int(row.project_id or 0),
+        "audiobook_project_id": int(row.id or 0),
+        "pricing_status": item.pricing_status,
+        "task_status": item.task_status,
+        "chapter_ids": normalized_chapter_ids,
+        "points_per_yuan": int(pricing_snapshot.config.points_per_yuan),
+        "user_price_basis": pricing_snapshot.config.user_price_basis,
+        "user_price_rate": round(float(pricing_snapshot.config.user_price_rate), 4),
+        "freeze_buffer_rate": round(float(pricing_snapshot.config.freeze_buffer_rate), 4),
+        "operating_snapshot": _build_operating_snapshot_payload(
+            pricing_snapshot=pricing_snapshot,
+            module_key=POINTS_BILLING_MODULE_AUDIOBOOK,
+            basis_yuan=_to_non_negative_float(item.estimated_yuan),
+            provider_key=_safe_text(effective_tts_pricing_key, "") or None,
+        ),
+    }
+    billing_payload.update(_filter_audiobook_billing_freeze_trace_payload(extra_payload))
+
     return _create_points_billing_event_log(
         db=db,
         actor_user_id=actor_user_id,
@@ -714,23 +759,7 @@ def record_audiobook_billing_freeze(
         default_request_method="POST",
         default_request_path=f"/api/v1/audiobook/projects/{row.id}/billing-freeze",
         operation_desc=f"有声书任务正式冻结积分 {amount_points:.2f}",
-        extra_payload={
-            "project_id": int(row.project_id or 0),
-            "audiobook_project_id": int(row.id or 0),
-            "pricing_status": item.pricing_status,
-            "task_status": item.task_status,
-            "chapter_ids": normalized_chapter_ids,
-            "points_per_yuan": int(pricing_snapshot.config.points_per_yuan),
-            "user_price_basis": pricing_snapshot.config.user_price_basis,
-            "user_price_rate": round(float(pricing_snapshot.config.user_price_rate), 4),
-            "freeze_buffer_rate": round(float(pricing_snapshot.config.freeze_buffer_rate), 4),
-            "operating_snapshot": _build_operating_snapshot_payload(
-                pricing_snapshot=pricing_snapshot,
-                module_key=POINTS_BILLING_MODULE_AUDIOBOOK,
-                basis_yuan=_to_non_negative_float(item.estimated_yuan),
-                provider_key=_safe_text(effective_tts_pricing_key, "") or None,
-            ),
-        },
+        extra_payload=billing_payload,
     )
 
 

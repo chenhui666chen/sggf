@@ -12,7 +12,7 @@ import type {
   StageStatus,
   TaskStatus,
 } from './types'
-import { audiobookColors } from './audiobookTheme'
+import { audiobookColorRoles, audiobookColors } from './audiobookTheme'
 import { getStageConfigForTask } from './utils'
 
 interface TaskStageDetailsProps {
@@ -21,10 +21,10 @@ interface TaskStageDetailsProps {
 }
 
 const STAGE_STATUS_COLORS: Record<StageStatus, { bg: string; border: string; text: string }> = {
-  pending: { bg: audiobookColors.pendingBg, border: audiobookColors.pendingBorder, text: audiobookColors.pendingText },
-  running: { bg: audiobookColors.brandSoft, border: audiobookColors.brand, text: audiobookColors.brand },
-  completed: { bg: audiobookColors.successSoft, border: audiobookColors.successMain, text: audiobookColors.successMain },
-  failed: { bg: audiobookColors.dangerChip, border: audiobookColors.dangerMain, text: audiobookColors.dangerMain },
+  pending: audiobookColorRoles.taskStatus.pending,
+  running: audiobookColorRoles.taskStatus.running,
+  completed: audiobookColorRoles.taskStatus.completed,
+  failed: audiobookColorRoles.taskStatus.failed,
 }
 
 const DEFAULT_PENDING_STAGE_INFO: StageInfo = {
@@ -136,7 +136,7 @@ const TaskStageDetails = ({ taskStatus, onOpenStageMetrics }: TaskStageDetailsPr
                       height: 24,
                       flex: '0 0 auto',
                       borderRadius: '50%',
-                      backgroundColor: audiobookColors.successMain,
+                      backgroundColor: audiobookColorRoles.taskStatus.completed.chipBg,
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'center',

@@ -1,113 +1,12 @@
 from __future__ import annotations
 
-import copy
-import json
-import logging
-import os
-import re
-import shutil
-import time
-import uuid
-from pathlib import Path
-from typing import Any, Dict, List, Literal, Optional, Tuple
+import hashlib
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
-from fastapi.responses import FileResponse
-import requests
-from sqlalchemy import text
-from sqlalchemy.orm import Session
-from sqlalchemy.orm.attributes import flag_modified
+from fastapi import Request
+from fastapi.responses import Response
 
-from app.core.security import get_current_user
-from app.db.base import get_db
-from app.models.character import Character
-from app.models.project import Project, Chapter
-from app.models.user import User
-from app.models.dreamweaver import (
-    DreamweaverAsset as DreamweaverAssetModel,
-    DreamweaverEpisode as DreamweaverEpisodeModel,
-    DreamweaverProject as DreamweaverProjectModel,
-    DreamweaverRunEvent as DreamweaverRunEventModel,
-    DreamweaverShot as DreamweaverShotModel,
-)
-from app.schemas.dreamweaver_contract import DREAMWEAVER_SCHEMA_VERSION
-from app.utils.datetime_utils import utc_now
-from app.services.dreamweaver.library import (
-    approve_latest_library_assets,
-    build_library_prompt,
-    build_library_role,
-    build_library_spec,
-    build_library_spec_from_script_entities,
-    compute_library_review,
-    default_library_asset_uri,
-    empty_library_spec,
-    ensure_required_library_assets,
-    enrich_payload_with_library,
-    has_any_library_entities,
-    load_latest_library_assets,
-    parse_library_role,
-    runs_root_path,
-    required_library_roles,
-    resolve_asset_path,
-    strip_crowd_characters_from_spec,
-)
-from app.services.dreamweaver.video_generation import (
-    DreamweaverRunPreflight,
-    build_dreamweaver_run_preflight,
-    resolve_video_generation_controls,
-    sync_subject_ref_for_asset as sync_subject_ref_for_asset_service,
-)
-from app.services.providers.kling import (
-    KlingAPIError,
-    KlingConfigurationError,
-)
-from app.services.dreamweaver.config_lock import (
-    DreamweaverProjectConfigLockedError,
-    apply_locked_generation_config,
-    apply_vision_review_qc_config,
-    enforce_locked_generation_config_compatible,
-    get_project_locked_generation_config,
-    serialize_locked_generation_config,
-)
-from app.services.dreamweaver.library_prompt import suggest_library_prompt
-from app.services.points_task_precheck import (
-    build_dreamweaver_task_points_precheck,
-    build_task_points_precheck_error_detail,
-)
-from app.services.chapter_adaptation_assets import build_drama_source_text
-
-from pipeline.state_machine import RunContext, State, progress_percent, run_until_done, stage_label
-from pipeline.media_presets import (
-    DREAMWEAVER_I2V_ENGINE,
-    DREAMWEAVER_T2V_ENGINE,
-    infer_dreamweaver_video_engine_from_model_id,
-    is_dreamweaver_auto_engine,
-    is_dreamweaver_i2v_engine,
-    normalize_dreamweaver_video_engine,
-    resolve_frame_size,
-)
-from pipeline.library_regenerate_roles import (
-    build_missing_character_view_regenerate_roles,
-    build_missing_character_view_summary,
-)
-from pipeline.style_presets import normalize_style_preset, style_negative_prompt_for_preset, style_prompt_for_preset
-from pipeline.artifacts_io import download_url_to_path as _download_url_to_path
-from agents.image_edit_utils import (
-    resolve_image_edit_adapter_name,
-    resolve_image_edit_multi_ref,
-    resolve_image_edit_ref_max_images,
-)
-
-from adapters.adapter_helpers import (
-    edit_image as unified_edit_image,
-    generate_image as unified_generate_image,
-    get_model_info,
-    model_supports_capability,
-)
-
-from app.api.v1.dreamweaver_api import router
-from app.api.v1.dreamweaver_api._schemas import *
-from app.api.v1.dreamweaver_api._helpers import *
+from app.api.v1.dreamweaver_api._imports import *
+from app.api.v1.dreamweaver_api._helpers import _load_project_for_user
 
 logger = logging.getLogger(__name__)
 
@@ -115,12 +14,12 @@ logger = logging.getLogger(__name__)
 def get_asset_library(
     project_id: int,
     run_id: Optional[str] = None,
+    offset: Optional[int] = None,
+    limit: Optional[int] = None,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    project = db.query(Project).filter(Project.id == project_id, Project.user_id == current_user.id).first()
-    if not project:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="项目不存在或无权限访问")
+    _load_project_for_user(db, project_id, current_user.id)
 
     scoped = False
     scope_mode = "project"
@@ -284,6 +183,14 @@ def get_asset_library(
                 meta["prompt"] = suggested
 
         asset["meta"] = meta
+
+    all_assets = [assets_by_role_all[r] for r in required if r in assets_by_role_all]
+    total = len(all_assets)
+
+    page_offset = max(0, offset) if offset is not None else 0
+    page_limit = max(1, limit) if limit is not None else total
+    paged_assets = all_assets[page_offset:page_offset + page_limit]
+
     return {
         "project_id": project_id,
         "scoped": bool(scoped),
@@ -291,7 +198,10 @@ def get_asset_library(
         "run_id": safe_run_id if scoped else None,
         "spec": spec,
         "review": review,
-        "assets": [assets_by_role_all[r] for r in required if r in assets_by_role_all],
+        "assets": paged_assets,
+        "total": total,
+        "offset": page_offset,
+        "limit": page_limit,
         "synced": {"created": created},
     }
 
@@ -303,9 +213,7 @@ def suggest_asset_library_regenerate_roles(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    project = db.query(Project).filter(Project.id == project_id, Project.user_id == current_user.id).first()
-    if not project:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="项目不存在或无权限")
+    _load_project_for_user(db, project_id, current_user.id, detail="项目不存在或无权限")
 
     payload = _resolve_character_view_missing_regenerate_roles(
         db,
@@ -324,9 +232,7 @@ def suggest_asset_library_prompt(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    project = db.query(Project).filter(Project.id == project_id, Project.user_id == current_user.id).first()
-    if not project:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="项目不存在或无权限访问")
+    _load_project_for_user(db, project_id, current_user.id)
 
     role = str(request.role or "").strip()
     if not role.startswith("lib_"):
@@ -455,9 +361,7 @@ def approve_asset_library(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    project = db.query(Project).filter(Project.id == project_id, Project.user_id == current_user.id).first()
-    if not project:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="素材不存在或无权限访问")
+    _load_project_for_user(db, project_id, current_user.id, detail="素材不存在或无权限访问")
 
     spec = _build_project_library_spec(db, project_id=project_id, full_scope=True)
     spec = strip_crowd_characters_from_spec(db, project_id=project_id, spec=spec)
@@ -487,9 +391,7 @@ def regenerate_asset_library(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    project = db.query(Project).filter(Project.id == project_id, Project.user_id == current_user.id).first()
-    if not project:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="项目不存在或无权限访问")
+    _load_project_for_user(db, project_id, current_user.id)
 
     role = str(request.role or "").strip()
     if not role.startswith("lib_"):
@@ -814,7 +716,7 @@ def regenerate_asset_library(
     prompt_similarity_threshold = image_cfg.get("image_edit_min_prompt_similarity")
     try:
         threshold_value = float(prompt_similarity_threshold) if prompt_similarity_threshold is not None else _env_float("DREAMWEAVER_IMAGE_EDIT_MIN_PROMPT_SIMILARITY", 0.0)
-    except Exception as e:  # noqa: BLE001
+    except (ValueError, TypeError) as e:
         logger.debug("Failed to parse prompt similarity threshold '%s': %s, using default 0.0", prompt_similarity_threshold, e)
         threshold_value = 0.0
     threshold_value = max(0.0, min(float(threshold_value), 1.0))
@@ -917,12 +819,12 @@ def regenerate_asset_library(
         try:
             try:
                 strength = float(image_cfg.get("image_edit_strength") or _env_float("DREAMWEAVER_IMAGE_EDIT_STRENGTH", 0.65))
-            except Exception as e:  # noqa: BLE001
+            except (ValueError, TypeError) as e:
                 logger.debug("Failed to parse image_edit_strength: %s, using default 0.65", e)
                 strength = 0.65
             try:
                 guidance_scale = float(image_cfg.get("image_edit_guidance") or _env_float("DREAMWEAVER_IMAGE_EDIT_GUIDANCE", 7.5))
-            except Exception as e:  # noqa: BLE001
+            except (ValueError, TypeError) as e:
                 logger.debug("Failed to parse image_edit_guidance: %s, using default 7.5", e)
                 guidance_scale = 7.5
             strength = max(0.0, min(float(strength), 1.0))
@@ -1060,12 +962,12 @@ def regenerate_asset_library(
         try:
             if int(meta.get("width") or 0) <= 0:
                 meta["width"] = int(width)
-        except Exception:  # noqa: BLE001
+        except (ValueError, TypeError):
             meta["width"] = int(width)
         try:
             if int(meta.get("height") or 0) <= 0:
                 meta["height"] = int(height)
-        except Exception:  # noqa: BLE001
+        except (ValueError, TypeError):
             meta["height"] = int(height)
     meta["negative_prompt"] = negative_prompt
     prompt_seed_role = str(seed_info.get("seed_role") or "").strip() if isinstance(seed_info, dict) else ""
@@ -1121,6 +1023,7 @@ def regenerate_asset_library(
 @router.get("/library/assets/{asset_id}/file")
 def get_library_asset_file(
     asset_id: int,
+    request: Request,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -1150,7 +1053,13 @@ def get_library_asset_file(
         media_type = "image/jpeg"
     elif suffix in {".webp"}:
         media_type = "image/webp"
-    return FileResponse(path=str(resolved), media_type=media_type)
+
+    etag = '"' + hashlib.md5(f"{asset_id}:{resolved.stat().st_mtime}:{resolved.stat().st_size}".encode()).hexdigest() + '"'
+    if_none_match = request.headers.get("if-none-match")
+    if if_none_match and if_none_match == etag:
+        return Response(status_code=304, headers={"ETag": etag})
+
+    return FileResponse(path=str(resolved), media_type=media_type, headers={"ETag": etag})
 
 
 @router.post("/library/assets/{asset_id}/upload", response_model=dict)
@@ -1352,6 +1261,7 @@ def sync_library_asset_provider_ref(
     except KlingAPIError as exc:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
     except Exception as exc:  # noqa: BLE001
+        logger.error("Unexpected error during Kling element sync for asset %s: %s", asset_id, exc)
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Kling element 同步失败: {exc}") from exc
 
     updated_payloads_by_id: Dict[int, Dict[str, Any]] = {}

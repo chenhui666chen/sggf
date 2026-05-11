@@ -81,6 +81,18 @@ const ScriptReviewMetricSections = ({
           secondary={audioBalance.voice_differentiation || '—'}
         />
       </ListItem>
+      {(audioBalance.unresolved_effect_count ?? 0) > 0 && (
+        <ListItem disableGutters>
+          <ListItemText
+            primary="未解析音效"
+            secondary={
+              `共 ${audioBalance.unresolved_effect_count} 个，` +
+              `占位 ${audioBalance.placeholder_effect_count ?? 0} 个，` +
+              `缺失文件 ${audioBalance.missing_effect_file_count ?? 0} 个`
+            }
+          />
+        </ListItem>
+      )}
     </List>
 
     <Divider textAlign="left">节奏评估</Divider>

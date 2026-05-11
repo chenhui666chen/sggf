@@ -12,6 +12,10 @@ from app.db.base import SessionLocal
 from app.models.audiobook import ChapterAudioRun
 from app.models.audiobook_task import AudiobookTask
 from app.services.audiobook.sse_progress import sse_tracker
+from app.services.audiobook.task_trace import (
+    build_audiobook_trace_context,
+    merge_audiobook_trace_context,
+)
 from app.utils.datetime_utils import utc_now
 
 
@@ -67,6 +71,30 @@ class AudiobookJobTracker:
             }
         finally:
             session.close()
+
+    def _merge_task_trace_context(
+        self,
+        *,
+        task: AudiobookTask,
+        stage: str,
+        progress: float,
+        detail: Optional[Dict[str, Any]],
+    ) -> Optional[Dict[str, Any]]:
+        if not isinstance(detail, dict):
+            return detail
+        return merge_audiobook_trace_context(
+            detail,
+            build_audiobook_trace_context(
+                celery_task_id=task.celery_task_id,
+                task_db_id=task.id,
+                task_type=task.task_type,
+                audiobook_project_id=task.audiobook_project_id,
+                chapter_id=detail.get("chapter_id") or task.chapter_id,
+                stage=stage,
+                status=detail.get("status") or task.status,
+                progress=progress,
+            ),
+        )
 
     @staticmethod
     def _emit_sse_progress(task_snapshot: Optional[Dict[str, Any]]) -> None:
@@ -245,6 +273,22 @@ class AudiobookJobTracker:
     ) -> None:
         """Update current stage and numeric progress."""
         progress = float(completed) / float(total) if total else 0.0
+        if isinstance(detail, dict):
+            session = self._with_session()
+            try:
+                task = session.query(AudiobookTask).filter(AudiobookTask.id == self.task_db_id).first()
+                detail = (
+                    self._merge_task_trace_context(
+                        task=task,
+                        stage=stage,
+                        progress=progress,
+                        detail=detail,
+                    )
+                    if task
+                    else detail
+                )
+            finally:
+                session.close()
         payload: Dict[str, Any] = {
             "current_stage": stage,
             "progress": progress,

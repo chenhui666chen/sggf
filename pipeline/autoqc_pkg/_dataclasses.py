@@ -39,6 +39,7 @@ DEFAULT_VIDEO_CLIP_QC_SAMPLE_RATE = 1.0
 DEFAULT_VIDEO_CLIP_QC_MAX_CHECKS = 0  # 0 表示不设上限，可通过 qc_config/ENV 收紧
 DEFAULT_VIDEO_CLIP_QC_CRITERIA = ["clarity", "smoothness", "consistency", "lighting", "color"]
 
+@dataclass
 class AutoQCFailure:
     failure_type: str
     severity: str

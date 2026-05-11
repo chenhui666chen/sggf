@@ -101,6 +101,22 @@ def test_recommend_voice_type_combined(voice_types_module):
     assert "lively" in recommended[:2]
 
 
+def test_recommend_voice_type_uses_rebel_alias(voice_types_module):
+    """测试前端旧 rebellious 值也能命中叛逆性格推荐"""
+    recommended = voice_types_module.recommend_voice_type(
+        personality="rebellious",
+        gender="male",
+    )
+    assert recommended
+    assert "lively" in recommended or "powerful" in recommended
+
+
+def test_recommend_voice_type_has_male_fallback(voice_types_module):
+    """测试只有男性性别时也能返回可应用的推荐"""
+    recommended = voice_types_module.recommend_voice_type(gender="male")
+    assert recommended[:3] == ["powerful", "majestic", "warm"]
+
+
 def test_apply_voice_type_to_tts_params_basic(voice_types_module):
     """测试应用声音类型到 TTS 参数（基础）"""
     base_params = {}

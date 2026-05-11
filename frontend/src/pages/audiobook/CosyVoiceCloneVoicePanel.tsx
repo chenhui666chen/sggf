@@ -4,11 +4,14 @@ import {
   Alert,
   Box,
   Button,
+  CircularProgress,
   Grid,
   Paper,
   TextField,
   Typography,
 } from '@mui/material'
+
+import { audiobookButtonSx } from './audiobookTheme'
 
 interface CosyVoiceCloneVoicePanelProps {
   cloneName: string
@@ -73,7 +76,8 @@ const CosyVoiceCloneVoicePanel = ({
           variant="contained"
           onClick={onCreateCloneVoice}
           disabled={busy || !cloneName.trim() || !cloneUrl.trim()}
-          sx={{ height: '100%' }}
+          startIcon={cloneLoading ? <CircularProgress size={18} color="inherit" /> : undefined}
+          sx={{ ...audiobookButtonSx.brandContained, height: '100%' }}
         >
           {cloneLoading ? '提交中...' : '开始复刻'}
         </Button>
@@ -84,6 +88,7 @@ const CosyVoiceCloneVoicePanel = ({
             variant="outlined"
             onClick={onOpenCloneRecordDialog}
             disabled={busy}
+            sx={audiobookButtonSx.neutralOutlined}
           >
             录音
           </Button>
@@ -91,6 +96,8 @@ const CosyVoiceCloneVoicePanel = ({
             variant="outlined"
             component="label"
             disabled={busy}
+            startIcon={cloneUploading ? <CircularProgress size={16} color="inherit" /> : undefined}
+            sx={audiobookButtonSx.brandOutlined}
           >
             {cloneUploading ? '上传中...' : '上传音频获取临时URL'}
             <input

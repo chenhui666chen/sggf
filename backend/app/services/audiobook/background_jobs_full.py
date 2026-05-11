@@ -7,7 +7,8 @@ from typing import List, Optional
 from app.db.base import SessionLocal
 from app.models.audiobook import AudiobookProject, ChapterAudio
 from app.models.character import Character
-from app.models.project import Chapter, Project
+from app.models.project import Project
+from app.services.audiobook.background_jobs_prefetch import prefetch_chapter_generation_records
 from app.services.audiobook.background_jobs_shared import (
     apply_chapter_audio_generation_result,
     build_checkpoint_patch_from_generation_result,
@@ -21,6 +22,7 @@ from app.services.audiobook.background_jobs_shared import (
     release_audiobook_project_billing,
     settle_audiobook_project_billing,
 )
+from app.services.audiobook.project_audio_runtime import resolve_project_audio_runtime_config
 from app.services.audiobook.task_support import (
     StageTracker,
     serialize_dataclass_to_dict,
@@ -29,31 +31,32 @@ from app.services.audiobook.task_support import (
 logger = logging.getLogger(__name__)
 
 
-def _apply_project_audio_effects(*, engine, audiobook_project: AudiobookProject, project: Optional[Project]) -> None:
-    if project and project.audio_config:
+def _apply_project_audio_effects(
+    *,
+    engine,
+    audiobook_project: AudiobookProject,
+    project: Optional[Project],
+    tts_model: str,
+) -> None:
+    runtime_config = resolve_project_audio_runtime_config(
+        project,
+        tts_model=tts_model,
+        base_voice_mapping=audiobook_project.voice_mapping or {},
+    )
+
+    if runtime_config.audio_fx:
         try:
-            from app.services.audiobook.project_audio_config import get_audio_fx
-            from app.services.audiobook.project_audio_config import parse_project_audio_config
+            engine.apply_audio_fx_config(runtime_config.audio_fx)
+            logger.info("🎚 已加载项目级音效/BGM 配置")
+        except Exception as exc:
+            logger.warning("⚠️ 应用项目级音效/BGM 配置失败: %s", exc)
 
-            config_data = parse_project_audio_config(project.audio_config or "")
-            audio_fx = get_audio_fx(config_data)
-        except Exception as parse_err:
-            logger.warning("⚠️ 解析项目级音频配置失败: %s", parse_err)
-            audio_fx = None
-
-        if audio_fx:
-            try:
-                engine.apply_audio_fx_config(audio_fx)
-                logger.info("🎚 已加载项目级音效/BGM 配置")
-            except Exception as exc:
-                logger.warning("⚠️ 应用项目级音效/BGM 配置失败: %s", exc)
-
-    if audiobook_project.voice_mapping:
+    if runtime_config.voice_mapping:
         try:
-            engine.voice_manager.apply_project_voice_mapping(audiobook_project.voice_mapping)
+            engine.voice_manager.apply_project_voice_mapping(runtime_config.voice_mapping)
             logger.info(
                 "🎛 已加载项目级角色音配置: %s 个角色",
-                len(audiobook_project.voice_mapping),
+                len(runtime_config.voice_mapping),
             )
         except Exception as exc:
             logger.warning("⚠️ 应用项目级角色音配置失败: %s", exc)
@@ -67,6 +70,7 @@ async def generate_audiobook_background(
 ) -> None:
     """后台生成有声书任务。"""
     db = SessionLocal()
+    db.expire_on_commit = False
     audiobook_project: Optional[AudiobookProject] = None
 
     try:
@@ -95,6 +99,7 @@ async def generate_audiobook_background(
                 engine=engine,
                 audiobook_project=audiobook_project,
                 project=project,
+                tts_model=tts_model,
             )
         except Exception as exc:
             logger.warning("⚠️ 加载项目级音频配置失败: %s", exc)
@@ -104,6 +109,14 @@ async def generate_audiobook_background(
         ).all()
         character_list = [character.name for character in characters if character.name]
         logger.info("📝 角色列表: %s", character_list)
+
+        generation_records = prefetch_chapter_generation_records(
+            db,
+            audiobook_project_id=audiobook_project_id,
+            chapter_ids=chapter_ids,
+        )
+        chapter_by_id = generation_records.chapter_by_id
+        chapter_audio_by_chapter_id = generation_records.chapter_audio_by_chapter_id
 
         current_run_failed_chapters = 0
         refresh_audiobook_project_audio_totals(
@@ -126,7 +139,7 @@ async def generate_audiobook_background(
                     chapter_id,
                 )
 
-                chapter = db.query(Chapter).filter(Chapter.id == chapter_id).first()
+                chapter = chapter_by_id.get(chapter_id)
                 if not chapter:
                     logger.warning("⚠️ 章节不存在: %s", chapter_id)
                     current_run_failed_chapters = mark_chapter_preflight_failed(
@@ -170,10 +183,7 @@ async def generate_audiobook_background(
                 logger.info("🎯 TaskID: %s", task_id)
 
                 if result["success"]:
-                    chapter_audio = db.query(ChapterAudio).filter(
-                        ChapterAudio.audiobook_project_id == audiobook_project_id,
-                        ChapterAudio.chapter_id == chapter_id,
-                    ).first()
+                    chapter_audio = chapter_audio_by_chapter_id.get(chapter_id)
 
                     if not chapter_audio:
                         chapter_audio = ChapterAudio(
@@ -181,6 +191,7 @@ async def generate_audiobook_background(
                             chapter_id=chapter_id,
                         )
                         db.add(chapter_audio)
+                        chapter_audio_by_chapter_id[chapter_id] = chapter_audio
                         logger.info("🆕 创建新的章节音频记录: chapter_id=%s", chapter_id)
                     else:
                         logger.info("♻️ 更新已有章节音频记录: chapter_id=%s", chapter_id)

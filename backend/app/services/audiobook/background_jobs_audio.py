@@ -5,8 +5,9 @@ import logging
 from typing import Dict, List, Optional
 
 from app.db.base import SessionLocal
-from app.models.audiobook import AudiobookProject, ChapterAudio
-from app.models.project import Chapter, Project
+from app.models.audiobook import AudiobookProject
+from app.models.project import Project
+from app.services.audiobook.background_jobs_prefetch import prefetch_chapter_generation_records
 from app.services.audiobook.background_jobs_shared import (
     apply_chapter_audio_generation_result,
     build_checkpoint_patch_from_generation_result,
@@ -20,6 +21,7 @@ from app.services.audiobook.background_jobs_shared import (
     release_audiobook_project_billing,
     settle_audiobook_project_billing,
 )
+from app.services.audiobook.project_audio_runtime import resolve_project_audio_runtime_config
 from app.services.audiobook.task_support import (
     StageTracker,
     update_chapter_run_state as _update_chapter_run_state,
@@ -28,56 +30,7 @@ from app.services.audiobook.task_support import (
 logger = logging.getLogger(__name__)
 
 
-def _build_effective_voice_mapping(
-    *,
-    audiobook_project: AudiobookProject,
-    project: Optional[Project],
-    tts_model: str,
-) -> Dict[str, dict]:
-    effective_voice_mapping = dict(audiobook_project.voice_mapping or {})
-    if not project or not project.audio_config:
-        return effective_voice_mapping
-
-    try:
-        from app.services.audiobook.project_audio_config import get_characters_for_model
-        from app.services.audiobook.project_audio_config import parse_project_audio_config
-
-        config_data = parse_project_audio_config(project.audio_config or "")
-        characters = get_characters_for_model(config_data, tts_model)
-        for item in characters:
-            name = item.get("name")
-            if not name:
-                logger.warning("⚠️ 跳过无名称的角色音配置项")
-                continue
-            effective_voice_mapping[name] = {
-                "voice_id": item.get("voice_id"),
-                "volume": item.get("volume", 50),
-                "speed": item.get("speed"),
-                "pitch": item.get("pitch"),
-                "tts_model": item.get("tts_model", tts_model),
-            }
-    except Exception as exc:
-        logger.warning(
-            "⚠️ 合并项目级角色音配置失败，将继续使用已有 voice_mapping: %s",
-            exc,
-        )
-    return effective_voice_mapping
-
-
-def _apply_project_audio_effects(*, engine, project: Optional[Project]) -> None:
-    if not project or not project.audio_config:
-        return
-
-    try:
-        from app.services.audiobook.project_audio_config import get_audio_fx
-        from app.services.audiobook.project_audio_config import parse_project_audio_config
-
-        config_data = parse_project_audio_config(project.audio_config or "")
-        audio_fx = get_audio_fx(config_data)
-    except Exception as parse_err:
-        logger.warning("⚠️ 解析项目级音频配置失败: %s", parse_err)
-        return
-
+def _apply_project_audio_effects(*, engine, audio_fx: Dict[str, object]) -> None:
     if not audio_fx:
         return
 
@@ -96,6 +49,7 @@ async def generate_audiobook_audio_from_scripts_background(
 ) -> None:
     """后台生成有声书音频任务（基于已生成或人工审核后的剧本）。"""
     db = SessionLocal()
+    db.expire_on_commit = False
     audiobook_project: Optional[AudiobookProject] = None
 
     try:
@@ -132,11 +86,12 @@ async def generate_audiobook_audio_from_scripts_background(
         novel_genre = (project.genre or "科幻") if project else "科幻"
         novel_theme = (project.sub_genre or "未知主题") if project else "未知主题"
 
-        effective_voice_mapping = _build_effective_voice_mapping(
-            audiobook_project=audiobook_project,
+        runtime_config = resolve_project_audio_runtime_config(
             project=project,
             tts_model=tts_model,
+            base_voice_mapping=audiobook_project.voice_mapping or {},
         )
+        effective_voice_mapping = runtime_config.voice_mapping
         if effective_voice_mapping:
             try:
                 engine.voice_manager.apply_project_voice_mapping(effective_voice_mapping)
@@ -144,7 +99,15 @@ async def generate_audiobook_audio_from_scripts_background(
             except Exception as exc:
                 logger.warning("⚠️ 应用角色音配置失败: %s", exc)
 
-        _apply_project_audio_effects(engine=engine, project=project)
+        _apply_project_audio_effects(engine=engine, audio_fx=runtime_config.audio_fx)
+
+        generation_records = prefetch_chapter_generation_records(
+            db,
+            audiobook_project_id=audiobook_project_id,
+            chapter_ids=chapter_ids,
+        )
+        chapter_by_id = generation_records.chapter_by_id
+        chapter_audio_by_chapter_id = generation_records.chapter_audio_by_chapter_id
 
         for index, chapter_id in enumerate(chapter_ids, 1):
             chapter = None
@@ -160,10 +123,7 @@ async def generate_audiobook_audio_from_scripts_background(
                     chapter_id,
                 )
 
-                chapter_audio = db.query(ChapterAudio).filter(
-                    ChapterAudio.audiobook_project_id == audiobook_project_id,
-                    ChapterAudio.chapter_id == chapter_id,
-                ).first()
+                chapter_audio = chapter_audio_by_chapter_id.get(chapter_id)
                 if not chapter_audio or not chapter_audio.script_json:
                     logger.warning(
                         "⚠️ 章节 %s 缺少剧本数据(script_json为空)，跳过该章节",
@@ -198,7 +158,7 @@ async def generate_audiobook_audio_from_scripts_background(
                     db.commit()
                     continue
 
-                chapter = db.query(Chapter).filter(Chapter.id == chapter_id).first()
+                chapter = chapter_by_id.get(chapter_id)
                 if not chapter:
                     logger.warning("⚠️ 章节不存在: %s", chapter_id)
                     current_run_failed_chapters = mark_chapter_preflight_failed(
@@ -214,7 +174,7 @@ async def generate_audiobook_audio_from_scripts_background(
 
                 try:
                     script_segments_data = json.loads(chapter_audio.script_json)
-                except Exception as parse_err:
+                except (json.JSONDecodeError, TypeError) as parse_err:
                     logger.error(
                         "❌ 解析章节剧本JSON失败 chapter_id=%s: %s",
                         chapter_id,

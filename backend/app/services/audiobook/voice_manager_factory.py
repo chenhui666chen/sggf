@@ -191,6 +191,36 @@ def list_supported_models() -> list:
     return list_supported_audiobook_tts_models()
 
 
+def list_auto_voice_assignment_models(preferred_model: Optional[str] = None) -> list[str]:
+    """列出可用于自动分配角色声线的模型。
+
+    只返回带系统音色目录的模型；需要用户先创建自定义音色的模型不参与自动兜底，
+    避免推荐出无法直接合成的角色音色。
+    """
+    from .voice_catalog import load_voice_catalog_for_model
+
+    preferred = normalize_audiobook_tts_model(preferred_model, default=DEFAULT_AUDIOBOOK_TTS_MODEL)
+    ordered_models = [
+        preferred,
+        *[model for model in list_supported_audiobook_tts_models() if model != preferred],
+    ]
+    result: list[str] = []
+
+    for model in ordered_models:
+        metadata = get_audiobook_tts_model_metadata(model)
+        capabilities = metadata.get("capabilities") or {}
+        if not capabilities.get("has_system_voices", False):
+            continue
+        try:
+            catalog = load_voice_catalog_for_model(model)
+        except Exception:
+            continue
+        if catalog.get("voices"):
+            result.append(normalize_audiobook_tts_model(model))
+
+    return result
+
+
 def list_all_models() -> list:
     """向后兼容 routes_tts 的旧函数名。"""
     return list_supported_models()
@@ -203,5 +233,5 @@ def create_voice_manager(tts_model: str, llm_client: Any = None):
     if tts_model == COSYVOICE_V35_PLUS_MODEL_ID:
         return CosyVoiceV3PlusVoiceManager()
     elif tts_model in {MINIMAX_SPEECH_28_HD_MODEL, MINIMAX_SPEECH_28_TURBO_MODEL}:
-        return MiniMaxVoiceManager()
+        return MiniMaxVoiceManager(model=tts_model)
     return VoiceManager(llm_client=llm_client)

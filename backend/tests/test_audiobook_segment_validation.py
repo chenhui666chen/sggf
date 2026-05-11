@@ -187,6 +187,40 @@ def test_segment_validation_keeps_pause_tags_for_render_plan():
     assert segment.text == "等一下。[pause:2s]继续。"
 
 
+def test_segment_validation_moves_spoken_pause_directives_out_of_text():
+    from app.services.audiobook.script_adapter_pkg._segment_validation import build_script_segment
+
+    segment = build_script_segment(
+        {
+            "type": "narration",
+            "text": "必须走。（停顿一秒）继续。",
+            "speaker": "旁白",
+        }
+    )
+
+    assert segment is not None
+    assert segment.text == "必须走。继续。"
+    assert segment.voice_params["pause_after_ms"] == 1000
+    assert "停顿" in segment.performance_notes
+
+
+def test_segment_validation_uses_original_text_when_text_is_only_pause_direction():
+    from app.services.audiobook.script_adapter_pkg._segment_validation import build_script_segment
+
+    segment = build_script_segment(
+        {
+            "type": "narration",
+            "text": "旁白停顿三秒后继续讲述。",
+            "original_text": "必须走。",
+            "speaker": "旁白",
+        }
+    )
+
+    assert segment is not None
+    assert segment.text == "必须走。"
+    assert segment.voice_params["pause_after_ms"] == 3000
+
+
 def test_segment_validation_inferrs_clear_emotion_when_missing_or_neutral():
     from app.services.audiobook.script_adapter_pkg._segment_validation import build_script_segment
 
@@ -222,6 +256,47 @@ def test_segment_validation_inferrs_clear_emotion_when_missing_or_neutral():
     assert explicit.emotion == "happy"
 
 
+def test_segment_validation_recovers_dialogue_speaker_from_clear_original_quote():
+    from app.services.audiobook.script_adapter_pkg._segment_validation import build_script_segment
+
+    segment = build_script_segment(
+        {
+            "type": "narration",
+            "text": "别碰我。",
+            "speaker": "旁白",
+            "emotion": "neutral",
+            "original_text": "陆衍低声道：“别碰我。”",
+        }
+    )
+
+    assert segment is not None
+    assert segment.type == "dialogue"
+    assert segment.speaker == "陆衍"
+    assert segment.emotion == "whisper"
+    assert segment.instruct_emotion == "neutral"
+
+
+def test_segment_validation_enriches_tense_narration_performance():
+    from app.services.audiobook.script_adapter_pkg._segment_validation import build_script_segment
+
+    segment = build_script_segment(
+        {
+            "type": "narration",
+            "text": "黑色裂隙在掌心微弱起伏，像一张嵌在肉里的嘴，吞吐着空气中看不见的浊气。",
+            "speaker": "旁白",
+            "emotion": "neutral",
+        }
+    )
+
+    assert segment is not None
+    assert segment.type == "narration"
+    assert segment.speaker == "旁白"
+    assert segment.emotion == "mysterious"
+    assert segment.instruct_emotion == "fearful"
+    assert "压迫感" in segment.performance_notes
+    assert "悬念停顿" in segment.performance_notes
+
+
 def test_segment_validation_removes_thinking_blocks_from_spoken_text():
     from app.services.audiobook.script_adapter_pkg._segment_validation import build_script_segment
 
@@ -247,6 +322,47 @@ def test_build_script_segments_falls_back_when_all_segments_invalid():
     assert len(segments) == 1
     assert segments[0].text == "\u8fd9\u662f\u4e00\u6bb5\u53ef\u7528\u7684\u539f\u6587\u3002"
     assert segments[0].adaptation_reason == "fallback_from_invalid_llm_segments"
+
+
+def test_build_script_segments_splits_long_narration_for_audiobook_cadence():
+    from app.services.audiobook.script_adapter_pkg._segment_validation import (
+        AUDIOBOOK_NARRATION_MAX_CHARS,
+        build_script_segments,
+    )
+
+    text = (
+        "一股无形吸力自他掌心爆发。守卫整条右臂的浊气如潮水倒灌，经脉中积蓄多年的祟意被强行抽离。"
+        "一息之间，那手臂干瘪如朽木，皮肤龟裂，筋肉萎缩，连骨骼都发出脆响。"
+        "祟意沿裂隙涌入陆衍体内，狂暴、冰冷、带着腐蚀意志的尖啸。"
+        "守卫连惨叫都未及发出，双目翻白，轰然倒地。陆衍跪在地上干呕，眼前发黑。"
+        "他知道，这种动静瞒不过巡逻队。必须走！"
+    )
+
+    segments = build_script_segments(
+        [
+            {
+                "type": "narration",
+                "text": text,
+                "speaker": "旁白",
+                "emotion": "tense",
+                "sound_effects": [{"name": "骨裂声"}],
+                "music_cue": {"style": "低频紧张弦乐"},
+                "voice_params": {"pause_before": 0.4, "pause_after": 0.6},
+            }
+        ]
+    )
+
+    assert len(segments) > 1
+    assert "".join(segment.text for segment in segments) == text
+    assert all(len(segment.text) <= AUDIOBOOK_NARRATION_MAX_CHARS for segment in segments)
+    assert segments[0].sound_effects
+    assert segments[0].music_cue is not None
+    assert all(not segment.sound_effects for segment in segments[1:])
+    assert all(segment.music_cue is None for segment in segments[1:])
+    assert segments[0].pause_before == 0.4
+    assert segments[-1].pause_after == 0.6
+    assert all(segment.pause_after >= 0.15 for segment in segments[:-1])
+    assert "auto_split_long_segment" in segments[0].adaptation_reason
 
 
 @pytest.mark.asyncio
@@ -320,7 +436,10 @@ async def test_audio_from_script_skip_final_review_returns_explicit_status(monke
 
 @pytest.mark.asyncio
 async def test_transform_paragraph_validates_llm_segments():
-    from app.services.audiobook.script_adapter_pkg._transform import TransformMixin
+    from app.services.audiobook.script_adapter_pkg._transform import (
+        TRANSFORM_OUTPUT_TOKEN_MIN,
+        TransformMixin,
+    )
 
     class DummyLLM:
         def __init__(self):
@@ -366,6 +485,41 @@ async def test_transform_paragraph_validates_llm_segments():
     assert segments[0].voice_params["rate"] == 2.0
     assert segments[0].voice_params["pause_after"] == 2.0
     assert harness.llm_client.calls[0]["model"] == "deepseek-v4-flash"
+    assert TRANSFORM_OUTPUT_TOKEN_MIN <= harness.llm_client.calls[0]["max_tokens"] < 32000
+    assert harness.llm_client.calls[0]["timeout"] >= 90
+    assert harness.llm_client.calls[0]["max_retries"] == 2
+
+
+@pytest.mark.asyncio
+async def test_transform_prompt_requires_dialogue_speaker_attribution():
+    from app.services.audiobook.script_adapter_pkg._transform import TransformMixin
+
+    class CapturingLLM:
+        def __init__(self):
+            self.calls = []
+
+        async def chat(self, **kwargs):
+            self.calls.append(kwargs)
+            return '{"segments": [{"type": "dialogue", "text": "别碰我。", "speaker": "陆衍"}]}'
+
+    class Harness(TransformMixin):
+        def __init__(self):
+            self.llm_client = CapturingLLM()
+            self.tts_model = "qwen3-tts-instruct-flash"
+            self.strategy = None
+
+    harness = Harness()
+    await harness._transform_paragraph(
+        "陆衍低声道：“别碰我。”",
+        character_list=["陆衍"],
+        analysis={"recommended_emotions": ["tense", "fearful"], "emotional_tone": "tense"},
+    )
+
+    prompt = harness.llm_client.calls[0]["messages"][0]["content"]
+    assert "直接引语必须拆成 dialogue" in prompt
+    assert "不要把角色台词归到旁白" in prompt
+    assert "只有叙述性文字才使用 speaker=旁白" in prompt
+    assert "旁白也必须有情绪层次" in prompt
 
 
 @pytest.mark.asyncio
@@ -394,6 +548,79 @@ async def test_transform_to_script_preserves_short_source_lines():
 
 
 @pytest.mark.asyncio
+async def test_transform_to_script_splits_large_source_into_smaller_batches():
+    from app.services.audiobook.script_adapter_pkg._transform import (
+        TRANSFORM_BATCH_HARD_CHARS,
+        TransformMixin,
+    )
+
+    class Harness(TransformMixin):
+        def __init__(self):
+            self.strategy = None
+            self.seen_batches = []
+
+        async def _transform_paragraph(self, paragraph, *args, **kwargs):
+            self.seen_batches.append(paragraph)
+            return [SimpleNamespace(text=paragraph)]
+
+    line = "风声压过巷口，脚步声贴着墙根追来。"
+    content = "\n".join(line * 6 for _ in range(20))
+
+    harness = Harness()
+    await harness._transform_to_script(
+        content,
+        character_list=[],
+        analysis={},
+    )
+
+    assert len(harness.seen_batches) > 1
+    assert max(len(batch) for batch in harness.seen_batches) <= TRANSFORM_BATCH_HARD_CHARS
+
+
+@pytest.mark.asyncio
+async def test_transform_to_script_passes_continuity_context_between_batches():
+    from app.services.audiobook.script_adapter_pkg._transform import TransformMixin
+
+    class Harness(TransformMixin):
+        def __init__(self):
+            self.strategy = None
+            self.contexts = []
+
+        async def _transform_paragraph(
+            self,
+            paragraph,
+            *args,
+            continuity_context="",
+            **kwargs,
+        ):
+            self.contexts.append(continuity_context)
+            batch_no = len(self.contexts)
+            return [
+                SimpleNamespace(
+                    type="narration",
+                    text=f"第{batch_no}批改编后的结尾。",
+                    speaker="旁白",
+                    emotion="tense",
+                )
+            ]
+
+    line = "风声压过巷口，脚步声贴着墙根追来。"
+    content = "\n".join(line * 6 for _ in range(20))
+
+    harness = Harness()
+    await harness._transform_to_script(
+        content,
+        character_list=[],
+        analysis={},
+    )
+
+    assert len(harness.contexts) > 1
+    assert harness.contexts[0] == ""
+    assert "第1批改编后的结尾" in harness.contexts[1]
+    assert "不要复述" not in harness.contexts[1]
+
+
+@pytest.mark.asyncio
 async def test_transform_paragraph_falls_back_to_source_text_on_llm_failure():
     from app.services.audiobook.script_adapter_pkg._transform import TransformMixin
 
@@ -419,3 +646,40 @@ async def test_transform_paragraph_falls_back_to_source_text_on_llm_failure():
     assert segments[0].speaker == "旁白"
     assert segments[0].text == "别走。门外的风忽然停了。"
     assert segments[0].adaptation_reason == "fallback_from_invalid_llm_segments"
+
+
+@pytest.mark.asyncio
+async def test_transform_paragraph_retries_smaller_chunks_after_json_parse_failure():
+    from app.services.audiobook.script_adapter_pkg._transform import TransformMixin
+
+    class FlakyLLM:
+        def __init__(self):
+            self.calls = []
+
+        async def chat(self, **kwargs):
+            self.calls.append(kwargs)
+            prompt = kwargs["messages"][0]["content"]
+            source_text = prompt.split("**原文段落**:", 1)[-1].split("**输出格式**", 1)[0]
+            if len(self.calls) == 1:
+                return '{"segments": [{"type": "narration", "text": "坏 JSON"'
+            if "第一句" in source_text:
+                return '{"segments": [{"type": "narration", "text": "第一句。", "speaker": "旁白"}]}'
+            if "第二句" in source_text:
+                return '{"segments": [{"type": "narration", "text": "第二句。", "speaker": "旁白"}]}'
+            return '{"segments": []}'
+
+    class Harness(TransformMixin):
+        def __init__(self):
+            self.llm_client = FlakyLLM()
+            self.tts_model = "qwen3-tts-instruct-flash"
+            self.strategy = None
+
+    harness = Harness()
+    segments = await harness._transform_paragraph(
+        "第一句。\n第二句。",
+        character_list=[],
+        analysis={},
+    )
+
+    assert [segment.text for segment in segments] == ["第一句。", "第二句。"]
+    assert len(harness.llm_client.calls) == 3

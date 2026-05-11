@@ -23,8 +23,8 @@ from app.services.audiobook.repository import (
     CharacterRepository,
     ProjectRepository,
 )
-from app.services.audiobook.project_audio_config import get_characters_for_model, parse_project_audio_config
-from app.services.audiobook.voice_manager_factory import create_voice_manager
+from app.services.audiobook.project_audio_runtime import resolve_project_audio_runtime_config
+from app.services.audiobook.voice_auto_assignment import AutoVoiceAssignmentPool
 
 logger = logging.getLogger(__name__)
 
@@ -91,21 +91,10 @@ class AudiobookAppService:
         return PreparedAudiobookProjectCreation(project=validated_project, chapters=chapters)
 
     def _load_project_voice_mapping(self, project: Project, tts_model: str) -> Dict[str, Dict]:
-        voice_mapping: Dict[str, Dict] = {}
-        config = parse_project_audio_config(project.audio_config or "")
-
-        for item in get_characters_for_model(config, tts_model):
-            name = item.get("name")
-            if not name:
-                continue
-            voice_mapping[name] = {
-                "voice_id": item.get("voice_id"),
-                "volume": item.get("volume", 50),
-                "speed": item.get("speed"),
-                "pitch": item.get("pitch"),
-            }
-
-        return voice_mapping
+        return resolve_project_audio_runtime_config(
+            project,
+            tts_model=tts_model,
+        ).voice_mapping
 
     def _apply_request_voice_config(
         self,
@@ -122,6 +111,10 @@ class AudiobookAppService:
                 "volume": item.volume,
                 "speed": item.speed,
                 "pitch": item.pitch,
+                "tts_model": item.tts_model,
+                "voice_type": item.voice_type,
+                "personality": item.personality,
+                "emotion_tendency": item.emotion_tendency,
             }
 
     def _auto_assign_voices(
@@ -134,7 +127,10 @@ class AudiobookAppService:
         try:
             characters = self.character_repo.list_by_project(self.db, project_id=project_id)
 
-            vm = create_voice_manager(tts_model=tts_model)
+            auto_voice_pool = AutoVoiceAssignmentPool(
+                preferred_model=tts_model,
+                existing_assignments=voice_mapping.values(),
+            )
 
             def _build_traits_from_character(char) -> Dict:
                 traits: Dict = {}
@@ -174,13 +170,15 @@ class AudiobookAppService:
                     continue
 
                 traits = _build_traits_from_character(char)
-                profile = vm.assign_voice(char.name, character_info=traits or None)
+                assignment = auto_voice_pool.assign(char.name, traits or None)
+                profile = assignment.profile
 
                 voice_mapping[char.name] = {
                     "voice_id": profile.voice_id,
                     "volume": profile.volume_base,
                     "speed": profile.speed_base,
                     "pitch": profile.pitch_base,
+                    "tts_model": assignment.model,
                 }
 
         except Exception as e:  # noqa: BLE001

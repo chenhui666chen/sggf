@@ -5,11 +5,12 @@ import logging
 import time
 import math
 import json
-from typing import List, Dict, Any, Optional, Callable
+from typing import List, Dict, Any, Optional, Callable, Tuple
 from pathlib import Path
 from dataclasses import asdict, is_dataclass
 
-from ..script_adapter import AudiobookScriptAgent, ScriptSegment, ChapterStructure
+from ..script_adapter import AudiobookScriptAgent, ScriptSegment, ChapterStructure, SoundEffect
+from ..script_adapter_pkg._segment_validation import NARRATOR, split_long_script_segment
 from ..voice_manager_factory import create_voice_manager
 from ..audio_mixer import AudioMixer
 from ..agent_message import MessageBus
@@ -36,6 +37,19 @@ from ..agents import (
 )
 
 logger = logging.getLogger(__name__)
+
+QUALITY_GATE_DEFAULT_THRESHOLD = 70.0
+QUALITY_GATE_MAX_REVISION_ROUNDS = 2
+QUALITY_GATE_STRONG_EMOTIONS = {
+    "angry",
+    "excited",
+    "fearful",
+    "mysterious",
+    "nervous",
+    "shout",
+    "surprised",
+    "tense",
+}
 
 class AudiobookEngineBase:
     """有声书生成引擎 - 专业多Agent协作模式"""
@@ -186,6 +200,282 @@ class AudiobookEngineBase:
             }
             for seg in script_segments
         ]
+
+    def _run_quality_review_with_auto_revision(
+        self,
+        script_segments: List[ScriptSegment],
+        *,
+        novel_genre: str,
+        quality_threshold: float = QUALITY_GATE_DEFAULT_THRESHOLD,
+        max_revision_rounds: int = QUALITY_GATE_MAX_REVISION_ROUNDS,
+    ) -> Tuple[Any, Dict[str, Any]]:
+        """评审剧本，并用评审结果驱动确定性自动修订。"""
+        threshold = self._coerce_quality_threshold(quality_threshold)
+        max_rounds = max(0, int(max_revision_rounds or 0))
+        revision_rounds: List[Dict[str, Any]] = []
+        quality_report = None
+
+        for round_index in range(max_rounds + 1):
+            review_segments = self._build_review_segments(script_segments)
+            quality_report = self.audio_quality_reviewer.review_script(
+                review_segments,
+                novel_genre=novel_genre,
+            )
+
+            if round_index >= max_rounds:
+                break
+
+            script_revision = self._auto_revise_script_segments_from_quality_report(
+                script_segments,
+                quality_report,
+            )
+            audio_balance_revision = self._auto_balance_script_audio_cues(
+                script_segments,
+                self.audio_quality_reviewer.quality_standards,
+            )
+            applied = bool(script_revision.get("applied") or audio_balance_revision.get("applied"))
+            if not applied:
+                break
+
+            revision_rounds.append(
+                {
+                    "round": round_index + 1,
+                    "script_revision": script_revision,
+                    "audio_balance": audio_balance_revision,
+                }
+            )
+
+        if quality_report is None:
+            review_segments = self._build_review_segments(script_segments)
+            quality_report = self.audio_quality_reviewer.review_script(
+                review_segments,
+                novel_genre=novel_genre,
+            )
+
+        passed = float(getattr(quality_report, "overall_score", 0.0) or 0.0) >= threshold
+        return quality_report, {
+            "applied": bool(revision_rounds),
+            "rounds": len(revision_rounds),
+            "revision_rounds": revision_rounds,
+            "quality_gate": {
+                "passed": passed,
+                "threshold": threshold,
+                "final_score": float(getattr(quality_report, "overall_score", 0.0) or 0.0),
+                "final_grade": str(getattr(quality_report, "overall_grade", "") or ""),
+                "blocked": not passed,
+                "reason": "" if passed else "script_quality_below_threshold",
+            },
+        }
+
+    def _auto_revise_script_segments_from_quality_report(
+        self,
+        script_segments: List[ScriptSegment],
+        quality_report: Any,
+    ) -> Dict[str, Any]:
+        """执行低风险剧本自动修订，不改写正文语义。"""
+        if not script_segments:
+            return {"applied": False}
+
+        issue_text = "\n".join(
+            f"{getattr(issue, 'description', '')}\n{getattr(issue, 'suggestion', '')}"
+            for issue in getattr(quality_report, "issues", []) or []
+        )
+        script_quality = getattr(quality_report, "script_quality", {}) or {}
+        should_check_action_effects = (
+            "动作或环境片段缺少音效提示" in issue_text
+            or int(script_quality.get("action_without_effect_count") or 0) > 0
+        )
+
+        summary: Dict[str, Any] = {
+            "applied": False,
+            "segments_before": len(script_segments),
+            "segments_after": len(script_segments),
+            "split_segments": 0,
+            "speaker_fixes": 0,
+            "pause_fixes": 0,
+            "performance_note_fixes": 0,
+            "sound_effect_fixes": 0,
+        }
+
+        revised_segments: List[ScriptSegment] = []
+        for segment in script_segments:
+            parts = split_long_script_segment(segment)
+            summary["split_segments"] += max(0, len(parts) - 1)
+            revised_segments.extend(parts)
+
+        if summary["split_segments"]:
+            script_segments[:] = revised_segments
+            summary["segments_after"] = len(script_segments)
+            summary["applied"] = True
+
+        sound_effects_enabled = self._auto_revision_sound_effects_enabled()
+        for segment in script_segments:
+            if self._fix_invalid_dialogue_speaker(segment):
+                summary["speaker_fixes"] += 1
+
+            if self._fix_missing_breath_pause(segment):
+                summary["pause_fixes"] += 1
+
+            if self._fix_missing_performance_note(segment):
+                summary["performance_note_fixes"] += 1
+
+            if (
+                should_check_action_effects
+                and sound_effects_enabled
+                and self._fix_missing_action_sound_effect(segment)
+            ):
+                summary["sound_effect_fixes"] += 1
+
+        if any(
+            summary[key] > 0
+            for key in (
+                "speaker_fixes",
+                "pause_fixes",
+                "performance_note_fixes",
+                "sound_effect_fixes",
+            )
+        ):
+            summary["applied"] = True
+
+        return summary
+
+    def _quality_report_to_payload(
+        self,
+        quality_report: Any,
+        *,
+        auto_revision: Optional[Dict[str, Any]] = None,
+        llm_script_review: Optional[Dict[str, Any]] = None,
+    ) -> Optional[Dict[str, Any]]:
+        if not quality_report:
+            return None
+        payload = asdict(quality_report) if is_dataclass(quality_report) else dict(quality_report)
+        if auto_revision and auto_revision.get("quality_gate"):
+            payload["quality_gate"] = auto_revision.get("quality_gate")
+        if auto_revision and auto_revision.get("applied"):
+            payload["auto_revision"] = auto_revision
+        if llm_script_review:
+            payload["llm_script_review"] = llm_script_review
+        return payload
+
+    def _coerce_quality_threshold(self, quality_threshold: Any) -> float:
+        try:
+            return float(quality_threshold)
+        except (TypeError, ValueError):
+            return QUALITY_GATE_DEFAULT_THRESHOLD
+
+    def _fix_invalid_dialogue_speaker(self, segment: ScriptSegment) -> bool:
+        if getattr(segment, "type", "") != "dialogue":
+            return False
+        speaker = str(getattr(segment, "speaker", "") or "").strip()
+        if speaker and speaker != NARRATOR:
+            return False
+        segment.type = "narration"
+        segment.speaker = NARRATOR
+        self._append_adaptation_reason(segment, "auto_quality_revision:dialogue_without_speaker_to_narration")
+        return True
+
+    def _fix_missing_breath_pause(self, segment: ScriptSegment) -> bool:
+        if not self._segment_needs_breath_pause(segment):
+            return False
+        current_pause = self._segment_pause_after(segment)
+        if current_pause >= 0.2:
+            return False
+        pause_after = 0.35 if str(getattr(segment, "emotion", "") or "").lower() in QUALITY_GATE_STRONG_EMOTIONS else 0.25
+        segment.pause_after = pause_after
+        voice_params = dict(getattr(segment, "voice_params", None) or {})
+        voice_params["pause_after"] = pause_after
+        voice_params.setdefault("pause_before", getattr(segment, "pause_before", 0.0))
+        segment.voice_params = voice_params
+        self._append_adaptation_reason(segment, "auto_quality_revision:add_breath_pause")
+        return True
+
+    def _fix_missing_performance_note(self, segment: ScriptSegment) -> bool:
+        if str(getattr(segment, "performance_notes", "") or "").strip():
+            return False
+        text = str(getattr(segment, "text", "") or "")
+        emotion = str(getattr(segment, "emotion", "") or "").lower()
+        if emotion not in QUALITY_GATE_STRONG_EMOTIONS and len(text) <= 80:
+            return False
+        segment.performance_notes = self._default_performance_note_for_segment(segment)
+        self._append_adaptation_reason(segment, "auto_quality_revision:add_performance_notes")
+        return True
+
+    def _fix_missing_action_sound_effect(self, segment: ScriptSegment) -> bool:
+        if getattr(segment, "type", "") != "narration":
+            return False
+        if getattr(segment, "sound_effects", None) or getattr(segment, "sound_effects_simple", None):
+            return False
+        effect_name = self._infer_action_sound_effect_name(str(getattr(segment, "text", "") or ""))
+        if not effect_name:
+            return False
+        segment.sound_effects = list(getattr(segment, "sound_effects", []) or [])
+        segment.sound_effects.append(SoundEffect(name=effect_name, layer="action", volume=0.28))
+        simple_effects = list(getattr(segment, "sound_effects_simple", []) or [])
+        if effect_name not in simple_effects:
+            simple_effects.append(effect_name)
+        segment.sound_effects_simple = simple_effects
+        self._append_adaptation_reason(segment, f"auto_quality_revision:add_sound_effect:{effect_name}")
+        return True
+
+    def _segment_needs_breath_pause(self, segment: ScriptSegment) -> bool:
+        emotion = str(getattr(segment, "emotion", "") or "").lower()
+        text = str(getattr(segment, "text", "") or "")
+        if emotion in QUALITY_GATE_STRONG_EMOTIONS:
+            return True
+        return any(token in text for token in ("！", "?", "？", "必须走", "突然", "猛地", "轰然", "一息之间"))
+
+    def _segment_pause_after(self, segment: ScriptSegment) -> float:
+        voice_params = getattr(segment, "voice_params", None) or {}
+        value = voice_params.get("pause_after", getattr(segment, "pause_after", 0.0))
+        try:
+            return float(value or 0.0)
+        except (TypeError, ValueError):
+            return 0.0
+
+    def _default_performance_note_for_segment(self, segment: ScriptSegment) -> str:
+        emotion = str(getattr(segment, "emotion", "") or "").lower()
+        if emotion in {"tense", "fearful", "nervous", "mysterious"}:
+            return "压低声线，语速略收，句尾留出紧张停顿"
+        if emotion in {"angry", "shout"}:
+            return "语气有力量，重音清晰，句尾短暂停顿"
+        if emotion in {"excited", "surprised"}:
+            return "语气上扬，节奏短促，保留情绪停顿"
+        return "平稳叙述，按句读自然换气"
+
+    def _infer_action_sound_effect_name(self, text: str) -> str:
+        if any(token in text for token in ("骨", "脆响", "龟裂", "碎裂")):
+            return "骨裂声"
+        if any(token in text for token in ("倒地", "轰然", "砸", "撞")):
+            return "重物倒地声"
+        if any(token in text for token in ("脚步", "奔", "踉跄", "追逐")):
+            return "急促脚步声"
+        if any(token in text for token in ("风声", "狂风", "夜风")):
+            return "风声"
+        if any(token in text for token in ("雨声", "暴雨", "雨幕")):
+            return "雨声"
+        if any(token in text for token in ("雷声", "惊雷")):
+            return "雷声"
+        if any(token in text for token in ("尖啸", "惨叫", "嘶吼")):
+            return "尖啸声"
+        if any(token in text for token in ("门响", "开门", "关门")):
+            return "门响"
+        if any(token in text for token in ("剑", "刀", "刃")):
+            return "兵刃声"
+        if any(token in text for token in ("爆发", "冲", "掌心")):
+            return "能量爆发声"
+        return ""
+
+    def _append_adaptation_reason(self, segment: ScriptSegment, reason: str) -> None:
+        current = str(getattr(segment, "adaptation_reason", "") or "").strip()
+        if reason in current:
+            return
+        segment.adaptation_reason = f"{current}; {reason}" if current else reason
+
+    def _auto_revision_sound_effects_enabled(self) -> bool:
+        audio_fx = getattr(self, "_audio_fx_config", None) or {}
+        if audio_fx.get("enable_sound_effects") is False:
+            return False
+        return str(audio_fx.get("sound_effect_density") or "").lower() != "off"
 
     @staticmethod
     def _select_evenly_indices(total: int, keep: int) -> List[int]:

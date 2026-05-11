@@ -32,10 +32,10 @@ from app.api.v1.dreamweaver_api import routes_run as dreamweaver_routes_run
 
 
 def load_dreamweaver_module():
-    dreamweaver_path = ROOT_DIR / "app" / "api" / "v1" / "dreamweaver.py"
+    dreamweaver_path = ROOT_DIR / "app" / "api" / "v1" / "dreamweaver_api" / "_imports.py"
     spec = spec_from_file_location("test_dreamweaver_module", dreamweaver_path)
     if spec is None or spec.loader is None:
-        raise RuntimeError("无法加载短剧路由模块")
+        raise RuntimeError("无法加载 DreamWeaver imports 模块")
 
     module = module_from_spec(spec)
     sys.modules.setdefault("test_dreamweaver_module", module)

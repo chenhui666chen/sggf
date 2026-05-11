@@ -23,6 +23,7 @@ DEFAULT_SIMILARITY_THRESHOLD = 0.9
 DEFAULT_MAX_SUBJECT_POS_DELTA = 0.1
 DEFAULT_WEIGHTS = {"identity": 0.4, "structure": 0.4, "style": 0.2}
 DEFAULT_SEMANTIC_THRESHOLD = 0.6
+VIDEO_EDIT_FEATURES = {"style-transfer", "video-extend", "video-remix"}
 DEFAULT_SEMANTIC_VLM_ADAPTER = "qwen3_vl_plus"
 DEFAULT_SEMANTIC_FRAMES = "both"  # head|tail|both
 DEFAULT_SEMANTIC_SAMPLE_RATE = 1.0

@@ -77,9 +77,10 @@ const TextProjectImportDialog = ({
         variant="contained"
         onClick={onCreate}
         disabled={creating}
+        startIcon={creating ? <CircularProgress size={18} color="inherit" /> : undefined}
         sx={audiobookButtonSx.brandContained}
       >
-        {creating ? <CircularProgress size={20} color="inherit" /> : '创建并开始配置音色'}
+        {creating ? '创建中...' : '创建并开始配置音色'}
       </Button>
     </DialogActions>
   </Dialog>

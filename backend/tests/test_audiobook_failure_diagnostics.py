@@ -85,6 +85,52 @@ def test_failure_diagnostic_maps_render_chunk_to_source_segment():
     assert diagnostic["error_message"] == "TTS provider returned empty audio"
 
 
+def test_failure_diagnostic_includes_trace_id_with_explicit_value_first():
+    diagnostic = build_chapter_failure_diagnostic(
+        stage="audio_from_scripts",
+        chapter_id=8,
+        result={
+            "trace_id": "result-trace",
+            "task_id": "engine-task-1",
+            "total_segments": 1,
+        },
+        resume_checkpoint={
+            "trace_id": "checkpoint-trace",
+            "engine_task_id": "checkpoint-task",
+        },
+        task_id="explicit-trace",
+    )
+
+    assert diagnostic["trace_id"] == "explicit-trace"
+    assert diagnostic["engine_task_id"] == "explicit-trace"
+
+
+def test_failure_diagnostic_falls_back_to_result_or_checkpoint_trace_id():
+    result_diagnostic = build_chapter_failure_diagnostic(
+        stage="audio_from_scripts",
+        chapter_id=9,
+        result={
+            "trace_id": "result-trace",
+            "task_id": "engine-task-2",
+            "total_segments": 1,
+        },
+    )
+    checkpoint_diagnostic = build_chapter_failure_diagnostic(
+        stage="audio_from_scripts",
+        chapter_id=10,
+        resume_checkpoint={
+            "trace_id": "checkpoint-trace",
+            "engine_task_id": "checkpoint-task",
+            "total_segments": 1,
+        },
+    )
+
+    assert result_diagnostic["trace_id"] == "result-trace"
+    assert result_diagnostic["engine_task_id"] == "engine-task-2"
+    assert checkpoint_diagnostic["trace_id"] == "checkpoint-trace"
+    assert checkpoint_diagnostic["engine_task_id"] == "checkpoint-task"
+
+
 def test_failure_diagnostic_uses_exception_type_and_object_segments():
     script_segments = [
         SimpleNamespace(
@@ -113,6 +159,7 @@ def test_failure_diagnostic_uses_exception_type_and_object_segments():
 
 def test_attach_failure_diagnostic_merges_failed_segment_indices():
     diagnostic = {
+        "trace_id": "trace-123",
         "failed_render_chunk_index": 2,
         "error_message": "failed",
     }
@@ -123,6 +170,7 @@ def test_attach_failure_diagnostic_merges_failed_segment_indices():
     )
 
     assert patch["failure_diagnostic"] == diagnostic
+    assert patch["failure_diagnostic"]["trace_id"] == "trace-123"
     assert patch["failed_segment_indices"] == [1, 2]
     assert patch["engine_task_id"] == "task_123"
 

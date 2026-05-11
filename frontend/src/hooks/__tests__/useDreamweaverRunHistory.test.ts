@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import type { DreamweaverRunSummary } from '../useDreamweaverRunHistory'
+import type { DreamweaverRunSummary } from '../../types/dreamweaver'
 
 vi.mock('../../services/api', () => ({
   apiClient: {
@@ -10,42 +10,39 @@ vi.mock('../../services/api', () => ({
 
 function makeRun(overrides: Partial<DreamweaverRunSummary> = {}): DreamweaverRunSummary {
   return {
-    id: Math.floor(Math.random() * 10000),
     run_id: `run-${Date.now()}`,
-    status: 'done',
+    status: 'completed',
     ...overrides,
   }
 }
 
 describe('DreamweaverRunSummary 类型与工具函数', () => {
   it('makeRun 应生成有效的运行记录', () => {
-    const run = makeRun({ id: 1, run_id: 'run-001', status: 'done' })
-    expect(run.id).toBe(1)
+    const run = makeRun({ run_id: 'run-001', status: 'completed' })
     expect(run.run_id).toBe('run-001')
-    expect(run.status).toBe('done')
+    expect(run.status).toBe('completed')
   })
 
   it('makeRun 应支持覆盖默认值', () => {
     const run = makeRun({
-      id: 2,
       run_id: 'run-002',
       status: 'failed',
       progress: 50,
-      error: 'Test error',
+      error_message: 'Test error',
     })
     expect(run.status).toBe('failed')
     expect(run.progress).toBe(50)
-    expect(run.error).toBe('Test error')
+    expect(run.error_message).toBe('Test error')
   })
 })
 
 describe('状态过滤逻辑', () => {
   const runs: DreamweaverRunSummary[] = [
-    makeRun({ id: 1, status: 'done' }),
-    makeRun({ id: 2, status: 'done' }),
-    makeRun({ id: 3, status: 'failed' }),
-    makeRun({ id: 4, status: 'running' }),
-    makeRun({ id: 5, status: '' }),
+    makeRun({ run_id: 'run-1', status: 'completed' }),
+    makeRun({ run_id: 'run-2', status: 'completed' }),
+    makeRun({ run_id: 'run-3', status: 'failed' }),
+    makeRun({ run_id: 'run-4', status: 'running' }),
+    makeRun({ run_id: 'run-5', status: '' }),
   ]
 
   function filterByStatus(runs: DreamweaverRunSummary[], filters: string[]): DreamweaverRunSummary[] {
@@ -66,20 +63,20 @@ describe('状态过滤逻辑', () => {
 
   it('应正确统计各状态数量', () => {
     const counts = countByStatus(runs)
-    expect(counts['done']).toBe(2)
+    expect(counts['completed']).toBe(2)
     expect(counts['failed']).toBe(1)
     expect(counts['running']).toBe(1)
     expect(counts['unknown']).toBe(1)
   })
 
   it('应正确过滤指定状态', () => {
-    const filtered = filterByStatus(runs, ['done'])
+    const filtered = filterByStatus(runs, ['completed'])
     expect(filtered).toHaveLength(2)
-    expect(filtered.every((r) => r.status === 'done')).toBe(true)
+    expect(filtered.every((r) => r.status === 'completed')).toBe(true)
   })
 
   it('应正确过滤多个状态', () => {
-    const filtered = filterByStatus(runs, ['done', 'failed'])
+    const filtered = filterByStatus(runs, ['completed', 'failed'])
     expect(filtered).toHaveLength(3)
   })
 
@@ -90,11 +87,11 @@ describe('状态过滤逻辑', () => {
 
   it('应处理大小写不一致', () => {
     const mixedRuns = [
-      makeRun({ status: 'DONE' }),
-      makeRun({ status: 'Done' }),
-      makeRun({ status: 'done' }),
+      makeRun({ status: 'COMPLETED' }),
+      makeRun({ status: 'Completed' }),
+      makeRun({ status: 'completed' }),
     ]
-    const filtered = filterByStatus(mixedRuns, ['done'])
+    const filtered = filterByStatus(mixedRuns, ['completed'])
     expect(filtered).toHaveLength(3)
   })
 })

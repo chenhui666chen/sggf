@@ -14,6 +14,10 @@ from ..voice_manager_factory import create_voice_manager
 from ..audio_mixer import AudioMixer
 from app.services.chapter_adaptation_assets import build_audio_adaptation_hint
 from core.unified_media_runtime import create_tts_engine
+from app.services.audiobook.audio_library_paths import (
+    get_audio_library_dir,
+    resolve_audio_library_file_path,
+)
 
 try:
     from ..agent_dispatch_client import client as tts_dispatch_client
@@ -72,19 +76,28 @@ class MusicMixin:
                     for entry in index_data:
                         style = str(entry.get("style") or "").strip()
                         if style and (style_hint in style or style in style_hint):
-                            file_path = entry.get("file_path")
-                            if file_path and Path(file_path).exists():
-                                return Path(file_path)
+                            resolved = resolve_audio_library_file_path(
+                                entry.get("file_path"),
+                                base_dir,
+                            )
+                            if resolved:
+                                return resolved
                 if mood_hint:
                     for entry in index_data:
                         if str(entry.get("mood") or "").strip().lower() == mood_hint:
-                            file_path = entry.get("file_path")
-                            if file_path and Path(file_path).exists():
-                                return Path(file_path)
+                            resolved = resolve_audio_library_file_path(
+                                entry.get("file_path"),
+                                base_dir,
+                            )
+                            if resolved:
+                                return resolved
                 for entry in index_data:
-                    file_path = entry.get("file_path")
-                    if file_path and Path(file_path).exists():
-                        return Path(file_path)
+                    resolved = resolve_audio_library_file_path(
+                        entry.get("file_path"),
+                        base_dir,
+                    )
+                    if resolved:
+                        return resolved
 
         for candidate in (base_dir / "music_cache").rglob("*.mp3"):
             return candidate
@@ -112,6 +125,9 @@ class MusicMixin:
             return audio_data
         
         mixed_audio = audio_data
+        base_dir = get_audio_library_dir()
+        applied_count = 0
+        skipped_count = 0
         
         # 🆕 检查是否启用智能音量平衡
         audio_fx = getattr(self, "_audio_fx_config", None) or {}
@@ -164,13 +180,12 @@ class MusicMixin:
             bgm_volume_offset -= 3
             
             if not file_ref:
+                skipped_count += 1
                 continue
             
             music_path = Path(file_ref)
             if not music_path.is_absolute():
                 # 相对路径：相对于 audio_library 根目录
-                # engine.py 在 backend/app/services/audiobook/ 下，parents[3] = backend/
-                base_dir = Path(__file__).resolve().parents[3] / "data" / "audio_library"
                 music_path = base_dir / file_ref
             
             if not music_path.exists():
@@ -184,6 +199,7 @@ class MusicMixin:
                     music_path = resolved
             if not music_path.exists():
                 logger.warning(f"⚠️ 配乐文件不存在: {music_path}")
+                skipped_count += 1
                 continue
             
             try:
@@ -220,9 +236,12 @@ class MusicMixin:
                     dialogue_volume_reduction=float(dialogue_volume_reduction or 0.0),
                 )
                 logger.info(f"✅ 已叠加配乐: {music_path.name}, 音量偏移={bgm_volume_offset:.1f}dB")
+                applied_count += 1
             except Exception as e:
                 logger.warning(f"⚠️ 叠加配乐失败 {music_path}: {e}")
-        
+                skipped_count += 1
+
+        logger.info("🎼 配乐时间线处理完成: applied=%s skipped=%s", applied_count, skipped_count)
         return mixed_audio
     
     def _calculate_intelligent_bgm_volume(

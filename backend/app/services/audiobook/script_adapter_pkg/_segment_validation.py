@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import logging
 import re
-from dataclasses import asdict, is_dataclass
+from dataclasses import asdict, is_dataclass, replace
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
+from ..pause_tags import strip_spoken_pause_directives
 from ._dataclasses import MusicCue, ScriptSegment, SoundEffect
 
 logger = logging.getLogger(__name__)
@@ -12,6 +13,9 @@ logger = logging.getLogger(__name__)
 NARRATOR = "\u65c1\u767d"
 
 VALID_SEGMENT_TYPES = {"narration", "dialogue", "monologue"}
+AUDIOBOOK_NARRATION_MAX_CHARS = 140
+AUDIOBOOK_DIALOGUE_MAX_CHARS = 120
+AUDIOBOOK_MIN_SPLIT_CHARS = 32
 SEGMENT_TYPE_ALIASES = {
     "narrator": "narration",
     "aside": "narration",
@@ -104,6 +108,9 @@ _CJK_SPACE_BEFORE_PUNCTUATION_RE = re.compile(r"(?<=[\u3400-\u4dbf\u4e00-\u9fff]
 _CJK_SPACE_BETWEEN_TEXT_RE = re.compile(r"(?<=[\u3400-\u4dbf\u4e00-\u9fff。！？；：，、])\s+(?=[\u3400-\u4dbf\u4e00-\u9fff])")
 _SPACE_BEFORE_BREAK_RE = re.compile(r"(?<=[\u3400-\u4dbf\u4e00-\u9fff。！？；：，、])\s+(?=<break\b)", re.IGNORECASE)
 _SPACE_AFTER_BREAK_RE = re.compile(r"(?<=>)\s+(?=[\u3400-\u4dbf\u4e00-\u9fff])")
+_AUDIOBOOK_SENTENCE_BOUNDARIES = set("。！？!?；;")
+_AUDIOBOOK_PHRASE_BOUNDARIES = set("，、,:：；;——…")
+_AUDIOBOOK_CLOSING_PUNCTUATION = set("\"'”’）】》」』")
 _BRACKETED_STAGE_DIRECTION_RE = re.compile(r"[\[【（(]\s*([^\]】）)]{1,32})\s*[\]】）)]")
 _PRESERVED_BRACKET_TAG_RE = re.compile(r"^(?:pause|break)(?:\s*:.*)?$", re.IGNORECASE)
 
@@ -130,12 +137,90 @@ _STAGE_DIRECTION_HINTS: Tuple[Tuple[Tuple[str, ...], str, str], ...] = (
 )
 _TEXT_EMOTION_HINTS: Tuple[Tuple[str, Tuple[str, ...]], ...] = (
     ("whisper", ("低声", "轻声", "小声", "耳语", "压低声音", "whisper", "whispered", "murmured", "softly", "quietly")),
+    ("mysterious", ("裂隙", "浊气", "鬼爪", "诡异", "未知势力", "看不见", "嵌在肉里的嘴", "阴冷", "幽暗", "寒意")),
     ("fearful", ("救命", "别过来", "不要过来", "我害怕", "好可怕", "恐惧", "惊恐", "颤抖", "terrified", "scared", "afraid", "frightened", "panic")),
     ("angry", ("滚出去", "闭嘴", "混蛋", "该死", "住手", "你疯了", "可恶", "愤怒", "怒吼", "angry", "furious", "enraged", "shouted")),
     ("sad", ("对不起", "眼泪", "泪水", "哭了", "哽咽", "抽泣", "悲伤", "心碎", "sobbing", "crying", "tears", "heartbroken")),
     ("happy", ("太好了", "真好", "哈哈", "开心", "高兴", "笑了", "delighted", "joyful", "happy", "laughed", "chuckled")),
     ("excited", ("快看", "成功了", "不可思议", "太棒了", "激动", "兴奋", "amazing", "incredible", "fantastic")),
 )
+_SPEECH_CUES: Tuple[str, ...] = tuple(
+    sorted(
+        {
+            "压低声音说",
+            "压低声音道",
+            "低声说道",
+            "低声道",
+            "低声说",
+            "轻声道",
+            "轻声说",
+            "小声道",
+            "小声说",
+            "喃喃道",
+            "喃喃说",
+            "怒吼道",
+            "怒吼",
+            "吼道",
+            "喝道",
+            "喝问",
+            "厉声道",
+            "沉声道",
+            "颤声道",
+            "嘶声道",
+            "冷笑道",
+            "苦笑道",
+            "笑道",
+            "问道",
+            "说道",
+            "答道",
+            "开口道",
+            "开口",
+            "说",
+            "道",
+            "问",
+            "喊",
+            "叫",
+            "吼",
+            "喝",
+            "答",
+        },
+        key=len,
+        reverse=True,
+    )
+)
+_SPEAKER_TRAILING_ADVERB_RE = re.compile(
+    r"(?:压低声音|低声|轻声|小声|冷冷|淡淡|缓缓|颤声|沉声|厉声|沙哑|忽然|突然|喃喃|冷笑|苦笑|怒|嘶哑|平静|颤抖着)(?:地)?$"
+)
+_QUOTED_TEXT_RE = re.compile(r"[“\"「『](?P<quote>[^”\"」』]{1,200})[”\"」』]")
+_AMBIGUOUS_SPEAKER_CANDIDATES = {
+    "他",
+    "她",
+    "它",
+    "我",
+    "你",
+    "他们",
+    "她们",
+    "我们",
+    "你们",
+    "有人",
+    "那人",
+    "对方",
+    "男人",
+    "女人",
+    "少年",
+    "少女",
+    "老人",
+    "孩子",
+}
+_NARRATION_PERFORMANCE_NOTES = {
+    "mysterious": "旁白保持低沉克制但有压迫感，关键意象处放慢并加重，句尾留悬念停顿",
+    "tense": "旁白保持紧张推进感，动作转折处收短句并加重，句尾留出呼吸停顿",
+    "fearful": "旁白压低声线，带轻微不安和压迫感，危险意象处放慢，句尾留悬念停顿",
+    "sad": "旁白放慢语速，声线更低更沉，重读失落意象，句尾留出沉默感",
+    "angry": "旁白保持克制的怒意和推进感，重点动词加重，避免过度喊叫",
+    "surprised": "旁白略微提起语势，突发信息前后留短停顿，突出转折感",
+    "excited": "旁白加快少许语速，保持明亮推进感，关键结果处加重并短暂停顿",
+}
 
 
 def build_script_segments(
@@ -147,7 +232,7 @@ def build_script_segments(
     for index, raw_segment in enumerate(raw_segments or []):
         segment = build_script_segment(raw_segment, index=index)
         if segment is not None:
-            segments.append(segment)
+            segments.extend(split_long_script_segment(segment))
 
     if not segments and str(fallback_text or "").strip():
         fallback_segment = build_script_segment(
@@ -161,7 +246,7 @@ def build_script_segments(
             index=0,
         )
         if fallback_segment is not None:
-            segments.append(fallback_segment)
+            segments.extend(split_long_script_segment(fallback_segment))
 
     return segments
 
@@ -171,6 +256,163 @@ def build_script_segment(raw_segment: Any, *, index: int = 0) -> Optional[Script
     if data is None:
         return None
     return ScriptSegment(**data)
+
+
+def split_long_script_segment(segment: ScriptSegment) -> List[ScriptSegment]:
+    """将过长剧本片段拆成更适合播讲的有声单元。"""
+    max_chars = _max_spoken_chars_for_segment(segment)
+    text = _clean_text(segment.text)
+    if len(text) <= max_chars:
+        return [segment]
+
+    chunks = _split_spoken_text_for_audiobook(text, max_chars=max_chars)
+    if len(chunks) <= 1:
+        return [segment]
+
+    split_segments: List[ScriptSegment] = []
+    source_voice_params = dict(segment.voice_params or {})
+    effective_pause_before = _coerce_float(
+        source_voice_params.get("pause_before", segment.pause_before),
+        segment.pause_before,
+        0.0,
+        2.0,
+    )
+    effective_pause_after = _coerce_float(
+        source_voice_params.get("pause_after", segment.pause_after),
+        segment.pause_after,
+        0.0,
+        2.0,
+    )
+    for chunk_index, chunk_text in enumerate(chunks):
+        is_first = chunk_index == 0
+        is_last = chunk_index == len(chunks) - 1
+        pause_before = effective_pause_before if is_first else 0.0
+        pause_after = effective_pause_after if is_last else max(0.15, min(effective_pause_after or 0.25, 0.45))
+        voice_params = dict(source_voice_params)
+        voice_params["pause_before"] = pause_before
+        voice_params["pause_after"] = pause_after
+        reason_suffix = f"auto_split_long_segment:{len(text)}->{len(chunks)}"
+        split_segments.append(
+            replace(
+                segment,
+                text=chunk_text,
+                pause_before=pause_before,
+                pause_after=pause_after,
+                voice_params=voice_params,
+                sound_effects=list(segment.sound_effects or []) if is_first else [],
+                music_cue=segment.music_cue if is_first else None,
+                sound_effects_simple=list(segment.sound_effects_simple or []) if is_first else [],
+                music_cue_simple=segment.music_cue_simple if is_first else "",
+                adaptation_reason=(
+                    f"{segment.adaptation_reason}; {reason_suffix}"
+                    if segment.adaptation_reason
+                    else reason_suffix
+                ),
+            )
+        )
+
+    logger.info(
+        "有声剧本长片段已自动拆分: type=%s speaker=%s length=%s chunks=%s",
+        segment.type,
+        segment.speaker,
+        len(text),
+        len(split_segments),
+    )
+    return split_segments
+
+
+def _max_spoken_chars_for_segment(segment: ScriptSegment) -> int:
+    if segment.type == "narration":
+        return AUDIOBOOK_NARRATION_MAX_CHARS
+    return AUDIOBOOK_DIALOGUE_MAX_CHARS
+
+
+def _split_spoken_text_for_audiobook(text: str, *, max_chars: int) -> List[str]:
+    source = _clean_text(text)
+    if not source or len(source) <= max_chars:
+        return [source] if source else []
+
+    units = _split_spoken_text_units(source)
+    chunks: List[str] = []
+    current = ""
+    for unit in units:
+        if not unit:
+            continue
+        if len(unit) > max_chars:
+            if current.strip():
+                chunks.append(current.strip())
+                current = ""
+            chunks.extend(_split_long_spoken_unit(unit, max_chars=max_chars))
+            continue
+        if current and len(current) + len(unit) > max_chars:
+            chunks.append(current.strip())
+            current = unit.lstrip()
+        else:
+            current += unit
+    if current.strip():
+        chunks.append(current.strip())
+
+    if len(chunks) >= 2 and len(chunks[-1]) < AUDIOBOOK_MIN_SPLIT_CHARS:
+        merged_tail = f"{chunks[-2]}{chunks[-1]}"
+        if len(merged_tail) <= max_chars:
+            chunks[-2:] = [merged_tail]
+
+    return chunks or [source]
+
+
+def _split_spoken_text_units(text: str) -> List[str]:
+    units: List[str] = []
+    start = 0
+    index = 0
+    while index < len(text):
+        char = text[index]
+        is_boundary = (
+            char in _AUDIOBOOK_SENTENCE_BOUNDARIES
+            or char in _AUDIOBOOK_PHRASE_BOUNDARIES
+            or char in {"\n", "\r"}
+        )
+        if not is_boundary:
+            index += 1
+            continue
+
+        end = index + 1
+        while end < len(text) and text[end] in _AUDIOBOOK_CLOSING_PUNCTUATION:
+            end += 1
+        while end < len(text) and text[end].isspace():
+            end += 1
+        units.append(text[start:end])
+        start = end
+        index = end
+
+    if start < len(text):
+        units.append(text[start:])
+    return units or [text]
+
+
+def _split_long_spoken_unit(text: str, *, max_chars: int) -> List[str]:
+    remaining = _clean_text(text)
+    if not remaining:
+        return []
+
+    chunks: List[str] = []
+    while len(remaining) > max_chars:
+        cut_index = _find_spoken_cut_index(remaining, max_chars=max_chars)
+        chunks.append(remaining[:cut_index].strip())
+        remaining = remaining[cut_index:].lstrip()
+    if remaining:
+        chunks.append(remaining.strip())
+    return chunks
+
+
+def _find_spoken_cut_index(text: str, *, max_chars: int) -> int:
+    lower_bound = max(AUDIOBOOK_MIN_SPLIT_CHARS, min(max_chars // 2, max_chars - 1))
+    window = text[:max_chars]
+    for pattern in (r"[。！？!?；;，、,:：]", r"\s+"):
+        matches = list(re.finditer(pattern, window))
+        for match in reversed(matches):
+            if match.end() >= lower_bound:
+                return match.end()
+    return max_chars
 
 
 def sanitize_script_segment_dict(raw_segment: Any, *, index: int = 0) -> Optional[Dict[str, Any]]:
@@ -184,18 +426,30 @@ def sanitize_script_segment_dict(raw_segment: Any, *, index: int = 0) -> Optiona
 
     original_text = _clean_text(raw_data.get("original_text"))
     text = _clean_text(raw_data.get("text"))
-    original_text, _, _ = _sanitize_spoken_markup(original_text)
-    text, markup_note, suggested_emotion = _sanitize_spoken_markup(text)
+    original_text, _, _, _ = _sanitize_spoken_markup(original_text)
+    text, markup_note, suggested_emotion, markup_pause_after_ms = _sanitize_spoken_markup(text)
     if _looks_like_performance_direction(text) and original_text:
         text = original_text
 
     if not text or _is_punctuation_only(text):
-        logger.warning("Skip empty script segment at %s", index)
-        return None
+        if original_text and not _is_punctuation_only(original_text):
+            text = original_text
+        else:
+            logger.warning("Skip empty script segment at %s", index)
+            return None
 
     segment_type = _normalize_segment_type(raw_data.get("type"))
     speaker = _normalize_speaker(raw_data.get("speaker"))
-    if segment_type == "dialogue" and speaker == NARRATOR:
+    dialogue_speaker = ""
+    dialogue_hint_emotion = ""
+    if speaker == NARRATOR and original_text:
+        dialogue_speaker = _extract_dialogue_speaker_from_original(original_text, text)
+
+    if dialogue_speaker:
+        segment_type = "dialogue"
+        speaker = dialogue_speaker
+        dialogue_hint_emotion = _infer_dialogue_emotion_from_original(original_text, text)
+    elif segment_type == "dialogue" and speaker == NARRATOR:
         segment_type = "narration"
 
     raw_emotion = raw_data.get("emotion")
@@ -204,6 +458,8 @@ def sanitize_script_segment_dict(raw_segment: Any, *, index: int = 0) -> Optiona
         emotion = suggested_emotion
     elif not str(raw_emotion or "").strip() or emotion == "neutral":
         inferred_emotion = _infer_spoken_text_emotion(text)
+        if not inferred_emotion and dialogue_hint_emotion:
+            inferred_emotion = dialogue_hint_emotion
         if inferred_emotion:
             emotion = inferred_emotion
     instruct_emotion = _normalize_instruct_emotion(raw_data.get("instruct_emotion"))
@@ -212,9 +468,20 @@ def sanitize_script_segment_dict(raw_segment: Any, *, index: int = 0) -> Optiona
     pause_after = _coerce_float(raw_data.get("pause_after"), 0.0, 0.0, 2.0)
     voice_params.setdefault("pause_before", pause_before)
     voice_params.setdefault("pause_after", pause_after)
+    if markup_pause_after_ms is not None:
+        voice_params.setdefault("pause_after_ms", markup_pause_after_ms)
     performance_notes = _clean_text(raw_data.get("performance_notes"))
     if markup_note:
         performance_notes = _append_performance_note(performance_notes, markup_note)
+    if segment_type == "narration" and speaker == NARRATOR:
+        emotion, instruct_emotion, performance_notes = _enrich_narration_delivery(
+            text,
+            emotion,
+            instruct_emotion,
+            performance_notes,
+        )
+    elif not instruct_emotion:
+        instruct_emotion = _instruct_emotion_for_emotion(emotion)
 
     return {
         "type": segment_type,
@@ -258,6 +525,88 @@ def _normalize_instruct_emotion(value: Any) -> str:
     return normalized if normalized in VALID_INSTRUCT_EMOTIONS else "neutral"
 
 
+def _extract_dialogue_speaker_from_original(original_text: str, spoken_text: str) -> str:
+    original = _clean_text(original_text)
+    spoken = _normalize_dialogue_text_for_match(spoken_text)
+    if not original or not spoken:
+        return ""
+
+    for quote_match in _QUOTED_TEXT_RE.finditer(original):
+        quote = _normalize_dialogue_text_for_match(quote_match.group("quote"))
+        if not quote or not _dialogue_text_matches(spoken, quote):
+            continue
+
+        before = original[: quote_match.start()]
+        speaker = _extract_speaker_before_quote(before)
+        if speaker:
+            return speaker
+
+    return ""
+
+
+def _infer_dialogue_emotion_from_original(original_text: str, spoken_text: str) -> str:
+    original = _clean_text(original_text)
+    spoken = _normalize_dialogue_text_for_match(spoken_text)
+    if not original or not spoken:
+        return ""
+
+    for quote_match in _QUOTED_TEXT_RE.finditer(original):
+        quote = _normalize_dialogue_text_for_match(quote_match.group("quote"))
+        if not quote or not _dialogue_text_matches(spoken, quote):
+            continue
+
+        before = original[: quote_match.start()]
+        hint = _stage_direction_hint(before)
+        if hint and hint[0] in VALID_EMOTIONS:
+            return hint[0]
+
+    return ""
+
+
+def _extract_speaker_before_quote(prefix: str) -> str:
+    value = _clean_text(prefix)
+    if not value:
+        return ""
+    value = re.split(r"[。！？!?；;\n]", value)[-1].strip()
+    value = value.rstrip("，,、：:；;。.!！?？")
+    if not value:
+        return ""
+
+    for cue in _SPEECH_CUES:
+        if not value.endswith(cue):
+            continue
+        candidate = value[: -len(cue)].strip()
+        candidate = _SPEAKER_TRAILING_ADVERB_RE.sub("", candidate).strip()
+        candidate = re.split(r"[，,、：:；;\s]", candidate)[-1].strip()
+        speaker = _normalize_speaker(candidate)
+        if _is_clear_character_speaker(speaker):
+            return speaker
+    return ""
+
+
+def _normalize_dialogue_text_for_match(value: Any) -> str:
+    text = _clean_text(value)
+    text = text.strip("\"'“”‘’「」『』")
+    return re.sub(r"[\s，,。.!！?？；;：:\"'“”‘’「」『』、…—\-]+", "", text)
+
+
+def _dialogue_text_matches(spoken_text: str, quoted_text: str) -> bool:
+    if not spoken_text or not quoted_text:
+        return False
+    return spoken_text == quoted_text or spoken_text in quoted_text or quoted_text in spoken_text
+
+
+def _is_clear_character_speaker(speaker: str) -> bool:
+    speaker = _normalize_speaker(speaker)
+    if not speaker or speaker == NARRATOR:
+        return False
+    if speaker in _AMBIGUOUS_SPEAKER_CANDIDATES:
+        return False
+    if len(speaker) > 12:
+        return False
+    return bool(re.search(r"[\u3400-\u4dbf\u4e00-\u9fffA-Za-z]", speaker))
+
+
 def _infer_spoken_text_emotion(text: str) -> str:
     normalized = _clean_text(text).lower()
     if not normalized:
@@ -271,6 +620,57 @@ def _infer_spoken_text_emotion(text: str) -> str:
     if re.search(r"[!！]{2,}", normalized):
         return "excited"
     return ""
+
+
+def _enrich_narration_delivery(
+    text: str,
+    emotion: str,
+    instruct_emotion: str,
+    performance_notes: str,
+) -> Tuple[str, str, str]:
+    effective_emotion = emotion or "neutral"
+    if effective_emotion in {"neutral", "calm"}:
+        inferred = _infer_spoken_text_emotion(text)
+        if inferred:
+            effective_emotion = inferred
+
+    if not instruct_emotion:
+        instruct_emotion = _instruct_emotion_for_emotion(effective_emotion)
+
+    default_note = _NARRATION_PERFORMANCE_NOTES.get(effective_emotion, "")
+    if default_note and _should_add_narration_performance_note(performance_notes):
+        performance_notes = _append_performance_note(performance_notes, default_note)
+
+    return effective_emotion, instruct_emotion, performance_notes
+
+
+def _instruct_emotion_for_emotion(emotion: str) -> str:
+    normalized = _normalize_emotion(emotion)
+    if normalized in {"tense", "nervous", "fearful", "mysterious", "whisper"}:
+        return "fearful" if normalized != "whisper" else "neutral"
+    if normalized in {"sad", "solemn"}:
+        return "sad"
+    if normalized in {"angry", "shout"}:
+        return "angry"
+    if normalized in {"happy", "joyful", "excited"}:
+        return "happy"
+    if normalized == "surprised":
+        return "surprised"
+    if normalized == "disgusted":
+        return "disgusted"
+    return "neutral" if normalized else ""
+
+
+def _should_add_narration_performance_note(performance_notes: str) -> bool:
+    value = _clean_text(performance_notes)
+    if not value:
+        return True
+    if len(value) < 12:
+        return True
+    generic_tokens = ("自然", "平稳", "正常", "旁白", "讲述")
+    return any(token in value for token in generic_tokens) and not any(
+        token in value for token in ("压迫", "停顿", "加重", "放慢", "语速", "重读")
+    )
 
 
 def _contains_emotion_keyword(normalized: str, compact: str, keyword: str) -> bool:
@@ -381,11 +781,15 @@ def _looks_like_performance_direction(text: str) -> bool:
     value = str(text or "").strip()
     if not value:
         return False
+    pause_result = strip_spoken_pause_directives(value)
+    if pause_result.applied and not pause_result.text:
+        return True
     starts_like_direction = value.startswith(
         (
             "\u65c1\u767d\u5c06",
             "\u65c1\u767d\u4ee5",
             "\u65c1\u767d\u7528",
+            "\u65c1\u767d\u505c\u987f",
             "\u8bf7\u4ee5",
         )
     )
@@ -409,10 +813,10 @@ def _clean_text(value: Any) -> str:
     return re.sub(r"\s+", " ", str(value or "")).strip()
 
 
-def _sanitize_spoken_markup(text: str) -> Tuple[str, str, str]:
+def _sanitize_spoken_markup(text: str) -> Tuple[str, str, str, Optional[int]]:
     value = str(text or "")
     if not value:
-        return "", "", ""
+        return "", "", "", None
 
     value = _HTML_ENTITY_TAG_RE.sub(lambda match: _html_unescape_minimal(match.group(0)), value)
     value = _THINKING_TAG_BLOCK_RE.sub(" ", value)
@@ -446,6 +850,12 @@ def _sanitize_spoken_markup(text: str) -> Tuple[str, str, str]:
 
     value = _XML_LIKE_TAG_RE.sub(strip_tag, value)
 
+    pause_result = strip_spoken_pause_directives(value)
+    value = pause_result.text
+    natural_pause_after_ms = pause_result.pause_after_ms
+    if pause_result.applied and "停顿" not in removed_emotion_notes:
+        removed_emotion_notes.append("停顿")
+
     value, stage_notes, stage_emotion = _strip_bracketed_stage_directions(value)
     for note in stage_notes:
         if note not in removed_emotion_notes:
@@ -460,7 +870,7 @@ def _sanitize_spoken_markup(text: str) -> Tuple[str, str, str]:
     note = ""
     if removed_emotion_notes:
         note = "保留" + "、".join(removed_emotion_notes) + "的表演意图，不要读出标签文字"
-    return value, note, suggested_emotion
+    return value, note, suggested_emotion, natural_pause_after_ms
 
 
 def _strip_bracketed_stage_directions(text: str) -> Tuple[str, List[str], str]:

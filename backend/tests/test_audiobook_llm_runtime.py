@@ -306,6 +306,23 @@ def test_tts_batch_item_preserves_explicit_language_type():
     assert "language_type_auto_detected" not in item["voice_params"]
 
 
+def test_tts_batch_item_strips_spoken_pause_directives_before_synthesis():
+    from app.services.audiobook.engine_pkg._tts_mixin import TTSMixin
+
+    segment = SimpleNamespace(
+        text="必须走。（停顿一秒）继续。",
+        voice_params={},
+        emotion="neutral",
+    )
+
+    item = TTSMixin()._build_tts_batch_item(segment)
+
+    assert item["text"] == "必须走。继续。"
+    assert item["voice_params"]["pause_after_ms"] == 1000
+    assert item["voice_params"]["pause_tag_applied"] is True
+    assert "停顿" not in item["text"]
+
+
 def test_qwen_language_detection_handles_non_chinese_scripts():
     from app.services.audiobook.tts_language import detect_qwen_language_type
 

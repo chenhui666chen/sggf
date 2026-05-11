@@ -13,7 +13,7 @@ import {
 } from '@mui/material'
 import MoreVertIcon from '@mui/icons-material/MoreVert'
 
-import { audiobookColors } from './audiobookTheme'
+import { audiobookButtonSx, audiobookColors } from './audiobookTheme'
 import type { Chapter } from './types'
 
 interface ChapterSelectionPanelProps {
@@ -41,6 +41,7 @@ const ChapterSelectionPanel = ({
         variant="outlined"
         size="small"
         onClick={onToggleAll}
+        sx={audiobookButtonSx.neutralOutlined}
       >
         {selectedChapters.length === chapters.length ? '取消全选' : '全选'}
       </Button>
@@ -64,7 +65,7 @@ const ChapterSelectionPanel = ({
                 edge="end"
                 size="small"
                 onClick={(event) => onOpenChapterMenu(event, chapter)}
-                sx={{ color: audiobookColors.neutralMuted }}
+                sx={audiobookButtonSx.neutralIcon}
               >
                 <MoreVertIcon fontSize="small" />
               </IconButton>

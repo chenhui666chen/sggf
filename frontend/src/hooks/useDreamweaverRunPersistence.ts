@@ -2,6 +2,7 @@ import { useEffect, useMemo } from 'react'
 
 import type { QualityMode } from '@/types/dreamweaver'
 import { writePersistedDreamWeaverRun } from '@/utils/dreamweaver'
+import type { UseDreamweaverRunConfigReturn } from './useDreamweaverRunConfig'
 
 export interface UseDreamweaverRunPersistenceParams {
   selectedProjectId: number | null
@@ -9,22 +10,7 @@ export interface UseDreamweaverRunPersistenceParams {
   resultRunId?: string | null
   taskId: string | null
   taskStatus: string | null
-  qualityMode: QualityMode
-  qcAllowFail: boolean
-  smartTuning: boolean
-  videoRequireConfirmation: boolean
-  promptReviewRequired: boolean
-  stylePreset: string
-  imageRatio: string
-  imageResolution: string
-  imageModel: string
-  videoModel: string
-  videoEditModel: string
-  visionModel: string
-  enableVideoEdit: boolean
-  enableVisionReview: boolean
-  enableSafetyAudit: boolean
-  safetyFailPolicy: 'warn' | 'block'
+  config: UseDreamweaverRunConfigReturn
   selectedChapterIds: number[]
 }
 
@@ -39,24 +25,30 @@ export function useDreamweaverRunPersistence({
   resultRunId,
   taskId,
   taskStatus,
-  qualityMode,
-  qcAllowFail,
-  smartTuning,
-  videoRequireConfirmation,
-  promptReviewRequired,
-  stylePreset,
-  imageRatio,
-  imageResolution,
-  imageModel,
-  videoModel,
-  videoEditModel,
-  visionModel,
-  enableVideoEdit,
-  enableVisionReview,
-  enableSafetyAudit,
-  safetyFailPolicy,
+  config,
   selectedChapterIds,
 }: UseDreamweaverRunPersistenceParams): UseDreamweaverRunPersistenceReturn {
+  const {
+    highQuality,
+    qcAllowFail,
+    smartTuning,
+    videoRequireConfirmation,
+    promptReviewRequired,
+    stylePreset,
+    imageRatio,
+    imageResolution,
+    imageModel,
+    videoModel,
+    videoEditModel,
+    visionModel,
+    enableVideoEdit,
+    enableVisionReview,
+    enableSafetyAudit,
+    safetyFailPolicy,
+  } = config
+
+  const qualityMode: QualityMode = highQuality ? 'quality' : 'cost'
+
   const persistedRunId = useMemo(() => {
     return taskRunId || resultRunId || null
   }, [resultRunId, taskRunId])

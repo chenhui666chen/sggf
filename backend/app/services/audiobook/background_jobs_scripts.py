@@ -7,8 +7,10 @@ from typing import Any, Dict, List, Optional
 from app.db.base import SessionLocal
 from app.models.audiobook import AudiobookProject, ChapterAudio
 from app.models.character import Character
-from app.models.project import Chapter, Project
+from app.models.project import Project
+from app.services.audiobook.background_jobs_prefetch import prefetch_chapter_generation_records
 from app.services.audiobook.background_jobs_shared import create_background_engine, parse_duration_seconds
+from app.services.audiobook.project_audio_runtime import resolve_project_audio_runtime_config
 from app.services.audiobook.task_support import (
     StageTracker,
     serialize_dataclass_to_dict,
@@ -65,18 +67,27 @@ def _load_existing_voice_mapping(engine, audiobook_project: AudiobookProject) ->
     if not audiobook_project.voice_mapping:
         return
 
-    try:
-        existing_voice_mapping = audiobook_project.voice_mapping
-        if isinstance(existing_voice_mapping, str):
+    existing_voice_mapping = audiobook_project.voice_mapping
+    if isinstance(existing_voice_mapping, str):
+        try:
             existing_voice_mapping = json.loads(existing_voice_mapping)
-        if isinstance(existing_voice_mapping, dict) and existing_voice_mapping:
-            engine.voice_manager.load_from_db(existing_voice_mapping)
-            logger.info(
-                "💾 已从数据库加载音色分配: %s 个角色",
-                len(existing_voice_mapping),
-            )
+        except (json.JSONDecodeError, TypeError) as load_err:
+            logger.warning("⚠️ 从数据库加载音色分配失败: %s", load_err)
+            return
+
+    if not isinstance(existing_voice_mapping, dict) or not existing_voice_mapping:
+        return
+
+    try:
+        engine.voice_manager.load_from_db(existing_voice_mapping)
     except Exception as load_err:
         logger.warning("⚠️ 从数据库加载音色分配失败: %s", load_err)
+        return
+
+    logger.info(
+        "💾 已从数据库加载音色分配: %s 个角色",
+        len(existing_voice_mapping),
+    )
 
 
 def _apply_script_stage_project_audio_config(
@@ -86,34 +97,16 @@ def _apply_script_stage_project_audio_config(
     tts_model: str,
     character_profiles: List[Dict[str, Any]],
 ) -> None:
-    if not project or not project.audio_config:
-        return
-
-    try:
-        from app.services.audiobook.project_audio_config import parse_project_audio_config
-
-        config_data = parse_project_audio_config(project.audio_config or "")
-    except Exception as parse_err:
-        logger.warning("⚠️ 解析项目级音频配置失败: %s", parse_err)
-        config_data = {}
-
-    from app.services.audiobook.project_audio_config import (
-        get_audio_fx,
-        get_characters_for_model,
+    runtime_config = resolve_project_audio_runtime_config(
+        project,
+        tts_model=tts_model,
     )
+    effective_voice_mapping = runtime_config.voice_mapping
 
-    effective_voice_mapping = {}
-    for item in get_characters_for_model(config_data, tts_model):
+    for item in runtime_config.character_items:
         name = item.get("name")
         if not name:
             continue
-        effective_voice_mapping[name] = {
-            "voice_id": item.get("voice_id"),
-            "volume": item.get("volume", 50),
-            "speed": item.get("speed"),
-            "pitch": item.get("pitch"),
-            "tts_model": item.get("tts_model", tts_model),
-        }
         logger.info(
             "✅ [剧本阶段] 加载角色音配置: %s -> %s",
             name,
@@ -133,12 +126,11 @@ def _apply_script_stage_project_audio_config(
         except Exception as exc:
             logger.warning("⚠️ [剧本阶段] 应用角色音配置失败: %s", exc)
 
-    audio_fx = get_audio_fx(config_data)
-    if not audio_fx:
+    if not runtime_config.audio_fx:
         return
 
     try:
-        engine.apply_audio_fx_config(audio_fx)
+        engine.apply_audio_fx_config(runtime_config.audio_fx)
         logger.info("🎚 [剧本阶段] 已加载项目级音效/BGM 配置")
     except Exception as exc:
         logger.warning("⚠️ [剧本阶段] 应用项目级音效/BGM 配置失败: %s", exc)
@@ -153,6 +145,7 @@ async def generate_audiobook_scripts_background(
 ) -> None:
     """后台生成有声书【剧本+评审】任务（不执行 TTS 和混音）。"""
     db = SessionLocal()
+    db.expire_on_commit = False
     audiobook_project: Optional[AudiobookProject] = None
 
     try:
@@ -196,6 +189,14 @@ async def generate_audiobook_scripts_background(
         except Exception as exc:
             logger.warning("⚠️ [剧本阶段] 加载项目级音频配置失败: %s", exc)
 
+        generation_records = prefetch_chapter_generation_records(
+            db,
+            audiobook_project_id=audiobook_project_id,
+            chapter_ids=chapter_ids,
+        )
+        chapter_by_id = generation_records.chapter_by_id
+        chapter_audio_by_chapter_id = generation_records.chapter_audio_by_chapter_id
+
         for index, chapter_id in enumerate(chapter_ids, 1):
             try:
                 logger.info(
@@ -205,7 +206,7 @@ async def generate_audiobook_scripts_background(
                     chapter_id,
                 )
 
-                chapter = db.query(Chapter).filter(Chapter.id == chapter_id).first()
+                chapter = chapter_by_id.get(chapter_id)
                 if not chapter:
                     logger.warning("⚠️ 章节不存在: %s", chapter_id)
                     audiobook_project.failed_chapters += 1
@@ -221,10 +222,7 @@ async def generate_audiobook_scripts_background(
                     )
                     continue
 
-                chapter_audio = db.query(ChapterAudio).filter(
-                    ChapterAudio.audiobook_project_id == audiobook_project_id,
-                    ChapterAudio.chapter_id == chapter_id,
-                ).first()
+                chapter_audio = chapter_audio_by_chapter_id.get(chapter_id)
 
                 if chapter_audio and chapter_audio.script_json and not force_regenerate:
                     if chapter_audio.script_status in ["reviewed", "approved"]:
@@ -277,6 +275,7 @@ async def generate_audiobook_scripts_background(
                         chapter_id=chapter_id,
                     )
                     db.add(chapter_audio)
+                    chapter_audio_by_chapter_id[chapter_id] = chapter_audio
 
                 stats = result.get("stats", {})
                 parse_stats = stats.get("parse_stats", {})

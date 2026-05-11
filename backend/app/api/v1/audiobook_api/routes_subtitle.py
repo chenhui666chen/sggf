@@ -7,32 +7,32 @@ from pathlib import Path
 
 from fastapi import Depends, HTTPException, Query, Request
 from fastapi.responses import FileResponse
-from sqlalchemy.orm import Session
 
-from app.core.security import get_current_user
-from app.db.base import get_db
-from app.models.user import User
-from app.models.project import Project, Chapter
-from app.models.audiobook import AudiobookProject, ChapterAudio
 from app.schemas.audiobook import (
     GenerationCheckpointResponse,
 )
+from app.api.v1.audiobook_api.dependencies import (
+    OwnedAudiobookProject,
+    get_active_chapter_audio_for_project,
+    get_owned_audiobook_project,
+)
 from app.services.audiobook.safe_filename import build_safe_filename
 from app.services.audiobook.repository import (
+    ChapterAudioRepository,
     ChapterAudioRunRepository,
+    ChapterRepository,
 )
 from app.services.audiobook.task_support import (
     build_generation_checkpoint_payload as _build_generation_checkpoint_payload,
     build_run_checkpoint_document as _build_run_checkpoint_document,
     enqueue_audiobook_task as _enqueue_audiobook_task,
     ensure_audiobook_points_precheck_passed as _ensure_audiobook_points_precheck_passed,
+    safe_record_audiobook_billing_freeze as _safe_record_audiobook_billing_freeze,
 )
+from app.services.audiobook.task_trace import build_audiobook_trace_context
 from app.services.audiobook.tts_model_ids import normalize_audiobook_tts_model
 from app.services.points_task_precheck import (
     build_audiobook_task_points_precheck,
-)
-from app.services.user_center_points_events import (
-    record_audiobook_billing_freeze,
 )
 from app.utils.datetime_utils import utc_now
 
@@ -40,34 +40,49 @@ from app.api.v1.audiobook_api import router
 
 logger = logging.getLogger(__name__)
 
+
+def _parse_browser_player_segments(
+    script_json: str,
+    *,
+    audiobook_project_id: int,
+    chapter_id: int,
+) -> list:
+    try:
+        segments = json.loads(script_json)
+    except (json.JSONDecodeError, TypeError) as exc:
+        logger.warning(
+            "浏览器播放器忽略无效章节剧本 JSON: audiobook_project_id=%s chapter_id=%s error=%s",
+            audiobook_project_id,
+            chapter_id,
+            exc,
+        )
+        return []
+
+    if isinstance(segments, list):
+        return segments
+
+    logger.warning(
+        "浏览器播放器忽略非数组章节剧本 JSON: audiobook_project_id=%s chapter_id=%s payload_type=%s",
+        audiobook_project_id,
+        chapter_id,
+        type(segments).__name__,
+    )
+    return []
+
+
 @router.get("/projects/{audiobook_project_id:int}/chapters/{chapter_id:int}/subtitle")
 async def get_chapter_subtitle(
     audiobook_project_id: int,
     chapter_id: int,
     format: str = Query("srt", pattern="^(srt|vtt|ass|labels|audacity)$"),
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    owned: OwnedAudiobookProject = Depends(get_owned_audiobook_project),
 ):
     """获取章节字幕文件"""
-    audiobook_project = db.query(AudiobookProject).filter(
-        AudiobookProject.id == audiobook_project_id
-    ).first()
-    if not audiobook_project:
-        raise HTTPException(status_code=404, detail="有声书项目不存在")
-    
-    project = db.query(Project).filter(
-        Project.id == audiobook_project.project_id,
-        Project.user_id == current_user.id,
-    ).first()
-    if not project:
-        raise HTTPException(status_code=403, detail="无权限访问")
-    
-    chapter_audio = db.query(ChapterAudio).filter(
-        ChapterAudio.audiobook_project_id == audiobook_project_id,
-        ChapterAudio.chapter_id == chapter_id,
-    ).first()
-    if not chapter_audio:
-        raise HTTPException(status_code=404, detail="章节音频记录不存在")
+    chapter_audio = get_active_chapter_audio_for_project(
+        db=owned.db,
+        audiobook_project_id=audiobook_project_id,
+        chapter_id=chapter_id,
+    )
     
     if not chapter_audio.subtitle_path:
         raise HTTPException(status_code=404, detail="字幕文件不存在")
@@ -104,32 +119,19 @@ async def get_chapter_subtitle(
 async def get_generation_checkpoint(
     audiobook_project_id: int,
     chapter_id: int,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    owned: OwnedAudiobookProject = Depends(get_owned_audiobook_project),
 ):
     """获取生成断点信息（用于断点续传）"""
-    audiobook_project = db.query(AudiobookProject).filter(
-        AudiobookProject.id == audiobook_project_id
-    ).first()
-    if not audiobook_project:
-        raise HTTPException(status_code=404, detail="有声书项目不存在")
-    
-    project = db.query(Project).filter(
-        Project.id == audiobook_project.project_id,
-        Project.user_id == current_user.id,
-    ).first()
-    if not project:
-        raise HTTPException(status_code=403, detail="无权限访问")
-    
-    chapter_audio = db.query(ChapterAudio).filter(
-        ChapterAudio.audiobook_project_id == audiobook_project_id,
-        ChapterAudio.chapter_id == chapter_id,
-    ).first()
+    chapter_audio = ChapterAudioRepository.get_active_by_project_chapter(
+        owned.db,
+        audiobook_project_id=audiobook_project_id,
+        chapter_id=chapter_id,
+    )
     return _build_generation_checkpoint_payload(
         chapter_id=chapter_id,
         chapter_audio=chapter_audio,
         run_type=None,
-        db=db,
+        db=owned.db,
         audiobook_project_id=audiobook_project_id,
     )
 
@@ -139,29 +141,17 @@ async def resume_chapter_generation(
     audiobook_project_id: int,
     chapter_id: int,
     raw_request: Request,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    owned: OwnedAudiobookProject = Depends(get_owned_audiobook_project),
 ):
     """从断点继续生成章节音频"""
-    audiobook_project = db.query(AudiobookProject).filter(
-        AudiobookProject.id == audiobook_project_id
-    ).first()
-    if not audiobook_project:
-        raise HTTPException(status_code=404, detail="有声书项目不存在")
-    
-    project = db.query(Project).filter(
-        Project.id == audiobook_project.project_id,
-        Project.user_id == current_user.id,
-    ).first()
-    if not project:
-        raise HTTPException(status_code=403, detail="无权限访问")
-    
-    chapter_audio = db.query(ChapterAudio).filter(
-        ChapterAudio.audiobook_project_id == audiobook_project_id,
-        ChapterAudio.chapter_id == chapter_id,
-    ).first()
-    if not chapter_audio:
-        raise HTTPException(status_code=404, detail="章节音频记录不存在")
+    db = owned.db
+    current_user = owned.current_user
+    project = owned.project
+    chapter_audio = get_active_chapter_audio_for_project(
+        db=db,
+        audiobook_project_id=audiobook_project_id,
+        chapter_id=chapter_id,
+    )
     
     checkpoint_payload = _build_generation_checkpoint_payload(
         chapter_id=chapter_id,
@@ -255,23 +245,24 @@ async def resume_chapter_generation(
     )
 
     if resume_task_type != "script_only":
-        try:
-            record_audiobook_billing_freeze(
-                db=db,
-                actor_user_id=current_user.id,
-                actor_username=current_user.username,
+        _safe_record_audiobook_billing_freeze(
+            db=db,
+            current_user=current_user,
+            audiobook_project_id=audiobook_project_id,
+            chapter_ids=[chapter_id],
+            raw_request=raw_request,
+            tts_pricing_key=tts_model,
+            trace_context=build_audiobook_trace_context(
+                celery_task_id=str(async_result.id),
+                task_type=resume_task_type,
                 audiobook_project_id=audiobook_project_id,
-                chapter_ids=[chapter_id],
-                request_context=raw_request,
-                tts_pricing_key=tts_model,
-            )
-        except Exception as exc:
-            logger.warning(
-                "记录有声书积分冻结失败 audiobook_project_id=%s chapter_id=%s: %s",
-                audiobook_project_id,
-                chapter_id,
-                exc,
-            )
+                chapter_id=chapter_id,
+                status="queued",
+                progress=0.0,
+                tts_model=tts_model,
+                cost_precheck_id=precheck.cost_precheck_id,
+            ),
+        )
 
     logger.info(
         "Resume queued for audiobook_project_id=%s chapter_id=%s source_run_id=%s new_job_id=%s completed=%s/%s task_type=%s",
@@ -304,26 +295,26 @@ async def resume_chapter_generation(
 @router.get("/projects/{audiobook_project_id:int}/browser-player")
 async def get_browser_player_data(
     audiobook_project_id: int,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    owned: OwnedAudiobookProject = Depends(get_owned_audiobook_project),
 ):
     """获取浏览器播放器所需数据（章节列表、音频URL、字幕URL）"""
-    audiobook_project = db.query(AudiobookProject).filter(
-        AudiobookProject.id == audiobook_project_id
-    ).first()
-    if not audiobook_project:
-        raise HTTPException(status_code=404, detail="有声书项目不存在")
-    
-    project = db.query(Project).filter(
-        Project.id == audiobook_project.project_id,
-        Project.user_id == current_user.id,
-    ).first()
-    if not project:
-        raise HTTPException(status_code=403, detail="无权限访问")
-    
+    db = owned.db
+    project = owned.project
+    audiobook_project = owned.audiobook_project
+    chapter_audios = [
+        chapter_audio
+        for chapter_audio in audiobook_project.chapter_audios
+        if chapter_audio.deleted_at is None
+    ]
+    chapter_ids = [chapter_audio.chapter_id for chapter_audio in chapter_audios]
+    chapter_map = {}
+    if chapter_ids:
+        chapters = ChapterRepository.list_active_by_ids(db, chapter_ids)
+        chapter_map = {chapter.id: chapter for chapter in chapters}
+
     chapters_data = []
-    for chapter_audio in audiobook_project.chapter_audios:
-        chapter = db.query(Chapter).filter(Chapter.id == chapter_audio.chapter_id).first()
+    for chapter_audio in chapter_audios:
+        chapter = chapter_map.get(chapter_audio.chapter_id)
         if not chapter:
             continue
         
@@ -339,15 +330,19 @@ async def get_browser_player_data(
         }
         
         if chapter_audio.script_json:
-            try:
-                chapter_info["segments"] = json.loads(chapter_audio.script_json)
-            except:
-                chapter_info["segments"] = []
+            chapter_info["segments"] = _parse_browser_player_segments(
+                chapter_audio.script_json,
+                audiobook_project_id=audiobook_project_id,
+                chapter_id=chapter_audio.chapter_id,
+            )
         
         chapters_data.append(chapter_info)
+
+    chapters_data.sort(key=lambda item: item.get("chapter_number") or 0)
     
     return {
         "project_id": audiobook_project_id,
+        "audiobook_project_id": audiobook_project_id,
         "project_title": project.title,
         "chapters": chapters_data,
         "total_duration": audiobook_project.total_duration,

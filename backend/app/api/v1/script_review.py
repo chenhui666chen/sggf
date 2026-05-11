@@ -18,13 +18,20 @@ from sqlalchemy.orm import Session
 
 from app.core.security import get_current_user
 from app.db.base import get_db
-from app.models.audiobook import AudiobookProject, ChapterAudio
+from app.models.audiobook import AudiobookProject, ChapterAudio, ChapterAudioRun
 from app.models.project import Project
 from app.models.user import User
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/script-review", tags=["script-review"])
+
+
+def _coerce_non_negative_int(value: Any) -> int:
+    try:
+        return max(0, int(value))
+    except (TypeError, ValueError):
+        return 0
 
 
 class QualityIssueResponse(BaseModel):
@@ -155,6 +162,102 @@ def _load_json_text(
         ) from exc
 
 
+def _load_latest_effect_timeline(
+    *,
+    db: Session,
+    audiobook_project_id: int,
+    chapter_id: int,
+) -> Dict[str, Any]:
+    runs = (
+        db.query(ChapterAudioRun)
+        .filter(
+            ChapterAudioRun.audiobook_project_id == audiobook_project_id,
+            ChapterAudioRun.chapter_id == chapter_id,
+            ChapterAudioRun.status == "completed",
+            ChapterAudioRun.checkpoint_json.isnot(None),
+        )
+        .order_by(ChapterAudioRun.created_at.desc(), ChapterAudioRun.id.desc())
+        .limit(20)
+        .all()
+    )
+    for run in runs:
+        checkpoint = getattr(run, "checkpoint_json", None)
+        if not isinstance(checkpoint, dict):
+            continue
+        timeline = checkpoint.get("effect_timeline")
+        if isinstance(timeline, dict):
+            return timeline
+    return {}
+
+
+def _merge_audio_asset_warnings(
+    quality_report: Any,
+    *,
+    effect_timeline: Dict[str, Any],
+) -> Any:
+    if not isinstance(quality_report, dict):
+        return quality_report
+
+    unresolved = effect_timeline.get("unresolved_effects")
+    if not isinstance(unresolved, dict):
+        return quality_report
+
+    unresolved_count = _coerce_non_negative_int(unresolved.get("unresolved_count"))
+    if unresolved_count <= 0:
+        return quality_report
+
+    report = dict(quality_report)
+    audio_balance = dict(report.get("audio_balance") or {})
+    audio_balance["unresolved_effect_count"] = unresolved_count
+    audio_balance["placeholder_effect_count"] = _coerce_non_negative_int(unresolved.get("placeholder_count"))
+    audio_balance["missing_effect_file_count"] = _coerce_non_negative_int(unresolved.get("missing_file_count"))
+    report["audio_balance"] = audio_balance
+
+    warnings = effect_timeline.get("warnings")
+    report["audio_warnings"] = list(warnings) if isinstance(warnings, list) else [
+        {
+            "code": "unresolved_sound_effect_assets",
+            "level": "warning",
+            "message": f"有 {unresolved_count} 个音效未找到真实素材，已在混音时跳过。",
+        }
+    ]
+
+    items = unresolved.get("items") if isinstance(unresolved.get("items"), list) else []
+    preview_names = [
+        str(item.get("description") or item.get("file") or "").strip()
+        for item in items[:3]
+        if isinstance(item, dict) and str(item.get("description") or item.get("file") or "").strip()
+    ]
+    description_suffix = f"：{'、'.join(preview_names)}" if preview_names else ""
+    issue = {
+        "location": "音效素材库",
+        "severity": "major",
+        "category": "audio_assets",
+        "description": f"有 {unresolved_count} 个音效未找到真实素材，混音时已跳过{description_suffix}",
+        "suggestion": "补齐或替换缺失的音效素材后重新生成章节音频",
+    }
+
+    existing_issues = list(report.get("issues")) if isinstance(report.get("issues"), list) else []
+    existing_issue_count = report.get("issues_count")
+    try:
+        issue_count = int(existing_issue_count)
+    except (TypeError, ValueError):
+        issue_count = len(existing_issues)
+    report["issues"] = [issue] + existing_issues
+    report["issues_count"] = max(0, issue_count) + 1
+
+    suggestions = report.get("revision_suggestions")
+    suggestion = issue["suggestion"]
+    if isinstance(suggestions, list):
+        report["revision_suggestions"] = (
+            [suggestion] + [item for item in suggestions if item != suggestion]
+        )
+    else:
+        report["revision_suggestions"] = [suggestion]
+
+    return report
+
+
 @router.get("/report/{audiobook_project_id}/{chapter_id}", response_model=dict)
 async def get_script_review_report(
     audiobook_project_id: int,
@@ -181,6 +284,14 @@ async def get_script_review_report(
         chapter_audio.script_review_json,
         not_found_detail="章节剧本审核报告不存在，请先生成或重新评审剧本",
         invalid_detail="章节剧本审核报告已损坏，请重新生成",
+    )
+    quality_report = _merge_audio_asset_warnings(
+        quality_report,
+        effect_timeline=_load_latest_effect_timeline(
+            db=db,
+            audiobook_project_id=audiobook_project_id,
+            chapter_id=chapter_id,
+        ),
     )
 
     return {

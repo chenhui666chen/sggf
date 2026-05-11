@@ -444,6 +444,36 @@ export function PendingLibraryReviewStatus({
   )
 }
 
+type PendingLibraryRuntimeStatusProps = {
+  libraryError: string | null
+  libraryLoading: boolean
+  missingCount: number
+  unapprovedCount: number
+  hasReview: boolean
+}
+
+export function PendingLibraryRuntimeStatus({
+  libraryError,
+  libraryLoading,
+  missingCount,
+  unapprovedCount,
+  hasReview,
+}: PendingLibraryRuntimeStatusProps) {
+  return (
+    <>
+      {libraryError && (
+        <Alert severity="error" sx={{ mb: 1 }}>
+          {libraryError}
+        </Alert>
+      )}
+      {libraryLoading && <LinearProgress sx={{ mb: 1 }} />}
+      {hasReview && (
+        <PendingLibraryReviewStatus missingCount={missingCount} unapprovedCount={unapprovedCount} />
+      )}
+    </>
+  )
+}
+
 type PendingLibraryReadyActionsProps = {
   onViewLibrary: () => void
   showPromptReviewAction: boolean

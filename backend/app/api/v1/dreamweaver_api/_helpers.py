@@ -107,8 +107,77 @@ from agents.image_edit_utils import (
     resolve_image_edit_ref_max_images,
 )
 
+from app.api.v1.dreamweaver_api._helpers_env import (
+    _env_int,
+    _env_float,
+    _env_flag,
+)
+from app.api.v1.dreamweaver_api._helpers_library_prompt import (
+    _CHARACTER_VIEW_PREFIX_TO_VIEW,
+    _CHARACTER_VIEW_TO_PREFIX,
+    _CHARACTER_VIEW_SEED_BASE,
+    _CHARACTER_VIEW_REFERENCE_EXTRA,
+    _character_view_from_role,
+    _character_role_for_view,
+    _build_library_prompt,
+    _augment_library_prompt_for_role,
+    _merge_descriptor_texts,
+    _meta_prompt_text,
+    _meta_descriptor_text,
+    _is_placeholder_entity_name,
+    _resolve_character_view_prompt_seed,
+    _resolve_prompt_seed_for_role,
+    _attach_view_chain_prompt_meta,
+)
+from app.api.v1.dreamweaver_api._helpers_library_spec import (
+    _build_project_library_spec,
+    _build_scoped_library_spec_from_run,
+    _normalize_positive_int_list,
+    _resolve_character_view_missing_regenerate_roles,
+    _resolve_library_entity_info,
+)
+from app.api.v1.dreamweaver_api._helpers_request_build import (
+    _load_project_chapters,
+    _build_source_text,
+    _quality_mode_to_runtime_config,
+    _infer_video_engine_from_model_id,
+    _resolve_registered_dreamweaver_model_id,
+    _build_dreamweaver_runtime_config_from_request,
+)
+
 from app.api.v1.dreamweaver_api import router
 logger = logging.getLogger(__name__)
+
+
+def _load_project_for_user(
+    db: Session,
+    project_id: int,
+    user_id: int,
+    *,
+    detail: str = "项目不存在或无权限访问",
+) -> Project:
+    project = db.query(Project).filter(Project.id == project_id, Project.user_id == user_id).first()
+    if not project:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=detail)
+    return project
+
+
+def _load_run_for_user(
+    db: Session,
+    run_id: str,
+    user_id: int,
+    *,
+    detail: str = "run_id 不存在或无权限访问",
+) -> DreamweaverProjectModel:
+    row = (
+        db.query(DreamweaverProjectModel)
+        .filter(DreamweaverProjectModel.run_id == run_id, DreamweaverProjectModel.user_id == user_id)
+        .first()
+    )
+    if not row:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=detail)
+    return row
+
 
 def _ensure_dreamweaver_points_precheck_passed(precheck: object) -> None:
     if bool(getattr(precheck, "allowed", False)):
@@ -196,34 +265,6 @@ def _persist_library_asset_provider_refs(
         db.commit()
 
 
-def _env_int(name: str, default: int) -> int:
-    raw = os.getenv(name)
-    if raw is None or not raw.strip():
-        return default
-    try:
-        return int(raw)
-    except ValueError:
-        return default
-
-
-def _env_float(name: str, default: float) -> float:
-    raw = os.getenv(name)
-    if raw is None or not raw.strip():
-        return default
-    try:
-        return float(raw)
-    except ValueError:
-        return default
-
-
-def _env_flag(name: str, default: bool = False) -> bool:
-    raw = os.getenv(name)
-    if raw is None:
-        return default
-    text = str(raw).strip().lower()
-    if not text:
-        return default
-    return text not in {"0", "false", "no", "off"}
 
 
 def _normalize_prompt_for_similarity(text: str) -> str:
@@ -442,725 +483,7 @@ def _write_image_from_generation_result(result: Any, out_path: Path) -> None:
     raise RuntimeError("unsupported image payload: missing image_url/base64")
 
 
-_CHARACTER_VIEW_PREFIX_TO_VIEW = {
-    "lib_character_portrait": "front",
-    "lib_character_portrait_side": "side",
-    "lib_character_portrait_back": "back",
-    "lib_character_portrait_bust": "bust_front",
-    "lib_character_portrait_bust_three_quarter": "bust_three_quarter",
-    "lib_character_portrait_bust_side": "bust_side",
-}
-_CHARACTER_VIEW_TO_PREFIX = {value: key for key, value in _CHARACTER_VIEW_PREFIX_TO_VIEW.items()}
-_CHARACTER_VIEW_SEED_BASE = {
-    "side": "front",
-    "back": "side",
-    "bust_front": "front",
-    "bust_three_quarter": "bust_front",
-    "bust_side": "bust_three_quarter",
-}
-_CHARACTER_VIEW_REFERENCE_EXTRA = {
-    "side": ["bust_front"],
-    "back": ["front", "bust_front"],
-    "bust_front": [],
-    "bust_three_quarter": ["front", "side"],
-    "bust_side": ["side", "bust_front"],
-}
 
-
-def _character_view_from_role(role: str) -> str:
-    prefix = str(role or "").strip().split(":", 1)[0]
-    return _CHARACTER_VIEW_PREFIX_TO_VIEW.get(prefix, "default")
-
-
-def _character_role_for_view(*, entity_id: int, view: str) -> str:
-    prefix = _CHARACTER_VIEW_TO_PREFIX.get(str(view or "").strip().lower())
-    if not prefix:
-        raise ValueError(f"unsupported character view: {view!r}")
-    return f"{prefix}:{int(entity_id)}"
-
-
-def _build_library_prompt(
-    entity_type: str,
-    name: str,
-    descriptor: str,
-    style_prompt: Optional[str] = None,
-    ratio: Optional[str] = None,
-) -> str:
-    # Reuse the shared library prompt builder so API and services stay consistent.
-    return build_library_prompt(
-        entity_type=entity_type,
-        name=name,
-        descriptor=descriptor,
-        style_prompt=style_prompt,
-        ratio=ratio,
-    )
-
-
-def _augment_library_prompt_for_role(*, role: str, prompt: str) -> str:
-    """
-    Add role-specific camera/view constraints when they are missing.
-    """
-    text = str(prompt or "").strip()
-    if not text:
-        return ""
-
-    prefix = str(role or "").strip().split(":", 1)[0]
-    if prefix not in _CHARACTER_VIEW_PREFIX_TO_VIEW:
-        return text
-
-    def _norm_key(s: str) -> str:
-        lowered = str(s or "").strip().lower()
-        return "".join(ch for ch in lowered if ch.isalnum())
-
-    hints: List[str] = [
-        "背景：纯色背景，画面干净，无场景杂物、无文字、无水印、无 logo。",
-        "约束：单人主体，完整构图，避免裁切关键部位。",
-    ]
-    if prefix == "lib_character_portrait_side":
-        hints.append("构图：侧面全身单人立绘，头顶到脚底完整入镜，四肢完整不被裁切。")
-        hints.append("一致性要求：与正面图保持同一角色身份锚点，重点保持发型、五官、服装和配件一致。")
-    elif prefix == "lib_character_portrait_back":
-        hints.append("构图：背面全身单人立绘，头顶到脚底完整入镜，四肢完整不被裁切。")
-        hints.append("一致性要求：与正面和侧面图保持同一角色身份锚点，重点保持发型轮廓、服装版型与配色一致。")
-    elif prefix == "lib_character_portrait_bust":
-        hints.append("构图：正面半身单人肖像（胸像到腰部），面部为主并保留肩颈与上半身服饰结构。")
-        hints.append("一致性要求：与全身正面保持同一角色身份锚点，重点保持五官、发型、领口与肩颈服饰细节一致。")
-    elif prefix == "lib_character_portrait_bust_three_quarter":
-        hints.append("构图：3/4 视角半身单人肖像（胸像到腰部），面部为主并清晰呈现肩颈与上半身服饰结构。")
-        hints.append("一致性要求：与半身正面和全身侧面保持同一角色身份锚点，重点保持侧脸轮廓与上半身服饰结构一致。")
-    elif prefix == "lib_character_portrait_bust_side":
-        hints.append("构图：侧面半身单人肖像（胸像到腰部），突出侧脸轮廓并保留肩颈与上半身服饰结构。")
-        hints.append("一致性要求：与半身 3/4 和全身侧面保持同一角色身份锚点，重点保持侧脸轮廓、发型与肩颈服饰细节一致。")
-    else:
-        hints.append("构图：正面全身单人立绘，头顶到脚底完整入镜，四肢完整不被裁切。")
-        hints.append("一致性要求：保持角色身份锚点稳定，突出发型、五官、服装与配件特征。")
-
-    merged = text
-    existing_key = _norm_key(text)
-    for hint in hints:
-        hint_key = _norm_key(hint)
-        if hint_key and hint_key in existing_key:
-            continue
-        merged = f"{merged}\\n{hint}"
-        existing_key = _norm_key(merged)
-    return merged.strip()
-
-
-def _merge_descriptor_texts(*parts: Any, limit: int = 1400) -> str:
-    seen: set[str] = set()
-    merged: List[str] = []
-    for part in parts:
-        if not isinstance(part, str):
-            continue
-        text = part.replace("\\r", "\\n").strip()
-        if not text:
-            continue
-
-        normalized = text.replace("\\uFF0C", ",").replace("\\uFF1B", ";").replace("\\n", ";")
-        chunks = [seg.strip(" \\n\\t,;.") for seg in normalized.replace(",", ";").split(";")]
-        for chunk in chunks:
-            if not chunk:
-                continue
-            key = "".join(chunk.split()).lower()
-            if not key or key in seen:
-                continue
-            seen.add(key)
-            merged.append(chunk)
-
-    if not merged:
-        return ""
-    out = "; ".join(merged)
-    return out[: max(32, int(limit))]
-
-
-def _meta_prompt_text(meta: Dict[str, Any]) -> str:
-    if not isinstance(meta, dict):
-        return ""
-    return str(meta.get("prompt") or meta.get("suggested_prompt") or "").strip()
-
-
-def _meta_descriptor_text(meta: Dict[str, Any]) -> str:
-    if not isinstance(meta, dict):
-        return ""
-    return str(meta.get("descriptor") or "").strip()
-
-
-def _is_placeholder_entity_name(value: Any) -> bool:
-    text = str(value or "").strip()
-    if not text:
-        return True
-    if re.fullmatch(r"[?\s]+", text):
-        return True
-    lowered = text.lower()
-    if lowered in {"unknown", "n/a", "na"}:
-        return True
-    if text in {"未知", "未命名", "角色", "人物", "角色名"}:
-        return True
-    if text.startswith("lib_"):
-        return True
-    return False
-
-
-def _resolve_character_view_prompt_seed(
-    *,
-    role: str,
-    assets_by_role: Dict[str, Dict[str, Any]],
-) -> Dict[str, Any]:
-    view = _character_view_from_role(role)
-    if view not in _CHARACTER_VIEW_SEED_BASE:
-        return {}
-
-    try:
-        _entity_type, entity_id = parse_library_role(role)
-    except Exception as e:
-        logger.debug("Failed to parse library role '%s' for view prompt seed: %s", role, e)
-        return {}
-
-    front_role = _character_role_for_view(entity_id=int(entity_id), view="front")
-    base_view = _CHARACTER_VIEW_SEED_BASE.get(view, "front")
-    base_role = _character_role_for_view(entity_id=int(entity_id), view=base_view)
-
-    def _asset_meta(role_name: str) -> Dict[str, Any]:
-        asset = assets_by_role.get(role_name) if isinstance(assets_by_role.get(role_name), dict) else {}
-        return asset.get("meta") if isinstance(asset.get("meta"), dict) else {}
-
-    front_meta = _asset_meta(front_role)
-    base_meta = _asset_meta(base_role)
-    seed_role = base_role if base_meta else front_role
-    seed_meta = base_meta if base_meta else front_meta
-
-    seed_prompt = _meta_prompt_text(seed_meta) or _meta_prompt_text(front_meta)
-    # Prefer front descriptor as identity anchor to avoid derived-view prompt drift.
-    anchor_descriptor = _meta_descriptor_text(front_meta) or _meta_descriptor_text(seed_meta)
-
-    ref_roles: List[str] = []
-    ref_views = [base_view] + _CHARACTER_VIEW_REFERENCE_EXTRA.get(view, [])
-    for ref_view in ref_views:
-        ref_role = _character_role_for_view(entity_id=int(entity_id), view=ref_view)
-        ref_meta = _asset_meta(ref_role)
-        if ref_meta and ref_role not in ref_roles:
-            ref_roles.append(ref_role)
-    if front_meta and front_role not in ref_roles:
-        ref_roles.append(front_role)
-
-    return {
-        "seed_role": seed_role,
-        "seed_prompt": seed_prompt,
-        "anchor_descriptor": anchor_descriptor,
-        "reference_roles": ref_roles,
-    }
-
-
-def _resolve_prompt_seed_for_role(
-    *,
-    role: str,
-    assets_by_role: Dict[str, Dict[str, Any]],
-    request_prompt: str,
-    current_prompt: str,
-    descriptor: str,
-    force_view_chain_seed: bool = False,
-) -> Tuple[str, str, Dict[str, Any], bool]:
-    request_prompt_text = str(request_prompt or "").strip()
-    current_prompt_text = str(current_prompt or "").strip()
-    seed_info = _resolve_character_view_prompt_seed(role=role, assets_by_role=assets_by_role)
-    if not isinstance(seed_info, dict):
-        seed_info = {}
-
-    seed_prompt = str(seed_info.get("seed_prompt") or "").strip()
-    anchor_descriptor = str(seed_info.get("anchor_descriptor") or "").strip()
-    manual_override = bool(request_prompt_text and request_prompt_text != current_prompt_text)
-    raw_prompt = request_prompt_text or current_prompt_text
-
-    # Explicitly support "smart prompt" on derived views with existing image:
-    # keep the prompt seed aligned with derived-view first-generation path.
-    if force_view_chain_seed and seed_prompt:
-        manual_override = False
-        raw_prompt = seed_prompt
-
-    if seed_prompt and not manual_override:
-        raw_prompt = seed_prompt
-    if anchor_descriptor:
-        descriptor = _merge_descriptor_texts(anchor_descriptor, descriptor, limit=1400)
-
-    return raw_prompt, descriptor, seed_info, manual_override
-
-
-def _attach_view_chain_prompt_meta(
-    meta: Dict[str, Any],
-    *,
-    seed_info: Dict[str, Any],
-    manual_override: bool,
-) -> Dict[str, Any]:
-    if not isinstance(meta, dict):
-        return {}
-
-    seed_role = str(seed_info.get("seed_role") or "").strip() if isinstance(seed_info, dict) else ""
-    reference_roles = []
-    if isinstance(seed_info, dict) and isinstance(seed_info.get("reference_roles"), list):
-        reference_roles = [str(item).strip() for item in seed_info.get("reference_roles", []) if str(item).strip()]
-
-    if seed_role:
-        meta["view_chain_prompt_seed_role"] = seed_role
-    if reference_roles:
-        meta["view_chain_reference_roles"] = reference_roles
-    meta["view_chain_manual_prompt_override"] = bool(manual_override)
-    return meta
-
-
-def _build_project_library_spec(
-    db: Session,
-    *,
-    project_id: int,
-    full_scope: bool,
-) -> Dict[str, Any]:
-    if full_scope:
-        return build_library_spec(
-            db,
-            project_id=project_id,
-            max_characters=0,
-            max_scenes=0,
-            max_props=0,
-        )
-    return build_library_spec(
-        db,
-        project_id=project_id,
-        max_characters=_env_int("DREAMWEAVER_LIBRARY_MAX_CHARACTERS", 12),
-        max_scenes=_env_int("DREAMWEAVER_LIBRARY_MAX_SCENES", 8),
-        max_props=_env_int("DREAMWEAVER_LIBRARY_MAX_PROPS", 8),
-    )
-
-
-def _build_scoped_library_spec_from_run(
-    db: Session,
-    *,
-    project_id: int,
-    user_id: int,
-    run_id: Optional[str],
-    strict: bool = False,
-) -> Optional[Dict[str, Any]]:
-    safe_run_id = str(run_id or "").strip()
-    if not safe_run_id:
-        return None
-    row = (
-        db.query(DreamweaverProjectModel)
-        .filter(
-            DreamweaverProjectModel.run_id == safe_run_id,
-            DreamweaverProjectModel.user_id == user_id,
-            DreamweaverProjectModel.source_project_id == project_id,
-        )
-        .first()
-    )
-    if row is None:
-        if strict:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="run_id not found for this project")
-        return None
-    if not isinstance(getattr(row, "contract_json", None), dict):
-        if strict:
-            return empty_library_spec(project_id=project_id)
-        return None
-    contract = row.contract_json if isinstance(row.contract_json, dict) else {}
-    runtime_cfg = contract.get("runtime_config") if isinstance(contract.get("runtime_config"), dict) else {}
-    entities = runtime_cfg.get("script_entities") if isinstance(runtime_cfg.get("script_entities"), dict) else {}
-    spec_candidate = build_library_spec_from_script_entities(db, project_id=project_id, entities=entities)
-    stripped = strip_crowd_characters_from_spec(db, project_id=project_id, spec=spec_candidate)
-    if has_any_library_entities(stripped):
-        return stripped
-    if strict:
-        return empty_library_spec(project_id=project_id)
-    return None
-
-
-def _normalize_positive_int_list(raw: Any, *, limit: int = 200) -> List[int]:
-    if not isinstance(raw, list):
-        return []
-    out: List[int] = []
-    for item in raw:
-        if isinstance(item, bool):
-            continue
-        try:
-            value = int(item)
-        except Exception:  # noqa: BLE001
-            continue
-        if value <= 0 or value in out:
-            continue
-        out.append(value)
-        if len(out) >= limit:
-            break
-    return out
-
-
-def _resolve_character_view_missing_regenerate_roles(
-    db: Session,
-    *,
-    project_id: int,
-    user_id: int,
-    run_id: Optional[str],
-    character_ids: Optional[List[int]] = None,
-) -> Dict[str, Any]:
-    safe_run_id = str(run_id or "").strip()
-    scoped = False
-    scope_mode = "project"
-    if safe_run_id:
-        spec = (
-            _build_scoped_library_spec_from_run(
-                db,
-                project_id=project_id,
-                user_id=user_id,
-                run_id=safe_run_id,
-                strict=True,
-            )
-            or empty_library_spec(project_id=project_id)
-        )
-        scoped = True
-        scope_mode = "run"
-    else:
-        spec = _build_project_library_spec(db, project_id=project_id, full_scope=True)
-
-    spec = strip_crowd_characters_from_spec(db, project_id=project_id, spec=spec)
-    created = ensure_required_library_assets(db, project_id=project_id, user_id=user_id, spec=spec)
-    required_roles = required_library_roles(spec)
-
-    assets_by_role_all = load_latest_library_assets(db, project_id=project_id, user_id=user_id)
-    assets_by_role_for_review = {r: assets_by_role_all[r] for r in required_roles if r in assets_by_role_all}
-    review = compute_library_review(spec=spec, assets_by_role=assets_by_role_for_review)
-    missing_roles_raw = review.get("missing_roles") if isinstance(review.get("missing_roles"), list) else []
-
-    target_character_ids = _normalize_positive_int_list(character_ids or [])
-    target_character_ids_or_none: Optional[List[int]] = target_character_ids or None
-
-    character_name_by_id: Dict[int, str] = {}
-    for item in spec.get("characters", []) if isinstance(spec.get("characters"), list) else []:
-        if not isinstance(item, dict):
-            continue
-        try:
-            entity_id = int(item.get("entity_id"))
-        except Exception:  # noqa: BLE001
-            continue
-        if entity_id <= 0:
-            continue
-        name = str(item.get("name") or "").strip()
-        if _is_placeholder_entity_name(name):
-            name = ""
-        if name:
-            character_name_by_id[entity_id] = name
-
-    regenerate_roles = build_missing_character_view_regenerate_roles(
-        required_roles=required_roles,
-        missing_roles=missing_roles_raw,
-        character_ids=target_character_ids_or_none,
-    )
-    summary = build_missing_character_view_summary(
-        required_roles=required_roles,
-        missing_roles=missing_roles_raw,
-        character_ids=target_character_ids_or_none,
-        entity_names=character_name_by_id,
-    )
-    summary = [
-        row
-        for row in summary
-        if isinstance(row, dict) and isinstance(row.get("missing_views"), list) and bool(row.get("missing_views"))
-    ]
-
-    return {
-        "project_id": int(project_id),
-        "scoped": bool(scoped),
-        "scope_mode": scope_mode,
-        "run_id": safe_run_id if scoped else None,
-        "character_ids": target_character_ids,
-        "regenerate_roles": regenerate_roles,
-        "total": len(regenerate_roles),
-        "character_view_missing_summary": summary,
-        "review_missing_roles_count": len(missing_roles_raw),
-        "synced": {"created": created},
-    }
-
-
-def _resolve_library_entity_info(
-    db: Session,
-    *,
-    project_id: int,
-    role: str,
-    meta: Dict[str, Any],
-    scoped_spec: Optional[Dict[str, Any]] = None,
-) -> Tuple[str, int, str, str]:
-    entity_type, entity_id = parse_library_role(role)
-    name = str(meta.get("entity_name") or meta.get("name") or "").strip()
-    if _is_placeholder_entity_name(name):
-        name = ""
-    descriptor = str(meta.get("descriptor") or "").strip()
-
-    if entity_type == "character":
-        row = (
-            db.query(Character)
-            .filter(Character.project_id == project_id, Character.id == entity_id)
-            .first()
-        )
-        if row is not None:
-            row_name = str(getattr(row, "name", "") or "").strip()
-            if _is_placeholder_entity_name(name) and row_name:
-                name = row_name
-            elif not name:
-                name = str(getattr(row, "name", "") or "").strip()
-            descriptor = _merge_descriptor_texts(
-                descriptor,
-                getattr(row, "summary", None),
-                getattr(row, "profile", None),
-                getattr(row, "tags", None),
-                limit=1400,
-            )
-
-    if not name or not descriptor:
-        specs: List[Dict[str, Any]] = []
-        if isinstance(scoped_spec, dict):
-            specs.append(scoped_spec)
-        # Fallback to scoped specs and remove crowd placeholders when the primary fields are incomplete.
-        specs.append(
-            strip_crowd_characters_from_spec(
-                db,
-                project_id=project_id,
-                spec=_build_project_library_spec(
-                    db,
-                    project_id=project_id,
-                    full_scope=True,
-                ),
-            )
-        )
-
-        section_key = "characters" if entity_type == "character" else "scenes" if entity_type == "scene" else "props"
-        for spec in specs:
-            for item in spec.get(section_key, []) if isinstance(spec.get(section_key), list) else []:
-                if not isinstance(item, dict):
-                    continue
-                try:
-                    if int(item.get("entity_id")) != int(entity_id):
-                        continue
-                except Exception:  # noqa: BLE001
-                    continue
-
-                candidate_name = str(item.get("name") or "").strip()
-                if _is_placeholder_entity_name(name) and candidate_name:
-                    name = candidate_name
-                elif not name:
-                    name = candidate_name
-                descriptor = _merge_descriptor_texts(descriptor, str(item.get("descriptor") or "").strip(), limit=1400)
-                break
-            if name and descriptor:
-                break
-
-    if _is_placeholder_entity_name(name):
-        fallback_prefix = "角色" if entity_type == "character" else "场景" if entity_type == "scene" else "道具"
-        name = f"{fallback_prefix}{int(entity_id)}"
-    return str(entity_type), int(entity_id), name, descriptor
-
-
-def _load_project_chapters(
-    db: Session, *, project_id: int, chapter_ids: List[int] | None
-) -> List[Chapter]:
-    chapter_query = db.query(Chapter).filter(Chapter.project_id == project_id)
-    if chapter_ids:
-        chapter_query = chapter_query.filter(Chapter.id.in_(chapter_ids))
-    return chapter_query.order_by(Chapter.chapter_number.asc()).all()
-
-
-def _build_source_text(chapters: List[Chapter]) -> str:
-    return build_drama_source_text(chapters)
-
-
-def _quality_mode_to_runtime_config(quality_mode: Optional[str]) -> Tuple[Dict[str, Any], Dict[str, Any], Dict[str, Any]]:
-    """
-    Translate a quality mode from the UI into default runtime configuration blocks.
-
-    Returns a tuple of (image_config, qc_config, video_config).
-    """
-    mode = (quality_mode or "").strip().lower()
-    if mode == "quality":
-        return (
-            {
-                "t2i_candidates": 2,
-                "mid_candidates": 2,
-                "image_selector": "semantic",
-                "keep_candidates": False,
-                "image_edit_policy": "auto",
-                "image_edit_min_prompt_similarity": 0.12,
-                "head_use_image_edit": True,
-                "tail_use_image_edit": True,
-                "mid_use_image_edit": True,
-                "ref_selector": "vlm",
-                "ref_max_images": 8,
-                "head_ref_rewrite": True,
-                "tail_ref_rewrite": True,
-                "mid_ref_rewrite": True,
-            },
-            {
-                "enable_semantic_qc": True,
-                # 开启语义 QC：对首帧进行语义质检，通过 VLM 验证画面与提示词一致性
-                "semantic_frames": "head",
-                "semantic_sample_rate": 0.6,
-                "semantic_max_checks": 12,
-            },
-            {
-                "engine": "wan_auto",
-                "fps": 30,
-                "motion_bucket_id": 127,
-            },
-        )
-    if mode == "cost":
-        return (
-            {
-                "t2i_candidates": 1,
-                "mid_candidates": 1,
-                "image_selector": "first",
-                "keep_candidates": False,
-                "head_use_image_edit": False,
-                "tail_use_image_edit": False,
-                "mid_use_image_edit": False,
-                "ref_selector": "recent",
-            },
-            {
-                "enable_semantic_qc": False,
-            },
-            {
-                "engine": "ffmpeg_slideshow",
-            },
-        )
-    return {}, {}, {}
-
-
-def _infer_video_engine_from_model_id(model_id: Any) -> str:
-    return infer_dreamweaver_video_engine_from_model_id(model_id)
-
-
-def _resolve_registered_dreamweaver_model_id(*candidates: Any, fallback: str) -> str:
-    normalized_fallback = str(fallback or "").strip()
-    seen: set[str] = set()
-    for raw_candidate in [*candidates, normalized_fallback]:
-        candidate = str(raw_candidate or "").strip()
-        if not candidate or candidate in seen:
-            continue
-        seen.add(candidate)
-        if isinstance(get_model_info(candidate), dict):
-            return candidate
-    return normalized_fallback
-
-
-def _build_dreamweaver_runtime_config_from_request(request: RunRequest) -> Dict[str, Any]:
-    runtime_config: Dict[str, Any] = {}
-
-    if isinstance(request.quality_mode, str) and request.quality_mode.strip():
-        image_config, qc_config, video_config = _quality_mode_to_runtime_config(request.quality_mode)
-        runtime_config.update(
-            {
-                "quality_mode": request.quality_mode.strip().lower(),
-                "image_config": image_config,
-                "qc_config": qc_config,
-                "video_config": video_config,
-            }
-        )
-    if request.smart_tuning is not None:
-        runtime_config["smart_tuning"] = bool(request.smart_tuning)
-    if isinstance(request.ab_variant, str) and request.ab_variant.strip():
-        runtime_config["ab_variant"] = request.ab_variant.strip()
-    if request.qc_allow_fail is not None:
-        qc_cfg = runtime_config.get("qc_config") if isinstance(runtime_config.get("qc_config"), dict) else {}
-        qc_cfg["allow_fail"] = bool(request.qc_allow_fail)
-        runtime_config["qc_config"] = qc_cfg
-    if isinstance(request.style_preset, str) and request.style_preset.strip():
-        runtime_config["style_preset"] = request.style_preset.strip()
-    if isinstance(request.image_ratio, str) and request.image_ratio.strip():
-        image_cfg = runtime_config.get("image_config") if isinstance(runtime_config.get("image_config"), dict) else {}
-        image_cfg["ratio"] = request.image_ratio.strip()
-        runtime_config["image_config"] = image_cfg
-    if isinstance(request.image_resolution, str) and request.image_resolution.strip():
-        image_cfg = runtime_config.get("image_config") if isinstance(runtime_config.get("image_config"), dict) else {}
-        image_cfg["resolution"] = request.image_resolution.strip()
-        runtime_config["image_config"] = image_cfg
-    if isinstance(request.image_model, str) and request.image_model.strip():
-        image_cfg = runtime_config.get("image_config") if isinstance(runtime_config.get("image_config"), dict) else {}
-        image_cfg["adapter"] = request.image_model.strip()
-        runtime_config["image_config"] = image_cfg
-    if isinstance(request.vision_model, str) and request.vision_model.strip():
-        vision_model = request.vision_model.strip()
-        image_cfg = runtime_config.get("image_config") if isinstance(runtime_config.get("image_config"), dict) else {}
-        image_cfg["vlm_adapter"] = vision_model
-        runtime_config["image_config"] = image_cfg
-
-        qc_cfg = runtime_config.get("qc_config") if isinstance(runtime_config.get("qc_config"), dict) else {}
-        qc_cfg = apply_vision_review_qc_config(qc_cfg, enabled=None, vision_model=vision_model)
-        runtime_config["qc_config"] = qc_cfg
-    if request.enable_vision_review is not None:
-        qc_cfg = runtime_config.get("qc_config") if isinstance(runtime_config.get("qc_config"), dict) else {}
-        qc_cfg = apply_vision_review_qc_config(
-            qc_cfg,
-            enabled=bool(request.enable_vision_review),
-            vision_model=request.vision_model,
-        )
-        runtime_config["qc_config"] = qc_cfg
-    if request.enable_safety_audit is not None:
-        qc_cfg = runtime_config.get("qc_config") if isinstance(runtime_config.get("qc_config"), dict) else {}
-        qc_cfg["enable_safety_audit"] = bool(request.enable_safety_audit)
-        runtime_config["qc_config"] = qc_cfg
-    if isinstance(request.safety_fail_policy, str) and request.safety_fail_policy.strip():
-        qc_cfg = runtime_config.get("qc_config") if isinstance(runtime_config.get("qc_config"), dict) else {}
-        qc_cfg["safety_fail_policy"] = request.safety_fail_policy.strip().lower()
-        runtime_config["qc_config"] = qc_cfg
-    if request.video_fps is not None:
-        video_cfg = runtime_config.get("video_config") if isinstance(runtime_config.get("video_config"), dict) else {}
-        video_cfg["fps"] = int(request.video_fps)
-        runtime_config["video_config"] = video_cfg
-    if isinstance(request.video_model, str) and request.video_model.strip():
-        video_model = request.video_model.strip()
-        video_cfg = runtime_config.get("video_config") if isinstance(runtime_config.get("video_config"), dict) else {}
-        video_cfg["adapter"] = video_model
-        inferred_engine = _infer_video_engine_from_model_id(video_model)
-        if inferred_engine:
-            video_cfg["engine"] = inferred_engine
-        runtime_config["video_config"] = video_cfg
-    if isinstance(request.video_edit_model, str) and request.video_edit_model.strip():
-        video_edit_cfg = (
-            runtime_config.get("video_edit_config") if isinstance(runtime_config.get("video_edit_config"), dict) else {}
-        )
-        video_edit_cfg["adapter"] = request.video_edit_model.strip()
-        runtime_config["video_edit_config"] = video_edit_cfg
-    if request.enable_video_edit is not None:
-        video_edit_cfg = (
-            runtime_config.get("video_edit_config") if isinstance(runtime_config.get("video_edit_config"), dict) else {}
-        )
-        video_edit_cfg["enabled"] = bool(request.enable_video_edit)
-        runtime_config["video_edit_config"] = video_edit_cfg
-    if request.video_require_confirmation is not None:
-        video_cfg = runtime_config.get("video_config") if isinstance(runtime_config.get("video_config"), dict) else {}
-        video_cfg["require_confirmation"] = bool(request.video_require_confirmation)
-        runtime_config["video_config"] = video_cfg
-
-    prompt_review_required = request.prompt_review_required
-    if prompt_review_required is None:
-        prompt_review_required = _env_flag("DREAMWEAVER_PROMPT_REVIEW_REQUIRED", default=False)
-    runtime_config["prompt_review_required"] = bool(prompt_review_required)
-    if prompt_review_required:
-        runtime_config["prompt_review"] = {"approved": False}
-
-    video_cfg = runtime_config.get("video_config") if isinstance(runtime_config.get("video_config"), dict) else {}
-    if not isinstance(video_cfg.get("provider_mode"), str) or not str(video_cfg.get("provider_mode") or "").strip():
-        video_cfg["provider_mode"] = str(os.getenv("DREAMWEAVER_VIDEO_PROVIDER_MODE") or "wan_only").strip().lower() or "wan_only"
-    if not isinstance(video_cfg.get("selector_mode"), str) or not str(video_cfg.get("selector_mode") or "").strip():
-        video_cfg["selector_mode"] = str(os.getenv("DREAMWEAVER_VIDEO_SELECTOR_MODE") or "off").strip().lower() or "off"
-    if "allow_kling_omni" not in video_cfg:
-        video_cfg["allow_kling_omni"] = _env_flag("DREAMWEAVER_ALLOW_KLING_OMNI", default=False)
-    if "enable_kling_video_provider" not in video_cfg:
-        video_cfg["enable_kling_video_provider"] = _env_flag(
-            "DREAMWEAVER_ENABLE_KLING_VIDEO_PROVIDER",
-            default=False,
-        )
-    if "allow_subject_bridge" not in video_cfg:
-        video_cfg["allow_subject_bridge"] = _env_flag("DREAMWEAVER_ALLOW_SUBJECT_BRIDGE", default=False)
-    if "allow_subject_bridge_auto_sync" not in video_cfg:
-        video_cfg["allow_subject_bridge_auto_sync"] = _env_flag(
-            "DREAMWEAVER_ALLOW_SUBJECT_BRIDGE_AUTO_SYNC",
-            default=False,
-        )
-    runtime_config["video_config"] = resolve_video_generation_controls(video_cfg)
-
-    return runtime_config
 
 
 # routes_run/routes_script/routes_video 等模块依赖 `from ..._helpers import *`

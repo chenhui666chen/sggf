@@ -6,7 +6,7 @@
 功能：
 1. 快速提取文本前 2 句
 2. 调用 TTS 生成预览音频
-3. 返回预览音频 URL 和时长
+3. 返回预览音频本地路径和时长
 """
 import os
 import logging
@@ -109,7 +109,7 @@ class PreviewGenerator:
                 "preview_id": preview_id,
                 "preview_text": preview_text,
                 "audio_path": output_path,
-                "audio_url": f"/api/v1/audiobook/previews/{preview_id}",
+                "audio_url": "",
                 "duration": duration,
                 "voice_id": voice_id,
                 "tts_params": tts_params,

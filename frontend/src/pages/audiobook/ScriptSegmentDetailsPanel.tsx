@@ -10,6 +10,7 @@ import type {
   ScriptSegment,
   ScriptSegmentVoiceParams,
 } from './types'
+import AudioPicker from './AudioPicker'
 import { audiobookColors } from './audiobookTheme'
 import {
   getMusicCueInputValue,
@@ -154,32 +155,30 @@ const ScriptSegmentDetailsPanel = ({
           onChange={(event) => updateVoiceParams({ volume: parseOptionalNumberInput(event.target.value) })}
         />
       </Box>
-      <TextField
-        fullWidth
-        size="small"
-        label="音效提示（逗号分隔）"
+      <AudioPicker
+        type="sfx"
         value={soundEffectsValue}
-        onChange={(event) =>
+        onChange={(v) =>
           onUpdateSegment(index, {
-            sound_effects_simple: parseCommaSeparatedList(event.target.value),
+            sound_effects_simple: v ? parseCommaSeparatedList(v) : [],
             sound_effects: [],
           })
         }
-        sx={{ mt: 1 }}
+        label="音效提示（可从库中选择）"
       />
-      <TextField
-        fullWidth
-        size="small"
-        label="配乐提示"
-        value={musicCueValue}
-        onChange={(event) =>
-          onUpdateSegment(index, {
-            music_cue_simple: event.target.value,
-            music_cue: null,
-          })
-        }
-        sx={{ mt: 1 }}
-      />
+      <Box sx={{ mt: 1 }}>
+        <AudioPicker
+          type="music"
+          value={musicCueValue}
+          onChange={(v) =>
+            onUpdateSegment(index, {
+              music_cue_simple: v || null,
+              music_cue: null,
+            })
+          }
+          label="配乐提示（可从库中选择）"
+        />
+      </Box>
     </Paper>
   )
 }

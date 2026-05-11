@@ -21,6 +21,7 @@ from app.services.audiobook.safe_filename import (
     ensure_unique_filename,
     sanitize_filename_component,
 )
+from app.services.audiobook.sfx_library_downloader import SfxLibraryDownloader
 from app.services.audiobook.subtitle_generator import SubtitleGenerator
 
 
@@ -97,7 +98,12 @@ def collect_project_export_output_files(*, project_id: int, audiobook_project_id
         ),
     ]
     manifest_files = [_project_export_manifest_path(path) for path in output_files]
-    return _unique_paths(output_files + manifest_files)
+    credit_files = [
+        credit_path
+        for output_file in output_files
+        for credit_path in _project_export_credit_paths(output_file).values()
+    ]
+    return _unique_paths(output_files + manifest_files + credit_files)
 
 
 def build_project_m4b_export(
@@ -156,7 +162,18 @@ def build_project_m4b_export(
         export_kind="m4b",
         source_signature=source_signature,
     )
+    used_effect_ids = _collect_project_used_effect_ids(
+        db,
+        audiobook_project_id=audiobook_project.id,
+        chapter_ids={chapter.chapter_id for chapter in chapters},
+    )
+    credits_used_effect_ids = used_effect_ids or None
+
     if cached_result and not force:
+        cached_result["credits"] = _write_project_export_credits(
+            output_file,
+            used_effect_ids=credits_used_effect_ids,
+        )
         return cached_result
 
     with tempfile.TemporaryDirectory(prefix="audiobook_m4b_") as tmp_dir:
@@ -201,6 +218,10 @@ def build_project_m4b_export(
         expected_duration_seconds=expected_duration,
         expected_chapter_count=len(chapters),
     )
+    credits = _write_project_export_credits(
+        output_file,
+        used_effect_ids=credits_used_effect_ids,
+    )
     result = {
         "success": True,
         "cached": False,
@@ -211,6 +232,7 @@ def build_project_m4b_export(
         "chapters": [asdict(chapter) for chapter in chapters],
         "metadata": export_metadata,
         "cover_art": _to_repo_relative_path(cover_path) if cover_path else None,
+        "credits": credits,
         "output_validation": output_validation,
         "source_signature": source_signature,
     }
@@ -265,9 +287,24 @@ def build_project_audacity_export(
         export_kind="audacity",
         source_signature=source_signature,
     )
+    used_effect_ids = _collect_project_used_effect_ids(
+        db,
+        audiobook_project_id=audiobook_project.id,
+        chapter_ids={chapter.chapter_id for chapter in chapters},
+    )
+    credits_used_effect_ids = used_effect_ids or None
+
     if cached_result and not force:
+        cached_result["credits"] = _write_project_export_credits(
+            output_file,
+            used_effect_ids=credits_used_effect_ids,
+        )
         return cached_result
 
+    credits = _write_project_export_credits(
+        output_file,
+        used_effect_ids=credits_used_effect_ids,
+    )
     with tempfile.TemporaryDirectory(prefix="audiobook_audacity_") as tmp_dir:
         temp_dir = Path(tmp_dir)
         tracks_dir = temp_dir / "tracks"
@@ -293,6 +330,7 @@ def build_project_audacity_export(
         with zipfile.ZipFile(output_file, "w", compression=zipfile.ZIP_DEFLATED) as archive:
             archive.writestr("project.lof", lof_content)
             archive.writestr("labels.txt", labels_content)
+            _write_audacity_archive_credits(archive, credits)
             for entry in track_entries:
                 archive.write(entry.path, entry.arcname)
 
@@ -312,7 +350,8 @@ def build_project_audacity_export(
         "track_mode": _summarize_audacity_track_mode(track_entries),
         "label_count": label_count,
         "chapters": [asdict(chapter) for chapter in chapters],
-        "files": ["project.lof", "labels.txt"] + [entry.arcname for entry in track_entries],
+        "files": ["project.lof", "labels.txt", "CREDITS.md", "license_manifest.jsonl"] + [entry.arcname for entry in track_entries],
+        "credits": credits,
         "source_signature": source_signature,
     }
     _write_project_export_manifest(
@@ -1076,6 +1115,108 @@ def _project_export_manifest_path(output_file: Path) -> Path:
     return output_file.with_name(f"{output_file.name}.json")
 
 
+def _project_export_credit_paths(output_file: Path) -> Dict[str, Path]:
+    return {
+        "markdown_path": output_file.with_name(f"{output_file.name}.CREDITS.md"),
+        "jsonl_path": output_file.with_name(f"{output_file.name}.license_manifest.jsonl"),
+    }
+
+
+def _write_project_export_credits(
+    output_file: Path,
+    *,
+    used_effect_ids: Optional[Set[str]] = None,
+) -> Dict[str, Any]:
+    paths = _project_export_credit_paths(output_file)
+    result = SfxLibraryDownloader().export_attribution_credits(
+        jsonl_path=paths["jsonl_path"],
+        markdown_path=paths["markdown_path"],
+        used_effect_ids=used_effect_ids,
+    )
+    return _normalize_project_export_credits_result(result)
+
+
+def _collect_project_used_effect_ids(
+    db: Session,
+    *,
+    audiobook_project_id: int,
+    chapter_ids: Optional[Set[int]] = None,
+) -> Set[str]:
+    runs = (
+        db.query(ChapterAudioRun)
+        .filter(
+            ChapterAudioRun.audiobook_project_id == audiobook_project_id,
+            ChapterAudioRun.status == "completed",
+            ChapterAudioRun.checkpoint_json.isnot(None),
+        )
+        .order_by(
+            ChapterAudioRun.chapter_id.asc(),
+            ChapterAudioRun.created_at.desc(),
+            ChapterAudioRun.id.desc(),
+        )
+        .all()
+    )
+
+    used_effect_ids: Set[str] = set()
+    seen_chapter_ids: Set[int] = set()
+    for run in runs:
+        chapter_id = int(run.chapter_id or 0)
+        if chapter_ids is not None and chapter_id not in chapter_ids:
+            continue
+        if chapter_id in seen_chapter_ids:
+            continue
+        seen_chapter_ids.add(chapter_id)
+
+        checkpoint_json = getattr(run, "checkpoint_json", None)
+        if not isinstance(checkpoint_json, dict):
+            continue
+        _collect_effect_ids_from_timeline_payload(
+            checkpoint_json.get("effect_timeline"),
+            used_effect_ids,
+        )
+        _collect_effect_ids_from_timeline_payload(
+            checkpoint_json.get("timeline"),
+            used_effect_ids,
+        )
+        stats = checkpoint_json.get("stats")
+        if isinstance(stats, dict):
+            _collect_effect_ids_from_timeline_payload(stats.get("timeline"), used_effect_ids)
+
+    return used_effect_ids
+
+
+def _collect_effect_ids_from_timeline_payload(payload: Any, used_effect_ids: Set[str]) -> None:
+    if isinstance(payload, dict):
+        timeline_items = payload.get("timeline")
+    else:
+        timeline_items = payload
+    if not isinstance(timeline_items, list):
+        return
+
+    for item in timeline_items:
+        if not isinstance(item, dict):
+            continue
+        effect_id = str(item.get("effect_id") or "").strip()
+        if effect_id:
+            used_effect_ids.add(effect_id)
+
+
+def _normalize_project_export_credits_result(result: Dict[str, Any]) -> Dict[str, Any]:
+    normalized = dict(result or {})
+    for key in ("jsonl_path", "markdown_path"):
+        path_value = normalized.get(key)
+        if path_value:
+            normalized[key] = _to_repo_relative_path(Path(path_value))
+    return _normalize_jsonable(normalized)
+
+
+def _write_audacity_archive_credits(archive: zipfile.ZipFile, credits: Dict[str, Any]) -> None:
+    markdown_path = _resolve_output_path(str(credits.get("markdown_path") or ""))
+    jsonl_path = _resolve_output_path(str(credits.get("jsonl_path") or ""))
+    archive.write(markdown_path, "CREDITS.md")
+    archive.write(jsonl_path, "license_manifest.jsonl")
+
+
 def _load_cached_project_export_result(
     output_file: Path,
     *,
@@ -1375,7 +1516,7 @@ def _parse_script_segments(raw_value: Any) -> List[Dict[str, Any]]:
     if isinstance(raw_value, str):
         try:
             payload = json.loads(raw_value)
-        except Exception:
+        except (json.JSONDecodeError, TypeError):
             return []
     if isinstance(payload, list):
         return [item for item in payload if isinstance(item, dict)]

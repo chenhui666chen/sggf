@@ -6,16 +6,103 @@
 """
 from __future__ import annotations
 
-from typing import Iterable, List, Optional
+from typing import Any, Iterable, List, Optional
 
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from app.models.audiobook import AudiobookProject, ChapterAudio, ChapterAudioRun
 from app.models.audiobook_delete_audit import AudiobookDeleteAudit
 from app.models.audiobook_task import AudiobookTask
 from app.models.character import Character
 from app.models.project import Chapter, Project
+from app.models.user import User
 from app.utils.datetime_utils import utc_now
+
+
+def _safe_iso(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+    if hasattr(value, "isoformat"):
+        return value.isoformat()
+    return str(value)
+
+
+def _serialize_audiobook_project_snapshot(project: AudiobookProject) -> dict:
+    return {
+        "id": project.id,
+        "project_id": project.project_id,
+        "status": project.status,
+        "tts_provider": project.tts_provider,
+        "voice_mapping": project.voice_mapping,
+        "enable_cache": project.enable_cache,
+        "total_chapters": project.total_chapters,
+        "completed_chapters": project.completed_chapters,
+        "failed_chapters": project.failed_chapters,
+        "total_duration": project.total_duration,
+        "total_size": project.total_size,
+        "total_cost": project.total_cost,
+        "created_at": _safe_iso(project.created_at),
+        "updated_at": _safe_iso(project.updated_at),
+        "completed_at": _safe_iso(project.completed_at),
+        "deleted_at": _safe_iso(project.deleted_at),
+    }
+
+
+def _serialize_chapter_audio_snapshot(audio: ChapterAudio) -> dict:
+    return {
+        "id": audio.id,
+        "audiobook_project_id": audio.audiobook_project_id,
+        "chapter_id": audio.chapter_id,
+        "audio_path": audio.audio_path,
+        "duration": audio.duration,
+        "file_size": audio.file_size,
+        "segment_count": audio.segment_count,
+        "dialogue_count": audio.dialogue_count,
+        "narration_count": audio.narration_count,
+        "generation_time": audio.generation_time,
+        "tts_cost": audio.tts_cost,
+        "cache_hit_rate": audio.cache_hit_rate,
+        "script_status": audio.script_status,
+        "created_at": _safe_iso(audio.created_at),
+        "updated_at": _safe_iso(audio.updated_at),
+        "deleted_at": _safe_iso(audio.deleted_at),
+    }
+
+
+def _serialize_task_snapshot(task: AudiobookTask) -> dict:
+    return {
+        "id": task.id,
+        "celery_task_id": task.celery_task_id,
+        "audiobook_project_id": task.audiobook_project_id,
+        "chapter_id": task.chapter_id,
+        "task_type": task.task_type,
+        "status": task.status,
+        "current_stage": task.current_stage,
+        "progress": task.progress,
+        "completed_units": task.completed_units,
+        "total_units": task.total_units,
+        "detail_json": task.detail_json,
+        "error_message": task.error_message,
+        "created_at": _safe_iso(task.created_at),
+        "updated_at": _safe_iso(task.updated_at),
+        "started_at": _safe_iso(task.started_at),
+        "finished_at": _safe_iso(task.finished_at),
+    }
+
+
+class UserRepository:
+    """用户查询封装。"""
+
+    @staticmethod
+    def get_active_by_id(db: Session, user_id: int) -> Optional[User]:
+        return (
+            db.query(User)
+            .filter(
+                User.id == user_id,
+                User.is_active.is_(True),
+            )
+            .first()
+        )
 
 
 class ProjectRepository:
@@ -29,9 +116,55 @@ class ProjectRepository:
             .first()
         )
 
+    @staticmethod
+    def list_user_projects_by_ids(
+        db: Session,
+        user_id: int,
+        project_ids: Iterable[int],
+    ) -> List[Project]:
+        ids = list({project_id for project_id in project_ids if project_id is not None})
+        if not ids:
+            return []
+
+        return (
+            db.query(Project)
+            .filter(
+                Project.id.in_(ids),
+                Project.user_id == user_id,
+            )
+            .all()
+        )
+
+    @staticmethod
+    def get_title_map_by_ids(
+        db: Session,
+        project_ids: Iterable[int],
+    ) -> dict[int, str]:
+        ids = list({project_id for project_id in project_ids if project_id is not None})
+        if not ids:
+            return {}
+
+        rows = (
+            db.query(Project.id, Project.title)
+            .filter(Project.id.in_(ids))
+            .all()
+        )
+        return {project_id: title for project_id, title in rows}
+
 
 class ChapterRepository:
     """与 Chapter 相关的查询封装"""
+
+    @staticmethod
+    def get_active_by_id(db: Session, chapter_id: int) -> Optional[Chapter]:
+        return (
+            db.query(Chapter)
+            .filter(
+                Chapter.id == chapter_id,
+                Chapter.deleted_at.is_(None),
+            )
+            .first()
+        )
 
     @staticmethod
     def get_project_chapters_by_ids(
@@ -48,6 +181,59 @@ class ChapterRepository:
             .filter(Chapter.project_id == project_id, Chapter.id.in_(ids))
             .all()
         )
+
+    @staticmethod
+    def list_active_by_ids(
+        db: Session,
+        chapter_ids: Iterable[int],
+    ) -> List[Chapter]:
+        ids = list({chapter_id for chapter_id in chapter_ids if chapter_id is not None})
+        if not ids:
+            return []
+
+        return (
+            db.query(Chapter)
+            .filter(
+                Chapter.id.in_(ids),
+                Chapter.deleted_at.is_(None),
+            )
+            .all()
+        )
+
+    @staticmethod
+    def get_active_project_chapter(
+        db: Session,
+        project_id: int,
+        chapter_id: int,
+    ) -> Optional[Chapter]:
+        return (
+            db.query(Chapter)
+            .filter(
+                Chapter.id == chapter_id,
+                Chapter.project_id == project_id,
+                Chapter.deleted_at.is_(None),
+            )
+            .first()
+        )
+
+    @staticmethod
+    def get_chapter_number_map_by_ids(
+        db: Session,
+        chapter_ids: Iterable[int],
+    ) -> dict[int, int]:
+        ids = list({chapter_id for chapter_id in chapter_ids if chapter_id is not None})
+        if not ids:
+            return {}
+
+        rows = (
+            db.query(Chapter.id, Chapter.chapter_number)
+            .filter(
+                Chapter.id.in_(ids),
+                Chapter.deleted_at.is_(None),
+            )
+            .all()
+        )
+        return {chapter_id: chapter_number for chapter_id, chapter_number in rows}
 
 
 class CharacterRepository:
@@ -71,6 +257,17 @@ class AudiobookProjectRepository:
         return (
             db.query(AudiobookProject)
             .filter(AudiobookProject.id == audiobook_project_id)
+            .first()
+        )
+
+    @staticmethod
+    def get_active_by_id(db: Session, audiobook_project_id: int) -> Optional[AudiobookProject]:
+        return (
+            db.query(AudiobookProject)
+            .filter(
+                AudiobookProject.id == audiobook_project_id,
+                AudiobookProject.deleted_at.is_(None),
+            )
             .first()
         )
 
@@ -108,6 +305,33 @@ class AudiobookProjectRepository:
             .order_by(AudiobookProject.created_at.desc())
             .all()
         )
+
+    @staticmethod
+    def _chapter_audio_ids_active_before_project_delete(
+        audit_log: Optional[AudiobookDeleteAudit],
+    ) -> Optional[List[int]]:
+        """从项目删除快照中读取本次项目删除实际影响的章节音频 ID。
+
+        返回 None 表示缺少可用快照，此时恢复逻辑会走历史兼容回退。
+        """
+        if not audit_log or not isinstance(audit_log.snapshot_json, dict):
+            return None
+
+        snapshot_chapter_audios = audit_log.snapshot_json.get("chapter_audios")
+        if not isinstance(snapshot_chapter_audios, list):
+            return None
+
+        audio_ids: List[int] = []
+        for audio_snapshot in snapshot_chapter_audios:
+            if not isinstance(audio_snapshot, dict):
+                continue
+            if audio_snapshot.get("deleted_at") is not None:
+                continue
+            audio_id = audio_snapshot.get("id")
+            if isinstance(audio_id, int):
+                audio_ids.append(audio_id)
+
+        return audio_ids
 
     @staticmethod
     def soft_delete(
@@ -149,78 +373,33 @@ class AudiobookProjectRepository:
         
         # 创建数据快照
         snapshot = {
-            'audiobook_project': {
-                'id': audiobook_project.id,
-                'project_id': audiobook_project.project_id,
-                'status': audiobook_project.status,
-                'tts_provider': audiobook_project.tts_provider,
-                'voice_mapping': audiobook_project.voice_mapping,
-                'enable_cache': audiobook_project.enable_cache,
-                'total_chapters': audiobook_project.total_chapters,
-                'completed_chapters': audiobook_project.completed_chapters,
-                'failed_chapters': audiobook_project.failed_chapters,
-                'total_duration': audiobook_project.total_duration,
-                'total_size': audiobook_project.total_size,
-                'total_cost': audiobook_project.total_cost,
-                'created_at': audiobook_project.created_at.isoformat() if audiobook_project.created_at else None,
-                'updated_at': audiobook_project.updated_at.isoformat() if audiobook_project.updated_at else None,
-                'completed_at': audiobook_project.completed_at.isoformat() if audiobook_project.completed_at else None,
-                'deleted_at': audiobook_project.deleted_at.isoformat() if audiobook_project.deleted_at else None,
-            },
-            'chapter_audios': [
-                {
-                    'id': audio.id,
-                    'audiobook_project_id': audio.audiobook_project_id,
-                    'chapter_id': audio.chapter_id,
-                    'audio_path': audio.audio_path,
-                    'duration': audio.duration,
-                    'file_size': audio.file_size,
-                    'segment_count': audio.segment_count,
-                    'dialogue_count': audio.dialogue_count,
-                    'narration_count': audio.narration_count,
-                    'generation_time': audio.generation_time,
-                    'tts_cost': audio.tts_cost,
-                    'cache_hit_rate': audio.cache_hit_rate,
-                    'script_status': audio.script_status,
-                    'created_at': audio.created_at.isoformat() if audio.created_at else None,
-                    'updated_at': audio.updated_at.isoformat() if audio.updated_at else None,
-                    'deleted_at': audio.deleted_at.isoformat() if audio.deleted_at else None,
-                }
+            "audiobook_project": _serialize_audiobook_project_snapshot(audiobook_project),
+            "chapter_audios": [
+                _serialize_chapter_audio_snapshot(audio)
                 for audio in chapter_audios
             ],
-            'tasks': [
-                {
-                    'id': task.id,
-                    'celery_task_id': task.celery_task_id,
-                    'audiobook_project_id': task.audiobook_project_id,
-                    'chapter_id': task.chapter_id,
-                    'task_type': task.task_type,
-                    'status': task.status,
-                    'current_stage': task.current_stage,
-                    'progress': task.progress,
-                    'completed_units': task.completed_units,
-                    'total_units': task.total_units,
-                    'detail_json': task.detail_json,
-                    'error_message': task.error_message,
-                    'created_at': task.created_at.isoformat() if task.created_at else None,
-                    'updated_at': task.updated_at.isoformat() if task.updated_at else None,
-                    'started_at': task.started_at.isoformat() if task.started_at else None,
-                    'finished_at': task.finished_at.isoformat() if task.finished_at else None,
-                }
+            "tasks": [
+                _serialize_task_snapshot(task)
                 for task in tasks
             ],
         }
         
-        # 计算文件数量和总大小
-        file_count = len(chapter_audios)
-        total_size = sum(audio.file_size or 0 for audio in chapter_audios)
+        active_chapter_audios = [
+            audio for audio in chapter_audios
+            if audio.deleted_at is None
+        ]
+
+        # 计算本次项目删除实际影响的文件数量和总大小
+        file_count = len(active_chapter_audios)
+        total_size = sum(audio.file_size or 0 for audio in active_chapter_audios)
+        deleted_at = utc_now()
         
         # 软删除有声书项目
-        audiobook_project.deleted_at = utc_now()
+        audiobook_project.deleted_at = deleted_at
         
-        # 软删除关联的章节音频
-        for audio in chapter_audios:
-            audio.deleted_at = utc_now()
+        # 只标记本次项目删除实际影响的章节音频，避免覆盖此前单独删除的记录。
+        for audio in active_chapter_audios:
+            audio.deleted_at = deleted_at
         
         # 创建审计日志
         audit_log = AudiobookDeleteAudit(
@@ -232,9 +411,9 @@ class AudiobookProjectRepository:
             delete_reason=delete_reason,
             file_count=file_count,
             total_size=total_size,
-            affected_chapters=len(chapter_audios),
+            affected_chapters=len(active_chapter_audios),
             affected_tasks=len(tasks),
-            deleted_at=utc_now(),
+            deleted_at=deleted_at,
         )
         
         db.add(audit_log)
@@ -268,21 +447,29 @@ class AudiobookProjectRepository:
         if not audiobook_project:
             return None
         
-        # 恢复有声书项目
-        audiobook_project.deleted_at = None
-        
-        # 恢复关联的章节音频
-        db.query(ChapterAudio).filter(
-            ChapterAudio.audiobook_project_id == audiobook_project_id,
-            ChapterAudio.deleted_at.isnot(None)
-        ).update({'deleted_at': None})
-        
         # 更新审计日志
         audit_log = db.query(AudiobookDeleteAudit).filter(
             AudiobookDeleteAudit.target_id == audiobook_project_id,
             AudiobookDeleteAudit.delete_type == 'project',
             AudiobookDeleteAudit.restored_at.is_(None)
         ).order_by(AudiobookDeleteAudit.deleted_at.desc()).first()
+
+        # 恢复有声书项目
+        audiobook_project.deleted_at = None
+
+        restore_chapter_audio_ids = (
+            AudiobookProjectRepository._chapter_audio_ids_active_before_project_delete(audit_log)
+        )
+        restore_query = db.query(ChapterAudio).filter(
+            ChapterAudio.audiobook_project_id == audiobook_project_id,
+            ChapterAudio.deleted_at.isnot(None),
+        )
+        if restore_chapter_audio_ids is None:
+            restore_query.update({'deleted_at': None})
+        elif restore_chapter_audio_ids:
+            restore_query.filter(
+                ChapterAudio.id.in_(restore_chapter_audio_ids)
+            ).update({'deleted_at': None})
         
         if audit_log:
             audit_log.restored_at = utc_now()
@@ -318,6 +505,52 @@ class AudiobookProjectRepository:
         )
 
 
+class AudiobookDeleteAuditRepository:
+    """有声书删除审计查询封装。"""
+
+    @staticmethod
+    def list_audits_by_target_ids(
+        db: Session,
+        target_ids: Iterable[int],
+        delete_type: str,
+    ) -> List[AudiobookDeleteAudit]:
+        ids = list({target_id for target_id in target_ids if target_id is not None})
+        if not ids:
+            return []
+
+        return (
+            db.query(AudiobookDeleteAudit)
+            .filter(
+                AudiobookDeleteAudit.target_id.in_(ids),
+                AudiobookDeleteAudit.delete_type == delete_type,
+            )
+            .order_by(AudiobookDeleteAudit.deleted_at.desc())
+            .all()
+        )
+
+    @staticmethod
+    def list_project_audits_by_target_ids(
+        db: Session,
+        target_ids: Iterable[int],
+    ) -> List[AudiobookDeleteAudit]:
+        return AudiobookDeleteAuditRepository.list_audits_by_target_ids(
+            db,
+            target_ids,
+            "project",
+        )
+
+    @staticmethod
+    def list_chapter_audio_audits_by_target_ids(
+        db: Session,
+        target_ids: Iterable[int],
+    ) -> List[AudiobookDeleteAudit]:
+        return AudiobookDeleteAuditRepository.list_audits_by_target_ids(
+            db,
+            target_ids,
+            "chapter",
+        )
+
+
 class ChapterAudioRepository:
     """与 ChapterAudio 相关的查询封装"""
 
@@ -333,10 +566,172 @@ class ChapterAudioRepository:
         )
 
     @staticmethod
+    def list_active_by_audiobook_projects(
+        db: Session,
+        audiobook_project_ids: Iterable[int],
+    ) -> List[ChapterAudio]:
+        ids = list({project_id for project_id in audiobook_project_ids if project_id is not None})
+        if not ids:
+            return []
+
+        return (
+            db.query(ChapterAudio)
+            .filter(
+                ChapterAudio.audiobook_project_id.in_(ids),
+                ChapterAudio.deleted_at.is_(None),
+            )
+            .all()
+        )
+
+    @staticmethod
+    def list_active_by_project_chapter_ids(
+        db: Session,
+        audiobook_project_id: int,
+        chapter_ids: Iterable[int],
+    ) -> List[ChapterAudio]:
+        ids = list({chapter_id for chapter_id in chapter_ids if chapter_id is not None})
+        if not ids:
+            return []
+
+        return (
+            db.query(ChapterAudio)
+            .filter(
+                ChapterAudio.audiobook_project_id == audiobook_project_id,
+                ChapterAudio.chapter_id.in_(ids),
+                ChapterAudio.deleted_at.is_(None),
+            )
+            .all()
+        )
+
+    @staticmethod
+    def list_active_approved_scripts(
+        db: Session,
+        audiobook_project_id: int,
+    ) -> List[ChapterAudio]:
+        return (
+            db.query(ChapterAudio)
+            .filter(
+                ChapterAudio.audiobook_project_id == audiobook_project_id,
+                ChapterAudio.script_json.isnot(None),
+                ChapterAudio.script_status == "approved",
+                ChapterAudio.deleted_at.is_(None),
+            )
+            .all()
+        )
+
+    @staticmethod
+    def list_by_audiobook_project_including_deleted(
+        db: Session,
+        audiobook_project_id: int,
+    ) -> List[ChapterAudio]:
+        return (
+            db.query(ChapterAudio)
+            .filter(ChapterAudio.audiobook_project_id == audiobook_project_id)
+            .all()
+        )
+
+    @staticmethod
+    def list_deleted_for_user(
+        db: Session,
+        user_id: int,
+        audiobook_project_id: Optional[int] = None,
+        limit: int = 50,
+    ) -> List[ChapterAudio]:
+        """获取用户已删除的章节音频列表。
+
+        仅返回父级有声书项目仍处于活动状态的章节音频，避免项目级删除在回收站中展开为大量重复章节。
+        """
+        query = (
+            db.query(ChapterAudio)
+            .join(AudiobookProject, ChapterAudio.audiobook_project_id == AudiobookProject.id)
+            .join(Project, Project.id == AudiobookProject.project_id)
+            .options(
+                joinedload(ChapterAudio.audiobook_project).joinedload(AudiobookProject.project),
+                joinedload(ChapterAudio.chapter),
+            )
+            .filter(
+                Project.user_id == user_id,
+                AudiobookProject.deleted_at.is_(None),
+                ChapterAudio.deleted_at.isnot(None),
+            )
+        )
+        if audiobook_project_id is not None:
+            query = query.filter(ChapterAudio.audiobook_project_id == audiobook_project_id)
+
+        return (
+            query
+            .order_by(ChapterAudio.deleted_at.desc())
+            .limit(limit)
+            .all()
+        )
+
+    @staticmethod
     def get_by_id(db: Session, chapter_audio_id: int) -> Optional[ChapterAudio]:
         return (
             db.query(ChapterAudio)
             .filter(ChapterAudio.id == chapter_audio_id)
+            .first()
+        )
+
+    @staticmethod
+    def get_active_by_id(db: Session, chapter_audio_id: int) -> Optional[ChapterAudio]:
+        return (
+            db.query(ChapterAudio)
+            .filter(
+                ChapterAudio.id == chapter_audio_id,
+                ChapterAudio.deleted_at.is_(None),
+            )
+            .first()
+        )
+
+    @staticmethod
+    def get_by_project_chapter(
+        db: Session,
+        audiobook_project_id: int,
+        chapter_id: int,
+    ) -> Optional[ChapterAudio]:
+        return (
+            db.query(ChapterAudio)
+            .filter(
+                ChapterAudio.audiobook_project_id == audiobook_project_id,
+                ChapterAudio.chapter_id == chapter_id,
+            )
+            .first()
+        )
+
+    @staticmethod
+    def get_active_by_project_chapter(
+        db: Session,
+        audiobook_project_id: int,
+        chapter_id: int,
+    ) -> Optional[ChapterAudio]:
+        return (
+            db.query(ChapterAudio)
+            .filter(
+                ChapterAudio.audiobook_project_id == audiobook_project_id,
+                ChapterAudio.chapter_id == chapter_id,
+                ChapterAudio.deleted_at.is_(None),
+            )
+            .first()
+        )
+
+    @staticmethod
+    def find_latest_reusable_script(
+        db: Session,
+        project_id: int,
+        chapter_id: int,
+    ) -> Optional[ChapterAudio]:
+        return (
+            db.query(ChapterAudio)
+            .join(AudiobookProject, ChapterAudio.audiobook_project_id == AudiobookProject.id)
+            .filter(
+                AudiobookProject.project_id == project_id,
+                AudiobookProject.deleted_at.is_(None),
+                ChapterAudio.chapter_id == chapter_id,
+                ChapterAudio.script_json.isnot(None),
+                ChapterAudio.deleted_at.is_(None),
+            )
+            .order_by(ChapterAudio.updated_at.desc())
             .first()
         )
 
@@ -376,43 +771,9 @@ class ChapterAudioRepository:
         
         # 创建数据快照
         snapshot = {
-            'chapter_audio': {
-                'id': chapter_audio.id,
-                'audiobook_project_id': chapter_audio.audiobook_project_id,
-                'chapter_id': chapter_audio.chapter_id,
-                'audio_path': chapter_audio.audio_path,
-                'duration': chapter_audio.duration,
-                'file_size': chapter_audio.file_size,
-                'segment_count': chapter_audio.segment_count,
-                'dialogue_count': chapter_audio.dialogue_count,
-                'narration_count': chapter_audio.narration_count,
-                'generation_time': chapter_audio.generation_time,
-                'tts_cost': chapter_audio.tts_cost,
-                'cache_hit_rate': chapter_audio.cache_hit_rate,
-                'script_status': chapter_audio.script_status,
-                'created_at': chapter_audio.created_at.isoformat() if chapter_audio.created_at else None,
-                'updated_at': chapter_audio.updated_at.isoformat() if chapter_audio.updated_at else None,
-                'deleted_at': chapter_audio.deleted_at.isoformat() if chapter_audio.deleted_at else None,
-            },
-            'tasks': [
-                {
-                    'id': task.id,
-                    'celery_task_id': task.celery_task_id,
-                    'audiobook_project_id': task.audiobook_project_id,
-                    'chapter_id': task.chapter_id,
-                    'task_type': task.task_type,
-                    'status': task.status,
-                    'current_stage': task.current_stage,
-                    'progress': task.progress,
-                    'completed_units': task.completed_units,
-                    'total_units': task.total_units,
-                    'detail_json': task.detail_json,
-                    'error_message': task.error_message,
-                    'created_at': task.created_at.isoformat() if task.created_at else None,
-                    'updated_at': task.updated_at.isoformat() if task.updated_at else None,
-                    'started_at': task.started_at.isoformat() if task.started_at else None,
-                    'finished_at': task.finished_at.isoformat() if task.finished_at else None,
-                }
+            "chapter_audio": _serialize_chapter_audio_snapshot(chapter_audio),
+            "tasks": [
+                _serialize_task_snapshot(task)
                 for task in tasks
             ],
         }
@@ -680,12 +1041,15 @@ class AudiobookTaskRepository:
         task_type: str,
         total_units: int = 0,
     ) -> AudiobookTask:
+        now = utc_now()
         task = AudiobookTask(
             audiobook_project_id=audiobook_project_id,
             chapter_id=chapter_id,
             task_type=task_type,
             total_units=total_units,
             status="pending",
+            created_at=now,
+            updated_at=now,
         )
         db.add(task)
         db.commit()
@@ -698,6 +1062,7 @@ class AudiobookTaskRepository:
         if not task:
             return
         task.celery_task_id = celery_task_id
+        task.updated_at = utc_now()
         db.commit()
 
     @staticmethod
@@ -706,7 +1071,10 @@ class AudiobookTaskRepository:
             db.query(AudiobookTask)
             .join(AudiobookProject, AudiobookProject.id == AudiobookTask.audiobook_project_id)
             .join(Project, Project.id == AudiobookProject.project_id)
-            .filter(Project.user_id == user_id)
+            .filter(
+                Project.user_id == user_id,
+                AudiobookProject.deleted_at.is_(None),
+            )
             .order_by(AudiobookTask.created_at.desc())
             .limit(limit)
             .all()
@@ -721,6 +1089,7 @@ class AudiobookTaskRepository:
             .filter(
                 AudiobookTask.celery_task_id == celery_task_id,
                 Project.user_id == user_id,
+                AudiobookProject.deleted_at.is_(None),
             )
             .first()
         )

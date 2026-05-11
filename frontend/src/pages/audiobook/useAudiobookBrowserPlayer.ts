@@ -32,13 +32,17 @@ export const useAudiobookBrowserPlayer = ({
     try {
       const response = await apiClient.getBrowserPlayerData(audiobookProjectId)
       const data = response.data as BrowserPlayerProjectData
+      const normalizedData: BrowserPlayerProjectData = {
+        ...data,
+        audiobook_project_id: data.audiobook_project_id ?? data.project_id,
+      }
 
-      if (!data?.chapters?.length) {
+      if (!normalizedData?.chapters?.length) {
         setSnackbar({ open: true, message: '当前项目暂无可播放章节', severity: 'warning' })
         return
       }
 
-      setBrowserPlayerData(data)
+      setBrowserPlayerData(normalizedData)
       setBrowserPlayerOpen(true)
     } catch (error: unknown) {
       setSnackbar({

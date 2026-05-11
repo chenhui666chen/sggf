@@ -1,0 +1,42 @@
+[
+  {
+    "query": "File:Explosion sound",
+    "title": "File:Explosion 10.ogg",
+    "name": "Explosion 10",
+    "description": "I made this two years ago.",
+    "size": 24083,
+    "mime": "application/ogg",
+    "url": "https://upload.wikimedia.org/wikipedia/commons/3/37/Explosion_10.ogg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+    "source_url": "https://commons.wikimedia.org/wiki/File:Explosion_10.ogg",
+    "license": "Public domain",
+    "license_url": "",
+    "author": "tcpp",
+    "category": "action",
+    "style": "intense",
+    "tags": [
+      "action",
+      "explosion",
+      "battle"
+    ]
+  },
+  {
+    "query": "File:Explosion sound",
+    "title": "File:Explosion-LS100155.ogg",
+    "name": "Explosion-LS100155",
+    "description": "Sound of single explosion",
+    "size": 31909,
+    "mime": "application/ogg",
+    "url": "https://upload.wikimedia.org/wikipedia/commons/b/b9/Explosion-LS100155.ogg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+    "source_url": "https://commons.wikimedia.org/wiki/File:Explosion-LS100155.ogg",
+    "license": "Public domain",
+    "license_url": "",
+    "author": "Fg2",
+    "category": "action",
+    "style": "intense",
+    "tags": [
+      "action",
+      "explosion",
+      "battle"
+    ]
+  }
+]

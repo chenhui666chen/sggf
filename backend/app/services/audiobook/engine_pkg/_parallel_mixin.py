@@ -13,6 +13,7 @@ from ..script_adapter import AudiobookScriptAgent, ScriptSegment, ChapterStructu
 from ..voice_manager_factory import create_voice_manager
 from ..audio_mixer import AudioMixer
 from ..task_tracker import StageType
+from ..duration_estimator import estimate_narration_duration_seconds
 from app.services.chapter_adaptation_assets import build_audio_adaptation_hint
 from core.unified_media_runtime import create_tts_engine
 
@@ -34,6 +35,43 @@ from ..agents import (
 )
 
 logger = logging.getLogger(__name__)
+
+MUSIC_WORTHY_EMOTION_KEYWORDS = (
+    "tense",
+    "sad",
+    "happy",
+    "excited",
+    "solemn",
+    "angry",
+    "fear",
+    "fearful",
+    "nervous",
+    "mysterious",
+    "suspense",
+    "epic",
+)
+
+
+def _has_music_worthy_emotion(emotion: str) -> bool:
+    normalized = str(emotion or "").lower()
+    return any(key in normalized for key in MUSIC_WORTHY_EMOTION_KEYWORDS)
+
+
+def _map_music_mood_from_emotion(emotion: str) -> str:
+    normalized = str(emotion or "").lower()
+    if any(key in normalized for key in ("tense", "angry", "fear", "fearful", "nervous", "suspense")):
+        return "tense"
+    if "sad" in normalized:
+        return "sad"
+    if "happy" in normalized or "excited" in normalized:
+        return "joyful"
+    if "tender" in normalized:
+        return "romantic"
+    if "solemn" in normalized or "epic" in normalized:
+        return "epic"
+    if "mysterious" in normalized:
+        return "mysterious"
+    return "peaceful"
 
 class ParallelMixin:
     async def _parallel_design(
@@ -59,8 +97,25 @@ class ParallelMixin:
         Returns:
             (voice_profiles, sound_effects_count, music_cues_count)
         """
+        audio_fx_for_generation = getattr(self, "_audio_fx_config", None) or {}
+
+        def asset_generation_enabled(enable_key: str, density_key: str) -> bool:
+            if not audio_fx_for_generation:
+                return False
+            enabled = audio_fx_for_generation.get(enable_key, True)
+            density = str(audio_fx_for_generation.get(density_key) or "medium").lower()
+            return bool(enabled) and density != "off"
+
+        allow_sfx_asset_generation = asset_generation_enabled(
+            "enable_sound_effects",
+            "sound_effect_density",
+        )
+        allow_music_asset_generation = asset_generation_enabled(
+            "enable_music",
+            "music_density",
+        )
+
         # 定义三个并行任务
-        allow_asset_generation = False
         async def voice_design_task():
             """ 音色设计任务（已废弃，现统一使用VoiceManager）"""
             if not include_voice_design:
@@ -201,7 +256,7 @@ class ParallelMixin:
             try:
                 effect_cues = self.sound_effect_designer.design_effects(
                     script_dicts,
-                    allow_asset_generation=allow_asset_generation,
+                    allow_asset_generation=allow_sfx_asset_generation,
                 )
                 
                 # 根据音效密度配置优化音效数量
@@ -215,6 +270,12 @@ class ParallelMixin:
                 
                 effect_cues = self.sound_effect_designer.optimize_effect_density(max_effects_per_minute=max_per_min)
                 logger.info(f"🎧 根据密度配置 ({sfx_density}) 优化后：{len(effect_cues)} 个音效")
+
+                if allow_sfx_asset_generation and hasattr(self.sound_effect_designer, "ensure_generated_assets"):
+                    max_generated_effects = 2 if sfx_density == "low" else 4 if sfx_density == "medium" else 6
+                    await self.sound_effect_designer.ensure_generated_assets(
+                        max_generated_effects=max_generated_effects,
+                    )
                 
                 self._last_effect_timeline = self.sound_effect_designer.export_effect_timeline()
                 sound_effects_count = len(self.sound_effect_designer.effect_cues)
@@ -259,14 +320,17 @@ class ParallelMixin:
             # 提取音乐标注并设计配乐方案
             try:
                 # 构造章节结构用于配乐设计（结合剧本片段的emotion和music_cue）
-                total_duration = len(chapter_content) / 10.0 if chapter_content else 600.0
+                total_duration = (
+                    estimate_narration_duration_seconds(chapter_content, min_duration=0.0)
+                    if chapter_content
+                    else 600.0
+                )
 
                 scenes = []
                 current_time = 0.0
                 for idx, seg in enumerate(script_segments):
                     text = getattr(seg, "text", "") or ""
-                    seg_len = len(text)
-                    seg_duration = seg_len / 10.0  # 粗略估算本段时长
+                    seg_duration = estimate_narration_duration_seconds(text, min_duration=0.0)
 
                     # 先累加，用上一段累加的 current_time 作为下一段的起点
                     start_time = current_time
@@ -291,23 +355,13 @@ class ParallelMixin:
                     emotion = (getattr(seg, "emotion", "") or "").lower()
 
                     has_explicit_music = bool(music_cue_text)
-                    has_strong_emotion = any(key in emotion for key in ["tense", "sad", "happy", "excited", "solemn"])
+                    has_strong_emotion = _has_music_worthy_emotion(emotion)
 
                     if not has_explicit_music and not has_strong_emotion:
                         continue
 
                     # 将剧本情绪标签映射到音乐情绪
-                    mood = "peaceful"
-                    if "tense" in emotion or "angry" in emotion:
-                        mood = "tense"
-                    elif "sad" in emotion:
-                        mood = "sad"
-                    elif "happy" in emotion or "excited" in emotion:
-                        mood = "joyful"
-                    elif "tender" in emotion:
-                        mood = "romantic"
-                    elif "solemn" in emotion:
-                        mood = "epic"
+                    mood = _map_music_mood_from_emotion(emotion)
 
                     # 如果 music_cue 文本里带有明显情绪关键词，也参与微调
                     lc_cue = music_cue_text.lower()
@@ -425,7 +479,7 @@ class ParallelMixin:
                 music_cues = await self.music_composer.design_music(
                     chapter_structure,
                     skip_intro_outro=skip_intro_outro,
-                    allow_asset_generation=allow_asset_generation,
+                    allow_asset_generation=allow_music_asset_generation,
                 )
                 
                 # 根据音乐密度配置优化配乐数量

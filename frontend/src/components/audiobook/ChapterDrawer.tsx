@@ -23,7 +23,7 @@ import PauseIcon from '@mui/icons-material/Pause'
 import PlayIcon from '@mui/icons-material/PlayArrow'
 import SwapVertIcon from '@mui/icons-material/SwapVert'
 import MiniPlayer from './MiniPlayer'
-import { audiobookColors } from '../../pages/audiobook/audiobookTheme'
+import { audiobookColorRoles, audiobookColors } from '../../pages/audiobook/audiobookTheme'
 import type {
   AudiobookProjectSummary,
   Chapter,
@@ -303,7 +303,7 @@ export default function ChapterDrawer({
         anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
         transformOrigin={{ vertical: 'top', horizontal: 'right' }}
       >
-        <MenuItem onClick={handleRequestDeleteAudiobook} sx={{ color: audiobookColors.dangerMain }}>
+        <MenuItem onClick={handleRequestDeleteAudiobook} sx={{ color: audiobookColorRoles.destructiveAction.main }}>
           <DeleteIcon sx={{ mr: 1 }} />
           删除整本有声书
         </MenuItem>
@@ -316,7 +316,7 @@ export default function ChapterDrawer({
         anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
         transformOrigin={{ vertical: 'top', horizontal: 'right' }}
       >
-        <MenuItem onClick={handleRequestDeleteChapterAudio} sx={{ color: audiobookColors.dangerMain }}>
+        <MenuItem onClick={handleRequestDeleteChapterAudio} sx={{ color: audiobookColorRoles.destructiveAction.main }}>
           <DeleteIcon sx={{ mr: 1 }} />
           删除本章音频
         </MenuItem>

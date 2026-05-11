@@ -1,359 +1,88 @@
 ---
 name: frontend-dev-guidelines
-description: Opinionated frontend development standards for modern React + TypeScript applications. Covers Suspense-first data fetching, lazy loading, feature-based architecture, MUI v7 styling, TanStack Router, performance optimization, and strict TypeScript practices.
+description: Project-specific frontend standards for this repository. Use when working on React 18, TypeScript, Vite, MUI 5, react-router-dom, Vitest, frontend pages, components, hooks, API clients, styling, performance, or frontend refactors.
 ---
-
 
 # Frontend Development Guidelines
 
-**(React · TypeScript · Suspense-First · Production-Grade)**
+适用范围：本仓库前端代码，主要技术栈为 React 18、TypeScript、Vite 5、MUI 5、react-router-dom 6、Vitest。
 
-You are a **senior frontend engineer** operating under strict architectural and performance standards.
+本 skill 定义前端任务的工作方式。使用时以现有组件、主题、路由和测试结构为准，不引入未使用框架或不符合项目现状的约束。
 
-Your goal is to build **scalable, predictable, and maintainable React applications** using:
+## When to Use
 
-* Suspense-first data fetching
-* Feature-based code organization
-* Strict TypeScript discipline
-* Performance-safe defaults
+在以下任务中使用：
 
-This skill defines **how frontend code must be written**, not merely how it *can* be written.
+- 修改 `frontend/src/**` 下的页面、组件、hooks、utils、types、services。
+- 修改 React Router 页面流转、API client、前端状态和副作用逻辑。
+- 修改 MUI 组件样式、主题 token、响应式布局或交互体验。
+- 编写或修复 Vitest 测试。
+- 做前端性能优化、可维护性重构、类型收敛。
 
----
+## Core Principles
 
-## 1. Frontend Feasibility & Complexity Index (FFCI)
+- **KISS**：组件职责清楚，状态尽量局部化，避免不必要的状态机和抽象层。
+- **YAGNI**：不添加当前页面不用的 props、模式、配置开关或框架迁移入口。
+- **DRY**：重复的格式化、API 适配、按钮状态、样式 token 应提取复用。
+- **SOLID**：页面负责编排，组件负责展示和局部交互，hooks 负责可复用状态逻辑。
 
-Before implementing a component, page, or feature, assess feasibility.
+## Architecture Rules
 
-### FFCI Dimensions (1–5)
+- 先查找现有同类页面、组件、hook 和测试，延续项目风格。
+- 页面级组件可以编排数据和流程；复杂逻辑下沉到 hook、utils 或 service。
+- 共享组件保持窄接口，不暴露与单一页面强绑定的业务细节。
+- API 调用优先集中在 `frontend/src/services/api.ts` 或既有 service 层。
+- 类型定义优先复用 `frontend/src/types/**` 和页面内已有类型。
 
-| Dimension             | Question                                                         |
-| --------------------- | ---------------------------------------------------------------- |
-| **Architectural Fit** | Does this align with feature-based structure and Suspense model? |
-| **Complexity Load**   | How complex is state, data, and interaction logic?               |
-| **Performance Risk**  | Does it introduce rendering, bundle, or CLS risk?                |
-| **Reusability**       | Can this be reused without modification?                         |
-| **Maintenance Cost**  | How hard will this be to reason about in 6 months?               |
+## React And TypeScript Rules
 
-### Score Formula
+- 使用函数组件和 hooks，避免新增 class component。
+- `useMemo`、`useCallback` 只用于稳定引用、昂贵计算或传递给重组件的 handler，不机械滥用。
+- 副作用必须有清晰依赖和清理逻辑，避免重复请求、泄漏计时器、陈旧闭包。
+- 禁止新增 `any`，除非外部动态数据无法合理建模，并需要局部收敛。
+- 导入类型使用 `import type`，保持已有 lint 风格。
 
-```
-FFCI = (Architectural Fit + Reusability + Performance) − (Complexity + Maintenance Cost)
-```
+## MUI And UI Rules
 
-**Range:** `-5 → +15`
+- 使用 MUI 5 语法和当前项目主题，不使用 MUI 7 专属 API。
+- 按钮、Tooltip、loading、disabled、danger/warning 等状态优先复用现有模式。
+- 响应式布局必须检查移动端和桌面端，避免文字溢出、按钮换行错位、内容重叠。
+- 不做营销式 landing page；业务工具页面优先信息密度、可扫描性和稳定操作。
+- 涉及明显视觉设计或 UI 重构时，同时使用 `frontend-design`。
 
-### Interpretation
+## Routing Rules
 
-| FFCI      | Meaning    | Action            |
-| --------- | ---------- | ----------------- |
-| **10–15** | Excellent  | Proceed           |
-| **6–9**   | Acceptable | Proceed with care |
-| **3–5**   | Risky      | Simplify or split |
-| **≤ 2**   | Poor       | Redesign          |
+- 当前项目使用 `react-router-dom`，不得引入 TanStack Router 规则。
+- 路由变更应检查入口、导航、参数读取、刷新恢复和空状态。
+- 页面拆分应保持可理解，不为了“懒加载”牺牲简单性。
 
----
+## Testing Rules
 
-## 2. Core Architectural Doctrine (Non-Negotiable)
+- 行为变更优先补充或更新 Vitest。
+- Hook、utils、API 适配、复杂按钮状态和本地存储逻辑应有 focused tests。
+- UI 布局类变更至少通过类型检查或现有测试；有条件时运行相关测试。
+- 若无法运行测试，最终回复必须说明原因和未覆盖风险。
 
-### 1. Suspense Is the Default
+## Refactor Rules
 
-* `useSuspenseQuery` is the **primary** data-fetching hook
-* No `isLoading` conditionals
-* No early-return spinners
+- 不同时重构无关页面或全局样式。
+- 提取组件前先确认重复是真实重复，而不是局部语义相似。
+- 保持现有导入路径、文件命名和测试组织方式。
+- 不引入新的 UI 库、状态库、路由库或数据请求库，除非用户明确要求。
 
-### 2. Lazy Load Anything Heavy
+## Validation Checklist
 
-* Routes
-* Feature entry components
-* Data grids, charts, editors
-* Large dialogs or modals
+完成后检查：
 
-### 3. Feature-Based Organization
+- [ ] 是否读取了相关页面、组件、hook、service、type 和测试。
+- [ ] 是否符合 React 18、Vite 5、MUI 5、react-router-dom 6、Vitest 的项目事实。
+- [ ] 是否没有引入未使用抽象、props、依赖或框架迁移。
+- [ ] 是否覆盖了关键测试，或说明了无法测试原因。
+- [ ] 是否检查了响应式和交互状态的基本风险。
 
-* Domain logic lives in `features/`
-* Reusable primitives live in `components/`
-* Cross-feature coupling is forbidden
+## Related Skills
 
-### 4. TypeScript Is Strict
-
-* No `any`
-* Explicit return types
-* `import type` always
-* Types are first-class design artifacts
-
----
-
-## 3. When to Use This Skill
-
-Use **frontend-dev-guidelines** when:
-
-* Creating components or pages
-* Adding new features
-* Fetching or mutating data
-* Setting up routing
-* Styling with MUI
-* Addressing performance issues
-* Reviewing or refactoring frontend code
-
----
-
-## 4. Quick Start Checklists
-
-### New Component Checklist
-
-* [ ] `React.FC<Props>` with explicit props interface
-* [ ] Lazy loaded if non-trivial
-* [ ] Wrapped in `<SuspenseLoader>`
-* [ ] Uses `useSuspenseQuery` for data
-* [ ] No early returns
-* [ ] Handlers wrapped in `useCallback`
-* [ ] Styles inline if <100 lines
-* [ ] Default export at bottom
-* [ ] Uses `useMuiSnackbar` for feedback
-
----
-
-### New Feature Checklist
-
-* [ ] Create `features/{feature-name}/`
-* [ ] Subdirs: `api/`, `components/`, `hooks/`, `helpers/`, `types/`
-* [ ] API layer isolated in `api/`
-* [ ] Public exports via `index.ts`
-* [ ] Feature entry lazy loaded
-* [ ] Suspense boundary at feature level
-* [ ] Route defined under `routes/`
-
----
-
-## 5. Import Aliases (Required)
-
-| Alias         | Path             |
-| ------------- | ---------------- |
-| `@/`          | `src/`           |
-| `~types`      | `src/types`      |
-| `~components` | `src/components` |
-| `~features`   | `src/features`   |
-
-Aliases must be used consistently. Relative imports beyond one level are discouraged.
-
----
-
-## 6. Component Standards
-
-### Required Structure Order
-
-1. Types / Props
-2. Hooks
-3. Derived values (`useMemo`)
-4. Handlers (`useCallback`)
-5. Render
-6. Default export
-
-### Lazy Loading Pattern
-
-```ts
-const HeavyComponent = React.lazy(() => import('./HeavyComponent'));
-```
-
-Always wrapped in `<SuspenseLoader>`.
-
----
-
-## 7. Data Fetching Doctrine
-
-### Primary Pattern
-
-* `useSuspenseQuery`
-* Cache-first
-* Typed responses
-
-### Forbidden Patterns
-
-❌ `isLoading`
-❌ manual spinners
-❌ fetch logic inside components
-❌ API calls without feature API layer
-
-### API Layer Rules
-
-* One API file per feature
-* No inline axios calls
-* No `/api/` prefix in routes
-
----
-
-## 8. Routing Standards (TanStack Router)
-
-* Folder-based routing only
-* Lazy load route components
-* Breadcrumb metadata via loaders
-
-```ts
-export const Route = createFileRoute('/my-route/')({
-  component: MyPage,
-  loader: () => ({ crumb: 'My Route' }),
-});
-```
-
----
-
-## 9. Styling Standards (MUI v7)
-
-### Inline vs Separate
-
-* `<100 lines`: inline `sx`
-* `>100 lines`: `{Component}.styles.ts`
-
-### Grid Syntax (v7 Only)
-
-```tsx
-<Grid size={{ xs: 12, md: 6 }} /> // ✅
-<Grid xs={12} md={6} />          // ❌
-```
-
-Theme access must always be type-safe.
-
----
-
-## 10. Loading & Error Handling
-
-### Absolute Rule
-
-❌ Never return early loaders
-✅ Always rely on Suspense boundaries
-
-### User Feedback
-
-* `useMuiSnackbar` only
-* No third-party toast libraries
-
----
-
-## 11. Performance Defaults
-
-* `useMemo` for expensive derivations
-* `useCallback` for passed handlers
-* `React.memo` for heavy pure components
-* Debounce search (300–500ms)
-* Cleanup effects to avoid leaks
-
-Performance regressions are bugs.
-
----
-
-## 12. TypeScript Standards
-
-* Strict mode enabled
-* No implicit `any`
-* Explicit return types
-* JSDoc on public interfaces
-* Types colocated with feature
-
----
-
-## 13. Canonical File Structure
-
-```
-src/
-  features/
-    my-feature/
-      api/
-      components/
-      hooks/
-      helpers/
-      types/
-      index.ts
-
-  components/
-    SuspenseLoader/
-    CustomAppBar/
-
-  routes/
-    my-route/
-      index.tsx
-```
-
----
-
-## 14. Canonical Component Template
-
-```ts
-import React, { useState, useCallback } from 'react';
-import { Box, Paper } from '@mui/material';
-import { useSuspenseQuery } from '@tanstack/react-query';
-import { featureApi } from '../api/featureApi';
-import type { FeatureData } from '~types/feature';
-
-interface MyComponentProps {
-  id: number;
-  onAction?: () => void;
-}
-
-export const MyComponent: React.FC<MyComponentProps> = ({ id, onAction }) => {
-  const [state, setState] = useState('');
-
-  const { data } = useSuspenseQuery<FeatureData>({
-    queryKey: ['feature', id],
-    queryFn: () => featureApi.getFeature(id),
-  });
-
-  const handleAction = useCallback(() => {
-    setState('updated');
-    onAction?.();
-  }, [onAction]);
-
-  return (
-    <Box sx={{ p: 2 }}>
-      <Paper sx={{ p: 3 }}>
-        {/* Content */}
-      </Paper>
-    </Box>
-  );
-};
-
-export default MyComponent;
-```
-
----
-
-## 15. Anti-Patterns (Immediate Rejection)
-
-❌ Early loading returns
-❌ Feature logic in `components/`
-❌ Shared state via prop drilling instead of hooks
-❌ Inline API calls
-❌ Untyped responses
-❌ Multiple responsibilities in one component
-
----
-
-## 16. Integration With Other Skills
-
-* **frontend-design** → Visual systems & aesthetics
-* **page-cro** → Layout hierarchy & conversion logic
-* **analytics-tracking** → Event instrumentation
-* **backend-dev-guidelines** → API contract alignment
-* **error-tracking** → Runtime observability
-
----
-
-## 17. Operator Validation Checklist
-
-Before finalizing code:
-
-* [ ] FFCI ≥ 6
-* [ ] Suspense used correctly
-* [ ] Feature boundaries respected
-* [ ] No early returns
-* [ ] Types explicit and correct
-* [ ] Lazy loading applied
-* [ ] Performance safe
-
----
-
-## 18. Skill Status
-
-**Status:** Stable, opinionated, and enforceable
-**Intended Use:** Production React codebases with long-term maintenance horizons
-
+- `frontend-design`：涉及视觉质量、布局、组件外观、交互体验时同时使用。
+- `systematic-debugging`：遇到 bug、测试失败或异常行为时同时使用。
+- `test-driven-development`：新增功能或 bugfix 且可测试时同时使用。
+- `backend-dev-guidelines`：涉及 API 合约或前后端字段对齐时同时使用。

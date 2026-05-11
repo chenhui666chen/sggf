@@ -37,7 +37,7 @@ export const useAudiobookCharacterVoiceSettings = ({
   const handleVoiceChange = useCallback((characterId: number, voiceId: string) => {
     const preset = voicePresets.find((item) => item.id === voiceId)
     patchCharacterVoice(characterId, (current) => {
-      const patch: Partial<CharacterVoiceSetting> = { voiceId }
+      const patch: Partial<CharacterVoiceSetting> = { voiceId, source: 'user' }
       if (!current.voiceId && preset?.default_params) {
         patch.volume = preset.default_params.volume ?? current.volume
         patch.speed = preset.default_params.speed ?? current.speed
@@ -48,36 +48,36 @@ export const useAudiobookCharacterVoiceSettings = ({
   }, [patchCharacterVoice, voicePresets])
 
   const handleVolumeChange = useCallback((characterId: number, volume: number) => {
-    patchCharacterVoice(characterId, () => ({ volume }))
+    patchCharacterVoice(characterId, () => ({ volume, source: 'user' }))
   }, [patchCharacterVoice])
 
   const handleSpeedChange = useCallback((characterId: number, speed: number) => {
-    patchCharacterVoice(characterId, () => ({ speed }))
+    patchCharacterVoice(characterId, () => ({ speed, source: 'user' }))
   }, [patchCharacterVoice])
 
   const handlePitchChange = useCallback((characterId: number, pitch: number) => {
-    patchCharacterVoice(characterId, () => ({ pitch }))
+    patchCharacterVoice(characterId, () => ({ pitch, source: 'user' }))
   }, [patchCharacterVoice])
 
   const handleTtsModelChangeForCharacter = useCallback((characterId: number, nextModel: TtsModel | 'inherit') => {
     if (nextModel === 'inherit') {
-      patchCharacterVoice(characterId, () => ({ ttsModel: undefined }))
+      patchCharacterVoice(characterId, () => ({ ttsModel: undefined, source: 'user' }))
       return
     }
 
-    patchCharacterVoice(characterId, () => ({ ttsModel: nextModel }))
+    patchCharacterVoice(characterId, () => ({ ttsModel: nextModel, source: 'user' }))
   }, [patchCharacterVoice])
 
   const handleVoiceTypeChange = useCallback((characterId: number, voiceType: string) => {
-    patchCharacterVoice(characterId, () => ({ voiceType: voiceType || undefined }))
+    patchCharacterVoice(characterId, () => ({ voiceType: voiceType || undefined, source: 'user' }))
   }, [patchCharacterVoice])
 
   const handlePersonalityChange = useCallback((characterId: number, personality: string) => {
-    patchCharacterVoice(characterId, () => ({ personality: personality || undefined }))
+    patchCharacterVoice(characterId, () => ({ personality: personality || undefined, source: 'user' }))
   }, [patchCharacterVoice])
 
   const handleEmotionTendencyChange = useCallback((characterId: number, emotionTendency: string) => {
-    patchCharacterVoice(characterId, () => ({ emotionTendency: emotionTendency || undefined }))
+    patchCharacterVoice(characterId, () => ({ emotionTendency: emotionTendency || undefined, source: 'user' }))
   }, [patchCharacterVoice])
 
   const handleRecommendVoiceType = useCallback(async (characterVoice: CharacterVoiceSetting) => {
@@ -106,10 +106,10 @@ export const useAudiobookCharacterVoiceSettings = ({
         return
       }
 
-      patchCharacterVoice(characterVoice.characterId, () => ({ voiceType: nextVoiceType }))
+      patchCharacterVoice(characterVoice.characterId, () => ({ voiceType: nextVoiceType, source: 'user' }))
       setSnackbar({
         open: true,
-        message: `已为 ${characterVoice.name || '角色'} 推荐声音类型`,
+        message: `已为 ${characterVoice.name || '角色'} 推荐声音类型，试听和生成会应用该风格。`,
         severity: 'success',
       })
     } catch (error) {

@@ -1,28 +1,31 @@
 from __future__ import annotations
 
 import json
+import logging
 
-from fastapi import Depends, HTTPException
-from sqlalchemy.orm import Session
+from fastapi import Depends
 
 from app.core.security import get_current_user
-from app.db.base import get_db
 from app.models.user import User
-from app.models.project import Project
-from app.models.audiobook import AudiobookProject, ChapterAudio
+from app.api.v1.audiobook_api.dependencies import (
+    OwnedAudiobookProject,
+    get_active_chapter_audio_for_project,
+    get_owned_audiobook_project,
+)
 from app.services.audiobook.narration_styles import (
-    find_narration_style_preset,
     get_all_narration_styles,
 )
 
 from app.api.v1.audiobook_api import router
 
+logger = logging.getLogger(__name__)
+
+
 @router.get("/projects/{audiobook_project_id:int}/chapters/{chapter_id:int}/review-status")
 async def get_chapter_review_status(
     audiobook_project_id: int,
     chapter_id: int,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    owned: OwnedAudiobookProject = Depends(get_owned_audiobook_project),
 ):
     """获取章节整体审查状态
     
@@ -32,32 +35,28 @@ async def get_chapter_review_status(
     - 平均质量评分
     - 标记需要重新生成的片段索引
     """
-    audiobook_project = db.query(AudiobookProject).filter(
-        AudiobookProject.id == audiobook_project_id
-    ).first()
-    if not audiobook_project:
-        raise HTTPException(status_code=404, detail="有声书项目不存在")
-    
-    project = db.query(Project).filter(
-        Project.id == audiobook_project.project_id,
-        Project.user_id == current_user.id,
-    ).first()
-    if not project:
-        raise HTTPException(status_code=403, detail="无权限访问")
-    
-    chapter_audio = db.query(ChapterAudio).filter(
-        ChapterAudio.audiobook_project_id == audiobook_project_id,
-        ChapterAudio.chapter_id == chapter_id,
-    ).first()
-    if not chapter_audio:
-        raise HTTPException(status_code=404, detail="章节音频记录不存在")
+    chapter_audio = get_active_chapter_audio_for_project(
+        db=owned.db,
+        audiobook_project_id=audiobook_project_id,
+        chapter_id=chapter_id,
+    )
     
     # 加载剧本和审查记录
     try:
         segments = json.loads(chapter_audio.script_json or "[]")
-    except Exception:
+    except (json.JSONDecodeError, TypeError) as exc:
+        logger.warning(
+            "章节审查状态忽略损坏剧本 JSON: chapter_audio_id=%s error=%s",
+            chapter_audio.id,
+            exc,
+        )
         segments = []
     if not isinstance(segments, list):
+        logger.warning(
+            "章节审查状态忽略非数组剧本 JSON: chapter_audio_id=%s payload_type=%s",
+            chapter_audio.id,
+            type(segments).__name__,
+        )
         segments = []
     
     review_data = {}
@@ -66,8 +65,18 @@ async def get_chapter_review_status(
             loaded_review_data = json.loads(chapter_audio.segment_reviews_json)
             if isinstance(loaded_review_data, dict):
                 review_data = loaded_review_data
-        except Exception:
-            review_data = {}
+            else:
+                logger.warning(
+                    "章节审查状态忽略非对象审查 JSON: chapter_audio_id=%s payload_type=%s",
+                    chapter_audio.id,
+                    type(loaded_review_data).__name__,
+                )
+        except (json.JSONDecodeError, TypeError) as exc:
+            logger.warning(
+                "章节审查状态忽略损坏审查 JSON: chapter_audio_id=%s error=%s",
+                chapter_audio.id,
+                exc,
+            )
     
     total_segments = len(segments)
     reviewed_segments = 0
@@ -108,16 +117,3 @@ async def list_narration_styles(
 ):
     """获取所有叙事风格预设列表"""
     return get_all_narration_styles()
-
-
-@router.get("/narration-styles/{style_id}")
-async def get_narration_style(
-    style_id: str,
-    current_user: User = Depends(get_current_user),
-):
-    """获取指定叙事风格预设详情"""
-    preset = find_narration_style_preset(style_id)
-    if not preset:
-        raise HTTPException(status_code=404, detail="叙事风格预设不存在")
-    return preset
-

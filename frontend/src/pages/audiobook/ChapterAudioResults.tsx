@@ -4,36 +4,44 @@ import {
 } from '@mui/material'
 
 import ChapterAudioResultItem from './ChapterAudioResultItem'
-import type { Chapter, ChapterAudio, GenerationCheckpoint } from './types'
+import type { Chapter, ChapterAudio, GenerationCheckpoint, TtsModel } from './types'
 
 interface ChapterAudioResultsProps {
   chapterAudios: ChapterAudio[]
   chapters: Chapter[]
   playingChapter: number | null
-  collectingChapterId: number | null
+  collectingChapterIds: ReadonlySet<number>
   resumeCheckpoints: Record<number, GenerationCheckpoint>
   generating: boolean
   resumingChapterId: number | null
+  ttsModel?: TtsModel
+  projectId?: number
+  audiobookProjectId?: number
   onPlayAudio: (chapterId: number) => void
   onDownloadAudio: (chapterId: number) => void
   onCollectChapterAudio: (chapterAudio: ChapterAudio) => void
   onOpenScriptEditor: (chapterId: number) => void
   onResumeChapterGeneration: (chapterId: number) => void
+  onOpenScriptReview?: (audiobookProjectId: number, chapterId: number) => void
 }
 
 const ChapterAudioResults = ({
   chapterAudios,
   chapters,
   playingChapter,
-  collectingChapterId,
+  collectingChapterIds,
   resumeCheckpoints,
   generating,
   resumingChapterId,
+  ttsModel,
+  projectId,
+  audiobookProjectId,
   onPlayAudio,
   onDownloadAudio,
   onCollectChapterAudio,
   onOpenScriptEditor,
   onResumeChapterGeneration,
+  onOpenScriptReview,
 }: ChapterAudioResultsProps) => {
   if (chapterAudios.length === 0) {
     return null
@@ -48,7 +56,7 @@ const ChapterAudioResults = ({
         {chapterAudios.map((chapterAudio) => {
           const chapter = chapters.find((item) => item.id === chapterAudio.chapter_id)
           const isPlaying = playingChapter === chapterAudio.chapter_id
-          const isCollecting = collectingChapterId === chapterAudio.chapter_id
+          const isCollecting = collectingChapterIds.has(chapterAudio.chapter_id)
           const resumeCheckpoint = resumeCheckpoints[chapterAudio.chapter_id]
 
           return (
@@ -58,15 +66,19 @@ const ChapterAudioResults = ({
               chapter={chapter}
               isPlaying={isPlaying}
               isCollecting={isCollecting}
-              collectDisabled={collectingChapterId !== null}
+              collectDisabled={isCollecting}
               resumeCheckpoint={resumeCheckpoint}
               generating={generating}
               resumingChapterId={resumingChapterId}
+              ttsModel={ttsModel}
+              projectId={projectId}
+              audiobookProjectId={audiobookProjectId}
               onPlayAudio={onPlayAudio}
               onDownloadAudio={onDownloadAudio}
               onCollectChapterAudio={onCollectChapterAudio}
               onOpenScriptEditor={onOpenScriptEditor}
               onResumeChapterGeneration={onResumeChapterGeneration}
+              onOpenScriptReview={onOpenScriptReview}
             />
           )
         })}

@@ -231,6 +231,42 @@ def recommend_voice_type(
     age_range: Optional[str] = None,
 ) -> List[str]:
     """根据角色属性推荐声音类型"""
+    personality_aliases = {
+        "rebellious": "rebel",
+        "rebel": "rebel",
+    }
+    gender_aliases = {
+        "男": "male",
+        "男性": "male",
+        "man": "male",
+        "boy": "male",
+        "m": "male",
+        "女": "female",
+        "女性": "female",
+        "woman": "female",
+        "girl": "female",
+        "f": "female",
+    }
+    age_aliases = {
+        "old": "elderly",
+        "elder": "elderly",
+        "elderly": "elderly",
+        "young": "adult",
+        "youth": "teen",
+        "teenager": "teen",
+    }
+    personality = personality_aliases.get(
+        str(personality or "").strip().lower(),
+        str(personality or "").strip().lower() or None,
+    )
+    gender = gender_aliases.get(
+        str(gender or "").strip().lower(),
+        str(gender or "").strip().lower() or None,
+    )
+    age_range = age_aliases.get(
+        str(age_range or "").strip().lower(),
+        str(age_range or "").strip().lower() or None,
+    )
     recommendations = []
 
     for voice_type, preset in VOICE_TYPE_PRESETS.items():
@@ -256,7 +292,20 @@ def recommend_voice_type(
 
     # 按分数排序
     recommendations.sort(key=lambda x: x[1], reverse=True)
-    return [v[0] for v in recommendations[:3]]
+    if recommendations:
+        return [v[0] for v in recommendations[:3]]
+
+    if age_range == "teen":
+        return ["lively", "playful", "gentle"]
+    if age_range == "elderly":
+        return ["majestic", "weathered", "scholarly"]
+    if age_range == "child":
+        return ["playful", "lively", "gentle"]
+    if gender == "female":
+        return ["gentle", "warm", "lively"]
+    if gender == "male":
+        return ["powerful", "majestic", "warm"]
+    return ["warm", "gentle", "mysterious"]
 
 
 def apply_voice_type_to_tts_params(

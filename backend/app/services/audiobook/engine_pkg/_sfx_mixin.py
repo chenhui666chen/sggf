@@ -14,6 +14,7 @@ from ..voice_manager_factory import create_voice_manager
 from ..audio_mixer import AudioMixer
 from app.services.chapter_adaptation_assets import build_audio_adaptation_hint
 from core.unified_media_runtime import create_tts_engine
+from app.services.audiobook.audio_library_paths import get_audio_library_dir
 
 try:
     from ..agent_dispatch_client import client as tts_dispatch_client
@@ -49,14 +50,15 @@ class SfxMixin:
             return audio_data
         
         mixed_audio = audio_data
-        base_dir = Path(__file__).resolve().parents[3] / "data" / "audio_library"
+        base_dir = get_audio_library_dir()
         audio_fx = getattr(self, "_audio_fx_config", None) or {}
         ducking_enabled = audio_fx.get("sound_effect_ducking", True)
         ducking_priority = audio_fx.get("sound_effect_priority", "dialogue")
         ducking_threshold_dbfs = audio_fx.get("sound_effect_ducking_threshold_dbfs", -35.0)
         ducking_reduction_db = audio_fx.get("sound_effect_ducking_reduction_db", -6.0)
         ducking_chunk_ms = audio_fx.get("sound_effect_ducking_chunk_ms", 250)
-        base_dir = Path(__file__).resolve().parents[3] / "data" / "audio_library"
+        applied_count = 0
+        skipped_count = 0
         
         for item in timeline_items:
             file_ref = item.get("file")
@@ -92,6 +94,7 @@ class SfxMixin:
             effect_volume_offset = base_gain + volume_adjust_db
 
             if not file_ref:
+                skipped_count += 1
                 continue
             
             effect_path = Path(file_ref)
@@ -106,6 +109,7 @@ class SfxMixin:
                         break
             if not effect_path.exists():
                 logger.warning(f"⚠️ 音效文件不存在: {effect_path}")
+                skipped_count += 1
                 continue
             
             try:
@@ -139,8 +143,11 @@ class SfxMixin:
                     ducking_reduction_db=float(ducking_reduction_db),
                     ducking_chunk_ms=int(ducking_chunk_ms),
                 )
+                applied_count += 1
             except Exception as e:
                 logger.warning(f"⚠️ 叠加音效失败 {effect_path}: {e}")
-        
+                skipped_count += 1
+
+        logger.info("🎛 音效时间线处理完成: applied=%s skipped=%s", applied_count, skipped_count)
         return mixed_audio
 

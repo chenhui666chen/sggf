@@ -23,6 +23,7 @@ import {
   DialogActions,
   DialogContent,
   DialogTitle,
+  Divider,
   Grid,
   IconButton,
   InputAdornment,
@@ -46,11 +47,13 @@ import ChapterDrawer from '@/components/audiobook/ChapterDrawer'
 import ProjectCard from '@/components/audiobook/ProjectCard'
 import useAudiobookChapterDrawer from '@/hooks/useAudiobookChapterDrawer'
 import BookParserUploadDialog from '@/components/BookParserUploadDialog'
+import { preloadAudiobookPage } from '@/pages/audiobook/audiobookPagePreload'
 import type { BookSource } from '@/services/bookParserApi'
 import type {
   AudiobookProjectSummary,
   BookColors,
   ChapterAudioDeleteCandidate,
+  DeletedChapterAudio,
   DeletedAudiobookProject,
   Project,
 } from '@/types/audiobook'
@@ -62,6 +65,7 @@ const AudiobookDashboardPage = () => {
   // 状态管理
   const [projects, setProjects] = useState<Project[]>([])
   const [loading, setLoading] = useState(true)
+  const [openingProjectId, setOpeningProjectId] = useState<number | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedGenre, setSelectedGenre] = useState<string>('all')
   
@@ -92,11 +96,13 @@ const AudiobookDashboardPage = () => {
   } | null>(null)
   const [audiobookProjectIdToDelete, setAudiobookProjectIdToDelete] = useState<number | null>(null)
 
-  // 回收站（已删除有声书项目）
+  // 回收站（已删除有声书项目与章节音频）
   const [recycleBinOpen, setRecycleBinOpen] = useState(false)
   const [recycleBinLoading, setRecycleBinLoading] = useState(false)
   const [deletedAudiobookProjects, setDeletedAudiobookProjects] = useState<DeletedAudiobookProject[]>([])
+  const [deletedChapterAudios, setDeletedChapterAudios] = useState<DeletedChapterAudio[]>([])
   const [restoringAudiobookProjectId, setRestoringAudiobookProjectId] = useState<number | null>(null)
+  const [restoringChapterAudioId, setRestoringChapterAudioId] = useState<number | null>(null)
 
   const chapterDrawer = useAudiobookChapterDrawer({
     onNotify: ({ message, severity }) => setSnackbar({ open: true, message, severity }),
@@ -124,6 +130,10 @@ const AudiobookDashboardPage = () => {
     fetchProjects()
   }, [])
 
+  useEffect(() => {
+    preloadAudiobookPage()
+  }, [])
+
   const formatTime = useCallback((seconds: number) => {
     if (!Number.isFinite(seconds) || seconds <= 0) return '00:00'
     const s = Math.floor(seconds)
@@ -146,13 +156,19 @@ const AudiobookDashboardPage = () => {
     return `${value.toFixed(digits)} ${units[idx]}`
   }, [])
 
-  const fetchDeletedAudiobookProjects = useCallback(async () => {
+  const fetchRecycleBinEntries = useCallback(async () => {
     setRecycleBinLoading(true)
     try {
-      const res = await apiClient.listDeletedProjects()
-      const data = res.data as any
-      const projects = Array.isArray(data?.projects) ? (data.projects as DeletedAudiobookProject[]) : []
+      const [projectsRes, chapterAudiosRes] = await Promise.all([
+        apiClient.listDeletedProjects(),
+        apiClient.listDeletedChapterAudios(),
+      ])
+      const projectData = projectsRes.data as any
+      const chapterAudioData = chapterAudiosRes.data
+      const projects = Array.isArray(projectData?.projects) ? (projectData.projects as DeletedAudiobookProject[]) : []
+      const chapterAudios = Array.isArray(chapterAudioData?.chapter_audios) ? chapterAudioData.chapter_audios : []
       setDeletedAudiobookProjects(projects)
+      setDeletedChapterAudios(chapterAudios)
     } catch (error: any) {
       setSnackbar({
         open: true,
@@ -166,7 +182,7 @@ const AudiobookDashboardPage = () => {
 
   const handleOpenRecycleBin = async () => {
     setRecycleBinOpen(true)
-    await fetchDeletedAudiobookProjects()
+    await fetchRecycleBinEntries()
   }
 
   const handleRestoreAudiobookProject = async (audiobookProjectId: number) => {
@@ -174,7 +190,8 @@ const AudiobookDashboardPage = () => {
     try {
       await apiClient.restoreAudiobookProject(audiobookProjectId)
       setSnackbar({ open: true, message: '已恢复到项目列表', severity: 'success' })
-      await fetchDeletedAudiobookProjects()
+      await fetchRecycleBinEntries()
+      await fetchProjects()
     } catch (error: any) {
       setSnackbar({
         open: true,
@@ -183,6 +200,26 @@ const AudiobookDashboardPage = () => {
       })
     } finally {
       setRestoringAudiobookProjectId(null)
+    }
+  }
+
+  const handleRestoreChapterAudio = async (chapterAudioId: number) => {
+    setRestoringChapterAudioId(chapterAudioId)
+    try {
+      await apiClient.restoreChapterAudio(chapterAudioId)
+      setSnackbar({ open: true, message: '章节音频已恢复', severity: 'success' })
+      if (chapterDrawer.open) {
+        await chapterDrawer.refresh()
+      }
+      await fetchRecycleBinEntries()
+    } catch (error: any) {
+      setSnackbar({
+        open: true,
+        message: await extractApiErrorMessage(error, '恢复章节音频失败，请稍后重试'),
+        severity: 'error',
+      })
+    } finally {
+      setRestoringChapterAudioId(null)
     }
   }
 
@@ -283,7 +320,23 @@ const AudiobookDashboardPage = () => {
 
   // 点击项目卡片，跳转到有声书生成页面
   const handleProjectClick = (project: Project) => {
-    navigate(`/audiobook/${project.id}`)
+    if (openingProjectId !== null) return
+
+    setOpeningProjectId(project.id)
+    setSnackbar({
+      open: true,
+      message: '正在进入项目配置，首次加载可能需要几秒，请稍候',
+      severity: 'info',
+    })
+    preloadAudiobookPage()
+
+    window.requestAnimationFrame(() => {
+      navigate(`/audiobook/${project.id}`)
+    })
+  }
+
+  const handleProjectPreload = () => {
+    preloadAudiobookPage()
   }
 
   const handleLogout = () => {
@@ -298,6 +351,9 @@ const AudiobookDashboardPage = () => {
       severity: 'success',
     })
   }
+
+  const recycleBinBusy = Boolean(restoringAudiobookProjectId || restoringChapterAudioId)
+  const hasRecycleBinItems = deletedAudiobookProjects.length > 0 || deletedChapterAudios.length > 0
 
   return (
     <Box
@@ -504,8 +560,10 @@ const AudiobookDashboardPage = () => {
                       <ProjectCard
                         project={project}
                         colors={colors}
+                        loading={openingProjectId === project.id}
                         onOpenProject={handleProjectClick}
                         onOpenChapterDrawer={handleOpenChapterDrawer}
+                        onPreloadProject={handleProjectPreload}
                       />
                     </Grid>
                   )
@@ -609,73 +667,144 @@ const AudiobookDashboardPage = () => {
         )}
       </Container>
 
-      {/* 回收站：已删除有声书项目 */}
+      {/* 回收站：已删除有声书项目与章节音频 */}
       <Dialog
         open={recycleBinOpen}
         onClose={() => {
-          if (!restoringAudiobookProjectId) setRecycleBinOpen(false)
+          if (!recycleBinBusy) setRecycleBinOpen(false)
         }}
-        maxWidth="sm"
+        maxWidth="md"
         fullWidth
       >
-        <DialogTitle>回收站（已删除有声书）</DialogTitle>
-        <DialogContent>
+        <DialogTitle>回收站</DialogTitle>
+        <DialogContent dividers>
           {recycleBinLoading ? (
             <Box sx={{ py: 2, display: 'flex', justifyContent: 'center' }}>
               <CircularProgress size={24} />
             </Box>
-          ) : deletedAudiobookProjects.length === 0 ? (
+          ) : !hasRecycleBinItems ? (
             <Alert severity="info" sx={{ mt: 1 }}>
               暂无已删除的有声书记录。
             </Alert>
           ) : (
-            <List dense>
-              {deletedAudiobookProjects.map((item) => (
-                <ListItem
-                  key={`deleted-audiobook-${item.id}`}
-                  divider
-                  secondaryAction={
-                    <Button
-                      size="small"
-                      variant="contained"
-                      onClick={() => handleRestoreAudiobookProject(item.id)}
-                      disabled={restoringAudiobookProjectId === item.id}
-                    >
-                      {restoringAudiobookProjectId === item.id ? (
-                        <CircularProgress size={16} color="inherit" />
-                      ) : (
-                        '恢复'
-                      )}
-                    </Button>
-                  }
-                >
-                  <ListItemText
-                    primary={item.project_title ? `《${item.project_title}》` : `有声书项目 #${item.id}`}
-                    secondary={
-                      <>
-                        <Typography variant="caption" color="text.secondary" display="block">
-                          删除时间：{item.deleted_at ? new Date(item.deleted_at).toLocaleString() : '未知'}
-                        </Typography>
-                        <Typography variant="caption" color="text.secondary" display="block">
-                          影响：{item.affected_chapters ?? 0} 章 · {formatBytes(item.total_size ?? 0)}
-                        </Typography>
-                        {item.delete_reason ? (
-                          <Typography variant="caption" color="text.secondary" display="block">
-                            原因：{item.delete_reason}
-                          </Typography>
-                        ) : null}
-                      </>
-                    }
-                  />
-                </ListItem>
-              ))}
-            </List>
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+              {deletedAudiobookProjects.length > 0 ? (
+                <Box>
+                  <Typography variant="subtitle2" sx={{ mb: 0.5, fontWeight: 700 }}>
+                    已删除有声书项目
+                  </Typography>
+                  <List dense disablePadding>
+                    {deletedAudiobookProjects.map((item) => (
+                      <ListItem
+                        key={`deleted-audiobook-${item.id}`}
+                        divider
+                        sx={{ pr: { xs: 12, sm: 14 } }}
+                        secondaryAction={
+                          <Button
+                            size="small"
+                            variant="contained"
+                            onClick={() => handleRestoreAudiobookProject(item.id)}
+                            disabled={recycleBinBusy}
+                            startIcon={
+                              restoringAudiobookProjectId === item.id ? (
+                                <CircularProgress size={14} color="inherit" />
+                              ) : undefined
+                            }
+                          >
+                            恢复
+                          </Button>
+                        }
+                      >
+                        <ListItemText
+                          primary={item.project_title ? `《${item.project_title}》` : `有声书项目 #${item.id}`}
+                          secondary={
+                            <>
+                              <Typography variant="caption" color="text.secondary" display="block">
+                                删除时间：{item.deleted_at ? new Date(item.deleted_at).toLocaleString() : '未知'}
+                              </Typography>
+                              <Typography variant="caption" color="text.secondary" display="block">
+                                影响：{item.affected_chapters ?? 0} 章 · {formatBytes(item.total_size ?? 0)}
+                              </Typography>
+                              {item.delete_reason ? (
+                                <Typography variant="caption" color="text.secondary" display="block">
+                                  原因：{item.delete_reason}
+                                </Typography>
+                              ) : null}
+                            </>
+                          }
+                        />
+                      </ListItem>
+                    ))}
+                  </List>
+                </Box>
+              ) : null}
+
+              {deletedAudiobookProjects.length > 0 && deletedChapterAudios.length > 0 ? <Divider /> : null}
+
+              {deletedChapterAudios.length > 0 ? (
+                <Box>
+                  <Typography variant="subtitle2" sx={{ mb: 0.5, fontWeight: 700 }}>
+                    已删除章节音频
+                  </Typography>
+                  <List dense disablePadding>
+                    {deletedChapterAudios.map((item) => (
+                      <ListItem
+                        key={`deleted-chapter-audio-${item.chapter_audio_id}`}
+                        divider
+                        sx={{ pr: { xs: 12, sm: 14 } }}
+                        secondaryAction={
+                          <Button
+                            size="small"
+                            variant="contained"
+                            onClick={() => handleRestoreChapterAudio(item.chapter_audio_id)}
+                            disabled={recycleBinBusy}
+                            startIcon={
+                              restoringChapterAudioId === item.chapter_audio_id ? (
+                                <CircularProgress size={14} color="inherit" />
+                              ) : undefined
+                            }
+                          >
+                            恢复
+                          </Button>
+                        }
+                      >
+                        <ListItemText
+                          primary={
+                            item.chapter_title
+                              ? `第${item.chapter_number ?? '?'}章 ${item.chapter_title}`
+                              : `章节音频 #${item.chapter_audio_id}`
+                          }
+                          secondary={
+                            <>
+                              <Typography variant="caption" color="text.secondary" display="block">
+                                所属项目：{item.project_title ? `《${item.project_title}》` : `项目 #${item.project_id ?? '-'}`}
+                              </Typography>
+                              <Typography variant="caption" color="text.secondary" display="block">
+                                删除时间：{item.deleted_at ? new Date(item.deleted_at).toLocaleString() : '未知'}
+                              </Typography>
+                              <Typography variant="caption" color="text.secondary" display="block">
+                                音频：{formatTime(item.duration ?? 0)} · {formatBytes(item.total_size ?? item.file_size ?? 0)}
+                              </Typography>
+                              {item.delete_reason ? (
+                                <Typography variant="caption" color="text.secondary" display="block">
+                                  原因：{item.delete_reason}
+                                </Typography>
+                              ) : null}
+                            </>
+                          }
+                        />
+                      </ListItem>
+                    ))}
+                  </List>
+                </Box>
+              ) : null}
+            </Box>
           )}
         </DialogContent>
         <DialogActions>
           <Button
             onClick={() => setRecycleBinOpen(false)}
-            disabled={Boolean(restoringAudiobookProjectId)}
+            disabled={recycleBinBusy}
           >
             关闭
           </Button>

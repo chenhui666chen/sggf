@@ -1,17 +1,7 @@
-import { useState, useCallback, useMemo } from 'react'
+import React, { useState, useCallback, useMemo } from 'react'
 import { apiClient, extractApiErrorMessage } from '../services/api'
-
-export interface DreamweaverRunSummary {
-  id: number
-  run_id: string
-  status: string
-  created_at?: string
-  updated_at?: string
-  state?: string | null
-  stage?: string | null
-  progress?: number | null
-  error?: string | null
-}
+import { toDreamweaverRunSummaries } from '../pages/dreamweaver-run/runPageHelpers'
+import type { DreamweaverRunSummary } from '../types/dreamweaver'
 
 export interface UseDreamweaverRunHistoryReturn {
   historyOpen: boolean
@@ -20,11 +10,12 @@ export interface UseDreamweaverRunHistoryReturn {
   historyError: string | null
   historyRuns: DreamweaverRunSummary[]
   historyStatusFilters: string[]
-  setHistoryStatusFilters: (filters: string[]) => void
+  setHistoryStatusFilters: React.Dispatch<React.SetStateAction<string[]>>
   historyStatusCounts: Record<string, number>
   filteredHistoryRuns: DreamweaverRunSummary[]
   fetchRunHistory: (projectId: number) => Promise<void>
-  clearHistoryError: () => void
+  openHistoryDialog: (projectId: number) => void
+  closeHistoryDialog: () => void
 }
 
 export function useDreamweaverRunHistory(): UseDreamweaverRunHistoryReturn {
@@ -39,7 +30,7 @@ export function useDreamweaverRunHistory(): UseDreamweaverRunHistoryReturn {
     setHistoryError(null)
     try {
       const res = await apiClient.listDreamweaverRuns(projectId, 100)
-      const runs = Array.isArray(res.data) ? (res.data as DreamweaverRunSummary[]) : []
+      const runs = toDreamweaverRunSummaries(res.data)
       setHistoryRuns(runs)
     } catch (e: any) {
       setHistoryError(await extractApiErrorMessage(e, '加载历史任务失败'))
@@ -64,8 +55,18 @@ export function useDreamweaverRunHistory(): UseDreamweaverRunHistoryReturn {
     return historyRuns.filter((run) => enabled.has(String(run.status || '').trim().toLowerCase() || 'unknown'))
   }, [historyRuns, historyStatusFilters])
 
-  const clearHistoryError = useCallback(() => {
+  const openHistoryDialog = useCallback(
+    (projectId: number) => {
+      setHistoryOpen(true)
+      void fetchRunHistory(projectId)
+    },
+    [fetchRunHistory],
+  )
+
+  const closeHistoryDialog = useCallback(() => {
+    setHistoryOpen(false)
     setHistoryError(null)
+    setHistoryStatusFilters([])
   }, [])
 
   return {
@@ -79,6 +80,7 @@ export function useDreamweaverRunHistory(): UseDreamweaverRunHistoryReturn {
     historyStatusCounts,
     filteredHistoryRuns,
     fetchRunHistory,
-    clearHistoryError,
+    openHistoryDialog,
+    closeHistoryDialog,
   }
 }

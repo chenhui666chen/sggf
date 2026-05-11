@@ -1,22 +1,39 @@
 import MoreVertIcon from '@mui/icons-material/MoreVert'
-import { Box, Card, CardContent, Chip, IconButton, Typography } from '@mui/material'
+import { Box, Card, CardContent, Chip, CircularProgress, IconButton, Typography } from '@mui/material'
 import type { BookColors, Project } from '@/types/audiobook'
 
 export default function ProjectCard({
   project,
   colors,
+  loading = false,
   onOpenProject,
   onOpenChapterDrawer,
+  onPreloadProject,
 }: {
   project: Project
   colors: BookColors
+  loading?: boolean
   onOpenProject: (project: Project) => void
   onOpenChapterDrawer: (project: Project) => void
+  onPreloadProject?: (project: Project) => void
 }) {
+  const handlePreloadProject = () => {
+    onPreloadProject?.(project)
+  }
+
+  const handleOpenProject = () => {
+    if (loading) return
+    onOpenProject(project)
+  }
+
   return (
     <Card
+      role="button"
+      tabIndex={0}
+      aria-busy={loading || undefined}
+      aria-disabled={loading || undefined}
       sx={{
-        cursor: 'pointer',
+        cursor: loading ? 'progress' : 'pointer',
         transition: 'transform 0.25s ease, box-shadow 0.25s ease',
         background: 'linear-gradient(135deg, rgba(17,24,39,0.55) 0%, rgba(31,41,55,0.45) 100%)',
         border: '1px solid rgba(255,255,255,0.12)',
@@ -41,10 +58,42 @@ export default function ProjectCard({
         '&:hover .vinyl': { transform: 'rotate(10deg)' },
         '&:hover .vinyl .playOverlay': { opacity: 1 },
       }}
-      onClick={() => onOpenProject(project)}
+      onClick={handleOpenProject}
+      onFocus={handlePreloadProject}
+      onPointerEnter={handlePreloadProject}
+      onKeyDown={(event) => {
+        if (event.currentTarget !== event.target) return
+        if (event.key !== 'Enter' && event.key !== ' ') return
+        event.preventDefault()
+        handleOpenProject()
+      }}
     >
+      {loading ? (
+        <Box
+          sx={{
+            position: 'absolute',
+            inset: 0,
+            zIndex: 4,
+            backgroundColor: 'rgba(5,10,20,0.62)',
+            backdropFilter: 'blur(3px)',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 1,
+            color: 'white',
+          }}
+        >
+          <CircularProgress size={28} sx={{ color: 'rgba(255,255,255,0.92)' }} />
+          <Typography sx={{ fontSize: '0.9rem', fontWeight: 700 }}>
+            正在进入项目配置
+          </Typography>
+        </Box>
+      ) : null}
+
       {/* 三点：快速打开“章节目录抽屉” */}
       <IconButton
+        disabled={loading}
         sx={{
           position: 'absolute',
           bottom: 8,

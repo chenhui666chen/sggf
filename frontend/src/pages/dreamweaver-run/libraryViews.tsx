@@ -1,6 +1,9 @@
 import type { ReactNode } from 'react'
 
-import { Box, Button, Chip, ImageListItem, Stack, Typography } from '@mui/material'
+import { Box, Button, Chip, ImageListItem, Stack, Tooltip, Typography } from '@mui/material'
+import LinkIcon from '@mui/icons-material/Link'
+import LinkOffIcon from '@mui/icons-material/LinkOff'
+import SyncIcon from '@mui/icons-material/Sync'
 
 type DreamweaverLibraryDisplayCardStateProps = {
   preview?: string | null
@@ -28,9 +31,13 @@ type DreamweaverLibraryDisplayCardProps = {
   aspectRatio: string
   state: DreamweaverLibraryDisplayCardStateProps
   libraryLoading: boolean
+  klingSubjectId?: string | null
+  klingSyncing?: boolean
   onToggleApprove?: () => void
   onLoadPreview?: () => void
   onOpenRegenerate: () => void
+  onOpenProviderRefDialog?: () => void
+  onSyncProviderRef?: () => void
 }
 
 function DreamweaverLibraryDisplayCardPreviewArea({
@@ -123,15 +130,23 @@ function DreamweaverLibraryDisplayCardErrors({
 function DreamweaverLibraryDisplayCardActions({
   state,
   libraryLoading,
+  klingSubjectId,
+  klingSyncing,
   onToggleApprove,
   onLoadPreview,
   onOpenRegenerate,
+  onOpenProviderRefDialog,
+  onSyncProviderRef,
 }: {
   state: DreamweaverLibraryDisplayCardStateProps
   libraryLoading: boolean
+  klingSubjectId?: string | null
+  klingSyncing?: boolean
   onToggleApprove?: () => void
   onLoadPreview?: () => void
   onOpenRegenerate: () => void
+  onOpenProviderRefDialog?: () => void
+  onSyncProviderRef?: () => void
 }) {
   return (
     <Stack direction="row" spacing={1} alignItems="center" mt={0.5} flexWrap="wrap">
@@ -156,6 +171,54 @@ function DreamweaverLibraryDisplayCardActions({
           >
             {state.hasRenderableImage ? '重新生成' : '生成素材'}
           </Button>
+          {state.hasRenderableImage && onOpenProviderRefDialog && (
+            klingSubjectId ? (
+              <>
+                <Chip
+                  size="small"
+                  icon={<LinkIcon sx={{ fontSize: 14 }} />}
+                  label={`Kling: ${klingSubjectId.slice(0, 8)}${klingSubjectId.length > 8 ? '...' : ''}`}
+                  color="info"
+                  variant="outlined"
+                />
+                {onSyncProviderRef && (
+                  <Tooltip title="同步 Kling 主体引用到关联视角" arrow>
+                    <span>
+                      <Button
+                        size="small"
+                        variant="text"
+                        startIcon={<SyncIcon sx={{ fontSize: 14 }} />}
+                        onClick={onSyncProviderRef}
+                        disabled={klingSyncing}
+                        sx={{ minWidth: 'auto', px: 0.5, fontSize: 11 }}
+                      >
+                        {klingSyncing ? '同步中...' : '同步'}
+                      </Button>
+                    </span>
+                  </Tooltip>
+                )}
+                <Button
+                  size="small"
+                  variant="text"
+                  startIcon={<LinkOffIcon sx={{ fontSize: 14 }} />}
+                  onClick={onOpenProviderRefDialog}
+                  sx={{ minWidth: 'auto', px: 0.5, fontSize: 11 }}
+                >
+                  解绑
+                </Button>
+              </>
+            ) : (
+              <Button
+                size="small"
+                variant="text"
+                startIcon={<LinkIcon sx={{ fontSize: 14 }} />}
+                onClick={onOpenProviderRefDialog}
+                sx={{ minWidth: 'auto', px: 0.5, fontSize: 11 }}
+              >
+                绑定 Kling
+              </Button>
+            )
+          )}
         </>
       ) : state.canGenerate ? (
         <Button size="small" variant="text" onClick={onOpenRegenerate} disabled={libraryLoading}>
@@ -174,9 +237,13 @@ export function DreamweaverLibraryDisplayCard({
   aspectRatio,
   state,
   libraryLoading,
+  klingSubjectId,
+  klingSyncing,
   onToggleApprove,
   onLoadPreview,
   onOpenRegenerate,
+  onOpenProviderRefDialog,
+  onSyncProviderRef,
 }: DreamweaverLibraryDisplayCardProps) {
   return (
     <ImageListItem key={itemKey} sx={{ border: '1px solid #eee', borderRadius: 2, overflow: 'hidden' }}>
@@ -194,9 +261,13 @@ export function DreamweaverLibraryDisplayCard({
         <DreamweaverLibraryDisplayCardActions
           state={state}
           libraryLoading={libraryLoading}
+          klingSubjectId={klingSubjectId}
+          klingSyncing={klingSyncing}
           onToggleApprove={onToggleApprove}
           onLoadPreview={onLoadPreview}
           onOpenRegenerate={onOpenRegenerate}
+          onOpenProviderRefDialog={onOpenProviderRefDialog}
+          onSyncProviderRef={onSyncProviderRef}
         />
       </Box>
     </ImageListItem>

@@ -177,6 +177,80 @@ def get_run(db, run_id):
     return db.query(ChapterAudioRun).filter(ChapterAudioRun.id == run_id).first()
 
 
+def test_update_stage_adds_trace_context_to_task_and_chapter_detail(monkeypatch):
+    session_factory = build_session_factory()
+
+    with session_factory() as db:
+        context = seed_tracker_context(db, celery_task_id="celery-stage-trace")
+        running_run = get_run(db, context["run_ids"]["running"])
+        chapter_id = running_run.chapter_id
+
+    emitted_events = []
+    monkeypatch.setattr(
+        AudiobookJobTracker,
+        "_with_session",
+        lambda self: session_factory(),
+    )
+    monkeypatch.setattr(
+        job_tracker.sse_tracker,
+        "emit_progress",
+        lambda task_id, payload: emitted_events.append((task_id, payload)),
+    )
+
+    AudiobookJobTracker(context["task_id"]).update_stage(
+        "tts_synthesis",
+        2,
+        5,
+        detail={
+            "chapter_id": chapter_id,
+            "status": "running",
+            "custom_metric": "kept",
+            "trace_id": "detail-trace-kept",
+        },
+    )
+
+    with session_factory() as db:
+        task = db.query(AudiobookTask).filter(AudiobookTask.id == context["task_id"]).first()
+        run = get_run(db, context["run_ids"]["running"])
+
+        assert task.detail_json["trace_id"] == "detail-trace-kept"
+        assert task.detail_json["celery_task_id"] == "celery-stage-trace"
+        assert task.detail_json["task_db_id"] == context["task_id"]
+        assert task.detail_json["task_type"] == "full"
+        assert task.detail_json["audiobook_project_id"] == run.audiobook_project_id
+        assert task.detail_json["chapter_id"] == chapter_id
+        assert task.detail_json["stage"] == "tts_synthesis"
+        assert task.detail_json["progress"] == 0.4
+        assert task.detail_json["custom_metric"] == "kept"
+
+        tracker_detail = run.checkpoint_json["tracker_detail"]
+        assert tracker_detail == task.detail_json
+
+    assert emitted_events == [
+        (
+            "celery-stage-trace",
+            {
+                "stage": "tts_synthesis",
+                "progress": 0.4,
+                "detail": {
+                    "chapter_id": chapter_id,
+                    "status": "running",
+                    "custom_metric": "kept",
+                    "trace_id": "detail-trace-kept",
+                    "celery_task_id": "celery-stage-trace",
+                    "task_db_id": context["task_id"],
+                    "task_type": "full",
+                    "audiobook_project_id": run.audiobook_project_id,
+                    "stage": "tts_synthesis",
+                    "progress": 0.4,
+                },
+                "status": "running",
+                "error_message": None,
+            },
+        )
+    ]
+
+
 def test_mark_failed_marks_unfinished_runs_for_same_celery_task(monkeypatch):
     session_factory = build_session_factory()
 

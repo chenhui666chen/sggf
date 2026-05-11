@@ -136,6 +136,7 @@ const CharacterVoiceConfigPanel = ({
           variant="outlined"
           onClick={onAutoAssignVoices}
           disabled={autoAssigningVoices}
+          startIcon={autoAssigningVoices ? <CircularProgress size={16} color="inherit" /> : undefined}
           sx={audiobookButtonSx.brandOutlined}
         >
           {autoAssigningVoices ? '智能推荐中...' : '基于人物卡自动推荐声线'}

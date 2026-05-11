@@ -5,7 +5,8 @@ import ContentCopyIcon from '@mui/icons-material/ContentCopy'
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import PhotoCameraIcon from '@mui/icons-material/PhotoCamera'
 import WarningIcon from '@mui/icons-material/Warning'
-import { Alert, Accordion, AccordionDetails, AccordionSummary, Button, Chip, Stack, Typography } from '@mui/material'
+import { Alert, Accordion, AccordionDetails, AccordionSummary, Box, Button, Chip, Stack, Typography } from '@mui/material'
+import { DreamweaverDiagnosticShotProviderTraceSection } from './diagnosticShotViews'
 
 type DreamweaverDiagnosticIssue = {
   code: string
@@ -380,6 +381,346 @@ export function DreamweaverDiagnosticCameraDiagnosticsSection({
         {cameraTreeAccordion ?? null}
         {cameraStatesAccordion ?? null}
         {cameraScenesAccordion ?? null}
+      </AccordionDetails>
+    </Accordion>
+  )
+}
+
+export interface DiagnosticFrameAccordionProps {
+  title: string
+  frame: unknown
+  kind?: 'image' | 'video'
+  renderPreviewGrid: (title: string, uris: string[], kind: 'image' | 'video') => ReactNode
+  renderDiagnosticJson: (value: unknown) => ReactNode
+  copyText: (text: string) => void
+  safeJsonStringify: (value: unknown) => string
+}
+
+export function DiagnosticFrameAccordion({
+  title,
+  frame,
+  kind = 'image',
+  renderPreviewGrid,
+  renderDiagnosticJson,
+  copyText,
+  safeJsonStringify,
+}: DiagnosticFrameAccordionProps) {
+  if (!frame || typeof frame !== 'object') return null
+  const frameRecord = frame as Record<string, unknown>
+  const uri = String(frameRecord.path || '').trim()
+  if (!uri) return null
+  const meta =
+    frameRecord.meta && typeof frameRecord.meta === 'object' && !Array.isArray(frameRecord.meta)
+      ? (frameRecord.meta as Record<string, unknown>)
+      : {}
+  const decision =
+    meta.decision && typeof meta.decision === 'object' && !Array.isArray(meta.decision)
+      ? (meta.decision as Record<string, unknown>)
+      : null
+  const via = typeof meta.via === 'string' ? meta.via : ''
+  const mode = decision && typeof decision.mode === 'string' ? String(decision.mode) : ''
+  const reason = decision && typeof decision.reason === 'string' ? String(decision.reason) : ''
+  const selector = typeof meta.selector === 'string' ? meta.selector : ''
+  const candidateCount = typeof meta.candidate_count === 'number' ? meta.candidate_count : null
+  const selected = typeof meta.selected === 'number' ? meta.selected : null
+  const selectedSeed = typeof meta.selected_seed === 'number' ? meta.selected_seed : null
+  const candidates = Array.isArray(meta.candidates) ? meta.candidates : []
+  const hasCandidates = candidates.some((c) => typeof c === 'string' && String(c).trim())
+
+  return (
+    <Accordion sx={{ mt: 1 }}>
+      <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+        <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" sx={{ width: '100%' }}>
+          <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
+            {title}
+          </Typography>
+          {via && <Chip size="small" label={`via: ${via}`} />}
+          {mode && <Chip size="small" label={`mode: ${mode}`} />}
+          {reason && (
+            <Chip size="small" label={`reason: ${reason}`} variant="outlined" sx={{ maxWidth: 420 }} />
+          )}
+          {selector && <Chip size="small" label={`selector: ${selector}`} />}
+          {candidateCount != null && <Chip size="small" label={`cands: ${candidateCount}`} />}
+          {selected != null && <Chip size="small" label={`selected: ${selected}`} color="primary" />}
+          {selectedSeed != null && <Chip size="small" label={`seed: ${selectedSeed}`} />}
+          {hasCandidates && <Chip size="small" label="keep_candidates" color="success" variant="outlined" />}
+        </Stack>
+      </AccordionSummary>
+      <AccordionDetails>
+        <Stack direction="row" spacing={1} flexWrap="wrap" alignItems="center" sx={{ mb: 1 }}>
+          <Button size="small" variant="outlined" startIcon={<ContentCopyIcon fontSize="small" />} onClick={() => copyText(safeJsonStringify(meta))}>
+            复制 meta
+          </Button>
+          <Button size="small" variant="text" onClick={() => copyText(uri)}>
+            复制路径
+          </Button>
+        </Stack>
+
+        {renderPreviewGrid('预览', [uri], kind)}
+
+        {hasCandidates &&
+          renderPreviewGrid(
+            '候选图（keep_candidates）',
+            candidates
+              .map((c) => (typeof c === 'string' ? c.trim() : ''))
+              .filter(Boolean)
+              .slice(0, 12),
+            'image',
+          )}
+
+        <Typography variant="subtitle2" sx={{ fontWeight: 600, mt: 1, mb: 0.5 }}>
+          meta
+        </Typography>
+        {renderDiagnosticJson(meta)}
+      </AccordionDetails>
+    </Accordion>
+  )
+}
+
+export function DebugJsonBox({ value, maxHeight, safeJsonStringify }: { value: unknown; maxHeight?: number; safeJsonStringify: (v: unknown) => string }) {
+  return (
+    <Box
+      sx={{
+        whiteSpace: 'pre-wrap',
+        fontFamily: 'monospace',
+        fontSize: 12,
+        bgcolor: '#fafafa',
+        border: '1px solid #eee',
+        borderRadius: 2,
+        p: 1.5,
+        ...(typeof maxHeight === 'number'
+          ? {
+              maxHeight,
+              overflow: 'auto',
+            }
+          : {}),
+      }}
+    >
+      {safeJsonStringify(value)}
+    </Box>
+  )
+}
+
+export function DiagnosticJson({ value, safeJsonStringify }: { value: unknown; safeJsonStringify: (v: unknown) => string }) {
+  return <DebugJsonBox value={value} maxHeight={320} safeJsonStringify={safeJsonStringify} />
+}
+
+export function TitledDiagnosticJsonAccordion({
+  title,
+  value,
+  marginTop = 1,
+  safeJsonStringify,
+}: {
+  title: string
+  value: unknown
+  marginTop?: number
+  safeJsonStringify: (v: unknown) => string
+}) {
+  if (!value) return null
+  return (
+    <Accordion sx={marginTop > 0 ? { mt: marginTop } : undefined}>
+      <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+        <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
+          {title}
+        </Typography>
+      </AccordionSummary>
+      <AccordionDetails><DiagnosticJson value={value} safeJsonStringify={safeJsonStringify} /></AccordionDetails>
+    </Accordion>
+  )
+}
+
+export interface DiagnosticUploadButtonProps {
+  label: string
+  accept: string
+  shotId: string
+  assetRole: 'head_frame' | 'tail_frame' | 'mid_frame' | 'video_clip'
+  disabled: boolean
+  onUpload: (shotId: string, assetRole: 'head_frame' | 'tail_frame' | 'mid_frame' | 'video_clip', file: File) => void
+}
+
+export function DiagnosticUploadButton({
+  label,
+  accept,
+  shotId,
+  assetRole,
+  disabled,
+  onUpload,
+}: DiagnosticUploadButtonProps) {
+  return (
+    <Button
+      size="small"
+      variant="outlined"
+      component="label"
+      disabled={disabled}
+    >
+      {label}
+      <input
+        hidden
+        type="file"
+        accept={accept}
+        onChange={(e) => {
+          const f = e.target.files && e.target.files[0]
+          e.target.value = ''
+          if (!f) return
+          onUpload(shotId, assetRole, f)
+        }}
+      />
+    </Button>
+  )
+}
+
+export interface ShotDiagnosticUploadActionsProps {
+  shotId: string
+  uploadDisabled: boolean
+  onUpload: (shotId: string, assetRole: 'head_frame' | 'tail_frame' | 'mid_frame' | 'video_clip', file: File) => void
+}
+
+export function ShotDiagnosticUploadActions({ shotId, uploadDisabled, onUpload }: ShotDiagnosticUploadActionsProps) {
+  if (!shotId) return null
+  return (
+    <>
+      <DiagnosticUploadButton label="上传首帧" accept="image/png" shotId={shotId} assetRole="head_frame" disabled={uploadDisabled} onUpload={onUpload} />
+      <DiagnosticUploadButton label="上传尾帧" accept="image/png" shotId={shotId} assetRole="tail_frame" disabled={uploadDisabled} onUpload={onUpload} />
+      <DiagnosticUploadButton label="上传中间帧" accept="image/png" shotId={shotId} assetRole="mid_frame" disabled={uploadDisabled} onUpload={onUpload} />
+      <DiagnosticUploadButton label="上传镜头视频" accept="video/mp4" shotId={shotId} assetRole="video_clip" disabled={uploadDisabled} onUpload={onUpload} />
+    </>
+  )
+}
+
+export interface ShotDiagnosticPromptRegenerateActionsProps {
+  shotId: string
+  sb: Record<string, unknown> | null
+  actionDisabled: boolean
+  onPromptAndRegenerateKeyframe: (shotId: string, frameType: 'head' | 'tail', prompt: string) => void
+  getDiagnosticStoryboardPrompt: (sb: Record<string, unknown> | null, frameRole: 'head_frame' | 'tail_frame') => string
+}
+
+export function ShotDiagnosticPromptRegenerateActions({
+  shotId,
+  sb,
+  actionDisabled,
+  onPromptAndRegenerateKeyframe,
+  getDiagnosticStoryboardPrompt,
+}: ShotDiagnosticPromptRegenerateActionsProps) {
+  if (!shotId) return null
+  return (
+    <>
+      <Button
+        size="small"
+        variant="contained"
+        onClick={() => void onPromptAndRegenerateKeyframe(shotId, 'head', getDiagnosticStoryboardPrompt(sb, 'head_frame'))}
+        disabled={actionDisabled}
+      >
+        改首帧提示词并重跑
+      </Button>
+      <Button
+        size="small"
+        variant="contained"
+        onClick={() => void onPromptAndRegenerateKeyframe(shotId, 'tail', getDiagnosticStoryboardPrompt(sb, 'tail_frame'))}
+        disabled={actionDisabled}
+      >
+        改尾帧提示词并重跑
+      </Button>
+    </>
+  )
+}
+
+export interface ShotProviderTraceSectionProps {
+  shotProviderTrace: {
+    reason?: string | null
+    requested_provider_mode?: string | null
+    recommended_provider?: string | null
+    applied_provider?: string | null
+    selector_mode?: string | null
+    metadata?: unknown
+  } | null
+  safeJsonStringify: (v: unknown) => string
+  renderDiagnosticJson: (value: unknown) => ReactNode
+}
+
+export function ShotProviderTraceSection({
+  shotProviderTrace,
+  safeJsonStringify,
+  renderDiagnosticJson,
+}: ShotProviderTraceSectionProps) {
+  if (!shotProviderTrace) return null
+  return (
+    <DreamweaverDiagnosticShotProviderTraceSection
+      reason={shotProviderTrace.reason}
+      requestedProviderMode={shotProviderTrace.requested_provider_mode}
+      recommendedProvider={shotProviderTrace.recommended_provider}
+      appliedProvider={shotProviderTrace.applied_provider}
+      selectorMode={shotProviderTrace.selector_mode}
+      metadataText={shotProviderTrace.metadata ? safeJsonStringify(shotProviderTrace.metadata) : null}
+      jsonContent={renderDiagnosticJson(shotProviderTrace)}
+    />
+  )
+}
+
+export interface SafetyBlockedShotItem {
+  shotId: string
+  shotIndex?: number
+  roles: string[]
+  errorSample: string
+}
+
+export interface SafetyBlockedAlertProps {
+  shots: SafetyBlockedShotItem[]
+  onOpenShot: (shotId: string) => void
+}
+
+export function SafetyBlockedAlert({ shots, onOpenShot }: SafetyBlockedAlertProps) {
+  if (!shots.length) return null
+  return (
+    <Alert severity="warning" sx={{ mb: 1 }}>
+      <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
+        检测到内容安全拦截：部分镜头产物被安全过滤
+      </Typography>
+      <Typography variant="body2" color="text.secondary">
+        请点击下方镜头编号查看/修改提示词后重试生成。
+      </Typography>
+      <Stack direction="row" spacing={1} flexWrap="wrap" sx={{ mt: 1 }}>
+        {shots.map((item) => {
+          const label = item.shotIndex != null ? `#${item.shotIndex} ${item.shotId}` : item.shotId
+          return (
+            <Button key={item.shotId} size="small" variant="outlined" onClick={() => onOpenShot(item.shotId)}>
+              {label}
+            </Button>
+          )
+        })}
+      </Stack>
+      {shots[0]?.errorSample && (
+        <Typography variant="caption" color="text.secondary" display="block" sx={{ mt: 1 }}>
+          示例错误：{shots[0].errorSample}
+        </Typography>
+      )}
+    </Alert>
+  )
+}
+
+export interface DebugAccordionProps {
+  title: string
+  value: unknown
+  marginTop?: number
+  marginBottom?: number
+  safeJsonStringify: (v: unknown) => string
+}
+
+export function DebugAccordion({ title, value, marginTop = 0, marginBottom = 0, safeJsonStringify }: DebugAccordionProps) {
+  return (
+    <Accordion
+      sx={{
+        ...(marginTop > 0 ? { mt: marginTop } : {}),
+        ...(marginBottom > 0 ? { mb: marginBottom } : {}),
+      }}
+    >
+      <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+        <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
+          {title}
+        </Typography>
+      </AccordionSummary>
+      <AccordionDetails>
+        <DebugJsonBox value={value} safeJsonStringify={safeJsonStringify} />
       </AccordionDetails>
     </Accordion>
   )

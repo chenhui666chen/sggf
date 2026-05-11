@@ -113,23 +113,6 @@ def test_voice_types_route_returns_catalog_entries():
     assert "suitable_scenarios" in by_type["gentle"]
 
 
-def test_voice_type_detail_route_returns_full_profile_and_404_for_unknown_type():
-    client = build_test_client()
-
-    response = client.get("/api/v1/audiobook/voice-types/gentle")
-    missing_response = client.get("/api/v1/audiobook/voice-types/unknown_type")
-
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["voice_type"] == "gentle"
-    assert payload["name"] == "温柔"
-    assert payload["speed_modifier"] == 0.9
-    assert payload["preferred_gender"] == "female"
-    assert payload["default_emotion"] == "calm"
-    assert missing_response.status_code == 404
-    assert missing_response.json()["detail"] == "声音类型不存在"
-
-
 def test_voice_type_recommendation_prefers_matching_personality_gender_and_age():
     response = build_test_client().post(
         "/api/v1/audiobook/voice-types/recommend",

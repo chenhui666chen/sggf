@@ -928,7 +928,7 @@ def persist_contract(
             error_type=error_type,
         )
     except Exception:  # noqa: BLE001
-        pass
+        logger.debug("Failed to emit dreamweaver terminal metrics for run %s", contract.get("run_id") if isinstance(contract, dict) else None)
 
     session.commit()
     return int(dw_project.id)

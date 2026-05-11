@@ -1,5 +1,6 @@
 import { useCallback, useState } from 'react'
 
+import { apiClient, extractApiErrorMessage } from '../../services/api'
 import type { SetSnackbar } from './hookTypes'
 import type {
   ScriptReviewDialogData,
@@ -72,6 +73,32 @@ export const useAudiobookReviewDialogs = ({
     setScriptReviewDialogOpen(true)
   }, [activeTaskStatus, setSnackbar])
 
+  const handleOpenScriptReviewFromApi = useCallback(async (
+    audiobookProjectId: number,
+    chapterId: number,
+  ) => {
+    try {
+      const res = await apiClient.getScriptReviewReport(audiobookProjectId, chapterId)
+      const { quality_report } = res.data
+      const report = normalizeScriptReview(quality_report)
+      if (!report) {
+        setSnackbar({ open: true, message: '审核报告数据格式异常', severity: 'error' })
+        return
+      }
+      setScriptReviewData({
+        report,
+        segments: [],
+        chapterId,
+      })
+      setScriptReviewSelectedIssueIndex(null)
+      setScriptReviewSelectedSegmentIndex(null)
+      setScriptReviewDialogOpen(true)
+    } catch (err: unknown) {
+      const msg = await extractApiErrorMessage(err, '获取审核报告失败')
+      setSnackbar({ open: true, message: msg, severity: 'error' })
+    }
+  }, [setSnackbar])
+
   const handleCloseScriptReviewDialog = useCallback(() => {
     setScriptReviewDialogOpen(false)
     setScriptReviewData(null)
@@ -108,6 +135,7 @@ export const useAudiobookReviewDialogs = ({
     stageMetricsData,
     setStageMetricsData,
     handleOpenScriptReviewDialog,
+    handleOpenScriptReviewFromApi,
     handleCloseScriptReviewDialog,
     handleOpenStageMetricsDialog,
     handleCloseStageMetricsDialog,

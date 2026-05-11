@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.models.audiobook import AudiobookProject
 from app.models.project import Project
+from app.services.audiobook.task_trace import merge_audiobook_trace_context
 
 PROJECT_EXPORT_STAGE = "project_export"
 
@@ -26,6 +27,7 @@ def build_project_export_task_detail(
     metadata: Optional[Dict[str, Any]] = None,
     result: Optional[Dict[str, Any]] = None,
     error_message: Optional[str] = None,
+    trace_context: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     stage_payload: Dict[str, Any] = {
         "status": status,
@@ -62,7 +64,7 @@ def build_project_export_task_detail(
         detail["export_result"] = result
     if error_message:
         detail["error_message"] = error_message
-    return detail
+    return merge_audiobook_trace_context(detail, trace_context)
 
 
 def load_project_export_context(

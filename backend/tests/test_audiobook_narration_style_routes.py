@@ -72,26 +72,6 @@ def test_narration_styles_route_returns_dynamic_catalog_entries():
     assert "qwen3-tts-instruct-flash" not in by_id["dramatic"]["supported_models"]
 
 
-def test_narration_style_detail_route_returns_full_preset():
-    response = build_test_client().get("/api/v1/audiobook/narration-styles/dramatic")
-
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["id"] == "dramatic"
-    assert payload["name"] == "戏剧表演"
-    assert payload["emotion_profile"]["emotion_variation"] is True
-    assert payload["speed_range"]["min"] == 0.8
-    assert payload["pause_multiplier"] == 1.5
-    assert payload["system_prompt_template"]
-
-
-def test_narration_style_detail_route_returns_404_for_unknown_style():
-    response = build_test_client().get("/api/v1/audiobook/narration-styles/unknown_style")
-
-    assert response.status_code == 404
-    assert response.json()["detail"] == "叙事风格预设不存在"
-
-
 def test_narration_style_lookup_separates_strict_find_from_generation_fallback():
     assert find_narration_style_preset("  DRAMATIC  ")["id"] == "dramatic"
     assert find_narration_style_preset("unknown_style") is None

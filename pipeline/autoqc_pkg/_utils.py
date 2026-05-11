@@ -387,3 +387,22 @@ def _extract_video_review_result(result: Any) -> Dict[str, Any]:
     }
 
 
+def _semantic_frames_list(semantic_frames: Any) -> List[str]:
+    text = str(semantic_frames or "").strip().lower()
+    if text in ("head", "tail"):
+        return [text]
+    return ["head", "tail"]
+
+
+def _normalize_state_text(value: Any, *, limit: int = 120) -> str:
+    if isinstance(value, (list, tuple)):
+        text = " ".join(_text_list_from_value(list(value)))
+    else:
+        text = _text_from_value(value)
+        if not text and isinstance(value, dict):
+            text = " ".join(_text_list_from_value(value))
+
+    text = re.sub(r"\s+", " ", text).strip()
+    if limit > 0 and len(text) > int(limit):
+        text = text[: int(limit)]
+    return text

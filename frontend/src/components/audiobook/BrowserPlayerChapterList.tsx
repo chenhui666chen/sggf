@@ -21,7 +21,19 @@ const BrowserPlayerChapterList: React.FC<BrowserPlayerChapterListProps> = ({
   currentChapterIndex,
   onSelectChapter,
 }) => (
-  <Box width={280} sx={{ overflowY: 'auto', borderRight: 1, borderColor: 'divider', pr: 2 }}>
+  <Box
+    sx={{
+      width: { xs: '100%', md: 280 },
+      flexShrink: 0,
+      maxHeight: { xs: 220, md: 'none' },
+      overflowY: 'auto',
+      borderRight: { xs: 0, md: 1 },
+      borderBottom: { xs: 1, md: 0 },
+      borderColor: 'divider',
+      pr: { xs: 0, md: 2 },
+      pb: { xs: 1.5, md: 0 },
+    }}
+  >
     <Typography variant="subtitle2" sx={{ mb: 1, fontWeight: 600 }}>
       章节列表
     </Typography>

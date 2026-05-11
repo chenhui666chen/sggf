@@ -7,7 +7,7 @@ import {
 } from '@mui/material'
 import WarningIcon from '@mui/icons-material/Warning'
 
-import { audiobookColors } from './audiobookTheme'
+import { audiobookButtonSx } from './audiobookTheme'
 import type { ResumableChapterEntry } from './useAudiobookResumeCheckpoints'
 
 interface ResumableChaptersAlertProps {
@@ -62,14 +62,7 @@ const ResumableChaptersAlert = ({
                   ? <CircularProgress size={14} color="inherit" />
                   : undefined
               }
-              sx={{
-                borderColor: audiobookColors.warning,
-                color: audiobookColors.warning,
-                '&:hover': {
-                  borderColor: audiobookColors.warning,
-                  backgroundColor: audiobookColors.warningSoft,
-                },
-              }}
+              sx={audiobookButtonSx.warningOutlined}
             >
               {isResuming ? '提交中...' : getResumableChapterLabel(entry)}
             </Button>

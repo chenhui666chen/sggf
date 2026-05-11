@@ -26,6 +26,10 @@ export interface AudiobookVoiceConfigPayloadItem {
   volume: number
   speed?: number
   pitch?: number
+  tts_model?: TtsModel | null
+  voice_type?: string | null
+  personality?: string | null
+  emotion_tendency?: string | null
 }
 
 export interface ProjectVoiceAssignmentResult {
@@ -109,15 +113,26 @@ const buildSavedCharacterConfigMap = (
       volume: number
       speed?: number
       pitch?: number
+      ttsModel?: TtsModel
+      voiceType?: string
+      personality?: string
+      emotionTendency?: string
+      source?: string | null
     }
   >()
 
   for (const item of savedCharacters) {
+    const itemTtsModel = normalizeTtsModelValue(item.tts_model) || ttsModel
     configById.set(item.character_id, {
-      voiceId: normalizeVoiceId(ttsModel, item.voice_id),
+      voiceId: normalizeVoiceId(itemTtsModel, item.voice_id),
       volume: item.volume,
       speed: item.speed ?? undefined,
       pitch: item.pitch ?? undefined,
+      ttsModel: itemTtsModel,
+      voiceType: item.voice_type || undefined,
+      personality: item.personality || undefined,
+      emotionTendency: item.emotion_tendency || undefined,
+      source: item.source ?? undefined,
     })
   }
 
@@ -158,19 +173,21 @@ export const buildProjectCharacterVoiceSettings = ({
 }): CharacterVoiceSetting[] =>
   characters.map((character) => {
     const saved = findSavedCharacterConfig(savedCharacters, character.id)
+    const savedTtsModel = normalizeTtsModelValue(saved?.tts_model) || ttsModel
     return {
       characterId: character.id,
       name: character.name,
       gender: character.gender,
       role: character.role,
-      voiceId: normalizeVoiceId(ttsModel, saved?.voice_id),
+      voiceId: normalizeVoiceId(savedTtsModel, saved?.voice_id),
       volume: saved?.volume ?? 50,
       speed: saved?.speed ?? 1.0,
       pitch: saved?.pitch ?? 50,
-      ttsModel: normalizeTtsModelValue(saved?.tts_model) || ttsModel,
+      ttsModel: savedTtsModel,
       voiceType: saved?.voice_type || undefined,
       personality: saved?.personality || undefined,
       emotionTendency: saved?.emotion_tendency || undefined,
+      ...(saved?.source ? { source: saved.source } : {}),
     }
   })
 
@@ -229,6 +246,11 @@ export const applyProjectVoiceAssignments = ({
       volume: config.volume ?? voice.volume,
       speed: config.speed ?? voice.speed,
       pitch: config.pitch ?? voice.pitch,
+      ttsModel: config.ttsModel ?? voice.ttsModel,
+      voiceType: config.voiceType ?? voice.voiceType,
+      personality: config.personality ?? voice.personality,
+      emotionTendency: config.emotionTendency ?? voice.emotionTendency,
+      ...((config.source ?? voice.source) ? { source: config.source ?? voice.source } : {}),
     }
   })
 
@@ -262,6 +284,7 @@ export const buildProjectAudioConfigPayload = ({
       voice_type: trimOptionalText(voice.voiceType),
       personality: trimOptionalText(voice.personality),
       emotion_tendency: trimOptionalText(voice.emotionTendency),
+      ...(trimOptionalText(voice.source) ? { source: trimOptionalText(voice.source) } : {}),
     })),
   audio_fx: audioFxConfig,
 })
@@ -283,4 +306,8 @@ export const buildAudiobookVoiceConfigPayload = ({
       volume: voice.volume,
       speed: voice.speed,
       pitch: voice.pitch,
+      tts_model: voice.ttsModel || ttsModel,
+      voice_type: trimOptionalText(voice.voiceType),
+      personality: trimOptionalText(voice.personality),
+      emotion_tendency: trimOptionalText(voice.emotionTendency),
     }))

@@ -15,3 +15,4 @@ from app.api.v1.audiobook_api import routes_review
 from app.api.v1.audiobook_api import routes_subtitle
 from app.api.v1.audiobook_api import routes_smart_chunk
 from app.api.v1.audiobook_api import routes_misc
+from app.api.v1.audiobook_api import routes_audio_library

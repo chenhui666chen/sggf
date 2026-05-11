@@ -100,8 +100,8 @@ class MinimaxMixin:
     ) -> str:
         """将语气词注入文本（MiniMax专用）。
         
-        从 performance_notes 中提取语气词标签，例如:
-        - "[叹气]"、"[轻笑]"、"[停顿]"
+        从 performance_notes 中提取安全的语气词标签，例如:
+        - "[叹气]"、"[轻笑]"
         - "#laughter#"、"#sigh#"
         """
         if not performance_notes or not performance_notes.strip():
@@ -115,8 +115,6 @@ class MinimaxMixin:
             tag = "[轻笑] "
         elif "叹" in notes_lower or "sigh" in notes_lower:
             tag = "[叹气] "
-        elif "顿" in notes_lower or "pause" in notes_lower:
-            tag = "[停顿] "
         
         return tag + text if tag else text
 

@@ -4,9 +4,11 @@ import { apiClient, extractApiErrorMessage } from '../../services/api'
 import type { SetSnackbar } from './hookTypes'
 import type {
   AudiobookEditorSessionState,
+  ScriptEditorStateData,
   ScriptSegment,
   TtsModel,
 } from './types'
+import { normalizeAudiobookChapterScriptData } from './scriptEditorUtils'
 
 type SegmentReviews = NonNullable<AudiobookEditorSessionState['segmentReviews']>
 
@@ -15,6 +17,7 @@ interface UseAudiobookSegmentReviewActionsParams {
   chapterId?: number | null
   ttsModel: TtsModel
   setSnackbar: SetSnackbar
+  setScriptEditorData: (data: ScriptEditorStateData | null) => void
 }
 
 export const useAudiobookSegmentReviewActions = ({
@@ -22,6 +25,7 @@ export const useAudiobookSegmentReviewActions = ({
   chapterId,
   ttsModel,
   setSnackbar,
+  setScriptEditorData,
 }: UseAudiobookSegmentReviewActionsParams) => {
   const [reviewMode, setReviewMode] = useState(false)
   const [segmentReviews, setSegmentReviews] = useState<SegmentReviews>({})
@@ -60,6 +64,12 @@ export const useAudiobookSegmentReviewActions = ({
         emotion: voiceParams.emotion ?? undefined,
       })
       setSnackbar({ open: true, message: `片段 #${index + 1} 重新生成成功`, severity: 'success' })
+      try {
+        const refreshRes = await apiClient.getAudiobookChapterScript(audiobookProjectId, chapterId)
+        setScriptEditorData(normalizeAudiobookChapterScriptData(refreshRes.data))
+      } catch {
+        // 刷新失败不影响用户操作
+      }
     } catch (error: unknown) {
       const message = await extractApiErrorMessage(error, '请稍后重试')
       setSnackbar({ open: true, message: `重新生成失败: ${message}`, severity: 'error' })
@@ -70,7 +80,7 @@ export const useAudiobookSegmentReviewActions = ({
         return next
       })
     }
-  }, [audiobookProjectId, chapterId, setSnackbar, ttsModel])
+  }, [audiobookProjectId, chapterId, setSnackbar, ttsModel, setScriptEditorData])
 
   return {
     reviewMode,

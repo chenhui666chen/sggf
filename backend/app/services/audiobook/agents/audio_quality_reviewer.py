@@ -13,7 +13,47 @@ import re
 from typing import Dict, List, Any, Optional
 from dataclasses import dataclass
 
+from app.services.audiobook.duration_estimator import estimate_narration_duration_seconds
+
 logger = logging.getLogger(__name__)
+
+STRONG_AUDIOBOOK_EMOTIONS = {
+    "angry",
+    "excited",
+    "fearful",
+    "mysterious",
+    "nervous",
+    "shout",
+    "surprised",
+    "tense",
+}
+ACTION_SOUND_HINTS = (
+    "爆发",
+    "倒地",
+    "轰然",
+    "脆响",
+    "龟裂",
+    "碎裂",
+    "撞",
+    "砸",
+    "冲",
+    "奔",
+    "踉跄",
+    "脚步",
+    "风声",
+    "雨声",
+    "雷声",
+    "尖啸",
+    "惨叫",
+    "干呕",
+    "门响",
+    "开门",
+    "关门",
+    "剑",
+    "刀",
+    "骨",
+)
+QUOTED_DIALOGUE_RE = re.compile(r"[“「『\"]([^“”「」『\"]{2,80})[”」』\"]")
 
 
 @dataclass
@@ -69,8 +109,9 @@ class AudioQualityReviewer:
         return {
             # 段落：朗读友好
             "max_paragraph_length": 120,  # 单段建议不超过 120 字（LLM 已经做了分段）
+            "max_dialogue_length": 120,  # 单段对白/独白建议不超过 120 字
 
-            # 时长：按 10 字/秒估算，建议单集在 10-35 分钟之间
+            # 时长：按统一中文有声书朗读语速估算，建议单集在 10-35 分钟之间
             "max_episode_duration": 35 * 60,  # 最大单集时长（秒）
             "min_episode_duration": 10 * 60,  # 最小单集时长
 
@@ -166,10 +207,23 @@ class AudioQualityReviewer:
         naturalness_score = 10.0
         clarity_score = 10.0
         engagement_score = 10.0
+        max_narration_length = int(self.quality_standards.get("max_paragraph_length", 120))
+        max_dialogue_length = int(self.quality_standards.get("max_dialogue_length", max_narration_length))
+        long_segment_count = 0
+        quoted_dialogue_count = 0
+        weak_pause_count = 0
+        action_without_effect_count = 0
+        expressive_segment_count = 0
+        missing_performance_notes_count = 0
         
         for i, seg in enumerate(segments):
-            text = seg.get("text", "")
+            text = str(seg.get("text", "") or "").strip()
             location = f"segment_{i}"
+            segment_type = str(seg.get("type", "narration") or "narration").strip().lower()
+            speaker = str(seg.get("speaker", "") or "").strip()
+            emotion = str(seg.get("emotion", "") or "").strip().lower()
+            performance_notes = str(seg.get("performance_notes", "") or "").strip()
+            text_length = len(text)
             
             # 检查拗口词汇
             awkward_words = self._detect_awkward_words(text)
@@ -184,15 +238,144 @@ class AudioQualityReviewer:
                 naturalness_score -= 0.3
             
             # 检查信息密度
-            if len(text) > 100 and text.count("，") < 2:
+            if text_length > 100 and text.count("，") < 2:
                 clarity_score -= 0.2
+
+            # 有声播讲单元长度检查：过长会导致 TTS 呼吸点不明确，也会削弱音效/停顿触发。
+            segment_max_length = max_dialogue_length if segment_type in {"dialogue", "monologue"} else max_narration_length
+            if text_length > segment_max_length:
+                long_segment_count += 1
+                severity = "major" if text_length > segment_max_length * 1.5 else "minor"
+                if long_segment_count <= 5:
+                    issues.append(QualityIssue(
+                        location=location,
+                        severity=severity,
+                        category="pacing",
+                        description=f"单段过长（{text_length}字，建议不超过{segment_max_length}字）",
+                        suggestion="按动作拍点、情绪转折或因果推进拆分，给 TTS 留出自然呼吸点"
+                    ))
+                clarity_score -= 0.6 if severity == "major" else 0.3
+                engagement_score -= 0.2
+
+            # 旁白里混入明确引号台词时，应拆出 dialogue，避免全部用旁白音色朗读。
+            if segment_type == "narration" and self._contains_quoted_dialogue(text):
+                quoted_dialogue_count += 1
+                if quoted_dialogue_count <= 5:
+                    issues.append(QualityIssue(
+                        location=location,
+                        severity="minor",
+                        category="script",
+                        description="旁白片段中疑似混入可拆分对白",
+                        suggestion="将引号内台词拆成 dialogue，并保留说话人归属；旁白只承载动作和场景"
+                    ))
+                clarity_score -= 0.3
+
+            if segment_type == "dialogue" and (not speaker or speaker == "旁白"):
+                issues.append(QualityIssue(
+                    location=location,
+                    severity="major",
+                    category="script",
+                    description="对话片段缺少有效说话人",
+                    suggestion="补充真实角色名；如果无法判断说话人，应改为 narration"
+                ))
+                clarity_score -= 0.5
+
+            expressive = emotion in STRONG_AUDIOBOOK_EMOTIONS or text_length > 80
+            if expressive:
+                expressive_segment_count += 1
+                if not performance_notes:
+                    missing_performance_notes_count += 1
+
+            if self._needs_breath_pause(text, emotion) and self._segment_pause_after(seg) < 0.12:
+                weak_pause_count += 1
+                if weak_pause_count <= 5:
+                    issues.append(QualityIssue(
+                        location=location,
+                        severity="minor",
+                        category="pacing",
+                        description="强情绪片段缺少停顿",
+                        suggestion="为紧张、惊惧、怒喊或强转折片段设置 pause_after，通常 0.2-0.6 秒更自然"
+                    ))
+                engagement_score -= 0.15
+
+            if (
+                segment_type == "narration"
+                and self._looks_like_action_or_environment_cue(text)
+                and not self._segment_has_sound_effects(seg)
+            ):
+                action_without_effect_count += 1
+                if action_without_effect_count <= 5:
+                    issues.append(QualityIssue(
+                        location=location,
+                        severity="minor",
+                        category="audio",
+                        description="动作或环境片段缺少音效提示",
+                        suggestion="为关键动作/环境补充少量 sound_effects，避免只靠旁白描述听觉事件"
+                    ))
+                engagement_score -= 0.15
+
+        if long_segment_count > 5:
+            issues.append(QualityIssue(
+                location="overall",
+                severity="minor",
+                category="pacing",
+                description=f"存在较多过长播讲片段（{long_segment_count}段）",
+                suggestion="优先批量拆分长旁白和长独白，按场景动作与情绪转折形成可播讲单元"
+            ))
+
+        if quoted_dialogue_count > 5:
+            issues.append(QualityIssue(
+                location="overall",
+                severity="minor",
+                category="script",
+                description=f"多处旁白疑似混入对白（{quoted_dialogue_count}段）",
+                suggestion="统一将明确台词拆成 dialogue，减少旁白音色代读角色台词"
+            ))
+
+        if weak_pause_count > 5:
+            issues.append(QualityIssue(
+                location="overall",
+                severity="minor",
+                category="pacing",
+                description=f"多处强情绪片段缺少停顿（{weak_pause_count}段）",
+                suggestion="统一为强情绪、转折和战斗片段补充 pause_after，增强听感呼吸"
+            ))
+
+        if action_without_effect_count > 5:
+            issues.append(QualityIssue(
+                location="overall",
+                severity="minor",
+                category="audio",
+                description=f"多处动作/环境片段未标注音效（{action_without_effect_count}段）",
+                suggestion="只为关键动作补充音效，避免过密，同时让重要听觉事件可被生成器捕捉"
+            ))
+
+        performance_notes_coverage = (
+            1.0 - (missing_performance_notes_count / expressive_segment_count)
+            if expressive_segment_count
+            else 1.0
+        )
+        if expressive_segment_count >= 5 and performance_notes_coverage < 0.5:
+            issues.append(QualityIssue(
+                location="overall",
+                severity="minor",
+                category="script",
+                description=f"强表现片段的演绎提示覆盖不足（约 {performance_notes_coverage * 100:.0f}%）",
+                suggestion="为强情绪、长旁白和关键转折补充 performance_notes，说明语速、音量、停顿和情绪方向"
+            ))
+            engagement_score -= 0.6
         
         return {
             "naturalness_score": max(0, min(10, naturalness_score)),
             "clarity_score": max(0, min(10, clarity_score)),
             "engagement_score": max(0, min(10, engagement_score)),
             "total_segments": len(segments),
-            "average_segment_length": sum(len(s.get("text", "")) for s in segments) / len(segments) if segments else 0
+            "average_segment_length": sum(len(s.get("text", "")) for s in segments) / len(segments) if segments else 0,
+            "long_segment_count": long_segment_count,
+            "quoted_dialogue_in_narration_count": quoted_dialogue_count,
+            "weak_pause_count": weak_pause_count,
+            "action_without_effect_count": action_without_effect_count,
+            "performance_notes_coverage": performance_notes_coverage,
         }
     
     def _detect_awkward_words(self, text: str) -> List[str]:
@@ -226,6 +409,41 @@ class AudioQualityReviewer:
 
         # 去重
         return list(dict.fromkeys(awkward))
+
+    def _contains_quoted_dialogue(self, text: str) -> bool:
+        """识别旁白中疑似可以拆成 dialogue 的引号台词。"""
+        for match in QUOTED_DIALOGUE_RE.finditer(str(text or "")):
+            quoted = match.group(1).strip()
+            if re.search(r"[。！？!?]", quoted):
+                return True
+            if len(quoted) >= 8 and re.search(r"(你|我|咱|别|不要|怎么|什么|为什么|吗|呢|吧|快|走|救命|住手)", quoted):
+                return True
+        return False
+
+    def _needs_breath_pause(self, text: str, emotion: str) -> bool:
+        """强情绪或强转折片段需要最小停顿，避免 TTS 连读成平铺旁白。"""
+        normalized_emotion = str(emotion or "").strip().lower()
+        if normalized_emotion in STRONG_AUDIOBOOK_EMOTIONS:
+            return True
+        value = str(text or "")
+        return bool(re.search(r"[！？!]{1,}|必须走|突然|猛地|轰然|当场|一息之间", value))
+
+    def _segment_pause_after(self, segment: Dict[str, Any]) -> float:
+        voice_params = segment.get("voice_params") if isinstance(segment.get("voice_params"), dict) else {}
+        value = voice_params.get("pause_after", segment.get("pause_after", 0.0))
+        try:
+            return float(value or 0.0)
+        except (TypeError, ValueError):
+            return 0.0
+
+    def _segment_has_sound_effects(self, segment: Dict[str, Any]) -> bool:
+        sound_effects = segment.get("sound_effects")
+        sound_effects_simple = segment.get("sound_effects_simple")
+        return bool(sound_effects) or bool(sound_effects_simple)
+
+    def _looks_like_action_or_environment_cue(self, text: str) -> bool:
+        value = str(text or "")
+        return any(keyword in value for keyword in ACTION_SOUND_HINTS)
     
     def _apply_genre_overrides(self, standards: Dict[str, Any], genre: str) -> Dict[str, Any]:
         """根据小说类型对质量标准做细分调整。
@@ -287,9 +505,10 @@ class AudioQualityReviewer:
             if seg.get("music_cue"):
                 total_music_cues += 1
         
-        # 估算时长（粗略）
+        # 估算时长：复用生成链路的有声书中文朗读语速，避免密度评审偏高。
         total_text_length = sum(len(s.get("text", "")) for s in segments)
-        estimated_duration_minutes = total_text_length / 10 / 60  # 假设10字/秒
+        estimated_duration = self._estimate_total_duration_seconds(segments)
+        estimated_duration_minutes = estimated_duration / 60
         
         # 音效密度
         effects_per_minute = total_effects / estimated_duration_minutes if estimated_duration_minutes > 0 else 0
@@ -410,9 +629,8 @@ class AudioQualityReviewer:
         issues: List[QualityIssue]
     ) -> Dict[str, Any]:
         """评审节奏"""
-        # 估算时长（粗略，按10字/秒）
-        total_text_length = sum(len(s.get("text", "")) for s in segments)
-        estimated_duration = total_text_length / 10  # 10字/秒
+        # 估算时长：与音效/配乐时间线使用同一朗读语速。
+        estimated_duration = self._estimate_total_duration_seconds(segments)
         estimated_duration_minutes = estimated_duration / 60
         
         pacing_issues = []
@@ -432,7 +650,12 @@ class AudioQualityReviewer:
         
         # 检查节奏变化
         segment_lengths = [len(s.get("text", "")) for s in segments]
+        segment_durations = [
+            self._estimate_segment_duration_seconds(s)
+            for s in segments
+        ]
         avg_length = sum(segment_lengths) / len(segment_lengths) if segment_lengths else 0
+        avg_duration = sum(segment_durations) / len(segment_durations) if segment_durations else 0.0
         
         # 如果连续多个片段都很长，可能节奏拖沓
         slow_segments = []
@@ -453,9 +676,15 @@ class AudioQualityReviewer:
         return {
             "estimated_duration": f"{estimated_duration_minutes:.1f}分钟",
             "pacing_issues": pacing_issues,
-            "average_segment_duration": f"{avg_length/10:.1f}秒",
+            "average_segment_duration": f"{avg_duration:.1f}秒",
             "total_segments": len(segments)
         }
+
+    def _estimate_total_duration_seconds(self, segments: List[Dict[str, Any]]) -> float:
+        return sum(self._estimate_segment_duration_seconds(segment) for segment in segments)
+
+    def _estimate_segment_duration_seconds(self, segment: Dict[str, Any]) -> float:
+        return estimate_narration_duration_seconds(segment.get("text", ""), min_duration=0.0)
     
     def _calculate_overall_score(
         self,
@@ -533,7 +762,7 @@ class AudioQualityReviewer:
         # 按类别生成建议
         script_issues = [i for i in issues if i.category == "script"]
         if script_issues:
-            suggestions.append("优化剧本：替换拗口词汇，提升口语化表达")
+            suggestions.append("优化剧本：控制单段长度，拆清对白/旁白，并替换拗口表达")
         
         audio_issues = [i for i in issues if i.category == "audio"]
         if audio_issues:

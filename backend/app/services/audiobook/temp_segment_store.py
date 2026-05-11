@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
+import logging
 import mimetypes
 import os
 import re
@@ -33,6 +34,7 @@ _CURRENT_FILE = Path(__file__).resolve()
 _BACKEND_ROOT = _CURRENT_FILE.parents[3]
 _REPO_ROOT = _CURRENT_FILE.parents[4]
 _LOCAL_TEMP_ROOT_ABS = (_REPO_ROOT / _DEFAULT_LOCAL_ROOT_REL).resolve()
+logger = logging.getLogger(__name__)
 
 
 class TempSegmentStoreError(RuntimeError):
@@ -90,7 +92,7 @@ def normalize_audio_extension(format_value: Optional[str]) -> str:
 def _normalize_segment_index(value: Any) -> Optional[int]:
     try:
         index = int(value)
-    except Exception:
+    except (TypeError, ValueError, OverflowError):
         return None
     if index < 0:
         return None
@@ -131,7 +133,7 @@ def _sanitize_run_id(run_id: Any) -> str:
 def _normalize_chapter_id(chapter_id: Any) -> int:
     try:
         return max(int(chapter_id), 0)
-    except Exception:
+    except (TypeError, ValueError, OverflowError):
         return 0
 
 
@@ -155,7 +157,7 @@ def _is_relative_to(path: Path, root: Path) -> bool:
     try:
         path.resolve(strict=False).relative_to(root.resolve(strict=False))
         return True
-    except Exception:
+    except (OSError, RuntimeError, ValueError):
         return False
 
 
@@ -195,7 +197,7 @@ def _resolve_safe_local_path(path_value: str) -> Optional[Path]:
 def _to_relative_repo_path(path: Path) -> str:
     try:
         return path.resolve(strict=False).relative_to(_REPO_ROOT.resolve(strict=False)).as_posix()
-    except Exception:
+    except (OSError, RuntimeError, ValueError):
         return path.as_posix()
 
 
@@ -336,7 +338,8 @@ def _build_oss_delete_headers(*, object_key: str) -> Optional[Tuple[str, Dict[st
     try:
         host = _resolve_oss_delete_host()
         bucket = _resolve_oss_delete_bucket()
-    except Exception:
+    except Exception as exc:
+        logger.debug("构造临时片段 OSS 删除请求头失败，跳过远端清理: object_key=%s error=%s", object_key, exc)
         return None
     if not host or not bucket:
         return None
@@ -450,7 +453,8 @@ class LocalFSTempSegmentStorageBackend:
             return None
         try:
             return path.read_bytes()
-        except Exception:
+        except OSError as exc:
+            logger.debug("读取临时片段音频失败: asset_ref=%s path=%s error=%s", asset_ref, path, exc)
             return None
 
     def asset_exists(self, asset_ref: str) -> bool:
@@ -459,7 +463,8 @@ class LocalFSTempSegmentStorageBackend:
             return False
         try:
             return path.exists()
-        except Exception:
+        except OSError as exc:
+            logger.debug("检查临时片段资源失败: asset_ref=%s path=%s error=%s", asset_ref, path, exc)
             return False
 
     def delete_prefix(
@@ -498,7 +503,8 @@ class LocalFSTempSegmentStorageBackend:
             except StopIteration:
                 current.rmdir()
                 current = current.parent
-            except Exception:
+            except OSError as exc:
+                logger.debug("清理临时片段空目录失败，停止向上剪枝: path=%s error=%s", current, exc)
                 break
 
 
@@ -786,7 +792,7 @@ def _extract_segment_integrity_metadata(
     raw_file_size = segment_payload.get("file_size")
     try:
         file_size = int(raw_file_size)
-    except Exception:
+    except (TypeError, ValueError, OverflowError):
         file_size = None
     if file_size is not None and file_size >= 0:
         metadata["file_size"] = file_size

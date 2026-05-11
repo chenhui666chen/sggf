@@ -7,7 +7,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, List, Optional
 
-from .tts_model_ids import MINIMAX_SPEECH_28_HD_MODEL
+from .tts_model_ids import MINIMAX_SPEECH_28_HD_MODEL, normalize_audiobook_tts_model
 from .voice_manager import VoiceManager, VoiceProfile
 from .voice_catalog import load_voice_catalog_for_model
 
@@ -30,9 +30,9 @@ class MiniMaxVoiceManager(VoiceManager):
     DEFAULT_NARRATOR_VOICE_ID = "male-qn-qingse"
     DEFAULT_FEMALE_VOICE_ID = "female-shaonv"
 
-    def __init__(self):
+    def __init__(self, model: str = MINIMAX_SPEECH_28_HD_MODEL):
         super().__init__()
-        self.model = MINIMAX_SPEECH_28_HD_MODEL
+        self.model = normalize_audiobook_tts_model(model)
         self.voice_catalog = None
         self._load_catalog()
         logger.info("MiniMax VoiceManager initialized with %s voices", len(self.voice_catalog.get("voices", [])))
@@ -40,7 +40,7 @@ class MiniMaxVoiceManager(VoiceManager):
     def _load_catalog(self):
         """加载 MiniMax 音色目录"""
         try:
-            self.voice_catalog = load_voice_catalog_for_model("minimax-speech-2.8-hd")
+            self.voice_catalog = load_voice_catalog_for_model(self.model)
         except Exception as e:
             logger.warning("Failed to load MiniMax voice catalog: %s", e)
             self.voice_catalog = {"voices": [], "voices_by_id": {}}
@@ -65,18 +65,25 @@ class MiniMaxVoiceManager(VoiceManager):
 
         defaults = entry.get("default_params") or {}
         config = voice_config or {}
+        profile_config = {
+            "pitch_base": int(config.get("pitch", defaults.get("pitch", 50)) or 50),
+            "speed_base": float(config.get("speed", defaults.get("speed", 1.0)) or 1.0),
+            "volume_base": int(config.get("volume", defaults.get("volume", 50)) or 50),
+            "default_emotion": "calm",
+        }
+        self._apply_voice_type_config(profile_config, config.get("voice_type"))
         return VoiceProfile(
             voice_id=str(entry.get("id") or voice_id),
             character_name=character_name,
             gender=str(entry.get("gender") or "neutral").lower(),
             age_group=str(entry.get("category") or "adult"),
-            personality=str(entry.get("style") or "calm"),
+            personality=str(config.get("personality") or entry.get("style") or "calm"),
             tts_model=self.model,
             tts_speaker_id=str(entry.get("speaker") or entry.get("id") or voice_id),
-            pitch_base=int(config.get("pitch", defaults.get("pitch", 50)) or 50),
-            speed_base=float(config.get("speed", defaults.get("speed", 1.0)) or 1.0),
-            volume_base=int(config.get("volume", defaults.get("volume", 50)) or 50),
-            default_emotion="calm",
+            pitch_base=profile_config["pitch_base"],
+            speed_base=profile_config["speed_base"],
+            volume_base=profile_config["volume_base"],
+            default_emotion=profile_config["default_emotion"],
         )
 
     def get_narrator_voice(self) -> VoiceProfile:
@@ -167,8 +174,12 @@ class MiniMaxVoiceManager(VoiceManager):
         
         # 按匹配分数排序，返回最佳匹配
         if candidates:
-            candidates.sort(key=lambda x: x[1], reverse=True)
-            best_voice = candidates[0][0]
+            candidate_pool = [
+                candidate for candidate in candidates
+                if candidate[0].get("id") not in self.used_voice_ids
+            ] or candidates
+            candidate_pool.sort(key=lambda x: x[1], reverse=True)
+            best_voice = candidate_pool[0][0]
             logger.info(
                 f"Selected MiniMax voice '{best_voice['id']}' for character '{character_name}' "
                 f"(gender={gender}, age_group={age_group})"

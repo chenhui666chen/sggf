@@ -548,6 +548,28 @@ def test_build_checkpoint_patch_from_generation_result_includes_completed_indice
     assert patch["render_plan"] == [{"index": 0, "cache_key": "sig-0"}]
 
 
+def test_build_checkpoint_patch_from_generation_result_includes_effect_timeline():
+    patch = build_checkpoint_patch_from_generation_result(
+        result={
+            "effect_timeline": {
+                "timeline": [
+                    {"effect_id": "rain_light", "timestamp": 0.0},
+                    {"effect_id": "door_open", "timestamp": 2.0},
+                ],
+            },
+        },
+        task_id="task_123",
+        output_path="audiobooks/project_1/chapter_001.mp3",
+    )
+
+    assert patch["effect_timeline"] == {
+        "timeline": [
+            {"effect_id": "rain_light", "timestamp": 0.0},
+            {"effect_id": "door_open", "timestamp": 2.0},
+        ],
+    }
+
+
 def test_attach_render_plan_metadata_marks_temp_asset_saved_stage():
     temp_cache = {
         "cached_audio_paths": {

@@ -12,6 +12,7 @@ from dataclasses import asdict, is_dataclass
 from ..script_adapter import AudiobookScriptAgent, ScriptSegment, ChapterStructure
 from ..voice_manager_factory import create_voice_manager
 from ..audio_mixer import AudioMixer
+from ..duration_estimator import estimate_narration_duration_seconds
 from app.services.chapter_adaptation_assets import build_audio_adaptation_hint
 from core.unified_media_runtime import create_tts_engine
 
@@ -62,8 +63,7 @@ class TimelineMixin:
         durations = []
         for seg in script_segments:
             text = getattr(seg, "text", "") or ""
-            duration = len(text) / 10.0
-            durations.append(max(duration, 0.2))
+            durations.append(estimate_narration_duration_seconds(text))
         return durations
 
     def _align_timeline_with_audio(

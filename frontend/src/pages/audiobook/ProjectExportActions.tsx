@@ -6,9 +6,12 @@ import {
   ListItemText,
   Menu,
   MenuItem,
+  Tooltip,
 } from '@mui/material'
 import DownloadIcon from '@mui/icons-material/Download'
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown'
+
+import { audiobookButtonSx } from './audiobookTheme'
 
 interface ProjectExportActionsProps {
   hasChapterAudios: boolean
@@ -42,6 +45,11 @@ const ProjectExportActions = ({
   const isAudacityPending = exportingProjectAudacity || hasActiveAudacityExportTask
   const hasPendingExport = isM4bPending || isAudacityPending
   const menuOpen = Boolean(menuAnchor)
+  const exportTooltipTitle = !canExport
+    ? '暂无已完成章节，无法导出'
+    : hasPendingExport
+      ? '已有导出任务排队中'
+      : '导出整本有声书'
 
   const closeMenu = () => {
     setMenuAnchor(null)
@@ -65,18 +73,22 @@ const ProjectExportActions = ({
 
   return (
     <>
-      <Button
-        variant="contained"
-        color="primary"
-        startIcon={hasPendingExport ? <CircularProgress size={18} color="inherit" /> : <DownloadIcon />}
-        endIcon={<KeyboardArrowDownIcon />}
-        onClick={(event) => setMenuAnchor(event.currentTarget)}
-        disabled={!canExport}
-        aria-haspopup="menu"
-        aria-expanded={menuOpen ? 'true' : undefined}
-      >
-        {hasPendingExport ? '导出排队中...' : '导出'}
-      </Button>
+      <Tooltip title={exportTooltipTitle}>
+        <span>
+          <Button
+            variant="contained"
+            startIcon={hasPendingExport ? <CircularProgress size={18} color="inherit" /> : <DownloadIcon />}
+            endIcon={<KeyboardArrowDownIcon />}
+            onClick={(event) => setMenuAnchor(event.currentTarget)}
+            disabled={!canExport}
+            aria-haspopup="menu"
+            aria-expanded={menuOpen ? 'true' : undefined}
+            sx={audiobookButtonSx.brandContained}
+          >
+            {hasPendingExport ? '导出排队中...' : '导出'}
+          </Button>
+        </span>
+      </Tooltip>
 
       <Menu
         anchorEl={menuAnchor}

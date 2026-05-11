@@ -1,5 +1,5 @@
 import type { ScriptReviewIssue } from './types'
-import { audiobookColors } from './audiobookTheme'
+import { audiobookColorRoles } from './audiobookTheme'
 import {
   ISSUE_DISPLAY_LIMIT,
   categoryLabelMap,
@@ -11,19 +11,19 @@ export const getReviewScoreVisual = (score?: number | null) => {
   const normalizedScore = typeof score === 'number' ? score : 0
   if (normalizedScore >= 8) {
     return {
-      backgroundColor: audiobookColors.successChip,
-      color: audiobookColors.success,
+      backgroundColor: audiobookColorRoles.reviewRisk.good.bg,
+      color: audiobookColorRoles.reviewRisk.good.text,
     }
   }
   if (normalizedScore >= 6) {
     return {
-      backgroundColor: audiobookColors.reviewWarningChip,
-      color: audiobookColors.reviewWarning,
+      backgroundColor: audiobookColorRoles.reviewRisk.warning.bg,
+      color: audiobookColorRoles.reviewRisk.warning.text,
     }
   }
   return {
-    backgroundColor: audiobookColors.dangerChip,
-    color: audiobookColors.reviewDanger,
+    backgroundColor: audiobookColorRoles.reviewRisk.danger.bg,
+    color: audiobookColorRoles.reviewRisk.danger.text,
   }
 }
 

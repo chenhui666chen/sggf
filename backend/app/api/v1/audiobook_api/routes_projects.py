@@ -11,8 +11,8 @@ from sqlalchemy.orm import Session
 from app.core.security import get_current_user
 from app.db.base import get_db
 from app.models.user import User
-from app.models.project import Project, Chapter
-from app.models.audiobook import AudiobookProject, ChapterAudio
+from app.models.project import Project
+from app.models.audiobook import ChapterAudio
 from app.schemas.audiobook import (
     AudiobookProjectCreate,
     GenerateAudioFromScriptsRequest,
@@ -36,6 +36,7 @@ from app.services.audiobook.repository import (
     AudiobookProjectRepository,
     ChapterAudioRepository,
     ChapterAudioRunRepository,
+    ChapterRepository,
     ProjectRepository,
     AudiobookTaskRepository,
 )
@@ -44,17 +45,21 @@ from app.services.audiobook.task_support import (
     build_run_checkpoint_document as _build_run_checkpoint_document,
     enqueue_audiobook_task as _enqueue_audiobook_task,
     ensure_audiobook_points_precheck_passed as _ensure_audiobook_points_precheck_passed,
+    safe_record_audiobook_billing_freeze as _safe_record_audiobook_billing_freeze,
 )
+from app.services.audiobook.task_trace import build_audiobook_trace_context
 from app.services.audiobook.tts_model_ids import normalize_audiobook_tts_model
 from app.services.points_task_precheck import (
     build_audiobook_task_points_precheck,
 )
-from app.services.user_center_points_events import (
-    record_audiobook_billing_freeze,
-)
 from app.utils.datetime_utils import utc_now
 
 from app.api.v1.audiobook_api import router
+from app.api.v1.audiobook_api.dependencies import (
+    OwnedAudiobookProject,
+    get_owned_audiobook_project,
+    resolve_owned_audiobook_project,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -111,23 +116,6 @@ def _attach_resume_checkpoints_to_queued_runs(
             latest_run,
             checkpoint_json=resumed_checkpoint_json,
         )
-
-
-def _get_project_export_context_for_user(
-    db: Session,
-    *,
-    audiobook_project_id: int,
-    current_user: User,
-) -> tuple[AudiobookProject, Project]:
-    audiobook_project = AudiobookProjectRepository.get_by_id(db, audiobook_project_id)
-    if not audiobook_project:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="有声书项目不存在")
-
-    project = ProjectRepository.get_user_project(db, current_user.id, audiobook_project.project_id)
-    if not project:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权限访问")
-
-    return audiobook_project, project
 
 
 def _queue_project_export_task(
@@ -229,18 +217,23 @@ async def create_audiobook_project(
     )
 
     if job_type != "script_only":
-        try:
-            record_audiobook_billing_freeze(
-                db=db,
-                actor_user_id=current_user.id,
-                actor_username=current_user.username,
+        _safe_record_audiobook_billing_freeze(
+            db=db,
+            current_user=current_user,
+            audiobook_project_id=audiobook_project.id,
+            chapter_ids=list(request.chapter_ids or []),
+            raw_request=raw_request,
+            tts_pricing_key=tts_model,
+            trace_context=build_audiobook_trace_context(
+                celery_task_id=str(async_result.id),
+                task_type=job_type,
                 audiobook_project_id=audiobook_project.id,
-                chapter_ids=list(request.chapter_ids or []),
-                request_context=raw_request,
-                tts_pricing_key=tts_model,
-            )
-        except Exception as exc:
-            logger.warning("记录有声书积分冻结失败 audiobook_project_id=%s: %s", audiobook_project.id, exc)
+                status="queued",
+                progress=0.0,
+                tts_model=tts_model,
+                cost_precheck_id=precheck.cost_precheck_id,
+            ),
+        )
 
     return {
         "success": True,
@@ -261,26 +254,21 @@ async def generate_audio_from_scripts(
     db: Session = Depends(get_db),
 ):
     """为指定有声书项目按已存在剧本排队生成章节音频。"""
-    audiobook_project = AudiobookProjectRepository.get_by_id(db, audiobook_project_id)
-    if not audiobook_project:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="有声书项目不存在")
-
-    project = ProjectRepository.get_user_project(db, current_user.id, audiobook_project.project_id)
-    if not project:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权限访问")
+    owned = resolve_owned_audiobook_project(
+        db=db,
+        current_user=current_user,
+        audiobook_project_id=audiobook_project_id,
+    )
+    project = owned.project
 
     requested_chapter_ids = [chapter_id for chapter_id in dict.fromkeys(request.chapter_ids or []) if chapter_id is not None]
     if not requested_chapter_ids:
         requested_chapter_ids = [
             chapter_audio.chapter_id
-            for chapter_audio in db.query(ChapterAudio)
-            .filter(
-                ChapterAudio.audiobook_project_id == audiobook_project_id,
-                ChapterAudio.script_json.isnot(None),
-                ChapterAudio.script_status == "approved",
-                ChapterAudio.deleted_at.is_(None),
+            for chapter_audio in ChapterAudioRepository.list_active_approved_scripts(
+                db,
+                audiobook_project_id,
             )
-            .all()
         ]
 
     if not requested_chapter_ids:
@@ -289,14 +277,10 @@ async def generate_audio_from_scripts(
             detail="没有可生成音频的已审批剧本章节",
         )
 
-    chapter_audio_rows = (
-        db.query(ChapterAudio)
-        .filter(
-            ChapterAudio.audiobook_project_id == audiobook_project_id,
-            ChapterAudio.chapter_id.in_(requested_chapter_ids),
-            ChapterAudio.deleted_at.is_(None),
-        )
-        .all()
+    chapter_audio_rows = ChapterAudioRepository.list_active_by_project_chapter_ids(
+        db,
+        audiobook_project_id,
+        requested_chapter_ids,
     )
     approved_chapter_ids = {
         chapter_audio.chapter_id
@@ -362,18 +346,23 @@ async def generate_audio_from_scripts(
         before_dispatch=bind_resume_checkpoints_before_dispatch,
     )
 
-    try:
-        record_audiobook_billing_freeze(
-            db=db,
-            actor_user_id=current_user.id,
-            actor_username=current_user.username,
+    _safe_record_audiobook_billing_freeze(
+        db=db,
+        current_user=current_user,
+        audiobook_project_id=audiobook_project_id,
+        chapter_ids=requested_chapter_ids,
+        raw_request=raw_request,
+        tts_pricing_key=tts_model,
+        trace_context=build_audiobook_trace_context(
+            celery_task_id=str(async_result.id),
+            task_type="audio_from_scripts",
             audiobook_project_id=audiobook_project_id,
-            chapter_ids=requested_chapter_ids,
-            request_context=raw_request,
-            tts_pricing_key=tts_model,
-        )
-    except Exception as exc:
-        logger.warning("记录有声书积分冻结失败 audiobook_project_id=%s: %s", audiobook_project_id, exc)
+            status="queued",
+            progress=0.0,
+            tts_model=tts_model,
+            cost_precheck_id=precheck.cost_precheck_id,
+        ),
+    )
 
     return {
         "success": True,
@@ -391,23 +380,14 @@ async def export_audiobook_project_m4b(
     audiobook_project_id: int,
     metadata: Optional[Dict[str, Any]] = Body(default=None),
     force: bool = Query(False, description="是否强制重新生成导出文件"),
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    owned: OwnedAudiobookProject = Depends(get_owned_audiobook_project),
 ):
     """导出整本有声书 M4B，包含按章节写入的 chapter markers。"""
-    audiobook_project = AudiobookProjectRepository.get_by_id(db, audiobook_project_id)
-    if not audiobook_project:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="有声书项目不存在")
-
-    project = ProjectRepository.get_user_project(db, current_user.id, audiobook_project.project_id)
-    if not project:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权限访问")
-
     try:
         export_result = build_project_m4b_export(
-            db,
-            audiobook_project=audiobook_project,
-            project=project,
+            owned.db,
+            audiobook_project=owned.audiobook_project,
+            project=owned.project,
             metadata=metadata or {},
             force=force,
         )
@@ -431,17 +411,11 @@ async def queue_audiobook_project_m4b_export(
     audiobook_project_id: int,
     metadata: Optional[Dict[str, Any]] = Body(default=None),
     force: bool = Query(False, description="是否强制重新生成导出文件"),
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    owned: OwnedAudiobookProject = Depends(get_owned_audiobook_project),
 ):
     """将整本 M4B 导出放入后台队列，状态通过 /tasks/{job_id}/status 查询。"""
-    _get_project_export_context_for_user(
-        db,
-        audiobook_project_id=audiobook_project_id,
-        current_user=current_user,
-    )
     return _queue_project_export_task(
-        db,
+        owned.db,
         audiobook_project_id=audiobook_project_id,
         export_type="m4b",
         metadata=metadata or {},
@@ -452,26 +426,17 @@ async def queue_audiobook_project_m4b_export(
 @router.get("/projects/{audiobook_project_id:int}/exports/m4b/download")
 async def download_audiobook_project_m4b(
     audiobook_project_id: int,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    owned: OwnedAudiobookProject = Depends(get_owned_audiobook_project),
 ):
     """下载已生成的整本 M4B 文件。"""
-    audiobook_project = AudiobookProjectRepository.get_by_id(db, audiobook_project_id)
-    if not audiobook_project:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="有声书项目不存在")
-
-    project = ProjectRepository.get_user_project(db, current_user.id, audiobook_project.project_id)
-    if not project:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权限访问")
-
     file_path = resolve_project_m4b_output_file(
-        project_id=project.id,
+        project_id=owned.project.id,
         audiobook_project_id=audiobook_project_id,
     )
     if not file_path.exists():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="M4B 文件不存在，请先导出")
 
-    filename = build_safe_filename(project.title or "audiobook", ".m4b", fallback="audiobook")
+    filename = build_safe_filename(owned.project.title or "audiobook", ".m4b", fallback="audiobook")
     encoded_filename = quote(filename)
     return FileResponse(
         path=str(file_path),
@@ -488,23 +453,14 @@ async def download_audiobook_project_m4b(
 async def export_audiobook_project_audacity(
     audiobook_project_id: int,
     force: bool = Query(False, description="是否强制重新生成导出文件"),
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    owned: OwnedAudiobookProject = Depends(get_owned_audiobook_project),
 ):
     """导出 Audacity ZIP，包含 project.lof、labels.txt 与按章节拆分的 WAV track。"""
-    audiobook_project = AudiobookProjectRepository.get_by_id(db, audiobook_project_id)
-    if not audiobook_project:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="有声书项目不存在")
-
-    project = ProjectRepository.get_user_project(db, current_user.id, audiobook_project.project_id)
-    if not project:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权限访问")
-
     try:
         export_result = build_project_audacity_export(
-            db,
-            audiobook_project=audiobook_project,
-            project=project,
+            owned.db,
+            audiobook_project=owned.audiobook_project,
+            project=owned.project,
             force=force,
         )
     except AudiobookExportError as exc:
@@ -526,17 +482,11 @@ async def export_audiobook_project_audacity(
 async def queue_audiobook_project_audacity_export(
     audiobook_project_id: int,
     force: bool = Query(False, description="是否强制重新生成导出文件"),
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    owned: OwnedAudiobookProject = Depends(get_owned_audiobook_project),
 ):
     """将 Audacity ZIP 导出放入后台队列，状态通过 /tasks/{job_id}/status 查询。"""
-    _get_project_export_context_for_user(
-        db,
-        audiobook_project_id=audiobook_project_id,
-        current_user=current_user,
-    )
     return _queue_project_export_task(
-        db,
+        owned.db,
         audiobook_project_id=audiobook_project_id,
         export_type="audacity",
         force=force,
@@ -546,27 +496,18 @@ async def queue_audiobook_project_audacity_export(
 @router.get("/projects/{audiobook_project_id:int}/exports/audacity/download")
 async def download_audiobook_project_audacity(
     audiobook_project_id: int,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    owned: OwnedAudiobookProject = Depends(get_owned_audiobook_project),
 ):
     """下载已生成的 Audacity ZIP 文件。"""
-    audiobook_project = AudiobookProjectRepository.get_by_id(db, audiobook_project_id)
-    if not audiobook_project:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="有声书项目不存在")
-
-    project = ProjectRepository.get_user_project(db, current_user.id, audiobook_project.project_id)
-    if not project:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权限访问")
-
     file_path = resolve_project_audacity_output_file(
-        project_id=project.id,
+        project_id=owned.project.id,
         audiobook_project_id=audiobook_project_id,
     )
     if not file_path.exists():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Audacity ZIP 文件不存在，请先导出")
 
     filename = build_safe_filename(
-        f"{project.title or 'audiobook'}_audacity",
+        f"{owned.project.title or 'audiobook'}_audacity",
         ".zip",
         fallback="audiobook",
     )
@@ -589,38 +530,19 @@ async def get_audiobook_project(
     db: Session = Depends(get_db)
 ):
     """获取有声书项目详情"""
-    audiobook_project = AudiobookProjectRepository.get_by_id(db, audiobook_project_id)
-
-    if not audiobook_project:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="有声书项目不存在",
-        )
-
-    # 验证权限
-    project = ProjectRepository.get_user_project(db, current_user.id, audiobook_project.project_id)
-
-    if not project:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="无权限访问",
-        )
+    owned = resolve_owned_audiobook_project(
+        db=db,
+        current_user=current_user,
+        audiobook_project_id=audiobook_project_id,
+    )
+    audiobook_project = owned.audiobook_project
 
     # 获取章节音频列表
     chapter_audios = ChapterAudioRepository.list_by_audiobook_project(db, audiobook_project_id)
 
     # 取章节编号，用于前端“按章节编号跨记录合并音频”
     chapter_ids = [ca.chapter_id for ca in chapter_audios]
-    chapter_number_by_id = {}
-    if chapter_ids:
-        from app.models.project import Chapter  # 避免顶层循环依赖
-
-        rows = (
-            db.query(Chapter.id, Chapter.chapter_number)
-            .filter(Chapter.id.in_(chapter_ids))
-            .all()
-        )
-        chapter_number_by_id = {cid: cnum for cid, cnum in rows}
+    chapter_number_by_id = ChapterRepository.get_chapter_number_map_by_ids(db, chapter_ids)
 
     return {
         "id": audiobook_project.id,
@@ -682,16 +604,10 @@ async def list_audiobook_projects(
         ]
 
     audiobook_project_ids = [ap.id for ap in audiobook_projects]
-    chapter_audios: List[ChapterAudio] = []
-    if audiobook_project_ids:
-        chapter_audios = (
-            db.query(ChapterAudio)
-            .filter(
-                ChapterAudio.audiobook_project_id.in_(audiobook_project_ids),
-                ChapterAudio.deleted_at.is_(None),
-            )
-            .all()
-        )
+    chapter_audios: List[ChapterAudio] = ChapterAudioRepository.list_active_by_audiobook_projects(
+        db,
+        audiobook_project_ids,
+    )
 
     audios_by_project: Dict[int, List[ChapterAudio]] = {}
     chapter_ids: List[int] = []
@@ -699,14 +615,7 @@ async def list_audiobook_projects(
         audios_by_project.setdefault(ca.audiobook_project_id, []).append(ca)
         chapter_ids.append(ca.chapter_id)
 
-    chapter_number_by_id: Dict[int, int] = {}
-    if chapter_ids:
-        rows = (
-            db.query(Chapter.id, Chapter.chapter_number)
-            .filter(Chapter.id.in_(list(set(chapter_ids))))
-            .all()
-        )
-        chapter_number_by_id = {cid: cnum for cid, cnum in rows}
+    chapter_number_by_id: Dict[int, int] = ChapterRepository.get_chapter_number_map_by_ids(db, chapter_ids)
 
     results: List[Dict[str, Any]] = []
     for ap in audiobook_projects:
@@ -748,11 +657,20 @@ async def list_user_audiobook_projects(
 ):
     """获取用户的所有有声书项目（用于有声小说仪表盘）"""
     audiobook_projects = AudiobookProjectRepository.list_by_user(db, current_user.id)
-    
-    # 获取项目详细信息
+
+    project_ids = list({ap.project_id for ap in audiobook_projects})
+    project_map: Dict[int, Project] = {}
+    if project_ids:
+        projects = ProjectRepository.list_user_projects_by_ids(
+            db,
+            current_user.id,
+            project_ids,
+        )
+        project_map = {project.id: project for project in projects}
+
     result = []
     for ap in audiobook_projects:
-        project = ProjectRepository.get_user_project(db, current_user.id, ap.project_id)
+        project = project_map.get(ap.project_id)
         if project:
             result.append({
                 "id": ap.id,

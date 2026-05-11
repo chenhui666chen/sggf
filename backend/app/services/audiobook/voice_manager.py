@@ -15,7 +15,8 @@ import json
 from .constants import INSTRUCT_SPEAKER_IDS, normalize_speaker_id
 from .llm_client import call_audiobook_llm_sync
 from .llm_json import LLMJsonParseError, parse_llm_json_object
-from .voice_catalog import load_voice_catalog
+from .tts_model_ids import DEFAULT_AUDIOBOOK_TTS_MODEL, normalize_audiobook_tts_model
+from .voice_catalog import load_voice_catalog, load_voice_catalog_for_model
 
 logger = logging.getLogger(__name__)
 
@@ -322,6 +323,71 @@ class VoiceManager:
             logger.info(f"🔁 映射旧音色 '{voice_id}' → Qwen3 speaker '{normalized}' (preset {preset_id})")
             return preset_id, self.PRESET_VOICES[preset_id]
         return None
+
+    def _resolve_voice_config_for_model(
+        self,
+        voice_id: Optional[str],
+        tts_model: Optional[str] = None,
+    ) -> Optional[Tuple[str, Dict[str, Any]]]:
+        """按指定模型解析音色配置，支持角色级跨模型 voice_mapping。"""
+        if not voice_id:
+            return None
+
+        normalized_model = normalize_audiobook_tts_model(tts_model or DEFAULT_AUDIOBOOK_TTS_MODEL)
+        if normalized_model == DEFAULT_AUDIOBOOK_TTS_MODEL:
+            return self._resolve_voice_config(voice_id)
+
+        try:
+            catalog = load_voice_catalog_for_model(normalized_model)
+            entry = catalog.get("voices_by_id", {}).get(str(voice_id))
+        except Exception as exc:
+            logger.warning("⚠️ 加载 %s 音色目录失败: %s", normalized_model, exc)
+            entry = None
+
+        if not entry:
+            return None
+
+        defaults = entry.get("default_params") or {}
+        voice_config = {
+            "tts_speaker_id": entry.get("speaker") or entry.get("id") or voice_id,
+            "gender": str(entry.get("gender") or "neutral").lower(),
+            "age_group": str(entry.get("category") or "adult").lower(),
+            "personality": str(entry.get("style") or "calm").lower(),
+            "pitch_base": int(defaults.get("pitch", 50) or 50),
+            "speed_base": float(defaults.get("speed", 1.0) or 1.0),
+            "volume_base": int(defaults.get("volume", 50) or 50),
+            "description": entry.get("description", ""),
+            "default_emotion": "calm",
+            "tts_model": normalized_model,
+        }
+        return str(entry.get("id") or voice_id), voice_config
+
+    def _apply_voice_type_config(self, voice_config: Dict[str, Any], voice_type: Optional[str]) -> None:
+        voice_type = str(voice_type or "").strip()
+        if not voice_type:
+            return
+
+        try:
+            from .voice_types import apply_voice_type_to_tts_params
+
+            enhanced = apply_voice_type_to_tts_params(
+                voice_type,
+                {
+                    "volume": voice_config.get("volume_base"),
+                    "speed": voice_config.get("speed_base"),
+                    "pitch": voice_config.get("pitch_base"),
+                },
+            )
+            if enhanced.get("volume") is not None:
+                voice_config["volume_base"] = int(max(0, min(100, enhanced["volume"])))
+            if enhanced.get("speed") is not None:
+                voice_config["speed_base"] = float(max(0.5, min(2.0, enhanced["speed"])))
+            if enhanced.get("pitch") is not None:
+                voice_config["pitch_base"] = int(max(0, min(100, enhanced["pitch"])))
+            if enhanced.get("emotion"):
+                voice_config["default_emotion"] = enhanced["emotion"]
+        except Exception as exc:
+            logger.warning("⚠️ 应用声音类型配置失败: %s", exc)
     
     def assign_voice(
         self,
@@ -444,16 +510,19 @@ class VoiceManager:
             personality in villain_personalities
         )
         
+        preferred_villain_voice_id = None
         if is_villain:
             logger.info(f"🎭 检测到反派角色，优先使用高张力音色 (role_type={role_type}, personality={personality})")
             # 根据性别锁定 Ethan/Bunny，并由情感映射增强张力
             # TTS引擎会自动为这些音色添加 angry/disgusted 情感
             if gender == "male":
-                logger.info("🎭 为男性反派分配: Ethan")
-                return "Ethan"  # Ethan，支持angry/disgusted情感
+                preferred_villain_voice_id = "Ethan"  # Ethan，支持angry/disgusted情感
             elif gender == "female":
-                logger.info("🎭 为女性反派分配: Bunny")
-                return "Bunny"  # Sunny，支持angry/disgusted情感
+                preferred_villain_voice_id = "Bunny"  # Sunny，支持angry/disgusted情感
+
+            if preferred_villain_voice_id and preferred_villain_voice_id not in self.used_voice_ids:
+                logger.info("🎭 为反派分配专用高张力音色: %s", preferred_villain_voice_id)
+                return preferred_villain_voice_id
         
         # 候选音色列表
         candidates = []
@@ -469,12 +538,6 @@ class VoiceManager:
             if gender in ("male", "female") and voice_config["gender"] != gender:
                 continue
                 
-            # 对性别未知的情况，才使用"避免重复"的策略
-            if gender not in ("male", "female"):
-                # 跳过已使用的音色（除非没有可用选项）
-                if voice_id in self.used_voice_ids and len(self.used_voice_ids) < len(self.PRESET_VOICES) - 2:
-                    continue
-                
             # 计算匹配分数
             score = 0
             if voice_config["gender"] == gender:
@@ -483,13 +546,19 @@ class VoiceManager:
                 score += 5
             if voice_config["personality"] == personality:
                 score += 3
+            if preferred_villain_voice_id and voice_id == preferred_villain_voice_id:
+                score += 4
                 
             candidates.append((voice_id, score))
             
         # 选择最高分
         if candidates:
-            candidates.sort(key=lambda x: x[1], reverse=True)
-            return candidates[0][0]
+            candidate_pool = [
+                candidate for candidate in candidates
+                if candidate[0] not in self.used_voice_ids
+            ] or candidates
+            candidate_pool.sort(key=lambda x: x[1], reverse=True)
+            return candidate_pool[0][0]
         else:
             # 优先：如果已知性别，则在全量音色中按性别挑一个（不看已使用记录），保证性别一致性
             if gender in ("male", "female"):
@@ -992,9 +1061,21 @@ class VoiceManager:
                 # 未显式配置音色，保留为自动分配
                 continue
 
-            resolved = self._resolve_voice_config(voice_id)
+            # 🆕 确定TTS模型：用户配置 > 智能推荐 > 默认值
+            tts_model = config.get("tts_model")
+            if not tts_model and suggest_model_for_character:
+                char_profile = profile_index.get(character_name)
+                tts_model = suggest_model_for_character(
+                    character_profile=char_profile,
+                    cost_priority="balanced",
+                )
+            if not tts_model:
+                tts_model = DEFAULT_AUDIOBOOK_TTS_MODEL
+            tts_model = normalize_audiobook_tts_model(tts_model)
+
+            resolved = self._resolve_voice_config_for_model(voice_id, tts_model)
             if not resolved:
-                logger.warning(f"⚠️ 未知的voice_id: {voice_id}，跳过角色 {character_name}")
+                logger.warning(f"⚠️ 未知的voice_id/model组合: {voice_id} ({tts_model})，跳过角色 {character_name}")
                 continue
             resolved_voice_id, preset = resolved
 
@@ -1028,20 +1109,13 @@ class VoiceManager:
                     pitch_int = preset.get("pitch_base", 50)
                 voice_config["pitch_base"] = max(0, min(100, pitch_int))
 
-            # 🆕 确定TTS模型：用户配置 > 智能推荐 > 默认值
-            tts_model = config.get("tts_model")
-            if not tts_model and suggest_model_for_character:
-                char_profile = profile_index.get(character_name)
-                tts_model = suggest_model_for_character(
-                    character_profile=char_profile,
-                    cost_priority="balanced",
-                )
-            if not tts_model:
-                tts_model = "qwen3-tts-instruct-flash"
+            self._apply_voice_type_config(voice_config, config.get("voice_type"))
             
             voice_config["tts_model"] = tts_model
 
             profile = self._create_profile(character_name, voice_id, voice_config, tts_model=tts_model)
+            if config.get("personality"):
+                profile.personality = str(config["personality"])
             
             # 🆕 如果有角色档案，增强profile信息
             char_profile = profile_index.get(character_name)
@@ -1095,7 +1169,8 @@ class VoiceManager:
             if not voice_id:
                 continue
             
-            resolved = self._resolve_voice_config(voice_id)
+            tts_model = normalize_audiobook_tts_model(config.get("tts_model") or DEFAULT_AUDIOBOOK_TTS_MODEL)
+            resolved = self._resolve_voice_config_for_model(voice_id, tts_model)
             if not resolved:
                 continue
             
@@ -1103,8 +1178,7 @@ class VoiceManager:
             voice_config = dict(preset)
             
             # 🆕 恢复TTS模型（如果数据库中有记录）
-            if config.get("tts_model"):
-                voice_config["tts_model"] = config["tts_model"]
+            voice_config["tts_model"] = tts_model
             
             # 恢复音量、语速、音高
             if config.get("volume") is not None:
@@ -1113,12 +1187,14 @@ class VoiceManager:
                 voice_config["speed_base"] = config["speed"]
             if config.get("pitch") is not None:
                 voice_config["pitch_base"] = config["pitch"]
+
+            self._apply_voice_type_config(voice_config, config.get("voice_type"))
             
             profile = self._create_profile(
                 character_name, 
                 resolved_voice_id, 
                 voice_config, 
-                tts_model=config.get("tts_model"),
+                tts_model=tts_model,
             )
             
             # 恢复角色档案信息

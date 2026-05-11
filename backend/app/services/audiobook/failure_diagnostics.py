@@ -44,7 +44,7 @@ def _get_value(value: Any, key: str, default: Any = None) -> Any:
 def _safe_int(value: Any) -> Optional[int]:
     try:
         number = int(value)
-    except Exception:
+    except (TypeError, ValueError, OverflowError):
         return None
     if number < 0:
         return None
@@ -335,6 +335,25 @@ def _error_type_from(
     return ""
 
 
+def _trace_id_from(
+    *,
+    task_id: Optional[str],
+    result: Optional[Dict[str, Any]],
+    checkpoint: Optional[Dict[str, Any]],
+) -> str:
+    sources = [
+        {"trace_id": task_id},
+        result if isinstance(result, dict) else {},
+        checkpoint if isinstance(checkpoint, dict) else {},
+    ]
+    for source in sources:
+        for key in ("trace_id", "celery_task_id", "task_id", "engine_task_id"):
+            value = _safe_str(source.get(key))
+            if value:
+                return value
+    return ""
+
+
 def build_chapter_failure_diagnostic(
     *,
     stage: str,
@@ -379,9 +398,15 @@ def build_chapter_failure_diagnostic(
         or _safe_str(result.get("task_id") if isinstance(result, dict) else None)
         or _safe_str(checkpoint.get("engine_task_id"))
     )
+    trace_id = _trace_id_from(
+        task_id=task_id,
+        result=result,
+        checkpoint=checkpoint,
+    )
 
     diagnostic: Dict[str, Any] = {
         "schema_version": FAILURE_DIAGNOSTIC_SCHEMA_VERSION,
+        "trace_id": trace_id or None,
         "stage": _safe_str(stage),
         "chapter_id": chapter_id,
         "chapter_title": _safe_str(chapter_title),

@@ -44,9 +44,28 @@ def test_calculate_text_coverage_detects_chinese_text_loss():
     assert calculate_text_coverage(original, [make_segment("\u591c\u8272\u538b\u4e0b\u6765\u3002")]) < 0.92
 
 
+def test_llm_review_prompt_includes_audiobook_cadence_contract():
+    from app.services.audiobook.script_adapter_pkg._llm_review import _build_review_prompt
+
+    prompt = _build_review_prompt(
+        '[{"type":"narration","text":"很长的旁白。","speaker":"旁白"}]',
+        batch_index=1,
+        batch_total=1,
+    )
+
+    assert '{"segments": [ ... ]}' in prompt
+    assert "narration 超过 140 字" in prompt
+    assert "连续动作按“发动 -> 受击 -> 后果 -> 反应”拆" in prompt
+    assert "不要在拆出的每段重复同一音效/配乐" in prompt
+
+
 @pytest.mark.asyncio
 async def test_llm_review_applies_structural_fix_with_flash_model():
-    from app.services.audiobook.script_adapter_pkg._llm_review import review_script_segments_with_llm
+    from app.services.audiobook.script_adapter_pkg._llm_review import (
+        REVIEW_OUTPUT_TOKEN_MAX,
+        REVIEW_TIMEOUT_MAX_SECONDS,
+        review_script_segments_with_llm,
+    )
 
     llm = DummyLLM(
         """
@@ -71,6 +90,10 @@ async def test_llm_review_applies_structural_fix_with_flash_model():
     assert result.report["coverage_ratio"] == 1.0
     assert result.segments[0].performance_notes == "\u4f4e\u6c89\u5e73\u7a33\u3002"
     assert llm.calls[0]["model"] == "deepseek-v4-flash"
+    assert llm.calls[0]["max_tokens"] <= REVIEW_OUTPUT_TOKEN_MAX
+    assert llm.calls[0]["timeout"] <= REVIEW_TIMEOUT_MAX_SECONDS
+    assert llm.calls[0]["max_retries"] == 1
+    assert llm.calls[0]["disable_timeout_auto_tuning"] is True
 
 
 @pytest.mark.asyncio

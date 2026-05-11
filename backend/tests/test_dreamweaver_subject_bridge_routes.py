@@ -29,10 +29,10 @@ from app.models.user import User
 
 
 def load_dreamweaver_module():
-    dreamweaver_path = ROOT_DIR / "app" / "api" / "v1" / "dreamweaver.py"
+    dreamweaver_path = ROOT_DIR / "app" / "api" / "v1" / "dreamweaver_api" / "_imports.py"
     spec = spec_from_file_location("test_dreamweaver_subject_bridge_module", dreamweaver_path)
     if spec is None or spec.loader is None:
-        raise RuntimeError("无法加载 DreamWeaver 路由模块")
+        raise RuntimeError("无法加载 DreamWeaver imports 模块")
 
     module = module_from_spec(spec)
     sys.modules.setdefault("test_dreamweaver_subject_bridge_module", module)

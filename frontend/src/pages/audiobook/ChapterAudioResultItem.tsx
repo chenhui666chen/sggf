@@ -5,12 +5,16 @@ import {
   Button,
   Chip,
   CircularProgress,
+  Collapse,
   IconButton,
   ListItemIcon,
   ListItemText,
   Menu,
   MenuItem,
+  Rating,
+  TextField,
   Tooltip,
+  Typography,
 } from '@mui/material'
 import DownloadIcon from '@mui/icons-material/Download'
 import EditIcon from '@mui/icons-material/Edit'
@@ -19,15 +23,18 @@ import MoreVertIcon from '@mui/icons-material/MoreVert'
 import PauseIcon from '@mui/icons-material/Pause'
 import PlayIcon from '@mui/icons-material/PlayArrow'
 import ReplayIcon from '@mui/icons-material/Replay'
+import StarIcon from '@mui/icons-material/Star'
+import SummarizeIcon from '@mui/icons-material/Summarize'
 
+import { apiClient, extractApiErrorMessage } from '../../services/api'
 import {
   formatChapterAudioButtonLabel,
   formatResumeCheckpointChipLabel,
   resolveAudioStatusChip,
   resolveScriptStatusChip,
 } from './chapterAudioResultUtils'
-import { audiobookColors } from './audiobookTheme'
-import type { Chapter, ChapterAudio, GenerationCheckpoint } from './types'
+import { audiobookButtonSx, audiobookColorRoles } from './audiobookTheme'
+import type { Chapter, ChapterAudio, GenerationCheckpoint, TtsModel } from './types'
 
 interface ChapterAudioResultItemProps {
   chapterAudio: ChapterAudio
@@ -38,11 +45,15 @@ interface ChapterAudioResultItemProps {
   resumeCheckpoint?: GenerationCheckpoint
   generating: boolean
   resumingChapterId: number | null
+  ttsModel?: TtsModel
+  projectId?: number
+  audiobookProjectId?: number
   onPlayAudio: (chapterId: number) => void
   onDownloadAudio: (chapterId: number) => void
   onCollectChapterAudio: (chapterAudio: ChapterAudio) => void
   onOpenScriptEditor: (chapterId: number) => void
   onResumeChapterGeneration: (chapterId: number) => void
+  onOpenScriptReview?: (audiobookProjectId: number, chapterId: number) => void
 }
 
 const chipSx = (chip: { backgroundColor: string; color: string }) => ({
@@ -61,17 +72,32 @@ const ChapterAudioResultItem = ({
   resumeCheckpoint,
   generating,
   resumingChapterId,
+  ttsModel,
+  projectId,
+  audiobookProjectId,
   onPlayAudio,
   onDownloadAudio,
   onCollectChapterAudio,
   onOpenScriptEditor,
   onResumeChapterGeneration,
+  onOpenScriptReview,
 }: ChapterAudioResultItemProps) => {
   const [menuAnchorEl, setMenuAnchorEl] = useState<HTMLElement | null>(null)
+  const [showRating, setShowRating] = useState(false)
+  const [ratingValue, setRatingValue] = useState<number | null>(null)
+  const [ratingComment, setRatingComment] = useState('')
+  const [ratingSubmitting, setRatingSubmitting] = useState(false)
+  const [ratingSubmitted, setRatingSubmitted] = useState(false)
+  const [ratingError, setRatingError] = useState<string | null>(null)
   const canResume = Boolean(resumeCheckpoint?.can_resume)
   const scriptChip = resolveScriptStatusChip(chapterAudio)
   const audioChip = resolveAudioStatusChip(chapterAudio)
   const menuOpen = Boolean(menuAnchorEl)
+  const collectTooltipTitle = isCollecting
+    ? '正在收录到用户资产'
+    : collectDisabled
+      ? '该章节音频已收录或暂不可收录'
+      : '收录到用户资产'
 
   const handleOpenMenu = (event: MouseEvent<HTMLButtonElement>) => {
     setMenuAnchorEl(event.currentTarget)
@@ -111,14 +137,7 @@ const ChapterAudioResultItem = ({
             size="small"
             startIcon={isPlaying ? <PauseIcon /> : <PlayIcon />}
             onClick={() => onPlayAudio(chapterAudio.chapter_id)}
-            sx={{
-              borderColor: isPlaying ? audiobookColors.danger : audiobookColors.brand,
-              color: isPlaying ? audiobookColors.danger : audiobookColors.brand,
-              '&:hover': {
-                borderColor: isPlaying ? audiobookColors.dangerDark : audiobookColors.brandDark,
-                backgroundColor: isPlaying ? audiobookColors.dangerSoft : audiobookColors.brandSoft,
-              },
-            }}
+            sx={isPlaying ? audiobookButtonSx.dangerOutlined : audiobookButtonSx.brandOutlined}
           >
             {formatChapterAudioButtonLabel(chapterAudio, chapter)}
           </Button>
@@ -128,29 +147,19 @@ const ChapterAudioResultItem = ({
           <IconButton
             size="small"
             onClick={() => onDownloadAudio(chapterAudio.chapter_id)}
-            sx={{
-              color: audiobookColors.brand,
-              '&:hover': {
-                backgroundColor: audiobookColors.brandSoft,
-              },
-            }}
+            sx={audiobookButtonSx.brandIcon}
           >
             <DownloadIcon fontSize="small" />
           </IconButton>
         </Tooltip>
 
-        <Tooltip title="收录到用户资产">
+        <Tooltip title={collectTooltipTitle}>
           <span>
           <IconButton
             size="small"
             onClick={() => onCollectChapterAudio(chapterAudio)}
             disabled={collectDisabled}
-            sx={{
-              color: audiobookColors.collect,
-              '&:hover': {
-                backgroundColor: audiobookColors.collectSoft,
-              },
-            }}
+            sx={audiobookButtonSx.collectIcon}
           >
             {isCollecting ? <CircularProgress size={18} color="inherit" /> : <LibraryAddIcon fontSize="small" />}
           </IconButton>
@@ -165,12 +174,7 @@ const ChapterAudioResultItem = ({
             aria-controls={menuOpen ? `chapter-audio-menu-${chapterAudio.id}` : undefined}
             aria-haspopup="menu"
             aria-expanded={menuOpen ? 'true' : undefined}
-            sx={{
-              color: audiobookColors.neutral,
-              '&:hover': {
-                backgroundColor: audiobookColors.neutralSoft,
-              },
-            }}
+            sx={audiobookButtonSx.neutralIcon}
           >
             <MoreVertIcon fontSize="small" />
           </IconButton>
@@ -189,6 +193,26 @@ const ChapterAudioResultItem = ({
             </ListItemIcon>
             <ListItemText primary="编辑剧本/提示词" />
           </MenuItem>
+          <MenuItem
+            onClick={() => {
+              handleCloseMenu()
+              if (audiobookProjectId && onOpenScriptReview) {
+                onOpenScriptReview(audiobookProjectId, chapterAudio.chapter_id)
+              }
+            }}
+            disabled={!audiobookProjectId || !onOpenScriptReview}
+          >
+            <ListItemIcon>
+              <SummarizeIcon fontSize="small" />
+            </ListItemIcon>
+            <ListItemText primary="查看审核报告" />
+          </MenuItem>
+          <MenuItem onClick={() => { handleCloseMenu(); setShowRating(true) }}>
+            <ListItemIcon>
+              <StarIcon fontSize="small" />
+            </ListItemIcon>
+            <ListItemText primary="评价生成质量" />
+          </MenuItem>
           {canResume && (
             <MenuItem
               onClick={handleResumeChapterGeneration}
@@ -200,7 +224,8 @@ const ChapterAudioResultItem = ({
                   : <ReplayIcon fontSize="small" />}
               </ListItemIcon>
               <ListItemText
-                primary={resumingChapterId === chapterAudio.chapter_id ? '提交中...' : '继续生成'}
+                primary="继续生成"
+                secondary={resumingChapterId === chapterAudio.chapter_id ? '提交中...' : undefined}
               />
             </MenuItem>
           )}
@@ -214,15 +239,100 @@ const ChapterAudioResultItem = ({
             label={formatResumeCheckpointChipLabel(resumeCheckpoint)}
             size="small"
             sx={{
-              backgroundColor: audiobookColors.warningSoft,
-              color: audiobookColors.warning,
+              backgroundColor: audiobookColorRoles.notice.warning.bg,
+              color: audiobookColorRoles.notice.warning.text,
               fontSize: '0.75rem',
               height: 22,
             }}
           />
         )}
         <Chip label={audioChip.label} size="small" sx={chipSx(audioChip)} />
+        {chapterAudio.generation_time != null && chapterAudio.generation_time > 0 && (
+          <Chip
+            label={`${chapterAudio.generation_time.toFixed(1)}s`}
+            size="small"
+            variant="outlined"
+            sx={{ fontSize: '0.75rem', height: 22 }}
+          />
+        )}
+        {chapterAudio.tts_cost != null && chapterAudio.tts_cost > 0 && (
+          <Chip
+            label={`￥${chapterAudio.tts_cost.toFixed(2)}`}
+            size="small"
+            variant="outlined"
+            sx={{ fontSize: '0.75rem', height: 22 }}
+          />
+        )}
       </Box>
+
+      <Collapse in={showRating}>
+        <Box sx={{ mt: 1, p: 1, backgroundColor: 'action.hover', borderRadius: 1 }}>
+          {ratingSubmitted ? (
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+              <StarIcon sx={{ color: 'gold', fontSize: 18 }} />
+              <Typography variant="caption" color="text.secondary">
+                已评分 {ratingValue} 星，感谢反馈！
+              </Typography>
+            </Box>
+          ) : (
+            <>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                <Typography variant="caption" color="text.secondary">评分：</Typography>
+                <Rating
+                  size="small"
+                  value={ratingValue}
+                  onChange={(_, v) => setRatingValue(v)}
+                />
+                <Button
+                  size="small"
+                  variant="text"
+                  disabled={ratingSubmitting || ratingValue === null}
+                  onClick={async () => {
+                    if (!ratingValue) return
+                    setRatingSubmitting(true)
+                    setRatingError(null)
+                    try {
+                      await apiClient.submitUserRating({
+                        model_id: ttsModel || 'unknown',
+                        task_type: 'audiobook_chapter',
+                        rating: ratingValue,
+                        comment: ratingComment || undefined,
+                        project_id: projectId,
+                      })
+                      setRatingSubmitted(true)
+                    } catch (err: unknown) {
+                      setRatingError(await extractApiErrorMessage(err, '提交评分失败'))
+                    } finally {
+                      setRatingSubmitting(false)
+                    }
+                  }}
+                >
+                  {ratingSubmitting ? '提交中...' : '提交'}
+                </Button>
+                <Button size="small" variant="text" onClick={() => setShowRating(false)}>
+                  取消
+                </Button>
+              </Box>
+              <TextField
+                size="small"
+                fullWidth
+                multiline
+                minRows={1}
+                maxRows={2}
+                placeholder="可选：写下你的反馈..."
+                value={ratingComment}
+                onChange={(e) => setRatingComment(e.target.value)}
+                sx={{ mt: 0.5 }}
+              />
+              {ratingError && (
+                <Typography variant="caption" color="error" sx={{ mt: 0.5 }}>
+                  {ratingError}
+                </Typography>
+              )}
+            </>
+          )}
+        </Box>
+      </Collapse>
     </Box>
   )
 }

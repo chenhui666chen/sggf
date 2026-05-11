@@ -22,6 +22,8 @@ export interface ChapterAudio {
   audio_path?: string | null
   script_status?: string | null
   has_script?: boolean
+  generation_time?: number | null
+  tts_cost?: number | null
 }
 
 export interface AudiobookProjectDetail {
@@ -30,8 +32,10 @@ export interface AudiobookProjectDetail {
   status?: string | null
   total_chapters?: number | null
   completed_chapters?: number | null
+  failed_chapters?: number | null
   total_duration?: number | null
   total_cost?: number | null
+  total_size?: number | null
   chapter_audios?: ChapterAudio[]
 }
 
@@ -117,6 +121,7 @@ export interface CharacterVoiceSetting {
   voiceType?: string
   personality?: string
   emotionTendency?: string
+  source?: 'user' | 'ai_suggest' | string | null
 }
 
 export interface AudioFxConfig {
@@ -124,6 +129,10 @@ export interface AudioFxConfig {
   enable_music: boolean
   sound_effect_density: 'low' | 'medium' | 'high' | 'off'
   music_density: 'low' | 'medium' | 'high' | 'off'
+  intelligent_balance?: boolean
+  bgm_volume?: number
+  sfx_volume?: number
+  balance_strategy?: 'auto' | 'ducking' | 'sidechain' | 'none'
 }
 
 export interface ProjectAudioConfig {
@@ -138,6 +147,7 @@ export interface ProjectAudioConfig {
     voice_type?: string | null
     personality?: string | null
     emotion_tendency?: string | null
+    source?: string | null
   }[]
   audio_fx?: AudioFxConfig | null
 }
@@ -193,6 +203,15 @@ export interface ScriptAudioBalanceMetrics {
   total_effects?: number
   total_music_cues?: number
   effects_per_minute?: number
+  unresolved_effect_count?: number
+  placeholder_effect_count?: number
+  missing_effect_file_count?: number
+}
+
+export interface ScriptAudioWarning {
+  code?: string
+  level?: string
+  message?: string
 }
 
 export interface ScriptPacingMetrics {
@@ -211,6 +230,7 @@ export interface ScriptReviewDetail {
   pacing?: ScriptPacingMetrics
   revision_suggestions?: string[]
   issues?: ScriptReviewIssue[]
+  audio_warnings?: ScriptAudioWarning[]
 }
 
 export interface ScriptSegmentVoiceParams {
@@ -402,6 +422,7 @@ export interface ScriptEditorDialogProps {
   hiddenEditorConflictSegmentDiffCount?: number
   onApplyIncomingDraft?: () => void
   onKeepLocalDraft?: () => void
+  projectId?: number
 }
 
 export interface AudiobookProjectHistoryItem {

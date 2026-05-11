@@ -1,4 +1,4 @@
-﻿/**
+/**
  * 耳畔星河 - 有声小说生成页面
  * 
  * 功能：
@@ -70,6 +70,7 @@ import { useAudiobookTextProjectImport } from './audiobook/useAudiobookTextProje
 import { useAudiobookTtsModelReadyGuard } from './audiobook/useAudiobookTtsModelReadyGuard'
 import { useAudiobookVoiceActions } from './audiobook/useAudiobookVoiceActions'
 import { useAudiobookVoiceCatalog } from './audiobook/useAudiobookVoiceCatalog'
+import { useCosyVoiceWorkbench } from './audiobook/useCosyVoiceWorkbench'
 import {
   AUDIOBOOK_SESSION_STORAGE_KEY,
   buildPendingTaskStatus,
@@ -260,6 +261,7 @@ const AudiobookPage = () => {
     chapterId: scriptEditorChapter?.chapterId,
     ttsModel,
     setSnackbar,
+    setScriptEditorData,
   })
 
   const {
@@ -295,7 +297,7 @@ const AudiobookPage = () => {
   } = useAudiobookAudioPlayback()
 
   const {
-    collectingChapterId,
+    collectingChapterIds,
     handleDownloadAudio,
     handleCollectChapterAudio,
     handlePlayAudio,
@@ -411,6 +413,7 @@ const AudiobookPage = () => {
     stageMetricsData,
     setStageMetricsData,
     handleOpenScriptReviewDialog,
+    handleOpenScriptReviewFromApi,
     handleCloseScriptReviewDialog,
     handleOpenStageMetricsDialog,
     handleCloseStageMetricsDialog,
@@ -461,12 +464,44 @@ const AudiobookPage = () => {
     handleAutoAssignVoices,
   } = useAudiobookVoiceActions({
     selectedProjectId,
+    routeProjectId,
     ttsModel,
     characterVoices,
     setCharacterVoicesForCurrentModel,
     updateCharacterVoicesForCurrentModel,
     refreshVoiceCatalog,
     setSnackbar,
+  })
+  const cosyVoiceWorkbench = useCosyVoiceWorkbench({
+    cloneName,
+    cloneUrl,
+    cloneLoading,
+    cloneUploading,
+    cloneRecording,
+    cloneDeletingId,
+    cloneError,
+    cloneSuccess,
+    cloneRecordDialogOpen,
+    designName,
+    designPrompt,
+    designPreviewText,
+    designLoading,
+    designError,
+    designSuccess,
+    customVoicePresets,
+    onCloneNameChange: setCloneName,
+    onCloneUrlChange: setCloneUrl,
+    onCreateCloneVoice: handleCreateCloneVoice,
+    onOpenCloneRecordDialog: handleOpenCloneRecordDialog,
+    onUploadCloneAudio: handleUploadCloneAudio,
+    onDesignNameChange: setDesignName,
+    onDesignPromptChange: setDesignPrompt,
+    onDesignPreviewTextChange: setDesignPreviewText,
+    onCreateDesignVoice: handleCreateDesignVoice,
+    onDeleteCustomVoice: handleDeleteCustomVoice,
+    onCloseCloneRecordDialog: handleCloseCloneRecordDialog,
+    onStartCloneRecording: handleStartCloneRecording,
+    onStopCloneRecording: handleStopCloneRecording,
   })
 
   const { ensureCurrentTtsModelReady } = useAudiobookTtsModelReadyGuard({
@@ -862,6 +897,17 @@ const AudiobookPage = () => {
     downloadCompletedProjectExport,
   })
 
+  const setupGenerateDisabled = selectedChapters.length === 0
+    || generating
+    || !(selectedProject?.id ?? routeProjectId)
+  const setupGenerateDisabledReason = generating
+    ? '当前有声书任务正在生成中'
+    : !(selectedProject?.id ?? routeProjectId)
+      ? '请先选择项目'
+      : selectedChapters.length === 0
+        ? '请先选择至少一个章节'
+        : ''
+
   return (
     <Box sx={{ minHeight: '100vh', background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)' }}>
       <AudiobookPageHeader
@@ -904,22 +950,7 @@ const AudiobookPage = () => {
             showCustomVoiceWorkbench={showCustomVoiceWorkbench}
             voiceError={voiceError}
             voiceLoading={voiceLoading}
-            cloneName={cloneName}
-            cloneUrl={cloneUrl}
-            cloneLoading={cloneLoading}
-            cloneUploading={cloneUploading}
-            cloneRecording={cloneRecording}
-            cloneDeletingId={cloneDeletingId}
-            cloneError={cloneError}
-            cloneSuccess={cloneSuccess}
-            cloneRecordDialogOpen={cloneRecordDialogOpen}
-            designName={designName}
-            designPrompt={designPrompt}
-            designPreviewText={designPreviewText}
-            designLoading={designLoading}
-            designError={designError}
-            designSuccess={designSuccess}
-            customVoicePresets={customVoicePresets}
+            cosyVoiceWorkbench={cosyVoiceWorkbench}
             narrationStyle={narrationStyle}
             narrationStylePrompt={narrationStylePrompt}
             outputFormat={outputFormat}
@@ -935,21 +966,9 @@ const AudiobookPage = () => {
             previewingCharacterId={previewingCharacterId}
             recommendingVoiceTypeId={recommendingVoiceTypeId}
             autoAssigningVoices={autoAssigningVoices}
-            generateDisabled={selectedChapters.length === 0 || generating || !(selectedProject?.id ?? routeProjectId)}
+            generateDisabled={setupGenerateDisabled}
+            generateDisabledReason={setupGenerateDisabledReason}
             onFetchVoiceCatalog={fetchVoiceCatalog}
-            onCloneNameChange={setCloneName}
-            onCloneUrlChange={setCloneUrl}
-            onCreateCloneVoice={handleCreateCloneVoice}
-            onOpenCloneRecordDialog={handleOpenCloneRecordDialog}
-            onUploadCloneAudio={handleUploadCloneAudio}
-            onDesignNameChange={setDesignName}
-            onDesignPromptChange={setDesignPrompt}
-            onDesignPreviewTextChange={setDesignPreviewText}
-            onCreateDesignVoice={handleCreateDesignVoice}
-            onDeleteCustomVoice={handleDeleteCustomVoice}
-            onCloseCloneRecordDialog={handleCloseCloneRecordDialog}
-            onStartCloneRecording={handleStartCloneRecording}
-            onStopCloneRecording={handleStopCloneRecording}
             onNarrationStyleChange={setNarrationStyle}
             onNarrationStylePromptChange={setNarrationStylePrompt}
             onOutputFormatChange={setOutputFormat}
@@ -1001,11 +1020,14 @@ const AudiobookPage = () => {
             currentChapterAudios={currentChapterAudios}
             chapters={chapters}
             playingChapter={playingChapter}
-            collectingChapterId={collectingChapterId}
+            collectingChapterIds={collectingChapterIds}
             resumeCheckpoints={resumeCheckpoints}
             generating={generating}
             resumingChapterId={resumingChapterId}
             hasScriptReview={Boolean(activeTaskStatus?.stages?.quality_review)}
+            ttsModel={ttsModel}
+            projectId={audiobookProject?.id}
+            audiobookProjectId={audiobookProject?.id}
             onOpenBrowserPlayer={handleOpenBrowserPlayer}
             onExportProjectM4b={handleExportProjectM4b}
             onExportProjectAudacity={handleExportProjectAudacity}
@@ -1015,6 +1037,7 @@ const AudiobookPage = () => {
             onOpenScriptEditor={handleOpenScriptEditor}
             onResumeChapterGeneration={handleResumeChapterGeneration}
             onOpenScriptReview={handleOpenScriptReviewDialog}
+            onOpenScriptReviewFromApi={handleOpenScriptReviewFromApi}
             onGenerateApprovedChapterAudio={handleGenerateAudioForApprovedChapters}
             onCreateNewProject={handleCreateNewAudiobookProject}
           />
@@ -1040,6 +1063,7 @@ const AudiobookPage = () => {
       <ScriptQualityReviewDialog
         open={scriptReviewDialogOpen}
         data={scriptReviewData}
+        audiobookProjectId={audiobookProject?.id}
         selectedIssueIndex={scriptReviewSelectedIssueIndex}
         selectedSegmentIndex={scriptReviewSelectedSegmentIndex}
         onClose={handleCloseScriptReviewDialog}
@@ -1086,6 +1110,7 @@ const AudiobookPage = () => {
         hiddenEditorConflictSegmentDiffCount={hiddenEditorConflictSegmentDiffCount}
         onApplyIncomingDraft={handleApplyIncomingEditorDraft}
         onKeepLocalDraft={handleKeepLocalEditorDraft}
+        projectId={audiobookProject?.id}
       />
       
       {/* 新增：历史记录对话框 */}

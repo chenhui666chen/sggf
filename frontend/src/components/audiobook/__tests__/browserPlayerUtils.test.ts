@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import {
   DEFAULT_PLAYER_STATE,
@@ -96,6 +96,7 @@ describe('browser player utils', () => {
     const storage = new MemoryStorage()
     const projectId = 12
     const storageKey = buildPlayerStateKey(projectId)
+    const now = Date.now()
     const snapshot = {
       currentChapterIndex: 1,
       currentTime: 31,
@@ -106,7 +107,14 @@ describe('browser player utils', () => {
     }
 
     expect(readStoredBrowserPlayerState(storage, projectId, 3)).toEqual(DEFAULT_PLAYER_STATE)
+    const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(now)
     expect(writeStoredBrowserPlayerState(storage, projectId, snapshot)).toBe(true)
+    nowSpy.mockRestore()
+
+    expect(JSON.parse(storage.getItem(storageKey) as string)).toMatchObject({
+      ...snapshot,
+      savedAt: now,
+    })
     expect(readStoredBrowserPlayerState(storage, projectId, 3)).toEqual(snapshot)
 
     storage.setItem(storageKey, JSON.stringify({
@@ -132,6 +140,33 @@ describe('browser player utils', () => {
 
     expect(readStoredBrowserPlayerState(new ThrowingStorage(), projectId, 2)).toEqual(DEFAULT_PLAYER_STATE)
     expect(writeStoredBrowserPlayerState(new ThrowingStorage(), projectId, snapshot)).toBe(false)
+  })
+
+  it('expires stored browser player state after the TTL window', () => {
+    const storage = new MemoryStorage()
+    const projectId = 12
+    const storageKey = buildPlayerStateKey(projectId)
+    const snapshot = {
+      currentChapterIndex: 2,
+      currentTime: 88,
+      volume: 0.9,
+      subtitleFormat: 'ass' as const,
+      showSubtitles: true,
+      wasPlaying: false,
+    }
+    const ttlMs = 7 * 24 * 60 * 60 * 1000
+    const now = 1_700_000_000_000
+    const savedAt = now - ttlMs - 1
+
+    storage.setItem(storageKey, JSON.stringify({
+      ...snapshot,
+      savedAt,
+    }))
+
+    const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(now)
+    expect(readStoredBrowserPlayerState(storage, projectId, 4)).toEqual(DEFAULT_PLAYER_STATE)
+    nowSpy.mockRestore()
+    expect(storage.getItem(storageKey)).toBeNull()
   })
 
   it('builds timed segments and finds active segment by playback time', () => {

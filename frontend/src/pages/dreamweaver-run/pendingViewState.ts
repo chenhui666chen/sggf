@@ -129,6 +129,49 @@ export type PendingVideoConfirmationJobState = {
 }
 
 export function resolvePendingVideoConfirmationJobState(input: {
+  job: {
+    shot_id?: string | null
+    desc?: string | null
+    status?: string | null
+    confirmed?: boolean | null
+    requires_bridge?: boolean | null
+    depends_on_shot_id?: string | null
+  }
+  shot: {
+    head_frame?: unknown
+    tail_frame?: unknown
+  } | null
+  running: boolean
+  videoJobConfirmingShotId: string | null | undefined
+  getShotFramePrompt: (frame: unknown) => string
+  getShotVideoPromptOverride: (shot: unknown) => string
+  snapshotShotById: Map<string, unknown>
+}): PendingVideoConfirmationJobState {
+  const sid = String(input.job.shot_id || '').trim()
+  const desc = String(input.job.desc || '').trim()
+  const dep = String(input.job.depends_on_shot_id || '').trim()
+  const headPrompt = input.shot ? input.getShotFramePrompt(input.shot.head_frame) : ''
+  const tailPrompt = input.shot ? input.getShotFramePrompt(input.shot.tail_frame) : ''
+  const overridePrompt = input.shot ? input.getShotVideoPromptOverride(input.shot) : ''
+
+  return resolvePendingVideoConfirmationJobStateFromFields({
+    shotId: sid,
+    desc,
+    status: String(input.job.status || '').trim(),
+    confirmed: Boolean(input.job.confirmed),
+    requiresBridge: Boolean(input.job.requires_bridge),
+    bridgeDependency: dep,
+    hasPrompt: Boolean(headPrompt || tailPrompt || overridePrompt),
+    headPrompt,
+    tailPrompt,
+    overridePrompt,
+    running: input.running,
+    videoJobConfirmingShotId: input.videoJobConfirmingShotId,
+    hasShot: Boolean(input.shot),
+  })
+}
+
+function resolvePendingVideoConfirmationJobStateFromFields(input: {
   shotId: string
   desc: string
   status: string

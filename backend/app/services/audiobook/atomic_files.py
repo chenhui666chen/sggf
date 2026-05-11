@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import os
+import logging
 import uuid
 from pathlib import Path
 from typing import Union
 
 
 PathLike = Union[str, os.PathLike[str]]
+logger = logging.getLogger(__name__)
 
 
 def write_bytes_atomic(path: PathLike, data: bytes) -> Path:
@@ -25,8 +27,13 @@ def write_bytes_atomic(path: PathLike, data: bytes) -> Path:
         try:
             if temp_path.exists():
                 temp_path.unlink()
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug(
+                "清理原子写入临时文件失败，已忽略: temp_path=%s target=%s error=%s",
+                temp_path,
+                target,
+                exc,
+            )
 
     return target
 

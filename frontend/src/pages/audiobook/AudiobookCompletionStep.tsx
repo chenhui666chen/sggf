@@ -11,12 +11,13 @@ import HeadphonesIcon from '@mui/icons-material/Headphones'
 import AudiobookCompletionStats from './AudiobookCompletionStats'
 import ChapterAudioResults from './ChapterAudioResults'
 import ProjectExportActions from './ProjectExportActions'
-import { audiobookButtonSx, audiobookColors } from './audiobookTheme'
+import { audiobookButtonRowSx, audiobookButtonSx, audiobookColors } from './audiobookTheme'
 import type {
   AudiobookProjectDetail,
   Chapter,
   ChapterAudio,
   GenerationCheckpoint,
+  TtsModel,
 } from './types'
 
 interface AudiobookCompletionStepProps {
@@ -31,11 +32,14 @@ interface AudiobookCompletionStepProps {
   currentChapterAudios: ChapterAudio[]
   chapters: Chapter[]
   playingChapter: number | null
-  collectingChapterId: number | null
+  collectingChapterIds: ReadonlySet<number>
   resumeCheckpoints: Record<number, GenerationCheckpoint>
   generating: boolean
   resumingChapterId: number | null
   hasScriptReview: boolean
+  ttsModel?: TtsModel
+  projectId?: number
+  audiobookProjectId?: number
   onOpenBrowserPlayer: () => void
   onExportProjectM4b: () => void
   onExportProjectAudacity: () => void
@@ -45,6 +49,7 @@ interface AudiobookCompletionStepProps {
   onOpenScriptEditor: (chapterId: number) => void
   onResumeChapterGeneration: (chapterId: number) => void
   onOpenScriptReview: () => void
+  onOpenScriptReviewFromApi?: (audiobookProjectId: number, chapterId: number) => void
   onGenerateApprovedChapterAudio: () => void
   onCreateNewProject: () => void
 }
@@ -61,11 +66,14 @@ const AudiobookCompletionStep = ({
   currentChapterAudios,
   chapters,
   playingChapter,
-  collectingChapterId,
+  collectingChapterIds,
   resumeCheckpoints,
   generating,
   resumingChapterId,
   hasScriptReview,
+  ttsModel,
+  projectId,
+  audiobookProjectId,
   onOpenBrowserPlayer,
   onExportProjectM4b,
   onExportProjectAudacity,
@@ -75,6 +83,7 @@ const AudiobookCompletionStep = ({
   onOpenScriptEditor,
   onResumeChapterGeneration,
   onOpenScriptReview,
+  onOpenScriptReviewFromApi,
   onGenerateApprovedChapterAudio,
   onCreateNewProject,
 }: AudiobookCompletionStepProps) => (
@@ -95,14 +104,14 @@ const AudiobookCompletionStep = ({
       <AudiobookCompletionStats audiobookProject={audiobookProject} />
     )}
 
-    <Box sx={{ display: 'flex', gap: 1.5, justifyContent: 'center', flexWrap: 'wrap', mb: 3 }}>
+    <Box sx={audiobookButtonRowSx.centeredWrap}>
       {hasChapterAudios && (
         <Button
           variant="contained"
           startIcon={browserPlayerLoading ? <CircularProgress size={18} color="inherit" /> : <HeadphonesIcon />}
           onClick={onOpenBrowserPlayer}
           disabled={browserPlayerLoading}
-          color="primary"
+          sx={audiobookButtonSx.brandContained}
         >
           {browserPlayerLoading ? '加载播放器...' : '打开浏览器播放器'}
         </Button>
@@ -133,14 +142,7 @@ const AudiobookCompletionStep = ({
         <Button
           variant="outlined"
           onClick={onGenerateApprovedChapterAudio}
-          sx={{
-            borderColor: audiobookColors.successMain,
-            color: audiobookColors.success,
-            '&:hover': {
-              borderColor: audiobookColors.success,
-              backgroundColor: audiobookColors.successSoft,
-            },
-          }}
+          sx={audiobookButtonSx.successOutlined}
         >
           对已审批章节生成音频
         </Button>
@@ -159,15 +161,19 @@ const AudiobookCompletionStep = ({
       chapterAudios={currentChapterAudios}
       chapters={chapters}
       playingChapter={playingChapter}
-      collectingChapterId={collectingChapterId}
+      collectingChapterIds={collectingChapterIds}
       resumeCheckpoints={resumeCheckpoints}
       generating={generating}
       resumingChapterId={resumingChapterId}
+      ttsModel={ttsModel}
+      projectId={projectId}
+      audiobookProjectId={audiobookProjectId}
       onPlayAudio={onPlayAudio}
       onDownloadAudio={onDownloadAudio}
       onCollectChapterAudio={onCollectChapterAudio}
       onOpenScriptEditor={onOpenScriptEditor}
       onResumeChapterGeneration={onResumeChapterGeneration}
+      onOpenScriptReview={onOpenScriptReviewFromApi}
     />
   </Paper>
 )

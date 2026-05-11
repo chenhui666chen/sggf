@@ -1,4 +1,4 @@
-import { useCallback, useState, type Dispatch, type SetStateAction } from 'react'
+import { useCallback, useRef, useState, type Dispatch, type SetStateAction } from 'react'
 
 import { buildAudiobookChapterAudioAssetMetadataContract } from '../../contracts/userAssetMetadataBuilders'
 import { buildAudiobookChapterAudioSourcePayload } from '../../contracts/userAssetSourcePayloadBuilders'
@@ -7,6 +7,10 @@ import { triggerBlobDownload } from '../../utils/blobDownload'
 import { extractLocalAssetStorageMetadata, getLocalAssetBlob } from '../../utils/localAssetVault'
 import { saveExplicitLocalUserAsset } from '../../utils/userAssetExplicitLocalCollection'
 import { buildAudiobookChapterAudioAssetDescriptor } from './chapterAudioAssetUtils'
+import {
+  addCollectingChapterId,
+  removeCollectingChapterId,
+} from './chapterAudioCollectingState'
 import type { PlayAudioOptions, SetSnackbar } from './hookTypes'
 import type {
   AudioOutputFormat,
@@ -46,7 +50,13 @@ export const useAudiobookChapterAudioActions = ({
   stopManagedPlayback,
   setSnackbar,
 }: UseAudiobookChapterAudioActionsParams) => {
-  const [collectingChapterId, setCollectingChapterId] = useState<number | null>(null)
+  const [collectingChapterIds, setCollectingChapterIds] = useState<Set<number>>(() => new Set())
+  const collectingChapterIdsRef = useRef<Set<number>>(new Set())
+
+  const updateCollectingChapterIds = useCallback((nextIds: Set<number>) => {
+    collectingChapterIdsRef.current = nextIds
+    setCollectingChapterIds(nextIds)
+  }, [])
 
   const fetchChapterAudioFile = useCallback(
     async (chapterId: number) => {
@@ -88,10 +98,13 @@ export const useAudiobookChapterAudioActions = ({
   const handleCollectChapterAudio = useCallback(async (chapterAudio: ChapterAudio) => {
     if (!audiobookProject) return
 
-    setCollectingChapterId(chapterAudio.chapter_id)
+    const chapterId = chapterAudio.chapter_id
+    if (collectingChapterIdsRef.current.has(chapterId)) return
+
+    updateCollectingChapterIds(addCollectingChapterId(collectingChapterIdsRef.current, chapterId))
 
     try {
-      const { blob, filename, downloadUrl } = await fetchChapterAudioFile(chapterAudio.chapter_id)
+      const { blob, filename, downloadUrl } = await fetchChapterAudioFile(chapterId)
       const assetDescriptor = buildAudiobookChapterAudioAssetDescriptor({
         audiobookProject,
         chapterAudio,
@@ -156,7 +169,7 @@ export const useAudiobookChapterAudioActions = ({
         severity: 'error',
       })
     } finally {
-      setCollectingChapterId(null)
+      updateCollectingChapterIds(removeCollectingChapterId(collectingChapterIdsRef.current, chapterId))
     }
   }, [
     audiobookProject,
@@ -165,6 +178,7 @@ export const useAudiobookChapterAudioActions = ({
     routeProjectId,
     selectedProject,
     setSnackbar,
+    updateCollectingChapterIds,
   ])
 
   const handlePlayAudio = useCallback(async (chapterId: number) => {
@@ -206,7 +220,7 @@ export const useAudiobookChapterAudioActions = ({
   ])
 
   return {
-    collectingChapterId,
+    collectingChapterIds,
     fetchChapterAudioFile,
     handleDownloadAudio,
     handleCollectChapterAudio,

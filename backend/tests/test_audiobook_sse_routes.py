@@ -3,9 +3,10 @@ from __future__ import annotations
 import asyncio
 import os
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, status
 from httpx import ASGITransport, AsyncClient, Response
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -155,6 +156,7 @@ def seed_sse_context(session_factory) -> dict[str, int | str]:
             "other_user_id": other_user.id,
             "owner_task_id": owner_task.celery_task_id,
             "other_task_id": other_task.celery_task_id,
+            "owner_audiobook_project_id": owner_audiobook_project.id,
         }
     finally:
         db.close()
@@ -192,6 +194,67 @@ def test_sse_stream_route_allows_owner_task_and_returns_event(monkeypatch):
     assert requested_task_ids == [context["owner_task_id"]]
 
 
+def test_sse_stream_route_does_not_subscribe_when_auth_fails(monkeypatch):
+    client, session_factory, app = build_test_client()
+    context = seed_sse_context(session_factory)
+
+    class FakeSseTracker:
+        async def stream_events(self, task_id: str):
+            raise AssertionError(f"不应订阅未鉴权任务: {task_id}")
+            yield ""
+
+    monkeypatch.setattr(routes_misc, "sse_tracker", FakeSseTracker())
+
+    def reject_user():
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="auth required")
+
+    app.dependency_overrides[get_current_user] = reject_user
+
+    response = client.get(f"/api/v1/audiobook/tasks/{context['owner_task_id']}/stream")
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == "auth required"
+
+
+def test_sse_stream_route_returns_controlled_error_event_when_tracker_fails(monkeypatch):
+    client, session_factory, app = build_test_client()
+    context = seed_sse_context(session_factory)
+
+    class FakeSseTracker:
+        async def stream_events(self, task_id: str):
+            raise RuntimeError("redis subscriber unavailable")
+            yield ""
+
+    monkeypatch.setattr(routes_misc, "sse_tracker", FakeSseTracker())
+    app.dependency_overrides[get_current_user] = lambda: _auth_user(int(context["owner_id"]))
+
+    response = client.get(f"/api/v1/audiobook/tasks/{context['owner_task_id']}/stream")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
+    assert "progress_stream_unavailable" in response.text
+    assert '"retryable": true' in response.text
+
+
+def test_sse_stream_route_passes_heartbeat_event(monkeypatch):
+    client, session_factory, app = build_test_client()
+    context = seed_sse_context(session_factory)
+
+    class FakeSseTracker:
+        async def stream_events(self, task_id: str):
+            yield "data: {\"event\":\"connected\",\"data\":{\"task_id\":\"sse-owner-task\"}}\n\n"
+            yield "data: {\"event\":\"heartbeat\",\"data\":{\"timestamp\":\"now\"}}\n\n"
+
+    monkeypatch.setattr(routes_misc, "sse_tracker", FakeSseTracker())
+    app.dependency_overrides[get_current_user] = lambda: _auth_user(int(context["owner_id"]))
+
+    response = client.get(f"/api/v1/audiobook/tasks/{context['owner_task_id']}/stream")
+
+    assert response.status_code == 200
+    assert "connected" in response.text
+    assert "heartbeat" in response.text
+
+
 def test_sse_stream_route_hides_foreign_task(monkeypatch):
     client, session_factory, app = build_test_client()
     context = seed_sse_context(session_factory)
@@ -208,6 +271,29 @@ def test_sse_stream_route_hides_foreign_task(monkeypatch):
 
     assert response.status_code == 404
     assert response.json()["detail"] == f"任务不存在: {context['other_task_id']}"
+
+
+def test_sse_stream_route_hides_task_for_deleted_audiobook_project(monkeypatch):
+    client, session_factory, app = build_test_client()
+    context = seed_sse_context(session_factory)
+
+    with session_factory() as db:
+        audiobook_project = db.get(AudiobookProject, context["owner_audiobook_project_id"])
+        audiobook_project.deleted_at = datetime.now(timezone.utc)
+        db.commit()
+
+    class FakeSseTracker:
+        async def stream_events(self, task_id: str):
+            raise AssertionError(f"不应订阅已删除项目任务: {task_id}")
+            yield ""
+
+    monkeypatch.setattr(routes_misc, "sse_tracker", FakeSseTracker())
+    app.dependency_overrides[get_current_user] = lambda: _auth_user(int(context["owner_id"]))
+
+    response = client.get(f"/api/v1/audiobook/tasks/{context['owner_task_id']}/stream")
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == f"任务不存在: {context['owner_task_id']}"
 
 
 def test_sse_stream_route_hides_missing_task(monkeypatch):

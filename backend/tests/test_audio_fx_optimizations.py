@@ -1,15 +1,44 @@
 """
 第八轮优化测试 - LLM场景检测、侧链压缩、音效库扩展
 """
+import asyncio
+import json
+import logging
 import pytest
 import sys
 import os
+import subprocess
 from pathlib import Path
+from types import SimpleNamespace
 
 
-# 添加项目根目录到 sys.path
-PROJECT_ROOT = Path(__file__).parent.parent.parent
-sys.path.insert(0, str(PROJECT_ROOT))
+@pytest.fixture
+def music_composer_module():
+    """Load MusicComposer module."""
+    try:
+        from app.services.audiobook.agents.music_composer import (
+            MusicComposer,
+            MusicCue,
+            MusicMood,
+            MusicType,
+        )
+        return {
+            "MusicComposer": MusicComposer,
+            "MusicCue": MusicCue,
+            "MusicMood": MusicMood,
+            "MusicType": MusicType,
+        }
+    except Exception as e:
+        pytest.skip(f"MusicComposer module load failed: {e}")
+
+
+# 添加 backend 与项目根目录到 sys.path
+BACKEND_ROOT = Path(__file__).resolve().parents[1]
+PROJECT_ROOT = BACKEND_ROOT.parent
+for path in (BACKEND_ROOT, PROJECT_ROOT):
+    path_str = str(path)
+    if path_str not in sys.path:
+        sys.path.insert(0, path_str)
 
 
 @pytest.fixture
@@ -212,7 +241,160 @@ def test_sound_library_structure(sound_effect_designer_module):
 
         # 验证类型有效
         effect_type = effect_info["type"]
-        assert effect_type in ["environment", "action", "emotion"]
+        assert effect_type in ["environment", "action", "emotion", "transition"]
+
+
+def test_external_sound_library_skips_missing_files(
+    sound_effect_designer_module,
+    tmp_path,
+    monkeypatch,
+    caplog,
+):
+    """外部索引指向缺失文件时应加载期跳过，避免后续匹配到不可用素材。"""
+    SoundEffectDesigner = sound_effect_designer_module["SoundEffectDesigner"]
+    designer_module = sys.modules[SoundEffectDesigner.__module__]
+    audio_library = tmp_path / "audio_library"
+    index_path = audio_library / "sound_effects_index.json"
+    index_path.parent.mkdir(parents=True)
+    index_path.write_text(
+        json.dumps(
+            [
+                {
+                    "id": "missing_effect",
+                    "category": "effects/action",
+                    "file_path": "sound_effects/effects/action/missing.wav",
+                    "description": "缺失动作音",
+                    "tags": ["missing"],
+                }
+            ],
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(designer_module, "AUDIO_LIBRARY_DIR", audio_library)
+    monkeypatch.setattr(designer_module, "SOUND_EFFECTS_DIR", audio_library / "sound_effects")
+
+    caplog.set_level(logging.WARNING, logger=designer_module.__name__)
+    designer = SoundEffectDesigner(index_path=str(index_path))
+
+    assert "missing_effect" not in designer.sound_library
+    assert "音效索引条目文件不存在" in caplog.text
+
+
+def test_external_sound_library_replaces_unresolved_builtin_entry(
+    sound_effect_designer_module,
+    tmp_path,
+    monkeypatch,
+):
+    """外部索引可覆盖同名但不可解析的内置占位条目。"""
+    SoundEffectDesigner = sound_effect_designer_module["SoundEffectDesigner"]
+    designer_module = sys.modules[SoundEffectDesigner.__module__]
+    audio_library = tmp_path / "audio_library"
+    sound_effect_file = audio_library / "sound_effects" / "environment" / "rain_heavy.wav"
+    sound_effect_file.parent.mkdir(parents=True)
+    sound_effect_file.write_bytes(b"rain")
+    index_path = audio_library / "sound_effects_index.json"
+    index_path.write_text(
+        json.dumps(
+            [
+                {
+                    "id": "rain_heavy",
+                    "category": "environment/rain",
+                    "file_path": "sound_effects/environment/rain_heavy.wav",
+                    "description": "可用大雨声",
+                    "tags": ["雨", "大雨"],
+                    "source": "test",
+                }
+            ],
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(designer_module, "AUDIO_LIBRARY_DIR", audio_library)
+    monkeypatch.setattr(designer_module, "SOUND_EFFECTS_DIR", audio_library / "sound_effects")
+
+    designer = SoundEffectDesigner(index_path=str(index_path))
+
+    assert designer.sound_library["rain_heavy"]["file"] == "sound_effects/environment/rain_heavy.wav"
+    assert designer.sound_library["rain_heavy"]["description"] == "可用大雨声"
+
+
+def test_match_effect_prefers_resolvable_external_match_over_builtin_placeholder(
+    sound_effect_designer_module,
+    tmp_path,
+    monkeypatch,
+):
+    """语义都匹配时，应优先使用外部索引中的真实素材，而不是内置占位文件名。"""
+    SoundEffectDesigner = sound_effect_designer_module["SoundEffectDesigner"]
+    designer_module = sys.modules[SoundEffectDesigner.__module__]
+    audio_library = tmp_path / "audio_library"
+    sound_effect_file = audio_library / "sound_effects" / "effects" / "action" / "paper.wav"
+    sound_effect_file.parent.mkdir(parents=True)
+    sound_effect_file.write_bytes(b"paper")
+    index_path = audio_library / "sound_effects_index.json"
+    index_path.write_text(
+        json.dumps(
+            [
+                {
+                    "id": "paper_available",
+                    "category": "effects/action",
+                    "file_path": "sound_effects/effects/action/paper.wav",
+                    "description": "纸张摩擦声",
+                    "tags": ["纸张", "摩擦"],
+                    "source": "test",
+                }
+            ],
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(designer_module, "AUDIO_LIBRARY_DIR", audio_library)
+    monkeypatch.setattr(designer_module, "SOUND_EFFECTS_DIR", audio_library / "sound_effects")
+
+    designer = SoundEffectDesigner(index_path=str(index_path))
+
+    cue = designer._match_effect(description="纸张摩擦声", timestamp=0.0, scene_id="scene")
+
+    assert cue.audio_file == "sound_effects/effects/action/paper.wav"
+
+
+def test_match_effect_prefers_resolvable_external_match_when_scores_tie(
+    sound_effect_designer_module,
+    tmp_path,
+    monkeypatch,
+):
+    """描述匹配分数相同时，可解析真实素材应优先于不可解析占位。"""
+    SoundEffectDesigner = sound_effect_designer_module["SoundEffectDesigner"]
+    designer_module = sys.modules[SoundEffectDesigner.__module__]
+    audio_library = tmp_path / "audio_library"
+    sound_effect_file = audio_library / "sound_effects" / "effects" / "action" / "custom_paper.wav"
+    sound_effect_file.parent.mkdir(parents=True)
+    sound_effect_file.write_bytes(b"paper")
+    index_path = audio_library / "sound_effects_index.json"
+    index_path.write_text(
+        json.dumps(
+            [
+                {
+                    "id": "paper_tie_available",
+                    "category": "effects/action",
+                    "file_path": "sound_effects/effects/action/custom_paper.wav",
+                    "description": "纸张簌簌声",
+                    "tags": ["纸张"],
+                    "source": "test",
+                }
+            ],
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(designer_module, "AUDIO_LIBRARY_DIR", audio_library)
+    monkeypatch.setattr(designer_module, "SOUND_EFFECTS_DIR", audio_library / "sound_effects")
+
+    designer = SoundEffectDesigner(index_path=str(index_path))
+
+    cue = designer._match_effect(description="纸张簌簌声", timestamp=0.0, scene_id="scene")
+
+    assert cue.audio_file == "sound_effects/effects/action/custom_paper.wav"
 
 
 def test_effect_type_enum(sound_effect_designer_module):
@@ -267,6 +449,759 @@ def test_design_effects_with_sound_effect_library(sound_effect_designer_module):
     assert cues[0].audio_file is not None
 
 
+def test_export_effect_timeline_includes_matched_effect_id(sound_effect_designer_module):
+    """Timeline should preserve the concrete sound library ID used for credits."""
+    designer = sound_effect_designer_module["SoundEffectDesigner"]()
+
+    cues = designer.design_effects(
+        [
+            {
+                "text": "rain",
+                "sound_effects": ["rain_light"],
+                "timestamp": 0.0,
+            }
+        ]
+    )
+    timeline = designer.export_effect_timeline()
+
+    assert cues[0].effect_id == "rain_light"
+    assert timeline["timeline"][0]["effect_id"] == "rain_light"
+
+
+def test_export_effect_timeline_reports_unresolved_sound_effect_assets(
+    sound_effect_designer_module,
+    monkeypatch,
+):
+    """Timeline should expose placeholder/missing SFX as user-visible warnings."""
+    SoundEffectCue = sound_effect_designer_module["SoundEffectCue"]
+    EffectType = sound_effect_designer_module["EffectType"]
+    designer = sound_effect_designer_module["SoundEffectDesigner"]()
+    designer.effect_cues = [
+        SoundEffectCue(
+            scene_id="scene_1",
+            timestamp=0.0,
+            effect_type=EffectType.ACTION,
+            description="骨裂声",
+            audio_file="placeholder.mp3",
+            effect_id="",
+        ),
+        SoundEffectCue(
+            scene_id="scene_2",
+            timestamp=2.5,
+            effect_type=EffectType.ENVIRONMENT,
+            description="荒野风声",
+            audio_file="missing_wind.wav",
+            effect_id="wind_missing",
+        ),
+    ]
+    monkeypatch.setattr(designer, "_has_resolvable_audio_file", lambda file_ref: False)
+
+    timeline = designer.export_effect_timeline()
+
+    assert timeline["unresolved_effects"]["unresolved_count"] == 2
+    assert timeline["unresolved_effects"]["placeholder_count"] == 1
+    assert timeline["unresolved_effects"]["missing_file_count"] == 1
+    assert timeline["unresolved_effects"]["items"][0]["reason"] == "placeholder_audio"
+    assert timeline["unresolved_effects"]["items"][1]["reason"] == "missing_audio_file"
+    assert timeline["warnings"][0]["code"] == "unresolved_sound_effect_assets"
+    assert "2" in timeline["warnings"][0]["message"]
+
+
+def test_design_effects_uses_narration_speed_for_timestamps(sound_effect_designer_module):
+    """音效时间线应按中文朗读语速估算，而不是按 10 字/秒压缩时间轴。"""
+    designer = sound_effect_designer_module["SoundEffectDesigner"]()
+
+    cues = designer.design_effects(
+        [
+            {"text": "甲" * 45, "sound_effects": ["rain_heavy"]},
+            {"text": "乙" * 10, "sound_effects": ["wind"]},
+        ]
+    )
+
+    assert [cue.timestamp for cue in cues[:2]] == pytest.approx([0.0, 10.0])
+
+
+def test_design_effects_preserves_structured_sound_effect_parameters(sound_effect_designer_module):
+    """Structured script SFX fields should survive library matching."""
+    designer = sound_effect_designer_module["SoundEffectDesigner"]()
+    EffectType = sound_effect_designer_module["EffectType"]
+
+    cues = designer.design_effects(
+        [
+            {
+                "text": "风声从巷口压过来。",
+                "sound_effects": [
+                    {
+                        "name": "风声",
+                        "layer": "bottom",
+                        "volume": 0.12,
+                        "timing": "continuous",
+                        "duration": 8.0,
+                        "fade_in": 1.0,
+                        "fade_out": 1.5,
+                        "delay": 0.7,
+                    }
+                ],
+                "timestamp": 0.0,
+            }
+        ]
+    )
+
+    assert len(cues) == 1
+    cue = cues[0]
+    assert cue.effect_type == EffectType.ENVIRONMENT
+    assert cue.volume == 0.12
+    assert cue.duration == 8.0
+    assert cue.fade_in == 1.0
+    assert cue.fade_out == 1.5
+    assert cue.timestamp == 0.7
+    assert cue.loop is True
+    assert cue.mix_mode == "background"
+
+
+def test_common_fantasy_effect_descriptions_match_library_aliases(sound_effect_designer_module):
+    """Common generated SFX names should map to concrete cue categories before AI generation."""
+    designer = sound_effect_designer_module["SoundEffectDesigner"]()
+    EffectType = sound_effect_designer_module["EffectType"]
+
+    cases = [
+        ("纸张摩擦声", EffectType.ACTION),
+        ("火把点燃声", EffectType.ACTION, "torch_ignite.mp3"),
+        ("远处呼喊回声", EffectType.EMOTION, "distant_shout_echo.mp3"),
+        ("灵石碰撞声", EffectType.ACTION, "crystal_clink.mp3"),
+    ]
+
+    for case in cases:
+        description, expected_type, *expected_file = case
+        cue = designer._match_effect(description=description, timestamp=0.0, scene_id="scene")
+        assert cue.effect_type == expected_type
+        if expected_file:
+            assert cue.audio_file == expected_file[0]
+        else:
+            assert designer._has_resolvable_audio_file(cue.audio_file)
+        assert cue.description == description
+
+
+def test_vidu_effect_prompt_enriches_fantasy_material(sound_effect_designer_module):
+    """Fantasy object SFX prompts should explain material and acoustic target."""
+    SoundEffectCue = sound_effect_designer_module["SoundEffectCue"]
+    EffectType = sound_effect_designer_module["EffectType"]
+    designer = sound_effect_designer_module["SoundEffectDesigner"]()
+
+    prompt = designer._build_vidu_effect_prompt(
+        SoundEffectCue(
+            scene_id="scene",
+            timestamp=0.0,
+            effect_type=EffectType.ACTION,
+            description="灵石碰撞声",
+        )
+    )
+
+    assert "灵石碰撞声" in prompt
+    assert "晶石/玉石" in prompt
+    assert "奇幻灵力" in prompt
+    assert "不要音乐" in prompt
+    assert "不要人声台词" in prompt
+
+
+def test_optimize_effect_density_respects_max_effects_per_minute(sound_effect_designer_module):
+    """Density settings should map to a real minimum interval."""
+    SoundEffectCue = sound_effect_designer_module["SoundEffectCue"]
+    EffectType = sound_effect_designer_module["EffectType"]
+    designer = sound_effect_designer_module["SoundEffectDesigner"]()
+
+    designer.effect_cues = [
+        SoundEffectCue("scene_1", 0.0, EffectType.ACTION, "hit_1", "hit.mp3"),
+        SoundEffectCue("scene_1", 6.0, EffectType.ACTION, "hit_2", "hit.mp3"),
+        SoundEffectCue("scene_1", 12.0, EffectType.ACTION, "hit_3", "hit.mp3"),
+    ]
+    assert len(designer.optimize_effect_density(max_effects_per_minute=10)) == 3
+
+    designer.effect_cues = [
+        SoundEffectCue("scene_1", 0.0, EffectType.ACTION, "hit_1", "hit.mp3"),
+        SoundEffectCue("scene_1", 6.0, EffectType.ACTION, "hit_2", "hit.mp3"),
+        SoundEffectCue("scene_1", 12.0, EffectType.ACTION, "hit_3", "hit.mp3"),
+    ]
+    optimized = designer.optimize_effect_density(max_effects_per_minute=6)
+    assert [cue.timestamp for cue in optimized] == [0.0, 12.0]
+
+
+def test_generated_environment_category_normalizes_to_environment(
+    sound_effect_designer_module,
+    tmp_path,
+):
+    """Generated category paths should not leak into EffectType coercion."""
+    designer = sound_effect_designer_module["SoundEffectDesigner"](
+        index_path=str(tmp_path / "sound_effects_index.json")
+    )
+
+    designer.register_new_effect(
+        {
+            "id": "city_rain_generated",
+            "category": "environment/city_rain",
+            "file_path": "sound_effects/environment/city_rain.mp3",
+            "description": "city rain",
+            "tags": ["rain"],
+            "source": "test",
+        }
+    )
+
+    assert designer.sound_library["city_rain_generated"]["type"] == "environment"
+
+
+def test_music_composer_normalizes_extended_moods(music_composer_module):
+    """Script review moods outside MusicMood should degrade to valid music moods."""
+    MusicComposer = music_composer_module["MusicComposer"]
+    MusicMood = music_composer_module["MusicMood"]
+    composer = MusicComposer(enable_ai=False)
+
+    assert composer._normalize_music_mood("fearful") == "tense"
+    assert composer._normalize_music_mood("angry") == "tense"
+    assert composer._normalize_music_mood("happy") == "joyful"
+    assert composer._normalize_music_mood("unknown") == "peaceful"
+
+    cue = composer._create_opening_music({"overall_mood": "fearful"})
+    assert cue.mood == MusicMood.TENSE
+
+
+def test_music_composer_export_timeline_preserves_mood(music_composer_module):
+    """V3-12: 导出的配乐时间线应保留 mood，供智能音量平衡使用。"""
+    MusicComposer = music_composer_module["MusicComposer"]
+    MusicCue = music_composer_module["MusicCue"]
+    MusicMood = music_composer_module["MusicMood"]
+    MusicType = music_composer_module["MusicType"]
+
+    composer = MusicComposer(enable_ai=False)
+    composer.music_cues = [
+        MusicCue(
+            scene_id="scene_tense",
+            timestamp=3.5,
+            music_type=MusicType.UNDERSCORE,
+            mood=MusicMood.TENSE,
+            description="tense underscore",
+            audio_file="music_cache/tense.mp3",
+            volume=0.2,
+            duration=18.0,
+        )
+    ]
+
+    timeline = composer.export_music_timeline()
+
+    assert timeline["timeline"][0]["mood"] == "tense"
+    assert timeline["timeline"][0]["type"] == "underscore"
+    assert timeline["cues_by_mood"] == {"tense": 1}
+
+
+def test_optimize_music_placement_drops_overlapping_underscore(music_composer_module):
+    """Multiple underscore cues should not be selected over the same time range."""
+    MusicComposer = music_composer_module["MusicComposer"]
+    MusicCue = music_composer_module["MusicCue"]
+    MusicMood = music_composer_module["MusicMood"]
+    MusicType = music_composer_module["MusicType"]
+    composer = MusicComposer(enable_ai=False)
+    composer._chapter_total_duration = 200.0
+    composer.music_cues = [
+        MusicCue("scene_1", 0.0, MusicType.UNDERSCORE, MusicMood.TENSE, "first", duration=30.0),
+        MusicCue("scene_2", 20.0, MusicType.UNDERSCORE, MusicMood.TENSE, "overlap", duration=30.0),
+        MusicCue("scene_3", 60.0, MusicType.UNDERSCORE, MusicMood.TENSE, "later", duration=20.0),
+    ]
+
+    optimized = composer.optimize_music_placement(max_music_coverage=1.0)
+
+    assert [cue.scene_id for cue in optimized] == ["scene_1", "scene_3"]
+
+
+def test_audio_library_dir_points_to_backend_data():
+    """混音阶段应读取生成器实际写入的 backend/data/audio_library。"""
+    from app.services.audiobook.audio_library_paths import get_audio_library_dir
+
+    assert get_audio_library_dir() == BACKEND_ROOT / "data" / "audio_library"
+
+
+def test_sound_effect_timeline_resolves_generated_audio_library_path(tmp_path, monkeypatch):
+    """最终音效叠加应能解析 sound_effects/... 相对路径。"""
+    from app.services.audiobook.audio_library_paths import AUDIO_LIBRARY_DIR_ENV
+    from app.services.audiobook.engine_pkg._sfx_mixin import SfxMixin
+
+    audio_library = tmp_path / "audio_library"
+    effect_path = audio_library / "sound_effects" / "effects" / "action" / "hit.wav"
+    effect_path.parent.mkdir(parents=True)
+    effect_path.write_bytes(b"effect-bytes")
+    monkeypatch.setenv(AUDIO_LIBRARY_DIR_ENV, str(audio_library))
+
+    calls = []
+
+    class Harness(SfxMixin):
+        def __init__(self):
+            self._audio_fx_config = {}
+            self.audio_mixer = SimpleNamespace(
+                add_sound_effect=self._add_sound_effect,
+            )
+
+        def _add_sound_effect(self, voice_audio, effect_audio, **kwargs):
+            calls.append((effect_audio, kwargs))
+            return voice_audio + b"|sfx"
+
+    result = Harness()._apply_sound_effects(
+        b"voice",
+        {
+            "timeline": [
+                {
+                    "file": "sound_effects/effects/action/hit.wav",
+                    "timestamp": 1.2,
+                    "type": "action",
+                    "volume": 0.5,
+                }
+            ]
+        },
+    )
+
+    assert result == b"voice|sfx"
+    assert calls[0][0] == b"effect-bytes"
+    assert calls[0][1]["position_ms"] == 1200
+
+
+def test_music_timeline_resolves_generated_audio_library_path(tmp_path, monkeypatch):
+    """最终配乐叠加应能解析 music_cache/... 相对路径。"""
+    from app.services.audiobook.audio_library_paths import AUDIO_LIBRARY_DIR_ENV
+    from app.services.audiobook.engine_pkg._music_mixin import MusicMixin
+
+    audio_library = tmp_path / "audio_library"
+    music_path = audio_library / "music_cache" / "bgm.mp3"
+    music_path.parent.mkdir(parents=True)
+    music_path.write_bytes(b"bgm-bytes")
+    monkeypatch.setenv(AUDIO_LIBRARY_DIR_ENV, str(audio_library))
+
+    calls = []
+
+    class Harness(MusicMixin):
+        def __init__(self):
+            self._audio_fx_config = {}
+            self.audio_mixer = SimpleNamespace(
+                add_background_music=self._add_background_music,
+            )
+
+        def _add_background_music(self, voice_audio, bgm_audio, **kwargs):
+            calls.append((bgm_audio, kwargs))
+            return voice_audio + b"|bgm"
+
+    result = Harness()._apply_background_music(
+        b"voice",
+        {
+            "timeline": [
+                {
+                    "file": "music_cache/bgm.mp3",
+                    "timestamp": 2.0,
+                    "type": "underscore",
+                    "mood": "tense",
+                    "volume": 0.2,
+                    "duration": 12.0,
+                }
+            ]
+        },
+    )
+
+    assert result == b"voice|bgm"
+    assert calls[0][0] == b"bgm-bytes"
+    assert calls[0][1]["position_ms"] == 2000
+    assert calls[0][1]["duration_ms"] == 12000
+
+
+@pytest.mark.parametrize(
+    ("mood", "expected_volume_db"),
+    [
+        ("tense", -28.0),
+        ("epic", -28.0),
+        ("peaceful", -41.0),
+        ("sad", -41.0),
+        ("joyful", -34.0),
+        ("romantic", -34.0),
+        ("mysterious", -36.0),
+    ],
+)
+def test_intelligent_bgm_volume_adjusts_underscore_moods(mood, expected_volume_db):
+    """V3-12: underscore 携带 mood 时也应参与智能 BGM 音量调整。"""
+    from app.services.audiobook.engine_pkg._music_mixin import MusicMixin
+
+    class Harness(MusicMixin):
+        pass
+
+    volume_db = Harness()._calculate_intelligent_bgm_volume(
+        base_volume_db=-36.0,
+        music_type="underscore",
+        mood=mood,
+        target_volume=0.2,
+    )
+
+    assert volume_db == pytest.approx(expected_volume_db)
+
+
+def test_music_resolver_uses_audio_library_base_for_relative_index_paths(tmp_path):
+    """V3-15: 混音链路读取 music_index.json 时应按 audio_library 根目录解析相对路径。"""
+    from app.services.audiobook.engine_pkg._music_mixin import MusicMixin
+
+    audio_library = tmp_path / "audio_library"
+    music_file = audio_library / "music_cache" / "indexed.wav"
+    music_file.parent.mkdir(parents=True)
+    music_file.write_bytes(b"indexed-music")
+    (audio_library / "music_index.json").write_text(
+        json.dumps(
+            [
+                {
+                    "style": "悬疑氛围",
+                    "mood": "tense",
+                    "file_path": "music_cache/indexed.wav",
+                }
+            ],
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    class Harness(MusicMixin):
+        pass
+
+    resolved = Harness()._resolve_music_path(
+        "missing.mp3",
+        audio_library,
+        style_hint="悬疑氛围",
+        mood_hint="tense",
+    )
+
+    assert resolved == music_file
+
+
+def test_segment_preview_resolver_uses_audio_library_base_for_relative_index_paths(tmp_path):
+    """V3-15: 单段试听读取 music_index.json 时应按 audio_library 根目录解析相对路径。"""
+    from app.services.audiobook.segment_preview_service import SegmentPreviewService
+
+    audio_library = tmp_path / "audio_library"
+    music_file = audio_library / "music_cache" / "indexed.wav"
+    music_file.parent.mkdir(parents=True)
+    music_file.write_bytes(b"indexed-music")
+
+    resolved = SegmentPreviewService.resolve_music_path(
+        "missing.mp3",
+        "悬疑氛围",
+        "tense",
+        audio_library,
+        [
+            {
+                "style": "悬疑氛围",
+                "mood": "tense",
+                "file_path": "music_cache/indexed.wav",
+            }
+        ],
+    )
+
+    assert resolved == music_file
+
+
+def test_parallel_music_scene_builder_uses_narration_duration_estimate():
+    """配乐候选场景起点和总时长应使用统一朗读时长估算。"""
+    from app.services.audiobook.engine_pkg._parallel_mixin import ParallelMixin
+
+    class FakeMusicComposer:
+        def __init__(self):
+            self.chapter_structure = None
+
+        async def design_music(self, chapter_structure, **kwargs):
+            self.chapter_structure = chapter_structure
+            return []
+
+        def optimize_music_placement(self, max_music_coverage=0.4):
+            return []
+
+        def export_music_timeline(self):
+            return {"timeline": []}
+
+    class Harness(ParallelMixin):
+        def __init__(self):
+            self._audio_fx_config = {
+                "enable_sound_effects": False,
+                "enable_music": True,
+                "music_density": "medium",
+            }
+            self.music_composer = FakeMusicComposer()
+
+    harness = Harness()
+    asyncio.run(
+        harness._parallel_design(
+            task_id="task",
+            script_segments=[
+                SimpleNamespace(text="甲" * 45, emotion="tense", music_cue="低频铺底"),
+                SimpleNamespace(text="乙" * 45, emotion="sad", music_cue="悲伤铺底"),
+            ],
+            chapter_content="章" * 90,
+            skip_stage_tracking=True,
+            include_voice_design=False,
+        )
+    )
+
+    structure = harness.music_composer.chapter_structure
+    assert structure["total_duration"] == pytest.approx(20.0)
+    assert [scene["start_time"] for scene in structure["scenes"]] == pytest.approx([0.0, 10.0])
+
+
+def test_parallel_music_scene_builder_includes_moderate_emotions():
+    """恐惧、紧张等中等情绪即使无显式 music_cue 也应进入配乐候选。"""
+    from app.services.audiobook.engine_pkg._parallel_mixin import ParallelMixin
+
+    class FakeMusicComposer:
+        def __init__(self):
+            self.chapter_structure = None
+
+        async def design_music(self, chapter_structure, **kwargs):
+            self.chapter_structure = chapter_structure
+            return []
+
+        def optimize_music_placement(self, max_music_coverage=0.4):
+            return []
+
+        def export_music_timeline(self):
+            return {"timeline": []}
+
+    class Harness(ParallelMixin):
+        def __init__(self):
+            self._audio_fx_config = {
+                "enable_sound_effects": False,
+                "enable_music": True,
+                "music_density": "medium",
+            }
+            self.music_composer = FakeMusicComposer()
+
+    harness = Harness()
+    asyncio.run(
+        harness._parallel_design(
+            task_id="task",
+            script_segments=[
+                SimpleNamespace(
+                    text="黑暗中传来细碎的声响。",
+                    emotion="fearful",
+                    music_cue=None,
+                    music_cue_simple="",
+                )
+            ],
+            chapter_content="黑暗中传来细碎的声响。",
+            skip_stage_tracking=True,
+            include_voice_design=False,
+        )
+    )
+
+    scene = harness.music_composer.chapter_structure["scenes"][0]
+    assert scene["scene_id"] == "scene_0"
+    assert scene["mood"] == "tense"
+    assert scene["is_climax"] is True
+
+
+def test_ensure_generated_assets_replaces_missing_environment_audio(
+    sound_effect_designer_module,
+    monkeypatch,
+):
+    """测试缺失环境音会被真实生成结果替换。"""
+    SoundEffectCue = sound_effect_designer_module["SoundEffectCue"]
+    EffectType = sound_effect_designer_module["EffectType"]
+    designer = sound_effect_designer_module["SoundEffectDesigner"]()
+
+    designer.effect_cues = [
+        SoundEffectCue(
+            scene_id="scene_1",
+            timestamp=3.0,
+            effect_type=EffectType.ENVIRONMENT,
+            description="雨夜街道环境音",
+            audio_file="rain_heavy.mp3",
+            volume=0.2,
+            fade_in=1.0,
+            fade_out=1.0,
+            loop=True,
+            duration=12.0,
+            mix_mode="background",
+        )
+    ]
+
+    monkeypatch.setattr(
+        designer,
+        "_has_resolvable_audio_file",
+        lambda file_ref: file_ref == "sound_effects/environment/generated_rain.mp3",
+    )
+
+    async def fake_ensure_vidu_ambient_sound(scene_description, duration, mood=None):
+        return SoundEffectCue(
+            scene_id="ambient",
+            timestamp=0.0,
+            effect_type=EffectType.ENVIRONMENT,
+            description=scene_description,
+            audio_file="sound_effects/environment/generated_rain.mp3",
+            volume=0.1,
+            fade_in=0.0,
+            fade_out=0.0,
+            loop=True,
+            duration=duration,
+            mix_mode="background",
+        )
+
+    monkeypatch.setattr(designer, "ensure_vidu_ambient_sound", fake_ensure_vidu_ambient_sound)
+
+    asyncio.run(designer.ensure_generated_assets(max_generated_effects=1))
+
+    cue = designer.effect_cues[0]
+    assert cue.audio_file == "sound_effects/environment/generated_rain.mp3"
+    assert cue.scene_id == "scene_1"
+    assert cue.timestamp == 3.0
+    assert cue.volume == 0.2
+    assert cue.fade_in == 1.0
+
+
+def test_vidu_ambient_ignores_missing_static_library_match(
+    sound_effect_designer_module,
+    monkeypatch,
+):
+    """测试静态库只命中文件名但本地文件不存在时，仍继续生成真实环境音。"""
+    SoundEffectCue = sound_effect_designer_module["SoundEffectCue"]
+    EffectType = sound_effect_designer_module["EffectType"]
+    designer = sound_effect_designer_module["SoundEffectDesigner"]()
+
+    monkeypatch.setattr(
+        designer,
+        "_match_effect",
+        lambda **_: SoundEffectCue(
+            scene_id="ambient",
+            timestamp=0.0,
+            effect_type=EffectType.ENVIRONMENT,
+            description="内置雨声",
+            audio_file="rain_heavy.mp3",
+        ),
+    )
+    monkeypatch.setattr(designer, "_has_resolvable_audio_file", lambda file_ref: False)
+    monkeypatch.setattr(
+        designer,
+        "download_and_register_effect",
+        lambda **_: {"file_path": "sound_effects/environment/generated_rain.mp3"},
+    )
+
+    class FakeViduResult:
+        success = True
+        audio_url = "https://example.test/rain.mp3"
+        error = ""
+
+    class FakeViduGenerator:
+        async def generate_audio_async(self, **kwargs):
+            return FakeViduResult()
+
+    designer._vidu_generator = FakeViduGenerator()
+
+    cue = asyncio.run(designer.ensure_vidu_ambient_sound("雨夜街道", 12.0, mood="tense"))
+
+    assert cue.audio_file == "sound_effects/environment/generated_rain.mp3"
+
+
+def test_vidu_short_effects_use_canonical_category_and_scene_tags(sound_effect_designer_module):
+    """Vidu 短音效入库时，应使用统一分类并携带场景标签。"""
+    SoundEffectDesigner = sound_effect_designer_module["SoundEffectDesigner"]
+    SoundEffectCue = sound_effect_designer_module["SoundEffectCue"]
+    EffectType = sound_effect_designer_module["EffectType"]
+
+    designer = SoundEffectDesigner()
+    calls = {}
+
+    class FakeViduResult:
+        success = True
+        audio_url = "https://example.test/door-kick.mp3"
+        error = ""
+
+    class FakeViduGenerator:
+        async def generate_audio_async(self, **kwargs):
+            return FakeViduResult()
+
+    def fake_download_and_register_effect(
+        *,
+        url,
+        effect_id,
+        category,
+        description,
+        tags,
+        source,
+        style="",
+        scenes=None,
+        file_name=None,
+    ):
+        calls.update(
+            {
+                "url": url,
+                "effect_id": effect_id,
+                "category": category,
+                "description": description,
+                "tags": list(tags),
+                "source": source,
+                "style": style,
+                "scenes": list(scenes or []),
+                "file_name": file_name,
+            }
+        )
+        return {
+            "id": effect_id,
+            "file_path": f"sound_effects/{category}/{effect_id}.mp3",
+        }
+
+    designer._vidu_generator = FakeViduGenerator()
+    designer.download_and_register_effect = fake_download_and_register_effect  # type: ignore[method-assign]
+
+    cue = SoundEffectCue(
+        scene_id="scene_1",
+        timestamp=0.0,
+        effect_type=EffectType.ACTION,
+        description="门被踹开声",
+        audio_file="",
+    )
+
+    record = asyncio.run(designer._generate_vidu_effect_for_cue(cue))
+
+    assert record is not None
+    assert calls["category"] == "action/realistic"
+    assert calls["style"] == "realistic"
+    assert "indoor" in calls["scenes"]
+    assert "action" in calls["tags"]
+    assert "realistic" in calls["tags"]
+
+
+def test_vidu_prompt_adapter_uses_timing2audio_contract(sound_effect_designer_module):
+    """测试单段 Vidu 音效 prompt 会适配为 timing2audio 参数。"""
+    designer = sound_effect_designer_module["SoundEffectDesigner"]()
+
+    class FakeViduResult:
+        success = True
+        audio_url = "https://example.test/effect.mp3"
+        error = ""
+
+    class FakeViduGenerator:
+        def __init__(self):
+            self.calls = []
+
+        async def generate_audio_async(self, **kwargs):
+            self.calls.append(kwargs)
+            return FakeViduResult()
+
+    fake_vidu = FakeViduGenerator()
+    designer._vidu_generator = fake_vidu
+
+    result = asyncio.run(
+        designer._generate_vidu_audio_for_prompt(
+            prompt="low buzz",
+            duration=3.0,
+            max_wait=60,
+        )
+    )
+
+    assert result.success is True
+    assert fake_vidu.calls == [
+        {
+            "timing_prompts": [{"from": 0.0, "to": 3.0, "prompt": "low buzz"}],
+            "duration": 3.0,
+            "max_wait": 60,
+        }
+    ]
+
+
 # ============== 导入测试 ==============
 
 def test_sound_effect_designer_imports():
@@ -293,6 +1228,869 @@ def test_audio_mixer_sidechain_imports():
         assert callable(mixer.apply_sidechain_compression)
     except ImportError as e:
         pytest.fail(f"AudioMixer 侧链压缩方法导入失败: {e}")
+
+
+# ============== V3-15 ~ V3-18 音乐库优化测试 ==============
+
+
+def test_music_index_uses_relative_paths(tmp_path, monkeypatch):
+    """V3-15: music_index.json 写入时 file_path 应为相对路径。"""
+    from app.services.audiobook.ai_music import MurekaO1Client, MusicGenerationRequest, MusicStyle
+
+    cache_dir = tmp_path / "music_cache"
+    cache_dir.mkdir()
+    monkeypatch.setenv("MUREKA_API_KEY", "test-key")
+
+    client = MurekaO1Client(enable_cache=True, cache_dir=str(cache_dir))
+    cache_file = cache_dir / "abc123.mp3"
+    cache_file.write_bytes(b"fake-audio")
+
+    request = MusicGenerationRequest(
+        prompt="test",
+        style=MusicStyle.AMBIENT,
+        duration=20,
+        tempo="medium",
+        mood="tense",
+        instruments=[],
+        variant=0,
+        bucket="underscore:tense",
+    )
+    client._update_music_index(request, cache_file)
+
+    import json as _json
+    with client.index_path.open("r", encoding="utf-8") as f:
+        data = _json.load(f)
+
+    assert len(data) == 1
+    assert not Path(data[0]["file_path"]).is_absolute()
+    assert data[0]["file_path"].startswith("music_cache/")
+
+
+def test_music_index_attaches_cloud_metadata_for_generated_music(tmp_path, monkeypatch):
+    """AI 生成音乐写入共享音乐库索引时，应同步记录云端对象信息。"""
+    from app.services.audiobook import ai_music as ai_music_module
+    from app.services.audiobook.ai_music import MurekaO1Client, MusicGenerationRequest, MusicStyle
+
+    cache_dir = tmp_path / "music_cache"
+    cache_dir.mkdir()
+    monkeypatch.setenv("MUREKA_API_KEY", "test-key")
+
+    uploaded = []
+
+    def fake_upload_audio_library_asset(*, local_path, relative_path, library_type):
+        uploaded.append((Path(local_path).name, relative_path, library_type))
+        return {
+            "storage_mode": "durable_cloud",
+            "storage_driver": "dashscope_oss",
+            "cloud_uri": f"oss://shared/audio-library/{library_type}/{relative_path}",
+            "public_url": f"https://cdn.example.test/{library_type}/{relative_path}",
+            "object_key": f"shared/audio-library/{library_type}/{relative_path}",
+            "local_cache_path": relative_path,
+            "asset_scope": "shared_library",
+        }
+
+    monkeypatch.setattr(ai_music_module, "upload_audio_library_asset", fake_upload_audio_library_asset)
+
+    client = MurekaO1Client(enable_cache=True, cache_dir=str(cache_dir))
+    monkeypatch.setattr(
+        client,
+        "_assess_audio_quality",
+        lambda file_path: {"quality_score": 90.0, "quality_grade": "A", "quality_status": "accepted"},
+    )
+    cache_file = cache_dir / "abc123.mp3"
+    cache_file.write_bytes(b"ID3fake-audio")
+
+    request = MusicGenerationRequest(
+        prompt="test",
+        style=MusicStyle.AMBIENT,
+        duration=20,
+        tempo="medium",
+        mood="tense",
+        instruments=[],
+        variant=0,
+        bucket="underscore:tense",
+    )
+    client._update_music_index(request, cache_file)
+
+    data = json.loads(client.index_path.read_text(encoding="utf-8"))
+    assert uploaded == [("abc123.mp3", "music_cache/abc123.mp3", "music")]
+    assert data[0]["storage_mode"] == "durable_cloud"
+    assert data[0]["storage_driver"] == "dashscope_oss"
+    assert data[0]["cloud_uri"] == "oss://shared/audio-library/music/music_cache/abc123.mp3"
+    assert data[0]["public_url"] == "https://cdn.example.test/music/music_cache/abc123.mp3"
+
+
+def test_music_composer_loads_external_index(music_composer_module, tmp_path, monkeypatch):
+    """V3-16: MusicComposer 应从 music_index.json 加载外部条目。"""
+    MusicComposer = music_composer_module["MusicComposer"]
+    composer_module = sys.modules[MusicComposer.__module__]
+
+    audio_library = tmp_path / "audio_library"
+    music_cache = audio_library / "music_cache"
+    music_cache.mkdir(parents=True)
+    music_file = music_cache / "tense_1.mp3"
+    music_file.write_bytes(b"fake-music")
+
+    index_path = audio_library / "music_index.json"
+    index_path.write_text(
+        json.dumps(
+            [
+                {
+                    "id": "tense_entry_1",
+                    "mood": "tense",
+                    "file_path": "music_cache/tense_1.mp3",
+                    "prompt": "tense scene",
+                    "bucket": "underscore:tense",
+                    "source": "mureka",
+                }
+            ],
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(composer_module, "AUDIO_LIBRARY_DIR", audio_library)
+    monkeypatch.setattr(composer_module, "DEFAULT_MUSIC_INDEX_PATH", index_path)
+
+    composer = MusicComposer(enable_ai=False, index_path=str(index_path))
+
+    assert "tense_entry_1" in composer.music_library
+    assert composer.music_library["tense_entry_1"]["mood"] == "tense"
+
+
+def test_music_composer_custom_index_resolves_relative_paths_from_index_dir(music_composer_module, tmp_path):
+    """V3-16: 自定义 music_index.json 的相对 file_path 应按索引所在目录解析。"""
+    MusicComposer = music_composer_module["MusicComposer"]
+
+    audio_library = tmp_path / "custom_audio_library"
+    music_cache = audio_library / "music_cache"
+    music_cache.mkdir(parents=True)
+    music_file = music_cache / "tense_custom.mp3"
+    music_file.write_bytes(b"fake-music")
+
+    index_path = audio_library / "music_index.json"
+    index_path.write_text(
+        json.dumps(
+            [
+                {
+                    "id": "tense_custom",
+                    "mood": "tense",
+                    "file_path": "music_cache/tense_custom.mp3",
+                    "prompt": "tense custom",
+                    "source": "mureka",
+                }
+            ],
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    composer = MusicComposer(enable_ai=False, index_path=str(index_path))
+
+    assert "tense_custom" in composer.music_library
+
+
+def test_music_composer_external_index_skips_missing_files(
+    music_composer_module, tmp_path, monkeypatch, caplog
+):
+    """V3-16: 外部音乐索引条目文件不存在时应跳过。"""
+    MusicComposer = music_composer_module["MusicComposer"]
+    composer_module = sys.modules[MusicComposer.__module__]
+
+    audio_library = tmp_path / "audio_library"
+    index_path = audio_library / "music_index.json"
+    index_path.parent.mkdir(parents=True)
+    index_path.write_text(
+        json.dumps(
+            [
+                {
+                    "id": "missing_music",
+                    "mood": "tense",
+                    "file_path": "music_cache/missing.mp3",
+                    "source": "mureka",
+                }
+            ],
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(composer_module, "AUDIO_LIBRARY_DIR", audio_library)
+    monkeypatch.setattr(composer_module, "DEFAULT_MUSIC_INDEX_PATH", index_path)
+
+    caplog.set_level(logging.WARNING, logger=composer_module.__name__)
+    composer = MusicComposer(enable_ai=False, index_path=str(index_path))
+
+    assert "missing_music" not in composer.music_library
+    assert "音乐索引条目文件不存在" in caplog.text
+
+
+def test_music_composer_external_index_replaces_unresolved_builtin(music_composer_module, tmp_path, monkeypatch):
+    """V3-16: 外部真实素材应覆盖内置不可解析占位。"""
+    MusicComposer = music_composer_module["MusicComposer"]
+    composer_module = sys.modules[MusicComposer.__module__]
+
+    audio_library = tmp_path / "audio_library"
+    music_cache = audio_library / "music_cache"
+    music_cache.mkdir(parents=True)
+    music_file = music_cache / "suspense_1.mp3"
+    music_file.write_bytes(b"real-music")
+
+    index_path = audio_library / "music_index.json"
+    index_path.write_text(
+        json.dumps(
+            [
+                {
+                    "id": "suspense_1",
+                    "mood": "tense",
+                    "file_path": "music_cache/suspense_1.mp3",
+                    "prompt": "suspense",
+                    "source": "mureka",
+                }
+            ],
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(composer_module, "AUDIO_LIBRARY_DIR", audio_library)
+    monkeypatch.setattr(composer_module, "DEFAULT_MUSIC_INDEX_PATH", index_path)
+
+    composer = MusicComposer(enable_ai=False, index_path=str(index_path))
+
+    assert composer.music_library["suspense_1"]["file"] == "music_cache/suspense_1.mp3"
+
+
+def test_music_pool_cache_preloaded_from_index(music_composer_module, tmp_path, monkeypatch):
+    """V3-17: 音乐池缓存应从 music_index.json 预加载。"""
+    MusicComposer = music_composer_module["MusicComposer"]
+    composer_module = sys.modules[MusicComposer.__module__]
+
+    audio_library = tmp_path / "audio_library"
+    music_cache = audio_library / "music_cache"
+    music_cache.mkdir(parents=True)
+
+    entries = []
+    for i in range(3):
+        f = music_cache / f"tense_{i}.mp3"
+        f.write_bytes(b"music")
+        entries.append(
+            {
+                "id": f"tense_{i}",
+                "mood": "tense",
+                "file_path": f"music_cache/tense_{i}.mp3",
+                "prompt": "tense",
+                "bucket": "underscore:tense",
+                "variant": i,
+                "source": "mureka",
+            }
+        )
+
+    index_path = audio_library / "music_index.json"
+    index_path.write_text(json.dumps(entries, ensure_ascii=False), encoding="utf-8")
+
+    monkeypatch.setattr(composer_module, "AUDIO_LIBRARY_DIR", audio_library)
+    monkeypatch.setattr(composer_module, "DEFAULT_MUSIC_INDEX_PATH", index_path)
+
+    composer = MusicComposer(enable_ai=False, index_path=str(index_path))
+
+    assert len(composer._music_pool_cache) > 0
+
+
+def test_ensure_music_pool_uses_preloaded_cache_with_enough_variants(music_composer_module):
+    """V3-17: 已有索引变体数量充足时，音乐池应复用缓存而不是重新调用生成器。"""
+    MusicComposer = music_composer_module["MusicComposer"]
+    composer = MusicComposer(enable_ai=False)
+    composer._music_pool_cache.clear()
+
+    preloaded = [f"music_cache/preloaded_{i}.mp3" for i in range(7)]
+    composer._music_pool_cache["underscore:tense|tense|20|7"] = preloaded
+
+    class FakeGenerator:
+        def __init__(self):
+            self.calls = []
+
+        async def generate_for_bucket(self, **kwargs):
+            self.calls.append(kwargs)
+            return SimpleNamespace(
+                success=True,
+                audio_file_path=f"music_cache/generated_{kwargs['variant']}.mp3",
+            )
+
+    fake_generator = FakeGenerator()
+    composer.enable_ai = True
+    composer.ai_generator = fake_generator
+
+    result = asyncio.run(
+        composer._ensure_music_pool(
+            bucket="underscore:tense",
+            mood="tense",
+            prompt="unused",
+            duration=20,
+            pool_size=5,
+        )
+    )
+
+    assert result == preloaded[:5]
+    assert fake_generator.calls == []
+    assert composer._music_pool_cache["underscore:tense|tense|20|5"] == preloaded[:5]
+
+
+def test_match_music_uses_seed_for_variety(music_composer_module):
+    """V3-18: _match_music 应基于 seed 稳定随机选取，而非固定返回首个。"""
+    MusicComposer = music_composer_module["MusicComposer"]
+    composer = MusicComposer(enable_ai=False)
+
+    composer.music_library["tense_a"] = {"mood": "tense", "description": "A", "file": "a.mp3"}
+    composer.music_library["tense_b"] = {"mood": "tense", "description": "B", "file": "b.mp3"}
+    composer.music_library["tense_c"] = {"mood": "tense", "description": "C", "file": "c.mp3"}
+
+    result_a = composer._match_music("tense", seed="scene_1")
+    result_b = composer._match_music("tense", seed="scene_2")
+
+    assert result_a["mood"] == "tense"
+    assert result_b["mood"] == "tense"
+
+    same_seed_1 = composer._match_music("tense", seed="scene_1")
+    same_seed_2 = composer._match_music("tense", seed="scene_1")
+    assert same_seed_1["file"] == same_seed_2["file"]
+
+
+def test_scene_music_static_fallback_seed_includes_project_and_chapter(music_composer_module):
+    """V3-18: 静态库降级选曲 seed 应包含项目和章节，避免跨章节固定命中同一首。"""
+    MusicComposer = music_composer_module["MusicComposer"]
+    composer = MusicComposer(enable_ai=False)
+    calls = []
+
+    def fake_match_music(mood, seed=""):
+        calls.append((mood, seed))
+        return {"mood": mood, "description": "tense", "file": "tense.mp3"}
+
+    composer._match_music = fake_match_music
+
+    cue = asyncio.run(
+        composer._design_scene_music(
+            {
+                "audiobook_project_id": "project_1",
+                "chapter_id": "chapter_2",
+                "scene_id": "scene_1",
+                "start_time": 12.5,
+                "duration": 30.0,
+                "mood": "tense",
+                "is_climax": True,
+            },
+            allow_asset_generation=False,
+        )
+    )
+
+    assert calls == [("tense", "project_1|chapter_2|scene_1|12.5|tense")]
+    assert cue.audio_file == "tense.mp3"
+
+
+# ============== V3-19 质量门控与素材清理测试 ==============
+
+
+def test_sound_effect_register_writes_quality_metadata(sound_effect_designer_module, tmp_path, monkeypatch):
+    """V3-19: register_new_effect 应自动写入质量元数据。"""
+    SoundEffectDesigner = sound_effect_designer_module["SoundEffectDesigner"]
+    designer_module = sys.modules[SoundEffectDesigner.__module__]
+
+    audio_library = tmp_path / "audio_library"
+    sfx_dir = audio_library / "sound_effects" / "test"
+    sfx_dir.mkdir(parents=True)
+    sfx_file = sfx_dir / "click.wav"
+    sfx_file.write_bytes(b"fake")
+
+    index_path = audio_library / "sound_effects_index.json"
+    monkeypatch.setattr(designer_module, "AUDIO_LIBRARY_DIR", audio_library)
+    monkeypatch.setattr(designer_module, "SOUND_EFFECTS_DIR", audio_library / "sound_effects")
+
+    designer = SoundEffectDesigner(index_path=str(index_path))
+    designer.register_new_effect({
+        "id": "test_click",
+        "category": "action",
+        "file_path": "sound_effects/test/click.wav",
+        "description": "click",
+    })
+
+    with index_path.open("r", encoding="utf-8") as f:
+        data = json.load(f)
+    entry = next(r for r in data if r["id"] == "test_click")
+    assert "quality_score" in entry
+    assert "quality_grade" in entry
+    assert "quality_status" in entry
+
+
+def test_sound_effect_quality_uses_ffmpeg_fallback_when_pydub_decode_fails(
+    sound_effect_designer_module,
+    tmp_path,
+    monkeypatch,
+):
+    """pydub 解码失败时，质量门禁应回退到 ffprobe/ffmpeg，避免误拒可用音频。"""
+    SoundEffectDesigner = sound_effect_designer_module["SoundEffectDesigner"]
+    designer_module = sys.modules[SoundEffectDesigner.__module__]
+
+    audio_library = tmp_path / "audio_library"
+    sfx_dir = audio_library / "sound_effects"
+    sfx_dir.mkdir(parents=True)
+    sfx_file = sfx_dir / "ambient.ogg"
+    sfx_file.write_bytes(b"OggS fake but ffmpeg mocked")
+
+    class BrokenAudioSegment:
+        @staticmethod
+        def from_file(path):
+            raise RuntimeError("decoder unavailable")
+
+    def fake_run(cmd, capture_output, text, check):
+        joined = " ".join(str(part) for part in cmd)
+        if "-show_entries" in joined:
+            return subprocess.CompletedProcess(
+                cmd,
+                0,
+                stdout=json.dumps(
+                    {
+                        "streams": [{"codec_type": "audio", "sample_rate": "48000", "channels": 2}],
+                        "format": {"duration": "12.5", "bit_rate": "160000"},
+                    }
+                ),
+                stderr="",
+            )
+        return subprocess.CompletedProcess(
+            cmd,
+            0,
+            stdout="",
+            stderr=(
+                "[Parsed_volumedetect_0] mean_volume: -24.0 dB\n"
+                "[Parsed_volumedetect_0] max_volume: -3.0 dB\n"
+            ),
+        )
+
+    monkeypatch.setitem(sys.modules, "pydub", SimpleNamespace(AudioSegment=BrokenAudioSegment))
+    monkeypatch.setattr(designer_module, "AUDIO_LIBRARY_DIR", audio_library)
+    monkeypatch.setattr(designer_module.subprocess, "run", fake_run)
+
+    designer = SoundEffectDesigner(index_path=str(audio_library / "sound_effects_index.json"))
+    quality = designer._assess_audio_quality("sound_effects/ambient.ogg")
+
+    assert quality["quality_status"] == "accepted"
+    assert quality["quality_score"] >= 60
+
+
+def test_sound_effect_quality_does_not_penalize_valid_short_effects(sound_effect_designer_module):
+    """短促点状音效本身不应被视为低质量。"""
+    SoundEffectDesigner = sound_effect_designer_module["SoundEffectDesigner"]
+
+    designer = SoundEffectDesigner()
+    quality = designer._score_audio_quality_metrics(
+        duration_s=0.12,
+        dbfs=-24.0,
+        silent_ratio=0.0,
+    )
+
+    assert quality["quality_status"] == "accepted"
+    assert quality["quality_score"] == 100.0
+
+
+def test_sound_effect_register_attaches_cloud_metadata_for_generated_sfx(
+    sound_effect_designer_module,
+    tmp_path,
+    monkeypatch,
+):
+    """AI 生成音效入库时，应同步登记共享云端对象信息。"""
+    SoundEffectDesigner = sound_effect_designer_module["SoundEffectDesigner"]
+    designer_module = sys.modules[SoundEffectDesigner.__module__]
+
+    audio_library = tmp_path / "audio_library"
+    sfx_dir = audio_library / "sound_effects" / "generated"
+    sfx_dir.mkdir(parents=True)
+    sfx_file = sfx_dir / "hit.wav"
+    sfx_file.write_bytes(b"RIFF0000WAVEfmt ")
+
+    uploaded = []
+
+    def fake_upload_audio_library_asset(*, local_path, relative_path, library_type):
+        uploaded.append((Path(local_path).name, relative_path, library_type))
+        return {
+            "storage_mode": "durable_cloud",
+            "storage_driver": "dashscope_oss",
+            "cloud_uri": f"oss://shared/audio-library/{library_type}/{relative_path}",
+            "public_url": f"https://cdn.example.test/{library_type}/{relative_path}",
+            "object_key": f"shared/audio-library/{library_type}/{relative_path}",
+            "local_cache_path": relative_path,
+            "asset_scope": "shared_library",
+        }
+
+    index_path = audio_library / "sound_effects_index.json"
+    monkeypatch.setattr(designer_module, "AUDIO_LIBRARY_DIR", audio_library)
+    monkeypatch.setattr(designer_module, "SOUND_EFFECTS_DIR", audio_library / "sound_effects")
+    monkeypatch.setattr(designer_module, "upload_audio_library_asset", fake_upload_audio_library_asset)
+
+    designer = SoundEffectDesigner(index_path=str(index_path))
+    monkeypatch.setattr(
+        designer,
+        "_assess_audio_quality",
+        lambda file_path: {"quality_score": 88.0, "quality_grade": "B", "quality_status": "accepted"},
+    )
+    designer.register_new_effect(
+        {
+            "id": "generated_hit",
+            "category": "action",
+            "file_path": "sound_effects/generated/hit.wav",
+            "description": "hit",
+            "source": "vidu",
+        }
+    )
+
+    data = json.loads(index_path.read_text(encoding="utf-8"))
+    entry = next(r for r in data if r["id"] == "generated_hit")
+    assert uploaded == [("hit.wav", "sound_effects/generated/hit.wav", "sfx")]
+    assert entry["storage_mode"] == "durable_cloud"
+    assert entry["storage_driver"] == "dashscope_oss"
+    assert entry["cloud_uri"] == "oss://shared/audio-library/sfx/sound_effects/generated/hit.wav"
+    assert entry["public_url"] == "https://cdn.example.test/sfx/sound_effects/generated/hit.wav"
+
+
+def test_sound_effect_register_upserts_generated_sfx_to_shared_db_index(
+    sound_effect_designer_module,
+    tmp_path,
+    monkeypatch,
+):
+    """AI 生成音效入库时，应同步写入共享数据库索引，保证素材浏览可见。"""
+    SoundEffectDesigner = sound_effect_designer_module["SoundEffectDesigner"]
+    designer_module = sys.modules[SoundEffectDesigner.__module__]
+
+    audio_library = tmp_path / "audio_library"
+    sfx_dir = audio_library / "sound_effects" / "generated"
+    sfx_dir.mkdir(parents=True)
+    sfx_file = sfx_dir / "door.wav"
+    sfx_file.write_bytes(b"RIFF0000WAVEfmt ")
+
+    saved_records = []
+    commits = []
+
+    class FakeSession:
+        def close(self):
+            pass
+
+        def commit(self):
+            commits.append(True)
+
+        def rollback(self):
+            raise AssertionError("不应回滚成功写入")
+
+    monkeypatch.setattr(designer_module, "AUDIO_LIBRARY_DIR", audio_library)
+    monkeypatch.setattr(designer_module, "SOUND_EFFECTS_DIR", audio_library / "sound_effects")
+    monkeypatch.setattr(designer_module, "SessionLocal", lambda: FakeSession())
+    monkeypatch.setattr(
+        designer_module,
+        "upsert_audio_library_asset",
+        lambda db, library_type, record: saved_records.append((library_type, dict(record))),
+    )
+
+    designer = SoundEffectDesigner(index_path=str(audio_library / "sound_effects_index.json"))
+    monkeypatch.setattr(
+        designer,
+        "_assess_audio_quality",
+        lambda file_path: {"quality_score": 90.0, "quality_grade": "A", "quality_status": "accepted"},
+    )
+
+    designer.register_new_effect(
+        {
+            "id": "generated_door",
+            "category": "effects/action",
+            "file_path": "sound_effects/generated/door.wav",
+            "description": "门被踹开声",
+            "source": "vidu",
+        }
+    )
+
+    assert commits == [True]
+    assert saved_records[0][0] == "sfx"
+    saved_record = saved_records[0][1]
+    assert saved_record["id"] == "generated_door"
+    assert saved_record["category"] == "action/realistic"
+    assert saved_record["style"] == "realistic"
+    assert "indoor" in saved_record["scenes"]
+
+
+def test_sound_effect_purge_low_quality(sound_effect_designer_module, tmp_path, monkeypatch):
+    """V3-19: purge_low_quality_assets 应删除低质条目和磁盘文件。"""
+    SoundEffectDesigner = sound_effect_designer_module["SoundEffectDesigner"]
+    designer_module = sys.modules[SoundEffectDesigner.__module__]
+
+    audio_library = tmp_path / "audio_library"
+    sfx_dir = audio_library / "sound_effects" / "test"
+    sfx_dir.mkdir(parents=True)
+    bad_file = sfx_dir / "bad.wav"
+    bad_file.write_bytes(b"bad")
+    good_file = sfx_dir / "good.wav"
+    good_file.write_bytes(b"good")
+
+    index_path = audio_library / "sound_effects_index.json"
+    index_path.write_text(json.dumps([
+        {"id": "bad_effect", "file_path": "sound_effects/test/bad.wav", "quality_score": 10.0, "quality_status": "rejected"},
+        {"id": "good_effect", "file_path": "sound_effects/test/good.wav", "quality_score": 80.0, "quality_status": "accepted"},
+    ], ensure_ascii=False), encoding="utf-8")
+
+    monkeypatch.setattr(designer_module, "AUDIO_LIBRARY_DIR", audio_library)
+    monkeypatch.setattr(designer_module, "SOUND_EFFECTS_DIR", audio_library / "sound_effects")
+
+    designer = SoundEffectDesigner(index_path=str(index_path))
+    result = designer.purge_low_quality_assets(min_score=40.0)
+
+    assert result["purged_count"] == 1
+    assert not bad_file.exists()
+    assert good_file.exists()
+
+    with index_path.open("r", encoding="utf-8") as f:
+        data = json.load(f)
+    assert len(data) == 1
+    assert data[0]["id"] == "good_effect"
+
+
+def test_sound_effect_purge_orphan_entries(sound_effect_designer_module, tmp_path, monkeypatch):
+    """V3-19: purge_orphan_entries 应清理文件已不存在的索引条目。"""
+    SoundEffectDesigner = sound_effect_designer_module["SoundEffectDesigner"]
+    designer_module = sys.modules[SoundEffectDesigner.__module__]
+
+    audio_library = tmp_path / "audio_library"
+    sfx_dir = audio_library / "sound_effects" / "test"
+    sfx_dir.mkdir(parents=True)
+    existing_file = sfx_dir / "exists.wav"
+    existing_file.write_bytes(b"data")
+
+    index_path = audio_library / "sound_effects_index.json"
+    index_path.write_text(json.dumps([
+        {"id": "orphan_effect", "file_path": "sound_effects/test/missing.wav", "quality_score": 80.0},
+        {"id": "existing_effect", "file_path": "sound_effects/test/exists.wav", "quality_score": 80.0},
+    ], ensure_ascii=False), encoding="utf-8")
+
+    monkeypatch.setattr(designer_module, "AUDIO_LIBRARY_DIR", audio_library)
+    monkeypatch.setattr(designer_module, "SOUND_EFFECTS_DIR", audio_library / "sound_effects")
+
+    designer = SoundEffectDesigner(index_path=str(index_path))
+    result = designer.purge_orphan_entries()
+
+    assert result["purged_count"] == 1
+    assert existing_file.exists()
+
+    with index_path.open("r", encoding="utf-8") as f:
+        data = json.load(f)
+    assert len(data) == 1
+    assert data[0]["id"] == "existing_effect"
+
+
+def test_sound_effect_purge_dry_run(sound_effect_designer_module, tmp_path, monkeypatch):
+    """V3-19: dry_run=True 时仅统计不实际删除。"""
+    SoundEffectDesigner = sound_effect_designer_module["SoundEffectDesigner"]
+    designer_module = sys.modules[SoundEffectDesigner.__module__]
+
+    audio_library = tmp_path / "audio_library"
+    sfx_dir = audio_library / "sound_effects" / "test"
+    sfx_dir.mkdir(parents=True)
+    bad_file = sfx_dir / "bad.wav"
+    bad_file.write_bytes(b"bad")
+
+    index_path = audio_library / "sound_effects_index.json"
+    index_path.write_text(json.dumps([
+        {"id": "bad_effect", "file_path": "sound_effects/test/bad.wav", "quality_score": 10.0, "quality_status": "rejected"},
+    ], ensure_ascii=False), encoding="utf-8")
+
+    monkeypatch.setattr(designer_module, "AUDIO_LIBRARY_DIR", audio_library)
+    monkeypatch.setattr(designer_module, "SOUND_EFFECTS_DIR", audio_library / "sound_effects")
+
+    designer = SoundEffectDesigner(index_path=str(index_path))
+    result = designer.purge_low_quality_assets(dry_run=True)
+
+    assert result["purged_count"] == 1
+    assert bad_file.exists()
+
+    with index_path.open("r", encoding="utf-8") as f:
+        data = json.load(f)
+    assert len(data) == 1
+
+
+def test_sound_effect_purge_does_not_delete_absolute_file_outside_library(
+    sound_effect_designer_module, tmp_path, monkeypatch
+):
+    """V3-19: 清理索引时不得删除素材库外部的绝对路径文件。"""
+    SoundEffectDesigner = sound_effect_designer_module["SoundEffectDesigner"]
+    designer_module = sys.modules[SoundEffectDesigner.__module__]
+
+    audio_library = tmp_path / "audio_library"
+    audio_library.mkdir()
+    outside_file = tmp_path / "outside.wav"
+    outside_file.write_bytes(b"outside")
+
+    index_path = audio_library / "sound_effects_index.json"
+    index_path.write_text(json.dumps([
+        {
+            "id": "outside_effect",
+            "file_path": str(outside_file),
+            "quality_score": 10.0,
+            "quality_status": "rejected",
+        },
+    ], ensure_ascii=False), encoding="utf-8")
+
+    monkeypatch.setattr(designer_module, "AUDIO_LIBRARY_DIR", audio_library)
+    monkeypatch.setattr(designer_module, "SOUND_EFFECTS_DIR", audio_library / "sound_effects")
+
+    designer = SoundEffectDesigner(index_path=str(index_path))
+    result = designer.purge_low_quality_assets(min_score=40.0)
+
+    assert result["purged_count"] == 1
+    assert outside_file.exists()
+
+    with index_path.open("r", encoding="utf-8") as f:
+        data = json.load(f)
+    assert data == []
+
+
+def test_sound_effect_purge_low_quality_keeps_unknown_quality_entries(
+    sound_effect_designer_module, tmp_path, monkeypatch
+):
+    """V3-19: 缺失质量元数据的历史音效条目不应被低质清理误删。"""
+    SoundEffectDesigner = sound_effect_designer_module["SoundEffectDesigner"]
+    designer_module = sys.modules[SoundEffectDesigner.__module__]
+
+    audio_library = tmp_path / "audio_library"
+    sfx_dir = audio_library / "sound_effects" / "test"
+    sfx_dir.mkdir(parents=True)
+    legacy_file = sfx_dir / "legacy.wav"
+    legacy_file.write_bytes(b"legacy")
+
+    index_path = audio_library / "sound_effects_index.json"
+    index_path.write_text(json.dumps([
+        {"id": "legacy_effect", "file_path": "sound_effects/test/legacy.wav"},
+    ], ensure_ascii=False), encoding="utf-8")
+
+    monkeypatch.setattr(designer_module, "AUDIO_LIBRARY_DIR", audio_library)
+    monkeypatch.setattr(designer_module, "SOUND_EFFECTS_DIR", audio_library / "sound_effects")
+
+    designer = SoundEffectDesigner(index_path=str(index_path))
+    result = designer.purge_low_quality_assets(min_score=40.0)
+
+    assert result["purged_count"] == 0
+    assert legacy_file.exists()
+
+    with index_path.open("r", encoding="utf-8") as f:
+        data = json.load(f)
+    assert len(data) == 1
+    assert data[0]["id"] == "legacy_effect"
+
+
+def test_music_composer_purge_low_quality(music_composer_module, tmp_path, monkeypatch):
+    """V3-19: MusicComposer.purge_low_quality_assets 应删除低质音乐条目。"""
+    MusicComposer = music_composer_module["MusicComposer"]
+    composer_module = sys.modules[MusicComposer.__module__]
+
+    audio_library = tmp_path / "audio_library"
+    music_cache = audio_library / "music_cache"
+    music_cache.mkdir(parents=True)
+    bad_file = music_cache / "bad.mp3"
+    bad_file.write_bytes(b"bad")
+    good_file = music_cache / "good.mp3"
+    good_file.write_bytes(b"good")
+
+    index_path = audio_library / "music_index.json"
+    index_path.write_text(json.dumps([
+        {"id": "bad_music", "file_path": "music_cache/bad.mp3", "quality_score": 15.0, "quality_status": "rejected"},
+        {"id": "good_music", "file_path": "music_cache/good.mp3", "quality_score": 85.0, "quality_status": "accepted"},
+    ], ensure_ascii=False), encoding="utf-8")
+
+    monkeypatch.setattr(composer_module, "AUDIO_LIBRARY_DIR", audio_library)
+    monkeypatch.setattr(composer_module, "DEFAULT_MUSIC_INDEX_PATH", index_path)
+
+    composer = MusicComposer(enable_ai=False, index_path=str(index_path))
+    result = composer.purge_low_quality_assets(min_score=40.0)
+
+    assert result["purged_count"] == 1
+    assert not bad_file.exists()
+    assert good_file.exists()
+
+
+def test_music_composer_purge_does_not_delete_absolute_file_outside_library(music_composer_module, tmp_path):
+    """V3-19: 音乐清理不得删除素材库外部的绝对路径文件。"""
+    MusicComposer = music_composer_module["MusicComposer"]
+
+    audio_library = tmp_path / "audio_library"
+    audio_library.mkdir()
+    outside_file = tmp_path / "outside.mp3"
+    outside_file.write_bytes(b"outside")
+
+    index_path = audio_library / "music_index.json"
+    index_path.write_text(json.dumps([
+        {
+            "id": "outside_music",
+            "file_path": str(outside_file),
+            "quality_score": 10.0,
+            "quality_status": "rejected",
+        },
+    ], ensure_ascii=False), encoding="utf-8")
+
+    composer = MusicComposer(enable_ai=False, index_path=str(index_path))
+    result = composer.purge_low_quality_assets(min_score=40.0)
+
+    assert result["purged_count"] == 1
+    assert outside_file.exists()
+
+    with index_path.open("r", encoding="utf-8") as f:
+        data = json.load(f)
+    assert data == []
+
+
+def test_music_composer_purge_low_quality_keeps_unknown_quality_entries(music_composer_module, tmp_path):
+    """V3-19: 缺失质量元数据的历史音乐条目不应被低质清理误删。"""
+    MusicComposer = music_composer_module["MusicComposer"]
+
+    audio_library = tmp_path / "audio_library"
+    music_cache = audio_library / "music_cache"
+    music_cache.mkdir(parents=True)
+    legacy_file = music_cache / "legacy.mp3"
+    legacy_file.write_bytes(b"legacy")
+
+    index_path = audio_library / "music_index.json"
+    index_path.write_text(json.dumps([
+        {"id": "legacy_music", "file_path": "music_cache/legacy.mp3"},
+    ], ensure_ascii=False), encoding="utf-8")
+
+    composer = MusicComposer(enable_ai=False, index_path=str(index_path))
+    result = composer.purge_low_quality_assets(min_score=40.0)
+
+    assert result["purged_count"] == 0
+    assert legacy_file.exists()
+
+    with index_path.open("r", encoding="utf-8") as f:
+        data = json.load(f)
+    assert len(data) == 1
+    assert data[0]["id"] == "legacy_music"
+
+
+def test_music_composer_purge_orphan_entries(music_composer_module, tmp_path, monkeypatch):
+    """V3-19: MusicComposer.purge_orphan_entries 应清理孤立音乐条目。"""
+    MusicComposer = music_composer_module["MusicComposer"]
+    composer_module = sys.modules[MusicComposer.__module__]
+
+    audio_library = tmp_path / "audio_library"
+    music_cache = audio_library / "music_cache"
+    music_cache.mkdir(parents=True)
+    existing_file = music_cache / "exists.mp3"
+    existing_file.write_bytes(b"data")
+
+    index_path = audio_library / "music_index.json"
+    index_path.write_text(json.dumps([
+        {"id": "orphan_music", "file_path": "music_cache/missing.mp3", "quality_score": 80.0},
+        {"id": "existing_music", "file_path": "music_cache/exists.mp3", "quality_score": 80.0},
+    ], ensure_ascii=False), encoding="utf-8")
+
+    monkeypatch.setattr(composer_module, "AUDIO_LIBRARY_DIR", audio_library)
+    monkeypatch.setattr(composer_module, "DEFAULT_MUSIC_INDEX_PATH", index_path)
+
+    composer = MusicComposer(enable_ai=False, index_path=str(index_path))
+    result = composer.purge_orphan_entries()
+
+    assert result["purged_count"] == 1
+    assert existing_file.exists()
 
 
 if __name__ == "__main__":

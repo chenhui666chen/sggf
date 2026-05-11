@@ -11,6 +11,9 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from adapters.adapter_helpers import analyze_video, chat_messages, get_model_info
 from agents.vlm_utils import clamp_text_list
+from pipeline.autoqc_pkg._dataclasses import AutoQCFailure, AutoQCRoute
+from pipeline.autoqc_pkg._utils import _is_dreamweaver_i2v_configured, _normalize_review_score, _parse_role_from_path
+from pipeline.autoqc_pkg._video_edit import _resolve_video_edit_model_from_payload, _infer_video_edit_feature, _resolve_video_edit_plan_feature
 from pipeline.media_presets import (
     DREAMWEAVER_I2V_ENGINE,
     is_dreamweaver_auto_engine,

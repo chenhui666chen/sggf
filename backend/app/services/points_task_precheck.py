@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 import os
 from dataclasses import dataclass, fields, is_dataclass
 from types import SimpleNamespace
@@ -33,6 +35,7 @@ from app.utils.datetime_utils import utc_now
 
 @dataclass(frozen=True)
 class AudiobookTaskPointsPrecheckSnapshot:
+    cost_precheck_id: str
     allowed: bool
     failure_code: str | None
     failure_message: str | None
@@ -103,6 +106,18 @@ def build_task_points_precheck_error_detail(
         if serialized is not None:
             detail[field.name] = serialized
     return detail
+
+
+def _build_stable_precheck_id(prefix: str, payload: dict[str, object]) -> str:
+    normalized = json.dumps(
+        payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    )
+    digest = hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:16]
+    return f"{prefix}-{digest}"
 
 
 def _env_int(name: str, default: int) -> int:
@@ -283,6 +298,20 @@ def build_audiobook_task_points_precheck(
     audiobook_project_id: int | None = None,
 ) -> AudiobookTaskPointsPrecheckSnapshot:
     normalized_chapter_ids = [int(chapter_id) for chapter_id in chapter_ids if int(chapter_id or 0) > 0]
+    normalized_tts_provider = str(tts_provider or "").strip()
+
+    def build_cost_precheck_id(**extra: object) -> str:
+        payload: dict[str, object] = {
+            "module": "audiobook",
+            "user_id": int(user_id or 0),
+            "project_id": int(project_id or 0),
+            "audiobook_project_id": int(audiobook_project_id or 0),
+            "chapter_ids": normalized_chapter_ids,
+            "tts_provider": normalized_tts_provider,
+        }
+        payload.update(extra)
+        return _build_stable_precheck_id("audiobook-precheck", payload)
+
     chapter_rows = _list_project_chapter_rows(
         db=db,
         project_id=project_id,
@@ -311,6 +340,7 @@ def build_audiobook_task_points_precheck(
     )
     if not task_billing.items:
         return AudiobookTaskPointsPrecheckSnapshot(
+            cost_precheck_id=build_cost_precheck_id(failure_code="estimate_unavailable"),
             allowed=False,
             failure_code="estimate_unavailable",
             failure_message="当前无法估算本次有声书任务的积分消耗，请补全章节内容后重试。",
@@ -333,6 +363,12 @@ def build_audiobook_task_points_precheck(
     required_frozen_points = round(float(item.suggested_frozen_points or 0.0), 2)
     if estimated_yuan <= 0 or required_frozen_points <= 0:
         return AudiobookTaskPointsPrecheckSnapshot(
+            cost_precheck_id=build_cost_precheck_id(
+                failure_code="estimate_unavailable",
+                estimated_yuan=estimated_yuan,
+                estimated_points=estimated_points,
+                required_frozen_points=required_frozen_points,
+            ),
             allowed=False,
             failure_code="estimate_unavailable",
             failure_message="当前无法估算本次有声书任务的积分消耗，请补全章节内容后重试。",
@@ -353,10 +389,17 @@ def build_audiobook_task_points_precheck(
         pricing_config=pricing_snapshot.config,
         module_key=POINTS_BILLING_MODULE_AUDIOBOOK,
         basis_yuan=estimated_yuan,
-        provider_key=str(tts_provider or "").strip() or None,
+        provider_key=normalized_tts_provider or None,
     )
     if operating_snapshot.negative_margin_blocked:
         return AudiobookTaskPointsPrecheckSnapshot(
+            cost_precheck_id=build_cost_precheck_id(
+                failure_code="negative_margin_blocked",
+                estimated_yuan=estimated_yuan,
+                estimated_points=estimated_points,
+                required_frozen_points=required_frozen_points,
+                negative_margin_blocked=True,
+            ),
             allowed=False,
             failure_code="negative_margin_blocked",
             failure_message=(
@@ -401,6 +444,15 @@ def build_audiobook_task_points_precheck(
 
     if effective_available_points + 1e-6 < additional_frozen_points:
         return AudiobookTaskPointsPrecheckSnapshot(
+            cost_precheck_id=build_cost_precheck_id(
+                failure_code="insufficient_available_points",
+                estimated_yuan=estimated_yuan,
+                estimated_points=estimated_points,
+                required_frozen_points=required_frozen_points,
+                existing_frozen_points=existing_frozen_points,
+                additional_frozen_points=additional_frozen_points,
+                effective_available_points=effective_available_points,
+            ),
             allowed=False,
             failure_code="insufficient_available_points",
             failure_message=_build_balance_failure_message(
@@ -422,6 +474,14 @@ def build_audiobook_task_points_precheck(
         )
 
     return AudiobookTaskPointsPrecheckSnapshot(
+        cost_precheck_id=build_cost_precheck_id(
+            estimated_yuan=estimated_yuan,
+            estimated_points=estimated_points,
+            required_frozen_points=required_frozen_points,
+            existing_frozen_points=existing_frozen_points,
+            additional_frozen_points=additional_frozen_points,
+            effective_available_points=effective_available_points,
+        ),
         allowed=True,
         failure_code=None,
         failure_message=None,

@@ -16,6 +16,7 @@ import { useCosyVoiceCloneRecording } from './useCosyVoiceCloneRecording'
 
 interface UseAudiobookVoiceActionsParams {
   selectedProjectId: number | null
+  routeProjectId?: number | null
   ttsModel: TtsModel
   characterVoices: CharacterVoiceSetting[]
   setCharacterVoicesForCurrentModel: (next: CharacterVoiceSetting[]) => void
@@ -28,6 +29,7 @@ interface UseAudiobookVoiceActionsParams {
 
 export const useAudiobookVoiceActions = ({
   selectedProjectId,
+  routeProjectId,
   ttsModel,
   characterVoices,
   setCharacterVoicesForCurrentModel,
@@ -192,11 +194,19 @@ export const useAudiobookVoiceActions = ({
   }, [cloneRecording])
 
   const handleAutoAssignVoices = useCallback(async () => {
-    if (!selectedProjectId) return
+    const targetProjectId = selectedProjectId ?? routeProjectId
+    if (!targetProjectId) {
+      setSnackbar({
+        open: true,
+        message: '请先选择项目后再进行智能推荐声线。',
+        severity: 'warning',
+      })
+      return
+    }
 
     try {
       setAutoAssigningVoices(true)
-      const res = await apiClient.autoAssignProjectAudioVoices(selectedProjectId, ttsModel)
+      const res = await apiClient.autoAssignProjectAudioVoices(targetProjectId, ttsModel)
       const configData = res.data || { characters: [] }
 
       const assignmentResult = applyProjectVoiceAssignments({
@@ -219,10 +229,10 @@ export const useAudiobookVoiceActions = ({
           severity: 'warning',
         })
       }
-    } catch {
+    } catch (error) {
       setSnackbar({
         open: true,
-        message: '自动推荐声线失败，请稍后重试',
+        message: await extractApiErrorMessage(error, '自动推荐声线失败，请稍后重试'),
         severity: 'error',
       })
     } finally {
@@ -230,6 +240,7 @@ export const useAudiobookVoiceActions = ({
     }
   }, [
     characterVoices,
+    routeProjectId,
     selectedProjectId,
     setCharacterVoicesForCurrentModel,
     setSnackbar,

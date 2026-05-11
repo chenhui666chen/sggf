@@ -15,8 +15,13 @@ from ._segment_validation import NARRATOR, build_script_segments
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_REVIEW_BATCH_SIZE = 24
+DEFAULT_REVIEW_BATCH_SIZE = 8
 DEFAULT_MIN_TEXT_COVERAGE = 0.92
+REVIEW_SOURCE_CONTEXT_MAX_CHARS = 1200
+REVIEW_OUTPUT_TOKEN_MIN = 1800
+REVIEW_OUTPUT_TOKEN_MAX = 7000
+REVIEW_TIMEOUT_MIN_SECONDS = 35
+REVIEW_TIMEOUT_MAX_SECONDS = 75
 
 
 @dataclass
@@ -140,14 +145,15 @@ async def _review_batch(
     source_text: str = "",
 ) -> List[ScriptSegment]:
     payload = [_segment_to_payload(segment, index=index) for index, segment in enumerate(batch)]
-    payload_json = json.dumps(payload, ensure_ascii=False, indent=2)
+    payload_json = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
     prompt = _build_review_prompt(
         payload_json,
         batch_index=batch_index,
         batch_total=batch_total,
         source_text=source_text,
     )
-    max_tokens = min(24000, max(4096, len(payload_json) * 3))
+    max_tokens = _estimate_review_max_tokens(payload_json)
+    timeout = _estimate_review_timeout(max_tokens)
     response = await call_audiobook_llm_async(
         llm_client,
         messages=[
@@ -159,9 +165,12 @@ async def _review_batch(
         ],
         max_tokens=max_tokens,
         temperature=0.2,
+        timeout=timeout,
+        timeout_seconds=timeout + 10,
+        max_retries=1,
+        disable_timeout_auto_tuning=True,
         use_cache=False,
         response_format={"type": "json_object"},
-        timeout_seconds=90,
     )
 
     try:
@@ -185,7 +194,10 @@ def _build_review_prompt(
 ) -> str:
     source_block = ""
     if source_text:
-        source_block = f"\n原始章节参考（只用于判断上下文，不要照抄未出现在输入片段中的文本）：\n{source_text[:4000]}\n"
+        source_block = (
+            "\n原始章节参考（只用于判断上下文，不要照抄未出现在输入片段中的文本）：\n"
+            f"{source_text[:REVIEW_SOURCE_CONTEXT_MAX_CHARS]}\n"
+        )
 
     return f"""请审阅下面的有声小说剧本片段，修正会影响 TTS 朗读质量的结构问题。
 
@@ -201,7 +213,10 @@ def _build_review_prompt(
 2. dialogue 片段如果 speaker 是旁白或空，且 text 实际是旁白，则改为 narration；不要强行编造说话人。
 3. 对话中残留“他说/她问/某某道”等归因标签时，可以删掉归因标签；如果归因里包含动作/场景信息，拆成 narration 片段。
 4. 角色台词中混入明显旁白时，拆出 narration；旁白中混入明显引号台词时，拆出 dialogue。
-5. performance_notes 和 instruct_* 只能描述声音、语气、情绪、节奏，不要描述身体动作。
+5. narration 超过 140 字，或 dialogue/monologue 超过 120 字时，按播讲拍点拆分；强动作、强情绪、转场、回忆切入必须单独成段。
+6. 连续动作按“发动 -> 受击 -> 后果 -> 反应”拆；逃亡/追逐/战斗场景每段只承载一个主要动作。
+7. 拆分时 sound_effects / music_cue 只保留在最相关的动作段或首段，不要在拆出的每段重复同一音效/配乐。
+8. performance_notes 和 instruct_* 只能描述声音、语气、情绪、节奏，不要描述身体动作。
 
 硬性约束：
 - 不得丢失 text 内容。拆分或合并后，输入 text 中的语义内容必须仍然出现在输出中。
@@ -212,6 +227,18 @@ def _build_review_prompt(
 待审稿片段 JSON：
 {payload_json}
 """
+
+
+def _estimate_review_max_tokens(payload_json: str) -> int:
+    """审稿只做结构纠错，输出预算应随输入增长但不能拖慢主链路。"""
+    estimated = int(len(payload_json or "") * 1.15) + 900
+    return max(REVIEW_OUTPUT_TOKEN_MIN, min(REVIEW_OUTPUT_TOKEN_MAX, estimated))
+
+
+def _estimate_review_timeout(max_tokens: int) -> int:
+    """LLM 审稿是非阻断增强，失败应快速降级保留原片段。"""
+    estimated = int(max_tokens / 140) + 25
+    return max(REVIEW_TIMEOUT_MIN_SECONDS, min(REVIEW_TIMEOUT_MAX_SECONDS, estimated))
 
 
 def _segment_to_payload(segment: ScriptSegment, *, index: int) -> Dict[str, Any]:

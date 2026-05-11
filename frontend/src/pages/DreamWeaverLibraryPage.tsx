@@ -22,16 +22,23 @@ import {
   Paper,
   Select,
   Stack,
+  TextField,
+  Tooltip,
   Typography,
   useMediaQuery,
 } from '@mui/material'
 import { useTheme } from '@mui/material/styles'
 import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh'
+import LinkIcon from '@mui/icons-material/Link'
+import LinkOffIcon from '@mui/icons-material/LinkOff'
 import MovieIcon from '@mui/icons-material/Movie'
 import RefreshIcon from '@mui/icons-material/Refresh'
+import SyncIcon from '@mui/icons-material/Sync'
 import UploadFileIcon from '@mui/icons-material/UploadFile'
 import { apiClient, extractApiErrorMessage } from '@/services/api'
+import { useDreamweaverProviderRef } from '@/hooks/useDreamweaverProviderRef'
+import { useDreamweaverBatchRegen } from '@/hooks/useDreamweaverBatchRegen'
 import { buildDreamWeaverLibraryAssetMetadataContract } from '@/contracts/userAssetMetadataBuilders'
 import { buildDreamWeaverLibrarySourcePayload } from '@/contracts/userAssetSourcePayloadBuilders'
 import LibraryRegenerateDialog from '@/components/dreamweaver/LibraryRegenerateDialog'
@@ -180,6 +187,8 @@ export default function DreamWeaverLibraryPage() {
   const [library, setLibrary] = useState<LibraryPayload | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const setErrorRef = useRef<(msg: string | null) => void>(setError)
+  setErrorRef.current = setError
   const [lockedConfig, setLockedConfig] = useState<any>(null)
   const [previews, setPreviews] = useState<Record<number, string>>({})
   const [previewAspectRatios, setPreviewAspectRatios] = useState<Record<number, string>>({})
@@ -206,6 +215,39 @@ export default function DreamWeaverLibraryPage() {
   const [batchApproving, setBatchApproving] = useState(false)
   const INITIAL_CARD_LIMIT = 20
 
+  const loadLibraryRef = useRef<() => Promise<void>>(async () => {})
+  const {
+    providerRefDialogOpen,
+    providerRefAssetRole,
+    providerRefSubjectId,
+    providerRefSubmitting,
+    providerRefError,
+    providerSyncAssetId,
+    providerSyncSubmitting,
+    openProviderRefDialog,
+    closeProviderRefDialog,
+    setProviderRefSubjectId,
+    submitProviderRef,
+    syncProviderRef,
+  } = useDreamweaverProviderRef({
+    onRefresh: () => loadLibraryRef.current(),
+  })
+
+  const {
+    batchRegenConfirmOpen,
+    batchRegenRoles,
+    batchRegenSubmitting,
+    batchRegenProgress,
+    batchRegenError,
+    openBatchRegenerateConfirm,
+    executeBatchRegenerate,
+    cancelBatchRegenerate,
+  } = useDreamweaverBatchRegen({
+    projectId,
+    onRefresh: () => loadLibraryRef.current(),
+    onError: (msg: string) => setErrorRef.current(msg),
+  })
+
   const selectedRolesCount = selectedRoles.size
   const hasSelection = selectedRolesCount > 0
 
@@ -224,6 +266,22 @@ export default function DreamWeaverLibraryPage() {
   const clearSelection = useCallback(() => {
     setSelectedRoles(new Set())
   }, [])
+
+  const getKlingProviderRef = useCallback((asset: LibraryAsset | null): { subjectId: string | null; synced: boolean } => {
+    if (!asset?.meta?.provider_refs) return { subjectId: null, synced: false }
+    const klingRef = (asset.meta.provider_refs as Record<string, any>)?.kling
+    if (!klingRef) return { subjectId: null, synced: false }
+    return {
+      subjectId: String(klingRef.subject_id || klingRef.element_id || ''),
+      synced: String(klingRef.source || '') === 'auto_sync',
+    }
+  }, [])
+
+  const openProviderRefDialogForAsset = useCallback((asset: LibraryAsset) => {
+    const { subjectId } = getKlingProviderRef(asset)
+    openProviderRefDialog(asset.id, asset.role, subjectId || undefined)
+  }, [getKlingProviderRef, openProviderRefDialog])
+
   const regenRoleInfo = useMemo(() => parseLibraryRole(regenRole), [regenRole])
   const regenIsDerivedCharacterView = useMemo(() => {
     return regenRoleInfo.entityType === 'character' && Boolean(regenRoleInfo.view) && regenRoleInfo.view !== 'front'
@@ -285,6 +343,7 @@ export default function DreamWeaverLibraryPage() {
       setLoading(false)
     }
   }, [projectId])
+  loadLibraryRef.current = loadLibrary
 
   useEffect(() => {
     void loadLibrary()
@@ -339,6 +398,7 @@ export default function DreamWeaverLibraryPage() {
     },
     [loadLibrary, projectId, selectedRoles, selectedRolesCount, clearSelection],
   )
+
   const uploadLibraryAsset = useCallback(
     async (assetId: number, file: File) => {
       if (!projectId) return
@@ -921,6 +981,25 @@ export default function DreamWeaverLibraryPage() {
                 {card.descriptor}
               </Typography>
             )}
+            {missingViews > 0 && (
+              <Button
+                size="small"
+                variant="outlined"
+                startIcon={<AutoFixHighIcon sx={{ fontSize: 14 }} />}
+                disabled={loading}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  const missingRoles = viewItems.filter((item) => item.markedMissing && item.role).map((item) => item.role)
+                  if (!missingRoles.length) return
+                  for (const role of missingRoles) {
+                    void apiClient.regenerateDreamweaverLibraryAsset(projectId!, { role })
+                  }
+                }}
+                sx={{ mt: 0.75, fontSize: 11, color: 'rgba(255,255,255,0.85)', borderColor: 'rgba(255,255,255,0.35)', '&:hover': { borderColor: 'rgba(255,255,255,0.7)', backgroundColor: 'rgba(255,255,255,0.08)' } }}
+              >
+                重生成缺失视角 ({missingViews})
+              </Button>
+            )}
             <Typography variant="caption" sx={{ display: 'block', mt: 0.75, color: 'rgba(255,255,255,0.55)' }}>
               点击查看六视角详情并生成/替换；已通过的单视角素材可收录到用户中心
             </Typography>
@@ -1110,6 +1189,53 @@ export default function DreamWeaverLibraryPage() {
               {collectState.loading ? '收录中...' : '收录到用户资产'}
             </Button>
           </Stack>
+          {imageState.hasRenderableImage ? (
+            <Stack direction="row" spacing={0.75} alignItems="center" mt={0.75} flexWrap="wrap">
+              {(() => {
+                const klingRef = getKlingProviderRef(asset)
+                return klingRef.subjectId ? (
+                  <>
+                    <Chip
+                      size="small"
+                      icon={<LinkIcon sx={{ fontSize: 14 }} />}
+                      label={`Kling: ${klingRef.subjectId.slice(0, 8)}${klingRef.subjectId.length > 8 ? '...' : ''}`}
+                      color="info"
+                      variant="outlined"
+                    />
+                    <Button
+                      size="small"
+                      variant="text"
+                      startIcon={<SyncIcon sx={{ fontSize: 14 }} />}
+                      onClick={() => void syncProviderRef(asset.id)}
+                      disabled={providerSyncSubmitting && providerSyncAssetId === asset.id}
+                      sx={{ minWidth: 'auto', px: 0.5, fontSize: 11 }}
+                    >
+                      {providerSyncSubmitting && providerSyncAssetId === asset.id ? '同步中...' : '同步'}
+                    </Button>
+                    <Button
+                      size="small"
+                      variant="text"
+                      startIcon={<LinkOffIcon sx={{ fontSize: 14 }} />}
+                      onClick={() => openProviderRefDialogForAsset(asset)}
+                      sx={{ minWidth: 'auto', px: 0.5, fontSize: 11 }}
+                    >
+                      解绑
+                    </Button>
+                  </>
+                ) : (
+                  <Button
+                    size="small"
+                    variant="text"
+                    startIcon={<LinkIcon sx={{ fontSize: 14 }} />}
+                    onClick={() => openProviderRefDialogForAsset(asset)}
+                    sx={{ minWidth: 'auto', px: 0.5, fontSize: 11 }}
+                  >
+                    绑定 Kling
+                  </Button>
+                )
+              })()}
+            </Stack>
+          ) : null}
           {collectState.feedback ? (
             <Alert severity={collectState.feedback.type} sx={{ mt: 1, borderRadius: 2 }}>
               {collectState.feedback.text}
@@ -1184,6 +1310,18 @@ export default function DreamWeaverLibraryPage() {
           <Chip label={`已通过：${approvedCount}`} color="success" variant="outlined" />
           <Chip label={`缺失：${missingCount}`} color={missingCount ? 'warning' : 'default'} variant="outlined" />
           <Chip label={`待审核：${unapprovedCount}`} color={unapprovedCount ? 'warning' : 'default'} variant="outlined" />
+          {missingCount > 0 && (
+            <Button
+              size="small"
+              variant="outlined"
+              startIcon={<AutoFixHighIcon fontSize="small" />}
+              onClick={() => void openBatchRegenerateConfirm()}
+              disabled={loading || batchRegenSubmitting}
+              sx={{ color: 'rgba(255,255,255,0.9)', borderColor: 'rgba(255,255,255,0.4)', '&:hover': { borderColor: 'rgba(255,255,255,0.8)', backgroundColor: 'rgba(255,255,255,0.08)' } }}
+            >
+              批量重生成缺失素材
+            </Button>
+          )}
         </Stack>
 
         {hasSelection && (
@@ -1462,6 +1600,57 @@ export default function DreamWeaverLibraryPage() {
                         {collectState.loading ? '收录中...' : '收录到用户资产'}
                       </Button>
                     ) : null}
+                    {asset && hasRenderableImage ? (
+                      <Stack direction="row" spacing={0.75} alignItems="center" mt={1} sx={{ flexWrap: 'wrap' }}>
+                        {(() => {
+                          const klingRef = getKlingProviderRef(asset)
+                          return klingRef.subjectId ? (
+                            <>
+                              <Chip
+                                size="small"
+                                icon={<LinkIcon sx={{ fontSize: 14 }} />}
+                                label={`Kling: ${klingRef.subjectId.slice(0, 8)}${klingRef.subjectId.length > 8 ? '...' : ''}`}
+                                color="info"
+                                variant="outlined"
+                              />
+                              <Tooltip title="同步 Kling 主体引用到关联视角" arrow>
+                                <span>
+                                  <Button
+                                    size="small"
+                                    variant="text"
+                                    startIcon={<SyncIcon sx={{ fontSize: 14 }} />}
+                                    onClick={() => void syncProviderRef(asset.id)}
+                                    disabled={providerSyncSubmitting && providerSyncAssetId === asset.id}
+                                    sx={{ minWidth: 'auto', px: 0.5, fontSize: 11 }}
+                                  >
+                                    {providerSyncSubmitting && providerSyncAssetId === asset.id ? '同步中...' : '同步'}
+                                  </Button>
+                                </span>
+                              </Tooltip>
+                              <Button
+                                size="small"
+                                variant="text"
+                                startIcon={<LinkOffIcon sx={{ fontSize: 14 }} />}
+                                onClick={() => openProviderRefDialogForAsset(asset)}
+                                sx={{ minWidth: 'auto', px: 0.5, fontSize: 11 }}
+                              >
+                                解绑
+                              </Button>
+                            </>
+                          ) : (
+                            <Button
+                              size="small"
+                              variant="text"
+                              startIcon={<LinkIcon sx={{ fontSize: 14 }} />}
+                              onClick={() => openProviderRefDialogForAsset(asset)}
+                              sx={{ minWidth: 'auto', px: 0.5, fontSize: 11 }}
+                            >
+                              绑定 Kling
+                            </Button>
+                          )
+                        })()}
+                      </Stack>
+                    ) : null}
                     {collectState.feedback ? (
                       <Alert severity={collectState.feedback.type} sx={{ mt: 1, borderRadius: 2 }}>
                         {collectState.feedback.text}
@@ -1476,6 +1665,46 @@ export default function DreamWeaverLibraryPage() {
         <DialogActions>
           <Button onClick={closeCharacterViews} disabled={loading || regenSubmitting}>
             关闭
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog open={providerRefDialogOpen} onClose={closeProviderRefDialog} maxWidth="xs" fullWidth>
+        <DialogTitle>绑定 Kling 主体</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            将 Kling 角色主体（subject_id）绑定到此素材，用于 I2V 视频生成时保持角色一致性。
+            留空 subject_id 可解绑。
+          </Typography>
+          <TextField
+            fullWidth
+            size="small"
+            label="Kling Subject ID"
+            value={providerRefSubjectId}
+            onChange={(e) => setProviderRefSubjectId(e.target.value)}
+            placeholder="输入 Kling subject_id..."
+            disabled={providerRefSubmitting}
+            sx={{ mb: 1 }}
+          />
+          <Typography variant="caption" color="text.secondary">
+            角色：{providerRefAssetRole}
+          </Typography>
+          {providerRefError && (
+            <Alert severity="error" sx={{ mt: 1, borderRadius: 2 }}>
+              {providerRefError}
+            </Alert>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={closeProviderRefDialog} disabled={providerRefSubmitting}>
+            取消
+          </Button>
+          <Button
+            variant="contained"
+            onClick={() => void submitProviderRef()}
+            disabled={providerRefSubmitting}
+          >
+            {providerRefSubmitting ? '绑定中...' : providerRefSubjectId.trim() ? '绑定' : '解绑'}
           </Button>
         </DialogActions>
       </Dialog>
@@ -1552,6 +1781,46 @@ export default function DreamWeaverLibraryPage() {
           </>
         }
       />
+
+      <Dialog open={batchRegenConfirmOpen} onClose={() => { if (!batchRegenSubmitting) cancelBatchRegenerate() }} maxWidth="sm" fullWidth>
+        <DialogTitle>批量重生成缺失素材</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            以下 {batchRegenRoles.length} 个缺失素材角色将被提交重生成：
+          </Typography>
+          <Box sx={{ maxHeight: 300, overflow: 'auto', mb: 2 }}>
+            {batchRegenRoles.map((role: string) => (
+              <Chip key={role} size="small" label={role} variant="outlined" sx={{ m: 0.25 }} />
+            ))}
+          </Box>
+          {batchRegenProgress && (
+            <Box sx={{ mb: 1 }}>
+              <LinearProgress variant="determinate" value={(batchRegenProgress.done / batchRegenProgress.total) * 100} />
+              <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: 'block' }}>
+                进度：{batchRegenProgress.done} / {batchRegenProgress.total}
+              </Typography>
+            </Box>
+          )}
+          {batchRegenError && (
+            <Alert severity="error" sx={{ mt: 1, borderRadius: 2 }}>
+              {batchRegenError}
+            </Alert>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={cancelBatchRegenerate} disabled={batchRegenSubmitting}>
+            取消
+          </Button>
+          <Button
+            variant="contained"
+            color="warning"
+            onClick={() => void executeBatchRegenerate()}
+            disabled={batchRegenSubmitting || !batchRegenRoles.length}
+          >
+            {batchRegenSubmitting ? '重生成中...' : `确认重生成 (${batchRegenRoles.length})`}
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   )
 }

@@ -1,4 +1,4 @@
-import type { ChangeEvent, MouseEvent } from 'react'
+import type { MouseEvent } from 'react'
 
 import {
   Alert,
@@ -11,6 +11,7 @@ import {
   InputLabel,
   MenuItem,
   Select,
+  Tooltip,
   Typography,
 } from '@mui/material'
 import VoiceIcon from '@mui/icons-material/RecordVoiceOver'
@@ -18,7 +19,10 @@ import VoiceIcon from '@mui/icons-material/RecordVoiceOver'
 import CharacterVoiceConfigPanel from './CharacterVoiceConfigPanel'
 import ChapterSelectionPanel from './ChapterSelectionPanel'
 import NarrationAudioConfigPanel from './NarrationAudioConfigPanel'
+import SmartDispatchInput from '../../components/SmartDispatchInput'
 import VoiceCatalogStatusPanel from './VoiceCatalogStatusPanel'
+import { audiobookButtonRowSx } from './audiobookTheme'
+import type { CosyVoiceWorkbench } from './CosyVoiceVoiceWorkbench'
 import type { NarrationStyleId } from './narrationStyles'
 import type { TtsModelOption } from './ttsModels'
 import type {
@@ -47,22 +51,7 @@ interface AudiobookSetupStepProps {
   showCustomVoiceWorkbench: boolean
   voiceError: string | null
   voiceLoading: boolean
-  cloneName: string
-  cloneUrl: string
-  cloneLoading: boolean
-  cloneUploading: boolean
-  cloneRecording: boolean
-  cloneDeletingId: string | null
-  cloneError: string | null
-  cloneSuccess: string | null
-  cloneRecordDialogOpen: boolean
-  designName: string
-  designPrompt: string
-  designPreviewText: string
-  designLoading: boolean
-  designError: string | null
-  designSuccess: string | null
-  customVoicePresets: VoicePreset[]
+  cosyVoiceWorkbench: CosyVoiceWorkbench
   narrationStyle: NarrationStyleId
   narrationStylePrompt: string
   outputFormat: AudioOutputFormat
@@ -79,20 +68,8 @@ interface AudiobookSetupStepProps {
   recommendingVoiceTypeId: number | null
   autoAssigningVoices: boolean
   generateDisabled: boolean
+  generateDisabledReason: string
   onFetchVoiceCatalog: () => void
-  onCloneNameChange: (value: string) => void
-  onCloneUrlChange: (value: string) => void
-  onCreateCloneVoice: () => void
-  onOpenCloneRecordDialog: () => void
-  onUploadCloneAudio: (event: ChangeEvent<HTMLInputElement>) => void
-  onDesignNameChange: (value: string) => void
-  onDesignPromptChange: (value: string) => void
-  onDesignPreviewTextChange: (value: string) => void
-  onCreateDesignVoice: () => void
-  onDeleteCustomVoice: (voiceId: string, label?: string) => void
-  onCloseCloneRecordDialog: () => void
-  onStartCloneRecording: () => void
-  onStopCloneRecording: () => void
   onNarrationStyleChange: (value: NarrationStyleId) => void
   onNarrationStylePromptChange: (value: string) => void
   onOutputFormatChange: (value: AudioOutputFormat) => void
@@ -132,22 +109,7 @@ const AudiobookSetupStep = ({
   showCustomVoiceWorkbench,
   voiceError,
   voiceLoading,
-  cloneName,
-  cloneUrl,
-  cloneLoading,
-  cloneUploading,
-  cloneRecording,
-  cloneDeletingId,
-  cloneError,
-  cloneSuccess,
-  cloneRecordDialogOpen,
-  designName,
-  designPrompt,
-  designPreviewText,
-  designLoading,
-  designError,
-  designSuccess,
-  customVoicePresets,
+  cosyVoiceWorkbench,
   narrationStyle,
   narrationStylePrompt,
   outputFormat,
@@ -164,20 +126,8 @@ const AudiobookSetupStep = ({
   recommendingVoiceTypeId,
   autoAssigningVoices,
   generateDisabled,
+  generateDisabledReason,
   onFetchVoiceCatalog,
-  onCloneNameChange,
-  onCloneUrlChange,
-  onCreateCloneVoice,
-  onOpenCloneRecordDialog,
-  onUploadCloneAudio,
-  onDesignNameChange,
-  onDesignPromptChange,
-  onDesignPreviewTextChange,
-  onCreateDesignVoice,
-  onDeleteCustomVoice,
-  onCloseCloneRecordDialog,
-  onStartCloneRecording,
-  onStopCloneRecording,
   onNarrationStyleChange,
   onNarrationStylePromptChange,
   onOutputFormatChange,
@@ -271,36 +221,8 @@ const AudiobookSetupStep = ({
         showCustomVoiceWorkbench={showCustomVoiceWorkbench}
         voiceError={voiceError}
         voiceLoading={voiceLoading}
-        cloneName={cloneName}
-        cloneUrl={cloneUrl}
-        cloneLoading={cloneLoading}
-        cloneUploading={cloneUploading}
-        cloneRecording={cloneRecording}
-        cloneDeletingId={cloneDeletingId}
-        cloneError={cloneError}
-        cloneSuccess={cloneSuccess}
-        cloneRecordDialogOpen={cloneRecordDialogOpen}
-        designName={designName}
-        designPrompt={designPrompt}
-        designPreviewText={designPreviewText}
-        designLoading={designLoading}
-        designError={designError}
-        designSuccess={designSuccess}
-        customVoicePresets={customVoicePresets}
+        cosyVoiceWorkbench={cosyVoiceWorkbench}
         onFetchVoiceCatalog={onFetchVoiceCatalog}
-        onCloneNameChange={onCloneNameChange}
-        onCloneUrlChange={onCloneUrlChange}
-        onCreateCloneVoice={onCreateCloneVoice}
-        onOpenCloneRecordDialog={onOpenCloneRecordDialog}
-        onUploadCloneAudio={onUploadCloneAudio}
-        onDesignNameChange={onDesignNameChange}
-        onDesignPromptChange={onDesignPromptChange}
-        onDesignPreviewTextChange={onDesignPreviewTextChange}
-        onCreateDesignVoice={onCreateDesignVoice}
-        onDeleteCustomVoice={onDeleteCustomVoice}
-        onCloseCloneRecordDialog={onCloseCloneRecordDialog}
-        onStartCloneRecording={onStartCloneRecording}
-        onStopCloneRecording={onStopCloneRecording}
       />
     </Box>
 
@@ -321,6 +243,7 @@ const AudiobookSetupStep = ({
         onGenerateSubtitleChange={onGenerateSubtitleChange}
         onAudioFxConfigChange={onAudioFxConfigChange}
       />
+      <SmartDispatchInput />
     </Box>
 
     <Box component="section" sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
@@ -368,15 +291,19 @@ const AudiobookSetupStep = ({
       </Grid>
     </Box>
 
-    <Box sx={{ display: 'flex', gap: 2, justifyContent: 'center' }}>
-      <Button
-        variant="contained"
-        onClick={onGenerate}
-        disabled={generateDisabled}
-        color="primary"
-      >
-        开始生成 ({selectedChapterCount}章)
-      </Button>
+    <Box sx={audiobookButtonRowSx.singlePrimary}>
+      <Tooltip title={generateDisabled ? generateDisabledReason : '开始生成有声书'}>
+        <span>
+          <Button
+            variant="contained"
+            onClick={onGenerate}
+            disabled={generateDisabled}
+            color="primary"
+          >
+            开始生成 ({selectedChapterCount}章)
+          </Button>
+        </span>
+      </Tooltip>
     </Box>
   </Box>
 )

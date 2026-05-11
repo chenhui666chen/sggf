@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 from typing import List, Optional
+import logging
 import re
 from pydantic import BaseModel
 import json
@@ -25,7 +26,9 @@ from app.services.audiobook.project_audio_config import (
     set_audio_fx,
     set_characters_for_model,
 )
-from app.services.audiobook.voice_manager_factory import create_voice_manager
+from app.services.audiobook.voice_auto_assignment import AutoVoiceAssignmentPool
+
+logger = logging.getLogger("uvicorn.error")
 
 
 class CharacterAudioConfig(BaseModel):
@@ -36,6 +39,10 @@ class CharacterAudioConfig(BaseModel):
     volume: int = 50
     speed: Optional[float] = None
     pitch: Optional[int] = None
+    tts_model: Optional[str] = None
+    voice_type: Optional[str] = None
+    personality: Optional[str] = None
+    emotion_tendency: Optional[str] = None
     source: Optional[str] = None  # "user" | "ai_suggest" | None
 
 
@@ -444,10 +451,10 @@ async def auto_assign_project_audio_voices(
         if cid is None or cid == 0:
             other_entries.append(item)
             continue
-        if source == "ai_suggest":
-            ai_configs_by_id[cid] = item
-        else:
+        if source == "user":
             manual_configs_by_id[cid] = item
+        else:
+            ai_configs_by_id[cid] = item
 
     # 载入项目角色
     characters = (
@@ -467,8 +474,16 @@ async def auto_assign_project_audio_voices(
         logger.warning(f"⚠️ LLM 客户端初始化失败：{e}，将使用规则推断模式")
         llm_client = None
 
-    vm = create_voice_manager(tts_model=tts_model, llm_client=llm_client)
-    logger.info(f"🎙️ VoiceManager 初始化完成，LLM 支持：{'启用' if llm_client else '禁用'}")
+    auto_voice_pool = AutoVoiceAssignmentPool(
+        preferred_model=tts_model,
+        llm_client=llm_client,
+        existing_assignments=[*manual_configs_by_id.values(), *other_entries],
+    )
+    logger.info(
+        "🎙️ 自动声线推荐池初始化完成，候选模型=%s，LLM 支持=%s",
+        auto_voice_pool.model_order,
+        "启用" if llm_client else "禁用",
+    )
     result_characters = []
 
     # 先放入“其他”条目（如旁白）
@@ -669,14 +684,21 @@ async def auto_assign_project_audio_voices(
         logger.info(f"📊 角色 '{char.name}' 特征：{traits}")
         
         # 如果有 LLM 客户端，记录 LLM 调用状态
-        if hasattr(vm, 'llm_client') and vm.llm_client:
+        if llm_client:
             logger.info(f"🤖 将使用 LLM 进行智能特征分析")
         else:
             logger.info(f"📖 将使用规则推断模式")
         
-        profile = vm.assign_voice(char.name, character_info=traits or None)
+        assignment = auto_voice_pool.assign(char.name, traits or None)
+        profile = assignment.profile
         
-        logger.info(f"🎤 角色 '{char.name}' 分配音色: {profile.voice_id}")
+        logger.info(
+            "🎤 角色 '%s' 分配音色: %s (model=%s, reused_voice_id=%s)",
+            char.name,
+            profile.voice_id,
+            assignment.model,
+            assignment.reused_voice_id,
+        )
 
         result_characters.append(
             {
@@ -686,6 +708,7 @@ async def auto_assign_project_audio_voices(
                 "volume": profile.volume_base,
                 "speed": profile.speed_base,
                 "pitch": profile.pitch_base,
+                "tts_model": assignment.model,
                 "source": "ai_suggest",
             }
         )

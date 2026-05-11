@@ -1,7 +1,7 @@
 import { useEffect, lazy, Suspense } from 'react'
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import { useDispatch, useSelector } from 'react-redux'
-import { ThemeProvider, createTheme, CssBaseline, CircularProgress, Box } from '@mui/material'
+import { ThemeProvider, createTheme, CssBaseline, CircularProgress, Box, Typography } from '@mui/material'
 import { CacheProvider } from '@emotion/react'
 import createCache from '@emotion/cache'
 import { RootState, AppDispatch } from '@/store/store'
@@ -9,6 +9,7 @@ import { getCurrentUser } from '@/store/slices/authSlice'
 import ProtectedRoute from '@/components/ProtectedRoute'
 import AdminProtectedRoute from '@/components/admin/AdminProtectedRoute'
 import LocalAssetHealthBanner from '@/components/user-assets/LocalAssetHealthBanner'
+import { loadAudiobookPageModule } from '@/pages/audiobook/audiobookPagePreload'
 
 const cache = createCache({
   key: 'css',
@@ -32,7 +33,7 @@ const UserCenterPage = lazy(() => import('@/pages/UserCenterPage'))
 const WorkflowControlPage = lazy(() => import('@/pages/WorkflowControlPage'))
 const AITracePage = lazy(() => import('@/pages/AITracePage'))
 const AudiobookDashboardPage = lazy(() => import('@/pages/AudiobookDashboardPage'))  // 耳畔星河仪表盘
-const AudiobookPage = lazy(() => import('@/pages/AudiobookPage'))  // 耳畔星河
+const AudiobookPage = lazy(loadAudiobookPageModule)  // 耳畔星河
 const DreamWeaverPage = lazy(() => import('@/pages/DreamWeaverPage')) // 织梦映心
 const DreamWeaverRunPage = lazy(() => import('@/pages/DreamWeaverRunPage')) // 织梦映心生成页
 const DreamWeaverLibraryPage = lazy(() => import('@/pages/DreamWeaverLibraryPage')) // 织梦映心项目素材库
@@ -51,11 +52,37 @@ const DatabaseQueryPage = lazy(() => import('@/pages/admin/DatabaseQueryPage'))
 const PromptEvolutionPage = lazy(() => import('@/pages/admin/PromptEvolutionPage'))
 
 // 加载中组件
-const LoadingFallback = () => (
-  <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
-    <CircularProgress />
-  </Box>
-)
+const LoadingFallback = () => {
+  const location = useLocation()
+  const isAudiobookProjectRoute = /^\/audiobook\/[^/]+/.test(location.pathname)
+
+  return (
+    <Box
+      sx={{
+        display: 'flex',
+        flexDirection: 'column',
+        justifyContent: 'center',
+        alignItems: 'center',
+        gap: 2,
+        height: '100vh',
+        px: 3,
+        textAlign: 'center',
+      }}
+    >
+      <CircularProgress />
+      {isAudiobookProjectRoute ? (
+        <Box>
+          <Typography sx={{ fontWeight: 700, color: 'text.primary' }}>
+            正在进入项目配置
+          </Typography>
+          <Typography variant="body2" sx={{ mt: 0.75, color: 'text.secondary' }}>
+            首次打开会加载页面资源和项目配置，请稍候。
+          </Typography>
+        </Box>
+      ) : null}
+    </Box>
+  )
+}
 
 const theme = createTheme({
   components: {

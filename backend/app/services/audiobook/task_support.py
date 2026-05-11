@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import logging
 from uuid import uuid4
 from datetime import datetime, timedelta, timezone
 from dataclasses import asdict, is_dataclass
@@ -13,10 +14,12 @@ from sqlalchemy.orm import Session
 from app.celery_app import celery_app
 from app.models.audiobook import ChapterAudio
 from app.models.audiobook_task import AudiobookTask
+from app.models.user import User
 from app.schemas.audiobook import AudiobookTaskStatus
 from app.services.audiobook.repository import AudiobookTaskRepository, ChapterAudioRunRepository
 from app.services.audiobook.temp_segment_store import extract_cached_segment_paths, temp_segment_asset_exists
 from app.services.points_task_precheck import build_task_points_precheck_error_detail
+from app.services.user_center_points_events import record_audiobook_billing_freeze
 from app.utils.datetime_utils import utc_now
 
 CHECKPOINT_SCHEMA_VERSION = 1
@@ -27,6 +30,8 @@ RESUME_RUN_TYPE_PRIORITY = {
     "full": 2,
     "script_only": 1,
 }
+
+logger = logging.getLogger(__name__)
 
 
 class StageTracker(Protocol):
@@ -51,6 +56,38 @@ def ensure_audiobook_points_precheck_passed(precheck: object) -> None:
         default_message="有声书积分预检未通过",
     )
     raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=detail)
+
+
+def safe_record_audiobook_billing_freeze(
+    *,
+    db: Session,
+    current_user: User,
+    audiobook_project_id: int,
+    chapter_ids: list[int],
+    raw_request: Any,
+    tts_pricing_key: str,
+    trace_context: Optional[Dict[str, Any]] = None,
+) -> None:
+    try:
+        payload = {
+            "db": db,
+            "actor_user_id": current_user.id,
+            "actor_username": current_user.username,
+            "audiobook_project_id": audiobook_project_id,
+            "chapter_ids": chapter_ids,
+            "request_context": raw_request,
+            "tts_pricing_key": tts_pricing_key,
+        }
+        if trace_context is not None:
+            payload["extra_payload"] = trace_context
+        record_audiobook_billing_freeze(**payload)
+    except Exception as exc:
+        logger.warning(
+            "记录有声书积分冻结失败 audiobook_project_id=%s chapter_ids=%s: %s",
+            audiobook_project_id,
+            chapter_ids,
+            exc,
+        )
 
 
 def serialize_dataclass_to_dict(obj: Any):
@@ -89,7 +126,7 @@ def _safe_json_value(value: Any) -> Any:
     if isinstance(value, str):
         try:
             return json.loads(value)
-        except Exception:
+        except json.JSONDecodeError:
             return value
     if is_dataclass(value):
         return asdict(value)
@@ -128,7 +165,7 @@ def _parse_iso_datetime(value: Any):
         if parsed.tzinfo is None:
             return parsed.replace(tzinfo=timezone.utc)
         return parsed.astimezone(timezone.utc)
-    except Exception:
+    except ValueError:
         return None
 
 
@@ -146,7 +183,7 @@ def _classify_temp_asset_storage_driver(asset_ref: str) -> str:
 def _normalize_segment_index(value: Any) -> Optional[int]:
     try:
         index = int(value)
-    except Exception:
+    except (TypeError, ValueError, OverflowError):
         return None
     if index < 0:
         return None
@@ -249,9 +286,10 @@ def _find_inconsistent_temp_asset_refs(
 ) -> List[Dict[str, Any]]:
     refs_by_index: Dict[int, List[Dict[str, Any]]] = {}
     for item in segment_asset_checks or []:
-        try:
-            index = int(item.get("index"))
-        except Exception:
+        if not isinstance(item, dict):
+            continue
+        index = _normalize_segment_index(item.get("index"))
+        if index is None:
             continue
         asset_ref = str(item.get("asset_ref") or "").strip()
         if not asset_ref:
@@ -304,9 +342,8 @@ def _mark_checkpoint_recorded_segment_statuses(checkpoint_document: Dict[str, An
             continue
 
         status = dict(raw_status)
-        try:
-            index = int(status.get("index", raw_key))
-        except Exception:
+        index = _normalize_segment_index(status.get("index", raw_key))
+        if index is None:
             updated[key] = status
             continue
 
@@ -327,11 +364,7 @@ def _build_resume_input_context(
 ) -> Dict[str, Any]:
     from app.models.audiobook import AudiobookProject
     from app.models.project import Chapter, Project
-    from app.services.audiobook.project_audio_config import (
-        get_audio_fx,
-        get_characters_for_model,
-        parse_project_audio_config,
-    )
+    from app.services.audiobook.project_audio_runtime import resolve_project_audio_runtime_config
 
     audiobook_project = (
         db.query(AudiobookProject)
@@ -372,16 +405,15 @@ def _build_resume_input_context(
         or getattr(chapter_audio, "narration_style_prompt", None)
     )
 
-    project_audio_config = (
-        parse_project_audio_config(project.audio_config or "")
-        if project and project.audio_config
-        else {}
+    runtime_config = resolve_project_audio_runtime_config(
+        project,
+        tts_model=resolved_tts_model,
     )
     voice_config_payload = {
         "model": resolved_tts_model,
-        "characters": get_characters_for_model(project_audio_config, resolved_tts_model),
+        "characters": runtime_config.character_items,
     }
-    audio_fx_payload = get_audio_fx(project_audio_config) or {}
+    audio_fx_payload = runtime_config.audio_fx
 
     run_type = str(getattr(chapter_run, "run_type", "") or "").strip().lower()
     if run_type == "audio_from_scripts":
@@ -816,7 +848,7 @@ def _validate_resume_checkpoint(
     schema_version: Optional[int]
     try:
         schema_version = int(schema_version_raw) if schema_version_raw is not None else None
-    except Exception:
+    except (TypeError, ValueError, OverflowError):
         schema_version = None
 
     if checkpoint_source == "chapter_audio_run":

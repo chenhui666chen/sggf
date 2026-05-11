@@ -1,6 +1,7 @@
 import os
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
@@ -11,6 +12,11 @@ os.environ.setdefault("DEBUG", "false")
 os.environ.setdefault("DATABASE_URL", "postgresql://test:test@127.0.0.1:5432/test_db")
 
 from app.services.audiobook.tts_engine import TTSEngine
+from app.services.audiobook.engine_pkg._tts_mixin import QWEN_RENDER_CHUNK_MAX_CHARS, TTSMixin
+from app.services.audiobook.tts_engine_pkg._aliyun_mixin import (
+    QWEN_TTS_INPUT_SAFETY_CHARS,
+    QWEN_TTS_MAX_INPUT_CHARS,
+)
 
 
 def test_qwen_http_payload_preserves_voice_language_and_instructions() -> None:
@@ -64,6 +70,57 @@ def test_qwen_explicit_instructions_override_derived_prompt() -> None:
         "instructions": "慢速、温柔、带一点回忆感",
         "optimize_instructions": False,
     }
+
+
+def test_qwen_http_payload_truncates_instructions_to_provider_input_limit() -> None:
+    engine = TTSEngine(model="qwen3-tts-instruct-flash", enable_cache=False, request_delay=0)
+    text = "x" * 520
+
+    payload = engine._build_qwen_http_payload(
+        model="qwen3-tts-instruct-flash",
+        text=text,
+        voice_id="Neil",
+        voice_params={
+            "instructions": "y" * 300,
+            "optimize_instructions": False,
+        },
+    )
+
+    assert payload["input"]["text"] == text
+    assert "parameters" in payload
+    instructions = payload["parameters"]["instructions"]
+    assert len(text) + len(instructions) <= QWEN_TTS_MAX_INPUT_CHARS - QWEN_TTS_INPUT_SAFETY_CHARS
+    assert instructions == "y" * (QWEN_TTS_MAX_INPUT_CHARS - QWEN_TTS_INPUT_SAFETY_CHARS - len(text))
+    assert payload["parameters"]["optimize_instructions"] is False
+
+
+def test_qwen_http_payload_drops_instructions_when_text_uses_budget() -> None:
+    engine = TTSEngine(model="qwen3-tts-instruct-flash", enable_cache=False, request_delay=0)
+
+    payload = engine._build_qwen_http_payload(
+        model="qwen3-tts-instruct-flash",
+        text="x" * 590,
+        voice_id="Neil",
+        voice_params={"instructions": "y" * 40},
+    )
+
+    assert payload["input"]["text"] == "x" * 590
+    assert "parameters" not in payload
+
+
+def test_qwen_render_chunks_use_conservative_limit() -> None:
+    class DummyEngine(TTSMixin):
+        tts_model = "minimax-speech-2.8-hd"
+
+    segment = SimpleNamespace(
+        text="x" * (QWEN_RENDER_CHUNK_MAX_CHARS + 80),
+        voice_params={"tts_model": "qwen3-tts-instruct-flash"},
+    )
+
+    chunks = DummyEngine()._build_render_chunks([segment])
+
+    assert len(chunks) == 2
+    assert all(len(chunk.text) <= QWEN_RENDER_CHUNK_MAX_CHARS for chunk in chunks)
 
 
 def test_cosyvoice_websocket_parameters_and_commands_are_stable() -> None:
@@ -157,3 +214,12 @@ def test_minimax_http_payload_clamps_voice_settings_and_keeps_audio_contract() -
         "format": "mp3",
         "channel": 1,
     }
+
+
+def test_minimax_interjection_injection_does_not_spell_out_pause_notes() -> None:
+    engine = TTSEngine(model="minimax-speech-2.8-hd", enable_cache=False, request_delay=0)
+
+    text = engine._apply_interjections("必须走。", "句尾停顿一秒，压低声音", "tense")
+
+    assert text == "必须走。"
+    assert "停顿" not in text

@@ -63,7 +63,7 @@ describe('audiobook project audio config utils', () => {
         {
           character_id: 1,
           name: 'Alice',
-          voice_id: 'Ryan',
+          voice_id: 'female-shaonv',
           volume: 66,
           speed: 1.2,
           pitch: 44,
@@ -81,7 +81,7 @@ describe('audiobook project audio config utils', () => {
         name: 'Alice',
         gender: 'female',
         role: 'lead',
-        voiceId: 'Neil',
+        voiceId: 'female-shaonv',
         volume: 66,
         speed: 1.2,
         pitch: 44,
@@ -173,10 +173,14 @@ describe('audiobook project audio config utils', () => {
         {
           character_id: 1,
           name: 'Lead',
-          voice_id: 'Ryan',
+          voice_id: 'male-qn-qingse',
           volume: 64,
           speed: null,
           pitch: 42,
+          tts_model: 'minimax-speech-2.8-hd',
+          voice_type: 'powerful',
+          personality: 'ambitious',
+          emotion_tendency: 'positive',
         },
         {
           character_id: 999,
@@ -191,10 +195,14 @@ describe('audiobook project audio config utils', () => {
         {
           characterId: 1,
           name: 'Lead',
-          voiceId: 'Neil',
+          voiceId: 'male-qn-qingse',
           volume: 64,
           speed: 1,
           pitch: 42,
+          ttsModel: 'minimax-speech-2.8-hd',
+          voiceType: 'powerful',
+          personality: 'ambitious',
+          emotionTendency: 'positive',
         },
         {
           characterId: 2,
@@ -297,6 +305,9 @@ describe('audiobook project audio config utils', () => {
           voiceId: 'villain-voice',
           volume: 58,
           speed: 1.05,
+          voiceType: 'cold',
+          personality: 'rational',
+          emotionTendency: 'negative',
         },
       ],
     })).toEqual([
@@ -306,6 +317,10 @@ describe('audiobook project audio config utils', () => {
         volume: 52,
         speed: 0.98,
         pitch: 51,
+        tts_model: 'cosyvoice-v3.5-plus',
+        voice_type: undefined,
+        personality: undefined,
+        emotion_tendency: undefined,
       },
       {
         character_name: 'Villain',
@@ -313,6 +328,10 @@ describe('audiobook project audio config utils', () => {
         volume: 58,
         speed: 1.05,
         pitch: undefined,
+        tts_model: 'cosyvoice-v3.5-plus',
+        voice_type: 'cold',
+        personality: 'rational',
+        emotion_tendency: 'negative',
       },
     ])
   })

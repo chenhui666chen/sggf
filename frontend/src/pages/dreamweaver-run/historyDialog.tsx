@@ -280,7 +280,7 @@ type DreamweaverHistoryFilterItem = {
   onClick: () => void
 }
 
-type DreamweaverHistoryRunListItem = {
+export type DreamweaverHistoryRunListItem = {
   runId: string
   statusLabel: string
   statusColor: 'default' | 'primary' | 'success' | 'error' | 'warning' | 'info'

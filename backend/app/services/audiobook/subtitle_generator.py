@@ -226,7 +226,7 @@ class SubtitleGenerator:
         for timing in timings or []:
             try:
                 segment_index = int(timing.get("index"))
-            except Exception:
+            except (AttributeError, TypeError, ValueError, OverflowError):
                 continue
             segment = segments_by_index.get(segment_index)
             if not segment:
@@ -290,7 +290,7 @@ class SubtitleGenerator:
     def _safe_time_value(value: Any) -> float:
         try:
             return max(0.0, float(value))
-        except Exception:
+        except (TypeError, ValueError, OverflowError):
             return 0.0
 
     @staticmethod

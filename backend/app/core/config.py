@@ -124,6 +124,21 @@ class Settings(BaseSettings):
     VIDU_API_KEY: str = ""
     VIDU_API_URL: str = "https://api.vidu.cn/ent/v2"
 
+    # 公开音效库 API 配置
+    FREESOUND_API_KEY: str = ""
+    PIXABAY_API_KEY: str = ""
+
+    # 有声书共享音频素材库云存储配置
+    AUDIOBOOK_AUDIO_LIBRARY_STORAGE_DRIVER: str = "local_fs"
+    AUDIOBOOK_AUDIO_LIBRARY_OSS_PREFIX: str = "shared/audio_library"
+    AUDIOBOOK_AUDIO_LIBRARY_OSS_PUBLIC_HOST: str = ""
+    AUDIOBOOK_AUDIO_LIBRARY_OSS_POLICY_MODEL: str = ""
+    AUDIOBOOK_AUDIO_LIBRARY_OSS_BUCKET: str = ""
+    AUDIOBOOK_AUDIO_LIBRARY_OSS_ENDPOINT: str = ""
+    AUDIOBOOK_AUDIO_LIBRARY_OSS_ACCESS_KEY_ID: str = ""
+    AUDIOBOOK_AUDIO_LIBRARY_OSS_ACCESS_KEY_SECRET: str = ""
+    AUDIOBOOK_AUDIO_LIBRARY_OSS_SECURITY_TOKEN: str = ""
+
     # 火山引擎 Doubao 服务配置
     DOUBAO_API_KEY: str = ""
     DOUBAO_API_BASE: str = "https://ark.cn-beijing.volces.com/api/v3"

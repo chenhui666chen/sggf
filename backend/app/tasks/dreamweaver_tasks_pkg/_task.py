@@ -14,6 +14,7 @@ from app.schemas.dreamweaver_contract import DREAMWEAVER_SCHEMA_VERSION
 from app.utils.datetime_utils import utc_now
 from app.services.dreamweaver.events import DreamweaverEventEmitter
 from app.services.dreamweaver.library import required_library_roles
+from app.services.dreamweaver.task_trace import build_dreamweaver_trace_context
 from app.services.user_center_points_events import (
     record_dreamweaver_billing_freeze,
     record_dreamweaver_billing_release,
@@ -234,6 +235,31 @@ def run_dreamweaver_task(
         except Exception as e:  # noqa: BLE001
             logger.debug("Failed to get queue name from delivery_info: %s", e)
             queue_name = None
+
+        trace_ctx = build_dreamweaver_trace_context(
+            trace_id=task_id,
+            celery_task_id=task_id,
+            project_id=project_id,
+            user_id=user_id,
+            run_id=run_id,
+            stage=stage_label(ctx.state),
+            state=ctx.state.name,
+            status="running",
+            progress=progress_percent(ctx.state),
+            queue=queue_name,
+            source_chapter_count=len(chapter_ids),
+            quality_mode=runtime_config.get("quality_mode") if isinstance(runtime_config, dict) else None,
+        )
+        logger.info(
+            "DreamWeaver run started: trace_id=%s project_id=%s run_id=%s stage=%s state=%s queue=%s",
+            trace_ctx.get("trace_id"),
+            project_id,
+            run_id,
+            trace_ctx.get("stage"),
+            trace_ctx.get("state"),
+            queue_name,
+        )
+
         running_payload = {
             "run_id": run_id,
             "state": ctx.state.name,
@@ -387,7 +413,7 @@ def run_dreamweaver_task(
             try:
                 record_dreamweaver_billing_freeze(db=session, run_id=run_id)
             except Exception as exc:
-                logger.warning("record_dreamweaver_billing_freeze failed run_id=%s: %s", run_id, exc)
+                logger.warning("record_dreamweaver_billing_freeze failed trace_id=%s run_id=%s: %s", trace_ctx.get("trace_id"), run_id, exc)
 
             running_payload = {
                 "run_id": run_id,
@@ -450,6 +476,12 @@ def run_dreamweaver_task(
         }
 
         if ctx.state == State.DONE:
+            logger.info(
+                "DreamWeaver run completed: trace_id=%s project_id=%s run_id=%s",
+                trace_ctx.get("trace_id"),
+                project_id,
+                run_id,
+            )
             contract = build_contract_from_payload(
                 run_id=run_id,
                 source_project_id=project_id,
@@ -467,7 +499,7 @@ def run_dreamweaver_task(
             try:
                 record_dreamweaver_billing_settle(db=session, run_id=run_id)
             except Exception as exc:
-                logger.warning("record_dreamweaver_billing_settle failed run_id=%s: %s", run_id, exc)
+                logger.warning("record_dreamweaver_billing_settle failed trace_id=%s run_id=%s: %s", trace_ctx.get("trace_id"), run_id, exc)
             _update_generation_history(
                 task_id,
                 status="completed",
@@ -476,6 +508,13 @@ def run_dreamweaver_task(
                 completed_at=utc_now().isoformat(),
             )
         elif ctx.state in (State.WAITING_SCRIPT_APPROVAL, State.WAITING_APPROVAL, State.WAITING_VIDEO_CONFIRMATION):
+            logger.info(
+                "DreamWeaver run waiting: trace_id=%s project_id=%s run_id=%s state=%s",
+                trace_ctx.get("trace_id"),
+                project_id,
+                run_id,
+                ctx.state.name,
+            )
             contract = build_contract_from_payload(
                 run_id=run_id,
                 source_project_id=project_id,
@@ -511,6 +550,14 @@ def run_dreamweaver_task(
                 "failed_state": failed_from_state or ctx.state.name,
                 "failed_from_state": failed_from_state,
             }
+            logger.warning(
+                "DreamWeaver run failed: trace_id=%s project_id=%s run_id=%s failed_from_state=%s error=%s",
+                trace_ctx.get("trace_id"),
+                project_id,
+                run_id,
+                failed_from_state or ctx.state.name,
+                error_message[:200],
+            )
             contract = build_contract_from_payload(
                 run_id=run_id,
                 source_project_id=project_id,
@@ -534,7 +581,7 @@ def run_dreamweaver_task(
                     reason="短剧任务失败，已释放冻结积分。",
                 )
             except Exception as exc:
-                logger.warning("record_dreamweaver_billing_release failed run_id=%s: %s", run_id, exc)
+                logger.warning("record_dreamweaver_billing_release failed trace_id=%s run_id=%s: %s", trace_ctx.get("trace_id"), run_id, exc)
             _update_generation_history(
                 task_id,
                 status="failed",
@@ -543,7 +590,13 @@ def run_dreamweaver_task(
                 completed_at=utc_now().isoformat(),
             )
     except Exception as exc:  # pragma: no cover - safety
-        logger.exception("DreamWeaver task failed: %s", exc)
+        logger.exception(
+            "DreamWeaver task crashed: trace_id=%s project_id=%s run_id=%s error=%s",
+            task_id,
+            project_id,
+            run_id,
+            exc,
+        )
         if emitter is not None:
             emitter.emit_event(
                 stage=None,
@@ -561,7 +614,7 @@ def run_dreamweaver_task(
                 reason="短剧任务异常中断，已释放冻结积分。",
             )
         except Exception as release_exc:
-            logger.warning("record_dreamweaver_billing_release failed run_id=%s: %s", run_id, release_exc)
+            logger.warning("record_dreamweaver_billing_release failed trace_id=%s run_id=%s: %s", task_id, run_id, release_exc)
         _update_generation_history(
             task_id,
             status="failed",

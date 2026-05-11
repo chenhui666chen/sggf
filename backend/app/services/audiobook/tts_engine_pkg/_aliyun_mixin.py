@@ -6,6 +6,9 @@ from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
+QWEN_TTS_MAX_INPUT_CHARS = 600
+QWEN_TTS_INPUT_SAFETY_CHARS = 20
+
 
 def _to_bool_flag(value: Any) -> bool:
     if isinstance(value, bool):
@@ -287,6 +290,55 @@ class AliyunMixin:
             payload["instructions"] = instructions
             payload["optimize_instructions"] = bool(voice_params.get("optimize_instructions", True))
         return payload
+
+    def _fit_qwen_instruction_payload_to_limit(
+        self,
+        *,
+        text: str,
+        instruct_payload: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """将 Qwen Instruct 请求控制在 DashScope 600 字输入限制内。"""
+        if not instruct_payload:
+            return {}
+
+        instructions = str(instruct_payload.get("instructions") or "").strip()
+        if not instructions:
+            return {}
+
+        text_length = len(str(text or ""))
+        if text_length > QWEN_TTS_MAX_INPUT_CHARS:
+            logger.warning(
+                "Qwen TTS 正文超过服务商输入限制: text=%s, max=%s",
+                text_length,
+                QWEN_TTS_MAX_INPUT_CHARS,
+            )
+            return {}
+
+        instruction_budget = QWEN_TTS_MAX_INPUT_CHARS - QWEN_TTS_INPUT_SAFETY_CHARS - text_length
+        if instruction_budget <= 0:
+            logger.warning(
+                "Qwen TTS 正文已无安全 instructions 预算: text=%s, max=%s",
+                text_length,
+                QWEN_TTS_MAX_INPUT_CHARS,
+            )
+            return {}
+
+        if len(instructions) <= instruction_budget:
+            return dict(instruct_payload)
+
+        fitted_payload = dict(instruct_payload)
+        fitted_payload["instructions"] = instructions[:instruction_budget].strip()
+        if not fitted_payload["instructions"]:
+            return {}
+
+        logger.warning(
+            "Qwen TTS instructions 已截断以满足服务商输入限制: text=%s, instructions=%s->%s, max=%s",
+            text_length,
+            len(instructions),
+            len(fitted_payload["instructions"]),
+            QWEN_TTS_MAX_INPUT_CHARS,
+        )
+        return fitted_payload
 
     async def _synthesize_cosyvoice_v3_plus(
         self,
@@ -815,7 +867,10 @@ class AliyunMixin:
                 "language_type": language_type,
             },
         }
-        instruct_payload = self._build_qwen_instruction_payload(voice_params)
+        instruct_payload = self._fit_qwen_instruction_payload_to_limit(
+            text=text,
+            instruct_payload=self._build_qwen_instruction_payload(voice_params),
+        )
         if instruct_payload:
             payload["parameters"] = instruct_payload
         return payload

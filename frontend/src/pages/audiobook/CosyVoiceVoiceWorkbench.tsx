@@ -12,7 +12,7 @@ import CosyVoiceDeleteVoiceDialog, { type PendingDeleteVoice } from './CosyVoice
 import CosyVoiceDesignVoicePanel from './CosyVoiceDesignVoicePanel'
 import type { VoicePreset } from './types'
 
-interface CosyVoiceVoiceWorkbenchProps {
+export interface CosyVoiceWorkbench {
   cloneName: string
   cloneUrl: string
   cloneLoading: boolean
@@ -74,7 +74,7 @@ const CosyVoiceVoiceWorkbench = ({
   onCloseCloneRecordDialog,
   onStartCloneRecording,
   onStopCloneRecording,
-}: CosyVoiceVoiceWorkbenchProps) => {
+}: CosyVoiceWorkbench) => {
   const voiceCreationBusy = cloneLoading || cloneUploading || cloneRecording || designLoading
   const deleteDisabled = cloneLoading || cloneUploading || designLoading
   const [pendingDeleteVoice, setPendingDeleteVoice] = useState<PendingDeleteVoice | null>(null)

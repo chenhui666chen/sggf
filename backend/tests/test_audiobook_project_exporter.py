@@ -150,6 +150,20 @@ def test_project_audacity_lof_escapes_track_paths():
     assert 'file "tracks/chapter_\\"quoted\\".wav"' in content
 
 
+def test_project_export_script_segment_parser_ignores_invalid_json():
+    assert project_exporter_module._parse_script_segments("{bad-json") == []
+
+
+def test_project_export_script_segment_parser_does_not_swallow_unexpected_json_errors(monkeypatch):
+    def boom(*args, **kwargs):
+        raise RuntimeError("unexpected json parser failure")
+
+    monkeypatch.setattr(project_exporter_module.json, "loads", boom)
+
+    with pytest.raises(RuntimeError, match="unexpected json parser failure"):
+        project_exporter_module._parse_script_segments('{"segments":[]}')
+
+
 def test_project_audacity_track_filename_is_cross_platform_safe():
     filename = _build_audacity_track_filename(
         ProjectAudioChapter(
@@ -179,9 +193,246 @@ def test_collect_project_export_output_files_includes_manifests():
     assert relative_files == {
         "audiobooks/project_12/exports/audiobook_project_34.m4b",
         "audiobooks/project_12/exports/audiobook_project_34.m4b.json",
+        "audiobooks/project_12/exports/audiobook_project_34.m4b.CREDITS.md",
+        "audiobooks/project_12/exports/audiobook_project_34.m4b.license_manifest.jsonl",
         "audiobooks/project_12/exports/audiobook_project_34_audacity.zip",
         "audiobooks/project_12/exports/audiobook_project_34_audacity.zip.json",
+        "audiobooks/project_12/exports/audiobook_project_34_audacity.zip.CREDITS.md",
+        "audiobooks/project_12/exports/audiobook_project_34_audacity.zip.license_manifest.jsonl",
     }
+
+
+def test_project_export_credits_sidecars_delegate_to_sfx_downloader(monkeypatch, tmp_path: Path):
+    calls = {}
+
+    class FakeSfxLibraryDownloader:
+        def export_attribution_credits(self, *, jsonl_path, markdown_path, used_effect_ids=None):
+            calls["jsonl_path"] = Path(jsonl_path)
+            calls["markdown_path"] = Path(markdown_path)
+            calls["used_effect_ids"] = used_effect_ids
+            Path(jsonl_path).parent.mkdir(parents=True, exist_ok=True)
+            Path(jsonl_path).write_text('{"effect_id":"rain"}\n', encoding="utf-8")
+            Path(markdown_path).write_text("# Audio Credits\n\n- Rain\n", encoding="utf-8")
+            return {
+                "stats": {"credits": 1},
+                "jsonl_path": str(jsonl_path),
+                "markdown_path": str(markdown_path),
+            }
+
+    monkeypatch.setattr(project_exporter_module, "SfxLibraryDownloader", FakeSfxLibraryDownloader, raising=False)
+
+    result = project_exporter_module._write_project_export_credits(
+        tmp_path / "book.m4b",
+        used_effect_ids={"rain_1"},
+    )
+
+    assert calls["jsonl_path"].name == "book.m4b.license_manifest.jsonl"
+    assert calls["markdown_path"].name == "book.m4b.CREDITS.md"
+    assert calls["used_effect_ids"] == {"rain_1"}
+    assert result["stats"]["credits"] == 1
+    assert Path(result["jsonl_path"]).exists()
+    assert Path(result["markdown_path"]).exists()
+
+
+def test_project_export_collects_used_effect_ids_from_checkpoints():
+    session_factory = _build_session_factory()
+
+    with session_factory() as db:
+        user = User(
+            username="effects_user",
+            email="effects@example.com",
+            password_hash="hash",
+            is_active=True,
+        )
+        db.add(user)
+        db.flush()
+
+        project = Project(
+            user_id=user.id,
+            display_no=1,
+            title="Effects Book",
+            audio_config="{}",
+            status="draft",
+        )
+        db.add(project)
+        db.flush()
+
+        chapter = Chapter(project_id=project.id, chapter_number=1, title="Opening", content="")
+        db.add(chapter)
+        db.flush()
+
+        audiobook_project = AudiobookProject(
+            project_id=project.id,
+            status="completed",
+            total_chapters=1,
+            completed_chapters=1,
+        )
+        other_audiobook_project = AudiobookProject(
+            project_id=project.id,
+            status="completed",
+            total_chapters=1,
+            completed_chapters=1,
+        )
+        db.add_all([audiobook_project, other_audiobook_project])
+        db.flush()
+
+        db.add_all(
+            [
+                ChapterAudioRun(
+                    audiobook_project_id=audiobook_project.id,
+                    chapter_id=chapter.id,
+                    run_type="full",
+                    status="completed",
+                    checkpoint_json={
+                        "effect_timeline": {
+                            "timeline": [
+                                {"effect_id": "rain_light"},
+                                {"effect_id": "door_open"},
+                                {"effect_id": "rain_light"},
+                                {"effect_id": ""},
+                            ],
+                        },
+                    },
+                ),
+                ChapterAudioRun(
+                    audiobook_project_id=other_audiobook_project.id,
+                    chapter_id=chapter.id,
+                    run_type="full",
+                    status="completed",
+                    checkpoint_json={
+                        "effect_timeline": {"timeline": [{"effect_id": "other_project"}]},
+                    },
+                ),
+            ]
+        )
+        db.commit()
+
+        used_effect_ids = project_exporter_module._collect_project_used_effect_ids(
+            db,
+            audiobook_project_id=audiobook_project.id,
+        )
+
+    assert used_effect_ids == {"rain_light", "door_open"}
+
+
+def test_cached_m4b_export_uses_checkpoint_effect_ids_for_credits(monkeypatch, tmp_path: Path):
+    session_factory = _build_session_factory()
+    calls = {}
+
+    class FakeSfxLibraryDownloader:
+        def export_attribution_credits(self, *, jsonl_path, markdown_path, used_effect_ids=None):
+            calls["used_effect_ids"] = used_effect_ids
+            Path(jsonl_path).write_text("", encoding="utf-8")
+            Path(markdown_path).write_text("# Audio Credits\n", encoding="utf-8")
+            return {
+                "stats": {"credits": 0},
+                "jsonl_path": str(jsonl_path),
+                "markdown_path": str(markdown_path),
+            }
+
+    monkeypatch.setattr(project_exporter_module, "SfxLibraryDownloader", FakeSfxLibraryDownloader, raising=False)
+    audio_file = tmp_path / "chapter_001.mp3"
+    audio_file.write_bytes(b"audio")
+    output_file = tmp_path / "book.m4b"
+    output_file.write_bytes(b"m4b")
+
+    with session_factory() as db:
+        user = User(
+            username="cached_effects_user",
+            email="cached-effects@example.com",
+            password_hash="hash",
+            is_active=True,
+        )
+        db.add(user)
+        db.flush()
+
+        project = Project(
+            user_id=user.id,
+            display_no=1,
+            title="Cached Effects Book",
+            description="",
+            audio_config="{}",
+            status="draft",
+        )
+        db.add(project)
+        db.flush()
+
+        chapter = Chapter(project_id=project.id, chapter_number=1, title="Opening", content="")
+        db.add(chapter)
+        db.flush()
+
+        audiobook_project = AudiobookProject(
+            project_id=project.id,
+            status="completed",
+            total_chapters=1,
+            completed_chapters=1,
+        )
+        db.add(audiobook_project)
+        db.flush()
+
+        db.add(
+            ChapterAudio(
+                audiobook_project_id=audiobook_project.id,
+                chapter_id=chapter.id,
+                audio_path=str(audio_file),
+                duration=1.0,
+                file_size=audio_file.stat().st_size,
+            )
+        )
+        db.add(
+            ChapterAudioRun(
+                audiobook_project_id=audiobook_project.id,
+                chapter_id=chapter.id,
+                run_type="full",
+                status="completed",
+                checkpoint_json={
+                    "effect_timeline": {"timeline": [{"effect_id": "rain_light"}]},
+                },
+            )
+        )
+        db.commit()
+
+        chapters = project_exporter_module.build_chapter_markers(
+            project_exporter_module.collect_project_audio_chapters(
+                db,
+                audiobook_project_id=audiobook_project.id,
+            )
+        )
+        export_metadata = {
+            "title": project.title or "Audiobook",
+            "author": "",
+            "narrator": "",
+            "year": "",
+            "description": project.description or "",
+        }
+        source_signature = project_exporter_module.build_project_export_source_signature(
+            chapters,
+            export_kind="m4b",
+            version=project_exporter_module._M4B_EXPORT_VERSION,
+            metadata=export_metadata,
+            extra={"cover_art": project_exporter_module._build_file_dependency_payload(None)},
+        )
+        project_exporter_module._write_project_export_manifest(
+            output_file,
+            export_kind="m4b",
+            source_signature=source_signature,
+            result={
+                "success": True,
+                "cached": False,
+                "output_path": str(output_file),
+                "source_signature": source_signature,
+            },
+        )
+
+        result = build_project_m4b_export(
+            db,
+            audiobook_project=audiobook_project,
+            project=project,
+            output_path=str(output_file),
+        )
+
+    assert result["cached"] is True
+    assert calls["used_effect_ids"] == {"rain_light"}
 
 
 def test_m4b_ffmpeg_command_maps_cover_as_attached_picture():
@@ -361,6 +612,8 @@ def test_project_m4b_export_merges_completed_chapters_with_markers(tmp_path: Pat
     assert result["chapters"][1]["start_ms"] >= result["chapters"][0]["end_ms"]
     assert result["output_validation"]["passed"] is True
     assert result["output_validation"]["expected_chapter_count"] == 2
+    assert Path(result["credits"]["markdown_path"]).exists()
+    assert Path(result["credits"]["jsonl_path"]).exists()
     assert output_file.exists()
     assert b"ftyp" in output_file.read_bytes()[:32]
 
@@ -553,16 +806,20 @@ def test_project_audacity_export_packages_tracks_lof_and_labels(tmp_path: Path):
         names = set(archive.namelist())
         assert "project.lof" in names
         assert "labels.txt" in names
+        assert "CREDITS.md" in names
+        assert "license_manifest.jsonl" in names
         assert "tracks/speaker_Narrator.wav" in names
         assert "tracks/chapter_002_Turn.wav" in names
 
         lof_content = archive.read("project.lof").decode("utf-8")
         labels_content = archive.read("labels.txt").decode("utf-8")
+        credits_content = archive.read("CREDITS.md").decode("utf-8")
 
     assert 'file "tracks/speaker_Narrator.wav"' in lof_content
     assert 'file "tracks/chapter_002_Turn.wav"' in lof_content
     assert "0.000000\t0.300000\t[Narrator] Opening line" in labels_content
     assert "\t2. Turn" in labels_content
+    assert "# Audio Credits" in credits_content
 
 
 def test_project_m4b_export_routes_are_registered():
@@ -589,6 +846,8 @@ def test_project_export_celery_tasks_are_registered():
     assert '@celery_app.task(name="audiobook.export_audacity", bind=True)' in content
     assert "build_project_m4b_export" in content
     assert "build_project_audacity_export" in content
+    assert "build_audiobook_trace_context" in content
+    assert "trace_context=_build_project_export_trace_context" in content
 
 
 def test_project_export_task_detail_contains_stage_and_download_url():
@@ -616,6 +875,35 @@ def test_project_export_task_detail_contains_stage_and_download_url():
     assert stage["status"] == "completed"
     assert stage["progress"] == 1.0
     assert stage["metrics"]["track_count"] == 4
+
+
+def test_project_export_task_detail_adds_trace_context_without_overwriting_detail_fields():
+    detail = build_project_export_task_detail(
+        audiobook_project_id=34,
+        export_type="m4b",
+        status="running",
+        progress=0.05,
+        message="正在导出整本 M4B",
+        trace_context={
+            "trace_id": "celery-123",
+            "celery_task_id": "celery-123",
+            "task_db_id": 56,
+            "task_type": "export_m4b",
+            "audiobook_project_id": 999,
+            "stage": PROJECT_EXPORT_STAGE,
+            "status": "running",
+            "progress": 0.05,
+        },
+    )
+
+    assert detail["audiobook_project_id"] == 34
+    assert detail["trace_id"] == "celery-123"
+    assert detail["celery_task_id"] == "celery-123"
+    assert detail["task_db_id"] == 56
+    assert detail["task_type"] == "export_m4b"
+    assert detail["stage"] == PROJECT_EXPORT_STAGE
+    assert detail["status"] == "running"
+    assert detail["progress"] == 0.05
 
 
 def test_audiobook_delete_routes_clean_project_export_artifacts():

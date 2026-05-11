@@ -1,11 +1,14 @@
 import {
   Alert,
   Button,
+  CircularProgress,
   Grid,
   Paper,
   TextField,
   Typography,
 } from '@mui/material'
+
+import { audiobookButtonSx } from './audiobookTheme'
 
 interface CosyVoiceDesignVoicePanelProps {
   designName: string
@@ -81,7 +84,8 @@ const CosyVoiceDesignVoicePanel = ({
           variant="contained"
           onClick={onCreateDesignVoice}
           disabled={busy || !designName.trim() || !designPrompt.trim() || !designPreviewText.trim()}
-          sx={{ height: '100%' }}
+          startIcon={designLoading ? <CircularProgress size={18} color="inherit" /> : undefined}
+          sx={{ ...audiobookButtonSx.brandContained, height: '100%' }}
         >
           {designLoading ? '设计中...' : '开始设计'}
         </Button>

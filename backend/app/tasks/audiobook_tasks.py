@@ -14,6 +14,7 @@ from app.services.audiobook.project_export_jobs import (
     build_project_export_task_detail,
 )
 from app.services.audiobook.project_exporter import AudiobookExportError
+from app.services.audiobook.task_trace import build_audiobook_trace_context
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +22,54 @@ logger = logging.getLogger(__name__)
 def _run_async(coro):
     """Helper to execute async jobs from Celery."""
     return asyncio.run(coro)
+
+
+def _build_project_export_trace_context(
+    *,
+    task_db_id: int,
+    celery_task_id: Optional[str],
+    audiobook_project_id: int,
+    export_type: str,
+    status: str,
+    progress: float,
+) -> Dict[str, Any]:
+    return build_audiobook_trace_context(
+        celery_task_id=celery_task_id,
+        task_db_id=task_db_id,
+        task_type=f"export_{export_type}",
+        audiobook_project_id=audiobook_project_id,
+        stage=PROJECT_EXPORT_STAGE,
+        status=status,
+        progress=progress,
+    )
+
+
+def _build_initial_generation_task_detail(
+    *,
+    task_db_id: int,
+    celery_task_id: Optional[str],
+    task_type: str,
+    audiobook_project_id: int,
+    chapter_ids: List[int],
+    tts_model: str,
+    stage: str,
+    status: str,
+    progress: float,
+) -> Dict[str, Any]:
+    return {
+        **build_audiobook_trace_context(
+            celery_task_id=celery_task_id,
+            task_db_id=task_db_id,
+            task_type=task_type,
+            audiobook_project_id=audiobook_project_id,
+            stage=stage,
+            status=status,
+            progress=progress,
+            tts_model=tts_model,
+        ),
+        "chapter_ids": list(chapter_ids or []),
+        "chapter_total": len(chapter_ids or []),
+    }
 
 
 @celery_app.task(name="audiobook.run_full", bind=True)
@@ -33,13 +82,24 @@ def run_full_audiobook_task(
 ) -> None:
     """Full pipeline: generate audio directly from chapter content."""
     tracker = AudiobookJobTracker(task_db_id)
-    tracker.mark_running(self.request.id if self.request else None)
+    celery_task_id = self.request.id if self.request else None
+    tracker.mark_running(celery_task_id)
     tracker.update_stage(
         "initializing",
         0,
         max(len(chapter_ids), 1),
         "准备生成完整有声书",
-        {"audiobook_project_id": audiobook_project_id},
+        _build_initial_generation_task_detail(
+            task_db_id=task_db_id,
+            celery_task_id=celery_task_id,
+            task_type="full",
+            audiobook_project_id=audiobook_project_id,
+            chapter_ids=chapter_ids,
+            tts_model=tts_model,
+            stage="initializing",
+            status="running",
+            progress=0.0,
+        ),
     )
     try:
         from app.services.audiobook.background_jobs import generate_audiobook_background
@@ -70,13 +130,24 @@ def run_script_generation_task(
 ) -> None:
     """Generate narrations/scripts only."""
     tracker = AudiobookJobTracker(task_db_id)
-    tracker.mark_running(self.request.id if self.request else None)
+    celery_task_id = self.request.id if self.request else None
+    tracker.mark_running(celery_task_id)
     tracker.update_stage(
         "script_adaptation",
         0,
         max(len(chapter_ids), 1),
         "准备剧本改写任务",
-        {"audiobook_project_id": audiobook_project_id},
+        _build_initial_generation_task_detail(
+            task_db_id=task_db_id,
+            celery_task_id=celery_task_id,
+            task_type="script_only",
+            audiobook_project_id=audiobook_project_id,
+            chapter_ids=chapter_ids,
+            tts_model=tts_model,
+            stage="script_adaptation",
+            status="running",
+            progress=0.0,
+        ),
     )
     try:
         from app.services.audiobook.background_jobs import (
@@ -109,13 +180,24 @@ def run_audio_from_scripts_task(
 ) -> None:
     """Generate audio from previously approved scripts."""
     tracker = AudiobookJobTracker(task_db_id)
-    tracker.mark_running(self.request.id if self.request else None)
+    celery_task_id = self.request.id if self.request else None
+    tracker.mark_running(celery_task_id)
     tracker.update_stage(
         "tts_synthesis",
         0,
         max(len(chapter_ids), 1),
         "准备基于剧本的音频生成",
-        {"audiobook_project_id": audiobook_project_id},
+        _build_initial_generation_task_detail(
+            task_db_id=task_db_id,
+            celery_task_id=celery_task_id,
+            task_type="audio_from_scripts",
+            audiobook_project_id=audiobook_project_id,
+            chapter_ids=chapter_ids,
+            tts_model=tts_model,
+            stage="tts_synthesis",
+            status="running",
+            progress=0.0,
+        ),
     )
     try:
         from app.services.audiobook.background_jobs import (
@@ -162,6 +244,14 @@ def _run_project_export_task(
             message=start_message,
             force=force,
             metadata=metadata,
+            trace_context=_build_project_export_trace_context(
+                task_db_id=task_db_id,
+                celery_task_id=celery_task_id,
+                audiobook_project_id=audiobook_project_id,
+                export_type=export_type,
+                status="running",
+                progress=0.05,
+            ),
         ),
     )
 
@@ -217,6 +307,14 @@ def _run_project_export_task(
             force=force,
             metadata=metadata,
             result=result,
+            trace_context=_build_project_export_trace_context(
+                task_db_id=task_db_id,
+                celery_task_id=celery_task_id,
+                audiobook_project_id=audiobook_project_id,
+                export_type=export_type,
+                status="completed",
+                progress=1.0,
+            ),
         )
         tracker.update_stage(PROJECT_EXPORT_STAGE, 1, 1, finish_message, finish_detail)
         tracker.mark_completed(finish_detail)
@@ -238,6 +336,14 @@ def _run_project_export_task(
                 force=force,
                 metadata=metadata,
                 error_message=message,
+                trace_context=_build_project_export_trace_context(
+                    task_db_id=task_db_id,
+                    celery_task_id=celery_task_id,
+                    audiobook_project_id=audiobook_project_id,
+                    export_type=export_type,
+                    status="failed",
+                    progress=0.0,
+                ),
             ),
         )
         tracker.mark_failed(f"{exc.code}: {message}")
@@ -259,6 +365,14 @@ def _run_project_export_task(
                 force=force,
                 metadata=metadata,
                 error_message=message,
+                trace_context=_build_project_export_trace_context(
+                    task_db_id=task_db_id,
+                    celery_task_id=celery_task_id,
+                    audiobook_project_id=audiobook_project_id,
+                    export_type=export_type,
+                    status="failed",
+                    progress=0.0,
+                ),
             ),
         )
         tracker.mark_failed(message)

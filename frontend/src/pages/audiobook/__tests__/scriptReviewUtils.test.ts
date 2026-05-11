@@ -84,6 +84,40 @@ describe('audiobook script review utils', () => {
     ])
   })
 
+  it('normalizes unresolved sound effect asset warnings for display', () => {
+    const review = normalizeScriptReview({
+      overall_score: 8,
+      audio_balance: {
+        unresolved_effect_count: 2,
+        placeholder_effect_count: 1,
+        missing_effect_file_count: 1,
+      },
+      audio_warnings: [
+        {
+          code: 'unresolved_sound_effect_assets',
+          level: 'warning',
+          message: '有 2 个音效未找到真实素材，已在混音时跳过。',
+        },
+        'invalid',
+      ],
+      issues: [],
+      revision_suggestions: [],
+    })
+
+    expect(review?.audio_balance).toMatchObject({
+      unresolved_effect_count: 2,
+      placeholder_effect_count: 1,
+      missing_effect_file_count: 1,
+    })
+    expect(review?.audio_warnings).toEqual([
+      {
+        code: 'unresolved_sound_effect_assets',
+        level: 'warning',
+        message: '有 2 个音效未找到真实素材，已在混音时跳过。',
+      },
+    ])
+  })
+
   it('formats numeric metrics safely', () => {
     expect(formatTenScale(7)).toBe('7.0')
     expect(formatOneDecimal(12.34)).toBe('12.3')

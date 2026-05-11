@@ -12,6 +12,8 @@ import {
   DialogTitle,
   DialogContent,
   DialogActions,
+  useMediaQuery,
+  useTheme,
 } from '@mui/material'
 import { apiClient } from '@/services/api'
 import { getLocalAssetBlob, saveLocalAsset } from '@/utils/localAssetVault'
@@ -43,6 +45,8 @@ interface BrowserPlayerProps {
 }
 
 const BrowserPlayer: React.FC<BrowserPlayerProps> = ({ projectData, open, onClose }) => {
+  const theme = useTheme()
+  const fullScreen = useMediaQuery(theme.breakpoints.down('sm'))
   const [currentChapterIndex, setCurrentChapterIndex] = useState(0)
   const [isPlaying, setIsPlaying] = useState(false)
   const [currentTime, setCurrentTime] = useState(0)
@@ -57,6 +61,7 @@ const BrowserPlayer: React.FC<BrowserPlayerProps> = ({ projectData, open, onClos
   const lastHighlightRef = useRef<number | null>(null)
   const lastHighlightScrollAtRef = useRef(0)
 
+  const audiobookProjectId = projectData.audiobook_project_id ?? projectData.project_id
   const currentChapter = projectData?.chapters?.[currentChapterIndex]
   const persistedCurrentSecond = Math.floor(currentTime)
   const timedSegments = useMemo(
@@ -66,10 +71,10 @@ const BrowserPlayer: React.FC<BrowserPlayerProps> = ({ projectData, open, onClos
 
   const persistSnapshot = useCallback(
     (snapshot: BrowserPlayerStateSnapshot) => {
-      if (!projectData?.project_id) return
-      writeStoredBrowserPlayerState(localStorage, projectData.project_id, snapshot)
+      if (!audiobookProjectId) return
+      writeStoredBrowserPlayerState(localStorage, audiobookProjectId, snapshot)
     },
-    [projectData?.project_id],
+    [audiobookProjectId],
   )
 
   const scrollToSegment = useCallback((index: number) => {
@@ -126,7 +131,7 @@ const BrowserPlayer: React.FC<BrowserPlayerProps> = ({ projectData, open, onClos
   }, [currentChapterIndex])
 
   const { handlePlayPause, handleSeek } = useBrowserPlayerAudioElement({
-    projectId: projectData.project_id,
+    projectId: audiobookProjectId,
     open,
     currentChapter,
     currentChapterIndex,
@@ -145,7 +150,7 @@ const BrowserPlayer: React.FC<BrowserPlayerProps> = ({ projectData, open, onClos
   })
 
   useEffect(() => {
-    if (!projectData?.project_id || !open) return
+    if (!audiobookProjectId || !open) return
 
     persistSnapshot({
       currentChapterIndex,
@@ -164,7 +169,7 @@ const BrowserPlayer: React.FC<BrowserPlayerProps> = ({ projectData, open, onClos
     showSubtitles,
     subtitleFormat,
     volume,
-    projectData?.project_id,
+    audiobookProjectId,
   ])
 
   const handleVolumeChange = (_event: Event, value: number | number[]) => {
@@ -176,7 +181,7 @@ const BrowserPlayer: React.FC<BrowserPlayerProps> = ({ projectData, open, onClos
 
     try {
       const cachedSubtitleAsset = buildCachedSubtitleAssetDescriptor({
-        projectId: projectData.project_id,
+        projectId: audiobookProjectId,
         chapter: currentChapter,
         chapterIndex: currentChapterIndex,
         subtitleFormat,
@@ -185,7 +190,7 @@ const BrowserPlayer: React.FC<BrowserPlayerProps> = ({ projectData, open, onClos
         cachedAsset: cachedSubtitleAsset,
         getCachedBlob: getLocalAssetBlob,
         fetchRemoteBlob: () => apiClient.getChapterSubtitle(
-          projectData.project_id,
+          audiobookProjectId,
           currentChapter.chapter_id,
           subtitleFormat,
         ),
@@ -206,7 +211,7 @@ const BrowserPlayer: React.FC<BrowserPlayerProps> = ({ projectData, open, onClos
 
     try {
       const cachedLabelsAsset = buildCachedAudacityLabelsAssetDescriptor({
-        projectId: projectData.project_id,
+        projectId: audiobookProjectId,
         chapter: currentChapter,
         chapterIndex: currentChapterIndex,
       })
@@ -214,7 +219,7 @@ const BrowserPlayer: React.FC<BrowserPlayerProps> = ({ projectData, open, onClos
         cachedAsset: cachedLabelsAsset,
         getCachedBlob: getLocalAssetBlob,
         fetchRemoteBlob: () => apiClient.getChapterSubtitle(
-          projectData.project_id,
+          audiobookProjectId,
           currentChapter.chapter_id,
           'labels',
         ),
@@ -233,7 +238,7 @@ const BrowserPlayer: React.FC<BrowserPlayerProps> = ({ projectData, open, onClos
   if (!open || !projectData) return null
 
   return (
-    <Dialog open={open} onClose={onClose} maxWidth="lg" fullWidth>
+    <Dialog open={open} onClose={onClose} maxWidth="lg" fullWidth fullScreen={fullScreen}>
       <DialogTitle>
         <BrowserPlayerHeader
           projectTitle={projectData.project_title}
@@ -245,14 +250,31 @@ const BrowserPlayer: React.FC<BrowserPlayerProps> = ({ projectData, open, onClos
       </DialogTitle>
 
       <DialogContent dividers>
-        <Box display="flex" gap={3} height="70vh">
+        <Box
+          sx={{
+            display: 'flex',
+            flexDirection: { xs: 'column', md: 'row' },
+            gap: { xs: 2, md: 3 },
+            height: { xs: 'auto', md: '70vh' },
+            minHeight: { xs: 'calc(100vh - 180px)', md: 0 },
+            overflow: { xs: 'visible', md: 'hidden' },
+          }}
+        >
           <BrowserPlayerChapterList
             chapters={projectData.chapters}
             currentChapterIndex={currentChapterIndex}
             onSelectChapter={setCurrentChapterIndex}
           />
 
-          <Box flex={1} display="flex" flexDirection="column">
+          <Box
+            sx={{
+              flex: 1,
+              display: 'flex',
+              flexDirection: 'column',
+              minWidth: 0,
+              minHeight: { xs: 0, md: 'auto' },
+            }}
+          >
             <BrowserPlayerChapterHeader
               currentChapter={currentChapter}
               currentChapterIndex={currentChapterIndex}

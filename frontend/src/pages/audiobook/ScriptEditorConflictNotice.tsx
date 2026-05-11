@@ -11,7 +11,7 @@ import type {
   EditorConflictDiffPreview,
   EditorConflictSegmentDiffPreview,
 } from './types'
-import { audiobookColors } from './audiobookTheme'
+import { audiobookColorRoles, audiobookColors } from './audiobookTheme'
 
 const EDITOR_CONFLICT_FIELD_DETAIL_LIMIT = 3
 
@@ -57,7 +57,7 @@ const ScriptEditorConflictNotice = ({
         sx={{
           p: 1.5,
           borderColor: 'warning.light',
-          backgroundColor: audiobookColors.warningFaint,
+          backgroundColor: audiobookColorRoles.notice.warning.faintBg,
         }}
       >
         <Box

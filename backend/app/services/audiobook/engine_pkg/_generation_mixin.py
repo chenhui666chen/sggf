@@ -271,10 +271,13 @@ class GenerationMixin:
                 self.task_tracker.start_stage(task_id, StageType.QUALITY_REVIEW)
                 logger.info("🔍 [6/8] AudioQualityReviewer剧本质量评审（TTS前）...")
                 
-                # 转换script_segments为评审格式
-                review_segments = self._build_review_segments(script_segments)
+                quality_report, auto_revision = self._run_quality_review_with_auto_revision(
+                    script_segments,
+                    novel_genre=novel_genre,
+                    quality_threshold=quality_threshold,
+                )
 
-                # 为前端评审弹窗准备一份精简的片段列表（只保留前50段）
+                review_segments = self._build_review_segments(script_segments)
                 sample_segments = [
                     {
                         "index": idx,
@@ -285,22 +288,6 @@ class GenerationMixin:
                     }
                     for idx, seg_dict in enumerate(review_segments[:50])
                 ]
-                
-                quality_report = self.audio_quality_reviewer.review_script(
-                    review_segments,
-                    novel_genre=novel_genre
-                )
-
-                auto_revision = self._auto_balance_script_audio_cues(
-                    script_segments,
-                    self.audio_quality_reviewer.quality_standards,
-                )
-                if auto_revision.get("applied"):
-                    review_segments = self._build_review_segments(script_segments)
-                    quality_report = self.audio_quality_reviewer.review_script(
-                        review_segments,
-                        novel_genre=novel_genre
-                    )
                 
                 issues_preview = [
                     {
@@ -323,6 +310,7 @@ class GenerationMixin:
                     "sample_segments": sample_segments,
                     "issues": issues_preview,
                     "auto_revision": auto_revision if auto_revision.get("applied") else None,
+                    "quality_gate": auto_revision.get("quality_gate"),
                 }
                 if llm_script_review_summary:
                     quality_stage_metrics["llm_script_review"] = llm_script_review_summary
@@ -335,9 +323,13 @@ class GenerationMixin:
                 logger.info(f"   ✅ 剧本评审完成: {quality_report.overall_grade} ({quality_report.overall_score:.1f}分)")
                 logger.info(f"   发现 {len(quality_report.issues)} 个问题")
                 
-                # 质量预警（不阻断流程，仅日志提示）
-                if quality_report.overall_score < quality_threshold:
-                    logger.warning(f"⚠️ 剧本质量评分低于阈值 ({quality_report.overall_score:.1f} < {quality_threshold})")
+                quality_gate = auto_revision.get("quality_gate") or {}
+                if not quality_gate.get("passed", True):
+                    logger.warning(
+                        "⚠️ 剧本质量闸门未通过，停止进入 TTS: %.1f < %.1f",
+                        quality_report.overall_score,
+                        quality_gate.get("threshold", quality_threshold),
+                    )
                     logger.warning(f"   修订建议: {', '.join(quality_report.revision_suggestions)}")
                     for issue in quality_report.issues[:5]:
                         logger.warning(f"   - [{issue.severity}] {issue.description}")
@@ -354,6 +346,7 @@ class GenerationMixin:
                             'overall_score': quality_report.overall_score,
                             'overall_grade': quality_report.overall_grade,
                             'issues_count': len(quality_report.issues),
+                            'quality_gate': quality_gate,
                         }
                     )
 
@@ -402,6 +395,51 @@ class GenerationMixin:
                         logger.info("Auto revision applied; refreshed sound/music timelines.")
                     except Exception as exc:
                         logger.warning("Auto revision refresh failed: %s", exc)
+
+                if not quality_gate.get("passed", True):
+                    gate_reason = (
+                        f"script_quality_gate_failed:"
+                        f"{quality_report.overall_score:.1f}<"
+                        f"{float(quality_gate.get('threshold') or quality_threshold):.1f}"
+                    )
+                    if WEBSOCKET_AVAILABLE and audiobook_project_id:
+                        await ws_manager.send_audiobook_progress(
+                            audiobook_project_id=audiobook_project_id,
+                            chapter_id=chapter_id,
+                            stage='quality_review',
+                            progress=100,
+                            message='剧本质量未通过，已停止进入语音合成',
+                            stage_metrics=quality_stage_metrics,
+                        )
+                    self.task_tracker.fail_stage(task_id, StageType.QUALITY_REVIEW, gate_reason)
+                    elapsed_time = time.time() - start_time
+                    return {
+                        "success": False,
+                        "task_id": task_id,
+                        "error": "script_quality_gate_failed",
+                        "message": "剧本质量评审未通过，已在 TTS 合成前停止",
+                        "script_segments_payload": self._build_review_segments(script_segments),
+                        "quality_report_detail": self._quality_report_to_payload(
+                            quality_report,
+                            auto_revision=auto_revision,
+                            llm_script_review=llm_script_review,
+                        ),
+                        "stats": {
+                            "generation_time": f"{elapsed_time:.1f}秒",
+                            "mode": "专业Agent模式",
+                            "script_segments": len(script_segments),
+                            "quality_report": {
+                                "overall_grade": quality_report.overall_grade,
+                                "overall_score": quality_report.overall_score,
+                                "issues_count": len(quality_report.issues),
+                                "revision_suggestions": quality_report.revision_suggestions,
+                                "auto_revision": auto_revision if auto_revision.get("applied") else None,
+                                "quality_gate": quality_gate,
+                                "llm_script_review": llm_script_review_summary,
+                            },
+                            "llm_script_review": llm_script_review_summary,
+                        },
+                    }
             else:
                 # 跳过质量评审，标记为已完成
                 self.task_tracker.complete_stage(task_id, StageType.QUALITY_REVIEW, metrics={
@@ -716,11 +754,11 @@ class GenerationMixin:
                 else:
                     script_segments_payload.append(getattr(seg, "__dict__", seg))
 
-            quality_report_payload = asdict(quality_report) if quality_report else None
-            if quality_report_payload and auto_revision.get("applied"):
-                quality_report_payload["auto_revision"] = auto_revision
-            if quality_report_payload and llm_script_review:
-                quality_report_payload["llm_script_review"] = llm_script_review
+            quality_report_payload = self._quality_report_to_payload(
+                quality_report,
+                auto_revision=auto_revision,
+                llm_script_review=llm_script_review,
+            )
 
             result = {
                 "success": True,
@@ -754,12 +792,15 @@ class GenerationMixin:
                         "issues_count": len(quality_report.issues),
                         "revision_suggestions": quality_report.revision_suggestions,
                         "auto_revision": auto_revision if auto_revision.get("applied") else None,
+                        "quality_gate": auto_revision.get("quality_gate"),
                         "llm_script_review": llm_script_review_summary,
                     } if quality_report else None,
                     "llm_script_review": llm_script_review_summary,
                     "final_audio_review": final_audio_review,
                 }
             }
+            if self._last_effect_timeline and self._last_effect_timeline.get("timeline"):
+                result["effect_timeline"] = self._last_effect_timeline
             
             logger.info(f"{'='*70}")
             if len(final_audio) > 0:

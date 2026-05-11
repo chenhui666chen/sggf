@@ -17,10 +17,8 @@ os.environ.setdefault("DEBUG", "false")
 os.environ.setdefault("DATABASE_URL", "postgresql://test:test@127.0.0.1:5432/test_db")
 
 from app.api.v1.audiobook_api import router as audiobook_router
-from app.api.v1.audiobook_api import routes_misc
 from app.core.security import get_current_user
 from app.models.user import User
-from app.services.audiobook.smart_retrier import RetryConfig
 
 
 class CompatTestClient:
@@ -60,63 +58,66 @@ def build_test_client() -> CompatTestClient:
     return CompatTestClient(app)
 
 
-def test_preview_file_route_reads_generated_audio_file(monkeypatch, tmp_path):
-    preview_id = "abc_123"
-    preview_file = tmp_path / f"preview_{preview_id}.mp3"
-    preview_file.write_bytes(b"ID3preview-audio")
-    monkeypatch.setattr(routes_misc.default_preview_generator, "output_dir", str(tmp_path))
-
-    response = build_test_client().get(f"/api/v1/audiobook/previews/{preview_id}")
-
-    assert response.status_code == 200
-    assert response.content == b"ID3preview-audio"
-    assert response.headers["content-type"].startswith("audio/mpeg")
-    assert response.headers["content-disposition"] == "inline"
+def build_route_path_set() -> set[str]:
+    app = FastAPI()
+    app.include_router(audiobook_router)
+    return {str(getattr(route, "path", "")) for route in app.routes}
 
 
-def test_preview_file_route_rejects_invalid_preview_id(monkeypatch, tmp_path):
-    monkeypatch.setattr(routes_misc.default_preview_generator, "output_dir", str(tmp_path))
+def test_legacy_preview_generate_route_is_removed():
+    response = build_test_client().post(
+        "/api/v1/audiobook/previews/generate",
+        json={
+            "text": "试听文本",
+            "voice_id": "voice-1",
+            "tts_model": "qwen3-tts-instruct-flash",
+        },
+    )
 
-    response = build_test_client().get("/api/v1/audiobook/previews/bad.id")
-
-    assert response.status_code == 400
-    assert response.json()["detail"] == "无效的预览ID"
+    assert response.status_code == 404
 
 
-def test_preview_file_route_returns_404_for_missing_audio(monkeypatch, tmp_path):
-    monkeypatch.setattr(routes_misc.default_preview_generator, "output_dir", str(tmp_path))
-
+def test_legacy_preview_file_route_is_removed():
     response = build_test_client().get("/api/v1/audiobook/previews/missing_preview")
 
     assert response.status_code == 404
-    assert response.json()["detail"] == "预览音频不存在"
 
 
-def test_retry_config_route_updates_default_retrier_config():
-    old_config = routes_misc.default_retrier.config
-    try:
-        response = build_test_client().post(
-            "/api/v1/audiobook/retries/config",
-            json={
-                "max_retries": 5,
-                "initial_delay": 1.5,
-                "backoff_factor": 1.75,
-                "enable_degraded": False,
-            },
-        )
-
-        assert response.status_code == 200
-        payload = response.json()
-        assert payload["message"] == "默认重试配置已更新"
-        assert payload["config"] == {
+def test_retry_config_route_is_not_exposed():
+    response = build_test_client().post(
+        "/api/v1/audiobook/retries/config",
+        json={
             "max_retries": 5,
             "initial_delay": 1.5,
             "backoff_factor": 1.75,
             "enable_degraded": False,
-        }
-        assert routes_misc.default_retrier.config.max_retries == 5
-        assert routes_misc.default_retrier.config.initial_delay == 1.5
-        assert routes_misc.default_retrier.config.backoff_factor == 1.75
-        assert routes_misc.default_retrier.config.enable_degraded is False
-    finally:
-        routes_misc.default_retrier.config = old_config or RetryConfig()
+        },
+    )
+
+    assert response.status_code == 404
+
+
+def test_legacy_preview_routes_are_not_registered_but_sse_is_not_deprecated():
+    app = FastAPI()
+    app.include_router(audiobook_router)
+    schema = app.openapi()
+
+    assert "/api/v1/audiobook/previews/generate" not in schema["paths"]
+    assert "/api/v1/audiobook/previews/{preview_id}" not in schema["paths"]
+    assert (
+        schema["paths"]["/api/v1/audiobook/tasks/{task_id}/stream"]["get"].get("deprecated")
+        is not True
+    )
+
+
+def test_unused_detail_routes_are_not_registered():
+    paths = build_route_path_set()
+
+    assert "/api/v1/audiobook/narration-styles/{style_id}" not in paths
+    assert "/api/v1/audiobook/voice-types/{voice_type}" not in paths
+
+
+def test_legacy_cosyvoice_v3_plus_alias_routes_are_not_registered():
+    paths = build_route_path_set()
+
+    assert not any("/cosyvoice-v3-plus/" in path for path in paths)

@@ -198,7 +198,7 @@ def extract_render_signatures(checkpoint_data: Optional[Dict[str, Any]]) -> Dict
             continue
         try:
             index = int(item.get("index"))
-        except Exception:
+        except (TypeError, ValueError, OverflowError):
             continue
         if index < 0:
             continue
@@ -361,13 +361,13 @@ def _resolve_chunk_char_limit(value: Optional[int]) -> int:
         if raw_env is not None:
             try:
                 candidate = int(raw_env)
-            except (TypeError, ValueError):
+            except (TypeError, ValueError, OverflowError):
                 candidate = None
     if candidate is None:
         candidate = DEFAULT_RENDER_CHUNK_MAX_CHARS
     try:
         resolved = int(candidate)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         resolved = DEFAULT_RENDER_CHUNK_MAX_CHARS
     if resolved <= 0:
         return 0

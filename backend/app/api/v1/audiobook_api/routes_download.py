@@ -4,6 +4,7 @@ import logging
 import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Any
 from urllib.parse import quote
 
 from fastapi import Depends, HTTPException, Query, status
@@ -15,11 +16,15 @@ from app.core.config import settings
 from app.core.security import get_current_user, get_current_user_optional
 from app.db.base import get_db
 from app.models.user import User
-from app.models.project import Project, Chapter
-from app.models.audiobook import AudiobookProject, ChapterAudio
+from app.models.audiobook import ChapterAudio
+from app.services.audiobook.repository import ChapterRepository, UserRepository
 from app.services.audiobook.safe_filename import build_safe_filename
 
 from app.api.v1.audiobook_api import router
+from app.api.v1.audiobook_api.dependencies import (
+    get_active_chapter_audio_for_project,
+    resolve_owned_audiobook_project,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -111,8 +116,8 @@ def _resolve_stream_token_user(
             detail="Invalid stream token",
         )
 
-    user = db.query(User).filter(User.id == user_id).first()
-    if not user or not user.is_active:
+    user = UserRepository.get_active_by_id(db, user_id)
+    if not user:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid stream token",
@@ -126,38 +131,25 @@ def _resolve_owned_chapter_audio_file(
     current_user: User,
     audiobook_project_id: int,
     chapter_id: int,
-) -> tuple[ChapterAudio, Chapter | None, str, str]:
-    audiobook_project = db.query(AudiobookProject).filter(
-        AudiobookProject.id == audiobook_project_id
-    ).first()
-
-    if not audiobook_project:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="有声书项目不存在"
+) -> tuple[ChapterAudio, Any | None, str, str]:
+    resolve_owned_audiobook_project(
+        db=db,
+        current_user=current_user,
+        audiobook_project_id=audiobook_project_id,
+    )
+    try:
+        chapter_audio = get_active_chapter_audio_for_project(
+            db=db,
+            audiobook_project_id=audiobook_project_id,
+            chapter_id=chapter_id,
         )
-
-    project = db.query(Project).filter(
-        Project.id == audiobook_project.project_id,
-        Project.user_id == current_user.id
-    ).first()
-
-    if not project:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="无权限访问"
-        )
-
-    chapter_audio = db.query(ChapterAudio).filter(
-        ChapterAudio.audiobook_project_id == audiobook_project_id,
-        ChapterAudio.chapter_id == chapter_id
-    ).first()
-
-    if not chapter_audio:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="章节音频不存在"
-        )
+    except HTTPException as exc:
+        if exc.status_code == status.HTTP_404_NOT_FOUND:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="章节音频不存在",
+            ) from exc
+        raise
 
     if not chapter_audio.audio_path:
         raise HTTPException(
@@ -172,7 +164,7 @@ def _resolve_owned_chapter_audio_file(
             detail=f"音频文件不存在: {file_path}"
         )
 
-    chapter = db.query(Chapter).filter(Chapter.id == chapter_id).first()
+    chapter = ChapterRepository.get_active_by_id(db, chapter_id)
     return chapter_audio, chapter, file_path, _get_audio_media_type(file_path)
 
 

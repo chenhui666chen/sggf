@@ -149,31 +149,29 @@ const ScriptSegmentActions = ({
       </Menu>
 
       {reviewMode && (
-        <>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, ml: 1 }}>
-            <Typography variant="caption" color="text.secondary">
-              评分：
-            </Typography>
-            <Rating
-              size="small"
-              value={review?.quality_score || 0}
-              onChange={(_, newValue) => {
-                if (newValue) onReview(index, newValue)
-              }}
-            />
-          </Box>
-          <Button
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, ml: 1 }}>
+          <Typography variant="caption" color="text.secondary">
+            评分：
+          </Typography>
+          <Rating
             size="small"
-            variant="outlined"
-            color="warning"
-            onClick={() => onRegenerate(index, segment)}
-            disabled={regenerating || !hasText}
-            startIcon={regenerating ? <CircularProgress size={14} /> : undefined}
-          >
-            {regenerating ? '重新生成中...' : '重新生成'}
-          </Button>
-        </>
+            value={review?.quality_score || 0}
+            onChange={(_, newValue) => {
+              if (newValue) onReview(index, newValue)
+            }}
+          />
+        </Box>
       )}
+      <Button
+        size="small"
+        variant="outlined"
+        color="warning"
+        onClick={() => onRegenerate(index, segment)}
+        disabled={regenerating || !hasText}
+        startIcon={regenerating ? <CircularProgress size={14} /> : undefined}
+      >
+        {regenerating ? '重新生成中...' : '重新生成'}
+      </Button>
     </Box>
   )
 }

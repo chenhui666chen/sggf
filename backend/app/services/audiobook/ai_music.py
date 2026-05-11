@@ -22,6 +22,7 @@ from enum import Enum
 
 import requests
 from app.core.config import settings
+from app.services.audiobook.audio_asset_cloud_storage import upload_audio_library_asset
 
 logger = logging.getLogger(__name__)
 
@@ -456,6 +457,56 @@ class MurekaO1Client:
         self._update_music_index(request, cache_file)
         logger.debug(f"💾 音乐已缓存: {cache_file.name}")
     
+    def _assess_audio_quality(self, file_path: str) -> Dict[str, Any]:
+        """评估音乐文件质量，返回质量元数据。"""
+        result = {"quality_score": 0.0, "quality_grade": "D", "quality_status": "rejected"}
+        try:
+            resolved = Path(file_path)
+            if not resolved.is_absolute():
+                resolved = self.cache_dir.parent / file_path
+            if not resolved.exists():
+                return result
+
+            from pydub import AudioSegment
+            audio = AudioSegment.from_file(str(resolved))
+            score = 100.0
+
+            duration_s = len(audio) / 1000.0
+            if duration_s < 3.0:
+                score -= 40
+            elif duration_s < 10.0:
+                score -= 10
+
+            dbfs = audio.dBFS
+            if dbfs < -40.0:
+                score -= 30
+            elif dbfs < -30.0:
+                score -= 15
+
+            silent_ms = len(audio) - len(audio.strip_silence(silence_thresh=-50))
+            silent_ratio = silent_ms / max(len(audio), 1)
+            if silent_ratio > 0.8:
+                score -= 40
+            elif silent_ratio > 0.5:
+                score -= 20
+
+            score = max(0.0, min(100.0, score))
+
+            if score >= 75:
+                grade, status = "B", "accepted"
+            elif score >= 60:
+                grade, status = "C", "accepted"
+            elif score >= 40:
+                grade, status = "C", "tolerated"
+            else:
+                grade, status = "D", "rejected"
+
+            result = {"quality_score": round(score, 1), "quality_grade": grade, "quality_status": status}
+        except Exception as e:
+            logger.debug("音乐质量评估跳过 (%s): %s", file_path, e)
+            result = {"quality_score": 0.0, "quality_grade": "D", "quality_status": "rejected"}
+        return result
+
     def _update_music_index(
         self,
         request: MusicGenerationRequest,
@@ -463,6 +514,14 @@ class MurekaO1Client:
     ) -> None:
         """更新本地音乐索引，便于后续检索和复用"""
         cache_key = self._get_cache_key(request)
+        try:
+            relative_path = cache_file.relative_to(self.cache_dir.parent)
+            file_path_str = relative_path.as_posix()
+        except ValueError:
+            file_path_str = str(cache_file)
+
+        quality = self._assess_audio_quality(file_path_str)
+
         record = {
             "id": cache_key,
             "prompt": request.prompt,
@@ -473,9 +532,23 @@ class MurekaO1Client:
             "instruments": request.instruments,
             "variant": request.variant,
             "bucket": request.bucket,
-            "file_path": str(cache_file),
+            "file_path": file_path_str,
             "source": "mureka",
+            "quality_score": quality["quality_score"],
+            "quality_grade": quality["quality_grade"],
+            "quality_status": quality["quality_status"],
         }
+        if record["quality_status"] != "rejected":
+            try:
+                record.update(
+                    upload_audio_library_asset(
+                        local_path=cache_file,
+                        relative_path=file_path_str,
+                        library_type="music",
+                    )
+                )
+            except Exception as exc:
+                logger.warning("鈿狅笍 音乐素材云端元数据写入失败，保留本地索引: %s", exc)
 
         try:
             with _MUSIC_INDEX_LOCK:

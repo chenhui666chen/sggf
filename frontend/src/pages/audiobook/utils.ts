@@ -232,6 +232,7 @@ export const severityLabelMap: Record<string, string> = {
 export const categoryLabelMap: Record<string, string> = {
   script: '剧本',
   audio: '音频',
+  audio_assets: '音效素材',
   pacing: '节奏',
 }
 
@@ -259,6 +260,9 @@ const normalizeScriptAudioBalanceMetrics = (
     total_effects: getNumberValue(value, 'total_effects'),
     total_music_cues: getNumberValue(value, 'total_music_cues'),
     effects_per_minute: getNumberValue(value, 'effects_per_minute'),
+    unresolved_effect_count: getNumberValue(value, 'unresolved_effect_count'),
+    placeholder_effect_count: getNumberValue(value, 'placeholder_effect_count'),
+    missing_effect_file_count: getNumberValue(value, 'missing_effect_file_count'),
   }
 }
 
@@ -287,9 +291,22 @@ const normalizeScriptReviewIssues = (value: unknown): NonNullable<ScriptReviewDe
         }))
     : []
 
+const normalizeAudioWarnings = (value: unknown): NonNullable<ScriptReviewDetail['audio_warnings']> =>
+  Array.isArray(value)
+    ? value
+        .filter(isRecord)
+        .map((warning) => ({
+          code: getStringValue(warning, 'code'),
+          level: getStringValue(warning, 'level'),
+          message: getStringValue(warning, 'message'),
+        }))
+        .filter((warning) => Boolean(warning.message || warning.code))
+    : []
+
 export const normalizeScriptReview = (raw: unknown): ScriptReviewDetail | null => {
   if (!isRecord(raw)) return null
   const safeIssues = normalizeScriptReviewIssues(raw.issues)
+  const audioWarnings = normalizeAudioWarnings(raw.audio_warnings)
   return {
     overall_score: getNumberValue(raw, 'overall_score'),
     overall_grade: getStringValue(raw, 'overall_grade'),
@@ -302,6 +319,7 @@ export const normalizeScriptReview = (raw: unknown): ScriptReviewDetail | null =
     pacing: normalizeScriptPacingMetrics(raw.pacing),
     revision_suggestions: getStringArrayValue(raw.revision_suggestions),
     issues: safeIssues,
+    audio_warnings: audioWarnings,
   }
 }
 

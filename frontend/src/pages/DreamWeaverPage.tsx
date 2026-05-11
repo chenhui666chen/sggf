@@ -51,6 +51,38 @@ interface Project {
   updated_at?: string | null
 }
 
+interface LatestRunSummary {
+  run_id: string
+  status: string
+  state?: string | null
+  stage?: string | null
+  progress: number
+  created_at?: string | null
+  updated_at?: string | null
+}
+
+type RunStatusLabel = 'running' | 'waiting' | 'completed' | 'failed' | 'timeout' | 'unknown'
+
+function classifyRunStatus(run: LatestRunSummary): RunStatusLabel {
+  const s = String(run.status || '').trim().toLowerCase()
+  if (s === 'running') return 'running'
+  if (s === 'completed') return 'completed'
+  if (s === 'failed') return 'failed'
+  if (s === 'timeout') return 'timeout'
+  const stage = String(run.stage || '').trim().toLowerCase()
+  if (s === 'pending' || stage.startsWith('waiting_')) return 'waiting'
+  return 'unknown'
+}
+
+const RUN_STATUS_CHIP_PROPS: Record<RunStatusLabel, { label: string; color: 'success' | 'warning' | 'error' | 'default' | 'info' }> = {
+  running: { label: '生成中', color: 'info' },
+  waiting: { label: '等待审核', color: 'warning' },
+  completed: { label: '已完成', color: 'success' },
+  failed: { label: '失败', color: 'error' },
+  timeout: { label: '超时', color: 'error' },
+  unknown: { label: '未知', color: 'default' },
+}
+
 const perforationHoles = Array.from({ length: 8 })
 const untitledTitleFallback = '未命名项目'
 const legacyUntitledTitles = new Set(['new novel', 'untitled', 'untitled project'])
@@ -106,6 +138,7 @@ export default function DreamWeaverPage() {
   const [projects, setProjects] = useState<Project[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [latestRunsByProject, setLatestRunsByProject] = useState<Record<number, LatestRunSummary | null>>({})
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedGenre, setSelectedGenre] = useState<string>('all')
   const [actionAlert, setActionAlert] = useState<{ severity: 'success' | 'error'; message: string } | null>(null)
@@ -127,7 +160,29 @@ export default function DreamWeaverPage() {
       try {
         setLoading(true)
         const res = await apiClient.getProjects()
-        setProjects((res.data as Project[]) || [])
+        const projectList = (res.data as Project[]) || []
+        setProjects(projectList)
+
+        const runEntries = await Promise.allSettled(
+          projectList.map(async (p) => {
+            try {
+              const runRes = await apiClient.listDreamweaverRuns(p.id, 1)
+              const runs = Array.isArray(runRes.data) ? runRes.data : []
+              const latest = runs[0] as LatestRunSummary | undefined
+              return [p.id, latest || null] as const
+            } catch {
+              return [p.id, null] as const
+            }
+          }),
+        )
+        const runsMap: Record<number, LatestRunSummary | null> = {}
+        for (const entry of runEntries) {
+          if (entry.status === 'fulfilled') {
+            const [id, run] = entry.value
+            runsMap[id] = run
+          }
+        }
+        setLatestRunsByProject(runsMap)
       } catch (e: any) {
         setError(e?.message || '获取项目失败，请稍后重试')
       } finally {
@@ -654,6 +709,21 @@ export default function DreamWeaverPage() {
                                 }}
                               />
                             )}
+                            {(() => {
+                              const latestRun = latestRunsByProject[project.id]
+                              if (!latestRun) return null
+                              const label = classifyRunStatus(latestRun)
+                              const chipProps = RUN_STATUS_CHIP_PROPS[label]
+                              return (
+                                <Chip
+                                  size="small"
+                                  label={chipProps.label}
+                                  color={chipProps.color}
+                                  variant="outlined"
+                                  sx={{ height: 22 }}
+                                />
+                              )
+                            })()}
                           </Box>
 
                           <Box sx={{ mt: 1, minHeight: 54 }}>
@@ -711,9 +781,20 @@ export default function DreamWeaverPage() {
                                 gap: 1,
                               }}
                             >
-                              <Typography variant="caption" sx={{ color: 'rgba(255,255,255,0.74)', fontWeight: 600 }}>
-                                点击进入生成流程
-                              </Typography>
+                              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.25 }}>
+                                <Typography variant="caption" sx={{ color: 'rgba(255,255,255,0.74)', fontWeight: 600 }}>
+                                  点击进入生成流程
+                                </Typography>
+                                {(() => {
+                                  const latestRun = latestRunsByProject[project.id]
+                                  if (!latestRun || latestRun.status !== 'running') return null
+                                  return (
+                                    <Typography variant="caption" sx={{ color: 'rgba(255,255,255,0.5)', fontSize: 10 }}>
+                                      进度 {latestRun.progress}%
+                                    </Typography>
+                                  )
+                                })()}
+                              </Box>
                               <Box sx={{ display: 'flex', gap: 0.75 }}>
                                 <Tooltip title="进入素材库" placement="top" arrow>
                                   <IconButton

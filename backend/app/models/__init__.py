@@ -17,6 +17,7 @@ from .dreamweaver import DreamweaverProject, DreamweaverEpisode, DreamweaverShot
 from .model_catalog import ModelCatalogEntry, ModelCatalogSource
 from .user_asset_record import UserAssetRecord
 from .generation_feedback import GenerationFeedback
+from .audio_library_asset import AudioLibraryAsset
 
 __all__ = [
     "User",
@@ -54,4 +55,5 @@ __all__ = [
     "ModelCatalogSource",
     "UserAssetRecord",
     "GenerationFeedback",
+    "AudioLibraryAsset",
 ]

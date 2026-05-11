@@ -267,6 +267,10 @@ def build_checkpoint_patch_from_generation_result(
     if isinstance(subtitle_artifacts, dict) and subtitle_artifacts:
         patch["subtitle_artifacts"] = subtitle_artifacts
 
+    effect_timeline = result.get("effect_timeline")
+    if isinstance(effect_timeline, dict) and isinstance(effect_timeline.get("timeline"), list):
+        patch["effect_timeline"] = effect_timeline
+
     temp_segment_cache = result.get("temp_segment_cache")
     if not isinstance(temp_segment_cache, dict):
         return patch

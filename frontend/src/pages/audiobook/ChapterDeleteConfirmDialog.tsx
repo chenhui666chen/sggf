@@ -18,7 +18,7 @@ import {
 } from '@mui/material'
 import WarningIcon from '@mui/icons-material/Warning'
 
-import { audiobookColors } from './audiobookTheme'
+import { audiobookButtonSx, audiobookColorRoles } from './audiobookTheme'
 import type { Chapter } from './types'
 
 interface ChapterDeleteConfirmDialogProps {
@@ -52,7 +52,7 @@ const ChapterDeleteConfirmDialog = ({
   >
     <DialogTitle>
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-        <WarningIcon sx={{ color: audiobookColors.dangerMain }} />
+        <WarningIcon sx={{ color: audiobookColorRoles.destructiveAction.main }} />
         <Typography variant="h6">确认删除章节</Typography>
       </Box>
     </DialogTitle>
@@ -65,7 +65,7 @@ const ChapterDeleteConfirmDialog = ({
         确定要删除以下章节吗？
       </Typography>
 
-      <Paper variant="outlined" sx={{ p: 2, mb: 2, backgroundColor: audiobookColors.dangerFaint }}>
+      <Paper variant="outlined" sx={{ p: 2, mb: 2, backgroundColor: audiobookColorRoles.destructiveAction.softBg }}>
         <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
           {chapter && `第${chapter.chapter_number}章 - ${chapter.title}`}
         </Typography>
@@ -110,9 +110,9 @@ const ChapterDeleteConfirmDialog = ({
             checked={deleteFiles}
             onChange={(event) => onDeleteFilesChange(event.target.checked)}
             sx={{
-              color: audiobookColors.dangerMain,
+              color: audiobookColorRoles.destructiveAction.main,
               '&.Mui-checked': {
-                color: audiobookColors.dangerMain,
+                color: audiobookColorRoles.destructiveAction.main,
               },
             }}
           />
@@ -128,12 +128,10 @@ const ChapterDeleteConfirmDialog = ({
         onClick={onDelete}
         disabled={deleting}
         variant="contained"
-        sx={{
-          backgroundColor: audiobookColors.dangerMain,
-          '&:hover': { backgroundColor: audiobookColors.dangerHover },
-        }}
+        startIcon={deleting ? <CircularProgress size={18} color="inherit" /> : undefined}
+        sx={audiobookButtonSx.dangerContained}
       >
-        {deleting ? <CircularProgress size={20} color="inherit" /> : '确认删除'}
+        {deleting ? '删除中...' : '确认删除'}
       </Button>
     </DialogActions>
   </Dialog>

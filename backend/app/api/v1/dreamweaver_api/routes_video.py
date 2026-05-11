@@ -1,116 +1,15 @@
 from __future__ import annotations
 
-import copy
-import json
-import logging
-import os
-import re
-import shutil
-import time
-import uuid
-from pathlib import Path
-from typing import Any, Dict, List, Literal, Optional, Tuple
+import hashlib
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
-from fastapi.responses import FileResponse
-import requests
-from sqlalchemy import text
-from sqlalchemy.orm import Session
-from sqlalchemy.orm.attributes import flag_modified
+from fastapi import Request
+from fastapi.responses import Response
 
-from app.core.security import get_current_user
-from app.db.base import get_db
-from app.models.character import Character
-from app.models.project import Project, Chapter
-from app.models.user import User
-from app.models.dreamweaver import (
-    DreamweaverAsset as DreamweaverAssetModel,
-    DreamweaverEpisode as DreamweaverEpisodeModel,
-    DreamweaverProject as DreamweaverProjectModel,
-    DreamweaverRunEvent as DreamweaverRunEventModel,
-    DreamweaverShot as DreamweaverShotModel,
-)
-from app.schemas.dreamweaver_contract import DREAMWEAVER_SCHEMA_VERSION
-from app.utils.datetime_utils import utc_now
-from app.services.dreamweaver.library import (
-    approve_latest_library_assets,
-    build_library_prompt,
-    build_library_role,
-    build_library_spec,
-    build_library_spec_from_script_entities,
-    compute_library_review,
-    default_library_asset_uri,
-    empty_library_spec,
-    ensure_required_library_assets,
-    enrich_payload_with_library,
-    has_any_library_entities,
-    load_latest_library_assets,
-    parse_library_role,
-    runs_root_path,
-    required_library_roles,
-    resolve_asset_path,
-    strip_crowd_characters_from_spec,
-)
-from app.services.dreamweaver.video_generation import (
-    DreamweaverRunPreflight,
-    build_dreamweaver_run_preflight,
-    resolve_video_generation_controls,
-    sync_subject_ref_for_asset as sync_subject_ref_for_asset_service,
-)
-from app.services.providers.kling import (
-    KlingAPIError,
-    KlingConfigurationError,
-)
-from app.services.dreamweaver.config_lock import (
-    DreamweaverProjectConfigLockedError,
-    apply_locked_generation_config,
-    apply_vision_review_qc_config,
-    enforce_locked_generation_config_compatible,
-    get_project_locked_generation_config,
-    serialize_locked_generation_config,
-)
-from app.services.dreamweaver.library_prompt import suggest_library_prompt
-from app.services.points_task_precheck import (
-    build_dreamweaver_task_points_precheck,
-    build_task_points_precheck_error_detail,
-)
-from app.services.chapter_adaptation_assets import build_drama_source_text
-
-from pipeline.state_machine import RunContext, State, progress_percent, run_until_done, stage_label
-from pipeline.media_presets import (
-    DREAMWEAVER_I2V_ENGINE,
-    DREAMWEAVER_T2V_ENGINE,
-    infer_dreamweaver_video_engine_from_model_id,
-    is_dreamweaver_auto_engine,
-    is_dreamweaver_i2v_engine,
-    normalize_dreamweaver_video_engine,
-    resolve_frame_size,
-)
-from pipeline.library_regenerate_roles import (
-    build_missing_character_view_regenerate_roles,
-    build_missing_character_view_summary,
-)
-from pipeline.style_presets import normalize_style_preset, style_negative_prompt_for_preset, style_prompt_for_preset
-from pipeline.artifacts_io import download_url_to_path as _download_url_to_path
-from agents.image_edit_utils import (
-    resolve_image_edit_adapter_name,
-    resolve_image_edit_multi_ref,
-    resolve_image_edit_ref_max_images,
-)
-
-from adapters.adapter_helpers import (
-    edit_image as unified_edit_image,
-    generate_image as unified_generate_image,
-    get_model_info,
-    model_supports_capability,
-)
-
-from app.api.v1.dreamweaver_api import router
-from app.api.v1.dreamweaver_api._schemas import *
-from app.api.v1.dreamweaver_api._helpers import *
+from app.api.v1.dreamweaver_api._imports import *
 from app.api.v1.dreamweaver_api._helpers import (
     _dreamweaver_celery_queue,
     _ensure_run_not_running,
+    _load_run_for_user,
     _normalize_run_id,
     _runs_base_dir,
 )
@@ -124,13 +23,7 @@ def rebuild_video_jobs(
     db: Session = Depends(get_db),
 ):
     safe_run_id = _normalize_run_id(run_id)
-    row = (
-        db.query(DreamweaverProjectModel)
-        .filter(DreamweaverProjectModel.run_id == safe_run_id, DreamweaverProjectModel.user_id == current_user.id)
-        .first()
-    )
-    if not row:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="run_id 不存在或无权限访问")
+    row = _load_run_for_user(db, safe_run_id, current_user.id)
 
     _ensure_run_not_running(row, action="重建视频任务")
 
@@ -282,13 +175,7 @@ def restart_run_async(
     - reset_policy=downstream 会清理当前阶段之后的产物并重新排队。
     - overwrite 为 true 时会覆盖已有中间结果。
     """
-    row = (
-        db.query(DreamweaverProjectModel)
-        .filter(DreamweaverProjectModel.run_id == run_id, DreamweaverProjectModel.user_id == current_user.id)
-        .first()
-    )
-    if not row:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="run_id 不存在或无权限访问")
+    row = _load_run_for_user(db, run_id, current_user.id)
 
     if str(row.status or "").strip().lower() == "running":
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="run 正在执行，无法重建视频任务")
@@ -440,7 +327,8 @@ def restart_run_async(
     task_id = str(uuid.uuid4())
     try:
         start_state_enum = State[start_state_raw]
-    except Exception:  # noqa: BLE001
+    except (KeyError, AttributeError):  # noqa: BLE001
+        logger.warning("Invalid start_state '%s' for restart, falling back to INIT", start_state_raw)
         start_state_enum = State.INIT
 
     if request.qc_allow_fail is not None and isinstance(row.contract_json, dict):
@@ -550,7 +438,8 @@ def delete_run(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="run_id 不存在或无权限访问")
     except Exception as exc:  # noqa: BLE001
         db.rollback()
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc))
+        logger.error("Unexpected error deleting dreamweaver run %s: %s", run_id, exc)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="删除运行时发生内部错误，请稍后重试") from exc
 
     return asdict(result)
 
@@ -558,19 +447,17 @@ def delete_run(
 @router.get("/runs/{run_id}", response_model=dict)
 def get_persisted_run_contract(
     run_id: str,
+    fields: Optional[str] = None,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """
     Get persisted run contract snapshot (Project/Episode/Shot/Asset).
+    Optional ``fields`` query parameter: comma-separated list of top-level
+    fields to include (e.g. ``fields=status,stage,progress``).  When omitted
+    the full snapshot is returned for backward compatibility.
     """
-    row = (
-        db.query(DreamweaverProjectModel)
-        .filter(DreamweaverProjectModel.run_id == run_id, DreamweaverProjectModel.user_id == current_user.id)
-        .first()
-    )
-    if not row:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="run_id not found or forbidden")
+    row = _load_run_for_user(db, run_id, current_user.id)
 
     contract_out = row.contract_json if isinstance(getattr(row, "contract_json", None), dict) else {}
     if isinstance(contract_out, dict):
@@ -675,9 +562,9 @@ def get_persisted_run_contract(
                             schema_v2["meta"] = meta
                             sh["shot_schema_v2"] = schema_v2
         except Exception as e:
-            logger.debug("Failed to generate video prompt for shot: %s", e)
+            logger.warning("Failed to generate video prompt for shot in run %s: %s", safe_run_id, e)
 
-    return {
+    full_result = {
         "dreamweaver_project_id": row.id,
         "run_id": row.run_id,
         "status": row.status,
@@ -689,6 +576,11 @@ def get_persisted_run_contract(
         "error_message": row.error_message,
         "contract": contract_out,
     }
+
+    if fields is not None:
+        selected = {f.strip() for f in fields.split(",") if f.strip()}
+        return {k: v for k, v in full_result.items() if k in selected}
+    return full_result
 
 
 @router.get("/runs/{run_id}/events", response_model=List[dict])
@@ -787,13 +679,7 @@ def upload_run_shot_asset_file(
     if not spec:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="仅支持 role 为 head_frame/tail_frame/mid_frame/video_clip")
 
-    row = (
-        db.query(DreamweaverProjectModel)
-        .filter(DreamweaverProjectModel.run_id == safe_run_id, DreamweaverProjectModel.user_id == current_user.id)
-        .first()
-    )
-    if not row:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="run_id 不存在或无权限访问")
+    row = _load_run_for_user(db, safe_run_id, current_user.id)
     _ensure_run_not_running(row, action="上传素材")
 
     contract = row.contract_json if isinstance(getattr(row, "contract_json", None), dict) else None
@@ -927,13 +813,7 @@ def update_run_shot_frame_prompt(
     if frame_norm not in {"head", "tail"}:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="frame only supports head/tail")
 
-    row = (
-        db.query(DreamweaverProjectModel)
-        .filter(DreamweaverProjectModel.run_id == safe_run_id, DreamweaverProjectModel.user_id == current_user.id)
-        .first()
-    )
-    if not row:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="run_id not found or forbidden")
+    row = _load_run_for_user(db, safe_run_id, current_user.id)
     _ensure_run_not_running(row, action="update prompts")
 
     contract = row.contract_json if isinstance(getattr(row, "contract_json", None), dict) else None
@@ -1051,7 +931,7 @@ def update_run_shot_frame_prompt(
             shot_schema_v2["meta"] = meta_for_prompt
             shot["shot_schema_v2"] = shot_schema_v2
     except Exception as e:
-        logger.debug("Failed to generate video prompt for shot %s: %s", safe_shot_id, e)
+        logger.warning("Failed to generate video prompt for shot %s in run %s: %s", safe_shot_id, safe_run_id, e)
 
     runtime_cfg = contract.get("runtime_config") if isinstance(contract.get("runtime_config"), dict) else {}
     if bool(runtime_cfg.get("prompt_review_required")):
@@ -1084,13 +964,7 @@ def update_run_shot_video_prompt(
     if not safe_shot_id or "/" in safe_shot_id or "\\" in safe_shot_id or ".." in safe_shot_id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="shot_id 格式不合法")
 
-    row = (
-        db.query(DreamweaverProjectModel)
-        .filter(DreamweaverProjectModel.run_id == safe_run_id, DreamweaverProjectModel.user_id == current_user.id)
-        .first()
-    )
-    if not row:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="run_id 不存在或无权限访问")
+    row = _load_run_for_user(db, safe_run_id, current_user.id)
     _ensure_run_not_running(row, action="更新视频提示词")
 
     contract = row.contract_json if isinstance(getattr(row, "contract_json", None), dict) else None
@@ -1127,16 +1001,12 @@ def update_run_shot_video_prompt(
 @router.get("/runs/{run_id}/merged-video/file")
 def get_run_merged_video_file(
     run_id: str,
+    request: Request,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    row = (
-        db.query(DreamweaverProjectModel)
-        .filter(DreamweaverProjectModel.run_id == run_id, DreamweaverProjectModel.user_id == current_user.id)
-        .first()
-    )
-    if not row:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="run_id 不存在或无权限访问")
+    safe_run_id = _normalize_run_id(run_id)
+    row = _load_run_for_user(db, safe_run_id, current_user.id)
 
     contract = row.contract_json if isinstance(row.contract_json, dict) else {}
     uri: Optional[str] = None
@@ -1176,7 +1046,13 @@ def get_run_merged_video_file(
         media_type = "video/webm"
     elif suffix in {".mov"}:
         media_type = "video/quicktime"
-    return FileResponse(path=str(resolved), media_type=media_type, filename=resolved.name)
+
+    etag = '"' + hashlib.md5(f"{safe_run_id}:{uri}:{resolved.stat().st_mtime}:{resolved.stat().st_size}".encode()).hexdigest() + '"'
+    if_none_match = request.headers.get("if-none-match")
+    if if_none_match and if_none_match == etag:
+        return Response(status_code=304, headers={"ETag": etag})
+
+    return FileResponse(path=str(resolved), media_type=media_type, filename=resolved.name, headers={"ETag": etag})
 
 
 def _contract_contains_asset_uri(contract: Dict[str, Any], uri: str) -> bool:
@@ -1219,6 +1095,7 @@ def _contract_contains_asset_uri(contract: Dict[str, Any], uri: str) -> bool:
 def get_run_asset_file(
     run_id: str,
     uri: str,
+    request: Request,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -1233,13 +1110,7 @@ def get_run_asset_file(
     if "://" in target_uri:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="不支持外部 URI")
 
-    row = (
-        db.query(DreamweaverProjectModel)
-        .filter(DreamweaverProjectModel.run_id == safe_run_id, DreamweaverProjectModel.user_id == current_user.id)
-        .first()
-    )
-    if not row:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="run_id 不存在或无权限访问")
+    row = _load_run_for_user(db, safe_run_id, current_user.id)
 
     contract = row.contract_json if isinstance(row.contract_json, dict) else {}
     if not _contract_contains_asset_uri(contract, target_uri):

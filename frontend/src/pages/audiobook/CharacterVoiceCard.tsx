@@ -2,6 +2,7 @@ import {
   Box,
   Button,
   Chip,
+  CircularProgress,
   ListItem,
   Tooltip,
   Typography,
@@ -159,6 +160,7 @@ const CharacterVoiceCard = ({
                 variant="outlined"
                 onClick={() => onPreviewCharacterVoice(characterVoice)}
                 disabled={!characterVoice.voiceId || isPreviewing}
+                startIcon={isPreviewing ? <CircularProgress size={16} color="inherit" /> : undefined}
               >
                 {isPreviewing ? '试听中...' : '试听'}
               </Button>

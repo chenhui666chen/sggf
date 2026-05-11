@@ -11,6 +11,10 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from adapters.adapter_helpers import analyze_video, chat_messages, get_model_info
 from agents.vlm_utils import clamp_text_list
+from pipeline.autoqc_pkg._dataclasses import AutoQCFailure, AutoQCShotReport, AutoQCScores
+from pipeline.autoqc_pkg._utils import _file_exists
+from pipeline.autoqc_pkg._video_clip_checks import _subject_pos, _pos_delta
+from pipeline.autoqc_pkg._semantic_match import _semantic_match
 from pipeline.media_presets import (
     DREAMWEAVER_I2V_ENGINE,
     is_dreamweaver_auto_engine,

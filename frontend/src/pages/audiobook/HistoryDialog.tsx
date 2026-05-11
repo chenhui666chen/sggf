@@ -19,7 +19,7 @@ import {
   Typography,
 } from '@mui/material'
 
-import { audiobookColors } from './audiobookTheme'
+import { audiobookButtonSx, audiobookColorRoles, audiobookColors } from './audiobookTheme'
 import type { HistoryDialogProps } from './types'
 
 const HistoryDialog = ({
@@ -98,7 +98,7 @@ const HistoryDialog = ({
                 <ListItem
                   key={project.id}
                   sx={{
-                    border: `1px solid ${audiobookColors.pendingBorder}`,
+                    border: `1px solid ${audiobookColorRoles.taskStatus.pending.border}`,
                     borderRadius: 2,
                     mb: 2,
                     '&:hover': {
@@ -124,12 +124,12 @@ const HistoryDialog = ({
                         sx={{
                           backgroundColor:
                             project.status === 'completed'
-                              ? audiobookColors.successMain
+                              ? audiobookColorRoles.taskStatus.completed.chipBg
                               : project.status === 'processing'
-                              ? audiobookColors.warningMain
+                              ? audiobookColorRoles.taskStatus.running.chipBg
                               : project.status === 'failed'
-                              ? audiobookColors.dangerMain
-                              : audiobookColors.pendingText,
+                              ? audiobookColorRoles.taskStatus.failed.chipBg
+                              : audiobookColorRoles.taskStatus.pending.chipBg,
                           color: 'white',
                         }}
                       />
@@ -165,7 +165,7 @@ const HistoryDialog = ({
                         event.stopPropagation()
                         handleOpenDeleteDialog(project.id)
                       }}
-                      sx={{ color: audiobookColors.dangerMain }}
+                      sx={{ color: audiobookColorRoles.destructiveAction.main }}
                     >
                       <DeleteIcon />
                     </IconButton>
@@ -183,7 +183,7 @@ const HistoryDialog = ({
       <Dialog open={deleteDialogOpen} onClose={handleCloseDeleteDialog}>
         <DialogTitle>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-            <WarningIcon sx={{ color: audiobookColors.dangerMain }} />
+            <WarningIcon sx={{ color: audiobookColorRoles.destructiveAction.main }} />
             <Typography variant="h6">确认删除</Typography>
           </Box>
         </DialogTitle>
@@ -206,10 +206,7 @@ const HistoryDialog = ({
           <Button
             onClick={handleConfirmDelete}
             variant="contained"
-            sx={{
-              backgroundColor: audiobookColors.dangerMain,
-              '&:hover': { backgroundColor: audiobookColors.dangerHover },
-            }}
+            sx={audiobookButtonSx.dangerContained}
           >
             确认删除
           </Button>

@@ -237,6 +237,19 @@ def test_audiobook_freeze_event_records_expected_payload():
             actor_username=user.username,
             audiobook_project_id=audiobook_project.id,
             chapter_ids=[chapter.id],
+            extra_payload={
+                "trace_id": "trace-freeze-1",
+                "celery_task_id": "trace-freeze-1",
+                "task_db_id": 42,
+                "task_type": "audio_from_scripts",
+                "cost_precheck_id": "audiobook-precheck-abc123",
+                "status": "queued",
+                "progress": 0.0,
+                "audiobook_project_id": 99999,
+                "amount_points": 1.0,
+                "chapter_ids": [99999],
+                "ignored_none": None,
+            },
         )
         assert log is not None
         payload = log.request_params or {}
@@ -257,6 +270,14 @@ def test_audiobook_freeze_event_records_expected_payload():
     assert payload["pricing_status"] == "estimated"
     assert payload["task_status"] == "running"
     assert payload["chapter_ids"] == [chapter.id]
+    assert payload["trace_id"] == "trace-freeze-1"
+    assert payload["celery_task_id"] == "trace-freeze-1"
+    assert payload["task_db_id"] == 42
+    assert payload["task_type"] == "audio_from_scripts"
+    assert payload["cost_precheck_id"] == "audiobook-precheck-abc123"
+    assert payload["status"] == "queued"
+    assert payload["progress"] == 0.0
+    assert "ignored_none" not in payload
     assert payload["action_path"] == f"/audiobook/{project.id}"
     assert payload["action_label"] == "查看有声书项目"
     assert payload["points_per_yuan"] == 100

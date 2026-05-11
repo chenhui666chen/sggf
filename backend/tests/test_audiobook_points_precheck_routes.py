@@ -245,6 +245,7 @@ def test_audiobook_create_project_blocks_with_structured_precheck_error(monkeypa
     assert detail["available_points"] == 20.0
     assert detail["effective_available_points"] == 20.0
     assert detail["additional_frozen_points"] > detail["available_points"]
+    assert detail["cost_precheck_id"].startswith("audiobook-precheck-")
     assert "当前可用 20.00 积分" in detail["message"]
     assert _count_audiobook_projects(session_factory) == 0
     assert _count_audiobook_tasks(session_factory) == 0

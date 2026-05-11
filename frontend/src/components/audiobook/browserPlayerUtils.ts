@@ -70,6 +70,7 @@ export interface BrowserPlayerResolvedAudioSource {
 type BrowserPlayerStateStorage = Pick<Storage, 'getItem' | 'removeItem' | 'setItem'>
 
 const PLAYER_STATE_STORAGE_PREFIX = 'audiobook_browser_player_state_v1'
+const BROWSER_PLAYER_STATE_TTL_MS = 7 * 24 * 60 * 60 * 1000
 
 export const DEFAULT_PLAYER_STATE: BrowserPlayerStateSnapshot = {
   currentChapterIndex: 0,
@@ -284,7 +285,22 @@ export const readStoredBrowserPlayerState = (
   }
 
   try {
-    return normalizePlayerStateSnapshot(JSON.parse(raw), totalChapters)
+    const parsed = JSON.parse(raw)
+    if (
+      isRecord(parsed)
+      && typeof parsed.savedAt === 'number'
+      && Number.isFinite(parsed.savedAt)
+      && Date.now() - parsed.savedAt > BROWSER_PLAYER_STATE_TTL_MS
+    ) {
+      try {
+        storage.removeItem(storageKey)
+      } catch {
+        // localStorage 不可用或已失效时忽略过期状态清理失败。
+      }
+      return DEFAULT_PLAYER_STATE
+    }
+
+    return normalizePlayerStateSnapshot(parsed, totalChapters)
   } catch {
     try {
       storage.removeItem(storageKey)
@@ -301,7 +317,13 @@ export const writeStoredBrowserPlayerState = (
   snapshot: BrowserPlayerStateSnapshot,
 ): boolean => {
   try {
-    storage.setItem(buildPlayerStateKey(projectId), JSON.stringify(snapshot))
+    storage.setItem(
+      buildPlayerStateKey(projectId),
+      JSON.stringify({
+        ...snapshot,
+        savedAt: Date.now(),
+      }),
+    )
     return true
   } catch {
     return false

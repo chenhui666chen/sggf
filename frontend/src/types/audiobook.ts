@@ -75,6 +75,26 @@ export interface DeletedAudiobookProject {
   restored_at?: string | null
 }
 
+export interface DeletedChapterAudio {
+  id: number
+  chapter_audio_id: number
+  audiobook_project_id: number
+  project_id?: number | null
+  project_title?: string | null
+  chapter_id: number
+  chapter_number?: number | null
+  chapter_title?: string | null
+  duration?: number | null
+  file_size?: number | null
+  deleted_at?: string | null
+  created_at?: string | null
+  audit_id?: number | null
+  delete_reason?: string | null
+  affected_tasks?: number | null
+  total_size?: number | null
+  restored_at?: string | null
+}
+
 export interface MergedChapterAudioRef {
   audiobookProjectId: number
   chapterAudio: ChapterAudio

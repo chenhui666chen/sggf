@@ -14,11 +14,13 @@ for path in (PROJECT_ROOT, BACKEND_ROOT):
 
 
 def test_autoqc_routes_video_clip_failure_to_edit_when_video_edit_enabled(monkeypatch) -> None:
-    from pipeline import autoqc
+    from pipeline.autoqc_pkg._routing import _route_from_failures
+    from pipeline.autoqc_pkg._dataclasses import AutoQCFailure
+    from adapters import adapter_helpers
 
-    monkeypatch.setattr(autoqc, "get_model_info", lambda model_id: {"id": model_id})
+    monkeypatch.setattr(adapter_helpers, "get_model_info", lambda model_id: {"id": model_id})
 
-    failure = autoqc.AutoQCFailure(
+    failure = AutoQCFailure(
         failure_type="video_clip_quality_below_threshold",
         severity="hard",
         message="video clip vision review below threshold",
@@ -31,7 +33,7 @@ def test_autoqc_routes_video_clip_failure_to_edit_when_video_edit_enabled(monkey
             "summary": "整体观感不稳定",
         },
     )
-    route = autoqc._route_from_failures(
+    route = _route_from_failures(
         failures=[failure],
         payload={
             "storyboard": [{"shot_id": "shot_001", "desc": "主角推门进入房间"}],
@@ -51,11 +53,13 @@ def test_autoqc_routes_video_clip_failure_to_edit_when_video_edit_enabled(monkey
 
 
 def test_autoqc_infers_video_extend_for_transition_break_issues(monkeypatch) -> None:
-    from pipeline import autoqc
+    from pipeline.autoqc_pkg._routing import _route_from_failures
+    from pipeline.autoqc_pkg._dataclasses import AutoQCFailure
+    from adapters import adapter_helpers
 
-    monkeypatch.setattr(autoqc, "get_model_info", lambda model_id: {"id": model_id})
+    monkeypatch.setattr(adapter_helpers, "get_model_info", lambda model_id: {"id": model_id})
 
-    failure = autoqc.AutoQCFailure(
+    failure = AutoQCFailure(
         failure_type="video_clip_quality_below_threshold",
         severity="hard",
         message="video clip vision review below threshold",
@@ -68,7 +72,7 @@ def test_autoqc_infers_video_extend_for_transition_break_issues(monkeypatch) -> 
             "summary": "片段收尾不完整，需要补足过渡",
         },
     )
-    route = autoqc._route_from_failures(
+    route = _route_from_failures(
         failures=[failure],
         payload={
             "storyboard": [{"shot_id": "shot_002", "desc": "主角转身离开房间"}],
@@ -84,11 +88,13 @@ def test_autoqc_infers_video_extend_for_transition_break_issues(monkeypatch) -> 
 
 
 def test_autoqc_falls_back_to_video_when_shot_already_attempted_video_edit(monkeypatch) -> None:
-    from pipeline import autoqc
+    from pipeline.autoqc_pkg._routing import _route_from_failures
+    from pipeline.autoqc_pkg._dataclasses import AutoQCFailure
+    from adapters import adapter_helpers
 
-    monkeypatch.setattr(autoqc, "get_model_info", lambda model_id: {"id": model_id})
+    monkeypatch.setattr(adapter_helpers, "get_model_info", lambda model_id: {"id": model_id})
 
-    failure = autoqc.AutoQCFailure(
+    failure = AutoQCFailure(
         failure_type="video_clip_quality_below_threshold",
         severity="hard",
         message="video clip vision review below threshold",
@@ -101,7 +107,7 @@ def test_autoqc_falls_back_to_video_when_shot_already_attempted_video_edit(monke
             "summary": "整体观感不稳定",
         },
     )
-    route = autoqc._route_from_failures(
+    route = _route_from_failures(
         failures=[failure],
         payload={
             "video_edit_config": {"enabled": True, "adapter": "wan2.7-videoedit"},

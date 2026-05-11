@@ -89,6 +89,17 @@ services:
       DB_POOL_PRE_PING: "True"
       # CORS配置
       CORS_ORIGINS: '["http://localhost:3000", "http://localhost:5173", "http://127.0.0.1:5173", "http://127.0.0.1:3000", "https://sggf.net", "https://www.sggf.net", "http://sggf.net", "http://www.sggf.net"]'
+      # 有声书共享音频素材库云存储配置
+      AUDIOBOOK_AUDIO_LIBRARY_STORAGE_DRIVER: dashscope_oss
+      AUDIOBOOK_AUDIO_LIBRARY_OSS_PREFIX: shared/audio_library
+      AUDIOBOOK_AUDIO_LIBRARY_OSS_POLICY_MODEL: cosyvoice-v3.5-plus
+      AUDIOBOOK_AUDIO_LIBRARY_OSS_BUCKET: ${AUDIOBOOK_AUDIO_LIBRARY_OSS_BUCKET:-}
+      AUDIOBOOK_AUDIO_LIBRARY_OSS_ENDPOINT: ${AUDIOBOOK_AUDIO_LIBRARY_OSS_ENDPOINT:-}
+      AUDIOBOOK_AUDIO_LIBRARY_OSS_ACCESS_KEY_ID: ${AUDIOBOOK_AUDIO_LIBRARY_OSS_ACCESS_KEY_ID:-}
+      AUDIOBOOK_AUDIO_LIBRARY_OSS_ACCESS_KEY_SECRET: ${AUDIOBOOK_AUDIO_LIBRARY_OSS_ACCESS_KEY_SECRET:-}
+      AUDIOBOOK_AUDIO_LIBRARY_OSS_SECURITY_TOKEN: ${AUDIOBOOK_AUDIO_LIBRARY_OSS_SECURITY_TOKEN:-}
+      # audio.sggf.net 的 DNS/CDN/OSS 映射验证通过后再启用，避免写入不可访问的 public_url
+      AUDIOBOOK_AUDIO_LIBRARY_OSS_PUBLIC_HOST: ${AUDIOBOOK_AUDIO_LIBRARY_OSS_PUBLIC_HOST:-}
       # Celery配置
       CELERY_BROKER_URL: redis://:NovelRedis2024!@redis:6379/0
       CELERY_RESULT_BACKEND: redis://:NovelRedis2024!@redis:6379/0

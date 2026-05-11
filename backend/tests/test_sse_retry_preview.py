@@ -304,6 +304,24 @@ def test_preview_output_structure(preview_module):
     assert len(expected_keys) == 7
 
 
+def test_preview_generator_does_not_emit_removed_preview_route(preview_module, tmp_path):
+    """旧 preview 路由已删除，内部工具不应再返回不可访问 URL"""
+    gen = preview_module.PreviewGenerator(output_dir=str(tmp_path))
+
+    def fake_tts_engine(*, output_path: str, **_kwargs):
+        Path(output_path).write_bytes(b"ID3preview")
+        return b"ID3preview"
+
+    preview = gen.generate_preview(
+        text="第一句话。第二句话。",
+        voice_id="voice-1",
+        tts_engine=fake_tts_engine,
+    )
+
+    assert preview["audio_path"].endswith(".mp3")
+    assert preview["audio_url"] == ""
+
+
 # ============== 导入测试 ==============
 
 def test_sse_module_imports():

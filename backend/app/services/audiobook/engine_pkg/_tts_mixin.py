@@ -6,6 +6,7 @@ from typing import List, Dict, Any, Optional, Callable, Set
 from ..prompt_normalizer import normalize_tts_prompt
 from ..pause_tags import strip_pause_tags
 from ..tts_language import apply_detected_language_type
+from ..tts_model_ids import DEFAULT_AUDIOBOOK_TTS_MODEL, normalize_audiobook_tts_model
 from app.services.audiobook.render_plan import (
     RENDER_PLAN_VERSION,
     RenderChunk,
@@ -14,6 +15,7 @@ from app.services.audiobook.render_plan import (
     render_chunks_to_timing_segments_payload,
     render_plan_to_payload,
 )
+from core.unified_media_runtime import create_tts_engine
 from app.services.audiobook.temp_segment_store import (
     extract_cached_segment_paths,
     load_cached_segment_audio,
@@ -27,6 +29,23 @@ except ImportError:
     tts_dispatch_client = None
 
 logger = logging.getLogger(__name__)
+
+QWEN_RENDER_CHUNK_MAX_CHARS = 360
+
+
+def _is_qwen_tts_model(model: Any) -> bool:
+    return normalize_audiobook_tts_model(model, default="").startswith("qwen3-tts")
+
+
+def _item_tts_model(item: Any) -> str:
+    voice_params = getattr(item, "voice_params", None)
+    if isinstance(voice_params, dict):
+        return str(voice_params.get("tts_model") or "").strip()
+    if isinstance(item, dict):
+        raw_params = item.get("voice_params")
+        if isinstance(raw_params, dict):
+            return str(raw_params.get("tts_model") or "").strip()
+    return ""
 
 
 def _build_segment_statuses(
@@ -130,11 +149,108 @@ def _mark_temp_asset_saved_segment_statuses(
 
 
 class TTSMixin:
+    def _get_tts_engine_for_segment_model(self, model: Optional[str]):
+        normalized_model = normalize_audiobook_tts_model(
+            model or getattr(self, "tts_model", None) or DEFAULT_AUDIOBOOK_TTS_MODEL
+        )
+        current_model = normalize_audiobook_tts_model(getattr(self.tts_engine, "model", None))
+        if normalized_model == current_model:
+            return self.tts_engine
+
+        engines_by_model = getattr(self, "_tts_engines_by_model", None)
+        if not isinstance(engines_by_model, dict):
+            engines_by_model = {}
+            setattr(self, "_tts_engines_by_model", engines_by_model)
+
+        engine = engines_by_model.get(normalized_model)
+        if engine is None:
+            engine = create_tts_engine(
+                enable_cache=bool(getattr(self.tts_engine, "enable_cache", True)),
+                max_concurrent=int(getattr(self.tts_engine, "max_concurrent", 1) or 1),
+                model=normalized_model,
+                request_delay=float(getattr(self.tts_engine, "request_delay", 0.5) or 0.5),
+                retry_config=getattr(self.tts_engine, "retry_config", None),
+            )
+            engines_by_model[normalized_model] = engine
+            logger.info("🎙️ 已为角色级 TTS 模型创建合成引擎: %s", normalized_model)
+        return engine
+
+    async def _synthesize_mixed_model_batch(
+        self,
+        batch_data: List[Dict[str, Any]],
+        *,
+        debug_save_segments: bool = False,
+        debug_output_dir: Optional[str] = None,
+        progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
+    ) -> List[bytes]:
+        audio_list: List[bytes] = []
+
+        debug_dir = None
+        if debug_save_segments:
+            from pathlib import Path
+
+            debug_dir = Path(debug_output_dir or "backend/data/tts_debug/mixed_models")
+            debug_dir.mkdir(parents=True, exist_ok=True)
+
+        for index, item in enumerate(batch_data):
+            text = str(item.get("text") or "")
+            voice_params = dict(item.get("voice_params") or {})
+            emotion = str(item.get("emotion") or "neutral")
+            segment_model = normalize_audiobook_tts_model(
+                voice_params.get("tts_model") or getattr(self, "tts_model", None)
+            )
+            engine = self._get_tts_engine_for_segment_model(segment_model)
+
+            try:
+                audio_bytes = await engine.synthesize(text, voice_params, emotion)
+            except Exception as exc:
+                logger.error(
+                    "角色级模型合成失败: index=%s model=%s speaker=%s error=%s",
+                    index,
+                    segment_model,
+                    voice_params.get("speaker"),
+                    exc,
+                )
+                audio_bytes = b""
+
+            audio_list.append(bytes(audio_bytes or b""))
+
+            if debug_dir and audio_bytes:
+                try:
+                    (debug_dir / f"segment_{index + 1:03d}_{segment_model}.mp3").write_bytes(audio_bytes)
+                except Exception as exc:
+                    logger.warning("保存混合模型调试音频失败: %s", exc)
+
+            if progress_callback:
+                progress_callback(
+                    {
+                        "event": "segment",
+                        "segment_index": index,
+                        "audio_bytes": bytes(audio_bytes or b""),
+                        "error_message": "" if audio_bytes else "tts_segment_failed",
+                        "error_type": "" if audio_bytes else "TTSSegmentError",
+                        "batch_index": index,
+                        "num_batches": len(batch_data),
+                        "start_idx": index,
+                        "end_idx": index + 1,
+                    }
+                )
+
+        return audio_list
+
     def _build_render_chunks(self, script_segments) -> List[RenderChunk]:
         items = list(script_segments or [])
         if all(isinstance(item, RenderChunk) for item in items):
             return items
-        return build_render_plan(items)
+        default_model = getattr(self, "tts_model", None)
+        segment_models = [_item_tts_model(item) for item in items]
+        has_qwen_model = _is_qwen_tts_model(default_model) or any(
+            _is_qwen_tts_model(model)
+            for model in segment_models
+            if model
+        )
+        max_chunk_chars = QWEN_RENDER_CHUNK_MAX_CHARS if has_qwen_model else None
+        return build_render_plan(items, max_chunk_chars=max_chunk_chars)
 
     def _build_tts_batch_item(self, seg) -> Dict[str, Any]:
         original_text = str(getattr(seg, "text", "") or "")
@@ -208,9 +324,31 @@ class TTSMixin:
         # 准备批量数据
         render_chunks = self._build_render_chunks(script_segments)
         batch_data = [self._build_tts_batch_item(chunk) for chunk in render_chunks]
+        batch_models = {
+            normalize_audiobook_tts_model(
+                (item.get("voice_params") or {}).get("tts_model")
+                or getattr(self, "tts_model", None)
+            )
+            for item in batch_data
+        }
+
+        if len(batch_models) > 1:
+            logger.info("🎙️ 检测到角色级混合 TTS 模型，按片段模型合成: %s", sorted(batch_models))
+            return await self._synthesize_mixed_model_batch(
+                batch_data,
+                debug_save_segments=debug_save_segments,
+                debug_output_dir=debug_output_dir,
+                progress_callback=progress_callback,
+            )
+
+        if batch_models:
+            only_model = next(iter(batch_models))
+            engine = self._get_tts_engine_for_segment_model(only_model)
+        else:
+            engine = self.tts_engine
         
         # 批量合成（使用分批策略）
-        audio_list = await self.tts_engine.synthesize_batch(
+        audio_list = await engine.synthesize_batch(
             batch_data,
             batch_size=10,  # 每批10个片段
             batch_interval=0,  # 批次间0秒（取消节流）

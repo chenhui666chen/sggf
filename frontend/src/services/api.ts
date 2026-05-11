@@ -1,6 +1,7 @@
 import axios, { AxiosInstance, AxiosError } from 'axios'
 import type {
   AudiobookTtsModel,
+  DeletedChapterAudio,
   UserAudiobookProjectOverview,
 } from '@/types/audiobook'
 import type { Project, ProjectCreatePayload, ProjectUpdatePayload } from '@/types/project'
@@ -59,6 +60,7 @@ interface DreamweaverRunOptions {
   enable_vision_review?: boolean
   enable_safety_audit?: boolean
   safety_fail_policy?: 'warn' | 'block'
+  schema_version?: string
 }
 
 interface DreamweaverProjectLockedGenerationConfig {
@@ -126,6 +128,37 @@ interface DreamweaverLibraryAutoRegenerateRolesResponse {
   synced?: { created?: number }
 }
 
+interface DreamweaverLibraryAssetProviderRefUpdateRequest {
+  provider?: 'kling'
+  subject_id?: string | null
+  source_asset_uri?: string | null
+}
+
+interface DreamweaverLibraryAssetProviderRefUpdateResponse {
+  project_id: number
+  asset_id: number
+  role: string
+  provider: string
+  subject_id?: string | null
+  provider_refs: Record<string, unknown>
+}
+
+interface DreamweaverLibraryAssetProviderRefSyncRequest {
+  provider?: 'kling'
+  include_related_views?: boolean
+  timeout_s?: number
+  poll_interval_s?: number
+}
+
+interface DreamweaverLibraryAssetProviderRefSyncResponse {
+  project_id: number
+  asset_id: number
+  role: string
+  provider: string
+  subject_id?: string | null
+  provider_refs: Record<string, unknown>
+}
+
 export type AudiobookGenerationMode = 'full' | 'script_only'
 export type AudiobookPreviewType = 'voice' | 'sfx' | 'bgm' | 'mix'
 export type AudiobookAudioFxDensity = 'low' | 'medium' | 'high' | 'off'
@@ -147,6 +180,7 @@ export interface AudiobookProjectAudioCharacterConfigPayload {
   voice_type?: string | null
   personality?: string | null
   emotion_tendency?: string | null
+  source?: string | null
 }
 
 export interface AudiobookProjectAudioConfigPayload {
@@ -160,6 +194,10 @@ export interface AudiobookVoiceConfigPayloadItem {
   volume: number
   speed?: number
   pitch?: number
+  tts_model?: AudiobookTtsModel | null
+  voice_type?: string | null
+  personality?: string | null
+  emotion_tendency?: string | null
 }
 
 export interface CreateAudiobookProjectPayload {
@@ -272,6 +310,7 @@ export interface PreviewTtsPayload {
   speed?: number
   pitch?: number
   model?: string
+  voice_type?: string | null
 }
 
 export interface AudiobookTtsModelCatalogItem {
@@ -804,7 +843,7 @@ interface DreamweaverShotVideoPromptUpdateRequest {
 
 interface DreamweaverRestartRequest {
   start_state: string
-  reset_policy?: string
+  reset_policy?: 'downstream' | 'none'
   qc_allow_fail?: boolean
   smart_tuning?: boolean
   shot_ids?: string[]
@@ -819,12 +858,23 @@ interface DreamweaverVideoJobConfirmAsyncResponse {
   status: 'queued' | 'blocked' | 'noop'
   task_id?: string | null
   message?: string | null
-  video_clip_jobs?: any[] | null
+  video_clip_jobs?: Record<string, unknown>[] | null
 }
 
 interface DreamweaverVideoJobsRebuildResponse {
   run_id: string
-  video_clip_jobs: any[]
+  video_clip_jobs: Record<string, unknown>[]
+}
+
+interface DreamweaverRunDeleteResponse {
+  run_id: string
+  deleted_generation_history: number
+  deleted_assets: number
+  deleted_shots: number
+  deleted_episodes: number
+  deleted_project: boolean
+  deleted_run_dir: boolean
+  failed_paths: string[]
 }
 
 interface OAuthAuthUrlRequest {
@@ -1565,6 +1615,25 @@ class ApiClient {
     return this.client.post('/api/v1/audiobook/tts/voices/cosyvoice-v3.5-plus/clones', payload)
   }
 
+  listCosyVoiceClones(prefix?: string) {
+    return this.client.get<{
+      meta: Record<string, unknown>
+      voices: Array<{
+        voice_id: string
+        status: string
+        gmt_create: string
+        gmt_modified: string
+        custom_type: string
+        voice_prompt: string
+        preview_text: string
+        preview_audio: string
+        display_name: string
+      }>
+    }>('/api/v1/audiobook/tts/voices/cosyvoice-v3.5-plus/clones', {
+      params: prefix ? { prefix } : undefined,
+    })
+  }
+
   createCosyVoiceV3PlusDesign(payload: {
     name: string
     voice_prompt: string
@@ -1758,6 +1827,14 @@ class ApiClient {
     return this.client.get('/api/v1/audiobook/projects/deleted')
   }
 
+  listDeletedChapterAudios(params?: { audiobook_project_id?: number; limit?: number }) {
+    return this.client.get<{
+      success: boolean
+      count: number
+      chapter_audios: DeletedChapterAudio[]
+    }>('/api/v1/audiobook/chapter-audios/deleted', { params })
+  }
+
   createAudiobookProject(payload: CreateAudiobookProjectPayload) {
     return this.client.post<AudiobookQueuedTaskResponse>('/api/v1/audiobook/projects', payload)
   }
@@ -1908,27 +1985,6 @@ class ApiClient {
       personality,
       gender,
       age_range: ageRange,
-    })
-  }
-
-  // 生成预览音频 API
-  generatePreview(text: string, voiceId: string, ttsModel: string, emotion?: string, speed?: number) {
-    return this.client.post('/api/v1/audiobook/previews/generate', {
-      text,
-      voice_id: voiceId,
-      tts_model: ttsModel,
-      emotion,
-      speed,
-    })
-  }
-
-  // 配置重试策略 API
-  configureRetry(maxRetries: number, initialDelay: number, backoffFactor: number, enableDegraded: boolean) {
-    return this.client.post('/api/v1/audiobook/retries/config', {
-      max_retries: maxRetries,
-      initial_delay: initialDelay,
-      backoff_factor: backoffFactor,
-      enable_degraded: enableDegraded,
     })
   }
 
@@ -2325,6 +2381,18 @@ class ApiClient {
     })
   }
 
+  updateDreamweaverLibraryAssetProviderRef(assetId: number, payload: DreamweaverLibraryAssetProviderRefUpdateRequest) {
+    return this.client.post<DreamweaverLibraryAssetProviderRefUpdateResponse>(`/api/v1/dreamweaver/library/assets/${assetId}/provider-ref`, payload, {
+      timeout: 15000,
+    })
+  }
+
+  syncDreamweaverLibraryAssetProviderRef(assetId: number, payload: DreamweaverLibraryAssetProviderRefSyncRequest = {}) {
+    return this.client.post<DreamweaverLibraryAssetProviderRefSyncResponse>(`/api/v1/dreamweaver/library/assets/${assetId}/provider-ref/sync`, payload, {
+      timeout: 120000,
+    })
+  }
+
   uploadDreamweaverRunShotAssetFile(runId: string, shotId: string, role: string, file: File) {
     const form = new FormData()
     form.append('file', file)
@@ -2447,7 +2515,7 @@ class ApiClient {
   }
 
   deleteDreamweaverRun(runId: string, deleteFiles: boolean = true) {
-    return this.client.delete(`/api/v1/dreamweaver/runs/${encodeURIComponent(runId)}`, {
+    return this.client.delete<DreamweaverRunDeleteResponse>(`/api/v1/dreamweaver/runs/${encodeURIComponent(runId)}`, {
       params: { delete_files: deleteFiles },
       timeout: 15000,
     })
@@ -2474,6 +2542,357 @@ class ApiClient {
 
   repairExpandStoryScore(payload: StoryExpansionRepairRequestPayload) {
     return this.client.post<StoryExpansionRepairResponse>('/api/v1/workflow/expand-story/repair-score', payload)
+  }
+
+  getAudioLibraryStats() {
+    return this.client.get<{
+      sfx_count: number
+      sfx_categories: string[]
+      sfx_scenes?: string[]
+      music_count: number
+      music_styles: string[]
+      music_moods: string[]
+    }>('/api/v1/audiobook/audio-library/stats')
+  }
+
+  browseSoundEffects(params?: { category?: string; tag?: string; scene?: string; search?: string }) {
+    const query = new URLSearchParams()
+    if (params?.category) query.set('category', params.category)
+    if (params?.tag) query.set('tag', params.tag)
+    if (params?.scene) query.set('scene', params.scene)
+    if (params?.search) query.set('search', params.search)
+    const qs = query.toString()
+    return this.client.get<Array<{
+      id: string
+      name: string
+      category: string
+      style?: string
+      file_path: string
+      description: string
+      tags: string[]
+      scenes?: string[]
+      source: string
+      source_id?: string
+      source_url?: string
+      author?: string
+      author_url?: string
+      license?: string
+      license_url?: string
+      license_version?: string
+      license_commercial?: boolean
+      attribution_required?: boolean
+      attribution_text?: string
+      quality_score?: number
+      quality_grade?: string
+      quality_status?: string
+      retrieved_at?: string
+      license_checked_at?: string
+    }>>(`/api/v1/audiobook/audio-library/sound-effects${qs ? '?' + qs : ''}`)
+  }
+
+  browseMusic(params?: { style?: string; mood?: string; search?: string }) {
+    const query = new URLSearchParams()
+    if (params?.style) query.set('style', params.style)
+    if (params?.mood) query.set('mood', params.mood)
+    if (params?.search) query.set('search', params.search)
+    const qs = query.toString()
+    return this.client.get<Array<{
+      id: string
+      style: string
+      duration: number
+      tempo: string
+      mood: string
+      bucket: string
+      file_path: string
+      source: string
+      variant: number | null
+      source_id?: string
+      source_url?: string
+      author?: string
+      author_url?: string
+      license?: string
+      license_url?: string
+      license_version?: string
+      license_commercial?: boolean
+      attribution_required?: boolean
+      attribution_text?: string
+      quality_score?: number
+      quality_grade?: string
+      quality_status?: string
+      retrieved_at?: string
+      license_checked_at?: string
+    }>>(`/api/v1/audiobook/audio-library/music${qs ? '?' + qs : ''}`)
+  }
+
+  getAudioLibraryPreviewUrl(fileType: 'sfx' | 'music', fileId: string) {
+    return `/api/v1/audiobook/audio-library/preview/${fileType}/${fileId}`
+  }
+
+  listSfxCandidates(params?: { status?: string }) {
+    const query = new URLSearchParams()
+    if (params?.status) query.set('status', params.status)
+    const qs = query.toString()
+    return this.client.get<{
+      total: number
+      invalid_rows: number
+      items: Array<{
+        source: string
+        source_id: string
+        name: string
+        description: string
+        source_url: string
+        file_url: string
+        preview_url: string
+        license: string
+        license_url: string
+        license_version: string
+        license_commercial: boolean
+        attribution_required: boolean
+        attribution_text: string
+        author: string
+        author_url: string
+        duration: number
+        mime_type: string
+        tags: string[]
+        query: string
+        discovered_at: string
+        license_checked_at: string
+        requires_manual_review: boolean
+        status: string
+        review_notes: string
+      }>
+    }>(`/api/v1/audiobook/audio-library/sound-effects/candidates${qs ? '?' + qs : ''}`)
+  }
+
+  buildSfxCandidateManifestDraft(payload: {
+    source_dir?: string
+    output_path?: string
+    items: Array<{
+      source: string
+      source_id: string
+      review_status: 'approved' | 'rejected' | 'needs_info'
+      license_verified?: boolean
+      local_file?: string
+      category?: string
+      style?: string
+      notes?: string
+    }>
+  }) {
+    return this.client.post<{
+      success: boolean
+      manifest_path: string
+      source_dir: string
+      stats: { approved: number; rejected: number; skipped: number }
+      items: Array<Record<string, unknown>>
+    }>('/api/v1/audiobook/audio-library/sound-effects/candidates/manifest-draft', payload)
+  }
+
+  importSfxManifest(payload: {
+    manifest_path?: string
+    source_dir?: string
+    dry_run?: boolean
+    confirm?: boolean
+    overwrite?: boolean
+  }) {
+    return this.client.post<{
+      success: boolean
+      dry_run: boolean
+      manifest_path: string
+      source_dir: string
+      stats: {
+        candidates: number
+        imported: number
+        rejected_license: number
+        rejected_file: number
+        rejected_quality: number
+        skipped_existing: number
+      }
+      records: Array<Record<string, unknown>>
+    }>('/api/v1/audiobook/audio-library/sound-effects/import-manifest', payload)
+  }
+
+  submitUserRating(payload: {
+    model_id: string
+    task_type: string
+    rating: number
+    comment?: string
+    prompt_text?: string
+    output_urls?: string[]
+    project_id?: number
+  }) {
+    return this.client.post<{ success: boolean; feedback_id?: number }>(
+      '/api/v1/feedback/user-rating',
+      payload,
+    )
+  }
+
+  getModelFeedbackStats(modelId: string, params?: { task_type?: string; days?: number }) {
+    const query = new URLSearchParams()
+    if (params?.task_type) query.set('task_type', params.task_type)
+    if (params?.days) query.set('days', String(params.days))
+    const qs = query.toString()
+    return this.client.get<{
+      success: boolean
+      stats: Record<string, unknown> | null
+    }>(`/api/v1/feedback/model-stats/${encodeURIComponent(modelId)}${qs ? '?' + qs : ''}`)
+  }
+
+  cleanupAudioLibrary(payload: {
+    library_type: string
+    remove_orphaned?: boolean
+    remove_missing_files?: boolean
+    remove_low_quality?: boolean
+    min_quality_score?: number
+    dry_run?: boolean
+    confirm?: boolean
+  }) {
+    return this.client.post<{
+      success: boolean
+      dry_run: boolean
+      stats: {
+        removed_orphaned: number
+        removed_missing: number
+        removed_low_quality: number
+        freed_bytes: number
+      }
+      details: {
+        missing_entries: Array<{ library_type: string; id: string; name: string; file_path: string; reason: string; size: number }>
+        low_quality_entries: Array<{ library_type: string; id: string; name: string; file_path: string; reason: string; size: number }>
+        orphaned_files: Array<{ library_type: string; id: string; name: string; file_path: string; reason: string; size: number }>
+      }
+    }>('/api/v1/audiobook/audio-library/cleanup', payload)
+  }
+
+  deleteAudioLibraryAsset(
+    libraryType: 'sfx' | 'music',
+    assetId: string,
+    payload: {
+      dry_run?: boolean
+      confirm?: boolean
+      delete_cloud_object?: boolean
+      delete_local_file?: boolean
+    },
+  ) {
+    return this.client.post<{
+      success: boolean
+      dry_run: boolean
+      asset: { library_type: string; id: string; name: string; file_path: string; reason: string; size: number }
+      stats: { index_removed: number; local_deleted: number; cloud_deleted: number }
+      details: Record<string, unknown>
+    }>(
+      `/api/v1/audiobook/audio-library/assets/${libraryType}/${encodeURIComponent(assetId)}/delete`,
+      payload,
+    )
+  }
+
+  getScriptReviewReport(audiobookProjectId: number, chapterId: number) {
+    return this.client.get<{
+      success: boolean
+      chapter_id: number
+      audiobook_project_id: number
+      script_status: string
+      quality_report: {
+        script_quality: Record<string, unknown>
+        audio_balance: Record<string, unknown>
+        pacing: Record<string, unknown>
+        issues: Array<{
+          location: string
+          severity: string
+          category: string
+          description: string
+          suggestion: string
+        }>
+        overall_grade: string
+        overall_score: number
+        revision_suggestions: string[]
+      }
+    }>(`/api/v1/script-review/report/${audiobookProjectId}/${chapterId}`)
+  }
+
+  submitScriptReviewFeedback(payload: {
+    audiobook_project_id: number
+    chapter_id: number
+    feedback: string
+  }) {
+    const params = new URLSearchParams()
+    params.append('audiobook_project_id', String(payload.audiobook_project_id))
+    params.append('chapter_id', String(payload.chapter_id))
+    params.append('feedback', payload.feedback)
+    return this.client.post<{
+      success: boolean
+      message: string
+    }>('/api/v1/script-review/feedback', params)
+  }
+
+  checkConsistency(payload: {
+    world_settings: Array<{ type?: string; name?: string; content?: string }>
+    new_content: string
+    project_id?: number
+  }) {
+    return this.client.post<{
+      status: string
+      is_consistent: boolean
+      consistency_check: {
+        raw_result: string
+        settings_checked: number
+        consistency_score: number
+        analysis_summary: string
+        checked_at: string
+      }
+    }>('/api/v1/ai/check-consistency', payload)
+  }
+
+  smartDispatch(payload: {
+    user_input: string
+    context?: Record<string, unknown>
+    strategy?: string
+    use_fallback?: boolean
+    dry_run?: boolean
+  }) {
+    return this.client.post<{
+      success: boolean
+      intent?: Record<string, unknown>
+      routing?: Record<string, unknown>
+      execution?: Record<string, unknown>
+      trace?: Record<string, unknown>
+      error?: string
+    }>('/api/v1/smart-dispatch/dispatch', payload)
+  }
+
+  recommendModels(payload: {
+    user_input: string
+    context?: Record<string, unknown>
+    strategy?: string
+  }) {
+    return this.client.post<{
+      success: boolean
+      intent: Record<string, unknown>
+      candidates: Array<{
+        model_id: string
+        name: string
+        provider: string
+        score: number
+        modality: string
+        quality_score: number
+        avg_latency: number
+        cost: number
+        recommended_scenarios: string[]
+        tags: string[]
+      }>
+      recommended?: {
+        model_id: string
+        name: string
+        provider: string
+        score: number
+        modality: string
+        quality_score: number
+        avg_latency: number
+        cost: number
+        recommended_scenarios: string[]
+        tags: string[]
+      }
+      reasons: string[]
+    }>('/api/v1/smart-dispatch/recommend-models', payload)
   }
 }
 

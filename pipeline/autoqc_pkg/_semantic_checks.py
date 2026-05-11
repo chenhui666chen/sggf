@@ -11,6 +11,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from adapters.adapter_helpers import analyze_video, chat_messages, get_model_info
 from agents.vlm_utils import clamp_text_list
+from pipeline.autoqc_pkg._utils import _semantic_frames_list, _stable_hash01
 from pipeline.media_presets import (
     DREAMWEAVER_I2V_ENGINE,
     is_dreamweaver_auto_engine,

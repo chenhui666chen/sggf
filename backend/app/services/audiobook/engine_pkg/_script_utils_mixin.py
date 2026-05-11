@@ -258,6 +258,7 @@ class ScriptUtilsMixin:
             voice_params_dict = self._apply_narration_style_to_voice_params(segment, voice_params_dict)
             if "rate" not in voice_params_dict and "speed" in voice_params_dict:
                 voice_params_dict["rate"] = voice_params_dict["speed"]
+            voice_params_dict["tts_model"] = getattr(voice_profile, "tts_model", getattr(self, "tts_model", ""))
             
             # 🔍 调试：输出最终参数
             logger.info(

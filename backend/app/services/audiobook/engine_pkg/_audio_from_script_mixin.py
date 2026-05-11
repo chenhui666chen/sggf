@@ -23,6 +23,7 @@ class AudioFromScriptMixin:
         novel_genre: str = "科幻",
         novel_theme: str = "未知主题",
         enable_quality_review: bool = True,
+        quality_threshold: float = 70.0,
         audiobook_project_id: Optional[int] = None,
         output_format: str = "mp3",
         resume_checkpoint: Optional[Dict[str, Any]] = None,
@@ -48,6 +49,8 @@ class AudioFromScriptMixin:
 
         try:
             final_audio_review = None
+            quality_report = None
+            auto_revision: Dict[str, Any] = {"applied": False}
 
             # ============ 阶段1：制定改编策略（用于后续设计阶段的风格参考） ============
             self.task_tracker.start_stage(task_id, StageType.STRATEGY)
@@ -106,7 +109,97 @@ class AudioFromScriptMixin:
                 audiobook_project_id=audiobook_project_id,
             )
 
-            # ============ 阶段6：音频提示词审阅 ============
+            # ============ 阶段6：剧本质量评审闸门（TTS 前） ============
+            if enable_quality_review:
+                self.task_tracker.start_stage(task_id, StageType.QUALITY_REVIEW)
+                quality_report, auto_revision = self._run_quality_review_with_auto_revision(
+                    script_segments,
+                    novel_genre=novel_genre,
+                    quality_threshold=quality_threshold,
+                )
+                issues_preview = [
+                    {
+                        "location": issue.location,
+                        "severity": issue.severity,
+                        "category": issue.category,
+                        "description": issue.description,
+                        "suggestion": issue.suggestion,
+                    }
+                    for issue in quality_report.issues[:20]
+                ]
+                quality_stage_metrics = {
+                    "overall_score": quality_report.overall_score,
+                    "overall_grade": quality_report.overall_grade,
+                    "issues_count": len(quality_report.issues),
+                    "script_quality": quality_report.script_quality,
+                    "audio_balance": quality_report.audio_balance,
+                    "pacing": quality_report.pacing,
+                    "revision_suggestions": quality_report.revision_suggestions,
+                    "issues": issues_preview,
+                    "auto_revision": auto_revision if auto_revision.get("applied") else None,
+                    "quality_gate": auto_revision.get("quality_gate"),
+                }
+                self.task_tracker.complete_stage(
+                    task_id,
+                    StageType.QUALITY_REVIEW,
+                    metrics=quality_stage_metrics,
+                )
+
+                if auto_revision.get("applied"):
+                    try:
+                        _, sound_effects_count, music_cues_count = await self._parallel_design(
+                            task_id,
+                            script_segments,
+                            "".join([seg.text for seg in script_segments]),
+                            chapter_id=chapter_id,
+                            audiobook_project_id=audiobook_project_id,
+                            skip_stage_tracking=True,
+                            include_voice_design=False,
+                        )
+                    except Exception as exc:
+                        logger.warning("Auto revision refresh failed: %s", exc)
+
+                quality_gate = auto_revision.get("quality_gate") or {}
+                if not quality_gate.get("passed", True):
+                    gate_reason = (
+                        f"script_quality_gate_failed:"
+                        f"{quality_report.overall_score:.1f}<"
+                        f"{float(quality_gate.get('threshold') or quality_threshold):.1f}"
+                    )
+                    self.task_tracker.fail_stage(task_id, StageType.QUALITY_REVIEW, gate_reason)
+                    elapsed_time = time.time() - start_time
+                    return {
+                        "success": False,
+                        "task_id": task_id,
+                        "error": "script_quality_gate_failed",
+                        "message": "剧本质量评审未通过，已在 TTS 合成前停止",
+                        "script_segments_payload": self._build_review_segments(script_segments),
+                        "quality_report_detail": self._quality_report_to_payload(
+                            quality_report,
+                            auto_revision=auto_revision,
+                        ),
+                        "stats": {
+                            "generation_time": f"{elapsed_time:.1f}秒",
+                            "mode": "script_only_pipeline",
+                            "script_segments": len(script_segments),
+                            "quality_report": {
+                                "overall_grade": quality_report.overall_grade,
+                                "overall_score": quality_report.overall_score,
+                                "issues_count": len(quality_report.issues),
+                                "revision_suggestions": quality_report.revision_suggestions,
+                                "auto_revision": auto_revision if auto_revision.get("applied") else None,
+                                "quality_gate": quality_gate,
+                            },
+                        },
+                    }
+            else:
+                self.task_tracker.complete_stage(
+                    task_id,
+                    StageType.QUALITY_REVIEW,
+                    metrics={"skipped": True},
+                )
+
+            # ============ 阶段7：音频提示词审阅 ============
             self._assign_voices(script_segments)
             self.task_tracker.start_stage(task_id, StageType.AUDIO_PROMPT_REVIEW)
             prompt_metrics = {
@@ -125,9 +218,9 @@ class AudioFromScriptMixin:
             }
             self.task_tracker.complete_stage(task_id, StageType.AUDIO_PROMPT_REVIEW, metrics=prompt_metrics)
 
-            # ============ 阶段7：TTS合成 ============
+            # ============ 阶段8：TTS合成 ============
             self.task_tracker.start_stage(task_id, StageType.TTS_SYNTHESIS)
-            logger.info("🎙️ [7/9] TTS合成中(基于已审稿剧本)...")
+            logger.info("🎙️ [8/10] TTS合成中(基于已审稿剧本)...")
             
             # 🔧 调试：从环境变量读取调试开关
             import os
@@ -336,7 +429,7 @@ class AudioFromScriptMixin:
                 final_audio_review = self._final_audio_review(
                     audio_info=audio_info,
                     file_size=len(final_audio),
-                    script_quality_report=None,
+                    script_quality_report=quality_report,
                     audio_data=final_audio,
                 )
 
@@ -395,9 +488,27 @@ class AudioFromScriptMixin:
                     "music_cues": music_cues_count if "music_cues_count" in locals() else 0,
                     "tts_stats": tts_stats,
                     "audio_info": audio_info,
+                    "quality_report": {
+                        "overall_grade": quality_report.overall_grade,
+                        "overall_score": quality_report.overall_score,
+                        "issues_count": len(quality_report.issues),
+                        "revision_suggestions": quality_report.revision_suggestions,
+                        "auto_revision": auto_revision if auto_revision.get("applied") else None,
+                        "quality_gate": auto_revision.get("quality_gate"),
+                    } if quality_report else None,
+                    "quality_report_detail": (
+                        self._quality_report_to_payload(
+                            quality_report,
+                            auto_revision=auto_revision,
+                        )
+                        if hasattr(self, "_quality_report_to_payload")
+                        else None
+                    ),
                     "final_audio_review": final_audio_review,
                 },
             }
+            if self._last_effect_timeline and self._last_effect_timeline.get("timeline"):
+                result["effect_timeline"] = self._last_effect_timeline
 
             logger.info(f"{'='*70}")
             if len(final_audio) > 0:

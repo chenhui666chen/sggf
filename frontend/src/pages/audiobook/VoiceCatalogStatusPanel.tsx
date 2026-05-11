@@ -1,5 +1,3 @@
-import type { ChangeEvent } from 'react'
-
 import {
   Alert,
   Box,
@@ -8,9 +6,9 @@ import {
 } from '@mui/material'
 
 import CosyVoiceVoiceWorkbench from './CosyVoiceVoiceWorkbench'
+import type { CosyVoiceWorkbench } from './CosyVoiceVoiceWorkbench'
 import type {
   VoiceCatalogMeta,
-  VoicePreset,
 } from './types'
 
 type VoiceCatalogNoticeSeverity = 'success' | 'warning' | 'info'
@@ -23,36 +21,8 @@ interface VoiceCatalogStatusPanelProps {
   showCustomVoiceWorkbench: boolean
   voiceError: string | null
   voiceLoading: boolean
-  cloneName: string
-  cloneUrl: string
-  cloneLoading: boolean
-  cloneUploading: boolean
-  cloneRecording: boolean
-  cloneDeletingId: string | null
-  cloneError: string | null
-  cloneSuccess: string | null
-  cloneRecordDialogOpen: boolean
-  designName: string
-  designPrompt: string
-  designPreviewText: string
-  designLoading: boolean
-  designError: string | null
-  designSuccess: string | null
-  customVoicePresets: VoicePreset[]
+  cosyVoiceWorkbench: CosyVoiceWorkbench
   onFetchVoiceCatalog: () => void
-  onCloneNameChange: (value: string) => void
-  onCloneUrlChange: (value: string) => void
-  onCreateCloneVoice: () => void
-  onOpenCloneRecordDialog: () => void
-  onUploadCloneAudio: (event: ChangeEvent<HTMLInputElement>) => void
-  onDesignNameChange: (value: string) => void
-  onDesignPromptChange: (value: string) => void
-  onDesignPreviewTextChange: (value: string) => void
-  onCreateDesignVoice: () => void
-  onDeleteCustomVoice: (voiceId: string, label?: string) => void
-  onCloseCloneRecordDialog: () => void
-  onStartCloneRecording: () => void
-  onStopCloneRecording: () => void
 }
 
 const VoiceCatalogStatusPanel = ({
@@ -63,36 +33,8 @@ const VoiceCatalogStatusPanel = ({
   showCustomVoiceWorkbench,
   voiceError,
   voiceLoading,
-  cloneName,
-  cloneUrl,
-  cloneLoading,
-  cloneUploading,
-  cloneRecording,
-  cloneDeletingId,
-  cloneError,
-  cloneSuccess,
-  cloneRecordDialogOpen,
-  designName,
-  designPrompt,
-  designPreviewText,
-  designLoading,
-  designError,
-  designSuccess,
-  customVoicePresets,
+  cosyVoiceWorkbench,
   onFetchVoiceCatalog,
-  onCloneNameChange,
-  onCloneUrlChange,
-  onCreateCloneVoice,
-  onOpenCloneRecordDialog,
-  onUploadCloneAudio,
-  onDesignNameChange,
-  onDesignPromptChange,
-  onDesignPreviewTextChange,
-  onCreateDesignVoice,
-  onDeleteCustomVoice,
-  onCloseCloneRecordDialog,
-  onStartCloneRecording,
-  onStopCloneRecording,
 }: VoiceCatalogStatusPanelProps) => (
   <Box sx={{ flex: 1, minWidth: 260 }}>
     {voiceCatalogMeta && (
@@ -104,37 +46,7 @@ const VoiceCatalogStatusPanel = ({
       {voiceCatalogNotice}
     </Alert>
     {showCustomVoiceWorkbench && (
-      <CosyVoiceVoiceWorkbench
-        cloneName={cloneName}
-        cloneUrl={cloneUrl}
-        cloneLoading={cloneLoading}
-        cloneUploading={cloneUploading}
-        cloneRecording={cloneRecording}
-        cloneDeletingId={cloneDeletingId}
-        cloneError={cloneError}
-        cloneSuccess={cloneSuccess}
-        cloneRecordDialogOpen={cloneRecordDialogOpen}
-        designName={designName}
-        designPrompt={designPrompt}
-        designPreviewText={designPreviewText}
-        designLoading={designLoading}
-        designError={designError}
-        designSuccess={designSuccess}
-        customVoicePresets={customVoicePresets}
-        onCloneNameChange={onCloneNameChange}
-        onCloneUrlChange={onCloneUrlChange}
-        onCreateCloneVoice={onCreateCloneVoice}
-        onOpenCloneRecordDialog={onOpenCloneRecordDialog}
-        onUploadCloneAudio={onUploadCloneAudio}
-        onDesignNameChange={onDesignNameChange}
-        onDesignPromptChange={onDesignPromptChange}
-        onDesignPreviewTextChange={onDesignPreviewTextChange}
-        onCreateDesignVoice={onCreateDesignVoice}
-        onDeleteCustomVoice={onDeleteCustomVoice}
-        onCloseCloneRecordDialog={onCloseCloneRecordDialog}
-        onStartCloneRecording={onStartCloneRecording}
-        onStopCloneRecording={onStopCloneRecording}
-      />
+      <CosyVoiceVoiceWorkbench {...cosyVoiceWorkbench} />
     )}
     {voiceError && (
       <Alert

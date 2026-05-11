@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import json
+import logging
 from typing import Any, Dict, List, Optional
 
 from .tts_model_ids import DEFAULT_AUDIOBOOK_TTS_MODEL, normalize_audiobook_tts_model
 
+logger = logging.getLogger(__name__)
 
 _LEGACY_MODEL_KEYS = {
     "cosyvoice-v3.5-plus": ("cosyvoice-v3-plus",),
@@ -18,9 +20,13 @@ def parse_project_audio_config(raw: str) -> Dict[str, Any]:
         return {}
     try:
         data = json.loads(raw)
-        return data if isinstance(data, dict) else {}
-    except Exception:
+    except (json.JSONDecodeError, TypeError) as exc:
+        logger.warning("项目音频配置 JSON 损坏，已忽略: error=%s", exc)
         return {}
+    if not isinstance(data, dict):
+        logger.warning("项目音频配置 JSON 不是对象，已忽略: payload_type=%s", type(data).__name__)
+        return {}
+    return data
 
 
 def get_audio_fx(config: Dict[str, Any]) -> Optional[dict]:

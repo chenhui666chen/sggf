@@ -14,10 +14,10 @@ for path in (PROJECT_ROOT, BACKEND_ROOT):
 
 
 def load_dreamweaver_module():
-    dreamweaver_path = BACKEND_ROOT / "app" / "api" / "v1" / "dreamweaver.py"
+    dreamweaver_path = BACKEND_ROOT / "app" / "api" / "v1" / "dreamweaver_api" / "_imports.py"
     spec = spec_from_file_location("test_dreamweaver_vision_review_module", dreamweaver_path)
     if spec is None or spec.loader is None:
-        raise RuntimeError("无法加载 DreamWeaver 路由模块")
+        raise RuntimeError("无法加载 DreamWeaver imports 模块")
 
     module = module_from_spec(spec)
     sys.modules.setdefault("test_dreamweaver_vision_review_module", module)
@@ -103,6 +103,8 @@ def test_runtime_config_enable_vision_review_seeds_child_qc_defaults() -> None:
 
 def test_autoqc_master_switch_false_skips_video_clip_review(monkeypatch, tmp_path: Path) -> None:
     from pipeline import autoqc
+    from pipeline.autoqc_pkg import _video_edit
+    from adapters import adapter_helpers
 
     calls: list[dict] = []
 
@@ -110,8 +112,8 @@ def test_autoqc_master_switch_false_skips_video_clip_review(monkeypatch, tmp_pat
         calls.append(kwargs)
         return SimpleNamespace(success=True, data={"overall_score": 9.0}, model_id=kwargs.get("model_id"))
 
-    monkeypatch.setattr(autoqc, "analyze_video", _fake_analyze_video)
-    monkeypatch.setattr(autoqc, "_submit_qc_feedback", lambda report, payload: None)
+    monkeypatch.setattr(adapter_helpers, "analyze_video", _fake_analyze_video)
+    monkeypatch.setattr(_video_edit, "_submit_qc_feedback", lambda report, payload: None)
 
     payload = _build_autoqc_payload(
         tmp_path,
@@ -131,10 +133,12 @@ def test_autoqc_master_switch_false_skips_video_clip_review(monkeypatch, tmp_pat
 
 def test_autoqc_video_clip_review_failure_routes_back_to_video(monkeypatch, tmp_path: Path) -> None:
     from pipeline import autoqc
+    from pipeline.autoqc_pkg import _video_edit
+    from adapters import adapter_helpers
 
-    monkeypatch.setattr(autoqc, "get_model_info", lambda model_id: {"id": model_id})
+    monkeypatch.setattr(adapter_helpers, "get_model_info", lambda model_id: {"id": model_id})
     monkeypatch.setattr(
-        autoqc,
+        adapter_helpers,
         "analyze_video",
         lambda **kwargs: SimpleNamespace(
             success=True,
@@ -144,7 +148,7 @@ def test_autoqc_video_clip_review_failure_routes_back_to_video(monkeypatch, tmp_
             error_code=None,
         ),
     )
-    monkeypatch.setattr(autoqc, "_submit_qc_feedback", lambda report, payload: None)
+    monkeypatch.setattr(_video_edit, "_submit_qc_feedback", lambda report, payload: None)
 
     payload = _build_autoqc_payload(
         tmp_path,
@@ -172,7 +176,8 @@ def test_autoqc_video_clip_review_failure_routes_back_to_video(monkeypatch, tmp_
 
 def test_submit_qc_feedback_infers_model_from_video_config(monkeypatch) -> None:
     from app.tasks import feedback_tasks
-    from pipeline import autoqc
+    from pipeline.autoqc_pkg._video_edit import _submit_qc_feedback
+    from pipeline.autoqc_pkg._dataclasses import AutoQCReport
 
     calls: list[dict] = []
 
@@ -182,7 +187,7 @@ def test_submit_qc_feedback_infers_model_from_video_config(monkeypatch) -> None:
 
     monkeypatch.setattr(feedback_tasks, "collect_qc_feedback_task", _FakeTask())
 
-    report = autoqc.AutoQCReport(
+    report = AutoQCReport(
         pass_=True,
         overall_score=0.92,
         shots={},
@@ -191,7 +196,7 @@ def test_submit_qc_feedback_infers_model_from_video_config(monkeypatch) -> None:
         config={},
     )
 
-    autoqc._submit_qc_feedback(
+    _submit_qc_feedback(
         report,
         {
             "modality": "text_to_video",

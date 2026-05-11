@@ -243,7 +243,6 @@ class ScriptPrepMixin:
                 )
 
             # 阶段3：剧本质量评审（可选）
-            review_segments = self._build_review_segments(script_segments)
             auto_revision: Dict[str, Any] = {"applied": False}
             if enable_quality_review:
                 self.task_tracker.start_stage(task_id, StageType.QUALITY_REVIEW)
@@ -259,21 +258,12 @@ class ScriptPrepMixin:
                         message='正在评审剧本质量...'
                     )
 
-                quality_report_obj = self.audio_quality_reviewer.review_script(
-                    review_segments,
+                quality_report_obj, auto_revision = self._run_quality_review_with_auto_revision(
+                    script_segments,
                     novel_genre=novel_genre,
+                    quality_threshold=quality_threshold,
                 )
 
-                auto_revision = self._auto_balance_script_audio_cues(
-                    script_segments,
-                    self.audio_quality_reviewer.quality_standards,
-                )
-                if auto_revision.get("applied"):
-                    review_segments = self._build_review_segments(script_segments)
-                    quality_report_obj = self.audio_quality_reviewer.review_script(
-                        review_segments,
-                        novel_genre=novel_genre,
-                    )
                 # 序列化为dict，方便存库
                 quality_report = {
                     "script_quality": quality_report_obj.script_quality,
@@ -293,6 +283,7 @@ class ScriptPrepMixin:
                         for i in quality_report_obj.issues
                     ],
                     "auto_revision": auto_revision if auto_revision.get("applied") else None,
+                    "quality_gate": auto_revision.get("quality_gate"),
                     "llm_script_review": llm_script_review,
                 }
 
@@ -306,6 +297,7 @@ class ScriptPrepMixin:
                     "pacing": quality_report_obj.pacing,
                     "revision_suggestions": quality_report_obj.revision_suggestions,
                     "issues": issues_preview,
+                    "quality_gate": auto_revision.get("quality_gate"),
                 }
                 if auto_revision.get("applied"):
                     stage_metrics["auto_revision"] = auto_revision
@@ -331,6 +323,7 @@ class ScriptPrepMixin:
                             'overall_score': quality_report_obj.overall_score,
                             'overall_grade': quality_report_obj.overall_grade,
                             'issues_count': len(quality_report_obj.issues),
+                            'quality_gate': auto_revision.get("quality_gate"),
                         }
                     )
 

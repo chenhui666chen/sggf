@@ -20,10 +20,11 @@ interface SelectOption {
 }
 
 const VOICE_TYPE_OPTIONS: readonly SelectOption[] = [
+  { value: 'majestic', label: '威严' },
   { value: 'gentle', label: '温柔' },
-  { value: 'energetic', label: '活泼' },
-  { value: 'calm', label: '平静' },
-  { value: 'serious', label: '严肃' },
+  { value: 'lively', label: '活泼' },
+  { value: 'weathered', label: '沧桑' },
+  { value: 'warm', label: '温暖' },
   { value: 'mysterious', label: '神秘' },
   { value: 'powerful', label: '力量' },
   { value: 'scholarly', label: '书卷气' },
@@ -38,7 +39,7 @@ const PERSONALITY_OPTIONS: readonly SelectOption[] = [
   { value: 'calm', label: '冷静' },
   { value: 'emotional', label: '感性' },
   { value: 'rational', label: '理性' },
-  { value: 'rebellious', label: '叛逆' },
+  { value: 'rebel', label: '叛逆' },
   { value: 'loyal', label: '忠诚' },
 ]
 

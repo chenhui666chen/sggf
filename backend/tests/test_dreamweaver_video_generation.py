@@ -11,10 +11,10 @@ if str(BACKEND_ROOT) not in sys.path:
 
 
 def load_dreamweaver_module():
-    dreamweaver_path = BACKEND_ROOT / "app" / "api" / "v1" / "dreamweaver.py"
-    spec = spec_from_file_location("test_dreamweaver_video_generation_module", dreamweaver_path)
+    imports_path = BACKEND_ROOT / "app" / "api" / "v1" / "dreamweaver_api" / "_imports.py"
+    spec = spec_from_file_location("test_dreamweaver_video_generation_module", imports_path)
     if spec is None or spec.loader is None:
-        raise RuntimeError("无法加载 DreamWeaver 路由模块")
+        raise RuntimeError("无法加载 DreamWeaver imports 模块")
 
     module = module_from_spec(spec)
     sys.modules.setdefault("test_dreamweaver_video_generation_module", module)

@@ -4,6 +4,7 @@
 包含 _transform_to_script 和 _transform_paragraph 方法
 """
 import logging
+import re
 from typing import List, Dict, Any, Optional, Callable
 
 from app.services.audiobook.llm_client import call_audiobook_llm_async
@@ -17,6 +18,15 @@ from ._dataclasses import ScriptSegment
 from ._segment_validation import build_script_segments
 
 logger = logging.getLogger(__name__)
+
+TRANSFORM_BATCH_TARGET_CHARS = 850
+TRANSFORM_BATCH_HARD_CHARS = 1200
+TRANSFORM_RETRY_CHUNK_TARGET_CHARS = 650
+TRANSFORM_RETRY_CHUNK_HARD_CHARS = 850
+TRANSFORM_OUTPUT_TOKEN_MIN = 1800
+TRANSFORM_OUTPUT_TOKEN_MAX = 9000
+TRANSFORM_CONTINUITY_SEGMENTS = 4
+TRANSFORM_CONTINUITY_MAX_CHARS = 520
 
 
 class TransformMixin:
@@ -44,28 +54,14 @@ class TransformMixin:
         # 分段处理：仅丢弃空行，短句/短对白必须保留，避免改编前丢失原文。
         paragraphs = [p.strip() for p in content.splitlines() if p.strip()]
         
-        # 合并短段落，减少LLM调用次数
-        merged_paragraphs = []
-        current_batch = []
-        current_length = 0
-        
-        for para in paragraphs:
-            if current_length + len(para) > 6000:  # 智能分批：每批次最多6000字，保持较大上下文窗口
-                if current_batch:
-                    merged_paragraphs.append('\n'.join(current_batch))
-                current_batch = [para]
-                current_length = len(para)
-            else:
-                current_batch.append(para)
-                current_length += len(para)
-        
-        if current_batch:
-            merged_paragraphs.append('\n'.join(current_batch))
+        # 合并短段落，但限制单次 LLM 转化请求体量，避免 JSON 模式大输出长时间无响应。
+        merged_paragraphs = self._build_transform_batches(paragraphs)
         
         total_paras = len(merged_paragraphs)
         logger.info(f"📝 合并后 {total_paras} 个批次（原 {len(paragraphs)} 段），总长度: {len(content)} 字")
         
         all_segments = []
+        continuity_context = ""
         
         for idx, para in enumerate(merged_paragraphs, 1):
             logger.info(f"   ⏳ [{idx}/{total_paras}] 处理段落 ({len(para)}字)...")
@@ -77,8 +73,10 @@ class TransformMixin:
                     analysis,
                     audio_adaptation_brief=audio_adaptation_brief,
                     character_profiles=character_profiles,
+                    continuity_context=continuity_context,
                 )
                 all_segments.extend(segments)
+                continuity_context = self._build_transform_continuity_context(all_segments)
                 logger.info(f"   ✅ [{idx}/{total_paras}] 完成，生成 {len(segments)} 个片段")
             except Exception as e:
                 logger.error(f"   ❌ [{idx}/{total_paras}] 失败: {e}")
@@ -98,6 +96,167 @@ class TransformMixin:
             all_segments = self._validate_semantic_integrity(all_segments)
         
         return all_segments
+
+    def _build_transform_batches(self, paragraphs: List[str]) -> List[str]:
+        """把原文段落组装成适合单次有声剧本转化的小批次。"""
+        merged_paragraphs: List[str] = []
+        current_batch: List[str] = []
+        current_length = 0
+
+        for para in paragraphs:
+            for part in self._split_long_paragraph_for_transform(para):
+                part_length = len(part)
+                separator_length = 1 if current_batch else 0
+                would_exceed_target = (
+                    current_batch
+                    and current_length + separator_length + part_length > TRANSFORM_BATCH_TARGET_CHARS
+                )
+
+                if would_exceed_target:
+                    merged_paragraphs.append("\n".join(current_batch))
+                    current_batch = [part]
+                    current_length = part_length
+                else:
+                    current_batch.append(part)
+                    current_length += separator_length + part_length
+
+        if current_batch:
+            merged_paragraphs.append("\n".join(current_batch))
+
+        return merged_paragraphs
+
+    def _split_long_paragraph_for_transform(self, paragraph: str) -> List[str]:
+        """按句子边界拆分过长段落，避免单段超过安全上限。"""
+        text = str(paragraph or "").strip()
+        if not text:
+            return []
+        if len(text) <= TRANSFORM_BATCH_HARD_CHARS:
+            return [text]
+
+        sentence_units = [
+            unit.strip()
+            for unit in re.findall(r"[^。！？!?；;]+[。！？!?；;]?", text)
+            if unit.strip()
+        ] or [text]
+
+        chunks: List[str] = []
+        current: List[str] = []
+        current_length = 0
+
+        def flush_current() -> None:
+            nonlocal current, current_length
+            if current:
+                chunks.append("".join(current).strip())
+                current = []
+                current_length = 0
+
+        for unit in sentence_units:
+            if len(unit) > TRANSFORM_BATCH_HARD_CHARS:
+                flush_current()
+                for start in range(0, len(unit), TRANSFORM_BATCH_HARD_CHARS):
+                    chunk = unit[start:start + TRANSFORM_BATCH_HARD_CHARS].strip()
+                    if chunk:
+                        chunks.append(chunk)
+                continue
+
+            if current and current_length + len(unit) > TRANSFORM_BATCH_HARD_CHARS:
+                flush_current()
+
+            current.append(unit)
+            current_length += len(unit)
+
+        flush_current()
+        return chunks
+
+    def _split_paragraph_for_parse_retry(self, paragraph: str) -> List[str]:
+        """JSON 解析失败后使用更小的句子批次重试，降低单次输出复杂度。"""
+        text = str(paragraph or "").strip()
+        if not text:
+            return []
+
+        source_lines = [line.strip() for line in text.splitlines() if line.strip()]
+        if len(source_lines) > 1:
+            chunks: List[str] = []
+            for line in source_lines:
+                if len(line) <= TRANSFORM_RETRY_CHUNK_HARD_CHARS:
+                    chunks.append(line)
+                    continue
+                for start in range(0, len(line), TRANSFORM_RETRY_CHUNK_HARD_CHARS):
+                    chunk = line[start:start + TRANSFORM_RETRY_CHUNK_HARD_CHARS].strip()
+                    if chunk:
+                        chunks.append(chunk)
+            return chunks
+
+        sentence_units = [
+            unit.strip()
+            for unit in re.findall(r"[^。！？!?；;\n]+[。！？!?；;]?", text)
+            if unit.strip()
+        ] or [text]
+
+        chunks: List[str] = []
+        current: List[str] = []
+        current_length = 0
+
+        def flush_current() -> None:
+            nonlocal current, current_length
+            if current:
+                chunks.append("".join(current).strip())
+                current = []
+                current_length = 0
+
+        for unit in sentence_units:
+            if len(unit) > TRANSFORM_RETRY_CHUNK_HARD_CHARS:
+                flush_current()
+                for start in range(0, len(unit), TRANSFORM_RETRY_CHUNK_HARD_CHARS):
+                    chunk = unit[start:start + TRANSFORM_RETRY_CHUNK_HARD_CHARS].strip()
+                    if chunk:
+                        chunks.append(chunk)
+                continue
+
+            if current and current_length + len(unit) > TRANSFORM_RETRY_CHUNK_TARGET_CHARS:
+                flush_current()
+
+            current.append(unit)
+            current_length += len(unit)
+
+        flush_current()
+        return chunks
+
+    def _estimate_transform_max_tokens(self, paragraph: str) -> int:
+        """根据输入长度估算 JSON 输出预算，避免固定 32000 导致慢请求。"""
+        paragraph_length = len(str(paragraph or ""))
+        estimated = int(paragraph_length * 2.8) + 1000
+        return max(TRANSFORM_OUTPUT_TOKEN_MIN, min(TRANSFORM_OUTPUT_TOKEN_MAX, estimated))
+
+    def _estimate_transform_timeout(self, max_tokens: int) -> int:
+        """给段落改编请求设置显式超时，和动态输出预算保持一致。"""
+        estimated = int(max_tokens / 80) + 60
+        return max(90, min(180, estimated))
+
+    def _build_transform_continuity_context(self, segments: List[ScriptSegment]) -> str:
+        """提取上一批结尾状态，给下一批保持剧情、角色和情绪连续性。"""
+        recent_segments = [segment for segment in segments if str(getattr(segment, "text", "")).strip()]
+        recent_segments = recent_segments[-TRANSFORM_CONTINUITY_SEGMENTS:]
+        if not recent_segments:
+            return ""
+
+        lines: List[str] = []
+        for segment in recent_segments:
+            text = str(getattr(segment, "text", "") or "").strip()
+            if not text:
+                continue
+            speaker = str(getattr(segment, "speaker", "") or "旁白").strip() or "旁白"
+            emotion = str(getattr(segment, "emotion", "") or "neutral").strip() or "neutral"
+            segment_type = str(getattr(segment, "type", "") or "narration").strip() or "narration"
+            text = re.sub(r"\s+", " ", text)
+            if len(text) > 80:
+                text = text[:80].rstrip() + "..."
+            lines.append(f"- {speaker}/{segment_type}/{emotion}: {text}")
+
+        context = "\n".join(lines)
+        if len(context) > TRANSFORM_CONTINUITY_MAX_CHARS:
+            context = context[-TRANSFORM_CONTINUITY_MAX_CHARS:].lstrip()
+        return context
     
     async def _transform_paragraph(
         self,
@@ -106,6 +265,8 @@ class TransformMixin:
         analysis: Dict[str, Any],
         audio_adaptation_brief: str = "",
         character_profiles: Optional[List[Dict[str, Any]]] = None,
+        continuity_context: str = "",
+        allow_parse_retry: bool = True,
     ) -> List[ScriptSegment]:
         """转化单个段落
         
@@ -144,6 +305,12 @@ class TransformMixin:
             if audio_adaptation_brief
             else ""
         )
+        continuity_block = (
+            "**上一批结尾状态**（仅用于保持承接关系，不要复述这些内容）：\n"
+            f"{continuity_context}\n\n"
+            if continuity_context
+            else ""
+        )
         
         character_block = ""
         if character_profiles:
@@ -164,23 +331,39 @@ class TransformMixin:
 
 {six_step_block}
 
-**🎯 片段划分与语义完整性（建议）**
+**🎯 片段划分与语义完整性（硬性要求）**
         
-下面的规则是"优先参考"而不是硬性约束，你可以在保证听感流畅和语义清晰的前提下灵活使用短片段：
+下面的规则是硬性要求。请把小说段落改成“可播讲单元”，而不是把原文整段搬进一个 narration：
         
 1【推荐做法：语义完整优先】
    - 尽量让每个片段在语义上自洽：包含完整的动作/情绪/场景信息，而不是被机械拆成几字一段。
+   - 旁白片段建议 45-120 字；强动作、强情绪、转场、回忆切入处必须拆段。
+   - 单个 narration 不要超过 140 字；单个 dialogue/monologue 不要超过 120 字。确有长句时，按动作拍点、情绪转折、因果推进拆成多个片段。
+   - 每个片段只承载一个主要听觉任务：动作爆发、伤害结果、角色反应、逃离推进、回忆切入，不要全部塞进同一段。
         
 2【短片段的合理场景】
    - ✅ 简短而自然的对白/感叹（如"好。""这不可能！"，"你说什么？"）可以作为独立片段存在；
    - ✅ 强烈情绪的短句（惊讶/愤怒/紧张等）适合单独成段，用来制造节奏和冲击力；
    - ❗ 建议避免：完全脱离上下文、让人不知所云的碎片（如单独出现的"就一晚。"而看不到前后铺垫）。
         
-3【对话与旁白关系】
-   - 对话前后的旁白，可以适当合在一起，形成"动作/心理 + 台词"的完整单位；
+3【长叙事的有声化拆分】
+   - 连续动作描写：按“发动 → 受击 → 后果 → 反应”拆分。
+   - 逃亡/追逐/战斗：每个片段保留一个清晰动作，使用 pause_after 制造呼吸点。
+   - 回忆切入：单独成段，给出更慢、更低的 performance_notes，并可添加轻微转场音效。
+   - 有明显音效的动作（倒地、骨裂、风声、脚步、墓前静默）应单独标注 sound_effects，不要只写在 text 里。
+
+4【对话与旁白关系】
+   - 直接引语必须拆成 dialogue：凡是原文中出现 “...”、「...」、『...』 或 角色说/道/问/喊/低声 后面的台词，都必须单独输出为 dialogue 片段。
+   - speaker 必须写真实角色名：原文明确说话人时使用该角色名；上下文连续且说话人明确时沿用最近角色；只有叙述性文字才使用 speaker=旁白。
+   - 不要把角色台词归到旁白；不要把带引号的台词和旁白合成一个 narration。可拆成“旁白动作/心理” + “dialogue 台词”两个片段。
    - 对于本来就自然很短的应答（"行。""好。"），可以放心保留为独立片段，不必强行合并。
+
+5【旁白情绪层次】
+   - 旁白也必须有情绪层次，不要整章都使用 neutral。根据场景张力选择 tense、fearful、mysterious、sad、solemn 等更准确的 emotion。
+   - 旁白的 performance_notes 必须具体可执行：说明语速、声线、重读位置、停顿目标；例如“低沉克制但有压迫感，关键意象处放慢并加重，句尾留悬念停顿”。
+   - 旁白要丰富但不抢角色台词：保持讲述者身份，不替角色喊台词，不把角色对白写进 narration。
         
-总之：**请优先保证片段本身听起来自然、有完整语气和意义，不必一味追求统一长度，也不需要强行合并所有短句。**
+总之：**请优先保证片段听起来像有声小说分镜，而不是长段朗读；语义完整和播讲呼吸必须同时满足。**
         
 **已知角色**: {', '.join(character_list) if character_list else '无'}
 {character_block}
@@ -188,68 +371,69 @@ class TransformMixin:
 **建议情感**: {', '.join(analysis.get('recommended_emotions', ['natural']))}
 **节奏模式**: {analysis.get('rhythm_pattern', '中等')}
 {adaptation_block}
+{continuity_block}
 
 **原文段落**:
 {paragraph}
 
 **输出格式**：
-请以**纯净的JSON数组格式**输出剧本片段（不要包含任何注释或说明文字）：
+请以**纯净的JSON对象格式**输出剧本片段（不要包含任何注释或说明文字），顶层必须是 `segments` 数组：
 
-**格式选择**：
-1. **精品模式**（推荐）：详细配置音效/配乐参数（音量、层级、3D位置、淡入淡出）
-2. **简洁模式**：只标注音效/配乐名称（系统会自动使用默认参数）
+**字段合约**：
+- 优先使用 `sound_effects` / `music_cue` 的精品字段；只有无法判断参数时才使用 `sound_effects_simple` / `music_cue_simple`。
+- JSON 内不要写 `//`、`/* */` 或解释性文字。
+- 不要同时为同一个听觉事件重复填写精品字段和 simple 字段。
+- 每个片段对象中每个 key 只能出现一次，禁止重复输出 `performance_notes`、`sound_effects`、`music_cue` 等字段。
+- `type=dialogue` 时 `speaker` 必须是角色名，禁止使用旁白；不确定说话人时才退回 narration。
+- `type=narration` 时 `speaker` 必须为旁白，且 text 中不得包含角色引号台词。
+- `sound_effects` 每个片段最多 2 个；没有关键音效时使用空数组。
+- `music_cue` 只在开场、转场、高潮、强情绪片段出现；普通片段使用 null 或省略，不要整段铺满 BGM。
+- 如果使用 `sound_effects`，则 `sound_effects_simple` 必须为 []；如果使用 `music_cue`，则 `music_cue_simple` 必须为空字符串。
 
 ```json
-[
+{{
+  "segments": [
     {{
-        "type": "narration|dialogue|monologue",
-        "text": "改编后的文本（简洁、听觉友好）",
-        "speaker": "角色名或旁白",
-        "emotion": "neutral|happy|sad|angry|calm|tense|excited|tender|solemn",
-        "instruct_emotion": "neutral|fearful|angry|sad|surprised|happy|disgusted",
-        "instruct_scene": "闲聊互动|新闻播报|比赛解说|诗歌朗诵|...（不适用留空）",
-        "instruct_role": "一个旁白|温和客服（不适用留空）",
-        "instruct_identity": "故事机（不适用留空）",
-        "voice_params": {{
-            "rate": 1.0,
-            "pitch": 1.0,
-            "pause_before": 0.2,
-            "pause_after": 0.3
-        }},
-        "performance_notes": "语气提示，如：以故事机的身份温柔讲述 / 激动地高声说 / 低声急促地提醒",
-        
-        // 🆕 音效配置（二选一）
-        // 方式1：精品模式（推荐）
-        "sound_effects": [
-            {{
-                "name": "脚步声",
-                "layer": "action",  // bottom(底音) | action(动作) | atmosphere(氛围)
-                "volume": 0.3,  // 0.0-1.0，人声为1.0基准
-                "timing": "trigger",  // continuous(持续) | trigger(触发式)
-                "position_3d": "left_to_right",  // left | right | center | back | left_to_right | right_to_left
-                "duration": 2.0,  // 持续时长（秒）
-                "fade_out": 0.5  // 淡出时长（秒）
-            }}
-        ],
-        // 方式2：简洁模式（兼容）
-        "sound_effects_simple": ["脚步声", "雨声"],
-        
-        // 🆕 配乐配置（二选一）
-        // 方式1：精品模式（推荐）
-        "music_cue": {{
-            "style": "悬疑低频弦乐",
-            "volume": 0.2,  // 0.0-1.0，建议0.15-0.4范围
-            "fade_in": 2.0,  // 淡入时长（秒）
-            "fade_out": 2.0,  // 淡出时长（秒）
-            "emotion_follow": true  // 是否跟随情绪波动调整音量
-        }},
-        // 方式2：简洁模式（兼容）
-        "music_cue_simple": "悬疑低频弦乐",
-        
-        "original_text": "对应的原文",
-        "adaptation_reason": "改编原因说明（如：使用较短句子 + 长停顿营造压迫感）"
+      "type": "narration|dialogue|monologue",
+      "text": "实际要朗读的文本",
+      "speaker": "角色名或旁白",
+      "emotion": "neutral|happy|sad|angry|calm|tense|excited|tender|solemn",
+      "instruct_emotion": "neutral|fearful|angry|sad|surprised|happy|disgusted",
+      "instruct_scene": "紧张逃亡场景",
+      "instruct_role": "沉稳有压迫感的有声书旁白",
+      "instruct_identity": "故事讲述者",
+      "voice_params": {{
+        "rate": 1.0,
+        "pitch": 1.0,
+        "pause_before": 0.2,
+        "pause_after": 0.3
+      }},
+      "performance_notes": "低声、短促，句尾留出紧张停顿",
+      "sound_effects": [
+        {{
+          "name": "脚步声",
+          "layer": "action",
+          "volume": 0.3,
+          "timing": "trigger",
+          "position_3d": "left_to_right",
+          "duration": 2.0,
+          "fade_out": 0.5
+        }}
+      ],
+      "music_cue": {{
+        "style": "悬疑低频弦乐",
+        "volume": 0.2,
+        "fade_in": 2.0,
+        "fade_out": 2.0,
+        "emotion_follow": true
+      }},
+      "sound_effects_simple": [],
+      "music_cue_simple": "",
+      "original_text": "对应的原文",
+      "adaptation_reason": "按动作拍点拆分，并用停顿营造压迫感"
     }}
-]
+  ]
+}}
 ```
 
 **🎵 音效/配乐标注指南**：
@@ -269,7 +453,7 @@ class TransformMixin:
    - 高潮场景：0.4-0.5（关键处留白，突出台词）
 
 *重要提醒**：
-- 只输出JSON数组，不要添加任何//注释或/*注释*/
+- 只输出 JSON 对象，顶层格式为 {{"segments": [...]}}，不要添加任何 // 注释或 /* 注释 */
 - 不要在JSON中添加解释性文字
 - emotion字段必须使用推荐情感之一，不要自行发明
 - instruct_emotion 可用于 qwen3-tts-instruct-flash / cosyvoice-v3.5-plus；CosyVoice 请使用 neutral、fearful、angry、sad、surprised、happy、disgusted
@@ -291,20 +475,26 @@ class TransformMixin:
         
         try:
             
-            # 使用有声书专用 LLM 配置，避免模型路由落到已下线模型
-            # 剧本转化可能输出很长的JSON数组，需要设置足够大的max_tokens
-            max_tokens_value = 32000
-            logger.info(f"🔧 [段落转化] 请求 max_tokens: {max_tokens_value}, 段落长度: {len(paragraph)} 字")
+            # 使用有声书专用 LLM 配置，避免模型路由落到已下线模型。
+            # 输出预算按段落长度估算，避免小段落也请求 32000 tokens 导致超时。
+            max_tokens_value = self._estimate_transform_max_tokens(paragraph)
+            timeout_value = self._estimate_transform_timeout(max_tokens_value)
+            logger.info(
+                f"🔧 [段落转化] 请求 max_tokens: {max_tokens_value}, "
+                f"timeout: {timeout_value}s, 段落长度: {len(paragraph)} 字"
+            )
             
             response = await call_audiobook_llm_async(
                 self.llm_client,
                 messages=[{"role": "user", "content": prompt}],
                 max_tokens=max_tokens_value,
+                timeout=timeout_value,
+                max_retries=2,
                 use_cache=False,
                 response_format={"type": "json_object"},  # 启用 deepseek JSON 模式
             )
             
-            logger.info(f"📊 [段落转化] 实际返回: {len(response)} 字符 (JSON截断检测: {'TRUNCATED' if len(response) > 40000 else 'OK'})")
+            logger.info(f"📊 [段落转化] 实际返回: {len(response)} 字符 (长度阈值检查: {'large' if len(response) > 40000 else 'normal'})")
             
             # 提取JSON
             json_str = clean_llm_json_text(response)
@@ -323,8 +513,21 @@ class TransformMixin:
             try:
                 segments_data = parse_llm_json_array(response)
             except LLMJsonParseError as json_err:
-                logger.error(f"JSON解析失败，原始响应: {response[:1000]}")
-                logger.error(f"清理后JSON: {json_str[:1000]}")
+                error_context = self._format_json_error_context(json_str, json_err)
+                logger.error(f"JSON解析失败: {json_err}; {error_context}")
+                logger.error(f"JSON解析失败，原始响应前1000字符: {response[:1000]}")
+                logger.error(f"清理后JSON前1000字符: {json_str[:1000]}")
+                if allow_parse_retry:
+                    retried_segments = await self._retry_transform_paragraph_in_smaller_chunks(
+                        paragraph,
+                        character_list,
+                        analysis,
+                        audio_adaptation_brief=audio_adaptation_brief,
+                        character_profiles=character_profiles,
+                        continuity_context=continuity_context,
+                    )
+                    if retried_segments:
+                        return retried_segments
                 raise RuntimeError(f"LLM返回的JSON格式错误: {json_err}") from json_err
             
             # 修复：将中文字段名转换为英文（LLM 偶尔会返回中文字段）
@@ -377,3 +580,62 @@ class TransformMixin:
         except Exception as e:
             logger.error(f"段落转化失败: {e}")
             return build_script_segments([], fallback_text=paragraph)
+
+    def _format_json_error_context(self, json_text: str, json_err: Exception, radius: int = 320) -> str:
+        """生成解析失败位置附近的上下文，便于定位模型输出污染点。"""
+        message = str(json_err)
+        match = re.search(r"\(char\s+(\d+)\)", message)
+        if not match:
+            return f"json_len={len(json_text)}"
+        pos = int(match.group(1))
+        start = max(0, pos - radius)
+        end = min(len(json_text), pos + radius)
+        snippet = json_text[start:end].replace("\n", "\\n")
+        return f"json_len={len(json_text)} error_char={pos} context={snippet}"
+
+    async def _retry_transform_paragraph_in_smaller_chunks(
+        self,
+        paragraph: str,
+        character_list: List[str],
+        analysis: Dict[str, Any],
+        *,
+        audio_adaptation_brief: str = "",
+        character_profiles: Optional[List[Dict[str, Any]]] = None,
+        continuity_context: str = "",
+    ) -> List[ScriptSegment]:
+        """解析失败后把原批次拆小重试，尽量保留 LLM 改编质量。"""
+        chunks = self._split_paragraph_for_parse_retry(paragraph)
+        if len(chunks) <= 1:
+            return []
+
+        logger.warning(
+            "段落转化 JSON 解析失败，开始拆小重试: 原长度=%s chunks=%s",
+            len(str(paragraph or "")),
+            len(chunks),
+        )
+
+        recovered: List[ScriptSegment] = []
+        retry_context = continuity_context
+        for idx, chunk in enumerate(chunks, 1):
+            try:
+                chunk_segments = await self._transform_paragraph(
+                    chunk,
+                    character_list,
+                    analysis,
+                    audio_adaptation_brief=audio_adaptation_brief,
+                    character_profiles=character_profiles,
+                    continuity_context=retry_context,
+                    allow_parse_retry=False,
+                )
+                recovered.extend(chunk_segments)
+                retry_context = self._build_transform_continuity_context(recovered)
+                logger.info(
+                    "段落转化拆小重试完成: %s/%s 片段=%s",
+                    idx,
+                    len(chunks),
+                    len(chunk_segments),
+                )
+            except Exception as exc:
+                logger.warning("段落转化拆小重试失败: %s/%s error=%s", idx, len(chunks), exc)
+
+        return recovered

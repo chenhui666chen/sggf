@@ -1,7 +1,11 @@
 import asyncio
+import hashlib
 import os
 import sys
 from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
 
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
@@ -13,6 +17,7 @@ os.environ.setdefault("DATABASE_URL", "postgresql://test:test@127.0.0.1:5432/tes
 
 from app.api.v1.audiobook_api import routes_tts
 from app.api.v1.audiobook_api.routes_tts import list_tts_models
+from app.schemas.audiobook import CosyVoiceCloneCreateRequest, TTSPreviewRequest
 from app.services.audiobook.tts_model_ids import (
     DEFAULT_AUDIOBOOK_TTS_MODEL,
     MINIMAX_SPEECH_28_HD_MODEL,
@@ -26,7 +31,10 @@ from app.services.audiobook.tts_model_ids import (
 from app.services.audiobook.narration_styles import get_all_narration_styles
 from app.services.audiobook.tts_engine_pkg import TTSEngine
 from app.services.audiobook.voice_catalog import load_voice_catalog_for_model
+from app.services.audiobook.voice_auto_assignment import AutoVoiceAssignmentPool
 from app.services.audiobook.voice_manager_factory import create_voice_manager, get_model_for_voice, list_supported_models
+from app.services.audiobook.voice_manager import VoiceManager
+from app.services.audiobook import voice_manager_cosyvoice_v3_plus as cosyvoice_v3_plus
 from app.services.audiobook.voice_manager_minimax import MiniMaxVoiceManager
 from core.model_resolution import normalize_model_id
 
@@ -65,6 +73,184 @@ def test_voice_manager_factory_keeps_minimax_manager_after_registry_alias() -> N
     assert get_model_for_voice("male-qn-qingse") == MINIMAX_SPEECH_28_HD_MODEL
 
 
+def test_minimax_project_mapping_applies_voice_type_params() -> None:
+    manager = MiniMaxVoiceManager()
+
+    manager.apply_project_voice_mapping({
+        "Hero": {
+            "voice_id": "male-qn-qingse",
+            "volume": 50,
+            "speed": 1.0,
+            "pitch": 50,
+            "voice_type": "lively",
+        },
+    })
+
+    profile = manager.get_voice("Hero")
+    assert profile.tts_speaker_id == "male-qn-qingse"
+    assert profile.speed_base == pytest.approx(1.15)
+    assert profile.pitch_base == 52
+    assert profile.volume_base == 50
+    assert profile.default_emotion == "happy"
+
+
+def test_qwen_voice_manager_prefers_unused_voice_for_same_traits() -> None:
+    manager = VoiceManager()
+
+    first = manager.assign_voice("秦川", {"gender": "male", "age_group": "young", "personality": "calm"})
+    second = manager.assign_voice("周明", {"gender": "male", "age_group": "young", "personality": "calm"})
+
+    assert first.voice_id != second.voice_id
+    assert first.gender == "male"
+    assert second.gender == "male"
+
+
+def test_minimax_voice_manager_prefers_unused_voice_for_same_traits() -> None:
+    manager = MiniMaxVoiceManager()
+
+    first = manager.assign_voice("林夏", {"gender": "female", "age_group": "young"})
+    second = manager.assign_voice("许晴", {"gender": "female", "age_group": "young"})
+
+    assert first.voice_id != second.voice_id
+    assert first.gender == "female"
+    assert second.gender == "female"
+
+
+def test_minimax_voice_manager_keeps_requested_turbo_model() -> None:
+    manager = create_voice_manager(MINIMAX_SPEECH_28_TURBO_MODEL)
+
+    profile = manager.assign_voice("林夏", {"gender": "female", "age_group": "young"})
+
+    assert isinstance(manager, MiniMaxVoiceManager)
+    assert manager.model == MINIMAX_SPEECH_28_TURBO_MODEL
+    assert profile.tts_model == MINIMAX_SPEECH_28_TURBO_MODEL
+
+
+def test_auto_voice_assignment_pool_falls_back_to_other_model_when_primary_is_exhausted() -> None:
+    qwen_voice_ids = [
+        voice["id"]
+        for voice in load_voice_catalog_for_model(DEFAULT_AUDIOBOOK_TTS_MODEL)["voices"]
+    ]
+    pool = AutoVoiceAssignmentPool(
+        preferred_model=DEFAULT_AUDIOBOOK_TTS_MODEL,
+        existing_assignments=[
+            {"voice_id": voice_id, "tts_model": DEFAULT_AUDIOBOOK_TTS_MODEL}
+            for voice_id in qwen_voice_ids
+        ],
+    )
+
+    assignment = pool.assign("新角色", {"gender": "male", "age_group": "young", "personality": "calm"})
+
+    assert assignment.model != DEFAULT_AUDIOBOOK_TTS_MODEL
+    assert assignment.profile.tts_model == assignment.model
+    assert assignment.profile.voice_id not in qwen_voice_ids
+
+
+def test_qwen_voice_manager_loads_cross_model_project_mapping() -> None:
+    manager = VoiceManager()
+
+    manager.apply_project_voice_mapping({
+        "跨模型角色": {
+            "voice_id": "male-qn-qingse",
+            "tts_model": MINIMAX_SPEECH_28_HD_MODEL,
+            "volume": 58,
+        },
+    })
+
+    profile = manager.get_voice("跨模型角色")
+    assert profile is not None
+    assert profile.voice_id == "male-qn-qingse"
+    assert profile.tts_speaker_id == "male-qn-qingse"
+    assert profile.tts_model == MINIMAX_SPEECH_28_HD_MODEL
+    assert profile.volume_base == 58
+
+
+def test_tts_preview_applies_voice_type_params() -> None:
+    request = TTSPreviewRequest(
+        text="试听文本",
+        voice_id="Neil",
+        volume=50,
+        speed=1.0,
+        pitch=50,
+        voice_type="powerful",
+    )
+
+    params = routes_tts._build_preview_voice_params(request, "Neil")
+
+    assert params["speaker"] == "Neil"
+    assert params["rate"] == pytest.approx(1.0)
+    assert params["speed"] == pytest.approx(1.0)
+    assert params["pitch"] == 48
+    assert params["volume"] == 60
+    assert params["emotion"] == "angry"
+
+
+def test_cosyvoice_voice_manager_logs_clone_catalog_failure(monkeypatch, caplog) -> None:
+    monkeypatch.setattr(
+        cosyvoice_v3_plus,
+        "list_supported_voices",
+        lambda _model: [
+            {
+                "id": "unit-voice",
+                "speaker": "unit-voice",
+                "category": "narrator",
+                "default_params": {"volume": 50, "speed": 1.0, "pitch": 50},
+            }
+        ],
+    )
+
+    def fail_clone_list(**_kwargs):
+        raise cosyvoice_v3_plus.CosyVoiceCloneError("missing api key")
+
+    monkeypatch.setattr(cosyvoice_v3_plus, "list_cosyvoice_v3_plus_clones", fail_clone_list)
+
+    with caplog.at_level("INFO", logger="app.services.audiobook.voice_manager_cosyvoice_v3_plus"):
+        manager = cosyvoice_v3_plus.CosyVoiceV3PlusVoiceManager()
+
+    assert manager.get_narrator_voice().tts_speaker_id == "unit-voice"
+    assert "CosyVoice 自定义音色列表不可用" in caplog.text
+    assert "missing api key" in caplog.text
+
+
+def test_cosyvoice_voice_manager_logs_invalid_numeric_overrides(monkeypatch, caplog) -> None:
+    monkeypatch.setattr(
+        cosyvoice_v3_plus,
+        "list_supported_voices",
+        lambda _model: [
+            {
+                "id": "unit-voice",
+                "speaker": "unit-voice",
+                "category": "narrator",
+                "default_params": {"volume": 50, "speed": 1.0, "pitch": 50},
+            }
+        ],
+    )
+    monkeypatch.setattr(cosyvoice_v3_plus, "list_cosyvoice_v3_plus_clones", lambda **_kwargs: ([], {}))
+
+    manager = cosyvoice_v3_plus.CosyVoiceV3PlusVoiceManager()
+
+    with caplog.at_level("DEBUG", logger="app.services.audiobook.voice_manager_cosyvoice_v3_plus"):
+        manager.apply_project_voice_mapping(
+            {
+                "Hero": {
+                    "voice_id": "unit-voice",
+                    "volume": "loud",
+                    "speed": "fast",
+                    "pitch": "high",
+                }
+            }
+        )
+
+    profile = manager.get_voice("Hero")
+    assert profile.volume_base == 50
+    assert profile.speed_base == pytest.approx(1.0)
+    assert profile.pitch_base == 50
+    assert "忽略无效 CosyVoice 音色参数" in caplog.text
+    assert "field=volume" in caplog.text
+    assert "field=speed" in caplog.text
+    assert "field=pitch" in caplog.text
+
+
 def test_supported_tts_models_do_not_advertise_unregistered_qwen_plus() -> None:
     supported = list_supported_models()
 
@@ -87,6 +273,44 @@ def test_tts_engine_normalizes_legacy_model_on_init() -> None:
 
     assert engine.model == DEFAULT_AUDIOBOOK_TTS_MODEL
     assert engine._is_qwen_instruct_model() is True
+
+
+def test_cosyvoice_clone_endpoint_uses_shared_prefix_builder(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+    current_user = SimpleNamespace(id=7)
+
+    def fake_build_prefix(display_name, user):
+        captured["builder_args"] = (display_name, user.id)
+        return "sharedpfx"
+
+    def fake_create_clone(*, prefix, audio_url):
+        captured["clone_args"] = (prefix, audio_url)
+        return {"voice_id": "voice-1"}
+
+    monkeypatch.setattr(routes_tts, "_build_cosyvoice_voice_prefix", fake_build_prefix)
+    monkeypatch.setattr(routes_tts, "create_cosyvoice_v3_plus_clone", fake_create_clone)
+    monkeypatch.setattr(routes_tts, "save_clone_display_name", lambda **_: None)
+
+    result = asyncio.run(
+        routes_tts.create_cosyvoice_v3_plus_voice_clone(
+            request=CosyVoiceCloneCreateRequest(name=" 星河旁白 ", url="oss://voices/sample.wav"),
+            current_user=current_user,
+        )
+    )
+
+    assert captured["builder_args"] == ("星河旁白", 7)
+    assert captured["clone_args"] == ("sharedpfx", "oss://voices/sample.wav")
+    assert result["voice_id"] == "voice-1"
+    assert result["display_name"] == "星河旁白"
+
+
+def test_cosyvoice_prefix_builder_uses_sha256_digest(monkeypatch) -> None:
+    monkeypatch.setattr("secrets.token_hex", lambda _size: "ff")
+
+    prefix = routes_tts._build_cosyvoice_voice_prefix("星河旁白", SimpleNamespace(id=7))
+    expected_digest = hashlib.sha256("7:星河旁白".encode("utf-8")).hexdigest()[:6]
+
+    assert prefix == f"v{expected_digest}ff"
 
 
 def test_tts_models_endpoint_uses_catalog_counts_and_supported_models(monkeypatch) -> None:

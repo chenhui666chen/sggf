@@ -1,7 +1,11 @@
+import { useState } from 'react'
+
 import {
+  Alert,
   Box,
   Button,
   CircularProgress,
+  Collapse,
   Dialog,
   DialogActions,
   DialogContent,
@@ -11,7 +15,11 @@ import {
   Paper,
   Typography,
 } from '@mui/material'
+import CheckCircleIcon from '@mui/icons-material/CheckCircle'
+import ErrorIcon from '@mui/icons-material/Error'
+import VerifiedUserIcon from '@mui/icons-material/VerifiedUser'
 
+import { apiClient, extractApiErrorMessage } from '../../services/api'
 import type {
   ScriptEditorDialogProps,
   ScriptSegment,
@@ -53,7 +61,42 @@ const ScriptEditorDialog = ({
   hiddenEditorConflictSegmentDiffCount = 0,
   onApplyIncomingDraft,
   onKeepLocalDraft,
-}: ScriptEditorDialogProps) => (
+  projectId,
+}: ScriptEditorDialogProps) => {
+  const [consistencyChecking, setConsistencyChecking] = useState(false)
+  const [consistencyResult, setConsistencyResult] = useState<{
+    is_consistent: boolean
+    consistency_score: number
+    analysis_summary: string
+  } | null>(null)
+  const [consistencyError, setConsistencyError] = useState<string | null>(null)
+
+  const handleCheckConsistency = async () => {
+    if (!data?.scriptSegments?.length) return
+    setConsistencyChecking(true)
+    setConsistencyError(null)
+    try {
+      const segmentsText = data.scriptSegments
+        .map((s: ScriptSegment, i: number) => `[${i + 1}] ${s.text || ''}`)
+        .join('\n')
+      const res = await apiClient.checkConsistency({
+        world_settings: [{ type: '剧本', name: chapter?.title || '当前章节', content: segmentsText }],
+        new_content: segmentsText,
+        project_id: projectId,
+      })
+      setConsistencyResult({
+        is_consistent: res.data.is_consistent,
+        consistency_score: res.data.consistency_check.consistency_score,
+        analysis_summary: res.data.consistency_check.analysis_summary,
+      })
+    } catch (err: unknown) {
+      setConsistencyError(await extractApiErrorMessage(err, '一致性检查失败'))
+    } finally {
+      setConsistencyChecking(false)
+    }
+  }
+
+  return (
   <Dialog open={open} onClose={onClose} maxWidth="lg" fullWidth>
     <DialogTitle>
       {chapter ? `编辑剧本与音频提示词 - ${chapter.title}` : '编辑章节剧本与音频提示词'}
@@ -175,6 +218,48 @@ const ScriptEditorDialog = ({
               </Typography>
 
               <Typography variant="subtitle1" sx={{ fontWeight: 600, mt: 2 }}>
+                一致性检查
+              </Typography>
+              <Paper variant="outlined" sx={{ p: 2 }}>
+                <Button
+                  size="small"
+                  variant="outlined"
+                  startIcon={consistencyChecking ? <CircularProgress size={14} /> : <VerifiedUserIcon />}
+                  onClick={handleCheckConsistency}
+                  disabled={consistencyChecking || !data?.scriptSegments?.length}
+                  fullWidth
+                >
+                  {consistencyChecking ? '检查中...' : '检查角色/设定一致性'}
+                </Button>
+                <Collapse in={Boolean(consistencyResult || consistencyError)}>
+                  <Box sx={{ mt: 1 }}>
+                    {consistencyError && (
+                      <Alert severity="error" sx={{ mt: 1 }}>{consistencyError}</Alert>
+                    )}
+                    {consistencyResult && (
+                      <Alert
+                        severity={consistencyResult.is_consistent ? 'success' : 'warning'}
+                        icon={consistencyResult.is_consistent ? <CheckCircleIcon /> : <ErrorIcon />}
+                        sx={{ mt: 1 }}
+                      >
+                        <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                          {consistencyResult.is_consistent ? '未发现一致性问题' : '发现潜在不一致'}
+                          {consistencyResult.consistency_score > 0 && (
+                            <>（评分：{(consistencyResult.consistency_score * 100).toFixed(0)}%）</>
+                          )}
+                        </Typography>
+                        {consistencyResult.analysis_summary && (
+                          <Typography variant="caption" sx={{ display: 'block', mt: 0.5, whiteSpace: 'pre-wrap' }}>
+                            {consistencyResult.analysis_summary}
+                          </Typography>
+                        )}
+                      </Alert>
+                    )}
+                  </Box>
+                </Collapse>
+              </Paper>
+
+              <Typography variant="subtitle1" sx={{ fontWeight: 600, mt: 2 }}>
                 分块诊断
               </Typography>
               <Paper variant="outlined" sx={{ p: 2 }}>
@@ -211,6 +296,7 @@ const ScriptEditorDialog = ({
       </Button>
     </DialogActions>
   </Dialog>
-)
+  )
+}
 
 export default ScriptEditorDialog
