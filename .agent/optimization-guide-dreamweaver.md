@@ -1,6 +1,6 @@
 # 织梦映心 — 优化指导文档
 
-> **版本**：4.1
+> **版本**：4.2
 > **创建日期**：2026-05-06
 > **更新日期**：2026-05-11
 > **适用范围**：`backend/app/api/v1/dreamweaver_api/`、`backend/app/services/dreamweaver/`、`frontend/src/pages/DreamWeaver*.tsx`、`frontend/src/pages/dreamweaver-run/`、`frontend/src/components/dreamweaver/`、`frontend/src/services/api.ts`
@@ -50,7 +50,8 @@
 | Pipeline | `autoqc_pkg/_qc_config.py` | — | ⚠️ 模块已迁移 |
 | Pipeline | `autoqc_pkg/_run_helpers.py` | — | ⚠️ 模块已迁移 |
 | 前端页面 | `DreamWeaverRunPage.tsx` | **6280** | **2762** |
-| 前端页面 | `DreamWeaverLibraryPage.tsx` | 1557 | 1743 |
+| 前端页面 | `DreamWeaverLibraryPage.tsx` | 1557 | 562 |
+| 前端子模块 | `dreamweaver-library/`（6 文件） | — | ~1631 |
 | 前端页面 | `DreamWeaverPage.tsx` | 1052 | 1073 |
 | 前端 hooks | `useDreamweaver*.ts`（27 个） | — | ~4128 |
 | 前端子模块 | `dreamweaver-run/`（29 文件） | ~6188 | ~10487 |
@@ -112,7 +113,7 @@
 | P-01 | P1 | 素材库全量加载无分页 | ✅ 已完成 | 中高 | 后端加分页参数，前端改虚拟滚动或分页加载 |
 | D-01 | P2 | 后端路由文件 import 大量重复 | ✅ 已完成 | 低 | 提取公共 import 块到 `_imports.py` |
 | D-02 | P2 | 后端路由文件间存在重复业务逻辑 | ✅ 已完成 | 中 | 提取共享 helper 到 `_helpers.py` |
-| S-02 | P1 | DreamWeaverLibraryPage 1743 行未拆分 | 🔄 进行中 | 中 | 按功能区域拆分子组件和 hook |
+| S-02 | P1 | DreamWeaverLibraryPage 1743 行未拆分 | ✅ 已完成 | 中 | 拆分为 dreamweaver-library/ 6 个子模块，主文件 562 行 |
 | S-03 | P2 | 后端 `_helpers.py` 1169 行过于庞大 | ✅ 已完成 | 中 | 按职责拆分为多个 helper 模块 |
 | F-03 | P2 | 素材库角色视图缺少批量操作入口 | ✅ 已完成 | 中 | 新增批量审核/批量重生成 UI |
 | F-04 | P2 | 运行页缺少视频预览播放器 | ✅ 已完成 | 低中 | 集成视频播放组件 |

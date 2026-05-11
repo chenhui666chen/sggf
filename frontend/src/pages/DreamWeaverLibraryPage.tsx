@@ -38,15 +38,9 @@ import {
 } from '@/utils/userAssetSourceNavigation'
 import type {
   LibraryAsset,
-  LibraryPayload,
   CharacterCard,
-  LibraryCard,
-  LibraryCardGroupKey,
-  StylePresetValue,
-  ImageRatioValue,
 } from './dreamweaver-library/libraryPageUtils'
 import {
-  LIBRARY_CARD_GROUP_ORDER,
   normalizeStylePresetValue,
   normalizeImageRatioValue,
   buildLibraryCards,

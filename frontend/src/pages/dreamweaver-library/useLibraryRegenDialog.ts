@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { apiClient, extractApiErrorMessage } from '@/services/api'
-import { parseLibraryRole, characterViewLabel, characterViewRole } from '@/utils/dreamweaverLibraryRole'
+import { parseLibraryRole, characterViewLabel } from '@/utils/dreamweaverLibraryRole'
 import { hasRenderableLibraryImage } from '@/utils/dreamweaverLibraryAssetState'
 import { STYLE_PRESETS, IMAGE_RATIOS } from '@/constants/dreamweaver'
-import type { LibraryAsset, LibraryPayload, StylePresetValue, ImageRatioValue } from './libraryPageUtils'
+import type { LibraryAsset, StylePresetValue, ImageRatioValue } from './libraryPageUtils'
 import { normalizeStylePresetValue, normalizeImageRatioValue, isPlaceholderEntityName } from './libraryPageUtils'
 
 export interface UseLibraryRegenDialogParams {
@@ -44,7 +44,7 @@ export interface UseLibraryRegenDialogReturn {
 }
 
 export function useLibraryRegenDialog(params: UseLibraryRegenDialogParams): UseLibraryRegenDialogReturn {
-  const { projectId, loading, lockedConfig, assetsByRole, characterNameById, missingRoleSet, loadLibrary } = params
+  const { projectId, lockedConfig, assetsByRole, characterNameById, missingRoleSet, loadLibrary } = params
 
   const [regenOpen, setRegenOpen] = useState(false)
   const [regenRole, setRegenRole] = useState('')
