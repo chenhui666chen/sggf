@@ -7,7 +7,6 @@ import { buildDreamWeaverLibrarySourcePayload } from '@/contracts/userAssetSourc
 import type {
   LibraryAsset,
   LibraryPayload,
-  CollectFeedback,
   CollectState,
 } from './libraryPageUtils'
 import { buildProtectedLibraryAssetUrl, getLibraryAssetDisplayTitle } from './libraryPageUtils'

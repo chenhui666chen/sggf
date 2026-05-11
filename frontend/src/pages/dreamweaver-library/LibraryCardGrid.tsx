@@ -16,9 +16,9 @@ import LinkOffIcon from '@mui/icons-material/LinkOff'
 import SyncIcon from '@mui/icons-material/Sync'
 import UploadFileIcon from '@mui/icons-material/UploadFile'
 import { CHARACTER_VIEW_ORDER, characterViewLabel, characterViewRole, parseLibraryRole } from '@/utils/dreamweaverLibraryRole'
-import { resolveLibraryAssetImageState, hasRenderableLibraryImage } from '@/utils/dreamweaverLibraryAssetState'
+import { resolveLibraryAssetImageState } from '@/utils/dreamweaverLibraryAssetState'
 import type { LibraryCard, LibraryCardGroupKey, LibraryAsset, CollectState, CharacterCard } from './libraryPageUtils'
-import { LIBRARY_CARD_GROUP_ORDER, assetToCssAspectRatio, assetTitle, getKlingProviderRef, getLibraryAssetDisplayTitle } from './libraryPageUtils'
+import { LIBRARY_CARD_GROUP_ORDER, assetToCssAspectRatio, getKlingProviderRef, getLibraryAssetDisplayTitle } from './libraryPageUtils'
 
 export interface LibraryCardGridProps {
   cards: LibraryCard[]
