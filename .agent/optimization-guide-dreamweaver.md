@@ -1,8 +1,8 @@
 # 织梦映心 — 优化指导文档
 
-> **版本**：4.2
+> **版本**：4.6
 > **创建日期**：2026-05-06
-> **更新日期**：2026-05-11
+> **更新日期**：2026-05-13
 > **适用范围**：`backend/app/api/v1/dreamweaver_api/`、`backend/app/services/dreamweaver/`、`frontend/src/pages/DreamWeaver*.tsx`、`frontend/src/pages/dreamweaver-run/`、`frontend/src/components/dreamweaver/`、`frontend/src/services/api.ts`
 
 ---
@@ -49,12 +49,12 @@
 | Pipeline | `autoqc_pkg/_run.py` | 822 | ⚠️ 模块已迁移，见 D-05 |
 | Pipeline | `autoqc_pkg/_qc_config.py` | — | ⚠️ 模块已迁移 |
 | Pipeline | `autoqc_pkg/_run_helpers.py` | — | ⚠️ 模块已迁移 |
-| 前端页面 | `DreamWeaverRunPage.tsx` | **6280** | **2762** |
+| 前端页面 | `DreamWeaverRunPage.tsx` | **6280** | **1713** |
 | 前端页面 | `DreamWeaverLibraryPage.tsx` | 1557 | 562 |
 | 前端子模块 | `dreamweaver-library/`（6 文件） | — | ~1631 |
 | 前端页面 | `DreamWeaverPage.tsx` | 1052 | 1073 |
 | 前端 hooks | `useDreamweaver*.ts`（27 个） | — | ~4128 |
-| 前端子模块 | `dreamweaver-run/`（29 文件） | ~6188 | ~10487 |
+| 前端子模块 | `dreamweaver-run/`（34 文件） | ~6188 | ~11000 |
 
 ### 后端 API 端点清单（32 个）
 
@@ -109,7 +109,7 @@
 |------|--------|------|------|------|--------------|
 | F-01 | P1 | Kling Provider Ref 前端未封装 | ✅ 已完成 | 中 | 补充 api.ts 方法与素材库 UI 入口 |
 | F-02 | P1 | Kling Provider Ref 同步前端未封装 | ✅ 已完成 | 中 | 补充 api.ts 方法与运行页 UI 入口 |
-| S-01 | P1 | DreamWeaverRunPage 巨型组件 | 🔄 进行中 | 高 | 6280→2762 行，仍需继续下沉状态和 render 函数 |
+| S-01 | P1 | DreamWeaverRunPage 巨型组件 | 🔄 进行中 | 高 | 6280→1713 行，已提取 library/pending/diagnostic/result/dialog/workbench 6 个 renderer 及 useDreamweaverRunActions hook 并全部集成，主文件接近拆分完成 |
 | P-01 | P1 | 素材库全量加载无分页 | ✅ 已完成 | 中高 | 后端加分页参数，前端改虚拟滚动或分页加载 |
 | D-01 | P2 | 后端路由文件 import 大量重复 | ✅ 已完成 | 低 | 提取公共 import 块到 `_imports.py` |
 | D-02 | P2 | 后端路由文件间存在重复业务逻辑 | ✅ 已完成 | 中 | 提取共享 helper 到 `_helpers.py` |
@@ -133,7 +133,7 @@
 | S-09 | P1 | RunPage 事件同步状态组提取 | ✅ 已完成 | 中 | 提取 eventCursor/eventSyncing 等 4 个 useState 到 `useDreamweaverEventSync` hook |
 | S-10 | P1 | RunPage renderMergedVideoPanel 提取 | ✅ 已完成 | 中 | 已提取为 `MergedVideoPanel` 组件（dreamweaver-run/MergedVideoPanel.tsx） |
 | S-11 | P1 | RunPage renderDiagnosticFrame 提取 | ✅ 已完成 | 中 | renderDiagnosticFrame 已精简为 ~10 行辅助函数，诊断面板逻辑已拆分到 diagnosticSections.tsx(679行) 和 diagnosticDialog.tsx(267行) |
-| S-12 | P2 | RunPage 其余大 render 函数提取 | 🔄 进行中 | 低 | 已提取 useDreamweaverTaskPolling/EventSyncLifecycle/RunHydration/DerivedState 4 个 hook，主文件 2762 行 |
+| S-12 | P2 | RunPage 其余大 render 函数提取 | ✅ 已完成 | 低 | 已提取 6 个 renderer（library/pending/diagnostic/result/dialog/workbench）及 useDreamweaverRunActions hook 并全部集成，主文件 1713 行 |
 | D-04 | P2 | 后端 services/library.py 1049 行拆分 | ✅ 已完成 | 中 | 拆分为 library_constants(58)+library_spec(362)+library_assets(526)+library.py(147) |
 | D-05 | P2 | autoqc_pkg/_run.py 822 行拆分 | ⚠️ 模块已迁移 | 中 | autoqc_pkg 目录已不存在，逻辑已迁移至 dreamweaver_tasks_pkg/ 和 video_generation/ |
 | S-13 | P1 | runPageHelpers.ts 巨型 helper 拆分 | ✅ 已完成 | 高 | 拆分为 runPageCore(564)+DiagnosticHelpers(681)+ConfigHelpers(355)+PropsBuilders(638)+DataTransforms(126)+Accessors(137)+FormatUtils(41)+HistoryHelpers(135)+LibraryHelpers(543) 共 9 个模块 |
@@ -202,16 +202,15 @@
 
 ### 问题
 
-`DreamWeaverRunPage.tsx` 从 6280 行降至 3028 行，已提取 27 个 `useDreamweaver*` hook 和 29 个 `dreamweaver-run/` 子模块。但主文件仍承担了：
+`DreamWeaverRunPage.tsx` 从 6280 行降至 1713 行，已提取 27 个 `useDreamweaver*` hook 和 29 个 `dreamweaver-run/` 子模块，以及 6 个 renderer（library/pending/diagnostic/result/dialog/workbench）和 `useDreamweaverRunActions` hook 并全部集成。但主文件仍承担了：
 
 - 约 30 个 useState（UI 开关、流式数据等）
 - 多个 render 函数
 - handleRun / applyStageSignal 等核心业务逻辑
-- API 调用逻辑
 
 ### 涉及文件
 
-- [DreamWeaverRunPage.tsx](file:///c:/Users/cuigu/novel_writing_agent/frontend/src/pages/DreamWeaverRunPage.tsx)（3028 行）
+- [DreamWeaverRunPage.tsx](file:///c:/Users/cuigu/novel_writing_agent/frontend/src/pages/DreamWeaverRunPage.tsx)（1713 行）
 - [dreamweaver-run/](file:///c:/Users/cuigu/novel_writing_agent/frontend/src/pages/dreamweaver-run/)（29 个子模块）
 - [useDreamweaver*.ts](file:///c:/Users/cuigu/novel_writing_agent/frontend/src/hooks/)（27 个 hook）
 

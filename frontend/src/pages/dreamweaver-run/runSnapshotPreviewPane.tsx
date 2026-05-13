@@ -145,7 +145,7 @@ export function RunSnapshotRefreshControls({
   )
 }
 
-type RunSnapshotSectionStatusProps = {
+export type RunSnapshotSectionStatusProps = {
   label: string
   onRefresh: () => void
   refreshDisabled?: boolean

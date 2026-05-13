@@ -41,7 +41,7 @@ export function DreamweaverResultLibraryHint({ message }: DreamweaverResultLibra
   )
 }
 
-type DreamweaverResultVideoSummarySectionProps = {
+export type DreamweaverResultVideoSummarySectionProps = {
   mergedVideo?: string | null
   viaSummary?: string | null
   fallbackCount: number
