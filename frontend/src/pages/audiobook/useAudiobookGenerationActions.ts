@@ -46,7 +46,6 @@ interface UseAudiobookGenerationActionsParams {
   ttsModel: TtsModel
   currentVoicePresets: VoicePreset[]
   scriptOnlyMode: boolean
-  forceRegenerateScript: boolean
   narrationStyle: NarrationStyleId
   narrationStylePrompt: string
   outputFormat: AudioOutputFormat
@@ -73,7 +72,6 @@ export const useAudiobookGenerationActions = ({
   ttsModel,
   currentVoicePresets,
   scriptOnlyMode,
-  forceRegenerateScript,
   narrationStyle,
   narrationStylePrompt,
   outputFormat,
@@ -212,7 +210,6 @@ export const useAudiobookGenerationActions = ({
           narrationStylePrompt,
           outputFormat,
           generateSubtitle,
-          forceRegenerateScript,
         }),
       )
 
@@ -243,7 +240,6 @@ export const useAudiobookGenerationActions = ({
     characterVoices,
     currentVoicePresets,
     ensureCurrentTtsModelReady,
-    forceRegenerateScript,
     generateSubtitle,
     generating,
     narrationStyle,

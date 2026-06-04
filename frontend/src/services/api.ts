@@ -2625,7 +2625,14 @@ class ApiClient {
   }
 
   getAudioLibraryPreviewUrl(fileType: 'sfx' | 'music', fileId: string) {
-    return `/api/v1/audiobook/audio-library/preview/${fileType}/${fileId}`
+    return `/api/v1/audiobook/audio-library/preview/${fileType}/${encodeURIComponent(fileId)}`
+  }
+
+  getAudioLibraryPreviewBlob(fileType: 'sfx' | 'music', fileId: string, signal?: AbortSignal) {
+    return this.client.get<Blob>(this.getAudioLibraryPreviewUrl(fileType, fileId), {
+      responseType: 'blob',
+      signal,
+    })
   }
 
   listSfxCandidates(params?: { status?: string }) {
@@ -2842,58 +2849,6 @@ class ApiClient {
     }>('/api/v1/ai/check-consistency', payload)
   }
 
-  smartDispatch(payload: {
-    user_input: string
-    context?: Record<string, unknown>
-    strategy?: string
-    use_fallback?: boolean
-    dry_run?: boolean
-  }) {
-    return this.client.post<{
-      success: boolean
-      intent?: Record<string, unknown>
-      routing?: Record<string, unknown>
-      execution?: Record<string, unknown>
-      trace?: Record<string, unknown>
-      error?: string
-    }>('/api/v1/smart-dispatch/dispatch', payload)
-  }
-
-  recommendModels(payload: {
-    user_input: string
-    context?: Record<string, unknown>
-    strategy?: string
-  }) {
-    return this.client.post<{
-      success: boolean
-      intent: Record<string, unknown>
-      candidates: Array<{
-        model_id: string
-        name: string
-        provider: string
-        score: number
-        modality: string
-        quality_score: number
-        avg_latency: number
-        cost: number
-        recommended_scenarios: string[]
-        tags: string[]
-      }>
-      recommended?: {
-        model_id: string
-        name: string
-        provider: string
-        score: number
-        modality: string
-        quality_score: number
-        avg_latency: number
-        cost: number
-        recommended_scenarios: string[]
-        tags: string[]
-      }
-      reasons: string[]
-    }>('/api/v1/smart-dispatch/recommend-models', payload)
-  }
 }
 
 export const apiClient = new ApiClient()

@@ -230,8 +230,8 @@ class TransformMixin:
 
     def _estimate_transform_timeout(self, max_tokens: int) -> int:
         """给段落改编请求设置显式超时，和动态输出预算保持一致。"""
-        estimated = int(max_tokens / 80) + 60
-        return max(90, min(180, estimated))
+        estimated = int(max_tokens / 50) + 24
+        return max(60, min(180, estimated))
 
     def _build_transform_continuity_context(self, segments: List[ScriptSegment]) -> str:
         """提取上一批结尾状态，给下一批保持剧情、角色和情绪连续性。"""

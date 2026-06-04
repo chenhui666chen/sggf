@@ -188,6 +188,17 @@ def _hydrate_audio_library_public_urls(entries: list) -> list:
     return hydrated
 
 
+def _audio_library_media_type(file_path: Path) -> str:
+    media_types = {
+        ".mp3": "audio/mpeg",
+        ".wav": "audio/wav",
+        ".ogg": "audio/ogg",
+        ".flac": "audio/flac",
+        ".m4a": "audio/mp4",
+    }
+    return media_types.get(file_path.suffix.lower(), "application/octet-stream")
+
+
 def _canonical_sfx_category(value: Any) -> str:
     raw = str(value or "").strip().lower().replace("\\", "/").strip("/")
     if not raw:
@@ -450,6 +461,10 @@ async def preview_audio_library_file(
     if not entry:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="素材未找到")
 
+    file_path = base_dir / entry["file_path"]
+    if file_path.exists():
+        return FileResponse(str(file_path), media_type=_audio_library_media_type(file_path))
+
     public_url = _resolve_audio_library_public_url(entry)
     if public_url.startswith(("http://", "https://")):
         return RedirectResponse(public_url)
@@ -457,16 +472,6 @@ async def preview_audio_library_file(
     file_path = base_dir / entry["file_path"]
     if not file_path.exists():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="文件不存在")
-
-    media_types = {
-        ".mp3": "audio/mpeg",
-        ".wav": "audio/wav",
-        ".ogg": "audio/ogg",
-        ".flac": "audio/flac",
-        ".m4a": "audio/mp4",
-    }
-    media_type = media_types.get(file_path.suffix.lower(), "application/octet-stream")
-    return FileResponse(str(file_path), media_type=media_type)
 
 
 class SfxSearchRequest(BaseModel):

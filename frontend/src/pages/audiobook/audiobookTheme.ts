@@ -43,6 +43,21 @@ export const audiobookColors = {
   pendingText: '#9e9e9e',
 } as const
 
+export const audiobookPanelSx = {
+  borderRadius: 2,
+  border: `1px solid ${audiobookColors.surfaceBorder}`,
+  backgroundColor: 'rgba(255,255,255,0.94)',
+  boxShadow: '0 16px 36px rgba(31, 41, 55, 0.08)',
+} as const
+
+export const audiobookPanelHeaderSx = {
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'space-between',
+  gap: 1.5,
+  mb: 2,
+} as const
+
 export const audiobookColorRoles = {
   destructiveAction: {
     main: audiobookColors.dangerMain,

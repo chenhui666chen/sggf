@@ -15,7 +15,7 @@ class AudiobookProjectCreate(BaseModel):
     voice_config: Optional[List["CharacterVoiceConfig"]] = None
     tts_model: Optional[str] = "qwen3-tts-instruct-flash"  # TTS 模型（qwen3-tts-instruct-flash / cosyvoice-v3.5-plus）
     generation_mode: str = "full"  # full: 直接生成音频; script_only: 仅生成剧本+评审
-    force_regenerate_script: bool = False  # 🆕 是否强制重新生成剧本（覆盖已有剧本）
+    force_regenerate_script: bool = True  # 是否强制重新生成剧本（覆盖已有剧本）
     narration_style: Optional[str] = "professional"  # 叙事风格: professional/dramatic/relaxing/expressive/custom
     narration_style_prompt: Optional[str] = None  # 自定义叙事风格prompt
     output_format: Optional[str] = "mp3"  # mp3/wav/m4b

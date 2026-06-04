@@ -20,6 +20,7 @@ interface ScriptSegmentCardProps {
   segment: ScriptSegment
   index: number
   detailsOpen: boolean
+  selected?: boolean
   reviewMode: boolean
   review?: { quality_score?: number; needs_regenerate?: boolean }
   previewingType: PreviewType | null
@@ -31,12 +32,14 @@ interface ScriptSegmentCardProps {
   onReview: (index: number, score: number) => void
   onToggleDetails: (index: number) => void
   onUpdateSegment: (index: number, patch: Partial<ScriptSegment>) => void
+  onSelect?: (index: number) => void
 }
 
 const ScriptSegmentCard = ({
   segment,
   index,
   detailsOpen,
+  selected = false,
   reviewMode,
   review,
   previewingType,
@@ -48,9 +51,24 @@ const ScriptSegmentCard = ({
   onReview,
   onToggleDetails,
   onUpdateSegment,
+  onSelect,
 }: ScriptSegmentCardProps) => {
   return (
-    <ListItem alignItems="flex-start" sx={{ mb: 1 }}>
+    <ListItem
+      alignItems="flex-start"
+      onFocusCapture={() => onSelect?.(index)}
+      onClickCapture={() => onSelect?.(index)}
+      sx={{
+        mb: 1,
+        border: '1px solid',
+        borderColor: selected ? 'primary.main' : 'transparent',
+        borderRadius: 1,
+        bgcolor: selected ? 'rgba(37, 99, 235, 0.06)' : '#ffffff',
+        contentVisibility: 'auto',
+        containIntrinsicSize: '220px',
+        transition: 'background-color 120ms ease, border-color 120ms ease',
+      }}
+    >
       <Box sx={{ width: '100%' }}>
         <Typography variant="caption" color="text.secondary">
           {formatScriptSegmentSummary(segment, index)}

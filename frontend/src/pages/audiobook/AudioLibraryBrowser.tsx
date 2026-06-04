@@ -1,16 +1,16 @@
-import { useCallback, useEffect, useState } from 'react'
+import { memo, useCallback, useEffect, useRef, useState } from 'react'
 import {
   Box,
   Button,
   Chip,
   CircularProgress,
+  Collapse,
   Dialog,
   DialogContent,
   DialogTitle,
   FormControl,
   IconButton,
   InputLabel,
-  List,
   ListItemButton,
   ListItemText,
   MenuItem,
@@ -21,6 +21,7 @@ import {
   TextField,
   Typography,
 } from '@mui/material'
+import { useVirtualizer } from '@tanstack/react-virtual'
 import CloseIcon from '@mui/icons-material/Close'
 import GraphicEqIcon from '@mui/icons-material/GraphicEq'
 import MusicNoteIcon from '@mui/icons-material/MusicNote'
@@ -30,14 +31,25 @@ import PlaylistAddCheckIcon from '@mui/icons-material/PlaylistAddCheck'
 import SearchIcon from '@mui/icons-material/Search'
 import UploadFileIcon from '@mui/icons-material/UploadFile'
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline'
+import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined'
 import { useSelector } from 'react-redux'
 
 import { apiClient } from '../../services/api'
 import type { RootState } from '../../store/store'
 import { audiobookColors } from './audiobookTheme'
+import {
+  buildAudioLibraryDetailItems,
+  formatAudioAssetNameLabel,
+  formatAudioKeywordLabel,
+  formatMusicDurationLabel,
+  formatSfxCategoryLabel,
+  getVisibleSfxScenes,
+  getVisibleSfxTags,
+} from './audioLibraryDisplay'
 import AudioLibraryPurgeDialog from './AudioLibraryPurgeDialog'
 import SfxCandidateReviewDialog from './SfxCandidateReviewDialog'
 import SfxManifestImportDialog from './SfxManifestImportDialog'
+import { useAudiobookAudioPlayback } from './useAudiobookAudioPlayback'
 
 interface AudioLibraryBrowserProps {
   open: boolean
@@ -84,51 +96,229 @@ interface MusicEntry extends AudioLibraryMetadata {
   variant: number | null
 }
 
-const formatQualityLabel = (entry: AudioLibraryMetadata) => {
-  const score = typeof entry.quality_score === 'number' ? entry.quality_score.toFixed(1) : '未评分'
-  const grade = entry.quality_grade ? `/${entry.quality_grade}` : ''
-  const status = entry.quality_status ? ` ${entry.quality_status}` : ''
-  return `质量 ${score}${grade}${status}`
+type AudioLibraryEntry = SfxEntry | MusicEntry
+type AudioLibraryType = 'sfx' | 'music'
+
+const detailButtonSx = {
+  mt: 0.75,
+  px: 0,
+  minWidth: 0,
+  justifyContent: 'flex-start',
+  fontSize: 12,
 }
 
-const formatCommercialLabel = (entry: AudioLibraryMetadata) => {
-  if (entry.license_commercial === true) return '允许商用'
-  if (entry.license_commercial === false) return '非商用'
-  return '商用未知'
+const estimateLibraryRowHeight = (entry: AudioLibraryEntry, expanded: boolean) => {
+  const tagRows = 'tags' in entry
+    ? Math.ceil((2 + getVisibleSfxTags(entry.tags).slice(0, 3).length) / 4)
+    : 1
+  return expanded ? 188 + tagRows * 24 : 92 + tagRows * 20
 }
 
-const formatAttributionLabel = (entry: AudioLibraryMetadata) => {
-  if (entry.attribution_required === true) return '需署名'
-  if (entry.attribution_required === false) return '免署名'
-  return '署名未知'
-}
-
-const formatDateLabel = (value?: string) => {
-  if (!value) return ''
-  return value.slice(0, 10)
-}
-
-const renderMetadata = (entry: AudioLibraryMetadata & { source: string }) => (
-  <>
-    <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap', mt: 0.5 }}>
-      <Chip label={formatQualityLabel(entry)} size="small" color={entry.quality_status === 'accepted' ? 'success' : 'default'} variant="outlined" />
-      <Chip label={`授权 ${entry.license || '未记录'}`} size="small" variant="outlined" title={entry.license_url || undefined} />
-      <Chip label={formatCommercialLabel(entry)} size="small" variant="outlined" />
-      <Chip label={formatAttributionLabel(entry)} size="small" variant="outlined" />
-      {entry.author && (
-        <Chip label={`作者 ${entry.author}`} size="small" variant="outlined" title={entry.author_url || undefined} />
-      )}
-      <Chip label={`来源 ${entry.source || '本地'}`} size="small" variant="outlined" title={entry.source_url || entry.source_id || undefined} />
-      {entry.retrieved_at && <Chip label={`入库 ${formatDateLabel(entry.retrieved_at)}`} size="small" variant="outlined" />}
-      {entry.license_checked_at && <Chip label={`授权检查 ${formatDateLabel(entry.license_checked_at)}`} size="small" variant="outlined" />}
-    </Box>
-    {entry.attribution_text && (
-      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
-        {entry.attribution_text}
+const renderDetailPanel = (entry: AudioLibraryMetadata & { source: string }) => (
+  <Box
+    sx={{
+      mt: 1,
+      display: 'grid',
+      gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, minmax(0, 1fr))' },
+      gap: 0.75,
+      color: 'text.secondary',
+    }}
+  >
+    {buildAudioLibraryDetailItems(entry).map((item) => (
+      <Typography
+        key={item.key}
+        variant="caption"
+        title={item.title}
+        sx={{
+          display: 'block',
+          overflowWrap: 'anywhere',
+        }}
+      >
+        <Box component="span" sx={{ color: 'text.primary', fontWeight: 600 }}>
+          {item.label}：
+        </Box>
+        {item.value}
       </Typography>
-    )}
-  </>
+    ))}
+  </Box>
 )
+
+interface AudioLibraryRowProps {
+  entry: AudioLibraryEntry
+  fileType: AudioLibraryType
+  isAdmin: boolean
+  isExpanded: boolean
+  isPlaying: boolean
+  isPreviewLoading: boolean
+  onDeleteAsset: (fileType: AudioLibraryType, id: string) => void
+  onPlay: (fileType: AudioLibraryType, id: string) => void
+  onToggleDetail: (fileType: AudioLibraryType, id: string) => void
+}
+
+const AudioLibraryRow = memo(({
+  entry,
+  fileType,
+  isAdmin,
+  isExpanded,
+  isPlaying,
+  isPreviewLoading,
+  onDeleteAsset,
+  onPlay,
+  onToggleDetail,
+}: AudioLibraryRowProps) => {
+  const isSfx = fileType === 'sfx'
+  const sfxEntry = isSfx ? entry as SfxEntry : null
+  const musicEntry = isSfx ? null : entry as MusicEntry
+
+  return (
+    <ListItemButton
+      component="div"
+      onClick={() => { onPlay(fileType, entry.id) }}
+      sx={{ borderBottom: '1px solid', borderColor: 'divider', alignItems: 'flex-start', py: 1.25 }}
+    >
+      <IconButton size="small" disabled={isPreviewLoading} sx={{ mr: 1, mt: 0.25 }}>
+        {isPreviewLoading ? <CircularProgress size={18} /> : isPlaying ? <PauseIcon /> : <PlayArrowIcon />}
+      </IconButton>
+      <ListItemText
+        primary={
+          isSfx
+            ? formatAudioAssetNameLabel(sfxEntry?.name)
+            : `${formatAudioKeywordLabel(musicEntry?.style)} - ${formatAudioKeywordLabel(musicEntry?.mood)}${musicEntry?.variant != null ? `（变体 ${musicEntry.variant}）` : ''}`
+        }
+        primaryTypographyProps={{ sx: { fontWeight: 600, overflowWrap: 'anywhere' } }}
+        secondary={
+          <>
+            <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap', mt: 0.5 }}>
+              {sfxEntry ? (
+                <>
+                  <Chip label={`分类：${formatSfxCategoryLabel(sfxEntry.category)}`} size="small" variant="outlined" />
+                  {getVisibleSfxScenes(sfxEntry.scenes).slice(0, 2).map((scene) => (
+                    <Chip key={scene} label={`场景：${formatAudioKeywordLabel(scene)}`} size="small" variant="outlined" />
+                  ))}
+                  {getVisibleSfxTags(sfxEntry.tags).slice(0, 3).map((tag) => (
+                    <Chip key={tag} label={formatAudioKeywordLabel(tag)} size="small" sx={{ backgroundColor: audiobookColors.brandFaint }} />
+                  ))}
+                </>
+              ) : musicEntry ? (
+                <>
+                  <Chip label={`风格：${formatAudioKeywordLabel(musicEntry.style)}`} size="small" variant="outlined" />
+                  <Chip label={`情绪：${formatAudioKeywordLabel(musicEntry.mood)}`} size="small" sx={{ backgroundColor: audiobookColors.brandFaint }} />
+                  <Chip label={formatMusicDurationLabel(musicEntry.duration)} size="small" />
+                  <Chip label={`节奏：${formatAudioKeywordLabel(musicEntry.tempo)}`} size="small" />
+                </>
+              ) : null}
+            </Box>
+            <Button
+              size="small"
+              variant="text"
+              startIcon={<InfoOutlinedIcon fontSize="small" />}
+              onClick={(event) => {
+                event.stopPropagation()
+                onToggleDetail(fileType, entry.id)
+              }}
+              sx={detailButtonSx}
+            >
+              {isExpanded ? '收起详细信息' : '详细信息'}
+            </Button>
+            <Collapse in={isExpanded} timeout={0} unmountOnExit>
+              {renderDetailPanel(entry)}
+            </Collapse>
+          </>
+        }
+        secondaryTypographyProps={{ component: 'div' }}
+      />
+      {isAdmin && (
+        <IconButton
+          size="small"
+          color="error"
+          onClick={(event) => {
+            event.stopPropagation()
+            onDeleteAsset(fileType, entry.id)
+          }}
+        >
+          <DeleteOutlineIcon fontSize="small" />
+        </IconButton>
+      )}
+    </ListItemButton>
+  )
+})
+
+interface AudioLibraryVirtualListProps<T extends AudioLibraryEntry> {
+  entries: T[]
+  fileType: AudioLibraryType
+  isAdmin: boolean
+  playingId: string | null
+  previewLoadingKey: string | null
+  expandedDetailIds: Record<string, boolean>
+  onDeleteAsset: (fileType: AudioLibraryType, id: string) => void
+  onPlay: (fileType: AudioLibraryType, id: string) => void
+  onToggleDetail: (fileType: AudioLibraryType, id: string) => void
+}
+
+const AudioLibraryVirtualList = <T extends AudioLibraryEntry>({
+  entries,
+  fileType,
+  isAdmin,
+  playingId,
+  previewLoadingKey,
+  expandedDetailIds,
+  onDeleteAsset,
+  onPlay,
+  onToggleDetail,
+}: AudioLibraryVirtualListProps<T>) => {
+  const parentRef = useRef<HTMLDivElement>(null)
+  const rowVirtualizer = useVirtualizer({
+    count: entries.length,
+    getScrollElement: () => parentRef.current,
+    estimateSize: (index) => {
+      const entry = entries[index]
+      return estimateLibraryRowHeight(entry, Boolean(expandedDetailIds[`${fileType}:${entry.id}`]))
+    },
+    getItemKey: (index) => entries[index]?.id || index,
+    overscan: 8,
+  })
+
+  return (
+    <Paper
+      ref={parentRef}
+      variant="outlined"
+      sx={{ height: '58vh', minHeight: 320, overflow: 'auto' }}
+    >
+      <Box sx={{ height: rowVirtualizer.getTotalSize(), position: 'relative' }}>
+        {rowVirtualizer.getVirtualItems().map((virtualRow) => {
+          const entry = entries[virtualRow.index]
+          const detailKey = `${fileType}:${entry.id}`
+          return (
+            <Box
+              key={virtualRow.key}
+              ref={rowVirtualizer.measureElement}
+              data-index={virtualRow.index}
+              sx={{
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                width: '100%',
+                transform: `translateY(${virtualRow.start}px)`,
+              }}
+            >
+              <AudioLibraryRow
+                entry={entry}
+                fileType={fileType}
+                isAdmin={isAdmin}
+                isExpanded={Boolean(expandedDetailIds[detailKey])}
+                isPlaying={playingId === entry.id}
+                isPreviewLoading={previewLoadingKey === detailKey}
+                onDeleteAsset={onDeleteAsset}
+                onPlay={onPlay}
+                onToggleDetail={onToggleDetail}
+              />
+            </Box>
+          )
+        })}
+      </Box>
+    </Paper>
+  )
+}
 
 const AudioLibraryBrowser = ({ open, onClose }: AudioLibraryBrowserProps) => {
   const { user } = useSelector((state: RootState) => state.auth)
@@ -147,7 +337,11 @@ const AudioLibraryBrowser = ({ open, onClose }: AudioLibraryBrowserProps) => {
   const [musicMoodFilter, setMusicMoodFilter] = useState('')
   const [searchText, setSearchText] = useState('')
   const [playingId, setPlayingId] = useState<string | null>(null)
-  const [audioEl, setAudioEl] = useState<HTMLAudioElement | null>(null)
+  const [previewLoadingKey, setPreviewLoadingKey] = useState<string | null>(null)
+  const [expandedDetailIds, setExpandedDetailIds] = useState<Record<string, boolean>>({})
+  const playbackRequestIdRef = useRef(0)
+  const previewAbortControllerRef = useRef<AbortController | null>(null)
+  const { playManagedBlob, stopManagedPlayback } = useAudiobookAudioPlayback()
 
   const [candidateReviewOpen, setCandidateReviewOpen] = useState(false)
   const [manifestImportOpen, setManifestImportOpen] = useState(false)
@@ -199,30 +393,65 @@ const AudioLibraryBrowser = ({ open, onClose }: AudioLibraryBrowserProps) => {
     else loadMusic()
   }, [open, tab, loadSfx, loadMusic])
 
-  useEffect(() => {
-    return () => { audioEl?.pause(); setAudioEl(null) }
-  }, [audioEl])
+  useEffect(() => () => {
+    previewAbortControllerRef.current?.abort()
+  }, [])
 
-  const handlePlay = (fileType: 'sfx' | 'music', id: string) => {
-    if (playingId === id) {
-      audioEl?.pause()
+  const handlePlay = useCallback(async (fileType: AudioLibraryType, id: string) => {
+    const requestId = playbackRequestIdRef.current + 1
+    playbackRequestIdRef.current = requestId
+    const previewKey = `${fileType}:${id}`
+
+    if (playingId === id || previewLoadingKey === previewKey) {
+      previewAbortControllerRef.current?.abort()
+      previewAbortControllerRef.current = null
+      stopManagedPlayback()
       setPlayingId(null)
-      setAudioEl(null)
+      setPreviewLoadingKey(null)
       return
     }
-    audioEl?.pause()
-    const url = apiClient.getAudioLibraryPreviewUrl(fileType, id)
-    const el = new Audio(url)
-    el.addEventListener('ended', () => { setPlayingId(null); setAudioEl(null) })
-    el.play().catch(() => { /* ignore */ })
-    setAudioEl(el)
+
+    previewAbortControllerRef.current?.abort()
+    const abortController = new AbortController()
+    previewAbortControllerRef.current = abortController
+    stopManagedPlayback()
     setPlayingId(id)
-  }
+    setPreviewLoadingKey(previewKey)
+    try {
+      const res = await apiClient.getAudioLibraryPreviewBlob(fileType, id, abortController.signal)
+      if (requestId !== playbackRequestIdRef.current) return
+      setPreviewLoadingKey(null)
+      await playManagedBlob(res.data, {
+        onEnded: () => {
+          if (requestId === playbackRequestIdRef.current) setPlayingId(null)
+        },
+      })
+    } catch {
+      if (requestId === playbackRequestIdRef.current) {
+        setPlayingId(null)
+        setPreviewLoadingKey(null)
+      }
+    } finally {
+      if (previewAbortControllerRef.current === abortController) previewAbortControllerRef.current = null
+    }
+  }, [playManagedBlob, playingId, previewLoadingKey, stopManagedPlayback])
+
+  const toggleDetail = useCallback((fileType: AudioLibraryType, id: string) => {
+    const key = `${fileType}:${id}`
+    setExpandedDetailIds((current) => ({
+      ...current,
+      [key]: !current[key],
+    }))
+  }, [])
 
   const handleClose = () => {
-    audioEl?.pause()
-    setAudioEl(null)
+    playbackRequestIdRef.current += 1
+    previewAbortControllerRef.current?.abort()
+    previewAbortControllerRef.current = null
+    stopManagedPlayback()
     setPlayingId(null)
+    setPreviewLoadingKey(null)
+    setExpandedDetailIds({})
     setSearchText('')
     setSfxCategoryFilter('')
     setSfxSceneFilter('')
@@ -234,7 +463,7 @@ const AudioLibraryBrowser = ({ open, onClose }: AudioLibraryBrowserProps) => {
     onClose()
   }
 
-  const handleDeleteAsset = async (fileType: 'sfx' | 'music', id: string) => {
+  const handleDeleteAsset = useCallback(async (fileType: AudioLibraryType, id: string) => {
     if (!isAdmin) return
     if (!window.confirm('确认删除该素材？此操作会从公共素材库移除。')) return
     try {
@@ -247,10 +476,10 @@ const AudioLibraryBrowser = ({ open, onClose }: AudioLibraryBrowserProps) => {
     } catch {
       /* ignore */
     }
-  }
+  }, [isAdmin, loadMusic, loadSfx])
 
   return (
-    <Dialog open={open} onClose={handleClose} maxWidth="md" fullWidth>
+    <Dialog open={open} onClose={handleClose} maxWidth="lg" fullWidth>
       <DialogTitle sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         音频素材库
         <IconButton onClick={handleClose} size="small">
@@ -263,18 +492,18 @@ const AudioLibraryBrowser = ({ open, onClose }: AudioLibraryBrowserProps) => {
           <Tab icon={<MusicNoteIcon />} iconPosition="start" label="音乐库" />
         </Tabs>
 
-        <Box sx={{ display: 'flex', gap: 1, mb: 2, alignItems: 'center' }}>
+        <Box sx={{ display: 'flex', gap: 1, mb: 2, alignItems: 'center', flexWrap: 'wrap' }}>
           <TextField
             size="small"
             placeholder="搜索素材..."
             value={searchText}
             onChange={(e) => setSearchText(e.target.value)}
             InputProps={{ startAdornment: <SearchIcon sx={{ mr: 1, color: 'text.secondary' }} /> }}
-            sx={{ flex: 1 }}
+            sx={{ flex: '1 1 320px' }}
           />
           {tab === 0 && (
             <>
-              <FormControl size="small" sx={{ minWidth: 160 }}>
+              <FormControl size="small" sx={{ minWidth: 180, flex: { xs: '1 1 160px', sm: '0 0 180px' } }}>
                 <InputLabel>分类</InputLabel>
                 <Select
                   label="分类"
@@ -283,11 +512,11 @@ const AudioLibraryBrowser = ({ open, onClose }: AudioLibraryBrowserProps) => {
                 >
                   <MenuItem value="">全部</MenuItem>
                   {sfxCategories.map((c) => (
-                    <MenuItem key={c} value={c}>{c}</MenuItem>
+                    <MenuItem key={c} value={c}>{formatSfxCategoryLabel(c)}</MenuItem>
                   ))}
                 </Select>
               </FormControl>
-              <FormControl size="small" sx={{ minWidth: 140 }}>
+              <FormControl size="small" sx={{ minWidth: 160, flex: { xs: '1 1 150px', sm: '0 0 160px' } }}>
                 <InputLabel>场景</InputLabel>
                 <Select
                   label="场景"
@@ -295,8 +524,8 @@ const AudioLibraryBrowser = ({ open, onClose }: AudioLibraryBrowserProps) => {
                   onChange={(e) => setSfxSceneFilter(e.target.value)}
                 >
                   <MenuItem value="">全部</MenuItem>
-                  {sfxScenes.map((scene) => (
-                    <MenuItem key={scene} value={scene}>{scene}</MenuItem>
+                  {getVisibleSfxScenes(sfxScenes).map((scene) => (
+                    <MenuItem key={scene} value={scene}>{formatAudioKeywordLabel(scene)}</MenuItem>
                   ))}
                 </Select>
               </FormControl>
@@ -304,7 +533,7 @@ const AudioLibraryBrowser = ({ open, onClose }: AudioLibraryBrowserProps) => {
           )}
           {tab === 1 && (
             <>
-              <FormControl size="small" sx={{ minWidth: 120 }}>
+              <FormControl size="small" sx={{ minWidth: 150, flex: { xs: '1 1 140px', sm: '0 0 150px' } }}>
                 <InputLabel>风格</InputLabel>
                 <Select
                   label="风格"
@@ -313,11 +542,11 @@ const AudioLibraryBrowser = ({ open, onClose }: AudioLibraryBrowserProps) => {
                 >
                   <MenuItem value="">全部</MenuItem>
                   {musicStyles.map((s) => (
-                    <MenuItem key={s} value={s}>{s}</MenuItem>
+                    <MenuItem key={s} value={s}>{formatAudioKeywordLabel(s)}</MenuItem>
                   ))}
                 </Select>
               </FormControl>
-              <FormControl size="small" sx={{ minWidth: 120 }}>
+              <FormControl size="small" sx={{ minWidth: 150, flex: { xs: '1 1 140px', sm: '0 0 150px' } }}>
                 <InputLabel>情绪</InputLabel>
                 <Select
                   label="情绪"
@@ -326,7 +555,7 @@ const AudioLibraryBrowser = ({ open, onClose }: AudioLibraryBrowserProps) => {
                 >
                   <MenuItem value="">全部</MenuItem>
                   {musicMoods.map((m) => (
-                    <MenuItem key={m} value={m}>{m}</MenuItem>
+                    <MenuItem key={m} value={m}>{formatAudioKeywordLabel(m)}</MenuItem>
                   ))}
                 </Select>
               </FormControl>
@@ -369,112 +598,49 @@ const AudioLibraryBrowser = ({ open, onClose }: AudioLibraryBrowserProps) => {
             <CircularProgress size={28} />
           </Box>
         ) : tab === 0 ? (
-          <Paper variant="outlined" sx={{ maxHeight: 480, overflow: 'auto' }}>
+          <>
             {sfxEntries.length === 0 ? (
-              <Typography variant="body2" color="text.secondary" sx={{ p: 2, textAlign: 'center' }}>
+              <Paper variant="outlined">
+                <Typography variant="body2" color="text.secondary" sx={{ p: 2, textAlign: 'center' }}>
                 暂无音效素材
-              </Typography>
+                </Typography>
+              </Paper>
             ) : (
-              <List dense disablePadding>
-                {sfxEntries.map((entry) => (
-                  <ListItemButton
-                    key={entry.id}
-                    onClick={() => handlePlay('sfx', entry.id)}
-                    sx={{ borderBottom: '1px solid', borderColor: 'divider' }}
-                  >
-                    <IconButton size="small" sx={{ mr: 1 }}>
-                      {playingId === entry.id ? <PauseIcon /> : <PlayArrowIcon />}
-                    </IconButton>
-                    <ListItemText
-                      primary={entry.name}
-                      secondary={
-                        <>
-                          <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap', mt: 0.5 }}>
-                            <Chip label={entry.category} size="small" variant="outlined" />
-                            {(entry.scenes || []).slice(0, 2).map((scene) => (
-                              <Chip key={scene} label={scene} size="small" variant="outlined" />
-                            ))}
-                            {entry.tags.slice(0, 3).map((t) => (
-                              <Chip key={t} label={t} size="small" sx={{ backgroundColor: audiobookColors.brandFaint }} />
-                            ))}
-                          </Box>
-                          {renderMetadata(entry)}
-                        </>
-                      }
-                      secondaryTypographyProps={{ component: 'div' }}
-                    />
-                    {isAdmin && (
-                      <IconButton
-                        size="small"
-                        color="error"
-                        onClick={(event) => {
-                          event.stopPropagation()
-                          void handleDeleteAsset('sfx', entry.id)
-                        }}
-                      >
-                        <DeleteOutlineIcon fontSize="small" />
-                      </IconButton>
-                    )}
-                    <Typography variant="caption" color="text.secondary">
-                      {entry.source}
-                    </Typography>
-                  </ListItemButton>
-                ))}
-              </List>
+              <AudioLibraryVirtualList
+                entries={sfxEntries}
+                fileType="sfx"
+                isAdmin={isAdmin}
+                playingId={playingId}
+                previewLoadingKey={previewLoadingKey}
+                expandedDetailIds={expandedDetailIds}
+                onDeleteAsset={handleDeleteAsset}
+                onPlay={handlePlay}
+                onToggleDetail={toggleDetail}
+              />
             )}
-          </Paper>
+          </>
         ) : (
-          <Paper variant="outlined" sx={{ maxHeight: 480, overflow: 'auto' }}>
+          <>
             {musicEntries.length === 0 ? (
-              <Typography variant="body2" color="text.secondary" sx={{ p: 2, textAlign: 'center' }}>
-                暂无音乐素材
-              </Typography>
+              <Paper variant="outlined">
+                <Typography variant="body2" color="text.secondary" sx={{ p: 2, textAlign: 'center' }}>
+                  暂无音乐素材
+                </Typography>
+              </Paper>
             ) : (
-              <List dense disablePadding>
-                {musicEntries.map((entry) => (
-                  <ListItemButton
-                    key={entry.id}
-                    onClick={() => handlePlay('music', entry.id)}
-                    sx={{ borderBottom: '1px solid', borderColor: 'divider' }}
-                  >
-                    <IconButton size="small" sx={{ mr: 1 }}>
-                      {playingId === entry.id ? <PauseIcon /> : <PlayArrowIcon />}
-                    </IconButton>
-                    <ListItemText
-                      primary={`${entry.style} - ${entry.mood}${entry.variant != null ? ` (V${entry.variant})` : ''}`}
-                      secondary={
-                        <>
-                          <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap', mt: 0.5 }}>
-                            <Chip label={entry.style} size="small" variant="outlined" />
-                            <Chip label={entry.mood} size="small" sx={{ backgroundColor: audiobookColors.brandFaint }} />
-                            <Chip label={`${entry.duration}s`} size="small" />
-                            <Chip label={entry.tempo} size="small" />
-                          </Box>
-                          {renderMetadata(entry)}
-                        </>
-                      }
-                      secondaryTypographyProps={{ component: 'div' }}
-                    />
-                    {isAdmin && (
-                      <IconButton
-                        size="small"
-                        color="error"
-                        onClick={(event) => {
-                          event.stopPropagation()
-                          void handleDeleteAsset('music', entry.id)
-                        }}
-                      >
-                        <DeleteOutlineIcon fontSize="small" />
-                      </IconButton>
-                    )}
-                    <Typography variant="caption" color="text.secondary">
-                      {entry.source}
-                    </Typography>
-                  </ListItemButton>
-                ))}
-              </List>
+              <AudioLibraryVirtualList
+                entries={musicEntries}
+                fileType="music"
+                isAdmin={isAdmin}
+                playingId={playingId}
+                previewLoadingKey={previewLoadingKey}
+                expandedDetailIds={expandedDetailIds}
+                onDeleteAsset={handleDeleteAsset}
+                onPlay={handlePlay}
+                onToggleDetail={toggleDetail}
+              />
             )}
-          </Paper>
+          </>
         )}
       </DialogContent>
       <SfxCandidateReviewDialog

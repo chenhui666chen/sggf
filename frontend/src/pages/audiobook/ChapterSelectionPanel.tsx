@@ -4,12 +4,11 @@ import {
   Box,
   Button,
   Checkbox,
+  Chip,
   IconButton,
   List,
   ListItem,
   ListItemText,
-  Paper,
-  Typography,
 } from '@mui/material'
 import MoreVertIcon from '@mui/icons-material/MoreVert'
 
@@ -32,11 +31,22 @@ const ChapterSelectionPanel = ({
   onOpenChapterMenu,
 }: ChapterSelectionPanelProps) => (
   <>
-    <Typography variant="subtitle1" sx={{ mb: 1 }}>
-      章节选择
-    </Typography>
-
-    <Box sx={{ mb: 2, display: 'flex', gap: 1 }}>
+    <Box
+      sx={{
+        mb: 1.5,
+        display: 'flex',
+        justifyContent: 'space-between',
+        gap: 1,
+        alignItems: 'center',
+        flexWrap: 'wrap',
+      }}
+    >
+      <Chip
+        size="small"
+        variant="outlined"
+        label={`${selectedChapters.length}/${chapters.length} 已选`}
+        color={selectedChapters.length > 0 ? 'primary' : 'default'}
+      />
       <Button
         variant="outlined"
         size="small"
@@ -47,14 +57,16 @@ const ChapterSelectionPanel = ({
       </Button>
     </Box>
 
-    <Paper
-      variant="outlined"
+    <Box
       sx={{
-        maxHeight: 400,
+        maxHeight: { xs: 360, lg: 430 },
         overflow: 'auto',
+        borderRadius: 1.5,
+        border: `1px solid ${audiobookColors.surfaceBorder}`,
+        backgroundColor: 'rgba(255,255,255,0.7)',
       }}
     >
-      <List>
+      <List disablePadding>
         {chapters.map((chapter) => (
           <ListItem
             key={chapter.id}
@@ -72,6 +84,12 @@ const ChapterSelectionPanel = ({
             }
             sx={{
               cursor: 'pointer',
+              py: 1,
+              px: 1.25,
+              borderBottom: `1px solid ${audiobookColors.surfaceBorder}`,
+              '&:last-of-type': {
+                borderBottom: 0,
+              },
               '&:hover': {
                 backgroundColor: audiobookColors.brandSoft,
               },
@@ -87,11 +105,28 @@ const ChapterSelectionPanel = ({
             <ListItemText
               primary={`第${chapter.chapter_number}章 - ${chapter.title}`}
               secondary={chapter.content ? `${chapter.content.slice(0, 50)}...` : '暂无内容'}
+              primaryTypographyProps={{
+                sx: {
+                  fontWeight: 600,
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                  pr: 1,
+                },
+              }}
+              secondaryTypographyProps={{
+                sx: {
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                  pr: 1,
+                },
+              }}
             />
           </ListItem>
         ))}
       </List>
-    </Paper>
+    </Box>
   </>
 )
 

@@ -124,8 +124,6 @@ const AudiobookPage = () => {
     setAudioFxConfig,
     scriptOnlyMode,
     setScriptOnlyMode,
-    forceRegenerateScript,
-    setForceRegenerateScript,
     ttsModel,
     setTtsModel,
     narrationStyle,
@@ -751,8 +749,6 @@ const AudiobookPage = () => {
     setShowHistory,
     scriptOnlyMode,
     setScriptOnlyMode,
-    forceRegenerateScript,
-    setForceRegenerateScript,
     narrationStyle,
     setNarrationStyle,
     narrationStylePrompt,
@@ -860,7 +856,6 @@ const AudiobookPage = () => {
     ttsModel,
     currentVoicePresets,
     scriptOnlyMode,
-    forceRegenerateScript,
     narrationStyle,
     narrationStylePrompt,
     outputFormat,
@@ -939,8 +934,6 @@ const AudiobookPage = () => {
             chapterCount={chapters.length}
             scriptOnlyMode={scriptOnlyMode}
             onScriptOnlyModeChange={setScriptOnlyMode}
-            forceRegenerateScript={forceRegenerateScript}
-            onForceRegenerateScriptChange={setForceRegenerateScript}
             ttsModel={ttsModel}
             ttsModelOptions={ttsModelOptions}
             voiceCatalogMeta={voiceCatalogMeta}

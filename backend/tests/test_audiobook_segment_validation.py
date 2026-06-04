@@ -486,8 +486,21 @@ async def test_transform_paragraph_validates_llm_segments():
     assert segments[0].voice_params["pause_after"] == 2.0
     assert harness.llm_client.calls[0]["model"] == "deepseek-v4-flash"
     assert TRANSFORM_OUTPUT_TOKEN_MIN <= harness.llm_client.calls[0]["max_tokens"] < 32000
-    assert harness.llm_client.calls[0]["timeout"] >= 90
+    assert 45 <= harness.llm_client.calls[0]["timeout"] <= 75
     assert harness.llm_client.calls[0]["max_retries"] == 2
+
+
+def test_transform_timeout_uses_fast_retry_budget_for_short_batches():
+    from app.services.audiobook.script_adapter_pkg._transform import (
+        TRANSFORM_OUTPUT_TOKEN_MAX,
+        TRANSFORM_OUTPUT_TOKEN_MIN,
+        TransformMixin,
+    )
+
+    harness = TransformMixin()
+
+    assert harness._estimate_transform_timeout(TRANSFORM_OUTPUT_TOKEN_MIN) == 60
+    assert harness._estimate_transform_timeout(TRANSFORM_OUTPUT_TOKEN_MAX) == 180
 
 
 @pytest.mark.asyncio

@@ -81,22 +81,55 @@ const CharacterVoiceCard = ({
       alignItems="flex-start"
       sx={{
         alignItems: 'stretch',
+        py: 1.25,
+        px: 1.25,
+        borderBottom: `1px solid ${audiobookColors.surfaceBorder}`,
+        '&:last-of-type': {
+          borderBottom: 0,
+        },
         '&:hover': {
           backgroundColor: audiobookColors.brandFaint,
         },
       }}
     >
       <Box sx={{ width: '100%' }}>
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
-          <Box>
-            <Typography variant="subtitle2">{characterVoice.name}</Typography>
+        <Box
+          sx={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'flex-start',
+            gap: 1,
+            mb: 1,
+          }}
+        >
+          <Box sx={{ minWidth: 0 }}>
+            <Typography
+              variant="subtitle2"
+              sx={{
+                fontWeight: 700,
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {characterVoice.name}
+            </Typography>
             {(characterVoice.role || characterVoice.gender) && (
-              <Typography variant="caption" color="text.secondary">
+              <Typography
+                variant="caption"
+                color="text.secondary"
+                sx={{
+                  display: 'block',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                }}
+              >
                 {characterVoice.role || '角色'} · {characterVoice.gender || '性别未设定'}
               </Typography>
             )}
           </Box>
-          <Box sx={{ display: 'flex', gap: 0.5 }}>
+          <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
             {characterVoice.ttsModel && characterVoice.ttsModel !== projectTtsModel && (
               <Chip
                 label={getTtsModelLabel(characterVoice.ttsModel)}
@@ -116,7 +149,7 @@ const CharacterVoiceCard = ({
           </Box>
         </Box>
 
-        <Box sx={{ display: 'flex', gap: 1, mb: 1 }}>
+        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: 'minmax(0, 1fr) 180px' }, gap: 1, mb: 1 }}>
           <CharacterVoicePresetSelect
             characterId={characterVoice.characterId}
             value={characterVoice.voiceId}

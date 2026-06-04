@@ -52,8 +52,6 @@ interface UseAudiobookPageSessionSyncParams {
   setShowHistory: Dispatch<SetStateAction<boolean>>
   scriptOnlyMode: boolean
   setScriptOnlyMode: Dispatch<SetStateAction<boolean>>
-  forceRegenerateScript: boolean
-  setForceRegenerateScript: Dispatch<SetStateAction<boolean>>
   narrationStyle: NarrationStyleId
   setNarrationStyle: Dispatch<SetStateAction<NarrationStyleId>>
   narrationStylePrompt: string
@@ -119,8 +117,6 @@ export const useAudiobookPageSessionSync = ({
   setShowHistory,
   scriptOnlyMode,
   setScriptOnlyMode,
-  forceRegenerateScript,
-  setForceRegenerateScript,
   narrationStyle,
   setNarrationStyle,
   narrationStylePrompt,
@@ -200,7 +196,6 @@ export const useAudiobookPageSessionSync = ({
 
     setShowHistory(Boolean(savedPageSession.showHistory))
     setScriptOnlyMode(Boolean(savedPageSession.scriptOnlyMode))
-    setForceRegenerateScript(Boolean(savedPageSession.forceRegenerateScript))
     setNarrationStyle(normalizeNarrationStyleValue(savedPageSession.narrationStyle))
     setNarrationStylePrompt(savedPageSession.narrationStylePrompt || '')
     setOutputFormat(savedPageSession.outputFormat || 'mp3')
@@ -224,7 +219,6 @@ export const useAudiobookPageSessionSync = ({
     skipNextPageSessionPersistRef,
     setShowHistory,
     setScriptOnlyMode,
-    setForceRegenerateScript,
     setNarrationStyle,
     setNarrationStylePrompt,
     setOutputFormat,
@@ -359,7 +353,6 @@ export const useAudiobookPageSessionSync = ({
       browserPlayerOpen,
       showHistory,
       scriptOnlyMode,
-      forceRegenerateScript,
       narrationStyle,
       narrationStylePrompt,
       outputFormat,
@@ -413,7 +406,6 @@ export const useAudiobookPageSessionSync = ({
     browserPlayerOpen,
     showHistory,
     scriptOnlyMode,
-    forceRegenerateScript,
     narrationStyle,
     narrationStylePrompt,
     outputFormat,

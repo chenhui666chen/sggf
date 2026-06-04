@@ -3,13 +3,11 @@ import {
   Button,
   CircularProgress,
   List,
-  Paper,
   Typography,
 } from '@mui/material'
-import AudioIcon from '@mui/icons-material/GraphicEq'
 
 import CharacterVoiceCard from './CharacterVoiceCard'
-import { audiobookButtonSx } from './audiobookTheme'
+import { audiobookButtonSx, audiobookColors } from './audiobookTheme'
 import type { TtsModelOption } from './ttsModels'
 import type {
   CharacterVoiceSetting,
@@ -67,10 +65,6 @@ const CharacterVoiceConfigPanel = ({
   onAutoAssignVoices,
 }: CharacterVoiceConfigPanelProps) => (
   <>
-    <Typography variant="subtitle1" sx={{ mb: 1, display: 'flex', alignItems: 'center', gap: 1 }}>
-      <AudioIcon fontSize="small" />
-      {supportsTtsTuning ? '角色音与音量配置' : '角色音配置'}
-    </Typography>
     <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
       {supportsTtsTuning
         ? '不修改时使用 AI 默认音色；为角色选择音色或调整音量、语速、音高后，本次有声书生成将优先使用你的配置。'
@@ -92,15 +86,16 @@ const CharacterVoiceConfigPanel = ({
     )}
 
     {!loadingCharacters && characterVoices.length > 0 && (
-      <Paper
-        variant="outlined"
+      <Box
         sx={{
-          maxHeight: 400,
+          maxHeight: { xs: 430, lg: 560 },
           overflow: 'auto',
-          p: 1,
+          borderRadius: 1.5,
+          border: `1px solid ${audiobookColors.surfaceBorder}`,
+          backgroundColor: 'rgba(255,255,255,0.72)',
         }}
       >
-        <List>
+        <List disablePadding>
           {characterVoices.map((characterVoice) => (
             <CharacterVoiceCard
               key={characterVoice.characterId}
@@ -126,11 +121,11 @@ const CharacterVoiceConfigPanel = ({
             />
           ))}
         </List>
-      </Paper>
+      </Box>
     )}
 
     {!loadingCharacters && (
-      <Box sx={{ mt: 2, display: 'flex', gap: 1, justifyContent: 'flex-end' }}>
+      <Box sx={{ mt: 1.5, display: 'flex', gap: 1, justifyContent: 'flex-end' }}>
         <Button
           size="small"
           variant="outlined"

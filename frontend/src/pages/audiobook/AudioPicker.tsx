@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   Autocomplete,
   Box,
@@ -13,6 +13,7 @@ import PlayArrowIcon from '@mui/icons-material/PlayArrow'
 import PauseIcon from '@mui/icons-material/Pause'
 
 import { apiClient } from '../../services/api'
+import { useAudiobookAudioPlayback } from './useAudiobookAudioPlayback'
 
 interface AudioPickerProps {
   type: 'sfx' | 'music'
@@ -45,11 +46,8 @@ const AudioPicker = ({ type, value, onChange, label }: AudioPickerProps) => {
   const [open, setOpen] = useState(false)
   const [search, setSearch] = useState('')
   const [playingId, setPlayingId] = useState<string | null>(null)
-  const [audioEl, setAudioEl] = useState<HTMLAudioElement | null>(null)
-
-  useEffect(() => {
-    return () => { audioEl?.pause(); setAudioEl(null) }
-  }, [audioEl])
+  const playbackRequestIdRef = useRef(0)
+  const { playManagedBlob, stopManagedPlayback } = useAudiobookAudioPlayback()
 
   const loadOptions = useCallback(async () => {
     try {
@@ -68,20 +66,29 @@ const AudioPicker = ({ type, value, onChange, label }: AudioPickerProps) => {
     loadOptions()
   }, [open, loadOptions])
 
-  const handlePlay = (id: string) => {
+  const handlePlay = async (id: string) => {
+    const requestId = playbackRequestIdRef.current + 1
+    playbackRequestIdRef.current = requestId
+
     if (playingId === id) {
-      audioEl?.pause()
+      stopManagedPlayback()
       setPlayingId(null)
-      setAudioEl(null)
       return
     }
-    audioEl?.pause()
-    const url = apiClient.getAudioLibraryPreviewUrl(type, id)
-    const el = new Audio(url)
-    el.addEventListener('ended', () => { setPlayingId(null); setAudioEl(null) })
-    el.play().catch(() => { /* ignore */ })
-    setAudioEl(el)
+
+    stopManagedPlayback()
     setPlayingId(id)
+    try {
+      const res = await apiClient.getAudioLibraryPreviewBlob(type, id)
+      if (requestId !== playbackRequestIdRef.current) return
+      await playManagedBlob(res.data, {
+        onEnded: () => {
+          if (requestId === playbackRequestIdRef.current) setPlayingId(null)
+        },
+      })
+    } catch {
+      if (requestId === playbackRequestIdRef.current) setPlayingId(null)
+    }
   }
 
   const resolveOptionLabel = (option: string | AudioOption): string => {
@@ -119,7 +126,7 @@ const AudioPicker = ({ type, value, onChange, label }: AudioPickerProps) => {
               <Box sx={{ display: 'flex', alignItems: 'center', width: '100%', gap: 0.5 }}>
                 <IconButton
                   size="small"
-                  onClick={(e) => { e.stopPropagation(); handlePlay(id) }}
+                  onClick={(e) => { e.stopPropagation(); void handlePlay(id) }}
                 >
                   {playingId === id ? <PauseIcon sx={{ fontSize: 16 }} /> : <PlayArrowIcon sx={{ fontSize: 16 }} />}
                 </IconButton>

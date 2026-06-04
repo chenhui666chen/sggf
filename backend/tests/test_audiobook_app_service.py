@@ -107,12 +107,11 @@ def seed_project_with_existing_script(db):
     return user, project, chapter, old_script
 
 
-def build_create_request(project_id: int, chapter_id: int, *, force_regenerate_script: bool) -> AudiobookProjectCreate:
+def build_create_request(project_id: int, chapter_id: int) -> AudiobookProjectCreate:
     return AudiobookProjectCreate(
         project_id=project_id,
         chapter_ids=[chapter_id],
         generation_mode="script_only",
-        force_regenerate_script=force_regenerate_script,
     )
 
 
@@ -128,30 +127,7 @@ def create_audiobook_project_with_request(db, user, project, chapter, request):
     )
 
 
-def test_create_audiobook_project_reuses_existing_script_by_default():
-    session_factory = build_session_factory()
-
-    with session_factory() as db:
-        user, project, chapter, old_script = seed_project_with_existing_script(db)
-        audiobook_project = create_audiobook_project_with_request(
-            db,
-            user,
-            project,
-            chapter,
-            build_create_request(project.id, chapter.id, force_regenerate_script=False),
-        )
-
-        cloned_audio = db.query(ChapterAudio).filter(
-            ChapterAudio.audiobook_project_id == audiobook_project.id,
-            ChapterAudio.chapter_id == chapter.id,
-        ).first()
-
-        assert cloned_audio is not None
-        assert json.loads(cloned_audio.script_json) == old_script
-        assert cloned_audio.script_status == "approved"
-
-
-def test_create_audiobook_project_skips_script_reuse_when_force_regenerate_requested():
+def test_create_audiobook_project_skips_existing_script_reuse_by_default():
     session_factory = build_session_factory()
 
     with session_factory() as db:
@@ -161,7 +137,7 @@ def test_create_audiobook_project_skips_script_reuse_when_force_regenerate_reque
             user,
             project,
             chapter,
-            build_create_request(project.id, chapter.id, force_regenerate_script=True),
+            build_create_request(project.id, chapter.id),
         )
 
         cloned_audio = db.query(ChapterAudio).filter(

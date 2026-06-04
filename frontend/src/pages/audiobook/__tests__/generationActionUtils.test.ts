@@ -54,7 +54,6 @@ describe('audiobook generation action utils', () => {
       narrationStylePrompt: '',
       outputFormat: 'wav',
       generateSubtitle: false,
-      forceRegenerateScript: false,
     })
 
     expect(payload).toEqual({
@@ -73,7 +72,7 @@ describe('audiobook generation action utils', () => {
       generation_mode: 'full',
       narration_style: 'dramatic',
       narration_style_prompt: undefined,
-      force_regenerate_script: false,
+      force_regenerate_script: true,
     })
     expect(payload.chapter_ids).not.toBe(chapterIds)
   })
@@ -89,7 +88,6 @@ describe('audiobook generation action utils', () => {
       narrationStylePrompt: '  慢速、温柔，并保留长停顿  ',
       outputFormat: 'mp3',
       generateSubtitle: true,
-      forceRegenerateScript: true,
     })).toMatchObject({
       narration_style: 'custom',
       narration_style_prompt: '慢速、温柔，并保留长停顿',
@@ -108,7 +106,6 @@ describe('audiobook generation action utils', () => {
       narrationStylePrompt: '这段不应透传',
       outputFormat: 'mp3',
       generateSubtitle: true,
-      forceRegenerateScript: false,
     }).narration_style_prompt).toBeUndefined()
   })
 
@@ -123,11 +120,10 @@ describe('audiobook generation action utils', () => {
       narrationStylePrompt: '这段只应由 custom 使用',
       outputFormat: 'mp3',
       generateSubtitle: true,
-      forceRegenerateScript: false,
     })).toMatchObject({
       narration_style: 'cinematic-story',
       narration_style_prompt: undefined,
-      force_regenerate_script: false,
+      force_regenerate_script: true,
     })
   })
 

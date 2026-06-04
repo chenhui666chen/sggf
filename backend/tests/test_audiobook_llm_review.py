@@ -1,3 +1,4 @@
+import asyncio
 import sys
 from pathlib import Path
 
@@ -121,6 +122,49 @@ async def test_llm_review_falls_back_when_text_coverage_is_low():
     assert result.report["applied"] is False
     assert result.report["failed_batches"] == 1
     assert result.segments[0].text == original[0].text
+
+
+@pytest.mark.asyncio
+async def test_llm_review_reports_exception_type_when_batch_error_message_is_empty():
+    from app.services.audiobook.script_adapter_pkg._llm_review import review_script_segments_with_llm
+
+    class TimeoutLLM:
+        async def chat(self, **kwargs):
+            raise asyncio.TimeoutError()
+
+    original = [make_segment("\u591c\u8272\u538b\u4e0b\u6765\u3002")]
+
+    result = await review_script_segments_with_llm(TimeoutLLM(), original)
+
+    assert result.report["applied"] is False
+    assert result.report["failed_batches"] == 1
+    assert result.report["batches"][0]["error"] == "TimeoutError"
+    assert result.segments[0].text == original[0].text
+
+
+@pytest.mark.asyncio
+async def test_llm_review_timeout_budget_covers_primary_and_fallback_attempt(monkeypatch):
+    from app.services.audiobook.script_adapter_pkg import _llm_review as review_module
+
+    captured_kwargs = {}
+
+    async def fake_call_audiobook_llm_async(_llm_client, **kwargs):
+        captured_kwargs.update(kwargs)
+        return (
+            '{"segments":[{"type":"narration","speaker":"\\u65c1\\u767d",'
+            '"text":"\\u591c\\u8272\\u538b\\u4e0b\\u6765\\u3002","emotion":"neutral"}]}'
+        )
+
+    monkeypatch.setattr(review_module, "call_audiobook_llm_async", fake_call_audiobook_llm_async)
+
+    result = await review_module.review_script_segments_with_llm(
+        object(),
+        [make_segment("\u591c\u8272\u538b\u4e0b\u6765\u3002")],
+    )
+
+    assert result.report["failed_batches"] == 0
+    assert captured_kwargs["max_retries"] == 1
+    assert captured_kwargs["timeout_seconds"] >= captured_kwargs["timeout"] * 2
 
 
 def test_summarize_script_review_report_keeps_stable_debug_fields():

@@ -7,14 +7,13 @@ import {
   FormControlLabel,
   InputLabel,
   MenuItem,
-  Paper,
   Select,
+  Stack,
 } from '@mui/material'
 
 import NarrationStyleSelector from '../../components/audiobook/NarrationStyleSelector'
 import { apiClient } from '../../services/api'
 import AudioFxConfigPanel from './AudioFxConfigPanel'
-import { audiobookColors } from './audiobookTheme'
 import {
   NARRATION_STYLE_OPTIONS,
   normalizeNarrationStyleOptions,
@@ -80,13 +79,13 @@ const NarrationAudioConfigPanel = ({
   }, [])
 
   return (
-    <>
-      <Paper
-        variant="outlined"
+    <Stack spacing={2}>
+      <Box
         sx={{
-          mb: 2,
-          p: 2,
-          backgroundColor: audiobookColors.brandFaint,
+          p: 1.5,
+          borderRadius: 1.5,
+          backgroundColor: 'rgba(123, 31, 162, 0.035)',
+          border: '1px solid rgba(123, 31, 162, 0.12)',
         }}
       >
         <NarrationStyleSelector
@@ -101,8 +100,8 @@ const NarrationAudioConfigPanel = ({
             return normalizedModel ? getTtsModelLabel(normalizedModel) : modelId
           }}
         />
-        <Box sx={{ mt: 2, display: 'flex', gap: 2, flexWrap: 'wrap', alignItems: 'center' }}>
-          <FormControl size="small" sx={{ minWidth: 140 }}>
+        <Box sx={{ mt: 2, display: 'flex', gap: 1.5, flexWrap: 'wrap', alignItems: 'center' }}>
+          <FormControl size="small" sx={{ minWidth: { xs: '100%', sm: 140 } }}>
             <InputLabel>输出格式</InputLabel>
             <Select
               label="输出格式"
@@ -115,6 +114,7 @@ const NarrationAudioConfigPanel = ({
             </Select>
           </FormControl>
           <FormControlLabel
+            sx={{ m: 0 }}
             control={
               <Checkbox
                 checked={generateSubtitle}
@@ -124,13 +124,13 @@ const NarrationAudioConfigPanel = ({
             label="生成字幕"
           />
         </Box>
-      </Paper>
+      </Box>
 
       <AudioFxConfigPanel
         value={audioFxConfig}
         onChange={onAudioFxConfigChange}
       />
-    </>
+    </Stack>
   )
 }
 

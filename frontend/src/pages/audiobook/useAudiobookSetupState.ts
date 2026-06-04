@@ -15,7 +15,6 @@ import type {
 export const useAudiobookSetupState = () => {
   const [audioFxConfig, setAudioFxConfig] = useState<AudioFxConfig>(() => createDefaultAudioFxConfig())
   const [scriptOnlyMode, setScriptOnlyMode] = useState(false)
-  const [forceRegenerateScript, setForceRegenerateScript] = useState(false)
   const [ttsModel, setTtsModel] = useState<TtsModel>(DEFAULT_TTS_MODEL)
   const [narrationStyle, setNarrationStyle] = useState<NarrationStyleId>(DEFAULT_NARRATION_STYLE)
   const [narrationStylePrompt, setNarrationStylePrompt] = useState('')
@@ -27,8 +26,6 @@ export const useAudiobookSetupState = () => {
     setAudioFxConfig,
     scriptOnlyMode,
     setScriptOnlyMode,
-    forceRegenerateScript,
-    setForceRegenerateScript,
     ttsModel,
     setTtsModel,
     narrationStyle,

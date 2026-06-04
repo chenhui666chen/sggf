@@ -716,26 +716,6 @@ class ChapterAudioRepository:
         )
 
     @staticmethod
-    def find_latest_reusable_script(
-        db: Session,
-        project_id: int,
-        chapter_id: int,
-    ) -> Optional[ChapterAudio]:
-        return (
-            db.query(ChapterAudio)
-            .join(AudiobookProject, ChapterAudio.audiobook_project_id == AudiobookProject.id)
-            .filter(
-                AudiobookProject.project_id == project_id,
-                AudiobookProject.deleted_at.is_(None),
-                ChapterAudio.chapter_id == chapter_id,
-                ChapterAudio.script_json.isnot(None),
-                ChapterAudio.deleted_at.is_(None),
-            )
-            .order_by(ChapterAudio.updated_at.desc())
-            .first()
-        )
-
-    @staticmethod
     def soft_delete(
         db: Session,
         chapter_audio_id: int,

@@ -22,6 +22,8 @@ REVIEW_OUTPUT_TOKEN_MIN = 1800
 REVIEW_OUTPUT_TOKEN_MAX = 7000
 REVIEW_TIMEOUT_MIN_SECONDS = 35
 REVIEW_TIMEOUT_MAX_SECONDS = 75
+REVIEW_FALLBACK_ATTEMPTS = 1
+REVIEW_TIMEOUT_OVERHEAD_SECONDS = 15
 
 
 @dataclass
@@ -107,8 +109,9 @@ async def review_script_segments_with_llm(
                 if batch_report["applied"]:
                     changed_batches += 1
         except Exception as exc:  # noqa: BLE001 - 审稿不能阻断主生成链路
-            logger.warning("LLM脚本审稿批次失败，保留原片段: batch=%s error=%s", batch_index, exc)
-            batch_report["error"] = str(exc)
+            error_summary = _format_exception_summary(exc)
+            logger.warning("LLM脚本审稿批次失败，保留原片段: batch=%s error=%s", batch_index, error_summary)
+            batch_report["error"] = error_summary
             reviewed_segments.extend(batch)
             failed_batches += 1
 
@@ -154,6 +157,7 @@ async def _review_batch(
     )
     max_tokens = _estimate_review_max_tokens(payload_json)
     timeout = _estimate_review_timeout(max_tokens)
+    timeout_seconds = _estimate_review_total_timeout(timeout)
     response = await call_audiobook_llm_async(
         llm_client,
         messages=[
@@ -166,7 +170,7 @@ async def _review_batch(
         max_tokens=max_tokens,
         temperature=0.2,
         timeout=timeout,
-        timeout_seconds=timeout + 10,
+        timeout_seconds=timeout_seconds,
         max_retries=1,
         disable_timeout_auto_tuning=True,
         use_cache=False,
@@ -239,6 +243,18 @@ def _estimate_review_timeout(max_tokens: int) -> int:
     """LLM 审稿是非阻断增强，失败应快速降级保留原片段。"""
     estimated = int(max_tokens / 140) + 25
     return max(REVIEW_TIMEOUT_MIN_SECONDS, min(REVIEW_TIMEOUT_MAX_SECONDS, estimated))
+
+
+def _estimate_review_total_timeout(request_timeout: int) -> int:
+    request_timeout = max(1, int(request_timeout or REVIEW_TIMEOUT_MIN_SECONDS))
+    return request_timeout * (1 + REVIEW_FALLBACK_ATTEMPTS) + REVIEW_TIMEOUT_OVERHEAD_SECONDS
+
+
+def _format_exception_summary(exc: BaseException) -> str:
+    message = str(exc).strip()
+    if message:
+        return message
+    return type(exc).__name__
 
 
 def _segment_to_payload(segment: ScriptSegment, *, index: int) -> Dict[str, Any]:

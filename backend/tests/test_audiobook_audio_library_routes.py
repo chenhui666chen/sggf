@@ -1311,6 +1311,41 @@ def test_preview_audio_library_file_redirects_to_cloud_public_url(monkeypatch, t
     assert response.headers["location"] == "https://cdn.example.test/sfx/cloud.wav"
 
 
+def test_preview_audio_library_file_prefers_local_mirror_over_public_url(monkeypatch, tmp_path):
+    audio_library = tmp_path / "audio_library"
+    local_file = audio_library / "sound_effects" / "action" / "local.wav"
+    local_file.parent.mkdir(parents=True)
+    local_file.write_bytes(b"RIFF-test-audio")
+    (audio_library / "sound_effects_index.json").write_text(
+        json.dumps(
+            [
+                {
+                    "id": "local_sfx",
+                    "name": "Local SFX",
+                    "category": "action",
+                    "file_path": "sound_effects/action/local.wav",
+                    "description": "local",
+                    "tags": [],
+                    "source": "test",
+                    "public_url": "https://cdn.example.test/sfx/local.wav",
+                }
+            ],
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(routes_audio_library, "get_audio_library_dir", lambda: audio_library)
+
+    response = build_test_client().get(
+        "/api/v1/audiobook/audio-library/preview/sfx/local_sfx",
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "audio/wav"
+    assert response.content == b"RIFF-test-audio"
+
+
 def test_list_sfx_candidates_reads_jsonl(monkeypatch, tmp_path):
     audio_library = tmp_path / "audio_library"
     audio_library.mkdir()

@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import sys
 from pathlib import Path
 
 import pytest
+from fastapi import HTTPException
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -141,6 +143,47 @@ def test_get_chapter_script_does_not_swallow_unexpected_json_errors(monkeypatch)
                     owned=owned,
                 )
             )
+
+
+def test_get_chapter_script_does_not_reuse_history_when_current_project_has_no_script():
+    session_factory = build_session_factory()
+
+    with session_factory() as db:
+        context = seed_script_context(db)
+        old_script = json.loads(context["chapter_audio"].script_json)
+        old_project = context["audiobook_project"]
+        new_project = AudiobookProject(
+            project_id=context["project"].id,
+            status="processing",
+            total_chapters=1,
+        )
+        db.add(new_project)
+        db.commit()
+
+        owned = OwnedAudiobookProject(
+            audiobook_project=new_project,
+            project=context["project"],
+            current_user=context["user"],
+            db=db,
+        )
+
+        with pytest.raises(HTTPException) as exc_info:
+            asyncio.run(
+                routes_script.get_chapter_script(
+                    audiobook_project_id=new_project.id,
+                    chapter_id=context["chapter"].id,
+                    owned=owned,
+                )
+            )
+
+        assert exc_info.value.status_code == 404
+        assert "请先生成剧本" in exc_info.value.detail
+        assert db.query(ChapterAudio).filter(
+            ChapterAudio.audiobook_project_id == new_project.id,
+            ChapterAudio.chapter_id == context["chapter"].id,
+        ).first() is None
+        assert json.loads(context["chapter_audio"].script_json) == old_script
+        assert old_project.id != new_project.id
 
 
 def test_update_chapter_script_does_not_swallow_unexpected_json_errors(monkeypatch):

@@ -11,6 +11,16 @@ const apiSource = readFileSync(
   'utf8',
 )
 
+const pickerSource = readFileSync(
+  new URL('../AudioPicker.tsx', import.meta.url),
+  'utf8',
+)
+
+const displaySource = readFileSync(
+  new URL('../audioLibraryDisplay.ts', import.meta.url),
+  'utf8',
+)
+
 const candidateReviewSource = readFileSync(
   new URL('../SfxCandidateReviewDialog.tsx', import.meta.url),
   'utf8',
@@ -32,7 +42,7 @@ describe('AudioLibraryBrowser source guards', () => {
     expect(browserSource).toContain('getAudioLibraryStats')
     expect(browserSource).toContain('browseSoundEffects')
     expect(browserSource).toContain('browseMusic')
-    expect(browserSource).toContain('getAudioLibraryPreviewUrl')
+    expect(browserSource).toContain('getAudioLibraryPreviewBlob')
     expect(browserSource).toContain('SfxCandidateReviewDialog')
     expect(browserSource).toContain('SfxManifestImportDialog')
     expect(browserSource).toContain('AudioLibraryPurgeDialog')
@@ -55,11 +65,34 @@ describe('AudioLibraryBrowser source guards', () => {
     expect(apiSource).not.toContain('downloadSfxToLibrary(')
   })
 
+  it('plays protected library previews through authenticated blob requests', () => {
+    expect(apiSource).toContain('getAudioLibraryPreviewBlob')
+    expect(apiSource).toContain("responseType: 'blob'")
+
+    expect(browserSource).toContain('getAudioLibraryPreviewBlob')
+    expect(browserSource).toContain('playManagedBlob')
+    expect(browserSource).not.toContain('new Audio(url)')
+
+    expect(pickerSource).toContain('getAudioLibraryPreviewBlob')
+    expect(pickerSource).toContain('playManagedBlob')
+    expect(pickerSource).not.toContain('new Audio(url)')
+  })
+
+  it('keeps library browsing interactions responsive on large result sets', () => {
+    expect(browserSource).toContain('useVirtualizer')
+    expect(browserSource).toContain('AudioLibraryVirtualList')
+    expect(browserSource).toContain('memo(')
+    expect(browserSource).toContain('previewLoadingKey')
+    expect(browserSource).toContain('AbortController')
+    expect(browserSource).toContain('timeout={0}')
+    expect(apiSource).toContain('signal?: AbortSignal')
+  })
+
   it('exposes scene filtering for audiobook sound effects', () => {
     expect(browserSource).toContain('sfxSceneFilter')
     expect(browserSource).toContain('setSfxScenes')
     expect(browserSource).toContain('scene: sfxSceneFilter')
-    expect(browserSource).toContain('entry.scenes')
+    expect(browserSource).toContain('sfxEntry.scenes')
 
     expect(apiSource).toContain('sfx_scenes?: string[]')
     expect(apiSource).toContain('scene?: string')
@@ -111,12 +144,16 @@ describe('AudioLibraryBrowser source guards', () => {
     expect(apiSource).toContain('/api/v1/audiobook/audio-library/assets/')
   })
 
-  it('shows quality, license, source, and attribution metadata in library results', () => {
-    expect(browserSource).toContain('质量')
-    expect(browserSource).toContain('授权')
-    expect(browserSource).toContain('允许商用')
-    expect(browserSource).toContain('需署名')
-    expect(browserSource).toContain('作者')
+  it('keeps quality, license, source, and attribution metadata behind details', () => {
+    expect(browserSource).toContain('详细信息')
+    expect(browserSource).toContain('buildAudioLibraryDetailItems')
+    expect(browserSource).toContain('Collapse')
+    expect(displaySource).toContain('质量')
+    expect(displaySource).toContain('授权')
+    expect(displaySource).toContain('允许商用')
+    expect(displaySource).toContain('需署名')
+    expect(displaySource).toContain('作者')
+    expect(displaySource).toContain('来源')
     expect(browserSource).toContain('quality_score')
     expect(browserSource).toContain('license_commercial')
     expect(browserSource).toContain('attribution_required')
@@ -126,5 +163,10 @@ describe('AudioLibraryBrowser source guards', () => {
     expect(apiSource).toContain('license_commercial?: boolean')
     expect(apiSource).toContain('attribution_required?: boolean')
     expect(apiSource).toContain('attribution_text?: string')
+  })
+
+  it('formats sound effect asset names into user-facing Chinese labels', () => {
+    expect(browserSource).toContain('formatAudioAssetNameLabel')
+    expect(browserSource).toContain('formatAudioAssetNameLabel(sfxEntry?.name)')
   })
 })

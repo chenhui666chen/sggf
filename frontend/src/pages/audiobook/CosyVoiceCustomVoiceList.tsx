@@ -6,9 +6,6 @@ import {
   Chip,
   Collapse,
   Divider,
-  List,
-  ListItem,
-  ListItemText,
   Tooltip,
   Typography,
 } from '@mui/material'
@@ -35,6 +32,52 @@ interface CosyVoiceCustomVoiceListProps {
   cloneDeletingId: string | null
   deleteDisabled: boolean
   onRequestDeleteVoice: (voiceId: string, label?: string) => void
+}
+
+const voiceItemSx = {
+  display: 'grid',
+  gridTemplateColumns: { xs: '1fr', sm: 'minmax(0, 1fr) auto' },
+  gap: 1,
+  alignItems: { xs: 'stretch', sm: 'center' },
+  p: 1,
+  borderRadius: 1.5,
+  border: '1px solid',
+  borderColor: 'divider',
+  backgroundColor: 'background.paper',
+  '& + &': { mt: 1 },
+} as const
+
+const actionSx = {
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: { xs: 'space-between', sm: 'flex-end' },
+  gap: 1,
+  minWidth: { xs: 0, sm: 132 },
+} as const
+
+const singleLineTextSx = {
+  overflow: 'hidden',
+  textOverflow: 'ellipsis',
+  whiteSpace: 'nowrap',
+} as const
+
+const doubleLineTextSx = {
+  display: '-webkit-box',
+  WebkitLineClamp: 2,
+  WebkitBoxOrient: 'vertical',
+  overflow: 'hidden',
+} as const
+
+const getVoiceKindLabel = (type?: string) => type === 'design' ? '设计' : '克隆'
+
+const getVoiceKindColor = (type?: string): 'warning' | 'success' => (
+  type === 'design' ? 'warning' : 'success'
+)
+
+const formatCreatedAt = (value?: string) => {
+  if (!value) return '—'
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString()
 }
 
 const CosyVoiceCustomVoiceList = ({
@@ -74,7 +117,15 @@ const CosyVoiceCustomVoiceList = ({
   return (
     <Box sx={{ mt: 1.5 }}>
       <Divider sx={{ mb: 1 }} />
-      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 0.5 }}>
+      <Box
+        sx={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 1,
+          mb: 1,
+        }}
+      >
         <Typography variant="caption" color="text.secondary">
           已创建自定义音色（可删除）
         </Typography>
@@ -89,45 +140,52 @@ const CosyVoiceCustomVoiceList = ({
       </Box>
 
       {!showDetails ? (
-        <List dense>
+        <Box>
           {customVoicePresets.map((preset) => {
             const isDesign = preset.customType === 'design'
+            const description = preset.description || preset.id
             return (
-              <ListItem
-                key={preset.id}
-                secondaryAction={
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                    <Tooltip title={isDesign ? '音色设计：通过文字描述生成新的声线' : '音色克隆：基于音频样本创建的专属音色'}>
-                      <Chip
-                        label={isDesign ? '设计' : '克隆'}
-                        size="small"
-                        color={isDesign ? 'warning' : 'success'}
-                        sx={{ height: 18, fontSize: '0.65rem' }}
-                      />
-                    </Tooltip>
-                    <Button
-                      variant="outlined"
-                      size="small"
-                      disabled={cloneDeletingId === preset.id || deleteDisabled}
-                      onClick={() => onRequestDeleteVoice(preset.id, preset.label)}
-                      sx={audiobookButtonSx.dangerOutlined}
+              <Box key={preset.id} sx={voiceItemSx}>
+                <Box sx={{ minWidth: 0 }}>
+                  <Typography variant="body2" sx={{ fontWeight: 700, ...singleLineTextSx }}>
+                    {preset.label || preset.id}
+                  </Typography>
+                  <Tooltip title={description}>
+                    <Typography
+                      variant="caption"
+                      color="text.secondary"
+                      sx={{ display: 'block', mt: 0.25, ...singleLineTextSx }}
                     >
-                      {cloneDeletingId === preset.id ? '删除中...' : '删除'}
-                    </Button>
-                  </Box>
-                }
-              >
-                <ListItemText
-                  primary={preset.label || preset.id}
-                  secondary={preset.description || preset.id}
-                />
-              </ListItem>
+                      {description}
+                    </Typography>
+                  </Tooltip>
+                </Box>
+                <Box sx={actionSx}>
+                  <Tooltip title={isDesign ? '音色设计：通过文字描述生成新的声线' : '音色克隆：基于音频样本创建的专属音色'}>
+                    <Chip
+                      label={getVoiceKindLabel(preset.customType)}
+                      size="small"
+                      color={getVoiceKindColor(preset.customType)}
+                      sx={{ height: 22, fontSize: '0.7rem', flexShrink: 0 }}
+                    />
+                  </Tooltip>
+                  <Button
+                    variant="outlined"
+                    size="small"
+                    disabled={cloneDeletingId === preset.id || deleteDisabled}
+                    onClick={() => onRequestDeleteVoice(preset.id, preset.label)}
+                    sx={{ ...audiobookButtonSx.dangerOutlined, flexShrink: 0 }}
+                  >
+                    {cloneDeletingId === preset.id ? '删除中...' : '删除'}
+                  </Button>
+                </Box>
+              </Box>
             )
           })}
-        </List>
+        </Box>
       ) : (
         <>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap', mb: 1 }}>
             <Button
               size="small"
               variant="outlined"
@@ -146,23 +204,43 @@ const CosyVoiceCustomVoiceList = ({
             {detailsLoading && details.length === 0 ? (
               <Typography variant="caption" color="text.secondary">加载中...</Typography>
             ) : (
-              <List dense>
-                {details.map((clone) => (
-                  <ListItem
-                    key={clone.voice_id}
-                    secondaryAction={
-                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+              <Box>
+                {details.map((clone) => {
+                  return (
+                    <Box key={clone.voice_id} sx={voiceItemSx}>
+                      <Box sx={{ minWidth: 0 }}>
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, minWidth: 0 }}>
+                          <Typography variant="body2" sx={{ fontWeight: 700, ...singleLineTextSx }}>
+                            {clone.display_name || clone.voice_id}
+                          </Typography>
+                          <Chip
+                            label={clone.status || '—'}
+                            size="small"
+                            variant="outlined"
+                            sx={{ height: 20, fontSize: '0.65rem', flexShrink: 0 }}
+                          />
+                        </Box>
+                        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.25 }}>
+                          创建：{formatCreatedAt(clone.gmt_create)}
+                        </Typography>
+                        {clone.voice_prompt && (
+                          <Tooltip title={clone.voice_prompt}>
+                            <Typography
+                              variant="caption"
+                              color="text.secondary"
+                              sx={{ mt: 0.25, ...doubleLineTextSx }}
+                            >
+                              描述：{clone.voice_prompt}
+                            </Typography>
+                          </Tooltip>
+                        )}
+                      </Box>
+                      <Box sx={actionSx}>
                         <Chip
-                          label={clone.custom_type === 'design' ? '设计' : '克隆'}
+                          label={getVoiceKindLabel(clone.custom_type)}
                           size="small"
-                          color={clone.custom_type === 'design' ? 'warning' : 'success'}
-                          sx={{ height: 18, fontSize: '0.65rem' }}
-                        />
-                        <Chip
-                          label={clone.status}
-                          size="small"
-                          variant="outlined"
-                          sx={{ height: 18, fontSize: '0.65rem' }}
+                          color={getVoiceKindColor(clone.custom_type)}
+                          sx={{ height: 22, fontSize: '0.7rem', flexShrink: 0 }}
                         />
                         <Button
                           variant="outlined"
@@ -174,26 +252,10 @@ const CosyVoiceCustomVoiceList = ({
                           {cloneDeletingId === clone.voice_id ? '删除中...' : '删除'}
                         </Button>
                       </Box>
-                    }
-                  >
-                    <ListItemText
-                      primary={clone.display_name || clone.voice_id}
-                      secondary={
-                        <>
-                          <Typography variant="caption" component="span" color="text.secondary">
-                            创建：{clone.gmt_create ? new Date(clone.gmt_create).toLocaleString() : '—'}
-                          </Typography>
-                          {clone.voice_prompt && (
-                            <Typography variant="caption" component="div" color="text.secondary" noWrap>
-                              提示词：{clone.voice_prompt}
-                            </Typography>
-                          )}
-                        </>
-                      }
-                    />
-                  </ListItem>
-                ))}
-              </List>
+                    </Box>
+                  )
+                })}
+              </Box>
             )}
           </Collapse>
         </>

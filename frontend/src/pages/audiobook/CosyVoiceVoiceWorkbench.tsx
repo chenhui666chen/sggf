@@ -1,6 +1,6 @@
 import { useState, type ChangeEvent } from 'react'
 import {
-  Grid,
+  Box,
   Paper,
   Typography,
 } from '@mui/material'
@@ -106,40 +106,36 @@ const CosyVoiceVoiceWorkbench = ({
         <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
           CosyVoice v3.5-plus 不提供系统音色。你可以通过“声音复刻”导入真实样本，也可以通过“声音设计”用文字描述生成新声线；创建完成后会出现在下方音色列表中。
         </Typography>
-        <Grid container spacing={1.5}>
-          <Grid item xs={12} lg={6}>
-            <CosyVoiceCloneVoicePanel
-              cloneName={cloneName}
-              cloneUrl={cloneUrl}
-              cloneLoading={cloneLoading}
-              cloneUploading={cloneUploading}
-              busy={voiceCreationBusy}
-              cloneError={cloneError}
-              cloneSuccess={cloneSuccess}
-              onCloneNameChange={onCloneNameChange}
-              onCloneUrlChange={onCloneUrlChange}
-              onCreateCloneVoice={onCreateCloneVoice}
-              onOpenCloneRecordDialog={onOpenCloneRecordDialog}
-              onUploadCloneAudio={onUploadCloneAudio}
-            />
-          </Grid>
+        <Box sx={{ display: 'grid', gap: 1.25 }}>
+          <CosyVoiceCloneVoicePanel
+            cloneName={cloneName}
+            cloneUrl={cloneUrl}
+            cloneLoading={cloneLoading}
+            cloneUploading={cloneUploading}
+            busy={voiceCreationBusy}
+            cloneError={cloneError}
+            cloneSuccess={cloneSuccess}
+            onCloneNameChange={onCloneNameChange}
+            onCloneUrlChange={onCloneUrlChange}
+            onCreateCloneVoice={onCreateCloneVoice}
+            onOpenCloneRecordDialog={onOpenCloneRecordDialog}
+            onUploadCloneAudio={onUploadCloneAudio}
+          />
 
-          <Grid item xs={12} lg={6}>
-            <CosyVoiceDesignVoicePanel
-              designName={designName}
-              designPrompt={designPrompt}
-              designPreviewText={designPreviewText}
-              designLoading={designLoading}
-              busy={voiceCreationBusy}
-              designError={designError}
-              designSuccess={designSuccess}
-              onDesignNameChange={onDesignNameChange}
-              onDesignPromptChange={onDesignPromptChange}
-              onDesignPreviewTextChange={onDesignPreviewTextChange}
-              onCreateDesignVoice={onCreateDesignVoice}
-            />
-          </Grid>
-        </Grid>
+          <CosyVoiceDesignVoicePanel
+            designName={designName}
+            designPrompt={designPrompt}
+            designPreviewText={designPreviewText}
+            designLoading={designLoading}
+            busy={voiceCreationBusy}
+            designError={designError}
+            designSuccess={designSuccess}
+            onDesignNameChange={onDesignNameChange}
+            onDesignPromptChange={onDesignPromptChange}
+            onDesignPreviewTextChange={onDesignPreviewTextChange}
+            onCreateDesignVoice={onCreateDesignVoice}
+          />
+        </Box>
 
         <CosyVoiceCustomVoiceList
           customVoicePresets={customVoicePresets}

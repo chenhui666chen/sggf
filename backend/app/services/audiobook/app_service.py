@@ -5,7 +5,6 @@
 - 基于项目配置 / 请求参数 / 角色信息构建 voice_mapping
 - 创建 AudiobookProject 记录
 """
-import json
 import logging
 from dataclasses import dataclass
 from typing import Dict, List
@@ -13,7 +12,7 @@ from typing import Dict, List
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
-from app.models.audiobook import AudiobookProject, ChapterAudio
+from app.models.audiobook import AudiobookProject
 from app.models.project import Chapter, Project
 from app.models.user import User
 from app.schemas.audiobook import AudiobookProjectCreate, CharacterVoiceConfig
@@ -184,50 +183,6 @@ class AudiobookAppService:
         except Exception as e:  # noqa: BLE001
             logger.warning("自动分配角色音色失败，将回退到默认规则: %s", e)
 
-    def _clone_existing_scripts(
-        self,
-        audiobook_project: AudiobookProject,
-        chapter_ids: List[int],
-    ) -> int:
-        """为新建的 audiobook_project 复用最近一次生成的剧本，直到用户主动重生成。"""
-        reused = 0
-        if not chapter_ids:
-            return reused
-
-        for chapter_id in chapter_ids:
-            existing = (
-                self.db.query(ChapterAudio)
-                .join(AudiobookProject, ChapterAudio.audiobook_project_id == AudiobookProject.id)
-                .filter(
-                    AudiobookProject.project_id == audiobook_project.project_id,
-                    ChapterAudio.chapter_id == chapter_id,
-                    ChapterAudio.script_json.isnot(None),
-                )
-                .order_by(ChapterAudio.updated_at.desc())
-                .first()
-            )
-            if not existing:
-                continue
-
-            clone = ChapterAudio(
-                audiobook_project_id=audiobook_project.id,
-                chapter_id=chapter_id,
-                script_json=existing.script_json,
-                script_review_json=existing.script_review_json,
-                script_status=existing.script_status or "pending",
-                segment_count=existing.segment_count,
-                dialogue_count=existing.dialogue_count,
-                narration_count=existing.narration_count,
-                character_count=existing.character_count,
-            )
-            self.db.add(clone)
-            reused += 1
-
-        if reused:
-            self.db.commit()
-            logger.info("♻️ 复用 %s 个章节的已有剧本供新项目 %s 使用", reused, audiobook_project.id)
-        return reused
-
     # -------- 对外用例方法 ---------
     def create_audiobook_project(
         self,
@@ -273,16 +228,9 @@ class AudiobookAppService:
 
         logger.info("有声书项目创建成功 audiobook_project_id=%s", audiobook_project.id)
 
-        # 5. 复用最近一次的剧本，除非用户要求强制重新生成剧本
-        if request.force_regenerate_script:
-            logger.info(
-                "跳过复用已有剧本: audiobook_project_id=%s force_regenerate_script=true",
-                audiobook_project.id,
-            )
-        else:
-            try:
-                self._clone_existing_scripts(audiobook_project, request.chapter_ids)
-            except Exception as exc:  # noqa: BLE001
-                logger.warning("复用已有剧本失败：%s", exc)
+        logger.info(
+            "已创建有声书项目，将为所选章节重新生成剧本: audiobook_project_id=%s",
+            audiobook_project.id,
+        )
 
         return audiobook_project

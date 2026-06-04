@@ -37,7 +37,6 @@ export const buildCreateAudiobookProjectPayload = ({
   narrationStylePrompt,
   outputFormat,
   generateSubtitle,
-  forceRegenerateScript,
 }: {
   projectId: number
   chapterIds: readonly number[]
@@ -48,7 +47,6 @@ export const buildCreateAudiobookProjectPayload = ({
   narrationStylePrompt: string
   outputFormat: AudioOutputFormat
   generateSubtitle: boolean
-  forceRegenerateScript: boolean
 }): CreateAudiobookProjectPayload => ({
   project_id: projectId,
   chapter_ids: [...chapterIds],
@@ -63,7 +61,7 @@ export const buildCreateAudiobookProjectPayload = ({
   narration_style_prompt: narrationStyle === 'custom' && narrationStylePrompt.trim()
     ? narrationStylePrompt.trim()
     : undefined,
-  force_regenerate_script: forceRegenerateScript,
+  force_regenerate_script: true,
 })
 
 export const extractQueuedAudiobookProjectTask = (

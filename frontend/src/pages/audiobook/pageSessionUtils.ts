@@ -112,7 +112,7 @@ export const normalizeAudiobookPageSessionState = (
     browserPlayerOpen: Boolean(session.browserPlayerOpen),
     showHistory: Boolean(session.showHistory),
     scriptOnlyMode: Boolean(session.scriptOnlyMode),
-    forceRegenerateScript: Boolean(session.forceRegenerateScript),
+    forceRegenerateScript: false,
     narrationStyle: normalizeNarrationStyleValue(session.narrationStyle),
     narrationStylePrompt: typeof session.narrationStylePrompt === 'string' ? session.narrationStylePrompt : '',
     outputFormat: normalizeAudioOutputFormat(session.outputFormat),
@@ -166,7 +166,7 @@ export const buildComparableAudiobookPageSessionPayload = (
     browserPlayerOpen: normalizedSession?.browserPlayerOpen ?? false,
     showHistory: normalizedSession?.showHistory ?? false,
     scriptOnlyMode: normalizedSession?.scriptOnlyMode ?? false,
-    forceRegenerateScript: normalizedSession?.forceRegenerateScript ?? false,
+    forceRegenerateScript: false,
     narrationStyle: normalizedSession?.narrationStyle ?? DEFAULT_NARRATION_STYLE,
     narrationStylePrompt: normalizedSession?.narrationStylePrompt ?? '',
     outputFormat: normalizedSession?.outputFormat ?? 'mp3',
@@ -217,7 +217,6 @@ export const hasRouteScopedAudiobookPageSessionState = (
   return Boolean(
     normalizedSession.showHistory
       || normalizedSession.scriptOnlyMode
-      || normalizedSession.forceRegenerateScript
       || normalizedSession.narrationStyle !== DEFAULT_NARRATION_STYLE
       || Boolean(normalizedSession.narrationStylePrompt)
       || normalizedSession.outputFormat !== 'mp3'
@@ -269,7 +268,6 @@ export const hasPersistableAudiobookPageSession = (
     normalizedSession.browserPlayerOpen
       || normalizedSession.showHistory
       || normalizedSession.scriptOnlyMode
-      || normalizedSession.forceRegenerateScript
       || normalizedSession.narrationStyle !== DEFAULT_NARRATION_STYLE
       || Boolean(normalizedSession.narrationStylePrompt)
       || normalizedSession.outputFormat !== 'mp3'

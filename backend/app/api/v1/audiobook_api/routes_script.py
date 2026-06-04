@@ -5,7 +5,6 @@ import json
 
 from fastapi import Depends, HTTPException, status
 
-from app.models.audiobook import ChapterAudio
 from app.schemas.audiobook import (
     ChapterScriptUpdateRequest,
 )
@@ -40,38 +39,10 @@ async def get_chapter_script(
     )
 
     if not chapter_audio or not chapter_audio.script_json:
-        fallback = ChapterAudioRepository.find_latest_reusable_script(
-            db,
-            project_id=project.id,
-            chapter_id=chapter_id,
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="章节剧本不存在，请先生成剧本",
         )
-
-        if fallback:
-            if not chapter_audio:
-                chapter_audio = ChapterAudio(
-                    audiobook_project_id=audiobook_project_id,
-                    chapter_id=chapter_id,
-                )
-                db.add(chapter_audio)
-
-            chapter_audio.script_json = fallback.script_json
-            chapter_audio.script_review_json = fallback.script_review_json
-            chapter_audio.script_status = fallback.script_status or "pending"
-            chapter_audio.segment_count = fallback.segment_count
-            chapter_audio.dialogue_count = fallback.dialogue_count
-            chapter_audio.narration_count = fallback.narration_count
-            chapter_audio.character_count = fallback.character_count
-            db.commit()
-            logger.info(
-                "♻️ 章节 %s 复用历史剧本供 audiobook_project_id=%s 使用",
-                chapter_id,
-                audiobook_project_id,
-            )
-        else:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="章节剧本不存在，请先生成剧本",
-            )
 
     try:
         script_segments = json.loads(chapter_audio.script_json)

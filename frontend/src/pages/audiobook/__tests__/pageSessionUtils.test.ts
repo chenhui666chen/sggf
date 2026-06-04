@@ -87,7 +87,7 @@ describe('audiobook page session utils', () => {
       browserPlayerOpen: true,
       showHistory: true,
       scriptOnlyMode: true,
-      forceRegenerateScript: true,
+      forceRegenerateScript: false,
       narrationStyle: 'cinematic-story',
       narrationStylePrompt: '  自定义旁白语气  ',
       outputFormat: 'wav',
@@ -192,7 +192,7 @@ describe('audiobook page session utils', () => {
     expect(hasPersistableAudiobookPageSession({ designPreviewText: '自定义试听文本' })).toBe(true)
     expect(hasPersistableAudiobookPageSession({ outputFormat: 'wav' })).toBe(true)
     expect(hasPersistableAudiobookPageSession({ generateSubtitle: false })).toBe(true)
-    expect(hasPersistableAudiobookPageSession({ forceRegenerateScript: true })).toBe(true)
+    expect(hasPersistableAudiobookPageSession({ forceRegenerateScript: true })).toBe(false)
     expect(hasPersistableAudiobookPageSession({ browserPlayerOpen: true })).toBe(true)
     expect(hasPersistableAudiobookPageSession({
       deleteChapterDialogOpen: true,
@@ -211,7 +211,7 @@ describe('audiobook page session utils', () => {
     expect(hasRouteScopedAudiobookPageSessionState({ narrationStylePrompt: '自定义语气' })).toBe(true)
     expect(hasRouteScopedAudiobookPageSessionState({ outputFormat: 'm4b' })).toBe(true)
     expect(hasRouteScopedAudiobookPageSessionState({ generateSubtitle: false })).toBe(true)
-    expect(hasRouteScopedAudiobookPageSessionState({ forceRegenerateScript: true })).toBe(true)
+    expect(hasRouteScopedAudiobookPageSessionState({ forceRegenerateScript: true })).toBe(false)
     expect(hasRouteScopedAudiobookPageSessionState({ newProjectTitle: 'new project' })).toBe(true)
 
     expect(hasDeleteChapterDialogPageSessionState({
