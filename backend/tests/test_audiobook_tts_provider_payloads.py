@@ -51,7 +51,7 @@ def test_qwen_http_payload_preserves_voice_language_and_instructions() -> None:
     assert "演绎要求：压低声音，停顿更长" in instructions
 
 
-def test_qwen_explicit_instructions_override_derived_prompt() -> None:
+def test_qwen_explicit_instructions_merge_with_structured_prompt() -> None:
     engine = TTSEngine(model="qwen3-tts-instruct-flash", enable_cache=False, request_delay=0)
 
     payload = engine._build_qwen_http_payload(
@@ -61,15 +61,25 @@ def test_qwen_explicit_instructions_override_derived_prompt() -> None:
         voice_params={
             "instructions": "慢速、温柔、带一点回忆感",
             "optimize_instructions": False,
-            "segment_speaker": "不应进入",
+            "segment_speaker": "林晚",
+            "segment_type": "dialogue",
+            "instruct_scene": "雨夜逃亡",
+            "instruct_role": "克制但紧张的调查员",
+            "instruct_emotion": "fearful",
+            "performance_notes": "句尾短暂停顿。",
         },
     )
 
     assert payload["input"]["language_type"] == "Auto"
-    assert payload["parameters"] == {
-        "instructions": "慢速、温柔、带一点回忆感",
-        "optimize_instructions": False,
-    }
+    assert payload["parameters"]["optimize_instructions"] is False
+    instructions = payload["parameters"]["instructions"]
+    assert instructions.startswith("慢速、温柔、带一点回忆感")
+    assert "说话角色：林晚" in instructions
+    assert "片段类型：dialogue" in instructions
+    assert "角色设定：克制但紧张的调查员" in instructions
+    assert "场景氛围：雨夜逃亡" in instructions
+    assert "情绪目标：fearful" in instructions
+    assert "演绎要求：句尾短暂停顿。" in instructions
 
 
 def test_qwen_http_payload_truncates_instructions_to_provider_input_limit() -> None:

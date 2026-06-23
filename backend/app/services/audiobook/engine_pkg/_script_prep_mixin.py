@@ -177,6 +177,8 @@ class ScriptPrepMixin:
 
             llm_script_review = getattr(self.script_adapter, "last_script_review", None)
             llm_script_review_summary = summarize_script_review_report(llm_script_review)
+            self._last_source_text_for_script_revision = chapter_content
+            self._last_llm_script_review = llm_script_review
             script_stage_metrics = {
                 "segments_count": segments_count,
                 "text_length": len(chapter_content),

@@ -272,6 +272,53 @@ export interface GenerateAudioFromScriptsPayload {
   narration_style_prompt?: string
   output_format?: string
   generate_subtitle?: boolean
+  timeline_edits?: Record<string, { startUnit: number; durationUnits: number }>
+}
+
+export interface RegenerateAudiobookSegmentPayload {
+  reason?: string
+  tts_model?: string
+  segment?: AudiobookScriptSegmentPayload
+  preview_type?: AudiobookPreviewType
+  voice_id?: string
+  emotion?: string
+}
+
+export interface RegenerateAudiobookSegmentResponse {
+  success: boolean
+  segment_index: number
+  audio_path?: string | null
+  segment?: AudiobookScriptSegmentPayload
+}
+
+export interface GenerateAudiobookSegmentRegenerationCandidateResponse {
+  success: boolean
+  segment_index: number
+  candidate_audio_path?: string | null
+  preview_type?: AudiobookPreviewType
+  audio_size?: number
+  model_used?: string | null
+  segment?: AudiobookScriptSegmentPayload
+}
+
+export interface UploadAudiobookSegmentVoiceRecordingCandidatePayload {
+  reason?: string
+  segment?: AudiobookScriptSegmentPayload
+}
+
+export interface ApplyAudiobookSegmentRegenerationCandidatePayload {
+  candidate_audio_path: string
+  reason?: string
+  segment?: AudiobookScriptSegmentPayload
+  preview_type?: AudiobookPreviewType
+}
+
+export interface ApplyAudiobookSegmentRegenerationCandidateResponse {
+  success: boolean
+  segment_index: number
+  audio_path?: string | null
+  preview_type?: AudiobookPreviewType
+  segment?: AudiobookScriptSegmentPayload
 }
 
 export interface PreviewScriptSegmentAudioPayload {
@@ -1868,11 +1915,75 @@ class ApiClient {
     audiobookProjectId: number,
     chapterId: number,
     segmentIndex: number,
-    payload: { reason?: string; tts_model?: string; voice_id?: string; emotion?: string }
+    payload: RegenerateAudiobookSegmentPayload
   ) {
-    return this.client.post(
+    return this.client.post<RegenerateAudiobookSegmentResponse>(
       `/api/v1/audiobook/projects/${audiobookProjectId}/chapters/${chapterId}/segments/${segmentIndex}/regenerate`,
       payload
+    )
+  }
+
+  generateSegmentRegenerationCandidate(
+    audiobookProjectId: number,
+    chapterId: number,
+    segmentIndex: number,
+    payload: RegenerateAudiobookSegmentPayload
+  ) {
+    return this.client.post<GenerateAudiobookSegmentRegenerationCandidateResponse>(
+      `/api/v1/audiobook/projects/${audiobookProjectId}/chapters/${chapterId}/segments/${segmentIndex}/regeneration-candidate`,
+      payload
+    )
+  }
+
+  uploadSegmentVoiceRecordingCandidate(
+    audiobookProjectId: number,
+    chapterId: number,
+    segmentIndex: number,
+    file: File,
+    payload: UploadAudiobookSegmentVoiceRecordingCandidatePayload = {},
+  ) {
+    const form = new FormData()
+    form.append('file', file)
+    if (payload.reason) {
+      form.append('reason', payload.reason)
+    }
+    if (payload.segment) {
+      form.append('segment', JSON.stringify(payload.segment))
+    }
+    return this.client.post<GenerateAudiobookSegmentRegenerationCandidateResponse>(
+      `/api/v1/audiobook/projects/${audiobookProjectId}/chapters/${chapterId}/segments/${segmentIndex}/regeneration-candidate/upload-voice`,
+      form,
+      {
+        headers: { 'Content-Type': 'multipart/form-data' },
+        timeout: 120000,
+      },
+    )
+  }
+
+  applySegmentRegenerationCandidate(
+    audiobookProjectId: number,
+    chapterId: number,
+    segmentIndex: number,
+    payload: ApplyAudiobookSegmentRegenerationCandidatePayload
+  ) {
+    return this.client.post<ApplyAudiobookSegmentRegenerationCandidateResponse>(
+      `/api/v1/audiobook/projects/${audiobookProjectId}/chapters/${chapterId}/segments/${segmentIndex}/regeneration-candidate/apply`,
+      payload
+    )
+  }
+
+  getSegmentRegenerationCandidateAudio(
+    audiobookProjectId: number,
+    chapterId: number,
+    segmentIndex: number,
+    audioPath: string
+  ) {
+    return this.client.get<Blob>(
+      `/api/v1/audiobook/projects/${audiobookProjectId}/chapters/${chapterId}/segments/${segmentIndex}/regeneration-candidate/audio`,
+      {
+        params: { audio_path: audioPath },
+        responseType: 'blob',
+      },
     )
   }
 

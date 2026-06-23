@@ -8,7 +8,14 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from agents.camera_states import build_camera_states
 from agents.camera_tree import build_camera_tree, build_camera_tree_llm
-from agents.llm_client import chat_completions, env_flag, extract_json_object, pick_model, llm_stream_context
+from agents.llm_client import (
+    chat_completions,
+    env_flag,
+    extract_json_object,
+    llm_stream_context,
+    pick_model,
+    resolve_llm_runtime_config,
+)
 from pipeline.media_presets import (
     DREAMWEAVER_AUTO_ENGINE,
     DREAMWEAVER_I2V_ENGINE,
@@ -48,9 +55,10 @@ def run(ctx: Any) -> None:
     enable_llm = env_flag("DREAMWEAVER_STORYBOARD_ENABLE_LLM", default=True)
     require_llm = env_flag("DREAMWEAVER_LLM_ONLY", default=False) or env_flag("DREAMWEAVER_STORYBOARD_REQUIRE_LLM", default=False)
 
-    api_key = (os.getenv("DASHSCOPE_API_KEY") or "").strip()
-    base_url = (os.getenv("DASHSCOPE_API_BASE") or "https://dashscope.aliyuncs.com/compatible-mode/v1").strip()
     model = pick_model(primary_env="DREAMWEAVER_STORYBOARD_MODEL", fallback_env="DREAMWEAVER_SCRIPT_MODEL", default="qwen-plus")
+    llm_runtime = resolve_llm_runtime_config(model)
+    api_key = llm_runtime.api_key
+    base_url = llm_runtime.base_url
     timeout_s = int(os.getenv("DREAMWEAVER_STORYBOARD_TIMEOUT", "180") or "180")
     max_shots_raw = _env_int("DREAMWEAVER_STORYBOARD_MAX_SHOTS", 0)
     safety_max_shots = _storyboard_safety_max_shots(quality_mode=quality_mode)
@@ -67,7 +75,9 @@ def run(ctx: Any) -> None:
 
     can_llm = bool(enable_llm and api_key and base_url)
     if require_llm and not can_llm:
-        raise RuntimeError("storyboard require LLM but DASHSCOPE_API_KEY/DASHSCOPE_API_BASE missing")
+        raise RuntimeError(
+            f"storyboard require LLM but {llm_runtime.api_key_env}/{llm_runtime.base_url_env} missing"
+        )
 
     min_shot_s = _env_float("DREAMWEAVER_STORYBOARD_MIN_SHOT_S", 5.0 if uses_video_containers else 3.0)
     max_shot_s = _env_float("DREAMWEAVER_STORYBOARD_MAX_SHOT_S", 15.0 if uses_video_containers else 10.0)

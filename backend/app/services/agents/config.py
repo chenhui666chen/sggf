@@ -20,10 +20,12 @@ def _resolve_backend_storage_path(raw_path: str) -> str:
 class Config:
     """System configuration."""
 
-    # DeepSeek model routing settings (served through DashScope compatible API)
+    # DeepSeek model routing settings (served through official DeepSeek API)
     MODEL_NAME = os.getenv("MODEL_NAME", "deepseek-v4-pro")
+    DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
+    DEEPSEEK_API_BASE = os.getenv("DEEPSEEK_API_BASE", "https://api.deepseek.com")
 
-    # DashScope settings
+    # DashScope settings (Qwen / Embedding / TTS / media models)
     DASHSCOPE_API_KEY = os.getenv("DASHSCOPE_API_KEY", "")
     DASHSCOPE_API_BASE = os.getenv("DASHSCOPE_API_BASE", "https://dashscope.aliyuncs.com/compatible-mode/v1")
 

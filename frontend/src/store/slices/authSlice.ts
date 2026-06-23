@@ -60,12 +60,42 @@ const clearPersistedAuth = () => {
 const getRejectedMessage = (payload: unknown, fallback: string) =>
   typeof payload === 'string' && payload.trim() ? payload : fallback
 
+const readPersistedAuth = (): Pick<AuthState, 'user' | 'token' | 'isAuthenticated'> => {
+  const token = localStorage.getItem('access_token')
+  const rawUser = localStorage.getItem('user')
+
+  if (!rawUser) {
+    return {
+      user: null,
+      token,
+      isAuthenticated: !!token,
+    }
+  }
+
+  try {
+    return {
+      user: JSON.parse(rawUser) as User | null,
+      token,
+      isAuthenticated: !!token,
+    }
+  } catch {
+    clearPersistedAuth()
+    return {
+      user: null,
+      token: null,
+      isAuthenticated: false,
+    }
+  }
+}
+
+const persistedAuth = readPersistedAuth()
+
 const initialState: AuthState = {
-  user: JSON.parse(localStorage.getItem('user') || 'null'),
-  token: localStorage.getItem('access_token'),
+  user: persistedAuth.user,
+  token: persistedAuth.token,
   isLoading: false,
   error: null,
-  isAuthenticated: !!localStorage.getItem('access_token'),
+  isAuthenticated: persistedAuth.isAuthenticated,
 }
 
 export const register = createAsyncThunk<AuthSuccessPayload, RegisterPayload, { rejectValue: string }>(

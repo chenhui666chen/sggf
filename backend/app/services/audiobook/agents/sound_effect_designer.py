@@ -628,14 +628,18 @@ class SoundEffectDesigner:
         try:
             # 构建 prompt，让 LLM 分析场景氛围并推荐音效
             available_effects = list(self.sound_library.keys())
-            prompt = f"""分析以下场景描述，从可用音效库中推荐1-2个最匹配的音效ID：
+            prompt = f"""分析以下场景描述，从可用音效库中推荐最匹配的音效ID：
 
 场景：{scene_description}
 
 可用音效库：{available_effects}
 
-请直接返回 JSON 格式，如：{{"recommended": ["rain_heavy", "wind"]}}
-只返回 JSON，不要其他内容。"""
+要求：
+- 只能从可用音效库中选择 effect_id，不要编造新 ID。
+- 最多2个，优先选择最关键的动作或环境音。
+- 只推荐音效，不要音乐，不要人声台词，不要旁白。
+- 请直接返回 JSON 格式，如：{{"recommended": ["rain_heavy", "wind"]}}
+- 只返回 JSON，不要其他内容。"""
 
             # 调用 LLM 分析
             if hasattr(self.llm_client, "chat"):

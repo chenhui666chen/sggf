@@ -4,6 +4,7 @@ import json
 import os
 import re
 from contextlib import contextmanager
+from dataclasses import dataclass
 from typing import Any, Callable, Dict, Iterator, List, Optional
 
 from core.model_resolution import normalize_model_id
@@ -32,6 +33,36 @@ def pick_model(*, primary_env: str, fallback_env: str, default: str = "qwen-plus
         return raw3
 
     return default
+
+
+@dataclass(frozen=True)
+class LLMRuntimeConfig:
+    api_key: str
+    base_url: str
+    api_key_env: str
+    base_url_env: str
+
+
+def _is_deepseek_official_model(model: str) -> bool:
+    normalized = normalize_model_id(model) or model
+    return normalized in {"deepseek-v4-flash", "deepseek-v4-pro"}
+
+
+def resolve_llm_runtime_config(model: str) -> LLMRuntimeConfig:
+    if _is_deepseek_official_model(model):
+        return LLMRuntimeConfig(
+            api_key=(os.getenv("DEEPSEEK_API_KEY") or "").strip(),
+            base_url=(os.getenv("DEEPSEEK_API_BASE") or "https://api.deepseek.com").strip(),
+            api_key_env="DEEPSEEK_API_KEY",
+            base_url_env="DEEPSEEK_API_BASE",
+        )
+
+    return LLMRuntimeConfig(
+        api_key=(os.getenv("DASHSCOPE_API_KEY") or "").strip(),
+        base_url=(os.getenv("DASHSCOPE_API_BASE") or "https://dashscope.aliyuncs.com/compatible-mode/v1").strip(),
+        api_key_env="DASHSCOPE_API_KEY",
+        base_url_env="DASHSCOPE_API_BASE",
+    )
 
 
 def extract_json_object(text: str) -> Optional[Dict[str, Any]]:

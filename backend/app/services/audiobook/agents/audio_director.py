@@ -6,12 +6,10 @@
 3. 协调各专业Agent的工作
 4. 最终质量把关和发布决策
 
-TTS能力：CosyVoice v3-plus
-- 顶级音质（MOS>4.7）
-- 语速控制：0.5-2.0
-- 音调控制：0.5-2.0
-- 毫秒级停顿：100-2000ms
-- 重音强调：3级
+TTS能力：多模型适配
+- 语气与演绎：instructions / instruction
+- 语速、音调、停顿：rate / pitch / pause
+- 模型专属能力由下游 TTS 适配层处理
 """
 
 import logging
@@ -51,7 +49,7 @@ class AdaptationStrategy:
     music_density: str = "medium"
     voice_differentiation: bool = True  # 是否为角色分配不同音色
     
-    # v3-plus高级特性利用
+    # TTS高级参数利用
     use_advanced_rate_control: bool = True  # 使用语速控制
     use_pitch_modulation: bool = True  # 使用音调调节
     use_precise_pauses: bool = True  # 使用精确停顿
@@ -149,7 +147,7 @@ class AudioDirector:
             sound_effect_density=sound_density_mapping[style],
             music_density="medium",
             voice_differentiation=True,
-            # 商业版：全面启用v3-plus高级特性
+            # 商业版：全面启用 TTS 高级参数
             use_advanced_rate_control=True,
             use_pitch_modulation=True,
             use_precise_pauses=True,
@@ -196,7 +194,7 @@ class AudioDirector:
         tasks.append(TaskAssignment(
             agent_name="AudiobookScriptAdapter",
             task_description=f"""改编章节内容为有声剧本，风格：{self.current_strategy.style.value}。
-充分利用v3-plus的rate/pitch/pause/emphasis控制。
+充分利用 instructions、rate/pitch/pause 等通用控制字段；模型专属能力由下游 TTS 适配层处理。
 
 ⚠️ 语义完整性约束：
 - 最小片段长度: {self.current_strategy.min_segment_length}字
@@ -211,7 +209,7 @@ class AudioDirector:
         if self.current_strategy.voice_differentiation:
             tasks.append(TaskAssignment(
                 agent_name="VoiceDesigner",
-                task_description="为主要角色设计差异化音色，使用v3-plus的rate/pitch参数进行精细调整。",
+                task_description="为主要角色设计差异化音色，结合性别、年龄、角色气质与 rate/pitch 参数进行精细调整。",
                 priority=2,
                 status="pending"
             ))

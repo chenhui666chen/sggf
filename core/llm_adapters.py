@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-LLM 适配器实现 - 支持阿里云 DashScope 和 DeepSeek
+LLM 适配器实现 - 支持阿里云 DashScope 和 DeepSeek 官方 API
 
 提供统一的 LLM 调用接口
 """
@@ -31,6 +31,8 @@ def _is_truthy_env(name: str, default: bool = False) -> bool:
 
 
 _SPECIAL_DEFAULT_PARAM_KEYS = {"request_model"}
+_DEEPSEEK_THINKING_ENABLED = {"enabled", "on", "true", "1", "yes"}
+_DEEPSEEK_THINKING_DISABLED = {"disabled", "off", "false", "0", "no"}
 
 
 class OpenAICompatibleAdapter(BaseLLMAdapter):
@@ -63,7 +65,7 @@ class OpenAICompatibleAdapter(BaseLLMAdapter):
             "temperature", "max_tokens", "top_p", "frequency_penalty",
             "presence_penalty", "stop", "seed", "response_format",
             "tools", "tool_choice", "stream", "n", "logprobs",
-            "top_logprobs", "user",
+            "top_logprobs", "user", "reasoning_effort",
         }
         if self.spec.default_params:
             extra_body = params.get("extra_body") or {}
@@ -94,6 +96,8 @@ class OpenAICompatibleAdapter(BaseLLMAdapter):
             "seed",
             "tools",
             "tool_choice",
+            "stream",
+            "reasoning_effort",
             "extra_body",
         }
         for key in passthrough_keys:
@@ -105,7 +109,77 @@ class OpenAICompatibleAdapter(BaseLLMAdapter):
         if timeout is not None:
             params["timeout"] = timeout
 
+        self._apply_deepseek_thinking_policy(params)
+
         return params
+
+    def _is_deepseek_official_adapter(self) -> bool:
+        return self.spec.provider == "deepseek" and self.spec.api_config.base_url.rstrip("/") == "https://api.deepseek.com"
+
+    def _normalize_deepseek_thinking(self, value: Any) -> Optional[Dict[str, str]]:
+        if value is None:
+            return None
+
+        if isinstance(value, dict):
+            raw_type = str(value.get("type", "")).strip().lower()
+        elif isinstance(value, bool):
+            raw_type = "enabled" if value else "disabled"
+        else:
+            raw_type = str(value).strip().lower()
+
+        if raw_type in _DEEPSEEK_THINKING_ENABLED:
+            return {"type": "enabled"}
+        if raw_type in _DEEPSEEK_THINKING_DISABLED:
+            return {"type": "disabled"}
+        return None
+
+    def _requires_non_thinking_mode(self, params: Dict[str, Any]) -> bool:
+        if params.get("stream"):
+            return True
+        if params.get("tools") or params.get("tool_choice"):
+            return True
+        response_format = params.get("response_format")
+        return isinstance(response_format, dict) and response_format.get("type") == "json_object"
+
+    def _apply_deepseek_thinking_policy(self, params: Dict[str, Any]) -> None:
+        if not self._is_deepseek_official_adapter():
+            return
+
+        extra_body = dict(params.get("extra_body") or {})
+        default_params = self.spec.default_params or {}
+        thinking = self._normalize_deepseek_thinking(
+            extra_body.get("thinking", default_params.get("thinking"))
+        )
+
+        if self._requires_non_thinking_mode(params):
+            thinking = {"type": "disabled"}
+
+        if thinking:
+            extra_body["thinking"] = thinking
+
+        if thinking and thinking["type"] == "enabled":
+            params.pop("temperature", None)
+            reasoning_effort = default_params.get("reasoning_effort")
+            if reasoning_effort:
+                params["reasoning_effort"] = reasoning_effort
+        else:
+            params.pop("reasoning_effort", None)
+            extra_body.pop("reasoning_effort", None)
+
+        if extra_body:
+            params["extra_body"] = extra_body
+        else:
+            params.pop("extra_body", None)
+
+    def _extract_reasoning_metadata(self, message: Any) -> Dict[str, Any]:
+        reasoning_content = getattr(message, "reasoning_content", None)
+        if not reasoning_content:
+            return {}
+
+        return {
+            "has_reasoning_content": True,
+            "reasoning_content_len": len(str(reasoning_content)),
+        }
 
     def _resolve_request_model(self) -> str:
         default_params = self.spec.default_params or {}
@@ -297,7 +371,9 @@ class OpenAICompatibleAdapter(BaseLLMAdapter):
 
             response = await client.chat.completions.create(**params)
 
-            content = response.choices[0].message.content or ""
+            message = response.choices[0].message
+            content = message.content or ""
+            metadata = self._extract_reasoning_metadata(message)
 
             usage = {}
             if response.usage:
@@ -325,6 +401,7 @@ class OpenAICompatibleAdapter(BaseLLMAdapter):
                 usage=usage,
                 latency=latency,
                 cost=cost,
+                metadata=metadata,
             )
 
         except Exception as e:
@@ -537,7 +614,7 @@ class OpenAICompatibleAdapter(BaseLLMAdapter):
     api_key_env="DASHSCOPE_API_KEY",
     base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
     priority=1,
-    fallback_models=["deepseek-chat"],
+    fallback_models=["deepseek-v4-flash"],
     tags=["creative", "dialogue", "chinese"],
 )
 class QwenMaxAdapter(OpenAICompatibleAdapter):
@@ -585,7 +662,7 @@ class QwenLongAdapter(OpenAICompatibleAdapter):
     base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
     supports_vision=True,
     priority=1,
-    fallback_models=["deepseek-chat"],
+    fallback_models=["deepseek-v4-flash"],
     tags=["creative", "reasoning", "long_context", "chinese"],
 )
 class Qwen35PlusAdapter(OpenAICompatibleAdapter):
@@ -657,14 +734,18 @@ class QwenTurboAdapter(OpenAICompatibleAdapter):
     avg_latency_seconds=15.0,
     cost_per_1k_input_tokens=0.012,
     cost_per_1k_output_tokens=0.024,
-    api_key_env="DASHSCOPE_API_KEY",
-    base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+    api_key_env="DEEPSEEK_API_KEY",
+    base_url="https://api.deepseek.com",
     supports_streaming=False,
     supports_timeout_param=False,
     supports_max_retries=False,
     priority=1,
     fallback_models=["qwen3.5-plus"],
-    default_params={"request_model": "deepseek-v4-pro"},
+    default_params={
+        "request_model": "deepseek-v4-pro",
+        "thinking": {"type": "enabled"},
+        "reasoning_effort": "high",
+    },
     tags=["reasoning", "logic"],
 )
 class DeepSeekV4ProAdapter(OpenAICompatibleAdapter):
@@ -699,7 +780,9 @@ class DeepSeekV4ProAdapter(OpenAICompatibleAdapter):
 
             response = await client.chat.completions.create(**params)
 
-            content = response.choices[0].message.content or ""
+            message = response.choices[0].message
+            content = message.content or ""
+            metadata = self._extract_reasoning_metadata(message)
 
             if "<think" in content and "</think" in content:
                 import re
@@ -730,6 +813,7 @@ class DeepSeekV4ProAdapter(OpenAICompatibleAdapter):
                 usage=usage,
                 latency=latency,
                 cost=cost,
+                metadata=metadata,
             )
 
         except Exception as e:
@@ -770,42 +854,20 @@ class DeepSeekV4ProAdapter(OpenAICompatibleAdapter):
     avg_latency_seconds=2.0,
     cost_per_1k_input_tokens=0.001,
     cost_per_1k_output_tokens=0.002,
-    api_key_env="DASHSCOPE_API_KEY",
-    base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+    api_key_env="DEEPSEEK_API_KEY",
+    base_url="https://api.deepseek.com",
     supports_streaming=True,
     supports_timeout_param=True,
     supports_max_retries=True,
     priority=2,
     fallback_models=["qwen3.5-plus"],
-    default_params={"request_model": "deepseek-v4-flash"},
+    default_params={
+        "request_model": "deepseek-v4-flash",
+        "thinking": {"type": "disabled"},
+    },
     tags=["reasoning", "fast"],
 )
 class DeepSeekV4FlashAdapter(OpenAICompatibleAdapter):
     """DeepSeek V4 Flash 适配器 - 轻量快速推理模型"""
-
-    pass
-
-
-@register_llm_model(
-    model_id="deepseek-chat",
-    name="DeepSeek Chat",
-    provider="deepseek",
-    capabilities=["chat", "writing", "fast"],
-    task_types=["chat", "rewrite", "fast"],
-    max_context_tokens=64000,
-    max_output_tokens=8192,
-    quality_score=8.0,
-    avg_latency_seconds=2.0,
-    cost_per_1k_input_tokens=0.001,
-    cost_per_1k_output_tokens=0.002,
-    api_key_env="DASHSCOPE_API_KEY",
-    base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
-    priority=2,
-    default_params={"request_model": "deepseek-v3"},
-    fallback_models=["qwen3.5-plus"],
-    tags=["chat", "fast"],
-)
-class DeepSeekChatAdapter(OpenAICompatibleAdapter):
-    """DeepSeek Chat 适配器"""
 
     pass

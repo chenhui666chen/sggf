@@ -23,7 +23,7 @@
 
 - 定位：项目中文创作主力模型，对应阿里云通义千问 Max 系列接入
 - 适用：故事概念生成、章节正文、角色对话、风格保持、结构化 JSON 输出
-- 限制：纯推理审校不如 `deepseek-reasoner`；整书级长上下文不如 `qwen-long`
+- 限制：纯推理审校不如 `deepseek-v4-pro`；整书级长上下文不如 `qwen-long`
 - 项目备注：当前 `chapter / concept / dialogue` 等任务默认优先路由到该模型
 - 官方资料：
   - https://help.aliyun.com/zh/model-studio/getting-started/models
@@ -43,31 +43,31 @@
 
 - 定位：项目轻量快速文本模型
 - 适用：实体提取、轻量摘要、格式化、低成本预处理
-- 限制：复杂创作质量不如 `qwen3-max`，严谨推理不如 `deepseek-reasoner`
+- 限制：复杂创作质量不如 `qwen3-max`，严谨推理不如 `deepseek-v4-pro`
 - 项目备注：当前 `entity_extract / summarize / fast` 等任务会优先命中
 - 官方资料：
   - https://help.aliyun.com/zh/model-studio/getting-started/models
   - https://help.aliyun.com/zh/model-studio/text-generation
 
-### deepseek-reasoner
+### deepseek-v4-pro
 
 - 定位：项目高强度推理与审校模型
 - 适用：世界观逻辑、人物动机、结构评审、质量复审、有声剧本逻辑检查
 - 限制：延迟高；当前项目接入层不向其开放 `temperature / timeout / max_retries`
-- 项目备注：项目运行时会剥离推理痕迹标签，只保留最终可消费文本
+- 项目备注：当前通过 DeepSeek 官方 API 接入，项目运行时会剥离推理痕迹标签，只保留最终可消费文本
 - 官方资料：
-  - https://help.aliyun.com/zh/model-studio/deepseek-api
-  - https://help.aliyun.com/zh/model-studio/models
+  - https://api-docs.deepseek.com/zh-cn/
+  - https://api-docs.deepseek.com/zh-cn/quick_start/pricing
 
-### deepseek-chat
+### deepseek-v4-flash
 
 - 定位：项目通用对话与快速改写模型
 - 适用：AI 痕迹处理、快速润色、低延迟交互、轻量创作辅助
-- 限制：深度逻辑与多步分析不如 `deepseek-reasoner`
+- 限制：深度逻辑与多步分析不如 `deepseek-v4-pro`
 - 项目备注：当前 `rewrite / ai_trace / chat` 优先使用该模型
 - 官方资料：
-  - https://help.aliyun.com/zh/model-studio/deepseek-api
-  - https://help.aliyun.com/zh/model-studio/models
+  - https://api-docs.deepseek.com/zh-cn/
+  - https://api-docs.deepseek.com/zh-cn/quick_start/pricing
 
 ## 3. 图像与多模态模型
 

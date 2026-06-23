@@ -5,6 +5,7 @@ import type {
   ScriptEditorChapterRef,
   ScriptEditorStateData,
   SmartChunkPreviewResult,
+  TimelineClipEditMap,
 } from './types'
 
 export const useAudiobookScriptEditorState = () => {
@@ -14,6 +15,7 @@ export const useAudiobookScriptEditorState = () => {
   const [scriptEditorLoading, setScriptEditorLoading] = useState(false)
   const [smartChunkPreview, setSmartChunkPreview] = useState<SmartChunkPreviewResult | null>(null)
   const [smartChunkPreviewLoading, setSmartChunkPreviewLoading] = useState(false)
+  const [timelineEdits, setTimelineEdits] = useState<TimelineClipEditMap>({})
   const [editorCrossTabConflict, setEditorCrossTabConflict] = useState<AudiobookEditorSessionState | null>(null)
 
   return {
@@ -29,6 +31,8 @@ export const useAudiobookScriptEditorState = () => {
     setSmartChunkPreview,
     smartChunkPreviewLoading,
     setSmartChunkPreviewLoading,
+    timelineEdits,
+    setTimelineEdits,
     editorCrossTabConflict,
     setEditorCrossTabConflict,
   }

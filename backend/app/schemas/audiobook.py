@@ -31,6 +31,7 @@ class GenerateAudioFromScriptsRequest(BaseModel):
     output_format: Optional[str] = "mp3"  # mp3/wav/m4b
     generate_subtitle: Optional[bool] = True  # 是否生成字幕文件
     resume_from_checkpoint: Optional[bool] = True  # 是否从断点续传
+    timeline_edits: Optional[Dict[str, Dict[str, float]]] = None  # 前端音频时间线调整（单章节生成时使用）
 
 
 class ChapterScriptUpdateRequest(BaseModel):
@@ -193,8 +194,18 @@ class SegmentRegenerateRequest(BaseModel):
     segment_index: Optional[int] = None  # 片段在章节中的索引；路径参数已携带时可省略
     reason: Optional[str] = None  # 重新生成原因（可选，用于记录）
     tts_model: Optional[str] = None  # 可选：指定使用不同的 TTS 模型
+    segment: Optional[Dict[str, Any]] = None
+    preview_type: Optional[str] = "voice"
     voice_id: Optional[str] = None  # 可选：使用不同的音色
     emotion: Optional[str] = None  # 可选：调整情感
+
+
+class SegmentRegenerationCandidateApplyRequest(BaseModel):
+    """Apply a generated segment-audio candidate to script_json."""
+    candidate_audio_path: str
+    reason: Optional[str] = None
+    segment: Optional[Dict[str, Any]] = None
+    preview_type: Optional[str] = "voice"
 
 
 class SegmentReviewRequest(BaseModel):

@@ -12,6 +12,8 @@ import type { SmartChunkPreviewResult } from './types'
 
 interface SmartChunkPreviewPanelProps {
   preview: SmartChunkPreviewResult
+  mutedTextColor?: string
+  dangerTextColor?: string
 }
 
 const formatNumber = (value: number): string =>
@@ -19,12 +21,16 @@ const formatNumber = (value: number): string =>
 
 const SmartChunkPreviewPanel = ({
   preview,
+  mutedTextColor,
+  dangerTextColor,
 }: SmartChunkPreviewPanelProps) => {
   const changedSeverity = preview.changed ? 'warning' : 'success'
   const changedMessage = preview.changed
     ? `将从 ${preview.originalSegments} 段调整为 ${preview.chunkedSegments} 个合成块`
     : '当前片段长度处于安全范围'
   const visibleChunks = preview.chunks.slice(0, 5)
+  const mutedColor = mutedTextColor || 'text.secondary'
+  const dangerColor = dangerTextColor || 'error.main'
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
@@ -56,17 +62,17 @@ const SmartChunkPreviewPanel = ({
                   sx={{ display: 'block', py: 0.75 }}
                 >
                   <Box sx={{ display: 'flex', justifyContent: 'space-between', gap: 1, mb: 0.25 }}>
-                    <Typography variant="caption" color="text.secondary">
+                    <Typography variant="caption" sx={{ color: mutedColor }}>
                       块 {index + 1}
                     </Typography>
-                    <Typography variant="caption" color={estimatedTokens > 1800 ? 'error.main' : 'text.secondary'}>
+                    <Typography variant="caption" sx={{ color: estimatedTokens > 1800 ? dangerColor : mutedColor }}>
                       {formatNumber(estimatedTokens)} token
                     </Typography>
                   </Box>
                   <Typography
                     variant="body2"
-                    color="text.secondary"
                     sx={{
+                      color: mutedColor,
                       display: '-webkit-box',
                       WebkitLineClamp: 2,
                       WebkitBoxOrient: 'vertical',
@@ -80,7 +86,7 @@ const SmartChunkPreviewPanel = ({
             })}
           </List>
           {preview.chunks.length > visibleChunks.length && (
-            <Typography variant="caption" color="text.secondary">
+            <Typography variant="caption" sx={{ color: mutedColor }}>
               另有 {preview.chunks.length - visibleChunks.length} 个合成块
             </Typography>
           )}

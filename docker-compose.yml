@@ -118,6 +118,7 @@ services:
       - ./adapters:/app/adapters
       - ./agents:/app/agents
       - ./pipeline:/app/pipeline
+      - ./config:/config:ro
       # 日志目录
       - ./backend/logs:/app/logs
     # 资源限制（生产环境建议根据实际情况调整）

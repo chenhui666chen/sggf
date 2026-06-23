@@ -333,6 +333,10 @@ async def generate_audio_from_scripts(
             celery_task_id=celery_task_id,
         )
 
+    timeline_edits_by_chapter: Dict[int, Dict[str, Dict[str, float]]] = {}
+    if request.timeline_edits and len(requested_chapter_ids) == 1:
+        timeline_edits_by_chapter[requested_chapter_ids[0]] = request.timeline_edits
+
     _, async_result = _enqueue_audiobook_task(
         db,
         audiobook_project_id=audiobook_project_id,
@@ -343,6 +347,7 @@ async def generate_audio_from_scripts(
         narration_style=request.narration_style,
         narration_style_prompt=request.narration_style_prompt,
         generate_subtitle=request.generate_subtitle,
+        timeline_edits_by_chapter=timeline_edits_by_chapter or None,
         before_dispatch=bind_resume_checkpoints_before_dispatch,
     )
 

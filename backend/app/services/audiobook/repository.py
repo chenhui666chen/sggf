@@ -949,6 +949,50 @@ class ChapterAudioRunRepository:
         return query.order_by(ChapterAudioRun.created_at.desc(), ChapterAudioRun.id.desc()).first()
 
     @staticmethod
+    def get_latest_completed_run(
+        db: Session,
+        *,
+        audiobook_project_id: int,
+        chapter_id: int,
+        run_type: Optional[str] = None,
+    ) -> Optional[ChapterAudioRun]:
+        query = db.query(ChapterAudioRun).filter(
+            ChapterAudioRun.audiobook_project_id == audiobook_project_id,
+            ChapterAudioRun.chapter_id == chapter_id,
+            ChapterAudioRun.status == "completed",
+        )
+        if run_type:
+            query = query.filter(ChapterAudioRun.run_type == run_type)
+        return query.order_by(ChapterAudioRun.created_at.desc(), ChapterAudioRun.id.desc()).first()
+
+    @staticmethod
+    def list_completed_runs_for_chapter(
+        db: Session,
+        *,
+        audiobook_project_id: int,
+        chapter_id: int,
+        run_types: Optional[Iterable[str]] = None,
+        limit: int = 20,
+    ) -> List[ChapterAudioRun]:
+        query = db.query(ChapterAudioRun).filter(
+            ChapterAudioRun.audiobook_project_id == audiobook_project_id,
+            ChapterAudioRun.chapter_id == chapter_id,
+            ChapterAudioRun.status == "completed",
+        )
+        normalized_run_types = [
+            str(run_type).strip()
+            for run_type in (run_types or [])
+            if str(run_type).strip()
+        ]
+        if normalized_run_types:
+            query = query.filter(ChapterAudioRun.run_type.in_(normalized_run_types))
+        return (
+            query.order_by(ChapterAudioRun.created_at.desc(), ChapterAudioRun.id.desc())
+            .limit(max(1, int(limit or 1)))
+            .all()
+        )
+
+    @staticmethod
     def list_runs_for_chapter(
         db: Session,
         *,

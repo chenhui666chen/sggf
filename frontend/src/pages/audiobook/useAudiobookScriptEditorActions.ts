@@ -16,6 +16,7 @@ import type {
   ScriptEditorChapterRef,
   ScriptEditorStateData,
   SmartChunkPreviewResult,
+  TimelineClipEditMap,
   TtsModel,
 } from './types'
 import {
@@ -32,6 +33,7 @@ interface UseAudiobookScriptEditorActionsParams {
   chapters: Chapter[]
   scriptEditorChapter: ScriptEditorChapterRef | null
   scriptEditorData: ScriptEditorStateData | null
+  timelineEdits: TimelineClipEditMap
   ttsModel: TtsModel
   narrationStyle: NarrationStyleId
   narrationStylePrompt: string
@@ -49,6 +51,7 @@ interface UseAudiobookScriptEditorActionsParams {
   setScriptEditorLoading: Dispatch<SetStateAction<boolean>>
   setSmartChunkPreview: Dispatch<SetStateAction<SmartChunkPreviewResult | null>>
   setSmartChunkPreviewLoading: Dispatch<SetStateAction<boolean>>
+  setTimelineEdits: Dispatch<SetStateAction<TimelineClipEditMap>>
   setTaskPointsPrecheckError: Dispatch<SetStateAction<TaskPointsPrecheckErrorDetail | null>>
   setSnackbar: SetSnackbar
 }
@@ -58,6 +61,7 @@ export const useAudiobookScriptEditorActions = ({
   chapters,
   scriptEditorChapter,
   scriptEditorData,
+  timelineEdits,
   ttsModel,
   narrationStyle,
   narrationStylePrompt,
@@ -75,6 +79,7 @@ export const useAudiobookScriptEditorActions = ({
   setScriptEditorLoading,
   setSmartChunkPreview,
   setSmartChunkPreviewLoading,
+  setTimelineEdits,
   setTaskPointsPrecheckError,
   setSnackbar,
 }: UseAudiobookScriptEditorActionsParams) => {
@@ -90,6 +95,7 @@ export const useAudiobookScriptEditorActions = ({
       resetScriptEditorTransientState()
       setSmartChunkPreview(null)
       setSmartChunkPreviewLoading(false)
+      setTimelineEdits({})
       setScriptEditorLoading(true)
 
       const res = await apiClient.getAudiobookChapterScript(audiobookProject.id, chapterId)
@@ -114,6 +120,7 @@ export const useAudiobookScriptEditorActions = ({
     setScriptEditorLoading,
     setSmartChunkPreview,
     setSmartChunkPreviewLoading,
+    setTimelineEdits,
     setSnackbar,
   ])
 
@@ -126,6 +133,7 @@ export const useAudiobookScriptEditorActions = ({
     setScriptEditorChapter(null)
     setSmartChunkPreview(null)
     setSmartChunkPreviewLoading(false)
+    setTimelineEdits({})
   }, [
     removeCurrentEditorSyncEntry,
     resetScriptEditorTransientState,
@@ -133,6 +141,7 @@ export const useAudiobookScriptEditorActions = ({
     setScriptEditorData,
     setSmartChunkPreview,
     setSmartChunkPreviewLoading,
+    setTimelineEdits,
     setScriptEditorDialogOpen,
     stopManagedPlayback,
   ])
@@ -168,6 +177,7 @@ export const useAudiobookScriptEditorActions = ({
             narrationStylePrompt,
             outputFormat,
             generateSubtitle,
+            timelineEdits,
           }),
         )
 
@@ -208,6 +218,7 @@ export const useAudiobookScriptEditorActions = ({
     resetSegmentPreviewState,
     scriptEditorChapter,
     scriptEditorData,
+    timelineEdits,
     setScriptEditorLoading,
     setSnackbar,
     setTaskPointsPrecheckError,

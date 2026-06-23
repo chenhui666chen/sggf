@@ -310,7 +310,7 @@ class BaseAgent(ABC):
             'qwen-long': 10000000,      # 10M tokens
             'qwen-turbo': 8000,         # 8K tokens
             'deepseek-v4-pro': 1000000, # V4 Pro: 1M tokens
-            'deepseek-chat': 64000,     # V3: 64K tokens
+            'deepseek-v4-flash': 1000000, # V4 Flash: 1M tokens
         }
         
         # 默认限制(如果模型未知)

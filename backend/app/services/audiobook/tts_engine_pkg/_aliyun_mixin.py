@@ -247,14 +247,8 @@ class AliyunMixin:
         if not self._is_qwen_instruct_model():
             return {}
 
-        explicit_instructions = str(voice_params.get("instructions") or "").strip()
-        if explicit_instructions:
-            return {
-                "instructions": explicit_instructions,
-                "optimize_instructions": bool(voice_params.get("optimize_instructions", True)),
-            }
-
         parts: List[str] = []
+        explicit_instructions = str(voice_params.get("instructions") or "").strip()
         segment_speaker = str(voice_params.get("segment_speaker") or "").strip()
         segment_type = str(voice_params.get("segment_type") or "").strip()
         instruct_role = str(voice_params.get("instruct_role") or "").strip()
@@ -281,7 +275,12 @@ class AliyunMixin:
         if performance_notes:
             parts.append(f"演绎要求：{performance_notes}")
 
-        instructions = "；".join(parts).strip("；")
+        instruction_parts: List[str] = []
+        if explicit_instructions:
+            instruction_parts.append(explicit_instructions)
+        instruction_parts.extend(part for part in parts if part and part not in explicit_instructions)
+
+        instructions = "；".join(instruction_parts).strip("；")
         if not instructions and not voice_params.get("use_instruct_mode"):
             return {}
 

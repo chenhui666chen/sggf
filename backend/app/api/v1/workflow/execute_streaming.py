@@ -477,7 +477,7 @@ async def execute_stage_with_streaming(task_id: str, project_id: int, stage_enum
 
                 # 🔥 执行流式 LLM 调用
                 logger.info(f"   🌊 开始流式 LLM 调用...")
-                # 🆕 按阶段选择模型，避免使用默认deepseek-chat
+                # 🆕 按阶段选择模型，避免使用默认 deepseek-v4-flash
                 stage_model = None
                 stage_task_type = None
                 stage_model_override = None

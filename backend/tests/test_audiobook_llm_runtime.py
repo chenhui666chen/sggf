@@ -24,13 +24,13 @@ class DummyLLM:
         return self.response
 
 
-def test_audiobook_llm_model_default_and_alias(monkeypatch):
+def test_audiobook_llm_model_default_and_configured_official_id(monkeypatch):
     from app.services.audiobook.llm_config import get_audiobook_llm_model
 
     monkeypatch.delenv("AUDIOBOOK_LLM_MODEL", raising=False)
     assert get_audiobook_llm_model() == "deepseek-v4-flash"
 
-    monkeypatch.setenv("AUDIOBOOK_LLM_MODEL", "deep seek v4 flash")
+    monkeypatch.setenv("AUDIOBOOK_LLM_MODEL", "deepseek-v4-flash")
     assert get_audiobook_llm_model() == "deepseek-v4-flash"
 
 

@@ -148,6 +148,8 @@ const AudiobookPage = () => {
     setSmartChunkPreview,
     smartChunkPreviewLoading,
     setSmartChunkPreviewLoading,
+    timelineEdits,
+    setTimelineEdits,
     editorCrossTabConflict,
     setEditorCrossTabConflict,
   } = useAudiobookScriptEditorState()
@@ -250,10 +252,16 @@ const AudiobookPage = () => {
     segmentReviews,
     setSegmentReviews,
     regeneratingSegments,
+    recordingSegmentIndex,
+    pendingSegmentRegenerations,
     resetSegmentReviewState,
     handleToggleReviewMode,
     handleReviewSegment,
     handleRegenerateSegment,
+    handleStartSegmentVoiceRecording,
+    handleStopSegmentVoiceRecording,
+    handleApplySegmentRegenerationCandidate,
+    handleDiscardSegmentRegenerationCandidate,
   } = useAudiobookSegmentReviewActions({
     audiobookProjectId: audiobookProject?.id,
     chapterId: scriptEditorChapter?.chapterId,
@@ -284,6 +292,7 @@ const AudiobookPage = () => {
     reviewMode,
     segmentDetailsOpen,
     segmentReviews,
+    timelineEdits,
     scriptEditorData,
     editorCrossTabConflict,
   })
@@ -346,7 +355,9 @@ const AudiobookPage = () => {
   } = useAudiobookSegmentPreview({
     audiobookProjectId: audiobookProject?.id,
     chapterId: scriptEditorChapter?.chapterId,
-    ttsModel,
+    chapterAudioAvailable: scriptEditorData?.chapterAudioAvailable,
+    segmentTimings: scriptEditorData?.segmentTimings,
+    pendingSegmentRegenerations,
     playingChapter,
     setPlayingChapter,
     playExternalUrl,
@@ -635,6 +646,7 @@ const AudiobookPage = () => {
     reviewMode,
     segmentDetailsOpen,
     segmentReviews,
+    timelineEdits,
     setEditorCrossTabConflict,
   })
 
@@ -648,6 +660,7 @@ const AudiobookPage = () => {
     chapters,
     scriptEditorChapter,
     scriptEditorData,
+    timelineEdits,
     ttsModel,
     narrationStyle,
     narrationStylePrompt,
@@ -665,6 +678,7 @@ const AudiobookPage = () => {
     setScriptEditorLoading,
     setSmartChunkPreview,
     setSmartChunkPreviewLoading,
+    setTimelineEdits,
     setTaskPointsPrecheckError,
     setSnackbar,
   })
@@ -689,6 +703,7 @@ const AudiobookPage = () => {
     setReviewMode,
     setSegmentReviews,
     setSegmentDetailsOpen,
+    setTimelineEdits,
     setEditorCrossTabConflict,
     setSnackbar,
   })
@@ -1082,14 +1097,22 @@ const AudiobookPage = () => {
         onSaveScript={handleSaveScript}
         onPreviewSegmentAudio={handlePreviewScriptSegmentAudio}
         onRegenerateSegment={handleRegenerateSegment}
+        onStartSegmentVoiceRecording={handleStartSegmentVoiceRecording}
+        onStopSegmentVoiceRecording={handleStopSegmentVoiceRecording}
+        onApplySegmentRegeneration={handleApplySegmentRegenerationCandidate}
+        onDiscardSegmentRegeneration={handleDiscardSegmentRegenerationCandidate}
         onReviewSegment={handleReviewSegment}
         segmentReviews={segmentReviews}
+        pendingSegmentRegenerations={pendingSegmentRegenerations}
+        recordingSegmentIndex={recordingSegmentIndex}
         segmentPreviewingIndex={segmentPreviewingIndex}
         segmentPreviewingType={segmentPreviewingType}
         segmentAudioUrls={segmentAudioUrls}
         segmentDetailsOpen={segmentDetailsOpen}
         onToggleSegmentDetails={handleToggleSegmentDetails}
         onUpdateSegment={handleUpdateScriptSegment}
+        timelineEdits={timelineEdits}
+        onChangeTimelineEdits={setTimelineEdits}
         reviewMode={reviewMode}
         onToggleReviewMode={handleToggleReviewMode}
         regeneratingSegments={regeneratingSegments}

@@ -7,6 +7,7 @@ import {
 import type {
   AudiobookEditorSessionState,
   ScriptEditorStateData,
+  TimelineClipEditMap,
 } from './types'
 
 const SCRIPT_EDITOR_CONFLICT_SEGMENT_PREVIEW_LIMIT = 6
@@ -18,6 +19,7 @@ interface UseAudiobookEditorConflictPreviewParams {
   reviewMode: boolean
   segmentDetailsOpen: Record<number, boolean>
   segmentReviews: SegmentReviews
+  timelineEdits: TimelineClipEditMap
   scriptEditorData: ScriptEditorStateData | null
   editorCrossTabConflict: AudiobookEditorSessionState | null
 }
@@ -27,6 +29,7 @@ export const useAudiobookEditorConflictPreview = ({
   reviewMode,
   segmentDetailsOpen,
   segmentReviews,
+  timelineEdits,
   scriptEditorData,
   editorCrossTabConflict,
 }: UseAudiobookEditorConflictPreviewParams) => {
@@ -48,6 +51,7 @@ export const useAudiobookEditorConflictPreview = ({
         reviewMode,
         openSegmentDetailIndices: extractOpenSegmentDetailIndices(segmentDetailsOpen),
         segmentReviews,
+        timelineEdits,
         data: scriptEditorData,
       },
       editorCrossTabConflict,
@@ -57,6 +61,7 @@ export const useAudiobookEditorConflictPreview = ({
       reviewMode,
       segmentDetailsOpen,
       segmentReviews,
+      timelineEdits,
       scriptEditorData,
       editorCrossTabConflict,
     ],

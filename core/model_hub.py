@@ -638,7 +638,7 @@ class ModelHub:
 
     def _get_default_model(self) -> Optional[str]:
         """获取默认模型"""
-        default_models = ["qwen3-max", "deepseek-chat", "qwen-turbo"]
+        default_models = ["qwen3-max", "deepseek-v4-flash", "qwen-turbo"]
         for model_id in default_models:
             if self.registry._is_available(model_id):
                 return model_id

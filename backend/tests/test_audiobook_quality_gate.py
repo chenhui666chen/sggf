@@ -68,6 +68,172 @@ def test_quality_review_auto_revision_fixes_script_before_gate():
     assert report.overall_score >= 70.0
 
 
+def test_quality_review_does_not_call_llm_revision_when_gate_already_passes():
+    from app.services.audiobook.agents.audio_quality_reviewer import AudioQualityReviewer
+    from app.services.audiobook.engine_pkg._base import AudiobookEngineBase
+    from app.services.audiobook.script_adapter_pkg._dataclasses import ScriptSegment
+
+    engine = AudiobookEngineBase.__new__(AudiobookEngineBase)
+    engine.audio_quality_reviewer = AudioQualityReviewer()
+    engine._audio_fx_config = {}
+    engine.revision_calls = 0
+
+    def fail_if_called(script_segments, quality_report, *, novel_genre):
+        engine.revision_calls += 1
+        return {"applied": False}
+
+    engine._llm_revise_script_segments_from_quality_report = fail_if_called
+    segments = [
+        ScriptSegment(
+            type="narration",
+            text="陆衍压低呼吸，沿着南侧小道继续向前。",
+            speaker="旁白",
+            emotion="neutral",
+            performance_notes="平稳叙述，句尾自然停顿。",
+            pause_after=0.25,
+        )
+    ]
+
+    report, revision = engine._run_quality_review_with_auto_revision(
+        segments,
+        novel_genre="玄幻",
+        quality_threshold=70.0,
+        max_revision_rounds=2,
+    )
+
+    assert revision["quality_gate"]["passed"] is True
+    assert revision["applied"] is False
+    assert engine.revision_calls == 0
+    assert report.overall_score >= 70.0
+
+
+def test_quality_review_uses_llm_revision_feedback_until_gate_passes():
+    from app.services.audiobook.engine_pkg._base import AudiobookEngineBase
+    from app.services.audiobook.script_adapter_pkg._dataclasses import ScriptSegment
+
+    class FakeQualityReviewer:
+        quality_standards = {}
+
+        def review_script(self, review_segments, novel_genre=""):
+            text = "".join(segment.get("text", "") for segment in review_segments)
+            passed = "陆衍从后窗翻出" in text
+            return SimpleNamespace(
+                script_quality={},
+                audio_balance={},
+                pacing={},
+                issues=[] if passed else [
+                    SimpleNamespace(
+                        location="segment_0",
+                        severity="major",
+                        category="script",
+                        description="剧本过短，缺少可播讲动作与情绪",
+                        suggestion="补足逃亡动作、场景压力和停顿提示",
+                    )
+                ],
+                overall_grade="A" if passed else "D",
+                overall_score=95.0 if passed else 55.0,
+                revision_suggestions=[] if passed else ["根据评审意见补足可播讲内容"],
+            )
+
+    engine = AudiobookEngineBase.__new__(AudiobookEngineBase)
+    engine.audio_quality_reviewer = FakeQualityReviewer()
+    engine._audio_fx_config = {}
+    engine._last_source_text_for_script_revision = "陆衍逃出后堂，掌心裂隙剧烈震颤。"
+    engine._last_llm_script_review = {"applied": False, "reason": "no_changes"}
+    engine.revision_calls = 0
+
+    def fake_llm_revision(script_segments, quality_report, *, novel_genre):
+        engine.revision_calls += 1
+        script_segments[:] = [
+            ScriptSegment(
+                type="narration",
+                text=(
+                    "陆衍从后窗翻出，夜风卷着腐土气息扑面而来。"
+                    "他按住掌心裂隙，沿着南侧小道压低呼吸向前逃去。"
+                ),
+                speaker="旁白",
+                emotion="tense",
+                performance_notes="压低声线，保持逃亡压迫感，句尾短暂停顿。",
+                pause_after=0.35,
+            )
+        ]
+        return {
+            "applied": True,
+            "reason": "llm_revision_applied",
+            "source": "llm_feedback",
+        }
+
+    engine._llm_revise_script_segments_from_quality_report = fake_llm_revision
+    segments = [
+        ScriptSegment(
+            type="narration",
+            text="短句。",
+            speaker="旁白",
+            emotion="neutral",
+        )
+    ]
+
+    report, revision = engine._run_quality_review_with_auto_revision(
+        segments,
+        novel_genre="玄幻",
+        quality_threshold=90.0,
+        max_revision_rounds=2,
+    )
+
+    assert revision["quality_gate"]["passed"] is True
+    assert revision["applied"] is True
+    assert revision["rounds"] == 1
+    assert revision["revision_rounds"][0]["llm_revision"]["applied"] is True
+    assert engine.revision_calls == 1
+    assert report.overall_score >= 90.0
+    assert segments[0].text.startswith("陆衍从后窗翻出")
+
+
+def test_quality_review_blocks_when_llm_revision_cannot_fix_gate():
+    from app.services.audiobook.agents.audio_quality_reviewer import AudioQualityReviewer
+    from app.services.audiobook.engine_pkg._base import AudiobookEngineBase
+    from app.services.audiobook.script_adapter_pkg._dataclasses import ScriptSegment
+
+    engine = AudiobookEngineBase.__new__(AudiobookEngineBase)
+    engine.audio_quality_reviewer = AudioQualityReviewer()
+    engine._audio_fx_config = {}
+    engine._last_source_text_for_script_revision = "陆衍逃出后堂。"
+    engine._last_llm_script_review = None
+    engine.revision_calls = 0
+
+    def fake_noop_revision(script_segments, quality_report, *, novel_genre):
+        engine.revision_calls += 1
+        return {
+            "applied": False,
+            "reason": "no_valid_llm_revision",
+            "source": "llm_feedback",
+        }
+
+    engine._llm_revise_script_segments_from_quality_report = fake_noop_revision
+    segments = [
+        ScriptSegment(
+            type="narration",
+            text="短句。",
+            speaker="旁白",
+            emotion="neutral",
+        )
+    ]
+
+    report, revision = engine._run_quality_review_with_auto_revision(
+        segments,
+        novel_genre="玄幻",
+        quality_threshold=101.0,
+        max_revision_rounds=2,
+    )
+
+    assert revision["quality_gate"]["passed"] is False
+    assert revision["quality_gate"]["blocked"] is True
+    assert revision["applied"] is False
+    assert revision["rounds"] == 0
+    assert engine.revision_calls == 1
+    assert report.overall_score < 101.0
+
+
 @pytest.mark.asyncio
 async def test_audio_from_script_quality_gate_blocks_tts_when_review_fails():
     from app.services.audiobook.engine_pkg._audio_from_script_mixin import AudioFromScriptMixin

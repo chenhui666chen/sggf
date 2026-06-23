@@ -50,6 +50,37 @@ VALID_EMOTIONS = {
     "whisper",
     "shout",
 }
+PROMPT_EMOTION_OPTIONS = (
+    "neutral",
+    "happy",
+    "sad",
+    "angry",
+    "calm",
+    "tense",
+    "excited",
+    "tender",
+    "solemn",
+    "fearful",
+    "surprised",
+    "disgusted",
+    "mysterious",
+    "epic",
+    "romantic",
+    "peaceful",
+    "joyful",
+    "nervous",
+    "focused",
+    "gentle",
+    "serious",
+    "whisper",
+    "shout",
+)
+
+
+def format_valid_emotions_for_prompt() -> str:
+    """返回与校验层一致、顺序稳定的 emotion 枚举提示。"""
+    return "|".join(PROMPT_EMOTION_OPTIONS)
+
 EMOTION_ALIASES = {
     "natural": "neutral",
     "normal": "neutral",
@@ -468,6 +499,10 @@ def sanitize_script_segment_dict(raw_segment: Any, *, index: int = 0) -> Optiona
     pause_after = _coerce_float(raw_data.get("pause_after"), 0.0, 0.0, 2.0)
     voice_params.setdefault("pause_before", pause_before)
     voice_params.setdefault("pause_after", pause_after)
+    pause_before = _coerce_float(voice_params.get("pause_before"), pause_before, 0.0, 2.0)
+    pause_after = _coerce_float(voice_params.get("pause_after"), pause_after, 0.0, 2.0)
+    voice_params["pause_before"] = pause_before
+    voice_params["pause_after"] = pause_after
     if markup_pause_after_ms is not None:
         voice_params.setdefault("pause_after_ms", markup_pause_after_ms)
     performance_notes = _clean_text(raw_data.get("performance_notes"))

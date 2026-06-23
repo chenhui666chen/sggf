@@ -224,9 +224,12 @@ JIANYING_BASE_URL=https://api.jianying.com/v1
 # 其他相关配置（示例）
 # ========================================
 
-# DeepSeek 通过阿里云百炼兼容接口调用，无需单独配置官方 DEEPSEEK_API_KEY
+# DeepSeek V4 文本模型走官方 API
+DEEPSEEK_API_KEY=your-deepseek-api-key-here
+DEEPSEEK_API_BASE=https://api.deepseek.com
+DEEPSEEK_MODEL=deepseek-v4-pro
 
-# 阿里云百炼API
+# 阿里云百炼API（用于 Qwen / Wan / Embedding / TTS 等 DashScope 能力）
 DASHSCOPE_API_KEY=your-dashscope-api-key-here
 DASHSCOPE_API_BASE=https://dashscope.aliyuncs.com/compatible-mode/v1
 

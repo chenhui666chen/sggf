@@ -7,6 +7,7 @@ import {
 } from '@mui/material'
 
 import type {
+  PendingSegmentRegeneration,
   PreviewType,
   ScriptSegment,
 } from './types'
@@ -25,10 +26,17 @@ interface ScriptSegmentCardProps {
   review?: { quality_score?: number; needs_regenerate?: boolean }
   previewingType: PreviewType | null
   audioUrl?: string
+  pendingRegeneration?: Partial<Record<PreviewType, PendingSegmentRegeneration>>
   regenerating: boolean
+  voiceRecording: boolean
+  voiceRecordingDisabled: boolean
   onChangeText: (index: number, value: string) => void
   onPreviewAudio: (index: number, segment: ScriptSegment, previewType: PreviewType) => void
-  onRegenerate: (index: number, segment: ScriptSegment) => void
+  onRegenerate: (index: number, segment: ScriptSegment, previewType: PreviewType) => void
+  onStartVoiceRecording: (index: number, segment: ScriptSegment) => void
+  onStopVoiceRecording: () => void
+  onApplyRegeneration: (index: number, previewType: PreviewType) => void
+  onDiscardRegeneration: (index: number, previewType: PreviewType) => void
   onReview: (index: number, score: number) => void
   onToggleDetails: (index: number) => void
   onUpdateSegment: (index: number, patch: Partial<ScriptSegment>) => void
@@ -44,10 +52,17 @@ const ScriptSegmentCard = ({
   review,
   previewingType,
   audioUrl,
+  pendingRegeneration,
   regenerating,
+  voiceRecording,
+  voiceRecordingDisabled,
   onChangeText,
   onPreviewAudio,
   onRegenerate,
+  onStartVoiceRecording,
+  onStopVoiceRecording,
+  onApplyRegeneration,
+  onDiscardRegeneration,
   onReview,
   onToggleDetails,
   onUpdateSegment,
@@ -87,10 +102,17 @@ const ScriptSegmentCard = ({
           detailsOpen={detailsOpen}
           reviewMode={reviewMode}
           review={review}
+          pendingRegeneration={pendingRegeneration}
           previewingType={previewingType}
           regenerating={regenerating}
+          voiceRecording={voiceRecording}
+          voiceRecordingDisabled={voiceRecordingDisabled}
           onPreviewAudio={onPreviewAudio}
           onRegenerate={onRegenerate}
+          onStartVoiceRecording={onStartVoiceRecording}
+          onStopVoiceRecording={onStopVoiceRecording}
+          onApplyRegeneration={onApplyRegeneration}
+          onDiscardRegeneration={onDiscardRegeneration}
           onReview={onReview}
           onToggleDetails={onToggleDetails}
         />

@@ -12,6 +12,8 @@ export type SetSnackbar = Dispatch<SetStateAction<SnackbarState>>
 
 export interface PlayAudioOptions {
   onEnded?: () => void
+  startRatio?: number
+  startTime?: number
 }
 
 export interface ActivateQueuedAudiobookTaskOptions {

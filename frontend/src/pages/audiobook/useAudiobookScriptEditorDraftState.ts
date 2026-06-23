@@ -5,6 +5,7 @@ import type {
   Chapter,
   ScriptEditorChapterRef,
   ScriptEditorStateData,
+  TimelineClipEditMap,
 } from './types'
 import type { SetSnackbar } from './hookTypes'
 import {
@@ -33,6 +34,7 @@ interface UseAudiobookScriptEditorDraftStateParams {
   setReviewMode: Dispatch<SetStateAction<boolean>>
   setSegmentReviews: Dispatch<SetStateAction<SegmentReviews>>
   setSegmentDetailsOpen: Dispatch<SetStateAction<Record<number, boolean>>>
+  setTimelineEdits: Dispatch<SetStateAction<TimelineClipEditMap>>
   setEditorCrossTabConflict: Dispatch<SetStateAction<AudiobookEditorSessionState | null>>
   setSnackbar: SetSnackbar
 }
@@ -54,6 +56,7 @@ export const useAudiobookScriptEditorDraftState = ({
   setReviewMode,
   setSegmentReviews,
   setSegmentDetailsOpen,
+  setTimelineEdits,
   setEditorCrossTabConflict,
   setSnackbar,
 }: UseAudiobookScriptEditorDraftStateParams) => {
@@ -99,6 +102,7 @@ export const useAudiobookScriptEditorDraftState = ({
     setSegmentDetailsOpen(
       buildSegmentDetailsOpenState(savedEditorSession.openSegmentDetailIndices || []),
     )
+    setTimelineEdits(savedEditorSession.timelineEdits || {})
     setScriptEditorLoading(false)
     setScriptEditorDialogOpen(true)
   }, [
@@ -116,6 +120,7 @@ export const useAudiobookScriptEditorDraftState = ({
     setScriptEditorLoading,
     setSegmentDetailsOpen,
     setSegmentReviews,
+    setTimelineEdits,
   ])
 
   const handleApplyIncomingEditorDraft = useCallback(() => {
@@ -129,6 +134,7 @@ export const useAudiobookScriptEditorDraftState = ({
     setSegmentDetailsOpen(
       buildSegmentDetailsOpenState(editorCrossTabConflict.openSegmentDetailIndices || []),
     )
+    setTimelineEdits(editorCrossTabConflict.timelineEdits || {})
     dismissedEditorConflictSignatureRef.current = null
     setEditorCrossTabConflict(null)
     setSnackbar({
@@ -144,6 +150,7 @@ export const useAudiobookScriptEditorDraftState = ({
     setScriptEditorData,
     setSegmentDetailsOpen,
     setSegmentReviews,
+    setTimelineEdits,
     setSnackbar,
   ])
 

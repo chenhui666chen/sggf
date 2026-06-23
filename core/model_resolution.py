@@ -47,13 +47,8 @@ TASK_TYPE_ALIASES = {
 }
 
 MODEL_ALIASES = {
-    "deepseek-r1": "deepseek-v4-pro",
-    "deep seek v4 flash": "deepseek-v4-flash",
-    "deepseek v4 flash": "deepseek-v4-flash",
     "deepseek-v4-flash": "deepseek-v4-flash",
-    "deepseek-v4f": "deepseek-v4-flash",
-    "deep seek v4 pro": "deepseek-v4-pro",
-    "deepseek v4 pro": "deepseek-v4-pro",
+    "deepseek-v4-pro": "deepseek-v4-pro",
     "qwen-max": "qwen3-max",
     "qwen-plus": "qwen-long",
     "qwen2.5-turbo": "qwen-turbo",

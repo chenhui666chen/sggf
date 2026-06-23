@@ -37,6 +37,172 @@ logger = logging.getLogger(__name__)
 
 class TimelineMixin:
     @staticmethod
+    def _normalize_editor_timeline_edits(edits: Any) -> Dict[str, Dict[str, float]]:
+        if not isinstance(edits, dict):
+            return {}
+
+        normalized: Dict[str, Dict[str, float]] = {}
+        for key, raw_edit in edits.items():
+            key_text = str(key or "").strip()
+            if not key_text or not isinstance(raw_edit, dict):
+                continue
+            try:
+                start_unit = float(raw_edit.get("startUnit"))
+                duration_units = float(raw_edit.get("durationUnits"))
+            except (TypeError, ValueError):
+                continue
+            if not math.isfinite(start_unit) or not math.isfinite(duration_units):
+                continue
+            if start_unit < 0 or duration_units <= 0:
+                continue
+            normalized[key_text] = {
+                "startUnit": start_unit,
+                "durationUnits": duration_units,
+            }
+        return normalized
+
+    @staticmethod
+    def _build_unit_offsets(segment_units: List[float]) -> List[Dict[str, float]]:
+        offsets: List[Dict[str, float]] = []
+        current = 0.0
+        for unit in segment_units:
+            safe_unit = max(0.0, float(unit or 0.0))
+            offsets.append({"start": current, "duration": safe_unit})
+            current += safe_unit
+        return offsets
+
+    @staticmethod
+    def _resolve_editor_edit_seconds(
+        edit: Dict[str, float],
+        unit_offsets: List[Dict[str, float]],
+        actual_offsets: List[Dict[str, float]],
+        total_actual_duration: float,
+    ) -> Optional[Dict[str, float]]:
+        if not unit_offsets or not actual_offsets:
+            return None
+
+        edit_start_unit = float(edit["startUnit"])
+        edit_duration_units = float(edit["durationUnits"])
+        edit_end_unit = edit_start_unit + edit_duration_units
+
+        start_seconds: Optional[float] = None
+        end_seconds: Optional[float] = None
+
+        for unit_offset, actual_offset in zip(unit_offsets, actual_offsets):
+            unit_start = float(unit_offset["start"])
+            unit_duration = float(unit_offset["duration"])
+            unit_end = unit_start + unit_duration
+            actual_start = float(actual_offset["start"])
+            actual_duration = max(0.0, float(actual_offset["duration"]))
+
+            if unit_duration <= 0:
+                continue
+
+            if start_seconds is None and unit_start <= edit_start_unit <= unit_end:
+                ratio = max(0.0, min(1.0, (edit_start_unit - unit_start) / unit_duration))
+                start_seconds = actual_start + ratio * actual_duration
+
+            if end_seconds is None and unit_start <= edit_end_unit <= unit_end:
+                ratio = max(0.0, min(1.0, (edit_end_unit - unit_start) / unit_duration))
+                end_seconds = actual_start + ratio * actual_duration
+
+        if start_seconds is None:
+            if edit_start_unit <= 0:
+                start_seconds = 0.0
+            else:
+                return None
+        if end_seconds is None:
+            end_seconds = total_actual_duration
+
+        start_seconds = max(0.0, min(total_actual_duration, start_seconds))
+        end_seconds = max(start_seconds, min(total_actual_duration, end_seconds))
+
+        return {
+            "timestamp": start_seconds,
+            "duration": max(0.0, end_seconds - start_seconds),
+        }
+
+    @staticmethod
+    def _parse_editor_timeline_key(key: str) -> Optional[Dict[str, int]]:
+        parts = str(key or "").split("-")
+        if len(parts) < 3:
+            return None
+        track = parts[0]
+        if track not in {"sfx", "music"}:
+            return None
+        try:
+            return {
+                "track": track,
+                "segment_index": int(parts[1]),
+                "cue_index": int(parts[2]) if track == "sfx" else 0,
+                "end_segment_index": int(parts[2]) if track == "music" else int(parts[1]),
+            }
+        except (TypeError, ValueError):
+            return None
+
+    def _apply_editor_timeline_edits(
+        self,
+        edits: Any,
+        *,
+        segment_units: List[float],
+        actual_durations: List[float],
+    ) -> None:
+        normalized_edits = self._normalize_editor_timeline_edits(edits)
+        if not normalized_edits:
+            return
+
+        unit_offsets = self._build_unit_offsets(segment_units)
+        actual_offsets = self._build_segment_offsets(actual_durations)
+        total_actual_duration = sum(max(0.0, float(duration or 0.0)) for duration in actual_durations)
+        if total_actual_duration <= 0:
+            return
+
+        track_counters = {"sfx": {}, "music": {}}
+        for key, edit in normalized_edits.items():
+            parsed = self._parse_editor_timeline_key(key)
+            if not parsed:
+                continue
+
+            seconds = self._resolve_editor_edit_seconds(
+                edit,
+                unit_offsets,
+                actual_offsets,
+                total_actual_duration,
+            )
+            if not seconds:
+                continue
+
+            timeline_attr = "_last_effect_timeline" if parsed["track"] == "sfx" else "_last_music_timeline"
+            timeline_payload = getattr(self, timeline_attr, None)
+            timeline_items = (
+                timeline_payload.get("timeline")
+                if isinstance(timeline_payload, dict)
+                else None
+            )
+            if not isinstance(timeline_items, list):
+                continue
+
+            for item in timeline_items:
+                if not isinstance(item, dict):
+                    continue
+                scene_index = self._parse_scene_index(str(item.get("scene_id") or ""))
+                if scene_index != parsed["segment_index"]:
+                    continue
+                if parsed["track"] == "music":
+                    item["timestamp"] = seconds["timestamp"]
+                    item["duration"] = seconds["duration"]
+                    item["editor_timeline_key"] = key
+                    break
+                cue_count = track_counters[parsed["track"]].get(scene_index, 0)
+                track_counters[parsed["track"]][scene_index] = cue_count + 1
+                if cue_count != parsed["cue_index"]:
+                    continue
+                item["timestamp"] = seconds["timestamp"]
+                item["duration"] = seconds["duration"]
+                item["editor_timeline_key"] = key
+                break
+
+    @staticmethod
     def _parse_scene_index(scene_id: str) -> Optional[int]:
         if not scene_id:
             return None

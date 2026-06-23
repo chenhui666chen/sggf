@@ -12,11 +12,43 @@ from app.api.v1.audiobook_api.dependencies import (
     OwnedAudiobookProject,
     get_owned_audiobook_project,
 )
-from app.services.audiobook.repository import ChapterAudioRepository, ChapterRepository
+from app.services.audiobook.repository import (
+    ChapterAudioRepository,
+    ChapterAudioRunRepository,
+    ChapterRepository,
+)
 
 from app.api.v1.audiobook_api import router
 
 logger = logging.getLogger(__name__)
+
+
+def _get_latest_completed_segment_timings(
+    db,
+    *,
+    audiobook_project_id: int,
+    chapter_id: int,
+) -> list:
+    completed_runs = ChapterAudioRunRepository.list_completed_runs_for_chapter(
+        db,
+        audiobook_project_id=audiobook_project_id,
+        chapter_id=chapter_id,
+        run_types=("audio_from_scripts", "full"),
+    )
+
+    for run in completed_runs:
+        checkpoint_json = getattr(run, "checkpoint_json", None)
+        if not isinstance(checkpoint_json, dict):
+            continue
+        segment_timings = checkpoint_json.get("segment_timings")
+        if isinstance(segment_timings, list) and segment_timings:
+            return segment_timings
+
+    return []
+
+
+def _build_chapter_audio_url(audiobook_project_id: int, chapter_id: int) -> str:
+    return f"/api/v1/audiobook/download/{audiobook_project_id}/{chapter_id}"
 
 @router.get("/projects/{audiobook_project_id:int}/chapters/{chapter_id:int}/script", response_model=dict)
 async def get_chapter_script(
@@ -64,6 +96,17 @@ async def get_chapter_script(
         "chapter_id": chapter_id,
         "script_status": chapter_audio.script_status or "pending",
         "script_segments": script_segments,
+        "chapter_audio_available": bool(chapter_audio.audio_path),
+        "chapter_audio_url": (
+            _build_chapter_audio_url(audiobook_project_id, chapter_id)
+            if chapter_audio.audio_path
+            else ""
+        ),
+        "segment_timings": _get_latest_completed_segment_timings(
+            db,
+            audiobook_project_id=audiobook_project_id,
+            chapter_id=chapter_id,
+        ),
         "script_review": script_review,
     }
 

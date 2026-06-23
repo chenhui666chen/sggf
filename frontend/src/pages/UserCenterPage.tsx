@@ -341,6 +341,10 @@ export default function UserCenterPage() {
     void loadUserCenterData()
   }, [loadUserCenterData])
 
+  const handleAssetWorkspaceFeedback = useCallback((nextFeedback: FeedbackState) => {
+    setFeedback(nextFeedback)
+  }, [])
+
   const projectAggregates = useMemo<ProjectAggregate[]>(() => {
     return [...projects]
       .map((project) => ({
@@ -356,7 +360,7 @@ export default function UserCenterPage() {
   } = useUserAssetWorkspaceViewModel({
     projects,
     pointsOverview,
-    publishFeedback: (nextFeedback) => setFeedback(nextFeedback),
+    publishFeedback: handleAssetWorkspaceFeedback,
     refreshUserCenterData: loadUserCenterData,
     navigateToPath: navigate,
     fallbackPath: '/user-center',

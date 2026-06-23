@@ -193,13 +193,18 @@ def apply_narration_style_to_tts_params(
         updated_params["pitch"] = preset["pitch_range"]["default"]
 
     # 应用情感（仅对支持的模型）
+    explicit_instruct_emotion = str(updated_params.get("instruct_emotion") or "").strip()
+    if explicit_instruct_emotion and explicit_instruct_emotion != "neutral":
+        updated_params["emotion"] = explicit_instruct_emotion
+    existing_emotion = str(updated_params.get("emotion") or "").strip()
     if preset["emotion_profile"]["emotion_variation"]:
         # 允许情感变化，不强制覆盖
         if "emotion" not in updated_params:
             updated_params["emotion"] = preset["emotion_profile"]["default_emotion"]
     else:
-        # 固定情感
-        updated_params["emotion"] = preset["emotion_profile"]["default_emotion"]
+        # 固定风格只覆盖空值或弱默认情绪，保留片段级强情绪。
+        if not existing_emotion or existing_emotion in {"neutral", "calm"}:
+            updated_params["emotion"] = preset["emotion_profile"]["default_emotion"]
 
     # 应用停顿倍数
     updated_params["pause_multiplier"] = preset["pause_multiplier"]
@@ -210,5 +215,10 @@ def apply_narration_style_to_tts_params(
     if prompt:
         updated_params.setdefault("instructions", prompt)
         updated_params["use_instruct_mode"] = True
+
+    performance_notes = str(updated_params.get("performance_notes") or "").strip()
+    instructions = str(updated_params.get("instructions") or "").strip()
+    if performance_notes and instructions and performance_notes not in instructions:
+        updated_params["instructions"] = f"{instructions} 演绎要求：{performance_notes}"
 
     return updated_params

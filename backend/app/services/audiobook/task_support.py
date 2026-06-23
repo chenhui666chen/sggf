@@ -613,6 +613,7 @@ def enqueue_chapter_runs(
     narration_style: Optional[str] = None,
     narration_style_prompt: Optional[str] = None,
     generate_subtitle: Optional[bool] = True,
+    timeline_edits_by_chapter: Optional[Dict[int, Dict[str, Dict[str, float]]]] = None,
 ) -> None:
     normalized_ids = [chapter_id for chapter_id in dict.fromkeys(chapter_ids or []) if chapter_id is not None]
     if not normalized_ids:
@@ -632,6 +633,14 @@ def enqueue_chapter_runs(
         resumable=True,
     )
     for run in runs:
+        checkpoint_patch: Dict[str, Any] = {"generate_subtitle": generate_subtitle is not False}
+        chapter_timeline_edits = (
+            timeline_edits_by_chapter.get(run.chapter_id)
+            if timeline_edits_by_chapter
+            else None
+        )
+        if chapter_timeline_edits:
+            checkpoint_patch["timeline_edits"] = chapter_timeline_edits
         run.checkpoint_json = build_run_checkpoint_document(
             db,
             run=run,
@@ -639,7 +648,7 @@ def enqueue_chapter_runs(
             audiobook_project_id=audiobook_project_id,
             status=run.status,
             current_stage=run.current_stage,
-            checkpoint_patch={"generate_subtitle": generate_subtitle is not False},
+            checkpoint_patch=checkpoint_patch,
         )
         db.add(run)
     if runs:
@@ -657,6 +666,7 @@ def enqueue_audiobook_task(
     narration_style: Optional[str] = None,
     narration_style_prompt: Optional[str] = None,
     generate_subtitle: Optional[bool] = True,
+    timeline_edits_by_chapter: Optional[Dict[int, Dict[str, Dict[str, float]]]] = None,
     force_regenerate_script: bool = False,
     before_dispatch: Optional[Callable[[AudiobookTask, str], None]] = None,
 ) -> Tuple[AudiobookTask, Any]:
@@ -694,6 +704,7 @@ def enqueue_audiobook_task(
                 audiobook_project_id,
                 normalized_chapter_ids,
                 tts_model,
+                timeline_edits_by_chapter or {},
             ],
         )
     else:
@@ -720,6 +731,7 @@ def enqueue_audiobook_task(
         narration_style=narration_style,
         narration_style_prompt=narration_style_prompt,
         generate_subtitle=generate_subtitle,
+        timeline_edits_by_chapter=timeline_edits_by_chapter,
     )
 
     if before_dispatch is not None:

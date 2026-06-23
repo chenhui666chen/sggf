@@ -10,6 +10,7 @@ import type {
   AudiobookEditorSessionState,
   ScriptEditorChapterRef,
   ScriptEditorStateData,
+  TimelineClipEditMap,
 } from './types'
 import {
   AUDIOBOOK_EDITOR_SYNC_HEARTBEAT_MS,
@@ -42,6 +43,7 @@ interface UseAudiobookEditorSessionSyncParams {
   reviewMode: boolean
   segmentDetailsOpen: Record<number, boolean>
   segmentReviews: Record<number, { quality_score?: number; needs_regenerate?: boolean }>
+  timelineEdits: TimelineClipEditMap
   setEditorCrossTabConflict: Dispatch<SetStateAction<AudiobookEditorSessionState | null>>
 }
 
@@ -60,6 +62,7 @@ export const useAudiobookEditorSessionSync = ({
   reviewMode,
   segmentDetailsOpen,
   segmentReviews,
+  timelineEdits,
   setEditorCrossTabConflict,
 }: UseAudiobookEditorSessionSyncParams) => {
   const writeEditorSyncEntries = useCallback((
@@ -106,6 +109,7 @@ export const useAudiobookEditorSessionSync = ({
       reviewMode,
       segmentDetailsOpen,
       segmentReviews,
+      timelineEdits,
       data: scriptEditorData,
       updatedAt,
       writerTabId: sessionTabIdRef.current,
@@ -118,6 +122,7 @@ export const useAudiobookEditorSessionSync = ({
     reviewMode,
     segmentDetailsOpen,
     segmentReviews,
+    timelineEdits,
     sessionTabIdRef,
   ])
 
@@ -250,6 +255,7 @@ export const useAudiobookEditorSessionSync = ({
       reviewMode,
       segmentDetailsOpen,
       segmentReviews,
+      timelineEdits,
       data: scriptEditorData,
     })
 
@@ -277,6 +283,7 @@ export const useAudiobookEditorSessionSync = ({
     reviewMode,
     segmentDetailsOpen,
     segmentReviews,
+    timelineEdits,
     editorSessionStorageKey,
     sessionHydratedRef,
     restoredEditorSessionKeyRef,
@@ -321,6 +328,7 @@ export const useAudiobookEditorSessionSync = ({
         reviewMode,
         segmentDetailsOpen,
         segmentReviews,
+        timelineEdits,
         data: scriptEditorData,
       })
 
@@ -368,6 +376,7 @@ export const useAudiobookEditorSessionSync = ({
     reviewMode,
     segmentDetailsOpen,
     segmentReviews,
+    timelineEdits,
     editorSyncStorageKey,
     sessionHydratedRef,
     sessionTabIdRef,

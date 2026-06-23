@@ -369,9 +369,10 @@ def test_build_script_segments_splits_long_narration_for_audiobook_cadence():
 async def test_audio_from_script_skip_final_review_returns_explicit_status(monkeypatch):
     from app.services.audiobook.engine_pkg import _audio_from_script_mixin as audio_module
     from app.services.audiobook.engine_pkg._audio_from_script_mixin import AudioFromScriptMixin
+    from app.services.audiobook.engine_pkg._timeline_mixin import TimelineMixin
     from app.services.audiobook.task_tracker import StageType, TaskTracker
 
-    class Harness(AudioFromScriptMixin):
+    class Harness(AudioFromScriptMixin, TimelineMixin):
         def __init__(self):
             self.task_tracker = TaskTracker()
             self.audio_director = SimpleNamespace(
@@ -384,7 +385,7 @@ async def test_audio_from_script_skip_final_review_returns_explicit_status(monke
             self.tts_engine = SimpleNamespace(get_cost_stats=lambda: {"estimated_cost": "¥0.00"})
             self.audio_mixer = SimpleNamespace(
                 mix_chapter=lambda audio_list, segment_types=None: b"audio",
-                get_audio_info=lambda audio: {"duration_seconds": 1.0},
+                get_audio_info=lambda audio: {"duration_seconds": 4.0},
             )
             self._last_effect_timeline = None
             self._last_music_timeline = None
@@ -393,6 +394,16 @@ async def test_audio_from_script_skip_final_review_returns_explicit_status(monke
             return None
 
         async def _parallel_design(self, *args, **kwargs):
+            self._last_effect_timeline = {
+                "timeline": [
+                    {
+                        "scene_id": "scene_0",
+                        "timestamp": 0.0,
+                        "duration": 2.0,
+                        "description": "door",
+                    },
+                ],
+            }
             return {}, 0, 0
 
         def _assign_voices(self, script_segments):
@@ -407,7 +418,10 @@ async def test_audio_from_script_skip_final_review_returns_explicit_status(monke
             }
 
         def _realign_timelines_with_audio(self, script_segments, audio_list):
-            return None
+            self._realign_timelines_with_durations(script_segments, [4.0])
+
+        def _apply_sound_effects(self, audio_data, effect_timeline):
+            return audio_data
 
         def _build_mixer_segment_types(self, script_segments):
             return [segment.type for segment in script_segments]
@@ -421,14 +435,22 @@ async def test_audio_from_script_skip_final_review_returns_explicit_status(monke
     harness = Harness()
     result = await harness.generate_chapter_audio_from_script(
         script_segments_data=[
-            {"type": "narration", "text": "\u7b2c\u4e00\u6bb5\u3002", "speaker": "\u65c1\u767d"},
+            {
+                "type": "narration",
+                "text": "\u7532" * 24,
+                "speaker": "\u65c1\u767d",
+                "sound_effects_simple": ["door"],
+            },
         ],
         chapter_id=1,
         enable_quality_review=False,
+        timeline_edits={"sfx-0-0": {"startUnit": 50, "durationUnits": 25}},
     )
 
     assert result["success"] is True
     assert result["stats"]["final_audio_review"] == {"skipped": True}
+    assert result["effect_timeline"]["timeline"][0]["timestamp"] == pytest.approx(50 / 99 * 4.0)
+    assert result["effect_timeline"]["timeline"][0]["duration"] == pytest.approx(25 / 99 * 4.0)
 
     task_status = harness.task_tracker.get_task_status(result["task_id"])
     assert task_status["stages"][StageType.FINAL_AUDIO_REVIEW.value]["metrics"] == {"skipped": True}

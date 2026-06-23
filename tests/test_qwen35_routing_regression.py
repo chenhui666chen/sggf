@@ -104,19 +104,19 @@ def test_story_expansion_routes_only_to_deepseek_and_qwen35_plus() -> None:
 
     qwen35_spec = model_hub.registry.get_spec("qwen3.5-plus")
     deepseek_v4_pro_spec = model_hub.registry.get_spec("deepseek-v4-pro")
-    deepseek_chat_spec = model_hub.registry.get_spec("deepseek-chat")
+    deepseek_v4_flash_spec = model_hub.registry.get_spec("deepseek-v4-flash")
     qwen_max_spec = model_hub.registry.get_spec("qwen3-max")
     qwen_long_spec = model_hub.registry.get_spec("qwen-long")
 
     assert qwen35_spec is not None
     assert deepseek_v4_pro_spec is not None
-    assert deepseek_chat_spec is not None
+    assert deepseek_v4_flash_spec is not None
     assert qwen_max_spec is not None
     assert qwen_long_spec is not None
 
-    assert qwen35_spec.routing.fallback_models == ["deepseek-chat"]
+    assert qwen35_spec.routing.fallback_models == ["deepseek-v4-flash"]
     assert deepseek_v4_pro_spec.routing.fallback_models == ["qwen3.5-plus"]
-    assert deepseek_chat_spec.routing.fallback_models == ["qwen3.5-plus"]
+    assert deepseek_v4_flash_spec.routing.fallback_models == ["qwen3.5-plus"]
     assert "concept" not in qwen_max_spec.routing.task_types
     assert "outline_expand" not in qwen_long_spec.routing.task_types
 

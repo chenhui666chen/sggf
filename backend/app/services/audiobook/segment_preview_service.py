@@ -79,7 +79,12 @@ class SegmentPreviewService:
                 continue
             voice_params[key] = value
 
-        if "rate" not in voice_params and "speed" in voice_params:
+        if instruct_emotion and instruct_emotion != "neutral":
+            voice_params["emotion"] = instruct_emotion
+
+        if "rate" in voice_params:
+            voice_params["speed"] = voice_params["rate"]
+        elif "speed" in voice_params:
             voice_params["rate"] = voice_params["speed"]
 
         voice_params["pause_before"] = segment_voice_params.get(

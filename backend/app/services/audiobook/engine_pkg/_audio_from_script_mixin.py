@@ -13,6 +13,14 @@ from app.services.audiobook.atomic_files import write_bytes_atomic
 
 logger = logging.getLogger(__name__)
 
+
+def _estimate_editor_segment_unit(segment: ScriptSegment) -> float:
+    text_length = len((getattr(segment, "text", "") or "").strip())
+    if text_length <= 0:
+        return 72.0
+    return float(round(max(64.0, min(220.0, text_length * 1.8 + 56.0))))
+
+
 class AudioFromScriptMixin:
     async def generate_chapter_audio_from_script(
         self,
@@ -27,6 +35,7 @@ class AudioFromScriptMixin:
         audiobook_project_id: Optional[int] = None,
         output_format: str = "mp3",
         resume_checkpoint: Optional[Dict[str, Any]] = None,
+        timeline_edits: Optional[Dict[str, Dict[str, float]]] = None,
         tts_progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
     ) -> Dict[str, Any]:
         """使用已经生成/人工编辑后的剧本片段生成章节音频。
@@ -100,6 +109,8 @@ class AudioFromScriptMixin:
 
             # 使用剧本文本粗略拼接作为环境描述
             chapter_text_for_design = "".join([seg.text for seg in script_segments])
+            self._last_source_text_for_script_revision = chapter_text_for_design
+            self._last_llm_script_review = None
 
             voice_profiles, sound_effects_count, music_cues_count = await self._parallel_design(
                 task_id,
@@ -354,8 +365,32 @@ class AudioFromScriptMixin:
                 and all(hasattr(chunk, "source_segment_indices") for chunk in render_chunks)
             ):
                 realign_with_render_chunks(script_segments, render_chunks, audio_list)
+                actual_durations = self._audio_durations_for_segments(render_chunks, audio_list)
+                source_actual_durations = [0.0 for _ in script_segments]
+                for chunk_index, chunk in enumerate(render_chunks):
+                    source_indices = getattr(chunk, "source_segment_indices", None) or []
+                    if not source_indices:
+                        continue
+                    try:
+                        source_index = int(source_indices[0])
+                    except Exception:
+                        continue
+                    if source_index < 0 or source_index >= len(source_actual_durations):
+                        continue
+                    if chunk_index < len(actual_durations):
+                        source_actual_durations[source_index] += max(0.0, float(actual_durations[chunk_index] or 0.0))
+                actual_durations_for_editor = source_actual_durations
             else:
                 self._realign_timelines_with_audio(script_segments, audio_list)
+                actual_durations_for_editor = self._audio_durations_for_segments(script_segments, audio_list)
+
+            apply_editor_timeline_edits = getattr(self, "_apply_editor_timeline_edits", None)
+            if callable(apply_editor_timeline_edits) and timeline_edits:
+                apply_editor_timeline_edits(
+                    timeline_edits,
+                    segment_units=[_estimate_editor_segment_unit(segment) for segment in script_segments],
+                    actual_durations=actual_durations_for_editor,
+                )
 
             # ============ 阶段8：音频混合 ============
             self.task_tracker.start_stage(task_id, StageType.AUDIO_MIXING)

@@ -60,6 +60,37 @@ def test_llm_review_prompt_includes_audiobook_cadence_contract():
     assert "不要在拆出的每段重复同一音效/配乐" in prompt
 
 
+def test_llm_review_prompt_includes_fidelity_contract():
+    from app.services.audiobook.script_adapter_pkg._llm_review import _build_review_prompt
+
+    prompt = _build_review_prompt(
+        '[{"type":"narration","text":"守卫甩出长鞭。","speaker":"旁白"}]',
+        batch_index=1,
+        batch_total=1,
+        source_text="守卫一掌拍向后心。",
+    )
+
+    assert "不得新增原文不存在的武器、招式、道具、台词或人物行动" in prompt
+    assert "必须标记并修正关键事件遗漏、重复动作、凭空新增事实" in prompt
+    assert "原文没有写武器时，不得补写刀、剑、鞭、枪等具体武器" in prompt
+
+
+def test_llm_review_prompt_keeps_tail_source_context_for_late_events():
+    from app.services.audiobook.script_adapter_pkg._llm_review import _build_review_prompt
+
+    source_text = "开头关键线索。" + ("中段铺垫。" * 400) + "苍白的手搭上右肩，灰袍老者请求借一步说话。"
+
+    prompt = _build_review_prompt(
+        '[{"type":"narration","text":"就像一口古井。","speaker":"旁白"}]',
+        batch_index=1,
+        batch_total=1,
+        source_text=source_text,
+    )
+
+    assert "开头关键线索" in prompt
+    assert "灰袍老者请求借一步说话" in prompt
+
+
 @pytest.mark.asyncio
 async def test_llm_review_applies_structural_fix_with_flash_model():
     from app.services.audiobook.script_adapter_pkg._llm_review import (

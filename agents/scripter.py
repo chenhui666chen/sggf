@@ -6,7 +6,14 @@ from typing import Any, Dict, List, Tuple
 from datetime import datetime
 from dataclasses import dataclass, field
 
-from agents.llm_client import chat_completions, env_flag, extract_json_array, extract_json_object, llm_stream_context
+from agents.llm_client import (
+    chat_completions,
+    env_flag,
+    extract_json_array,
+    extract_json_object,
+    llm_stream_context,
+    resolve_llm_runtime_config,
+)
 from pipeline.style_presets import ensure_style_payload
 
 
@@ -226,10 +233,10 @@ def _pick_dreamweaver_script_model() -> str:
     if model:
         return model
 
-    # 兼容历史：部分部署把 DEEPSEEK_MODEL 指向 qwen-*；但如果是 deepseek-chat 等 DeepSeek 侧模型名，
-    # 在 DashScope compatible-mode 下会触发 model_not_found，因此仅接受 qwen*。
+    # 兼容历史：部分部署把 DEEPSEEK_MODEL 指向 qwen-*，继续允许该路径复用百炼通道。
+    # DeepSeek V4 模型由 resolve_llm_runtime_config 统一切到官方 DeepSeek API。
     legacy = (os.getenv("DEEPSEEK_MODEL") or "").strip()
-    if legacy.startswith("qwen"):
+    if legacy.startswith("qwen") or legacy in {"deepseek-v4-flash", "deepseek-v4-pro"}:
         return legacy
 
     return "qwen-plus"
@@ -992,9 +999,10 @@ def run(ctx: Any) -> None:
     ensure_style_payload(payload)
     style_prompt = str(payload.get("style_prompt") or "")
 
-    api_key = (os.getenv("DASHSCOPE_API_KEY") or "").strip()
-    base_url = (os.getenv("DASHSCOPE_API_BASE") or "https://dashscope.aliyuncs.com/compatible-mode/v1").strip()
     model = _pick_dreamweaver_script_model()
+    llm_runtime = resolve_llm_runtime_config(model)
+    api_key = llm_runtime.api_key
+    base_url = llm_runtime.base_url
     timeout_s = int(os.getenv("DREAMWEAVER_SCRIPT_TIMEOUT", "180") or "180")
     temperature = _env_float("DREAMWEAVER_SCRIPT_TEMPERATURE", 0.3)
     if temperature < 0.0:
@@ -1004,7 +1012,9 @@ def run(ctx: Any) -> None:
 
     can_llm = bool(enable_llm and api_key and base_url)
     if require_llm and not can_llm:
-        raise RuntimeError("DASHSCOPE_API_KEY and DASHSCOPE_API_BASE are required for script generation")
+        raise RuntimeError(
+            f"{llm_runtime.api_key_env} and {llm_runtime.base_url_env} are required for script generation"
+        )
 
     if not can_llm:
         fallback_text = (source_text or "").strip()

@@ -45,6 +45,7 @@ async def generate_audiobook_audio_from_scripts_background(
     audiobook_project_id: int,
     chapter_ids: List[int],
     tts_model: str = "qwen3-tts-instruct-flash",
+    timeline_edits_by_chapter: Optional[Dict[int, Dict[str, Dict[str, float]]]] = None,
     tracker: Optional[StageTracker] = None,
 ) -> None:
     """后台生成有声书音频任务（基于已生成或人工审核后的剧本）。"""
@@ -220,6 +221,10 @@ async def generate_audiobook_audio_from_scripts_background(
                 output_format = output_context.output_format
                 generate_subtitle = output_context.generate_subtitle
                 output_path = output_context.output_path
+                chapter_timeline_edits = (
+                    (timeline_edits_by_chapter or {}).get(chapter_id)
+                    or resume_checkpoint.get("timeline_edits")
+                )
 
                 result = await engine.generate_chapter_audio_from_script(
                     script_segments_data=script_segments_data,
@@ -231,6 +236,7 @@ async def generate_audiobook_audio_from_scripts_background(
                     enable_quality_review=True,
                     audiobook_project_id=audiobook_project_id,
                     resume_checkpoint=resume_checkpoint,
+                    timeline_edits=chapter_timeline_edits if isinstance(chapter_timeline_edits, dict) else None,
                     tts_progress_callback=output_context.tts_progress_callback,
                 )
 

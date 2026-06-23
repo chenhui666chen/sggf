@@ -8,6 +8,7 @@ import {
   TextField,
   Typography,
 } from '@mui/material'
+import type { SxProps, Theme } from '@mui/material/styles'
 import CloseIcon from '@mui/icons-material/Close'
 import PlayArrowIcon from '@mui/icons-material/PlayArrow'
 import PauseIcon from '@mui/icons-material/Pause'
@@ -20,6 +21,7 @@ interface AudioPickerProps {
   value: string
   onChange: (value: string) => void
   label: string
+  paperSx?: SxProps<Theme>
 }
 
 interface SfxOption {
@@ -41,7 +43,7 @@ interface MusicOption {
 
 type AudioOption = SfxOption | MusicOption
 
-const AudioPicker = ({ type, value, onChange, label }: AudioPickerProps) => {
+const AudioPicker = ({ type, value, onChange, label, paperSx }: AudioPickerProps) => {
   const [options, setOptions] = useState<AudioOption[]>([])
   const [open, setOpen] = useState(false)
   const [search, setSearch] = useState('')
@@ -159,7 +161,13 @@ const AudioPicker = ({ type, value, onChange, label }: AudioPickerProps) => {
           />
         )}
         PaperComponent={({ children }) => (
-          <Paper elevation={4} sx={{ '& .MuiAutocomplete-listbox': { maxHeight: 280 } }}>
+          <Paper
+            elevation={4}
+            sx={[
+              { '& .MuiAutocomplete-listbox': { maxHeight: 280 } },
+              ...(Array.isArray(paperSx) ? paperSx : paperSx ? [paperSx] : []),
+            ]}
+          >
             {children}
           </Paper>
         )}

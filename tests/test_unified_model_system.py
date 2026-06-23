@@ -95,14 +95,14 @@ class TestUnifiedModelSpec:
         routing = RoutingConfig(
             task_types=["chapter", "dialogue"],
             priority=1,
-            fallback_models=["deepseek-chat"],
+            fallback_models=["deepseek-v4-flash"],
             weight=1.0,
             enabled=True
         )
 
         assert "chapter" in routing.task_types
         assert routing.priority == 1
-        assert "deepseek-chat" in routing.fallback_models
+        assert "deepseek-v4-flash" in routing.fallback_models
 
     def test_performance_profile_creation(self):
         """测试性能配置创建"""
@@ -488,7 +488,7 @@ class TestLLMAdapters:
             model_type=ModelType.LLM,
             api_config=APIConfig(
                 api_key_env="TEST_API_KEY",
-                base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+                base_url="https://api.deepseek.com",
             ),
             default_params={"request_model": "deepseek-v4-pro"},
         )
@@ -548,7 +548,7 @@ class TestLLMAdapters:
             model_type=ModelType.LLM,
             api_config=APIConfig(
                 api_key_env="TEST_API_KEY",
-                base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+                base_url="https://api.deepseek.com",
             ),
             constraints=LLMConstraints(max_output_tokens=384000, supports_timeout_param=False),
             default_params={"request_model": "deepseek-v4-pro"},
@@ -1258,7 +1258,8 @@ class TestCompatibility:
         """测试历史模型别名映射。"""
         from core.model_resolution import normalize_model_id
 
-        assert normalize_model_id("deepseek-r1") == "deepseek-v4-pro"
+        assert normalize_model_id("deepseek-v4-pro") == "deepseek-v4-pro"
+        assert normalize_model_id("deepseek-v4-flash") == "deepseek-v4-flash"
         assert normalize_model_id("qwen-plus") == "qwen-long"
         assert normalize_model_id("qwen-max") == "qwen3-max"
 
@@ -1292,19 +1293,27 @@ class TestYAMLConfiguration:
         qwen_spec = registry.get_spec("qwen3-max")
         assert qwen_spec is not None
         assert qwen_spec.provider == "alibaba"
+        assert qwen_spec.api_config.api_key_env == "DASHSCOPE_API_KEY"
+        assert qwen_spec.api_config.base_url == "https://dashscope.aliyuncs.com/compatible-mode/v1"
 
         deepseek_spec = registry.get_spec("deepseek-v4-pro")
         assert deepseek_spec is not None
         assert deepseek_spec.provider == "deepseek"
-        assert deepseek_spec.api_config.api_key_env == "DASHSCOPE_API_KEY"
-        assert deepseek_spec.api_config.base_url == "https://dashscope.aliyuncs.com/compatible-mode/v1"
+        assert deepseek_spec.api_config.api_key_env == "DEEPSEEK_API_KEY"
+        assert deepseek_spec.api_config.base_url == "https://api.deepseek.com"
         assert deepseek_spec.default_params["request_model"] == "deepseek-v4-pro"
+        assert deepseek_spec.default_params["thinking"] == {"type": "enabled"}
+        assert deepseek_spec.default_params["reasoning_effort"] == "high"
 
-        deepseek_chat_spec = registry.get_spec("deepseek-chat")
-        assert deepseek_chat_spec is not None
-        assert deepseek_chat_spec.api_config.api_key_env == "DASHSCOPE_API_KEY"
-        assert deepseek_chat_spec.api_config.base_url == "https://dashscope.aliyuncs.com/compatible-mode/v1"
-        assert deepseek_chat_spec.default_params["request_model"] == "deepseek-v3"
+        deepseek_flash_spec = registry.get_spec("deepseek-v4-flash")
+        assert deepseek_flash_spec is not None
+        assert deepseek_flash_spec.provider == "deepseek"
+        assert deepseek_flash_spec.api_config.api_key_env == "DEEPSEEK_API_KEY"
+        assert deepseek_flash_spec.api_config.base_url == "https://api.deepseek.com"
+        assert deepseek_flash_spec.default_params["request_model"] == "deepseek-v4-flash"
+        assert deepseek_flash_spec.default_params["thinking"] == {"type": "disabled"}
+
+        assert registry.get_spec("deepseek-" + "chat") is None
 
     def test_yaml_audio_model_loading(self):
         """测试当前 YAML 中的音频模型已纳入统一模型注册中心。"""

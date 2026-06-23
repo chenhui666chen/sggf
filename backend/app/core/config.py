@@ -108,11 +108,13 @@ class Settings(BaseSettings):
     MAX_UPLOAD_SIZE: int = 10 * 1024 * 1024  # 10MB
     UPLOAD_DIR: str = "./uploads"
 
-    # DeepSeek API配置
+    # DeepSeek 官方 API配置
+    DEEPSEEK_API_KEY: str = ""
+    DEEPSEEK_API_BASE: str = "https://api.deepseek.com"
     DEEPSEEK_MODEL: str = "deepseek-v4-pro"
     MODEL_NAME: str = "deepseek-v4-pro"
     
-    # 阿里云百炼 API配置
+    # 阿里云百炼 API配置（Qwen / Embedding / TTS / 视频等 DashScope 能力）
     DASHSCOPE_API_KEY: str = "your-dashscope-api-key"
     DASHSCOPE_API_BASE: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 

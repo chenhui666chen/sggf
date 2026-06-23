@@ -177,6 +177,7 @@ def run_audio_from_scripts_task(
     audiobook_project_id: int,
     chapter_ids: List[int],
     tts_model: str,
+    timeline_edits_by_chapter: Optional[Dict[int, Dict[str, Dict[str, float]]]] = None,
 ) -> None:
     """Generate audio from previously approved scripts."""
     tracker = AudiobookJobTracker(task_db_id)
@@ -209,6 +210,7 @@ def run_audio_from_scripts_task(
                 audiobook_project_id=audiobook_project_id,
                 chapter_ids=chapter_ids,
                 tts_model=tts_model,
+                timeline_edits_by_chapter=timeline_edits_by_chapter or {},
                 tracker=tracker,
             )
         )

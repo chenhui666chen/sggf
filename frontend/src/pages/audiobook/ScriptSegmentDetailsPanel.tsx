@@ -5,13 +5,13 @@ import {
   TextField,
   Typography,
 } from '@mui/material'
+import type { SxProps, Theme } from '@mui/material/styles'
 
 import type {
   ScriptSegment,
   ScriptSegmentVoiceParams,
 } from './types'
 import AudioPicker from './AudioPicker'
-import { audiobookColors } from './audiobookTheme'
 import {
   getMusicCueInputValue,
   getScriptSegmentVoiceParams,
@@ -24,16 +24,27 @@ interface ScriptSegmentDetailsPanelProps {
   segment: ScriptSegment
   index: number
   onUpdateSegment: (index: number, patch: Partial<ScriptSegment>) => void
+  sx?: SxProps<Theme>
+  audioPickerPaperSx?: SxProps<Theme>
+  mutedTextColor?: string
 }
 
 const ScriptSegmentDetailsPanel = ({
   segment,
   index,
   onUpdateSegment,
+  sx,
+  audioPickerPaperSx,
+  mutedTextColor,
 }: ScriptSegmentDetailsPanelProps) => {
   const voiceParams = getScriptSegmentVoiceParams(segment)
   const soundEffectsValue = getSoundEffectsInputValue(segment)
   const musicCueValue = getMusicCueInputValue(segment)
+  const mutedCaptionSx = {
+    color: mutedTextColor || 'text.secondary',
+    display: 'block',
+    mb: 0.5,
+  } as const
 
   const updateVoiceParams = (patch: Partial<ScriptSegmentVoiceParams>) => {
     onUpdateSegment(index, { voice_params: { ...voiceParams, ...patch } })
@@ -42,14 +53,16 @@ const ScriptSegmentDetailsPanel = ({
   return (
     <Paper
       variant="outlined"
-      sx={{
-        mt: 1,
-        p: 1,
-        backgroundColor: audiobookColors.surfaceSubtle,
-        borderStyle: 'dashed',
-      }}
+      sx={[
+        {
+          mt: 1,
+          p: 1,
+          borderStyle: 'dashed',
+        },
+        ...(Array.isArray(sx) ? sx : sx ? [sx] : []),
+      ]}
     >
-      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
+      <Typography variant="caption" sx={mutedCaptionSx}>
         详细信息
       </Typography>
       <Typography variant="caption" sx={{ display: 'block' }}>
@@ -77,7 +90,7 @@ const ScriptSegmentDetailsPanel = ({
         配乐：{segment.music_cue ? JSON.stringify(segment.music_cue) : (segment.music_cue_simple || '—')}
       </Typography>
       <Divider sx={{ my: 1 }} />
-      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
+      <Typography variant="caption" sx={mutedCaptionSx}>
         音频提示词（可编辑）
       </Typography>
       <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, minmax(0, 1fr))' }, gap: 1 }}>
@@ -165,6 +178,7 @@ const ScriptSegmentDetailsPanel = ({
           })
         }
         label="音效提示（可从库中选择）"
+        paperSx={audioPickerPaperSx}
       />
       <Box sx={{ mt: 1 }}>
         <AudioPicker
@@ -177,6 +191,7 @@ const ScriptSegmentDetailsPanel = ({
             })
           }
           label="配乐提示（可从库中选择）"
+          paperSx={audioPickerPaperSx}
         />
       </Box>
     </Paper>

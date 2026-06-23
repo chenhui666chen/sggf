@@ -32,6 +32,11 @@ describe('audiobook script editor utils', () => {
       script_segments: [
         { text: 'Line 1', speaker: 'Narrator' },
       ],
+      chapter_audio_available: true,
+      chapter_audio_url: '/api/v1/audiobook/download/3/9',
+      segment_timings: [
+        { index: 0, start: 1.2, end: 3.4, duration: 2.2 },
+      ],
       script_review: {
         overall_score: 8.8,
         issues: [{ severity: 'minor', description: 'Can be tighter' }],
@@ -40,6 +45,11 @@ describe('audiobook script editor utils', () => {
       scriptStatus: 'reviewed',
       scriptSegments: [
         { text: 'Line 1', speaker: 'Narrator' },
+      ],
+      chapterAudioAvailable: true,
+      chapterAudioUrl: '/api/v1/audiobook/download/3/9',
+      segmentTimings: [
+        { index: 0, start: 1.2, end: 3.4, duration: 2.2 },
       ],
       scriptReview: {
         overall_score: 8.8,
@@ -50,6 +60,9 @@ describe('audiobook script editor utils', () => {
     expect(normalizeAudiobookChapterScriptData(null)).toEqual({
       scriptStatus: 'pending',
       scriptSegments: [],
+      chapterAudioAvailable: false,
+      chapterAudioUrl: '',
+      segmentTimings: [],
       scriptReview: null,
     })
   })
@@ -73,6 +86,9 @@ describe('audiobook script editor utils', () => {
       narrationStylePrompt: '',
       outputFormat: 'mp3',
       generateSubtitle: true,
+      timelineEdits: {
+        'sfx-0-0': { startUnit: 12, durationUnits: 48 },
+      },
     })).toEqual({
       chapter_ids: [8],
       tts_model: 'qwen3-tts-instruct-flash',
@@ -80,6 +96,9 @@ describe('audiobook script editor utils', () => {
       narration_style_prompt: undefined,
       output_format: 'mp3',
       generate_subtitle: true,
+      timeline_edits: {
+        'sfx-0-0': { startUnit: 12, durationUnits: 48 },
+      },
     })
 
     expect(buildGenerateAudioFromScriptPayload({

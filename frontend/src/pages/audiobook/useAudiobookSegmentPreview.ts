@@ -3,21 +3,63 @@ import { useCallback, useEffect, useRef, useState, type Dispatch, type SetStateA
 import { apiClient, extractApiErrorMessage } from '../../services/api'
 import type { PlayAudioOptions, SetSnackbar } from './hookTypes'
 import type {
+  PendingSegmentRegenerationMap,
   PreviewType,
+  SegmentPreviewPlaybackOptions,
   ScriptSegment,
-  TtsModel,
+  ScriptSegmentTiming,
 } from './types'
 
 interface UseAudiobookSegmentPreviewParams {
   audiobookProjectId?: number | null
   chapterId?: number | null
-  ttsModel: TtsModel
+  chapterAudioAvailable?: boolean
+  segmentTimings?: readonly ScriptSegmentTiming[]
+  pendingSegmentRegenerations: PendingSegmentRegenerationMap
   playingChapter: number | null
   setPlayingChapter: Dispatch<SetStateAction<number | null>>
   playExternalUrl: (url: string, options?: PlayAudioOptions) => Promise<unknown>
   stopManagedPlayback: () => void
   onResetSegmentDetails?: () => void
   setSnackbar: SetSnackbar
+}
+
+const PREVIEW_TYPE_LABELS: Record<PreviewType, string> = {
+  voice: '人声',
+  sfx: '音效',
+  bgm: '配乐',
+  mix: '融合',
+}
+
+const resolveSegmentAudioPath = (segment: ScriptSegment, previewType: PreviewType) => {
+  if (previewType === 'voice') return segment.audio_path || ''
+  if (previewType === 'sfx') return segment.sfx_audio_path || ''
+  if (previewType === 'bgm') return segment.bgm_audio_path || ''
+  return segment.mix_audio_path || ''
+}
+
+const clampSegmentStartRatio = (value: number): number =>
+  Math.max(0, Math.min(0.95, value))
+
+export const resolveSegmentTimelineStartTime = (
+  segmentTimings: readonly ScriptSegmentTiming[] = [],
+  segmentIndex: number,
+  startRatio = 0,
+): number | null => {
+  const timing = segmentTimings.find((item) => Number(item.index) === segmentIndex)
+  if (!timing || !Number.isFinite(timing.start) || timing.start < 0) {
+    return null
+  }
+
+  const end = Number(timing.end)
+  const duration = Number(timing.duration)
+  const resolvedDuration = Number.isFinite(duration) && duration > 0
+    ? duration
+    : Number.isFinite(end) && end > timing.start
+      ? end - timing.start
+      : 0
+
+  return timing.start + resolvedDuration * clampSegmentStartRatio(startRatio)
 }
 
 const revokeObjectUrlMap = (urls: Record<number, string>) => {
@@ -31,7 +73,9 @@ const revokeObjectUrlMap = (urls: Record<number, string>) => {
 export const useAudiobookSegmentPreview = ({
   audiobookProjectId,
   chapterId,
-  ttsModel,
+  chapterAudioAvailable = false,
+  segmentTimings = [],
+  pendingSegmentRegenerations,
   playingChapter,
   setPlayingChapter,
   playExternalUrl,
@@ -72,11 +116,30 @@ export const useAudiobookSegmentPreview = ({
     index: number,
     segment: ScriptSegment,
     previewType: PreviewType,
+    options?: SegmentPreviewPlaybackOptions,
   ) => {
     if (!audiobookProjectId || !chapterId) return
-    const textValue = String(segment?.text || '').trim()
-    if (!textValue) {
-      setSnackbar({ open: true, message: '片段文本为空，无法生成音频', severity: 'warning' })
+
+    const pendingRegeneration = pendingSegmentRegenerations[index]?.[previewType]
+    const candidateAudioPath = pendingRegeneration?.candidateAudioPath || resolveSegmentAudioPath(segment, previewType)
+    const shouldUseChapterAudio = !candidateAudioPath && previewType === 'mix' && chapterAudioAvailable
+    const chapterStartTime = shouldUseChapterAudio
+      ? resolveSegmentTimelineStartTime(segmentTimings, index, options?.startRatio ?? 0)
+      : null
+    if (!candidateAudioPath && !shouldUseChapterAudio) {
+      setSnackbar({
+        open: true,
+        message: `暂无可试听${PREVIEW_TYPE_LABELS[previewType]}音频，请先重新生成候选版本`,
+        severity: 'warning',
+      })
+      return
+    }
+    if (shouldUseChapterAudio && chapterStartTime === null) {
+      setSnackbar({
+        open: true,
+        message: '暂无该片段的整章时间轴，请重新生成章节音频后再试',
+        severity: 'warning',
+      })
       return
     }
 
@@ -92,10 +155,34 @@ export const useAudiobookSegmentPreview = ({
         setPlayingChapter(null)
       }
 
-      const response = await apiClient.previewScriptSegmentAudio(
+      if (shouldUseChapterAudio) {
+        const streamUrl = await apiClient.getAudiobookChapterAudioSignedStreamUrl(
+          audiobookProjectId,
+          chapterId,
+        )
+        if (!isCurrentPreviewRequest()) {
+          return
+        }
+
+        await playExternalUrl(streamUrl, {
+          startTime: chapterStartTime ?? 0,
+          onEnded: () => {
+            if (isCurrentPreviewRequest()) {
+              clearPreviewingState()
+            }
+          },
+        })
+        if (isCurrentPreviewRequest()) {
+          setSnackbar({ open: true, message: '整章融合音频已从该片段位置播放', severity: 'success' })
+        }
+        return
+      }
+
+      const response = await apiClient.getSegmentRegenerationCandidateAudio(
         audiobookProjectId,
         chapterId,
-        { segment, tts_model: ttsModel, preview_type: previewType },
+        index,
+        candidateAudioPath,
       )
       const url = window.URL.createObjectURL(response.data)
 
@@ -114,6 +201,7 @@ export const useAudiobookSegmentPreview = ({
         return next
       })
       await playExternalUrl(url, {
+        startRatio: options?.startRatio,
         onEnded: () => {
           if (isCurrentPreviewRequest()) {
             clearPreviewingState()
@@ -121,13 +209,14 @@ export const useAudiobookSegmentPreview = ({
         },
       })
       if (isCurrentPreviewRequest()) {
-        setSnackbar({ open: true, message: '片段音频已生成并开始播放', severity: 'success' })
+        const versionLabel = pendingRegeneration ? '候选' : '片段'
+        setSnackbar({ open: true, message: `${versionLabel}${PREVIEW_TYPE_LABELS[previewType]}音频已开始播放`, severity: 'success' })
       }
     } catch (error) {
       if (isCurrentPreviewRequest()) {
         setSnackbar({
           open: true,
-          message: await extractApiErrorMessage(error) || '生成片段音频失败，请重试',
+          message: await extractApiErrorMessage(error) || `播放${PREVIEW_TYPE_LABELS[previewType]}音频失败，请重新生成后再试`,
           severity: 'error',
         })
       }
@@ -139,13 +228,15 @@ export const useAudiobookSegmentPreview = ({
   }, [
     audiobookProjectId,
     chapterId,
+    chapterAudioAvailable,
     clearPreviewingState,
+    pendingSegmentRegenerations,
     playExternalUrl,
     playingChapter,
     setPlayingChapter,
     setSnackbar,
+    segmentTimings,
     stopManagedPlayback,
-    ttsModel,
   ])
 
   return {

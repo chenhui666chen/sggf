@@ -73,7 +73,7 @@ llm_models:
         - audiobook_review
       priority: 1
       fallback_models:
-        - deepseek-chat
+        - deepseek-v4-flash
       weight: 1.0
       enabled: true
 
@@ -266,7 +266,7 @@ llm_models:
         - multimodal_analysis
       priority: 1
       fallback_models:
-        - deepseek-chat
+        - deepseek-v4-flash
       weight: 1.0
       enabled: true
 
@@ -549,8 +549,8 @@ llm_models:
       supports_context_caching: true
 
     api_config:
-      api_key_env: DASHSCOPE_API_KEY
-      base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+      api_key_env: DEEPSEEK_API_KEY
+      base_url: https://api.deepseek.com
       default_timeout: 300
       default_max_retries: 3
 
@@ -583,6 +583,9 @@ llm_models:
 
     default_params:
       request_model: deepseek-v4-pro
+      thinking:
+        type: enabled
+      reasoning_effort: high
 
     summary: 项目中的高强度推理模型。DeepSeek V4 Pro 定位于强化推理模型，适合复杂分析、数学逻辑和多步骤决策；项目中主要承担结构审校、人物逻辑和质量复审。
     recommended_scenarios:
@@ -591,21 +594,22 @@ llm_models:
       - 情节结构检查与质量评审
       - 有声剧本改编中的逻辑约束处理
     limitations:
-      - 响应慢于 deepseek-chat、qwen3-max 和 qwen-turbo
+      - 响应慢于 deepseek-v4-flash、qwen3-max 和 qwen-turbo
       - 当前项目接入层不向它开放 temperature、timeout 和 max_retries 参数
       - 不适合作为高频流式交互模型
     integration_notes:
-      - 项目运行时会主动移除返回中的 think 标签内容，仅保留最终可消费文本
+      - 默认启用 DeepSeek 官方思考模式，项目运行时仅消费最终 content，不把 reasoning_content 混入业务输出
+      - 工具调用、流式输出和严格 JSON 输出场景会自动禁用思考模式
       - 内部 task_type=quality_review、review、structure_plot 等会优先命中该模型
       - 该模型更适合作为“第二判断层”，而不是大批量前台低延迟调用
     best_practice_tips:
       - 深度推理任务首选
       - 世界观、人物、结构审校优先使用
       - 适合作为生成后的质量复审模型
-    documentation_url: https://help.aliyun.com/zh/model-studio/deepseek-api
+    documentation_url: https://api-docs.deepseek.com/zh-cn/
     source_urls:
-      - https://help.aliyun.com/zh/model-studio/deepseek-api
-      - https://help.aliyun.com/zh/model-studio/models
+      - https://api-docs.deepseek.com/zh-cn/
+      - https://api-docs.deepseek.com/zh-cn/quick_start/pricing
 
     tags:
       - reasoning
@@ -647,8 +651,8 @@ llm_models:
       supports_context_caching: true
 
     api_config:
-      api_key_env: DASHSCOPE_API_KEY
-      base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+      api_key_env: DEEPSEEK_API_KEY
+      base_url: https://api.deepseek.com
       default_timeout: 60
 
     performance:
@@ -674,6 +678,8 @@ llm_models:
 
     default_params:
       request_model: deepseek-v4-flash
+      thinking:
+        type: disabled
 
     summary: 项目中的轻量快速推理模型。DeepSeek V4 Flash 定位于高性价比快速推理，适合需要推理能力但对延迟敏感的场景。
     recommended_scenarios:
@@ -687,103 +693,19 @@ llm_models:
     integration_notes:
       - 内部 task_type=fast、ai_trace、simple 等优先使用
       - 适合作为统一中心中的"快速推理通道模型"
+      - 默认禁用 DeepSeek 官方思考模式，保留低延迟和 temperature 可控性
       - 与 deepseek-v4-pro 形成质量/速度互补关系
     best_practice_tips:
       - 快速响应任务首选
       - 成本极低，适合作为高频调用模型
       - AI 痕迹处理与快速改写推荐使用
-    documentation_url: https://help.aliyun.com/zh/model-studio/deepseek-api
+    documentation_url: https://api-docs.deepseek.com/zh-cn/
     source_urls:
-      - https://help.aliyun.com/zh/model-studio/deepseek-api
-      - https://help.aliyun.com/zh/model-studio/models
+      - https://api-docs.deepseek.com/zh-cn/
+      - https://api-docs.deepseek.com/zh-cn/quick_start/pricing
 
     tags:
       - reasoning
-      - fast
-      - deepseek
-
-  - id: deepseek-chat
-    name: DeepSeek Chat
-    provider: deepseek
-    model_type: llm
-    version: v1
-    status: active
-
-    capabilities:
-      - name: chat
-        level: native
-        score: 0.85
-        description: 适合日常对话、多轮改写和轻量创作
-      - name: writing
-        level: native
-        score: 0.8
-        description: 适合通用写作、润色和过稿
-      - name: fast
-        level: native
-        score: 0.8
-        description: 比推理模型延迟更低，适合快速响应
-
-    constraints:
-      max_context_tokens: 128000  # 🔥 官方最新：128K上下文（2025-12-01更新）
-      max_output_tokens: 8192  # 🔥 官方最新：默认4K，最大8K
-      supports_streaming: true
-      supports_function_call: true
-      supports_timeout_param: true
-      supports_max_retries: true
-      supports_json_mode: true  # 🔥 官方最新：支持JSON输出
-
-    api_config:
-      api_key_env: DASHSCOPE_API_KEY
-      base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
-      default_timeout: 120
-
-    performance:
-      quality_score: 8.0
-      avg_latency_seconds: 2.0
-      p95_latency_seconds: 5.0
-      cost_per_1k_input_tokens: 0.001
-      cost_per_1k_output_tokens: 0.002
-      currency: CNY
-
-    routing:
-      task_types:
-        - chat
-        - rewrite
-        - fast
-        - ai_trace
-      priority: 2
-      fallback_models:
-        - qwen3.5-plus
-      enabled: true
-
-    default_params:
-      request_model: deepseek-v3
-
-    summary: 项目中的通用对话与快速改写模型。DeepSeek 官方文档将 Chat 系列定位为常规高性价比对话模型，适合日常交互、通用问答和轻量写作场景。
-    recommended_scenarios:
-      - AI 痕迹处理
-      - 快速改写与润色
-      - 日常对话与低延迟交互
-      - 轻量创作辅助与说明文整理
-    limitations:
-      - 深度推理、严格逻辑评审不如 deepseek-v4-pro
-      - 最终文学性正文质量一般不应替代 qwen3-max
-      - 长篇整体上下文能力不应替代 qwen-long
-    integration_notes:
-      - 内部 task_type=ai_trace、rewrite、chat 默认优先使用
-      - 适合作为统一中心中的“快速通道模型”
-      - 与 qwen3-max 形成质量/成本互补关系
-    best_practice_tips:
-      - 日常对话和快速任务首选
-      - 成本较低，适合作为高频调用模型
-      - AI 痕迹处理与快速改写推荐使用
-    documentation_url: https://help.aliyun.com/zh/model-studio/deepseek-api
-    source_urls:
-      - https://help.aliyun.com/zh/model-studio/deepseek-api
-      - https://help.aliyun.com/zh/model-studio/models
-
-    tags:
-      - chat
       - fast
       - deepseek
 

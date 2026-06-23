@@ -161,7 +161,7 @@ class MergeMixin:
                     })
         
         if natural_short_segments:
-            logger.info(f"检测到 {len(natural_short_segments)} 个自然短句（对白/独白），已从语义错误统计中排除")
+            logger.info(f"检测到 {len(natural_short_segments)} 个自然短片段（对白/独白/节奏短旁白），已从语义错误统计中排除")
         
         if short_segments:
             logger.warning(f"语义完整性验证失败：发现 {len(short_segments)} 个过短片段 (<{min_length}字)：")
@@ -177,8 +177,9 @@ class MergeMixin:
     
     def _is_natural_short_utterance(self, seg: ScriptSegment, min_length: int) -> bool:
         """
-        判断一个短片段是否属于"自然短句"，例如：
+        判断一个短片段是否属于"自然短句/节奏短旁白"，例如：
         - 简短而完整的对白/独白（如"好。""行。"）
+        - 章节标题或有声小说节奏点短旁白（如"它在呼吸。""陆衍不信邪。"）
         - 带完整终止标点且长度虽短但语义完整
         - 强烈情绪的短句（惊讶/愤怒/紧张）
         这类片段允许在长度上略低于 min_length，而不视为语义错误。
@@ -191,10 +192,13 @@ class MergeMixin:
         if length >= min_length:
             return False
 
-        if seg.type not in ("dialogue", "monologue"):
+        if "..." in text or "……" in text:
             return False
 
-        if "..." in text or "..." in text:
+        if seg.type == "narration":
+            return self._is_natural_short_narration_beat(text, seg)
+
+        if seg.type not in ("dialogue", "monologue"):
             return False
 
         whitelist = {
@@ -216,3 +220,34 @@ class MergeMixin:
             return True
 
         return False
+
+    def _is_natural_short_narration_beat(self, text: str, seg: ScriptSegment) -> bool:
+        """判断短旁白是否是可保留的有声小说节奏点，而非破碎语义片段。"""
+        if text.startswith("第") and "章" in text[:8] and len(text) >= 6:
+            return True
+
+        if not text.endswith(("。", "！", "?", "？", "!")):
+            return False
+
+        stripped_text = text.rstrip("。！?？！!")
+        if len(stripped_text) < 4:
+            return False
+
+        semantic_markers = (
+            "是",
+            "在",
+            "不",
+            "就是",
+            "只有",
+            "唯一",
+            "机会",
+            "掌心",
+            "裂隙",
+            "呼吸",
+            "信邪",
+        )
+        if any(marker in stripped_text for marker in semantic_markers):
+            return True
+
+        strong_emotions = {"tense", "excited", "shocked", "fearful", "mysterious", "solemn"}
+        return seg.emotion in strong_emotions and len(stripped_text) >= 8

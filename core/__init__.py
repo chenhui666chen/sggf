@@ -24,7 +24,6 @@ from .llm_adapters import (
     QwenTurboAdapter,
     DeepSeekV4ProAdapter,
     DeepSeekV4FlashAdapter,
-    DeepSeekChatAdapter,
 )
 
 from .model_hub import (
@@ -60,7 +59,6 @@ __all__ = [
     "QwenTurboAdapter",
     "DeepSeekV4ProAdapter",
     "DeepSeekV4FlashAdapter",
-    "DeepSeekChatAdapter",
     "ModelHub",
     "model_hub",
     "get_model_hub",

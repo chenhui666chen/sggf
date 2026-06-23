@@ -3,7 +3,14 @@ from __future__ import annotations
 import os
 from typing import Any, Dict, List, Optional, Tuple
 
-from agents.llm_client import chat_completions, env_flag, extract_json_object, pick_model, llm_stream_context
+from agents.llm_client import (
+    chat_completions,
+    env_flag,
+    extract_json_object,
+    llm_stream_context,
+    pick_model,
+    resolve_llm_runtime_config,
+)
 from pipeline.style_presets import ensure_style_payload
 
 
@@ -81,14 +88,17 @@ def run(ctx: Any) -> None:
         "DREAMWEAVER_PLANNER_REQUIRE_LLM", default=False
     )
 
-    api_key = (os.getenv("DASHSCOPE_API_KEY") or "").strip()
-    base_url = (os.getenv("DASHSCOPE_API_BASE") or "https://dashscope.aliyuncs.com/compatible-mode/v1").strip()
     model = pick_model(primary_env="DREAMWEAVER_PLANNER_MODEL", fallback_env="DREAMWEAVER_SCRIPT_MODEL", default="qwen-plus")
+    llm_runtime = resolve_llm_runtime_config(model)
+    api_key = llm_runtime.api_key
+    base_url = llm_runtime.base_url
     timeout_s = int(os.getenv("DREAMWEAVER_PLANNER_TIMEOUT", "120") or "120")
 
     can_llm = bool(enable_llm and api_key and base_url)
     if require_llm and not can_llm:
-        raise RuntimeError("planner require LLM but DASHSCOPE_API_KEY/DASHSCOPE_API_BASE missing")
+        raise RuntimeError(
+            f"planner require LLM but {llm_runtime.api_key_env}/{llm_runtime.base_url_env} missing"
+        )
 
     mode = "rule"
     llm_error: str | None = None

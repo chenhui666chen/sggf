@@ -11,20 +11,36 @@ import {
   Tooltip,
   Typography,
 } from '@mui/material'
+import type { SxProps, Theme } from '@mui/material/styles'
+import CancelIcon from '@mui/icons-material/Cancel'
+import CheckCircleIcon from '@mui/icons-material/CheckCircle'
 import GraphicEqIcon from '@mui/icons-material/GraphicEq'
-import MusicNoteIcon from '@mui/icons-material/MusicNote'
+import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown'
+import LibraryMusicIcon from '@mui/icons-material/LibraryMusic'
+import MicIcon from '@mui/icons-material/Mic'
 import PlayArrowIcon from '@mui/icons-material/PlayArrow'
-import RecordVoiceOverIcon from '@mui/icons-material/RecordVoiceOver'
+import ReplayIcon from '@mui/icons-material/Replay'
+import StopCircleIcon from '@mui/icons-material/StopCircle'
 import SurroundSoundIcon from '@mui/icons-material/SurroundSound'
 
 import type {
+  PendingSegmentRegeneration,
   PreviewType,
   ScriptSegment,
 } from './types'
-import {
-  hasPreviewableMusicCue,
-  hasPreviewableSoundEffects,
-} from './scriptSegmentCardUtils'
+
+const previewOptions: Array<{
+  type: PreviewType
+  label: string
+  icon: JSX.Element
+}> = [
+  { type: 'voice', label: '人声', icon: <PlayArrowIcon fontSize="small" /> },
+  { type: 'sfx', label: '音效', icon: <GraphicEqIcon fontSize="small" /> },
+  { type: 'bgm', label: '配乐', icon: <LibraryMusicIcon fontSize="small" /> },
+  { type: 'mix', label: '融合', icon: <SurroundSoundIcon fontSize="small" /> },
+]
+
+const regenerateOptions = previewOptions
 
 interface ScriptSegmentActionsProps {
   segment: ScriptSegment
@@ -32,12 +48,29 @@ interface ScriptSegmentActionsProps {
   detailsOpen: boolean
   reviewMode: boolean
   review?: { quality_score?: number; needs_regenerate?: boolean }
+  pendingRegeneration?: Partial<Record<PreviewType, PendingSegmentRegeneration>>
   previewingType: PreviewType | null
   regenerating: boolean
+  voiceRecording: boolean
+  voiceRecordingDisabled: boolean
+  chapterAudioAvailable?: boolean
   onPreviewAudio: (index: number, segment: ScriptSegment, previewType: PreviewType) => void
-  onRegenerate: (index: number, segment: ScriptSegment) => void
+  onRegenerate: (index: number, segment: ScriptSegment, previewType: PreviewType) => void
+  onStartVoiceRecording: (index: number, segment: ScriptSegment) => void
+  onStopVoiceRecording: () => void
+  onApplyRegeneration: (index: number, previewType: PreviewType) => void
+  onDiscardRegeneration: (index: number, previewType: PreviewType) => void
   onReview: (index: number, score: number) => void
   onToggleDetails: (index: number) => void
+  menuPaperSx?: SxProps<Theme>
+  mutedTextColor?: string
+}
+
+const hasSavedAudioForType = (segment: ScriptSegment, previewType: PreviewType) => {
+  if (previewType === 'voice') return Boolean(segment.audio_path)
+  if (previewType === 'sfx') return Boolean(segment.sfx_audio_path)
+  if (previewType === 'bgm') return Boolean(segment.bgm_audio_path)
+  return Boolean(segment.mix_audio_path)
 }
 
 const ScriptSegmentActions = ({
@@ -46,65 +79,62 @@ const ScriptSegmentActions = ({
   detailsOpen,
   reviewMode,
   review,
+  pendingRegeneration,
   previewingType,
   regenerating,
+  voiceRecording,
+  voiceRecordingDisabled,
+  chapterAudioAvailable = false,
   onPreviewAudio,
   onRegenerate,
+  onStartVoiceRecording,
+  onStopVoiceRecording,
+  onApplyRegeneration,
+  onDiscardRegeneration,
   onReview,
   onToggleDetails,
+  menuPaperSx,
+  mutedTextColor,
 }: ScriptSegmentActionsProps) => {
   const [previewMenuAnchor, setPreviewMenuAnchor] = useState<HTMLElement | null>(null)
+  const [regenerateMenuAnchor, setRegenerateMenuAnchor] = useState<HTMLElement | null>(null)
   const isBusy = previewingType !== null
   const hasText = Boolean(segment.text?.trim())
-  const isPreviewing = (type: PreviewType) => previewingType === type
-  const previewMenuOpen = Boolean(previewMenuAnchor)
-  const soundEffectsAvailable = hasPreviewableSoundEffects(segment)
-  const musicCueAvailable = hasPreviewableMusicCue(segment)
+  const hasPendingRegenerations = Boolean(pendingRegeneration && Object.keys(pendingRegeneration).length > 0)
 
   const handleOpenPreviewMenu = (event: MouseEvent<HTMLButtonElement>) => {
     setPreviewMenuAnchor(event.currentTarget)
+  }
+
+  const handleOpenRegenerateMenu = (event: MouseEvent<HTMLButtonElement>) => {
+    setRegenerateMenuAnchor(event.currentTarget)
   }
 
   const handleClosePreviewMenu = () => {
     setPreviewMenuAnchor(null)
   }
 
-  const handlePreview = (previewType: PreviewType) => {
-    handleClosePreviewMenu()
-    onPreviewAudio(index, segment, previewType)
+  const handleCloseRegenerateMenu = () => {
+    setRegenerateMenuAnchor(null)
   }
 
-  const previewOptions: Array<{
-    type: PreviewType
-    label: string
-    icon: JSX.Element
-    disabled: boolean
-  }> = [
-    {
-      type: 'voice',
-      label: '人声试听',
-      icon: <RecordVoiceOverIcon fontSize="small" />,
-      disabled: !hasText,
-    },
-    {
-      type: 'sfx',
-      label: '音效试听',
-      icon: <GraphicEqIcon fontSize="small" />,
-      disabled: !hasText || !soundEffectsAvailable,
-    },
-    {
-      type: 'bgm',
-      label: '配乐试听',
-      icon: <MusicNoteIcon fontSize="small" />,
-      disabled: !hasText || !musicCueAvailable,
-    },
-    {
-      type: 'mix',
-      label: '融合试听',
-      icon: <SurroundSoundIcon fontSize="small" />,
-      disabled: !hasText,
-    },
-  ]
+  const handlePreview = (option: { type: PreviewType }) => {
+    handleClosePreviewMenu()
+    onPreviewAudio(index, segment, option.type)
+  }
+
+  const handleRegenerate = (option: { type: PreviewType }) => {
+    handleCloseRegenerateMenu()
+    onRegenerate(index, segment, option.type)
+  }
+
+  const handleVoiceRecordingClick = () => {
+    if (voiceRecording) {
+      onStopVoiceRecording()
+      return
+    }
+    onStartVoiceRecording(index, segment)
+  }
 
   return (
     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 1, flexWrap: 'wrap' }}>
@@ -116,41 +146,124 @@ const ScriptSegmentActions = ({
         {detailsOpen ? '收起详情' : '查看详情'}
       </Button>
 
-      <Tooltip title={hasText ? '选择试听类型' : '片段文本为空，无法试听'}>
+      <Tooltip title="选择单轨或融合试听">
         <span>
           <Button
             size="small"
             variant="outlined"
             onClick={handleOpenPreviewMenu}
-            disabled={isBusy || !hasText}
+            disabled={isBusy}
             startIcon={isBusy ? <CircularProgress size={14} /> : <PlayArrowIcon fontSize="small" />}
+            endIcon={<KeyboardArrowDownIcon fontSize="small" />}
           >
-            {isBusy ? '生成中...' : '试听'}
+            {isBusy ? '播放中...' : '试听'}
           </Button>
         </span>
       </Tooltip>
       <Menu
         anchorEl={previewMenuAnchor}
-        open={previewMenuOpen}
+        open={Boolean(previewMenuAnchor)}
         onClose={handleClosePreviewMenu}
+        PaperProps={{ sx: menuPaperSx }}
       >
-        {previewOptions.map((option) => (
+        {previewOptions.map((option) => {
+          const canPlay = Boolean(pendingRegeneration?.[option.type])
+            || hasSavedAudioForType(segment, option.type)
+            || (option.type === 'mix' && chapterAudioAvailable)
+          return (
+            <MenuItem
+              key={option.type}
+              onClick={() => handlePreview(option)}
+              disabled={!canPlay || isBusy}
+            >
+              <ListItemIcon>
+                {previewingType === option.type ? <CircularProgress size={18} /> : option.icon}
+              </ListItemIcon>
+              <ListItemText>{option.label}</ListItemText>
+            </MenuItem>
+          )
+        })}
+      </Menu>
+
+      <Tooltip title="选择单轨或融合重新生成">
+        <span>
+          <Button
+            size="small"
+            variant="outlined"
+            color="warning"
+            onClick={handleOpenRegenerateMenu}
+            disabled={regenerating || !hasText}
+            startIcon={regenerating ? <CircularProgress size={14} /> : <ReplayIcon fontSize="small" />}
+            endIcon={<KeyboardArrowDownIcon fontSize="small" />}
+          >
+            {regenerating ? '重新生成中...' : '重新生成'}
+          </Button>
+        </span>
+      </Tooltip>
+      <Menu
+        anchorEl={regenerateMenuAnchor}
+        open={Boolean(regenerateMenuAnchor)}
+        onClose={handleCloseRegenerateMenu}
+        PaperProps={{ sx: menuPaperSx }}
+      >
+        {regenerateOptions.map((option) => (
           <MenuItem
             key={option.type}
-            onClick={() => handlePreview(option.type)}
-            disabled={option.disabled || isBusy}
+            onClick={() => handleRegenerate(option)}
+            disabled={regenerating || !hasText}
           >
-            <ListItemIcon>
-              {isPreviewing(option.type) ? <CircularProgress size={18} /> : option.icon}
-            </ListItemIcon>
+            <ListItemIcon>{option.icon}</ListItemIcon>
             <ListItemText>{option.label}</ListItemText>
           </MenuItem>
         ))}
       </Menu>
 
+      <Tooltip title={voiceRecording ? '结束真人配音录制并上传候选' : '真人直接配音，录完后生成候选版本'}>
+        <span>
+          <Button
+            size="small"
+            variant={voiceRecording ? 'contained' : 'outlined'}
+            color={voiceRecording ? 'error' : 'primary'}
+            onClick={handleVoiceRecordingClick}
+            disabled={!voiceRecording && (voiceRecordingDisabled || regenerating)}
+            startIcon={voiceRecording ? <StopCircleIcon fontSize="small" /> : <MicIcon fontSize="small" />}
+          >
+            {voiceRecording ? '结束配音' : '配音'}
+          </Button>
+        </span>
+      </Tooltip>
+
+      {hasPendingRegenerations && previewOptions.map((option) => {
+        const pending = pendingRegeneration?.[option.type]
+        if (!pending) return null
+        return (
+          <Box key={option.type} sx={{ display: 'flex', gap: 0.75, alignItems: 'center' }}>
+            <Button
+              size="small"
+              variant="contained"
+              color="success"
+              onClick={() => onApplyRegeneration(index, option.type)}
+              disabled={regenerating}
+              startIcon={<CheckCircleIcon fontSize="small" />}
+            >
+              保存{option.label}
+            </Button>
+            <Button
+              size="small"
+              variant="outlined"
+              onClick={() => onDiscardRegeneration(index, option.type)}
+              disabled={regenerating}
+              startIcon={<CancelIcon fontSize="small" />}
+            >
+              取消{option.label}
+            </Button>
+          </Box>
+        )
+      })}
+
       {reviewMode && (
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, ml: 1 }}>
-          <Typography variant="caption" color="text.secondary">
+          <Typography variant="caption" sx={{ color: mutedTextColor || 'text.secondary' }}>
             评分：
           </Typography>
           <Rating
@@ -162,16 +275,6 @@ const ScriptSegmentActions = ({
           />
         </Box>
       )}
-      <Button
-        size="small"
-        variant="outlined"
-        color="warning"
-        onClick={() => onRegenerate(index, segment)}
-        disabled={regenerating || !hasText}
-        startIcon={regenerating ? <CircularProgress size={14} /> : undefined}
-      >
-        {regenerating ? '重新生成中...' : '重新生成'}
-      </Button>
     </Box>
   )
 }

@@ -23,7 +23,7 @@ os.environ.setdefault("DATABASE_URL", "postgresql://test:test@127.0.0.1:5432/tes
 from app.api.v1.audiobook_api import routes_script
 from app.api.v1.audiobook_api.dependencies import OwnedAudiobookProject
 from app.db.base import Base
-from app.models.audiobook import AudiobookProject, ChapterAudio
+from app.models.audiobook import AudiobookProject, ChapterAudio, ChapterAudioRun
 from app.models.project import Chapter, Project
 from app.models.user import User
 from app.schemas.audiobook import ChapterScriptUpdateRequest
@@ -44,6 +44,7 @@ def build_session_factory():
             Chapter.__table__,
             AudiobookProject.__table__,
             ChapterAudio.__table__,
+            ChapterAudioRun.__table__,
         ],
     )
     return session_factory
@@ -184,6 +185,147 @@ def test_get_chapter_script_does_not_reuse_history_when_current_project_has_no_s
         ).first() is None
         assert json.loads(context["chapter_audio"].script_json) == old_script
         assert old_project.id != new_project.id
+
+
+def test_get_chapter_script_returns_chapter_audio_timeline_for_editor_playback():
+    session_factory = build_session_factory()
+
+    with session_factory() as db:
+        context = seed_script_context(db)
+        segment_timings = [
+            {"index": 0, "start": 1.25, "end": 3.75, "duration": 2.5},
+        ]
+        db.add(
+            ChapterAudioRun(
+                audiobook_project_id=context["audiobook_project"].id,
+                chapter_id=context["chapter"].id,
+                run_type="audio_from_scripts",
+                status="completed",
+                current_stage="completed",
+                progress=1.0,
+                checkpoint_json={
+                    "segment_timings": segment_timings,
+                    "cached_audio_paths": {},
+                },
+                resumable=False,
+            )
+        )
+        db.commit()
+
+        owned = OwnedAudiobookProject(
+            audiobook_project=context["audiobook_project"],
+            project=context["project"],
+            current_user=context["user"],
+            db=db,
+        )
+
+        payload = asyncio.run(
+            routes_script.get_chapter_script(
+                audiobook_project_id=context["audiobook_project"].id,
+                chapter_id=context["chapter"].id,
+                owned=owned,
+            )
+        )
+
+        assert payload["chapter_audio_available"] is True
+        assert payload["chapter_audio_url"] == (
+            f"/api/v1/audiobook/download/{context['audiobook_project'].id}/{context['chapter'].id}"
+        )
+        assert payload["segment_timings"] == segment_timings
+
+
+def test_get_chapter_script_keeps_completed_timeline_when_newer_run_is_running():
+    session_factory = build_session_factory()
+
+    with session_factory() as db:
+        context = seed_script_context(db)
+        completed_timings = [
+            {"index": 0, "start": 0.0, "end": 2.0, "duration": 2.0},
+        ]
+        db.add(
+            ChapterAudioRun(
+                audiobook_project_id=context["audiobook_project"].id,
+                chapter_id=context["chapter"].id,
+                run_type="audio_from_scripts",
+                status="completed",
+                current_stage="completed",
+                progress=1.0,
+                checkpoint_json={"segment_timings": completed_timings},
+                resumable=False,
+            )
+        )
+        db.flush()
+        db.add(
+            ChapterAudioRun(
+                audiobook_project_id=context["audiobook_project"].id,
+                chapter_id=context["chapter"].id,
+                run_type="audio_from_scripts",
+                status="running",
+                current_stage="tts_synthesis",
+                progress=0.25,
+                checkpoint_json={"segment_timings": []},
+                resumable=True,
+            )
+        )
+        db.commit()
+
+        owned = OwnedAudiobookProject(
+            audiobook_project=context["audiobook_project"],
+            project=context["project"],
+            current_user=context["user"],
+            db=db,
+        )
+
+        payload = asyncio.run(
+            routes_script.get_chapter_script(
+                audiobook_project_id=context["audiobook_project"].id,
+                chapter_id=context["chapter"].id,
+                owned=owned,
+            )
+        )
+
+        assert payload["segment_timings"] == completed_timings
+
+
+def test_get_chapter_script_uses_full_generation_timeline_for_completed_chapter_audio():
+    session_factory = build_session_factory()
+
+    with session_factory() as db:
+        context = seed_script_context(db)
+        full_generation_timings = [
+            {"index": 0, "start": 4.0, "end": 6.5, "duration": 2.5},
+        ]
+        db.add(
+            ChapterAudioRun(
+                audiobook_project_id=context["audiobook_project"].id,
+                chapter_id=context["chapter"].id,
+                run_type="full",
+                status="completed",
+                current_stage="completed",
+                progress=1.0,
+                checkpoint_json={"segment_timings": full_generation_timings},
+                resumable=False,
+            )
+        )
+        db.commit()
+
+        owned = OwnedAudiobookProject(
+            audiobook_project=context["audiobook_project"],
+            project=context["project"],
+            current_user=context["user"],
+            db=db,
+        )
+
+        payload = asyncio.run(
+            routes_script.get_chapter_script(
+                audiobook_project_id=context["audiobook_project"].id,
+                chapter_id=context["chapter"].id,
+                owned=owned,
+            )
+        )
+
+        assert payload["chapter_audio_available"] is True
+        assert payload["segment_timings"] == full_generation_timings
 
 
 def test_update_chapter_script_does_not_swallow_unexpected_json_errors(monkeypatch):

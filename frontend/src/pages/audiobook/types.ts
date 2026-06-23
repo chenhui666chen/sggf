@@ -59,6 +59,17 @@ export type StageStatus = 'pending' | 'running' | 'completed' | 'failed'
 
 export type PreviewType = 'voice' | 'sfx' | 'bgm' | 'mix'
 
+export interface SegmentPreviewPlaybackOptions {
+  startRatio?: number
+}
+
+export interface ScriptSegmentTiming {
+  index: number
+  start: number
+  end?: number | null
+  duration?: number | null
+}
+
 export type TtsModel = AudiobookTtsModel
 
 export type AudioOutputFormat = 'mp3' | 'wav' | 'm4b'
@@ -262,6 +273,10 @@ export interface ScriptSegment {
   role_name?: string | null
   emotion?: string | null
   text?: string | null
+  audio_path?: string | null
+  sfx_audio_path?: string | null
+  bgm_audio_path?: string | null
+  mix_audio_path?: string | null
   performance_notes?: string | null
   original_text?: string | null
   adaptation_reason?: string | null
@@ -278,6 +293,15 @@ export interface ScriptSegment {
   music_cue?: ScriptSegmentMusicCueDetail | string | null
 }
 
+export interface PendingSegmentRegeneration {
+  candidateAudioPath: string
+  previewType: PreviewType
+  segment: ScriptSegment
+  generatedAt?: string
+}
+
+export type PendingSegmentRegenerationMap = Record<number, Partial<Record<PreviewType, PendingSegmentRegeneration>>>
+
 export interface ScriptReviewDialogData {
   report: ScriptReviewDetail | null
   segments: ScriptSegment[]
@@ -292,8 +316,22 @@ export interface ScriptEditorChapterRef {
 export interface ScriptEditorStateData {
   scriptStatus: string
   scriptSegments: ScriptSegment[]
+  chapterAudioAvailable?: boolean
+  chapterAudioUrl?: string
+  segmentTimings?: ScriptSegmentTiming[]
   scriptReview: ScriptReviewDetail | null
 }
+
+export interface TimelineClipEdit {
+  startUnit: number
+  durationUnits: number
+}
+
+export type TimelineClipEditMap = Record<string, TimelineClipEdit>
+
+export type TimelineClipEditUpdater =
+  | TimelineClipEditMap
+  | ((current: TimelineClipEditMap) => TimelineClipEditMap)
 
 export interface SmartChunkPreviewStats {
   total_chunks: number
@@ -320,6 +358,7 @@ export interface AudiobookEditorSessionState {
   reviewMode?: boolean
   openSegmentDetailIndices?: number[]
   segmentReviews?: Record<number, { quality_score?: number; needs_regenerate?: boolean }>
+  timelineEdits?: TimelineClipEditMap
   data?: ScriptEditorStateData | null
   updatedAt?: string
   writerTabId?: string
@@ -399,16 +438,29 @@ export interface ScriptEditorDialogProps {
   onClose: () => void
   onChangeSegmentText: (index: number, value: string) => void
   onSaveScript: (options: { nextStatus?: 'reviewed' | 'approved'; generateAudio?: boolean }) => void
-  onPreviewSegmentAudio: (index: number, segment: ScriptSegment, previewType: PreviewType) => void
-  onRegenerateSegment: (index: number, segment: ScriptSegment) => void
+  onPreviewSegmentAudio: (
+    index: number,
+    segment: ScriptSegment,
+    previewType: PreviewType,
+    options?: SegmentPreviewPlaybackOptions,
+  ) => void
+  onRegenerateSegment: (index: number, segment: ScriptSegment, previewType: PreviewType) => void
+  onStartSegmentVoiceRecording: (index: number, segment: ScriptSegment) => void
+  onStopSegmentVoiceRecording: () => void
+  onApplySegmentRegeneration: (index: number, previewType: PreviewType) => void
+  onDiscardSegmentRegeneration: (index: number, previewType: PreviewType) => void
   onReviewSegment: (index: number, score: number) => void
   segmentReviews: Record<number, { quality_score?: number; needs_regenerate?: boolean }>
+  pendingSegmentRegenerations: PendingSegmentRegenerationMap
+  recordingSegmentIndex: number | null
   segmentPreviewingIndex: number | null
   segmentPreviewingType: PreviewType | null
   segmentAudioUrls: Record<number, string>
   segmentDetailsOpen: Record<number, boolean>
   onToggleSegmentDetails: (index: number) => void
   onUpdateSegment: (index: number, patch: Partial<ScriptSegment>) => void
+  timelineEdits: TimelineClipEditMap
+  onChangeTimelineEdits: (updater: TimelineClipEditUpdater) => void
   reviewMode: boolean
   onToggleReviewMode: () => void
   regeneratingSegments: Set<number>

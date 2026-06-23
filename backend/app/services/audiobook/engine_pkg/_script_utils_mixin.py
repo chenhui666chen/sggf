@@ -37,6 +37,43 @@ from ..agents import (
 logger = logging.getLogger(__name__)
 
 class ScriptUtilsMixin:
+    def _infer_opening_delivery(self, text: str) -> Dict[str, str]:
+        """根据片头文本推断有声书开场的播讲方式。"""
+        normalized_text = str(text or "")
+        tense_keywords = (
+            "逃亡",
+            "危机",
+            "威胁",
+            "致命",
+            "恐怖",
+            "追杀",
+            "杀",
+            "血",
+            "危险",
+            "风暴",
+        )
+        mysterious_keywords = ("未知", "秘密", "真相", "谜", "阴影", "禁地")
+
+        if any(keyword in normalized_text for keyword in tense_keywords):
+            return {
+                "emotion": "tense",
+                "instruct_emotion": "fearful",
+                "performance_notes": "低沉克制，带悬念感；关键词略加重，句尾短暂停顿。",
+            }
+
+        if any(keyword in normalized_text for keyword in mysterious_keywords):
+            return {
+                "emotion": "mysterious",
+                "instruct_emotion": "neutral",
+                "performance_notes": "压低声线，保留悬念感；信息点清晰，结尾留白。",
+            }
+
+        return {
+            "emotion": "solemn",
+            "instruct_emotion": "neutral",
+            "performance_notes": "沉稳开场，语速适中；章节名和集数清晰读出。",
+        }
+
     def _is_narration_segment(self, segment: ScriptSegment) -> bool:
         speaker = str(getattr(segment, "speaker", "") or "").strip()
         segment_type = str(getattr(segment, "type", "") or "").strip().lower()
@@ -52,6 +89,10 @@ class ScriptUtilsMixin:
             return voice_params
 
         base_params = dict(voice_params)
+        performance_notes = str(getattr(segment, "performance_notes", "") or "").strip()
+        if performance_notes and not base_params.get("performance_notes"):
+            base_params["performance_notes"] = performance_notes
+
         original_segment_params = getattr(segment, "voice_params", None) or {}
         if "speed" not in original_segment_params and "rate" not in original_segment_params:
             base_params.pop("speed", None)
@@ -92,6 +133,38 @@ class ScriptUtilsMixin:
             styled_params["narration_style_pause_applied"] = True
 
         return styled_params
+
+    def _normalize_final_voice_params(
+        self,
+        segment: ScriptSegment,
+        voice_params: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        normalized_params = dict(voice_params)
+        instruct_emotion = str(getattr(segment, "instruct_emotion", "") or "").strip()
+        if instruct_emotion and instruct_emotion != "neutral":
+            normalized_params["emotion"] = instruct_emotion
+            try:
+                setattr(segment, "emotion", instruct_emotion)
+            except Exception:
+                pass
+
+        if "rate" in normalized_params:
+            normalized_params["speed"] = normalized_params["rate"]
+        elif "speed" in normalized_params:
+            normalized_params["rate"] = normalized_params["speed"]
+
+        for key in ("pause_before", "pause_after"):
+            try:
+                pause_value = max(0.0, float(normalized_params.get(key) or 0.0))
+            except (TypeError, ValueError):
+                pause_value = 0.0
+            normalized_params[key] = pause_value
+            try:
+                setattr(segment, key, pause_value)
+            except Exception:
+                pass
+
+        return normalized_params
 
     def _build_mixer_segment_types(self, script_segments) -> List[str]:
         def normalize_type(value: Any) -> str:
@@ -159,17 +232,21 @@ class ScriptUtilsMixin:
         # 片头
         opening = chapter_structure.opening
         if opening and opening.intro_text:
+            opening_delivery = self._infer_opening_delivery(opening.intro_text)
             opening_segment = ScriptSegment(
                 type="narration",
                 text=opening.intro_text,
                 speaker=getattr(opening, "intro_narrator", "旁白") or "旁白",
-                emotion="calm",
-                performance_notes="章节片头",
+                emotion=opening_delivery["emotion"],
+                performance_notes=opening_delivery["performance_notes"],
                 pause_before=0.0,
                 pause_after=0.5,
                 music_cue=getattr(opening, "intro_music", None),
                 original_text=opening.intro_text,
                 adaptation_reason="自动生成章节片头",
+                instruct_emotion=opening_delivery["instruct_emotion"],
+                instruct_scene="章节片头",
+                instruct_role="有声书旁白",
             )
             segments.append(opening_segment)
 
@@ -259,6 +336,7 @@ class ScriptUtilsMixin:
             if "rate" not in voice_params_dict and "speed" in voice_params_dict:
                 voice_params_dict["rate"] = voice_params_dict["speed"]
             voice_params_dict["tts_model"] = getattr(voice_profile, "tts_model", getattr(self, "tts_model", ""))
+            voice_params_dict = self._normalize_final_voice_params(segment, voice_params_dict)
             
             # 🔍 调试：输出最终参数
             logger.info(
@@ -271,6 +349,7 @@ class ScriptUtilsMixin:
             
             # 写回到segment
             segment.voice_params = voice_params_dict
+            instruct_emotion = (getattr(segment, "instruct_emotion", "") or "").strip()
             
             # 将片段元信息透传给TTS，用于Instruct模板（场景/角色/身份）
             segment.voice_params["segment_speaker"] = getattr(segment, "speaker", "")

@@ -90,6 +90,38 @@ def test_segment_preview_service_resolves_voice_params(monkeypatch):
     assert params["use_instruct_mode"] is True
 
 
+def test_segment_preview_service_keeps_rate_speed_and_emotion_consistent(monkeypatch):
+    install_fake_voice_manager(monkeypatch)
+    service = SegmentPreviewService(
+        tts_model="qwen3-tts-instruct-flash",
+        voice_mapping={},
+        audio_fx={},
+    )
+
+    emotion, params = service.resolve_voice_params(
+        {
+            "type": "narration",
+            "speaker": "narrator",
+            "emotion": "calm",
+            "instruct_emotion": "fearful",
+            "voice_params": {
+                "emotion": "calm",
+                "speed": 1.15,
+                "rate": 0.8,
+                "pause_before": 0.3,
+                "pause_after": 0.5,
+            },
+        }
+    )
+
+    assert emotion == "fearful"
+    assert params["emotion"] == "fearful"
+    assert params["rate"] == 0.8
+    assert params["speed"] == 0.8
+    assert params["pause_before"] == 0.3
+    assert params["pause_after"] == 0.5
+
+
 def test_segment_preview_service_normalizes_effects_and_music_cues():
     effect_specs = SegmentPreviewService.normalize_sound_effects(
         {

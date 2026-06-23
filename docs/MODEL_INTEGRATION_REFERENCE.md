@@ -1,7 +1,7 @@
 # 模型接入参考文档
 
 初版：`2026-04-18`
-最近更新：`2026-04-28`
+最近更新：`2026-06-05`
 
 本次更新重点：
 
@@ -10,6 +10,7 @@
 - 补充 Asset Studio / DreamWeaver 统一模型清单的事实源与维护入口
 - 补充本次调试中验证有效的最小回归测试集合
 - 补充长耗时生成请求的可观测性要求
+- 补充 `deepseek-v4-flash` 与 `deepseek-v4-pro` 从阿里百炼切换到 DeepSeek 官方 API 的接入基线
 
 ## 1. 目标
 
@@ -122,6 +123,27 @@
 1. 在 `config/llm_models.yaml` 增加模型配置。
 2. 在 `core/llm_adapters.py` 增加一个适配器类。
 3. 如果接口完全兼容 OpenAI Chat Completions，很多时候只需要新增一个继承 `OpenAICompatibleAdapter` 的轻量子类。
+
+#### DeepSeek 官方渠道接入基线（2026-06-05）
+
+`deepseek-v4-flash` 和 `deepseek-v4-pro` 不再按阿里百炼 DashScope 文本模型处理，应统一按 DeepSeek 官方 OpenAI 兼容接口接入。
+
+| 项目内模型 ID | 官方请求模型 ID | Base URL | 环境变量密钥 | 官方文档 |
+| --- | --- | --- | --- | --- |
+| `deepseek-v4-flash` | `deepseek-v4-flash` | `https://api.deepseek.com` | `DEEPSEEK_API_KEY` | `https://api-docs.deepseek.com/zh-cn/` |
+| `deepseek-v4-pro` | `deepseek-v4-pro` | `https://api.deepseek.com` | `DEEPSEEK_API_KEY` | `https://api-docs.deepseek.com/zh-cn/` |
+
+落地要求：
+
+- `config/llm_models.yaml` 中这两个模型的 `api_config.api_key_env` 应为 `DEEPSEEK_API_KEY`，`api_config.base_url` 应为 `https://api.deepseek.com`。
+- `core/llm_adapters.py` 中这两个模型对应的 `@register_llm_model(...)` 参数也要同步使用 `DEEPSEEK_API_KEY` 和 `https://api.deepseek.com`。
+- `default_params.request_model` 保持官方模型 ID：`deepseek-v4-flash` 或 `deepseek-v4-pro`。
+- `deepseek-v4-flash` 默认禁用官方思考模式，保留低延迟和 `temperature` 可控性。
+- `deepseek-v4-pro` 默认启用官方思考模式并使用 `reasoning_effort=high`，仅用于审校、规划、复杂推理等高价值任务。
+- 流式输出、工具调用和严格 JSON 输出场景必须禁用思考模式，避免 `reasoning_content` 回传要求、前端流式消费和 JSON 解析受到影响。
+- `documentation_url` / `source_urls` 应指向 DeepSeek 官方文档，不再指向阿里百炼 DeepSeek API 文档。
+- `DASHSCOPE_API_KEY`、`DASHSCOPE_API_BASE` 和 `https://dashscope.aliyuncs.com/compatible-mode/v1` 仍保留给 Qwen、Wan、百炼 TTS / 视频等 DashScope 模型，不应用作这两个 DeepSeek V4 模型的接入渠道。
+- 项目内不再保留 DeepSeek 旧版 Chat / Reasoner 模型名；快速通道统一使用 `deepseek-v4-flash`，高强度推理通道统一使用 `deepseek-v4-pro`。
 
 ### 4.2 媒体智能调度链
 
@@ -689,6 +711,28 @@ print(f"task_id={task_id}, error={error}")
 
 如果有 `task_id` 说明格式正确；如果有错误信息，根据错误调整请求格式。
 
+对于 DeepSeek 官方文本 LLM，先用最小 OpenAI 兼容调用确认密钥、Base URL 和模型 ID 正确：
+
+```python
+import os
+from openai import OpenAI
+
+client = OpenAI(
+    api_key=os.getenv("DEEPSEEK_API_KEY"),
+    base_url="https://api.deepseek.com",
+)
+
+response = client.chat.completions.create(
+    model="deepseek-v4-flash",
+    messages=[{"role": "user", "content": "ping"}],
+    max_tokens=32,
+)
+
+print(response.choices[0].message.content)
+```
+
+验证 `deepseek-v4-pro` 时只替换 `model` 字段；如果本地适配器仍读 `DASHSCOPE_API_KEY` 或 `dashscope.aliyuncs.com/compatible-mode/v1`，说明运行时配置还没有完成渠道切换。
+
 ### 9.4 完整真实调用验证
 
 使用测试脚本进行完整验证：
@@ -875,6 +919,26 @@ python -m pytest "tests/test_asset_studio_model_catalog.py" -q
 - 视频 / 音频 / 异步媒体任务在提交时就应该记录 `accepted` 级别日志，在完成时再记录 `completed` 日志
 - 没有入口日志时，用户很容易误判为“前端显示生成中，但后端根本没发请求”
 - Asset Studio 这类交互式页面还应该在 loading 态先展示 pending 请求信息，例如模型、模式、提示词摘要或是否带参考图
+
+### 10.14 "DeepSeek V4 Pro / Flash 继续走阿里百炼也一样"
+
+不成立。
+
+- `deepseek-v4-flash` 和 `deepseek-v4-pro` 的项目接入基线现在以 DeepSeek 官方 API 为准。
+- 这两个模型应使用 `DEEPSEEK_API_KEY` 和 `https://api.deepseek.com`，不再复用 DashScope 的 `DASHSCOPE_API_KEY` 与 `https://dashscope.aliyuncs.com/compatible-mode/v1`。
+- 阿里百炼渠道仍可服务 Qwen、Wan、TTS、视频等百炼模型；不要把该规则外推到 DeepSeek 官方 V4 文本模型。
+- 排查这两个模型失败时，先检查实际请求的 Base URL、API Key 环境变量和 `request_model`，再检查提示词、上下文长度或业务参数。
+
+### 10.15 "DeepSeek V4 全局启用思考模式更稳"
+
+不成立。
+
+- `deepseek-v4-flash` 是项目快速通道，默认禁用思考模式，适合 fast / chat / rewrite / ai_trace / simple。
+- `deepseek-v4-pro` 是高强度推理通道，默认启用思考模式，适合 worldview / character / structure_plot / review / quality_review / final_review / reasoning / volume_detail_expand。
+- 思考模式下 `temperature`、`top_p` 等采样参数不生效，因此不适合需要风格随机性或创造性控制的生成链路。
+- 思考模式会优先消耗 reasoning tokens；`max_tokens` 太小时可能出现 HTTP 200 但 `content` 为空。
+- 当前项目只把 `reasoning_content` 作为 metadata 记录长度和存在性，不把它拼进业务 `content`。
+- 工具调用、流式输出和严格 JSON 输出场景由适配器自动把 `thinking` 设为 disabled。
 
 ## 11. TTS 模型接入经验总结（2026-04-20）
 

@@ -6,6 +6,7 @@ import type {
   EditorConflictSegmentDiffPreview,
   ScriptEditorStateData,
   ScriptSegment,
+  TimelineClipEditMap,
 } from './types'
 import { normalizeScriptReview } from './utils'
 
@@ -130,6 +131,38 @@ export const normalizeSegmentReviews = (
   return normalized
 }
 
+export const normalizeTimelineEdits = (edits: unknown): TimelineClipEditMap => {
+  if (!edits || typeof edits !== 'object') {
+    return {}
+  }
+
+  const normalized: TimelineClipEditMap = {}
+  for (const [clipKey, rawEdit] of Object.entries(edits as Record<string, unknown>)) {
+    if (!clipKey.trim() || !rawEdit || typeof rawEdit !== 'object') {
+      continue
+    }
+
+    const edit = rawEdit as Record<string, unknown>
+    const startUnit = Number(edit.startUnit)
+    const durationUnits = Number(edit.durationUnits)
+    if (
+      !Number.isFinite(startUnit)
+      || !Number.isFinite(durationUnits)
+      || startUnit < 0
+      || durationUnits <= 0
+    ) {
+      continue
+    }
+
+    normalized[clipKey] = {
+      startUnit,
+      durationUnits,
+    }
+  }
+
+  return normalized
+}
+
 export const normalizeScriptEditorStateData = (raw: unknown): ScriptEditorStateData | null => {
   if (!raw || typeof raw !== 'object') {
     return null
@@ -142,6 +175,9 @@ export const normalizeScriptEditorStateData = (raw: unknown): ScriptEditorStateD
         ? data.scriptStatus
         : 'pending',
     scriptSegments: Array.isArray(data.scriptSegments) ? data.scriptSegments : [],
+    chapterAudioAvailable: data.chapterAudioAvailable === true,
+    chapterAudioUrl: typeof data.chapterAudioUrl === 'string' ? data.chapterAudioUrl : '',
+    segmentTimings: Array.isArray(data.segmentTimings) ? data.segmentTimings : [],
     scriptReview: normalizeScriptReview(data.scriptReview),
   }
 }
@@ -161,6 +197,7 @@ export const normalizeAudiobookEditorSessionState = (
     reviewMode: Boolean(session.reviewMode),
     openSegmentDetailIndices: normalizeSegmentDetailIndices(session.openSegmentDetailIndices),
     segmentReviews: normalizeSegmentReviews(session.segmentReviews),
+    timelineEdits: normalizeTimelineEdits(session.timelineEdits),
     data: normalizeScriptEditorStateData(session.data),
     updatedAt: typeof session.updatedAt === 'string' ? session.updatedAt : undefined,
     writerTabId: typeof session.writerTabId === 'string' && session.writerTabId.trim()
@@ -209,6 +246,7 @@ export const buildComparableAudiobookEditorSessionPayload = (
     reviewMode: normalizedSession?.reviewMode ?? false,
     openSegmentDetailIndices: normalizedSession?.openSegmentDetailIndices ?? [],
     segmentReviews: normalizedSession?.segmentReviews ?? {},
+    timelineEdits: normalizedSession?.timelineEdits ?? {},
     data: normalizedSession?.data ?? null,
   }
 }
@@ -220,6 +258,7 @@ export const buildAudiobookEditorSessionPayload = ({
   reviewMode,
   segmentDetailsOpen,
   segmentReviews,
+  timelineEdits,
   data,
   updatedAt,
   writerTabId,
@@ -230,6 +269,7 @@ export const buildAudiobookEditorSessionPayload = ({
   reviewMode: boolean
   segmentDetailsOpen: Record<number, boolean>
   segmentReviews: Record<number, { quality_score?: number; needs_regenerate?: boolean }>
+  timelineEdits?: TimelineClipEditMap
   data: ScriptEditorStateData
   updatedAt?: string
   writerTabId?: string
@@ -240,6 +280,7 @@ export const buildAudiobookEditorSessionPayload = ({
   reviewMode,
   openSegmentDetailIndices: extractOpenSegmentDetailIndices(segmentDetailsOpen),
   segmentReviews,
+  timelineEdits: normalizeTimelineEdits(timelineEdits),
   data,
   updatedAt,
   writerTabId,
@@ -441,6 +482,20 @@ const formatSegmentReviewSummary = (
     : `评分 ${ratedCount} 条，待重生成 ${regenerateCount} 条，涉及 ${previewIndices}`
 }
 
+const formatTimelineEditsSummary = (edits: unknown): string => {
+  const normalizedEdits = normalizeTimelineEdits(edits)
+  const entries = Object.keys(normalizedEdits)
+
+  if (entries.length === 0) {
+    return '无时间线调整'
+  }
+
+  const previewKeys = entries.slice(0, 3).join('、')
+  return entries.length > 3
+    ? `${entries.length} 个片段已调整，包含 ${previewKeys} 等`
+    : `${entries.length} 个片段已调整，包含 ${previewKeys}`
+}
+
 const resolveScriptSegmentSpeaker = (segment: ScriptSegment | null | undefined): string => {
   const speaker =
     segment?.speaker
@@ -508,6 +563,17 @@ export const buildAudiobookEditorConflictPreview = (
         label: '片段审查',
         currentValue: formatSegmentReviewSummary(normalizedLocalSession.segmentReviews),
         incomingValue: formatSegmentReviewSummary(normalizedIncomingSession.segmentReviews),
+        maxLength: 80,
+      }),
+    )
+  }
+  if (!isDiffValueEqual(normalizedLocalSession.timelineEdits, normalizedIncomingSession.timelineEdits)) {
+    fieldDiffs.push(
+      buildEditorConflictFieldDiffPreview({
+        key: 'timelineEdits',
+        label: '音频时间线',
+        currentValue: formatTimelineEditsSummary(normalizedLocalSession.timelineEdits),
+        incomingValue: formatTimelineEditsSummary(normalizedIncomingSession.timelineEdits),
         maxLength: 80,
       }),
     )

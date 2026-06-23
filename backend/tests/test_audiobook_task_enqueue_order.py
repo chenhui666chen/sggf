@@ -153,6 +153,11 @@ def test_enqueue_audiobook_task_prepares_task_runs_and_checkpoint_before_dispatc
             narration_style="professional",
             narration_style_prompt=None,
             generate_subtitle=True,
+            timeline_edits_by_chapter={
+                context["chapter"].id: {
+                    "sfx-0-0": {"startUnit": 12, "durationUnits": 48},
+                },
+            },
             before_dispatch=before_dispatch,
         )
 
@@ -169,7 +174,15 @@ def test_enqueue_audiobook_task_prepares_task_runs_and_checkpoint_before_dispatc
         assert dispatch_snapshot["run_count"] == 1
         assert dispatch_snapshot["run_celery_task_ids"] == ["fixed-celery-task-id"]
         assert dispatch_snapshot["run_checkpoint_json"][0]["generate_subtitle"] is True
+        assert dispatch_snapshot["run_checkpoint_json"][0]["timeline_edits"] == {
+            "sfx-0-0": {"startUnit": 12, "durationUnits": 48},
+        }
         assert (
             dispatch_snapshot["run_checkpoint_json"][0]["resume_requested_at"]
             == "2026-05-03T00:00:00+00:00"
         )
+        assert snapshots[0]["args"][-1] == {
+            context["chapter"].id: {
+                "sfx-0-0": {"startUnit": 12, "durationUnits": 48},
+            },
+        }

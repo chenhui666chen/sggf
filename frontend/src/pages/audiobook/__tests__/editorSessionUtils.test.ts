@@ -30,6 +30,13 @@ describe('audiobook editor session utils', () => {
         invalid: { quality_score: 7 },
         4: { quality_score: Number.NaN, needs_regenerate: 'yes' },
       },
+      timelineEdits: {
+        'sfx-0-0': { startUnit: '12', durationUnits: 48 },
+        'music-1-2': { startUnit: 24, durationUnits: '96' },
+        invalidNegative: { startUnit: -1, durationUnits: 20 },
+        invalidDuration: { startUnit: 10, durationUnits: 0 },
+        invalidMissing: { startUnit: 10 },
+      },
       data: {
         scriptStatus: '',
         scriptSegments: [{ text: '旁白文本' }],
@@ -47,6 +54,10 @@ describe('audiobook editor session utils', () => {
       openSegmentDetailIndices: [1, 3],
       segmentReviews: {
         2: { quality_score: 8.5, needs_regenerate: true },
+      },
+      timelineEdits: {
+        'sfx-0-0': { startUnit: 12, durationUnits: 48 },
+        'music-1-2': { startUnit: 24, durationUnits: 96 },
       },
       data: {
         scriptStatus: 'pending',
@@ -111,6 +122,9 @@ describe('audiobook editor session utils', () => {
       writerTabId: 'tab-a',
       updatedAt: '2026-04-30T12:00:00.000Z',
       openSegmentDetailIndices: ['2', 0] as unknown as number[],
+      timelineEdits: {
+        'sfx-0-0': { startUnit: 12, durationUnits: 48 },
+      },
       data: {
         scriptStatus: 'reviewed',
         scriptSegments: [{ text: 'A' }],
@@ -125,9 +139,15 @@ describe('audiobook editor session utils', () => {
       reviewMode: false,
       openSegmentDetailIndices: [0, 2],
       segmentReviews: {},
+      timelineEdits: {
+        'sfx-0-0': { startUnit: 12, durationUnits: 48 },
+      },
       data: {
         scriptStatus: 'reviewed',
         scriptSegments: [{ text: 'A' }],
+        chapterAudioAvailable: false,
+        chapterAudioUrl: '',
+        segmentTimings: [],
         scriptReview: null,
       },
     })
@@ -141,6 +161,9 @@ describe('audiobook editor session utils', () => {
       reviewMode: true,
       segmentDetailsOpen: { 2: true, 1: false, 0: true },
       segmentReviews: { 0: { quality_score: 8 } },
+      timelineEdits: {
+        'sfx-0-0': { startUnit: 12, durationUnits: 48 },
+      },
       data: {
         scriptStatus: 'generated',
         scriptSegments: [{ text: 'A' }],
@@ -156,10 +179,19 @@ describe('audiobook editor session utils', () => {
     }
 
     expect(base.openSegmentDetailIndices).toEqual([0, 2])
+    expect(base.timelineEdits).toEqual({
+      'sfx-0-0': { startUnit: 12, durationUnits: 48 },
+    })
     expect(areAudiobookEditorSessionsEquivalent(base, sameDraft)).toBe(true)
     expect(areAudiobookEditorSessionsEquivalent(base, {
       ...sameDraft,
       reviewMode: false,
+    })).toBe(false)
+    expect(areAudiobookEditorSessionsEquivalent(base, {
+      ...sameDraft,
+      timelineEdits: {
+        'sfx-0-0': { startUnit: 18, durationUnits: 48 },
+      },
     })).toBe(false)
   })
 
@@ -230,6 +262,9 @@ describe('audiobook editor session utils', () => {
       reviewMode: false,
       openSegmentDetailIndices: [1],
       segmentReviews: { 0: { quality_score: 7 } },
+      timelineEdits: {
+        'sfx-0-0': { startUnit: 12, durationUnits: 48 },
+      },
       data: {
         scriptStatus: 'generated',
         scriptSegments: [
@@ -248,6 +283,9 @@ describe('audiobook editor session utils', () => {
       reviewMode: true,
       openSegmentDetailIndices: [1, 2],
       segmentReviews: { 0: { quality_score: 9, needs_regenerate: true } },
+      timelineEdits: {
+        'sfx-0-0': { startUnit: 18, durationUnits: 64 },
+      },
       data: {
         scriptStatus: 'reviewed',
         scriptSegments: [
@@ -276,6 +314,7 @@ describe('audiobook editor session utils', () => {
       'reviewMode',
       'openSegmentDetailIndices',
       'segmentReviews',
+      'timelineEdits',
     ])
     expect(preview?.segmentDiffs).toHaveLength(2)
     expect(preview?.segmentDiffs[0]).toMatchObject({

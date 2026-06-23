@@ -4,18 +4,31 @@
 包含 _build_chapter_structure, _generate_chapter_opening, _generate_chapter_closing, _generate_smart_hook 方法
 """
 import logging
-from typing import List, Dict, Any
+import re
+from typing import List, Dict, Any, Optional
 
 from ._dataclasses import (
     ChapterStructure, ChapterOpening, ChapterClosing, 
     MusicCue, ScriptSegment
 )
+from ._segment_validation import NARRATOR, NARRATOR_ALIAS_KEYS
 
 logger = logging.getLogger(__name__)
 
 
 class StructureMixin:
     """章节结构方法"""
+
+    def _format_character_intro(self, character_list: List[str]) -> str:
+        """将主要角色格式化为自然的中文短语。"""
+        characters = [str(name).strip() for name in character_list[:3] if str(name).strip()]
+        if not characters:
+            return ""
+        if len(characters) == 1:
+            return characters[0]
+        if len(characters) == 2:
+            return "与".join(characters)
+        return f"{'、'.join(characters[:-1])}与{characters[-1]}"
     
     def _build_chapter_structure(
         self,
@@ -55,7 +68,8 @@ class StructureMixin:
             chapter_number=chapter_number,
             genre=genre,
             body_segments=body_segments,
-            analysis=analysis
+            analysis=analysis,
+            character_list=character_list
         )
         
         structure = ChapterStructure(
@@ -100,13 +114,14 @@ class StructureMixin:
         }
         logo_sound = logo_sound_map.get(genre, "default-logo.mp3")
         
-        theme = analysis.get('theme', '')
+        theme = str(analysis.get('theme') or chapter_title or "本章故事").strip()
         
-        if character_list:
-            main_chars = ', '.join(character_list[:3])
-            intro_text = f"{main_chars}的故事继续展开。{theme}，第{chapter_number}集，现在开播！"
+        main_chars = self._format_character_intro(character_list)
+        episode_suffix = "故事开始。" if chapter_number <= 1 else "风暴再起。"
+        if main_chars:
+            intro_text = f"{main_chars}卷入本章风暴。{theme}。第{chapter_number}集，{episode_suffix}"
         else:
-            intro_text = f"{theme}，第{chapter_number}集，现在开播！"
+            intro_text = f"{theme}。第{chapter_number}集，{episode_suffix}"
         
         music_style_map = {
             "科幻": "科幻电子音乐",
@@ -122,8 +137,8 @@ class StructureMixin:
             style=music_style,
             volume=0.2,
             fade_in=2.0,
-            fade_out=0.0,
-            duration=28.0
+            fade_out=2.0,
+            duration=12.0
         )
         
         return ChapterOpening(
@@ -131,7 +146,7 @@ class StructureMixin:
             intro_text=intro_text,
             intro_narrator="旁白",
             intro_music=intro_music,
-            duration=30.0
+            duration=14.0
         )
     
     def _generate_chapter_closing(
@@ -140,7 +155,8 @@ class StructureMixin:
         chapter_number: int,
         genre: str,
         body_segments: List[ScriptSegment],
-        analysis: Dict[str, Any]
+        analysis: Dict[str, Any],
+        character_list: Optional[List[str]] = None
     ) -> ChapterClosing:
         """
         生成章节片尾（包含智能钩子生成）
@@ -154,21 +170,17 @@ class StructureMixin:
         Returns:
             ChapterClosing对象
         """
-        theme = analysis.get('theme', '')
-        recap_text = f"本章：{theme}"
+        theme = str(analysis.get('theme') or chapter_title or "本章故事").strip()
+        recap_text = f"本章暂告一段落：{theme}"
         
         hook_text = self._generate_smart_hook(
             body_segments=body_segments,
             genre=genre,
-            chapter_number=chapter_number
+            chapter_number=chapter_number,
+            character_list=character_list
         )
         
-        call_to_action_templates = [
-            "喜欢本章记得点赞、订阅，评论区留言你的看法！",
-            "点赞订阅，评论区说出你的猜测，下章不见不散！",
-            "热烈讨论中，评论区等你来留言，别忘了点赞订阅哦！"
-        ]
-        call_to_action = call_to_action_templates[chapter_number % len(call_to_action_templates)]
+        call_to_action = "请继续收听下一章。"
         
         music_style_map = {
             "科幻": "科幻电子音乐",
@@ -185,7 +197,7 @@ class StructureMixin:
             volume=0.2,
             fade_in=0.0,
             fade_out=3.0,
-            duration=60.0
+            duration=18.0
         )
         
         return ChapterClosing(
@@ -194,14 +206,15 @@ class StructureMixin:
             call_to_action=call_to_action,
             outro_narrator="旁白",
             outro_music=outro_music,
-            duration=60.0
+            duration=20.0
         )
     
     def _generate_smart_hook(
         self,
         body_segments: List[ScriptSegment],
         genre: str,
-        chapter_number: int
+        chapter_number: int,
+        character_list: Optional[List[str]] = None
     ) -> str:
         """
         智能钩子生成（基于最后几个片段的情绪高涨）
@@ -233,7 +246,12 @@ class StructureMixin:
         if high_emotion_segments:
             last_high = high_emotion_segments[-1]
             emotion = last_high.emotion
-            speaker = last_high.speaker
+            speaker = self._resolve_hook_actor(last_high, character_list or [])
+
+            if not speaker:
+                hook = self._generate_generic_emotion_hook(emotion, genre, chapter_number)
+                logger.info(f"生成智能钩子: {hook}")
+                return hook
             
             if emotion == "angry":
                 hook_templates = [
@@ -260,8 +278,6 @@ class StructureMixin:
             
             hook = hook_templates[chapter_number % len(hook_templates)]
         else:
-            last_seg = body_segments[-1]
-            
             genre_hooks = {
                 "科幻": f"下一章，更多未知的科技奇迹即将揭晓！",
                 "奇幻": f"下一章，魔法世界的秘密即将揭开！",
@@ -274,3 +290,68 @@ class StructureMixin:
         
         logger.info(f"生成智能钩子: {hook}")
         return hook
+
+    def _resolve_hook_actor(self, segment: ScriptSegment, character_list: List[str]) -> str:
+        """从片段或角色列表中提取可作为片尾钩子主语的真实角色名。"""
+        speaker = str(getattr(segment, "speaker", "") or "").strip()
+        if self._is_valid_hook_actor(speaker):
+            return speaker
+
+        text = str(getattr(segment, "text", "") or "")
+        for candidate in self._iter_hook_actor_candidates(character_list):
+            if candidate in text:
+                return candidate
+
+        return ""
+
+    def _iter_hook_actor_candidates(self, character_list: List[str]):
+        seen = set()
+        for value in character_list or []:
+            candidate = str(value or "").strip()
+            if not self._is_valid_hook_actor(candidate) or candidate in seen:
+                continue
+            seen.add(candidate)
+            yield candidate
+
+    def _is_valid_hook_actor(self, value: str) -> bool:
+        name = str(value or "").strip()
+        if not name:
+            return False
+        normalized = name.strip("[]()（）【】\"'“”‘’").strip().rstrip(":：").strip()
+        key = re.sub(r"[\s_\-]+", "", normalized).lower()
+        return bool(normalized) and normalized != NARRATOR and key not in NARRATOR_ALIAS_KEYS
+
+    def _generate_generic_emotion_hook(self, emotion: str, genre: str, chapter_number: int) -> str:
+        generic_templates = {
+            "angry": [
+                "怒火已经被点燃，下一章，局势将如何失控？",
+                "冲突还在升级，下一章，新的代价即将揭晓！",
+            ],
+            "tense": [
+                "危机将至，下一章，谁能逃过一劫？",
+                "紧张的局面还在升级，下一章，危机将如何逼近？",
+            ],
+            "excited": [
+                "计划即将实施，下一章，惊喜还是惊吓？",
+                "激动人心的时刻即将到来，命运将如何转向？",
+            ],
+            "sad": [
+                "悲伤还未散去，下一章，希望还在吗？",
+                "低谷之后，故事将走向何方？下章见分晓！",
+            ],
+        }
+        hook_templates = generic_templates.get(emotion)
+        if not hook_templates:
+            return self._generate_genre_hook(genre)
+        return hook_templates[chapter_number % len(hook_templates)]
+
+    def _generate_genre_hook(self, genre: str) -> str:
+        genre_hooks = {
+            "科幻": "下一章，更多未知的科技奇迹即将揭晓！",
+            "奇幻": "下一章，魔法世界的秘密即将揭开！",
+            "悬疑": "下一章，真相即将浮出水面！",
+            "言情": "下一章，他们的感情将如何发展？",
+            "古言": "下一章，命运的齿轮继续转动！",
+            "武侠": "下一章，江湖风云再起！"
+        }
+        return genre_hooks.get(genre, "下一章，精彩继续！")

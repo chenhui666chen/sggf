@@ -8,14 +8,40 @@ import type {
   ScriptEditorChapterRef,
   ScriptEditorStateData,
   ScriptSegment,
+  ScriptSegmentTiming,
   SmartChunkPreviewResult,
   SmartChunkPreviewStats,
+  TimelineClipEditMap,
   TtsModel,
 } from './types'
 import type { NarrationStyleId } from './narrationStyles'
 import { normalizeScriptReview } from './utils'
 
 type ScriptSaveStatus = NonNullable<UpdateAudiobookChapterScriptPayload['script_status']>
+
+const normalizeSegmentTimings = (raw: unknown): ScriptSegmentTiming[] => {
+  if (!Array.isArray(raw)) {
+    return []
+  }
+
+  return raw.flatMap((item) => {
+    const timing = item && typeof item === 'object' ? item as Record<string, unknown> : {}
+    const index = Number(timing.index)
+    const start = Number(timing.start)
+    if (!Number.isInteger(index) || index < 0 || !Number.isFinite(start) || start < 0) {
+      return []
+    }
+
+    const end = Number(timing.end)
+    const duration = Number(timing.duration)
+    return [{
+      index,
+      start,
+      end: Number.isFinite(end) && end >= start ? end : null,
+      duration: Number.isFinite(duration) && duration > 0 ? duration : null,
+    }]
+  })
+}
 
 export const buildScriptEditorChapterRef = (
   chapterId: number,
@@ -35,6 +61,9 @@ export const normalizeAudiobookChapterScriptData = (
         script_status?: unknown
         script_segments?: unknown
         script_review?: unknown
+        chapter_audio_available?: unknown
+        chapter_audio_url?: unknown
+        segment_timings?: unknown
       }
     : {}
 
@@ -45,6 +74,11 @@ export const normalizeAudiobookChapterScriptData = (
     scriptSegments: Array.isArray(data.script_segments)
       ? data.script_segments as ScriptSegment[]
       : [],
+    chapterAudioAvailable: data.chapter_audio_available === true,
+    chapterAudioUrl: typeof data.chapter_audio_url === 'string'
+      ? data.chapter_audio_url
+      : '',
+    segmentTimings: normalizeSegmentTimings(data.segment_timings),
     scriptReview: normalizeScriptReview(data.script_review),
   }
 }
@@ -69,6 +103,7 @@ export const buildGenerateAudioFromScriptPayload = ({
   narrationStylePrompt,
   outputFormat,
   generateSubtitle,
+  timelineEdits,
 }: {
   chapterId?: number
   ttsModel: TtsModel
@@ -76,6 +111,7 @@ export const buildGenerateAudioFromScriptPayload = ({
   narrationStylePrompt: string
   outputFormat: AudioOutputFormat
   generateSubtitle: boolean
+  timelineEdits?: TimelineClipEditMap
 }): GenerateAudioFromScriptsPayload => ({
   ...(chapterId ? { chapter_ids: [chapterId] } : {}),
   tts_model: ttsModel,
@@ -85,6 +121,9 @@ export const buildGenerateAudioFromScriptPayload = ({
     : undefined,
   output_format: outputFormat,
   generate_subtitle: generateSubtitle,
+  ...(timelineEdits && Object.keys(timelineEdits).length > 0
+    ? { timeline_edits: timelineEdits }
+    : {}),
 })
 
 export const extractQueuedAudiobookJobId = (raw: unknown): string | null => {
