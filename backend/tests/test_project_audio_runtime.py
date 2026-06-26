@@ -14,7 +14,8 @@ from app.services.audiobook.project_audio_runtime import (
 )
 
 
-def test_build_character_voice_mapping_item_keeps_supported_voice_fields():
+def test_build_character_voice_mapping_item_keeps_voice_asset_fields_only():
+    voice_design_prompt = "young female audiobook voice"
     item = {
         "voice_id": "voice-a",
         "volume": 61,
@@ -24,9 +25,31 @@ def test_build_character_voice_mapping_item_keeps_supported_voice_fields():
         "voice_type": "warm",
         "personality": "calm",
         "emotion_tendency": "gentle",
+        "voice_clone_data_url": "data:audio/wav;base64,AAAA",
+        "voice_design_prompt": voice_design_prompt,
     }
 
-    assert build_character_voice_mapping_item(item, tts_model="fallback-model") == item
+    assert build_character_voice_mapping_item(item, tts_model="fallback-model") == {
+        "voice_id": "voice-a",
+        "tts_model": "custom-model",
+        "voice_clone_data_url": "data:audio/wav;base64,AAAA",
+        "voice_design_prompt": voice_design_prompt,
+    }
+
+
+def test_build_character_voice_mapping_item_omits_role_level_profiling_and_tuning_defaults():
+    item = {
+        "voice_id": "voice-a",
+        "tts_model": "custom-model",
+        "voice_clone_data_url": "data:audio/wav;base64,AAAA",
+        "voice_design_prompt": None,
+    }
+
+    assert build_character_voice_mapping_item(item, tts_model="fallback-model") == {
+        "voice_id": "voice-a",
+        "tts_model": "custom-model",
+        "voice_clone_data_url": "data:audio/wav;base64,AAAA",
+    }
 
 
 def test_resolve_project_audio_runtime_config_merges_base_then_project_model_config():
@@ -57,7 +80,7 @@ def test_resolve_project_audio_runtime_config_merges_base_then_project_model_con
     )
 
     assert runtime.voice_mapping["旁白"]["voice_id"] == "new-narrator"
-    assert runtime.voice_mapping["旁白"]["volume"] == 70
+    assert "volume" not in runtime.voice_mapping["旁白"]
     assert runtime.voice_mapping["旧角色"]["voice_id"] == "old-role"
     assert "" not in runtime.voice_mapping
     assert runtime.audio_fx == {"enabled": True, "bgm": {"volume": 0.2}}

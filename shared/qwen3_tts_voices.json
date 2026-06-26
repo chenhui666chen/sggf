@@ -1,7 +1,7 @@
 {
   "model": "qwen3-tts-instruct-flash",
   "updated_at": "2026-04-21",
-  "source": "https://help.aliyun.com/zh/model-studio/qwen-tts | https://help.aliyun.com/zh/model-studio/qwen-tts-api",
+  "source": "https://help.aliyun.com/zh/model-studio/qwen-tts-api | https://help.aliyun.com/zh/model-studio/qwen-tts-voice-list",
   "voices": [
     {
       "id": "Cherry",
@@ -194,7 +194,7 @@
       "id": "Mochi",
       "speaker": "Mochi",
       "label": "沙小弥 (Mochi)",
-      "gender": "female",
+      "gender": "male",
       "style": "cute",
       "category": "general",
       "languages": ["zh", "en", "fr", "de", "ru", "it", "es", "pt", "ja", "ko"],
@@ -249,7 +249,7 @@
       "id": "Elias",
       "speaker": "Elias",
       "label": "墨讲师 (Elias)",
-      "gender": "male",
+      "gender": "female",
       "style": "calm",
       "category": "general",
       "languages": ["zh", "en", "fr", "de", "ru", "it", "es", "pt", "ja", "ko"],

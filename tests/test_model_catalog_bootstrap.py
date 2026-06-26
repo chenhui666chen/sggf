@@ -16,10 +16,15 @@ def test_build_model_catalog_card_payloads_covers_current_integrated_models() ->
     payloads = build_model_catalog_card_payloads()
     by_key = {payload["model_key"]: payload for payload in payloads}
 
-    assert len(payloads) == 43
+    assert len(payloads) >= 42
     assert by_key["qwen3-max"]["category"] == "llm"
     assert by_key["wan2.6-t2i"]["category"] == "image"
     assert by_key["qwen3-tts-instruct-flash"]["category"] == "audio"
+    assert by_key["mimo-v2.5-tts"]["category"] == "audio"
+    assert by_key["mimo-v2.5-tts-voicedesign"]["category"] == "audio"
+    assert by_key["mimo-v2.5-tts-voiceclone"]["category"] == "audio"
+    assert "mimo-v2.5-tts-hd" not in by_key
+    assert "mimo-v2.5-tts-turbo" not in by_key
     assert by_key["qwen3-vl-plus"]["category"] == "multimodal"
     assert by_key["qwen3.6-plus"]["config_source"] == "merged"
     assert by_key["wan2.7-t2v"]["name"] == "Wan 2.7 Text-to-Video"

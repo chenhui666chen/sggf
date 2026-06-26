@@ -17,6 +17,7 @@ from .llm_client import call_audiobook_llm_sync
 from .llm_json import LLMJsonParseError, parse_llm_json_object
 from .tts_model_ids import DEFAULT_AUDIOBOOK_TTS_MODEL, normalize_audiobook_tts_model
 from .voice_catalog import load_voice_catalog, load_voice_catalog_for_model
+from .voice_description_policy import build_quality_voice_description
 
 logger = logging.getLogger(__name__)
 
@@ -201,6 +202,7 @@ class VoiceProfile:
             "pause_after": self._get_pause_after(emotion),
             "character_base_pitch": max(0, min(100, self.pitch_base)),
             "character_base_speed": max(0.5, min(2.0, self.speed_base)),
+            "voice_description": self._build_voice_description(emotion, speed_value),
         }
         
         if use_instruct_mode:
@@ -215,6 +217,37 @@ class VoiceProfile:
             pass
         
         return params
+
+    def _build_voice_description(self, emotion: str, speed_value: float) -> str:
+        """生成可被模型风格控制层复用的结构化声音描述。"""
+        age_map = {
+            "child": "儿童",
+            "teen": "青少年",
+            "young": "青年",
+            "adult": "中年",
+            "elder": "老年",
+        }
+        personality_traits = {
+            "calm": ["沉稳", "吐字清晰"],
+            "energetic": ["明亮", "有活力"],
+            "gentle": ["温柔", "亲切自然"],
+            "serious": ["严肃", "有力"],
+            "cold": ["冷静", "克制"],
+            "warm": ["温暖", "亲切自然"],
+            "dialect": ["地域口音", "生活化"],
+        }
+        pitch_label = "偏高" if self.pitch_base >= 62 else "偏低" if self.pitch_base <= 38 else "中音"
+        pace_label = "快速" if speed_value >= 1.15 else "缓慢" if speed_value <= 0.9 else "中速"
+        traits = personality_traits.get(str(self.personality or "").strip().lower(), ["吐字清晰"])
+        return build_quality_voice_description(
+            gender=self.gender,
+            age_group=age_map.get(str(self.age_group or "").strip().lower(), "青年"),
+            pitch=pitch_label,
+            pace=pace_label,
+            emotion=emotion or self.default_emotion or "neutral",
+            traits=traits,
+            use_case="有声书角色对白",
+        )
 
     def _get_pause_before(self, emotion: str) -> float:
         """根据情感计算前停顿时长（秒）"""

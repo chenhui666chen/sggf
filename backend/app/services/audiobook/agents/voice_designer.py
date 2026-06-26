@@ -12,6 +12,11 @@ from typing import Dict, List, Any, Optional
 from dataclasses import dataclass, field
 
 from app.services.audiobook.constants import normalize_speaker_id
+from app.services.audiobook.voice_description_policy import (
+    build_quality_voice_description,
+    gender_label,
+    infer_pitch,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -257,16 +262,24 @@ class VoiceDesigner:
         character_info: Dict[str, Any]
     ) -> str:
         """生成音色描述"""
-        name = character_info.get("name", "角色")
-        gender_desc = "男性" if characteristics.gender == "male" else "女性"
-        
-        description = (
-            f"{name}的声音：{gender_desc}，{characteristics.age_range}，"
-            f"音色{characteristics.tone}，语速{characteristics.speaking_pace}。"
-            f"适合表现{character_info.get('personality', '普通')}的性格特质。"
+        personality = str(character_info.get("personality") or "").strip()
+        traits = [characteristics.tone, characteristics.voice_quality]
+        if personality:
+            traits.append(f"适合表现{personality}的性格底色")
+
+        return build_quality_voice_description(
+            gender=characteristics.gender,
+            age_group=characteristics.age_range,
+            pitch=infer_pitch(characteristics.tone, characteristics.gender),
+            pace=characteristics.speaking_pace,
+            emotion="冷静" if "冷静" in personality else "温和" if "温柔" in personality else "平静",
+            traits=traits,
+            use_case=(
+                "有声书角色对白"
+                if gender_label(characteristics.gender) in {"男性", "女性"}
+                else "有声书旁白"
+            ),
         )
-        
-        return description
     
     def _generate_sample_texts(
         self,

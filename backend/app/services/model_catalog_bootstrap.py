@@ -3,10 +3,17 @@
 from __future__ import annotations
 
 from collections import OrderedDict
+from copy import deepcopy
 from pathlib import Path
 from typing import Any, Iterable
 
 import yaml
+
+from app.services.audiobook.tts_model_ids import (
+    get_audiobook_tts_style_capabilities,
+    is_supported_audiobook_tts_model,
+    normalize_audiobook_tts_model,
+)
 
 CATEGORY_LABELS: dict[str, str] = {
     "llm": "文本LLM",
@@ -380,6 +387,7 @@ def _build_extra_frontend_payload(
         if isinstance(entry, dict) and str(entry.get("label") or "").strip() and str(entry.get("value") or "").strip()
     ]
     context_window = _build_context_window_items(constraints)
+    detailed_specs = _build_detailed_specs(item)
 
     return {
         "category_label": category_label,
@@ -468,7 +476,93 @@ def _build_extra_frontend_payload(
                 }
             ],
         },
+        "detailed_specs": detailed_specs,
     }
+
+
+def _build_detailed_specs(item: dict[str, Any]) -> dict[str, Any]:
+    detailed_specs = deepcopy(item.get("detailed_specs")) if isinstance(item.get("detailed_specs"), dict) else {}
+    model_id = str(item.get("id") or "").strip()
+    if not model_id or not is_supported_audiobook_tts_model(model_id):
+        return detailed_specs
+
+    voice_synthesis = (
+        deepcopy(detailed_specs.get("voice_synthesis"))
+        if isinstance(detailed_specs.get("voice_synthesis"), dict)
+        else {}
+    )
+    existing_style_control = (
+        deepcopy(voice_synthesis.get("style_control"))
+        if isinstance(voice_synthesis.get("style_control"), dict)
+        else {}
+    )
+    voice_synthesis["style_control"] = _deep_merge_dict(
+        _build_tts_style_control_spec(model_id),
+        existing_style_control,
+    )
+    detailed_specs["voice_synthesis"] = voice_synthesis
+    return detailed_specs
+
+
+def _build_tts_style_control_spec(model_id: str) -> dict[str, Any]:
+    normalized_model = normalize_audiobook_tts_model(model_id)
+    capabilities = get_audiobook_tts_style_capabilities(normalized_model)
+    modes = [
+        {
+            "id": mode,
+            "label": _tts_style_control_mode_label(mode),
+            "description": _tts_style_control_mode_description(mode),
+        }
+        for mode in capabilities.get("style_control_modes") or []
+    ]
+    advanced_controls = [
+        label
+        for key, label in (
+            ("supports_voice_description", "声音描述融合"),
+            ("supports_director_mode", "导演模式"),
+            ("supports_audio_tags", "音频标签"),
+            ("supports_emotion_mixing", "复合情绪"),
+            ("supports_micro_tags", "微表演标签"),
+            ("supports_word_level_control", "词/字级控制"),
+        )
+        if capabilities.get(key)
+    ]
+
+    return {
+        "model_family": capabilities.get("model_family") or "generic",
+        "preferred_mode": capabilities.get("preferred_style_control_mode") or "natural_language",
+        "modes": modes,
+        "supports_voice_description": bool(capabilities.get("supports_voice_description")),
+        "supports_director_mode": bool(capabilities.get("supports_director_mode")),
+        "supports_audio_tags": bool(capabilities.get("supports_audio_tags")),
+        "supports_emotion_mixing": bool(capabilities.get("supports_emotion_mixing")),
+        "supports_micro_tags": bool(capabilities.get("supports_micro_tags")),
+        "supports_word_level_control": bool(capabilities.get("supports_word_level_control")),
+        "instruction_budget": capabilities.get("instruction_budget"),
+        "control_message_roles": capabilities.get("control_message_roles") or {},
+        "advanced_controls": advanced_controls,
+        "project_integration_status": "runtime_registered",
+    }
+
+
+def _tts_style_control_mode_label(mode: Any) -> str:
+    labels = {
+        "natural_language": "自然语言指令",
+        "director": "导演模式",
+        "audio_tags": "音频标签",
+        "basic": "基础参数",
+    }
+    return labels.get(str(mode or "").strip(), str(mode or "").strip())
+
+
+def _tts_style_control_mode_description(mode: Any) -> str:
+    descriptions = {
+        "natural_language": "将语气、场景、情绪和声音描述写入自然语言控制字段。",
+        "director": "按角色、场景、指导组织成导演式表演指令。",
+        "audio_tags": "在合成文本中插入整体风格标签和细粒度音频标签。",
+        "basic": "仅使用模型基础参数，不承诺可消费复杂声音描述。",
+    }
+    return descriptions.get(str(mode or "").strip(), "")
 
 
 def _build_environment_bindings(api_config: dict[str, Any]) -> list[dict[str, Any]]:

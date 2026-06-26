@@ -1,0 +1,705 @@
+{
+  "timestamp": "2026-06-25T14:29:36.015910",
+  "model": "seed-tts-2.0-expressive",
+  "protocol": "websocket_binary_frame",
+  "endpoint": "wss://openspeech.bytedance.com/api/v3/tts/bidirection",
+  "test_text": "你好，这是一个测试。",
+  "total_voices": 99,
+  "success_count": 0,
+  "failure_count": 99,
+  "results": [
+    {
+      "voice_id": "zh_female_vv_uranus_bigtts",
+      "success": false,
+      "error": "Expected ConnectionStarted, got {'type': 'AudioOnlyServer', 'event': 'Audio(50)', 'session_id': 'a074974c-79e3-4187-9cd2-399879d42bcf', 'payload': b'{}', 'payload_size': 2}",
+      "audio_size": 0,
+      "duration_ms": 0
+    },
+    {
+      "voice_id": "saturn_zh_female_cancan_tob",
+      "success": false,
+      "error": "Expected ConnectionStarted, got {'type': 'AudioOnlyServer', 'event': 'Audio(50)', 'session_id': '7f4a4a0d-fef0-486e-aa0e-1bc96c4db7fe', 'payload': b'{}', 'payload_size': 2}",
+      "audio_size": 0,
+      "duration_ms": 0
+    },
+    {
+      "voice_id": "saturn_zh_female_keainvsheng_tob",
+      "success": false,
+      "error": "Expected ConnectionStarted, got {'type': 'AudioOnlyServer', 'event': 'Audio(50)', 'session_id': 'db5714f3-f8b6-4a92-9232-7d19ba1e6c1d', 'payload': b'{}', 'payload_size': 2}",
+      "audio_size": 0,
+      "duration_ms": 0
+    },
+    {
+      "voice_id": "saturn_zh_female_tiaopigongzhu_tob",
+      "success": false,
+      "error": "Expected ConnectionStarted, got {'type': 'AudioOnlyServer', 'event': 'Audio(50)', 'session_id': '44f110f6-c1c5-4941-a4fe-ce14af7cdf2f', 'payload': b'{}', 'payload_size': 2}",
+      "audio_size": 0,
+      "duration_ms": 0
+    },
+    {
+      "voice_id": "saturn_zh_male_shuanglangshaonian_tob",
+      "success": false,
+      "error": "Expected ConnectionStarted, got {'type': 'AudioOnlyServer', 'event': 'Audio(50)', 'session_id': '8f5d0a97-00af-41a6-9493-3b494b5aae7f', 'payload': b'{}', 'payload_size': 2}",
+      "audio_size": 0,
+      "duration_ms": 0
+    },
+    {
+      "voice_id": "saturn_zh_male_tiancaitongzhuo_tob",
+      "success": false,
+      "error": "Expected ConnectionStarted, got {'type': 'AudioOnlyServer', 'event': 'Audio(50)', 'session_id': '6be0eb0e-3bb7-445e-b5df-f3214af4dfbe', 'payload': b'{}', 'payload_size': 2}",
+      "audio_size": 0,
+      "duration_ms": 0
+    },
+    {
+      "voice_id": "zh_female_xiaohe_uranus_bigtts",
+      "success": false,
+      "error": "Expected ConnectionStarted, got {'type': 'AudioOnlyServer', 'event': 'Audio(50)', 'session_id': 'b53b1cca-b6ae-4308-b818-5219dddaa17b', 'payload': b'{}', 'payload_size': 2}",
+      "audio_size": 0,
+      "duration_ms": 0
+    },
+    {
+      "voice_id": "zh_male_m191_uranus_bigtts",
+      "success": false,
+      "error": "Expected ConnectionStarted, got {'type': 'AudioOnlyServer', 'event': 'Audio(50)', 'session_id': 'a5589bf3-aa6b-49a9-8bec-9fcc5dddb63b', 'payload': b'{}', 'payload_size': 2}",
+      "audio_size": 0,
+      "duration_ms": 0
+    },
+    {
+      "voice_id": "zh_male_taocheng_uranus_bigtts",
+      "success": false,
+      "error": "Expected ConnectionStarted, got {'type': 'AudioOnlyServer', 'event': 'Audio(50)', 'session_id': '71f8b616-cd4f-4ffa-ad81-638b7b277c35', 'payload': b'{}', 'payload_size': 2}",
+      "audio_size": 0,
+      "duration_ms": 0
+    },
+    {
+      "voice_id": "en_male_tim_uranus_bigtts",
+      "success": false,
+      "error": "Expected ConnectionStarted, got {'type': 'AudioOnlyServer', 'event': 'Audio(50)', 'session_id': 'dfd56ed3-a1f1-46e9-abef-8345bf5c7922', 'payload': b'{}', 'payload_size': 2}",
+      "audio_size": 0,
+      "duration_ms": 0
+    },
+    {
+      "voice_id": "en_female_dacey_uranus_bigtts",
+      "success": false,
+      "error": "Expected ConnectionStarted, got {'type': 'AudioOnlyServer', 'event': 'Audio(50)', 'session_id': '1c2fb698-5335-45a0-9aaa-91ce1a22f600', 'payload': b'{}', 'payload_size': 2}",
+      "audio_size": 0,
+      "duration_ms": 0
+    },
+    {
+      "voice_id": "en_female_stokie_uranus_bigtts",
+      "success": false,
+      "error": "Expected ConnectionStarted, got {'type': 'AudioOnlyServer', 'event': 'Audio(50)', 'session_id': '1863b8d0-1203-47bc-a3da-9a47566e76bd', 'payload': b'{}', 'payload_size': 2}",
+      "audio_size": 0,
+      "duration_ms": 0
+    },
+    {
+      "voice_id": "zh_male_liufei_uranus_bigtts",
+      "success": false,
+      "error": "Expected ConnectionStarted, got {'type': 'AudioOnlyServer', 'event': 'Audio(50)', 'session_id': 'a3ac7df4-2115-48f6-ba0d-23e8b7d7bbd8', 'payload': b'{}', 'payload_size': 2}",
+      "audio_size": 0,
+      "duration_ms": 0
+    },
+    {
+      "voice_id": "zh_female_qingxinnvsheng_uranus_bigtts",
+      "success": false,
+      "error": "Expected ConnectionStarted, got {'type': 'AudioOnlyServer', 'event': 'Audio(50)', 'session_id': '846af3f6-9db4-441f-9523-ad9e061b9bfe', 'payload': b'{}', 'payload_size': 2}",
+      "audio_size": 0,
+      "duration_ms": 0
+    },
+    {
+      "voice_id": "zh_female_cancan_uranus_bigtts",
+      "success": false,
+      "error": "Expected ConnectionStarted, got {'type': 'AudioOnlyServer', 'event': 'Audio(50)', 'session_id': '5659fe33-f7df-4e2d-a0e6-9c3c5bf0824f', 'payload': b'{}', 'payload_size': 2}",
+      "audio_size": 0,
+      "duration_ms": 0
+    },
+    {
+      "voice_id": "zh_female_sajiaoxuemei_uranus_bigtts",
+      "success": false,
+      "error": "Expected ConnectionStarted, got {'type': 'AudioOnlyServer', 'event': 'Audio(50)', 'session_id': '0a188c3c-c36e-4cb7-996c-16230de8f422', 'payload': b'{}', 'payload_size': 2}",
+      "audio_size": 0,
+      "duration_ms": 0
+    },
+    {
+      "voice_id": "zh_female_tianmeixiaoyuan_uranus_bigtts",
+      "success": false,
+      "error": "Expected ConnectionStarted, got {'type': 'AudioOnlyServer', 'event': 'Audio(50)', 'session_id': '8723842e-116a-4f52-a053-dfbe3dc7a58d', 'payload': b'{}', 'payload_size': 2}",
+      "audio_size": 0,
+      "duration_ms": 0
+    },
+    {
+      "voice_id": "zh_female_tianmeitaozi_uranus_bigtts",
+      "success": false,
+      "error": "Expected ConnectionStarted, got {'type': 'AudioOnlyServer', 'event': 'Audio(50)', 'session_id': '10a28a16-3776-4944-9127-97d361c9c00a', 'payload': b'{}', 'payload_size': 2}",
+      "audio_size": 0,
+      "duration_ms": 0
+    },
+    {
+      "voice_id": "zh_female_shuangkuaisisi_uranus_bigtts",
+      "success": false,
+      "error": "Expected ConnectionStarted, got {'type': 'AudioOnlyServer', 'event': 'Audio(50)', 'session_id': '30454c64-ca0c-48d3-87cb-83175cd574e7', 'payload': b'{}', 'payload_size': 2}",
+      "audio_size": 0,
+      "duration_ms": 0
+    },
+    {
+      "voice_id": "zh_female_peiqi_uranus_bigtts",
+      "success": false,
+      "error": "Expected ConnectionStarted, got {'type': 'AudioOnlyServer', 'event': 'Audio(50)', 'session_id': '4a3e3f87-86c9-4432-95c1-d4873b504e4d', 'payload': b'{}', 'payload_size': 2}",
+      "audio_size": 0,
+      "duration_ms": 0
+    },
+    {
+      "voice_id": "zh_female_linjianvhai_uranus_bigtts",
+      "success": false,
+      "error": "Expected ConnectionStarted, got {'type': 'AudioOnlyServer', 'event': 'Audio(50)', 'session_id': 'db0f4700-54ec-4bd8-adde-5ebbc2b07523', 'payload': b'{}', 'payload_size': 2}",
+      "audio_size": 0,
+      "duration_ms": 0
+    },
+    {
+      "voice_id": "zh_male_shaonianzixin_uranus_bigtts",
+      "success": false,
+      "error": "Expected ConnectionStarted, got {'type': 'AudioOnlyServer', 'event': 'Audio(50)', 'session_id': '4abbbbcc-6071-41d5-8b2e-fd61a960218d', 'payload': b'{}', 'payload_size': 2}",
+      "audio_size": 0,
+      "duration_ms": 0
+    },
+    {
+      "voice_id": "zh_male_sunwukong_uranus_bigtts",
+      "success": false,
+      "error": "Expected ConnectionStarted, got {'type': 'AudioOnlyServer', 'event': 'Audio(50)', 'session_id': '9c2127c1-9c00-4436-94ea-22a94f941f86', 'payload': b'{}', 'payload_size': 2}",
+      "audio_size": 0,
+      "duration_ms": 0
+    },
+    {
+      "voice_id": "zh_female_yingyujiaoxue_uranus_bigtts",
+      "success": false,
+      "error": "Expected ConnectionStarted, got {'type': 'AudioOnlyServer', 'event': 'Audio(50)', 'session_id': 'dd66a8b6-40ac-45bf-b8fd-3813d9c466c6', 'payload': b'{}', 'payload_size': 2}",
+      "audio_size": 0,
+      "duration_ms": 0
+    },
+    {
+      "voice_id": "zh_female_kefunvsheng_uranus_bigtts",
+      "success": false,
+      "error": "Expected ConnectionStarted, got {'type': 'AudioOnlyServer', 'event': 'Audio(50)', 'session_id': '2e0feb04-a5ea-45e6-a957-0b34f8d84986', 'payload': b'{}', 'payload_size': 2}",
+      "audio_size": 0,
+      "duration_ms": 0
+    },
+    {
+      "voice_id": "zh_female_xiaoxue_uranus_bigtts",
+      "success": false,
+      "error": "Expected ConnectionStarted, got {'type': 'AudioOnlyServer', 'event': 'Audio(50)', 'session_id': '9c2f6e7d-3e12-4445-8d33-b82837be883d', 'payload': b'{}', 'payload_size': 2}",
+      "audio_size": 0,
+      "duration_ms": 0
+    },
+    {
+      "voice_id": "zh_male_dayi_uranus_bigtts",
+      "success": false,
+      "error": "Expected ConnectionStarted, got {'type': 'AudioOnlyServer', 'event': 'Audio(50)', 'session_id': '3d2befcc-d0a4-4270-bd49-1494f7114746', 'payload': b'{}', 'payload_size': 2}",
+      "audio_size": 0,
+      "duration_ms": 0
+    },
+    {
+      "voice_id": "zh_female_mizai_uranus_bigtts",
+      "success": false,
+      "error": "Expected ConnectionStarted, got {'type': 'AudioOnlyServer', 'event': 'Audio(50)', 'session_id': '31f9374a-bfda-4bcc-b7e7-411b7ebad61a', 'payload': b'{}', 'payload_size': 2}",
+      "audio_size": 0,
+      "duration_ms": 0
+    },
+    {
+      "voice_id": "zh_female_jitangnv_uranus_bigtts",
+      "success": false,
+      "error": "Expected ConnectionStarted, got {'type': 'AudioOnlyServer', 'event': 'Audio(50)', 'session_id': '7a7758ca-6def-4a51-8666-74cb041a25c9', 'payload': b'{}', 'payload_size': 2}",
+      "audio_size": 0,
+      "duration_ms": 0
+    },
+    {
+      "voice_id": "zh_female_meilinvyou_uranus_bigtts",
+      "success": false,
+      "error": "Expected ConnectionStarted, got {'type': 'AudioOnlyServer', 'event': 'Audio(50)', 'session_id': '93c425a3-ae2b-4a7f-84d7-68dfb843d59b', 'payload': b'{}', 'payload_size': 2}",
+      "audio_size": 0,
+      "duration_ms": 0
+    },
+    {
+      "voice_id": "zh_female_liuchangnv_uranus_bigtts",
+      "success": false,
+      "error": "Expected ConnectionStarted, got {'type': 'AudioOnlyServer', 'event': 'Audio(50)', 'session_id': 'dcce62df-a4b3-4ee8-937a-0749a3300d46', 'payload': b'{}', 'payload_size': 2}",
+      "audio_size": 0,
+      "duration_ms": 0
+    },
+    {
+      "voice_id": "zh_male_ruyayichen_uranus_bigtts",
+      "success": false,
+      "error": "Expected ConnectionStarted, got {'type': 'AudioOnlyServer', 'event': 'Audio(50)', 'session_id': 'a259a5a4-8393-46e2-9618-f4b52d8fdb4b', 'payload': b'{}', 'payload_size': 2}",
+      "audio_size": 0,
+      "duration_ms": 0
+    },
+    {
+      "voice_id": "zh_female_wenroumama_uranus_bigtts",
+      "success": false,
+      "error": "Expected ConnectionStarted, got {'type': 'AudioOnlyServer', 'event': 'Audio(50)', 'session_id': '65264ba9-dafb-4c16-8636-b9b0f159265d', 'payload': b'{}', 'payload_size': 2}",
+      "audio_size": 0,
+      "duration_ms": 0
+    },
+    {
+      "voice_id": "zh_male_jieshuoxiaoming_uranus_bigtts",
+      "success": false,
+      "error": "Expected ConnectionStarted, got {'type': 'AudioOnlyServer', 'event': 'Audio(50)', 'session_id': '625e7bb0-b1fb-4465-ade3-c71fef25e581', 'payload': b'{}', 'payload_size': 2}",
+      "audio_size": 0,
+      "duration_ms": 0
+    },
+    {
+      "voice_id": "zh_female_tvbnv_uranus_bigtts",
+      "success": false,
+      "error": "Expected ConnectionStarted, got {'type': 'AudioOnlyServer', 'event': 'Audio(50)', 'session_id': '15d1a3f4-7f98-4443-a587-ec33876082e5', 'payload': b'{}', 'payload_size': 2}",
+      "audio_size": 0,
+      "duration_ms": 0
+    },
+    {
+      "voice_id": "zh_male_yizhipiannan_uranus_bigtts",
+      "success": false,
+      "error": "Expected ConnectionStarted, got {'type': 'AudioOnlyServer', 'event': 'Audio(50)', 'session_id': '5016a226-c10e-4cc9-8206-bbc07c7d0b11', 'payload': b'{}', 'payload_size': 2}",
+      "audio_size": 0,
+      "duration_ms": 0
+    },
+    {
+      "voice_id": "zh_female_qiaopinv_uranus_bigtts",
+      "success": false,
+      "error": "Expected ConnectionStarted, got {'type': 'AudioOnlyServer', 'event': 'Audio(50)', 'session_id': '60408182-a752-4b07-834a-4da5b8627b0f', 'payload': b'{}', 'payload_size': 2}",
+      "audio_size": 0,
+      "duration_ms": 0
+    },
+    {
+      "voice_id": "zh_female_zhishuaiyingzi_uranus_bigtts",
+      "success": false,
+      "error": "Expected ConnectionStarted, got {'type': 'AudioOnlyServer', 'event': 'Audio(50)', 'session_id': '98cfb78d-8309-4811-ad51-1b4f23971d8e', 'payload': b'{}', 'payload_size': 2}",
+      "audio_size": 0,
+      "duration_ms": 0
+    },
+    {
+      "voice_id": "zh_male_linjiananhai_uranus_bigtts",
+      "success": false,
+      "error": "Expected ConnectionStarted, got {'type': 'AudioOnlyServer', 'event': 'Audio(50)', 'session_id': '1c32a9e9-edf7-412e-b68d-a28297f088cc', 'payload': b'{}', 'payload_size': 2}",
+      "audio_size": 0,
+      "duration_ms": 0
+    },
+    {
+      "voice_id": "zh_male_silang_uranus_bigtts",
+      "success": false,
+      "error": "Expected ConnectionStarted, got {'type': 'AudioOnlyServer', 'event': 'Audio(50)', 'session_id': 'c3760f12-24b4-43d3-a6cf-ae32e1cc1795', 'payload': b'{}', 'payload_size': 2}",
+      "audio_size": 0,
+      "duration_ms": 0
+    },
+    {
+      "voice_id": "zh_male_ruyaqingnian_uranus_bigtts",
+      "success": false,
+      "error": "Expected ConnectionStarted, got {'type': 'AudioOnlyServer', 'event': 'Audio(50)', 'session_id': 'a5d2b3f0-5cc0-4ba2-9b3b-c3b56ca6b515', 'payload': b'{}', 'payload_size': 2}",
+      "audio_size": 0,
+      "duration_ms": 0
+    },
+    {
+      "voice_id": "zh_male_qingcang_uranus_bigtts",
+      "success": false,
+      "error": "Expected ConnectionStarted, got {'type': 'AudioOnlyServer', 'event': 'Audio(50)', 'session_id': 'ca2835f5-57f5-4406-b7b7-6c9b0bcba613', 'payload': b'{}', 'payload_size': 2}",
+      "audio_size": 0,
+      "duration_ms": 0
+    },
+    {
+      "voice_id": "zh_male_xionger_uranus_bigtts",
+      "success": false,
+      "error": "Expected ConnectionStarted, got {'type': 'AudioOnlyServer', 'event': 'Audio(50)', 'session_id': '17edaca8-ce66-41eb-a118-b1d93fb0f164', 'payload': b'{}', 'payload_size': 2}",
+      "audio_size": 0,
+      "duration_ms": 0
+    },
+    {
+      "voice_id": "zh_female_yingtaowanzi_uranus_bigtts",
+      "success": false,
+      "error": "Expected ConnectionStarted, got {'type': 'AudioOnlyServer', 'event': 'Audio(50)', 'session_id': '68ba4eab-1f1f-48f5-a70d-92fbf6000e6b', 'payload': b'{}', 'payload_size': 2}",
+      "audio_size": 0,
+      "duration_ms": 0
+    },
+    {
+      "voice_id": "zh_male_wennuanahu_uranus_bigtts",
+      "success": false,
+      "error": "Expected ConnectionStarted, got {'type': 'AudioOnlyServer', 'event': 'Audio(50)', 'session_id': '5d98eb62-7708-46d1-a6d0-62d80c75c159', 'payload': b'{}', 'payload_size': 2}",
+      "audio_size": 0,
+      "duration_ms": 0
+    },
+    {
+      "voice_id": "zh_male_naiqimengwa_uranus_bigtts",
+      "success": false,
+      "error": "Expected ConnectionStarted, got {'type': 'AudioOnlyServer', 'event': 'Audio(50)', 'session_id': 'fe7dc2c0-cee1-4310-a262-3ed5a8baba04', 'payload': b'{}', 'payload_size': 2}",
+      "audio_size": 0,
+      "duration_ms": 0
+    },
+    {
+      "voice_id": "zh_female_popo_uranus_bigtts",
+      "success": false,
+      "error": "Expected ConnectionStarted, got {'type': 'AudioOnlyServer', 'event': 'Audio(50)', 'session_id': '84e641cb-b1c6-43d7-ad4f-f5849aa26cfd', 'payload': b'{}', 'payload_size': 2}",
+      "audio_size": 0,
+      "duration_ms": 0
+    },
+    {
+      "voice_id": "zh_female_gaolengyujie_uranus_bigtts",
+      "success": false,
+      "error": "Expected ConnectionStarted, got {'type': 'AudioOnlyServer', 'event': 'Audio(50)', 'session_id': '1d45cedd-66c7-4dfc-87a9-72b24b719f6f', 'payload': b'{}', 'payload_size': 2}",
+      "audio_size": 0,
+      "duration_ms": 0
+    },
+    {
+      "voice_id": "zh_male_aojiaobazong_uranus_bigtts",
+      "success": false,
+      "error": "Expected ConnectionStarted, got {'type': 'AudioOnlyServer', 'event': 'Audio(50)', 'session_id': 'b59aeb21-61cd-466c-8357-2ffb2367572c', 'payload': b'{}', 'payload_size': 2}",
+      "audio_size": 0,
+      "duration_ms": 0
+    },
+    {
+      "voice_id": "zh_male_lanyinmianbao_uranus_bigtts",
+      "success": false,
+      "error": "Expected ConnectionStarted, got {'type': 'AudioOnlyServer', 'event': 'Audio(50)', 'session_id': '02f2f2b0-787c-49bf-8731-170c1e52d9d9', 'payload': b'{}', 'payload_size': 2}",
+      "audio_size": 0,
+      "duration_ms": 0
+    },
+    {
+      "voice_id": "zh_male_fanjuanqingnian_uranus_bigtts",
+      "success": false,
+      "error": "Expected ConnectionStarted, got {'type': 'AudioOnlyServer', 'event': 'Audio(50)', 'session_id': '36e38aa0-e8ec-40be-bcae-0d3dfd9ad745', 'payload': b'{}', 'payload_size': 2}",
+      "audio_size": 0,
+      "duration_ms": 0
+    },
+    {
+      "voice_id": "zh_female_wenroushunv_uranus_bigtts",
+      "success": false,
+      "error": "Expected ConnectionStarted, got {'type': 'AudioOnlyServer', 'event': 'Audio(50)', 'session_id': 'b9ceb677-8cc7-4bc1-9192-39388f19bfc3', 'payload': b'{}', 'payload_size': 2}",
+      "audio_size": 0,
+      "duration_ms": 0
+    },
+    {
+      "voice_id": "zh_female_gufengshaoyu_uranus_bigtts",
+      "success": false,
+      "error": "Expected ConnectionStarted, got {'type': 'AudioOnlyServer', 'event': 'Audio(50)', 'session_id': '8d5014ec-175f-486e-b13a-18baba930dab', 'payload': b'{}', 'payload_size': 2}",
+      "audio_size": 0,
+      "duration_ms": 0
+    },
+    {
+      "voice_id": "zh_male_huolixiaoge_uranus_bigtts",
+      "success": false,
+      "error": "Expected ConnectionStarted, got {'type': 'AudioOnlyServer', 'event': 'Audio(50)', 'session_id': '876f71cf-34ef-4b78-a33f-d0407e0f5ac7', 'payload': b'{}', 'payload_size': 2}",
+      "audio_size": 0,
+      "duration_ms": 0
+    },
+    {
+      "voice_id": "zh_male_baqiqingshu_uranus_bigtts",
+      "success": false,
+      "error": "Expected ConnectionStarted, got {'type': 'AudioOnlyServer', 'event': 'Audio(50)', 'session_id': '97db7085-b854-497b-8537-f6851a1eb27f', 'payload': b'{}', 'payload_size': 2}",
+      "audio_size": 0,
+      "duration_ms": 0
+    },
+    {
+      "voice_id": "zh_male_xuanyijieshuo_uranus_bigtts",
+      "success": false,
+      "error": "Expected ConnectionStarted, got {'type': 'AudioOnlyServer', 'event': 'Audio(50)', 'session_id': 'bec8b526-49c9-4638-a7a2-62ade7d0c345', 'payload': b'{}', 'payload_size': 2}",
+      "audio_size": 0,
+      "duration_ms": 0
+    },
+    {
+      "voice_id": "zh_female_mengyatou_uranus_bigtts",
+      "success": false,
+      "error": "Expected ConnectionStarted, got {'type': 'AudioOnlyServer', 'event': 'Audio(50)', 'session_id': '3b38558b-97af-4cf6-8353-fd384c3ff4e4', 'payload': b'{}', 'payload_size': 2}",
+      "audio_size": 0,
+      "duration_ms": 0
+    },
+    {
+      "voice_id": "zh_female_tiexinnvsheng_uranus_bigtts",
+      "success": false,
+      "error": "Expected ConnectionStarted, got {'type': 'AudioOnlyServer', 'event': 'Audio(50)', 'session_id': '1306d73e-59b2-4c04-ac79-628f847d785f', 'payload': b'{}', 'payload_size': 2}",
+      "audio_size": 0,
+      "duration_ms": 0
+    },
+    {
+      "voice_id": "zh_female_jitangmei_uranus_bigtts",
+      "success": false,
+      "error": "Expected ConnectionStarted, got {'type': 'AudioOnlyServer', 'event': 'Audio(50)', 'session_id': '640ddf49-5d72-4f6f-a7be-8a138b68b03f', 'payload': b'{}', 'payload_size': 2}",
+      "audio_size": 0,
+      "duration_ms": 0
+    },
+    {
+      "voice_id": "zh_male_cixingjieshuonan_uranus_bigtts",
+      "success": false,
+      "error": "Expected ConnectionStarted, got {'type': 'AudioOnlyServer', 'event': 'Audio(50)', 'session_id': '2ce9e0d7-5d1c-493a-b69a-2a46b0b43f61', 'payload': b'{}', 'payload_size': 2}",
+      "audio_size": 0,
+      "duration_ms": 0
+    },
+    {
+      "voice_id": "zh_male_liangsangmengzai_uranus_bigtts",
+      "success": false,
+      "error": "Expected ConnectionStarted, got {'type': 'AudioOnlyServer', 'event': 'Audio(50)', 'session_id': '24ba6e6d-7847-46bd-8525-3f7509f5a52c', 'payload': b'{}', 'payload_size': 2}",
+      "audio_size": 0,
+      "duration_ms": 0
+    },
+    {
+      "voice_id": "zh_female_kailangjiejie_uranus_bigtts",
+      "success": false,
+      "error": "Expected ConnectionStarted, got {'type': 'AudioOnlyServer', 'event': 'Audio(50)', 'session_id': 'ba9a3633-fcd9-437c-b588-03b445282a16', 'payload': b'{}', 'payload_size': 2}",
+      "audio_size": 0,
+      "duration_ms": 0
+    },
+    {
+      "voice_id": "zh_male_gaolengchenwen_uranus_bigtts",
+      "success": false,
+      "error": "Expected ConnectionStarted, got {'type': 'AudioOnlyServer', 'event': 'Audio(50)', 'session_id': '61ad32d7-cd1c-4277-9c9f-02886f7344c0', 'payload': b'{}', 'payload_size': 2}",
+      "audio_size": 0,
+      "duration_ms": 0
+    },
+    {
+      "voice_id": "zh_male_shenyeboke_uranus_bigtts",
+      "success": false,
+      "error": "Expected ConnectionStarted, got {'type': 'AudioOnlyServer', 'event': 'Audio(50)', 'session_id': 'd84c9ae5-7102-4e24-9172-d511090ebfb2', 'payload': b'{}', 'payload_size': 2}",
+      "audio_size": 0,
+      "duration_ms": 0
+    },
+    {
+      "voice_id": "zh_male_lubanqihao_uranus_bigtts",
+      "success": false,
+      "error": "Expected ConnectionStarted, got {'type': 'AudioOnlyServer', 'event': 'Audio(50)', 'session_id': '5930399a-cad1-4179-b97d-741a8530a530', 'payload': b'{}', 'payload_size': 2}",
+      "audio_size": 0,
+      "duration_ms": 0
+    },
+    {
+      "voice_id": "zh_female_jiaochuannv_uranus_bigtts",
+      "success": false,
+      "error": "Expected ConnectionStarted, got {'type': 'AudioOnlyServer', 'event': 'Audio(50)', 'session_id': 'b7632d30-2356-4c98-afd2-eaa6a019b59f', 'payload': b'{}', 'payload_size': 2}",
+      "audio_size": 0,
+      "duration_ms": 0
+    },
+    {
+      "voice_id": "zh_female_linxiao_uranus_bigtts",
+      "success": false,
+      "error": "Expected ConnectionStarted, got {'type': 'AudioOnlyServer', 'event': 'Audio(50)', 'session_id': '4ee3c2ac-efd2-428a-a746-9d3e24e05dbf', 'payload': b'{}', 'payload_size': 2}",
+      "audio_size": 0,
+      "duration_ms": 0
+    },
+    {
+      "voice_id": "zh_female_lingling_uranus_bigtts",
+      "success": false,
+      "error": "Expected ConnectionStarted, got {'type': 'AudioOnlyServer', 'event': 'Audio(50)', 'session_id': 'dc12e1dd-0e6b-4081-a39c-943acff84107', 'payload': b'{}', 'payload_size': 2}",
+      "audio_size": 0,
+      "duration_ms": 0
+    },
+    {
+      "voice_id": "zh_female_chunribu_uranus_bigtts",
+      "success": false,
+      "error": "Expected ConnectionStarted, got {'type': 'AudioOnlyServer', 'event': 'Audio(50)', 'session_id': '862e0506-ea7d-4e9c-acdc-1f913fc6b783', 'payload': b'{}', 'payload_size': 2}",
+      "audio_size": 0,
+      "duration_ms": 0
+    },
+    {
+      "voice_id": "zh_male_tangseng_uranus_bigtts",
+      "success": false,
+      "error": "Expected ConnectionStarted, got {'type': 'AudioOnlyServer', 'event': 'Audio(50)', 'session_id': '97891680-989a-4b12-b1d0-f8339ece6cb8', 'payload': b'{}', 'payload_size': 2}",
+      "audio_size": 0,
+      "duration_ms": 0
+    },
+    {
+      "voice_id": "zh_male_zhuangzhou_uranus_bigtts",
+      "success": false,
+      "error": "Expected ConnectionStarted, got {'type': 'AudioOnlyServer', 'event': 'Audio(50)', 'session_id': 'bdd33f85-240e-4562-b83c-c86ffcb2372e', 'payload': b'{}', 'payload_size': 2}",
+      "audio_size": 0,
+      "duration_ms": 0
+    },
+    {
+      "voice_id": "zh_male_kailangdidi_uranus_bigtts",
+      "success": false,
+      "error": "Expected ConnectionStarted, got {'type': 'AudioOnlyServer', 'event': 'Audio(50)', 'session_id': 'b69e2f21-2d16-4245-97bd-6e116467d90a', 'payload': b'{}', 'payload_size': 2}",
+      "audio_size": 0,
+      "duration_ms": 0
+    },
+    {
+      "voice_id": "zh_male_zhubajie_uranus_bigtts",
+      "success": false,
+      "error": "Expected ConnectionStarted, got {'type': 'AudioOnlyServer', 'event': 'Audio(50)', 'session_id': '325349c5-8749-49ff-844c-9993805e161a', 'payload': b'{}', 'payload_size': 2}",
+      "audio_size": 0,
+      "duration_ms": 0
+    },
+    {
+      "voice_id": "zh_female_ganmaodianyin_uranus_bigtts",
+      "success": false,
+      "error": "Expected ConnectionStarted, got {'type': 'AudioOnlyServer', 'event': 'Audio(50)', 'session_id': 'de79ea5c-144c-4d85-8b94-187758c3740a', 'payload': b'{}', 'payload_size': 2}",
+      "audio_size": 0,
+      "duration_ms": 0
+    },
+    {
+      "voice_id": "zh_female_chanmeinv_uranus_bigtts",
+      "success": false,
+      "error": "Expected ConnectionStarted, got {'type': 'AudioOnlyServer', 'event': 'Audio(50)', 'session_id': 'ace864ce-44a6-4a90-931b-63abf9fcf66b', 'payload': b'{}', 'payload_size': 2}",
+      "audio_size": 0,
+      "duration_ms": 0
+    },
+    {
+      "voice_id": "zh_female_nvleishen_uranus_bigtts",
+      "success": false,
+      "error": "Expected ConnectionStarted, got {'type': 'AudioOnlyServer', 'event': 'Audio(50)', 'session_id': '9daf846a-085f-4d83-9cac-c66809968c70', 'payload': b'{}', 'payload_size': 2}",
+      "audio_size": 0,
+      "duration_ms": 0
+    },
+    {
+      "voice_id": "zh_female_qinqienv_uranus_bigtts",
+      "success": false,
+      "error": "Expected ConnectionStarted, got {'type': 'AudioOnlyServer', 'event': 'Audio(50)', 'session_id': '1ae5bb56-9ce2-41c5-818b-adbb6925fc7c', 'payload': b'{}', 'payload_size': 2}",
+      "audio_size": 0,
+      "duration_ms": 0
+    },
+    {
+      "voice_id": "zh_male_kuailexiaodong_uranus_bigtts",
+      "success": false,
+      "error": "Expected ConnectionStarted, got {'type': 'AudioOnlyServer', 'event': 'Audio(50)', 'session_id': '414daeee-8131-4d7e-adcc-66fafe6fb249', 'payload': b'{}', 'payload_size': 2}",
+      "audio_size": 0,
+      "duration_ms": 0
+    },
+    {
+      "voice_id": "zh_male_kailangxuezhang_uranus_bigtts",
+      "success": false,
+      "error": "Expected ConnectionStarted, got {'type': 'AudioOnlyServer', 'event': 'Audio(50)', 'session_id': '325dc560-45d6-4f12-98a4-e3cc7dd2bc99', 'payload': b'{}', 'payload_size': 2}",
+      "audio_size": 0,
+      "duration_ms": 0
+    },
+    {
+      "voice_id": "zh_male_youyoujunzi_uranus_bigtts",
+      "success": false,
+      "error": "Expected ConnectionStarted, got {'type': 'AudioOnlyServer', 'event': 'Audio(50)', 'session_id': '922fe8c7-76f5-45bb-a8e5-2b069e58e34e', 'payload': b'{}', 'payload_size': 2}",
+      "audio_size": 0,
+      "duration_ms": 0
+    },
+    {
+      "voice_id": "zh_female_wenjingmaomao_uranus_bigtts",
+      "success": false,
+      "error": "Expected ConnectionStarted, got {'type': 'AudioOnlyServer', 'event': 'Audio(50)', 'session_id': '879e6980-542f-42e8-bcce-888f480fc59e', 'payload': b'{}', 'payload_size': 2}",
+      "audio_size": 0,
+      "duration_ms": 0
+    },
+    {
+      "voice_id": "zh_female_zhixingnv_uranus_bigtts",
+      "success": false,
+      "error": "Expected ConnectionStarted, got {'type': 'AudioOnlyServer', 'event': 'Audio(50)', 'session_id': '79226fc0-bc7c-4bb6-8522-51b301b54914', 'payload': b'{}', 'payload_size': 2}",
+      "audio_size": 0,
+      "duration_ms": 0
+    },
+    {
+      "voice_id": "zh_male_qingshuangnanda_uranus_bigtts",
+      "success": false,
+      "error": "Expected ConnectionStarted, got {'type': 'AudioOnlyServer', 'event': 'Audio(50)', 'session_id': 'e1c42fcb-0de6-419b-98db-063612793673', 'payload': b'{}', 'payload_size': 2}",
+      "audio_size": 0,
+      "duration_ms": 0
+    },
+    {
+      "voice_id": "zh_male_yuanboxiaoshu_uranus_bigtts",
+      "success": false,
+      "error": "Expected ConnectionStarted, got {'type': 'AudioOnlyServer', 'event': 'Audio(50)', 'session_id': 'c845c5a0-4615-4b3c-8bdb-df22343415c9', 'payload': b'{}', 'payload_size': 2}",
+      "audio_size": 0,
+      "duration_ms": 0
+    },
+    {
+      "voice_id": "zh_male_yangguangqingnian_uranus_bigtts",
+      "success": false,
+      "error": "Expected ConnectionStarted, got {'type': 'AudioOnlyServer', 'event': 'Audio(50)', 'session_id': '0ff40137-edce-4bdc-8e0b-f01d14bcfa84', 'payload': b'{}', 'payload_size': 2}",
+      "audio_size": 0,
+      "duration_ms": 0
+    },
+    {
+      "voice_id": "zh_female_qingchezizi_uranus_bigtts",
+      "success": false,
+      "error": "Expected ConnectionStarted, got {'type': 'AudioOnlyServer', 'event': 'Audio(50)', 'session_id': '6578d22c-f09b-416d-933f-13e2e6c613d8', 'payload': b'{}', 'payload_size': 2}",
+      "audio_size": 0,
+      "duration_ms": 0
+    },
+    {
+      "voice_id": "zh_female_tianmeiyueyue_uranus_bigtts",
+      "success": false,
+      "error": "Expected ConnectionStarted, got {'type': 'AudioOnlyServer', 'event': 'Audio(50)', 'session_id': 'c28a3a2c-e503-4b79-8a9e-d05694fee361', 'payload': b'{}', 'payload_size': 2}",
+      "audio_size": 0,
+      "duration_ms": 0
+    },
+    {
+      "voice_id": "zh_female_xinlingjitang_uranus_bigtts",
+      "success": false,
+      "error": "Expected ConnectionStarted, got {'type': 'AudioOnlyServer', 'event': 'Audio(50)', 'session_id': 'b819ab67-09cb-4dc9-b940-b5b8ac2be1e5', 'payload': b'{}', 'payload_size': 2}",
+      "audio_size": 0,
+      "duration_ms": 0
+    },
+    {
+      "voice_id": "zh_male_wenrouxiaoge_uranus_bigtts",
+      "success": false,
+      "error": "Expected ConnectionStarted, got {'type': 'AudioOnlyServer', 'event': 'Audio(50)', 'session_id': '4bb9cf80-369b-4221-a0f0-bfae7b3953f6', 'payload': b'{}', 'payload_size': 2}",
+      "audio_size": 0,
+      "duration_ms": 0
+    },
+    {
+      "voice_id": "zh_female_roumeinvyou_uranus_bigtts",
+      "success": false,
+      "error": "Expected ConnectionStarted, got {'type': 'AudioOnlyServer', 'event': 'Audio(50)', 'session_id': 'a6a46f41-4463-4012-8bd5-3b953ea2fc65', 'payload': b'{}', 'payload_size': 2}",
+      "audio_size": 0,
+      "duration_ms": 0
+    },
+    {
+      "voice_id": "zh_male_dongfanghaoran_uranus_bigtts",
+      "success": false,
+      "error": "Expected ConnectionStarted, got {'type': 'AudioOnlyServer', 'event': 'Audio(50)', 'session_id': '25f5a23f-d458-4dd5-be52-00d27e1e1fdd', 'payload': b'{}', 'payload_size': 2}",
+      "audio_size": 0,
+      "duration_ms": 0
+    },
+    {
+      "voice_id": "zh_female_wenrouxiaoya_uranus_bigtts",
+      "success": false,
+      "error": "Expected ConnectionStarted, got {'type': 'AudioOnlyServer', 'event': 'Audio(50)', 'session_id': 'f5d37886-f64d-4d9d-b8c5-2bd970b530d2', 'payload': b'{}', 'payload_size': 2}",
+      "audio_size": 0,
+      "duration_ms": 0
+    },
+    {
+      "voice_id": "zh_male_tiancaitongsheng_uranus_bigtts",
+      "success": false,
+      "error": "Expected ConnectionStarted, got {'type': 'AudioOnlyServer', 'event': 'Audio(50)', 'session_id': '6c4cedb2-4145-4429-ae95-9528ac847a19', 'payload': b'{}', 'payload_size': 2}",
+      "audio_size": 0,
+      "duration_ms": 0
+    },
+    {
+      "voice_id": "zh_female_wuzetian_uranus_bigtts",
+      "success": false,
+      "error": "Expected ConnectionStarted, got {'type': 'AudioOnlyServer', 'event': 'Audio(50)', 'session_id': '844e2abd-bcfb-45b8-ac79-5f62cf13f9d9', 'payload': b'{}', 'payload_size': 2}",
+      "audio_size": 0,
+      "duration_ms": 0
+    },
+    {
+      "voice_id": "zh_female_gujie_uranus_bigtts",
+      "success": false,
+      "error": "Expected ConnectionStarted, got {'type': 'AudioOnlyServer', 'event': 'Audio(50)', 'session_id': 'c5e6404b-ab58-4907-b4ac-4d4009dde046', 'payload': b'{}', 'payload_size': 2}",
+      "audio_size": 0,
+      "duration_ms": 0
+    },
+    {
+      "voice_id": "zh_male_guanggaojieshuo_uranus_bigtts",
+      "success": false,
+      "error": "Expected ConnectionStarted, got {'type': 'AudioOnlyServer', 'event': 'Audio(50)', 'session_id': '93b96c42-d7a2-426b-b53b-a92a07df2868', 'payload': b'{}', 'payload_size': 2}",
+      "audio_size": 0,
+      "duration_ms": 0
+    },
+    {
+      "voice_id": "zh_female_shaoergushi_uranus_bigtts",
+      "success": false,
+      "error": "Expected ConnectionStarted, got {'type': 'AudioOnlyServer', 'event': 'Audio(50)', 'session_id': 'a9e8a201-075f-4dc6-b02e-0ac9d2c74ce5', 'payload': b'{}', 'payload_size': 2}",
+      "audio_size": 0,
+      "duration_ms": 0
+    },
+    {
+      "voice_id": "zh_female_sophie_uranus_bigtts",
+      "success": false,
+      "error": "Expected ConnectionStarted, got {'type': 'AudioOnlyServer', 'event': 'Audio(50)', 'session_id': '0384e449-1025-4014-a7fa-c486a2a32df8', 'payload': b'{}', 'payload_size': 2}",
+      "audio_size": 0,
+      "duration_ms": 0
+    },
+    {
+      "voice_id": "saturn_zh_male_qingxinmumu_cs_tob",
+      "success": false,
+      "error": "Expected ConnectionStarted, got {'type': 'AudioOnlyServer', 'event': 'Audio(50)', 'session_id': '6ee06091-ebda-43d0-bc47-6e53f00cdcef', 'payload': b'{}', 'payload_size': 2}",
+      "audio_size": 0,
+      "duration_ms": 0
+    }
+  ]
+}

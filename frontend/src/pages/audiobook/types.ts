@@ -132,6 +132,10 @@ export interface CharacterVoiceSetting {
   voiceType?: string
   personality?: string
   emotionTendency?: string
+  voiceCloneDataUrl?: string
+  voiceDesignPrompt?: string
+  mimoVoiceAssetId?: string
+  stepaudioVoiceAssetId?: string
   source?: 'user' | 'ai_suggest' | string | null
 }
 
@@ -151,13 +155,17 @@ export interface ProjectAudioConfig {
     character_id: number
     name: string
     voice_id: string
-    volume: number
+    volume?: number | null
     speed?: number | null
     pitch?: number | null
     tts_model?: TtsModel | null
     voice_type?: string | null
     personality?: string | null
     emotion_tendency?: string | null
+    voice_clone_data_url?: string | null
+    voice_design_prompt?: string | null
+    mimo_voice_asset_id?: string | null
+    stepaudio_voice_asset_id?: string | null
     source?: string | null
   }[]
   audio_fx?: AudioFxConfig | null
@@ -182,6 +190,8 @@ export interface VoicePreset {
   recommended?: string[]
   default_params?: VoiceDefaultParams
   supportsInstruct?: boolean
+  disabled?: boolean
+  disabledReason?: string
 }
 
 export interface VoiceCatalogMeta {
@@ -251,6 +261,10 @@ export interface ScriptSegmentVoiceParams {
   pitch?: number | null
   volume?: number | null
   emotion?: string | null
+  voice_clone_data_url?: string | null
+  voice_design_prompt?: string | null
+  mimo_voice_asset_id?: string | null
+  stepaudio_voice_asset_id?: string | null
 }
 
 export interface ScriptSegmentSoundEffectDetail {

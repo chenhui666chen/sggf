@@ -31,12 +31,30 @@ const CharacterVoicePresetSelect = ({
 }: CharacterVoicePresetSelectProps) => {
   const hasNoVoicePresets = currentVoicePresets.length === 0
 
+  // 验证当前 value 是否在可用选项中,如果不在则使用空字符串(默认值)
+  // 这样可以避免 MUI Select 的 "out-of-range value" 警告
+  const safeValue = hasNoVoicePresets || voiceLoading
+    ? ''
+    : currentVoicePresets.some((preset) => preset.id === value)
+      ? value
+      : ''
+
+  // 如果 value 无效且不是 loading/empty 状态,通知父组件重置为默认值
+  if (value && value !== safeValue && !voiceLoading && !hasNoVoicePresets) {
+    console.warn(
+      `[CharacterVoicePresetSelect] Character ${characterId}: ` +
+      `Invalid voice ID "${value}", resetting to default.`
+    )
+    // 延迟执行,避免在渲染期间调用 setState
+    setTimeout(() => onVoiceChange(characterId, ''), 0)
+  }
+
   return (
     <FormControl size="small" fullWidth>
       <InputLabel>角色音</InputLabel>
       <Select
         label="角色音"
-        value={value}
+        value={safeValue}
         onChange={(event) => onVoiceChange(characterId, event.target.value as string)}
         disabled={voiceLoading && hasNoVoicePresets}
       >
@@ -59,7 +77,7 @@ const CharacterVoicePresetSelect = ({
           </MenuItem>
         )}
         {currentVoicePresets.map((preset) => (
-          <MenuItem key={preset.id} value={preset.id}>
+          <MenuItem key={preset.id} value={preset.id} disabled={Boolean(preset.disabled)}>
             <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 0.25 }}>
               <Typography variant="body2" fontWeight={600}>
                 {preset.label || preset.id}
@@ -67,6 +85,11 @@ const CharacterVoicePresetSelect = ({
               {preset.description && (
                 <Typography variant="caption" color="text.secondary">
                   {preset.description}
+                </Typography>
+              )}
+              {preset.disabledReason && (
+                <Typography variant="caption" color="warning.main">
+                  {preset.disabledReason}
                 </Typography>
               )}
               <Typography variant="caption" color="text.secondary">

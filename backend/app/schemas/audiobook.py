@@ -106,13 +106,19 @@ class CharacterVoiceConfig(BaseModel):
     """角色音频配置（用户可选）"""
     character_name: str
     voice_id: str
-    volume: int = 50
+    volume: Optional[int] = None
     speed: Optional[float] = None
     pitch: Optional[int] = None
     tts_model: Optional[str] = None
     voice_type: Optional[str] = None  # 声音类型（majestic/gentle/lively 等）
     personality: Optional[str] = None  # 性格类型
     emotion_tendency: Optional[str] = None  # 情感倾向
+
+
+    voice_clone_data_url: Optional[str] = None
+    voice_design_prompt: Optional[str] = None
+    mimo_voice_asset_id: Optional[str] = None
+    stepaudio_voice_asset_id: Optional[str] = None
 
 
 class TTSPreviewRequest(BaseModel):
@@ -125,6 +131,12 @@ class TTSPreviewRequest(BaseModel):
     model: Optional[str] = "qwen3-tts-instruct-flash"  # TTS 模型（默认 qwen3-tts-instruct-flash）
     voice_type: Optional[str] = None  # 声音类型（majestic/gentle/lively 等）
     instruction: Optional[str] = None
+
+
+    voice_clone_data_url: Optional[str] = None
+    voice_design_prompt: Optional[str] = None
+    mimo_voice_asset_id: Optional[str] = None
+    stepaudio_voice_asset_id: Optional[str] = None
 
 
 class TTSPreviewWithTimestampsRequest(TTSPreviewRequest):
@@ -244,6 +256,31 @@ class CosyVoiceDesignCreateRequest(BaseModel):
     prefix: Optional[str] = None
     sample_rate: Optional[int] = 24000
     response_format: Optional[str] = "wav"
+
+
+class MiMoVoiceCloneAssetCreateRequest(BaseModel):
+    """MiMo Voice Clone 本地音色资产创建请求。"""
+
+    name: str
+    audio_data_url: str
+    description: Optional[str] = None
+
+
+class MiMoVoiceDesignAssetCreateRequest(BaseModel):
+    """MiMo Voice Design 本地音色资产创建请求。"""
+
+    name: str
+    voice_design_prompt: str
+    description: Optional[str] = None
+
+
+class StepAudioVoiceCloneAssetCreateRequest(BaseModel):
+    """StepAudio Voice Clone 本地参考样本资产创建请求。"""
+
+    name: str
+    sample_text: Optional[str] = None
+    file_id: Optional[str] = None
+    description: Optional[str] = None
 
 
 class AudiobookTaskStatus(BaseModel):

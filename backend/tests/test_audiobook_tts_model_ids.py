@@ -16,14 +16,21 @@ os.environ.setdefault("DEBUG", "false")
 os.environ.setdefault("DATABASE_URL", "postgresql://test:test@127.0.0.1:5432/test_db")
 
 from app.api.v1.audiobook_api import routes_tts
-from app.api.v1.audiobook_api.routes_tts import list_tts_models
+from app.api.v1.audiobook_api.routes_tts import list_tts_models, list_tts_voices
 from app.schemas.audiobook import CosyVoiceCloneCreateRequest, TTSPreviewRequest
 from app.services.audiobook.tts_model_ids import (
     DEFAULT_AUDIOBOOK_TTS_MODEL,
     MINIMAX_SPEECH_28_HD_MODEL,
     MINIMAX_SPEECH_28_TURBO_MODEL,
+    MIMO_V25_TTS_MODEL,
+    MIMO_V25_TTS_VOICE_CLONE_MODEL,
+    MIMO_V25_TTS_VOICE_DESIGN_MODEL,
+    SEED_TTS_20_EXPRESSIVE_MODEL,
+    STEPAUDIO_25_TTS_MODEL,
     SUPPORTED_AUDIOBOOK_TTS_MODELS,
+    get_audiobook_tts_model_metadata,
     get_audiobook_tts_runtime_model_id,
+    get_audiobook_tts_style_capabilities,
     get_audiobook_tts_model_price_per_10k,
     is_supported_audiobook_tts_model,
     normalize_audiobook_tts_model,
@@ -34,8 +41,11 @@ from app.services.audiobook.voice_catalog import load_voice_catalog_for_model
 from app.services.audiobook.voice_auto_assignment import AutoVoiceAssignmentPool
 from app.services.audiobook.voice_manager_factory import create_voice_manager, get_model_for_voice, list_supported_models
 from app.services.audiobook.voice_manager import VoiceManager
+from app.services.audiobook.voice_manager_mimo import MiMoVoiceManager
 from app.services.audiobook import voice_manager_cosyvoice_v3_plus as cosyvoice_v3_plus
 from app.services.audiobook.voice_manager_minimax import MiniMaxVoiceManager
+from app.services.audiobook.voice_manager_stepaudio import StepAudioVoiceManager
+from core.unified_media_runtime import create_tts_engine, get_media_runtime
 from core.model_resolution import normalize_model_id
 
 
@@ -45,11 +55,150 @@ def test_audiobook_tts_model_normalization_keeps_business_model_ids() -> None:
     assert normalize_audiobook_tts_model("minimax-speech-2.8") == MINIMAX_SPEECH_28_HD_MODEL
     assert normalize_audiobook_tts_model("qwen3-tts-flash") == DEFAULT_AUDIOBOOK_TTS_MODEL
     assert normalize_audiobook_tts_model("qwen3-tts-plus") == DEFAULT_AUDIOBOOK_TTS_MODEL
+    assert normalize_audiobook_tts_model("MiMo/V2.5-TTS") == MIMO_V25_TTS_MODEL
+    assert normalize_audiobook_tts_model("mimo-v2.5-tts-voicedesign") == MIMO_V25_TTS_VOICE_DESIGN_MODEL
+    assert normalize_audiobook_tts_model("mimo-v2.5-tts-voice-design") == MIMO_V25_TTS_VOICE_DESIGN_MODEL
+    assert normalize_audiobook_tts_model("mimo-v2.5-tts-voiceclone") == MIMO_V25_TTS_VOICE_CLONE_MODEL
+    assert normalize_audiobook_tts_model("mimo-v2.5-tts-voice-clone") == MIMO_V25_TTS_VOICE_CLONE_MODEL
+    assert normalize_audiobook_tts_model("StepAudio-2.5-TTS") == STEPAUDIO_25_TTS_MODEL
+    assert normalize_audiobook_tts_model("stepaudio_2_5_tts") == STEPAUDIO_25_TTS_MODEL
+    assert normalize_audiobook_tts_model("stepfun/stepaudio-2.5-tts") == STEPAUDIO_25_TTS_MODEL
+    assert normalize_audiobook_tts_model("seed-tts-2.0-expressive") == SEED_TTS_20_EXPRESSIVE_MODEL
+    assert normalize_audiobook_tts_model("doubao/seed-tts-2.0-expressive") == SEED_TTS_20_EXPRESSIVE_MODEL
+    assert normalize_audiobook_tts_model("doubao-tts-2.0-expressive") == SEED_TTS_20_EXPRESSIVE_MODEL
+    assert normalize_audiobook_tts_model("mimo-v2.5-tts-hd", default="") == ""
+    assert normalize_audiobook_tts_model("mimo-v2.5-tts-turbo", default="") == ""
     assert is_supported_audiobook_tts_model("MiniMax/speech-2.8-hd") is True
+    assert is_supported_audiobook_tts_model("mimo-v2.5-tts") is True
+    assert is_supported_audiobook_tts_model("mimo-v2.5-tts-voicedesign") is True
+    assert is_supported_audiobook_tts_model("mimo-v2.5-tts-voiceclone") is True
+    assert is_supported_audiobook_tts_model("stepaudio-2.5-tts") is True
+    assert is_supported_audiobook_tts_model("seed-tts-2.0-expressive") is True
+    assert is_supported_audiobook_tts_model("mimo-v2.5-tts-hd") is False
+    assert is_supported_audiobook_tts_model("mimo-v2.5-tts-turbo") is False
     assert is_supported_audiobook_tts_model("unknown-tts-model") is False
     assert normalize_model_id("MiniMax/speech-2.8-hd") == "MiniMax/speech-2.8-hd"
     assert get_audiobook_tts_runtime_model_id(MINIMAX_SPEECH_28_HD_MODEL) == "MiniMax/speech-2.8-hd"
     assert get_audiobook_tts_runtime_model_id(MINIMAX_SPEECH_28_TURBO_MODEL) == "MiniMax/speech-2.8-turbo"
+    assert get_audiobook_tts_runtime_model_id(MIMO_V25_TTS_MODEL) == MIMO_V25_TTS_MODEL
+    assert get_audiobook_tts_runtime_model_id(MIMO_V25_TTS_VOICE_DESIGN_MODEL) == MIMO_V25_TTS_VOICE_DESIGN_MODEL
+    assert get_audiobook_tts_runtime_model_id(MIMO_V25_TTS_VOICE_CLONE_MODEL) == MIMO_V25_TTS_VOICE_CLONE_MODEL
+    assert get_audiobook_tts_runtime_model_id(STEPAUDIO_25_TTS_MODEL) == STEPAUDIO_25_TTS_MODEL
+    assert get_audiobook_tts_runtime_model_id(SEED_TTS_20_EXPRESSIVE_MODEL) == SEED_TTS_20_EXPRESSIVE_MODEL
+
+
+def test_audiobook_tts_model_style_capabilities_are_exposed() -> None:
+    qwen_caps = get_audiobook_tts_style_capabilities(DEFAULT_AUDIOBOOK_TTS_MODEL)
+    assert qwen_caps["model_family"] == "qwen"
+    assert qwen_caps["preferred_style_control_mode"] == "natural_language"
+    assert qwen_caps["style_control_modes"] == ["natural_language"]
+    assert qwen_caps["supports_voice_description"] is True
+    assert qwen_caps["supports_audio_tags"] is False
+    assert qwen_caps["instruction_budget"] == 600
+
+    mimo_caps = get_audiobook_tts_style_capabilities(MIMO_V25_TTS_MODEL)
+    assert mimo_caps["model_family"] == "mimo"
+    assert mimo_caps["preferred_style_control_mode"] == "director"
+    assert mimo_caps["style_control_modes"] == ["director", "audio_tags", "natural_language"]
+    assert mimo_caps["supports_director_mode"] is True
+    assert mimo_caps["supports_audio_tags"] is True
+    assert mimo_caps["supports_emotion_mixing"] is True
+    assert mimo_caps["supports_micro_tags"] is True
+    assert mimo_caps["supports_word_level_control"] is True
+    assert mimo_caps["control_message_roles"] == {
+        "director": "user",
+        "audio_tags": "assistant",
+        "natural_language": "user",
+    }
+    assert mimo_caps["has_system_voices"] is True
+    assert mimo_caps["supports_singing"] is True
+    assert mimo_caps["supports_streaming"] is True
+    assert mimo_caps["supports_voice_design"] is False
+    assert mimo_caps["supports_voice_clone"] is False
+
+    design_caps = get_audiobook_tts_style_capabilities(MIMO_V25_TTS_VOICE_DESIGN_MODEL)
+    assert design_caps["model_family"] == "mimo"
+    assert design_caps["preferred_style_control_mode"] == "voice_design"
+    assert design_caps["style_control_modes"] == ["voice_design", "natural_language"]
+    assert design_caps["has_system_voices"] is False
+    assert design_caps["requires_custom_voice"] is True
+    assert design_caps["supports_voice_design"] is True
+    assert design_caps["supports_voice_clone"] is False
+    assert design_caps["supports_director_mode"] is False
+    assert design_caps["supports_audio_tags"] is False
+    assert design_caps["supports_micro_tags"] is False
+    assert design_caps["supports_word_level_control"] is False
+    assert design_caps["supports_singing"] is False
+    assert design_caps["control_message_roles"] == {
+        "voice_design": "user",
+        "natural_language": "user",
+    }
+
+    clone_caps = get_audiobook_tts_style_capabilities(MIMO_V25_TTS_VOICE_CLONE_MODEL)
+    assert clone_caps["model_family"] == "mimo"
+    assert clone_caps["style_control_modes"] == ["director", "audio_tags", "natural_language"]
+    assert clone_caps["preferred_style_control_mode"] == "director"
+    assert clone_caps["has_system_voices"] is False
+    assert clone_caps["requires_custom_voice"] is True
+    assert clone_caps["supports_voice_clone"] is True
+    assert clone_caps["supports_voice_design"] is False
+    assert clone_caps["supports_director_mode"] is True
+    assert clone_caps["supports_audio_tags"] is True
+    assert clone_caps["supports_singing"] is False
+    assert clone_caps["control_message_roles"]["voice_clone"] == "audio.voice"
+
+    stepaudio_caps = get_audiobook_tts_style_capabilities(STEPAUDIO_25_TTS_MODEL)
+    assert stepaudio_caps["model_family"] == "stepaudio"
+    assert stepaudio_caps["preferred_style_control_mode"] == "global_context"
+    assert stepaudio_caps["style_control_modes"] == ["global_context", "inline_context", "natural_language"]
+    assert stepaudio_caps["supports_voice_description"] is True
+    assert stepaudio_caps["supports_audio_tags"] is False
+    assert stepaudio_caps["supports_emotion_mixing"] is True
+    assert stepaudio_caps["supports_micro_tags"] is True
+    assert stepaudio_caps["supports_word_level_control"] is True
+    assert stepaudio_caps["supports_voice_clone"] is True
+    assert stepaudio_caps["supports_streaming"] is True
+    assert stepaudio_caps["instruction_budget"] == 200
+    assert stepaudio_caps["max_input_chars"] == 1000
+    assert stepaudio_caps["control_message_roles"] == {
+        "global_context": "parameters.instruction",
+        "inline_context": "input.parentheses",
+        "natural_language": "parameters.instruction",
+    }
+
+    seed_caps = get_audiobook_tts_style_capabilities(SEED_TTS_20_EXPRESSIVE_MODEL)
+    assert seed_caps["model_family"] == "doubao"
+    assert seed_caps["preferred_style_control_mode"] == "query_response"
+    assert seed_caps["style_control_modes"] == ["query_response", "audio_tags", "natural_language"]
+    assert seed_caps["supports_voice_description"] is True
+    assert seed_caps["supports_emotion_mixing"] is True
+    assert seed_caps["supports_micro_tags"] is True
+    assert seed_caps["supports_voice_clone"] is True
+    assert seed_caps["supports_streaming"] is True
+    assert seed_caps["control_message_roles"] == {
+        "query_response": "additions.context_texts",
+        "audio_tags": "req_params.text + req_params.use_tag_parser",
+        "natural_language": "additions.context_texts",
+    }
+
+    minimax_caps = get_audiobook_tts_style_capabilities(MINIMAX_SPEECH_28_HD_MODEL)
+    assert minimax_caps["model_family"] == "minimax"
+    assert minimax_caps["preferred_style_control_mode"] == "basic"
+    assert minimax_caps["style_control_modes"] == ["basic"]
+    assert minimax_caps["supports_audio_tags"] is False
+
+    unknown_caps = get_audiobook_tts_style_capabilities("unknown-tts")
+    assert unknown_caps["model_family"] == "generic"
+    assert unknown_caps["preferred_style_control_mode"] == "natural_language"
+
+
+def test_audiobook_tts_model_metadata_returns_independent_capability_copy() -> None:
+    metadata = get_audiobook_tts_model_metadata(MIMO_V25_TTS_MODEL)
+    metadata["capabilities"]["style_control_modes"].append("broken")
+
+    fresh = get_audiobook_tts_model_metadata(MIMO_V25_TTS_MODEL)
+
+    assert "broken" not in fresh["capabilities"]["style_control_modes"]
 
 
 def test_minimax_voice_catalog_accepts_registry_model_id_alias() -> None:
@@ -59,6 +208,52 @@ def test_minimax_voice_catalog_accepts_registry_model_id_alias() -> None:
     assert catalog["meta"]["model"] == MINIMAX_SPEECH_28_HD_MODEL
     assert "male-qn-qingse" in voice_ids
     assert "Cherry" not in voice_ids
+
+
+def test_stepaudio_voice_catalog_contains_official_contextual_tts_voices() -> None:
+    catalog = load_voice_catalog_for_model(STEPAUDIO_25_TTS_MODEL)
+    voice_ids = {voice["id"] for voice in catalog["voices"]}
+
+    assert catalog["meta"]["model"] == STEPAUDIO_25_TTS_MODEL
+    assert catalog["meta"]["voice_count"] == 36
+    assert {
+        "vibrant-youth",
+        "lively-girl",
+        "soft-spoken-gentleman",
+        "magnetic-voiced-male",
+        "cixingnansheng",
+        "wenrounvsheng",
+        "shuangkuainansheng",
+        "huolinvsheng",
+    }.issubset(voice_ids)
+
+
+def test_seed_tts_voice_catalog_contains_doubao_20_expressive_voices() -> None:
+    catalog = load_voice_catalog_for_model(SEED_TTS_20_EXPRESSIVE_MODEL)
+    voice_ids = {voice["id"] for voice in catalog["voices"]}
+
+    assert catalog["meta"]["model"] == SEED_TTS_20_EXPRESSIVE_MODEL
+    assert catalog["meta"]["voice_count"] == 99
+    assert {
+        "zh_female_vv_uranus_bigtts",
+        "saturn_zh_female_keainvsheng_tob",
+        "saturn_zh_female_tiaopigongzhu_tob",
+        "saturn_zh_male_shuanglangshaonian_tob",
+        "saturn_zh_male_tiancaitongzhuo_tob",
+        "en_male_tim_uranus_bigtts",
+        "zh_male_xuanyijieshuo_uranus_bigtts",
+    }.issubset(voice_ids)
+    tag_ready = {
+        voice["id"]
+        for voice in catalog["voices"]
+        if voice.get("supports_inline_voice_labels")
+    }
+    assert {
+        "saturn_zh_female_keainvsheng_tob",
+        "saturn_zh_female_tiaopigongzhu_tob",
+        "saturn_zh_male_shuanglangshaonian_tob",
+        "saturn_zh_male_tiancaitongzhuo_tob",
+    }.issubset(tag_ready)
 
 
 def test_voice_manager_factory_keeps_minimax_manager_after_registry_alias() -> None:
@@ -94,6 +289,48 @@ def test_minimax_project_mapping_applies_voice_type_params() -> None:
     assert profile.default_emotion == "happy"
 
 
+def test_mimo_voice_clone_mapping_preserves_audio_voice_data_url() -> None:
+    manager = MiMoVoiceManager(MIMO_V25_TTS_VOICE_CLONE_MODEL)
+
+    manager.apply_project_voice_mapping({
+        "CloneHero": {
+            "voice_id": "",
+            "tts_model": MIMO_V25_TTS_VOICE_CLONE_MODEL,
+            "voice_clone_data_url": "data:audio/wav;base64,AAAA",
+            "volume": 64,
+        },
+    })
+
+    profile = manager.get_voice("CloneHero")
+    params = profile.get_tts_params("calm")
+
+    assert profile.tts_model == MIMO_V25_TTS_VOICE_CLONE_MODEL
+    assert params["speaker"] == ""
+    assert params["voice_clone_data_url"] == "data:audio/wav;base64,AAAA"
+    assert params["volume"] == 64
+
+
+def test_mimo_voice_design_mapping_preserves_design_prompt() -> None:
+    manager = MiMoVoiceManager(MIMO_V25_TTS_VOICE_DESIGN_MODEL)
+
+    manager.apply_project_voice_mapping({
+        "DesignHero": {
+            "voice_id": "",
+            "tts_model": MIMO_V25_TTS_VOICE_DESIGN_MODEL,
+            "voice_design_prompt": "青年女性，中音，语速中等，清亮但克制，适合有声书对白",
+            "speed": 1.05,
+        },
+    })
+
+    profile = manager.get_voice("DesignHero")
+    params = profile.get_tts_params("calm")
+
+    assert profile.tts_model == MIMO_V25_TTS_VOICE_DESIGN_MODEL
+    assert params["speaker"] == ""
+    assert params["voice_design_prompt"] == "青年女性，中音，语速中等，清亮但克制，适合有声书对白"
+    assert params["speed"] == pytest.approx(1.05)
+
+
 def test_qwen_voice_manager_prefers_unused_voice_for_same_traits() -> None:
     manager = VoiceManager()
 
@@ -124,6 +361,33 @@ def test_minimax_voice_manager_keeps_requested_turbo_model() -> None:
     assert isinstance(manager, MiniMaxVoiceManager)
     assert manager.model == MINIMAX_SPEECH_28_TURBO_MODEL
     assert profile.tts_model == MINIMAX_SPEECH_28_TURBO_MODEL
+
+
+def test_voice_manager_factory_routes_mimo_inline_custom_voice_models() -> None:
+    clone_manager = create_voice_manager(MIMO_V25_TTS_VOICE_CLONE_MODEL)
+    design_manager = create_voice_manager(MIMO_V25_TTS_VOICE_DESIGN_MODEL)
+
+    assert isinstance(clone_manager, MiMoVoiceManager)
+    assert clone_manager.model == MIMO_V25_TTS_VOICE_CLONE_MODEL
+    assert isinstance(design_manager, MiMoVoiceManager)
+    assert design_manager.model == MIMO_V25_TTS_VOICE_DESIGN_MODEL
+
+
+def test_voice_manager_factory_routes_stepaudio_contextual_tts_model() -> None:
+    manager = create_voice_manager("stepfun/stepaudio-2.5-tts")
+
+    assert isinstance(manager, StepAudioVoiceManager)
+    assert manager.model == STEPAUDIO_25_TTS_MODEL
+    assert manager.get_narrator_voice().tts_speaker_id == "cixingnansheng"
+    assert manager.get_model_info()["supports_inline_context"] is True
+
+
+def test_voice_manager_factory_routes_seed_tts_expressive_model() -> None:
+    manager = create_voice_manager("doubao/seed-tts-2.0-expressive")
+
+    assert manager.model == SEED_TTS_20_EXPRESSIVE_MODEL
+    assert manager.get_narrator_voice().tts_speaker_id == "zh_female_vv_uranus_bigtts"
+    assert manager.get_model_info()["supports_query_response"] is True
 
 
 def test_auto_voice_assignment_pool_falls_back_to_other_model_when_primary_is_exhausted() -> None:
@@ -260,6 +524,11 @@ def test_supported_tts_models_do_not_advertise_unregistered_qwen_plus() -> None:
         "cosyvoice-v3.5-plus",
         MINIMAX_SPEECH_28_HD_MODEL,
         MINIMAX_SPEECH_28_TURBO_MODEL,
+        MIMO_V25_TTS_MODEL,
+        MIMO_V25_TTS_VOICE_DESIGN_MODEL,
+        MIMO_V25_TTS_VOICE_CLONE_MODEL,
+        STEPAUDIO_25_TTS_MODEL,
+        SEED_TTS_20_EXPRESSIVE_MODEL,
     ]
 
 
@@ -273,6 +542,39 @@ def test_tts_engine_normalizes_legacy_model_on_init() -> None:
 
     assert engine.model == DEFAULT_AUDIOBOOK_TTS_MODEL
     assert engine._is_qwen_instruct_model() is True
+
+
+def test_mimo_models_are_registered_for_audiobook_runtime_selection() -> None:
+    runtime = get_media_runtime()
+
+    for model_id in (
+        MIMO_V25_TTS_MODEL,
+        MIMO_V25_TTS_VOICE_DESIGN_MODEL,
+        MIMO_V25_TTS_VOICE_CLONE_MODEL,
+        STEPAUDIO_25_TTS_MODEL,
+        SEED_TTS_20_EXPRESSIVE_MODEL,
+    ):
+        spec = runtime.select_model(
+            operation="synthesize_speech",
+            modality="text_to_speech",
+            preferred_model=model_id,
+        )
+        engine = create_tts_engine(model_id=model_id)
+
+        assert spec.id == model_id
+        assert engine.model == model_id
+
+
+def test_mimo_custom_voice_models_return_empty_voice_catalogs() -> None:
+    for model_id in (
+        MIMO_V25_TTS_VOICE_DESIGN_MODEL,
+        MIMO_V25_TTS_VOICE_CLONE_MODEL,
+    ):
+        catalog = asyncio.run(list_tts_voices(model=model_id, current_user=object()))
+
+        assert catalog["model"] == model_id
+        assert catalog["voice_count"] == 0
+        assert catalog["voices"] == []
 
 
 def test_cosyvoice_clone_endpoint_uses_shared_prefix_builder(monkeypatch) -> None:
@@ -336,6 +638,39 @@ def test_tts_models_endpoint_uses_catalog_counts_and_supported_models(monkeypatc
     assert models[DEFAULT_AUDIOBOOK_TTS_MODEL]["voice_count"] == load_voice_catalog_for_model(
         DEFAULT_AUDIOBOOK_TTS_MODEL
     )["meta"]["voice_count"]
+    assert models[MIMO_V25_TTS_MODEL]["runtime_status"] == "ready"
+    assert models[MIMO_V25_TTS_MODEL]["runtime_model_id"] == MIMO_V25_TTS_MODEL
+    assert models[MIMO_V25_TTS_MODEL]["runtime_error"] is None
+    assert models[MIMO_V25_TTS_MODEL]["catalog_status"] == "ready"
+    assert models[MIMO_V25_TTS_MODEL]["voice_count"] == load_voice_catalog_for_model(
+        MIMO_V25_TTS_MODEL
+    )["meta"]["voice_count"]
+    assert models[MIMO_V25_TTS_VOICE_DESIGN_MODEL]["runtime_status"] == "ready"
+    assert models[MIMO_V25_TTS_VOICE_DESIGN_MODEL]["runtime_model_id"] == MIMO_V25_TTS_VOICE_DESIGN_MODEL
+    assert models[MIMO_V25_TTS_VOICE_DESIGN_MODEL]["runtime_error"] is None
+    assert models[MIMO_V25_TTS_VOICE_DESIGN_MODEL]["catalog_status"] == "not_applicable"
+    assert models[MIMO_V25_TTS_VOICE_DESIGN_MODEL]["voice_count"] == 0
+    assert models[MIMO_V25_TTS_VOICE_CLONE_MODEL]["runtime_status"] == "ready"
+    assert models[MIMO_V25_TTS_VOICE_CLONE_MODEL]["runtime_model_id"] == MIMO_V25_TTS_VOICE_CLONE_MODEL
+    assert models[MIMO_V25_TTS_VOICE_CLONE_MODEL]["runtime_error"] is None
+    assert models[MIMO_V25_TTS_VOICE_CLONE_MODEL]["catalog_status"] == "not_applicable"
+    assert models[MIMO_V25_TTS_VOICE_CLONE_MODEL]["voice_count"] == 0
+    assert models[STEPAUDIO_25_TTS_MODEL]["runtime_status"] == "ready"
+    assert models[STEPAUDIO_25_TTS_MODEL]["runtime_model_id"] == STEPAUDIO_25_TTS_MODEL
+    assert models[STEPAUDIO_25_TTS_MODEL]["runtime_error"] is None
+    assert models[STEPAUDIO_25_TTS_MODEL]["catalog_status"] == "ready"
+    assert models[STEPAUDIO_25_TTS_MODEL]["voice_count"] == load_voice_catalog_for_model(
+        STEPAUDIO_25_TTS_MODEL
+    )["meta"]["voice_count"]
+    assert models[STEPAUDIO_25_TTS_MODEL]["price_per_10k"] == 5.8
+    assert "全局语境" in models[STEPAUDIO_25_TTS_MODEL]["features"]
+    assert models[SEED_TTS_20_EXPRESSIVE_MODEL]["runtime_status"] == "ready"
+    assert models[SEED_TTS_20_EXPRESSIVE_MODEL]["runtime_model_id"] == SEED_TTS_20_EXPRESSIVE_MODEL
+    assert models[SEED_TTS_20_EXPRESSIVE_MODEL]["catalog_status"] == "ready"
+    assert models[SEED_TTS_20_EXPRESSIVE_MODEL]["voice_count"] == load_voice_catalog_for_model(
+        SEED_TTS_20_EXPRESSIVE_MODEL
+    )["meta"]["voice_count"]
+    assert "对话式TTS" in models[SEED_TTS_20_EXPRESSIVE_MODEL]["features"]
     assert f"{models[DEFAULT_AUDIOBOOK_TTS_MODEL]['voice_count']} 个可用音色" in models[
         DEFAULT_AUDIOBOOK_TTS_MODEL
     ]["description"]

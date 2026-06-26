@@ -1,11 +1,9 @@
 import { Box, IconButton, Slider, Tooltip, Typography } from '@mui/material'
-import {
-  Pause,
-  PlayArrow,
-  SkipNext,
-  SkipPrevious,
-  VolumeUp,
-} from '@mui/icons-material'
+import PauseIcon from '@mui/icons-material/Pause'
+import PlayArrowIcon from '@mui/icons-material/PlayArrow'
+import SkipNextIcon from '@mui/icons-material/SkipNext'
+import SkipPreviousIcon from '@mui/icons-material/SkipPrevious'
+import VolumeUpIcon from '@mui/icons-material/VolumeUp'
 
 import { formatBrowserPlayerTime } from './browserPlayerUtils'
 
@@ -61,17 +59,17 @@ const BrowserPlayerControls: React.FC<BrowserPlayerControlsProps> = ({
         <Tooltip title={previousDisabled ? '当前已经是第一章' : '上一章'}>
           <span>
             <IconButton onClick={onPrevious} disabled={previousDisabled}>
-              <SkipPrevious />
+              <SkipPreviousIcon />
             </IconButton>
           </span>
         </Tooltip>
         <IconButton onClick={onPlayPause} size="large">
-          {isPlaying ? <Pause fontSize="large" /> : <PlayArrow fontSize="large" />}
+          {isPlaying ? <PauseIcon fontSize="large" /> : <PlayArrowIcon fontSize="large" />}
         </IconButton>
         <Tooltip title={nextDisabled ? '当前已经是最后一章' : '下一章'}>
           <span>
             <IconButton onClick={onNext} disabled={nextDisabled}>
-              <SkipNext />
+              <SkipNextIcon />
             </IconButton>
           </span>
         </Tooltip>
@@ -88,7 +86,7 @@ const BrowserPlayerControls: React.FC<BrowserPlayerControlsProps> = ({
             minWidth: { xs: 180, sm: 0 },
           }}
         >
-          <VolumeUp fontSize="small" />
+          <VolumeUpIcon fontSize="small" />
           <Slider
             value={volume}
             step={0.01}

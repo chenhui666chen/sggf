@@ -1,5 +1,5 @@
 import { Box, Button, Chip, Typography } from '@mui/material'
-import { Download } from '@mui/icons-material'
+import DownloadIcon from '@mui/icons-material/Download'
 
 import type { SubtitleFormat } from './browserPlayerUtils'
 import type { BrowserPlayerChapter } from './browserPlayerTypes'
@@ -33,7 +33,7 @@ const BrowserPlayerChapterHeader: React.FC<BrowserPlayerChapterHeaderProps> = ({
         {currentChapter?.has_subtitle && (
           <Button
             size="small"
-            startIcon={<Download />}
+            startIcon={<DownloadIcon />}
             onClick={onDownloadSubtitle}
           >
             下载字幕 ({subtitleFormat.toUpperCase()})
@@ -42,7 +42,7 @@ const BrowserPlayerChapterHeader: React.FC<BrowserPlayerChapterHeaderProps> = ({
         {currentChapter?.audacity_labels_url && (
           <Button
             size="small"
-            startIcon={<Download />}
+            startIcon={<DownloadIcon />}
             onClick={onDownloadAudacityLabels}
           >
             下载 Labels

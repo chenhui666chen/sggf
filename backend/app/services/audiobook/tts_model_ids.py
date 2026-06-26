@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from typing import Any, Final
 
 from app.services.audiobook.cosyvoice_clone_client import COSYVOICE_V35_PLUS_MODEL_ID
@@ -9,12 +10,22 @@ from core.model_resolution import normalize_model_id
 DEFAULT_AUDIOBOOK_TTS_MODEL: Final[str] = "qwen3-tts-instruct-flash"
 MINIMAX_SPEECH_28_HD_MODEL: Final[str] = "minimax-speech-2.8-hd"
 MINIMAX_SPEECH_28_TURBO_MODEL: Final[str] = "minimax-speech-2.8-turbo"
+MIMO_V25_TTS_MODEL: Final[str] = "mimo-v2.5-tts"
+MIMO_V25_TTS_VOICE_DESIGN_MODEL: Final[str] = "mimo-v2.5-tts-voicedesign"
+MIMO_V25_TTS_VOICE_CLONE_MODEL: Final[str] = "mimo-v2.5-tts-voiceclone"
+STEPAUDIO_25_TTS_MODEL: Final[str] = "stepaudio-2.5-tts"
+SEED_TTS_20_EXPRESSIVE_MODEL: Final[str] = "seed-tts-2.0-expressive"
 
 SUPPORTED_AUDIOBOOK_TTS_MODELS: Final[set[str]] = {
     DEFAULT_AUDIOBOOK_TTS_MODEL,
     COSYVOICE_V35_PLUS_MODEL_ID,
     MINIMAX_SPEECH_28_HD_MODEL,
     MINIMAX_SPEECH_28_TURBO_MODEL,
+    MIMO_V25_TTS_MODEL,
+    MIMO_V25_TTS_VOICE_DESIGN_MODEL,
+    MIMO_V25_TTS_VOICE_CLONE_MODEL,
+    STEPAUDIO_25_TTS_MODEL,
+    SEED_TTS_20_EXPRESSIVE_MODEL,
 }
 
 SUPPORTED_AUDIOBOOK_TTS_MODEL_ORDER: Final[tuple[str, ...]] = (
@@ -22,6 +33,11 @@ SUPPORTED_AUDIOBOOK_TTS_MODEL_ORDER: Final[tuple[str, ...]] = (
     COSYVOICE_V35_PLUS_MODEL_ID,
     MINIMAX_SPEECH_28_HD_MODEL,
     MINIMAX_SPEECH_28_TURBO_MODEL,
+    MIMO_V25_TTS_MODEL,
+    MIMO_V25_TTS_VOICE_DESIGN_MODEL,
+    MIMO_V25_TTS_VOICE_CLONE_MODEL,
+    STEPAUDIO_25_TTS_MODEL,
+    SEED_TTS_20_EXPRESSIVE_MODEL,
 )
 
 AUDIOBOOK_TTS_RUNTIME_MODEL_IDS: Final[dict[str, str]] = {
@@ -29,6 +45,180 @@ AUDIOBOOK_TTS_RUNTIME_MODEL_IDS: Final[dict[str, str]] = {
     COSYVOICE_V35_PLUS_MODEL_ID: COSYVOICE_V35_PLUS_MODEL_ID,
     MINIMAX_SPEECH_28_HD_MODEL: "MiniMax/speech-2.8-hd",
     MINIMAX_SPEECH_28_TURBO_MODEL: "MiniMax/speech-2.8-turbo",
+    MIMO_V25_TTS_MODEL: MIMO_V25_TTS_MODEL,
+    MIMO_V25_TTS_VOICE_DESIGN_MODEL: MIMO_V25_TTS_VOICE_DESIGN_MODEL,
+    MIMO_V25_TTS_VOICE_CLONE_MODEL: MIMO_V25_TTS_VOICE_CLONE_MODEL,
+    STEPAUDIO_25_TTS_MODEL: STEPAUDIO_25_TTS_MODEL,
+    SEED_TTS_20_EXPRESSIVE_MODEL: SEED_TTS_20_EXPRESSIVE_MODEL,
+}
+
+GENERIC_AUDIOBOOK_TTS_STYLE_CAPABILITIES: Final[dict[str, Any]] = {
+    "model_family": "generic",
+    "style_control_modes": ["natural_language"],
+    "preferred_style_control_mode": "natural_language",
+    "supports_voice_description": True,
+    "supports_director_mode": False,
+    "supports_audio_tags": False,
+    "supports_emotion_mixing": False,
+    "supports_micro_tags": False,
+    "supports_word_level_control": False,
+    "supports_singing": False,
+    "supports_streaming": False,
+    "instruction_budget": None,
+    "control_message_roles": {},
+}
+
+MIMO_V25_STYLE_CAPABILITIES: Final[dict[str, Any]] = {
+    "model_family": "mimo",
+    "style_control_modes": ["director", "audio_tags", "natural_language"],
+    "preferred_style_control_mode": "director",
+    "supports_voice_description": True,
+    "supports_director_mode": True,
+    "supports_audio_tags": True,
+    "supports_emotion_mixing": True,
+    "supports_micro_tags": True,
+    "supports_word_level_control": True,
+    "instruction_budget": None,
+    "control_message_roles": {
+        "director": "user",
+        "audio_tags": "assistant",
+        "natural_language": "user",
+    },
+}
+
+AUDIOBOOK_TTS_STYLE_CAPABILITIES: Final[dict[str, dict[str, Any]]] = {
+    DEFAULT_AUDIOBOOK_TTS_MODEL: {
+        "model_family": "qwen",
+        "style_control_modes": ["natural_language"],
+        "preferred_style_control_mode": "natural_language",
+        "supports_voice_description": True,
+        "instruction_budget": 600,
+        "control_message_roles": {"natural_language": "parameters.instructions"},
+    },
+    COSYVOICE_V35_PLUS_MODEL_ID: {
+        "model_family": "cosyvoice",
+        "style_control_modes": ["natural_language"],
+        "preferred_style_control_mode": "natural_language",
+        "supports_voice_description": True,
+        "instruction_budget": 100,
+        "control_message_roles": {"natural_language": "parameters.instruction"},
+    },
+    MINIMAX_SPEECH_28_HD_MODEL: {
+        "model_family": "minimax",
+        "style_control_modes": ["basic"],
+        "preferred_style_control_mode": "basic",
+        "supports_voice_description": False,
+        "control_message_roles": {},
+    },
+    MINIMAX_SPEECH_28_TURBO_MODEL: {
+        "model_family": "minimax",
+        "style_control_modes": ["basic"],
+        "preferred_style_control_mode": "basic",
+        "supports_voice_description": False,
+        "control_message_roles": {},
+    },
+    MIMO_V25_TTS_MODEL: {
+        **MIMO_V25_STYLE_CAPABILITIES,
+        "has_system_voices": True,
+        "requires_custom_voice": False,
+        "supports_voice_clone": False,
+        "supports_voice_design": False,
+        "supports_voice_tuning": True,
+        "supports_singing": True,
+        "supports_streaming": True,
+        "control_message_roles": {
+            "director": "user",
+            "audio_tags": "assistant",
+            "natural_language": "user",
+        },
+    },
+    MIMO_V25_TTS_VOICE_DESIGN_MODEL: {
+        **MIMO_V25_STYLE_CAPABILITIES,
+        "style_control_modes": ["voice_design", "natural_language"],
+        "preferred_style_control_mode": "voice_design",
+        "has_system_voices": False,
+        "requires_custom_voice": True,
+        "supports_voice_clone": False,
+        "supports_voice_design": True,
+        "supports_voice_tuning": True,
+        "supports_director_mode": False,
+        "supports_audio_tags": False,
+        "supports_micro_tags": False,
+        "supports_word_level_control": False,
+        "supports_singing": False,
+        "supports_streaming": False,
+        "voice_design_instruction_mode": "voice_description_first",
+        "style_instruction_scope": "merged_into_voice_design_prompt",
+        "control_message_roles": {
+            "voice_design": "user",
+            "natural_language": "user",
+        },
+    },
+    MIMO_V25_TTS_VOICE_CLONE_MODEL: {
+        **MIMO_V25_STYLE_CAPABILITIES,
+        "has_system_voices": False,
+        "requires_custom_voice": True,
+        "supports_voice_clone": True,
+        "supports_voice_design": False,
+        "supports_voice_tuning": True,
+        "supports_singing": False,
+        "supports_streaming": False,
+        "control_message_roles": {
+            "director": "user",
+            "audio_tags": "assistant",
+            "natural_language": "user",
+            "voice_clone": "audio.voice",
+        },
+    },
+    STEPAUDIO_25_TTS_MODEL: {
+        "model_family": "stepaudio",
+        "style_control_modes": ["global_context", "inline_context", "natural_language"],
+        "preferred_style_control_mode": "global_context",
+        "supports_voice_description": True,
+        "supports_director_mode": False,
+        "supports_audio_tags": False,
+        "supports_emotion_mixing": True,
+        "supports_micro_tags": True,
+        "supports_word_level_control": True,
+        "supports_singing": False,
+        "supports_streaming": True,
+        "has_system_voices": True,
+        "requires_custom_voice": False,
+        "supports_voice_clone": True,
+        "supports_voice_design": False,
+        "supports_voice_tuning": True,
+        "instruction_budget": 200,
+        "max_input_chars": 1000,
+        "control_message_roles": {
+            "global_context": "parameters.instruction",
+            "inline_context": "input.parentheses",
+            "natural_language": "parameters.instruction",
+        },
+    },
+    SEED_TTS_20_EXPRESSIVE_MODEL: {
+        "model_family": "doubao",
+        "style_control_modes": ["query_response", "audio_tags", "natural_language"],
+        "preferred_style_control_mode": "query_response",
+        "supports_voice_description": True,
+        "supports_director_mode": False,
+        "supports_audio_tags": True,
+        "supports_emotion_mixing": True,
+        "supports_micro_tags": True,
+        "supports_word_level_control": True,
+        "supports_singing": False,
+        "supports_streaming": True,
+        "has_system_voices": True,
+        "requires_custom_voice": False,
+        "supports_voice_clone": True,
+        "supports_voice_design": False,
+        "supports_voice_tuning": True,
+        "instruction_budget": None,
+        "control_message_roles": {
+            "query_response": "additions.context_texts",
+            "audio_tags": "req_params.text + req_params.use_tag_parser",
+            "natural_language": "additions.context_texts",
+        },
+    },
 }
 
 AUDIOBOOK_TTS_MODEL_CATALOG: Final[dict[str, dict[str, Any]]] = {
@@ -100,6 +290,99 @@ AUDIOBOOK_TTS_MODEL_CATALOG: Final[dict[str, dict[str, Any]]] = {
             "supports_voice_tuning": False,
         },
     },
+    MIMO_V25_TTS_MODEL: {
+        "name": "MiMo V2.5 TTS",
+        "description": "小米 MiMo 预置音色语音合成模型，{voice_count} 个官方精品音色，支持导演模式、音频标签和唱歌模式",
+        "catalog_note": "仅使用官方预置音色；支持自然语言风格指令、导演模式、音频标签和低延迟流式输出。",
+        "price_per_10k": 3.0,
+        "cost_level": "medium",
+        "quality_level": "high",
+        "priority": 2,
+        "features": ("{voice_count} 音色", "导演模式", "音频标签", "唱歌模式", "低延迟流式"),
+        "capabilities": {
+            "has_system_voices": True,
+            "requires_custom_voice": False,
+            "supports_voice_clone": False,
+            "supports_voice_design": False,
+            "supports_voice_tuning": True,
+            "supports_singing": True,
+            "supports_streaming": True,
+        },
+    },
+    MIMO_V25_TTS_VOICE_DESIGN_MODEL: {
+        "name": "MiMo V2.5 TTS Voice Design",
+        "description": "小米 MiMo 文本音色设计模型，通过 user 消息中的声音描述生成定制音色",
+        "catalog_note": "不提供预置音色；需要传入高质量 voice_description 作为 user 消息，适合为有声小说角色临时设计声线。",
+        "price_per_10k": 6.0,
+        "cost_level": "medium",
+        "quality_level": "high",
+        "priority": 2,
+        "features": ("文本音色设计", "自然语言风格融合", "复合情绪", "无预置音色"),
+        "capabilities": {
+            "has_system_voices": False,
+            "requires_custom_voice": True,
+            "supports_voice_clone": False,
+            "supports_voice_design": True,
+            "supports_voice_tuning": True,
+            "supports_singing": False,
+            "supports_streaming": False,
+        },
+    },
+    MIMO_V25_TTS_VOICE_CLONE_MODEL: {
+        "name": "MiMo V2.5 TTS Voice Clone",
+        "description": "小米 MiMo 音频样本复刻模型，通过 audio.voice 传入 base64 音频样本",
+        "catalog_note": "不提供预置音色；audio.voice 必须是 data:{MIME_TYPE};base64,$BASE64_AUDIO，样本 base64 不超过 10 MB。",
+        "price_per_10k": 3.0,
+        "cost_level": "low",
+        "quality_level": "medium_high",
+        "priority": 4,
+        "features": ("音色复刻", "导演模式", "音频标签", "样本不超过 10 MB"),
+        "capabilities": {
+            "has_system_voices": False,
+            "requires_custom_voice": True,
+            "supports_voice_clone": True,
+            "supports_voice_design": False,
+            "supports_voice_tuning": True,
+            "supports_singing": False,
+            "supports_streaming": False,
+        },
+    },
+    STEPAUDIO_25_TTS_MODEL: {
+        "name": "StepAudio 2.5 TTS",
+        "description": "Contextual TTS，{voice_count} 个可用音色，支持全局语境 instruction、文中语境括号控制与 Zero-shot 音色复刻",
+        "catalog_note": "Global Context 定调整段基调，Inline Context 用圆括号逐句控制情绪、停顿和气息；单次输入 1000 字符，instruction 200 字符。",
+        "price_per_10k": 5.8,
+        "cost_level": "medium",
+        "quality_level": "premium",
+        "priority": 2,
+        "features": ("Contextual TTS", "全局语境", "文中语境", "Zero-shot 音色复刻", "1000 字符"),
+        "capabilities": {
+            "has_system_voices": True,
+            "requires_custom_voice": False,
+            "supports_voice_clone": True,
+            "supports_voice_design": False,
+            "supports_voice_tuning": True,
+            "supports_streaming": True,
+        },
+    },
+    SEED_TTS_20_EXPRESSIVE_MODEL: {
+        "name": "Doubao Seed-TTS 2.0 Expressive",
+        "description": "豆包语音合成 2.0 高表现力版，{voice_count} 个可用音色，支持 Query-Response 对话式TTS和文本指令控制",
+        "catalog_note": "适合有声小说、AI 交互、内容生产和企业客服，可通过上下文指令控制语速、情绪、声线和风格。",
+        "price_per_10k": 5.0,
+        "cost_level": "medium",
+        "quality_level": "premium",
+        "priority": 2,
+        "features": ("对话式TTS", "情感演绎", "文本指令控制", "{voice_count} 音色"),
+        "capabilities": {
+            "has_system_voices": True,
+            "requires_custom_voice": False,
+            "supports_voice_clone": True,
+            "supports_voice_design": False,
+            "supports_voice_tuning": True,
+            "supports_streaming": True,
+        },
+    },
 }
 
 _AUDIOBOOK_TTS_MODEL_ALIASES: Final[dict[str, str]] = {
@@ -119,6 +402,27 @@ _AUDIOBOOK_TTS_MODEL_ALIASES: Final[dict[str, str]] = {
     "minimax/speech-2.8-hd": MINIMAX_SPEECH_28_HD_MODEL,
     "minimax/speech-2.8-turbo": MINIMAX_SPEECH_28_TURBO_MODEL,
     "minimax/speech-2.8": MINIMAX_SPEECH_28_HD_MODEL,
+    "mimo-v2.5-tts": MIMO_V25_TTS_MODEL,
+    "mimo-v2.5-tts-voicedesign": MIMO_V25_TTS_VOICE_DESIGN_MODEL,
+    "mimo-v2.5-tts-voice-design": MIMO_V25_TTS_VOICE_DESIGN_MODEL,
+    "mimo/v2.5-tts-voicedesign": MIMO_V25_TTS_VOICE_DESIGN_MODEL,
+    "mimo/v2.5-tts-voice-design": MIMO_V25_TTS_VOICE_DESIGN_MODEL,
+    "mimo-v2.5-tts-voiceclone": MIMO_V25_TTS_VOICE_CLONE_MODEL,
+    "mimo-v2.5-tts-voice-clone": MIMO_V25_TTS_VOICE_CLONE_MODEL,
+    "mimo/v2.5-tts-voiceclone": MIMO_V25_TTS_VOICE_CLONE_MODEL,
+    "mimo/v2.5-tts-voice-clone": MIMO_V25_TTS_VOICE_CLONE_MODEL,
+    "mimo/v2.5-tts": MIMO_V25_TTS_MODEL,
+    "stepaudio-2.5-tts": STEPAUDIO_25_TTS_MODEL,
+    "stepaudio_2_5_tts": STEPAUDIO_25_TTS_MODEL,
+    "stepaudio25tts": STEPAUDIO_25_TTS_MODEL,
+    "stepfun/stepaudio-2.5-tts": STEPAUDIO_25_TTS_MODEL,
+    "stepfun/stepaudio_2_5_tts": STEPAUDIO_25_TTS_MODEL,
+    "seed-tts-2.0-expressive": SEED_TTS_20_EXPRESSIVE_MODEL,
+    "seed_tts_2_0_expressive": SEED_TTS_20_EXPRESSIVE_MODEL,
+    "doubao/seed-tts-2.0-expressive": SEED_TTS_20_EXPRESSIVE_MODEL,
+    "doubao/seed_tts_2_0_expressive": SEED_TTS_20_EXPRESSIVE_MODEL,
+    "doubao-tts-2.0-expressive": SEED_TTS_20_EXPRESSIVE_MODEL,
+    "doubao-语音合成-2.0": SEED_TTS_20_EXPRESSIVE_MODEL,
 }
 
 
@@ -148,6 +452,30 @@ def normalize_audiobook_tts_model(model: Any, *, default: str = DEFAULT_AUDIOBOO
         return MINIMAX_SPEECH_28_HD_MODEL
     if lowered.startswith("qwen3-tts"):
         return DEFAULT_AUDIOBOOK_TTS_MODEL
+    if lowered.startswith("stepfun/stepaudio-2.5-tts") or lowered.startswith("stepaudio-2.5-tts"):
+        return STEPAUDIO_25_TTS_MODEL
+    if lowered.startswith("stepfun/stepaudio_2_5_tts") or lowered.startswith("stepaudio_2_5_tts"):
+        return STEPAUDIO_25_TTS_MODEL
+    if (
+        lowered.startswith("doubao/seed-tts-2.0-expressive")
+        or lowered.startswith("doubao/seed_tts_2_0_expressive")
+        or lowered.startswith("doubao-tts-2.0-expressive")
+        or lowered.startswith("seed-tts-2.0-expressive")
+        or lowered.startswith("seed_tts_2_0_expressive")
+    ):
+        return SEED_TTS_20_EXPRESSIVE_MODEL
+    if lowered.startswith("mimo-v2.5-tts-voicedesign") or lowered.startswith("mimo/v2.5-tts-voicedesign"):
+        return MIMO_V25_TTS_VOICE_DESIGN_MODEL
+    if lowered.startswith("mimo-v2.5-tts-voice-design") or lowered.startswith("mimo/v2.5-tts-voice-design"):
+        return MIMO_V25_TTS_VOICE_DESIGN_MODEL
+    if lowered.startswith("mimo-v2.5-tts-voiceclone") or lowered.startswith("mimo/v2.5-tts-voiceclone"):
+        return MIMO_V25_TTS_VOICE_CLONE_MODEL
+    if lowered.startswith("mimo-v2.5-tts-voice-clone") or lowered.startswith("mimo/v2.5-tts-voice-clone"):
+        return MIMO_V25_TTS_VOICE_CLONE_MODEL
+    if lowered.startswith("mimo-v2.5-tts-") or lowered.startswith("mimo/v2.5-tts-"):
+        return default
+    if lowered.startswith("mimo-v2.5-tts") or lowered.startswith("mimo/v2.5-tts"):
+        return MIMO_V25_TTS_MODEL
 
     return default
 
@@ -167,13 +495,23 @@ def get_audiobook_tts_runtime_model_id(model: Any) -> str:
     return AUDIOBOOK_TTS_RUNTIME_MODEL_IDS.get(normalized, normalize_model_id(normalized) or normalized)
 
 
+def get_audiobook_tts_style_capabilities(model: Any) -> dict[str, Any]:
+    normalized = normalize_audiobook_tts_model(model, default="")
+    capabilities = deepcopy(GENERIC_AUDIOBOOK_TTS_STYLE_CAPABILITIES)
+    capabilities.update(deepcopy(AUDIOBOOK_TTS_STYLE_CAPABILITIES.get(normalized, {})))
+    return capabilities
+
+
 def get_audiobook_tts_model_metadata(model: Any) -> dict[str, Any]:
     normalized = normalize_audiobook_tts_model(model, default="")
     if normalized not in AUDIOBOOK_TTS_MODEL_CATALOG:
         return {}
-    metadata = dict(AUDIOBOOK_TTS_MODEL_CATALOG[normalized])
+    metadata = deepcopy(AUDIOBOOK_TTS_MODEL_CATALOG[normalized])
     metadata["id"] = normalized
     metadata["features"] = list(metadata.get("features") or [])
+    capabilities = dict(metadata.get("capabilities") or {})
+    capabilities.update(get_audiobook_tts_style_capabilities(normalized))
+    metadata["capabilities"] = capabilities
     return metadata
 
 

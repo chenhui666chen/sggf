@@ -1,9 +1,7 @@
 import { Chip, Tooltip } from '@mui/material'
-import {
-  Wifi as ConnectedIcon,
-  WifiOff as DisconnectedIcon,
-  Sync as ReconnectingIcon,
-} from '@mui/icons-material'
+import SyncIcon from '@mui/icons-material/Sync'
+import WifiIcon from '@mui/icons-material/Wifi'
+import WifiOffIcon from '@mui/icons-material/WifiOff'
 
 interface WebSocketStatusProps {
   isConnected: boolean
@@ -19,7 +17,7 @@ export function WebSocketStatus({
   const getStatusDisplay = () => {
     if (isConnected) {
       return {
-        icon: <ConnectedIcon sx={{ fontSize: 16 }} />,
+        icon: <WifiIcon sx={{ fontSize: 16 }} />,
         label: '已连接',
         color: 'success' as const,
         tooltip: 'WebSocket 连接正常',
@@ -27,14 +25,14 @@ export function WebSocketStatus({
     }
     if (isReconnecting) {
       return {
-        icon: <ReconnectingIcon sx={{ fontSize: 16, animation: 'spin 1s linear infinite', '@keyframes spin': { '0%': { transform: 'rotate(0deg)' }, '100%': { transform: 'rotate(360deg)' } } }} />,
+        icon: <SyncIcon sx={{ fontSize: 16, animation: 'spin 1s linear infinite', '@keyframes spin': { '0%': { transform: 'rotate(0deg)' }, '100%': { transform: 'rotate(360deg)' } } }} />,
         label: `重连中(${reconnectAttempts})`,
         color: 'warning' as const,
         tooltip: `正在尝试重新连接 (${reconnectAttempts}/5)`,
       }
     }
     return {
-      icon: <DisconnectedIcon sx={{ fontSize: 16 }} />,
+      icon: <WifiOffIcon sx={{ fontSize: 16 }} />,
       label: '已断开',
       color: 'error' as const,
       tooltip: 'WebSocket 连接已断开',

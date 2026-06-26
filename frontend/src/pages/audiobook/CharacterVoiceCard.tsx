@@ -4,6 +4,7 @@ import {
   Chip,
   CircularProgress,
   ListItem,
+  TextField,
   Tooltip,
   Typography,
 } from '@mui/material'
@@ -11,15 +12,14 @@ import {
 import {
   CharacterVoiceModelSelect,
   CharacterVoicePresetSelect,
-  CharacterVoiceTraitControls,
-  CharacterVoiceTuningControls,
   getCharacterModelChipColor,
 } from './CharacterVoiceCardControls'
 import { audiobookColors } from './audiobookTheme'
 import {
+  getTtsStyleControlLabels,
   getTtsModelLabel,
+  modelUsesInlineCustomVoiceInput,
   modelRequiresCustomVoice,
-  modelSupportsVoiceTuning,
 } from './ttsModels'
 import type { TtsModelOption } from './ttsModels'
 import type {
@@ -30,51 +30,45 @@ import type {
 
 interface CharacterVoiceCardProps {
   characterVoice: CharacterVoiceSetting
-  supportsTtsTuning: boolean
   projectTtsModel: TtsModel
   voiceLoading: boolean
   currentVoicePresets: VoicePreset[]
   voicePresetsByModel: Record<TtsModel, VoicePreset[]>
   ttsModelOptions: readonly TtsModelOption[]
   isPreviewing: boolean
-  isRecommendingVoiceType: boolean
   onVoiceChange: (characterId: number, voiceId: string) => void
   onTtsModelChangeForCharacter: (characterId: number, nextModel: TtsModel | 'inherit') => void
-  onVoiceTypeChange: (characterId: number, voiceType: string) => void
-  onPersonalityChange: (characterId: number, personality: string) => void
-  onEmotionTendencyChange: (characterId: number, emotionTendency: string) => void
-  onRecommendVoiceType: (characterVoice: CharacterVoiceSetting) => void
-  onVolumeChange: (characterId: number, volume: number) => void
-  onSpeedChange: (characterId: number, speed: number) => void
-  onPitchChange: (characterId: number, pitch: number) => void
+  onVoiceCloneDataUrlChange: (characterId: number, voiceCloneDataUrl: string) => void
   onPreviewCharacterVoice: (characterVoice: CharacterVoiceSetting) => void
 }
 
 const CharacterVoiceCard = ({
   characterVoice,
-  supportsTtsTuning,
   projectTtsModel,
   voiceLoading,
   currentVoicePresets,
   voicePresetsByModel,
   ttsModelOptions,
   isPreviewing,
-  isRecommendingVoiceType,
   onVoiceChange,
   onTtsModelChangeForCharacter,
-  onVoiceTypeChange,
-  onPersonalityChange,
-  onEmotionTendencyChange,
-  onRecommendVoiceType,
-  onVolumeChange,
-  onSpeedChange,
-  onPitchChange,
+  onVoiceCloneDataUrlChange,
   onPreviewCharacterVoice,
 }: CharacterVoiceCardProps) => {
   const effectiveTtsModel = characterVoice.ttsModel || projectTtsModel
   const effectiveVoicePresets = voicePresetsByModel[effectiveTtsModel] || currentVoicePresets
-  const supportsEffectiveTuning = modelSupportsVoiceTuning(effectiveTtsModel, ttsModelOptions)
   const effectiveModelRequiresCustomVoice = modelRequiresCustomVoice(effectiveTtsModel, ttsModelOptions)
+  const usesInlineCustomVoiceInput = modelUsesInlineCustomVoiceInput(effectiveTtsModel, ttsModelOptions)
+  const styleControlLabels = getTtsStyleControlLabels(effectiveTtsModel, ttsModelOptions)
+  const hasInlineCustomVoiceInput = Boolean(characterVoice.voiceCloneDataUrl?.trim())
+  const hasReusableMimoVoiceAsset = Boolean(characterVoice.mimoVoiceAssetId?.trim())
+  const hasReusableStepAudioVoiceAsset = Boolean(characterVoice.stepaudioVoiceAssetId?.trim())
+  const canPreview = Boolean(
+    characterVoice.voiceId
+    || hasInlineCustomVoiceInput
+    || hasReusableMimoVoiceAsset
+    || hasReusableStepAudioVoiceAsset,
+  )
 
   return (
     <ListItem
@@ -138,7 +132,7 @@ const CharacterVoiceCard = ({
                 sx={{ height: 18, fontSize: '0.65rem' }}
               />
             )}
-            {characterVoice.voiceId && (
+            {(characterVoice.voiceId || hasInlineCustomVoiceInput || hasReusableMimoVoiceAsset || hasReusableStepAudioVoiceAsset) && (
               <Chip
                 label="已配置"
                 size="small"
@@ -150,14 +144,39 @@ const CharacterVoiceCard = ({
         </Box>
 
         <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: 'minmax(0, 1fr) 180px' }, gap: 1, mb: 1 }}>
-          <CharacterVoicePresetSelect
-            characterId={characterVoice.characterId}
-            value={characterVoice.voiceId}
-            requiresCustomVoice={effectiveModelRequiresCustomVoice}
-            voiceLoading={voiceLoading}
-            currentVoicePresets={effectiveVoicePresets}
-            onVoiceChange={onVoiceChange}
-          />
+          {usesInlineCustomVoiceInput ? (
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+              <CharacterVoicePresetSelect
+                characterId={characterVoice.characterId}
+                value={characterVoice.voiceId}
+                requiresCustomVoice={effectiveModelRequiresCustomVoice}
+                voiceLoading={voiceLoading}
+                currentVoicePresets={effectiveVoicePresets}
+                onVoiceChange={onVoiceChange}
+              />
+              {effectiveTtsModel === 'mimo-v2.5-tts-voiceclone' && (
+                <TextField
+                  label="audio.voice 样本"
+                  value={characterVoice.voiceCloneDataUrl || ''}
+                  onChange={(event) => onVoiceCloneDataUrlChange(characterVoice.characterId, event.target.value)}
+                  placeholder="data:audio/mpeg;base64,... 或 data:audio/wav;base64,..."
+                  size="small"
+                  fullWidth
+                  multiline
+                  minRows={2}
+                />
+              )}
+            </Box>
+          ) : (
+            <CharacterVoicePresetSelect
+              characterId={characterVoice.characterId}
+              value={characterVoice.voiceId}
+              requiresCustomVoice={effectiveModelRequiresCustomVoice}
+              voiceLoading={voiceLoading}
+              currentVoicePresets={effectiveVoicePresets}
+              onVoiceChange={onVoiceChange}
+            />
+          )}
           <CharacterVoiceModelSelect
             characterId={characterVoice.characterId}
             value={characterVoice.ttsModel}
@@ -167,22 +186,34 @@ const CharacterVoiceCard = ({
           />
         </Box>
 
-        <CharacterVoiceTraitControls
-          characterVoice={characterVoice}
-          onVoiceTypeChange={onVoiceTypeChange}
-          onPersonalityChange={onPersonalityChange}
-          onEmotionTendencyChange={onEmotionTendencyChange}
-          onRecommendVoiceType={onRecommendVoiceType}
-          isRecommendingVoiceType={isRecommendingVoiceType}
-        />
-
-        {(supportsTtsTuning || supportsEffectiveTuning) && (
-          <CharacterVoiceTuningControls
-            characterVoice={characterVoice}
-            onVolumeChange={onVolumeChange}
-            onSpeedChange={onSpeedChange}
-            onPitchChange={onPitchChange}
-          />
+        {styleControlLabels.length > 0 && (
+          <Box
+            sx={{
+              mb: 1,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 0.75,
+              flexWrap: 'wrap',
+            }}
+          >
+            <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600 }}>
+              控制方式
+            </Typography>
+            {styleControlLabels.map((label) => (
+              <Chip
+                key={label}
+                label={label}
+                size="small"
+                variant="outlined"
+                sx={{
+                  height: 20,
+                  fontSize: '0.68rem',
+                  borderColor: audiobookColors.surfaceBorder,
+                  backgroundColor: 'rgba(255,255,255,0.72)',
+                }}
+              />
+            ))}
+          </Box>
         )}
 
         <Box sx={{ mt: 1, display: 'flex', justifyContent: 'flex-end' }}>
@@ -192,7 +223,7 @@ const CharacterVoiceCard = ({
                 size="small"
                 variant="outlined"
                 onClick={() => onPreviewCharacterVoice(characterVoice)}
-                disabled={!characterVoice.voiceId || isPreviewing}
+                disabled={!canPreview || isPreviewing}
                 startIcon={isPreviewing ? <CircularProgress size={16} color="inherit" /> : undefined}
               >
                 {isPreviewing ? '试听中...' : '试听'}

@@ -81,8 +81,7 @@ class StoryExpansionCoordinatorBase:
     EPIC_MAX_VOLUMES = 50
     EPIC_DEFAULT_CHAPTERS_PER_VOLUME = 30
     STORY_EXPANSION_MODEL_CANDIDATES = (
-        "qwen3.5-plus",
-        "qwen3.6-plus",
+        "qwen3.7-plus",
         "deepseek-v4-pro",
     )
     STORY_EXPANSION_MIN_CONTEXT_TOKENS = 1_000_000

@@ -178,13 +178,13 @@ class EstimationMixin:
         volume_detail_config: Optional[Dict[str, Any]] = None,
     ) -> str:
         if execution_mode == "epic":
-            return self._estimate_stage_model("concept", "qwen3.5-plus")
+            return self._estimate_stage_model("concept", "qwen3.7-plus")
         if execution_mode == "volume_detail":
             chapter_range = None
             if isinstance(volume_detail_config, dict):
                 chapter_range = volume_detail_config.get("chapters_count_range")
             return self._estimate_volume_detail_outline_model(chapter_range)
-        return self._estimate_context_model("outline_expand", target_chapter_count, "qwen3.5-plus")
+        return self._estimate_context_model("outline_expand", target_chapter_count, "qwen3.7-plus")
 
     def _estimate_character_model_for_plan(self, target_character_count: int) -> str:
         return self._estimate_context_model("character_expand", target_character_count, "deepseek-v4-pro")

@@ -1,4 +1,4 @@
-﻿"""Workflow API module."""
+"""Workflow API module."""
 import logging
 import asyncio
 from fastapi import APIRouter, Depends, HTTPException, status, Body, BackgroundTasks
@@ -119,7 +119,24 @@ async def generate_next_chapter(
         # 计算下一章编号
         next_chapter_number = len(existing_chapters) + 1
         logger.info(f"   ✓ 当前已有 {len(existing_chapters)} 章，即将生成第 {next_chapter_number} 章")
-        
+
+        # 🆕 当所有章节都被删除时（连第一章都不存在），重置工作流章节相关阶段状态与草稿
+        # 保留 concept/structure 阶段（项目设定与总大纲），仅清空章节草稿与评审/迭代产物
+        # 这样前端会从"章节规划"步骤开始重新生成第 1 章
+        if not existing_chapters:
+            logger.info(f"   🔄 检测到项目无任何章节，重置章节草稿与阶段状态...")
+            WorkflowContextBuilder(db).update_project_settings_fields(
+                project_id,
+                chapter_draft=None,
+                review_report=None,
+                final_version=None,
+                stage_three_status="pending",
+                stage_four_status="pending",
+                stage_five_status="pending",
+            )
+            db.commit()
+            logger.info(f"   ✅ 已重置章节草稿与阶段状态，将从第1章章节规划开始重新生成")
+
         # 4. 提取前一章结尾（用于衔接）
         previous_ending = ""
         if existing_chapters:

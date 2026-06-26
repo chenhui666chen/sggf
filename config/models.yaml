@@ -1,4 +1,4 @@
-﻿models:
+models:
 - id: wan2.6-t2i
   name: Wan 2.6 Text-to-Image
   provider: alibaba
@@ -1788,7 +1788,8 @@
   - 当提供商返回时间戳信息时，系统会原样保留
   documentation_url: https://help.aliyun.com/zh/model-studio/qwen-tts
   source_urls:
-  - https://help.aliyun.com/zh/model-studio/text-to-speech
+  - https://help.aliyun.com/zh/model-studio/qwen-tts-api
+  - https://help.aliyun.com/zh/model-studio/qwen-tts-voice-list
   - https://help.aliyun.com/zh/model-studio/models
   tags:
   - audio
@@ -1800,67 +1801,130 @@
   detailed_specs:
     voice_synthesis:
       voice_catalog:
-        description: 预设音色库，适合标准朗读场景，可结合 instructions 做自然语言演绎控制
+        description: 预设音色库，适合标准朗读场景，可结合 instructions 做自然语言演绎控制。此处仅列出 qwen3-tts-instruct-flash 支持的官方 voice 参数。
+        supported_languages:
+        - 中文（普通话）
+        - 英语
+        - 法语
+        - 德语
+        - 俄语
+        - 意大利语
+        - 西班牙语
+        - 葡萄牙语
+        - 日语
+        - 韩语
         categories:
-        - name: 标准女声
+        - name: 女性音色
           voices:
-          - id: zhitian
-            name: 知甜
+          - id: Cherry
+            name: 芊悦
             gender: female
-            description: 甜美女声，适合有声书
-            recommended_scenarios:
-            - 有声书
-            - 广播剧
-            - 儿童故事
-          - id: zhiyan
-            name: 知燕
+            description: 阳光积极、亲切自然小姐姐
+          - id: Serena
+            name: 苏瑶
             gender: female
-            description: 温柔女声，适合情感内容
-            recommended_scenarios:
-            - 睡前故事
-            - 情感内容
-            - 散文朗读
-          - id: zhiyue
-            name: 知悦
+            description: 温柔小姐姐
+          - id: Chelsie
+            name: 千雪
             gender: female
-            description: 活泼女声，适合轻松内容
-            recommended_scenarios:
-            - 娱乐内容
-            - 轻松对话
-        - name: 标准男声
+            description: 二次元虚拟女友
+          - id: Momo
+            name: 茉兔
+            gender: female
+            description: 撒娇搞怪，逗你开心
+          - id: Vivian
+            name: 十三
+            gender: female
+            description: 拽拽的、可爱的小暴躁
+          - id: Maia
+            name: 四月
+            gender: female
+            description: 知性与温柔的碰撞
+          - id: Bella
+            name: 萌宝
+            gender: female
+            description: 喝酒不打醉拳的小萝莉
+          - id: Mia
+            name: 乖小妹
+            gender: female
+            description: 温顺如春水，乖巧如初雪
+          - id: Bellona
+            name: 燕铮莺
+            gender: female
+            description: 声音洪亮，吐字清晰，人物鲜活，听得人热血沸腾；金戈铁马入梦来，字正腔圆间尽显千面人声的江湖
+          - id: Bunny
+            name: 萌小姬
+            gender: female
+            description: “萌属性”爆棚的小萝莉
+          - id: Elias
+            name: 墨讲师
+            gender: female
+            description: 既保持学科严谨性，又通过叙事技巧将复杂知识转化为可消化的认知模块
+          - id: Nini
+            name: 邻家妹妹
+            gender: female
+            description: 糯米糍一样又软又黏的嗓音，那一声声拉长了的“哥哥”，甜得能把人的骨头都叫酥了
+          - id: Seren
+            name: 小婉
+            gender: female
+            description: 温和舒缓的声线，助你更快地进入睡眠，晚安，好梦
+          - id: Stella
+            name: 少女阿月
+            gender: female
+            description: 平时是甜到发腻的迷糊少女音，但在喊出“代表月亮消灭你”时，瞬间充满不容置疑的爱与正义
+        - name: 男性音色
           voices:
-          - id: zhixiang
-            name: 知翔
+          - id: Ethan
+            name: 晨煦
             gender: male
-            description: 磁性男声，适合有声书
-            recommended_scenarios:
-            - 有声书
-            - 纪录片解说
-            - 企业宣传
-          - id: zhida
-            name: 知达
+            description: 标准普通话，带部分北方口音。阳光、温暖、活力、朝气
+          - id: Moon
+            name: 月白
             gender: male
-            description: 稳重男声，适合商务内容
-            recommended_scenarios:
-            - 企业宣传
-            - 教育内容
-            - 新闻播报
-          - id: zhifan
-            name: 知凡
+            description: 率性帅气的月白
+          - id: Kai
+            name: 凯
             gender: male
-            description: 年轻男声，适合青春内容
-            recommended_scenarios:
-            - 青春小说
-            - 校园故事
-        total_count: 12
-        update_note: 音色库持续更新，以官方文档为准
+            description: 耳朵的一场SPA
+          - id: Nofish
+            name: 不吃鱼
+            gender: male
+            description: 不会翘舌音的设计师
+          - id: Eldric Sage
+            name: 沧明子
+            gender: male
+            description: 沉稳睿智的老者，沧桑如松却心明如镜
+          - id: Mochi
+            name: 沙小弥
+            gender: male
+            description: 聪明伶俐的小大人，童真未泯却早慧如禅
+          - id: Vincent
+            name: 田叔
+            gender: male
+            description: 一口独特的沙哑烟嗓，一开口便道尽了千军万马与江湖豪情
+          - id: Neil
+            name: 阿闻
+            gender: male
+            description: 平直的基线语调，字正腔圆的咬字发音，这就是最专业的新闻主持人
+          - id: Arthur
+            name: 徐大爷
+            gender: male
+            description: 被岁月和旱烟浸泡过的质朴嗓音，不疾不徐地摇开了满村的奇闻异事
+          - id: Pip
+            name: 顽屁小孩
+            gender: male
+            description: 调皮捣蛋却充满童真的他来了，这是你记忆中的小新吗
+        total_count: 24
+        update_note: 音色库以 Qwen-TTS 官方音色列表为准；Flash-only 音色不作为 qwen3-tts-instruct-flash 的可选 voice。
       calling_method:
-        param_name: speaker
-        format: voice_id
+        param_name: voice
+        format: official_voice_id
         required: true
-        example: "# Python 调用示例\nfrom core.unified_media_runtime import media_runtime\n\
-          \naudio_bytes = await media_runtime.synthesize_speech(\n    model_id=\"\
-          qwen3-tts-instruct-flash\",\n    text=\"这是测试文本\",\n    speaker=\"zhitian\"\n)\n"
+        example: "# DashScope Python SDK 调用示例\nimport os\nimport dashscope\n\nresponse\
+          \ = dashscope.MultiModalConversation.call(\n    model=\"qwen3-tts-instruct-flash\"\
+          ,\n    api_key=os.getenv(\"DASHSCOPE_API_KEY\"),\n    text=\"这是测试文本\"\
+          ,\n    voice=\"Cherry\",\n    language_type=\"Chinese\",\n    instructions=\"\
+          用温和但克制的旁白语气讲述。\",\n    optimize_instructions=True,\n)\n"
       comparison_with_cosyvoice:
         instruct_support: true
         voice_clone_support: false
@@ -1886,16 +1950,17 @@
       usage_examples:
         python:
         - name: 基础语音合成
-          code: "from core.unified_media_runtime import media_runtime\n\naudio_bytes\
-            \ = await media_runtime.synthesize_speech(\n    model_id=\"qwen3-tts-instruct-flash\"\
-            ,\n    text=\"欢迎收听本期节目，今天我们要聊的是人工智能的发展历程。\",\n    speaker=\"zhitian\"\n\
-            )\n"
+          code: "import os\nimport dashscope\n\nresponse = dashscope.MultiModalConversation.call(\n\
+            \    model=\"qwen3-tts-instruct-flash\",\n    api_key=os.getenv(\"DASHSCOPE_API_KEY\"\
+            ),\n    text=\"欢迎收听本期节目，今天我们要聊的是人工智能的发展历程。\",\n    voice=\"Cherry\"\
+            ,\n    language_type=\"Chinese\",\n)\n"
         - name: 批量章节合成
-          code: "chapters = [\"第一章内容...\", \"第二章内容...\", \"第三章内容...\"]\n\nfor i, chapter\
-            \ in enumerate(chapters):\n    audio = await media_runtime.synthesize_speech(\n\
-            \        model_id=\"qwen3-tts-instruct-flash\",\n        text=chapter,\n      \
-            \  speaker=\"zhixiang\"\n    )\n    save_audio(f\"chapter_{i+1}.mp3\"\
-            , audio)\n"
+          code: "import os\nimport dashscope\n\nchapters = [\"第一章内容...\", \"第二章内容...\"\
+            , \"第三章内容...\"]\n\nfor chapter in chapters:\n    response = dashscope.MultiModalConversation.call(\n\
+            \        model=\"qwen3-tts-instruct-flash\",\n        api_key=os.getenv(\"\
+            DASHSCOPE_API_KEY\"),\n        text=chapter,\n        voice=\"Neil\"\
+            ,\n        language_type=\"Chinese\",\n        instructions=\"用沉稳、清晰的有声书旁白语气朗读。\"\
+            ,\n        optimize_instructions=True,\n    )\n"
 - id: cosyvoice-v3.5-plus
   name: CosyVoice v3.5 Plus
   provider: alibaba
@@ -2076,6 +2141,608 @@
         phoneme_timestamps:
           enabled: true
           description: 返回音素级别时间戳
+- id: mimo-v2.5-tts
+  name: MiMo V2.5 TTS
+  provider: mimo
+  version: v2.5
+  status: active
+  modality:
+  - text_to_speech
+  - text_to_audio
+  capabilities:
+  - name: speech_synthesis
+    support_level: native
+    description: 使用预置精品音色进行语音合成
+    source: xiaomi_mimo_v2_5_tts_docs
+    verified_at: '2026-06-24'
+    confidence: medium
+  - name: director_style_control
+    support_level: native
+    description: 支持角色、场景、指导三段式导演模式
+    source: xiaomi_mimo_v2_5_tts_docs
+    verified_at: '2026-06-24'
+    confidence: medium
+  - name: audio_tag_control
+    support_level: native
+    description: 支持整体风格标签与文本内细粒度音频标签
+    source: xiaomi_mimo_v2_5_tts_docs
+    verified_at: '2026-06-24'
+    confidence: medium
+  - name: singing_mode
+    support_level: native
+    description: 支持唱歌模式，需在文本开头添加唱歌标签
+    source: xiaomi_mimo_v2_5_tts_docs
+    verified_at: '2026-06-24'
+    confidence: medium
+  api_config:
+    base_url: https://api.xiaomimimo.com/v1
+    endpoint: /chat/completions
+    api_key_env: MIMO_API_KEY
+    auth_type: api-key
+  constraints:
+    max_batch_size: 1
+    stream_audio_format: pcm16
+    non_stream_audio_formats:
+    - wav
+    - mp3
+  quality_metrics:
+    overall_score: 0.0
+  avg_latency_seconds: 0.0
+  summary: 小米 MiMo-V2.5-TTS 预置音色语音合成模型，官方资料确认支持自然语言风格指令、导演模式、音频标签、唱歌模式和低延迟流式输出；项目已接入 payload 构建，真实接口仍待使用 MIMO_API_KEY 端到端验证。
+  recommended_scenarios:
+  - 有声小说角色对白导演模式
+  - 复合情绪朗读控制
+  - 音频标签控制片段
+  - 唱歌或歌词式试听
+  limitations:
+  - 不支持音色设计与音色复刻
+  - 真实接口尚未在当前环境用 MIMO_API_KEY 完成端到端验证
+  - 流式调用应使用 pcm16，非流式默认 wav
+  integration_notes:
+  - 目标合成文本放在 role=assistant 的消息中
+  - 自然语言控制放在 role=user 的 content 中
+  - 音频标签控制直接嵌入 role=assistant 的待合成文本
+  - audio.voice 使用官方预置音色 ID，默认 mimo_default
+  documentation_url: null
+  source_urls:
+  - user_attachment:58afdcd6-33f2-43bc-9a4c-d41f496ca72c/pasted-text.txt
+  tags:
+  - audio
+  - tts
+  - mimo
+  - audiobook
+  - pending-runtime-validation
+  - director-mode
+  - audio-tags
+  - singing
+  detailed_specs:
+    voice_synthesis:
+      voice_catalog:
+        categories:
+        - name: 官方预置音色
+          voices:
+          - id: mimo_default
+            name: MiMo-默认
+            gender: neutral
+            languages:
+            - 中文
+            - 英文
+            description: 因部署集群而异，中国集群默认为冰糖，其他集群默认为 Mia。
+          - id: 冰糖
+            name: 冰糖
+            gender: female
+            languages:
+            - 中文
+            description: 中文女性预置音色。
+          - id: 茉莉
+            name: 茉莉
+            gender: female
+            languages:
+            - 中文
+            description: 中文女性预置音色。
+          - id: 苏打
+            name: 苏打
+            gender: male
+            languages:
+            - 中文
+            description: 中文男性预置音色。
+          - id: 白桦
+            name: 白桦
+            gender: male
+            languages:
+            - 中文
+            description: 中文男性预置音色。
+          - id: Mia
+            name: Mia
+            gender: female
+            languages:
+            - 英文
+            description: 英文女性预置音色。
+          - id: Chloe
+            name: Chloe
+            gender: female
+            languages:
+            - 英文
+            description: 英文女性预置音色。
+          - id: Milo
+            name: Milo
+            gender: male
+            languages:
+            - 英文
+            description: 英文男性预置音色。
+          - id: Dean
+            name: Dean
+            gender: male
+            languages:
+            - 英文
+            description: 英文男性预置音色。
+        total_count: 9
+        update_note: 官方预置音色目录已接入；真实音频效果仍需人工试听校验。
+      calling_method:
+        param_name: audio.voice
+        format: official_preset_voice_id
+        required: true
+        default: mimo_default
+        example: 'audio={"format": "wav", "voice": "Chloe"}'
+      instruct_control:
+        enabled: true
+        param_name: messages
+        description: 自然语言控制放在 user content；音频标签控制放在 assistant content。导演模式推荐使用角色、场景、指导结构。
+        usage_tips:
+        - 导演模式适合影视级角色配音和复杂情绪朗读。
+        - 音频标签模式仅应在 MiMo 标签控制模式下生成，不要污染 Qwen、CosyVoice 或 MiniMax。
+        - 流式调用设置 stream=true 且 audio.format=pcm16。
+- id: mimo-v2.5-tts-voicedesign
+  name: MiMo V2.5 TTS Voice Design
+  provider: mimo
+  version: v2.5-voicedesign
+  status: active
+  modality:
+  - text_to_speech
+  - voice_design
+  capabilities:
+  - name: speech_synthesis
+    support_level: native
+    description: 通过文本描述定制音色并进行语音合成
+    source: xiaomi_mimo_v2_5_tts_docs
+    verified_at: '2026-06-24'
+    confidence: medium
+  - name: voice_design
+    support_level: native
+    description: user 消息中的文本作为音色设计描述
+    source: xiaomi_mimo_v2_5_tts_docs
+    verified_at: '2026-06-24'
+    confidence: medium
+  - name: voice_design_style_instruction
+    support_level: native
+    description: 风格、情绪和演绎要求应融合进 user 消息中的音色设计描述，不作为独立导演模式或音频标签使用
+    source: xiaomi_mimo_v2_5_tts_docs
+    verified_at: '2026-06-24'
+    confidence: medium
+  api_config:
+    base_url: https://api.xiaomimimo.com/v1
+    endpoint: /chat/completions
+    api_key_env: MIMO_API_KEY
+    auth_type: api-key
+  constraints:
+    max_batch_size: 1
+    stream_behavior: 兼容模式，仅在推理完成后以流式格式返回一次结果
+  quality_metrics:
+    overall_score: 0.0
+  avg_latency_seconds: 0.0
+  summary: 小米 MiMo-V2.5-TTS 文本音色设计模型，user 消息必填并作为 voice design prompt；不支持唱歌、预置音色或音色复刻，真实接口仍待 MIMO_API_KEY 端到端验证。
+  recommended_scenarios:
+  - 为有声小说角色按声音描述生成临时音色
+  - 精品角色对白试听
+  - 角色声线方向探索
+  limitations:
+  - 不支持唱歌模式、预置音色和音色复刻
+  - user 消息必填，内容应为具体的音色设计描述
+  - 低延迟流式暂未上线，仅兼容流式返回
+  - 真实接口尚未在当前环境用 MIMO_API_KEY 完成端到端验证
+  integration_notes:
+  - voice_description 应写入 role=user 的 content
+  - 合成目标文本仍放在 role=assistant 的 content
+  - audio 中不传预置 voice，可传 optimize_text_preview
+  documentation_url: null
+  source_urls:
+  - user_attachment:58afdcd6-33f2-43bc-9a4c-d41f496ca72c/pasted-text.txt
+  tags:
+  - audio
+  - tts
+  - mimo
+  - audiobook
+  - pending-runtime-validation
+  - voice-design
+  - voice-design-prompt
+  detailed_specs:
+    voice_synthesis:
+      voice_catalog:
+        categories: []
+        total_count: 0
+        update_note: 该模型不支持预置音色，需通过 user 消息进行音色设计。
+      calling_method:
+        param_name: messages.user.content
+        format: voice_design_prompt
+        required: true
+        example: 'messages=[{"role": "user", "content": "青年女性，中音偏低，语速缓慢，温柔但略带疲惫"}, {"role": "assistant", "content": "今晚的风很轻，我们慢慢说。"}]'
+      voice_design:
+        enabled: true
+        message_role: user
+        prompt_field: voice_description
+        optimize_text_preview_param: audio.optimize_text_preview
+- id: mimo-v2.5-tts-voiceclone
+  name: MiMo V2.5 TTS Voice Clone
+  provider: mimo
+  version: v2.5-voiceclone
+  status: active
+  modality:
+  - text_to_speech
+  - voice_clone
+  capabilities:
+  - name: speech_synthesis
+    support_level: native
+    description: 基于音频样本复刻任意音色并进行语音合成
+    source: xiaomi_mimo_v2_5_tts_docs
+    verified_at: '2026-06-24'
+    confidence: medium
+  - name: voice_clone
+    support_level: native
+    description: audio.voice 传入 data:{MIME_TYPE};base64,$BASE64_AUDIO
+    source: xiaomi_mimo_v2_5_tts_docs
+    verified_at: '2026-06-24'
+    confidence: medium
+  - name: audio_tag_control
+    support_level: native
+    description: 支持音频标签控制，适合快速预览复杂演绎指令
+    source: xiaomi_mimo_v2_5_tts_docs
+    verified_at: '2026-06-24'
+    confidence: medium
+  api_config:
+    base_url: https://api.xiaomimimo.com/v1
+    endpoint: /chat/completions
+    api_key_env: MIMO_API_KEY
+    auth_type: api-key
+  constraints:
+    max_batch_size: 1
+    max_base64_size_mb: 10
+    supported_sample_mime_types:
+    - audio/mpeg
+    - audio/mp3
+    - audio/wav
+    stream_behavior: 兼容模式，仅在推理完成后以流式格式返回一次结果
+  quality_metrics:
+    overall_score: 0.0
+  avg_latency_seconds: 0.0
+  summary: 小米 MiMo-V2.5-TTS 音色复刻模型，audio.voice 需传入带 MIME 前缀的 base64 音频样本；不支持唱歌、预置音色或音色设计，真实接口仍待 MIMO_API_KEY 端到端验证。
+  recommended_scenarios:
+  - 基于授权样本复刻角色声线
+  - 精品角色对白试听
+  - 音色一致性验证
+  limitations:
+  - 不支持唱歌模式、预置音色和音色设计
+  - base64 字符串大小不超过 10 MB
+  - 当前仅支持 mp3/wav 音频样本
+  - 真实接口尚未在当前环境用 MIMO_API_KEY 完成端到端验证
+  integration_notes:
+  - audio.voice 必须形如 data:audio/mpeg;base64,$BASE64_AUDIO 或 data:audio/wav;base64,$BASE64_AUDIO
+  - 可通过 user 消息传入自然语言风格指令
+  - 音频标签控制嵌入 assistant 待合成文本
+  documentation_url: null
+  source_urls:
+  - user_attachment:58afdcd6-33f2-43bc-9a4c-d41f496ca72c/pasted-text.txt
+  tags:
+  - audio
+  - tts
+  - mimo
+  - audiobook
+  - pending-runtime-validation
+  - voice-clone
+  - audio-tags
+  detailed_specs:
+    voice_synthesis:
+      voice_catalog:
+        categories: []
+        total_count: 0
+        update_note: 该模型不支持预置音色，需通过 audio.voice 传入样本复刻音色。
+      calling_method:
+        param_name: audio.voice
+        format: data:{MIME_TYPE};base64,$BASE64_AUDIO
+        required: true
+        example: 'audio={"format": "wav", "voice": "data:audio/mpeg;base64,$BASE64_AUDIO"}'
+      voice_clone:
+        enabled: true
+        param_name: audio.voice
+        max_base64_size_mb: 10
+        supported_mime_types:
+        - audio/mpeg
+        - audio/mp3
+        - audio/wav
+- id: stepaudio-2.5-tts
+  name: StepAudio 2.5 TTS
+  provider: stepfun
+  version: "2.5"
+  status: active
+  modality:
+  - text_to_speech
+  - voice_clone
+  capabilities:
+  - name: speech_synthesis
+    support_level: native
+    score: 0.95
+    description: Contextual TTS，支持具备语境感知能力的语音合成
+    source: https://platform.stepfun.com/docs/zh/guides/models/stepaudio-2.5-tts
+    verified_at: '2026-06-24'
+    confidence: high
+  - name: global_context_control
+    support_level: native
+    score: 0.95
+    description: instruction 参数定义整段表达基调，上限 200 字符
+    source: https://platform.stepfun.com/docs/zh/guides/models/stepaudio-2.5-tts#核心能力
+    verified_at: '2026-06-24'
+    confidence: high
+  - name: inline_context_control
+    support_level: native
+    score: 0.95
+    description: input 文本中用圆括号插入句内语境指令，括号内容仅作为指令处理
+    source: https://platform.stepfun.com/docs/zh/guides/models/stepaudio-2.5-tts#核心能力
+    verified_at: '2026-06-24'
+    confidence: high
+  - name: zero_shot_voice_clone
+    support_level: native
+    score: 0.9
+    description: 支持通过约 3 秒参考音频进行 Zero-shot 音色复刻，并继承全局/文中语境控制能力
+    source: https://platform.stepfun.com/docs/zh/guides/models/stepaudio-2.5-tts#核心能力
+    verified_at: '2026-06-24'
+    confidence: high
+  constraints:
+    max_prompt_length: 1000
+    max_batch_size: 1
+    max_input_chars: 1000
+    instruction_max_chars: 200
+  quality_metrics:
+    overall_score: 9.4
+    prompt_adherence: 9.5
+  cost_profile:
+    unit: per_10000_characters
+    price: 5.8
+    currency: CNY
+    source: https://platform.stepfun.com/docs/zh/guides/models/stepaudio-2.5-tts
+  avg_latency_seconds: 0.0
+  summary: StepAudio 2.5 TTS 是阶跃星辰的语境感知语音合成模型，支持 Global Context 全局语境、Inline Context 文中语境和 Zero-shot 音色复刻；项目已接入非流式 /v1/audio/speech 合成链路，真实 STEP_API_KEY 中文与英文基础试听均已通过，早前中文失败已确认为本地脚本编码问题。
+  recommended_scenarios:
+  - 有声小说语境感知朗读
+  - 复杂情绪与停顿控制
+  - 需要括号内联导演提示的角色对白
+  - 授权样本的 Zero-shot 音色复刻试听
+  limitations:
+  - 单次 input 上限 1000 字符
+  - instruction 上限 200 字符
+  - 不能使用 voice_label 参数，StepAudio 2.5 TTS 应通过 voice、instruction 和 input 圆括号语境控制
+  - 基础中文/英文合成已通过真实接口验证；Zero-shot 正式复刻资产管理和复刻试听接口待后续独立接入
+  integration_notes:
+  - 非流式合成端点为 POST https://api.stepfun.com/v1/audio/speech
+  - 可通过 STEPAUDIO_TTS_BASE_URL 覆盖 StepFun base URL，用于 .com、.ai 或专属网关验证
+  - 后端读取 STEP_API_KEY，兼容 STEPFUN_API_KEY
+  - 全局语境写入 request.instruction
+  - 文中语境保留在 input 文本圆括号中，不会被朗读
+  - 当前有声书默认音色使用官方音色 voice=cixingnansheng
+  documentation_url: https://platform.stepfun.com/docs/zh/guides/models/stepaudio-2.5-tts
+  source_urls:
+  - https://platform.stepfun.com/docs/zh/guides/models/stepaudio-2.5-tts#核心能力
+  tags:
+  - audio
+  - tts
+  - stepfun
+  - stepaudio
+  - audiobook
+  - contextual-tts
+  - global-context
+  - inline-context
+  - zero-shot-voice-clone
+  - runtime-validated
+  - pending-voice-clone-assets
+  api_config:
+    base_url: https://api.stepfun.com/v1
+    endpoint: /audio/speech
+    api_key_env: STEP_API_KEY
+    auth_type: bearer
+  detailed_specs:
+    voice_synthesis:
+      voice_catalog:
+        categories:
+        - name: 有声书与角色配音
+          voices:
+          - id: vibrant-youth
+            name: Vibrant Youth
+            gender: male
+            description: 年轻明亮，适合有声书和视频配音
+          - id: lively-girl
+            name: Lively Girl
+            gender: female
+            description: 活泼女声，适合有声书和视频配音
+          - id: soft-spoken-gentleman
+            name: Soft-spoken Gentleman
+            gender: male
+            description: 温和克制，适合情感陪伴和有声书
+          - id: magnetic-voiced-male
+            name: Magnetic-voiced Male
+            gender: male
+            description: 磁性男声，适合有声书和视频配音
+          - id: zixinnansheng
+            name: 自信男声
+            gender: male
+            description: 自信稳定，适合有声书、陪伴、教育培训和营销
+          - id: wenrougongzi
+            name: 温柔公子
+            gender: male
+            description: 温柔有角色感，适合情感陪伴和有声书
+          - id: yuanqinansheng
+            name: 元气男声
+            gender: male
+            description: 元气明朗，适合有声书、口播和客服
+          - id: cixingnansheng
+            name: 磁性男声
+            gender: male
+            description: 磁性男声，适合有声书旁白、情感陪伴和默认试听
+          - id: yuanqishaonv
+            name: 元气少女
+            gender: female
+            description: 元气少女感，适合有声书、情感陪伴和语音助手
+          - id: zhengpaiqingnian
+            name: 正派青年
+            gender: male
+            description: 正派清晰，适合营销和有声书
+          - id: boyinnansheng
+            name: 播音男声
+            gender: male
+            description: 吐字清楚，适合有声书和口播新闻
+          - id: ruyananshi
+            name: 儒雅男士
+            gender: male
+            description: 儒雅稳定，适合有声书、陪伴、口播和助手
+          - id: shenchennanyin
+            name: 深沉男音
+            gender: male
+            description: 低沉稳重，适合情感陪伴和有声书
+          - id: wenrounvsheng
+            name: 温柔女声
+            gender: female
+            description: 温柔女声，适合有声书和情感陪伴
+          - id: youyanvsheng
+            name: 优雅女声
+            gender: female
+            description: 优雅女声，适合视频配音
+          - id: lengyanyujie
+            name: 冷艳御姐
+            gender: female
+            description: 冷艳、有角色感，适合视频配音
+        - name: 客服教育与营销
+          voices:
+          - id: elegantgentle-female
+            name: 气质温婉
+            gender: female
+            description: 温婉女声，适合客服、口播、教育培训和陪伴
+          - id: livelybreezy-female
+            name: 活力轻快
+            gender: female
+            description: 活力轻快，适合陪伴、客服、教育培训和营销
+          - id: wenrounansheng
+            name: 温柔男声
+            gender: male
+            description: 温柔自然，适合口播、陪伴、客服和教育培训
+          - id: jingdiannvsheng
+            name: 经典女声
+            gender: female
+            description: 经典亲和，适合客服和情感陪伴
+          - id: wenroushunv
+            name: 温柔熟女
+            gender: female
+            description: 成熟温柔，适合客服、新闻解说和教育培训
+          - id: tianmeinvsheng
+            name: 甜美女声
+            gender: female
+            description: 甜美亲近，适合情感陪伴和客服
+          - id: shuangkuainansheng
+            name: 爽快男声
+            gender: male
+            description: 爽快男声，适合客服、业务办理和语音助手
+          - id: ganliannvsheng
+            name: 干练女声
+            gender: female
+            description: 干练女声，适合客服、业务办理和语音助手
+          - id: qinhenvsheng
+            name: 亲和女声
+            gender: female
+            description: 亲和女声，适合客服、业务办理和语音助手
+          - id: huolinvsheng
+            name: 活力女声
+            gender: female
+            description: 活力女声，适合客服、业务办理和语音助手
+        - name: 口播新闻与解说
+          voices:
+          - id: qingniandaxuesheng
+            name: 青年大学生
+            gender: male
+            description: 青年大学生感，适合口播、解说和新闻
+          - id: qinqienvsheng
+            name: 亲切女声
+            gender: female
+            description: 亲切女声，适合口播、解说和新闻
+          - id: jilingshaonv
+            name: 机灵少女
+            gender: female
+            description: 机灵少女感，适合语音助手、口播和新闻解说
+          - id: shuangkuaijiejie
+            name: 爽快姐姐
+            gender: female
+            description: 爽快女声，适合口播、解说和新闻
+          - id: wenjingxuejie
+            name: 文静学姐
+            gender: female
+            description: 文静女声，适合口播、解说和新闻
+        - name: 语音助手与视频配音
+          voices:
+          - id: qingchunshaonv
+            name: 清纯少女
+            gender: female
+            description: 清纯少女感，适合客服和语音助手
+          - id: linjiajiejie
+            name: 邻家姐姐
+            gender: female
+            description: 亲近自然，适合口播、陪伴、助手和视频配音
+          - id: ruanmengnvsheng
+            name: 软萌女声
+            gender: female
+            description: 软萌女声，适合陪伴、语音助手和视频配音
+          - id: linjiameimei
+            name: 邻家妹妹
+            gender: female
+            description: 邻家妹妹感，适合视频配音、口播和语音助手
+          - id: zhixingjiejie
+            name: 知性姐姐
+            gender: female
+            description: 知性女声，适合视频配音、口播和语音助手
+        total_count: 36
+        update_note: 已按官方最佳实践音色表登记 36 个官方音色；Zero-shot 正式复刻资产管理待后续补充。
+      calling_method:
+        param_name: voice
+        format: official_voice_id
+        required: true
+        example: "POST /v1/audio/speech\n{\n  \"model\": \"stepaudio-2.5-tts\",\n  \"voice\": \"cixingnansheng\",\n  \"input\": \"她停下脚步。（压低声音，克制但发颤）你真的想清楚了吗？\",\n  \"instruction\": \"克制的悲伤，不哭腔，轻轻发颤\"\n}"
+      contextual_control:
+        global_context:
+          enabled: true
+          param_name: instruction
+          max_chars: 200
+          description: 用自然语言定义整段表达基调
+        inline_context:
+          enabled: true
+          syntax: 圆括号()
+          description: 在 input 文本中插入句内情绪、停顿、气息和重音提示，括号内容不直接朗读
+      request_parameters:
+        supported_response_formats:
+        - wav
+        - mp3
+        - flac
+        - opus
+        - pcm
+        speed_range: 0.5-2.0
+        volume_range: 0.1-2.0
+        sample_rates:
+        - 8000
+        - 16000
+        - 22050
+        - 24000
+        - 48000
+        unsupported_for_stepaudio_2_5_tts:
+        - voice_label
+      voice_clone:
+        enabled: true
+        preview_endpoint: /audio/voices/preview
+        min_reference_audio_seconds: 3
+        creates_asset: false
+        note: 试听接口仅生成试听音频，不创建正式音色资产。
 - id: MiniMax/speech-2.8-turbo
   name: MiniMax Speech 2.8 Turbo
   provider: minimax
@@ -3888,96 +4555,579 @@
   - qwen
   - alibaba
   - flagship
-- id: qwen3.6-plus
-  name: Qwen3.6 Plus
+- id: qwen3.7-plus
+  name: Qwen3.7 Plus
   provider: alibaba
-  version: 3.6 Plus
+  version: 3.7 Plus
   status: active
   modality:
   - text_to_text
+  - multimodal_chat
+  - image_understanding
+  - video_understanding
   capabilities:
   - name: text_understanding
     support_level: native
-    description: 深度文本理解
-    source: 'TODO: verify from official docs'
-    verified_at: '2026-04-17'
-    confidence: medium
+    description: 深度文本理解，纯文本表现接近Qwen3.7-Max
+    source: https://help.aliyun.com/zh/model-studio/vision-model
+    verified_at: '2026-06-26'
+    confidence: high
   - name: text_generation
     support_level: native
-    description: 高质量文本生成
-    source: 'TODO: verify from official docs'
-    verified_at: '2026-04-17'
-    confidence: medium
+    description: 高质量文本生成，最大输出64K tokens
+    source: https://help.aliyun.com/zh/model-studio/vision-model
+    verified_at: '2026-06-26'
+    confidence: high
   - name: reasoning
     support_level: native
-    description: 逻辑推理
-    source: 'TODO: verify from official docs'
-    verified_at: '2026-04-17'
-    confidence: medium
+    description: 逻辑推理与数学能力显著提升
+    source: https://help.aliyun.com/zh/model-studio/vision-model
+    verified_at: '2026-06-26'
+    confidence: high
   - name: coding
     support_level: native
-    description: 代码生成与理解
-    source: 'TODO: verify from official docs'
-    verified_at: '2026-04-17'
-    confidence: medium
+    description: 代码生成与理解，Terminal Bench 2.0较上代提升约9分
+    source: https://help.aliyun.com/zh/model-studio/vision-model
+    verified_at: '2026-06-26'
+    confidence: high
   - name: multi_language
     support_level: native
     description: 多语言支持
-    source: 'TODO: verify from official docs'
-    verified_at: '2026-04-17'
+    source: https://help.aliyun.com/zh/model-studio/vision-model
+    verified_at: '2026-06-26'
     confidence: medium
+  - name: image_understanding
+    support_level: native
+    score: 0.95
+    description: 原生图像理解，单次最多2048张图片，单张最高1600万像素；BabyVision榜单64.7分（全球前五、国产第一）
+    source: https://help.aliyun.com/zh/model-studio/vision-model
+    verified_at: '2026-06-26'
+    confidence: high
+  - name: video_understanding
+    support_level: native
+    score: 0.93
+    description: 支持最长2小时/2GB视频理解，兼容OpenAI消息格式
+    source: https://help.aliyun.com/zh/model-studio/vision-model
+    verified_at: '2026-06-26'
+    confidence: high
   - name: web_search
     support_level: native
     score: 0.97
-    description: 联网搜索能力，可主动检索互联网信息并生成回答
-    source: https://help.aliyun.com/zh/model-studio/qwen3.6-plus-api-reference
-    verified_at: '2026-04-17'
+    description: 内置联网搜索工具，可主动检索互联网信息并生成回答
+    source: https://help.aliyun.com/zh/model-studio/vision-model
+    verified_at: '2026-06-26'
     confidence: high
     web_search_provider: alibaba_dashscope
+  - name: function_calling
+    support_level: native
+    description: 支持 Function Calling 与内置工具（联网搜索、代码执行）
+    source: https://help.aliyun.com/zh/model-studio/vision-model
+    verified_at: '2026-06-26'
+    confidence: high
+  - name: json_output
+    support_level: native
+    description: 非思考模式下支持结构化JSON输出
+    source: https://help.aliyun.com/zh/model-studio/vision-model
+    verified_at: '2026-06-26'
+    confidence: high
+  - name: agent
+    support_level: native
+    score: 0.93
+    description: 智能体能力突出，Skillbench较上代提升10.2分，支持GUI/CLI闭环与视觉编程
+    source: https://help.aliyun.com/zh/model-studio/vision-model
+    verified_at: '2026-06-26'
+    confidence: high
   constraints:
-    max_prompt_length: 256000
-    max_output_length: 8000
-    context_window: 256000
+    max_prompt_length: 1000000
+    max_output_length: 65536
+    context_window: 1000000
+    max_images_per_request: 2048
+    max_videos_per_request: 64
+    max_image_pixels: 16000000
+    max_video_duration_seconds: 7200
+    max_video_size_mb: 2048
   quality_metrics:
-    overall_score: 9.5
-    reasoning: 0.95
-    understanding: 0.96
-    generation: 0.95
-    coding: 0.94
-  avg_latency_seconds: 3.0
-  summary: Qwen3.6 Plus 超大规模语言模型，通义千问最新一代旗舰级文本模型，支持超长上下文。
+    overall_score: 9.2
+    reasoning: 0.92
+    understanding: 0.95
+    generation: 0.94
+    coding: 0.93
+    vision: 0.95
+  avg_latency_seconds: 1.6
+  summary: 阿里云2026年6月发布的多模态智能体大模型，原生支持文本、图像、视频输入，视觉推理能力跻身全球前五、国产第一梯队；纯文本表现接近Qwen3.7-Max，编程、数学、智能体能力较前代大幅提升，且调用成本显著降低。
   recommended_scenarios:
-  - 长文档理解
-  - 复杂推理
-  - 代码生成
-  - 专业写作
-  - 多语言翻译
+  - 图像与视频内容理解
+  - 多模态内容分析（文本+图像+视频）
+  - 模型校验与信息验证（内置联网搜索）
+  - 长文档理解与复杂推理
+  - 智能体任务（GUI/CLI闭环、视觉编程）
+  - 多语言翻译与专业写作
   limitations:
-  - 成本较高
-  - 需要清晰的输入
+  - 视觉输入为理解型能力，不负责图像/视频生成
+  - 思考模式会消耗额外tokens
+  - 联网搜索会增加响应时间
   integration_notes:
-  - 通过阿里云百炼平台 API 调用
-  - 使用阿里云百炼 API Key
-  - 支持超长上下文
-  - 计费通过阿里云百炼平台
-  - 价格以百炼平台实时价格为准
-  documentation_url: https://help.aliyun.com/zh/model-studio/qwen3.6-plus-api-reference
+  - 通过阿里云百炼平台 OpenAI 兼容接口调用，模型名为 qwen3.7-plus
+  - 使用阿里云百炼 API Key（DASHSCOPE_API_KEY）
+  - 支持超长上下文（100万tokens）
+  - 视觉输入支持单张最高1600万像素、最长2小时视频
+  - 计费通过阿里云百炼平台，价格以百炼平台实时价格为准
+  documentation_url: https://help.aliyun.com/zh/model-studio/vision-model
   source_urls:
-  - https://help.aliyun.com/zh/model-studio/qwen3.6-plus-api-reference
+  - https://help.aliyun.com/zh/model-studio/vision-model
   - https://help.aliyun.com/zh/model-studio/models
   - https://help.aliyun.com/zh/model-studio/pricing
   pricing_info:
     unit: 每千 tokens
     currency: CNY
-    last_updated: 2025-04
+    last_updated: '2026-06'
     source: 阿里云百炼官方价格文档
     pricing_url: https://help.aliyun.com/zh/model-studio/pricing
     note: ⚠️ 重要：价格可能调整，请以阿里云百炼平台实时价格为准。
     verification_required: true
     verification_source: https://help.aliyun.com/zh/model-studio/pricing
   api_config:
-    base_url: https://dashscope.aliyuncs.com/api/v1
-    endpoint: /api/v1/services/aigc/text-generation/generation
+    base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+    endpoint: /v1/chat/completions
+    auth_type: alibaba_cloud_dashscope
+    api_key_env: DASHSCOPE_API_KEY
+    pricing_endpoint: https://help.aliyun.com/zh/model-studio/pricing
+    pricing_verification:
+      enabled: true
+      source_type: official_website
+      cache_hours: 24
+  tags:
+  - text_to_text
+  - multimodal
+  - vision
+  - llm
+  - qwen
+  - alibaba
+  - flagship
+  - long_context
+  - agent
+  usage_guide:
+    category_common: llm
+    model_specific:
+      title: Qwen3.7 Plus 使用指南
+      sections:
+        - title: 视觉理解（图像与视频）
+          content: |
+            Qwen3.7 Plus 原生支持文本、图像、视频输入，单次最多2048张图片、64个视频（最长2小时/2GB）。
+            
+            **OpenAI 兼容接口（推荐）：**
+            ```python
+            from openai import OpenAI
+            client = OpenAI(
+                api_key=os.getenv("DASHSCOPE_API_KEY"),
+                base_url="https://dashscope.aliyuncs.com/compatible-mode/v1"
+            )
+            completion = client.chat.completions.create(
+                model="qwen3.7-plus",
+                messages=[{
+                    "role": "user",
+                    "content": [
+                        {"type": "image_url", "image_url": {"url": "https://example.com/image.jpg"}},
+                        {"type": "text", "text": "图中描绘的是什么景象?"}
+                    ]
+                }]
+            )
+            ```
+            
+            **DashScope 原生 SDK（多图/视频）：**
+            ```python
+            import dashscope
+            messages = [{
+                "role": "user",
+                "content": [
+                    {"image": "https://example.com/image1.jpg"},
+                    {"image": "https://example.com/image2.jpg"},
+                    {"text": "这些是什么?"}
+                ]
+            }]
+            response = dashscope.MultiModalConversation.call(
+                api_key=os.getenv('DASHSCOPE_API_KEY'),
+                model='qwen3.7-plus',
+                messages=messages
+            )
+            ```
+          tips:
+            - 单张图片最高支持1600万像素
+            - 视频最长2小时、最大2GB
+            - 单次最多2048张图片，支持大规模图像批量分析
+            - Token计算公式：h x w / (32 x 32) + 2
+        - title: 联网搜索与内置工具
+          content: |
+            Qwen3.7 Plus 内置联网搜索与代码执行工具，无需额外配置：
+            
+            ```python
+            completion = client.chat.completions.create(
+                model="qwen3.7-plus",
+                messages=[{"role": "user", "content": "你的问题"}],
+                extra_body={"enable_search": True}
+            )
+            ```
+            
+            也可使用 Responses API 调用内置工具：
+            ```python
+            response = client.responses.create(
+                model="qwen3.7-plus",
+                input="你的问题",
+                tools=[
+                    {"type": "web_search"},
+                    {"type": "code_interpreter"}
+                ]
+            )
+            ```
+          tips:
+            - 日常查询使用默认的 turbo 搜索策略
+            - 高精度多源交叉验证设置 search_strategy: max
+            - 强依赖实时信息设置 forced_search: true
+            - 可设置 freshness 限定搜索时效性
+        - title: 深度思考模式
+          content: |
+            适合复杂推理任务，会消耗额外tokens：
+            
+            ```python
+            completion = client.chat.completions.create(
+                model="qwen3.7-plus",
+                messages=[{"role": "user", "content": "复杂问题"}],
+                extra_body={"enable_thinking": True}
+            )
+            ```
+            
+            流式输出时可观察 reasoning_content 字段获取思考过程。
+          tips:
+            - 适合复杂推理、多步分析任务
+            - 会增加 token 消耗和响应时间
+            - 结构化输出与工具调用场景建议关闭思考模式
+        - title: 最佳实践
+          content: |
+            **提示词技巧：**
+            - 提供清晰具体的指令
+            - 使用角色设定提升回答质量
+            - 复杂任务可拆分为多步骤
+            
+            **性能优化：**
+            - 利用 100万tokens 超长上下文处理长文档
+            - 缓存重复的系统提示词降低延迟
+            - 多模态分析优先选用，视觉理解能力行业领先
+- id: kimi/kimi-k2.6
+  name: Kimi K2.6
+  provider: moonshot
+  version: K2.6
+  status: active
+  modality:
+  - text_to_text
+  - multimodal_chat
+  - image_understanding
+  - video_understanding
+  capabilities:
+  - name: text_understanding
+    support_level: native
+    description: 深度文本理解，长文本与中文创作能力优秀
+    source: https://help.aliyun.com/zh/model-studio/use-kimi-k2-6
+    verified_at: '2026-06-26'
+    confidence: high
+  - name: text_generation
+    support_level: native
+    description: 高质量文本生成，最大输出8K tokens
+    source: https://help.aliyun.com/zh/model-studio/use-kimi-k2-6
+    verified_at: '2026-06-26'
+    confidence: high
+  - name: reasoning
+    support_level: native
+    description: 支持思考模式（enable_thinking），复杂推理能力强
+    source: https://help.aliyun.com/zh/model-studio/use-kimi-k2-6
+    verified_at: '2026-06-26'
+    confidence: high
+  - name: multi_language
+    support_level: native
+    description: 多语言支持，中文能力突出
+    source: https://help.aliyun.com/zh/model-studio/use-kimi-k2-6
+    verified_at: '2026-06-26'
+    confidence: medium
+  - name: image_understanding
+    support_level: native
+    score: 0.88
+    description: 原生图像理解，支持单轮多图输入
+    source: https://help.aliyun.com/zh/model-studio/use-kimi-k2-6
+    verified_at: '2026-06-26'
+    confidence: high
+  - name: video_understanding
+    support_level: native
+    score: 0.85
+    description: 支持视频内容理解，通过 video_url 传入
+    source: https://help.aliyun.com/zh/model-studio/use-kimi-k2-6
+    verified_at: '2026-06-26'
+    confidence: high
+  - name: function_calling
+    support_level: native
+    description: 支持 Function Calling
+    source: https://help.aliyun.com/zh/model-studio/use-kimi-k2-6
+    verified_at: '2026-06-26'
+    confidence: medium
+  - name: json_output
+    support_level: native
+    description: 支持结构化 JSON 输出
+    source: https://help.aliyun.com/zh/model-studio/use-kimi-k2-6
+    verified_at: '2026-06-26'
+    confidence: medium
+  constraints:
+    max_prompt_length: 131072
+    max_output_length: 8192
+    context_window: 131072
+    max_thinking_tokens: 16384
+    supports_thinking_mode: true
+  quality_metrics:
+    overall_score: 8.9
+    reasoning: 0.90
+    understanding: 0.88
+    generation: 0.91
+    vision: 0.88
+  avg_latency_seconds: 2.0
+  summary: 月之暗面 Kimi K2.6 模型，经阿里云百炼平台 OpenAI 兼容接口接入；原生支持文本、图像、视频输入与思考模式，长文本与中文创作能力优秀，是多模态分析与长文写作的备选模型。
+  recommended_scenarios:
+  - 图像与视频内容理解
+  - 多模态内容分析（文本+图像+视频）
+  - 长篇大纲扩展与章节生成
+  - 中文长文本创作与角色扮演
+  - 复杂推理任务（开启思考模式）
+  limitations:
+  - 输出长度受限（8K tokens），不适合一次性超长输出
+  - 上下文 128K，处理整书级资料时需配合分层摘要
+  - 视觉输入为理解型能力，不负责图像/视频生成
+  - 思考模式会消耗额外 tokens
+  integration_notes:
+  - 通过阿里云百炼平台 OpenAI 兼容接口调用，模型名为 kimi/kimi-k2.6
+  - 使用阿里云百炼 API Key（DASHSCOPE_API_KEY）
+  - 使用 extra_body={"enable_thinking": true} 开启思考模式
+  - 视觉输入支持 image_url（多图）与 video_url
+  - 思考过程通过 response.choices[0].message.reasoning_content 字段返回
+  - 计费通过阿里云百炼平台，价格以百炼平台实时价格为准
+  documentation_url: https://help.aliyun.com/zh/model-studio/use-kimi-k2-6
+  source_urls:
+  - https://help.aliyun.com/zh/model-studio/use-kimi-k2-6
+  - https://help.aliyun.com/zh/model-studio/models
+  - https://help.aliyun.com/zh/model-studio/pricing
+  pricing_info:
+    unit: 每千 tokens
+    currency: CNY
+    last_updated: '2026-06'
+    source: 阿里云百炼官方价格文档
+    pricing_url: https://help.aliyun.com/zh/model-studio/pricing
+    note: ⚠️ 重要：价格可能调整，请以阿里云百炼平台实时价格为准。
+    verification_required: true
+    verification_source: https://help.aliyun.com/zh/model-studio/pricing
+  api_config:
+    base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+    endpoint: /v1/chat/completions
+    auth_type: alibaba_cloud_dashscope
+    api_key_env: DASHSCOPE_API_KEY
+    pricing_endpoint: https://help.aliyun.com/zh/model-studio/pricing
+    pricing_verification:
+      enabled: true
+      source_type: official_website
+      cache_hours: 24
+  tags:
+  - text_to_text
+  - multimodal
+  - vision
+  - llm
+  - kimi
+  - moonshot
+  - alibaba
+  - long_context
+  usage_guide:
+    category_common: llm
+    model_specific:
+      title: Kimi K2.6 使用指南
+      sections:
+        - title: 视觉理解（图像与视频）
+          content: |
+            Kimi K2.6 原生支持文本、图像、视频输入。
+            
+            **单图传入示例：**
+            ```python
+            from openai import OpenAI
+            client = OpenAI(
+                api_key=os.getenv("DASHSCOPE_API_KEY"),
+                base_url="https://dashscope.aliyuncs.com/compatible-mode/v1"
+            )
+            completion = client.chat.completions.create(
+                model="kimi/kimi-k2.6",
+                messages=[{
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": "图中描绘的是什么景象?"},
+                        {"type": "image_url", "image_url": {"url": "https://example.com/image.jpg"}}
+                    ]
+                }],
+                extra_body={"enable_thinking": True}
+            )
+            ```
+            
+            **视频传入示例：**
+            ```python
+            completion = client.chat.completions.create(
+                model="kimi/kimi-k2.6",
+                messages=[{
+                    "role": "user",
+                    "content": [
+                        {"type": "video_url", "video_url": {"url": "https://example.com/video.mp4"}},
+                        {"type": "text", "text": "这段视频的内容是什么?"}
+                    ]
+                }]
+            )
+            ```
+          tips:
+            - 多图可在同一消息中传入多个 image_url 项
+            - 视频通过 video_url 类型传入
+            - 视觉输入为理解型能力，不负责生成
+        - title: 深度思考模式
+          content: |
+            通过 extra_body={"enable_thinking": true} 开启思考模式：
+            
+            ```python
+            completion = client.chat.completions.create(
+                model="kimi/kimi-k2.6",
+                messages=[{"role": "user", "content": "复杂问题"}],
+                extra_body={"enable_thinking": True}
+            )
+            # 思考过程
+            if getattr(completion.choices[0].message, 'reasoning_content', None):
+                print(completion.choices[0].message.reasoning_content)
+            # 完整回复
+            print(completion.choices[0].message.content)
+            ```
+          tips:
+            - 适合复杂推理、多步分析任务
+            - 会增加 token 消耗和响应时间
+            - 思考过程通过 reasoning_content 字段返回
+        - title: 最佳实践
+          content: |
+            **提示词技巧：**
+            - 提供清晰具体的指令
+            - 中文长文本创作可发挥模型优势
+            - 复杂任务可拆分为多步骤
+            
+            **性能优化：**
+            - 利用 128K 上下文处理长文档
+            - 长文输出建议分段生成并聚合
+            - 多图分析时合并到单次请求以减少重复上下文
+- id: glm-5.2
+  name: GLM-5.2
+  provider: zhipu
+  version: '5.2'
+  status: active
+  modality:
+  - text_to_text
+  capabilities:
+  - name: text_understanding
+    support_level: native
+    description: 深度文本理解，长文档解析能力优秀
+    source: https://help.aliyun.com/zh/model-studio/use-glm-5-2
+    verified_at: '2026-06-26'
+    confidence: high
+  - name: text_generation
+    support_level: native
+    description: 高质量文本生成，最大输出16K tokens
+    source: https://help.aliyun.com/zh/model-studio/use-glm-5-2
+    verified_at: '2026-06-26'
+    confidence: high
+  - name: reasoning
+    support_level: native
+    score: 0.93
+    description: 长程推理能力突出，FrontierSWE 74.4分（开源第一），仅落后 Claude Opus 4.8 不到1个百分点
+    source: https://help.aliyun.com/zh/model-studio/use-glm-5-2
+    verified_at: '2026-06-26'
+    confidence: high
+  - name: coding
+    support_level: native
+    score: 0.95
+    description: Terminal-Bench 2.1 81.0分、SWE-bench Pro 62.1分，开源模型第一梯队
+    source: https://help.aliyun.com/zh/model-studio/use-glm-5-2
+    verified_at: '2026-06-26'
+    confidence: high
+  - name: long_context
+    support_level: native
+    score: 0.95
+    description: 稳定支持100万tokens上下文（glm-5.2[1m]），IndexShare稀疏注意力机制
+    source: https://help.aliyun.com/zh/model-studio/use-glm-5-2
+    verified_at: '2026-06-26'
+    confidence: high
+  - name: agent
+    support_level: native
+    score: 0.92
+    description: 多步骤智能体任务能力优秀，支持长链路工程任务自主推进
+    source: https://help.aliyun.com/zh/model-studio/use-glm-5-2
+    verified_at: '2026-06-26'
+    confidence: high
+  - name: function_calling
+    support_level: native
+    description: 支持 Function Calling
+    source: https://help.aliyun.com/zh/model-studio/use-glm-5-2
+    verified_at: '2026-06-26'
+    confidence: medium
+  - name: json_output
+    support_level: native
+    description: 支持结构化 JSON 输出
+    source: https://help.aliyun.com/zh/model-studio/use-glm-5-2
+    verified_at: '2026-06-26'
+    confidence: medium
+  constraints:
+    max_prompt_length: 1000000
+    max_output_length: 16384
+    context_window: 1000000
+    supports_thinking_mode: true
+    thinking_levels:
+    - non_thinking
+    - high
+    - max
+  quality_metrics:
+    overall_score: 9.1
+    reasoning: 0.93
+    understanding: 0.92
+    generation: 0.88
+    coding: 0.95
+    agent: 0.92
+  avg_latency_seconds: 2.5
+  summary: 智谱AI 2026年6月发布的旗舰开源大模型，744B MoE架构（单次激活约40B），原生支持100万tokens稳定上下文，主打长程推理与代码工程能力，Terminal-Bench/SWE-bench Pro/FrontierSWE 等多项基准开源第一，经阿里云百炼平台 OpenAI 兼容接口接入。
+  recommended_scenarios:
+  - 长程代码工程与多文件项目重构
+  - 长文档解析与百万级日志分析
+  - 多步骤智能体任务（长链路工程）
+  - 复杂推理任务（开启思考模式）
+  - 长篇大纲扩展与章节生成
+  limitations:
+  - 视觉输入能力非主打，不适合图像/视频理解任务
+  - 思考模式 Max 档位会消耗较多 tokens
+  - 长上下文模式下响应延迟较高
+  integration_notes:
+  - 通过阿里云百炼平台 OpenAI 兼容接口调用，模型名为 glm-5.2
+  - 使用阿里云百炼 API Key（DASHSCOPE_API_KEY）
+  - 启用完整100万上下文需使用 model="glm-5.2[1m]"，默认为小上下文版本
+  - 使用 extra_body 传递思考模式档位（Non-Thinking/High/Max）
+  - 支持 Function Calling 与结构化 JSON 输出
+  - MIT 开源协议，可商用，支持本地私有化部署
+  - 计费通过阿里云百炼平台，价格以百炼平台实时价格为准
+  documentation_url: https://help.aliyun.com/zh/model-studio/use-glm-5-2
+  source_urls:
+  - https://help.aliyun.com/zh/model-studio/use-glm-5-2
+  - https://help.aliyun.com/zh/model-studio/models
+  - https://help.aliyun.com/zh/model-studio/pricing
+  pricing_info:
+    unit: 每千 tokens
+    currency: CNY
+    last_updated: '2026-06'
+    source: 阿里云百炼官方价格文档
+    pricing_url: https://help.aliyun.com/zh/model-studio/pricing
+    note: ⚠️ 重要：价格可能调整，请以阿里云百炼平台实时价格为准。
+    verification_required: true
+    verification_source: https://help.aliyun.com/zh/model-studio/pricing
+  api_config:
+    base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+    endpoint: /v1/chat/completions
     auth_type: alibaba_cloud_dashscope
     api_key_env: DASHSCOPE_API_KEY
     pricing_endpoint: https://help.aliyun.com/zh/model-studio/pricing
@@ -3988,99 +5138,1286 @@
   tags:
   - text_to_text
   - llm
-  - qwen
+  - glm
+  - zhipu
   - alibaba
+  - long_context
+  - coding
+  - agent
+  - open_source
+  usage_guide:
+    category_common: llm
+    model_specific:
+      title: GLM-5.2 使用指南
+      sections:
+        - title: 长上下文启用
+          content: |
+            GLM-5.2 原生支持100万tokens稳定上下文，需通过 model 参数后缀启用：
+            
+            ```python
+            from openai import OpenAI
+            client = OpenAI(
+                api_key=os.getenv("DASHSCOPE_API_KEY"),
+                base_url="https://dashscope.aliyuncs.com/compatible-mode/v1"
+            )
+            # 启用完整100万上下文
+            completion = client.chat.completions.create(
+                model="glm-5.2[1m]",
+                messages=[{"role": "user", "content": "分析这个完整代码仓库..."}],
+                max_tokens=4096
+            )
+            # 默认小上下文版本
+            completion = client.chat.completions.create(
+                model="glm-5.2",
+                messages=[{"role": "user", "content": "简单问题"}]
+            )
+            ```
+          tips:
+            - model="glm-5.2[1m]" 启用完整100万上下文
+            - model="glm-5.2" 默认使用小上下文版本，响应更快
+            - 长上下文模式下建议使用流式输出降低首字节延迟
+        - title: 思考模式档位
+          content: |
+            GLM-5.2 支持多档位思考强度控制，平衡速度与性能：
+            
+            ```python
+            # 基础模式（Non-Thinking），速度快、成本低
+            completion = client.chat.completions.create(
+                model="glm-5.2",
+                messages=[{"role": "user", "content": "简单任务"}],
+                extra_body={"thinking": "non_thinking"}
+            )
+            
+            # High 档位，复杂推理
+            completion = client.chat.completions.create(
+                model="glm-5.2",
+                messages=[{"role": "user", "content": "复杂推理任务"}],
+                extra_body={"thinking": "high"}
+            )
+            
+            # Max 档位，最强推理
+            completion = client.chat.completions.create(
+                model="glm-5.2",
+                messages=[{"role": "user", "content": "极复杂工程任务"}],
+                extra_body={"thinking": "max"}
+            )
+            ```
+          tips:
+            - 简单任务用 non_thinking 控制成本
+            - 复杂推理任务用 high 或 max
+            - 高峰时段 max 消耗3倍配额，非高峰2倍
+            - 9月前非高峰时段 max 可享1倍优惠
+        - title: 代码工程与智能体
+          content: |
+            GLM-5.2 主打长程代码工程，适合多文件项目重构与长链路智能体任务：
+            
+            ```python
+            # 全仓库代码分析（需启用长上下文）
+            completion = client.chat.completions.create(
+                model="glm-5.2[1m]",
+                messages=[
+                    {"role": "system", "content": "你是资深Python开发者"},
+                    {"role": "user", "content": "分析以下完整代码仓库并给出重构建议：\n\n{repo_content}"}
+                ],
+                max_tokens=8192,
+                extra_body={"thinking": "high"}
+            )
+            ```
+          tips:
+            - 全仓库分析使用 glm-5.2[1m] 启用完整上下文
+            - 多步骤任务可配合 Function Calling 自主推进
+            - 长链路工程任务建议开启 high 思考档位
+        - title: 最佳实践
+          content: |
+            **提示词技巧：**
+            - 提供清晰具体的指令和上下文
+            - 代码任务附带完整项目结构
+            - 复杂任务可拆分为多步骤并配合工具调用
+            
+            **性能优化：**
+            - 简单任务使用基础模式和小上下文版本
+            - 长文档分析启用 glm-5.2[1m]
+            - 流式输出降低长任务首字节延迟
+            - 非高峰时段执行 Max 档位任务可节省配额
+- id: MiniMax/MiniMax-M3
+  name: MiniMax M3
+  provider: minimax
+  version: 'M3'
+  status: active
+  modality:
+  - text_to_text
+  - multimodal_chat
+  - image_understanding
+  - video_understanding
+  capabilities:
+  - name: image_understanding
+    support_level: native
+    score: 0.93
+    description: 原生多模态图像理解，支持单图/多图输入，通过 image_url 传入，原生训练无需外挂视觉模块
+    source: https://help.aliyun.com/zh/model-studio/minimax-api-by-minimax
+    verified_at: '2026-06-26'
+    confidence: high
+  - name: video_understanding
+    support_level: native
+    score: 0.90
+    description: 原生视频理解，通过 video_url 传入，可设置 fps 参数控制采样帧率
+    source: https://help.aliyun.com/zh/model-studio/minimax-api-by-minimax
+    verified_at: '2026-06-26'
+    confidence: high
+  - name: text_understanding
+    support_level: native
+    score: 0.92
+    description: 深度文本理解，支持100万tokens超长上下文
+    source: https://www.minimaxi.com/blog/minimax-m3
+    verified_at: '2026-06-26'
+    confidence: high
+  - name: text_generation
+    support_level: native
+    score: 0.88
+    description: 高质量文本生成，最大输出16K tokens，支持自适应思考模式
+    source: https://help.aliyun.com/zh/model-studio/minimax-api-by-minimax
+    verified_at: '2026-06-26'
+    confidence: high
+  - name: reasoning
+    support_level: native
+    score: 0.90
+    description: 混合思考模式（adaptive/disabled），复杂任务先思考再回复
+    source: https://help.aliyun.com/zh/model-studio/minimax-api-by-minimax
+    verified_at: '2026-06-26'
+    confidence: high
+  - name: coding
+    support_level: native
+    score: 0.92
+    description: SWE-Bench Pro 59.0%、Terminal Bench 2.1 66.0%、SWE-fficiency 34.8%、KernelBench Hard 28.8%
+    source: https://www.minimaxi.com/blog/minimax-m3
+    verified_at: '2026-06-26'
+    confidence: high
+  - name: long_context
+    support_level: native
+    score: 0.95
+    description: 原生支持100万tokens上下文（MSA稀疏注意力），100万上下文下每token计算量仅为上代1/20
+    source: https://www.minimaxi.com/blog/minimax-m3
+    verified_at: '2026-06-26'
+    confidence: high
+  - name: agent
+    support_level: native
+    score: 0.93
+    description: Agentic能力突出，MCP Atlas 74.2%，支持搜索、Office操作
+    source: https://www.minimaxi.com/blog/minimax-m3
+    verified_at: '2026-06-26'
+    confidence: high
+  - name: function_calling
+    support_level: native
+    description: 支持 Function Calling
+    source: https://help.aliyun.com/zh/model-studio/minimax-api-by-minimax
+    verified_at: '2026-06-26'
+    confidence: medium
+  - name: json_output
+    support_level: native
+    description: 支持结构化 JSON 输出
+    source: https://help.aliyun.com/zh/model-studio/minimax-api-by-minimax
+    verified_at: '2026-06-26'
+    confidence: medium
+  constraints:
+    max_prompt_length: 1000000
+    max_output_length: 16384
+    context_window: 1000000
+    supports_thinking_mode: true
+    thinking_levels:
+    - adaptive
+    - disabled
+    supports_image_input: true
+    supports_multi_image: true
+    supports_video_input: true
+    video_fps_configurable: true
+  quality_metrics:
+    overall_score: 9.0
+    reasoning: 0.90
+    understanding: 0.92
+    generation: 0.88
+    coding: 0.92
+    agent: 0.93
+    multimodal: 0.93
+  avg_latency_seconds: 2.2
+  summary: 稀宇科技（MiniMax）2026年6月发布的旗舰开源大模型，采用 MSA（MiniMax Sparse Attention）稀疏注意力架构，原生支持100万tokens超长上下文，是国内首个集齐"前沿Coding能力、1M上下文、原生多模态"三要素的开源模型，SWE-Bench Pro/Terminal Bench/MCP Atlas 等多项基准达到国际领先水平，经阿里云百炼平台 OpenAI 兼容接口接入。
+  recommended_scenarios:
+  - 长程代码工程与多文件项目重构
+  - 超长文档解析与百万级代码库分析
+  - 多步骤智能体任务（搜索、Office、长链路工程协作）
+  - 图像与视频内容理解（原生多模态）
+  - 复杂推理任务（开启自适应思考模式）
+  - 长篇大纲扩展与章节生成
+  limitations:
+  - 思考模式会消耗较多 tokens
+  - 长上下文模式下响应延迟较高
+  - 视频输入需通过 video_url 传入，受网络传输影响
+  integration_notes:
+  - 通过阿里云百炼平台 OpenAI 兼容接口调用，模型名为 MiniMax/MiniMax-M3
+  - 使用阿里云百炼 API Key（DASHSCOPE_API_KEY）
+  - '思考模式通过 extra_body={"thinking": {"type": "adaptive"|"disabled"}} 控制'
+  - adaptive 为默认值，模型自主判断是否需要思考；disabled 关闭思考，响应更快
+  - 图像通过 content 数组的 image_url 类型传入，支持单图与多图
+  - 视频通过 content 数组的 video_url 类型传入，可设置 fps 参数控制采样帧率
+  - 支持 Function Calling 与结构化 JSON 输出
+  - 上下文缓存隐式自动开启，命中部分按输入 Token 单价的 20% 计费
+  - MIT 开源协议，可商用
+  - 计费通过阿里云百炼平台，价格以百炼平台实时价格为准
+  documentation_url: https://help.aliyun.com/zh/model-studio/minimax-api-by-minimax
+  source_urls:
+  - https://help.aliyun.com/zh/model-studio/minimax-api-by-minimax
+  - https://www.minimaxi.com/blog/minimax-m3
+  - https://help.aliyun.com/zh/model-studio/models
+  - https://help.aliyun.com/zh/model-studio/pricing
+  pricing_info:
+    unit: 每千 tokens
+    currency: CNY
+    last_updated: '2026-06'
+    source: 阿里云百炼官方价格文档
+    pricing_url: https://help.aliyun.com/zh/model-studio/pricing
+    note: ⚠️ 重要：价格可能调整，请以阿里云百炼平台实时价格为准。隐式上下文缓存命中按输入单价20%计费。
+    verification_required: true
+    verification_source: https://help.aliyun.com/zh/model-studio/pricing
+    context_cache:
+      mode: implicit
+      hit_discount: 0.20
+      auto_enabled: true
+  api_config:
+    base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+    endpoint: /v1/chat/completions
+    auth_type: alibaba_cloud_dashscope
+    api_key_env: DASHSCOPE_API_KEY
+    pricing_endpoint: https://help.aliyun.com/zh/model-studio/pricing
+    pricing_verification:
+      enabled: true
+      source_type: official_website
+      cache_hours: 24
+  tags:
+  - text_to_text
+  - multimodal_chat
+  - image_understanding
+  - video_understanding
+  - llm
+  - minimax
+  - alibaba
+  - long_context
+  - coding
+  - agent
+  - open_source
+  usage_guide:
+    category_common: llm
+    model_specific:
+      title: MiniMax M3 使用指南
+      sections:
+        - title: 基础调用与思考模式
+          content: |
+            MiniMax M3 通过阿里云百炼 OpenAI 兼容接口调用，支持混合思考模式：
+
+            ```python
+            import os
+            from openai import OpenAI
+
+            client = OpenAI(
+                api_key=os.getenv("DASHSCOPE_API_KEY"),
+                base_url="https://dashscope.aliyuncs.com/compatible-mode/v1"
+            )
+
+            # 自适应思考模式（默认，模型自主判断是否思考）
+            completion = client.chat.completions.create(
+                model="MiniMax/MiniMax-M3",
+                messages=[{"role": "user", "content": "你是谁"}],
+                extra_body={"thinking": {"type": "adaptive"}},
+                stream=True
+            )
+
+            # 关闭思考（响应更快，适合对话、代码补全等延迟敏感场景）
+            completion = client.chat.completions.create(
+                model="MiniMax/MiniMax-M3",
+                messages=[{"role": "user", "content": "简单问题"}],
+                extra_body={"thinking": {"type": "disabled"}}
+            )
+            ```
+          tips:
+            - adaptive 为默认值，复杂任务会先思考再回复
+            - disabled 关闭思考，适合延迟敏感场景
+            - 思考过程通过 reasoning_content 字段返回，回复通过 content 字段返回
+            - 流式输出可降低首字节延迟
+        - title: 图像理解（单图/多图）
+          content: |
+            MiniMax M3 原生支持图像理解，通过 content 数组传入 image_url：
+
+            ```python
+            # 单图传入示例
+            completion = client.chat.completions.create(
+                model="MiniMax/MiniMax-M3",
+                messages=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": "图中描绘的是什么景象?"},
+                            {"type": "image_url", "image_url": {"url": "https://example.com/image.jpg"}}
+                        ]
+                    }
+                ],
+                extra_body={"thinking": {"type": "adaptive"}}
+            )
+
+            # 多图传入示例
+            completion = client.chat.completions.create(
+                model="MiniMax/MiniMax-M3",
+                messages=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": "这些图描绘了什么内容？"},
+                            {"type": "image_url", "image_url": {"url": "https://example.com/img1.jpg"}},
+                            {"type": "image_url", "image_url": {"url": "https://example.com/img2.jpg"}}
+                        ]
+                    }
+                ],
+                extra_body={"thinking": {"type": "adaptive"}}
+            )
+            ```
+          tips:
+            - 原生多模态训练，无需外挂视觉模块
+            - 支持单图与多图输入
+            - 图像通过 image_url 类型传入
+        - title: 视频理解
+          content: |
+            MiniMax M3 支持视频内容理解，通过 video_url 类型传入，可设置 fps 参数：
+
+            ```python
+            completion = client.chat.completions.create(
+                model="MiniMax/MiniMax-M3",
+                messages=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "video_url",
+                                "video_url": {"url": "https://example.com/video.mp4"},
+                                "fps": 2
+                            },
+                            {"type": "text", "text": "这段视频的内容是什么?"}
+                        ]
+                    }
+                ]
+            )
+            print(completion.choices[0].message.content)
+            ```
+          tips:
+            - 视频通过 video_url 类型传入
+            - fps 参数控制采样帧率（默认2帧/秒）
+            - 视频文件需可公网访问
+        - title: 长上下文与代码工程
+          content: |
+            MiniMax M3 原生支持100万tokens上下文，适合长程代码工程：
+
+            ```python
+            # 全仓库代码分析
+            completion = client.chat.completions.create(
+                model="MiniMax/MiniMax-M3",
+                messages=[
+                    {"role": "system", "content": "你是资深Python开发者"},
+                    {"role": "user", "content": "分析以下完整代码仓库并给出重构建议：\n\n{repo_content}"}
+                ],
+                max_tokens=8192,
+                extra_body={"thinking": {"type": "adaptive"}}
+            )
+            ```
+          tips:
+            - 利用100万上下文一次性输入大型代码库
+            - 多步骤任务可配合 Function Calling 自主推进
+            - 长链路工程任务建议开启 adaptive 思考模式
+            - 上下文缓存隐式自动开启，命中部分按输入单价20%计费
+        - title: 最佳实践
+          content: |
+            **提示词技巧：**
+            - 提供清晰具体的指令和上下文
+            - 代码任务附带完整项目结构
+            - 复杂任务可拆分为多步骤并配合工具调用
+            
+            **性能优化：**
+            - 对话、代码补全用 thinking.type=disabled 降低延迟
+            - 复杂推理、Agentic 任务用 thinking.type=adaptive
+            - 长文档分析利用100万上下文一次性输入
+            - 流式输出降低长任务首字节延迟
+            - 利用上下文缓存降低重复前缀的推理成本
+- id: step-3.7-flash
+  name: Step 3.7 Flash
+  provider: stepfun
+  version: '3.7'
+  status: active
+  modality:
+  - text_to_text
+  - multimodal_chat
+  - image_understanding
+  capabilities:
+  - name: image_understanding
+    support_level: native
+    score: 0.92
+    description: 原生多模态图像理解，198B稀疏MoE（196B语言+1.8B视觉编码器），支持 base64 与 URL，可设置 detail 参数（high/low），可自主裁剪、放大、重读图像
+    source: https://platform.stepfun.com/docs/zh/guides/models/step-3.7-flash
+    verified_at: '2026-06-26'
+    confidence: high
+  - name: text_understanding
+    support_level: native
+    score: 0.88
+    description: 深度文本理解，支持256K上下文窗口
+    source: https://platform.stepfun.com/docs/zh/guides/models/step-3.7-flash
+    verified_at: '2026-06-26'
+    confidence: high
+  - name: text_generation
+    support_level: native
+    score: 0.85
+    description: 高质量文本生成，最大输出16K tokens，最高生成速度400 tokens/s
+    source: https://platform.stepfun.com/docs/zh/guides/models/step-3.7-flash
+    verified_at: '2026-06-26'
+    confidence: high
+  - name: reasoning
+    support_level: native
+    score: 0.88
+    description: 三档推理强度可调（low/medium/high），思考过程通过 reasoning 字段返回
+    source: https://platform.stepfun.com/docs/zh/guides/developer/reasoning
+    verified_at: '2026-06-26'
+    confidence: high
+  - name: agent
+    support_level: native
+    score: 0.93
+    description: 面向生产级Agent优化，ClawEval-1.1 67.1分（第一）、Toolathlon 49.5、HLE w. Tool 48.1
+    source: https://static.stepfun.com/blog/step-3.7-flash/
+    verified_at: '2026-06-26'
+    confidence: high
+  - name: coding
+    support_level: native
+    score: 0.88
+    description: SWE-Bench PRO 56.3分（第二）、Terminal-Bench 2.1 59.5
+    source: https://static.stepfun.com/blog/step-3.7-flash/
+    verified_at: '2026-06-26'
+    confidence: high
+  - name: web_search
+    support_level: native
+    score: 0.90
+    description: 联网与视觉搜索增强，SimpleVQA(Search) 79.2分（第一）、V*(Python) 95.3
+    source: https://static.stepfun.com/blog/step-3.7-flash/
+    verified_at: '2026-06-26'
+    confidence: high
+  - name: long_context
+    support_level: native
+    score: 0.85
+    description: 支持256K上下文窗口
+    source: https://platform.stepfun.com/docs/zh/guides/models/step-3.7-flash
+    verified_at: '2026-06-26'
+    confidence: high
+  - name: function_calling
+    support_level: native
+    description: 支持 Function Calling，长程多轮工具编排稳定
+    source: https://platform.stepfun.com/docs/zh/guides/models/step-3.7-flash
+    verified_at: '2026-06-26'
+    confidence: medium
+  - name: json_output
+    support_level: native
+    description: 支持结构化 JSON 输出
+    source: https://platform.stepfun.com/docs/zh/guides/models/step-3.7-flash
+    verified_at: '2026-06-26'
+    confidence: medium
+  constraints:
+    max_prompt_length: 262144
+    max_output_length: 16384
+    context_window: 262144
+    supports_thinking_mode: true
+    thinking_levels:
+    - low
+    - medium
+    - high
+    supports_image_input: true
+    supports_multi_image: true
+    supports_image_detail_param: true
+  quality_metrics:
+    overall_score: 8.8
+    reasoning: 0.88
+    understanding: 0.88
+    generation: 0.85
+    coding: 0.88
+    agent: 0.93
+    multimodal: 0.92
+    web_search: 0.90
+  avg_latency_seconds: 1.2
+  max_tokens_per_second: 400
+  summary: 阶跃星辰2026年6月发布并开源的生产级Agent高效率Flash模型，198B稀疏MoE架构（196B语言+1.8B视觉编码器，激活11B），最高生成速度400 tokens/s，原生多模态理解，三档推理强度可调，ClawEval-1.1/SimpleVQA(Search)等多项Agent与视觉基准第一，直接调用StepFun官方OpenAI兼容接口。
+  recommended_scenarios:
+  - 高频、多轮、低等待的Agent工作流
+  - 多模态Agent（UI/图表/文档/图片理解与执行）
+  - 长程多轮工具编排（API/浏览器/终端/Office）
+  - 高吞吐Coding Agent与并发编码管道
+  - 联网搜索与视觉搜索增强任务
+  - 一次性解析海量文档（256K上下文）
+  limitations:
+  - 上下文窗口256K，低于部分百万级长上下文模型
+  - 复杂推理深度上限低于旗舰模型
+  - 视频输入能力非主打
+  integration_notes:
+  - 通过 StepFun 官方 OpenAI 兼容接口调用，模型名为 step-3.7-flash
+  - 使用 StepFun API Key（STEPFUN_API_KEY），非阿里云百炼
+  - 中国大陆 base_url: https://api.stepfun.com/v1
+  - 海外 base_url: https://api.stepfun.ai/v1（需与API Key签发平台匹配）
+  - 思考过程通过 delta.reasoning 字段返回（流式）或 message.reasoning 字段返回（非流式）
+  - 三档推理强度可调（low/medium/high），平衡速度、成本与认知深度
+  - 图像通过 content 数组的 image_url 类型传入，支持 base64 与 URL，可设置 detail 参数（high/low）
+  - 支持 Function Calling 与结构化 JSON 输出
+  - 上下文缓存命中按输入 Token 单价的 20% 计费
+  - Apache-2.0 开源协议，可商用
+  documentation_url: https://platform.stepfun.com/docs/zh/guides/models/step-3.7-flash
+  source_urls:
+  - https://platform.stepfun.com/docs/zh/guides/models/step-3.7-flash
+  - https://platform.stepfun.com/docs/zh/guides/developer/reasoning
+  - https://platform.stepfun.com/docs/zh/api-reference/chat/chat-completion-create
+  - https://static.stepfun.com/blog/step-3.7-flash/
+  pricing_info:
+    unit: 每百万 tokens
+    currency: USD
+    last_updated: '2026-06'
+    source: StepFun 官方价格文档
+    pricing_url: https://platform.stepfun.com/docs/zh/guides/pricing/intro
+    input_cache_miss: 0.20
+    input_cache_hit: 0.04
+    output: 1.15
+    note: ⚠️ 重要：价格可能调整，请以 StepFun 平台实时价格为准。上下文缓存命中按输入单价20%计费。
+    verification_required: true
+    verification_source: https://platform.stepfun.com/docs/zh/guides/pricing/intro
+    context_cache:
+      mode: implicit
+      hit_discount: 0.20
+      auto_enabled: true
+  api_config:
+    base_url: https://api.stepfun.com/v1
+    base_url_global: https://api.stepfun.ai/v1
+    endpoint: /v1/chat/completions
+    auth_type: stepfun_api_key
+    api_key_env: STEPFUN_API_KEY
+    pricing_endpoint: https://platform.stepfun.com/docs/zh/guides/pricing/intro
+    pricing_verification:
+      enabled: true
+      source_type: official_website
+      cache_hours: 24
+  tags:
+  - text_to_text
+  - multimodal_chat
+  - image_understanding
+  - llm
+  - stepfun
+  - fast
+  - agent
+  - coding
+  - web_search
+  - open_source
+  usage_guide:
+    category_common: llm
+    model_specific:
+      title: Step 3.7 Flash 使用指南
+      sections:
+        - title: 基础调用与思考模式
+          content: |
+            Step 3.7 Flash 通过 StepFun 官方 OpenAI 兼容接口调用，支持三档推理强度：
+
+            ```python
+            import os
+            from openai import OpenAI
+
+            client = OpenAI(
+                api_key=os.getenv("STEPFUN_API_KEY"),
+                base_url="https://api.stepfun.com/v1"
+            )
+
+            # 流式调用，思考过程通过 reasoning 字段返回
+            response = client.chat.completions.create(
+                model="step-3.7-flash",
+                messages=[{"role": "user", "content": "你是谁"}],
+                stream=True
+            )
+
+            for chunk in response:
+                if chunk.choices:
+                    delta = chunk.choices[0].delta
+                    # 思考过程
+                    if hasattr(delta, 'reasoning') and delta.reasoning:
+                        print(delta.reasoning, end='', flush=True)
+                    # 回复内容
+                    elif delta.content:
+                        print(delta.content, end='', flush=True)
+            ```
+          tips:
+            - 思考过程通过 delta.reasoning 字段返回（流式）
+            - 非流式调用通过 message.reasoning 字段返回
+            - 三档推理强度：low（快）、medium（默认）、high（深）
+            - 流式输出可降低首字节延迟
+        - title: 图像理解（base64/URL）
+          content: |
+            Step 3.7 Flash 原生支持图像理解，通过 content 数组传入 image_url，支持 base64 与 URL，可设置 detail 参数：
+
+            ```python
+            import base64
+
+            # 将本地图片转换为 base64 字符串
+            def image_to_base64(image_path):
+                with open(image_path, "rb") as image_file:
+                    return base64.b64encode(image_file.read()).decode('utf-8')
+
+            bstring1 = image_to_base64("./宫保鸡丁.png")
+
+            # base64 传入示例
+            messages = [
+                {"role": "user", "content": [
+                    {"type": "image_url", "image_url": {"url": f"data:image/jpg;base64,{bstring1}", "detail": "high"}},
+                    {"type": "text", "text": "帮我看看这是什么菜，如何制作？"}
+                ]}
+            ]
+
+            response = client.chat.completions.create(
+                model="step-3.7-flash",
+                messages=messages,
+                stream=True
+            )
+
+            # URL 传入示例
+            messages = [
+                {"role": "user", "content": [
+                    {"type": "image_url", "image_url": {"url": "https://example.com/image.jpg", "detail": "high"}},
+                    {"type": "text", "text": "描述这张图片"}
+                ]}
+            ]
+            ```
+          tips:
+            - 原生多模态训练，1.8B 视觉编码器，无需外挂模块
+            - 支持 base64 与 URL 两种传入方式
+            - detail 参数：high（高清晰度）、low（低清晰度）
+            - 可自主裁剪、放大、重读图像以深化理解
+        - title: Agent 工作流与工具编排
+          content: |
+            Step 3.7 Flash 面向生产级 Agent 优化，适合长程多轮工具编排：
+
+            ```python
+            # 配合 Function Calling 进行工具编排
+            tools = [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "get_weather",
+                        "description": "获取指定城市的天气",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "city": {"type": "string", "description": "城市名"}
+                            },
+                            "required": ["city"]
+                        }
+                    }
+                }
+            ]
+
+            response = client.chat.completions.create(
+                model="step-3.7-flash",
+                messages=[{"role": "user", "content": "北京今天天气怎么样？"}],
+                tools=tools,
+                stream=True
+            )
+            ```
+          tips:
+            - ClawEval-1.1 67.1分（第一），长程多轮工作流稳定
+            - 兼容主流 Agent 框架（Claude Code / OpenClaw / Hermes Agent 等）
+            - 适配 MCP/Skills 等工具调用协议
+            - 高频场景用 low 档位最大化速度
+        - title: 最佳实践
+          content: |
+            **提示词技巧：**
+            - 提供清晰具体的指令和上下文
+            - 多模态任务附带 detail 参数控制清晰度
+            - Agent 任务可拆分为多步骤并配合工具调用
+            
+            **性能优化：**
+            - 高频Agent任务用 low 档位最大化速度
+            - 复杂推理用 high 档位深化认知
+            - 利用256K上下文一次性输入大型文档
+            - 流式输出降低长任务首字节延迟
+            - 利用上下文缓存降低重复前缀的推理成本
+- id: mimo-v2.5-pro
+  name: MiMo V2.5 Pro
+  provider: xiaomi
+  version: '2.5'
+  status: active
+  modality:
+  - text_to_text
+  capabilities:
+  - name: text_understanding
+    support_level: native
+    score: 0.94
+    description: 万亿参数旗舰基座，深度文本理解，原生支持1M tokens上下文
+    source: https://mimo.mi.com/models/zh-CN/mimo-v2.5-pro
+    verified_at: '2026-06-26'
+    confidence: high
+  - name: text_generation
+    support_level: native
+    score: 0.90
+    description: 高质量文本生成，最大输出128K tokens，支持结构化输出
+    source: https://mimo.mi.com/models/zh-CN/mimo-v2.5-pro
+    verified_at: '2026-06-26'
+    confidence: high
+  - name: reasoning
+    support_level: native
+    score: 0.94
+    description: 深度思考能力突出，SWE-bench/TAU-bench等主流Agent评测全面领先
+    source: https://mimo.mi.com/models/zh-CN/mimo-v2.5-pro
+    verified_at: '2026-06-26'
+    confidence: high
+  - name: agent
+    support_level: native
+    score: 0.95
+    description: 极致Agent能力，可稳定完成近千轮工具调用的长程任务，4.3小时672次工具调用完成北大编译器工程
+    source: https://mimo.mi.com/models/zh-CN/mimo-v2.5-pro
+    verified_at: '2026-06-26'
+    confidence: high
+  - name: coding
+    support_level: native
+    score: 0.94
+    description: 长程代码开发能力突出，11.5小时无人工干预产出8192行代码（视频编辑器），芯片EDA全流程1小时完成
+    source: https://mimo.mi.com/models/zh-CN/mimo-v2.5-pro
+    verified_at: '2026-06-26'
+    confidence: high
+  - name: long_context
+    support_level: native
+    score: 0.95
+    description: 原生支持1M tokens上下文，完整处理超长合同、代码库与研究报告
+    source: https://mimo.mi.com/models/zh-CN/mimo-v2.5-pro
+    verified_at: '2026-06-26'
+    confidence: high
+  - name: instruction_following
+    support_level: native
+    score: 0.93
+    description: 模糊指令遵循能力突出，精准捕捉上下文隐含的微妙要求
+    source: https://mimo.mi.com/models/zh-CN/mimo-v2.5-pro
+    verified_at: '2026-06-26'
+    confidence: high
+  - name: function_calling
+    support_level: native
+    description: 支持 Function Calling，长程多轮工具调用稳定
+    source: https://mimo.mi.com/models/zh-CN/mimo-v2.5-pro
+    verified_at: '2026-06-26'
+    confidence: medium
+  - name: json_output
+    support_level: native
+    description: 支持结构化 JSON 输出
+    source: https://mimo.mi.com/models/zh-CN/mimo-v2.5-pro
+    verified_at: '2026-06-26'
+    confidence: medium
+  - name: web_search
+    support_level: native
+    description: 支持联网搜索
+    source: https://mimo.mi.com/models/zh-CN/mimo-v2.5-pro
+    verified_at: '2026-06-26'
+    confidence: medium
+  constraints:
+    max_prompt_length: 1000000
+    max_output_length: 131072
+    context_window: 1000000
+    supports_thinking_mode: true
+    thinking_levels:
+    - disabled
+    - enabled
+    supports_web_search: true
+    rpm_limit: 100
+    tpm_limit: 10000000
+  quality_metrics:
+    overall_score: 9.3
+    reasoning: 0.94
+    understanding: 0.94
+    generation: 0.90
+    coding: 0.94
+    agent: 0.95
+    instruction_following: 0.93
+  avg_latency_seconds: 2.0
+  summary: 小米2025年12月发布的万亿参数旗舰基座模型，原生支持1M tokens上下文与128K输出，主打极致Agent能力与长程代码开发，SWE-bench/TAU-bench等主流Agent评测全面领先，可稳定完成近千轮工具调用的长程任务，直接调用小米MiMo官方OpenAI兼容接口。
+  recommended_scenarios:
+  - 长程Agent工作流（近千轮工具调用）
+  - 大型代码库端到端开发与重构
+  - 超长合同/研究报告解析（1M上下文）
+  - 复杂多步骤智能体任务
+  - 模糊指令遵循的高强度生产场景
+  - 芯片EDA/编译器工程等长程开发
+  limitations:
+  - 纯文本输入输出，不支持图像/视频/音频
+  - 万亿参数模型，长程任务延迟较高
+  - TPM限制10M，高并发需规划配额
+  integration_notes:
+  - 通过小米 MiMo 官方 OpenAI 兼容接口调用，模型名为 mimo-v2.5-pro
+  - 使用 MiMo API Key（MIMO_API_KEY）
+  - base_url: https://api.xiaomimimo.com/v1
+  - 接口同时兼容 OpenAI 和 Anthropic 协议
+  - '思考模式通过 extra_body={"thinking": {"type": "disabled"|"enabled"}} 控制'
+  - 支持 Function Calling、流式输出、联网搜索、结构化输出
+  - 上下文缓存命中按输入 Token 单价的 0.83% 计费
+  - 使用 max_completion_tokens 参数控制输出长度（非 max_tokens）
+  - 支持 Claude Code、Cline 等主流 AI 工具直接配置
+  documentation_url: https://mimo.mi.com/models/zh-CN/mimo-v2.5-pro
+  source_urls:
+  - https://mimo.mi.com/models/zh-CN/mimo-v2.5-pro
+  - https://mimo.mi.com/docs/price/pay-as-you-go
+  - https://mimo.mi.com/docs/quick-start/first-api-call
+  pricing_info:
+    unit: 每百万 tokens
+    currency: CNY
+    last_updated: '2026-06'
+    source: 小米 MiMo 官方价格文档
+    pricing_url: https://mimo.mi.com/docs/price/pay-as-you-go
+    input_cache_miss: 3.0
+    input_cache_hit: 0.025
+    output: 6.0
+    note: ⚠️ 重要：价格可能调整，请以小米 MiMo 平台实时价格为准。上下文缓存命中按输入单价0.83%计费。
+    verification_required: true
+    verification_source: https://mimo.mi.com/docs/price/pay-as-you-go
+    context_cache:
+      mode: implicit
+      hit_discount: 0.0083
+      auto_enabled: true
+  api_config:
+    base_url: https://api.xiaomimimo.com/v1
+    endpoint: /v1/chat/completions
+    auth_type: xiaomi_mimo_api_key
+    api_key_env: MIMO_API_KEY
+    protocol_compatibility:
+    - openai
+    - anthropic
+    pricing_endpoint: https://mimo.mi.com/docs/price/pay-as-you-go
+    pricing_verification:
+      enabled: true
+      source_type: official_website
+      cache_hours: 24
+  tags:
+  - text_to_text
+  - llm
+  - xiaomi
+  - reasoning
+  - agent
+  - coding
+  - long_context
   - flagship
+  usage_guide:
+    category_common: llm
+    model_specific:
+      title: MiMo V2.5 Pro 使用指南
+      sections:
+        - title: 基础调用与思考模式
+          content: |
+            MiMo V2.5 Pro 通过小米 MiMo 官方 OpenAI 兼容接口调用，支持深度思考模式：
+
+            ```python
+            import os
+            from openai import OpenAI
+
+            client = OpenAI(
+                api_key=os.environ.get("MIMO_API_KEY"),
+                base_url="https://api.xiaomimimo.com/v1"
+            )
+
+            # 关闭思考（默认，响应更快）
+            completion = client.chat.completions.create(
+                model="mimo-v2.5-pro",
+                messages=[
+                    {"role": "system", "content": "You are MiMo, an AI assistant developed by Xiaomi."},
+                    {"role": "user", "content": "你是谁"}
+                ],
+                max_completion_tokens=1024,
+                stream=False,
+                extra_body={"thinking": {"type": "disabled"}}
+            )
+            print(completion.choices[0].message.content)
+
+            # 开启思考（复杂任务，提升一次性完成率）
+            completion = client.chat.completions.create(
+                model="mimo-v2.5-pro",
+                messages=[{"role": "user", "content": "实现一个简单的编译器"}],
+                max_completion_tokens=8192,
+                extra_body={"thinking": {"type": "enabled"}}
+            )
+            ```
+          tips:
+            - 使用 max_completion_tokens 参数（非 max_tokens）
+            - disabled 为默认，响应更快
+            - enabled 开启思考，适合复杂Agent与代码任务
+            - 接口同时兼容 OpenAI 和 Anthropic 协议
+            - 支持 Claude Code、Cline 等主流 AI 工具直接配置
+        - title: 长程Agent与工具编排
+          content: |
+            MiMo V2.5 Pro 极致Agent能力，可稳定完成近千轮工具调用：
+
+            ```python
+            tools = [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "read_file",
+                        "description": "读取文件内容",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {"path": {"type": "string", "description": "文件路径"}},
+                            "required": ["path"]
+                        }
+                    }
+                }
+            ]
+
+            response = client.chat.completions.create(
+                model="mimo-v2.5-pro",
+                messages=[{"role": "user", "content": "分析项目结构并给出重构建议"}],
+                tools=tools,
+                extra_body={"thinking": {"type": "enabled"}}
+            )
+            ```
+          tips:
+            - SWE-bench/TAU-bench等主流Agent评测全面领先
+            - 可稳定完成近千轮工具调用的长程任务
+            - 4.3小时672次工具调用完成北大编译器工程
+            - 长程任务建议开启思考模式
+        - title: 长上下文与代码工程
+          content: |
+            MiMo V2.5 Pro 原生支持1M tokens上下文，适合大型代码库分析：
+
+            ```python
+            # 全仓库代码分析
+            completion = client.chat.completions.create(
+                model="mimo-v2.5-pro",
+                messages=[
+                    {"role": "system", "content": "你是资深Python开发者"},
+                    {"role": "user", "content": "分析以下完整代码仓库并给出重构建议：\n\n{repo_content}"}
+                ],
+                max_completion_tokens=8192,
+                extra_body={"thinking": {"type": "enabled"}}
+            )
+            ```
+          tips:
+            - 利用1M上下文一次性输入大型代码库
+            - 最大输出128K tokens，适合长报告
+            - 上下文缓存命中按输入单价0.83%计费，重复前缀成本极低
+            - 高并发场景需注意 RPM 100 / TPM 10M 限制
+        - title: 最佳实践
+          content: |
+            **提示词技巧：**
+            - 提供清晰具体的指令和上下文
+            - 代码任务附带完整项目结构
+            - 复杂任务可拆分为多步骤并配合工具调用
+            
+            **性能优化：**
+            - 对话、简单任务用 thinking.type=disabled 降低延迟
+            - 长程Agent与代码任务用 thinking.type=enabled
+            - 大型代码库利用1M上下文一次性输入
+            - 利用上下文缓存降低重复前缀的推理成本
+            - 高并发需注意 RPM 100 / TPM 10M 限制
+- id: mimo-v2.5
+  name: MiMo V2.5
+  provider: xiaomi
+  version: '2.5'
+  status: active
+  modality:
+  - text_to_text
+  - multimodal_chat
+  - image_understanding
+  - video_understanding
+  - audio_understanding
+  capabilities:
+  - name: image_understanding
+    support_level: native
+    score: 0.92
+    description: 原生全模态感知，支持图像理解，通过 image_url 传入
+    source: https://mimo.mi.com/models/zh-CN/mimo-v2.5
+    verified_at: '2026-06-26'
+    confidence: high
+  - name: video_understanding
+    support_level: native
+    score: 0.90
+    description: 原生视频理解，通过 video_url 传入，可设置 fps 与 media_resolution 参数
+    source: https://mimo.mi.com/models/zh-CN/mimo-v2.5
+    verified_at: '2026-06-26'
+    confidence: high
+  - name: audio_understanding
+    support_level: native
+    score: 0.88
+    description: 原生音频理解，通过 input_audio 类型传入
+    source: https://mimo.mi.com/models/zh-CN/mimo-v2.5
+    verified_at: '2026-06-26'
+    confidence: high
+  - name: text_understanding
+    support_level: native
+    score: 0.90
+    description: 深度文本理解，支持1M tokens超长上下文
+    source: https://mimo.mi.com/models/zh-CN/mimo-v2.5
+    verified_at: '2026-06-26'
+    confidence: high
+  - name: text_generation
+    support_level: native
+    score: 0.85
+    description: 高质量文本生成，最大输出128K tokens
+    source: https://mimo.mi.com/models/zh-CN/mimo-v2.5
+    verified_at: '2026-06-26'
+    confidence: high
+  - name: reasoning
+    support_level: native
+    score: 0.88
+    description: 支持深度思考模式，跨模态长程推理能力优秀
+    source: https://mimo.mi.com/models/zh-CN/mimo-v2.5
+    verified_at: '2026-06-26'
+    confidence: high
+  - name: agent
+    support_level: native
+    score: 0.90
+    description: 强大的全模态Agent能力，原生Agent执行能力，日常任务表现比肩mimo-v2.5-pro
+    source: https://mimo.mi.com/models/zh-CN/mimo-v2.5
+    verified_at: '2026-06-26'
+    confidence: high
+  - name: long_context
+    support_level: native
+    score: 0.95
+    description: 原生支持1M tokens上下文，支持长视频追踪与长时间画面时序推理
+    source: https://mimo.mi.com/models/zh-CN/mimo-v2.5
+    verified_at: '2026-06-26'
+    confidence: high
+  - name: web_search
+    support_level: native
+    score: 0.85
+    description: 支持联网搜索，跨模态信息获取与验证
+    source: https://mimo.mi.com/models/zh-CN/mimo-v2.5
+    verified_at: '2026-06-26'
+    confidence: medium
+  - name: function_calling
+    support_level: native
+    description: 支持 Function Calling
+    source: https://mimo.mi.com/models/zh-CN/mimo-v2.5
+    verified_at: '2026-06-26'
+    confidence: medium
+  - name: json_output
+    support_level: native
+    description: 支持结构化 JSON 输出
+    source: https://mimo.mi.com/models/zh-CN/mimo-v2.5
+    verified_at: '2026-06-26'
+    confidence: medium
+  constraints:
+    max_prompt_length: 1000000
+    max_output_length: 131072
+    context_window: 1000000
+    supports_thinking_mode: true
+    thinking_levels:
+    - disabled
+    - enabled
+    supports_image_input: true
+    supports_multi_image: true
+    supports_video_input: true
+    video_fps_configurable: true
+    video_media_resolution_configurable: true
+    supports_audio_input: true
+    supports_web_search: true
+    rpm_limit: 100
+    tpm_limit: 10000000
+  quality_metrics:
+    overall_score: 9.0
+    reasoning: 0.88
+    understanding: 0.92
+    generation: 0.85
+    agent: 0.90
+    multimodal: 0.92
+    web_search: 0.85
+  avg_latency_seconds: 1.5
+  summary: 小米2025年12月发布的原生全模态感知模型，支持图像、视频、音频、文本联合理解，原生支持1M tokens上下文与128K输出，具备强大的全模态Agent能力，位于性能与效率的Pareto前沿，直接调用小米MiMo官方OpenAI兼容接口。
+  recommended_scenarios:
+  - 多模态Agent（图像/视频/音频/文本联合理解）
+  - 长视频追踪与长时间画面时序推理
+  - 全模态信息获取与交叉验证
+  - 长文档与长视频分析（1M上下文）
+  - 跨模态搜索与推理任务
+  - 日常Agent任务（比肩pro能力且效率更优）
+  limitations:
+  - 仅支持文本输出，不支持图像/视频/音频生成
+  - 万亿参数级别，多模态输入延迟较高
+  - TPM限制10M，高并发需规划配额
+  integration_notes:
+  - 通过小米 MiMo 官方 OpenAI 兼容接口调用，模型名为 mimo-v2.5
+  - 使用 MiMo API Key（MIMO_API_KEY），与pro共用
+  - base_url: https://api.xiaomimimo.com/v1
+  - 接口同时兼容 OpenAI 和 Anthropic 协议
+  - '思考模式通过 extra_body={"thinking": {"type": "disabled"|"enabled"}} 控制'
+  - 图像通过 content 数组的 image_url 类型传入（支持URL）
+  - 音频通过 content 数组的 input_audio 类型传入（支持URL）
+  - 视频通过 content 数组的 video_url 类型传入，可设置 fps 与 media_resolution 参数
+  - 支持 Function Calling、流式输出、联网搜索、结构化输出
+  - 上下文缓存命中按输入 Token 单价的 2% 计费
+  - 使用 max_completion_tokens 参数控制输出长度（非 max_tokens）
+  documentation_url: https://mimo.mi.com/models/zh-CN/mimo-v2.5
+  source_urls:
+  - https://mimo.mi.com/models/zh-CN/mimo-v2.5
+  - https://mimo.mi.com/docs/price/pay-as-you-go
+  - https://mimo.mi.com/docs/quick-start/first-api-call
+  pricing_info:
+    unit: 每百万 tokens
+    currency: CNY
+    last_updated: '2026-06'
+    source: 小米 MiMo 官方价格文档
+    pricing_url: https://mimo.mi.com/docs/price/pay-as-you-go
+    input_cache_miss: 1.0
+    input_cache_hit: 0.02
+    output: 2.0
+    note: ⚠️ 重要：价格可能调整，请以小米 MiMo 平台实时价格为准。上下文缓存命中按输入单价2%计费。
+    verification_required: true
+    verification_source: https://mimo.mi.com/docs/price/pay-as-you-go
+    context_cache:
+      mode: implicit
+      hit_discount: 0.02
+      auto_enabled: true
+  api_config:
+    base_url: https://api.xiaomimimo.com/v1
+    endpoint: /v1/chat/completions
+    auth_type: xiaomi_mimo_api_key
+    api_key_env: MIMO_API_KEY
+    protocol_compatibility:
+    - openai
+    - anthropic
+    pricing_endpoint: https://mimo.mi.com/docs/price/pay-as-you-go
+    pricing_verification:
+      enabled: true
+      source_type: official_website
+      cache_hours: 24
+  tags:
+  - text_to_text
+  - multimodal_chat
+  - image_understanding
+  - video_understanding
+  - audio_understanding
+  - llm
+  - xiaomi
+  - multimodal
+  - agent
   - long_context
   usage_guide:
     category_common: llm
     model_specific:
-      title: Qwen3.6 Plus 使用指南
+      title: MiMo V2.5 使用指南
       sections:
-        - title: 联网搜索功能
+        - title: 基础调用与思考模式
           content: |
-            Qwen3.6 Plus 支持强大的联网搜索能力，可通过以下方式启用：
-            
-            **方式一：Chat Completions API（推荐）**
+            MiMo V2.5 通过小米 MiMo 官方 OpenAI 兼容接口调用，支持深度思考模式：
+
             ```python
+            import os
             from openai import OpenAI
+
             client = OpenAI(
-                api_key=os.getenv("DASHSCOPE_API_KEY"),
-                base_url="https://dashscope.aliyuncs.com/compatible-mode/v1"
+                api_key=os.environ.get("MIMO_API_KEY"),
+                base_url="https://api.xiaomimimo.com/v1"
             )
+
+            # 关闭思考（默认，响应更快）
             completion = client.chat.completions.create(
-                model="qwen3.6-plus",
-                messages=[{"role": "user", "content": "你的问题"}],
-                extra_body={"enable_search": True}
+                model="mimo-v2.5",
+                messages=[{"role": "user", "content": "你是谁"}],
+                max_completion_tokens=1024,
+                stream=False,
+                extra_body={"thinking": {"type": "disabled"}}
             )
+            print(completion.choices[0].message.content)
             ```
-            
-            **方式二：DashScope 原生 SDK**
+          tips:
+            - 使用 max_completion_tokens 参数（非 max_tokens）
+            - disabled 为默认，响应更快
+            - enabled 开启思考，适合复杂多模态推理任务
+            - 接口同时兼容 OpenAI 和 Anthropic 协议
+        - title: 全模态理解（图像/音频/视频）
+          content: |
+            MiMo V2.5 原生全模态感知，支持图像、音频、视频联合理解：
+
             ```python
-            import dashscope
-            response = dashscope.Generation.call(
-                api_key=os.getenv("DASHSCOPE_API_KEY"),
-                model="qwen3.6-plus",
-                messages=[{"role": "user", "content": "你的问题"}],
-                enable_search=True,
-                result_format="message"
-            )
-            ```
-            
-            **方式三：Responses API（仅 qwen3.6-plus 支持）**
-            ```python
-            from openai import OpenAI
-            client = OpenAI(
-                api_key=os.getenv("DASHSCOPE_API_KEY"),
-                base_url="https://dashscope.aliyuncs.com/compatible-mode/v1"
-            )
-            response = client.responses.create(
-                model="qwen3.6-plus",
-                input="你的问题",
-                tools=[
-                    {"type": "web_search"},
-                    {"type": "web_extractor"},
-                    {"type": "code_interpreter"}
-                ]
+            messages = [
+                {"role": "user", "content": "请分别描述提供的图像、音频和视频的内容"},
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": "https://example.com/image.png"}
+                        },
+                        {
+                            "type": "input_audio",
+                            "input_audio": {"data": "https://example.com/audio.wav"}
+                        },
+                        {
+                            "type": "video_url",
+                            "video_url": {"url": "https://example.com/video.mp4"},
+                            "fps": 2,
+                            "media_resolution": "default"
+                        }
+                    ]
+                }
+            ]
+
+            response = client.chat.completions.create(
+                model="mimo-v2.5",
+                messages=messages,
+                max_completion_tokens=1024,
+                extra_body={"thinking": {"type": "disabled"}}
             )
             ```
           tips:
-            - 日常查询使用默认的 turbo 搜索策略即可
-            - 需要高精度多源交叉验证时，设置 search_strategy: max
-            - 强依赖实时信息时，设置 forced_search: true 强制搜索
-            - 可设置 freshness 参数限定搜索时效性（7/30/180/365天）
-            - 可设置 assigned_site_list 限定搜索来源站点
-            - 开启 enable_source: true 可返回搜索来源链接
-            - 开启 enable_citation: true 可在回复中添加角标注释
-        - title: 深度思考模式
+            - 原生全模态感知，无需外挂模块
+            - 图像通过 image_url 类型传入
+            - 音频通过 input_audio 类型传入
+            - 视频通过 video_url 类型传入，可设置 fps 与 media_resolution
+            - 支持长视频追踪与长时间画面时序推理
+        - title: 长上下文多模态Agent
           content: |
-            Qwen3.6 Plus 支持深度思考模式，适合复杂推理任务：
-            
+            MiMo V2.5 支持1M上下文与全模态Agent能力：
+
             ```python
-            completion = client.chat.completions.create(
-                model="qwen3.6-plus",
-                messages=[{"role": "user", "content": "复杂问题"}],
-                extra_body={"enable_thinking": True}
+            # 多模态Agent任务（图像分析+工具调用）
+            tools = [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "search_web",
+                        "description": "联网搜索",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {"query": {"type": "string"}},
+                            "required": ["query"]
+                        }
+                    }
+                }
+            ]
+
+            response = client.chat.completions.create(
+                model="mimo-v2.5",
+                messages=[
+                    {"role": "user", "content": [
+                        {"type": "image_url", "image_url": {"url": "https://example.com/chart.png"}},
+                        {"type": "text", "text": "分析这张图表并搜索相关数据进行验证"}
+                    ]}
+                ],
+                tools=tools,
+                extra_body={"thinking": {"type": "enabled"}}
             )
             ```
-            
-            流式输出时可观察 reasoning_content 字段获取思考过程。
           tips:
-            - 适合复杂推理、多步分析任务
-            - 会增加 token 消耗和响应时间
-            - 建议配合联网搜索使用，效果更佳
+            - 日常Agent任务比肩mimo-v2.5-pro能力
+            - 性能与效率的Pareto前沿，token效率更优
+            - 跨模态信息获取与交叉验证
+            - 利用1M上下文一次性输入长视频与长文档
         - title: 最佳实践
           content: |
             **提示词技巧：**
-            - 提供清晰具体的指令
-            - 使用角色设定提升回答质量
-            - 复杂任务可拆分为多步骤
-            - 提供示例引导模型输出格式
+            - 提供清晰具体的指令和上下文
+            - 多模态任务明确各模态的输入类型
+            - Agent 任务可拆分为多步骤并配合工具调用
             
             **性能优化：**
-            - 利用 256K 超长上下文处理长文档
-            - 缓存重复的系统提示词降低延迟
-            - 合理使用 max_output_length 控制输出
+            - 日常Agent任务优先选用v2.5（效率更优）
+            - 深度Agent与代码任务用pro
+            - 长视频分析可设置 fps 控制采样帧率
+            - 利用1M上下文一次性输入长视频与长文档
+            - 利用上下文缓存降低重复前缀的推理成本
+            - 高并发需注意 RPM 100 / TPM 10M 限制
 - id: wan2.7-image
   name: Wan 2.7 Image
   provider: alibaba
@@ -4768,6 +7105,180 @@
   - doubao
   - seedream
   - latest
+- id: seed-tts-2.0-expressive
+  name: Doubao Seed-TTS 2.0 Expressive
+  provider: volcengine
+  version: 2.0-expressive
+  status: active
+  modality:
+  - text_to_speech
+  - voice_clone
+  capabilities:
+  - name: speech_synthesis
+    support_level: native
+    score: 0.95
+    description: 豆包语音合成 2.0 高表现力版本，支持自然、细腻、具备情感表现的语音合成
+    source: https://www.volcengine.com/docs/6561/2532486?lang=zh
+    verified_at: '2026-06-25'
+    confidence: high
+  - name: query_response_tts
+    support_level: native
+    score: 0.95
+    description: 支持 Query-Response 对话式 TTS，通过上下文指令生成更贴合场景的语气、语调和停顿
+    source: https://www.volcengine.com/docs/6561/2532486?lang=zh
+    verified_at: '2026-06-25'
+    confidence: high
+  - name: context_texts_style_control
+    support_level: native
+    score: 0.95
+    description: 高表现力版支持 req_params.additions.context_texts 语音指令控制，指令文本不参与计费
+    source: D:/cuigu/Documents/豆包语音_双向流式语音合成WebSocket_1782219746.pdf
+    verified_at: '2026-06-25'
+    confidence: high
+  - name: voice_instruction_and_context_reference
+    support_level: native
+    score: 0.9
+    description: 支持用语音指令控制整体情绪、方言、语气、语速和音调，也支持引用上文作为只理解不合成的语境
+    source: D:/cuigu/Documents/豆包语音_语音指令与标签_1780036074.pdf
+    verified_at: '2026-06-25'
+    confidence: high
+  - name: inline_voice_labels
+    support_level: native
+    score: 0.85
+    description: 支持在句子前使用方括号语音标签描述表情、心理、肢体动作或局部演绎细节；项目在显式标签模式下会把标签前缀写入合成文本并启用 use_tag_parser
+    source: D:/cuigu/Documents/豆包语音_语音指令与标签_1780036074.pdf
+    verified_at: '2026-06-25'
+    confidence: medium
+  - name: voice_tag_parser
+    support_level: native
+    score: 0.85
+    description: 支持 use_tag_parser 语音标签 COT 解析能力，适合复刻音色和短文本精细控制
+    source: D:/cuigu/Documents/豆包语音_双向流式语音合成WebSocket_1782219746.pdf
+    verified_at: '2026-06-25'
+    confidence: high
+  - name: bidirectional_streaming
+    support_level: native
+    score: 0.9
+    description: 官方提供 WebSocket 双向流式 TTS，支持文本流式输入和音频流式输出
+    source: D:/cuigu/Documents/豆包语音_双向流式语音合成WebSocket_1782219746.pdf
+    verified_at: '2026-06-25'
+    confidence: high
+  constraints:
+    max_batch_size: 1
+    max_input_chars: 1000
+    supported_formats:
+    - mp3
+    - pcm
+    - ogg_opus
+    - wav
+    sample_rates:
+    - 8000
+    - 16000
+    - 22050
+    - 24000
+    - 32000
+    - 44100
+    - 48000
+  quality_metrics:
+    overall_score: 9.4
+    prompt_adherence: 9.3
+  cost_profile:
+    unit: per_10000_characters
+    price: 5.0
+    currency: CNY
+    source: user_provided_product_info
+  avg_latency_seconds: 0.0
+  summary: 豆包语音合成 2.0 高表现力版面向 AI 交互、听书、内容生产和客服场景，重点增强拟人感、情感演绎和文本指令控制；有声小说链路已通过非流式 Volcengine V3 基础试听验证，双向流式 WebSocket 协议已按 PDF 建档，待后续实时播放链路扩展。
+  recommended_scenarios:
+  - 有声小说高表现力朗读
+  - 角色对白复合情绪演绎
+  - AI 交互 Query-Response 语音
+  - 需要笑声、哭腔等副语言表现的内容
+  limitations:
+  - context_texts 和 use_tag_parser 需要使用 seed-tts-2.0-expressive
+  - use_tag_parser 主要面向复刻音色，且文本长度建议小于 64 字符
+  - 语音标签属于抢鲜体验能力，官方说明后续会持续优化，真实稳定性需要按音色和文本单独验证
+  - 语音标签官方示例推荐使用可爱女生、调皮公主、爽朗少年、天才同桌或声音复刻 2.0 模型复刻后的音色；当前目录已包含这些系统音色，但真实稳定性仍需逐音色验证
+  - 当前项目先接入非流式 /api/v3/tts/unidirectional；双向流式 WebSocket 待实时交互场景扩展
+  integration_notes:
+  - 非流式合成端点为 POST https://openspeech.bytedance.com/api/v3/tts/unidirectional
+  - 请求头使用 X-Api-Key、X-Api-App-Key 和 X-Api-Resource-Id，默认 resource_id 为 seed-tts-2.0
+  - 音色写入 req_params.speaker，默认 zh_female_vv_uranus_bigtts
+  - 音频格式、采样率、语速和音量写入 req_params.audio_params
+  - 有声小说风格控制写入 req_params.additions 的 JSON 字符串，其中 context_texts 为语音指令数组
+  - 显式使用标签控制时，项目会把 inline_audio_tags 合成为 [标签] 前缀写入 req_params.text，并在 additions 字符串中设置 use_tag_parser=true
+  - 后端只读取 Seed Speech/openspeech 专用语音合成密钥：VOLCENGINE_TTS_API_KEY、DOUBAO_TTS_API_KEY、SEED_TTS_API_KEY、VOLCENGINE_SPEECH_API_KEY 或 DOUBAO_SPEECH_API_KEY
+  - VOLCENGINE_API_KEY / DOUBAO_API_KEY 属于火山方舟通用密钥，不能作为 Seed-TTS 的 X-Api-Key 回退使用
+  documentation_url: https://www.volcengine.com/docs/6561/2532486?lang=zh
+  source_urls:
+  - https://www.volcengine.com/docs/6561/2532486?lang=zh
+  - D:/cuigu/Documents/豆包语音_双向流式语音合成WebSocket_1782219746.pdf
+  - D:/cuigu/Documents/豆包语音_语音指令与标签_1780036074.pdf
+  tags:
+  - audio
+  - tts
+  - volcengine
+  - doubao
+  - seed-tts
+  - audiobook
+  - query-response
+  - context-texts
+  - inline-voice-labels
+  - expressive-tts
+  - runtime-validated
+  - pending-tag-parser-validation
+  api_config:
+    base_url: https://openspeech.bytedance.com
+    endpoint: /api/v3/tts/unidirectional
+    websocket_endpoint: /api/v3/tts/bidirection
+    api_key_env: VOLCENGINE_TTS_API_KEY
+    app_key_env: VOLCENGINE_TTS_APP_KEY
+    resource_id_env: VOLCENGINE_TTS_RESOURCE_ID
+    default_resource_id: seed-tts-2.0
+    auth_type: x_api_key
+  detailed_specs:
+    voice_synthesis:
+      default_voice: zh_female_vv_uranus_bigtts
+      request_parameters:
+        req_params:
+          model:
+            required: true
+            value: seed-tts-2.0-expressive
+          speaker:
+            required: true
+            example: zh_female_vv_uranus_bigtts
+          text_type:
+            value: plain
+          audio_params:
+            format:
+              supported:
+              - mp3
+              - pcm
+              - ogg_opus
+              - wav
+              default: mp3
+            sample_rate:
+              supported:
+              - 8000
+              - 16000
+              - 22050
+              - 24000
+              - 32000
+              - 44100
+              - 48000
+              default: 24000
+            speech_rate:
+              range: -50..100
+            loudness_rate:
+              range: -50..100
+          additions:
+            type: json_string
+            context_texts:
+              enabled: true
+              description: 语音指令数组，不参与计费
+            use_tag_parser:
+              enabled: true
+              description: 显式标签控制时启用，标签示例为 [旁白，语调惊恐]正文
 routing:
   default_strategy: balanced
   strategies:
@@ -4800,3 +7311,4 @@ routing:
       timeout:
         action: reduce_duration
         fallback_model: fast_variant
+

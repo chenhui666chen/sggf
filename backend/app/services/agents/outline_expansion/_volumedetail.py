@@ -104,7 +104,7 @@ class VolumeDetailMixin:
         avg_chapters = (chapters_count_range[0] + chapters_count_range[1]) // 2
         estimated_words = avg_chapters * 450  # 每章约450字
         model_name = self.estimate_volume_detail_model(chapters_count_range)
-        selected_architect = self.plot_architect_plus if model_name == "qwen3.5-plus" else self.plot_architect_r1
+        selected_architect = self.plot_architect_plus if model_name == "qwen3.7-plus" else self.plot_architect_r1
         logger.debug(
             "Volume detail runtime model selected | model=%s avg_chapters=%s estimated_words=%s",
             model_name,

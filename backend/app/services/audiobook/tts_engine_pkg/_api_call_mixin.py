@@ -85,6 +85,7 @@ from app.services.audiobook.tts_engine_pkg._constants import (
     RetryConfig,
     TTSCost,
     MINIMAX_EMOTIONS,
+    TTSUserInputError,
 )
 
 class APICallMixin:
@@ -112,6 +113,8 @@ class APICallMixin:
                 return audio
             else:
                 logger.warning("主提供商 %s 返回空音频", self.primary_provider.value)
+        except TTSUserInputError:
+            raise
         except Exception as e:
             logger.error("主提供商 %s 失败: %s", self.primary_provider.value, e)
 
@@ -137,6 +140,8 @@ class APICallMixin:
                 )
                 if audio and len(audio) > 0:
                     return audio
+            except TTSUserInputError:
+                raise
             except Exception as e:
                 logger.error("备用提供商 %s 失败: %s", fallback_provider.value, e)
                 continue

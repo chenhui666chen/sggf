@@ -19,6 +19,7 @@ from ..voice_manager_factory import create_voice_manager
 from ..audio_mixer import AudioMixer
 from ..agent_message import MessageBus
 from ..task_tracker import TaskTracker
+from ..tts_delivery_plan import build_delivery_plan, resolve_segment_tts_model
 from app.services.chapter_adaptation_assets import build_audio_adaptation_hint
 from core.unified_media_runtime import create_tts_engine
 
@@ -182,6 +183,27 @@ class AudiobookEngineBase:
 
     def _build_review_segments(self, script_segments: List[ScriptSegment]) -> List[Dict[str, Any]]:
         """构造评审所需的片段结构。"""
+        def review_voice_params(seg: ScriptSegment) -> Dict[str, Any]:
+            voice_params = dict(seg.voice_params) if isinstance(getattr(seg, "voice_params", None), dict) else {}
+            voice_params.setdefault("segment_speaker", getattr(seg, "speaker", ""))
+            voice_params.setdefault("segment_type", getattr(seg, "type", ""))
+            voice_params.setdefault("instruct_emotion", getattr(seg, "instruct_emotion", "") or "")
+            voice_params.setdefault("instruct_scene", getattr(seg, "instruct_scene", "") or "")
+            voice_params.setdefault("instruct_role", getattr(seg, "instruct_role", "") or "")
+            voice_params.setdefault("instruct_identity", getattr(seg, "instruct_identity", "") or "")
+            performance_notes = str(getattr(seg, "performance_notes", "") or "").strip()
+            if performance_notes:
+                voice_params.setdefault("performance_notes", performance_notes)
+            resolved_model = resolve_segment_tts_model(voice_params, getattr(self, "tts_model", None))
+            voice_params["resolved_tts_model"] = resolved_model
+            voice_params["delivery_plan"] = build_delivery_plan(
+                segment=seg,
+                voice_params=voice_params,
+                model=resolved_model,
+                emotion=getattr(seg, "instruct_emotion", "") or getattr(seg, "emotion", "neutral"),
+            )
+            return voice_params
+
         return [
             {
                 "type": seg.type,
@@ -191,7 +213,7 @@ class AudiobookEngineBase:
                 "performance_notes": seg.performance_notes if hasattr(seg, "performance_notes") else "",
                 "pause_before": getattr(seg, "pause_before", 0.0),
                 "pause_after": getattr(seg, "pause_after", 0.0),
-                "voice_params": seg.voice_params if hasattr(seg, "voice_params") else {},
+                "voice_params": review_voice_params(seg),
                 "instruct_emotion": getattr(seg, "instruct_emotion", ""),
                 "instruct_scene": getattr(seg, "instruct_scene", ""),
                 "instruct_role": getattr(seg, "instruct_role", ""),

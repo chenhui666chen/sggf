@@ -19,7 +19,7 @@ VOLUME_DETAIL_GROUP_RANGE_PATTERN = re.compile(
     r"(?:章节|章节范围)\s*[：:]\s*(?P<start>\d+)\s*(?:-|~|～|—|－|至|到)\s*(?P<end>\d+)(?:\s*章)?"
 )
 # 🚀 deepseek-v4-pro（384K 输出，~60 万汉字）下放宽以下上限
-# 该阈值保留兼容历史配置；卷细化当前已不再依据章节规模切换到 qwen3.5-plus。
+# 该阈值保留兼容历史配置；卷细化当前已不再依据章节规模切换到 qwen3.7-plus。
 VOLUME_DETAIL_MODEL_SWITCH_THRESHOLD = 80
 VOLUME_DETAIL_CHUNKING_THRESHOLD = 80
 VOLUME_DETAIL_CHUNK_SIZE = 36

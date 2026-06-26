@@ -114,7 +114,7 @@ def _select_previous_chapter_context_strategy(
 
             selected_model = LayeredSummarizer.estimate_selected_model("chapter_generation", next_chapter_number)
         except Exception:
-            selected_model = "qwen3.5-plus"
+            selected_model = "qwen3.7-plus"
 
     safe_input_budget = _get_safe_input_token_budget(
         selected_model,

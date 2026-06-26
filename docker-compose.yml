@@ -167,6 +167,7 @@ services:
       - ./nginx-prod.conf:/etc/nginx/nginx.conf:ro
       - ${NGINX_SSL_CERT_PATH:-./ssl/cert.pem}:/etc/nginx/ssl/cert.pem:ro
       - ${NGINX_SSL_KEY_PATH:-./ssl/key.pem}:/etc/nginx/ssl/key.pem:ro
+      - ./certbot/www:/var/www/certbot:ro
     depends_on:
       - backend
       - frontend

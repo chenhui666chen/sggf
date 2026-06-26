@@ -21,6 +21,7 @@ from app.services.audiobook.tts_engine_pkg._constants import (
     TTSProvider,
     RetryConfig,
     TTSCost,
+    TTSUserInputError,
 )
 
-__all__ = ["TTSEngine", "TTSProvider", "RetryConfig", "TTSCost"]
+__all__ = ["TTSEngine", "TTSProvider", "RetryConfig", "TTSCost", "TTSUserInputError"]

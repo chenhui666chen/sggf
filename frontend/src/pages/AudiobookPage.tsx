@@ -235,7 +235,6 @@ const AudiobookPage = () => {
     currentModelCatalogUnavailable,
     currentModelRuntimeUnavailable,
     showCustomVoiceWorkbench,
-    supportsTtsTuning,
     voiceCatalogSummary,
     voiceCatalogNotice,
     voiceCatalogNoticeSeverity,
@@ -329,6 +328,7 @@ const AudiobookPage = () => {
     playingChapter,
     setPlayingChapter,
     playManagedBlob,
+    playExternalUrl,
     setSnackbar,
   })
 
@@ -458,12 +458,17 @@ const AudiobookPage = () => {
     setDesignPrompt,
     designPreviewText,
     setDesignPreviewText,
+    designPreviewAudioUrl,
+    designPreviewVoiceId,
     designLoading,
     designError,
     designSuccess,
+    customVoicePreviewingId,
     autoAssigningVoices,
     handleCreateCloneVoice,
     handleCreateDesignVoice,
+    handlePreviewDesignVoice,
+    handlePreviewCustomVoice,
     handleDeleteCustomVoice,
     handleUploadCloneAudio,
     handleStartCloneRecording,
@@ -479,6 +484,8 @@ const AudiobookPage = () => {
     setCharacterVoicesForCurrentModel,
     updateCharacterVoicesForCurrentModel,
     refreshVoiceCatalog,
+    playExternalUrl,
+    playManagedBlob,
     setSnackbar,
   })
   const cosyVoiceWorkbench = useCosyVoiceWorkbench({
@@ -493,10 +500,12 @@ const AudiobookPage = () => {
     cloneRecordDialogOpen,
     designName,
     designPrompt,
-    designPreviewText,
+    designPreviewAudioUrl,
+    designPreviewVoiceId,
     designLoading,
     designError,
     designSuccess,
+    customVoicePreviewingId,
     customVoicePresets,
     onCloneNameChange: setCloneName,
     onCloneUrlChange: setCloneUrl,
@@ -505,8 +514,9 @@ const AudiobookPage = () => {
     onUploadCloneAudio: handleUploadCloneAudio,
     onDesignNameChange: setDesignName,
     onDesignPromptChange: setDesignPrompt,
-    onDesignPreviewTextChange: setDesignPreviewText,
     onCreateDesignVoice: handleCreateDesignVoice,
+    onPreviewDesignVoice: handlePreviewDesignVoice,
+    onPreviewCustomVoice: handlePreviewCustomVoice,
     onDeleteCustomVoice: handleDeleteCustomVoice,
     onCloseCloneRecordDialog: handleCloseCloneRecordDialog,
     onStartCloneRecording: handleStartCloneRecording,
@@ -822,20 +832,12 @@ const AudiobookPage = () => {
   })
 
   const {
-    recommendingVoiceTypeId,
     handleVoiceChange,
-    handleVolumeChange,
-    handleSpeedChange,
-    handlePitchChange,
     handleTtsModelChangeForCharacter,
-    handleVoiceTypeChange,
-    handlePersonalityChange,
-    handleEmotionTendencyChange,
-    handleRecommendVoiceType,
+    handleVoiceCloneDataUrlChange,
   } = useAudiobookCharacterVoiceSettings({
     voicePresets,
     updateCharacterVoicesForCurrentModel,
-    setSnackbar,
   })
 
   useAudiobookSourceChapterFocus({
@@ -958,6 +960,7 @@ const AudiobookPage = () => {
             showCustomVoiceWorkbench={showCustomVoiceWorkbench}
             voiceError={voiceError}
             voiceLoading={voiceLoading}
+            customVoicePresets={customVoicePresets}
             cosyVoiceWorkbench={cosyVoiceWorkbench}
             narrationStyle={narrationStyle}
             narrationStylePrompt={narrationStylePrompt}
@@ -966,13 +969,12 @@ const AudiobookPage = () => {
             audioFxConfig={audioFxConfig}
             chapters={chapters}
             selectedChapters={selectedChapters}
-            supportsTtsTuning={supportsTtsTuning}
             loadingCharacters={loadingCharacters}
             characterVoices={characterVoices}
             currentVoicePresets={currentVoicePresets}
             voicePresetsByModel={voicePresetsByModel}
             previewingCharacterId={previewingCharacterId}
-            recommendingVoiceTypeId={recommendingVoiceTypeId}
+            customVoicePreviewingId={customVoicePreviewingId}
             autoAssigningVoices={autoAssigningVoices}
             generateDisabled={setupGenerateDisabled}
             generateDisabledReason={setupGenerateDisabledReason}
@@ -988,13 +990,8 @@ const AudiobookPage = () => {
             onOpenChapterMenu={handleOpenChapterMenu}
             onVoiceChange={handleVoiceChange}
             onTtsModelChangeForCharacter={handleTtsModelChangeForCharacter}
-            onVoiceTypeChange={handleVoiceTypeChange}
-            onPersonalityChange={handlePersonalityChange}
-            onEmotionTendencyChange={handleEmotionTendencyChange}
-            onRecommendVoiceType={handleRecommendVoiceType}
-            onVolumeChange={handleVolumeChange}
-            onSpeedChange={handleSpeedChange}
-            onPitchChange={handlePitchChange}
+            onVoiceCloneDataUrlChange={handleVoiceCloneDataUrlChange}
+            onPreviewCustomVoice={handlePreviewCustomVoice}
             onPreviewCharacterVoice={handlePreviewCharacterVoice}
             onAutoAssignVoices={handleAutoAssignVoices}
             onGenerate={handleGenerate}

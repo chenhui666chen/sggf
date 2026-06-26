@@ -25,16 +25,22 @@ def build_character_voice_mapping_item(
     *,
     tts_model: str,
 ) -> Dict[str, Any]:
-    return {
+    result = {
         "voice_id": item.get("voice_id"),
-        "volume": item.get("volume", 50),
-        "speed": item.get("speed"),
-        "pitch": item.get("pitch"),
         "tts_model": item.get("tts_model", tts_model),
-        "voice_type": item.get("voice_type"),
-        "personality": item.get("personality"),
-        "emotion_tendency": item.get("emotion_tendency"),
     }
+
+    for key in (
+        "voice_clone_data_url",
+        "voice_design_prompt",
+        "mimo_voice_asset_id",
+        "stepaudio_voice_asset_id",
+    ):
+        value = item.get(key)
+        if value is not None:
+            result[key] = value
+
+    return result
 
 
 def normalize_base_voice_mapping(base_voice_mapping: Any) -> Dict[str, Dict[str, Any]]:

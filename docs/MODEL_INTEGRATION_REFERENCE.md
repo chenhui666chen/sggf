@@ -1,7 +1,7 @@
 # 模型接入参考文档
 
 初版：`2026-04-18`
-最近更新：`2026-06-05`
+最近更新：`2026-06-25`
 
 本次更新重点：
 
@@ -11,6 +11,7 @@
 - 补充本次调试中验证有效的最小回归测试集合
 - 补充长耗时生成请求的可观测性要求
 - 补充 `deepseek-v4-flash` 与 `deepseek-v4-pro` 从阿里百炼切换到 DeepSeek 官方 API 的接入基线
+- 补充豆包 `seed-tts-2.0-expressive` 的 Volcengine Seed Speech 接入基线
 
 ## 1. 目标
 
@@ -266,7 +267,7 @@ BaseAdapter
 ├── _SyncImageAdapter          # 百炼同步图片 (qwen-image, wan2.7-image, wan2.6-t2i)
 ├── _AsyncImageAdapter         # 百炼异步图片 (kling-v3-image, kling-v3-omni-image)
 ├── _SeedreamImageAdapter      # 火山方舟图片 (doubao-seedream-4-5, doubao-seedream-5-0)
-├── _DashScopeChatAdapter      # 百炼对话 (qwen3.5-omni-plus, qwen3.6-plus, qwen3-vl-plus)
+├── _DashScopeChatAdapter      # 百炼对话 (qwen3.5-omni-plus, qwen3.7-plus, qwen3-vl-plus)
 ├── _VolcengineChatAdapter     # 火山方舟对话 (doubao-seed-2-0-pro, doubao-seed-2-0-lite)
 ├── _DashScopeTTSAdapter       # 百炼TTS (MiniMax/speech-2.8-turbo, MiniMax/speech-2.8-hd)
 ├── Qwen3TTSInstructFlashAdapter # 百炼TTS (qwen3-tts-instruct-flash)
@@ -576,7 +577,7 @@ def generate(self, task: TaskSpec) -> GenerationResult:
 | 注册 ID | 平台 | 典型延迟 |
 | --- | --- | --- |
 | `qwen3.5-omni-plus` | 百炼 | 1.5s |
-| `qwen3.6-plus` | 百炼 | 5s |
+| `qwen3.7-plus` | 百炼 | 1.6s |
 | `qwen3-vl-plus` | 百炼 | 3.5s |
 | `doubao-seed-2-0-pro` | 火山方舟 | 6s |
 | `doubao-seed-2-0-lite` | 火山方舟 | 4s |
@@ -1115,9 +1116,137 @@ if isinstance(audio_info, dict):
         return base64.b64decode(audio_data)
 ```
 
-### 11.4 TTS 模型的 Voice ID 管理
+### 11.4 豆包 Seed-TTS 2.0 Expressive 接入要点
 
-#### 11.4.1 VoiceManager 的作用
+#### 11.4.1 模型与鉴权边界
+
+豆包 `seed-tts-2.0-expressive` 走 Volcengine Seed Speech / openspeech TTS 接口，不走百炼 DashScope，也不走火山方舟 OpenAI 兼容对话接口。
+
+| 项 | 当前接入基线 |
+| --- | --- |
+| 注册 ID | `seed-tts-2.0-expressive` |
+| provider | `volcengine` |
+| 默认 resource id | `seed-tts-2.0` |
+| 非流式端点 | `POST https://openspeech.bytedance.com/api/v3/tts/unidirectional` |
+| 双向流式端点 | `wss://openspeech.bytedance.com/api/v3/tts/bidirection` |
+| API Key 环境变量 | 优先 `VOLCENGINE_TTS_API_KEY`，兼容 `DOUBAO_TTS_API_KEY`、`SEED_TTS_API_KEY`、`VOLCENGINE_SPEECH_API_KEY`、`DOUBAO_SPEECH_API_KEY` |
+| Resource 环境变量 | `VOLCENGINE_TTS_RESOURCE_ID` 或 `DOUBAO_TTS_RESOURCE_ID` |
+
+关键规则：
+
+- `VOLCENGINE_API_KEY` / `VOLCANO_ENGINE_API_KEY` 通常用于火山方舟模型端点，不能默认当作 Seed Speech TTS 密钥。
+- `DOUBAO_API_KEY` 通常也是方舟/OpenAI 兼容端点密钥，项目不会再把它回退用作 Seed-TTS 的 `X-Api-Key`。
+- `DASHSCOPE_API_KEY` / `ALIYUN_API_KEY` 只用于百炼 TTS、Qwen、Wan 等百炼模型，不应复用到豆包 Seed-TTS。
+- 双向流式 PDF 明确要求 `X-Api-Key` 和 `X-Api-Resource-Id`；项目当前 HTTP 分支同时发送 `X-Api-App-Key` 以兼容旧鉴权形态。
+
+#### 11.4.2 请求体基线
+
+当前有声小说链路先接入非流式 HTTP 合成，payload 由 `TTSEngine._build_seed_tts_http_payload(...)` 生成：
+
+```json
+{
+  "user": {
+    "uid": "audiobook"
+  },
+  "req_params": {
+    "model": "seed-tts-2.0-expressive",
+    "speaker": "zh_female_vv_uranus_bigtts",
+    "text": "要合成的文本",
+    "text_type": "plain",
+    "with_timestamp": 0,
+    "audio_params": {
+      "format": "mp3",
+      "sample_rate": 24000,
+      "speech_rate": 0,
+      "loudness_rate": 0
+    },
+    "additions": "{\"context_texts\":[\"用温柔但疲惫的青年女性声线朗读，语速偏慢，句尾保留轻微气声。\"]}"
+  }
+}
+```
+
+模型感知风格控制规则：
+
+- 有声小说的角色、场景、情绪、声音描述和演绎要求统一交给 `tts_style_control.build_model_style_control(...)`。
+- 对豆包模型，风格控制模式为 `doubao_query_response`。
+- 输出位置是 `req_params.additions` 字符串内的 `context_texts`，不要拼到正文里。
+- `context_texts` 是语音指令，不应作为正文朗读内容处理。
+- 按官方 V3 协议和真实接口验证，`additions` 字段类型是字符串；项目会把 `{ "context_texts": [...] }` 序列化为 JSON 字符串后发送。
+
+#### 11.4.3 语音指令、引用上文与标签
+
+`D:/cuigu/Documents/豆包语音_语音指令与标签_1780036074.pdf` 补充了三类控制入口：
+
+| 控制方式 | 官方含义 | 项目映射 |
+| --- | --- | --- |
+| 语音指令 | 控制整体情绪、方言、语气、语速快慢、音调高低等 | 写入 `req_params.additions` JSON 字符串中的 `context_texts` |
+| 引用上文 | 输入合成文本的上文，只引用不合成，让模型承接语境情绪 | 优先作为 `context_texts` 的语境材料；真实接口验证后再决定是否独立建 `context_reference` 字段 |
+| 语音标签 | 在句子前用方括号写表情、心理、肢体动作等局部细节 | 显式标签模式下把 `inline_audio_tags` 合成为 `[标签]正文`，并在 `additions` JSON 字符串中设置 `use_tag_parser=true` |
+
+方括号标签示例：
+
+```json
+{
+  "req_params": {
+    "model": "seed-tts-2.0-expressive",
+    "speaker": "saturn_zh_female_keainvsheng_tob",
+    "text": "[旁白，语调惊恐，强调触摸到尸体般触感的恐怖]可当他的手触碰到对方的身体时，却感觉一阵冰冷僵硬。",
+    "text_type": "plain",
+    "with_timestamp": 0,
+    "audio_params": {
+      "format": "mp3",
+      "sample_rate": 24000
+    },
+    "additions": "{\"context_texts\":[\"承接前文悬疑氛围，保持压低音量和克制恐惧。\"],\"use_tag_parser\":true}"
+  }
+}
+```
+
+注意：
+
+- 语音标签属于官方“抢鲜体验”，文档明确说明后续会持续优化，不能在真实验证前把稳定性写成已确认。
+- 官方示例要求先确定音色为可爱女生、调皮公主、爽朗少年、天才同桌，或使用声音复刻 2.0 模型复刻后的音色；当前项目系统音色目录已覆盖这四个推荐音色。
+- 没有显式选择标签模式时，不要自动把所有声音描述改写成方括号标签；默认仍使用 `context_texts`，保持稳定。
+
+#### 11.4.4 Expressive 与 Standard 的差异
+
+按双向流式官方 PDF：
+
+| 模型 | 适用结论 |
+| --- | --- |
+| `seed-tts-2.0-standard` | 标准版，时延更低；不支持 `context_texts`，不支持 `use_tag_parser` |
+| `seed-tts-2.0-expressive` | 高表现力版；支持 `context_texts` 与 `use_tag_parser`，但效果可能有波动 |
+
+项目内当前只把 `seed-tts-2.0-expressive` 暴露给有声小说模型选择，因为有声小说朗读依赖情绪、停顿、声线和场景指令。
+
+#### 11.4.5 音色与复刻状态
+
+- 当前系统音色目录在 `shared/seed_tts_2_0_voices.json`，已包含用户提供的 99 个豆包 Seed-TTS 2.0 官方音色。
+- 默认旁白音色为 `zh_female_vv_uranus_bigtts`。
+- 目录中的 `voice_type` / `speaker` 才是接口 `audio_params.voice` 应传的真实值，音色中文名只用于展示。
+- 复刻音色对应 resource id 可能是 `seed-icl-2.0`；涉及付费资产、状态机、音色确认和 `use_tag_parser` 条件，不能直接复用系统音色逻辑。
+
+#### 11.4.6 响应解析与测试
+
+Seed-TTS HTTP 响应可能是音频二进制，也可能是 JSON 中携带音频字段。当前解析逻辑需要兼容：
+
+- `audio/*` 二进制响应。
+- JSON 顶层 `audio`、`data`、`output`、`result`。
+- 嵌套字段 `audio`、`data`、`audio_data`、`binary`、`url`。
+
+最小回归测试：
+
+```bash
+python -m pytest "backend/tests/test_audiobook_tts_model_ids.py" "backend/tests/test_audiobook_tts_provider_payloads.py" -q
+npm run test -- "src/pages/audiobook/__tests__/ttsModels.test.ts"
+python -m pytest "backend/tests/test_project_audio_runtime.py" -q
+```
+
+真实接口验证前，不要把 `pending-runtime-validation` 从模型标签中移除。
+
+### 11.5 TTS 模型的 Voice ID 管理
+
+#### 11.5.1 VoiceManager 的作用
 
 `VoiceManager` 维护预设音色与 TTS 语音 ID 的映射关系：
 
@@ -1130,7 +1259,7 @@ PRESET_VOICES = {
 }
 ```
 
-#### 11.4.2 语音 ID 规范化
+#### 11.5.2 语音 ID 规范化
 
 不同 TTS 模型可能使用不同的语音 ID 格式：
 
@@ -1138,16 +1267,18 @@ PRESET_VOICES = {
 | --- | --- |
 | MiniMax | `male-qn-qingse`, `Chinese (Mandarin)_News_Anchor` |
 | Qwen | `Neil`, `Serena`, `Cherry` |
+| 豆包 Seed-TTS 2.0 | `zh_female_vv_uranus_bigtts`, `saturn_zh_female_keainvsheng_tob` |
 
 `_normalize_speaker_id` 方法应根据模型类型返回正确的语音 ID。
 
-### 11.5 TTS 预览功能调试清单
+### 11.6 TTS 预览功能调试清单
 
 当 TTS 预览失败时，按以下顺序排查：
 
 1. **检查模型 ID 格式**
    - [ ] MiniMax 模型是否带 `MiniMax/` 前缀？
    - [ ] Qwen 模型是否为 `qwen3-tts-instruct-flash` 或 `qwen3-tts-plus`？
+   - [ ] 豆包模型是否为 `seed-tts-2.0-expressive`，且 `X-Api-Resource-Id` 是否为 `seed-tts-2.0`？
 
 2. **检查语音 ID**
    - [ ] 选择的语音是否在对应模型的可用列表中？
@@ -1156,6 +1287,7 @@ PRESET_VOICES = {
 3. **检查请求体**
    - [ ] MiniMax 是否包含 `action: tts` 字段？
    - [ ] Qwen 是否有 `voice` 和 `language_type` 字段？
+   - [ ] 豆包是否把音色放在 `req_params.speaker`，把音频参数放在 `req_params.audio_params`，并把风格控制放在 `req_params.additions` JSON 字符串的 `context_texts`？
 
 4. **检查响应解析**
    - [ ] MiniMax 音频数据是否为十六进制编码？
@@ -1167,6 +1299,8 @@ PRESET_VOICES = {
 
 6. **检查环境变量**
    - [ ] `DASHSCOPE_API_KEY` 或 `ALIYUN_API_KEY` 是否已设置？
+   - [ ] 豆包 Seed-TTS 是否设置了专用语音合成密钥 `VOLCENGINE_TTS_API_KEY`，并按权限需要设置 `VOLCENGINE_TTS_RESOURCE_ID=seed-tts-2.0`？
+   - [ ] 如果只配置了 `VOLCENGINE_API_KEY` 或 `DOUBAO_API_KEY`，应先到豆包语音/Seed Speech 控制台确认是否获得 openspeech 的专用 `X-Api-Key`。
 
 ## 13. 推荐提问方式
 

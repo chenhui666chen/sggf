@@ -105,16 +105,21 @@ class AudiobookAppService:
             return
 
         for item in voice_config:
-            voice_mapping[item.character_name] = {
+            mapping_item = {
                 "voice_id": item.voice_id,
-                "volume": item.volume,
-                "speed": item.speed,
-                "pitch": item.pitch,
                 "tts_model": item.tts_model,
-                "voice_type": item.voice_type,
-                "personality": item.personality,
-                "emotion_tendency": item.emotion_tendency,
             }
+            for key in (
+                "voice_clone_data_url",
+                "voice_design_prompt",
+                "mimo_voice_asset_id",
+                "stepaudio_voice_asset_id",
+            ):
+                value = getattr(item, key, None)
+                if value is not None:
+                    mapping_item[key] = value
+
+            voice_mapping[item.character_name] = mapping_item
 
     def _auto_assign_voices(
         self,
@@ -174,9 +179,6 @@ class AudiobookAppService:
 
                 voice_mapping[char.name] = {
                     "voice_id": profile.voice_id,
-                    "volume": profile.volume_base,
-                    "speed": profile.speed_base,
-                    "pitch": profile.pitch_base,
                     "tts_model": assignment.model,
                 }
 

@@ -11,8 +11,9 @@ import {
 } from './narrationStyles'
 import { normalizePositiveId } from './editorSessionUtils'
 import { normalizeScriptReview, normalizeStageEntry } from './utils'
+import { DEFAULT_CHARACTER_VOICE_PREVIEW_TEXT } from './voicePreviewText'
 
-export const DEFAULT_DESIGN_PREVIEW_TEXT = '欢迎收听这段声音设计试听，我们从这里开始塑造角色的独特声线。'
+export const DEFAULT_DESIGN_PREVIEW_TEXT = DEFAULT_CHARACTER_VOICE_PREVIEW_TEXT
 
 export const hasCustomDesignPreviewText = (value: unknown): boolean => {
   if (typeof value !== 'string') {

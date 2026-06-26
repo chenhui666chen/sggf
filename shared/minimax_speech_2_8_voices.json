@@ -584,8 +584,8 @@
       "description": "柔和少女"
     },
     {
-      "id": "Cantonese_ProfessionalHost（F)",
-      "speaker": "Cantonese_ProfessionalHost（F)",
+      "id": "Cantonese_ProfessionalHost(F)",
+      "speaker": "Cantonese_ProfessionalHost(F)",
       "label": "专业女主持",
       "gender": "female",
       "style": "professional",
@@ -604,8 +604,8 @@
       "description": "温柔女声"
     },
     {
-      "id": "Cantonese_ProfessionalHost（M)",
-      "speaker": "Cantonese_ProfessionalHost（M)",
+      "id": "Cantonese_ProfessionalHost(M)",
+      "speaker": "Cantonese_ProfessionalHost(M)",
       "label": "专业男主持",
       "gender": "male",
       "style": "professional",

@@ -13,7 +13,6 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
-      '@mui/icons-material': path.resolve(__dirname, './node_modules/@mui/icons-material/esm'),
       '@mui/system': path.resolve(__dirname, './node_modules/@mui/system/esm'),
       '@mui/utils': path.resolve(__dirname, './node_modules/@mui/utils/esm'),
     },
@@ -33,7 +32,6 @@ export default defineConfig({
     hmr: {
       protocol: 'ws',
       host: 'localhost',
-      port: 5173,
     },
     fs: {
       cachedChecks: true,
@@ -110,11 +108,10 @@ export default defineConfig({
       'prop-types',
       'react-is',
       'axios',
-    ],
-    exclude: [
       '@mui/material',
-      '@mui/material/styles',
+      '@mui/material/utils',
       '@mui/icons-material',
+      '@mui/icons-material/Close',
       '@mui/lab',
       '@mui/system',
       '@mui/styled-engine',

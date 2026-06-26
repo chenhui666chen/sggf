@@ -58,6 +58,7 @@ interface AudiobookSetupStepProps {
   showCustomVoiceWorkbench: boolean
   voiceError: string | null
   voiceLoading: boolean
+  customVoicePresets: VoicePreset[]
   cosyVoiceWorkbench: CosyVoiceWorkbench
   narrationStyle: NarrationStyleId
   narrationStylePrompt: string
@@ -66,13 +67,12 @@ interface AudiobookSetupStepProps {
   audioFxConfig: AudioFxConfig
   chapters: Chapter[]
   selectedChapters: number[]
-  supportsTtsTuning: boolean
   loadingCharacters: boolean
   characterVoices: CharacterVoiceSetting[]
   currentVoicePresets: VoicePreset[]
   voicePresetsByModel: Record<TtsModel, VoicePreset[]>
   previewingCharacterId: number | null
-  recommendingVoiceTypeId: number | null
+  customVoicePreviewingId: string | null
   autoAssigningVoices: boolean
   generateDisabled: boolean
   generateDisabledReason: string
@@ -88,13 +88,8 @@ interface AudiobookSetupStepProps {
   onOpenChapterMenu: (event: MouseEvent<HTMLButtonElement>, chapter: Chapter) => void
   onVoiceChange: (characterId: number, voiceId: string) => void
   onTtsModelChangeForCharacter: (characterId: number, nextModel: TtsModel | 'inherit') => void
-  onVoiceTypeChange: (characterId: number, voiceType: string) => void
-  onPersonalityChange: (characterId: number, personality: string) => void
-  onEmotionTendencyChange: (characterId: number, emotionTendency: string) => void
-  onRecommendVoiceType: (characterVoice: CharacterVoiceSetting) => void
-  onVolumeChange: (characterId: number, volume: number) => void
-  onSpeedChange: (characterId: number, speed: number) => void
-  onPitchChange: (characterId: number, pitch: number) => void
+  onVoiceCloneDataUrlChange: (characterId: number, voiceCloneDataUrl: string) => void
+  onPreviewCustomVoice: (voice: VoicePreset, model?: TtsModel) => void
   onPreviewCharacterVoice: (characterVoice: CharacterVoiceSetting) => void
   onAutoAssignVoices: () => void
   onGenerate: () => void
@@ -173,6 +168,7 @@ const AudiobookSetupStep = ({
   showCustomVoiceWorkbench,
   voiceError,
   voiceLoading,
+  customVoicePresets,
   cosyVoiceWorkbench,
   narrationStyle,
   narrationStylePrompt,
@@ -181,13 +177,12 @@ const AudiobookSetupStep = ({
   audioFxConfig,
   chapters,
   selectedChapters,
-  supportsTtsTuning,
   loadingCharacters,
   characterVoices,
   currentVoicePresets,
   voicePresetsByModel,
   previewingCharacterId,
-  recommendingVoiceTypeId,
+  customVoicePreviewingId,
   autoAssigningVoices,
   generateDisabled,
   generateDisabledReason,
@@ -203,13 +198,8 @@ const AudiobookSetupStep = ({
   onOpenChapterMenu,
   onVoiceChange,
   onTtsModelChangeForCharacter,
-  onVoiceTypeChange,
-  onPersonalityChange,
-  onEmotionTendencyChange,
-  onRecommendVoiceType,
-  onVolumeChange,
-  onSpeedChange,
-  onPitchChange,
+  onVoiceCloneDataUrlChange,
+  onPreviewCustomVoice,
   onPreviewCharacterVoice,
   onAutoAssignVoices,
   onGenerate,
@@ -358,6 +348,7 @@ const AudiobookSetupStep = ({
             </Box>
 
             <VoiceCatalogStatusPanel
+              ttsModel={ttsModel}
               voiceCatalogMeta={voiceCatalogMeta}
               voiceCatalogSummary={voiceCatalogSummary}
               voiceCatalogNotice={voiceCatalogNotice}
@@ -365,7 +356,10 @@ const AudiobookSetupStep = ({
               showCustomVoiceWorkbench={showCustomVoiceWorkbench}
               voiceError={voiceError}
               voiceLoading={voiceLoading}
+              customVoicePresets={customVoicePresets}
               cosyVoiceWorkbench={cosyVoiceWorkbench}
+              customVoicePreviewingId={customVoicePreviewingId}
+              onPreviewCustomVoice={onPreviewCustomVoice}
               onFetchVoiceCatalog={onFetchVoiceCatalog}
             />
           </Stack>
@@ -410,14 +404,13 @@ const AudiobookSetupStep = ({
 
         <SetupPanel
           icon={<VoiceIcon fontSize="small" />}
-          title={supportsTtsTuning ? '角色声音与调音' : '角色声音'}
+          title="角色声音"
           subtitle="角色专属音色会覆盖项目默认模型"
         >
           <Alert severity="info" sx={{ mb: 2 }}>
-            已选择 {selectedChapterCount}/{chapterCount} 个章节。未配置的角色将由 AI 自动分配音色和音量。
+            已选择 {selectedChapterCount}/{chapterCount} 个章节。未配置的角色将由 AI 自动分配音色。
           </Alert>
           <CharacterVoiceConfigPanel
-            supportsTtsTuning={supportsTtsTuning}
             loadingCharacters={loadingCharacters}
             characterVoices={characterVoices}
             ttsModel={ttsModel}
@@ -426,17 +419,10 @@ const AudiobookSetupStep = ({
             voicePresetsByModel={voicePresetsByModel}
             ttsModelOptions={ttsModelOptions}
             previewingCharacterId={previewingCharacterId}
-            recommendingVoiceTypeId={recommendingVoiceTypeId}
             autoAssigningVoices={autoAssigningVoices}
             onVoiceChange={onVoiceChange}
             onTtsModelChangeForCharacter={onTtsModelChangeForCharacter}
-            onVoiceTypeChange={onVoiceTypeChange}
-            onPersonalityChange={onPersonalityChange}
-            onEmotionTendencyChange={onEmotionTendencyChange}
-            onRecommendVoiceType={onRecommendVoiceType}
-            onVolumeChange={onVolumeChange}
-            onSpeedChange={onSpeedChange}
-            onPitchChange={onPitchChange}
+            onVoiceCloneDataUrlChange={onVoiceCloneDataUrlChange}
             onPreviewCharacterVoice={onPreviewCharacterVoice}
             onAutoAssignVoices={onAutoAssignVoices}
           />

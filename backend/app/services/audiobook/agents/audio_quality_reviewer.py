@@ -215,6 +215,7 @@ class AudioQualityReviewer:
         action_without_effect_count = 0
         expressive_segment_count = 0
         missing_performance_notes_count = 0
+        missing_delivery_plan_count = 0
         
         for i, seg in enumerate(segments):
             text = str(seg.get("text", "") or "").strip()
@@ -285,6 +286,17 @@ class AudioQualityReviewer:
                 expressive_segment_count += 1
                 if not performance_notes:
                     missing_performance_notes_count += 1
+                if not self._has_actionable_delivery_plan(seg):
+                    missing_delivery_plan_count += 1
+                    if missing_delivery_plan_count <= 5:
+                        issues.append(QualityIssue(
+                            location=location,
+                            severity="minor",
+                            category="script",
+                            description="强表现片段缺少可执行朗读意图",
+                            suggestion="补充 delivery_plan，至少包含模型、朗读方式、微表演标签或导演指导，便于按 TTS 模型生成风格指令"
+                        ))
+                    engagement_score -= 0.2
 
             if self._needs_breath_pause(text, emotion) and self._segment_pause_after(seg) < 0.12:
                 weak_pause_count += 1
@@ -355,6 +367,11 @@ class AudioQualityReviewer:
             if expressive_segment_count
             else 1.0
         )
+        delivery_plan_coverage = (
+            1.0 - (missing_delivery_plan_count / expressive_segment_count)
+            if expressive_segment_count
+            else 1.0
+        )
         if expressive_segment_count >= 5 and performance_notes_coverage < 0.5:
             issues.append(QualityIssue(
                 location="overall",
@@ -376,6 +393,8 @@ class AudioQualityReviewer:
             "weak_pause_count": weak_pause_count,
             "action_without_effect_count": action_without_effect_count,
             "performance_notes_coverage": performance_notes_coverage,
+            "delivery_plan_coverage": delivery_plan_coverage,
+            "missing_delivery_plan_count": missing_delivery_plan_count,
         }
     
     def _detect_awkward_words(self, text: str) -> List[str]:
@@ -440,6 +459,21 @@ class AudioQualityReviewer:
         sound_effects = segment.get("sound_effects")
         sound_effects_simple = segment.get("sound_effects_simple")
         return bool(sound_effects) or bool(sound_effects_simple)
+
+    def _has_actionable_delivery_plan(self, segment: Dict[str, Any]) -> bool:
+        voice_params = segment.get("voice_params") if isinstance(segment.get("voice_params"), dict) else {}
+        delivery_plan = voice_params.get("delivery_plan")
+        if not isinstance(delivery_plan, dict):
+            return False
+        has_model = bool(delivery_plan.get("model") or voice_params.get("resolved_tts_model") or voice_params.get("tts_model"))
+        has_mode = bool(delivery_plan.get("delivery_mode"))
+        has_guidance = bool(
+            delivery_plan.get("director_guidance")
+            or delivery_plan.get("micro_tags")
+            or delivery_plan.get("pause_strategy")
+            or delivery_plan.get("stress_words")
+        )
+        return has_model and has_mode and has_guidance
 
     def _looks_like_action_or_environment_cue(self, text: str) -> bool:
         value = str(text or "")

@@ -67,6 +67,26 @@ def test_narration_style_prefers_explicit_instruct_emotion_over_weak_default():
     assert "lower the voice and leave a suspenseful pause" in params["instructions"]
 
 
+def test_narration_style_adds_multidimensional_narrator_voice_description():
+    params = apply_narration_style_to_tts_params(
+        "relaxing",
+        {
+            "emotion": "neutral",
+            "voice_description": "性别：女性，年龄感：青年，音调：偏高，语速：快速，情绪：激动，特点：明亮，用途：角色对白",
+        },
+    )
+
+    description = params["voice_description"]
+
+    assert description.startswith("性别：中性，年龄感：中年")
+    assert "音调：中低音" in description
+    assert "语速：缓慢" in description
+    assert "情绪：calm" in description
+    assert "特点：温和、舒缓" in description
+    assert "用途：有声书旁白" in description
+    assert "角色对白" not in description
+
+
 def test_segment_validation_uses_voice_params_pause_as_effective_top_level_pause():
     segment = build_script_segment(
         {
@@ -143,3 +163,31 @@ def test_assign_voices_keeps_instruct_emotion_added_by_narration_style():
     assert segment.instruct_emotion == "calm"
     assert segment.voice_params["instruct_emotion"] == "calm"
     assert segment.voice_params["use_instruct_mode"] is True
+
+
+def test_assign_voices_prepares_delivery_plan_with_segment_model_for_review():
+    profile = FakeVoiceProfile()
+    engine = DummyScriptUtils()
+    engine._narration_style_id = ""
+    engine.tts_model = "qwen3-tts-instruct-flash"
+    engine.voice_manager = FakeVoiceManager(profile)
+    segment = ScriptSegment(
+        type="dialogue",
+        text="她压低声音说，我真的撑不住了。",
+        speaker="岑霜",
+        emotion="sad",
+        instruct_emotion="sad",
+        instruct_scene="雨夜逃亡后短暂停下",
+        instruct_role="长期压抑情绪的继承人",
+        performance_notes="压低声音，语速偏慢，句尾带一点哽咽并留白。",
+        voice_params={"tts_model": "mimo-v2.5-tts"},
+    )
+
+    engine._assign_voices([segment])
+
+    assert segment.voice_params["resolved_tts_model"] == "mimo-v2.5-tts"
+    delivery_plan = segment.voice_params["delivery_plan"]
+    assert delivery_plan["model"] == "mimo-v2.5-tts"
+    assert delivery_plan["model_family"] == "mimo"
+    assert delivery_plan["model_control_preference"] == "director"
+    assert "哽咽" in delivery_plan["micro_tags"]

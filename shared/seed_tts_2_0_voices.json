@@ -1,0 +1,2586 @@
+{
+  "model": "seed-tts-2.0-expressive",
+  "updated_at": "2026-06-25",
+  "source": "user provided Volcengine Doubao Seed-TTS 2.0 voice catalog",
+  "default_voice": "zh_female_vv_uranus_bigtts",
+  "voices": [
+    {
+      "id": "zh_female_vv_uranus_bigtts",
+      "speaker": "zh_female_vv_uranus_bigtts",
+      "label": "vivi 2.0",
+      "voice_type": "zh_female_vv_uranus_bigtts",
+      "gender": "female",
+      "language": "cn",
+      "category": "general",
+      "style": "natural",
+      "scenario": "通用场景",
+      "tags": [
+        "通用场景"
+      ],
+      "description": "vivi 2.0，豆包语音合成 2.0 官方音色，推荐用于通用场景。",
+      "recommended": [
+        "有声小说",
+        "AI 交互",
+        "内容生产"
+      ],
+      "supports_inline_voice_labels": false,
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "saturn_zh_female_cancan_tob",
+      "speaker": "saturn_zh_female_cancan_tob",
+      "label": "知性灿灿",
+      "voice_type": "saturn_zh_female_cancan_tob",
+      "gender": "female",
+      "language": "cn",
+      "category": "roleplay",
+      "style": "intellectual",
+      "scenario": "角色扮演",
+      "tags": [
+        "角色扮演"
+      ],
+      "description": "知性灿灿，豆包语音合成 2.0 官方音色，推荐用于角色扮演。",
+      "recommended": [
+        "角色对白",
+        "有声小说",
+        "情感演绎"
+      ],
+      "supports_inline_voice_labels": false,
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "saturn_zh_female_keainvsheng_tob",
+      "speaker": "saturn_zh_female_keainvsheng_tob",
+      "label": "可爱女生",
+      "voice_type": "saturn_zh_female_keainvsheng_tob",
+      "gender": "female",
+      "language": "cn",
+      "category": "roleplay",
+      "style": "cute",
+      "scenario": "角色扮演",
+      "tags": [
+        "角色扮演",
+        "语音标签推荐音色"
+      ],
+      "description": "可爱女生，豆包语音合成 2.0 官方音色，推荐用于角色扮演。",
+      "recommended": [
+        "角色对白",
+        "有声小说",
+        "情感演绎"
+      ],
+      "supports_inline_voice_labels": true,
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "saturn_zh_female_tiaopigongzhu_tob",
+      "speaker": "saturn_zh_female_tiaopigongzhu_tob",
+      "label": "调皮公主",
+      "voice_type": "saturn_zh_female_tiaopigongzhu_tob",
+      "gender": "female",
+      "language": "cn",
+      "category": "roleplay",
+      "style": "playful",
+      "scenario": "角色扮演",
+      "tags": [
+        "角色扮演",
+        "语音标签推荐音色"
+      ],
+      "description": "调皮公主，豆包语音合成 2.0 官方音色，推荐用于角色扮演。",
+      "recommended": [
+        "角色对白",
+        "有声小说",
+        "情感演绎"
+      ],
+      "supports_inline_voice_labels": true,
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "saturn_zh_male_shuanglangshaonian_tob",
+      "speaker": "saturn_zh_male_shuanglangshaonian_tob",
+      "label": "爽朗少年",
+      "voice_type": "saturn_zh_male_shuanglangshaonian_tob",
+      "gender": "male",
+      "language": "cn",
+      "category": "roleplay",
+      "style": "bright",
+      "scenario": "角色扮演",
+      "tags": [
+        "角色扮演",
+        "语音标签推荐音色"
+      ],
+      "description": "爽朗少年，豆包语音合成 2.0 官方音色，推荐用于角色扮演。",
+      "recommended": [
+        "角色对白",
+        "有声小说",
+        "情感演绎"
+      ],
+      "supports_inline_voice_labels": true,
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "saturn_zh_male_tiancaitongzhuo_tob",
+      "speaker": "saturn_zh_male_tiancaitongzhuo_tob",
+      "label": "天才同桌",
+      "voice_type": "saturn_zh_male_tiancaitongzhuo_tob",
+      "gender": "male",
+      "language": "cn",
+      "category": "roleplay",
+      "style": "smart",
+      "scenario": "角色扮演",
+      "tags": [
+        "角色扮演",
+        "语音标签推荐音色"
+      ],
+      "description": "天才同桌，豆包语音合成 2.0 官方音色，推荐用于角色扮演。",
+      "recommended": [
+        "角色对白",
+        "有声小说",
+        "情感演绎"
+      ],
+      "supports_inline_voice_labels": true,
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "zh_female_xiaohe_uranus_bigtts",
+      "speaker": "zh_female_xiaohe_uranus_bigtts",
+      "label": "小何",
+      "voice_type": "zh_female_xiaohe_uranus_bigtts",
+      "gender": "female",
+      "language": "cn",
+      "category": "general",
+      "style": "natural",
+      "scenario": "通用场景",
+      "tags": [
+        "通用场景"
+      ],
+      "description": "小何，豆包语音合成 2.0 官方音色，推荐用于通用场景。",
+      "recommended": [
+        "有声小说",
+        "AI 交互",
+        "内容生产"
+      ],
+      "supports_inline_voice_labels": false,
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "zh_male_m191_uranus_bigtts",
+      "speaker": "zh_male_m191_uranus_bigtts",
+      "label": "云舟",
+      "voice_type": "zh_male_m191_uranus_bigtts",
+      "gender": "male",
+      "language": "cn",
+      "category": "general",
+      "style": "natural",
+      "scenario": "通用场景",
+      "tags": [
+        "通用场景"
+      ],
+      "description": "云舟，豆包语音合成 2.0 官方音色，推荐用于通用场景。",
+      "recommended": [
+        "有声小说",
+        "AI 交互",
+        "内容生产"
+      ],
+      "supports_inline_voice_labels": false,
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "zh_male_taocheng_uranus_bigtts",
+      "speaker": "zh_male_taocheng_uranus_bigtts",
+      "label": "小天",
+      "voice_type": "zh_male_taocheng_uranus_bigtts",
+      "gender": "male",
+      "language": "cn",
+      "category": "general",
+      "style": "natural",
+      "scenario": "通用场景",
+      "tags": [
+        "通用场景"
+      ],
+      "description": "小天，豆包语音合成 2.0 官方音色，推荐用于通用场景。",
+      "recommended": [
+        "有声小说",
+        "AI 交互",
+        "内容生产"
+      ],
+      "supports_inline_voice_labels": false,
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "en_male_tim_uranus_bigtts",
+      "speaker": "en_male_tim_uranus_bigtts",
+      "label": "Tim",
+      "voice_type": "en_male_tim_uranus_bigtts",
+      "gender": "male",
+      "language": "en",
+      "category": "general",
+      "style": "natural",
+      "scenario": "通用场景",
+      "tags": [
+        "通用场景"
+      ],
+      "description": "Tim，豆包语音合成 2.0 官方音色，推荐用于通用场景。",
+      "recommended": [
+        "有声小说",
+        "AI 交互",
+        "内容生产"
+      ],
+      "supports_inline_voice_labels": false,
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "en_female_dacey_uranus_bigtts",
+      "speaker": "en_female_dacey_uranus_bigtts",
+      "label": "Dacey",
+      "voice_type": "en_female_dacey_uranus_bigtts",
+      "gender": "female",
+      "language": "en",
+      "category": "general",
+      "style": "natural",
+      "scenario": "通用场景",
+      "tags": [
+        "通用场景"
+      ],
+      "description": "Dacey，豆包语音合成 2.0 官方音色，推荐用于通用场景。",
+      "recommended": [
+        "有声小说",
+        "AI 交互",
+        "内容生产"
+      ],
+      "supports_inline_voice_labels": false,
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "en_female_stokie_uranus_bigtts",
+      "speaker": "en_female_stokie_uranus_bigtts",
+      "label": "Stokie",
+      "voice_type": "en_female_stokie_uranus_bigtts",
+      "gender": "female",
+      "language": "en",
+      "category": "general",
+      "style": "natural",
+      "scenario": "通用场景",
+      "tags": [
+        "通用场景"
+      ],
+      "description": "Stokie，豆包语音合成 2.0 官方音色，推荐用于通用场景。",
+      "recommended": [
+        "有声小说",
+        "AI 交互",
+        "内容生产"
+      ],
+      "supports_inline_voice_labels": false,
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "zh_male_liufei_uranus_bigtts",
+      "speaker": "zh_male_liufei_uranus_bigtts",
+      "label": "刘飞 2.0",
+      "voice_type": "zh_male_liufei_uranus_bigtts",
+      "gender": "male",
+      "language": "zh",
+      "category": "general",
+      "style": "natural",
+      "scenario": "通用场景",
+      "tags": [
+        "通用场景"
+      ],
+      "description": "刘飞 2.0，豆包语音合成 2.0 官方音色，推荐用于通用场景。",
+      "recommended": [
+        "有声小说",
+        "AI 交互",
+        "内容生产"
+      ],
+      "supports_inline_voice_labels": false,
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "zh_female_qingxinnvsheng_uranus_bigtts",
+      "speaker": "zh_female_qingxinnvsheng_uranus_bigtts",
+      "label": "清新女声 2.0",
+      "voice_type": "zh_female_qingxinnvsheng_uranus_bigtts",
+      "gender": "female",
+      "language": "zh",
+      "category": "general",
+      "style": "natural",
+      "scenario": "通用场景",
+      "tags": [
+        "通用场景"
+      ],
+      "description": "清新女声 2.0，豆包语音合成 2.0 官方音色，推荐用于通用场景。",
+      "recommended": [
+        "有声小说",
+        "AI 交互",
+        "内容生产"
+      ],
+      "supports_inline_voice_labels": false,
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "zh_female_cancan_uranus_bigtts",
+      "speaker": "zh_female_cancan_uranus_bigtts",
+      "label": "知性灿灿 2.0",
+      "voice_type": "zh_female_cancan_uranus_bigtts",
+      "gender": "female",
+      "language": "zh",
+      "category": "roleplay",
+      "style": "intellectual",
+      "scenario": "角色扮演",
+      "tags": [
+        "角色扮演"
+      ],
+      "description": "知性灿灿 2.0，豆包语音合成 2.0 官方音色，推荐用于角色扮演。",
+      "recommended": [
+        "角色对白",
+        "有声小说",
+        "情感演绎"
+      ],
+      "supports_inline_voice_labels": false,
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "zh_female_sajiaoxuemei_uranus_bigtts",
+      "speaker": "zh_female_sajiaoxuemei_uranus_bigtts",
+      "label": "撒娇学妹 2.0",
+      "voice_type": "zh_female_sajiaoxuemei_uranus_bigtts",
+      "gender": "female",
+      "language": "zh",
+      "category": "roleplay",
+      "style": "coquettish",
+      "scenario": "角色扮演",
+      "tags": [
+        "角色扮演"
+      ],
+      "description": "撒娇学妹 2.0，豆包语音合成 2.0 官方音色，推荐用于角色扮演。",
+      "recommended": [
+        "角色对白",
+        "有声小说",
+        "情感演绎"
+      ],
+      "supports_inline_voice_labels": false,
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "zh_female_tianmeixiaoyuan_uranus_bigtts",
+      "speaker": "zh_female_tianmeixiaoyuan_uranus_bigtts",
+      "label": "甜美小源 2.0",
+      "voice_type": "zh_female_tianmeixiaoyuan_uranus_bigtts",
+      "gender": "female",
+      "language": "zh",
+      "category": "general",
+      "style": "sweet",
+      "scenario": "通用场景",
+      "tags": [
+        "通用场景"
+      ],
+      "description": "甜美小源 2.0，豆包语音合成 2.0 官方音色，推荐用于通用场景。",
+      "recommended": [
+        "有声小说",
+        "AI 交互",
+        "内容生产"
+      ],
+      "supports_inline_voice_labels": false,
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "zh_female_tianmeitaozi_uranus_bigtts",
+      "speaker": "zh_female_tianmeitaozi_uranus_bigtts",
+      "label": "甜美桃子 2.0",
+      "voice_type": "zh_female_tianmeitaozi_uranus_bigtts",
+      "gender": "female",
+      "language": "zh",
+      "category": "general",
+      "style": "sweet",
+      "scenario": "通用场景",
+      "tags": [
+        "通用场景"
+      ],
+      "description": "甜美桃子 2.0，豆包语音合成 2.0 官方音色，推荐用于通用场景。",
+      "recommended": [
+        "有声小说",
+        "AI 交互",
+        "内容生产"
+      ],
+      "supports_inline_voice_labels": false,
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "zh_female_shuangkuaisisi_uranus_bigtts",
+      "speaker": "zh_female_shuangkuaisisi_uranus_bigtts",
+      "label": "爽快思思 2.0",
+      "voice_type": "zh_female_shuangkuaisisi_uranus_bigtts",
+      "gender": "female",
+      "language": "zh",
+      "category": "general",
+      "style": "natural",
+      "scenario": "通用场景",
+      "tags": [
+        "通用场景"
+      ],
+      "description": "爽快思思 2.0，豆包语音合成 2.0 官方音色，推荐用于通用场景。",
+      "recommended": [
+        "有声小说",
+        "AI 交互",
+        "内容生产"
+      ],
+      "supports_inline_voice_labels": false,
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "zh_female_peiqi_uranus_bigtts",
+      "speaker": "zh_female_peiqi_uranus_bigtts",
+      "label": "佩奇猪 2.0",
+      "voice_type": "zh_female_peiqi_uranus_bigtts",
+      "gender": "female",
+      "language": "zh",
+      "category": "dubbing",
+      "style": "dubbing",
+      "scenario": "视频配音",
+      "tags": [
+        "视频配音"
+      ],
+      "description": "佩奇猪 2.0，豆包语音合成 2.0 官方音色，推荐用于视频配音。",
+      "recommended": [
+        "视频配音",
+        "角色演绎",
+        "内容生产"
+      ],
+      "supports_inline_voice_labels": false,
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "zh_female_linjianvhai_uranus_bigtts",
+      "speaker": "zh_female_linjianvhai_uranus_bigtts",
+      "label": "邻家女孩 2.0",
+      "voice_type": "zh_female_linjianvhai_uranus_bigtts",
+      "gender": "female",
+      "language": "zh",
+      "category": "general",
+      "style": "natural",
+      "scenario": "通用场景",
+      "tags": [
+        "通用场景"
+      ],
+      "description": "邻家女孩 2.0，豆包语音合成 2.0 官方音色，推荐用于通用场景。",
+      "recommended": [
+        "有声小说",
+        "AI 交互",
+        "内容生产"
+      ],
+      "supports_inline_voice_labels": false,
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "zh_male_shaonianzixin_uranus_bigtts",
+      "speaker": "zh_male_shaonianzixin_uranus_bigtts",
+      "label": "少年梓辛/Brayan 2.0",
+      "voice_type": "zh_male_shaonianzixin_uranus_bigtts",
+      "gender": "male",
+      "language": "zh",
+      "category": "general",
+      "style": "natural",
+      "scenario": "通用场景",
+      "tags": [
+        "通用场景"
+      ],
+      "description": "少年梓辛/Brayan 2.0，豆包语音合成 2.0 官方音色，推荐用于通用场景。",
+      "recommended": [
+        "有声小说",
+        "AI 交互",
+        "内容生产"
+      ],
+      "supports_inline_voice_labels": false,
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "zh_male_sunwukong_uranus_bigtts",
+      "speaker": "zh_male_sunwukong_uranus_bigtts",
+      "label": "猴哥 2.0",
+      "voice_type": "zh_male_sunwukong_uranus_bigtts",
+      "gender": "male",
+      "language": "zh",
+      "category": "dubbing",
+      "style": "dubbing",
+      "scenario": "视频配音",
+      "tags": [
+        "视频配音"
+      ],
+      "description": "猴哥 2.0，豆包语音合成 2.0 官方音色，推荐用于视频配音。",
+      "recommended": [
+        "视频配音",
+        "角色演绎",
+        "内容生产"
+      ],
+      "supports_inline_voice_labels": false,
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "zh_female_yingyujiaoxue_uranus_bigtts",
+      "speaker": "zh_female_yingyujiaoxue_uranus_bigtts",
+      "label": "Tina老师 2.0",
+      "voice_type": "zh_female_yingyujiaoxue_uranus_bigtts",
+      "gender": "female",
+      "language": "zh",
+      "category": "education",
+      "style": "education",
+      "scenario": "教育场景",
+      "tags": [
+        "教育场景"
+      ],
+      "description": "Tina老师 2.0，豆包语音合成 2.0 官方音色，推荐用于教育场景。",
+      "recommended": [
+        "教育培训",
+        "儿童陪伴",
+        "知识讲解"
+      ],
+      "supports_inline_voice_labels": false,
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "zh_female_kefunvsheng_uranus_bigtts",
+      "speaker": "zh_female_kefunvsheng_uranus_bigtts",
+      "label": "暖阳女声 2.0",
+      "voice_type": "zh_female_kefunvsheng_uranus_bigtts",
+      "gender": "female",
+      "language": "zh",
+      "category": "customer_service",
+      "style": "service",
+      "scenario": "客服场景",
+      "tags": [
+        "客服场景"
+      ],
+      "description": "暖阳女声 2.0，豆包语音合成 2.0 官方音色，推荐用于客服场景。",
+      "recommended": [
+        "智能客服",
+        "业务办理",
+        "语音助手"
+      ],
+      "supports_inline_voice_labels": false,
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "zh_female_xiaoxue_uranus_bigtts",
+      "speaker": "zh_female_xiaoxue_uranus_bigtts",
+      "label": "儿童绘本 2.0",
+      "voice_type": "zh_female_xiaoxue_uranus_bigtts",
+      "gender": "female",
+      "language": "zh",
+      "category": "audiobook",
+      "style": "child_story",
+      "scenario": "有声阅读",
+      "tags": [
+        "有声阅读"
+      ],
+      "description": "儿童绘本 2.0，豆包语音合成 2.0 官方音色，推荐用于有声阅读。",
+      "recommended": [
+        "有声小说",
+        "有声阅读",
+        "故事朗读"
+      ],
+      "supports_inline_voice_labels": false,
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "zh_male_dayi_uranus_bigtts",
+      "speaker": "zh_male_dayi_uranus_bigtts",
+      "label": "大壹 2.0",
+      "voice_type": "zh_male_dayi_uranus_bigtts",
+      "gender": "male",
+      "language": "zh",
+      "category": "dubbing",
+      "style": "dubbing",
+      "scenario": "视频配音",
+      "tags": [
+        "视频配音"
+      ],
+      "description": "大壹 2.0，豆包语音合成 2.0 官方音色，推荐用于视频配音。",
+      "recommended": [
+        "视频配音",
+        "角色演绎",
+        "内容生产"
+      ],
+      "supports_inline_voice_labels": false,
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "zh_female_mizai_uranus_bigtts",
+      "speaker": "zh_female_mizai_uranus_bigtts",
+      "label": "黑猫侦探社咪仔 2.0",
+      "voice_type": "zh_female_mizai_uranus_bigtts",
+      "gender": "female",
+      "language": "zh",
+      "category": "dubbing",
+      "style": "dubbing",
+      "scenario": "视频配音",
+      "tags": [
+        "视频配音"
+      ],
+      "description": "黑猫侦探社咪仔 2.0，豆包语音合成 2.0 官方音色，推荐用于视频配音。",
+      "recommended": [
+        "视频配音",
+        "角色演绎",
+        "内容生产"
+      ],
+      "supports_inline_voice_labels": false,
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "zh_female_jitangnv_uranus_bigtts",
+      "speaker": "zh_female_jitangnv_uranus_bigtts",
+      "label": "鸡汤女 2.0",
+      "voice_type": "zh_female_jitangnv_uranus_bigtts",
+      "gender": "female",
+      "language": "zh",
+      "category": "dubbing",
+      "style": "dubbing",
+      "scenario": "视频配音",
+      "tags": [
+        "视频配音"
+      ],
+      "description": "鸡汤女 2.0，豆包语音合成 2.0 官方音色，推荐用于视频配音。",
+      "recommended": [
+        "视频配音",
+        "角色演绎",
+        "内容生产"
+      ],
+      "supports_inline_voice_labels": false,
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "zh_female_meilinvyou_uranus_bigtts",
+      "speaker": "zh_female_meilinvyou_uranus_bigtts",
+      "label": "魅力女友 2.0",
+      "voice_type": "zh_female_meilinvyou_uranus_bigtts",
+      "gender": "female",
+      "language": "zh",
+      "category": "general",
+      "style": "natural",
+      "scenario": "通用场景",
+      "tags": [
+        "通用场景"
+      ],
+      "description": "魅力女友 2.0，豆包语音合成 2.0 官方音色，推荐用于通用场景。",
+      "recommended": [
+        "有声小说",
+        "AI 交互",
+        "内容生产"
+      ],
+      "supports_inline_voice_labels": false,
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "zh_female_liuchangnv_uranus_bigtts",
+      "speaker": "zh_female_liuchangnv_uranus_bigtts",
+      "label": "流畅女声 2.0",
+      "voice_type": "zh_female_liuchangnv_uranus_bigtts",
+      "gender": "female",
+      "language": "zh",
+      "category": "dubbing",
+      "style": "dubbing",
+      "scenario": "视频配音",
+      "tags": [
+        "视频配音"
+      ],
+      "description": "流畅女声 2.0，豆包语音合成 2.0 官方音色，推荐用于视频配音。",
+      "recommended": [
+        "视频配音",
+        "角色演绎",
+        "内容生产"
+      ],
+      "supports_inline_voice_labels": false,
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "zh_male_ruyayichen_uranus_bigtts",
+      "speaker": "zh_male_ruyayichen_uranus_bigtts",
+      "label": "儒雅逸辰 2.0",
+      "voice_type": "zh_male_ruyayichen_uranus_bigtts",
+      "gender": "male",
+      "language": "zh",
+      "category": "dubbing",
+      "style": "dubbing",
+      "scenario": "视频配音",
+      "tags": [
+        "视频配音"
+      ],
+      "description": "儒雅逸辰 2.0，豆包语音合成 2.0 官方音色，推荐用于视频配音。",
+      "recommended": [
+        "视频配音",
+        "角色演绎",
+        "内容生产"
+      ],
+      "supports_inline_voice_labels": false,
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "zh_female_wenroumama_uranus_bigtts",
+      "speaker": "zh_female_wenroumama_uranus_bigtts",
+      "label": "温柔妈妈 2.0",
+      "voice_type": "zh_female_wenroumama_uranus_bigtts",
+      "gender": "female",
+      "language": "zh",
+      "category": "general",
+      "style": "gentle",
+      "scenario": "通用场景",
+      "tags": [
+        "通用场景"
+      ],
+      "description": "温柔妈妈 2.0，豆包语音合成 2.0 官方音色，推荐用于通用场景。",
+      "recommended": [
+        "有声小说",
+        "AI 交互",
+        "内容生产"
+      ],
+      "supports_inline_voice_labels": false,
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "zh_male_jieshuoxiaoming_uranus_bigtts",
+      "speaker": "zh_male_jieshuoxiaoming_uranus_bigtts",
+      "label": "解说小明 2.0",
+      "voice_type": "zh_male_jieshuoxiaoming_uranus_bigtts",
+      "gender": "male",
+      "language": "zh",
+      "category": "general",
+      "style": "narration",
+      "scenario": "通用场景",
+      "tags": [
+        "通用场景"
+      ],
+      "description": "解说小明 2.0，豆包语音合成 2.0 官方音色，推荐用于通用场景。",
+      "recommended": [
+        "有声小说",
+        "AI 交互",
+        "内容生产"
+      ],
+      "supports_inline_voice_labels": false,
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "zh_female_tvbnv_uranus_bigtts",
+      "speaker": "zh_female_tvbnv_uranus_bigtts",
+      "label": "TVB女声 2.0",
+      "voice_type": "zh_female_tvbnv_uranus_bigtts",
+      "gender": "female",
+      "language": "zh",
+      "category": "general",
+      "style": "natural",
+      "scenario": "通用场景",
+      "tags": [
+        "通用场景"
+      ],
+      "description": "TVB女声 2.0，豆包语音合成 2.0 官方音色，推荐用于通用场景。",
+      "recommended": [
+        "有声小说",
+        "AI 交互",
+        "内容生产"
+      ],
+      "supports_inline_voice_labels": false,
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "zh_male_yizhipiannan_uranus_bigtts",
+      "speaker": "zh_male_yizhipiannan_uranus_bigtts",
+      "label": "译制片男 2.0",
+      "voice_type": "zh_male_yizhipiannan_uranus_bigtts",
+      "gender": "male",
+      "language": "zh",
+      "category": "general",
+      "style": "natural",
+      "scenario": "通用场景",
+      "tags": [
+        "通用场景"
+      ],
+      "description": "译制片男 2.0，豆包语音合成 2.0 官方音色，推荐用于通用场景。",
+      "recommended": [
+        "有声小说",
+        "AI 交互",
+        "内容生产"
+      ],
+      "supports_inline_voice_labels": false,
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "zh_female_qiaopinv_uranus_bigtts",
+      "speaker": "zh_female_qiaopinv_uranus_bigtts",
+      "label": "俏皮女声 2.0",
+      "voice_type": "zh_female_qiaopinv_uranus_bigtts",
+      "gender": "female",
+      "language": "zh",
+      "category": "general",
+      "style": "natural",
+      "scenario": "通用场景",
+      "tags": [
+        "通用场景"
+      ],
+      "description": "俏皮女声 2.0，豆包语音合成 2.0 官方音色，推荐用于通用场景。",
+      "recommended": [
+        "有声小说",
+        "AI 交互",
+        "内容生产"
+      ],
+      "supports_inline_voice_labels": false,
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "zh_female_zhishuaiyingzi_uranus_bigtts",
+      "speaker": "zh_female_zhishuaiyingzi_uranus_bigtts",
+      "label": "直率英子 2.0",
+      "voice_type": "zh_female_zhishuaiyingzi_uranus_bigtts",
+      "gender": "female",
+      "language": "zh",
+      "category": "general",
+      "style": "natural",
+      "scenario": "通用场景",
+      "tags": [
+        "通用场景"
+      ],
+      "description": "直率英子 2.0，豆包语音合成 2.0 官方音色，推荐用于通用场景。",
+      "recommended": [
+        "有声小说",
+        "AI 交互",
+        "内容生产"
+      ],
+      "supports_inline_voice_labels": false,
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "zh_male_linjiananhai_uranus_bigtts",
+      "speaker": "zh_male_linjiananhai_uranus_bigtts",
+      "label": "邻家男孩 2.0",
+      "voice_type": "zh_male_linjiananhai_uranus_bigtts",
+      "gender": "male",
+      "language": "zh",
+      "category": "general",
+      "style": "natural",
+      "scenario": "通用场景",
+      "tags": [
+        "通用场景"
+      ],
+      "description": "邻家男孩 2.0，豆包语音合成 2.0 官方音色，推荐用于通用场景。",
+      "recommended": [
+        "有声小说",
+        "AI 交互",
+        "内容生产"
+      ],
+      "supports_inline_voice_labels": false,
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "zh_male_silang_uranus_bigtts",
+      "speaker": "zh_male_silang_uranus_bigtts",
+      "label": "四郎 2.0",
+      "voice_type": "zh_male_silang_uranus_bigtts",
+      "gender": "male",
+      "language": "zh",
+      "category": "general",
+      "style": "natural",
+      "scenario": "通用场景",
+      "tags": [
+        "通用场景"
+      ],
+      "description": "四郎 2.0，豆包语音合成 2.0 官方音色，推荐用于通用场景。",
+      "recommended": [
+        "有声小说",
+        "AI 交互",
+        "内容生产"
+      ],
+      "supports_inline_voice_labels": false,
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "zh_male_ruyaqingnian_uranus_bigtts",
+      "speaker": "zh_male_ruyaqingnian_uranus_bigtts",
+      "label": "儒雅青年 2.0",
+      "voice_type": "zh_male_ruyaqingnian_uranus_bigtts",
+      "gender": "male",
+      "language": "zh",
+      "category": "general",
+      "style": "natural",
+      "scenario": "通用场景",
+      "tags": [
+        "通用场景"
+      ],
+      "description": "儒雅青年 2.0，豆包语音合成 2.0 官方音色，推荐用于通用场景。",
+      "recommended": [
+        "有声小说",
+        "AI 交互",
+        "内容生产"
+      ],
+      "supports_inline_voice_labels": false,
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "zh_male_qingcang_uranus_bigtts",
+      "speaker": "zh_male_qingcang_uranus_bigtts",
+      "label": "擎苍 2.0",
+      "voice_type": "zh_male_qingcang_uranus_bigtts",
+      "gender": "male",
+      "language": "zh",
+      "category": "general",
+      "style": "natural",
+      "scenario": "通用场景",
+      "tags": [
+        "通用场景"
+      ],
+      "description": "擎苍 2.0，豆包语音合成 2.0 官方音色，推荐用于通用场景。",
+      "recommended": [
+        "有声小说",
+        "AI 交互",
+        "内容生产"
+      ],
+      "supports_inline_voice_labels": false,
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "zh_male_xionger_uranus_bigtts",
+      "speaker": "zh_male_xionger_uranus_bigtts",
+      "label": "熊二 2.0",
+      "voice_type": "zh_male_xionger_uranus_bigtts",
+      "gender": "male",
+      "language": "zh",
+      "category": "general",
+      "style": "natural",
+      "scenario": "通用场景",
+      "tags": [
+        "通用场景"
+      ],
+      "description": "熊二 2.0，豆包语音合成 2.0 官方音色，推荐用于通用场景。",
+      "recommended": [
+        "有声小说",
+        "AI 交互",
+        "内容生产"
+      ],
+      "supports_inline_voice_labels": false,
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "zh_female_yingtaowanzi_uranus_bigtts",
+      "speaker": "zh_female_yingtaowanzi_uranus_bigtts",
+      "label": "樱桃丸子 2.0",
+      "voice_type": "zh_female_yingtaowanzi_uranus_bigtts",
+      "gender": "female",
+      "language": "zh",
+      "category": "general",
+      "style": "natural",
+      "scenario": "通用场景",
+      "tags": [
+        "通用场景"
+      ],
+      "description": "樱桃丸子 2.0，豆包语音合成 2.0 官方音色，推荐用于通用场景。",
+      "recommended": [
+        "有声小说",
+        "AI 交互",
+        "内容生产"
+      ],
+      "supports_inline_voice_labels": false,
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "zh_male_wennuanahu_uranus_bigtts",
+      "speaker": "zh_male_wennuanahu_uranus_bigtts",
+      "label": "温暖阿虎/Alvin 2.0",
+      "voice_type": "zh_male_wennuanahu_uranus_bigtts",
+      "gender": "male",
+      "language": "zh",
+      "category": "general",
+      "style": "natural",
+      "scenario": "通用场景",
+      "tags": [
+        "通用场景"
+      ],
+      "description": "温暖阿虎/Alvin 2.0，豆包语音合成 2.0 官方音色，推荐用于通用场景。",
+      "recommended": [
+        "有声小说",
+        "AI 交互",
+        "内容生产"
+      ],
+      "supports_inline_voice_labels": false,
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "zh_male_naiqimengwa_uranus_bigtts",
+      "speaker": "zh_male_naiqimengwa_uranus_bigtts",
+      "label": "奶气萌娃 2.0",
+      "voice_type": "zh_male_naiqimengwa_uranus_bigtts",
+      "gender": "male",
+      "language": "zh",
+      "category": "general",
+      "style": "natural",
+      "scenario": "通用场景",
+      "tags": [
+        "通用场景"
+      ],
+      "description": "奶气萌娃 2.0，豆包语音合成 2.0 官方音色，推荐用于通用场景。",
+      "recommended": [
+        "有声小说",
+        "AI 交互",
+        "内容生产"
+      ],
+      "supports_inline_voice_labels": false,
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "zh_female_popo_uranus_bigtts",
+      "speaker": "zh_female_popo_uranus_bigtts",
+      "label": "婆婆 2.0",
+      "voice_type": "zh_female_popo_uranus_bigtts",
+      "gender": "female",
+      "language": "zh",
+      "category": "general",
+      "style": "natural",
+      "scenario": "通用场景",
+      "tags": [
+        "通用场景"
+      ],
+      "description": "婆婆 2.0，豆包语音合成 2.0 官方音色，推荐用于通用场景。",
+      "recommended": [
+        "有声小说",
+        "AI 交互",
+        "内容生产"
+      ],
+      "supports_inline_voice_labels": false,
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "zh_female_gaolengyujie_uranus_bigtts",
+      "speaker": "zh_female_gaolengyujie_uranus_bigtts",
+      "label": "高冷御姐 2.0",
+      "voice_type": "zh_female_gaolengyujie_uranus_bigtts",
+      "gender": "female",
+      "language": "zh",
+      "category": "roleplay",
+      "style": "cold",
+      "scenario": "角色扮演",
+      "tags": [
+        "角色扮演"
+      ],
+      "description": "高冷御姐 2.0，豆包语音合成 2.0 官方音色，推荐用于角色扮演。",
+      "recommended": [
+        "角色对白",
+        "有声小说",
+        "情感演绎"
+      ],
+      "supports_inline_voice_labels": false,
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "zh_male_aojiaobazong_uranus_bigtts",
+      "speaker": "zh_male_aojiaobazong_uranus_bigtts",
+      "label": "傲娇霸总 2.0",
+      "voice_type": "zh_male_aojiaobazong_uranus_bigtts",
+      "gender": "male",
+      "language": "zh",
+      "category": "roleplay",
+      "style": "tsundere",
+      "scenario": "角色扮演",
+      "tags": [
+        "角色扮演"
+      ],
+      "description": "傲娇霸总 2.0，豆包语音合成 2.0 官方音色，推荐用于角色扮演。",
+      "recommended": [
+        "角色对白",
+        "有声小说",
+        "情感演绎"
+      ],
+      "supports_inline_voice_labels": false,
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "zh_male_lanyinmianbao_uranus_bigtts",
+      "speaker": "zh_male_lanyinmianbao_uranus_bigtts",
+      "label": "懒音绵宝 2.0",
+      "voice_type": "zh_male_lanyinmianbao_uranus_bigtts",
+      "gender": "male",
+      "language": "zh",
+      "category": "audiobook",
+      "style": "audiobook",
+      "scenario": "有声阅读",
+      "tags": [
+        "有声阅读"
+      ],
+      "description": "懒音绵宝 2.0，豆包语音合成 2.0 官方音色，推荐用于有声阅读。",
+      "recommended": [
+        "有声小说",
+        "有声阅读",
+        "故事朗读"
+      ],
+      "supports_inline_voice_labels": false,
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "zh_male_fanjuanqingnian_uranus_bigtts",
+      "speaker": "zh_male_fanjuanqingnian_uranus_bigtts",
+      "label": "反卷青年 2.0",
+      "voice_type": "zh_male_fanjuanqingnian_uranus_bigtts",
+      "gender": "male",
+      "language": "zh",
+      "category": "roleplay",
+      "style": "roleplay",
+      "scenario": "角色扮演",
+      "tags": [
+        "角色扮演"
+      ],
+      "description": "反卷青年 2.0，豆包语音合成 2.0 官方音色，推荐用于角色扮演。",
+      "recommended": [
+        "角色对白",
+        "有声小说",
+        "情感演绎"
+      ],
+      "supports_inline_voice_labels": false,
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "zh_female_wenroushunv_uranus_bigtts",
+      "speaker": "zh_female_wenroushunv_uranus_bigtts",
+      "label": "温柔淑女 2.0",
+      "voice_type": "zh_female_wenroushunv_uranus_bigtts",
+      "gender": "female",
+      "language": "zh",
+      "category": "general",
+      "style": "gentle",
+      "scenario": "通用场景",
+      "tags": [
+        "通用场景"
+      ],
+      "description": "温柔淑女 2.0，豆包语音合成 2.0 官方音色，推荐用于通用场景。",
+      "recommended": [
+        "有声小说",
+        "AI 交互",
+        "内容生产"
+      ],
+      "supports_inline_voice_labels": false,
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "zh_female_gufengshaoyu_uranus_bigtts",
+      "speaker": "zh_female_gufengshaoyu_uranus_bigtts",
+      "label": "古风少御 2.0",
+      "voice_type": "zh_female_gufengshaoyu_uranus_bigtts",
+      "gender": "female",
+      "language": "zh",
+      "category": "roleplay",
+      "style": "classical",
+      "scenario": "角色扮演",
+      "tags": [
+        "角色扮演"
+      ],
+      "description": "古风少御 2.0，豆包语音合成 2.0 官方音色，推荐用于角色扮演。",
+      "recommended": [
+        "角色对白",
+        "有声小说",
+        "情感演绎"
+      ],
+      "supports_inline_voice_labels": false,
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "zh_male_huolixiaoge_uranus_bigtts",
+      "speaker": "zh_male_huolixiaoge_uranus_bigtts",
+      "label": "活力小哥 2.0",
+      "voice_type": "zh_male_huolixiaoge_uranus_bigtts",
+      "gender": "male",
+      "language": "zh",
+      "category": "roleplay",
+      "style": "roleplay",
+      "scenario": "角色扮演",
+      "tags": [
+        "角色扮演"
+      ],
+      "description": "活力小哥 2.0，豆包语音合成 2.0 官方音色，推荐用于角色扮演。",
+      "recommended": [
+        "角色对白",
+        "有声小说",
+        "情感演绎"
+      ],
+      "supports_inline_voice_labels": false,
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "zh_male_baqiqingshu_uranus_bigtts",
+      "speaker": "zh_male_baqiqingshu_uranus_bigtts",
+      "label": "霸气青叔 2.0",
+      "voice_type": "zh_male_baqiqingshu_uranus_bigtts",
+      "gender": "male",
+      "language": "zh",
+      "category": "roleplay",
+      "style": "powerful",
+      "scenario": "角色扮演",
+      "tags": [
+        "角色扮演"
+      ],
+      "description": "霸气青叔 2.0，豆包语音合成 2.0 官方音色，推荐用于角色扮演。",
+      "recommended": [
+        "角色对白",
+        "有声小说",
+        "情感演绎"
+      ],
+      "supports_inline_voice_labels": false,
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "zh_male_xuanyijieshuo_uranus_bigtts",
+      "speaker": "zh_male_xuanyijieshuo_uranus_bigtts",
+      "label": "悬疑解说 2.0",
+      "voice_type": "zh_male_xuanyijieshuo_uranus_bigtts",
+      "gender": "male",
+      "language": "zh",
+      "category": "audiobook",
+      "style": "suspense",
+      "scenario": "有声阅读",
+      "tags": [
+        "有声阅读"
+      ],
+      "description": "悬疑解说 2.0，豆包语音合成 2.0 官方音色，推荐用于有声阅读。",
+      "recommended": [
+        "有声小说",
+        "有声阅读",
+        "故事朗读"
+      ],
+      "supports_inline_voice_labels": false,
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "zh_female_mengyatou_uranus_bigtts",
+      "speaker": "zh_female_mengyatou_uranus_bigtts",
+      "label": "萌丫头/Cutey 2.0",
+      "voice_type": "zh_female_mengyatou_uranus_bigtts",
+      "gender": "female",
+      "language": "zh",
+      "category": "roleplay",
+      "style": "roleplay",
+      "scenario": "角色扮演",
+      "tags": [
+        "角色扮演"
+      ],
+      "description": "萌丫头/Cutey 2.0，豆包语音合成 2.0 官方音色，推荐用于角色扮演。",
+      "recommended": [
+        "角色对白",
+        "有声小说",
+        "情感演绎"
+      ],
+      "supports_inline_voice_labels": false,
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "zh_female_tiexinnvsheng_uranus_bigtts",
+      "speaker": "zh_female_tiexinnvsheng_uranus_bigtts",
+      "label": "贴心女声/Candy 2.0",
+      "voice_type": "zh_female_tiexinnvsheng_uranus_bigtts",
+      "gender": "female",
+      "language": "zh",
+      "category": "general",
+      "style": "natural",
+      "scenario": "通用场景",
+      "tags": [
+        "通用场景"
+      ],
+      "description": "贴心女声/Candy 2.0，豆包语音合成 2.0 官方音色，推荐用于通用场景。",
+      "recommended": [
+        "有声小说",
+        "AI 交互",
+        "内容生产"
+      ],
+      "supports_inline_voice_labels": false,
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "zh_female_jitangmei_uranus_bigtts",
+      "speaker": "zh_female_jitangmei_uranus_bigtts",
+      "label": "鸡汤妹妹/Hope 2.0",
+      "voice_type": "zh_female_jitangmei_uranus_bigtts",
+      "gender": "female",
+      "language": "zh",
+      "category": "general",
+      "style": "natural",
+      "scenario": "通用场景",
+      "tags": [
+        "通用场景"
+      ],
+      "description": "鸡汤妹妹/Hope 2.0，豆包语音合成 2.0 官方音色，推荐用于通用场景。",
+      "recommended": [
+        "有声小说",
+        "AI 交互",
+        "内容生产"
+      ],
+      "supports_inline_voice_labels": false,
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "zh_male_cixingjieshuonan_uranus_bigtts",
+      "speaker": "zh_male_cixingjieshuonan_uranus_bigtts",
+      "label": "磁性解说男声/Morgan 2.0",
+      "voice_type": "zh_male_cixingjieshuonan_uranus_bigtts",
+      "gender": "male",
+      "language": "zh",
+      "category": "general",
+      "style": "narration",
+      "scenario": "通用场景",
+      "tags": [
+        "通用场景"
+      ],
+      "description": "磁性解说男声/Morgan 2.0，豆包语音合成 2.0 官方音色，推荐用于通用场景。",
+      "recommended": [
+        "有声小说",
+        "AI 交互",
+        "内容生产"
+      ],
+      "supports_inline_voice_labels": false,
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "zh_male_liangsangmengzai_uranus_bigtts",
+      "speaker": "zh_male_liangsangmengzai_uranus_bigtts",
+      "label": "亮嗓萌仔 2.0",
+      "voice_type": "zh_male_liangsangmengzai_uranus_bigtts",
+      "gender": "male",
+      "language": "zh",
+      "category": "general",
+      "style": "natural",
+      "scenario": "通用场景",
+      "tags": [
+        "通用场景"
+      ],
+      "description": "亮嗓萌仔 2.0，豆包语音合成 2.0 官方音色，推荐用于通用场景。",
+      "recommended": [
+        "有声小说",
+        "AI 交互",
+        "内容生产"
+      ],
+      "supports_inline_voice_labels": false,
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "zh_female_kailangjiejie_uranus_bigtts",
+      "speaker": "zh_female_kailangjiejie_uranus_bigtts",
+      "label": "开朗姐姐 2.0",
+      "voice_type": "zh_female_kailangjiejie_uranus_bigtts",
+      "gender": "female",
+      "language": "zh",
+      "category": "general",
+      "style": "natural",
+      "scenario": "通用场景",
+      "tags": [
+        "通用场景"
+      ],
+      "description": "开朗姐姐 2.0，豆包语音合成 2.0 官方音色，推荐用于通用场景。",
+      "recommended": [
+        "有声小说",
+        "AI 交互",
+        "内容生产"
+      ],
+      "supports_inline_voice_labels": false,
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "zh_male_gaolengchenwen_uranus_bigtts",
+      "speaker": "zh_male_gaolengchenwen_uranus_bigtts",
+      "label": "高冷沉稳 2.0",
+      "voice_type": "zh_male_gaolengchenwen_uranus_bigtts",
+      "gender": "male",
+      "language": "zh",
+      "category": "general",
+      "style": "cold",
+      "scenario": "通用场景",
+      "tags": [
+        "通用场景"
+      ],
+      "description": "高冷沉稳 2.0，豆包语音合成 2.0 官方音色，推荐用于通用场景。",
+      "recommended": [
+        "有声小说",
+        "AI 交互",
+        "内容生产"
+      ],
+      "supports_inline_voice_labels": false,
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "zh_male_shenyeboke_uranus_bigtts",
+      "speaker": "zh_male_shenyeboke_uranus_bigtts",
+      "label": "深夜播客 2.0",
+      "voice_type": "zh_male_shenyeboke_uranus_bigtts",
+      "gender": "male",
+      "language": "zh",
+      "category": "multi_emotion",
+      "style": "podcast",
+      "scenario": "多情感",
+      "tags": [
+        "多情感"
+      ],
+      "description": "深夜播客 2.0，豆包语音合成 2.0 官方音色，推荐用于多情感。",
+      "recommended": [
+        "有声小说",
+        "情绪演绎",
+        "深夜播客"
+      ],
+      "supports_inline_voice_labels": false,
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "zh_male_lubanqihao_uranus_bigtts",
+      "speaker": "zh_male_lubanqihao_uranus_bigtts",
+      "label": "鲁班七号 2.0",
+      "voice_type": "zh_male_lubanqihao_uranus_bigtts",
+      "gender": "male",
+      "language": "zh",
+      "category": "roleplay",
+      "style": "roleplay",
+      "scenario": "角色扮演",
+      "tags": [
+        "角色扮演"
+      ],
+      "description": "鲁班七号 2.0，豆包语音合成 2.0 官方音色，推荐用于角色扮演。",
+      "recommended": [
+        "角色对白",
+        "有声小说",
+        "情感演绎"
+      ],
+      "supports_inline_voice_labels": false,
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "zh_female_jiaochuannv_uranus_bigtts",
+      "speaker": "zh_female_jiaochuannv_uranus_bigtts",
+      "label": "娇喘女声 2.0",
+      "voice_type": "zh_female_jiaochuannv_uranus_bigtts",
+      "gender": "female",
+      "language": "zh",
+      "category": "dubbing",
+      "style": "dubbing",
+      "scenario": "视频配音",
+      "tags": [
+        "视频配音"
+      ],
+      "description": "娇喘女声 2.0，豆包语音合成 2.0 官方音色，推荐用于视频配音。",
+      "recommended": [
+        "视频配音",
+        "角色演绎",
+        "内容生产"
+      ],
+      "supports_inline_voice_labels": false,
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "zh_female_linxiao_uranus_bigtts",
+      "speaker": "zh_female_linxiao_uranus_bigtts",
+      "label": "林潇 2.0",
+      "voice_type": "zh_female_linxiao_uranus_bigtts",
+      "gender": "female",
+      "language": "zh",
+      "category": "roleplay",
+      "style": "roleplay",
+      "scenario": "角色扮演",
+      "tags": [
+        "角色扮演"
+      ],
+      "description": "林潇 2.0，豆包语音合成 2.0 官方音色，推荐用于角色扮演。",
+      "recommended": [
+        "角色对白",
+        "有声小说",
+        "情感演绎"
+      ],
+      "supports_inline_voice_labels": false,
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "zh_female_lingling_uranus_bigtts",
+      "speaker": "zh_female_lingling_uranus_bigtts",
+      "label": "玲玲姐姐 2.0",
+      "voice_type": "zh_female_lingling_uranus_bigtts",
+      "gender": "female",
+      "language": "zh",
+      "category": "roleplay",
+      "style": "roleplay",
+      "scenario": "角色扮演",
+      "tags": [
+        "角色扮演"
+      ],
+      "description": "玲玲姐姐 2.0，豆包语音合成 2.0 官方音色，推荐用于角色扮演。",
+      "recommended": [
+        "角色对白",
+        "有声小说",
+        "情感演绎"
+      ],
+      "supports_inline_voice_labels": false,
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "zh_female_chunribu_uranus_bigtts",
+      "speaker": "zh_female_chunribu_uranus_bigtts",
+      "label": "春日部姐姐 2.0",
+      "voice_type": "zh_female_chunribu_uranus_bigtts",
+      "gender": "female",
+      "language": "zh",
+      "category": "roleplay",
+      "style": "roleplay",
+      "scenario": "角色扮演",
+      "tags": [
+        "角色扮演"
+      ],
+      "description": "春日部姐姐 2.0，豆包语音合成 2.0 官方音色，推荐用于角色扮演。",
+      "recommended": [
+        "角色对白",
+        "有声小说",
+        "情感演绎"
+      ],
+      "supports_inline_voice_labels": false,
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "zh_male_tangseng_uranus_bigtts",
+      "speaker": "zh_male_tangseng_uranus_bigtts",
+      "label": "唐僧 2.0",
+      "voice_type": "zh_male_tangseng_uranus_bigtts",
+      "gender": "male",
+      "language": "zh",
+      "category": "roleplay",
+      "style": "roleplay",
+      "scenario": "角色扮演",
+      "tags": [
+        "角色扮演"
+      ],
+      "description": "唐僧 2.0，豆包语音合成 2.0 官方音色，推荐用于角色扮演。",
+      "recommended": [
+        "角色对白",
+        "有声小说",
+        "情感演绎"
+      ],
+      "supports_inline_voice_labels": false,
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "zh_male_zhuangzhou_uranus_bigtts",
+      "speaker": "zh_male_zhuangzhou_uranus_bigtts",
+      "label": "庄周 2.0",
+      "voice_type": "zh_male_zhuangzhou_uranus_bigtts",
+      "gender": "male",
+      "language": "zh",
+      "category": "roleplay",
+      "style": "roleplay",
+      "scenario": "角色扮演",
+      "tags": [
+        "角色扮演"
+      ],
+      "description": "庄周 2.0，豆包语音合成 2.0 官方音色，推荐用于角色扮演。",
+      "recommended": [
+        "角色对白",
+        "有声小说",
+        "情感演绎"
+      ],
+      "supports_inline_voice_labels": false,
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "zh_male_kailangdidi_uranus_bigtts",
+      "speaker": "zh_male_kailangdidi_uranus_bigtts",
+      "label": "开朗弟弟 2.0",
+      "voice_type": "zh_male_kailangdidi_uranus_bigtts",
+      "gender": "male",
+      "language": "zh",
+      "category": "roleplay",
+      "style": "roleplay",
+      "scenario": "角色扮演",
+      "tags": [
+        "角色扮演"
+      ],
+      "description": "开朗弟弟 2.0，豆包语音合成 2.0 官方音色，推荐用于角色扮演。",
+      "recommended": [
+        "角色对白",
+        "有声小说",
+        "情感演绎"
+      ],
+      "supports_inline_voice_labels": false,
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "zh_male_zhubajie_uranus_bigtts",
+      "speaker": "zh_male_zhubajie_uranus_bigtts",
+      "label": "猪八戒 2.0",
+      "voice_type": "zh_male_zhubajie_uranus_bigtts",
+      "gender": "male",
+      "language": "zh",
+      "category": "roleplay",
+      "style": "roleplay",
+      "scenario": "角色扮演",
+      "tags": [
+        "角色扮演"
+      ],
+      "description": "猪八戒 2.0，豆包语音合成 2.0 官方音色，推荐用于角色扮演。",
+      "recommended": [
+        "角色对白",
+        "有声小说",
+        "情感演绎"
+      ],
+      "supports_inline_voice_labels": false,
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "zh_female_ganmaodianyin_uranus_bigtts",
+      "speaker": "zh_female_ganmaodianyin_uranus_bigtts",
+      "label": "感冒电音姐姐 2.0",
+      "voice_type": "zh_female_ganmaodianyin_uranus_bigtts",
+      "gender": "female",
+      "language": "zh",
+      "category": "roleplay",
+      "style": "roleplay",
+      "scenario": "角色扮演",
+      "tags": [
+        "角色扮演"
+      ],
+      "description": "感冒电音姐姐 2.0，豆包语音合成 2.0 官方音色，推荐用于角色扮演。",
+      "recommended": [
+        "角色对白",
+        "有声小说",
+        "情感演绎"
+      ],
+      "supports_inline_voice_labels": false,
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "zh_female_chanmeinv_uranus_bigtts",
+      "speaker": "zh_female_chanmeinv_uranus_bigtts",
+      "label": "谄媚女声 2.0",
+      "voice_type": "zh_female_chanmeinv_uranus_bigtts",
+      "gender": "female",
+      "language": "zh",
+      "category": "roleplay",
+      "style": "roleplay",
+      "scenario": "角色扮演",
+      "tags": [
+        "角色扮演"
+      ],
+      "description": "谄媚女声 2.0，豆包语音合成 2.0 官方音色，推荐用于角色扮演。",
+      "recommended": [
+        "角色对白",
+        "有声小说",
+        "情感演绎"
+      ],
+      "supports_inline_voice_labels": false,
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "zh_female_nvleishen_uranus_bigtts",
+      "speaker": "zh_female_nvleishen_uranus_bigtts",
+      "label": "女雷神 2.0",
+      "voice_type": "zh_female_nvleishen_uranus_bigtts",
+      "gender": "female",
+      "language": "zh",
+      "category": "roleplay",
+      "style": "roleplay",
+      "scenario": "角色扮演",
+      "tags": [
+        "角色扮演"
+      ],
+      "description": "女雷神 2.0，豆包语音合成 2.0 官方音色，推荐用于角色扮演。",
+      "recommended": [
+        "角色对白",
+        "有声小说",
+        "情感演绎"
+      ],
+      "supports_inline_voice_labels": false,
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "zh_female_qinqienv_uranus_bigtts",
+      "speaker": "zh_female_qinqienv_uranus_bigtts",
+      "label": "亲切女声 2.0",
+      "voice_type": "zh_female_qinqienv_uranus_bigtts",
+      "gender": "female",
+      "language": "zh",
+      "category": "audiobook",
+      "style": "audiobook",
+      "scenario": "有声阅读",
+      "tags": [
+        "有声阅读"
+      ],
+      "description": "亲切女声 2.0，豆包语音合成 2.0 官方音色，推荐用于有声阅读。",
+      "recommended": [
+        "有声小说",
+        "有声阅读",
+        "故事朗读"
+      ],
+      "supports_inline_voice_labels": false,
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "zh_male_kuailexiaodong_uranus_bigtts",
+      "speaker": "zh_male_kuailexiaodong_uranus_bigtts",
+      "label": "快乐小东 2.0",
+      "voice_type": "zh_male_kuailexiaodong_uranus_bigtts",
+      "gender": "male",
+      "language": "zh",
+      "category": "general",
+      "style": "natural",
+      "scenario": "通用场景",
+      "tags": [
+        "通用场景"
+      ],
+      "description": "快乐小东 2.0，豆包语音合成 2.0 官方音色，推荐用于通用场景。",
+      "recommended": [
+        "有声小说",
+        "AI 交互",
+        "内容生产"
+      ],
+      "supports_inline_voice_labels": false,
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "zh_male_kailangxuezhang_uranus_bigtts",
+      "speaker": "zh_male_kailangxuezhang_uranus_bigtts",
+      "label": "开朗学长 2.0",
+      "voice_type": "zh_male_kailangxuezhang_uranus_bigtts",
+      "gender": "male",
+      "language": "zh",
+      "category": "general",
+      "style": "natural",
+      "scenario": "通用场景",
+      "tags": [
+        "通用场景"
+      ],
+      "description": "开朗学长 2.0，豆包语音合成 2.0 官方音色，推荐用于通用场景。",
+      "recommended": [
+        "有声小说",
+        "AI 交互",
+        "内容生产"
+      ],
+      "supports_inline_voice_labels": false,
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "zh_male_youyoujunzi_uranus_bigtts",
+      "speaker": "zh_male_youyoujunzi_uranus_bigtts",
+      "label": "悠悠君子 2.0",
+      "voice_type": "zh_male_youyoujunzi_uranus_bigtts",
+      "gender": "male",
+      "language": "zh",
+      "category": "audiobook",
+      "style": "audiobook",
+      "scenario": "有声阅读",
+      "tags": [
+        "有声阅读"
+      ],
+      "description": "悠悠君子 2.0，豆包语音合成 2.0 官方音色，推荐用于有声阅读。",
+      "recommended": [
+        "有声小说",
+        "有声阅读",
+        "故事朗读"
+      ],
+      "supports_inline_voice_labels": false,
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "zh_female_wenjingmaomao_uranus_bigtts",
+      "speaker": "zh_female_wenjingmaomao_uranus_bigtts",
+      "label": "文静毛毛 2.0",
+      "voice_type": "zh_female_wenjingmaomao_uranus_bigtts",
+      "gender": "female",
+      "language": "zh",
+      "category": "general",
+      "style": "natural",
+      "scenario": "通用场景",
+      "tags": [
+        "通用场景"
+      ],
+      "description": "文静毛毛 2.0，豆包语音合成 2.0 官方音色，推荐用于通用场景。",
+      "recommended": [
+        "有声小说",
+        "AI 交互",
+        "内容生产"
+      ],
+      "supports_inline_voice_labels": false,
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "zh_female_zhixingnv_uranus_bigtts",
+      "speaker": "zh_female_zhixingnv_uranus_bigtts",
+      "label": "知性女声 2.0",
+      "voice_type": "zh_female_zhixingnv_uranus_bigtts",
+      "gender": "female",
+      "language": "zh",
+      "category": "audiobook",
+      "style": "intellectual",
+      "scenario": "有声阅读",
+      "tags": [
+        "有声阅读"
+      ],
+      "description": "知性女声 2.0，豆包语音合成 2.0 官方音色，推荐用于有声阅读。",
+      "recommended": [
+        "有声小说",
+        "有声阅读",
+        "故事朗读"
+      ],
+      "supports_inline_voice_labels": false,
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "zh_male_qingshuangnanda_uranus_bigtts",
+      "speaker": "zh_male_qingshuangnanda_uranus_bigtts",
+      "label": "清爽男大 2.0",
+      "voice_type": "zh_male_qingshuangnanda_uranus_bigtts",
+      "gender": "male",
+      "language": "zh",
+      "category": "general",
+      "style": "natural",
+      "scenario": "通用场景",
+      "tags": [
+        "通用场景"
+      ],
+      "description": "清爽男大 2.0，豆包语音合成 2.0 官方音色，推荐用于通用场景。",
+      "recommended": [
+        "有声小说",
+        "AI 交互",
+        "内容生产"
+      ],
+      "supports_inline_voice_labels": false,
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "zh_male_yuanboxiaoshu_uranus_bigtts",
+      "speaker": "zh_male_yuanboxiaoshu_uranus_bigtts",
+      "label": "渊博小叔 2.0",
+      "voice_type": "zh_male_yuanboxiaoshu_uranus_bigtts",
+      "gender": "male",
+      "language": "zh",
+      "category": "general",
+      "style": "natural",
+      "scenario": "通用场景",
+      "tags": [
+        "通用场景"
+      ],
+      "description": "渊博小叔 2.0，豆包语音合成 2.0 官方音色，推荐用于通用场景。",
+      "recommended": [
+        "有声小说",
+        "AI 交互",
+        "内容生产"
+      ],
+      "supports_inline_voice_labels": false,
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "zh_male_yangguangqingnian_uranus_bigtts",
+      "speaker": "zh_male_yangguangqingnian_uranus_bigtts",
+      "label": "阳光青年 2.0",
+      "voice_type": "zh_male_yangguangqingnian_uranus_bigtts",
+      "gender": "male",
+      "language": "zh",
+      "category": "general",
+      "style": "natural",
+      "scenario": "通用场景",
+      "tags": [
+        "通用场景"
+      ],
+      "description": "阳光青年 2.0，豆包语音合成 2.0 官方音色，推荐用于通用场景。",
+      "recommended": [
+        "有声小说",
+        "AI 交互",
+        "内容生产"
+      ],
+      "supports_inline_voice_labels": false,
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "zh_female_qingchezizi_uranus_bigtts",
+      "speaker": "zh_female_qingchezizi_uranus_bigtts",
+      "label": "清澈梓梓 2.0",
+      "voice_type": "zh_female_qingchezizi_uranus_bigtts",
+      "gender": "female",
+      "language": "zh",
+      "category": "general",
+      "style": "natural",
+      "scenario": "通用场景",
+      "tags": [
+        "通用场景"
+      ],
+      "description": "清澈梓梓 2.0，豆包语音合成 2.0 官方音色，推荐用于通用场景。",
+      "recommended": [
+        "有声小说",
+        "AI 交互",
+        "内容生产"
+      ],
+      "supports_inline_voice_labels": false,
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "zh_female_tianmeiyueyue_uranus_bigtts",
+      "speaker": "zh_female_tianmeiyueyue_uranus_bigtts",
+      "label": "甜美悦悦 2.0",
+      "voice_type": "zh_female_tianmeiyueyue_uranus_bigtts",
+      "gender": "female",
+      "language": "zh",
+      "category": "general",
+      "style": "sweet",
+      "scenario": "通用场景",
+      "tags": [
+        "通用场景"
+      ],
+      "description": "甜美悦悦 2.0，豆包语音合成 2.0 官方音色，推荐用于通用场景。",
+      "recommended": [
+        "有声小说",
+        "AI 交互",
+        "内容生产"
+      ],
+      "supports_inline_voice_labels": false,
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "zh_female_xinlingjitang_uranus_bigtts",
+      "speaker": "zh_female_xinlingjitang_uranus_bigtts",
+      "label": "心灵鸡汤 2.0",
+      "voice_type": "zh_female_xinlingjitang_uranus_bigtts",
+      "gender": "female",
+      "language": "zh",
+      "category": "audiobook",
+      "style": "audiobook",
+      "scenario": "有声阅读",
+      "tags": [
+        "有声阅读"
+      ],
+      "description": "心灵鸡汤 2.0，豆包语音合成 2.0 官方音色，推荐用于有声阅读。",
+      "recommended": [
+        "有声小说",
+        "有声阅读",
+        "故事朗读"
+      ],
+      "supports_inline_voice_labels": false,
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "zh_male_wenrouxiaoge_uranus_bigtts",
+      "speaker": "zh_male_wenrouxiaoge_uranus_bigtts",
+      "label": "温柔小哥 2.0",
+      "voice_type": "zh_male_wenrouxiaoge_uranus_bigtts",
+      "gender": "male",
+      "language": "zh",
+      "category": "general",
+      "style": "gentle",
+      "scenario": "通用场景",
+      "tags": [
+        "通用场景"
+      ],
+      "description": "温柔小哥 2.0，豆包语音合成 2.0 官方音色，推荐用于通用场景。",
+      "recommended": [
+        "有声小说",
+        "AI 交互",
+        "内容生产"
+      ],
+      "supports_inline_voice_labels": false,
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "zh_female_roumeinvyou_uranus_bigtts",
+      "speaker": "zh_female_roumeinvyou_uranus_bigtts",
+      "label": "柔美女友 2.0",
+      "voice_type": "zh_female_roumeinvyou_uranus_bigtts",
+      "gender": "female",
+      "language": "zh",
+      "category": "general",
+      "style": "natural",
+      "scenario": "通用场景",
+      "tags": [
+        "通用场景"
+      ],
+      "description": "柔美女友 2.0，豆包语音合成 2.0 官方音色，推荐用于通用场景。",
+      "recommended": [
+        "有声小说",
+        "AI 交互",
+        "内容生产"
+      ],
+      "supports_inline_voice_labels": false,
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "zh_male_dongfanghaoran_uranus_bigtts",
+      "speaker": "zh_male_dongfanghaoran_uranus_bigtts",
+      "label": "东方浩然 2.0",
+      "voice_type": "zh_male_dongfanghaoran_uranus_bigtts",
+      "gender": "male",
+      "language": "zh",
+      "category": "general",
+      "style": "natural",
+      "scenario": "通用场景",
+      "tags": [
+        "通用场景"
+      ],
+      "description": "东方浩然 2.0，豆包语音合成 2.0 官方音色，推荐用于通用场景。",
+      "recommended": [
+        "有声小说",
+        "AI 交互",
+        "内容生产"
+      ],
+      "supports_inline_voice_labels": false,
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "zh_female_wenrouxiaoya_uranus_bigtts",
+      "speaker": "zh_female_wenrouxiaoya_uranus_bigtts",
+      "label": "温柔小雅 2.0",
+      "voice_type": "zh_female_wenrouxiaoya_uranus_bigtts",
+      "gender": "female",
+      "language": "zh",
+      "category": "general",
+      "style": "gentle",
+      "scenario": "通用场景",
+      "tags": [
+        "通用场景"
+      ],
+      "description": "温柔小雅 2.0，豆包语音合成 2.0 官方音色，推荐用于通用场景。",
+      "recommended": [
+        "有声小说",
+        "AI 交互",
+        "内容生产"
+      ],
+      "supports_inline_voice_labels": false,
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "zh_male_tiancaitongsheng_uranus_bigtts",
+      "speaker": "zh_male_tiancaitongsheng_uranus_bigtts",
+      "label": "天才童声 2.0",
+      "voice_type": "zh_male_tiancaitongsheng_uranus_bigtts",
+      "gender": "male",
+      "language": "zh",
+      "category": "general",
+      "style": "smart",
+      "scenario": "通用场景",
+      "tags": [
+        "通用场景"
+      ],
+      "description": "天才童声 2.0，豆包语音合成 2.0 官方音色，推荐用于通用场景。",
+      "recommended": [
+        "有声小说",
+        "AI 交互",
+        "内容生产"
+      ],
+      "supports_inline_voice_labels": false,
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "zh_female_wuzetian_uranus_bigtts",
+      "speaker": "zh_female_wuzetian_uranus_bigtts",
+      "label": "武则天 2.0",
+      "voice_type": "zh_female_wuzetian_uranus_bigtts",
+      "gender": "female",
+      "language": "zh",
+      "category": "roleplay",
+      "style": "roleplay",
+      "scenario": "角色扮演",
+      "tags": [
+        "角色扮演"
+      ],
+      "description": "武则天 2.0，豆包语音合成 2.0 官方音色，推荐用于角色扮演。",
+      "recommended": [
+        "角色对白",
+        "有声小说",
+        "情感演绎"
+      ],
+      "supports_inline_voice_labels": false,
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "zh_female_gujie_uranus_bigtts",
+      "speaker": "zh_female_gujie_uranus_bigtts",
+      "label": "顾姐 2.0",
+      "voice_type": "zh_female_gujie_uranus_bigtts",
+      "gender": "female",
+      "language": "zh",
+      "category": "roleplay",
+      "style": "roleplay",
+      "scenario": "角色扮演",
+      "tags": [
+        "角色扮演"
+      ],
+      "description": "顾姐 2.0，豆包语音合成 2.0 官方音色，推荐用于角色扮演。",
+      "recommended": [
+        "角色对白",
+        "有声小说",
+        "情感演绎"
+      ],
+      "supports_inline_voice_labels": false,
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "zh_male_guanggaojieshuo_uranus_bigtts",
+      "speaker": "zh_male_guanggaojieshuo_uranus_bigtts",
+      "label": "广告解说 2.0",
+      "voice_type": "zh_male_guanggaojieshuo_uranus_bigtts",
+      "gender": "male",
+      "language": "zh",
+      "category": "general",
+      "style": "narration",
+      "scenario": "通用场景",
+      "tags": [
+        "通用场景"
+      ],
+      "description": "广告解说 2.0，豆包语音合成 2.0 官方音色，推荐用于通用场景。",
+      "recommended": [
+        "有声小说",
+        "AI 交互",
+        "内容生产"
+      ],
+      "supports_inline_voice_labels": false,
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "zh_female_shaoergushi_uranus_bigtts",
+      "speaker": "zh_female_shaoergushi_uranus_bigtts",
+      "label": "少儿故事 2.0",
+      "voice_type": "zh_female_shaoergushi_uranus_bigtts",
+      "gender": "female",
+      "language": "zh",
+      "category": "audiobook",
+      "style": "child_story",
+      "scenario": "有声阅读",
+      "tags": [
+        "有声阅读"
+      ],
+      "description": "少儿故事 2.0，豆包语音合成 2.0 官方音色，推荐用于有声阅读。",
+      "recommended": [
+        "有声小说",
+        "有声阅读",
+        "故事朗读"
+      ],
+      "supports_inline_voice_labels": false,
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "zh_female_sophie_uranus_bigtts",
+      "speaker": "zh_female_sophie_uranus_bigtts",
+      "label": "魅力苏菲 2.0",
+      "voice_type": "zh_female_sophie_uranus_bigtts",
+      "gender": "female",
+      "language": "zh",
+      "category": "general",
+      "style": "natural",
+      "scenario": "通用场景",
+      "tags": [
+        "通用场景"
+      ],
+      "description": "魅力苏菲 2.0，豆包语音合成 2.0 官方音色，推荐用于通用场景。",
+      "recommended": [
+        "有声小说",
+        "AI 交互",
+        "内容生产"
+      ],
+      "supports_inline_voice_labels": false,
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "saturn_zh_male_qingxinmumu_cs_tob",
+      "speaker": "saturn_zh_male_qingxinmumu_cs_tob",
+      "label": "清新沐沐 2.0",
+      "voice_type": "saturn_zh_male_qingxinmumu_cs_tob",
+      "gender": "male",
+      "language": "zh",
+      "category": "customer_service",
+      "style": "service",
+      "scenario": "客服场景",
+      "tags": [
+        "客服场景"
+      ],
+      "description": "清新沐沐 2.0，豆包语音合成 2.0 官方音色，推荐用于客服场景。",
+      "recommended": [
+        "智能客服",
+        "业务办理",
+        "语音助手"
+      ],
+      "supports_inline_voice_labels": false,
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    }
+  ]
+}

@@ -1,13 +1,52 @@
 """阿里云 TTS Mixin - 支持 Qwen 和 MiniMax 模型"""
 
+import asyncio
 import json
 import logging
+import os
+import uuid
 from typing import Any, Dict, List, Optional
+
+from app.services.audiobook.tts_style_control import (
+    build_model_style_control,
+    is_doubao_style_control_model,
+    is_mimo_style_control_model,
+    is_stepaudio_style_control_model,
+    prepare_text_for_style_control,
+)
+from app.services.audiobook.tts_model_ids import (
+    MIMO_V25_TTS_MODEL,
+    MIMO_V25_TTS_VOICE_CLONE_MODEL,
+    MIMO_V25_TTS_VOICE_DESIGN_MODEL,
+    SEED_TTS_20_EXPRESSIVE_MODEL,
+    STEPAUDIO_25_TTS_MODEL,
+    normalize_audiobook_tts_model,
+)
+from app.services.audiobook.tts_engine_pkg._constants import TTSUserInputError
 
 logger = logging.getLogger(__name__)
 
 QWEN_TTS_MAX_INPUT_CHARS = 600
 QWEN_TTS_INPUT_SAFETY_CHARS = 20
+STEPAUDIO_TTS_DEFAULT_BASE_URL = "https://api.stepfun.com/v1"
+STEPAUDIO_TTS_MAX_INPUT_CHARS = 1000
+STEPAUDIO_TTS_INSTRUCTION_MAX_CHARS = 200
+STEPAUDIO_TTS_DEFAULT_VOICE = "cixingnansheng"
+STEPAUDIO_TTS_RESPONSE_FORMATS = {"mp3", "wav", "flac", "opus", "pcm"}
+STEPAUDIO_TTS_SAMPLE_RATES = {8000, 16000, 22050, 24000, 48000}
+STEPAUDIO_TTS_STREAM_FORMATS = {"sse", "audio"}
+SEED_TTS_DEFAULT_ENDPOINT = "https://openspeech.bytedance.com/api/v3/tts/unidirectional"
+SEED_TTS_DEFAULT_RESOURCE_ID = "seed-tts-2.0"
+SEED_TTS_DEFAULT_VOICE = "zh_female_vv_uranus_bigtts"
+SEED_TTS_RESPONSE_FORMATS = {"mp3", "pcm", "ogg_opus", "wav"}
+SEED_TTS_SAMPLE_RATES = {8000, 16000, 22050, 24000, 32000, 44100, 48000}
+SEED_TTS_API_KEY_ENV_NAMES = (
+    "VOLCENGINE_TTS_API_KEY",
+    "DOUBAO_TTS_API_KEY",
+    "SEED_TTS_API_KEY",
+    "VOLCENGINE_SPEECH_API_KEY",
+    "DOUBAO_SPEECH_API_KEY",
+)
 
 
 def _to_bool_flag(value: Any) -> bool:
@@ -18,6 +57,109 @@ def _to_bool_flag(value: Any) -> bool:
     if isinstance(value, str):
         return value.strip().lower() in {"1", "true", "yes", "on"}
     return False
+
+
+def _get_seed_tts_api_key() -> Optional[str]:
+    for env_name in SEED_TTS_API_KEY_ENV_NAMES:
+        value = str(os.getenv(env_name) or "").strip()
+        if value:
+            return value
+    return None
+
+
+def _build_seed_tts_additions(
+    *,
+    context_texts: List[str],
+    use_tag_parser: bool = False,
+) -> str:
+    additions: Dict[str, Any] = {}
+    if context_texts:
+        additions["context_texts"] = context_texts
+    if use_tag_parser:
+        additions["use_tag_parser"] = True
+    return json.dumps(additions, ensure_ascii=False, separators=(",", ":"))
+
+
+def _extract_seed_tts_context_texts_from_payload(payload: Dict[str, Any]) -> List[str]:
+    raw_additions = payload.get("req_params", {}).get("additions")
+    if not raw_additions:
+        return []
+    if isinstance(raw_additions, str):
+        try:
+            raw_additions = json.loads(raw_additions)
+        except Exception:
+            return []
+    if not isinstance(raw_additions, dict):
+        return []
+    context_texts = raw_additions.get("context_texts")
+    if isinstance(context_texts, str):
+        return [context_texts] if context_texts.strip() else []
+    if isinstance(context_texts, list):
+        return [str(item).strip() for item in context_texts if str(item or "").strip()]
+    return []
+
+
+def _decode_seed_tts_audio_value(audio_info: Any) -> Optional[bytes]:
+    import base64
+
+    if isinstance(audio_info, str) and audio_info:
+        if audio_info.startswith(("http://", "https://")):
+            return None
+        if audio_info.startswith("data:") and "," in audio_info:
+            audio_info = audio_info.split(",", 1)[1]
+        return base64.b64decode(audio_info)
+    return None
+
+
+def _parse_seed_tts_json_audio_chunks(text: str) -> Optional[bytes]:
+    import json
+
+    chunks: List[bytes] = []
+    for line in str(text or "").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            item = json.loads(line)
+        except Exception:
+            return None
+        if not isinstance(item, dict):
+            continue
+        audio_chunk = _decode_seed_tts_audio_value(item.get("data") or item.get("audio"))
+        if audio_chunk:
+            chunks.append(audio_chunk)
+    if chunks:
+        return b"".join(chunks)
+    return None
+
+
+def _extract_stepaudio_error_message(response) -> str:
+    try:
+        data = response.json()
+    except Exception:
+        return str(getattr(response, "text", "") or "").strip()
+    if isinstance(data, dict):
+        error = data.get("error")
+        if isinstance(error, dict):
+            message = str(error.get("message") or "").strip()
+            if message:
+                return message
+        message = str(data.get("message") or "").strip()
+        if message:
+            return message
+    return str(getattr(response, "text", "") or "").strip()
+
+
+def _build_stepaudio_voice_preview_error(response) -> Exception:
+    provider_message = _extract_stepaudio_error_message(response)
+    if "CER_NOT_PASS" in provider_message:
+        return TTSUserInputError(
+            "StepAudio Voice Clone reference audio and transcript do not match. "
+            "Please set the reference transcript (sample_text) to the exact spoken content in the reference audio. "
+            f"Provider detail: {provider_message}",
+            code="stepaudio_clone_sample_text_mismatch",
+        )
+    return Exception(f"StepAudio voice preview API error: {response.status_code} - {provider_message[:200]}")
 
 
 def _extract_cosyvoice_timestamp_metadata(events: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -109,11 +251,6 @@ class AliyunMixin:
 
         raw_speaker_id = voice_params.get("speaker", "")
         provider_model = self.model
-        api_key = os.getenv("DASHSCOPE_API_KEY") or os.getenv("ALIYUN_API_KEY")
-
-        if not api_key:
-            logger.error("未设置 DASHSCOPE_API_KEY 或 ALIYUN_API_KEY 环境变量")
-            return None
 
         if not text or not text.strip():
             logger.warning("TTS 文本为空")
@@ -121,6 +258,60 @@ class AliyunMixin:
 
         text = text.strip()
         logger.info(f"准备TTS文本: [{text}] (长度:{len(text)}字)")
+
+        if self._is_seed_tts_model():
+            seed_api_key = _get_seed_tts_api_key()
+            if not seed_api_key:
+                logger.error(
+                    "未设置豆包语音合成专用 API Key，请配置 %s；"
+                    "VOLCENGINE_API_KEY / DOUBAO_API_KEY 是火山方舟通用 Key，不能用于 Seed-TTS X-Api-Key",
+                    " / ".join(SEED_TTS_API_KEY_ENV_NAMES),
+                )
+                return None
+            seed_resource_id = (
+                os.getenv("VOLCENGINE_TTS_RESOURCE_ID")
+                or os.getenv("DOUBAO_TTS_RESOURCE_ID")
+                or SEED_TTS_DEFAULT_RESOURCE_ID
+            )
+            return await self._synthesize_seed_tts(
+                text=text,
+                voice_params=voice_params,
+                provider_model=provider_model,
+                api_key=seed_api_key,
+                resource_id=seed_resource_id,
+                raw_speaker_id=raw_speaker_id,
+            )
+
+        if self._is_stepaudio_model():
+            step_api_key = os.getenv("STEP_API_KEY") or os.getenv("STEPFUN_API_KEY")
+            if not step_api_key:
+                logger.error("未设置 STEP_API_KEY 或 STEPFUN_API_KEY 环境变量")
+                return None
+            return await self._synthesize_stepaudio(
+                text=text,
+                voice_params=voice_params,
+                provider_model=provider_model,
+                api_key=step_api_key,
+                raw_speaker_id=raw_speaker_id,
+            )
+
+        if self._is_mimo_model():
+            mimo_api_key = os.getenv("MIMO_API_KEY")
+            if not mimo_api_key:
+                logger.error("未设置 MIMO_API_KEY 环境变量")
+                return None
+            return await self._synthesize_mimo(
+                text=text,
+                voice_params=voice_params,
+                provider_model=provider_model,
+                api_key=mimo_api_key,
+                raw_speaker_id=raw_speaker_id,
+            )
+
+        api_key = os.getenv("DASHSCOPE_API_KEY") or os.getenv("ALIYUN_API_KEY")
+        if not api_key:
+            logger.error("未设置 DASHSCOPE_API_KEY 或 ALIYUN_API_KEY 环境变量")
+            return None
 
         if self._is_minimax_model():
             return await self._synthesize_minimax(
@@ -157,6 +348,15 @@ class AliyunMixin:
         if not raw_speaker_id:
             return ""
 
+        if self._is_mimo_model(model):
+            return raw_speaker_id
+
+        if self._is_stepaudio_model(model):
+            return raw_speaker_id or STEPAUDIO_TTS_DEFAULT_VOICE
+
+        if self._is_seed_tts_model(model):
+            return raw_speaker_id or SEED_TTS_DEFAULT_VOICE
+
         if self._is_qwen_model():
             from app.services.audiobook.constants import normalize_speaker_id
             from app.services.audiobook.voice_manager import VoiceManager
@@ -169,6 +369,124 @@ class AliyunMixin:
             return raw_speaker_id
 
         return raw_speaker_id
+
+    def _is_mimo_model(self, model: Optional[str] = None) -> bool:
+        """判断是否为 MiMo-V2.5-TTS 系列模型。"""
+        return is_mimo_style_control_model(model or self.model)
+
+    def _is_stepaudio_model(self, model: Optional[str] = None) -> bool:
+        """Return whether the current model is StepAudio 2.5 TTS."""
+        return is_stepaudio_style_control_model(model or self.model)
+
+    def _is_seed_tts_model(self, model: Optional[str] = None) -> bool:
+        """Return whether the current model is Doubao Seed-TTS 2.0."""
+        return is_doubao_style_control_model(model or self.model)
+
+    async def _synthesize_seed_tts(
+        self,
+        text: str,
+        voice_params: Dict[str, Any],
+        provider_model: str,
+        api_key: str,
+        resource_id: str,
+        raw_speaker_id: str,
+    ) -> Optional[bytes]:
+        """Doubao Seed-TTS 2.0 synthesis via Volcengine HTTP API."""
+        speaker_id = self._normalize_speaker_id(raw_speaker_id, provider_model)
+        voice_params["speaker"] = speaker_id
+
+        logger.info(
+            "调用豆包 Seed-TTS 2.0: model=%s, voice=%s",
+            provider_model,
+            speaker_id,
+        )
+        return await self._call_seed_tts_websocket(
+            model=provider_model,
+            api_key=api_key,
+            text=text,
+            voice=speaker_id,
+            voice_params=voice_params,
+            resource_id=resource_id,
+        )
+
+    async def _synthesize_stepaudio(
+        self,
+        text: str,
+        voice_params: Dict[str, Any],
+        provider_model: str,
+        api_key: str,
+        raw_speaker_id: str,
+    ) -> Optional[bytes]:
+        """StepAudio 2.5 TTS synthesis via StepFun HTTP API."""
+        speaker_id = self._normalize_speaker_id(raw_speaker_id, provider_model)
+        stepaudio_voice_asset_id = str(voice_params.get("stepaudio_voice_asset_id") or "").strip()
+        is_stepaudio_clone_asset = (
+            str(raw_speaker_id or "").strip().startswith("stepaudio_clone:")
+            or str(speaker_id or "").strip().startswith("stepaudio_clone:")
+            or bool(stepaudio_voice_asset_id)
+        )
+        if is_stepaudio_clone_asset:
+            if not speaker_id and stepaudio_voice_asset_id:
+                speaker_id = f"stepaudio_clone:{stepaudio_voice_asset_id}"
+            voice_params["speaker"] = speaker_id
+            stepaudio_voice_file_id = str(voice_params.get("stepaudio_voice_file_id") or "").strip()
+            if not stepaudio_voice_file_id:
+                raise ValueError("StepAudio clone reference requires file_id for official voice preview")
+
+            logger.info(
+                "调用 StepAudio 2.5 voice preview: model=%s, asset=%s, file_id=%s",
+                provider_model,
+                stepaudio_voice_asset_id or speaker_id,
+                stepaudio_voice_file_id,
+            )
+            return await self._call_stepaudio_voice_preview_http(
+                model=provider_model,
+                api_key=api_key,
+                text=text,
+                file_id=stepaudio_voice_file_id,
+                sample_text=str(voice_params.get("stepaudio_voice_sample_text") or ""),
+                instruction=self._build_stepaudio_instruction_payload(voice_params),
+            )
+
+        voice_params["speaker"] = speaker_id
+
+        logger.info(
+            "调用 StepAudio 2.5 TTS: model=%s, voice=%s",
+            provider_model,
+            speaker_id,
+        )
+        return await self._call_stepaudio_speech_http(
+            model=provider_model,
+            api_key=api_key,
+            text=text,
+            voice=speaker_id,
+            voice_params=voice_params,
+        )
+
+    async def _synthesize_mimo(
+        self,
+        text: str,
+        voice_params: Dict[str, Any],
+        provider_model: str,
+        api_key: str,
+        raw_speaker_id: str,
+    ) -> Optional[bytes]:
+        """MiMo-V2.5-TTS 合成 - 通过小米 MiMo OpenAI 兼容接口。"""
+        speaker_id = self._normalize_speaker_id(raw_speaker_id, provider_model)
+        voice_params["speaker"] = speaker_id
+
+        logger.info(
+            "调用小米 MiMo TTS: model=%s, voice=%s",
+            provider_model,
+            speaker_id,
+        )
+        return await self._call_mimo_chat_completions_http(
+            model=provider_model,
+            api_key=api_key,
+            text=text,
+            voice=speaker_id,
+            voice_params=voice_params,
+        )
 
     async def _synthesize_minimax(
         self,
@@ -247,48 +565,14 @@ class AliyunMixin:
         if not self._is_qwen_instruct_model():
             return {}
 
-        parts: List[str] = []
-        explicit_instructions = str(voice_params.get("instructions") or "").strip()
-        segment_speaker = str(voice_params.get("segment_speaker") or "").strip()
-        segment_type = str(voice_params.get("segment_type") or "").strip()
-        instruct_role = str(voice_params.get("instruct_role") or "").strip()
-        instruct_identity = str(voice_params.get("instruct_identity") or "").strip()
-        instruct_scene = str(voice_params.get("instruct_scene") or "").strip()
-        instruct_emotion = str(voice_params.get("instruct_emotion") or "").strip()
-        performance_notes = str(voice_params.get("performance_notes") or "").strip()
-        fallback_emotion = str(voice_params.get("emotion") or "").strip()
-
-        if segment_speaker and segment_speaker != "旁白":
-            parts.append(f"说话角色：{segment_speaker}")
-        if segment_type:
-            parts.append(f"片段类型：{segment_type}")
-        if instruct_role:
-            parts.append(f"角色设定：{instruct_role}")
-        if instruct_identity:
-            parts.append(f"身份设定：{instruct_identity}")
-        if instruct_scene:
-            parts.append(f"场景氛围：{instruct_scene}")
-        if instruct_emotion:
-            parts.append(f"情绪目标：{instruct_emotion}")
-        elif fallback_emotion and fallback_emotion != "neutral":
-            parts.append(f"情绪目标：{fallback_emotion}")
-        if performance_notes:
-            parts.append(f"演绎要求：{performance_notes}")
-
-        instruction_parts: List[str] = []
-        if explicit_instructions:
-            instruction_parts.append(explicit_instructions)
-        instruction_parts.extend(part for part in parts if part and part not in explicit_instructions)
-
-        instructions = "；".join(instruction_parts).strip("；")
-        if not instructions and not voice_params.get("use_instruct_mode"):
+        style_control = build_model_style_control(
+            self.model,
+            voice_params,
+            str(voice_params.get("emotion") or "neutral"),
+        )
+        if not style_control.provider_fields and not voice_params.get("use_instruct_mode"):
             return {}
-
-        payload: Dict[str, Any] = {}
-        if instructions:
-            payload["instructions"] = instructions
-            payload["optimize_instructions"] = bool(voice_params.get("optimize_instructions", True))
-        return payload
+        return dict(style_control.provider_fields)
 
     def _fit_qwen_instruction_payload_to_limit(
         self,
@@ -514,39 +798,15 @@ class AliyunMixin:
         return "".join(result).strip()
 
     def _build_cosyvoice_instruction_payload(self, voice_params: Dict[str, Any]) -> str:
-        explicit_instruction = str(
-            voice_params.get("instruction") or voice_params.get("instructions") or ""
-        ).strip()
-        if explicit_instruction:
-            return self._truncate_cosyvoice_instruction(explicit_instruction)
-
-        parts: List[str] = []
-        segment_speaker = str(voice_params.get("segment_speaker") or "").strip()
-        if segment_speaker and segment_speaker != "旁白":
-            parts.append(f"说话角色：{segment_speaker}")
-
-        instruct_role = str(voice_params.get("instruct_role") or "").strip()
-        instruct_identity = str(voice_params.get("instruct_identity") or "").strip()
-        instruct_scene = str(voice_params.get("instruct_scene") or "").strip()
-        instruct_emotion = str(
-            voice_params.get("instruct_emotion") or voice_params.get("emotion") or ""
-        ).strip()
-        performance_notes = str(voice_params.get("performance_notes") or "").strip()
-
-        if instruct_role:
-            parts.append(f"角色设定：{instruct_role}")
-        if instruct_identity:
-            parts.append(f"身份设定：{instruct_identity}")
-        if instruct_scene:
-            parts.append(f"场景氛围：{instruct_scene}")
-        if instruct_emotion and instruct_emotion != "neutral":
-            parts.append(f"情绪目标：{instruct_emotion}")
-        if performance_notes:
-            parts.append(f"演绎要求：{performance_notes}")
-
-        if not parts and not voice_params.get("use_instruct_mode"):
+        style_control = build_model_style_control(
+            self.model,
+            voice_params,
+            str(voice_params.get("emotion") or "neutral"),
+        )
+        instruction = str(style_control.provider_fields.get("instructions") or "").strip()
+        if not instruction and not voice_params.get("use_instruct_mode"):
             return ""
-        return self._truncate_cosyvoice_instruction("；".join(parts).strip("；"))
+        return self._truncate_cosyvoice_instruction(instruction)
 
     async def _call_dashscope_cosyvoice_websocket(
         self,
@@ -704,6 +964,12 @@ class AliyunMixin:
         voice: str,
         voice_params: Dict[str, Any],
     ) -> Dict[str, Any]:
+        style_control = build_model_style_control(
+            model,
+            voice_params,
+            str(voice_params.get("emotion") or "neutral"),
+        )
+        text = prepare_text_for_style_control(text, style_control)
         speed = float(voice_params.get("rate", voice_params.get("speed", 1.0)) or 1.0)
         volume = int(voice_params.get("volume", 50) or 50)
         pitch = int(voice_params.get("pitch", 0) or 0)
@@ -726,6 +992,805 @@ class AliyunMixin:
             },
             "model": model,
         }
+
+    def _build_mimo_chat_payload(
+        self,
+        *,
+        model: str,
+        text: str,
+        voice: str,
+        voice_params: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        normalized_model = normalize_audiobook_tts_model(model, default=str(model or ""))
+        style_control = build_model_style_control(
+            normalized_model,
+            voice_params,
+            str(voice_params.get("emotion") or "neutral"),
+        )
+        if normalized_model == MIMO_V25_TTS_VOICE_DESIGN_MODEL:
+            design_prompt = (
+                (str(style_control.messages[0].get("content") or "").strip() if style_control.messages else "")
+                or str(voice_params.get("voice_design_prompt") or "").strip()
+                or str(voice_params.get("voice_description") or "").strip()
+                or str(voice_params.get("instructions") or voice_params.get("instruction") or "").strip()
+            )
+            messages = [{"role": "user", "content": design_prompt}]
+            if text or not _to_bool_flag(voice_params.get("optimize_text_preview")):
+                messages.append({"role": "assistant", "content": text})
+        elif style_control.mode == "mimo_audio_tags":
+            messages = [
+                {
+                    "role": "assistant",
+                    "content": prepare_text_for_style_control(text, style_control),
+                }
+            ]
+        else:
+            messages = list(style_control.messages)
+            messages.append({"role": "assistant", "content": text})
+
+        stream = _to_bool_flag(voice_params.get("stream"))
+        audio_format = str(voice_params.get("format") or ("pcm16" if stream else "wav")).strip().lower()
+        if audio_format not in {"wav", "mp3", "pcm16"}:
+            audio_format = "pcm16" if stream else "wav"
+
+        audio: Dict[str, Any] = {"format": audio_format}
+        if normalized_model == MIMO_V25_TTS_VOICE_DESIGN_MODEL:
+            if "optimize_text_preview" in voice_params:
+                audio["optimize_text_preview"] = _to_bool_flag(voice_params.get("optimize_text_preview"))
+        elif normalized_model == MIMO_V25_TTS_VOICE_CLONE_MODEL:
+            explicit_voice = str(voice or "").strip()
+            clone_voice = (
+                str(voice_params.get("voice_sample_data_url") or "").strip()
+                or str(voice_params.get("voice_clone_data_url") or "").strip()
+                or (explicit_voice if explicit_voice.startswith("data:audio/") else "")
+            )
+            if clone_voice:
+                audio["voice"] = clone_voice
+        else:
+            audio["voice"] = str(voice or "").strip() or "mimo_default"
+
+        payload: Dict[str, Any] = {
+            "model": normalized_model,
+            "messages": messages,
+            "audio": audio,
+        }
+        if stream:
+            payload["stream"] = True
+        return payload
+
+    def _truncate_stepaudio_instruction(self, value: str) -> str:
+        return str(value or "").strip()[:STEPAUDIO_TTS_INSTRUCTION_MAX_CHARS].strip()
+
+    def _build_stepaudio_instruction_payload(self, voice_params: Dict[str, Any]) -> str:
+        style_control = build_model_style_control(
+            self.model,
+            voice_params,
+            str(voice_params.get("emotion") or "neutral"),
+        )
+        instruction = str(
+            style_control.provider_fields.get("instruction")
+            or style_control.provider_fields.get("instructions")
+            or ""
+        ).strip()
+        return self._truncate_stepaudio_instruction(instruction)
+
+    def _fit_stepaudio_text_to_limit(self, text: str) -> str:
+        text = str(text or "").strip()
+        if len(text) <= STEPAUDIO_TTS_MAX_INPUT_CHARS:
+            return text
+        logger.warning(
+            "StepAudio TTS input 已截断以满足服务商限制: text=%s->%s",
+            len(text),
+            STEPAUDIO_TTS_MAX_INPUT_CHARS,
+        )
+        return text[:STEPAUDIO_TTS_MAX_INPUT_CHARS].strip()
+
+    def _build_stepaudio_http_payload(
+        self,
+        *,
+        model: str,
+        text: str,
+        voice: str,
+        voice_params: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        normalized_model = normalize_audiobook_tts_model(model, default=str(model or ""))
+        payload: Dict[str, Any] = {
+            "model": normalized_model or STEPAUDIO_25_TTS_MODEL,
+            "voice": str(voice or "").strip() or STEPAUDIO_TTS_DEFAULT_VOICE,
+            "input": self._fit_stepaudio_text_to_limit(text),
+        }
+        instruction = self._build_stepaudio_instruction_payload(voice_params)
+        if instruction:
+            payload["instruction"] = instruction
+
+        response_format = str(voice_params.get("format") or voice_params.get("response_format") or "").strip().lower()
+        if response_format in STEPAUDIO_TTS_RESPONSE_FORMATS:
+            payload["response_format"] = response_format
+        speed = voice_params.get("speed")
+        if isinstance(speed, (int, float)) and not isinstance(speed, bool) and 0.5 <= float(speed) <= 2.0:
+            payload["speed"] = float(speed)
+        volume = voice_params.get("volume")
+        if isinstance(volume, (int, float)) and not isinstance(volume, bool) and 0.1 <= float(volume) <= 2.0:
+            payload["volume"] = float(volume)
+        sample_rate = voice_params.get("sample_rate")
+        if isinstance(sample_rate, int) and not isinstance(sample_rate, bool) and sample_rate in STEPAUDIO_TTS_SAMPLE_RATES:
+            payload["sample_rate"] = sample_rate
+        pronunciation_map = voice_params.get("pronunciation_map")
+        if isinstance(pronunciation_map, dict) and isinstance(pronunciation_map.get("tone"), list):
+            payload["pronunciation_map"] = pronunciation_map
+        for bool_param in ("markdown_filter", "return_url"):
+            value = voice_params.get(bool_param)
+            if isinstance(value, bool):
+                payload[bool_param] = value
+        stream_format = str(voice_params.get("stream_format") or "").strip().lower()
+        if stream_format in STEPAUDIO_TTS_STREAM_FORMATS:
+            payload["stream_format"] = stream_format
+        return payload
+
+    def _build_stepaudio_voice_preview_payload(
+        self,
+        *,
+        model: str,
+        text: str,
+        file_id: str,
+        sample_text: str = "",
+        instruction: str = "",
+    ) -> Dict[str, Any]:
+        normalized_model = normalize_audiobook_tts_model(model, default=str(model or ""))
+        clean_preview_text = self._fit_stepaudio_text_to_limit(text)
+        clean_sample_text = str(sample_text or "").strip()
+        payload: Dict[str, Any] = {
+            "model": normalized_model or STEPAUDIO_25_TTS_MODEL,
+            "file_id": str(file_id or "").strip(),
+            "text": clean_sample_text or clean_preview_text,
+        }
+        if clean_preview_text and clean_sample_text:
+            payload["sample_text"] = clean_preview_text
+        clean_instruction = str(instruction or "").strip()
+        if clean_instruction:
+            payload["instruction"] = clean_instruction[:STEPAUDIO_TTS_INSTRUCTION_MAX_CHARS]
+        return payload
+
+    def _seed_tts_ratio_from_ui_value(self, value: Any, *, default: float = 1.0) -> float:
+        try:
+            ratio = float(value)
+        except (TypeError, ValueError):
+            return default
+        if 0.1 <= ratio <= 2.0:
+            return round(ratio, 3)
+        if 0 <= ratio <= 100:
+            return round(max(0.1, min(2.0, ratio / 50.0)), 3)
+        return default
+
+    def _seed_tts_rate_from_ratio(self, ratio: float) -> int:
+        return int(round(max(-50.0, min(100.0, (ratio - 1.0) * 100.0))))
+
+    def _seed_tts_pitch_from_ui_value(self, value: Any) -> int:
+        try:
+            pitch = float(value)
+        except (TypeError, ValueError):
+            return 0
+        if -12 <= pitch <= 12:
+            return int(round(pitch))
+        if 0 <= pitch <= 100:
+            return int(round(max(-12.0, min(12.0, (pitch - 50.0) / 50.0 * 12.0))))
+        return 0
+
+    def _build_seed_tts_context_texts(
+        self,
+        voice_params: Dict[str, Any],
+        style_control: Optional[Any] = None,
+    ) -> List[str]:
+        if style_control is None:
+            style_control = build_model_style_control(
+                SEED_TTS_20_EXPRESSIVE_MODEL,
+                voice_params,
+                str(voice_params.get("emotion") or "neutral"),
+            )
+        context_texts = style_control.provider_fields.get("context_texts")
+        if isinstance(context_texts, str):
+            return [context_texts] if context_texts.strip() else []
+        if isinstance(context_texts, list):
+            return [
+                str(item).strip()
+                for item in context_texts
+                if str(item or "").strip()
+            ]
+        instruction = str(
+            voice_params.get("instructions")
+            or voice_params.get("instruction")
+            or ""
+        ).strip()
+        return [instruction] if instruction else []
+
+    def _build_seed_tts_http_payload(
+        self,
+        *,
+        model: str,
+        text: str,
+        voice: str,
+        voice_params: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        normalized_model = normalize_audiobook_tts_model(model, default=str(model or "")) or SEED_TTS_20_EXPRESSIVE_MODEL
+        response_format = str(voice_params.get("format") or voice_params.get("response_format") or "mp3").strip().lower()
+        if response_format not in SEED_TTS_RESPONSE_FORMATS:
+            response_format = "mp3"
+
+        sample_rate = voice_params.get("sample_rate")
+        if not isinstance(sample_rate, int) or isinstance(sample_rate, bool) or sample_rate not in SEED_TTS_SAMPLE_RATES:
+            sample_rate = 24000
+
+        speed = self._seed_tts_ratio_from_ui_value(voice_params.get("speed", voice_params.get("rate", 1.0)))
+        volume = self._seed_tts_ratio_from_ui_value(voice_params.get("volume", 50))
+        pitch = self._seed_tts_pitch_from_ui_value(voice_params.get("pitch", 50))
+        style_control = build_model_style_control(
+            normalized_model,
+            voice_params,
+            str(voice_params.get("emotion") or "neutral"),
+        )
+        prepared_text = prepare_text_for_style_control(str(text or ""), style_control)
+        context_texts = self._build_seed_tts_context_texts(voice_params, style_control)
+
+        req_params: Dict[str, Any] = {
+            "model": normalized_model,
+            "text": prepared_text,
+            "text_type": "plain",
+            "with_timestamp": 0,
+        }
+        use_tag_parser = _to_bool_flag(voice_params.get("use_tag_parser")) or _to_bool_flag(
+            style_control.provider_fields.get("use_tag_parser")
+        )
+        if context_texts or use_tag_parser:
+            req_params["additions"] = _build_seed_tts_additions(
+                context_texts=context_texts,
+                use_tag_parser=use_tag_parser,
+            )
+        req_params["speaker"] = str(voice or "").strip() or SEED_TTS_DEFAULT_VOICE
+        req_params["audio_params"] = {
+            "format": response_format,
+            "sample_rate": sample_rate,
+            "speech_rate": self._seed_tts_rate_from_ratio(speed),
+            "loudness_rate": self._seed_tts_rate_from_ratio(volume),
+        }
+        if pitch:
+            req_params["post_process"] = {"pitch": pitch}
+
+        return {
+            "user": {"uid": str(voice_params.get("uid") or "audiobook")},
+            "req_params": req_params,
+        }
+
+    async def _parse_stepaudio_audio_response(self, response, client) -> bytes:
+        import base64
+
+        content_type = str(response.headers.get("content-type") or response.headers.get("Content-Type") or "").lower()
+        if content_type.startswith("audio/"):
+            return bytes(response.content)
+
+        try:
+            data = response.json()
+        except Exception:
+            return bytes(response.content)
+
+        if not isinstance(data, dict):
+            raise ValueError("StepAudio response missing audio data")
+
+        audio_info = data.get("audio") or data.get("data") or data.get("output") or data.get("sample_audio")
+        if isinstance(audio_info, str) and audio_info:
+            if audio_info.startswith(("http://", "https://")):
+                audio_response = await client.get(audio_info)
+                if audio_response.status_code == 200:
+                    return bytes(audio_response.content)
+            if audio_info.startswith("data:") and "," in audio_info:
+                audio_info = audio_info.split(",", 1)[1]
+            return base64.b64decode(audio_info)
+
+        if isinstance(audio_info, dict):
+            audio_data = audio_info.get("data") or audio_info.get("audio") or audio_info.get("sample_audio")
+            if isinstance(audio_data, str) and audio_data:
+                if audio_data.startswith("data:") and "," in audio_data:
+                    audio_data = audio_data.split(",", 1)[1]
+                return base64.b64decode(audio_data)
+            audio_url = audio_info.get("url")
+            if isinstance(audio_url, str) and audio_url:
+                audio_response = await client.get(audio_url)
+                if audio_response.status_code == 200:
+                    return bytes(audio_response.content)
+
+        raise ValueError(f"StepAudio response missing audio data: {str(data)[:200]}")
+
+    async def _parse_seed_tts_audio_response(self, response, client) -> bytes:
+        import base64
+
+        content_type = str(response.headers.get("content-type") or response.headers.get("Content-Type") or "").lower()
+        if content_type.startswith("audio/"):
+            return bytes(response.content)
+
+        try:
+            data = response.json()
+        except Exception:
+            parsed_chunks = _parse_seed_tts_json_audio_chunks(getattr(response, "text", ""))
+            if parsed_chunks:
+                return parsed_chunks
+            if response.content:
+                return bytes(response.content)
+            raise ValueError("Seed-TTS response missing audio data")
+
+        if not isinstance(data, dict):
+            raise ValueError("Seed-TTS response missing audio data")
+
+        audio_info = (
+            data.get("audio")
+            or data.get("data")
+            or data.get("output")
+            or data.get("result")
+        )
+        if isinstance(audio_info, str) and audio_info:
+            if audio_info.startswith(("http://", "https://")):
+                audio_response = await client.get(audio_info)
+                if audio_response.status_code == 200:
+                    return bytes(audio_response.content)
+            return _decode_seed_tts_audio_value(audio_info) or b""
+
+        if isinstance(audio_info, dict):
+            audio_data = (
+                audio_info.get("audio")
+                or audio_info.get("data")
+                or audio_info.get("audio_data")
+                or audio_info.get("binary")
+            )
+            if isinstance(audio_data, str) and audio_data:
+                return _decode_seed_tts_audio_value(audio_data) or b""
+            audio_url = audio_info.get("url")
+            if isinstance(audio_url, str) and audio_url:
+                audio_response = await client.get(audio_url)
+                if audio_response.status_code == 200:
+                    return bytes(audio_response.content)
+
+        raise ValueError(f"Seed-TTS response missing audio data: {str(data)[:200]}")
+
+    def _parse_mimo_audio_response(self, data: Dict[str, Any]) -> bytes:
+        import base64
+
+        choices = data.get("choices")
+        if not isinstance(choices, list) or not choices:
+            raise ValueError("MiMo response missing choices")
+
+        message = choices[0].get("message") if isinstance(choices[0], dict) else None
+        if not isinstance(message, dict):
+            raise ValueError("MiMo response missing message")
+
+        audio_info = message.get("audio")
+        audio_data = audio_info.get("data") if isinstance(audio_info, dict) else audio_info
+        if not isinstance(audio_data, str) or not audio_data:
+            raise ValueError("MiMo response missing audio data")
+        return base64.b64decode(audio_data)
+
+    async def _call_seed_tts_websocket(
+        self,
+        model: str,
+        api_key: str,
+        text: str,
+        voice: str,
+        voice_params: Dict[str, Any],
+        resource_id: str = SEED_TTS_DEFAULT_RESOURCE_ID,
+    ) -> bytes:
+        """Call Doubao Seed-TTS 2.0 via Volcengine WebSocket API (bidirectional streaming).
+        
+        Uses official protocols.py module for binary frame protocol.
+        """
+        import copy
+        import sys
+        from pathlib import Path
+
+        import websockets
+        
+        # Import protocols module from scripts directory
+        project_root = Path(__file__).parent.parent.parent.parent.parent.parent
+        scripts_dir = project_root / "scripts"
+        if str(scripts_dir) not in sys.path:
+            sys.path.insert(0, str(scripts_dir))
+        
+        try:
+            from protocols import (
+                EventType,
+                MsgType,
+                finish_connection,
+                finish_session,
+                receive_message,
+                start_connection,
+                start_session,
+                task_request,
+                wait_for_event,
+            )
+        except ImportError as e:
+            logger.error(f"Failed to import protocols module: {e}")
+            raise RuntimeError(f"Protocols module not found: {e}")
+
+        # WebSocket endpoint
+        ws_url = str(os.getenv("SEED_TTS_WS_ENDPOINT") or "wss://openspeech.bytedance.com/api/v3/tts/bidirection").strip()
+        clean_resource_id = str(resource_id or SEED_TTS_DEFAULT_RESOURCE_ID).strip()
+        connect_id = str(uuid.uuid4())
+        session_id = str(uuid.uuid4())
+        
+        # Build audio parameters
+        response_format = str(voice_params.get("format") or voice_params.get("response_format") or "mp3").strip().lower()
+        if response_format not in SEED_TTS_RESPONSE_FORMATS:
+            response_format = "mp3"
+        
+        sample_rate = voice_params.get("sample_rate")
+        if not isinstance(sample_rate, int) or isinstance(sample_rate, bool) or sample_rate not in SEED_TTS_SAMPLE_RATES:
+            sample_rate = 24000
+        
+        # Convert UI values to API ranges
+        speed = self._seed_tts_ratio_from_ui_value(voice_params.get("speed", voice_params.get("rate", 1.0)))
+        volume = self._seed_tts_ratio_from_ui_value(voice_params.get("volume", 50))
+        pitch = self._seed_tts_pitch_from_ui_value(voice_params.get("pitch", 50))
+        
+        speech_rate = self._seed_tts_rate_from_ratio(speed)
+        loudness_rate = self._seed_tts_rate_from_ratio(volume)
+        
+        # Build req_params
+        base_request: Dict[str, Any] = {
+            "req_params": {
+                "model": model,
+                "speaker": str(voice or "").strip() or SEED_TTS_DEFAULT_VOICE,
+                "audio_params": {
+                    "format": response_format,
+                    "sample_rate": sample_rate,
+                    "speech_rate": speech_rate,
+                    "loudness_rate": loudness_rate,
+                },
+            },
+        }
+        
+        # Add optional parameters
+        context_texts = self._build_seed_tts_context_texts(voice_params, None)
+        if context_texts:
+            base_request["req_params"]["context_texts"] = context_texts
+        
+        use_tag_parser = _to_bool_flag(voice_params.get("use_tag_parser"))
+        if use_tag_parser:
+            base_request["req_params"]["use_tag_parser"] = True
+        
+        if pitch:
+            base_request["req_params"]["post_process"] = {"pitch": pitch}
+        
+        websocket = None
+        audio_data = bytearray()
+        
+        try:
+            # Connect to server
+            headers = {
+                "X-Api-Key": api_key,
+                "X-Api-Resource-Id": clean_resource_id,
+                "X-Api-Connect-Id": connect_id,
+                "X-Control-Require-Usage-Tokens-Return": "*",
+            }
+            
+            logger.info(f"Seed-TTS WebSocket: Connecting to {ws_url}")
+            websocket = await websockets.connect(
+                ws_url,
+                additional_headers=headers,
+                max_size=10 * 1024 * 1024
+            )
+            logger.info(f"Seed-TTS WebSocket: Connected, Logid: {websocket.response.headers.get('x-tt-logid', 'N/A')}")
+            
+            # Start connection
+            await start_connection(websocket)
+            await wait_for_event(websocket, MsgType.FullServerResponse, EventType.ConnectionStarted)
+            logger.info("Seed-TTS WebSocket: Connection started")
+            
+            # Start session
+            start_session_request = copy.deepcopy(base_request)
+            start_session_request["event"] = EventType.StartSession
+            await start_session(
+                websocket,
+                json.dumps(start_session_request).encode(),
+                session_id
+            )
+            await wait_for_event(websocket, MsgType.FullServerResponse, EventType.SessionStarted)
+            logger.info("Seed-TTS WebSocket: Session started")
+            
+            # Send TaskRequest with full text
+            task_request_data = copy.deepcopy(base_request)
+            task_request_data["event"] = EventType.TaskRequest
+            task_request_data["req_params"]["text"] = text
+            
+            await task_request(
+                websocket,
+                json.dumps(task_request_data).encode(),
+                session_id
+            )
+            logger.info("Seed-TTS WebSocket: Task request sent")
+            
+            # Receive audio data and events
+            timeout = 30  # seconds
+            while True:
+                try:
+                    msg = await asyncio.wait_for(receive_message(websocket), timeout=timeout)
+                except asyncio.TimeoutError:
+                    logger.warning(f"Seed-TTS WebSocket: Timeout after receiving {len(audio_data)} bytes")
+                    break
+                
+                if msg.type == MsgType.FullServerResponse:
+                    if msg.event == EventType.SessionFinished:
+                        logger.info("Seed-TTS WebSocket: Session finished")
+                        break
+                    elif msg.event == EventType.TTSSentenceEnd:
+                        logger.debug(f"Seed-TTS WebSocket: Sentence ended")
+                    elif msg.event in (EventType.SessionFailed, EventType.ConnectionFailed):
+                        error_msg = msg.payload.decode('utf-8', errors='replace') if msg.payload else "Unknown error"
+                        raise RuntimeError(f"Seed-TTS WebSocket failed: {error_msg}")
+                
+                elif msg.type == MsgType.AudioOnlyServer:
+                    audio_data.extend(msg.payload)
+                    logger.debug(f"Seed-TTS WebSocket: Received audio chunk {len(msg.payload)} bytes")
+            
+            # Finish session
+            await finish_session(websocket, session_id)
+            
+            if not audio_data:
+                raise RuntimeError("Seed-TTS WebSocket returned no audio data")
+            
+            # Set metadata
+            self._set_last_synthesis_metadata(
+                {
+                    "provider": "volcengine",
+                    "provider_model": model,
+                    "speaker": voice,
+                    "transport": "websocket_binary_frame",
+                    "base_url": ws_url.replace("/api/v3/tts/bidirection", ""),
+                    "endpoint": "/api/v3/tts/bidirection",
+                    "resource_id": clean_resource_id,
+                    "session_id": session_id,
+                    "connect_id": connect_id,
+                    "audio_format": response_format,
+                    "sample_rate": sample_rate,
+                }
+            )
+            
+            logger.info("Seed-TTS WebSocket synthesis completed: %d bytes", len(audio_data))
+            return bytes(audio_data)
+        
+        finally:
+            if websocket:
+                try:
+                    # Finish connection
+                    await finish_connection(websocket)
+                    try:
+                        await wait_for_event(websocket, MsgType.FullServerResponse, EventType.ConnectionFinished)
+                        logger.debug("Seed-TTS WebSocket: Connection finished")
+                    except:
+                        pass
+                    await websocket.close()
+                    logger.debug("Seed-TTS WebSocket: Closed")
+                except Exception as e:
+                    logger.warning(f"Seed-TTS WebSocket close error: {e}")
+
+    async def _call_seed_tts_http(
+        self,
+        model: str,
+        api_key: str,
+        text: str,
+        voice: str,
+        voice_params: Dict[str, Any],
+        resource_id: str = SEED_TTS_DEFAULT_RESOURCE_ID,
+    ) -> bytes:
+        """Call Doubao Seed-TTS 2.0 via Volcengine HTTP API."""
+        import httpx
+
+        endpoint = str(os.getenv("SEED_TTS_HTTP_ENDPOINT") or SEED_TTS_DEFAULT_ENDPOINT).strip()
+        clean_resource_id = str(resource_id or SEED_TTS_DEFAULT_RESOURCE_ID).strip()
+        app_key = (
+            str(os.getenv("VOLCENGINE_TTS_APP_KEY") or os.getenv("DOUBAO_TTS_APP_KEY") or "").strip()
+            or api_key
+        )
+        payload = self._build_seed_tts_http_payload(
+            model=model,
+            text=text,
+            voice=voice,
+            voice_params=voice_params,
+        )
+
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            response = await client.post(
+                endpoint,
+                headers={
+                    "X-Api-App-Key": app_key,
+                    "X-Api-Key": api_key,
+                    "X-Api-Resource-Id": clean_resource_id,
+                    "Content-Type": "application/json",
+                },
+                json=payload,
+            )
+            if response.status_code != 200:
+                logger.error("Seed-TTS API 失败: status=%s, body=%s", response.status_code, response.text[:500])
+                raise Exception(f"Seed-TTS API error: {response.status_code} - {response.text[:200]}")
+
+            audio_result = await self._parse_seed_tts_audio_response(response, client)
+            self._set_last_synthesis_metadata(
+                {
+                    "provider": "volcengine",
+                    "provider_model": payload["req_params"]["model"],
+                    "speaker": payload["req_params"]["speaker"],
+                    "transport": "http",
+                    "base_url": endpoint.removesuffix("/api/v3/tts/unidirectional"),
+                    "endpoint": "/api/v3/tts/unidirectional",
+                    "resource_id": clean_resource_id,
+                    "style_control": "query_response",
+                    "context_texts": _extract_seed_tts_context_texts_from_payload(payload),
+                    "audio_format": payload["req_params"].get("audio_params", {}).get("format"),
+                }
+            )
+            return audio_result
+
+    async def _call_stepaudio_speech_http(
+        self,
+        model: str,
+        api_key: str,
+        text: str,
+        voice: str,
+        voice_params: Dict[str, Any],
+    ) -> bytes:
+        """Call StepAudio 2.5 TTS via StepFun HTTP API."""
+        import httpx
+
+        base_url = str(os.getenv("STEPAUDIO_TTS_BASE_URL") or STEPAUDIO_TTS_DEFAULT_BASE_URL).rstrip("/")
+        endpoint = f"{base_url}/audio/speech"
+        payload = self._build_stepaudio_http_payload(
+            model=model,
+            text=text,
+            voice=voice,
+            voice_params=voice_params,
+        )
+
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            response = await client.post(
+                endpoint,
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                },
+                json=payload,
+            )
+            if response.status_code != 200:
+                logger.error("StepAudio API 失败: status=%s, body=%s", response.status_code, response.text[:500])
+                raise Exception(f"StepAudio TTS API error: {response.status_code} - {response.text[:200]}")
+
+            audio_result = await self._parse_stepaudio_audio_response(response, client)
+            self._set_last_synthesis_metadata(
+                {
+                    "provider": "stepfun",
+                    "provider_model": payload["model"],
+                    "speaker": payload["voice"],
+                    "transport": "http",
+                    "base_url": base_url,
+                    "endpoint": "/audio/speech",
+                    "instruction": payload.get("instruction", ""),
+                    "style_control": "global_context_inline_context",
+                    "audio_format": payload.get("response_format") or "provider_default",
+                }
+            )
+            return audio_result
+
+    async def _call_stepaudio_voice_preview_http(
+        self,
+        *,
+        model: str,
+        api_key: str,
+        text: str,
+        file_id: str,
+        sample_text: str = "",
+        instruction: str = "",
+    ) -> bytes:
+        """Call StepAudio zero-shot voice preview via StepFun HTTP API."""
+        import httpx
+
+        clean_file_id = str(file_id or "").strip()
+        if not clean_file_id:
+            raise ValueError("StepAudio voice preview requires file_id")
+        base_url = str(os.getenv("STEPAUDIO_TTS_BASE_URL") or STEPAUDIO_TTS_DEFAULT_BASE_URL).rstrip("/")
+        endpoint = f"{base_url}/audio/voices/preview"
+        payload = self._build_stepaudio_voice_preview_payload(
+            model=model,
+            text=text,
+            file_id=clean_file_id,
+            sample_text=sample_text,
+            instruction=instruction,
+        )
+
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            response = await client.post(
+                endpoint,
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                },
+                json=payload,
+            )
+            if response.status_code != 200:
+                logger.error("StepAudio voice preview API 失败: status=%s, body=%s", response.status_code, response.text[:500])
+                raise _build_stepaudio_voice_preview_error(response)
+
+            audio_result = await self._parse_stepaudio_audio_response(response, client)
+            self._set_last_synthesis_metadata(
+                {
+                    "provider": "stepfun",
+                    "provider_model": payload["model"],
+                    "transport": "http",
+                    "base_url": base_url,
+                    "endpoint": "/audio/voices/preview",
+                    "file_id": payload["file_id"],
+                    "instruction": payload.get("instruction", ""),
+                    "audio_format": "provider_default",
+                }
+            )
+            return audio_result
+
+    async def _call_mimo_chat_completions_http(
+        self,
+        model: str,
+        api_key: str,
+        text: str,
+        voice: str,
+        voice_params: Dict[str, Any],
+    ) -> bytes:
+        """调用 MiMo-V2.5-TTS via 小米 OpenAI 兼容 HTTP API。"""
+        import httpx
+
+        payload = self._build_mimo_chat_payload(
+            model=model,
+            text=text,
+            voice=voice,
+            voice_params=voice_params,
+        )
+
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            response = await client.post(
+                "https://api.xiaomimimo.com/v1/chat/completions",
+                headers={
+                    "api-key": api_key,
+                    "Content-Type": "application/json",
+                },
+                json=payload,
+            )
+            if response.status_code != 200:
+                logger.error("MiMo API 失败: status=%s, body=%s", response.status_code, response.text[:500])
+                raise Exception(f"MiMo TTS API error: {response.status_code} - {response.text[:200]}")
+
+            data = response.json()
+            audio_result = self._parse_mimo_audio_response(data)
+            self._set_last_synthesis_metadata(
+                {
+                    "provider": "mimo",
+                    "provider_model": payload["model"],
+                    "speaker": payload.get("audio", {}).get("voice", ""),
+                    "transport": "http",
+                    "base_url": "https://api.xiaomimimo.com/v1",
+                    "endpoint": "/chat/completions",
+                    "style_control_messages": payload["messages"],
+                    "audio_format": payload.get("audio", {}).get("format"),
+                }
+            )
+            return audio_result
+
+    async def _call_dashscope_mimo_http(
+        self,
+        model: str,
+        api_key: str,
+        text: str,
+        voice: str,
+        voice_params: Dict[str, Any],
+    ) -> bytes:
+        """Backward-compatible wrapper for the old private method name."""
+        return await self._call_mimo_chat_completions_http(
+            model=model,
+            api_key=api_key,
+            text=text,
+            voice=voice,
+            voice_params=voice_params,
+        )
 
     async def _call_dashscope_minimax_http(
         self,

@@ -1,0 +1,115 @@
+{
+  "model": "mimo-v2.5-tts",
+  "updated_at": "2026-06-24",
+  "source": "xiaomi-mimo-v2.5-tts-docs",
+  "voices": [
+    {
+      "id": "mimo_default",
+      "speaker": "mimo_default",
+      "label": "MiMo-默认 (mimo_default)",
+      "gender": "neutral",
+      "style": "default",
+      "category": "narrator",
+      "languages": ["中文", "英文"],
+      "description": "因部署集群而异，中国集群默认为冰糖，其他集群默认为 Mia。",
+      "recommended": ["默认试听", "快速预览"],
+      "default_params": {"volume": 50, "speed": 1.0, "pitch": 50}
+    },
+    {
+      "id": "冰糖",
+      "speaker": "冰糖",
+      "label": "冰糖",
+      "gender": "female",
+      "style": "bright",
+      "category": "adult",
+      "languages": ["中文"],
+      "description": "中文女性预置音色。",
+      "recommended": ["有声书旁白", "角色对白"],
+      "default_params": {"volume": 50, "speed": 1.0, "pitch": 55}
+    },
+    {
+      "id": "茉莉",
+      "speaker": "茉莉",
+      "label": "茉莉",
+      "gender": "female",
+      "style": "gentle",
+      "category": "adult",
+      "languages": ["中文"],
+      "description": "中文女性预置音色。",
+      "recommended": ["温柔角色", "情感独白"],
+      "default_params": {"volume": 50, "speed": 1.0, "pitch": 54}
+    },
+    {
+      "id": "苏打",
+      "speaker": "苏打",
+      "label": "苏打",
+      "gender": "male",
+      "style": "clear",
+      "category": "adult",
+      "languages": ["中文"],
+      "description": "中文男性预置音色。",
+      "recommended": ["男声角色", "清晰旁白"],
+      "default_params": {"volume": 50, "speed": 1.0, "pitch": 46}
+    },
+    {
+      "id": "白桦",
+      "speaker": "白桦",
+      "label": "白桦",
+      "gender": "male",
+      "style": "calm",
+      "category": "adult",
+      "languages": ["中文"],
+      "description": "中文男性预置音色。",
+      "recommended": ["沉稳旁白", "成熟角色"],
+      "default_params": {"volume": 50, "speed": 1.0, "pitch": 44}
+    },
+    {
+      "id": "Mia",
+      "speaker": "Mia",
+      "label": "Mia",
+      "gender": "female",
+      "style": "natural",
+      "category": "adult",
+      "languages": ["英文"],
+      "description": "英文女性预置音色。",
+      "recommended": ["英文旁白", "英文角色对白"],
+      "default_params": {"volume": 50, "speed": 1.0, "pitch": 55}
+    },
+    {
+      "id": "Chloe",
+      "speaker": "Chloe",
+      "label": "Chloe",
+      "gender": "female",
+      "style": "bright",
+      "category": "adult",
+      "languages": ["英文"],
+      "description": "英文女性预置音色。",
+      "recommended": ["英文情绪表达", "明亮角色"],
+      "default_params": {"volume": 50, "speed": 1.0, "pitch": 56}
+    },
+    {
+      "id": "Milo",
+      "speaker": "Milo",
+      "label": "Milo",
+      "gender": "male",
+      "style": "clear",
+      "category": "adult",
+      "languages": ["英文"],
+      "description": "英文男性预置音色。",
+      "recommended": ["英文男声角色", "英文旁白"],
+      "default_params": {"volume": 50, "speed": 1.0, "pitch": 45}
+    },
+    {
+      "id": "Dean",
+      "speaker": "Dean",
+      "label": "Dean",
+      "gender": "male",
+      "style": "calm",
+      "category": "adult",
+      "languages": ["英文"],
+      "description": "英文男性预置音色。",
+      "recommended": ["沉稳英文旁白", "成熟角色"],
+      "default_params": {"volume": 50, "speed": 1.0, "pitch": 44}
+    }
+  ]
+}

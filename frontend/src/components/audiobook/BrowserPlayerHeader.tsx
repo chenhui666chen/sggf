@@ -7,7 +7,7 @@ import {
   Tooltip,
   Typography,
 } from '@mui/material'
-import { Subtitles } from '@mui/icons-material'
+import SubtitlesIcon from '@mui/icons-material/Subtitles'
 
 import {
   normalizeSubtitleFormat,
@@ -47,7 +47,7 @@ const BrowserPlayerHeader: React.FC<BrowserPlayerHeaderProps> = ({
           color={showSubtitles ? 'primary' : 'default'}
           onClick={onToggleSubtitles}
         >
-          <Subtitles />
+          <SubtitlesIcon />
         </IconButton>
       </Tooltip>
     </Box>

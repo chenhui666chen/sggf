@@ -3,12 +3,14 @@ import { useCallback, useState, type Dispatch, type SetStateAction } from 'react
 import { apiClient, extractApiErrorMessage } from '../../services/api'
 import type { SetSnackbar } from './hookTypes'
 import type { CharacterVoiceSetting, TtsModel } from './types'
+import { DEFAULT_CHARACTER_VOICE_PREVIEW_TEXT } from './voicePreviewText'
 
 interface UseAudiobookCharacterVoicePreviewParams {
   ttsModel: TtsModel
   playingChapter: number | null
   setPlayingChapter: Dispatch<SetStateAction<number | null>>
   playManagedBlob: (blob: Blob) => Promise<unknown>
+  playExternalUrl: (url: string) => Promise<unknown>
   setSnackbar: SetSnackbar
 }
 
@@ -17,12 +19,16 @@ export const useAudiobookCharacterVoicePreview = ({
   playingChapter,
   setPlayingChapter,
   playManagedBlob,
+  playExternalUrl,
   setSnackbar,
 }: UseAudiobookCharacterVoicePreviewParams) => {
   const [previewingCharacterId, setPreviewingCharacterId] = useState<number | null>(null)
 
   const handlePreviewCharacterVoice = useCallback(async (cv: CharacterVoiceSetting) => {
-    if (!cv.voiceId) {
+    const hasInlineCustomVoiceInput = Boolean(cv.voiceCloneDataUrl?.trim())
+    const hasReusableMimoVoiceAsset = Boolean(cv.mimoVoiceAssetId?.trim())
+    const hasReusableStepAudioVoiceAsset = Boolean(cv.stepaudioVoiceAssetId?.trim())
+    if (!cv.voiceId && !hasInlineCustomVoiceInput && !hasReusableMimoVoiceAsset && !hasReusableStepAudioVoiceAsset) {
       setSnackbar({ open: true, message: '请先为该角色选择音色再试听', severity: 'error' })
       return
     }
@@ -30,20 +36,24 @@ export const useAudiobookCharacterVoicePreview = ({
     try {
       setPreviewingCharacterId(cv.characterId)
       const modelForPreview = cv.ttsModel || ttsModel
-      const response = await apiClient.previewTTS({
-        text: '当你真的喜欢一个人的时候就容易说傻话办蠢事。',
+      const result = await apiClient.previewTTSCached({
+        text: DEFAULT_CHARACTER_VOICE_PREVIEW_TEXT,
         voice_id: cv.voiceId,
-        volume: cv.volume,
-        speed: cv.speed,
-        pitch: cv.pitch,
         model: modelForPreview,
-        voice_type: cv.voiceType,
+        voice_clone_data_url: cv.voiceCloneDataUrl,
+        voice_design_prompt: undefined,
+        mimo_voice_asset_id: cv.mimoVoiceAssetId,
+        stepaudio_voice_asset_id: cv.stepaudioVoiceAssetId,
       })
 
       if (playingChapter) {
         setPlayingChapter(null)
       }
-      await playManagedBlob(response.data)
+      if (result.audioUrl) {
+        await playExternalUrl(result.audioUrl)
+      } else if (result.blob) {
+        await playManagedBlob(result.blob)
+      }
     } catch (error: unknown) {
       setSnackbar({
         open: true,
@@ -53,7 +63,7 @@ export const useAudiobookCharacterVoicePreview = ({
     } finally {
       setPreviewingCharacterId(null)
     }
-  }, [playManagedBlob, playingChapter, setPlayingChapter, setSnackbar, ttsModel])
+  }, [playManagedBlob, playExternalUrl, playingChapter, setPlayingChapter, setSnackbar, ttsModel])
 
   return {
     previewingCharacterId,

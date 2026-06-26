@@ -305,7 +305,7 @@ class BaseAgent(ABC):
         MODEL_LIMITS = {
             'qwen-max': 30720,          # 30K tokens
             'qwen3-max': 256000,        # 256K tokens（上下文 256K）
-            'qwen3.5-plus': 1000000,    # 1M tokens（上下文 100万，输出 65K）
+            'qwen3.7-plus': 1000000,    # 1M tokens（上下文 100万，输出 65K）
             'qwen-plus': 1000000,       # 1M tokens
             'qwen-long': 10000000,      # 10M tokens
             'qwen-turbo': 8000,         # 8K tokens

@@ -38,6 +38,11 @@ _OPERATION_MODEL_IDS: Dict[str, set[str]] = {
         "cosyvoice-v3.5-plus",
         "MiniMax/speech-2.8-turbo",  # MiniMax 高质量语音合成
         "MiniMax/speech-2.8-hd",     # MiniMax 旗舰级语音合成
+        "mimo-v2.5-tts",
+        "mimo-v2.5-tts-voicedesign",
+        "mimo-v2.5-tts-voiceclone",
+        "stepaudio-2.5-tts",
+        "seed-tts-2.0-expressive",
     },
 }
 

@@ -16,6 +16,7 @@ import hashlib
 import logging
 import random
 import os
+import re
 from typing import Dict, Any, Optional, List, Callable
 import io
 from dataclasses import dataclass
@@ -95,6 +96,26 @@ _TTS_CACHE_NAMESPACE = "audiobook_tts_audio_v1"
 _TTS_CACHE_VALIDATION_VERSION = "tts_output_validator_v1"
 _TTS_CACHE_DEFAULT_TTL_SECONDS = 7 * 24 * 60 * 60
 _TTS_CACHE_BACKEND = None
+_AUDIO_DATA_URL_LOG_REDACT_RE = re.compile(
+    r"^data:(?P<mime>[^,;]+(?:;[^,;]+)*);base64,(?P<data>.+)$",
+    re.DOTALL,
+)
+
+
+def redact_tts_voice_params_for_log(value: Any) -> Any:
+    """Redact large audio data URLs before logging TTS params."""
+    if isinstance(value, dict):
+        return {key: redact_tts_voice_params_for_log(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [redact_tts_voice_params_for_log(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(redact_tts_voice_params_for_log(item) for item in value)
+    if isinstance(value, str):
+        match = _AUDIO_DATA_URL_LOG_REDACT_RE.match(value.strip())
+        if match:
+            mime_type = match.group("mime").split(";", 1)[0].strip().lower()
+            return f"<audio data URL: {mime_type}, base64 chars={len(match.group('data'))}>"
+    return value
 
 
 def _env_bool(name: str, default: bool = False) -> bool:
@@ -170,7 +191,11 @@ class TTSEngineBase:
         ).strip().lower() not in {"0", "false", "no", "off"}
 
         # 根据模型设置单价：不同模型价格不同
-        if "plus" in model:
+        if "seed-tts-2.0" in model or "doubao" in model:
+            self.price_per_10k = 5.0
+        elif "stepaudio" in model:
+            self.price_per_10k = 5.8
+        elif "plus" in model:
             self.price_per_10k = 2.0  # ¥2/万字符（cosyvoice-v3.5-plus）
         elif "minimax" in model and "hd" in model:
             self.price_per_10k = 6.0  # ¥6/万字符（minimax speech-2.8-hd: 600积分/万字符）
@@ -267,8 +292,8 @@ class TTSEngineBase:
             performance_notes = voice_params.get("performance_notes", "")
             effective_text = self._apply_interjections(effective_text, performance_notes, emotion)
         
-        # 调试：输出接收到的 voice_params
-        logger.info("TTS引擎接收参数: %s", voice_params)
+        # 调试：输出接收到的 voice_params，避免把录音样本 base64 完整写入日志。
+        logger.info("TTS引擎接收参数: %s", redact_tts_voice_params_for_log(voice_params))
         
         # 将 emotion 添加到 voice_params 中，供 _call_aliyun_tts 使用
         voice_params_with_emotion = voice_params.copy()

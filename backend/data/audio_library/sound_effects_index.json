@@ -49267,66 +49267,6 @@
     "asset_scope": "shared_library"
   },
   {
-    "id": "ambient_city_wind_calm_vidu_fcdd5f",
-    "name": "城市风声环境音（Vidu，calm）",
-    "category": "environment/peaceful",
-    "file_path": "sound_effects/environment/peaceful/ambient_city_wind_calm_vidu_fcdd5f.wav",
-    "description": "城市风声环境音（Vidu，calm）",
-    "tags": [
-      "风",
-      "calm",
-      "Vidu",
-      "environment",
-      "peaceful",
-      "outdoor"
-    ],
-    "source": "vidu",
-    "style": "peaceful",
-    "scenes": [
-      "outdoor"
-    ],
-    "quality_score": 100.0,
-    "quality_grade": "B",
-    "quality_status": "accepted",
-    "storage_mode": "durable_cloud",
-    "storage_driver": "aliyun_oss",
-    "cloud_uri": "oss://shared/audio_library/sfx/sound_effects/environment/peaceful/ambient_city_wind_calm_vidu_fcdd5f.wav",
-    "public_url": "https://audio.sggf.net/shared/audio_library/sfx/sound_effects/environment/peaceful/ambient_city_wind_calm_vidu_fcdd5f.wav",
-    "object_key": "shared/audio_library/sfx/sound_effects/environment/peaceful/ambient_city_wind_calm_vidu_fcdd5f.wav",
-    "local_cache_path": "sound_effects/environment/peaceful/ambient_city_wind_calm_vidu_fcdd5f.wav",
-    "asset_scope": "shared_library"
-  },
-  {
-    "id": "ambient_city_wind_calm_vidu_d2a18c",
-    "name": "城市风声环境音（Vidu，calm）",
-    "category": "environment/peaceful",
-    "file_path": "sound_effects/environment/peaceful/ambient_city_wind_calm_vidu_d2a18c.wav",
-    "description": "城市风声环境音（Vidu，calm）",
-    "tags": [
-      "风",
-      "calm",
-      "Vidu",
-      "environment",
-      "peaceful",
-      "outdoor"
-    ],
-    "source": "vidu",
-    "style": "peaceful",
-    "scenes": [
-      "outdoor"
-    ],
-    "quality_score": 100.0,
-    "quality_grade": "B",
-    "quality_status": "accepted",
-    "storage_mode": "durable_cloud",
-    "storage_driver": "aliyun_oss",
-    "cloud_uri": "oss://shared/audio_library/sfx/sound_effects/environment/peaceful/ambient_city_wind_calm_vidu_d2a18c.wav",
-    "public_url": "https://audio.sggf.net/shared/audio_library/sfx/sound_effects/environment/peaceful/ambient_city_wind_calm_vidu_d2a18c.wav",
-    "object_key": "shared/audio_library/sfx/sound_effects/environment/peaceful/ambient_city_wind_calm_vidu_d2a18c.wav",
-    "local_cache_path": "sound_effects/environment/peaceful/ambient_city_wind_calm_vidu_d2a18c.wav",
-    "asset_scope": "shared_library"
-  },
-  {
     "id": "sfx_action_c8ccc9",
     "name": "烛火噼啪声",
     "category": "action/realistic",
@@ -49498,6 +49438,216 @@
     "public_url": "https://audio.sggf.net/shared/audio_library/sfx/sound_effects/action/realistic/sfx_action_5004d6.wav",
     "object_key": "shared/audio_library/sfx/sound_effects/action/realistic/sfx_action_5004d6.wav",
     "local_cache_path": "sound_effects/action/realistic/sfx_action_5004d6.wav",
+    "asset_scope": "shared_library"
+  },
+  {
+    "id": "ambient_city_wind_calm_vidu_d2a18c",
+    "name": "城市风声环境音（Vidu，calm）",
+    "category": "environment/peaceful",
+    "file_path": "sound_effects/environment/peaceful/ambient_city_wind_calm_vidu_d2a18c.wav",
+    "description": "城市风声环境音（Vidu，calm）",
+    "tags": [
+      "风",
+      "calm",
+      "Vidu",
+      "environment",
+      "peaceful",
+      "outdoor"
+    ],
+    "source": "vidu",
+    "style": "peaceful",
+    "scenes": [
+      "outdoor"
+    ],
+    "quality_score": 100.0,
+    "quality_grade": "B",
+    "quality_status": "accepted",
+    "storage_mode": "durable_cloud",
+    "storage_driver": "aliyun_oss",
+    "cloud_uri": "oss://shared/audio_library/sfx/sound_effects/environment/peaceful/ambient_city_wind_calm_vidu_d2a18c.wav",
+    "public_url": "https://audio.sggf.net/shared/audio_library/sfx/sound_effects/environment/peaceful/ambient_city_wind_calm_vidu_d2a18c.wav",
+    "object_key": "shared/audio_library/sfx/sound_effects/environment/peaceful/ambient_city_wind_calm_vidu_d2a18c.wav",
+    "local_cache_path": "sound_effects/environment/peaceful/ambient_city_wind_calm_vidu_d2a18c.wav",
+    "asset_scope": "shared_library"
+  },
+  {
+    "id": "ambient_city_wind_calm_vidu_aa0fb1",
+    "name": "城市风声环境音（Vidu，calm）",
+    "category": "environment/peaceful",
+    "file_path": "sound_effects/environment/peaceful/ambient_city_wind_calm_vidu_aa0fb1.wav",
+    "description": "城市风声环境音（Vidu，calm）",
+    "tags": [
+      "风",
+      "calm",
+      "Vidu",
+      "environment",
+      "peaceful",
+      "outdoor",
+      "mystery",
+      "horror"
+    ],
+    "source": "vidu",
+    "style": "peaceful",
+    "scenes": [
+      "outdoor",
+      "mystery",
+      "horror"
+    ],
+    "quality_score": 100.0,
+    "quality_grade": "B",
+    "quality_status": "accepted",
+    "storage_mode": "durable_cloud",
+    "storage_driver": "aliyun_oss",
+    "cloud_uri": "oss://shared/audio_library/sfx/sound_effects/environment/peaceful/ambient_city_wind_calm_vidu_aa0fb1.wav",
+    "public_url": "https://audio.sggf.net/shared/audio_library/sfx/sound_effects/environment/peaceful/ambient_city_wind_calm_vidu_aa0fb1.wav",
+    "object_key": "shared/audio_library/sfx/sound_effects/environment/peaceful/ambient_city_wind_calm_vidu_aa0fb1.wav",
+    "local_cache_path": "sound_effects/environment/peaceful/ambient_city_wind_calm_vidu_aa0fb1.wav",
+    "asset_scope": "shared_library"
+  },
+  {
+    "id": "ambient_city_wind_calm_vidu_fcdd5f",
+    "name": "城市风声环境音（Vidu，calm）",
+    "category": "environment/peaceful",
+    "file_path": "sound_effects/environment/peaceful/ambient_city_wind_calm_vidu_fcdd5f.wav",
+    "description": "城市风声环境音（Vidu，calm）",
+    "tags": [
+      "风",
+      "calm",
+      "Vidu",
+      "environment",
+      "peaceful",
+      "outdoor"
+    ],
+    "source": "vidu",
+    "style": "peaceful",
+    "scenes": [
+      "outdoor"
+    ],
+    "quality_score": 100.0,
+    "quality_grade": "B",
+    "quality_status": "accepted",
+    "storage_mode": "durable_cloud",
+    "storage_driver": "aliyun_oss",
+    "cloud_uri": "oss://shared/audio_library/sfx/sound_effects/environment/peaceful/ambient_city_wind_calm_vidu_fcdd5f.wav",
+    "public_url": "https://audio.sggf.net/shared/audio_library/sfx/sound_effects/environment/peaceful/ambient_city_wind_calm_vidu_fcdd5f.wav",
+    "object_key": "shared/audio_library/sfx/sound_effects/environment/peaceful/ambient_city_wind_calm_vidu_fcdd5f.wav",
+    "local_cache_path": "sound_effects/environment/peaceful/ambient_city_wind_calm_vidu_fcdd5f.wav",
+    "asset_scope": "shared_library"
+  },
+  {
+    "id": "sfx_action_cf4c1e",
+    "name": "衣物摩擦声",
+    "category": "action/realistic",
+    "file_path": "sound_effects/action/realistic/sfx_action_cf4c1e.wav",
+    "description": "衣物摩擦声",
+    "tags": [
+      "action",
+      "realistic",
+      "general",
+      "scene_3"
+    ],
+    "source": "vidu",
+    "style": "realistic",
+    "scenes": [
+      "general",
+      "scene_3"
+    ],
+    "quality_score": 100.0,
+    "quality_grade": "B",
+    "quality_status": "accepted",
+    "storage_mode": "durable_cloud",
+    "storage_driver": "aliyun_oss",
+    "cloud_uri": "oss://shared/audio_library/sfx/sound_effects/action/realistic/sfx_action_cf4c1e.wav",
+    "public_url": "https://audio.sggf.net/shared/audio_library/sfx/sound_effects/action/realistic/sfx_action_cf4c1e.wav",
+    "object_key": "shared/audio_library/sfx/sound_effects/action/realistic/sfx_action_cf4c1e.wav",
+    "local_cache_path": "sound_effects/action/realistic/sfx_action_cf4c1e.wav",
+    "asset_scope": "shared_library"
+  },
+  {
+    "id": "sfx_action_540e84",
+    "name": "锁链轻微碰撞声",
+    "category": "action/realistic",
+    "file_path": "sound_effects/action/realistic/sfx_action_540e84.wav",
+    "description": "锁链轻微碰撞声",
+    "tags": [
+      "action",
+      "realistic",
+      "general",
+      "scene_17"
+    ],
+    "source": "vidu",
+    "style": "realistic",
+    "scenes": [
+      "general",
+      "scene_17"
+    ],
+    "quality_score": 100.0,
+    "quality_grade": "B",
+    "quality_status": "accepted",
+    "storage_mode": "durable_cloud",
+    "storage_driver": "aliyun_oss",
+    "cloud_uri": "oss://shared/audio_library/sfx/sound_effects/action/realistic/sfx_action_540e84.wav",
+    "public_url": "https://audio.sggf.net/shared/audio_library/sfx/sound_effects/action/realistic/sfx_action_540e84.wav",
+    "object_key": "shared/audio_library/sfx/sound_effects/action/realistic/sfx_action_540e84.wav",
+    "local_cache_path": "sound_effects/action/realistic/sfx_action_540e84.wav",
+    "asset_scope": "shared_library"
+  },
+  {
+    "id": "sfx_action_dda558",
+    "name": "鼾声",
+    "category": "action/realistic",
+    "file_path": "sound_effects/action/realistic/sfx_action_dda558.wav",
+    "description": "鼾声",
+    "tags": [
+      "action",
+      "realistic",
+      "general",
+      "scene_19"
+    ],
+    "source": "vidu",
+    "style": "realistic",
+    "scenes": [
+      "general",
+      "scene_19"
+    ],
+    "quality_score": 100.0,
+    "quality_grade": "B",
+    "quality_status": "accepted",
+    "storage_mode": "durable_cloud",
+    "storage_driver": "aliyun_oss",
+    "cloud_uri": "oss://shared/audio_library/sfx/sound_effects/action/realistic/sfx_action_dda558.wav",
+    "public_url": "https://audio.sggf.net/shared/audio_library/sfx/sound_effects/action/realistic/sfx_action_dda558.wav",
+    "object_key": "shared/audio_library/sfx/sound_effects/action/realistic/sfx_action_dda558.wav",
+    "local_cache_path": "sound_effects/action/realistic/sfx_action_dda558.wav",
+    "asset_scope": "shared_library"
+  },
+  {
+    "id": "sfx_action_f1d8ed",
+    "name": "陶罐碎裂",
+    "category": "action/realistic",
+    "file_path": "sound_effects/action/realistic/sfx_action_f1d8ed.wav",
+    "description": "陶罐碎裂",
+    "tags": [
+      "action",
+      "realistic",
+      "general",
+      "scene_31"
+    ],
+    "source": "vidu",
+    "style": "realistic",
+    "scenes": [
+      "general",
+      "scene_31"
+    ],
+    "quality_score": 100.0,
+    "quality_grade": "B",
+    "quality_status": "accepted",
+    "storage_mode": "durable_cloud",
+    "storage_driver": "aliyun_oss",
+    "cloud_uri": "oss://shared/audio_library/sfx/sound_effects/action/realistic/sfx_action_f1d8ed.wav",
+    "public_url": "https://audio.sggf.net/shared/audio_library/sfx/sound_effects/action/realistic/sfx_action_f1d8ed.wav",
+    "object_key": "shared/audio_library/sfx/sound_effects/action/realistic/sfx_action_f1d8ed.wav",
+    "local_cache_path": "sound_effects/action/realistic/sfx_action_f1d8ed.wav",
     "asset_scope": "shared_library"
   }
 ]

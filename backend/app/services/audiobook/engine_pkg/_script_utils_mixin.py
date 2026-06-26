@@ -14,6 +14,7 @@ from ..voice_manager_factory import create_voice_manager
 from ..audio_mixer import AudioMixer
 from ..narration_styles import apply_narration_style_to_tts_params
 from ..pause_tags import coerce_pause_ms, strip_pause_tags
+from ..tts_delivery_plan import build_delivery_plan, resolve_segment_tts_model
 from app.services.chapter_adaptation_assets import build_audio_adaptation_hint
 from core.unified_media_runtime import create_tts_engine
 
@@ -335,7 +336,11 @@ class ScriptUtilsMixin:
             voice_params_dict = self._apply_narration_style_to_voice_params(segment, voice_params_dict)
             if "rate" not in voice_params_dict and "speed" in voice_params_dict:
                 voice_params_dict["rate"] = voice_params_dict["speed"]
-            voice_params_dict["tts_model"] = getattr(voice_profile, "tts_model", getattr(self, "tts_model", ""))
+            voice_params_dict["tts_model"] = (
+                segment_voice_params.get("tts_model")
+                or getattr(voice_profile, "tts_model", None)
+                or getattr(self, "tts_model", "")
+            )
             voice_params_dict = self._normalize_final_voice_params(segment, voice_params_dict)
             
             # 🔍 调试：输出最终参数
@@ -361,3 +366,15 @@ class ScriptUtilsMixin:
 
             if instruct_emotion or segment.voice_params["instruct_scene"] or segment.voice_params["instruct_role"] or segment.voice_params["instruct_identity"]:
                 segment.voice_params["use_instruct_mode"] = True
+
+            resolved_model = resolve_segment_tts_model(
+                segment.voice_params,
+                getattr(self, "tts_model", None),
+            )
+            segment.voice_params["resolved_tts_model"] = resolved_model
+            segment.voice_params["delivery_plan"] = build_delivery_plan(
+                segment=segment,
+                voice_params=segment.voice_params,
+                model=resolved_model,
+                emotion=instruct_emotion or segment_emotion or "neutral",
+            )

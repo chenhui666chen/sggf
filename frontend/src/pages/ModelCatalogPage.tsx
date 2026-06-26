@@ -287,6 +287,25 @@ interface DetailedSpecs {
       format?: string
       required?: boolean
     }
+    style_control?: {
+      model_family?: string
+      preferred_mode?: string
+      modes?: Array<{
+        id: string
+        label: string
+        description?: string
+      }>
+      supports_voice_description?: boolean
+      supports_director_mode?: boolean
+      supports_audio_tags?: boolean
+      supports_emotion_mixing?: boolean
+      supports_micro_tags?: boolean
+      supports_word_level_control?: boolean
+      instruction_budget?: number | null
+      control_message_roles?: Record<string, string>
+      advanced_controls?: string[]
+      project_integration_status?: string
+    }
     instruct_control?: {
       enabled?: boolean
       param_name?: string
@@ -1339,6 +1358,51 @@ function getVoiceDesignPrinciples(entry?: CatalogEntry | null): string[] {
   return entry?.detailed_specs?.voice_synthesis?.voice_design?.quality_principles || []
 }
 
+function getStyleControlModeLabel(mode?: string | null): string {
+  const labels: Record<string, string> = {
+    natural_language: '自然语言指令',
+    director: '导演模式',
+    audio_tags: '音频标签',
+    basic: '基础参数',
+  }
+  const normalized = String(mode || '').trim()
+  return labels[normalized] || normalized || '-'
+}
+
+function getStyleControlRoleLabel(role?: string | null): string {
+  const labels: Record<string, string> = {
+    user: 'user 消息',
+    assistant: 'assistant 消息',
+    'parameters.instructions': 'parameters.instructions',
+    'parameters.instruction': 'parameters.instruction',
+  }
+  const normalized = String(role || '').trim()
+  return labels[normalized] || normalized || '-'
+}
+
+function getTtsStyleControlRoleItems(entry?: CatalogEntry | null): LabeledValueItem[] {
+  const roles = entry?.detailed_specs?.voice_synthesis?.style_control?.control_message_roles || {}
+  return Object.entries(roles).map(([mode, role]) => ({
+    label: getStyleControlModeLabel(mode),
+    value: getStyleControlRoleLabel(role),
+  }))
+}
+
+function getTtsStyleControlAdvancedLabels(entry?: CatalogEntry | null): string[] {
+  const styleControl = entry?.detailed_specs?.voice_synthesis?.style_control
+  if (!styleControl) return []
+
+  return mergeUniqueStrings(
+    styleControl.advanced_controls,
+    styleControl.supports_voice_description ? ['声音描述融合'] : [],
+    styleControl.supports_director_mode ? ['导演模式'] : [],
+    styleControl.supports_audio_tags ? ['音频标签'] : [],
+    styleControl.supports_emotion_mixing ? ['复合情绪'] : [],
+    styleControl.supports_micro_tags ? ['微表演标签'] : [],
+    styleControl.supports_word_level_control ? ['词/字级控制'] : [],
+  )
+}
+
 // Helper components
 function LabeledValueSection({ title, items }: { title: string; items: LabeledValueItem[] }) {
   return (
@@ -1652,6 +1716,9 @@ export default function ModelCatalogPage() {
   const voiceDesignDimensions = getVoiceDesignDimensionItems(selectedEntry)
   const voiceDesignPrinciples = getVoiceDesignPrinciples(selectedEntry)
   const voiceLifecycleStatuses = getVoiceLifecycleStatusItems(selectedEntry)
+  const ttsStyleControl = selectedEntry?.detailed_specs?.voice_synthesis?.style_control
+  const ttsStyleControlRoleItems = getTtsStyleControlRoleItems(selectedEntry)
+  const ttsStyleControlAdvancedLabels = getTtsStyleControlAdvancedLabels(selectedEntry)
 
   return (
     <Box sx={{ minHeight: '100vh', backgroundColor: '#f4f7fb', py: 3 }}>
@@ -2119,6 +2186,51 @@ export default function ModelCatalogPage() {
                                   {' = '}
                                   {selectedEntry.detailed_specs.voice_synthesis.calling_method.format || 'voice_id'}
                                 </Typography>
+                              )}
+                              {ttsStyleControl && (
+                                <Box sx={{ mt: 0.5 }}>
+                                  <Typography variant="caption" color="text.secondary">
+                                    风格控制模式
+                                    {ttsStyleControl.preferred_mode
+                                      ? ` · 推荐 ${getStyleControlModeLabel(ttsStyleControl.preferred_mode)}`
+                                      : ''}
+                                    {ttsStyleControl.instruction_budget
+                                      ? ` · 指令预算 ${ttsStyleControl.instruction_budget} 字符`
+                                      : ''}
+                                  </Typography>
+                                  {(ttsStyleControl.modes || []).length > 0 && (
+                                    <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap sx={{ mt: 0.75 }}>
+                                      {(ttsStyleControl.modes || []).map((mode) => (
+                                        <Chip
+                                          key={mode.id}
+                                          size="small"
+                                          color={mode.id === ttsStyleControl.preferred_mode ? 'primary' : 'default'}
+                                          variant={mode.id === ttsStyleControl.preferred_mode ? 'filled' : 'outlined'}
+                                          label={mode.label || getStyleControlModeLabel(mode.id)}
+                                        />
+                                      ))}
+                                    </Stack>
+                                  )}
+                                  {ttsStyleControlRoleItems.length > 0 && (
+                                    <Grid container spacing={1.25} sx={{ mt: 0.5 }}>
+                                      {ttsStyleControlRoleItems.map((item) => (
+                                        <Grid item xs={12} sm={6} md={4} key={item.label}>
+                                          <Typography variant="caption" color="text.secondary">
+                                            消息位置 · {item.label}
+                                          </Typography>
+                                          <Typography variant="body2">{item.value}</Typography>
+                                        </Grid>
+                                      ))}
+                                    </Grid>
+                                  )}
+                                  {ttsStyleControlAdvancedLabels.length > 0 && (
+                                    <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap sx={{ mt: 0.75 }}>
+                                      {ttsStyleControlAdvancedLabels.map((label) => (
+                                        <Chip key={label} size="small" variant="outlined" label={`高级控制：${label}`} />
+                                      ))}
+                                    </Stack>
+                                  )}
+                                </Box>
                               )}
                               {selectedEntry.detailed_specs.voice_synthesis.voice_clone?.input_requirements && (
                                 <Typography variant="body2" color="text.secondary">

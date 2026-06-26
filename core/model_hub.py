@@ -311,7 +311,7 @@ class ModelHub:
                     await asyncio.sleep(wait_time)
 
         # 内容安全回退链路：换用不同安全策略的模型重试
-        _CONTENT_SAFETY_FALLBACK_CHAIN = ["deepseek-v4-pro", "qwen3.5-plus"]
+        _CONTENT_SAFETY_FALLBACK_CHAIN = ["deepseek-v4-pro", "qwen3.7-plus"]
         if last_result and last_result.error_code == "content_safety":
             tried = set(attempted)
             strip_kwargs = {k: v for k, v in kwargs.items() if k != "max_retries"}

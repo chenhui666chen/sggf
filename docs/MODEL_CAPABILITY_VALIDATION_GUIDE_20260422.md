@@ -206,6 +206,19 @@ python -m backend.app.scripts.bootstrap_model_catalog_cards --prune-stale
 - 事件流里经常有中间增量结果，不能直接当最终结果消费
 - 如果词级有了，不要自动推断音素级也有
 
+豆包 Seed-TTS 2.0 Expressive 额外检查：
+
+- 模型 ID 必须记录为 `seed-tts-2.0-expressive`，默认 resource id 为 `seed-tts-2.0`。
+- 非流式合成验证 `POST https://openspeech.bytedance.com/api/v3/tts/unidirectional`；双向流式能力单独验证 `wss://openspeech.bytedance.com/api/v3/tts/bidirection`。
+- 鉴权检查 `X-Api-Key`、`X-Api-Resource-Id`，不要误用百炼 `DASHSCOPE_API_KEY`，也不要把火山方舟通用 `VOLCENGINE_API_KEY` / `DOUBAO_API_KEY` 当作 Seed Speech 专用 TTS Key。
+- 项目只接受 `VOLCENGINE_TTS_API_KEY`、`DOUBAO_TTS_API_KEY`、`SEED_TTS_API_KEY`、`VOLCENGINE_SPEECH_API_KEY`、`DOUBAO_SPEECH_API_KEY` 作为 Seed-TTS `X-Api-Key` 来源。
+- 有声小说风格控制应写入 `req_params.additions.context_texts`，不要拼入待朗读正文。
+- `seed-tts-2.0-standard` 不支持 `context_texts` / `use_tag_parser`，不能用 standard 的结果证明 expressive 的高表现力能力。
+- `use_tag_parser` 主要面向复刻音色和短文本精细控制，验证记录要说明是否使用复刻音色、文本长度和标签位置。
+- 方括号语音标签验证要至少覆盖一个官方推荐系统音色，例如可爱女生、调皮公主、爽朗少年或天才同桌，并记录对应 `Voice_type`。
+- 引用上文验证要确认上文只作为语境被理解，不被合成为音频正文。
+- 当前只做本地 mock 或 payload 检查时，结论只能写“项目链路已接入”，不能写“真实接口已验证”。
+
 ### 5.2 图像生成 / 图像编辑
 
 至少检查：

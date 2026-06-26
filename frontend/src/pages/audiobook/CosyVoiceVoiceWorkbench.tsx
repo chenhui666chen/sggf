@@ -24,10 +24,12 @@ export interface CosyVoiceWorkbench {
   cloneRecordDialogOpen: boolean
   designName: string
   designPrompt: string
-  designPreviewText: string
+  designPreviewAudioUrl: string
+  designPreviewVoiceId: string
   designLoading: boolean
   designError: string | null
   designSuccess: string | null
+  customVoicePreviewingId: string | null
   customVoicePresets: VoicePreset[]
   onCloneNameChange: (value: string) => void
   onCloneUrlChange: (value: string) => void
@@ -36,8 +38,9 @@ export interface CosyVoiceWorkbench {
   onUploadCloneAudio: (event: ChangeEvent<HTMLInputElement>) => void
   onDesignNameChange: (value: string) => void
   onDesignPromptChange: (value: string) => void
-  onDesignPreviewTextChange: (value: string) => void
   onCreateDesignVoice: () => void
+  onPreviewDesignVoice: () => void
+  onPreviewCustomVoice: (voice: VoicePreset) => void
   onDeleteCustomVoice: (voiceId: string, label?: string) => void
   onCloseCloneRecordDialog: () => void
   onStartCloneRecording: () => void
@@ -56,10 +59,12 @@ const CosyVoiceVoiceWorkbench = ({
   cloneRecordDialogOpen,
   designName,
   designPrompt,
-  designPreviewText,
+  designPreviewAudioUrl,
+  designPreviewVoiceId,
   designLoading,
   designError,
   designSuccess,
+  customVoicePreviewingId,
   customVoicePresets,
   onCloneNameChange,
   onCloneUrlChange,
@@ -68,8 +73,9 @@ const CosyVoiceVoiceWorkbench = ({
   onUploadCloneAudio,
   onDesignNameChange,
   onDesignPromptChange,
-  onDesignPreviewTextChange,
   onCreateDesignVoice,
+  onPreviewDesignVoice,
+  onPreviewCustomVoice,
   onDeleteCustomVoice,
   onCloseCloneRecordDialog,
   onStartCloneRecording,
@@ -125,15 +131,16 @@ const CosyVoiceVoiceWorkbench = ({
           <CosyVoiceDesignVoicePanel
             designName={designName}
             designPrompt={designPrompt}
-            designPreviewText={designPreviewText}
+            designPreviewAudioUrl={designPreviewAudioUrl}
+            designPreviewVoiceId={designPreviewVoiceId}
             designLoading={designLoading}
             busy={voiceCreationBusy}
             designError={designError}
             designSuccess={designSuccess}
             onDesignNameChange={onDesignNameChange}
             onDesignPromptChange={onDesignPromptChange}
-            onDesignPreviewTextChange={onDesignPreviewTextChange}
             onCreateDesignVoice={onCreateDesignVoice}
+            onPreviewDesignVoice={onPreviewDesignVoice}
           />
         </Box>
 
@@ -141,6 +148,8 @@ const CosyVoiceVoiceWorkbench = ({
           customVoicePresets={customVoicePresets}
           cloneDeletingId={cloneDeletingId}
           deleteDisabled={deleteDisabled}
+          previewingVoiceId={customVoicePreviewingId}
+          onPreviewCustomVoice={onPreviewCustomVoice}
           onRequestDeleteVoice={handleRequestDeleteVoice}
         />
       </Paper>

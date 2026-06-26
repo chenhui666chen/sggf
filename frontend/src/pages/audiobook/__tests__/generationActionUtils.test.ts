@@ -46,7 +46,6 @@ describe('audiobook generation action utils', () => {
       voiceConfig: [{
         character_name: '旁白',
         voice_id: 'Neil',
-        volume: 50,
       }],
       ttsModel: 'qwen3-tts-instruct-flash',
       generationMode: 'full',
@@ -64,7 +63,6 @@ describe('audiobook generation action utils', () => {
       voice_config: [{
         character_name: '旁白',
         voice_id: 'Neil',
-        volume: 50,
       }],
       tts_model: 'qwen3-tts-instruct-flash',
       output_format: 'wav',

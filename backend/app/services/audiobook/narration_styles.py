@@ -3,6 +3,8 @@
 """
 from typing import Dict, Any, Optional
 
+from app.services.audiobook.voice_description_policy import build_quality_voice_description
+
 
 ALL_NARRATION_TTS_MODELS = (
     "qwen3-tts-instruct-flash",
@@ -137,6 +139,45 @@ NARRATION_STYLE_PRESETS: Dict[str, Dict[str, Any]] = {
 }
 
 
+NARRATION_VOICE_DESCRIPTION_PRESETS: Dict[str, Dict[str, Any]] = {
+    "professional": {
+        "age_group": "中年",
+        "pitch": "中音",
+        "pace": "中速",
+        "traits": ["吐字清晰", "客观克制"],
+        "use_case": "新闻播报和知识类有声书旁白",
+    },
+    "dramatic": {
+        "age_group": "中年",
+        "pitch": "中低音",
+        "pace": "中速",
+        "traits": ["有张力", "停顿层次明确"],
+        "use_case": "剧情有声书旁白",
+    },
+    "relaxing": {
+        "age_group": "中年",
+        "pitch": "中低音",
+        "pace": "缓慢",
+        "traits": ["温和", "舒缓"],
+        "use_case": "有声书旁白",
+    },
+    "expressive": {
+        "age_group": "青年",
+        "pitch": "中高音",
+        "pace": "偏快",
+        "traits": ["明亮", "节奏变化丰富"],
+        "use_case": "儿童故事和轻喜剧有声书旁白",
+    },
+    "custom": {
+        "age_group": "中年",
+        "pitch": "中音",
+        "pace": "中速",
+        "traits": ["吐字清晰", "风格跟随自定义提示"],
+        "use_case": "有声书旁白",
+    },
+}
+
+
 def normalize_narration_style_id(style_id: str) -> str:
     """规范化叙事风格 ID。"""
     return str(style_id or "").strip().lower()
@@ -163,6 +204,24 @@ def get_all_narration_styles() -> list:
         }
         for preset in NARRATION_STYLE_PRESETS.values()
     ]
+
+
+def build_narration_voice_description(style_id: str, emotion: str) -> str:
+    """生成旁白专用声音描述，避免沿用角色对白画像。"""
+    style_key = normalize_narration_style_id(style_id)
+    preset = NARRATION_VOICE_DESCRIPTION_PRESETS.get(
+        style_key,
+        NARRATION_VOICE_DESCRIPTION_PRESETS["professional"],
+    )
+    return build_quality_voice_description(
+        gender="neutral",
+        age_group=preset["age_group"],
+        pitch=preset["pitch"],
+        pace=preset["pace"],
+        emotion=emotion or "calm",
+        traits=preset["traits"],
+        use_case=preset["use_case"],
+    )
 
 
 def apply_narration_style_to_tts_params(
@@ -220,5 +279,10 @@ def apply_narration_style_to_tts_params(
     instructions = str(updated_params.get("instructions") or "").strip()
     if performance_notes and instructions and performance_notes not in instructions:
         updated_params["instructions"] = f"{instructions} 演绎要求：{performance_notes}"
+
+    updated_params["voice_description"] = build_narration_voice_description(
+        preset["id"],
+        str(updated_params.get("emotion") or preset["emotion_profile"]["default_emotion"]),
+    )
 
     return updated_params

@@ -5,14 +5,19 @@ import {
   Button,
   Chip,
   Collapse,
+  CircularProgress,
   Divider,
+  IconButton,
   Tooltip,
   Typography,
 } from '@mui/material'
+import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline'
+import ExpandLessIcon from '@mui/icons-material/ExpandLess'
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
+import PlayArrowIcon from '@mui/icons-material/PlayArrow'
 import RefreshIcon from '@mui/icons-material/Refresh'
 
 import { apiClient, extractApiErrorMessage } from '../../services/api'
-import { audiobookButtonSx } from './audiobookTheme'
 import type { VoicePreset } from './types'
 
 interface CloneDetail {
@@ -31,8 +36,12 @@ interface CosyVoiceCustomVoiceListProps {
   customVoicePresets: VoicePreset[]
   cloneDeletingId: string | null
   deleteDisabled: boolean
+  previewingVoiceId: string | null
+  onPreviewCustomVoice: (voice: VoicePreset) => void
   onRequestDeleteVoice: (voiceId: string, label?: string) => void
 }
+
+const VISIBLE_CUSTOM_VOICE_LIMIT = 3
 
 const voiceItemSx = {
   display: 'grid',
@@ -51,7 +60,7 @@ const actionSx = {
   display: 'flex',
   alignItems: 'center',
   justifyContent: { xs: 'space-between', sm: 'flex-end' },
-  gap: 1,
+  gap: 0.5,
   minWidth: { xs: 0, sm: 132 },
 } as const
 
@@ -84,12 +93,19 @@ const CosyVoiceCustomVoiceList = ({
   customVoicePresets,
   cloneDeletingId,
   deleteDisabled,
+  previewingVoiceId,
+  onPreviewCustomVoice,
   onRequestDeleteVoice,
 }: CosyVoiceCustomVoiceListProps) => {
   const [details, setDetails] = useState<CloneDetail[]>([])
   const [detailsLoading, setDetailsLoading] = useState(false)
   const [detailsError, setDetailsError] = useState<string | null>(null)
   const [showDetails, setShowDetails] = useState(false)
+  const [showAllPresets, setShowAllPresets] = useState(false)
+  const visiblePresets = showAllPresets
+    ? customVoicePresets
+    : customVoicePresets.slice(0, VISIBLE_CUSTOM_VOICE_LIMIT)
+  const hiddenPresetCount = customVoicePresets.length - visiblePresets.length
 
   const fetchDetails = useCallback(async () => {
     setDetailsLoading(true)
@@ -141,9 +157,11 @@ const CosyVoiceCustomVoiceList = ({
 
       {!showDetails ? (
         <Box>
-          {customVoicePresets.map((preset) => {
+          {visiblePresets.map((preset) => {
             const isDesign = preset.customType === 'design'
             const description = preset.description || preset.id
+            const isDeleting = cloneDeletingId === preset.id
+            const isPreviewing = previewingVoiceId === preset.id
             return (
               <Box key={preset.id} sx={voiceItemSx}>
                 <Box sx={{ minWidth: 0 }}>
@@ -169,19 +187,48 @@ const CosyVoiceCustomVoiceList = ({
                       sx={{ height: 22, fontSize: '0.7rem', flexShrink: 0 }}
                     />
                   </Tooltip>
-                  <Button
-                    variant="outlined"
-                    size="small"
-                    disabled={cloneDeletingId === preset.id || deleteDisabled}
-                    onClick={() => onRequestDeleteVoice(preset.id, preset.label)}
-                    sx={{ ...audiobookButtonSx.dangerOutlined, flexShrink: 0 }}
-                  >
-                    {cloneDeletingId === preset.id ? '删除中...' : '删除'}
-                  </Button>
+                  <Tooltip title="试听">
+                    <span>
+                      <IconButton
+                        size="small"
+                        onClick={() => onPreviewCustomVoice(preset)}
+                        disabled={Boolean(previewingVoiceId) || isDeleting}
+                        sx={{ flexShrink: 0 }}
+                        aria-label={`试听 ${preset.label || preset.id}`}
+                      >
+                        {isPreviewing ? <CircularProgress size={18} /> : <PlayArrowIcon fontSize="small" />}
+                      </IconButton>
+                    </span>
+                  </Tooltip>
+                  <Tooltip title={isDeleting ? '删除中' : '删除'}>
+                    <span>
+                      <IconButton
+                        size="small"
+                        color="error"
+                        disabled={isDeleting || deleteDisabled}
+                        onClick={() => onRequestDeleteVoice(preset.id, preset.label)}
+                        sx={{ flexShrink: 0 }}
+                        aria-label={`删除 ${preset.label || preset.id}`}
+                      >
+                        {isDeleting ? <CircularProgress size={18} /> : <DeleteOutlineIcon fontSize="small" />}
+                      </IconButton>
+                    </span>
+                  </Tooltip>
                 </Box>
               </Box>
             )
           })}
+          {customVoicePresets.length > VISIBLE_CUSTOM_VOICE_LIMIT && (
+            <Button
+              size="small"
+              variant="text"
+              endIcon={showAllPresets ? <ExpandLessIcon /> : <ExpandMoreIcon />}
+              onClick={() => setShowAllPresets((current) => !current)}
+              sx={{ mt: 1, fontSize: '0.75rem', minWidth: 0 }}
+            >
+              {showAllPresets ? '收起' : `展开 ${hiddenPresetCount} 个`}
+            </Button>
+          )}
         </Box>
       ) : (
         <>
@@ -206,6 +253,16 @@ const CosyVoiceCustomVoiceList = ({
             ) : (
               <Box>
                 {details.map((clone) => {
+                  const detailPreset: VoicePreset = {
+                    id: clone.voice_id,
+                    speaker: clone.voice_id,
+                    label: clone.display_name || clone.voice_id,
+                    customType: clone.custom_type === 'design' ? 'design' : 'clone',
+                    category: 'custom',
+                    description: clone.voice_prompt || clone.voice_id,
+                  }
+                  const isDeleting = cloneDeletingId === clone.voice_id
+                  const isPreviewing = previewingVoiceId === clone.voice_id
                   return (
                     <Box key={clone.voice_id} sx={voiceItemSx}>
                       <Box sx={{ minWidth: 0 }}>
@@ -242,15 +299,31 @@ const CosyVoiceCustomVoiceList = ({
                           color={getVoiceKindColor(clone.custom_type)}
                           sx={{ height: 22, fontSize: '0.7rem', flexShrink: 0 }}
                         />
-                        <Button
-                          variant="outlined"
-                          size="small"
-                          disabled={cloneDeletingId === clone.voice_id || deleteDisabled}
-                          onClick={() => onRequestDeleteVoice(clone.voice_id, clone.display_name)}
-                          sx={audiobookButtonSx.dangerOutlined}
-                        >
-                          {cloneDeletingId === clone.voice_id ? '删除中...' : '删除'}
-                        </Button>
+                        <Tooltip title="试听">
+                          <span>
+                            <IconButton
+                              size="small"
+                              onClick={() => onPreviewCustomVoice(detailPreset)}
+                              disabled={Boolean(previewingVoiceId) || isDeleting}
+                              aria-label={`试听 ${clone.display_name || clone.voice_id}`}
+                            >
+                              {isPreviewing ? <CircularProgress size={18} /> : <PlayArrowIcon fontSize="small" />}
+                            </IconButton>
+                          </span>
+                        </Tooltip>
+                        <Tooltip title={isDeleting ? '删除中' : '删除'}>
+                          <span>
+                            <IconButton
+                              size="small"
+                              color="error"
+                              disabled={isDeleting || deleteDisabled}
+                              onClick={() => onRequestDeleteVoice(clone.voice_id, clone.display_name)}
+                              aria-label={`删除 ${clone.display_name || clone.voice_id}`}
+                            >
+                              {isDeleting ? <CircularProgress size={18} /> : <DeleteOutlineIcon fontSize="small" />}
+                            </IconButton>
+                          </span>
+                        </Tooltip>
                       </Box>
                     </Box>
                   )

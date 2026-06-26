@@ -7,6 +7,11 @@ export const TTS_MODELS: readonly TtsModel[] = [
   'cosyvoice-v3.5-plus',
   'minimax-speech-2.8-hd',
   'minimax-speech-2.8-turbo',
+  'mimo-v2.5-tts',
+  'mimo-v2.5-tts-voicedesign',
+  'mimo-v2.5-tts-voiceclone',
+  'stepaudio-2.5-tts',
+  'seed-tts-2.0-expressive',
 ] as const
 
 export interface TtsModelOption {
@@ -34,6 +39,17 @@ export interface TtsModelCapabilities {
   supportsVoiceClone: boolean
   supportsVoiceDesign: boolean
   supportsVoiceTuning: boolean
+  modelFamily: string
+  styleControlModes: string[]
+  preferredStyleControlMode: string
+  supportsVoiceDescription: boolean
+  supportsDirectorMode: boolean
+  supportsAudioTags: boolean
+  supportsEmotionMixing: boolean
+  supportsMicroTags: boolean
+  supportsWordLevelControl: boolean
+  instructionBudget?: number | null
+  controlMessageRoles: Record<string, string>
 }
 
 export const DEFAULT_NARRATOR_BY_MODEL: Record<string, string> = {
@@ -41,6 +57,11 @@ export const DEFAULT_NARRATOR_BY_MODEL: Record<string, string> = {
   'cosyvoice-v3.5-plus': '',
   'minimax-speech-2.8-hd': 'male-qn-qingse',
   'minimax-speech-2.8-turbo': 'male-qn-qingse',
+  'mimo-v2.5-tts': 'mimo_default',
+  'mimo-v2.5-tts-voicedesign': '',
+  'mimo-v2.5-tts-voiceclone': '',
+  'stepaudio-2.5-tts': 'cixingnansheng',
+  'seed-tts-2.0-expressive': 'zh_female_vv_uranus_bigtts',
 }
 
 export const TTS_MODEL_LABELS: Record<string, string> = {
@@ -48,6 +69,11 @@ export const TTS_MODEL_LABELS: Record<string, string> = {
   'cosyvoice-v3.5-plus': 'CosyVoice v3.5-plus',
   'minimax-speech-2.8-hd': 'MiniMax HD',
   'minimax-speech-2.8-turbo': 'MiniMax Turbo',
+  'mimo-v2.5-tts': 'MiMo V2.5 TTS',
+  'mimo-v2.5-tts-voicedesign': 'MiMo Voice Design',
+  'mimo-v2.5-tts-voiceclone': 'MiMo Voice Clone',
+  'stepaudio-2.5-tts': 'StepAudio 2.5 TTS',
+  'seed-tts-2.0-expressive': 'Doubao Seed-TTS 2.0 Expressive',
 }
 
 const TTS_MODEL_ALIASES: Record<string, TtsModel> = {
@@ -66,6 +92,25 @@ const TTS_MODEL_ALIASES: Record<string, TtsModel> = {
   'minimax/speech-2.8': 'minimax-speech-2.8-hd',
   'minimax/speech-2.8-hd': 'minimax-speech-2.8-hd',
   'minimax/speech-2.8-turbo': 'minimax-speech-2.8-turbo',
+  'mimo-v2.5-tts': 'mimo-v2.5-tts',
+  'mimo/v2.5-tts': 'mimo-v2.5-tts',
+  'mimo-v2.5-tts-voicedesign': 'mimo-v2.5-tts-voicedesign',
+  'mimo-v2.5-tts-voice-design': 'mimo-v2.5-tts-voicedesign',
+  'mimo/v2.5-tts-voicedesign': 'mimo-v2.5-tts-voicedesign',
+  'mimo/v2.5-tts-voice-design': 'mimo-v2.5-tts-voicedesign',
+  'mimo-v2.5-tts-voiceclone': 'mimo-v2.5-tts-voiceclone',
+  'mimo-v2.5-tts-voice-clone': 'mimo-v2.5-tts-voiceclone',
+  'mimo/v2.5-tts-voiceclone': 'mimo-v2.5-tts-voiceclone',
+  'mimo/v2.5-tts-voice-clone': 'mimo-v2.5-tts-voiceclone',
+  'stepaudio-2.5-tts': 'stepaudio-2.5-tts',
+  stepaudio_2_5_tts: 'stepaudio-2.5-tts',
+  'stepfun/stepaudio-2.5-tts': 'stepaudio-2.5-tts',
+  'stepfun/stepaudio_2_5_tts': 'stepaudio-2.5-tts',
+  'seed-tts-2.0-expressive': 'seed-tts-2.0-expressive',
+  seed_tts_2_0_expressive: 'seed-tts-2.0-expressive',
+  'doubao/seed-tts-2.0-expressive': 'seed-tts-2.0-expressive',
+  'doubao/seed_tts_2_0_expressive': 'seed-tts-2.0-expressive',
+  'doubao-tts-2.0-expressive': 'seed-tts-2.0-expressive',
 }
 
 export const isTtsModel = (value: unknown): value is TtsModel =>
@@ -91,6 +136,17 @@ const FALLBACK_TTS_MODEL_CAPABILITIES: Record<string, TtsModelCapabilities> = {
     supportsVoiceClone: false,
     supportsVoiceDesign: false,
     supportsVoiceTuning: false,
+    modelFamily: 'qwen',
+    styleControlModes: ['natural_language'],
+    preferredStyleControlMode: 'natural_language',
+    supportsVoiceDescription: true,
+    supportsDirectorMode: false,
+    supportsAudioTags: false,
+    supportsEmotionMixing: false,
+    supportsMicroTags: false,
+    supportsWordLevelControl: false,
+    instructionBudget: 600,
+    controlMessageRoles: { natural_language: 'parameters.instructions' },
   },
   'cosyvoice-v3.5-plus': {
     hasSystemVoices: false,
@@ -98,6 +154,17 @@ const FALLBACK_TTS_MODEL_CAPABILITIES: Record<string, TtsModelCapabilities> = {
     supportsVoiceClone: true,
     supportsVoiceDesign: true,
     supportsVoiceTuning: true,
+    modelFamily: 'cosyvoice',
+    styleControlModes: ['natural_language'],
+    preferredStyleControlMode: 'natural_language',
+    supportsVoiceDescription: true,
+    supportsDirectorMode: false,
+    supportsAudioTags: false,
+    supportsEmotionMixing: false,
+    supportsMicroTags: false,
+    supportsWordLevelControl: false,
+    instructionBudget: 100,
+    controlMessageRoles: { natural_language: 'parameters.instruction' },
   },
   'minimax-speech-2.8-hd': {
     hasSystemVoices: true,
@@ -105,6 +172,17 @@ const FALLBACK_TTS_MODEL_CAPABILITIES: Record<string, TtsModelCapabilities> = {
     supportsVoiceClone: false,
     supportsVoiceDesign: false,
     supportsVoiceTuning: false,
+    modelFamily: 'minimax',
+    styleControlModes: ['basic'],
+    preferredStyleControlMode: 'basic',
+    supportsVoiceDescription: false,
+    supportsDirectorMode: false,
+    supportsAudioTags: false,
+    supportsEmotionMixing: false,
+    supportsMicroTags: false,
+    supportsWordLevelControl: false,
+    instructionBudget: null,
+    controlMessageRoles: {},
   },
   'minimax-speech-2.8-turbo': {
     hasSystemVoices: true,
@@ -112,6 +190,127 @@ const FALLBACK_TTS_MODEL_CAPABILITIES: Record<string, TtsModelCapabilities> = {
     supportsVoiceClone: false,
     supportsVoiceDesign: false,
     supportsVoiceTuning: false,
+    modelFamily: 'minimax',
+    styleControlModes: ['basic'],
+    preferredStyleControlMode: 'basic',
+    supportsVoiceDescription: false,
+    supportsDirectorMode: false,
+    supportsAudioTags: false,
+    supportsEmotionMixing: false,
+    supportsMicroTags: false,
+    supportsWordLevelControl: false,
+    instructionBudget: null,
+    controlMessageRoles: {},
+  },
+  'mimo-v2.5-tts': {
+    hasSystemVoices: true,
+    requiresCustomVoice: false,
+    supportsVoiceClone: false,
+    supportsVoiceDesign: false,
+    supportsVoiceTuning: true,
+    modelFamily: 'mimo',
+    styleControlModes: ['director', 'audio_tags', 'natural_language'],
+    preferredStyleControlMode: 'director',
+    supportsVoiceDescription: true,
+    supportsDirectorMode: true,
+    supportsAudioTags: true,
+    supportsEmotionMixing: true,
+    supportsMicroTags: true,
+    supportsWordLevelControl: true,
+    instructionBudget: null,
+    controlMessageRoles: {
+      director: 'user',
+      audio_tags: 'assistant',
+      natural_language: 'user',
+    },
+  },
+  'mimo-v2.5-tts-voicedesign': {
+    hasSystemVoices: false,
+    requiresCustomVoice: true,
+    supportsVoiceClone: false,
+    supportsVoiceDesign: true,
+    supportsVoiceTuning: true,
+    modelFamily: 'mimo',
+    styleControlModes: ['voice_design', 'natural_language'],
+    preferredStyleControlMode: 'voice_design',
+    supportsVoiceDescription: true,
+    supportsDirectorMode: false,
+    supportsAudioTags: false,
+    supportsEmotionMixing: true,
+    supportsMicroTags: false,
+    supportsWordLevelControl: false,
+    instructionBudget: null,
+    controlMessageRoles: {
+      voice_design: 'user',
+      natural_language: 'user',
+    },
+  },
+  'mimo-v2.5-tts-voiceclone': {
+    hasSystemVoices: false,
+    requiresCustomVoice: true,
+    supportsVoiceClone: true,
+    supportsVoiceDesign: false,
+    supportsVoiceTuning: true,
+    modelFamily: 'mimo',
+    styleControlModes: ['director', 'audio_tags', 'natural_language'],
+    preferredStyleControlMode: 'director',
+    supportsVoiceDescription: true,
+    supportsDirectorMode: true,
+    supportsAudioTags: true,
+    supportsEmotionMixing: true,
+    supportsMicroTags: true,
+    supportsWordLevelControl: true,
+    instructionBudget: null,
+    controlMessageRoles: {
+      director: 'user',
+      audio_tags: 'assistant',
+      natural_language: 'user',
+      voice_clone: 'audio.voice',
+    },
+  },
+  'stepaudio-2.5-tts': {
+    hasSystemVoices: true,
+    requiresCustomVoice: false,
+    supportsVoiceClone: true,
+    supportsVoiceDesign: false,
+    supportsVoiceTuning: true,
+    modelFamily: 'stepaudio',
+    styleControlModes: ['global_context', 'inline_context', 'natural_language'],
+    preferredStyleControlMode: 'global_context',
+    supportsVoiceDescription: true,
+    supportsDirectorMode: false,
+    supportsAudioTags: false,
+    supportsEmotionMixing: true,
+    supportsMicroTags: true,
+    supportsWordLevelControl: true,
+    instructionBudget: 200,
+    controlMessageRoles: {
+      global_context: 'parameters.instruction',
+      inline_context: 'input.parentheses',
+      natural_language: 'parameters.instruction',
+    },
+  },
+  'seed-tts-2.0-expressive': {
+    hasSystemVoices: true,
+    requiresCustomVoice: false,
+    supportsVoiceClone: true,
+    supportsVoiceDesign: false,
+    supportsVoiceTuning: true,
+    modelFamily: 'doubao',
+    styleControlModes: ['query_response', 'audio_tags', 'natural_language'],
+    preferredStyleControlMode: 'query_response',
+    supportsVoiceDescription: true,
+    supportsDirectorMode: false,
+    supportsAudioTags: true,
+    supportsEmotionMixing: true,
+    supportsMicroTags: true,
+    supportsWordLevelControl: true,
+    instructionBudget: null,
+    controlMessageRoles: {
+      query_response: 'req_params.additions.context_texts',
+      audio_tags: 'req_params.text + req_params.use_tag_parser',
+      natural_language: 'req_params.additions.context_texts',
+    },
   },
 }
 
@@ -121,7 +320,49 @@ const getFallbackTtsModelCapabilities = (model: TtsModel): TtsModelCapabilities 
   supportsVoiceClone: FALLBACK_TTS_MODEL_CAPABILITIES[model]?.supportsVoiceClone ?? false,
   supportsVoiceDesign: FALLBACK_TTS_MODEL_CAPABILITIES[model]?.supportsVoiceDesign ?? false,
   supportsVoiceTuning: FALLBACK_TTS_MODEL_CAPABILITIES[model]?.supportsVoiceTuning ?? false,
+  modelFamily: FALLBACK_TTS_MODEL_CAPABILITIES[model]?.modelFamily ?? 'generic',
+  styleControlModes: [...(FALLBACK_TTS_MODEL_CAPABILITIES[model]?.styleControlModes ?? ['natural_language'])],
+  preferredStyleControlMode:
+    FALLBACK_TTS_MODEL_CAPABILITIES[model]?.preferredStyleControlMode ?? 'natural_language',
+  supportsVoiceDescription: FALLBACK_TTS_MODEL_CAPABILITIES[model]?.supportsVoiceDescription ?? true,
+  supportsDirectorMode: FALLBACK_TTS_MODEL_CAPABILITIES[model]?.supportsDirectorMode ?? false,
+  supportsAudioTags: FALLBACK_TTS_MODEL_CAPABILITIES[model]?.supportsAudioTags ?? false,
+  supportsEmotionMixing: FALLBACK_TTS_MODEL_CAPABILITIES[model]?.supportsEmotionMixing ?? false,
+  supportsMicroTags: FALLBACK_TTS_MODEL_CAPABILITIES[model]?.supportsMicroTags ?? false,
+  supportsWordLevelControl: FALLBACK_TTS_MODEL_CAPABILITIES[model]?.supportsWordLevelControl ?? false,
+  instructionBudget: FALLBACK_TTS_MODEL_CAPABILITIES[model]?.instructionBudget ?? null,
+  controlMessageRoles: { ...(FALLBACK_TTS_MODEL_CAPABILITIES[model]?.controlMessageRoles ?? {}) },
 })
+
+const normalizeStringArray = (value: unknown, fallback: string[]): string[] => {
+  if (!Array.isArray(value)) {
+    return [...fallback]
+  }
+  const seen = new Set<string>()
+  return value.flatMap((item): string[] => {
+    if (typeof item !== 'string') {
+      return []
+    }
+    const normalized = item.trim()
+    if (!normalized || seen.has(normalized)) {
+      return []
+    }
+    seen.add(normalized)
+    return [normalized]
+  })
+}
+
+const normalizeStringRecord = (value: unknown, fallback: Record<string, string>): Record<string, string> => {
+  if (!value || typeof value !== 'object') {
+    return { ...fallback }
+  }
+  return Object.fromEntries(Object.entries(value as Record<string, unknown>).flatMap(([key, item]) => {
+    if (typeof item !== 'string' || !key.trim() || !item.trim()) {
+      return []
+    }
+    return [[key.trim(), item.trim()]]
+  }))
+}
 
 const normalizeTtsModelCapabilities = (
   model: TtsModel,
@@ -149,11 +390,49 @@ const normalizeTtsModelCapabilities = (
     supportsVoiceTuning: typeof raw.supports_voice_tuning === 'boolean'
       ? raw.supports_voice_tuning
       : fallback.supportsVoiceTuning,
+    modelFamily: typeof raw.model_family === 'string' && raw.model_family.trim()
+      ? raw.model_family.trim()
+      : fallback.modelFamily,
+    styleControlModes: normalizeStringArray(raw.style_control_modes, fallback.styleControlModes),
+    preferredStyleControlMode:
+      typeof raw.preferred_style_control_mode === 'string' && raw.preferred_style_control_mode.trim()
+        ? raw.preferred_style_control_mode.trim()
+        : fallback.preferredStyleControlMode,
+    supportsVoiceDescription: typeof raw.supports_voice_description === 'boolean'
+      ? raw.supports_voice_description
+      : fallback.supportsVoiceDescription,
+    supportsDirectorMode: typeof raw.supports_director_mode === 'boolean'
+      ? raw.supports_director_mode
+      : fallback.supportsDirectorMode,
+    supportsAudioTags: typeof raw.supports_audio_tags === 'boolean'
+      ? raw.supports_audio_tags
+      : fallback.supportsAudioTags,
+    supportsEmotionMixing: typeof raw.supports_emotion_mixing === 'boolean'
+      ? raw.supports_emotion_mixing
+      : fallback.supportsEmotionMixing,
+    supportsMicroTags: typeof raw.supports_micro_tags === 'boolean'
+      ? raw.supports_micro_tags
+      : fallback.supportsMicroTags,
+    supportsWordLevelControl: typeof raw.supports_word_level_control === 'boolean'
+      ? raw.supports_word_level_control
+      : fallback.supportsWordLevelControl,
+    instructionBudget: typeof raw.instruction_budget === 'number' && Number.isFinite(raw.instruction_budget)
+      ? raw.instruction_budget
+      : raw.instruction_budget === null
+        ? null
+        : fallback.instructionBudget,
+    controlMessageRoles: normalizeStringRecord(raw.control_message_roles, fallback.controlMessageRoles),
   }
 }
 
 export const getDefaultNarratorId = (model: TtsModel): string =>
-  DEFAULT_NARRATOR_BY_MODEL[model] || (model === 'cosyvoice-v3.5-plus' ? '' : 'Neil')
+  DEFAULT_NARRATOR_BY_MODEL[model] || (
+    model === 'cosyvoice-v3.5-plus'
+    || model === 'mimo-v2.5-tts-voicedesign'
+    || model === 'mimo-v2.5-tts-voiceclone'
+      ? ''
+      : 'Neil'
+  )
 
 export const getFallbackVoiceId = (
   model: TtsModel,
@@ -319,13 +598,50 @@ export const modelSupportsCustomVoiceWorkbench = (
   modelOptions: readonly TtsModelOption[] = [],
 ): boolean => {
   const capabilities = getTtsModelCapabilities(model, modelOptions)
-  return capabilities.supportsVoiceClone || capabilities.supportsVoiceDesign
+  return model === 'cosyvoice-v3.5-plus'
+    && (capabilities.supportsVoiceClone || capabilities.supportsVoiceDesign)
+}
+
+export const modelUsesInlineCustomVoiceInput = (
+  model: TtsModel,
+  modelOptions: readonly TtsModelOption[] = [],
+): boolean => {
+  const capabilities = getTtsModelCapabilities(model, modelOptions)
+  return capabilities.modelFamily === 'mimo'
+    && model === 'mimo-v2.5-tts-voiceclone'
 }
 
 export const modelSupportsVoiceTuning = (
   model: TtsModel,
   modelOptions: readonly TtsModelOption[] = [],
 ): boolean => getTtsModelCapabilities(model, modelOptions).supportsVoiceTuning
+
+const STYLE_CONTROL_MODE_LABELS: Record<string, string> = {
+  natural_language: '自然语言指令',
+  voice_design: '音色设计',
+  director: '导演模式',
+  audio_tags: '音频标签',
+  global_context: '全局语境',
+  inline_context: '文中语境',
+  query_response: '对话式TTS',
+  basic: '基础参数',
+}
+
+export const getTtsStyleControlLabels = (
+  model: TtsModel,
+  modelOptions: readonly TtsModelOption[] = [],
+): string[] => {
+  const capabilities = getTtsModelCapabilities(model, modelOptions)
+  const seen = new Set<string>()
+  return capabilities.styleControlModes.flatMap((mode): string[] => {
+    const label = STYLE_CONTROL_MODE_LABELS[mode] || mode
+    if (!label || seen.has(label)) {
+      return []
+    }
+    seen.add(label)
+    return [label]
+  })
+}
 
 const QWEN_FLASH_ONLY_TO_INSTRUCT: Record<string, string> = {
   Aiden: 'Ethan',
@@ -394,18 +710,37 @@ const LEGACY_COSYVOICE_SYSTEM_VOICES = new Set(['longanyang', 'longanhuan'])
 export const normalizeVoiceId = (
   model: TtsModel,
   voiceId?: string | null,
+  validVoiceIds?: readonly string[] | Set<string>,
 ): string => {
   if (!voiceId) return ''
 
+  let normalizedVoiceId = voiceId
+
   if (model === 'qwen3-tts-instruct-flash') {
-    const normalizedVoiceId = LEGACY_VOICE_ALIASES[voiceId] || voiceId
-    return QWEN_FLASH_ONLY_TO_INSTRUCT[normalizedVoiceId] || normalizedVoiceId
+    normalizedVoiceId = LEGACY_VOICE_ALIASES[voiceId] || voiceId
+    normalizedVoiceId = QWEN_FLASH_ONLY_TO_INSTRUCT[normalizedVoiceId] || normalizedVoiceId
+  } else if (model === 'cosyvoice-v3.5-plus') {
+    normalizedVoiceId = COSYVOICE_V3_PLUS_LEGACY_ALIASES[voiceId] || voiceId
+    if (LEGACY_COSYVOICE_SYSTEM_VOICES.has(normalizedVoiceId)) {
+      return ''
+    }
   }
 
-  if (model === 'cosyvoice-v3.5-plus') {
-    const normalizedVoiceId = COSYVOICE_V3_PLUS_LEGACY_ALIASES[voiceId] || voiceId
-    return LEGACY_COSYVOICE_SYSTEM_VOICES.has(normalizedVoiceId) ? '' : normalizedVoiceId
+  // 如果提供了有效音色列表,验证规范化后的音色ID是否在列表中
+  if (validVoiceIds) {
+    const validVoiceIdSet: Set<string> =
+      validVoiceIds instanceof Set ? validVoiceIds : new Set(validVoiceIds)
+    const isValid = validVoiceIdSet.has(normalizedVoiceId)
+    
+    if (!isValid) {
+      // 音色不在有效列表中,返回空字符串让前端使用默认值
+      console.warn(
+        `[ttsModels] Voice ID "${normalizedVoiceId}" is not valid for model "${model}". ` +
+        `Resetting to default.`
+      )
+      return ''
+    }
   }
 
-  return voiceId
+  return normalizedVoiceId
 }

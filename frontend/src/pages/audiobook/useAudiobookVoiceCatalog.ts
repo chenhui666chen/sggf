@@ -14,7 +14,6 @@ import {
   mergeTtsModelOptions,
   modelRequiresCustomVoice,
   modelSupportsCustomVoiceWorkbench,
-  modelSupportsVoiceTuning,
   normalizeTtsModelOptions,
   type TtsModelOption,
 } from './ttsModels'
@@ -73,7 +72,6 @@ export const useAudiobookVoiceCatalog = ({
   )
   const currentModelRequiresCustomVoice = modelRequiresCustomVoice(ttsModel, mergedTtsModelOptions)
   const showCustomVoiceWorkbench = modelSupportsCustomVoiceWorkbench(ttsModel, mergedTtsModelOptions)
-  const supportsTtsTuning = modelSupportsVoiceTuning(ttsModel, mergedTtsModelOptions)
   const currentModelCatalogUnavailable = currentTtsModelOption?.catalogStatus === 'unavailable'
   const currentModelRuntimeUnavailable = currentTtsModelOption?.runtimeStatus === 'unavailable'
 
@@ -83,11 +81,8 @@ export const useAudiobookVoiceCatalog = ({
   )
 
   const customVoicePresets = useMemo(() => {
-    if (!showCustomVoiceWorkbench) {
-      return []
-    }
     return currentVoicePresets.filter((preset) => preset.category === 'custom')
-  }, [currentVoicePresets, showCustomVoiceWorkbench])
+  }, [currentVoicePresets])
 
   const currentModelHasUsableVoice = useMemo(() => {
     if (currentModelCatalogUnavailable || currentModelRuntimeUnavailable) {
@@ -300,7 +295,6 @@ export const useAudiobookVoiceCatalog = ({
     currentModelCatalogUnavailable,
     currentModelRuntimeUnavailable,
     showCustomVoiceWorkbench,
-    supportsTtsTuning,
     voiceCatalogSummary,
     voiceCatalogNotice,
     voiceCatalogNoticeSeverity,

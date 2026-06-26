@@ -116,7 +116,14 @@ STYLE_VOCABULARY = {
     "impressionist": ["印象派", "impressionist", "水彩质感"],
     "tilt_shift": ["移轴", "移轴摄影", "tilt shift"],
     "time_lapse": ["延时", "延时拍摄", "time lapse"],
-    "han_comic": ["韩漫", "韩式漫画", "korean comic"]
+    "han_comic": ["韩漫", "韩式漫画", "korean comic"],
+    "tts_whisper": ["低语", "耳语", "小声", "压低声音", "whisper"],
+    "tts_sobbing": ["哽咽", "哭腔", "抽泣", "呜咽", "带着哭意", "sobbing"],
+    "tts_laughter": ["笑意", "轻笑", "大笑", "苦笑", "冷笑", "laugh"],
+    "tts_breathy": ["气声", "吸气", "叹气", "喘息", "深呼吸", "breathy"],
+    "tts_voice_break": ["破音", "变调", "颤抖", "声音颤抖", "鼻音"],
+    "tts_emotional_mix": ["压抑的愤怒", "温柔但疲惫", "带着哽咽的笑意", "狂躁中的温柔"],
+    "tts_director_guidance": ["导演模式", "角色", "场景", "指导", "演绎要领", "重音", "停顿"]
 }
 
 SCENARIO_VOCABULARY = {
@@ -136,6 +143,12 @@ SCENARIO_VOCABULARY = {
     "action_replicate": ["动作复刻", "模仿动作", "复刻动作", "动作参考"],
     "video_continuation": ["续写", "视频续写", "继续", "延续", "后续"],
     "storyboard": ["分镜", "故事板", "storyboard", "多宫格", "分镜图"],
+    "audiobook_narration": ["有声书", "旁白", "朗读", "播讲", "小说配音", "audiobook"],
+    "character_dialogue": ["角色对白", "对话", "多人对白", "人物台词", "角色配音"],
+    "character_monologue": ["独白", "内心独白", "自言自语", "心理活动", "monologue"],
+    "emotional_outburst": ["情绪爆发", "嘶吼", "怒吼", "崩溃", "哭喊", "爆发戏"],
+    "tts_director_mode": ["导演模式", "角色场景指导", "演员指导", "角色：", "场景：", "指导："],
+    "tts_audio_tag_control": ["音频标签", "风格标签", "标签控制", "低语标签", "哽咽标签"],
 }
 
 

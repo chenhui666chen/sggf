@@ -23,13 +23,11 @@ type SavedCharacterAudioConfig = ProjectAudioConfig['characters'][number]
 export interface AudiobookVoiceConfigPayloadItem {
   character_name: string
   voice_id: string
-  volume: number
-  speed?: number
-  pitch?: number
   tts_model?: TtsModel | null
-  voice_type?: string | null
-  personality?: string | null
-  emotion_tendency?: string | null
+  voice_clone_data_url?: string | null
+  voice_design_prompt?: string | null
+  mimo_voice_asset_id?: string | null
+  stepaudio_voice_asset_id?: string | null
 }
 
 export interface ProjectVoiceAssignmentResult {
@@ -110,13 +108,17 @@ const buildSavedCharacterConfigMap = (
     number,
     {
       voiceId: string
-      volume: number
+      volume?: number | null
       speed?: number
       pitch?: number
       ttsModel?: TtsModel
       voiceType?: string
       personality?: string
       emotionTendency?: string
+      voiceCloneDataUrl?: string
+      voiceDesignPrompt?: string
+      mimoVoiceAssetId?: string
+      stepaudioVoiceAssetId?: string
       source?: string | null
     }
   >()
@@ -132,6 +134,10 @@ const buildSavedCharacterConfigMap = (
       voiceType: item.voice_type || undefined,
       personality: item.personality || undefined,
       emotionTendency: item.emotion_tendency || undefined,
+      voiceCloneDataUrl: trimOptionalText(item.voice_clone_data_url),
+      voiceDesignPrompt: trimOptionalText(item.voice_design_prompt),
+      mimoVoiceAssetId: trimOptionalText(item.mimo_voice_asset_id),
+      stepaudioVoiceAssetId: trimOptionalText(item.stepaudio_voice_asset_id),
       source: item.source ?? undefined,
     })
   }
@@ -160,18 +166,76 @@ const resolvePayloadVoiceId = (
 }
 
 const shouldIncludeVoiceSetting = (voice: CharacterVoiceSetting): boolean =>
-  isNarratorVoiceSetting(voice) || Boolean(voice.voiceId.trim())
+  isNarratorVoiceSetting(voice)
+  || Boolean(voice.voiceId.trim())
+  || Boolean(trimOptionalText(voice.voiceCloneDataUrl))
+  || Boolean(trimOptionalText(voice.mimoVoiceAssetId))
+  || Boolean(trimOptionalText(voice.stepaudioVoiceAssetId))
+
+const getEffectiveVoiceModel = (voice: CharacterVoiceSetting, fallbackTtsModel: TtsModel): TtsModel =>
+  voice.ttsModel || fallbackTtsModel
+
+const getPayloadVoiceCloneDataUrl = (
+  voice: CharacterVoiceSetting,
+  fallbackTtsModel: TtsModel,
+): string | undefined =>
+  getEffectiveVoiceModel(voice, fallbackTtsModel) === 'mimo-v2.5-tts-voiceclone'
+    && !trimOptionalText(voice.mimoVoiceAssetId)
+    ? trimOptionalText(voice.voiceCloneDataUrl)
+    : undefined
+
+const getPayloadVoiceDesignPrompt = (): string | undefined => undefined
+
+const getPayloadMimoVoiceAssetId = (
+  voice: CharacterVoiceSetting,
+  fallbackTtsModel: TtsModel,
+): string | undefined => {
+  const effectiveModel = getEffectiveVoiceModel(voice, fallbackTtsModel)
+  if (effectiveModel !== 'mimo-v2.5-tts-voiceclone' && effectiveModel !== 'mimo-v2.5-tts-voicedesign') {
+    return undefined
+  }
+  return trimOptionalText(voice.mimoVoiceAssetId)
+}
+
+const getPayloadStepAudioVoiceAssetId = (
+  voice: CharacterVoiceSetting,
+  fallbackTtsModel: TtsModel,
+): string | undefined => {
+  const effectiveModel = getEffectiveVoiceModel(voice, fallbackTtsModel)
+  if (effectiveModel !== 'stepaudio-2.5-tts') {
+    return undefined
+  }
+  return trimOptionalText(voice.stepaudioVoiceAssetId)
+}
+
+const shouldIncludeVoiceSettingForModel = (
+  voice: CharacterVoiceSetting,
+  fallbackTtsModel: TtsModel,
+): boolean =>
+  shouldIncludeVoiceSetting(voice)
+  && (
+    isNarratorVoiceSetting(voice)
+    || Boolean(voice.voiceId.trim())
+    || Boolean(getPayloadVoiceCloneDataUrl(voice, fallbackTtsModel))
+    || Boolean(getPayloadVoiceDesignPrompt())
+    || Boolean(getPayloadMimoVoiceAssetId(voice, fallbackTtsModel))
+    || Boolean(getPayloadStepAudioVoiceAssetId(voice, fallbackTtsModel))
+  )
 
 export const buildProjectCharacterVoiceSettings = ({
   characters,
   savedCharacters = [],
   ttsModel,
+  voicePresets = [],
 }: {
   characters: readonly ProjectCharacterSummary[]
   savedCharacters?: readonly SavedCharacterAudioConfig[]
   ttsModel: TtsModel
-}): CharacterVoiceSetting[] =>
-  characters.map((character) => {
+  voicePresets?: Array<Pick<VoicePreset, 'id'>>
+}): CharacterVoiceSetting[] => {
+  const validVoiceIds = new Set(voicePresets.map((p) => p.id))
+  
+  return characters.map((character) => {
     const saved = findSavedCharacterConfig(savedCharacters, character.id)
     const savedTtsModel = normalizeTtsModelValue(saved?.tts_model) || ttsModel
     return {
@@ -179,7 +243,7 @@ export const buildProjectCharacterVoiceSettings = ({
       name: character.name,
       gender: character.gender,
       role: character.role,
-      voiceId: normalizeVoiceId(savedTtsModel, saved?.voice_id),
+      voiceId: normalizeVoiceId(savedTtsModel, saved?.voice_id, validVoiceIds),
       volume: saved?.volume ?? 50,
       speed: saved?.speed ?? 1.0,
       pitch: saved?.pitch ?? 50,
@@ -187,9 +251,14 @@ export const buildProjectCharacterVoiceSettings = ({
       voiceType: saved?.voice_type || undefined,
       personality: saved?.personality || undefined,
       emotionTendency: saved?.emotion_tendency || undefined,
+      voiceCloneDataUrl: trimOptionalText(saved?.voice_clone_data_url),
+      voiceDesignPrompt: trimOptionalText(saved?.voice_design_prompt),
+      mimoVoiceAssetId: trimOptionalText(saved?.mimo_voice_asset_id),
+      stepaudioVoiceAssetId: trimOptionalText(saved?.stepaudio_voice_asset_id),
       ...(saved?.source ? { source: saved.source } : {}),
     }
   })
+}
 
 export const buildInitialProjectVoiceSettings = ({
   characters,
@@ -207,7 +276,7 @@ export const buildInitialProjectVoiceSettings = ({
   const narratorSaved = findSavedNarratorConfig(savedCharacters)
   const narratorVoice: CharacterVoiceSetting = {
     ...baseNarratorVoice,
-    voiceId: normalizeVoiceId(ttsModel, narratorSaved?.voice_id) || baseNarratorVoice.voiceId,
+    voiceId: normalizeVoiceId(ttsModel, narratorSaved?.voice_id, new Set(voicePresets.map((p) => p.id))) || baseNarratorVoice.voiceId,
     volume: narratorSaved?.volume ?? baseNarratorVoice.volume,
     speed: narratorSaved?.speed ?? baseNarratorVoice.speed,
     pitch: narratorSaved?.pitch ?? baseNarratorVoice.pitch,
@@ -219,6 +288,7 @@ export const buildInitialProjectVoiceSettings = ({
       characters,
       savedCharacters,
       ttsModel,
+      voicePresets,
     }),
   ]
 }
@@ -250,6 +320,10 @@ export const applyProjectVoiceAssignments = ({
       voiceType: config.voiceType ?? voice.voiceType,
       personality: config.personality ?? voice.personality,
       emotionTendency: config.emotionTendency ?? voice.emotionTendency,
+      voiceCloneDataUrl: config.voiceCloneDataUrl ?? voice.voiceCloneDataUrl,
+      voiceDesignPrompt: config.voiceDesignPrompt ?? voice.voiceDesignPrompt,
+      mimoVoiceAssetId: config.mimoVoiceAssetId ?? voice.mimoVoiceAssetId,
+      stepaudioVoiceAssetId: config.stepaudioVoiceAssetId ?? voice.stepaudioVoiceAssetId,
       ...((config.source ?? voice.source) ? { source: config.source ?? voice.source } : {}),
     }
   })
@@ -272,20 +346,24 @@ export const buildProjectAudioConfigPayload = ({
   voicePresets: Array<Pick<VoicePreset, 'id'>>
 }): ProjectAudioConfig => ({
   characters: characterVoices
-    .filter(shouldIncludeVoiceSetting)
-    .map((voice) => ({
-      character_id: voice.characterId,
-      name: voice.name,
-      voice_id: resolvePayloadVoiceId(voice, ttsModel, voicePresets),
-      volume: voice.volume,
-      speed: voice.speed,
-      pitch: voice.pitch,
-      tts_model: voice.ttsModel || ttsModel,
-      voice_type: trimOptionalText(voice.voiceType),
-      personality: trimOptionalText(voice.personality),
-      emotion_tendency: trimOptionalText(voice.emotionTendency),
-      ...(trimOptionalText(voice.source) ? { source: trimOptionalText(voice.source) } : {}),
-    })),
+    .filter((voice) => shouldIncludeVoiceSettingForModel(voice, ttsModel))
+    .map((voice) => {
+      const voiceCloneDataUrl = getPayloadVoiceCloneDataUrl(voice, ttsModel)
+      const voiceDesignPrompt = getPayloadVoiceDesignPrompt()
+      const mimoVoiceAssetId = getPayloadMimoVoiceAssetId(voice, ttsModel)
+      const stepaudioVoiceAssetId = getPayloadStepAudioVoiceAssetId(voice, ttsModel)
+      return {
+        character_id: voice.characterId,
+        name: voice.name,
+        voice_id: resolvePayloadVoiceId(voice, ttsModel, voicePresets),
+        tts_model: voice.ttsModel || ttsModel,
+        ...(voiceCloneDataUrl ? { voice_clone_data_url: voiceCloneDataUrl } : {}),
+        ...(voiceDesignPrompt ? { voice_design_prompt: voiceDesignPrompt } : {}),
+        ...(mimoVoiceAssetId ? { mimo_voice_asset_id: mimoVoiceAssetId } : {}),
+        ...(stepaudioVoiceAssetId ? { stepaudio_voice_asset_id: stepaudioVoiceAssetId } : {}),
+        ...(trimOptionalText(voice.source) ? { source: trimOptionalText(voice.source) } : {}),
+      }
+    }),
   audio_fx: audioFxConfig,
 })
 
@@ -299,15 +377,19 @@ export const buildAudiobookVoiceConfigPayload = ({
   voicePresets: Array<Pick<VoicePreset, 'id'>>
 }): AudiobookVoiceConfigPayloadItem[] =>
   characterVoices
-    .filter(shouldIncludeVoiceSetting)
-    .map((voice) => ({
-      character_name: voice.name,
-      voice_id: resolvePayloadVoiceId(voice, ttsModel, voicePresets),
-      volume: voice.volume,
-      speed: voice.speed,
-      pitch: voice.pitch,
-      tts_model: voice.ttsModel || ttsModel,
-      voice_type: trimOptionalText(voice.voiceType),
-      personality: trimOptionalText(voice.personality),
-      emotion_tendency: trimOptionalText(voice.emotionTendency),
-    }))
+    .filter((voice) => shouldIncludeVoiceSettingForModel(voice, ttsModel))
+    .map((voice) => {
+      const voiceCloneDataUrl = getPayloadVoiceCloneDataUrl(voice, ttsModel)
+      const voiceDesignPrompt = getPayloadVoiceDesignPrompt()
+      const mimoVoiceAssetId = getPayloadMimoVoiceAssetId(voice, ttsModel)
+      const stepaudioVoiceAssetId = getPayloadStepAudioVoiceAssetId(voice, ttsModel)
+      return {
+        character_name: voice.name,
+        voice_id: resolvePayloadVoiceId(voice, ttsModel, voicePresets),
+        tts_model: voice.ttsModel || ttsModel,
+        ...(voiceCloneDataUrl ? { voice_clone_data_url: voiceCloneDataUrl } : {}),
+        ...(voiceDesignPrompt ? { voice_design_prompt: voiceDesignPrompt } : {}),
+        ...(mimoVoiceAssetId ? { mimo_voice_asset_id: mimoVoiceAssetId } : {}),
+        ...(stepaudioVoiceAssetId ? { stepaudio_voice_asset_id: stepaudioVoiceAssetId } : {}),
+      }
+    })

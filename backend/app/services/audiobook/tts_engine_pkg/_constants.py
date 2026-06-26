@@ -91,6 +91,14 @@ class TTSProvider(str, Enum):
     # GOOGLE = "google"    # Google Cloud TTS
     # OPENAI = "openai"    # OpenAI TTS
 
+
+class TTSUserInputError(ValueError):
+    """Error caused by user-controlled TTS input rather than provider availability."""
+
+    def __init__(self, message: str, *, code: str = "tts_user_input_error") -> None:
+        super().__init__(message)
+        self.code = code
+
 # 前端显示用模型名 -> DashScope 实际模型 ID
 ALIYUN_MODEL_ALIASES: Dict[str, str] = {
     # 应用侧统一切到 qwen3-tts-instruct-flash，并兼容历史 qwen3-tts-flash 配置。

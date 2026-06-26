@@ -4,7 +4,7 @@ import base64
 import logging
 from typing import Optional
 
-from fastapi import Depends, File, HTTPException, Response, UploadFile, status
+from fastapi import Depends, File, Form, HTTPException, Response, UploadFile, status
 
 from app.core.security import get_current_user
 from app.models.user import User
@@ -14,18 +14,42 @@ from app.schemas.audiobook import (
     TTSPreviewWithTimestampsResponse,
     CosyVoiceCloneCreateRequest,
     CosyVoiceDesignCreateRequest,
+    MiMoVoiceCloneAssetCreateRequest,
+    MiMoVoiceDesignAssetCreateRequest,
+    StepAudioVoiceCloneAssetCreateRequest,
 )
 from app.services.audiobook.constants import normalize_speaker_id
-from app.services.audiobook.tts_engine import RetryConfig
+from app.services.audiobook.tts_engine import RetryConfig, TTSUserInputError
 from app.services.audiobook.tts_model_ids import (
     DEFAULT_AUDIOBOOK_TTS_MODEL,
+    STEPAUDIO_25_TTS_MODEL,
     get_audiobook_tts_runtime_model_id,
     get_audiobook_tts_model_metadata,
     normalize_audiobook_tts_model,
 )
 from app.services.audiobook.voice_types import apply_voice_type_to_tts_params
 from app.services.audiobook.voice_manager import VoiceManager
-from app.services.audiobook.voice_catalog import get_voice_entry, load_voice_catalog_for_model
+from app.services.audiobook.voice_catalog import get_preview_quote_for_voice, get_voice_entry, load_voice_catalog_for_model
+from app.services.audiobook.mimo_voice_assets import (
+    MiMoVoiceAssetError,
+    MiMoVoiceAssetStore,
+    list_mimo_voice_asset_presets,
+    merge_mimo_voice_asset_tts_params,
+)
+from app.services.audiobook.stepaudio_voice_assets import (
+    StepAudioVoiceAssetError,
+    StepAudioVoiceAssetStore,
+    get_stepaudio_api_key,
+    list_stepaudio_voice_asset_presets,
+    merge_stepaudio_voice_asset_tts_params,
+    upload_stepaudio_voice_reference_file,
+    validate_stepaudio_clone_audio_mime_type,
+)
+from app.services.audiobook.tts_preview_cache import (
+    _build_preview_cache_key,
+    check_oss_preview_exists,
+    upload_preview_to_oss,
+)
 from app.services.audiobook.cosyvoice_clone_client import (
     COSYVOICE_V35_PLUS_MODEL_ID,
     CosyVoiceCloneError,
@@ -49,6 +73,9 @@ from app.api.v1.audiobook_api import router
 logger = logging.getLogger(__name__)
 
 DEFAULT_TTS_MODEL = DEFAULT_AUDIOBOOK_TTS_MODEL
+DEFAULT_STEPAUDIO_CLONE_PREVIEW_TEXT = "当你真的喜欢一个人的时候就容易说傻话办蠢事。"
+DEFAULT_STEPAUDIO_CLONE_PREVIEW_INSTRUCTION = "语气自然，语速中等，保持参考音色特征。"
+
 _PREVIEW_RETRY_CONFIG = RetryConfig(
     max_retries=4,
     base_delay=1.0,
@@ -78,6 +105,11 @@ def _validate_cosyvoice_v35_voice_id(voice_id: str) -> str:
 
 
 def _build_model_voice_catalog_status(model_name: str) -> tuple[int, str, str | None]:
+    model_meta = get_audiobook_tts_model_metadata(model_name)
+    capabilities = model_meta.get("capabilities") if isinstance(model_meta.get("capabilities"), dict) else {}
+    if not capabilities.get("has_system_voices", True):
+        return 0, "not_applicable", None
+
     try:
         catalog = load_voice_catalog_for_model(model_name)
     except Exception as exc:
@@ -145,12 +177,48 @@ def _build_cosyvoice_voice_prefix(display_name: str, current_user: User) -> str:
     return f"{base}{digest}{suffix}"[:10]
 
 
-def _resolve_preview_text(request: TTSPreviewRequest) -> str:
+def _require_stepaudio_clone_sample_text(sample_text: str) -> str:
+    clean_sample_text = str(sample_text or "").strip()
+    if not clean_sample_text:
+        raise StepAudioVoiceAssetError(
+            "sample_text cannot be empty; it must match the exact spoken content in the reference audio"
+        )
+    return clean_sample_text
+
+
+async def _resolve_stepaudio_clone_file_id(
+    *,
+    file_id: str,
+    filename: str,
+    content: bytes,
+    mime_type: str,
+) -> str:
+    resolved_file_id = str(file_id or "").strip()
+    if resolved_file_id:
+        return resolved_file_id
+
+    stepaudio_api_key = get_stepaudio_api_key()
+    if not stepaudio_api_key:
+        raise StepAudioVoiceAssetError(
+            "STEP_API_KEY or STEPFUN_API_KEY is required before StepAudio clone preview or save"
+        )
+    return await upload_stepaudio_voice_reference_file(
+        filename=filename or "stepaudio-reference.wav",
+        content=content,
+        mime_type=mime_type,
+        api_key=stepaudio_api_key,
+    )
+
+
+def _resolve_preview_text(request: TTSPreviewRequest, model_name: str) -> str:
     text = (request.text or "").strip()
     if not text:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="文本不能为空")
     if len(text) > 200:
         text = text[:200]
+    # 当用户传入默认试听文本时，按音色从名言列表选取对应文本，保证与 warmup 缓存键一致
+    if text == DEFAULT_STEPAUDIO_CLONE_PREVIEW_TEXT:
+        text = get_preview_quote_for_voice(model_name, request.voice_id)
     return text
 
 
@@ -203,6 +271,30 @@ def _build_preview_voice_params(request: TTSPreviewRequest, speaker_id: str) -> 
     if instruction:
         voice_params["instruction"] = instruction
 
+    voice_clone_data_url = str(getattr(request, "voice_clone_data_url", "") or "").strip()
+    if voice_clone_data_url:
+        voice_params["voice_clone_data_url"] = voice_clone_data_url
+
+    voice_design_prompt = str(getattr(request, "voice_design_prompt", "") or "").strip()
+    if voice_design_prompt:
+        voice_params["voice_design_prompt"] = voice_design_prompt
+
+    mimo_voice_asset_id = str(getattr(request, "mimo_voice_asset_id", "") or "").strip()
+    if mimo_voice_asset_id:
+        voice_params["mimo_voice_asset_id"] = mimo_voice_asset_id
+        try:
+            voice_params = merge_mimo_voice_asset_tts_params(voice_params)
+        except MiMoVoiceAssetError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    stepaudio_voice_asset_id = str(getattr(request, "stepaudio_voice_asset_id", "") or "").strip()
+    if stepaudio_voice_asset_id:
+        voice_params["stepaudio_voice_asset_id"] = stepaudio_voice_asset_id
+        try:
+            voice_params = merge_stepaudio_voice_asset_tts_params(voice_params)
+        except StepAudioVoiceAssetError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
     if getattr(request, "word_timestamp_enabled", False):
         voice_params["word_timestamp_enabled"] = True
     if getattr(request, "phoneme_timestamp_enabled", False):
@@ -239,8 +331,8 @@ async def tts_preview(
     current_user: User = Depends(get_current_user),
 ):
     """合成一小段音频用于前端试听"""
-    text = _resolve_preview_text(request)
     model_name = _resolve_preview_model_name(request)
+    text = _resolve_preview_text(request, model_name)
     preview_retry = _PREVIEW_RETRY_CONFIG
     speaker_id = _resolve_preview_speaker_id(request, model_name)
     voice_params = _build_preview_voice_params(request, speaker_id)
@@ -256,6 +348,12 @@ async def tts_preview(
             request_delay=0.0,
             retry_config=preview_retry,
         )
+    except TTSUserInputError as exc:
+        logger.info("TTS试听输入参数无效: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"message": str(exc), "code": getattr(exc, "code", "tts_user_input_error"), "retryable": False},
+        ) from exc
     except Exception as exc:
         logger.warning("TTS试听失败: %s", exc)
         raise HTTPException(
@@ -272,14 +370,119 @@ async def tts_preview(
     return Response(content=audio_bytes, media_type=media_type)
 
 
+@router.post("/tts/preview-cached")
+async def tts_preview_cached(
+    request: TTSPreviewRequest,
+    current_user: User = Depends(get_current_user),
+):
+    """试听接口 (带云端 OSS 缓存，无 Redis 依赖)。
+
+    缓存命中 → 302 重定向到 CDN URL。
+    缓存未命中 → TTS 合成 → 上传 OSS → 302 重定向。
+    云端未配置 → 降级返回原始音频 blob。
+    """
+    model_name = _resolve_preview_model_name(request)
+    text = _resolve_preview_text(request, model_name)
+    speaker_id = _resolve_preview_speaker_id(request, model_name)
+    voice_params = _build_preview_voice_params(request, speaker_id)
+
+    # 构建缓存键
+    cache_key = _build_preview_cache_key(
+        model=model_name,
+        voice_id=speaker_id,
+        text=text,
+        volume=int(request.volume),
+        speed=float(request.speed or 1.0),
+        pitch=int(request.pitch or 50),
+        emotion=str(voice_params.get("emotion") or "neutral"),
+        voice_type=str(request.voice_type or ""),
+        mimo_voice_asset_id=str(getattr(request, "mimo_voice_asset_id", "") or ""),
+        stepaudio_voice_asset_id=str(getattr(request, "stepaudio_voice_asset_id", "") or ""),
+        voice_params=voice_params,
+    )
+
+    # 检查 OSS 是否已有缓存文件
+    cached_url = check_oss_preview_exists(cache_key, ext="mp3")
+    cached_format = "mp3"
+    if not cached_url:
+        cached_url = check_oss_preview_exists(cache_key, ext="wav")
+        cached_format = "wav"
+    if cached_url:
+        logger.info("TTS 试听 OSS 缓存命中: %s", cache_key[:12])
+        return {
+            "audio_url": cached_url,
+            "blob": None,
+            "cache_hit": True,
+            "storage": "oss",
+            "response_format": cached_format,
+        }
+
+    # 未命中: TTS 合成
+    preview_retry = _PREVIEW_RETRY_CONFIG
+    try:
+        audio_bytes = await runtime_synthesize_speech(
+            text=text,
+            voice_params=voice_params,
+            emotion=str(voice_params.get("emotion") or "neutral"),
+            model_id=model_name,
+            enable_cache=False,
+            max_concurrent=1,
+            request_delay=0.0,
+            retry_config=preview_retry,
+        )
+    except TTSUserInputError as exc:
+        logger.info("TTS试听输入参数无效: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"message": str(exc), "code": getattr(exc, "code", "tts_user_input_error"), "retryable": False},
+        ) from exc
+    except Exception as exc:
+        logger.warning("TTS试听失败: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"message": "TTS服务暂时不可用，请稍后重试", "retryable": True},
+        ) from exc
+
+    if not audio_bytes:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"message": "TTS服务暂时不可用，请稍后重试", "retryable": True},
+        )
+
+    response_format = "wav" if audio_bytes.startswith(b"RIFF") else "mp3"
+    cloud_url = upload_preview_to_oss(
+        audio_bytes=audio_bytes,
+        cache_key=cache_key,
+        response_format=response_format,
+    )
+
+    if cloud_url:
+        return {
+            "audio_url": cloud_url,
+            "blob": None,
+            "cache_hit": False,
+            "storage": "oss",
+            "response_format": response_format,
+        }
+
+    # 云端未配置
+    return {
+        "audio_url": None,
+        "blob": base64.b64encode(audio_bytes).decode("utf-8"),
+        "cache_hit": False,
+        "storage": "blob",
+        "response_format": response_format,
+    }
+
+
 @router.post("/tts/preview-with-timestamps", response_model=TTSPreviewWithTimestampsResponse)
 async def tts_preview_with_timestamps(
     request: TTSPreviewWithTimestampsRequest,
     current_user: User = Depends(get_current_user),
 ):
     """合成短音频并返回可消费的词级时间戳。当前仅支持 CosyVoice v3.5 Plus。"""
-    text = _resolve_preview_text(request)
     model_name = _resolve_preview_model_name(request)
+    text = _resolve_preview_text(request, model_name)
     if not _is_cosyvoice_v35_model(model_name):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -420,6 +623,9 @@ async def list_tts_voices(
                 model,
                 exc,
             )
+    else:
+        voices.extend(list_mimo_voice_asset_presets(model))
+        voices.extend(list_stepaudio_voice_asset_presets(model))
     return {
         "model": meta.get("model", DEFAULT_TTS_MODEL),
         "updated_at": meta.get("updated_at"),
@@ -543,6 +749,274 @@ async def delete_cosyvoice_v3_plus_voice_clone(
     try:
         return delete_cosyvoice_clone(voice_id=voice_id)
     except CosyVoiceCloneError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@router.get("/tts/voices/mimo/assets")
+async def list_mimo_voice_assets(
+    model: Optional[str] = None,
+    current_user: User = Depends(get_current_user),
+):
+    """列出 MiMo 本地可复用音色资产。"""
+    del current_user
+    try:
+        assets = MiMoVoiceAssetStore().list_assets(model=model)
+        return {
+            "assets": [asset.to_dict() for asset in assets],
+            "voices": [asset.to_voice_preset() for asset in assets],
+            "total": len(assets),
+        }
+    except MiMoVoiceAssetError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@router.post("/tts/voices/mimo/clone-assets")
+async def create_mimo_voice_clone_asset(
+    request: MiMoVoiceCloneAssetCreateRequest,
+    current_user: User = Depends(get_current_user),
+):
+    """保存 MiMo Voice Clone 本地音频样本资产。"""
+    del current_user
+    try:
+        asset = MiMoVoiceAssetStore().create_clone_asset(
+            name=request.name,
+            audio_data_url=request.audio_data_url,
+            description=request.description or "",
+        )
+        return {"asset": asset.to_dict(), "voice": asset.to_voice_preset()}
+    except MiMoVoiceAssetError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@router.post("/tts/voices/mimo/clone-assets/upload")
+async def upload_mimo_voice_clone_asset(
+    name: str = Form(...),
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
+):
+    """上传本地音频并保存为 MiMo Voice Clone 本地音色资产。"""
+    del current_user
+    try:
+        content = await file.read()
+        asset = MiMoVoiceAssetStore().create_clone_asset_from_bytes(
+            name=name,
+            audio_bytes=content,
+            mime_type=file.content_type or "",
+        )
+        return {"asset": asset.to_dict(), "voice": asset.to_voice_preset()}
+    except MiMoVoiceAssetError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    finally:
+        try:
+            await file.close()
+        except Exception as exc:
+            logger.debug(
+                "关闭 MiMo 上传文件失败，已忽略清理错误: filename=%s error=%s",
+                file.filename,
+                exc,
+            )
+
+
+@router.post("/tts/voices/mimo/design-assets")
+async def create_mimo_voice_design_asset(
+    request: MiMoVoiceDesignAssetCreateRequest,
+    current_user: User = Depends(get_current_user),
+):
+    """保存 MiMo Voice Design 本地声音描述资产。"""
+    del current_user
+    try:
+        asset = MiMoVoiceAssetStore().create_design_asset(
+            name=request.name,
+            voice_design_prompt=request.voice_design_prompt,
+            description=request.description or "",
+        )
+        return {"asset": asset.to_dict(), "voice": asset.to_voice_preset()}
+    except MiMoVoiceAssetError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@router.delete("/tts/voices/mimo/assets/{asset_id}")
+async def delete_mimo_voice_asset(
+    asset_id: str,
+    current_user: User = Depends(get_current_user),
+):
+    """删除 MiMo 本地音色资产。"""
+    del current_user
+    try:
+        deleted = MiMoVoiceAssetStore().delete_asset(asset_id)
+        if not deleted:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="MiMo voice asset not found")
+        return {"deleted": True, "asset_id": asset_id}
+    except MiMoVoiceAssetError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@router.get("/tts/voices/stepaudio/assets")
+async def list_stepaudio_voice_assets(
+    model: Optional[str] = None,
+    current_user: User = Depends(get_current_user),
+):
+    """列出 StepAudio 本地复刻参考样本资产。"""
+    del current_user
+    try:
+        assets = StepAudioVoiceAssetStore().list_assets(model=model)
+        return {
+            "assets": [asset.to_dict() for asset in assets],
+            "voices": [asset.to_voice_preset() for asset in assets],
+            "total": len(assets),
+        }
+    except StepAudioVoiceAssetError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@router.post("/tts/voices/stepaudio/clone-assets")
+async def create_stepaudio_voice_clone_asset(
+    request: StepAudioVoiceCloneAssetCreateRequest,
+    current_user: User = Depends(get_current_user),
+):
+    """创建 StepAudio 复刻参考样本元数据资产。
+
+    当前官方资料只给出 /audio/voices/preview 使用 file_id 的合同，未给出正式音色创建接口；
+    因此该接口只保存可复用的本地参考资产元数据，不伪造正式 voice_id。
+    """
+    del current_user
+    raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail="StepAudio clone asset requires an uploaded mp3/wav sample; use /clone-assets/upload",
+    )
+
+
+@router.post("/tts/voices/stepaudio/clone-assets/preview")
+async def preview_stepaudio_voice_clone_asset(
+    name: str = Form(""),
+    sample_text: str = Form(""),
+    preview_text: str = Form(DEFAULT_STEPAUDIO_CLONE_PREVIEW_TEXT),
+    instruction: str = Form(DEFAULT_STEPAUDIO_CLONE_PREVIEW_INSTRUCTION),
+    file_id: str = Form(""),
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
+):
+    """Preview a StepAudio Voice Clone sample before saving the local voice asset."""
+    del current_user
+    try:
+        del name
+        content = await file.read()
+        validate_stepaudio_clone_audio_mime_type(file.content_type or "")
+        clean_sample_text = _require_stepaudio_clone_sample_text(sample_text)
+        resolved_file_id = await _resolve_stepaudio_clone_file_id(
+            file_id=file_id,
+            filename=file.filename or "stepaudio-reference.wav",
+            content=content,
+            mime_type=file.content_type or "",
+        )
+        stepaudio_api_key = get_stepaudio_api_key()
+        if not stepaudio_api_key:
+            raise StepAudioVoiceAssetError(
+                "STEP_API_KEY or STEPFUN_API_KEY is required before StepAudio clone preview"
+            )
+
+        engine = runtime_create_tts_engine(
+            model_id=STEPAUDIO_25_TTS_MODEL,
+            strategy="balanced",
+            enable_cache=False,
+            max_concurrent=1,
+            request_delay=0.0,
+            retry_config=_PREVIEW_RETRY_CONFIG,
+        )
+        audio_bytes = await engine._call_stepaudio_voice_preview_http(
+            model=STEPAUDIO_25_TTS_MODEL,
+            api_key=stepaudio_api_key,
+            text=(str(preview_text or "").strip() or DEFAULT_STEPAUDIO_CLONE_PREVIEW_TEXT),
+            file_id=resolved_file_id,
+            sample_text=clean_sample_text,
+            instruction=str(instruction or "").strip() or DEFAULT_STEPAUDIO_CLONE_PREVIEW_INSTRUCTION,
+        )
+        audio_mime_type = "audio/wav" if audio_bytes.startswith(b"RIFF") else "audio/mpeg"
+        audio_format = "wav" if audio_mime_type == "audio/wav" else "mp3"
+        return {
+            "file_id": resolved_file_id,
+            "sample_text": clean_sample_text,
+            "preview_text": str(preview_text or "").strip() or DEFAULT_STEPAUDIO_CLONE_PREVIEW_TEXT,
+            "instruction": str(instruction or "").strip() or DEFAULT_STEPAUDIO_CLONE_PREVIEW_INSTRUCTION,
+            "audio_data_base64": base64.b64encode(audio_bytes).decode("utf-8"),
+            "audio_mime_type": audio_mime_type,
+            "audio_format": audio_format,
+            "audio_size_bytes": len(audio_bytes),
+            "billing_notice": "StepAudio preview only returns audio; confirm save only after you accept the result.",
+        }
+    except TTSUserInputError as exc:
+        logger.info("StepAudio 复刻预试听输入参数无效: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"message": str(exc), "code": getattr(exc, "code", "tts_user_input_error"), "retryable": False},
+        ) from exc
+    except StepAudioVoiceAssetError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    finally:
+        try:
+            await file.close()
+        except Exception as exc:
+            logger.debug(
+                "关闭 StepAudio 预试听上传文件失败，已忽略清理错误: filename=%s error=%s",
+                file.filename,
+                exc,
+            )
+
+
+@router.post("/tts/voices/stepaudio/clone-assets/upload")
+async def upload_stepaudio_voice_clone_asset(
+    name: str = Form(...),
+    sample_text: str = Form(""),
+    file_id: str = Form(""),
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
+):
+    """上传本地音频并保存为 StepAudio Voice Clone 参考样本资产。"""
+    del current_user
+    try:
+        content = await file.read()
+        validate_stepaudio_clone_audio_mime_type(file.content_type or "")
+        clean_sample_text = _require_stepaudio_clone_sample_text(sample_text)
+        resolved_file_id = await _resolve_stepaudio_clone_file_id(
+            file_id=file_id,
+            filename=file.filename or "stepaudio-reference.wav",
+            content=content,
+            mime_type=file.content_type or "",
+        )
+        asset = StepAudioVoiceAssetStore().create_clone_asset_from_bytes(
+            name=name,
+            audio_bytes=content,
+            mime_type=file.content_type or "",
+            sample_text=clean_sample_text,
+            file_id=resolved_file_id,
+        )
+        return {"asset": asset.to_dict(), "voice": asset.to_voice_preset()}
+    except StepAudioVoiceAssetError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    finally:
+        try:
+            await file.close()
+        except Exception as exc:
+            logger.debug(
+                "关闭 StepAudio 上传文件失败，已忽略清理错误: filename=%s error=%s",
+                file.filename,
+                exc,
+            )
+
+
+@router.delete("/tts/voices/stepaudio/assets/{asset_id}")
+async def delete_stepaudio_voice_asset(
+    asset_id: str,
+    current_user: User = Depends(get_current_user),
+):
+    """删除 StepAudio 本地复刻参考样本资产。"""
+    del current_user
+    try:
+        deleted = StepAudioVoiceAssetStore().delete_asset(asset_id)
+        if not deleted:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="StepAudio voice asset not found")
+        return {"deleted": True, "asset_id": asset_id}
+    except StepAudioVoiceAssetError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
 

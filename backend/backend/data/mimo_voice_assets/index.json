@@ -1,0 +1,76 @@
+{
+  "assets": [
+    {
+      "id": "mimo_design_d2340c3384977265",
+      "name": "大爷",
+      "asset_type": "design",
+      "model": "mimo-v2.5-tts-voicedesign",
+      "description": "",
+      "voice_design_prompt": "一位年迈的老先生，说带北方口音的普通话，语速缓慢而沉稳，嗓音略带沙哑和沧桑感，仿佛一位饱经风霜的老爷爷在讲故事，充满岁月的智慧。",
+      "mime_type": "",
+      "audio_path": "",
+      "created_at": "2026-06-24T07:13:16.608397+00:00",
+      "updated_at": "2026-06-24T07:13:16.608397+00:00"
+    },
+    {
+      "id": "mimo_design_b18605565572aa57",
+      "name": "豆豆",
+      "asset_type": "design",
+      "model": "mimo-v2.5-tts-voicedesign",
+      "description": "",
+      "voice_design_prompt": "三岁女童稚嫩可爱的声音",
+      "mime_type": "",
+      "audio_path": "",
+      "created_at": "2026-06-24T09:53:39.997740+00:00",
+      "updated_at": "2026-06-24T09:53:39.997740+00:00"
+    },
+    {
+      "id": "mimo_clone_3885edfd5129ab41",
+      "name": "方法",
+      "asset_type": "clone",
+      "model": "mimo-v2.5-tts-voiceclone",
+      "description": "",
+      "voice_design_prompt": "",
+      "mime_type": "audio/mpeg",
+      "audio_path": "clone_samples/mimo_clone_3885edfd5129ab41.mp3",
+      "created_at": "2026-06-24T10:43:34.828548+00:00",
+      "updated_at": "2026-06-24T10:43:34.828548+00:00"
+    },
+    {
+      "id": "mimo_design_e88fb1581c58abbd",
+      "name": "火凤凰",
+      "asset_type": "design",
+      "model": "mimo-v2.5-tts-voicedesign",
+      "description": "",
+      "voice_design_prompt": "一个阴狠毒辣坏人的声音",
+      "mime_type": "",
+      "audio_path": "",
+      "created_at": "2026-06-24T11:54:55.332938+00:00",
+      "updated_at": "2026-06-24T11:54:55.332938+00:00"
+    },
+    {
+      "id": "mimo_clone_28235bde41ab2dcf",
+      "name": "零零",
+      "asset_type": "clone",
+      "model": "mimo-v2.5-tts-voiceclone",
+      "description": "",
+      "voice_design_prompt": "",
+      "mime_type": "audio/wav",
+      "audio_path": "clone_samples/mimo_clone_28235bde41ab2dcf.wav",
+      "created_at": "2026-06-24T11:57:02.177558+00:00",
+      "updated_at": "2026-06-24T11:57:02.177558+00:00"
+    },
+    {
+      "id": "mimo_clone_d4cf239da22a6359",
+      "name": "gg",
+      "asset_type": "clone",
+      "model": "mimo-v2.5-tts-voiceclone",
+      "description": "",
+      "voice_design_prompt": "",
+      "mime_type": "audio/wav",
+      "audio_path": "clone_samples/mimo_clone_d4cf239da22a6359.wav",
+      "created_at": "2026-06-24T12:02:05.914866+00:00",
+      "updated_at": "2026-06-24T12:02:05.914866+00:00"
+    }
+  ]
+}

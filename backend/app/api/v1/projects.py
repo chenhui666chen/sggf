@@ -36,13 +36,17 @@ class CharacterAudioConfig(BaseModel):
     character_id: int
     name: str
     voice_id: str
-    volume: int = 50
+    volume: Optional[int] = None
     speed: Optional[float] = None
     pitch: Optional[int] = None
     tts_model: Optional[str] = None
     voice_type: Optional[str] = None
     personality: Optional[str] = None
     emotion_tendency: Optional[str] = None
+    voice_clone_data_url: Optional[str] = None
+    voice_design_prompt: Optional[str] = None
+    mimo_voice_asset_id: Optional[str] = None
+    stepaudio_voice_asset_id: Optional[str] = None
     source: Optional[str] = None  # "user" | "ai_suggest" | None
 
 
@@ -68,6 +72,26 @@ class ProjectAudioConfig(BaseModel):
     """项目级音频配置"""
     characters: List[CharacterAudioConfig] = []
     audio_fx: Optional[AudioFxConfig] = None
+
+
+PERSISTED_CHARACTER_AUDIO_CONFIG_FIELDS = (
+    "character_id",
+    "name",
+    "voice_id",
+    "tts_model",
+    "voice_clone_data_url",
+    "voice_design_prompt",
+    "mimo_voice_asset_id",
+    "stepaudio_voice_asset_id",
+    "source",
+)
+
+
+def _dump_persisted_character_audio_config(config: CharacterAudioConfig) -> dict:
+    return config.model_dump(
+        include=set(PERSISTED_CHARACTER_AUDIO_CONFIG_FIELDS),
+        exclude_none=True,
+    )
 
 
 router = APIRouter(prefix="/api/v1/projects", tags=["projects"])
@@ -352,7 +376,7 @@ async def delete_project(
     }
 
 
-@router.get("/{project_id}/audio-config", response_model=ProjectAudioConfig)
+@router.get("/{project_id}/audio-config", response_model=ProjectAudioConfig, response_model_exclude_none=True)
 async def get_project_audio_config(
     project_id: int,
     tts_model: str = Query("qwen3-tts-instruct-flash"),
@@ -372,13 +396,16 @@ async def get_project_audio_config(
 
     data = parse_project_audio_config(project.audio_config or "")
 
-    characters = get_characters_for_model(data, tts_model)
+    characters = [
+        _dump_persisted_character_audio_config(CharacterAudioConfig(**item))
+        for item in get_characters_for_model(data, tts_model)
+    ]
     audio_fx = get_audio_fx(data)
     # 让 Pydantic 处理具体字段校验
     return ProjectAudioConfig(characters=characters, audio_fx=audio_fx)
 
 
-@router.put("/{project_id}/audio-config", response_model=ProjectAudioConfig)
+@router.put("/{project_id}/audio-config", response_model=ProjectAudioConfig, response_model_exclude_none=True)
 async def update_project_audio_config(
     project_id: int,
     config: ProjectAudioConfig,
@@ -398,14 +425,22 @@ async def update_project_audio_config(
         )
 
     data = parse_project_audio_config(project.audio_config or "")
-    set_characters_for_model(data, tts_model, [c.dict() for c in (config.characters or [])])
-    set_audio_fx(data, config.audio_fx.dict() if config.audio_fx else None)
+    characters = [
+        _dump_persisted_character_audio_config(c)
+        for c in (config.characters or [])
+    ]
+    set_characters_for_model(
+        data,
+        tts_model,
+        characters,
+    )
+    set_audio_fx(data, config.audio_fx.model_dump(exclude_none=True) if config.audio_fx else None)
     project.audio_config = json.dumps(data, ensure_ascii=False)
     db.add(project)
     db.commit()
     db.refresh(project)
 
-    return config
+    return ProjectAudioConfig(characters=characters, audio_fx=config.audio_fx)
 
 
 @router.post("/{project_id}/audio-config/auto-voices", response_model=ProjectAudioConfig)
@@ -705,9 +740,6 @@ async def auto_assign_project_audio_voices(
                 "character_id": char.id,
                 "name": char.name,
                 "voice_id": profile.voice_id,
-                "volume": profile.volume_base,
-                "speed": profile.speed_base,
-                "pitch": profile.pitch_base,
                 "tts_model": assignment.model,
                 "source": "ai_suggest",
             }

@@ -450,6 +450,98 @@ domains:
           blend_mode: "creative"
           layer_count: 3
         reason: "多层创意合成，实现艺术化效果"
+
+  # ==================== TTS / 有声小说 Domain ====================
+  tts:
+    name: "有声小说 / TTS"
+    provider: "Multi-provider"
+    description: "有声小说语音合成、角色配音、旁白播讲和模型感知风格控制"
+
+    modalities:
+      audiobook: "有声书生成"
+      text_to_speech: "文本转语音"
+      voice_design: "角色声音设计"
+      narration: "旁白播讲"
+      dialogue: "角色对白"
+
+    creative_modes:
+      natural_language_control: "自然语言声音描述"
+      audio_tag_control: "音频标签控制"
+      director_mode: "角色 / 场景 / 指导演绎模式"
+      voice_profile_reconciliation: "已选音色与声音描述融合"
+
+    styles:
+      clear: ["吐字清晰", "字正腔圆", "清晰", "播音腔"]
+      gentle: ["温柔", "亲切", "柔和", "治愈"]
+      calm: ["沉稳", "冷静", "平和", "克制"]
+      energetic: ["明亮", "活泼", "有活力", "语调上扬"]
+      whisper: ["低语", "耳语", "小声", "压低声音"]
+      sobbing: ["哽咽", "哭腔", "抽泣", "呜咽"]
+      laughter: ["笑意", "轻笑", "大笑", "苦笑", "冷笑"]
+      breathy: ["气声", "吸气", "叹气", "喘息", "深呼吸"]
+      voice_break: ["破音", "变调", "声音颤抖", "鼻音"]
+      mixed_emotion: ["压抑的愤怒", "温柔但疲惫", "带着哽咽的笑意", "狂躁中的温柔"]
+
+    scene_rules:
+      - name: "有声书旁白"
+        keywords: ["audiobook_narration", "有声书", "旁白", "朗读", "播讲", "小说配音"]
+        recommended:
+          use_case: "有声书旁白"
+          pace: "中速"
+          pitch: "中音"
+          style_control_mode: "natural_language_control"
+        reason: "旁白需要稳定、清晰且可长时间聆听的声音描述，避免套用角色对白画像"
+
+      - name: "角色对白"
+        keywords: ["character_dialogue", "角色对白", "对话", "人物台词", "角色配音"]
+        recommended:
+          use_case: "有声书角色对白"
+          style_control_mode: "natural_language_control"
+          preserve_selected_voice: true
+        reason: "角色对白以已选音色为硬约束，声音描述只作为软风格指导"
+
+      - name: "独白"
+        keywords: ["character_monologue", "独白", "内心独白", "自言自语", "心理活动"]
+        recommended:
+          use_case: "有声书角色独白"
+          pace: "偏慢"
+          style_control_mode: "director_mode"
+        reason: "独白通常需要更明显的情绪层次、停顿和心理状态"
+
+      - name: "情绪爆发"
+        keywords: ["emotional_outburst", "情绪爆发", "嘶吼", "怒吼", "崩溃", "哭喊"]
+        recommended:
+          style_control_mode: "director_mode"
+          intensity: "high"
+          preserve_selected_voice: true
+        reason: "情绪爆发需要在不覆盖已选音色的前提下增强演绎指导"
+
+      - name: "MiMo 音频标签"
+        keywords: ["tts_audio_tag_control", "音频标签", "风格标签", "低语标签", "哽咽标签"]
+        recommended:
+          style_control_mode: "audio_tag_control"
+          target_models: ["mimo-v2.5-tts", "mimo-v2.5-tts-voicedesign", "mimo-v2.5-tts-voiceclone"]
+        reason: "音频标签控制仅适用于支持标签模式的 TTS 模型，不应下发到 Qwen、MiniMax 或 CosyVoice"
+
+    prompt_template: "性别：[性别]，年龄感：[年龄]，音调：[高低]，语速：[快慢]，情绪：[情绪]，特点：[音质]，用途：[旁白/角色对白]"
+
+    prompt_examples:
+      - "温柔知性的女性，30 岁左右，语调平和，适合有声书朗读"
+      - "沉稳的中年男性，语速缓慢，音色低沉有磁性，适合纪录片或有声书旁白"
+      - "用明亮活泼的青少年嗓音，带着恶作剧得逞后的得意与戏谑，语速偏快且咬字轻巧"
+
+    parsing_rules:
+      - "已选音色为硬约束，声音描述为软约束；发生冲突时按音色画像修正。"
+      - "声音描述必须包含性别、年龄感、音调、语速、情绪、特点、用途中的多个维度。"
+      - "避免使用“好听”“普通”“高级”等不可执行描述。"
+      - "避免要求模仿名人、演员或特定人物原声。"
+      - "MiMo 音频标签只应进入支持标签控制模型的 assistant content。"
+      - "Qwen、CosyVoice 使用自然语言 instructions；MiMo 自然语言控制优先使用角色 / 场景 / 指导结构。"
+
+    constraints:
+      preserve_selected_voice: true
+      forbid_imitation: true
+      require_multidimensional_description: true
   
   # ==================== RUNWAY Domain (预留) ====================
   runway:

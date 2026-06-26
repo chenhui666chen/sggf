@@ -16,7 +16,6 @@ import type {
 } from './types'
 
 interface CharacterVoiceConfigPanelProps {
-  supportsTtsTuning: boolean
   loadingCharacters: boolean
   characterVoices: CharacterVoiceSetting[]
   ttsModel: TtsModel
@@ -25,23 +24,15 @@ interface CharacterVoiceConfigPanelProps {
   voicePresetsByModel: Record<TtsModel, VoicePreset[]>
   ttsModelOptions: readonly TtsModelOption[]
   previewingCharacterId: number | null
-  recommendingVoiceTypeId: number | null
   autoAssigningVoices: boolean
   onVoiceChange: (characterId: number, voiceId: string) => void
   onTtsModelChangeForCharacter: (characterId: number, nextModel: TtsModel | 'inherit') => void
-  onVoiceTypeChange: (characterId: number, voiceType: string) => void
-  onPersonalityChange: (characterId: number, personality: string) => void
-  onEmotionTendencyChange: (characterId: number, emotionTendency: string) => void
-  onRecommendVoiceType: (characterVoice: CharacterVoiceSetting) => void
-  onVolumeChange: (characterId: number, volume: number) => void
-  onSpeedChange: (characterId: number, speed: number) => void
-  onPitchChange: (characterId: number, pitch: number) => void
+  onVoiceCloneDataUrlChange: (characterId: number, voiceCloneDataUrl: string) => void
   onPreviewCharacterVoice: (characterVoice: CharacterVoiceSetting) => void
   onAutoAssignVoices: () => void
 }
 
 const CharacterVoiceConfigPanel = ({
-  supportsTtsTuning,
   loadingCharacters,
   characterVoices,
   ttsModel,
@@ -50,25 +41,16 @@ const CharacterVoiceConfigPanel = ({
   voicePresetsByModel,
   ttsModelOptions,
   previewingCharacterId,
-  recommendingVoiceTypeId,
   autoAssigningVoices,
   onVoiceChange,
   onTtsModelChangeForCharacter,
-  onVoiceTypeChange,
-  onPersonalityChange,
-  onEmotionTendencyChange,
-  onRecommendVoiceType,
-  onVolumeChange,
-  onSpeedChange,
-  onPitchChange,
+  onVoiceCloneDataUrlChange,
   onPreviewCharacterVoice,
   onAutoAssignVoices,
 }: CharacterVoiceConfigPanelProps) => (
   <>
     <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-      {supportsTtsTuning
-        ? '不修改时使用 AI 默认音色；为角色选择音色或调整音量、语速、音高后，本次有声书生成将优先使用你的配置。'
-        : '不修改时使用 AI 默认音色；为角色选择音色后，本次有声书生成将优先使用你的配置。'}
+      不修改时使用 AI 默认音色；为角色选择音色后，本次有声书生成将优先使用你的配置。
     </Typography>
 
     {loadingCharacters && (
@@ -100,23 +82,15 @@ const CharacterVoiceConfigPanel = ({
             <CharacterVoiceCard
               key={characterVoice.characterId}
               characterVoice={characterVoice}
-              supportsTtsTuning={supportsTtsTuning}
               projectTtsModel={ttsModel}
               voiceLoading={voiceLoading}
               currentVoicePresets={currentVoicePresets}
               voicePresetsByModel={voicePresetsByModel}
               ttsModelOptions={ttsModelOptions}
               isPreviewing={previewingCharacterId === characterVoice.characterId}
-              isRecommendingVoiceType={recommendingVoiceTypeId === characterVoice.characterId}
               onVoiceChange={onVoiceChange}
               onTtsModelChangeForCharacter={onTtsModelChangeForCharacter}
-              onVoiceTypeChange={onVoiceTypeChange}
-              onPersonalityChange={onPersonalityChange}
-              onEmotionTendencyChange={onEmotionTendencyChange}
-              onRecommendVoiceType={onRecommendVoiceType}
-              onVolumeChange={onVolumeChange}
-              onSpeedChange={onSpeedChange}
-              onPitchChange={onPitchChange}
+              onVoiceCloneDataUrlChange={onVoiceCloneDataUrlChange}
               onPreviewCharacterVoice={onPreviewCharacterVoice}
             />
           ))}

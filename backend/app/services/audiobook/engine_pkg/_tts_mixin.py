@@ -5,6 +5,7 @@ from typing import List, Dict, Any, Optional, Callable, Set
 
 from ..prompt_normalizer import normalize_tts_prompt
 from ..pause_tags import strip_pause_tags
+from ..tts_delivery_plan import build_delivery_plan, resolve_segment_tts_model
 from ..tts_language import apply_detected_language_type
 from ..tts_model_ids import DEFAULT_AUDIOBOOK_TTS_MODEL, normalize_audiobook_tts_model
 from app.services.audiobook.render_plan import (
@@ -266,6 +267,22 @@ class TTSMixin:
         performance_notes = str(getattr(seg, "performance_notes", "") or "").strip()
         if performance_notes:
             voice_params.setdefault("performance_notes", performance_notes)
+        resolved_model = resolve_segment_tts_model(
+            voice_params,
+            getattr(self, "tts_model", None) or DEFAULT_AUDIOBOOK_TTS_MODEL,
+        )
+        voice_params["resolved_tts_model"] = resolved_model
+        voice_params["delivery_plan"] = build_delivery_plan(
+            segment=seg,
+            voice_params={**voice_params, "text": normalized_text},
+            model=resolved_model,
+            emotion=(
+                getattr(seg, "instruct_emotion", "")
+                or voice_params.get("instruct_emotion")
+                or voice_params.get("emotion")
+                or getattr(seg, "emotion", "neutral")
+            ),
+        )
 
         if pause_result.applied:
             voice_params.setdefault("original_tts_text", original_text)

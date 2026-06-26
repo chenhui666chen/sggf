@@ -4,7 +4,10 @@ from typing import Any, Dict, List, Optional
 
 from .voice_manager import VoiceManager
 from .voice_manager_cosyvoice_v3_plus import CosyVoiceV3PlusVoiceManager
+from .voice_manager_mimo import MiMoVoiceManager
 from .voice_manager_minimax import MiniMaxVoiceManager
+from .voice_manager_seed_tts import SeedTTSVoiceManager
+from .voice_manager_stepaudio import StepAudioVoiceManager
 from .cosyvoice_clone_client import (
     COSYVOICE_V35_PLUS_MODEL_ID,
     COSYVOICE_V35_PLUS_VOICE_ID_PREFIX,
@@ -14,6 +17,11 @@ from .tts_model_ids import (
     DEFAULT_AUDIOBOOK_TTS_MODEL,
     MINIMAX_SPEECH_28_HD_MODEL,
     MINIMAX_SPEECH_28_TURBO_MODEL,
+    MIMO_V25_TTS_MODEL,
+    MIMO_V25_TTS_VOICE_CLONE_MODEL,
+    MIMO_V25_TTS_VOICE_DESIGN_MODEL,
+    SEED_TTS_20_EXPRESSIVE_MODEL,
+    STEPAUDIO_25_TTS_MODEL,
     get_audiobook_tts_model_metadata,
     list_supported_audiobook_tts_models,
     normalize_audiobook_tts_model,
@@ -30,6 +38,9 @@ MODEL_VOICE_MAPPING = {
     "minimax-speech-2.8-hd": "minimax-speech-2.8",
     "minimax-speech-2.8-turbo": "minimax-speech-2.8",
     "minimax-speech-2.8": "minimax-speech-2.8",
+    MIMO_V25_TTS_MODEL: "mimo-v2.5-tts",
+    STEPAUDIO_25_TTS_MODEL: STEPAUDIO_25_TTS_MODEL,
+    SEED_TTS_20_EXPRESSIVE_MODEL: SEED_TTS_20_EXPRESSIVE_MODEL,
 }
 
 # 模型成本和优先级配置
@@ -63,6 +74,31 @@ MODEL_CONFIGS = {
         "cost_level": "low",
         "quality_level": "medium",
         "priority": 5,  # 快速场景
+    },
+    MIMO_V25_TTS_MODEL: {
+        "cost_level": "medium",
+        "quality_level": "high",
+        "priority": 2,
+    },
+    MIMO_V25_TTS_VOICE_DESIGN_MODEL: {
+        "cost_level": "medium",
+        "quality_level": "high",
+        "priority": 2,
+    },
+    MIMO_V25_TTS_VOICE_CLONE_MODEL: {
+        "cost_level": "low",
+        "quality_level": "medium_high",
+        "priority": 4,
+    },
+    STEPAUDIO_25_TTS_MODEL: {
+        "cost_level": "medium",
+        "quality_level": "premium",
+        "priority": 2,
+    },
+    SEED_TTS_20_EXPRESSIVE_MODEL: {
+        "cost_level": "medium",
+        "quality_level": "premium",
+        "priority": 2,
     },
 }
 
@@ -232,6 +268,19 @@ def create_voice_manager(tts_model: str, llm_client: Any = None):
 
     if tts_model == COSYVOICE_V35_PLUS_MODEL_ID:
         return CosyVoiceV3PlusVoiceManager()
-    elif tts_model in {MINIMAX_SPEECH_28_HD_MODEL, MINIMAX_SPEECH_28_TURBO_MODEL}:
+    elif tts_model in {
+        MINIMAX_SPEECH_28_HD_MODEL,
+        MINIMAX_SPEECH_28_TURBO_MODEL,
+    }:
         return MiniMaxVoiceManager(model=tts_model)
+    elif tts_model in {
+        MIMO_V25_TTS_MODEL,
+        MIMO_V25_TTS_VOICE_DESIGN_MODEL,
+        MIMO_V25_TTS_VOICE_CLONE_MODEL,
+    }:
+        return MiMoVoiceManager(model=tts_model)
+    elif tts_model == STEPAUDIO_25_TTS_MODEL:
+        return StepAudioVoiceManager(model=tts_model)
+    elif tts_model == SEED_TTS_20_EXPRESSIVE_MODEL:
+        return SeedTTSVoiceManager(model=tts_model)
     return VoiceManager(llm_client=llm_client)

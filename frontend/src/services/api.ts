@@ -173,13 +173,11 @@ export interface AudiobookProjectAudioCharacterConfigPayload {
   character_id: number
   name: string
   voice_id: string
-  volume: number
-  speed?: number | null
-  pitch?: number | null
   tts_model?: AudiobookTtsModel | null
-  voice_type?: string | null
-  personality?: string | null
-  emotion_tendency?: string | null
+  voice_clone_data_url?: string | null
+  voice_design_prompt?: string | null
+  mimo_voice_asset_id?: string | null
+  stepaudio_voice_asset_id?: string | null
   source?: string | null
 }
 
@@ -191,13 +189,11 @@ export interface AudiobookProjectAudioConfigPayload {
 export interface AudiobookVoiceConfigPayloadItem {
   character_name: string
   voice_id: string
-  volume: number
-  speed?: number
-  pitch?: number
   tts_model?: AudiobookTtsModel | null
-  voice_type?: string | null
-  personality?: string | null
-  emotion_tendency?: string | null
+  voice_clone_data_url?: string | null
+  voice_design_prompt?: string | null
+  mimo_voice_asset_id?: string | null
+  stepaudio_voice_asset_id?: string | null
 }
 
 export interface CreateAudiobookProjectPayload {
@@ -222,6 +218,10 @@ export interface AudiobookScriptSegmentVoiceParamsPayload {
   pitch?: number | null
   volume?: number | null
   emotion?: string | null
+  voice_clone_data_url?: string | null
+  voice_design_prompt?: string | null
+  mimo_voice_asset_id?: string | null
+  stepaudio_voice_asset_id?: string | null
 }
 
 export interface AudiobookScriptSegmentSoundEffectPayload {
@@ -357,7 +357,20 @@ export interface PreviewTtsPayload {
   speed?: number
   pitch?: number
   model?: string
+  instruction?: string | null
   voice_type?: string | null
+  voice_clone_data_url?: string | null
+  voice_design_prompt?: string | null
+  mimo_voice_asset_id?: string | null
+  stepaudio_voice_asset_id?: string | null
+}
+
+interface PreviewTtsCachedResponse {
+  audio_url?: string | null
+  blob?: string | null
+  cache_hit?: boolean
+  storage?: string
+  response_format?: string
 }
 
 export interface AudiobookTtsModelCatalogItem {
@@ -1622,6 +1635,51 @@ class ApiClient {
     return this.client.post<Blob>('/api/v1/audiobook/tts/preview', payload, { responseType: 'blob' })
   }
 
+  async previewTTSCached(payload: PreviewTtsPayload): Promise<{ audioUrl: string | null; blob: Blob | null }> {
+    const url = buildApiUrl(this.client.defaults.baseURL, '/api/v1/audiobook/tts/preview-cached')
+    const token = getStoredAccessToken()
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+    }
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`
+    }
+    const res = await fetch(url, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(payload),
+    })
+    if (!res.ok) {
+      throw new Error(`preview-cached failed: ${res.status}`)
+    }
+
+    const contentType = res.headers.get('content-type') || ''
+    if (contentType.includes('application/json')) {
+      const data = (await res.json()) as PreviewTtsCachedResponse
+      const audioUrl = typeof data.audio_url === 'string' && data.audio_url.trim() ? data.audio_url.trim() : null
+      if (audioUrl) {
+        return { audioUrl, blob: null }
+      }
+
+      const base64Blob = typeof data.blob === 'string' ? data.blob.trim() : ''
+      if (base64Blob) {
+        const binary = globalThis.atob(base64Blob)
+        const bytes = new Uint8Array(binary.length)
+        for (let index = 0; index < binary.length; index += 1) {
+          bytes[index] = binary.charCodeAt(index)
+        }
+        const mimeType = data.response_format === 'wav' ? 'audio/wav' : 'audio/mpeg'
+        return { audioUrl: null, blob: new Blob([bytes], { type: mimeType }) }
+      }
+
+      return { audioUrl: null, blob: null }
+    }
+
+    const blob = await res.blob()
+    return { audioUrl: null, blob }
+  }
+
   previewTTSWithTimestamps(payload: {
     text: string
     voice_id: string
@@ -1704,6 +1762,92 @@ class ApiClient {
       headers: { 'Content-Type': 'multipart/form-data' },
       timeout: 60000,
     })
+  }
+
+  listMimoVoiceAssets(model?: string) {
+    return this.client.get('/api/v1/audiobook/tts/voices/mimo/assets', {
+      params: model ? { model } : undefined,
+    })
+  }
+
+  createMimoVoiceCloneAsset(payload: { name: string; audio_data_url: string; description?: string }) {
+    return this.client.post('/api/v1/audiobook/tts/voices/mimo/clone-assets', payload)
+  }
+
+  createMimoVoiceCloneAssetFromFile(payload: { name: string; file: File }) {
+    const form = new FormData()
+    form.append('name', payload.name)
+    form.append('file', payload.file)
+    return this.client.post('/api/v1/audiobook/tts/voices/mimo/clone-assets/upload', form, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 60000,
+    })
+  }
+
+  createMimoVoiceDesignAsset(payload: { name: string; voice_design_prompt: string; description?: string }) {
+    return this.client.post('/api/v1/audiobook/tts/voices/mimo/design-assets', payload)
+  }
+
+  deleteMimoVoiceAsset(assetId: string) {
+    return this.client.delete(`/api/v1/audiobook/tts/voices/mimo/assets/${encodeURIComponent(assetId)}`)
+  }
+
+  listStepAudioVoiceAssets(model?: string) {
+    return this.client.get('/api/v1/audiobook/tts/voices/stepaudio/assets', {
+      params: model ? { model } : undefined,
+    })
+  }
+
+  previewStepAudioVoiceCloneAssetFromFile(payload: {
+    name?: string
+    file: File
+    sampleText: string
+    previewText?: string
+    instruction?: string
+    fileId?: string
+  }) {
+    const form = new FormData()
+    if (payload.name) form.append('name', payload.name)
+    form.append('sample_text', payload.sampleText)
+    if (payload.previewText) form.append('preview_text', payload.previewText)
+    if (payload.instruction) form.append('instruction', payload.instruction)
+    if (payload.fileId) form.append('file_id', payload.fileId)
+    form.append('file', payload.file)
+    return this.client.post<{
+      file_id: string
+      sample_text: string
+      preview_text: string
+      instruction: string
+      audio_data_base64: string
+      audio_mime_type: string
+      audio_format: string
+      audio_size_bytes: number
+      billing_notice?: string
+    }>('/api/v1/audiobook/tts/voices/stepaudio/clone-assets/preview', form, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 120000,
+    })
+  }
+
+  createStepAudioVoiceCloneAssetFromFile(payload: {
+    name: string
+    file: File
+    sampleText: string
+    fileId?: string
+  }) {
+    const form = new FormData()
+    form.append('name', payload.name)
+    if (payload.sampleText) form.append('sample_text', payload.sampleText)
+    if (payload.fileId) form.append('file_id', payload.fileId)
+    form.append('file', payload.file)
+    return this.client.post('/api/v1/audiobook/tts/voices/stepaudio/clone-assets/upload', form, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 60000,
+    })
+  }
+
+  deleteStepAudioVoiceAsset(assetId: string) {
+    return this.client.delete(`/api/v1/audiobook/tts/voices/stepaudio/assets/${encodeURIComponent(assetId)}`)
   }
 
   // 角色管理API

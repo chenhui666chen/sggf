@@ -33,30 +33,30 @@ class LayeredSummarizer:
     DEFAULT_MODEL_LIMIT = 32000
     DEFAULT_TARGET_TOKENS = 2048
     # 分块摘要优先控制成本，归并摘要优先控制质量。
-    CHUNK_SUMMARY_MODEL = "qwen3.5-plus"
-    REDUCE_SUMMARY_MODEL = "qwen3.6-plus"
+    CHUNK_SUMMARY_MODEL = "qwen3.7-plus"
+    REDUCE_SUMMARY_MODEL = "qwen3.7-plus"
 
     # 模型选择只决定“最终任务用什么模型更合适”，上下文是否压缩由 mode 再决定
     MODEL_SELECTION_RULES = {
         "outline_expand": [
-            ((0, 80), ("qwen3.6-plus", 0.80)),
-            ((80, 220), ("qwen3.5-plus", 0.72)),
-            ((220, 9999), ("qwen3.5-plus", 0.60)),
+            ((0, 80), ("qwen3.7-plus", 0.80)),
+            ((80, 220), ("qwen3.7-plus", 0.72)),
+            ((220, 9999), ("qwen3.7-plus", 0.60)),
         ],
         "character_expand": [
-            ((0, 30), ("qwen3.6-plus", 0.78)),
-            ((30, 120), ("qwen3.5-plus", 0.70)),
-            ((120, 9999), ("qwen3.5-plus", 0.58)),
+            ((0, 30), ("qwen3.7-plus", 0.78)),
+            ((30, 120), ("qwen3.7-plus", 0.70)),
+            ((120, 9999), ("qwen3.7-plus", 0.58)),
         ],
         "chapter_generation": [
-            ((0, 60), ("qwen3.6-plus", 0.78)),
-            ((60, 260), ("qwen3.5-plus", 0.72)),
-            ((260, 9999), ("qwen3.5-plus", 0.62)),
+            ((0, 60), ("qwen3.7-plus", 0.78)),
+            ((60, 260), ("qwen3.7-plus", 0.72)),
+            ((260, 9999), ("qwen3.7-plus", 0.62)),
         ],
         "structure_design": [
-            ((0, 40), ("qwen3.6-plus", 0.80)),
-            ((40, 180), ("qwen3.5-plus", 0.72)),
-            ((180, 9999), ("qwen3.5-plus", 0.60)),
+            ((0, 40), ("qwen3.7-plus", 0.80)),
+            ((40, 180), ("qwen3.7-plus", 0.72)),
+            ((180, 9999), ("qwen3.7-plus", 0.60)),
         ],
     }
 
@@ -346,7 +346,7 @@ class LayeredSummarizer:
                 normalized_model = normalize_model_id(model) or model
                 return normalized_model, ratio
 
-        return normalize_model_id("qwen3.5-plus") or "qwen3.5-plus", 0.30
+        return normalize_model_id("qwen3.7-plus") or "qwen3.7-plus", 0.30
 
     @classmethod
     def estimate_selected_model(cls, scenario: str, current_count: int) -> str:

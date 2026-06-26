@@ -296,4 +296,3 @@ class CosyVoiceV35PlusAdapter(BaseAdapter):
             status=ModelStatus.ACTIVE, modality=["text_to_speech"], avg_latency_seconds=3.0,
         )
 
-

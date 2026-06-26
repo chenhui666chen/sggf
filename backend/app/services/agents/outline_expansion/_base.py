@@ -62,7 +62,7 @@ class OutlineExpanderBase:
         # 避免超长逐章输出时中途收缩成范围摘要或解释性废话。
         outline_expand_max_tokens = 32768
         outline_expand_timeout = estimate_model_timeout_seconds(
-            "qwen3.5-plus",
+            "qwen3.7-plus",
             outline_expand_max_tokens,
         )
         self.llm = create_task_llm(
