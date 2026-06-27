@@ -21,5 +21,6 @@ __all__ = [
     'aliyun_embeddings',
     'intelligent_truncator',  # 新增: AI辅助智能截断器
     'layered_summarizer',     # 新增: 分层摘要器
+    'review_feature_gate',
+    'multi_model_review_service',
 ]
-
