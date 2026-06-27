@@ -942,7 +942,10 @@ class CreativeDirectorCoordinator:
         )
         
         # 🔥 使用智能选择的模型和优化后的上下文
-        selected_model = context_result["selected_model"]
+        selected_model = (
+            self.project_context.get("workflow_generation_model")
+            or context_result["selected_model"]
+        )
         optimized_context = context_result["context"]
         memory_text = context_result.get("memory_text", "")
         structured_memory = context_result.get("structured_memory", {})
@@ -1128,7 +1131,11 @@ class CreativeDirectorCoordinator:
         if optimizer is None or not normalized_draft:
             return normalized_draft
 
+        workflow_generation_model = self.project_context.get("workflow_generation_model")
+        original_llm = getattr(optimizer, "llm", None)
         try:
+            if workflow_generation_model:
+                optimizer.llm = create_model_llm(model=workflow_generation_model, temperature=0.5)
             optimization_result = optimizer.optimize_style(
                 normalized_draft,
                 context={
@@ -1142,6 +1149,9 @@ class CreativeDirectorCoordinator:
         except Exception:
             logger.exception("文风优化失败，保留原始章节草稿")
             return normalized_draft
+        finally:
+            if workflow_generation_model and original_llm is not None:
+                optimizer.llm = original_llm
 
         if isinstance(optimization_result, str):
             optimized_content = optimization_result.strip()
@@ -1198,11 +1208,22 @@ class CreativeDirectorCoordinator:
         )
         
         # ✅ 使用双prompt调用
-        content_result = self.content_creator.create_chapter_from_prompts(
-            system_prompt=content_system_prompt,
-            user_prompt=content_user_prompt,
-            context=None,
-        )
+        workflow_generation_model = self.project_context.get("workflow_generation_model")
+        original_content_llm = getattr(self.content_creator, "llm", None)
+        try:
+            if workflow_generation_model:
+                self.content_creator.llm = create_model_llm(
+                    model=workflow_generation_model,
+                    temperature=0.7,
+                )
+            content_result = self.content_creator.create_chapter_from_prompts(
+                system_prompt=content_system_prompt,
+                user_prompt=content_user_prompt,
+                context=None,
+            )
+        finally:
+            if workflow_generation_model and original_content_llm is not None:
+                self.content_creator.llm = original_content_llm
         draft_content = content_result if isinstance(content_result, str) else content_result.get("output", "章节内容")
         logger.info(f"✅ 第1章草稿创作完成，长度: {len(draft_content)}")
 
@@ -1252,7 +1273,7 @@ class CreativeDirectorCoordinator:
         logger.info("🔍 质量评审官正在评审内容...")
         
         # 🆕 使用智能截断替代手动截断
-        # qwen3-max 限制: 256K tokens ≈ 384000字符
+        # qwen3.7-plus 限制: 1M tokens ≈ 1500000字符
         # 评审模板约1500字 + content，需确保总输入不超限
         truncated_content = smart_truncate_for_context(
             content=content,
@@ -1322,8 +1343,15 @@ class CreativeDirectorCoordinator:
         logger.info("🧭 迭代协调官正在整理修订计划...")
         iteration_plan = ""
         iteration_coordinator = getattr(self, "iteration_coordinator", None)
+        workflow_generation_model = self.project_context.get("workflow_generation_model")
         if iteration_coordinator is not None:
+            original_iteration_llm = getattr(iteration_coordinator, "llm", None)
             try:
+                if workflow_generation_model:
+                    iteration_coordinator.llm = create_model_llm(
+                        model=workflow_generation_model,
+                        temperature=0.4,
+                    )
                 coordination_result = iteration_coordinator.coordinate_iteration(
                     truncated_review,
                     truncated_original,
@@ -1348,15 +1376,33 @@ class CreativeDirectorCoordinator:
         else:
             logger.warning("⚠️ 迭代协调官未初始化，直接使用评审意见修订")
 
+        if (
+            workflow_generation_model
+            and iteration_coordinator is not None
+            and "original_iteration_llm" in locals()
+            and original_iteration_llm is not None
+        ):
+            iteration_coordinator.llm = original_iteration_llm
+
         revision_context = {"iteration_plan": iteration_plan} if iteration_plan else None
         if iteration_plan:
             logger.info(f"✅ 迭代计划完成，长度: {len(iteration_plan)}")
         
-        revision_result = self.content_reviser.revise_content(
-            truncated_original,
-            truncated_review,
-            context=revision_context,
-        )
+        original_reviser_llm = getattr(self.content_reviser, "llm", None)
+        try:
+            if workflow_generation_model:
+                self.content_reviser.llm = create_model_llm(
+                    model=workflow_generation_model,
+                    temperature=0.7,
+                )
+            revision_result = self.content_reviser.revise_content(
+                truncated_original,
+                truncated_review,
+                context=revision_context,
+            )
+        finally:
+            if workflow_generation_model and original_reviser_llm is not None:
+                self.content_reviser.llm = original_reviser_llm
         revised_content = revision_result if isinstance(revision_result, str) else revision_result.get("output", original_content)
         logger.info(f"✅ 内容优化完成，长度: {len(revised_content)}")
         

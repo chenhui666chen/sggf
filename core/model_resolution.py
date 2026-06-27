@@ -49,9 +49,6 @@ TASK_TYPE_ALIASES = {
 MODEL_ALIASES = {
     "deepseek-v4-flash": "deepseek-v4-flash",
     "deepseek-v4-pro": "deepseek-v4-pro",
-    "qwen-max": "qwen3-max",
-    "qwen-plus": "qwen-long",
-    "qwen2.5-turbo": "qwen-turbo",
     "qwen3_vl_plus": "qwen3-vl-plus",
     "qwen3_tts": "qwen3-tts-instruct-flash",
     "qwen3-tts-flash": "qwen3-tts-instruct-flash",
@@ -67,6 +64,8 @@ MODEL_ALIASES = {
     "minimax-speech-2.8-hd": "MiniMax/speech-2.8-hd",
     "minimax/speech-2.8-turbo": "MiniMax/speech-2.8-turbo",
     "minimax/speech-2.8-hd": "MiniMax/speech-2.8-hd",
+    "minimax/minimax-m3": "MiniMax/MiniMax-M3",
+    "minimax-m3": "MiniMax/MiniMax-M3",
 }
 
 

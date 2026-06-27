@@ -63,6 +63,8 @@ def test_iteration_revision_prompt_embeds_iteration_plan():
 
     assert "本轮迭代协调计划" in prompt
     assert "加强主角与反派的正面冲突" in prompt
+    assert "评审要求执行核验表" in prompt
+    assert "R0-MUST-1" in prompt
 
 
 def test_iteration_loop_review_user_prompt_includes_plan_and_assets():
@@ -70,6 +72,8 @@ def test_iteration_loop_review_user_prompt_includes_plan_and_assets():
         chapter_number=8,
         chapter_content="修订后的章节正文。",
         chapter_plan="主角必须在本章正面拒绝反派合作。",
+        review_text="R0-MUST-1：必须让主角当场拒绝反派合作。",
+        iteration_plan="## 本轮必做项\n1. 明确写出主角拒绝反派合作的理由。",
         recent_chapter_assets_summary="第7章资产：主角已察觉反派试探。",
     )
 
@@ -77,6 +81,10 @@ def test_iteration_loop_review_user_prompt_includes_plan_and_assets():
     assert "主角必须在本章正面拒绝反派合作" in prompt
     assert "第7章资产" in prompt
     assert "通过 / 继续修改 / 风险较高" in prompt
+    assert "R0-MUST-1" in prompt
+    assert "评审要求执行核验表" in prompt
+    assert "爽点效果（权重25%）" in prompt
+    assert "内容一致性（权重15%）" in prompt
 
 
 def test_content_reviser_method_uses_runtime_prompt_builder():

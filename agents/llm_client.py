@@ -19,7 +19,7 @@ def env_flag(name: str, default: bool) -> bool:
     return raw.strip().lower() in {"1", "true", "yes", "y", "on"}
 
 
-def pick_model(*, primary_env: str, fallback_env: str, default: str = "qwen-plus") -> str:
+def pick_model(*, primary_env: str, fallback_env: str, default: str = "qwen3.7-plus") -> str:
     raw = os.getenv(primary_env, "").strip()
     if raw:
         return raw

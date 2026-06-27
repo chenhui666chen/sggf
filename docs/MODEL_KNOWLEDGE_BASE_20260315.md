@@ -1,4 +1,4 @@
-# 模型档案总览
+﻿# 模型档案总览
 日期：`2026-03-15`
 
 ## 1. 说明
@@ -19,32 +19,12 @@
 
 ## 2. 文本模型
 
-### qwen3-max
+### qwen3.7-plus
 
-- 定位：项目中文创作主力模型，对应阿里云通义千问 Max 系列接入
+- 定位：项目中文创作主力模型，对应阿里云通义千问 Plus 系列接入
 - 适用：故事概念生成、章节正文、角色对话、风格保持、结构化 JSON 输出
-- 限制：纯推理审校不如 `deepseek-v4-pro`；整书级长上下文不如 `qwen-long`
+- 限制：纯推理审校不如 `deepseek-v4-pro`；超长整书级任务仍需分层摘要策略
 - 项目备注：当前 `chapter / concept / dialogue` 等任务默认优先路由到该模型
-- 官方资料：
-  - https://help.aliyun.com/zh/model-studio/getting-started/models
-  - https://help.aliyun.com/zh/model-studio/text-generation
-
-### qwen-long
-
-- 定位：项目超长上下文模型
-- 适用：大纲扩展、整书汇总、长文档理解、RAG 结果聚合后二次加工
-- 限制：延迟高于 `qwen3-max` 与 `qwen-turbo`，不适合作为高频低延迟对话模型
-- 项目备注：当前 `outline_expand / book_synthesis` 默认优先路由到该模型
-- 官方资料：
-  - https://help.aliyun.com/zh/model-studio/long-context
-  - https://help.aliyun.com/zh/model-studio/getting-started/models
-
-### qwen-turbo
-
-- 定位：项目轻量快速文本模型
-- 适用：实体提取、轻量摘要、格式化、低成本预处理
-- 限制：复杂创作质量不如 `qwen3-max`，严谨推理不如 `deepseek-v4-pro`
-- 项目备注：当前 `entity_extract / summarize / fast` 等任务会优先命中
 - 官方资料：
   - https://help.aliyun.com/zh/model-studio/getting-started/models
   - https://help.aliyun.com/zh/model-studio/text-generation
@@ -213,3 +193,4 @@
 - 仍有部分历史 Agent 代码直接使用 `adapters/model_adapters.py` 里的 `ModelAdapterFactory`，这些调用点尚未全部迁到新的 registry/runtime facade
 - `legacy_bridge` 目前仅保留少量非统一媒体路径的旧式兜底，媒体模型侧的旧 fallback 已基本清空
 - 如果后续继续推进，建议继续把各个 Agent 内部直接 new / get 旧式 `ModelAdapterFactory` 的位置逐步改成调用统一多模态运行时
+

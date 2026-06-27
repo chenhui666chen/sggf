@@ -50,7 +50,14 @@ from app.api.v1.workflow.story_resolve import (
     _normalize_concept_stage_characters_for_storage,
 )
 from app.api.v1.workflow.requirement import _resolve_workflow_requirement
-async def execute_stage_with_streaming(task_id: str, project_id: int, stage_enum: StageType, user_id: int, db: Session):
+async def execute_stage_with_streaming(
+    task_id: str,
+    project_id: int,
+    stage_enum: StageType,
+    user_id: int,
+    db: Session,
+    workflow_generation_model: Optional[str] = None,
+):
     """
     🆕 使用流式输出执行阶段任务
 
@@ -123,18 +130,26 @@ async def execute_stage_with_streaming(task_id: str, project_id: int, stage_enum
         # 🆕 广播本阶段选用的模型，便于前端调试
         try:
             from app.core.config import settings
-            default_content_model = getattr(settings, "DEFAULT_CONTENT_MODEL", "qwen3-max")
+            default_content_model = getattr(settings, "DEFAULT_CONTENT_MODEL", "qwen3.7-plus")
         except Exception:
-            default_content_model = "qwen3-max"
+            default_content_model = "qwen3.7-plus"
+        creative_model = workflow_generation_model or default_content_model
         stage_task_type = None
         stage_model_override = None
-        if stage_enum == StageType.CONTENT:
+        if stage_enum == StageType.CONCEPT:
+            stage_task_type = "concept"
+            stage_model_override = creative_model
+        elif stage_enum == StageType.STRUCTURE:
+            stage_task_type = "structure_plot"
+            stage_model_override = creative_model
+        elif stage_enum == StageType.CONTENT:
             stage_task_type = "chapter"
-            stage_model_override = default_content_model
+            stage_model_override = creative_model
         elif stage_enum == StageType.REVIEW:
             stage_task_type = "review"
         elif stage_enum == StageType.ITERATION:
-            stage_task_type = "review"
+            stage_task_type = "rewrite"
+            stage_model_override = creative_model
         stage_model = resolve_model_for_task(stage_task_type, stage_model_override) if stage_task_type else None
         if stage_model:
             await ws_manager.send_model_used(
@@ -324,6 +339,7 @@ async def execute_stage_with_streaming(task_id: str, project_id: int, stage_enum
                         system_prompt=concept_system_prompt,
                         on_chunk=on_concept_chunk,
                         temperature=0.9,
+                        model=workflow_generation_model,
                         task_type="concept",
                     )
                     
@@ -354,6 +370,7 @@ async def execute_stage_with_streaming(task_id: str, project_id: int, stage_enum
                         system_prompt=world_system_prompt,
                         on_chunk=on_world_chunk,
                         temperature=0.7,
+                        model=workflow_generation_model,
                         task_type="worldview",
                     )
                     
@@ -387,6 +404,7 @@ async def execute_stage_with_streaming(task_id: str, project_id: int, stage_enum
                         system_prompt=character_system_prompt,
                         on_chunk=on_character_chunk,
                         temperature=0.7,
+                        model=workflow_generation_model,
                         task_type="character",
                     )
                     
@@ -443,6 +461,7 @@ async def execute_stage_with_streaming(task_id: str, project_id: int, stage_enum
                         system_prompt=structure_system_prompt,
                         on_chunk=on_structure_chunk,
                         temperature=0.7,
+                        model=workflow_generation_model,
                         task_type="structure_plot",
                     )
                     
@@ -483,17 +502,19 @@ async def execute_stage_with_streaming(task_id: str, project_id: int, stage_enum
                 stage_model_override = None
                 try:
                     from app.core.config import settings
-                    default_content_model = getattr(settings, "DEFAULT_CONTENT_MODEL", "qwen3-max")
+                    default_content_model = getattr(settings, "DEFAULT_CONTENT_MODEL", "qwen3.7-plus")
                 except Exception:
-                    default_content_model = "qwen3-max"
+                    default_content_model = "qwen3.7-plus"
+                creative_model = workflow_generation_model or default_content_model
                 
                 if stage_enum == StageType.CONTENT:
                     stage_task_type = "chapter"
-                    stage_model_override = default_content_model
+                    stage_model_override = creative_model
                 elif stage_enum == StageType.REVIEW:
                     stage_task_type = "review"
                 elif stage_enum == StageType.ITERATION:
-                    stage_task_type = "review"
+                    stage_task_type = "rewrite"
+                    stage_model_override = creative_model
                 stage_model = (
                     resolve_model_for_task(stage_task_type, stage_model_override)
                     if stage_task_type
@@ -561,6 +582,7 @@ async def execute_stage_with_streaming(task_id: str, project_id: int, stage_enum
                     "user_id": user_id,
                     "requirement": requirement,
                     "enable_streaming": False,
+                    "workflow_generation_model": workflow_generation_model,
                 },
             )
 

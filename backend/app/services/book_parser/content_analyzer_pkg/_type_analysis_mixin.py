@@ -176,7 +176,7 @@ class TypeAnalysisMixin:
             content=parsed,
             confidence=0.85,
             chapter_range=(1, len(chapters)),
-            model_used="qwen3-max",
+            model_used="qwen3.7-plus",
         )
     
     # ==================== 世界观分析 ====================
@@ -254,7 +254,7 @@ class TypeAnalysisMixin:
             content=parsed,
             confidence=0.80,
             chapter_range=(1, len(chapters)),
-            model_used="qwen3-max",
+            model_used="qwen3.7-plus",
         )
     
     # ==================== 情节分析 ====================
@@ -354,7 +354,7 @@ class TypeAnalysisMixin:
             content=parsed,
             confidence=0.75,
             chapter_range=(1, len(chapters)),
-            model_used="qwen3-max",
+            model_used="qwen3.7-plus",
         )
     
     # ==================== 写作风格分析 ====================
@@ -422,7 +422,7 @@ class TypeAnalysisMixin:
             content=parsed,
             confidence=0.80,
             chapter_range=(1, len(chapters)),
-            model_used="qwen3-max",
+            model_used="qwen3.7-plus",
         )
 
     async def analyze_concepts(
@@ -488,7 +488,7 @@ class TypeAnalysisMixin:
             content=parsed,
             confidence=0.78,
             chapter_range=(1, len(chapters)),
-            model_used="qwen3-max",
+            model_used="qwen3.7-plus",
         )
 
     # ==================== 辅助方法 ====================

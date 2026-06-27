@@ -121,6 +121,20 @@ def _build_task_interrupted_error(task_type: Any) -> str:
     return "后台任务因服务重启或热重载中断，请重新发起"
 
 
+def _build_inactive_generate_next_chapter_error() -> str:
+    return "生成下一章任务已不在后端执行队列中，请重新发起"
+
+
+def _is_inactive_generate_next_chapter_task(task_type: Any, task_id: Any) -> bool:
+    if _normalize_task_type(task_type) != "generate_next_chapter":
+        return False
+    try:
+        from app.api.v1.workflow.routes_chapter import is_generate_next_chapter_task_active
+    except Exception:
+        return False
+    return not is_generate_next_chapter_task_active(str(task_id))
+
+
 def _should_mark_task_as_interrupted(task_type: Any, created_at: datetime) -> bool:
     if not _is_in_memory_workflow_task(task_type):
         return False
@@ -841,6 +855,36 @@ async def get_running_tasks(
                 })
 
                 logger.info(f"   ✅ 已将孤儿任务 {task_id} 标记为 failed")
+
+            elif _is_inactive_generate_next_chapter_task(task_type, task_id):
+                inactive_error = _build_inactive_generate_next_chapter_error()
+                logger.warning(f"🧯 检测到已结束但状态残留的生成下一章任务: {task_id}")
+
+                update_query = text("""
+                    UPDATE generation_history
+                    SET status = 'failed',
+                        error = :error,
+                        completed_at = :completed_at
+                    WHERE task_id = :task_id
+                """)
+
+                db.execute(update_query, {
+                    "error": inactive_error,
+                    "completed_at": now.isoformat(),
+                    "task_id": task_id
+                })
+                db.commit()
+
+                interrupted_tasks.append({
+                    "task_id": task_id,
+                    "task_type": task_type,
+                    "status": "failed",
+                    "created_at": created_at_str,
+                    "age_minutes": round(task_age_minutes, 1),
+                    "reason": inactive_error,
+                })
+
+                logger.info(f"   ✅ 已将残留任务 {task_id} 标记为 failed")
 
             elif task_age_minutes > task_timeout_minutes:
                 # 标记为超时

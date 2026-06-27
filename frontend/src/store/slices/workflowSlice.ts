@@ -57,6 +57,15 @@ export interface WorkflowState {
   generateNextChapter: GenerateNextChapterState
 }
 
+const createInitialGenerateNextChapterState = (): GenerateNextChapterState => ({
+  taskId: null,
+  chapterNumber: null,
+  progress: 0,
+  currentStep: 0,
+  streamContent: '',
+  isRunning: false,
+})
+
 // 初始状态（Agent ID 使用 snake_case 命名规范）
 const initialStages: Record<StageType, Stage> = {
   concept: {
@@ -130,14 +139,7 @@ const initialState: WorkflowState = {
   createdProjectId: null,
   createProjectError: null,
   // 🆕 生成下一章任务初始状态
-  generateNextChapter: {
-    taskId: null,
-    chapterNumber: null,
-    progress: 0,
-    currentStep: 0,
-    streamContent: '',
-    isRunning: false,
-  },
+  generateNextChapter: createInitialGenerateNextChapterState(),
 }
 
 // 异步Thunk
@@ -147,17 +149,20 @@ export const startWorkflow = createAsyncThunk(
     projectId,
     requirement,
     targetChapterCount,
+    workflowGenerationModel,
     clearExisting = false,  // 🆕 是否清空现有内容
   }: {
     projectId: number
     requirement: string
     targetChapterCount?: number
+    workflowGenerationModel?: string
     clearExisting?: boolean  // 🆕 重新开始时需要清空旧数据
   }) => {
     const response = await apiClient.post('/api/v1/workflow/start', {
       project_id: projectId, // 🎯 确保传递project_id
       requirement,
       target_chapter_count: targetChapterCount,
+      workflow_generation_model: workflowGenerationModel,
       clear_existing: clearExisting,  // 🆕 传递清空标志
     })
     return response.data
@@ -303,6 +308,7 @@ const workflowSlice = createSlice({
         state.isCreatingProject = false
         state.createdProjectId = null
         state.createProjectError = null
+        state.generateNextChapter = createInitialGenerateNextChapterState()
       } else if (state.projectId === null || state.projectId === 0) {
         // 页面初始化：设置project_id（不重置阶段，由localStorage恢复）
       }
@@ -381,6 +387,7 @@ const workflowSlice = createSlice({
       state.isCreatingProject = false
       state.createdProjectId = null
       state.createProjectError = null
+      state.generateNextChapter = createInitialGenerateNextChapterState()
     },
     clearSaveChapterState: (state) => {
       state.isSavingChapter = false
@@ -409,14 +416,7 @@ const workflowSlice = createSlice({
       state.generateNextChapter.streamContent = ''
     },
     completeGenerateNextChapter: (state) => {
-      state.generateNextChapter = {
-        taskId: null,
-        chapterNumber: null,
-        progress: 0,
-        currentStep: 0,
-        streamContent: '',
-        isRunning: false,
-      }
+      state.generateNextChapter = createInitialGenerateNextChapterState()
     },
   },
   extraReducers: (builder) => {

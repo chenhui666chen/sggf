@@ -18,7 +18,7 @@ from backend.app.services.outline_merger import parse_framework_to_volumes
 class _DummySummarizer:
     def prepare_context_for_expansion(self, **kwargs):
         return {
-            "selected_model": "qwen-long",
+            "selected_model": "qwen3.7-plus",
             "context": "压缩后的上下文",
             "memory_text": "结构化记忆约束",
             "structured_memory": {"story": 1},
@@ -1502,7 +1502,7 @@ def test_expand_volume_detail_uses_r1_chunk_supplement_after_large_volume_range_
 """,
         ]
     )
-    expander.estimate_volume_detail_model = lambda _chapters_count_range: "qwen3.5-plus"
+    expander.estimate_volume_detail_model = lambda _chapters_count_range: "qwen3.7-plus"
 
     monkeypatch.setattr(
         outline_expander_module,

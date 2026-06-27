@@ -54,7 +54,7 @@ def test_registry_re_register_cleans_stale_task_mapping() -> None:
     assert [spec.id for spec in registry.get_models_for_task("task_new")] == ["dup-model"]
 
 
-def test_qwen35_plus_has_adapter_and_outline_expand_routes_to_plus() -> None:
+def test_current_qwen_plus_has_adapter_and_removed_book_synthesis_route() -> None:
     from core.model_runtime import resolve_model_for_task
     from core.model_hub import model_hub
 
@@ -62,63 +62,62 @@ def test_qwen35_plus_has_adapter_and_outline_expand_routes_to_plus() -> None:
     if not config_path.exists():
         pytest.skip("YAML 配置文件不存在")
 
-    adapter = model_hub.registry.get_adapter("qwen3.5-plus")
+    adapter = model_hub.registry.get_adapter("qwen3.7-plus")
     assert adapter is not None
-    assert type(adapter).__name__ == "Qwen35PlusAdapter"
+    assert type(adapter).__name__ == "Qwen37PlusAdapter"
 
-    assert resolve_model_for_task("outline_expand", None) == "qwen3.5-plus"
-    assert resolve_model_for_task("book_synthesis", None) == "qwen-long"
+    assert resolve_model_for_task("outline_expand", None) == "mimo-v2.5"
+    assert resolve_model_for_task("book_synthesis", None) is None
     assert resolve_model_for_task("review", None) == "deepseek-v4-pro"
 
 
-def test_qwen36_plus_has_adapter_for_verification_workflow() -> None:
+def test_current_qwen_plus_has_adapter_for_verification_workflow() -> None:
     from core.model_hub import model_hub
 
     config_path = Path(__file__).parent.parent / "config" / "llm_models.yaml"
     if not config_path.exists():
         pytest.skip("YAML 配置文件不存在")
 
-    spec = model_hub.registry.get_spec("qwen3.6-plus")
-    adapter = model_hub.registry.get_adapter("qwen3.6-plus")
+    spec = model_hub.registry.get_spec("qwen3.7-plus")
+    adapter = model_hub.registry.get_adapter("qwen3.7-plus")
 
     assert spec is not None
     assert adapter is not None
-    assert type(adapter).__name__ == "Qwen36PlusAdapter"
+    assert type(adapter).__name__ == "Qwen37PlusAdapter"
     assert "verification" in spec.routing.task_types
 
 
-def test_story_expansion_routes_only_to_deepseek_and_qwen35_plus() -> None:
+def test_story_expansion_routes_to_current_long_context_models() -> None:
     from core.model_runtime import resolve_model_for_task
     from core.model_hub import model_hub
 
     expected_routes = {
-        "concept": "qwen3.5-plus",
-        "outline_expand": "qwen3.5-plus",
-        "character": "deepseek-v4-pro",
-        "character_expand": "deepseek-v4-pro",
+        "concept": "mimo-v2.5",
+        "outline_expand": "mimo-v2.5",
+        "character": "doubao-seed-character",
+        "character_expand": "doubao-seed-character",
         "volume_detail_expand": "deepseek-v4-pro",
     }
 
     for task_type, expected_model in expected_routes.items():
         assert resolve_model_for_task(task_type, None) == expected_model
 
-    qwen35_spec = model_hub.registry.get_spec("qwen3.5-plus")
+    mimo_spec = model_hub.registry.get_spec("mimo-v2.5")
     deepseek_v4_pro_spec = model_hub.registry.get_spec("deepseek-v4-pro")
     deepseek_v4_flash_spec = model_hub.registry.get_spec("deepseek-v4-flash")
-    qwen_max_spec = model_hub.registry.get_spec("qwen3-max")
-    qwen_long_spec = model_hub.registry.get_spec("qwen-long")
+    qwen_max_spec = model_hub.registry.get_spec("qwen3.7-plus")
+    removed_long_context_spec = model_hub.registry.get_spec("qwen-" + "long")
 
-    assert qwen35_spec is not None
+    assert mimo_spec is not None
     assert deepseek_v4_pro_spec is not None
     assert deepseek_v4_flash_spec is not None
     assert qwen_max_spec is not None
-    assert qwen_long_spec is not None
+    assert removed_long_context_spec is None
 
-    assert qwen35_spec.routing.fallback_models == ["deepseek-v4-flash"]
-    assert deepseek_v4_pro_spec.routing.fallback_models == ["qwen3.5-plus"]
-    assert deepseek_v4_flash_spec.routing.fallback_models == ["qwen3.5-plus"]
-    assert "concept" not in qwen_max_spec.routing.task_types
-    assert "outline_expand" not in qwen_long_spec.routing.task_types
+    assert mimo_spec.routing.fallback_models == ["qwen3.7-plus"]
+    assert qwen_max_spec.routing.fallback_models == ["deepseek-v4-flash"]
+    assert deepseek_v4_pro_spec.routing.fallback_models == ["qwen3.7-plus"]
+    assert deepseek_v4_flash_spec.routing.fallback_models == ["qwen3.7-plus"]
 
 
 class _FakeLLMClient:

@@ -25,7 +25,7 @@ class StreamingService:
 
     def __init__(self, llm_client: Optional[UnifiedLLMClient] = None):
         self.llm_client = llm_client or get_llm_client(strategy="auto")
-        self.default_model = normalize_model_id(os.getenv("DEEPSEEK_MODEL", "qwen3-max")) or "qwen3-max"
+        self.default_model = normalize_model_id(os.getenv("DEEPSEEK_MODEL", "qwen3.7-plus")) or "qwen3.7-plus"
 
     async def generate_with_streaming(
         self,

@@ -5657,7 +5657,7 @@ models:
   - 视频输入能力非主打
   integration_notes:
   - 通过 StepFun 官方 OpenAI 兼容接口调用，模型名为 step-3.7-flash
-  - 使用 StepFun API Key（STEPFUN_API_KEY），非阿里云百炼
+  - 使用 StepFun API Key（STEP_API_KEY），非阿里云百炼
   - 中国大陆 base_url: https://api.stepfun.com/v1
   - 海外 base_url: https://api.stepfun.ai/v1（需与API Key签发平台匹配）
   - 思考过程通过 delta.reasoning 字段返回（流式）或 message.reasoning 字段返回（非流式）
@@ -5693,7 +5693,7 @@ models:
     base_url_global: https://api.stepfun.ai/v1
     endpoint: /v1/chat/completions
     auth_type: stepfun_api_key
-    api_key_env: STEPFUN_API_KEY
+    api_key_env: STEP_API_KEY
     pricing_endpoint: https://platform.stepfun.com/docs/zh/guides/pricing/intro
     pricing_verification:
       enabled: true
@@ -5724,7 +5724,7 @@ models:
             from openai import OpenAI
 
             client = OpenAI(
-                api_key=os.getenv("STEPFUN_API_KEY"),
+                api_key=os.getenv("STEP_API_KEY"),
                 base_url="https://api.stepfun.com/v1"
             )
 
@@ -7279,6 +7279,293 @@ models:
             use_tag_parser:
               enabled: true
               description: 显式标签控制时启用，标签示例为 [旁白，语调惊恐]正文
+
+- id: doubao-seed-evolving
+  name: Doubao Seed Evolving
+  provider: volcengine
+  version: evolving
+  status: active
+  modality:
+  - text_to_text
+  - chat
+  capabilities:
+  - name: text_understanding
+    support_level: native
+    score: 0.93
+    description: 深度思考模型，复杂任务编排与长程规划能力突出
+    source: https://www.volcengine.com/docs/82379/1399008
+    verified_at: '2026-06-26'
+    confidence: high
+  - name: text_generation
+    support_level: native
+    score: 0.90
+    description: 高质量文本生成，覆盖工程交付完整流程
+    source: https://www.volcengine.com/docs/82379/1399008
+    verified_at: '2026-06-26'
+    confidence: high
+  - name: complex_reasoning
+    support_level: native
+    score: 0.93
+    description: 面向 Coding 与 Agent 时代的深度思考模型，需求理解、长期规划与持续修复能力全面升级
+    source: https://www.volcengine.com/docs/82379/1399008
+    verified_at: '2026-06-26'
+    confidence: high
+  - name: code_generation
+    support_level: native
+    score: 0.93
+    description: 仓库级理解、端到端项目交付与自测闭环
+    source: https://www.volcengine.com/docs/82379/1399008
+    verified_at: '2026-06-26'
+    confidence: high
+  - name: agent
+    support_level: native
+    score: 0.94
+    description: 复杂任务编排、长程规划与工具调用核心能力
+    source: https://www.volcengine.com/docs/82379/1399008
+    verified_at: '2026-06-26'
+    confidence: high
+  - name: long_context
+    support_level: native
+    score: 0.88
+    description: 支持256K长上下文窗口
+    source: https://www.volcengine.com/docs/82379/1399008
+    verified_at: '2026-06-26'
+    confidence: high
+  - name: function_calling
+    support_level: native
+    description: 支持 Function Calling 与结构化 JSON 输出
+    source: https://www.volcengine.com/docs/82379/1399008
+    verified_at: '2026-06-26'
+    confidence: high
+  constraints:
+    max_prompt_length: 262144
+    max_output_length: 16384
+    context_window: 262144
+    supports_thinking_mode: true
+    thinking_levels:
+    - enabled
+    - disabled
+    supports_context_cache: true
+    rpm_limit: 1000
+    tpm_limit: 10000000
+  quality_metrics:
+    overall_score: 9.3
+    reasoning: 0.93
+    code_quality: 0.93
+    agent: 0.94
+    language_understanding: 0.90
+  avg_latency_seconds: 2.5
+  summary: 火山引擎豆包 Seed Evolving 深度思考模型，面向 Agent 与 Coding 场景设计的 Seed 系列旗舰，具备复杂任务编排、长程规划、代码生成与工具调用核心能力，采用动态迭代机制（每周至少一个版本更新），通过统一 Model ID 始终获取最新版本。
+  recommended_scenarios:
+  - 复杂 Coding 工程交付与端到端项目开发
+  - 长链路 Agent 任务编排与执行
+  - 多步骤工程交付与自测闭环
+  - 高复杂度任务探索与高价值生产场景
+  limitations:
+  - 动态迭代版本，能力可能随版本波动
+  - 输出价格相对较高（30元/百万tokens）
+  - 上下文窗口256K，低于部分百万级长上下文模型
+  integration_notes:
+  - 通过火山方舟 OpenAI 兼容接口调用，统一 Model ID 为 doubao-seed-evolving
+  - 使用火山引擎 API Key（DOUBAO_API_KEY）
+  - base_url: https://ark.cn-beijing.volces.com/api/v3
+  - 深度思考模型，思考过程通过 reasoning_content 字段返回
+  - 支持 Function Calling 与结构化 JSON 输出
+  - 支持透明缓存（context cache），缓存命中按输入 Token 单价的 20% 计费
+  - 模型采用动态迭代机制，每周至少发布一个版本更新
+  documentation_url: https://www.volcengine.com/docs/82379/1399008
+  source_urls:
+  - https://www.volcengine.com/docs/82379/1399008
+  - https://www.volcengine.com/docs/82379/1544106
+  - https://www.volcengine.com/product/doubao
+  pricing_info:
+    unit: per 1M tokens
+    currency: CNY
+    last_updated: '2026-06'
+    source: 火山引擎官方价格
+    pricing_url: https://www.volcengine.com/docs/82379/1544106
+    input_price: 6.00
+    cached_input_price: 1.20
+    output_price: 30.00
+    cache_storage_price_per_hour: 0.017
+    note: 价格按输入长度分档，上表为 [0, 256] 区间单价；缓存命中按 20% 计费。
+  api_config:
+    base_url: https://ark.cn-beijing.volces.com/api/v3
+    endpoint: /chat/completions
+    auth_type: bearer_token
+    api_key_env: DOUBAO_API_KEY
+    request_format:
+      model: doubao-seed-evolving
+      messages: array
+      max_tokens: integer
+      temperature: float
+    response_format:
+      choices: array
+      usage: object
+  tags:
+  - llm
+  - chat
+  - volcengine
+  - doubao
+  - seed
+  - evolving
+  - reasoning
+  - agent
+  - coding
+
+- id: doubao-seed-character
+  name: Doubao Seed Character
+  provider: volcengine
+  version: '260628'
+  status: active
+  modality:
+  - text_to_text
+  - multimodal_chat
+  - image_understanding
+  - video_understanding
+  - chat
+  capabilities:
+  - name: roleplay
+    support_level: native
+    score: 0.95
+    description: 面向泛娱乐场景全面升级的角色扮演模型，剧情推理、对话节奏与情感递进能力显著增强
+    source: https://www.volcengine.com/docs/82379/1399008
+    verified_at: '2026-06-26'
+    confidence: high
+  - name: dialogue
+    support_level: native
+    score: 0.95
+    description: Human-like 自然聊天能力，可主动激活对话并贴合语境回复
+    source: https://www.volcengine.com/docs/82379/1399008
+    verified_at: '2026-06-26'
+    confidence: high
+  - name: image_understanding
+    support_level: native
+    score: 0.85
+    description: 新增 VLM 多模态理解，支持图片与表情包输入
+    source: https://www.volcengine.com/docs/82379/1399008
+    verified_at: '2026-06-26'
+    confidence: high
+  - name: video_understanding
+    support_level: native
+    score: 0.82
+    description: VLM 多模态理解，支持视频输入
+    source: https://www.volcengine.com/docs/82379/1399008
+    verified_at: '2026-06-26'
+    confidence: high
+  - name: text_understanding
+    support_level: native
+    score: 0.88
+    description: 深度文本理解，支持128K上下文
+    source: https://www.volcengine.com/docs/82379/1399008
+    verified_at: '2026-06-26'
+    confidence: high
+  - name: text_generation
+    support_level: native
+    score: 0.88
+    description: 高质量角色对话生成，对话节奏自然流畅
+    source: https://www.volcengine.com/docs/82379/1399008
+    verified_at: '2026-06-26'
+    confidence: high
+  - name: reasoning
+    support_level: native
+    score: 0.80
+    description: 新增 thinking 能力，剧情推理与情境理解能力增强
+    source: https://www.volcengine.com/docs/82379/1399008
+    verified_at: '2026-06-26'
+    confidence: high
+  - name: function_calling
+    support_level: native
+    description: 增强格式遵循与 function call / tool use 调用
+    source: https://www.volcengine.com/docs/82379/1399008
+    verified_at: '2026-06-26'
+    confidence: high
+  constraints:
+    max_prompt_length: 131072
+    max_output_length: 32768
+    context_window: 131072
+    supports_thinking_mode: true
+    thinking_levels:
+    - enabled
+    - disabled
+    supports_image_input: true
+    supports_multi_image: true
+    supports_video_input: true
+    supports_context_cache: true
+    rpm_limit: 1000
+    tpm_limit: 10000000
+  quality_metrics:
+    overall_score: 8.8
+    roleplay: 0.95
+    dialogue: 0.95
+    reasoning: 0.80
+    multimodal: 0.85
+    instruction_following: 0.88
+  avg_latency_seconds: 1.5
+  summary: 火山引擎豆包 Seed Character 角色扮演模型，面向新一代虚拟陪伴与泛娱乐场景，角色扮演的剧情推理、对话节奏与情感递进能力显著增强，新增 Human-like 自然聊天、thinking 与 VLM 多模态理解（视频/图片/表情包）能力，可主动激活对话并贴合语境回复。
+  recommended_scenarios:
+  - 虚拟陪伴与角色扮演对话
+  - 故事角色口吻控制与多轮对话润色
+  - 剧情推理与情感递进场景
+  - 结合图片/视频/表情包的多模态角色互动
+  - 需要主动激活对话的陪伴型 Agent
+  limitations:
+  - 上下文窗口相对较小（128K），不适合超长整书上下文处理
+  - 价格按输入长度分档（32/128 token 阈值），长输入场景成本会上升
+  - 多模态仅支持理解输入，不生成图像/视频
+  integration_notes:
+  - 通过火山方舟 OpenAI 兼容接口调用，统一 Model ID 为 doubao-seed-character
+  - 使用火山引擎 API Key（DOUBAO_API_KEY）
+  - base_url: https://ark.cn-beijing.volces.com/api/v3
+  - 角色扮演专用模型，支持 Human-like 自然聊天与主动激活对话
+  - 支持 thinking 模式与 VLM 多模态理解（视频/图片/表情包）
+  - 支持 Function Calling 与格式遵循
+  - 支持透明缓存（context cache），缓存命中按输入 Token 单价的 20% 计费
+  - 价格按输入长度分档：[0,32] 输入0.80元/输出2.00元，(32,128] 输入1.20元/输出6.00元（元/百万tokens）
+  documentation_url: https://www.volcengine.com/docs/82379/1399008
+  source_urls:
+  - https://www.volcengine.com/docs/82379/1399008
+  - https://www.volcengine.com/docs/82379/1544106
+  - https://www.volcengine.com/product/doubao
+  pricing_info:
+    unit: per 1M tokens
+    currency: CNY
+    last_updated: '2026-06'
+    source: 火山引擎官方价格
+    pricing_url: https://www.volcengine.com/docs/82379/1544106
+    input_price_tiers:
+    - range: '[0, 32]'
+      input_price: 0.80
+      output_price: 2.00
+    - range: '(32, 128]'
+      input_price: 1.20
+      output_price: 6.00
+    cached_input_price: 0.16
+    cache_storage_price_per_hour: 0.017
+    note: 价格按输入长度分档；缓存命中统一按 0.16 元/百万 tokens 计费。
+  api_config:
+    base_url: https://ark.cn-beijing.volces.com/api/v3
+    endpoint: /chat/completions
+    auth_type: bearer_token
+    api_key_env: DOUBAO_API_KEY
+    request_format:
+      model: doubao-seed-character-260628
+      messages: array
+      max_tokens: integer
+      temperature: float
+    response_format:
+      choices: array
+      usage: object
+  tags:
+  - llm
+  - chat
+  - volcengine
+  - doubao
+  - seed
+  - character
+  - roleplay
+  - multimodal
+
 routing:
   default_strategy: balanced
   strategies:
@@ -7311,4 +7598,5 @@ routing:
       timeout:
         action: reduce_duration
         fallback_model: fast_variant
+
 

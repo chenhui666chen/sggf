@@ -63,6 +63,26 @@ interface DreamweaverRunOptions {
   schema_version?: string
 }
 
+export interface WorkflowGenerationModel {
+  id: string
+  name: string
+  provider: string
+  default: boolean
+  max_context_tokens: number
+  max_output_tokens: number
+  supports_streaming: boolean
+  quality_score?: number | null
+  cost_multiplier?: number | null
+  cost_label?: string | null
+  relative_cost_basis?: string | null
+  relative_cost_basis_label?: string | null
+}
+
+export interface WorkflowGenerationModelsResponse {
+  models: WorkflowGenerationModel[]
+  default_model: string
+}
+
 interface DreamweaverProjectLockedGenerationConfig {
   locked: boolean
   style_preset: string
@@ -2367,6 +2387,7 @@ class ApiClient {
     projectId: number
     stage: string
     requirement?: string
+    workflowGenerationModel?: string
     enableStreaming?: boolean
     regenerate?: boolean
     targets?: string[]
@@ -2376,12 +2397,20 @@ class ApiClient {
       project_id: payload.projectId,
       stage: payload.stage,
       requirement: payload.requirement,
+      workflow_generation_model: payload.workflowGenerationModel,
       enable_streaming: payload.enableStreaming,
       regenerate: payload.regenerate,
       targets: payload.targets,
       feedback: payload.feedback,
     }, {
       timeout: 5000,
+      validateStatus: () => true,
+    })
+  }
+
+  getWorkflowGenerationModels() {
+    return this.client.get<WorkflowGenerationModelsResponse>('/api/v1/workflow/generation-models', {
+      timeout: 15000,
       validateStatus: () => true,
     })
   }
@@ -2432,8 +2461,11 @@ class ApiClient {
     })
   }
 
-  generateNextWorkflowChapter(projectId: number) {
-    return this.client.post(`/api/v1/workflow/${projectId}/generate-next-chapter`, undefined, {
+  generateNextWorkflowChapter(projectId: number, workflowGenerationModel?: string) {
+    const payload = workflowGenerationModel
+      ? { workflow_generation_model: workflowGenerationModel }
+      : {}
+    return this.client.post(`/api/v1/workflow/${projectId}/generate-next-chapter`, payload, {
       timeout: 15000,
       validateStatus: () => true,
     })

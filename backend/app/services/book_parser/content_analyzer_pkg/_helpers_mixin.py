@@ -273,15 +273,13 @@ class HelpersMixin:
         
         raise Exception(f"LLM调用失败，已重试{max_retries}次: {last_error}")
     
-    async def _call_qwen_long(
+    async def _call_synthesis_llm(
         self,
         prompt: str,
         max_retries: int = 3
     ) -> str:
         """
-        调用阿里云 qwen-long 模型（用于汇总分析）
-        
-        支持超长输入（1000万tokens）
+        调用汇总分析模型。
         """
         messages = [
             {"role": "system", "content": "你是一个专业的小说分析助手，擅长从大量文本中提取结构化信息。请始终以有效的JSON格式输出结果。"},
@@ -292,7 +290,7 @@ class HelpersMixin:
         for attempt in range(max_retries):
             try:
                 logger.info(
-                    "🚀 开始调用 qwen-long | 输入: %s字 | 尝试: %s/%s",
+                    "🚀 开始调用汇总分析模型 | 输入: %s字 | 尝试: %s/%s",
                     len(prompt),
                     attempt + 1,
                     max_retries,
@@ -300,24 +298,24 @@ class HelpersMixin:
                 content = await asyncio.wait_for(
                     self.llm.chat(
                         messages=messages,
-                        model="qwen-long",
+                        model="qwen3.7-plus",
                         temperature=0.3,
                         max_tokens=8000,
-                        timeout=self.QWEN_LONG_REQUEST_TIMEOUT_SECONDS,
+                        timeout=self.LLM_REQUEST_TIMEOUT_SECONDS,
                     ),
-                    timeout=self.QWEN_LONG_REQUEST_TIMEOUT_SECONDS + 5,
+                    timeout=self.LLM_REQUEST_TIMEOUT_SECONDS + 5,
                 )
 
-                logger.info(f"✅ qwen-long调用成功 | 输入: {len(prompt)}字 | 输出: {len(content)}字")
+                logger.info(f"✅ 汇总分析模型调用成功 | 输入: {len(prompt)}字 | 输出: {len(content)}字")
                 return content
                 
             except Exception as e:
                 last_error = e
                 wait_time = 2 ** attempt
-                logger.warning(f"qwen-long调用失败(尝试 {attempt + 1}/{max_retries}): {e}，{wait_time}秒后重试")
+                logger.warning(f"汇总分析模型调用失败(尝试 {attempt + 1}/{max_retries}): {e}，{wait_time}秒后重试")
                 await asyncio.sleep(wait_time)
         
-        raise Exception(f"qwen-long调用失败，已重试{max_retries}次: {last_error}")
+        raise Exception(f"汇总分析模型调用失败，已重试{max_retries}次: {last_error}")
     
     def _parse_json_response(self, response: str) -> Dict[str, Any]:
         """

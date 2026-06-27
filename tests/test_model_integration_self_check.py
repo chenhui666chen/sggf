@@ -62,15 +62,15 @@ class _FakeModel:
 def test_resolve_requested_chains_auto_detects_membership() -> None:
     assert check_model_integration.resolve_requested_chains(
         "all",
-        "qwen3-max",
-        ["qwen3-max"],
+        "qwen3.7-plus",
+        ["qwen3.7-plus"],
         ["wan2.6-t2i"],
     ) == ["llm"]
 
     assert check_model_integration.resolve_requested_chains(
         "all",
         "wan2.6-t2i",
-        ["qwen3-max"],
+        ["qwen3.7-plus"],
         ["wan2.6-t2i"],
     ) == ["media"]
 

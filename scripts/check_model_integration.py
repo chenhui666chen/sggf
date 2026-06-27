@@ -11,7 +11,7 @@
 4. 路由层是否至少能给出本地预览结果
 
 示例：
-    python scripts/check_model_integration.py --chain llm --model-id qwen3-max
+    python scripts/check_model_integration.py --chain llm --model-id qwen3.7-plus
     python scripts/check_model_integration.py --chain media --model-id wan2.6-t2i --strategy quality
     python scripts/check_model_integration.py --chain all
 """

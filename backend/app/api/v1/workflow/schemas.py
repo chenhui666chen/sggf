@@ -31,6 +31,7 @@ class StartWorkflowRequest(BaseModel):
     requirement: str
     # 🆕 可选的目标章节数配置，用于长篇规划（默认100章）
     target_chapter_count: Optional[int] = 100
+    workflow_generation_model: Optional[str] = None
     # 🆕 是否清空现有内容（重新开始时使用）
     clear_existing: bool = False
 
@@ -38,6 +39,7 @@ class ExecuteStageRequest(BaseModel):
     project_id: int
     stage: str
     requirement: Optional[str] = None
+    workflow_generation_model: Optional[str] = None
     # 🆕 是否启用流式输出（默认启用）
     enable_streaming: bool = True
     # 🆕 概念阶段评审/重生支持的可选参数
@@ -52,6 +54,9 @@ class RegenerateStageRequest(BaseModel):
 class SaveStageContentRequest(BaseModel):
     content: str
     continue_workflow: bool = False
+
+class GenerateNextChapterRequest(BaseModel):
+    workflow_generation_model: Optional[str] = None
 
 class ExpandStoryRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")

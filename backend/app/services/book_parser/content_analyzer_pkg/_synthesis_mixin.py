@@ -196,9 +196,9 @@ class SynthesisMixin:
 7. 优先输出 limitation / growth_direction / mainline_role / mainline_clues 这些新语义键
 8. 统一输出 role_position，禁止输出旧字段 role"""
 
-        # 🆕 使用qwen-long进行汇总分析
+        # 使用汇总分析模型
         try:
-            result = await self._call_qwen_long(prompt)
+            result = await self._call_synthesis_llm(prompt)
             parsed = self._parse_json_response(result)
             if parsed.get("parse_error"):
                 raise ValueError("人物汇总 JSON 解析失败")
@@ -274,7 +274,7 @@ class SynthesisMixin:
             content=parsed,
             confidence=0.90,  # 基于全书统计，可信度更高
             chapter_range=(1, len(chapters)),
-            model_used="qwen-long",  # 🆕 更新模型标识
+            model_used="qwen3.7-plus",
         )
     
     async def _synthesize_worldview(
@@ -334,8 +334,8 @@ class SynthesisMixin:
 1. 出现次数最多的场景通常是核心地点
 2. 从开篇提取世界观基础设定"""
 
-        # 🆕 使用qwen-long进行汇总分析
-        result = await self._call_qwen_long(prompt)
+        # 使用汇总分析模型
+        result = await self._call_synthesis_llm(prompt)
         parsed = self._parse_json_response(result)
         
         # 补充统计信息
@@ -346,7 +346,7 @@ class SynthesisMixin:
             content=parsed,
             confidence=0.85,
             chapter_range=(1, len(chapters)),
-            model_used="qwen-long",  # 🆕 更新模型标识
+            model_used="qwen3.7-plus",
         )
     
     async def _synthesize_plot(
@@ -430,8 +430,8 @@ class SynthesisMixin:
 3. 根据情感基调变化识别剧情节奏
 4. 转折点通常伴随冲突升级"""
 
-        # 🆕 使用qwen-long进行汇总分析
-        result = await self._call_qwen_long(prompt)
+        # 使用汇总分析模型
+        result = await self._call_synthesis_llm(prompt)
         parsed = self._parse_json_response(result)
         
         # 补充统计信息
@@ -443,7 +443,7 @@ class SynthesisMixin:
             content=parsed,
             confidence=0.88,
             chapter_range=(1, len(chapters)),
-            model_used="qwen-long",  # 🆕 更新模型标识
+            model_used="qwen3.7-plus",
         )
     
     async def _synthesize_style(
@@ -486,8 +486,8 @@ class SynthesisMixin:
     "genre_conventions": "是否遵循类型惯例"
 }}"""
 
-        # 🆕 使用qwen-long进行汇总分析
-        result = await self._call_qwen_long(prompt)
+        # 使用汇总分析模型
+        result = await self._call_synthesis_llm(prompt)
         parsed = self._parse_json_response(result)
         
         # 补充统计信息
@@ -498,7 +498,7 @@ class SynthesisMixin:
             content=parsed,
             confidence=0.82,
             chapter_range=(1, len(chapters)),
-            model_used="qwen-long",  # 🆕 更新模型标识
+            model_used="qwen3.7-plus",
         )
 
     async def _synthesize_concepts(
@@ -554,7 +554,7 @@ class SynthesisMixin:
 2. 优先提取反复出现或推动剧情的概念
 3. 若无法确认定义，请基于摘要做保守描述，不要过度脑补"""
 
-        result = await self._call_qwen_long(prompt)
+        result = await self._call_synthesis_llm(prompt)
         parsed = self._parse_json_response(result)
 
         if "terms" not in parsed:
@@ -569,7 +569,7 @@ class SynthesisMixin:
             content=parsed,
             confidence=0.78,
             chapter_range=(1, len(chapters)),
-            model_used="qwen-long",
+            model_used="qwen3.7-plus",
         )
 
     # ==================== 人物分析 ====================

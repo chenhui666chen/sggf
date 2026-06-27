@@ -505,5 +505,7 @@ def test_normalize_model_id_returns_current_multimodal_ids() -> None:
     assert normalize_model_id("wan2.7-i2v") == "wan2.7-i2v"
     assert normalize_model_id("qwen_multiperson_fusion") == "qwen-image-edit-plus"
     assert normalize_model_id("wan_image_edit") == "qwen-image-edit-plus"
+    assert normalize_model_id("MiniMax/MiniMax-M3") == "MiniMax/MiniMax-M3"
+    assert normalize_model_id("minimax-m3") == "MiniMax/MiniMax-M3"
     assert has_runtime_wrapper("wan2.6-t2i") is True
     assert has_runtime_wrapper("wan2.7-t2v") is True

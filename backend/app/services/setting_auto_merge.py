@@ -330,7 +330,7 @@ class SettingAutoMergeService:
     ) -> Dict[str, Any]:
         """使用LLM对候选集合中规则匹配失败的项进行再分类。
 
-        只处理规则匹配无法归类的候选项，使用 qwen-turbo 低成本模型。
+        只处理规则匹配无法归类的候选项，使用 deepseek-v4-flash 模型。
         """
         from app.services.setting_categories import TYPE_TO_CATEGORY_MAP, SYSTEM_CATEGORIES
 
@@ -408,7 +408,7 @@ class SettingAutoMergeService:
         try:
             import os
             from core.langchain_bridge import create_model_llm
-            model = os.getenv("RECLASSIFY_MODEL", "qwen-turbo")
+            model = os.getenv("RECLASSIFY_MODEL", "deepseek-v4-flash")
             llm = create_model_llm(model=model, temperature=0.1)
             response = await llm.ainvoke(prompt)
             content = response.content if hasattr(response, "content") else str(response)
@@ -538,5 +538,5 @@ class SettingAutoMergeService:
             "reclassified": reclassified,
             "skipped": skipped,
             "details": details,
-            "model": model if 'model' in dir() else "qwen-turbo",
+            "model": model if 'model' in dir() else "deepseek-v4-flash",
         }

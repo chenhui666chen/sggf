@@ -34,11 +34,25 @@ from app.api.v1.workflow.helpers import *
 from app.api.v1.workflow.story_helpers import *
 from app.api.v1.workflow.story_resolve import *
 from app.api.v1.workflow.requirement import _save_workflow_requirement
+from app.api.v1.workflow.model_selection import (
+    DEFAULT_WORKFLOW_GENERATION_MODEL,
+    list_workflow_generation_models,
+    resolve_workflow_generation_model,
+)
 from app.api.v1.workflow.execute_background import (
     _run_execute_stage_background_serialized,
     _run_execute_stage_with_streaming_serialized,
     execute_stage_background,
 )
+
+@router.get("/generation-models")
+async def get_workflow_generation_models(
+    current_user = Depends(get_current_user),
+):
+    return {
+        "models": list_workflow_generation_models(),
+        "default_model": DEFAULT_WORKFLOW_GENERATION_MODEL,
+    }
 
 @router.post("/start")
 async def start_workflow(
@@ -76,6 +90,15 @@ async def start_workflow(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Missing project_id or requirement",
             )
+        try:
+            workflow_generation_model = resolve_workflow_generation_model(
+                request.workflow_generation_model
+            )
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=str(exc),
+            ) from exc
 
         # 初始化Agent
         logger.info("   正在初始化Agent...")
@@ -194,6 +217,7 @@ async def start_workflow(
             "requirement": requirement,
             "status": "running",
             "target_chapter_count": target_chapter_count,
+            "workflow_generation_model": workflow_generation_model,
         })
 
         # 返回初始化的阶段信息
@@ -235,8 +259,14 @@ async def start_workflow(
             },
         }
 
-        return {"status": "success", "stages": stages}
+        return {
+            "status": "success",
+            "stages": stages,
+            "workflow_generation_model": workflow_generation_model,
+        }
 
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -272,6 +302,15 @@ async def execute_stage(
 
         # 执行阶段
         stage_enum = StageType(stage)
+        try:
+            workflow_generation_model = resolve_workflow_generation_model(
+                request.workflow_generation_model
+            )
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=str(exc),
+            ) from exc
         
         # 🔔 推送阶段开始状态
         await ws_manager.send_stage_update(
@@ -283,7 +322,11 @@ async def execute_stage(
         
         stage_output = await coordinator.execute_stage(
             stage_enum,
-            {"project_id": project_id, "user_id": current_user.id},
+            {
+                "project_id": project_id,
+                "user_id": current_user.id,
+                "workflow_generation_model": workflow_generation_model,
+            },
         )
         
         # 🔔 推送阶段完成状态
@@ -306,6 +349,8 @@ async def execute_stage(
             ],
         }
 
+    except HTTPException:
+        raise
     except ValueError:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -370,6 +415,15 @@ async def execute_stage_async(
 
         # 验证stage值
         stage_enum = StageType(stage)
+        try:
+            workflow_generation_model = resolve_workflow_generation_model(
+                request.workflow_generation_model
+            )
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=str(exc),
+            ) from exc
 
         if requirement:
             storage_mode = _save_workflow_requirement(
@@ -419,6 +473,7 @@ async def execute_stage_async(
                     stage_enum,
                     current_user.id,
                     db,
+                    workflow_generation_model,
                 )
             )
             logger.info(f"   🌊 流式后台任务已启动")
@@ -434,6 +489,7 @@ async def execute_stage_async(
                     getattr(request, "regenerate", False),
                     getattr(request, "targets", None),
                     getattr(request, "feedback", None),
+                    workflow_generation_model,
                 )
             )
             logger.info(f"   🚀 后台任务已启动")
@@ -444,6 +500,8 @@ async def execute_stage_async(
             "streaming_enabled": streaming_enabled  # 🆕 返回是否启用了流式输出
         }
 
+    except HTTPException:
+        raise
     except ValueError:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

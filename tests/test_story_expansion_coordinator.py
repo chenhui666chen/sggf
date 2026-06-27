@@ -1347,11 +1347,11 @@ class _AnalysisCoordinator(StoryExpansionCoordinator):
         self.project_id = None
         self.genre = ""
         self.planned_chapters_max = planned_chapters_max
-        self.planner_llm = type("LLM", (), {"model_name": "qwen-long"})()
-        self.writer_llm = type("LLM", (), {"model_name": "qwen-long"})()
+        self.planner_llm = type("LLM", (), {"model_name": "qwen3.7-plus"})()
+        self.writer_llm = type("LLM", (), {"model_name": "qwen3.7-plus"})()
 
 
-def test_story_expansion_runtime_selection_prefers_qwen35_for_low_risk_case():
+def test_story_expansion_runtime_selection_prefers_qwen37_for_low_risk_case():
     coordinator = _AnalysisCoordinator()
 
     selection = coordinator._select_story_expansion_runtime_models(
@@ -1377,15 +1377,15 @@ def test_story_expansion_runtime_selection_prefers_qwen35_for_low_risk_case():
         expansion_mode="total",
     )
 
-    assert selection["planner_model"] == "qwen3.5-plus"
-    assert selection["writer_model"] == "qwen3.5-plus"
+    assert selection["planner_model"] == "qwen3.7-plus"
+    assert selection["writer_model"] == "qwen3.7-plus"
     assert "综合成本最低" in selection["planner"]["selection_basis"]
     assert "质量与输出门槛过滤" in selection["selection_reason"]
     assert selection["planner"]["timeout_seconds"] >= 180
     assert selection["writer"]["timeout_seconds"] >= 180
 
 
-def test_story_expansion_runtime_selection_upgrades_to_qwen36_for_medium_risk_case():
+def test_story_expansion_runtime_selection_keeps_qwen37_for_medium_risk_case():
     coordinator = _AnalysisCoordinator()
 
     selection = coordinator._select_story_expansion_runtime_models(
@@ -1412,8 +1412,8 @@ def test_story_expansion_runtime_selection_upgrades_to_qwen36_for_medium_risk_ca
         expansion_mode="total",
     )
 
-    assert selection["planner_model"] == "qwen3.6-plus"
-    assert selection["writer_model"] == "qwen3.6-plus"
+    assert selection["planner_model"] == "qwen3.7-plus"
+    assert selection["writer_model"] == "qwen3.7-plus"
     assert selection["planner"]["quality_floor"] == 9.0
     assert selection["writer"]["quality_floor"] == 9.0
 
@@ -1683,8 +1683,8 @@ def test_analyze_expansion_request_includes_runtime_model_selection_reason():
         expansion_mode="total",
     )
 
-    assert analysis["model_plan"]["coordinator_planner_model"] == "qwen3.5-plus"
-    assert analysis["model_plan"]["coordinator_writer_model"] == "qwen3.5-plus"
+    assert analysis["model_plan"]["coordinator_planner_model"] == "qwen3.7-plus"
+    assert analysis["model_plan"]["coordinator_writer_model"] == "qwen3.7-plus"
     assert analysis["model_plan"]["coordinator_planner_max_tokens"] == coordinator.planner_llm.max_tokens
     assert analysis["model_plan"]["coordinator_writer_max_tokens"] == coordinator.writer_llm.max_tokens
     assert analysis["model_plan"]["coordinator_planner_timeout_seconds"] == coordinator.planner_llm.runtime_options["timeout"]
@@ -1712,7 +1712,7 @@ def test_analyze_expansion_request_reports_epic_mode_and_model_plan():
     )
 
     assert analysis["execution_mode"] == "epic"
-    assert analysis["model_plan"]["outline_expansion_model"] == "qwen3.5-plus"
+    assert analysis["model_plan"]["outline_expansion_model"] == "mimo-v2.5"
     assert analysis["estimated_rounds"] >= 1
     assert any("目标章节规模较大" in note for note in analysis["model_plan"]["notes"])
 
@@ -1801,7 +1801,7 @@ def test_analyze_expansion_request_honors_explicit_epic_framework_mode():
     assert analysis["effective_expansion_mode"] == "epic_framework"
     assert analysis["epic_config"]["total_volumes"] == 12
     assert analysis["epic_config"]["chapter_range"] == [900, 1200]
-    assert analysis["model_plan"]["outline_expansion_model"] == "qwen3.5-plus"
+    assert analysis["model_plan"]["outline_expansion_model"] == "mimo-v2.5"
 
 
 def test_analyze_expansion_request_uses_phased_character_plan_for_epic_framework_auto_supplement():
@@ -1985,7 +1985,7 @@ def test_analyze_expansion_request_adds_notes_for_sparse_outline_and_large_chara
         enable_auto_supplement=True,
     )
 
-    assert analysis["model_plan"]["character_expansion_model"] == "qwen3.5-plus"
+    assert analysis["model_plan"]["character_expansion_model"] == "qwen3.7-plus"
     assert any("缺少结构化大纲" in note for note in analysis["model_plan"]["notes"])
     assert any("目标人物规模较大" in note for note in analysis["model_plan"]["notes"])
 

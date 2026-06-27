@@ -3,196 +3,6 @@
 # 定义项目当前接入的文本大模型能力、约束、路由与档案信息。
 
 llm_models:
-  - id: qwen3-max
-    name: Qwen3 Max
-    provider: alibaba
-    model_type: llm
-    version: v1
-    status: active
-
-    capabilities:
-      - name: creative
-        level: native
-        score: 0.9
-        description: 擅长创意写作、故事扩展和角色扮演类内容生成
-      - name: dialogue
-        level: native
-        score: 0.85
-        description: 多轮对话与角色口吻控制能力较强
-      - name: reasoning
-        level: native
-        score: 0.8
-        description: 具备通用复杂任务处理能力，但不是纯推理优先模型
-      - name: writing
-        level: native
-        score: 0.9
-        description: 适合作为中文长文写作主力模型
-      - name: chinese
-        level: native
-        score: 0.95
-        description: 中文理解与表达能力优秀
-
-    constraints:
-      max_context_tokens: 32000
-      max_output_tokens: 8192
-      supports_streaming: true
-      supports_function_call: true
-      supports_vision: false
-      supports_json_mode: true
-      supports_timeout_param: true
-      supports_max_retries: true
-      supports_temperature: true
-      supports_system_prompt: true
-      supports_multi_turn: true
-
-    api_config:
-      api_key_env: DASHSCOPE_API_KEY
-      base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
-      default_timeout: 120
-      default_max_retries: 3
-
-    performance:
-      quality_score: 8.5
-      avg_latency_seconds: 2.5
-      p95_latency_seconds: 5.0
-      tokens_per_second: 80
-      cost_per_1k_input_tokens: 0.004
-      cost_per_1k_output_tokens: 0.012
-      currency: CNY
-
-    routing:
-      task_types:
-        - chapter
-        - dialogue
-        - creative
-        - writing
-        - audiobook_director
-        - audiobook_voice
-        - audiobook_sound
-        - audiobook_music
-        - audiobook_review
-      priority: 1
-      fallback_models:
-        - deepseek-v4-flash
-      weight: 1.0
-      enabled: true
-
-    default_params:
-      temperature: 0.7
-      max_tokens: 4096
-
-    summary: 项目中的中文创作主力模型。官方资料显示 Qwen Max 系列适合高质量内容生成、角色扮演、复杂指令理解和结构化输出；本项目内部使用 qwen3-max 作为创意与正文写作入口。
-    recommended_scenarios:
-      - 故事概念生成与题材差异化发散
-      - 章节正文起草与重写
-      - 对话润色、语气统一和风格保持
-      - 需要 JSON 输出的创作辅助流程
-    limitations:
-      - 并非项目内最强推理模型，严谨审校任务仍优先 deepseek-v4-pro
-      - 成本高于 qwen-turbo，低价值提取任务不建议优先使用
-      - 超长整书上下文处理能力不如 qwen-long
-    integration_notes:
-      - 内部 task_type=chapter、concept、dialogue 默认优先路由到该模型
-      - 当前通过 DashScope OpenAI 兼容接口接入
-      - 该模型档案参考阿里云通义千问 Max 系列官方文档整理，内部 id 为项目统一别名
-    best_practice_tips:
-      - 适合创意写作、章节生成与角色扮演
-      - 中文内容质量稳定，适合作为默认正文模型
-      - 支持流式输出与 JSON 模式，适合工作流编排
-    documentation_url: https://help.aliyun.com/zh/model-studio/models
-    source_urls:
-      - https://help.aliyun.com/zh/model-studio/models
-      - https://help.aliyun.com/zh/model-studio/text-generation
-
-    tags:
-      - creative
-      - dialogue
-      - chinese
-      - alibaba
-
-  - id: qwen-long
-    name: Qwen Long
-    provider: alibaba
-    model_type: llm
-    version: v1
-    status: active
-
-    capabilities:
-      - name: long_context
-        level: native
-        score: 0.98
-        description: 支持超长上下文输入，适合整书级分析
-      - name: summarization
-        level: native
-        score: 0.85
-        description: 长文摘要与信息整合能力强
-      - name: analysis
-        level: native
-        score: 0.8
-        description: 适合整章、整卷、整书级别分析与扩写
-
-    constraints:
-      max_context_tokens: 10000000
-      max_output_tokens: 8192
-      supports_streaming: true
-      supports_timeout_param: true
-      supports_max_retries: true
-
-    api_config:
-      api_key_env: DASHSCOPE_API_KEY
-      base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
-      default_timeout: 180
-
-    performance:
-      quality_score: 8.0
-      avg_latency_seconds: 5.0
-      p95_latency_seconds: 15.0
-      cost_per_1k_input_tokens: 0.0005
-      cost_per_1k_output_tokens: 0.002
-      currency: CNY
-
-    routing:
-      task_types:
-        - book_synthesis
-        - long_context
-        - summarize_long
-        - super_long_input
-      priority: 2
-      fallback_models:
-        - qwen3.7-plus
-      enabled: true
-
-    summary: 项目中的超长上下文模型。阿里云官方资料明确将 Qwen-Long 定位为百万级到千万级上下文处理模型，适合长篇资料理解、长书摘要和整书分析。注意：输出限制仅8K，不适合需要大量输出的场景。
-    recommended_scenarios:
-      - 整书级别分析（输入超过100万tokens）
-      - 全书剧情汇总与问题定位
-      - 大量检索结果拼接后的再加工
-      - 长文本解析、实体归纳和阶段性总结
-    limitations:
-      - 输出限制仅8K tokens，不适合大纲扩展等需要大量输出的场景
-      - 延迟高于 qwen3-max 和 qwen-turbo
-      - 不适合作为高频低延迟的日常对话模型
-      - 长上下文场景下仍需注意提示结构，否则输出易发散
-    integration_notes:
-      - 内部 task_type=book_synthesis、long_context 默认路由到该模型
-      - 适合与分层摘要、RAG 结果聚合一起使用
-      - 大纲扩展场景优先使用 qwen3.7-plus（输出能力更强）
-      - 项目当前将其视为"整书上下文入口"，不是默认正文生成模型
-    best_practice_tips:
-      - 适合处理超长文本与整书分析
-      - 整书汇总优先使用
-      - 大纲扩展场景建议使用 qwen3.7-plus（输出能力65K vs 8K）
-      - 建议将输入按层级组织，避免无结构堆叠
-    documentation_url: https://help.aliyun.com/zh/model-studio/long-context-qwen-long
-    source_urls:
-      - https://help.aliyun.com/zh/model-studio/long-context-qwen-long
-      - https://help.aliyun.com/zh/model-studio/models
-
-    tags:
-      - long_context
-      - chinese
-      - alibaba
-
   - id: qwen3.7-plus
     name: Qwen3.7 Plus
     provider: alibaba
@@ -260,8 +70,8 @@ llm_models:
       avg_latency_seconds: 1.6
       p95_latency_seconds: 3.0
       tokens_per_second: 120
-      cost_per_1k_input_tokens: 0.0004
-      cost_per_1k_output_tokens: 0.0016
+      cost_per_1k_input_tokens: 0.002
+      cost_per_1k_output_tokens: 0.008
       currency: CNY
 
     routing:
@@ -382,8 +192,8 @@ llm_models:
       avg_latency_seconds: 2.0
       p95_latency_seconds: 4.0
       tokens_per_second: 80
-      cost_per_1k_input_tokens: 0.002
-      cost_per_1k_output_tokens: 0.010
+      cost_per_1k_input_tokens: 0.0065
+      cost_per_1k_output_tokens: 0.027
       currency: CNY
 
     routing:
@@ -494,8 +304,8 @@ llm_models:
       avg_latency_seconds: 2.5
       p95_latency_seconds: 5.0
       tokens_per_second: 70
-      cost_per_1k_input_tokens: 0.002
-      cost_per_1k_output_tokens: 0.012
+      cost_per_1k_input_tokens: 0.008
+      cost_per_1k_output_tokens: 0.028
       currency: CNY
 
     routing:
@@ -617,8 +427,8 @@ llm_models:
       avg_latency_seconds: 2.2
       p95_latency_seconds: 4.5
       tokens_per_second: 80
-      cost_per_1k_input_tokens: 0.002
-      cost_per_1k_output_tokens: 0.012
+      cost_per_1k_input_tokens: 0.0042
+      cost_per_1k_output_tokens: 0.0168
       currency: CNY
       context_cache_discount: 0.20
 
@@ -749,7 +559,7 @@ llm_models:
       supports_image_detail_param: true
 
     api_config:
-      api_key_env: STEPFUN_API_KEY
+      api_key_env: STEP_API_KEY
       base_url: https://api.stepfun.com/v1
       default_timeout: 300
       default_max_retries: 3
@@ -759,7 +569,7 @@ llm_models:
       avg_latency_seconds: 1.2
       p95_latency_seconds: 3.0
       tokens_per_second: 400
-      cost_per_1k_input_tokens: 0.0014
+      cost_per_1k_input_tokens: 0.00135
       cost_per_1k_output_tokens: 0.0081
       currency: USD
       context_cache_discount: 0.20
@@ -799,7 +609,7 @@ llm_models:
       - 视频输入能力非主打
     integration_notes:
       - 通过 StepFun 官方 OpenAI 兼容接口调用，模型名为 step-3.7-flash
-      - 使用 StepFun API Key（STEPFUN_API_KEY），非阿里云百炼
+      - 使用 StepFun API Key（STEP_API_KEY），非阿里云百炼
       - 中国大陆 base_url: https://api.stepfun.com/v1
       - 海外 base_url: https://api.stepfun.ai/v1（需与API Key签发平台匹配）
       - 思考过程通过 delta.reasoning 字段返回（流式）或 message.reasoning 字段返回（非流式）
@@ -1108,84 +918,257 @@ llm_models:
       - chinese
       - xiaomi
 
-  - id: qwen-turbo
-    name: Qwen Turbo
-    provider: alibaba
+  - id: doubao-seed-evolving
+    name: Doubao Seed Evolving
+    provider: volcengine
     model_type: llm
-    version: v1
+    version: evolving
     status: active
 
     capabilities:
-      - name: fast
+      - name: reasoning
         level: native
-        score: 0.95
-        description: 响应速度快，吞吐高
-      - name: simple
+        score: 0.93
+        description: 深度思考模型，面向 Coding 与 Agent 时代打造的 Seed 系列旗舰，需求理解、长期规划与持续修复能力全面升级
+      - name: agent
         level: native
-        score: 0.8
-        description: 适合简单直接的结构化处理任务
-      - name: extraction
+        score: 0.94
+        description: 面向 Agent 场景设计，具备复杂任务编排、长程规划与工具调用核心能力，可胜任高复杂度长链路任务探索
+      - name: coding
+        level: native
+        score: 0.93
+        description: 面向 Coding 场景持续优化，覆盖真实工程开发完整流程，支持仓库级理解、端到端项目交付与自测闭环
+      - name: long_context
+        level: native
+        score: 0.88
+        description: 支持256K长上下文窗口，可一次性解析大型代码库或多步骤搜索循环
+      - name: writing
         level: native
         score: 0.85
-        description: 适合实体提取、摘要和轻量改写
+        description: 通用文本生成与结构化输出能力均衡
+      - name: chinese
+        level: native
+        score: 0.95
+        description: 中文理解与表达能力优秀，国产模型
 
     constraints:
-      max_context_tokens: 8192
-      max_output_tokens: 4096
+      max_context_tokens: 262144
+      max_output_tokens: 16384
       supports_streaming: true
+      supports_function_call: true
+      supports_json_mode: true
+      supports_timeout_param: true
+      supports_max_retries: true
+      supports_temperature: true
+      supports_system_prompt: true
+      supports_multi_turn: true
+      supports_thinking_mode: true
+      supports_context_cache: true
 
     api_config:
-      api_key_env: DASHSCOPE_API_KEY
-      base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
-      default_timeout: 60
+      api_key_env: DOUBAO_API_KEY
+      base_url: https://ark.cn-beijing.volces.com/api/v3
+      default_timeout: 300
+      default_max_retries: 3
 
     performance:
-      quality_score: 7.0
-      avg_latency_seconds: 1.0
-      p95_latency_seconds: 2.0
-      cost_per_1k_input_tokens: 0.0008
-      cost_per_1k_output_tokens: 0.002
+      quality_score: 9.3
+      avg_latency_seconds: 2.5
+      p95_latency_seconds: 6.0
+      tokens_per_second: 100
+      cost_per_1k_input_tokens: 0.006
+      cost_per_1k_output_tokens: 0.03
       currency: CNY
+      context_cache_discount: 0.20
 
     routing:
       task_types:
-        - entity_extract
-        - summarize
-        - simple
-        - fast
+        - concept
+        - outline_expand
+        - chapter_batch
+        - long_writing
+        - coding
+        - agent
+        - reasoning
       priority: 2
       fallback_models:
         - qwen3.7-plus
+      weight: 1.0
       enabled: true
 
-    summary: 项目中的轻量快速模型。官方资料将 Qwen Turbo 系列定位为高吞吐、低成本、适合日常问答和轻量结构化处理的模型；项目里主要用于提取与摘要。
+    default_params:
+      temperature: 0.7
+      max_tokens: 16384
+      thinking:
+        type: enabled
+
+    summary: 火山引擎豆包 Seed Evolving 深度思考模型，面向 Agent 与 Coding 场景设计的 Seed 系列旗舰，具备复杂任务编排、长程规划、代码生成与工具调用核心能力，采用动态迭代机制（每周至少一个版本更新），通过统一 Model ID 始终获取最新版本。
     recommended_scenarios:
-      - 实体提取
-      - 轻量摘要
-      - 快速格式化与简单改写
-      - 批量低成本预处理任务
+      - 复杂 Coding 工程交付与端到端项目开发
+      - 长链路 Agent 任务编排与执行
+      - 多步骤工程交付与自测闭环
+      - 高复杂度任务探索与高价值生产场景
+      - 需要持续获取最新模型能力的生产环境
     limitations:
-      - 复杂创作质量不如 qwen3-max
-      - 严谨推理与多步分析不如 deepseek-v4-pro
-      - 在长上下文整书任务中不应替代 qwen-long
+      - 动态迭代版本，能力可能随版本波动，不建议对一致性要求极高的批处理任务直接使用
+      - 输出价格相对较高（30元/百万tokens），大规模调用需评估成本
+      - 上下文窗口256K，低于部分百万级长上下文模型
     integration_notes:
-      - 内部 task_type=entity_extract、summarize 默认优先路由到该模型
-      - 当前项目保持其“快而便宜”的定位，不将其作为高质量正文模型
-      - 若后续升级到新一代 Turbo 家族，可再单独评估上下文窗口与价格策略
+      - 通过火山方舟 OpenAI 兼容接口调用，统一 Model ID 为 doubao-seed-evolving，始终获取最新版本
+      - 使用火山引擎 API Key（DOUBAO_API_KEY），非阿里云百炼
+      - base_url: https://ark.cn-beijing.volces.com/api/v3
+      - 深度思考模型，思考过程通过 reasoning_content 字段返回
+      - 支持 Function Calling 与结构化 JSON 输出
+      - 支持透明缓存（context cache），缓存命中按输入 Token 单价的 20% 计费
+      - 模型采用动态迭代机制，每周至少发布一个版本更新
     best_practice_tips:
-      - 适合简单快速任务
-      - 实体提取与摘要优先使用
-      - 作为高质量模型的前置清洗层很合适
-    documentation_url: https://help.aliyun.com/zh/model-studio/models
+      - 利用统一 Model ID 始终获取最新模型能力，无需手动切换版本
+      - 启用透明缓存降低重复前缀的推理成本
+      - 复杂工程任务依赖其长程规划与持续修复能力
+      - 对一致性要求极高的批处理任务建议使用固定版本号（如 doubao-seed-2-1-pro-260628）
+    documentation_url: https://www.volcengine.com/docs/82379/1399008
     source_urls:
-      - https://help.aliyun.com/zh/model-studio/models
-      - https://help.aliyun.com/zh/model-studio/text-generation
+      - https://www.volcengine.com/docs/82379/1399008
+      - https://www.volcengine.com/docs/82379/1544106
+      - https://www.volcengine.com/product/doubao
 
     tags:
-      - fast
-      - cheap
+      - reasoning
+      - agent
+      - coding
+      - long_context
+      - writing
       - chinese
-      - alibaba
+      - volcengine
+      - doubao
+      - evolving
+
+  - id: doubao-seed-character
+    name: Doubao Seed Character
+    provider: volcengine
+    model_type: llm
+    version: '260628'
+    status: active
+
+    capabilities:
+      - name: roleplay
+        level: native
+        score: 0.95
+        description: 面向泛娱乐场景全面升级的角色扮演模型，剧情推理、对话节奏与情感递进能力显著增强
+      - name: dialogue
+        level: native
+        score: 0.95
+        description: Human-like 自然聊天能力，可主动激活对话并贴合语境回复，对话节奏自然流畅
+      - name: multimodal
+        level: native
+        score: 0.85
+        description: 新增 VLM 多模态理解，支持视频/图片/表情包输入，丰富角色扮演的表达维度
+      - name: reasoning
+        level: native
+        score: 0.80
+        description: 新增 thinking 能力，剧情推理与情境理解能力增强
+      - name: instruction_following
+        level: native
+        score: 0.88
+        description: 增强格式遵循与 function call / tool use 调用，覆盖更多泛娱乐场景
+      - name: chinese
+        level: native
+        score: 0.95
+        description: 中文理解与表达能力优秀，国产模型
+
+    constraints:
+      max_context_tokens: 131072
+      max_output_tokens: 32768
+      supports_streaming: true
+      supports_function_call: true
+      supports_json_mode: true
+      supports_timeout_param: true
+      supports_max_retries: true
+      supports_temperature: true
+      supports_system_prompt: true
+      supports_multi_turn: true
+      supports_thinking_mode: true
+      supports_vision: true
+      supports_context_cache: true
+
+    api_config:
+      api_key_env: DOUBAO_API_KEY
+      base_url: https://ark.cn-beijing.volces.com/api/v3
+      default_timeout: 300
+      default_max_retries: 3
+
+    performance:
+      quality_score: 8.8
+      avg_latency_seconds: 1.5
+      p95_latency_seconds: 3.5
+      tokens_per_second: 120
+      cost_per_1k_input_tokens: 0.0012
+      cost_per_1k_output_tokens: 0.006
+      currency: CNY
+      context_cache_discount: 0.20
+
+    routing:
+      task_types:
+        - dialogue
+        - character
+        - character_expand
+        - chapter
+        - creative
+        - roleplay
+      priority: 2
+      fallback_models:
+        - qwen3.7-plus
+      weight: 1.0
+      enabled: true
+
+    default_params:
+      request_model: doubao-seed-character-260628
+      temperature: 0.85
+      max_tokens: 8192
+      thinking:
+        type: disabled
+
+    summary: 火山引擎豆包 Seed Character 角色扮演模型，面向新一代虚拟陪伴与泛娱乐场景，角色扮演的剧情推理、对话节奏与情感递进能力显著增强，新增 Human-like 自然聊天、thinking 与 VLM 多模态理解（视频/图片/表情包）能力，可主动激活对话并贴合语境回复。
+    recommended_scenarios:
+      - 虚拟陪伴与角色扮演对话
+      - 故事角色口吻控制与多轮对话润色
+      - 剧情推理与情感递进场景
+      - 结合图片/视频/表情包的多模态角色互动
+      - 需要主动激活对话的陪伴型 Agent
+    limitations:
+      - 上下文窗口相对较小（128K），不适合超长整书上下文处理
+      - 价格按输入长度分档（32/128 token 阈值），长输入场景成本会上升
+      - 多模态仅支持理解输入，不生成图像/视频
+    integration_notes:
+      - 通过火山方舟 OpenAI 兼容接口调用，统一 Model ID 为 doubao-seed-character，始终获取最新版本
+      - 使用火山引擎 API Key（DOUBAO_API_KEY），非阿里云百炼
+      - base_url: https://ark.cn-beijing.volces.com/api/v3
+      - 角色扮演专用模型，支持 Human-like 自然聊天与主动激活对话
+      - 支持 thinking 模式与 VLM 多模态理解（视频/图片/表情包）
+      - 支持 Function Calling 与格式遵循
+      - 支持透明缓存（context cache），缓存命中按输入 Token 单价的 20% 计费
+      - 价格按输入长度分档：[0,32] 输入0.80元/输出2.00元，(32,128] 输入1.20元/输出6.00元（元/百万tokens）
+    best_practice_tips:
+      - 角色扮演场景适当提高 temperature（0.85+）增强对话自然度
+      - 利用 thinking 模式增强剧情推理与情境理解
+      - 结合多模态输入（表情包/图片）丰富角色互动表达
+      - 启用透明缓存降低重复角色设定的推理成本
+    documentation_url: https://www.volcengine.com/docs/82379/1399008
+    source_urls:
+      - https://www.volcengine.com/docs/82379/1399008
+      - https://www.volcengine.com/docs/82379/1544106
+      - https://www.volcengine.com/product/doubao
+
+    tags:
+      - roleplay
+      - dialogue
+      - multimodal
+      - reasoning
+      - instruction_following
+      - chinese
+      - volcengine
+      - doubao
+      - character
 
   - id: deepseek-v4-pro
     name: DeepSeek V4 Pro
@@ -1237,8 +1220,8 @@ llm_models:
       avg_latency_seconds: 15.0
       p95_latency_seconds: 45.0
       tokens_per_second: 30
-      cost_per_1k_input_tokens: 0.012
-      cost_per_1k_output_tokens: 0.024
+      cost_per_1k_input_tokens: 0.003
+      cost_per_1k_output_tokens: 0.006
       currency: CNY
 
     routing:
@@ -1272,7 +1255,7 @@ llm_models:
       - 情节结构检查与质量评审
       - 有声剧本改编中的逻辑约束处理
     limitations:
-      - 响应慢于 deepseek-v4-flash、qwen3-max 和 qwen-turbo
+      - 响应慢于 deepseek-v4-flash 和 qwen3.7-plus
       - 当前项目接入层不向它开放 temperature、timeout 和 max_retries 参数
       - 不适合作为高频流式交互模型
     integration_notes:

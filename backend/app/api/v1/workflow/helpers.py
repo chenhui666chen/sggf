@@ -64,8 +64,8 @@ def _get_safe_input_token_budget(
 def _select_text_model_by_input_tokens(
     total_tokens: int,
     *,
-    primary_model: str = "qwen3-max",
-    fallback_model: str = "qwen-long",
+    primary_model: str = "qwen3.7-plus",
+    fallback_model: str = "qwen3.7-plus",
 ) -> tuple[str, int]:
     """按统一模型配置选择主模型或长上下文回退模型。"""
     safe_budget = _get_safe_input_token_budget(primary_model)
@@ -483,12 +483,16 @@ def _build_iteration_review_prompt(
     chapter_number: int,
     chapter_content: str,
     chapter_plan: str,
+    review_text: str = "",
+    iteration_plan: str = "",
     recent_chapter_assets_summary: str = "",
 ) -> str:
     return build_iteration_loop_review_user_prompt(
         chapter_number=chapter_number,
         chapter_content=chapter_content,
         chapter_plan=chapter_plan,
+        review_text=review_text,
+        iteration_plan=iteration_plan,
         recent_chapter_assets_summary=recent_chapter_assets_summary,
     )
 

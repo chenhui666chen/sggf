@@ -6,6 +6,8 @@
 
 from typing import Dict, Any
 
+from app.services.prompts.workflow_runtime import STANDARD_CHAPTER_REVIEW_RUBRIC
+
 
 # 题材专属评审模块配置
 GENRE_REVIEW_MODULES: Dict[str, Dict[str, Any]] = {
@@ -458,45 +460,46 @@ class GenreAdaptiveReviewPrompts:
         Returns:
             完整的 System Prompt
         """
-        # 获取题材专属模块
+        # 获取题材专属模块。题材模块只作为专项检查，不改变综合评分权重。
         genre_module = GENRE_REVIEW_MODULES.get(genre, DEFAULT_REVIEW_MODULE)
-        weights = genre_module.get("weight_adjustment", {})
         
         # 基础评审体系
         base_prompt = f"""你是一位专业的网络小说质量评审官。请使用【网文6维度评审体系】对章节内容进行评审。
 
-## 📊 网文6维度评审体系{f"（{genre}题材权重优化）" if genre else ""}
+{STANDARD_CHAPTER_REVIEW_RUBRIC}
 
-### 1. 爽点效果（权重{weights.get('爽点效果', 25)}%）
+## 📊 六维细则{f"（{genre}题材专项检查不改变评分权重）" if genre else ""}
+
+### 1. 爽点效果（权重25%）
 - 本章是否有明确的爽点（打脸/升级/获得宝物/装逼成功/反转翻盘等）？
 - 爽点铺垫是否充分？释放是否有力？
 - 如果是过渡章节，是否为后续爽点做了必要铺垫？
 
-### 2. 节奏把控（权重{weights.get('节奏把控', 20)}%）
+### 2. 节奏把控（权重20%）
 - 紧张与舒缓是否平衡？
 - 信息密度是否适中（不过载也不空洞）？
 - 场景转换是否流畅？
 - 对话与叙述比例是否合理（建议30-50%对话）？
 
-### 3. 钩子效果（权重{weights.get('钩子效果', 15)}%）
+### 3. 钩子效果（权重15%）
 - 章节开头是否吸引人？（是否避免了"醒来/阳光照进"的套路开头）
 - 章节结尾是否有悬念/钩子？（是否避免了"她知道从这一刻起..."的总结式结尾）
 - 读者是否有"想点下一章"的冲动？
 - 伏笔铺设是否自然？
 
-### 4. 代入感（权重{weights.get('代入感', 15)}%）
+### 4. 代入感（权重15%）
 - 主角视角是否清晰？
 - 读者能否代入主角的处境和情感？
 - 配角是否有存在感而不抢戏？
 - 情感共鸣是否充分？
 
-### 5. 文笔流畅度（权重{weights.get('文笔流畅度', 10)}%）
+### 5. 文笔流畅度（权重10%）
 - 是否有明显的AI痕迹或机械感？
 - 对话是否自然、符合人物性格？
 - 是否有病句、重复、啰嗦？
 - 描写是否生动有画面感？
 
-### 6. 内容一致性（权重{weights.get('内容一致性', 15)}%）
+### 6. 内容一致性（权重15%）
 - 人物设定是否与前文一致（性格、能力、外貌、背景）？
 - 世界观规则是否与前文一致？
 - 时间线是否合理？

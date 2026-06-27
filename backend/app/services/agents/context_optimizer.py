@@ -5,11 +5,14 @@
 1. 动态评估各部分内容的token消耗
 2. 基于重要性⭐️分级进行智能截断
 3. 对超长内容使用摘要策略
-4. 确保总输入不超过 qwen3-max 的 256K tokens 限制
+4. 确保总输入不超过 qwen3.7-plus 的 100万 tokens 限制
 """
 from typing import Dict, Any, Optional, Tuple
 import logging
 import re
+
+from core.model_resolution import normalize_model_id
+from core.model_runtime import ensure_model_hub_initialized
 
 
 logger = logging.getLogger(__name__)
@@ -24,34 +27,37 @@ class ContextOptimizer:
     
     # 各模型的Token限制
     MODEL_LIMITS = {
-        'qwen-max': 30720,
-        'qwen3-max': 256000,    # 256K tokens（上下文 256K）
-        'qwen-plus': 1000000,   # 100万tokens
-        'qwen-turbo': 1000000,  # 100万tokens (Qwen2.5-Turbo)
-        'qwen-long': 10000000,  # 1000万tokens
-        'deepseek-v4-pro': 1000000,  # 100万tokens
+        'qwen3.7-plus': 1000000,   # 1M tokens（上下文 100万，输出 65K）
+        'deepseek-v4-pro': 1000000,    # 100万tokens
+        'deepseek-v4-flash': 1000000,  # 100万tokens
     }
     
     # 🆕 智能模型选择策略（根据章节数）
     MODEL_SELECTION_STRATEGY = {
         'chapter_planning': {  # 章节规划阶段
-            'default': 'qwen3-max',  # 默认使用 qwen3-max（质量优先）
+            'default': 'qwen3.7-plus',  # 默认使用 qwen3.7-plus（质量优先）
             'thresholds': [
-                (0, 50, 'qwen3-max', 0.85),     # 0-50章: qwen3-max, 85%使用率
-                (50, 999, 'qwen-long', 0.30),   # 50+章: qwen-long, 30%使用率（较宽松）
+                (0, 50, 'qwen3.7-plus', 0.85),     # 0-50章: qwen3.7-plus, 85%使用率
+                (50, 999, 'qwen3.7-plus', 0.70),
             ]
         },
         'content_creation': {  # 内容创作阶段
-            'default': 'qwen3-max',
+            'default': 'qwen3.7-plus',
             'thresholds': [
-                (0, 20, 'qwen3-max', 0.85),     # 0-20章: qwen3-max, 85%使用率
-                (20, 50, 'qwen-long', 0.40),    # 20-50章: qwen-long, 40%使用率
-                (50, 999, 'qwen-long', 0.20),   # 50+章: qwen-long, 20%使用率（很宽松）
+                (0, 20, 'qwen3.7-plus', 0.85),     # 0-20章: qwen3.7-plus, 85%使用率
+                (20, 50, 'qwen3.7-plus', 0.75),
+                (50, 999, 'qwen3.7-plus', 0.65),
             ]
         }
     }
     
-    def __init__(self, target_token_ratio: float = 0.85, current_chapter: int = 1, stage: str = 'content_creation'):
+    def __init__(
+        self,
+        target_token_ratio: float = 0.85,
+        current_chapter: int = 1,
+        stage: str = 'content_creation',
+        model_name: Optional[str] = None,
+    ):
         """初始化优化器
         
         Args:
@@ -61,10 +67,11 @@ class ContextOptimizer:
         """
         self.current_chapter = current_chapter
         self.stage = stage
+        self.requested_model = normalize_model_id(model_name)
         
         # 🆕 智能选择模型和目标比例
         self.selected_model, self.target_token_ratio = self._select_model_and_ratio()
-        self.max_tokens = self.MODEL_LIMITS[self.selected_model]
+        self.max_tokens = self._get_model_limit(self.selected_model)
         self.target_tokens = int(self.max_tokens * self.target_token_ratio)
         
         logger.debug(f"📊 上下文优化器初始化:")
@@ -80,6 +87,9 @@ class ContextOptimizer:
         Returns:
             (model_name, target_ratio)
         """
+        if self.requested_model:
+            return self.requested_model, 0.85
+
         strategy = self.MODEL_SELECTION_STRATEGY.get(self.stage, self.MODEL_SELECTION_STRATEGY['content_creation'])
         
         # 查找匹配的阈值
@@ -89,15 +99,26 @@ class ContextOptimizer:
         
         # 默认返回
         return strategy['default'], 0.85
+
+    def _get_model_limit(self, model_id: str) -> int:
+        static_limit = self.MODEL_LIMITS.get(model_id)
+        if static_limit:
+            return static_limit
+
+        try:
+            ensure_model_hub_initialized()
+            from core.model_hub import model_hub
+
+            spec = model_hub.registry.get_spec(model_id)
+            if spec and spec.constraints and spec.constraints.max_context_tokens:
+                return int(spec.constraints.max_context_tokens)
+        except Exception as exc:
+            logger.debug(f"读取模型上下文限制失败: {exc}")
+
+        return self.MODEL_LIMITS['qwen3.7-plus']
     
     def _get_content_priorities(self) -> dict:
-        """根据选择的模型动态调整内容优先级和token预算
-        
-        Returns:
-            CONTENT_PRIORITIES 字典
-        """
-        # 基础配置（qwen3-max）
-        base_config = {
+        return {
             'previous_chapters_analysis': {'priority': 1, 'max_tokens': 8000},
             'chapter_plan': {'priority': 2, 'max_tokens': 3000},
             'characters': {'priority': 3, 'max_tokens': 4000},
@@ -108,38 +129,6 @@ class ContextOptimizer:
             'system_prompt': {'priority': 8, 'max_tokens': 1000},
             'instructions': {'priority': 9, 'max_tokens': 1000},
         }
-        
-        # 如果使用qwen-long，放宽限制
-        if self.selected_model == 'qwen-long':
-            # 根据章节数动态调整
-            if self.current_chapter < 50:
-                # 20-50章：适度放宽
-                return {
-                    'previous_chapters_analysis': {'priority': 1, 'max_tokens': 15000},  # 约2倍
-                    'chapter_plan': {'priority': 2, 'max_tokens': 5000},
-                    'characters': {'priority': 3, 'max_tokens': 8000},
-                    'world_setting': {'priority': 4, 'max_tokens': 8000},
-                    'plot_outline': {'priority': 5, 'max_tokens': 12000},  # 约2倍
-                    'project_concept': {'priority': 6, 'max_tokens': 2000},
-                    'previous_ending': {'priority': 7, 'max_tokens': 1000},
-                    'system_prompt': {'priority': 8, 'max_tokens': 2000},
-                    'instructions': {'priority': 9, 'max_tokens': 2000},
-                }
-            else:
-                # 50+章：大幅放宽
-                return {
-                    'previous_chapters_analysis': {'priority': 1, 'max_tokens': 30000},  # 约4倍
-                    'chapter_plan': {'priority': 2, 'max_tokens': 8000},
-                    'characters': {'priority': 3, 'max_tokens': 15000},
-                    'world_setting': {'priority': 4, 'max_tokens': 15000},
-                    'plot_outline': {'priority': 5, 'max_tokens': 25000},  # 约4倍
-                    'project_concept': {'priority': 6, 'max_tokens': 3000},
-                    'previous_ending': {'priority': 7, 'max_tokens': 1500},
-                    'system_prompt': {'priority': 8, 'max_tokens': 3000},
-                    'instructions': {'priority': 9, 'max_tokens': 3000},
-                }
-        
-        return base_config
     
     def estimate_tokens(self, text: str) -> int:
         """估算文本的token数量
@@ -671,7 +660,11 @@ class ContextOptimizer:
 # 全局单例
 _context_optimizer = None
 
-def get_context_optimizer(current_chapter: int = 1, stage: str = 'content_creation') -> ContextOptimizer:
+def get_context_optimizer(
+    current_chapter: int = 1,
+    stage: str = 'content_creation',
+    model_name: Optional[str] = None,
+) -> ContextOptimizer:
     """获取全局上下文优化器实例
     
     Args:
@@ -682,4 +675,4 @@ def get_context_optimizer(current_chapter: int = 1, stage: str = 'content_creati
         ContextOptimizer 实例
     """
     # 每次都创建新实例，因为需要传入章节数
-    return ContextOptimizer(current_chapter=current_chapter, stage=stage)
+    return ContextOptimizer(current_chapter=current_chapter, stage=stage, model_name=model_name)

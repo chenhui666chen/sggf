@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import json
 import sys
@@ -261,7 +261,7 @@ def test_story_expansion_analysis_payload_accepts_runtime_model_timeout_fields()
         {
             "execution_mode": "delta",
             "model_plan": {
-                "coordinator_planner_model": "qwen3.6-plus",
+                "coordinator_planner_model": "qwen3.7-plus",
                 "coordinator_writer_model": "deepseek-v4-pro",
                 "coordinator_planner_max_tokens": 9879,
                 "coordinator_writer_max_tokens": 26857,
@@ -1128,11 +1128,11 @@ def test_validate_expand_story_request_rejects_volume_detail_above_120_chapters(
 
 
 def test_select_text_model_by_input_tokens_uses_dynamic_model_budget() -> None:
-    safe_budget = workflow._get_safe_input_token_budget("qwen3-max")
+    safe_budget = workflow._get_safe_input_token_budget("qwen3.7-plus")
 
     assert safe_budget > 10000
-    assert workflow._select_text_model_by_input_tokens(safe_budget - 1)[0] == "qwen3-max"
-    assert workflow._select_text_model_by_input_tokens(safe_budget + 1)[0] == "qwen-long"
+    assert workflow._select_text_model_by_input_tokens(safe_budget - 1)[0] == "qwen3.7-plus"
+    assert workflow._select_text_model_by_input_tokens(safe_budget + 1)[0] == "qwen3.7-plus"
 
 
 @pytest.mark.parametrize(

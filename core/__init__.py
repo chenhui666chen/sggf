@@ -19,9 +19,6 @@ from .unified_registry import (
 
 from .llm_adapters import (
     OpenAICompatibleAdapter,
-    QwenMaxAdapter,
-    QwenLongAdapter,
-    QwenTurboAdapter,
     DeepSeekV4ProAdapter,
     DeepSeekV4FlashAdapter,
 )
@@ -54,9 +51,6 @@ __all__ = [
     "register_llm_model",
     "registry",
     "OpenAICompatibleAdapter",
-    "QwenMaxAdapter",
-    "QwenLongAdapter",
-    "QwenTurboAdapter",
     "DeepSeekV4ProAdapter",
     "DeepSeekV4FlashAdapter",
     "ModelHub",

@@ -142,7 +142,7 @@ async def llm_reclassify_candidate_settings(
     """
     使用LLM对候选集合中规则匹配失败的项进行再分类
 
-    仅处理规则引擎无法归类的候选项，使用 qwen-turbo 低成本模型。
+    仅处理规则引擎无法归类的候选项，使用 deepseek-v4-flash 模型。
     每次最多处理20个候选项。
     """
     _ensure_project_owned(project_id, current_user, db)
@@ -157,7 +157,7 @@ async def llm_reclassify_candidate_settings(
         "reclassified": result.get("reclassified", 0),
         "skipped": result.get("skipped", 0),
         "details": result.get("details", []),
-        "model": result.get("model", "qwen-turbo"),
+        "model": result.get("model", "deepseek-v4-flash"),
     }
 
 

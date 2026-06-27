@@ -93,6 +93,8 @@ class LayeredSummarizer:
         current_count: int = 50,
         focus_range: Optional[Tuple[int, int]] = None,
         project_id: Optional[int] = None,
+        forced_model: Optional[str] = None,
+        forced_target_ratio: Optional[float] = None,
     ) -> dict:
         """
         为扩展任务准备优化上下文
@@ -119,8 +121,17 @@ class LayeredSummarizer:
         logger.debug(f"{'=' * 70}\n")
 
         selected_model, target_ratio = self._select_model(scenario, current_count)
+        normalized_forced_model = normalize_model_id(forced_model) if forced_model else None
+        if normalized_forced_model:
+            selected_model = normalized_forced_model
+            if forced_target_ratio is not None:
+                target_ratio = max(0.05, min(float(forced_target_ratio), 0.95))
+
         model_limit = self._get_model_limit(selected_model)
-        target_tokens = max(self.DEFAULT_TARGET_TOKENS, int(model_limit * target_ratio))
+        if normalized_forced_model and forced_target_ratio is not None:
+            target_tokens = max(256, int(model_limit * target_ratio))
+        else:
+            target_tokens = max(self.DEFAULT_TARGET_TOKENS, int(model_limit * target_ratio))
 
         original_context = self._assemble_context(
             outline=outline,
@@ -920,7 +931,11 @@ class LayeredSummarizer:
             return text
 
         target_chars = self._tokens_to_chars(target_tokens)
-        return self._rule_based_truncate(text, target_chars)
+        shrunk = self._rule_based_truncate(text, target_chars)
+        while self._estimate_tokens(shrunk) > target_tokens and target_chars > 80:
+            target_chars = max(80, int(target_chars * 0.85))
+            shrunk = self._rule_based_truncate(text, target_chars)
+        return shrunk
 
     def _build_structured_memory(
         self,
@@ -1292,6 +1307,8 @@ def prepare_smart_context(
     focus_range: Optional[Tuple[int, int]] = None,
     knowledge_base: Optional[NovelKnowledgeBase] = None,
     project_id: Optional[int] = None,
+    forced_model: Optional[str] = None,
+    forced_target_ratio: Optional[float] = None,
 ) -> Dict[str, Any]:
     """便捷函数: 智能准备上下文"""
     summarizer = LayeredSummarizer(knowledge_base)
@@ -1303,4 +1320,6 @@ def prepare_smart_context(
         current_count=current_count,
         focus_range=focus_range,
         project_id=project_id,
+        forced_model=forced_model,
+        forced_target_ratio=forced_target_ratio,
     )

@@ -49,6 +49,7 @@ async def _run_execute_stage_background_serialized(
     regenerate: bool = False,
     targets: Optional[list[str]] = None,
     feedback: Optional[str] = None,
+    workflow_generation_model: Optional[str] = None,
 ):
     async with _get_workflow_execution_lock(project_id):
         await execute_stage_background(
@@ -60,6 +61,7 @@ async def _run_execute_stage_background_serialized(
             regenerate,
             targets,
             feedback,
+            workflow_generation_model,
         )
 
 
@@ -69,12 +71,30 @@ async def _run_execute_stage_with_streaming_serialized(
     stage_enum: StageType,
     user_id: int,
     db: Session,
+    workflow_generation_model: Optional[str] = None,
 ):
     async with _get_workflow_execution_lock(project_id):
-        await execute_stage_with_streaming(task_id, project_id, stage_enum, user_id, db)
+        await execute_stage_with_streaming(
+            task_id,
+            project_id,
+            stage_enum,
+            user_id,
+            db,
+            workflow_generation_model,
+        )
 
 
-async def execute_stage_background(task_id: str, project_id: int, stage_enum: StageType, user_id: int, db: Session, regenerate: bool = False, targets: Optional[list[str]] = None, feedback: Optional[str] = None):
+async def execute_stage_background(
+    task_id: str,
+    project_id: int,
+    stage_enum: StageType,
+    user_id: int,
+    db: Session,
+    regenerate: bool = False,
+    targets: Optional[list[str]] = None,
+    feedback: Optional[str] = None,
+    workflow_generation_model: Optional[str] = None,
+):
     """后台执行阶段任务"""
     import logging
     from sqlalchemy import text
@@ -310,6 +330,7 @@ async def execute_stage_background(task_id: str, project_id: int, stage_enum: St
                 "regenerate": regenerate,
                 "targets": targets,
                 "feedback": feedback,
+                "workflow_generation_model": workflow_generation_model,
             },
         )
         

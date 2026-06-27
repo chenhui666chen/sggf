@@ -105,12 +105,8 @@ class CharacterExpansionMixin:
         logger.debug(f"   - Token使用: {stats['total_tokens']:,} / {stats['target_tokens']:,} ({stats['total_tokens']/stats['target_tokens']*100:.1f}%)\n")
         
         # 🎆 更新LLM：使用智能选择的模型
-        if selected_model != "qwen-long":  # 如果不是qwen-long，需要创建新的LLM
-            dynamic_llm = create_model_llm(model=selected_model, temperature=0.7)
-            logger.debug(f"🔄 动态创建 LLM: {selected_model}\n")
-        else:
-            dynamic_llm = self.llm  # 使用默认的qwen-long
-            logger.debug(f"✅ 使用默认 LLM: qwen-long\n")
+        dynamic_llm = create_model_llm(model=selected_model, temperature=0.7)
+        logger.debug(f"🔄 动态创建 LLM: {selected_model}\n")
 
         # 🔥 修改：先执行扩展，再判断是否继续
         # 🆕 计算卷数和每卷章节数（网文通常每卷20-30章）
@@ -545,10 +541,7 @@ Please analyze：
         logger.debug(f"   - Token使用: {stats['total_tokens']:,} / {stats['target_tokens']:,}\n")
 
         # 🎆 更新LLM：使用智能选择的模型
-        if selected_model != "qwen-long":
-            dynamic_llm = create_model_llm(model=selected_model, temperature=0.8, max_tokens=4000)
-        else:
-            dynamic_llm = self.character_designer.llm
+        dynamic_llm = create_model_llm(model=selected_model, temperature=0.8, max_tokens=4000)
         
         # 临时替换LLM
         original_llm = self.character_designer.llm

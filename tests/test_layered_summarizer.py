@@ -2,16 +2,21 @@ import os
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "backend"))
 
 from backend.app.services.agents.layered_summarizer import LayeredSummarizer
 from backend.app.services.agents.structured_memory_store import StructuredMemoryStore
 
 
 def test_model_limit_comes_from_registry_config():
+    from core.model_hub import model_hub
+
+    config_path = os.path.join(os.path.dirname(__file__), "..", "config", "llm_models.yaml")
+    model_hub.initialize(config_path)
     summarizer = LayeredSummarizer()
 
-    assert summarizer._get_model_limit("qwen3-max") == 32000
-    assert summarizer._get_model_limit("qwen-plus") == 10000000
+    assert summarizer._get_model_limit("qwen3.7-plus") == 1000000
+    assert summarizer._get_model_limit("qwen-" + "plus") == summarizer.DEFAULT_MODEL_LIMIT
 
 
 def test_prepare_context_uses_pass_through_when_input_is_small():
@@ -37,6 +42,40 @@ def test_prepare_context_uses_pass_through_when_input_is_small():
     assert "【结构化记忆】" in result["context"]
     assert result["structured_memory"]["character_states"]
     assert result["structured_memory"]["world_rules_hard_constraints"]
+
+
+def test_prepare_context_uses_forced_model_budget(monkeypatch):
+    summarizer = LayeredSummarizer()
+
+    def fake_get_model_limit(model_id: str) -> int:
+        if model_id == "doubao-seed-character":
+            return 1600
+        if model_id == "qwen3.7-plus":
+            return 1000000
+        return summarizer.DEFAULT_MODEL_LIMIT
+
+    def fake_generate_skeleton(content: str, content_type: str, target_tokens: int, force_map_reduce: bool = False) -> str:
+        return summarizer._shrink_text_to_token_budget(content, target_tokens)
+
+    monkeypatch.setattr(summarizer, "_get_model_limit", fake_get_model_limit)
+    monkeypatch.setattr(summarizer, "_generate_skeleton", fake_generate_skeleton)
+
+    result = summarizer.prepare_context_for_expansion(
+        outline="第1章：雨夜入城\n" + ("- 主线冲突：旧案线索浮现。\n" * 900),
+        characters="### 【姓名】：林舟\n" + ("【当前状态】：继续追查旧案。\n" * 360),
+        worldview="- 核心规则：夜禁期间城门不会无故开启。\n" * 240,
+        scenario="chapter_generation",
+        current_count=3,
+        focus_range=(1, 6),
+        forced_model="doubao-seed-character",
+        forced_target_ratio=0.50,
+    )
+
+    assert result["selected_model"] == "doubao-seed-character"
+    assert result["stats"]["model_limit_tokens"] == 1600
+    assert result["stats"]["target_tokens"] == 800
+    assert result["stats"]["mode"] != "pass_through"
+    assert result["stats"]["total_tokens"] <= 800
 
 
 def test_regex_extract_range_returns_complete_chapter_blocks():
@@ -178,13 +217,13 @@ def test_prepare_context_reuses_persisted_structured_memory_across_rounds(tmp_pa
 
 
 def test_estimate_selected_model_matches_current_capability_tiers():
-    assert LayeredSummarizer.REDUCE_SUMMARY_MODEL == "qwen3.6-plus"
-    assert LayeredSummarizer.estimate_selected_model("chapter_generation", 20) == "qwen3.6-plus"
-    assert LayeredSummarizer.estimate_selected_model("chapter_generation", 120) == "qwen3.5-plus"
-    assert LayeredSummarizer.estimate_selected_model("chapter_generation", 500) == "qwen3.5-plus"
-    assert LayeredSummarizer.estimate_selected_model("structure_design", 20) == "qwen3.6-plus"
-    assert LayeredSummarizer.estimate_selected_model("outline_expand", 30) == "qwen3.6-plus"
-    assert LayeredSummarizer.estimate_selected_model("character_expand", 180) == "qwen3.5-plus"
+    assert LayeredSummarizer.REDUCE_SUMMARY_MODEL == "qwen3.7-plus"
+    assert LayeredSummarizer.estimate_selected_model("chapter_generation", 20) == "qwen3.7-plus"
+    assert LayeredSummarizer.estimate_selected_model("chapter_generation", 120) == "qwen3.7-plus"
+    assert LayeredSummarizer.estimate_selected_model("chapter_generation", 500) == "qwen3.7-plus"
+    assert LayeredSummarizer.estimate_selected_model("structure_design", 20) == "qwen3.7-plus"
+    assert LayeredSummarizer.estimate_selected_model("outline_expand", 30) == "qwen3.7-plus"
+    assert LayeredSummarizer.estimate_selected_model("character_expand", 180) == "qwen3.7-plus"
 
 
 def test_summarize_chapter_block_prefers_standardized_outline_fields():

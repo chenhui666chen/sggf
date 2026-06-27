@@ -423,6 +423,10 @@ class AgentCoordinator:
             project_id = input_data.get("project_id")
             workflow_state = self.get_workflow_state(project_id)
             target_chapter_count = workflow_state.get("target_chapter_count")
+            workflow_generation_model = (
+                input_data.get("workflow_generation_model")
+                or workflow_state.get("workflow_generation_model")
+            )
             real_coordinator = self.get_real_coordinator(project_id)
 
             if not real_coordinator:
@@ -435,6 +439,10 @@ class AgentCoordinator:
                 real_coordinator.set_project_context(project_id)
                 self._real_coordinator = real_coordinator
                 logger.debug(f"✅ 已为真实协调器设置项目上下文: {project_id}")
+
+            if workflow_generation_model:
+                real_coordinator.project_context["workflow_generation_model"] = workflow_generation_model
+                logger.debug(f"✅ 已为真实协调器设置工作流创作模型: {workflow_generation_model}")
 
             # 🆕 设置长篇创作配置（例如目标章节数）
             if target_chapter_count is not None and hasattr(real_coordinator, "set_longform_config"):

@@ -18,6 +18,17 @@ def _join_prompt_sections(*sections: str) -> str:
     return "\n\n".join(section.strip() for section in sections if section and section.strip())
 
 
+STANDARD_CHAPTER_REVIEW_RUBRIC = """## 网文6维度评审体系（统一评分口径）
+1. 爽点效果（权重25%）
+2. 节奏把控（权重20%）
+3. 钩子效果（权重15%）
+4. 代入感（权重15%）
+5. 文笔流畅度（权重10%）
+6. 内容一致性（权重15%）
+
+综合评分必须按以上六个维度及权重裁决。初评、复评、最终验收都使用同一套评分口径，不能把“是否执行修改”混入综合评分。"""
+
+
 _DEFAULT_CONCEPT_HARD_CONSTRAINTS = """- 除非用户明确要求，否则不要使用“林尘”作为主角名。
 - 除非用户明确要求，不要把世界命名为“九寰界 / 九寰界域”。
 - 除非用户明确要求，不要直接复用“飞升骗局 / 高维收割 / 天外监察者 / 养蛊游戏”作为终局真相模板。"""
@@ -268,15 +279,9 @@ def build_first_chapter_review_prompts(*, chapter_draft: str) -> Tuple[str, str]
     base_prompt = prompt_manager.get_agent_prompt("quality_reviewer").strip()
     system_prompt = _join_prompt_sections(
         base_prompt,
-        """请使用【网文6维度评审体系】对第一章内容进行评审。
+        f"""请使用【网文6维度评审体系】对第一章内容进行评审。
 
-## 网文6维度评审体系
-1. 爽点效果（权重25%）
-2. 节奏把控（权重20%）
-3. 钩子效果（权重15%）
-4. 代入感（权重15%）
-5. 文笔流畅度（权重10%）
-6. 内容一致性（权重15%）
+{STANDARD_CHAPTER_REVIEW_RUBRIC}
 
 请给出结构化评审结果，不要省略综合评分。
 - 你当前只做评审，不要直接改写正文。
@@ -462,6 +467,7 @@ def build_iteration_revision_user_prompt(
 5. 如果原稿已有可用亮点，修订时要保留并强化，而不是全部推翻重写。
 6. 成稿篇幅不得少于原稿字数的90%。
 7. 直接输出优化后的完整章节正文（第一行为章节标题），不要附加修订说明。
+8. 改稿前必须在内部建立“评审要求执行核验表”，逐条核对 R0-MUST/Rn-MUST 或【必改】项；例如将初评第一条必改项视为 R0-MUST-1。不要输出核验表，但必须据此完成正文修订。
 
 请立即输出优化后的章节："""
 
@@ -503,6 +509,8 @@ def build_iteration_loop_review_user_prompt(
     chapter_number: int,
     chapter_content: str,
     chapter_plan: str = "",
+    review_text: str = "",
+    iteration_plan: str = "",
     recent_chapter_assets_summary: str = "",
 ) -> str:
     continuity_block = (
@@ -511,7 +519,11 @@ def build_iteration_loop_review_user_prompt(
         else "（最近章节没有可用的结构化连续性资产）"
     )
     chapter_plan_block = chapter_plan if chapter_plan else "（未提供章节规划，请根据当前正文自行判断达标度。）"
+    review_block = review_text if review_text else "（未提供上一轮评审要求，仅按统一评分口径复评。）"
+    iteration_plan_block = iteration_plan if iteration_plan else "（未提供本轮迭代计划。）"
     return f"""请复评以下第{chapter_number}章：
+
+{STANDARD_CHAPTER_REVIEW_RUBRIC}
 
 【章节规划】
 {chapter_plan_block}
@@ -519,26 +531,57 @@ def build_iteration_loop_review_user_prompt(
 【最近章节连续性资产】（重点检查是否承接场景目标、冲突推进、人物状态、钩子与伏笔）
 {continuity_block}
 
+【上一轮评审要求 / 历史评审要求】（用于逐条验收，不得替代统一评分口径）
+{review_block}
+
+【本轮迭代协调计划】（用于逐条验收）
+{iteration_plan_block}
+
 【章节内容】
 {chapter_content}
 
 【复评要求】
-1. 先判断关键问题是否被解决，再评估整体是否达标。
-2. 仍按网文6维度给出简洁但明确的结论。
-3. 如果未达标，只保留最影响通过的3条问题。
-4. 明确给出“通过 / 继续修改 / 风险较高”结论。"""
+1. 必须先按统一6维度评分口径重新评分，综合评分不得因“是否执行修改”单独加减分。
+2. 必须逐条核验上一轮评审要求和本轮必做项是否已执行。
+3. 如果未达标，只保留最影响通过的3条剩余问题。
+4. 明确给出“通过 / 继续修改 / 风险较高”结论。
+
+【输出格式】
+综合评分：X/10分
+六维评分：
+- 爽点效果：X/10
+- 节奏把控：X/10
+- 钩子效果：X/10
+- 代入感：X/10
+- 文笔流畅度：X/10
+- 内容一致性：X/10
+
+## 评审要求执行核验表
+| 要求ID/来源 | 状态（已执行/部分执行/未执行） | 修改后证据 | 未完成原因 |
+|---|---|---|---|
+
+## 剩余关键问题
+1. ...
+2. ...
+3. ...
+
+结论：通过 / 继续修改 / 风险较高"""
 
 
 def get_iteration_loop_review_system_prompt() -> str:
     base_prompt = prompt_manager.get_agent_prompt("final_reviewer").strip()
     return _join_prompt_sections(
         base_prompt,
-        """请使用网文6维度对上面的章节进行评审，并特别检查它是否承接了最近章节连续性资产中的场景目标、冲突推进、人物状态、结尾钩子与伏笔。
+        f"""请使用统一网文6维度评分口径对上面的章节进行评审，并特别检查它是否承接了最近章节连续性资产中的场景目标、冲突推进、人物状态、结尾钩子与伏笔。
+
+{STANDARD_CHAPTER_REVIEW_RUBRIC}
 
 输出要求：
 1. 必须包含一行：综合评分：X/10分
-2. 必须包含一行：结论：通过 / 继续修改 / 风险较高
-3. 给出最重要的3条剩余问题或修改建议
-4. 如已达标，可用1-2条说明本轮已解决的关键点
-5. 不要输出与评分无关的冗余说明""",
+2. 必须输出六维评分，且综合评分使用同一套权重口径
+3. 必须输出“评审要求执行核验表”，逐条核验上一轮评审要求和本轮必做项
+4. 必须包含一行：结论：通过 / 继续修改 / 风险较高
+5. 给出最重要的3条剩余问题或修改建议
+6. 如已达标，可用1-2条说明本轮已解决的关键点
+7. 不要输出与评分和执行核验无关的冗余说明""",
     )

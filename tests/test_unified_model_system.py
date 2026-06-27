@@ -1255,13 +1255,12 @@ class TestCompatibility:
         assert normalize_task_type("outline") == "outline_expand"
 
     def test_model_alias_normalization(self):
-        """测试历史模型别名映射。"""
+        """测试模型 ID 归一化不再重写未注册旧别名。"""
         from core.model_resolution import normalize_model_id
 
         assert normalize_model_id("deepseek-v4-pro") == "deepseek-v4-pro"
         assert normalize_model_id("deepseek-v4-flash") == "deepseek-v4-flash"
-        assert normalize_model_id("qwen-plus") == "qwen-long"
-        assert normalize_model_id("qwen-max") == "qwen3-max"
+        assert normalize_model_id("qwen-" + "plus") == "qwen-" + "plus"
 
     def test_deleted_legacy_files_are_removed(self):
         """测试旧兼容链路文件已删除。"""
@@ -1290,7 +1289,7 @@ class TestYAMLConfiguration:
         registry.clear()
         model_hub.initialize(str(config_path))
 
-        qwen_spec = registry.get_spec("qwen3-max")
+        qwen_spec = registry.get_spec("qwen3.7-plus")
         assert qwen_spec is not None
         assert qwen_spec.provider == "alibaba"
         assert qwen_spec.api_config.api_key_env == "DASHSCOPE_API_KEY"

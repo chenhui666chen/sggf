@@ -270,7 +270,7 @@ class BaseAgent(ABC):
                 getattr(self.llm, 'model_name', None)
                 or getattr(self.llm, 'model', None)
                 or Config.MODEL_NAME
-                or "qwen3-max"
+                or "qwen3.7-plus"
             )
             temp_llm = create_model_llm(model=model_name, temperature=temperature)
             logger.debug(f"🎲 使用自定义 temperature={temperature}")
@@ -299,16 +299,11 @@ class BaseAgent(ABC):
         from .intelligent_truncator import truncate_with_ai_assist
         
         # 💡 智能检测当前模型的tokens限制
-        model_name = getattr(self.llm, 'model_name', None) or getattr(self.llm, 'model', 'qwen3-max')
+        model_name = getattr(self.llm, 'model_name', None) or getattr(self.llm, 'model', 'qwen3.7-plus')
         
         # 模型限制映射 (tokens)
         MODEL_LIMITS = {
-            'qwen-max': 30720,          # 30K tokens
-            'qwen3-max': 256000,        # 256K tokens（上下文 256K）
             'qwen3.7-plus': 1000000,    # 1M tokens（上下文 100万，输出 65K）
-            'qwen-plus': 1000000,       # 1M tokens
-            'qwen-long': 10000000,      # 10M tokens
-            'qwen-turbo': 8000,         # 8K tokens
             'deepseek-v4-pro': 1000000, # V4 Pro: 1M tokens
             'deepseek-v4-flash': 1000000, # V4 Flash: 1M tokens
         }
@@ -727,6 +722,8 @@ class FinalReviewerAgent(BaseAgent):
             chapter_number=int(runtime_context.get("chapter_number") or chapter_number or 1),
             chapter_content=content,
             chapter_plan=runtime_context.get("chapter_plan", chapter_plan),
+            review_text=runtime_context.get("review_text", ""),
+            iteration_plan=runtime_context.get("iteration_plan", ""),
             recent_chapter_assets_summary=runtime_context.get(
                 "recent_chapter_assets_summary",
                 recent_chapter_assets_summary,

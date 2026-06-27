@@ -1,4 +1,4 @@
-﻿"""
+"""
 细纲提取器 - 从已写章节内容反向提取结构化细纲
 
 用于大纲扩展场景：
@@ -27,7 +27,7 @@ class OutlineExtractor:
         """
         if llm is None:
             from app.core.config import settings
-            model = getattr(settings, "DEEPSEEK_MODEL", None) or getattr(settings, "MODEL_NAME", "qwen3-max")
+            model = getattr(settings, "DEEPSEEK_MODEL", None) or getattr(settings, "MODEL_NAME", "qwen3.7-plus")
             self.llm = create_model_llm(model=model, temperature=0.3)
         else:
             self.llm = llm

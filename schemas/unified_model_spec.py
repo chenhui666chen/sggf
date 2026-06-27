@@ -311,13 +311,21 @@ class UnifiedModelSpec:
         )
 
         perf_data = data.get("performance", {})
+        cost_per_1k_input_tokens = perf_data.get("cost_per_1k_input_tokens")
+        if cost_per_1k_input_tokens is None and perf_data.get("cost_per_1m_input_tokens") is not None:
+            cost_per_1k_input_tokens = perf_data.get("cost_per_1m_input_tokens", 0.0) / 1000
+
+        cost_per_1k_output_tokens = perf_data.get("cost_per_1k_output_tokens")
+        if cost_per_1k_output_tokens is None and perf_data.get("cost_per_1m_output_tokens") is not None:
+            cost_per_1k_output_tokens = perf_data.get("cost_per_1m_output_tokens", 0.0) / 1000
+
         performance = PerformanceProfile(
             quality_score=perf_data.get("quality_score", 7.0),
             avg_latency_seconds=perf_data.get("avg_latency_seconds", 2.0),
             p95_latency_seconds=perf_data.get("p95_latency_seconds", 5.0),
             tokens_per_second=perf_data.get("tokens_per_second", 50.0),
-            cost_per_1k_input_tokens=perf_data.get("cost_per_1k_input_tokens", 0.0),
-            cost_per_1k_output_tokens=perf_data.get("cost_per_1k_output_tokens", 0.0),
+            cost_per_1k_input_tokens=cost_per_1k_input_tokens or 0.0,
+            cost_per_1k_output_tokens=cost_per_1k_output_tokens or 0.0,
             currency=perf_data.get("currency", "CNY"),
         )
 

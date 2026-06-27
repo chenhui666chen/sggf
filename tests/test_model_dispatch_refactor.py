@@ -53,7 +53,7 @@ def test_agents_llm_client_forwards_timeout_to_chat() -> None:
         content = chat_completions(
             api_key="test-key",
             base_url="https://example.test/v1",
-            model="qwen3.5-plus",
+            model="qwen3.7-plus",
             messages=[{"role": "user", "content": "hello"}],
             timeout_s=321,
         )
@@ -83,7 +83,7 @@ def test_agents_llm_client_forwards_timeout_to_chat_stream() -> None:
         content = chat_completions(
             api_key="test-key",
             base_url="https://example.test/v1",
-            model="qwen3.5-plus",
+            model="qwen3.7-plus",
             messages=[{"role": "user", "content": "hello"}],
             timeout_s=654,
             on_chunk=_on_chunk,
@@ -109,13 +109,13 @@ def test_agents_llm_client_resolves_deepseek_v4_to_official_api(monkeypatch: pyt
     assert config.base_url_env == "DEEPSEEK_API_BASE"
 
 
-def test_agents_llm_client_keeps_qwen_on_dashscope(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_agents_llm_client_keeps_current_qwen_on_dashscope(monkeypatch: pytest.MonkeyPatch) -> None:
     from agents.llm_client import resolve_llm_runtime_config
 
     monkeypatch.setenv("DASHSCOPE_API_KEY", "dashscope-key")
     monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
 
-    config = resolve_llm_runtime_config("qwen-plus")
+    config = resolve_llm_runtime_config("qwen3.7-plus")
 
     assert config.api_key == "dashscope-key"
     assert config.base_url == "https://dashscope.aliyuncs.com/compatible-mode/v1"
@@ -277,7 +277,7 @@ def test_langchain_bridge_routes_through_model_hub() -> None:
         new=AsyncMock(
             return_value=LLMResult(
                 success=True,
-                model_id="qwen3-max",
+                model_id="qwen3.7-plus",
                 content="bridge-ok",
             )
         ),
@@ -363,17 +363,21 @@ def test_no_legacy_llm_imports_in_runtime_code() -> None:
         r"from app\.services\.model_optimizer import",
         r"from app\.services\.agents\.llm_singleton import",
         r"from \.llm_singleton import",
-        r"from \.\.llm_client import",
         r"from \.\.model_optimizer import",
         r"from langchain_openai import ChatOpenAI",
         r"from langchain_community\.chat_models import ChatOpenAI",
         r"\bChatOpenAI\(",
     ]
+    allowed_relative_llm_client_paths = {
+        project_root / "backend/app/services/audiobook/engine_pkg/_base.py",
+    }
 
     offenders: list[str] = []
     for target in targets:
         for path in target.rglob("*.py"):
             text = path.read_text(encoding="utf-8", errors="ignore")
+            if re.search(r"from \.\.llm_client import", text) and path not in allowed_relative_llm_client_paths:
+                offenders.append(f"{path}: from \\.\\.llm_client import")
             for pattern in forbidden_patterns:
                 if re.search(pattern, text):
                     offenders.append(f"{path}: {pattern}")

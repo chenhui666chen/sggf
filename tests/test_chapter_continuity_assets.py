@@ -108,6 +108,16 @@ def test_genre_adaptive_review_prompt_includes_recent_chapter_assets() -> None:
     assert "是否延续或回应了最近章节留下的结尾钩子、伏笔和未完成事项？" in prompt
 
 
+def test_genre_adaptive_review_system_prompt_uses_fixed_score_weights() -> None:
+    system_prompt = GenreAdaptiveReviewPrompts.get_review_system_prompt(genre="修仙")
+
+    assert "爽点效果（权重25%）" in system_prompt
+    assert "节奏把控（权重20%）" in system_prompt
+    assert "内容一致性（权重15%）" in system_prompt
+    assert "修仙题材专项评审" in system_prompt
+    assert "题材专项检查不改变评分权重" in system_prompt
+
+
 def test_iteration_prompts_include_recent_chapter_assets() -> None:
     continuity = "第9章《雾门之后》\n- 场景目标: 深入密道\n- 结尾钩子: 门后响起更近的脚步声"
 

@@ -572,8 +572,8 @@ def register_llm_model(
 
     使用示例:
         @register_llm_model(
-            model_id="qwen3-max",
-            name="Qwen3 Max",
+            model_id="qwen3.7-plus",
+            name="Qwen3.7 Plus",
             provider="alibaba",
             capabilities=["creative", "dialogue", "reasoning"],
             task_types=["concept", "chapter", "dialogue"],

@@ -39,6 +39,8 @@ DEFAULT_TARGET_MODELS: tuple[str, ...] = (
     "step-3.7-flash",
     "mimo-v2.5-pro",
     "mimo-v2.5",
+    "doubao-seed-evolving",
+    "doubao-seed-character",
 )
 
 VERIFICATION_SCOPE = "manual_verified"

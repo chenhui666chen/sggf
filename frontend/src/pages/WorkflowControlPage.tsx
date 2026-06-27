@@ -69,9 +69,19 @@ import OutputPreviewPanel from '@/components/workflow/OutputPreviewPanel'
 import AgentStatusIndicator from '@/components/workflow/AgentStatusIndicator'
 import { workflowWebSocket } from '@/services/websocket'
 import { apiClient, extractApiErrorMessage } from '@/services/api'  // ✅ 添加apiClient导入
+import type { WorkflowGenerationModel } from '@/services/api'
 import { formatProjectSequenceLabel } from '@/utils/projectDisplay'
 import { ProgressEstimator, type StageDurations, type ProgressState } from '@/utils/progressEstimator'
 import { statisticsService } from '@/services/statistics'
+import {
+  chooseWorkflowGenerationModel,
+  readStoredWorkflowGenerationModel,
+  writeStoredWorkflowGenerationModel,
+} from '@/utils/workflowGenerationModelPreference'
+import {
+  formatWorkflowGenerationModelOptionLabel,
+  formatWorkflowGenerationModelTooltip,
+} from '@/utils/workflowGenerationModelDisplay'
 import { buildStoryExpansionCompletionMessage } from '@/utils/storyExpansionFeedback'
 import {
   getStoryExpansionResultFromTaskComplete,
@@ -116,6 +126,11 @@ export default function WorkflowControlPage() {
   const currentProject = useSelector((state: RootState) => state.project.currentProject)
   const [openDialog, setOpenDialog] = useState(false)
   const [requirement, setRequirement] = useState('')
+  const [workflowGenerationModel, setWorkflowGenerationModel] = useState(
+    () => readStoredWorkflowGenerationModel() || 'qwen3.7-plus'
+  )
+  const [workflowGenerationModels, setWorkflowGenerationModels] = useState<WorkflowGenerationModel[]>([])
+  const [workflowGenerationModelsLoading, setWorkflowGenerationModelsLoading] = useState(false)
   const [isRunning, setIsRunning] = useState(false)
   const [isStarting, setIsStarting] = useState(false)  // 新增：标记是否正在启动工作流
   const [showSaveDialog, setShowSaveDialog] = useState(false)
@@ -136,6 +151,42 @@ export default function WorkflowControlPage() {
       navigate(`/workflow/${savedProjectId}`)
     }
   }, [])
+  useEffect(() => {
+    let active = true
+    setWorkflowGenerationModelsLoading(true)
+    apiClient.getWorkflowGenerationModels()
+      .then((response) => {
+        if (!active || response.status < 200 || response.status >= 300) return
+        const models = response.data.models || []
+        const defaultModel = response.data.default_model || 'qwen3.7-plus'
+        const storedModel = readStoredWorkflowGenerationModel()
+        setWorkflowGenerationModels(models)
+        setWorkflowGenerationModel((current) => chooseWorkflowGenerationModel({
+          models,
+          currentModel: current,
+          storedModel,
+          defaultModel,
+        }))
+      })
+      .catch(() => {
+        if (!active) return
+        setWorkflowGenerationModels([])
+        setWorkflowGenerationModel(readStoredWorkflowGenerationModel() || 'qwen3.7-plus')
+      })
+      .finally(() => {
+        if (active) {
+          setWorkflowGenerationModelsLoading(false)
+        }
+      })
+    return () => {
+      active = false
+    }
+  }, [])
+
+  const handleWorkflowGenerationModelChange = (modelId: string) => {
+    setWorkflowGenerationModel(modelId)
+    writeStoredWorkflowGenerationModel(modelId)
+  }
 
   // 🔥 页面离开前，保存当前项目ID
   useEffect(() => {
@@ -503,6 +554,9 @@ export default function WorkflowControlPage() {
     if (generateNextChapterTaskId) {
       setGeneratingNextChapter(true)
       setIsGenerateNextChapterFlow(true)
+    } else {
+      setGeneratingNextChapter(false)
+      setIsGenerateNextChapterFlow(false)
     }
   }, [generateNextChapterTaskId, generateNextChapterNumber])
 
@@ -514,14 +568,21 @@ export default function WorkflowControlPage() {
   // 🔥 关键修复：设置WebSocket加入房间后的回调，主动查询状态
   useEffect(() => {
     // 注册加入房间成功后的回调
+    let isActive = true
+    const activeProjectId = projectId ? Number(projectId) : null
+
     workflowWebSocket.setOnRoomJoined(async (joinedProjectId) => {
-      if (!projectId || Number(projectId) !== joinedProjectId) {
+      if (!activeProjectId || activeProjectId !== joinedProjectId) {
         return
       }
       
       try {
-        dispatch(fetchProject(Number(projectId)))
-        const response = await apiClient.getWorkflowAllStagesContent(Number(projectId))
+        dispatch(fetchProject(activeProjectId))
+        const response = await apiClient.getWorkflowAllStagesContent(activeProjectId)
+
+        if (!isActive) {
+          return
+        }
 
         if (response.status < 200 || response.status >= 300) {
           return
@@ -568,6 +629,7 @@ export default function WorkflowControlPage() {
     
     // cleanup
     return () => {
+      isActive = false
       workflowWebSocket.setOnRoomJoined(() => {})
     }
   }, [projectId, dispatch])
@@ -783,6 +845,13 @@ export default function WorkflowControlPage() {
 
         // 切换工作流阶段
         dispatch(setCurrentStage(targetStage))
+
+        setProgressMessage(
+          data.message ||
+          (currentStep === 4
+            ? '正在内部改稿和复评，最终版本确认后会展示正文，请等待...'
+            : '')
+        )
 
         return  // 不更新普通任务进度
       }
@@ -1115,6 +1184,9 @@ export default function WorkflowControlPage() {
     if (!projectId) return
 
     // 🔧 关键修复: 延迟执行，等待Token加载
+    const requestedProjectId = Number(projectId)
+    let isActive = true
+
     const timer = setTimeout(() => {
       const loadAllStageContents = async () => {
         try {
@@ -1125,7 +1197,11 @@ export default function WorkflowControlPage() {
 
           // 🔔 步骤1：检查是否有正在运行的任务
           try {
-            const runningTasksResponse = await apiClient.getWorkflowRunningTasks(Number(projectId))
+            const runningTasksResponse = await apiClient.getWorkflowRunningTasks(requestedProjectId)
+
+            if (!isActive) {
+              return
+            }
 
             if (runningTasksResponse.status >= 200 && runningTasksResponse.status < 300) {
               const runningTasksData = runningTasksResponse.data
@@ -1191,7 +1267,11 @@ export default function WorkflowControlPage() {
           }
 
           // ⚡ 步骤2：性能优化: 使用批量接口一次性获取所有阶段内容
-          const batchResponse = await apiClient.getWorkflowAllStagesContent(Number(projectId))
+          const batchResponse = await apiClient.getWorkflowAllStagesContent(requestedProjectId)
+
+          if (!isActive) {
+            return
+          }
 
           if (batchResponse.status >= 200 && batchResponse.status < 300) {
             const batchData = batchResponse.data
@@ -1221,7 +1301,11 @@ export default function WorkflowControlPage() {
 
           // 加载阶段状态
           try {
-            const statusResponse = await apiClient.getWorkflowStageStatus(Number(projectId))
+            const statusResponse = await apiClient.getWorkflowStageStatus(requestedProjectId)
+
+            if (!isActive) {
+              return
+            }
 
             if (statusResponse.status >= 200 && statusResponse.status < 300) {
               const statusData = statusResponse.data
@@ -1286,7 +1370,10 @@ export default function WorkflowControlPage() {
     }, 100)  // 🔧 延迟100ms，等待localStorage初始化
 
     // 🔧 清理定时器
-    return () => clearTimeout(timer)
+    return () => {
+      isActive = false
+      clearTimeout(timer)
+    }
   }, [projectId, dispatch])
 
   // 🆕 自动执行阶段的逻辑（异步模式）
@@ -1478,6 +1565,7 @@ export default function WorkflowControlPage() {
         projectId: parseInt(projectId),
         stage,
         requirement: requirement || '创作一部小说',
+        workflowGenerationModel,
         enableStreaming,
       })
 
@@ -1726,6 +1814,7 @@ export default function WorkflowControlPage() {
         startWorkflow({
           projectId: parseInt(projectId),
           requirement,
+          workflowGenerationModel,
           clearExisting: isRestartMode,  // 🆕 传递清空标志
         })
       ).unwrap()
@@ -2321,7 +2410,7 @@ export default function WorkflowControlPage() {
     setGeneratingNextChapter(true)
 
     try {
-      const response = await apiClient.generateNextWorkflowChapter(Number(projectId))
+      const response = await apiClient.generateNextWorkflowChapter(Number(projectId), workflowGenerationModel)
 
       if (response.status >= 200 && response.status < 300) {
         const data = response.data
@@ -2373,6 +2462,7 @@ export default function WorkflowControlPage() {
       const response = await apiClient.postWorkflowStageAsync({
         projectId: parseInt(projectId),
         stage: 'concept',
+        workflowGenerationModel,
         regenerate: true,
         targets,
         feedback: feedbackText,
@@ -2730,6 +2820,50 @@ export default function WorkflowControlPage() {
             </CardContent>
           </Card>
 
+          <Card sx={{ mb: 1.5 }}>
+            <CardContent sx={{ py: 1.5, px: 2, '&:last-child': { pb: 1.5 } }}>
+              <FormControl fullWidth size="small">
+                <InputLabel>创作模型</InputLabel>
+                <Select
+                  value={workflowGenerationModel}
+                  label="创作模型"
+                  onChange={(event) => handleWorkflowGenerationModelChange(String(event.target.value))}
+                  disabled={workflowGenerationModelsLoading || isStarting || isRunning || generatingNextChapter}
+                >
+                  {workflowGenerationModels.length === 0 && (
+                    <MenuItem value={workflowGenerationModel}>{workflowGenerationModel}</MenuItem>
+                  )}
+                  {workflowGenerationModels.map((model) => (
+                    <MenuItem key={model.id} value={model.id}>
+                      <Tooltip
+                        title={
+                          <Box sx={{ whiteSpace: 'pre-line' }}>
+                            {formatWorkflowGenerationModelTooltip(model)}
+                          </Box>
+                        }
+                        placement="right"
+                        arrow
+                        enterDelay={250}
+                      >
+                        <Box
+                          component="span"
+                          sx={{
+                            display: 'block',
+                            width: '100%',
+                            whiteSpace: 'normal',
+                            lineHeight: 1.35,
+                          }}
+                        >
+                          {formatWorkflowGenerationModelOptionLabel(model)}
+                        </Box>
+                      </Tooltip>
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+            </CardContent>
+          </Card>
+
           {/* 阶段信息面板（工作步骤说明） */}
           <StageInfoPanel stage={workflow.currentStage} />
 
@@ -3063,6 +3197,46 @@ export default function WorkflowControlPage() {
             </Alert>
           )}
           
+          <FormControl fullWidth sx={{ mb: 2 }}>
+            <InputLabel>创作模型</InputLabel>
+            <Select
+              value={workflowGenerationModel}
+              onChange={(e) => handleWorkflowGenerationModelChange(String(e.target.value))}
+              disabled={isStarting || workflowGenerationModelsLoading}
+              label="创作模型"
+            >
+              {workflowGenerationModels.length === 0 && (
+                <MenuItem value={workflowGenerationModel}>{workflowGenerationModel}</MenuItem>
+              )}
+              {workflowGenerationModels.map((model) => (
+                <MenuItem key={model.id} value={model.id}>
+                  <Tooltip
+                    title={
+                      <Box sx={{ whiteSpace: 'pre-line' }}>
+                        {formatWorkflowGenerationModelTooltip(model)}
+                      </Box>
+                    }
+                    placement="right"
+                    arrow
+                    enterDelay={250}
+                  >
+                    <Box
+                      component="span"
+                      sx={{
+                        display: 'block',
+                        width: '100%',
+                        whiteSpace: 'normal',
+                        lineHeight: 1.35,
+                      }}
+                    >
+                      {formatWorkflowGenerationModelOptionLabel(model)}
+                    </Box>
+                  </Tooltip>
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+
           {/* 🆕 题材选择 */}
           <FormControl fullWidth sx={{ mb: 2 }}>
             <InputLabel>题材类型</InputLabel>
@@ -3638,5 +3812,6 @@ export default function WorkflowControlPage() {
     </Container>
   )
 }
+
 
 

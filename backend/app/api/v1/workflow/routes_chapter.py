@@ -1,6 +1,7 @@
 """Workflow API module."""
 import logging
 import asyncio
+import os
 from fastapi import APIRouter, Depends, HTTPException, status, Body, BackgroundTasks
 from sqlalchemy.orm import Session
 from typing import Dict, Any, Optional, Tuple, List
@@ -34,14 +35,341 @@ from app.services.auto_system_detector import auto_create_system_collections
 
 logger = logging.getLogger(__name__)
 
+_active_generate_next_chapter_task_ids: set[str] = set()
+
+
+def mark_generate_next_chapter_task_active(task_id: str) -> None:
+    _active_generate_next_chapter_task_ids.add(str(task_id))
+
+
+def mark_generate_next_chapter_task_inactive(task_id: str) -> None:
+    _active_generate_next_chapter_task_ids.discard(str(task_id))
+
+
+def is_generate_next_chapter_task_active(task_id: str) -> bool:
+    return str(task_id) in _active_generate_next_chapter_task_ids
+
+
+def _select_iteration_fallback_version(
+    *,
+    initial_version: str,
+    latest_revised_version: str,
+    best_version: str,
+) -> str:
+    return best_version or initial_version or latest_revised_version
+
+
+def _iteration_review_has_unresolved_required_items(review_text: str) -> bool:
+    """检测复评核验表中是否仍有必改项未执行。"""
+    for raw_line in str(review_text or "").splitlines():
+        line = raw_line.strip()
+        if not line.startswith("|"):
+            continue
+        cells = [cell.strip() for cell in line.strip("|").split("|")]
+        if len(cells) < 2:
+            continue
+        source = cells[0].upper()
+        status_text = cells[1]
+        is_required_item = "MUST" in source or "必改" in cells[0]
+        if is_required_item and "未执行" in status_text:
+            return True
+    return False
+
+
+def _split_stream_text(text: str, *, chunk_size: int = 1200) -> list[str]:
+    if not text:
+        return []
+    safe_chunk_size = max(1, int(chunk_size or 1))
+    return [text[index:index + safe_chunk_size] for index in range(0, len(text), safe_chunk_size)]
+
+
+def _get_chapter_plan_prompt_token_budget(model_name: Optional[str]) -> int:
+    normalized_model = normalize_model_id(model_name) or model_name or "qwen3.7-plus"
+    if normalized_model == "doubao-seed-character":
+        try:
+            configured_budget = int(os.getenv("DOUBAO_CHAPTER_PLAN_PROMPT_BUDGET", "80000"))
+        except (TypeError, ValueError):
+            configured_budget = 80000
+        # 128K 输入窗口不贴边使用，给系统提示词、输出和服务端 token 估算差异留余量。
+        return max(12000, min(configured_budget, 96000))
+
+    safe_budget = _get_safe_input_token_budget(
+        normalized_model,
+        usage_ratio=0.60,
+        prompt_overhead_tokens=2200,
+    )
+    return safe_budget
+
+
+def _truncate_prompt_text(text: str, max_chars: int) -> str:
+    value = str(text or "").strip()
+    if not value or max_chars <= 0:
+        return ""
+    if len(value) <= max_chars:
+        return value
+    if max_chars <= 80:
+        return value[:max_chars].rstrip()
+
+    marker = "\n...\n"
+    available = max_chars - len(marker)
+    head_chars = max(40, int(available * 0.68))
+    tail_chars = max(30, available - head_chars)
+    return f"{value[:head_chars].rstrip()}{marker}{value[-tail_chars:].lstrip()}"
+
+
+def _shrink_prompt_text_to_token_budget(text: str, token_budget: int) -> str:
+    value = str(text or "").strip()
+    if not value or token_budget <= 0:
+        return ""
+    if _estimate_tokens_by_chars(value) <= token_budget:
+        return value
+
+    max_chars = max(40, int(token_budget / 1.3) - 16)
+    shrunk = _truncate_prompt_text(value, max_chars)
+    while _estimate_tokens_by_chars(shrunk) > token_budget and max_chars > 40:
+        max_chars = max(40, int(max_chars * 0.82))
+        shrunk = _truncate_prompt_text(value, max_chars)
+    return shrunk
+
+
+def _guard_chapter_plan_prompt_sections(
+    sections: Dict[str, str],
+    *,
+    static_prompt_tokens: int,
+    max_prompt_tokens: int,
+) -> Dict[str, str]:
+    dynamic_budget = max(300, max_prompt_tokens - static_prompt_tokens - 80)
+    weights = {
+        "current_chapter_outline": 0.16,
+        "current_volume_context": 0.07,
+        "core_character_anchor_context": 0.07,
+        "focus_character_relationship_context": 0.07,
+        "planning_character_context": 0.10,
+        "epic_framework_context": 0.06,
+        "optimized_context_text": 0.22,
+        "structured_memory_text": 0.08,
+        "previous_chapters_summary": 0.06,
+        "recent_chapter_assets_summary": 0.06,
+        "previous_ending": 0.04,
+        "climax_instruction": 0.02,
+        "chapter_plan_guide": 0.06,
+        "concept": 0.03,
+    }
+    guarded: Dict[str, str] = {}
+    for key, value in sections.items():
+        section_budget = max(40, int(dynamic_budget * weights.get(key, 0.04)))
+        guarded[key] = _shrink_prompt_text_to_token_budget(value, section_budget)
+    return guarded
+
+
+def _build_chapter_plan_user_prompt(
+    *,
+    next_chapter_number: int,
+    concept: str,
+    current_chapter_outline: str,
+    current_volume_context: str,
+    core_character_anchor_context: str,
+    focus_character_relationship_context: str,
+    planning_character_context: str,
+    epic_framework_context: str,
+    optimized_context_text: str,
+    structured_memory_text: str,
+    previous_chapters_summary: str,
+    recent_chapter_assets_summary: str,
+    previous_ending: str,
+    climax_instruction: str = "",
+    chapter_plan_guide: str = "",
+    model_name: Optional[str] = None,
+    max_prompt_tokens: Optional[int] = None,
+) -> str:
+    fallback_sections = {
+        "concept": "（暂无故事概念）",
+        "current_chapter_outline": "（未提取到当前章节精确细纲，将回退到章节窗口推断）",
+        "current_volume_context": "（无可用卷级上下文）",
+        "core_character_anchor_context": "（无可用核心角色锚点）",
+        "focus_character_relationship_context": "（无可用焦点人物关系摘要）",
+        "planning_character_context": "（无可用人物规划候选摘要）",
+        "epic_framework_context": "（无额外长篇框架约束）",
+        "optimized_context_text": "（无可用优化上下文）",
+        "structured_memory_text": "（无可用结构化记忆）",
+        "previous_chapters_summary": "（这是第一章）",
+        "recent_chapter_assets_summary": "（最近章节没有可用的结构化连续性资产）",
+        "previous_ending": "（这是第一章，没有前一章）",
+        "climax_instruction": "",
+        "chapter_plan_guide": "",
+    }
+    raw_sections = {
+        "concept": concept,
+        "current_chapter_outline": current_chapter_outline,
+        "current_volume_context": current_volume_context,
+        "core_character_anchor_context": core_character_anchor_context,
+        "focus_character_relationship_context": focus_character_relationship_context,
+        "planning_character_context": planning_character_context,
+        "epic_framework_context": epic_framework_context,
+        "optimized_context_text": optimized_context_text,
+        "structured_memory_text": structured_memory_text,
+        "previous_chapters_summary": previous_chapters_summary,
+        "recent_chapter_assets_summary": recent_chapter_assets_summary,
+        "previous_ending": previous_ending,
+        "climax_instruction": climax_instruction,
+        "chapter_plan_guide": chapter_plan_guide,
+    }
+
+    def normalize_sections(source: Dict[str, str]) -> Dict[str, str]:
+        return {
+            key: str(value or "").strip() or fallback_sections[key]
+            for key, value in source.items()
+        }
+
+    def render(sections: Dict[str, str]) -> str:
+        genre_specific = ""
+        if sections["chapter_plan_guide"]:
+            genre_specific = f"""
+【题材专属细化】（以下为通用规划要求的具体落地方式）
+{sections["chapter_plan_guide"]}"""
+
+        return f"""请为第{next_chapter_number}章制定创作计划。
+
+【整本书信息 - 智能优化上下文】
+- 故事概念：{sections["concept"]}
+
+【当前章节精确细纲】（如存在，最高优先级承接）
+{sections["current_chapter_outline"]}
+
+【当前卷上下文】（用于保持卷目标、卷节奏与卷内推进方向）
+{sections["current_volume_context"]}
+
+【核心角色锚点】（始终保留主角/核心对手/关键驱动者的长期目标与叙事职责）
+{sections["core_character_anchor_context"]}
+
+【焦点人物关系】（优先承接本章相关人物之间正在变化的关系与博弈）
+{sections["focus_character_relationship_context"]}
+
+【人物规划候选摘要】（用于本章规划阶段决定出场与推进，不直接灌入全量人物）
+{sections["planning_character_context"]}
+
+【长篇框架约束】（用于保持跨卷一致性）
+{sections["epic_framework_context"]}
+
+【优化后的核心上下文】（已通过分层摘要策略压缩）
+{sections["optimized_context_text"]}
+
+【结构化记忆约束】（优先遵循）
+{sections["structured_memory_text"]}
+
+【已完成章节摘要】
+{sections["previous_chapters_summary"]}
+
+【最近章节连续性资产】（优先承接拆书细纲、未完成冲突、人物状态、伏笔与钩子）
+{sections["recent_chapter_assets_summary"]}
+
+【前一章结尾】
+{sections["previous_ending"]}
+{sections["climax_instruction"]}
+
+【输出要求】
+请为第{next_chapter_number}章制定创作计划，必须包含：
+## 1. 本章定位
+- 在整体情节中的位置（起承转合哪个阶段）
+- 本章类型：【日常/过渡/冲突/高潮/转折】
+
+## 2. 核心事件
+- 推进主线情节的关键事件
+- 事件的起因-经过-结果
+
+## 3. 爽点设计 ⚡
+- 本章爽点类型：【打脸/升级/获得/反转/装逼/无（铺垫章）】
+- 爽点具体内容描述
+- 铺垫方式（如何让爽点更有冲击力）
+
+## 4. 人物推进
+- 主角本章的成长或变化
+- 重要配角的表现
+- 人物关系推进
+
+## 5. 结尾钩子设计 🎣
+- 钩子类型：【悬念式/危机式/反转式/信息炸弹式/选择困境式】
+- 钩子具体内容
+- 确保读者有“想点下一章”的冲动
+
+## 6. 场景安排
+- 时间、地点、氛围
+- 场景转换节点
+
+【约束】
+- 确保与整本书情节大纲、前文剧情和结构化记忆保持一致
+- 如提供当前章节精确细纲，必须优先落实场景目标、关键事件、人物出场、冲突推进、结尾钩子和伏笔
+- 人物动机、关系和主线绑定优先以人物运行态摘要为准
+- 如果最近章节连续性资产已有场景目标、人物状态、伏笔或钩子，必须优先承接
+- 推进故事发展，不能原地踏步；爽点和钩子必须具体、可执行{genre_specific}"""
+
+    normalized_sections = normalize_sections(raw_sections)
+    prompt = render(normalized_sections)
+    if max_prompt_tokens is None:
+        max_prompt_tokens = _get_chapter_plan_prompt_token_budget(model_name)
+    if max_prompt_tokens <= 0 or _estimate_tokens_by_chars(prompt) <= max_prompt_tokens:
+        return prompt
+
+    static_sections = normalize_sections({key: "" for key in raw_sections})
+    static_prompt_tokens = _estimate_tokens_by_chars(render(static_sections))
+    guarded_sections = _guard_chapter_plan_prompt_sections(
+        normalized_sections,
+        static_prompt_tokens=static_prompt_tokens,
+        max_prompt_tokens=max_prompt_tokens,
+    )
+    prompt = render(guarded_sections)
+
+    trim_order = [
+        "chapter_plan_guide",
+        "optimized_context_text",
+        "previous_chapters_summary",
+        "planning_character_context",
+        "current_volume_context",
+        "core_character_anchor_context",
+        "focus_character_relationship_context",
+        "epic_framework_context",
+        "structured_memory_text",
+        "recent_chapter_assets_summary",
+        "current_chapter_outline",
+        "previous_ending",
+    ]
+    cursor = 0
+    while _estimate_tokens_by_chars(prompt) > max_prompt_tokens and cursor < len(trim_order) * 4:
+        key = trim_order[cursor % len(trim_order)]
+        current_tokens = _estimate_tokens_by_chars(guarded_sections.get(key, ""))
+        next_budget = max(30, int(current_tokens * 0.72))
+        guarded_sections[key] = _shrink_prompt_text_to_token_budget(guarded_sections.get(key, ""), next_budget)
+        prompt = render(guarded_sections)
+        cursor += 1
+
+    return prompt
+
+
 from app.api.v1.workflow import router
 from app.api.v1.workflow.schemas import *
 from app.api.v1.workflow.helpers import *
+from app.api.v1.workflow.helpers import (
+    _build_iteration_review_prompt,
+    _build_iteration_revision_prompt,
+    _build_recent_chapter_assets_summary,
+    _build_recent_full_chapter_excerpt,
+    _estimate_tokens_by_chars,
+    _get_safe_input_token_budget,
+    _select_previous_chapter_context_strategy,
+    _select_text_model_by_input_tokens,
+)
 from app.api.v1.workflow.story_helpers import *
+from app.api.v1.workflow.story_helpers import _sync_real_coordinator_project_context
+from app.api.v1.workflow.model_selection import resolve_workflow_generation_model
+from app.api.v1.workflow.routes_optimize import (
+    _create_generated_chapter,
+    _extract_iteration_review_score,
+)
 
 @router.post("/{project_id}/generate-next-chapter")
 async def generate_next_chapter(
     project_id: int,
+    request: Optional[GenerateNextChapterRequest] = Body(default=None),
     current_user = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -69,6 +397,15 @@ async def generate_next_chapter(
 
     try:
         logger.info(f"📍 开始生成下一章（异步模式），项目ID: {project_id}")
+        try:
+            workflow_generation_model = resolve_workflow_generation_model(
+                request.workflow_generation_model if request else None
+            )
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=str(exc),
+            ) from exc
         workflow_context_builder = WorkflowContextBuilder(db)
         
         # 1. 验证项目存在且属于用户
@@ -174,6 +511,7 @@ async def generate_next_chapter(
             context_strategy = _select_previous_chapter_context_strategy(
                 chapters,
                 next_chapter_number=next_chapter_number,
+                preferred_model=workflow_generation_model,
             )
             recent_full_count = int(context_strategy.get("recent_full_count") or 0)
             detailed_summary_count = int(context_strategy.get("detailed_summary_count") or 0)
@@ -318,6 +656,7 @@ async def generate_next_chapter(
             )
 
         # 7. 启动后台任务
+        mark_generate_next_chapter_task_active(task_id)
         asyncio.create_task(
             execute_generate_next_chapter_task(
                 task_id=task_id,
@@ -332,6 +671,7 @@ async def generate_next_chapter(
                 previous_chapters_summary=previous_chapters_summary,
                 previous_chapters_payload=previous_chapters_payload,
                 recent_chapter_assets_summary=recent_chapter_assets_summary,
+                workflow_generation_model=workflow_generation_model,
             )
         )
         logger.info(f"   🚀 后台任务已启动")
@@ -341,7 +681,8 @@ async def generate_next_chapter(
             "task_id": task_id,
             "status": "running",
             "message": f"已开始生成第{next_chapter_number}章",
-            "next_chapter_number": next_chapter_number
+            "next_chapter_number": next_chapter_number,
+            "workflow_generation_model": workflow_generation_model,
         }
 
     except HTTPException:
@@ -369,6 +710,7 @@ async def execute_generate_next_chapter_task(
     previous_chapters_summary: str,
     previous_chapters_payload: list,
     recent_chapter_assets_summary: str,
+    workflow_generation_model: Optional[str] = None,
 ):
     """
     后台执行生成下一章任务（真流式版本）
@@ -384,6 +726,7 @@ async def execute_generate_next_chapter_task(
 
     logger = logging.getLogger("uvicorn.error")
     logger.info(f"🚀 开始执行后台任务: {task_id}, 生成第{next_chapter_number}章")
+    mark_generate_next_chapter_task_active(task_id)
 
     # 获取流式服务
     streaming_service = get_streaming_service()
@@ -506,6 +849,8 @@ async def execute_generate_next_chapter_task(
             or chapter_generation_context.content_character_context
             or ""
         )
+        forced_plan_model = normalize_model_id(workflow_generation_model) if workflow_generation_model else None
+        forced_plan_ratio = 0.45 if forced_plan_model else None
         plan_context_result = layered_summarizer.prepare_context_for_expansion(
             outline=plot_outline or "",
             characters=plan_character_context,
@@ -514,10 +859,12 @@ async def execute_generate_next_chapter_task(
             current_count=next_chapter_number,  # 使用当前章节数选择模型
             focus_range=(max(1, next_chapter_number - 5), next_chapter_number + 5),  # 聚焦当前章节前后5章
             project_id=project_id,
+            forced_model=forced_plan_model,
+            forced_target_ratio=forced_plan_ratio,
         )
         
         # 🔥 使用智能选择的模型和优化后的上下文
-        selected_plan_model = plan_context_result["selected_model"]
+        selected_plan_model = workflow_generation_model or plan_context_result["selected_model"]
         plan_optimized_context_text = plan_context_result["context"]
         plan_memory_text = plan_context_result.get("memory_text", "")
         plan_structured_memory = plan_context_result.get("structured_memory", {})
@@ -559,98 +906,35 @@ async def execute_generate_next_chapter_task(
 
         # 🆕 构建章节规划提示词（使用模块化系统）
         plan_system_prompt = ChapterPlanningPrompts.get_system_prompt(plan_project_genre)
-
-        plan_user_prompt = f"""请为第{next_chapter_number}章制定创作计划。
-
-【整本书信息 - 智能优化上下文】
-- 故事概念：{plan_optimized_context.get('project_concept', concept)}
-
-【当前章节精确细纲】（如存在，最高优先级承接）
-{chapter_generation_context.current_chapter_outline or '（未提取到当前章节精确细纲，将回退到章节窗口推断）'}
-
-【当前卷上下文】（用于保持卷目标、卷节奏与卷内推进方向）
-{chapter_generation_context.current_volume_context or '（无可用卷级上下文）'}
-
-【核心角色锚点】（始终保留主角/核心对手/关键驱动者的长期目标与叙事职责）
-{chapter_generation_context.core_character_anchor_context or '（无可用核心角色锚点）'}
-
-【焦点人物关系】（优先承接本章相关人物之间正在变化的关系与博弈）
-{chapter_generation_context.focus_character_relationship_context or '（无可用焦点人物关系摘要）'}
-
-【人物规划候选摘要】（用于本章规划阶段决定出场与推进，不直接灌入全量人物）
-{chapter_generation_context.planning_character_prompt_context or chapter_generation_context.character_prompt_context or '（无可用人物规划候选摘要）'}
-
-【长篇框架约束】（用于保持跨卷一致性）
-{chapter_generation_context.epic_framework_context or '（无额外长篇框架约束）'}
-
-【优化后的核心上下文】（已通过分层摘要策略压缩，聚焦第{max(1, next_chapter_number - 5)}-{next_chapter_number + 5}章）
-{plan_optimized_context.get('plot_outline', plot_outline)}
-
-【结构化记忆约束】（优先遵循）
-{plan_optimized_context.get('structured_memory_text', '') or '（无可用结构化记忆）'}
-
-【已完成章节摘要】
-{plan_optimized_context.get('previous_chapters_analysis', previous_chapters_summary) if previous_chapters_summary else '（这是第一章）'}
-
-【最近章节连续性资产】（优先承接拆书细纲、未完成冲突、人物状态、伏笔与钩子）
-{plan_optimized_context.get('recent_chapter_assets_summary', recent_chapter_assets_summary) or '（最近章节没有可用的结构化连续性资产）'}
-
-【前一章结尾】
-{plan_optimized_context.get('previous_ending', previous_ending) if previous_ending else '（这是第一章，没有前一章）'}
-{climax_instruction}
-
----
-
-请为第{next_chapter_number}章制定创作计划，必须包含以下内容：
-
-## 1. 本章定位
-- 在整体情节中的位置（起承转合哪个阶段）
-- 本章类型：【日常/过渡/冲突/高潮/转折】
-
-## 2. 核心事件
-- 推进主线情节的关键事件
-- 事件的起因-经过-结果
-
-## 3. 爽点设计 ⚡
-- 本章爽点类型：【打脸/升级/获得/反转/装逼/无（铺垫章）】
-- 爽点具体内容描述
-- 铺垫方式（如何让爽点更有冲击力）
-
-## 4. 人物推进
-- 主角本章的成长或变化
-- 重要配角的表现
-- 人物关系推进
-
-## 5. 结尾钩子设计 🎣
-- 钩子类型：【悬念式/危机式/反转式/信息炸弹式/选择困境式】
-- 钩子具体内容
-- 确保读者有"想点下一章"的冲动
-
-## 6. 场景安排
-- 时间、地点、氛围
-- 场景转换节点
-
----
-
-要求：
-- 确保与整本书的情节大纲保持一致
-- 如果提供了“当前章节精确细纲”，必须优先落实其中的场景目标、关键事件、人物出场、冲突推进、结尾钩子和伏笔，除非它与已发生章节连续性冲突
-- 确保与前面章节的剧情连贯
-- 如果提供了“当前卷上下文”或“长篇框架约束”，本章推进必须服务卷目标，并且不能破坏跨卷设定一致性
-- 人物动机、关系和主线绑定优先以“人物运行态摘要”为准，不要被冗长人物背景带偏
-- 优先遵循结构化记忆中的人物状态、关系边、伏笔和世界规则
-- 如果最近章节连续性资产中已经明确了场景目标、冲突推进、人物出场、结尾钩子或伏笔，必须优先承接，不要丢失
-- 推进故事发展，不能原地踏步
-- 爽点和钩子必须具体、可执行"""
-
-        # 使用题材专属细化
-        genre_specific = f"""
-Genre-specific refinement (specific implementation of general planning requirements, please use in combination)
-{chapter_plan_guide}""" if chapter_plan_guide else ''
-
-        # 将题材专属细化添加到提示词
-        if genre_specific:
-            plan_user_prompt += genre_specific
+        plan_prompt_budget = _get_chapter_plan_prompt_token_budget(selected_plan_model)
+        plan_user_prompt = _build_chapter_plan_user_prompt(
+            next_chapter_number=next_chapter_number,
+            concept=plan_optimized_context.get('project_concept', concept),
+            current_chapter_outline=chapter_generation_context.current_chapter_outline,
+            current_volume_context=chapter_generation_context.current_volume_context,
+            core_character_anchor_context=chapter_generation_context.core_character_anchor_context,
+            focus_character_relationship_context=chapter_generation_context.focus_character_relationship_context,
+            planning_character_context=(
+                chapter_generation_context.planning_character_prompt_context
+                or chapter_generation_context.character_prompt_context
+            ),
+            epic_framework_context=chapter_generation_context.epic_framework_context,
+            optimized_context_text=plan_optimized_context.get('plot_outline', plot_outline),
+            structured_memory_text=plan_optimized_context.get('structured_memory_text', ''),
+            previous_chapters_summary=plan_optimized_context.get('previous_chapters_analysis', previous_chapters_summary),
+            recent_chapter_assets_summary=plan_optimized_context.get('recent_chapter_assets_summary', recent_chapter_assets_summary),
+            previous_ending=plan_optimized_context.get('previous_ending', previous_ending),
+            climax_instruction=climax_instruction,
+            chapter_plan_guide=chapter_plan_guide,
+            model_name=selected_plan_model,
+            max_prompt_tokens=plan_prompt_budget,
+        )
+        plan_prompt_tokens = _estimate_tokens_by_chars(plan_user_prompt)
+        logger.info(
+            "      - 最终规划Prompt: %s tokens / 预算 %s tokens",
+            plan_prompt_tokens,
+            plan_prompt_budget,
+        )
 
         # 🆕 使用真流式 LLM 调用（智能选择模型）
         try:
@@ -851,11 +1135,12 @@ Genre-specific refinement (specific implementation of general planning requireme
         from app.services.agents.context_optimizer import get_context_optimizer
         context_optimizer = get_context_optimizer(
             current_chapter=next_chapter_number,
-            stage='content_creation'
+            stage='content_creation',
+            model_name=workflow_generation_model,
         )
         
         # 🆕 获取优化器选择的模型（不再需要 optimize_for_chapter_generation，因为章节规划已消化上下文）
-        selected_content_model = context_optimizer.selected_model
+        selected_content_model = workflow_generation_model or context_optimizer.selected_model
         resolved_content_model = resolve_model_for_task(None, selected_content_model) or selected_content_model
         logger.info(f"   🤖 内容创作使用模型: {resolved_content_model} (requested={selected_content_model})")
         # 🆕 广播步骤2模型
@@ -1246,6 +1531,8 @@ Genre-specific refinement (specific implementation of general planning requireme
                     选择的模型名称
                 """
                 # 估算总输入长度（章节 + 评审 + 系统提示词 + 用户提示词模板）
+                if workflow_generation_model:
+                    return workflow_generation_model
                 chapter_tokens = estimate_tokens(chapter_content)
                 reviews_tokens = estimate_tokens(reviews)
                 prompt_overhead = 500  # 系统提示词和用户提示词模板的开销
@@ -1264,7 +1551,7 @@ Genre-specific refinement (specific implementation of general planning requireme
             logger.info(f"      - 章节长度: {len(chapter_draft)} 字 ≈ {estimate_tokens(chapter_draft)} tokens")
             logger.info(f"      - 初始评审: {len(initial_reviews)} 字 ≈ {estimate_tokens(initial_reviews)} tokens")
             logger.info(f"      - 预估总计: ≈ {estimate_tokens(chapter_draft) + estimate_tokens(initial_reviews) + 500} tokens")
-            logger.info(f"      - qwen3-max 安全输入预算: ≈ {_get_safe_input_token_budget('qwen3-max')} tokens")
+            logger.info(f"      - {selected_revision_model} 安全输入预算: ≈ {_get_safe_input_token_budget(selected_revision_model)} tokens")
             
             # 🆕 广播步骤4改稿模型（首轮改稿前广播一次）
             if not skip_iteration_optimization:
@@ -1287,6 +1574,7 @@ Genre-specific refinement (specific implementation of general planning requireme
             final_version = current_version
             reached_pass = skip_iteration_optimization
             best_version = current_version
+            latest_revised_version = ""
             # 初始化最佳分数为已有评审的分数（若无法提取则为0）
             best_score = _extract_iteration_review_score(current_review)
             # 🆕 累积所有轮次的评审意见，作为改稿参考
@@ -1378,7 +1666,7 @@ Genre-specific refinement (specific implementation of general planning requireme
                 )
 
                 # 仅在最后一轮向前端流式输出正文；前几轮不推送正文
-                on_chunk_cb = on_iteration_chunk if round_idx == max_rounds else noop_chunk
+                on_chunk_cb = noop_chunk
                 revised_version = await streaming_service.generate_chapter_streaming(
                     prompt=iteration_user_prompt_round,
                     system_prompt=iteration_system_prompt,
@@ -1386,6 +1674,7 @@ Genre-specific refinement (specific implementation of general planning requireme
                     temperature=0.7,
                     model=selected_revision_model,
                 )
+                latest_revised_version = revised_version
                 logger.info(f"   ✓ 第{round_idx}轮改稿完成（{selected_revision_model}），字数: {len(revised_version)}")
                 await ws_manager.send_task_progress(
                     project_id=project_id,
@@ -1400,6 +1689,8 @@ Genre-specific refinement (specific implementation of general planning requireme
                     chapter_number=next_chapter_number,
                     chapter_content=revised_version,
                     chapter_plan=chapter_plan,
+                    review_text=all_reviews_text,
+                    iteration_plan=iteration_plan_text,
                     recent_chapter_assets_summary=recent_chapter_assets_summary,
                 )
                 new_review_report = await streaming_service.generate_chapter_streaming(
@@ -1410,7 +1701,10 @@ Genre-specific refinement (specific implementation of general planning requireme
                     task_type="review",
                 )
                 score = _extract_iteration_review_score(new_review_report)
+                has_unresolved_required_items = _iteration_review_has_unresolved_required_items(new_review_report)
                 logger.info(f"   🧮 第{round_idx}轮评分：{score:.1f}/10")
+                if has_unresolved_required_items:
+                    logger.info("   🚧 第%s轮仍有必改项未执行，本轮不作为可采用版本", round_idx)
                 await ws_manager.send_task_progress(
                     project_id=project_id,
                     task_id=task_id,
@@ -1422,26 +1716,39 @@ Genre-specific refinement (specific implementation of general planning requireme
                 all_reviews.append(f"【第{round_idx}轮评审】\n{new_review_report}")
 
                 # 🆕 记录最高评分版本
-                if score > best_score:
+                previous_best_score = best_score
+                score_improved = (not has_unresolved_required_items) and score >= previous_best_score
+                if score_improved:
                     best_score = score
                     best_version = revised_version
 
                 # 判定是否达标
-                if score >= pass_score_threshold:
+                if score >= pass_score_threshold and not has_unresolved_required_items:
                     final_version = revised_version
                     current_review = new_review_report
                     reached_pass = True
                     logger.info(f"   🎉 达到目标分值 {pass_score_threshold}，停止迭代")
                     break
                 else:
-                    # 继续下一轮
-                    current_version = revised_version
+                    # 只有评分不下降时才把本轮改稿作为下一轮基底，避免低分稿继续污染后续迭代。
+                    if score_improved:
+                        current_version = revised_version
+                    else:
+                        logger.info(
+                            f"   ↩️ 第{round_idx}轮评分未提升（{score:.1f}/10 < {previous_best_score:.1f}/10），"
+                            "下一轮继续基于当前最佳版本修订"
+                        )
+                        current_version = best_version
                     current_review = new_review_report
-                    final_version = revised_version
+                    final_version = best_version
 
             if not reached_pass:
                 logger.info(f"   ⚠️ 未达标，输出最高评分版本：{best_score:.1f}/10")
-                final_version = best_version
+                final_version = _select_iteration_fallback_version(
+                    initial_version=chapter_draft,
+                    latest_revised_version=latest_revised_version,
+                    best_version=best_version,
+                )
             logger.info(f"   ✅ 迭代优化结束，输出最终版本，长度: {len(final_version)}")
         except Exception as e:
             logger.error(f"   ⚠️ 真流式迭代优化失败，回退到同步调用: {e}")
@@ -1490,6 +1797,9 @@ Genre-specific refinement (specific implementation of general planning requireme
             final_version = chapter_draft
 
         if not skip_iteration_optimization:
+            for chunk in _split_stream_text(final_version):
+                next_chunk_index = iteration_chunk_index[0] + 1
+                await on_iteration_chunk(chunk, next_chunk_index)
             await ws_manager.send_stream_end(project_id, 'iteration', len(final_version), f"第{next_chapter_number}章迭代优化完成")
         # 🔔 推送阶段完成状态（生成下一章 - 步骤4）
         await ws_manager.send_stage_update(
@@ -1688,18 +1998,18 @@ Genre-specific refinement (specific implementation of general planning requireme
         try:
             update_query = text("""
                 UPDATE generation_history
-                SET status = :status, error_message = :error_message, completed_at = :completed_at
+                SET status = :status, error = :error, completed_at = :completed_at
                 WHERE task_id = :task_id
             """)
             db.execute(update_query, {
                 "status": "failed",
-                "error_message": str(e),
+                "error": str(e),
                 "completed_at": utc_now().isoformat(),
                 "task_id": task_id
             })
             db.commit()
-        except Exception:
-            pass
+        except Exception as update_error:
+            logger.warning(f"⚠️ 更新任务失败状态失败: {update_error}")
 
         # 发送错误事件
         await ws_manager.send_task_error(
@@ -1708,5 +2018,7 @@ Genre-specific refinement (specific implementation of general planning requireme
             error=str(e)
         )
     finally:
+        mark_generate_next_chapter_task_inactive(task_id)
         db.close()
+
 

@@ -600,53 +600,6 @@ class OpenAICompatibleAdapter(BaseLLMAdapter):
 
 
 @register_llm_model(
-    model_id="qwen3-max",
-    name="Qwen3 Max",
-    provider="alibaba",
-    capabilities=["creative", "dialogue", "reasoning", "writing"],
-    task_types=["chapter", "dialogue", "creative", "writing"],
-    max_context_tokens=32000,
-    max_output_tokens=8192,
-    quality_score=8.5,
-    avg_latency_seconds=2.5,
-    cost_per_1k_input_tokens=0.004,
-    cost_per_1k_output_tokens=0.012,
-    api_key_env="DASHSCOPE_API_KEY",
-    base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
-    priority=1,
-    fallback_models=["deepseek-v4-flash"],
-    tags=["creative", "dialogue", "chinese"],
-)
-class QwenMaxAdapter(OpenAICompatibleAdapter):
-    """阿里云 Qwen3 Max 适配器"""
-
-    pass
-
-
-@register_llm_model(
-    model_id="qwen-long",
-    name="Qwen Long",
-    provider="alibaba",
-    capabilities=["long_context", "summarization", "analysis"],
-    task_types=["book_synthesis", "long_context"],
-    max_context_tokens=10000000,
-    max_output_tokens=8192,
-    quality_score=8.0,
-    avg_latency_seconds=5.0,
-    cost_per_1k_input_tokens=0.0005,
-    cost_per_1k_output_tokens=0.002,
-    api_key_env="DASHSCOPE_API_KEY",
-    base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
-    priority=1,
-    tags=["long_context", "chinese"],
-)
-class QwenLongAdapter(OpenAICompatibleAdapter):
-    """阿里云 Qwen Long 适配器 - 支持超长上下文"""
-
-    pass
-
-
-@register_llm_model(
     model_id="qwen3.7-plus",
     name="Qwen3.7 Plus",
     provider="alibaba",
@@ -656,8 +609,8 @@ class QwenLongAdapter(OpenAICompatibleAdapter):
     max_output_tokens=65536,
     quality_score=9.2,
     avg_latency_seconds=1.6,
-    cost_per_1k_input_tokens=0.0004,
-    cost_per_1k_output_tokens=0.0016,
+    cost_per_1k_input_tokens=0.002,
+    cost_per_1k_output_tokens=0.008,
     api_key_env="DASHSCOPE_API_KEY",
     base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
     default_timeout=180,
@@ -684,8 +637,8 @@ class Qwen37PlusAdapter(OpenAICompatibleAdapter):
     max_output_tokens=8192,
     quality_score=8.9,
     avg_latency_seconds=2.0,
-    cost_per_1k_input_tokens=0.002,
-    cost_per_1k_output_tokens=0.010,
+    cost_per_1k_input_tokens=0.0065,
+    cost_per_1k_output_tokens=0.027,
     api_key_env="DASHSCOPE_API_KEY",
     base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
     default_timeout=180,
@@ -714,8 +667,8 @@ class KimiK26Adapter(OpenAICompatibleAdapter):
     max_output_tokens=16384,
     quality_score=9.1,
     avg_latency_seconds=2.5,
-    cost_per_1k_input_tokens=0.002,
-    cost_per_1k_output_tokens=0.012,
+    cost_per_1k_input_tokens=0.008,
+    cost_per_1k_output_tokens=0.028,
     api_key_env="DASHSCOPE_API_KEY",
     base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
     default_timeout=300,
@@ -744,8 +697,8 @@ class GLM52Adapter(OpenAICompatibleAdapter):
     max_output_tokens=16384,
     quality_score=9.0,
     avg_latency_seconds=2.2,
-    cost_per_1k_input_tokens=0.002,
-    cost_per_1k_output_tokens=0.012,
+    cost_per_1k_input_tokens=0.0042,
+    cost_per_1k_output_tokens=0.0168,
     api_key_env="DASHSCOPE_API_KEY",
     base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
     default_timeout=300,
@@ -775,9 +728,9 @@ class MiniMaxM3Adapter(OpenAICompatibleAdapter):
     max_output_tokens=16384,
     quality_score=8.8,
     avg_latency_seconds=1.2,
-    cost_per_1k_input_tokens=0.0014,
+    cost_per_1k_input_tokens=0.00135,
     cost_per_1k_output_tokens=0.0081,
-    api_key_env="STEPFUN_API_KEY",
+    api_key_env="STEP_API_KEY",
     base_url="https://api.stepfun.com/v1",
     default_timeout=300,
     supports_function_call=True,
@@ -806,8 +759,8 @@ class Step37FlashAdapter(OpenAICompatibleAdapter):
     max_output_tokens=131072,
     quality_score=9.3,
     avg_latency_seconds=2.0,
-    cost_per_1k_input_tokens=3.0,
-    cost_per_1k_output_tokens=6.0,
+    cost_per_1k_input_tokens=0.003,
+    cost_per_1k_output_tokens=0.006,
     api_key_env="MIMO_API_KEY",
     base_url="https://api.xiaomimimo.com/v1",
     default_timeout=600,
@@ -838,8 +791,8 @@ class MiMoV25ProAdapter(OpenAICompatibleAdapter):
     max_output_tokens=131072,
     quality_score=9.0,
     avg_latency_seconds=1.5,
-    cost_per_1k_input_tokens=1.0,
-    cost_per_1k_output_tokens=2.0,
+    cost_per_1k_input_tokens=0.001,
+    cost_per_1k_output_tokens=0.002,
     api_key_env="MIMO_API_KEY",
     base_url="https://api.xiaomimimo.com/v1",
     default_timeout=600,
@@ -864,24 +817,65 @@ class MiMoV25Adapter(OpenAICompatibleAdapter):
 
 
 @register_llm_model(
-    model_id="qwen-turbo",
-    name="Qwen Turbo",
-    provider="alibaba",
-    capabilities=["fast", "simple", "extraction"],
-    task_types=["entity_extract", "summarize", "simple"],
-    max_context_tokens=8192,
-    max_output_tokens=4096,
-    quality_score=7.0,
-    avg_latency_seconds=1.0,
-    cost_per_1k_input_tokens=0.0008,
-    cost_per_1k_output_tokens=0.002,
-    api_key_env="DASHSCOPE_API_KEY",
-    base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+    model_id="doubao-seed-evolving",
+    name="Doubao Seed Evolving",
+    provider="volcengine",
+    capabilities=["reasoning", "agent", "coding", "long_context", "writing", "chinese"],
+    task_types=["concept", "outline_expand", "chapter_batch", "long_writing", "coding", "agent", "reasoning"],
+    max_context_tokens=262144,
+    max_output_tokens=16384,
+    quality_score=9.3,
+    avg_latency_seconds=2.5,
+    cost_per_1k_input_tokens=0.006,
+    cost_per_1k_output_tokens=0.03,
+    api_key_env="DOUBAO_API_KEY",
+    base_url="https://ark.cn-beijing.volces.com/api/v3",
+    default_timeout=300,
+    supports_function_call=True,
+    supports_thinking_mode=True,
     priority=2,
-    tags=["fast", "chinese"],
+    fallback_models=["qwen3.7-plus"],
+    default_params={"temperature": 0.7, "max_tokens": 16384, "thinking": {"type": "enabled"}},
+    tags=["reasoning", "agent", "coding", "long_context", "writing", "chinese", "volcengine", "doubao", "evolving"],
 )
-class QwenTurboAdapter(OpenAICompatibleAdapter):
-    """阿里云 Qwen Turbo 适配器 - 快速响应"""
+class DoubaoSeedEvolvingAdapter(OpenAICompatibleAdapter):
+    """火山引擎豆包 Seed Evolving 适配器。直接调用火山方舟 OpenAI 兼容接口，
+    面向 Agent 与 Coding 场景设计的 Seed 系列深度思考模型，
+    具备复杂任务编排、长程规划、代码生成与工具调用核心能力，
+    采用动态迭代机制（每周至少一个版本更新），通过统一 Model ID 始终获取最新版本。"""
+
+    pass
+
+
+@register_llm_model(
+    model_id="doubao-seed-character",
+    name="Doubao Seed Character",
+    provider="volcengine",
+    capabilities=["roleplay", "dialogue", "multimodal", "reasoning", "instruction_following", "chinese"],
+    task_types=["dialogue", "character", "character_expand", "chapter", "creative", "roleplay"],
+    max_context_tokens=131072,
+    max_output_tokens=32768,
+    quality_score=8.8,
+    avg_latency_seconds=1.5,
+    cost_per_1k_input_tokens=0.0012,
+    cost_per_1k_output_tokens=0.006,
+    api_key_env="DOUBAO_API_KEY",
+    base_url="https://ark.cn-beijing.volces.com/api/v3",
+    default_timeout=300,
+    supports_function_call=True,
+    supports_thinking_mode=True,
+    supports_vision=True,
+    priority=2,
+    fallback_models=["qwen3.7-plus"],
+    default_params={"request_model": "doubao-seed-character-260628", "temperature": 0.85, "max_tokens": 8192, "thinking": {"type": "disabled"}},
+    tags=["roleplay", "dialogue", "multimodal", "reasoning", "instruction_following", "chinese", "volcengine", "doubao", "character"],
+)
+class DoubaoSeedCharacterAdapter(OpenAICompatibleAdapter):
+    """火山引擎豆包 Seed Character 适配器。直接调用火山方舟 OpenAI 兼容接口，
+    面向新一代虚拟陪伴与泛娱乐场景的角色扮演模型，
+    角色扮演的剧情推理、对话节奏与情感递进能力显著增强，
+    新增 Human-like 自然聊天、thinking 与 VLM 多模态理解（视频/图片/表情包）能力，
+    可主动激活对话并贴合语境回复。"""
 
     pass
 
@@ -896,8 +890,8 @@ class QwenTurboAdapter(OpenAICompatibleAdapter):
     max_output_tokens=384000,
     quality_score=9.5,
     avg_latency_seconds=15.0,
-    cost_per_1k_input_tokens=0.012,
-    cost_per_1k_output_tokens=0.024,
+    cost_per_1k_input_tokens=0.003,
+    cost_per_1k_output_tokens=0.006,
     api_key_env="DEEPSEEK_API_KEY",
     base_url="https://api.deepseek.com",
     supports_streaming=False,

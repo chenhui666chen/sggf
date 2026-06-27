@@ -239,7 +239,7 @@ def _pick_dreamweaver_script_model() -> str:
     if legacy.startswith("qwen") or legacy in {"deepseek-v4-flash", "deepseek-v4-pro"}:
         return legacy
 
-    return "qwen-plus"
+    return "qwen3.7-plus"
 
 
 def _pick_dreamweaver_script_enhance_model() -> str:
