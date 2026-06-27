@@ -160,6 +160,11 @@ class Settings(BaseSettings):
     # Agent配置
     TEMPERATURE: float = 0.7
     MAX_CONTEXT_LENGTH: int = 4000
+    ENABLE_MULTI_MODEL_REVIEW: bool = False
+    MULTI_MODEL_REVIEW_DEFAULT_PRESET: str = "balanced_3"
+    MULTI_MODEL_REVIEW_CHIEF_MODEL: str = "deepseek-v4-pro"
+    MULTI_MODEL_REVIEW_CONCURRENCY: int = 5
+    MULTI_MODEL_REVIEW_TIMEOUT_SECONDS: int = 120
 
     # 日志配置
     LOG_LEVEL: str = "INFO"

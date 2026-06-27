@@ -22,7 +22,10 @@ from .agents import (
     WorldArchitectAgent,
 )
 from core.langchain_bridge import create_task_llm, create_model_llm
+from core.model_runtime import run_async_compat
 from .intelligent_truncator import smart_truncate_for_context
+from . import review_feature_gate
+from .multi_model_review_service import MultiModelReviewService
 
 # 导入模块化提示词
 from app.services.prompts.stages.world_building import (
@@ -1252,6 +1255,40 @@ class CreativeDirectorCoordinator:
             "styled_content": styled_content,
         }
 
+    def _run_single_model_quality_review(self, truncated_content: str) -> str:
+        review_system_prompt, review_user_prompt = build_first_chapter_review_prompts(
+            chapter_draft=truncated_content,
+        )
+        review_result = self.quality_reviewer._process_with_system_prompt(
+            review_user_prompt,
+            system_prompt=review_system_prompt,
+        )
+        return review_result if isinstance(review_result, str) else review_result.get("output", "评审报告")
+
+    @staticmethod
+    def _review_needs_revision(review: str) -> bool:
+        return any(keyword in review for keyword in ["需要修订", "建议修改", "必须改进", "严重问题"])
+
+    def _get_review_genre(self) -> str:
+        return str(
+            self.project_context.get("genre")
+            or self.project_context.get("project_genre")
+            or ""
+        )
+
+    @staticmethod
+    def _build_review_meta(multi_model_result: Dict[str, Any]) -> Dict[str, Any]:
+        return {
+            "multi_model": bool(multi_model_result.get("multi_model")),
+            "preset": multi_model_result.get("preset"),
+            "chief_model": multi_model_result.get("chief_model"),
+            "reviewer_models": multi_model_result.get("reviewer_models") or [],
+            "reviewer_profiles": multi_model_result.get("reviewer_profiles") or [],
+            "per_model_reports": multi_model_result.get("per_model_reports") or [],
+            "fallback_required": bool(multi_model_result.get("fallback_required")),
+            "fallback_reason": multi_model_result.get("fallback_reason"),
+        }
+
     def _stage_four_quality_review(self, content_result: Dict[str, Any]) -> Dict[str, Any]:
         """
         阶段4：质量评审 - 调用真实Agent生成
@@ -1284,22 +1321,53 @@ class CreativeDirectorCoordinator:
         
         logger.info(f"📏 内容长度: {len(content)} → {len(truncated_content)}字符")
         
-        review_system_prompt, review_user_prompt = build_first_chapter_review_prompts(
-            chapter_draft=truncated_content,
-        )
-        review_result = self.quality_reviewer._process_with_system_prompt(
-            review_user_prompt,
-            system_prompt=review_system_prompt,
-        )
-        review = review_result if isinstance(review_result, str) else review_result.get("output", "评审报告")
+        review_meta: Optional[Dict[str, Any]] = None
+        cfg = review_feature_gate.get_multi_model_review_config(self.project_context)
+        if cfg:
+            try:
+                service = MultiModelReviewService(
+                    preset=cfg["preset"],
+                    chief_model=cfg.get("chief_model"),
+                )
+                multi_model_result = run_async_compat(
+                    lambda: service.review(
+                        truncated_content,
+                        genre=self._get_review_genre(),
+                        chapter_plan=str(self.project_context.get("chapter_plan") or ""),
+                    )
+                )
+                review_meta = self._build_review_meta(multi_model_result)
+                if multi_model_result.get("multi_model") and multi_model_result.get("review"):
+                    review = str(multi_model_result["review"])
+                    needs_revision = self._review_needs_revision(review)
+                    logger.info(f"✅ 多模型质量评审完成，长度: {len(review)}")
+                    self.project_context.update({"review": review, "review_meta": review_meta})
+                    return {
+                        "review": review,
+                        "needs_revision": needs_revision,
+                        "multi_model": True,
+                        "review_meta": review_meta,
+                    }
+                logger.warning("多模型质量评审未产出足够结果，回退单模型评审")
+            except Exception:
+                logger.exception("多模型质量评审失败，回退单模型评审")
+
+        review = self._run_single_model_quality_review(truncated_content)
         logger.info(f"✅ 质量评审完成，长度: {len(review)}")
         
         # 简单判断是否需要修订（基于关键词）
-        needs_revision = any(keyword in review for keyword in ["需要修订", "建议修改", "必须改进", "严重问题"])
+        needs_revision = self._review_needs_revision(review)
         logger.info(f"📋 是否需要修订: {needs_revision}")
         
-        self.project_context.update({"review": review})
-        return {"review": review, "needs_revision": needs_revision}
+        context_update = {"review": review}
+        result: Dict[str, Any] = {"review": review, "needs_revision": needs_revision}
+        if review_meta is not None:
+            review_meta["multi_model"] = False
+            context_update["review_meta"] = review_meta
+            result["multi_model"] = False
+            result["review_meta"] = review_meta
+        self.project_context.update(context_update)
+        return result
 
     def _stage_five_iteration_optimization(self, review_result: Dict[str, Any]) -> Dict[str, Any]:
         """

@@ -56,6 +56,7 @@ class WorkflowProjectProfile:
     planned_chapters_min: int = 0
     planned_chapters_max: int = 0
     user_outline_plan: str = ""
+    review_config: str = ""
 
     def to_project_context_payload(self) -> dict[str, Any]:
         return {
@@ -67,6 +68,7 @@ class WorkflowProjectProfile:
             "planned_chapters_min": self.planned_chapters_min,
             "planned_chapters_max": self.planned_chapters_max,
             "user_outline_plan": self.user_outline_plan,
+            "review_config": self.review_config,
             "project_genre": self.genre,
         }
 
@@ -765,7 +767,8 @@ class WorkflowContextBuilder:
             text(
                 """
                 SELECT title, genre, sub_genre, planned_length_type,
-                       planned_chapters_min, planned_chapters_max, user_outline_plan
+                       planned_chapters_min, planned_chapters_max, user_outline_plan,
+                       review_config
                 FROM projects
                 WHERE id = :project_id
                 """
@@ -785,6 +788,7 @@ class WorkflowContextBuilder:
             planned_chapters_min=int(row[4] or 0),
             planned_chapters_max=int(row[5] or 0),
             user_outline_plan=_decode_prompt_text(row[6]),
+            review_config=str(row[7] or ""),
         )
 
     def ensure_project_settings_record(self, project_id: int) -> bool:

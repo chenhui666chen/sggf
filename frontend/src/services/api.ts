@@ -4,7 +4,13 @@ import type {
   DeletedChapterAudio,
   UserAudiobookProjectOverview,
 } from '@/types/audiobook'
-import type { Project, ProjectCreatePayload, ProjectUpdatePayload } from '@/types/project'
+import type {
+  Project,
+  ProjectCreatePayload,
+  ProjectUpdatePayload,
+  ReviewConfigPayload,
+  ReviewConfigResponse,
+} from '@/types/project'
 import type {
   SettingCollection,
   SettingCollectionCreatePayload,
@@ -1456,6 +1462,14 @@ class ApiClient {
         params: ttsModel ? { tts_model: ttsModel } : undefined,
       },
     )
+  }
+
+  getProjectReviewConfig(projectId: number) {
+    return this.client.get<ReviewConfigResponse>(`/api/v1/projects/${projectId}/review-config`)
+  }
+
+  updateProjectReviewConfig(projectId: number, data: ReviewConfigPayload) {
+    return this.client.put<ReviewConfigResponse>(`/api/v1/projects/${projectId}/review-config`, data)
   }
 
   // 章节API

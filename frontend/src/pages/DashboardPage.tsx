@@ -35,6 +35,7 @@ import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import AutoStoriesIcon from '@mui/icons-material/AutoStories'
 import FileDownloadIcon from '@mui/icons-material/FileDownload'
 import HubIcon from '@mui/icons-material/Hub'
+import TuneIcon from '@mui/icons-material/Tune'
 import Menu from '@mui/material/Menu'
 import Snackbar from '@mui/material/Snackbar'
 import Alert from '@mui/material/Alert'
@@ -50,6 +51,7 @@ import { startGenerateNextChapter } from '@/store/slices/workflowSlice'
 import { generationService, GenerationTask } from '@/services/generation'
 import { apiClient } from '@/services/api'
 import GenerationProgressDialog from '@/components/GenerationProgressDialog'
+import MultiModelReviewSettingsDialog from '@/components/project/MultiModelReviewSettingsDialog'
 import { logger } from '@/utils/logger'
 import { buildStoryExpansionCompletionMessage } from '@/utils/storyExpansionFeedback'
 import {
@@ -132,6 +134,7 @@ export default function DashboardPage() {
   // 🆕 书名编辑状态
   const [editingTitleProjectId, setEditingTitleProjectId] = useState<number | null>(null)
   const [editedTitle, setEditedTitle] = useState('')
+  const [reviewSettingsProjectId, setReviewSettingsProjectId] = useState<number | null>(null)
 
   // 🆕 生成下一章状态
   const [generatingNextChapter, setGeneratingNextChapter] = useState<Record<number, boolean>>({})
@@ -467,6 +470,20 @@ export default function DashboardPage() {
   const handleCancelDelete = () => {
     setDeleteConfirmOpen(false)
     setProjectToDelete(null)
+  }
+
+  const handleOpenReviewSettings = (projectId: number) => {
+    setReviewSettingsProjectId(projectId)
+  }
+
+  const handleCloseReviewSettings = () => {
+    setReviewSettingsProjectId(null)
+  }
+
+  const handleReviewSettingsSaved = () => {
+    setSnackbarMessage('评审设置已保存')
+    setSnackbarSeverity('success')
+    setSnackbarOpen(true)
   }
 
   const handleLogout = () => {
@@ -996,6 +1013,37 @@ export default function DashboardPage() {
               }}
             >
               {/* 整体容器 - 包含 3D 变换 */}
+              <Tooltip title="评审设置" arrow>
+                <IconButton
+                  size="small"
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    if (!isDisabled) handleOpenReviewSettings(project.id)
+                  }}
+                  disabled={isDisabled}
+                  sx={{
+                    position: 'absolute',
+                    top: { xs: 7, sm: 9 },
+                    right: { xs: 9, sm: 11 },
+                    zIndex: 8,
+                    width: { xs: 28, sm: 30 },
+                    height: { xs: 28, sm: 30 },
+                    color: bookColors.accent,
+                    backgroundColor: 'rgba(0,0,0,0.28)',
+                    border: `1px solid ${bookColors.accent}44`,
+                    '&:hover': {
+                      backgroundColor: `${bookColors.accent}22`,
+                      transform: 'translateY(-1px)',
+                    },
+                    '&.Mui-disabled': {
+                      color: 'rgba(255,255,255,0.3)',
+                      borderColor: 'rgba(255,255,255,0.14)',
+                    },
+                  }}
+                >
+                  <TuneIcon sx={{ fontSize: { xs: 16, sm: 17 } }} />
+                </IconButton>
+              </Tooltip>
               <Box
                 sx={{
                   position: 'relative',
@@ -1775,6 +1823,14 @@ export default function DashboardPage() {
             setCurrentTask(null)
           }
         }}
+      />
+
+      <MultiModelReviewSettingsDialog
+        open={reviewSettingsProjectId !== null}
+        projectId={reviewSettingsProjectId}
+        projectTitle={projects.find((project) => project.id === reviewSettingsProjectId)?.title}
+        onClose={handleCloseReviewSettings}
+        onSaved={handleReviewSettingsSaved}
       />
 
       {/* 章节列表侧边栏 */}

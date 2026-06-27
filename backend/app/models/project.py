@@ -34,6 +34,9 @@ class Project(Base):
     audio_config: Mapped[Optional[str]] = mapped_column(
         Text, nullable=True, comment="项目级音频配置(JSON)"
     )
+    review_config: Mapped[Optional[str]] = mapped_column(
+        Text, nullable=True, comment="评审高级功能配置(JSON)"
+    )
     
     status: Mapped[str] = mapped_column(String(50), default="draft")  # draft, writing, reviewing, published
     word_count: Mapped[int] = mapped_column(default=0)

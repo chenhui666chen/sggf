@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from typing import List, Optional
 import logging
 import re
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 import json
 from app.db.base import get_db
 from app.models.user import User
@@ -17,6 +17,12 @@ from app.schemas.project import (
     ProjectCreate, ProjectUpdate, ProjectResponse, ProjectDetailResponse,
     ChapterCreate, ChapterUpdate, ChapterResponse
 )
+from app.schemas.review_config import (
+    MultiModelReviewConfig,
+    ReviewConfigResponse,
+    ReviewConfigUpdate,
+)
+from app.core.config import settings
 from app.core.security import get_current_user
 from app.services.workflow_context_builder import WorkflowContextBuilder
 from app.services.audiobook.project_audio_config import (
@@ -96,6 +102,8 @@ def _dump_persisted_character_audio_config(config: CharacterAudioConfig) -> dict
 
 router = APIRouter(prefix="/api/v1/projects", tags=["projects"])
 
+AVAILABLE_REVIEW_PRESETS = ["balanced_3", "key_chapter_5", "deep_7"]
+
 
 def _allocate_next_display_no(db: Session, *, user_id: int) -> int:
     """为同一用户分配稳定递增的展示序号。"""
@@ -116,6 +124,43 @@ def _allocate_next_display_no(db: Session, *, user_id: int) -> int:
 def _is_untitled_project(title: Optional[str]) -> bool:
     normalized_title = (title or "").strip()
     return not normalized_title or normalized_title == "未命名项目"
+
+
+def _get_owned_project(db: Session, project_id: int, current_user: User) -> Project:
+    project = db.query(Project).filter(
+        (Project.id == project_id) & (Project.user_id == current_user.id)
+    ).first()
+
+    if not project:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Project not found",
+        )
+    return project
+
+
+def _load_review_config(raw: Optional[str]) -> dict:
+    if not raw:
+        return {}
+    try:
+        data = json.loads(raw)
+    except (TypeError, json.JSONDecodeError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _review_config_response(config: dict) -> ReviewConfigResponse:
+    try:
+        multi_model_review = MultiModelReviewConfig(**(config.get("multi_model_review") or {}))
+    except ValidationError:
+        logger.warning("项目评审配置格式无效，已回退默认配置")
+        multi_model_review = MultiModelReviewConfig()
+
+    return ReviewConfigResponse(
+        multi_model_review=multi_model_review,
+        system_enabled=settings.ENABLE_MULTI_MODEL_REVIEW,
+        available_presets=AVAILABLE_REVIEW_PRESETS,
+    )
 
 
 def _sync_project_title_from_saved_concept(db: Session, project: Project) -> bool:
@@ -441,6 +486,44 @@ async def update_project_audio_config(
     db.refresh(project)
 
     return ProjectAudioConfig(characters=characters, audio_fx=config.audio_fx)
+
+
+@router.get("/{project_id}/review-config", response_model=ReviewConfigResponse)
+async def get_project_review_config(
+    project_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> ReviewConfigResponse:
+    """获取项目级评审高级功能配置。"""
+    project = _get_owned_project(db, project_id, current_user)
+    return _review_config_response(_load_review_config(project.review_config))
+
+
+@router.put("/{project_id}/review-config", response_model=ReviewConfigResponse)
+async def update_project_review_config(
+    project_id: int,
+    config: ReviewConfigUpdate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> ReviewConfigResponse:
+    """更新项目级评审高级功能配置。"""
+    project = _get_owned_project(db, project_id, current_user)
+    incoming = config.multi_model_review
+
+    if incoming.enabled and not settings.ENABLE_MULTI_MODEL_REVIEW:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="多模型评审功能未在系统级开启，请联系管理员",
+        )
+
+    data = _load_review_config(project.review_config)
+    data["multi_model_review"] = incoming.model_dump(exclude_none=True)
+    project.review_config = json.dumps(data, ensure_ascii=False)
+    db.add(project)
+    db.commit()
+    db.refresh(project)
+
+    return _review_config_response(data)
 
 
 @router.post("/{project_id}/audio-config/auto-voices", response_model=ProjectAudioConfig)

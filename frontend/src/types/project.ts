@@ -28,3 +28,26 @@ export interface ProjectCreatePayload {
 }
 
 export type ProjectUpdatePayload = Partial<ProjectCreatePayload> & Record<string, unknown>
+
+export type ReviewPreset = 'balanced_3' | 'key_chapter_5' | 'deep_7'
+export type KeyChapterReviewPreset = 'key_chapter_5' | 'deep_7'
+export type AutoReviewScenario = 'first_chapter' | 'key_chapter' | 'final_chapter'
+
+export interface MultiModelReviewConfig {
+  enabled: boolean
+  preset: ReviewPreset
+  auto_scenarios: AutoReviewScenario[]
+  manual_depth: ReviewPreset
+  key_chapter_depth: KeyChapterReviewPreset
+  chief_model: string
+  custom_panel?: Record<string, unknown> | null
+}
+
+export interface ReviewConfigPayload {
+  multi_model_review: MultiModelReviewConfig
+}
+
+export interface ReviewConfigResponse extends ReviewConfigPayload {
+  system_enabled: boolean
+  available_presets: ReviewPreset[]
+}
