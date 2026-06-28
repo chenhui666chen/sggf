@@ -46,6 +46,8 @@ class ExecuteStageRequest(BaseModel):
     regenerate: bool = False
     targets: Optional[list[str]] = None
     feedback: Optional[str] = None
+    manual_multi_model_review: bool = False
+    manual_multi_model_review_preset: Optional[str] = None
 
 class RegenerateStageRequest(BaseModel):
     project_id: int

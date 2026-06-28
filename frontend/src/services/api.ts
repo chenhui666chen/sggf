@@ -10,6 +10,7 @@ import type {
   ProjectUpdatePayload,
   ReviewConfigPayload,
   ReviewConfigResponse,
+  ReviewMetaResponse,
 } from '@/types/project'
 import type {
   SettingCollection,
@@ -2406,6 +2407,8 @@ class ApiClient {
     regenerate?: boolean
     targets?: string[]
     feedback?: string
+    manualMultiModelReview?: boolean
+    manualMultiModelReviewPreset?: string
   }) {
     return this.client.post('/api/v1/workflow/execute-stage-async', {
       project_id: payload.projectId,
@@ -2416,6 +2419,8 @@ class ApiClient {
       regenerate: payload.regenerate,
       targets: payload.targets,
       feedback: payload.feedback,
+      manual_multi_model_review: payload.manualMultiModelReview,
+      manual_multi_model_review_preset: payload.manualMultiModelReviewPreset,
     }, {
       timeout: 5000,
       validateStatus: () => true,
@@ -2438,6 +2443,13 @@ class ApiClient {
 
   getWorkflowAllStagesContent(projectId: number) {
     return this.client.get(`/api/v1/workflow/${projectId}/all-stages-content`, {
+      timeout: 15000,
+      validateStatus: () => true,
+    })
+  }
+
+  getWorkflowReviewMeta(projectId: number) {
+    return this.client.get<ReviewMetaResponse>(`/api/v1/workflow/${projectId}/review-meta`, {
       timeout: 15000,
       validateStatus: () => true,
     })

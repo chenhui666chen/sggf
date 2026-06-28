@@ -1003,6 +1003,46 @@ async def get_all_stages_content(
         )
 
 
+@router.get("/{project_id}/review-meta")
+async def get_review_meta(
+    project_id: int,
+    current_user = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """获取工作流评审元信息，不混入阶段文本快照。"""
+    try:
+        query = text(
+            """
+            SELECT id FROM projects
+            WHERE id = :project_id AND user_id = :user_id
+            """
+        )
+        result = db.execute(
+            query,
+            {"project_id": project_id, "user_id": current_user.id},
+        ).fetchone()
+
+        if not result:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="项目不存在",
+            )
+
+        workflow_context_builder = WorkflowContextBuilder(db)
+        return {
+            "project_id": project_id,
+            "review_meta": workflow_context_builder.load_review_meta(project_id),
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e),
+        )
+
+
 @router.get("/{project_id}/stage-status")
 async def get_stage_status(
     project_id: int,

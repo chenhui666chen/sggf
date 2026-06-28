@@ -25,6 +25,10 @@ import {
   FormHelperText,
   Drawer,
   IconButton,
+  Chip,
+  Badge,
+  Snackbar,
+  Alert as MuiAlert,
 } from '@mui/material'
 import RefreshIcon from '@mui/icons-material/Refresh'
 import SaveIcon from '@mui/icons-material/Save'
@@ -39,10 +43,7 @@ import NavigateNextIcon from '@mui/icons-material/NavigateNext'
 import AddIcon from '@mui/icons-material/Add'
 import MenuIcon from '@mui/icons-material/Menu'
 import CloseIcon from '@mui/icons-material/Close'
-import Chip from '@mui/material/Chip'
-import Badge from '@mui/material/Badge'
-import Snackbar from '@mui/material/Snackbar'
-import MuiAlert from '@mui/material/Alert'
+import TuneIcon from '@mui/icons-material/Tune'
 import { RootState, AppDispatch, store } from '@/store/store'
 import {
   startWorkflow,
@@ -67,9 +68,11 @@ import { fetchChapters } from '@/store/slices/editorSlice'
 import StageInfoPanel from '@/components/workflow/StageInfoPanel'
 import OutputPreviewPanel from '@/components/workflow/OutputPreviewPanel'
 import AgentStatusIndicator from '@/components/workflow/AgentStatusIndicator'
+import MultiModelReviewSettingsDialog from '@/components/project/MultiModelReviewSettingsDialog'
 import { workflowWebSocket } from '@/services/websocket'
 import { apiClient, extractApiErrorMessage } from '@/services/api'  // ✅ 添加apiClient导入
 import type { WorkflowGenerationModel } from '@/services/api'
+import type { ReviewMeta, ReviewPreset } from '@/types/project'
 import { formatProjectSequenceLabel } from '@/utils/projectDisplay'
 import { ProgressEstimator, type StageDurations, type ProgressState } from '@/utils/progressEstimator'
 import { statisticsService } from '@/services/statistics'
@@ -242,6 +245,7 @@ export default function WorkflowControlPage() {
     setEditedContentDraftContent('')
     setReviewReportContent('')
     setEditedReviewReportContent('')
+    setReviewMeta(null)
     setFinalVersionContent('')
     setEditedFinalVersionContent('')
 
@@ -256,6 +260,7 @@ export default function WorkflowControlPage() {
     setShowReviewDialog(false)
     setReviewLoading(false)
     setReviewSaving(false)
+    setShowReviewSettingsDialog(false)
 
     setIsStreaming(false)
     setStreamingStage(null)
@@ -319,8 +324,12 @@ export default function WorkflowControlPage() {
   const [showReviewDialog, setShowReviewDialog] = useState(false)
   const [reviewReportContent, setReviewReportContent] = useState('')
   const [editedReviewReportContent, setEditedReviewReportContent] = useState('')
+  const [reviewMeta, setReviewMeta] = useState<ReviewMeta | null>(null)
   const [reviewLoading, setReviewLoading] = useState(false)
   const [reviewSaving, setReviewSaving] = useState(false)
+  const [showReviewSettingsDialog, setShowReviewSettingsDialog] = useState(false)
+  const [showManualReviewDialog, setShowManualReviewDialog] = useState(false)
+  const [manualReviewPreset, setManualReviewPreset] = useState<ReviewPreset>('key_chapter_5')
 
   // 🆕 流式输出状态
   const [isStreaming, setIsStreaming] = useState(false)
@@ -345,6 +354,17 @@ export default function WorkflowControlPage() {
   
   // 🆕 左侧抽屉展开/收起状态
   const [leftDrawerOpen, setLeftDrawerOpen] = useState(false)
+
+  const refreshWorkflowReviewMeta = async (targetProjectId: number) => {
+    try {
+      const reviewMetaResponse = await apiClient.getWorkflowReviewMeta(targetProjectId)
+      if (reviewMetaResponse.status >= 200 && reviewMetaResponse.status < 300) {
+        setReviewMeta(reviewMetaResponse.data.review_meta || null)
+      }
+    } catch {
+      setReviewMeta(null)
+    }
+  }
 
   const [snackbarOpen, setSnackbarOpen] = useState(false)
   const [snackbarMessage, setSnackbarMessage] = useState('')
@@ -1299,6 +1319,10 @@ export default function WorkflowControlPage() {
             // 这里可以保留原有代码逻辑
           }
 
+          if (isActive) {
+            await refreshWorkflowReviewMeta(requestedProjectId)
+          }
+
           // 加载阶段状态
           try {
             const statusResponse = await apiClient.getWorkflowStageStatus(requestedProjectId)
@@ -1511,7 +1535,10 @@ export default function WorkflowControlPage() {
   }
 
   // 🆕 异步执行阶段函数
-  const executeStageAsync = async (stage: StageType) => {
+  const executeStageAsync = async (
+    stage: StageType,
+    options: { manualMultiModelReview?: boolean; manualMultiModelReviewPreset?: ReviewPreset } = {},
+  ) => {
     if (!projectId) return
 
     try {
@@ -1567,6 +1594,8 @@ export default function WorkflowControlPage() {
         requirement: requirement || '创作一部小说',
         workflowGenerationModel,
         enableStreaming,
+        manualMultiModelReview: options.manualMultiModelReview,
+        manualMultiModelReviewPreset: options.manualMultiModelReviewPreset,
       })
 
       if (response.status < 200 || response.status >= 300) {
@@ -2189,6 +2218,35 @@ export default function WorkflowControlPage() {
   const handleCloseReviewDialog = () => {
     setShowReviewDialog(false)
     setEditedReviewReportContent('')  // 清空编辑状态
+  }
+
+  const handleReviewSettingsSaved = async () => {
+    setSnackbarMessage('评审设置已保存')
+    setSnackbarSeverity('success')
+    setSnackbarOpen(true)
+    if (projectId) {
+      await refreshWorkflowReviewMeta(Number(projectId))
+    }
+  }
+
+  const handleManualMultiModelReview = () => {
+    if (!projectId || isRunning || isStarting || generatingNextChapter) return
+    setManualReviewPreset('key_chapter_5')
+    setShowManualReviewDialog(true)
+  }
+
+  const handleConfirmManualMultiModelReview = () => {
+    if (!projectId || isRunning || isStarting || generatingNextChapter) return
+    setShowManualReviewDialog(false)
+    setReviewReportContent('')
+    setEditedReviewReportContent('')
+    setReviewMeta(null)
+    dispatch(setCurrentStage('review'))
+    setIsRunning(true)
+    void executeStageAsync('review', {
+      manualMultiModelReview: true,
+      manualMultiModelReviewPreset: manualReviewPreset,
+    })
   }
 
   // 仅保存评审报告
@@ -2924,7 +2982,41 @@ export default function WorkflowControlPage() {
                       },
                     }}
                   >
-                    {stageNames[stage]}
+                    <Box component="span" sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.75 }}>
+                      <Box component="span">{stageNames[stage]}</Box>
+                      {stage === 'review' && projectId ? (
+                        <Tooltip title="多模型评审设置" arrow>
+                          <Box
+                            component="span"
+                            onClick={(event) => event.stopPropagation()}
+                            sx={{ display: 'inline-flex' }}
+                          >
+                            <IconButton
+                              aria-label="多模型评审设置"
+                              size="small"
+                              onClick={(event) => {
+                                event.stopPropagation()
+                                setShowReviewSettingsDialog(true)
+                              }}
+                              disabled={isRunning || isStarting || generatingNextChapter}
+                              sx={{
+                                width: 28,
+                                height: 28,
+                                p: 0.25,
+                                border: '1px solid',
+                                borderColor: 'divider',
+                                bgcolor: 'background.paper',
+                                '&:hover': {
+                                  bgcolor: 'action.hover',
+                                },
+                              }}
+                            >
+                              <TuneIcon fontSize="small" />
+                            </IconButton>
+                          </Box>
+                        </Tooltip>
+                      ) : null}
+                    </Box>
                   </StepLabel>
                 </Step>
               ))}
@@ -2948,6 +3040,7 @@ export default function WorkflowControlPage() {
             progressMessage={progressMessage}
             selectedConceptView={selectedConceptView}
             projectId={projectId || ''}
+            reviewMeta={reviewMeta}
           />
 
           {/* 控制按钮 - 在文本区域正下方居中 */}
@@ -3047,14 +3140,24 @@ export default function WorkflowControlPage() {
           </Button>
         ) : workflow.currentStage === 'review' ? (
           /* 质量评审阶段：显示"评审报告"按钮 */
-          <Button
-            variant="outlined"
-            onClick={handleOpenReviewDialog}
-            disabled={!reviewReportContent && workflow.stages.review.status !== 'completed'}
-            startIcon={<ArticleIcon />}
-          >
-            评审报告
-          </Button>
+          <Box sx={{ display: 'flex', gap: 1 }}>
+            <Button
+              variant="outlined"
+              onClick={handleOpenReviewDialog}
+              disabled={!reviewReportContent && workflow.stages.review.status !== 'completed'}
+              startIcon={<ArticleIcon />}
+            >
+              评审报告
+            </Button>
+            <Button
+              variant="outlined"
+              onClick={handleManualMultiModelReview}
+              disabled={!contentDraftContent || isRunning || isStarting || generatingNextChapter}
+              startIcon={<RefreshIcon />}
+            >
+              多模型重评
+            </Button>
+          </Box>
         ) : workflow.currentStage === 'iteration' ? (
           /* 迭代优化阶段：显示“最终成品”和“生成下一章”按钮 */
           <Box sx={{ display: 'flex', gap: 1 }}>
@@ -3789,6 +3892,45 @@ export default function WorkflowControlPage() {
               onClick={handleSubmitRegenerateConcept}
             >
               提交并重新生成
+            </Button>
+          </Box>
+        </Box>
+      </Dialog>
+
+      <MultiModelReviewSettingsDialog
+        open={showReviewSettingsDialog}
+        projectId={projectId ? Number(projectId) : null}
+        projectTitle={currentProject?.title}
+        onClose={() => setShowReviewSettingsDialog(false)}
+        onSaved={handleReviewSettingsSaved}
+      />
+
+      <Dialog open={showManualReviewDialog} onClose={() => setShowManualReviewDialog(false)} maxWidth="xs" fullWidth>
+        <Box sx={{ p: 3, display: 'flex', flexDirection: 'column', gap: 2.25 }}>
+          <Typography variant="h6">升级本次质量评审</Typography>
+          <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+            仅重新评审当前章节初稿，不修改项目自动策略。
+          </Typography>
+          <FormControl fullWidth size="small">
+            <InputLabel>评审强度</InputLabel>
+            <Select
+              label="评审强度"
+              value={manualReviewPreset}
+              onChange={(event) => setManualReviewPreset(event.target.value as ReviewPreset)}
+            >
+              <MenuItem value="balanced_3">普通增强（3 评审）</MenuItem>
+              <MenuItem value="key_chapter_5">重点章节（5 评审）</MenuItem>
+              <MenuItem value="deep_7">深度人工（7 评审）</MenuItem>
+            </Select>
+          </FormControl>
+          <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 1 }}>
+            <Button onClick={() => setShowManualReviewDialog(false)}>取消</Button>
+            <Button
+              variant="contained"
+              onClick={handleConfirmManualMultiModelReview}
+              disabled={!contentDraftContent || isRunning || isStarting || generatingNextChapter}
+            >
+              开始重评
             </Button>
           </Box>
         </Box>

@@ -6,8 +6,16 @@ from pydantic import BaseModel, Field, field_validator
 
 
 ReviewPreset = Literal["balanced_3", "key_chapter_5", "deep_7"]
+ReviewStrategyPreset = Optional[ReviewPreset]
 KeyChapterReviewPreset = Literal["key_chapter_5", "deep_7"]
 AutoReviewScenario = Literal["first_chapter", "key_chapter", "final_chapter"]
+
+
+class ReviewAutoStrategy(BaseModel):
+    regular: ReviewStrategyPreset = None
+    opening: ReviewStrategyPreset = "key_chapter_5"
+    key: ReviewStrategyPreset = "key_chapter_5"
+    finale: ReviewStrategyPreset = "deep_7"
 
 
 class MultiModelReviewConfig(BaseModel):
@@ -16,6 +24,7 @@ class MultiModelReviewConfig(BaseModel):
     auto_scenarios: list[AutoReviewScenario] = Field(default_factory=list)
     manual_depth: ReviewPreset = "balanced_3"
     key_chapter_depth: KeyChapterReviewPreset = "key_chapter_5"
+    auto_strategy: ReviewAutoStrategy = Field(default_factory=ReviewAutoStrategy)
     chief_model: str = "deepseek-v4-pro"
     custom_panel: Optional[dict[str, Any]] = None
 
@@ -31,5 +40,4 @@ class ReviewConfigUpdate(BaseModel):
 
 class ReviewConfigResponse(BaseModel):
     multi_model_review: MultiModelReviewConfig
-    system_enabled: bool
     available_presets: list[ReviewPreset]

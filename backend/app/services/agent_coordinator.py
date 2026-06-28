@@ -500,6 +500,8 @@ class AgentCoordinator:
                 return {
                     "review": result.get("review", ""),
                     "needs_revision": result.get("needs_revision", False),
+                    "multi_model": result.get("multi_model"),
+                    "review_meta": result.get("review_meta") or {},
                 }
             
             elif stage == StageType.ITERATION:

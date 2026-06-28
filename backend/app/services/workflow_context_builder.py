@@ -82,6 +82,7 @@ class WorkflowStageTextContext:
     plot_outline: str = ""
     chapter_draft: str = ""
     review_report: str = ""
+    review_meta: dict[str, Any] = field(default_factory=dict)
     final_version: str = ""
 
 
@@ -156,6 +157,7 @@ ALLOWED_PROJECT_SETTINGS_UPDATE_FIELDS = {
     "plot_outline",
     "chapter_draft",
     "review_report",
+    "review_meta",
     "final_version",
     "stage_one_status",
     "stage_two_status",
@@ -826,7 +828,7 @@ class WorkflowContextBuilder:
                 """
                 SELECT concept, world_setting, characters, plot_outline,
                        epic_volumes_detail,
-                       chapter_draft, review_report, final_version
+                       chapter_draft, review_report, review_meta, final_version
                 FROM project_settings
                 WHERE project_id = :project_id
                 """
@@ -855,8 +857,26 @@ class WorkflowContextBuilder:
             plot_outline=plot_outline,
             chapter_draft=_decode_prompt_text(row[5]),
             review_report=_decode_prompt_text(row[6]),
-            final_version=_decode_prompt_text(row[7]),
+            review_meta=_parse_storage_value(row[7], {}),
+            final_version=_decode_prompt_text(row[8]),
         )
+
+    def load_review_meta(self, project_id: int) -> dict[str, Any]:
+        row = self.db.execute(
+            text(
+                """
+                SELECT review_meta
+                FROM project_settings
+                WHERE project_id = :project_id
+                """
+            ),
+            {"project_id": project_id},
+        ).fetchone()
+
+        if not row:
+            return {}
+        parsed = _parse_storage_value(row[0], {})
+        return parsed if isinstance(parsed, dict) else {}
 
     def load_concept_storage_state(self, project_id: int) -> WorkflowConceptStorageState:
         row = self.db.execute(
@@ -1058,6 +1078,12 @@ class WorkflowContextBuilder:
         self.ensure_project_settings_record(project_id)
 
         normalized_fields = dict(fields)
+        if "review_meta" in normalized_fields:
+            normalized_fields["review_meta"] = json.dumps(
+                normalized_fields["review_meta"] or {},
+                ensure_ascii=False,
+            )
+
         if "epic_volumes_detail" in normalized_fields and normalized_fields["epic_volumes_detail"] is not None:
             normalized_fields["epic_volumes_detail"] = _decode_storage_text(
                 normalized_fields["epic_volumes_detail"]

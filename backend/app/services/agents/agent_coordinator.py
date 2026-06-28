@@ -1246,6 +1246,7 @@ class CreativeDirectorCoordinator:
                 "draft_content": draft_content,
                 "styled_content": styled_content,
                 "content": styled_content,
+                "chapter_plan": chapter_plan,
                 "chapters": [styled_content],
             }
         )
@@ -1276,12 +1277,43 @@ class CreativeDirectorCoordinator:
             or ""
         )
 
+    def _get_review_chapter_number(self) -> int:
+        for key in ("chapter_number", "next_chapter_number", "current_chapter"):
+            raw_value = self.project_context.get(key)
+            try:
+                chapter_number = int(raw_value)
+            except (TypeError, ValueError):
+                continue
+            if chapter_number > 0:
+                return chapter_number
+        return 1
+
+    def _resolve_multi_model_review_preset(self, cfg: Dict[str, Any]) -> Optional[str]:
+        scenarios_configured = "auto_scenarios" in cfg
+        is_manual = bool(
+            self.project_context.get("force_multi_model_review")
+            or self.project_context.get("manual_multi_model_review")
+        )
+
+        if not scenarios_configured and not is_manual:
+            return str(cfg.get("preset") or "balanced_3")
+
+        should_trigger, preset = review_feature_gate.should_trigger_multi_model_review(
+            self.project_context,
+            chapter_number=self._get_review_chapter_number(),
+            is_manual=is_manual,
+            chapter_plan=str(self.project_context.get("chapter_plan") or ""),
+        )
+        return preset if should_trigger else None
+
     @staticmethod
     def _build_review_meta(multi_model_result: Dict[str, Any]) -> Dict[str, Any]:
         return {
             "multi_model": bool(multi_model_result.get("multi_model")),
             "preset": multi_model_result.get("preset"),
             "chief_model": multi_model_result.get("chief_model"),
+            "chief_model_reused_as_reviewer": bool(multi_model_result.get("chief_model_reused_as_reviewer")),
+            "structured_summary": multi_model_result.get("structured_summary") or {},
             "reviewer_models": multi_model_result.get("reviewer_models") or [],
             "reviewer_profiles": multi_model_result.get("reviewer_profiles") or [],
             "per_model_reports": multi_model_result.get("per_model_reports") or [],
@@ -1323,10 +1355,11 @@ class CreativeDirectorCoordinator:
         
         review_meta: Optional[Dict[str, Any]] = None
         cfg = review_feature_gate.get_multi_model_review_config(self.project_context)
-        if cfg:
+        multi_model_preset = self._resolve_multi_model_review_preset(cfg) if cfg else None
+        if cfg and multi_model_preset:
             try:
                 service = MultiModelReviewService(
-                    preset=cfg["preset"],
+                    preset=multi_model_preset,
                     chief_model=cfg.get("chief_model"),
                 )
                 multi_model_result = run_async_compat(

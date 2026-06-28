@@ -22,7 +22,6 @@ from app.schemas.review_config import (
     ReviewConfigResponse,
     ReviewConfigUpdate,
 )
-from app.core.config import settings
 from app.core.security import get_current_user
 from app.services.workflow_context_builder import WorkflowContextBuilder
 from app.services.audiobook.project_audio_config import (
@@ -158,7 +157,6 @@ def _review_config_response(config: dict) -> ReviewConfigResponse:
 
     return ReviewConfigResponse(
         multi_model_review=multi_model_review,
-        system_enabled=settings.ENABLE_MULTI_MODEL_REVIEW,
         available_presets=AVAILABLE_REVIEW_PRESETS,
     )
 
@@ -509,12 +507,6 @@ async def update_project_review_config(
     """更新项目级评审高级功能配置。"""
     project = _get_owned_project(db, project_id, current_user)
     incoming = config.multi_model_review
-
-    if incoming.enabled and not settings.ENABLE_MULTI_MODEL_REVIEW:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="多模型评审功能未在系统级开启，请联系管理员",
-        )
 
     data = _load_review_config(project.review_config)
     data["multi_model_review"] = incoming.model_dump(exclude_none=True)

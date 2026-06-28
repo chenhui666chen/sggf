@@ -3,7 +3,6 @@ import {
   Alert,
   Box,
   Button,
-  Checkbox,
   CircularProgress,
   Dialog,
   DialogActions,
@@ -11,7 +10,6 @@ import {
   DialogTitle,
   FormControl,
   FormControlLabel,
-  FormGroup,
   InputLabel,
   MenuItem,
   Select,
@@ -20,10 +18,11 @@ import {
 } from '@mui/material'
 import { apiClient, extractApiErrorMessage } from '@/services/api'
 import type {
-  AutoReviewScenario,
   MultiModelReviewConfig,
+  ReviewAutoStrategy,
   ReviewConfigResponse,
   ReviewPreset,
+  ReviewStrategyPreset,
 } from '@/types/project'
 
 const PRESET_LABELS: Record<ReviewPreset, string> = {
@@ -32,12 +31,27 @@ const PRESET_LABELS: Record<ReviewPreset, string> = {
   deep_7: '深度人工（7 评审）',
 }
 
+const AUTO_STRATEGY_LABELS: Record<keyof ReviewAutoStrategy, string> = {
+  regular: '普通章节',
+  opening: '开篇章节',
+  key: '重点章节',
+  finale: '完结章节',
+}
+
+const DEFAULT_AUTO_STRATEGY: ReviewAutoStrategy = {
+  regular: null,
+  opening: 'key_chapter_5',
+  key: 'key_chapter_5',
+  finale: 'deep_7',
+}
+
 const DEFAULT_CONFIG: MultiModelReviewConfig = {
   enabled: false,
   preset: 'balanced_3',
   auto_scenarios: [],
   manual_depth: 'balanced_3',
   key_chapter_depth: 'key_chapter_5',
+  auto_strategy: DEFAULT_AUTO_STRATEGY,
   chief_model: 'deepseek-v4-pro',
   custom_panel: null,
 }
@@ -51,10 +65,15 @@ interface MultiModelReviewSettingsDialogProps {
 }
 
 function normalizeConfig(response?: ReviewConfigResponse | null): MultiModelReviewConfig {
+  const multiModelReview: Partial<MultiModelReviewConfig> = response?.multi_model_review || {}
   return {
     ...DEFAULT_CONFIG,
-    ...(response?.multi_model_review || {}),
-    auto_scenarios: response?.multi_model_review?.auto_scenarios || [],
+    ...multiModelReview,
+    auto_scenarios: multiModelReview.auto_scenarios || [],
+    auto_strategy: {
+      ...DEFAULT_AUTO_STRATEGY,
+      ...(multiModelReview.auto_strategy || {}),
+    },
   }
 }
 
@@ -66,7 +85,6 @@ export default function MultiModelReviewSettingsDialog({
   onSaved,
 }: MultiModelReviewSettingsDialogProps) {
   const [config, setConfig] = useState<MultiModelReviewConfig>(DEFAULT_CONFIG)
-  const [systemEnabled, setSystemEnabled] = useState(false)
   const [availablePresets, setAvailablePresets] = useState<ReviewPreset[]>(['balanced_3', 'key_chapter_5', 'deep_7'])
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -82,7 +100,6 @@ export default function MultiModelReviewSettingsDialog({
       .then((response) => {
         if (!active) return
         setConfig(normalizeConfig(response.data))
-        setSystemEnabled(response.data.system_enabled)
         setAvailablePresets(response.data.available_presets.length ? response.data.available_presets : ['balanced_3'])
       })
       .catch(async (err) => {
@@ -103,15 +120,18 @@ export default function MultiModelReviewSettingsDialog({
     setConfig((current) => ({ ...current, ...patch }))
   }
 
-  const toggleScenario = (scenario: AutoReviewScenario, checked: boolean) => {
+  const updateAutoStrategy = (
+    key: keyof ReviewAutoStrategy,
+    preset: ReviewStrategyPreset,
+  ) => {
     setConfig((current) => {
-      const scenarios = new Set(current.auto_scenarios)
-      if (checked) {
-        scenarios.add(scenario)
-      } else {
-        scenarios.delete(scenario)
+      return {
+        ...current,
+        auto_strategy: {
+          ...current.auto_strategy,
+          [key]: preset,
+        },
       }
-      return { ...current, auto_scenarios: Array.from(scenarios) as AutoReviewScenario[] }
     })
   }
 
@@ -120,15 +140,10 @@ export default function MultiModelReviewSettingsDialog({
     setSaving(true)
     setError('')
     try {
-      const payloadConfig: MultiModelReviewConfig = {
-        ...config,
-        enabled: systemEnabled ? config.enabled : false,
-      }
       const response = await apiClient.updateProjectReviewConfig(projectId, {
-        multi_model_review: payloadConfig,
+        multi_model_review: config,
       })
       setConfig(normalizeConfig(response.data))
-      setSystemEnabled(response.data.system_enabled)
       onSaved?.()
       onClose()
     } catch (err) {
@@ -138,7 +153,7 @@ export default function MultiModelReviewSettingsDialog({
     }
   }
 
-  const disabled = loading || saving || !systemEnabled
+  const disabled = loading || saving
 
   return (
     <Dialog open={open} onClose={saving ? undefined : onClose} maxWidth="sm" fullWidth>
@@ -158,93 +173,39 @@ export default function MultiModelReviewSettingsDialog({
           ) : (
             <>
               {error ? <Alert severity="error">{error}</Alert> : null}
-              {!systemEnabled ? (
-                <Alert severity="warning">系统级多模型评审开关未开启，项目暂不能启用该能力。</Alert>
-              ) : null}
-
               <FormControlLabel
                 control={
                   <Switch
-                    checked={config.enabled && systemEnabled}
-                    disabled={loading || saving || !systemEnabled}
+                    checked={config.enabled}
+                    disabled={loading || saving}
                     onChange={(event) => updateConfig({ enabled: event.target.checked })}
                   />
                 }
                 label="启用多模型质量评审"
               />
 
-              <FormControl fullWidth size="small" disabled={disabled}>
-                <InputLabel>默认评审深度</InputLabel>
-                <Select
-                  label="默认评审深度"
-                  value={config.preset}
-                  onChange={(event) => updateConfig({ preset: event.target.value as ReviewPreset })}
-                >
-                  {availablePresets.map((preset) => (
-                    <MenuItem key={preset} value={preset}>{PRESET_LABELS[preset]}</MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
-
-              <FormControl fullWidth size="small" disabled={disabled}>
-                <InputLabel>手动触发深度</InputLabel>
-                <Select
-                  label="手动触发深度"
-                  value={config.manual_depth}
-                  onChange={(event) => updateConfig({ manual_depth: event.target.value as ReviewPreset })}
-                >
-                  {availablePresets.map((preset) => (
-                    <MenuItem key={preset} value={preset}>{PRESET_LABELS[preset]}</MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
-
-              <FormControl fullWidth size="small" disabled={disabled}>
-                <InputLabel>重点章节深度</InputLabel>
-                <Select
-                  label="重点章节深度"
-                  value={config.key_chapter_depth}
-                  onChange={(event) => updateConfig({ key_chapter_depth: event.target.value as 'key_chapter_5' | 'deep_7' })}
-                >
-                  <MenuItem value="key_chapter_5">{PRESET_LABELS.key_chapter_5}</MenuItem>
-                  <MenuItem value="deep_7">{PRESET_LABELS.deep_7}</MenuItem>
-                </Select>
-              </FormControl>
-
               <Box>
-                <Typography variant="subtitle2" sx={{ mb: 0.75 }}>自动触发场景</Typography>
-                <FormGroup row>
-                  <FormControlLabel
-                    control={
-                      <Checkbox
-                        checked={config.auto_scenarios.includes('first_chapter')}
-                        disabled={disabled}
-                        onChange={(event) => toggleScenario('first_chapter', event.target.checked)}
-                      />
-                    }
-                    label="第一章"
-                  />
-                  <FormControlLabel
-                    control={
-                      <Checkbox
-                        checked={config.auto_scenarios.includes('key_chapter')}
-                        disabled={disabled}
-                        onChange={(event) => toggleScenario('key_chapter', event.target.checked)}
-                      />
-                    }
-                    label="重点章节"
-                  />
-                  <FormControlLabel
-                    control={
-                      <Checkbox
-                        checked={config.auto_scenarios.includes('final_chapter')}
-                        disabled={disabled}
-                        onChange={(event) => toggleScenario('final_chapter', event.target.checked)}
-                      />
-                    }
-                    label="完结章"
-                  />
-                </FormGroup>
+                <Typography variant="subtitle2" sx={{ mb: 1 }}>自动多模型评审策略</Typography>
+                <Box sx={{ display: 'grid', gap: 1.5 }}>
+                  {(Object.keys(AUTO_STRATEGY_LABELS) as Array<keyof ReviewAutoStrategy>).map((key) => (
+                    <FormControl key={key} fullWidth size="small" disabled={disabled}>
+                      <InputLabel>{AUTO_STRATEGY_LABELS[key]}</InputLabel>
+                      <Select
+                        label={AUTO_STRATEGY_LABELS[key]}
+                        value={config.auto_strategy[key] || ''}
+                        onChange={(event) => updateAutoStrategy(
+                          key,
+                          event.target.value ? event.target.value as ReviewPreset : null,
+                        )}
+                      >
+                        <MenuItem value="">不增强（单模型）</MenuItem>
+                        {availablePresets.map((preset) => (
+                          <MenuItem key={preset} value={preset}>{PRESET_LABELS[preset]}</MenuItem>
+                        ))}
+                      </Select>
+                    </FormControl>
+                  ))}
+                </Box>
               </Box>
             </>
           )}

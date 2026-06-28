@@ -28,6 +28,7 @@ def ensure_runtime_schema_compatibility() -> None:
     当前处理：
     - characters.genre_fields_json
     - projects.review_config
+    - project_settings.review_meta
     """
 
     global _schema_compat_checked
@@ -75,6 +76,24 @@ def ensure_runtime_schema_compatibility() -> None:
                         )
                     logger.warning(
                         "检测到 projects.review_config 缺失，已在运行时自动补齐。"
+                        "正式环境仍建议执行 Alembic 迁移以保持版本链一致。"
+                    )
+            if inspector.has_table("project_settings"):
+                existing_columns = {
+                    column["name"] for column in inspector.get_columns("project_settings")
+                }
+                if "review_meta" not in existing_columns:
+                    with engine.begin() as conn:
+                        conn.execute(
+                            text(
+                                """
+                                ALTER TABLE project_settings
+                                ADD COLUMN IF NOT EXISTS review_meta TEXT
+                                """
+                            )
+                        )
+                    logger.warning(
+                        "检测到 project_settings.review_meta 缺失，已在运行时自动补齐。"
                         "正式环境仍建议执行 Alembic 迁移以保持版本链一致。"
                     )
         except Exception as exc:  # noqa: BLE001

@@ -53,6 +53,7 @@ def test_load_stage_contents_snapshot_pretty_formats_json_fields() -> None:
                 '"世界观正文"',
                 '["林岩","扳手"]',
                 '{"outline":"第一幕"}',
+                "",
                 '"章节初稿"',
                 '"评审报告"',
                 '"终稿"',
@@ -66,6 +67,15 @@ def test_load_stage_contents_snapshot_pretty_formats_json_fields() -> None:
     assert snapshot["concept"] == '{\n  "title": "设定中心"\n}'
     assert snapshot["world_setting"] == "世界观正文"
     assert snapshot["characters"] == '[\n  "林岩",\n  "扳手"\n]'
+
+
+def test_load_review_meta_returns_persisted_json() -> None:
+    db = DummySession(rows=[('{"multi_model": true, "preset": "deep_7"}',)])
+
+    builder = WorkflowContextBuilder(db)
+    meta = builder.load_review_meta(12)
+
+    assert meta == {"multi_model": True, "preset": "deep_7"}
 
 
 def test_load_stage_status_snapshot_returns_pending_defaults_when_missing() -> None:
@@ -101,7 +111,7 @@ def test_load_epic_framework_state_decodes_framework_fields() -> None:
                 '"长篇框架正文"',
                 "2026-04-13T10:00:00",
                 '"总纲内容"',
-                '{"volumes":[{"volume_number":1}]}',
+                '{"volumes":{"1":{"type":"framework","title":"初入南麓","summary":"卷摘要","chapters_range":[1,80]}}}',
             )
         ]
     )
@@ -111,9 +121,9 @@ def test_load_epic_framework_state_decodes_framework_fields() -> None:
 
     assert state.epic_framework == "长篇框架正文"
     assert state.framework_generated_at == "2026-04-13T10:00:00"
-    assert state.plot_outline == "总纲内容"
+    assert "初入南麓" in state.plot_outline
     assert "volumes" in state.epic_volumes_detail
-    assert "volume_number" in state.epic_volumes_detail
+    assert "初入南麓" in state.epic_volumes_detail
 
 
 def test_load_stage_text_context_normalizes_historical_plot_outline() -> None:
@@ -132,6 +142,8 @@ def test_load_stage_text_context_normalizes_historical_plot_outline() -> None:
                 "",
                 '["顾长庚","苏璃"]',
                 legacy_outline,
+                "",
+                "",
                 "",
                 "",
                 "",
@@ -161,7 +173,7 @@ def test_load_epic_framework_state_normalizes_plot_outline() -> None:
                 '"长篇框架正文"',
                 "2026-04-13T10:00:00",
                 json.dumps(legacy_outline, ensure_ascii=False),
-                '{"volumes":[{"volume_number":1}]}',
+                "",
             )
         ]
     )
@@ -200,6 +212,21 @@ def test_update_project_settings_fields_records_allowed_fields_and_commits() -> 
     assert params["plot_outline"] == "大纲正文"
     assert params["stage_two_status"] == "completed"
     assert "updated_at" in params
+
+
+def test_update_project_settings_fields_accepts_review_meta() -> None:
+    db = DummySession(rows=[(1,)])
+
+    builder = WorkflowContextBuilder(db)
+    builder.update_project_settings_fields(
+        9,
+        review_meta={"multi_model": True, "preset": "key_chapter_5"},
+    )
+
+    sql, params = db.executed[-1]
+    assert "UPDATE project_settings" in sql
+    assert "review_meta = :review_meta" in sql
+    assert json.loads(params["review_meta"]) == {"multi_model": True, "preset": "key_chapter_5"}
 
 
 def test_update_project_settings_fields_normalizes_plot_outline_before_persisting() -> None:
@@ -280,8 +307,8 @@ def test_validate_story_framework_mode_switch_allows_total_mode_without_framewor
 def test_load_project_chapter_context_prefers_stage_outline_and_builder_data() -> None:
     db = DummySession(
         rows=[
-            ("项目标题", "科幻", "太空歌剧", "long", 120, 300, "用户自定义大纲"),
-            ("", '"世界观设定"', '["林岩","回声"]', '"阶段大纲"', "", "", ""),
+            ("项目标题", "科幻", "太空歌剧", "long", 120, 300, "用户自定义大纲", ""),
+            ("", '"世界观设定"', '["林岩","回声"]', '"阶段大纲"', "", "", "", "", ""),
         ]
     )
 

@@ -1,6 +1,7 @@
 import { readFileSync, readdirSync, statSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import ts from 'typescript'
 import { describe, expect, it } from 'vitest'
 
 const srcRoot = fileURLToPath(new URL('..', import.meta.url))
@@ -22,6 +23,46 @@ const collectSourceFiles = (directory: string): string[] => {
     }
 
     return []
+  })
+}
+
+const hasRuntimeMUIComponentDeepImport = (filePath: string): boolean => {
+  const source = readFileSync(filePath, 'utf8')
+  const sourceFile = ts.createSourceFile(filePath, source, ts.ScriptTarget.Latest, true)
+
+  return sourceFile.statements.some((statement) => {
+    if (!ts.isImportDeclaration(statement) || !ts.isStringLiteral(statement.moduleSpecifier)) {
+      return false
+    }
+
+    const moduleName = statement.moduleSpecifier.text
+    if (!moduleName.startsWith('@mui/material/') || moduleName.startsWith('@mui/material/styles')) {
+      return false
+    }
+
+    const importClause = statement.importClause
+    if (!importClause) {
+      return true
+    }
+
+    if (importClause.isTypeOnly) {
+      return false
+    }
+
+    if (importClause.name) {
+      return true
+    }
+
+    const namedBindings = importClause.namedBindings
+    if (!namedBindings) {
+      return false
+    }
+
+    if (ts.isNamespaceImport(namedBindings)) {
+      return true
+    }
+
+    return namedBindings.elements.some((element) => !element.isTypeOnly)
   })
 }
 
@@ -49,5 +90,15 @@ describe('MUI icons source contract', () => {
     const viteConfigSource = readFileSync(viteConfigPath, 'utf8')
 
     expect(viteConfigSource).not.toMatch(/hmr:\s*\{[\s\S]*port:\s*5173[\s\S]*\}/)
+  })
+})
+
+describe('MUI material source contract', () => {
+  it('avoids runtime deep imports for @mui/material components', () => {
+    const offenders = collectSourceFiles(srcRoot)
+      .filter(hasRuntimeMUIComponentDeepImport)
+      .map((filePath) => path.relative(projectRoot, filePath))
+
+    expect(offenders).toEqual([])
   })
 })

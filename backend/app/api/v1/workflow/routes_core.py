@@ -326,6 +326,8 @@ async def execute_stage(
                 "project_id": project_id,
                 "user_id": current_user.id,
                 "workflow_generation_model": workflow_generation_model,
+                "manual_multi_model_review": getattr(request, "manual_multi_model_review", False),
+                "manual_multi_model_review_preset": getattr(request, "manual_multi_model_review_preset", None),
             },
         )
         
@@ -474,6 +476,8 @@ async def execute_stage_async(
                     current_user.id,
                     db,
                     workflow_generation_model,
+                    getattr(request, "manual_multi_model_review", False),
+                    getattr(request, "manual_multi_model_review_preset", None),
                 )
             )
             logger.info(f"   🌊 流式后台任务已启动")
@@ -490,6 +494,8 @@ async def execute_stage_async(
                     getattr(request, "targets", None),
                     getattr(request, "feedback", None),
                     workflow_generation_model,
+                    getattr(request, "manual_multi_model_review", False),
+                    getattr(request, "manual_multi_model_review_preset", None),
                 )
             )
             logger.info(f"   🚀 后台任务已启动")

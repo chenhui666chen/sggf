@@ -50,8 +50,8 @@
 5. **格式强约束**：全部走结构化模板，便于对接 stage_five 迭代优化
 6. **数量分级**：默认 3 个，重点章节 5 个，人工深度 7 个；不把模型数量作为质量目标本身
 7. **模型去重**：避免同一 provider 或同类强推理模型堆叠造成"伪多数"
-8. **默认关闭**：作为高级功能，系统级 + 项目级双重开关，用户自主启用
-9. **分级触发**：日常初稿默认单模型，重点章节/手动触发才走多模型
+8. **默认关闭**：作为高级功能，仅保留项目级用户开关，由用户在质量评审阶段自主启用
+9. **分级触发**：章节规划先输出章节定位，质量评审按定位自动选择单模型/3/5/7 档；手动升级只作为本次评审动作
 10. **责任可追溯**：每条意见标注来源模型、profile、置信度和证据片段，便于审计与回滚
 
 ### 1.4 模型能力画像与评审委员会预设
@@ -85,18 +85,13 @@
 
 ## 二、开关设计（核心：让用户自主决定是否启用）
 
-采用**两级开关**：系统级总闸 + 项目级用户开关。系统级关闭时全局不可用；系统级开启时，用户可在项目设置里自主勾选。
+采用**单一项目级开关**：用户在工作流页“质量评审”步骤标签旁打开设置弹窗并自主启用。后端不再保留隐藏的全局总闸，避免出现“用户已开启但系统暗中禁用”的不可见状态。
 
-### 2.1 系统级开关（管理员控制）
+### 2.1 系统运行参数（非开关）
 
-在 `backend/app/core/config.py` 的 `Settings` 类新增，仿照已有 `ENABLE_TYPED_RAG` 模式：
+在 `backend/app/core/config.py` 的 `Settings` 类新增运行参数：
 
 ```python
-# config.py 既有先例
-ENABLE_TYPED_RAG: bool = True
-
-# 🆕 新增：多模型质量评审总开关（默认关闭）
-ENABLE_MULTI_MODEL_REVIEW: bool = False
 # 多模型评审并发上限（控制成本/并发）
 MULTI_MODEL_REVIEW_CONCURRENCY: int = 5
 # 单个评审官最大超时（秒），超时则该路降级为占位
@@ -116,12 +111,11 @@ DOUBAO_REVIEW_PROMPT_BUDGET: int = 64_000
 通过 `.env` / `.env.local` 覆盖：
 
 ```bash
-ENABLE_MULTI_MODEL_REVIEW=true
 MULTI_MODEL_REVIEW_CONCURRENCY=5
 DOUBAO_REVIEW_PROMPT_BUDGET=64000
 ```
 
-### 2.2 项目级开关（用户自主决定）
+### 2.2 项目级开关（唯一用户开关）
 
 在 `Project` 模型新增 JSON 配置字段，仿照已有 `audio_config` 模式：
 
@@ -144,9 +138,12 @@ class Project(Base):
   "multi_model_review": {
     "enabled": false,
     "preset": "balanced_3",
-    "auto_scenarios": [],
-    "manual_depth": "balanced_3",
-    "key_chapter_depth": "key_chapter_5",
+    "auto_strategy": {
+      "regular": null,
+      "opening": "key_chapter_5",
+      "key": "key_chapter_5",
+      "finale": "deep_7"
+    },
     "chief_model": "deepseek-v4-pro",
     "custom_panel": null
   }
@@ -158,10 +155,11 @@ class Project(Base):
 | 字段 | 含义 | 取值 |
 |---|---|---|
 | `enabled` | 本项目是否启用多模型评审 | `true` / `false` |
-| `preset` | 默认评审委员会预设 | `balanced_3` / `key_chapter_5` / `deep_7` |
-| `auto_scenarios` | 自动触发场景 | `first_chapter` / `key_chapter` / `final_chapter` |
-| `manual_depth` | 用户手动触发时使用的深度 | `balanced_3` / `key_chapter_5` / `deep_7` |
-| `key_chapter_depth` | 自动识别重点章节时使用的深度 | `key_chapter_5` / `deep_7` |
+| `auto_strategy.regular` | 普通章节自动评审强度 | `null` / `balanced_3` / `key_chapter_5` / `deep_7` |
+| `auto_strategy.opening` | 开篇章节自动评审强度 | `null` / `balanced_3` / `key_chapter_5` / `deep_7` |
+| `auto_strategy.key` | 重点章节自动评审强度 | `null` / `balanced_3` / `key_chapter_5` / `deep_7` |
+| `auto_strategy.finale` | 完结章节自动评审强度 | `null` / `balanced_3` / `key_chapter_5` / `deep_7` |
+| `preset` / `auto_scenarios` / `manual_depth` / `key_chapter_depth` | 旧配置兼容字段 | 新 UI 不再暴露 |
 | `chief_model` | 主审模型 | 默认 `deepseek-v4-pro` |
 | `custom_panel` | 高级用户自定义评审委员会 | `null` 或 profile/model 映射 |
 
@@ -205,10 +203,6 @@ def get_multi_model_review_config(project_context: Dict[str, Any]) -> Optional[D
     注意：当前工作流 project_context 默认不包含完整 Project ORM 对象。
     落地时应在 WorkflowProjectProfile 中查询并注入 review_config，或由调用方按 project_id 查询后传入。
     """
-    # 系统级总闸
-    if not getattr(settings, "ENABLE_MULTI_MODEL_REVIEW", False):
-        return None
-
     # 项目级开关
     raw = project_context.get("review_config")
     if not raw:
@@ -231,34 +225,32 @@ def get_multi_model_review_config(project_context: Dict[str, Any]) -> Optional[D
 
 
 def should_trigger_multi_model_review(
-    project_context: Dict[str, Any], chapter_number: int, is_manual: bool = False
+    project_context: Dict[str, Any],
+    chapter_number: int,
+    is_manual: bool = False,
+    chapter_plan: str = "",
 ) -> tuple[bool, Optional[str]]:
     """判定本次评审是否实际触发多模型路径，并返回使用的预设。"""
     cfg = get_multi_model_review_config(project_context)
     if cfg is None:
         return False, None
     if is_manual:
-        return True, cfg.get("manual_depth") or cfg["preset"]
-    scenarios = cfg.get("auto_scenarios", [])
-    if "first_chapter" in scenarios and chapter_number == 1:
-        return True, cfg.get("key_chapter_depth") or "key_chapter_5"
-    if "key_chapter" in scenarios and _is_key_chapter(project_context, chapter_number):
-        return True, cfg.get("key_chapter_depth") or "key_chapter_5"
-    if "final_chapter" in scenarios and _is_final_chapter(project_context, chapter_number):
-        return True, cfg.get("key_chapter_depth") or "key_chapter_5"
+        return True, project_context.get("manual_multi_model_review_preset") or cfg.get("manual_depth") or cfg["preset"]
+
+    tier = resolve_chapter_review_tier(project_context, chapter_number, chapter_plan)
+    preset = (cfg.get("auto_strategy") or {}).get(tier)
+    if preset:
+        return True, preset
     return False, None
 
 
-def _is_key_chapter(project_context: Dict[str, Any], chapter_number: int) -> bool:
-    """重点章节判定：卷首/转折点/高潮点。可后续接入大纲标记。"""
-    # 简单实现：每 10 章或卷首视为重点；后续可读取大纲的 plot_points
-    return chapter_number % 10 == 0 or chapter_number == 1
-
-
-def _is_final_chapter(project_context: Dict[str, Any], chapter_number: int) -> bool:
-    """完结章判定：优先使用项目规划最大章节数，后续可接入卷/书完结标记。"""
-    planned_max = int(project_context.get("planned_chapters_max") or 0)
-    return planned_max > 0 and chapter_number >= planned_max
+def resolve_chapter_review_tier(project_context, chapter_number, chapter_plan) -> str:
+    """优先读取章节规划的“章节定位”，再用章节号和计划总章数兜底。"""
+    # 章节定位枚举：普通推进 / 开篇定调 / 小高潮 / 大高潮 / 关键转折 /
+    # 伏笔回收 / 人物突破 / 世界观揭示 / 卷末收束 / 完结收束
+    # 映射：完结收束/卷末收束 -> finale；关键转折/伏笔回收/高潮等 -> key；
+    # 开篇定调 -> opening；普通推进 -> regular
+    ...
 ```
 
 ### 2.4 前端开关 UI
@@ -273,10 +265,11 @@ def _is_final_chapter(project_context: Dict[str, Any], chapter_number: int) -> b
 └─ ▶ 高级功能（折叠）
      ├─ 多模型质量评审  [开关]
      │   启用后，章节评审将由多个不同模型并行评审后汇总
-     │   默认深度：[普通增强 3评审 ▼]
-     │   手动触发深度：[普通增强 3评审 ▼]
-     │   重点章节深度：[重点章节 5评审 ▼]
-     │   自动触发：☐ 第一章  ☐ 重点章节  ☐ 完结章
+     │   自动多模型评审策略：
+     │   普通章节：[不增强/单模型 ▼]
+     │   开篇章节：[重点章节 5评审 ▼]
+     │   重点章节：[重点章节 5评审 ▼]
+     │   完结章节：[深度人工 7评审 ▼]
      │   高级自定义评审委员会（后续版本开放）
      │   ⚠ 启用会增加评审耗时与算力消耗
      └─ ...
@@ -718,7 +711,6 @@ async def get_review_config(
     existing = json.loads(project.review_config) if project.review_config else {}
     return ReviewConfigResponse(
         multi_model_review=existing.get("multi_model_review") or {},
-        system_enabled=settings.ENABLE_MULTI_MODEL_REVIEW,
         available_presets=["balanced_3", "key_chapter_5", "deep_7"],
     )
 
@@ -733,14 +725,6 @@ async def update_review_config(
     """更新项目级评审高级功能配置。"""
     project = _get_owned_project(db, project_id, current_user)
 
-    # 系统级总闸校验
-    if payload.multi_model_review and payload.multi_model_review.enabled:
-        if not settings.ENABLE_MULTI_MODEL_REVIEW:
-            raise HTTPException(
-                status_code=403,
-                detail="多模型评审功能未在系统级开启，请联系管理员"
-            )
-
     # 合并到现有 review_config
     existing = json.loads(project.review_config) if project.review_config else {}
     existing["multi_model_review"] = payload.multi_model_review.dict(exclude_none=True)
@@ -748,7 +732,6 @@ async def update_review_config(
     db.commit()
     return ReviewConfigResponse(
         multi_model_review=existing["multi_model_review"],
-        system_enabled=settings.ENABLE_MULTI_MODEL_REVIEW,
         available_presets=["balanced_3", "key_chapter_5", "deep_7"],
     )
 ```
@@ -760,12 +743,16 @@ from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
 
 
+class ReviewAutoStrategy(BaseModel):
+    regular: Optional[str] = None
+    opening: Optional[str] = "key_chapter_5"
+    key: Optional[str] = "key_chapter_5"
+    finale: Optional[str] = "deep_7"
+
+
 class MultiModelReviewConfig(BaseModel):
     enabled: bool = False
-    preset: str = "balanced_3"
-    auto_scenarios: List[str] = Field(default_factory=list)
-    manual_depth: str = "balanced_3"
-    key_chapter_depth: str = "key_chapter_5"
+    auto_strategy: ReviewAutoStrategy = Field(default_factory=ReviewAutoStrategy)
     chief_model: str = "deepseek-v4-pro"
     custom_panel: Optional[Dict[str, Any]] = None
 
@@ -776,7 +763,6 @@ class ReviewConfigUpdate(BaseModel):
 
 class ReviewConfigResponse(BaseModel):
     multi_model_review: MultiModelReviewConfig
-    system_enabled: bool
     available_presets: List[str]
 ```
 
@@ -822,8 +808,7 @@ MULTI_MODEL_REVIEW_ALLOWED_MODELS = {
 `.env.local` 新增：
 
 ```bash
-# 多模型质量评审（高级功能，默认关闭）
-ENABLE_MULTI_MODEL_REVIEW=false
+# 多模型质量评审运行参数（是否启用由项目级开关决定）
 MULTI_MODEL_REVIEW_CONCURRENCY=5
 MULTI_MODEL_REVIEW_TIMEOUT_SECONDS=120
 MULTI_MODEL_REVIEW_DEFAULT_PRESET=balanced_3
@@ -841,120 +826,30 @@ MULTI_MODEL_REVIEW_DEFAULT_PROMPT_BUDGET=80000
 
 ### 5.1 项目设置页新增高级功能区块
 
-在项目设置页（参考现有 `frontend/src/pages/ProjectSettings/` 或对应路由组件）新增折叠区块：
-
-新建 `frontend/src/components/project/MultiModelReviewSettings.tsx`：
+在工作流页“质量评审”步骤标签旁保留唯一设置入口。弹窗只展示项目级开关与自动策略；手动升级不写入项目设置，而是在质量评审阶段作为一次性动作选择 3/5/7 档。
 
 ```tsx
-import { useState, useEffect } from 'react';
-import {
-  Box, Switch, FormControlLabel, FormGroup, Checkbox,
-  Typography, Accordion, AccordionSummary, AccordionDetails,
-  MenuItem, Select,
-} from '@mui/material';
-import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
+type ReviewPreset = 'balanced_3' | 'key_chapter_5' | 'deep_7';
+
+interface ReviewAutoStrategy {
+  regular: ReviewPreset | null;
+  opening: ReviewPreset | null;
+  key: ReviewPreset | null;
+  finale: ReviewPreset | null;
+}
 
 interface MultiModelReviewConfig {
   enabled: boolean;
-  preset: 'balanced_3' | 'key_chapter_5' | 'deep_7';
-  auto_scenarios: string[];
-  manual_depth: 'balanced_3' | 'key_chapter_5' | 'deep_7';
-  key_chapter_depth: 'key_chapter_5' | 'deep_7';
+  auto_strategy: ReviewAutoStrategy;
   chief_model: string;
 }
 
-interface Props {
-  projectId: number;
-  systemEnabled: boolean;  // 来自后端 ENABLE_MULTI_MODEL_REVIEW
-}
-
-const REVIEW_PRESETS = [
-  { id: 'balanced_3', label: '普通增强（3评审）' },
-  { id: 'key_chapter_5', label: '重点章节（5评审）' },
-  { id: 'deep_7', label: '深度人工（7评审）' },
-];
-
-export function MultiModelReviewSettings({ projectId, systemEnabled }: Props) {
-  const [config, setConfig] = useState<MultiModelReviewConfig>({
-    enabled: false,
-    preset: 'balanced_3',
-    auto_scenarios: [],
-    manual_depth: 'balanced_3',
-    key_chapter_depth: 'key_chapter_5',
-    chief_model: 'deepseek-v4-pro',
-  });
-
-  // 加载与保存逻辑略，调用 GET/PUT /projects/{id}/review-config
-
-  return (
-    <Accordion>
-      <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-        <Typography>高级功能</Typography>
-      </AccordionSummary>
-      <AccordionDetails>
-        <FormGroup>
-          <FormControlLabel
-            control={
-              <Switch
-                checked={config.enabled}
-                disabled={!systemEnabled}
-                onChange={(e) => setConfig({ ...config, enabled: e.target.checked })}
-              />
-            }
-            label="多模型质量评审"
-          />
-          {!systemEnabled && (
-            <Typography variant="caption" color="error">
-              该功能未在系统级开启，请联系管理员
-            </Typography>
-          )}
-          {config.enabled && (
-            <Box mt={2}>
-              <Typography variant="body2" color="text.secondary">
-                启用后，章节评审将由多个不同模型并行评审后汇总。会增加评审耗时与算力消耗。
-              </Typography>
-              <Typography variant="subtitle2" mt={2}>默认深度</Typography>
-              <Select
-                value={config.preset}
-                size="small"
-                sx={{ minWidth: 260 }}
-                onChange={(e) => setConfig({ ...config, preset: e.target.value as MultiModelReviewConfig['preset'] })}
-              >
-                {REVIEW_PRESETS.map(p => <MenuItem key={p.id} value={p.id}>{p.label}</MenuItem>)}
-              </Select>
-              <Typography variant="subtitle2" mt={2}>手动触发深度</Typography>
-              <Select
-                value={config.manual_depth}
-                size="small"
-                sx={{ minWidth: 260 }}
-                onChange={(e) => setConfig({ ...config, manual_depth: e.target.value as MultiModelReviewConfig['manual_depth'] })}
-              >
-                {REVIEW_PRESETS.map(p => <MenuItem key={p.id} value={p.id}>{p.label}</MenuItem>)}
-              </Select>
-              <Typography variant="subtitle2" mt={2}>重点章节深度</Typography>
-              <Select
-                value={config.key_chapter_depth}
-                size="small"
-                sx={{ minWidth: 260 }}
-                onChange={(e) => setConfig({ ...config, key_chapter_depth: e.target.value as MultiModelReviewConfig['key_chapter_depth'] })}
-              >
-                {REVIEW_PRESETS.filter(p => p.id !== 'balanced_3').map(p => (
-                  <MenuItem key={p.id} value={p.id}>{p.label}</MenuItem>
-                ))}
-              </Select>
-              <Typography variant="subtitle2" mt={2}>自动触发</Typography>
-              <FormGroup row>
-                <FormControlLabel control={<Checkbox checked={config.auto_scenarios.includes('first_chapter')} />} label="第一章" />
-                <FormControlLabel control={<Checkbox checked={config.auto_scenarios.includes('key_chapter')} />} label="重点章节" />
-                <FormControlLabel control={<Checkbox checked={config.auto_scenarios.includes('final_chapter')} />} label="完结章" />
-              </FormGroup>
-            </Box>
-          )}
-        </FormGroup>
-      </AccordionDetails>
-    </Accordion>
-  );
-}
+const DEFAULT_AUTO_STRATEGY: ReviewAutoStrategy = {
+  regular: null,
+  opening: 'key_chapter_5',
+  key: 'key_chapter_5',
+  finale: 'deep_7',
+};
 ```
 
 ### 5.2 评审结果展示
@@ -1015,13 +910,11 @@ async def test_multi_model_review_requires_single_model_fallback_when_all_fail()
     assert result["fallback_required"] is True
 
 
-def test_feature_gate_system_disabled():
-    """系统级关闭时，即使项目开启也返回 None"""
-    with patch("app.services.agents.review_feature_gate.settings") as mock_settings:
-        mock_settings.ENABLE_MULTI_MODEL_REVIEW = False
-        from app.services.agents.review_feature_gate import get_multi_model_review_config
-        project_context = {"review_config": '{"multi_model_review":{"enabled":true}}'}
-        assert get_multi_model_review_config(project_context) is None
+def test_feature_gate_uses_project_toggle():
+    """项目级开关开启时返回配置；不再依赖隐藏全局总闸。"""
+    from app.services.agents.review_feature_gate import get_multi_model_review_config
+    project_context = {"review_config": '{"multi_model_review":{"enabled":true}}'}
+    assert get_multi_model_review_config(project_context) is not None
 ```
 
 ### 6.2 集成测试
@@ -1029,8 +922,8 @@ def test_feature_gate_system_disabled():
 - 端到端：开启多模型开关 → 提交第一章 → 验证评审元信息中 `review_mode='multi'`、`preset='key_chapter_5'` 且 `reviewer_models` 非空
 - 降级：mock 单个模型超时 → 验证走降级路径不中断流程
 - 全失败：mock 全部模型失败 → 验证入口层调用原 `_single_model_review`
-- 深度选择：手动传入 `force_multi_model_review=true` → 验证使用 `manual_depth`
-- 向后兼容：关闭开关 → 验证走原单模型路径，行为与改造前一致
+- 深度选择：手动传入 `manual_multi_model_review=true` 与 `manual_multi_model_review_preset` → 验证只影响本次评审
+- 向后兼容：项目级开关关闭 → 验证走原单模型路径，行为与改造前一致
 
 ---
 
@@ -1038,15 +931,15 @@ def test_feature_gate_system_disabled():
 
 ### 7.1 灰度上线
 
-1. **阶段一**：`ENABLE_MULTI_MODEL_REVIEW=false`，仅代码合并，行为零变化
-2. **阶段二**：管理员在测试项目开启，验证 `balanced_3` 并行评审
-3. **阶段三**：对少量用户开放项目级开关
+1. **阶段一**：代码合并后默认所有项目 `enabled=false`，行为零变化
+2. **阶段二**：在测试项目开启项目级开关，验证 `balanced_3` 并行评审
+3. **阶段三**：对少量用户暴露质量评审步骤旁的设置入口
 4. **阶段四**：开放 `key_chapter_5` 自动重点章节评审
 5. **阶段五**：仅对高级用户开放 `deep_7` 人工深度评审
 
 ### 7.2 回滚策略
 
-- **快速回滚**：`.env` 设 `ENABLE_MULTI_MODEL_REVIEW=false`，重启服务即可全局回到单模型
+- **快速回滚**：通过项目配置接口或数据修复脚本批量将 `multi_model_review.enabled=false`，所有项目回到单模型
 - **数据兼容**：新增字段全部可空，单模型评审记录 `review_mode=NULL`，不影响既有数据
 - **代码回滚**：评审入口的 `_single_model_review` 保持原逻辑，多模型为新增分支，可安全移除
 
@@ -1065,7 +958,7 @@ def test_feature_gate_system_disabled():
 
 | 类别 | 文件 | 操作 |
 |---|---|---|
-| 后端·配置 | `backend/app/core/config.py` | 新增 ENABLE_MULTI_MODEL_REVIEW、preset、并发、超时、主审模型等配置 |
+| 后端·配置 | `backend/app/core/config.py` | 新增 preset、并发、超时、主审模型等运行参数 |
 | 后端·模型 | `backend/app/models/project.py` | 新增 `review_config` 字段 |
 | 后端·模型 | `backend/app/models/review.py` 或阶段输出存储 | 新增 `review_mode`/`review_preset`/`chief_model`/`reviewer_models`/`reviewer_profiles`/`per_model_reports` |
 | 后端·迁移 | `alembic/versions/xxxx_add_multi_model_review.py` | 新增迁移 |
@@ -1089,7 +982,7 @@ def test_feature_gate_system_disabled():
 |---|---|---|
 | 评审形态 | 并行独立 + 主审汇总 | 两份意见共同推荐，规避群体盲思与共识难产 |
 | 默认状态 | 关闭 | 高级功能，避免默认增加成本与延迟 |
-| 开关层级 | 系统级 + 项目级两级 | 管理员控总闸，用户自主启用 |
+| 开关层级 | 项目级单一开关 | 避免隐藏全局总闸造成用户不可见状态；用户在质量评审阶段自主启用 |
 | 触发方式 | 分级触发（manual/first/key/final） | 平衡体验与算力 |
 | 评审数量 | 3 / 5 / 7 三档 | 保持互补性，控制边际成本 |
 | profile 语义 | 全维度评审 + 重点加权 | 避免把完整评审机械拆分 |

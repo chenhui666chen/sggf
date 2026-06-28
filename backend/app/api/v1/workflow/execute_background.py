@@ -50,6 +50,8 @@ async def _run_execute_stage_background_serialized(
     targets: Optional[list[str]] = None,
     feedback: Optional[str] = None,
     workflow_generation_model: Optional[str] = None,
+    manual_multi_model_review: bool = False,
+    manual_multi_model_review_preset: Optional[str] = None,
 ):
     async with _get_workflow_execution_lock(project_id):
         await execute_stage_background(
@@ -62,6 +64,8 @@ async def _run_execute_stage_background_serialized(
             targets,
             feedback,
             workflow_generation_model,
+            manual_multi_model_review,
+            manual_multi_model_review_preset,
         )
 
 
@@ -72,6 +76,8 @@ async def _run_execute_stage_with_streaming_serialized(
     user_id: int,
     db: Session,
     workflow_generation_model: Optional[str] = None,
+    manual_multi_model_review: bool = False,
+    manual_multi_model_review_preset: Optional[str] = None,
 ):
     async with _get_workflow_execution_lock(project_id):
         await execute_stage_with_streaming(
@@ -81,6 +87,8 @@ async def _run_execute_stage_with_streaming_serialized(
             user_id,
             db,
             workflow_generation_model,
+            manual_multi_model_review,
+            manual_multi_model_review_preset,
         )
 
 
@@ -94,6 +102,8 @@ async def execute_stage_background(
     targets: Optional[list[str]] = None,
     feedback: Optional[str] = None,
     workflow_generation_model: Optional[str] = None,
+    manual_multi_model_review: bool = False,
+    manual_multi_model_review_preset: Optional[str] = None,
 ):
     """后台执行阶段任务"""
     import logging
@@ -331,6 +341,8 @@ async def execute_stage_background(
                 "targets": targets,
                 "feedback": feedback,
                 "workflow_generation_model": workflow_generation_model,
+                "manual_multi_model_review": manual_multi_model_review,
+                "manual_multi_model_review_preset": manual_multi_model_review_preset,
             },
         )
         
@@ -576,6 +588,7 @@ async def execute_stage_background(
                 workflow_context_builder.update_project_settings_fields(
                     project_id,
                     review_report=json.dumps(output_data.get("review", ""), ensure_ascii=False),
+                    review_meta=output_data.get("review_meta") or {},
                     stage_four_status="completed",
                 )
                 logger.info(f"   💾 已保存质量评审结果到 project_settings")

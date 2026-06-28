@@ -13,8 +13,6 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
-      '@mui/system': path.resolve(__dirname, './node_modules/@mui/system/esm'),
-      '@mui/utils': path.resolve(__dirname, './node_modules/@mui/utils/esm'),
     },
     dedupe: [
       '@mui/icons-material',
@@ -108,13 +106,6 @@ export default defineConfig({
       'prop-types',
       'react-is',
       'axios',
-      '@mui/material',
-      '@mui/material/utils',
-      '@mui/icons-material',
-      '@mui/icons-material/Close',
-      '@mui/lab',
-      '@mui/system',
-      '@mui/styled-engine',
     ],
   },
 })

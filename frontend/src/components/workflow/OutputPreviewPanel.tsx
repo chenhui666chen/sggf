@@ -15,6 +15,7 @@ import {
   getWorkflowPreviewEmptyMessage,
   getWorkflowPreviewLoadingLabel,
 } from '@/utils/workflowPreviewMessages'
+import ReviewMetaPanel, { type ReviewMeta } from './ReviewMetaPanel'
 
 interface OutputPreviewPanelProps {
   stage: StageType
@@ -37,6 +38,8 @@ interface OutputPreviewPanelProps {
   selectedConceptView?: 'concept' | 'world' | 'character'
   // 🆕 项目ID（用于跳转知识库）
   projectId?: string
+  // 多模型评审元信息
+  reviewMeta?: ReviewMeta | null
 }
 
 const stageTitles: Record<StageType, string> = {
@@ -63,6 +66,7 @@ export default function OutputPreviewPanel({
   progressMessage = '',  // 🆕 新增默认值
   selectedConceptView = 'concept',  // 🆕 新增默认值
   projectId = '',  // 🆕 新增默认值
+  reviewMeta = null,
 }: OutputPreviewPanelProps) {
   const navigate = useNavigate()
   // 🆕 根据当前阶段和选择获取对应的内容
@@ -171,6 +175,10 @@ export default function OutputPreviewPanel({
             position: 'relative',
           }}
         >
+          {stage === 'review' && !isCurrentStageStreaming ? (
+            <ReviewMetaPanel reviewMeta={reviewMeta} reviewText={reviewReportContent} />
+          ) : null}
+
           {content ? (
             <FormattedContent
               content={content}

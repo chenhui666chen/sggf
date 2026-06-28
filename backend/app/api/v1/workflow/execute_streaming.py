@@ -57,6 +57,8 @@ async def execute_stage_with_streaming(
     user_id: int,
     db: Session,
     workflow_generation_model: Optional[str] = None,
+    manual_multi_model_review: bool = False,
+    manual_multi_model_review_preset: Optional[str] = None,
 ):
     """
     🆕 使用流式输出执行阶段任务
@@ -95,6 +97,11 @@ async def execute_stage_with_streaming(
                 workflow_context_builder,
                 project_profile,
             )
+            if manual_multi_model_review and stage_enum == StageType.REVIEW:
+                real_coord.project_context["manual_multi_model_review"] = True
+                if manual_multi_model_review_preset:
+                    real_coord.project_context["manual_multi_model_review_preset"] = manual_multi_model_review_preset
+                logger.info("   ✅ 已启用手动多模型评审标记")
         except Exception as e:
             logger.warning(f"⚠️ 项目基本信息注入失败：{e}")
 
@@ -723,6 +730,7 @@ async def execute_stage_with_streaming(
                 workflow_context_builder.update_project_settings_fields(
                     project_id,
                     review_report=json.dumps(result_str, ensure_ascii=False),
+                    review_meta=output_data.get("review_meta") or {},
                     stage_four_status="completed",
                 )
             elif stage_enum == StageType.ITERATION:

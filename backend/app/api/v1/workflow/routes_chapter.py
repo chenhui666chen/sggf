@@ -4,7 +4,7 @@ import asyncio
 import os
 from fastapi import APIRouter, Depends, HTTPException, status, Body, BackgroundTasks
 from sqlalchemy.orm import Session
-from typing import Dict, Any, Optional, Tuple, List
+from typing import Dict, Any, Optional, Tuple, List, Callable
 from pydantic import BaseModel, ConfigDict
 from datetime import datetime
 import json
@@ -32,6 +32,8 @@ from app.services.prompts.workflow_runtime import (
     get_iteration_revision_system_prompt,
 )
 from app.services.auto_system_detector import auto_create_system_collections
+from app.services.agents import review_feature_gate
+from app.services.agents.multi_model_review_service import MultiModelReviewService
 
 logger = logging.getLogger(__name__)
 
@@ -81,6 +83,156 @@ def _split_stream_text(text: str, *, chunk_size: int = 1200) -> list[str]:
         return []
     safe_chunk_size = max(1, int(chunk_size or 1))
     return [text[index:index + safe_chunk_size] for index in range(0, len(text), safe_chunk_size)]
+
+
+def _resolve_next_chapter_multi_model_review_preset(
+    project_context: Dict[str, Any],
+    chapter_number: int,
+    chapter_plan: str = "",
+) -> Optional[str]:
+    cfg = review_feature_gate.get_multi_model_review_config(project_context)
+    if not cfg:
+        return None
+
+    is_manual = bool(
+        project_context.get("force_multi_model_review")
+        or project_context.get("manual_multi_model_review")
+    )
+    if "auto_scenarios" not in cfg and "auto_strategy" not in cfg and not is_manual:
+        return str(cfg.get("preset") or "balanced_3")
+
+    should_trigger, preset = review_feature_gate.should_trigger_multi_model_review(
+        project_context,
+        chapter_number=chapter_number,
+        is_manual=is_manual,
+        chapter_plan=chapter_plan,
+    )
+    return preset if should_trigger else None
+
+
+def _build_next_chapter_review_meta(multi_model_result: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "multi_model": bool(multi_model_result.get("multi_model")),
+        "preset": multi_model_result.get("preset"),
+        "chief_model": multi_model_result.get("chief_model"),
+        "chief_model_reused_as_reviewer": bool(multi_model_result.get("chief_model_reused_as_reviewer")),
+        "structured_summary": multi_model_result.get("structured_summary") or {},
+        "reviewer_models": multi_model_result.get("reviewer_models") or [],
+        "reviewer_profiles": multi_model_result.get("reviewer_profiles") or [],
+        "per_model_reports": multi_model_result.get("per_model_reports") or [],
+        "fallback_required": bool(multi_model_result.get("fallback_required")),
+        "fallback_reason": multi_model_result.get("fallback_reason"),
+    }
+
+
+async def _run_single_next_chapter_streaming_review(
+    *,
+    chapter_draft: str,
+    chapter_plan: str,
+    plot_outline: str,
+    genre: str,
+    next_chapter_number: int,
+    recent_chapter_assets_summary: str,
+    streaming_service: Any,
+    on_review_chunk: Callable[[str, int], Any],
+    real_coordinator: Any,
+) -> str:
+    from app.services.prompts.review_prompts import GenreAdaptiveReviewPrompts
+
+    review_system_prompt = GenreAdaptiveReviewPrompts.get_review_system_prompt(
+        genre=genre,
+    )
+    review_user_prompt = GenreAdaptiveReviewPrompts.get_review_user_prompt(
+        chapter_number=next_chapter_number,
+        chapter_plan=chapter_plan,
+        chapter_content=chapter_draft,
+        plot_outline=plot_outline,
+        genre=genre,
+        recent_chapter_assets_summary=recent_chapter_assets_summary,
+    )
+
+    try:
+        review_report = await streaming_service.generate_chapter_streaming(
+            prompt=review_user_prompt,
+            system_prompt=review_system_prompt,
+            on_chunk=on_review_chunk,
+            temperature=0.7,
+            task_type="review",
+        )
+        logger.info(f"   ✓ 评审完成（真流式 + review任务路由），报告长度: {len(review_report)}")
+        return review_report
+    except Exception as e:
+        logger.error(f"   ⚠️ 真流式调用失败，回退到同步调用: {e}")
+        if real_coordinator is not None and hasattr(real_coordinator, "review_chapter"):
+            return await asyncio.to_thread(
+                real_coordinator.review_chapter,
+                chapter_draft=chapter_draft,
+                chapter_plan=chapter_plan,
+                plot_outline=plot_outline,
+            )
+        return "质量评审：章节符合要求，可以继续优化。"
+
+
+async def _run_next_chapter_quality_review(
+    *,
+    project_context: Dict[str, Any],
+    chapter_draft: str,
+    chapter_plan: str,
+    plot_outline: str,
+    genre: str,
+    next_chapter_number: int,
+    recent_chapter_assets_summary: str,
+    streaming_service: Any,
+    on_review_chunk: Callable[[str, int], Any],
+    real_coordinator: Any,
+) -> Tuple[str, Dict[str, Any]]:
+    multi_model_preset = _resolve_next_chapter_multi_model_review_preset(
+        project_context,
+        next_chapter_number,
+        chapter_plan,
+    )
+    review_meta: Dict[str, Any] = {}
+    if multi_model_preset:
+        try:
+            cfg = review_feature_gate.get_multi_model_review_config(project_context) or {}
+            service = MultiModelReviewService(
+                preset=multi_model_preset,
+                chief_model=cfg.get("chief_model"),
+            )
+            multi_model_result = await service.review(
+                chapter_draft,
+                genre=genre,
+                chapter_plan=chapter_plan,
+            )
+            review_meta = _build_next_chapter_review_meta(multi_model_result)
+            review_report = str(multi_model_result.get("review") or "")
+            if multi_model_result.get("multi_model") and review_report:
+                await on_review_chunk(review_report, 1)
+                logger.info(f"   ✓ 多模型评审完成，报告长度: {len(review_report)}")
+                return review_report, review_meta
+            logger.warning("多模型评审未产出足够结果，回退单模型评审")
+        except Exception as e:
+            review_meta = {
+                "multi_model": False,
+                "fallback_required": True,
+                "fallback_reason": str(e),
+            }
+            logger.exception("多模型评审失败，回退单模型评审")
+
+    review_report = await _run_single_next_chapter_streaming_review(
+        chapter_draft=chapter_draft,
+        chapter_plan=chapter_plan,
+        plot_outline=plot_outline,
+        genre=genre,
+        next_chapter_number=next_chapter_number,
+        recent_chapter_assets_summary=recent_chapter_assets_summary,
+        streaming_service=streaming_service,
+        on_review_chunk=on_review_chunk,
+        real_coordinator=real_coordinator,
+    )
+    if review_meta:
+        review_meta["multi_model"] = False
+    return review_report, review_meta
 
 
 def _get_chapter_plan_prompt_token_budget(model_name: Optional[str]) -> int:
@@ -1357,45 +1509,27 @@ async def execute_generate_next_chapter_task(
          # 🆕 获取项目题材（用于题材自适应评审）
         review_project_genre = project_profile.genre or ""
         logger.info(f"   🎯 评审使用题材: {review_project_genre or '通用'}")
-        
-        # 🆕 使用题材自适应评审提示词
-        from app.services.prompts.review_prompts import GenreAdaptiveReviewPrompts
-        
-        review_system_prompt = GenreAdaptiveReviewPrompts.get_review_system_prompt(
-            genre=review_project_genre
-        )
-        
-        review_user_prompt = GenreAdaptiveReviewPrompts.get_review_user_prompt(
-            chapter_number=next_chapter_number,
-            chapter_plan=chapter_plan,
-            chapter_content=chapter_draft,
-            plot_outline=plot_outline,
-            genre=review_project_genre,
-            recent_chapter_assets_summary=recent_chapter_assets_summary,
+
+        review_project_context = project_profile.to_project_context_payload()
+        review_project_context.update(
+            {
+                "chapter_number": next_chapter_number,
+                "next_chapter_number": next_chapter_number,
+            }
         )
 
-        # 🆕 使用真流式 LLM 调用（按 review 任务路由）
-        try:
-            review_report = await streaming_service.generate_chapter_streaming(
-                prompt=review_user_prompt,
-                system_prompt=review_system_prompt,
-                on_chunk=on_review_chunk,
-                temperature=0.7,
-                task_type="review",
-            )
-            logger.info(f"   ✓ 评审完成（真流式 + review任务路由），报告长度: {len(review_report)}")
-        except Exception as e:
-            logger.error(f"   ⚠️ 真流式调用失败，回退到同步调用: {e}")
-            # 回退到同步调用
-            if hasattr(real_coordinator, 'review_chapter'):
-                review_report = await asyncio.to_thread(
-                    real_coordinator.review_chapter,
-                    chapter_draft=chapter_draft,
-                    chapter_plan=chapter_plan,
-                    plot_outline=plot_outline
-                )
-            else:
-                review_report = "质量评审：章节符合要求，可以继续优化。"
+        review_report, review_meta = await _run_next_chapter_quality_review(
+            project_context=review_project_context,
+            chapter_draft=chapter_draft,
+            chapter_plan=chapter_plan,
+            plot_outline=plot_outline,
+            genre=review_project_genre,
+            next_chapter_number=next_chapter_number,
+            recent_chapter_assets_summary=recent_chapter_assets_summary,
+            streaming_service=streaming_service,
+            on_review_chunk=on_review_chunk,
+            real_coordinator=real_coordinator,
+        )
 
         await ws_manager.send_stream_end(project_id, 'review', len(review_report), f"第{next_chapter_number}章质量评审完成")
         # 🔔 推送阶段完成状态（生成下一章 - 步骤3）
@@ -1424,6 +1558,7 @@ async def execute_generate_next_chapter_task(
         workflow_context_builder.update_project_settings_fields(
             project_id,
             review_report=review_report,
+            review_meta=review_meta,
         )
         logger.info(f"   ✓ 评审报告已同步到数据库")
 
