@@ -59,6 +59,13 @@ class TimelineMixin:
                 "startUnit": start_unit,
                 "durationUnits": duration_units,
             }
+            if "volume" in raw_edit:
+                try:
+                    volume = float(raw_edit.get("volume"))
+                except (TypeError, ValueError):
+                    volume = math.nan
+                if math.isfinite(volume):
+                    normalized[key_text]["volume"] = max(0.0, min(1.0, volume))
         return normalized
 
     @staticmethod
@@ -191,6 +198,8 @@ class TimelineMixin:
                 if parsed["track"] == "music":
                     item["timestamp"] = seconds["timestamp"]
                     item["duration"] = seconds["duration"]
+                    if "volume" in edit:
+                        item["volume"] = edit["volume"]
                     item["editor_timeline_key"] = key
                     break
                 cue_count = track_counters[parsed["track"]].get(scene_index, 0)
@@ -199,6 +208,8 @@ class TimelineMixin:
                     continue
                 item["timestamp"] = seconds["timestamp"]
                 item["duration"] = seconds["duration"]
+                if "volume" in edit:
+                    item["volume"] = edit["volume"]
                 item["editor_timeline_key"] = key
                 break
 
@@ -247,6 +258,9 @@ class TimelineMixin:
         adjusted_items: List[Dict[str, Any]] = []
         for item in timeline.get("timeline", []):
             new_item = dict(item)
+            if new_item.get("editor_timeline_key"):
+                adjusted_items.append(new_item)
+                continue
             scene_id = str(item.get("scene_id") or "")
             idx = self._parse_scene_index(scene_id)
             if idx is not None and idx < len(estimated_offsets) and idx < len(actual_offsets):
@@ -324,6 +338,78 @@ class TimelineMixin:
                 source_durations[index] = estimated_durations[index] if index < len(estimated_durations) else 0.2
 
         self._realign_timelines_with_durations(script_segments, source_durations)
+
+    def _realign_timelines_with_mixed_timing(
+        self,
+        script_segments: List[ScriptSegment],
+        mixer_segments: List[Any],
+        segment_timings: List[Dict[str, Any]],
+    ) -> None:
+        """Align automatic effect/music cues to the same post-mix timeline as speech."""
+        if not script_segments or not mixer_segments or not segment_timings:
+            return
+
+        estimated_durations = self._estimate_segment_durations(script_segments)
+        estimated_offsets = self._build_segment_offsets(estimated_durations)
+        actual_offsets: List[Dict[str, float]] = [
+            {"start": 0.0, "duration": 0.0} for _ in script_segments
+        ]
+        assigned = [False for _ in script_segments]
+
+        for timing in segment_timings:
+            if not isinstance(timing, dict):
+                continue
+            try:
+                mixer_segment_index = int(timing.get("index"))
+            except (TypeError, ValueError):
+                continue
+            if mixer_segment_index < 0 or mixer_segment_index >= len(mixer_segments):
+                continue
+            segment = mixer_segments[mixer_segment_index]
+            source_indices = getattr(segment, "source_segment_indices", None) or []
+            if not source_indices:
+                continue
+            try:
+                source_index = int(source_indices[0])
+                start = max(0.0, float(timing.get("start") or 0.0))
+                duration = max(0.0, float(timing.get("duration") or 0.0))
+            except (TypeError, ValueError):
+                continue
+            if source_index < 0 or source_index >= len(actual_offsets):
+                continue
+            if not assigned[source_index]:
+                actual_offsets[source_index] = {"start": start, "duration": duration}
+                assigned[source_index] = True
+            else:
+                current = actual_offsets[source_index]
+                current["start"] = min(current["start"], start)
+                current["duration"] += duration
+
+        previous_end = 0.0
+        for index, offset in enumerate(actual_offsets):
+            if not assigned[index]:
+                offset["start"] = previous_end
+                offset["duration"] = estimated_durations[index] if index < len(estimated_durations) else 0.2
+            previous_end = max(previous_end, offset["start"] + offset["duration"])
+
+        total_actual = max(
+            previous_end,
+            max((float(item.get("end") or 0.0) for item in segment_timings if isinstance(item, dict)), default=0.0),
+        )
+        self._last_effect_timeline = self._align_timeline_with_audio(
+            self._last_effect_timeline,
+            estimated_offsets,
+            actual_offsets,
+            total_actual,
+            align_environment=True,
+        )
+        self._last_music_timeline = self._align_timeline_with_audio(
+            self._last_music_timeline,
+            estimated_offsets,
+            actual_offsets,
+            total_actual,
+            align_environment=False,
+        )
 
     def _audio_durations_for_segments(
         self,

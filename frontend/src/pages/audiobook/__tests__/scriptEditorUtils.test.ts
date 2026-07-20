@@ -87,17 +87,15 @@ describe('audiobook script editor utils', () => {
       outputFormat: 'mp3',
       generateSubtitle: true,
       timelineEdits: {
-        'sfx-0-0': { startUnit: 12, durationUnits: 48 },
+        'sfx-0-0': { startUnit: 12, durationUnits: 48, volume: 0.35 },
       },
     })).toEqual({
       chapter_ids: [8],
       tts_model: 'qwen3-tts-instruct-flash',
-      narration_style: 'dramatic',
-      narration_style_prompt: undefined,
       output_format: 'mp3',
       generate_subtitle: true,
       timeline_edits: {
-        'sfx-0-0': { startUnit: 12, durationUnits: 48 },
+        'sfx-0-0': { startUnit: 12, durationUnits: 48, volume: 0.35 },
       },
     })
 
@@ -109,8 +107,6 @@ describe('audiobook script editor utils', () => {
       generateSubtitle: false,
     })).toEqual({
       tts_model: 'cosyvoice-v3.5-plus',
-      narration_style: 'custom',
-      narration_style_prompt: '克制、冷静',
       output_format: 'm4b',
       generate_subtitle: false,
     })
@@ -125,8 +121,6 @@ describe('audiobook script editor utils', () => {
     })).toEqual({
       chapter_ids: [9],
       tts_model: 'qwen3-tts-instruct-flash',
-      narration_style: 'documentary',
-      narration_style_prompt: undefined,
       output_format: 'wav',
       generate_subtitle: true,
     })

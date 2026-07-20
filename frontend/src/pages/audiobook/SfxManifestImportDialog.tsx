@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   Alert,
   Box,
@@ -53,12 +53,32 @@ const SfxManifestImportDialog = ({ open, onClose, onImported }: SfxManifestImpor
   const [importing, setImporting] = useState(false)
   const [stats, setStats] = useState<ImportStats | null>(null)
   const [recordCount, setRecordCount] = useState(0)
+  const [previewRequestKey, setPreviewRequestKey] = useState<string | null>(null)
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
 
-  const canImport = Boolean(stats && recordCount > 0 && confirmed)
+  const currentRequestKey = JSON.stringify([
+    manifestPath.trim(),
+    sourceDir.trim(),
+    overwrite,
+  ])
+  const previewIsCurrent = previewRequestKey === currentRequestKey
+  const canImport = Boolean(stats && recordCount > 0 && confirmed && previewIsCurrent)
+
+  useEffect(() => {
+    setStats(null)
+    setRecordCount(0)
+    setPreviewRequestKey(null)
+    setConfirmed(false)
+    setMessage('')
+    setError('')
+  }, [currentRequestKey])
 
   const runImport = async (dryRun: boolean) => {
+    if (!dryRun && !canImport) {
+      setError('导入条件已变化，请重新执行 dry_run 预检')
+      return
+    }
     if (dryRun) {
       setChecking(true)
     } else {
@@ -77,8 +97,12 @@ const SfxManifestImportDialog = ({ open, onClose, onImported }: SfxManifestImpor
       setStats(res.data.stats || EMPTY_STATS)
       setRecordCount(res.data.records.length)
       if (dryRun) {
+        setPreviewRequestKey(currentRequestKey)
+        setConfirmed(false)
         setMessage(`预检完成：候选 ${res.data.stats.candidates} 个，可导入 ${res.data.records.length} 个。`)
       } else {
+        setPreviewRequestKey(null)
+        setConfirmed(false)
         setMessage(`manifest 导入完成：已导入 ${res.data.stats.imported} 个音效。`)
         onImported?.()
       }
@@ -95,6 +119,7 @@ const SfxManifestImportDialog = ({ open, onClose, onImported }: SfxManifestImpor
     setError('')
     setStats(null)
     setRecordCount(0)
+    setPreviewRequestKey(null)
     setConfirmed(false)
     onClose()
   }
@@ -117,22 +142,16 @@ const SfxManifestImportDialog = ({ open, onClose, onImported }: SfxManifestImpor
             size="small"
             label="manifest 路径"
             value={manifestPath}
-            onChange={(event) => {
-              setManifestPath(event.target.value)
-              setStats(null)
-              setConfirmed(false)
-            }}
+            onChange={(event) => setManifestPath(event.target.value)}
+            disabled={checking || importing}
             helperText="必须位于音频素材库目录内"
           />
           <TextField
             size="small"
             label="本地素材目录"
             value={sourceDir}
-            onChange={(event) => {
-              setSourceDir(event.target.value)
-              setStats(null)
-              setConfirmed(false)
-            }}
+            onChange={(event) => setSourceDir(event.target.value)}
+            disabled={checking || importing}
             helperText="manifest 中的 file 字段会按该目录解析"
           />
           <FormControlLabel
@@ -140,6 +159,7 @@ const SfxManifestImportDialog = ({ open, onClose, onImported }: SfxManifestImpor
               <Checkbox
                 checked={overwrite}
                 onChange={(event) => setOverwrite(event.target.checked)}
+                disabled={checking || importing}
               />
             }
             label="允许覆盖已存在文件"
@@ -167,7 +187,7 @@ const SfxManifestImportDialog = ({ open, onClose, onImported }: SfxManifestImpor
             <Checkbox
               checked={confirmed}
               onChange={(event) => setConfirmed(event.target.checked)}
-              disabled={!stats || stats.candidates === 0}
+              disabled={!stats || stats.candidates === 0 || !previewIsCurrent || checking || importing}
             />
           }
           label="我确认这些素材已获得商用授权，并同意写入本地音效库索引"

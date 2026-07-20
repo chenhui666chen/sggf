@@ -16,8 +16,8 @@ import { extractQueuedAudiobookJobId } from './scriptEditorUtils'
 export type AudiobookGenerationMode = 'full' | 'script_only'
 
 export const resolveAudiobookGenerationMode = (
-  scriptOnlyMode: boolean,
-): AudiobookGenerationMode => (scriptOnlyMode ? 'script_only' : 'full')
+  _scriptOnlyMode: boolean,
+): AudiobookGenerationMode => 'script_only'
 
 export const resolveProjectIdForAudiobookGeneration = ({
   selectedProjectId,
@@ -32,9 +32,6 @@ export const buildCreateAudiobookProjectPayload = ({
   chapterIds,
   voiceConfig,
   ttsModel,
-  generationMode,
-  narrationStyle,
-  narrationStylePrompt,
   outputFormat,
   generateSubtitle,
 }: {
@@ -56,11 +53,7 @@ export const buildCreateAudiobookProjectPayload = ({
   tts_model: ttsModel,
   output_format: outputFormat,
   generate_subtitle: generateSubtitle,
-  generation_mode: generationMode,
-  narration_style: narrationStyle,
-  narration_style_prompt: narrationStyle === 'custom' && narrationStylePrompt.trim()
-    ? narrationStylePrompt.trim()
-    : undefined,
+  generation_mode: 'script_only',
   force_regenerate_script: true,
 })
 

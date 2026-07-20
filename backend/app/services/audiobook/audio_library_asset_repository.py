@@ -6,6 +6,10 @@ from typing import Any, Iterable
 from sqlalchemy.orm import Session
 
 from app.models.audio_library_asset import AudioLibraryAsset
+from app.services.audiobook.audio_library_source_policy import (
+    ALLOWED_SFX_SOURCES,
+    normalize_sfx_record_source,
+)
 
 
 _COMMON_RECORD_FIELDS = (
@@ -141,6 +145,8 @@ def upsert_audio_library_asset(
     record: dict[str, Any],
 ) -> AudioLibraryAsset:
     normalized_type = normalize_library_type(library_type)
+    if normalized_type == "sfx":
+        record = normalize_sfx_record_source(record)
     asset_key = _asset_key_from_record(record)
     asset = (
         db.query(AudioLibraryAsset)
@@ -196,20 +202,54 @@ def audio_library_asset_to_record(asset: AudioLibraryAsset) -> dict[str, Any]:
     return record
 
 
-def list_audio_library_asset_records(db: Session, library_type: str) -> list[dict[str, Any]]:
+def list_audio_library_asset_records(
+    db: Session,
+    library_type: str,
+    *,
+    include_disallowed_sfx_sources: bool = False,
+) -> list[dict[str, Any]]:
     normalized_type = normalize_library_type(library_type)
-    assets: Iterable[AudioLibraryAsset] = (
+    query = db.query(AudioLibraryAsset).filter(AudioLibraryAsset.library_type == normalized_type)
+    if normalized_type == "sfx" and not include_disallowed_sfx_sources:
+        query = query.filter(AudioLibraryAsset.source.in_(ALLOWED_SFX_SOURCES))
+    assets: Iterable[AudioLibraryAsset] = query.order_by(AudioLibraryAsset.asset_key.asc()).all()
+    return [audio_library_asset_to_record(asset) for asset in assets]
+
+
+def replace_audio_library_asset_records(
+    db: Session,
+    library_type: str,
+    records: Iterable[dict[str, Any]],
+) -> None:
+    normalized_type = normalize_library_type(library_type)
+    existing_assets = (
         db.query(AudioLibraryAsset)
         .filter(AudioLibraryAsset.library_type == normalized_type)
-        .order_by(AudioLibraryAsset.asset_key.asc())
         .all()
     )
-    return [audio_library_asset_to_record(asset) for asset in assets]
+    existing_by_key = {asset.asset_key: asset for asset in existing_assets}
+    retained_keys: set[str] = set()
+
+    for record in records:
+        if normalized_type == "sfx":
+            record = normalize_sfx_record_source(record)
+        asset_key = _asset_key_from_record(record)
+        asset = existing_by_key.get(asset_key)
+        if asset is None:
+            asset = AudioLibraryAsset(library_type=normalized_type, asset_key=asset_key)
+            db.add(asset)
+        _apply_record_to_asset(asset, normalized_type, record)
+        retained_keys.add(asset_key)
+
+    for asset in existing_assets:
+        if asset.asset_key not in retained_keys:
+            db.delete(asset)
 
 
 __all__ = [
     "audio_library_asset_to_record",
     "list_audio_library_asset_records",
     "normalize_library_type",
+    "replace_audio_library_asset_records",
     "upsert_audio_library_asset",
 ]

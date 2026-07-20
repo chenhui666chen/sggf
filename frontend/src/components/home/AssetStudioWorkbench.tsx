@@ -95,7 +95,7 @@ interface SpeechVoicePreset {
   supportsInstruct?: boolean
 }
 
-type AudioGenerationType = 'music' | 'sound-effect' | 'speech'
+type AudioGenerationType = 'music' | 'sound-effect' | 'scene-audio' | 'speech'
 type AssetStudioMediaType = 'image' | 'video' | 'audio'
 type AssetCollectKey = 'image' | 'video' | 'motion' | 'audio'
 
@@ -700,6 +700,11 @@ const AUDIO_GENERATION_TYPE_OPTIONS: Array<{ value: AudioGenerationType; label: 
     helper: '适合环境音、动作音和短时音效草案。',
   },
   {
+    value: 'scene-audio',
+    label: '场景音频',
+    helper: '在一条导演式提示词中统一生成多角色对白、环境声、动作音效和配乐。',
+  },
+  {
     value: 'speech',
     label: '语音合成',
     helper: '适合旁白、对白和角色试听，可直接选择 TTS 模型与音色。',
@@ -719,6 +724,13 @@ const AUDIO_MODEL_OPTIONS_BY_TYPE: Record<AudioGenerationType, ModelOption[]> = 
       value: 'vidu-timing2audio',
       label: 'Vidu Timing2Audio',
       helper: '可控文生音效，支持通过时间轴控制多个音效事件，适合视频音效和有声小说音效。',
+    },
+  ],
+  'scene-audio': [
+    {
+      value: 'seed-audio-1.0',
+      label: '豆包音频生成模型 1.0',
+      helper: '适合有声剧和影视场景预演，可在一次生成中组合对白、环境、音效与音乐。',
     },
   ],
   speech: [
@@ -758,6 +770,7 @@ const AUDIO_DURATION_OPTIONS_BY_TYPE: Record<AudioGenerationType, DurationOption
     { value: '8', label: '8 秒' },
     { value: '10', label: '10 秒' },
   ],
+  'scene-audio': [],
   speech: [],
 }
 
@@ -1500,6 +1513,8 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
     assetStudioModelCatalog?.defaults.asset_studio_audio_music || 'mureka-o1-instrumental'
   const assetStudioAudioSoundEffectDefaultModelId =
     assetStudioModelCatalog?.defaults.asset_studio_audio_sound_effect || 'vidu-timing2audio'
+  const assetStudioAudioSceneDefaultModelId =
+    assetStudioModelCatalog?.defaults.asset_studio_audio_scene || 'seed-audio-1.0'
   const assetStudioAudioSpeechDefaultModelId =
     assetStudioModelCatalog?.defaults.asset_studio_audio_speech || 'qwen3-tts-instruct-flash'
 
@@ -1542,6 +1557,7 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
   const [audioTempo, setAudioTempo] = useState('medium')
   const [audioVoiceId, setAudioVoiceId] = useState('')
   const [audioInstruction, setAudioInstruction] = useState('')
+  const [audioSpeakerIds, setAudioSpeakerIds] = useState('')
   const [audioRate, setAudioRate] = useState('1.0')
   const [audioPitch, setAudioPitch] = useState('1.0')
   const [audioVolume, setAudioVolume] = useState('50')
@@ -1669,6 +1685,9 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
     'sound-effect':
       assetStudioModelCatalog?.groups.audio_sound_effect?.map(mapCatalogOptionToModelOption) ||
       AUDIO_MODEL_OPTIONS_BY_TYPE['sound-effect'],
+    'scene-audio':
+      assetStudioModelCatalog?.groups.audio_scene?.map(mapCatalogOptionToModelOption) ||
+      AUDIO_MODEL_OPTIONS_BY_TYPE['scene-audio'],
     speech: assetStudioModelCatalog?.groups.audio_speech?.map(mapCatalogOptionToModelOption) || AUDIO_MODEL_OPTIONS_BY_TYPE.speech,
   }
   const audioModelOptions = audioModelOptionsByType[audioGenerationType]
@@ -2233,7 +2252,9 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
           ? assetStudioAudioMusicDefaultModelId
           : audioGenerationType === 'sound-effect'
             ? assetStudioAudioSoundEffectDefaultModelId
-            : assetStudioAudioSpeechDefaultModelId
+            : audioGenerationType === 'scene-audio'
+              ? assetStudioAudioSceneDefaultModelId
+              : assetStudioAudioSpeechDefaultModelId
       setAudioModelId(
         audioModelOptions.find((option) => option.value === preferredAudioModelId)?.value ||
           audioModelOptions[0]?.value ||
@@ -2243,6 +2264,7 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
   }, [
     assetStudioAudioMusicDefaultModelId,
     assetStudioAudioSoundEffectDefaultModelId,
+    assetStudioAudioSceneDefaultModelId,
     assetStudioAudioSpeechDefaultModelId,
     audioGenerationType,
     audioModelId,
@@ -2454,7 +2476,13 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
       return
     }
     if (!audioPrompt.trim()) {
-      setAudioError(audioGenerationType === 'music' ? '请先填写配乐提示词' : '请先填写音效提示词')
+      setAudioError(
+        audioGenerationType === 'music'
+          ? '请先填写配乐提示词'
+          : audioGenerationType === 'scene-audio'
+            ? '请先填写场景音频提示词'
+            : '请先填写音效提示词',
+      )
       return
     }
 
@@ -2468,6 +2496,9 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
       formData.append('duration', audioDuration)
       formData.append('mood', audioMood)
       formData.append('tempo', audioTempo)
+      if (audioGenerationType === 'scene-audio') {
+        formData.append('speaker_ids', audioSpeakerIds.trim())
+      }
       if (audioGenerationType === 'music') {
         formData.append('style', audioStyle)
       }
@@ -2999,20 +3030,56 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
                 </Alert>
               ) : null}
 
+              {audioGenerationType === 'scene-audio' ? (
+                <>
+                  <Alert severity="info" sx={{ borderRadius: 3 }}>
+                    豆包 Seed Audio 会按提示词顺序统一编排对白、环境声、动作音效和配乐。输出为 MP3 / 48 kHz，并自动保存到资产工作台。
+                  </Alert>
+                  <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
+                    {[
+                      ['对白场景', '安静的室内，窗外持续下雨。男子1用低沉严肃的语气说：“你终于来了。”女子1短暂停顿后平静回答：“有些答案，只能当面告诉你。”远处一声闷雷，低音弦乐缓慢进入。'],
+                      ['悬疑追逐', '夜晚地下停车场，急促脚步声由远及近，汽车警报突然响起。男子1喘息着低声说：“别回头，继续跑。”随后传来轮胎摩擦地面的声音，紧张的电子打击乐逐渐增强。'],
+                      ['氛围叙事', '清晨海边，海浪和海鸥声持续。旁白温和地讲述：“天亮以后，小镇又恢复了往日的平静。”木吉他与柔和钢琴缓慢铺开，最后只留下海浪声。'],
+                    ].map(([label, prompt]) => (
+                      <Button key={label} size="small" variant="outlined" onClick={() => setAudioPrompt(prompt)} sx={WORKBENCH_SUBTLE_ACTION_BUTTON_SX}>
+                        {label}
+                      </Button>
+                    ))}
+                  </Stack>
+                </>
+              ) : null}
+
               <TextField
                 multiline
                 minRows={8}
-                label={audioGenerationType === 'music' ? '配乐提示词' : '音效提示词'}
+                label={audioGenerationType === 'music' ? '配乐提示词' : audioGenerationType === 'scene-audio' ? '场景音频提示词' : '音效提示词'}
                 value={audioPrompt}
                 onChange={(event) => setAudioPrompt(event.target.value)}
                 placeholder={
                   audioGenerationType === 'music'
                     ? '例如：夜色都市，低频铺底，缓慢推进，悬疑感钢琴与合成器氛围配乐。'
-                    : '例如：雨夜巷口的脚步声与湿润地面回响，近景、短促、带一点紧张气氛。'
+                    : audioGenerationType === 'scene-audio'
+                      ? '按时间顺序描述环境、角色身份与语气、台词、动作音效、配乐及收尾。'
+                      : '例如：雨夜巷口的脚步声与湿润地面回响，近景、短促、带一点紧张气氛。'
                 }
                 InputLabelProps={{ sx: { color: 'rgba(255,255,255,0.62)' } }}
                 sx={{ '& .MuiOutlinedInput-root': { color: 'white', backgroundColor: 'rgba(255,255,255,0.03)' } }}
               />
+
+              {audioGenerationType === 'scene-audio' ? (
+                <TextField
+                  size="small"
+                  fullWidth
+                  label="参考说话人 ID（可选）"
+                  value={audioSpeakerIds}
+                  onChange={(event) => setAudioSpeakerIds(event.target.value)}
+                  placeholder="多个 speaker_id 使用逗号或换行分隔"
+                  helperText="按角色出现顺序填写；留空时由模型根据角色描述生成声音。"
+                  InputLabelProps={{ sx: { color: 'rgba(255,255,255,0.62)' } }}
+                  FormHelperTextProps={{ sx: { color: 'rgba(255,255,255,0.56)', mx: 0 } }}
+                  sx={{ '& .MuiOutlinedInput-root': { color: 'white', backgroundColor: 'rgba(255,255,255,0.03)' } }}
+                />
+              ) : null}
 
               {audioGenerationType === 'speech' ? (
                 <Stack spacing={1.5}>
@@ -3139,7 +3206,7 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
                 </Stack>
               ) : null}
 
-              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5} sx={{ display: audioGenerationType === 'speech' ? 'none' : 'flex' }}>
+              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5} sx={{ display: audioGenerationType === 'speech' || audioGenerationType === 'scene-audio' ? 'none' : 'flex' }}>
                 <FormControl size="small" fullWidth>
                   <InputLabel sx={{ color: 'rgba(255,255,255,0.68)' }}>时长</InputLabel>
                   <Select value={audioDuration} label="时长" onChange={(event) => setAudioDuration(event.target.value)} sx={{ color: 'white' }}>
@@ -3199,8 +3266,8 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
                   result: audioResult,
                   assetKind: 'audio',
                   prompt: audioPrompt,
-                  fallbackTitle: audioGenerationType === 'music' ? '配乐资产' : audioGenerationType === 'sound-effect' ? '音效资产' : '语音资产',
-                  tags: ['asset_studio', audioGenerationType === 'music' ? 'music' : audioGenerationType === 'sound-effect' ? 'sound-effect' : 'speech'],
+                  fallbackTitle: audioGenerationType === 'music' ? '配乐资产' : audioGenerationType === 'sound-effect' ? '音效资产' : audioGenerationType === 'scene-audio' ? '场景音频资产' : '语音资产',
+                  tags: ['asset_studio', audioGenerationType === 'music' ? 'music' : audioGenerationType === 'sound-effect' ? 'sound-effect' : audioGenerationType === 'scene-audio' ? 'scene-audio' : 'speech'],
                 })
               }
               collecting={collectStates.audio.loading}
@@ -3214,6 +3281,8 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
                 ? '配乐模式会把风格、情绪和节奏一并传给后端音频服务。'
                 : audioGenerationType === 'sound-effect'
                 ? '音效模式使用 Vidu Timing2Audio 进行时间轴可控的音效生成。'
+                : audioGenerationType === 'scene-audio'
+                ? '场景音频模式使用豆包 Seed Audio 1.0，一次生成对白、环境声、音效与配乐，并持久化临时结果地址。'
                 : '语音模式会调用统一 TTS 运行时，按所选模型、音色和说话参数直接输出语音资产。'}
             </Typography>
             <FooterAction loading={audioLoading} label="生成音频" onClick={handleGenerateAudio} />

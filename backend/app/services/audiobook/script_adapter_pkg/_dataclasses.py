@@ -32,6 +32,7 @@ class SoundEffect:
     fade_in: float = 0.0  # 淡入时长（秒）
     fade_out: float = 0.0  # 淡出时长（秒）
     delay: float = 0.0  # 延迟触发（秒），相对于片段开始
+    asset_id: Optional[str] = None
 
 
 @dataclass
@@ -55,6 +56,7 @@ class MusicCue:
     duration: Optional[float] = None  # 持续时长（秒），None表示持续到片段结束
     start_time: float = 0.0  # 开始时间（秒），相对于片段开始
     emotion_follow: bool = True  # 是否跟随情绪波动调整音量
+    asset_id: Optional[str] = None
 
 
 @dataclass

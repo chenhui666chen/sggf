@@ -23,7 +23,7 @@ const buildCheckpoint = (
 describe('audiobook generation action utils', () => {
   it('resolves generation mode and request project ids', () => {
     expect(resolveAudiobookGenerationMode(true)).toBe('script_only')
-    expect(resolveAudiobookGenerationMode(false)).toBe('full')
+    expect(resolveAudiobookGenerationMode(false)).toBe('script_only')
     expect(resolveProjectIdForAudiobookGeneration({
       selectedProjectId: 7,
       routeProjectId: 8,
@@ -67,16 +67,14 @@ describe('audiobook generation action utils', () => {
       tts_model: 'qwen3-tts-instruct-flash',
       output_format: 'wav',
       generate_subtitle: false,
-      generation_mode: 'full',
-      narration_style: 'dramatic',
-      narration_style_prompt: undefined,
+      generation_mode: 'script_only',
       force_regenerate_script: true,
     })
     expect(payload.chapter_ids).not.toBe(chapterIds)
   })
 
-  it('passes a trimmed custom narration prompt only for custom style', () => {
-    expect(buildCreateAudiobookProjectPayload({
+  it('omits narration style fields from create payloads', () => {
+    const customStylePayload = buildCreateAudiobookProjectPayload({
       projectId: 9,
       chapterIds: [1],
       voiceConfig: [],
@@ -86,43 +84,27 @@ describe('audiobook generation action utils', () => {
       narrationStylePrompt: '  慢速、温柔，并保留长停顿  ',
       outputFormat: 'mp3',
       generateSubtitle: true,
-    })).toMatchObject({
-      narration_style: 'custom',
-      narration_style_prompt: '慢速、温柔，并保留长停顿',
+    })
+    expect(customStylePayload).toEqual(expect.objectContaining({
+      generation_mode: 'script_only',
       output_format: 'mp3',
       generate_subtitle: true,
       force_regenerate_script: true,
-    })
+    }))
 
-    expect(buildCreateAudiobookProjectPayload({
+    const payloadWithoutNarrationStyle = buildCreateAudiobookProjectPayload({
       projectId: 9,
       chapterIds: [1],
       voiceConfig: [],
       ttsModel: 'cosyvoice-v3.5-plus',
-      generationMode: 'full',
+      generationMode: 'script_only',
       narrationStyle: 'dramatic',
       narrationStylePrompt: '这段不应透传',
       outputFormat: 'mp3',
       generateSubtitle: true,
-    }).narration_style_prompt).toBeUndefined()
-  })
-
-  it('preserves backend-provided narration style ids in create payloads', () => {
-    expect(buildCreateAudiobookProjectPayload({
-      projectId: 9,
-      chapterIds: [1],
-      voiceConfig: [],
-      ttsModel: 'qwen3-tts-instruct-flash',
-      generationMode: 'full',
-      narrationStyle: 'cinematic-story',
-      narrationStylePrompt: '这段只应由 custom 使用',
-      outputFormat: 'mp3',
-      generateSubtitle: true,
-    })).toMatchObject({
-      narration_style: 'cinematic-story',
-      narration_style_prompt: undefined,
-      force_regenerate_script: true,
     })
+    expect(payloadWithoutNarrationStyle).not.toHaveProperty('narration_style')
+    expect(payloadWithoutNarrationStyle).not.toHaveProperty('narration_style_prompt')
   })
 
   it('extracts queued audiobook project task identifiers defensively', () => {

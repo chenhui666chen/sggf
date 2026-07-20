@@ -14,7 +14,6 @@ import type {
   TimelineClipEditMap,
   TtsModel,
 } from './types'
-import type { NarrationStyleId } from './narrationStyles'
 import { normalizeScriptReview } from './utils'
 
 type ScriptSaveStatus = NonNullable<UpdateAudiobookChapterScriptPayload['script_status']>
@@ -99,15 +98,13 @@ export const buildUpdateChapterScriptPayload = (
 export const buildGenerateAudioFromScriptPayload = ({
   chapterId,
   ttsModel,
-  narrationStyle,
-  narrationStylePrompt,
   outputFormat,
   generateSubtitle,
   timelineEdits,
 }: {
   chapterId?: number
   ttsModel: TtsModel
-  narrationStyle: NarrationStyleId
+  narrationStyle: string
   narrationStylePrompt: string
   outputFormat: AudioOutputFormat
   generateSubtitle: boolean
@@ -115,10 +112,6 @@ export const buildGenerateAudioFromScriptPayload = ({
 }): GenerateAudioFromScriptsPayload => ({
   ...(chapterId ? { chapter_ids: [chapterId] } : {}),
   tts_model: ttsModel,
-  narration_style: narrationStyle,
-  narration_style_prompt: narrationStyle === 'custom' && narrationStylePrompt.trim()
-    ? narrationStylePrompt.trim()
-    : undefined,
   output_format: outputFormat,
   generate_subtitle: generateSubtitle,
   ...(timelineEdits && Object.keys(timelineEdits).length > 0

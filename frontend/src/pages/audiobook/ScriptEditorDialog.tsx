@@ -64,6 +64,7 @@ import {
   adjustTimelineClipEdit,
   applyTimelineEdits,
   buildTimelineModel,
+  getDefaultTimelineClipVolume,
   isTimelineClipEditable,
   resolveTimelineSeekSegmentOffsetRatio,
   resolveTimelineSeekSegmentIndex,
@@ -600,12 +601,12 @@ const TimelineTrack = ({
   compact?: boolean
   selectedIndex: number
   scale: number
-  onSelectClip: (index: number) => void
+  onSelectClip: (clip: TimelineClip) => void
   onAdjustClip: (
     clip: TimelineClip,
     operation: TimelineClipEditOperation,
     deltaUnits: number,
-    baseEdit: { startUnit: number; durationUnits: number },
+    baseEdit: { startUnit: number; durationUnits: number; volume?: number },
   ) => void
   locked?: boolean
   muted?: boolean
@@ -632,6 +633,7 @@ const TimelineTrack = ({
         const baseEdit = {
           startUnit: clip.startUnit,
           durationUnits: clip.durationUnits,
+          ...(typeof clip.volume === 'number' ? { volume: clip.volume } : {}),
         }
         target.setPointerCapture(event.pointerId)
 
@@ -677,14 +679,14 @@ const TimelineTrack = ({
             role="button"
             tabIndex={0}
             aria-label={`${clip.label}${editable ? '，可拖动调整' : ''}`}
-            onClick={() => !locked && onSelectClip(clip.segmentIndex)}
-            onDoubleClick={() => !locked && onSelectClip(clip.segmentIndex)}
+            onClick={() => !locked && onSelectClip(clip)}
+            onDoubleClick={() => !locked && onSelectClip(clip)}
             onPointerDown={(event) => handlePointerEdit(event, 'move')}
             onKeyDown={(event) => {
               if (event.key === 'Enter' || event.key === ' ') {
                 event.preventDefault()
                 if (!locked) {
-                  onSelectClip(clip.segmentIndex)
+                  onSelectClip(clip)
                 }
               }
             }}
@@ -861,6 +863,7 @@ const ScriptEditorDialog = ({
 }: ScriptEditorDialogProps) => {
   const [consistencyChecking, setConsistencyChecking] = useState(false)
   const [selectedSegmentIndex, setSelectedSegmentIndex] = useState(0)
+  const [selectedTimelineClipKey, setSelectedTimelineClipKey] = useState<string | null>(null)
   const [timelineScale, setTimelineScale] = useState(1)
   const [timelineSeeking, setTimelineSeeking] = useState(false)
   const timelineContentRef = useRef<HTMLDivElement | null>(null)
@@ -898,14 +901,17 @@ const ScriptEditorDialog = ({
   // 提前定义基础导航函数（供后续useEffect使用）
   const handleSelectSegment = useCallback((index: number) => {
     if (!scriptSegments.length) return
+    setSelectedTimelineClipKey(null)
     setSelectedSegmentIndex(Math.max(0, Math.min(index, scriptSegments.length - 1)))
   }, [scriptSegments.length])
 
   const handlePreviousSegment = useCallback(() => {
+    setSelectedTimelineClipKey(null)
     setSelectedSegmentIndex((current) => Math.max(0, current - 1))
   }, [])
 
   const handleNextSegment = useCallback(() => {
+    setSelectedTimelineClipKey(null)
     setSelectedSegmentIndex((current) => Math.min(scriptSegments.length - 1, current + 1))
   }, [scriptSegments.length])
 
@@ -970,6 +976,25 @@ const ScriptEditorDialog = ({
     () => applyTimelineEdits(timelineModel, timelineEdits),
     [timelineModel, timelineEdits],
   )
+  const editableTimelineClips = useMemo(
+    () => [
+      ...editedTimelineModel.clipsByTrack.sfx,
+      ...editedTimelineModel.clipsByTrack.music,
+    ],
+    [editedTimelineModel],
+  )
+  const selectedTimelineClip = useMemo(
+    () => editableTimelineClips.find((clip) => clip.key === selectedTimelineClipKey) || null,
+    [editableTimelineClips, selectedTimelineClipKey],
+  )
+  const selectedTimelineClipVolume = selectedTimelineClip
+    ? selectedTimelineClip.volume ?? getDefaultTimelineClipVolume(selectedTimelineClip)
+    : 0
+  const selectedTimelineClipTrackLabel = selectedTimelineClip?.track === 'music'
+    ? '配乐轨'
+    : selectedTimelineClip?.track === 'sfx'
+      ? '音效轨'
+      : ''
   const timelineContentWidth = Math.max(
     TIMELINE_MIN_CONTENT_WIDTH,
     Math.round(editedTimelineModel.totalUnits * timelineScale) + TIMELINE_SIDE_PADDING * 2,
@@ -1008,6 +1033,7 @@ const ScriptEditorDialog = ({
 
     const seekUnit = getTimelineSeekUnitFromClientX(clientX)
     const seekIndex = resolveTimelineSeekSegmentIndex(editedTimelineModel, seekUnit)
+    setSelectedTimelineClipKey(null)
     setSelectedSegmentIndex(seekIndex)
 
     if (play && scriptSegments[seekIndex]) {
@@ -1103,7 +1129,7 @@ const ScriptEditorDialog = ({
     clip: TimelineClip,
     operation: TimelineClipEditOperation,
     deltaUnits: number,
-    baseEdit: { startUnit: number; durationUnits: number },
+    baseEdit: { startUnit: number; durationUnits: number; volume?: number },
   ) => {
     if (!isTimelineClipEditable(clip)) return
 
@@ -1121,6 +1147,41 @@ const ScriptEditorDialog = ({
       }
     })
   }, [editedTimelineModel.totalUnits, onChangeTimelineEdits])
+
+  const handleSelectTimelineClip = useCallback((clip: TimelineClip) => {
+    if (!isTimelineClipEditable(clip)) {
+      handleSelectSegment(clip.segmentIndex)
+      return
+    }
+    setSelectedTimelineClipKey(clip.key)
+    setSelectedSegmentIndex(Math.max(0, Math.min(clip.segmentIndex, scriptSegments.length - 1)))
+  }, [handleSelectSegment, scriptSegments.length])
+
+  const handleChangeTimelineClipVolume = useCallback((clip: TimelineClip, volume: number) => {
+    if (!isTimelineClipEditable(clip)) return
+    const normalizedVolume = Math.max(0, Math.min(1, Number.isFinite(volume) ? volume : getDefaultTimelineClipVolume(clip)))
+    onChangeTimelineEdits((current) => {
+      const currentEdit = current[clip.key] || {
+        startUnit: clip.startUnit,
+        durationUnits: clip.durationUnits,
+      }
+
+      return {
+        ...current,
+        [clip.key]: {
+          ...currentEdit,
+          volume: Number(normalizedVolume.toFixed(2)),
+        },
+      }
+    })
+  }, [onChangeTimelineEdits])
+
+  useEffect(() => {
+    if (!selectedTimelineClipKey) return
+    if (!selectedTimelineClip) {
+      setSelectedTimelineClipKey(null)
+    }
+  }, [selectedTimelineClip, selectedTimelineClipKey])
 
   const handleCheckConsistency = async () => {
     if (!data?.scriptSegments?.length) return
@@ -1981,7 +2042,7 @@ const ScriptEditorDialog = ({
                 px: 1.5,
                 py: 0.75,
                 display: 'grid',
-                gridTemplateColumns: { xs: '1fr', lg: 'minmax(0, 1fr) auto minmax(136px, 160px) auto' },
+                gridTemplateColumns: { xs: '1fr', lg: 'minmax(0, 1fr) auto minmax(170px, 220px) minmax(136px, 160px) auto' },
                 gap: 1,
                 alignItems: 'center',
                 borderBottom: `1px solid ${EDITOR_SURFACE_COLORS.border}`,
@@ -2045,6 +2106,56 @@ const ScriptEditorDialog = ({
                   </Stack>
                 ))}
               </Stack>
+
+              <Box
+                sx={{
+                  display: 'grid',
+                  gridTemplateColumns: '54px minmax(0, 1fr)',
+                  gap: 1,
+                  alignItems: 'center',
+                  minWidth: 0,
+                }}
+              >
+                <Box sx={{ minWidth: 0 }}>
+                  <Typography variant="caption" sx={{ display: 'block', color: EDITOR_SURFACE_COLORS.muted }}>
+                    片段音量
+                  </Typography>
+                  <Typography
+                    variant="caption"
+                    sx={{
+                      display: 'block',
+                      color: selectedTimelineClip ? EDITOR_SURFACE_COLORS.text : EDITOR_SURFACE_COLORS.faint,
+                      fontSize: 10,
+                      whiteSpace: 'nowrap',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                    }}
+                  >
+                    {selectedTimelineClip
+                      ? `${selectedTimelineClipTrackLabel} ${Math.round(selectedTimelineClipVolume * 100)}%`
+                      : '未选择'}
+                  </Typography>
+                </Box>
+                <Slider
+                  size="small"
+                  aria-label="选中音频片段音量"
+                  min={0}
+                  max={1}
+                  step={0.05}
+                  value={selectedTimelineClip ? selectedTimelineClipVolume : 0}
+                  disabled={!selectedTimelineClip}
+                  valueLabelDisplay="auto"
+                  valueLabelFormat={(value) => `${Math.round(value * 100)}%`}
+                  onChange={(_, value) => {
+                    if (!selectedTimelineClip) return
+                    handleChangeTimelineClipVolume(
+                      selectedTimelineClip,
+                      Array.isArray(value) ? value[0] : value,
+                    )
+                  }}
+                  sx={{ color: selectedTimelineClip?.track === 'music' ? EDITOR_TRACK_COLORS.music : EDITOR_TRACK_COLORS.sfx }}
+                />
+              </Box>
 
               {/* 缩放控制 */}
               <Box sx={{ display: 'grid', gridTemplateColumns: '36px minmax(0, 1fr)', gap: 1, alignItems: 'center', minWidth: 0 }}>
@@ -2231,7 +2342,7 @@ const ScriptEditorDialog = ({
                       compact={track.compact}
                       selectedIndex={safeSelectedSegmentIndex}
                       scale={timelineScale}
-                      onSelectClip={handleSelectSegment}
+                      onSelectClip={handleSelectTimelineClip}
                       onAdjustClip={handleAdjustTimelineClip}
                       locked={trackLocks[track.key]}
                       muted={trackMutes[track.key]}

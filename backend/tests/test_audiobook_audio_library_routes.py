@@ -14,8 +14,10 @@ from sqlalchemy.pool import StaticPool
 
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
-if str(ROOT_DIR) not in sys.path:
-    sys.path.insert(0, str(ROOT_DIR))
+PROJECT_ROOT = ROOT_DIR.parent
+for path in (ROOT_DIR, PROJECT_ROOT):
+    if str(path) not in sys.path:
+        sys.path.insert(0, str(path))
 
 os.environ.setdefault("DEBUG", "false")
 os.environ.setdefault("DATABASE_URL", "postgresql://test:test@127.0.0.1:5432/test_db")
@@ -25,6 +27,7 @@ from app.api.v1.audiobook_api import routes_audio_library
 from app.core.security import get_current_user
 from app.db.base import Base, get_db
 from app.models.audio_library_asset import AudioLibraryAsset
+from app.models.audio_library_asset_rating import AudioLibraryAssetRating
 from app.models.role import Role
 from app.models.user import User
 from app.services.audiobook.sfx_library_downloader import SfxLibraryDownloader
@@ -90,7 +93,10 @@ def build_db_test_client(*, admin: bool = False) -> tuple[CompatTestClient, sess
         poolclass=StaticPool,
     )
     testing_session_local = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-    Base.metadata.create_all(bind=engine, tables=[AudioLibraryAsset.__table__])
+    Base.metadata.create_all(
+        bind=engine,
+        tables=[AudioLibraryAsset.__table__, AudioLibraryAssetRating.__table__],
+    )
 
     app = FastAPI()
     app.include_router(audiobook_router)
@@ -141,6 +147,25 @@ def test_public_sfx_direct_search_route_is_disabled():
     assert "候选审核" in response.json()["detail"]
 
 
+def test_admin_sfx_candidate_and_manifest_routes_are_retired():
+    client = build_test_client(admin=True)
+
+    responses = [
+        client.get("/api/v1/audiobook/audio-library/sound-effects/candidates"),
+        client.post(
+            "/api/v1/audiobook/audio-library/sound-effects/candidates/manifest-draft",
+            json={"items": []},
+        ),
+        client.post(
+            "/api/v1/audiobook/audio-library/sound-effects/import-manifest",
+            json={},
+        ),
+    ]
+
+    assert [response.status_code for response in responses] == [200, 200, 410]
+    assert "AI" in responses[-1].json()["detail"]
+
+
 def test_audio_library_management_routes_require_admin():
     client, _session_factory = build_db_test_client()
 
@@ -161,6 +186,118 @@ def test_audio_library_management_routes_require_admin():
         kwargs = {"json": payload} if payload is not None else {}
         response = client.request(method, url, **kwargs)
         assert response.status_code == 403, f"{method} {url}"
+
+
+def test_audio_library_upload_requires_shared_rights_confirmation(monkeypatch, tmp_path):
+    audio_library = tmp_path / "audio_library"
+    monkeypatch.setattr(routes_audio_library, "get_audio_library_dir", lambda: audio_library)
+    client, _session_factory = build_db_test_client()
+
+    response = client.post(
+        "/api/v1/audiobook/audio-library/assets/upload",
+        data={
+            "library_type": "sfx",
+            "name": "雨声",
+            "category": "environment/peaceful",
+            "rights_confirmed": "false",
+        },
+        files={"file": ("rain.wav", b"RIFF0000WAVEfmt ", "audio/wav")},
+    )
+
+    assert response.status_code == 400
+    assert not audio_library.exists()
+
+
+def test_audio_library_upload_saves_sfx_to_shared_indexes(monkeypatch, tmp_path):
+    audio_library = tmp_path / "audio_library"
+    monkeypatch.setattr(routes_audio_library, "get_audio_library_dir", lambda: audio_library)
+    monkeypatch.setattr(
+        routes_audio_library,
+        "upload_audio_library_asset",
+        lambda *, local_path, relative_path, library_type: {
+            "storage_mode": "local_cache",
+            "storage_driver": "local_fs",
+            "local_cache_path": relative_path,
+            "asset_scope": "shared_library",
+        },
+    )
+    client, session_factory = build_db_test_client()
+
+    response = client.post(
+        "/api/v1/audiobook/audio-library/assets/upload",
+        data={
+            "library_type": "sfx",
+            "name": "室内雨声",
+            "description": "窗外持续的轻柔雨声",
+            "category": "environment/peaceful",
+            "tags": "雨声,室内,环境",
+            "license_commercial": "true",
+            "rights_confirmed": "true",
+        },
+        files={"file": ("original-name.wav", b"RIFF0000WAVEfmt ", "audio/wav")},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["success"] is True
+    entry = payload["asset"]
+    assert entry["id"].startswith("user_sfx_")
+    assert entry["name"] == "室内雨声"
+    assert entry["source"] == "user_upload"
+    assert entry["file_path"].startswith("sound_effects/user_upload/")
+    assert entry["file_path"].endswith(".wav")
+    assert "original-name" not in entry["file_path"]
+    assert (audio_library / entry["file_path"]).read_bytes() == b"RIFF0000WAVEfmt "
+
+    indexed = json.loads((audio_library / "sound_effects_index.json").read_text(encoding="utf-8"))
+    assert indexed == [entry]
+    db = session_factory()
+    try:
+        asset = db.query(AudioLibraryAsset).one()
+        assert asset.asset_key == entry["id"]
+        assert asset.name == "室内雨声"
+        assert asset.metadata_json["uploaded_by_user_id"] == 1
+    finally:
+        db.close()
+
+
+def test_audio_library_upload_saves_music_metadata(monkeypatch, tmp_path):
+    audio_library = tmp_path / "audio_library"
+    monkeypatch.setattr(routes_audio_library, "get_audio_library_dir", lambda: audio_library)
+    monkeypatch.setattr(
+        routes_audio_library,
+        "upload_audio_library_asset",
+        lambda *, local_path, relative_path, library_type: {
+            "storage_mode": "local_cache",
+            "storage_driver": "local_fs",
+            "local_cache_path": relative_path,
+            "asset_scope": "shared_library",
+        },
+    )
+    client, _session_factory = build_db_test_client()
+
+    response = client.post(
+        "/api/v1/audiobook/audio-library/assets/upload",
+        data={
+            "library_type": "music",
+            "name": "紧张追逐配乐",
+            "description": "适合追逐场景的持续配乐",
+            "style": "电影感",
+            "mood": "紧张",
+            "tags": "追逐,紧张",
+            "rights_confirmed": "true",
+        },
+        files={"file": ("chase.mp3", b"ID3fake-audio", "audio/mpeg")},
+    )
+
+    assert response.status_code == 200
+    entry = response.json()["asset"]
+    assert entry["id"].startswith("user_music_")
+    assert entry["file_path"].startswith("music_cache/user_upload/")
+    assert entry["style"] == "电影感"
+    assert entry["mood"] == "紧张"
+    indexed = json.loads((audio_library / "music_index.json").read_text(encoding="utf-8"))
+    assert indexed == [entry]
 
 
 def test_audio_library_cleanup_defaults_to_dry_run(monkeypatch, tmp_path):
@@ -194,6 +331,7 @@ def test_audio_library_cleanup_defaults_to_dry_run(monkeypatch, tmp_path):
     assert response.status_code == 200
     payload = response.json()
     assert payload["dry_run"] is True
+    assert payload["plan_token"]
     assert payload["stats"]["removed_missing"] == 1
     assert payload["details"]["missing_entries"] == [
         {
@@ -225,6 +363,25 @@ def test_audio_library_cleanup_requires_confirmation_for_write(monkeypatch, tmp_
 
     assert response.status_code == 400
     assert "confirm=true" in response.json()["detail"]
+
+
+def test_audio_library_cleanup_requires_plan_token_for_write(monkeypatch, tmp_path):
+    audio_library = tmp_path / "audio_library"
+    audio_library.mkdir()
+    (audio_library / "sound_effects_index.json").write_text("[]", encoding="utf-8")
+    monkeypatch.setattr(routes_audio_library, "get_audio_library_dir", lambda: audio_library)
+
+    response = build_test_client(admin=True).post(
+        "/api/v1/audiobook/audio-library/cleanup",
+        json={
+            "library_type": "sfx",
+            "dry_run": False,
+            "confirm": True,
+        },
+    )
+
+    assert response.status_code == 400
+    assert "plan_token" in response.json()["detail"]
 
 
 def test_audio_library_cleanup_dry_run_reports_orphaned_and_low_quality(monkeypatch, tmp_path):
@@ -327,15 +484,26 @@ def test_audio_library_cleanup_confirmed_removes_only_library_files(monkeypatch,
     )
     monkeypatch.setattr(routes_audio_library, "get_audio_library_dir", lambda: audio_library)
 
-    response = build_test_client(admin=True).post(
+    client = build_test_client(admin=True)
+    request_payload = {
+        "library_type": "sfx",
+        "remove_missing_files": True,
+        "remove_orphaned": True,
+        "remove_low_quality": True,
+    }
+    preview_response = client.post(
+        "/api/v1/audiobook/audio-library/cleanup",
+        json=request_payload,
+    )
+    plan_token = preview_response.json()["plan_token"]
+
+    response = client.post(
         "/api/v1/audiobook/audio-library/cleanup",
         json={
-            "library_type": "sfx",
-            "remove_missing_files": True,
-            "remove_orphaned": True,
-            "remove_low_quality": True,
+            **request_payload,
             "dry_run": False,
             "confirm": True,
+            "plan_token": plan_token,
         },
     )
 
@@ -348,6 +516,69 @@ def test_audio_library_cleanup_confirmed_removes_only_library_files(monkeypatch,
     assert not orphan_file.exists()
     assert outside_file.exists()
     assert json.loads(index_path.read_text(encoding="utf-8")) == []
+
+
+def test_audio_library_cleanup_removes_database_only_low_quality_asset(monkeypatch, tmp_path):
+    audio_library = tmp_path / "audio_library"
+    target_file = audio_library / "sound_effects" / "test" / "bad.wav"
+    target_file.parent.mkdir(parents=True)
+    target_file.write_bytes(b"bad")
+    index_path = audio_library / "sound_effects_index.json"
+    index_path.write_text("[]", encoding="utf-8")
+    client, session_factory = build_db_test_client(admin=True)
+    monkeypatch.setattr(routes_audio_library, "get_audio_library_dir", lambda: audio_library)
+    db = session_factory()
+    try:
+        db.add(
+            AudioLibraryAsset(
+                library_type="sfx",
+                asset_key="db_bad_sfx",
+                name="DB Bad",
+                category="action/realistic",
+                file_path="sound_effects/test/bad.wav",
+                description="low quality",
+                source="user_upload",
+                tags=["bad"],
+                quality_score=10,
+                quality_status="rejected",
+                asset_scope="shared_library",
+            )
+        )
+        db.commit()
+    finally:
+        db.close()
+
+    request_payload = {
+        "library_type": "sfx",
+        "remove_missing_files": True,
+        "remove_orphaned": True,
+        "remove_low_quality": True,
+    }
+    preview_response = client.post(
+        "/api/v1/audiobook/audio-library/cleanup",
+        json=request_payload,
+    )
+    plan_token = preview_response.json()["plan_token"]
+
+    response = client.post(
+        "/api/v1/audiobook/audio-library/cleanup",
+        json={
+            **request_payload,
+            "dry_run": False,
+            "confirm": True,
+            "plan_token": plan_token,
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["stats"]["removed_low_quality"] == 1
+    assert not target_file.exists()
+    assert json.loads(index_path.read_text(encoding="utf-8")) == []
+    db = session_factory()
+    try:
+        assert db.query(AudioLibraryAsset).count() == 0
+    finally:
+        db.close()
 
 
 def test_audio_library_asset_delete_defaults_to_dry_run(monkeypatch, tmp_path):
@@ -489,7 +720,7 @@ def test_audio_library_asset_delete_confirm_removes_database_record_and_cloud_ob
                 asset_key="cloud_sfx",
                 name="Cloud SFX",
                 file_path="sound_effects/cloud.wav",
-                source="database",
+                source="user_upload",
                 storage_mode="durable_cloud",
                 storage_driver="aliyun_oss",
                 object_key="shared/audio_library/sfx/sound_effects/cloud.wav",
@@ -542,7 +773,7 @@ def test_audio_library_cloud_sync_dry_run_reports_local_cache_assets(monkeypatch
                     "file_path": "sound_effects/environment/rain.ogg",
                     "description": "rain",
                     "tags": ["rain"],
-                    "source": "wikimedia_commons",
+                    "source": "ai_generated",
                     "storage_mode": "local_cache",
                     "storage_driver": "local_fs",
                     "asset_scope": "shared_library",
@@ -587,7 +818,7 @@ def test_audio_library_cloud_sync_confirm_requires_cloud_storage(monkeypatch, tm
                     "file_path": "sound_effects/environment/rain.ogg",
                     "description": "rain",
                     "tags": ["rain"],
-                    "source": "wikimedia_commons",
+                    "source": "ai_generated",
                     "storage_mode": "local_cache",
                 }
             ],
@@ -623,7 +854,7 @@ def test_audio_library_cloud_sync_confirm_uploads_and_updates_index(monkeypatch,
                     "file_path": "sound_effects/environment/rain.ogg",
                     "description": "rain",
                     "tags": ["rain"],
-                    "source": "wikimedia_commons",
+                    "source": "ai_generated",
                     "storage_mode": "local_cache",
                     "storage_driver": "local_fs",
                     "asset_scope": "shared_library",
@@ -854,7 +1085,7 @@ def test_audio_library_db_sync_confirm_imports_json_indexes(monkeypatch, tmp_pat
                     "file_path": "sound_effects/environment/rain.ogg",
                     "description": "rain",
                     "tags": ["rain"],
-                    "source": "wikimedia_commons",
+                    "source": "ai_generated",
                     "storage_mode": "local_cache",
                 }
             ],
@@ -902,7 +1133,7 @@ def test_browse_sound_effects_prefers_database_records(monkeypatch, tmp_path):
                 category="environment/peaceful",
                 file_path="sound_effects/environment/db_rain.ogg",
                 description="database rain",
-                source="database",
+                source="user_upload",
                 tags=["rain"],
                 storage_mode="durable_cloud",
                 storage_driver="dashscope_oss",
@@ -922,6 +1153,170 @@ def test_browse_sound_effects_prefers_database_records(monkeypatch, tmp_path):
     assert payload[0]["public_url"] == "https://cdn.example.test/sfx/db_rain.ogg"
 
 
+def test_audio_library_rating_updates_existing_vote_and_returns_summary(monkeypatch, tmp_path):
+    audio_library = tmp_path / "audio_library"
+    audio_library.mkdir()
+    (audio_library / "sound_effects_index.json").write_text("[]", encoding="utf-8")
+    client, session_factory = build_db_test_client()
+    monkeypatch.setattr(routes_audio_library, "get_audio_library_dir", lambda: audio_library)
+    db = session_factory()
+    try:
+        db.add(
+            AudioLibraryAsset(
+                library_type="sfx",
+                asset_key="rating_sfx",
+                name="评分音效",
+                category="action/realistic",
+                file_path="sound_effects/action/rating.wav",
+                description="rating",
+                source="user_upload",
+                tags=[],
+            )
+        )
+        db.commit()
+    finally:
+        db.close()
+
+    assert client.post(
+        "/api/v1/audiobook/audio-library/assets/sfx/rating_sfx/rating",
+        json={"score": 4},
+    ).status_code == 200
+    response = client.post(
+        "/api/v1/audiobook/audio-library/assets/sfx/rating_sfx/rating",
+        json={"score": 5},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["rating_count"] == 1
+    assert response.json()["average_score"] == 5.0
+    assert response.json()["user_score"] == 5
+
+    browse_response = client.get("/api/v1/audiobook/audio-library/sound-effects")
+    assert browse_response.status_code == 200
+    assert browse_response.json()[0]["rating_count"] == 1
+    assert browse_response.json()[0]["average_rating"] == 5.0
+    assert browse_response.json()[0]["user_rating"] == 5
+
+    db = session_factory()
+    try:
+        assert db.query(AudioLibraryAssetRating).count() == 1
+    finally:
+        db.close()
+
+
+def test_audio_library_low_ratings_auto_unpublish_and_hide_asset(monkeypatch, tmp_path):
+    audio_library = tmp_path / "audio_library"
+    audio_library.mkdir()
+    index_path = audio_library / "sound_effects_index.json"
+    index_path.write_text(
+        json.dumps(
+            [
+                {
+                    "id": "low_rating_sfx",
+                    "name": "低分音效",
+                    "category": "action/realistic",
+                    "file_path": "sound_effects/action/low.wav",
+                    "description": "low",
+                    "source": "user_upload",
+                    "tags": [],
+                }
+            ],
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    client, session_factory = build_db_test_client()
+    monkeypatch.setattr(routes_audio_library, "get_audio_library_dir", lambda: audio_library)
+    monkeypatch.setenv("AUDIO_LIBRARY_MIN_RATING_COUNT", "1")
+    monkeypatch.setenv("AUDIO_LIBRARY_MIN_LOW_RATING_COUNT", "1")
+    monkeypatch.setenv("AUDIO_LIBRARY_MIN_LOW_RATING_RATIO", "1")
+    monkeypatch.setenv("AUDIO_LIBRARY_MAX_AVERAGE_SCORE", "2")
+    db = session_factory()
+    try:
+        db.add(
+            AudioLibraryAsset(
+                library_type="sfx",
+                asset_key="low_rating_sfx",
+                name="低分音效",
+                category="action/realistic",
+                file_path="sound_effects/action/low.wav",
+                description="low",
+                source="user_upload",
+                tags=[],
+            )
+        )
+        db.commit()
+    finally:
+        db.close()
+
+    response = client.post(
+        "/api/v1/audiobook/audio-library/assets/sfx/low_rating_sfx/rating",
+        json={"score": 1},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["auto_unpublished"] is True
+    assert client.get("/api/v1/audiobook/audio-library/sound-effects").json() == []
+
+    db = session_factory()
+    try:
+        asset = db.query(AudioLibraryAsset).one()
+        assert asset.quality_status == "community_rejected"
+    finally:
+        db.close()
+    indexed = json.loads(index_path.read_text(encoding="utf-8"))
+    assert indexed[0]["quality_status"] == "community_rejected"
+
+
+def test_browse_sound_effects_merges_json_records_missing_from_database(monkeypatch, tmp_path):
+    audio_library = tmp_path / "audio_library"
+    audio_library.mkdir()
+    (audio_library / "sound_effects_index.json").write_text(
+        json.dumps(
+            [
+                {
+                    "id": "json_door",
+                    "name": "JSON Door",
+                    "category": "action/realistic",
+                    "file_path": "sound_effects/action/json_door.wav",
+                    "description": "door",
+                    "source": "user_upload",
+                    "tags": ["door"],
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+    client, session_factory = build_db_test_client()
+    monkeypatch.setattr(routes_audio_library, "get_audio_library_dir", lambda: audio_library)
+    db = session_factory()
+    try:
+        db.add(
+            AudioLibraryAsset(
+                library_type="sfx",
+                asset_key="db_rain",
+                name="DB Rain",
+                category="environment/peaceful",
+                file_path="sound_effects/environment/db_rain.ogg",
+                description="database rain",
+                source="user_upload",
+                tags=["rain"],
+                storage_mode="durable_cloud",
+                storage_driver="dashscope_oss",
+                public_url="https://cdn.example.test/sfx/db_rain.ogg",
+                asset_scope="shared_library",
+            )
+        )
+        db.commit()
+    finally:
+        db.close()
+
+    response = client.get("/api/v1/audiobook/audio-library/sound-effects")
+
+    assert response.status_code == 200
+    assert [item["id"] for item in response.json()] == ["db_rain", "json_door"]
+
+
 def test_browse_sound_effects_rewrites_cloud_url_from_configured_host(monkeypatch, tmp_path):
     audio_library = tmp_path / "audio_library"
     audio_library.mkdir()
@@ -939,7 +1334,7 @@ def test_browse_sound_effects_rewrites_cloud_url_from_configured_host(monkeypatc
                 category="environment/peaceful",
                 file_path="sound_effects/environment/db_rain.ogg",
                 description="database rain",
-                source="database",
+                source="user_upload",
                 tags=["rain"],
                 storage_mode="durable_cloud",
                 storage_driver="aliyun_oss",
@@ -978,7 +1373,7 @@ def test_browse_sound_effects_keeps_legacy_public_url_without_object_key(monkeyp
                 category="environment/peaceful",
                 file_path="sound_effects/environment/db_rain.ogg",
                 description="database rain",
-                source="database",
+                source="user_upload",
                 tags=["rain"],
                 storage_mode="durable_cloud",
                 storage_driver="dashscope_oss",
@@ -1013,7 +1408,7 @@ def test_preview_audio_library_file_uses_database_public_url(monkeypatch, tmp_pa
                 category="environment/peaceful",
                 file_path="sound_effects/environment/db_rain.ogg",
                 description="database rain",
-                source="database",
+                source="user_upload",
                 tags=["rain"],
                 storage_mode="durable_cloud",
                 storage_driver="dashscope_oss",
@@ -1034,6 +1429,36 @@ def test_preview_audio_library_file_uses_database_public_url(monkeypatch, tmp_pa
     assert response.headers["location"] == "https://cdn.example.test/sfx/db_rain.ogg"
 
 
+def test_preview_audio_library_file_rejects_local_path_outside_library(monkeypatch, tmp_path):
+    audio_library = tmp_path / "audio_library"
+    audio_library.mkdir()
+    outside_file = tmp_path / "private.wav"
+    outside_file.write_bytes(b"private")
+    (audio_library / "sound_effects_index.json").write_text(
+        json.dumps(
+            [
+                {
+                    "id": "outside_sfx",
+                    "name": "Outside",
+                    "category": "action/realistic",
+                    "file_path": str(outside_file),
+                    "description": "outside",
+                    "source": "user_upload",
+                    "tags": [],
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+    client, _session_factory = build_db_test_client()
+    monkeypatch.setattr(routes_audio_library, "get_audio_library_dir", lambda: audio_library)
+
+    response = client.get("/api/v1/audiobook/audio-library/preview/sfx/outside_sfx")
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "文件不存在"
+
+
 def test_preview_audio_library_file_rewrites_cloud_url_from_configured_host(monkeypatch, tmp_path):
     audio_library = tmp_path / "audio_library"
     audio_library.mkdir()
@@ -1051,7 +1476,7 @@ def test_preview_audio_library_file_rewrites_cloud_url_from_configured_host(monk
                 category="environment/peaceful",
                 file_path="sound_effects/environment/db_rain.ogg",
                 description="database rain",
-                source="database",
+                source="user_upload",
                 tags=["rain"],
                 storage_mode="durable_cloud",
                 storage_driver="aliyun_oss",
@@ -1088,7 +1513,7 @@ def test_browse_sound_effects_returns_quality_license_and_attribution_metadata(m
                     "file_path": "sound_effects/effects/action/hit.wav",
                     "description": "hit",
                     "tags": ["hit"],
-                    "source": "local_authorized",
+                    "source": "user_upload",
                     "source_url": "https://example.com/sfx",
                     "author": "foley-author",
                     "author_url": "https://example.com/author",
@@ -1151,7 +1576,7 @@ def test_browse_sound_effects_filters_by_scene(monkeypatch, tmp_path):
                     "description": "door",
                     "tags": ["door"],
                     "scenes": ["indoor", "mansion"],
-                    "source": "local_authorized",
+                    "source": "user_upload",
                 },
                 {
                     "id": "outdoor_wind",
@@ -1161,7 +1586,7 @@ def test_browse_sound_effects_filters_by_scene(monkeypatch, tmp_path):
                     "description": "wind",
                     "tags": ["wind"],
                     "scenes": ["outdoor"],
-                    "source": "local_authorized",
+                    "source": "user_upload",
                 },
             ],
             ensure_ascii=False,
@@ -1190,7 +1615,7 @@ def test_browse_sound_effects_infers_scene_for_legacy_entries(monkeypatch, tmp_p
                     "file_path": "sound_effects/effects/action/door.wav",
                     "description": "old wooden door opens",
                     "tags": ["door"],
-                    "source": "legacy",
+                    "source": "user_upload",
                 },
                 {
                     "id": "legacy_wind",
@@ -1199,7 +1624,7 @@ def test_browse_sound_effects_infers_scene_for_legacy_entries(monkeypatch, tmp_p
                     "file_path": "sound_effects/effects/action/wind.wav",
                     "description": "wind in open field",
                     "tags": ["wind"],
-                    "source": "legacy",
+                    "source": "user_upload",
                 },
             ],
             ensure_ascii=False,
@@ -1217,6 +1642,27 @@ def test_browse_sound_effects_infers_scene_for_legacy_entries(monkeypatch, tmp_p
     assert "indoor" in payload[0]["scenes"]
 
 
+def test_normalize_sfx_entry_applies_curated_train_station_metadata():
+    normalized = routes_audio_library._normalize_sfx_entry({
+        "id": "action_local_authorized_wikimedia_airchime_k5la_b1a2540775",
+        "source_id": "wikimedia_airchime_k5la_train_horn_cc0",
+        "name": "train_horn_airchime_k5la",
+        "description": "Diesel locomotive horn for train arrivals and railway warnings.",
+        "category": "action/intense",
+        "style": "intense",
+        "tags": ["action", "intense", "battle", "train", "horn", "travel"],
+        "scenes": ["battle", "travel"],
+    })
+
+    assert normalized["name"] == "火车站火车鸣笛与人群交谈声"
+    assert normalized["description"] == "火车站环境声，包含火车鸣笛、列车运行声和背景人群交谈。"
+    assert normalized["category"] == "environment/realistic"
+    assert normalized["style"] == "realistic"
+    assert normalized["scenes"] == ["travel"]
+    assert "people" in normalized["tags"]
+    assert "battle" not in normalized["tags"]
+
+
 def test_browse_music_returns_quality_license_and_attribution_metadata(monkeypatch, tmp_path):
     audio_library = tmp_path / "audio_library"
     audio_library.mkdir()
@@ -1231,7 +1677,7 @@ def test_browse_music_returns_quality_license_and_attribution_metadata(monkeypat
                     "mood": "tense",
                     "bucket": "cinematic:tense",
                     "file_path": "music_cache/tense.mp3",
-                    "source": "local_authorized",
+                    "source": "user_upload",
                     "source_url": "https://example.com/music",
                     "author": "composer",
                     "author_url": "https://example.com/composer",
@@ -1292,7 +1738,7 @@ def test_preview_audio_library_file_redirects_to_cloud_public_url(monkeypatch, t
                     "file_path": "sound_effects/action/cloud.wav",
                     "description": "cloud",
                     "tags": [],
-                    "source": "test",
+                    "source": "ai_generated",
                     "public_url": "https://cdn.example.test/sfx/cloud.wav",
                 }
             ],
@@ -1326,7 +1772,7 @@ def test_preview_audio_library_file_prefers_local_mirror_over_public_url(monkeyp
                     "file_path": "sound_effects/action/local.wav",
                     "description": "local",
                     "tags": [],
-                    "source": "test",
+                    "source": "ai_generated",
                     "public_url": "https://cdn.example.test/sfx/local.wav",
                 }
             ],
@@ -1579,7 +2025,7 @@ def test_build_sfx_manifest_draft_rejects_output_path_outside_library(monkeypatc
     assert "output_path" in response.json()["detail"]
 
 
-def test_import_sfx_manifest_defaults_to_dry_run(monkeypatch, tmp_path):
+def test_import_sfx_manifest_is_retired_even_for_dry_run(monkeypatch, tmp_path):
     audio_library = tmp_path / "audio_library"
     source_dir = audio_library / "approved_sfx"
     source_dir.mkdir(parents=True)
@@ -1609,12 +2055,8 @@ def test_import_sfx_manifest_defaults_to_dry_run(monkeypatch, tmp_path):
         json={"manifest_path": "sfx_import_manifest_draft.jsonl", "source_dir": "approved_sfx"},
     )
 
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["dry_run"] is True
-    assert payload["stats"]["candidates"] == 1
-    assert payload["stats"]["imported"] == 0
-    assert payload["records"]
+    assert response.status_code == 410
+    assert "AI" in response.json()["detail"]
     assert not (audio_library / "sound_effects_index.json").exists()
 
 
@@ -1632,8 +2074,8 @@ def test_import_sfx_manifest_requires_confirm_for_write(monkeypatch, tmp_path):
         },
     )
 
-    assert response.status_code == 400
-    assert "confirm=true" in response.json()["detail"]
+    assert response.status_code == 410
+    assert "AI" in response.json()["detail"]
 
 
 def test_import_sfx_manifest_rejects_manifest_path_outside_library(monkeypatch, tmp_path):
@@ -1646,11 +2088,11 @@ def test_import_sfx_manifest_rejects_manifest_path_outside_library(monkeypatch, 
         json={"manifest_path": "../outside.jsonl"},
     )
 
-    assert response.status_code == 400
-    assert "manifest_path" in response.json()["detail"]
+    assert response.status_code == 410
+    assert "AI" in response.json()["detail"]
 
 
-def test_import_sfx_manifest_confirmed_writes_index(monkeypatch, tmp_path):
+def test_import_sfx_manifest_confirmed_does_not_write_index(monkeypatch, tmp_path):
     audio_library = tmp_path / "audio_library"
     source_dir = audio_library / "approved_sfx"
     source_dir.mkdir(parents=True)
@@ -1686,7 +2128,8 @@ def test_import_sfx_manifest_confirmed_writes_index(monkeypatch, tmp_path):
         },
     )
 
-    response = build_test_client(admin=True).post(
+    client, session_factory = build_db_test_client(admin=True)
+    response = client.post(
         "/api/v1/audiobook/audio-library/sound-effects/import-manifest",
         json={
             "manifest_path": "sfx_import_manifest_draft.jsonl",
@@ -1696,14 +2139,15 @@ def test_import_sfx_manifest_confirmed_writes_index(monkeypatch, tmp_path):
         },
     )
 
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["dry_run"] is False
-    assert payload["stats"]["imported"] == 1
+    assert response.status_code == 410
+    assert "AI" in response.json()["detail"]
     index_path = audio_library / "sound_effects_index.json"
-    assert index_path.exists()
-    indexed = json.loads(index_path.read_text(encoding="utf-8"))
-    assert indexed[0]["name"] == "wood_door_open"
+    assert not index_path.exists()
+    db = session_factory()
+    try:
+        assert db.query(AudioLibraryAsset).count() == 0
+    finally:
+        db.close()
 
 
 def test_audio_library_cloud_objects_requires_aliyun_oss(monkeypatch):

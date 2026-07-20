@@ -25,6 +25,26 @@ const voiceActionsSource = readFileSync(
   new URL('../useAudiobookVoiceActions.ts', import.meta.url),
   'utf8',
 )
+const narrationAudioConfigPanelSource = readFileSync(
+  new URL('../NarrationAudioConfigPanel.tsx', import.meta.url),
+  'utf8',
+)
+const audioFxConfigPanelSource = readFileSync(
+  new URL('../AudioFxConfigPanel.tsx', import.meta.url),
+  'utf8',
+)
+const scriptEditorDialogSource = readFileSync(
+  new URL('../ScriptEditorDialog.tsx', import.meta.url),
+  'utf8',
+)
+const chapterSelectionPanelSource = readFileSync(
+  new URL('../ChapterSelectionPanel.tsx', import.meta.url),
+  'utf8',
+)
+const chapterActionsMenuSource = readFileSync(
+  new URL('../ChapterActionsMenu.tsx', import.meta.url),
+  'utf8',
+)
 
 describe('Audiobook setup source guards', () => {
   it('keeps CosyVoice workbench fields grouped below the page boundary', () => {
@@ -44,7 +64,7 @@ describe('Audiobook setup source guards', () => {
     )
     expect(voiceCatalogStatusPanelSource).toContain('ttsModel === \'cosyvoice-v3.5-plus\'')
     expect(voiceCatalogStatusPanelSource).toContain('ttsModel === \'mimo-v2.5-tts-voiceclone\'')
-    expect(voiceCatalogStatusPanelSource).toContain('audio.voice 必须传入 data:{MIME_TYPE};base64,$BASE64_AUDIO')
+    expect(voiceCatalogStatusPanelSource).toContain('上传或录制授权样本并保存为可复用音色')
     expect(voiceCatalogStatusPanelSource).toContain('ttsModel === \'mimo-v2.5-tts-voicedesign\'')
     expect(voiceCatalogStatusPanelSource).toContain('填写 voice design prompt 并保存为可复用音色')
     expect(voiceCatalogStatusPanelSource).toContain('再到角色音色下拉中选用')
@@ -112,5 +132,58 @@ describe('Audiobook setup source guards', () => {
     expect(cloneRecordDialogSource).toContain('录音统计')
     expect(cloneRecordDialogSource).toContain('已录时长')
     expect(cloneRecordDialogSource).toContain('LinearProgress')
+  })
+
+  it('keeps setup controls focused on script-first generation and hides narration style and balance toggles', () => {
+    expect(setupStepSource).not.toContain('配置章节与角色声音')
+    expect(setupStepSource).not.toContain('title="生成策略"')
+    expect(setupStepSource).not.toContain('只生成剧本和评审')
+    expect(setupStepSource).not.toContain('适合先审稿再进入音频阶段')
+    expect(setupStepSource).not.toContain('生成剧本、音频与导出素材')
+    expect(setupStepSource).not.toContain('适合一次性完成可试听章节')
+    expect(setupStepSource).not.toContain('完整音频链路')
+    expect(setupStepSource).not.toContain('onScriptOnlyModeChange')
+    expect(setupStepSource).not.toContain('项目默认 TTS 模型')
+    expect(setupStepSource).not.toContain('onTtsModelChange=')
+    expect(setupStepSource).not.toContain('onTtsModelChange:')
+    expect(setupStepSource).not.toContain('onTtsModelChange(event.target.value as TtsModel)')
+    expect(setupStepSource).toContain('音色管理')
+    expect(setupStepSource).toContain('VoiceCatalogStatusPanel')
+    expect(setupStepSource).toContain('Dialog')
+
+    expect(narrationAudioConfigPanelSource).not.toContain('NarrationStyleSelector')
+    expect(narrationAudioConfigPanelSource).not.toContain('getNarrationStyles')
+    expect(narrationAudioConfigPanelSource).not.toContain('旁白风格')
+    expect(audioFxConfigPanelSource).not.toContain('智能音量平衡')
+    expect(audioFxConfigPanelSource).not.toContain('intelligent_balance')
+    expect(audioFxConfigPanelSource).not.toContain('平衡策略')
+    expect(audioFxConfigPanelSource).not.toContain('BGM 音量')
+    expect(audioFxConfigPanelSource).not.toContain('音效音量')
+    expect(scriptEditorDialogSource).toContain('片段音量')
+    expect(scriptEditorDialogSource).toContain('选中音频片段音量')
+  })
+
+  it('uses a single-select locked chapter queue with regeneration actions', () => {
+    expect(chapterSelectionPanelSource).toContain('Radio')
+    expect(chapterSelectionPanelSource).not.toContain('Checkbox')
+    expect(chapterSelectionPanelSource).not.toContain('onToggleAll')
+    expect(chapterSelectionPanelSource).toContain('generatedChapterIds')
+    expect(chapterSelectionPanelSource).toContain('已生成')
+    expect(chapterSelectionPanelSource).toContain('scrollTop')
+    expect(chapterActionsMenuSource).toContain('canRegenerate')
+    expect(chapterActionsMenuSource).toContain('重新生成')
+  })
+
+  it('stacks chapters before narration on the left with voices on the right', () => {
+    const narrationIndex = setupStepSource.indexOf('title="叙事与音频"')
+    const chapterQueueIndex = setupStepSource.indexOf('title="章节队列"')
+    const voiceIndex = setupStepSource.indexOf('title="角色声音"')
+    const generateButtonRowIndex = setupStepSource.indexOf('audiobookButtonRowSx.singlePrimary')
+
+    expect(chapterQueueIndex).toBeGreaterThanOrEqual(0)
+    expect(narrationIndex).toBeGreaterThan(chapterQueueIndex)
+    expect(voiceIndex).toBeGreaterThan(narrationIndex)
+    expect(generateButtonRowIndex).toBeGreaterThan(voiceIndex)
+    expect(setupStepSource).toContain("lg: 'minmax(360px, 0.92fr) minmax(0, 1.38fr)'")
   })
 })

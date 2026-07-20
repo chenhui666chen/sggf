@@ -88,6 +88,7 @@ from app.services.audiobook.tts_engine_pkg._constants import (
     MINIMAX_MODEL_ALIASES,
     MINIMAX_EMOTIONS,
 )
+from ..tts_model_ids import normalize_audiobook_tts_emotion
 
 _TTS_CACHE_VALIDATION_VERSION = "tts_output_validator_v1"
 
@@ -403,10 +404,7 @@ class MinimaxMixin:
         if not value:
             return "neutral"
         if self._is_cosyvoice_v3_plus():
-            if value in COSYVOICE_V3_PLUS_INSTRUCT_EMOTIONS:
-                return value
-            mapped = COSYVOICE_V3_PLUS_EMOTION_ALIASES.get(value)
-            return mapped or "neutral"
+            return normalize_audiobook_tts_emotion(value, self.model) or "neutral"
 
         mapping = {
             "focused": "neutral",

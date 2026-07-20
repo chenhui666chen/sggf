@@ -23,6 +23,12 @@ export interface AudioLibraryDetailItem {
   title?: string
 }
 
+export interface AudioAssetDescriptionSource {
+  name?: string
+  description?: string
+  tags?: string[]
+}
+
 const AUDIO_KEYWORD_LABELS: Record<string, string> = {
   action: '动作',
   alchemy: '炼金',
@@ -33,11 +39,14 @@ const AUDIO_KEYWORD_LABELS: Record<string, string> = {
   battle: '战斗',
   book: '书页',
   bottle: '瓶子',
+  cork: '软木塞',
   calm: '平静',
   city: '城市',
   clinic: '诊所',
   close: '合上',
   detail: '细节',
+  dice: '骰子',
+  die: '骰子',
   door: '门',
   emotion: '情绪',
   environment: '环境',
@@ -49,7 +58,10 @@ const AUDIO_KEYWORD_LABELS: Record<string, string> = {
   footstep: '脚步',
   footsteps: '脚步',
   general: '通用',
+  glass: '玻璃',
+  gambling: '赌博',
   heartbeat: '心跳',
+  horn: '鸣笛',
   hit: '撞击',
   horror: '惊悚',
   impact: '撞击',
@@ -59,6 +71,8 @@ const AUDIO_KEYWORD_LABELS: Record<string, string> = {
   jump: '跳跃',
   long: '长版',
   machine: '机器',
+  custom: '自定义',
+  alarm: '警报',
   medium: '中速',
   medicine: '医药',
   metal: '金属',
@@ -72,6 +86,10 @@ const AUDIO_KEYWORD_LABELS: Record<string, string> = {
   pill: '药片',
   peaceful: '平静',
   people: '人群',
+  passenger: '乘客',
+  passengers: '乘客',
+  platform: '站台',
+  public_transport: '公共交通',
   rain: '雨声',
   reading: '阅读',
   realistic: '写实',
@@ -79,18 +97,32 @@ const AUDIO_KEYWORD_LABELS: Record<string, string> = {
   romance: '浪漫',
   room: '房间',
   rustle: '摩擦',
+  ritual: '仪式',
+  roll: '滚动',
   sad: '悲伤',
   scifi: '科幻',
   sci_fi: '科幻',
   shake: '摇晃',
   slow: '慢速',
   sting: '刺点',
+  single: '单个',
   storm: '暴风雨',
   tense: '紧张',
   thud: '闷响',
   thunder: '雷声',
   transition: '转场',
+  train: '火车',
+  railway: '铁路',
+  locomotive: '火车机车',
+  station: '车站',
   travel: '旅行',
+  table: '桌面',
+  talk: '交谈',
+  talking: '交谈',
+  tavern: '酒馆',
+  twist: '旋拧',
+  two: '两个',
+  uncork: '拔塞',
   water: '水声',
   weird: '诡异',
   wood: '木头',
@@ -98,7 +130,12 @@ const AUDIO_KEYWORD_LABELS: Record<string, string> = {
 
 const AUDIO_ASSET_NAME_PHRASES: Record<string, string> = {
   book_page: '书页',
+  glass_瓶子_cork_twist: '玻璃瓶软木塞旋拧声',
+  glass_瓶子_uncork: '玻璃瓶拔塞声',
   medicine_pill: '药片',
+  single_die_roll_table: '桌面掷单枚骰子声',
+  train_horn_airchime_k5la: '火车站火车鸣笛与人群交谈声',
+  two_dice_roll_table: '桌面掷两枚骰子声',
 }
 
 const SOURCE_LABELS: Record<string, string> = {
@@ -137,21 +174,35 @@ const normalizeKeyword = (value: string) =>
 
 const hasChinese = (value: string) => /[\u4e00-\u9fff]/.test(value)
 
-const formatUnknownKeyword = (value: string) =>
-  value.trim().replace(/[._-]+/g, ' ').replace(/\s+/g, ' ')
+const splitAudioTokens = (value: string) =>
+  value.trim().split(/[._\s-]+/).filter(Boolean)
+
+const translateAudioTokens = (value: string) => {
+  const labels = splitAudioTokens(value)
+    .map((token) => {
+      if (hasChinese(token) && !/[A-Za-z]/.test(token)) return token
+      return AUDIO_KEYWORD_LABELS[normalizeKeyword(token)] || ''
+    })
+    .filter(Boolean)
+  return labels.filter((label, index) => label !== labels[index - 1])
+}
 
 export const formatAudioKeywordLabel = (value?: string | null) => {
   const raw = String(value || '').trim()
   if (!raw) return '未分类'
-  if (hasChinese(raw)) return raw
-  return AUDIO_KEYWORD_LABELS[normalizeKeyword(raw)] || formatUnknownKeyword(raw)
+  if (hasChinese(raw) && !/[A-Za-z]/.test(raw)) return raw
+  const exactLabel = AUDIO_KEYWORD_LABELS[normalizeKeyword(raw)]
+  if (exactLabel) return exactLabel
+  const labels = translateAudioTokens(raw)
+  return labels.length > 0 ? labels.join('') : '其他'
 }
 
 export const formatAudioAssetNameLabel = (name?: string | null) => {
   const raw = String(name || '').trim()
   if (!raw) return '未命名素材'
-  if (hasChinese(raw)) return raw
-  const parts = raw.split(/[_\s-]+/).filter(Boolean)
+  const exactPhrase = AUDIO_ASSET_NAME_PHRASES[normalizeKeyword(raw)]
+  if (exactPhrase) return exactPhrase
+  const parts = splitAudioTokens(raw)
   const labels: string[] = []
 
   for (let index = 0; index < parts.length; index += 1) {
@@ -163,12 +214,49 @@ export const formatAudioAssetNameLabel = (name?: string | null) => {
     }
 
     const part = parts[index]
-    labels.push(/^\d+$/.test(part) ? part : formatAudioKeywordLabel(part))
+    if (/^\d+$/.test(part)) {
+      labels.push(part)
+      continue
+    }
+    if (hasChinese(part) && !/[A-Za-z]/.test(part)) {
+      labels.push(part)
+      continue
+    }
+    const translated = AUDIO_KEYWORD_LABELS[normalizeKeyword(part)]
+    if (translated) labels.push(translated)
   }
 
-  return labels
+  const localized = labels
     .filter((label, index) => label !== labels[index - 1])
     .join(' ')
+  return localized || '其他音效'
+}
+
+export const formatAudioAssetDescriptionLabel = ({
+  name,
+  description,
+  tags = [],
+}: AudioAssetDescriptionSource) => {
+  const rawDescription = String(description || '').trim()
+  if (hasChinese(rawDescription) && !/[A-Za-z]/.test(rawDescription)) return rawDescription
+
+  const semanticText = `${name || ''} ${rawDescription} ${tags.join(' ')}`.toLowerCase()
+  const hasTrain = /\b(train|railway|locomotive)\b/.test(semanticText)
+  const hasHorn = /\b(horn|airchime)\b/.test(semanticText)
+  const hasPeople = /\b(people|passengers?|talk|talking|crowd|announcement)\b/.test(semanticText)
+  if (hasTrain && hasHorn && hasPeople) {
+    return '火车站环境声，包含火车鸣笛、列车运行声和背景人群交谈。'
+  }
+  if (hasTrain && hasHorn) return '火车鸣笛声，适合车站、铁路和列车到达场景。'
+  if (/\bmetal\b/.test(semanticText) && /\b(hit|impact|strike)\b/.test(semanticText)) {
+    return '金属撞击声，适合机械、锻造或物体碰撞场景。'
+  }
+  if (/\bwood\b/.test(semanticText) && /\b(hit|impact|strike)\b/.test(semanticText)) {
+    return '木质物体撞击声，适合门、木箱或家具碰撞场景。'
+  }
+
+  const nameLabel = formatAudioAssetNameLabel(name)
+  return nameLabel === '其他音效' || nameLabel === '未命名素材' ? '' : `${nameLabel}。`
 }
 
 export const formatSfxCategoryLabel = (category?: string | null) => {
@@ -197,7 +285,7 @@ export const getVisibleSfxScenes = (scenes: string[] = []) =>
 export const formatSourceLabel = (source?: string | null) => {
   const raw = String(source || '').trim()
   if (!raw) return '本地'
-  return SOURCE_LABELS[normalizeKeyword(raw)] || formatUnknownKeyword(raw)
+  return SOURCE_LABELS[normalizeKeyword(raw)] || '其他来源'
 }
 
 const formatQualityStatusLabel = (status?: string) => {

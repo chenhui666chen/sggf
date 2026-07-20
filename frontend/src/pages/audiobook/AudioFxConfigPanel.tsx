@@ -3,19 +3,15 @@ import {
   Box,
   Button,
   Checkbox,
-  Collapse,
   FormControl,
   FormControlLabel,
   Grid,
   InputLabel,
   MenuItem,
   Select,
-  Slider,
   Stack,
   Typography,
 } from '@mui/material'
-import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
-import ExpandLessIcon from '@mui/icons-material/ExpandLess'
 import LibraryMusicIcon from '@mui/icons-material/LibraryMusic'
 
 import { audiobookColors } from './audiobookTheme'
@@ -33,7 +29,6 @@ interface AudioFxConfigPanelProps {
 
 const AudioFxConfigPanel = ({ value, onChange }: AudioFxConfigPanelProps) => {
   const [libraryBrowserOpen, setLibraryBrowserOpen] = useState(false)
-  const [advancedOpen, setAdvancedOpen] = useState(false)
   const updateValue = (patch: Partial<AudioFxConfig>) => {
     onChange({ ...value, ...patch })
   }
@@ -162,92 +157,6 @@ const AudioFxConfigPanel = ({ value, onChange }: AudioFxConfigPanelProps) => {
           </Typography>
         </Box>
       )}
-
-      <Box sx={{ mt: 2 }}>
-        <Button
-          size="small"
-          variant="text"
-          endIcon={advancedOpen ? <ExpandLessIcon /> : <ExpandMoreIcon />}
-          onClick={() => setAdvancedOpen(!advancedOpen)}
-        >
-          高级选项
-        </Button>
-        <Collapse in={advancedOpen}>
-          <Box
-            sx={{
-              p: 1.5,
-              mt: 1,
-              borderRadius: 1.5,
-              border: `1px solid ${audiobookColors.surfaceBorder}`,
-              backgroundColor: 'rgba(255,255,255,0.72)',
-            }}
-          >
-            <Grid container spacing={2}>
-              <Grid item xs={12}>
-                <FormControlLabel
-                  control={
-                    <Checkbox
-                      checked={value.intelligent_balance ?? false}
-                      onChange={(_, checked) => updateValue({ intelligent_balance: checked })}
-                      color="primary"
-                    />
-                  }
-                  label="智能音量平衡（自动调节 BGM/音效与旁白之间的音量比例）"
-                />
-              </Grid>
-              <Grid item xs={12} md={6}>
-                <FormControl size="small" fullWidth disabled={value.balance_strategy === 'none'}>
-                  <InputLabel>平衡策略</InputLabel>
-                  <Select
-                    label="平衡策略"
-                    value={value.balance_strategy || 'auto'}
-                    onChange={(event) =>
-                      updateValue({ balance_strategy: event.target.value as AudioFxConfig['balance_strategy'] })
-                    }
-                  >
-                    <MenuItem value="auto">自动（推荐）</MenuItem>
-                    <MenuItem value="ducking">闪避（旁白时压低背景音）</MenuItem>
-                    <MenuItem value="sidechain">侧链压缩（更平滑的过渡）</MenuItem>
-                    <MenuItem value="none">不使用平衡策略</MenuItem>
-                  </Select>
-                </FormControl>
-              </Grid>
-              <Grid item xs={12} md={6}>
-                <Typography variant="caption" color="text.secondary" gutterBottom>
-                  BGM 音量：{Math.round((value.bgm_volume ?? 0.7) * 100)}%
-                </Typography>
-                <Slider
-                  size="small"
-                  min={0}
-                  max={1}
-                  step={0.05}
-                  value={value.bgm_volume ?? 0.7}
-                  onChange={(_, v) => updateValue({ bgm_volume: v as number })}
-                  disabled={!value.enable_music}
-                  valueLabelDisplay="auto"
-                  valueLabelFormat={(v) => `${Math.round(v * 100)}%`}
-                />
-              </Grid>
-              <Grid item xs={12} md={6}>
-                <Typography variant="caption" color="text.secondary" gutterBottom>
-                  音效音量：{Math.round((value.sfx_volume ?? 0.8) * 100)}%
-                </Typography>
-                <Slider
-                  size="small"
-                  min={0}
-                  max={1}
-                  step={0.05}
-                  value={value.sfx_volume ?? 0.8}
-                  onChange={(_, v) => updateValue({ sfx_volume: v as number })}
-                  disabled={!value.enable_sound_effects}
-                  valueLabelDisplay="auto"
-                  valueLabelFormat={(v) => `${Math.round(v * 100)}%`}
-                />
-              </Grid>
-            </Grid>
-          </Box>
-        </Collapse>
-      </Box>
     </Box>
   )
 }

@@ -767,11 +767,13 @@ def _sanitize_sound_effect(value: Any) -> Optional[SoundEffect]:
     if not isinstance(value, dict):
         return None
 
-    name = _clean_text(value.get("name") or value.get("effect") or value.get("id"))
+    asset_id = _clean_text(value.get("asset_id") or value.get("effect_id") or value.get("id"))
+    name = _clean_text(value.get("name") or value.get("effect") or asset_id)
     if not name:
         return None
     return SoundEffect(
         name=name,
+        asset_id=asset_id or None,
         layer=_clean_text(value.get("layer")) or "action",
         volume=_coerce_float(value.get("volume"), 0.3, 0.0, 1.0),
         timing=_clean_text(value.get("timing")) or "trigger",
@@ -792,11 +794,13 @@ def _sanitize_music_cue(value: Any) -> Optional[MusicCue]:
     if not isinstance(value, dict):
         return None
 
-    style = _clean_text(value.get("style") or value.get("name") or value.get("cue"))
+    asset_id = _clean_text(value.get("asset_id") or value.get("music_id") or value.get("id"))
+    style = _clean_text(value.get("style") or value.get("name") or value.get("cue") or asset_id)
     if not style:
         return None
     return MusicCue(
         style=style,
+        asset_id=asset_id or None,
         volume=_coerce_float(value.get("volume"), 0.2, 0.0, 1.0),
         fade_in=_coerce_float(value.get("fade_in"), 2.0, 0.0, 30.0),
         fade_out=_coerce_float(value.get("fade_out"), 2.0, 0.0, 30.0),

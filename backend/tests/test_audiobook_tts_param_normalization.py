@@ -63,11 +63,11 @@ def test_narration_style_prefers_explicit_instruct_emotion_over_weak_default():
         },
     )
 
-    assert params["emotion"] == "fearful"
-    assert "lower the voice and leave a suspenseful pause" in params["instructions"]
+    assert params["emotion"] == "calm"
+    assert "instructions" not in params
 
 
-def test_narration_style_adds_multidimensional_narrator_voice_description():
+def test_narration_style_keeps_runtime_voice_description_unchanged():
     params = apply_narration_style_to_tts_params(
         "relaxing",
         {
@@ -78,13 +78,8 @@ def test_narration_style_adds_multidimensional_narrator_voice_description():
 
     description = params["voice_description"]
 
-    assert description.startswith("性别：中性，年龄感：中年")
-    assert "音调：中低音" in description
-    assert "语速：缓慢" in description
-    assert "情绪：calm" in description
-    assert "特点：温和、舒缓" in description
-    assert "用途：有声书旁白" in description
-    assert "角色对白" not in description
+    assert description == "性别：女性，年龄感：青年，音调：偏高，语速：快速，情绪：激动，特点：明亮，用途：角色对白"
+    assert params["narration_style_legacy"] == "relaxing"
 
 
 def test_segment_validation_uses_voice_params_pause_as_effective_top_level_pause():
@@ -160,9 +155,9 @@ def test_assign_voices_keeps_instruct_emotion_added_by_narration_style():
 
     engine._assign_voices([segment])
 
-    assert segment.instruct_emotion == "calm"
-    assert segment.voice_params["instruct_emotion"] == "calm"
-    assert segment.voice_params["use_instruct_mode"] is True
+    assert segment.instruct_emotion == ""
+    assert segment.voice_params["instruct_emotion"] == ""
+    assert "use_instruct_mode" not in segment.voice_params
 
 
 def test_assign_voices_prepares_delivery_plan_with_segment_model_for_review():
@@ -191,3 +186,7 @@ def test_assign_voices_prepares_delivery_plan_with_segment_model_for_review():
     assert delivery_plan["model_family"] == "mimo"
     assert delivery_plan["model_control_preference"] == "director"
     assert "哽咽" in delivery_plan["micro_tags"]
+    snapshot = segment.voice_params["provider_prompt_snapshot"]
+    assert snapshot["model"] == "mimo-v2.5-tts"
+    assert snapshot["mode"] == "mimo_director"
+    assert snapshot["provider_prompt"]["messages"][0]["role"] == "user"

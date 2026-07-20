@@ -51,9 +51,9 @@ const CharacterVoicePresetSelect = ({
 
   return (
     <FormControl size="small" fullWidth>
-      <InputLabel>角色音</InputLabel>
+      <InputLabel>音色</InputLabel>
       <Select
-        label="角色音"
+        label="音色"
         value={safeValue}
         onChange={(event) => onVoiceChange(characterId, event.target.value as string)}
         disabled={voiceLoading && hasNoVoicePresets}

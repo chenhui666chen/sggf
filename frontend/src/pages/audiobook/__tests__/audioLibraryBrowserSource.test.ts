@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 
 const browserSource = readFileSync(
@@ -16,18 +16,13 @@ const pickerSource = readFileSync(
   'utf8',
 )
 
+const segmentDetailsSource = readFileSync(
+  new URL('../ScriptSegmentDetailsPanel.tsx', import.meta.url),
+  'utf8',
+)
+
 const displaySource = readFileSync(
   new URL('../audioLibraryDisplay.ts', import.meta.url),
-  'utf8',
-)
-
-const candidateReviewSource = readFileSync(
-  new URL('../SfxCandidateReviewDialog.tsx', import.meta.url),
-  'utf8',
-)
-
-const manifestImportSource = readFileSync(
-  new URL('../SfxManifestImportDialog.tsx', import.meta.url),
   'utf8',
 )
 
@@ -36,6 +31,9 @@ const purgeSource = readFileSync(
   'utf8',
 )
 
+const uploadDialogUrl = new URL('../AudioLibraryUploadDialog.tsx', import.meta.url)
+const uploadDialogSource = existsSync(uploadDialogUrl) ? readFileSync(uploadDialogUrl, 'utf8') : ''
+
 describe('AudioLibraryBrowser source guards', () => {
   it('keeps the library browser read-only for public third-party assets', () => {
     expect(browserSource).toContain('音频素材库')
@@ -43,8 +41,8 @@ describe('AudioLibraryBrowser source guards', () => {
     expect(browserSource).toContain('browseSoundEffects')
     expect(browserSource).toContain('browseMusic')
     expect(browserSource).toContain('getAudioLibraryPreviewBlob')
-    expect(browserSource).toContain('SfxCandidateReviewDialog')
-    expect(browserSource).toContain('SfxManifestImportDialog')
+    expect(browserSource).not.toContain('SfxCandidateReviewDialog')
+    expect(browserSource).not.toContain('SfxManifestImportDialog')
     expect(browserSource).toContain('AudioLibraryPurgeDialog')
 
     expect(browserSource).not.toContain('从公开库导入')
@@ -78,6 +76,14 @@ describe('AudioLibraryBrowser source guards', () => {
     expect(pickerSource).not.toContain('new Audio(url)')
   })
 
+  it('passes explicit library selections to structured script segment fields', () => {
+    expect(pickerSource).toContain('onSelectAsset?: (selection: AudioAssetSelection) => void')
+    expect(pickerSource).toContain('onSelectAsset?.(')
+    expect(segmentDetailsSource).toContain('onSelectAsset={')
+    expect(segmentDetailsSource).toContain('buildSoundEffectAssetPatch')
+    expect(segmentDetailsSource).toContain('buildMusicAssetPatch')
+  })
+
   it('keeps library browsing interactions responsive on large result sets', () => {
     expect(browserSource).toContain('useVirtualizer')
     expect(browserSource).toContain('AudioLibraryVirtualList')
@@ -99,30 +105,6 @@ describe('AudioLibraryBrowser source guards', () => {
     expect(apiSource).toContain("query.set('scene', params.scene)")
   })
 
-  it('keeps candidate review as manifest-only workflow', () => {
-    expect(candidateReviewSource).toContain('候选清单审核')
-    expect(candidateReviewSource).toContain('listSfxCandidates')
-    expect(candidateReviewSource).toContain('buildSfxCandidateManifestDraft')
-    expect(candidateReviewSource).toContain('本地文件')
-    expect(candidateReviewSource).toContain('manifest')
-
-    expect(candidateReviewSource).not.toContain('downloadSfxToLibrary')
-    expect(candidateReviewSource).not.toContain('searchPublicSfx')
-    expect(candidateReviewSource).not.toContain('CloudDownloadIcon')
-  })
-
-  it('keeps manifest import as two-step local workflow', () => {
-    expect(manifestImportSource).toContain('manifest 导入')
-    expect(manifestImportSource).toContain('importSfxManifest')
-    expect(manifestImportSource).toContain('dry_run')
-    expect(manifestImportSource).toContain('confirm')
-    expect(manifestImportSource).toContain('我确认')
-
-    expect(manifestImportSource).not.toContain('downloadSfxToLibrary')
-    expect(manifestImportSource).not.toContain('searchPublicSfx')
-    expect(manifestImportSource).not.toContain('CloudDownloadIcon')
-  })
-
   it('keeps cleanup as dry-run plus explicit confirm workflow', () => {
     expect(purgeSource).toContain('素材清理')
     expect(purgeSource).toContain('cleanupAudioLibrary')
@@ -132,6 +114,16 @@ describe('AudioLibraryBrowser source guards', () => {
     expect(purgeSource).toContain('missing_entries')
     expect(purgeSource).toContain('low_quality_entries')
     expect(purgeSource).toContain('orphaned_files')
+  })
+
+  it('invalidates destructive previews when operation parameters change', () => {
+    expect(purgeSource).toContain('const currentRequestKey = JSON.stringify([')
+    expect(purgeSource).toContain('previewRequestKey === currentRequestKey')
+    expect(purgeSource).toContain('setPreviewRequestKey(currentRequestKey)')
+    expect(purgeSource).toContain('setLibraryType(initialLibraryType)')
+    expect(purgeSource).toContain('plan_token: previewPlanToken')
+    expect(apiSource).toContain('plan_token?: string')
+
   })
 
   it('keeps audio library management actions admin-only', () => {
@@ -168,5 +160,35 @@ describe('AudioLibraryBrowser source guards', () => {
   it('formats sound effect asset names into user-facing Chinese labels', () => {
     expect(browserSource).toContain('formatAudioAssetNameLabel')
     expect(browserSource).toContain('formatAudioAssetNameLabel(sfxEntry?.name)')
+    expect(browserSource).toContain('formatAudioAssetDescriptionLabel(sfxEntry)')
+    expect(pickerSource).toContain('formatAudioAssetNameLabel')
+    expect(pickerSource).toContain('formatAudioKeywordLabel')
+  })
+
+  it('allows authenticated users to upload licensed shared audio assets', () => {
+    expect(browserSource).toContain('AudioLibraryUploadDialog')
+    expect(browserSource).toContain('上传素材')
+    expect(uploadDialogSource).toContain('rightsConfirmed')
+    expect(uploadDialogSource).toContain('我确认拥有该音频的共享和使用授权')
+    expect(uploadDialogSource).toContain('uploadAudioLibraryAsset')
+    expect(apiSource).toContain('/api/v1/audiobook/audio-library/assets/upload')
+  })
+
+  it('supports per-user star ratings without triggering preview playback', () => {
+    expect(browserSource).toContain('<Rating')
+    expect(browserSource).toContain('event.stopPropagation()')
+    expect(browserSource).toContain('rateAudioLibraryAsset')
+    expect(browserSource).toContain('auto_unpublished')
+    expect(apiSource).toContain('rating_count: number')
+    expect(apiSource).toContain('average_rating: number')
+    expect(apiSource).toContain('user_rating?: number | null')
+    expect(apiSource).toContain('/rating`')
+  })
+
+  it('shows uploaded Chinese music names before style and mood metadata', () => {
+    expect(browserSource).toContain('formatAudioAssetNameLabel(musicEntry?.name)')
+    expect(apiSource).toContain('name: string')
+    expect(apiSource).toContain('description: string')
+    expect(apiSource).toContain('tags: string[]')
   })
 })

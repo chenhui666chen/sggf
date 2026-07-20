@@ -7,7 +7,7 @@
 """
 import logging
 from dataclasses import dataclass
-from typing import Dict, List
+from typing import Any, Dict, List, Sequence
 
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
@@ -23,6 +23,7 @@ from app.services.audiobook.repository import (
     ProjectRepository,
 )
 from app.services.audiobook.project_audio_runtime import resolve_project_audio_runtime_config
+from app.services.audiobook.chapter_character_scope import select_chapter_characters
 from app.services.audiobook.voice_auto_assignment import AutoVoiceAssignmentPool
 
 logger = logging.getLogger(__name__)
@@ -109,15 +110,6 @@ class AudiobookAppService:
                 "voice_id": item.voice_id,
                 "tts_model": item.tts_model,
             }
-            for key in (
-                "voice_clone_data_url",
-                "voice_design_prompt",
-                "mimo_voice_asset_id",
-                "stepaudio_voice_asset_id",
-            ):
-                value = getattr(item, key, None)
-                if value is not None:
-                    mapping_item[key] = value
 
             voice_mapping[item.character_name] = mapping_item
 
@@ -126,10 +118,20 @@ class AudiobookAppService:
         project_id: int,
         voice_mapping: Dict[str, Dict],
         tts_model: str,
+        *,
+        chapters: Sequence[Chapter] | None = None,
+        characters: Sequence[Any] | None = None,
     ) -> None:
         """为缺少配置的角色自动分配音色（基于结构化人物信息）。"""
         try:
-            characters = self.character_repo.list_by_project(self.db, project_id=project_id)
+            resolved_characters = list(characters) if characters is not None else list(
+                self.character_repo.list_by_project(self.db, project_id=project_id)
+            )
+            if chapters is not None:
+                resolved_characters, _ = select_chapter_characters(
+                    chapters=chapters,
+                    characters=resolved_characters,
+                )
 
             auto_voice_pool = AutoVoiceAssignmentPool(
                 preferred_model=tts_model,
@@ -167,7 +169,7 @@ class AudiobookAppService:
 
                 return traits
 
-            for char in characters:
+            for char in resolved_characters:
                 # 已有配置（项目级或本次请求）优先，不自动覆盖
                 existing = voice_mapping.get(char.name)
                 if existing and existing.get("voice_id"):
@@ -208,7 +210,12 @@ class AudiobookAppService:
         tts_model = (request.tts_model or "qwen3-tts-instruct-flash").strip()
         voice_mapping_data = self._load_project_voice_mapping(project, tts_model)
         self._apply_request_voice_config(voice_mapping_data, request.voice_config)
-        self._auto_assign_voices(project.id, voice_mapping_data, tts_model)
+        self._auto_assign_voices(
+            project.id,
+            voice_mapping_data,
+            tts_model,
+            chapters=prepared_request.chapters,
+        )
 
         # 4. 创建 AudiobookProject
         audiobook_project = AudiobookProject(

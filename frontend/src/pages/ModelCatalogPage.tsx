@@ -560,7 +560,7 @@ function mergeUniqueStrings(...groups: Array<string[] | null | undefined>): stri
   const merged: string[] = []
 
   groups.forEach((group) => {
-    ;(group || []).forEach((item) => {
+    (group || []).forEach((item) => {
       const normalized = String(item || '').trim()
       if (!normalized || seen.has(normalized)) return
       seen.add(normalized)
@@ -576,7 +576,7 @@ function mergeResourceLinks(...groups: Array<ResourceLinkItem[] | null | undefin
   const merged: ResourceLinkItem[] = []
 
   groups.forEach((group) => {
-    ;(group || []).forEach((item) => {
+    (group || []).forEach((item) => {
       const url = String(item?.url || '').trim()
       if (!url || seen.has(url)) return
       seen.add(url)

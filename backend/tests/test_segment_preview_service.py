@@ -2,6 +2,7 @@ import asyncio
 import os
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
@@ -174,6 +175,96 @@ def test_segment_preview_service_normalizes_effects_and_music_cues():
     assert music_cue["volume"] == 0.3
     assert music_cue["start_time"] == 2.0
     assert music_cue["sync_with_dialogue"] is True
+
+
+def test_segment_preview_service_preserves_explicit_audio_asset_ids():
+    effect_specs = SegmentPreviewService.normalize_sound_effects(
+        {
+            "sound_effects": [
+                {
+                    "asset_id": "sfx-door-01",
+                    "name": "Heavy door",
+                }
+            ]
+        }
+    )
+    music_cue = SegmentPreviewService.normalize_music_cue(
+        {
+            "music_cue": {
+                "asset_id": "music-tense-01",
+                "style": "Tense bed",
+            }
+        }
+    )
+
+    assert effect_specs[0]["asset_id"] == "sfx-door-01"
+    assert effect_specs[0]["name"] == "Heavy door"
+    assert music_cue is not None
+    assert music_cue["asset_id"] == "music-tense-01"
+    assert music_cue["style"] == "Tense bed"
+
+
+def test_segment_preview_service_matches_sound_effect_by_asset_id(monkeypatch):
+    matched_descriptions = []
+
+    class FakeDesigner:
+        def __init__(self, llm_client=None):
+            pass
+
+        def _match_effect(self, description, timestamp, scene_id):
+            matched_descriptions.append(description)
+            return SimpleNamespace(
+                effect_type=SimpleNamespace(value="action"),
+                audio_file="sound_effects/selected.wav",
+                volume=0.4,
+                duration=1.0,
+                fade_in=0.0,
+                fade_out=0.0,
+                loop=False,
+            )
+
+    monkeypatch.setattr(segment_preview_service, "SoundEffectDesigner", FakeDesigner)
+    timeline = SegmentPreviewService.build_effect_timeline(
+        [{"asset_id": "sfx-door-01", "name": "Heavy door"}]
+    )
+
+    assert matched_descriptions == ["sfx-door-01"]
+    assert timeline[0]["description"] == "Heavy door"
+    assert timeline[0]["file"] == "sound_effects/selected.wav"
+
+
+def test_segment_preview_service_resolves_music_by_asset_id_before_style(tmp_path):
+    audio_library = tmp_path / "audio_library"
+    first_file = audio_library / "music_cache" / "first.wav"
+    selected_file = audio_library / "music_cache" / "selected.wav"
+    first_file.parent.mkdir(parents=True)
+    first_file.write_bytes(b"first")
+    selected_file.write_bytes(b"selected")
+    music_index = [
+        {
+            "id": "music-first",
+            "style": "Tense bed",
+            "mood": "tense",
+            "file_path": "music_cache/first.wav",
+        },
+        {
+            "id": "music-selected",
+            "style": "Tense bed",
+            "mood": "tense",
+            "file_path": "music_cache/selected.wav",
+        },
+    ]
+
+    resolved = SegmentPreviewService.resolve_music_path(
+        None,
+        "Tense bed",
+        "tense",
+        audio_library,
+        music_index,
+        asset_id="music-selected",
+    )
+
+    assert resolved == selected_file
 
 
 def test_segment_preview_service_uses_shared_narration_duration_estimate():

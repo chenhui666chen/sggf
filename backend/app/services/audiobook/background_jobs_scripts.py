@@ -10,6 +10,7 @@ from app.models.character import Character
 from app.models.project import Project
 from app.services.audiobook.background_jobs_prefetch import prefetch_chapter_generation_records
 from app.services.audiobook.background_jobs_shared import create_background_engine, parse_duration_seconds
+from app.services.audiobook.chapter_character_scope import select_chapter_characters
 from app.services.audiobook.project_audio_runtime import resolve_project_audio_runtime_config
 from app.services.audiobook.task_support import (
     StageTracker,
@@ -172,11 +173,9 @@ async def generate_audiobook_scripts_background(
         characters = db.query(Character).filter(
             Character.project_id == audiobook_project.project_id
         ).all()
-        character_list = [character.name for character in characters if character.name]
         character_profiles = _build_character_profiles(characters)
 
-        logger.info("📝 剧本阶段角色列表: %s", character_list)
-        logger.info("📋 角色档案数量: %s", len(character_profiles))
+        logger.info("📋 项目角色档案数量: %s", len(character_profiles))
 
         _load_existing_voice_mapping(engine, audiobook_project)
         try:
@@ -258,11 +257,25 @@ async def generate_audiobook_scripts_background(
                 elif force_regenerate and chapter_audio and chapter_audio.script_json:
                     logger.info("🔄 [强制重生成] 章节 %s 将覆盖现有剧本", chapter_id)
 
+                chapter_characters, _ = select_chapter_characters(
+                    chapters=[chapter],
+                    characters=characters,
+                )
+                character_list = [
+                    character.name for character in chapter_characters if character.name
+                ]
+                chapter_character_profiles = _build_character_profiles(chapter_characters)
+                logger.info(
+                    "📝 章节 %s 剧本人物范围: %s",
+                    chapter_id,
+                    character_list,
+                )
+
                 result = await engine.prepare_chapter_script(
                     chapter_content=chapter.content or "",
                     chapter_id=chapter_id,
                     character_list=character_list,
-                    character_profiles=character_profiles,
+                    character_profiles=chapter_character_profiles,
                     audiobook_project_id=audiobook_project_id,
                     chapter_title=chapter.title or "",
                     chapter_summary=chapter.summary or "",

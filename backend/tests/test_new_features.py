@@ -39,14 +39,17 @@ def test_narration_style_presets(backend_services_dir):
     assert "pause_multiplier" in preset
 
     params = module.apply_narration_style_to_tts_params("professional", {})
-    assert "speed" in params
-    assert "emotion" in params
-    assert "system_prompt" in params
-    assert "instructions" in params
+    assert params["narration_style_legacy"] == "professional"
+    assert "speed" not in params
+    assert "emotion" not in params
+    assert "system_prompt" not in params
+    assert "instructions" not in params
 
     custom_params = module.apply_narration_style_to_tts_params("custom", {}, "  慢速温柔  ")
-    assert custom_params["system_prompt"] == "慢速温柔"
-    assert custom_params["instructions"] == "慢速温柔"
+    assert custom_params["narration_style_legacy"] == "custom"
+    assert custom_params["narration_style_prompt_legacy"] == "慢速温柔"
+    assert "system_prompt" not in custom_params
+    assert "instructions" not in custom_params
 
 
 def test_subtitle_generator_srt(backend_services_dir):

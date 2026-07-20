@@ -14,6 +14,7 @@
 import hashlib
 import json
 import logging
+import os
 import re
 import shutil
 import time
@@ -29,7 +30,12 @@ import httpx
 
 from app.services.audiobook.audio_library_paths import get_audio_library_dir
 from app.services.audiobook.audio_asset_cloud_storage import upload_audio_library_asset
+from app.services.audiobook.audio_library_source_policy import (
+    is_allowed_sfx_source,
+    normalize_sfx_record_source,
+)
 from app.services.audiobook.agents.sound_effect_designer import SoundEffectDesigner
+from app.services.audiobook.sfx_metadata import metadata_keyword_matches, normalize_sfx_semantics
 
 logger = logging.getLogger(__name__)
 
@@ -244,7 +250,7 @@ def classify_category(name: str, description: str, tags: List[str]) -> str:
     text = f"{name} {description} {' '.join(tags)}".lower()
     scores: Dict[str, int] = {}
     for cat, keywords in CATEGORY_KEYWORD_MAP.items():
-        score = sum(1 for kw in keywords if kw in text)
+        score = sum(1 for kw in keywords if metadata_keyword_matches(text, kw))
         if score > 0:
             scores[cat] = score
     if scores:
@@ -256,7 +262,7 @@ def classify_style(name: str, description: str, tags: List[str]) -> str:
     text = f"{name} {description} {' '.join(tags)}".lower()
     scores: Dict[str, int] = {}
     for style, keywords in STYLE_KEYWORD_MAP.items():
-        score = sum(1 for kw in keywords if kw in text)
+        score = sum(1 for kw in keywords if metadata_keyword_matches(text, kw))
         if score > 0:
             scores[style] = score
     if scores:
@@ -268,7 +274,7 @@ def classify_scene(name: str, description: str, tags: List[str]) -> List[str]:
     text = f"{name} {description} {' '.join(tags)}".lower()
     scenes = []
     for scene, keywords in SCENE_KEYWORD_MAP.items():
-        if any(kw in text for kw in keywords):
+        if any(metadata_keyword_matches(text, kw) for kw in keywords):
             scenes.append(scene)
     return scenes or ["general"]
 
@@ -1004,14 +1010,29 @@ class SfxLibraryDownloader:
         category = _normalize_category_hint(result.category_hint) or classify_category(name, desc, tags)
         style = _normalize_style_hint(result.style_hint) or classify_style(name, desc, tags)
         scenes = classify_scene(name, desc, tags)
+        normalized = normalize_sfx_semantics({
+            "source_id": result.source_id,
+            "name": name,
+            "description": desc,
+            "category": f"{category}/{style}",
+            "style": style,
+            "tags": tags,
+            "scenes": scenes,
+            "duration": result.duration,
+        })
 
         return {
-            "category": category,
-            "style": style,
-            "scenes": scenes,
+            "category": str(normalized.get("category") or category).split("/", 1)[0],
+            "style": str(normalized.get("style") or style),
+            "scenes": list(normalized.get("scenes") or scenes),
         }
 
     def build_record(self, result: SfxSearchResult, classification: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        try:
+            normalized_source = normalize_sfx_record_source({"source": result.source})["source"]
+        except ValueError:
+            logger.info("拒绝将非用户上传或 AI 生成音效写入素材库: %s", result.source)
+            return None
         category = classification["category"]
         style = classification["style"]
         scenes = classification["scenes"]
@@ -1033,14 +1054,14 @@ class SfxLibraryDownloader:
         attribution_text = manifest_attribution or (_build_attribution_text(result) if attribution_required else "")
         source_payload_json = dict(result.extra.get("source_payload_json") or {})
 
-        return {
+        record = {
             "id": effect_id,
             "name": sanitize_filename(result.name),
             "category": f"{category}/{style}",
             "file_path": file_path,
             "description": result.description or result.name,
             "tags": list(set(result.tags + scenes)),
-            "source": result.source,
+            "source": normalized_source,
             "source_id": result.source_id,
             "source_url": result.source_url,
             "author": result.author,
@@ -1061,6 +1082,7 @@ class SfxLibraryDownloader:
             "license_checked_at": now,
             "source_payload_json": source_payload_json,
         }
+        return normalize_sfx_semantics(record)
 
     def import_local_assets(
         self,
@@ -1076,6 +1098,7 @@ class SfxLibraryDownloader:
             "candidates": 0,
             "imported": 0,
             "rejected_license": 0,
+            "rejected_source": 0,
             "rejected_file": 0,
             "rejected_quality": 0,
             "skipped_existing": 0,
@@ -1090,6 +1113,9 @@ class SfxLibraryDownloader:
                 continue
 
             result = _manifest_row_to_search_result(row, source_file.stem)
+            if not is_allowed_sfx_source(result.source):
+                stats["rejected_source"] += 1
+                continue
             if not _local_manifest_license_valid(result):
                 stats["rejected_license"] += 1
                 continue
@@ -1124,7 +1150,15 @@ class SfxLibraryDownloader:
                         pass
                 continue
 
-            self._register_to_index(record)
+            try:
+                self._register_to_index(record)
+            except Exception:
+                if copied_file:
+                    try:
+                        target_path.unlink(missing_ok=True)
+                    except OSError:
+                        logger.warning("音效索引写入失败后无法回滚文件: %s", target_path)
+                raise
             stats["imported"] += 1
             records.append(record)
 
@@ -1524,6 +1558,8 @@ class SfxLibraryDownloader:
         return designer._assess_audio_quality(file_path)
 
     def _register_to_index(self, record: Dict[str, Any]) -> None:
+        record = normalize_sfx_record_source(record)
+        temp_path = self.index_path.with_name(f"{self.index_path.name}.tmp")
         try:
             index_data: List[Dict[str, Any]] = []
             if self.index_path.exists():
@@ -1539,10 +1575,17 @@ class SfxLibraryDownloader:
             index_data.append(record)
 
             self.index_path.parent.mkdir(parents=True, exist_ok=True)
-            with self.index_path.open("w", encoding="utf-8") as f:
+            with temp_path.open("w", encoding="utf-8") as f:
                 json.dump(index_data, f, ensure_ascii=False, indent=2)
-        except Exception as e:
-            logger.warning("⚠️ 写入音效索引失败: %s", e)
+                f.flush()
+                os.fsync(f.fileno())
+            temp_path.replace(self.index_path)
+        except Exception:
+            try:
+                temp_path.unlink(missing_ok=True)
+            except OSError:
+                logger.warning("音效索引临时文件清理失败: %s", temp_path)
+            raise
 
     def run(self, config: Optional[SfxDownloadConfig] = None) -> Dict[str, Any]:
         config = config or SfxDownloadConfig()

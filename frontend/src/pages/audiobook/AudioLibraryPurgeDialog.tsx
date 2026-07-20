@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   Alert,
   Box,
@@ -80,14 +80,43 @@ const AudioLibraryPurgeDialog = ({
   const [checking, setChecking] = useState(false)
   const [purging, setPurging] = useState(false)
   const [result, setResult] = useState<CleanupResult | null>(null)
+  const [previewRequestKey, setPreviewRequestKey] = useState<string | null>(null)
+  const [previewPlanToken, setPreviewPlanToken] = useState('')
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
 
-  const totalAffected = result
+  const currentRequestKey = JSON.stringify([
+    libraryType,
+    removeMissing,
+    removeOrphaned,
+    removeLowQuality,
+    minQualityScore,
+  ])
+  const previewIsCurrent = previewRequestKey === currentRequestKey
+    && result !== null
+    && Boolean(previewPlanToken)
+  const totalAffected = previewIsCurrent && result
     ? result.stats.removed_missing + result.stats.removed_orphaned + result.stats.removed_low_quality
     : 0
 
+  useEffect(() => {
+    if (open) setLibraryType(initialLibraryType)
+  }, [initialLibraryType, open])
+
+  useEffect(() => {
+    setResult(null)
+    setPreviewRequestKey(null)
+    setPreviewPlanToken('')
+    setConfirmed(false)
+    setMessage('')
+    setError('')
+  }, [currentRequestKey])
+
   const runCleanup = async (dryRun: boolean) => {
+    if (!dryRun && (!previewIsCurrent || !confirmed)) {
+      setError('清理条件已变化，请重新执行 dry_run 预览')
+      return
+    }
     if (dryRun) setChecking(true)
     else setPurging(true)
     setMessage('')
@@ -101,13 +130,21 @@ const AudioLibraryPurgeDialog = ({
         min_quality_score: minQualityScore,
         dry_run: dryRun,
         confirm: !dryRun && confirmed,
+        plan_token: previewPlanToken,
       })
       setResult({ stats: res.data.stats, details: res.data.details })
       if (dryRun) {
-        setMessage(`dry_run 完成：发现 ${totalAffected || (
-          res.data.stats.removed_missing + res.data.stats.removed_orphaned + res.data.stats.removed_low_quality
-        )} 项可清理。`)
+        const affected = res.data.stats.removed_missing
+          + res.data.stats.removed_orphaned
+          + res.data.stats.removed_low_quality
+        setPreviewRequestKey(currentRequestKey)
+        setPreviewPlanToken(res.data.plan_token)
+        setConfirmed(false)
+        setMessage(`dry_run 完成：发现 ${affected} 项可清理。`)
       } else {
+        setPreviewRequestKey(null)
+        setPreviewPlanToken('')
+        setConfirmed(false)
         setMessage('素材清理完成')
         onPurged?.()
       }
@@ -123,6 +160,8 @@ const AudioLibraryPurgeDialog = ({
     setMessage('')
     setError('')
     setResult(null)
+    setPreviewRequestKey(null)
+    setPreviewPlanToken('')
     setConfirmed(false)
     onClose()
   }
@@ -164,7 +203,7 @@ const AudioLibraryPurgeDialog = ({
         </Alert>
 
         <Box sx={{ display: 'grid', gridTemplateColumns: '160px 1fr', gap: 1.5, alignItems: 'center' }}>
-          <FormControl size="small">
+          <FormControl size="small" disabled={checking || purging}>
             <InputLabel>库类型</InputLabel>
             <Select
               label="库类型"
@@ -178,15 +217,15 @@ const AudioLibraryPurgeDialog = ({
           </FormControl>
           <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
             <FormControlLabel
-              control={<Checkbox checked={removeMissing} onChange={(event) => setRemoveMissing(event.target.checked)} />}
+              control={<Checkbox checked={removeMissing} onChange={(event) => setRemoveMissing(event.target.checked)} disabled={checking || purging} />}
               label="缺失索引"
             />
             <FormControlLabel
-              control={<Checkbox checked={removeOrphaned} onChange={(event) => setRemoveOrphaned(event.target.checked)} />}
+              control={<Checkbox checked={removeOrphaned} onChange={(event) => setRemoveOrphaned(event.target.checked)} disabled={checking || purging} />}
               label="孤立文件"
             />
             <FormControlLabel
-              control={<Checkbox checked={removeLowQuality} onChange={(event) => setRemoveLowQuality(event.target.checked)} />}
+              control={<Checkbox checked={removeLowQuality} onChange={(event) => setRemoveLowQuality(event.target.checked)} disabled={checking || purging} />}
               label="低质素材"
             />
           </Box>
@@ -196,7 +235,7 @@ const AudioLibraryPurgeDialog = ({
             type="number"
             value={minQualityScore}
             onChange={(event) => setMinQualityScore(Number(event.target.value) || 0)}
-            disabled={!removeLowQuality}
+            disabled={!removeLowQuality || checking || purging}
           />
           <Typography variant="caption" color="text.secondary">
             低于该分数或 `quality_status=rejected` 的素材会进入低质清理预览。
@@ -226,7 +265,7 @@ const AudioLibraryPurgeDialog = ({
             <Checkbox
               checked={confirmed}
               onChange={(event) => setConfirmed(event.target.checked)}
-              disabled={!result || totalAffected === 0}
+              disabled={!previewIsCurrent || totalAffected === 0 || checking || purging}
             />
           }
           label="我确认执行上述清理并允许写入索引"

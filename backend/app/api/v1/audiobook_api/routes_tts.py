@@ -9,6 +9,8 @@ from fastapi import Depends, File, Form, HTTPException, Response, UploadFile, st
 from app.core.security import get_current_user
 from app.models.user import User
 from app.schemas.audiobook import (
+    TTSPromptTestPreviewRequest,
+    TTSPromptTestPreviewResponse,
     TTSPreviewRequest,
     TTSPreviewWithTimestampsRequest,
     TTSPreviewWithTimestampsResponse,
@@ -50,6 +52,8 @@ from app.services.audiobook.tts_preview_cache import (
     check_oss_preview_exists,
     upload_preview_to_oss,
 )
+from app.services.audiobook.tts_test_unit import build_tts_test_catalog, get_tts_test_case
+from app.services.audiobook.audio_asset_cloud_storage import get_audio_library_storage_driver
 from app.services.audiobook.cosyvoice_clone_client import (
     COSYVOICE_V35_PLUS_MODEL_ID,
     CosyVoiceCloneError,
@@ -107,7 +111,7 @@ def _validate_cosyvoice_v35_voice_id(voice_id: str) -> str:
 def _build_model_voice_catalog_status(model_name: str) -> tuple[int, str, str | None]:
     model_meta = get_audiobook_tts_model_metadata(model_name)
     capabilities = model_meta.get("capabilities") if isinstance(model_meta.get("capabilities"), dict) else {}
-    if not capabilities.get("has_system_voices", True):
+    if not capabilities.get("has_system_voices", True) and model_name != COSYVOICE_V35_PLUS_MODEL_ID:
         return 0, "not_applicable", None
 
     try:
@@ -259,6 +263,9 @@ def _build_preview_voice_params(request: TTSPreviewRequest, speaker_id: str) -> 
         "speaker": speaker_id,
         "volume": base_params.get("volume"),
     }
+    request_voice_id = str(getattr(request, "voice_id", "") or "").strip()
+    if request_voice_id:
+        voice_params["voice_id"] = request_voice_id
     if base_params.get("speed") is not None:
         voice_params["rate"] = base_params["speed"]
         voice_params["speed"] = base_params["speed"]
@@ -280,6 +287,13 @@ def _build_preview_voice_params(request: TTSPreviewRequest, speaker_id: str) -> 
         voice_params["voice_design_prompt"] = voice_design_prompt
 
     mimo_voice_asset_id = str(getattr(request, "mimo_voice_asset_id", "") or "").strip()
+    if not mimo_voice_asset_id and (
+        request_voice_id.startswith("mimo_clone:")
+        or request_voice_id.startswith("mimo_design:")
+        or str(speaker_id or "").startswith("mimo_clone:")
+        or str(speaker_id or "").startswith("mimo_design:")
+    ):
+        mimo_voice_asset_id = request_voice_id or str(speaker_id or "")
     if mimo_voice_asset_id:
         voice_params["mimo_voice_asset_id"] = mimo_voice_asset_id
         try:
@@ -288,6 +302,11 @@ def _build_preview_voice_params(request: TTSPreviewRequest, speaker_id: str) -> 
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
     stepaudio_voice_asset_id = str(getattr(request, "stepaudio_voice_asset_id", "") or "").strip()
+    if not stepaudio_voice_asset_id and (
+        request_voice_id.startswith("stepaudio_clone:")
+        or str(speaker_id or "").startswith("stepaudio_clone:")
+    ):
+        stepaudio_voice_asset_id = request_voice_id or str(speaker_id or "")
     if stepaudio_voice_asset_id:
         voice_params["stepaudio_voice_asset_id"] = stepaudio_voice_asset_id
         try:
@@ -323,6 +342,129 @@ async def _synthesize_preview_payload(
     if not isinstance(payload, dict):
         raise RuntimeError("TTS 试听未返回有效 payload")
     return payload
+
+
+def _build_prompt_test_voice_params(
+    request: TTSPromptTestPreviewRequest,
+    test_case: dict,
+) -> tuple[str, dict]:
+    model_name = str(test_case["model"])
+    voice_id = str(request.voice_id or "").strip()
+    if not voice_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="请先选择测试音色",
+        )
+
+    if model_name.startswith("qwen3-tts"):
+        preset = VoiceManager.PRESET_VOICES.get(voice_id)
+        speaker_id = normalize_speaker_id(preset["tts_speaker_id"] if preset else voice_id)
+    else:
+        entry = get_voice_entry(voice_id, model=model_name)
+        speaker_id = str(entry.get("speaker") if entry else voice_id)
+        if _is_cosyvoice_v35_model(model_name):
+            speaker_id = _validate_cosyvoice_v35_voice_id(speaker_id)
+
+    voice_params = dict(test_case["voice_params"])
+    voice_params.update({"speaker": speaker_id, "voice_id": voice_id})
+
+    for field_name in ("voice_clone_data_url", "voice_design_prompt"):
+        value = str(getattr(request, field_name, "") or "").strip()
+        if value:
+            voice_params[field_name] = value
+
+    mimo_asset_id = str(request.mimo_voice_asset_id or "").strip()
+    if not mimo_asset_id and voice_id.startswith(("mimo_clone:", "mimo_design:")):
+        mimo_asset_id = voice_id
+    if mimo_asset_id:
+        voice_params["mimo_voice_asset_id"] = mimo_asset_id
+        try:
+            voice_params = merge_mimo_voice_asset_tts_params(voice_params)
+        except MiMoVoiceAssetError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    stepaudio_asset_id = str(request.stepaudio_voice_asset_id or "").strip()
+    if not stepaudio_asset_id and voice_id.startswith("stepaudio_clone:"):
+        stepaudio_asset_id = voice_id
+    if stepaudio_asset_id:
+        voice_params["stepaudio_voice_asset_id"] = stepaudio_asset_id
+        try:
+            voice_params = merge_stepaudio_voice_asset_tts_params(voice_params)
+        except StepAudioVoiceAssetError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    # The provider adapter must consume exactly the snapshot shown by the test page.
+    voice_params["provider_prompt_snapshot"] = test_case["provider_prompt_snapshot"]
+    return voice_id, voice_params
+
+
+@router.get("/tts/test-cases")
+async def list_tts_prompt_test_cases(
+    current_user: User = Depends(get_current_user),
+):
+    """Return model-specific prompt cases without project or chapter context."""
+    return {"models": build_tts_test_catalog()}
+
+
+@router.post("/tts/test-preview", response_model=TTSPromptTestPreviewResponse)
+async def preview_tts_prompt_test_case(
+    request: TTSPromptTestPreviewRequest,
+    current_user: User = Depends(get_current_user),
+):
+    """Synthesize one independent case using its displayed provider prompt snapshot."""
+    try:
+        test_case = get_tts_test_case(request.model, request.case_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+    voice_id, voice_params = _build_prompt_test_voice_params(request, test_case)
+    try:
+        payload = await _synthesize_preview_payload(
+            text=str(test_case["text"]),
+            model_name=str(test_case["model"]),
+            voice_params=voice_params,
+            retry_config=_PREVIEW_RETRY_CONFIG,
+        )
+    except TTSUserInputError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"message": str(exc), "code": getattr(exc, "code", "tts_user_input_error"), "retryable": False},
+        ) from exc
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.warning("独立 TTS 提示词测试试听失败: model=%s case=%s error=%s", request.model, request.case_id, exc)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"message": "TTS 服务暂时不可用，请稍后重试", "retryable": True},
+        ) from exc
+
+    audio_bytes = payload.get("audio_bytes")
+    if isinstance(audio_bytes, bytearray):
+        audio_bytes = bytes(audio_bytes)
+    if not isinstance(audio_bytes, bytes) or not audio_bytes:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"message": "TTS 服务未返回有效音频", "retryable": True},
+        )
+
+    audio_format = str(payload.get("format") or ("wav" if audio_bytes.startswith(b"RIFF") else "mp3")).lower()
+    audio_mime_type = "audio/wav" if audio_format in {"wav", "pcm", "pcm16"} else "audio/mpeg"
+    return TTSPromptTestPreviewResponse(
+        model=str(test_case["model"]),
+        case_id=str(test_case["id"]),
+        text=str(test_case["text"]),
+        voice_id=voice_id,
+        style_control_mode=str(test_case["style_control_mode"]),
+        provider_prompt_snapshot=test_case["provider_prompt_snapshot"],
+        audio_data_base64=base64.b64encode(audio_bytes).decode("ascii"),
+        audio_format=audio_format,
+        audio_mime_type=audio_mime_type,
+        audio_size_bytes=len(audio_bytes),
+        provider=payload.get("provider"),
+        provider_model=payload.get("provider_model"),
+        transport=payload.get("transport"),
+    )
 
 
 @router.post("/tts/preview")
@@ -416,6 +558,15 @@ async def tts_preview_cached(
             "storage": "oss",
             "response_format": cached_format,
         }
+
+    logger.info(
+        "TTS preview cache miss: key=%s model=%s voice_id=%s speaker=%s driver=%s",
+        cache_key[:12],
+        model_name,
+        str(getattr(request, "voice_id", "") or "").strip(),
+        speaker_id,
+        get_audio_library_storage_driver(),
+    )
 
     # 未命中: TTS 合成
     preview_retry = _PREVIEW_RETRY_CONFIG

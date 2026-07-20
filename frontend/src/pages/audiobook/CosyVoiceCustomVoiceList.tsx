@@ -99,8 +99,9 @@ const CosyVoiceCustomVoiceList = ({
 }: CosyVoiceCustomVoiceListProps) => {
   const [details, setDetails] = useState<CloneDetail[]>([])
   const [detailsLoading, setDetailsLoading] = useState(false)
+  const [detailsLoaded, setDetailsLoaded] = useState(false)
   const [detailsError, setDetailsError] = useState<string | null>(null)
-  const [showDetails, setShowDetails] = useState(false)
+  const [showDetails, setShowDetails] = useState(customVoicePresets.length === 0)
   const [showAllPresets, setShowAllPresets] = useState(false)
   const visiblePresets = showAllPresets
     ? customVoicePresets
@@ -113,6 +114,7 @@ const CosyVoiceCustomVoiceList = ({
     try {
       const res = await apiClient.listCosyVoiceClones()
       setDetails(res.data.voices || [])
+      setDetailsLoaded(true)
     } catch (err: unknown) {
       setDetailsError(await extractApiErrorMessage(err, '获取音色列表失败'))
     } finally {
@@ -121,14 +123,16 @@ const CosyVoiceCustomVoiceList = ({
   }, [])
 
   useEffect(() => {
-    if (showDetails && details.length === 0 && !detailsLoading && !detailsError) {
+    if (customVoicePresets.length === 0 && !showDetails) {
+      setShowDetails(true)
+    }
+  }, [customVoicePresets.length, showDetails])
+
+  useEffect(() => {
+    if (showDetails && !detailsLoaded && !detailsLoading && !detailsError) {
       void fetchDetails()
     }
-  }, [showDetails, details.length, detailsLoading, detailsError, fetchDetails])
-
-  if (customVoicePresets.length === 0) {
-    return null
-  }
+  }, [showDetails, detailsLoaded, detailsLoading, detailsError, fetchDetails])
 
   return (
     <Box sx={{ mt: 1.5 }}>
@@ -237,7 +241,7 @@ const CosyVoiceCustomVoiceList = ({
               size="small"
               variant="outlined"
               startIcon={<RefreshIcon />}
-              onClick={fetchDetails}
+              onClick={() => void fetchDetails()}
               disabled={detailsLoading}
               sx={{ fontSize: '0.7rem' }}
             >
@@ -247,9 +251,13 @@ const CosyVoiceCustomVoiceList = ({
               <Typography variant="caption" color="error">{detailsError}</Typography>
             )}
           </Box>
-          <Collapse in={details.length > 0 || detailsLoading}>
+          <Collapse in={details.length > 0 || detailsLoading || detailsLoaded}>
             {detailsLoading && details.length === 0 ? (
               <Typography variant="caption" color="text.secondary">加载中...</Typography>
+            ) : detailsLoaded && details.length === 0 ? (
+              <Typography variant="caption" color="text.secondary">
+                暂无已创建的 CosyVoice 自定义音色。
+              </Typography>
             ) : (
               <Box>
                 {details.map((clone) => {

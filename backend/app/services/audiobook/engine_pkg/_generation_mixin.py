@@ -14,6 +14,7 @@ from ..voice_manager_factory import create_voice_manager
 from ..audio_mixer import AudioMixer
 from ..task_tracker import StageType
 from app.services.chapter_adaptation_assets import build_audio_adaptation_hint
+from app.services.audiobook.chapter_cadence import apply_chapter_cadence
 from app.services.audiobook.render_plan import render_chunks_to_timing_segments_payload
 from app.services.audiobook.temp_segment_store import save_segment_audio_batch, save_segment_audio_map
 from app.services.audiobook.atomic_files import write_bytes_atomic
@@ -458,24 +459,13 @@ class GenerationMixin:
                     )
             
             # ============ 阶段7：音频提示词审阅 ============
+            apply_chapter_cadence(script_segments)
             self._assign_voices(script_segments)
             self.task_tracker.start_stage(task_id, StageType.AUDIO_PROMPT_REVIEW)
-            prompt_metrics = {
-                "segments_count": len(script_segments),
-                "sound_effects_count": sum(len(getattr(seg, "sound_effects", []) or []) for seg in script_segments),
-                "music_cues_count": sum(
-                    1
-                    for seg in script_segments
-                    if getattr(seg, "music_cue", None) or getattr(seg, "music_cue_simple", "")
-                ),
-                "instruct_count": sum(
-                    1
-                    for seg in script_segments
-                    if (getattr(seg, "instruct_emotion", "") or getattr(seg, "instruct_scene", "") or getattr(seg, "instruct_role", "") or getattr(seg, "instruct_identity", ""))
-                ),
-            }
-            if llm_script_review_summary:
-                prompt_metrics["llm_script_review"] = llm_script_review_summary
+            prompt_metrics = self._build_audio_prompt_review_metrics(
+                script_segments,
+                llm_script_review_summary=llm_script_review_summary,
+            )
             self.task_tracker.complete_stage(task_id, StageType.AUDIO_PROMPT_REVIEW, metrics=prompt_metrics)
             if WEBSOCKET_AVAILABLE and audiobook_project_id:
                 await ws_manager.send_audiobook_progress(
@@ -674,6 +664,10 @@ class GenerationMixin:
                 )
             except TypeError:
                 final_audio = self.audio_mixer.mix_chapter(audio_list, segment_types=segment_types)
+
+            realign_with_mixed_timing = getattr(self, "_realign_timelines_with_mixed_timing", None)
+            if callable(realign_with_mixed_timing) and segment_timings:
+                realign_with_mixed_timing(script_segments, mixer_segments, segment_timings)
             
             # 应用音效时间线（如有）
             if self._last_effect_timeline and self._last_effect_timeline.get("timeline"):
@@ -715,6 +709,8 @@ class GenerationMixin:
                     file_size=len(final_audio),
                     script_quality_report=quality_report,
                     audio_data=final_audio,
+                    script_segments=script_segments,
+                    audio_list=audio_list,
                 )
 
                 self.task_tracker.complete_stage(task_id, StageType.FINAL_AUDIO_REVIEW, metrics=final_audio_review)

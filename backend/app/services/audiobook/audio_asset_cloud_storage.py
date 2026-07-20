@@ -338,7 +338,6 @@ def list_audio_library_objects(
     headers = _build_aliyun_oss_request_headers(
         method="GET",
         bucket=config["bucket"],
-        query_items=query_items,
         oss_headers={"x-oss-security-token": config["security_token"]} if config["security_token"] else {},
     )
     url = _build_aliyun_oss_request_url(

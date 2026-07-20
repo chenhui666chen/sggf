@@ -22,7 +22,7 @@ describe('audiobook download utils', () => {
   })
 
   it('falls back to ASCII filenames and final fallback values', () => {
-    expect(extractDownloadFilename('attachment; filename=\"chapter_1.mp3\"', 'fallback.mp3')).toBe(
+    expect(extractDownloadFilename('attachment; filename="chapter_1.mp3"', 'fallback.mp3')).toBe(
       'chapter_1.mp3',
     )
     expect(extractDownloadFilename('', 'fallback.mp3')).toBe('fallback.mp3')

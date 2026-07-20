@@ -39,6 +39,7 @@ export const normalizeCosyVoicePreviewAudioUrl = (
 interface UseAudiobookVoiceActionsParams {
   selectedProjectId: number | null
   routeProjectId?: number | null
+  selectedChapterIds: number[]
   ttsModel: TtsModel
   characterVoices: CharacterVoiceSetting[]
   setCharacterVoicesForCurrentModel: (next: CharacterVoiceSetting[]) => void
@@ -54,6 +55,7 @@ interface UseAudiobookVoiceActionsParams {
 export const useAudiobookVoiceActions = ({
   selectedProjectId,
   routeProjectId,
+  selectedChapterIds,
   ttsModel,
   characterVoices,
   setCharacterVoicesForCurrentModel,
@@ -198,8 +200,6 @@ export const useAudiobookVoiceActions = ({
     if (!voiceId) return
     try {
       setCustomVoicePreviewingId(voice.id)
-      const isMimoModel = model.startsWith('mimo-v2.5-tts-')
-      const isStepAudioModel = model === 'stepaudio-2.5-tts'
       const response = await apiClient.previewTTSCached({
         text: DEFAULT_DESIGN_PREVIEW_TEXT,
         voice_id: voiceId,
@@ -207,8 +207,6 @@ export const useAudiobookVoiceActions = ({
         speed: voice.default_params?.speed ?? 1.0,
         pitch: voice.default_params?.pitch ?? 50,
         model,
-        mimo_voice_asset_id: isMimoModel ? voice.id : undefined,
-        stepaudio_voice_asset_id: isStepAudioModel ? voice.id : undefined,
       })
       if (response.audioUrl) {
         await playExternalUrl(response.audioUrl)
@@ -321,7 +319,11 @@ export const useAudiobookVoiceActions = ({
 
     try {
       setAutoAssigningVoices(true)
-      const res = await apiClient.autoAssignProjectAudioVoices(targetProjectId, ttsModel)
+      const res = await apiClient.autoAssignProjectAudioVoices(
+        targetProjectId,
+        ttsModel,
+        selectedChapterIds,
+      )
       const configData = res.data || { characters: [] }
 
       const assignmentResult = applyProjectVoiceAssignments({
@@ -356,6 +358,7 @@ export const useAudiobookVoiceActions = ({
   }, [
     characterVoices,
     routeProjectId,
+    selectedChapterIds,
     selectedProjectId,
     setCharacterVoicesForCurrentModel,
     setSnackbar,

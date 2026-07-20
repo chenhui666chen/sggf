@@ -65,7 +65,36 @@ GENERIC_AUDIOBOOK_TTS_STYLE_CAPABILITIES: Final[dict[str, Any]] = {
     "supports_singing": False,
     "supports_streaming": False,
     "instruction_budget": None,
+    "supported_emotions": [],
+    "emotion_aliases": {},
     "control_message_roles": {},
+}
+
+_CORE_TTS_EMOTIONS: Final[list[str]] = [
+    "neutral",
+    "happy",
+    "sad",
+    "angry",
+    "fearful",
+    "surprised",
+    "disgusted",
+]
+
+_CORE_TTS_EMOTION_ALIASES: Final[dict[str, str]] = {
+    "calm": "neutral",
+    "tender": "neutral",
+    "gentle": "neutral",
+    "focused": "neutral",
+    "serious": "neutral",
+    "whisper": "neutral",
+    "solemn": "sad",
+    "tense": "fearful",
+    "nervous": "fearful",
+    "fear": "fearful",
+    "scared": "fearful",
+    "excited": "happy",
+    "joyful": "happy",
+    "shout": "angry",
 }
 
 MIMO_V25_STYLE_CAPABILITIES: Final[dict[str, Any]] = {
@@ -93,6 +122,8 @@ AUDIOBOOK_TTS_STYLE_CAPABILITIES: Final[dict[str, dict[str, Any]]] = {
         "preferred_style_control_mode": "natural_language",
         "supports_voice_description": True,
         "instruction_budget": 600,
+        "supported_emotions": _CORE_TTS_EMOTIONS,
+        "emotion_aliases": _CORE_TTS_EMOTION_ALIASES,
         "control_message_roles": {"natural_language": "parameters.instructions"},
     },
     COSYVOICE_V35_PLUS_MODEL_ID: {
@@ -101,6 +132,8 @@ AUDIOBOOK_TTS_STYLE_CAPABILITIES: Final[dict[str, dict[str, Any]]] = {
         "preferred_style_control_mode": "natural_language",
         "supports_voice_description": True,
         "instruction_budget": 100,
+        "supported_emotions": _CORE_TTS_EMOTIONS,
+        "emotion_aliases": _CORE_TTS_EMOTION_ALIASES,
         "control_message_roles": {"natural_language": "parameters.instruction"},
     },
     MINIMAX_SPEECH_28_HD_MODEL: {
@@ -500,6 +533,65 @@ def get_audiobook_tts_style_capabilities(model: Any) -> dict[str, Any]:
     capabilities = deepcopy(GENERIC_AUDIOBOOK_TTS_STYLE_CAPABILITIES)
     capabilities.update(deepcopy(AUDIOBOOK_TTS_STYLE_CAPABILITIES.get(normalized, {})))
     return capabilities
+
+
+_EMOTION_KEYWORD_ALIASES: Final[tuple[tuple[str, str], ...]] = (
+    ("\u7d27\u5f20", "fearful"),
+    ("\u6050\u60e7", "fearful"),
+    ("\u5bb3\u6015", "fearful"),
+    ("\u53d1\u98a4", "fearful"),
+    ("\u6124\u6012", "angry"),
+    ("\u6012", "angry"),
+    ("\u60b2", "sad"),
+    ("\u54ed", "sad"),
+    ("\u54fd\u54bd", "sad"),
+    ("\u5f00\u5fc3", "happy"),
+    ("\u559c", "happy"),
+    ("\u60ca", "surprised"),
+    ("\u538c\u6076", "disgusted"),
+    ("\u5acc\u6076", "disgusted"),
+)
+
+
+def _coerce_capability_string_list(value: Any) -> list[str]:
+    if isinstance(value, str):
+        return [value.strip()] if value.strip() else []
+    if isinstance(value, (list, tuple, set)):
+        return [str(item).strip() for item in value if str(item).strip()]
+    return []
+
+
+def normalize_audiobook_tts_emotion(emotion: Any, model: Any) -> str:
+    """Normalize an emotion label from the selected model capability matrix."""
+
+    value = str(emotion or "").strip()
+    if not value:
+        return ""
+
+    capabilities = get_audiobook_tts_style_capabilities(model)
+    supported = _coerce_capability_string_list(capabilities.get("supported_emotions"))
+    if not supported:
+        return value
+
+    lowered = value.lower()
+    supported_lookup = {item.lower(): item for item in supported}
+    if lowered in supported_lookup:
+        return supported_lookup[lowered]
+
+    aliases = {
+        str(key).strip().lower(): str(mapped).strip()
+        for key, mapped in dict(capabilities.get("emotion_aliases") or {}).items()
+        if str(key).strip() and str(mapped).strip()
+    }
+    mapped = aliases.get(lowered)
+    if mapped and mapped.lower() in supported_lookup:
+        return supported_lookup[mapped.lower()]
+
+    for keyword, candidate in _EMOTION_KEYWORD_ALIASES:
+        if keyword in value and candidate.lower() in supported_lookup:
+            return supported_lookup[candidate.lower()]
+
+    return "neutral" if "neutral" in supported_lookup else supported[0]
 
 
 def get_audiobook_tts_model_metadata(model: Any) -> dict[str, Any]:

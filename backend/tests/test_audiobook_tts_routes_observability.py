@@ -13,6 +13,7 @@ os.environ.setdefault("DEBUG", "false")
 os.environ.setdefault("DATABASE_URL", "postgresql://test:test@127.0.0.1:5432/test_db")
 
 from app.api.v1.audiobook_api import routes_tts
+from app.services.audiobook.cosyvoice_clone_client import CosyVoiceClone
 
 
 LOGGER_NAME = "app.api.v1.audiobook_api.routes_tts"
@@ -71,6 +72,66 @@ def test_list_tts_voices_logs_clone_list_failure_and_returns_static_catalog(monk
     assert payload["voices"] == [static_voice]
     assert "CosyVoice 自定义音色列表不可用" in caplog.text
     assert "missing api key" in caplog.text
+
+
+def test_list_tts_voices_merges_cosyvoice_custom_clone_and_design_voices(monkeypatch) -> None:
+    monkeypatch.setattr(
+        routes_tts,
+        "load_voice_catalog_for_model",
+        lambda model: {
+            "voices": [],
+            "meta": {"model": model, "updated_at": "unit-test", "source": "unit"},
+        },
+    )
+    monkeypatch.setattr(
+        routes_tts,
+        "list_cosyvoice_v3_plus_clones",
+        lambda **_kwargs: (
+            [
+                CosyVoiceClone(
+                    voice_id="cosyvoice-v3.5-plus-vclone-111",
+                    status="OK",
+                    gmt_create="2026-01-01T00:00:00Z",
+                    custom_type="clone",
+                ),
+                CosyVoiceClone(
+                    voice_id="cosyvoice-v3.5-plus-vdesign-222",
+                    status="OK",
+                    gmt_create="2026-01-02T00:00:00Z",
+                    custom_type="design",
+                    voice_prompt="温柔的女声",
+                    preview_text="你好",
+                ),
+            ],
+            {"cached": False},
+        ),
+    )
+    monkeypatch.setattr(
+        routes_tts,
+        "get_clone_display_name",
+        lambda voice_id: {
+            "cosyvoice-v3.5-plus-vclone-111": "克隆甲",
+            "cosyvoice-v3.5-plus-vdesign-222": "设计乙",
+        }.get(voice_id),
+    )
+
+    payload = asyncio.run(
+        routes_tts.list_tts_voices(
+            model=routes_tts.COSYVOICE_V35_PLUS_MODEL_ID,
+            current_user=SimpleNamespace(id=1),
+        )
+    )
+
+    assert payload["model"] == routes_tts.COSYVOICE_V35_PLUS_MODEL_ID
+    assert payload["voice_count"] == 2
+    assert [voice["id"] for voice in payload["voices"]] == [
+        "cosyvoice-v3.5-plus-vclone-111",
+        "cosyvoice-v3.5-plus-vdesign-222",
+    ]
+    assert {voice["customType"] for voice in payload["voices"]} == {"clone", "design"}
+    assert all(voice["category"] == "custom" for voice in payload["voices"])
+    assert payload["voices"][0]["speaker"] == "cosyvoice-v3.5-plus-vclone-111"
+    assert payload["voices"][1]["label"] == "设计-设计乙"
 
 
 def test_upload_clone_audio_logs_close_failure_without_blocking(monkeypatch, caplog) -> None:

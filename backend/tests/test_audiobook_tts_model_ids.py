@@ -37,12 +37,14 @@ from app.services.audiobook.tts_model_ids import (
 )
 from app.services.audiobook.narration_styles import get_all_narration_styles
 from app.services.audiobook.tts_engine_pkg import TTSEngine
+from app.services.audiobook.tts_style_control import normalize_emotion_for_model
 from app.services.audiobook.voice_catalog import load_voice_catalog_for_model
 from app.services.audiobook.voice_auto_assignment import AutoVoiceAssignmentPool
 from app.services.audiobook.voice_manager_factory import create_voice_manager, get_model_for_voice, list_supported_models
 from app.services.audiobook.voice_manager import VoiceManager
 from app.services.audiobook.voice_manager_mimo import MiMoVoiceManager
 from app.services.audiobook import voice_manager_cosyvoice_v3_plus as cosyvoice_v3_plus
+from app.services.audiobook import tts_model_ids
 from app.services.audiobook.voice_manager_minimax import MiniMaxVoiceManager
 from app.services.audiobook.voice_manager_stepaudio import StepAudioVoiceManager
 from core.unified_media_runtime import create_tts_engine, get_media_runtime
@@ -95,6 +97,15 @@ def test_audiobook_tts_model_style_capabilities_are_exposed() -> None:
     assert qwen_caps["supports_voice_description"] is True
     assert qwen_caps["supports_audio_tags"] is False
     assert qwen_caps["instruction_budget"] == 600
+    assert qwen_caps["supported_emotions"] == [
+        "neutral",
+        "happy",
+        "sad",
+        "angry",
+        "fearful",
+        "surprised",
+        "disgusted",
+    ]
 
     mimo_caps = get_audiobook_tts_style_capabilities(MIMO_V25_TTS_MODEL)
     assert mimo_caps["model_family"] == "mimo"
@@ -186,6 +197,7 @@ def test_audiobook_tts_model_style_capabilities_are_exposed() -> None:
     assert minimax_caps["preferred_style_control_mode"] == "basic"
     assert minimax_caps["style_control_modes"] == ["basic"]
     assert minimax_caps["supports_audio_tags"] is False
+    assert minimax_caps["supported_emotions"] == []
 
     unknown_caps = get_audiobook_tts_style_capabilities("unknown-tts")
     assert unknown_caps["model_family"] == "generic"
@@ -199,6 +211,25 @@ def test_audiobook_tts_model_metadata_returns_independent_capability_copy() -> N
     fresh = get_audiobook_tts_model_metadata(MIMO_V25_TTS_MODEL)
 
     assert "broken" not in fresh["capabilities"]["style_control_modes"]
+
+
+def test_tts_emotion_normalization_uses_model_capability_matrix(monkeypatch) -> None:
+    original_caps = tts_model_ids.get_audiobook_tts_style_capabilities("cosyvoice-v3.5-plus")
+    monkeypatch.setitem(
+        tts_model_ids.AUDIOBOOK_TTS_STYLE_CAPABILITIES,
+        "cosyvoice-v3.5-plus",
+        {
+            **original_caps,
+            "supported_emotions": ["neutral", "fearful"],
+            "emotion_aliases": {"panicked": "fearful"},
+        },
+    )
+
+    engine = TTSEngine(model="cosyvoice-v3.5-plus")
+
+    assert tts_model_ids.normalize_audiobook_tts_emotion("panicked", "cosyvoice-v3.5-plus") == "fearful"
+    assert normalize_emotion_for_model("panicked", "cosyvoice-v3.5-plus") == "fearful"
+    assert engine._normalize_emotion("panicked") == "fearful"
 
 
 def test_minimax_voice_catalog_accepts_registry_model_id_alias() -> None:
@@ -447,6 +478,27 @@ def test_tts_preview_applies_voice_type_params() -> None:
     assert params["pitch"] == 48
     assert params["volume"] == 60
     assert params["emotion"] == "angry"
+
+
+def test_tts_preview_expands_asset_reference_from_voice_id(monkeypatch) -> None:
+    captured = {}
+
+    def fake_merge(config):
+        captured.update(config)
+        return {**config, "voice_clone_data_url": "data:audio/wav;base64,AAAA"}
+
+    monkeypatch.setattr(routes_tts, "merge_mimo_voice_asset_tts_params", fake_merge)
+    request = TTSPreviewRequest(
+        text="试听文本",
+        voice_id="mimo_clone:unit",
+        model="mimo-v2.5-tts-voiceclone",
+    )
+
+    params = routes_tts._build_preview_voice_params(request, "mimo_clone:unit")
+
+    assert captured["mimo_voice_asset_id"] == "mimo_clone:unit"
+    assert captured["voice_id"] == "mimo_clone:unit"
+    assert params["voice_clone_data_url"] == "data:audio/wav;base64,AAAA"
 
 
 def test_cosyvoice_voice_manager_logs_clone_catalog_failure(monkeypatch, caplog) -> None:

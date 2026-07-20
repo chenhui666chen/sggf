@@ -22,6 +22,7 @@ from app.services.audiobook.background_jobs_shared import (
     release_audiobook_project_billing,
     settle_audiobook_project_billing,
 )
+from app.services.audiobook.chapter_character_scope import select_chapter_characters
 from app.services.audiobook.project_audio_runtime import resolve_project_audio_runtime_config
 from app.services.audiobook.task_support import (
     StageTracker,
@@ -107,9 +108,6 @@ async def generate_audiobook_background(
         characters = db.query(Character).filter(
             Character.project_id == audiobook_project.project_id
         ).all()
-        character_list = [character.name for character in characters if character.name]
-        logger.info("📝 角色列表: %s", character_list)
-
         generation_records = prefetch_chapter_generation_records(
             db,
             audiobook_project_id=audiobook_project_id,
@@ -165,6 +163,17 @@ async def generate_audiobook_background(
                 output_format = output_context.output_format
                 generate_subtitle = output_context.generate_subtitle
                 output_path = output_context.output_path
+
+                chapter_characters, _ = select_chapter_characters(
+                    chapters=[chapter],
+                    characters=characters,
+                )
+                character_list = [
+                    character.name
+                    for character in chapter_characters
+                    if character.name
+                ]
+                logger.info("📝 章节 %s 人物范围: %s", chapter_id, character_list)
 
                 result = await engine.generate_chapter_audio(
                     chapter_content=chapter.content or "",

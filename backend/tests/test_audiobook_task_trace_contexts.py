@@ -14,6 +14,9 @@ os.environ.setdefault("DATABASE_URL", "postgresql://test:test@127.0.0.1:5432/tes
 from app.tasks.audiobook_tasks import (  # noqa: E402
     _build_initial_generation_task_detail,
 )
+from app.services.audiobook.prompt_audio_transcript_queue import (  # noqa: E402
+    build_prompt_audio_transcript_task_detail,
+)
 
 
 def test_build_initial_generation_task_detail_adds_script_only_trace_context():
@@ -42,6 +45,39 @@ def test_build_initial_generation_task_detail_adds_script_only_trace_context():
         "progress": 0.0,
         "tts_model": "qwen3-tts-instruct-flash",
     }
+
+
+def test_build_prompt_audio_transcript_task_detail_records_manual_cost_boundary():
+    detail = build_prompt_audio_transcript_task_detail(
+        task_db_id=12,
+        celery_task_id="celery-asr-123",
+        audiobook_project_id=34,
+        chapter_audio_id=56,
+        chapter_id=78,
+        status="completed",
+        stage="asr_transcript_skipped",
+        progress=1.0,
+        message="ASR provider 未配置，已跳过真实转写",
+        reason="asr_provider_not_configured",
+    )
+
+    assert detail["trace_id"] == "celery-asr-123"
+    assert detail["task_db_id"] == 12
+    assert detail["task_type"] == "prompt_audio_asr_transcript"
+    assert detail["audiobook_project_id"] == 34
+    assert detail["chapter_audio_id"] == 56
+    assert detail["chapter_id"] == 78
+    assert detail["manual_triggered"] is True
+    assert detail["cost_control"] == {
+        "manual_trigger_required": True,
+        "auto_asr_in_generation": False,
+        "provider_call_allowed": False,
+    }
+    assert detail["reason"] == "asr_provider_not_configured"
+    stage = detail["stages"]["asr_transcript_skipped"]
+    assert stage["status"] == "completed"
+    assert stage["progress"] == 1.0
+    assert stage["metrics"]["reason"] == "asr_provider_not_configured"
 
 
 def test_build_initial_generation_task_detail_adds_audio_from_scripts_trace_context():

@@ -24,6 +24,7 @@ export interface ChapterAudio {
   has_script?: boolean
   generation_time?: number | null
   tts_cost?: number | null
+  prompt_audio_quality?: Record<string, unknown> | null
 }
 
 export interface AudiobookProjectDetail {
@@ -86,6 +87,9 @@ export type StageKey =
   | 'audio_mixing'
   | 'final_audio_review'
   | 'project_export'
+  | 'asr_transcript_queued'
+  | 'asr_transcript_provider_check'
+  | 'asr_transcript_skipped'
 
 export interface StageConfig {
   key: StageKey
@@ -145,8 +149,6 @@ export interface AudioFxConfig {
   sound_effect_density: 'low' | 'medium' | 'high' | 'off'
   music_density: 'low' | 'medium' | 'high' | 'off'
   intelligent_balance?: boolean
-  bgm_volume?: number
-  sfx_volume?: number
   balance_strategy?: 'auto' | 'ducking' | 'sidechain' | 'none'
 }
 
@@ -265,17 +267,106 @@ export interface ScriptSegmentVoiceParams {
   voice_design_prompt?: string | null
   mimo_voice_asset_id?: string | null
   stepaudio_voice_asset_id?: string | null
+  provider_prompt_snapshot?: ProviderPromptSnapshot | null
+}
+
+export interface InlineTagStrategySnapshot {
+  model_family?: string | null
+  placement?: string | null
+  style_tags?: string[] | null
+  inline_tags?: string[] | null
+  use_tag_parser?: boolean | null
+}
+
+export interface ProviderPromptSnapshot {
+  provider_prompt?: {
+    inline_tag_strategy?: InlineTagStrategySnapshot | null
+    [key: string]: unknown
+  } | null
+  [key: string]: unknown
+}
+
+export interface InlineTagStrategySummary {
+  modelFamily: string
+  placement: string
+  tags: string[]
+  useTagParser: boolean
+}
+
+export interface PromptAudioQualityCoverageSummary {
+  segmentsCount: number
+  audioSegmentsCount: number
+  missingAudioCount: number
+  providerPromptSnapshotCount: number
+  inlineTagStrategyCount: number
+  manualReviewPendingCount: number
+}
+
+export interface PromptAudioQualityModelSummary {
+  model: string
+  modelFamily: string
+  segmentsCount: number
+  audioSegmentsCount: number
+  missingAudioCount: number
+  providerPromptSnapshotCount: number
+  inlineTagStrategyCount: number
+  useTagParserCount: number
+  tagCount: number
+  manualReviewSegmentIndices: number[]
+  manualReviewFields: PromptAudioQualityManualReviewFields
+}
+
+export interface PromptAudioQualityManualReviewFields {
+  tagParseSuccess: boolean | null
+  textContamination: boolean | null
+  score: number | null
+  notes: string
+  asrTranscript: string
+  asrAssist: PromptAudioQualityAsrAssist | null
+  reviewedAt: string
+  reviewedBy: number | null
+}
+
+export interface PromptAudioQualityAsrAssist {
+  available: boolean
+  source: string
+  segmentIndices: number[]
+  expectedText: string
+  transcriptText: string
+  similarityScore: number | null
+  wordErrorRate: number | null
+  detectedTagResidue: boolean | null
+  matchedTags: string[]
+  suggestedTextContamination: boolean | null
+  suggestedTagParseSuccess: boolean | null
+}
+
+export interface PromptAudioQualitySummary {
+  coverage: PromptAudioQualityCoverageSummary
+  models: PromptAudioQualityModelSummary[]
 }
 
 export interface ScriptSegmentSoundEffectDetail {
+  asset_id?: string | null
   id?: string | null
   effect_id?: string | null
   name?: string | null
 }
 
 export interface ScriptSegmentMusicCueDetail {
+  asset_id?: string | null
   style?: string | null
   name?: string | null
+  mood?: string | null
+}
+
+export interface AudioAssetSelection {
+  id: string
+  type: 'sfx' | 'music'
+  label: string
+  name?: string
+  style?: string
+  mood?: string
 }
 
 export interface ScriptSegment {
@@ -339,6 +430,7 @@ export interface ScriptEditorStateData {
 export interface TimelineClipEdit {
   startUnit: number
   durationUnits: number
+  volume?: number
 }
 
 export type TimelineClipEditMap = Record<string, TimelineClipEdit>

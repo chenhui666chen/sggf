@@ -11,6 +11,7 @@ import HeadphonesIcon from '@mui/icons-material/Headphones'
 import AudiobookCompletionStats from './AudiobookCompletionStats'
 import ChapterAudioResults from './ChapterAudioResults'
 import ProjectExportActions from './ProjectExportActions'
+import PromptAudioReviewSummaryPanel from './PromptAudioReviewSummaryPanel'
 import { audiobookButtonRowSx, audiobookButtonSx, audiobookColors } from './audiobookTheme'
 import type {
   AudiobookProjectDetail,
@@ -103,6 +104,8 @@ const AudiobookCompletionStep = ({
     {audiobookProject && (
       <AudiobookCompletionStats audiobookProject={audiobookProject} />
     )}
+
+    <PromptAudioReviewSummaryPanel audiobookProjectId={audiobookProject?.id} />
 
     <Box sx={audiobookButtonRowSx.centeredWrap}>
       {hasChapterAudios && (

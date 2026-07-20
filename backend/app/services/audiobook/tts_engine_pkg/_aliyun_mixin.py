@@ -14,6 +14,7 @@ from app.services.audiobook.tts_style_control import (
     is_stepaudio_style_control_model,
     prepare_text_for_style_control,
 )
+from app.services.audiobook.tts_prompt_strategy import compact_instruction_parts
 from app.services.audiobook.tts_model_ids import (
     MIMO_V25_TTS_MODEL,
     MIMO_V25_TTS_VOICE_CLONE_MODEL,
@@ -47,6 +48,62 @@ SEED_TTS_API_KEY_ENV_NAMES = (
     "VOLCENGINE_SPEECH_API_KEY",
     "DOUBAO_SPEECH_API_KEY",
 )
+QWEN_TTS_PRIORITY_INSTRUCTION_PREFIXES = (
+    "情绪目标：",
+    "停顿策略：",
+    "重读词：",
+    "演绎要求：",
+    "导演指导：",
+    "韵律控制：",
+    "朗读方式：",
+    "情绪层次：",
+    "微表演标签：",
+    "说话角色：",
+    "角色设定：",
+    "场景氛围：",
+    "身份设定：",
+)
+QWEN_TTS_LOW_PRIORITY_INSTRUCTION_PREFIXES = (
+    "旁白模板：",
+    "对白模板：",
+    "内心独白模板：",
+    "声音描述：",
+    "片段类型：",
+)
+
+
+def _split_qwen_instruction_parts(instructions: str) -> List[str]:
+    parts: List[str] = []
+    for raw_part in str(instructions or "").replace(";", "；").split("；"):
+        part = raw_part.strip()
+        if part:
+            parts.append(part)
+    return parts
+
+
+def _qwen_instruction_priority(part: str) -> int:
+    for index, prefix in enumerate(QWEN_TTS_PRIORITY_INSTRUCTION_PREFIXES):
+        if part.startswith(prefix):
+            return index
+    if part.startswith(QWEN_TTS_LOW_PRIORITY_INSTRUCTION_PREFIXES):
+        return 100
+    return 50
+
+
+def _refit_qwen_structured_instructions(instructions: str, budget: int) -> str:
+    parts = _split_qwen_instruction_parts(instructions)
+    if len(parts) <= 1:
+        return str(instructions or "")[:budget].strip()
+
+    prioritized_parts = [
+        part
+        for _, part in sorted(
+            enumerate(parts),
+            key=lambda item: (_qwen_instruction_priority(item[1]), item[0]),
+        )
+    ]
+    fitted, _, _ = compact_instruction_parts(prioritized_parts, budget)
+    return fitted.strip()
 
 
 def _to_bool_flag(value: Any) -> bool:
@@ -148,6 +205,34 @@ def _extract_stepaudio_error_message(response) -> str:
         if message:
             return message
     return str(getattr(response, "text", "") or "").strip()
+
+
+def _provider_prompt_from_snapshot(voice_params: Dict[str, Any]) -> Dict[str, Any]:
+    snapshot = voice_params.get("provider_prompt_snapshot")
+    if not isinstance(snapshot, dict):
+        return {}
+    provider_prompt = snapshot.get("provider_prompt")
+    return dict(provider_prompt) if isinstance(provider_prompt, dict) else {}
+
+
+def _snapshot_instructions(voice_params: Dict[str, Any]) -> str:
+    provider_prompt = _provider_prompt_from_snapshot(voice_params)
+    return str(provider_prompt.get("instructions") or "").strip()
+
+
+def _snapshot_text_prefix(voice_params: Dict[str, Any]) -> str:
+    provider_prompt = _provider_prompt_from_snapshot(voice_params)
+    return str(provider_prompt.get("text_prefix") or "").strip()
+
+
+def _snapshot_context_texts(voice_params: Dict[str, Any]) -> List[str]:
+    provider_prompt = _provider_prompt_from_snapshot(voice_params)
+    context_texts = provider_prompt.get("context_texts")
+    if isinstance(context_texts, str):
+        return [context_texts] if context_texts.strip() else []
+    if isinstance(context_texts, list):
+        return [str(item).strip() for item in context_texts if str(item or "").strip()]
+    return []
 
 
 def _build_stepaudio_voice_preview_error(response) -> Exception:
@@ -400,14 +485,28 @@ class AliyunMixin:
             provider_model,
             speaker_id,
         )
-        return await self._call_seed_tts_websocket(
-            model=provider_model,
-            api_key=api_key,
-            text=text,
-            voice=speaker_id,
-            voice_params=voice_params,
-            resource_id=resource_id,
-        )
+        try:
+            return await self._call_seed_tts_websocket(
+                model=provider_model,
+                api_key=api_key,
+                text=text,
+                voice=speaker_id,
+                voice_params=voice_params,
+                resource_id=resource_id,
+            )
+        except RuntimeError as exc:
+            message = str(exc).lower()
+            if "no audio" not in message:
+                raise
+            logger.warning("Seed-TTS WebSocket 未返回音频，回退到 HTTP: %s", exc)
+            return await self._call_seed_tts_http(
+                model=provider_model,
+                api_key=api_key,
+                text=text,
+                voice=speaker_id,
+                voice_params=voice_params,
+                resource_id=resource_id,
+            )
 
     async def _synthesize_stepaudio(
         self,
@@ -565,6 +664,13 @@ class AliyunMixin:
         if not self._is_qwen_instruct_model():
             return {}
 
+        snapshot_instruction = _snapshot_instructions(voice_params)
+        if snapshot_instruction:
+            return {
+                "instructions": snapshot_instruction,
+                "optimize_instructions": bool(voice_params.get("optimize_instructions", True)),
+            }
+
         style_control = build_model_style_control(
             self.model,
             voice_params,
@@ -610,7 +716,10 @@ class AliyunMixin:
             return dict(instruct_payload)
 
         fitted_payload = dict(instruct_payload)
-        fitted_payload["instructions"] = instructions[:instruction_budget].strip()
+        fitted_payload["instructions"] = _refit_qwen_structured_instructions(
+            instructions,
+            instruction_budget,
+        )
         if not fitted_payload["instructions"]:
             return {}
 
@@ -693,6 +802,32 @@ class AliyunMixin:
                     hints.append(value)
             return hints[:5]
 
+        def _pause_seconds(value: Any) -> Optional[float]:
+            if isinstance(value, bool):
+                return None
+            try:
+                seconds = float(value)
+            except (TypeError, ValueError):
+                return None
+            if seconds <= 0:
+                return None
+            return round(max(0.1, min(2.0, seconds)), 2)
+
+        def _cosyvoice_pause_parameters(params: Dict[str, Any]) -> Dict[str, float]:
+            if _to_bool_flag(params.get("timeline_boundary_managed")):
+                return {}
+            delivery_plan = params.get("delivery_plan") if isinstance(params.get("delivery_plan"), dict) else {}
+            pause_params: Dict[str, float] = {}
+            pause_before = _pause_seconds(params.get("pause_before")) or _pause_seconds(delivery_plan.get("pause_before"))
+            pause_after = _pause_seconds(params.get("pause_after")) or _pause_seconds(delivery_plan.get("pause_after"))
+            if pause_after is None and str(delivery_plan.get("pause_profile") or "").strip().lower() == "dramatic":
+                pause_after = 0.8
+            if pause_before is not None:
+                pause_params["pause_before"] = pause_before
+            if pause_after is not None:
+                pause_params["pause_after"] = pause_after
+            return pause_params
+
         rate = _to_float(voice_params.get("rate", voice_params.get("speed", 1.0)), 1.0)
         rate = max(0.5, min(2.0, rate))
 
@@ -722,6 +857,7 @@ class AliyunMixin:
             "pitch": pitch,
             "enable_ssml": self._is_ssml_text(text),
         }
+        parameters.update(_cosyvoice_pause_parameters(voice_params))
         instruction = self._build_cosyvoice_instruction_payload(voice_params)
         if instruction:
             parameters["instruction"] = instruction
@@ -798,6 +934,10 @@ class AliyunMixin:
         return "".join(result).strip()
 
     def _build_cosyvoice_instruction_payload(self, voice_params: Dict[str, Any]) -> str:
+        snapshot_instruction = _snapshot_instructions(voice_params)
+        if snapshot_instruction:
+            return self._truncate_cosyvoice_instruction(snapshot_instruction)
+
         style_control = build_model_style_control(
             self.model,
             voice_params,
@@ -970,9 +1110,18 @@ class AliyunMixin:
             str(voice_params.get("emotion") or "neutral"),
         )
         text = prepare_text_for_style_control(text, style_control)
-        speed = float(voice_params.get("rate", voice_params.get("speed", 1.0)) or 1.0)
-        volume = int(voice_params.get("volume", 50) or 50)
-        pitch = int(voice_params.get("pitch", 0) or 0)
+        basic_settings = style_control.provider_fields.get("basic_voice_settings")
+        if isinstance(basic_settings, dict):
+            speed_source = basic_settings.get("speed", voice_params.get("rate", voice_params.get("speed", 1.0)))
+            volume_source = basic_settings.get("volume", voice_params.get("volume", 50))
+            pitch_source = basic_settings.get("pitch", voice_params.get("pitch", 0))
+        else:
+            speed_source = voice_params.get("rate", voice_params.get("speed", 1.0))
+            volume_source = voice_params.get("volume", 50)
+            pitch_source = voice_params.get("pitch", 0)
+        speed = float(speed_source or 1.0)
+        volume = int(volume_source or 50)
+        pitch = int(pitch_source or 0)
         return {
             "input": {
                 "action": "tts",
@@ -1061,18 +1210,26 @@ class AliyunMixin:
     def _truncate_stepaudio_instruction(self, value: str) -> str:
         return str(value or "").strip()[:STEPAUDIO_TTS_INSTRUCTION_MAX_CHARS].strip()
 
-    def _build_stepaudio_instruction_payload(self, voice_params: Dict[str, Any]) -> str:
-        style_control = build_model_style_control(
-            self.model,
+    def _build_stepaudio_style_control(self, model: str, voice_params: Dict[str, Any]):
+        return build_model_style_control(
+            model,
             voice_params,
             str(voice_params.get("emotion") or "neutral"),
         )
+
+    def _extract_stepaudio_instruction(self, style_control) -> str:
         instruction = str(
             style_control.provider_fields.get("instruction")
             or style_control.provider_fields.get("instructions")
             or ""
         ).strip()
         return self._truncate_stepaudio_instruction(instruction)
+
+    def _build_stepaudio_instruction_payload(self, voice_params: Dict[str, Any]) -> str:
+        snapshot_instruction = _snapshot_instructions(voice_params)
+        if snapshot_instruction:
+            return self._truncate_stepaudio_instruction(snapshot_instruction)
+        return self._extract_stepaudio_instruction(self._build_stepaudio_style_control(self.model, voice_params))
 
     def _fit_stepaudio_text_to_limit(self, text: str) -> str:
         text = str(text or "").strip()
@@ -1094,12 +1251,27 @@ class AliyunMixin:
         voice_params: Dict[str, Any],
     ) -> Dict[str, Any]:
         normalized_model = normalize_audiobook_tts_model(model, default=str(model or ""))
+        snapshot_prefix = _snapshot_text_prefix(voice_params)
+        snapshot_instruction = _snapshot_instructions(voice_params)
+        style_control = None
+        if snapshot_prefix:
+            prepared_text = f"{snapshot_prefix}{text}" if not str(text or "").startswith(snapshot_prefix) else str(text or "")
+        else:
+            style_control = self._build_stepaudio_style_control(
+                normalized_model or STEPAUDIO_25_TTS_MODEL,
+                voice_params,
+            )
+            prepared_text = prepare_text_for_style_control(text, style_control)
         payload: Dict[str, Any] = {
             "model": normalized_model or STEPAUDIO_25_TTS_MODEL,
             "voice": str(voice or "").strip() or STEPAUDIO_TTS_DEFAULT_VOICE,
-            "input": self._fit_stepaudio_text_to_limit(text),
+            "input": self._fit_stepaudio_text_to_limit(prepared_text),
         }
-        instruction = self._build_stepaudio_instruction_payload(voice_params)
+        instruction = (
+            self._truncate_stepaudio_instruction(snapshot_instruction)
+            if snapshot_instruction
+            else self._extract_stepaudio_instruction(style_control)
+        )
         if instruction:
             payload["instruction"] = instruction
 
@@ -1181,6 +1353,10 @@ class AliyunMixin:
         voice_params: Dict[str, Any],
         style_control: Optional[Any] = None,
     ) -> List[str]:
+        snapshot_context_texts = _snapshot_context_texts(voice_params)
+        if snapshot_context_texts:
+            return snapshot_context_texts
+
         if style_control is None:
             style_control = build_model_style_control(
                 SEED_TTS_20_EXPRESSIVE_MODEL,
@@ -1223,12 +1399,17 @@ class AliyunMixin:
         speed = self._seed_tts_ratio_from_ui_value(voice_params.get("speed", voice_params.get("rate", 1.0)))
         volume = self._seed_tts_ratio_from_ui_value(voice_params.get("volume", 50))
         pitch = self._seed_tts_pitch_from_ui_value(voice_params.get("pitch", 50))
-        style_control = build_model_style_control(
-            normalized_model,
-            voice_params,
-            str(voice_params.get("emotion") or "neutral"),
-        )
-        prepared_text = prepare_text_for_style_control(str(text or ""), style_control)
+        snapshot_prefix = _snapshot_text_prefix(voice_params)
+        if snapshot_prefix:
+            prepared_text = f"{snapshot_prefix}{str(text or '')}"
+            style_control = None
+        else:
+            style_control = build_model_style_control(
+                normalized_model,
+                voice_params,
+                str(voice_params.get("emotion") or "neutral"),
+            )
+            prepared_text = prepare_text_for_style_control(str(text or ""), style_control)
         context_texts = self._build_seed_tts_context_texts(voice_params, style_control)
 
         req_params: Dict[str, Any] = {
@@ -1237,8 +1418,10 @@ class AliyunMixin:
             "text_type": "plain",
             "with_timestamp": 0,
         }
-        use_tag_parser = _to_bool_flag(voice_params.get("use_tag_parser")) or _to_bool_flag(
-            style_control.provider_fields.get("use_tag_parser")
+        use_tag_parser = _to_bool_flag(voice_params.get("use_tag_parser")) or (
+            _to_bool_flag(style_control.provider_fields.get("use_tag_parser"))
+            if style_control is not None
+            else False
         )
         if context_texts or use_tag_parser:
             req_params["additions"] = _build_seed_tts_additions(

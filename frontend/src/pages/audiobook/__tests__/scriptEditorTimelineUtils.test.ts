@@ -193,13 +193,21 @@ describe('scriptEditorTimelineUtils', () => {
       createSegment({ sound_effects_simple: ['door close'] }),
     ])
     const editedModel = applyTimelineEdits(model, {
-      [model.clipsByTrack.sfx[0].key]: { startUnit: 12, durationUnits: 64 },
+      [model.clipsByTrack.sfx[0].key]: { startUnit: 12, durationUnits: 64, volume: 0.35 },
     })
 
     expect(editedModel.clipsByTrack.sfx[0]).toMatchObject({
       startUnit: 12,
       durationUnits: 64,
+      volume: 0.35,
     })
     expect(editedModel.clipsByTrack.scriptVoice[0]).toEqual(model.clipsByTrack.scriptVoice[0])
+  })
+
+  it('preserves clip volume while moving or resizing timeline edits', () => {
+    expect(adjustTimelineClipEdit(
+      { startUnit: 30, durationUnits: 40, volume: 0.4 },
+      { operation: 'move', deltaUnits: 25, totalUnits: 100 },
+    )).toEqual({ startUnit: 55, durationUnits: 40, volume: 0.4 })
   })
 })

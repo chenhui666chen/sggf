@@ -15,6 +15,7 @@ from ..voice_manager_factory import create_voice_manager
 from ..audio_mixer import AudioMixer
 from ..task_tracker import StageType
 from app.services.chapter_adaptation_assets import build_audio_adaptation_hint
+from app.services.audiobook.chapter_cadence import apply_chapter_cadence
 from core.unified_media_runtime import create_tts_engine
 
 try:
@@ -347,27 +348,16 @@ class ScriptPrepMixin:
                 )
 
             # 为脚本片段补全音色参数，便于提示词审阅
+            apply_chapter_cadence(script_segments)
             self._assign_voices(script_segments)
 
             # 音频提示词审阅阶段（输出可编辑的提示词快照）
             self.task_tracker.start_stage(task_id, StageType.AUDIO_PROMPT_REVIEW)
             output_segments = self._build_review_segments(script_segments)
-            prompt_metrics = {
-                "segments_count": len(script_segments),
-                "sound_effects_count": sum(len(getattr(seg, "sound_effects", []) or []) for seg in script_segments),
-                "music_cues_count": sum(
-                    1
-                    for seg in script_segments
-                    if getattr(seg, "music_cue", None) or getattr(seg, "music_cue_simple", "")
-                ),
-                "instruct_count": sum(
-                    1
-                    for seg in script_segments
-                    if (getattr(seg, "instruct_emotion", "") or getattr(seg, "instruct_scene", "") or getattr(seg, "instruct_role", "") or getattr(seg, "instruct_identity", ""))
-                ),
-            }
-            if llm_script_review_summary:
-                prompt_metrics["llm_script_review"] = llm_script_review_summary
+            prompt_metrics = self._build_audio_prompt_review_metrics(
+                output_segments,
+                llm_script_review_summary=llm_script_review_summary,
+            )
             self.task_tracker.complete_stage(task_id, StageType.AUDIO_PROMPT_REVIEW, metrics=prompt_metrics)
 
             if WEBSOCKET_AVAILABLE and audiobook_project_id:

@@ -91,6 +91,24 @@ def test_llm_review_prompt_keeps_tail_source_context_for_late_events():
     assert "灰袍老者请求借一步说话" in prompt
 
 
+def test_llm_review_prompt_keeps_neighbor_anchors_and_hearing_continuity_contract():
+    from app.services.audiobook.script_adapter_pkg._llm_review import _build_review_prompt
+
+    prompt = _build_review_prompt(
+        '[{"type":"dialogue","text":"他终于说出了真相。","speaker":"陆衍"}]',
+        batch_index=2,
+        batch_total=3,
+        previous_context='[{"speaker":"岑霜","text":"她把信递给陆衍。"}]',
+        next_context='[{"speaker":"旁白","text":"门外忽然传来脚步声。"}]',
+    )
+
+    assert "批次前置衔接锚点" in prompt
+    assert "批次后续预览锚点" in prompt
+    assert "她把信递给陆衍" in prompt
+    assert "门外忽然传来脚步声" in prompt
+    assert "听众仅靠音频也能理解人物指代、动作因果和场景转换" in prompt
+
+
 @pytest.mark.asyncio
 async def test_llm_review_applies_structural_fix_with_flash_model():
     from app.services.audiobook.script_adapter_pkg._llm_review import (

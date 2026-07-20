@@ -41,6 +41,8 @@ class ReviewMixin:
         file_size: int,
         script_quality_report: Optional[Any] = None,
         audio_data: Optional[bytes] = None,
+        script_segments: Optional[List[Any]] = None,
+        audio_list: Optional[List[Any]] = None,
     ) -> Dict[str, Any]:
         """对最终混合后的音频做一次轻量评审。
 
@@ -114,12 +116,139 @@ class ReviewMixin:
             "bitrate": bitrate,
             "sample_rate": sample_rate,
             "waveform_quality": waveform_quality,
+            "prompt_audio_quality": self._build_prompt_audio_quality_feedback(
+                script_segments,
+                audio_list,
+            ),
             "warnings": warnings,
             "summary": summary,
             "severity": severity,
             "script_overall_score": getattr(script_quality_report, "overall_score", None) if script_quality_report else None,
             "script_overall_grade": getattr(script_quality_report, "overall_grade", None) if script_quality_report else None,
         }
+
+    def _build_prompt_audio_quality_feedback(
+        self,
+        script_segments: Optional[List[Any]],
+        audio_list: Optional[List[Any]],
+    ) -> Dict[str, Any]:
+        if not script_segments:
+            return {"available": False, "reason": "missing_script_segments"}
+
+        by_model: Dict[str, Dict[str, Any]] = {}
+        provider_prompt_snapshot_count = 0
+        inline_tag_strategy_count = 0
+        audio_segments_count = 0
+        manual_review_pending_count = 0
+
+        for index, segment in enumerate(script_segments):
+            voice_params = self._segment_voice_params(segment)
+            snapshot = voice_params.get("provider_prompt_snapshot") if isinstance(voice_params, dict) else None
+            provider_prompt = snapshot.get("provider_prompt") if isinstance(snapshot, dict) else None
+            strategy = provider_prompt.get("inline_tag_strategy") if isinstance(provider_prompt, dict) else None
+
+            model = self._segment_review_model(segment, voice_params, snapshot)
+            model_feedback = by_model.setdefault(
+                model,
+                {
+                    "model_family": "unknown",
+                    "segments_count": 0,
+                    "audio_segments_count": 0,
+                    "missing_audio_count": 0,
+                    "provider_prompt_snapshot_count": 0,
+                    "inline_tag_strategy_count": 0,
+                    "use_tag_parser_count": 0,
+                    "tag_count": 0,
+                    "manual_review_segment_indices": [],
+                    "manual_review_fields": {
+                        "tag_parse_success": None,
+                        "text_contamination": None,
+                        "score": None,
+                    },
+                },
+            )
+            model_feedback["segments_count"] += 1
+
+            has_audio = bool(index < len(audio_list or []) and (audio_list or [])[index])
+            if has_audio:
+                audio_segments_count += 1
+                model_feedback["audio_segments_count"] += 1
+            else:
+                model_feedback["missing_audio_count"] += 1
+
+            if isinstance(snapshot, dict):
+                provider_prompt_snapshot_count += 1
+                model_feedback["provider_prompt_snapshot_count"] += 1
+
+            if not isinstance(strategy, dict):
+                continue
+
+            inline_tag_strategy_count += 1
+            manual_review_pending_count += 1
+            model_feedback["inline_tag_strategy_count"] += 1
+            model_feedback["manual_review_segment_indices"].append(index)
+            model_feedback["model_family"] = (
+                str(strategy.get("model_family") or model_feedback["model_family"]).strip()
+                or model_feedback["model_family"]
+            )
+            use_tag_parser = strategy.get("use_tag_parser")
+            if use_tag_parser is True or (
+                isinstance(use_tag_parser, str)
+                and use_tag_parser.strip().lower() in {"1", "true", "yes"}
+            ):
+                model_feedback["use_tag_parser_count"] += 1
+
+            segment_tags = set()
+            for tag_key in ("style_tags", "inline_tags"):
+                tags = strategy.get(tag_key)
+                if not isinstance(tags, list):
+                    continue
+                for tag in tags:
+                    tag_text = str(tag).strip() if tag is not None else ""
+                    if tag_text:
+                        segment_tags.add(tag_text)
+            model_feedback["tag_count"] += len(segment_tags)
+
+        segments_count = len(script_segments)
+        return {
+            "available": True,
+            "coverage": {
+                "segments_count": segments_count,
+                "audio_segments_count": audio_segments_count,
+                "missing_audio_count": max(segments_count - audio_segments_count, 0),
+                "provider_prompt_snapshot_count": provider_prompt_snapshot_count,
+                "inline_tag_strategy_count": inline_tag_strategy_count,
+                "manual_review_pending_count": manual_review_pending_count,
+            },
+            "by_model": by_model,
+        }
+
+    def _segment_voice_params(self, segment: Any) -> Dict[str, Any]:
+        if isinstance(segment, dict):
+            voice_params = segment.get("voice_params")
+        else:
+            voice_params = getattr(segment, "voice_params", None)
+        return voice_params if isinstance(voice_params, dict) else {}
+
+    def _segment_review_model(
+        self,
+        segment: Any,
+        voice_params: Dict[str, Any],
+        snapshot: Any,
+    ) -> str:
+        if isinstance(snapshot, dict):
+            model = str(snapshot.get("model") or "").strip()
+            if model:
+                return model
+        for key in ("resolved_tts_model", "tts_model"):
+            model = str(voice_params.get(key) or "").strip()
+            if model:
+                return model
+        if isinstance(segment, dict):
+            model = str(segment.get("tts_model") or "").strip()
+        else:
+            model = str(getattr(segment, "tts_model", "") or "").strip()
+        return model or "unknown"
 
     def _serialize_audio_quality_report(self, report: Any) -> Dict[str, Any]:
         if report is None:

@@ -1,4 +1,4 @@
-import { EXPORT_STAGE_CONFIG, GENERATION_STAGE_CONFIG, STAGE_KEYS } from './constants'
+import { EXPORT_STAGE_CONFIG, GENERATION_STAGE_CONFIG, PROMPT_AUDIO_ASR_STAGE_CONFIG, STAGE_KEYS } from './constants'
 export { buildAudiobookChapterAssetUuid } from '../../utils/audiobookAssetIds'
 import type {
   NavigationType,
@@ -79,8 +79,15 @@ export const coerceStageStatus = (value: unknown): StageStatus => {
 export const isProjectExportTask = (task: Pick<TaskStatus, 'task_type'> | null | undefined) =>
   task?.task_type === 'export_m4b' || task?.task_type === 'export_audacity'
 
+export const isPromptAudioAsrTranscriptTask = (task: Pick<TaskStatus, 'task_type'> | null | undefined) =>
+  task?.task_type === 'prompt_audio_asr_transcript'
+
 export const getStageConfigForTask = (task: Pick<TaskStatus, 'task_type'>): readonly StageConfig[] =>
-  isProjectExportTask(task) ? EXPORT_STAGE_CONFIG : GENERATION_STAGE_CONFIG
+  isProjectExportTask(task)
+    ? EXPORT_STAGE_CONFIG
+    : isPromptAudioAsrTranscriptTask(task)
+      ? PROMPT_AUDIO_ASR_STAGE_CONFIG
+      : GENERATION_STAGE_CONFIG
 
 export const normalizeStageEntry = (raw: unknown): StageInfo => {
   const entry = isRecord(raw) ? raw : {}

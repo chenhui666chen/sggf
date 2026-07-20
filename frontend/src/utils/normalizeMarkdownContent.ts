@@ -96,7 +96,7 @@ function stripFieldPrefix(line: string, allowMarkdownList: boolean): string {
   }
 
   value = value.replace(/^\*+/, '').trimStart()
-  value = value.replace(/^[【\[]\s*/, '')
+  value = value.replace(/^[【[]\s*/, '')
   return value
 }
 

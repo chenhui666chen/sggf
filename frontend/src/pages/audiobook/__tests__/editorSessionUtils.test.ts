@@ -31,8 +31,8 @@ describe('audiobook editor session utils', () => {
         4: { quality_score: Number.NaN, needs_regenerate: 'yes' },
       },
       timelineEdits: {
-        'sfx-0-0': { startUnit: '12', durationUnits: 48 },
-        'music-1-2': { startUnit: 24, durationUnits: '96' },
+        'sfx-0-0': { startUnit: '12', durationUnits: 48, volume: '0.35' },
+        'music-1-2': { startUnit: 24, durationUnits: '96', volume: 1.5 },
         invalidNegative: { startUnit: -1, durationUnits: 20 },
         invalidDuration: { startUnit: 10, durationUnits: 0 },
         invalidMissing: { startUnit: 10 },
@@ -56,8 +56,8 @@ describe('audiobook editor session utils', () => {
         2: { quality_score: 8.5, needs_regenerate: true },
       },
       timelineEdits: {
-        'sfx-0-0': { startUnit: 12, durationUnits: 48 },
-        'music-1-2': { startUnit: 24, durationUnits: 96 },
+        'sfx-0-0': { startUnit: 12, durationUnits: 48, volume: 0.35 },
+        'music-1-2': { startUnit: 24, durationUnits: 96, volume: 1 },
       },
       data: {
         scriptStatus: 'pending',
@@ -123,7 +123,7 @@ describe('audiobook editor session utils', () => {
       updatedAt: '2026-04-30T12:00:00.000Z',
       openSegmentDetailIndices: ['2', 0] as unknown as number[],
       timelineEdits: {
-        'sfx-0-0': { startUnit: 12, durationUnits: 48 },
+        'sfx-0-0': { startUnit: 12, durationUnits: 48, volume: 0.45 },
       },
       data: {
         scriptStatus: 'reviewed',
@@ -140,7 +140,7 @@ describe('audiobook editor session utils', () => {
       openSegmentDetailIndices: [0, 2],
       segmentReviews: {},
       timelineEdits: {
-        'sfx-0-0': { startUnit: 12, durationUnits: 48 },
+        'sfx-0-0': { startUnit: 12, durationUnits: 48, volume: 0.45 },
       },
       data: {
         scriptStatus: 'reviewed',
@@ -162,7 +162,7 @@ describe('audiobook editor session utils', () => {
       segmentDetailsOpen: { 2: true, 1: false, 0: true },
       segmentReviews: { 0: { quality_score: 8 } },
       timelineEdits: {
-        'sfx-0-0': { startUnit: 12, durationUnits: 48 },
+        'sfx-0-0': { startUnit: 12, durationUnits: 48, volume: 0.45 },
       },
       data: {
         scriptStatus: 'generated',
@@ -180,7 +180,7 @@ describe('audiobook editor session utils', () => {
 
     expect(base.openSegmentDetailIndices).toEqual([0, 2])
     expect(base.timelineEdits).toEqual({
-      'sfx-0-0': { startUnit: 12, durationUnits: 48 },
+      'sfx-0-0': { startUnit: 12, durationUnits: 48, volume: 0.45 },
     })
     expect(areAudiobookEditorSessionsEquivalent(base, sameDraft)).toBe(true)
     expect(areAudiobookEditorSessionsEquivalent(base, {

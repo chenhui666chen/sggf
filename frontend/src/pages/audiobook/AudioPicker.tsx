@@ -14,12 +14,20 @@ import PlayArrowIcon from '@mui/icons-material/PlayArrow'
 import PauseIcon from '@mui/icons-material/Pause'
 
 import { apiClient } from '../../services/api'
+import type { AudioAssetSelection } from './types'
+import {
+  formatAudioAssetNameLabel,
+  formatAudioKeywordLabel,
+  formatMusicDurationLabel,
+  formatSfxCategoryLabel,
+} from './audioLibraryDisplay'
 import { useAudiobookAudioPlayback } from './useAudiobookAudioPlayback'
 
 interface AudioPickerProps {
   type: 'sfx' | 'music'
   value: string
   onChange: (value: string) => void
+  onSelectAsset?: (selection: AudioAssetSelection) => void
   label: string
   paperSx?: SxProps<Theme>
 }
@@ -43,7 +51,14 @@ interface MusicOption {
 
 type AudioOption = SfxOption | MusicOption
 
-const AudioPicker = ({ type, value, onChange, label, paperSx }: AudioPickerProps) => {
+const AudioPicker = ({
+  type,
+  value,
+  onChange,
+  onSelectAsset,
+  label,
+  paperSx,
+}: AudioPickerProps) => {
   const [options, setOptions] = useState<AudioOption[]>([])
   const [open, setOpen] = useState(false)
   const [search, setSearch] = useState('')
@@ -95,9 +110,9 @@ const AudioPicker = ({ type, value, onChange, label, paperSx }: AudioPickerProps
 
   const resolveOptionLabel = (option: string | AudioOption): string => {
     if (typeof option === 'string') return option
-    if (type === 'sfx') return (option as SfxOption).name
+    if (type === 'sfx') return formatAudioAssetNameLabel((option as SfxOption).name)
     const music = option as MusicOption
-    return `${music.style} - ${music.mood}`
+    return `${formatAudioKeywordLabel(music.style)} - ${formatAudioKeywordLabel(music.mood)}`
   }
 
   return (
@@ -115,7 +130,25 @@ const AudioPicker = ({ type, value, onChange, label, paperSx }: AudioPickerProps
         onInputChange={(_, newInput) => setSearch(newInput)}
         onChange={(_, newValue) => {
           if (newValue && typeof newValue !== 'string') {
-            onChange(resolveOptionLabel(newValue))
+            const selection = type === 'sfx'
+              ? {
+                  id: newValue.id,
+                  type: 'sfx' as const,
+                  label: resolveOptionLabel(newValue),
+                  name: resolveOptionLabel(newValue),
+                }
+              : {
+                  id: newValue.id,
+                  type: 'music' as const,
+                  label: resolveOptionLabel(newValue),
+                  style: formatAudioKeywordLabel((newValue as MusicOption).style),
+                  mood: formatAudioKeywordLabel((newValue as MusicOption).mood),
+                }
+            if (onSelectAsset) {
+              onSelectAsset?.(selection)
+            } else {
+              onChange(selection.label)
+            }
           } else if (typeof newValue === 'string') {
             onChange(newValue)
           }
@@ -137,16 +170,16 @@ const AudioPicker = ({ type, value, onChange, label, paperSx }: AudioPickerProps
                 </Typography>
                 {type === 'sfx' && (
                   <>
-                    <Chip label={(option as SfxOption).category} size="small" variant="outlined" />
+                    <Chip label={formatSfxCategoryLabel((option as SfxOption).category)} size="small" variant="outlined" />
                     {((option as SfxOption).scenes || []).slice(0, 2).map((scene) => (
-                      <Chip key={scene} label={scene} size="small" variant="outlined" />
+                      <Chip key={scene} label={formatAudioKeywordLabel(scene)} size="small" variant="outlined" />
                     ))}
                   </>
                 )}
                 {type === 'music' && (
                   <>
-                    <Chip label={(option as MusicOption).mood} size="small" />
-                    <Chip label={`${(option as MusicOption).duration}s`} size="small" />
+                    <Chip label={formatAudioKeywordLabel((option as MusicOption).mood)} size="small" />
+                    <Chip label={formatMusicDurationLabel((option as MusicOption).duration)} size="small" />
                   </>
                 )}
               </Box>

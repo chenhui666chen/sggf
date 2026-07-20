@@ -1,5 +1,6 @@
 import { memo, useCallback, useEffect, useRef, useState } from 'react'
 import {
+  Alert,
   Box,
   Button,
   Chip,
@@ -15,7 +16,9 @@ import {
   ListItemText,
   MenuItem,
   Paper,
+  Rating,
   Select,
+  Snackbar,
   Tab,
   Tabs,
   TextField,
@@ -27,7 +30,6 @@ import GraphicEqIcon from '@mui/icons-material/GraphicEq'
 import MusicNoteIcon from '@mui/icons-material/MusicNote'
 import PauseIcon from '@mui/icons-material/Pause'
 import PlayArrowIcon from '@mui/icons-material/PlayArrow'
-import PlaylistAddCheckIcon from '@mui/icons-material/PlaylistAddCheck'
 import SearchIcon from '@mui/icons-material/Search'
 import UploadFileIcon from '@mui/icons-material/UploadFile'
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline'
@@ -39,6 +41,7 @@ import type { RootState } from '../../store/store'
 import { audiobookColors } from './audiobookTheme'
 import {
   buildAudioLibraryDetailItems,
+  formatAudioAssetDescriptionLabel,
   formatAudioAssetNameLabel,
   formatAudioKeywordLabel,
   formatMusicDurationLabel,
@@ -47,8 +50,7 @@ import {
   getVisibleSfxTags,
 } from './audioLibraryDisplay'
 import AudioLibraryPurgeDialog from './AudioLibraryPurgeDialog'
-import SfxCandidateReviewDialog from './SfxCandidateReviewDialog'
-import SfxManifestImportDialog from './SfxManifestImportDialog'
+import AudioLibraryUploadDialog from './AudioLibraryUploadDialog'
 import { useAudiobookAudioPlayback } from './useAudiobookAudioPlayback'
 
 interface AudioLibraryBrowserProps {
@@ -72,6 +74,9 @@ interface AudioLibraryMetadata {
   quality_status?: string
   retrieved_at?: string
   license_checked_at?: string
+  rating_count: number
+  average_rating: number
+  user_rating?: number | null
 }
 
 interface SfxEntry extends AudioLibraryMetadata {
@@ -87,6 +92,10 @@ interface SfxEntry extends AudioLibraryMetadata {
 
 interface MusicEntry extends AudioLibraryMetadata {
   id: string
+  name: string
+  description: string
+  prompt: string
+  tags: string[]
   style: string
   duration: number
   tempo: string
@@ -111,7 +120,7 @@ const estimateLibraryRowHeight = (entry: AudioLibraryEntry, expanded: boolean) =
   const tagRows = 'tags' in entry
     ? Math.ceil((2 + getVisibleSfxTags(entry.tags).slice(0, 3).length) / 4)
     : 1
-  return expanded ? 188 + tagRows * 24 : 92 + tagRows * 20
+  return expanded ? 246 + tagRows * 24 : 150 + tagRows * 20
 }
 
 const renderDetailPanel = (entry: AudioLibraryMetadata & { source: string }) => (
@@ -150,8 +159,10 @@ interface AudioLibraryRowProps {
   isExpanded: boolean
   isPlaying: boolean
   isPreviewLoading: boolean
+  isRating: boolean
   onDeleteAsset: (fileType: AudioLibraryType, id: string) => void
   onPlay: (fileType: AudioLibraryType, id: string) => void
+  onRate: (fileType: AudioLibraryType, id: string, score: number) => void
   onToggleDetail: (fileType: AudioLibraryType, id: string) => void
 }
 
@@ -162,13 +173,16 @@ const AudioLibraryRow = memo(({
   isExpanded,
   isPlaying,
   isPreviewLoading,
+  isRating,
   onDeleteAsset,
   onPlay,
+  onRate,
   onToggleDetail,
 }: AudioLibraryRowProps) => {
   const isSfx = fileType === 'sfx'
   const sfxEntry = isSfx ? entry as SfxEntry : null
   const musicEntry = isSfx ? null : entry as MusicEntry
+  const sfxDescription = sfxEntry ? formatAudioAssetDescriptionLabel(sfxEntry) : ''
 
   return (
     <ListItemButton
@@ -183,11 +197,22 @@ const AudioLibraryRow = memo(({
         primary={
           isSfx
             ? formatAudioAssetNameLabel(sfxEntry?.name)
-            : `${formatAudioKeywordLabel(musicEntry?.style)} - ${formatAudioKeywordLabel(musicEntry?.mood)}${musicEntry?.variant != null ? `（变体 ${musicEntry.variant}）` : ''}`
+            : musicEntry?.name
+              ? formatAudioAssetNameLabel(musicEntry?.name)
+              : `${formatAudioKeywordLabel(musicEntry?.style)} - ${formatAudioKeywordLabel(musicEntry?.mood)}${musicEntry?.variant != null ? `（变体 ${musicEntry.variant}）` : ''}`
         }
         primaryTypographyProps={{ sx: { fontWeight: 600, overflowWrap: 'anywhere' } }}
         secondary={
           <>
+            {sfxEntry && sfxDescription && (
+              <Typography
+                variant="body2"
+                color="text.secondary"
+                sx={{ mt: 0.35, overflowWrap: 'anywhere' }}
+              >
+                {sfxDescription}
+              </Typography>
+            )}
             <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap', mt: 0.5 }}>
               {sfxEntry ? (
                 <>
@@ -207,6 +232,26 @@ const AudioLibraryRow = memo(({
                   <Chip label={`节奏：${formatAudioKeywordLabel(musicEntry.tempo)}`} size="small" />
                 </>
               ) : null}
+            </Box>
+            <Box
+              onClick={(event) => event.stopPropagation()}
+              sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 0.75, minHeight: 24 }}
+            >
+              <Rating
+                size="small"
+                value={entry.user_rating || 0}
+                disabled={isRating}
+                onChange={(event, score) => {
+                  event.stopPropagation()
+                  if (score) onRate(fileType, entry.id, score)
+                }}
+              />
+              <Typography variant="caption" color="text.secondary">
+                {entry.rating_count > 0
+                  ? `${entry.average_rating.toFixed(1)} 分 · ${entry.rating_count} 人`
+                  : '暂无评分'}
+              </Typography>
+              {isRating && <CircularProgress size={14} />}
             </Box>
             <Button
               size="small"
@@ -249,9 +294,11 @@ interface AudioLibraryVirtualListProps<T extends AudioLibraryEntry> {
   isAdmin: boolean
   playingId: string | null
   previewLoadingKey: string | null
+  ratingLoadingKey: string | null
   expandedDetailIds: Record<string, boolean>
   onDeleteAsset: (fileType: AudioLibraryType, id: string) => void
   onPlay: (fileType: AudioLibraryType, id: string) => void
+  onRate: (fileType: AudioLibraryType, id: string, score: number) => void
   onToggleDetail: (fileType: AudioLibraryType, id: string) => void
 }
 
@@ -261,9 +308,11 @@ const AudioLibraryVirtualList = <T extends AudioLibraryEntry>({
   isAdmin,
   playingId,
   previewLoadingKey,
+  ratingLoadingKey,
   expandedDetailIds,
   onDeleteAsset,
   onPlay,
+  onRate,
   onToggleDetail,
 }: AudioLibraryVirtualListProps<T>) => {
   const parentRef = useRef<HTMLDivElement>(null)
@@ -308,8 +357,10 @@ const AudioLibraryVirtualList = <T extends AudioLibraryEntry>({
                 isExpanded={Boolean(expandedDetailIds[detailKey])}
                 isPlaying={playingId === entry.id}
                 isPreviewLoading={previewLoadingKey === detailKey}
+                isRating={ratingLoadingKey === detailKey}
                 onDeleteAsset={onDeleteAsset}
                 onPlay={onPlay}
+                onRate={onRate}
                 onToggleDetail={onToggleDetail}
               />
             </Box>
@@ -338,28 +389,29 @@ const AudioLibraryBrowser = ({ open, onClose }: AudioLibraryBrowserProps) => {
   const [searchText, setSearchText] = useState('')
   const [playingId, setPlayingId] = useState<string | null>(null)
   const [previewLoadingKey, setPreviewLoadingKey] = useState<string | null>(null)
+  const [ratingLoadingKey, setRatingLoadingKey] = useState<string | null>(null)
   const [expandedDetailIds, setExpandedDetailIds] = useState<Record<string, boolean>>({})
   const playbackRequestIdRef = useRef(0)
   const previewAbortControllerRef = useRef<AbortController | null>(null)
   const { playManagedBlob, stopManagedPlayback } = useAudiobookAudioPlayback()
 
-  const [candidateReviewOpen, setCandidateReviewOpen] = useState(false)
-  const [manifestImportOpen, setManifestImportOpen] = useState(false)
   const [purgeOpen, setPurgeOpen] = useState(false)
+  const [uploadOpen, setUploadOpen] = useState(false)
+  const [notice, setNotice] = useState('')
+
+  const loadStats = useCallback(async () => {
+    try {
+      const res = await apiClient.getAudioLibraryStats()
+      setSfxCategories(res.data.sfx_categories)
+      setSfxScenes(res.data.sfx_scenes || [])
+      setMusicStyles(res.data.music_styles)
+      setMusicMoods(res.data.music_moods)
+    } catch { /* ignore */ }
+  }, [])
 
   useEffect(() => {
-    if (!open) return
-    const loadStats = async () => {
-      try {
-        const res = await apiClient.getAudioLibraryStats()
-        setSfxCategories(res.data.sfx_categories)
-        setSfxScenes(res.data.sfx_scenes || [])
-        setMusicStyles(res.data.music_styles)
-        setMusicMoods(res.data.music_moods)
-      } catch { /* ignore */ }
-    }
-    loadStats()
-  }, [open])
+    if (open) loadStats()
+  }, [loadStats, open])
 
   const loadSfx = useCallback(async () => {
     setLoading(true)
@@ -451,17 +503,64 @@ const AudioLibraryBrowser = ({ open, onClose }: AudioLibraryBrowserProps) => {
     stopManagedPlayback()
     setPlayingId(null)
     setPreviewLoadingKey(null)
+    setRatingLoadingKey(null)
     setExpandedDetailIds({})
     setSearchText('')
     setSfxCategoryFilter('')
     setSfxSceneFilter('')
     setMusicStyleFilter('')
     setMusicMoodFilter('')
-    setCandidateReviewOpen(false)
-    setManifestImportOpen(false)
     setPurgeOpen(false)
+    setUploadOpen(false)
     onClose()
   }
+
+  const handleRate = useCallback(async (fileType: AudioLibraryType, id: string, score: number) => {
+    const ratingKey = `${fileType}:${id}`
+    setRatingLoadingKey(ratingKey)
+    try {
+      const res = await apiClient.rateAudioLibraryAsset(fileType, id, score)
+      const result = res.data
+      if (result.auto_unpublished) {
+        if (fileType === 'sfx') {
+          setSfxEntries((entries) => entries.filter((entry) => entry.id !== id))
+        } else {
+          setMusicEntries((entries) => entries.filter((entry) => entry.id !== id))
+        }
+        setNotice('该素材已达到低分阈值并自动下架')
+        await loadStats()
+        return
+      }
+
+      const ratingPatch = {
+        rating_count: result.rating_count,
+        average_rating: result.average_score,
+        user_rating: result.user_score,
+      }
+      if (fileType === 'sfx') {
+        setSfxEntries((entries) => entries.map((entry) => (
+          entry.id === id ? { ...entry, ...ratingPatch } : entry
+        )))
+      } else {
+        setMusicEntries((entries) => entries.map((entry) => (
+          entry.id === id ? { ...entry, ...ratingPatch } : entry
+        )))
+      }
+      setNotice('评分已更新')
+    } catch {
+      setNotice('评分提交失败，请稍后重试')
+    } finally {
+      setRatingLoadingKey(null)
+    }
+  }, [loadStats])
+
+  const handleUploaded = useCallback((fileType: AudioLibraryType) => {
+    setTab(fileType === 'sfx' ? 0 : 1)
+    setNotice('素材已上传并加入共享素材库')
+    void loadStats()
+    if (fileType === 'sfx') void loadSfx()
+    else void loadMusic()
+  }, [loadMusic, loadSfx, loadStats])
 
   const handleDeleteAsset = useCallback(async (fileType: AudioLibraryType, id: string) => {
     if (!isAdmin) return
@@ -563,34 +662,24 @@ const AudioLibraryBrowser = ({ open, onClose }: AudioLibraryBrowserProps) => {
           )}
         </Box>
 
-        <Box sx={{ display: isAdmin ? 'flex' : 'none', gap: 1, mb: isAdmin ? 2 : 0 }}>
-          {tab === 0 && (
-            <Button
-              size="small"
-              variant="outlined"
-              startIcon={<PlaylistAddCheckIcon />}
-              onClick={() => setCandidateReviewOpen(true)}
-            >
-              候选审核
-            </Button>
-          )}
-          {tab === 0 && (
-            <Button
-              size="small"
-              variant="outlined"
-              startIcon={<UploadFileIcon />}
-              onClick={() => setManifestImportOpen(true)}
-            >
-              manifest 导入
-            </Button>
-          )}
+        <Box sx={{ display: 'flex', gap: 1, mb: 2, flexWrap: 'wrap' }}>
           <Button
             size="small"
-            variant="outlined"
-            onClick={() => setPurgeOpen(true)}
+            variant="contained"
+            startIcon={<UploadFileIcon />}
+            onClick={() => setUploadOpen(true)}
           >
-            素材清理
+            上传素材
           </Button>
+          {isAdmin && (
+            <Button
+              size="small"
+              variant="outlined"
+              onClick={() => setPurgeOpen(true)}
+            >
+              素材清理
+            </Button>
+          )}
         </Box>
 
         {loading ? (
@@ -612,9 +701,11 @@ const AudioLibraryBrowser = ({ open, onClose }: AudioLibraryBrowserProps) => {
                 isAdmin={isAdmin}
                 playingId={playingId}
                 previewLoadingKey={previewLoadingKey}
+                ratingLoadingKey={ratingLoadingKey}
                 expandedDetailIds={expandedDetailIds}
                 onDeleteAsset={handleDeleteAsset}
                 onPlay={handlePlay}
+                onRate={handleRate}
                 onToggleDetail={toggleDetail}
               />
             )}
@@ -634,23 +725,22 @@ const AudioLibraryBrowser = ({ open, onClose }: AudioLibraryBrowserProps) => {
                 isAdmin={isAdmin}
                 playingId={playingId}
                 previewLoadingKey={previewLoadingKey}
+                ratingLoadingKey={ratingLoadingKey}
                 expandedDetailIds={expandedDetailIds}
                 onDeleteAsset={handleDeleteAsset}
                 onPlay={handlePlay}
+                onRate={handleRate}
                 onToggleDetail={toggleDetail}
               />
             )}
           </>
         )}
       </DialogContent>
-      <SfxCandidateReviewDialog
-        open={candidateReviewOpen}
-        onClose={() => setCandidateReviewOpen(false)}
-      />
-      <SfxManifestImportDialog
-        open={manifestImportOpen}
-        onClose={() => setManifestImportOpen(false)}
-        onImported={loadSfx}
+      <AudioLibraryUploadDialog
+        open={uploadOpen}
+        initialLibraryType={tab === 0 ? 'sfx' : 'music'}
+        onClose={() => setUploadOpen(false)}
+        onUploaded={handleUploaded}
       />
       <AudioLibraryPurgeDialog
         open={purgeOpen}
@@ -658,6 +748,16 @@ const AudioLibraryBrowser = ({ open, onClose }: AudioLibraryBrowserProps) => {
         onClose={() => setPurgeOpen(false)}
         onPurged={tab === 0 ? loadSfx : loadMusic}
       />
+      <Snackbar
+        open={Boolean(notice)}
+        autoHideDuration={3200}
+        onClose={() => setNotice('')}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+      >
+        <Alert severity={notice.includes('失败') ? 'error' : 'success'} onClose={() => setNotice('')}>
+          {notice}
+        </Alert>
+      </Snackbar>
     </Dialog>
   )
 }

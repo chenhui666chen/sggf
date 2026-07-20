@@ -28,6 +28,7 @@ import { useAudiobookActiveTasks } from './audiobook/useAudiobookActiveTasks'
 import { useAudiobookBrowserPlayer } from './audiobook/useAudiobookBrowserPlayer'
 import { useAudiobookChapterSelectionActions } from './audiobook/useAudiobookChapterSelectionActions'
 import { useAudiobookCharacterVoicePreview } from './audiobook/useAudiobookCharacterVoicePreview'
+import { useAudiobookCharacterScope } from './audiobook/useAudiobookCharacterScope'
 import { useAudiobookCharacterVoiceState } from './audiobook/useAudiobookCharacterVoiceState'
 import { useAudiobookCharacterVoiceSettings } from './audiobook/useAudiobookCharacterVoiceSettings'
 import { useAudiobookChapterAudioActions } from './audiobook/useAudiobookChapterAudioActions'
@@ -35,6 +36,7 @@ import { useAudiobookChapterDeleteActions } from './audiobook/useAudiobookChapte
 import { useAudiobookEditorSessionSync } from './audiobook/useAudiobookEditorSessionSync'
 import { useAudiobookGenerationActions } from './audiobook/useAudiobookGenerationActions'
 import { useAudiobookGenerationState } from './audiobook/useAudiobookGenerationState'
+import { useAudiobookGeneratedChapterIds } from './audiobook/useAudiobookGeneratedChapterIds'
 import { useAudiobookHistoryActions } from './audiobook/useAudiobookHistoryActions'
 import { useAudiobookAudioPlayback } from './audiobook/useAudiobookAudioPlayback'
 import { useAudiobookNewProjectAction } from './audiobook/useAudiobookNewProjectAction'
@@ -114,6 +116,18 @@ const AudiobookPage = () => {
     audiobookProject,
     setAudiobookProject,
   } = useAudiobookProjectState()
+  const {
+    characterScope,
+    characterScopeLoading,
+    characterScopeError,
+  } = useAudiobookCharacterScope({
+    projectId: selectedProjectId ?? routeProjectId,
+    selectedChapterIds: selectedChapters,
+  })
+  const scopedCharacterIds = useMemo(
+    () => characterScope?.characters.map((item) => item.character_id) || [],
+    [characterScope],
+  )
   const {
     characterVoices,
     setCharacterVoicesForCurrentModel,
@@ -223,10 +237,10 @@ const AudiobookPage = () => {
   const {
     ttsModelOptions,
     voicePresets,
-    voiceCatalogMeta,
     voiceLoading,
     voiceError,
     voicePresetsByModel,
+    voiceCatalogMetaByModel,
     currentVoicePresets,
     customVoicePresets,
     currentTtsModelOption,
@@ -234,12 +248,7 @@ const AudiobookPage = () => {
     currentModelHasUsableVoice,
     currentModelCatalogUnavailable,
     currentModelRuntimeUnavailable,
-    showCustomVoiceWorkbench,
-    voiceCatalogSummary,
-    voiceCatalogNotice,
-    voiceCatalogNoticeSeverity,
     refreshVoiceCatalog,
-    fetchVoiceCatalog,
   } = useAudiobookVoiceCatalog({
     ttsModel,
     characterVoices,
@@ -479,6 +488,7 @@ const AudiobookPage = () => {
   } = useAudiobookVoiceActions({
     selectedProjectId,
     routeProjectId,
+    selectedChapterIds: selectedChapters,
     ttsModel,
     characterVoices,
     setCharacterVoicesForCurrentModel,
@@ -577,6 +587,10 @@ const AudiobookPage = () => {
   } = useAudiobookResumeCheckpoints({
     audiobookProject,
     chapters,
+  })
+  const generatedChapterIds = useAudiobookGeneratedChapterIds({
+    projectId: selectedProjectId ?? routeProjectId,
+    currentChapterAudios,
   })
 
   useAudiobookRouteProjectLoader({
@@ -822,19 +836,16 @@ const AudiobookPage = () => {
     setNewProjectText,
   })
 
-  const {
-    handleToggleChapter,
-    handleToggleAll,
-  } = useAudiobookChapterSelectionActions({
+  const { handleToggleChapter } = useAudiobookChapterSelectionActions({
     chapters,
     selectedChapters,
+    generatedChapterIds,
     setSelectedChapters,
   })
 
   const {
     handleVoiceChange,
     handleTtsModelChangeForCharacter,
-    handleVoiceCloneDataUrlChange,
   } = useAudiobookCharacterVoiceSettings({
     voicePresets,
     updateCharacterVoicesForCurrentModel,
@@ -861,6 +872,7 @@ const AudiobookPage = () => {
   const {
     handleGenerateAudioForApprovedChapters,
     handleGenerate,
+    handleRegenerateChapter,
     handleResumeChapterGeneration,
   } = useAudiobookGenerationActions({
     audiobookProject,
@@ -948,49 +960,41 @@ const AudiobookPage = () => {
         {activeStep === 0 && (
           <AudiobookSetupStep
             selectedChapterCount={selectedChapters.length}
-            chapterCount={chapters.length}
-            scriptOnlyMode={scriptOnlyMode}
-            onScriptOnlyModeChange={setScriptOnlyMode}
             ttsModel={ttsModel}
             ttsModelOptions={ttsModelOptions}
-            voiceCatalogMeta={voiceCatalogMeta}
-            voiceCatalogSummary={voiceCatalogSummary}
-            voiceCatalogNotice={voiceCatalogNotice}
-            voiceCatalogNoticeSeverity={voiceCatalogNoticeSeverity}
-            showCustomVoiceWorkbench={showCustomVoiceWorkbench}
             voiceError={voiceError}
             voiceLoading={voiceLoading}
-            customVoicePresets={customVoicePresets}
             cosyVoiceWorkbench={cosyVoiceWorkbench}
-            narrationStyle={narrationStyle}
-            narrationStylePrompt={narrationStylePrompt}
             outputFormat={outputFormat}
             generateSubtitle={generateSubtitle}
             audioFxConfig={audioFxConfig}
             chapters={chapters}
             selectedChapters={selectedChapters}
+            generatedChapterIds={generatedChapterIds}
             loadingCharacters={loadingCharacters}
+            characterScopeLoading={characterScopeLoading}
+            characterScopeError={characterScopeError}
+            scopedCharacterIds={scopedCharacterIds}
+            unresolvedCharacterNames={characterScope?.unresolved_names || []}
             characterVoices={characterVoices}
             currentVoicePresets={currentVoicePresets}
             voicePresetsByModel={voicePresetsByModel}
+            voiceCatalogMetaByModel={voiceCatalogMetaByModel}
             previewingCharacterId={previewingCharacterId}
             customVoicePreviewingId={customVoicePreviewingId}
             autoAssigningVoices={autoAssigningVoices}
             generateDisabled={setupGenerateDisabled}
             generateDisabledReason={setupGenerateDisabledReason}
-            onFetchVoiceCatalog={fetchVoiceCatalog}
-            onNarrationStyleChange={setNarrationStyle}
-            onNarrationStylePromptChange={setNarrationStylePrompt}
+            onFetchVoiceCatalog={(model) => {
+              void refreshVoiceCatalog(model)
+            }}
             onOutputFormatChange={setOutputFormat}
             onGenerateSubtitleChange={setGenerateSubtitle}
             onAudioFxConfigChange={setAudioFxConfig}
-            onTtsModelChange={setTtsModel}
-            onToggleAllChapters={handleToggleAll}
             onToggleChapter={handleToggleChapter}
             onOpenChapterMenu={handleOpenChapterMenu}
             onVoiceChange={handleVoiceChange}
             onTtsModelChangeForCharacter={handleTtsModelChangeForCharacter}
-            onVoiceCloneDataUrlChange={handleVoiceCloneDataUrlChange}
             onPreviewCustomVoice={handlePreviewCustomVoice}
             onPreviewCharacterVoice={handlePreviewCharacterVoice}
             onAutoAssignVoices={handleAutoAssignVoices}
@@ -1147,7 +1151,17 @@ const AudiobookPage = () => {
 
       <ChapterActionsMenu
         anchorEl={chapterMenuAnchor}
+        canRegenerate={Boolean(
+          selectedChapterForMenu && generatedChapterIds.has(selectedChapterForMenu.id)
+        )}
         onClose={handleCloseChapterMenu}
+        onRegenerate={() => {
+          const chapterId = selectedChapterForMenu?.id
+          handleCloseChapterMenu()
+          if (chapterId) {
+            void handleRegenerateChapter(chapterId)
+          }
+        }}
         onOpenDeleteDialog={handleOpenDeleteChapterDialog}
       />
 

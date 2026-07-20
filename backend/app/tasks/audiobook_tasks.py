@@ -14,6 +14,12 @@ from app.services.audiobook.project_export_jobs import (
     build_project_export_task_detail,
 )
 from app.services.audiobook.project_exporter import AudiobookExportError
+from app.services.audiobook.prompt_audio_transcript_queue import (
+    PROMPT_AUDIO_ASR_TRANSCRIPT_COMPLETED_STAGE,
+    PROMPT_AUDIO_ASR_TRANSCRIPT_PROVIDER_CHECK_STAGE,
+    PROMPT_AUDIO_ASR_TRANSCRIPT_SKIPPED_STAGE,
+    build_prompt_audio_transcript_task_detail,
+)
 from app.services.audiobook.task_trace import build_audiobook_trace_context
 
 logger = logging.getLogger(__name__)
@@ -414,6 +420,170 @@ def export_project_audacity_task(
         audiobook_project_id=audiobook_project_id,
         export_type="audacity",
         force=force,
+    )
+
+
+def _run_prompt_audio_asr_transcript_task_body(
+    *,
+    task_db_id: int,
+    celery_task_id: Optional[str],
+    audiobook_project_id: int,
+    chapter_audio_id: int,
+    provider: Optional[str] = None,
+    target_model: Optional[str] = None,
+    confirm_cost: bool = False,
+) -> Dict[str, Any]:
+    tracker = AudiobookJobTracker(task_db_id)
+
+    from app.db.base import SessionLocal
+    from app.services.audiobook.prompt_audio_asr_provider import create_prompt_audio_asr_provider
+    from app.services.audiobook.prompt_audio_transcript_runner import (
+        execute_prompt_audio_transcript,
+        normalize_prompt_audio_transcript_error,
+    )
+    from app.services.audiobook.repository import ChapterAudioRepository
+
+    db = SessionLocal()
+    chapter_id: Optional[int] = None
+    try:
+        chapter_audio = ChapterAudioRepository.get_active_by_id(db, chapter_audio_id)
+        chapter_id = chapter_audio.chapter_id if chapter_audio else None
+
+        start_message = "正在检查 ASR 转写配置"
+        tracker.update_stage(
+            PROMPT_AUDIO_ASR_TRANSCRIPT_PROVIDER_CHECK_STAGE,
+            0,
+            1,
+            start_message,
+            build_prompt_audio_transcript_task_detail(
+                task_db_id=task_db_id,
+                celery_task_id=celery_task_id,
+                audiobook_project_id=audiobook_project_id,
+                chapter_audio_id=chapter_audio_id,
+                chapter_id=chapter_id,
+                status="running",
+                stage=PROMPT_AUDIO_ASR_TRANSCRIPT_PROVIDER_CHECK_STAGE,
+                progress=0.0,
+                message=start_message,
+                provider=provider,
+                target_model=target_model,
+                provider_call_allowed=confirm_cost,
+            ),
+        )
+
+        if chapter_audio is None:
+            raise RuntimeError("chapter_audio_not_found")
+
+        result = execute_prompt_audio_transcript(
+            db,
+            chapter_audio=chapter_audio,
+            provider=create_prompt_audio_asr_provider(provider),
+            target_model=target_model,
+            provider_call_allowed=confirm_cost,
+        )
+    except Exception as exc:
+        error = normalize_prompt_audio_transcript_error(exc)
+        if error["reason"] in {"asr_provider_not_configured", "asr_cost_not_confirmed"}:
+            finish_message = error["message"]
+            detail = build_prompt_audio_transcript_task_detail(
+                task_db_id=task_db_id,
+                celery_task_id=celery_task_id,
+                audiobook_project_id=audiobook_project_id,
+                chapter_audio_id=chapter_audio_id,
+                chapter_id=chapter_id,
+                status="completed",
+                stage=PROMPT_AUDIO_ASR_TRANSCRIPT_SKIPPED_STAGE,
+                progress=1.0,
+                message=finish_message,
+                reason=error["reason"],
+                provider=provider,
+                target_model=target_model,
+                provider_call_allowed=confirm_cost,
+            )
+            detail["transcript_status"] = "skipped"
+            detail["provider_configured"] = error["reason"] != "asr_provider_not_configured"
+            tracker.update_stage(
+                PROMPT_AUDIO_ASR_TRANSCRIPT_SKIPPED_STAGE,
+                1,
+                1,
+                finish_message,
+                detail,
+            )
+            tracker.mark_completed(detail)
+            return detail
+
+        finish_message = error["message"]
+        detail = build_prompt_audio_transcript_task_detail(
+            task_db_id=task_db_id,
+            celery_task_id=celery_task_id,
+            audiobook_project_id=audiobook_project_id,
+            chapter_audio_id=chapter_audio_id,
+            chapter_id=chapter_id,
+            status="failed",
+            stage="asr_transcript_failed",
+            progress=1.0,
+            message=finish_message,
+            reason=error["reason"],
+            provider=provider,
+            target_model=target_model,
+            provider_call_allowed=confirm_cost,
+        )
+        detail["transcript_status"] = "failed"
+        tracker.update_stage("asr_transcript_failed", 1, 1, finish_message, detail)
+        tracker.mark_failed(f"{error['reason']}: {finish_message}")
+        raise
+    finally:
+        db.close()
+
+    finish_message = "ASR 转写完成，已回填人工验收辅助字段"
+    detail = build_prompt_audio_transcript_task_detail(
+        task_db_id=task_db_id,
+        celery_task_id=celery_task_id,
+        audiobook_project_id=audiobook_project_id,
+        chapter_audio_id=chapter_audio_id,
+        chapter_id=chapter_id,
+        status="completed",
+        stage=PROMPT_AUDIO_ASR_TRANSCRIPT_COMPLETED_STAGE,
+        progress=1.0,
+        message=finish_message,
+        provider=str(result.get("provider") or provider or ""),
+        target_model=str(result.get("model") or target_model or ""),
+        provider_call_allowed=confirm_cost,
+    )
+    detail.update(result)
+    tracker.update_stage(
+        PROMPT_AUDIO_ASR_TRANSCRIPT_COMPLETED_STAGE,
+        1,
+        1,
+        finish_message,
+        detail,
+    )
+    tracker.mark_completed(detail)
+    return detail
+
+
+@celery_app.task(name="audiobook.prompt_audio_asr_transcript", bind=True)
+def run_prompt_audio_asr_transcript_task(
+    self,
+    task_db_id: int,
+    audiobook_project_id: int,
+    chapter_audio_id: int,
+    provider: Optional[str] = None,
+    target_model: Optional[str] = None,
+    confirm_cost: bool = False,
+) -> Dict[str, Any]:
+    """Run a manual prompt/audio ASR transcript job and write review assistance."""
+    tracker = AudiobookJobTracker(task_db_id)
+    celery_task_id = self.request.id if self.request else None
+    tracker.mark_running(celery_task_id)
+    return _run_prompt_audio_asr_transcript_task_body(
+        task_db_id=task_db_id,
+        celery_task_id=celery_task_id,
+        audiobook_project_id=audiobook_project_id,
+        chapter_audio_id=chapter_audio_id,
+        provider=provider,
+        target_model=target_model,
+        confirm_cost=confirm_cost,
     )
 
 

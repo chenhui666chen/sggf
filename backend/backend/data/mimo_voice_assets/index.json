@@ -25,18 +25,6 @@
       "updated_at": "2026-06-24T09:53:39.997740+00:00"
     },
     {
-      "id": "mimo_clone_3885edfd5129ab41",
-      "name": "方法",
-      "asset_type": "clone",
-      "model": "mimo-v2.5-tts-voiceclone",
-      "description": "",
-      "voice_design_prompt": "",
-      "mime_type": "audio/mpeg",
-      "audio_path": "clone_samples/mimo_clone_3885edfd5129ab41.mp3",
-      "created_at": "2026-06-24T10:43:34.828548+00:00",
-      "updated_at": "2026-06-24T10:43:34.828548+00:00"
-    },
-    {
       "id": "mimo_design_e88fb1581c58abbd",
       "name": "火凤凰",
       "asset_type": "design",
@@ -59,18 +47,6 @@
       "audio_path": "clone_samples/mimo_clone_28235bde41ab2dcf.wav",
       "created_at": "2026-06-24T11:57:02.177558+00:00",
       "updated_at": "2026-06-24T11:57:02.177558+00:00"
-    },
-    {
-      "id": "mimo_clone_d4cf239da22a6359",
-      "name": "gg",
-      "asset_type": "clone",
-      "model": "mimo-v2.5-tts-voiceclone",
-      "description": "",
-      "voice_design_prompt": "",
-      "mime_type": "audio/wav",
-      "audio_path": "clone_samples/mimo_clone_d4cf239da22a6359.wav",
-      "created_at": "2026-06-24T12:02:05.914866+00:00",
-      "updated_at": "2026-06-24T12:02:05.914866+00:00"
     }
   ]
 }

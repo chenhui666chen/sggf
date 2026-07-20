@@ -37,6 +37,7 @@ from app.api.v1.asset_studio_api._helpers import (
     _allocate_output_path,
     _build_audio_response,
     _merge_points_billing_metadata,
+    _materialize_output_reference,
     _copy_output_file,
     _raise_for_failed_result,
     _release_asset_studio_billing_safely,
@@ -62,6 +63,7 @@ async def generate_audio_asset(
     pitch: float = Form(default=1.0),
     volume: int = Form(default=50),
     emotion: str = Form(default="neutral"),
+    speaker_ids: str = Form(default=""),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -70,7 +72,7 @@ async def generate_audio_asset(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="提示词不能为空")
 
     normalized_generation_type = str(generation_type or "").strip().lower()
-    if normalized_generation_type not in {"music", "sound-effect", "speech"}:
+    if normalized_generation_type not in {"music", "sound-effect", "speech", "scene-audio"}:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="不支持的音频生成类型")
 
     requested_model_id = (model_id or "").strip() or (
@@ -79,9 +81,111 @@ async def generate_audio_asset(
         else DEFAULT_AUDIO_SOUND_EFFECT_MODEL_ID
         if normalized_generation_type == "sound-effect"
         else DEFAULT_AUDIO_SPEECH_MODEL_ID
+        if normalized_generation_type == "speech"
+        else DEFAULT_AUDIO_SCENE_MODEL_ID
     )
     normalized_mood = str(mood or "").strip() or "calm"
     normalized_tempo = str(tempo or "").strip() or "medium"
+
+    if normalized_generation_type == "scene-audio":
+        resolved_model_id = normalize_model_id(requested_model_id) or requested_model_id
+        if resolved_model_id not in SCENE_AUDIO_MODELS:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"当前场景音频仅支持以下模型: {', '.join(sorted(SCENE_AUDIO_MODELS))}",
+            )
+
+        references = [
+            {"speaker": value.strip()}
+            for value in re.split(r"[,，\n]+", str(speaker_ids or ""))
+            if value.strip()
+        ]
+        mode = "text_to_audio"
+        basis_yuan = estimate_asset_studio_basis_yuan(
+            kind="audio",
+            mode=mode,
+            model_id=resolved_model_id,
+            prompt_chars=len(cleaned_prompt),
+        )
+        precheck = None
+        try:
+            precheck = _reserve_asset_studio_billing(
+                db=db,
+                current_user=current_user,
+                kind="audio",
+                mode=mode,
+                basis_yuan=basis_yuan,
+                model_id=resolved_model_id,
+                request_path="/api/v1/asset-studio/audio",
+                summary="资产工作台场景音频生成已启动，积分已冻结。",
+                extra_payload={"generation_type": normalized_generation_type, "speaker_count": len(references)},
+            )
+            from adapters.registry import registry
+
+            adapter = registry.get_adapter(resolved_model_id)
+            result = await asyncio.to_thread(
+                adapter.generate,
+                prompt=cleaned_prompt,
+                references=references or None,
+                audio_config={
+                    "format": "mp3",
+                    "sample_rate": 48000,
+                    "pitch_rate": 0,
+                    "speech_rate": 0,
+                    "loudness_rate": 0,
+                },
+                watermark={},
+            )
+            if not result.success or not result.outputs:
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail=result.error or "豆包场景音频生成失败",
+                )
+            output_path = await asyncio.to_thread(
+                _materialize_output_reference,
+                result.outputs[0],
+                kind="audio",
+                subdir="audio/scene",
+            )
+            response = _build_audio_response(
+                mode=mode,
+                model_id=resolved_model_id,
+                output_path=output_path,
+                metadata=_merge_points_billing_metadata(
+                    {
+                        "requested_model_id": requested_model_id,
+                        "resolved_model_id": resolved_model_id,
+                        "generation_type": normalized_generation_type,
+                        "speaker_ids": [item["speaker"] for item in references],
+                        "format": "mp3",
+                        "sample_rate": 48000,
+                        **dict(result.metadata or {}),
+                    },
+                    precheck,
+                ),
+            )
+            _settle_asset_studio_billing(
+                db=db,
+                current_user=current_user,
+                precheck=precheck,
+                kind="audio",
+                mode=mode,
+                basis_yuan=basis_yuan,
+                model_id=resolved_model_id,
+                summary="资产工作台场景音频生成已完成，积分已结算。",
+                extra_payload={"generation_type": normalized_generation_type, "speaker_count": len(references)},
+            )
+            return response
+        except Exception:
+            _release_asset_studio_billing_safely(
+                db=db,
+                current_user=current_user,
+                precheck=precheck,
+                reason="资产工作台场景音频生成失败，已释放冻结积分。",
+                kind="audio",
+                mode=mode,
+            )
+            raise
 
     if normalized_generation_type == "music":
         resolved_duration = _validate_audio_duration("music", duration)

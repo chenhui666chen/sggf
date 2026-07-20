@@ -68,22 +68,12 @@ export const useAudiobookCharacterVoiceSettings = ({
     })
   }, [patchCharacterVoice, voicePresets])
 
-  const handleTtsModelChangeForCharacter = useCallback((characterId: number, nextModel: TtsModel | 'inherit') => {
-    if (nextModel === 'inherit') {
-      patchCharacterVoice(characterId, () => ({ ttsModel: undefined, source: 'user' }))
-      return
-    }
-
+  const handleTtsModelChangeForCharacter = useCallback((characterId: number, nextModel: TtsModel) => {
     patchCharacterVoice(characterId, () => ({ ttsModel: nextModel, source: 'user' }))
-  }, [patchCharacterVoice])
-
-  const handleVoiceCloneDataUrlChange = useCallback((characterId: number, voiceCloneDataUrl: string) => {
-    patchCharacterVoice(characterId, () => ({ voiceCloneDataUrl: voiceCloneDataUrl || undefined, source: 'user' }))
   }, [patchCharacterVoice])
 
   return {
     handleVoiceChange,
     handleTtsModelChangeForCharacter,
-    handleVoiceCloneDataUrlChange,
   }
 }

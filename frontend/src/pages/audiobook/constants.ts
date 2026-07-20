@@ -31,9 +31,16 @@ export const EXPORT_STAGE_CONFIG: readonly StageConfig[] = [
   { key: 'project_export', name: '项目导出', icon: '11', desc: '打包整本输出文件' },
 ]
 
+export const PROMPT_AUDIO_ASR_STAGE_CONFIG: readonly StageConfig[] = [
+  { key: 'asr_transcript_queued', name: 'ASR 排队', icon: 'A1', desc: '等待手动转写任务启动' },
+  { key: 'asr_transcript_provider_check', name: '配置检查', icon: 'A2', desc: '检查 ASR provider 与成本控制' },
+  { key: 'asr_transcript_skipped', name: '转写结果', icon: 'A3', desc: '记录转写状态或跳过原因' },
+]
+
 export const STAGE_CONFIG: readonly StageConfig[] = [
   ...GENERATION_STAGE_CONFIG,
   ...EXPORT_STAGE_CONFIG,
+  ...PROMPT_AUDIO_ASR_STAGE_CONFIG,
 ]
 
 export const STAGE_KEYS: StageKey[] = STAGE_CONFIG.map((stage) => stage.key)

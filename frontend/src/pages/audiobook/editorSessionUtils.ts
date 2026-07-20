@@ -154,10 +154,16 @@ export const normalizeTimelineEdits = (edits: unknown): TimelineClipEditMap => {
       continue
     }
 
-    normalized[clipKey] = {
+    const nextEdit: TimelineClipEditMap[string] = {
       startUnit,
       durationUnits,
     }
+    const volume = Number(edit.volume)
+    if (Number.isFinite(volume)) {
+      nextEdit.volume = Math.max(0, Math.min(1, volume))
+    }
+
+    normalized[clipKey] = nextEdit
   }
 
   return normalized

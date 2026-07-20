@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest'
+import * as scriptSegmentCardUtils from '../scriptSegmentCardUtils'
 
 import {
   formatScriptSegmentSummary,
+  getInlineTagStrategySummary,
   getMusicCueInputValue,
   getScriptSegmentVoiceParams,
   getScriptSegmentSpeakerLabel,
@@ -14,6 +16,52 @@ import {
 } from '../scriptSegmentCardUtils'
 
 describe('script segment card utils', () => {
+  it('builds structured patches for explicit audio library selections', () => {
+    const utils = scriptSegmentCardUtils as unknown as {
+      buildSoundEffectAssetPatch: (selection: {
+        id: string
+        type: 'sfx'
+        label: string
+        name?: string
+      }) => unknown
+      buildMusicAssetPatch: (selection: {
+        id: string
+        type: 'music'
+        label: string
+        style?: string
+        mood?: string
+      }) => unknown
+    }
+
+    expect(typeof utils.buildSoundEffectAssetPatch).toBe('function')
+    expect(utils.buildSoundEffectAssetPatch({
+      id: 'sfx-door-01',
+      type: 'sfx',
+      label: 'Heavy door',
+      name: 'Heavy door',
+    })).toEqual({
+      sound_effects: [{ asset_id: 'sfx-door-01', name: 'Heavy door' }],
+      sound_effects_simple: [],
+    })
+
+    expect(typeof utils.buildMusicAssetPatch).toBe('function')
+    expect(utils.buildMusicAssetPatch({
+      id: 'music-tense-01',
+      type: 'music',
+      label: 'Tense strings - tense',
+      style: 'Tense strings',
+      mood: 'tense',
+    })).toEqual({
+      music_cue: {
+        asset_id: 'music-tense-01',
+        style: 'Tense strings',
+        name: 'Tense strings - tense',
+        mood: 'tense',
+      },
+      music_cue_simple: null,
+    })
+  })
+
   it('parses optional numeric input without forcing blank values to zero', () => {
     expect(parseOptionalNumberInput('1.25')).toBe(1.25)
     expect(parseOptionalNumberInput(' 0 ')).toBe(0)
@@ -33,6 +81,31 @@ describe('script segment card utils', () => {
     const params = { speed: 1.1, pitch: 42 }
     expect(getScriptSegmentVoiceParams({ voice_params: params })).toBe(params)
     expect(getScriptSegmentVoiceParams({ voice_params: null })).toEqual({})
+  })
+
+  it('summarizes provider prompt inline tag strategy for review display', () => {
+    expect(getInlineTagStrategySummary({
+      voice_params: {
+        provider_prompt_snapshot: {
+          provider_prompt: {
+            inline_tag_strategy: {
+              model_family: 'doubao',
+              placement: 'text_prefix',
+              style_tags: ['旁白'],
+              inline_tags: ['低语', '吸气'],
+              use_tag_parser: true,
+            },
+          },
+        },
+      },
+    })).toEqual({
+      modelFamily: 'doubao',
+      placement: 'text_prefix',
+      tags: ['旁白', '低语', '吸气'],
+      useTagParser: true,
+    })
+
+    expect(getInlineTagStrategySummary({ voice_params: null })).toBeNull()
   })
 
   it('formats segment summary labels with robust fallbacks', () => {

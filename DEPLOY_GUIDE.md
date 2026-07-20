@@ -102,7 +102,7 @@ Windows 推荐直接使用：
 6. 上传文件到远端项目目录
 7. 删除远端多余文件
 8. 重建并启动容器
-9. 校验容器状态与后端健康接口
+9. 校验容器状态、后端健康接口与试听缓存所需的 OSS driver
 
 ## 配置说明
 
@@ -139,6 +139,21 @@ ssh root@101.132.154.143 "cd /data/apps/novel_writing_agent && if docker compose
 ```powershell
 ssh root@101.132.154.143 "curl -sS http://127.0.0.1:8000/health"
 ```
+
+查看有声书试听缓存所需的 OSS driver：
+
+```powershell
+ssh root@101.132.154.143 "cd /data/apps/novel_writing_agent && if docker compose version >/dev/null 2>&1; then docker compose exec -T backend printenv AUDIOBOOK_AUDIO_LIBRARY_STORAGE_DRIVER; else docker-compose exec -T backend printenv AUDIOBOOK_AUDIO_LIBRARY_STORAGE_DRIVER; fi"
+```
+
+生产环境必须输出 `aliyun_oss`。`/api/v1/audiobook/tts/preview-cached` 依赖该 driver 对 `shared/audio_library/tts_preview/...` 做 OSS HEAD 命中检查；如果实际容器值退回 `dashscope_oss` 或 `local_fs`，服务健康检查仍可能通过，但试听会重新合成，无法复用已经上传到 OSS 的公共试听。
+
+同时确认后端容器中以下变量非空，否则 `aliyun_oss` 虽然启用，但 OSS HEAD 检查仍会失败并降级为未命中：
+
+- `AUDIOBOOK_AUDIO_LIBRARY_OSS_BUCKET`
+- `AUDIOBOOK_AUDIO_LIBRARY_OSS_ENDPOINT`
+- `AUDIOBOOK_AUDIO_LIBRARY_OSS_ACCESS_KEY_ID`
+- `AUDIOBOOK_AUDIO_LIBRARY_OSS_ACCESS_KEY_SECRET`
 
 查看磁盘占用：
 

@@ -17,6 +17,8 @@ from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 
+from app.services.audiobook.audio_library_rating_service import is_community_rejected_status
+
 logger = logging.getLogger(__name__)
 
 BACKEND_DIR = Path(__file__).resolve().parents[4]
@@ -67,6 +69,7 @@ class MusicCue:
     duration: float = 30.0  # 持续时长（秒）
     sync_with_dialogue: bool = True  # 对话时自动降低音量
     dialogue_volume_reduction: float = 0.5  # 对话时音量降低比例
+    asset_id: str = ""
 
 
 class MusicComposer:
@@ -323,6 +326,8 @@ class MusicComposer:
             bucket_groups: Dict[str, List[str]] = {}
 
             for item in records:
+                if is_community_rejected_status(item.get("quality_status")):
+                    continue
                 entry_id = item.get("id") or item.get("name")
                 if not entry_id:
                     continue
@@ -346,6 +351,7 @@ class MusicComposer:
 
                 self.music_library[entry_id] = {
                     "mood": mood,
+                    "style": item.get("style") or "",
                     "description": str(description)[:200],
                     "file": file_path,
                     "source": item.get("source", "index"),
@@ -561,6 +567,48 @@ class MusicComposer:
         start_time = scene.get("start_time", 0.0)
         duration = scene.get("duration", 60.0)
         scene_description = scene.get("description", "场景")
+
+        explicit_asset_id = str(scene.get("music_asset_id") or "").strip()
+        if explicit_asset_id:
+            music_info = self._match_music_by_asset_id(explicit_asset_id)
+            if music_info:
+                selected_mood = self._normalize_music_mood(music_info.get("mood") or mood)
+
+                def scene_float(key: str, default: float, minimum: float, maximum: float) -> float:
+                    try:
+                        value = float(scene.get(key, default))
+                    except (TypeError, ValueError):
+                        value = default
+                    return max(minimum, min(maximum, value))
+
+                default_duration = scene_float("duration", 60.0, 0.0, 120.0)
+                return MusicCue(
+                    scene_id=str(scene.get("scene_id") or "scene"),
+                    timestamp=scene_float("start_time", 0.0, 0.0, 86400.0)
+                    + scene_float("music_start_time", 0.0, 0.0, 600.0),
+                    music_type=MusicType.UNDERSCORE,
+                    mood=MusicMood(selected_mood),
+                    description=str(
+                        scene.get("music_style")
+                        or music_info.get("style")
+                        or music_info.get("description")
+                        or scene_description
+                    ),
+                    audio_file=str(music_info.get("file") or ""),
+                    volume=scene_float("music_volume", 0.15, 0.0, 1.0),
+                    fade_in=scene_float("music_fade_in", 3.0, 0.0, 30.0),
+                    fade_out=scene_float("music_fade_out", 3.0, 0.0, 30.0),
+                    duration=scene_float("music_duration", default_duration, 0.0, 120.0),
+                    sync_with_dialogue=bool(scene.get("music_sync_with_dialogue", True)),
+                    dialogue_volume_reduction=scene_float(
+                        "music_dialogue_volume_reduction",
+                        0.6,
+                        0.0,
+                        1.0,
+                    ),
+                    asset_id=explicit_asset_id,
+                )
+            logger.warning("显式配乐素材 ID 不存在或文件不可用，将回退到自动匹配: %s", explicit_asset_id)
         
         # 选择“可复用桶”的基准风格提示词：避免每个场景都拼接细节，导致缓存无法命中
         bucket_prompt = self._select_ai_prompt_for_scene(scene) or ""
@@ -649,6 +697,12 @@ class MusicComposer:
             "description": "平静的氛围音乐",
             "file": "peaceful_ambient.mp3"
         }
+
+    def _match_music_by_asset_id(self, asset_id: str) -> Optional[Dict[str, Any]]:
+        normalized_id = str(asset_id or "").strip()
+        if not normalized_id:
+            return None
+        return self.music_library.get(normalized_id)
     
     async def create_theme_music(
         self,
@@ -754,6 +808,15 @@ class MusicComposer:
         for cue in self.music_cues:
             if cue.music_type in [MusicType.OPENING, MusicType.ENDING, MusicType.THEME]:
                 optimized_cues.append(cue)
+
+        # 用户显式选中的素材不受自动配乐覆盖率裁剪。
+        explicit_scene_cues = [
+            cue
+            for cue in self.music_cues
+            if cue.music_type == MusicType.UNDERSCORE and cue.asset_id
+        ]
+        explicit_scene_cues.sort(key=lambda cue: cue.timestamp)
+        optimized_cues.extend(explicit_scene_cues)
         
         # 根据情绪优先级添加场景音乐
         mood_priority = {
@@ -766,7 +829,11 @@ class MusicComposer:
             MusicMood.PEACEFUL: 6
         }
         
-        scene_cues = [c for c in self.music_cues if c.music_type == MusicType.UNDERSCORE]
+        scene_cues = [
+            cue
+            for cue in self.music_cues
+            if cue.music_type == MusicType.UNDERSCORE and not cue.asset_id
+        ]
         scene_cues.sort(key=lambda x: (mood_priority.get(x.mood, 10), x.timestamp))
         
         # 逐个添加，直到达到覆盖率上限
@@ -827,6 +894,7 @@ class MusicComposer:
                     "fade_out": cue.fade_out,
                     "sync_with_dialogue": cue.sync_with_dialogue,
                     "dialogue_volume_reduction": cue.dialogue_volume_reduction,
+                    "asset_id": cue.asset_id,
                 }
                 for cue in sorted(self.music_cues, key=lambda x: x.timestamp)
             ]

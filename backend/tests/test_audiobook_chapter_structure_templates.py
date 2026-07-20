@@ -143,7 +143,7 @@ def test_opening_segment_gets_performable_tense_delivery():
     assert "悬念" in opening_segment.performance_notes or "低沉" in opening_segment.performance_notes
 
 
-def test_professional_narration_preserves_segment_emotion_and_merges_performance_notes():
+def test_professional_narration_legacy_style_does_not_merge_runtime_instructions():
     params = apply_narration_style_to_tts_params(
         "professional",
         {
@@ -153,8 +153,8 @@ def test_professional_narration_preserves_segment_emotion_and_merges_performance
     )
 
     assert params["emotion"] == "tense"
-    assert "专业、清晰、客观" in params["instructions"]
-    assert "低沉克制，带悬念感，句尾短暂停顿。" in params["instructions"]
+    assert "instructions" not in params
+    assert params["narration_style_legacy"] == "professional"
 
 
 def test_engine_style_application_merges_segment_performance_notes():
@@ -177,4 +177,5 @@ def test_engine_style_application_merges_segment_performance_notes():
     )
 
     assert params["emotion"] == "tense"
-    assert "低沉克制，带悬念感。" in params["instructions"]
+    assert params["performance_notes"] == "低沉克制，带悬念感。"
+    assert "instructions" not in params

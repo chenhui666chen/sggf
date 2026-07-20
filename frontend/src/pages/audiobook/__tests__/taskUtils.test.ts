@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import type { TaskStatus } from '../types'
-import { createEmptyStageMap } from '../utils'
+import { createEmptyStageMap, getStageConfigForTask } from '../utils'
 import {
   buildActiveTaskRefs,
   buildTaskStatusMap,
@@ -337,5 +337,24 @@ describe('audiobook task utils', () => {
     expect(formatAudiobookTaskLabel(buildTask({
       task_type: 'export_audacity',
     }), chapters)).toBe('Audacity ZIP 导出')
+  })
+
+  it('formats prompt audio ASR transcript task labels', () => {
+    const chapters = [
+      { id: 101, chapter_number: 7 },
+    ]
+
+    expect(formatAudiobookTaskLabel(buildTask({
+      chapter_id: 101,
+      task_type: 'prompt_audio_asr_transcript',
+    }), chapters)).toBe('第7章 ASR 转写')
+  })
+
+  it('uses a compact ASR transcript stage config for transcript queue tasks', () => {
+    expect(getStageConfigForTask({ task_type: 'prompt_audio_asr_transcript' }).map((stage) => stage.key)).toEqual([
+      'asr_transcript_queued',
+      'asr_transcript_provider_check',
+      'asr_transcript_skipped',
+    ])
   })
 })

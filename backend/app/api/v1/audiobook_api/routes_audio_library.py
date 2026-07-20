@@ -1,12 +1,14 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
+import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from fastapi import Body, Depends, HTTPException, Query, status
+from fastapi import Body, Depends, File, Form, HTTPException, Query, UploadFile, status
 from fastapi.responses import FileResponse, RedirectResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.exc import SQLAlchemyError
@@ -29,8 +31,17 @@ from app.services.audiobook.audio_library_paths import get_audio_library_dir
 from app.services.audiobook.audio_library_asset_repository import (
     audio_library_asset_to_record,
     list_audio_library_asset_records,
+    replace_audio_library_asset_records,
     upsert_audio_library_asset,
 )
+from app.services.audiobook.audio_library_source_policy import is_allowed_sfx_source
+from app.services.audiobook.audio_library_rating_service import (
+    COMMUNITY_REJECTED_STATUS,
+    get_audio_library_rating_summaries,
+    is_community_rejected_status,
+    submit_audio_library_rating,
+)
+from app.services.audiobook.sfx_metadata import normalize_sfx_semantics
 from app.models.audio_library_asset import AudioLibraryAsset
 
 from app.api.v1.audiobook_api import router
@@ -40,6 +51,8 @@ logger = logging.getLogger(__name__)
 _DEFAULT_AUDIO_LIBRARY_OSS_PREFIX = "shared/audio_library"
 _VALID_SFX_CATEGORIES = {"environment", "action", "emotion", "transition"}
 _VALID_SFX_STYLES = {"cinematic", "realistic", "fantasy", "scifi", "horror", "peaceful", "intense"}
+_ALLOWED_AUDIO_UPLOAD_EXTENSIONS = {".mp3", ".wav", ".ogg", ".flac", ".m4a"}
+_MAX_AUDIO_UPLOAD_BYTES = 50 * 1024 * 1024
 _SFX_SCENE_KEYWORDS = {
     "indoor": (
         "室内", "屋内", "房间", "屋里", "门", "走廊", "大厅", "客厅", "卧室", "厨房",
@@ -99,10 +112,17 @@ class SfxLibraryEntry(BaseModel):
     asset_scope: str = ""
     retrieved_at: str = ""
     license_checked_at: str = ""
+    rating_count: int = 0
+    average_rating: float = 0.0
+    user_rating: Optional[int] = None
 
 
 class MusicLibraryEntry(BaseModel):
     id: str
+    name: str = ""
+    description: str = ""
+    prompt: str = ""
+    tags: List[str] = []
     style: str
     duration: float
     tempo: str
@@ -133,6 +153,13 @@ class MusicLibraryEntry(BaseModel):
     asset_scope: str = ""
     retrieved_at: str = ""
     license_checked_at: str = ""
+    rating_count: int = 0
+    average_rating: float = 0.0
+    user_rating: Optional[int] = None
+
+
+class AudioLibraryRatingRequest(BaseModel):
+    score: int = Field(..., ge=1, le=5)
 
 
 class LibraryStatsResponse(BaseModel):
@@ -199,6 +226,55 @@ def _audio_library_media_type(file_path: Path) -> str:
     return media_types.get(file_path.suffix.lower(), "application/octet-stream")
 
 
+def _parse_audio_upload_tags(value: str) -> List[str]:
+    normalized = str(value or "").replace("，", ",")
+    tags: List[str] = []
+    for item in normalized.split(","):
+        tag = item.strip()
+        if tag and tag not in tags:
+            tags.append(tag)
+    return tags[:20]
+
+
+def _validate_audio_upload_name(value: str) -> str:
+    name = str(value or "").strip()
+    if not name:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="素材名称不能为空")
+    if len(name) > 100:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="素材名称不能超过 100 个字符")
+    if not any("\u4e00" <= char <= "\u9fff" for char in name):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="素材名称请使用中文")
+    return name
+
+
+async def _save_audio_upload_atomic(upload: UploadFile, target_path: Path) -> tuple[int, str]:
+    temp_path = target_path.with_name(f"{target_path.name}.part")
+    digest = hashlib.sha256()
+    total_size = 0
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with temp_path.open("xb") as output:
+            while True:
+                chunk = await upload.read(1024 * 1024)
+                if not chunk:
+                    break
+                total_size += len(chunk)
+                if total_size > _MAX_AUDIO_UPLOAD_BYTES:
+                    raise HTTPException(
+                        status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                        detail="音频文件不能超过 50MB",
+                    )
+                digest.update(chunk)
+                output.write(chunk)
+        if total_size <= 0:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="音频文件不能为空")
+        os.replace(temp_path, target_path)
+        return total_size, digest.hexdigest()
+    except Exception:
+        temp_path.unlink(missing_ok=True)
+        raise
+
+
 def _canonical_sfx_category(value: Any) -> str:
     raw = str(value or "").strip().lower().replace("\\", "/").strip("/")
     if not raw:
@@ -224,7 +300,7 @@ def _canonical_sfx_category(value: Any) -> str:
 
 
 def _normalize_sfx_entry(entry: Dict[str, Any]) -> Dict[str, Any]:
-    normalized = dict(entry)
+    normalized = normalize_sfx_semantics(entry)
     category = _canonical_sfx_category(normalized.get("category"))
     if category:
         normalized["category"] = category
@@ -289,16 +365,124 @@ def _load_library_entries(
     base_dir: Path,
     library_type: str,
     index_name: str,
+    include_disallowed_sfx_sources: bool = False,
 ) -> list:
     try:
-        db_records = list_audio_library_asset_records(db, library_type)
+        db_records = list_audio_library_asset_records(
+            db,
+            library_type,
+            include_disallowed_sfx_sources=include_disallowed_sfx_sources,
+        )
     except SQLAlchemyError as exc:
         logger.warning("读取音频素材数据库索引失败，回退 JSON 索引: %s", exc)
         db.rollback()
         db_records = []
-    if db_records:
-        return _hydrate_audio_library_public_urls(db_records)
-    return _hydrate_audio_library_public_urls(_load_json_array(base_dir / index_name))
+
+    json_records = [
+        entry
+        for entry in _load_json_array(base_dir / index_name)
+        if isinstance(entry, dict)
+        and (
+            library_type != "sfx"
+            or include_disallowed_sfx_sources
+            or is_allowed_sfx_source(entry.get("source"))
+        )
+    ]
+    if not db_records:
+        return _hydrate_audio_library_public_urls([
+            record
+            for record in json_records
+            if not is_community_rejected_status(record.get("quality_status"))
+        ])
+
+    merged_records = list(db_records)
+    known_asset_ids = {
+        str(entry.get("id") or entry.get("asset_key") or entry.get("source_id") or "").strip()
+        for entry in db_records
+    }
+    for entry in json_records:
+        asset_id = str(entry.get("id") or entry.get("asset_key") or entry.get("source_id") or "").strip()
+        if asset_id and asset_id not in known_asset_ids:
+            merged_records.append(entry)
+            known_asset_ids.add(asset_id)
+    return _hydrate_audio_library_public_urls([
+        record
+        for record in merged_records
+        if not is_community_rejected_status(record.get("quality_status"))
+        and (
+            library_type != "sfx"
+            or include_disallowed_sfx_sources
+            or is_allowed_sfx_source(record.get("source"))
+        )
+    ])
+
+
+def _attach_audio_library_rating_summaries(
+    db: Session,
+    *,
+    library_type: str,
+    entries: list[Dict[str, Any]],
+    user_id: int,
+) -> list[Dict[str, Any]]:
+    asset_keys = [
+        str(entry.get("id") or "").strip()
+        for entry in entries
+        if str(entry.get("id") or "").strip()
+    ]
+    if not asset_keys:
+        return entries
+    try:
+        assets = (
+            db.query(AudioLibraryAsset)
+            .filter(
+                AudioLibraryAsset.library_type == library_type,
+                AudioLibraryAsset.asset_key.in_(asset_keys),
+            )
+            .all()
+        )
+        summaries = get_audio_library_rating_summaries(
+            db,
+            assets=assets,
+            user_id=user_id,
+        )
+    except SQLAlchemyError as exc:
+        logger.warning("读取音频素材评分失败，返回无评分列表: %s", exc)
+        db.rollback()
+        summaries = {}
+
+    enriched: list[Dict[str, Any]] = []
+    for entry in entries:
+        item = dict(entry)
+        summary = summaries.get(str(item.get("id") or ""), {})
+        item["rating_count"] = int(summary.get("rating_count") or 0)
+        item["average_rating"] = float(summary.get("average_score") or 0.0)
+        item["user_rating"] = summary.get("user_score")
+        enriched.append(item)
+    return enriched
+
+
+def _sync_community_rejected_to_json(
+    *,
+    base_dir: Path,
+    library_type: str,
+    asset_id: str,
+    moderation_metadata: dict[str, Any],
+) -> None:
+    index_path = base_dir / _index_name_for_library_type(library_type)
+    entries = [entry for entry in _load_json_array(index_path) if isinstance(entry, dict)]
+    changed = False
+    updated_entries: list[Dict[str, Any]] = []
+    for entry in entries:
+        item = dict(entry)
+        if _entry_asset_id(item) == asset_id:
+            item["quality_status"] = COMMUNITY_REJECTED_STATUS
+            metadata = dict(item.get("metadata_json") or {})
+            metadata["community_moderation"] = dict(moderation_metadata)
+            item["metadata_json"] = metadata
+            changed = True
+        updated_entries.append(item)
+    if changed:
+        _write_json_array_atomic(index_path, updated_entries)
 
 
 @router.get(
@@ -389,6 +573,12 @@ async def browse_sound_effects(
             or any(search_lower in t.lower() for t in e.get("scenes", []))
         ]
 
+    results = _attach_audio_library_rating_summaries(
+        db,
+        library_type="sfx",
+        entries=results,
+        user_id=current_user.id,
+    )
     return [SfxLibraryEntry(**e) for e in results]
 
 
@@ -420,12 +610,218 @@ async def browse_music(
         search_lower = search.lower()
         results = [
             e for e in results
-            if search_lower in e.get("style", "").lower()
+            if search_lower in e.get("name", "").lower()
+            or search_lower in e.get("description", "").lower()
+            or search_lower in e.get("style", "").lower()
             or search_lower in e.get("mood", "").lower()
             or search_lower in e.get("prompt", "").lower()
+            or any(search_lower in str(tag).lower() for tag in e.get("tags", []))
         ]
 
+    results = _attach_audio_library_rating_summaries(
+        db,
+        library_type="music",
+        entries=results,
+        user_id=current_user.id,
+    )
     return [MusicLibraryEntry(**e) for e in results]
+
+
+@router.post(
+    "/audio-library/assets/upload",
+    summary="上传共享音频素材",
+)
+async def upload_audio_library_file(
+    library_type: str = Form(...),
+    name: str = Form(...),
+    description: str = Form(default=""),
+    category: str = Form(default=""),
+    style: str = Form(default=""),
+    mood: str = Form(default=""),
+    tags: str = Form(default=""),
+    license_commercial: bool = Form(default=False),
+    rights_confirmed: bool = Form(default=False),
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    normalized_type = str(library_type or "").strip().lower()
+    if normalized_type not in {"sfx", "music"}:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="素材类型必须为 sfx 或 music")
+    if not rights_confirmed:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="必须确认拥有该音频的共享和使用授权",
+        )
+
+    normalized_name = _validate_audio_upload_name(name)
+    suffix = Path(file.filename or "").suffix.lower()
+    if suffix not in _ALLOWED_AUDIO_UPLOAD_EXTENSIONS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="仅支持 mp3、wav、ogg、flac、m4a 音频文件",
+        )
+    content_type = str(file.content_type or "application/octet-stream").lower()
+    if not (content_type.startswith("audio/") or content_type == "application/octet-stream"):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="上传文件必须是音频")
+
+    asset_id = f"user_{normalized_type}_{uuid.uuid4().hex}"
+    asset_subdir = "sound_effects/user_upload" if normalized_type == "sfx" else "music_cache/user_upload"
+    relative_path = f"{asset_subdir}/{asset_id}{suffix}"
+    base_dir = get_audio_library_dir()
+    target_path = base_dir / relative_path
+    index_path = base_dir / _index_name_for_library_type(normalized_type)
+    index_existed = index_path.exists()
+    previous_entries = [entry for entry in _load_json_array(index_path) if isinstance(entry, dict)]
+    index_written = False
+    storage_metadata: Dict[str, Any] = {}
+
+    try:
+        file_size, sha256 = await _save_audio_upload_atomic(file, target_path)
+        storage_metadata = upload_audio_library_asset(
+            local_path=target_path,
+            relative_path=relative_path,
+            library_type=normalized_type,
+        )
+        record: Dict[str, Any] = {
+            "id": asset_id,
+            "name": normalized_name,
+            "description": str(description or "").strip(),
+            "file_path": relative_path,
+            "source": "user_upload",
+            "author": str(current_user.username or "").strip(),
+            "license": "用户授权共享",
+            "license_commercial": bool(license_commercial),
+            "attribution_required": False,
+            "tags": _parse_audio_upload_tags(tags),
+            "file_size": file_size,
+            "sha256": sha256,
+            "content_type": content_type,
+            "asset_scope": "shared_library",
+            "metadata_json": {
+                "uploaded_by_user_id": current_user.id,
+                "rights_confirmed": True,
+            },
+            **storage_metadata,
+        }
+        if normalized_type == "sfx":
+            normalized_category = _canonical_sfx_category(category) or "action/realistic"
+            record.update({
+                "category": normalized_category,
+                "style": str(style or "").strip() or (
+                    normalized_category.split("/", 1)[1] if "/" in normalized_category else "realistic"
+                ),
+            })
+            record["scenes"] = _infer_sfx_scenes(record)
+        else:
+            record.update({
+                "style": str(style or "").strip() or "其他",
+                "mood": str(mood or "").strip() or "其他",
+                "duration": 0.0,
+                "tempo": "",
+                "bucket": "",
+                "prompt": str(description or "").strip(),
+            })
+
+        upsert_audio_library_asset(db, normalized_type, record)
+        db.flush()
+        _write_json_array_atomic(index_path, [*previous_entries, record])
+        index_written = True
+        db.commit()
+        return {"success": True, "asset": record}
+    except HTTPException:
+        db.rollback()
+        if index_written:
+            if index_existed:
+                _write_json_array_atomic(index_path, previous_entries)
+            else:
+                index_path.unlink(missing_ok=True)
+        target_path.unlink(missing_ok=True)
+        raise
+    except Exception as exc:
+        db.rollback()
+        if index_written:
+            try:
+                if index_existed:
+                    _write_json_array_atomic(index_path, previous_entries)
+                else:
+                    index_path.unlink(missing_ok=True)
+            except OSError:
+                logger.exception("恢复音频素材 JSON 索引失败")
+        target_path.unlink(missing_ok=True)
+        object_key = str(storage_metadata.get("object_key") or "").strip()
+        if object_key:
+            try:
+                delete_audio_library_object(object_key=object_key)
+            except Exception:
+                logger.exception("清理上传失败后的云端音频素材失败")
+        logger.exception("上传共享音频素材失败")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="上传共享音频素材失败",
+        ) from exc
+    finally:
+        await file.close()
+
+
+@router.post(
+    "/audio-library/assets/{library_type}/{asset_id}/rating",
+    summary="提交共享音频素材评分",
+)
+async def rate_audio_library_asset(
+    library_type: str,
+    asset_id: str,
+    request: AudioLibraryRatingRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    normalized_type = str(library_type or "").strip().lower()
+    index_name = _index_name_for_library_type(normalized_type)
+    normalized_asset_id = str(asset_id or "").strip()
+    if not normalized_asset_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="asset_id is required")
+
+    asset = (
+        db.query(AudioLibraryAsset)
+        .filter(
+            AudioLibraryAsset.library_type == normalized_type,
+            AudioLibraryAsset.asset_key == normalized_asset_id,
+        )
+        .with_for_update()
+        .first()
+    )
+    if asset is None:
+        base_dir = get_audio_library_dir()
+        entries = [entry for entry in _load_json_array(base_dir / index_name) if isinstance(entry, dict)]
+        entry = next((item for item in entries if _entry_asset_id(item) == normalized_asset_id), None)
+        if entry is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="素材不存在")
+        asset = upsert_audio_library_asset(db, normalized_type, entry)
+        db.flush()
+
+    try:
+        result = submit_audio_library_rating(
+            db,
+            asset=asset,
+            user_id=current_user.id,
+            score=request.score,
+        )
+        if result["auto_unpublished"]:
+            moderation_metadata = dict(asset.metadata_json or {}).get("community_moderation") or {}
+            _sync_community_rejected_to_json(
+                base_dir=get_audio_library_dir(),
+                library_type=normalized_type,
+                asset_id=normalized_asset_id,
+                moderation_metadata=moderation_metadata,
+            )
+        db.commit()
+        return result
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except Exception:
+        db.rollback()
+        raise
 
 
 @router.get(
@@ -461,17 +857,15 @@ async def preview_audio_library_file(
     if not entry:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="素材未找到")
 
-    file_path = base_dir / entry["file_path"]
-    if file_path.exists():
+    file_path = _resolve_deletable_library_file(base_dir, str(entry.get("file_path") or ""))
+    if file_path and file_path.exists() and file_path.is_file():
         return FileResponse(str(file_path), media_type=_audio_library_media_type(file_path))
 
     public_url = _resolve_audio_library_public_url(entry)
     if public_url.startswith(("http://", "https://")):
         return RedirectResponse(public_url)
 
-    file_path = base_dir / entry["file_path"]
-    if not file_path.exists():
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="文件不存在")
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="文件不存在")
 
 
 class SfxSearchRequest(BaseModel):
@@ -518,6 +912,7 @@ class LibraryCleanupRequest(BaseModel):
     min_quality_score: float = 40.0
     dry_run: bool = True
     confirm: bool = False
+    plan_token: str = ""
 
 
 class AudioLibraryCloudSyncRequest(BaseModel):
@@ -782,15 +1177,65 @@ def _cleanup_detail(library_type: str, entry: Dict[str, Any], reason: str, size:
     }
 
 
+def _build_library_cleanup_plan_token(
+    request: LibraryCleanupRequest,
+    details: Dict[str, List[Dict[str, Any]]],
+) -> str:
+    targets = []
+    for detail_type in ("missing_entries", "low_quality_entries", "orphaned_files"):
+        for item in details[detail_type]:
+            targets.append({
+                "detail_type": detail_type,
+                "library_type": str(item.get("library_type") or ""),
+                "id": str(item.get("id") or ""),
+                "file_path": str(item.get("file_path") or ""),
+                "reason": str(item.get("reason") or ""),
+                "size": int(item.get("size") or 0),
+            })
+    targets.sort(key=lambda item: (
+        item["detail_type"],
+        item["library_type"],
+        item["id"],
+        item["file_path"],
+    ))
+    payload = {
+        "library_type": request.library_type,
+        "remove_orphaned": request.remove_orphaned,
+        "remove_missing_files": request.remove_missing_files,
+        "remove_low_quality": request.remove_low_quality,
+        "min_quality_score": float(request.min_quality_score),
+        "targets": targets,
+    }
+    encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def _write_json_array_atomic(path: Path, entries: List[Dict[str, Any]]) -> None:
+    temp_path = path.with_name(f"{path.name}.tmp")
+    try:
+        temp_path.write_text(
+            json.dumps(entries, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        temp_path.replace(path)
+    except Exception:
+        try:
+            temp_path.unlink(missing_ok=True)
+        except OSError:
+            logger.warning("音频素材 JSON 临时文件清理失败: %s", temp_path)
+        raise
+
+
 def _scan_library_cleanup(
     base_dir: Path,
     library_type: str,
     index_name: str,
     asset_subdir: str,
     request: LibraryCleanupRequest,
+    source_entries: Optional[List[Dict[str, Any]]] = None,
 ) -> tuple[List[Dict[str, Any]], List[Dict[str, Any]], Dict[str, List[Dict[str, Any]]], Dict[str, int]]:
     index_path = base_dir / index_name
-    entries = _load_json_array(index_path)
+    entries = source_entries if source_entries is not None else _load_json_array(index_path)
     cleaned: List[Dict[str, Any]] = []
     removed_entries: List[Dict[str, Any]] = []
     details = {"missing_entries": [], "low_quality_entries": [], "orphaned_files": []}
@@ -803,7 +1248,9 @@ def _scan_library_cleanup(
         if resolved:
             indexed_files.add(resolved.resolve(strict=False).as_posix())
 
-        missing = request.remove_missing_files and (not resolved or not resolved.exists())
+        has_local_file = bool(resolved and resolved.exists() and resolved.is_file())
+        has_cloud_file = _resolve_audio_library_public_url(entry).startswith(("http://", "https://"))
+        missing = request.remove_missing_files and not has_local_file and not has_cloud_file
         low_quality = request.remove_low_quality and _is_low_quality_entry(entry, request.min_quality_score)
 
         if missing:
@@ -1218,64 +1665,13 @@ async def build_sfx_manifest_draft(
 async def import_sfx_manifest(
     request: SfxManifestImportRequest,
     current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
 ):
     _require_audio_library_admin(current_user)
-    if not request.dry_run and not request.confirm:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="执行实际导入必须传入 dry_run=false 且 confirm=true",
-        )
-
-    base_dir = get_audio_library_dir()
-    manifest_path = _resolve_audio_library_input_path(
-        base_dir,
-        request.manifest_path,
-        "manifest_path",
-        "sfx_import_manifest_draft.jsonl",
+    raise HTTPException(
+        status_code=status.HTTP_410_GONE,
+        detail="音效素材库已停止导入第三方或本地 manifest，请使用用户上传或 AI 生成音效。",
     )
-    source_dir = _resolve_audio_library_input_path(
-        base_dir,
-        request.source_dir,
-        "source_dir",
-        "approved_sfx",
-    )
-
-    if not manifest_path.exists() or not manifest_path.is_file():
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="manifest_path 文件不存在",
-        )
-    if not source_dir.exists() or not source_dir.is_dir():
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="source_dir 目录不存在",
-        )
-
-    from app.services.audiobook.sfx_library_downloader import SfxLibraryDownloader
-
-    downloader = SfxLibraryDownloader(
-        output_dir=base_dir / "sound_effects",
-        index_path=base_dir / "sound_effects_index.json",
-    )
-    try:
-        result = downloader.import_local_assets(
-            source_dir,
-            manifest_path,
-            dry_run=request.dry_run,
-            overwrite=request.overwrite,
-        )
-    finally:
-        downloader.close()
-
-    return {
-        "success": True,
-        "dry_run": request.dry_run,
-        "manifest_path": str(manifest_path),
-        "source_dir": str(source_dir),
-        **result,
-    }
-
-
 @router.post(
     "/audio-library/db-sync",
     summary="同步 JSON 音频素材索引到数据库",
@@ -1294,7 +1690,7 @@ async def sync_audio_library_json_indexes_to_db(
 
     base_dir = get_audio_library_dir()
     stats = {"candidates": 0, "synced": 0}
-    details = {"candidates": [], "synced": []}
+    details = {"candidates": [], "synced": [], "rejected": []}
 
     for target_type, index_name in _resolve_library_type_targets(request.library_type):
         entries = _load_json_array(base_dir / index_name)
@@ -1305,6 +1701,14 @@ async def sync_audio_library_json_indexes_to_db(
                 "id": str(entry.get("id") or entry.get("asset_key") or entry.get("source_id") or ""),
                 "file_path": str(entry.get("file_path") or entry.get("file") or ""),
             })
+            if target_type == "sfx" and not is_allowed_sfx_source(entry.get("source")):
+                details["rejected"].append({
+                    "library_type": target_type,
+                    "id": str(entry.get("id") or entry.get("asset_key") or entry.get("source_id") or ""),
+                    "source": str(entry.get("source") or ""),
+                    "reason": "source_not_allowed",
+                })
+                continue
             if request.dry_run:
                 continue
             asset = upsert_audio_library_asset(db, target_type, entry)
@@ -1886,6 +2290,7 @@ async def delete_audio_library_asset(
 async def cleanup_audio_library(
     request: LibraryCleanupRequest,
     current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
 ):
     _require_audio_library_admin(current_user)
     if not request.dry_run and not request.confirm:
@@ -1918,34 +2323,68 @@ async def cleanup_audio_library(
             detail="library_type 必须为 sfx、music 或 both",
         )
 
+    scan_results = []
     for target_type, index_name, asset_subdir in cleanup_targets:
+        source_entries = _load_library_entries(
+            db=db,
+            base_dir=base_dir,
+            library_type=target_type,
+            index_name=index_name,
+            include_disallowed_sfx_sources=target_type == "sfx",
+        )
         entries, cleaned, target_details, target_stats = _scan_library_cleanup(
             base_dir,
             target_type,
             index_name,
             asset_subdir,
             request,
+            source_entries=source_entries,
         )
         for key, value in target_stats.items():
             stats[key] += value
         for key, value in target_details.items():
             details[key].extend(value)
+        scan_results.append((target_type, index_name, cleaned, target_details))
 
-        if request.dry_run:
-            continue
+    plan_token = _build_library_cleanup_plan_token(request, details)
+    if request.dry_run:
+        return {
+            "success": True,
+            "dry_run": True,
+            "plan_token": plan_token,
+            "stats": stats,
+            "details": details,
+        }
+    if not request.plan_token:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="执行实际清理必须携带 dry_run 返回的 plan_token",
+        )
+    if request.plan_token != plan_token:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="清理目标或参数已变化，请重新执行 dry_run 预览",
+        )
 
+    for target_type, index_name, cleaned, target_details in scan_results:
         for item in target_details["low_quality_entries"]:
             _unlink_library_file(base_dir, item["file_path"])
         for item in target_details["orphaned_files"]:
             _unlink_library_file(base_dir, item["file_path"])
 
-        if len(cleaned) != len(entries):
-            index_path = base_dir / index_name
-            index_path.write_text(json.dumps(cleaned, ensure_ascii=False, indent=2), encoding="utf-8")
+        _write_json_array_atomic(base_dir / index_name, cleaned)
+
+        try:
+            replace_audio_library_asset_records(db, target_type, cleaned)
+            db.commit()
+        except SQLAlchemyError as exc:
+            logger.warning("同步音频素材清理结果到数据库失败，保留 JSON 清理结果: %s", exc)
+            db.rollback()
 
     return {
         "success": True,
-        "dry_run": request.dry_run,
+        "dry_run": False,
+        "plan_token": plan_token,
         "stats": stats,
         "details": details,
     }

@@ -25,11 +25,12 @@ describe('StepAudio voice asset source wiring', () => {
     expect(source).toContain('deleteStepAudioVoiceAsset')
   })
 
-  it('sends StepAudio asset ids in custom voice preview payloads', () => {
+  it('previews custom voices by voice id references only', () => {
     const source = readSource('src/pages/audiobook/useAudiobookVoiceActions.ts')
 
-    expect(source).toContain("model === 'stepaudio-2.5-tts'")
-    expect(source).toContain('stepaudio_voice_asset_id')
+    expect(source).toContain('voice_id: voiceId')
+    expect(source).not.toContain('stepaudio_voice_asset_id')
+    expect(source).not.toContain('mimo_voice_asset_id')
   })
 
   it('guards StepAudio reference assets that are missing file ids from preview selection', () => {

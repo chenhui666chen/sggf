@@ -1,7 +1,9 @@
 import {
   Box,
+  Chip,
   Divider,
   Paper,
+  Stack,
   TextField,
   Typography,
 } from '@mui/material'
@@ -13,6 +15,9 @@ import type {
 } from './types'
 import AudioPicker from './AudioPicker'
 import {
+  buildMusicAssetPatch,
+  buildSoundEffectAssetPatch,
+  getInlineTagStrategySummary,
   getMusicCueInputValue,
   getScriptSegmentVoiceParams,
   getSoundEffectsInputValue,
@@ -38,6 +43,7 @@ const ScriptSegmentDetailsPanel = ({
   mutedTextColor,
 }: ScriptSegmentDetailsPanelProps) => {
   const voiceParams = getScriptSegmentVoiceParams(segment)
+  const inlineTagStrategy = getInlineTagStrategySummary(segment)
   const soundEffectsValue = getSoundEffectsInputValue(segment)
   const musicCueValue = getMusicCueInputValue(segment)
   const mutedCaptionSx = {
@@ -83,6 +89,27 @@ const ScriptSegmentDetailsPanel = ({
       <Typography variant="caption" sx={{ display: 'block' }}>
         音色参数：{segment.voice_params ? JSON.stringify(segment.voice_params) : '—'}
       </Typography>
+      {inlineTagStrategy && (
+        <Box sx={{ mt: 0.75 }}>
+          <Typography variant="caption" sx={mutedCaptionSx}>
+            标签注入策略
+          </Typography>
+          <Stack direction="row" spacing={0.75} useFlexGap flexWrap="wrap">
+            {inlineTagStrategy.modelFamily && (
+              <Chip size="small" label={`模型：${inlineTagStrategy.modelFamily}`} />
+            )}
+            {inlineTagStrategy.placement && (
+              <Chip size="small" label={`位置：${inlineTagStrategy.placement}`} />
+            )}
+            {inlineTagStrategy.useTagParser && (
+              <Chip size="small" label="Tag Parser" color="primary" variant="outlined" />
+            )}
+            {inlineTagStrategy.tags.map((tag) => (
+              <Chip key={tag} size="small" label={tag} variant="outlined" />
+            ))}
+          </Stack>
+        </Box>
+      )}
       <Typography variant="caption" sx={{ display: 'block' }}>
         音效：{segment.sound_effects ? JSON.stringify(segment.sound_effects) : (segment.sound_effects_simple ? JSON.stringify(segment.sound_effects_simple) : '—')}
       </Typography>
@@ -177,6 +204,9 @@ const ScriptSegmentDetailsPanel = ({
             sound_effects: [],
           })
         }
+        onSelectAsset={(selection) =>
+          onUpdateSegment(index, buildSoundEffectAssetPatch(selection))
+        }
         label="音效提示（可从库中选择）"
         paperSx={audioPickerPaperSx}
       />
@@ -189,6 +219,9 @@ const ScriptSegmentDetailsPanel = ({
               music_cue_simple: v || null,
               music_cue: null,
             })
+          }
+          onSelectAsset={(selection) =>
+            onUpdateSegment(index, buildMusicAssetPatch(selection))
           }
           label="配乐提示（可从库中选择）"
           paperSx={audioPickerPaperSx}

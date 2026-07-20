@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import {
   buildAudioLibraryDetailItems,
+  formatAudioAssetDescriptionLabel,
   formatAudioAssetNameLabel,
   formatAudioKeywordLabel,
   formatMusicDurationLabel,
@@ -11,14 +12,15 @@ import {
 } from '../audioLibraryDisplay'
 
 describe('audio library display helpers', () => {
-  it('labels sound effect filters and tags in Chinese while keeping unknown values readable', () => {
+  it('labels all sound effect filters and tags in Chinese', () => {
     expect(formatSfxCategoryLabel('action/realistic')).toBe('动作 / 写实')
     expect(formatAudioKeywordLabel('indoor')).toBe('室内')
     expect(formatAudioKeywordLabel('mystery')).toBe('悬疑')
     expect(formatAudioKeywordLabel('battle')).toBe('战斗')
     expect(formatAudioKeywordLabel('romance')).toBe('浪漫')
     expect(formatAudioKeywordLabel('travel')).toBe('旅行')
-    expect(formatAudioKeywordLabel('custom_alarm')).toBe('custom alarm')
+    expect(formatAudioKeywordLabel('custom_alarm')).toBe('自定义警报')
+    expect(formatAudioKeywordLabel('unmapped_xyz')).toBe('其他')
   })
 
   it('hides generated scene placeholders from scene filters', () => {
@@ -33,6 +35,30 @@ describe('audio library display helpers', () => {
     expect(formatAudioAssetNameLabel('book_page_close_detail_01')).toBe('书页 合上 细节 01')
     expect(formatAudioAssetNameLabel('medicine_pill_bottle_shake_long')).toBe('药片 瓶子 摇晃 长版')
     expect(formatAudioAssetNameLabel('phase_jump_arcane_05')).toBe('相位 跳跃 奥术 05')
+    expect(formatAudioAssetNameLabel('two dice roll table')).toBe('桌面掷两枚骰子声')
+    expect(formatAudioAssetNameLabel('single die roll table')).toBe('桌面掷单枚骰子声')
+    expect(formatAudioAssetNameLabel('glass 瓶子 cork twist')).toBe('玻璃瓶软木塞旋拧声')
+    expect(formatAudioAssetNameLabel('glass 瓶子 uncork')).toBe('玻璃瓶拔塞声')
+    expect(formatAudioAssetNameLabel('train_horn_airchime_k5la')).toBe('火车站火车鸣笛与人群交谈声')
+    expect(formatAudioAssetNameLabel('unmapped foreign title')).toBe('其他音效')
+
+    for (const name of [
+      'two dice roll table',
+      'single die roll table',
+      'glass 瓶子 cork twist',
+      'glass 瓶子 uncork',
+      'unmapped foreign title',
+    ]) {
+      expect(formatAudioAssetNameLabel(name)).not.toMatch(/[A-Za-z]/)
+    }
+  })
+
+  it('builds a concise Chinese description for train station ambience', () => {
+    expect(formatAudioAssetDescriptionLabel({
+      name: 'train_horn_airchime_k5la',
+      description: 'Diesel locomotive horn for train arrivals and railway warnings.',
+      tags: ['train', 'horn', 'people', 'talk', 'station', 'travel'],
+    })).toBe('火车站环境声，包含火车鸣笛、列车运行声和背景人群交谈。')
   })
 
   it('hides license-like tags from the compact user-facing summary', () => {

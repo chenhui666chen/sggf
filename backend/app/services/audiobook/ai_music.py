@@ -22,7 +22,9 @@ from enum import Enum
 
 import requests
 from app.core.config import settings
+from app.db.base import SessionLocal
 from app.services.audiobook.audio_asset_cloud_storage import upload_audio_library_asset
+from app.services.audiobook.audio_library_asset_repository import upsert_audio_library_asset
 
 logger = logging.getLogger(__name__)
 
@@ -577,9 +579,31 @@ class MurekaO1Client:
                     encoding="utf-8",
                 )
                 os.replace(tmp_path, self.index_path)
+            self._upsert_generated_music_to_db_index(record)
         except Exception as e:
             logger.warning(f"⚠️ 更新音乐索引失败: {e}")
     
+    def _upsert_generated_music_to_db_index(self, record: Dict[str, Any]) -> None:
+        """同步共享数据库索引；失败不阻断音乐生成和本地索引写入。"""
+        db = None
+        try:
+            db = SessionLocal()
+            upsert_audio_library_asset(db, "music", record)
+            db.commit()
+        except Exception as exc:
+            if db is not None:
+                try:
+                    db.rollback()
+                except Exception:
+                    pass
+            logger.warning("音乐素材数据库索引写入失败，保留本地索引: %s", exc)
+        finally:
+            if db is not None:
+                try:
+                    db.close()
+                except Exception:
+                    pass
+
     def _remove_mureka_watermark(
         self,
         audio_data: bytes,

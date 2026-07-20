@@ -121,3 +121,9 @@ def test_legacy_cosyvoice_v3_plus_alias_routes_are_not_registered():
     paths = build_route_path_set()
 
     assert not any("/cosyvoice-v3-plus/" in path for path in paths)
+
+
+def test_source_project_character_scope_route_is_registered():
+    paths = build_route_path_set()
+
+    assert "/api/v1/audiobook/source-projects/{project_id:int}/character-scope" in paths

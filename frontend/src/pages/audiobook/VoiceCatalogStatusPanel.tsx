@@ -17,7 +17,7 @@ import type {
 
 type VoiceCatalogNoticeSeverity = 'success' | 'warning' | 'info'
 
-const MIMO_VOICE_CLONE_NOTICE = 'MiMo Voice Clone 不创建系统音色；audio.voice 必须传入 data:{MIME_TYPE};base64,$BASE64_AUDIO 样本。请在角色音色或调用参数中填入授权音频样本，样本 base64 不超过 10 MB。'
+const MIMO_VOICE_CLONE_NOTICE = 'MiMo Voice Clone 使用 audio.voice 样本；请在音色管理窗口上传或录制授权样本并保存为可复用音色，再到角色音色下拉中选用。'
 const MIMO_VOICE_DESIGN_NOTICE = 'MiMo Voice Design 不创建系统音色；请先在上方 MiMo 本地音色中填写 voice design prompt 并保存为可复用音色，再到角色音色下拉中选用。生成时后端会把该音色展开到 role=user，朗读文本仍放在 role=assistant。'
 
 const STEPAUDIO_VOICE_CLONE_NOTICE = 'StepAudio 2.5 TTS 支持 Zero-shot 复刻试听；当前先保存本地参考样本和可选 file_id，正式自生成音色资产创建接口待官方合同确认后再接入。'

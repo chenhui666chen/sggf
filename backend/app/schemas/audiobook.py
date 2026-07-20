@@ -14,7 +14,7 @@ class AudiobookProjectCreate(BaseModel):
     enable_cache: bool = True
     voice_config: Optional[List["CharacterVoiceConfig"]] = None
     tts_model: Optional[str] = "qwen3-tts-instruct-flash"  # TTS 模型（qwen3-tts-instruct-flash / cosyvoice-v3.5-plus）
-    generation_mode: str = "full"  # full: 直接生成音频; script_only: 仅生成剧本+评审
+    generation_mode: str = "script_only"  # full: 直接生成音频; script_only: 仅生成剧本+评审
     force_regenerate_script: bool = True  # 是否强制重新生成剧本（覆盖已有剧本）
     narration_style: Optional[str] = "professional"  # 叙事风格: professional/dramatic/relaxing/expressive/custom
     narration_style_prompt: Optional[str] = None  # 自定义叙事风格prompt
@@ -106,19 +106,7 @@ class CharacterVoiceConfig(BaseModel):
     """角色音频配置（用户可选）"""
     character_name: str
     voice_id: str
-    volume: Optional[int] = None
-    speed: Optional[float] = None
-    pitch: Optional[int] = None
     tts_model: Optional[str] = None
-    voice_type: Optional[str] = None  # 声音类型（majestic/gentle/lively 等）
-    personality: Optional[str] = None  # 性格类型
-    emotion_tendency: Optional[str] = None  # 情感倾向
-
-
-    voice_clone_data_url: Optional[str] = None
-    voice_design_prompt: Optional[str] = None
-    mimo_voice_asset_id: Optional[str] = None
-    stepaudio_voice_asset_id: Optional[str] = None
 
 
 class TTSPreviewRequest(BaseModel):
@@ -143,6 +131,36 @@ class TTSPreviewWithTimestampsRequest(TTSPreviewRequest):
     """带时间戳的 TTS 试听请求"""
     word_timestamp_enabled: bool = True
     phoneme_timestamp_enabled: bool = False
+
+
+class TTSPromptTestPreviewRequest(BaseModel):
+    """独立 TTS 提示词测试试听请求。"""
+
+    model: str
+    case_id: str
+    voice_id: str = ""
+    voice_clone_data_url: Optional[str] = None
+    voice_design_prompt: Optional[str] = None
+    mimo_voice_asset_id: Optional[str] = None
+    stepaudio_voice_asset_id: Optional[str] = None
+
+
+class TTSPromptTestPreviewResponse(BaseModel):
+    """独立 TTS 提示词测试试听响应。"""
+
+    model: str
+    case_id: str
+    text: str
+    voice_id: str
+    style_control_mode: str
+    provider_prompt_snapshot: Dict[str, Any]
+    audio_data_base64: str
+    audio_format: str
+    audio_mime_type: str
+    audio_size_bytes: int
+    provider: Optional[str] = None
+    provider_model: Optional[str] = None
+    transport: Optional[str] = None
 
 
 class TTSWordTimestamp(BaseModel):
@@ -226,6 +244,65 @@ class SegmentReviewRequest(BaseModel):
     quality_score: Optional[float] = None  # 质量评分 1-5
     notes: Optional[str] = None  # 审查备注
     needs_regenerate: Optional[bool] = False  # 是否需要重新生成
+
+
+class PromptAudioManualReviewRequest(BaseModel):
+    """Prompt 与音频一致性人工验收请求"""
+
+    model: str
+    tag_parse_success: Optional[bool] = None
+    text_contamination: Optional[bool] = None
+    score: Optional[float] = Field(default=None, ge=0, le=5)
+    notes: Optional[str] = None
+    asr_transcript: Optional[str] = None
+
+    @field_validator("model")
+    @classmethod
+    def normalize_model(cls, value: str) -> str:
+        model = str(value or "").strip()
+        if not model:
+            raise ValueError("model 不能为空")
+        return model
+
+    @field_validator("notes")
+    @classmethod
+    def normalize_notes(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        notes = str(value).strip()
+        return notes or None
+
+    @field_validator("asr_transcript")
+    @classmethod
+    def normalize_asr_transcript(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        transcript = str(value).strip()
+        return transcript or None
+
+
+class PromptAudioTranscriptQueueRequest(BaseModel):
+    """手动 ASR 转写排队请求。"""
+
+    model: Optional[str] = None
+    provider: Optional[str] = None
+    confirm_cost: bool = False
+
+    @field_validator("model")
+    @classmethod
+    def normalize_transcript_model(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        model = str(value).strip()
+        return model or None
+
+    @field_validator("provider")
+    @classmethod
+    def normalize_provider(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        provider = str(value).strip().lower()
+        return provider or None
 
 
 class ChapterReviewStatus(BaseModel):

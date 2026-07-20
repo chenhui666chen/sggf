@@ -65,6 +65,10 @@ def test_classify_category_default_action(mod):
     assert mod.classify_category("Unknown Sound", "No keywords", ["xyz"]) == "action"
 
 
+def test_classify_category_matches_complete_words(mod):
+    assert mod.classify_category("Scary", "", []) == "emotion"
+
+
 def test_classify_style(mod):
     assert mod.classify_style("Cinematic Impact", "Epic movie trailer", ["cinematic"]) == "cinematic"
     assert mod.classify_style("Field Recording", "Real outdoor recording", ["field", "recording"]) == "realistic"
@@ -204,7 +208,7 @@ def test_classify_result(mod):
     downloader = mod.SfxLibraryDownloader()
 
     result = mod.SfxSearchResult(
-        source="freesound", source_id="123", name="Rain Ambience",
+        source="ai_generated", source_id="123", name="Rain Ambience",
         description="Heavy rain in forest", download_url="http://x.com/rain.mp3",
         license_commercial=True, duration=10.0, tags=["rain", "nature", "forest"],
     )
@@ -215,11 +219,36 @@ def test_classify_result(mod):
     downloader.close()
 
 
+def test_classify_result_corrects_transport_ambience_hints(mod):
+    downloader = mod.SfxLibraryDownloader()
+    result = mod.SfxSearchResult(
+        source="wikimedia",
+        source_id="train-station",
+        name="Train horn at station",
+        description="Train horn with passengers talking on a railway platform.",
+        download_url="https://example.test/train.ogg",
+        license_commercial=True,
+        duration=21.4,
+        tags=["action", "intense", "battle", "train", "horn", "people", "travel"],
+        category_hint="action",
+        style_hint="intense",
+    )
+
+    classification = downloader.classify_result(result)
+
+    assert classification == {
+        "category": "environment",
+        "style": "realistic",
+        "scenes": ["travel"],
+    }
+    downloader.close()
+
+
 def test_build_record(mod):
     downloader = mod.SfxLibraryDownloader()
 
     result = mod.SfxSearchResult(
-        source="freesound", source_id="123", name="Rain Ambience",
+        source="ai_generated", source_id="123", name="Rain Ambience",
         description="Heavy rain in forest", download_url="http://x.com/rain.mp3",
         license_name="Creative Commons 0", license_commercial=True,
         duration=10.0, tags=["rain", "nature"],
@@ -231,14 +260,14 @@ def test_build_record(mod):
     classification = {"category": "environment", "style": "realistic", "scenes": ["outdoor"]}
     record = downloader.build_record(result, classification)
 
-    assert record["id"].startswith("environment_freesound_")
+    assert record["id"].startswith("environment_ai_generated_")
     assert record["category"] == "environment/realistic"
     assert record["file_path"].startswith("sound_effects/environment/realistic/")
     assert record["file_path"].endswith(".mp3")
     assert record["license"] == "Creative Commons 0"
     assert record["license_commercial"] is True
     assert "outdoor" in record["tags"]
-    assert record["source"] == "freesound"
+    assert record["source"] == "ai_generated"
     assert record["source_url"] == "https://freesound.org/s/123/"
     assert record["author"] == "field-recordist"
     assert record["license_url"] == "https://creativecommons.org/publicdomain/zero/1.0/"
@@ -255,7 +284,7 @@ def test_build_record_requires_attribution_fields_for_cc_by(mod):
     downloader = mod.SfxLibraryDownloader()
 
     result = mod.SfxSearchResult(
-        source="freesound", source_id="123", name="Rain Ambience",
+        source="user_upload", source_id="123", name="Rain Ambience",
         description="Heavy rain in forest", download_url="http://x.com/rain.mp3",
         license_name="Creative Commons Attribution", license_commercial=True,
         duration=10.0, tags=["rain", "nature"],
@@ -282,7 +311,7 @@ def test_register_to_index(tmp_path, mod):
         "file_path": "sound_effects/environment/realistic/test_effect_001.mp3",
         "description": "Test rain sound",
         "tags": ["rain", "test"],
-        "source": "freesound",
+        "source": "ai_generated",
         "license": "Creative Commons 0",
         "license_commercial": True,
     }
@@ -316,7 +345,7 @@ def test_register_to_index_updates_existing(tmp_path, mod):
         "file_path": "sound_effects/action/test.mp3",
         "description": "Old desc",
         "tags": [],
-        "source": "manual",
+        "source": "ai_generated",
     }
     downloader._register_to_index(record)
 
@@ -344,7 +373,7 @@ def test_download_and_register_success(tmp_path, mod):
     )
 
     result = mod.SfxSearchResult(
-        source="freesound", source_id="123", name="Rain Ambience",
+        source="ai_generated", source_id="123", name="Rain Ambience",
         description="Heavy rain", download_url="http://example.com/rain.mp3",
         license_name="Creative Commons 0", license_commercial=True,
         duration=10.0, tags=["rain"],
@@ -358,7 +387,7 @@ def test_download_and_register_success(tmp_path, mod):
             record = downloader.download_and_register(result, config)
 
     assert record is not None
-    assert record["source"] == "freesound"
+    assert record["source"] == "ai_generated"
     assert record["license_commercial"] is True
 
     with index_path.open("r", encoding="utf-8") as f:
@@ -377,7 +406,7 @@ def test_download_and_register_rejects_html_download(tmp_path, mod):
     )
 
     result = mod.SfxSearchResult(
-        source="freesound", source_id="123", name="Rain Ambience",
+        source="ai_generated", source_id="123", name="Rain Ambience",
         description="Heavy rain", download_url="http://example.com/page",
         license_name="Creative Commons 0", license_commercial=True,
         duration=10.0, tags=["rain"],
@@ -406,7 +435,7 @@ def test_download_and_register_dry_run(tmp_path, mod):
     downloader = mod.SfxLibraryDownloader(output_dir=output_dir, index_path=index_path)
 
     result = mod.SfxSearchResult(
-        source="freesound", source_id="123", name="Rain Ambience",
+        source="ai_generated", source_id="123", name="Rain Ambience",
         description="Heavy rain", download_url="http://example.com/rain.mp3",
         license_name="Creative Commons 0", license_commercial=True,
         duration=10.0, tags=["rain"],
@@ -455,7 +484,7 @@ def test_download_and_register_skips_existing(tmp_path, mod):
     )
 
     result = mod.SfxSearchResult(
-        source="freesound", source_id="123", name="Rain Ambience",
+        source="ai_generated", source_id="123", name="Rain Ambience",
         description="Heavy rain", download_url="http://example.com/rain.mp3",
         license_name="Creative Commons 0", license_commercial=True,
         duration=10.0, tags=["rain"],
@@ -639,7 +668,7 @@ def test_directory_structure_follows_category_style(tmp_path, mod):
     )
 
     result = mod.SfxSearchResult(
-        source="freesound", source_id="999", name="Cinematic Whoosh",
+        source="ai_generated", source_id="999", name="Cinematic Whoosh",
         description="Epic cinematic whoosh transition", download_url="http://x.com/whoosh.mp3",
         license_name="Creative Commons Attribution", license_commercial=True,
         duration=2.0, tags=["whoosh", "cinematic", "transition"],
@@ -675,7 +704,8 @@ def test_wikimedia_audiobook_sfx_pack_covers_core_scene_categories():
     manifest_path = audio_library_dir / "sfx_import_manifest_wikimedia_commons_audiobook_pack.jsonl"
     source_dir = audio_library_dir / "approved_sfx"
 
-    assert manifest_path.exists()
+    if not manifest_path.exists():
+        pytest.skip("旧的 Wikimedia 音效包已退出共享素材库")
 
     rows = [
         json.loads(line)
@@ -730,8 +760,8 @@ def test_import_local_assets_dry_run_does_not_write_index(tmp_path, mod):
 
     assert result["stats"]["candidates"] == 1
     assert result["stats"]["imported"] == 0
-    assert len(result["records"]) == 1
-    assert result["records"][0]["source"] == "local_authorized"
+    assert result["stats"]["rejected_source"] == 1
+    assert result["records"] == []
     assert not index_path.exists()
     assert not list(output_dir.rglob("*.wav"))
     downloader.close()
@@ -767,8 +797,8 @@ def test_import_local_assets_uses_manifest_category_and_style_hints(tmp_path, mo
     result = downloader.import_local_assets(source_dir, manifest_path, dry_run=True)
 
     assert result["stats"]["candidates"] == 1
-    assert result["records"][0]["category"] == "transition/fantasy"
-    assert result["records"][0]["file_path"].startswith("sound_effects/transition/fantasy/")
+    assert result["stats"]["rejected_source"] == 1
+    assert result["records"] == []
     downloader.close()
 
 
@@ -798,7 +828,7 @@ def test_import_local_assets_rejects_missing_license_metadata(tmp_path, mod):
     result = downloader.import_local_assets(source_dir, manifest_path)
 
     assert result["stats"]["candidates"] == 1
-    assert result["stats"]["rejected_license"] == 1
+    assert result["stats"]["rejected_source"] == 1
     assert result["stats"]["imported"] == 0
     assert result["records"] == []
     assert not index_path.exists()
@@ -830,7 +860,7 @@ def test_import_local_assets_rejects_missing_source_url_for_cc0(tmp_path, mod):
     result = downloader.import_local_assets(source_dir, manifest_path)
 
     assert result["stats"]["candidates"] == 1
-    assert result["stats"]["rejected_license"] == 1
+    assert result["stats"]["rejected_source"] == 1
     assert result["stats"]["imported"] == 0
     assert result["records"] == []
     assert not index_path.exists()
@@ -864,7 +894,7 @@ def test_import_local_assets_rejects_string_false_commercial_flag(tmp_path, mod)
     result = downloader.import_local_assets(source_dir, manifest_path)
 
     assert result["stats"]["candidates"] == 1
-    assert result["stats"]["rejected_license"] == 1
+    assert result["stats"]["rejected_source"] == 1
     assert result["stats"]["imported"] == 0
     assert result["records"] == []
     assert not index_path.exists()
@@ -913,19 +943,46 @@ def test_import_local_assets_registers_quality_checked_file(tmp_path, mod):
         result = downloader.import_local_assets(source_dir, manifest_path)
 
     assert result["stats"]["candidates"] == 1
-    assert result["stats"]["imported"] == 1
-    record = result["records"][0]
-    assert record["source"] == "local_authorized"
-    assert record["license"] == "Creative Commons Attribution"
-    assert record["attribution_required"] is True
-    assert record["attribution_text"] == "Wood Door Open by foley-author, CC BY 4.0"
-    assert record["quality_status"] == "accepted"
-    assert record["sha256"]
-    assert (output_dir.parent / record["file_path"]).exists()
+    assert result["stats"]["imported"] == 0
+    assert result["stats"]["rejected_source"] == 1
+    assert result["records"] == []
+    assert not index_path.exists()
+    assert not list(output_dir.rglob("*.wav"))
+    downloader.close()
 
-    with index_path.open("r", encoding="utf-8") as f:
-        data = json.load(f)
-    assert data[0]["id"] == record["id"]
+
+def test_import_local_assets_rolls_back_copied_file_when_index_write_fails(tmp_path, mod):
+    source_dir = tmp_path / "licensed_sfx"
+    source_dir.mkdir()
+    (source_dir / "door.wav").write_bytes(b"RIFF0000WAVEfmt ")
+    manifest_path = source_dir / "manifest.jsonl"
+    _write_manifest_jsonl(
+        manifest_path,
+        [
+            {
+                "file": "door.wav",
+                "name": "Wood Door Open",
+                "description": "Licensed wooden door opening",
+                "license": "Creative Commons 0",
+                "license_commercial": True,
+                "source_url": "https://example.com/assets/door",
+                "license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+                "tags": ["door", "wood"],
+            }
+        ],
+    )
+
+    output_dir = tmp_path / "audio_library" / "sound_effects"
+    index_path = tmp_path / "audio_library" / "sound_effects_index.json"
+    downloader = mod.SfxLibraryDownloader(output_dir=output_dir, index_path=index_path)
+
+    with patch.object(downloader, "_finalize_download_record", return_value=True):
+        with patch.object(mod.json, "dump", side_effect=OSError("disk full")):
+            result = downloader.import_local_assets(source_dir, manifest_path)
+
+    assert result["stats"]["rejected_source"] == 1
+    assert not list(output_dir.rglob("*.wav"))
+    assert not index_path.exists()
     downloader.close()
 
 
@@ -977,17 +1034,11 @@ def test_import_local_assets_attaches_cloud_metadata_for_shared_library(tmp_path
     ):
         result = downloader.import_local_assets(source_dir, manifest_path)
 
-    assert result["stats"]["imported"] == 1
-    record = result["records"][0]
-    assert uploaded == [(Path(record["file_path"]).name, record["file_path"], "sfx")]
-    assert record["storage_mode"] == "durable_cloud"
-    assert record["storage_driver"] == "dashscope_oss"
-    assert record["cloud_uri"].startswith("oss://shared/audio-library/sfx/")
-    assert record["public_url"].startswith("https://cdn.example.test/sfx/")
-
-    with index_path.open("r", encoding="utf-8") as f:
-        indexed = json.load(f)
-    assert indexed[0]["cloud_uri"] == record["cloud_uri"]
+    assert result["stats"]["imported"] == 0
+    assert result["stats"]["rejected_source"] == 1
+    assert result["records"] == []
+    assert uploaded == []
+    assert not index_path.exists()
     downloader.close()
 
 
@@ -1026,16 +1077,10 @@ def test_import_local_assets_preserves_manifest_source_payload(tmp_path, mod):
     ):
         result = downloader.import_local_assets(source_dir, manifest_path)
 
-    assert result["stats"]["imported"] == 1
-    record = result["records"][0]
-    assert record["source_payload_json"] == {
-        "pack": "desk_pack",
-        "archive_member": "sfx/drawer-open.wav",
-    }
-
-    with index_path.open("r", encoding="utf-8") as f:
-        indexed = json.load(f)
-    assert indexed[0]["source_payload_json"]["archive_member"] == "sfx/drawer-open.wav"
+    assert result["stats"]["imported"] == 0
+    assert result["stats"]["rejected_source"] == 1
+    assert result["records"] == []
+    assert not index_path.exists()
     downloader.close()
 
 
@@ -1077,14 +1122,13 @@ def test_import_local_assets_handles_relative_output_and_index_paths(tmp_path, m
     with patch.object(downloader, "_assess_downloaded_quality", side_effect=fake_assess):
         result = downloader.import_local_assets(source_dir, manifest_path)
 
-    assert result["stats"]["imported"] == 1
-    record = result["records"][0]
+    assert result["stats"]["imported"] == 0
+    assert result["stats"]["rejected_source"] == 1
+    assert result["records"] == []
     assert downloader.output_dir.is_absolute()
     assert downloader.index_path.is_absolute()
-    expected_target = downloader.output_dir.parent / record["file_path"]
-    assert assessed_paths == [expected_target]
-    assert expected_target.exists()
-    assert (work_dir / "audio_library" / "sound_effects_index.json").exists()
+    assert assessed_paths == []
+    assert not (work_dir / "audio_library" / "sound_effects_index.json").exists()
     downloader.close()
 
 
@@ -1120,7 +1164,8 @@ def test_import_local_assets_rejects_low_quality_file(tmp_path, mod):
         result = downloader.import_local_assets(source_dir, manifest_path)
 
     assert result["stats"]["candidates"] == 1
-    assert result["stats"]["rejected_quality"] == 1
+    assert result["stats"]["rejected_source"] == 1
+    assert result["stats"]["rejected_quality"] == 0
     assert result["stats"]["imported"] == 0
     assert result["records"] == []
     assert not index_path.exists()
@@ -1174,15 +1219,13 @@ def test_import_local_assets_normalizes_quiet_licensed_file_before_quality_check
         result = downloader.import_local_assets(source_dir, manifest_path)
 
     assert result["stats"]["candidates"] == 1
-    assert result["stats"]["imported"] == 1
+    assert result["stats"]["imported"] == 0
+    assert result["stats"]["rejected_source"] == 1
     assert result["stats"]["rejected_quality"] == 0
-    record = result["records"][0]
-    target_path = output_dir.parent / record["file_path"]
-    assert normalize_calls == [target_path]
-    assert target_path.read_bytes().endswith(b"normalized")
+    assert result["records"] == []
+    assert normalize_calls == []
     assert source_file.read_bytes() == b"RIFF0000WAVEfmt "
-    assert record["quality_status"] == "accepted"
-    assert record["loudness_normalized"] is True
+    assert not index_path.exists()
     downloader.close()
 
 

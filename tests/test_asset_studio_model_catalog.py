@@ -59,3 +59,14 @@ def test_asset_studio_video_duration_options_follow_models_yaml() -> None:
     assert duration_options["wan2.7-t2v"] == (3.0, 5.0, 10.0, 15.0)
     assert duration_options["wan2.7-i2v"] == (3.0, 5.0, 10.0)
     assert duration_options["kling-v3-video-generation"] == (5.0, 10.0)
+
+
+def test_asset_studio_catalog_exposes_seed_audio_scene_generation() -> None:
+    from app.services.asset_studio_model_catalog import get_asset_studio_model_manifest
+
+    _clear_asset_studio_model_catalog_caches()
+    manifest = get_asset_studio_model_manifest()
+
+    scene_audio = {item["model_id"]: item for item in manifest["groups"]["audio_scene"]}
+    assert "seed-audio-1.0" in scene_audio
+    assert scene_audio["seed-audio-1.0"]["label"] == "豆包音频生成模型 1.0"

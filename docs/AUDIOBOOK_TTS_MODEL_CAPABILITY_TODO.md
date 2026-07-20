@@ -171,7 +171,9 @@
 
 - 已新增 `backend/app/services/audiobook/tts_style_control.py`。
 - 已开始区分：
-  - Qwen/CosyVoice：自然语言 `instructions`
+  - Qwen：自然语言 `instructions`，provider 层在输入预算不足时按字段优先级二次压缩。
+  - CosyVoice：短 cue 优先的 `instruction`，同时依赖 `pause_before/after`
+  - StepAudio：`instruction` 承载全局 cue，正文圆括号承载停顿/低语/情绪层次等 inline context。
   - MiMo 自然语言控制：`role: user`
   - MiMo 音频标签控制：`role: assistant`
 - 已补充部分 provider payload 测试。
@@ -194,7 +196,9 @@
   - `voice_description_best_practices`
   - `unsupported_patterns`
 - 为不同模型生成不同风格控制格式：
-  - Qwen / CosyVoice：自然语言描述。
+  - Qwen：自然语言描述，预算不足时优先保留情绪、停顿、重读和演绎要求。
+  - CosyVoice：短 cue + pause 参数。
+  - StepAudio：全局 cue + 圆括号 inline context，长声音画像只作为低优先级上下文。
   - MiMo 自然语言：角色、场景、指导。
   - MiMo 标签模式：整体风格标签和文本内音频标签。
   - MiMo VoiceDesign：高质量声音描述优先，风格指令融合进 voice design prompt。
@@ -204,7 +208,8 @@
 
 - 同一个有声书片段选择不同 TTS 模型时，最终 payload 的风格控制字段不同且符合模型要求。
 - MiMo 音频标签只出现在 MiMo 标签控制模式中。
-- 现有 Qwen、MiniMax、CosyVoice 调用不被 MiMo 逻辑污染。
+- 现有 Qwen、MiniMax、CosyVoice 调用不被 MiMo 逻辑污染，且 CosyVoice 不再被长自然语言 instruction 误导。
+- Qwen / CosyVoice / StepAudio 在受限预算下仍保留情绪、停顿、重读和演绎 cue，不再优先保留长声音画像或模板。
 
 ### 关联文件
 
@@ -532,6 +537,7 @@
 - `shared/stepaudio_2_5_tts_voices.json` 已登记官方最佳实践音色表中的 36 个官方音色，并接入 `voice_catalog.py`。
 - `backend/app/services/audiobook/tts_model_ids.py` 已接入模型常量、支持列表、runtime ID、别名归一化、价格、能力矩阵和 `/api/v1/audiobook/tts/models` 元数据。
 - `backend/app/services/audiobook/tts_style_control.py` 已新增 StepAudio 模型识别和 `stepaudio_global_context` 风格控制，避免复用 Qwen/MiMo/CosyVoice 的字段假设。
+- StepAudio 的 `instruction` 已按官方 200 字上限做模型专用优先级：情绪、停顿、重读、演绎要求优先；长声音画像只在能完整放入预算时保留，无法放入时丢弃，避免生成误导性的截断碎片。
 - `backend/app/services/audiobook/tts_engine_pkg/_aliyun_mixin.py` 已接入 StepFun HTTP 调用：
   - 构造 `model`、`voice`、`input`、可选 `instruction`、可选 `response_format`。
   - 支持官方可选参数：`speed`、`volume`、`sample_rate`、`pronunciation_map`、`markdown_filter`、`return_url`、`stream_format`。
@@ -594,6 +600,7 @@
 - 模型中心能展示 StepAudio 2.5 TTS 的官方来源、能力边界、音色和调用方式。
 - 有声小说链路能选择该模型并生成正确 payload。
 - 不使用 Qwen、MiMo、MiniMax 或 CosyVoice 的音色和风格控制假设替代 StepAudio 官方能力。
+- StepAudio 长声音画像、长角色场景或长显式上下文不会挤掉情绪、停顿、重读和演绎要求；逐句停顿/低语继续进入正文圆括号。
 - 模型卡片不再保留中文基础合成的 `pending-runtime-validation`；但在正式收费音色创建和文件上传接口确认前，继续标记或说明 `pending-official-voice-clone-assets`。
 
 ### 本轮验证

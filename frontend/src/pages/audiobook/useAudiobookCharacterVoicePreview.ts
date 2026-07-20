@@ -25,10 +25,7 @@ export const useAudiobookCharacterVoicePreview = ({
   const [previewingCharacterId, setPreviewingCharacterId] = useState<number | null>(null)
 
   const handlePreviewCharacterVoice = useCallback(async (cv: CharacterVoiceSetting) => {
-    const hasInlineCustomVoiceInput = Boolean(cv.voiceCloneDataUrl?.trim())
-    const hasReusableMimoVoiceAsset = Boolean(cv.mimoVoiceAssetId?.trim())
-    const hasReusableStepAudioVoiceAsset = Boolean(cv.stepaudioVoiceAssetId?.trim())
-    if (!cv.voiceId && !hasInlineCustomVoiceInput && !hasReusableMimoVoiceAsset && !hasReusableStepAudioVoiceAsset) {
+    if (!cv.voiceId.trim()) {
       setSnackbar({ open: true, message: '请先为该角色选择音色再试听', severity: 'error' })
       return
     }
@@ -40,10 +37,6 @@ export const useAudiobookCharacterVoicePreview = ({
         text: DEFAULT_CHARACTER_VOICE_PREVIEW_TEXT,
         voice_id: cv.voiceId,
         model: modelForPreview,
-        voice_clone_data_url: cv.voiceCloneDataUrl,
-        voice_design_prompt: undefined,
-        mimo_voice_asset_id: cv.mimoVoiceAssetId,
-        stepaudio_voice_asset_id: cv.stepaudioVoiceAssetId,
       })
 
       if (playingChapter) {

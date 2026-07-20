@@ -66,7 +66,7 @@ def test_qwen_http_payload_preserves_voice_language_and_instructions() -> None:
     instructions = payload["parameters"]["instructions"]
     assert "说话角色：林晚" in instructions
     assert "角色设定：冷静的调查员" in instructions
-    assert "情绪目标：tense" in instructions
+    assert "情绪目标：fearful" in instructions
     assert "演绎要求：压低声音，停顿更长" in instructions
 
 
@@ -115,7 +115,7 @@ def test_qwen_explicit_instructions_merge_with_structured_prompt() -> None:
     assert "演绎要求：句尾短暂停顿。" in instructions
 
 
-def test_qwen_payload_uses_narration_style_voice_description_for_narrator() -> None:
+def test_qwen_payload_ignores_legacy_narration_style_runtime_overrides() -> None:
     engine = TTSEngine(model="qwen3-tts-instruct-flash", enable_cache=False, request_delay=0)
     voice_params = apply_narration_style_to_tts_params(
         "relaxing",
@@ -135,11 +135,10 @@ def test_qwen_payload_uses_narration_style_voice_description_for_narrator() -> N
     )
 
     instructions = payload["parameters"]["instructions"]
-
-    assert "声音描述：性别：男性，年龄感：中年" in instructions
-    assert "语速：缓慢" in instructions
-    assert "用途：有声书旁白" in instructions
-    assert "角色对白" not in instructions
+    assert "声音描述：性别：男性" in instructions
+    assert "片段类型：narration" in instructions
+    assert "温和、舒缓、放松" not in instructions
+    assert "语速：缓慢" not in instructions
 
 
 def test_qwen_http_payload_truncates_instructions_to_provider_input_limit() -> None:
@@ -164,6 +163,42 @@ def test_qwen_http_payload_truncates_instructions_to_provider_input_limit() -> N
     assert payload["parameters"]["optimize_instructions"] is False
 
 
+def test_qwen_http_payload_refits_structured_instruction_by_field_priority() -> None:
+    engine = TTSEngine(model="qwen3-tts-instruct-flash", enable_cache=False, request_delay=0)
+    text = "x" * 500
+
+    payload = engine._build_qwen_http_payload(
+        model="qwen3-tts-instruct-flash",
+        text=text,
+        voice_id="Cherry",
+        voice_params={
+            "segment_speaker": "旁白",
+            "segment_type": "narration",
+            "voice_description": "性别：女性，年龄感：青年，音调：中低音，语速：中等，特点：吐字清晰、气息稳定，用途：有声书旁白。" * 4,
+            "instruct_role": "全知叙述者",
+            "instruct_scene": "密室揭示关键证据，所有人都屏住呼吸。",
+            "instruct_emotion": "surprised",
+            "performance_notes": "压低声音，新鲜的指纹前短停，结尾加重但不要喊。",
+            "delivery_plan": {
+                "pause_profile": "dramatic",
+                "pause_strategy": "新鲜的指纹前短停",
+                "stress_words": ["新鲜的指纹"],
+                "director_guidance": "新鲜的指纹前短停，结尾保持克制。",
+            },
+        },
+    )
+
+    instructions = payload["parameters"]["instructions"]
+
+    assert len(text) + len(instructions) <= QWEN_TTS_MAX_INPUT_CHARS - QWEN_TTS_INPUT_SAFETY_CHARS
+    assert "surprised" in instructions
+    assert "演绎要求：压低声音" in instructions
+    assert "停顿策略：新鲜的指纹前短停" in instructions
+    assert "重读词：新鲜的指纹" in instructions
+    assert "声音描述：" not in instructions
+    assert "旁白模板：" not in instructions
+
+
 def test_qwen_http_payload_drops_instructions_when_text_uses_budget() -> None:
     engine = TTSEngine(model="qwen3-tts-instruct-flash", enable_cache=False, request_delay=0)
 
@@ -176,6 +211,27 @@ def test_qwen_http_payload_drops_instructions_when_text_uses_budget() -> None:
 
     assert payload["input"]["text"] == "x" * 590
     assert "parameters" not in payload
+
+
+def test_qwen_http_payload_reuses_provider_prompt_snapshot_instruction() -> None:
+    engine = TTSEngine(model="qwen3-tts-instruct-flash", enable_cache=False, request_delay=0)
+
+    payload = engine._build_qwen_http_payload(
+        model="qwen3-tts-instruct-flash",
+        text="她终于停下。",
+        voice_id="Neil",
+        voice_params={
+            "instructions": "不要重新构建这条 instruction",
+            "provider_prompt_snapshot": {
+                "provider_prompt": {
+                    "instructions": "快照中的最终 Qwen 指令",
+                }
+            },
+        },
+    )
+
+    assert payload["parameters"]["instructions"] == "快照中的最终 Qwen 指令"
+    assert "不要重新构建" not in payload["parameters"]["instructions"]
 
 
 def test_qwen_render_chunks_use_conservative_limit() -> None:
@@ -251,6 +307,115 @@ def test_cosyvoice_websocket_parameters_and_commands_are_stable() -> None:
     assert finish_task["payload"] == {"input": {}}
 
 
+def test_cosyvoice_websocket_parameters_include_explicit_pause_controls() -> None:
+    engine = TTSEngine(model="cosyvoice-v3.5-plus", enable_cache=False, request_delay=0)
+
+    parameters = engine._build_cosyvoice_websocket_parameters(
+        text="她停在门前，没有立刻回答。",
+        voice="cosyvoice-v3.5-plus-demo",
+        voice_params={
+            "pause_before": 0.25,
+            "pause_after": 0.75,
+        },
+    )
+
+    assert parameters["pause_before"] == 0.25
+    assert parameters["pause_after"] == 0.75
+
+
+def test_cosyvoice_websocket_parameters_map_dramatic_delivery_plan_to_pause_after() -> None:
+    engine = TTSEngine(model="cosyvoice-v3.5-plus", enable_cache=False, request_delay=0)
+
+    parameters = engine._build_cosyvoice_websocket_parameters(
+        text="她终于明白，那扇门后什么都没有。",
+        voice="cosyvoice-v3.5-plus-demo",
+        voice_params={
+            "delivery_plan": {
+                "pause_profile": "dramatic",
+                "pause_strategy": "句尾留白",
+            },
+        },
+    )
+
+    assert parameters["pause_after"] == 0.8
+    assert "pause_before" not in parameters
+
+
+def test_cosyvoice_uses_mixer_for_chapter_boundary_pause_without_duplicate_provider_pause() -> None:
+    engine = TTSEngine(model="cosyvoice-v3.5-plus", enable_cache=False, request_delay=0)
+
+    parameters = engine._build_cosyvoice_websocket_parameters(
+        text="她终于明白，那扇门后什么都没有。",
+        voice="cosyvoice-v3.5-plus-demo",
+        voice_params={
+            "timeline_boundary_managed": True,
+            "pause_before": 0.25,
+            "pause_after": 0.75,
+            "delivery_plan": {"pause_profile": "dramatic"},
+        },
+    )
+
+    assert "pause_before" not in parameters
+    assert "pause_after" not in parameters
+
+
+def test_cosyvoice_instruction_prioritizes_performance_cues_within_provider_limit() -> None:
+    engine = TTSEngine(model="cosyvoice-v3.5-plus", enable_cache=False, request_delay=0)
+
+    parameters = engine._build_cosyvoice_websocket_parameters(
+        text="盒盖打开的一瞬间，所有人的呼吸都停住了。里面没有钥匙，只有一枚新鲜的指纹。",
+        voice="cosyvoice-v3.5-plus-demo",
+        voice_params={
+            "voice_description": (
+                "性别：女性，年龄感：青年，音调：中低音，语速：中等，"
+                "情绪：冷静克制，特点：吐字清晰、气息稳定，用途：有声书旁白"
+            ),
+            "segment_speaker": "旁白",
+            "segment_type": "narration",
+            "instruct_role": "全知叙述者",
+            "instruct_scene": "密室揭示关键证据",
+            "instruct_emotion": "surprised",
+            "performance_notes": "先压住情绪，指纹二字前短暂停顿，结尾加重但不要喊。",
+            "delivery_plan": {
+                "pause_profile": "dramatic",
+                "pause_strategy": "先压住情绪，指纹二字前短暂停顿，结尾加重但不要喊。",
+                "stress_words": ["新鲜的指纹"],
+                "emotion_primary": "surprised",
+            },
+        },
+    )
+
+    instruction = parameters["instruction"]
+
+    assert "surprised" in instruction
+    assert "指纹" in instruction
+    assert "重读" in instruction
+    assert "新鲜的指纹" in instruction
+    assert "不要喊" in instruction
+    assert "声音描述" not in instruction
+    assert "旁白模板" not in instruction
+
+
+def test_cosyvoice_websocket_parameters_reuse_provider_prompt_snapshot_instruction() -> None:
+    engine = TTSEngine(model="cosyvoice-v3.5-plus", enable_cache=False, request_delay=0)
+
+    parameters = engine._build_cosyvoice_websocket_parameters(
+        text="她停在门前。",
+        voice="cosyvoice-v3.5-plus-demo",
+        voice_params={
+            "instructions": "不要重新构建这条 instruction",
+            "provider_prompt_snapshot": {
+                "provider_prompt": {
+                    "instructions": "快照中的最终 CosyVoice 指令",
+                }
+            },
+        },
+    )
+
+    assert parameters["instruction"] == engine._truncate_cosyvoice_instruction("快照中的最终 CosyVoice 指令")
+    assert "不要重新构建" not in parameters["instruction"]
+
+
 def test_minimax_http_payload_clamps_voice_settings_and_keeps_audio_contract() -> None:
     engine = TTSEngine(model="minimax-speech-2.8-hd", enable_cache=False, request_delay=0)
 
@@ -293,6 +458,66 @@ def test_minimax_interjection_injection_does_not_spell_out_pause_notes() -> None
 
     assert text == "必须走。"
     assert "停顿" not in text
+
+
+def test_minimax_style_control_degrades_delivery_plan_to_basic_voice_settings() -> None:
+    control = build_model_style_control(
+        "minimax-speech-2.8-hd",
+        {
+            "speed": 1.0,
+            "volume": 50,
+            "pitch": 0,
+            "delivery_plan": {
+                "pace": "slow",
+                "pitch": "lower",
+                "intensity": "high",
+                "micro_tags": ["低语"],
+                "pause_strategy": "句尾留白",
+            },
+        },
+        "sad",
+    )
+
+    assert control.mode == "basic"
+    assert control.provider_fields["basic_voice_settings"] == {
+        "speed": 0.9,
+        "volume": 58,
+        "pitch": -8,
+    }
+    assert control.messages == []
+    assert control.text_prefix == ""
+    assert any("已降级为 speed/volume/pitch 基础参数" in warning for warning in control.warnings)
+    assert any("micro_tags" in warning and "pause_strategy" in warning for warning in control.warnings)
+
+
+def test_minimax_http_payload_applies_basic_delivery_plan_settings() -> None:
+    engine = TTSEngine(model="minimax-speech-2.8-hd", enable_cache=False, request_delay=0)
+
+    payload = engine._build_minimax_http_payload(
+        model="MiniMax/speech-2.8-hd",
+        text="别回头，继续往前走。",
+        voice="male-qn-qingse",
+        voice_params={
+            "speed": 1.0,
+            "volume": 50,
+            "pitch": 0,
+            "delivery_plan": {
+                "pace": "slow",
+                "pitch": "lower",
+                "intensity": "high",
+                "micro_tags": ["低语"],
+                "pause_strategy": "句尾留白",
+            },
+        },
+    )
+
+    assert payload["input"]["text"] == "别回头，继续往前走。"
+    assert payload["input"]["voice_setting"] == {
+        "voice_id": "male-qn-qingse",
+        "speed": 0.9,
+        "vol": 0.58,
+        "pitch": -8,
+    }
 
 
 def test_minimax_style_control_uses_basic_mode_without_natural_language_fields() -> None:
@@ -372,6 +597,62 @@ def test_stepaudio_style_control_uses_global_context_instruction() -> None:
     assert "情绪目标：克制的悲伤，不哭腔，轻轻发颤" in control.provider_fields["instruction"]
 
 
+def test_stepaudio_style_control_renders_pause_and_micro_tags_as_inline_parentheses() -> None:
+    control = build_model_style_control(
+        STEPAUDIO_25_TTS_MODEL,
+        {
+            "segment_speaker": "岑霜",
+            "segment_type": "dialogue",
+            "instruct_emotion": "紧张",
+            "delivery_plan": {
+                "pause_profile": "dramatic",
+                "pause_strategy": "句尾留白",
+                "micro_tags": ["低语"],
+                "emotion_mix": ["紧张"],
+            },
+        },
+        "neutral",
+    )
+
+    assert control.mode == "stepaudio_global_context"
+    assert control.text_prefix == "（停顿0.8秒）（低语）（紧张）"
+    assert prepare_text_for_style_control("别回头。", control) == "（停顿0.8秒）（低语）（紧张）别回头。"
+
+
+def test_stepaudio_style_control_preserves_key_cues_within_instruction_budget() -> None:
+    control = build_model_style_control(
+        STEPAUDIO_25_TTS_MODEL,
+        {
+            "segment_speaker": "旁白",
+            "segment_type": "narration",
+            "voice_description": "性别：女性，年龄感：青年，音调：中低音，语速：中等，情绪：冷静克制，特点：吐字清晰、气息稳定，用途：有声书旁白。" * 6,
+            "instruct_role": "全知叙述者",
+            "instruct_scene": "密室揭示关键证据，所有人都屏住呼吸。",
+            "instruct_emotion": "surprised",
+            "performance_notes": "压低声音，新鲜的指纹前短停，结尾加重但不要喊。",
+            "delivery_plan": {
+                "pause_profile": "dramatic",
+                "pause_strategy": "新鲜的指纹前短停",
+                "micro_tags": ["低语"],
+                "emotion_mix": ["压抑"],
+                "stress_words": ["新鲜的指纹"],
+                "director_guidance": "新鲜的指纹前短停，结尾保持克制。",
+            },
+        },
+        "neutral",
+    )
+
+    instruction = control.provider_fields["instruction"]
+
+    assert len(instruction) <= 200
+    assert "surprised" in instruction
+    assert "演绎要求：压低声音" in instruction
+    assert "停顿策略：新鲜的指纹前短停" in instruction
+    assert "重读词：新鲜的指纹" in instruction
+    assert "声音描述：" not in instruction
+    assert control.text_prefix == "（停顿0.8秒）（低语）（压抑）"
+
+
 def test_seed_tts_style_control_uses_query_response_context_texts() -> None:
     control = build_model_style_control(
         SEED_TTS_20_EXPRESSIVE_MODEL,
@@ -411,6 +692,64 @@ def test_mimo_label_control_prefixes_text_without_polluting_other_models() -> No
     assert prepare_text_for_style_control("别停下。", mimo_control) == "（紧张，深呼吸）[小声]别停下。"
     assert qwen_control.text_prefix == ""
     assert prepare_text_for_style_control("别停下。", qwen_control) == "别停下。"
+
+
+def test_inline_tag_strategy_audits_mimo_and_doubao_tag_placement() -> None:
+    voice_params = {
+        "style_control_method": "audio_tags",
+        "style_tags": ["紧张", "紧张"],
+        "inline_audio_tags": ["低语"],
+        "delivery_plan": {
+            "emotion_primary": "fearful",
+            "emotion_mix": ["压抑"],
+            "micro_tags": ["吸气", "低语"],
+        },
+    }
+
+    mimo_control = build_model_style_control("mimo-v2.5-tts", voice_params, "fearful")
+    doubao_control = build_model_style_control(SEED_TTS_20_EXPRESSIVE_MODEL, voice_params, "fearful")
+
+    assert mimo_control.text_prefix == "（紧张）[低语][吸气]"
+    assert mimo_control.provider_fields["inline_tag_strategy"] == {
+        "model_family": "mimo",
+        "placement": "assistant_prefix",
+        "style_tags": ["紧张"],
+        "inline_tags": ["低语", "吸气"],
+        "use_tag_parser": False,
+    }
+
+    assert doubao_control.text_prefix == "[低语，吸气]"
+    assert doubao_control.provider_fields["inline_tag_strategy"] == {
+        "model_family": "doubao",
+        "placement": "text_prefix",
+        "style_tags": ["紧张"],
+        "inline_tags": ["低语", "吸气"],
+        "use_tag_parser": True,
+    }
+
+
+def test_doubao_inline_tag_strategy_preserves_style_fallback_with_delivery_plan_tags() -> None:
+    control = build_model_style_control(
+        SEED_TTS_20_EXPRESSIVE_MODEL,
+        {
+            "style_control_method": "labels",
+            "style_tags": ["旁白"],
+            "delivery_plan": {
+                "emotion_primary": "fearful",
+                "emotion_mix": ["压抑"],
+            },
+        },
+        "fearful",
+    )
+
+    assert control.text_prefix == "[旁白，fearful，压抑]"
+    assert control.provider_fields["inline_tag_strategy"] == {
+        "model_family": "doubao",
+        "placement": "text_prefix",
+        "style_tags": ["旁白", "fearful", "压抑"],
+        "inline_tags": [],
+        "use_tag_parser": True,
+    }
 
 
 def test_mimo_style_control_recognizes_registered_model_aliases() -> None:
@@ -510,6 +849,25 @@ def test_stepaudio_http_payload_uses_instruction_and_keeps_inline_context() -> N
     assert "语速偏慢" in payload["instruction"]
 
 
+def test_stepaudio_http_payload_prefixes_delivery_plan_inline_context() -> None:
+    engine = TTSEngine(model=STEPAUDIO_25_TTS_MODEL, enable_cache=False, request_delay=0)
+
+    payload = engine._build_stepaudio_http_payload(
+        model=STEPAUDIO_25_TTS_MODEL,
+        text="别回头。",
+        voice="cixingnansheng",
+        voice_params={
+            "delivery_plan": {
+                "pause_profile": "dramatic",
+                "micro_tags": ["低语"],
+                "emotion_mix": ["紧张"],
+            },
+        },
+    )
+
+    assert payload["input"] == "（停顿0.8秒）（低语）（紧张）别回头。"
+
+
 def test_seed_tts_http_payload_uses_context_texts_and_audio_params() -> None:
     engine = TTSEngine(model=SEED_TTS_20_EXPRESSIVE_MODEL, enable_cache=False, request_delay=0)
 
@@ -570,6 +928,30 @@ def test_seed_tts_http_payload_supports_official_inline_voice_labels() -> None:
     ]
 
 
+def test_seed_tts_http_payload_reuses_provider_prompt_snapshot_context_and_prefix() -> None:
+    engine = TTSEngine(model=SEED_TTS_20_EXPRESSIVE_MODEL, enable_cache=False, request_delay=0)
+
+    payload = engine._build_seed_tts_http_payload(
+        model=SEED_TTS_20_EXPRESSIVE_MODEL,
+        text="别回头。",
+        voice="zh_female_vv_uranus_bigtts",
+        voice_params={
+            "instructions": "不要重新构建这条 context",
+            "provider_prompt_snapshot": {
+                "provider_prompt": {
+                    "text_prefix": "[快照标签]",
+                    "context_texts": ["快照中的最终 Seed 上下文"],
+                }
+            },
+        },
+    )
+
+    assert payload["req_params"]["text"] == "[快照标签]别回头。"
+    additions = json.loads(payload["req_params"]["additions"])
+    assert additions["context_texts"] == ["快照中的最终 Seed 上下文"]
+    assert "不要重新构建" not in additions["context_texts"][0]
+
+
 def test_stepaudio_http_payload_truncates_instruction_to_provider_limit() -> None:
     engine = TTSEngine(model=STEPAUDIO_25_TTS_MODEL, enable_cache=False, request_delay=0)
 
@@ -584,7 +966,7 @@ def test_stepaudio_http_payload_truncates_instruction_to_provider_limit() -> Non
     )
 
     assert payload["voice"] == "cixingnansheng"
-    assert payload["instruction"] == "a" * 200
+    assert payload["instruction"] == ("a" * 199) + "…"
     assert len(payload["instruction"]) == 200
 
 
@@ -765,6 +1147,40 @@ def test_seed_tts_http_call_uses_volcengine_v3_endpoint(monkeypatch) -> None:
     assert metadata["endpoint"] == "/api/v3/tts/unidirectional"
     assert metadata["resource_id"] == "seed-tts-2.0"
     assert metadata["style_control"] == "query_response"
+
+
+def test_seed_tts_synthesis_falls_back_to_http_when_websocket_returns_no_audio(monkeypatch) -> None:
+    engine = TTSEngine(model=SEED_TTS_20_EXPRESSIVE_MODEL, enable_cache=False, request_delay=0)
+    calls: list[str] = []
+
+    async def fake_websocket(**_kwargs):
+        calls.append("websocket")
+        raise RuntimeError("Seed-TTS WebSocket returned no audio data")
+
+    async def fake_http(**kwargs):
+        calls.append("http")
+        assert kwargs["model"] == SEED_TTS_20_EXPRESSIVE_MODEL
+        assert kwargs["text"] == "她终于笑了。"
+        assert kwargs["voice"] == "zh_female_vv_uranus_bigtts"
+        assert kwargs["resource_id"] == "seed-tts-2.0"
+        return b"seed-http-audio"
+
+    monkeypatch.setattr(engine, "_call_seed_tts_websocket", fake_websocket)
+    monkeypatch.setattr(engine, "_call_seed_tts_http", fake_http)
+
+    result = asyncio.run(
+        engine._synthesize_seed_tts(
+            text="她终于笑了。",
+            voice_params={"speaker": "zh_female_vv_uranus_bigtts"},
+            provider_model=SEED_TTS_20_EXPRESSIVE_MODEL,
+            api_key="unit-seed-key",
+            resource_id="seed-tts-2.0",
+            raw_speaker_id="zh_female_vv_uranus_bigtts",
+        )
+    )
+
+    assert result == b"seed-http-audio"
+    assert calls == ["websocket", "http"]
 
 
 def test_seed_tts_parser_decodes_text_plain_json_lines() -> None:

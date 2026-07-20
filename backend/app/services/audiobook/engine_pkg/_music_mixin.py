@@ -131,7 +131,7 @@ class MusicMixin:
         
         # 🆕 检查是否启用智能音量平衡
         audio_fx = getattr(self, "_audio_fx_config", None) or {}
-        intelligent_balance = audio_fx.get("intelligent_balance", False)
+        intelligent_balance = audio_fx.get("intelligent_balance", True)
         # 将默认配乐基准音量从 -30dB 再降低到 -36dB，避免喧宾夺主
         base_bgm_volume_db = audio_fx.get("base_bgm_volume", -36)
         try:

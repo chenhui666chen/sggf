@@ -1,7 +1,6 @@
 import {
   Box,
   Chip,
-  Divider,
   FormControl,
   InputLabel,
   MenuItem,
@@ -14,16 +13,14 @@ import type { TtsModel } from './types'
 
 interface CharacterVoiceModelSelectProps {
   characterId: number
-  value?: TtsModel
-  projectTtsModel: TtsModel
+  value: TtsModel
   ttsModelOptions: readonly TtsModelOption[]
-  onTtsModelChangeForCharacter: (characterId: number, nextModel: TtsModel | 'inherit') => void
+  onTtsModelChangeForCharacter: (characterId: number, nextModel: TtsModel) => void
 }
 
 const CharacterVoiceModelSelect = ({
   characterId,
   value,
-  projectTtsModel,
   ttsModelOptions,
   onTtsModelChangeForCharacter,
 }: CharacterVoiceModelSelectProps) => (
@@ -31,16 +28,12 @@ const CharacterVoiceModelSelect = ({
     <InputLabel>模型</InputLabel>
     <Select
       label="模型"
-      value={value || 'inherit'}
+      value={value}
       onChange={(event) => onTtsModelChangeForCharacter(
         characterId,
-        event.target.value as TtsModel | 'inherit',
+        event.target.value as TtsModel,
       )}
     >
-      <MenuItem value="inherit">
-        <em>跟随项目 ({getTtsModelLabel(projectTtsModel)})</em>
-      </MenuItem>
-      <Divider sx={{ my: 0.5 }} />
       {ttsModelOptions.map((option) => {
         const badge = getTtsModelBadge(option.id, ttsModelOptions)
         return (

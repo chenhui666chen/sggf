@@ -33,6 +33,12 @@ from app.services.audiobook.llm_json import parse_llm_json_object
 from app.services.audiobook.ai_music import AIMusicGenerator, MusicGenerationResult, create_music_generator
 from app.services.audiobook.audio_asset_cloud_storage import upload_audio_library_asset
 from app.services.audiobook.audio_library_asset_repository import upsert_audio_library_asset
+from app.services.audiobook.audio_library_source_policy import (
+    is_allowed_sfx_source,
+    normalize_sfx_record_source,
+)
+from app.services.audiobook.audio_library_rating_service import is_community_rejected_status
+from app.services.audiobook.sfx_metadata import normalize_sfx_semantics
 from app.services.audiobook.vidu_timing2audio_generator import ViduTiming2AudioGenerator, create_vidu_timing2audio_generator
 from app.services.audiobook.duration_estimator import estimate_narration_duration_seconds
 from app.db.base import SessionLocal
@@ -342,9 +348,11 @@ class SoundEffectDesigner:
             data = dict(getattr(value, "__dict__", {}) or {})
 
         description = (
-            data.get("name")
-            or data.get("effect")
+            data.get("asset_id")
+            or data.get("effect_id")
             or data.get("id")
+            or data.get("name")
+            or data.get("effect")
             or data.get("description")
             or data.get("prompt")
             or ""
@@ -1104,7 +1112,7 @@ class SoundEffectDesigner:
                 category=category,
                 description=name,
                 tags=list(dict.fromkeys([*tags, *classification["tags"]])),
-                source="vidu",
+                source="ai_generated",
                 style=classification["style"],
                 scenes=classification["scenes"],
             )
@@ -1233,7 +1241,7 @@ class SoundEffectDesigner:
                 category=f"{classification['category']}/{classification['style']}",
                 description=description,
                 tags=classification["tags"],
-                source="vidu",
+                source="ai_generated",
                 style=classification["style"],
                 scenes=classification["scenes"],
             )
@@ -1485,6 +1493,12 @@ class SoundEffectDesigner:
             
             loaded = 0
             for item in records:
+                item = normalize_sfx_semantics(item)
+                if not is_allowed_sfx_source(item.get("source")):
+                    logger.info("忽略非用户上传或 AI 生成的音效: %s", item.get("id") or item.get("name"))
+                    continue
+                if is_community_rejected_status(item.get("quality_status")):
+                    continue
                 effect_id = item.get("id") or item.get("name")
                 if not effect_id:
                     continue
@@ -1667,11 +1681,12 @@ class SoundEffectDesigner:
             "file_path": "sound_effects/generated/forest_birds_ai_001.mp3",
             "description": "森林里的鸟鸣声",
             "tags": ["森林", "鸟鸣"],
-            "source": "ai"
+            "source": "ai_generated"
         }
         """
         index_path = self.index_path
         try:
+            record = normalize_sfx_record_source(record, default="ai_generated")
             file_path = record.get("file_path") or record.get("file", "")
             description = str(record.get("description") or record.get("name") or record.get("id") or "").strip()
             effect_type = self._coerce_effect_type(record.get("category") or record.get("type") or "action")
@@ -1752,7 +1767,7 @@ class SoundEffectDesigner:
                     "tags": record.get("tags", []),
                     "style": record.get("style", ""),
                     "scenes": record.get("scenes", []),
-                    "source": record.get("source", "ai"),
+                    "source": record.get("source", "ai_generated"),
                     "quality_score": record.get("quality_score", 0.0),
                     "quality_grade": record.get("quality_grade", "D"),
                     "quality_status": record.get("quality_status", "rejected"),
@@ -1815,6 +1830,7 @@ class SoundEffectDesigner:
         """
         try:
             # 下载文件
+            source = normalize_sfx_record_source({"source": source})["source"]
             resp = requests.get(url, stream=True, timeout=30)
             resp.raise_for_status()
 

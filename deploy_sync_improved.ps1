@@ -1023,6 +1023,36 @@ if ($SkipValidation) {
     }
 
     Write-Host "  Backend health check: $($healthResult.Output)" -ForegroundColor Green
+
+    $storageDriverCommand = "cd $quotedRemotePath && $composeCommand exec -T backend printenv AUDIOBOOK_AUDIO_LIBRARY_STORAGE_DRIVER"
+    $storageDriverResult = Invoke-RemoteCommand -HostUser $ServerUser -HostIP $ServerIP -Command $storageDriverCommand -ConnectTimeout $TimeoutSeconds
+    $storageDriver = $storageDriverResult.Output.Trim()
+    if ($storageDriverResult.ExitCode -ne 0 -or $storageDriver -ne "aliyun_oss") {
+        throw "Audio library storage driver validation failed. Expected 'aliyun_oss', got '$storageDriver'. TTS preview shared cache requires a HEAD-capable OSS driver."
+    }
+
+    Write-Host "  Audio library storage driver: $storageDriver" -ForegroundColor Green
+
+    $requiredOssEnvNames = @(
+        "AUDIOBOOK_AUDIO_LIBRARY_OSS_BUCKET",
+        "AUDIOBOOK_AUDIO_LIBRARY_OSS_ENDPOINT",
+        "AUDIOBOOK_AUDIO_LIBRARY_OSS_ACCESS_KEY_ID",
+        "AUDIOBOOK_AUDIO_LIBRARY_OSS_ACCESS_KEY_SECRET"
+    )
+    $missingOssEnvNames = New-Object System.Collections.Generic.List[string]
+    foreach ($envName in $requiredOssEnvNames) {
+        $envCommand = "cd $quotedRemotePath && $composeCommand exec -T backend printenv $envName"
+        $envResult = Invoke-RemoteCommand -HostUser $ServerUser -HostIP $ServerIP -Command $envCommand -ConnectTimeout $TimeoutSeconds
+        if ($envResult.ExitCode -ne 0 -or [string]::IsNullOrWhiteSpace($envResult.Output.Trim())) {
+            $null = $missingOssEnvNames.Add($envName)
+        }
+    }
+
+    if ($missingOssEnvNames.Count -gt 0) {
+        throw "Aliyun OSS audio library config missing in backend container: $($missingOssEnvNames -join ', '). TTS preview shared cache requires these variables for OSS HEAD checks."
+    }
+
+    Write-Host "  Aliyun OSS required config: present" -ForegroundColor Green
 }
 
 Write-Host ""

@@ -56,7 +56,7 @@ export const loadAudiobookProjectSelectionData = async ({
       chapters: chaptersData,
       selectedChapterIds: normalizeSelectedChapterIds(selectedChapterIds, {
         allowedIds: chapterIds,
-        fallbackIds: chapterIds,
+        fallbackIds: chapterIds.slice(0, 1),
       }),
       characterVoices: buildInitialProjectVoiceSettings({
         characters: charactersData,
@@ -71,7 +71,7 @@ export const loadAudiobookProjectSelectionData = async ({
       chapters: chaptersData,
       selectedChapterIds: normalizeSelectedChapterIds(selectedChapterIds, {
         allowedIds: chapterIds,
-        fallbackIds: chapterIds,
+        fallbackIds: chapterIds.slice(0, 1),
       }),
       characterVoices: [buildBaseNarratorVoice(ttsModel, voicePresets)],
       audioFxConfig: createDefaultAudioFxConfig(),

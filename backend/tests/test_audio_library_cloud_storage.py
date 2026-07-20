@@ -226,6 +226,7 @@ def test_aliyun_oss_list_objects_parses_bucket_items(tmp_path, monkeypatch):
     monkeypatch.setenv("AUDIOBOOK_AUDIO_LIBRARY_OSS_ENDPOINT", "oss-cn-shanghai.aliyuncs.com")
     monkeypatch.setenv("AUDIOBOOK_AUDIO_LIBRARY_OSS_ACCESS_KEY_ID", "ak")
     monkeypatch.setenv("AUDIOBOOK_AUDIO_LIBRARY_OSS_ACCESS_KEY_SECRET", "secret")
+    monkeypatch.setattr(storage, "formatdate", lambda usegmt: "Mon, 20 Jul 2026 08:00:00 GMT")
     calls = []
     xml = """<?xml version=\"1.0\" encoding=\"UTF-8\"?>
 <ListBucketResult xmlns=\"http://doc.oss-cn-shanghai.aliyuncs.com\">
@@ -263,6 +264,15 @@ def test_aliyun_oss_list_objects_parses_bucket_items(tmp_path, monkeypatch):
         "?list-type=2&max-keys=2&prefix=shared%2Faudio_library%2F"
     )
     assert calls[0]["headers"]["Authorization"].startswith("OSS ak:")
+    assert calls[0]["headers"]["Authorization"] == storage._build_aliyun_oss_authorization(
+        method="GET",
+        bucket="sggf-audio-library",
+        object_key="",
+        content_type="",
+        date_header="Mon, 20 Jul 2026 08:00:00 GMT",
+        access_key_id="ak",
+        access_key_secret="secret",
+    )
     assert result["bucket"] == "sggf-audio-library"
     assert result["is_truncated"] is False
     assert result["items"] == [

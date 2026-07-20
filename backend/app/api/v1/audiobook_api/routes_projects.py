@@ -5,7 +5,7 @@ from urllib.parse import quote
 from typing import List, Optional, Dict, Any
 
 from fastapi import Body, Depends, HTTPException, Query, Request, status
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from sqlalchemy.orm import Session
 
 from app.core.security import get_current_user
@@ -29,6 +29,11 @@ from app.services.audiobook.project_export_jobs import (
     PROJECT_EXPORT_STAGE,
     build_project_export_download_url,
     build_project_export_task_detail,
+)
+from app.services.audiobook.prompt_audio_review_summary import (
+    build_prompt_audio_review_summary,
+    build_prompt_audio_review_summary_csv,
+    load_prompt_audio_quality,
 )
 from app.services.audiobook.safe_filename import build_safe_filename
 from app.services.audiobook.app_service import AudiobookAppService
@@ -62,6 +67,28 @@ from app.api.v1.audiobook_api.dependencies import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _load_prompt_audio_quality_for_response(chapter_audio: ChapterAudio) -> Optional[Dict[str, Any]]:
+    return load_prompt_audio_quality(chapter_audio)
+
+
+def _serialize_chapter_audio_summary(
+    chapter_audio: ChapterAudio,
+    chapter_number_by_id: Dict[int, int],
+) -> Dict[str, Any]:
+    return {
+        "id": chapter_audio.id,
+        "chapter_id": chapter_audio.chapter_id,
+        "chapter_number": chapter_number_by_id.get(chapter_audio.chapter_id),
+        "audio_path": chapter_audio.audio_path,
+        "duration": chapter_audio.duration,
+        "file_size": chapter_audio.file_size,
+        "script_status": chapter_audio.script_status or "pending",
+        "has_script": bool(chapter_audio.script_json),
+        "has_review": bool(chapter_audio.script_review_json),
+        "prompt_audio_quality": _load_prompt_audio_quality_for_response(chapter_audio),
+    }
 
 
 def _attach_resume_checkpoints_to_queued_runs(
@@ -173,6 +200,19 @@ def _queue_project_export_task(
     }
 
 
+def _build_prompt_audio_review_summary_for_owned_project(
+    owned: OwnedAudiobookProject,
+) -> Dict[str, Any]:
+    chapter_audios = ChapterAudioRepository.list_by_audiobook_project(
+        owned.db,
+        owned.audiobook_project.id,
+    )
+    return build_prompt_audio_review_summary(
+        audiobook_project_id=owned.audiobook_project.id,
+        chapter_audios=chapter_audios,
+    )
+
+
 @router.post("/projects", response_model=dict)
 async def create_audiobook_project(
     request: AudiobookProjectCreate,
@@ -188,7 +228,7 @@ async def create_audiobook_project(
     """
     service = AudiobookAppService(db=db, current_user=current_user)
     # 4. 后台启动生成任务（通过 Celery 队列）
-    job_type = "script_only" if getattr(request, "generation_mode", "full") == "script_only" else "full"
+    job_type = "script_only" if getattr(request, "generation_mode", "script_only") == "script_only" else "full"
     prepared_request = service.prepare_audiobook_project_creation(request)
     tts_model = normalize_audiobook_tts_model(request.tts_model)
     if job_type != "script_only":
@@ -528,6 +568,39 @@ async def download_audiobook_project_audacity(
     )
 
 
+@router.get("/projects/{audiobook_project_id:int}/prompt-audio-review-summary", response_model=dict)
+async def get_prompt_audio_review_summary(
+    audiobook_project_id: int,
+    owned: OwnedAudiobookProject = Depends(get_owned_audiobook_project),
+):
+    """获取项目级 Prompt/Audio 人工验收汇总。"""
+    return _build_prompt_audio_review_summary_for_owned_project(owned)
+
+
+@router.get("/projects/{audiobook_project_id:int}/prompt-audio-review-summary.csv")
+async def export_prompt_audio_review_summary_csv(
+    audiobook_project_id: int,
+    owned: OwnedAudiobookProject = Depends(get_owned_audiobook_project),
+):
+    """导出项目级 Prompt/Audio 人工验收汇总 CSV。"""
+    summary = _build_prompt_audio_review_summary_for_owned_project(owned)
+    csv_text = build_prompt_audio_review_summary_csv(summary)
+    filename = build_safe_filename(
+        f"{owned.project.title or 'audiobook'}_prompt_audio_review_summary",
+        ".csv",
+        fallback="prompt_audio_review_summary",
+    )
+    encoded_filename = quote(filename)
+    return Response(
+        content=csv_text,
+        media_type="text/csv; charset=utf-8",
+        headers={
+            "Content-Disposition": f"attachment; filename*=UTF-8''{encoded_filename}",
+            "Access-Control-Expose-Headers": "Content-Disposition",
+        },
+    )
+
+
 @router.get("/projects/{audiobook_project_id:int}", response_model=dict)
 async def get_audiobook_project(
     audiobook_project_id: int,
@@ -560,17 +633,7 @@ async def get_audiobook_project(
         "total_cost": audiobook_project.total_cost,
         "created_at": audiobook_project.created_at.isoformat() if audiobook_project.created_at else None,
 	        "chapter_audios": [
-	            {
-	                "id": ca.id,
-	                "chapter_id": ca.chapter_id,
-	                "chapter_number": chapter_number_by_id.get(ca.chapter_id),
-	                "audio_path": ca.audio_path,
-	                "duration": ca.duration,
-	                "file_size": ca.file_size,
-                "script_status": ca.script_status or "pending",
-                "has_script": bool(ca.script_json),
-                "has_review": bool(ca.script_review_json),
-            }
+	            _serialize_chapter_audio_summary(ca, chapter_number_by_id)
             for ca in chapter_audios
         ],
     }
@@ -636,17 +699,7 @@ async def list_audiobook_projects(
                 "total_duration": ap.total_duration,
                 "created_at": ap.created_at.isoformat() if ap.created_at else None,
                 "chapter_audios": [
-                    {
-                        "id": ca.id,
-                        "chapter_id": ca.chapter_id,
-                        "chapter_number": chapter_number_by_id.get(ca.chapter_id),
-                        "audio_path": ca.audio_path,
-                        "duration": ca.duration,
-                        "file_size": ca.file_size,
-                        "script_status": ca.script_status or "pending",
-                        "has_script": bool(ca.script_json),
-                        "has_review": bool(ca.script_review_json),
-                    }
+                    _serialize_chapter_audio_summary(ca, chapter_number_by_id)
                     for ca in audios
                 ],
             }

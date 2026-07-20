@@ -18,6 +18,8 @@ describe('audiobook project audio config utils', () => {
       enable_music: true,
       sound_effect_density: 'medium',
       music_density: 'medium',
+      intelligent_balance: true,
+      balance_strategy: 'auto',
     })
   })
 
@@ -33,6 +35,8 @@ describe('audiobook project audio config utils', () => {
       enable_music: true,
       sound_effect_density: 'high',
       music_density: 'medium',
+      intelligent_balance: true,
+      balance_strategy: 'auto',
     })
   })
 
@@ -116,6 +120,46 @@ describe('audiobook project audio config utils', () => {
         voiceCloneDataUrl: undefined,
         voiceDesignPrompt: undefined,
       },
+    ])
+  })
+
+  it('hydrates legacy asset ids into voice id references', () => {
+    const voices = buildProjectCharacterVoiceSettings({
+      ttsModel: 'mimo-v2.5-tts-voiceclone',
+      characters: [
+        { id: 1, name: 'CloneHero' },
+        { id: 2, name: 'DesignHero' },
+        { id: 3, name: 'StepHero' },
+      ],
+      savedCharacters: [
+        {
+          character_id: 1,
+          name: 'CloneHero',
+          voice_id: '',
+          tts_model: 'mimo-v2.5-tts-voiceclone',
+          mimo_voice_asset_id: 'mimo_clone_unit',
+        },
+        {
+          character_id: 2,
+          name: 'DesignHero',
+          voice_id: '',
+          tts_model: 'mimo-v2.5-tts-voicedesign',
+          mimo_voice_asset_id: 'mimo_design_unit',
+        },
+        {
+          character_id: 3,
+          name: 'StepHero',
+          voice_id: '',
+          tts_model: 'stepaudio-2.5-tts',
+          stepaudio_voice_asset_id: 'stepaudio_clone_unit',
+        },
+      ],
+    })
+
+    expect(voices.map((voice) => voice.voiceId)).toEqual([
+      'mimo_clone:mimo_clone_unit',
+      'mimo_design:mimo_design_unit',
+      'stepaudio_clone:stepaudio_clone_unit',
     ])
   })
 
@@ -284,7 +328,7 @@ describe('audiobook project audio config utils', () => {
     })
   })
 
-  it('persists MiMo inline voice clone input while requiring reusable assets for MiMo voice design', () => {
+  it('ignores inline clone and design inputs because voice assets are managed separately', () => {
     const audioFxConfig = createDefaultAudioFxConfig()
 
     expect(buildProjectAudioConfigPayload({
@@ -312,15 +356,7 @@ describe('audiobook project audio config utils', () => {
         },
       ],
     })).toEqual({
-      characters: [
-        {
-          character_id: 5,
-          name: 'CloneHero',
-          voice_id: '',
-          tts_model: 'mimo-v2.5-tts-voiceclone',
-          voice_clone_data_url: 'data:audio/wav;base64,AAAA',
-        },
-      ],
+      characters: [],
       audio_fx: audioFxConfig,
     })
   })
@@ -419,7 +455,7 @@ describe('audiobook project audio config utils', () => {
     })
   })
 
-  it('includes MiMo clone inline input in generation voice config but excludes MiMo design inline prompt', () => {
+  it('excludes inline clone and design inputs from generation voice config', () => {
     expect(buildAudiobookVoiceConfigPayload({
       ttsModel: 'mimo-v2.5-tts-voicedesign',
       voicePresets: [],
@@ -441,14 +477,7 @@ describe('audiobook project audio config utils', () => {
           voiceDesignPrompt: '少年男性，偏高音，语速偏快，紧张但勇敢',
         },
       ],
-    })).toEqual([
-      {
-        character_name: 'CloneRole',
-        voice_id: '',
-        tts_model: 'mimo-v2.5-tts-voiceclone',
-        voice_clone_data_url: 'data:audio/mpeg;base64,BBBB',
-      },
-    ])
+    })).toEqual([])
   })
 
   it('ignores stale MiMo inline inputs when the effective model no longer uses them', () => {
@@ -474,7 +503,7 @@ describe('audiobook project audio config utils', () => {
     ])
   })
 
-  it('persists reusable MiMo voice asset ids without embedding inline samples', () => {
+  it('persists reusable voice assets as voice_id references only', () => {
     const audioFxConfig = createDefaultAudioFxConfig()
 
     expect(buildProjectAudioConfigPayload({
@@ -499,7 +528,6 @@ describe('audiobook project audio config utils', () => {
           name: 'ReusableDesign',
           voice_id: 'mimo_design:mimo_design_unit',
           tts_model: 'mimo-v2.5-tts-voicedesign',
-          mimo_voice_asset_id: 'mimo_design_unit',
         },
       ],
       audio_fx: audioFxConfig,
@@ -524,7 +552,6 @@ describe('audiobook project audio config utils', () => {
         character_name: 'ReusableClone',
         voice_id: 'mimo_clone:mimo_clone_unit',
         tts_model: 'mimo-v2.5-tts-voiceclone',
-        mimo_voice_asset_id: 'mimo_clone_unit',
       },
     ])
 
@@ -546,7 +573,6 @@ describe('audiobook project audio config utils', () => {
         character_name: 'ReusableStepAudioClone',
         voice_id: 'stepaudio_clone:stepaudio_clone_unit',
         tts_model: 'stepaudio-2.5-tts',
-        stepaudio_voice_asset_id: 'stepaudio_clone_unit',
       },
     ])
   })

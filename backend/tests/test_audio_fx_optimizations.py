@@ -262,9 +262,10 @@ def test_external_sound_library_skips_missing_files(
                 {
                     "id": "missing_effect",
                     "category": "effects/action",
-                    "file_path": "sound_effects/effects/action/missing.wav",
-                    "description": "缺失动作音",
-                    "tags": ["missing"],
+                        "file_path": "sound_effects/effects/action/missing.wav",
+                        "description": "缺失动作音",
+                        "tags": ["missing"],
+                        "source": "user_upload",
                 }
             ],
             ensure_ascii=False,
@@ -279,6 +280,78 @@ def test_external_sound_library_skips_missing_files(
 
     assert "missing_effect" not in designer.sound_library
     assert "音效索引条目文件不存在" in caplog.text
+
+
+def test_external_sound_library_skips_community_rejected_entries(
+    sound_effect_designer_module,
+    tmp_path,
+    monkeypatch,
+):
+    SoundEffectDesigner = sound_effect_designer_module["SoundEffectDesigner"]
+    designer_module = sys.modules[SoundEffectDesigner.__module__]
+    audio_library = tmp_path / "audio_library"
+    sound_effect_file = audio_library / "sound_effects" / "action" / "rejected.wav"
+    sound_effect_file.parent.mkdir(parents=True)
+    sound_effect_file.write_bytes(b"rejected")
+    index_path = audio_library / "sound_effects_index.json"
+    index_path.write_text(
+        json.dumps(
+            [
+                {
+                    "id": "community_rejected_effect",
+                    "category": "action/realistic",
+                    "file_path": "sound_effects/action/rejected.wav",
+                    "quality_status": "community_rejected",
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(designer_module, "AUDIO_LIBRARY_DIR", audio_library)
+    monkeypatch.setattr(designer_module, "SOUND_EFFECTS_DIR", audio_library / "sound_effects")
+
+    designer = SoundEffectDesigner(index_path=str(index_path))
+
+    assert "community_rejected_effect" not in designer.sound_library
+
+
+def test_external_sound_library_uses_normalized_train_station_category(
+    sound_effect_designer_module,
+    tmp_path,
+    monkeypatch,
+):
+    SoundEffectDesigner = sound_effect_designer_module["SoundEffectDesigner"]
+    designer_module = sys.modules[SoundEffectDesigner.__module__]
+    audio_library = tmp_path / "audio_library"
+    sound_file = audio_library / "sound_effects" / "action" / "train.ogg"
+    sound_file.parent.mkdir(parents=True)
+    sound_file.write_bytes(b"OggS")
+    index_path = audio_library / "sound_effects_index.json"
+    index_path.write_text(
+        json.dumps([{
+            "id": "action_local_authorized_wikimedia_airchime_k5la_b1a2540775",
+            "source_id": "wikimedia_airchime_k5la_train_horn_cc0",
+            "name": "train_horn_airchime_k5la",
+            "description": "Diesel locomotive horn for train arrivals and railway warnings.",
+            "category": "action/intense",
+            "style": "intense",
+            "tags": ["action", "intense", "battle", "train", "horn", "travel"],
+            "scenes": ["battle", "travel"],
+                "file_path": "sound_effects/action/train.ogg",
+                "source": "user_upload",
+        }]),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(designer_module, "AUDIO_LIBRARY_DIR", audio_library)
+    monkeypatch.setattr(designer_module, "SOUND_EFFECTS_DIR", audio_library / "sound_effects")
+
+    designer = SoundEffectDesigner(index_path=str(index_path))
+    entry = designer.sound_library["action_local_authorized_wikimedia_airchime_k5la_b1a2540775"]
+
+    assert entry["type"] == "environment"
+    assert entry["description"] == "火车站环境声，包含火车鸣笛、列车运行声和背景人群交谈。"
+    assert "people" in entry["tags"]
+    assert "battle" not in entry["tags"]
 
 
 def test_external_sound_library_replaces_unresolved_builtin_entry(
@@ -303,7 +376,7 @@ def test_external_sound_library_replaces_unresolved_builtin_entry(
                     "file_path": "sound_effects/environment/rain_heavy.wav",
                     "description": "可用大雨声",
                     "tags": ["雨", "大雨"],
-                    "source": "test",
+                        "source": "user_upload",
                 }
             ],
             ensure_ascii=False,
@@ -317,6 +390,51 @@ def test_external_sound_library_replaces_unresolved_builtin_entry(
 
     assert designer.sound_library["rain_heavy"]["file"] == "sound_effects/environment/rain_heavy.wav"
     assert designer.sound_library["rain_heavy"]["description"] == "可用大雨声"
+
+
+def test_sound_effect_designer_prefers_explicit_asset_id_over_display_name(
+    sound_effect_designer_module,
+    tmp_path,
+):
+    SoundEffectDesigner = sound_effect_designer_module["SoundEffectDesigner"]
+    audio_library = tmp_path / "audio_library"
+    sound_file = audio_library / "sound_effects" / "selected.wav"
+    sound_file.parent.mkdir(parents=True)
+    sound_file.write_bytes(b"selected-effect")
+    index_path = audio_library / "sound_effects_index.json"
+    index_path.write_text(
+        json.dumps(
+            [
+                {
+                    "id": "sfx-selected-01",
+                    "category": "action",
+                        "file_path": "sound_effects/selected.wav",
+                        "description": "Selected library effect",
+                        "source": "user_upload",
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    designer = SoundEffectDesigner(index_path=str(index_path))
+    cues = designer.design_effects(
+        [
+            {
+                "text": "The door shuts.",
+                "sound_effects": [
+                    {
+                        "asset_id": "sfx-selected-01",
+                        "name": "A misleading display name",
+                    }
+                ],
+            }
+        ],
+        allow_asset_generation=False,
+    )
+
+    assert cues[0].effect_id == "sfx-selected-01"
+    assert cues[0].audio_file == "sound_effects/selected.wav"
 
 
 def test_match_effect_prefers_resolvable_external_match_over_builtin_placeholder(
@@ -341,7 +459,7 @@ def test_match_effect_prefers_resolvable_external_match_over_builtin_placeholder
                     "file_path": "sound_effects/effects/action/paper.wav",
                     "description": "纸张摩擦声",
                     "tags": ["纸张", "摩擦"],
-                    "source": "test",
+                        "source": "user_upload",
                 }
             ],
             ensure_ascii=False,
@@ -380,7 +498,7 @@ def test_match_effect_prefers_resolvable_external_match_when_scores_tie(
                     "file_path": "sound_effects/effects/action/custom_paper.wav",
                     "description": "纸张簌簌声",
                     "tags": ["纸张"],
-                    "source": "test",
+                        "source": "user_upload",
                 }
             ],
             ensure_ascii=False,
@@ -578,7 +696,7 @@ def test_common_fantasy_effect_descriptions_match_library_aliases(sound_effect_d
         if expected_file:
             assert cue.audio_file == expected_file[0]
         else:
-            assert designer._has_resolvable_audio_file(cue.audio_file)
+            assert cue.audio_file == "paper.mp3"
         assert cue.description == description
 
 
@@ -642,7 +760,7 @@ def test_generated_environment_category_normalizes_to_environment(
             "file_path": "sound_effects/environment/city_rain.mp3",
             "description": "city rain",
             "tags": ["rain"],
-            "source": "test",
+            "source": "ai_generated",
         }
     )
 
@@ -895,6 +1013,115 @@ def test_segment_preview_resolver_uses_audio_library_base_for_relative_index_pat
     )
 
     assert resolved == music_file
+
+
+def test_parallel_sound_design_preserves_structured_asset_selection():
+    from app.services.audiobook.engine_pkg._parallel_mixin import ParallelMixin
+
+    class FakeSoundEffectDesigner:
+        def __init__(self):
+            self.script_segments = None
+            self.effect_cues = []
+
+        def design_effects(self, script_segments, **kwargs):
+            self.script_segments = script_segments
+            self.effect_cues = [SimpleNamespace()]
+            return self.effect_cues
+
+        def optimize_effect_density(self, max_effects_per_minute=4):
+            return self.effect_cues
+
+        def export_effect_timeline(self):
+            return {"timeline": []}
+
+    class Harness(ParallelMixin):
+        def __init__(self):
+            self._audio_fx_config = {
+                "enable_sound_effects": True,
+                "sound_effect_density": "medium",
+                "enable_music": False,
+            }
+            self.sound_effect_designer = FakeSoundEffectDesigner()
+
+    harness = Harness()
+    asyncio.run(
+        harness._parallel_design(
+            task_id="task",
+            script_segments=[
+                SimpleNamespace(
+                    text="The door shuts.",
+                    sound_effects=[
+                        SimpleNamespace(
+                            asset_id="sfx-door-01",
+                            name="Heavy door",
+                            volume=0.4,
+                        )
+                    ],
+                    sound_effects_simple=[],
+                )
+            ],
+            skip_stage_tracking=True,
+            include_voice_design=False,
+        )
+    )
+
+    effect_request = harness.sound_effect_designer.script_segments[0]["sound_effects"][0]
+    assert effect_request.asset_id == "sfx-door-01"
+    assert effect_request.name == "Heavy door"
+    assert effect_request.volume == 0.4
+
+
+def test_parallel_music_scene_builder_preserves_explicit_asset_selection():
+    from app.services.audiobook.engine_pkg._parallel_mixin import ParallelMixin
+
+    class FakeMusicComposer:
+        def __init__(self):
+            self.chapter_structure = None
+
+        async def design_music(self, chapter_structure, **kwargs):
+            self.chapter_structure = chapter_structure
+            return []
+
+        def optimize_music_placement(self, max_music_coverage=0.4):
+            return []
+
+        def export_music_timeline(self):
+            return {"timeline": []}
+
+    class Harness(ParallelMixin):
+        def __init__(self):
+            self._audio_fx_config = {
+                "enable_sound_effects": False,
+                "enable_music": True,
+                "music_density": "medium",
+            }
+            self.music_composer = FakeMusicComposer()
+
+    harness = Harness()
+    asyncio.run(
+        harness._parallel_design(
+            task_id="task",
+            script_segments=[
+                SimpleNamespace(
+                    text="The corridor narrows.",
+                    emotion="neutral",
+                    music_cue=SimpleNamespace(
+                        asset_id="music-corridor-01",
+                        style="Tense corridor bed",
+                        volume=0.18,
+                    ),
+                    music_cue_simple="",
+                )
+            ],
+            skip_stage_tracking=True,
+            include_voice_design=False,
+        )
+    )
+
+    scene = harness.music_composer.chapter_structure["scenes"][0]
+    assert scene["music_asset_id"] == "music-corridor-01"
+    assert scene["music_style"] == "Tense corridor bed"
+    assert scene["music_volume"] == 0.18
 
 
 def test_parallel_music_scene_builder_uses_narration_duration_estimate():
@@ -1320,6 +1547,64 @@ def test_music_index_attaches_cloud_metadata_for_generated_music(tmp_path, monke
     assert data[0]["public_url"] == "https://cdn.example.test/music/music_cache/abc123.mp3"
 
 
+def test_music_index_upserts_generated_music_to_shared_db_index(tmp_path, monkeypatch):
+    from app.services.audiobook import ai_music as ai_music_module
+    from app.services.audiobook.ai_music import MurekaO1Client, MusicGenerationRequest, MusicStyle
+
+    cache_dir = tmp_path / "music_cache"
+    cache_dir.mkdir()
+    monkeypatch.setenv("MUREKA_API_KEY", "test-key")
+    monkeypatch.setattr(ai_music_module, "upload_audio_library_asset", lambda **kwargs: {})
+    saved_records = []
+    commits = []
+
+    class FakeSession:
+        def commit(self):
+            commits.append(True)
+
+        def rollback(self):
+            raise AssertionError("successful database upsert must not roll back")
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(ai_music_module, "SessionLocal", lambda: FakeSession(), raising=False)
+    monkeypatch.setattr(
+        ai_music_module,
+        "upsert_audio_library_asset",
+        lambda db, library_type, record: saved_records.append((library_type, dict(record))),
+        raising=False,
+    )
+
+    client = MurekaO1Client(enable_cache=True, cache_dir=str(cache_dir))
+    monkeypatch.setattr(
+        client,
+        "_assess_audio_quality",
+        lambda file_path: {"quality_score": 90.0, "quality_grade": "A", "quality_status": "accepted"},
+    )
+    cache_file = cache_dir / "shared.mp3"
+    cache_file.write_bytes(b"ID3fake-audio")
+    request = MusicGenerationRequest(
+        prompt="tense underscore",
+        style=MusicStyle.AMBIENT,
+        duration=20,
+        tempo="medium",
+        mood="tense",
+        instruments=[],
+        variant=0,
+        bucket="underscore:tense",
+    )
+
+    client._update_music_index(request, cache_file)
+
+    assert commits == [True]
+    assert saved_records[0][0] == "music"
+    saved_record = saved_records[0][1]
+    assert saved_record["id"] == client._get_cache_key(request)
+    assert saved_record["file_path"] == "music_cache/shared.mp3"
+    assert saved_record["source"] == "mureka"
+
+
 def test_music_composer_loads_external_index(music_composer_module, tmp_path, monkeypatch):
     """V3-16: MusicComposer 应从 music_index.json 加载外部条目。"""
     MusicComposer = music_composer_module["MusicComposer"]
@@ -1425,6 +1710,39 @@ def test_music_composer_external_index_skips_missing_files(
     assert "音乐索引条目文件不存在" in caplog.text
 
 
+def test_music_composer_external_index_skips_community_rejected_entries(
+    music_composer_module,
+    tmp_path,
+    monkeypatch,
+):
+    MusicComposer = music_composer_module["MusicComposer"]
+    composer_module = sys.modules[MusicComposer.__module__]
+    audio_library = tmp_path / "audio_library"
+    music_file = audio_library / "music_cache" / "rejected.mp3"
+    music_file.parent.mkdir(parents=True)
+    music_file.write_bytes(b"rejected")
+    index_path = audio_library / "music_index.json"
+    index_path.write_text(
+        json.dumps(
+            [
+                {
+                    "id": "community_rejected_music",
+                    "mood": "tense",
+                    "file_path": "music_cache/rejected.mp3",
+                    "quality_status": "community_rejected",
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(composer_module, "AUDIO_LIBRARY_DIR", audio_library)
+    monkeypatch.setattr(composer_module, "DEFAULT_MUSIC_INDEX_PATH", index_path)
+
+    composer = MusicComposer(enable_ai=False, index_path=str(index_path))
+
+    assert "community_rejected_music" not in composer.music_library
+
+
 def test_music_composer_external_index_replaces_unresolved_builtin(music_composer_module, tmp_path, monkeypatch):
     """V3-16: 外部真实素材应覆盖内置不可解析占位。"""
     MusicComposer = music_composer_module["MusicComposer"]
@@ -1459,6 +1777,75 @@ def test_music_composer_external_index_replaces_unresolved_builtin(music_compose
     composer = MusicComposer(enable_ai=False, index_path=str(index_path))
 
     assert composer.music_library["suspense_1"]["file"] == "music_cache/suspense_1.mp3"
+
+
+def test_music_composer_uses_explicit_asset_id_without_ai_generation(
+    music_composer_module,
+    tmp_path,
+    monkeypatch,
+):
+    MusicComposer = music_composer_module["MusicComposer"]
+    composer_module = sys.modules[MusicComposer.__module__]
+    audio_library = tmp_path / "audio_library"
+    music_file = audio_library / "music_cache" / "selected.mp3"
+    music_file.parent.mkdir(parents=True)
+    music_file.write_bytes(b"selected-music")
+    index_path = audio_library / "music_index.json"
+    index_path.write_text(
+        json.dumps(
+            [
+                {
+                    "id": "music-selected-01",
+                    "mood": "tense",
+                    "style": "Selected tense bed",
+                    "file_path": "music_cache/selected.mp3",
+                    "description": "Selected library music",
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    class FakeGenerator:
+        def __init__(self):
+            self.calls = []
+
+        async def generate_for_bucket(self, **kwargs):
+            self.calls.append(kwargs)
+            return SimpleNamespace(success=True, audio_file_path="generated.mp3")
+
+    generator = FakeGenerator()
+    monkeypatch.setattr(composer_module, "AI_MUSIC_AVAILABLE", True)
+    composer = MusicComposer(
+        ai_generator=generator,
+        enable_ai=True,
+        index_path=str(index_path),
+    )
+
+    cue = asyncio.run(
+        composer._design_scene_music(
+            {
+                "scene_id": "scene-1",
+                "start_time": 4.0,
+                "duration": 30.0,
+                "mood": "tense",
+                "description": "Tense corridor",
+                "is_climax": True,
+                "music_asset_id": "music-selected-01",
+                "music_volume": 0.18,
+            }
+        )
+    )
+
+    assert cue is not None
+    assert cue.audio_file == "music_cache/selected.mp3"
+    assert cue.volume == 0.18
+    assert getattr(cue, "asset_id", "") == "music-selected-01"
+    assert generator.calls == []
+
+    composer.music_cues = [cue]
+    composer._chapter_total_duration = 30.0
+    assert composer.optimize_music_placement(max_music_coverage=0.01) == [cue]
 
 
 def test_music_pool_cache_preloaded_from_index(music_composer_module, tmp_path, monkeypatch):

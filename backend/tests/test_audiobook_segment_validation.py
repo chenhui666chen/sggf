@@ -63,6 +63,50 @@ def test_segment_validation_normalizes_core_fields():
     assert segment.music_cue.emotion_follow is False
 
 
+def test_segment_validation_preserves_explicit_audio_library_asset_ids():
+    from app.services.audiobook.script_adapter_pkg._segment_validation import build_script_segment
+
+    segment = build_script_segment(
+        {
+            "type": "narration",
+            "text": "The iron door closes behind them.",
+            "sound_effects": [
+                {
+                    "asset_id": "sfx-door-closed-01",
+                    "effect_id": "legacy-door-id",
+                    "name": "Heavy iron door",
+                }
+            ],
+            "music_cue": {
+                "asset_id": "music-tense-bed-01",
+                "style": "Low tense strings",
+            },
+        }
+    )
+
+    assert segment is not None
+    assert segment.sound_effects[0].asset_id == "sfx-door-closed-01"
+    assert segment.sound_effects[0].name == "Heavy iron door"
+    assert segment.music_cue is not None
+    assert segment.music_cue.asset_id == "music-tense-bed-01"
+    assert segment.music_cue.style == "Low tense strings"
+
+
+def test_audio_cue_dataclasses_keep_legacy_positional_argument_order():
+    from app.services.audiobook.script_adapter_pkg._dataclasses import MusicCue, SoundEffect
+
+    effect = SoundEffect("Door", "environment", 0.25)
+    music = MusicCue("Tense bed", 0.3, 1.0, 2.5)
+
+    assert effect.layer == "environment"
+    assert effect.volume == 0.25
+    assert effect.asset_id is None
+    assert music.volume == 0.3
+    assert music.fade_in == 1.0
+    assert music.fade_out == 2.5
+    assert music.asset_id is None
+
+
 def test_segment_validation_skips_empty_or_punctuation_only_segments():
     from app.services.audiobook.script_adapter_pkg._segment_validation import build_script_segment
 

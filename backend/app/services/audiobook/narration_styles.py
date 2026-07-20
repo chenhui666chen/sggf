@@ -229,60 +229,17 @@ def apply_narration_style_to_tts_params(
     base_params: Dict[str, Any],
     custom_prompt: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """将叙事风格应用到 TTS 参数
+    """保留历史旁白风格输入，但不再覆盖运行时表演参数。
 
-    Args:
-        style_id: 风格ID
-        base_params: 基础TTS参数
-        custom_prompt: 自定义prompt（如果用户提供）
-
-    Returns:
-        更新后的TTS参数
+    新链路中旁白只保存 TTS 模型与音色引用，语速、音高、停顿和风格指令
+    均由片段文本、上下文与 delivery_plan 动态决定。该函数仅保留历史
+    style_id/custom_prompt 作为可审计兼容输入，避免旧项目数据丢失。
     """
-    preset = get_narration_style_preset(style_id)
-
     updated_params = base_params.copy()
-
-    # 应用语速
-    if "speed" not in updated_params or updated_params["speed"] is None:
-        updated_params["speed"] = preset["speed_range"]["default"]
-
-    # 应用音调
-    if "pitch" not in updated_params or updated_params["pitch"] is None:
-        updated_params["pitch"] = preset["pitch_range"]["default"]
-
-    # 应用情感（仅对支持的模型）
-    explicit_instruct_emotion = str(updated_params.get("instruct_emotion") or "").strip()
-    if explicit_instruct_emotion and explicit_instruct_emotion != "neutral":
-        updated_params["emotion"] = explicit_instruct_emotion
-    existing_emotion = str(updated_params.get("emotion") or "").strip()
-    if preset["emotion_profile"]["emotion_variation"]:
-        # 允许情感变化，不强制覆盖
-        if "emotion" not in updated_params:
-            updated_params["emotion"] = preset["emotion_profile"]["default_emotion"]
-    else:
-        # 固定风格只覆盖空值或弱默认情绪，保留片段级强情绪。
-        if not existing_emotion or existing_emotion in {"neutral", "calm"}:
-            updated_params["emotion"] = preset["emotion_profile"]["default_emotion"]
-
-    # 应用停顿倍数
-    updated_params["pause_multiplier"] = preset["pause_multiplier"]
-
-    # 应用系统prompt
-    prompt = (custom_prompt or "").strip() or preset.get("system_prompt_template", "")
-    updated_params["system_prompt"] = prompt
+    normalized_style = normalize_narration_style_id(style_id)
+    if normalized_style:
+        updated_params["narration_style_legacy"] = normalized_style
+    prompt = str(custom_prompt or "").strip()
     if prompt:
-        updated_params.setdefault("instructions", prompt)
-        updated_params["use_instruct_mode"] = True
-
-    performance_notes = str(updated_params.get("performance_notes") or "").strip()
-    instructions = str(updated_params.get("instructions") or "").strip()
-    if performance_notes and instructions and performance_notes not in instructions:
-        updated_params["instructions"] = f"{instructions} 演绎要求：{performance_notes}"
-
-    updated_params["voice_description"] = build_narration_voice_description(
-        preset["id"],
-        str(updated_params.get("emotion") or preset["emotion_profile"]["default_emotion"]),
-    )
-
+        updated_params["narration_style_prompt_legacy"] = prompt
     return updated_params

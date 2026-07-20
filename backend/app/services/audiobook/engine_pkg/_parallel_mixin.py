@@ -231,24 +231,36 @@ class ParallelMixin:
             for seg in script_segments:
                 text = getattr(seg, "text", "") or ""
                 raw_effects = getattr(seg, "sound_effects", None)
-                effect_names = []
+                effect_requests = []
                 if raw_effects:
                     for ef in raw_effects:
                         if not ef:
                             continue
                         if isinstance(ef, dict):
-                            name = ef.get("name") or ef.get("effect_id") or ef.get("id")
+                            reference = (
+                                ef.get("asset_id")
+                                or ef.get("effect_id")
+                                or ef.get("id")
+                                or ef.get("name")
+                            )
+                        elif isinstance(ef, str):
+                            reference = ef.strip()
                         else:
-                            name = getattr(ef, "name", None) or str(ef)
-                        if name:
-                            effect_names.append(name)
+                            reference = (
+                                getattr(ef, "asset_id", None)
+                                or getattr(ef, "effect_id", None)
+                                or getattr(ef, "id", None)
+                                or getattr(ef, "name", None)
+                            )
+                        if reference:
+                            effect_requests.append(ef)
                 else:
-                    effect_names = getattr(seg, "sound_effects_simple", []) or []
+                    effect_requests = getattr(seg, "sound_effects_simple", []) or []
 
                 script_dicts.append(
                     {
                         "text": text,
-                        "sound_effects": effect_names,
+                        "sound_effects": effect_requests,
                     }
                 )
             
@@ -338,19 +350,42 @@ class ParallelMixin:
 
                     # 只有在存在 music_cue 或明显的情绪标签时，才认为是需要配乐的场景
                     raw_music_cue = getattr(seg, "music_cue", None)
+                    music_cue_data: Dict[str, Any] = {}
                     music_cue_text = ""
                     if isinstance(raw_music_cue, str):
                         music_cue_text = raw_music_cue
                     elif isinstance(raw_music_cue, dict):
+                        music_cue_data = dict(raw_music_cue)
                         music_cue_text = (
                             raw_music_cue.get("style")
                             or raw_music_cue.get("name")
                             or raw_music_cue.get("cue")
                             or ""
                         )
+                    elif raw_music_cue is not None:
+                        music_cue_data = (
+                            asdict(raw_music_cue)
+                            if is_dataclass(raw_music_cue)
+                            else dict(getattr(raw_music_cue, "__dict__", {}) or {})
+                        )
+                        music_cue_text = (
+                            music_cue_data.get("style")
+                            or music_cue_data.get("name")
+                            or music_cue_data.get("cue")
+                            or ""
+                        )
                     else:
                         # 兼容简洁模式：music_cue_simple 只是一个字符串说明
                         music_cue_text = getattr(seg, "music_cue_simple", "") or ""
+
+                    music_asset_id = str(
+                        music_cue_data.get("asset_id")
+                        or music_cue_data.get("music_id")
+                        or music_cue_data.get("id")
+                        or ""
+                    ).strip()
+                    if not music_cue_text and music_asset_id:
+                        music_cue_text = music_asset_id
 
                     emotion = (getattr(seg, "emotion", "") or "").lower()
 
@@ -372,7 +407,7 @@ class ParallelMixin:
                     elif any(k in lc_cue for k in ["sad", "哀伤", "悲伤"]):
                         mood = "sad"
 
-                    scenes.append({
+                    scene = {
                         "scene_id": f"scene_{idx}",
                         "start_time": start_time,
                         "duration": min(max(seg_duration, 20.0), 120.0),  # 单段配乐时长限制在 20-120 秒
@@ -380,7 +415,24 @@ class ParallelMixin:
                         "description": text[:80],
                         "is_climax": "tense" in mood or "epic" in mood,
                         "is_turning_point": False,
-                    })
+                    }
+                    if music_asset_id:
+                        scene["music_asset_id"] = music_asset_id
+                    if music_cue_data:
+                        scene["music_style"] = music_cue_text
+                        cue_field_map = {
+                            "volume": "music_volume",
+                            "fade_in": "music_fade_in",
+                            "fade_out": "music_fade_out",
+                            "duration": "music_duration",
+                            "start_time": "music_start_time",
+                            "sync_with_dialogue": "music_sync_with_dialogue",
+                            "dialogue_volume_reduction": "music_dialogue_volume_reduction",
+                        }
+                        for source_key, scene_key in cue_field_map.items():
+                            if music_cue_data.get(source_key) is not None:
+                                scene[scene_key] = music_cue_data[source_key]
+                    scenes.append(scene)
 
                 # 🆕 智能化增强：高潮点检测 + 情绪曲线分析
                 audio_fx = getattr(self, "_audio_fx_config", None) or {}

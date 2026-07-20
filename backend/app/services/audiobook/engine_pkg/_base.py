@@ -20,6 +20,8 @@ from ..audio_mixer import AudioMixer
 from ..agent_message import MessageBus
 from ..task_tracker import TaskTracker
 from ..tts_delivery_plan import build_delivery_plan, resolve_segment_tts_model
+from ..tts_style_control import build_model_style_control, build_provider_prompt_snapshot
+from ..chapter_cadence import apply_chapter_cadence
 from app.services.chapter_adaptation_assets import build_audio_adaptation_hint
 from core.unified_media_runtime import create_tts_engine
 
@@ -181,6 +183,99 @@ class AudiobookEngineBase:
         except Exception as e:
             logger.warning(f"⚠️ 应用项目级音效/BGM 策略失败: {e}")
 
+    def _segment_value(self, segment: Any, key: str, default: Any = None) -> Any:
+        if isinstance(segment, dict):
+            return segment.get(key, default)
+        return getattr(segment, key, default)
+
+    def _build_audio_prompt_review_metrics(
+        self,
+        script_segments: List[Any],
+        *,
+        llm_script_review_summary: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        metrics: Dict[str, Any] = {
+            "segments_count": len(script_segments),
+            "sound_effects_count": sum(
+                len(self._segment_value(seg, "sound_effects", []) or [])
+                for seg in script_segments
+            ),
+            "music_cues_count": sum(
+                1
+                for seg in script_segments
+                if self._segment_value(seg, "music_cue") or self._segment_value(seg, "music_cue_simple", "")
+            ),
+            "instruct_count": sum(
+                1
+                for seg in script_segments
+                if (
+                    self._segment_value(seg, "instruct_emotion", "")
+                    or self._segment_value(seg, "instruct_scene", "")
+                    or self._segment_value(seg, "instruct_role", "")
+                    or self._segment_value(seg, "instruct_identity", "")
+                )
+            ),
+        }
+        if llm_script_review_summary:
+            metrics["llm_script_review"] = llm_script_review_summary
+
+        strategy_count = 0
+        by_model_family: Dict[str, int] = {}
+        by_placement: Dict[str, int] = {}
+        use_tag_parser_count = 0
+        tag_count = 0
+
+        for seg in script_segments:
+            voice_params = self._segment_value(seg, "voice_params", {})
+            if not isinstance(voice_params, dict):
+                continue
+            snapshot = voice_params.get("provider_prompt_snapshot")
+            if not isinstance(snapshot, dict):
+                continue
+            provider_prompt = snapshot.get("provider_prompt")
+            if not isinstance(provider_prompt, dict):
+                continue
+            strategy = provider_prompt.get("inline_tag_strategy")
+            if not isinstance(strategy, dict):
+                continue
+
+            strategy_count += 1
+            model_family = str(strategy.get("model_family") or "unknown").strip() or "unknown"
+            placement = str(strategy.get("placement") or "unknown").strip() or "unknown"
+            by_model_family[model_family] = by_model_family.get(model_family, 0) + 1
+            by_placement[placement] = by_placement.get(placement, 0) + 1
+
+            use_tag_parser = strategy.get("use_tag_parser")
+            if use_tag_parser is True or (
+                isinstance(use_tag_parser, str)
+                and use_tag_parser.strip().lower() in {"1", "true", "yes"}
+            ):
+                use_tag_parser_count += 1
+
+            segment_tags = set()
+            for tag_key in ("style_tags", "inline_tags"):
+                tags = strategy.get(tag_key)
+                if not isinstance(tags, list):
+                    continue
+                for tag in tags:
+                    tag_text = str(tag).strip() if tag is not None else ""
+                    if tag_text:
+                        segment_tags.add(tag_text)
+            tag_count += len(segment_tags)
+
+        if strategy_count:
+            metrics.update(
+                {
+                    "inline_tag_strategy_count": strategy_count,
+                    "inline_tag_strategy_by_model_family": by_model_family,
+                    "inline_tag_strategy_by_placement": by_placement,
+                    "inline_tag_strategy_use_tag_parser_count": use_tag_parser_count,
+                    "inline_tag_strategy_tag_count": tag_count,
+                }
+            )
+
+        return metrics
+
     def _build_review_segments(self, script_segments: List[ScriptSegment]) -> List[Dict[str, Any]]:
         """构造评审所需的片段结构。"""
         def review_voice_params(seg: ScriptSegment) -> Dict[str, Any]:
@@ -201,6 +296,17 @@ class AudiobookEngineBase:
                 voice_params=voice_params,
                 model=resolved_model,
                 emotion=getattr(seg, "instruct_emotion", "") or getattr(seg, "emotion", "neutral"),
+            )
+            style_control = build_model_style_control(
+                resolved_model,
+                voice_params,
+                getattr(seg, "instruct_emotion", "") or getattr(seg, "emotion", "neutral"),
+            )
+            voice_params["provider_prompt_snapshot"] = build_provider_prompt_snapshot(
+                model=resolved_model,
+                voice_id=voice_params.get("speaker") or voice_params.get("voice_id") or "",
+                style_control=style_control,
+                delivery_plan=voice_params["delivery_plan"],
             )
             return voice_params
 
@@ -241,6 +347,7 @@ class AudiobookEngineBase:
         max_rounds = max(0, int(max_revision_rounds or 0))
         revision_rounds: List[Dict[str, Any]] = []
         quality_report = None
+        apply_chapter_cadence(script_segments)
 
         for round_index in range(max_rounds + 1):
             review_segments = self._build_review_segments(script_segments)
@@ -274,6 +381,8 @@ class AudiobookEngineBase:
                 applied = bool(llm_revision.get("applied"))
             if not applied:
                 break
+
+            apply_chapter_cadence(script_segments)
 
             revision_rounds.append(
                 {

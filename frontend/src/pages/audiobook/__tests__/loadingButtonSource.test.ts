@@ -66,20 +66,34 @@ describe('Audiobook loading button source guards', () => {
     expect(cosyVoiceListSource).toContain('onPreviewCustomVoice')
   })
 
-  it('surfaces model style-control capabilities on character voice cards', () => {
-    expect(characterCardSource).toContain('getTtsStyleControlLabels')
-    expect(characterCardSource).toContain('styleControlLabels.map')
-    expect(characterCardSource).toContain('控制方式')
+  it('keeps CosyVoice remote custom voices manageable when local presets are empty', () => {
+    expect(cosyVoiceListSource).not.toContain('if (customVoicePresets.length === 0)')
+    expect(cosyVoiceListSource).toContain("useState(customVoicePresets.length === 0)")
+    expect(cosyVoiceListSource).toContain('detailsLoaded')
+    expect(cosyVoiceListSource).toContain('setDetailsLoaded(true)')
+    expect(cosyVoiceListSource).toContain('showDetails && !detailsLoaded')
+    expect(cosyVoiceListSource).toContain('details.length > 0 || detailsLoading || detailsLoaded')
+    expect(cosyVoiceListSource).toContain('onPreviewCustomVoice(detailPreset)')
+    expect(cosyVoiceListSource).toContain('onRequestDeleteVoice(clone.voice_id')
   })
 
-  it('keeps MiMo clone inline input while removing role-level MiMo design prompt entry', () => {
-    expect(characterCardSource).toContain('voiceCloneDataUrl')
-    expect(characterCardSource).toContain('onVoiceCloneDataUrlChange')
+  it('keeps character cards focused on model, voice, preview, and voice management only', () => {
+    expect(characterCardSource).not.toContain('getTtsStyleControlLabels')
+    expect(characterCardSource).not.toContain('styleControlLabels.map')
+    expect(characterCardSource).not.toContain('控制方式')
+    expect(characterCardSource).toContain('音色管理')
+    expect(characterCardSource).toContain('onOpenVoiceManagement')
+  })
+
+  it('moves clone and design voice authoring out of character cards', () => {
+    expect(characterCardSource).not.toContain('voiceCloneDataUrl')
+    expect(characterCardSource).not.toContain('onVoiceCloneDataUrlChange')
     expect(characterCardSource).not.toContain('onVoiceDesignPromptChange')
-    expect(characterCardSource).toContain('mimo-v2.5-tts-voiceclone')
-    expect(characterCardSource).toContain('audio.voice')
+    expect(characterCardSource).not.toContain('mimo-v2.5-tts-voiceclone')
+    expect(characterCardSource).not.toContain('audio.voice')
     expect(characterCardSource).not.toContain('Voice Design Prompt')
     expect(characterVoiceSettingsSource).not.toContain('handleVoiceDesignPromptChange')
+    expect(characterVoiceSettingsSource).not.toContain('handleVoiceCloneDataUrlChange')
   })
 
   it('removes role-level voice profiling and tuning controls from character voice setup', () => {

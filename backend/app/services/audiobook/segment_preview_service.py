@@ -130,22 +130,28 @@ class SegmentPreviewService:
                 if not effect:
                     continue
                 if isinstance(effect, dict):
-                    name = effect.get("name") or effect.get("effect_id") or effect.get("id")
+                    asset_id = (
+                        effect.get("asset_id")
+                        or effect.get("effect_id")
+                        or effect.get("id")
+                    )
+                    name = effect.get("name") or effect.get("effect") or asset_id
                     if not name:
                         continue
-                    specs.append(
-                        {
-                            "name": str(name).strip(),
-                            "volume": effect.get("volume"),
-                            "delay": effect.get("delay", effect.get("start_time", 0.0)),
-                            "duration": effect.get("duration"),
-                            "fade_in": effect.get("fade_in"),
-                            "fade_out": effect.get("fade_out"),
-                            "layer": effect.get("layer"),
-                            "timing": effect.get("timing"),
-                            "file": effect.get("file") or effect.get("audio_file"),
-                        }
-                    )
+                    spec = {
+                        "name": str(name).strip(),
+                        "volume": effect.get("volume"),
+                        "delay": effect.get("delay", effect.get("start_time", 0.0)),
+                        "duration": effect.get("duration"),
+                        "fade_in": effect.get("fade_in"),
+                        "fade_out": effect.get("fade_out"),
+                        "layer": effect.get("layer"),
+                        "timing": effect.get("timing"),
+                        "file": effect.get("file") or effect.get("audio_file"),
+                    }
+                    if asset_id:
+                        spec["asset_id"] = str(asset_id).strip()
+                    specs.append(spec)
                 else:
                     name = str(effect).strip()
                     if name:
@@ -174,7 +180,8 @@ class SegmentPreviewService:
             name = spec.get("name")
             if not name:
                 continue
-            cue = designer._match_effect(str(name), 0.0, "preview")
+            match_reference = spec.get("asset_id") or name
+            cue = designer._match_effect(str(match_reference), 0.0, "preview")
             layer = str(spec.get("layer") or "").strip().lower()
             effect_type = cue.effect_type.value if cue else "action"
             if layer in {"bottom", "atmosphere", "environment", "ambient"}:
@@ -304,6 +311,12 @@ class SegmentPreviewService:
             style = raw_cue.get("style") or raw_cue.get("name") or raw_cue.get("cue")
             file_ref = raw_cue.get("file") or raw_cue.get("audio_file")
             return {
+                "asset_id": str(
+                    raw_cue.get("asset_id")
+                    or raw_cue.get("music_id")
+                    or raw_cue.get("id")
+                    or ""
+                ).strip() or None,
                 "style": str(style or "").strip(),
                 "file": file_ref,
                 "volume": raw_cue.get("volume", 0.2),
@@ -381,7 +394,23 @@ class SegmentPreviewService:
         mood_hint: str,
         base_dir: Path,
         music_index: List[Dict[str, Any]],
+        asset_id: str = "",
     ) -> Optional[Path]:
+        normalized_asset_id = str(asset_id or "").strip()
+        if normalized_asset_id and music_index:
+            for entry in music_index:
+                entry_id = str(entry.get("id") or entry.get("asset_id") or "").strip()
+                if entry_id != normalized_asset_id:
+                    continue
+                resolved = resolve_audio_library_file_path(
+                    entry.get("file_path") or entry.get("file"),
+                    base_dir,
+                )
+                if resolved:
+                    return resolved
+                break
+            logger.warning("试听配乐素材 ID 不存在或文件不可用，将回退到提示匹配: %s", normalized_asset_id)
+
         if file_ref:
             music_path = Path(file_ref)
             if not music_path.is_absolute():
@@ -447,6 +476,7 @@ class SegmentPreviewService:
             mood_hint,
             self.audio_library_dir,
             music_index,
+            asset_id=str(cue.get("asset_id") or ""),
         )
         if not music_path or not music_path.exists():
             logger.warning("试听配乐文件不存在: %s", music_path)

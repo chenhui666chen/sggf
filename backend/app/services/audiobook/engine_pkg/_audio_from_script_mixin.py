@@ -8,6 +8,7 @@ from ..script_adapter import ScriptSegment
 from ..task_tracker import StageType
 from ..script_adapter_pkg._segment_validation import build_script_segment
 from app.services.audiobook.render_plan import render_chunks_to_timing_segments_payload
+from app.services.audiobook.chapter_cadence import apply_chapter_cadence
 from app.services.audiobook.temp_segment_store import save_segment_audio_batch, save_segment_audio_map
 from app.services.audiobook.atomic_files import write_bytes_atomic
 
@@ -211,22 +212,11 @@ class AudioFromScriptMixin:
                 )
 
             # ============ 阶段7：音频提示词审阅 ============
+            apply_chapter_cadence(script_segments)
             self._assign_voices(script_segments)
             self.task_tracker.start_stage(task_id, StageType.AUDIO_PROMPT_REVIEW)
-            prompt_metrics = {
-                "segments_count": len(script_segments),
-                "sound_effects_count": sum(len(getattr(seg, "sound_effects", []) or []) for seg in script_segments),
-                "music_cues_count": sum(
-                    1
-                    for seg in script_segments
-                    if getattr(seg, "music_cue", None) or getattr(seg, "music_cue_simple", "")
-                ),
-                "instruct_count": sum(
-                    1
-                    for seg in script_segments
-                    if (getattr(seg, "instruct_emotion", "") or getattr(seg, "instruct_scene", "") or getattr(seg, "instruct_role", "") or getattr(seg, "instruct_identity", ""))
-                ),
-            }
+            build_prompt_metrics = getattr(self, "_build_audio_prompt_review_metrics", None)
+            prompt_metrics = build_prompt_metrics(script_segments) if callable(build_prompt_metrics) else {}
             self.task_tracker.complete_stage(task_id, StageType.AUDIO_PROMPT_REVIEW, metrics=prompt_metrics)
 
             # ============ 阶段8：TTS合成 ============
@@ -424,6 +414,10 @@ class AudioFromScriptMixin:
             except TypeError:
                 final_audio = self.audio_mixer.mix_chapter(audio_list, segment_types=segment_types)
 
+            realign_with_mixed_timing = getattr(self, "_realign_timelines_with_mixed_timing", None)
+            if callable(realign_with_mixed_timing) and segment_timings:
+                realign_with_mixed_timing(script_segments, mixer_segments, segment_timings)
+
             # 应用音效时间线（如有）
             if self._last_effect_timeline and self._last_effect_timeline.get("timeline"):
                 logger.info("🎛 应用音效时间线叠加音效...")
@@ -466,6 +460,8 @@ class AudioFromScriptMixin:
                     file_size=len(final_audio),
                     script_quality_report=quality_report,
                     audio_data=final_audio,
+                    script_segments=script_segments,
+                    audio_list=audio_list,
                 )
 
                 self.task_tracker.complete_stage(

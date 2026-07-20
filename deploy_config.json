@@ -33,6 +33,7 @@
         "frontend/src/**/*.tsx",
         "frontend/src/**/*.ts",
         "frontend/src/**/*.css",
+        "frontend/src/**/*.json",
         "frontend/public/**/*",
         "frontend/package.json",
         "frontend/package-lock.json",

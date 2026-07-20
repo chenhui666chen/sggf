@@ -150,12 +150,12 @@ export const useAudiobookGenerationActions = ({
     ttsModel,
   ])
 
-  const handleGenerate = useCallback(async () => {
+  const generateChapters = useCallback(async (chapterIds: number[]) => {
     if (generating) return
     if (!ensureCurrentTtsModelReady()) return
 
-    if (selectedChapters.length === 0) {
-      setSnackbar({ open: true, message: '请至少选择一个章节', severity: 'error' })
+    if (chapterIds.length === 0) {
+      setSnackbar({ open: true, message: '请选择一个可生成章节', severity: 'error' })
       return
     }
 
@@ -202,7 +202,7 @@ export const useAudiobookGenerationActions = ({
       const response = await apiClient.createAudiobookProject(
         buildCreateAudiobookProjectPayload({
           projectId: projectIdForRequest,
-          chapterIds: selectedChapters,
+          chapterIds,
           voiceConfig: voiceConfigPayload,
           ttsModel,
           generationMode,
@@ -247,7 +247,6 @@ export const useAudiobookGenerationActions = ({
     outputFormat,
     routeProjectId,
     scriptOnlyMode,
-    selectedChapters,
     selectedProjectId,
     setActiveStep,
     setGenerating,
@@ -257,6 +256,16 @@ export const useAudiobookGenerationActions = ({
     showGenerationError,
     ttsModel,
   ])
+
+  const handleGenerate = useCallback(
+    () => generateChapters(selectedChapters),
+    [generateChapters, selectedChapters],
+  )
+
+  const handleRegenerateChapter = useCallback(
+    (chapterId: number) => generateChapters([chapterId]),
+    [generateChapters],
+  )
 
   const handleResumeChapterGeneration = useCallback(async (chapterId: number) => {
     if (!audiobookProject?.id) {
@@ -309,6 +318,7 @@ export const useAudiobookGenerationActions = ({
   return {
     handleGenerateAudioForApprovedChapters,
     handleGenerate,
+    handleRegenerateChapter,
     handleResumeChapterGeneration,
   }
 }

@@ -41,6 +41,7 @@ import HeadphonesIcon from '@mui/icons-material/Headphones'
 import HistoryIcon from '@mui/icons-material/History'
 import LogoutIcon from '@mui/icons-material/Logout'
 import SearchIcon from '@mui/icons-material/Search'
+import ScienceIcon from '@mui/icons-material/Science'
 import { useDispatch } from 'react-redux'
 import { logout } from '@/store/slices/authSlice'
 import ChapterDrawer from '@/components/audiobook/ChapterDrawer'
@@ -373,7 +374,7 @@ const AudiobookDashboardPage = () => {
         }}
       >
         <Container maxWidth="lg">
-          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', rowGap: 2 }}>
             {/* 左侧：返回按钮 + 标题 */}
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
               <IconButton
@@ -407,7 +408,22 @@ const AudiobookDashboardPage = () => {
             </Box>
 
             {/* 右侧：操作按钮 */}
-            <Box sx={{ display: 'flex', gap: 1.5 }}>
+            <Box sx={{ display: 'flex', gap: 1.5, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+              <Button
+                variant="outlined"
+                startIcon={<ScienceIcon />}
+                onClick={() => navigate('/audiobook-tts-test')}
+                sx={{
+                  color: 'white',
+                  borderColor: 'rgba(255,255,255,0.5)',
+                  '&:hover': {
+                    borderColor: 'white',
+                    backgroundColor: 'rgba(255,255,255,0.1)',
+                  },
+                }}
+              >
+                TTS 测试
+              </Button>
               <Button
                 variant="outlined"
                 startIcon={<HistoryIcon />}

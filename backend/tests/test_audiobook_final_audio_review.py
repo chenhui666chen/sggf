@@ -40,6 +40,100 @@ class ReviewHarness(ReviewMixin):
         )
 
 
+def test_final_audio_review_includes_prompt_audio_quality_feedback_by_model():
+    report = AudioQualityReport(
+        grade=AudioQualityGrade.EXCELLENT,
+        score=98.0,
+        issues=[],
+        metrics={},
+        passed=True,
+    )
+    segments = [
+        SimpleNamespace(
+            voice_params={
+                "resolved_tts_model": "mimo-v2.5-tts",
+                "provider_prompt_snapshot": {
+                    "model": "mimo-v2.5-tts",
+                    "provider_prompt": {
+                        "inline_tag_strategy": {
+                            "model_family": "mimo",
+                            "placement": "assistant_prefix",
+                            "style_tags": ["tense", "tense"],
+                            "inline_tags": ["whisper"],
+                            "use_tag_parser": False,
+                        }
+                    },
+                },
+            }
+        ),
+        {
+            "voice_params": {
+                "resolved_tts_model": "seed-tts-2.0-expressive",
+                "provider_prompt_snapshot": {
+                    "model": "seed-tts-2.0-expressive",
+                    "provider_prompt": {
+                        "inline_tag_strategy": {
+                            "model_family": "doubao",
+                            "placement": "text_prefix",
+                            "style_tags": ["narration"],
+                            "inline_tags": ["whisper"],
+                            "use_tag_parser": True,
+                        }
+                    },
+                },
+            }
+        },
+        SimpleNamespace(
+            voice_params={
+                "resolved_tts_model": "qwen3-tts-instruct-flash",
+                "provider_prompt_snapshot": {
+                    "model": "qwen3-tts-instruct-flash",
+                    "provider_prompt": {"instructions": "Read calmly."},
+                },
+            }
+        ),
+    ]
+
+    review = ReviewHarness(report)._final_audio_review(
+        audio_info={"duration_seconds": 120.0},
+        file_size=2048,
+        audio_data=None,
+        script_segments=segments,
+        audio_list=[b"mimo-audio", b"doubao-audio", b""],
+    )
+
+    feedback = review["prompt_audio_quality"]
+
+    assert feedback["available"] is True
+    assert feedback["coverage"] == {
+        "segments_count": 3,
+        "audio_segments_count": 2,
+        "missing_audio_count": 1,
+        "provider_prompt_snapshot_count": 3,
+        "inline_tag_strategy_count": 2,
+        "manual_review_pending_count": 2,
+    }
+    assert feedback["by_model"]["mimo-v2.5-tts"] == {
+        "model_family": "mimo",
+        "segments_count": 1,
+        "audio_segments_count": 1,
+        "missing_audio_count": 0,
+        "provider_prompt_snapshot_count": 1,
+        "inline_tag_strategy_count": 1,
+        "use_tag_parser_count": 0,
+        "tag_count": 2,
+        "manual_review_segment_indices": [0],
+        "manual_review_fields": {
+            "tag_parse_success": None,
+            "text_contamination": None,
+            "score": None,
+        },
+    }
+    assert feedback["by_model"]["seed-tts-2.0-expressive"]["model_family"] == "doubao"
+    assert feedback["by_model"]["seed-tts-2.0-expressive"]["use_tag_parser_count"] == 1
+    assert feedback["by_model"]["qwen3-tts-instruct-flash"]["manual_review_segment_indices"] == []
+
+
 def test_final_audio_review_includes_waveform_quality_metrics():
     report = AudioQualityReport(
         grade=AudioQualityGrade.POOR,

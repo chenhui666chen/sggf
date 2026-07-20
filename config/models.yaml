@@ -7566,6 +7566,156 @@ models:
   - roleplay
   - multimodal
 
+- id: seed-audio-1.0
+  name: 豆包音频生成模型 1.0
+  provider: volcengine
+  version: '1.0'
+  status: active
+  model_family: Seed Audio
+  modality:
+  - text_to_audio
+  capabilities:
+  - name: text_to_audio
+    label: 文本生成完整音频
+    support_level: native
+    description: 根据自然语言提示一次生成包含对白、环境音、音效和音乐的完整音频
+    source: https://docs.volcengine.com/docs/6561/2550782?lang=zh
+    confidence: high
+  - name: multi_speaker_dialogue
+    label: 多角色对白
+    support_level: native
+    description: 可在同一段提示词中描述多个角色的性别、年龄、口音、音色和说话情绪
+    source: https://docs.volcengine.com/docs/6561/2550782?lang=zh
+    confidence: high
+  - name: sound_effect_generation
+    label: 场景与音效生成
+    support_level: native
+    description: 支持按时间顺序描述环境声、拟音和事件音效
+    source: https://docs.volcengine.com/docs/6561/2550782?lang=zh
+    confidence: high
+  - name: music_generation
+    label: 配乐生成
+    support_level: native
+    description: 支持描述主奏乐器、配器、节奏及整体情绪
+    source: https://docs.volcengine.com/docs/6561/2550782?lang=zh
+    confidence: high
+  - name: speaker_reference
+    label: 说话人引用
+    support_level: native
+    description: references 参数支持通过 speaker ID 指定参考说话人
+    source: https://docs.volcengine.com/docs/6561/2550782?lang=zh
+    confidence: high
+  - name: audio_parameter_control
+    label: 音频参数控制
+    support_level: native
+    description: 支持配置输出格式、采样率、音调、语速和响度
+    source: https://docs.volcengine.com/docs/6561/2550782?lang=zh
+    confidence: high
+  constraints:
+    request_timeout_seconds: 300
+    verified_formats:
+    - mp3
+    verified_sample_rates:
+    - 48000
+    pitch_rate_default: 0
+    speech_rate_default: 0
+    loudness_rate_default: 0
+    response_delivery: url
+    requires_api_key: true
+    api_key_header: X-Api-Key
+  quality_metrics:
+    feature_completeness: 0.95
+    prompt_controllability: 0.90
+    multi_element_audio: 0.95
+  avg_latency_seconds: 30.0
+  summary: 豆包音频生成模型 1.0 可依据一段自然语言描述生成完整场景音频，在单次生成中组合多角色对白、环境声、事件音效和配乐，并支持引用指定说话人。
+  recommended_scenarios:
+  - 有声剧和广播剧片段生成
+  - 小说章节的对白、环境音与配乐一体化制作
+  - 影视、短剧和游戏的场景音频预演
+  - 多角色对白与氛围音效合成
+  - 广告、播客和叙事音频制作
+  limitations:
+  - 生成结果通过临时 URL 返回，调用方应及时下载并持久化
+  - 复杂长提示词的角色一致性和事件时序需要通过实际样例验证
+  - references 中的 speaker ID 必须来自当前火山引擎账号可用的说话人资源
+  - 当前项目资料仅确认 mp3、48000 Hz 组合，其他格式与采样率需按官方文档或能力验证结果补充
+  integration_notes:
+  - 项目模型 ID 与官方请求模型 ID 均为 seed-audio-1.0
+  - 使用 OpenSpeech HTTP 接口 POST /api/v3/tts/create
+  - 复用火山方舟 DOUBAO_API_KEY，通过 X-Api-Key 请求头认证；VOLCENGINE_OPEN_SPEECH_API_KEY 可作为专用覆盖项
+  - 请求主体使用 text_prompt，不是常规 TTS 接口的 text 字段
+  - references 为可选数组，每项可通过 speaker 指定参考说话人
+  - 成功响应返回 url、duration 和 original_duration
+  - 建议超时设置为 300 秒，并由业务层下载响应 URL 对应的音频文件
+  documentation_url: https://docs.volcengine.com/docs/6561/2550782?lang=zh
+  source_urls:
+  - https://docs.volcengine.com/docs/6561/2550782?lang=zh
+  tags:
+  - audio
+  - text-to-audio
+  - audio-generation
+  - multi-speaker
+  - dialogue
+  - sound-effect
+  - music
+  - doubao
+  - seed-audio
+  - volcengine
+  api_config:
+    base_url: https://openspeech.bytedance.com
+    endpoint: /api/v3/tts/create
+    auth_type: x_api_key
+    api_key_env: DOUBAO_API_KEY
+    api_key_env_override: VOLCENGINE_OPEN_SPEECH_API_KEY
+    timeout_seconds: 300
+    request_format:
+      model: seed-audio-1.0
+      text_prompt: string
+      references: array_optional
+      audio_config:
+        format: mp3
+        sample_rate: 48000
+        pitch_rate: 0
+        speech_rate: 0
+        loudness_rate: 0
+      watermark: object_optional
+    response_format:
+      url: string
+      duration: number
+      original_duration: number
+  detailed_specs:
+    audio_generation:
+      prompt_language: natural_language
+      prompt_elements:
+      - dialogue
+      - speaker_profile
+      - emotion
+      - ambient_sound
+      - sound_effect
+      - music
+      calling_method:
+        param_name: text_prompt
+        required: true
+        example: |
+          from adapters.registry import registry
+
+          adapter = registry.get_adapter("seed-audio-1.0")
+          result = adapter.generate(
+              prompt="雨夜中，两名男子低声交谈，远处有汽车驶过，配乐紧张悬疑。",
+              references=[{"speaker": "<speaker_id>"}],
+              audio_config={"format": "mp3", "sample_rate": 48000},
+          )
+      speaker_reference:
+        enabled: true
+        param_name: references[].speaker
+        required: false
+      output:
+        delivery: url
+        duration_fields:
+        - duration
+        - original_duration
+
 routing:
   default_strategy: balanced
   strategies:

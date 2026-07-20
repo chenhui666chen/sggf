@@ -93,6 +93,11 @@ def build_delivery_plan(
     )
 
     plan["model"] = resolved_model
+    plan["tts_model"] = resolved_model
+    voice_id = _first_text(plan.get("voice_id"), params.get("speaker"), params.get("voice_id"))
+    plan.setdefault("voice_id", voice_id)
+    if text:
+        plan.setdefault("text", text)
     style_capabilities = get_audiobook_tts_style_capabilities(resolved_model)
     plan["model_family"] = _text(style_capabilities.get("model_family")) or model_family(resolved_model)
     plan["model_control_preference"] = preferred_control_mode(resolved_model, params)
@@ -103,6 +108,7 @@ def build_delivery_plan(
         plan.setdefault("speaker", speaker)
     plan.setdefault("delivery_mode", _infer_delivery_mode(segment_type, target_emotion, performance_notes, text))
     plan.setdefault("emotion_primary", target_emotion or "neutral")
+    plan.setdefault("emotion", target_emotion or "neutral")
     plan.setdefault("emotion_mix", _infer_emotion_mix(performance_notes))
     plan.setdefault("pace", _infer_pace(params, performance_notes))
     plan.setdefault("pitch", _infer_pitch(performance_notes))
@@ -111,6 +117,18 @@ def build_delivery_plan(
     pause_strategy = _infer_pause_strategy(performance_notes)
     if pause_strategy:
         plan.setdefault("pause_strategy", pause_strategy)
+    plan.setdefault("pause_profile", _infer_pause_profile(performance_notes, text))
+    timeline_pause_after_ms = _coerce_timeline_pause_ms(
+        plan.get("timeline_pause_after_ms", params.get("timeline_pause_after_ms")),
+    )
+    if timeline_pause_after_ms is not None:
+        plan["timeline_pause_after_ms"] = timeline_pause_after_ms
+    cadence_profile = _first_text(plan.get("cadence_profile"), params.get("cadence_profile"))
+    cadence_reason = _first_text(plan.get("cadence_reason"), params.get("cadence_reason"))
+    if cadence_profile:
+        plan["cadence_profile"] = cadence_profile
+    if cadence_reason:
+        plan["cadence_reason"] = cadence_reason
     stress_words = _coerce_string_list(plan.get("stress_words"))
     if stress_words:
         plan["stress_words"] = stress_words
@@ -130,6 +148,7 @@ def build_delivery_plan(
     guidance = _first_text(plan.get("director_guidance"), params.get("instructions"), performance_notes)
     if guidance:
         plan["director_guidance"] = guidance
+    plan.setdefault("style_instruction", _build_style_instruction(plan, performance_notes))
 
     return _compact_plan(plan)
 
@@ -164,6 +183,14 @@ def delivery_plan_instruction_parts(plan: Dict[str, Any] | None) -> List[str]:
         parts.append("微表演标签：" + "、".join(micro_tags))
     if pause_strategy:
         parts.append(f"停顿策略：{pause_strategy}")
+    cadence_profile = _text(value.get("cadence_profile"))
+    cadence_reason = _text(value.get("cadence_reason"))
+    timeline_pause_after_ms = _coerce_timeline_pause_ms(value.get("timeline_pause_after_ms"))
+    if cadence_profile or cadence_reason or timeline_pause_after_ms is not None:
+        cadence_parts = [part for part in (cadence_profile, cadence_reason) if part]
+        if timeline_pause_after_ms is not None:
+            cadence_parts.append(f"后期留白{timeline_pause_after_ms}毫秒")
+        parts.append("剧情节奏：" + "，".join(cadence_parts))
     if stress_words:
         parts.append("重读词：" + "、".join(stress_words))
     if guidance:
@@ -271,6 +298,36 @@ def _infer_pause_strategy(notes: str) -> str:
     return ""
 
 
+def _infer_pause_profile(notes: str, text: str) -> str:
+    source = f"{notes} {text}"
+    if _contains_any(source, ("留白", "长停顿", "停顿", "……", "...")):
+        return "dramatic"
+    if _contains_any(source, ("，", ",", "、", ";", "；")):
+        return "natural"
+    return "balanced"
+
+
+def _build_style_instruction(plan: Dict[str, Any], notes: str) -> str:
+    explicit = _text(notes)
+    if explicit:
+        return explicit
+
+    parts: List[str] = []
+    emotion = _text(plan.get("emotion") or plan.get("emotion_primary"))
+    pace = _text(plan.get("pace"))
+    intensity = _text(plan.get("intensity"))
+    pause_profile = _text(plan.get("pause_profile"))
+    if emotion and emotion != "neutral":
+        parts.append(f"情绪保持{emotion}")
+    if pace and pace != "medium":
+        parts.append(f"语速{pace}")
+    if intensity and intensity != "medium":
+        parts.append(f"强度{intensity}")
+    if pause_profile and pause_profile != "balanced":
+        parts.append(f"停顿{pause_profile}")
+    return "，".join(parts)
+
+
 def _compact_plan(plan: Dict[str, Any]) -> Dict[str, Any]:
     output: Dict[str, Any] = {}
     for key, value in plan.items():
@@ -285,6 +342,18 @@ def _compact_plan(plan: Dict[str, Any]) -> Dict[str, Any]:
         elif value not in (None, "", {}, []):
             output[key] = value
     return output
+
+
+def _coerce_timeline_pause_ms(value: Any) -> int | None:
+    if isinstance(value, bool):
+        return None
+    try:
+        pause_ms = int(round(float(value)))
+    except (TypeError, ValueError):
+        return None
+    if pause_ms <= 0:
+        return None
+    return max(80, min(3000, pause_ms))
 
 
 def _contains_any(value: str, needles: Iterable[str]) -> bool:

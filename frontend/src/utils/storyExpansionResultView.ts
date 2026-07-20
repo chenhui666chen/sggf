@@ -342,8 +342,8 @@ function normalizeSuggestionText(value: string): string {
   }
 
   return trimmed
-    .replace(/^[\-\*•·]\s*/u, '')
-    .replace(/^\d+[\.\)\]、．]\s*/u, '')
+    .replace(/^[*•·-]\s*/u, '')
+    .replace(/^\d+[.)\]、．]\s*/u, '')
     .trim()
 }
 

@@ -287,6 +287,9 @@ def _voice_params_for_chunk(
     if source_chunk_index < source_chunk_count - 1:
         chunk_params.pop("pause_after", None)
         chunk_params.pop("pause_after_ms", None)
+        chunk_params.pop("timeline_pause_after_ms", None)
+        chunk_params.pop("cadence_profile", None)
+        chunk_params.pop("cadence_reason", None)
 
     return chunk_params
 

@@ -33,6 +33,7 @@ const UserCenterPage = lazy(() => import('@/pages/UserCenterPage'))
 const WorkflowControlPage = lazy(() => import('@/pages/WorkflowControlPage'))
 const AITracePage = lazy(() => import('@/pages/AITracePage'))
 const AudiobookDashboardPage = lazy(() => import('@/pages/AudiobookDashboardPage'))  // 耳畔星河仪表盘
+const TtsPromptTestPage = lazy(() => import('@/pages/TtsPromptTestPage'))
 const AudiobookPage = lazy(loadAudiobookPageModule)  // 耳畔星河
 const DreamWeaverPage = lazy(() => import('@/pages/DreamWeaverPage')) // 织梦映心
 const DreamWeaverRunPage = lazy(() => import('@/pages/DreamWeaverRunPage')) // 织梦映心生成页
@@ -236,6 +237,14 @@ function App() {
                 element={
                   <ProtectedRoute>
                     <AudiobookDashboardPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/audiobook-tts-test"
+                element={
+                  <ProtectedRoute>
+                    <TtsPromptTestPage />
                   </ProtectedRoute>
                 }
               />

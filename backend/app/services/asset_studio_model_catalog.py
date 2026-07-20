@@ -59,6 +59,9 @@ _GROUP_MODEL_IDS: dict[str, tuple[str, ...]] = {
     "audio_sound_effect": (
         "vidu-timing2audio",
     ),
+    "audio_scene": (
+        "seed-audio-1.0",
+    ),
     "audio_speech": (
         "qwen3-tts-instruct-flash",
         "cosyvoice-v3.5-plus",
@@ -113,6 +116,7 @@ _DEFAULT_MODEL_IDS: dict[str, str] = {
     "asset_studio_motion": "wan2.7-i2v",
     "asset_studio_audio_music": "mureka-o1-instrumental",
     "asset_studio_audio_sound_effect": "vidu-timing2audio",
+    "asset_studio_audio_scene": "seed-audio-1.0",
     "asset_studio_audio_speech": "qwen3-tts-instruct-flash",
     "asset_studio_vision_review": "qwen3-vl-plus",
     "dreamweaver_image": "qwen-image-2.0-pro",

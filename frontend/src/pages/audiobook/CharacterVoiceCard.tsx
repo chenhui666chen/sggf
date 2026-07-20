@@ -4,7 +4,6 @@ import {
   Chip,
   CircularProgress,
   ListItem,
-  TextField,
   Tooltip,
   Typography,
 } from '@mui/material'
@@ -12,13 +11,9 @@ import {
 import {
   CharacterVoiceModelSelect,
   CharacterVoicePresetSelect,
-  getCharacterModelChipColor,
 } from './CharacterVoiceCardControls'
 import { audiobookColors } from './audiobookTheme'
 import {
-  getTtsStyleControlLabels,
-  getTtsModelLabel,
-  modelUsesInlineCustomVoiceInput,
   modelRequiresCustomVoice,
 } from './ttsModels'
 import type { TtsModelOption } from './ttsModels'
@@ -30,21 +25,21 @@ import type {
 
 interface CharacterVoiceCardProps {
   characterVoice: CharacterVoiceSetting
-  projectTtsModel: TtsModel
+  defaultTtsModel: TtsModel
   voiceLoading: boolean
   currentVoicePresets: VoicePreset[]
   voicePresetsByModel: Record<TtsModel, VoicePreset[]>
   ttsModelOptions: readonly TtsModelOption[]
   isPreviewing: boolean
   onVoiceChange: (characterId: number, voiceId: string) => void
-  onTtsModelChangeForCharacter: (characterId: number, nextModel: TtsModel | 'inherit') => void
-  onVoiceCloneDataUrlChange: (characterId: number, voiceCloneDataUrl: string) => void
+  onTtsModelChangeForCharacter: (characterId: number, nextModel: TtsModel) => void
   onPreviewCharacterVoice: (characterVoice: CharacterVoiceSetting) => void
+  onOpenVoiceManagement: (model: TtsModel) => void
 }
 
 const CharacterVoiceCard = ({
   characterVoice,
-  projectTtsModel,
+  defaultTtsModel,
   voiceLoading,
   currentVoicePresets,
   voicePresetsByModel,
@@ -52,23 +47,13 @@ const CharacterVoiceCard = ({
   isPreviewing,
   onVoiceChange,
   onTtsModelChangeForCharacter,
-  onVoiceCloneDataUrlChange,
   onPreviewCharacterVoice,
+  onOpenVoiceManagement,
 }: CharacterVoiceCardProps) => {
-  const effectiveTtsModel = characterVoice.ttsModel || projectTtsModel
+  const effectiveTtsModel = characterVoice.ttsModel || defaultTtsModel
   const effectiveVoicePresets = voicePresetsByModel[effectiveTtsModel] || currentVoicePresets
   const effectiveModelRequiresCustomVoice = modelRequiresCustomVoice(effectiveTtsModel, ttsModelOptions)
-  const usesInlineCustomVoiceInput = modelUsesInlineCustomVoiceInput(effectiveTtsModel, ttsModelOptions)
-  const styleControlLabels = getTtsStyleControlLabels(effectiveTtsModel, ttsModelOptions)
-  const hasInlineCustomVoiceInput = Boolean(characterVoice.voiceCloneDataUrl?.trim())
-  const hasReusableMimoVoiceAsset = Boolean(characterVoice.mimoVoiceAssetId?.trim())
-  const hasReusableStepAudioVoiceAsset = Boolean(characterVoice.stepaudioVoiceAssetId?.trim())
-  const canPreview = Boolean(
-    characterVoice.voiceId
-    || hasInlineCustomVoiceInput
-    || hasReusableMimoVoiceAsset
-    || hasReusableStepAudioVoiceAsset,
-  )
+  const canPreview = Boolean(characterVoice.voiceId.trim())
 
   return (
     <ListItem
@@ -124,15 +109,7 @@ const CharacterVoiceCard = ({
             )}
           </Box>
           <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-            {characterVoice.ttsModel && characterVoice.ttsModel !== projectTtsModel && (
-              <Chip
-                label={getTtsModelLabel(characterVoice.ttsModel)}
-                size="small"
-                color={getCharacterModelChipColor(characterVoice.ttsModel, ttsModelOptions)}
-                sx={{ height: 18, fontSize: '0.65rem' }}
-              />
-            )}
-            {(characterVoice.voiceId || hasInlineCustomVoiceInput || hasReusableMimoVoiceAsset || hasReusableStepAudioVoiceAsset) && (
+            {characterVoice.voiceId && (
               <Chip
                 label="已配置"
                 size="small"
@@ -143,80 +120,33 @@ const CharacterVoiceCard = ({
           </Box>
         </Box>
 
-        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: 'minmax(0, 1fr) 180px' }, gap: 1, mb: 1 }}>
-          {usesInlineCustomVoiceInput ? (
-            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-              <CharacterVoicePresetSelect
-                characterId={characterVoice.characterId}
-                value={characterVoice.voiceId}
-                requiresCustomVoice={effectiveModelRequiresCustomVoice}
-                voiceLoading={voiceLoading}
-                currentVoicePresets={effectiveVoicePresets}
-                onVoiceChange={onVoiceChange}
-              />
-              {effectiveTtsModel === 'mimo-v2.5-tts-voiceclone' && (
-                <TextField
-                  label="audio.voice 样本"
-                  value={characterVoice.voiceCloneDataUrl || ''}
-                  onChange={(event) => onVoiceCloneDataUrlChange(characterVoice.characterId, event.target.value)}
-                  placeholder="data:audio/mpeg;base64,... 或 data:audio/wav;base64,..."
-                  size="small"
-                  fullWidth
-                  multiline
-                  minRows={2}
-                />
-              )}
-            </Box>
-          ) : (
-            <CharacterVoicePresetSelect
-              characterId={characterVoice.characterId}
-              value={characterVoice.voiceId}
-              requiresCustomVoice={effectiveModelRequiresCustomVoice}
-              voiceLoading={voiceLoading}
-              currentVoicePresets={effectiveVoicePresets}
-              onVoiceChange={onVoiceChange}
-            />
-          )}
+        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '180px minmax(0, 1fr)' }, gap: 1, mb: 1 }}>
           <CharacterVoiceModelSelect
             characterId={characterVoice.characterId}
-            value={characterVoice.ttsModel}
-            projectTtsModel={projectTtsModel}
+            value={effectiveTtsModel}
             ttsModelOptions={ttsModelOptions}
             onTtsModelChangeForCharacter={onTtsModelChangeForCharacter}
           />
+          <CharacterVoicePresetSelect
+            characterId={characterVoice.characterId}
+            value={characterVoice.voiceId}
+            requiresCustomVoice={effectiveModelRequiresCustomVoice}
+            voiceLoading={voiceLoading}
+            currentVoicePresets={effectiveVoicePresets}
+            onVoiceChange={onVoiceChange}
+          />
         </Box>
 
-        {styleControlLabels.length > 0 && (
-          <Box
-            sx={{
-              mb: 1,
-              display: 'flex',
-              alignItems: 'center',
-              gap: 0.75,
-              flexWrap: 'wrap',
-            }}
-          >
-            <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600 }}>
-              控制方式
-            </Typography>
-            {styleControlLabels.map((label) => (
-              <Chip
-                key={label}
-                label={label}
-                size="small"
-                variant="outlined"
-                sx={{
-                  height: 20,
-                  fontSize: '0.68rem',
-                  borderColor: audiobookColors.surfaceBorder,
-                  backgroundColor: 'rgba(255,255,255,0.72)',
-                }}
-              />
-            ))}
-          </Box>
-        )}
-
-        <Box sx={{ mt: 1, display: 'flex', justifyContent: 'flex-end' }}>
+        <Box sx={{ mt: 1, display: 'flex', justifyContent: 'flex-end', gap: 1, flexWrap: 'wrap' }}>
+          <Tooltip title="创建、试听和管理克隆/设计音色">
+            <Button
+              size="small"
+              variant="outlined"
+              onClick={() => onOpenVoiceManagement(effectiveTtsModel)}
+            >
+              音色管理
+            </Button>
+          </Tooltip>
           <Tooltip title="云端精确试听效果，请稍作等待...">
             <span>
               <Button

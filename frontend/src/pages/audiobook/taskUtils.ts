@@ -265,6 +265,8 @@ export const formatAudiobookTaskLabel = (
       return `${chapterLabel} 剧本`
     case 'audio_from_scripts':
       return `${chapterLabel} 音频`
+    case 'prompt_audio_asr_transcript':
+      return `${chapterLabel} ASR 转写`
     case 'export_m4b':
       return '整本 M4B 导出'
     case 'export_audacity':

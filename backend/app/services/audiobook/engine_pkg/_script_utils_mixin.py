@@ -15,6 +15,7 @@ from ..audio_mixer import AudioMixer
 from ..narration_styles import apply_narration_style_to_tts_params
 from ..pause_tags import coerce_pause_ms, strip_pause_tags
 from ..tts_delivery_plan import build_delivery_plan, resolve_segment_tts_model
+from ..tts_style_control import build_model_style_control, build_provider_prompt_snapshot
 from app.services.chapter_adaptation_assets import build_audio_adaptation_hint
 from core.unified_media_runtime import create_tts_engine
 
@@ -217,7 +218,9 @@ class ScriptUtilsMixin:
         result: List[Optional[int]] = []
         for segment in script_segments or []:
             voice_params = getattr(segment, "voice_params", None) or {}
-            pause_ms = coerce_pause_ms(voice_params.get("pause_after_ms"))
+            pause_ms = coerce_pause_ms(voice_params.get("timeline_pause_after_ms"))
+            if pause_ms is None:
+                pause_ms = coerce_pause_ms(voice_params.get("pause_after_ms"))
             if pause_ms is None:
                 pause_ms = strip_pause_tags(getattr(segment, "text", "") or "").pause_after_ms
             result.append(pause_ms)
@@ -344,11 +347,16 @@ class ScriptUtilsMixin:
             voice_params_dict = self._normalize_final_voice_params(segment, voice_params_dict)
             
             # 🔍 调试：输出最终参数
+            speed_for_log = voice_params_dict.get("speed")
+            try:
+                speed_text = f"{float(speed_for_log):.2f}"
+            except (TypeError, ValueError):
+                speed_text = ""
             logger.info(
                 f"🎵 [{segment.speaker}] 最终voice_params: "
                 f"speaker={voice_params_dict.get('speaker')}, "
                 f"pitch={voice_params_dict.get('pitch')}, "
-                f"speed={voice_params_dict.get('speed'):.2f}, "
+                f"speed={speed_text}, "
                 f"volume={voice_params_dict.get('volume')}"
             )
             
@@ -377,4 +385,15 @@ class ScriptUtilsMixin:
                 voice_params=segment.voice_params,
                 model=resolved_model,
                 emotion=instruct_emotion or segment_emotion or "neutral",
+            )
+            style_control = build_model_style_control(
+                resolved_model,
+                segment.voice_params,
+                instruct_emotion or segment_emotion or "neutral",
+            )
+            segment.voice_params["provider_prompt_snapshot"] = build_provider_prompt_snapshot(
+                model=resolved_model,
+                voice_id=segment.voice_params.get("speaker") or segment.voice_params.get("voice_id") or "",
+                style_control=style_control,
+                delivery_plan=segment.voice_params["delivery_plan"],
             )

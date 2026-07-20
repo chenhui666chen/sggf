@@ -24,6 +24,7 @@ export interface TimelineClip {
   durationUnits: number
   textPreview: string
   enabled: boolean
+  volume?: number
   speakerLabel?: string
   emotionLabel?: string
 }
@@ -264,6 +265,14 @@ export const buildTimelineModel = (segments: ScriptSegment[]): TimelineModel => 
 export const isTimelineClipEditable = (clip: Pick<TimelineClip, 'track'>): boolean =>
   clip.track === 'sfx' || clip.track === 'music'
 
+export const getDefaultTimelineClipVolume = (
+  clip: Pick<TimelineClip, 'track'>,
+): number => {
+  if (clip.track === 'music') return 0.2
+  if (clip.track === 'sfx') return 0.5
+  return 1
+}
+
 export const resolveTimelineSeekSegmentIndex = (
   model: Pick<TimelineModel, 'segmentOffsets' | 'totalUnits'>,
   seekUnit: number,
@@ -306,6 +315,7 @@ export const adjustTimelineClipEdit = (
     return {
       startUnit: clamp(startUnit + adjustment.deltaUnits, 0, Math.max(0, totalUnits - durationUnits)),
       durationUnits,
+      ...(typeof edit.volume === 'number' ? { volume: edit.volume } : {}),
     }
   }
 
@@ -320,6 +330,7 @@ export const adjustTimelineClipEdit = (
     return {
       startUnit: nextStart,
       durationUnits: Math.max(minDurationUnits, clipEnd - nextStart),
+      ...(typeof edit.volume === 'number' ? { volume: edit.volume } : {}),
     }
   }
 
@@ -327,6 +338,7 @@ export const adjustTimelineClipEdit = (
   return {
     startUnit,
     durationUnits: clamp(durationUnits + adjustment.deltaUnits, minDurationUnits, maxDuration),
+    ...(typeof edit.volume === 'number' ? { volume: edit.volume } : {}),
   }
 }
 

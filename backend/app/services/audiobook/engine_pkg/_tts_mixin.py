@@ -290,6 +290,12 @@ class TTSMixin:
         if pause_result.pause_after_ms is not None:
             voice_params.setdefault("pause_after_ms", pause_result.pause_after_ms)
 
+        if voice_params.get("timeline_boundary_managed"):
+            # Chapter-level cadence is inserted once by the final mixer. Do not let
+            # provider-specific SSML/WebSocket controls add the same boundary again.
+            voice_params.pop("pause_before", None)
+            voice_params.pop("pause_after", None)
+
         if normalized_text != original_text:
             voice_params.setdefault("original_tts_text", original_text)
             voice_params["normalized_text_applied"] = True

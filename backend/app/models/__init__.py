@@ -18,6 +18,7 @@ from .model_catalog import ModelCatalogEntry, ModelCatalogSource
 from .user_asset_record import UserAssetRecord
 from .generation_feedback import GenerationFeedback
 from .audio_library_asset import AudioLibraryAsset
+from .audio_library_asset_rating import AudioLibraryAssetRating
 
 __all__ = [
     "User",
@@ -56,4 +57,5 @@ __all__ = [
     "UserAssetRecord",
     "GenerationFeedback",
     "AudioLibraryAsset",
+    "AudioLibraryAssetRating",
 ]

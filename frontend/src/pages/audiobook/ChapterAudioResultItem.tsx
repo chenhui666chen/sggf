@@ -18,6 +18,7 @@ import {
 } from '@mui/material'
 import DownloadIcon from '@mui/icons-material/Download'
 import EditIcon from '@mui/icons-material/Edit'
+import FactCheckIcon from '@mui/icons-material/FactCheck'
 import LibraryAddIcon from '@mui/icons-material/LibraryAdd'
 import MoreVertIcon from '@mui/icons-material/MoreVert'
 import PauseIcon from '@mui/icons-material/Pause'
@@ -34,6 +35,7 @@ import {
   resolveScriptStatusChip,
 } from './chapterAudioResultUtils'
 import { audiobookButtonSx, audiobookColorRoles } from './audiobookTheme'
+import PromptAudioManualReviewPanel from './PromptAudioManualReviewPanel'
 import type { Chapter, ChapterAudio, GenerationCheckpoint, TtsModel } from './types'
 
 interface ChapterAudioResultItemProps {
@@ -89,10 +91,12 @@ const ChapterAudioResultItem = ({
   const [ratingSubmitting, setRatingSubmitting] = useState(false)
   const [ratingSubmitted, setRatingSubmitted] = useState(false)
   const [ratingError, setRatingError] = useState<string | null>(null)
+  const [showPromptAudioReview, setShowPromptAudioReview] = useState(false)
   const canResume = Boolean(resumeCheckpoint?.can_resume)
   const scriptChip = resolveScriptStatusChip(chapterAudio)
   const audioChip = resolveAudioStatusChip(chapterAudio)
   const menuOpen = Boolean(menuAnchorEl)
+  const hasPromptAudioReviewModels = Boolean(chapterAudio.prompt_audio_quality)
   const collectTooltipTitle = isCollecting
     ? '正在收录到用户资产'
     : collectDisabled
@@ -213,6 +217,21 @@ const ChapterAudioResultItem = ({
             </ListItemIcon>
             <ListItemText primary="评价生成质量" />
           </MenuItem>
+          <MenuItem
+            onClick={() => {
+              handleCloseMenu()
+              setShowPromptAudioReview(true)
+            }}
+            disabled={!hasPromptAudioReviewModels}
+          >
+            <ListItemIcon>
+              <FactCheckIcon fontSize="small" />
+            </ListItemIcon>
+            <ListItemText
+              primary="Prompt/Audio 验收"
+              secondary={hasPromptAudioReviewModels ? undefined : '暂无质量回写'}
+            />
+          </MenuItem>
           {canResume && (
             <MenuItem
               onClick={handleResumeChapterGeneration}
@@ -332,6 +351,13 @@ const ChapterAudioResultItem = ({
             </>
           )}
         </Box>
+      </Collapse>
+
+      <Collapse in={showPromptAudioReview}>
+        <PromptAudioManualReviewPanel
+          chapterAudio={chapterAudio}
+          onCollapse={() => setShowPromptAudioReview(false)}
+        />
       </Collapse>
     </Box>
   )

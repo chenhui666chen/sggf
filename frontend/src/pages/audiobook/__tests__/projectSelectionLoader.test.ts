@@ -73,7 +73,11 @@ describe('audiobook project selection loader', () => {
       projectId: 12,
       selectedChapterIds: [2, 99],
       ttsModel: 'cosyvoice-v3.5-plus',
-      voicePresets: [{ id: 'fallback-voice' }],
+      voicePresets: [
+        { id: 'fallback-voice' },
+        { id: 'narrator-saved' },
+        { id: 'hero-saved' },
+      ],
     })
 
     expect(mockedApiClient.getChapters).toHaveBeenCalledWith(12)
@@ -83,7 +87,7 @@ describe('audiobook project selection loader', () => {
       'cosyvoice-v3.5-plus',
     )
     expect(data.selectedChapterIds).toEqual([2])
-    expect(data.audioFxConfig).toEqual({
+    expect(data.audioFxConfig).toMatchObject({
       enable_sound_effects: false,
       enable_music: true,
       sound_effect_density: 'high',
@@ -133,7 +137,7 @@ describe('audiobook project selection loader', () => {
     })
 
     expect(data.selectedChapterIds).toEqual([3])
-    expect(data.audioFxConfig).toEqual({
+    expect(data.audioFxConfig).toMatchObject({
       enable_sound_effects: true,
       enable_music: true,
       sound_effect_density: 'medium',
@@ -143,6 +147,27 @@ describe('audiobook project selection loader', () => {
       { characterId: 0, voiceId: 'Neil' },
       { characterId: 9, name: 'Lead', voiceId: '' },
     ])
+  })
+
+  it('selects only the first chapter for a fresh project session', async () => {
+    mockedApiClient.getChapters.mockResolvedValue(
+      apiResponse([
+        { id: 21, chapter_number: 1, title: 'Chapter 1', content: 'Text 1' },
+        { id: 22, chapter_number: 2, title: 'Chapter 2', content: 'Text 2' },
+      ]),
+    )
+    mockedApiClient.getCharacters.mockResolvedValue(apiResponse([]))
+    mockedApiClient.getProjectAudioConfig.mockResolvedValue(
+      apiResponse({ characters: [], audio_fx: null }),
+    )
+
+    const data = await loadAudiobookProjectSelectionData({
+      projectId: 20,
+      ttsModel: 'qwen3-tts-instruct-flash',
+      voicePresets: [],
+    })
+
+    expect(data.selectedChapterIds).toEqual([21])
   })
 
   it('falls back to narrator voice and default audio fx when characters fail', async () => {
@@ -164,7 +189,7 @@ describe('audiobook project selection loader', () => {
     expect(mockedApiClient.getProjectAudioConfig).not.toHaveBeenCalled()
     expect(data.chapters).toHaveLength(2)
     expect(data.selectedChapterIds).toEqual([5])
-    expect(data.audioFxConfig).toEqual({
+    expect(data.audioFxConfig).toMatchObject({
       enable_sound_effects: true,
       enable_music: true,
       sound_effect_density: 'medium',

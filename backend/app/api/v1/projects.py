@@ -1,7 +1,7 @@
 ﻿"""
 项目API路由
 """
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, status, Query
 from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 from typing import List, Optional
@@ -31,6 +31,8 @@ from app.services.audiobook.project_audio_config import (
     set_audio_fx,
     set_characters_for_model,
 )
+from app.services.audiobook.tts_model_ids import normalize_audiobook_tts_model
+from app.services.audiobook.chapter_character_scope import select_chapter_characters
 from app.services.audiobook.voice_auto_assignment import AutoVoiceAssignmentPool
 
 logger = logging.getLogger("uvicorn.error")
@@ -64,7 +66,7 @@ class AudioFxConfig(BaseModel):
     bgm_theme: Optional[str] = None
     bgm_style: Optional[str] = None
     base_bgm_volume: float = -36.0
-    intelligent_balance: bool = False
+    intelligent_balance: bool = True
     bgm_crossfade_ms: int = 0
     sound_effect_ducking: bool = True
     sound_effect_priority: str = "dialogue"  # dialogue/sfx
@@ -84,19 +86,36 @@ PERSISTED_CHARACTER_AUDIO_CONFIG_FIELDS = (
     "name",
     "voice_id",
     "tts_model",
-    "voice_clone_data_url",
-    "voice_design_prompt",
-    "mimo_voice_asset_id",
-    "stepaudio_voice_asset_id",
-    "source",
 )
 
 
+def _resolve_character_audio_voice_id(config: CharacterAudioConfig) -> str:
+    voice_id = str(config.voice_id or "").strip()
+    if voice_id:
+        return voice_id
+
+    tts_model = normalize_audiobook_tts_model(config.tts_model)
+    mimo_voice_asset_id = str(config.mimo_voice_asset_id or "").strip()
+    if mimo_voice_asset_id:
+        if tts_model == "mimo-v2.5-tts-voicedesign":
+            return f"mimo_design:{mimo_voice_asset_id}"
+        if tts_model == "mimo-v2.5-tts-voiceclone":
+            return f"mimo_clone:{mimo_voice_asset_id}"
+
+    stepaudio_voice_asset_id = str(config.stepaudio_voice_asset_id or "").strip()
+    if stepaudio_voice_asset_id and tts_model == "stepaudio-2.5-tts":
+        return f"stepaudio_clone:{stepaudio_voice_asset_id}"
+
+    return voice_id
+
+
 def _dump_persisted_character_audio_config(config: CharacterAudioConfig) -> dict:
-    return config.model_dump(
+    data = config.model_dump(
         include=set(PERSISTED_CHARACTER_AUDIO_CONFIG_FIELDS),
         exclude_none=True,
     )
+    data["voice_id"] = _resolve_character_audio_voice_id(config)
+    return data
 
 
 router = APIRouter(prefix="/api/v1/projects", tags=["projects"])
@@ -522,6 +541,7 @@ async def update_project_review_config(
 async def auto_assign_project_audio_voices(
     project_id: int,
     tts_model: str = Query("qwen3-tts-instruct-flash"),
+    chapter_ids: Optional[List[int]] = Body(default=None),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> ProjectAudioConfig:
@@ -547,15 +567,49 @@ async def auto_assign_project_audio_voices(
     existing_characters = get_characters_for_model(data, tts_model)
     audio_fx = get_audio_fx(data)
 
+    # 载入项目角色，并按本次所选章节收敛推荐范围。
+    characters = (
+        db.query(Character)
+        .filter(Character.project_id == project_id)
+        .order_by(Character.id)
+        .all()
+    )
+    scoped_character_ids = None
+    if chapter_ids:
+        normalized_chapter_ids = list(dict.fromkeys(chapter_ids))
+        selected_chapters = (
+            db.query(Chapter)
+            .filter(
+                Chapter.project_id == project_id,
+                Chapter.id.in_(normalized_chapter_ids),
+                Chapter.deleted_at.is_(None),
+            )
+            .all()
+        )
+        if len(selected_chapters) != len(normalized_chapter_ids):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="部分章节不存在",
+            )
+        characters, scope = select_chapter_characters(
+            chapters=selected_chapters,
+            characters=characters,
+        )
+        scoped_character_ids = {item.character_id for item in scope.characters}
+
     # 建立已有配置索引
     manual_configs_by_id = {}
     ai_configs_by_id = {}
     other_entries = []
+    preserved_out_of_scope_entries = []
 
     for item in existing_characters:
         if not isinstance(item, dict):
             continue
         cid = item.get("character_id")
+        if scoped_character_ids is not None and cid not in scoped_character_ids:
+            preserved_out_of_scope_entries.append(item)
+            continue
         source = item.get("source")
         # 旁白或未知 ID 的条目直接保留
         if cid is None or cid == 0:
@@ -565,14 +619,6 @@ async def auto_assign_project_audio_voices(
             manual_configs_by_id[cid] = item
         else:
             ai_configs_by_id[cid] = item
-
-    # 载入项目角色
-    characters = (
-        db.query(Character)
-        .filter(Character.project_id == project_id)
-        .order_by(Character.id)
-        .all()
-    )
 
     llm_client = None
     try:
@@ -596,7 +642,8 @@ async def auto_assign_project_audio_voices(
     )
     result_characters = []
 
-    # 先放入“其他”条目（如旁白）
+    # 先保留范围外已有配置，再放入本次范围内的“其他”条目（如旁白）。
+    result_characters.extend(preserved_out_of_scope_entries)
     result_characters.extend(other_entries)
 
     def _normalize_text(value: Optional[str]) -> str:
