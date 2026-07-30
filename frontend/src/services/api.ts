@@ -188,6 +188,8 @@ interface DreamweaverLibraryAssetProviderRefSyncResponse {
 
 export type AudiobookGenerationMode = 'full' | 'script_only'
 export type AudiobookPreviewType = 'voice' | 'sfx' | 'bgm' | 'mix'
+export type AudiobookAudioEngineMode = 'legacy_stems' | 'seed_scene' | 'auto'
+const SEED_SCENE_TEST_REQUEST_TIMEOUT_MS = 660000
 export type AudiobookAudioFxDensity = 'low' | 'medium' | 'high' | 'off'
 export interface AudiobookAudioFxConfigPayload {
   enable_sound_effects: boolean
@@ -209,6 +211,9 @@ export interface AudiobookProjectAudioCharacterConfigPayload {
 export interface AudiobookProjectAudioConfigPayload {
   characters: AudiobookProjectAudioCharacterConfigPayload[]
   audio_fx?: AudiobookAudioFxConfigPayload | null
+  audio_engine_mode?: AudiobookAudioEngineMode
+  // multilingual 变体暂不启用，仅开放 seed-audio-1.0。
+  seed_audio_model?: 'seed-audio-1.0'
 }
 
 export interface AudiobookVoiceConfigPayloadItem {
@@ -426,6 +431,98 @@ export interface AudiobookTtsModelCatalogResponse {
   models: AudiobookTtsModelCatalogItem[]
 }
 
+export interface MiniMaxVoiceCloneCreateResponse {
+  clone: {
+    owner_user_id: string
+    voice_id: string
+    name: string
+    model: string
+    sample_text: string
+    created_at: string
+    provider_request_id: string
+  }
+  voice: Record<string, unknown>
+  voice_id: string
+  provider_request_id: string
+  preview_audio_data_base64: string
+  preview_audio_url: string
+  preview_audio_mime_type: string
+  preview_price_per_10k: number
+  first_formal_use_fee_yuan: number
+  billing_notice: string
+}
+
+export interface VoiceReferenceAssetRecord {
+  asset_id: string
+  reference_kind: string
+  reference_field: string
+  provider?: string
+  source_model?: string
+  source_voice_id?: string
+  storage_uri?: string
+  source_url?: string
+  authorization_basis?: string
+  authorization_version?: string
+  owner_user_id?: number
+  revoked_at?: string
+  metadata_json?: Record<string, unknown>
+}
+
+export interface VoicePoolVoiceRecord {
+  publication_id: string
+  display_name: string
+  description: string
+  voice_origin: string
+  source_model?: string | null
+  gender_presentation: string
+  age_impression: string
+  primary_style: string
+  language: string
+  accent: string
+  timbre_tags: string[]
+  scenario_tags: string[]
+  emotion_tags: string[]
+  public_preview_uri: string
+  reference_audio_url: string
+  status: string
+  rating_count: number
+  average_score: number
+}
+
+export interface VoiceReferenceMaterializeResponse {
+  source_asset_id: string
+  reference_audio_uri: string | null
+  cache_hit: boolean
+  requires_cost_confirmation: boolean
+  generated: boolean
+  preview_text?: string
+  cost_quote?: {
+    model: string
+    model_name: string
+    price_per_10k_yuan: number
+    estimated_cost_yuan: number
+    pricing_status: string
+    pricing_basis: string
+    billing_notice: string
+  }
+}
+
+export interface VoicePoolPublicationPayload {
+  display_name: string
+  description?: string
+  gender_presentation: 'female' | 'male' | 'neutral'
+  age_impression: 'child' | 'teen' | 'young_adult' | 'adult' | 'mature' | 'elder'
+  primary_style: string
+  language: string
+  accent?: string
+  timbre_tags: string[]
+  scenario_tags: string[]
+  emotion_tags?: string[]
+  rights_basis: 'self_voice' | 'licensed_voice' | 'synthetic_source' | 'synthetic_design'
+  license_version: string
+  consent_at: string
+}
+
 export interface TtsPromptTestProviderPromptSnapshot {
   model: string
   voice_id?: string
@@ -495,6 +592,136 @@ export interface TtsPromptTestPreviewResponse {
   provider?: string | null
   provider_model?: string | null
   transport?: string | null
+}
+
+export interface SeedSceneTestReferenceSlot {
+  id: string
+  speaker: string
+  description: string
+}
+
+export interface SeedSceneTestVariant {
+  id: 'described_voices' | 'reference_voices' | string
+  blind_label: string
+  prompt: string
+}
+
+export interface SeedSceneTestCase {
+  id: string
+  name: string
+  category: string
+  purpose: string
+  model: string
+  repeat_count: number
+  expected_duration_s: number
+  expected_texts: string[]
+  reference_slots: SeedSceneTestReferenceSlot[]
+  variants: SeedSceneTestVariant[]
+}
+
+export interface SeedSceneTestReferencePayload {
+  slot_id: string
+  source_model: string
+  source_voice_id: string
+  audio_data_base64?: string
+  audio_url?: string
+  audio_mime_type?: string
+}
+
+export interface SeedSceneTestPreviewPayload {
+  case_id: string
+  variant: string
+  sample_index?: number
+  references?: SeedSceneTestReferencePayload[]
+  force_regenerate?: boolean
+}
+
+export interface SeedSceneBlindSample {
+  anonymous_id: string
+  blind_label: string
+}
+
+export interface SeedSceneBlindBatchResponse {
+  schema_version: 'seed-scene-blind-review-v1' | string
+  batch_id: string
+  locked: boolean
+  samples: SeedSceneBlindSample[]
+}
+
+export interface SeedSceneBlindAudioResponse extends SeedSceneBlindSample {
+  audio_mime_type: string
+  audio_data_base64: string
+}
+
+export interface SeedSceneBlindReviewPayload {
+  score: number
+  flags: Record<string, boolean>
+  notes: string
+}
+
+export interface SeedSceneBlindReviewRecord extends SeedSceneBlindReviewPayload {
+  schema_version: 'seed-scene-blind-review-record-v1' | string
+  batch_id: string
+  anonymous_id: string
+  reviewer_user_id: number
+  submitted_at: string
+  locked: boolean
+}
+
+export interface SeedSceneBlindReviewSummarySample {
+  anonymous_id: string
+  blind_label: string
+  review_count: number
+  average_score?: number | null
+  flag_pass_rates: Record<string, number>
+  case_id?: string | null
+  variant?: string | null
+  sample_index?: number | null
+  sample_id?: string | null
+}
+
+export interface SeedSceneBlindReviewSummaryResponse {
+  schema_version: 'seed-scene-blind-review-summary-v1' | string
+  batch_id: string
+  sample_count: number
+  completed_sample_count: number
+  review_count: number
+  reviewer_count: number
+  identity_revealed: boolean
+  samples: SeedSceneBlindReviewSummarySample[]
+}
+
+export interface SeedSceneTestPreviewResponse {
+  model: string
+  case_id: string
+  variant: string
+  sample_index: number
+  sample_id: string
+  blind_label: string
+  prompt: string
+  expected_texts: string[]
+  audio_data_base64: string
+  audio_format: string
+  audio_mime_type: string
+  audio_size_bytes: number
+  duration?: number | null
+  subtitle?: unknown
+  request_id?: string | null
+  generation_latency_s?: number | null
+  billing: {
+    pricing_status?: string
+    pricing_source?: string | null
+    pricing_basis?: string
+    price_per_minute_yuan?: number | null
+    billable_duration_s?: number
+    provider_request_count?: number
+    actual_cost_yuan?: number | null
+  }
+  generation_status: string
+  fallback_reason?: string | null
+  quality_report: Record<string, unknown>
+  references: Array<Record<string, unknown>>
+  cached: boolean
 }
 
 export interface AudiobookChapterStreamUrlResponse {
@@ -2116,6 +2343,91 @@ class ApiClient {
     return this.client.get(`/api/v1/audiobook/projects/${audiobookProjectId}`)
   }
 
+  getMyVoiceReferences() {
+    return this.client.get<{ assets: VoiceReferenceAssetRecord[]; total: number }>(
+      '/api/v1/audiobook/voice-pool/mine',
+    )
+  }
+
+  getPublicVoicePool(params?: {
+    gender_presentation?: string
+    age_impression?: string
+    primary_style?: string
+    language?: string
+    limit?: number
+    cursor?: string
+  }) {
+    return this.client.get<{
+      voices: VoicePoolVoiceRecord[]
+      total: number
+      next_cursor?: string | null
+    }>(
+      '/api/v1/audiobook/voice-pool/public',
+      { params },
+    )
+  }
+
+  getVoicePoolTaxonomy() {
+    return this.client.get<Record<string, string[] | string>>(
+      '/api/v1/audiobook/voice-pool/taxonomy',
+    )
+  }
+
+  materializeVoiceReference(sourceAssetId: string, confirmCost = false) {
+    return this.client.post<VoiceReferenceMaterializeResponse>(
+      '/api/v1/audiobook/tts/voice-references/materialize',
+      { source_asset_id: sourceAssetId, confirm_cost: confirmCost },
+    )
+  }
+
+  publishVoiceToPool(sourceAssetId: string, payload: VoicePoolPublicationPayload) {
+    return this.client.post(
+      '/api/v1/audiobook/voice-pool/publications',
+      payload,
+      { params: { source_asset_id: sourceAssetId } },
+    )
+  }
+
+  ratePublicVoice(publicationId: string, score: number) {
+    return this.client.post(
+      `/api/v1/audiobook/voice-pool/publications/${encodeURIComponent(publicationId)}/rating`,
+      { score },
+    )
+  }
+
+  createMiniMaxVoiceCloneFromFile(payload: {
+    model: string
+    name: string
+    sampleText: string
+    file: File
+  }) {
+    const form = new FormData()
+    form.append('model', payload.model)
+    form.append('name', payload.name)
+    form.append('sample_text', payload.sampleText)
+    form.append('file', payload.file)
+    return this.client.post<MiniMaxVoiceCloneCreateResponse>(
+      '/api/v1/audiobook/tts/voices/minimax/clones/upload',
+      form,
+      {
+        headers: { 'Content-Type': 'multipart/form-data' },
+        timeout: 180000,
+      },
+    )
+  }
+
+  listMiniMaxVoiceClones(model: string) {
+    return this.client.get('/api/v1/audiobook/tts/voices/minimax/clones', {
+      params: { model },
+    })
+  }
+
+  removeMiniMaxVoiceClone(voiceId: string) {
+    return this.client.delete(
+      `/api/v1/audiobook/tts/voices/minimax/clones/${encodeURIComponent(voiceId)}`,
+    )
+  }
+
   getTtsPromptTestCases() {
     return this.client.get<TtsPromptTestCatalogResponse>('/api/v1/audiobook/tts/test-cases')
   }
@@ -2125,6 +2437,58 @@ class ApiClient {
       '/api/v1/audiobook/tts/test-preview',
       payload,
       { timeout: 180000 },
+    )
+  }
+
+  getSeedSceneTestCases() {
+    return this.client.get<{ cases: SeedSceneTestCase[] }>(
+      '/api/v1/audiobook/scene-audio/test-cases',
+    )
+  }
+
+  previewSeedSceneTestCase(payload: SeedSceneTestPreviewPayload) {
+    return this.client.post<SeedSceneTestPreviewResponse>(
+      '/api/v1/audiobook/scene-audio/test-preview',
+      payload,
+      { timeout: SEED_SCENE_TEST_REQUEST_TIMEOUT_MS },
+    )
+  }
+
+  getSeedSceneBlindReviewBatch(batchId: string) {
+    return this.client.get<SeedSceneBlindBatchResponse>(
+      `/api/v1/audiobook/scene-audio/blind-review/batches/${encodeURIComponent(batchId)}`,
+    )
+  }
+
+  getSeedSceneBlindReviewAudio(batchId: string, anonymousId: string) {
+    return this.client.get<SeedSceneBlindAudioResponse>(
+      `/api/v1/audiobook/scene-audio/blind-review/batches/${encodeURIComponent(batchId)}`
+      + `/samples/${encodeURIComponent(anonymousId)}/audio`,
+    )
+  }
+
+  submitSeedSceneBlindReview(
+    batchId: string,
+    anonymousId: string,
+    payload: SeedSceneBlindReviewPayload,
+  ) {
+    return this.client.post<SeedSceneBlindReviewRecord>(
+      `/api/v1/audiobook/scene-audio/blind-review/batches/${encodeURIComponent(batchId)}`
+      + `/samples/${encodeURIComponent(anonymousId)}/review`,
+      payload,
+    )
+  }
+
+  getMySeedSceneBlindReview(batchId: string, anonymousId: string) {
+    return this.client.get<SeedSceneBlindReviewRecord>(
+      `/api/v1/audiobook/scene-audio/blind-review/batches/${encodeURIComponent(batchId)}`
+      + `/samples/${encodeURIComponent(anonymousId)}/review`,
+    )
+  }
+
+  getSeedSceneBlindReviewSummary(batchId: string) {
+    return this.client.get<SeedSceneBlindReviewSummaryResponse>(
+      `/api/v1/audiobook/scene-audio/blind-review/batches/${encodeURIComponent(batchId)}/summary`,
     )
   }
 
@@ -2694,12 +3058,33 @@ class ApiClient {
     })
   }
 
-  generateNextWorkflowChapter(projectId: number, workflowGenerationModel?: string) {
-    const payload = workflowGenerationModel
-      ? { workflow_generation_model: workflowGenerationModel }
-      : {}
+  generateNextWorkflowChapter(
+    projectId: number,
+    options?: { workflowGenerationModel?: string; generationTier?: 'free' | 'standard' }
+  ) {
+    // camelCase → snake_case 映射在此完成，后端收到的请求体始终是 snake_case
+    const payload: { workflow_generation_model?: string; generation_tier?: string } = {}
+    if (options?.workflowGenerationModel) {
+      payload.workflow_generation_model = options.workflowGenerationModel
+    }
+    if (options?.generationTier) {
+      payload.generation_tier = options.generationTier
+    }
     return this.client.post(`/api/v1/workflow/${projectId}/generate-next-chapter`, payload, {
       timeout: 15000,
+      validateStatus: () => true,
+    })
+  }
+
+  getFreeGenerationQuota() {
+    return this.client.get<{
+      enabled: boolean
+      daily_limit: number
+      used: number
+      remaining: number
+      reset_at: string
+      global_available: boolean
+    }>('/api/v1/workflow/free-generation/quota', {
       validateStatus: () => true,
     })
   }

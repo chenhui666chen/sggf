@@ -1,0 +1,431 @@
+"""Deterministic compiler from audiobook script segments to Seed Audio prompts."""
+
+from __future__ import annotations
+
+from typing import Any, Dict, Iterable, List, Sequence, Tuple
+
+from .models import (
+    DEFERRED_PREVIEW_REFERENCE_FIELD,
+    SceneAudioEvent,
+    ScenePromptCompileResult,
+    SceneVoiceProfile,
+)
+
+
+REFERENCE_FIELDS = (
+    "speaker",
+    "audio_data",
+    "audio_url",
+    DEFERRED_PREVIEW_REFERENCE_FIELD,
+)
+MICRO_VOCALIZATION_TERMS = (
+    "轻笑",
+    "笑声",
+    "哭泣",
+    "抽泣",
+    "哭腔",
+    "哽咽",
+    "吸气",
+    "喘息",
+    "呻吟",
+    "吞咽",
+    "呜咽",
+)
+
+
+class ScenePromptCompiler:
+    """Compile reviewed script facts without asking an LLM to rewrite dialogue."""
+
+    def __init__(self, *, max_prompt_chars: int = 2800) -> None:
+        if max_prompt_chars <= 0:
+            raise ValueError("max_prompt_chars must be positive")
+        self.max_prompt_chars = max_prompt_chars
+
+    def compile_segments(
+        self,
+        segments: Sequence[Any],
+        *,
+        voice_profiles: Sequence[SceneVoiceProfile] = (),
+        scene_description: str = "",
+        ending_description: str = "",
+    ) -> ScenePromptCompileResult:
+        events: List[SceneAudioEvent] = []
+        previous_scene = ""
+        previous_music = ""
+        for segment in segments:
+            current_scene = str(getattr(segment, "instruct_scene", "") or "").strip()
+            if current_scene and current_scene.casefold() != previous_scene.casefold():
+                events.append(
+                    SceneAudioEvent(
+                        kind="scene",
+                        anchor="before",
+                        acoustic=current_scene,
+                    )
+                )
+                previous_scene = current_scene
+            music_signature = self._music_cue_signature(
+                getattr(segment, "music_cue", None)
+            )
+            include_music = bool(music_signature and music_signature != previous_music)
+            events.extend(
+                self._events_from_segment(
+                    segment,
+                    include_music=include_music,
+                )
+            )
+            if music_signature:
+                previous_music = music_signature
+        return self.compile_events(
+            events,
+            voice_profiles=voice_profiles,
+            scene_description=scene_description,
+            ending_description=ending_description,
+        )
+
+    def compile_events(
+        self,
+        events: Iterable[SceneAudioEvent],
+        *,
+        voice_profiles: Sequence[SceneVoiceProfile] = (),
+        scene_description: str = "",
+        ending_description: str = "",
+    ) -> ScenePromptCompileResult:
+        ordered_events = tuple(events)
+        expected_texts = tuple(
+            str(event.exact_text)
+            for event in ordered_events
+            if event.kind == "speech" and event.exact_text is not None
+        )
+        appearing_speakers = self._appearing_speakers(ordered_events)
+        profiles_by_name = {
+            str(profile.name).strip(): profile
+            for profile in voice_profiles
+        }
+        references, reference_speakers = self._resolve_references(
+            appearing_speakers,
+            profiles_by_name,
+        )
+        reference_index = {
+            speaker: index
+            for index, speaker in enumerate(reference_speakers, start=1)
+        }
+
+        lines = [
+            f"场景：{str(scene_description or '').strip() or '按剧情顺序生成自然、连贯的有声小说场景。'}",
+            "",
+            "角色与声音：",
+        ]
+        if appearing_speakers:
+            for speaker in appearing_speakers:
+                profile = profiles_by_name.get(speaker)
+                description = str(getattr(profile, "description", "") or "").strip()
+                if not description:
+                    description = "声音清晰自然，与角色身份和当前剧情一致"
+                if speaker in reference_index:
+                    lines.append(
+                        f"- {speaker} 的声音参考 @音频{reference_index[speaker]}，"
+                        "以参考中的声音身份为准；仅按当前剧情调整情绪、语气、音量、语速和停顿。"
+                    )
+                else:
+                    lines.append(f"- {speaker} 是 {description}。")
+        else:
+            lines.append("- 本场景没有可辨识角色台词。")
+
+        lines.extend(
+            [
+                "",
+                "生成要求：",
+                "对白和旁白始终清晰位于前景；音乐、环境与动作音效不得遮挡人声。",
+                "严格朗读说话事件中文引号内的原文，不新增、删减或改写台词，不产生未声明的可辨识人声或歌词。",
+                "笑声、哭泣、吸气、喘息、呻吟和吞咽按非语言人声表演，不朗读其舞台说明。",
+                "",
+                "按顺序生成：",
+            ]
+        )
+        lines.extend(
+            f"{index}. {self._render_event(event)}"
+            for index, event in enumerate(ordered_events, start=1)
+        )
+        ending = str(ending_description or "").strip()
+        if ending:
+            lines.extend(["", f"场景收尾：{ending.rstrip('。')}。"])
+
+        prompt = "\n".join(lines).strip()
+        requires_split = len(prompt) > self.max_prompt_chars
+        return ScenePromptCompileResult(
+            prompt=prompt,
+            events=ordered_events,
+            expected_texts=expected_texts,
+            references=references,
+            reference_speakers=reference_speakers,
+            requires_split=requires_split,
+            split_reason="prompt_exceeds_budget" if requires_split else None,
+        )
+
+    def _events_from_segment(
+        self,
+        segment: Any,
+        *,
+        include_music: bool = True,
+    ) -> List[SceneAudioEvent]:
+        events: List[SceneAudioEvent] = []
+        speaker = str(getattr(segment, "speaker", "") or "旁白").strip() or "旁白"
+        text = str(getattr(segment, "text", "") or "")
+        performance = self._segment_performance(segment)
+
+        music_cue = getattr(segment, "music_cue", None)
+        if (
+            include_music
+            and music_cue is not None
+            and str(getattr(music_cue, "style", "") or "").strip()
+        ):
+            events.append(
+                SceneAudioEvent(
+                    kind="music",
+                    anchor="before",
+                    acoustic=self._describe_music_cue(music_cue),
+                )
+            )
+
+        effect_events = [
+            self._sound_effect_event(effect, related_text=text or None)
+            for effect in list(getattr(segment, "sound_effects", None) or [])
+        ]
+        events.extend(
+            event
+            for event in effect_events
+            if event.anchor in {"before", "throughout"}
+        )
+
+        vocalization = self._build_vocalization_event(speaker, performance)
+        if vocalization is not None and vocalization.anchor == "before":
+            events.append(vocalization)
+
+        pause_before = self._pause_value(segment, "pause_before")
+        if pause_before > 0:
+            events.append(
+                SceneAudioEvent(
+                    kind="transition",
+                    anchor="before",
+                    acoustic=f"停顿约{pause_before:g}秒",
+                )
+            )
+
+        if text:
+            events.append(
+                SceneAudioEvent(
+                    kind="speech",
+                    anchor="during",
+                    speaker=speaker,
+                    exact_text=text,
+                    performance=performance or None,
+                    acoustic=str(getattr(segment, "instruct_scene", "") or "").strip() or None,
+                )
+            )
+
+        if vocalization is not None and vocalization.anchor != "before":
+            events.append(vocalization)
+
+        events.extend(
+            event
+            for event in effect_events
+            if event.anchor in {"during", "until_text", "after"}
+        )
+
+        pause_after = self._pause_value(segment, "pause_after")
+        if pause_after > 0:
+            events.append(
+                SceneAudioEvent(
+                    kind="transition",
+                    anchor="after",
+                    acoustic=f"停顿约{pause_after:g}秒",
+                )
+            )
+        return events
+
+    @staticmethod
+    def _appearing_speakers(events: Sequence[SceneAudioEvent]) -> Tuple[str, ...]:
+        speakers: List[str] = []
+        for event in events:
+            speaker = str(event.speaker or "").strip()
+            if speaker and speaker not in speakers:
+                speakers.append(speaker)
+        return tuple(speakers)
+
+    def _resolve_references(
+        self,
+        appearing_speakers: Sequence[str],
+        profiles_by_name: Dict[str, SceneVoiceProfile],
+    ) -> Tuple[Tuple[Dict[str, Any], ...], Tuple[str, ...]]:
+        references: List[Dict[str, Any]] = []
+        reference_speakers: List[str] = []
+        for speaker in appearing_speakers:
+            profile = profiles_by_name.get(speaker)
+            if profile is None or profile.provider_reference is None:
+                continue
+            reference = dict(profile.provider_reference)
+            populated = [field for field in REFERENCE_FIELDS if str(reference.get(field) or "").strip()]
+            if len(populated) != 1:
+                fields = ", ".join(REFERENCE_FIELDS)
+                raise ValueError(f"voice profile {speaker} must set exactly one of {fields}")
+            references.append(reference)
+            reference_speakers.append(speaker)
+        if len(references) > 3:
+            raise ValueError("a Seed Audio scene supports at most 3 references")
+        return tuple(references), tuple(reference_speakers)
+
+    @staticmethod
+    def _segment_performance(segment: Any) -> str:
+        notes = str(getattr(segment, "performance_notes", "") or "").strip().rstrip("。")
+        if notes:
+            return notes
+        emotion = str(getattr(segment, "emotion", "") or "").strip()
+        return f"以{emotion}情绪自然表达" if emotion and emotion != "neutral" else "自然、清晰"
+
+    @staticmethod
+    def _pause_value(segment: Any, name: str) -> float:
+        value = getattr(segment, name, 0.0)
+        voice_params = getattr(segment, "voice_params", None)
+        if isinstance(voice_params, dict) and voice_params.get(name) is not None:
+            value = voice_params[name]
+        try:
+            return max(0.0, float(value or 0.0))
+        except (TypeError, ValueError):
+            return 0.0
+
+    @staticmethod
+    def _describe_music_cue(cue: Any) -> str:
+        style = str(getattr(cue, "style", "") or "").strip()
+        fade_out = float(getattr(cue, "fade_out", 0.0) or 0.0)
+        if any(marker in style for marker in ("音乐停止", "停止音乐", "配乐停止", "戛然而止")):
+            parts = ["音乐停止"]
+            if fade_out > 0 and "戛然而止" not in style:
+                parts.append(f"约{fade_out:g}秒淡出")
+            return "，".join(parts)
+        if any(marker in style for marker in ("切换为", "转为", "变化为")):
+            parts = [style]
+        else:
+            parts = [f"音乐以{style}进入"]
+        fade_in = float(getattr(cue, "fade_in", 0.0) or 0.0)
+        duration = getattr(cue, "duration", None)
+        if fade_in > 0:
+            parts.append(f"约{fade_in:g}秒淡入")
+        if duration is not None:
+            parts.append(f"持续约{float(duration):g}秒")
+        if fade_out > 0:
+            parts.append(f"末尾约{fade_out:g}秒淡出")
+        parts.append("对白出现时降低且不遮挡人声")
+        return "，".join(parts)
+
+    @staticmethod
+    def _music_cue_signature(cue: Any) -> str:
+        if cue is None:
+            return ""
+        values = (
+            getattr(cue, "style", ""),
+            getattr(cue, "fade_in", 0.0),
+            getattr(cue, "fade_out", 0.0),
+            getattr(cue, "duration", None),
+        )
+        return "|".join(str(value or "").strip().casefold() for value in values)
+
+    @staticmethod
+    def _build_vocalization_event(speaker: str, performance: str) -> SceneAudioEvent | None:
+        found = [
+            (performance.find(term), term)
+            for term in MICRO_VOCALIZATION_TERMS
+            if term in performance
+        ]
+        if not found:
+            return None
+        ordered_terms: List[str] = []
+        for _, term in sorted(found):
+            if term not in ordered_terms:
+                ordered_terms.append(term)
+        if any(marker in performance for marker in ("在一声", "先轻", "先吸", "开口前")):
+            anchor = "before"
+        elif any(marker in performance for marker in ("随后", "句尾", "说完", "结束后")):
+            anchor = "after"
+        else:
+            anchor = "during"
+        return SceneAudioEvent(
+            kind="vocalization",
+            anchor=anchor,
+            speaker=speaker,
+            performance="、".join(ordered_terms),
+        )
+
+    @staticmethod
+    def _sound_effect_event(effect: Any, *, related_text: str | None) -> SceneAudioEvent:
+        name = str(getattr(effect, "name", "") or "").strip() or "关键动作音效"
+        timing = str(getattr(effect, "timing", "") or "trigger").strip().lower()
+        layer = str(getattr(effect, "layer", "") or "action").strip().lower()
+        continuous = timing in {"continuous", "throughout"}
+        kind = "ambient" if continuous and layer in {"bottom", "atmosphere"} else "sfx"
+        anchor_map = {
+            "before": "before",
+            "pre": "before",
+            "during": "during",
+            "trigger": "during",
+            "after": "after",
+            "post": "after",
+            "continuous": "throughout",
+            "throughout": "throughout",
+            "until_text": "until_text",
+        }
+        anchor = anchor_map.get(timing, "during")
+        acoustic_parts = [name]
+        position = str(getattr(effect, "position_3d", "") or "").strip()
+        if position:
+            acoustic_parts.append(f"空间位置或移动为{position}")
+        duration = getattr(effect, "duration", None)
+        if duration is not None:
+            acoustic_parts.append(f"持续约{float(duration):g}秒")
+        delay = float(getattr(effect, "delay", 0.0) or 0.0)
+        if delay > 0:
+            acoustic_parts.append(f"延后约{delay:g}秒")
+        fade_in = float(getattr(effect, "fade_in", 0.0) or 0.0)
+        if fade_in > 0:
+            acoustic_parts.append(f"开头约{fade_in:g}秒淡入")
+        fade_out = float(getattr(effect, "fade_out", 0.0) or 0.0)
+        if fade_out > 0:
+            acoustic_parts.append(f"末尾约{fade_out:g}秒淡出")
+        return SceneAudioEvent(
+            kind=kind,
+            anchor=anchor,
+            acoustic="，".join(acoustic_parts),
+            related_text=related_text,
+        )
+
+    def _render_event(self, event: SceneAudioEvent) -> str:
+        if event.kind == "speech":
+            performance = str(event.performance or "自然、清晰").strip().rstrip("。")
+            speaker = str(event.speaker or "旁白").strip()
+            verb = "讲述" if speaker == "旁白" else "说道"
+            return f"{speaker}用{performance}的方式{verb}：“{event.exact_text}”"
+
+        description = str(event.acoustic or event.performance or "自然呈现").strip().rstrip("。")
+        speaker = str(event.speaker or "").strip()
+        if event.kind == "vocalization":
+            action = f"{speaker}发出{description}等非语言声音" if speaker else f"出现{description}等非语言人声"
+        elif event.kind == "music":
+            action = description
+        elif event.kind == "ambient":
+            action = f"环境中{description}"
+        elif event.kind == "sfx":
+            action = description
+        elif event.kind == "scene":
+            action = f"环境与空间状态切换为：{description}"
+        else:
+            action = description
+
+        if event.anchor == "before":
+            return f"先是{action}。"
+        if event.anchor == "during":
+            return f"台词期间伴随{action}。" if event.kind in {"sfx", "ambient"} else f"期间，{action}。"
+        if event.anchor == "after":
+            return f"随后，{action}。"
+        if event.anchor == "throughout":
+            return f"{action}，并持续到场景结束。"
+        related_text = str(event.related_text or "").strip()
+        return f"{action}从此处持续至对应台词说完{related_text}二字。"

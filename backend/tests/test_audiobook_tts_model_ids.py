@@ -45,10 +45,198 @@ from app.services.audiobook.voice_manager import VoiceManager
 from app.services.audiobook.voice_manager_mimo import MiMoVoiceManager
 from app.services.audiobook import voice_manager_cosyvoice_v3_plus as cosyvoice_v3_plus
 from app.services.audiobook import tts_model_ids
+from app.services.audiobook.engine_pkg._tts_mixin import (
+    TTSMixin,
+    subtract_tts_cost_stats,
+)
 from app.services.audiobook.voice_manager_minimax import MiniMaxVoiceManager
 from app.services.audiobook.voice_manager_stepaudio import StepAudioVoiceManager
 from core.unified_media_runtime import create_tts_engine, get_media_runtime
 from core.model_resolution import normalize_model_id
+
+
+@pytest.mark.parametrize(
+    ("model_id", "expected_price", "expected_status"),
+    [
+        (DEFAULT_AUDIOBOOK_TTS_MODEL, 0.8, "public_postpaid"),
+        ("cosyvoice-v3.5-plus", 1.5, "public_postpaid"),
+        (MINIMAX_SPEECH_28_TURBO_MODEL, 2.0, "public_postpaid"),
+        (MINIMAX_SPEECH_28_HD_MODEL, 3.5, "public_postpaid"),
+        (MIMO_V25_TTS_MODEL, 0.0, "limited_time_free"),
+        (MIMO_V25_TTS_VOICE_DESIGN_MODEL, 0.0, "limited_time_free"),
+        (MIMO_V25_TTS_VOICE_CLONE_MODEL, 0.0, "limited_time_free"),
+        (STEPAUDIO_25_TTS_MODEL, 5.8, "public_postpaid"),
+        (SEED_TTS_20_EXPRESSIVE_MODEL, 3.0, "public_postpaid"),
+    ],
+)
+def test_audiobook_tts_catalog_uses_public_postpaid_user_prices(
+    model_id: str,
+    expected_price: float,
+    expected_status: str,
+) -> None:
+    metadata = get_audiobook_tts_model_metadata(model_id)
+
+    assert get_audiobook_tts_model_price_per_10k(model_id) == expected_price
+    assert metadata["pricing_status"] == expected_status
+    assert metadata["pricing_basis"] == "public_list_price"
+
+
+def test_audiobook_tts_catalog_records_fixed_custom_voice_fees() -> None:
+    minimax = get_audiobook_tts_model_metadata(MINIMAX_SPEECH_28_TURBO_MODEL)
+    stepaudio = get_audiobook_tts_model_metadata(STEPAUDIO_25_TTS_MODEL)
+    seed_tts = get_audiobook_tts_model_metadata(SEED_TTS_20_EXPRESSIVE_MODEL)
+
+    assert minimax["custom_voice_pricing"]["first_formal_use_yuan"] == 9.9
+    assert stepaudio["custom_voice_pricing"]["formal_clone_success_yuan"] == 9.9
+    assert seed_tts["custom_voice_pricing"] == {
+        "postpaid_slot_first_formal_use_yuan": 138.0,
+        "preview_price_per_10k": 3.0,
+        "unused_preview_retention_days": 7,
+    }
+
+
+@pytest.mark.parametrize(
+    ("model_id", "expected_price"),
+    [
+        (DEFAULT_AUDIOBOOK_TTS_MODEL, 0.8),
+        ("cosyvoice-v3.5-plus", 1.5),
+        (MINIMAX_SPEECH_28_TURBO_MODEL, 2.0),
+        (MINIMAX_SPEECH_28_HD_MODEL, 3.5),
+        (MIMO_V25_TTS_MODEL, 0.0),
+        (MIMO_V25_TTS_VOICE_DESIGN_MODEL, 0.0),
+        (MIMO_V25_TTS_VOICE_CLONE_MODEL, 0.0),
+        (STEPAUDIO_25_TTS_MODEL, 5.8),
+        (SEED_TTS_20_EXPRESSIVE_MODEL, 3.0),
+    ],
+)
+def test_tts_runtime_engine_uses_catalog_price(model_id: str, expected_price: float) -> None:
+    engine = TTSEngine(enable_cache=False, request_delay=0, model=model_id)
+
+    assert engine.price_per_10k == expected_price
+
+
+def test_mixed_model_cost_stats_include_every_runtime_engine() -> None:
+    class FakeEngine:
+        def __init__(self, model: str, stats: dict[str, object]) -> None:
+            self.model = model
+            self._stats = stats
+
+        def get_cost_stats(self) -> dict[str, object]:
+            return dict(self._stats)
+
+    harness = TTSMixin()
+    harness.tts_engine = FakeEngine(
+        DEFAULT_AUDIOBOOK_TTS_MODEL,
+        {
+            "total_characters": 1000,
+            "total_segments": 2,
+            "cache_hits": 1,
+            "api_calls": 1,
+            "failed_segments": 0,
+            "failed_characters": 0,
+            "estimated_cost": "¥0.08",
+        },
+    )
+    harness._tts_engines_by_model = {
+        MINIMAX_SPEECH_28_TURBO_MODEL: FakeEngine(
+            MINIMAX_SPEECH_28_TURBO_MODEL,
+            {
+                "total_characters": 10000,
+                "total_segments": 1,
+                "cache_hits": 0,
+                "api_calls": 1,
+                "failed_segments": 1,
+                "failed_characters": 30,
+                "estimated_cost": "¥2.00",
+            },
+        )
+    }
+
+    stats = harness._aggregate_tts_cost_stats()
+
+    assert stats["total_characters"] == 11000
+    assert stats["total_segments"] == 3
+    assert stats["cache_hits"] == 1
+    assert stats["cache_hit_rate"] == "33.3%"
+    assert stats["api_calls"] == 2
+    assert stats["failed_segments"] == 1
+    assert stats["failed_characters"] == 30
+    assert stats["estimated_cost"] == "¥2.08"
+    assert set(stats["by_model"]) == {
+        DEFAULT_AUDIOBOOK_TTS_MODEL,
+        MINIMAX_SPEECH_28_TURBO_MODEL,
+    }
+
+
+def test_tts_cost_stats_can_be_scoped_to_current_chapter() -> None:
+    baseline = {
+        "total_characters": 11000,
+        "total_segments": 3,
+        "cache_hits": 1,
+        "api_calls": 2,
+        "failed_segments": 1,
+        "failed_characters": 30,
+        "estimated_cost_yuan": 2.08,
+        "estimated_cost": "¥2.08",
+        "by_model": {
+            DEFAULT_AUDIOBOOK_TTS_MODEL: {
+                "total_characters": 1000,
+                "total_segments": 2,
+                "cache_hits": 1,
+                "api_calls": 1,
+                "failed_segments": 0,
+                "failed_characters": 0,
+                "estimated_cost_yuan": 0.08,
+                "estimated_cost": "¥0.08",
+            },
+            MINIMAX_SPEECH_28_TURBO_MODEL: {
+                "total_characters": 10000,
+                "total_segments": 1,
+                "cache_hits": 0,
+                "api_calls": 1,
+                "failed_segments": 1,
+                "failed_characters": 30,
+                "estimated_cost_yuan": 2.0,
+                "estimated_cost": "¥2.00",
+            },
+        },
+    }
+    current = {
+        "total_characters": 21000,
+        "total_segments": 5,
+        "cache_hits": 2,
+        "api_calls": 3,
+        "failed_segments": 1,
+        "failed_characters": 30,
+        "estimated_cost_yuan": 3.08,
+        "estimated_cost": "¥3.08",
+        "by_model": {
+            **baseline["by_model"],
+            DEFAULT_AUDIOBOOK_TTS_MODEL: {
+                "total_characters": 11000,
+                "total_segments": 4,
+                "cache_hits": 2,
+                "api_calls": 2,
+                "failed_segments": 0,
+                "failed_characters": 0,
+                "estimated_cost_yuan": 1.08,
+                "estimated_cost": "¥1.08",
+            },
+        },
+    }
+
+    chapter = subtract_tts_cost_stats(current, baseline)
+
+    assert chapter["total_characters"] == 10000
+    assert chapter["total_segments"] == 2
+    assert chapter["cache_hits"] == 1
+    assert chapter["cache_hit_rate"] == "50.0%"
+    assert chapter["api_calls"] == 1
+    assert chapter["failed_segments"] == 0
+    assert chapter["failed_characters"] == 0
+    assert chapter["estimated_cost_yuan"] == 1.0
+    assert chapter["estimated_cost"] == "¥1.00"
+    assert set(chapter["by_model"]) == {DEFAULT_AUDIOBOOK_TTS_MODEL}
 
 
 def test_audiobook_tts_model_normalization_keeps_business_model_ids() -> None:
@@ -197,6 +385,7 @@ def test_audiobook_tts_model_style_capabilities_are_exposed() -> None:
     assert minimax_caps["preferred_style_control_mode"] == "basic"
     assert minimax_caps["style_control_modes"] == ["basic"]
     assert minimax_caps["supports_audio_tags"] is False
+    assert minimax_caps["supports_voice_clone"] is True
     assert minimax_caps["supported_emotions"] == []
 
     unknown_caps = get_audiobook_tts_style_capabilities("unknown-tts")
@@ -232,6 +421,50 @@ def test_tts_emotion_normalization_uses_model_capability_matrix(monkeypatch) -> 
     assert engine._normalize_emotion("panicked") == "fearful"
 
 
+def test_stepaudio_emotion_is_not_downgraded_by_generic_aliyun_mapping() -> None:
+    """stepaudio/mimo 等模型的情感只进入风格指令文本，不是阿里云 API 枚举，
+    不应被硬编码降级表把 fearful/disgusted 降成 tense/angry。"""
+    engine = TTSEngine(model="stepaudio-2.5-tts")
+
+    assert engine._normalize_emotion("fearful") == "fearful"
+    assert engine._normalize_emotion("disgusted") == "disgusted"
+
+    qwen_engine = TTSEngine(model="qwen3-tts-instruct-flash")
+    # qwen 能力矩阵显式声明支持 fearful，不应降级；tense 按矩阵别名归一到 fearful
+    assert qwen_engine._normalize_emotion("fearful") == "fearful"
+    assert qwen_engine._normalize_emotion("tense") == "fearful"
+
+
+def test_narrator_speed_is_stable_across_emotions() -> None:
+    """旁白语速不应随逐段 emotion 标签机械变速（导致忽快忽慢），
+    情绪层次交给风格指令/performance_notes 表达；角色台词仍保留情感变速。"""
+    from app.services.audiobook.voice_manager import VoiceProfile
+
+    narrator = VoiceProfile(
+        voice_id="narrator_voice",
+        character_name="旁白",
+        gender="male",
+        age_group="adult",
+        personality="calm",
+        tts_speaker_id="stepaudio_narrator",
+        speed_base=1.0,
+    )
+    assert narrator.get_tts_params("fearful")["speed"] == 1.0
+    assert narrator.get_tts_params("sad")["speed"] == 1.0
+
+    role = VoiceProfile(
+        voice_id="role_voice",
+        character_name="张三",
+        gender="male",
+        age_group="adult",
+        personality="calm",
+        tts_speaker_id="stepaudio_role",
+        speed_base=1.0,
+    )
+    assert role.get_tts_params("fearful")["speed"] == pytest.approx(1.15)
+    assert role.get_tts_params("sad")["speed"] == pytest.approx(0.85)
+
+
 def test_minimax_voice_catalog_accepts_registry_model_id_alias() -> None:
     catalog = load_voice_catalog_for_model("MiniMax/speech-2.8-hd")
     voice_ids = {voice["id"] for voice in catalog["voices"]}
@@ -264,7 +497,8 @@ def test_seed_tts_voice_catalog_contains_doubao_20_expressive_voices() -> None:
     voice_ids = {voice["id"] for voice in catalog["voices"]}
 
     assert catalog["meta"]["model"] == SEED_TTS_20_EXPRESSIVE_MODEL
-    assert catalog["meta"]["voice_count"] == 99
+    assert catalog["meta"]["voice_count"] == len(catalog["voices"])
+    assert catalog["meta"]["voice_count"] >= 99
     assert {
         "zh_female_vv_uranus_bigtts",
         "saturn_zh_female_keainvsheng_tob",
@@ -394,6 +628,23 @@ def test_minimax_voice_manager_keeps_requested_turbo_model() -> None:
     assert profile.tts_model == MINIMAX_SPEECH_28_TURBO_MODEL
 
 
+def test_minimax_voice_manager_keeps_created_custom_voice_id() -> None:
+    manager = MiniMaxVoiceManager(model=MINIMAX_SPEECH_28_HD_MODEL)
+
+    manager.apply_project_voice_mapping({
+        "主角": {
+            "voice_id": "mmx_0123456789abcdef",
+            "tts_model": MINIMAX_SPEECH_28_HD_MODEL,
+        }
+    })
+
+    profile = manager.get_voice("主角")
+    assert profile is not None
+    assert profile.voice_id == "mmx_0123456789abcdef"
+    assert profile.tts_speaker_id == "mmx_0123456789abcdef"
+    assert profile.get_tts_params("calm")["speaker"] == "mmx_0123456789abcdef"
+
+
 def test_voice_manager_factory_routes_mimo_inline_custom_voice_models() -> None:
     clone_manager = create_voice_manager(MIMO_V25_TTS_VOICE_CLONE_MODEL)
     design_manager = create_voice_manager(MIMO_V25_TTS_VOICE_DESIGN_MODEL)
@@ -419,6 +670,25 @@ def test_voice_manager_factory_routes_seed_tts_expressive_model() -> None:
     assert manager.model == SEED_TTS_20_EXPRESSIVE_MODEL
     assert manager.get_narrator_voice().tts_speaker_id == "zh_female_vv_uranus_bigtts"
     assert manager.get_model_info()["supports_query_response"] is True
+
+
+def test_seed_tts_voice_manager_preserves_explicit_clone_speaker_id() -> None:
+    manager = create_voice_manager(SEED_TTS_20_EXPRESSIVE_MODEL)
+    clone_speaker_id = "S_account_voice_clone_001"
+
+    manager.apply_project_voice_mapping({
+        "女主": {
+            "voice_id": clone_speaker_id,
+            "tts_model": SEED_TTS_20_EXPRESSIVE_MODEL,
+            "gender": "female",
+        },
+    })
+
+    profile = manager.get_voice("女主")
+    assert profile is not None
+    assert profile.voice_id == clone_speaker_id
+    assert profile.tts_speaker_id == clone_speaker_id
+    assert profile.get_tts_params("calm")["speaker"] == clone_speaker_id
 
 
 def test_auto_voice_assignment_pool_falls_back_to_other_model_when_primary_is_exhausted() -> None:
@@ -483,7 +753,7 @@ def test_tts_preview_applies_voice_type_params() -> None:
 def test_tts_preview_expands_asset_reference_from_voice_id(monkeypatch) -> None:
     captured = {}
 
-    def fake_merge(config):
+    def fake_merge(config, **_kwargs):
         captured.update(config)
         return {**config, "voice_clone_data_url": "data:audio/wav;base64,AAAA"}
 

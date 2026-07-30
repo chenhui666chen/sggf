@@ -169,7 +169,7 @@ const FALLBACK_TTS_MODEL_CAPABILITIES: Record<string, TtsModelCapabilities> = {
   'minimax-speech-2.8-hd': {
     hasSystemVoices: true,
     requiresCustomVoice: false,
-    supportsVoiceClone: false,
+    supportsVoiceClone: true,
     supportsVoiceDesign: false,
     supportsVoiceTuning: false,
     modelFamily: 'minimax',
@@ -187,7 +187,7 @@ const FALLBACK_TTS_MODEL_CAPABILITIES: Record<string, TtsModelCapabilities> = {
   'minimax-speech-2.8-turbo': {
     hasSystemVoices: true,
     requiresCustomVoice: false,
-    supportsVoiceClone: false,
+    supportsVoiceClone: true,
     supportsVoiceDesign: false,
     supportsVoiceTuning: false,
     modelFamily: 'minimax',
@@ -598,7 +598,10 @@ export const modelSupportsCustomVoiceWorkbench = (
   modelOptions: readonly TtsModelOption[] = [],
 ): boolean => {
   const capabilities = getTtsModelCapabilities(model, modelOptions)
-  return model === 'cosyvoice-v3.5-plus'
+  const supportedWorkbenchModel = model === 'cosyvoice-v3.5-plus'
+    || model === 'minimax-speech-2.8-hd'
+    || model === 'minimax-speech-2.8-turbo'
+  return supportedWorkbenchModel
     && (capabilities.supportsVoiceClone || capabilities.supportsVoiceDesign)
 }
 

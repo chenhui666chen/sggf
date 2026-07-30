@@ -44,8 +44,17 @@ class SeedTTSVoiceManager(VoiceManager):
         voice_config: Optional[Dict[str, Any]] = None,
     ) -> VoiceProfile:
         config = voice_config or {}
-        entry = self.get_voice_entry(voice_id) or self.get_voice_entry(self.DEFAULT_NARRATOR_VOICE_ID)
-        if not entry:
+        entry = self.get_voice_entry(voice_id)
+        if entry is None:
+            entry = {
+                "id": voice_id,
+                "speaker": voice_id,
+                "gender": config.get("gender") or "neutral",
+                "category": config.get("age_group") or "adult",
+                "style": config.get("personality") or "calm",
+                "default_params": {},
+            }
+        if not entry.get("id") or not entry.get("speaker"):
             raise ValueError("Seed-TTS voice catalog is empty")
 
         defaults = entry.get("default_params") or {}
@@ -101,7 +110,7 @@ class SeedTTSVoiceManager(VoiceManager):
                 continue
             config = raw_config if isinstance(raw_config, dict) else {"voice_id": raw_config}
             voice_id = str(config.get("voice_id") or config.get("speaker") or "").strip()
-            if not voice_id or not self.validate_voice(voice_id):
+            if not voice_id:
                 voice_id = self.select_voice_for_character(str(character_name))
             profile = self._build_profile(str(character_name), voice_id, config)
             self.character_voices[str(character_name)] = profile
@@ -116,7 +125,8 @@ class SeedTTSVoiceManager(VoiceManager):
         return self.DEFAULT_NARRATOR_VOICE_ID
 
     def validate_voice(self, voice_id: str) -> bool:
-        return str(voice_id or "").strip() in self.voice_catalog.get("voices_by_id", {})
+        # 账号级声音复刻 ID 不会出现在静态系统音色目录中，只能由供应商校验。
+        return bool(str(voice_id or "").strip())
 
     def get_supported_emotions(self) -> List[str]:
         return ["happy", "sad", "angry", "fearful", "surprised", "calm", "tender", "tense"]

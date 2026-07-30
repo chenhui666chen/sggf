@@ -77,6 +77,55 @@ def _build_preview_cache_key(
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
+def build_default_preview_cache_key(*, model: str, voice_id: str) -> str:
+    """Build the cache key used by the character voice preview control."""
+    from app.services.audiobook.constants import normalize_speaker_id
+    from app.services.audiobook.tts_model_ids import (
+        DEFAULT_AUDIOBOOK_TTS_MODEL,
+        normalize_audiobook_tts_model,
+    )
+    from app.services.audiobook.voice_catalog import (
+        get_preview_quote_for_voice,
+        get_voice_entry,
+    )
+    from app.services.audiobook.voice_manager import VoiceManager
+
+    normalized_model = normalize_audiobook_tts_model(
+        model or DEFAULT_AUDIOBOOK_TTS_MODEL,
+    )
+    normalized_voice_id = str(voice_id or "").strip()
+    if not normalized_voice_id:
+        raise ValueError("voice_id is required to resolve a preview cache key")
+
+    if normalized_model.startswith("qwen3-tts"):
+        preset = VoiceManager.PRESET_VOICES.get(normalized_voice_id)
+        speaker_id = normalize_speaker_id(
+            preset["tts_speaker_id"] if preset else normalized_voice_id
+        )
+    else:
+        entry = get_voice_entry(normalized_voice_id, model=normalized_model)
+        speaker_id = str(entry.get("speaker") if entry else normalized_voice_id)
+
+    voice_params = {
+        "speaker": speaker_id,
+        "volume": 50,
+        "voice_id": normalized_voice_id,
+    }
+    return _build_preview_cache_key(
+        model=normalized_model,
+        voice_id=speaker_id,
+        text=get_preview_quote_for_voice(normalized_model, normalized_voice_id),
+        volume=50,
+        speed=1.0,
+        pitch=50,
+        emotion="neutral",
+        voice_type="",
+        mimo_voice_asset_id="",
+        stepaudio_voice_asset_id="",
+        voice_params=voice_params,
+    )
+
+
 def _build_preview_object_key(cache_key: str, ext: str) -> str:
     """构建 OSS object_key: {prefix}/tts_preview/{前两位}/{hash}.{ext}"""
     prefix = str(os.getenv("AUDIOBOOK_AUDIO_LIBRARY_OSS_PREFIX") or "shared/audio_library").strip().strip("/")
@@ -184,6 +233,7 @@ def upload_preview_to_oss(
 
 __all__ = [
     "_build_preview_cache_key",
+    "build_default_preview_cache_key",
     "check_oss_preview_exists",
     "upload_preview_to_oss",
 ]

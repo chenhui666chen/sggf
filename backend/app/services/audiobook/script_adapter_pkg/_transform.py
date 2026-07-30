@@ -13,6 +13,16 @@ from app.services.audiobook.llm_json import (
     clean_llm_json_text,
     parse_llm_json_array,
 )
+from app.services.audiobook.tts_model_ids import (
+    COSYVOICE_V35_PLUS_MODEL_ID,
+    DEFAULT_AUDIOBOOK_TTS_MODEL,
+    SEED_TTS_20_EXPRESSIVE_MODEL,
+    normalize_audiobook_tts_model,
+)
+from app.services.audiobook.script_render_mode import (
+    build_script_transform_engine_guidance,
+    normalize_script_audio_engine_mode,
+)
 
 from ._dataclasses import ScriptSegment
 from ._fidelity import audit_script_fidelity
@@ -25,7 +35,7 @@ TRANSFORM_BATCH_HARD_CHARS = 1200
 TRANSFORM_RETRY_CHUNK_TARGET_CHARS = 650
 TRANSFORM_RETRY_CHUNK_HARD_CHARS = 850
 TRANSFORM_OUTPUT_TOKEN_MIN = 1800
-TRANSFORM_OUTPUT_TOKEN_MAX = 9000
+TRANSFORM_OUTPUT_TOKEN_MAX = 8000
 TRANSFORM_CONTINUITY_SEGMENTS = 4
 TRANSFORM_CONTINUITY_MAX_CHARS = 520
 
@@ -63,7 +73,8 @@ class TransformMixin:
         
         all_segments = []
         continuity_context = ""
-        
+        degraded_batches: List[Dict[str, Any]] = []
+
         for idx, para in enumerate(merged_paragraphs, 1):
             logger.info(f"   ⏳ [{idx}/{total_paras}] 处理段落 ({len(para)}字)...")
             
@@ -76,16 +87,40 @@ class TransformMixin:
                     character_profiles=character_profiles,
                     continuity_context=continuity_context,
                 )
+                if any(
+                    "fallback_from_invalid_llm_segments" in str(getattr(seg, "adaptation_reason", "") or "")
+                    for seg in segments
+                ):
+                    degraded_batches.append({"batch_index": idx, "reason": "llm_transform_fallback", "chars": len(para)})
+                    logger.warning(f"   ⚠️ [{idx}/{total_paras}] LLM转化失败，该批次已降级为原文旁白")
                 all_segments.extend(segments)
                 continuity_context = self._build_transform_continuity_context(all_segments)
                 logger.info(f"   ✅ [{idx}/{total_paras}] 完成，生成 {len(segments)} 个片段")
             except Exception as e:
                 logger.error(f"   ❌ [{idx}/{total_paras}] 失败: {e}")
-                # 继续处理下一段，不中断整个流程
-                pass
+                # 保留原文兜底，避免整批正文静默丢失，并记录降级
+                fallback_segments = build_script_segments([], fallback_text=para)
+                all_segments.extend(fallback_segments)
+                continuity_context = self._build_transform_continuity_context(all_segments)
+                degraded_batches.append({
+                    "batch_index": idx,
+                    "reason": f"batch_exception:{str(e)[:120]}",
+                    "chars": len(para),
+                })
 
             if progress_callback:
                 progress_callback(idx, total_paras)
+
+        # 记录降级统计，供上层写入质量报告，让人工审核能感知降级批次
+        self.last_transform_degradation = {
+            "total_batches": total_paras,
+            "degraded_batches": len(degraded_batches),
+            "details": degraded_batches[:20],
+        }
+        if degraded_batches:
+            logger.warning(
+                f"⚠️ 本章 {len(degraded_batches)}/{total_paras} 个批次降级为原文旁白（无对话拆分/情感标注），请审核时重点检查"
+            )
         
         logger.info(f"✅ 全部段落处理完成，总计 {len(all_segments)} 个剧本片段")
         
@@ -181,16 +216,51 @@ class TransformMixin:
 
         source_lines = [line.strip() for line in text.splitlines() if line.strip()]
         if len(source_lines) > 1:
-            chunks: List[str] = []
-            for line in source_lines:
+            # 按目标长度聚合多行，避免把对话密集的正文炸成大量 3~8 字的碎片：
+            # 碎片会让 LLM 幻觉出整段 JSON（慢且低质），并可能再次触发截断。
+            def _split_long_line(line: str) -> List[str]:
                 if len(line) <= TRANSFORM_RETRY_CHUNK_HARD_CHARS:
-                    chunks.append(line)
-                    continue
+                    return [line]
+                pieces: List[str] = []
                 for start in range(0, len(line), TRANSFORM_RETRY_CHUNK_HARD_CHARS):
-                    chunk = line[start:start + TRANSFORM_RETRY_CHUNK_HARD_CHARS].strip()
-                    if chunk:
-                        chunks.append(chunk)
-            return chunks
+                    piece = line[start:start + TRANSFORM_RETRY_CHUNK_HARD_CHARS].strip()
+                    if piece:
+                        pieces.append(piece)
+                return pieces
+
+            grouped: List[str] = []
+            current: List[str] = []
+            current_length = 0
+
+            def flush_line_group() -> None:
+                nonlocal current, current_length
+                if current:
+                    grouped.append("\n".join(current).strip())
+                    current = []
+                    current_length = 0
+
+            for line in source_lines:
+                if len(line) > TRANSFORM_RETRY_CHUNK_HARD_CHARS:
+                    flush_line_group()
+                    grouped.extend(_split_long_line(line))
+                    continue
+
+                if current and current_length + len(line) > TRANSFORM_RETRY_CHUNK_TARGET_CHARS:
+                    flush_line_group()
+
+                current.append(line)
+                current_length += len(line)
+
+            flush_line_group()
+
+            # 聚合后若只剩 1 个块（≈整段原文），退回逐行拆分，确保重试拆得比原批次更小，
+            # 否则等于重发原内容，重试没有意义。
+            if len(grouped) <= 1:
+                fallback: List[str] = []
+                for line in source_lines:
+                    fallback.extend(_split_long_line(line))
+                return fallback
+            return grouped
 
         sentence_units = [
             unit.strip()
@@ -229,8 +299,12 @@ class TransformMixin:
 
     def _estimate_transform_max_tokens(self, paragraph: str) -> int:
         """根据输入长度估算 JSON 输出预算，避免固定 32000 导致慢请求。"""
+        # 每个片段的 JSON 结构非常冗长（instruct_*/voice_params/performance_notes/
+        # sound_effects[]/music_cue 等），输出字符约为正文长度的 10 倍以上，按约
+        # 2.6 字符/token 折算需要 ~6 倍正文长度的 token 预算。预算不足会在字符串
+        # 中途截断（Unterminated string），触发昂贵的碎片重试甚至整批降级。
         paragraph_length = len(str(paragraph or ""))
-        estimated = int(paragraph_length * 2.8) + 1000
+        estimated = int(paragraph_length * 6.0) + 1500
         return max(TRANSFORM_OUTPUT_TOKEN_MIN, min(TRANSFORM_OUTPUT_TOKEN_MAX, estimated))
 
     def _estimate_transform_timeout(self, max_tokens: int) -> int:
@@ -279,8 +353,26 @@ class TransformMixin:
             character_profiles: 🆕 完整角色档案（用于对话归属和角色身份识别）
         """
         
-        model_name = (getattr(self, "tts_model", None) or "qwen3-tts-instruct-flash").strip()
-        if "plus" in model_name:
+        model_name = (getattr(self, "tts_model", None) or DEFAULT_AUDIOBOOK_TTS_MODEL).strip()
+        normalized_model = normalize_audiobook_tts_model(model_name, default=model_name.lower())
+        audio_engine_mode = normalize_script_audio_engine_mode(
+            getattr(self, "audio_engine_mode", "legacy_stems")
+        )
+        engine_block = build_script_transform_engine_guidance(audio_engine_mode)
+        if audio_engine_mode == "seed_scene":
+            tts_block = f"""**主生成模型：seed-audio-1.0（完整声音场景模式）**
+- 负责一次生成旁白、多人对白、非语言人声、环境、动作音效和配乐
+- 当前选择的逐句 TTS 模型 {normalized_model} 仅用于试听参考音色和局部回退，不决定主场景剧本结构
+"""
+            instruct_block = """**Seed Audio 场景表演提示**
+- 使用 instruct_scene 保存连续的环境、空间和声学状态，使用 performance_notes 保存角色可执行的表演过程。
+- 使用 sound_effects.timing 表达声音相对台词的先后关系，使用 music_cue.style 表达配乐进入、延续、变化或停止。
+- 保持台词原文与角色归属精确，不输出供应商请求字段，不把舞台说明混入 text。
+"""
+            model_contract_reminders = """- instruct_scene 必须可直接编译为 Seed Audio 场景状态
+- performance_notes 必须描述情绪变化、韵律和微表演
+- sound_effects / music_cue 必须使用自然语言事件和相对时序，不依赖素材 ID 或本地文件"""
+        elif normalized_model == COSYVOICE_V35_PLUS_MODEL_ID:
             tts_block = """**当前TTS模型：CosyVoice v3.5-plus（精品模式）**\n- 适合：精品章节 / 情绪层次丰富场景\n- 特性：精细情感控制、instruction 演绎能力强，但必须使用复刻/设计音色\n"""
             instruct_block = (
                 "**Instruct 提示（cosyvoice-v3.5-plus）**\n"
@@ -289,9 +381,42 @@ class TransformMixin:
                 "- instruct_emotion 取值：neutral、fearful、angry、sad、surprised、happy、disgusted\n"
                 "- 请优先输出通用自然语言约束，不要依赖固定内置音色枚举\n"
             )
-        else:
+            model_contract_reminders = """- instruct_emotion 使用 neutral、fearful、angry、sad、surprised、happy、disgusted
+- instruct_scene / instruct_role / instruct_identity 使用通用自然语言约束，不依赖固定系统音色枚举
+- performance_notes 必须是可直接执行的自然语言演绎说明"""
+        elif normalized_model == SEED_TTS_20_EXPRESSIVE_MODEL:
+            tts_block = """**当前TTS模型：Seed-TTS 2.0 Expressive（豆包情感模式）**
+- 适合：需要连续情绪变化、口语感和微表演的中文旁白、对白与独白
+- 特性：发送层使用 Query-Response 上下文控制，并可在受控场景启用音频标签
+- 约束：剧本层只描述目标表演，不直接拼接供应商请求字段或标签语法
+"""
+            instruct_block = """**Seed-TTS 2.0 表演提示**
+- performance_notes 会由确定性发送层编译到 Query-Response 的 context_texts；请写成清晰、可执行的导演指令。
+- 每个片段都要说明情绪变化过程，而不只是静态情绪词：起始状态 → 转折触发 → 结束状态，并补充语速、音量、音调、重读和停顿。
+- 笑声、哭腔、吸气、喘息、尖叫、呻吟等微表演应写入具体 performance_notes；不要把“用悲伤语气说”等舞台说明混入 text。
+- 音频标签仅适合短句、强情绪和明确微表演；是否启用及标签格式由发送层根据 delivery plan 决定。
+- 长旁白和复杂情绪变化优先使用自然语言上下文，避免堆叠标签导致朗读正文、角色漂移或节奏失控。
+- 输出保持供应商中立：不要输出 style_control_method、style_tags、inline_audio_tags、context_texts 或 use_tag_parser。
+"""
+            model_contract_reminders = """- instruct_emotion / instruct_scene / instruct_role / instruct_identity 只记录供应商中立的表演意图
+- performance_notes 必须包含可感知的情绪变化过程、韵律和微表演；发送层会据此构建 context_texts 或受控音频标签
+- 不要输出 style_control_method、style_tags、inline_audio_tags、context_texts、use_tag_parser 等供应商请求字段"""
+        elif normalized_model.startswith("qwen3-tts"):
             tts_block = """**当前TTS模型：Qwen3-TTS Instruct Flash（默认模式）**\n- 适合：长篇连载 / 日更章节 / 成本敏感但需要一定表现力的内容\n- 特性：49 音色、稳定性强、成本低，并支持通过自然语言 instructions 控制语气与演绎\n- 限制：当前链路重点是 instructions，不要输出 SSML 语法\n"""
             instruct_block = """**Qwen3 Instruct 提示**\n- 请输出结构化指令字段：instruct_emotion / instruct_scene / instruct_role / instruct_identity\n- performance_notes 会一并映射到 Qwen instructions，请写成可直接执行的演绎说明\n- qwen3-tts-instruct-flash 不依赖 SSML，请直接描述情绪、场景、身份与语气目标\n"""
+            model_contract_reminders = """- instruct_emotion / instruct_scene / instruct_role / instruct_identity 用于构建 Qwen instructions
+- performance_notes 必须是可直接执行的自然语言演绎说明，不要输出 SSML"""
+        else:
+            tts_block = f"""**当前TTS模型：{normalized_model}**
+- 使用模型无关的有声书剧本结构，具体供应商参数由发送层转换
+- 重点输出准确台词、角色归属、情绪、韵律、停顿与可执行的 performance_notes
+"""
+            instruct_block = """**通用表演提示**
+- 使用 instruct_emotion / instruct_scene / instruct_role / instruct_identity 表达供应商中立的表演意图。
+- performance_notes 描述语速、音调、音量、重读、停顿和情绪变化，不输出供应商私有字段或语法。
+"""
+            model_contract_reminders = """- instruct_* 与 performance_notes 只表达供应商中立的表演意图
+- 不要输出供应商私有请求字段或标签语法"""
 
         input_guard_block = (
             "**输入安全约束**：\n"
@@ -379,6 +504,8 @@ class TransformMixin:
 {tts_block}
 
 {instruct_block}
+
+{engine_block}
 
 {input_guard_block}
 
@@ -513,12 +640,11 @@ class TransformMixin:
 - 只输出 JSON 对象，顶层格式为 {{"segments": [...]}}，不要添加任何 // 注释或 /* 注释 */
 - 不要在JSON中添加解释性文字
 - emotion字段必须使用推荐情感之一，不要自行发明
-- instruct_emotion 可用于 qwen3-tts-instruct-flash / cosyvoice-v3.5-plus；CosyVoice 请使用 neutral、fearful、angry、sad、surprised、happy、disgusted
-- instruct_scene / instruct_role / instruct_identity 可用于 qwen3-tts-instruct-flash / cosyvoice-v3.5-plus；CosyVoice 请输出通用自然语言约束，不要依赖固定系统音色枚举
+{model_contract_reminders}
 - voice_params必须包含rate和pitch参数，根据情感调整
 - pause_before/after单位为秒，范围：0.1-2.0
 - 优先使用happy/sad/tense等有强烈情感的标签，避免过多使用neutral
-- performance_notes要具体可执行，帮助TTS调节韵律和语气；在 qwen3-tts-instruct-flash 中它会直接参与 instructions 构建
+- performance_notes要具体可执行，帮助TTS调节韵律和语气
 - adaptation_reason说明为什么这样设置句式和停顿，以服务听觉节奏
 
 🔥 **极重要：text字段内容规范**
@@ -545,6 +671,7 @@ class TransformMixin:
                 self.llm_client,
                 messages=[{"role": "user", "content": prompt}],
                 max_tokens=max_tokens_value,
+                temperature=0.3,
                 timeout=timeout_value,
                 max_retries=2,
                 use_cache=False,

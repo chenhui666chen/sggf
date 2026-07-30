@@ -271,20 +271,21 @@ class FileParser:
         """检查 EPUB 支持"""
         try:
             import ebooklib
+            import bs4
             return True
-        except ImportError:
-            logger.warning("⚠️ ebooklib 未安装，EPUB 解析不可用")
-            logger.warning("   安装: pip install ebooklib")
+        except (ImportError, OSError) as exc:
+            logger.warning("⚠️ EPUB 解析依赖不可用: %s", exc)
+            logger.warning("   安装: pip install ebooklib beautifulsoup4")
             return False
     
     def _check_pdf_support(self) -> bool:
         """检查 PDF 支持"""
         try:
-            import PyPDF2
+            import pypdf
             return True
-        except ImportError:
-            logger.warning("⚠️ PyPDF2 未安装，PDF 解析不可用")
-            logger.warning("   安装: pip install PyPDF2")
+        except (ImportError, OSError) as exc:
+            logger.warning("⚠️ PDF 解析依赖不可用: %s", exc)
+            logger.warning("   安装: pip install pypdf")
             return False
     
     def detect_format(self, filename: str, content_bytes: bytes = None) -> FileFormat:
@@ -599,7 +600,7 @@ class FileParser:
         try:
             from ebooklib import ITEM_DOCUMENT, epub
             from bs4 import BeautifulSoup
-        except ImportError as e:
+        except (ImportError, OSError) as e:
             return ParsedContent(
                 text="",
                 format=FileFormat.EPUB,
@@ -1568,7 +1569,12 @@ class FileParser:
         br_nodes = list(node.find_all("br")) if hasattr(node, "find_all") else []
         for br in br_nodes:
             br.replace_with(f" {FileParser._EPUB_LINE_BREAK_PAUSE_MARKER} ")
-        return FileParser._normalize_epub_text(" ".join(node.stripped_strings))
+        raw_text = (
+            node.get_text(separator="", strip=False)
+            if hasattr(node, "get_text")
+            else "".join(node.stripped_strings)
+        )
+        return FileParser._normalize_epub_text(raw_text)
 
     @staticmethod
     def _append_epub_block(blocks: List[str], text: str) -> None:
@@ -1590,7 +1596,7 @@ class FileParser:
         if len(items) < 4:
             return items
 
-        boundary_start = max(0, int(len(items) * 0.65))
+        boundary_start = max(0, int(len(items) * 0.5))
         for index in range(boundary_start, len(items)):
             title = FileParser._normalize_heading_text(items[index])
             if title not in FileParser._EPUB_INLINE_NOTES_TITLE_EXACT:
@@ -1820,22 +1826,22 @@ class FileParser:
                 text="",
                 format=FileFormat.PDF,
                 success=False,
-                error="PDF 解析不可用，请安装 PyPDF2"
+                error="PDF 解析不可用，请安装 pypdf"
             )
         
         try:
-            import PyPDF2
-        except ImportError:
+            import pypdf
+        except (ImportError, OSError):
             return ParsedContent(
                 text="",
                 format=FileFormat.PDF,
                 success=False,
-                error="缺少依赖: PyPDF2"
+                error="缺少依赖: pypdf"
             )
         
         try:
             # 从字节流创建 PDF 阅读器
-            pdf_reader = PyPDF2.PdfReader(io.BytesIO(content))
+            pdf_reader = pypdf.PdfReader(io.BytesIO(content))
             
             # 提取元数据
             metadata = pdf_reader.metadata or {}

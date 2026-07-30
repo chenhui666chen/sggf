@@ -14,6 +14,7 @@ if str(ROOT_DIR) not in sys.path:
 
 from app.api.v1.audiobook_api import router as audiobook_router
 from app.core.security import get_current_user
+from app.db.base import get_db
 from app.models.user import User
 from app.services.audiobook.project_audio_runtime import build_character_voice_mapping_item
 from app.services.audiobook.stepaudio_voice_assets import (
@@ -62,6 +63,7 @@ def build_test_client() -> CompatTestClient:
         password_hash="hash",
         is_active=True,
     )
+    app.dependency_overrides[get_db] = lambda: object()
     return CompatTestClient(app)
 
 
@@ -98,6 +100,27 @@ def test_stepaudio_clone_asset_stores_audio_file_without_json_base64(tmp_path, m
     assert params["stepaudio_voice_file_id"] == "file-unit-test"
     assert params["stepaudio_voice_sample_text"] == "今天天气不错"
     assert params["voice_sample_path"] == str((tmp_path / asset.audio_path).resolve())
+
+
+def test_stepaudio_assets_are_isolated_by_owner(tmp_path):
+    store = StepAudioVoiceAssetStore(tmp_path)
+    first = store.create_clone_asset_from_bytes(
+        name="owner one",
+        audio_bytes=b"RIFFowner-one",
+        mime_type="audio/wav",
+        owner_user_id=7,
+    )
+    second = store.create_clone_asset_from_bytes(
+        name="owner two",
+        audio_bytes=b"RIFFowner-two",
+        mime_type="audio/wav",
+        owner_user_id=8,
+    )
+
+    assert [asset.id for asset in store.list_assets(owner_user_id=7)] == [first.id]
+    assert [asset.id for asset in store.list_assets(owner_user_id=8)] == [second.id]
+    with pytest.raises(StepAudioVoiceAssetError, match="does not belong"):
+        store.resolve_tts_params(second.id, owner_user_id=7)
 
 
 def test_stepaudio_clone_asset_without_file_id_is_marked_unavailable_for_synthesis(tmp_path, monkeypatch):
@@ -354,7 +377,7 @@ def test_stepaudio_preview_route_returns_user_error_for_cer_mismatch(monkeypatch
             code="stepaudio_clone_sample_text_mismatch",
         )
 
-    def fake_merge_stepaudio_voice_asset_tts_params(voice_params):
+    def fake_merge_stepaudio_voice_asset_tts_params(voice_params, **_kwargs):
         return {
             **voice_params,
             "stepaudio_voice_file_id": "file-unit",
@@ -401,6 +424,7 @@ def test_stepaudio_clone_asset_delete_route_removes_file(tmp_path, monkeypatch):
         name="delete me",
         audio_bytes=b"RIFFdelete-wav",
         mime_type="audio/wav",
+        owner_user_id=1,
     )
 
     response = build_test_client().delete(f"/api/v1/audiobook/tts/voices/stepaudio/assets/{asset.id}")

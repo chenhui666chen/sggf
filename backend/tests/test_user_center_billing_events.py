@@ -317,7 +317,7 @@ def test_audiobook_freeze_event_uses_tts_pricing_key_when_provided():
         payload={
             "points_per_yuan": 100,
             "user_price_basis": "public_list_price",
-            "user_price_rate": 1.0,
+            "user_price_rate": 0.8,
             "provider_discount_capture_rate": 1.0,
             "freeze_buffer_rate": 0.1,
             "margin_warning_rate": 0.15,
@@ -341,10 +341,85 @@ def test_audiobook_freeze_event_uses_tts_pricing_key_when_provided():
     finally:
         db.close()
 
-    assert payload["amount_yuan"] == 6.0
-    assert payload["amount_points"] == 660.0
+    assert payload["amount_yuan"] == 3.5
+    assert payload["amount_points"] == 385.0
+    assert payload["user_price_rate"] == 1.0
     assert payload["operating_snapshot"]["provider_key"] == "minimax-speech-2.8-hd"
-    assert payload["operating_snapshot"]["user_billed_yuan"] == 6.0
+    assert payload["operating_snapshot"]["user_billed_yuan"] == 3.5
+
+
+def test_audiobook_seed_scene_freeze_uses_precheck_amount_override():
+    _, session_factory = build_test_client()
+    now = datetime.now(timezone.utc)
+
+    user = create_user(
+        session_factory,
+        username="seed_scene_freeze_user",
+        email="seed_scene_freeze@example.com",
+    )
+    operator = create_user(
+        session_factory,
+        username="seed_scene_freeze_admin",
+        email="seed_scene_freeze_admin@example.com",
+    )
+    project = create_project(
+        session_factory,
+        user_id=user.id,
+        display_no=1,
+        title="Seed Scene 冻结项目",
+    )
+    chapter = create_chapter(
+        session_factory,
+        project_id=project.id,
+        chapter_number=1,
+        title="第一章",
+        content="声" * 450,
+    )
+    audiobook_project = create_audiobook_project(
+        session_factory,
+        project_id=project.id,
+        status="processing",
+        total_chapters=1,
+        completed_chapters=0,
+        total_cost=0.0,
+        created_at=now,
+        updated_at=now,
+    )
+    create_points_pricing_policy_snapshot(
+        session_factory,
+        operator_user_id=operator.id,
+        operator_username=operator.username,
+        payload={
+            "points_per_yuan": 100,
+            "user_price_basis": "public_list_price",
+            "user_price_rate": 1.0,
+            "provider_discount_capture_rate": 1.0,
+            "freeze_buffer_rate": 0.1,
+            "margin_warning_rate": 0.15,
+            "negative_margin_block_enabled": True,
+        },
+        created_at=now - timedelta(minutes=5),
+    )
+
+    db = session_factory()
+    try:
+        log = record_audiobook_billing_freeze(
+            db=db,
+            actor_user_id=user.id,
+            actor_username=user.username,
+            audiobook_project_id=audiobook_project.id,
+            chapter_ids=[chapter.id],
+            tts_pricing_key="seed-audio-1.0",
+            estimated_yuan_override=2.0,
+        )
+        assert log is not None
+        payload = log.request_params or {}
+    finally:
+        db.close()
+
+    assert payload["amount_yuan"] == 2.0
+    assert payload["amount_points"] == 220.0
+    assert payload["operating_snapshot"]["provider_key"] == "seed-audio-1.0"
 
 
 def test_dreamweaver_freeze_event_records_expected_payload():
@@ -978,7 +1053,7 @@ def test_audiobook_settle_event_is_idempotent():
         payload={
             "points_per_yuan": 100,
             "user_price_basis": "public_list_price",
-            "user_price_rate": 1.0,
+            "user_price_rate": 0.8,
             "provider_discount_capture_rate": 1.0,
             "freeze_buffer_rate": 0.1,
             "margin_warning_rate": 0.15,
@@ -997,6 +1072,12 @@ def test_audiobook_settle_event_is_idempotent():
 
     assert first_log is not None
     assert second_log is None
+
+    first_payload = first_log.request_params or {}
+    assert first_payload["amount_yuan"] == 1.0
+    assert first_payload["amount_points"] == 100.0
+    assert first_payload["user_price_rate"] == 1.0
+    assert first_payload["operating_snapshot"]["user_billed_yuan"] == 1.0
 
     matched_logs = [
         log

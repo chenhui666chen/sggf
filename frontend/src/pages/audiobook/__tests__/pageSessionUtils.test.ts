@@ -50,7 +50,6 @@ describe('audiobook page session utils', () => {
       narrationStyle: 'cinematic-story',
       narrationStylePrompt: '  自定义旁白语气  ',
       outputFormat: 'wav',
-      generateSubtitle: false,
       scriptReviewDialogOpen: true,
       scriptReviewData: {
         report: { overall_score: 8, issues: [] },
@@ -91,7 +90,6 @@ describe('audiobook page session utils', () => {
       narrationStyle: 'cinematic-story',
       narrationStylePrompt: '  自定义旁白语气  ',
       outputFormat: 'wav',
-      generateSubtitle: false,
       scriptReviewDialogOpen: true,
       scriptReviewData: {
         report: { overall_score: 8, issues_count: 0 },
@@ -164,7 +162,6 @@ describe('audiobook page session utils', () => {
       newProjectTitle: '新项目',
       narrationStylePrompt: '',
       outputFormat: 'mp3',
-      generateSubtitle: true,
       forceRegenerateScript: false,
     })
   })
@@ -191,7 +188,6 @@ describe('audiobook page session utils', () => {
     expect(hasPersistableAudiobookPageSession({ designPreviewText: DEFAULT_DESIGN_PREVIEW_TEXT })).toBe(false)
     expect(hasPersistableAudiobookPageSession({ designPreviewText: '自定义试听文本' })).toBe(true)
     expect(hasPersistableAudiobookPageSession({ outputFormat: 'wav' })).toBe(true)
-    expect(hasPersistableAudiobookPageSession({ generateSubtitle: false })).toBe(true)
     expect(hasPersistableAudiobookPageSession({ forceRegenerateScript: true })).toBe(false)
     expect(hasPersistableAudiobookPageSession({ browserPlayerOpen: true })).toBe(true)
     expect(hasPersistableAudiobookPageSession({
@@ -210,7 +206,6 @@ describe('audiobook page session utils', () => {
     expect(hasRouteScopedAudiobookPageSessionState({ designPreviewText: DEFAULT_DESIGN_PREVIEW_TEXT })).toBe(false)
     expect(hasRouteScopedAudiobookPageSessionState({ narrationStylePrompt: '自定义语气' })).toBe(true)
     expect(hasRouteScopedAudiobookPageSessionState({ outputFormat: 'm4b' })).toBe(true)
-    expect(hasRouteScopedAudiobookPageSessionState({ generateSubtitle: false })).toBe(true)
     expect(hasRouteScopedAudiobookPageSessionState({ forceRegenerateScript: true })).toBe(false)
     expect(hasRouteScopedAudiobookPageSessionState({ newProjectTitle: 'new project' })).toBe(true)
 

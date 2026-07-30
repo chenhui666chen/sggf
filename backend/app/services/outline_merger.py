@@ -258,12 +258,25 @@ def _renumber_volume_detail_content(
     detail_content: str,
     *,
     expected_start: int,
+    expected_end: int,
     original_start: int = 0,
+    original_end: int = 0,
 ) -> str:
     if not detail_content or not detail_content.strip():
         return detail_content
 
     heading_numbers = _extract_volume_detail_heading_numbers(detail_content)
+    range_is_already_aligned = (
+        original_start == expected_start
+        and original_end == expected_end
+    )
+    headings_are_absolute = bool(heading_numbers) and all(
+        expected_start <= number <= expected_end
+        for number in heading_numbers
+    )
+    if range_is_already_aligned and headings_are_absolute:
+        return detail_content
+
     detected_start = heading_numbers[0] if heading_numbers else max(_safe_int(original_start, 0), 0)
     if detected_start <= 0:
         return detail_content
@@ -309,6 +322,7 @@ def normalize_volume_detail_layout(
         expected_end = expected_start + chapter_count - 1
         original_range = vol_data.get("chapters_range") or [0, 0]
         original_start = _safe_int(original_range[0], 0)
+        original_end = _safe_int(original_range[1], 0) if len(original_range) >= 2 else 0
 
         vol_data["chapter_count"] = chapter_count
         if vol_data.get("type") == "detail":
@@ -317,7 +331,9 @@ def normalize_volume_detail_layout(
                 vol_data["detail"] = _renumber_volume_detail_content(
                     detail_text,
                     expected_start=expected_start,
+                    expected_end=expected_end,
                     original_start=original_start,
+                    original_end=original_end,
                 )
                 vol_data["detail"] = _ensure_volume_detail_tail_sections(str(vol_data.get("detail") or ""))
 

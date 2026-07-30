@@ -52,7 +52,6 @@ describe('audiobook generation action utils', () => {
       narrationStyle: 'dramatic',
       narrationStylePrompt: '',
       outputFormat: 'wav',
-      generateSubtitle: false,
     })
 
     expect(payload).toEqual({
@@ -66,7 +65,7 @@ describe('audiobook generation action utils', () => {
       }],
       tts_model: 'qwen3-tts-instruct-flash',
       output_format: 'wav',
-      generate_subtitle: false,
+      generate_subtitle: true,
       generation_mode: 'script_only',
       force_regenerate_script: true,
     })
@@ -83,7 +82,6 @@ describe('audiobook generation action utils', () => {
       narrationStyle: 'custom',
       narrationStylePrompt: '  慢速、温柔，并保留长停顿  ',
       outputFormat: 'mp3',
-      generateSubtitle: true,
     })
     expect(customStylePayload).toEqual(expect.objectContaining({
       generation_mode: 'script_only',
@@ -101,7 +99,6 @@ describe('audiobook generation action utils', () => {
       narrationStyle: 'dramatic',
       narrationStylePrompt: '这段不应透传',
       outputFormat: 'mp3',
-      generateSubtitle: true,
     })
     expect(payloadWithoutNarrationStyle).not.toHaveProperty('narration_style')
     expect(payloadWithoutNarrationStyle).not.toHaveProperty('narration_style_prompt')

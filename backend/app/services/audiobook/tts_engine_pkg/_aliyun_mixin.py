@@ -1078,11 +1078,17 @@ class AliyunMixin:
         return b"".join(audio_chunks)
 
     def _build_minimax_voice_candidates(self, voice: str) -> List[str]:
+        from app.services.audiobook.minimax_voice_clone_client import is_minimax_custom_voice_id
+
+        requested_voice = str(voice or "").strip()
+        if is_minimax_custom_voice_id(requested_voice):
+            return [requested_voice]
+
         known_working_voices = [
             "male-qn-qingse",
             "Chinese (Mandarin)_News_Anchor",
         ]
-        candidates = [str(voice or "").strip()]
+        candidates = [requested_voice]
         if candidates[0].startswith("female-qn-"):
             candidates.append(candidates[0].replace("female-qn-", "female-"))
         elif candidates[0].startswith("male-qn-"):
@@ -1559,7 +1565,7 @@ class AliyunMixin:
         resource_id: str = SEED_TTS_DEFAULT_RESOURCE_ID,
     ) -> bytes:
         """Call Doubao Seed-TTS 2.0 via Volcengine WebSocket API (bidirectional streaming).
-        
+
         Uses official protocols.py module for binary frame protocol.
         """
         import copy
@@ -1567,13 +1573,23 @@ class AliyunMixin:
         from pathlib import Path
 
         import websockets
-        
-        # Import protocols module from scripts directory
-        project_root = Path(__file__).parent.parent.parent.parent.parent.parent
-        scripts_dir = project_root / "scripts"
-        if str(scripts_dir) not in sys.path:
-            sys.path.insert(0, str(scripts_dir))
-        
+
+        # Import protocols module from scripts directory.
+        # 部署形态不同：本地源码运行时 scripts 位于仓库根目录，容器内 scripts 可能
+        # 单独挂载在 /scripts 或 /app/scripts，因此按多候选依次探测，取第一个含
+        # protocols.py 的目录加入 sys.path。
+        here = Path(__file__).resolve()
+        scripts_candidates = [
+            here.parents[5] / "scripts",
+            here.parents[4] / "scripts",
+            Path("/scripts"),
+        ]
+        for scripts_dir in scripts_candidates:
+            if (scripts_dir / "protocols.py").exists():
+                if str(scripts_dir) not in sys.path:
+                    sys.path.insert(0, str(scripts_dir))
+                break
+
         try:
             from protocols import (
                 EventType,
@@ -1595,24 +1611,24 @@ class AliyunMixin:
         clean_resource_id = str(resource_id or SEED_TTS_DEFAULT_RESOURCE_ID).strip()
         connect_id = str(uuid.uuid4())
         session_id = str(uuid.uuid4())
-        
+
         # Build audio parameters
         response_format = str(voice_params.get("format") or voice_params.get("response_format") or "mp3").strip().lower()
         if response_format not in SEED_TTS_RESPONSE_FORMATS:
             response_format = "mp3"
-        
+
         sample_rate = voice_params.get("sample_rate")
         if not isinstance(sample_rate, int) or isinstance(sample_rate, bool) or sample_rate not in SEED_TTS_SAMPLE_RATES:
             sample_rate = 24000
-        
+
         # Convert UI values to API ranges
         speed = self._seed_tts_ratio_from_ui_value(voice_params.get("speed", voice_params.get("rate", 1.0)))
         volume = self._seed_tts_ratio_from_ui_value(voice_params.get("volume", 50))
         pitch = self._seed_tts_pitch_from_ui_value(voice_params.get("pitch", 50))
-        
+
         speech_rate = self._seed_tts_rate_from_ratio(speed)
         loudness_rate = self._seed_tts_rate_from_ratio(volume)
-        
+
         # Build req_params
         base_request: Dict[str, Any] = {
             "req_params": {
@@ -1626,22 +1642,22 @@ class AliyunMixin:
                 },
             },
         }
-        
+
         # Add optional parameters
         context_texts = self._build_seed_tts_context_texts(voice_params, None)
         if context_texts:
             base_request["req_params"]["context_texts"] = context_texts
-        
+
         use_tag_parser = _to_bool_flag(voice_params.get("use_tag_parser"))
         if use_tag_parser:
             base_request["req_params"]["use_tag_parser"] = True
-        
+
         if pitch:
             base_request["req_params"]["post_process"] = {"pitch": pitch}
-        
+
         websocket = None
         audio_data = bytearray()
-        
+
         try:
             # Connect to server
             headers = {
@@ -1650,7 +1666,7 @@ class AliyunMixin:
                 "X-Api-Connect-Id": connect_id,
                 "X-Control-Require-Usage-Tokens-Return": "*",
             }
-            
+
             logger.info(f"Seed-TTS WebSocket: Connecting to {ws_url}")
             websocket = await websockets.connect(
                 ws_url,
@@ -1658,12 +1674,12 @@ class AliyunMixin:
                 max_size=10 * 1024 * 1024
             )
             logger.info(f"Seed-TTS WebSocket: Connected, Logid: {websocket.response.headers.get('x-tt-logid', 'N/A')}")
-            
+
             # Start connection
             await start_connection(websocket)
             await wait_for_event(websocket, MsgType.FullServerResponse, EventType.ConnectionStarted)
             logger.info("Seed-TTS WebSocket: Connection started")
-            
+
             # Start session
             start_session_request = copy.deepcopy(base_request)
             start_session_request["event"] = EventType.StartSession
@@ -1674,28 +1690,34 @@ class AliyunMixin:
             )
             await wait_for_event(websocket, MsgType.FullServerResponse, EventType.SessionStarted)
             logger.info("Seed-TTS WebSocket: Session started")
-            
+
             # Send TaskRequest with full text
             task_request_data = copy.deepcopy(base_request)
             task_request_data["event"] = EventType.TaskRequest
             task_request_data["req_params"]["text"] = text
-            
+
             await task_request(
                 websocket,
                 json.dumps(task_request_data).encode(),
                 session_id
             )
             logger.info("Seed-TTS WebSocket: Task request sent")
-            
+
+            # 按双向流协议时序：全部文本发送完毕后立即发送 FinishSession，
+            # 服务端收到后才会在推流结束时返回 SessionFinished。若放在接收循环
+            # 之后，只能靠接收超时兜底结束，且超时后到达的尾部音频会被丢弃。
+            await finish_session(websocket, session_id)
+            logger.info("Seed-TTS WebSocket: Finish session sent")
+
             # Receive audio data and events
-            timeout = 30  # seconds
+            timeout = float(os.getenv("SEED_TTS_WS_RECEIVE_TIMEOUT") or 30)  # seconds
             while True:
                 try:
                     msg = await asyncio.wait_for(receive_message(websocket), timeout=timeout)
                 except asyncio.TimeoutError:
                     logger.warning(f"Seed-TTS WebSocket: Timeout after receiving {len(audio_data)} bytes")
                     break
-                
+
                 if msg.type == MsgType.FullServerResponse:
                     if msg.event == EventType.SessionFinished:
                         logger.info("Seed-TTS WebSocket: Session finished")
@@ -1705,17 +1727,14 @@ class AliyunMixin:
                     elif msg.event in (EventType.SessionFailed, EventType.ConnectionFailed):
                         error_msg = msg.payload.decode('utf-8', errors='replace') if msg.payload else "Unknown error"
                         raise RuntimeError(f"Seed-TTS WebSocket failed: {error_msg}")
-                
+
                 elif msg.type == MsgType.AudioOnlyServer:
                     audio_data.extend(msg.payload)
                     logger.debug(f"Seed-TTS WebSocket: Received audio chunk {len(msg.payload)} bytes")
-            
-            # Finish session
-            await finish_session(websocket, session_id)
-            
+
             if not audio_data:
                 raise RuntimeError("Seed-TTS WebSocket returned no audio data")
-            
+
             # Set metadata
             self._set_last_synthesis_metadata(
                 {
@@ -1732,10 +1751,10 @@ class AliyunMixin:
                     "sample_rate": sample_rate,
                 }
             )
-            
+
             logger.info("Seed-TTS WebSocket synthesis completed: %d bytes", len(audio_data))
             return bytes(audio_data)
-        
+
         finally:
             if websocket:
                 try:
@@ -2172,7 +2191,7 @@ class AliyunMixin:
             # Qwen TTS 响应格式（根据阿里云官方文档）：音频直接在 output.audio 字段（base64字符串）
             if "output" in data and "audio" in data["output"]:
                 audio_info = data["output"]["audio"]
-                
+
                 # 直接是base64字符串（不是对象）
                 if isinstance(audio_info, str) and audio_info:
                     import base64
@@ -2189,7 +2208,7 @@ class AliyunMixin:
                         }
                     )
                     return base64.b64decode(audio_info)
-                
+
                 # 是对象的情况
                 if isinstance(audio_info, dict):
                     # url 格式
@@ -2209,7 +2228,7 @@ class AliyunMixin:
                                 }
                             )
                             return audio_response.content
-                    
+
                     # data 格式
                     audio_data = audio_info.get("data")
                     if audio_data:

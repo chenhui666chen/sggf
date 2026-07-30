@@ -107,6 +107,16 @@ def is_cosyvoice_v35_plus_voice_id(voice_id: str) -> bool:
     return str(voice_id or "").strip().startswith(COSYVOICE_V35_PLUS_VOICE_ID_PREFIX)
 
 
+def is_cosyvoice_custom_voice_id(voice_id: str) -> bool:
+    normalized = str(voice_id or "").strip()
+    return normalized.startswith(
+        (
+            COSYVOICE_V35_PLUS_VOICE_ID_PREFIX,
+            _LEGACY_COSYVOICE_V3_PLUS_VOICE_ID_PREFIX,
+        )
+    )
+
+
 def is_legacy_cosyvoice_system_voice(voice_id: str) -> bool:
     return str(voice_id or "").strip() in _LEGACY_COSYVOICE_SYSTEM_VOICES
 
@@ -185,7 +195,7 @@ def _resolve_clone_name_store_path() -> Path:
     return current.parents[3] / "data" / "cosyvoice_clone_names.json"
 
 
-def _load_clone_name_store() -> Dict[str, str]:
+def _load_clone_name_store() -> Dict[str, Dict[str, Any]]:
     path = _resolve_clone_name_store_path()
     try:
         if not path.exists():
@@ -194,13 +204,32 @@ def _load_clone_name_store() -> Dict[str, str]:
 
         data = json.loads(path.read_text(encoding="utf-8"))
         if isinstance(data, dict):
-            return {str(k): str(v) for k, v in data.items() if k and v}
+            normalized: Dict[str, Dict[str, Any]] = {}
+            for key, value in data.items():
+                voice_id = str(key or "").strip()
+                if not voice_id:
+                    continue
+                if isinstance(value, dict):
+                    normalized[voice_id] = {
+                        "display_name": str(value.get("display_name") or "").strip(),
+                        "owner_user_id": (
+                            int(value["owner_user_id"])
+                            if value.get("owner_user_id") not in (None, "")
+                            else None
+                        ),
+                    }
+                elif value:
+                    normalized[voice_id] = {
+                        "display_name": str(value).strip(),
+                        "owner_user_id": None,
+                    }
+            return normalized
     except Exception:
         return {}
     return {}
 
 
-def _save_clone_name_store(mapping: Dict[str, str]) -> None:
+def _save_clone_name_store(mapping: Dict[str, Dict[str, Any]]) -> None:
     path = _resolve_clone_name_store_path()
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -212,13 +241,21 @@ def _save_clone_name_store(mapping: Dict[str, str]) -> None:
         return
 
 
-def save_clone_display_name(*, voice_id: str, display_name: str) -> None:
+def save_clone_display_name(
+    *,
+    voice_id: str,
+    display_name: str,
+    owner_user_id: int | None = None,
+) -> None:
     voice_id = (voice_id or "").strip()
     display_name = (display_name or "").strip()
     if not voice_id or not display_name:
         return
     mapping = _load_clone_name_store()
-    mapping[voice_id] = display_name[:50]
+    mapping[voice_id] = {
+        "display_name": display_name[:50],
+        "owner_user_id": owner_user_id,
+    }
     _save_clone_name_store(mapping)
 
 
@@ -228,7 +265,21 @@ def get_clone_display_name(voice_id: str) -> Optional[str]:
         return None
     mapping = _load_clone_name_store()
     value = mapping.get(voice_id)
-    return str(value).strip() if value else None
+    if not isinstance(value, dict):
+        return None
+    display_name = str(value.get("display_name") or "").strip()
+    return display_name or None
+
+
+def get_clone_owner_user_id(voice_id: str) -> Optional[int]:
+    voice_id = (voice_id or "").strip()
+    if not voice_id:
+        return None
+    value = _load_clone_name_store().get(voice_id)
+    if not isinstance(value, dict):
+        return None
+    owner_user_id = value.get("owner_user_id")
+    return int(owner_user_id) if owner_user_id not in (None, "") else None
 
 
 def remove_clone_display_name(voice_id: str) -> None:
@@ -710,10 +761,15 @@ def list_cosyvoice_v3_plus_clones(
     return clones, meta
 
 
-def delete_cosyvoice_clone(*, voice_id: str) -> Dict[str, Any]:
+def delete_cosyvoice_clone(
+    *,
+    voice_id: str,
+    remove_local_mapping: bool = True,
+    missing_ok: bool = False,
+) -> Dict[str, Any]:
     voice_id = (voice_id or "").strip()
-    if not voice_id.startswith(COSYVOICE_V35_PLUS_VOICE_ID_PREFIX):
-        raise CosyVoiceCloneError("仅允许删除 cosyvoice-v3.5-plus 的复刻音色")
+    if not is_cosyvoice_custom_voice_id(voice_id):
+        raise CosyVoiceCloneError("仅允许删除已知 CosyVoice 自定义音色")
 
     api_key = _require_dashscope_api_key()
     try:
@@ -722,11 +778,22 @@ def delete_cosyvoice_clone(*, voice_id: str) -> Dict[str, Any]:
         raise CosyVoiceCloneError(f"dashscope 版本不支持 VoiceEnrollmentService（tts_v2）: {exc}") from exc
 
     service = VoiceEnrollmentService(api_key=api_key)
+    already_absent = False
     try:
         service.delete_voice(voice_id=voice_id)
     except Exception as exc:  # noqa: BLE001
-        raise CosyVoiceCloneError(f"delete_voice 失败: {exc}") from exc
+        if missing_ok and "BadRequest.ResourceNotExist" in str(exc):
+            already_absent = True
+        else:
+            raise CosyVoiceCloneError(f"delete_voice 失败: {exc}") from exc
 
-    remove_clone_display_name(voice_id)
+    if remove_local_mapping:
+        remove_clone_display_name(voice_id)
     invalidate_cosyvoice_clone_cache()
+    if already_absent:
+        return {
+            "voice_id": voice_id,
+            "deleted": False,
+            "already_absent": True,
+        }
     return {"voice_id": voice_id, "deleted": True}

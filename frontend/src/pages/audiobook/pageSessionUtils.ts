@@ -117,7 +117,6 @@ export const normalizeAudiobookPageSessionState = (
     narrationStyle: normalizeNarrationStyleValue(session.narrationStyle),
     narrationStylePrompt: typeof session.narrationStylePrompt === 'string' ? session.narrationStylePrompt : '',
     outputFormat: normalizeAudioOutputFormat(session.outputFormat),
-    generateSubtitle: session.generateSubtitle !== false,
     scriptReviewDialogOpen: Boolean(session.scriptReviewDialogOpen),
     scriptReviewData: normalizedScriptReviewData,
     scriptReviewSelectedIssueIndex: normalizeOptionalZeroBasedIndex(session.scriptReviewSelectedIssueIndex),
@@ -171,7 +170,6 @@ export const buildComparableAudiobookPageSessionPayload = (
     narrationStyle: normalizedSession?.narrationStyle ?? DEFAULT_NARRATION_STYLE,
     narrationStylePrompt: normalizedSession?.narrationStylePrompt ?? '',
     outputFormat: normalizedSession?.outputFormat ?? 'mp3',
-    generateSubtitle: normalizedSession?.generateSubtitle ?? true,
     scriptReviewDialogOpen: hasScriptReviewDialogState,
     scriptReviewData:
       hasScriptReviewDialogState
@@ -221,7 +219,6 @@ export const hasRouteScopedAudiobookPageSessionState = (
       || normalizedSession.narrationStyle !== DEFAULT_NARRATION_STYLE
       || Boolean(normalizedSession.narrationStylePrompt)
       || normalizedSession.outputFormat !== 'mp3'
-      || normalizedSession.generateSubtitle === false
       || normalizedSession.cloneRecordDialogOpen
       || normalizedSession.cloneName
       || normalizedSession.cloneUrl
@@ -272,7 +269,6 @@ export const hasPersistableAudiobookPageSession = (
       || normalizedSession.narrationStyle !== DEFAULT_NARRATION_STYLE
       || Boolean(normalizedSession.narrationStylePrompt)
       || normalizedSession.outputFormat !== 'mp3'
-      || normalizedSession.generateSubtitle === false
       || (normalizedSession.scriptReviewDialogOpen && normalizedSession.scriptReviewData)
       || (normalizedSession.stageMetricsDialogOpen && normalizedSession.stageMetricsData)
       || (normalizedSession.deleteChapterDialogOpen && normalizedSession.deleteChapterTarget)

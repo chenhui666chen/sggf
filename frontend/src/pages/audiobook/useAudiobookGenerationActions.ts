@@ -26,6 +26,7 @@ import {
   extractQueuedAudiobookJobId,
 } from './scriptEditorUtils'
 import type {
+  AudioEngineMode,
   AudioFxConfig,
   AudioOutputFormat,
   AudiobookProjectDetail,
@@ -43,13 +44,13 @@ interface UseAudiobookGenerationActionsParams {
   routeProjectId: number | null
   characterVoices: CharacterVoiceSetting[]
   audioFxConfig: AudioFxConfig
+  audioEngineMode: AudioEngineMode
   ttsModel: TtsModel
   currentVoicePresets: VoicePreset[]
   scriptOnlyMode: boolean
   narrationStyle: NarrationStyleId
   narrationStylePrompt: string
   outputFormat: AudioOutputFormat
-  generateSubtitle: boolean
   ensureCurrentTtsModelReady: () => boolean
   activateQueuedAudiobookTask: ActivateQueuedAudiobookTask
   setGenerating: Dispatch<SetStateAction<boolean>>
@@ -69,13 +70,13 @@ export const useAudiobookGenerationActions = ({
   routeProjectId,
   characterVoices,
   audioFxConfig,
+  audioEngineMode,
   ttsModel,
   currentVoicePresets,
   scriptOnlyMode,
   narrationStyle,
   narrationStylePrompt,
   outputFormat,
-  generateSubtitle,
   ensureCurrentTtsModelReady,
   activateQueuedAudiobookTask,
   setGenerating,
@@ -119,7 +120,6 @@ export const useAudiobookGenerationActions = ({
           narrationStyle,
           narrationStylePrompt,
           outputFormat,
-          generateSubtitle,
         }),
       )
 
@@ -140,7 +140,6 @@ export const useAudiobookGenerationActions = ({
     audiobookProject,
     ensureCurrentTtsModelReady,
     generating,
-    generateSubtitle,
     narrationStyle,
     narrationStylePrompt,
     outputFormat,
@@ -178,6 +177,7 @@ export const useAudiobookGenerationActions = ({
       const projectAudioConfigBody = buildProjectAudioConfigPayload({
         characterVoices,
         audioFxConfig,
+        audioEngineMode,
         ttsModel,
         voicePresets: currentVoicePresets,
       })
@@ -209,7 +209,6 @@ export const useAudiobookGenerationActions = ({
           narrationStyle,
           narrationStylePrompt,
           outputFormat,
-          generateSubtitle,
         }),
       )
 
@@ -237,10 +236,10 @@ export const useAudiobookGenerationActions = ({
   }, [
     activateQueuedAudiobookTask,
     audioFxConfig,
+    audioEngineMode,
     characterVoices,
     currentVoicePresets,
     ensureCurrentTtsModelReady,
-    generateSubtitle,
     generating,
     narrationStyle,
     narrationStylePrompt,

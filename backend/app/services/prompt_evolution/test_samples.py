@@ -1,13 +1,19 @@
 """
 提示词进化系统 - 测试样本管理
 
-管理用于评估提示词效果的测试样本
+管理用于评估提示词效果的测试样本。
+支持三层来源：管理员自定义 > 自动生成 > 内置默认。
 """
-from dataclasses import dataclass
-from typing import List, Dict, Any, Optional
+from dataclasses import dataclass, field
+from typing import List, Dict, Any, Optional, Callable, Awaitable
 from enum import Enum
+from datetime import datetime
 import json
+import uuid
+import logging
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 
 class GenreType(str, Enum):
@@ -22,6 +28,13 @@ class GenreType(str, Enum):
     OTHER = "其他"             # 其他类型
 
 
+class SampleSource(str, Enum):
+    """样本来源"""
+    DEFAULT = "default"   # 内置默认
+    CUSTOM = "custom"     # 管理员自定义
+    AUTO = "auto"         # LLM 自动生成
+
+
 @dataclass
 class TestSample:
     """测试样本"""
@@ -30,7 +43,9 @@ class TestSample:
     genre: str = "其他"                 # 题材类型
     expected_ai_score: Optional[int] = None  # 预期AI得分（可选）
     description: str = ""               # 样本描述
-    
+    source: str = "default"             # 来源: default / custom / auto
+    created_at: str = ""                # 创建时间 ISO 格式
+
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典"""
         return {
@@ -38,9 +53,11 @@ class TestSample:
             "text": self.text,
             "genre": self.genre,
             "expected_ai_score": self.expected_ai_score,
-            "description": self.description
+            "description": self.description,
+            "source": self.source,
+            "created_at": self.created_at,
         }
-    
+
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "TestSample":
         """从字典创建"""
@@ -49,7 +66,9 @@ class TestSample:
             text=data["text"],
             genre=data.get("genre", "其他"),
             expected_ai_score=data.get("expected_ai_score"),
-            description=data.get("description", "")
+            description=data.get("description", ""),
+            source=data.get("source", "default"),
+            created_at=data.get("created_at", ""),
         )
 
 
@@ -118,63 +137,219 @@ DEFAULT_TEST_SAMPLES = [
 
 
 class TestSampleManager:
-    """测试样本管理器"""
-    
-    def __init__(self, samples: Optional[List[TestSample]] = None):
-        self.samples = samples or DEFAULT_TEST_SAMPLES.copy()
+    """
+    测试样本管理器
+
+    支持持久化存储，三层来源优先级：custom > auto > default。
+    进化引擎取样时优先使用 custom，不足部分用 auto/default 补齐。
+    """
+
+    _STORAGE_DIR: Optional[Path] = None
+
+    def __init__(self, samples: Optional[List[TestSample]] = None, storage_dir: Optional[str] = None):
+        if storage_dir:
+            self._storage_path = Path(storage_dir) / "test_samples.json"
+        else:
+            # 与 EvolutionStorage / ModelConfigStorage 统一使用仓库根 data/prompt_evolution
+            base_dir = Path(__file__).resolve().parents[4]
+            self._storage_path = base_dir / "data" / "prompt_evolution" / "test_samples.json"
+            legacy_path = Path(__file__).resolve().parents[3] / "data" / "prompt_evolution" / "test_samples.json"
+            if not self._storage_path.exists() and legacy_path.exists():
+                self._storage_path.parent.mkdir(parents=True, exist_ok=True)
+                import shutil
+                shutil.copy2(legacy_path, self._storage_path)
+        self._storage_path.parent.mkdir(parents=True, exist_ok=True)
+
+        if samples is not None:
+            self.samples = samples
+        else:
+            self.samples = self._load_or_default()
+        self._rebuild_index()
+
+    def _rebuild_index(self):
         self._sample_index = {s.sample_id: s for s in self.samples}
-    
+
+    def _load_or_default(self) -> List[TestSample]:
+        """从持久化文件加载，无文件时使用内置默认"""
+        if self._storage_path.exists():
+            try:
+                with open(self._storage_path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                loaded = [TestSample.from_dict(d) for d in data]
+                if loaded:
+                    logger.info(f"从文件加载测试样本: {len(loaded)} 个")
+                    return loaded
+            except (json.JSONDecodeError, IOError, TypeError) as e:
+                logger.warning(f"加载测试样本文件失败: {e}")
+        return DEFAULT_TEST_SAMPLES.copy()
+
+    def _persist(self):
+        """持久化到文件"""
+        data = [s.to_dict() for s in self.samples]
+        with open(self._storage_path, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+
+    # ==================== 查询接口 ====================
+
     def get_sample(self, sample_id: str) -> Optional[TestSample]:
         """根据ID获取样本"""
         return self._sample_index.get(sample_id)
-    
+
     def get_samples_by_genre(self, genre: str) -> List[TestSample]:
         """根据题材获取样本"""
         return [s for s in self.samples if s.genre == genre]
-    
+
+    def get_samples_by_source(self, source: str) -> List[TestSample]:
+        """根据来源获取样本"""
+        return [s for s in self.samples if s.source == source]
+
     def get_random_samples(self, count: int) -> List[TestSample]:
-        """随机获取指定数量的样本"""
+        """
+        智能随机取样：custom 优先，不足时补 auto/default。
+        尽量覆盖不同题材。
+        """
         import random
-        return random.sample(self.samples, min(count, len(self.samples)))
+        custom = [s for s in self.samples if s.source == SampleSource.CUSTOM]
+        others = [s for s in self.samples if s.source != SampleSource.CUSTOM]
+
+        if len(custom) >= count:
+            return random.sample(custom, count)
+
+        # custom 不够，全选 custom + 从 others 补齐
+        selected = custom.copy()
+        remaining = count - len(selected)
+        if remaining > 0 and others:
+            selected += random.sample(others, min(remaining, len(others)))
+        return selected
 
     def get_samples(self, count: int) -> List[TestSample]:
         """按数量获取样本，兼容进化引擎的批量取样接口"""
         return self.get_random_samples(count)
-    
-    def add_sample(self, sample: TestSample):
-        """添加样本"""
+
+    async def prepare_evaluation_samples(
+        self,
+        count: int,
+        detector: Any,
+        genre: Optional[str] = None,
+        generator: Optional[Callable[..., Awaitable[List[TestSample]]]] = None,
+    ) -> List[TestSample]:
+        """清除原文 AI 率为 0 的样本，并生成通过检测的替代样本。"""
+        target_samples = self.get_samples_by_genre(genre) if genre else self.samples.copy()
+        invalid_ids: List[str] = []
+
+        for sample in target_samples:
+            result = await detector.detect_ai_content(sample.text[:5000])
+            if result.get("success") and result.get("ai_score") == 0:
+                invalid_ids.append(sample.sample_id)
+
+        removed_genres = [self._sample_index[sample_id].genre for sample_id in invalid_ids]
+        if invalid_ids:
+            invalid_set = set(invalid_ids)
+            self.samples = [s for s in self.samples if s.sample_id not in invalid_set]
+            self._rebuild_index()
+            self._persist()
+            logger.warning("已清除 AI 率为 0 的测试样本: %s", ", ".join(invalid_ids))
+
+        candidates = self.get_samples_by_genre(genre) if genre else self.samples.copy()
+        if len(candidates) < count and generator is not None:
+            replacement_genres = removed_genres or ([genre] if genre else [])
+            if not replacement_genres:
+                replacement_genres = ["通用"]
+            accepted: List[TestSample] = []
+            attempts = 0
+            while len(candidates) + len(accepted) < count and attempts < 3:
+                attempts += 1
+                missing = count - len(candidates) - len(accepted)
+                generated = await generator(
+                    genres=list(dict.fromkeys(replacement_genres)),
+                    count_per_genre=max(2, missing * 2),
+                )
+                for sample in generated:
+                    result = await detector.detect_ai_content(sample.text[:5000])
+                    if result.get("success") and result.get("ai_score") != 0:
+                        sample.source = SampleSource.AUTO
+                        if not sample.created_at:
+                            sample.created_at = datetime.now().isoformat()
+                        if sample.sample_id not in self._sample_index:
+                            self.samples.append(sample)
+                            self._sample_index[sample.sample_id] = sample
+                            accepted.append(sample)
+                            if len(candidates) + len(accepted) >= count:
+                                break
+                    else:
+                        logger.warning("丢弃 AI 率为 0 或检测失败的替代样本: %s", sample.sample_id)
+            if accepted:
+                self._persist()
+            candidates = self.get_samples_by_genre(genre) if genre else self.samples.copy()
+
+        if len(candidates) < count:
+            raise RuntimeError(f"有效测试样本不足: 需要 {count} 个，当前仅 {len(candidates)} 个")
+
+        source_priority = {SampleSource.CUSTOM: 0, SampleSource.AUTO: 1, SampleSource.DEFAULT: 2}
+        candidates.sort(key=lambda sample: source_priority.get(sample.source, 3))
+        return candidates[:count]
+
+    def get_all_samples(self) -> List[TestSample]:
+        """获取所有样本"""
+        return self.samples.copy()
+
+    def get_sample_count(self) -> int:
+        """获取样本数量"""
+        return len(self.samples)
+
+    def get_genres(self) -> List[str]:
+        """获取所有题材"""
+        return list(set(s.genre for s in self.samples))
+
+    # ==================== 增删接口 ====================
+
+    def add_sample(self, sample: TestSample) -> TestSample:
+        """添加样本并持久化"""
         if sample.sample_id in self._sample_index:
             raise ValueError(f"样本ID {sample.sample_id} 已存在")
+        if not sample.created_at:
+            sample.created_at = datetime.now().isoformat()
         self.samples.append(sample)
         self._sample_index[sample.sample_id] = sample
-    
+        self._persist()
+        return sample
+
     def remove_sample(self, sample_id: str) -> bool:
-        """移除样本"""
+        """移除样本并持久化"""
         if sample_id not in self._sample_index:
             return False
         sample = self._sample_index[sample_id]
         self.samples.remove(sample)
         del self._sample_index[sample_id]
+        self._persist()
         return True
-    
-    def get_all_samples(self) -> List[TestSample]:
-        """获取所有样本"""
-        return self.samples.copy()
-    
-    def get_sample_count(self) -> int:
-        """获取样本数量"""
-        return len(self.samples)
-    
-    def get_genres(self) -> List[str]:
-        """获取所有题材"""
-        return list(set(s.genre for s in self.samples))
-    
+
+    def clear_auto_samples(self):
+        """清除所有自动生成的样本"""
+        self.samples = [s for s in self.samples if s.source != SampleSource.AUTO]
+        self._rebuild_index()
+        self._persist()
+
+    def add_auto_samples(self, samples: List[TestSample]):
+        """批量添加自动生成的样本（替换旧的 auto 样本）"""
+        self.clear_auto_samples()
+        for s in samples:
+            s.source = SampleSource.AUTO
+            if not s.created_at:
+                s.created_at = datetime.now().isoformat()
+            self.samples.append(s)
+        self._rebuild_index()
+        self._persist()
+        logger.info(f"添加自动生成样本: {len(samples)} 个")
+
+    # ==================== 导入导出 ====================
+
     def save_to_file(self, file_path: Path):
-        """保存到文件"""
+        """保存到指定文件"""
         data = [s.to_dict() for s in self.samples]
         with open(file_path, 'w', encoding='utf-8') as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
-    
+
     @classmethod
     def load_from_file(cls, file_path: Path) -> "TestSampleManager":
         """从文件加载"""
@@ -182,15 +357,107 @@ class TestSampleManager:
             data = json.load(f)
         samples = [TestSample.from_dict(d) for d in data]
         return cls(samples)
-    
+
     def get_summary(self) -> Dict[str, Any]:
         """获取摘要信息"""
-        genre_count = {}
+        genre_count: Dict[str, int] = {}
+        source_count: Dict[str, int] = {}
         for sample in self.samples:
             genre_count[sample.genre] = genre_count.get(sample.genre, 0) + 1
-        
+            source_count[sample.source] = source_count.get(sample.source, 0) + 1
+
         return {
             "total_samples": len(self.samples),
             "genres": self.get_genres(),
-            "genre_distribution": genre_count
+            "genre_distribution": genre_count,
+            "source_distribution": source_count,
         }
+
+
+# ============================================================================
+# 自动生成器
+# ============================================================================
+
+# LLM 生成提示模板（按题材）
+_GENRE_GENERATION_PROMPTS: Dict[str, str] = {
+    "玄幻": "请写一段200-350字的玄幻小说片段，包含修炼、法宝、妖兽等元素。要有具体的场景描写和人物动作，不要使用对话格式。",
+    "都市": "请写一段200-350字的都市小说片段，包含职场、生活、城市场景。要有细腻的心理描写和日常细节，不要使用对话格式。",
+    "言情": "请写一段200-350字的言情小说片段，描写人物间的情感互动或内心独白。要有氛围描写和细腻的情感表达，不要使用对话格式。",
+    "悬疑": "请写一段200-350字的悬疑小说片段，包含线索发现、推理思考或紧张氛围。要有环境描写和心理活动，不要使用对话格式。",
+    "科幻": "请写一段200-350字的科幻小说片段，包含未来科技、太空或AI等元素。要有想象力和科技感的细节描写，不要使用对话格式。",
+    "历史": "请写一段200-350字的历史小说片段，包含古代场景、人物和时代氛围。要有时代特征的细节和人物心理，不要使用对话格式。",
+    "武侠": "请写一段200-350字的武侠小说片段，包含江湖、武功、侠义等元素。要有动作描写和江湖氛围，不要使用对话格式。",
+}
+
+
+async def generate_samples_via_llm(
+    genres: Optional[List[str]] = None,
+    count_per_genre: int = 2,
+) -> List[TestSample]:
+    """
+    使用 LLM 自动生成测试样本
+
+    Args:
+        genres: 要生成的题材列表（None=全部7种）
+        count_per_genre: 每种题材生成的样本数
+
+    Returns:
+        生成的 TestSample 列表
+    """
+    from core.unified_llm_client import get_llm_client
+
+    llm = get_llm_client()
+    target_genres = genres or list(_GENRE_GENERATION_PROMPTS.keys())
+    generated: List[TestSample] = []
+    now = datetime.now().isoformat()
+
+    for genre in target_genres:
+        prompt = _GENRE_GENERATION_PROMPTS.get(genre)
+        if not prompt:
+            continue
+
+        for i in range(count_per_genre):
+            try:
+                messages = [
+                    {"role": "system", "content": "你是一位网络小说作家，擅长各种题材的创作。请直接输出小说正文内容，不要加标题、解释或格式标记。"},
+                    {"role": "user", "content": prompt},
+                ]
+                result = await llm.chat(
+                    messages=messages,
+                    temperature=0.95,  # 高温度增加多样性
+                    use_cache=False,
+                )
+
+                if result and len(result.strip()) >= 100:
+                    sample_id = f"auto_{genre}_{uuid.uuid4().hex[:8]}"
+                    generated.append(TestSample(
+                        sample_id=sample_id,
+                        text=result.strip(),
+                        genre=genre,
+                        description=f"自动生成 - {genre}小说片段",
+                        source=SampleSource.AUTO,
+                        created_at=now,
+                    ))
+                    logger.info(f"自动生成样本: {sample_id} ({genre}, {len(result.strip())}字)")
+                else:
+                    logger.warning(f"自动生成样本过短或为空: {genre} #{i+1}")
+            except Exception as e:
+                logger.error(f"自动生成样本失败: {genre} #{i+1}: {e}")
+
+    logger.info(f"自动生成完成: {len(generated)}/{len(target_genres) * count_per_genre} 个样本")
+    return generated
+
+
+# ============================================================================
+# 全局单例
+# ============================================================================
+
+_manager: Optional[TestSampleManager] = None
+
+
+def get_sample_manager() -> TestSampleManager:
+    """获取测试样本管理器单例"""
+    global _manager
+    if _manager is None:
+        _manager = TestSampleManager()
+    return _manager

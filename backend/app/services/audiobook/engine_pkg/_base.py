@@ -22,6 +22,7 @@ from ..task_tracker import TaskTracker
 from ..tts_delivery_plan import build_delivery_plan, resolve_segment_tts_model
 from ..tts_style_control import build_model_style_control, build_provider_prompt_snapshot
 from ..chapter_cadence import apply_chapter_cadence
+from ..project_audio_config import get_audio_engine_mode, get_seed_audio_model
 from app.services.chapter_adaptation_assets import build_audio_adaptation_hint
 from core.unified_media_runtime import create_tts_engine
 
@@ -108,6 +109,9 @@ class AudiobookEngineBase:
         self._last_music_timeline: Optional[Dict[str, Any]] = None
         # 项目级音效/BGM 配置（来自 Project.audio_config.audio_fx）
         self._audio_fx_config: Optional[Dict[str, Any]] = None
+        self._audio_engine_mode = "legacy_stems"
+        self._seed_audio_model = get_seed_audio_model({})
+        self._scene_voice_mapping: Dict[str, Dict[str, Any]] = {}
         self._narration_style_id: Optional[str] = None
         self._narration_style_prompt: Optional[str] = None
         
@@ -147,6 +151,32 @@ class AudiobookEngineBase:
             logger.info(f"🎚 已应用项目级音效/BGM 配置: {self._audio_fx_config}")
         except Exception as e:
             logger.warning(f"⚠️ 设置音效/BGM 配置失败: {e}")
+
+    def apply_scene_audio_runtime_config(
+        self,
+        *,
+        audio_engine_mode: str,
+        seed_audio_model: str,
+        voice_mapping: Dict[str, Any],
+    ) -> None:
+        """保存场景引擎运行配置，供两个章节入口共用。"""
+        self._audio_engine_mode = get_audio_engine_mode(
+            {"audio_engine_mode": audio_engine_mode}
+        )
+        self._seed_audio_model = get_seed_audio_model(
+            {"seed_audio_model": seed_audio_model}
+        )
+        script_adapter = getattr(self, "script_adapter", None)
+        if script_adapter is not None:
+            script_adapter.audio_engine_mode = self._audio_engine_mode
+        quality_reviewer = getattr(self, "audio_quality_reviewer", None)
+        if quality_reviewer is not None:
+            quality_reviewer.audio_engine_mode = self._audio_engine_mode
+        self._scene_voice_mapping = {
+            str(name): dict(config)
+            for name, config in (voice_mapping or {}).items()
+            if name is not None and isinstance(config, dict)
+        }
 
     def apply_narration_style_config(
         self,

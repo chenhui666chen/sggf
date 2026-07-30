@@ -61,6 +61,7 @@ MULTI_MODEL_REVIEW_ALLOWED_MODELS = {
 MODEL_REVIEW_PROMPT_BUDGETS = {
     "doubao-seed-character": "DOUBAO_REVIEW_PROMPT_BUDGET",
 }
+CHAPTER_PLAN_PROMPT_BUDGET_SETTING = "MULTI_MODEL_REVIEW_CHAPTER_PLAN_PROMPT_BUDGET"
 
 MODEL_REVIEW_GOVERNANCE: dict[str, dict[str, Any]] = {
     "qwen3.7-plus": {"provider": "alibaba", "reasoning": False},
@@ -140,6 +141,7 @@ class MultiModelReviewService:
         )
         self.concurrency = concurrency or getattr(settings, "MULTI_MODEL_REVIEW_CONCURRENCY", 5)
         self.timeout = getattr(settings, "MULTI_MODEL_REVIEW_TIMEOUT_SECONDS", 120)
+        self.chief_timeout = getattr(settings, "MULTI_MODEL_REVIEW_CHIEF_TIMEOUT_SECONDS", 120)
 
     async def review(
         self,
@@ -150,7 +152,7 @@ class MultiModelReviewService:
         start_time = time.perf_counter()
         semaphore = asyncio.Semaphore(self.concurrency)
         review_inputs = [
-            self._build_reviewer_input(reviewer, chapter_draft)
+            self._build_reviewer_input(reviewer, chapter_draft, chapter_plan=chapter_plan)
             for reviewer in self.reviewers
         ]
         tasks = []
@@ -210,12 +212,37 @@ class MultiModelReviewService:
                 "fallback_reason": f"多模型评审成功数 {success_count} < 2",
             }
 
-        final_report = await self._summarize(per_model_reports, chapter_draft, genre)
+        try:
+            chief_result = await asyncio.wait_for(
+                self._summarize(per_model_reports, chapter_draft, genre),
+                timeout=self.chief_timeout,
+            )
+        except asyncio.TimeoutError:
+            return self._chief_fallback_result(
+                per_model_reports,
+                start_time=start_time,
+                reason="主审汇总超时",
+                metric_reason="chief_timeout",
+            )
+        except Exception as exc:
+            logger.warning("主审汇总失败: %s", exc)
+            return self._chief_fallback_result(
+                per_model_reports,
+                start_time=start_time,
+                reason=f"主审汇总失败：{exc}",
+                metric_reason="chief_failed",
+            )
+
+        final_report = str(chief_result.get("report") or "")
+        chief_cost = self._extract_metadata_cost(chief_result)
+        chief_usage_metadata = self._extract_usage_metadata(chief_result)
         self._record_metrics(
             result="success",
             latency_seconds=time.perf_counter() - start_time,
             per_model_reports=per_model_reports,
+            chief_cost=chief_cost,
         )
+        reviewer_cost = sum(self._extract_report_cost(report) for report in per_model_reports)
         return {
             "review": final_report,
             "multi_model": True,
@@ -225,6 +252,33 @@ class MultiModelReviewService:
             "reviewer_profiles": [reviewer["profile"] for reviewer in self.reviewers],
             "chief_model": self.chief_model,
             "chief_model_reused_as_reviewer": self.chief_model_reused_as_reviewer,
+            "chief_cost": chief_cost,
+            "chief_usage_metadata": chief_usage_metadata,
+            "total_cost": reviewer_cost + chief_cost,
+            "preset": self.preset,
+        }
+
+    def _chief_fallback_result(
+        self,
+        per_model_reports: list[dict[str, Any]],
+        *,
+        start_time: float,
+        reason: str,
+        metric_reason: str,
+    ) -> dict[str, Any]:
+        self._record_metrics(
+            result="fallback",
+            latency_seconds=time.perf_counter() - start_time,
+            per_model_reports=per_model_reports,
+            fallback_reason=metric_reason,
+        )
+        return {
+            "review": "",
+            "multi_model": False,
+            "fallback_required": True,
+            "per_model_reports": per_model_reports,
+            "fallback_reason": reason,
+            "chief_model": self.chief_model,
             "preset": self.preset,
         }
 
@@ -340,6 +394,8 @@ class MultiModelReviewService:
         self,
         reviewer: dict[str, str],
         chapter_draft: str,
+        *,
+        chapter_plan: str = "",
     ) -> tuple[dict[str, str], str, str, bool]:
         model_id = reviewer["model"]
         prompt_budget = self._get_prompt_budget(model_id)
@@ -353,7 +409,20 @@ class MultiModelReviewService:
         system_prompt, user_prompt = build_first_chapter_review_prompts(
             chapter_draft=clipped_draft,
         )
+        if chapter_plan.strip():
+            clipped_plan = self._clip_chapter_plan(chapter_plan.strip())
+            user_prompt = f"{user_prompt}\n\n【本章规划与目标】\n{clipped_plan}"
         return reviewer, system_prompt, user_prompt, input_was_clipped
+
+    @staticmethod
+    def _clip_chapter_plan(chapter_plan: str) -> str:
+        max_tokens = int(getattr(settings, CHAPTER_PLAN_PROMPT_BUDGET_SETTING, 12000))
+        max_chars = max(1, int(max_tokens * 1.5))
+        if len(chapter_plan) <= max_chars:
+            return chapter_plan
+        head_length = int(max_chars * 0.8)
+        tail_length = max_chars - head_length
+        return f"{chapter_plan[:head_length]}\n\n[章节规划已裁剪]\n\n{chapter_plan[-tail_length:]}"
 
     @staticmethod
     def _get_prompt_budget(model_id: str) -> int:
@@ -370,6 +439,9 @@ class MultiModelReviewService:
         preset: str,
         chief_model: str,
     ) -> None:
+        if chief_model not in MULTI_MODEL_REVIEW_ALLOWED_MODELS:
+            raise ValueError(f"主审模型 {chief_model} 不在多模型评审白名单")
+
         for reviewer in reviewers:
             model_id = reviewer.get("model") or ""
             profile = reviewer.get("profile") or ""
@@ -412,6 +484,7 @@ class MultiModelReviewService:
         latency_seconds: float,
         per_model_reports: list[dict[str, Any]],
         fallback_reason: Optional[str] = None,
+        chief_cost: float = 0.0,
     ) -> None:
         labels = {"preset": self.preset, "result": result}
         metrics_collector.increment_counter(
@@ -426,13 +499,13 @@ class MultiModelReviewService:
             category=MetricCategory.PERFORMANCE,
         )
 
-        token_cost = sum(
+        monetary_cost = sum(
             self._extract_report_cost(report)
             for report in per_model_reports
-        )
+        ) + max(0.0, chief_cost)
         metrics_collector.increment_counter(
-            "multi_model_review_token_cost_total",
-            value=token_cost,
+            "multi_model_review_cost_total",
+            value=monetary_cost,
             labels={"preset": self.preset},
             category=MetricCategory.BUSINESS,
         )
@@ -512,7 +585,7 @@ class MultiModelReviewService:
         per_model_reports: list[dict[str, Any]],
         chapter_draft: str,
         genre: str,
-    ) -> str:
+    ) -> dict[str, Any]:
         from app.services.prompts.manager import prompt_manager
 
         base_prompt = prompt_manager.get_agent_prompt("final_reviewer").strip()
@@ -557,7 +630,12 @@ class MultiModelReviewService:
                 HumanMessage(content=summarize_user_prompt),
             ]
         )
-        return response.content if hasattr(response, "content") else str(response)
+        metadata = self._extract_response_metadata(response)
+        return {
+            "report": response.content if hasattr(response, "content") else str(response),
+            "cost": self._extract_metadata_cost(metadata),
+            "usage_metadata": self._extract_usage_metadata(metadata),
+        }
 
     @staticmethod
     def _build_summarize_instruction() -> str:

@@ -451,6 +451,14 @@ def test_minimax_http_payload_clamps_voice_settings_and_keeps_audio_contract() -
     }
 
 
+def test_minimax_custom_voice_does_not_fallback_to_an_unrelated_system_voice() -> None:
+    engine = TTSEngine(model="minimax-speech-2.8-hd", enable_cache=False, request_delay=0)
+
+    candidates = engine._build_minimax_voice_candidates("mmx_0123456789abcdef")
+
+    assert candidates == ["mmx_0123456789abcdef"]
+
+
 def test_minimax_interjection_injection_does_not_spell_out_pause_notes() -> None:
     engine = TTSEngine(model="minimax-speech-2.8-hd", enable_cache=False, request_delay=0)
 
@@ -1181,6 +1189,88 @@ def test_seed_tts_synthesis_falls_back_to_http_when_websocket_returns_no_audio(m
 
     assert result == b"seed-http-audio"
     assert calls == ["websocket", "http"]
+
+
+def test_seed_tts_websocket_sends_finish_session_before_awaiting_session_finished(monkeypatch) -> None:
+    """按双向流协议时序，FinishSession 必须在收流前发送：服务端收到 FinishSession
+    后才会返回 SessionFinished。若等接收循环超时后才发，每段合成都会白等超时，
+    且超时后到达的尾部音频会被丢弃（尾音截断）。"""
+    scripts_dir = ROOT_DIR.parent / "scripts"
+    if str(scripts_dir) not in sys.path:
+        sys.path.insert(0, str(scripts_dir))
+    import protocols
+    import websockets
+
+    engine = TTSEngine(model=SEED_TTS_20_EXPRESSIVE_MODEL, enable_cache=False, request_delay=0)
+    monkeypatch.setenv("SEED_TTS_WS_RECEIVE_TIMEOUT", "0.5")
+
+    E = protocols.EventType
+    M = protocols.MsgType
+    F = protocols.MsgTypeFlagBits
+
+    class FakeSeedServer:
+        """模拟真实服务端：收到 FinishSession 前不发 SessionFinished，
+        且最后一块音频在 FinishSession 之后才推送。"""
+
+        def __init__(self) -> None:
+            self.response = SimpleNamespace(headers={})
+            self.events: list[int] = []
+            self._queue: asyncio.Queue = asyncio.Queue()
+
+        def _reply(self, msg) -> None:
+            self._queue.put_nowait(msg.marshal())
+
+        async def send(self, data) -> None:
+            msg = protocols.Message.from_bytes(data)
+            self.events.append(int(msg.event))
+            if msg.event == E.StartConnection:
+                self._reply(protocols.Message(type=M.FullServerResponse, flag=F.WithEvent, event=E.ConnectionStarted))
+            elif msg.event == E.StartSession:
+                self._reply(
+                    protocols.Message(
+                        type=M.FullServerResponse, flag=F.WithEvent, event=E.SessionStarted, session_id=msg.session_id
+                    )
+                )
+            elif msg.event == E.TaskRequest:
+                self._reply(protocols.Message(type=M.AudioOnlyServer, payload=b"seed-head"))
+            elif msg.event == E.FinishSession:
+                self._reply(protocols.Message(type=M.AudioOnlyServer, payload=b"-tail"))
+                self._reply(
+                    protocols.Message(
+                        type=M.FullServerResponse, flag=F.WithEvent, event=E.SessionFinished, session_id=msg.session_id
+                    )
+                )
+            elif msg.event == E.FinishConnection:
+                self._reply(protocols.Message(type=M.FullServerResponse, flag=F.WithEvent, event=E.ConnectionFinished))
+
+        async def recv(self):
+            return await self._queue.get()
+
+        async def close(self) -> None:
+            return None
+
+    fake_ws = FakeSeedServer()
+
+    async def fake_connect(*_args, **_kwargs):
+        return fake_ws
+
+    monkeypatch.setattr(websockets, "connect", fake_connect)
+
+    result = asyncio.run(
+        engine._call_seed_tts_websocket(
+            model=SEED_TTS_20_EXPRESSIVE_MODEL,
+            api_key="unit-seed-key",
+            text="她终于笑了。",
+            voice="zh_female_vv_uranus_bigtts",
+            voice_params={},
+            resource_id="seed-tts-2.0",
+        )
+    )
+
+    assert result == b"seed-head-tail", "FinishSession 后到达的尾部音频不应被丢弃"
+    finish_idx = fake_ws.events.index(int(E.FinishSession))
+    # FinishSession 应紧随 TaskRequest 发送，而不是等接收循环超时后才补发
+    assert fake_ws.events[finish_idx - 1] == int(E.TaskRequest)
 
 
 def test_seed_tts_parser_decodes_text_plain_json_lines() -> None:

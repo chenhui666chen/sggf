@@ -8,6 +8,16 @@ from typing import Dict, Any, Optional, List
 
 from app.services.audiobook.llm_client import call_audiobook_llm_async
 from app.services.audiobook.llm_json import parse_llm_json_object
+from app.services.audiobook.script_render_mode import (
+    build_script_analysis_engine_guidance,
+    normalize_script_audio_engine_mode,
+)
+from app.services.audiobook.tts_model_ids import (
+    COSYVOICE_V35_PLUS_MODEL_ID,
+    DEFAULT_AUDIOBOOK_TTS_MODEL,
+    SEED_TTS_20_EXPRESSIVE_MODEL,
+    normalize_audiobook_tts_model,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -38,20 +48,59 @@ class AnalysisMixin:
             }
         """
         
-        model_name = (getattr(self, "tts_model", None) or "qwen3-tts-instruct-flash").strip()
-        if "plus" in model_name:
+        model_name = (getattr(self, "tts_model", None) or DEFAULT_AUDIOBOOK_TTS_MODEL).strip()
+        normalized_model = normalize_audiobook_tts_model(model_name, default=model_name.lower())
+        audio_engine_mode = normalize_script_audio_engine_mode(
+            getattr(self, "audio_engine_mode", "legacy_stems")
+        )
+        engine_block = build_script_analysis_engine_guidance(audio_engine_mode)
+        if audio_engine_mode == "seed_scene":
+            tts_block = (
+                "**主生成模型：seed-audio-1.0（完整声音场景模式）**\n"
+                "- 负责在同一次生成中完成旁白、多人对白、非语言人声、环境、动作音效和配乐。\n"
+                f"- 当前选择的逐句 TTS 模型 {model_name} 仅用于试听参考音色和局部回退，不决定主场景剧本结构。\n"
+            )
+            instruct_block = (
+                "**Seed Audio 场景分析提示**\n"
+                "- 优先识别连续场景、声音事件相对时序、声学空间、音乐生命周期和角色表演变化。\n"
+                "- 角色声音描述与参考音频只定义声音身份；情绪、语气、音量、语速和停顿由当前剧情决定。\n"
+            )
+        elif normalized_model == COSYVOICE_V35_PLUS_MODEL_ID:
             tts_block = "**当前TTS模型：CosyVoice v3.5-plus（精品模式）**\n- 适合：精品章节 / 情绪层次丰富场景\n- 特性：精细情感控制、instruction 演绎能力强，但必须使用复刻/设计音色\n- 成本：相对更高，适合高光章节与关键桥段\n"
             instruct_block = (
                 "**Instruct 情绪提示（CosyVoice 专用）**\n"
                 "- cosyvoice-v3.5-plus 无系统音色，请默认假设上游已经选定复刻/设计 voice_id\n"
                 "- 请在 performance_notes 中写清角色身份、场景张力、目标语气（如【愤怒/紧张/平静】），便于后续注入 instruction\n"
             )
-        else:
-            tts_block = "**当前TTS模型：Qwen3-TTS Instruct Flash（默认模式）**\n- 适合：长篇连载 / 日更章节 / 需要低成本但仍要一定表现力的内容\n- 特性：49 音色、稳定性强、成本低，并支持通过 instructions / optimize_instructions 做自然语言演绎控制\n- 限制：当前链路重点是 instructions，不要输出 SSML 语法\n"
+        elif normalized_model == SEED_TTS_20_EXPRESSIVE_MODEL:
+            tts_block = (
+                "**当前TTS模型：Seed-TTS 2.0 Expressive（豆包情感模式）**\n"
+                "- 适合：需要连续情绪变化、口语感和微表演的中文旁白、对白与独白\n"
+                "- 特性：发送层使用 Query-Response 上下文控制，可表达情绪过程、韵律和微表演\n"
+                "- 约束：分析层只描述表演意图，不涉及供应商请求字段或标签语法\n"
+            )
+            instruct_block = (
+                "**Seed-TTS 2.0 分析提示**\n"
+                "- 请重点识别情绪变化过程（起始状态 → 转折触发 → 结束状态）、韵律节奏和微表演机会（笑声、哭腔、吸气、喘息等）。\n"
+                "- 角色声音特征分析要为后续 performance_notes 提供可执行的导演视角素材。\n"
+            )
+        elif normalized_model.startswith("qwen3-tts"):
+            tts_block = "**当前TTS模型：Qwen3-TTS Instruct Flash（默认模式）**\n- 适合：长篇连载 / 日更章节 / 需要低成本但仍要一定表现力的内容\n- 特性：49 音色、稳定性强、成本低，并支持通过自然语言 instructions 控制语气与演绎\n- 限制：当前链路重点是 instructions，不要输出 SSML 语法\n"
             instruct_block = (
                 "**Qwen3 Instruct 提示**\n"
                 "- 请把情绪、场景、身份、角色语气尽量结构化写到 instruct_emotion / instruct_scene / instruct_role / instruct_identity 中\n"
                 "- performance_notes 会一并映射到 Qwen instructions，请写成可直接执行的演绎要求\n"
+            )
+        else:
+            tts_block = (
+                f"**当前TTS模型：{normalized_model}**\n"
+                "- 使用模型无关的有声书剧本结构，具体供应商参数由发送层转换\n"
+                "- 分析时重点关注角色声音特征、情绪基调与表演机会\n"
+            )
+            instruct_block = (
+                "**通用表演分析提示**\n"
+                "- 用供应商中立的自然语言描述情绪、场景、身份与语气目标。\n"
+                "- performance_notes 素材应描述语速、音调、音量、重读、停顿和情绪变化。\n"
             )
 
         def _build_analysis_sample(text: str, max_len: int = 6000) -> str:
@@ -107,6 +156,8 @@ class AnalysisMixin:
 
 {instruct_block}
 
+{engine_block}
+
 {input_guard_block}
 
 {character_block}
@@ -118,7 +169,7 @@ class AnalysisMixin:
 **章节内容节选**（智能采样：开头+中段+结尾，最多6000字）：
 {sample_content}
 
-**分析目标**：基于当前TTS模型能力，挖掘文本中的情感细节和节奏变化，为后续"6步听觉化重构"和参数控制提供依据。
+**分析目标**：基于当前音频引擎和角色表演能力，挖掘文本中的情感细节和节奏变化，为后续听觉化重构和渲染计划提供依据。
 
 请以**纯净的JSON格式**输出分析结果（不要包含注释）：
 ```json
@@ -146,6 +197,7 @@ class AnalysisMixin:
                 self.llm_client,
                 messages=[{"role": "user", "content": prompt}],
                 max_tokens=max_tokens_value,
+                max_retries=2,
                 use_cache=False,
                 response_format={"type": "json_object"},
             )

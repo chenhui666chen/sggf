@@ -1313,6 +1313,9 @@ class CreativeDirectorCoordinator:
             "preset": multi_model_result.get("preset"),
             "chief_model": multi_model_result.get("chief_model"),
             "chief_model_reused_as_reviewer": bool(multi_model_result.get("chief_model_reused_as_reviewer")),
+            "chief_cost": float(multi_model_result.get("chief_cost") or 0.0),
+            "chief_usage_metadata": multi_model_result.get("chief_usage_metadata") or {},
+            "total_cost": float(multi_model_result.get("total_cost") or 0.0),
             "structured_summary": multi_model_result.get("structured_summary") or {},
             "reviewer_models": multi_model_result.get("reviewer_models") or [],
             "reviewer_profiles": multi_model_result.get("reviewer_profiles") or [],
@@ -1364,7 +1367,7 @@ class CreativeDirectorCoordinator:
                 )
                 multi_model_result = run_async_compat(
                     lambda: service.review(
-                        truncated_content,
+                        content,
                         genre=self._get_review_genre(),
                         chapter_plan=str(self.project_context.get("chapter_plan") or ""),
                     )

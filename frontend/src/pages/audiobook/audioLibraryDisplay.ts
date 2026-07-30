@@ -222,6 +222,14 @@ export const formatAudioAssetNameLabel = (name?: string | null) => {
       labels.push(part)
       continue
     }
+    if (hasChinese(part)) {
+      // 中英混合片段：提取中文部分展示，避免整段被丢弃后兜底“其他音效”
+      const chineseOnly = (part.match(/[\u4e00-\u9fff]+/g) || []).join('')
+      if (chineseOnly) {
+        labels.push(chineseOnly)
+        continue
+      }
+    }
     const translated = AUDIO_KEYWORD_LABELS[normalizeKeyword(part)]
     if (translated) labels.push(translated)
   }

@@ -131,6 +131,6 @@ Thumbs.db
 
 # Project specific
 logs/
+data/voice_cleanup_audits/
 *.db
 *.sqlite
-

@@ -47,8 +47,7 @@ describe('audiobook editor timeline session wiring', () => {
     }
 
     expect(editorActionsSource).toContain('setTimelineEdits({})')
-    expect(editorActionsSource).toContain('timelineEdits,')
-    expect(editorActionsSource).toContain('buildGenerateAudioFromScriptPayload({')
+    expect(editorActionsSource).not.toContain('buildGenerateAudioFromScriptPayload({')
     expect(editorDraftSource).toContain('setTimelineEdits(savedEditorSession.timelineEdits || {})')
     expect(editorDraftSource).toContain('setTimelineEdits(editorCrossTabConflict.timelineEdits || {})')
     expect(editorSyncSource).toContain('timelineEdits,')

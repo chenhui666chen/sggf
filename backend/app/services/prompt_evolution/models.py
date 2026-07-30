@@ -68,6 +68,7 @@ class EvaluationResult:
     # 🆕 多维评分
     original_multi_score: Optional[Dict[str, Any]] = None   # 原始文本多维评分
     rewritten_multi_score: Optional[Dict[str, Any]] = None  # 改写后多维评分
+    llm_review: Optional[Dict[str, Any]] = None              # 独立大模型语义质量评审
     evaluated_at: str = field(default_factory=lambda: datetime.now().isoformat())
 
 
@@ -91,6 +92,9 @@ class PromptVersion:
     # 🆕 题材定制化
     genre: Optional[str] = None                     # 题材标签（玄幻/都市/言情/悬疑等）
     genre_optimized: bool = False                   # 是否针对特定题材优化
+    # 🆕 多模型评估结果
+    best_model_id: Optional[str] = None             # 多模型评测中表现最佳的模型ID
+    multi_model_scores: Optional[Dict[str, float]] = None  # 各模型AI分数 {model_id: score}
     
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典"""
@@ -116,6 +120,9 @@ class PromptVersion:
                     "original_metrics": r.original_metrics,
                     "rewritten_metrics": r.rewritten_metrics,
                     "metrics_comparison": r.metrics_comparison,
+                    "original_multi_score": r.original_multi_score,
+                    "rewritten_multi_score": r.rewritten_multi_score,
+                    "llm_review": r.llm_review,
                     "evaluated_at": r.evaluated_at
                 }
                 for r in self.evaluation_results
@@ -131,7 +138,10 @@ class PromptVersion:
             "avg_writing": self.avg_writing,
             # 🆕 题材标签
             "genre": self.genre,
-            "genre_optimized": self.genre_optimized
+            "genre_optimized": self.genre_optimized,
+            # 🆕 多模型评估结果
+            "best_model_id": self.best_model_id,
+            "multi_model_scores": self.multi_model_scores,
         }
 
     @classmethod
@@ -154,6 +164,9 @@ class PromptVersion:
                 original_metrics=r.get("original_metrics"),
                 rewritten_metrics=r.get("rewritten_metrics"),
                 metrics_comparison=r.get("metrics_comparison"),
+                original_multi_score=r.get("original_multi_score"),
+                rewritten_multi_score=r.get("rewritten_multi_score"),
+                llm_review=r.get("llm_review"),
                 evaluated_at=r.get("evaluated_at", "")
             )
             for r in data.get("evaluation_results", [])
@@ -185,7 +198,10 @@ class PromptVersion:
             avg_writing=data.get("avg_writing", 50.0),
             # 🆕 题材标签
             genre=data.get("genre"),
-            genre_optimized=data.get("genre_optimized", False)
+            genre_optimized=data.get("genre_optimized", False),
+            # 🆕 多模型评估结果
+            best_model_id=data.get("best_model_id"),
+            multi_model_scores=data.get("multi_model_scores"),
         )
 
 
@@ -204,6 +220,7 @@ class EvolutionHistory:
     started_at: str = field(default_factory=lambda: datetime.now().isoformat())
     completed_at: Optional[str] = None
     error_message: Optional[str] = None
+    genre: Optional[str] = None                         # 本次进化固定题材
 
 
 @dataclass
@@ -244,6 +261,10 @@ class EvolutionConfig:
     genre: Optional[str] = None           # 目标题材（玄幻/都市/言情/悬疑等）
     genre_weight_config: Optional[Dict[str, float]] = None  # 题材权重配置 {"ai_score": 0.4, "readability": 0.3, "writing": 0.2, "fidelity": 0.1}
     
+    # 🆕 多模型评估配置
+    multi_model_eval_interval: int = 3    # 多模型评估间隔（每N轮触发一次，0=仅结束时）
+    multi_model_eval_at_end: bool = True  # 进化结束时是否强制触发全模型评测
+
     # 🆕 审核通过标准（四项都需通过，但权重可调整）
     ai_score_threshold: float = 30.0      # AI分数阈值（≤此值通过）
     readability_threshold: float = 70.0   # 可读性阈值（≤此值通过）

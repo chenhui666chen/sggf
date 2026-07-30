@@ -29,11 +29,19 @@ from app.services.audiobook.background_jobs_shared import (
     apply_chapter_audio_generation_result,
     generate_and_apply_subtitle_artifacts,
     mark_chapter_generation_failed,
+    parse_estimated_cost,
     prepare_chapter_generation_output_context,
     release_audiobook_project_billing,
     settle_audiobook_project_billing,
 )
 from app.services.audiobook.task_support import build_generation_checkpoint_payload
+
+
+def test_parse_estimated_cost_accepts_supported_currency_symbols():
+    assert parse_estimated_cost("¥2.08") == 2.08
+    assert parse_estimated_cost("￥2.08") == 2.08
+    assert parse_estimated_cost("$2.08") == 2.08
+    assert parse_estimated_cost("not-a-cost") is None
 
 
 def build_session_factory():
@@ -262,6 +270,60 @@ def test_prepare_chapter_generation_output_context_uses_run_checkpoint_and_persi
         assert run.checkpoint_json["cached_audio_paths"]["2"] == "tmp/segment_2.wav"
 
 
+def test_tts_progress_callback_merges_incremental_scene_checkpoints():
+    session_factory = build_session_factory()
+
+    with session_factory() as db:
+        context = seed_runtime_context(db)
+        run = ChapterAudioRun(
+            audiobook_project_id=context["audiobook_project"].id,
+            chapter_id=context["chapter"].id,
+            run_type="full",
+            celery_task_id="celery-scene-1",
+            status="running",
+            current_stage="tts_synthesis",
+            progress=0.0,
+            checkpoint_json={},
+        )
+        db.add(run)
+        db.commit()
+
+        output_context = prepare_chapter_generation_output_context(
+            db,
+            engine=FakeNarrationStyleEngine(),
+            audiobook_project=context["audiobook_project"],
+            chapter_id=context["chapter"].id,
+            chapter_number=context["chapter"].chapter_number,
+            run_type="full",
+        )
+
+        output_context.tts_progress_callback(
+            {
+                "task_id": "engine-scene-1",
+                "total_segments": 4,
+                "scene_checkpoints": {
+                    "scene_0001": {"status": "passed", "audio_path": "scene-1.wav"},
+                },
+            }
+        )
+        output_context.tts_progress_callback(
+            {
+                "task_id": "engine-scene-1",
+                "total_segments": 4,
+                "scene_checkpoints": {
+                    "scene_0002": {"status": "passed", "audio_path": "scene-2.wav"},
+                },
+            }
+        )
+        db.refresh(run)
+
+        assert run.current_stage == "scene_rendering"
+        assert run.checkpoint_json["scene_checkpoints"] == {
+            "scene_0001": {"status": "passed", "audio_path": "scene-1.wav"},
+            "scene_0002": {"status": "passed", "audio_path": "scene-2.wav"},
+        }
+
+
 def test_generate_and_apply_subtitle_artifacts_updates_chapter_audio(tmp_path):
     session_factory = build_session_factory()
 
@@ -354,6 +416,32 @@ def test_apply_chapter_audio_generation_result_updates_shared_metadata():
         assert chapter_audio.generation_time == 3.5
         assert chapter_audio.tts_cost == 0.12
         assert json.loads(chapter_audio.final_audio_review_json) == {"score": 0.91}
+
+
+def test_apply_chapter_audio_generation_result_prefers_structured_cost_yuan():
+    session_factory = build_session_factory()
+
+    with session_factory() as db:
+        context = seed_runtime_context(db)
+        chapter_audio = context["chapter_audio"]
+
+        apply_chapter_audio_generation_result(
+            chapter_audio=chapter_audio,
+            result={
+                "duration": 1.0,
+                "file_size": 128,
+                "stats": {
+                    "parse_stats": {},
+                    "tts_stats": {
+                        "estimated_cost_yuan": 0.123456,
+                        "estimated_cost": "¥0.12",
+                    },
+                },
+            },
+            output_path="audiobooks/project_1/chapter_001.wav",
+        )
+
+        assert chapter_audio.tts_cost == 0.123456
 
 
 def test_apply_chapter_audio_generation_result_can_preserve_existing_counts():

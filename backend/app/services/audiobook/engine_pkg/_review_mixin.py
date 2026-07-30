@@ -43,6 +43,7 @@ class ReviewMixin:
         audio_data: Optional[bytes] = None,
         script_segments: Optional[List[Any]] = None,
         audio_list: Optional[List[Any]] = None,
+        audio_presence: Optional[List[bool]] = None,
     ) -> Dict[str, Any]:
         """对最终混合后的音频做一次轻量评审。
 
@@ -119,6 +120,7 @@ class ReviewMixin:
             "prompt_audio_quality": self._build_prompt_audio_quality_feedback(
                 script_segments,
                 audio_list,
+                audio_presence,
             ),
             "warnings": warnings,
             "summary": summary,
@@ -131,6 +133,7 @@ class ReviewMixin:
         self,
         script_segments: Optional[List[Any]],
         audio_list: Optional[List[Any]],
+        audio_presence: Optional[List[bool]] = None,
     ) -> Dict[str, Any]:
         if not script_segments:
             return {"available": False, "reason": "missing_script_segments"}
@@ -169,7 +172,14 @@ class ReviewMixin:
             )
             model_feedback["segments_count"] += 1
 
-            has_audio = bool(index < len(audio_list or []) and (audio_list or [])[index])
+            if audio_presence is not None:
+                has_audio = bool(
+                    index < len(audio_presence) and audio_presence[index]
+                )
+            else:
+                has_audio = bool(
+                    index < len(audio_list or []) and (audio_list or [])[index]
+                )
             if has_audio:
                 audio_segments_count += 1
                 model_feedback["audio_segments_count"] += 1

@@ -661,7 +661,10 @@ export default function DashboardPage() {
         const errorData = response.data
         logger.error('❌ 创建生成任务失败:', errorData)
 
-        setSnackbarMessage(errorData?.detail || errorData?.error || '创建生成任务失败，请重试')
+        // 🆕 detail 可能是字符串（404/409/503）或对象（429 免费额度）
+        const detail = errorData?.detail
+        const detailMessage = typeof detail === 'string' ? detail : detail?.message
+        setSnackbarMessage(detailMessage || errorData?.error || '创建生成任务失败，请重试')
         setSnackbarSeverity('error')
         setSnackbarOpen(true)
         // 🔧 只在失败时重置状态
@@ -688,11 +691,13 @@ export default function DashboardPage() {
     try {
       const response = await apiClient.getChapter(chapter.id)
       const data = response.data
+      const project = projects.find((item) => item.id === selectedProjectId)
       localStorage.setItem('zhiwen_import_content', JSON.stringify({
         fromProjectId: selectedProjectId,
         chapterId: chapter.id,
         title: data.title,
         content: data.content,
+        genre: project?.genre || null,
       }))
       
       setSnackbarMessage('✨ 章节内容已准备，正在跳转到织文无迹...')

@@ -107,6 +107,11 @@ class ReorderUnderParentRequest(BaseModel):
     ordered_ids: List[int]
 
 
+class AutoMergeRequest(BaseModel):
+    chapter_plan: str = ""
+    chapter_content: str = ""
+
+
 class GraphEdgeCreate(BaseModel):
     source_item_id: int
     target_item_id: int

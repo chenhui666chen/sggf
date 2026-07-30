@@ -4,6 +4,7 @@ import type { TaskPointsPrecheckErrorDetail } from '../../services/api'
 import type { SetSnackbar } from './hookTypes'
 import { loadAudiobookProjectSelectionData } from './projectSelectionLoader'
 import type {
+  AudioEngineMode,
   AudioFxConfig,
   AudiobookProjectDetail,
   Chapter,
@@ -33,6 +34,7 @@ interface UseAudiobookProjectSelectionActionsParams {
   setChapters: Dispatch<SetStateAction<Chapter[]>>
   setSelectedChapters: Dispatch<SetStateAction<number[]>>
   setAudioFxConfig: Dispatch<SetStateAction<AudioFxConfig>>
+  setAudioEngineMode: Dispatch<SetStateAction<AudioEngineMode>>
   setActiveStep: Dispatch<SetStateAction<number>>
   setSnackbar: SetSnackbar
 }
@@ -50,6 +52,7 @@ export const useAudiobookProjectSelectionActions = ({
   setChapters,
   setSelectedChapters,
   setAudioFxConfig,
+  setAudioEngineMode,
   setActiveStep,
   setSnackbar,
 }: UseAudiobookProjectSelectionActionsParams) => {
@@ -81,6 +84,7 @@ export const useAudiobookProjectSelectionActions = ({
       setSelectedChapters(projectSelectionData.selectedChapterIds)
       setCharacterVoicesForCurrentModel(projectSelectionData.characterVoices)
       setAudioFxConfig(projectSelectionData.audioFxConfig)
+      setAudioEngineMode(projectSelectionData.audioEngineMode)
 
       if (!options?.skipStepReset) {
         setActiveStep(0)
@@ -96,6 +100,7 @@ export const useAudiobookProjectSelectionActions = ({
     resetChapterDeleteState,
     setActiveStep,
     setAudioFxConfig,
+    setAudioEngineMode,
     setAudiobookProject,
     setCharacterVoicesForCurrentModel,
     setChapters,

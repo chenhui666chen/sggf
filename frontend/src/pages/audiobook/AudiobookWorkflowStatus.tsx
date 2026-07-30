@@ -10,13 +10,14 @@ import type { TaskPointsPrecheckErrorDetail } from '../../services/api'
 import ActiveProjectTasksAlert from './ActiveProjectTasksAlert'
 import ResumableChaptersAlert from './ResumableChaptersAlert'
 import type { TaskStatus } from './types'
+import type { AudioEngineMode } from './types'
 import type { ResumableChapterEntry } from './useAudiobookResumeCheckpoints'
 import { audiobookColors } from './audiobookTheme'
 
-const steps = ['配置音色', '生成有声书', '完成']
-
 interface AudiobookWorkflowStatusProps {
   activeStep: number
+  lastGenerationMode: 'full' | 'script_only'
+  audioEngineMode: AudioEngineMode
   taskPointsPrecheckError: TaskPointsPrecheckErrorDetail | null
   activeProjectTasks: TaskStatus[]
   generating: boolean
@@ -31,6 +32,8 @@ interface AudiobookWorkflowStatusProps {
 
 const AudiobookWorkflowStatus = ({
   activeStep,
+  lastGenerationMode,
+  audioEngineMode,
   taskPointsPrecheckError,
   activeProjectTasks,
   generating,
@@ -41,8 +44,15 @@ const AudiobookWorkflowStatus = ({
   onCloseTaskPointsPrecheck,
   onFocusActiveTask,
   onResumeChapterGeneration,
-}: AudiobookWorkflowStatusProps) => (
-  <>
+}: AudiobookWorkflowStatusProps) => {
+  const steps = lastGenerationMode === 'script_only'
+    ? ['章节与声音', '生成场景剧本', '审阅场景剧本']
+    : audioEngineMode === 'seed_scene'
+      ? ['剧本已批准', '生成场景音频', '音频完成']
+      : ['剧本已批准', '生成分轨音频', '音频完成']
+
+  return (
+    <>
     <Paper sx={{ p: 3, mb: 3, backgroundColor: audiobookColors.surfacePaper }}>
       <Stepper activeStep={activeStep}>
         {steps.map((label) => (
@@ -80,7 +90,8 @@ const AudiobookWorkflowStatus = ({
         onResumeChapterGeneration={onResumeChapterGeneration}
       />
     )}
-  </>
-)
+    </>
+  )
+}
 
 export default AudiobookWorkflowStatus

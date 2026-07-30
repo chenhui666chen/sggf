@@ -21,6 +21,7 @@ from app.services.audiobook.temp_segment_store import (
     extract_cached_segment_paths,
     load_cached_segment_audio,
 )
+from app.services.audiobook.tts_cost_utils import extract_tts_cost_yuan
 
 try:
     from ..agent_dispatch_client import client as tts_dispatch_client
@@ -32,6 +33,147 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 QWEN_RENDER_CHUNK_MAX_CHARS = 360
+
+
+def aggregate_tts_cost_stats(
+    primary_engine: Any,
+    engines_by_model: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    engines = [primary_engine]
+    engines.extend((engines_by_model or {}).values())
+    by_model: Dict[str, Dict[str, Any]] = {}
+
+    for engine in engines:
+        get_stats = getattr(engine, "get_cost_stats", None)
+        if not callable(get_stats):
+            continue
+        stats = dict(get_stats() or {})
+        model = normalize_audiobook_tts_model(
+            getattr(engine, "model", None),
+            default=str(getattr(engine, "model", None) or "unknown"),
+        )
+        stats["estimated_cost_yuan"] = round(extract_tts_cost_yuan(stats), 6)
+        by_model[model] = stats
+
+    integer_fields = (
+        "total_characters",
+        "total_segments",
+        "cache_hits",
+        "api_calls",
+        "failed_segments",
+        "failed_characters",
+    )
+    aggregated = {
+        field: sum(int(stats.get(field) or 0) for stats in by_model.values())
+        for field in integer_fields
+    }
+    total_cost = round(
+        sum(float(stats.get("estimated_cost_yuan") or 0.0) for stats in by_model.values()),
+        6,
+    )
+    total_segments = aggregated["total_segments"]
+    cache_rate = (
+        aggregated["cache_hits"] / total_segments * 100
+        if total_segments > 0
+        else 0.0
+    )
+    aggregated.update(
+        {
+            "cache_hit_rate": f"{cache_rate:.1f}%",
+            "api_calls_scope": "usable_audio_outputs_only",
+            "estimated_cost": f"¥{total_cost:.2f}",
+            "estimated_cost_yuan": total_cost,
+            "estimated_cost_scope": "usable_audio_estimate",
+            "provider_billing_note": (
+                "estimated_cost/api_calls only count usable audio outputs; "
+                "the provider may still bill failed, empty, or retried requests."
+            ),
+            "by_model": by_model,
+        }
+    )
+    return aggregated
+
+
+def subtract_tts_cost_stats(
+    current: Dict[str, Any],
+    baseline: Dict[str, Any],
+) -> Dict[str, Any]:
+    integer_fields = (
+        "total_characters",
+        "total_segments",
+        "cache_hits",
+        "api_calls",
+        "failed_segments",
+        "failed_characters",
+    )
+    current_by_model = dict(current.get("by_model") or {})
+    baseline_by_model = dict(baseline.get("by_model") or {})
+    chapter_by_model: Dict[str, Dict[str, Any]] = {}
+
+    for model, current_stats_value in current_by_model.items():
+        current_stats = dict(current_stats_value or {})
+        baseline_stats = dict(baseline_by_model.get(model) or {})
+        model_stats = {
+            field: max(
+                int(current_stats.get(field) or 0)
+                - int(baseline_stats.get(field) or 0),
+                0,
+            )
+            for field in integer_fields
+        }
+        model_cost = max(
+            extract_tts_cost_yuan(current_stats)
+            - extract_tts_cost_yuan(baseline_stats),
+            0.0,
+        )
+        if not any(model_stats.values()) and model_cost <= 0:
+            continue
+        model_stats.update(
+            {
+                "cache_hit_rate": (
+                    f"{model_stats['cache_hits'] / model_stats['total_segments'] * 100:.1f}%"
+                    if model_stats["total_segments"] > 0
+                    else "0.0%"
+                ),
+                "api_calls_scope": "usable_audio_outputs_only",
+                "estimated_cost_yuan": round(model_cost, 6),
+                "estimated_cost": f"¥{model_cost:.2f}",
+                "estimated_cost_scope": "usable_audio_estimate",
+            }
+        )
+        chapter_by_model[str(model)] = model_stats
+
+    chapter = {
+        field: sum(int(stats.get(field) or 0) for stats in chapter_by_model.values())
+        for field in integer_fields
+    }
+    total_cost = round(
+        sum(extract_tts_cost_yuan(stats) for stats in chapter_by_model.values()),
+        6,
+    )
+    chapter.update(
+        {
+            "cache_hit_rate": (
+                f"{chapter['cache_hits'] / chapter['total_segments'] * 100:.1f}%"
+                if chapter["total_segments"] > 0
+                else "0.0%"
+            ),
+            "api_calls_scope": "usable_audio_outputs_only",
+            "estimated_cost_yuan": total_cost,
+            "estimated_cost": f"¥{total_cost:.2f}",
+            "estimated_cost_scope": "usable_audio_estimate",
+            "provider_billing_note": current.get("provider_billing_note"),
+            "by_model": chapter_by_model,
+        }
+    )
+    return chapter
+
+
+def collect_tts_cost_stats(owner: Any) -> Dict[str, Any]:
+    return aggregate_tts_cost_stats(
+        getattr(owner, "tts_engine", None),
+        getattr(owner, "_tts_engines_by_model", None),
+    )
 
 
 def _is_qwen_tts_model(model: Any) -> bool:
@@ -150,6 +292,18 @@ def _mark_temp_asset_saved_segment_statuses(
 
 
 class TTSMixin:
+    def _aggregate_tts_cost_stats(self) -> Dict[str, Any]:
+        return collect_tts_cost_stats(self)
+
+    def _chapter_tts_cost_stats(
+        self,
+        baseline: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        return subtract_tts_cost_stats(
+            collect_tts_cost_stats(self),
+            baseline,
+        )
+
     def _get_tts_engine_for_segment_model(self, model: Optional[str]):
         normalized_model = normalize_audiobook_tts_model(
             model or getattr(self, "tts_model", None) or DEFAULT_AUDIOBOOK_TTS_MODEL

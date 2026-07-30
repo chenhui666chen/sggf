@@ -34,8 +34,32 @@ from app.services.prompts.workflow_runtime import (
 from app.services.auto_system_detector import auto_create_system_collections
 from app.services.agents import review_feature_gate
 from app.services.agents.multi_model_review_service import MultiModelReviewService
+from app.services.generation_lock import (
+    LockHandle,
+    LockServiceUnavailableError,
+    get_generation_lock_service,
+)
+from app.services.free_quota import (
+    QuotaServiceUnavailableError,
+    get_free_quota_service,
+)
 
 logger = logging.getLogger(__name__)
+
+
+async def _keep_generation_lock_alive(
+    lock_handle: Optional[LockHandle],
+    *,
+    interval_seconds: int = 300,
+) -> None:
+    """Renew the project lock until cancelled by the owning generation task."""
+    if lock_handle is None:
+        return
+    lock_service = get_generation_lock_service()
+    while True:
+        await asyncio.sleep(interval_seconds)
+        if not await lock_service.renew(lock_handle):
+            raise RuntimeError(f"项目 {lock_handle.project_id} 生成锁续租失败")
 
 _active_generate_next_chapter_task_ids: set[str] = set()
 
@@ -116,6 +140,9 @@ def _build_next_chapter_review_meta(multi_model_result: Dict[str, Any]) -> Dict[
         "preset": multi_model_result.get("preset"),
         "chief_model": multi_model_result.get("chief_model"),
         "chief_model_reused_as_reviewer": bool(multi_model_result.get("chief_model_reused_as_reviewer")),
+        "chief_cost": float(multi_model_result.get("chief_cost") or 0.0),
+        "chief_usage_metadata": multi_model_result.get("chief_usage_metadata") or {},
+        "total_cost": float(multi_model_result.get("total_cost") or 0.0),
         "structured_summary": multi_model_result.get("structured_summary") or {},
         "reviewer_models": multi_model_result.get("reviewer_models") or [],
         "reviewer_profiles": multi_model_result.get("reviewer_profiles") or [],
@@ -136,6 +163,9 @@ async def _run_single_next_chapter_streaming_review(
     streaming_service: Any,
     on_review_chunk: Callable[[str, int], Any],
     real_coordinator: Any,
+    review_model: Optional[str] = None,
+    max_llm_attempts: int = 3,
+    require_exact_model: bool = False,
 ) -> str:
     from app.services.prompts.review_prompts import GenreAdaptiveReviewPrompts
 
@@ -157,11 +187,21 @@ async def _run_single_next_chapter_streaming_review(
             system_prompt=review_system_prompt,
             on_chunk=on_review_chunk,
             temperature=0.7,
+            model=review_model,
             task_type="review",
+            max_retries=max_llm_attempts,
+            require_exact_model=require_exact_model,
         )
-        logger.info(f"   ✓ 评审完成（真流式 + review任务路由），报告长度: {len(review_report)}")
+        logger.info(
+            f"   ✓ 评审完成（真流式 + {'锁定模型 ' + review_model if review_model else 'review任务路由'}），"
+            f"报告长度: {len(review_report)}"
+        )
         return review_report
     except Exception as e:
+        # 🆕 锁定模型档位下禁止回退到协调器（回退路径模型不受控），直接终止
+        if require_exact_model:
+            logger.error(f"   ❌ 锁定模型评审失败且禁止回退: {e}")
+            raise
         logger.error(f"   ⚠️ 真流式调用失败，回退到同步调用: {e}")
         if real_coordinator is not None and hasattr(real_coordinator, "review_chapter"):
             return await asyncio.to_thread(
@@ -185,11 +225,20 @@ async def _run_next_chapter_quality_review(
     streaming_service: Any,
     on_review_chunk: Callable[[str, int], Any],
     real_coordinator: Any,
+    enable_multi_model_review: bool = True,
+    review_model: Optional[str] = None,
+    max_llm_attempts: int = 3,
+    require_exact_model: bool = False,
 ) -> Tuple[str, Dict[str, Any]]:
-    multi_model_preset = _resolve_next_chapter_multi_model_review_preset(
-        project_context,
-        next_chapter_number,
-        chapter_plan,
+    # 🆕 免费档短路：不进多模型评审 gate，直接单模型评审
+    multi_model_preset = (
+        _resolve_next_chapter_multi_model_review_preset(
+            project_context,
+            next_chapter_number,
+            chapter_plan,
+        )
+        if enable_multi_model_review
+        else None
     )
     review_meta: Dict[str, Any] = {}
     if multi_model_preset:
@@ -229,6 +278,9 @@ async def _run_next_chapter_quality_review(
         streaming_service=streaming_service,
         on_review_chunk=on_review_chunk,
         real_coordinator=real_coordinator,
+        review_model=review_model,
+        max_llm_attempts=max_llm_attempts,
+        require_exact_model=require_exact_model,
     )
     if review_meta:
         review_meta["multi_model"] = False
@@ -512,7 +564,7 @@ from app.api.v1.workflow.helpers import (
 )
 from app.api.v1.workflow.story_helpers import *
 from app.api.v1.workflow.story_helpers import _sync_real_coordinator_project_context
-from app.api.v1.workflow.model_selection import resolve_workflow_generation_model
+from app.api.v1.workflow.generation_profile import resolve_generation_profile
 from app.api.v1.workflow.routes_optimize import (
     _create_generated_chapter,
     _extract_iteration_review_score,
@@ -547,17 +599,44 @@ async def generate_next_chapter(
 
     logger = logging.getLogger("uvicorn.error")
 
+    # 🆕 项目生成锁：跨进程/跨实例互斥，任务启动后转交后台任务释放
+    lock_service = get_generation_lock_service()
+    lock_handle: Optional[LockHandle] = None
+    background_task_started = False
+    # 🆕 任务ID提前生成：免费档配额 reservation 以 task_id 为键
+    task_id = str(uuid.uuid4())
+    quota_reserved = False
+    quota_result = None
+
     try:
         logger.info(f"📍 开始生成下一章（异步模式），项目ID: {project_id}")
         try:
-            workflow_generation_model = resolve_workflow_generation_model(
-                request.workflow_generation_model if request else None
+            generation_profile = resolve_generation_profile(
+                current_user=current_user,
+                requested_tier=request.generation_tier if request else None,
+                requested_model=request.workflow_generation_model if request else None,
             )
         except ValueError as exc:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=str(exc),
             ) from exc
+        workflow_generation_model = generation_profile.model
+        logger.info(
+            f"   ✓ 生成档位: {generation_profile.tier} | 模型: {workflow_generation_model} | "
+            f"最大迭代轮次: {generation_profile.max_iteration_rounds}"
+        )
+        # 🆕 锁定模型档位预检（fail closed）：模型被 catalog guard 重路由时直接拒绝，不占资源不启动任务
+        if not generation_profile.allow_model_fallback and generation_profile.model:
+            preflight_resolved = resolve_model_for_task(None, generation_profile.model)
+            if preflight_resolved != generation_profile.model:
+                logger.warning(
+                    f"   ❌ 免费档预检失败：{generation_profile.model} 被重路由为 {preflight_resolved}"
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail="免费生成模型暂不可用，请稍后再试",
+                )
         workflow_context_builder = WorkflowContextBuilder(db)
         
         # 1. 验证项目存在且属于用户
@@ -572,7 +651,54 @@ async def generate_next_chapter(
             )
         
         logger.info(f"   ✓ 项目验证通过: {project.title}")
-        
+
+        # 🆕 1.5 获取项目生成锁（Redis SET NX + token + TTL，全档位生效）
+        # Redis 故障时：标准档回退进程内互斥并告警；免费档 fail closed 直接拒绝
+        try:
+            lock_handle = await lock_service.acquire(
+                project_id,
+                allow_local_fallback=(generation_profile.tier != "free"),
+            )
+        except LockServiceUnavailableError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="生成服务暂不可用，请稍后再试",
+            ) from exc
+        if lock_handle is None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="该项目已有生成任务进行中，请等待完成后再试",
+            )
+        logger.info(f"   🔒 已获取项目生成锁 (backend={lock_handle.backend})")
+
+        # 🆕 1.6 免费档配额原子占用（Lua：用户日额度 + 全局发放量，超限不递增）
+        if generation_profile.quota_enabled:
+            quota_service = get_free_quota_service()
+            try:
+                quota_result = await quota_service.reserve(current_user.id, task_id)
+            except QuotaServiceUnavailableError as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail="免费额度服务暂不可用，请稍后再试",
+                ) from exc
+            if not quota_result.allowed:
+                raise HTTPException(
+                    status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                    detail={
+                        "message": (
+                            "今日免费生成额度已用完"
+                            if quota_result.reason == "user_limit"
+                            else "今日免费发放量已达上限，请明天再来"
+                        ),
+                        "remaining_quota": quota_result.remaining,
+                        "reset_at": quota_result.reset_at,
+                    },
+                )
+            quota_reserved = True
+            logger.info(
+                f"   🎫 免费额度占用成功 | 剩余: {quota_result.remaining} | 重置: {quota_result.reset_at}"
+            )
+
         # 2. 获取项目设定
         settings_context = workflow_context_builder.load_stage_text_context(project_id)
         
@@ -775,8 +901,7 @@ async def generate_next_chapter(
 
         previous_chapters_summary, previous_chapters_payload, recent_chapter_assets_summary = summarize_chapters(existing_chapters)
 
-        # 6. 生成任务ID并创建任务记录
-        task_id = str(uuid.uuid4())
+        # 6. 使用提前生成的任务ID创建任务记录（task_id 已在配额 reservation 中使用）
         logger.info(f"   🎯 创建异步任务: {task_id}")
 
         # 创建任务记录
@@ -824,22 +949,46 @@ async def generate_next_chapter(
                 previous_chapters_payload=previous_chapters_payload,
                 recent_chapter_assets_summary=recent_chapter_assets_summary,
                 workflow_generation_model=workflow_generation_model,
+                generation_tier=generation_profile.tier,
+                max_iteration_rounds=generation_profile.max_iteration_rounds,
+                enable_multi_model_review=generation_profile.enable_multi_model_review,
+                max_llm_attempts=generation_profile.max_llm_attempts,
+                allow_model_fallback=generation_profile.allow_model_fallback,
+                lock_handle=lock_handle,
+                quota_enabled=generation_profile.quota_enabled,
             )
         )
+        background_task_started = True
         logger.info(f"   🚀 后台任务已启动")
 
         # 8. 立即返回响应
-        return {
+        response = {
             "task_id": task_id,
             "status": "running",
             "message": f"已开始生成第{next_chapter_number}章",
             "next_chapter_number": next_chapter_number,
             "workflow_generation_model": workflow_generation_model,
+            "generation_tier": generation_profile.tier,
         }
+        if quota_result is not None:
+            response["remaining_quota"] = quota_result.remaining
+            response["quota_reset_at"] = quota_result.reset_at
+        return response
 
     except HTTPException:
+        # 锁已获取但任务未启动：退还额度并释放锁（避免 409 死锁到 TTL 过期）
+        if not background_task_started:
+            if quota_reserved:
+                await get_free_quota_service().refund_if_pending(task_id)
+            if lock_handle is not None:
+                await lock_service.release(lock_handle)
         raise
     except Exception as e:
+        if not background_task_started:
+            if quota_reserved:
+                await get_free_quota_service().refund_if_pending(task_id)
+            if lock_handle is not None:
+                await lock_service.release(lock_handle)
         logger.error(f"❌ 创建生成下一章任务失败: {e}")
         import traceback
         traceback.print_exc()
@@ -847,6 +996,28 @@ async def generate_next_chapter(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(e)
         )
+
+
+@router.get("/free-generation/quota")
+async def get_free_generation_quota(current_user=Depends(get_current_user)):
+    """Return the authenticated user's free chapter allowance."""
+    from app.core.config import settings
+
+    try:
+        quota = await get_free_quota_service().get_status(current_user.id)
+    except QuotaServiceUnavailableError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="免费额度服务暂不可用，请稍后再试",
+        ) from exc
+    return {
+        "enabled": bool(getattr(settings, "FREE_TIER_ENFORCEMENT_ENABLED", False)),
+        "daily_limit": quota.daily_limit,
+        "used": quota.used,
+        "remaining": quota.remaining,
+        "reset_at": quota.reset_at,
+        "global_available": quota.global_available,
+    }
 
 
 async def execute_generate_next_chapter_task(
@@ -863,6 +1034,13 @@ async def execute_generate_next_chapter_task(
     previous_chapters_payload: list,
     recent_chapter_assets_summary: str,
     workflow_generation_model: Optional[str] = None,
+    generation_tier: str = "standard",
+    max_iteration_rounds: Optional[int] = None,
+    enable_multi_model_review: bool = True,
+    max_llm_attempts: int = 3,
+    allow_model_fallback: bool = True,
+    lock_handle: Optional[LockHandle] = None,
+    quota_enabled: bool = False,
 ):
     """
     后台执行生成下一章任务（真流式版本）
@@ -877,7 +1055,12 @@ async def execute_generate_next_chapter_task(
     from app.db.base import SessionLocal
 
     logger = logging.getLogger("uvicorn.error")
-    logger.info(f"🚀 开始执行后台任务: {task_id}, 生成第{next_chapter_number}章")
+    logger.info(
+        f"🚀 开始执行后台任务: {task_id}, 生成第{next_chapter_number}章 | "
+        f"档位: {generation_tier} | 模型: {workflow_generation_model or '自动'}"
+    )
+    # 🆕 锁定模型档位（免费档）：禁止回退时全链路严格校验模型，重路由即终止
+    require_exact_model = not allow_model_fallback
     mark_generate_next_chapter_task_active(task_id)
 
     # 获取流式服务
@@ -885,6 +1068,11 @@ async def execute_generate_next_chapter_task(
 
     # 创建独立的数据库会话
     db = SessionLocal()
+    lock_heartbeat_task = (
+        asyncio.create_task(_keep_generation_lock_alive(lock_handle))
+        if lock_handle is not None
+        else None
+    )
 
     # 🆕 定义四个步骤对应的 Agent 列表，统一来自后端 Agent 注册表
     STEP_AGENTS = get_stage_agents_map(include_stage=True)
@@ -1096,9 +1284,15 @@ async def execute_generate_next_chapter_task(
                 on_chunk=on_plan_chunk,
                 temperature=0.7,
                 model=selected_plan_model,  # 🔥 使用智能选择的模型
+                max_retries=max_llm_attempts,
+                require_exact_model=require_exact_model,
             )
             logger.info(f"   ✓ 章节规划已完成（真流式 + {selected_plan_model}），长度: {len(chapter_plan)}")
         except Exception as e:
+            # 🆕 锁定模型档位下禁止回退到协调器（回退路径模型不受控），直接终止
+            if require_exact_model:
+                logger.error(f"   ❌ 锁定模型章节规划失败且禁止回退: {e}")
+                raise
             logger.error(f"   ⚠️ 真流式调用失败，回退到同步调用: {e}")
             # 回退到同步调用
             if hasattr(real_coordinator, 'generate_chapter_plan'):
@@ -1387,9 +1581,15 @@ async def execute_generate_next_chapter_task(
                 on_chunk=on_content_chunk,
                 temperature=0.7,
                 model=selected_content_model,  # 🔥 使用智能选择的模型
+                max_retries=max_llm_attempts,
+                require_exact_model=require_exact_model,
             )
             logger.info(f"   ✓ 章节初稿已完成（真流式 + {selected_content_model}），字数: {len(chapter_draft)}")
         except Exception as e:
+            # 🆕 锁定模型档位下禁止回退到协调器（回退路径模型不受控），直接终止
+            if require_exact_model:
+                logger.error(f"   ❌ 锁定模型内容创作失败且禁止回退: {e}")
+                raise
             logger.error(f"   ⚠️ 真流式调用失败，回退到同步调用: {e}")
             import traceback
             traceback.print_exc()  # 🔧 打印完整的异常堆栈
@@ -1416,6 +1616,12 @@ async def execute_generate_next_chapter_task(
             else:
                 logger.warning("   ⚠️ 协调器没有 generate_chapter_content 方法，使用默认模板")
                 chapter_draft = f"第{next_chapter_number}章内容\n\n{chapter_plan}\n\n（此处为生成的章节内容）"
+
+        # 🆕 免费档：首次正文产出成功，额度转为已消耗（此后失败不退额，防主动断连刷生成）
+        chapter_content_produced = True
+        if quota_enabled:
+            if not await get_free_quota_service().mark_consumed(task_id):
+                raise RuntimeError("正文已生成，但免费额度消费状态记录失败，请稍后联系管理员")
 
         logger.info(f"   🌊 发送流式结束通知...")
         await ws_manager.send_stream_end(project_id, 'content', len(chapter_draft), f"第{next_chapter_number}章内容创作完成")
@@ -1529,6 +1735,10 @@ async def execute_generate_next_chapter_task(
             streaming_service=streaming_service,
             on_review_chunk=on_review_chunk,
             real_coordinator=real_coordinator,
+            enable_multi_model_review=enable_multi_model_review,
+            review_model=(workflow_generation_model if require_exact_model else None),
+            max_llm_attempts=max_llm_attempts,
+            require_exact_model=require_exact_model,
         )
 
         await ws_manager.send_stream_end(project_id, 'review', len(review_report), f"第{next_chapter_number}章质量评审完成")
@@ -1579,6 +1789,9 @@ async def execute_generate_next_chapter_task(
         except Exception:
             pass_score_threshold = 8.5
             max_rounds = 2
+        # 🆕 生成档位解析后的明确轮次优先于全局配置（免费档为 1）
+        if max_iteration_rounds is not None:
+            max_rounds = int(max_iteration_rounds)
 
         initial_review_score = _extract_iteration_review_score(review_report)
         skip_iteration_optimization = initial_review_score >= pass_score_threshold
@@ -1778,9 +1991,15 @@ async def execute_generate_next_chapter_task(
                         on_chunk=noop_chunk,
                         temperature=0.3,
                         model=selected_revision_model,
+                        max_retries=max_llm_attempts,
+                        require_exact_model=require_exact_model,
                     )
                     logger.info(f"   ✓ 第{round_idx}轮迭代计划生成完成，长度: {len(iteration_plan_text)}")
                 except Exception as coordination_error:
+                    # 🆕 锁定模型档位下模型被重路由等失败不可忽略，直接终止
+                    if require_exact_model:
+                        logger.error(f"   ❌ 锁定模型迭代计划失败且禁止回退: {coordination_error}")
+                        raise
                     logger.warning(
                         f"   ⚠️ 第{round_idx}轮迭代计划生成失败，将直接依据评审意见改稿: {coordination_error}"
                     )
@@ -1808,6 +2027,8 @@ async def execute_generate_next_chapter_task(
                     on_chunk=on_chunk_cb,
                     temperature=0.7,
                     model=selected_revision_model,
+                    max_retries=max_llm_attempts,
+                    require_exact_model=require_exact_model,
                 )
                 latest_revised_version = revised_version
                 logger.info(f"   ✓ 第{round_idx}轮改稿完成（{selected_revision_model}），字数: {len(revised_version)}")
@@ -1833,7 +2054,10 @@ async def execute_generate_next_chapter_task(
                     system_prompt=review_system_prompt_loop,
                     on_chunk=noop_chunk,  # 评分不流式推送正文
                     temperature=0.3,
+                    model=(workflow_generation_model if require_exact_model else None),
                     task_type="review",
+                    max_retries=max_llm_attempts,
+                    require_exact_model=require_exact_model,
                 )
                 score = _extract_iteration_review_score(new_review_report)
                 has_unresolved_required_items = _iteration_review_has_unresolved_required_items(new_review_report)
@@ -1886,6 +2110,10 @@ async def execute_generate_next_chapter_task(
                 )
             logger.info(f"   ✅ 迭代优化结束，输出最终版本，长度: {len(final_version)}")
         except Exception as e:
+            # 🆕 锁定模型档位下禁止回退到协调器（回退路径模型不受控），直接终止
+            if require_exact_model:
+                logger.error(f"   ❌ 锁定模型迭代优化失败且禁止回退: {e}")
+                raise
             logger.error(f"   ⚠️ 真流式迭代优化失败，回退到同步调用: {e}")
             # 回退到同步调用
             if hasattr(real_coordinator, 'optimize_chapter'):
@@ -2114,7 +2342,9 @@ async def execute_generate_next_chapter_task(
                 chapter_content=final_version,
                 chapter_number=next_chapter_number,
                 project_id=project_id,
-                generate_summary=True  # 🆕 工作流场景需要生成摘要
+                generate_summary=True,  # 🆕 工作流场景需要生成摘要
+                # 🆕 免费档后置提取/摘要同样锁定模型；标准档传 None 保持现有行为
+                post_processing_model=(workflow_generation_model if require_exact_model else None),
             )
             
             logger.info(f"✅ 后台任务已启动，将在后台异步执行")
@@ -2128,6 +2358,10 @@ async def execute_generate_next_chapter_task(
         logger.error(f"❌ 后台任务失败: {task_id}, 错误: {e}")
         import traceback
         traceback.print_exc()
+
+        # 🆕 免费档：正文产出前失败退还额度（reservation 仍为 pending 才退，幂等）
+        if quota_enabled and not locals().get("chapter_content_produced", False):
+            await get_free_quota_service().refund_if_pending(task_id)
 
         # 更新任务状态为失败
         try:
@@ -2154,6 +2388,18 @@ async def execute_generate_next_chapter_task(
         )
     finally:
         mark_generate_next_chapter_task_inactive(task_id)
+        if lock_heartbeat_task is not None:
+            lock_heartbeat_task.cancel()
+            try:
+                await lock_heartbeat_task
+            except asyncio.CancelledError:
+                pass
+            except Exception as heartbeat_error:
+                logger.error("项目 %s 生成锁心跳已失败: %s", project_id, heartbeat_error)
+        # 🆕 任务结束（成功/失败）释放项目生成锁（release 内部按 token 校验，幂等且不抛异常）
+        if lock_handle is not None:
+            released = await get_generation_lock_service().release(lock_handle)
+            logger.info(f"   🔓 项目 {project_id} 生成锁释放{'成功' if released else '失败（由 TTL 兜底）'}")
         db.close()
 
 

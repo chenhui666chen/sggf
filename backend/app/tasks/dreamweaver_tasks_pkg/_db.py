@@ -1,6 +1,7 @@
 """
 数据库更新函数
 """
+import logging
 import random
 import sqlite3
 import time
@@ -11,6 +12,9 @@ from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
 from app.db.base import SessionLocal
+
+
+logger = logging.getLogger(__name__)
 
 
 def _update_generation_history(task_id: str, **changes: Any) -> None:

@@ -3,6 +3,8 @@ import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import pytest
+
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
@@ -175,11 +177,147 @@ def test_audiobook_precheck_uses_selected_tts_model_price():
         db.close()
 
     assert precheck.allowed is True
-    assert precheck.estimated_yuan == 6.0
-    assert precheck.estimated_points == 600.0
-    assert precheck.required_frozen_points == 660.0
+    assert precheck.estimated_yuan == 3.5
+    assert precheck.estimated_points == 350.0
+    assert precheck.required_frozen_points == 385.0
     assert precheck.cost_precheck_id.startswith("audiobook-precheck-")
     assert len(precheck.cost_precheck_id) > len("audiobook-precheck-")
+
+
+def test_audiobook_precheck_allows_explicitly_free_mimo_model_without_freeze():
+    _, session_factory = build_test_client()
+    now = datetime.now(timezone.utc)
+
+    user = create_user(
+        session_factory,
+        username="precheck_mimo_free_user",
+        email="precheck_mimo_free@example.com",
+    )
+    operator = create_user(
+        session_factory,
+        username="precheck_mimo_free_admin",
+        email="precheck_mimo_free_admin@example.com",
+    )
+    project = create_project(
+        session_factory,
+        user_id=user.id,
+        display_no=1,
+        title="MiMo 限时免费项目",
+    )
+    chapter = create_chapter(
+        session_factory,
+        project_id=project.id,
+        chapter_number=1,
+        title="第一章",
+        content="免" * 10000,
+    )
+    _seed_points_snapshots(
+        session_factory,
+        operator_user_id=operator.id,
+        operator_username=operator.username,
+        now=now,
+        reusable_asset_reward=0.0,
+    )
+
+    db = session_factory()
+    try:
+        precheck = build_audiobook_task_points_precheck(
+            db=db,
+            user_id=user.id,
+            project_id=project.id,
+            project_title=project.title,
+            chapter_ids=[chapter.id],
+            tts_provider="mimo-v2.5-tts",
+        )
+    finally:
+        db.close()
+
+    assert precheck.allowed is True
+    assert precheck.failure_code is None
+    assert precheck.estimated_yuan == 0.0
+    assert precheck.estimated_points == 0.0
+    assert precheck.required_frozen_points == 0.0
+    assert precheck.additional_frozen_points == 0.0
+    assert precheck.operating_snapshot is not None
+    assert precheck.operating_snapshot.supplier_list_price_yuan == 0.0
+
+
+@pytest.mark.parametrize("legacy_rate", ["0.02", "invalid-rate", None])
+def test_audiobook_seed_scene_precheck_uses_public_postpaid_rate(
+    monkeypatch,
+    legacy_rate,
+) -> None:
+    _, session_factory = build_test_client()
+    now = datetime.now(timezone.utc)
+    monkeypatch.delenv("DOUBAO_SEED_AUDIO_PRICE_PER_MINUTE_YUAN", raising=False)
+    if legacy_rate is None:
+        monkeypatch.delenv(
+            "DOUBAO_SEED_AUDIO_PRICE_PER_SECOND_YUAN",
+            raising=False,
+        )
+    else:
+        monkeypatch.setenv(
+            "DOUBAO_SEED_AUDIO_PRICE_PER_SECOND_YUAN",
+            legacy_rate,
+        )
+
+    user = create_user(
+        session_factory,
+        username="seed_scene_precheck_user",
+        email="seed_scene_precheck@example.com",
+    )
+    operator = create_user(
+        session_factory,
+        username="seed_scene_precheck_admin",
+        email="seed_scene_precheck_admin@example.com",
+    )
+    project = create_project(
+        session_factory,
+        user_id=user.id,
+        display_no=1,
+        title="Seed Scene 预检项目",
+    )
+    chapter = create_chapter(
+        session_factory,
+        project_id=project.id,
+        chapter_number=1,
+        title="第一章",
+        content="声" * 450,
+    )
+    create_user_asset(
+        session_factory,
+        user_id=user.id,
+        title="Seed Scene 高余额资产",
+        source_uri="https://example.com/seed-scene-balance.png",
+        created_at=now,
+        updated_at=now,
+    )
+    _seed_points_snapshots(
+        session_factory,
+        operator_user_id=operator.id,
+        operator_username=operator.username,
+        now=now,
+        reusable_asset_reward=1000.0,
+    )
+
+    db = session_factory()
+    try:
+        precheck = build_audiobook_task_points_precheck(
+            db=db,
+            user_id=user.id,
+            project_id=project.id,
+            project_title=project.title,
+            chapter_ids=[chapter.id],
+            tts_provider="minimax-speech-2.8-hd",
+            audio_engine_mode="seed_scene",
+        )
+    finally:
+        db.close()
+
+    assert precheck.allowed is True
+    assert precheck.estimated_yuan == 1.67
+    assert precheck.estimated_points == 167.0
+    assert precheck.required_frozen_points == 183.7
 
 
 def test_audiobook_precheck_cost_id_is_stable_for_same_inputs():
@@ -236,7 +374,7 @@ def test_audiobook_precheck_cost_id_is_stable_for_same_inputs():
     assert first.cost_precheck_id == second.cost_precheck_id
 
 
-def test_audiobook_precheck_blocks_when_negative_margin_policy_is_hit():
+def test_audiobook_precheck_uses_public_list_price_when_global_rate_discounts():
     _, session_factory = build_test_client()
     now = datetime.now(timezone.utc)
 
@@ -281,11 +419,14 @@ def test_audiobook_precheck_blocks_when_negative_margin_policy_is_hit():
     finally:
         db.close()
 
-    assert precheck.allowed is False
-    assert precheck.failure_code == "negative_margin_blocked"
+    assert precheck.allowed is True
+    assert precheck.failure_code is None
+    assert precheck.estimated_yuan == 1.0
+    assert precheck.estimated_points == 100.0
+    assert precheck.required_frozen_points == 110.0
     assert precheck.operating_snapshot is not None
-    assert precheck.operating_snapshot.negative_margin_blocked is True
-    assert "预估毛利为负" in (precheck.failure_message or "")
+    assert precheck.operating_snapshot.user_billed_yuan == 1.0
+    assert precheck.operating_snapshot.negative_margin_blocked is False
 
 
 def test_audiobook_precheck_reuses_existing_formal_freeze_amount():

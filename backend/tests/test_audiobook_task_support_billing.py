@@ -1,5 +1,6 @@
 import os
 import sys
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -11,6 +12,32 @@ os.environ.setdefault("DEBUG", "false")
 os.environ.setdefault("DATABASE_URL", "postgresql://test:test@127.0.0.1:5432/test_db")
 
 from app.services.audiobook import task_support
+
+
+def test_resolve_audiobook_billing_context_uses_seed_scene_pricing_key():
+    project = SimpleNamespace(
+        audio_config=json.dumps({"audio_engine_mode": "seed_scene"})
+    )
+
+    context = task_support.resolve_audiobook_billing_pricing_context(
+        project=project,
+        tts_pricing_key="minimax-speech-2.8-hd",
+    )
+
+    assert context.audio_engine_mode == "seed_scene"
+    assert context.pricing_key == "seed-audio-1.0"
+
+
+def test_resolve_audiobook_billing_context_keeps_legacy_tts_pricing_key():
+    project = SimpleNamespace(audio_config="{}")
+
+    context = task_support.resolve_audiobook_billing_pricing_context(
+        project=project,
+        tts_pricing_key="minimax-speech-2.8-hd",
+    )
+
+    assert context.audio_engine_mode == "legacy_stems"
+    assert context.pricing_key == "minimax-speech-2.8-hd"
 
 
 def test_safe_record_audiobook_billing_freeze_forwards_expected_arguments(monkeypatch):
@@ -93,6 +120,30 @@ def test_safe_record_audiobook_billing_freeze_forwards_trace_context(monkeypatch
             "extra_payload": trace_context,
         }
     ]
+
+
+def test_safe_record_audiobook_billing_freeze_forwards_precheck_amount(monkeypatch):
+    calls = []
+    current_user = SimpleNamespace(id=7, username="billing_user")
+
+    monkeypatch.setattr(
+        task_support,
+        "record_audiobook_billing_freeze",
+        lambda **kwargs: calls.append(kwargs),
+    )
+
+    task_support.safe_record_audiobook_billing_freeze(
+        db="db",
+        current_user=current_user,
+        audiobook_project_id=12,
+        chapter_ids=[3],
+        raw_request="request",
+        tts_pricing_key="seed-audio-1.0",
+        estimated_yuan_override=2.0,
+    )
+
+    assert calls[0]["tts_pricing_key"] == "seed-audio-1.0"
+    assert calls[0]["estimated_yuan_override"] == 2.0
 
 
 def test_safe_record_audiobook_billing_freeze_logs_and_swallows_failures(monkeypatch, caplog):

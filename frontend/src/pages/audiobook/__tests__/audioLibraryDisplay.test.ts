@@ -42,6 +42,10 @@ describe('audio library display helpers', () => {
     expect(formatAudioAssetNameLabel('train_horn_airchime_k5la')).toBe('火车站火车鸣笛与人群交谈声')
     expect(formatAudioAssetNameLabel('unmapped foreign title')).toBe('其他音效')
 
+    // 中英混合名称：提取中文部分展示，而不是兜底“其他音效”
+    expect(formatAudioAssetNameLabel('城市环境环境音（Doubao，calm）')).toBe('城市环境环境音')
+    expect(formatAudioAssetNameLabel('雨夜街道环境音(Doubao)')).toBe('雨夜街道环境音')
+
     for (const name of [
       'two dice roll table',
       'single die roll table',

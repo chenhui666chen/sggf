@@ -11,6 +11,16 @@ from sqlalchemy.orm import Session
 
 from app.models.project import Chapter
 from app.schemas.dreamweaver_contract import DREAMWEAVER_SCHEMA_VERSION
+from app.services.audiobook.duration_estimator import (
+    estimate_narration_duration_seconds,
+)
+from app.services.audiobook.scene_engine.scene_billing import (
+    SEED_AUDIO_MODEL,
+    get_seed_audio_price_per_second_yuan,
+)
+from app.services.audiobook.tts_model_ids import (
+    get_audiobook_tts_model_metadata,
+)
 from app.services.dreamweaver.persistence import build_contract_from_payload
 from app.services.points_pricing_policy import (
     PointsBusinessSettlementSnapshot,
@@ -296,9 +306,13 @@ def build_audiobook_task_points_precheck(
     chapter_ids: Sequence[int],
     tts_provider: str | None,
     audiobook_project_id: int | None = None,
+    audio_engine_mode: str | None = None,
 ) -> AudiobookTaskPointsPrecheckSnapshot:
     normalized_chapter_ids = [int(chapter_id) for chapter_id in chapter_ids if int(chapter_id or 0) > 0]
     normalized_tts_provider = str(tts_provider or "").strip()
+    normalized_audio_engine_mode = str(audio_engine_mode or "legacy_stems").strip().lower()
+    uses_seed_scene = normalized_audio_engine_mode == "seed_scene"
+    pricing_provider_key = SEED_AUDIO_MODEL if uses_seed_scene else normalized_tts_provider
 
     def build_cost_precheck_id(**extra: object) -> str:
         payload: dict[str, object] = {
@@ -308,6 +322,8 @@ def build_audiobook_task_points_precheck(
             "audiobook_project_id": int(audiobook_project_id or 0),
             "chapter_ids": normalized_chapter_ids,
             "tts_provider": normalized_tts_provider,
+            "audio_engine_mode": normalized_audio_engine_mode,
+            "pricing_provider_key": pricing_provider_key,
         }
         payload.update(extra)
         return _build_stable_precheck_id("audiobook-precheck", payload)
@@ -320,48 +336,112 @@ def build_audiobook_task_points_precheck(
     selected_chapter_count = len(chapter_rows) if chapter_rows else len(normalized_chapter_ids)
     pricing_snapshot = get_points_pricing_policy_snapshot(db=db)
 
-    synthetic_row = SimpleNamespace(
-        id=int(audiobook_project_id or 0),
-        project_id=int(project_id or 0),
-        project_title=project_title,
-        status="pending",
-        tts_provider=tts_provider,
-        total_chapters=max(selected_chapter_count, 0),
-        completed_chapters=0,
-        total_cost=0.0,
-        created_at=utc_now(),
-        updated_at=utc_now(),
-    )
-    task_billing = build_user_center_task_billing_overview(
-        audiobook_rows=[synthetic_row],
-        dreamweaver_rows=[],
-        chapter_rows=list(chapter_rows),
-        pricing_config=pricing_snapshot.config,
-    )
-    if not task_billing.items:
-        return AudiobookTaskPointsPrecheckSnapshot(
-            cost_precheck_id=build_cost_precheck_id(failure_code="estimate_unavailable"),
-            allowed=False,
-            failure_code="estimate_unavailable",
-            failure_message="当前无法估算本次有声书任务的积分消耗，请补全章节内容后重试。",
-            estimated_yuan=None,
-            estimated_points=None,
-            required_frozen_points=0.0,
-            existing_frozen_points=0.0,
-            additional_frozen_points=0.0,
-            balance_points=0.0,
-            frozen_points=0.0,
-            available_points=0.0,
-            effective_available_points=0.0,
-            reclaimed_running_frozen_points=0.0,
-            operating_snapshot=None,
+    if uses_seed_scene:
+        seed_rate = get_seed_audio_price_per_second_yuan()
+        if seed_rate is None:
+            return AudiobookTaskPointsPrecheckSnapshot(
+                cost_precheck_id=build_cost_precheck_id(
+                    failure_code="estimate_unavailable",
+                    pricing_status="rate_unconfigured",
+                ),
+                allowed=False,
+                failure_code="estimate_unavailable",
+                failure_message=(
+                    "当前未配置 Seed Audio 元/秒费率，无法安全估算和冻结积分。"
+                ),
+                estimated_yuan=None,
+                estimated_points=None,
+                required_frozen_points=0.0,
+                existing_frozen_points=0.0,
+                additional_frozen_points=0.0,
+                balance_points=0.0,
+                frozen_points=0.0,
+                available_points=0.0,
+                effective_available_points=0.0,
+                reclaimed_running_frozen_points=0.0,
+                operating_snapshot=None,
+            )
+        estimated_duration_s = sum(
+            estimate_narration_duration_seconds(content, min_duration=0.0)
+            for row in chapter_rows
+            if (content := str(getattr(row, "content", "") or "").strip())
+        )
+        estimated_yuan = round(max(estimated_duration_s * seed_rate, 0.01), 2)
+        operating_snapshot = build_points_business_settlement_snapshot(
+            pricing_config=pricing_snapshot.config,
+            module_key=POINTS_BILLING_MODULE_AUDIOBOOK,
+            basis_yuan=estimated_yuan,
+            provider_key=pricing_provider_key,
+        )
+        estimated_points = round(
+            max(float(operating_snapshot.user_billed_yuan), 0.0)
+            * max(int(pricing_snapshot.config.points_per_yuan), 1),
+            2,
+        )
+        required_frozen_points = round(
+            estimated_points
+            * (1 + max(float(pricing_snapshot.config.freeze_buffer_rate), 0.0)),
+            2,
+        )
+    else:
+        synthetic_row = SimpleNamespace(
+            id=int(audiobook_project_id or 0),
+            project_id=int(project_id or 0),
+            project_title=project_title,
+            status="pending",
+            tts_provider=tts_provider,
+            total_chapters=max(selected_chapter_count, 0),
+            completed_chapters=0,
+            total_cost=0.0,
+            created_at=utc_now(),
+            updated_at=utc_now(),
+        )
+        task_billing = build_user_center_task_billing_overview(
+            audiobook_rows=[synthetic_row],
+            dreamweaver_rows=[],
+            chapter_rows=list(chapter_rows),
+            pricing_config=pricing_snapshot.config,
+        )
+        if not task_billing.items:
+            return AudiobookTaskPointsPrecheckSnapshot(
+                cost_precheck_id=build_cost_precheck_id(failure_code="estimate_unavailable"),
+                allowed=False,
+                failure_code="estimate_unavailable",
+                failure_message="当前无法估算本次有声书任务的积分消耗，请补全章节内容后重试。",
+                estimated_yuan=None,
+                estimated_points=None,
+                required_frozen_points=0.0,
+                existing_frozen_points=0.0,
+                additional_frozen_points=0.0,
+                balance_points=0.0,
+                frozen_points=0.0,
+                available_points=0.0,
+                effective_available_points=0.0,
+                reclaimed_running_frozen_points=0.0,
+                operating_snapshot=None,
+            )
+
+        item = task_billing.items[0]
+        estimated_yuan = round(float(item.estimated_yuan or 0.0), 2)
+        estimated_points = round(float(item.estimated_points or 0.0), 2) if item.estimated_points is not None else None
+        required_frozen_points = round(float(item.suggested_frozen_points or 0.0), 2)
+        operating_snapshot = build_points_business_settlement_snapshot(
+            pricing_config=pricing_snapshot.config,
+            module_key=POINTS_BILLING_MODULE_AUDIOBOOK,
+            basis_yuan=estimated_yuan,
+            provider_key=pricing_provider_key or None,
         )
 
-    item = task_billing.items[0]
-    estimated_yuan = round(float(item.estimated_yuan or 0.0), 2)
-    estimated_points = round(float(item.estimated_points or 0.0), 2) if item.estimated_points is not None else None
-    required_frozen_points = round(float(item.suggested_frozen_points or 0.0), 2)
-    if estimated_yuan <= 0 or required_frozen_points <= 0:
+    tts_metadata = (
+        get_audiobook_tts_model_metadata(normalized_tts_provider)
+        if not uses_seed_scene
+        else {}
+    )
+    explicitly_free = (
+        tts_metadata.get("pricing_status") == "limited_time_free"
+        and float(tts_metadata.get("price_per_10k") or 0.0) == 0.0
+    )
+    if (estimated_yuan <= 0 or required_frozen_points <= 0) and not explicitly_free:
         return AudiobookTaskPointsPrecheckSnapshot(
             cost_precheck_id=build_cost_precheck_id(
                 failure_code="estimate_unavailable",
@@ -385,12 +465,6 @@ def build_audiobook_task_points_precheck(
             operating_snapshot=None,
         )
 
-    operating_snapshot = build_points_business_settlement_snapshot(
-        pricing_config=pricing_snapshot.config,
-        module_key=POINTS_BILLING_MODULE_AUDIOBOOK,
-        basis_yuan=estimated_yuan,
-        provider_key=normalized_tts_provider or None,
-    )
     if operating_snapshot.negative_margin_blocked:
         return AudiobookTaskPointsPrecheckSnapshot(
             cost_precheck_id=build_cost_precheck_id(

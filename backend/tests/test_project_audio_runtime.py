@@ -12,6 +12,70 @@ from app.services.audiobook.project_audio_runtime import (
     normalize_base_voice_mapping,
     resolve_project_audio_runtime_config,
 )
+from app.services.audiobook import project_audio_runtime as project_audio_runtime_module
+from app.services.audiobook.engine_pkg._base import AudiobookEngineBase
+
+
+def test_engine_stores_scene_audio_runtime_config_without_mutating_mapping():
+    engine = object.__new__(AudiobookEngineBase)
+    voice_mapping = {
+        "女主": {
+            "tts_model": "qwen3-tts-instruct-flash",
+            "voice_id": "Cherry",
+        }
+    }
+
+    engine.apply_scene_audio_runtime_config(
+        audio_engine_mode="seed_scene",
+        voice_mapping=voice_mapping,
+        seed_audio_model="seed-audio-1.0",
+    )
+    voice_mapping["女主"]["voice_id"] = "changed-after-apply"
+
+    assert engine._audio_engine_mode == "seed_scene"
+    assert engine._seed_audio_model == "seed-audio-1.0"
+    assert engine._scene_voice_mapping["女主"]["voice_id"] == "Cherry"
+
+
+def test_engine_rejects_unknown_scene_audio_runtime_mode():
+    engine = object.__new__(AudiobookEngineBase)
+
+    engine.apply_scene_audio_runtime_config(
+        audio_engine_mode="unknown-mode",
+        voice_mapping={},
+        seed_audio_model="unknown-model",
+    )
+
+    assert engine._audio_engine_mode == "legacy_stems"
+    assert engine._seed_audio_model == "seed-audio-1.0"
+
+
+def test_apply_scene_audio_runtime_to_engine_passes_mode_and_mapping():
+    calls = []
+    engine = SimpleNamespace(
+        apply_scene_audio_runtime_config=lambda **kwargs: calls.append(kwargs)
+    )
+    runtime = SimpleNamespace(
+        audio_engine_mode="seed_scene",
+        seed_audio_model="seed-audio-1.0",
+        voice_mapping={"旁白": {"tts_model": "seed-tts-2.0-expressive"}},
+    )
+    apply_runtime = getattr(
+        project_audio_runtime_module,
+        "apply_scene_audio_runtime_to_engine",
+        None,
+    )
+
+    assert callable(apply_runtime)
+    apply_runtime(engine=engine, runtime_config=runtime)
+
+    assert calls == [
+        {
+            "audio_engine_mode": "seed_scene",
+            "seed_audio_model": "seed-audio-1.0",
+            "voice_mapping": runtime.voice_mapping,
+        }
+    ]
 
 
 def test_build_character_voice_mapping_item_keeps_voice_asset_fields_only():
@@ -84,7 +148,44 @@ def test_resolve_project_audio_runtime_config_merges_base_then_project_model_con
     assert runtime.voice_mapping["旧角色"]["voice_id"] == "old-role"
     assert "" not in runtime.voice_mapping
     assert runtime.audio_fx == {"enabled": True, "bgm": {"volume": 0.2}}
+    assert runtime.audio_engine_mode == "legacy_stems"
     assert len(runtime.character_items) == 2
+
+
+def test_resolve_project_audio_runtime_config_reads_valid_scene_engine_mode():
+    project = SimpleNamespace(
+        audio_config=json.dumps(
+            {
+                "audio_engine_mode": "seed_scene",
+                "seed_audio_model": "seed-audio-1.0",
+            },
+            ensure_ascii=False,
+        )
+    )
+
+    runtime = resolve_project_audio_runtime_config(
+        project,
+        tts_model="qwen3-tts-instruct-flash",
+    )
+
+    assert runtime.audio_engine_mode == "seed_scene"
+    assert runtime.seed_audio_model == "seed-audio-1.0"
+
+
+def test_resolve_project_audio_runtime_config_rejects_unknown_scene_engine_mode():
+    project = SimpleNamespace(
+        audio_config=json.dumps(
+            {"audio_engine_mode": "experimental-unbounded"},
+            ensure_ascii=False,
+        )
+    )
+
+    runtime = resolve_project_audio_runtime_config(
+        project,
+        tts_model="qwen3-tts-instruct-flash",
+    )
+
+    assert runtime.audio_engine_mode == "legacy_stems"
 
 
 def test_resolve_project_audio_runtime_config_supports_legacy_model_keys():
@@ -120,6 +221,7 @@ def test_resolve_project_audio_runtime_config_tolerates_empty_or_invalid_config(
 
     assert runtime.raw_config == {}
     assert runtime.audio_fx == {}
+    assert runtime.audio_engine_mode == "legacy_stems"
     assert runtime.character_items == []
     assert runtime.voice_mapping == {"保留角色": {"voice_id": "existing"}}
     assert "项目音频配置 JSON 损坏，已忽略" in caplog.text

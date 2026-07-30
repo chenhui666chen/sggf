@@ -1,9 +1,10 @@
-﻿"""
+"""
 提示词进化系统 - 评估器
 
 封装AI检测调用，评估改写效果
 """
 import asyncio
+import hashlib
 import logging
 from typing import List, Tuple, Optional, Dict, Any
 
@@ -13,6 +14,7 @@ from core.model_resolution import TaskType
 
 from .models import EvaluationResult, AITraceDetail
 from .test_samples import TestSample
+from .semantic_judge import SemanticJudge, calculate_hybrid_score
 from .novel_rules import (
     preprocess_text, postprocess_text, ALL_FORBIDDEN_WORDS,
     calculate_text_metrics, compare_metrics, TextMetrics,
@@ -23,18 +25,59 @@ from .novel_rules import (
 logger = logging.getLogger(__name__)
 
 
+class _CachedDetectorProxy:
+    """代理检测器：detect_ai_content 走评估器的样本级缓存
+
+    供样本基线检测使用，使基线检测结果可被后续 evaluate_prompt 复用。
+    """
+
+    def __init__(self, evaluator: "PromptEvaluator"):
+        self._evaluator = evaluator
+
+    async def detect_ai_content(self, text: str) -> Dict[str, Any]:
+        return await self._evaluator._detect_original_cached(text)
+
+
 class PromptEvaluator:
     """提示词评估器"""
     
     def __init__(self):
         self.llm_client = get_llm_client()
         self.ai_detector = tencent_ai_detect_service
+        self.semantic_judge = SemanticJudge(self.llm_client)
+        # 🆕 样本原文检测缓存：同一进化运行内，每个样本原文只检测一次
+        # key = 文本哈希, value = 检测结果 dict
+        self._original_detect_cache: Dict[str, Dict[str, Any]] = {}
+        # 🆕 缓存代理检测器：基线检测与评估共享同一缓存
+        self.cached_detector = _CachedDetectorProxy(self)
+
+    async def _detect_original_cached(self, text: str) -> Dict[str, Any]:
+        """检测原始文本AI率（带样本级缓存，避免重复付费检测）"""
+        cache_key = hashlib.md5(text[:5000].encode("utf-8")).hexdigest()
+        cached = self._original_detect_cache.get(cache_key)
+        if cached is not None:
+            logger.debug("   ♻️ 命中原文检测缓存，跳过重复检测")
+            return cached
+        result = await self.ai_detector.detect_ai_content(text[:5000])
+        # 仅缓存成功结果，失败时下次仍可重试
+        if result.get("success"):
+            self._original_detect_cache[cache_key] = result
+        return result
+
+    def get_cached_original_score(self, text: str) -> Optional[int]:
+        """查询样本原文的缓存AI分数（无缓存时返回None）"""
+        cache_key = hashlib.md5(text[:5000].encode("utf-8")).hexdigest()
+        cached = self._original_detect_cache.get(cache_key)
+        if cached is not None:
+            return cached.get("ai_score")
+        return None
     
     async def evaluate_prompt(
         self,
         prompt: str,
         samples: List[TestSample],
-        temperature: float = 0.8
+        temperature: float = 0.8,
+        model_id: Optional[str] = None
     ) -> Tuple[float, List[EvaluationResult]]:
         """
         评估提示词效果
@@ -43,6 +86,7 @@ class PromptEvaluator:
             prompt: 待评估的改写提示词
             samples: 测试样本列表
             temperature: LLM温度参数
+            model_id: 指定改写执行模型（None时使用默认路由）
             
         Returns:
             (平均AI得分, 评估结果列表)
@@ -56,9 +100,26 @@ class PromptEvaluator:
             logger.info(f"📝 评估样本: {sample.sample_id} ({sample.genre})")
 
             try:
-                # 1. 使用提示词改写文本
+                # 1. 先检测原始文本（样本级缓存：首次进入本次进化时检测一次）
+                logger.debug(f"   ⏳ 检测原始文本AI率...")
+                original_result = await self._detect_original_cached(sample.text)
+                if original_result.get("success") and original_result.get("ai_score") == 0:
+                    logger.warning("样本 %s 原始 AI 率为 0，已排除", sample.sample_id)
+                    results.append(EvaluationResult(
+                        sample_id=sample.sample_id,
+                        original_text=sample.text,
+                        rewritten_text="",
+                        original_ai_score=0,
+                        rewritten_ai_score=None,
+                        score_reduction=0,
+                        success=False,
+                        error="原始样本AI率为0，已排除"
+                    ))
+                    continue
+
+                # 2. 使用提示词改写文本
                 logger.debug(f"   ⏳ 正在改写文本...")
-                rewritten = await self._rewrite_text(prompt, sample.text, temperature)
+                rewritten = await self._rewrite_text(prompt, sample.text, temperature, model_id=model_id)
                 logger.debug(f"   ✅ 改写完成，长度: {len(rewritten)}")
                 
                 if not rewritten or len(rewritten.strip()) < 50:
@@ -74,9 +135,6 @@ class PromptEvaluator:
                     ))
                     continue
                 
-                # 2. 检测原始文本的AI率
-                logger.debug(f"   ⏳ 检测原始文本AI率...")
-                original_result = await self.ai_detector.detect_ai_content(sample.text[:5000])
                 original_trace_detail = None
                 if original_result.get("success"):
                     original_score = original_result.get("ai_score", 100)
@@ -147,6 +205,13 @@ class PromptEvaluator:
                 rewritten_multi_score.fidelity_score = fidelity_score
                 rewritten_multi_score.details["fidelity"] = f"相似度{100-fidelity_score:.0f}%"
 
+                llm_review = await self.semantic_judge.evaluate(
+                    sample.text, rewritten, sample.genre
+                )
+                rewritten_multi_score.overall_score = calculate_hybrid_score(
+                    rewritten_score, rewritten_multi_score.overall_score, llm_review
+                )
+
                 logger.debug(f"   🎯 原文多维评分: {original_multi_score.to_summary()}", flush=True)
                 logger.debug(f"   🎯 改写多维评分: {rewritten_multi_score.to_summary()}", flush=True)
 
@@ -165,6 +230,11 @@ class PromptEvaluator:
                     logger.debug(f"   🚨 可读性严重下降! (得分: {rewritten_multi_score.readability_score:.0f})", flush=True)
                     logger.debug(f"      建议: 当前改写可能过度优化，影响阅读体验", flush=True)
 
+                evaluation_success = not llm_review.get("hard_fail", False)
+                evaluation_error = None
+                if not evaluation_success:
+                    evaluation_error = "；".join(llm_review.get("hard_fail_reasons", []))
+
                 results.append(EvaluationResult(
                     sample_id=sample.sample_id,
                     original_text=sample.text,
@@ -172,7 +242,8 @@ class PromptEvaluator:
                     original_ai_score=original_score,
                     rewritten_ai_score=rewritten_score,
                     score_reduction=score_reduction,
-                    success=True,
+                    success=evaluation_success,
+                    error=evaluation_error,
                     original_trace_detail=original_trace_detail,
                     rewritten_trace_detail=rewritten_trace_detail,
                     # 🆕 量化指标
@@ -195,11 +266,13 @@ class PromptEvaluator:
                     metrics_comparison=metrics_comparison,
                     # 🆕 多维评分
                     original_multi_score=original_multi_score.to_dict(),
-                    rewritten_multi_score=rewritten_multi_score.to_dict()
+                    rewritten_multi_score=rewritten_multi_score.to_dict(),
+                    llm_review=llm_review,
                 ))
                 
-                total_score += rewritten_score
-                success_count += 1
+                if evaluation_success:
+                    total_score += rewritten_score
+                    success_count += 1
                 
                 logger.info(
                     f"  ✅ 原始: {original_score} → 改写后: {rewritten_score} "
@@ -229,8 +302,15 @@ class PromptEvaluator:
         
         return avg_score, results
     
-    async def _rewrite_text(self, prompt: str, original_text: str, temperature: float) -> str:
-        """使用提示词改写文本（三层架构：预处理 → LLM改写 → 后处理）"""
+    async def _rewrite_text(self, prompt: str, original_text: str, temperature: float, model_id: Optional[str] = None) -> str:
+        """使用提示词改写文本（三层架构：预处理 → LLM改写 → 后处理）
+
+        Args:
+            prompt: 改写提示词
+            original_text: 原始文本
+            temperature: LLM温度参数
+            model_id: 指定使用的模型ID（可选，None时使用默认路由）
+        """
 
         # ========== 第1层：规则预处理 ==========
         preprocessed_text, preprocess_logs = preprocess_text(original_text)
@@ -243,13 +323,21 @@ class PromptEvaluator:
             {"role": "user", "content": f"请改写以下文本，降低其AI痕迹：\n\n{preprocessed_text}"}
         ]
 
-        # 🔧 使用 REWRITE 任务类型（自动选择适合改写的快速模型）
-        llm_result = await self.llm_client.chat(
-            messages=messages,
-            task_type=TaskType.REWRITE,  # 由模型策略决定使用哪个模型
-            temperature=temperature,
-            use_cache=False  # 禁用缓存以获得多样性
-        )
+        # 构建调用参数
+        chat_kwargs: Dict[str, Any] = {
+            "messages": messages,
+            "temperature": temperature,
+            "use_cache": False,  # 禁用缓存以获得多样性
+        }
+
+        if model_id:
+            # 指定模型调用
+            chat_kwargs["model"] = model_id
+        else:
+            # 使用 REWRITE 任务类型（自动选择适合改写的快速模型）
+            chat_kwargs["task_type"] = TaskType.REWRITE
+
+        llm_result = await self.llm_client.chat(**chat_kwargs)
 
         # ========== 第3层：规则后处理 ==========
         final_result, postprocess_logs = postprocess_text(llm_result.strip())

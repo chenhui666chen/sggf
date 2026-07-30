@@ -328,6 +328,22 @@ describe('audiobook project audio config utils', () => {
     })
   })
 
+  it('includes an explicitly selected scene audio engine mode', () => {
+    const audioFxConfig = createDefaultAudioFxConfig()
+
+    expect(buildProjectAudioConfigPayload({
+      ttsModel: 'qwen3-tts-instruct-flash',
+      voicePresets: [],
+      audioFxConfig,
+      audioEngineMode: 'seed_scene',
+      characterVoices: [],
+    })).toEqual({
+      characters: [],
+      audio_fx: audioFxConfig,
+      audio_engine_mode: 'seed_scene',
+    })
+  })
+
   it('ignores inline clone and design inputs because voice assets are managed separately', () => {
     const audioFxConfig = createDefaultAudioFxConfig()
 
@@ -573,6 +589,34 @@ describe('audiobook project audio config utils', () => {
         character_name: 'ReusableStepAudioClone',
         voice_id: 'stepaudio_clone:stepaudio_clone_unit',
         tts_model: 'stepaudio-2.5-tts',
+      },
+    ])
+  })
+
+  it('persists trusted scene reference identity for backend ownership validation', () => {
+    expect(buildAudiobookVoiceConfigPayload({
+      ttsModel: 'seed-tts-2.0-expressive',
+      voicePresets: [],
+      characterVoices: [
+        {
+          characterId: 21,
+          name: 'PublicRole',
+          voiceId: 'public:vp_unit',
+          volume: 50,
+          ttsModel: 'mimo-v2.5-tts-voicedesign',
+          referenceSource: 'public_pool',
+          referenceAudioUrl: 'https://client.example/untrusted.mp3',
+          voicePoolPublicationId: 'vp_unit',
+        },
+      ],
+    })).toEqual([
+      {
+        character_name: 'PublicRole',
+        voice_id: 'public:vp_unit',
+        tts_model: 'mimo-v2.5-tts-voicedesign',
+        reference_source: 'public_pool',
+        reference_audio_url: 'https://client.example/untrusted.mp3',
+        voice_pool_publication_id: 'vp_unit',
       },
     ])
   })

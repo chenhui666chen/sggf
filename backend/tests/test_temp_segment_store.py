@@ -570,6 +570,26 @@ def test_build_checkpoint_patch_from_generation_result_includes_effect_timeline(
     }
 
 
+def test_build_checkpoint_patch_from_generation_result_includes_scene_checkpoints():
+    scene_checkpoints = {
+        "scene_0001": {
+            "schema_version": 1,
+            "renderer_version": "scene-render-service-v1",
+            "status": "passed",
+            "audio_path": "backend/data/scene_0001.mp3",
+            "prompt_hash": "prompt-hash",
+            "reference_hashes": ["reference-hash"],
+        }
+    }
+
+    patch = build_checkpoint_patch_from_generation_result(
+        result={"scene_checkpoints": scene_checkpoints},
+        task_id="task_scene",
+    )
+
+    assert patch["scene_checkpoints"] == scene_checkpoints
+
+
 def test_attach_render_plan_metadata_marks_temp_asset_saved_stage():
     temp_cache = {
         "cached_audio_paths": {

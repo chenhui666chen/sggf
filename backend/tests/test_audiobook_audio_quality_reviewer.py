@@ -87,3 +87,88 @@ def test_audio_quality_reviewer_uses_shared_narration_duration_estimate():
     assert audio_balance["effects_per_minute"] == 6.0
     assert pacing["estimated_duration"] == "1.0分钟"
     assert pacing["average_segment_duration"] == "60.0秒"
+
+
+def test_audio_quality_reviewer_reports_seed_scene_readiness():
+    from app.services.audiobook.agents.audio_quality_reviewer import AudioQualityReviewer
+
+    reviewer = AudioQualityReviewer()
+    report = reviewer.review_script(
+        [
+            {
+                "type": "dialogue",
+                "speaker": "俘虏",
+                "text": "不要啊！",
+                "emotion": "fearful",
+                "performance_notes": "先颤抖吸气，随后绝望尖叫",
+                "instruct_scene": "空旷大殿，远处风声持续，木台阶有轻微回响",
+                "sound_effects": [
+                    {"name": "金属划过声", "timing": "after", "duration": 1.0}
+                ],
+                "music_cue": {"style": "低频铜管进入，随后定音鼓渐强"},
+            }
+        ],
+        audio_engine_mode="seed_scene",
+    )
+
+    readiness = report.audio_balance["render_readiness"]
+    assert readiness["mode"] == "seed_scene"
+    assert readiness["scene_context_coverage"] == 1.0
+    assert readiness["relative_timing_coverage"] == 1.0
+    assert readiness["music_lifecycle_coverage"] == 1.0
+    assert readiness["status"] == "ready"
+
+
+def test_audio_quality_reviewer_flags_seed_scene_without_context():
+    from app.services.audiobook.agents.audio_quality_reviewer import AudioQualityReviewer
+
+    reviewer = AudioQualityReviewer()
+    report = reviewer.review_script(
+        [
+            {
+                "type": "narration",
+                "speaker": "旁白",
+                "text": "门外的脚步越来越近。",
+                "sound_effects": [{"name": "脚步声"}],
+            }
+        ],
+        audio_engine_mode="seed_scene",
+    )
+
+    readiness = report.audio_balance["render_readiness"]
+    descriptions = "\n".join(issue.description for issue in report.issues)
+    assert readiness["status"] == "needs_attention"
+    assert readiness["scene_context_coverage"] == 0.0
+    assert readiness["relative_timing_coverage"] == 0.0
+    assert "Seed 场景缺少环境与空间状态" in descriptions
+    assert "Seed 声音事件缺少相对时序" in descriptions
+
+
+def test_audio_quality_reviewer_reports_legacy_stems_readiness():
+    from app.services.audiobook.agents.audio_quality_reviewer import AudioQualityReviewer
+
+    reviewer = AudioQualityReviewer()
+    report = reviewer.review_script(
+        [
+            {
+                "type": "narration",
+                "speaker": "旁白",
+                "text": "门被猛地关上。",
+                "sound_effects": [
+                    {
+                        "name": "沉重关门声",
+                        "timing": "after",
+                        "volume": 0.4,
+                        "fade_in": 0.0,
+                        "fade_out": 0.3,
+                    }
+                ],
+            }
+        ],
+        audio_engine_mode="legacy_stems",
+    )
+
+    readiness = report.audio_balance["render_readiness"]
+    assert readiness["mode"] == "legacy_stems"
+    assert readiness["executable_effect_coverage"] == 1.0
+    assert readiness["status"] == "ready"

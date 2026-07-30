@@ -65,7 +65,7 @@ class SmartChunker:
         # 分离中英文
         chinese_chars = len(re.findall(r'[\u4e00-\u9fff\u3400-\u4dbf]', text))
         english_words = len(re.findall(r'[a-zA-Z]+', text))
-        punctuation = len(re.findall(r'[，。！？、；：""''（）【】《》.,!?;:\'"()\[\]{}]', text))
+        punctuation = len(re.findall(r"[，。！？、；：\"'（）【】《》.,!?;:()\[\]{}]", text))
 
         # 估算 token 数
         chinese_tokens = math.ceil(chinese_chars / self.chinese_ratio)

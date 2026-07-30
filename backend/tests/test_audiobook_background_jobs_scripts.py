@@ -25,6 +25,9 @@ class DummyVoiceManager:
     def load_from_db(self, mapping):
         self.loaded.append(mapping)
 
+    def apply_project_voice_mapping(self, mapping, *, character_profiles=None):
+        self.loaded.append(mapping)
+
 
 class FailingVoiceManager:
     def load_from_db(self, mapping):
@@ -67,3 +70,35 @@ def test_load_existing_voice_mapping_keeps_voice_manager_failures_non_blocking(c
         background_jobs_scripts._load_existing_voice_mapping(engine, audiobook_project)
 
     assert "从数据库加载音色分配失败" in caplog.text
+
+
+def test_script_stage_applies_project_audio_engine_mode(monkeypatch):
+    applied_runtime = []
+    engine = build_engine()
+    engine.apply_scene_audio_runtime_config = lambda **kwargs: applied_runtime.append(kwargs)
+    runtime_config = SimpleNamespace(
+        voice_mapping={},
+        audio_fx={},
+        audio_engine_mode="seed_scene",
+        character_items=[],
+    )
+    monkeypatch.setattr(
+        background_jobs_scripts,
+        "resolve_project_audio_runtime_config",
+        lambda *args, **kwargs: runtime_config,
+    )
+
+    background_jobs_scripts._apply_script_stage_project_audio_config(
+        engine=engine,
+        project=SimpleNamespace(),
+        tts_model="qwen3-tts-instruct-flash",
+        character_profiles=[],
+    )
+
+    assert applied_runtime == [
+        {
+            "audio_engine_mode": "seed_scene",
+            "seed_audio_model": "seed-audio-1.0",
+            "voice_mapping": {},
+        }
+    ]

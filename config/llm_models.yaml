@@ -133,6 +133,116 @@ llm_models:
       - verification
       - agent
 
+  - id: qwen3.7-flash
+    name: Qwen3.7 Flash
+    provider: alibaba
+    model_type: llm
+    version: v1
+    status: active
+
+    capabilities:
+      - name: creative
+        level: native
+        score: 0.88
+        description: 轻量高速文本生成，适合大批量、低成本内容任务
+      - name: reasoning
+        level: native
+        score: 0.85
+        description: 支持思考模式（最大思维链256K tokens），中等复杂度推理
+      - name: long_context
+        level: native
+        score: 0.95
+        description: 支持100万tokens上下文，最大输入991K（思考模式983K）
+      - name: writing
+        level: native
+        score: 0.87
+        description: 中文写作流畅，适合初稿生成与批量扩写
+      - name: chinese
+        level: native
+        score: 0.92
+        description: 中文理解与表达能力良好
+
+    constraints:
+      max_context_tokens: 1000000
+      max_output_tokens: 65536
+      max_thinking_tokens: 262144
+      supports_streaming: true
+      supports_function_call: true
+      supports_vision: false
+      supports_json_mode: true
+      supports_timeout_param: true
+      supports_max_retries: true
+      supports_temperature: true
+      supports_system_prompt: true
+      supports_multi_turn: true
+      supports_thinking_mode: true
+
+    api_config:
+      api_key_env: DASHSCOPE_API_KEY
+      base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+      default_timeout: 180
+      default_max_retries: 3
+
+    performance:
+      quality_score: 8.5
+      avg_latency_seconds: 1.2
+      p95_latency_seconds: 2.5
+      tokens_per_second: 150
+      cost_per_1k_input_tokens: 0.0002
+      cost_per_1k_output_tokens: 0.0008
+      currency: CNY
+
+    routing:
+      task_types:
+        - concept
+        - outline_expand
+        - volume_outline
+        - chapter_batch
+        - long_writing
+        - summarize
+        - entity_extract
+      priority: 3
+      fallback_models:
+        - qwen3.7-plus
+      weight: 1.0
+      enabled: true
+
+    default_params:
+      temperature: 0.7
+      max_tokens: 32768
+      enable_thinking: false
+
+    summary: 阿里云通义千问轻量高速模型，输入0.2元/百万tokens、输出0.8元/百万tokens（约为qwen3.7-plus的十分之一），支持100万tokens上下文与思考模式，适合大批量、低成本的文本生成与辅助任务。
+    recommended_scenarios:
+      - 大批量章节初稿与扩写（成本敏感场景）
+      - 长文档摘要与信息提取（100万tokens上下文）
+      - 高频辅助任务（候选生成、格式转换、清洗）
+    limitations:
+      - 生成质量弱于 qwen3.7-plus，复杂创作建议用主力模型
+      - 视觉输入能力未经项目验证，当前不作为能力承诺
+      - 思考模式会消耗额外tokens
+    integration_notes:
+      - 通过 DashScope OpenAI 兼容接口接入，模型名为 qwen3.7-flash
+      - 使用阿里云百炼 API Key（DASHSCOPE_API_KEY）
+      - 服务端限流 RPM 30000、TPM 5,000,000
+      - 计费支持缓存命中折扣（命中0.04元/百万tokens）与 Batch 半价
+    best_practice_tips:
+      - 成本敏感的批量任务优先选用
+      - 复杂推理任务开启 enable_thinking 或改用 qwen3.7-plus
+      - 高频调用可利用上下文缓存降低输入成本
+    documentation_url: https://help.aliyun.com/zh/model-studio/models
+    source_urls:
+      - https://help.aliyun.com/zh/model-studio/models
+      - https://help.aliyun.com/zh/model-studio/pricing
+
+    tags:
+      - creative
+      - long_context
+      - fast
+      - low_cost
+      - chinese
+      - alibaba
+
   - id: kimi/kimi-k2.6
     name: Kimi K2.6
     provider: moonshot

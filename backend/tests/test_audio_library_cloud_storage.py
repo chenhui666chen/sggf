@@ -164,6 +164,7 @@ def test_aliyun_oss_upload_missing_config_keeps_local_cache(tmp_path, monkeypatc
         "local_cache_path": "sound_effects/action/door.ogg",
         "asset_scope": "shared_library",
     }
+    assert storage.is_audio_library_cloud_storage_enabled() is False
 
 
 def test_build_public_url_prefers_configured_audio_library_host(monkeypatch):

@@ -79,6 +79,8 @@ services:
       REDIS_URL: redis://:NovelRedis2024!@redis:6379/0
       # JWT密钥（生产环境必须修改）
       JWT_SECRET: d268d958af7fcfc8c17910bb3abcbf8d26bdda0e94b8b21b4d73dbd529e3e433
+      # Seed Audio 1.0 单次请求最长读取等待；超时后测试单元不自动重试
+      VOLCENGINE_OPEN_SPEECH_TIMEOUT: ${VOLCENGINE_OPEN_SPEECH_TIMEOUT:-600}
       # 关闭Debug模式
       DEBUG: "False"
       # 数据库连接池配置
@@ -119,6 +121,7 @@ services:
       - ./agents:/app/agents
       - ./pipeline:/app/pipeline
       - ./config:/config:ro
+      - ./scripts:/scripts:ro
       # 日志目录
       - ./backend/logs:/app/logs
     # 资源限制（生产环境建议根据实际情况调整）

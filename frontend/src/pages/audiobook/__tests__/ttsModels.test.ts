@@ -204,7 +204,10 @@ describe('audiobook ttsModels', () => {
       preferredStyleControlMode: 'basic',
       supportsVoiceDescription: false,
       supportsAudioTags: false,
+      supportsVoiceClone: true,
     })
+    expect(modelSupportsCustomVoiceWorkbench('minimax-speech-2.8-hd')).toBe(true)
+    expect(modelSupportsCustomVoiceWorkbench('minimax-speech-2.8-turbo')).toBe(true)
 
     expect(getTtsModelCapabilities('mimo-v2.5-tts')).toMatchObject({
       hasSystemVoices: true,

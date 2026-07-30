@@ -21,7 +21,11 @@ from app.services.audiobook.background_jobs_shared import (
     release_audiobook_project_billing,
     settle_audiobook_project_billing,
 )
-from app.services.audiobook.project_audio_runtime import resolve_project_audio_runtime_config
+from app.services.audiobook.project_audio_runtime import (
+    apply_scene_audio_runtime_to_engine,
+    resolve_project_audio_runtime_config,
+    validate_project_voice_references,
+)
 from app.services.audiobook.task_support import (
     StageTracker,
     update_chapter_run_state as _update_chapter_run_state,
@@ -91,6 +95,16 @@ async def generate_audiobook_audio_from_scripts_background(
             project=project,
             tts_model=tts_model,
             base_voice_mapping=audiobook_project.voice_mapping or {},
+        )
+        if project is not None:
+            validate_project_voice_references(
+                db,
+                owner_user_id=int(project.user_id),
+                voice_mapping=runtime_config.voice_mapping,
+            )
+        apply_scene_audio_runtime_to_engine(
+            engine=engine,
+            runtime_config=runtime_config,
         )
         effective_voice_mapping = runtime_config.voice_mapping
         if effective_voice_mapping:
@@ -344,7 +358,8 @@ async def generate_audiobook_audio_from_scripts_background(
 
                 traceback.print_exc()
 
-        audiobook_project.status = "completed"
+        # 本次运行有失败章节时置为 failed，避免掩盖局部失败
+        audiobook_project.status = "completed" if current_run_failed_chapters == 0 else "failed"
         final_totals = refresh_audiobook_project_audio_totals(
             db,
             audiobook_project=audiobook_project,

@@ -1,6 +1,6 @@
 # Audiobook Task Queue Architecture
 
-Last updated: 2026-05-03
+Last updated: 2026-07-21
 
 ## Goals
 
@@ -38,10 +38,16 @@ Last updated: 2026-05-03
 ## Deployment Checklist
 
 1. Ensure Redis is reachable and set `CELERY_BROKER_URL`, `CELERY_RESULT_BACKEND` in `.env` / environment.
-2. Start worker from project root (Windows uses `-P solo`):  
-   `celery -A app.celery_app.celery_app worker -P solo -Q audiobook -l info`
+2. Start worker from project root (Windows uses `-P solo`) and assign a queue-specific node name:
+   `celery -A app.celery_app.celery_app worker -P solo -Q audiobook -n audiobook@%h -l info`
 3. Run FastAPI app as usual (uvicorn). API only enqueues jobs now.
 4. Optional: run `celery -A app.celery_app.celery_app beat` if future scheduled jobs are required (not needed yet).
+
+### Development worker lifecycle
+
+Uvicorn `--reload` only reloads the FastAPI process. Celery workers keep imported Python modules in memory and must be restarted after changes under `backend/app/tasks/**` or `backend/app/services/**`. Otherwise the API may enqueue successfully while the worker immediately fails with an import or signature error from an older code version.
+
+`dev.bat` now broadcasts `control shutdown` before starting workers, waits for stale workers to exit, and uses distinct `audiobook@%h` / `dreamweaver@%h` node names. Re-run the development launcher, or restart the affected worker explicitly, after backend task code changes. Before restarting, check that no task is active so a running generation is not interrupted.
 
 ## Status Schema (audiobook_tasks)
 

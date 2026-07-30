@@ -112,7 +112,12 @@ def test_list_tts_voices_merges_cosyvoice_custom_clone_and_design_voices(monkeyp
         lambda voice_id: {
             "cosyvoice-v3.5-plus-vclone-111": "克隆甲",
             "cosyvoice-v3.5-plus-vdesign-222": "设计乙",
-        }.get(voice_id),
+            }.get(voice_id),
+        )
+    monkeypatch.setattr(
+        routes_tts,
+        "get_clone_owner_user_id",
+        lambda _voice_id: 1,
     )
 
     payload = asyncio.run(

@@ -126,6 +126,11 @@ for preset_id, cfg in _BASE_PRESET_VOICES.items():
     key = cfg["tts_speaker_id"].lower()
     _SPEAKER_TO_PRESET.setdefault(key, preset_id)
 
+# 用户自建/克隆音色的 voice_id 前缀：这些资产不在静态音色目录内，
+# 需交由所属模型的专用 manager 解析。
+_CUSTOM_ASSET_VOICE_PREFIXES = ("mimo_design:", "mimo_clone:", "stepaudio_clone:")
+
+
 
 @dataclass
 class VoiceProfile:
@@ -180,6 +185,7 @@ class VoiceProfile:
         adjustment = self.emotion_adjustments.get(emotion, self.emotion_adjustments["neutral"])
         is_instruct_voice = self.tts_speaker_id in INSTRUCT_SPEAKER_IDS
         use_instruct_mode = bool(is_instruct_voice and emotion and emotion != "neutral")
+        is_narrator = str(self.character_name).strip() in ("旁白", "narrator")
         
         volume_offset = adjustment.get("volume_offset", 0)
         final_volume = max(0, min(100, self.volume_base + volume_offset))
@@ -189,7 +195,12 @@ class VoiceProfile:
             speed_value = max(0.5, min(2.0, self.speed_base))
         else:
             pitch_value = max(0, min(100, self.pitch_base + adjustment["pitch_offset"]))
-            speed_value = max(0.5, min(2.0, self.speed_base * adjustment["speed_multiplier"]))
+            if is_narrator:
+                # 旁白语速保持稳定：逐段 emotion 标签直接乘变速会让旁白忽快忽慢，
+                # 情绪起伏交给风格指令/performance_notes 表达
+                speed_value = max(0.5, min(2.0, self.speed_base))
+            else:
+                speed_value = max(0.5, min(2.0, self.speed_base * adjustment["speed_multiplier"]))
         
         speaker_id = normalize_speaker_id(self.tts_speaker_id)
 
@@ -394,6 +405,37 @@ class VoiceManager:
             "tts_model": normalized_model,
         }
         return str(entry.get("id") or voice_id), voice_config
+
+    def _resolve_custom_asset_profile(
+        self,
+        character_name: str,
+        config: Dict[str, Any],
+        tts_model: str,
+    ):
+        """解析用户自建/克隆音色（mimo/stepaudio），返回携带 asset 参数的 profile。
+
+        这些音色不在静态音色目录中，需交由所属模型的专用 manager 解析，
+        以便 voice_design_prompt / mimo_voice_asset_id 等随 profile 带到合成层。
+        委派失败时返回 None，由调用方回退到默认解析/降级逻辑。
+        """
+        try:
+            from .voice_manager_factory import create_voice_manager
+
+            delegate = create_voice_manager(tts_model)
+            # 工厂对未知模型会回退到基类 VoiceManager，其本身无法解析自定义音色，
+            # 直接返回 None 避免无意义的自我递归。
+            if type(delegate) is VoiceManager:
+                return None
+            delegate.apply_project_voice_mapping({character_name: dict(config)})
+            return delegate.get_voice(character_name)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "⚠️ 解析自定义音色失败，回退默认处理: %s (%s) -> %s",
+                config.get("voice_id"),
+                tts_model,
+                exc,
+            )
+            return None
 
     def _apply_voice_type_config(self, voice_config: Dict[str, Any], voice_type: Optional[str]) -> None:
         voice_type = str(voice_type or "").strip()
@@ -1106,7 +1148,28 @@ class VoiceManager:
                 tts_model = DEFAULT_AUDIOBOOK_TTS_MODEL
             tts_model = normalize_audiobook_tts_model(tts_model)
 
+            # 用户自建/克隆音色（mimo_design:/mimo_clone:/stepaudio_clone:）不在静态音色
+            # 目录内，基类无法解析。委派给该角色所属模型的专用 manager 解析，保留其携带
+            # asset 参数（voice_design_prompt / mimo_voice_asset_id 等）的 profile，
+            # 避免整角色被当作未知组合跳过、静默丢失用户已选音色。
+            if str(voice_id or "").startswith(_CUSTOM_ASSET_VOICE_PREFIXES):
+                delegated_profile = self._resolve_custom_asset_profile(
+                    character_name, config, tts_model
+                )
+                if delegated_profile is not None:
+                    self.character_voices[character_name] = delegated_profile
+                    self.used_voice_ids.add(
+                        getattr(delegated_profile, "voice_id", voice_id)
+                    )
+                    logger.info(
+                        f"🎛 应用用户音频配置(自定义音色): {character_name} -> {voice_id} "
+                        f"(model={tts_model})"
+                    )
+                    continue
+                # 委派失败则继续走后续解析/降级逻辑
+
             resolved = self._resolve_voice_config_for_model(voice_id, tts_model)
+
             if not resolved:
                 logger.warning(f"⚠️ 未知的voice_id/model组合: {voice_id} ({tts_model})，跳过角色 {character_name}")
                 continue

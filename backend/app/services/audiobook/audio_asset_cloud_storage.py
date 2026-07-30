@@ -45,7 +45,17 @@ def get_audio_library_storage_driver() -> str:
 
 
 def is_audio_library_cloud_storage_enabled() -> bool:
-    return get_audio_library_storage_driver() in {_DRIVER_DASHSCOPE_OSS, _DRIVER_ALIYUN_OSS}
+    storage_driver = get_audio_library_storage_driver()
+    if storage_driver == _DRIVER_DASHSCOPE_OSS:
+        return True
+    if storage_driver != _DRIVER_ALIYUN_OSS:
+        return False
+
+    try:
+        _get_aliyun_oss_required_config()
+    except RuntimeError:
+        return False
+    return True
 
 
 def _normalize_relative_path(value: str | Path) -> str:

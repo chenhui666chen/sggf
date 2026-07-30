@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
-from dotenv import load_dotenv
+from dotenv import dotenv_values, load_dotenv
 
 
 def get_backend_root() -> Path:
@@ -60,14 +61,26 @@ def load_project_env(*, override: bool = False) -> tuple[Path, ...]:
 
     - backend/.env 优先
     - 根目录 .env 作为兜底
-    - 默认不覆盖已有环境变量
+    - 默认不覆盖已有的非空环境变量
+    - 空环境变量视为未配置，允许由 .env 补齐
     """
-    loaded_files: list[Path] = []
+    loaded_files = [
+        env_file
+        for env_file in get_env_file_candidates()
+        if env_file.exists()
+    ]
 
-    for env_file in get_env_file_candidates():
-        if not env_file.exists():
-            continue
+    if not override:
+        env_keys = {
+            key
+            for env_file in loaded_files
+            for key in dotenv_values(env_file)
+        }
+        for key in env_keys:
+            if os.environ.get(key) == "":
+                os.environ.pop(key, None)
+
+    for env_file in loaded_files:
         load_dotenv(env_file, override=override)
-        loaded_files.append(env_file)
 
     return tuple(loaded_files)

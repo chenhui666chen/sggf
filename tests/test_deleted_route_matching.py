@@ -18,7 +18,8 @@ for candidate in (str(ROOT_DIR), str(BACKEND_DIR)):
         sys.path.insert(0, candidate)
 
 
-from app.api.v1.audiobook import list_deleted_projects, router as audiobook_router
+from app.api.v1.audiobook_api import router as audiobook_router
+from app.api.v1.audiobook_api.routes_delete import list_deleted_projects
 from app.api.v1.chapters import get_deleted_chapters, router as chapters_router
 from app.models.audiobook_delete_audit import AudiobookDeleteAudit
 from app.models.project import Chapter, Project
@@ -160,7 +161,7 @@ def test_list_deleted_projects_returns_audit_enriched_items(monkeypatch) -> None
     current_user = SimpleNamespace(id=42)
 
     monkeypatch.setattr(
-        "app.api.v1.audiobook.AudiobookProjectRepository.list_deleted",
+        "app.api.v1.audiobook_api.routes_delete.AudiobookProjectRepository.list_deleted",
         lambda db, user_id, limit: [deleted_project],
     )
 

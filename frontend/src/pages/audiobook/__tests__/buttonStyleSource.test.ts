@@ -8,6 +8,7 @@ const readSource = (relativePath: string) => readFileSync(
 
 const themeSource = readSource('../audiobookTheme.ts')
 const completionSource = readSource('../AudiobookCompletionStep.tsx')
+const scriptCompletionSource = readSource('../AudiobookScriptCompletionStep.tsx')
 const setupSource = readSource('../AudiobookSetupStep.tsx')
 const chapterAudioItemSource = readSource('../ChapterAudioResultItem.tsx')
 const exportActionsSource = readSource('../ProjectExportActions.tsx')
@@ -34,7 +35,7 @@ describe('Audiobook button style source guards', () => {
       expect(themeSource).toContain(`${variant}: {`)
     }
 
-    expect(completionSource).toContain('audiobookButtonSx.successOutlined')
+    expect(scriptCompletionSource).toContain('color="success"')
     expect(completionSource).not.toContain('borderColor: audiobookColors.successMain')
 
     expect(chapterAudioItemSource).toContain('audiobookButtonSx.collectIcon')

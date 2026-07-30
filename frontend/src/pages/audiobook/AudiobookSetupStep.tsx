@@ -21,6 +21,8 @@ import CharacterVoiceConfigPanel from './CharacterVoiceConfigPanel'
 import ChapterSelectionPanel from './ChapterSelectionPanel'
 import NarrationAudioConfigPanel from './NarrationAudioConfigPanel'
 import VoiceCatalogStatusPanel from './VoiceCatalogStatusPanel'
+import VoicePoolWorkbench from './VoicePoolWorkbench'
+import { useAudiobookSceneVoicePool } from './useAudiobookSceneVoicePool'
 import {
   audiobookButtonRowSx,
   audiobookColors,
@@ -37,6 +39,7 @@ import {
 } from './ttsModels'
 import type {
   AudioFxConfig,
+  AudioEngineMode,
   AudioOutputFormat,
   Chapter,
   CharacterVoiceSetting,
@@ -53,8 +56,8 @@ interface AudiobookSetupStepProps {
   voiceLoading: boolean
   cosyVoiceWorkbench: CosyVoiceWorkbench
   outputFormat: AudioOutputFormat
-  generateSubtitle: boolean
   audioFxConfig: AudioFxConfig
+  audioEngineMode: AudioEngineMode
   chapters: Chapter[]
   selectedChapters: number[]
   generatedChapterIds: ReadonlySet<number>
@@ -74,11 +77,11 @@ interface AudiobookSetupStepProps {
   generateDisabledReason: string
   onFetchVoiceCatalog: (model: TtsModel) => void
   onOutputFormatChange: (value: AudioOutputFormat) => void
-  onGenerateSubtitleChange: (value: boolean) => void
   onAudioFxConfigChange: (value: AudioFxConfig) => void
+  onAudioEngineModeChange: (value: AudioEngineMode) => void
   onToggleChapter: (chapterId: number) => void
   onOpenChapterMenu: (event: MouseEvent<HTMLButtonElement>, chapter: Chapter) => void
-  onVoiceChange: (characterId: number, voiceId: string) => void
+  onVoiceChange: (characterId: number, voiceId: string, preset?: VoicePreset) => void
   onTtsModelChangeForCharacter: (characterId: number, nextModel: TtsModel) => void
   onPreviewCustomVoice: (voice: VoicePreset, model?: TtsModel) => void
   onPreviewCharacterVoice: (characterVoice: CharacterVoiceSetting) => void
@@ -153,8 +156,8 @@ const AudiobookSetupStep = ({
   voiceLoading,
   cosyVoiceWorkbench,
   outputFormat,
-  generateSubtitle,
   audioFxConfig,
+  audioEngineMode,
   chapters,
   selectedChapters,
   generatedChapterIds,
@@ -174,8 +177,8 @@ const AudiobookSetupStep = ({
   generateDisabledReason,
   onFetchVoiceCatalog,
   onOutputFormatChange,
-  onGenerateSubtitleChange,
   onAudioFxConfigChange,
+  onAudioEngineModeChange,
   onToggleChapter,
   onOpenChapterMenu,
   onVoiceChange,
@@ -187,6 +190,7 @@ const AudiobookSetupStep = ({
 }: AudiobookSetupStepProps) => {
   const [voiceManagementOpen, setVoiceManagementOpen] = useState(false)
   const [voiceManagementModel, setVoiceManagementModel] = useState<TtsModel>(ttsModel)
+  const sceneVoicePool = useAudiobookSceneVoicePool()
 
   const handleOpenVoiceManagement = (model: TtsModel) => {
     setVoiceManagementModel(model)
@@ -240,6 +244,25 @@ const AudiobookSetupStep = ({
     : voiceManagementOption?.source === 'fallback'
       ? (voiceLoading ? 'info' : 'warning')
       : 'success'
+  const effectiveVoicePresetsByModel = useMemo(() => {
+    if (audioEngineMode !== 'seed_scene') return voicePresetsByModel
+    const models = new Set<TtsModel>([
+      ttsModel,
+      ...Object.keys(voicePresetsByModel),
+      ...characterVoices.map((voice) => voice.ttsModel).filter((model): model is TtsModel => Boolean(model)),
+    ])
+    const next: Record<TtsModel, VoicePreset[]> = { ...voicePresetsByModel }
+    for (const model of models) {
+      const merged = [...(voicePresetsByModel[model] || []), ...sceneVoicePool.presets]
+      next[model] = merged.filter(
+        (preset, index) => merged.findIndex((item) => item.id === preset.id) === index,
+      )
+    }
+    return next
+  }, [audioEngineMode, characterVoices, sceneVoicePool.presets, ttsModel, voicePresetsByModel])
+  const effectiveCurrentVoicePresets = audioEngineMode === 'seed_scene'
+    ? effectiveVoicePresetsByModel[ttsModel] || currentVoicePresets
+    : currentVoicePresets
 
   return (
   <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5 }}>
@@ -268,15 +291,15 @@ const AudiobookSetupStep = ({
         <SetupPanel
           icon={<LibraryMusicIcon fontSize="small" />}
           title="叙事与音频"
-          subtitle="输出格式、字幕、音效与配乐"
+          subtitle="输出格式、音效与配乐"
         >
           <NarrationAudioConfigPanel
             outputFormat={outputFormat}
-            generateSubtitle={generateSubtitle}
             audioFxConfig={audioFxConfig}
+            audioEngineMode={audioEngineMode}
             onOutputFormatChange={onOutputFormatChange}
-            onGenerateSubtitleChange={onGenerateSubtitleChange}
             onAudioFxConfigChange={onAudioFxConfigChange}
+            onAudioEngineModeChange={onAudioEngineModeChange}
           />
         </SetupPanel>
       </Stack>
@@ -305,8 +328,8 @@ const AudiobookSetupStep = ({
             characterVoices={characterVoices}
             ttsModel={ttsModel}
             voiceLoading={voiceLoading}
-            currentVoicePresets={currentVoicePresets}
-            voicePresetsByModel={voicePresetsByModel}
+            currentVoicePresets={effectiveCurrentVoicePresets}
+            voicePresetsByModel={effectiveVoicePresetsByModel}
             ttsModelOptions={ttsModelOptions}
             previewingCharacterId={previewingCharacterId}
             autoAssigningVoices={autoAssigningVoices}
@@ -321,7 +344,7 @@ const AudiobookSetupStep = ({
     </Box>
 
     <Box sx={audiobookButtonRowSx.singlePrimary}>
-      <Tooltip title={generateDisabled ? generateDisabledReason : '开始生成有声书'}>
+      <Tooltip title={generateDisabled ? generateDisabledReason : '生成本章场景剧本'}>
         <span>
           <Button
             variant="contained"
@@ -329,7 +352,7 @@ const AudiobookSetupStep = ({
             disabled={generateDisabled}
             color="primary"
           >
-            {selectedChapterCount > 0 ? '开始生成本章' : '请选择章节'}
+            {selectedChapterCount > 0 ? '生成本章场景剧本' : '请选择章节'}
           </Button>
         </span>
       </Tooltip>
@@ -346,6 +369,16 @@ const AudiobookSetupStep = ({
         <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
           在这里创建和管理克隆/设计音色；保存后回到角色卡片，为旁白或角色选择对应音色。
         </Typography>
+        {audioEngineMode === 'seed_scene' ? (
+          <VoicePoolWorkbench
+            privateAssets={sceneVoicePool.privateAssets}
+            publicVoices={sceneVoicePool.publicVoices}
+            taxonomy={sceneVoicePool.taxonomy}
+            loading={sceneVoicePool.loading}
+            error={sceneVoicePool.error}
+            onRefresh={sceneVoicePool.refresh}
+          />
+        ) : (
         <VoiceCatalogStatusPanel
           ttsModel={voiceManagementModel}
           voiceCatalogMeta={voiceManagementMeta}
@@ -361,6 +394,7 @@ const AudiobookSetupStep = ({
           onPreviewCustomVoice={onPreviewCustomVoice}
           onFetchVoiceCatalog={() => onFetchVoiceCatalog(voiceManagementModel)}
         />
+        )}
       </DialogContent>
       <DialogActions>
         <Button onClick={() => setVoiceManagementOpen(false)}>

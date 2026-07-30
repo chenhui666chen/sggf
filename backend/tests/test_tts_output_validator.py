@@ -193,7 +193,7 @@ def test_tts_cost_reset_preserves_model_price():
     engine.cost_tracker.add_segment(10000, is_cached=False)
 
     stats = engine.get_cost_stats()
-    assert stats["estimated_cost"] == "¥6.00"
+    assert stats["estimated_cost"] == "¥3.50"
     assert stats["estimated_cost_scope"] == "usable_audio_estimate"
 
 

@@ -240,14 +240,3 @@ async def sync_settings_to_workflow(
     }
 
 
-
-
-
-
-
-
-class AutoMergeRequest(BaseModel):
-    chapter_plan: str = ""
-    chapter_content: str = ""
-
-

@@ -26,6 +26,7 @@ from .tts_model_ids import (
     list_supported_audiobook_tts_models,
     normalize_audiobook_tts_model,
 )
+from .minimax_voice_clone_client import is_minimax_custom_voice_id
 
 
 # 模型 -> 音色目录文件的映射
@@ -118,6 +119,11 @@ def get_model_for_voice(voice_id: str, preferred_model: str = None) -> str:
     voice_id = str(voice_id or "").strip()
     if voice_id.startswith(COSYVOICE_V35_PLUS_VOICE_ID_PREFIX):
         return COSYVOICE_V35_PLUS_MODEL_ID
+    if is_minimax_custom_voice_id(voice_id):
+        preferred = normalize_audiobook_tts_model(preferred_model, default="") if preferred_model else ""
+        if preferred in {MINIMAX_SPEECH_28_HD_MODEL, MINIMAX_SPEECH_28_TURBO_MODEL}:
+            return preferred
+        return MINIMAX_SPEECH_28_HD_MODEL
 
     raw_preferred_model = str(preferred_model or "").strip() or None
     preferred_model = normalize_audiobook_tts_model(preferred_model) if raw_preferred_model else None

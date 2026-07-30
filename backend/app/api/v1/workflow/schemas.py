@@ -59,6 +59,8 @@ class SaveStageContentRequest(BaseModel):
 
 class GenerateNextChapterRequest(BaseModel):
     workflow_generation_model: Optional[str] = None
+    # 🆕 生成档位意图（"free" | "standard"），最终档位由服务端权益判定决定
+    generation_tier: Optional[str] = None
 
 class ExpandStoryRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")

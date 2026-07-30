@@ -2,28 +2,20 @@ import { useCallback, type Dispatch, type SetStateAction } from 'react'
 
 import {
   apiClient,
-  describeTaskPointsPrecheckErrorDetail,
   extractApiErrorMessage,
-  extractTaskPointsPrecheckErrorDetail,
-  type TaskPointsPrecheckErrorDetail,
 } from '../../services/api'
-import type { ActivateQueuedAudiobookTask, SetSnackbar } from './hookTypes'
-import type { NarrationStyleId } from './narrationStyles'
+import type { SetSnackbar } from './hookTypes'
 import type {
   AudiobookProjectDetail,
-  AudioOutputFormat,
   Chapter,
   ScriptEditorChapterRef,
   ScriptEditorStateData,
   SmartChunkPreviewResult,
   TimelineClipEditMap,
-  TtsModel,
 } from './types'
 import {
-  buildGenerateAudioFromScriptPayload,
   buildScriptEditorChapterRef,
   buildUpdateChapterScriptPayload,
-  extractQueuedAudiobookJobId,
   normalizeAudiobookChapterScriptData,
   normalizeSmartChunkPreviewResponse,
 } from './scriptEditorUtils'
@@ -33,18 +25,11 @@ interface UseAudiobookScriptEditorActionsParams {
   chapters: Chapter[]
   scriptEditorChapter: ScriptEditorChapterRef | null
   scriptEditorData: ScriptEditorStateData | null
-  timelineEdits: TimelineClipEditMap
-  ttsModel: TtsModel
-  narrationStyle: NarrationStyleId
-  narrationStylePrompt: string
-  outputFormat: AudioOutputFormat
-  generateSubtitle: boolean
-  ensureCurrentTtsModelReady: () => boolean
+  refreshAudiobookProjectDetail: (audiobookProjectId: number) => Promise<AudiobookProjectDetail>
   resetScriptEditorTransientState: () => void
   resetSegmentPreviewState: () => void
   removeCurrentEditorSyncEntry: () => void
   stopManagedPlayback: () => void
-  activateQueuedAudiobookTask: ActivateQueuedAudiobookTask
   setScriptEditorDialogOpen: Dispatch<SetStateAction<boolean>>
   setScriptEditorChapter: Dispatch<SetStateAction<ScriptEditorChapterRef | null>>
   setScriptEditorData: Dispatch<SetStateAction<ScriptEditorStateData | null>>
@@ -52,7 +37,6 @@ interface UseAudiobookScriptEditorActionsParams {
   setSmartChunkPreview: Dispatch<SetStateAction<SmartChunkPreviewResult | null>>
   setSmartChunkPreviewLoading: Dispatch<SetStateAction<boolean>>
   setTimelineEdits: Dispatch<SetStateAction<TimelineClipEditMap>>
-  setTaskPointsPrecheckError: Dispatch<SetStateAction<TaskPointsPrecheckErrorDetail | null>>
   setSnackbar: SetSnackbar
 }
 
@@ -61,18 +45,11 @@ export const useAudiobookScriptEditorActions = ({
   chapters,
   scriptEditorChapter,
   scriptEditorData,
-  timelineEdits,
-  ttsModel,
-  narrationStyle,
-  narrationStylePrompt,
-  outputFormat,
-  generateSubtitle,
-  ensureCurrentTtsModelReady,
+  refreshAudiobookProjectDetail,
   resetScriptEditorTransientState,
   resetSegmentPreviewState,
   removeCurrentEditorSyncEntry,
   stopManagedPlayback,
-  activateQueuedAudiobookTask,
   setScriptEditorDialogOpen,
   setScriptEditorChapter,
   setScriptEditorData,
@@ -80,7 +57,6 @@ export const useAudiobookScriptEditorActions = ({
   setSmartChunkPreview,
   setSmartChunkPreviewLoading,
   setTimelineEdits,
-  setTaskPointsPrecheckError,
   setSnackbar,
 }: UseAudiobookScriptEditorActionsParams) => {
   const handleOpenScriptEditor = useCallback(async (chapterId: number) => {
@@ -148,13 +124,10 @@ export const useAudiobookScriptEditorActions = ({
 
   const handleSaveScript = useCallback(async (options: {
     nextStatus?: 'reviewed' | 'approved'
-    generateAudio?: boolean
   }) => {
     if (!audiobookProject || !scriptEditorChapter || !scriptEditorData) return
-    if (options.generateAudio && !ensureCurrentTtsModelReady()) return
 
     try {
-      setTaskPointsPrecheckError(null)
       resetSegmentPreviewState()
       setScriptEditorLoading(true)
 
@@ -167,62 +140,45 @@ export const useAudiobookScriptEditorActions = ({
         ),
       )
 
-      if (options.generateAudio) {
-        const queueResponse = await apiClient.generateAudioFromScripts(
-          audiobookProject.id,
-          buildGenerateAudioFromScriptPayload({
-            chapterId: scriptEditorChapter.chapterId,
-            ttsModel,
-            narrationStyle,
-            narrationStylePrompt,
-            outputFormat,
-            generateSubtitle,
-            timelineEdits,
-          }),
-        )
-
-        const jobId = extractQueuedAudiobookJobId(queueResponse.data)
-        if (!jobId) {
-          throw new Error('音频生成任务未返回 job_id')
-        }
-
-        await activateQueuedAudiobookTask(audiobookProject.id, jobId, {
-          generationMode: 'full',
-          successMessage: '剧本已保存，并已触发该章节音频生成',
-        })
-      } else {
-        setSnackbar({ open: true, message: '剧本已保存', severity: 'success' })
+      if (options.nextStatus) {
+        setScriptEditorData((current) => current
+          ? { ...current, scriptStatus: options.nextStatus as 'reviewed' | 'approved' }
+          : current)
       }
-    } catch (err: unknown) {
-      const precheckDetail = await extractTaskPointsPrecheckErrorDetail(err)
-      setTaskPointsPrecheckError(precheckDetail)
-      const message = precheckDetail
-        ? describeTaskPointsPrecheckErrorDetail(precheckDetail)
-        : await extractApiErrorMessage(err, '保存失败，请稍后重试')
+
+      try {
+        await refreshAudiobookProjectDetail(audiobookProject.id)
+      } catch {
+        setSnackbar({
+          open: true,
+          message: '剧本已保存，但项目状态刷新失败，请重新打开项目',
+          severity: 'warning',
+        })
+        return
+      }
       setSnackbar({
         open: true,
-        message: message || '保存失败，请稍后重试',
+        message: options.nextStatus === 'approved' ? '剧本已批准' : '剧本已保存',
+        severity: 'success',
+      })
+    } catch (err: unknown) {
+      setSnackbar({
+        open: true,
+        message: await extractApiErrorMessage(err, '保存失败，请稍后重试'),
         severity: 'error',
       })
     } finally {
       setScriptEditorLoading(false)
     }
   }, [
-    activateQueuedAudiobookTask,
     audiobookProject,
-    ensureCurrentTtsModelReady,
-    generateSubtitle,
-    narrationStyle,
-    narrationStylePrompt,
-    outputFormat,
+    refreshAudiobookProjectDetail,
     resetSegmentPreviewState,
     scriptEditorChapter,
     scriptEditorData,
-    timelineEdits,
+    setScriptEditorData,
     setScriptEditorLoading,
     setSnackbar,
-    setTaskPointsPrecheckError,
-    ttsModel,
   ])
 
   const handlePreviewSmartChunking = useCallback(async () => {

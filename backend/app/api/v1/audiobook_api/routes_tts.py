@@ -1,13 +1,18 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import logging
+from pathlib import Path
 from typing import Optional
 
 from fastapi import Depends, File, Form, HTTPException, Response, UploadFile, status
+from starlette.concurrency import run_in_threadpool
 
 from app.core.security import get_current_user
+from app.db.base import get_db
 from app.models.user import User
+from app.models.voice_reference_asset import VoiceReferenceAsset
 from app.schemas.audiobook import (
     TTSPromptTestPreviewRequest,
     TTSPromptTestPreviewResponse,
@@ -19,11 +24,14 @@ from app.schemas.audiobook import (
     MiMoVoiceCloneAssetCreateRequest,
     MiMoVoiceDesignAssetCreateRequest,
     StepAudioVoiceCloneAssetCreateRequest,
+    VoiceReferenceMaterializeRequest,
 )
 from app.services.audiobook.constants import normalize_speaker_id
 from app.services.audiobook.tts_engine import RetryConfig, TTSUserInputError
 from app.services.audiobook.tts_model_ids import (
     DEFAULT_AUDIOBOOK_TTS_MODEL,
+    MINIMAX_SPEECH_28_HD_MODEL,
+    MINIMAX_SPEECH_28_TURBO_MODEL,
     STEPAUDIO_25_TTS_MODEL,
     get_audiobook_tts_runtime_model_id,
     get_audiobook_tts_model_metadata,
@@ -47,11 +55,27 @@ from app.services.audiobook.stepaudio_voice_assets import (
     upload_stepaudio_voice_reference_file,
     validate_stepaudio_clone_audio_mime_type,
 )
+from app.services.audiobook.minimax_voice_clone_client import (
+    MiniMaxVoiceCloneError,
+    MiniMaxVoiceCloneStore,
+    build_minimax_voice_clone_billing,
+    create_minimax_voice_clone_from_bytes,
+    list_minimax_voice_clone_presets,
+)
 from app.services.audiobook.tts_preview_cache import (
     _build_preview_cache_key,
     check_oss_preview_exists,
     upload_preview_to_oss,
 )
+from app.services.audiobook.voice_reference_asset_repository import (
+    get_active_voice_reference_asset,
+    persist_user_generated_voice_reference,
+    revoke_voice_reference_asset,
+)
+from app.services.audiobook.voice_asset_billing_ledger_repository import (
+    record_voice_billing_event,
+)
+from sqlalchemy.orm import Session
 from app.services.audiobook.tts_test_unit import build_tts_test_catalog, get_tts_test_case
 from app.services.audiobook.audio_asset_cloud_storage import get_audio_library_storage_driver
 from app.services.audiobook.cosyvoice_clone_client import (
@@ -61,6 +85,7 @@ from app.services.audiobook.cosyvoice_clone_client import (
     create_cosyvoice_v3_plus_design,
     delete_cosyvoice_clone,
     get_clone_display_name,
+    get_clone_owner_user_id,
     is_cosyvoice_v35_plus_voice_id,
     list_cosyvoice_v3_plus_clones,
     save_clone_display_name,
@@ -79,6 +104,10 @@ logger = logging.getLogger(__name__)
 DEFAULT_TTS_MODEL = DEFAULT_AUDIOBOOK_TTS_MODEL
 DEFAULT_STEPAUDIO_CLONE_PREVIEW_TEXT = "当你真的喜欢一个人的时候就容易说傻话办蠢事。"
 DEFAULT_STEPAUDIO_CLONE_PREVIEW_INSTRUCTION = "语气自然，语速中等，保持参考音色特征。"
+DEFAULT_VOICE_REFERENCE_PREVIEW_TEXT = (
+    "清晨的风从窗外吹进来，我停下脚步，轻声说：别担心，我们会找到答案。"
+)
+VOICE_REFERENCE_PREVIEW_SCHEMA_VERSION = "voice-reference-preview-v1"
 
 _PREVIEW_RETRY_CONFIG = RetryConfig(
     max_retries=4,
@@ -87,6 +116,145 @@ _PREVIEW_RETRY_CONFIG = RetryConfig(
     exponential_base=2.0,
     jitter=True,
 )
+
+
+def _register_user_generated_voice_asset(
+    *,
+    db: Session | object,
+    asset: object,
+    owner_user_id: int,
+    provider: str,
+    source_model: str,
+    source_voice_id: str,
+    root_dir: Path,
+) -> None:
+    """将本地设计/复刻资产登记到私有参考资产表；登记失败不回滚已保存的本地资产。"""
+    asset_type = str(getattr(asset, "asset_type", "") or "").strip().lower()
+    relative_audio_path = str(getattr(asset, "audio_path", "") or "").strip()
+    storage_path = (root_dir / relative_audio_path).resolve() if relative_audio_path else None
+    storage_uri = str(storage_path) if storage_path and storage_path.exists() else None
+    sha256 = None
+    if storage_path and storage_path.exists():
+        sha256 = hashlib.sha256(storage_path.read_bytes()).hexdigest()
+
+    if not isinstance(db, Session):
+        return
+    try:
+        persist_user_generated_voice_reference(
+            db,
+            owner_user_id=owner_user_id,
+            provider=provider,
+            source_model=source_model,
+            source_voice_id=source_voice_id,
+            authorization_basis="synthetic_design" if asset_type == "design" else "synthetic_source",
+            storage_uri=storage_uri,
+            sha256=sha256,
+            content_type=str(getattr(asset, "mime_type", "") or "") or None,
+            metadata={
+                "local_asset_id": str(getattr(asset, "id", "") or ""),
+                "display_name": str(getattr(asset, "name", "") or ""),
+            },
+        )
+        db.commit()
+    except Exception:  # pragma: no cover - 数据库不可用时不破坏音色创建结果
+        logger.warning("登记用户音色参考资产失败", exc_info=True)
+        db.rollback()
+
+
+def _register_remote_user_generated_voice(
+    *,
+    db: Session | object,
+    owner_user_id: int,
+    provider: str,
+    source_model: str,
+    source_voice_id: str,
+    authorization_basis: str,
+    source_url: str = "",
+    display_name: str = "",
+) -> None:
+    if not isinstance(db, Session):
+        return
+    try:
+        persist_user_generated_voice_reference(
+            db,
+            owner_user_id=owner_user_id,
+            provider=provider,
+            source_model=source_model,
+            source_voice_id=source_voice_id,
+            authorization_basis=authorization_basis,
+            storage_uri=source_url or None,
+            source_url=source_url or None,
+            metadata={"display_name": display_name},
+        )
+        db.commit()
+    except Exception:  # pragma: no cover - 供应商成功结果不能被登记故障回滚
+        logger.warning("登记远程用户音色参考资产失败", exc_info=True)
+        db.rollback()
+
+
+def _revoke_registered_user_voice(
+    *,
+    db: Session | object,
+    owner_user_id: int,
+    source_voice_id: str,
+) -> None:
+    if not isinstance(db, Session):
+        return
+    try:
+        asset = (
+            db.query(VoiceReferenceAsset)
+            .filter(
+                VoiceReferenceAsset.owner_user_id == owner_user_id,
+                VoiceReferenceAsset.source_voice_id == source_voice_id,
+                VoiceReferenceAsset.revoked_at.is_(None),
+                VoiceReferenceAsset.deleted_at.is_(None),
+            )
+            .first()
+        )
+        if asset is None:
+            return
+        revoke_voice_reference_asset(
+            db,
+            asset_id=asset.asset_id,
+            owner_user_id=owner_user_id,
+            revoked_by_user_id=owner_user_id,
+            reason="用户删除自定义音色",
+        )
+        db.commit()
+    except Exception:  # pragma: no cover - 删除主流程不因审计回写失败而反转
+        logger.warning("撤销用户参考音色登记失败", exc_info=True)
+        db.rollback()
+
+
+def _voice_reference_cost_quote(*, model: str, text: str) -> dict[str, object]:
+    metadata = get_audiobook_tts_model_metadata(model)
+    price_per_10k = float(metadata.get("price_per_10k") or 0.0)
+    estimated_cost = round(price_per_10k * len(text) / 10000.0, 6)
+    pricing_status = str(metadata.get("pricing_status") or "unknown")
+    return {
+        "model": model,
+        "model_name": str(metadata.get("name") or model),
+        "price_per_10k_yuan": price_per_10k,
+        "estimated_cost_yuan": estimated_cost,
+        "pricing_status": pricing_status,
+        "pricing_basis": str(metadata.get("pricing_basis") or "public_list_price"),
+        "billing_notice": (
+            f"本次标准参考试听按公开后付费价 {price_per_10k:g} 元/万字符估算，"
+            f"约 {estimated_cost:.6f} 元；缓存命中后不会重复生成。"
+            if price_per_10k > 0
+            else "当前模型公开价为限时免费；仍需确认后才会调用模型生成标准参考试听。"
+        ),
+    }
+
+
+def _existing_voice_reference_uri(asset: object) -> str:
+    uri = str(getattr(asset, "storage_uri", "") or "").strip()
+    if not uri:
+        return ""
+    if uri.startswith(("http://", "https://", "oss://")):
+        return uri
+    path = Path(uri)
+    return uri if path.exists() else ""
 
 
 def _is_cosyvoice_v35_model(model: str) -> bool:
@@ -242,7 +410,12 @@ def _resolve_preview_speaker_id(request: TTSPreviewRequest, model_name: str) -> 
     return speaker_id
 
 
-def _build_preview_voice_params(request: TTSPreviewRequest, speaker_id: str) -> dict:
+def _build_preview_voice_params(
+    request: TTSPreviewRequest,
+    speaker_id: str,
+    *,
+    owner_user_id: int | None = None,
+) -> dict:
     base_params = {
         "volume": request.volume,
         "speed": request.speed,
@@ -297,7 +470,10 @@ def _build_preview_voice_params(request: TTSPreviewRequest, speaker_id: str) -> 
     if mimo_voice_asset_id:
         voice_params["mimo_voice_asset_id"] = mimo_voice_asset_id
         try:
-            voice_params = merge_mimo_voice_asset_tts_params(voice_params)
+            voice_params = merge_mimo_voice_asset_tts_params(
+                voice_params,
+                owner_user_id=owner_user_id,
+            )
         except MiMoVoiceAssetError as exc:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
@@ -310,7 +486,10 @@ def _build_preview_voice_params(request: TTSPreviewRequest, speaker_id: str) -> 
     if stepaudio_voice_asset_id:
         voice_params["stepaudio_voice_asset_id"] = stepaudio_voice_asset_id
         try:
-            voice_params = merge_stepaudio_voice_asset_tts_params(voice_params)
+            voice_params = merge_stepaudio_voice_asset_tts_params(
+                voice_params,
+                owner_user_id=owner_user_id,
+            )
         except StepAudioVoiceAssetError as exc:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
@@ -347,6 +526,8 @@ async def _synthesize_preview_payload(
 def _build_prompt_test_voice_params(
     request: TTSPromptTestPreviewRequest,
     test_case: dict,
+    *,
+    owner_user_id: int | None = None,
 ) -> tuple[str, dict]:
     model_name = str(test_case["model"])
     voice_id = str(request.voice_id or "").strip()
@@ -379,7 +560,10 @@ def _build_prompt_test_voice_params(
     if mimo_asset_id:
         voice_params["mimo_voice_asset_id"] = mimo_asset_id
         try:
-            voice_params = merge_mimo_voice_asset_tts_params(voice_params)
+            voice_params = merge_mimo_voice_asset_tts_params(
+                voice_params,
+                owner_user_id=owner_user_id,
+            )
         except MiMoVoiceAssetError as exc:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
@@ -389,7 +573,10 @@ def _build_prompt_test_voice_params(
     if stepaudio_asset_id:
         voice_params["stepaudio_voice_asset_id"] = stepaudio_asset_id
         try:
-            voice_params = merge_stepaudio_voice_asset_tts_params(voice_params)
+            voice_params = merge_stepaudio_voice_asset_tts_params(
+                voice_params,
+                owner_user_id=owner_user_id,
+            )
         except StepAudioVoiceAssetError as exc:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
@@ -417,7 +604,11 @@ async def preview_tts_prompt_test_case(
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
-    voice_id, voice_params = _build_prompt_test_voice_params(request, test_case)
+    voice_id, voice_params = _build_prompt_test_voice_params(
+        request,
+        test_case,
+        owner_user_id=int(current_user.id),
+    )
     try:
         payload = await _synthesize_preview_payload(
             text=str(test_case["text"]),
@@ -477,7 +668,11 @@ async def tts_preview(
     text = _resolve_preview_text(request, model_name)
     preview_retry = _PREVIEW_RETRY_CONFIG
     speaker_id = _resolve_preview_speaker_id(request, model_name)
-    voice_params = _build_preview_voice_params(request, speaker_id)
+    voice_params = _build_preview_voice_params(
+        request,
+        speaker_id,
+        owner_user_id=int(current_user.id),
+    )
 
     try:
         audio_bytes = await runtime_synthesize_speech(
@@ -526,7 +721,11 @@ async def tts_preview_cached(
     model_name = _resolve_preview_model_name(request)
     text = _resolve_preview_text(request, model_name)
     speaker_id = _resolve_preview_speaker_id(request, model_name)
-    voice_params = _build_preview_voice_params(request, speaker_id)
+    voice_params = _build_preview_voice_params(
+        request,
+        speaker_id,
+        owner_user_id=int(current_user.id),
+    )
 
     # 构建缓存键
     cache_key = _build_preview_cache_key(
@@ -626,6 +825,199 @@ async def tts_preview_cached(
     }
 
 
+@router.post("/tts/voice-references/materialize")
+async def materialize_voice_reference_preview(
+    request: VoiceReferenceMaterializeRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """按当前用户私有音色生成一次标准参考试听，并写入可复用缓存。"""
+    asset = get_active_voice_reference_asset(
+        db,
+        asset_id=request.source_asset_id,
+        owner_user_id=int(current_user.id),
+    )
+    if asset is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="音色参考资产不存在、已撤销或不属于当前用户",
+        )
+
+    existing_uri = _existing_voice_reference_uri(asset)
+    if (
+        existing_uri
+        and str((asset.metadata_json or {}).get("preview_schema_version") or "")
+        == VOICE_REFERENCE_PREVIEW_SCHEMA_VERSION
+    ):
+        return {
+            "source_asset_id": asset.asset_id,
+            "reference_audio_uri": existing_uri,
+            "cache_hit": True,
+            "requires_cost_confirmation": False,
+            "generated": False,
+        }
+
+    model_name = normalize_audiobook_tts_model(asset.source_model or "", default="")
+    source_voice_id = str(asset.source_voice_id or "").strip()
+    if not model_name or not source_voice_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="音色缺少 source_model 或 source_voice_id，无法生成标准参考试听",
+        )
+
+    preview_request = TTSPreviewRequest(
+        text=DEFAULT_VOICE_REFERENCE_PREVIEW_TEXT,
+        voice_id=source_voice_id,
+        model=model_name,
+        volume=50,
+        speed=1.0,
+        pitch=50,
+    )
+    speaker_id = _resolve_preview_speaker_id(preview_request, model_name)
+    voice_params = _build_preview_voice_params(
+        preview_request,
+        speaker_id,
+        owner_user_id=int(current_user.id),
+    )
+    cache_key = _build_preview_cache_key(
+        model=model_name,
+        voice_id=speaker_id,
+        text=DEFAULT_VOICE_REFERENCE_PREVIEW_TEXT,
+        volume=50,
+        speed=1.0,
+        pitch=50,
+        emotion=str(voice_params.get("emotion") or "neutral"),
+        voice_params=voice_params,
+    )
+
+    cached_format = "mp3"
+    cached_url = check_oss_preview_exists(cache_key, ext=cached_format)
+    if not cached_url:
+        cached_format = "wav"
+        cached_url = check_oss_preview_exists(cache_key, ext=cached_format)
+    if cached_url:
+        asset.reference_field = "audio_url"
+        asset.source_preview_cache_key = cache_key
+        asset.storage_uri = cached_url
+        asset.source_url = cached_url
+        asset.content_type = "audio/wav" if cached_format == "wav" else "audio/mpeg"
+        asset.metadata_json = {
+            **dict(asset.metadata_json or {}),
+            "preview_schema_version": VOICE_REFERENCE_PREVIEW_SCHEMA_VERSION,
+            "preview_text": DEFAULT_VOICE_REFERENCE_PREVIEW_TEXT,
+        }
+        db.commit()
+        return {
+            "source_asset_id": asset.asset_id,
+            "reference_audio_uri": cached_url,
+            "cache_hit": True,
+            "requires_cost_confirmation": False,
+            "generated": False,
+        }
+
+    quote = _voice_reference_cost_quote(
+        model=model_name,
+        text=DEFAULT_VOICE_REFERENCE_PREVIEW_TEXT,
+    )
+    if not request.confirm_cost:
+        return {
+            "source_asset_id": asset.asset_id,
+            "reference_audio_uri": None,
+            "cache_hit": False,
+            "requires_cost_confirmation": True,
+            "generated": False,
+            "preview_text": DEFAULT_VOICE_REFERENCE_PREVIEW_TEXT,
+            "cost_quote": quote,
+        }
+
+    try:
+        audio_bytes = await runtime_synthesize_speech(
+            text=DEFAULT_VOICE_REFERENCE_PREVIEW_TEXT,
+            voice_params=voice_params,
+            emotion=str(voice_params.get("emotion") or "neutral"),
+            model_id=model_name,
+            enable_cache=False,
+            max_concurrent=1,
+            request_delay=0.0,
+            retry_config=_PREVIEW_RETRY_CONFIG,
+        )
+    except TTSUserInputError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "message": str(exc),
+                "code": getattr(exc, "code", "tts_user_input_error"),
+                "retryable": False,
+            },
+        ) from exc
+    except Exception as exc:
+        logger.warning("生成标准参考试听失败: asset=%s", asset.asset_id, exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"message": "标准参考试听生成失败，请稍后重试", "retryable": True},
+        ) from exc
+    if not audio_bytes:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"message": "模型未返回标准参考试听", "retryable": True},
+        )
+
+    response_format = "wav" if audio_bytes.startswith(b"RIFF") else "mp3"
+    content_type = "audio/wav" if response_format == "wav" else "audio/mpeg"
+    reference_uri = upload_preview_to_oss(
+        audio_bytes=audio_bytes,
+        cache_key=cache_key,
+        response_format=response_format,
+    )
+    storage_kind = "oss"
+    if not reference_uri:
+        output_dir = Path("backend/data/voice_references") / f"user_{int(current_user.id)}"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        output_path = output_dir / f"{asset.asset_id}.{response_format}"
+        output_path.write_bytes(audio_bytes)
+        reference_uri = str(output_path.resolve())
+        storage_kind = "local_private"
+
+    asset.reference_field = "audio_url" if reference_uri.startswith(("http://", "https://")) else "audio_data"
+    asset.source_preview_cache_key = cache_key
+    asset.storage_uri = reference_uri
+    asset.source_url = reference_uri if reference_uri.startswith(("http://", "https://")) else None
+    asset.sha256 = hashlib.sha256(audio_bytes).hexdigest()
+    asset.file_size = len(audio_bytes)
+    asset.content_type = content_type
+    asset.metadata_json = {
+        **dict(asset.metadata_json or {}),
+        "preview_schema_version": VOICE_REFERENCE_PREVIEW_SCHEMA_VERSION,
+        "preview_text": DEFAULT_VOICE_REFERENCE_PREVIEW_TEXT,
+        "storage_kind": storage_kind,
+    }
+    record_voice_billing_event(
+        db,
+        provider=str(asset.provider or "tts"),
+        event_type="preview",
+        model=model_name,
+        voice_id=source_voice_id,
+        owner_user_id=int(current_user.id),
+        voice_asset_id=asset.asset_id,
+        billable=float(quote["price_per_10k_yuan"]) > 0,
+        fixed_fee_yuan=float(quote["estimated_cost_yuan"]),
+        metadata={
+            "pricing_basis": quote["pricing_basis"],
+            "preview_schema_version": VOICE_REFERENCE_PREVIEW_SCHEMA_VERSION,
+        },
+    )
+    db.commit()
+    return {
+        "source_asset_id": asset.asset_id,
+        "reference_audio_uri": reference_uri,
+        "cache_hit": False,
+        "requires_cost_confirmation": False,
+        "generated": True,
+        "preview_text": DEFAULT_VOICE_REFERENCE_PREVIEW_TEXT,
+        "cost_quote": quote,
+    }
+
+
 @router.post("/tts/preview-with-timestamps", response_model=TTSPreviewWithTimestampsResponse)
 async def tts_preview_with_timestamps(
     request: TTSPreviewWithTimestampsRequest,
@@ -642,7 +1034,11 @@ async def tts_preview_with_timestamps(
 
     preview_retry = _PREVIEW_RETRY_CONFIG
     speaker_id = _resolve_preview_speaker_id(request, model_name)
-    voice_params = _build_preview_voice_params(request, speaker_id)
+    voice_params = _build_preview_voice_params(
+        request,
+        speaker_id,
+        owner_user_id=int(current_user.id),
+    )
 
     try:
         payload = await _synthesize_preview_payload(
@@ -761,12 +1157,20 @@ async def list_tts_voices(
     catalog = load_voice_catalog_for_model(model)
     meta = catalog.get("meta") or {}
     voices = list(catalog.get("voices") or [])
+    owner_user_id = getattr(current_user, "id", None)
 
     # cosyvoice-v3.5-plus：官方静态目录为空，仅追加当前账号下的复刻/设计音色。
     if model == COSYVOICE_V35_PLUS_MODEL_ID:
         try:
             clones, _clone_meta = list_cosyvoice_v3_plus_clones()
-            voices.extend([c.to_voice_preset(get_clone_display_name(c.voice_id)) for c in clones])
+            voices.extend(
+                [
+                    c.to_voice_preset(get_clone_display_name(c.voice_id))
+                    for c in clones
+                    if owner_user_id is not None
+                    and get_clone_owner_user_id(c.voice_id) == int(owner_user_id)
+                ]
+            )
         except CosyVoiceCloneError as exc:
             # 未配置 API Key 等情况下，不阻塞页面继续使用其他模型
             logger.info(
@@ -775,8 +1179,23 @@ async def list_tts_voices(
                 exc,
             )
     else:
-        voices.extend(list_mimo_voice_asset_presets(model))
-        voices.extend(list_stepaudio_voice_asset_presets(model))
+        if (
+            owner_user_id is not None
+            and model in {MINIMAX_SPEECH_28_HD_MODEL, MINIMAX_SPEECH_28_TURBO_MODEL}
+        ):
+            voices.extend(
+                list_minimax_voice_clone_presets(
+                    owner_user_id=str(owner_user_id),
+                    model=model,
+                )
+            )
+        if owner_user_id is not None:
+            voices.extend(
+                list_mimo_voice_asset_presets(model, owner_user_id=int(owner_user_id))
+            )
+            voices.extend(
+                list_stepaudio_voice_asset_presets(model, owner_user_id=int(owner_user_id))
+            )
     return {
         "model": meta.get("model", DEFAULT_TTS_MODEL),
         "updated_at": meta.get("updated_at"),
@@ -786,10 +1205,118 @@ async def list_tts_voices(
     }
 
 
+@router.get("/tts/voices/minimax/clones")
+async def list_minimax_voice_clones(
+    model: str = MINIMAX_SPEECH_28_HD_MODEL,
+    current_user: User = Depends(get_current_user),
+):
+    """列出当前用户在本系统登记的 MiniMax 复刻音色。"""
+    try:
+        clones = MiniMaxVoiceCloneStore().list(
+            owner_user_id=str(current_user.id),
+            model=model,
+        )
+        return {
+            "clones": [clone.to_dict() for clone in clones],
+            "voices": [clone.to_voice_preset() for clone in clones],
+            "total": len(clones),
+            **build_minimax_voice_clone_billing(model),
+        }
+    except MiniMaxVoiceCloneError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@router.post("/tts/voices/minimax/clones/upload")
+async def create_minimax_voice_clone_from_upload(
+    file: UploadFile = File(...),
+    name: str = Form(...),
+    sample_text: str = Form(...),
+    model: str = Form(MINIMAX_SPEECH_28_HD_MODEL),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """上传授权样本并通过阿里云百炼创建真实 MiniMax 复刻音色。"""
+    try:
+        content = await file.read()
+        result = await run_in_threadpool(
+            create_minimax_voice_clone_from_bytes,
+            owner_user_id=str(current_user.id),
+            model=model,
+            name=name,
+            sample_text=sample_text,
+            filename=file.filename or "minimax-reference.wav",
+            content=content,
+            content_type=file.content_type or "",
+        )
+        clone = result["clone"]
+        preview_audio = bytes(result.get("preview_audio_bytes") or b"")
+        _register_remote_user_generated_voice(
+            db=db,
+            owner_user_id=int(current_user.id),
+            provider="minimax",
+            source_model=clone.model,
+            source_voice_id=clone.voice_id,
+            authorization_basis="synthetic_source",
+            source_url=str(result.get("preview_audio_url") or ""),
+            display_name=clone.name,
+        )
+        return {
+            "clone": clone.to_dict(),
+            "voice": clone.to_voice_preset(),
+            "voice_id": clone.voice_id,
+            "provider_request_id": clone.provider_request_id,
+            "preview_audio_data_base64": base64.b64encode(preview_audio).decode("ascii") if preview_audio else "",
+            "preview_audio_url": str(result.get("preview_audio_url") or ""),
+            "preview_audio_mime_type": "audio/mpeg",
+            **build_minimax_voice_clone_billing(model),
+        }
+    except MiniMaxVoiceCloneError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    finally:
+        try:
+            await file.close()
+        except Exception as exc:
+            logger.debug(
+                "关闭 MiniMax 复刻上传文件失败，已忽略清理错误: filename=%s error=%s",
+                file.filename,
+                exc,
+            )
+
+
+@router.delete("/tts/voices/minimax/clones/{voice_id}")
+async def remove_minimax_voice_clone_from_local_catalog(
+    voice_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """仅从本系统用户音色目录移除；不会删除百炼账号中的云端音色。"""
+    try:
+        removed = MiniMaxVoiceCloneStore().remove(
+            owner_user_id=str(current_user.id),
+            voice_id=voice_id,
+        )
+        if not removed:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="MiniMax 复刻音色不存在")
+        _revoke_registered_user_voice(
+            db=db,
+            owner_user_id=int(current_user.id),
+            source_voice_id=voice_id,
+        )
+        return {
+            "removed": True,
+            "voice_id": voice_id,
+            "provider_deleted": False,
+            "message": "已从本系统音色目录移除，百炼账号中的云端音色未删除。",
+        }
+    except MiniMaxVoiceCloneError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
 @router.post("/tts/voices/cosyvoice-v3.5-plus/clones")
 async def create_cosyvoice_v3_plus_voice_clone(
     request: CosyVoiceCloneCreateRequest,
     current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
 ):
     """创建 cosyvoice-v3.5-plus 复刻音色。
 
@@ -802,7 +1329,20 @@ async def create_cosyvoice_v3_plus_voice_clone(
 
         prefix = (request.prefix or "").strip() or _build_cosyvoice_voice_prefix(display_name, current_user)
         result = create_cosyvoice_v3_plus_clone(prefix=prefix, audio_url=request.url)
-        save_clone_display_name(voice_id=result.get("voice_id", ""), display_name=display_name)
+        save_clone_display_name(
+            voice_id=result.get("voice_id", ""),
+            display_name=display_name,
+            owner_user_id=int(current_user.id),
+        )
+        _register_remote_user_generated_voice(
+            db=db,
+            owner_user_id=int(current_user.id),
+            provider="cosyvoice",
+            source_model=COSYVOICE_V35_PLUS_MODEL_ID,
+            source_voice_id=str(result.get("voice_id") or ""),
+            authorization_basis="synthetic_source",
+            display_name=display_name,
+        )
         result["display_name"] = display_name
         return result
     except CosyVoiceCloneError as exc:
@@ -813,6 +1353,7 @@ async def create_cosyvoice_v3_plus_voice_clone(
 async def create_cosyvoice_v3_plus_voice_design(
     request: CosyVoiceDesignCreateRequest,
     current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
 ):
     try:
         display_name = (request.name or "").strip()
@@ -827,7 +1368,21 @@ async def create_cosyvoice_v3_plus_voice_design(
             sample_rate=int(request.sample_rate or 24000),
             response_format=str(request.response_format or "wav"),
         )
-        save_clone_display_name(voice_id=result.get("voice_id", ""), display_name=display_name)
+        save_clone_display_name(
+            voice_id=result.get("voice_id", ""),
+            display_name=display_name,
+            owner_user_id=int(current_user.id),
+        )
+        _register_remote_user_generated_voice(
+            db=db,
+            owner_user_id=int(current_user.id),
+            provider="cosyvoice",
+            source_model=COSYVOICE_V35_PLUS_MODEL_ID,
+            source_voice_id=str(result.get("voice_id") or ""),
+            authorization_basis="synthetic_design",
+            source_url=str(result.get("preview_audio") or result.get("preview_audio_url") or ""),
+            display_name=display_name,
+        )
         result["display_name"] = display_name
         return result
     except CosyVoiceCloneError as exc:
@@ -885,6 +1440,7 @@ async def list_cosyvoice_v3_plus_voice_clones(
                     "display_name": get_clone_display_name(c.voice_id),
                 }
                 for c in clones
+                if get_clone_owner_user_id(c.voice_id) == int(current_user.id)
             ],
         }
     except CosyVoiceCloneError as exc:
@@ -895,10 +1451,23 @@ async def list_cosyvoice_v3_plus_voice_clones(
 async def delete_cosyvoice_v3_plus_voice_clone(
     voice_id: str,
     current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
 ):
     """删除 cosyvoice-v3.5-plus 复刻音色。"""
+    owner_user_id = get_clone_owner_user_id(voice_id)
+    if owner_user_id != int(current_user.id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="不能删除其他用户或未确认归属的 CosyVoice 音色",
+        )
     try:
-        return delete_cosyvoice_clone(voice_id=voice_id)
+        result = delete_cosyvoice_clone(voice_id=voice_id)
+        _revoke_registered_user_voice(
+            db=db,
+            owner_user_id=int(current_user.id),
+            source_voice_id=voice_id,
+        )
+        return result
     except CosyVoiceCloneError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
@@ -909,9 +1478,11 @@ async def list_mimo_voice_assets(
     current_user: User = Depends(get_current_user),
 ):
     """列出 MiMo 本地可复用音色资产。"""
-    del current_user
     try:
-        assets = MiMoVoiceAssetStore().list_assets(model=model)
+        assets = MiMoVoiceAssetStore().list_assets(
+            model=model,
+            owner_user_id=int(current_user.id),
+        )
         return {
             "assets": [asset.to_dict() for asset in assets],
             "voices": [asset.to_voice_preset() for asset in assets],
@@ -925,14 +1496,24 @@ async def list_mimo_voice_assets(
 async def create_mimo_voice_clone_asset(
     request: MiMoVoiceCloneAssetCreateRequest,
     current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
 ):
     """保存 MiMo Voice Clone 本地音频样本资产。"""
-    del current_user
     try:
         asset = MiMoVoiceAssetStore().create_clone_asset(
             name=request.name,
             audio_data_url=request.audio_data_url,
             description=request.description or "",
+            owner_user_id=int(current_user.id),
+        )
+        _register_user_generated_voice_asset(
+            db=db,
+            asset=asset,
+            owner_user_id=int(current_user.id),
+            provider="mimo",
+            source_model=asset.model,
+            source_voice_id=f"mimo_clone:{asset.id}",
+            root_dir=MiMoVoiceAssetStore().root_dir,
         )
         return {"asset": asset.to_dict(), "voice": asset.to_voice_preset()}
     except MiMoVoiceAssetError as exc:
@@ -944,15 +1525,25 @@ async def upload_mimo_voice_clone_asset(
     name: str = Form(...),
     file: UploadFile = File(...),
     current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
 ):
     """上传本地音频并保存为 MiMo Voice Clone 本地音色资产。"""
-    del current_user
     try:
         content = await file.read()
         asset = MiMoVoiceAssetStore().create_clone_asset_from_bytes(
             name=name,
             audio_bytes=content,
             mime_type=file.content_type or "",
+            owner_user_id=int(current_user.id),
+        )
+        _register_user_generated_voice_asset(
+            db=db,
+            asset=asset,
+            owner_user_id=int(current_user.id),
+            provider="mimo",
+            source_model=asset.model,
+            source_voice_id=f"mimo_clone:{asset.id}",
+            root_dir=MiMoVoiceAssetStore().root_dir,
         )
         return {"asset": asset.to_dict(), "voice": asset.to_voice_preset()}
     except MiMoVoiceAssetError as exc:
@@ -972,14 +1563,24 @@ async def upload_mimo_voice_clone_asset(
 async def create_mimo_voice_design_asset(
     request: MiMoVoiceDesignAssetCreateRequest,
     current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
 ):
     """保存 MiMo Voice Design 本地声音描述资产。"""
-    del current_user
     try:
         asset = MiMoVoiceAssetStore().create_design_asset(
             name=request.name,
             voice_design_prompt=request.voice_design_prompt,
             description=request.description or "",
+            owner_user_id=int(current_user.id),
+        )
+        _register_user_generated_voice_asset(
+            db=db,
+            asset=asset,
+            owner_user_id=int(current_user.id),
+            provider="mimo",
+            source_model=asset.model,
+            source_voice_id=f"mimo_design:{asset.id}",
+            root_dir=MiMoVoiceAssetStore().root_dir,
         )
         return {"asset": asset.to_dict(), "voice": asset.to_voice_preset()}
     except MiMoVoiceAssetError as exc:
@@ -990,13 +1591,25 @@ async def create_mimo_voice_design_asset(
 async def delete_mimo_voice_asset(
     asset_id: str,
     current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
 ):
     """删除 MiMo 本地音色资产。"""
-    del current_user
     try:
-        deleted = MiMoVoiceAssetStore().delete_asset(asset_id)
+        deleted = MiMoVoiceAssetStore().delete_asset(
+            asset_id,
+            owner_user_id=int(current_user.id),
+        )
         if not deleted:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="MiMo voice asset not found")
+        _revoke_registered_user_voice(
+            db=db,
+            owner_user_id=int(current_user.id),
+            source_voice_id=(
+                asset_id
+                if asset_id.startswith(("mimo_clone:", "mimo_design:"))
+                else f"{'mimo_design' if asset_id.startswith('mimo_design_') else 'mimo_clone'}:{asset_id}"
+            ),
+        )
         return {"deleted": True, "asset_id": asset_id}
     except MiMoVoiceAssetError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
@@ -1008,9 +1621,11 @@ async def list_stepaudio_voice_assets(
     current_user: User = Depends(get_current_user),
 ):
     """列出 StepAudio 本地复刻参考样本资产。"""
-    del current_user
     try:
-        assets = StepAudioVoiceAssetStore().list_assets(model=model)
+        assets = StepAudioVoiceAssetStore().list_assets(
+            model=model,
+            owner_user_id=int(current_user.id),
+        )
         return {
             "assets": [asset.to_dict() for asset in assets],
             "voices": [asset.to_voice_preset() for asset in assets],
@@ -1030,7 +1645,6 @@ async def create_stepaudio_voice_clone_asset(
     当前官方资料只给出 /audio/voices/preview 使用 file_id 的合同，未给出正式音色创建接口；
     因此该接口只保存可复用的本地参考资产元数据，不伪造正式 voice_id。
     """
-    del current_user
     raise HTTPException(
         status_code=status.HTTP_400_BAD_REQUEST,
         detail="StepAudio clone asset requires an uploaded mp3/wav sample; use /clone-assets/upload",
@@ -1048,7 +1662,6 @@ async def preview_stepaudio_voice_clone_asset(
     current_user: User = Depends(get_current_user),
 ):
     """Preview a StepAudio Voice Clone sample before saving the local voice asset."""
-    del current_user
     try:
         del name
         content = await file.read()
@@ -1121,9 +1734,9 @@ async def upload_stepaudio_voice_clone_asset(
     file_id: str = Form(""),
     file: UploadFile = File(...),
     current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
 ):
     """上传本地音频并保存为 StepAudio Voice Clone 参考样本资产。"""
-    del current_user
     try:
         content = await file.read()
         validate_stepaudio_clone_audio_mime_type(file.content_type or "")
@@ -1140,6 +1753,16 @@ async def upload_stepaudio_voice_clone_asset(
             mime_type=file.content_type or "",
             sample_text=clean_sample_text,
             file_id=resolved_file_id,
+            owner_user_id=int(current_user.id),
+        )
+        _register_user_generated_voice_asset(
+            db=db,
+            asset=asset,
+            owner_user_id=int(current_user.id),
+            provider="stepaudio",
+            source_model=asset.model,
+            source_voice_id=f"stepaudio_clone:{asset.id}",
+            root_dir=StepAudioVoiceAssetStore().root_dir,
         )
         return {"asset": asset.to_dict(), "voice": asset.to_voice_preset()}
     except StepAudioVoiceAssetError as exc:
@@ -1159,13 +1782,23 @@ async def upload_stepaudio_voice_clone_asset(
 async def delete_stepaudio_voice_asset(
     asset_id: str,
     current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
 ):
     """删除 StepAudio 本地复刻参考样本资产。"""
-    del current_user
     try:
-        deleted = StepAudioVoiceAssetStore().delete_asset(asset_id)
+        deleted = StepAudioVoiceAssetStore().delete_asset(
+            asset_id,
+            owner_user_id=int(current_user.id),
+        )
         if not deleted:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="StepAudio voice asset not found")
+        _revoke_registered_user_voice(
+            db=db,
+            owner_user_id=int(current_user.id),
+            source_voice_id=(
+                asset_id if asset_id.startswith("stepaudio_clone:") else f"stepaudio_clone:{asset_id}"
+            ),
+        )
         return {"deleted": True, "asset_id": asset_id}
     except StepAudioVoiceAssetError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc

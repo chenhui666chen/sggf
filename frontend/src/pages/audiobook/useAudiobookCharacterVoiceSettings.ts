@@ -47,8 +47,12 @@ export const useAudiobookCharacterVoiceSettings = ({
     )
   }, [updateCharacterVoicesForCurrentModel])
 
-  const handleVoiceChange = useCallback((characterId: number, voiceId: string) => {
-    const preset = voicePresets.find((item) => item.id === voiceId)
+  const handleVoiceChange = useCallback((
+    characterId: number,
+    voiceId: string,
+    selectedPreset?: VoicePreset,
+  ) => {
+    const preset = selectedPreset || voicePresets.find((item) => item.id === voiceId)
     patchCharacterVoice(characterId, (current) => {
       const mimoVoiceAssetId = parseMimoVoiceAssetId(voiceId)
       const stepaudioVoiceAssetId = parseStepAudioVoiceAssetId(voiceId)
@@ -57,6 +61,11 @@ export const useAudiobookCharacterVoiceSettings = ({
         source: 'user',
         mimoVoiceAssetId,
         stepaudioVoiceAssetId,
+        referenceSource: preset?.referenceSource,
+        referenceAudioUrl: preset?.referenceAudioUrl,
+        voiceReferenceAssetId: preset?.voiceReferenceAssetId,
+        voicePoolPublicationId: preset?.voicePoolPublicationId,
+        ...(preset?.sourceModel ? { ttsModel: preset.sourceModel } : {}),
         ...(mimoVoiceAssetId ? { voiceCloneDataUrl: undefined, voiceDesignPrompt: undefined } : {}),
       }
       if (!current.voiceId && preset?.default_params) {

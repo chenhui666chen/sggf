@@ -16,6 +16,10 @@ from core.unified_llm_client import UnifiedLLMClient, get_llm_client
 logger = logging.getLogger(__name__)
 
 
+class ModelReroutedError(RuntimeError):
+    """锁定模型被 catalog guard 重路由（免费档 fail closed，禁止降级换模型）。"""
+
+
 class StreamingService:
     """
     流式输出服务
@@ -37,6 +41,7 @@ class StreamingService:
         temperature: float = 0.7,
         max_tokens: Optional[int] = None,
         max_retries: int = 3,
+        require_exact_model: bool = False,
     ) -> str:
         normalized_task_type = normalize_task_type(task_type)
         explicit_model = normalize_model_id(model)
@@ -48,6 +53,13 @@ class StreamingService:
         last_error: Optional[Exception] = None
 
         for attempt in range(max_retries):
+            # 🆕 锁定模型校验：每次尝试前重新解析，被重路由立即终止（不重试、不降级）
+            if require_exact_model and explicit_model:
+                current_resolved = resolve_model_for_task(normalized_task_type, explicit_model) or explicit_model
+                if current_resolved != explicit_model:
+                    raise ModelReroutedError(
+                        f"锁定模型 {explicit_model} 已被重路由为 {current_resolved}，终止生成"
+                    )
             chunk_index = 0
             collected: List[str] = []
 
@@ -107,6 +119,8 @@ class StreamingService:
         temperature: float = 0.7,
         model: Optional[str] = None,
         task_type: Optional[str] = None,
+        max_retries: int = 3,
+        require_exact_model: bool = False,
     ) -> str:
         messages = [
             {"role": "system", "content": system_prompt},
@@ -119,6 +133,8 @@ class StreamingService:
             temperature=temperature,
             model=model,
             task_type=task_type,
+            max_retries=max_retries,
+            require_exact_model=require_exact_model,
         )
 
 

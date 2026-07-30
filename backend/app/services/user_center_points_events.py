@@ -14,6 +14,7 @@ from app.models.user import User
 from app.services.points_pricing_policy import (
     build_points_business_settlement_snapshot,
     get_points_pricing_policy_snapshot,
+    resolve_module_user_price_rate,
 )
 from app.services.user_center_task_billing import build_user_center_task_billing_overview
 from app.utils.datetime_utils import ensure_utc_datetime, utc_now
@@ -645,6 +646,7 @@ def record_audiobook_billing_freeze(
     request_context: object | None = None,
     tts_pricing_key: str | None = None,
     extra_payload: dict[str, Any] | None = None,
+    estimated_yuan_override: float | None = None,
 ) -> AdminOperationLog | None:
     row = (
         db.query(
@@ -694,6 +696,9 @@ def record_audiobook_billing_freeze(
         selected_chapter_count = int(row.total_chapters or 0)
 
     effective_tts_pricing_key = _safe_text(tts_pricing_key, "") or row.tts_provider
+    normalized_estimated_yuan_override = _to_non_negative_float(
+        estimated_yuan_override
+    )
     synthetic_row = SimpleNamespace(
         id=row.id,
         project_id=row.project_id,
@@ -702,7 +707,7 @@ def record_audiobook_billing_freeze(
         tts_provider=effective_tts_pricing_key,
         total_chapters=selected_chapter_count,
         completed_chapters=0,
-        total_cost=0.0,
+        total_cost=normalized_estimated_yuan_override,
         created_at=utc_now(),
         updated_at=utc_now(),
     )
@@ -710,7 +715,11 @@ def record_audiobook_billing_freeze(
     task_billing = build_user_center_task_billing_overview(
         audiobook_rows=[synthetic_row],
         dreamweaver_rows=[],
-        chapter_rows=list(chapter_rows),
+        chapter_rows=(
+            []
+            if normalized_estimated_yuan_override > 0
+            else list(chapter_rows)
+        ),
         pricing_config=pricing_snapshot.config,
     )
     if not task_billing.items:
@@ -728,8 +737,11 @@ def record_audiobook_billing_freeze(
         "task_status": item.task_status,
         "chapter_ids": normalized_chapter_ids,
         "points_per_yuan": int(pricing_snapshot.config.points_per_yuan),
-        "user_price_basis": pricing_snapshot.config.user_price_basis,
-        "user_price_rate": round(float(pricing_snapshot.config.user_price_rate), 4),
+        "user_price_basis": "public_list_price",
+        "user_price_rate": resolve_module_user_price_rate(
+            pricing_config=pricing_snapshot.config,
+            module_key=POINTS_BILLING_MODULE_AUDIOBOOK,
+        ),
         "freeze_buffer_rate": round(float(pricing_snapshot.config.freeze_buffer_rate), 4),
         "operating_snapshot": _build_operating_snapshot_payload(
             pricing_snapshot=pricing_snapshot,
@@ -738,6 +750,10 @@ def record_audiobook_billing_freeze(
             provider_key=_safe_text(effective_tts_pricing_key, "") or None,
         ),
     }
+    if normalized_estimated_yuan_override > 0:
+        billing_payload["estimated_yuan_override"] = (
+            normalized_estimated_yuan_override
+        )
     billing_payload.update(_filter_audiobook_billing_freeze_trace_payload(extra_payload))
 
     return _create_points_billing_event_log(
@@ -849,8 +865,11 @@ def record_audiobook_billing_settle(
             "pricing_status": item.pricing_status,
             "task_status": item.task_status,
             "points_per_yuan": int(pricing_snapshot.config.points_per_yuan),
-            "user_price_basis": pricing_snapshot.config.user_price_basis,
-            "user_price_rate": round(float(pricing_snapshot.config.user_price_rate), 4),
+            "user_price_basis": "public_list_price",
+            "user_price_rate": resolve_module_user_price_rate(
+                pricing_config=pricing_snapshot.config,
+                module_key=POINTS_BILLING_MODULE_AUDIOBOOK,
+            ),
             "operating_snapshot": _build_operating_snapshot_payload(
                 pricing_snapshot=pricing_snapshot,
                 module_key=POINTS_BILLING_MODULE_AUDIOBOOK,

@@ -9,6 +9,18 @@ ReviewPreset = Literal["balanced_3", "key_chapter_5", "deep_7"]
 ReviewStrategyPreset = Optional[ReviewPreset]
 KeyChapterReviewPreset = Literal["key_chapter_5", "deep_7"]
 AutoReviewScenario = Literal["first_chapter", "key_chapter", "final_chapter"]
+ReviewChiefModel = Literal[
+    "qwen3.7-plus",
+    "deepseek-v4-pro",
+    "deepseek-v4-flash",
+    "doubao-seed-character",
+    "doubao-seed-evolving",
+    "glm-5.2",
+    "step-3.7-flash",
+    "kimi/kimi-k2.6",
+    "mimo-v2.5",
+    "mimo-v2.5-pro",
+]
 
 
 class ReviewAutoStrategy(BaseModel):
@@ -25,7 +37,7 @@ class MultiModelReviewConfig(BaseModel):
     manual_depth: ReviewPreset = "balanced_3"
     key_chapter_depth: KeyChapterReviewPreset = "key_chapter_5"
     auto_strategy: ReviewAutoStrategy = Field(default_factory=ReviewAutoStrategy)
-    chief_model: str = "deepseek-v4-pro"
+    chief_model: ReviewChiefModel = "deepseek-v4-pro"
     custom_panel: Optional[dict[str, Any]] = None
 
     @field_validator("auto_scenarios")

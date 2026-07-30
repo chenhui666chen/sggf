@@ -3,6 +3,9 @@ import sys
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+from fastapi import HTTPException
+
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
@@ -71,6 +74,74 @@ def test_request_voice_config_omits_unset_role_level_profiling_and_tuning_fields
         "voice_id": "Neil",
         "tts_model": "qwen3-tts-instruct-flash",
     }
+
+
+def test_private_reference_is_resolved_from_owned_database_asset(monkeypatch) -> None:
+    service = object.__new__(AudiobookAppService)
+    service.db = object()
+    service.current_user = SimpleNamespace(id=7)
+    def validate_references(_db, *, owner_user_id, voice_mapping):
+        assert owner_user_id == 7
+        voice_mapping["女主"].update(
+            {
+                "reference_audio_url": "https://oss.example.com/private/reference.mp3",
+                "voice_reference_owner_user_id": 7,
+                "voice_id": "mimo_design:owned",
+                "tts_model": "mimo-v2.5-tts-voicedesign",
+            }
+        )
+
+    monkeypatch.setattr(app_service_module, "validate_project_voice_references", validate_references)
+    voice_mapping = {}
+
+    service._apply_request_voice_config(
+        voice_mapping,
+        [
+            CharacterVoiceConfig(
+                character_name="女主",
+                voice_id="client-spoofed-id",
+                tts_model="client-spoofed-model",
+                reference_source="user_private",
+                reference_audio_url="https://attacker.example/spoof.mp3",
+                voice_reference_asset_id="ug-owned",
+            )
+        ],
+    )
+
+    assert voice_mapping["女主"] == {
+        "voice_id": "mimo_design:owned",
+        "tts_model": "mimo-v2.5-tts-voicedesign",
+        "reference_source": "user_private",
+        "reference_audio_url": "https://oss.example.com/private/reference.mp3",
+        "voice_reference_asset_id": "ug-owned",
+        "voice_reference_owner_user_id": 7,
+    }
+
+
+def test_private_reference_rejects_unowned_or_revoked_asset(monkeypatch) -> None:
+    service = object.__new__(AudiobookAppService)
+    service.db = object()
+    service.current_user = SimpleNamespace(id=7)
+    monkeypatch.setattr(
+        app_service_module,
+        "validate_project_voice_references",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(PermissionError("已撤销")),
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        service._apply_request_voice_config(
+            {},
+            [
+                CharacterVoiceConfig(
+                    character_name="女主",
+                    voice_id="private:foreign",
+                    reference_source="user_private",
+                    voice_reference_asset_id="ug-foreign",
+                )
+            ],
+        )
+
+    assert exc_info.value.status_code == 403
 
 
 def test_auto_assign_voices_only_assigns_explicitly_scoped_characters(monkeypatch) -> None:

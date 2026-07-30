@@ -35,11 +35,12 @@ class _DashScopeTTSAdapter(BaseAdapter):
         try:
             url = f"{DASHSCOPE_BASE}/api/v1/services/aigc/multimodal-generation/generation"
             headers = {"Authorization": f"Bearer {DASHSCOPE_API_KEY}", "Content-Type": "application/json"}
+            voice_id = str(kwargs.get("voice_id") or kwargs.get("speaker") or self.VOICE_ID).strip()
             payload = {
                 "model": self.MODEL_ID,
                 "input": {
                     "text": prompt or "这是一段测试语音。",
-                    "voice_setting": {"voice_id": self.VOICE_ID},
+                    "voice_setting": {"voice_id": voice_id},
                     "audio_setting": kwargs.get("audio_setting", {"sample_rate": 32000, "format": "mp3"}),
                 },
             }
@@ -295,4 +296,3 @@ class CosyVoiceV35PlusAdapter(BaseAdapter):
             id="cosyvoice-v3.5-plus", name="CosyVoice V3.5 Plus", provider="alibaba", version="v3.5",
             status=ModelStatus.ACTIVE, modality=["text_to_speech"], avg_latency_seconds=3.0,
         )
-

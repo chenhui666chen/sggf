@@ -2181,7 +2181,7 @@ const ScriptEditorDialog = ({
                 <Button
                   size="small"
                   variant="outlined"
-                  onClick={() => onSaveScript({ nextStatus: 'reviewed', generateAudio: false })}
+                  onClick={() => onSaveScript({ nextStatus: 'reviewed' })}
                   disabled={loading || !data}
                 >
                   保存
@@ -2189,11 +2189,11 @@ const ScriptEditorDialog = ({
                 <Button
                   size="small"
                   variant="contained"
-                  onClick={() => onSaveScript({ nextStatus: 'approved', generateAudio: true })}
+                  onClick={() => onSaveScript({ nextStatus: 'approved' })}
                   disabled={loading || !data}
                   sx={editorPrimaryActionSx}
                 >
-                  生成音频
+                  批准剧本
                 </Button>
               </Stack>
             </Box>

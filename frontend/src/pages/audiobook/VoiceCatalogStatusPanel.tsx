@@ -8,6 +8,7 @@ import {
 import CosyVoiceVoiceWorkbench from './CosyVoiceVoiceWorkbench'
 import type { CosyVoiceWorkbench } from './CosyVoiceVoiceWorkbench'
 import MimoVoiceAssetWorkbench from './MimoVoiceAssetWorkbench'
+import MiniMaxVoiceCloneWorkbench from './MiniMaxVoiceCloneWorkbench'
 import StepAudioVoiceCloneWorkbench from './StepAudioVoiceCloneWorkbench'
 import type {
   TtsModel,
@@ -64,6 +65,18 @@ const VoiceCatalogStatusPanel = ({
     </Alert>
     {showCustomVoiceWorkbench && ttsModel === 'cosyvoice-v3.5-plus' && (
       <CosyVoiceVoiceWorkbench {...cosyVoiceWorkbench} />
+    )}
+    {showCustomVoiceWorkbench && (
+      ttsModel === 'minimax-speech-2.8-hd'
+      || ttsModel === 'minimax-speech-2.8-turbo'
+    ) && (
+      <MiniMaxVoiceCloneWorkbench
+        ttsModel={ttsModel}
+        customVoicePresets={customVoicePresets}
+        previewingVoiceId={customVoicePreviewingId}
+        onPreviewCustomVoice={onPreviewCustomVoice}
+        onChanged={onFetchVoiceCatalog}
+      />
     )}
     {(ttsModel === 'mimo-v2.5-tts-voiceclone' || ttsModel === 'mimo-v2.5-tts-voicedesign') && (
       <MimoVoiceAssetWorkbench

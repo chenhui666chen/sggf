@@ -7,7 +7,7 @@ export const useAudiobookGenerationState = () => {
   const [taskStatuses, setTaskStatuses] = useState<Record<string, TaskStatus>>({})
   const [currentTaskId, setCurrentTaskId] = useState<string | null>(null)
   const [currentAudiobookProjectId, setCurrentAudiobookProjectId] = useState<number | null>(null)
-  const [lastGenerationMode, setLastGenerationMode] = useState<'full' | 'script_only'>('full')
+  const [lastGenerationMode, setLastGenerationMode] = useState<'full' | 'script_only'>('script_only')
   const [activeStep, setActiveStep] = useState(0)
 
   const clearActiveGenerationState = useCallback(() => {

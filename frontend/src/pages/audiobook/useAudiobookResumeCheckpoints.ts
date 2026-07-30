@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 
 import { apiClient } from '../../services/api'
+import { hasPlayableChapterAudio } from './completionViewUtils'
 import type {
   AudiobookProjectDetail,
   Chapter,
@@ -28,7 +29,7 @@ export const useAudiobookResumeCheckpoints = ({
     (): ChapterAudio[] => (Array.isArray(audiobookProject?.chapter_audios) ? audiobookProject.chapter_audios : []),
     [audiobookProject?.chapter_audios],
   )
-  const hasChapterAudios = currentChapterAudios.length > 0
+  const hasChapterAudios = hasPlayableChapterAudio(currentChapterAudios)
 
   const resumableChapterEntries = useMemo<ResumableChapterEntry[]>(() => {
     return currentChapterAudios

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
@@ -21,11 +22,15 @@ from app.services.audiobook.task_support import (
     serialize_dataclass_to_dict,
     update_chapter_run_state as _update_chapter_run_state,
 )
+from app.services.audiobook.tts_cost_utils import parse_tts_cost_yuan
 from app.services.audiobook.temp_segment_janitor import finalize_completed_chapter_run_temp_assets
 from app.services.user_center_points_events import (
     record_audiobook_billing_release,
     record_audiobook_billing_settle,
 )
+
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -166,10 +171,7 @@ def parse_duration_seconds(raw_value: Any) -> Optional[float]:
 
 
 def parse_estimated_cost(raw_value: Any) -> Optional[float]:
-    try:
-        return float(str(raw_value).replace("¥", "").replace("$", ""))
-    except Exception:
-        return None
+    return parse_tts_cost_yuan(raw_value)
 
 
 def apply_chapter_audio_generation_result(
@@ -219,7 +221,10 @@ def apply_chapter_audio_generation_result(
     if generation_time is not None:
         chapter_audio.generation_time = generation_time
 
-    cost = parse_estimated_cost(tts_stats.get("estimated_cost", "¥0.00"))
+    raw_cost = tts_stats.get("estimated_cost_yuan")
+    if raw_cost is None:
+        raw_cost = tts_stats.get("estimated_cost", "¥0.00")
+    cost = parse_estimated_cost(raw_cost)
     if cost is not None:
         chapter_audio.tts_cost = cost
 
@@ -270,6 +275,14 @@ def build_checkpoint_patch_from_generation_result(
     effect_timeline = result.get("effect_timeline")
     if isinstance(effect_timeline, dict) and isinstance(effect_timeline.get("timeline"), list):
         patch["effect_timeline"] = effect_timeline
+
+    scene_checkpoints = result.get("scene_checkpoints")
+    if isinstance(scene_checkpoints, dict) and scene_checkpoints:
+        patch["scene_checkpoints"] = {
+            str(scene_id): dict(checkpoint)
+            for scene_id, checkpoint in scene_checkpoints.items()
+            if scene_id is not None and isinstance(checkpoint, dict)
+        }
 
     temp_segment_cache = result.get("temp_segment_cache")
     if not isinstance(temp_segment_cache, dict):
@@ -586,6 +599,7 @@ def persist_chapter_run_tts_progress(
     total_segment_count: int,
     completed_segment_indices: List[int],
     temp_segment_cache: Optional[Dict[str, Any]],
+    scene_checkpoints: Optional[Dict[str, Any]] = None,
 ) -> None:
     if total_segment_count <= 0:
         return
@@ -605,11 +619,20 @@ def persist_chapter_run_tts_progress(
     )
 
     checkpoint_patch = build_checkpoint_patch_from_generation_result(
-        result={"temp_segment_cache": temp_segment_cache or {}},
+        result={
+            "temp_segment_cache": temp_segment_cache or {},
+            "scene_checkpoints": scene_checkpoints or {},
+        },
         task_id=task_id,
     )
     if normalized_completed_segment_indices:
         checkpoint_patch["completed_segment_indices"] = normalized_completed_segment_indices
+
+    current_stage = (
+        "scene_rendering"
+        if scene_checkpoints is not None
+        else "tts_synthesis"
+    )
 
     _update_chapter_run_state(
         db,
@@ -617,7 +640,7 @@ def persist_chapter_run_tts_progress(
         chapter_id=chapter_id,
         run_type=run_type,
         status="running",
-        current_stage="tts_synthesis",
+        current_stage=current_stage,
         progress=progress,
         total_segment_count=total_segment_count,
         completed_segment_count=completed_segment_count,
@@ -686,6 +709,7 @@ def prepare_chapter_generation_output_context(
             total_segment_count=int(payload.get("total_segments") or 0),
             completed_segment_indices=payload.get("completed_segment_indices") or [],
             temp_segment_cache=payload.get("temp_segment_cache"),
+            scene_checkpoints=payload.get("scene_checkpoints"),
         )
 
     return ChapterGenerationOutputContext(

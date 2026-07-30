@@ -8,7 +8,7 @@
  * 4. 进度监控
  * 5. 音频播放与下载
  */
-import { useMemo } from 'react'
+import { useCallback, useMemo } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import BrowserPlayer from '../components/audiobook/BrowserPlayer'
 import AudiobookCompletionStep from './audiobook/AudiobookCompletionStep'
@@ -51,6 +51,7 @@ import {
 } from './audiobook/useAudiobookProjectSelectionActions'
 import { useAudiobookReviewDialogs } from './audiobook/useAudiobookReviewDialogs'
 import { useAudiobookResumeCheckpoints } from './audiobook/useAudiobookResumeCheckpoints'
+import { useAudiobookRealtimeProgress } from './audiobook/useAudiobookRealtimeProgress'
 import { useAudiobookRouteProjectLoader } from './audiobook/useAudiobookRouteProjectLoader'
 import { useAudiobookRuntimeState } from './audiobook/useAudiobookRuntimeState'
 import { useAudiobookEditorConflictPreview } from './audiobook/useAudiobookEditorConflictPreview'
@@ -72,6 +73,8 @@ import { useAudiobookTextProjectImport } from './audiobook/useAudiobookTextProje
 import { useAudiobookTtsModelReadyGuard } from './audiobook/useAudiobookTtsModelReadyGuard'
 import { useAudiobookVoiceActions } from './audiobook/useAudiobookVoiceActions'
 import { useAudiobookVoiceCatalog } from './audiobook/useAudiobookVoiceCatalog'
+import { useAudiobookVoiceConfigAutosave } from './audiobook/useAudiobookVoiceConfigAutosave'
+import type { TtsModel, VoicePreset } from './audiobook/types'
 import { useCosyVoiceWorkbench } from './audiobook/useCosyVoiceWorkbench'
 import {
   AUDIOBOOK_SESSION_STORAGE_KEY,
@@ -80,6 +83,7 @@ import {
 import {
   readUserAssetSourceAudiobookRouteRequest,
 } from '../utils/userAssetSourceNavigation'
+import { applyAudiobookSceneProgress } from './audiobook/audiobookSceneProgress'
 import {
   Box,
   Container,
@@ -136,6 +140,8 @@ const AudiobookPage = () => {
   const {
     audioFxConfig,
     setAudioFxConfig,
+    audioEngineMode,
+    setAudioEngineMode,
     scriptOnlyMode,
     setScriptOnlyMode,
     ttsModel,
@@ -146,8 +152,6 @@ const AudiobookPage = () => {
     setNarrationStylePrompt,
     outputFormat,
     setOutputFormat,
-    generateSubtitle,
-    setGenerateSubtitle,
   } = useAudiobookSetupState()
   const {
     scriptEditorDialogOpen,
@@ -440,13 +444,18 @@ const AudiobookPage = () => {
     setSnackbar,
   })
 
-  const progressTaskStatus = useMemo(
-    () => activeTaskStatus ?? buildPendingTaskStatus({
+  const realtimeAudiobookProgress = useAudiobookRealtimeProgress({
+    audiobookProjectId: currentAudiobookProjectId ?? audiobookProject?.id ?? null,
+    taskId: activeTaskStatus?.task_id ?? null,
+  })
+  const progressTaskStatus = useMemo(() => {
+    const baseTaskStatus = activeTaskStatus ?? buildPendingTaskStatus({
       taskId: 'pending',
       audiobookProjectId: currentAudiobookProjectId || 0,
-    }),
-    [activeTaskStatus, currentAudiobookProjectId],
-  )
+    })
+    return applyAudiobookSceneProgress(baseTaskStatus, realtimeAudiobookProgress)
+      ?? baseTaskStatus
+  }, [activeTaskStatus, currentAudiobookProjectId, realtimeAudiobookProgress])
 
   const {
     cloneName,
@@ -632,6 +641,7 @@ const AudiobookPage = () => {
     setChapters,
     setSelectedChapters,
     setAudioFxConfig,
+    setAudioEngineMode,
     setActiveStep,
     setSnackbar,
   })
@@ -684,18 +694,11 @@ const AudiobookPage = () => {
     chapters,
     scriptEditorChapter,
     scriptEditorData,
-    timelineEdits,
-    ttsModel,
-    narrationStyle,
-    narrationStylePrompt,
-    outputFormat,
-    generateSubtitle,
-    ensureCurrentTtsModelReady,
+    refreshAudiobookProjectDetail,
     resetScriptEditorTransientState,
     resetSegmentPreviewState,
     removeCurrentEditorSyncEntry,
     stopManagedPlayback,
-    activateQueuedAudiobookTask,
     setScriptEditorDialogOpen,
     setScriptEditorChapter,
     setScriptEditorData,
@@ -703,7 +706,6 @@ const AudiobookPage = () => {
     setSmartChunkPreview,
     setSmartChunkPreviewLoading,
     setTimelineEdits,
-    setTaskPointsPrecheckError,
     setSnackbar,
   })
 
@@ -794,8 +796,6 @@ const AudiobookPage = () => {
     setNarrationStylePrompt,
     outputFormat,
     setOutputFormat,
-    generateSubtitle,
-    setGenerateSubtitle,
     scriptReviewDialogOpen,
     setScriptReviewDialogOpen,
     scriptReviewData,
@@ -851,6 +851,39 @@ const AudiobookPage = () => {
     updateCharacterVoicesForCurrentModel,
   })
 
+  const { scheduleVoiceConfigSave } = useAudiobookVoiceConfigAutosave({
+    projectId: selectedProjectId ?? routeProjectId,
+    characterVoices,
+    audioFxConfig,
+    audioEngineMode,
+    ttsModel,
+    currentVoicePresets,
+    setSnackbar,
+  })
+
+  // 用户显式修改音色后自动持久化，再次进入项目时已选音色保持固定
+  const handleVoiceChangeAndPersist = useCallback((
+    characterId: number,
+    voiceId: string,
+    preset?: VoicePreset,
+  ) => {
+    handleVoiceChange(characterId, voiceId, preset)
+    scheduleVoiceConfigSave()
+  }, [handleVoiceChange, scheduleVoiceConfigSave])
+
+  const handleTtsModelChangeForCharacterAndPersist = useCallback((
+    characterId: number,
+    nextModel: TtsModel,
+  ) => {
+    handleTtsModelChangeForCharacter(characterId, nextModel)
+    scheduleVoiceConfigSave()
+  }, [handleTtsModelChangeForCharacter, scheduleVoiceConfigSave])
+
+  const handleAutoAssignVoicesAndPersist = useCallback(async () => {
+    await handleAutoAssignVoices()
+    scheduleVoiceConfigSave()
+  }, [handleAutoAssignVoices, scheduleVoiceConfigSave])
+
   useAudiobookSourceChapterFocus({
     selectedProjectId,
     requestedAudiobookProjectId,
@@ -882,13 +915,13 @@ const AudiobookPage = () => {
     routeProjectId,
     characterVoices,
     audioFxConfig,
+    audioEngineMode,
     ttsModel,
     currentVoicePresets,
     scriptOnlyMode,
     narrationStyle,
     narrationStylePrompt,
     outputFormat,
-    generateSubtitle,
     ensureCurrentTtsModelReady,
     activateQueuedAudiobookTask,
     setGenerating,
@@ -944,6 +977,8 @@ const AudiobookPage = () => {
       <Container maxWidth="xl" sx={{ py: 4 }}>
         <AudiobookWorkflowStatus
           activeStep={activeStep}
+          lastGenerationMode={lastGenerationMode}
+          audioEngineMode={audioEngineMode}
           taskPointsPrecheckError={taskPointsPrecheckError}
           activeProjectTasks={activeProjectTasks}
           generating={generating}
@@ -966,8 +1001,8 @@ const AudiobookPage = () => {
             voiceLoading={voiceLoading}
             cosyVoiceWorkbench={cosyVoiceWorkbench}
             outputFormat={outputFormat}
-            generateSubtitle={generateSubtitle}
             audioFxConfig={audioFxConfig}
+            audioEngineMode={audioEngineMode}
             chapters={chapters}
             selectedChapters={selectedChapters}
             generatedChapterIds={generatedChapterIds}
@@ -989,15 +1024,15 @@ const AudiobookPage = () => {
               void refreshVoiceCatalog(model)
             }}
             onOutputFormatChange={setOutputFormat}
-            onGenerateSubtitleChange={setGenerateSubtitle}
             onAudioFxConfigChange={setAudioFxConfig}
+            onAudioEngineModeChange={setAudioEngineMode}
             onToggleChapter={handleToggleChapter}
             onOpenChapterMenu={handleOpenChapterMenu}
-            onVoiceChange={handleVoiceChange}
-            onTtsModelChangeForCharacter={handleTtsModelChangeForCharacter}
+            onVoiceChange={handleVoiceChangeAndPersist}
+            onTtsModelChangeForCharacter={handleTtsModelChangeForCharacterAndPersist}
             onPreviewCustomVoice={handlePreviewCustomVoice}
             onPreviewCharacterVoice={handlePreviewCharacterVoice}
-            onAutoAssignVoices={handleAutoAssignVoices}
+            onAutoAssignVoices={handleAutoAssignVoicesAndPersist}
             onGenerate={handleGenerate}
           />
         )}
@@ -1020,6 +1055,7 @@ const AudiobookPage = () => {
           <AudiobookCompletionStep
             audiobookProject={audiobookProject}
             lastGenerationMode={lastGenerationMode}
+            audioEngineMode={audioEngineMode}
             hasChapterAudios={hasChapterAudios}
             browserPlayerLoading={browserPlayerLoading}
             exportingProjectM4b={exportingProjectM4b}

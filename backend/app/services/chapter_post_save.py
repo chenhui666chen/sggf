@@ -216,7 +216,8 @@ async def process_chapter_post_save(
     chapter_content: str,
     chapter_number: int,
     project_id: int,
-    generate_summary: bool = False  # 🆕 新增参数：是否生成摘要
+    generate_summary: bool = False,  # 🆕 新增参数：是否生成摘要
+    post_processing_model: Optional[str] = None,  # 🆕 后置处理锁定模型（免费档），缺省保持现有行为
 ):
     """
     章节保存后的后台处理任务
@@ -232,12 +233,16 @@ async def process_chapter_post_save(
         chapter_number: 章节编号
         project_id: 项目ID
         generate_summary: 是否生成摘要（默认False，仅工作流场景为True）
+        post_processing_model: 后置提取/摘要使用的锁定模型（默认None，保持各服务现有模型选择）
     """
     # 创建独立的数据库会话
     db = SessionLocal()
     
     try:
-        logger.info(f"📡 开始后台处理章节 {chapter_id}（第{chapter_number}章）...")
+        logger.info(
+            f"📡 开始后台处理章节 {chapter_id}（第{chapter_number}章）"
+            f" | 后置模型: {post_processing_model or '默认路由'}..."
+        )
         
         # 🔔 推送任务开始事件
         try:
@@ -272,6 +277,7 @@ async def process_chapter_post_save(
                     chapter_title=chapter_title,
                     chapter_content=chapter_content,
                     project_id=project_id,
+                    model=post_processing_model,
                 )
                 
                 entities = unified_result.get("entities", [])
@@ -295,6 +301,7 @@ async def process_chapter_post_save(
                     chapter_title=chapter_title,
                     chapter_content=chapter_content,
                     project_id=project_id,
+                    model=post_processing_model,
                 )
                 logger.info(f"   ✅ 抽取到 {len(entities)} 个实体")
                 
@@ -303,6 +310,7 @@ async def process_chapter_post_save(
                 locations = await LocationHierarchyExtractor.extract_location_hierarchy(
                     chapter_title=chapter_title,
                     chapter_content=chapter_content,
+                    model=post_processing_model,
                 )
                 logger.info(f"   ✅ 提取到 {len(locations)} 个地点")
                 
@@ -313,6 +321,7 @@ async def process_chapter_post_save(
                         chapter_title=chapter_title,
                         chapter_content=chapter_content,
                         entities=entities,
+                        model=post_processing_model,
                     )
                     logger.info(f"   ✅ 抽取到 {len(relations)} 个关系")
                 else:
@@ -419,7 +428,7 @@ async def process_chapter_post_save(
                 
                 logger.info(f"   📝 开始生成章节摘要...")
                 
-                summarizer = create_chapter_summarizer(db_session=db)
+                summarizer = create_chapter_summarizer(db_session=db, model=post_processing_model)
                 summarizer.get_or_generate_summary(
                     chapter_id=chapter_id,
                     chapter_number=chapter_number,
@@ -472,7 +481,8 @@ def start_chapter_post_save_task(
     chapter_content: str,
     chapter_number: int,
     project_id: int,
-    generate_summary: bool = False  # 🆕 新增参数：是否生成摘要
+    generate_summary: bool = False,  # 🆕 新增参数：是否生成摘要
+    post_processing_model: Optional[str] = None,  # 🆕 后置处理锁定模型（免费档），缺省保持现有行为
 ):
     """
     启动章节保存后的后台处理任务
@@ -484,6 +494,7 @@ def start_chapter_post_save_task(
         chapter_number: 章节编号
         project_id: 项目ID
         generate_summary: 是否生成摘要（默认False，仅工作流场景为True）
+        post_processing_model: 后置提取/摘要使用的锁定模型（默认None，保持各服务现有模型选择）
     """
     def run_async_task():
         """在新的事件循环中运行异步任务"""
@@ -497,7 +508,8 @@ def start_chapter_post_save_task(
                     chapter_content=chapter_content,
                     chapter_number=chapter_number,
                     project_id=project_id,
-                    generate_summary=generate_summary  # 🆕 传递摘要生成参数
+                    generate_summary=generate_summary,  # 🆕 传递摘要生成参数
+                    post_processing_model=post_processing_model,  # 🆕 传递后置处理锁定模型
                 )
             )
         finally:

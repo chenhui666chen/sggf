@@ -15,6 +15,14 @@ from app.services.book_parser.chapter_splitter import ChapterSplitter
 from app.services.book_parser.file_parser import FileParser
 
 
+def _require_beautiful_soup():
+    try:
+        from bs4 import BeautifulSoup
+    except (ImportError, OSError) as exc:
+        pytest.skip(f"BeautifulSoup is unavailable: {exc}")
+    return BeautifulSoup
+
+
 class _FakeEpubItem:
     def __init__(
         self,
@@ -152,7 +160,7 @@ def test_infer_epub_title_from_item_identifier_is_conservative():
 
 
 def test_extract_epub_document_text_removes_footnote_links_and_normalizes_quotes():
-    BeautifulSoup = pytest.importorskip("bs4").BeautifulSoup
+    BeautifulSoup = _require_beautiful_soup()
     html = """
     <html>
       <body>
@@ -175,7 +183,7 @@ def test_extract_epub_document_text_removes_footnote_links_and_normalizes_quotes
 
 
 def test_extract_epub_document_text_removes_sup_and_footnote_blocks():
-    BeautifulSoup = pytest.importorskip("bs4").BeautifulSoup
+    BeautifulSoup = _require_beautiful_soup()
     html = """
     <html>
       <body>
@@ -198,7 +206,7 @@ def test_extract_epub_document_text_removes_sup_and_footnote_blocks():
 
 
 def test_extract_epub_document_text_preserves_structural_audio_blocks():
-    BeautifulSoup = pytest.importorskip("bs4").BeautifulSoup
+    BeautifulSoup = _require_beautiful_soup()
     html = """
     <html>
       <body>
@@ -226,7 +234,7 @@ def test_extract_epub_document_text_preserves_structural_audio_blocks():
 
 
 def test_extract_epub_document_text_removes_inline_notes_at_chapter_end():
-    BeautifulSoup = pytest.importorskip("bs4").BeautifulSoup
+    BeautifulSoup = _require_beautiful_soup()
     html = """
     <html>
       <body>
@@ -257,7 +265,7 @@ def test_strip_epub_inline_note_blocks_keeps_numbered_body_lists():
 
 
 def test_extract_epub_document_title_reads_headings_and_chapter_classes():
-    BeautifulSoup = pytest.importorskip("bs4").BeautifulSoup
+    BeautifulSoup = _require_beautiful_soup()
 
     assert (
         FileParser._extract_epub_document_title(
@@ -276,7 +284,7 @@ def test_extract_epub_document_title_reads_headings_and_chapter_classes():
 
 
 def test_epub_spine_fallback_uses_document_title_marker_when_nav_is_missing():
-    BeautifulSoup = pytest.importorskip("bs4").BeautifulSoup
+    BeautifulSoup = _require_beautiful_soup()
     html = """
     <html><body>
       <div class="chapter-title">第三章 微光</div>
@@ -317,6 +325,23 @@ def test_filter_epub_non_narrative_parts_keeps_middle_notes_and_chapters():
 
     assert [title for title, _ in parts] == ["第一章", "Notes", "第二章"]
     assert skipped == []
+
+
+def test_parse_pdf_uses_pypdf_dependency_and_preserves_metadata():
+    from pypdf import PdfWriter
+
+    writer = PdfWriter()
+    writer.add_blank_page(width=72, height=72)
+    writer.add_metadata({"/Title": "星河样章", "/Author": "测试作者"})
+    pdf_buffer = io.BytesIO()
+    writer.write(pdf_buffer)
+
+    parsed = FileParser().parse(pdf_buffer.getvalue(), "sample.pdf")
+
+    assert parsed.success is True
+    assert parsed.title == "星河样章"
+    assert parsed.author == "测试作者"
+    assert parsed.metadata["pages"] == 1
 
 
 def test_extract_pdf_outline_entries_flattens_and_dedupes_pages():
@@ -624,7 +649,7 @@ def test_extract_epub_cover_payload_reads_opf_cover_manifest_item():
 
 
 def test_extract_epub_navigation_text_parts_slices_html_nav_anchors():
-    BeautifulSoup = pytest.importorskip("bs4").BeautifulSoup
+    BeautifulSoup = _require_beautiful_soup()
 
     parts = FileParser._extract_epub_navigation_text_parts(
         _FakeNavEpubBook(),

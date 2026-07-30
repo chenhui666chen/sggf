@@ -27,31 +27,10 @@ except ImportError:
     print("❌ pydub 不可用")
     sys.exit(1)
 
-# 直接从文件导入避免循环依赖
-import importlib.util
-
-def load_module(module_name, file_path):
-    """动态加载模块"""
-    spec = importlib.util.spec_from_file_location(module_name, file_path)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-# 加载模块
-base_path = os.path.join(os.path.dirname(__file__), '..', 'app', 'services', 'audiobook')
-
-audio_mixer_module = load_module("audio_mixer", os.path.join(base_path, 'audio_mixer.py'))
-AudioMixer = audio_mixer_module.AudioMixer
-
-segmenter_module = load_module("smart_segmenter", os.path.join(base_path, 'smart_segmenter.py'))
-SmartTextSegmenter = segmenter_module.SmartTextSegmenter
-SegmentType = segmenter_module.SegmentType
-
-substitutor_module = load_module("word_substitutor", os.path.join(base_path, 'word_substitutor.py'))
-WordSubstitutor = substitutor_module.WordSubstitutor
-
-stt_module = load_module("stt_verifier", os.path.join(base_path, 'stt_verifier.py'))
-STTVerifier = stt_module.STTVerifier
+from app.services.audiobook.audio_mixer import AudioMixer
+from app.services.audiobook.smart_segmenter import SegmentType, SmartTextSegmenter
+from app.services.audiobook.stt_verifier import STTVerifier
+from app.services.audiobook.word_substitutor import WordSubstitutor
 
 
 def test_smart_segmentation():
@@ -96,7 +75,6 @@ def test_smart_segmentation():
         "应该包含至少一种分段类型"
     
     print("  ✅ 智能文本分段测试通过")
-    return True
 
 
 def test_word_substitution():
@@ -135,7 +113,6 @@ def test_word_substitution():
     assert result.substitutions_made, "应该有替换记录"
     
     print("  ✅ 词语替换修正测试通过")
-    return True
 
 
 def test_stt_verification():
@@ -176,9 +153,10 @@ def test_stt_verification():
     print(f"  通过: {result.passed}")
     print(f"  置信度: {result.confidence:.2f}")
     
-    # 降级模式应该返回成功
-    assert result.success, "降级模式应该返回成功"
-    assert result.similarity_score > 0.5, "降级模式应该有较高相似度"
+    # 未启用 Whisper 时应明确标记为跳过，不得伪装成验证成功。
+    assert result.skipped is True
+    assert result.success is False
+    assert result.passed is False
     
     # 测试相似度计算
     sim = verifier._calculate_similarity("测试文本", "测试文本")
@@ -188,7 +166,6 @@ def test_stt_verification():
     assert 0.0 <= sim2 <= 1.0, "相似度应在 0-1 之间"
     
     print("  ✅ STT 回验测试通过")
-    return True
 
 
 def test_integrated_workflow():
@@ -263,10 +240,11 @@ def test_integrated_workflow():
     assert len(segments) > 0, "应该有分段结果"
     assert len(audio_segments) > 0, "应该有音频片段"
     assert len(mixed_audio) > 0, "应该有混合音频"
-    assert verification.success, "STT 验证应该成功"
+    assert verification.skipped is True
+    assert verification.success is False
+    assert verification.passed is False
     
     print("  ✅ 完整工作流集成测试通过")
-    return True
 
 
 def test_edge_cases():
@@ -299,11 +277,12 @@ def test_edge_cases():
     # 测试4: STT 验证空文本
     verifier = STTVerifier(enable_whisper=False)
     empty_result = verifier.verify(b"", "")
-    assert empty_result.success, "空文本验证应该成功（降级模式）"
+    assert empty_result.skipped is True
+    assert empty_result.success is False
+    assert empty_result.passed is False
     print("  ✅ 空文本 STT 验证正常")
     
     print("  ✅ 边界情况测试通过")
-    return True
 
 
 def run_all_tests():
@@ -325,8 +304,8 @@ def run_all_tests():
     
     for name, test_func in tests:
         try:
-            if test_func():
-                passed += 1
+            test_func()
+            passed += 1
         except Exception as e:
             print(f"  ❌ {name} 测试失败: {str(e)}")
             import traceback

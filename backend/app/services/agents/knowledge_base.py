@@ -12,7 +12,6 @@ from typing import Any, Dict, List, Optional
 
 from importlib_resources import files
 from langchain_core.documents import Document
-from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from app.services.character_runtime_context import build_character_runtime_metadata
 
@@ -42,6 +41,42 @@ logger = logging.getLogger(__name__)
 
 
 _MIGRATION_FILENAME_PATTERN = re.compile(r"(?P<version>\d+)-.+\.sqlite\.sql$")
+
+
+class _FallbackTextSplitter:
+    """Minimal overlap splitter used only when LangChain's optional parsers cannot import."""
+
+    def __init__(self, *, chunk_size: int, chunk_overlap: int) -> None:
+        self.chunk_size = max(1, int(chunk_size))
+        self.chunk_overlap = max(0, min(int(chunk_overlap), self.chunk_size - 1))
+
+    def split_text(self, text: str) -> List[str]:
+        normalized = str(text or "")
+        if not normalized:
+            return []
+        step = self.chunk_size - self.chunk_overlap
+        return [
+            normalized[start:start + self.chunk_size]
+            for start in range(0, len(normalized), step)
+            if normalized[start:start + self.chunk_size]
+        ]
+
+
+def _create_text_splitter() -> Any:
+    try:
+        from langchain_text_splitters import RecursiveCharacterTextSplitter
+
+        return RecursiveCharacterTextSplitter(
+            chunk_size=1000,
+            chunk_overlap=200,
+            length_function=len,
+        )
+    except (ImportError, OSError) as exc:
+        logger.warning(
+            "LangChain text splitter unavailable, using built-in overlap splitter: %s",
+            exc,
+        )
+        return _FallbackTextSplitter(chunk_size=1000, chunk_overlap=200)
 
 
 def _load_supported_migration_versions() -> Dict[str, int]:
@@ -217,11 +252,7 @@ class NovelKnowledgeBase:
                 self.active_persist_directory = None
                 logger.warning("Using in-memory Chroma fallback from: %s", CHROMA_SRC)
 
-        self.text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=1000,
-            chunk_overlap=200,
-            length_function=len,
-        )
+        self.text_splitter = _create_text_splitter()
 
     def _create_persistent_vectorstore(self, chromadb, settings_cls, persist_directory: str):
         chroma_client = chromadb.PersistentClient(

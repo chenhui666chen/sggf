@@ -23,7 +23,10 @@ from dataclasses import dataclass
 from enum import Enum
 
 from ..constants import INSTRUCT_SPEAKER_IDS, normalize_speaker_id
-from ..tts_model_ids import normalize_audiobook_tts_model
+from ..tts_model_ids import (
+    get_audiobook_tts_model_price_per_10k,
+    normalize_audiobook_tts_model,
+)
 from ..tts_batch_planner import plan_tts_batches
 from ..tts_output_validator import TTSValidationResult, validate_tts_audio
 from ..voice_catalog import get_voice_entry
@@ -190,19 +193,13 @@ class TTSEngineBase:
             os.getenv("AUDIOBOOK_TTS_OUTPUT_VALIDATION", "1")
         ).strip().lower() not in {"0", "false", "no", "off"}
 
-        # 根据模型设置单价：不同模型价格不同
-        if "seed-tts-2.0" in model or "doubao" in model:
-            self.price_per_10k = 5.0
-        elif "stepaudio" in model:
-            self.price_per_10k = 5.8
-        elif "plus" in model:
-            self.price_per_10k = 2.0  # ¥2/万字符（cosyvoice-v3.5-plus）
-        elif "minimax" in model and "hd" in model:
-            self.price_per_10k = 6.0  # ¥6/万字符（minimax speech-2.8-hd: 600积分/万字符）
-        elif "minimax" in model:
-            self.price_per_10k = 3.0  # ¥3/万字符（minimax speech-2.8-turbo: 300积分/万字符）
-        else:
-            self.price_per_10k = 1.0  # ¥1/万字符（默认 flash 模型）
+        catalog_price = get_audiobook_tts_model_price_per_10k(
+            self.model,
+            default=1.0,
+        )
+        self.price_per_10k = float(
+            catalog_price if catalog_price is not None else 1.0
+        )
         
         # 重试配置
         self.retry_config = retry_config or RetryConfig(
@@ -298,15 +295,15 @@ class TTSEngineBase:
         # 将 emotion 添加到 voice_params 中，供 _call_aliyun_tts 使用
         voice_params_with_emotion = voice_params.copy()
         
-        # 🔥 情感映射：根据模型能力归一化情感，避免服务端报错
+        # 🔥 情感映射：按模型能力矩阵归一化情感，避免服务端报错
         original_emotion = emotion
         emotion = self._normalize_emotion(emotion)
         if original_emotion != emotion:
-            logger.warning(
-                "情感映射: %s -> %s (阿里云 TTS 不支持 '%s')",
+            logger.info(
+                "情感映射: %s -> %s (模型 %s 按能力矩阵归一化)",
                 original_emotion,
                 emotion,
-                original_emotion,
+                self.model,
             )
         
         voice_params_with_emotion["emotion"] = emotion

@@ -35,7 +35,7 @@ interface CharacterVoiceConfigPanelProps {
   ttsModelOptions: readonly TtsModelOption[]
   previewingCharacterId: number | null
   autoAssigningVoices: boolean
-  onVoiceChange: (characterId: number, voiceId: string) => void
+  onVoiceChange: (characterId: number, voiceId: string, preset?: VoicePreset) => void
   onTtsModelChangeForCharacter: (characterId: number, nextModel: TtsModel) => void
   onPreviewCharacterVoice: (characterVoice: CharacterVoiceSetting) => void
   onOpenVoiceManagement: (model: TtsModel) => void

@@ -148,9 +148,17 @@ def test_frontend_ui_components():
     print("Test 5: Frontend UI Components")
     print("="*60)
     
-    page_tsx_path = os.path.join(os.path.dirname(__file__), '..', '..', 'frontend', 'src', 'pages', 'AudiobookPage.tsx')
+    pages_dir = os.path.join(os.path.dirname(__file__), '..', '..', 'frontend', 'src', 'pages')
+    page_tsx_path = os.path.join(pages_dir, 'AudiobookPage.tsx')
+    editor_tsx_path = os.path.join(pages_dir, 'audiobook', 'ScriptEditorDialog.tsx')
+    actions_tsx_path = os.path.join(pages_dir, 'audiobook', 'ScriptSegmentActions.tsx')
     with open(page_tsx_path, 'r', encoding='utf-8') as f:
-        content = f.read()
+        page_content = f.read()
+    with open(editor_tsx_path, 'r', encoding='utf-8') as f:
+        editor_content = f.read()
+    with open(actions_tsx_path, 'r', encoding='utf-8') as f:
+        actions_content = f.read()
+    content = "\n".join((page_content, editor_content, actions_content))
     
     # 验证状态声明
     assert "reviewMode" in content, "reviewMode state not found"
@@ -165,7 +173,7 @@ def test_frontend_ui_components():
     print("  Found: Handler functions")
     
     # 验证 UI 组件
-    assert "进入审查模式" in content or "退出审查模式" in content, "Review mode button not found"
+    assert "评审标注" in content and "退出标注" in content, "Review mode button not found"
     assert "审查进度" in content, "Review progress indicator not found"
     assert "重新生成" in content, "Regenerate button text not found"
     assert "Rating" in content, "Rating component not found"

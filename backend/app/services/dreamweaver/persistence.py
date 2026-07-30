@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 import re
 from typing import Any, Dict, List, Optional, Tuple
@@ -29,6 +30,8 @@ from app.schemas.dreamweaver_contract import (
     Shot,
     ShotConstraints,
 )
+
+logger = logging.getLogger(__name__)
 
 try:
     from app.services.monitoring import metrics_collector

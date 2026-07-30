@@ -1,4 +1,10 @@
-import { EXPORT_STAGE_CONFIG, GENERATION_STAGE_CONFIG, PROMPT_AUDIO_ASR_STAGE_CONFIG, STAGE_KEYS } from './constants'
+import {
+  EXPORT_STAGE_CONFIG,
+  GENERATION_STAGE_CONFIG,
+  PROMPT_AUDIO_ASR_STAGE_CONFIG,
+  SEED_SCENE_RENDER_STAGE_CONFIG,
+  STAGE_KEYS,
+} from './constants'
 export { buildAudiobookChapterAssetUuid } from '../../utils/audiobookAssetIds'
 import type {
   NavigationType,
@@ -82,12 +88,31 @@ export const isProjectExportTask = (task: Pick<TaskStatus, 'task_type'> | null |
 export const isPromptAudioAsrTranscriptTask = (task: Pick<TaskStatus, 'task_type'> | null | undefined) =>
   task?.task_type === 'prompt_audio_asr_transcript'
 
-export const getStageConfigForTask = (task: Pick<TaskStatus, 'task_type'>): readonly StageConfig[] =>
-  isProjectExportTask(task)
-    ? EXPORT_STAGE_CONFIG
-    : isPromptAudioAsrTranscriptTask(task)
-      ? PROMPT_AUDIO_ASR_STAGE_CONFIG
-      : GENERATION_STAGE_CONFIG
+type StageConfigTask = Pick<TaskStatus, 'task_type'> & Partial<Pick<
+  TaskStatus,
+  'current_stage' | 'stages'
+>>
+
+const hasSceneRenderingProgress = (task: StageConfigTask): boolean => {
+  const sceneStage = task.stages?.scene_rendering
+  return task.current_stage === 'scene_rendering'
+    || Boolean(sceneStage && (sceneStage.status !== 'pending' || sceneStage.progress > 0))
+}
+
+export const getStageConfigForTask = (task: StageConfigTask): readonly StageConfig[] => {
+  if (isProjectExportTask(task)) {
+    return EXPORT_STAGE_CONFIG
+  }
+  if (isPromptAudioAsrTranscriptTask(task)) {
+    return PROMPT_AUDIO_ASR_STAGE_CONFIG
+  }
+  if (!hasSceneRenderingProgress(task)) {
+    return GENERATION_STAGE_CONFIG
+  }
+  return GENERATION_STAGE_CONFIG.map((stage) => (
+    stage.key === 'tts_synthesis' ? SEED_SCENE_RENDER_STAGE_CONFIG : stage
+  ))
+}
 
 export const normalizeStageEntry = (raw: unknown): StageInfo => {
   const entry = isRecord(raw) ? raw : {}

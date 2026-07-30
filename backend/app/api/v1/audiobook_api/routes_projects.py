@@ -50,6 +50,7 @@ from app.services.audiobook.task_support import (
     build_run_checkpoint_document as _build_run_checkpoint_document,
     enqueue_audiobook_task as _enqueue_audiobook_task,
     ensure_audiobook_points_precheck_passed as _ensure_audiobook_points_precheck_passed,
+    resolve_audiobook_billing_pricing_context as _resolve_audiobook_billing_pricing_context,
     safe_record_audiobook_billing_freeze as _safe_record_audiobook_billing_freeze,
 )
 from app.services.audiobook.task_trace import build_audiobook_trace_context
@@ -84,6 +85,12 @@ def _serialize_chapter_audio_summary(
         "audio_path": chapter_audio.audio_path,
         "duration": chapter_audio.duration,
         "file_size": chapter_audio.file_size,
+        "segment_count": chapter_audio.segment_count or 0,
+        "dialogue_count": chapter_audio.dialogue_count or 0,
+        "narration_count": chapter_audio.narration_count or 0,
+        "character_count": chapter_audio.character_count or 0,
+        "generation_time": chapter_audio.generation_time or 0.0,
+        "tts_cost": chapter_audio.tts_cost or 0.0,
         "script_status": chapter_audio.script_status or "pending",
         "has_script": bool(chapter_audio.script_json),
         "has_review": bool(chapter_audio.script_review_json),
@@ -231,6 +238,10 @@ async def create_audiobook_project(
     job_type = "script_only" if getattr(request, "generation_mode", "script_only") == "script_only" else "full"
     prepared_request = service.prepare_audiobook_project_creation(request)
     tts_model = normalize_audiobook_tts_model(request.tts_model)
+    billing_context = _resolve_audiobook_billing_pricing_context(
+        project=prepared_request.project,
+        tts_pricing_key=tts_model,
+    )
     if job_type != "script_only":
         precheck = build_audiobook_task_points_precheck(
             db=db,
@@ -239,6 +250,7 @@ async def create_audiobook_project(
             project_title=prepared_request.project.title,
             chapter_ids=list(request.chapter_ids or []),
             tts_provider=tts_model,
+            audio_engine_mode=billing_context.audio_engine_mode,
         )
         _ensure_audiobook_points_precheck_passed(precheck)
 
@@ -263,7 +275,8 @@ async def create_audiobook_project(
             audiobook_project_id=audiobook_project.id,
             chapter_ids=list(request.chapter_ids or []),
             raw_request=raw_request,
-            tts_pricing_key=tts_model,
+            tts_pricing_key=billing_context.pricing_key,
+            estimated_yuan_override=precheck.estimated_yuan,
             trace_context=build_audiobook_trace_context(
                 celery_task_id=str(async_result.id),
                 task_type=job_type,
@@ -352,6 +365,10 @@ async def generate_audio_from_scripts(
                 resume_payloads_by_chapter[resume_chapter_id] = checkpoint_payload
 
     tts_model = normalize_audiobook_tts_model(request.tts_model)
+    billing_context = _resolve_audiobook_billing_pricing_context(
+        project=project,
+        tts_pricing_key=tts_model,
+    )
     precheck = build_audiobook_task_points_precheck(
         db=db,
         user_id=current_user.id,
@@ -359,6 +376,7 @@ async def generate_audio_from_scripts(
         project_title=project.title,
         chapter_ids=requested_chapter_ids,
         tts_provider=tts_model,
+        audio_engine_mode=billing_context.audio_engine_mode,
     )
     _ensure_audiobook_points_precheck_passed(precheck)
 
@@ -397,7 +415,8 @@ async def generate_audio_from_scripts(
         audiobook_project_id=audiobook_project_id,
         chapter_ids=requested_chapter_ids,
         raw_request=raw_request,
-        tts_pricing_key=tts_model,
+        tts_pricing_key=billing_context.pricing_key,
+        estimated_yuan_override=precheck.estimated_yuan,
         trace_context=build_audiobook_trace_context(
             celery_task_id=str(async_result.id),
             task_type="audio_from_scripts",

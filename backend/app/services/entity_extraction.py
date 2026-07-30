@@ -11,10 +11,11 @@ from typing import List, Dict, Any, Optional
 from sqlalchemy.orm import Session
 
 from app.models.setting import SettingCollection, SettingItem
-from core.langchain_bridge import get_task_llm
+from core.langchain_bridge import create_task_llm, get_task_llm
 import os
 
 from app.services.setting_categories import SYSTEM_CATEGORIES, TYPE_TO_CATEGORY_MAP
+from app.services.exact_model_guard import require_exact_model
 
 CATEGORY_NAME_MAP = dict(SYSTEM_CATEGORIES)
 
@@ -97,6 +98,7 @@ class EntityExtractionService:
         chapter_title: str,
         chapter_content: str,
         project_id: int,
+        model: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """
         从章节内容中抽取实体
@@ -111,7 +113,9 @@ class EntityExtractionService:
         ]
         """
         # 🛡️ 使用单例管理器获取LLM实例（已禁用代理）
-        llm = get_task_llm("entity_extract")
+        # 🆕 调用方显式指定模型时优先（免费档锁定模型），缺省保持 task 路由
+        exact_model = require_exact_model(model, "entity_extract")
+        llm = create_task_llm("entity_extract", model=exact_model) if exact_model else get_task_llm("entity_extract")
         
         prompt = f"""你是一个小说设定提取专家。请从以下章节中提取所有重要的设定元素，包括：
 - 人物/角色（主要配角、重要NPC等）
@@ -183,6 +187,7 @@ class EntityExtractionService:
         chapter_title: str,
         chapter_content: str,
         entities: List[Dict[str, Any]],
+        model: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """
         从章节内容中抽取实体间关系
@@ -200,7 +205,9 @@ class EntityExtractionService:
             return []
         
         # 🛡️ 使用单例管理器获取LLM实例（已禁用代理）
-        llm = get_task_llm("entity_extract")
+        # 🆕 调用方显式指定模型时优先（免费档锁定模型），缺省保持 task 路由
+        exact_model = require_exact_model(model, "entity_extract")
+        llm = create_task_llm("entity_extract", model=exact_model) if exact_model else get_task_llm("entity_extract")
         
         entity_names = [e["name"] for e in entities]
         entity_list_str = "\n".join([f"- {name}" for name in entity_names])

@@ -1,6 +1,8 @@
 # novel_writing_agent 仓库清理规则
 
-日期：`2026-04-19`
+创建日期：`2026-04-19`
+
+最近复核：`2026-07-30`
 
 ## 1. 文档目的
 
@@ -52,10 +54,11 @@
 - 启动脚本：`start*.py`、`start*.bat`、`start*.ps1`
 - 部署脚本：`deploy*.bat`、`deploy*.ps1`、`deploy*.sh`
 - 数据库迁移：`backend/alembic/**`、`backend/alembic/versions/**`
-- 配置文件：`.env*`、`.json`、`.yaml`、`.yml`、`.ini`、`.toml`
+- 配置文件：有明确配置用途的 `.env*`、`.json`、`.yaml`、`.yml`、`.ini`、`.toml`
 - 依赖文件：`requirements*.txt`、`package.json`、`package-lock.json`
 - 前端配置：`vite.config.ts`、`tsconfig*.json`、`postcss.config.js`、`tailwind.config.js`
-- 运行数据与数据库文件：例如 `backend/novel_app.db`、`backend/novel_writing.db`、`backend/app.db`
+- 业务运行所需且已有明确版本管理决策的数据与数据库文件，例如
+  `backend/novel_app.db`、`backend/novel_writing.db`、`backend/app.db`
 - 服务端入口与核心模块：例如 `backend/app/main.py`、`backend/app/**`
 
 ### 2.4 `scripts/` 目录不是临时目录
@@ -114,12 +117,15 @@
 - `deploy*.bat`、`deploy*.ps1`、`deploy*.sh`
 - `backend/alembic/**`
 - `.env*`
-- `*.json`、`*.yaml`、`*.yml`、`*.ini`、`*.toml`
+- 有明确配置用途的 `*.json`、`*.yaml`、`*.yml`、`*.ini`、`*.toml`
 - `requirements*.txt`
 - `package.json`
 - `package-lock.json`
 - `vite.config.ts`
 - `tsconfig*.json`
+
+配置格式不等于配置用途。测试结果、运行状态、缓存索引、锁文件和模型评估历史即使采用
+JSON/YAML 格式，也应按生成产物规则判断，不得仅凭扩展名默认纳入版本管理。
 
 ### 3.4 正式业务源码
 
@@ -247,6 +253,28 @@
 - `frontend/dist/` 属于构建产物，可单独作为“构建产物清理”处理，但不建议和“废弃文档/脚本清理”混在同一轮执行
 - `frontend/node_modules/` 不属于废弃目录，默认保留
 
+### 4.6 测试与运行生成目录
+
+以下目录由当前测试、音频预览、场景渲染或提示词优化流程生成，默认不纳入版本管理：
+
+- `.test-tmp/`
+- `.pytest-tmp-*/`
+- `backend/data/seed_scene_tests/`
+- `backend/data/audiobook_scene_runs/`
+- `backend/data/audio_library/music_cache/`
+- `backend/data/prompt_evolution/`
+- `backend/backend/data/asset_studio_outputs/`
+- `data/prompt_evolution/`
+
+处理规则：
+
+- 新生成文件应通过 `.gitignore` 排除。
+- 本地文件可在确认后清理，但清理不是提交代码的前置条件。
+- 已被 Git 跟踪的文件不因新增忽略规则自动删除或取消跟踪；如需迁移，必须单独盘点消费者、
+  备份与恢复方式，并作为独立变更确认。
+- 经审核作为固定测试夹具、授权素材、迁移种子或可复现实验基线的文件可以保留，但应放入
+  语义明确的目录，避免与缓存目录混放。
+
 ## 5. 当前仓库中的明确保留例外
 
 以下是容易误删、但当前规则下应明确保留的例外项。
@@ -320,6 +348,17 @@ rg --files `
 Get-ChildItem -Recurse -Directory -Filter "__pycache__"
 Get-ChildItem -Force ".pytest_cache","backend/.pytest_cache","scripts/.pytest_cache" -ErrorAction SilentlyContinue
 ```
+
+#### 6.1.4 扫描 Git 未跟踪生成物
+
+```powershell
+git status --short
+git ls-files --others --exclude-standard
+git check-ignore -v ".test-tmp/example" ".pytest-tmp-example/output"
+```
+
+先确认忽略规则能够覆盖生成路径，再考虑清理本地文件。不要使用 `git add -A` 将未分类的
+未跟踪文件整体加入提交。
 
 ### 6.2 第二步：逐项做引用确认
 
@@ -484,6 +523,9 @@ python -m pytest backend/tests -q -k "相关模块关键词"
 
 - `.pytest_cache/`
 - 仓库内 `__pycache__/`
+- `.test-tmp/`
+- `.pytest-tmp-*/`
+- 第 4.6 节列出的可再生成运行目录
 
 但注意排除：
 

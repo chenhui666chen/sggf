@@ -2,6 +2,8 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import path from 'path'
 
+const LOCAL_BACKEND_TARGET = 'http://127.0.0.1:8000'
+
 export default defineConfig({
   plugins: [
     react({
@@ -36,7 +38,7 @@ export default defineConfig({
     },
     proxy: {
       '/api/workflow': {
-        target: 'http://127.0.0.1:8000',
+        target: LOCAL_BACKEND_TARGET,
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/api\/workflow/, '/api/v1/workflow'),
         headers: {
@@ -55,7 +57,7 @@ export default defineConfig({
         },
       },
       '/api': {
-        target: 'http://127.0.0.1:8000',
+        target: LOCAL_BACKEND_TARGET,
         changeOrigin: true,
         headers: {
           Connection: 'keep-alive',
@@ -73,7 +75,7 @@ export default defineConfig({
         },
       },
       '/socket.io': {
-        target: 'http://127.0.0.1:8000',
+        target: LOCAL_BACKEND_TARGET,
         changeOrigin: true,
         ws: true,
       },

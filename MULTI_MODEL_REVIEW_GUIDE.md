@@ -2,6 +2,8 @@
 
 > 把"单模型单轮评审"升级为"并行独立评审 + 主审汇总"，并作为**默认关闭的高级功能**开放给用户自主启用。
 
+> 实施状态（2026-07-25）：项目级开关、3/5/7 档并行评审、主审汇总、手动重评、自动分级触发、单模型回退、`review_meta` 持久化和前端展示均已接入。主审汇总已纳入独立超时与回退，旧协调器入口已改为由多模型服务按模型预算裁剪原始正文，主审成本和用量已进入评审元信息。真实供应商灰度、端到端成本基线和更大范围集成回归仍待完成。
+
 ---
 
 ## 一、改造目标与边界
@@ -96,6 +98,8 @@
 MULTI_MODEL_REVIEW_CONCURRENCY: int = 5
 # 单个评审官最大超时（秒），超时则该路降级为占位
 MULTI_MODEL_REVIEW_TIMEOUT_SECONDS: int = 120
+# 主审汇总最大超时（秒），超时则回退原单模型评审
+MULTI_MODEL_REVIEW_CHIEF_TIMEOUT_SECONDS: int = 120
 # 默认评审委员会预设
 MULTI_MODEL_REVIEW_DEFAULT_PRESET: str = "balanced_3"
 # 面向产品功能开放的独立评审官上限；更大数量仅用于内部评测
@@ -104,6 +108,8 @@ MULTI_MODEL_REVIEW_MAX_REVIEWERS: int = 7
 MULTI_MODEL_REVIEW_CHIEF_MODEL: str = "deepseek-v4-pro"
 # 其他非 1M 模型的默认评审正文预算
 MULTI_MODEL_REVIEW_DEFAULT_PROMPT_BUDGET: int = 80_000
+# 章节规划输入预算，避免规划文本挤占章节正文的模型上下文
+MULTI_MODEL_REVIEW_CHAPTER_PLAN_PROMPT_BUDGET: int = 12_000
 # 豆包 Seed Character 是 128K 输入窗口，需给 system/profile/输出格式留余量
 DOUBAO_REVIEW_PROMPT_BUDGET: int = 64_000
 ```
@@ -112,6 +118,8 @@ DOUBAO_REVIEW_PROMPT_BUDGET: int = 64_000
 
 ```bash
 MULTI_MODEL_REVIEW_CONCURRENCY=5
+MULTI_MODEL_REVIEW_CHIEF_TIMEOUT_SECONDS=120
+MULTI_MODEL_REVIEW_CHAPTER_PLAN_PROMPT_BUDGET=12000
 DOUBAO_REVIEW_PROMPT_BUDGET=64000
 ```
 
@@ -866,7 +874,7 @@ const DEFAULT_AUTO_STRATEGY: ReviewAutoStrategy = {
 
 ### 6.1 单元测试
 
-`backend/tests/services/agents/test_multi_model_review_service.py`：
+`backend/tests/test_multi_model_review_service.py`：
 
 ```python
 import pytest
@@ -950,7 +958,8 @@ def test_feature_gate_uses_project_toggle():
 - `multi_model_review_trigger_total`：触发次数
 - `multi_model_review_latency_seconds`：端到端延迟分布
 - `multi_model_review_fallback_total`：降级次数
-- `multi_model_review_token_cost_total`：token 消耗
+- `multi_model_review_cost_total`：独立评审官与主审合计的货币成本（取自模型响应 metadata）
+- `review_meta.chief_usage_metadata`：主审 token 用量元数据
 
 ---
 
@@ -967,7 +976,7 @@ def test_feature_gate_uses_project_toggle():
 | 后端·服务 | `backend/app/services/agents/agent_coordinator.py` | 改造 `_stage_four_quality_review` |
 | 后端·API | `backend/app/api/v1/review_config.py` | 新建项目级开关 API |
 | 后端·Schema | `backend/app/schemas/review_config.py` | 新建配置 schema |
-| 后端·测试 | `backend/tests/services/agents/test_multi_model_review_service.py` | 新建单元测试 |
+| 后端·测试 | `backend/tests/test_multi_model_review_service.py` | 多模型服务、超时回退、输入预算、配置治理与触发策略单元测试 |
 | 配置 | `config/llm_models.yaml` | 默认不改全局 review 路由；必要时补候选标签 |
 | 配置 | `.env.local` | 新增多模型评审环境变量 |
 | 前端·组件 | `frontend/src/components/project/MultiModelReviewSettings.tsx` | 新建设置组件 |

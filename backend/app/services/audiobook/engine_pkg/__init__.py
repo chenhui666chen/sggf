@@ -12,6 +12,7 @@ from app.services.audiobook.engine_pkg._parallel_mixin import ParallelMixin
 from app.services.audiobook.engine_pkg._task_mixin import TaskMixin
 from app.services.audiobook.engine_pkg._script_prep_mixin import ScriptPrepMixin
 from app.services.audiobook.engine_pkg._audio_from_script_mixin import AudioFromScriptMixin
+from app.services.audiobook.engine_pkg._scene_render_mixin import SceneRenderMixin
 from app.services.audiobook.engine_pkg._project_mixin import ProjectMixin
 
 
@@ -27,6 +28,7 @@ class AudiobookEngine(
     ParallelMixin,
     TaskMixin,
     ScriptPrepMixin,
+    SceneRenderMixin,
     AudioFromScriptMixin,
     ProjectMixin,
 ):

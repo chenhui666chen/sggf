@@ -1,4 +1,4 @@
-﻿"""
+"""
 提示词进化系统 - 元优化器（增强版）
 
 让LLM分析提示词效果并生成改进版本
@@ -6,6 +6,7 @@
 """
 import re
 import logging
+import copy
 from typing import List, Optional, Tuple, Dict
 from dataclasses import dataclass, field
 
@@ -30,6 +31,8 @@ class ExperienceRecord:
     ineffective_strategies: List[str] = field(default_factory=list)  # 无效策略
     forbidden_patterns: List[str] = field(default_factory=list)      # 需避免的模式
     best_practices: List[str] = field(default_factory=list)          # 最佳实践
+    # 🆕 方向性洞察：战略级方向判断（跨批次软引导，区别于原子策略）
+    strategic_insights: List[str] = field(default_factory=list)
     # 🔧 新增：权重配置和阈值参数
     weight_config: Optional[Dict] = None                             # 评分权重配置
     threshold_config: Optional[Dict] = None                          # 阈值参数配置
@@ -49,6 +52,7 @@ INITIAL_PROMPT = """你是一位资深网文作者，擅长将文字改写得更
 ## 1. 词汇层 - 去AI化
 【禁用词】震惊、深邃、璀璨、磅礴、不禁、随即、然而、因此、此外
 【禁用词】首先、其次、再次、最后、综上所述、值得注意的是
+【禁用词】宛如、交织、宿命感、倒吸一口凉气、嘴角勾起一抹弧度、不可思议的是、不可否认
 【替换规则】
 - "他感到悲伤" → 用身体反应表现（喉咙发紧、眼眶发热、鼻子发酸）
 - "她很愤怒" → 攥紧拳头、太阳穴突突跳、咬紧后槽牙
@@ -140,6 +144,7 @@ INITIAL_PROMPT = """你是一位资深网文作者，擅长将文字改写得更
 4. 不得输出任何解释、注释或标签
 5. 不得使用"眼中闪过一丝xxx"这类AI套路
 6. 不得让主角永远冷静，适当加入慌乱
+7. 不得使用"在这片XX的大陆上"这类模板化开篇句，改用具体场景切入
 
 # 完整改写示例
 
@@ -199,15 +204,14 @@ META_OPTIMIZER_PROMPT = """你是一个提示词优化专家。你的任务是�
 {experience_summary}
 
 ═══════════════════════════════════════
-【⚠️ 历史分析对比 - 必须差异化！】
+【历史分析对比】
 ═══════════════════════════════════════
 {previous_analysis_summary}
 
-**重要要求**：你的分析必须与上述历史分析不同！
-- 如果历史分析提到"标点革命失败"，这次请分析其他维度
-- 如果历史分析总是提"句式碎片化有效"，这次请找其他有效点
-- 禁止使用与历史分析相同的措辞和结论
-- 每次分析必须发现新问题或新洞察
+**重要要求**：以数据重复验证为准，不为追求新颖而强行发明新结论。
+- 已在多个同题材样本稳定复现的结论可以重复确认
+- 单个样本的偶然降分不得直接归纳为通用策略
+- 智能评审为medium/high风险或任一质量硬门槛失败的样本不得作为成功依据
 
 ═══════════════════════════════════════
 【AI检测核心原理】（优化参考）
@@ -224,21 +228,21 @@ AI检测器通过多维度"指纹"识别AI文本，需要综合优化：
    - 人类写作有碎片化表达、倒装、省略
 
 3. **词汇选择**
-   - AI偏好书面语、正式词汇
-   - 人类使用口语化、方言化、个性化词汇
-   - AI喜欢"华丽"词藻，人类用词更朴素直接
+   - 检查高频模板词、空泛修饰和重复搭配
+   - 保持题材语域和人物身份，不把书面语机械改成口语或方言
+   - 优先准确表达，不进行固定词表的一对一替换
 
 4. **过渡词模式化**
    - "首先/其次/此外/然而/因此"是AI标志词
    - 人类用"其实/说白了/反正/话说回来"等口语过渡
 
-5. **情感和主观性**
-   - AI文本客观中立，缺乏情感色彩
-   - 人类写作带有主观判断、情绪波动、个人偏好
+5. **情感表达**
+   - 检查情感表达是否重复使用固定模板
+   - 不得新增原文没有的情绪、身体反应、主观判断或个人偏好
 
 6. **叙述视角**
-   - AI保持全知全能的上帝视角
-   - 人类有观点偏向、信息盲点、认知局限
+   - 必须保持原文叙述视角、信息边界和认知范围
+   - 不得通过换视角、增加盲点或主观评论来制造所谓真人感
 
 ═══════════════════════════════════════
 【小说专用六维检测】（核心分析维度）
@@ -361,19 +365,66 @@ AI检测器通过多维度"指纹"识别AI文本，需要综合优化：
 [综合分析，150字以内，包含成功原因、失败原因、改进方向]
 ===ANALYSIS_END===
 
+===STRATEGIC_INSIGHT===
+[可选：仅当发现"方向级"的战略判断时输出（如"应从拆碎句子转向重构信息流"这类整体方向结论），每行一条，最多2条，50字以内。没有则留空]
+===STRATEGIC_INSIGHT_END===
+
 ===IMPROVED_PROMPT===
 [改进后的完整提示词，要求：
 1. 保留有效策略
 2. 修正或删除无效策略
 3. 增加针对失败样本问题的新指令
 4. 包含具体的禁用词汇/句式列表
-5. **必须包含标点符号优化的明确指令**：
-   - 要求减少句号主导
-   - 要求使用问号、感叹号表达情感
-   - 要求使用破折号、分号、省略号
-   - 要求逗号使用更口语化
-6. 如有必要，添加改写示例展示标点变化]
+5. 标点只能按语义和语法自然调整，不得强制增加问号、感叹号、破折号或省略号
+6. 必须包含专名、事实、设定、事件顺序、因果、否定关系和题材语域保护]
 ===IMPROVED_PROMPT_END==="""
+
+
+SAFE_INITIAL_PROMPT = """你是一位严谨的中文小说文字编辑。请在不改变内容事实的前提下，降低文本中可能被AI检测器识别的机械生成特征。
+
+# 第一优先级：内容不可变
+- 不得改变人物姓名、称谓、身份、关系和说话者。
+- 不得改变地点、时间、数量、物品名、功法名、境界名和世界观设定。
+- 不得改变事件顺序、因果关系、肯定否定、人物动机和情绪方向。
+- 不得删除关键情节、线索、动作、结论，也不得补写原文没有的事实、比喻、感官和内心活动。
+- 原文没有对话时不要新增对话；原文没有心理活动时不要新增心理活动。
+
+# 优化方向：只处理语言表达
+1. 避免句长和句式高度均匀，但句长变化必须服从原文语义和阅读节奏，不机械拆句。
+2. 减少模板化连接词、总结词和连续同构句式；语义需要时可以保留正常连接词。
+3. 删除不承载信息的套话、重复解释和空泛形容，不得删除具体事实。
+4. 优先使用准确、常见、符合题材语域的词，避免生硬同义替换和固定“去AI词库”替换。
+5. 对话只做符合人物身份的轻度自然化，不统一添加语气词、方言、现代网络用语或废话。
+6. 标点按语义正常使用，不为制造随机性而堆叠短句、省略号、破折号、问号或感叹号。
+7. 保持原叙事视角、语气、段落功能和题材风格，不把严肃文本改成吐槽或段子。
+
+# 输出前自检
+- 逐项核对专名、数字、否定词、事件顺序、因果和结尾结论。
+- 若某处改写可能改变含义，保留原句或只做最小修改。
+- 只输出改写后的正文，不输出标题、说明、标签、分析或Markdown。
+"""
+
+SAFE_GENRE_ADDONS = {
+    "玄幻": """# 玄幻题材约束
+- 完整保留人物、宗门、法宝、武器、妖兽、功法、境界和招式名称。
+- 不把古典或严肃语域统一改成现代口语，不新增吐槽和生活化类比。
+- 可减少空泛威势总结，但不能改写战斗动作、修炼结果和力量关系。""",
+    "都市": """# 都市题材约束
+- 保留职业关系、聊天内容、时间、金额、地点和现实事件。
+- 口语化程度以原人物身份为准，不统一添加方言、语气词和网络用语。""",
+    "言情": """# 言情题材约束
+- 保留感情方向、关系状态、动作发起者和潜台词，不擅自增加暧昧、冲突或和解。
+- 可以清理套话，但不得用固定身体反应替换所有情绪陈述。""",
+    "悬疑": """# 悬疑题材约束
+- 完整保留证据、数字、时间线、人物位置、推理步骤和信息揭示顺序。
+- 不新增线索，不提前揭示结论，不为制造跳跃感打乱因果。""",
+    "科幻": """# 科幻题材约束
+- 保留技术名词、参数、规则、实体关系和因果机制，不用日常类比替换关键设定。""",
+    "历史": """# 历史题材约束
+- 保留时代、官职、称谓、制度和礼仪语域，不现代口语化。""",
+    "武侠": """# 武侠题材约束
+- 保留门派、招式、兵器、穴位、人物称谓和江湖语域，不改成现代网络表达。""",
+}
 
 
 class MetaOptimizer:
@@ -385,6 +436,8 @@ class MetaOptimizer:
         self.experience = ExperienceRecord()
         # 🆕 历史分析记录（用于强制差异化）
         self.previous_analyses: List[str] = []
+        # 🆕 本次进化周期内已生成的变体策略（用于变体生成去重）
+        self._session_strategy_history: List[str] = []
         # 🔧 当前题材
         self.current_genre: Optional[str] = None
 
@@ -395,15 +448,42 @@ class MetaOptimizer:
         Args:
             genre: 题材类型（玄幻/都市/言情/悬疑等）
         """
-        base_prompt = INITIAL_PROMPT
+        base_prompt = SAFE_INITIAL_PROMPT
 
         if genre:
             self.current_genre = genre
-            genre_addon = self._get_genre_specific_addon(genre)
+            genre_addon = SAFE_GENRE_ADDONS.get(genre, "")
             if genre_addon:
                 base_prompt = base_prompt + "\n\n" + genre_addon
 
         return base_prompt
+
+    @staticmethod
+    def _is_eligible_success_sample(result: EvaluationResult) -> bool:
+        """只有真实降分且质量稳定的样本才允许沉淀为成功经验。"""
+        if not result.success or result.score_reduction <= 10:
+            return False
+        review = result.llm_review or {}
+        if not review.get("available") or review.get("hard_fail"):
+            return False
+        if review.get("over_rewrite_risk") != "low":
+            return False
+        return (
+            review.get("semantic_fidelity", {}).get("score", 0) >= 80
+            and review.get("fact_consistency", {}).get("score", 0) >= 90
+            and review.get("information_completeness", {}).get("score", 0) >= 75
+        )
+
+    @staticmethod
+    def _validate_prompt_safety(prompt: str) -> bool:
+        """阻止元优化器把内容破坏包装成降低 AI 率策略。"""
+        unsafe_patterns = (
+            "破坏叙事逻辑", "重构内在逻辑", "插入不相关联想", "无关细节",
+            "改变事件顺序", "重排事件", "极致口语化", "强制口语化",
+            "制造不完美", "逻辑是跳跃的", "非线性叙事", "改变叙事视角",
+            "改名", "替换人物姓名", "删除原文信息",
+        )
+        return bool(prompt.strip()) and not any(pattern in prompt for pattern in unsafe_patterns)
 
     def _get_genre_specific_addon(self, genre: str) -> str:
         """🔧 获取题材专用的提示词补充"""
@@ -506,8 +586,42 @@ class MetaOptimizer:
         )
         # 🆕 同时重置历史分析
         self.previous_analyses = []
+        # 🆕 重置本周期变体策略历史
+        self._session_strategy_history = []
         logger.info(f"📚 预置小说专用经验: 有效策略{len(PRESET_EFFECTIVE_STRATEGIES)}条, "
                    f"禁止模式{len(PRESET_FORBIDDEN_PATTERNS)}条")
+
+    def _load_strategic_insights(self, historical_reports: List[Dict], genre: Optional[str] = None) -> int:
+        """
+        🆕 跨批次加载方向性洞察（同题材优先，保留最近5条）
+
+        洞察是战略级方向判断，不参与经验优化器的原子策略去重流程，单独加载。
+        """
+        sorted_reports = sorted(
+            historical_reports,
+            key=lambda x: x.get("created_at", ""),
+            reverse=True
+        )
+        if genre:
+            genre_reports = [r for r in sorted_reports if r.get("genre") == genre]
+            other_reports = [r for r in sorted_reports if r.get("genre") != genre]
+            sorted_reports = genre_reports[:3] + other_reports[:2]
+        else:
+            sorted_reports = sorted_reports[:5]
+
+        loaded = 0
+        # 逆序遍历：让最近批次的洞察排在列表末尾（截断时最容易保留）
+        for report in reversed(sorted_reports):
+            for insight in report.get("strategic_insights", []):
+                insight = (insight or "").strip()
+                if insight and insight not in self.experience.strategic_insights:
+                    self.experience.strategic_insights.append(insight)
+                    loaded += 1
+        self.experience.strategic_insights = self.experience.strategic_insights[-5:]
+
+        if loaded:
+            logger.info(f"🧭 跨批次加载方向性洞察: {loaded} 条")
+        return loaded
 
     def load_historical_experience(self, historical_reports: List[Dict], genre: Optional[str] = None) -> int:
         """
@@ -524,7 +638,10 @@ class MetaOptimizer:
             return 0
 
         loaded_count = 0
-        
+
+        # 🆕 先跨批次加载方向性洞察（不受"优化经验"分支 return 影响，独立于原子策略）
+        self._load_strategic_insights(historical_reports, genre)
+
         # 🆕 尝试从 storage 加载优化后的经验
         from .storage import get_evolution_storage
         storage = get_evolution_storage()
@@ -680,8 +797,8 @@ class MetaOptimizer:
         results = current_version.evaluation_results
 
         # 分离成功和失败样本
-        success_samples = [r for r in results if r.success and r.score_reduction > 10]
-        failure_samples = [r for r in results if not r.success or r.score_reduction <= 10]
+        success_samples = [r for r in results if self._is_eligible_success_sample(r)]
+        failure_samples = [r for r in results if not self._is_eligible_success_sample(r)]
 
         # 构建成功样本分析
         success_analysis = self._build_success_analysis(success_samples)
@@ -719,6 +836,16 @@ class MetaOptimizer:
             experience_summary=experience_summary,
             previous_analysis_summary=previous_analysis_summary
         )
+        optimization_prompt += """
+
+【不可突破的进化边界】
+- 只能优化可能影响AI检测的语言统计特征：模板化词汇、重复句式、句长过度均匀、机械连接和空泛套话。
+- 降分样本只有在语义保真、事实一致、信息完整均通过且过度改写风险为low时，才可归纳为成功经验。
+- 禁止把改名、删信息、换视角、改事件顺序、改因果、添加无关细节、强制口语化、制造病句归因成有效策略。
+- 禁止要求破坏叙事逻辑、插入不相关联想、非线性重排、统一添加吐槽/方言/语气词/身体反应。
+- 优先小幅修改和单变量实验；没有跨多个同题材样本重复验证的手法，不得写成强制规则。
+- 改进后的提示词必须继续包含专名、事实、事件顺序、因果、否定关系和题材语域保护。
+"""
         
         # 🆕 添加探索模式和反向优化指令
         if exploration_instruction:
@@ -739,13 +866,23 @@ class MetaOptimizer:
             use_cache=False
         )
 
-        # 解析响应并更新经验库
+        # 先在当前实例上解析；若候选不安全，则用快照完整回滚经验变更。
+        experience_snapshot = copy.deepcopy(self.experience)
+        analyses_snapshot = list(self.previous_analyses)
         improved_prompt, analysis = self._parse_response(response)
 
         if not improved_prompt:
             logger.warning("⚠️ 无法解析改进后的提示词，使用原提示词")
+            self.experience = experience_snapshot
+            self.previous_analyses = analyses_snapshot
             improved_prompt = current_version.prompt_text
             analysis = "解析失败，保持原提示词"
+        elif not self._validate_prompt_safety(improved_prompt):
+            logger.warning("元优化器生成了高风险内容改写策略，拒绝该提示词并保留当前版本")
+            self.experience = experience_snapshot
+            self.previous_analyses = analyses_snapshot
+            improved_prompt = current_version.prompt_text
+            analysis = f"候选提示词包含可能破坏原文的策略，已拒绝。{analysis}".strip()
 
         return improved_prompt, analysis
 
@@ -785,10 +922,12 @@ class MetaOptimizer:
                 temperature
             )
             
-            if variant_prompt:
+            if variant_prompt and self._validate_prompt_safety(variant_prompt):
                 variants.append((variant_prompt, strategy_desc))
                 mode_label = "🔍探索" if exploration_mode else "📝常规"
                 logger.info(f"{mode_label} 生成变体 {i}: {strategy_desc[:50]}...")
+            elif variant_prompt:
+                logger.warning("丢弃包含高风险内容改写策略的A/B变体: %s", strategy_desc[:80])
         
         return variants
     
@@ -808,25 +947,41 @@ class MetaOptimizer:
             策略描述列表
         """
         mode_desc = "激进探索" if exploration_mode else "温和优化"
-        
+
+        # 🆕 汇总历史已探索方向（跨批次经验 + 本周期已生成的变体策略），用于避免重复探索
+        explored_directions = (
+            list(self.experience.effective_strategies)
+            + list(self.experience.ineffective_strategies)
+            + self._session_strategy_history
+        )
+        # 只保留最近的方向，避免提示词过长
+        explored_directions = explored_directions[-20:]
+        explored_section = ""
+        if explored_directions:
+            explored_lines = "\n".join(f"- {d[:60]}" for d in explored_directions)
+            explored_section = f"""
+【历史已探索方向】（以下方向已被尝试过，避免生成语义重复的策略，优先探索显著不同的维度或新颖组合）
+{explored_lines}
+"""
+
         prompt = f"""你是提示词优化专家，擅长发现降低AI痕迹的创新方法。
 
 你的任务：**随机生成 {num_strategies} 个不同的{mode_desc}策略**，用于测试和改进"降低AI痕迹"提示词。
-
+{explored_section}
 【核心要求】
 1. **完全随机创造**：每次生成都应该不同，不要重复固定模式
 2. **多维度探索**：从不同角度切入（词汇、句式、情感、对话、标点、描写、节奏等）
 3. **创新思维**：可以提出反常规的、实验性的方法
-4. {'增强激进性：可以尝试极端或颛覆性的策略' if exploration_mode else '保持温和：策略应该可控且有效'}
+4. {'扩大语言统计维度组合，但不得突破内容保真边界' if exploration_mode else '保持温和：策略应该可控且有效'}
 
 【可能的探索方向示例】（仅供参考，你需要随机创造新的）
 - 标点类：如“禁用句号主导”、“增加省略号使用”、“问号感叹号交替”
-- 句式类：如“长短句极端对比”、“碎片化表达”、“复合句优先”
-- 词汇类：如“口语化极致”、“禁用形容词”、“多用动词”
+- 句式类：如“降低连续同构句比例”、“按语义调整句长”、“减少机械复合句”
+- 词汇类：如“减少模板化连接词”、“删除空泛套话”、“保留题材语域”
 - 情感类：如“隐性情感表达”、“身体反应主导”、“环境映射情绪”
 - 对话类：如“方言化对话”、“不完整句式”、“语气词密集”
 - 描写类：如“感官细节主导”、“删除抽象描述”、“具体画面感”
-- 结构类：如“破坏均衡结构”、“允许冗余”、“非线性叙述”
+- 结构类：如“减少段落模板重复”、“保持事件顺序下调整段内表达”
 - 节奏类：如“加快节奏”、“停顿增加”、“韵律变化”
 
 【输出格式】
@@ -834,9 +989,9 @@ class MetaOptimizer:
 每条策略应该是一个简洁的描述性句子（30-50字）。
 
 示例输出：
-强制每句必须有情感标点（问号、感叹号、省略号），禁用连续3个以上句号
-所有描写必须通过具体的视觉、听觉、触觉细节，禁用抽象形容词
-对话中必须包含至少一个不完整句（省略、打断、话说一半）
+减少连续使用相同句法骨架，但不机械拆句或改变语义
+清理不承载事实的套话和重复解释，保留全部具体信息
+对话只在原有语气范围内轻度自然化，不新增方言或语气词
 
 请开始随机生成："""
         
@@ -870,7 +1025,10 @@ class MetaOptimizer:
             
             # 只取需要的数量
             strategies = strategies[:num_strategies]
-            
+
+            # 🆕 记入本周期策略历史，供下次生成时去重
+            self._session_strategy_history.extend(strategies)
+
             logger.info(f"🎲 AI随机生成 {len(strategies)} 个{mode_desc}策略")
             for i, s in enumerate(strategies, 1):
                 logger.debug(f"  {i}. {s[:60]}...")
@@ -911,6 +1069,8 @@ class MetaOptimizer:
 2. 根据变体策略，强化、弱化或调整相关规则
 3. 可以添加新的指令、示例或禁止项
 4. 直接输出完整的变体提示词，不要任何解释或标记
+5. 不得改变人物、专名、事实、设定、事件顺序、因果和叙事视角
+6. 不得加入极致口语化、无关细节、非线性叙事、逻辑跳跃或强制标点规则
 
 请输出变体提示词："""
         
@@ -968,11 +1128,23 @@ class MetaOptimizer:
 
         for i, r in enumerate(samples[:3], 1):
             if not r.success:
+                review = r.llm_review or {}
+                quality_details = ""
+                if review.get("available"):
+                    quality_details = (
+                        f"\n├─ 语义保真: {review.get('semantic_fidelity', {}).get('score', '-')}"
+                        f"，事实一致: {review.get('fact_consistency', {}).get('score', '-')}"
+                        f"，信息完整: {review.get('information_completeness', {}).get('score', '-')}"
+                        f"\n├─ 过度改写风险: {review.get('over_rewrite_risk', '-')}"
+                        f"；{review.get('over_rewrite_reason', '')}"
+                    )
                 lines.append(f"""
 【失败样本{i}】错误: {r.error}
 ┌─ 原文 ─────────────────────────────────
 │ {r.original_text[:200]}...
-└─ 问题：改写过程出错，需要检查提示词是否有歧义
+├─ 改写后 ───────────────────────────────
+│ {r.rewritten_text[:200]}...{quality_details}
+└─ 问题：不得把该样本的降分手法归纳为成功经验；优先修复语义、事实、信息完整性和过度改写问题
 """)
             else:
                 # 构建AI痕迹详情
@@ -1131,6 +1303,14 @@ class MetaOptimizer:
         """构建累积经验摘要，主动提取TOP策略"""
         lines = []
 
+        # 🆕 方向性洞察（跨批次软引导：仅供参考，不强制执行）
+        if self.experience.strategic_insights:
+            lines.append("🧭 【历史验证的有效方向】（供参考，非强制）")
+            for insight in self.experience.strategic_insights[-3:]:
+                lines.append(f"   • {insight}")
+            lines.append("   若当前方向仍在见效，请沿此深挖；若已停滞，再考虑新方向。")
+            lines.append("")
+
         # 🆕 首先强调TOP3最有效策略（必须执行）
         if self.experience.effective_strategies:
             top_strategies = self._get_top_strategies()
@@ -1235,21 +1415,22 @@ class MetaOptimizer:
         instruction_parts.append("【🔍 探索模式激活】")
         instruction_parts.append("═══════════════════════════════════════")
         instruction_parts.append("")
-        instruction_parts.append("当前处于探索模式，允许你尝试更激进、更大胆的策略：")
+        instruction_parts.append("当前处于探索模式，可以扩大语言统计特征的组合范围，但内容保真边界不可突破：")
         instruction_parts.append("")
-        instruction_parts.append("1. **突破常规约束**")
+        instruction_parts.append("1. **扩大可控实验范围**")
         instruction_parts.append("   - 你可以大幅调整现有策略的权重和优先级")
-        instruction_parts.append("   - 可以尝试之前被认为风险较高的方法")
-        instruction_parts.append("   - 允许更激进的句式变化和标点实验")
+        instruction_parts.append("   - 每次优先改变一个语言变量，便于判断真实贡献")
+        instruction_parts.append("   - 句式和标点实验必须服从语义、语法和题材语域")
         instruction_parts.append("")
         instruction_parts.append("2. **增加多样性**")
-        instruction_parts.append("   - 引入全新的改写维度或视角")
+        instruction_parts.append("   - 可以探索新的词汇、句法和重复模式指标，不得改变叙事视角")
         instruction_parts.append("   - 尝试组合之前未曾组合的策略")
         instruction_parts.append("   - 实验性地添加新的禁用词或规则")
         instruction_parts.append("")
         instruction_parts.append("3. **跳出局部最优**")
-        instruction_parts.append("   - 暂时忽略部分历史经验的约束")
+        instruction_parts.append("   - 可以重新检验历史语言策略，但不得忽略内容保真约束")
         instruction_parts.append("   - 重新评估之前认为无效的策略")
+        instruction_parts.append("   - 🆕 可以质疑【历史验证的有效方向】：若怀疑其已过时，允许尝试相反方向")
         instruction_parts.append("   - 寻找全新的优化方向")
         instruction_parts.append("")
         
@@ -1265,6 +1446,8 @@ class MetaOptimizer:
         instruction_parts.append("⚠️ 注意：探索模式不是放弃原则，仍需：")
         instruction_parts.append("   - 保持文笔顺畅和可读性")
         instruction_parts.append("   - 不改变故事情节")
+        instruction_parts.append("   - 不改变专名、事实、设定、事件顺序、因果和否定关系")
+        instruction_parts.append("   - 不添加无关细节、吐槽、方言或原文没有的内心活动")
         instruction_parts.append("   - 保证输出质量")
         
         return "\n".join(instruction_parts)
@@ -1312,6 +1495,22 @@ class MetaOptimizer:
         )
         analysis = analysis_match.group(1).strip() if analysis_match else ""
 
+        # 🆕 提取方向性洞察（战略级方向判断，跨批次沉淀）
+        insight_match = re.search(
+            r"===STRATEGIC_INSIGHT===\s*(.*?)\s*===STRATEGIC_INSIGHT_END===",
+            response, re.DOTALL
+        )
+        if insight_match:
+            insights = [s.strip() for s in insight_match.group(1).strip().split('\n') if s.strip()]
+            for insight in insights[:2]:  # 每轮最多采纳2条
+                # 过滤模板占位符残留
+                if insight.startswith('[') or len(insight) < 8:
+                    continue
+                if insight not in self.experience.strategic_insights:
+                    self.experience.strategic_insights.append(insight)
+            # 洞察是高阶方向，保留最近5条即可
+            self.experience.strategic_insights = self.experience.strategic_insights[-5:]
+
         # 提取改进后的提示词
         prompt_match = re.search(
             r"===IMPROVED_PROMPT===\s*(.*?)\s*===IMPROVED_PROMPT_END===",
@@ -1330,7 +1529,8 @@ class MetaOptimizer:
 
         logger.info(f"📚 经验库更新: 有效策略{len(self.experience.effective_strategies)}条, "
                    f"无效策略{len(self.experience.ineffective_strategies)}条, "
-                   f"禁止模式{len(self.experience.forbidden_patterns)}条")
+                   f"禁止模式{len(self.experience.forbidden_patterns)}条, "
+                   f"方向洞察{len(self.experience.strategic_insights)}条")
 
         return improved_prompt, analysis
 
@@ -1347,6 +1547,8 @@ class MetaOptimizer:
             "ineffective_strategies": self.experience.ineffective_strategies,
             "forbidden_patterns": self.experience.forbidden_patterns,
             "best_practices": self.experience.best_practices,
+            # 🆕 方向性洞察（跨批次软引导）
+            "strategic_insights": self.experience.strategic_insights,
             # 🔧 新增：保存权重和阈值配置
             "weight_config": weight_config or self.experience.weight_config,
             "threshold_config": threshold_config or self.experience.threshold_config,

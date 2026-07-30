@@ -11,7 +11,11 @@ from app.services.audiobook.tts_model_ids import (
     get_audiobook_tts_model_price_per_10k,
     is_supported_audiobook_tts_model,
 )
-from app.services.points_pricing_policy import PointsPricingPolicyConfig, PointsPricingPolicySnapshot
+from app.services.points_pricing_policy import (
+    PointsPricingPolicyConfig,
+    PointsPricingPolicySnapshot,
+    resolve_module_user_price_rate,
+)
 from app.services.user_center_points import COMPLETED_STATUSES, RUNNING_STATUSES
 from app.utils.datetime_utils import ensure_utc_datetime
 
@@ -81,8 +85,20 @@ def _resolve_tts_price_per_10k(provider: object | None) -> float:
     return max(provider_default_map.get(provider_key, fallback), 0.0)
 
 
-def _convert_yuan_to_points(yuan: float, config: PointsPricingPolicyConfig) -> float:
-    amount = max(float(yuan), 0.0) * max(int(config.points_per_yuan), 1) * max(float(config.user_price_rate), 0.0)
+def _convert_yuan_to_points(
+    yuan: float,
+    config: PointsPricingPolicyConfig,
+    *,
+    module_key: str,
+) -> float:
+    amount = (
+        max(float(yuan), 0.0)
+        * max(int(config.points_per_yuan), 1)
+        * resolve_module_user_price_rate(
+            pricing_config=config,
+            module_key=module_key,
+        )
+    )
     return round(amount, 2)
 
 
@@ -406,7 +422,15 @@ def build_user_center_task_billing_overview(
         )
 
         actual_yuan = _to_finite_float(getattr(row, "total_cost", None))
-        actual_points = _convert_yuan_to_points(actual_yuan, pricing_config) if actual_yuan > 0 else None
+        actual_points = (
+            _convert_yuan_to_points(
+                actual_yuan,
+                pricing_config,
+                module_key="audiobook",
+            )
+            if actual_yuan > 0
+            else None
+        )
         if actual_yuan > 0:
             actual_spend_yuan += actual_yuan
             actual_spend_points += actual_points or 0.0
@@ -462,7 +486,11 @@ def build_user_center_task_billing_overview(
             )
             continue
 
-        estimated_points = _convert_yuan_to_points(estimated_yuan, pricing_config)
+        estimated_points = _convert_yuan_to_points(
+            estimated_yuan,
+            pricing_config,
+            module_key="audiobook",
+        )
         buffered_points = _apply_freeze_buffer(estimated_points, pricing_config)
 
         estimated_running_spend_yuan += estimated_yuan
@@ -518,7 +546,11 @@ def build_user_center_task_billing_overview(
 
         estimated_yuan, estimate_basis = _estimate_running_dreamweaver_yuan(getattr(row, "contract_json", None))
         if status in COMPLETED_STATUSES and estimated_yuan is not None:
-            actual_points = _convert_yuan_to_points(estimated_yuan, pricing_config)
+            actual_points = _convert_yuan_to_points(
+                estimated_yuan,
+                pricing_config,
+                module_key="dreamweaver",
+            )
             actual_spend_yuan += estimated_yuan
             actual_spend_points += actual_points
             actual_task_count += 1
@@ -568,7 +600,11 @@ def build_user_center_task_billing_overview(
             )
             continue
 
-        estimated_points = _convert_yuan_to_points(estimated_yuan, pricing_config)
+        estimated_points = _convert_yuan_to_points(
+            estimated_yuan,
+            pricing_config,
+            module_key="dreamweaver",
+        )
         buffered_points = _apply_freeze_buffer(estimated_points, pricing_config)
 
         estimated_running_spend_yuan += estimated_yuan

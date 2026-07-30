@@ -628,6 +628,36 @@ class Qwen37PlusAdapter(OpenAICompatibleAdapter):
 
 
 @register_llm_model(
+    model_id="qwen3.7-flash",
+    name="Qwen3.7 Flash",
+    provider="alibaba",
+    capabilities=["creative", "reasoning", "long_context", "writing"],
+    task_types=["concept", "outline_expand", "volume_outline", "chapter_batch", "long_writing", "summarize", "entity_extract"],
+    max_context_tokens=1000000,
+    max_output_tokens=65536,
+    quality_score=8.5,
+    avg_latency_seconds=1.2,
+    cost_per_1k_input_tokens=0.0002,
+    cost_per_1k_output_tokens=0.0008,
+    api_key_env="DASHSCOPE_API_KEY",
+    base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+    default_timeout=180,
+    supports_function_call=True,
+    supports_vision=False,
+    supports_thinking_mode=True,
+    priority=3,
+    fallback_models=["qwen3.7-plus"],
+    default_params={"temperature": 0.7, "max_tokens": 32768, "enable_thinking": False},
+    tags=["creative", "long_context", "fast", "low_cost", "chinese", "alibaba"],
+)
+class Qwen37FlashAdapter(OpenAICompatibleAdapter):
+    """阿里云 Qwen3.7 Flash 适配器。轻量高速文本模型，输入0.2元/百万tokens、
+    输出0.8元/百万tokens，适合大批量低成本文本任务。视觉能力未经项目验证，暂不开放。"""
+
+    pass
+
+
+@register_llm_model(
     model_id="kimi/kimi-k2.6",
     name="Kimi K2.6",
     provider="moonshot",

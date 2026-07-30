@@ -45,7 +45,7 @@ describe('ScriptEditorDialog editing-workbench layout', () => {
       'visibleSegmentCards',
       '评审标注',
       '评审报告',
-      '生成音频',
+      '批准剧本',
       '时间线',
       '脚本/人声',
       '音效轨',

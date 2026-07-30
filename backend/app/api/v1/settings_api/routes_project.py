@@ -28,6 +28,7 @@ from app.schemas.settings import (
     BulkMoveItemsRequest,
     SetParentRequest,
     ReorderUnderParentRequest,
+    AutoMergeRequest,
     GraphEdgeCreate,
     GraphEdgeResponse,
 )

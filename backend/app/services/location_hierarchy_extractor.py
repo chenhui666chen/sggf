@@ -11,8 +11,9 @@ from typing import List, Dict, Any, Optional, Tuple
 from sqlalchemy.orm import Session
 
 from app.models.setting import SettingCollection, SettingItem
-from core.langchain_bridge import get_task_llm
+from core.langchain_bridge import create_task_llm, get_task_llm
 import os
+from app.services.exact_model_guard import require_exact_model
 
 
 class LocationHierarchyExtractor:
@@ -22,6 +23,7 @@ class LocationHierarchyExtractor:
     async def extract_location_hierarchy(
         chapter_title: str,
         chapter_content: str,
+        model: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """
         从章节内容中提取地点及其层级关系
@@ -44,7 +46,9 @@ class LocationHierarchyExtractor:
         ]
         """
         # 🛡️ 使用单例管理器获取LLM实例（已禁用代理）
-        llm = get_task_llm("entity_extract")
+        # 🆕 调用方显式指定模型时优先（免费档锁定模型），缺省保持 task 路由
+        exact_model = require_exact_model(model, "entity_extract")
+        llm = create_task_llm("entity_extract", model=exact_model) if exact_model else get_task_llm("entity_extract")
         
         prompt = f"""你是一个小说地点提取专家。请从以下章节中提取所有地点，并识别它们的层级关系。
 

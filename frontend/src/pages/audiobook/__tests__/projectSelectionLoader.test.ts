@@ -66,6 +66,7 @@ describe('audiobook project selection loader', () => {
           sound_effect_density: 'high',
           music_density: 'low',
         },
+        audio_engine_mode: 'seed_scene',
       }),
     )
 
@@ -93,6 +94,7 @@ describe('audiobook project selection loader', () => {
       sound_effect_density: 'high',
       music_density: 'low',
     })
+    expect(data.audioEngineMode).toBe('seed_scene')
     expect(data.characterVoices).toMatchObject([
       {
         characterId: 0,
@@ -143,6 +145,7 @@ describe('audiobook project selection loader', () => {
       sound_effect_density: 'medium',
       music_density: 'medium',
     })
+    expect(data.audioEngineMode).toBe('legacy_stems')
     expect(data.characterVoices).toMatchObject([
       { characterId: 0, voiceId: 'Neil' },
       { characterId: 9, name: 'Lead', voiceId: '' },

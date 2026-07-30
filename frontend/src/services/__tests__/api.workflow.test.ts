@@ -48,4 +48,56 @@ describe('workflow API client', () => {
       expect.any(Object),
     )
   })
+
+  it('maps generate-next-chapter options from camelCase to snake_case', async () => {
+    const postMock = vi.spyOn((apiClient as any).client, 'post').mockResolvedValue({ status: 200, data: {} })
+
+    await apiClient.generateNextWorkflowChapter(7, {
+      workflowGenerationModel: 'deepseek-v4-pro',
+      generationTier: 'standard',
+    })
+
+    expect(postMock).toHaveBeenCalledWith(
+      '/api/v1/workflow/7/generate-next-chapter',
+      {
+        workflow_generation_model: 'deepseek-v4-pro',
+        generation_tier: 'standard',
+      },
+      expect.any(Object),
+    )
+  })
+
+  it('sends only generation_tier for free tier requests', async () => {
+    const postMock = vi.spyOn((apiClient as any).client, 'post').mockResolvedValue({ status: 200, data: {} })
+
+    await apiClient.generateNextWorkflowChapter(7, { generationTier: 'free' })
+
+    expect(postMock).toHaveBeenCalledWith(
+      '/api/v1/workflow/7/generate-next-chapter',
+      { generation_tier: 'free' },
+      expect.any(Object),
+    )
+  })
+
+  it('sends empty payload when options are omitted (standard tier default)', async () => {
+    const postMock = vi.spyOn((apiClient as any).client, 'post').mockResolvedValue({ status: 200, data: {} })
+
+    await apiClient.generateNextWorkflowChapter(7)
+
+    expect(postMock).toHaveBeenCalledWith(
+      '/api/v1/workflow/7/generate-next-chapter',
+      {},
+      expect.any(Object),
+    )
+  })
+
+  it('loads the authenticated user free generation quota', async () => {
+    const getMock = vi.spyOn((apiClient as any).client, 'get').mockResolvedValue({ status: 200, data: {} })
+
+    await apiClient.getFreeGenerationQuota()
+
+    expect(getMock).toHaveBeenCalledWith('/api/v1/workflow/free-generation/quota', {
+      validateStatus: expect.any(Function),
+    })
+  })
 })

@@ -98,6 +98,8 @@ Thumbs.db
 # Testing
 .coverage
 .pytest_cache/
+.pytest-tmp-*/
+.test-tmp/
 htmlcov/
 .tox/
 .hypothesis/
@@ -146,6 +148,14 @@ backend/.env.local
 runs/
 backend/runs/
 test_old_sdk.wav
+
+# Generated runtime data (local tests, previews, and optimization runs)
+backend/data/seed_scene_tests/
+backend/data/audiobook_scene_runs/
+backend/data/audio_library/music_cache/
+backend/data/prompt_evolution/
+backend/backend/data/asset_studio_outputs/
+data/prompt_evolution/
 
 # Misc
 .turbo/

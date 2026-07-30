@@ -183,6 +183,11 @@ export default function MultiModelReviewSettingsDialog({
                 }
                 label="启用多模型质量评审"
               />
+              {config.enabled ? (
+                <Alert severity="warning">
+                  会增加评审耗时与模型调用成本。
+                </Alert>
+              ) : null}
 
               <Box>
                 <Typography variant="subtitle2" sx={{ mb: 1 }}>自动多模型评审策略</Typography>

@@ -11,7 +11,10 @@ from app.models.project import Project
 from app.services.audiobook.background_jobs_prefetch import prefetch_chapter_generation_records
 from app.services.audiobook.background_jobs_shared import create_background_engine, parse_duration_seconds
 from app.services.audiobook.chapter_character_scope import select_chapter_characters
-from app.services.audiobook.project_audio_runtime import resolve_project_audio_runtime_config
+from app.services.audiobook.project_audio_runtime import (
+    apply_scene_audio_runtime_to_engine,
+    resolve_project_audio_runtime_config,
+)
 from app.services.audiobook.task_support import (
     StageTracker,
     serialize_dataclass_to_dict,
@@ -101,6 +104,10 @@ def _apply_script_stage_project_audio_config(
     runtime_config = resolve_project_audio_runtime_config(
         project,
         tts_model=tts_model,
+    )
+    apply_scene_audio_runtime_to_engine(
+        engine=engine,
+        runtime_config=runtime_config,
     )
     effective_voice_mapping = runtime_config.voice_mapping
 
@@ -196,6 +203,8 @@ async def generate_audiobook_scripts_background(
         chapter_by_id = generation_records.chapter_by_id
         chapter_audio_by_chapter_id = generation_records.chapter_audio_by_chapter_id
 
+        failed_in_run = 0
+
         for index, chapter_id in enumerate(chapter_ids, 1):
             try:
                 logger.info(
@@ -209,6 +218,7 @@ async def generate_audiobook_scripts_background(
                 if not chapter:
                     logger.warning("⚠️ 章节不存在: %s", chapter_id)
                     audiobook_project.failed_chapters += 1
+                    failed_in_run += 1
                     _update_chapter_run_state(
                         db,
                         audiobook_project_id=audiobook_project_id,
@@ -276,11 +286,17 @@ async def generate_audiobook_scripts_background(
                     chapter_id=chapter_id,
                     character_list=character_list,
                     character_profiles=chapter_character_profiles,
+                    novel_genre=str(getattr(project, "genre", "") or "").strip() or "通用",
                     audiobook_project_id=audiobook_project_id,
                     chapter_title=chapter.title or "",
                     chapter_summary=chapter.summary or "",
                     summary_data=chapter.summary_data,
                 )
+
+                if not result.get("success"):
+                    raise RuntimeError(
+                        f"剧本生成失败: {result.get('error') or '未知错误'}"
+                    )
 
                 if not chapter_audio:
                     chapter_audio = ChapterAudio(
@@ -364,6 +380,7 @@ async def generate_audiobook_scripts_background(
             except Exception as exc:
                 logger.error("❌ [脚本阶段] 章节 %s 处理异常: %s", chapter_id, exc)
                 audiobook_project.failed_chapters += 1
+                failed_in_run += 1
                 _update_chapter_run_state(
                     db,
                     audiobook_project_id=audiobook_project_id,
@@ -379,10 +396,14 @@ async def generate_audiobook_scripts_background(
 
                 traceback.print_exc()
 
-        audiobook_project.status = "completed"
+        # 本次运行有失败章节时置为 failed，避免掩盖局部失败
+        audiobook_project.status = "completed" if failed_in_run == 0 else "failed"
         db.commit()
 
-        logger.info("🎉 有声书剧本生成完成!")
+        if failed_in_run:
+            logger.warning("⚠️ 有声书剧本生成结束，但本次运行有 %s 个章节失败", failed_in_run)
+        else:
+            logger.info("🎉 有声书剧本生成完成!")
         logger.info(
             "   - 成功: %s/%s",
             audiobook_project.completed_chapters,

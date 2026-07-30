@@ -45,6 +45,7 @@ class MiMoVoiceAsset:
     audio_path: str = ""
     created_at: str = ""
     updated_at: str = ""
+    owner_user_id: Optional[int] = None
 
     @classmethod
     def from_dict(cls, payload: Dict[str, Any]) -> "MiMoVoiceAsset":
@@ -59,6 +60,11 @@ class MiMoVoiceAsset:
             audio_path=str(payload.get("audio_path") or "").strip(),
             created_at=str(payload.get("created_at") or "").strip(),
             updated_at=str(payload.get("updated_at") or "").strip(),
+            owner_user_id=(
+                int(payload["owner_user_id"])
+                if payload.get("owner_user_id") not in (None, "")
+                else None
+            ),
         )
 
     def to_dict(self) -> Dict[str, Any]:
@@ -73,6 +79,7 @@ class MiMoVoiceAsset:
             "audio_path": self.audio_path,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
+            "owner_user_id": self.owner_user_id,
         }
 
     def to_voice_preset(self) -> Dict[str, Any]:
@@ -95,20 +102,30 @@ class MiMoVoiceAssetStore:
         self.root_dir = Path(root_dir or DEFAULT_MIMO_VOICE_ASSET_DIR)
         self.index_path = self.root_dir / "index.json"
 
-    def list_assets(self, *, model: Optional[str] = None, asset_type: Optional[str] = None) -> List[MiMoVoiceAsset]:
+    def list_assets(
+        self,
+        *,
+        model: Optional[str] = None,
+        asset_type: Optional[str] = None,
+        owner_user_id: Optional[int] = None,
+    ) -> List[MiMoVoiceAsset]:
         normalized_model = normalize_audiobook_tts_model(model, default="") if model else ""
         requested_type = str(asset_type or "").strip()
         assets = list(self._load_assets())
+        if owner_user_id is not None:
+            assets = [asset for asset in assets if asset.owner_user_id == owner_user_id]
         if normalized_model:
             assets = [asset for asset in assets if asset.model == normalized_model]
         if requested_type:
             assets = [asset for asset in assets if asset.asset_type == requested_type]
         return sorted(assets, key=lambda asset: asset.created_at, reverse=True)
 
-    def get_asset(self, asset_id: str) -> MiMoVoiceAsset:
+    def get_asset(self, asset_id: str, *, owner_user_id: Optional[int] = None) -> MiMoVoiceAsset:
         normalized_id = _strip_asset_voice_prefix(asset_id)
         for asset in self._load_assets():
             if asset.id == normalized_id:
+                if asset.owner_user_id is not None and asset.owner_user_id != owner_user_id:
+                    raise MiMoVoiceAssetError("MiMo voice asset does not belong to this user")
                 return asset
         raise MiMoVoiceAssetError(f"MiMo voice asset not found: {asset_id}")
 
@@ -118,6 +135,7 @@ class MiMoVoiceAssetStore:
         name: str,
         voice_design_prompt: str,
         description: str = "",
+        owner_user_id: Optional[int] = None,
     ) -> MiMoVoiceAsset:
         clean_name = _require_text(name, "name")
         prompt = _require_text(voice_design_prompt, "voice_design_prompt")
@@ -131,6 +149,7 @@ class MiMoVoiceAssetStore:
             voice_design_prompt=prompt,
             created_at=now,
             updated_at=now,
+            owner_user_id=owner_user_id,
         )
         self._append_asset(asset)
         return asset
@@ -141,6 +160,7 @@ class MiMoVoiceAssetStore:
         name: str,
         audio_data_url: str,
         description: str = "",
+        owner_user_id: Optional[int] = None,
     ) -> MiMoVoiceAsset:
         clean_name = _require_text(name, "name")
         mime_type, audio_bytes = _decode_audio_data_url(audio_data_url)
@@ -149,6 +169,7 @@ class MiMoVoiceAssetStore:
             audio_bytes=audio_bytes,
             mime_type=mime_type,
             description=description,
+            owner_user_id=owner_user_id,
         )
 
     def create_clone_asset_from_bytes(
@@ -158,6 +179,7 @@ class MiMoVoiceAssetStore:
         audio_bytes: bytes,
         mime_type: str,
         description: str = "",
+        owner_user_id: Optional[int] = None,
     ) -> MiMoVoiceAsset:
         clean_name = _require_text(name, "name")
         audio_payload = bytes(audio_bytes or b"")
@@ -169,6 +191,7 @@ class MiMoVoiceAssetStore:
             audio_bytes=audio_payload,
             mime_type=clean_mime_type,
             description=description,
+            owner_user_id=owner_user_id,
         )
 
     def _create_clone_asset_record(
@@ -178,6 +201,7 @@ class MiMoVoiceAssetStore:
         audio_bytes: bytes,
         mime_type: str,
         description: str = "",
+        owner_user_id: Optional[int] = None,
     ) -> MiMoVoiceAsset:
         now = _utc_now()
         asset_id = _build_asset_id("clone")
@@ -196,17 +220,25 @@ class MiMoVoiceAssetStore:
             audio_path=relative_path,
             created_at=now,
             updated_at=now,
+            owner_user_id=owner_user_id,
         )
         self._append_asset(asset)
         return asset
 
-    def delete_asset(self, asset_id: str) -> bool:
+    def delete_asset(self, asset_id: str, *, owner_user_id: Optional[int] = None) -> bool:
         normalized_id = _strip_asset_voice_prefix(asset_id)
         assets = list(self._load_assets())
-        kept = [asset for asset in assets if asset.id != normalized_id]
+        owner_assets = (
+            [asset for asset in assets if asset.owner_user_id == owner_user_id]
+            if owner_user_id is not None
+            else assets
+        )
+        removed = next((asset for asset in owner_assets if asset.id == normalized_id), None)
+        if removed is None:
+            raise MiMoVoiceAssetError("MiMo voice asset does not belong to this user")
+        kept = [asset for asset in assets if asset is not removed]
         if len(kept) == len(assets):
             return False
-        removed = next(asset for asset in assets if asset.id == normalized_id)
         if removed.audio_path:
             audio_path = (self.root_dir / removed.audio_path).resolve()
             root = self.root_dir.resolve()
@@ -215,8 +247,8 @@ class MiMoVoiceAssetStore:
         self._save_assets(kept)
         return True
 
-    def resolve_tts_params(self, asset_id: str) -> Dict[str, Any]:
-        asset = self.get_asset(asset_id)
+    def resolve_tts_params(self, asset_id: str, *, owner_user_id: Optional[int] = None) -> Dict[str, Any]:
+        asset = self.get_asset(asset_id, owner_user_id=owner_user_id)
         if asset.asset_type == "design":
             return {
                 "mimo_voice_asset_id": asset.id,
@@ -270,24 +302,45 @@ class MiMoVoiceAssetStore:
         self.index_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-def list_mimo_voice_asset_presets(model: str) -> List[Dict[str, Any]]:
+def list_mimo_voice_asset_presets(
+    model: str,
+    *,
+    owner_user_id: Optional[int] = None,
+) -> List[Dict[str, Any]]:
     normalized_model = normalize_audiobook_tts_model(model, default="")
     if normalized_model not in {MIMO_V25_TTS_VOICE_CLONE_MODEL, MIMO_V25_TTS_VOICE_DESIGN_MODEL}:
         return []
-    return [asset.to_voice_preset() for asset in MiMoVoiceAssetStore().list_assets(model=normalized_model)]
+    return [
+        asset.to_voice_preset()
+        for asset in MiMoVoiceAssetStore().list_assets(
+            model=normalized_model,
+            owner_user_id=owner_user_id,
+        )
+    ]
 
 
-def resolve_mimo_voice_asset_tts_params(asset_id: str) -> Dict[str, Any]:
-    return MiMoVoiceAssetStore().resolve_tts_params(asset_id)
+def resolve_mimo_voice_asset_tts_params(
+    asset_id: str,
+    *,
+    owner_user_id: Optional[int] = None,
+) -> Dict[str, Any]:
+    return MiMoVoiceAssetStore().resolve_tts_params(asset_id, owner_user_id=owner_user_id)
 
 
-def merge_mimo_voice_asset_tts_params(config: Dict[str, Any]) -> Dict[str, Any]:
+def merge_mimo_voice_asset_tts_params(
+    config: Dict[str, Any],
+    *,
+    owner_user_id: Optional[int] = None,
+) -> Dict[str, Any]:
     asset_id = str(config.get("mimo_voice_asset_id") or "").strip()
     if not asset_id:
         asset_id = _strip_asset_voice_prefix(str(config.get("voice_id") or config.get("speaker") or "").strip())
     if not asset_id:
         return dict(config)
-    params = resolve_mimo_voice_asset_tts_params(asset_id)
+    params = resolve_mimo_voice_asset_tts_params(
+        asset_id,
+        owner_user_id=owner_user_id,
+    )
     return {**config, **params}
 
 

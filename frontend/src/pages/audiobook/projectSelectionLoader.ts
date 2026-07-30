@@ -1,5 +1,6 @@
 import { apiClient } from '../../services/api'
 import type {
+  AudioEngineMode,
   AudioFxConfig,
   Chapter,
   CharacterVoiceSetting,
@@ -21,7 +22,12 @@ export interface AudiobookProjectSelectionData {
   selectedChapterIds: number[]
   characterVoices: CharacterVoiceSetting[]
   audioFxConfig: AudioFxConfig
+  audioEngineMode: AudioEngineMode
 }
+
+const normalizeAudioEngineMode = (value: unknown): AudioEngineMode => (
+  value === 'seed_scene' ? 'seed_scene' : 'legacy_stems'
+)
 
 export const loadAudiobookProjectSelectionData = async ({
   projectId,
@@ -65,6 +71,7 @@ export const loadAudiobookProjectSelectionData = async ({
         voicePresets,
       }),
       audioFxConfig: normalizeProjectAudioFxConfig(projectAudioConfig?.audio_fx),
+      audioEngineMode: normalizeAudioEngineMode(projectAudioConfig?.audio_engine_mode),
     }
   } catch {
     return {
@@ -75,6 +82,7 @@ export const loadAudiobookProjectSelectionData = async ({
       }),
       characterVoices: [buildBaseNarratorVoice(ttsModel, voicePresets)],
       audioFxConfig: createDefaultAudioFxConfig(),
+      audioEngineMode: 'legacy_stems',
     }
   }
 }

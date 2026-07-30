@@ -4,7 +4,7 @@
 from fastapi import APIRouter, Body, Depends, HTTPException, status, Query
 from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
-from typing import List, Optional
+from typing import List, Literal, Optional
 import logging
 import re
 from pydantic import BaseModel, ValidationError
@@ -25,10 +25,14 @@ from app.schemas.review_config import (
 from app.core.security import get_current_user
 from app.services.workflow_context_builder import WorkflowContextBuilder
 from app.services.audiobook.project_audio_config import (
+    get_audio_engine_mode,
     get_audio_fx,
     get_characters_for_model,
+    get_seed_audio_model,
     parse_project_audio_config,
     set_audio_fx,
+    set_audio_engine_mode,
+    set_seed_audio_model,
     set_characters_for_model,
 )
 from app.services.audiobook.tts_model_ids import normalize_audiobook_tts_model
@@ -79,6 +83,9 @@ class ProjectAudioConfig(BaseModel):
     """项目级音频配置"""
     characters: List[CharacterAudioConfig] = []
     audio_fx: Optional[AudioFxConfig] = None
+    audio_engine_mode: Optional[Literal["legacy_stems", "seed_scene", "auto"]] = None
+    # multilingual 变体暂不启用，仅开放 seed-audio-1.0；恢复时同步放开此处与 SEED_AUDIO_MODELS。
+    seed_audio_model: Optional[Literal["seed-audio-1.0"]] = None
 
 
 PERSISTED_CHARACTER_AUDIO_CONFIG_FIELDS = (
@@ -464,7 +471,12 @@ async def get_project_audio_config(
     ]
     audio_fx = get_audio_fx(data)
     # 让 Pydantic 处理具体字段校验
-    return ProjectAudioConfig(characters=characters, audio_fx=audio_fx)
+    return ProjectAudioConfig(
+        characters=characters,
+        audio_fx=audio_fx,
+        audio_engine_mode=get_audio_engine_mode(data),
+        seed_audio_model=get_seed_audio_model(data),
+    )
 
 
 @router.put("/{project_id}/audio-config", response_model=ProjectAudioConfig, response_model_exclude_none=True)
@@ -497,12 +509,21 @@ async def update_project_audio_config(
         characters,
     )
     set_audio_fx(data, config.audio_fx.model_dump(exclude_none=True) if config.audio_fx else None)
+    if config.audio_engine_mode is not None:
+        set_audio_engine_mode(data, config.audio_engine_mode)
+    if config.seed_audio_model is not None:
+        set_seed_audio_model(data, config.seed_audio_model)
     project.audio_config = json.dumps(data, ensure_ascii=False)
     db.add(project)
     db.commit()
     db.refresh(project)
 
-    return ProjectAudioConfig(characters=characters, audio_fx=config.audio_fx)
+    return ProjectAudioConfig(
+        characters=characters,
+        audio_fx=config.audio_fx,
+        audio_engine_mode=get_audio_engine_mode(data),
+        seed_audio_model=get_seed_audio_model(data),
+    )
 
 
 @router.get("/{project_id}/review-config", response_model=ReviewConfigResponse)

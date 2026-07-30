@@ -11,6 +11,10 @@ from app.services.audiobook.render_plan import render_chunks_to_timing_segments_
 from app.services.audiobook.chapter_cadence import apply_chapter_cadence
 from app.services.audiobook.temp_segment_store import save_segment_audio_batch, save_segment_audio_map
 from app.services.audiobook.atomic_files import write_bytes_atomic
+from app.services.audiobook.engine_pkg._tts_mixin import (
+    collect_tts_cost_stats,
+    subtract_tts_cost_stats,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +48,7 @@ class AudioFromScriptMixin:
         用于两阶段流程的第2阶段：从 ChapterAudio.script_json 直接进入 TTS + 混音。
         """
         start_time = time.time()
+        tts_cost_baseline = collect_tts_cost_stats(self)
 
         # 创建任务追踪（标记来源为 existing_script）
         task_id = self.task_tracker.create_task(
@@ -219,6 +224,49 @@ class AudioFromScriptMixin:
             prompt_metrics = build_prompt_metrics(script_segments) if callable(build_prompt_metrics) else {}
             self.task_tracker.complete_stage(task_id, StageType.AUDIO_PROMPT_REVIEW, metrics=prompt_metrics)
 
+            try_seed_scene = getattr(self, "_try_generate_seed_scene_chapter", None)
+            scene_chapter_result = (
+                await self._try_generate_seed_scene_chapter(
+                    script_segments=script_segments,
+                    chapter_id=chapter_id,
+                    task_id=task_id,
+                    output_path=output_path,
+                    output_format=output_format,
+                    resume_checkpoint=resume_checkpoint,
+                    enable_quality_review=enable_quality_review,
+                    script_quality_report=quality_report,
+                    tts_progress_callback=tts_progress_callback,
+                    audiobook_project_id=audiobook_project_id,
+                )
+                if callable(try_seed_scene)
+                else None
+            )
+            if scene_chapter_result is not None:
+                scene_chapter_result["quality_report_detail"] = (
+                    self._quality_report_to_payload(
+                        quality_report,
+                        auto_revision=auto_revision,
+                    )
+                    if hasattr(self, "_quality_report_to_payload")
+                    else None
+                )
+                scene_chapter_result["stats"].update(
+                    {
+                        "generation_time": f"{time.time() - start_time:.1f}秒",
+                        "quality_report": {
+                            "overall_grade": quality_report.overall_grade,
+                            "overall_score": quality_report.overall_score,
+                            "issues_count": len(quality_report.issues),
+                            "revision_suggestions": quality_report.revision_suggestions,
+                            "auto_revision": auto_revision if auto_revision.get("applied") else None,
+                            "quality_gate": auto_revision.get("quality_gate"),
+                        }
+                        if quality_report
+                        else None,
+                    }
+                )
+                return scene_chapter_result
+
             # ============ 阶段8：TTS合成 ============
             self.task_tracker.start_stage(task_id, StageType.TTS_SYNTHESIS)
             logger.info("🎙️ [8/10] TTS合成中(基于已审稿剧本)...")
@@ -315,7 +363,10 @@ class AudioFromScriptMixin:
                 except Exception as cache_err:
                     logger.warning("⚠️ 保存临时分段音频失败: %s", cache_err)
 
-            tts_stats = self.tts_engine.get_cost_stats()
+            tts_stats = subtract_tts_cost_stats(
+                collect_tts_cost_stats(self),
+                tts_cost_baseline,
+            )
 
             self.task_tracker.complete_stage(
                 task_id,

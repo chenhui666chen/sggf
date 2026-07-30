@@ -567,9 +567,11 @@ def test_design_effects_with_sound_effect_library(sound_effect_designer_module):
     assert cues[0].audio_file is not None
 
 
-def test_export_effect_timeline_includes_matched_effect_id(sound_effect_designer_module):
+def test_export_effect_timeline_includes_matched_effect_id(sound_effect_designer_module, monkeypatch):
     """Timeline should preserve the concrete sound library ID used for credits."""
     designer = sound_effect_designer_module["SoundEffectDesigner"]()
+    # 测试环境无真实素材文件，视为可解析以聚焦 effect_id 保留行为
+    monkeypatch.setattr(designer, "_has_resolvable_audio_file", lambda file_ref: True)
 
     cues = designer.design_effects(
         [
@@ -623,6 +625,56 @@ def test_export_effect_timeline_reports_unresolved_sound_effect_assets(
     assert timeline["unresolved_effects"]["items"][1]["reason"] == "missing_audio_file"
     assert timeline["warnings"][0]["code"] == "unresolved_sound_effect_assets"
     assert "2" in timeline["warnings"][0]["message"]
+
+
+def test_export_effect_timeline_excludes_unresolvable_assets(
+    sound_effect_designer_module,
+    monkeypatch,
+):
+    """音效生成失败不做兜底直接跳过：placeholder/死文件名条目不应进入混音时间线，
+    否则混音层逐条尝试后刷"音效文件不存在"警告。"""
+    SoundEffectCue = sound_effect_designer_module["SoundEffectCue"]
+    EffectType = sound_effect_designer_module["EffectType"]
+    designer = sound_effect_designer_module["SoundEffectDesigner"]()
+    designer.effect_cues = [
+        SoundEffectCue(
+            scene_id="scene_1",
+            timestamp=0.0,
+            effect_type=EffectType.ACTION,
+            description="骨裂声",
+            audio_file="placeholder.mp3",
+            effect_id="",
+        ),
+        SoundEffectCue(
+            scene_id="scene_2",
+            timestamp=2.5,
+            effect_type=EffectType.EMOTION,
+            description="远处呼喊回声",
+            audio_file="distant_shout_echo.mp3",
+            effect_id="distant_shout_echo",
+        ),
+        SoundEffectCue(
+            scene_id="scene_3",
+            timestamp=5.0,
+            effect_type=EffectType.ACTION,
+            description="关门声",
+            audio_file="door_close.mp3",
+            effect_id="door_close",
+        ),
+    ]
+    monkeypatch.setattr(
+        designer,
+        "_has_resolvable_audio_file",
+        lambda file_ref: file_ref == "door_close.mp3",
+    )
+
+    timeline = designer.export_effect_timeline()
+
+    # 只有可解析素材进入混音时间线
+    assert [item["file"] for item in timeline["timeline"]] == ["door_close.mp3"]
+    # 不可解析条目仍保留在质量报告中
+    assert timeline["unresolved_effects"]["unresolved_count"] == 2
+    assert timeline["total_effects"] == 3
 
 
 def test_design_effects_uses_narration_speed_for_timestamps(sound_effect_designer_module):
@@ -700,13 +752,13 @@ def test_common_fantasy_effect_descriptions_match_library_aliases(sound_effect_d
         assert cue.description == description
 
 
-def test_vidu_effect_prompt_enriches_fantasy_material(sound_effect_designer_module):
+def test_doubao_effect_prompt_enriches_fantasy_material(sound_effect_designer_module):
     """Fantasy object SFX prompts should explain material and acoustic target."""
     SoundEffectCue = sound_effect_designer_module["SoundEffectCue"]
     EffectType = sound_effect_designer_module["EffectType"]
     designer = sound_effect_designer_module["SoundEffectDesigner"]()
 
-    prompt = designer._build_vidu_effect_prompt(
+    prompt = designer._build_doubao_effect_prompt(
         SoundEffectCue(
             scene_id="scene",
             timestamp=0.0,
@@ -718,8 +770,64 @@ def test_vidu_effect_prompt_enriches_fantasy_material(sound_effect_designer_modu
     assert "灵石碰撞声" in prompt
     assert "晶石/玉石" in prompt
     assert "奇幻灵力" in prompt
-    assert "不要音乐" in prompt
-    assert "不要人声台词" in prompt
+    # 负面约束（不要音乐/人声）已按需求移除
+    assert "不要音乐" not in prompt
+    assert "不要人声台词" not in prompt
+
+
+def test_doubao_effect_prompt_prefers_llm_expansion(sound_effect_designer_module):
+    """LLM available: prompt should be the LLM-expanded sound design description."""
+    SoundEffectCue = sound_effect_designer_module["SoundEffectCue"]
+    EffectType = sound_effect_designer_module["EffectType"]
+    designer = sound_effect_designer_module["SoundEffectDesigner"]()
+    designer.llm_client = object()
+
+    captured = {}
+
+    def fake_run(prompt: str, max_tokens: int) -> str:
+        captured["prompt"] = prompt
+        return '{"prompt": "细碎的晶石相互碰撞，清脆短促，近景干净，尾音带一丝灵力闪烁感"}'
+
+    designer._run_llm_chat_sync = fake_run
+
+    prompt = designer._build_doubao_effect_prompt(
+        SoundEffectCue(
+            scene_id="scene",
+            timestamp=0.0,
+            effect_type=EffectType.ACTION,
+            description="灵石碰撞声",
+        )
+    )
+
+    assert prompt == "细碎的晶石相互碰撞，清脆短促，近景干净，尾音带一丝灵力闪烁感"
+    # 扩写请求里应携带剧本描述与声音特点要求
+    assert "灵石碰撞声" in captured["prompt"]
+    assert "声源与材质" in captured["prompt"]
+
+
+def test_doubao_effect_prompt_falls_back_when_llm_fails(sound_effect_designer_module):
+    """LLM failure should fall back to the keyword template without crashing."""
+    SoundEffectCue = sound_effect_designer_module["SoundEffectCue"]
+    EffectType = sound_effect_designer_module["EffectType"]
+    designer = sound_effect_designer_module["SoundEffectDesigner"]()
+    designer.llm_client = object()
+
+    def fake_run(prompt: str, max_tokens: int) -> str:
+        raise RuntimeError("llm down")
+
+    designer._run_llm_chat_sync = fake_run
+
+    prompt = designer._build_doubao_effect_prompt(
+        SoundEffectCue(
+            scene_id="scene",
+            timestamp=0.0,
+            effect_type=EffectType.ACTION,
+            description="灵石碰撞声",
+        )
+    )
+
+    assert "灵石碰撞声" in prompt
+    assert "晶石/玉石" in prompt
 
 
 def test_optimize_effect_density_respects_max_effects_per_minute(sound_effect_designer_module):
@@ -1071,6 +1179,136 @@ def test_parallel_sound_design_preserves_structured_asset_selection():
     assert effect_request.volume == 0.4
 
 
+def test_parallel_design_seed_scene_skips_local_asset_generation():
+    from app.services.audiobook.engine_pkg._parallel_mixin import ParallelMixin
+
+    class UnexpectedSoundDesigner:
+        def __init__(self):
+            self.calls = 0
+
+        def design_effects(self, *args, **kwargs):
+            self.calls += 1
+            return []
+
+    class UnexpectedMusicComposer:
+        def __init__(self):
+            self.calls = 0
+
+        async def design_music(self, *args, **kwargs):
+            self.calls += 1
+            return []
+
+    class Harness(ParallelMixin):
+        def __init__(self):
+            self._audio_engine_mode = "seed_scene"
+            self._audio_fx_config = {
+                "enable_sound_effects": True,
+                "sound_effect_density": "high",
+                "enable_music": True,
+                "music_density": "high",
+            }
+            self.sound_effect_designer = UnexpectedSoundDesigner()
+            self.music_composer = UnexpectedMusicComposer()
+            self._last_effect_timeline = {"timeline": ["stale"]}
+            self._last_music_timeline = {"timeline": ["stale"]}
+
+    harness = Harness()
+    result = asyncio.run(
+        harness._parallel_design(
+            task_id="task",
+            script_segments=[
+                SimpleNamespace(
+                    text="雨声中，门被猛地推开。",
+                    sound_effects=[SimpleNamespace(name="持续雨声")],
+                    music_cue=SimpleNamespace(style="低频紧张弦乐进入"),
+                )
+            ],
+            skip_stage_tracking=True,
+            include_voice_design=False,
+            prepare_render_assets=False,
+        )
+    )
+
+    assert result[1:] == (1, 1)
+    assert harness.sound_effect_designer.calls == 0
+    assert harness.music_composer.calls == 0
+    assert harness._last_effect_timeline is None
+    assert harness._last_music_timeline is None
+
+
+def test_parallel_design_seed_scene_keeps_legacy_fallback_assets_by_default():
+    from app.services.audiobook.engine_pkg._parallel_mixin import ParallelMixin
+
+    class FallbackSoundDesigner:
+        def __init__(self):
+            self.calls = 0
+            self.effect_cues = []
+
+        def design_effects(self, *args, **kwargs):
+            self.calls += 1
+            self.effect_cues = [SimpleNamespace()]
+            return self.effect_cues
+
+        def optimize_effect_density(self, **kwargs):
+            return self.effect_cues
+
+        def export_effect_timeline(self):
+            return {"timeline": [{"description": "关门声"}]}
+
+    class FallbackMusicComposer:
+        def __init__(self):
+            self.calls = 0
+            self.music_cues = []
+
+        async def design_music(self, *args, **kwargs):
+            self.calls += 1
+            self.music_cues = [SimpleNamespace()]
+            return self.music_cues
+
+        def optimize_music_placement(self, **kwargs):
+            return self.music_cues
+
+        def export_music_timeline(self):
+            return {"timeline": [{"description": "紧张配乐"}]}
+
+    class Harness(ParallelMixin):
+        def __init__(self):
+            self._audio_engine_mode = "seed_scene"
+            self._audio_fx_config = {
+                "enable_sound_effects": True,
+                "sound_effect_density": "medium",
+                "enable_music": True,
+                "music_density": "medium",
+            }
+            self.sound_effect_designer = FallbackSoundDesigner()
+            self.music_composer = FallbackMusicComposer()
+
+    harness = Harness()
+    asyncio.run(
+        harness._parallel_design(
+            task_id="task",
+            script_segments=[
+                SimpleNamespace(
+                    text="门被猛地关上。",
+                    emotion="tense",
+                    sound_effects=[SimpleNamespace(name="关门声")],
+                    sound_effects_simple=[],
+                    music_cue=SimpleNamespace(style="紧张弦乐进入"),
+                    music_cue_simple="",
+                )
+            ],
+            chapter_content="门被猛地关上。",
+            skip_stage_tracking=True,
+            include_voice_design=False,
+        )
+    )
+
+    assert harness.sound_effect_designer.calls == 1
+    assert harness.music_composer.calls == 1
+    assert harness._last_effect_timeline["timeline"]
+    assert harness._last_music_timeline["timeline"]
+
+
 def test_parallel_music_scene_builder_preserves_explicit_asset_selection():
     from app.services.audiobook.engine_pkg._parallel_mixin import ParallelMixin
 
@@ -1252,7 +1490,7 @@ def test_ensure_generated_assets_replaces_missing_environment_audio(
         lambda file_ref: file_ref == "sound_effects/environment/generated_rain.mp3",
     )
 
-    async def fake_ensure_vidu_ambient_sound(scene_description, duration, mood=None):
+    async def fake_ensure_doubao_ambient_sound(scene_description, duration, mood=None):
         return SoundEffectCue(
             scene_id="ambient",
             timestamp=0.0,
@@ -1267,7 +1505,7 @@ def test_ensure_generated_assets_replaces_missing_environment_audio(
             mix_mode="background",
         )
 
-    monkeypatch.setattr(designer, "ensure_vidu_ambient_sound", fake_ensure_vidu_ambient_sound)
+    monkeypatch.setattr(designer, "ensure_doubao_ambient_sound", fake_ensure_doubao_ambient_sound)
 
     asyncio.run(designer.ensure_generated_assets(max_generated_effects=1))
 
@@ -1279,7 +1517,7 @@ def test_ensure_generated_assets_replaces_missing_environment_audio(
     assert cue.fade_in == 1.0
 
 
-def test_vidu_ambient_ignores_missing_static_library_match(
+def test_doubao_ambient_ignores_missing_static_library_match(
     sound_effect_designer_module,
     monkeypatch,
 ):
@@ -1306,24 +1544,126 @@ def test_vidu_ambient_ignores_missing_static_library_match(
         lambda **_: {"file_path": "sound_effects/environment/generated_rain.mp3"},
     )
 
-    class FakeViduResult:
+    class FakeDoubaoResult:
         success = True
         audio_url = "https://example.test/rain.mp3"
         error = ""
 
-    class FakeViduGenerator:
+    class FakeDoubaoGenerator:
         async def generate_audio_async(self, **kwargs):
-            return FakeViduResult()
+            return FakeDoubaoResult()
 
-    designer._vidu_generator = FakeViduGenerator()
+    designer._doubao_sfx_generator = FakeDoubaoGenerator()
 
-    cue = asyncio.run(designer.ensure_vidu_ambient_sound("雨夜街道", 12.0, mood="tense"))
+    cue = asyncio.run(designer.ensure_doubao_ambient_sound("雨夜街道", 12.0, mood="tense"))
 
     assert cue.audio_file == "sound_effects/environment/generated_rain.mp3"
 
 
-def test_vidu_short_effects_use_canonical_category_and_scene_tags(sound_effect_designer_module):
-    """Vidu 短音效入库时，应使用统一分类并携带场景标签。"""
+def test_ambient_effect_metadata_name_uses_scene_description(sound_effect_designer_module):
+    """回归：环境音入库名称应为真实场景描述（纯中文），不追加"环境音"后缀，且标签不混入英文提供商名。"""
+    designer = sound_effect_designer_module["SoundEffectDesigner"]()
+
+    meta = designer._build_ambient_effect_metadata("脚步声", "calm", provider="Doubao")
+
+    assert meta["name"] == "脚步声"
+    assert "环境音" not in meta["name"]
+    assert "Doubao" not in meta["tags"]
+    assert "Doubao" not in meta["name"]
+    # effect_id 仍保留提供商后缀用于去重
+    assert "doubao" in meta["effect_id"]
+
+    # 场景描述已以"环境音"结尾时去掉该后缀，避免冗余
+    meta2 = designer._build_ambient_effect_metadata("雨夜的城市街道环境音", "calm", provider="Doubao")
+    assert meta2["name"] == "雨夜的城市街道"
+    assert "环境音" not in meta2["name"]
+
+    # 空描述时回退到粗分类模板名，同样不含"环境音"
+    meta3 = designer._build_ambient_effect_metadata("", "calm", provider="Doubao")
+    assert meta3["name"]
+    assert "环境音" not in meta3["name"]
+    assert "（" not in meta3["name"]
+
+
+def test_doubao_ambient_failure_returns_none_without_fallback(
+    sound_effect_designer_module,
+    monkeypatch,
+):
+    """回归：豆包环境音生成失败时不做任何兜底，直接返回 None。"""
+    designer = sound_effect_designer_module["SoundEffectDesigner"]()
+
+    monkeypatch.setattr(designer, "_match_effect", lambda **_: None)
+    monkeypatch.setattr(designer, "_has_resolvable_audio_file", lambda file_ref: False)
+
+    fallback_calls = []
+    monkeypatch.setattr(
+        designer,
+        "design_ambient_sound",
+        lambda *args, **kwargs: fallback_calls.append("builtin"),
+    )
+    monkeypatch.setattr(
+        designer,
+        "ensure_mureka_ambient_sound",
+        lambda *args, **kwargs: fallback_calls.append("mureka"),
+    )
+
+    class FakeDoubaoResult:
+        success = False
+        audio_url = ""
+        error = "quota exceeded"
+
+    class FakeDoubaoGenerator:
+        async def generate_audio_async(self, **kwargs):
+            return FakeDoubaoResult()
+
+    designer._doubao_sfx_generator = FakeDoubaoGenerator()
+
+    cue = asyncio.run(designer.ensure_doubao_ambient_sound("雨夜街道", 12.0, mood="tense"))
+
+    assert cue is None
+    assert fallback_calls == []
+
+
+def test_download_and_register_effect_url_without_extension(
+    sound_effect_designer_module,
+    monkeypatch,
+    tmp_path,
+):
+    """回归：豆包CDN直链无文件后缀时，不应把域名/路径误当后缀导致写文件失败。"""
+    import app.services.audiobook.agents.sound_effect_designer as sfx_module
+
+    designer = sound_effect_designer_module["SoundEffectDesigner"]()
+
+    monkeypatch.setattr(sfx_module, "SOUND_EFFECTS_DIR", tmp_path)
+    monkeypatch.setattr(designer, "register_new_effect", lambda record: None)
+
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def iter_content(self, chunk_size=8192):
+            yield b"fake-audio-bytes"
+
+    monkeypatch.setattr(sfx_module.requests, "get", lambda *args, **kwargs: FakeResponse())
+
+    record = designer.download_and_register_effect(
+        url="https://sami-vod.volcengine-speech.com/volcengine-speech/cdn/20260729/861023e6-a02e-45b3-88a4-0382c255dfbd",
+        effect_id="ambient_city_test_doubao_78221c",
+        category="environment/peaceful",
+        description="测试环境音",
+        tags=["city"],
+        source="ai_generated",
+    )
+
+    assert record is not None
+    assert record["file_path"] == "sound_effects/environment/peaceful/ambient_city_test_doubao_78221c.mp3"
+    saved = tmp_path / "environment" / "peaceful" / "ambient_city_test_doubao_78221c.mp3"
+    assert saved.exists()
+    assert saved.read_bytes() == b"fake-audio-bytes"
+
+
+def test_doubao_short_effects_use_canonical_category_and_scene_tags(sound_effect_designer_module):
+    """豆包短音效入库时，应使用统一分类并携带场景标签。"""
     SoundEffectDesigner = sound_effect_designer_module["SoundEffectDesigner"]
     SoundEffectCue = sound_effect_designer_module["SoundEffectCue"]
     EffectType = sound_effect_designer_module["EffectType"]
@@ -1331,14 +1671,14 @@ def test_vidu_short_effects_use_canonical_category_and_scene_tags(sound_effect_d
     designer = SoundEffectDesigner()
     calls = {}
 
-    class FakeViduResult:
+    class FakeDoubaoResult:
         success = True
         audio_url = "https://example.test/door-kick.mp3"
         error = ""
 
-    class FakeViduGenerator:
+    class FakeDoubaoGenerator:
         async def generate_audio_async(self, **kwargs):
-            return FakeViduResult()
+            return FakeDoubaoResult()
 
     def fake_download_and_register_effect(
         *,
@@ -1370,7 +1710,7 @@ def test_vidu_short_effects_use_canonical_category_and_scene_tags(sound_effect_d
             "file_path": f"sound_effects/{category}/{effect_id}.mp3",
         }
 
-    designer._vidu_generator = FakeViduGenerator()
+    designer._doubao_sfx_generator = FakeDoubaoGenerator()
     designer.download_and_register_effect = fake_download_and_register_effect  # type: ignore[method-assign]
 
     cue = SoundEffectCue(
@@ -1381,7 +1721,7 @@ def test_vidu_short_effects_use_canonical_category_and_scene_tags(sound_effect_d
         audio_file="",
     )
 
-    record = asyncio.run(designer._generate_vidu_effect_for_cue(cue))
+    record = asyncio.run(designer._generate_doubao_effect_for_cue(cue))
 
     assert record is not None
     assert calls["category"] == "action/realistic"
@@ -1391,40 +1731,38 @@ def test_vidu_short_effects_use_canonical_category_and_scene_tags(sound_effect_d
     assert "realistic" in calls["tags"]
 
 
-def test_vidu_prompt_adapter_uses_timing2audio_contract(sound_effect_designer_module):
-    """测试单段 Vidu 音效 prompt 会适配为 timing2audio 参数。"""
+def test_doubao_prompt_adapter_uses_seed_audio_contract(sound_effect_designer_module):
+    """测试单段音效 prompt 会以 prompt/duration 契约调用豆包生成器。"""
     designer = sound_effect_designer_module["SoundEffectDesigner"]()
 
-    class FakeViduResult:
+    class FakeDoubaoResult:
         success = True
         audio_url = "https://example.test/effect.mp3"
         error = ""
 
-    class FakeViduGenerator:
+    class FakeDoubaoGenerator:
         def __init__(self):
             self.calls = []
 
         async def generate_audio_async(self, **kwargs):
             self.calls.append(kwargs)
-            return FakeViduResult()
+            return FakeDoubaoResult()
 
-    fake_vidu = FakeViduGenerator()
-    designer._vidu_generator = fake_vidu
+    fake_doubao = FakeDoubaoGenerator()
+    designer._doubao_sfx_generator = fake_doubao
 
     result = asyncio.run(
-        designer._generate_vidu_audio_for_prompt(
+        designer._generate_doubao_audio_for_prompt(
             prompt="low buzz",
             duration=3.0,
-            max_wait=60,
         )
     )
 
     assert result.success is True
-    assert fake_vidu.calls == [
+    assert fake_doubao.calls == [
         {
-            "timing_prompts": [{"from": 0.0, "to": 3.0, "prompt": "low buzz"}],
+            "prompt": "low buzz",
             "duration": 3.0,
-            "max_wait": 60,
         }
     ]
 
@@ -2478,6 +2816,145 @@ def test_music_composer_purge_orphan_entries(music_composer_module, tmp_path, mo
 
     assert result["purged_count"] == 1
     assert existing_file.exists()
+
+
+def test_download_and_register_effect_normalizes_quiet_audio(
+    sound_effect_designer_module,
+    monkeypatch,
+    tmp_path,
+):
+    """回归：豆包生成的音效电平极低（实测约-50dBFS）时，入库前应做响度归一化，
+    否则混音层再叠加 -14dB 基准增益后几乎不可闻，且质量评估会因低响度+
+    静音误判打成 rejected（阻断云端上传、被 purge_low_quality_assets 清理）。"""
+    import base64
+    import io
+
+    from pydub import AudioSegment
+    from pydub.generators import Sine
+
+    import app.services.audiobook.agents.sound_effect_designer as sfx_module
+
+    designer = sound_effect_designer_module["SoundEffectDesigner"]()
+
+    monkeypatch.setattr(sfx_module, "SOUND_EFFECTS_DIR", tmp_path)
+    monkeypatch.setattr(designer, "register_new_effect", lambda record: None)
+
+    # 构造 -50dBFS 的低电平音频（模拟豆包真实返回）
+    quiet = Sine(440).to_audio_segment(duration=1000)
+    quiet = quiet.apply_gain(-50.0 - quiet.dBFS)
+    buf = io.BytesIO()
+    quiet.export(buf, format="wav")
+    data_uri = "data:audio/wav;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
+
+    record = designer.download_and_register_effect(
+        url=data_uri,
+        effect_id="sfx_action_quiet01",
+        category="action/realistic",
+        description="低电平测试音效",
+        tags=["action"],
+        source="ai_generated",
+    )
+
+    assert record is not None
+    saved = tmp_path / "action" / "realistic" / "sfx_action_quiet01.wav"
+    assert saved.exists()
+    normalized = AudioSegment.from_file(str(saved))
+    # 归一化后平均响度应显著抬升（目标约 -23dBFS，允许编码误差）
+    assert normalized.dBFS > -30.0
+
+
+def test_enhance_effects_with_doubao_covers_transition_cues(
+    sound_effect_designer_module,
+    monkeypatch,
+):
+    """回归：TRANSITION 类型占位音效也应被豆包补生成，
+    否则转场占位永远无人生成、混音时被静默跳过。"""
+    SoundEffectCue = sound_effect_designer_module["SoundEffectCue"]
+    EffectType = sound_effect_designer_module["EffectType"]
+    designer = sound_effect_designer_module["SoundEffectDesigner"]()
+
+    class FakeDoubaoResult:
+        success = True
+        audio_url = "https://example.test/transition.mp3"
+        error = ""
+
+    class FakeDoubaoGenerator:
+        async def generate_audio_async(self, **kwargs):
+            return FakeDoubaoResult()
+
+    designer._doubao_sfx_generator = FakeDoubaoGenerator()
+    monkeypatch.setattr(designer, "_has_resolvable_audio_file", lambda file_ref: False)
+    designer.download_and_register_effect = lambda **kwargs: {  # type: ignore[method-assign]
+        "id": kwargs["effect_id"],
+        "file_path": f"sound_effects/{kwargs['category']}/{kwargs['effect_id']}.mp3",
+    }
+
+    designer.effect_cues = [
+        SoundEffectCue(
+            scene_id="scene_1",
+            timestamp=10.0,
+            effect_type=EffectType.TRANSITION,
+            description="场景切换的呼啸转场音",
+            audio_file="placeholder.mp3",
+        )
+    ]
+
+    asyncio.run(designer.enhance_effects_with_doubao(max_generated_effects=1))
+
+    cue = designer.effect_cues[0]
+    assert cue.audio_file != "placeholder.mp3"
+    assert "sfx_transition_" in cue.audio_file
+
+
+def test_ambient_effect_metadata_slug_not_forced_to_city(sound_effect_designer_module):
+    """回归：环境音 effect_id 的 slug 推断不应把非城市场景（水滴声等）
+    一律兜底成 city_ambient 模板，避免 id 与声学语义不符。"""
+    designer = sound_effect_designer_module["SoundEffectDesigner"]()
+
+    # 水声类场景应归 water 而非 city
+    meta = designer._build_ambient_effect_metadata("水滴声", "calm", provider="Doubao")
+    assert "city" not in meta["effect_id"]
+    assert "water" in meta["effect_id"]
+
+    meta2 = designer._build_ambient_effect_metadata("水牢里持续的滴水声", "tense", provider="Doubao")
+    assert "city" not in meta2["effect_id"]
+
+    # 无任何场景关键词时用中性 slug，不冒充城市
+    meta3 = designer._build_ambient_effect_metadata("心跳声", "calm", provider="Doubao")
+    assert "city" not in meta3["effect_id"]
+
+    # 真实城市场景仍归 city
+    meta4 = designer._build_ambient_effect_metadata("雨夜的城市街道", "calm", provider="Doubao")
+    assert "city" in meta4["effect_id"]
+
+
+def test_llm_prompt_expansion_runs_off_event_loop(sound_effect_designer_module, monkeypatch):
+    """回归：async 生成链路中的 LLM 提示词扩写应放入线程执行，
+    避免同步 HTTP 调用阻塞事件循环。"""
+    import threading
+
+    designer = sound_effect_designer_module["SoundEffectDesigner"]()
+    designer.llm_client = object()
+
+    captured = {}
+
+    def fake_run_llm(prompt, max_tokens):
+        captured["thread"] = threading.current_thread()
+        return '{"prompt": "扩写后的声音描述"}'
+
+    monkeypatch.setattr(designer, "_run_llm_chat_sync", fake_run_llm)
+
+    async def main():
+        loop_thread = threading.current_thread()
+        expanded = await designer._expand_effect_prompt_with_llm_async(
+            "雨夜街道", "持续循环的环境音"
+        )
+        return loop_thread, expanded
+
+    loop_thread, expanded = asyncio.run(main())
+
+    assert expanded == "扩写后的声音描述"
+    assert captured["thread"] is not loop_thread
 
 
 if __name__ == "__main__":

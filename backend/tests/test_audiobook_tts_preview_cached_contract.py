@@ -18,6 +18,7 @@ os.environ.setdefault("DATABASE_URL", "postgresql://test:test@127.0.0.1:5432/tes
 from app.api.v1.audiobook_api import routes_tts
 from app.scripts import warmup_tts_voice_previews
 from app.services.audiobook import voice_catalog
+from app.services.audiobook.tts_preview_cache import build_default_preview_cache_key
 
 
 class DummyRequest:
@@ -167,6 +168,33 @@ def test_warmup_preview_cache_key_matches_default_preview_request() -> None:
 
     assert warmup_voice_params == route_voice_params
     assert warmup_cache_key == route_cache_key
+
+
+def test_shared_default_preview_cache_identity_matches_route_and_warmup() -> None:
+    model_name = "qwen3-tts-instruct-flash"
+    voice_id = "Vincent"
+    request = routes_tts.TTSPreviewRequest(
+        text=routes_tts.DEFAULT_STEPAUDIO_CLONE_PREVIEW_TEXT,
+        voice_id=voice_id,
+        model=model_name,
+        volume=50,
+    )
+    text = routes_tts._resolve_preview_text(request, model_name)
+    speaker_id = routes_tts._resolve_preview_speaker_id(request, model_name)
+    voice_params = routes_tts._build_preview_voice_params(request, speaker_id)
+    route_key = routes_tts._build_preview_cache_key(
+        model=model_name,
+        voice_id=speaker_id,
+        text=text,
+        volume=50,
+        speed=1.0,
+        pitch=50,
+        emotion="neutral",
+        voice_type="",
+        voice_params=voice_params,
+    )
+
+    assert build_default_preview_cache_key(model=model_name, voice_id=voice_id) == route_key
 
 
 def test_preview_cache_key_is_shared_across_users_for_same_fixed_preview(monkeypatch) -> None:

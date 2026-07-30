@@ -7,6 +7,7 @@ import {
 import { createDefaultAudioFxConfig } from './projectAudioConfigUtils'
 import { DEFAULT_TTS_MODEL } from './ttsModels'
 import type {
+  AudioEngineMode,
   AudioFxConfig,
   AudioOutputFormat,
   TtsModel,
@@ -14,16 +15,18 @@ import type {
 
 export const useAudiobookSetupState = () => {
   const [audioFxConfig, setAudioFxConfig] = useState<AudioFxConfig>(() => createDefaultAudioFxConfig())
+  const [audioEngineMode, setAudioEngineMode] = useState<AudioEngineMode>('legacy_stems')
   const [scriptOnlyMode, setScriptOnlyMode] = useState(true)
   const [ttsModel, setTtsModel] = useState<TtsModel>(DEFAULT_TTS_MODEL)
   const [narrationStyle, setNarrationStyle] = useState<NarrationStyleId>(DEFAULT_NARRATION_STYLE)
   const [narrationStylePrompt, setNarrationStylePrompt] = useState('')
   const [outputFormat, setOutputFormat] = useState<AudioOutputFormat>('mp3')
-  const [generateSubtitle, setGenerateSubtitle] = useState(true)
 
   return {
     audioFxConfig,
     setAudioFxConfig,
+    audioEngineMode,
+    setAudioEngineMode,
     scriptOnlyMode,
     setScriptOnlyMode,
     ttsModel,
@@ -34,7 +37,5 @@ export const useAudiobookSetupState = () => {
     setNarrationStylePrompt,
     outputFormat,
     setOutputFormat,
-    generateSubtitle,
-    setGenerateSubtitle,
   }
 }

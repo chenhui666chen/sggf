@@ -8,6 +8,7 @@ import logging
 from typing import Any, Dict, List, Optional
 
 from .tts_model_ids import MINIMAX_SPEECH_28_HD_MODEL, normalize_audiobook_tts_model
+from .minimax_voice_clone_client import is_minimax_custom_voice_id
 from .voice_manager import VoiceManager, VoiceProfile
 from .voice_catalog import load_voice_catalog_for_model
 
@@ -59,7 +60,17 @@ class MiniMaxVoiceManager(VoiceManager):
         voice_id: str,
         voice_config: Optional[Dict[str, Any]] = None,
     ) -> VoiceProfile:
-        entry = self.get_voice_entry(voice_id) or self.get_voice_entry(self.DEFAULT_NARRATOR_VOICE_ID)
+        entry = self.get_voice_entry(voice_id)
+        if entry is None and is_minimax_custom_voice_id(voice_id):
+            entry = {
+                "id": voice_id,
+                "speaker": voice_id,
+                "gender": "neutral",
+                "category": "custom",
+                "style": "cloned",
+                "default_params": {"pitch": 0, "speed": 1.0, "volume": 50},
+            }
+        entry = entry or self.get_voice_entry(self.DEFAULT_NARRATOR_VOICE_ID)
         if not entry:
             raise ValueError("MiniMax voice catalog is empty")
 
@@ -195,7 +206,7 @@ class MiniMaxVoiceManager(VoiceManager):
 
     def validate_voice(self, voice_id: str) -> bool:
         """验证音色ID是否有效"""
-        return voice_id in self.voice_catalog.get("voices_by_id", {})
+        return voice_id in self.voice_catalog.get("voices_by_id", {}) or is_minimax_custom_voice_id(voice_id)
 
     def get_supported_emotions(self) -> List[str]:
         """获取 MiniMax 支持的情感列表"""

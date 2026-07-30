@@ -107,6 +107,10 @@ class CharacterVoiceConfig(BaseModel):
     character_name: str
     voice_id: str
     tts_model: Optional[str] = None
+    reference_source: Optional[str] = None
+    reference_audio_url: Optional[str] = None
+    voice_reference_asset_id: Optional[str] = None
+    voice_pool_publication_id: Optional[str] = None
 
 
 class TTSPreviewRequest(BaseModel):
@@ -161,6 +165,142 @@ class TTSPromptTestPreviewResponse(BaseModel):
     provider: Optional[str] = None
     provider_model: Optional[str] = None
     transport: Optional[str] = None
+
+
+class SeedSceneTestReferenceRequest(BaseModel):
+    """One existing TTS preview assigned to a Seed Audio test reference slot."""
+
+    slot_id: str
+    source_model: str
+    source_voice_id: str
+    audio_data_base64: Optional[str] = None
+    audio_url: Optional[str] = None
+    audio_mime_type: str = "audio/mpeg"
+
+    @model_validator(mode="after")
+    def validate_preview_source(self) -> "SeedSceneTestReferenceRequest":
+        if self.audio_data_base64 and self.audio_url:
+            raise ValueError("reference 的 audio_data_base64 和 audio_url 只能提供一种")
+        return self
+
+
+class SeedSceneTestPreviewRequest(BaseModel):
+    """Independent Seed Audio scene test request."""
+
+    case_id: str
+    variant: str
+    sample_index: int = Field(default=1, ge=1, le=3)
+    references: List[SeedSceneTestReferenceRequest] = Field(default_factory=list)
+    force_regenerate: bool = False
+
+
+class SeedSceneTestPreviewResponse(BaseModel):
+    """Reviewable Seed Audio scene test result."""
+
+    model: str
+    case_id: str
+    variant: str
+    sample_index: int
+    sample_id: str
+    blind_label: str
+    prompt: str
+    expected_texts: List[str]
+    audio_data_base64: str
+    audio_format: str
+    audio_mime_type: str
+    audio_size_bytes: int
+    duration: Optional[float] = None
+    subtitle: Any = None
+    request_id: Optional[str] = None
+    generation_latency_s: Optional[float] = None
+    billing: Dict[str, Any]
+    generation_status: str
+    fallback_reason: Optional[str] = None
+    quality_report: Dict[str, Any]
+    references: List[Dict[str, Any]] = Field(default_factory=list)
+    cached: bool = False
+
+
+class SeedSceneBlindBatchSampleRequest(BaseModel):
+    case_id: str = Field(min_length=1)
+    variant: str = Field(min_length=1)
+    sample_index: int = Field(ge=1, le=3)
+
+
+class SeedSceneBlindBatchCreateRequest(BaseModel):
+    samples: List[SeedSceneBlindBatchSampleRequest] = Field(min_length=1)
+
+
+class SeedSceneBlindSample(BaseModel):
+    anonymous_id: str
+    blind_label: str
+
+
+class SeedSceneBlindBatchResponse(BaseModel):
+    schema_version: str
+    batch_id: str
+    locked: bool
+    samples: List[SeedSceneBlindSample]
+
+
+class SeedSceneBlindAudioResponse(BaseModel):
+    anonymous_id: str
+    blind_label: str
+    audio_mime_type: str
+    audio_data_base64: str
+
+
+class SeedSceneBlindReviewFlags(BaseModel):
+    dialogueComplete: bool
+    plotUnderstandable: bool
+    voicesDistinct: bool
+    voiceConsistent: bool
+    emotionNatural: bool
+    effectsTimed: bool
+    musicAppropriate: bool
+    mixClear: bool
+    usable: bool
+
+
+class SeedSceneBlindReviewSubmitRequest(BaseModel):
+    score: float = Field(ge=1, le=5)
+    flags: SeedSceneBlindReviewFlags
+    notes: str = Field(default="", max_length=2000)
+
+
+class SeedSceneBlindReviewRecordResponse(BaseModel):
+    schema_version: str
+    batch_id: str
+    anonymous_id: str
+    reviewer_user_id: int
+    score: float
+    flags: Dict[str, bool]
+    notes: str
+    submitted_at: str
+    locked: bool
+
+
+class SeedSceneBlindReviewSummarySample(BaseModel):
+    anonymous_id: str
+    blind_label: str
+    review_count: int
+    average_score: Optional[float] = None
+    flag_pass_rates: Dict[str, float]
+    case_id: Optional[str] = None
+    variant: Optional[str] = None
+    sample_index: Optional[int] = None
+    sample_id: Optional[str] = None
+
+
+class SeedSceneBlindReviewSummaryResponse(BaseModel):
+    schema_version: str
+    batch_id: str
+    sample_count: int
+    completed_sample_count: int
+    review_count: int
+    reviewer_count: int
+    identity_revealed: bool
+    samples: List[SeedSceneBlindReviewSummarySample]
 
 
 class TTSWordTimestamp(BaseModel):
@@ -358,6 +498,13 @@ class StepAudioVoiceCloneAssetCreateRequest(BaseModel):
     sample_text: Optional[str] = None
     file_id: Optional[str] = None
     description: Optional[str] = None
+
+
+class VoiceReferenceMaterializeRequest(BaseModel):
+    """为用户设计音色生成可供 Seed Audio 引用的标准试听。"""
+
+    source_asset_id: str = Field(min_length=1, max_length=160)
+    confirm_cost: bool = False
 
 
 class AudiobookTaskStatus(BaseModel):

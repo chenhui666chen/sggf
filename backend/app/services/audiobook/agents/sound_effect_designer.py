@@ -10,6 +10,8 @@ SoundEffectDesigner - 音效设计师Agent
 import logging
 import json
 import os
+import asyncio
+import base64
 import hashlib
 import re
 import shutil
@@ -39,7 +41,11 @@ from app.services.audiobook.audio_library_source_policy import (
 )
 from app.services.audiobook.audio_library_rating_service import is_community_rejected_status
 from app.services.audiobook.sfx_metadata import normalize_sfx_semantics
-from app.services.audiobook.vidu_timing2audio_generator import ViduTiming2AudioGenerator, create_vidu_timing2audio_generator
+from app.services.audiobook.doubao_sfx_generator import (
+    DoubaoSfxGenerator,
+    create_doubao_sfx_generator,
+    has_doubao_sfx_api_key,
+)
 from app.services.audiobook.duration_estimator import estimate_narration_duration_seconds
 from app.db.base import SessionLocal
 
@@ -124,7 +130,7 @@ class SoundEffectDesigner:
         """
         self.llm_client = llm_client
         self._music_generator: Optional[AIMusicGenerator] = None
-        self._vidu_generator: Optional[ViduTiming2AudioGenerator] = None
+        self._doubao_sfx_generator: Optional[DoubaoSfxGenerator] = None
 
         # 内置占位音效库
         self.sound_library = self._init_sound_library()
@@ -739,10 +745,15 @@ class SoundEffectDesigner:
         elif any(k in text for k in ["乡村", "田野"]):
             base = "country"
             tags.append("乡村")
-        else:
+        elif any(k in text for k in ["水", "溪", "河", "泉", "湖"]):
+            base = "water"
+            tags.append("水")
+        elif any(k in text for k in ["城", "街", "路", "巷", "市场", "广场", "闹市"]):
             base = "city"
-            if any(k in text for k in ["街", "路", "巷"]):
-                tags.append("城市")
+            tags.append("城市")
+        else:
+            # 无场景关键词时用中性 slug，避免把非城市场景误标成 city_ambient
+            base = "scene"
 
         if "雨" in text:
             label = "rain"
@@ -756,8 +767,6 @@ class SoundEffectDesigner:
 
         mood_tag = mood or "calm"
         tags.append(mood_tag)
-        if provider:
-            tags.append(provider)
 
         slug = f"{base}_{label}"
         raw = f"{scene_description}|{mood_tag}|{provider}"
@@ -777,8 +786,12 @@ class SoundEffectDesigner:
             base_cn = "海边"
         elif base == "country":
             base_cn = "乡村"
-        else:
+        elif base == "water":
+            base_cn = "水声"
+        elif base == "city":
             base_cn = "城市"
+        else:
+            base_cn = "场景"
 
         if label == "rain":
             label_cn = "雨夜"
@@ -789,7 +802,17 @@ class SoundEffectDesigner:
         else:
             label_cn = "环境"
 
-        name = f"{base_cn}{label_cn}环境音（{provider}，{mood_tag}）"
+        # 名称优先使用真实场景描述（纯中文可被前端直接展示），粗分类模板仅作兜底。
+        # 不追加"环境音"后缀，也去掉描述里已有的该后缀，避免名称冗余。
+        scene_text = str(scene_description or "").strip()
+        if scene_text:
+            name = scene_text[:24].strip()
+            while name.endswith("环境音"):
+                name = name[: -len("环境音")].strip()
+            if not name:
+                name = f"{base_cn}{label_cn}"
+        else:
+            name = f"{base_cn}{label_cn}"
 
         return {
             "effect_id": effect_id,
@@ -860,7 +883,7 @@ class SoundEffectDesigner:
                 continue
 
             try:
-                replacement = await self.ensure_vidu_ambient_sound(
+                replacement = await self.ensure_doubao_ambient_sound(
                     cue.description,
                     cue.duration or 10.0,
                     mood=self._infer_mood_from_scene(cue.description),
@@ -883,7 +906,7 @@ class SoundEffectDesigner:
             remaining -= 1
 
         if remaining > 0:
-            await self.enhance_effects_with_vidu(max_vidu_effects=remaining)
+            await self.enhance_effects_with_doubao(max_generated_effects=remaining)
 
     async def ensure_mureka_ambient_sound(
         self,
@@ -1003,47 +1026,37 @@ class SoundEffectDesigner:
             effect_id=effect_id,
         )
 
-    async def _generate_vidu_audio_for_prompt(
+    async def _generate_doubao_audio_for_prompt(
         self,
         *,
         prompt: str,
         duration: float,
-        max_wait: int = 60,
     ):
-        """把单段音效描述适配为 Vidu timing2audio 请求。"""
-        if self._vidu_generator is None:
-            raise RuntimeError("Vidu generator is not initialized")
+        """把单段音效描述适配为豆包 seed-audio-1.0 生成请求。"""
+        if self._doubao_sfx_generator is None:
+            raise RuntimeError("Doubao SFX generator is not initialized")
 
         duration_sec = max(2.0, min(10.0, float(duration or 0)))
-        timing_prompts = [
-            {
-                "from": 0.0,
-                "to": duration_sec,
-                "prompt": str(prompt or "").strip(),
-            }
-        ]
-        return await self._vidu_generator.generate_audio_async(
-            timing_prompts=timing_prompts,
+        return await self._doubao_sfx_generator.generate_audio_async(
+            prompt=str(prompt or "").strip(),
             duration=duration_sec,
-            max_wait=max_wait,
         )
 
-    async def ensure_vidu_ambient_sound(
+    async def ensure_doubao_ambient_sound(
         self,
         scene_description: str,
         duration: float,
         mood: Optional[str] = None,
-    ) -> SoundEffectCue:
-        """使用ViduAI生成环境音（本地 + ViduAI兜底）"""
-        logger.info(f"🌆 [ViduAI] 设计环境音: {scene_description}")
+    ) -> Optional[SoundEffectCue]:
+        """使用豆包生成环境音（本地优先，生成失败不做兜底，直接不生成）"""
+        logger.info(f"🌆 [豆包] 设计环境音: {scene_description}")
 
-        # 初始化ViduAI生成器
-        if self._vidu_generator is None:
-            vidu_key = getattr(settings, "VIDU_API_KEY", "") or os.getenv("VIDU_API_KEY", "")
-            if not vidu_key:
-                logger.warning("⚠️ 未配置ViduAI API密钥(VIDU_API_KEY)，回退到 Mureka 环境音逻辑")
-                return await self.ensure_mureka_ambient_sound(scene_description, duration, mood)
-            self._vidu_generator = create_vidu_timing2audio_generator(api_key=vidu_key)
+        # 初始化豆包音效生成器
+        if self._doubao_sfx_generator is None:
+            if not has_doubao_sfx_api_key():
+                logger.warning("⚠️ 未配置豆包音频生成密钥(DOUBAO_API_KEY 等)，暂不生成环境音")
+                return None
+            self._doubao_sfx_generator = create_doubao_sfx_generator()
 
         # 1. 先尝试使用本地已生成的环境音
         local_cue = self._match_effect(
@@ -1064,35 +1077,38 @@ class SoundEffectDesigner:
             local_cue.fade_in = 3.0
             local_cue.fade_out = 3.0
             local_cue.mix_mode = "background"
-            logger.info("✅ 使用本地环境音，无需调用ViduAI")
+            logger.info("✅ 使用本地环境音，无需调用豆包")
             return local_cue
 
-        # 2. 调用ViduAI生成新的环境音
+        # 2. 调用豆包生成新的环境音
         duration_sec = max(3.0, min(10.0, duration))
-        
-        # 将音效描述转换为简洁的中文 prompt（适合ViduAI）
-        ambient_prompt = scene_description
-        logger.info(f"🎧 [ViduAI] 环境音 prompt: {ambient_prompt} (时长: {duration_sec}s)")
+
+        # 环境音提示词：优先用 LLM 根据剧本场景扩写声音特点，让环境音更贴合剧情
+        ambient_prompt = await self._expand_effect_prompt_with_llm_async(
+            scene_description, "持续循环的环境音"
+        )
+        if not ambient_prompt:
+            ambient_prompt = f"{scene_description}的持续环境音"
+        logger.info(f"🎧 [豆包] 环境音 prompt: {ambient_prompt} (时长: {duration_sec}s)")
 
         try:
-            result = await self._generate_vidu_audio_for_prompt(
+            result = await self._generate_doubao_audio_for_prompt(
                 prompt=ambient_prompt,
                 duration=duration_sec,
-                max_wait=60,
             )
-            
+
             if not result.success:
-                logger.warning(f"⚠️ ViduAI环境音生成失败: {result.error}，回退到 Mureka/内置环境音")
-                return await self.ensure_mureka_ambient_sound(scene_description, duration, mood)
-            
+                logger.warning(f"⚠️ 豆包环境音生成失败: {result.error}，暂不生成环境音")
+                return None
+
             audio_url = result.audio_url
             if not audio_url:
-                logger.warning("⚠️ ViduAI返回结果中缺少音频URL，回退到 Mureka/内置环境音")
-                return await self.ensure_mureka_ambient_sound(scene_description, duration, mood)
+                logger.warning("⚠️ 豆包返回结果中缺少音频URL，暂不生成环境音")
+                return None
 
-            # 3. 下载ViduAI返回的音频并写入本地 sound_effects 仓库 + 索引
+            # 3. 下载豆包返回的音频并写入本地 sound_effects 仓库 + 索引
             mood_value = mood or self._infer_mood_from_scene(scene_description)
-            meta = self._build_ambient_effect_metadata(scene_description, mood_value, provider="Vidu")
+            meta = self._build_ambient_effect_metadata(scene_description, mood_value, provider="Doubao")
             effect_id = meta["effect_id"]
             tags = meta["tags"]
             name = meta["name"]
@@ -1117,10 +1133,10 @@ class SoundEffectDesigner:
                 scenes=classification["scenes"],
             )
             if not record:
-                logger.warning("⚠️ ViduAI环境音下载或注册失败，回退到 Mureka/内置环境音")
-                return await self.ensure_mureka_ambient_sound(scene_description, duration, mood)
+                logger.warning("⚠️ 豆包环境音下载或注册失败，暂不生成环境音")
+                return None
 
-            logger.info(f"🎧 已生成并注册ViduAI环境音: {effect_id}")
+            logger.info(f"🎧 已生成并注册豆包环境音: {effect_id}")
 
             return SoundEffectCue(
                 scene_id="ambient",
@@ -1138,32 +1154,31 @@ class SoundEffectDesigner:
             )
             
         except Exception as e:
-            logger.warning(f"⚠️ 调用ViduAI生成环境音失败: {e}，回退到 Mureka/内置环境音")
-            return await self.ensure_mureka_ambient_sound(scene_description, duration, mood)
+            logger.warning(f"⚠️ 调用豆包生成环境音失败: {e}，暂不生成环境音")
+            return None
 
-    async def enhance_effects_with_vidu(
+    async def enhance_effects_with_doubao(
         self,
-        max_vidu_effects: int = 5,
+        max_generated_effects: int = 5,
     ) -> None:
-        """使用ViduAI为占位音效生成真实音效（仅 ACTION/EMOTION 类型）
+        """使用豆包为占位音效生成真实音效（ACTION/EMOTION/TRANSITION 短效音）
 
         设计原则：
         1. 只处理当前时间线中 audio_file 为空或 placeholder.mp3 的提示；
-        2. 只处理 ACTION / EMOTION 两类短效音，避免误当作整章环境床；
-        3. 为每个描述生成一段 1-5 秒的短音效，并入库，后续可被 _match_effect 命中。
+        2. 只处理 ACTION / EMOTION / TRANSITION 三类短效音，避免误当作整章环境床；
+        3. 为每个描述生成一段短音效，并入库，后续可被 _match_effect 命中。
         """
         if not self.effect_cues:
             return
 
-        # 初始化ViduAI生成器
-        if self._vidu_generator is None:
-            vidu_key = getattr(settings, "VIDU_API_KEY", "") or os.getenv("VIDU_API_KEY", "")
-            if not vidu_key:
-                logger.info("⚠️ 未配置ViduAI API密钥(VIDU_API_KEY)，跳过占位音效增强")
+        # 初始化豆包音效生成器
+        if self._doubao_sfx_generator is None:
+            if not has_doubao_sfx_api_key():
+                logger.info("⚠️ 未配置豆包音频生成密钥(DOUBAO_API_KEY 等)，跳过占位音效增强")
                 return
-            self._vidu_generator = create_vidu_timing2audio_generator(api_key=vidu_key)
+            self._doubao_sfx_generator = create_doubao_sfx_generator()
 
-        remaining = max(0, int(max_vidu_effects)) or 0
+        remaining = max(0, int(max_generated_effects)) or 0
         if remaining <= 0:
             return
 
@@ -1176,54 +1191,58 @@ class SoundEffectDesigner:
                 if self._has_resolvable_audio_file(cue.audio_file):
                     continue
 
-                # 仅处理动作/情绪类短效音
-                if cue.effect_type not in (EffectType.ACTION, EffectType.EMOTION):
+                # 仅处理动作/情绪/转场类短效音
+                if cue.effect_type not in (
+                    EffectType.ACTION,
+                    EffectType.EMOTION,
+                    EffectType.TRANSITION,
+                ):
                     continue
 
                 try:
-                    record = await self._generate_vidu_effect_for_cue(cue)
+                    record = await self._generate_doubao_effect_for_cue(cue)
                     if record and record.get("file_path"):
                         cue.audio_file = record["file_path"]
                         cue.effect_id = str(record.get("id") or cue.effect_id or "")
                         remaining -= 1
                 except Exception as e:
-                    logger.warning(f"⚠️ 使用ViduAI生成音效失败（忽略并继续）: {e}")
+                    logger.warning(f"⚠️ 使用豆包生成音效失败（忽略并继续）: {e}")
                     continue
         except Exception as e:
-            logger.warning(f"⚠️ 占位音效ViduAI增强流程失败: {e}")
+            logger.warning(f"⚠️ 占位音效豆包增强流程失败: {e}")
 
-    async def _generate_vidu_effect_for_cue(
+    async def _generate_doubao_effect_for_cue(
         self,
         cue: SoundEffectCue,
     ) -> Optional[Dict[str, Any]]:
-        """针对单个占位音效，调用ViduAI生成短音效并入库。"""
+        """针对单个占位音效，调用豆包生成短音效并入库。"""
         # 动作音一般更短，情绪音稍长一些
         base_duration = 3 if cue.effect_type == EffectType.ACTION else 5
         duration_sec = max(3.0, min(base_duration, 10.0))
 
-        logger.info(f"🎧 [ViduAI] 为占位音效生成短音效: {cue.description} ({cue.effect_type.value})")
+        logger.info(f"🎧 [豆包] 为占位音效生成短音效: {cue.description} ({cue.effect_type.value})")
 
-        effect_prompt = self._build_vidu_effect_prompt(cue)
-        logger.info(f"🎧 [ViduAI] 短音效 prompt: {effect_prompt} (时长: {duration_sec}s)")
+        # 提示词构造内含同步 LLM 扩写，放入线程避免阻塞事件循环
+        effect_prompt = await asyncio.to_thread(self._build_doubao_effect_prompt, cue)
+        logger.info(f"🎧 [豆包] 短音效 prompt: {effect_prompt} (时长: {duration_sec}s)")
 
         try:
-            result = await self._generate_vidu_audio_for_prompt(
+            result = await self._generate_doubao_audio_for_prompt(
                 prompt=effect_prompt,
                 duration=duration_sec,
-                max_wait=60,
             )
-            
+
             if not result.success:
-                logger.warning(f"⚠️ ViduAI短音效生成失败: {result.error}")
+                logger.warning(f"⚠️ 豆包短音效生成失败: {result.error}")
                 return None
-            
+
             audio_url = result.audio_url
             if not audio_url:
-                logger.warning("⚠️ ViduAI短音效结果中缺少音频URL")
+                logger.warning("⚠️ 豆包短音效结果中缺少音频URL")
                 return None
 
             # 构造元数据并入库
-            raw = f"{cue.description}|{cue.effect_type.value}|Vidu"
+            raw = f"{cue.description}|{cue.effect_type.value}|Doubao"
             short_hash = hashlib.md5(raw.encode("utf-8")).hexdigest()[:6]
             effect_id = f"sfx_{cue.effect_type.value}_{short_hash}"
             description = cue.description or f"{cue.effect_type.value} effect"
@@ -1246,26 +1265,55 @@ class SoundEffectDesigner:
                 scenes=classification["scenes"],
             )
             if not record:
-                logger.warning("⚠️ ViduAI短音效下载或注册失败")
+                logger.warning("⚠️ 豆包短音效下载或注册失败")
                 return None
 
-            logger.info(f"🎧 已生成并注册ViduAI短音效: {effect_id}")
+            logger.info(f"🎧 已生成并注册豆包短音效: {effect_id}")
             return record
-            
+
         except Exception as e:
-            logger.warning(f"⚠️ ViduAI短音效生成异常: {e}")
+            logger.warning(f"⚠️ 豆包短音效生成异常: {e}")
             return None
 
-    def _build_vidu_effect_prompt(self, cue: SoundEffectCue) -> str:
+    def _expand_effect_prompt_with_llm(self, description: str, effect_kind: str) -> str:
+        """用 LLM 把剧本音效描述扩写成更详细的声音设计提示词。
+
+        失败或未配置 LLM 时返回空字符串，由调用方回退到模板拼接。
+        """
+        description = str(description or "").strip()
+        if not description or not self.llm_client:
+            return ""
+
+        prompt = (
+            "你是有声书音效设计师。请把下面来自剧本的音效需求扩写成一段用于AI音效生成的中文描述，"
+            "着重刻画声音本身的特点：声源与材质、动作细节、强弱与节奏、远近与空间感。\n"
+            f"音效类型：{effect_kind}\n"
+            f"剧本音效需求：{description}\n"
+            "要求：只描述声音本身，1-2句话、不超过60字，不要角色名、不要剧情复述、不要任何附加说明。\n"
+            '返回JSON：{"prompt": "扩写后的描述"}'
+        )
+        try:
+            raw = self._run_llm_chat_sync(prompt, max_tokens=200)
+            data = json.loads(raw) if raw else {}
+            expanded = str(data.get("prompt") or "").strip()
+            if expanded:
+                logger.info(f"🎨 [LLM] 音效 prompt 扩写: {description} -> {expanded}")
+            return expanded[:120]
+        except Exception as e:
+            logger.debug(f"音效 prompt LLM 扩写失败，回退模板: {e}")
+            return ""
+
+    async def _expand_effect_prompt_with_llm_async(self, description: str, effect_kind: str) -> str:
+        """异步包装：LLM 扩写是同步 HTTP 调用，放入线程避免阻塞事件循环。"""
+        return await asyncio.to_thread(
+            self._expand_effect_prompt_with_llm, description, effect_kind
+        )
+
+    def _build_doubao_effect_prompt(self, cue: SoundEffectCue) -> str:
         """把剧本里的短音效名称扩展成更明确的生成提示。"""
         description = str(getattr(cue, "description", "") or "").strip()
         if not description:
             description = f"{cue.effect_type.value} sound effect"
-
-        enrichments = []
-        for keywords, prompt_text in EFFECT_PROMPT_ENRICHMENTS:
-            if any(keyword in description for keyword in keywords):
-                enrichments.append(prompt_text)
 
         layer_hint = "短促触发式动作音效"
         if cue.effect_type == EffectType.EMOTION:
@@ -1273,11 +1321,21 @@ class SoundEffectDesigner:
         elif cue.effect_type == EffectType.TRANSITION:
             layer_hint = "转场短音效"
 
+        # 优先用 LLM 根据剧本描述扩写声音特点
+        expanded = self._expand_effect_prompt_with_llm(description, layer_hint)
+        if expanded:
+            return expanded
+
+        # LLM 不可用或失败时回退到关键词模板扩写
+        enrichments = []
+        for keywords, prompt_text in EFFECT_PROMPT_ENRICHMENTS:
+            if any(keyword in description for keyword in keywords):
+                enrichments.append(prompt_text)
+
         parts = [description]
         if enrichments:
             parts.append("声音设计：" + "；".join(dict.fromkeys(enrichments)))
         parts.append(f"类型：{layer_hint}")
-        parts.append("只生成音效，不要音乐，不要人声台词，不要旁白")
         return "。".join(part.strip("。") for part in parts if part).strip()
 
     def optimize_effect_density(
@@ -1330,6 +1388,14 @@ class SoundEffectDesigner:
     def export_effect_timeline(self) -> Dict[str, Any]:
         """导出音效时间线（用于混音）"""
         unresolved_effects = self._collect_unresolved_effects()
+        # 音效生成失败不做兜底直接跳过：placeholder/无法解析的文件不进入混音
+        # 时间线，避免混音层逐条尝试后刷"音效文件不存在"警告；未解析条目仅
+        # 保留在 unresolved_effects 质量报告中。
+        resolved_cues = [
+            cue
+            for cue in sorted(self.effect_cues, key=lambda x: x.timestamp)
+            if self._has_resolvable_audio_file(cue.audio_file)
+        ]
         timeline = {
             "total_effects": len(self.effect_cues),
             "effects_by_type": self._count_by_type(),
@@ -1348,7 +1414,7 @@ class SoundEffectDesigner:
                     "mix_mode": cue.mix_mode,
                     "effect_id": cue.effect_id,
                 }
-                for cue in sorted(self.effect_cues, key=lambda x: x.timestamp)
+                for cue in resolved_cues
             ]
         }
         if unresolved_effects["unresolved_count"] > 0:
@@ -1801,6 +1867,29 @@ class SoundEffectDesigner:
                 except Exception:
                     pass
 
+    def _normalize_effect_loudness(
+        self,
+        audio_path: Path,
+        target_dbfs: float = -23.0,
+        quiet_threshold_dbfs: float = -35.0,
+    ) -> None:
+        """低电平音效入库前归一化响度；失败时保留原文件，不阻塞入库。"""
+        try:
+            from pydub import AudioSegment
+
+            fmt = audio_path.suffix.lstrip(".").lower() or "mp3"
+            audio = AudioSegment.from_file(str(audio_path))
+            dbfs = audio.dBFS
+            if dbfs == float("-inf") or dbfs >= quiet_threshold_dbfs:
+                return
+            audio = audio.apply_gain(target_dbfs - dbfs)
+            audio.export(str(audio_path), format=fmt)
+            logger.info(
+                f"🔊 音效响度归一化: {audio_path.name} {dbfs:.1f}dBFS -> {target_dbfs}dBFS"
+            )
+        except Exception as e:
+            logger.warning(f"⚠️ 音效响度归一化失败（保留原文件）: {e}")
+
     def download_and_register_effect(
         self,
         url: str,
@@ -1829,19 +1918,42 @@ class SoundEffectDesigner:
             成功时返回完整的record字典，失败时返回None
         """
         try:
-            # 下载文件
+            # 获取音频内容（支持 HTTP 直链与 data:audio/...;base64 数据地址）
             source = normalize_sfx_record_source({"source": source})["source"]
-            resp = requests.get(url, stream=True, timeout=30)
-            resp.raise_for_status()
+            audio_bytes: Optional[bytes] = None
+            ext_hint: Optional[str] = None
+            resp = None
+            if url.startswith("data:"):
+                header, _, encoded = url.partition(",")
+                mime_type = header[5:].split(";", 1)[0].strip().lower()
+                audio_bytes = base64.b64decode(re.sub(r"\s+", "", encoded))
+                ext_hint = {
+                    "audio/mpeg": "mp3",
+                    "audio/mp3": "mp3",
+                    "audio/wav": "wav",
+                    "audio/x-wav": "wav",
+                    "audio/ogg": "ogg",
+                    "audio/flac": "flac",
+                }.get(mime_type)
+            else:
+                resp = requests.get(url, stream=True, timeout=30)
+                resp.raise_for_status()
 
             # 推断文件后缀
             ext = None
             if file_name and "." in file_name:
                 ext = file_name.split(".")[-1]
+            elif ext_hint:
+                ext = ext_hint
             else:
-                # 尝试从URL推断
-                if "." in url.split("?")[0]:
-                    ext = url.split("?")[0].rsplit(".", 1)[-1]
+                # 尝试从URL推断（仅从最后一个路径段提取后缀，避免把域名/路径误当后缀）
+                url_path = url.split("?")[0].split("#")[0]
+                last_segment = url_path.rsplit("/", 1)[-1]
+                if "." in last_segment:
+                    candidate = last_segment.rsplit(".", 1)[-1].strip().lower()
+                    # 合法后缀必须短小且为纯字母数字，杜绝含路径分隔符的伪后缀
+                    if candidate.isalnum() and len(candidate) <= 5:
+                        ext = candidate
             if not ext:
                 ext = "mp3"  # 默认使用mp3
 
@@ -1856,9 +1968,17 @@ class SoundEffectDesigner:
             output_path = output_dir / file_name
 
             with output_path.open("wb") as f:
-                for chunk in resp.iter_content(chunk_size=8192):
-                    if chunk:
-                        f.write(chunk)
+                if audio_bytes is not None:
+                    f.write(audio_bytes)
+                else:
+                    for chunk in resp.iter_content(chunk_size=8192):
+                        if chunk:
+                            f.write(chunk)
+
+            # 豆包等 AI 生成的音效电平常低至 -50dBFS，入库前做响度归一化，
+            # 避免混音层叠加基准衰减后几乎不可闻，也避免质量评估因低响度
+            # 误判 rejected（阻断云端上传、被低质清理任务删除）
+            self._normalize_effect_loudness(output_path)
 
             # 构建记录并注册
             # file_path 相对于 AUDIO_LIBRARY_DIR，供后续组合路径使用

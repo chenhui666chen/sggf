@@ -399,34 +399,16 @@ class MinimaxMixin:
         return model.startswith("cosyvoice-v3.5-plus") or model.startswith("cosyvoice-v3-plus")
 
     def _normalize_emotion(self, emotion: str) -> str:
-        """按模型能力归一化情感标签。"""
+        """按模型能力矩阵归一化情感标签。
+
+        仅当能力矩阵显式声明 supported_emotions（qwen/cosyvoice 的 API 情感枚举）
+        时才做映射；stepaudio/mimo/seed 等模型的情感只进入风格指令文本，不是
+        服务端枚举，强行降级（如 fearful->tense）会白白损失表现力。
+        """
         value = str(emotion or "").strip().lower()
         if not value:
             return "neutral"
-        if self._is_cosyvoice_v3_plus():
-            return normalize_audiobook_tts_emotion(value, self.model) or "neutral"
-
-        mapping = {
-            "focused": "neutral",
-            "solemn": "neutral",
-            "tender": "neutral",
-            "gentle": "neutral",
-            "serious": "neutral",
-            "nervous": "tense",
-            "fearful": "tense",
-            "surprised": "happy",
-            "excited": "happy",
-            "disgusted": "angry",
-            "whisper": "neutral",
-            "shout": "angry",
-            "neutral": "neutral",
-            "happy": "happy",
-            "sad": "sad",
-            "angry": "angry",
-            "calm": "calm",
-            "tense": "tense",
-        }
-        return mapping.get(value, "neutral")
+        return normalize_audiobook_tts_emotion(value, self.model) or value
 
     def _is_ssml_text(self, text: str) -> bool:
         return str(text or "").lstrip().lower().startswith("<speak")

@@ -15,6 +15,7 @@ if str(ROOT_DIR) not in sys.path:
 
 from app.api.v1.audiobook_api import router as audiobook_router
 from app.core.security import get_current_user
+from app.db.base import get_db
 from app.models.user import User
 from app.services.audiobook.mimo_voice_assets import (
     MiMoVoiceAssetError,
@@ -60,6 +61,7 @@ def build_test_client() -> CompatTestClient:
         password_hash="hash",
         is_active=True,
     )
+    app.dependency_overrides[get_db] = lambda: object()
     return CompatTestClient(app)
 
 
@@ -296,3 +298,55 @@ def test_mimo_voice_asset_id_is_preserved_and_expanded_by_voice_manager(tmp_path
     assert mapping_item["mimo_voice_asset_id"] == asset.id
     assert params["mimo_voice_asset_id"] == asset.id
     assert params["voice_design_prompt"] == "young female, medium pitch, calm audiobook voice"
+
+
+def test_base_voice_manager_resolves_mimo_design_cross_model_voice(tmp_path, monkeypatch):
+    """混合模型项目：主 manager 为基类 VoiceManager 时，per-character 的 mimo 自定义
+    音色不应被当作未知组合跳过，而应解析出 asset 信息随 profile 带到下游。"""
+    monkeypatch.setattr(
+        "app.services.audiobook.mimo_voice_assets.DEFAULT_MIMO_VOICE_ASSET_DIR",
+        tmp_path,
+    )
+    store = MiMoVoiceAssetStore(tmp_path)
+    asset = store.create_design_asset(
+        name="cross model asset",
+        voice_design_prompt="middle-aged male, low pitch, wise elder audiobook voice",
+    )
+
+    from app.services.audiobook.voice_manager import VoiceManager
+
+    manager = VoiceManager()
+    manager.apply_project_voice_mapping(
+        {
+            "纪老药": {
+                "voice_id": f"mimo_design:{asset.id}",
+                "tts_model": MIMO_V25_TTS_VOICE_DESIGN_MODEL,
+                "volume": 50,
+            }
+        }
+    )
+
+    profile = manager.get_voice("纪老药")
+    assert profile is not None, "mimo 自定义音色角色不应被跳过"
+    params = profile.get_tts_params("calm")
+    assert params["mimo_voice_asset_id"] == asset.id
+    assert params["voice_design_prompt"] == "middle-aged male, low pitch, wise elder audiobook voice"
+
+
+def test_mimo_assets_are_isolated_by_owner(tmp_path):
+    store = MiMoVoiceAssetStore(tmp_path)
+    first = store.create_design_asset(
+        name="owner one",
+        voice_design_prompt="calm adult narrator",
+        owner_user_id=7,
+    )
+    second = store.create_design_asset(
+        name="owner two",
+        voice_design_prompt="bright young narrator",
+        owner_user_id=8,
+    )
+
+    assert [asset.id for asset in store.list_assets(owner_user_id=7)] == [first.id]
+    assert [asset.id for asset in store.list_assets(owner_user_id=8)] == [second.id]
+    with pytest.raises(MiMoVoiceAssetError, match="does not belong"):
+        store.resolve_tts_params(second.id, owner_user_id=7)

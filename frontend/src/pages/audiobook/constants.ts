@@ -27,6 +27,13 @@ export const GENERATION_STAGE_CONFIG: readonly StageConfig[] = [
   { key: 'final_audio_review', name: '最终评审', icon: '10', desc: '最终质量检查' },
 ]
 
+export const SEED_SCENE_RENDER_STAGE_CONFIG: StageConfig = {
+  key: 'scene_rendering',
+  name: '场景生成',
+  icon: '08',
+  desc: '统一生成对白、旁白、环境声、音效与音乐',
+}
+
 export const EXPORT_STAGE_CONFIG: readonly StageConfig[] = [
   { key: 'project_export', name: '项目导出', icon: '11', desc: '打包整本输出文件' },
 ]
@@ -39,6 +46,7 @@ export const PROMPT_AUDIO_ASR_STAGE_CONFIG: readonly StageConfig[] = [
 
 export const STAGE_CONFIG: readonly StageConfig[] = [
   ...GENERATION_STAGE_CONFIG,
+  SEED_SCENE_RENDER_STAGE_CONFIG,
   ...EXPORT_STAGE_CONFIG,
   ...PROMPT_AUDIO_ASR_STAGE_CONFIG,
 ]

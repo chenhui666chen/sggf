@@ -27,13 +27,7 @@ except ImportError:
     print("❌ pydub 不可用，无法运行测试")
     sys.exit(1)
 
-# 直接从文件导入避免循环依赖
-import importlib.util
-mixer_path = os.path.join(os.path.dirname(__file__), '..', 'app', 'services', 'audiobook', 'audio_mixer.py')
-spec = importlib.util.spec_from_file_location("audio_mixer", mixer_path)
-audio_mixer_module = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(audio_mixer_module)
-AudioMixer = audio_mixer_module.AudioMixer
+from app.services.audiobook.audio_mixer import AudioMixer
 
 
 def create_test_audio(duration_ms=1000, frequency=440, volume_db=-20):
@@ -104,7 +98,26 @@ def test_silence_trimming():
     assert len(not_trimmed_audio) == len(test_audio), "不启用修剪时音频长度不应改变"
     
     print("  ✅ 静音修剪测试通过")
-    return True
+
+
+def test_trim_silence_keeps_tail_padding_for_word_endings():
+    """尾部静音修剪必须保留韵尾缓冲。
+
+    中文尾字的气声/自然衰减常低于 -40dBFS，若紧贴最后一个响音块一刀切断，
+    会产生"最后一个字没吐完就被截断"的听感。
+    """
+    from pydub.generators import Sine
+
+    speech = Sine(440).to_audio_segment(duration=1000).apply_gain(-6)
+    audio = speech + AudioSegment.silent(duration=1200)
+
+    mixer = AudioMixer(enable_silence_trim=True, silence_trim_threshold=-40)
+    trimmed = mixer._trim_silence(audio)
+
+    # 修剪后应比纯语音段至少多保留 200ms 韵尾缓冲
+    assert len(trimmed) >= 1000 + 200, "尾部修剪不应贴着最后一个响音块切断"
+    # 但也不应把 1200ms 尾部静音全部保留
+    assert len(trimmed) <= 1000 + 600, "超出韵尾缓冲的尾部静音应被剪除"
 
 
 def test_loudness_normalization():
@@ -154,7 +167,6 @@ def test_loudness_normalization():
     assert not_normalized is quiet_audio or abs(not_normalized.dBFS - quiet_audio.dBFS) < 0.1, "不启用标准化时音频不应改变"
     
     print("  ✅ 响度标准化测试通过")
-    return True
 
 
 def test_semantic_pauses():
@@ -199,7 +211,6 @@ def test_semantic_pauses():
     print(f"  无 semantic 停顿混合结果长度: {len(result_no_semantic)} bytes")
     
     print("  ✅ 语义停顿测试通过")
-    return True
 
 
 def test_full_mixing_pipeline():
@@ -254,7 +265,6 @@ def test_full_mixing_pipeline():
     assert len(result_basic) > 0, "基础混合应该产生音频"
     
     print("  ✅ 完整混合流程测试通过")
-    return True
 
 
 def run_all_tests():
@@ -275,8 +285,8 @@ def run_all_tests():
     
     for name, test_func in tests:
         try:
-            if test_func():
-                passed += 1
+            test_func()
+            passed += 1
         except Exception as e:
             print(f"  ❌ {name} 测试失败: {str(e)}")
             import traceback

@@ -14,6 +14,7 @@ from typing import Dict, List, Any, Optional
 from dataclasses import dataclass
 
 from app.services.audiobook.duration_estimator import estimate_narration_duration_seconds
+from app.services.audiobook.script_render_mode import normalize_script_audio_engine_mode
 
 logger = logging.getLogger(__name__)
 
@@ -102,6 +103,7 @@ class AudioQualityReviewer:
             llm_client: LLM客户端（可选，用于智能评审）
         """
         self.llm_client = llm_client
+        self.audio_engine_mode = "legacy_stems"
         self.quality_standards = self._init_quality_standards()
     
     def _init_quality_standards(self) -> Dict[str, Any]:
@@ -129,7 +131,8 @@ class AudioQualityReviewer:
     def review_script(
         self,
         script_segments: List[Dict[str, Any]],
-        novel_genre: str = ""
+        novel_genre: str = "",
+        audio_engine_mode: Optional[str] = None,
     ) -> AudioQualityReport:
         """
         评审有声剧本
@@ -169,6 +172,14 @@ class AudioQualityReviewer:
         
         # 2. 音频平衡评审
         audio_balance = self._review_audio_balance(script_segments, issues)
+        effective_engine_mode = normalize_script_audio_engine_mode(
+            audio_engine_mode or self.audio_engine_mode
+        )
+        audio_balance["render_readiness"] = self._review_render_readiness(
+            script_segments,
+            issues,
+            audio_engine_mode=effective_engine_mode,
+        )
         
         # 3. 节奏评审
         pacing = self._review_pacing(script_segments, issues)
@@ -197,6 +208,183 @@ class AudioQualityReviewer:
         logger.info(f"   发现 {len(issues)} 个问题")
         
         return report
+
+    def _review_render_readiness(
+        self,
+        segments: List[Dict[str, Any]],
+        issues: List[QualityIssue],
+        *,
+        audio_engine_mode: str,
+    ) -> Dict[str, Any]:
+        if audio_engine_mode == "seed_scene":
+            return self._review_seed_scene_readiness(segments, issues)
+        return self._review_legacy_stems_readiness(segments, issues)
+
+    def _review_seed_scene_readiness(
+        self,
+        segments: List[Dict[str, Any]],
+        issues: List[QualityIssue],
+    ) -> Dict[str, Any]:
+        segment_count = len(segments)
+        scene_context_count = sum(
+            1 for segment in segments if str(segment.get("instruct_scene") or "").strip()
+        )
+        effects = [
+            effect
+            for segment in segments
+            for effect in list(segment.get("sound_effects") or [])
+            if effect
+        ]
+        timed_effect_count = sum(
+            1
+            for effect in effects
+            if str(self._cue_value(effect, "timing") or "").strip().lower()
+            in {
+                "before",
+                "pre",
+                "during",
+                "trigger",
+                "after",
+                "post",
+                "continuous",
+                "throughout",
+                "until_text",
+            }
+        )
+        music_cues = [
+            segment.get("music_cue") or segment.get("music_cue_simple")
+            for segment in segments
+            if segment.get("music_cue") or segment.get("music_cue_simple")
+        ]
+        lifecycle_music_count = sum(
+            1
+            for cue in music_cues
+            if any(
+                marker in str(self._cue_value(cue, "style") or cue)
+                for marker in (
+                    "进入",
+                    "淡入",
+                    "延续",
+                    "持续",
+                    "渐强",
+                    "渐弱",
+                    "变化",
+                    "切换",
+                    "停止",
+                    "淡出",
+                )
+            )
+        )
+
+        scene_context_coverage = self._coverage(scene_context_count, segment_count)
+        relative_timing_coverage = self._coverage(timed_effect_count, len(effects))
+        music_lifecycle_coverage = self._coverage(lifecycle_music_count, len(music_cues))
+        ready = (
+            scene_context_coverage > 0
+            and relative_timing_coverage >= 1.0
+            and music_lifecycle_coverage >= 1.0
+        )
+
+        if segment_count and scene_context_coverage == 0:
+            issues.append(
+                QualityIssue(
+                    location="overall",
+                    severity="minor",
+                    category="audio",
+                    description="Seed 场景缺少环境与空间状态",
+                    suggestion="为场景首段和真实转场补充 instruct_scene，并在连续片段中保持声学状态一致",
+                )
+            )
+        if effects and relative_timing_coverage < 1.0:
+            issues.append(
+                QualityIssue(
+                    location="overall",
+                    severity="minor",
+                    category="audio",
+                    description="Seed 声音事件缺少相对时序",
+                    suggestion="明确声音发生在台词之前、期间、之后或持续到场景结束",
+                )
+            )
+        if music_cues and music_lifecycle_coverage < 1.0:
+            issues.append(
+                QualityIssue(
+                    location="overall",
+                    severity="minor",
+                    category="audio",
+                    description="Seed 配乐提示缺少生命周期",
+                    suggestion="说明音乐何时进入、变化、停止或淡出，而不是只写情绪标签",
+                )
+            )
+
+        return {
+            "mode": "seed_scene",
+            "status": "ready" if ready else "needs_attention",
+            "scene_context_coverage": scene_context_coverage,
+            "relative_timing_coverage": relative_timing_coverage,
+            "music_lifecycle_coverage": music_lifecycle_coverage,
+        }
+
+    def _review_legacy_stems_readiness(
+        self,
+        segments: List[Dict[str, Any]],
+        issues: List[QualityIssue],
+    ) -> Dict[str, Any]:
+        effects = [
+            effect
+            for segment in segments
+            for effect in list(segment.get("sound_effects") or [])
+            if effect
+        ]
+        executable_effect_count = sum(
+            1
+            for effect in effects
+            if str(self._cue_value(effect, "name") or effect).strip()
+            and str(self._cue_value(effect, "timing") or "").strip()
+            and any(
+                self._cue_value(effect, field) is not None
+                for field in (
+                    "asset_id",
+                    "volume",
+                    "duration",
+                    "delay",
+                    "fade_in",
+                    "fade_out",
+                    "position_3d",
+                )
+            )
+        )
+        executable_effect_coverage = self._coverage(
+            executable_effect_count,
+            len(effects),
+        )
+        ready = executable_effect_coverage >= 1.0
+        if effects and not ready:
+            issues.append(
+                QualityIssue(
+                    location="overall",
+                    severity="minor",
+                    category="audio",
+                    description="分轨音效缺少可执行参数",
+                    suggestion="补充明确音效名称、timing，以及素材 ID、音量、时长、延迟或淡入淡出参数",
+                )
+            )
+        return {
+            "mode": "legacy_stems",
+            "status": "ready" if ready else "needs_attention",
+            "executable_effect_coverage": executable_effect_coverage,
+        }
+
+    @staticmethod
+    def _cue_value(cue: Any, field: str) -> Any:
+        if isinstance(cue, dict):
+            return cue.get(field)
+        return getattr(cue, field, None)
+
+    @staticmethod
+    def _coverage(ready_count: int, total_count: int) -> float:
+        if total_count <= 0:
+            return 1.0
+        return round(ready_count / total_count, 4)
     
     def _review_script_quality(
         self,

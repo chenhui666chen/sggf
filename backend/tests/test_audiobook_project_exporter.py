@@ -690,7 +690,7 @@ def test_project_m4b_export_embeds_cover_metadata_and_cache_signature(tmp_path: 
 
     assert output_path.exists()
     assert result["cached"] is False
-    assert result["cover_art"] == cover.as_posix()
+    assert result["cover_art"] == project_exporter_module._to_repo_relative_path(cover)
     assert cached_result["cached"] is True
     assert cached_result["source_signature"] == result["source_signature"]
 

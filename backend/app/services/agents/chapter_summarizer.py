@@ -1,4 +1,4 @@
-﻿"""  
+"""
 章节摘要生成器 - 自动生成核心事件摘要，减少AI上下文长度
 """
 from typing import Dict, Any, List, Optional
@@ -12,6 +12,7 @@ from core.langchain_bridge import create_task_llm
 from .knowledge_base import NovelKnowledgeBase
 from .memory_manager import NovelMemoryManager
 from app.services.chapter_adaptation_assets import attach_cross_media_adaptation_hints, load_summary_data
+from app.services.exact_model_guard import require_exact_model
 
 
 class ChapterSummarizer:
@@ -37,13 +38,15 @@ class ChapterSummarizer:
     
     def __init__(self, knowledge_base: Optional[NovelKnowledgeBase] = None,
                  memory_manager: Optional[NovelMemoryManager] = None,
-                 db_session = None):
+                 db_session = None,
+                 model: Optional[str] = None):
         """初始化摘要生成器
         
         Args:
             knowledge_base: 知识库实例
             memory_manager: 记忆管理器实例
             db_session: 数据库会话，用于缓存摘要
+            model: 指定摘要生成模型（🆕 免费档锁定模型用，缺省保持默认路由）
         """
         self.knowledge_base = knowledge_base or NovelKnowledgeBase()
         self.memory_manager = memory_manager or NovelMemoryManager()
@@ -51,7 +54,7 @@ class ChapterSummarizer:
         
         # 初始化AI Agent
         self.creative_director = CreativeDirectorAgent(self.knowledge_base, self.memory_manager)
-        self.llm = create_task_llm()
+        self.llm = create_task_llm(model=require_exact_model(model))
     
     def generate_chapter_summary(self, chapter_number: int, chapter_title: str, 
                                 chapter_content: str, summary_length: int = 300) -> Dict[str, Any]:
@@ -863,15 +866,17 @@ class ChapterSummarizer:
 
 def create_chapter_summarizer(knowledge_base: Optional[NovelKnowledgeBase] = None,
                              memory_manager: Optional[NovelMemoryManager] = None,
-                             db_session = None) -> ChapterSummarizer:
+                             db_session = None,
+                             model: Optional[str] = None) -> ChapterSummarizer:
     """创建章节摘要生成器的工厂函数
     
     Args:
         knowledge_base: 知识库实例
         memory_manager: 记忆管理器实例
         db_session: 数据库会话，用于缓存摘要
+        model: 指定摘要生成模型（🆕 免费档锁定模型用，缺省保持默认路由）
         
     Returns:
         配置好的ChapterSummarizer实例
     """
-    return ChapterSummarizer(knowledge_base, memory_manager, db_session)
+    return ChapterSummarizer(knowledge_base, memory_manager, db_session, model=model)

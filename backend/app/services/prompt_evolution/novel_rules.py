@@ -23,6 +23,7 @@ FORBIDDEN_EMOTION_WORDS = [
     "无与伦比", "美轮美奂", "叹为观止", "令人窒息", "完美无瑕",
     "心中一凛", "心中一紧", "心中一沉", "心头一震",
     "眼中闪过", "眼眸深邃", "眸光闪烁",
+    "宛如", "交织", "宿命感", "倒吸一口凉气", "嘴角勾起一抹",
 ]
 
 # 过渡词禁用词 - AI特有的逻辑连接词模式
@@ -31,6 +32,7 @@ FORBIDDEN_TRANSITION_WORDS = [
     "然而", "因此", "于是乎", "与此同时", "话虽如此",
     "毫无疑问", "显而易见", "不言而喻", "值得注意的是",
     "需要指出的是", "综上所述", "总而言之", "总的来说",
+    "不可思议的是", "不可否认",
 ]
 
 # 描写类禁用词 - 过于直白或空洞的形容
@@ -41,8 +43,8 @@ FORBIDDEN_DESCRIPTION_WORDS = [
 
 # 合并所有禁用词
 ALL_FORBIDDEN_WORDS = (
-    FORBIDDEN_EMOTION_WORDS + 
-    FORBIDDEN_TRANSITION_WORDS + 
+    FORBIDDEN_EMOTION_WORDS +
+    FORBIDDEN_TRANSITION_WORDS +
     FORBIDDEN_DESCRIPTION_WORDS
 )
 
@@ -59,14 +61,21 @@ WORD_SUBSTITUTION_MAP: Dict[str, List[str]] = {
     "然而": ["可", "但", "却", ""],
     "因此": ["所以", ""],
     "此外": ["还有", "另外说", ""],
-    
+
     # 情感展示替换
     "感到悲伤": ["喉咙发紧", "眼眶发热"],
     "感到愤怒": ["攥紧了拳头", "太阳穴突突直跳"],
     "感到害怕": ["后背发凉", "腿有点软"],
     "感到紧张": ["手心出汗", "心跳加速"],
     "感到开心": ["嘴角压不住地上扬", "眼睛都亮了"],
-    
+
+    # AI高频词替换（保证强制替换后句子仍通顺）
+    "宛如": ["像"],
+    "交织": ["混杂"],
+    "宿命感": ["命中注定的感觉"],
+    "倒吸一口凉气": ["喉咙一紧"],
+    "嘴角勾起一抹": ["嘴角带着点"],
+
     # 描写词替换
     "非常": ["很", "挺", ""],
     "十分": ["很", "挺", ""],
@@ -87,36 +96,141 @@ SENTENCE_PATTERN_FIXES = [
 # 三、预处理函数
 # ============================================================================
 
+def _strip_ai_formatting(text: str) -> Tuple[str, List[str]]:
+    """
+    清除AI输出的格式痕迹（确定性规则，零成本）
+
+    处理以下AI格式特征：
+    1. Markdown标记残留（加粗、标题、列表、引用）
+    2. 英文半角标点混入中文文本
+    3. Unicode特殊字符规范化（em-dash、弯引号）
+    4. 多余空格/缩进清理
+    5. AI编号列表结构
+    """
+    logs = []
+    result = text
+
+    # 1. 清除 Markdown 标记
+    # 加粗
+    if "**" in result:
+        result = re.sub(r'\*\*(.+?)\*\*', r'\1', result)
+        logs.append("清除Markdown加粗")
+    if "__" in result:
+        result = re.sub(r'__(.+?)__', r'\1', result)
+        logs.append("清除Markdown下划线加粗")
+    # 斜体（注意不误伤省略号中的星号）
+    if re.search(r'(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)', result):
+        result = re.sub(r'(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)', r'\1', result)
+        logs.append("清除Markdown斜体")
+    # 标题（行首 # 开头）
+    if re.search(r'^#{1,6}\s+', result, re.MULTILINE):
+        result = re.sub(r'^#{1,6}\s+', '', result, flags=re.MULTILINE)
+        logs.append("清除Markdown标题")
+    # 无序列表（行首 - * + 开头）
+    if re.search(r'^\s*[-*+]\s+', result, re.MULTILINE):
+        result = re.sub(r'^\s*[-*+]\s+', '', result, flags=re.MULTILINE)
+        logs.append("清除Markdown无序列表")
+    # 有序列表（行首数字. 开头）
+    if re.search(r'^\s*\d+\.\s+', result, re.MULTILINE):
+        result = re.sub(r'^\s*\d+\.\s+', '', result, flags=re.MULTILINE)
+        logs.append("清除Markdown有序列表")
+    # 引用块
+    if re.search(r'^>\s?', result, re.MULTILINE):
+        result = re.sub(r'^>\s?', '', result, flags=re.MULTILINE)
+        logs.append("清除Markdown引用")
+    # 行内代码
+    if '`' in result:
+        result = re.sub(r'`([^`]+)`', r'\1', result)
+        logs.append("清除Markdown行内代码")
+
+    # 2. 英文半角标点 → 中文全角（仅当两侧是中文字符时）
+    punct_map = {',': '，', '.': '。', ';': '；', ':': '：', '!': '！', '?': '？'}
+    for eng, chn in punct_map.items():
+        pattern = r'([\u4e00-\u9fa5])' + re.escape(eng) + r'([\u4e00-\u9fa5])'
+        if re.search(pattern, result):
+            result = re.sub(pattern, r'\1' + chn + r'\2', result)
+            logs.append(f"修正半角标点: {eng}→{chn}")
+
+    # 3. Unicode特殊字符规范化
+    # 单个 em-dash → 中文破折号
+    if '—' in result:
+        # 先处理已有的双em-dash（不改）
+        # 将单个em-dash转为中文破折号对
+        result = re.sub(r'(?<!—)—(?!—)', '——', result)
+        # 修正三个以上连续em-dash
+        result = re.sub(r'—{3,}', '——', result)
+        logs.append("规范化破折号")
+    # 弯引号 → 中文引号
+    if '\u201c' in result or '\u201d' in result:
+        result = result.replace('\u201c', '\u201c').replace('\u201d', '\u201d')
+        # 注：\u201c = " \u201d = " 本身就是中文左右双引号，无需替换
+        # 但部分场景弯引号可能与直角引号不一致，这里保持原样
+    if '\u2018' in result or '\u2019' in result:
+        result = result.replace('\u2018', '\u2018').replace('\u2019', '\u2019')
+
+    # 4. 多余空格清理
+    # 中文字符间的多余空格（仅水平空白，不吃换行）
+    if re.search(r'[\u4e00-\u9fa5][ \t]+[\u4e00-\u9fa5]', result):
+        result = re.sub(r'([\u4e00-\u9fa5])[ \t]+([\u4e00-\u9fa5])', r'\1\2', result)
+        logs.append("清理中文间空格")
+    # 段首过多空格（保留2字符标准缩进）
+    if re.search(r'^[ \t]{3,}', result, re.MULTILINE):
+        result = re.sub(r'^[ \t]{3,}', '  ', result, flags=re.MULTILINE)
+        logs.append("修正段首缩进")
+
+    # 5. AI编号列表结构（中文编号格式）
+    # 如：（一）、（二）、（三）或 第一、第二、第三
+    if re.search(r'^[（(][一二三四五六七八九十]+[）)][、.]?\s*', result, re.MULTILINE):
+        result = re.sub(r'^[（(][一二三四五六七八九十]+[）)][、.]?\s*', '', result, flags=re.MULTILINE)
+        logs.append("清除中文编号列表")
+
+    # 6. 清除连续空行（AI倾向双空行分段）
+    if '\n\n\n' in result:
+        result = re.sub(r'\n{3,}', '\n\n', result)
+        logs.append("压缩连续空行")
+
+    return result, logs
+
+
 def preprocess_text(text: str) -> Tuple[str, List[str]]:
     """
     预处理文本，进行确定性的规则替换
-    
+
+    处理流程：
+    1. AI格式特征清洗（Markdown、半角标点、Unicode、空格）
+    2. 过度标点修正
+    3. AI标志词删除
+
     Args:
         text: 原始文本
-        
+
     Returns:
         (处理后的文本, 处理日志列表)
     """
     logs = []
     result = text
-    
+
+    # 0. AI格式特征清洗（新增）
+    result, format_logs = _strip_ai_formatting(result)
+    logs.extend(format_logs)
+
     # 1. 处理过度使用的标点
     # 连续3个以上感叹号 -> 1个
     if "!!!" in result:
         result = re.sub(r"!{3,}", "!", result)
         logs.append("修正过多感叹号")
-    
+
     # 连续3个以上问号 -> 1个
     if "???" in result:
         result = re.sub(r"\?{3,}", "?", result)
         logs.append("修正过多问号")
-    
+
     # 2. 删除明显的AI标志词
     for word in ["不禁", "随即"]:
         if word in result:
             result = result.replace(word, "")
             logs.append(f"删除AI标志词: {word}")
-    
+
     return result, logs
 
 
@@ -168,6 +282,9 @@ def postprocess_text(text: str) -> Tuple[str, List[str]]:
     for word in FORBIDDEN_TRANSITION_WORDS:
         if word in result:
             replacement = WORD_SUBSTITUTION_MAP.get(word, [""])[0]
+            if not replacement:
+                # 删除连接词时连同其后的逗号一起清理，避免残留"。，"
+                result = result.replace(word + "，", "")
             result = result.replace(word, replacement)
             logs.append(f"强制替换: {word} -> {replacement or '(删除)'}")
 
@@ -564,22 +681,14 @@ def compare_metrics(original: TextMetrics, rewritten: TextMetrics) -> str:
 
 # 预置有效策略（从 BypassAIGC 和实践中提取）
 PRESET_EFFECTIVE_STRATEGIES = [
-    "用身体反应替代情感陈述（如'喉咙发紧'替代'感到悲伤'）",
-    "对话中增加语气词和省略（'嗯''啊''呢'）",
-    "长句后接1-2个短句制造节奏变化",
-    "用具体感官细节替代形容词堆砌",
-    "减少'然而''因此'等逻辑连接词",
-    "允许适度的'废话'和重复（人类写作特征）",
-    "使用'把'字句替代被动句式",
-    "适当使用省略号制造停顿感",
-    "对话中加入打断和话说一半的情况",
-    "用动作细节展示情绪而非直接说明",
-    # 🆕 文笔优美相关策略
-    "善用比喻拟人等修辞手法增加文学美感",
-    "注意句子韵律节奏如行云流水",
-    "情景交融让环境描写与情感呼应",
-    "用精准有画面感的动词（如'踱步'替代'走'）",
-    "适度留白给读者想象空间",
+    "减少连续重复的句法骨架，但按语义自然调整句长，不机械拆句",
+    "清理不承载事实的套话、重复解释和空泛总结",
+    "减少模板化连接词的连续使用，语义需要时保留正常连接词",
+    "使用准确、常见且符合题材语域的词，避免生硬同义替换",
+    "保留原文全部专名、数字、事实、设定、事件顺序、因果和否定关系",
+    "对话只在原有人物身份和语气范围内轻度自然化",
+    "标点按语义使用，避免单一标点长期主导，也避免刻意堆叠特殊标点",
+    "每次只测试少量语言变量，并要求在多个同题材样本上重复验证",
 ]
 
 # 预置无效策略
@@ -591,6 +700,10 @@ PRESET_INEFFECTIVE_STRATEGIES = [
     "所有句子都改成短句破坏行文流畅性",
     "机械短句堆砌导致文字干涩失去美感",
     "过度追求口语化牺牲文笔优美",
+    "通过改名、改设定、重排事件或改变叙事视角换取低AI率",
+    "添加原文没有的感官、比喻、内心活动、吐槽和无关细节",
+    "把偶然在单个样本降分的手法直接升级为强制规则",
+    "固定使用身体反应、语气词、短句、省略号形成新的反检测模板",
 ]
 
 # 预置禁止模式
@@ -605,6 +718,10 @@ PRESET_FORBIDDEN_PATTERNS = [
     "对话过于礼貌和完整",
     "主角永远冷静不慌乱",
     "所有句子长度相近",
+    "要求破坏叙事逻辑、插入不相关联想或进行非线性重排",
+    "强制修改人物姓名、专名、事实、设定、事件顺序或因果关系",
+    "统一把不同题材和人物语言改成现代口语、方言或网络表达",
+    "为了降低AI率删除结尾结论、关键线索或具体信息",
 ]
 
 
@@ -845,7 +962,7 @@ def calculate_multi_dimension_score(
     # 🆕 8. 可读性维度评分（越高越好，与其他维度相反）
     score.readability_score, score.readability_warnings = _calculate_readability_score(text, metrics)
     score.details["readability"] = f"可读性{score.readability_score:.0f}"
-    
+
     # 🆕 9. 原文保真度维度评分（越低越好，表示改动越小）
     # 注意：需要原文才能计算，否则设为中性值50
     score.fidelity_score = 50  # 默认值，表示未提供原文
@@ -1123,14 +1240,14 @@ def _calculate_readability_score(text: str, metrics: TextMetrics) -> Tuple[float
 def _calculate_fidelity_score(original_text: str, rewritten_text: str) -> float:
     """
     🆕 计算原文保真度得分（衡量改写前后的相似度）
-    
+
     评分逻辑（0-100，越低越好，表示改动越小）：
     - 0-20分：几乎没改动，相似度>80% ✨
     - 21-40分：微调，相似度60-80%
     - 41-60分：中等改动，相似度40-60%
     - 61-80分：大幅改写，相似夦20-40%
     - 81-100分：几乎全部重写，相似度<20%
-    
+
     评估维度：
     1. 字符级相似度（编辑距离）
     2. 词级相似度（共同词汇比例）
@@ -1138,7 +1255,7 @@ def _calculate_fidelity_score(original_text: str, rewritten_text: str) -> float:
     4. 长度变化程度
     """
     score = 0.0
-    
+
     # 1. 字符级相似度（简化的编辑距离比例）
     max_len = max(len(original_text), len(rewritten_text))
     if max_len > 0:
@@ -1150,38 +1267,38 @@ def _calculate_fidelity_score(original_text: str, rewritten_text: str) -> float:
         char_similarity = common_chars / max_len
         # 相似度越高，分数越低（越好）
         score += (1 - char_similarity) * 30  # 最多30分
-    
+
     # 2. 词级相似度（分词后比较）
     # 简单分词：按标点和空格切分
     def simple_tokenize(text):
         # 分隔标点和空格，保留有意义的词
         words = re.findall(r'[\w\u4e00-\u9fa5]+', text)
         return [w for w in words if len(w) > 1]  # 过滤单字
-    
+
     orig_words = set(simple_tokenize(original_text))
     rewr_words = set(simple_tokenize(rewritten_text))
-    
+
     if orig_words and rewr_words:
         common_words = orig_words & rewr_words
         word_similarity = len(common_words) / max(len(orig_words), len(rewr_words))
         score += (1 - word_similarity) * 35  # 最多35分
-    
+
     # 3. 句子结构相似度（句数和句长分布）
     orig_sents = [s.strip() for s in re.split(r'[。！？]', original_text) if s.strip()]
     rewr_sents = [s.strip() for s in re.split(r'[。！？]', rewritten_text) if s.strip()]
-    
+
     sent_count_diff = abs(len(orig_sents) - len(rewr_sents))
     max_sent_count = max(len(orig_sents), len(rewr_sents))
     if max_sent_count > 0:
         sent_count_similarity = 1 - (sent_count_diff / max_sent_count)
         score += (1 - sent_count_similarity) * 20  # 最多20分
-    
+
     # 4. 长度变化程度
     len_ratio = len(rewritten_text) / len(original_text) if len(original_text) > 0 else 1.0
     len_change = abs(1 - len_ratio)  # 0表示长度不变，1表示差异很大
     score += len_change * 15  # 最多15分
-    
+
     # 确保分数在0-100范围内
     score = max(0, min(100, score))
-    
+
     return score

@@ -164,9 +164,21 @@ class Settings(BaseSettings):
     MULTI_MODEL_REVIEW_CHIEF_MODEL: str = "deepseek-v4-pro"
     MULTI_MODEL_REVIEW_CONCURRENCY: int = 5
     MULTI_MODEL_REVIEW_TIMEOUT_SECONDS: int = 120
+    MULTI_MODEL_REVIEW_CHIEF_TIMEOUT_SECONDS: int = 120
     MULTI_MODEL_REVIEW_MAX_REVIEWERS: int = 7
     MULTI_MODEL_REVIEW_DEFAULT_PROMPT_BUDGET: int = 80000
+    MULTI_MODEL_REVIEW_CHAPTER_PLAN_PROMPT_BUDGET: int = 12000
     DOUBAO_REVIEW_PROMPT_BUDGET: int = 64000
+
+    # 免费生成档位（灵感方舟）配置
+    # 强制开关：开启后无标准档角色的用户一律落入免费档（默认关，行为与现状一致）
+    FREE_TIER_ENFORCEMENT_ENABLED: bool = False
+    # 拥有任一角色码即具备标准档权益（逗号分隔）
+    FREE_TIER_STANDARD_ROLE_CODES: str = "super_admin,admin,standard_generation"
+    # 免费档每用户每日章数额度
+    FREE_TIER_DAILY_CHAPTER_LIMIT: int = 2
+    # 全局免费发放量护栏（当日免费章数封顶，注意：章数不等于成本）
+    FREE_TIER_GLOBAL_DAILY_LIMIT: int = 500
 
     # 日志配置
     LOG_LEVEL: str = "INFO"

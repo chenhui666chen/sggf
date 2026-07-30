@@ -36,4 +36,47 @@ describe('independent TTS prompt test unit source contract', () => {
     expect(apiSource).toContain('/api/v1/audiobook/tts/test-cases')
     expect(apiSource).toContain('/api/v1/audiobook/tts/test-preview')
   })
+
+  it('keeps Seed scene A/B review inside the standalone test unit', () => {
+    const pageSource = readSource('../../TtsPromptTestPage.tsx')
+    const scenePanelSource = readSource('../../SeedSceneTestPanel.tsx')
+    const apiSource = readSource('../../../services/api.ts')
+
+    expect(pageSource).toContain("value=\"seed_scene\"")
+    expect(pageSource).toContain('SeedSceneTestPanel')
+    expect(pageSource).toContain('latestTtsPreview')
+    expect(scenePanelSource).toContain('apiClient.getSeedSceneTestCases')
+    expect(scenePanelSource).toContain('apiClient.previewSeedSceneTestCase')
+    expect(scenePanelSource).toContain('使用当前试听')
+    expect(scenePanelSource).toContain('force_regenerate')
+    expect(scenePanelSource).not.toContain('audiobookProjectId')
+    expect(scenePanelSource).not.toContain('chapterId')
+    expect(apiSource).toContain('/api/v1/audiobook/scene-audio/test-cases')
+    expect(apiSource).toContain('/api/v1/audiobook/scene-audio/test-preview')
+  })
+
+  it('binds each Seed reference slot from its own model voice preview', () => {
+    const scenePanelSource = readSource('../../SeedSceneTestPanel.tsx')
+    const apiSource = readSource('../../../services/api.ts')
+
+    expect(scenePanelSource).toContain('apiClient.getTtsModels')
+    expect(scenePanelSource).toContain('apiClient.getTtsVoices')
+    expect(scenePanelSource).toContain('apiClient.previewTTSCached')
+    expect(scenePanelSource).toContain('SEED_REFERENCE_VOICE_PREVIEW_TEXT')
+    expect(scenePanelSource).toContain('buildSeedSceneReferencePayload')
+    expect(scenePanelSource).toContain('原生 speaker')
+    expect(scenePanelSource).toContain('audioUrl: result.audioUrl')
+    expect(scenePanelSource).toContain('audioDataBase64: await blobToBase64(result.blob)')
+    expect(scenePanelSource).not.toContain('disabled={!latestTtsPreview}')
+    expect(apiSource).toContain('audio_url?: string')
+    expect(apiSource).toContain('audio_data_base64?: string')
+  })
+
+  it('routes local review requests to the IPv4 backend listener', () => {
+    const viteSource = readSource('../../../../vite.config.ts')
+
+    expect(viteSource).toContain("const LOCAL_BACKEND_TARGET = 'http://127.0.0.1:8000'")
+    expect(viteSource).toContain('target: LOCAL_BACKEND_TARGET')
+    expect(viteSource).not.toContain("const LOCAL_BACKEND_TARGET = 'http://localhost:8000'")
+  })
 })

@@ -134,6 +134,38 @@ def test_final_audio_review_includes_prompt_audio_quality_feedback_by_model():
     assert feedback["by_model"]["qwen3-tts-instruct-flash"]["manual_review_segment_indices"] == []
 
 
+def test_final_audio_review_uses_audio_presence_without_segment_bytes():
+    report = AudioQualityReport(
+        grade=AudioQualityGrade.EXCELLENT,
+        score=98.0,
+        issues=[],
+        metrics={},
+        passed=True,
+    )
+    segments = [
+        SimpleNamespace(voice_params={"resolved_tts_model": "seed-audio-1.0"}),
+        SimpleNamespace(voice_params={"resolved_tts_model": "seed-audio-1.0"}),
+    ]
+
+    review = ReviewHarness(report)._final_audio_review(
+        audio_info={"duration_seconds": 120.0},
+        file_size=2048,
+        audio_data=None,
+        script_segments=segments,
+        audio_list=None,
+        audio_presence=[True, False],
+    )
+
+    assert review["prompt_audio_quality"]["coverage"] == {
+        "segments_count": 2,
+        "audio_segments_count": 1,
+        "missing_audio_count": 1,
+        "provider_prompt_snapshot_count": 0,
+        "inline_tag_strategy_count": 0,
+        "manual_review_pending_count": 0,
+    }
+
+
 def test_final_audio_review_includes_waveform_quality_metrics():
     report = AudioQualityReport(
         grade=AudioQualityGrade.POOR,

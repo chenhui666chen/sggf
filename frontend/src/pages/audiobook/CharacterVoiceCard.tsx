@@ -31,7 +31,7 @@ interface CharacterVoiceCardProps {
   voicePresetsByModel: Record<TtsModel, VoicePreset[]>
   ttsModelOptions: readonly TtsModelOption[]
   isPreviewing: boolean
-  onVoiceChange: (characterId: number, voiceId: string) => void
+  onVoiceChange: (characterId: number, voiceId: string, preset?: VoicePreset) => void
   onTtsModelChangeForCharacter: (characterId: number, nextModel: TtsModel) => void
   onPreviewCharacterVoice: (characterVoice: CharacterVoiceSetting) => void
   onOpenVoiceManagement: (model: TtsModel) => void

@@ -219,4 +219,72 @@ describe('workflowWebSocket', () => {
       token: 'jwt-token',
     })
   })
+
+  it('joinAudiobook 会切换有声书房间并在重连后重新入房', async () => {
+    const socket = new MockSocket()
+    ioMock.mockReturnValue(socket)
+    globalThis.localStorage.setItem('access_token', 'jwt-token')
+
+    const { workflowWebSocket } = await import('../websocket')
+
+    const connectPromise = workflowWebSocket.connect()
+    socket.connected = true
+    socket.trigger('connect')
+    await connectPromise
+
+    workflowWebSocket.joinAudiobook(21)
+    workflowWebSocket.joinAudiobook(22)
+
+    expect(socket.emit).toHaveBeenCalledWith('join_audiobook', {
+      audiobook_project_id: 21,
+      token: 'jwt-token',
+    })
+    expect(socket.emit).toHaveBeenCalledWith('leave_audiobook', {
+      audiobook_project_id: 21,
+    })
+    expect(socket.emit).toHaveBeenCalledWith('join_audiobook', {
+      audiobook_project_id: 22,
+      token: 'jwt-token',
+    })
+
+    socket.connected = false
+    socket.trigger('disconnect')
+    socket.connected = true
+    socket.trigger('connect')
+
+    expect(socket.emit).toHaveBeenCalledTimes(4)
+    expect(socket.emit).toHaveBeenLastCalledWith('join_audiobook', {
+      audiobook_project_id: 22,
+      token: 'jwt-token',
+    })
+  })
+
+  it('audiobook_progress 订阅可以独立取消', async () => {
+    const socket = new MockSocket()
+    ioMock.mockReturnValue(socket)
+
+    const { workflowWebSocket } = await import('../websocket')
+    const connectPromise = workflowWebSocket.connect()
+    socket.connected = true
+    socket.trigger('connect')
+    await connectPromise
+
+    const listener = vi.fn()
+    const unsubscribe = workflowWebSocket.onAudiobookProgress(listener)
+    const payload = {
+      audiobook_project_id: 22,
+      chapter_id: 31,
+      stage: 'scene_rendering',
+      progress: 50,
+      message: '场景音频处理完成：scene_0001',
+      stage_metrics: { scene_id: 'scene_0001' },
+    }
+
+    socket.trigger('audiobook_progress', payload)
+    expect(listener).toHaveBeenCalledWith(payload)
+
+    unsubscribe()
+    socket.trigger('audiobook_progress', payload)
+    expect(listener).toHaveBeenCalledTimes(1)
+  })
 })

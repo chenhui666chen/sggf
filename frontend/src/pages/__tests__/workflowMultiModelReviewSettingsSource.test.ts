@@ -47,4 +47,11 @@ describe('Workflow multi-model review settings source guards', () => {
     expect(dialogSource).not.toContain('自动触发场景')
     expect(dialogSource).not.toContain('auto_scenarios.includes')
   })
+
+  it('warns users that multi-model review increases latency and cost', () => {
+    const dialogSource = readSource('../../components/project/MultiModelReviewSettingsDialog.tsx')
+
+    expect(dialogSource).toContain('会增加评审耗时与模型调用成本')
+    expect(dialogSource).toContain('severity="warning"')
+  })
 })

@@ -298,7 +298,7 @@ class HelpersMixin:
                 content = await asyncio.wait_for(
                     self.llm.chat(
                         messages=messages,
-                        model="qwen3.7-plus",
+                        model="qwen3.7-flash",
                         temperature=0.3,
                         max_tokens=8000,
                         timeout=self.LLM_REQUEST_TIMEOUT_SECONDS,

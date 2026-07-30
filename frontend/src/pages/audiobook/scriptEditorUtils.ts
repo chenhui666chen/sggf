@@ -99,7 +99,6 @@ export const buildGenerateAudioFromScriptPayload = ({
   chapterId,
   ttsModel,
   outputFormat,
-  generateSubtitle,
   timelineEdits,
 }: {
   chapterId?: number
@@ -107,13 +106,12 @@ export const buildGenerateAudioFromScriptPayload = ({
   narrationStyle: string
   narrationStylePrompt: string
   outputFormat: AudioOutputFormat
-  generateSubtitle: boolean
   timelineEdits?: TimelineClipEditMap
 }): GenerateAudioFromScriptsPayload => ({
   ...(chapterId ? { chapter_ids: [chapterId] } : {}),
   tts_model: ttsModel,
   output_format: outputFormat,
-  generate_subtitle: generateSubtitle,
+  generate_subtitle: true,
   ...(timelineEdits && Object.keys(timelineEdits).length > 0
     ? { timeline_edits: timelineEdits }
     : {}),

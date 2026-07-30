@@ -146,9 +146,19 @@ export interface DreamweaverEventData {
   created_at?: string | null
 }
 
+export interface AudiobookProgressData {
+  audiobook_project_id: number
+  chapter_id: number
+  stage: string
+  progress: number
+  message?: string | null
+  stage_metrics?: Record<string, unknown>
+}
+
 class WorkflowWebSocket {
   private socket: Socket | null = null
   private projectId: number | null = null
+  private audiobookProjectId: number | null = null
   private connectPromise: Promise<void> | null = null
   private reconnectAttempts = 0
   private maxReconnectAttempts = 5
@@ -267,6 +277,9 @@ class WorkflowWebSocket {
       if (this.projectId) {
         this.joinProject(this.projectId, 0, socket)
       }
+      if (this.audiobookProjectId) {
+        this.joinAudiobook(this.audiobookProjectId, socket)
+      }
     })
 
     socket.on('disconnect', () => {
@@ -369,6 +382,53 @@ class WorkflowWebSocket {
     }
   }
 
+  joinAudiobook(audiobookProjectId: number, socket: Socket | null = this.socket) {
+    const previousAudiobookProjectId = this.audiobookProjectId
+    this.audiobookProjectId = audiobookProjectId
+
+    if (!socket) {
+      void this.connect().catch(() => undefined)
+      return
+    }
+    if (this.socket !== socket) {
+      return
+    }
+    if (!socket.connected) {
+      if (!socket.active) {
+        socket.connect()
+      }
+      return
+    }
+
+    const token = localStorage.getItem('access_token')
+    if (!token) {
+      return
+    }
+    if (
+      previousAudiobookProjectId
+      && previousAudiobookProjectId !== audiobookProjectId
+    ) {
+      socket.emit('leave_audiobook', {
+        audiobook_project_id: previousAudiobookProjectId,
+      })
+    }
+    socket.emit('join_audiobook', {
+      audiobook_project_id: audiobookProjectId,
+      token,
+    })
+  }
+
+  leaveAudiobook(audiobookProjectId: number) {
+    if (this.socket?.connected) {
+      this.socket.emit('leave_audiobook', {
+        audiobook_project_id: audiobookProjectId,
+      })
+    }
+    if (this.audiobookProjectId === audiobookProjectId) {
+      this.audiobookProjectId = null
+    }
+  }
+
   setOnRoomJoined(callback: (projectId: number) => void) {
     this.onRoomJoinedCallback = callback
   }
@@ -457,6 +517,10 @@ class WorkflowWebSocket {
     return this.subscribeDataEvent('dreamweaver_event', callback)
   }
 
+  onAudiobookProgress(callback: (data: AudiobookProgressData) => void) {
+    return this.subscribeDataEvent('audiobook_progress', callback)
+  }
+
   removeAllListeners() {
     if (!this.socket) return
     this.socket.off('stage_update')
@@ -472,6 +536,7 @@ class WorkflowWebSocket {
     this.socket.off('model_used')
     this.socket.off('notification')
     this.socket.off('dreamweaver_event')
+    this.socket.off('audiobook_progress')
   }
 
   removeEventListeners() {
@@ -489,6 +554,7 @@ class WorkflowWebSocket {
     this.socket.off('model_used')
     this.socket.off('notification')
     this.socket.off('dreamweaver_event')
+    this.socket.off('audiobook_progress')
   }
 
   disconnect() {
@@ -497,6 +563,7 @@ class WorkflowWebSocket {
     this.socket.disconnect()
     this.socket = null
     this.projectId = null
+    this.audiobookProjectId = null
     this.connectPromise = null
   }
 

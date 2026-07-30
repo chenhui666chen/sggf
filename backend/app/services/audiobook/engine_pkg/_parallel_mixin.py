@@ -84,6 +84,7 @@ class ParallelMixin:
         audiobook_project_id: Optional[int] = None,
         skip_stage_tracking: bool = False,
         include_voice_design: bool = True,
+        prepare_render_assets: bool = True,
     ) -> tuple:
         """
         并行执行音色、音效、音乐设计
@@ -93,11 +94,13 @@ class ParallelMixin:
             script_segments: 剧本片段列表
             chapter_content: 章节原文（用于环境音与配乐生成）
             preserve_user_config: 是否保留用户配置（True=只为未配置的角色设计音色）
+            prepare_render_assets: 是否生成分轨素材与时间线；剧本准备阶段可关闭，正式音频阶段保留供局部回退
         
         Returns:
             (voice_profiles, sound_effects_count, music_cues_count)
         """
         audio_fx_for_generation = getattr(self, "_audio_fx_config", None) or {}
+        is_seed_scene = str(getattr(self, "_audio_engine_mode", "legacy_stems")) == "seed_scene"
 
         def asset_generation_enabled(enable_key: str, density_key: str) -> bool:
             if not audio_fx_for_generation:
@@ -225,6 +228,26 @@ class ParallelMixin:
                         metrics={"sound_effects_count": 0, "skipped": True}
                     )
                     return 0
+
+            if is_seed_scene and not prepare_render_assets:
+                sound_effects_count = sum(
+                    len(getattr(segment, "sound_effects", None) or [])
+                    or len(getattr(segment, "sound_effects_simple", None) or [])
+                    for segment in script_segments
+                )
+                self._last_effect_timeline = None
+                metrics = {
+                    "sound_effects_count": sound_effects_count,
+                    "render_mode": "seed_scene_prompt",
+                    "local_asset_generation": False,
+                }
+                if not skip_stage_tracking:
+                    self.task_tracker.complete_stage(
+                        task_id,
+                        StageType.SOUND_DESIGN,
+                        metrics=metrics,
+                    )
+                return sound_effects_count
             
             # 构造用于音效设计的简化片段结构
             script_dicts = []
@@ -328,6 +351,29 @@ class ParallelMixin:
                         metrics={"music_cues_count": 0, "skipped": True}
                     )
                     return 0
+
+            if is_seed_scene and not prepare_render_assets:
+                music_cues_count = sum(
+                    1
+                    for segment in script_segments
+                    if (
+                        getattr(segment, "music_cue", None)
+                        or getattr(segment, "music_cue_simple", "")
+                    )
+                )
+                self._last_music_timeline = None
+                metrics = {
+                    "music_cues_count": music_cues_count,
+                    "render_mode": "seed_scene_prompt",
+                    "local_asset_generation": False,
+                }
+                if not skip_stage_tracking:
+                    self.task_tracker.complete_stage(
+                        task_id,
+                        StageType.MUSIC_COMPOSITION,
+                        metrics=metrics,
+                    )
+                return music_cues_count
             
             # 提取音乐标注并设计配乐方案
             try:

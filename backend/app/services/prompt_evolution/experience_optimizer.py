@@ -1,4 +1,4 @@
-﻿"""
+"""
 提示词进化系统 - 历史经验智能去重与优化
 
 核心功能：
@@ -15,7 +15,6 @@ from datetime import datetime
 from collections import Counter
 
 from core.unified_llm_client import get_llm_client
-from core.model_resolution import TaskType
 
 logger = logging.getLogger(__name__)
 
@@ -327,7 +326,7 @@ class ExperienceOptimizer:
             
             response = await self.llm_client.chat(
                 messages=messages,
-                task_type=TaskType.REVIEW_CHECK,
+                task_type="summarize",  # 去重合并属信息整理类任务，走轻量模型
                 temperature=0.3,  # 低温度，保证稳定输出
                 use_cache=False
             )
@@ -618,7 +617,7 @@ class ExperienceOptimizer:
             
             response = await self.llm_client.chat(
                 messages=messages,
-                task_type=TaskType.REVIEW_CHECK,
+                task_type="summarize",  # 去重属信息整理类任务，走轻量模型
                 temperature=0.3,
                 use_cache=False
             )

@@ -1,4 +1,5 @@
 import type {
+  AudioEngineMode,
   AudioFxConfig,
   CharacterVoiceSetting,
   ProjectAudioConfig,
@@ -24,6 +25,10 @@ export interface AudiobookVoiceConfigPayloadItem {
   character_name: string
   voice_id: string
   tts_model?: TtsModel | null
+  reference_source?: 'user_private' | 'public_pool'
+  reference_audio_url?: string
+  voice_reference_asset_id?: string
+  voice_pool_publication_id?: string
 }
 
 export interface ProjectVoiceAssignmentResult {
@@ -119,6 +124,10 @@ const buildSavedCharacterConfigMap = (
       voiceDesignPrompt?: string
       mimoVoiceAssetId?: string
       stepaudioVoiceAssetId?: string
+      referenceSource?: 'user_private' | 'public_pool'
+      referenceAudioUrl?: string
+      voiceReferenceAssetId?: string
+      voicePoolPublicationId?: string
       source?: string | null
     }
   >()
@@ -138,6 +147,10 @@ const buildSavedCharacterConfigMap = (
       voiceDesignPrompt: trimOptionalText(item.voice_design_prompt),
       mimoVoiceAssetId: trimOptionalText(item.mimo_voice_asset_id),
       stepaudioVoiceAssetId: trimOptionalText(item.stepaudio_voice_asset_id),
+      referenceSource: item.reference_source || undefined,
+      referenceAudioUrl: trimOptionalText(item.reference_audio_url),
+      voiceReferenceAssetId: trimOptionalText(item.voice_reference_asset_id),
+      voicePoolPublicationId: trimOptionalText(item.voice_pool_publication_id),
       source: item.source ?? undefined,
     })
   }
@@ -210,7 +223,8 @@ export const buildProjectCharacterVoiceSettings = ({
   ttsModel: TtsModel
   voicePresets?: Array<Pick<VoicePreset, 'id'>>
 }): CharacterVoiceSetting[] => {
-  const validVoiceIds = new Set(voicePresets.map((p) => p.id))
+  // 音色目录尚未加载完成时不做合法性校验，避免误丢弃已保存的音色配置
+  const validVoiceIds = voicePresets.length > 0 ? new Set(voicePresets.map((p) => p.id)) : undefined
   
   return characters.map((character) => {
     const saved = findSavedCharacterConfig(savedCharacters, character.id)
@@ -224,6 +238,10 @@ export const buildProjectCharacterVoiceSettings = ({
       ttsModel: savedTtsModel,
       mimoVoiceAssetId: trimOptionalText(saved?.mimo_voice_asset_id),
       stepaudioVoiceAssetId: trimOptionalText(saved?.stepaudio_voice_asset_id),
+      referenceSource: saved?.reference_source || undefined,
+      referenceAudioUrl: trimOptionalText(saved?.reference_audio_url),
+      voiceReferenceAssetId: trimOptionalText(saved?.voice_reference_asset_id),
+      voicePoolPublicationId: trimOptionalText(saved?.voice_pool_publication_id),
     }, ttsModel)
     return {
       characterId: character.id,
@@ -242,6 +260,10 @@ export const buildProjectCharacterVoiceSettings = ({
       voiceDesignPrompt: trimOptionalText(saved?.voice_design_prompt),
       mimoVoiceAssetId: trimOptionalText(saved?.mimo_voice_asset_id),
       stepaudioVoiceAssetId: trimOptionalText(saved?.stepaudio_voice_asset_id),
+      referenceSource: saved?.reference_source || undefined,
+      referenceAudioUrl: trimOptionalText(saved?.reference_audio_url),
+      voiceReferenceAssetId: trimOptionalText(saved?.voice_reference_asset_id),
+      voicePoolPublicationId: trimOptionalText(saved?.voice_pool_publication_id),
       ...(saved?.source ? { source: saved.source } : {}),
     }
   })
@@ -263,7 +285,12 @@ export const buildInitialProjectVoiceSettings = ({
   const narratorSaved = findSavedNarratorConfig(savedCharacters)
   const narratorVoice: CharacterVoiceSetting = {
     ...baseNarratorVoice,
-    voiceId: normalizeVoiceId(ttsModel, narratorSaved?.voice_id, new Set(voicePresets.map((p) => p.id)))
+    voiceId: normalizeVoiceId(
+      ttsModel,
+      narratorSaved?.voice_id,
+      // 音色目录尚未加载完成时不做合法性校验，避免误丢弃已保存的音色配置
+      voicePresets.length > 0 ? new Set(voicePresets.map((p) => p.id)) : undefined,
+    )
       || resolveLegacyVoiceAssetReference({
         characterId: NARRATOR_CHARACTER_ID,
         name: NARRATOR_NAME,
@@ -277,6 +304,10 @@ export const buildInitialProjectVoiceSettings = ({
     volume: narratorSaved?.volume ?? baseNarratorVoice.volume,
     speed: narratorSaved?.speed ?? baseNarratorVoice.speed,
     pitch: narratorSaved?.pitch ?? baseNarratorVoice.pitch,
+    referenceSource: narratorSaved?.reference_source || undefined,
+    referenceAudioUrl: trimOptionalText(narratorSaved?.reference_audio_url),
+    voiceReferenceAssetId: trimOptionalText(narratorSaved?.voice_reference_asset_id),
+    voicePoolPublicationId: trimOptionalText(narratorSaved?.voice_pool_publication_id),
   }
 
   return [
@@ -313,6 +344,10 @@ export const applyProjectVoiceAssignments = ({
       ttsModel: config.ttsModel ?? voice.ttsModel,
       mimoVoiceAssetId: config.mimoVoiceAssetId ?? voice.mimoVoiceAssetId,
       stepaudioVoiceAssetId: config.stepaudioVoiceAssetId ?? voice.stepaudioVoiceAssetId,
+      referenceSource: config.referenceSource ?? voice.referenceSource,
+      referenceAudioUrl: config.referenceAudioUrl ?? voice.referenceAudioUrl,
+      voiceReferenceAssetId: config.voiceReferenceAssetId ?? voice.voiceReferenceAssetId,
+      voicePoolPublicationId: config.voicePoolPublicationId ?? voice.voicePoolPublicationId,
     }, ttsModel)
     return {
       ...voice,
@@ -341,11 +376,13 @@ export const applyProjectVoiceAssignments = ({
 export const buildProjectAudioConfigPayload = ({
   characterVoices,
   audioFxConfig,
+  audioEngineMode,
   ttsModel,
   voicePresets,
 }: {
   characterVoices: readonly CharacterVoiceSetting[]
   audioFxConfig: AudioFxConfig
+  audioEngineMode?: AudioEngineMode
   ttsModel: TtsModel
   voicePresets: Array<Pick<VoicePreset, 'id'>>
 }): ProjectAudioConfig => ({
@@ -357,9 +394,18 @@ export const buildProjectAudioConfigPayload = ({
         name: voice.name,
         voice_id: resolvePayloadVoiceId(voice, ttsModel, voicePresets),
         tts_model: voice.ttsModel || ttsModel,
+        ...(voice.referenceSource ? { reference_source: voice.referenceSource } : {}),
+        ...(voice.referenceAudioUrl ? { reference_audio_url: voice.referenceAudioUrl } : {}),
+        ...(voice.voiceReferenceAssetId
+          ? { voice_reference_asset_id: voice.voiceReferenceAssetId }
+          : {}),
+        ...(voice.voicePoolPublicationId
+          ? { voice_pool_publication_id: voice.voicePoolPublicationId }
+          : {}),
       }
     }),
   audio_fx: audioFxConfig,
+  ...(audioEngineMode ? { audio_engine_mode: audioEngineMode } : {}),
 })
 
 export const buildAudiobookVoiceConfigPayload = ({
@@ -378,5 +424,13 @@ export const buildAudiobookVoiceConfigPayload = ({
         character_name: voice.name,
         voice_id: resolvePayloadVoiceId(voice, ttsModel, voicePresets),
         tts_model: voice.ttsModel || ttsModel,
+        ...(voice.referenceSource ? { reference_source: voice.referenceSource } : {}),
+        ...(voice.referenceAudioUrl ? { reference_audio_url: voice.referenceAudioUrl } : {}),
+        ...(voice.voiceReferenceAssetId
+          ? { voice_reference_asset_id: voice.voiceReferenceAssetId }
+          : {}),
+        ...(voice.voicePoolPublicationId
+          ? { voice_pool_publication_id: voice.voicePoolPublicationId }
+          : {}),
       }
     })

@@ -26,6 +26,30 @@ describe('audiobook stage utils', () => {
     )
   })
 
+  it('replaces the TTS card with scene rendering only after live scene progress appears', () => {
+    const stages = buildPendingTaskStatus({
+      taskId: 'seed-task',
+      audiobookProjectId: 12,
+      taskType: 'full',
+    }).stages
+    stages.scene_rendering = {
+      status: 'running',
+      progress: 0.5,
+    }
+
+    const keys = getStageConfigForTask({
+      task_type: 'full',
+      current_stage: 'scene_rendering',
+      stages,
+    }).map((stage) => stage.key)
+
+    expect(keys).toContain('scene_rendering')
+    expect(keys).not.toContain('tts_synthesis')
+    expect(getStageConfigForTask({ task_type: 'full' }).map((stage) => stage.key)).not.toContain(
+      'scene_rendering',
+    )
+  })
+
   it('normalizes task status payloads and preserves task type', () => {
     const normalized = normalizeTaskStatusResponse({
       task_id: 'job-1',

@@ -18,7 +18,7 @@ interface CharacterVoicePresetSelectProps {
   requiresCustomVoice: boolean
   voiceLoading: boolean
   currentVoicePresets: VoicePreset[]
-  onVoiceChange: (characterId: number, voiceId: string) => void
+  onVoiceChange: (characterId: number, voiceId: string, preset?: VoicePreset) => void
 }
 
 const CharacterVoicePresetSelect = ({
@@ -55,7 +55,14 @@ const CharacterVoicePresetSelect = ({
       <Select
         label="音色"
         value={safeValue}
-        onChange={(event) => onVoiceChange(characterId, event.target.value as string)}
+        onChange={(event) => {
+          const voiceId = event.target.value as string
+          onVoiceChange(
+            characterId,
+            voiceId,
+            currentVoicePresets.find((preset) => preset.id === voiceId),
+          )
+        }}
         disabled={voiceLoading && hasNoVoicePresets}
       >
         <MenuItem value="">

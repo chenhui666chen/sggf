@@ -1,0 +1,67 @@
+{
+  "schema_version": "asr-probe-evidence-v1",
+  "date": "2026-07-25",
+  "audio": {
+    "speech_source": "repository_generated_test_narration",
+    "speech_url": "https://audio.sggf.net/shared/audio_library/tts_preview/as/asr-contract-funasr-seed-narration-20260725.mp3",
+    "speech_contains_user_voice": false,
+    "non_speech_source": "wikimedia_public_domain_dull_thud",
+    "non_speech_duration_s": 0.39
+  },
+  "success_probes": [
+    {
+      "provider": "aliyun",
+      "model": "paraformer-v2",
+      "elapsed_s": 3.779,
+      "usage_duration_s": 15.336,
+      "estimated_public_postpaid_cost_yuan": 0.001227,
+      "task_id": "99cef6dd-0875-46b9-b5c3-2988c4b3814d",
+      "segments": [
+        {
+          "start_ms": 9240,
+          "end_ms": 15320,
+          "text": "他抬起头，望向灰蒙蒙的天空，心里忽然生出一丝不安。"
+        }
+      ]
+    },
+    {
+      "provider": "doubao",
+      "model": "volc.bigasr.auc",
+      "elapsed_s": 3.129,
+      "usage_duration_s": 15.335,
+      "estimated_public_postpaid_cost_yuan": 0.009797,
+      "request_id": "c2fe539c-fd1f-4914-ae68-a85cf80d269c",
+      "segments": [
+        {
+          "start_ms": 9710,
+          "end_ms": 14750,
+          "text": "他抬起头望向灰蒙蒙的天空，心里忽然生出一丝不安。"
+        }
+      ]
+    }
+  ],
+  "failure_probes": [
+    {
+      "provider": "aliyun",
+      "model": "paraformer-v2",
+      "input_kind": "very_short_non_speech",
+      "timeout_s": 45.0,
+      "process_elapsed_s": 63.9,
+      "error_code": "asr_provider_timeout",
+      "automatic_retry": false,
+      "seed_reinvoked": false,
+      "provider_charge_status": "unknown_requires_billing_receipt"
+    },
+    {
+      "provider": "doubao",
+      "model": "volc.bigasr.auc",
+      "input_kind": "very_short_non_speech",
+      "timeout_s": 45.0,
+      "process_elapsed_s": 53.8,
+      "error_code": "asr_provider_timeout",
+      "automatic_retry": false,
+      "seed_reinvoked": false,
+      "provider_charge_status": "unknown_requires_billing_receipt"
+    }
+  ]
+}

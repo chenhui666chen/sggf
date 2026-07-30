@@ -123,11 +123,11 @@ class MusicLibraryEntry(BaseModel):
     description: str = ""
     prompt: str = ""
     tags: List[str] = []
-    style: str
-    duration: float
-    tempo: str
-    mood: str
-    bucket: str
+    style: str = ""
+    duration: float = 0.0
+    tempo: str = ""
+    mood: str = ""
+    bucket: str = ""
     file_path: str
     source: str
     variant: Optional[int] = None
@@ -359,6 +359,22 @@ def _sfx_scene_matches(entry: Dict[str, Any], requested: str) -> bool:
     return False
 
 
+def _serialize_library_entries(entries: list, model_cls: type[BaseModel], library_type: str) -> list:
+    """逐条序列化素材列表，单条脏数据只跳过并告警，不拖垮整个列表接口。"""
+    serialized = []
+    for entry in entries:
+        try:
+            serialized.append(model_cls(**entry))
+        except Exception as exc:
+            logger.warning(
+                "素材条目序列化失败，已跳过: type=%s id=%s -> %s",
+                library_type,
+                entry.get("id") if isinstance(entry, dict) else entry,
+                exc,
+            )
+    return serialized
+
+
 def _load_library_entries(
     *,
     db: Session,
@@ -579,7 +595,7 @@ async def browse_sound_effects(
         entries=results,
         user_id=current_user.id,
     )
-    return [SfxLibraryEntry(**e) for e in results]
+    return _serialize_library_entries(results, SfxLibraryEntry, "sfx")
 
 
 @router.get(
@@ -624,7 +640,7 @@ async def browse_music(
         entries=results,
         user_id=current_user.id,
     )
-    return [MusicLibraryEntry(**e) for e in results]
+    return _serialize_library_entries(results, MusicLibraryEntry, "music")
 
 
 @router.post(
@@ -2233,13 +2249,18 @@ async def delete_audio_library_asset(
             "details": details,
         }
 
+    skip_cloud_delete = False
     if request.delete_cloud_object and object_key:
         allowed_root = f"{_configured_audio_library_oss_prefix()}/"
         if not object_key.startswith(allowed_root):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="object_key must stay inside audio library OSS prefix",
+            # 前缀外的云端对象拒绝删除（安全约束），但不阻断本地数据库/索引删除
+            logger.warning(
+                "素材云端对象不在素材库 OSS 前缀内，跳过云端删除: %s (allowed_root=%s)",
+                object_key,
+                allowed_root,
             )
+            details["cloud_error"] = "object_key outside audio library OSS prefix, cloud delete skipped"
+            skip_cloud_delete = True
 
     if request.delete_local_file and local_path and local_path.exists() and local_path.is_file():
         try:
@@ -2251,16 +2272,15 @@ async def delete_audio_library_asset(
                 detail=f"鍒犻櫎鏈湴绱犳潗澶辫触: {exc}",
             ) from exc
 
-    if request.delete_cloud_object and object_key:
+    if request.delete_cloud_object and object_key and not skip_cloud_delete:
         try:
             delete_result = delete_audio_library_object(object_key=object_key)
+            if delete_result.get("deleted"):
+                stats["cloud_deleted"] = 1
         except Exception as exc:
-            raise HTTPException(
-                status_code=status.HTTP_502_BAD_GATEWAY,
-                detail=f"鍒犻櫎浜戠绱犳潗澶辫触: {exc}",
-            ) from exc
-        if delete_result.get("deleted"):
-            stats["cloud_deleted"] = 1
+            # 云端删除失败不阻断本地数据库/索引删除，否则素材会一直残留在列表里删不掉
+            logger.warning("删除云端素材失败（继续删除本地索引）: %s -> %s", object_key, exc)
+            details["cloud_error"] = str(exc)
 
     if asset is not None:
         db.delete(asset)

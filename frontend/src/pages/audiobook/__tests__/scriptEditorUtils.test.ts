@@ -85,7 +85,6 @@ describe('audiobook script editor utils', () => {
       narrationStyle: 'dramatic',
       narrationStylePrompt: '',
       outputFormat: 'mp3',
-      generateSubtitle: true,
       timelineEdits: {
         'sfx-0-0': { startUnit: 12, durationUnits: 48, volume: 0.35 },
       },
@@ -104,11 +103,10 @@ describe('audiobook script editor utils', () => {
       narrationStyle: 'custom',
       narrationStylePrompt: '  克制、冷静  ',
       outputFormat: 'm4b',
-      generateSubtitle: false,
     })).toEqual({
       tts_model: 'cosyvoice-v3.5-plus',
       output_format: 'm4b',
-      generate_subtitle: false,
+      generate_subtitle: true,
     })
 
     expect(buildGenerateAudioFromScriptPayload({
@@ -117,7 +115,6 @@ describe('audiobook script editor utils', () => {
       narrationStyle: 'documentary',
       narrationStylePrompt: '这段只应由 custom 使用',
       outputFormat: 'wav',
-      generateSubtitle: true,
     })).toEqual({
       chapter_ids: [9],
       tts_model: 'qwen3-tts-instruct-flash',

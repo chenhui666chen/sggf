@@ -200,6 +200,7 @@ class TTSCost:
             "api_calls_scope": "usable_audio_outputs_only",
             "failed_segments": self.failed_segments,
             "failed_characters": self.failed_characters,
+            "estimated_cost_yuan": round(self.estimated_cost, 6),
             "estimated_cost": f"¥{self.estimated_cost:.2f}",
             "estimated_cost_scope": self.cost_scope,
             "provider_billing_note": self.provider_billing_note,

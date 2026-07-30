@@ -111,6 +111,7 @@ class AudioMixer:
         enable_silence_trim: bool = True,
         silence_trim_threshold: int = -40,  # dBFS，静音检测阈值
         silence_trim_min_silence: int = 100,  # 最小静音长度（ms）
+        silence_trim_keep_tail_ms: int = 250,  # 尾部保留的韵尾缓冲（ms），避免尾字被切
         enable_internal_silence_limit: bool = True,
         max_internal_silence_ms: int = 2500,  # 单段内部最长静音，避免 TTS 异常拖长
         # 🆕 新增：响度标准化参数
@@ -130,6 +131,7 @@ class AudioMixer:
         self.enable_silence_trim = enable_silence_trim
         self.silence_trim_threshold = silence_trim_threshold
         self.silence_trim_min_silence = silence_trim_min_silence
+        self.silence_trim_keep_tail_ms = silence_trim_keep_tail_ms
         self.enable_internal_silence_limit = enable_internal_silence_limit
         self.max_internal_silence_ms = max_internal_silence_ms
 
@@ -558,12 +560,16 @@ class AudioMixer:
                     trimmed_end = len(audio) - i
                     break
             
-            if trimmed_end > 0:
-                audio = audio[:len(audio) - trimmed_end]
+            # 保留韵尾缓冲：中文尾字的气声/自然衰减常低于阈值，若紧贴最后一个
+            # 响音块切断，会产生"最后一个字没吐完就被截断"的听感，只剪超出部分
+            keep_tail = max(0, int(self.silence_trim_keep_tail_ms or 0))
+            cut_end = max(0, trimmed_end - keep_tail)
+            if cut_end > 0:
+                audio = audio[:len(audio) - cut_end]
 
             if len(audio) > 0:
                 logger.debug(
-                    f"✂️ 静音修剪完成: 原始{len(audio) + trimmed + trimmed_end}ms -> "
+                    f"✂️ 静音修剪完成: 原始{len(audio) + trimmed + cut_end}ms -> "
                     f"修剪后{len(audio)}ms"
                 )
             return audio

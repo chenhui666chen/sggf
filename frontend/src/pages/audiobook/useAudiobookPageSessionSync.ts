@@ -58,8 +58,6 @@ interface UseAudiobookPageSessionSyncParams {
   setNarrationStylePrompt: Dispatch<SetStateAction<string>>
   outputFormat: AudioOutputFormat
   setOutputFormat: Dispatch<SetStateAction<AudioOutputFormat>>
-  generateSubtitle: boolean
-  setGenerateSubtitle: Dispatch<SetStateAction<boolean>>
   scriptReviewDialogOpen: boolean
   setScriptReviewDialogOpen: Dispatch<SetStateAction<boolean>>
   scriptReviewData: ScriptReviewDialogData | null
@@ -123,8 +121,6 @@ export const useAudiobookPageSessionSync = ({
   setNarrationStylePrompt,
   outputFormat,
   setOutputFormat,
-  generateSubtitle,
-  setGenerateSubtitle,
   scriptReviewDialogOpen,
   setScriptReviewDialogOpen,
   scriptReviewData,
@@ -199,7 +195,6 @@ export const useAudiobookPageSessionSync = ({
     setNarrationStyle(normalizeNarrationStyleValue(savedPageSession.narrationStyle))
     setNarrationStylePrompt(savedPageSession.narrationStylePrompt || '')
     setOutputFormat(savedPageSession.outputFormat || 'mp3')
-    setGenerateSubtitle(savedPageSession.generateSubtitle !== false)
     setCloneRecordDialogOpen(Boolean(savedPageSession.cloneRecordDialogOpen))
     setCloneName(savedPageSession.cloneName || '')
     setCloneUrl(savedPageSession.cloneUrl || '')
@@ -222,7 +217,6 @@ export const useAudiobookPageSessionSync = ({
     setNarrationStyle,
     setNarrationStylePrompt,
     setOutputFormat,
-    setGenerateSubtitle,
     setCloneRecordDialogOpen,
     setCloneName,
     setCloneUrl,
@@ -356,7 +350,6 @@ export const useAudiobookPageSessionSync = ({
       narrationStyle,
       narrationStylePrompt,
       outputFormat,
-      generateSubtitle,
       scriptReviewDialogOpen,
       scriptReviewData,
       scriptReviewSelectedIssueIndex,
@@ -409,7 +402,6 @@ export const useAudiobookPageSessionSync = ({
     narrationStyle,
     narrationStylePrompt,
     outputFormat,
-    generateSubtitle,
     scriptReviewDialogOpen,
     scriptReviewData,
     scriptReviewSelectedIssueIndex,

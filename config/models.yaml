@@ -1772,6 +1772,16 @@ models:
   quality_metrics:
     overall_score: 8.0
     prompt_adherence: 0.8
+  cost_profile:
+    unit: per_10000_characters
+    price: 0.8
+    currency: CNY
+    pricing_status: public_postpaid
+    pricing_basis: public_list_price
+    source: alibaba_model_studio_public_price_2026-07-22
+    custom_voice_pricing:
+      creation_yuan: 0.01
+      applies_to_current_runtime: false
   avg_latency_seconds: 4.0
   summary: 项目默认使用的 TTS 模型。阿里云百炼文档将 Qwen3-TTS Instruct Flash 定位为高吞吐、预设音色丰富且支持自然语言 instructions 的语音合成路径。
   recommended_scenarios:
@@ -2004,6 +2014,15 @@ models:
   quality_metrics:
     overall_score: 8.8
     style_accuracy: 0.88
+  cost_profile:
+    unit: per_10000_characters
+    price: 1.5
+    currency: CNY
+    pricing_status: public_postpaid
+    pricing_basis: public_list_price
+    source: alibaba_model_studio_public_price_2026-07-22
+    custom_voice_pricing:
+      creation_yuan: 0.0
   avg_latency_seconds: 7.0
   summary: 有声书子系统中使用的高表现力 TTS 与语音克隆/设计选项。CosyVoice v3.5 Plus 支持 instruction 控制，但不提供系统音色，
     必须使用复刻或设计得到的 voice_id 才能进行合成。
@@ -2187,6 +2206,13 @@ models:
     - mp3
   quality_metrics:
     overall_score: 0.0
+  cost_profile:
+    unit: per_10000_characters
+    price: 0.0
+    currency: CNY
+    pricing_status: limited_time_free
+    pricing_basis: public_list_price
+    source: xiaomi_mimo_limited_time_free_2026-07-22
   avg_latency_seconds: 0.0
   summary: 小米 MiMo-V2.5-TTS 预置音色语音合成模型，官方资料确认支持自然语言风格指令、导演模式、音频标签、唱歌模式和低延迟流式输出；项目已接入 payload 构建，真实接口仍待使用 MIMO_API_KEY 端到端验证。
   recommended_scenarios:
@@ -2329,6 +2355,13 @@ models:
     stream_behavior: 兼容模式，仅在推理完成后以流式格式返回一次结果
   quality_metrics:
     overall_score: 0.0
+  cost_profile:
+    unit: per_10000_characters
+    price: 0.0
+    currency: CNY
+    pricing_status: limited_time_free
+    pricing_basis: public_list_price
+    source: xiaomi_mimo_limited_time_free_2026-07-22
   avg_latency_seconds: 0.0
   summary: 小米 MiMo-V2.5-TTS 文本音色设计模型，user 消息必填并作为 voice design prompt；不支持唱歌、预置音色或音色复刻，真实接口仍待 MIMO_API_KEY 端到端验证。
   recommended_scenarios:
@@ -2413,6 +2446,13 @@ models:
     stream_behavior: 兼容模式，仅在推理完成后以流式格式返回一次结果
   quality_metrics:
     overall_score: 0.0
+  cost_profile:
+    unit: per_10000_characters
+    price: 0.0
+    currency: CNY
+    pricing_status: limited_time_free
+    pricing_basis: public_list_price
+    source: xiaomi_mimo_limited_time_free_2026-07-22
   avg_latency_seconds: 0.0
   summary: 小米 MiMo-V2.5-TTS 音色复刻模型，audio.voice 需传入带 MIME 前缀的 base64 音频样本；不支持唱歌、预置音色或音色设计，真实接口仍待 MIMO_API_KEY 端到端验证。
   recommended_scenarios:
@@ -2507,7 +2547,12 @@ models:
     unit: per_10000_characters
     price: 5.8
     currency: CNY
+    pricing_status: public_postpaid
+    pricing_basis: public_list_price
     source: https://platform.stepfun.com/docs/zh/guides/models/stepaudio-2.5-tts
+    custom_voice_pricing:
+      preview_price_per_10000_characters: 5.8
+      formal_clone_success_yuan: 9.9
   avg_latency_seconds: 0.0
   summary: StepAudio 2.5 TTS 是阶跃星辰的语境感知语音合成模型，支持 Global Context 全局语境、Inline Context 文中语境和 Zero-shot 音色复刻；项目已接入非流式 /v1/audio/speech 合成链路，真实 STEP_API_KEY 中文与英文基础试听均已通过，早前中文失败已确认为本地脚本编码问题。
   recommended_scenarios:
@@ -2786,7 +2831,13 @@ models:
     unit: per_10000_characters
     price: 2.0
     currency: CNY
+    pricing_status: public_postpaid
+    pricing_basis: public_list_price
     source: https://help.aliyun.com/zh/model-studio/billing-for-model-studio
+    custom_voice_pricing:
+      clone_request_yuan: 0.0
+      preview_price_per_10000_characters: 2.0
+      first_formal_use_yuan: 9.9
   avg_latency_seconds: 2.0
   summary: MiniMax 新一代语音合成模型 Turbo 版本，响应速度快，适合对延迟敏感的场景。
   recommended_scenarios:
@@ -2852,8 +2903,13 @@ models:
     unit: per_10000_characters
     price: 3.5
     currency: CNY
+    pricing_status: public_postpaid
+    pricing_basis: public_list_price
     source: https://help.aliyun.com/zh/model-studio/billing-for-model-studio
-    note: "音色复刻首次使用额外收取 9.9 元"
+    custom_voice_pricing:
+      clone_request_yuan: 0.0
+      preview_price_per_10000_characters: 3.5
+      first_formal_use_yuan: 9.9
   avg_latency_seconds: 3.5
   summary: MiniMax 新一代语音合成模型 HD 版本，音质更优，适合对音质要求高的场景。
   recommended_scenarios:
@@ -7184,9 +7240,15 @@ models:
     prompt_adherence: 9.3
   cost_profile:
     unit: per_10000_characters
-    price: 5.0
+    price: 3.0
     currency: CNY
-    source: user_provided_product_info
+    pricing_status: public_postpaid
+    pricing_basis: public_list_price
+    source: volcengine_public_postpaid_2026-07-22
+    custom_voice_pricing:
+      postpaid_slot_first_formal_use_yuan: 138.0
+      preview_price_per_10000_characters: 3.0
+      unused_preview_retention_days: 7
   avg_latency_seconds: 0.0
   summary: 豆包语音合成 2.0 高表现力版面向 AI 交互、听书、内容生产和客服场景，重点增强拟人感、情感演绎和文本指令控制；有声小说链路已通过非流式 Volcengine V3 基础试听验证，双向流式 WebSocket 协议已按 PDF 建档，待后续实时播放链路扩展。
   recommended_scenarios:
@@ -7613,6 +7675,23 @@ models:
     confidence: high
   constraints:
     request_timeout_seconds: 300
+    max_duration_seconds: 120
+    max_prompt_chars: 3000
+    max_audio_references: 3
+    max_reference_duration_seconds: 30
+    max_reference_size_mb: 10
+    supported_formats:
+    - wav
+    - mp3
+    - pcm
+    - ogg_opus
+    supported_sample_rates:
+    - 8000
+    - 16000
+    - 24000
+    - 32000
+    - 44100
+    - 48000
     verified_formats:
     - mp3
     verified_sample_rates:
@@ -7627,6 +7706,14 @@ models:
     feature_completeness: 0.95
     prompt_controllability: 0.90
     multi_element_audio: 0.95
+  cost_profile:
+    unit: per_second
+    price: 0.0166666667
+    currency: CNY
+    pricing_status: public_postpaid
+    pricing_basis: public_list_price
+    price_per_minute: 1.0
+    source: volcengine_public_postpaid_2026-07-22
   avg_latency_seconds: 30.0
   summary: 豆包音频生成模型 1.0 可依据一段自然语言描述生成完整场景音频，在单次生成中组合多角色对白、环境声、事件音效和配乐，并支持引用指定说话人。
   recommended_scenarios:
@@ -7646,7 +7733,10 @@ models:
   - 复用火山方舟 DOUBAO_API_KEY，通过 X-Api-Key 请求头认证；VOLCENGINE_OPEN_SPEECH_API_KEY 可作为专用覆盖项
   - 请求主体使用 text_prompt，不是常规 TTS 接口的 text 字段
   - references 为可选数组，每项可通过 speaker 指定参考说话人
-  - 成功响应返回 url、duration 和 original_duration
+  - speaker、audio_data、audio_url 三者互斥；最多三条音频参考，每条最长 30 秒且不超过 10 MB
+  - 成功响应可返回 Base64 audio、两小时有效 url、duration、original_duration 和 subtitle
+  - original_duration 是供应商计费时长；开启 enable_subtitle 后 subtitle 包含句级和字词级毫秒时间戳
+  - 请求通过 X-Api-Request-Id 传入客户端追踪 ID，响应通过 X-Tt-Logid 返回服务端请求标识
   - 建议超时设置为 300 秒，并由业务层下载响应 URL 对应的音频文件
   documentation_url: https://docs.volcengine.com/docs/6561/2550782?lang=zh
   source_urls:
@@ -7679,11 +7769,18 @@ models:
         pitch_rate: 0
         speech_rate: 0
         loudness_rate: 0
+        enable_subtitle: true
       watermark: object_optional
+    response_headers:
+      request_id: X-Tt-Logid
     response_format:
+      code: integer
+      message: string
+      audio: base64_string_optional
       url: string
       duration: number
       original_duration: number
+      subtitle: object_optional
   detailed_specs:
     audio_generation:
       prompt_language: natural_language

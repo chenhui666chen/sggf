@@ -32,8 +32,11 @@ class AudiobookScriptAgentBase:
             raise ValueError("AudiobookScriptAgent必须提供llm_client参数")
         self.llm_client = llm_client
         self.tts_model = tts_model
+        self.audio_engine_mode = "legacy_stems"
         self.strategy = strategy
         self.last_script_review: Optional[Dict[str, Any]] = None
+        # 最近一次转化的降级统计（LLM转化失败回退原文旁白的批次）
+        self.last_transform_degradation: Optional[Dict[str, Any]] = None
     
     async def adapt_chapter(
         self,
@@ -70,6 +73,7 @@ class AudiobookScriptAgentBase:
             logger.info(f"   角色档案数量: {len(character_profiles)}")
 
         audio_adaptation_brief = format_audio_adaptation_brief(adaptation_context)
+        self.last_transform_degradation = None
         
         def report_progress(progress: float, metrics: Optional[Dict[str, Any]] = None) -> None:
             if not progress_callback:
@@ -124,6 +128,7 @@ class AudiobookScriptAgentBase:
                 self.llm_client,
                 script_segments,
                 source_text=chapter_content,
+                audio_engine_mode=self.audio_engine_mode,
             )
             self.last_script_review = review_result.report
             if review_result.report.get("applied"):

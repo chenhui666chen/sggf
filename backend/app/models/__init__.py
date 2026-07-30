@@ -19,6 +19,10 @@ from .user_asset_record import UserAssetRecord
 from .generation_feedback import GenerationFeedback
 from .audio_library_asset import AudioLibraryAsset
 from .audio_library_asset_rating import AudioLibraryAssetRating
+from .voice_reference_asset import VoiceReferenceAsset
+from .voice_asset_billing_ledger import VoiceAssetBillingLedger
+from .voice_pool_publication import VoicePoolPublication
+from .voice_pool_rating import VoicePoolRating
 
 __all__ = [
     "User",
@@ -58,4 +62,8 @@ __all__ = [
     "GenerationFeedback",
     "AudioLibraryAsset",
     "AudioLibraryAssetRating",
+    "VoiceReferenceAsset",
+    "VoiceAssetBillingLedger",
+    "VoicePoolPublication",
+    "VoicePoolRating",
 ]

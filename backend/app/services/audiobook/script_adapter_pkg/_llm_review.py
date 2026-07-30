@@ -9,6 +9,7 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence
 
 from app.services.audiobook.llm_client import call_audiobook_llm_async
 from app.services.audiobook.llm_json import LLMJsonParseError, parse_llm_json_array
+from app.services.audiobook.script_render_mode import build_script_review_engine_guidance
 
 from ._dataclasses import ScriptSegment
 from ._segment_validation import NARRATOR, build_script_segments
@@ -53,6 +54,7 @@ async def review_script_segments_with_llm(
     script_segments: Sequence[ScriptSegment],
     *,
     source_text: str = "",
+    audio_engine_mode: str = "legacy_stems",
     batch_size: int = DEFAULT_REVIEW_BATCH_SIZE,
     min_text_coverage: float = DEFAULT_MIN_TEXT_COVERAGE,
 ) -> ScriptLLMReviewResult:
@@ -97,6 +99,7 @@ async def review_script_segments_with_llm(
                 source_text=source_text,
                 previous_context=_build_neighbor_context(original_segments[max(0, batch_start - 2):batch_start]),
                 next_context=_build_neighbor_context(original_segments[batch_end:batch_end + 2]),
+                audio_engine_mode=audio_engine_mode,
             )
             coverage_ratio = calculate_text_coverage(batch, reviewed_batch)
             batch_report["coverage_ratio"] = coverage_ratio
@@ -152,6 +155,7 @@ async def _review_batch(
     source_text: str = "",
     previous_context: str = "",
     next_context: str = "",
+    audio_engine_mode: str = "legacy_stems",
 ) -> List[ScriptSegment]:
     payload = [_segment_to_payload(segment, index=index) for index, segment in enumerate(batch)]
     payload_json = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
@@ -162,6 +166,7 @@ async def _review_batch(
         source_text=source_text,
         previous_context=previous_context,
         next_context=next_context,
+        audio_engine_mode=audio_engine_mode,
     )
     max_tokens = _estimate_review_max_tokens(payload_json)
     timeout = _estimate_review_timeout(max_tokens)
@@ -205,7 +210,9 @@ def _build_review_prompt(
     source_text: str = "",
     previous_context: str = "",
     next_context: str = "",
+    audio_engine_mode: str = "legacy_stems",
 ) -> str:
+    engine_review_block = build_script_review_engine_guidance(audio_engine_mode)
     source_block = ""
     if source_text:
         source_block = (
@@ -235,6 +242,8 @@ def _build_review_prompt(
 
 {source_block}
 {previous_context_block}{next_context_block}
+{engine_review_block}
+
 输出要求：
 - 只返回 JSON 对象，格式为 {{"segments": [ ... ]}}。
 - 每个 segment 尽量保留输入字段：type、text、speaker、emotion、performance_notes、pause_before、pause_after、voice_params、instruct_emotion、instruct_scene、instruct_role、instruct_identity、sound_effects、music_cue、sound_effects_simple、music_cue_simple、original_text、adaptation_reason。

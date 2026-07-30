@@ -33,7 +33,6 @@ export const buildCreateAudiobookProjectPayload = ({
   voiceConfig,
   ttsModel,
   outputFormat,
-  generateSubtitle,
 }: {
   projectId: number
   chapterIds: readonly number[]
@@ -43,7 +42,6 @@ export const buildCreateAudiobookProjectPayload = ({
   narrationStyle: NarrationStyleId
   narrationStylePrompt: string
   outputFormat: AudioOutputFormat
-  generateSubtitle: boolean
 }): CreateAudiobookProjectPayload => ({
   project_id: projectId,
   chapter_ids: [...chapterIds],
@@ -52,7 +50,7 @@ export const buildCreateAudiobookProjectPayload = ({
   voice_config: voiceConfig,
   tts_model: ttsModel,
   output_format: outputFormat,
-  generate_subtitle: generateSubtitle,
+  generate_subtitle: true,
   generation_mode: 'script_only',
   force_regenerate_script: true,
 })

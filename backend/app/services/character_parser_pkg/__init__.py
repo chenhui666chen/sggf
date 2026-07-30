@@ -16,6 +16,7 @@ from ._utils import (
     _build_mainline_binding_text,
     _merge_parsed_character,
     _build_personality_anchor_text,
+    _extract_prefixed_character_value,
 )
 from ._dataclasses import ParsedCharacter
 from ._parser import CharacterTextParser, has_parseable_character_cards
@@ -37,6 +38,7 @@ __all__ = [
     "_build_mainline_binding_text",
     "_merge_parsed_character",
     "_build_personality_anchor_text",
+    "_extract_prefixed_character_value",
     "ParsedCharacter",
     "CharacterTextParser",
     "has_parseable_character_cards",

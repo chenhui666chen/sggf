@@ -27,6 +27,7 @@ from app.services.audiobook.task_support import (
     build_run_checkpoint_document as _build_run_checkpoint_document,
     enqueue_audiobook_task as _enqueue_audiobook_task,
     ensure_audiobook_points_precheck_passed as _ensure_audiobook_points_precheck_passed,
+    resolve_audiobook_billing_pricing_context as _resolve_audiobook_billing_pricing_context,
     safe_record_audiobook_billing_freeze as _safe_record_audiobook_billing_freeze,
 )
 from app.services.audiobook.task_trace import build_audiobook_trace_context
@@ -169,6 +170,10 @@ async def resume_chapter_generation(
 
     resume_task_type = str(checkpoint_payload.get("resume_task_type") or "full").strip().lower()
     tts_model = normalize_audiobook_tts_model(checkpoint_payload.get("tts_model"))
+    billing_context = _resolve_audiobook_billing_pricing_context(
+        project=project,
+        tts_pricing_key=tts_model,
+    )
     output_format = checkpoint_payload.get("output_format")
     narration_style = checkpoint_payload.get("narration_style")
     narration_style_prompt = checkpoint_payload.get("narration_style_prompt")
@@ -182,6 +187,7 @@ async def resume_chapter_generation(
             project_title=project.title,
             chapter_ids=[chapter_id],
             tts_provider=tts_model,
+            audio_engine_mode=billing_context.audio_engine_mode,
         )
         _ensure_audiobook_points_precheck_passed(precheck)
 
@@ -251,7 +257,8 @@ async def resume_chapter_generation(
             audiobook_project_id=audiobook_project_id,
             chapter_ids=[chapter_id],
             raw_request=raw_request,
-            tts_pricing_key=tts_model,
+            tts_pricing_key=billing_context.pricing_key,
+            estimated_yuan_override=precheck.estimated_yuan,
             trace_context=build_audiobook_trace_context(
                 celery_task_id=str(async_result.id),
                 task_type=resume_task_type,

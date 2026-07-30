@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import {
   Alert, Box, Button, Chip, CircularProgress, Divider, FormControl, IconButton,
   InputLabel, LinearProgress, MenuItem, Paper, Rating, Select, Stack, TextField,
@@ -10,6 +10,8 @@ import PlayArrowIcon from '@mui/icons-material/PlayArrow'
 import SaveIcon from '@mui/icons-material/Save'
 import ScienceIcon from '@mui/icons-material/Science'
 
+import SeedSceneTestPanel, { type LatestTtsPreviewReference } from './SeedSceneTestPanel'
+import SeedSceneBlindReviewPanel from './SeedSceneBlindReviewPanel'
 import {
   apiClient,
   extractApiErrorMessage,
@@ -134,8 +136,12 @@ const ReviewEditor = ({
 )
 
 const TtsPromptTestPage = () => {
+  const [searchParams] = useSearchParams()
+  const blindBatchId = searchParams.get('blind_batch_id')?.trim() || ''
   const navigate = useNavigate()
   const audioUrlRef = useRef<string | null>(null)
+  const [testMode, setTestMode] = useState<'tts' | 'seed_scene'>('tts')
+  const [latestTtsPreview, setLatestTtsPreview] = useState<LatestTtsPreviewReference | null>(null)
   const [models, setModels] = useState<TtsPromptTestModel[]>([])
   const [selectedModelId, setSelectedModelId] = useState('')
   const [selectedCaseId, setSelectedCaseId] = useState('')
@@ -252,6 +258,12 @@ const TtsPromptTestPage = () => {
         voice_id: selectedVoiceId,
       })
       replaceAudioUrl(createAudioUrl(data.audio_data_base64, data.audio_mime_type))
+      setLatestTtsPreview({
+        model: data.model,
+        voiceId: data.voice_id,
+        audioDataBase64: data.audio_data_base64,
+        audioMimeType: data.audio_mime_type,
+      })
       setPreviewSnapshot(data.provider_prompt_snapshot)
       setPreviewMeta([data.provider, data.provider_model, data.transport, `${Math.max(1, Math.round(data.audio_size_bytes / 1024))} KB`].filter(Boolean).join(' · '))
     } catch (requestError) {
@@ -283,30 +295,59 @@ const TtsPromptTestPage = () => {
     onSave: handleSaveReview,
   }
 
+  if (blindBatchId) {
+    return <SeedSceneBlindReviewPanel batchId={blindBatchId} />
+  }
+
   return (
     <Box sx={{ minHeight: '100vh', bgcolor: '#f3f5f7', color: '#1f2933' }}>
       <Box component="header" sx={{ bgcolor: '#263238', color: 'white', borderBottom: '3px solid #00a389' }}>
-        <Box sx={{ minHeight: 64, px: { xs: 2, md: 3 }, display: 'flex', alignItems: 'center', gap: 1.5 }}>
+        <Box sx={{ minHeight: 64, px: { xs: 2, md: 3 }, py: { xs: 1, sm: 0 }, display: 'flex', flexWrap: { xs: 'wrap', sm: 'nowrap' }, alignItems: 'center', gap: 1.5 }}>
           <Tooltip title="返回有声书项目"><IconButton color="inherit" onClick={() => navigate('/audiobook-dashboard')}><ArrowBackIcon /></IconButton></Tooltip>
           <ScienceIcon sx={{ color: '#52d6c2' }} />
           <Box sx={{ minWidth: 0, flex: 1 }}>
-            <Typography variant="h6" sx={{ fontWeight: 700 }}>TTS 提示词测试</Typography>
-            <Typography variant="caption" sx={{ color: 'rgba(255,255,255,0.72)' }}>{progress.reviewed}/{progress.total} 已评审</Typography>
+            <Typography variant="h6" sx={{ fontWeight: 700 }}>音频模型测试</Typography>
+            <Typography variant="caption" sx={{ color: 'rgba(255,255,255,0.72)' }}>
+              {testMode === 'tts' ? `${progress.reviewed}/${progress.total} 已评审` : 'Seed Audio 场景 A/B'}
+            </Typography>
           </Box>
-          <Box sx={{ width: { xs: 90, sm: 180 } }}><LinearProgress variant="determinate" value={progress.percent} color="success" /></Box>
+          <ToggleButtonGroup
+            exclusive
+            size="small"
+            value={testMode}
+            onChange={(_, value: 'tts' | 'seed_scene' | null) => { if (value) setTestMode(value) }}
+            sx={{
+              width: { xs: '100%', sm: 'auto' },
+              order: { xs: 3, sm: 0 },
+              bgcolor: 'rgba(255,255,255,0.1)',
+              '& .MuiToggleButton-root': { color: 'rgba(255,255,255,0.78)', borderColor: 'rgba(255,255,255,0.25)', px: 1.25 },
+              '& .MuiToggleButton-root:first-of-type': { flex: { xs: 1, sm: 'initial' } },
+              '& .MuiToggleButton-root:last-of-type': { flex: { xs: 1, sm: 'initial' } },
+              '& .Mui-selected': { color: '#102a27 !important', bgcolor: '#52d6c2 !important' },
+            }}
+          >
+            <ToggleButton value="tts">TTS 朗读</ToggleButton>
+            <ToggleButton value="seed_scene">Seed 场景</ToggleButton>
+          </ToggleButtonGroup>
+          {testMode === 'tts' && (
+            <Box sx={{ display: { xs: 'none', sm: 'block' }, width: 150 }}>
+              <LinearProgress variant="determinate" value={progress.percent} color="success" />
+            </Box>
+          )}
         </Box>
       </Box>
 
-      {loading ? (
-        <Box sx={{ minHeight: 420, display: 'grid', placeItems: 'center' }}><CircularProgress /></Box>
-      ) : error ? (
-        <Box sx={{ p: 3 }}><Alert severity="error">{error}</Alert></Box>
-      ) : (
-        <Box sx={{
-          display: 'grid',
-          gridTemplateColumns: { xs: '1fr', md: '260px minmax(380px, 1fr)', xl: '260px minmax(440px, 1fr) 390px' },
-          minHeight: 'calc(100vh - 67px)',
-        }}>
+      <Box sx={{ display: testMode === 'tts' ? 'block' : 'none' }}>
+        {loading ? (
+          <Box sx={{ minHeight: 420, display: 'grid', placeItems: 'center' }}><CircularProgress /></Box>
+        ) : error ? (
+          <Box sx={{ p: 3 }}><Alert severity="error">{error}</Alert></Box>
+        ) : (
+          <Box sx={{
+            display: 'grid',
+            gridTemplateColumns: { xs: '1fr', md: '260px minmax(380px, 1fr)', xl: '260px minmax(440px, 1fr) 390px' },
+            minHeight: 'calc(100vh - 67px)',
+          }}>
           <Box component="nav" sx={{ bgcolor: 'white', borderRight: { md: '1px solid #dce1e5' }, p: 2 }}>
             <Typography variant="overline" color="text.secondary">模型</Typography>
             <Stack spacing={0.75} sx={{ mt: 1 }}>
@@ -381,8 +422,12 @@ const TtsPromptTestPage = () => {
             <Divider sx={{ my: 2.5 }} />
             <ReviewEditor {...reviewEditorProps} />
           </Box>
-        </Box>
-      )}
+          </Box>
+        )}
+      </Box>
+      <Box sx={{ display: testMode === 'seed_scene' ? 'block' : 'none' }}>
+        <SeedSceneTestPanel latestTtsPreview={latestTtsPreview} />
+      </Box>
     </Box>
   )
 }

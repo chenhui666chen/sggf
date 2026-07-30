@@ -157,12 +157,28 @@ class ModelRegistry:
                             importlib.reload(loaded)
                     except Exception:
                         pass
-            config_path = Path(__file__).resolve().parent.parent / "config" / "models.yaml"
-            if config_path.exists():
+            # 解析 models.yaml 路径。部署形态不同：本地源码运行时 config 位于仓库根目录
+            # (<root>/config)，容器内 config 单独挂载在 /config，而 adapters 挂载在 /app/adapters，
+            # 因此需要按多候选依次探测，取第一个真实存在的路径。
+            here = Path(__file__).resolve()
+            config_candidates = []
+            env_config = os.getenv("MODELS_CONFIG_PATH")
+            if env_config:
+                config_candidates.append(Path(env_config))
+            config_candidates.append(here.parent.parent / "config" / "models.yaml")
+            if len(here.parents) > 2:
+                config_candidates.append(here.parents[2] / "config" / "models.yaml")
+            config_path = next((c for c in config_candidates if c.exists()), None)
+            if config_path is not None:
                 try:
                     self.load_from_yaml(str(config_path))
                 except Exception:
                     pass
+            else:
+                _logger.warning(
+                    "models.yaml not found in any candidate: %s",
+                    [str(c) for c in config_candidates],
+                )
             self._builtin_loaded = True
     
     def register(

@@ -22,6 +22,13 @@ export interface ChapterAudio {
   audio_path?: string | null
   script_status?: string | null
   has_script?: boolean
+  has_review?: boolean
+  duration?: number | null
+  file_size?: number | null
+  segment_count?: number | null
+  dialogue_count?: number | null
+  narration_count?: number | null
+  character_count?: number | null
   generation_time?: number | null
   tts_cost?: number | null
   prompt_audio_quality?: Record<string, unknown> | null
@@ -84,6 +91,7 @@ export type StageKey =
   | 'quality_review'
   | 'audio_prompt_review'
   | 'tts_synthesis'
+  | 'scene_rendering'
   | 'audio_mixing'
   | 'final_audio_review'
   | 'project_export'
@@ -140,6 +148,10 @@ export interface CharacterVoiceSetting {
   voiceDesignPrompt?: string
   mimoVoiceAssetId?: string
   stepaudioVoiceAssetId?: string
+  referenceSource?: 'user_private' | 'public_pool'
+  referenceAudioUrl?: string
+  voiceReferenceAssetId?: string
+  voicePoolPublicationId?: string
   source?: 'user' | 'ai_suggest' | string | null
 }
 
@@ -151,6 +163,8 @@ export interface AudioFxConfig {
   intelligent_balance?: boolean
   balance_strategy?: 'auto' | 'ducking' | 'sidechain' | 'none'
 }
+
+export type AudioEngineMode = 'legacy_stems' | 'seed_scene'
 
 export interface ProjectAudioConfig {
   characters: {
@@ -168,9 +182,16 @@ export interface ProjectAudioConfig {
     voice_design_prompt?: string | null
     mimo_voice_asset_id?: string | null
     stepaudio_voice_asset_id?: string | null
+    reference_source?: 'user_private' | 'public_pool' | null
+    reference_audio_url?: string | null
+    voice_reference_asset_id?: string | null
+    voice_pool_publication_id?: string | null
     source?: string | null
   }[]
   audio_fx?: AudioFxConfig | null
+  audio_engine_mode?: 'legacy_stems' | 'seed_scene' | 'auto'
+  // multilingual 变体暂不启用，仅开放 seed-audio-1.0。
+  seed_audio_model?: 'seed-audio-1.0'
 }
 
 export interface VoiceDefaultParams {
@@ -187,6 +208,7 @@ export interface VoicePreset {
   style?: string
   category?: string
   customType?: 'clone' | 'design'
+  provider?: string
   languages?: string[]
   description?: string
   recommended?: string[]
@@ -194,6 +216,11 @@ export interface VoicePreset {
   supportsInstruct?: boolean
   disabled?: boolean
   disabledReason?: string
+  sourceModel?: TtsModel
+  referenceSource?: 'user_private' | 'public_pool'
+  referenceAudioUrl?: string
+  voiceReferenceAssetId?: string
+  voicePoolPublicationId?: string
 }
 
 export interface VoiceCatalogMeta {
@@ -510,7 +537,6 @@ export interface AudiobookPageSessionState {
   narrationStyle?: NarrationStyleId
   narrationStylePrompt?: string
   outputFormat?: AudioOutputFormat
-  generateSubtitle?: boolean
   scriptReviewDialogOpen?: boolean
   scriptReviewData?: ScriptReviewDialogData | null
   scriptReviewSelectedIssueIndex?: number | null
@@ -543,7 +569,7 @@ export interface ScriptEditorDialogProps {
   data: ScriptEditorStateData | null
   onClose: () => void
   onChangeSegmentText: (index: number, value: string) => void
-  onSaveScript: (options: { nextStatus?: 'reviewed' | 'approved'; generateAudio?: boolean }) => void
+  onSaveScript: (options: { nextStatus?: 'reviewed' | 'approved' }) => void
   onPreviewSegmentAudio: (
     index: number,
     segment: ScriptSegment,

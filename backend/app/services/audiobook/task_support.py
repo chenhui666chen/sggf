@@ -5,7 +5,7 @@ import json
 import logging
 from uuid import uuid4
 from datetime import datetime, timedelta, timezone
-from dataclasses import asdict, is_dataclass
+from dataclasses import asdict, dataclass, is_dataclass
 from typing import Any, Callable, Dict, List, Optional, Protocol, Tuple
 
 from fastapi import HTTPException, status
@@ -16,7 +16,12 @@ from app.models.audiobook import ChapterAudio
 from app.models.audiobook_task import AudiobookTask
 from app.models.user import User
 from app.schemas.audiobook import AudiobookTaskStatus
+from app.services.audiobook.project_audio_config import (
+    get_audio_engine_mode,
+    parse_project_audio_config,
+)
 from app.services.audiobook.repository import AudiobookTaskRepository, ChapterAudioRunRepository
+from app.services.audiobook.scene_engine.scene_billing import SEED_AUDIO_MODEL
 from app.services.audiobook.temp_segment_store import extract_cached_segment_paths, temp_segment_asset_exists
 from app.services.points_task_precheck import build_task_points_precheck_error_detail
 from app.services.user_center_points_events import record_audiobook_billing_freeze
@@ -32,6 +37,32 @@ RESUME_RUN_TYPE_PRIORITY = {
 }
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class AudiobookBillingPricingContext:
+    audio_engine_mode: str
+    pricing_key: str
+
+
+def resolve_audiobook_billing_pricing_context(
+    *,
+    project: Any,
+    tts_pricing_key: str,
+) -> AudiobookBillingPricingContext:
+    config = parse_project_audio_config(
+        str(getattr(project, "audio_config", "") or "")
+    )
+    audio_engine_mode = get_audio_engine_mode(config)
+    pricing_key = (
+        SEED_AUDIO_MODEL
+        if audio_engine_mode == "seed_scene"
+        else str(tts_pricing_key or "").strip()
+    )
+    return AudiobookBillingPricingContext(
+        audio_engine_mode=audio_engine_mode,
+        pricing_key=pricing_key,
+    )
 
 
 class StageTracker(Protocol):
@@ -67,6 +98,7 @@ def safe_record_audiobook_billing_freeze(
     raw_request: Any,
     tts_pricing_key: str,
     trace_context: Optional[Dict[str, Any]] = None,
+    estimated_yuan_override: Optional[float] = None,
 ) -> None:
     try:
         payload = {
@@ -80,6 +112,8 @@ def safe_record_audiobook_billing_freeze(
         }
         if trace_context is not None:
             payload["extra_payload"] = trace_context
+        if estimated_yuan_override is not None:
+            payload["estimated_yuan_override"] = estimated_yuan_override
         record_audiobook_billing_freeze(**payload)
     except Exception as exc:
         logger.warning(
@@ -524,6 +558,11 @@ def build_run_checkpoint_document(
             elif key == "cached_audio_paths" and isinstance(value, dict):
                 checkpoint_document["cached_audio_paths"] = {
                     **dict(checkpoint_document.get("cached_audio_paths") or {}),
+                    **value,
+                }
+            elif key == "scene_checkpoints" and isinstance(value, dict):
+                checkpoint_document["scene_checkpoints"] = {
+                    **dict(checkpoint_document.get("scene_checkpoints") or {}),
                     **value,
                 }
             elif key in {"completed_segment_indices", "failed_segment_indices"} and isinstance(value, list):

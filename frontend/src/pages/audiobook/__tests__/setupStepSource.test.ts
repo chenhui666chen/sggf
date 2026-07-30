@@ -153,6 +153,9 @@ describe('Audiobook setup source guards', () => {
 
     expect(narrationAudioConfigPanelSource).not.toContain('NarrationStyleSelector')
     expect(narrationAudioConfigPanelSource).not.toContain('getNarrationStyles')
+    expect(narrationAudioConfigPanelSource).toContain('ToggleButtonGroup')
+    expect(narrationAudioConfigPanelSource).toContain('生成引擎')
+    expect(narrationAudioConfigPanelSource).toContain('场景生成')
     expect(narrationAudioConfigPanelSource).not.toContain('旁白风格')
     expect(audioFxConfigPanelSource).not.toContain('智能音量平衡')
     expect(audioFxConfigPanelSource).not.toContain('intelligent_balance')
@@ -161,6 +164,7 @@ describe('Audiobook setup source guards', () => {
     expect(audioFxConfigPanelSource).not.toContain('音效音量')
     expect(scriptEditorDialogSource).toContain('片段音量')
     expect(scriptEditorDialogSource).toContain('选中音频片段音量')
+    expect(setupStepSource).toContain('生成本章场景剧本')
   })
 
   it('uses a single-select locked chapter queue with regeneration actions', () => {

@@ -1,16 +1,9 @@
 import sys
 import os
-import importlib.util
 
-base = os.path.join(os.path.dirname(__file__), '..', 'app', 'services', 'audiobook')
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
-def load_module(name, path):
-    spec = importlib.util.spec_from_file_location(name, path)
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
-
-catalog = load_module("voice_catalog", os.path.join(base, "voice_catalog.py"))
+from app.services.audiobook import voice_catalog as catalog
 
 print("=== 测试模型列表 ===")
 VOICE_FILENAMES_BY_MODEL = catalog.VOICE_FILENAMES_BY_MODEL

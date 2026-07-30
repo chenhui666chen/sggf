@@ -296,6 +296,26 @@ export default function WorkflowControlPage() {
   // 🆕 保护机制：已有内容警告对话框
   const [showContentWarningDialog, setShowContentWarningDialog] = useState(false)
   const [existingChaptersCount, _setExistingChaptersCount] = useState(0)
+  const [freeQuota, setFreeQuota] = useState<{
+    remaining: number
+    resetAt: string
+    globalAvailable: boolean
+  } | null>(null)
+
+  useEffect(() => {
+    let active = true
+    apiClient.getFreeGenerationQuota().then((response) => {
+      if (!active || response.status < 200 || response.status >= 300) return
+      setFreeQuota({
+        remaining: response.data.remaining,
+        resetAt: response.data.reset_at,
+        globalAvailable: response.data.global_available,
+      })
+    }).catch(() => undefined)
+    return () => {
+      active = false
+    }
+  }, [])
 
   // 故事概念内容状态（仅用于显示，不再需要对话框）
   const [conceptContent, setConceptContent] = useState('')
@@ -1811,6 +1831,12 @@ export default function WorkflowControlPage() {
     handleGenerateNextChapter()
   }
 
+  // 🆕 免费生成下一章（服务端强制 qwen3.7-flash，每日限额）
+  const handleContinueNextChapterFree = () => {
+    setShowContentWarningDialog(false)
+    handleGenerateNextChapter('free')
+  }
+
   const handleStartWorkflow = async () => {
     if (!projectId || !requirement.trim()) {
       // 使用 Snackbar 显示错误提示（取代 alert）
@@ -2462,34 +2488,65 @@ export default function WorkflowControlPage() {
   }
 
   // 生成下一章（方案3：独立的章节生成工作流）
-  const handleGenerateNextChapter = async () => {
+  // 🆕 tier='free' 时走免费档（服务端强制 qwen3.7-flash，每日限额）
+  const handleGenerateNextChapter = async (tier: 'free' | 'standard' = 'standard') => {
     if (!projectId) return
 
     setGeneratingNextChapter(true)
 
     try {
-      const response = await apiClient.generateNextWorkflowChapter(Number(projectId), workflowGenerationModel)
+      const response = await apiClient.generateNextWorkflowChapter(
+        Number(projectId),
+        tier === 'free'
+          ? { generationTier: 'free' }
+          : { workflowGenerationModel, generationTier: 'standard' }
+      )
 
       if (response.status >= 200 && response.status < 300) {
         const data = response.data
 
-        // 后端返回: { task_id, status, message, next_chapter_number }
-        const { task_id, next_chapter_number } = data
+        // 后端返回: { task_id, status, message, next_chapter_number, remaining_quota?, quota_reset_at? }
+        const { task_id, next_chapter_number, remaining_quota } = data
+        if (tier === 'free' && typeof remaining_quota === 'number') {
+          setFreeQuota((current) => ({
+            remaining: remaining_quota,
+            resetAt: data.quota_reset_at || current?.resetAt || '',
+            globalAvailable: current?.globalAvailable ?? true,
+          }))
+        }
 
         // 🆕 使用 Redux action 设置任务状态
         dispatch(startGenerateNextChapter({ taskId: task_id, chapterNumber: next_chapter_number }))
         setIsGenerateNextChapterFlow(true)
 
-        setSnackbarMessage(`🚀 已开始生成第${next_chapter_number}章，请等待...`)
+        // 🆕 免费档展示剩余额度
+        const quotaSuffix = typeof remaining_quota === 'number' ? `（今日免费额度剩余 ${remaining_quota} 次）` : ''
+        setSnackbarMessage(`🚀 已开始生成第${next_chapter_number}章，请等待...${quotaSuffix}`)
         setSnackbarSeverity('info')
         setSnackbarOpen(true)
 
         // 注意：不再设置 setGeneratingNextChapter(false)，等待 WebSocket 完成事件
       } else {
         const errorData = response.data || {}
+        // 🆕 detail 可能是字符串（404/409/503）或对象（429 带剩余额度与重置时间）
+        const detail = errorData.detail
+        const detailMessage = typeof detail === 'string' ? detail : detail?.message
 
-        setSnackbarMessage(errorData.detail || errorData.error || '创建生成任务失败，请重试')
-        setSnackbarSeverity('error')
+        let message = detailMessage || errorData.error || '创建生成任务失败，请重试'
+        if (response.status === 429 && typeof detail === 'object' && detail?.reset_at) {
+          const resetTime = new Date(detail.reset_at)
+          const resetText = Number.isNaN(resetTime.getTime())
+            ? detail.reset_at
+            : resetTime.toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+          message = `${detailMessage || '今日免费生成额度已用完'}，${resetText} 重置`
+        } else if (response.status === 409) {
+          message = detailMessage || '该项目已有生成任务进行中，请等待完成后再试'
+        } else if (response.status === 503) {
+          message = detailMessage || '生成服务暂不可用，请稍后再试'
+        }
+
+        setSnackbarMessage(message)
+        setSnackbarSeverity(response.status === 429 ? 'warning' : 'error')
         setSnackbarOpen(true)
         setGeneratingNextChapter(false)
       }
@@ -3171,7 +3228,7 @@ export default function WorkflowControlPage() {
             </Button>
             <Button
               variant="outlined"
-              onClick={handleGenerateNextChapter}
+              onClick={() => handleGenerateNextChapter()}
               disabled={workflow.stages.iteration.status !== 'completed' || generatingNextChapter}
               startIcon={generatingNextChapter ? <CircularProgress size={20} /> : <NavigateNextIcon />}
             >
@@ -3245,6 +3302,29 @@ export default function WorkflowControlPage() {
                   <Typography variant="button">继续创作下一章</Typography>
                   <Typography variant="caption" sx={{ display: 'block', opacity: 0.8 }}>
                     基于现有内容，生成第 {existingChaptersCount + 1} 章（推荐）
+                  </Typography>
+                </Box>
+              </Button>
+            )}
+
+            {/* 🆕 免费生成入口：服务端强制 qwen3.7-flash，每日限额 */}
+            {existingChaptersCount > 0 && (
+              <Button
+                variant="outlined"
+                color="success"
+                onClick={handleContinueNextChapterFree}
+                startIcon={<AddIcon />}
+                disabled={generatingNextChapter || freeQuota?.remaining === 0 || freeQuota?.globalAvailable === false}
+                sx={{ justifyContent: 'flex-start', py: 1.5 }}
+              >
+                <Box sx={{ textAlign: 'left' }}>
+                  <Typography variant="button">免费生成下一章</Typography>
+                  <Typography variant="caption" sx={{ display: 'block', opacity: 0.8 }}>
+                    {freeQuota?.globalAvailable === false
+                      ? '今日免费发放量已用完'
+                      : freeQuota
+                        ? `使用免费模型生成第 ${existingChaptersCount + 1} 章，今日剩余 ${freeQuota.remaining} 章`
+                        : `使用免费模型生成第 ${existingChaptersCount + 1} 章，每日限 2 章`}
                   </Typography>
                 </Box>
               </Button>

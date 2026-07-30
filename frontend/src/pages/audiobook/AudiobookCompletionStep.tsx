@@ -9,11 +9,14 @@ import CheckIcon from '@mui/icons-material/CheckCircle'
 import HeadphonesIcon from '@mui/icons-material/Headphones'
 
 import AudiobookCompletionStats from './AudiobookCompletionStats'
+import AudiobookScriptCompletionStep from './AudiobookScriptCompletionStep'
 import ChapterAudioResults from './ChapterAudioResults'
 import ProjectExportActions from './ProjectExportActions'
 import PromptAudioReviewSummaryPanel from './PromptAudioReviewSummaryPanel'
+import { resolveAudiobookCompletionMode } from './completionViewUtils'
 import { audiobookButtonRowSx, audiobookButtonSx, audiobookColors } from './audiobookTheme'
 import type {
+  AudioEngineMode,
   AudiobookProjectDetail,
   Chapter,
   ChapterAudio,
@@ -24,6 +27,7 @@ import type {
 interface AudiobookCompletionStepProps {
   audiobookProject: AudiobookProjectDetail | null
   lastGenerationMode: 'full' | 'script_only'
+  audioEngineMode: AudioEngineMode
   hasChapterAudios: boolean
   browserPlayerLoading: boolean
   exportingProjectM4b: boolean
@@ -58,6 +62,7 @@ interface AudiobookCompletionStepProps {
 const AudiobookCompletionStep = ({
   audiobookProject,
   lastGenerationMode,
+  audioEngineMode,
   hasChapterAudios,
   browserPlayerLoading,
   exportingProjectM4b,
@@ -87,98 +92,113 @@ const AudiobookCompletionStep = ({
   onOpenScriptReviewFromApi,
   onGenerateApprovedChapterAudio,
   onCreateNewProject,
-}: AudiobookCompletionStepProps) => (
-  <Paper sx={{ p: 4, backgroundColor: audiobookColors.surfacePaper }}>
-    <Box sx={{ textAlign: 'center', mb: 3 }}>
-      <CheckIcon sx={{ fontSize: 80, color: audiobookColors.successMain, mb: 2 }} />
-      <Typography variant="h5" sx={{ mb: 2 }}>
-        生成完成！
-      </Typography>
-      <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-        {lastGenerationMode === 'script_only'
-          ? '剧本与评审已生成，接下来可以逐章审稿、修改剧本，再生成音频'
-          : '您的有声书已经准备好了'}
-      </Typography>
-    </Box>
+}: AudiobookCompletionStepProps) => {
+  const completionMode = resolveAudiobookCompletionMode({
+    requestedMode: lastGenerationMode,
+    chapterAudios: currentChapterAudios,
+  })
 
-    {audiobookProject && (
-      <AudiobookCompletionStats audiobookProject={audiobookProject} />
-    )}
-
-    <PromptAudioReviewSummaryPanel audiobookProjectId={audiobookProject?.id} />
-
-    <Box sx={audiobookButtonRowSx.centeredWrap}>
-      {hasChapterAudios && (
-        <Button
-          variant="contained"
-          startIcon={browserPlayerLoading ? <CircularProgress size={18} color="inherit" /> : <HeadphonesIcon />}
-          onClick={onOpenBrowserPlayer}
-          disabled={browserPlayerLoading}
-          sx={audiobookButtonSx.brandContained}
-        >
-          {browserPlayerLoading ? '加载播放器...' : '打开浏览器播放器'}
-        </Button>
-      )}
-
-      <ProjectExportActions
-        hasChapterAudios={hasChapterAudios}
-        completedChapters={audiobookProject?.completed_chapters}
-        exportingProjectM4b={exportingProjectM4b}
-        exportingProjectAudacity={exportingProjectAudacity}
-        hasActiveM4bExportTask={hasActiveM4bExportTask}
-        hasActiveAudacityExportTask={hasActiveAudacityExportTask}
-        onExportProjectM4b={onExportProjectM4b}
-        onExportProjectAudacity={onExportProjectAudacity}
+  if (completionMode === 'script_only') {
+    return (
+      <AudiobookScriptCompletionStep
+        audioEngineMode={audioEngineMode}
+        currentChapterAudios={currentChapterAudios}
+        chapters={chapters}
+        generating={generating}
+        hasScriptReview={hasScriptReview}
+        audiobookProjectId={audiobookProjectId}
+        onOpenScriptEditor={onOpenScriptEditor}
+        onOpenScriptReview={onOpenScriptReview}
+        onOpenScriptReviewFromApi={onOpenScriptReviewFromApi}
+        onGenerateApprovedChapterAudio={onGenerateApprovedChapterAudio}
+        onCreateNewProject={onCreateNewProject}
       />
+    )
+  }
 
-      {hasScriptReview && (
-        <Button
-          variant="outlined"
-          onClick={onOpenScriptReview}
-          sx={audiobookButtonSx.brandOutlined}
-        >
-          查看剧本评审
-        </Button>
-      )}
+  return (
+    <Paper sx={{ p: 4, backgroundColor: audiobookColors.surfacePaper }}>
+      <Box sx={{ textAlign: 'center', mb: 3 }}>
+        <CheckIcon sx={{ fontSize: 64, color: audiobookColors.successMain, mb: 1.5 }} />
+        <Typography variant="h5" sx={{ mb: 1 }}>
+          音频生成完成
+        </Typography>
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+          {audioEngineMode === 'seed_scene'
+            ? '场景音频已完成渲染，可以试听、验收或导出。'
+            : '章节音频已生成，可以试听、验收或导出。'}
+        </Typography>
+      </Box>
 
       {audiobookProject && (
-        <Button
-          variant="outlined"
-          onClick={onGenerateApprovedChapterAudio}
-          sx={audiobookButtonSx.successOutlined}
-        >
-          对已审批章节生成音频
-        </Button>
+        <AudiobookCompletionStats audiobookProject={audiobookProject} />
       )}
 
-      <Button
-        variant="contained"
-        onClick={onCreateNewProject}
-        sx={audiobookButtonSx.brandContained}
-      >
-        生成新项目
-      </Button>
-    </Box>
+      <PromptAudioReviewSummaryPanel audiobookProjectId={audiobookProject?.id} />
 
-    <ChapterAudioResults
-      chapterAudios={currentChapterAudios}
-      chapters={chapters}
-      playingChapter={playingChapter}
-      collectingChapterIds={collectingChapterIds}
-      resumeCheckpoints={resumeCheckpoints}
-      generating={generating}
-      resumingChapterId={resumingChapterId}
-      ttsModel={ttsModel}
-      projectId={projectId}
-      audiobookProjectId={audiobookProjectId}
-      onPlayAudio={onPlayAudio}
-      onDownloadAudio={onDownloadAudio}
-      onCollectChapterAudio={onCollectChapterAudio}
-      onOpenScriptEditor={onOpenScriptEditor}
-      onResumeChapterGeneration={onResumeChapterGeneration}
-      onOpenScriptReview={onOpenScriptReviewFromApi}
-    />
-  </Paper>
-)
+      <Box sx={audiobookButtonRowSx.centeredWrap}>
+        {hasChapterAudios && (
+          <Button
+            variant="contained"
+            startIcon={browserPlayerLoading ? <CircularProgress size={18} color="inherit" /> : <HeadphonesIcon />}
+            onClick={onOpenBrowserPlayer}
+            disabled={browserPlayerLoading}
+            sx={audiobookButtonSx.brandContained}
+          >
+            {browserPlayerLoading ? '加载播放器...' : '打开浏览器播放器'}
+          </Button>
+        )}
+
+        <ProjectExportActions
+          hasChapterAudios={hasChapterAudios}
+          completedChapters={audiobookProject?.completed_chapters}
+          exportingProjectM4b={exportingProjectM4b}
+          exportingProjectAudacity={exportingProjectAudacity}
+          hasActiveM4bExportTask={hasActiveM4bExportTask}
+          hasActiveAudacityExportTask={hasActiveAudacityExportTask}
+          onExportProjectM4b={onExportProjectM4b}
+          onExportProjectAudacity={onExportProjectAudacity}
+        />
+
+        {hasScriptReview && (
+          <Button
+            variant="outlined"
+            onClick={onOpenScriptReview}
+            sx={audiobookButtonSx.brandOutlined}
+          >
+            查看剧本评审
+          </Button>
+        )}
+
+        <Button
+          variant="contained"
+          onClick={onCreateNewProject}
+          sx={audiobookButtonSx.brandContained}
+        >
+          生成新项目
+        </Button>
+      </Box>
+
+      <ChapterAudioResults
+        chapterAudios={currentChapterAudios}
+        chapters={chapters}
+        playingChapter={playingChapter}
+        collectingChapterIds={collectingChapterIds}
+        resumeCheckpoints={resumeCheckpoints}
+        generating={generating}
+        resumingChapterId={resumingChapterId}
+        ttsModel={ttsModel}
+        projectId={projectId}
+        audiobookProjectId={audiobookProjectId}
+        onPlayAudio={onPlayAudio}
+        onDownloadAudio={onDownloadAudio}
+        onCollectChapterAudio={onCollectChapterAudio}
+        onOpenScriptEditor={onOpenScriptEditor}
+        onResumeChapterGeneration={onResumeChapterGeneration}
+        onOpenScriptReview={onOpenScriptReviewFromApi}
+      />
+    </Paper>
+  )
+}
 
 export default AudiobookCompletionStep

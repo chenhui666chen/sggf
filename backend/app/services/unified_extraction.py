@@ -11,6 +11,7 @@ logger = logging.getLogger(__name__)
 from typing import List, Dict, Any, Optional
 import os
 from core.langchain_bridge import create_model_llm
+from app.services.exact_model_guard import require_exact_model
 
 
 class UnifiedExtractionService:
@@ -21,6 +22,7 @@ class UnifiedExtractionService:
         chapter_title: str,
         chapter_content: str,
         project_id: int,
+        model: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         一次性从章节内容中提取所有信息
@@ -61,8 +63,8 @@ class UnifiedExtractionService:
             ]
         }
         """
-        # 创建LLM实例
-        model = (
+        # 创建LLM实例（🆕 调用方显式指定模型时优先，用于免费档锁定模型）
+        model = require_exact_model(model) or (
             os.getenv("UNIFIED_EXTRACTION_MODEL")
             or os.getenv("DEEPSEEK_MODEL")
             or os.getenv("MODEL_NAME")

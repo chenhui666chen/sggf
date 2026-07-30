@@ -246,7 +246,11 @@ class WorkflowWebSocketManager:
         }
         # 使用 audiobook_project_id 作为房间标识（前端可监听整个有声书项目）
         room = f'audiobook_{audiobook_project_id}'
-        await sio.emit('audiobook_progress', data, room=room)
+        try:
+            await sio.emit('audiobook_progress', data, room=room)
+        except Exception as exc:
+            # 进度推送属于旁路通知，失败（如 Celery 中事件循环已关闭）不应中断业务流程
+            logger.warning("⚠️ 有声书进度推送失败（忽略）: %s", exc)
     
     @staticmethod
     async def send_audiobook_chapter_complete(

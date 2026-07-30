@@ -22,7 +22,10 @@ from app.services.audiobook.repository import (
     CharacterRepository,
     ProjectRepository,
 )
-from app.services.audiobook.project_audio_runtime import resolve_project_audio_runtime_config
+from app.services.audiobook.project_audio_runtime import (
+    resolve_project_audio_runtime_config,
+    validate_project_voice_references,
+)
 from app.services.audiobook.chapter_character_scope import select_chapter_characters
 from app.services.audiobook.voice_auto_assignment import AutoVoiceAssignmentPool
 
@@ -110,8 +113,36 @@ class AudiobookAppService:
                 "voice_id": item.voice_id,
                 "tts_model": item.tts_model,
             }
+            reference_source = str(item.reference_source or "").strip().lower()
+            if reference_source:
+                mapping_item["reference_source"] = reference_source
+            if item.reference_audio_url:
+                mapping_item["reference_audio_url"] = item.reference_audio_url
+            if item.voice_reference_asset_id:
+                mapping_item["voice_reference_asset_id"] = item.voice_reference_asset_id
+            if item.voice_pool_publication_id:
+                mapping_item["voice_pool_publication_id"] = item.voice_pool_publication_id
 
             voice_mapping[item.character_name] = mapping_item
+
+        requires_reference_validation = any(
+            str(config.get("reference_source") or "").strip().lower()
+            in {"user_private", "public_pool"}
+            for config in voice_mapping.values()
+        )
+        if not requires_reference_validation:
+            return
+
+        try:
+            validate_project_voice_references(
+                self.db,
+                owner_user_id=int(self.current_user.id),
+                voice_mapping=voice_mapping,
+            )
+        except PermissionError as exc:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
     def _auto_assign_voices(
         self,

@@ -178,6 +178,17 @@ class ScriptPrepMixin:
 
             llm_script_review = getattr(self.script_adapter, "last_script_review", None)
             llm_script_review_summary = summarize_script_review_report(llm_script_review)
+            transform_degradation = getattr(self.script_adapter, "last_transform_degradation", None)
+            has_degraded_batches = bool(
+                isinstance(transform_degradation, dict)
+                and transform_degradation.get("degraded_batches")
+            )
+            if has_degraded_batches:
+                logger.warning(
+                    "⚠️ 剧本转化存在降级批次: %s/%s（已回退原文旁白，审核时请重点检查）",
+                    transform_degradation.get("degraded_batches"),
+                    transform_degradation.get("total_batches"),
+                )
             self._last_source_text_for_script_revision = chapter_content
             self._last_llm_script_review = llm_script_review
             script_stage_metrics = {
@@ -186,6 +197,8 @@ class ScriptPrepMixin:
             }
             if llm_script_review_summary:
                 script_stage_metrics["llm_script_review"] = llm_script_review_summary
+            if has_degraded_batches:
+                script_stage_metrics["transform_degradation"] = transform_degradation
 
             self.task_tracker.complete_stage(
                 task_id,
@@ -224,6 +237,7 @@ class ScriptPrepMixin:
                 preserve_user_config=True,
                 chapter_id=chapter_id,
                 audiobook_project_id=audiobook_project_id,
+                prepare_render_assets=False,
             )
 
             logger.info("   ✅并行设计完成")
@@ -288,6 +302,7 @@ class ScriptPrepMixin:
                     "auto_revision": auto_revision if auto_revision.get("applied") else None,
                     "quality_gate": auto_revision.get("quality_gate"),
                     "llm_script_review": llm_script_review,
+                    "transform_degradation": transform_degradation if has_degraded_batches else None,
                 }
 
                 issues_preview = quality_report["issues"][:20]
@@ -394,6 +409,7 @@ class ScriptPrepMixin:
                     },
                     "characters": len(character_list or []),
                     "llm_script_review": llm_script_review_summary,
+                    "transform_degradation": transform_degradation if has_degraded_batches else None,
                 },
                 "script_segments": output_segments,
                 "quality_report": quality_report,

@@ -570,12 +570,14 @@ const AudioLibraryBrowser = ({ open, onClose }: AudioLibraryBrowserProps) => {
         dry_run: false,
         confirm: true,
       })
+      setNotice('素材已删除')
       if (fileType === 'sfx') await loadSfx()
       else await loadMusic()
+      void loadStats()
     } catch {
-      /* ignore */
+      setNotice('素材删除失败，请稍后重试')
     }
-  }, [isAdmin, loadMusic, loadSfx])
+  }, [isAdmin, loadMusic, loadSfx, loadStats])
 
   return (
     <Dialog open={open} onClose={handleClose} maxWidth="lg" fullWidth>

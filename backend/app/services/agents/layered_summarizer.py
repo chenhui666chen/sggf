@@ -33,8 +33,8 @@ class LayeredSummarizer:
     DEFAULT_MODEL_LIMIT = 32000
     DEFAULT_TARGET_TOKENS = 2048
     # 分块摘要优先控制成本，归并摘要优先控制质量。
-    CHUNK_SUMMARY_MODEL = "qwen3.7-plus"
-    REDUCE_SUMMARY_MODEL = "qwen3.7-plus"
+    CHUNK_SUMMARY_MODEL = "qwen3.7-flash"
+    REDUCE_SUMMARY_MODEL = "qwen3.7-flash"
 
     # 模型选择只决定“最终任务用什么模型更合适”，上下文是否压缩由 mode 再决定
     MODEL_SELECTION_RULES = {

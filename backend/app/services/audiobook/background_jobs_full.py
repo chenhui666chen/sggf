@@ -23,7 +23,10 @@ from app.services.audiobook.background_jobs_shared import (
     settle_audiobook_project_billing,
 )
 from app.services.audiobook.chapter_character_scope import select_chapter_characters
-from app.services.audiobook.project_audio_runtime import resolve_project_audio_runtime_config
+from app.services.audiobook.project_audio_runtime import (
+    apply_scene_audio_runtime_to_engine,
+    resolve_project_audio_runtime_config,
+)
 from app.services.audiobook.task_support import (
     StageTracker,
     serialize_dataclass_to_dict,
@@ -43,6 +46,10 @@ def _apply_project_audio_effects(
         project,
         tts_model=tts_model,
         base_voice_mapping=audiobook_project.voice_mapping or {},
+    )
+    apply_scene_audio_runtime_to_engine(
+        engine=engine,
+        runtime_config=runtime_config,
     )
 
     if runtime_config.audio_fx:

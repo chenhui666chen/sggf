@@ -13,6 +13,7 @@ from ..script_adapter import AudiobookScriptAgent, ScriptSegment, ChapterStructu
 from ..voice_manager_factory import create_voice_manager
 from ..audio_mixer import AudioMixer
 from app.services.chapter_adaptation_assets import build_audio_adaptation_hint
+from app.services.audiobook.tts_cost_utils import parse_tts_cost_yuan
 from core.unified_media_runtime import create_tts_engine
 
 try:
@@ -118,7 +119,7 @@ class ProjectMixin:
         
         # 3. 汇总统计
         success_count = sum(1 for r in results if r["success"])
-        tts_stats = self.tts_engine.get_cost_stats()
+        tts_stats = self._aggregate_tts_cost_stats()
         
         summary = {
             "project_id": project_id,
@@ -278,12 +279,10 @@ class ProjectMixin:
                         
                         # 提取成本
                         tts_stats = result.get("stats", {}).get("tts_stats", {})
-                        cost_str = tts_stats.get("estimated_cost", "￥0.00")
-                        # 解析成本字符串（如 "￥0.12"）
-                        try:
-                            cost = float(cost_str.replace("￥", "").replace("$", ""))
-                        except Exception:
-                            cost = 0.0
+                        raw_cost = tts_stats.get("estimated_cost_yuan")
+                        if raw_cost is None:
+                            raw_cost = tts_stats.get("estimated_cost", "¥0.00")
+                        cost = parse_tts_cost_yuan(raw_cost) or 0.0
                         total_cost += cost
                         
                         # 📡 推送章节完成通知

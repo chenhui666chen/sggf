@@ -25,6 +25,7 @@ POINTS_PRICING_POLICY_OPERATING_MODULES: tuple[tuple[str, str], ...] = (
 )
 
 POINTS_PRICING_BASIS_OPTIONS = {"public_list_price", "standard_price_table"}
+PUBLIC_LIST_PRICE_LOCKED_MODULES = frozenset({"audiobook"})
 
 
 def _env_float(name: str, default: float) -> float:
@@ -134,6 +135,17 @@ class PointsPricingPolicyConfig:
             "margin_warning_rate": round(min(max(float(self.margin_warning_rate), 0.0), 1.0), 4),
             "negative_margin_block_enabled": bool(self.negative_margin_block_enabled),
         }
+
+
+def resolve_module_user_price_rate(
+    *,
+    pricing_config: PointsPricingPolicyConfig,
+    module_key: str,
+) -> float:
+    normalized_module_key = str(module_key or "").strip().lower()
+    if normalized_module_key in PUBLIC_LIST_PRICE_LOCKED_MODULES:
+        return 1.0
+    return max(float(pricing_config.user_price_rate), 0.0)
 
 
 @dataclass(frozen=True)
@@ -303,7 +315,10 @@ def build_points_business_settlement_snapshot(
     provider_key: str | None = None,
 ) -> PointsBusinessSettlementSnapshot:
     supplier_list_price_yuan = max(float(basis_yuan), 0.0)
-    user_billed_yuan = supplier_list_price_yuan * max(float(pricing_config.user_price_rate), 0.0)
+    user_billed_yuan = supplier_list_price_yuan * resolve_module_user_price_rate(
+        pricing_config=pricing_config,
+        module_key=module_key,
+    )
 
     supplier_discount_rate, supplier_discount_rate_source = resolve_provider_discount_rate(
         module_key=module_key,

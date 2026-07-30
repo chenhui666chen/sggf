@@ -24,6 +24,7 @@ from app.db.base import get_db
 from app.models.user import User
 from app.services.audiobook.ai_music import MusicGenerationRequest, MusicStyle, create_music_generator
 from app.services.points_usage_pricing import estimate_asset_studio_basis_yuan
+from adapters.volcengine.audio_generation import DEFAULT_AUDIO_CONFIG
 from core.model_catalog_runtime import get_model_catalog_runtime_index
 from core.model_resolution import normalize_model_id
 from core.unified_media_runtime import UnifiedMediaResult, media_runtime
@@ -127,13 +128,7 @@ async def generate_audio_asset(
                 adapter.generate,
                 prompt=cleaned_prompt,
                 references=references or None,
-                audio_config={
-                    "format": "mp3",
-                    "sample_rate": 48000,
-                    "pitch_rate": 0,
-                    "speech_rate": 0,
-                    "loudness_rate": 0,
-                },
+                audio_config=dict(DEFAULT_AUDIO_CONFIG),
                 watermark={},
             )
             if not result.success or not result.outputs:
