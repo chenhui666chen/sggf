@@ -1,0 +1,9 @@
+schema_version: 1
+module_path: shared_assets
+title: TTS 语音资产与预览语料
+scope:
+    - shared/
+source_files: []
+depends_on: []
+related_to:
+    - path: adapters_layer/cross_cutting_adapters

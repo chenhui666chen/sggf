@@ -1,0 +1,14 @@
+schema_version: 1
+module_path: adapters_layer/legacy_and_support
+title: 适配器兼容层与辅助工具（Legacy Bridge、运行时包装、内容安全、限流、提示词优化）
+scope:
+    - adapters/legacy_bridge.py
+    - adapters/legacy_runtime_wrappers.py
+    - adapters/content_safety_checker.py
+    - adapters/rate_limiter.py
+    - adapters/prompt_optimizer.py
+source_files: []
+depends_on: []
+related_to:
+    - path: adapters_layer/cross_cutting_adapters
+    - path: adapters_layer/shared_infrastructure

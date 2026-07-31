@@ -1,0 +1,10 @@
+schema_version: 1
+module_path: pipeline_processing
+title: DreamWeaver 视频生成流水线与自动质检
+scope:
+    - pipeline/
+source_files: []
+depends_on: []
+related_to:
+    - path: adapters_layer/shared_infrastructure
+    - path: agents_core/shared_agents

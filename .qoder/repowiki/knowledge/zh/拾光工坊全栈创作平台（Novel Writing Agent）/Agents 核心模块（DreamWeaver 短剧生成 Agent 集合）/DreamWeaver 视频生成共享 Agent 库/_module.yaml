@@ -1,0 +1,39 @@
+schema_version: 1
+module_path: agents_core/shared_agents
+title: DreamWeaver 视频生成共享 Agent 库
+scope:
+    - agents/asset_library.py
+    - agents/auditor.py
+    - agents/best_image_selector.py
+    - agents/camera_states.py
+    - agents/camera_tree.py
+    - agents/character_manager.py
+    - agents/cross_batch_audio_manager.py
+    - agents/dreamweaver.py
+    - agents/editor.py
+    - agents/high_performance_voice_consistency_manager.py
+    - agents/image_edit_utils.py
+    - agents/lipsync_manager.py
+    - agents/llm_client.py
+    - agents/optimized_audio_sync_manager.py
+    - agents/painter.py
+    - agents/performance_audio_sync_manager.py
+    - agents/performance_voice_consistency_manager.py
+    - agents/planner.py
+    - agents/prompt_fragments.py
+    - agents/reference_image_selector.py
+    - agents/scripter.py
+    - agents/semantic_asset_index.py
+    - agents/simple_audio_sync_manager.py
+    - agents/simple_character_manager.py
+    - agents/simple_voice_consistency_manager.py
+    - agents/sound_effect_manager.py
+    - agents/storyboarder.py
+    - agents/vlm_utils.py
+    - agents/voice_consistency_manager.py
+source_files: []
+depends_on: []
+related_to:
+    - path: adapters_layer/shared_infrastructure
+    - path: core_engine
+    - path: pipeline_processing

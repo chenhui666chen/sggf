@@ -1,0 +1,18 @@
+schema_version: 1
+module_path: adapters_layer/shared_infrastructure
+title: 模型适配器基础设施与注册中心
+scope:
+    - adapters/base.py
+    - adapters/_shared.py
+    - adapters/adapter_helpers.py
+    - adapters/registry.py
+source_files: []
+depends_on: []
+related_to:
+    - path: adapters_layer/cross_cutting_adapters
+    - path: adapters_layer/legacy_and_support
+    - path: agents_core/shared_agents
+    - path: config_files
+    - path: pipeline_processing
+    - path: scripts_tooling
+    - path: tests_root

@@ -1,0 +1,9 @@
+schema_version: 1
+module_path: schemas_common
+title: 统一模型适配器 Schema 定义
+scope:
+    - schemas/
+source_files: []
+depends_on: []
+related_to:
+    - path: core_engine

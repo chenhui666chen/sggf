@@ -1,0 +1,10 @@
+schema_version: 1
+module_path: tests_root
+title: 单元测试套件（Pytest）
+scope:
+    - tests/
+source_files: []
+depends_on: []
+related_to:
+    - path: adapters_layer/shared_infrastructure
+    - path: core_engine

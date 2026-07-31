@@ -1,0 +1,11 @@
+schema_version: 1
+module_path: infra_deploy
+title: 基础设施初始化与契约校验
+scope:
+    - postgres-init/
+    - ssl/
+    - .github/workflows/contracts.yml
+source_files: []
+depends_on: []
+related_to:
+    - path: docs_documentation

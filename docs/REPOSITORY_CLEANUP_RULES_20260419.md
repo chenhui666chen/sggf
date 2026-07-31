@@ -262,14 +262,21 @@ JSON/YAML 格式，也应按生成产物规则判断，不得仅凭扩展名默�
 - `backend/data/seed_scene_tests/`
 - `backend/data/audiobook_scene_runs/`
 - `backend/data/audio_library/music_cache/`
-- `backend/data/prompt_evolution/`
+- `backend/data/prompt_evolution/`（仅当确认是测试临时目录时处理；不得清理其中的运行历史）
 - `backend/backend/data/asset_studio_outputs/`
-- `data/prompt_evolution/`
+- `data/prompt_evolution/`（提示词进化运行数据，禁止清理）
 
 处理规则：
 
 - 新生成文件应通过 `.gitignore` 排除。
 - 本地文件可在确认后清理，但清理不是提交代码的前置条件。
+- **禁止删除或重置 `data/prompt_evolution/` 及其子目录。** 其中的
+  `evolution_history.json`、`best_prompts.json`、`approved_prompts.json`、
+  `model_config.json`、`model_performance.json`、经验报告、调度状态和实验账本
+  均属于用户运行数据，不是缓存或调试产物。清理仓库、删除未跟踪文件、切换分支
+  或执行批量清理前，必须将这些数据迁移到独立备份位置并获得明确确认。
+- 若文件损坏，应先复制原文件并记录校验值，再进行修复或隔离；不得以“乱码”、
+  “格式异常”或“当前任务无效”为理由直接删除整个数据目录。
 - 已被 Git 跟踪的文件不因新增忽略规则自动删除或取消跟踪；如需迁移，必须单独盘点消费者、
   备份与恢复方式，并作为独立变更确认。
 - 经审核作为固定测试夹具、授权素材、迁移种子或可复现实验基线的文件可以保留，但应放入

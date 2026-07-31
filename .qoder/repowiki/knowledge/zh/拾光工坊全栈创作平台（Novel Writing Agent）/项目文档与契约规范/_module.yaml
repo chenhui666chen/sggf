@@ -1,0 +1,9 @@
+schema_version: 1
+module_path: docs_documentation
+title: 项目文档与契约规范
+scope:
+    - docs/
+source_files: []
+depends_on: []
+related_to:
+    - path: infra_deploy

@@ -1,0 +1,15 @@
+schema_version: 1
+module_path: adapters_layer/cross_cutting_adapters
+title: 模型适配器层（兼容旧版与新版统一注册协议）
+scope:
+    - adapters/model_adapters.py
+    - adapters/new_models_adapters.py
+    - adapters/qwen_multimodal_adapter.py
+    - adapters/wan26_video_adapter.py
+    - adapters/wanx_adapter.py
+source_files: []
+depends_on: []
+related_to:
+    - path: adapters_layer/legacy_and_support
+    - path: adapters_layer/shared_infrastructure
+    - path: shared_assets

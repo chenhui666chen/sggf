@@ -1,0 +1,8 @@
+schema_version: 1
+module_path: adapters_layer
+title: 多模态模型适配器层
+scope:
+    - adapters/
+source_files: []
+depends_on: []
+related_to: []

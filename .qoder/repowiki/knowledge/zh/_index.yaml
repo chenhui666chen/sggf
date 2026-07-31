@@ -1,0 +1,285 @@
+# 知识卡导出索引文件
+schema_version: 1
+locale: zh-CN
+branch: main
+nodes_managed: true
+exported_at: "2026-07-31T17:59:19Z"
+modules:
+    "":
+        dir_name: 拾光工坊全栈创作平台（Novel Writing Agent）
+        title: 拾光工坊全栈创作平台（Novel Writing Agent）
+        scope:
+            - README.md
+            - .gitignore
+            - docker-compose.yml
+            - nginx.conf
+            - nginx-dev.conf
+            - nginx-prod.conf
+            - deploy_config.json
+            - start_backend.py
+            - agent_coordinator.py
+            - project_manager.py
+            - author_voice_system.py
+            - dialogue_authenticity_module.py
+            - split_agent_coordinator.py
+            - test_seed_tts_websocket.py
+            - .env.example
+            - .pyrightconfig.json
+            - AGENTS.md
+            - ALIYUN_GUIDE.md
+            - CONTENT_SAFETY_CHECKER.md
+            - DATABASE_MIGRATION_GUIDE.md
+            - DEPLOY_GUIDE.md
+            - FFMPEG_VIDEO_EDIT_GUIDE.md
+            - FORMATTING_USER_GUIDE.md
+            - HIERARCHY_USAGE_GUIDE.md
+            - JIANYING_MCP_GUIDE.md
+            - MULTI_AGENT_GUIDE.md
+            - MULTI_MODEL_REVIEW_GUIDE.md
+            - QUICK_START_GUIDE.md
+            - SEED_TTS_WEBSOCKET_IMPLEMENTATION.md
+            - SSL_AUTO_RENEW_GUIDE.md
+            - SSL_CERTIFICATE_GUIDE.md
+            - VECTOR_DATABASE_GUIDE.md
+            - alembic.ini
+            - algorithm_filing.txt
+            - algorithm_filing_full.txt
+            - config.py
+            - deploy_sync_improved.ps1
+            - deploy_unified.bat
+            - dev-kill.ps1
+            - dev.bat
+            - install.bat
+            - nginx.conf.http
+            - redis.conf
+            - setup_ssh_key.bat
+            - setup_ssh_key.ps1
+            - start_production.bat
+            - test_problematic_voice.py
+        source_files: []
+        children:
+            - adapters_layer
+            - agents_core
+            - config_files
+            - core_engine
+            - docs_documentation
+            - infra_deploy
+            - pipeline_processing
+            - schemas_common
+            - scripts_tooling
+            - shared_assets
+            - tests_root
+        depends_on: []
+        related_to: []
+    adapters_layer:
+        dir_name: 多模态模型适配器层
+        title: 多模态模型适配器层
+        scope:
+            - adapters/
+        source_files: []
+        children:
+            - adapters_layer/cross_cutting_adapters
+            - adapters_layer/legacy_and_support
+            - adapters_layer/shared_infrastructure
+        depends_on: []
+        related_to: []
+    adapters_layer/cross_cutting_adapters:
+        dir_name: 模型适配器层（兼容旧版与新版统一注册协议）
+        title: 模型适配器层（兼容旧版与新版统一注册协议）
+        scope:
+            - adapters/model_adapters.py
+            - adapters/new_models_adapters.py
+            - adapters/qwen_multimodal_adapter.py
+            - adapters/wan26_video_adapter.py
+            - adapters/wanx_adapter.py
+        source_files: []
+        children: []
+        depends_on: []
+        related_to:
+            - path: adapters_layer/legacy_and_support
+            - path: adapters_layer/shared_infrastructure
+            - path: shared_assets
+    adapters_layer/legacy_and_support:
+        dir_name: 适配器兼容层与辅助工具（Legacy Bridge、运行时包装、内容安全、限流、提示词优化）
+        title: 适配器兼容层与辅助工具（Legacy Bridge、运行时包装、内容安全、限流、提示词优化）
+        scope:
+            - adapters/legacy_bridge.py
+            - adapters/legacy_runtime_wrappers.py
+            - adapters/content_safety_checker.py
+            - adapters/rate_limiter.py
+            - adapters/prompt_optimizer.py
+        source_files: []
+        children: []
+        depends_on: []
+        related_to:
+            - path: adapters_layer/cross_cutting_adapters
+            - path: adapters_layer/shared_infrastructure
+    adapters_layer/shared_infrastructure:
+        dir_name: 模型适配器基础设施与注册中心
+        title: 模型适配器基础设施与注册中心
+        scope:
+            - adapters/base.py
+            - adapters/_shared.py
+            - adapters/adapter_helpers.py
+            - adapters/registry.py
+        source_files: []
+        children: []
+        depends_on: []
+        related_to:
+            - path: adapters_layer/cross_cutting_adapters
+            - path: adapters_layer/legacy_and_support
+            - path: agents_core/shared_agents
+            - path: config_files
+            - path: pipeline_processing
+            - path: scripts_tooling
+            - path: tests_root
+    agents_core:
+        dir_name: Agents 核心模块（DreamWeaver 短剧生成 Agent 集合）
+        title: Agents 核心模块（DreamWeaver 短剧生成 Agent 集合）
+        scope:
+            - agents/
+        source_files: []
+        children:
+            - agents_core/shared_agents
+        depends_on: []
+        related_to: []
+    agents_core/shared_agents:
+        dir_name: DreamWeaver 视频生成共享 Agent 库
+        title: DreamWeaver 视频生成共享 Agent 库
+        scope:
+            - agents/asset_library.py
+            - agents/auditor.py
+            - agents/best_image_selector.py
+            - agents/camera_states.py
+            - agents/camera_tree.py
+            - agents/character_manager.py
+            - agents/cross_batch_audio_manager.py
+            - agents/dreamweaver.py
+            - agents/editor.py
+            - agents/high_performance_voice_consistency_manager.py
+            - agents/image_edit_utils.py
+            - agents/lipsync_manager.py
+            - agents/llm_client.py
+            - agents/optimized_audio_sync_manager.py
+            - agents/painter.py
+            - agents/performance_audio_sync_manager.py
+            - agents/performance_voice_consistency_manager.py
+            - agents/planner.py
+            - agents/prompt_fragments.py
+            - agents/reference_image_selector.py
+            - agents/scripter.py
+            - agents/semantic_asset_index.py
+            - agents/simple_audio_sync_manager.py
+            - agents/simple_character_manager.py
+            - agents/simple_voice_consistency_manager.py
+            - agents/sound_effect_manager.py
+            - agents/storyboarder.py
+            - agents/vlm_utils.py
+            - agents/voice_consistency_manager.py
+        source_files: []
+        children: []
+        depends_on: []
+        related_to:
+            - path: adapters_layer/shared_infrastructure
+            - path: core_engine
+            - path: pipeline_processing
+    config_files:
+        dir_name: 模型与意图配置中心
+        title: 模型与意图配置中心
+        scope:
+            - config/
+        source_files: []
+        children: []
+        depends_on: []
+        related_to:
+            - path: adapters_layer/shared_infrastructure
+            - path: core_engine
+    core_engine:
+        dir_name: 统一模型调度与执行核心（Core Engine）
+        title: 统一模型调度与执行核心（Core Engine）
+        scope:
+            - core/
+        source_files: []
+        children: []
+        depends_on: []
+        related_to:
+            - path: agents_core/shared_agents
+            - path: config_files
+            - path: schemas_common
+            - path: scripts_tooling
+            - path: tests_root
+    docs_documentation:
+        dir_name: 项目文档与契约规范
+        title: 项目文档与契约规范
+        scope:
+            - docs/
+        source_files: []
+        children: []
+        depends_on: []
+        related_to:
+            - path: infra_deploy
+    infra_deploy:
+        dir_name: 基础设施初始化与契约校验
+        title: 基础设施初始化与契约校验
+        scope:
+            - postgres-init/
+            - ssl/
+            - .github/workflows/contracts.yml
+        source_files: []
+        children: []
+        depends_on: []
+        related_to:
+            - path: docs_documentation
+    pipeline_processing:
+        dir_name: DreamWeaver 视频生成流水线与自动质检
+        title: DreamWeaver 视频生成流水线与自动质检
+        scope:
+            - pipeline/
+        source_files: []
+        children: []
+        depends_on: []
+        related_to:
+            - path: adapters_layer/shared_infrastructure
+            - path: agents_core/shared_agents
+    schemas_common:
+        dir_name: 统一模型适配器 Schema 定义
+        title: 统一模型适配器 Schema 定义
+        scope:
+            - schemas/
+        source_files: []
+        children: []
+        depends_on: []
+        related_to:
+            - path: core_engine
+    scripts_tooling:
+        dir_name: 模型接入自检与测试工具集
+        title: 模型接入自检与测试工具集
+        scope:
+            - scripts/
+        source_files: []
+        children: []
+        depends_on: []
+        related_to:
+            - path: adapters_layer/shared_infrastructure
+            - path: core_engine
+    shared_assets:
+        dir_name: TTS 语音资产与预览语料
+        title: TTS 语音资产与预览语料
+        scope:
+            - shared/
+        source_files: []
+        children: []
+        depends_on: []
+        related_to:
+            - path: adapters_layer/cross_cutting_adapters
+    tests_root:
+        dir_name: 单元测试套件（Pytest）
+        title: 单元测试套件（Pytest）
+        scope:
+            - tests/
+        source_files: []
+        children: []
+        depends_on: []
+        related_to:
+            - path: adapters_layer/shared_infrastructure
+            - path: core_engine

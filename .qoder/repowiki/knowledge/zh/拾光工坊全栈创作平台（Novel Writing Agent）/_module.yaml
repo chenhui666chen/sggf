@@ -1,0 +1,54 @@
+schema_version: 1
+module_path: ""
+title: 拾光工坊全栈创作平台（Novel Writing Agent）
+scope:
+    - README.md
+    - .gitignore
+    - docker-compose.yml
+    - nginx.conf
+    - nginx-dev.conf
+    - nginx-prod.conf
+    - deploy_config.json
+    - start_backend.py
+    - agent_coordinator.py
+    - project_manager.py
+    - author_voice_system.py
+    - dialogue_authenticity_module.py
+    - split_agent_coordinator.py
+    - test_seed_tts_websocket.py
+    - .env.example
+    - .pyrightconfig.json
+    - AGENTS.md
+    - ALIYUN_GUIDE.md
+    - CONTENT_SAFETY_CHECKER.md
+    - DATABASE_MIGRATION_GUIDE.md
+    - DEPLOY_GUIDE.md
+    - FFMPEG_VIDEO_EDIT_GUIDE.md
+    - FORMATTING_USER_GUIDE.md
+    - HIERARCHY_USAGE_GUIDE.md
+    - JIANYING_MCP_GUIDE.md
+    - MULTI_AGENT_GUIDE.md
+    - MULTI_MODEL_REVIEW_GUIDE.md
+    - QUICK_START_GUIDE.md
+    - SEED_TTS_WEBSOCKET_IMPLEMENTATION.md
+    - SSL_AUTO_RENEW_GUIDE.md
+    - SSL_CERTIFICATE_GUIDE.md
+    - VECTOR_DATABASE_GUIDE.md
+    - alembic.ini
+    - algorithm_filing.txt
+    - algorithm_filing_full.txt
+    - config.py
+    - deploy_sync_improved.ps1
+    - deploy_unified.bat
+    - dev-kill.ps1
+    - dev.bat
+    - install.bat
+    - nginx.conf.http
+    - redis.conf
+    - setup_ssh_key.bat
+    - setup_ssh_key.ps1
+    - start_production.bat
+    - test_problematic_voice.py
+source_files: []
+depends_on: []
+related_to: []
