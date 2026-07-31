@@ -23,6 +23,13 @@ from .voice_reference_asset import VoiceReferenceAsset
 from .voice_asset_billing_ledger import VoiceAssetBillingLedger
 from .voice_pool_publication import VoicePoolPublication
 from .voice_pool_rating import VoicePoolRating
+from .prompt_experiment import (
+    PromptChallenger,
+    PromptChallengerStateTransition,
+    PromptChampionAssignment,
+    PromptExperiment,
+    PromptExperimentBudget,
+)
 
 __all__ = [
     "User",
@@ -66,4 +73,9 @@ __all__ = [
     "VoiceAssetBillingLedger",
     "VoicePoolPublication",
     "VoicePoolRating",
+    "PromptChallenger",
+    "PromptChallengerStateTransition",
+    "PromptExperiment",
+    "PromptExperimentBudget",
+    "PromptChampionAssignment",
 ]

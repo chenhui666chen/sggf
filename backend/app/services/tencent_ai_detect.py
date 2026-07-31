@@ -20,6 +20,8 @@ logger = logging.getLogger(__name__)
 class TencentAIDetectService:
     """腾讯云 AI 生成检测服务"""
     
+    MAX_TEXT_CHARACTERS = 10000
+
     def __init__(self):
         self.secret_id = getattr(settings, 'TENCENT_SECRET_ID', '')
         self.secret_key = getattr(settings, 'TENCENT_SECRET_KEY', '')
@@ -29,6 +31,17 @@ class TencentAIDetectService:
         self.service = "tms"
         self.version = "2020-12-29"
         self.action = "TextModeration"
+
+    @classmethod
+    def prepare_text(cls, text: str) -> str:
+        """统一应用腾讯云 TMS 的 Unicode 字符数限制。"""
+        return text[:cls.MAX_TEXT_CHARACTERS]
+
+    @property
+    def detection_policy_version(self) -> str:
+        """生成可用于检测缓存失效的稳定策略版本。"""
+        contract = f"{self.service}:{self.version}:{self.action}:TEXT_AIGC:{self.biztype or 'default'}"
+        return hashlib.sha256(contract.encode("utf-8")).hexdigest()[:16]
     
     def _get_sign(self, key: bytes, msg: str) -> bytes:
         """HMAC-SHA256 签名"""
@@ -165,6 +178,7 @@ class TencentAIDetectService:
             }
         
         # 文本转 Base64
+        text = self.prepare_text(text)
         content_base64 = base64.b64encode(text.encode("utf-8")).decode("utf-8")
         
         # 构建请求体
@@ -260,4 +274,3 @@ class TencentAIDetectService:
 
 # 全局服务实例
 tencent_ai_detect_service = TencentAIDetectService()
-

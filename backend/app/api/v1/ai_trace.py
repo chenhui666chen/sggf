@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 from typing import Optional, List
 from sqlalchemy.orm import Session
 import time
+import uuid
 
 from app.db.base import get_db
 from app.core.security import get_current_user
@@ -58,6 +59,7 @@ class ReduceResponse(BaseModel):
     genre_detected: Optional[str] = None  # 自动检测到的题材
     prompt_version_id: Optional[str] = None
     selection_source: Optional[str] = None
+    returned_variant: Optional[str] = None  # returnable 择优返回的变体（champion/challenger），未评估为 None
     error: Optional[str] = None
 
 
@@ -115,7 +117,7 @@ async def reduce_ai_trace(
             logger.info(f"  使用前端已检测分数: {original_score}")
         else:
             step1_start = time.time()
-            original_detect_result = await tencent_ai_detect_service.detect_ai_content(text[:5000])
+            original_detect_result = await tencent_ai_detect_service.detect_ai_content(text)
             original_score = (
                 original_detect_result.get("ai_score", 50)
                 if original_detect_result.get("success")
@@ -198,7 +200,7 @@ async def reduce_ai_trace(
 
         # 4. 检测改写后AI分数
         step3_start = time.time()
-        new_result = await tencent_ai_detect_service.detect_ai_content(reduced_text[:5000])
+        new_result = await tencent_ai_detect_service.detect_ai_content(reduced_text)
         new_score = (
             new_result.get("ai_score", original_score)
             if new_result.get("success")
@@ -214,6 +216,104 @@ async def reduce_ai_trace(
             f"(降低{improvement}分), 总耗时={total_time:.2f}秒, 模型={model_name or '默认'}"
         )
 
+        prompt_version_id = selection["version_id"] if selection else f"initial-{detected_genre}"
+
+        # 旁路：shadow 实验分流（EXPERIMENT_ENABLED 默认关闭；任何异常静默跳过，绝不影响冠军返回）
+        try:
+            from app.services.prompt_evolution.experiment_contract import FrozenModelContract
+            from app.services.prompt_evolution.shadow_dispatch import (
+                ShadowDispatchConfig,
+                maybe_create_shadow_experiment,
+            )
+
+            dispatch_config = ShadowDispatchConfig.from_env()
+            if dispatch_config.enabled:
+                maybe_create_shadow_experiment(
+                    db,
+                    subject_id=str(current_user.id),
+                    genre=detected_genre,
+                    request_id=f"req_{uuid.uuid4().hex[:16]}",
+                    original_text=text,
+                    champion_text=reduced_text,
+                    original_ai_score=original_score,
+                    champion_ai_score=new_score,
+                    champion_prompt_text=prompt,
+                    contract=FrozenModelContract.freeze(
+                        resolved_model_id=active_model_id or "default_route",
+                        model_selection_source=selection_source,
+                        model_config_version=None,
+                        prompt_version_id=prompt_version_id,
+                        temperature=0.8,
+                    ),
+                    config=dispatch_config,
+                )
+        except Exception as dispatch_error:  # noqa: BLE001 —— 旁路红线：只记类型不落原文
+            logger.warning(f"shadow 分流旁路异常跳过: {type(dispatch_error).__name__}")
+
+        # 旁路：returnable best-of-2 择优（§5.4 / §14 第 8 步 · 子块 C）
+        # EXPERIMENT_ENABLED 默认关闭；命中挑战者胜出即覆盖返回文本并落库回流。
+        # 任何异常回退冠军（fail-safe 双保险），绝不影响用户返回。
+        returned_variant = None
+        try:
+            from app.services.prompt_evolution.experiment_contract import FrozenModelContract
+            from app.services.prompt_evolution.experiment_privacy import PayloadVault
+            from app.services.prompt_evolution.returnable_service import (
+                ReturnableConfig,
+                ReturnableDeps,
+                returnable_reduce,
+            )
+
+            returnable_config = ReturnableConfig.from_env()
+            if returnable_config.enabled:
+                async def _returnable_rewrite(prompt_text, source_text, model_id):
+                    return await evaluator._rewrite_text(
+                        prompt_text, source_text, temperature=0.8, model_id=model_id
+                    )
+
+                async def _returnable_detect(candidate_text):
+                    result = await tencent_ai_detect_service.detect_ai_content(candidate_text)
+                    if not result.get("success"):
+                        return None
+                    return float(result.get("ai_score", 0.0))
+
+                vault = (
+                    PayloadVault(returnable_config.payload_key)
+                    if returnable_config.payload_key else None
+                )
+                outcome = await returnable_reduce(
+                    db,
+                    subject_id=str(current_user.id),
+                    genre=detected_genre,
+                    request_id=f"req_{uuid.uuid4().hex[:16]}",
+                    original_text=text,
+                    champion_text=reduced_text,
+                    champion_ai_score=float(new_score),
+                    model_id=active_model_id,
+                    contract=FrozenModelContract.freeze(
+                        resolved_model_id=active_model_id or "default_route",
+                        model_selection_source=selection_source,
+                        model_config_version=None,
+                        prompt_version_id=prompt_version_id,
+                        temperature=0.8,
+                    ),
+                    champion_prompt_text=prompt,
+                    deps=ReturnableDeps(
+                        rewrite_fn=_returnable_rewrite,
+                        detect_fn=_returnable_detect,
+                    ),
+                    config=returnable_config,
+                    vault=vault,
+                )
+                returned_variant = outcome.returned_variant
+                # 挑战者胜出：用其文本与 AI 分覆盖响应（champion 命中则保持不变）
+                if outcome.returned_variant == "challenger":
+                    reduced_text = outcome.returned_text
+                    if outcome.challenger_ai_score is not None:
+                        new_score = int(round(outcome.challenger_ai_score))
+                        improvement = original_score - new_score
+        except Exception as returnable_error:  # noqa: BLE001 —— 旁路红线：任何异常回退冠军
+            logger.warning(f"returnable 择优旁路异常跳过: {type(returnable_error).__name__}")
+
         return ReduceResponse(
             success=True,
             reduced_text=reduced_text,
@@ -223,8 +323,9 @@ async def reduce_ai_trace(
             improvement=improvement,
             model_used=model_name or "默认路由",
             genre_detected=detected_genre,
-            prompt_version_id=selection["version_id"] if selection else f"initial-{detected_genre}",
+            prompt_version_id=prompt_version_id,
             selection_source=selection_source,
+            returned_variant=returned_variant,
         )
 
     except Exception as e:

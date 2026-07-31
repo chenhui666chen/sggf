@@ -9,10 +9,13 @@ from app.services.ai_trace_storage import get_background_optimization_coordinato
 from app.core.permissions import require_admin
 from typing import Any, Dict, Optional, List
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 import logging
 
+from sqlalchemy.orm import Session
+
 from app.core.security import get_current_user
+from app.db.base import get_db
 from app.models.user import User
 from app.services.prompt_evolution import (
     PromptEvolutionEngine,
@@ -29,7 +32,8 @@ router = APIRouter(prefix="/api/v1/prompt-evolution", tags=["Prompt Evolution"])
 # 全局状态：正在运行的进化任务
 _running_task: Optional[asyncio.Task] = None
 _current_evolution_id: Optional[str] = None
-EVOLUTION_GENRES = ["玄幻", "都市", "言情", "悬疑", "科幻", "历史", "武侠"]
+# 题材列表单一来源：契约模块常量（与调度 beat 任务共用，新增题材只改契约模块）
+from app.services.prompt_evolution.experiment_contract import EVOLUTION_GENRES
 _genre_queue_status: Dict[str, Any] = {}
 
 
@@ -945,3 +949,454 @@ async def generate_test_samples(
     except Exception as e:
         logger.error(f"自动生成样本失败: {e}")
         return {"success": False, "error": f"生成失败: {str(e)}"}
+
+
+# ============================================================================
+# 冠军晋升 / 回滚 / 推荐查询 API（设计文档 §8.3 / §10 · §14 第 9 步 · 子块 C）
+#
+# 第一版不做自动晋升：系统给推荐（GET recommendation）→ 管理员权衡后确认
+# （POST promote）→ 原子切换指针。硬闸门（§8.1）不可绕过；如需绕过须显式授权 +
+# 填写原因并记入 gate_overridden 审计。回滚以指针表为冠军权威，秒级重指历史版本。
+# offline_gate_passed（§8.1 #2）取自挑战者行，不信任客户端。
+# ============================================================================
+
+class ChampionRecommendationItem(BaseModel):
+    """单个挑战者的晋升评估结果"""
+    challenger_id: str
+    total: int
+    effective_total: int
+    confirmed_win: int
+    loss: int
+    win_rate: float
+    wilson_lower_bound: float
+    invalidation_rate: float
+    hard_fail_rate: float
+    hard_gate_passed: bool
+    hard_gate_failures: List[str] = Field(default_factory=list)
+    recommended: bool
+    recommend_failures: List[str] = Field(default_factory=list)
+
+
+class ChampionRecommendationResponse(BaseModel):
+    """晋升推荐查询响应"""
+    genre: str
+    evaluation_policy_version: str
+    count: int
+    items: List[ChampionRecommendationItem] = Field(default_factory=list)
+
+
+class PromoteChampionRequest(BaseModel):
+    """晋升执行请求"""
+    genre: str
+    challenger_id: str
+    evaluation_policy_version: str
+    light_judge_version: Optional[str] = Field(default=None, description="按评审器版本进一步过滤样本")
+    reason: Optional[str] = Field(default=None, description="晋升备注")
+    gate_override: bool = Field(default=False, description="是否绕过硬闸门（须填 override_reason）")
+    override_reason: Optional[str] = Field(default=None, description="绕过硬闸门的书面理由（§8.1）")
+
+
+class PromoteChampionResponse(BaseModel):
+    """晋升执行响应"""
+    promoted: bool
+    reason: str
+    hard_gate_passed: Optional[bool] = None
+    hard_gate_failures: List[str] = Field(default_factory=list)
+    recommended: Optional[bool] = None
+    recommend_failures: List[str] = Field(default_factory=list)
+    prompt_version_id: Optional[str] = None
+    previous_version_id: Optional[str] = None
+
+
+class RollbackChampionRequest(BaseModel):
+    """回滚请求"""
+    genre: str
+    target_version_id: str
+    reason: str = Field(description="回滚原因（审计必填）")
+
+
+class RollbackChampionResponse(BaseModel):
+    """回滚响应"""
+    success: bool
+    reason: str
+    prompt_version_id: Optional[str] = None
+    previous_version_id: Optional[str] = None
+
+
+@router.get("/champion/recommendation", response_model=ChampionRecommendationResponse)
+async def get_champion_recommendation(
+    genre: str,
+    evaluation_policy_version: str,
+    light_judge_version: Optional[str] = None,
+    current_user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """
+    列出某题材下 returnable 挑战者的晋升评估（硬闸门 + 推荐指标），供管理员决策。
+
+    数据源：returnable 挑战者（prompt_challengers）+ 各自结算 verdict 序列
+    （prompt_experiments，按本评审策略版本过滤）+ 挑战者行 offline_gate_passed（§8.1 #2）。
+    只读，不改任何状态。
+    """
+    from app.services.prompt_evolution.challenger_repository import ChallengerRepository
+    from app.services.prompt_evolution.experiment_contract import ServingMode
+    from app.services.prompt_evolution.experiment_repository import ExperimentRepository
+    from app.services.prompt_evolution.promotion import (
+        PromotionThresholds,
+        aggregate_challenger_stats,
+        evaluate_promotion_gate,
+    )
+
+    thresholds = PromotionThresholds()
+    chal_repo = ChallengerRepository(db)
+    exp_repo = ExperimentRepository(db)
+
+    challengers = chal_repo.list_serving(genre, ServingMode.RETURNABLE.value)
+    items: List[ChampionRecommendationItem] = []
+    for challenger in challengers:
+        outcomes = exp_repo.list_outcomes_for_challenger(
+            challenger.challenger_id, evaluation_policy_version, light_judge_version
+        )
+        stats = aggregate_challenger_stats(outcomes, z=thresholds.wilson_z)
+        gate = evaluate_promotion_gate(
+            stats,
+            offline_gate_passed=bool(challenger.offline_gate_passed),
+            policy_version_consistent=True,
+            has_unresolved_safety_incident=False,
+            thresholds=thresholds,
+        )
+        items.append(
+            ChampionRecommendationItem(
+                challenger_id=challenger.challenger_id,
+                total=stats.total,
+                effective_total=stats.effective_total,
+                confirmed_win=stats.confirmed_win,
+                loss=stats.loss,
+                win_rate=stats.win_rate,
+                wilson_lower_bound=stats.wilson_lower_bound,
+                invalidation_rate=stats.invalidation_rate,
+                hard_fail_rate=stats.hard_fail_rate,
+                hard_gate_passed=gate.hard_gate_passed,
+                hard_gate_failures=list(gate.hard_gate_failures),
+                recommended=gate.recommended,
+                recommend_failures=list(gate.recommend_failures),
+            )
+        )
+
+    return ChampionRecommendationResponse(
+        genre=genre,
+        evaluation_policy_version=evaluation_policy_version,
+        count=len(items),
+        items=items,
+    )
+
+
+@router.post("/champion/promote", response_model=PromoteChampionResponse)
+async def promote_champion_endpoint(
+    request: PromoteChampionRequest,
+    current_user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """
+    管理员确认晋升某挑战者为冠军（§8.3 原子切换指针）。
+
+    offline_gate_passed（§8.1 #2）取自挑战者行，不信任客户端；operator 取登录管理员。
+    硬闸门未过且未授权绕过时返回 promoted=False + 失败项（HTTP 200，供前端展示）；
+    绕过须填 override_reason，缺失则 400。
+    """
+    from app.services.prompt_evolution.challenger_repository import ChallengerRepository
+    from app.services.prompt_evolution.champion_promotion import promote_champion
+
+    challenger = ChallengerRepository(db).get_by_challenger_id(request.challenger_id)
+    offline_gate_passed = bool(challenger.offline_gate_passed) if challenger is not None else False
+
+    try:
+        outcome = promote_champion(
+            db,
+            genre=request.genre,
+            challenger_id=request.challenger_id,
+            evaluation_policy_version=request.evaluation_policy_version,
+            operator=current_user.username,
+            offline_gate_passed=offline_gate_passed,
+            light_judge_version=request.light_judge_version,
+            reason=request.reason,
+            gate_override=request.gate_override,
+            override_reason=request.override_reason,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    gate = outcome.gate_result
+    assignment = outcome.assignment
+    return PromoteChampionResponse(
+        promoted=outcome.promoted,
+        reason=outcome.reason,
+        hard_gate_passed=gate.hard_gate_passed if gate is not None else None,
+        hard_gate_failures=list(gate.hard_gate_failures) if gate is not None else [],
+        recommended=gate.recommended if gate is not None else None,
+        recommend_failures=list(gate.recommend_failures) if gate is not None else [],
+        prompt_version_id=assignment.prompt_version_id if assignment is not None else None,
+        previous_version_id=assignment.previous_version_id if assignment is not None else None,
+    )
+
+
+@router.post("/champion/rollback", response_model=RollbackChampionResponse)
+async def rollback_champion_endpoint(
+    request: RollbackChampionRequest,
+    current_user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """
+    回滚冠军到历史版本（§8.3 秒级回滚）：指针表为权威，重指目标版本 + 降级当前冠军挑战者。
+
+    目标版本须在该题材指针历史中出现过；未找到返回 404。operator 取登录管理员。
+    """
+    from app.services.prompt_evolution.champion_promotion import rollback_champion
+
+    outcome = rollback_champion(
+        db,
+        genre=request.genre,
+        target_version_id=request.target_version_id,
+        operator=current_user.username,
+        reason=request.reason,
+    )
+    if not outcome.success:
+        raise HTTPException(status_code=404, detail="回滚目标版本不在该题材指针历史中")
+
+    assignment = outcome.assignment
+    return RollbackChampionResponse(
+        success=outcome.success,
+        reason=outcome.reason,
+        prompt_version_id=assignment.prompt_version_id if assignment is not None else None,
+        previous_version_id=assignment.previous_version_id if assignment is not None else None,
+    )
+
+
+class ApproveReturnableRequest(BaseModel):
+    """returnable 人工开闸请求"""
+    reason: str = Field(
+        min_length=1, max_length=500, description="审批原因（审计必填，纯空白拒绝）"
+    )
+
+    @field_validator("reason")
+    @classmethod
+    def _normalize_reason(cls, value: str) -> str:
+        # 五轮评审④：与服务层共用同一规则（strip + 拒纯空白 + 换行规范化为空格
+        # + 上限对齐审计表 String(500)），ValueError 由 Pydantic 转 422
+        from app.services.prompt_evolution.returnable_service import (
+            normalize_approval_reason,
+        )
+
+        return normalize_approval_reason(value)
+
+
+class ApproveReturnableResponse(BaseModel):
+    """returnable 人工开闸响应"""
+    challenger_id: str
+    genre: str
+    serving_mode: str
+
+
+@router.post(
+    "/challengers/{challenger_id}/returnable", response_model=ApproveReturnableResponse
+)
+async def approve_returnable_endpoint(
+    challenger_id: str,
+    request: ApproveReturnableRequest,
+    current_user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """
+    管理员人工开闸（§5.4 / §14 第 8 步）：批准 eligible 挑战者进入 returnable，
+    使其参与 best-of-2 择优返回。状态经 serving_mode 状态机校验（§3.1），
+    非 eligible 拒绝；operator 取登录管理员，审批 operator + reason 与状态
+    变更同事务落审计表（prompt_challenger_state_transitions）。
+    """
+    from app.services.prompt_evolution.returnable_service import approve_returnable
+
+    try:
+        row = approve_returnable(
+            db, challenger_id, operator=current_user.username, reason=request.reason
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    if row is None:
+        raise HTTPException(status_code=404, detail="挑战者不存在")
+    return ApproveReturnableResponse(
+        challenger_id=row.challenger_id,
+        genre=row.genre,
+        serving_mode=row.serving_mode,
+    )
+
+
+# ============================================================================
+# 进化调度器状态面板 / 手动休眠唤醒 API（设计文档 §11 · §14 第 10 步 · 子块 C）
+#
+# 只读快照 + 管理员手动干预调度器三态（running/sleeping/awake）。休眠置 sleeping
+# （只停离线生成新变体，成对实验监控与择优照常）；唤醒置 awake（过渡态，下一次
+# beat tick 消费后转 running 触发定向进化，§11 三态语义）。均只读写 scheduler_state.json
+# 落盘账本，不触 DB、不接外部 API。为可测性把状态账本装配为可注入依赖。
+# ============================================================================
+
+def get_scheduler_state_store():
+    """调度器状态账本依赖（默认落盘 data/prompt_evolution/scheduler_state.json）。"""
+    from app.services.prompt_evolution.scheduler_state import SchedulerStateStore
+    return SchedulerStateStore()
+
+
+def get_holdout_score_store():
+    """holdout 分差缓存依赖（信号 2 观测，默认落盘 data/prompt_evolution）。"""
+    from app.services.prompt_evolution.holdout_probe import HoldoutScoreStore
+    return HoldoutScoreStore()
+
+
+def get_sentinel_state_store():
+    """哨兵状态缓存依赖（信号 5 观测，默认落盘 data/prompt_evolution）。"""
+    from app.services.prompt_evolution.sentinel_probe import SentinelStateStore
+    return SentinelStateStore()
+
+
+class HoldoutSignalInfo(BaseModel):
+    """holdout 分差信号观测（信号 2）：gap 为 tick 真实消费值（含降级）"""
+    gap: float
+    computed_at: Optional[str] = None
+    stale: bool = False
+    defaulted: bool = True
+
+
+class SentinelSignalInfo(BaseModel):
+    """哨兵退化信号观测（信号 5）：degraded 为 tick 真实消费值（含降级）"""
+    degraded: bool
+    checked_at: Optional[str] = None
+    stale: bool = False
+    defaulted: bool = True
+
+
+class SchedulerSignals(BaseModel):
+    """题材级启停信号观测元数据（纯读缓存组装，defaulted=True 表示消费的是降级默认值）"""
+    holdout: HoldoutSignalInfo
+    sentinel: SentinelSignalInfo
+
+
+class SchedulerStateItem(BaseModel):
+    """单个题材的调度器三态记录"""
+    genre: str
+    state: str
+    reasons: List[str] = Field(default_factory=list)
+    updated_at: Optional[str] = None
+    last_tick_at: Optional[str] = None
+    signals: Optional[SchedulerSignals] = None
+
+
+class SchedulerStateSnapshotResponse(BaseModel):
+    """调度器状态快照响应（供管理面板）"""
+    count: int
+    items: List[SchedulerStateItem] = Field(default_factory=list)
+
+
+class SchedulerManualRequest(BaseModel):
+    """手动休眠/唤醒请求"""
+    genre: str = Field(description="目标题材（须为已知题材）")
+    reason: Optional[str] = Field(default=None, description="手动操作备注（并入 reasons）")
+
+
+class SchedulerManualResponse(BaseModel):
+    """手动休眠/唤醒响应"""
+    genre: str
+    state: str
+    reasons: List[str] = Field(default_factory=list)
+    updated_at: Optional[str] = None
+    last_tick_at: Optional[str] = None
+
+
+def _scheduler_record_to_item(record, signals: Optional[SchedulerSignals] = None) -> SchedulerStateItem:
+    return SchedulerStateItem(
+        genre=record.genre,
+        state=record.state,
+        reasons=list(record.reasons),
+        updated_at=record.updated_at,
+        last_tick_at=record.last_tick_at,
+        signals=signals,
+    )
+
+
+@router.get("/scheduler/state", response_model=SchedulerStateSnapshotResponse)
+async def get_scheduler_state(
+    current_user: User = Depends(require_admin),
+    store=Depends(get_scheduler_state_store),
+    holdout_store=Depends(get_holdout_score_store),
+    sentinel_store=Depends(get_sentinel_state_store),
+):
+    """
+    调度器三态快照（§11）：按 EVOLUTION_GENRES 逐题材读取，无记录默认 running。
+
+    只读，不改任何状态；供管理面板观测各题材休眠/唤醒状态与最近 tick 时间。
+    每题材附 signals 观测元数据（holdout 信号 2 / 哨兵信号 5）：值为 tick 真实
+    消费口径（含降级），defaulted 区分真实信号与降级默认值，纯读缓存不触发外部调用。
+    """
+    from app.services.prompt_evolution.experiment_contract import (
+        EXPERIMENT_EVALUATION_POLICY_VERSION,
+    )
+
+    items = []
+    for genre in EVOLUTION_GENRES:
+        signals = SchedulerSignals(
+            holdout=HoldoutSignalInfo(
+                **holdout_store.describe_signal(genre, policy=EXPERIMENT_EVALUATION_POLICY_VERSION)
+            ),
+            sentinel=SentinelSignalInfo(
+                **sentinel_store.describe_signal(genre, policy=EXPERIMENT_EVALUATION_POLICY_VERSION)
+            ),
+        )
+        items.append(_scheduler_record_to_item(store.get(genre), signals=signals))
+    return SchedulerStateSnapshotResponse(count=len(items), items=items)
+
+
+@router.post("/scheduler/sleep", response_model=SchedulerManualResponse)
+async def sleep_scheduler(
+    request: SchedulerManualRequest,
+    current_user: User = Depends(require_admin),
+    store=Depends(get_scheduler_state_store),
+):
+    """管理员手动休眠某题材（置 sleeping）；未知题材返回 400。"""
+    from datetime import datetime, timezone
+    from app.services.prompt_evolution.evolution_scheduler import STATE_SLEEPING
+
+    if request.genre not in EVOLUTION_GENRES:
+        raise HTTPException(status_code=400, detail="未知题材")
+
+    reasons = ["manual_sleep"] + ([request.reason] if request.reason else [])
+    record = store.set(
+        request.genre,
+        STATE_SLEEPING,
+        reasons=reasons,
+        now=datetime.now(timezone.utc).isoformat(),
+    )
+    return _scheduler_record_to_item(record).model_dump()
+
+
+@router.post("/scheduler/wake", response_model=SchedulerManualResponse)
+async def wake_scheduler(
+    request: SchedulerManualRequest,
+    current_user: User = Depends(require_admin),
+    store=Depends(get_scheduler_state_store),
+):
+    """
+    管理员手动唤醒某题材（置 awake）；未知题材返回 400。
+
+    awake 为过渡态：下一次 beat tick 消费后转 running 重启进化（§11 三态）。
+    """
+    from datetime import datetime, timezone
+    from app.services.prompt_evolution.evolution_scheduler import STATE_AWAKE
+
+    if request.genre not in EVOLUTION_GENRES:
+        raise HTTPException(status_code=400, detail="未知题材")
+
+    reasons = ["manual_wake"] + ([request.reason] if request.reason else [])
+    record = store.set(
+        request.genre,
+        STATE_AWAKE,
+        reasons=reasons,
+        now=datetime.now(timezone.utc).isoformat(),
+    )
+    return _scheduler_record_to_item(record).model_dump()

@@ -1032,7 +1032,7 @@ class MultiModelEvaluationService:
         if original_ai_score is not None:
             orig_score = original_ai_score
         else:
-            detect_result = await tencent_ai_detect_service.detect_ai_content(text[:5000])
+            detect_result = await tencent_ai_detect_service.detect_ai_content(text)
             orig_score = detect_result.get("ai_score", 50) if detect_result.get("success") else 50
 
         # 并发评估所有模型
@@ -1183,7 +1183,7 @@ class MultiModelEvaluationService:
             # 检测AI分数
             async with self._detect_semaphore:
                 detect_result = await tencent_ai_detect_service.detect_ai_content(
-                    final_text[:5000]
+                    final_text
                 )
 
             ai_score = (
@@ -1300,7 +1300,7 @@ class MultiModelEvaluationService:
         if original_ai_score is not None:
             orig_score = original_ai_score
         else:
-            detect_result = await tencent_ai_detect_service.detect_ai_content(text[:5000])
+            detect_result = await tencent_ai_detect_service.detect_ai_content(text)
             orig_score = detect_result.get("ai_score", 50) if detect_result.get("success") else 50
 
         # 常规轮次已经评估过活跃模型，挑战赛只产生挑战者的额外成本。

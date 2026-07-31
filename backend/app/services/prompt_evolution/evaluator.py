@@ -53,12 +53,13 @@ class PromptEvaluator:
 
     async def _detect_original_cached(self, text: str) -> Dict[str, Any]:
         """检测原始文本AI率（带样本级缓存，避免重复付费检测）"""
-        cache_key = hashlib.md5(text[:5000].encode("utf-8")).hexdigest()
+        prepared_text = tencent_ai_detect_service.prepare_text(text)
+        cache_key = hashlib.md5(prepared_text.encode("utf-8")).hexdigest()
         cached = self._original_detect_cache.get(cache_key)
         if cached is not None:
             logger.debug("   ♻️ 命中原文检测缓存，跳过重复检测")
             return cached
-        result = await self.ai_detector.detect_ai_content(text[:5000])
+        result = await self.ai_detector.detect_ai_content(prepared_text)
         # 仅缓存成功结果，失败时下次仍可重试
         if result.get("success"):
             self._original_detect_cache[cache_key] = result
@@ -66,7 +67,8 @@ class PromptEvaluator:
 
     def get_cached_original_score(self, text: str) -> Optional[int]:
         """查询样本原文的缓存AI分数（无缓存时返回None）"""
-        cache_key = hashlib.md5(text[:5000].encode("utf-8")).hexdigest()
+        prepared_text = tencent_ai_detect_service.prepare_text(text)
+        cache_key = hashlib.md5(prepared_text.encode("utf-8")).hexdigest()
         cached = self._original_detect_cache.get(cache_key)
         if cached is not None:
             return cached.get("ai_score")
@@ -102,7 +104,16 @@ class PromptEvaluator:
             try:
                 # 1. 先检测原始文本（样本级缓存：首次进入本次进化时检测一次）
                 logger.debug(f"   ⏳ 检测原始文本AI率...")
-                original_result = await self._detect_original_cached(sample.text)
+                policy_version = tencent_ai_detect_service.detection_policy_version
+                original_result = sample.get_ai_detection(policy_version)
+                if original_result is not None:
+                    prepared_text = tencent_ai_detect_service.prepare_text(sample.text)
+                    cache_key = hashlib.md5(prepared_text.encode("utf-8")).hexdigest()
+                    self._original_detect_cache.setdefault(cache_key, original_result)
+                else:
+                    original_result = await self._detect_original_cached(sample.text)
+                    if original_result.get("success"):
+                        sample.store_ai_detection(original_result, policy_version)
                 if original_result.get("success") and original_result.get("ai_score") == 0:
                     logger.warning("样本 %s 原始 AI 率为 0，已排除", sample.sample_id)
                     results.append(EvaluationResult(
@@ -155,7 +166,7 @@ class PromptEvaluator:
 
                 # 3. 检测改写后文本的AI率
                 logger.debug(f"   ⏳ 检测改写后文本AI率...")
-                rewritten_result = await self.ai_detector.detect_ai_content(rewritten[:5000])
+                rewritten_result = await self.ai_detector.detect_ai_content(rewritten)
                 rewritten_trace_detail = None
                 if rewritten_result.get("success"):
                     rewritten_score = rewritten_result.get("ai_score", 100)
@@ -353,7 +364,7 @@ class PromptEvaluator:
     
     async def quick_detect(self, text: str) -> Dict[str, Any]:
         """快速检测单段文本的AI率"""
-        result = await self.ai_detector.detect_ai_content(text[:5000])
+        result = await self.ai_detector.detect_ai_content(text)
         return {
             "success": result.get("success", False),
             "ai_score": result.get("ai_score"),

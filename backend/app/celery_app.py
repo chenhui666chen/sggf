@@ -51,6 +51,34 @@ celery_app.conf.update(
             "schedule": crontab(minute=17),
             "args": (100,),
         },
+        # shadow 实验批处理：每 5 分钟认领并执行 pending 实验（EXPERIMENT_ENABLED 未开启时任务体空转）
+        "prompt-experiment-run-shadow-batch": {
+            "task": "prompt_experiment.run_shadow_batch",
+            "schedule": crontab(minute="*/5"),
+            "args": (5, 600),
+        },
+        # 四层校准：每 30 分钟重算并把四层全过的 shadow 挑战者推进到 eligible（EXPERIMENT_ENABLED 未开启时空转）
+        "prompt-experiment-run-calibration": {
+            "task": "prompt_experiment.run_calibration",
+            "schedule": crontab(minute="*/30"),
+        },
+        # 进化启停调度：每 60 分钟逐题材采集信号并按三态决策转移（EXPERIMENT_ENABLED 未开启时空转）
+        "prompt-experiment-run-scheduler-tick": {
+            "task": "prompt_experiment.run_scheduler_tick",
+            "schedule": crontab(minute=0),
+        },
+        # holdout 过拟合探针：每日低频对冠军做训练/留出新鲜复评并写缓存，供 tick 只读消费
+        # （外部评分 API 有成本，冠军未变时任务体内部跳过重算；EXPERIMENT_ENABLED 未开启时空转）
+        "prompt-experiment-run-holdout-eval": {
+            "task": "prompt_experiment.run_holdout_eval",
+            "schedule": crontab(hour=3, minute=40),
+        },
+        # 哨兵巡检探针：每 12 小时对 sleeping 题材用固定哨兵语料做冠军新鲜检测并写缓存，
+        # 供 tick 只读消费唤醒（非 sleeping 题材跳过不调外部评分；EXPERIMENT_ENABLED 未开启时空转）
+        "prompt-experiment-run-sentinel-probe": {
+            "task": "prompt_experiment.run_sentinel_probe",
+            "schedule": crontab(hour="4,16", minute=10),
+        },
     },
 )
 

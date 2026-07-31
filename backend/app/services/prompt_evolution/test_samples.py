@@ -8,12 +8,23 @@ from dataclasses import dataclass, field
 from typing import List, Dict, Any, Optional, Callable, Awaitable
 from enum import Enum
 from datetime import datetime
+import hashlib
 import json
 import uuid
 import logging
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
+
+# 留出集划分比例（§11.1 holdout_score_gap 信号 2，结构参数非质量阈值）：
+# 按 sample_id 哈希取固定比例划入留出集，同一样本恒定归属，增删样本不漂移。
+HOLDOUT_RATIO = 0.3
+
+
+def is_holdout_sample_id(sample_id: str) -> bool:
+    """按 sample_id 哈希做确定性留出划分（同一 ID 恒定结果，不随机漂移）。"""
+    digest = hashlib.sha256(sample_id.encode("utf-8")).hexdigest()
+    return int(digest, 16) % 100 < round(HOLDOUT_RATIO * 100)
 
 
 class GenreType(str, Enum):
@@ -44,7 +55,48 @@ class TestSample:
     expected_ai_score: Optional[int] = None  # 预期AI得分（可选）
     description: str = ""               # 样本描述
     source: str = "default"             # 来源: default / custom / auto
+    is_holdout: bool = False            # 留出集标记（§11.1 holdout 过拟合探针，旧数据缺省训练）
     created_at: str = ""                # 创建时间 ISO 格式
+    ai_detection_score: Optional[int] = None
+    ai_detection_label: str = ""
+    ai_detection_suggestion: str = ""
+    ai_detection_text_hash: str = ""
+    ai_detection_policy_version: str = ""
+    ai_detected_at: str = ""
+
+    def _detection_text_hash(self) -> str:
+        from app.services.tencent_ai_detect import tencent_ai_detect_service
+
+        prepared = tencent_ai_detect_service.prepare_text(self.text)
+        return hashlib.sha256(prepared.encode("utf-8")).hexdigest()
+
+    def get_ai_detection(self, policy_version: str) -> Optional[Dict[str, Any]]:
+        """返回仍适用于当前文本和检测策略的持久化基线。"""
+        if self.ai_detection_score is None:
+            return None
+        if self.ai_detection_policy_version != policy_version:
+            return None
+        if self.ai_detection_text_hash != self._detection_text_hash():
+            return None
+        return {
+            "success": True,
+            "ai_score": self.ai_detection_score,
+            "label": self.ai_detection_label,
+            "suggestion": self.ai_detection_suggestion,
+        }
+
+    def detection_cache_key(self, policy_version: str) -> str:
+        """返回不包含原文、可跨样本复用的内容寻址键。"""
+        return f"{policy_version}:{self._detection_text_hash()}"
+
+    def store_ai_detection(self, result: Dict[str, Any], policy_version: str) -> None:
+        """保存成功检测的最小结构化结果，不持久化供应商原始响应。"""
+        self.ai_detection_score = int(result.get("ai_score", 0))
+        self.ai_detection_label = str(result.get("label", ""))
+        self.ai_detection_suggestion = str(result.get("suggestion", ""))
+        self.ai_detection_text_hash = self._detection_text_hash()
+        self.ai_detection_policy_version = policy_version
+        self.ai_detected_at = datetime.now().isoformat()
 
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典"""
@@ -55,7 +107,14 @@ class TestSample:
             "expected_ai_score": self.expected_ai_score,
             "description": self.description,
             "source": self.source,
+            "is_holdout": self.is_holdout,
             "created_at": self.created_at,
+            "ai_detection_score": self.ai_detection_score,
+            "ai_detection_label": self.ai_detection_label,
+            "ai_detection_suggestion": self.ai_detection_suggestion,
+            "ai_detection_text_hash": self.ai_detection_text_hash,
+            "ai_detection_policy_version": self.ai_detection_policy_version,
+            "ai_detected_at": self.ai_detected_at,
         }
 
     @classmethod
@@ -68,7 +127,14 @@ class TestSample:
             expected_ai_score=data.get("expected_ai_score"),
             description=data.get("description", ""),
             source=data.get("source", "default"),
+            is_holdout=bool(data.get("is_holdout", False)),
             created_at=data.get("created_at", ""),
+            ai_detection_score=data.get("ai_detection_score"),
+            ai_detection_label=data.get("ai_detection_label", ""),
+            ai_detection_suggestion=data.get("ai_detection_suggestion", ""),
+            ai_detection_text_hash=data.get("ai_detection_text_hash", ""),
+            ai_detection_policy_version=data.get("ai_detection_policy_version", ""),
+            ai_detected_at=data.get("ai_detected_at", ""),
         )
 
 
@@ -195,9 +261,12 @@ class TestSampleManager:
         """根据ID获取样本"""
         return self._sample_index.get(sample_id)
 
-    def get_samples_by_genre(self, genre: str) -> List[TestSample]:
-        """根据题材获取样本"""
-        return [s for s in self.samples if s.genre == genre]
+    def get_samples_by_genre(self, genre: str, holdout: Optional[bool] = None) -> List[TestSample]:
+        """根据题材获取样本；holdout 非 None 时按留出归属过滤（True=留出，False=训练）。"""
+        samples = [s for s in self.samples if s.genre == genre]
+        if holdout is None:
+            return samples
+        return [s for s in samples if s.is_holdout == holdout]
 
     def get_samples_by_source(self, source: str) -> List[TestSample]:
         """根据来源获取样本"""
@@ -233,65 +302,110 @@ class TestSampleManager:
         genre: Optional[str] = None,
         generator: Optional[Callable[..., Awaitable[List[TestSample]]]] = None,
     ) -> List[TestSample]:
-        """清除原文 AI 率为 0 的样本，并生成通过检测的替代样本。"""
+        """复用持久基线，仅检测凑足本轮数量所需的未检测样本。"""
+        from app.services.tencent_ai_detect import tencent_ai_detect_service
+
+        policy_version = tencent_ai_detect_service.detection_policy_version
         target_samples = self.get_samples_by_genre(genre) if genre else self.samples.copy()
+        source_priority = {SampleSource.CUSTOM: 0, SampleSource.AUTO: 1, SampleSource.DEFAULT: 2}
+        target_samples.sort(key=lambda sample: source_priority.get(sample.source, 3))
+        detections_by_content = {
+            sample.detection_cache_key(policy_version): result
+            for sample in self.samples
+            if (result := sample.get_ai_detection(policy_version)) is not None
+        }
         invalid_ids: List[str] = []
+        selected: List[TestSample] = []
+        persistence_changed = False
 
         for sample in target_samples:
-            result = await detector.detect_ai_content(sample.text[:5000])
+            if len(selected) >= count:
+                break
+            result = sample.get_ai_detection(policy_version)
+            if result is None:
+                cache_key = sample.detection_cache_key(policy_version)
+                result = detections_by_content.get(cache_key)
+                if result is None:
+                    result = await detector.detect_ai_content(sample.text)
+                if result.get("success"):
+                    detections_by_content[cache_key] = result
+                    sample.store_ai_detection(result, policy_version)
+                    persistence_changed = True
             if result.get("success") and result.get("ai_score") == 0:
                 invalid_ids.append(sample.sample_id)
+            elif result.get("success"):
+                selected.append(sample)
 
         removed_genres = [self._sample_index[sample_id].genre for sample_id in invalid_ids]
         if invalid_ids:
             invalid_set = set(invalid_ids)
-            self.samples = [s for s in self.samples if s.sample_id not in invalid_set]
+            self.samples = [sample for sample in self.samples if sample.sample_id not in invalid_set]
             self._rebuild_index()
-            self._persist()
             logger.warning("已清除 AI 率为 0 的测试样本: %s", ", ".join(invalid_ids))
 
-        candidates = self.get_samples_by_genre(genre) if genre else self.samples.copy()
-        if len(candidates) < count and generator is not None:
-            replacement_genres = removed_genres or ([genre] if genre else [])
-            if not replacement_genres:
-                replacement_genres = ["通用"]
-            accepted: List[TestSample] = []
+        if len(selected) < count and generator is not None:
+            replacement_genres = removed_genres or ([genre] if genre else []) or ["通用"]
             attempts = 0
-            while len(candidates) + len(accepted) < count and attempts < 3:
+            while len(selected) < count and attempts < 3:
                 attempts += 1
-                missing = count - len(candidates) - len(accepted)
+                missing = count - len(selected)
                 generated = await generator(
                     genres=list(dict.fromkeys(replacement_genres)),
                     count_per_genre=max(2, missing * 2),
                 )
                 for sample in generated:
-                    result = await detector.detect_ai_content(sample.text[:5000])
+                    cache_key = sample.detection_cache_key(policy_version)
+                    result = sample.get_ai_detection(policy_version)
+                    if result is None:
+                        result = detections_by_content.get(cache_key)
+                        if result is None:
+                            result = await detector.detect_ai_content(sample.text)
                     if result.get("success") and result.get("ai_score") != 0:
+                        detections_by_content[cache_key] = result
+                        sample.store_ai_detection(result, policy_version)
                         sample.source = SampleSource.AUTO
                         if not sample.created_at:
                             sample.created_at = datetime.now().isoformat()
                         if sample.sample_id not in self._sample_index:
                             self.samples.append(sample)
                             self._sample_index[sample.sample_id] = sample
-                            accepted.append(sample)
-                            if len(candidates) + len(accepted) >= count:
+                            selected.append(sample)
+                            persistence_changed = True
+                            if len(selected) >= count:
                                 break
                     else:
                         logger.warning("丢弃 AI 率为 0 或检测失败的替代样本: %s", sample.sample_id)
-            if accepted:
-                self._persist()
-            candidates = self.get_samples_by_genre(genre) if genre else self.samples.copy()
 
-        if len(candidates) < count:
-            raise RuntimeError(f"有效测试样本不足: 需要 {count} 个，当前仅 {len(candidates)} 个")
+        if invalid_ids or persistence_changed:
+            self._persist()
 
-        source_priority = {SampleSource.CUSTOM: 0, SampleSource.AUTO: 1, SampleSource.DEFAULT: 2}
-        candidates.sort(key=lambda sample: source_priority.get(sample.source, 3))
-        return candidates[:count]
+        if len(selected) < count:
+            raise RuntimeError(f"有效测试样本不足: 需要 {count} 个，当前仅 {len(selected)} 个")
+
+        selected.sort(key=lambda sample: source_priority.get(sample.source, 3))
+        return selected[:count]
 
     def get_all_samples(self) -> List[TestSample]:
         """获取所有样本"""
         return self.samples.copy()
+
+    def apply_holdout_split(self) -> Dict[str, int]:
+        """
+        对全部样本按 sample_id 哈希做确定性留出划分并持久化（§11.1 holdout 探针）。
+
+        幂等：同一样本恒定归属，重复调用结果不变；归属无变化时不写盘。
+        返回 {"holdout": 留出数, "training": 训练数} 统计。
+        """
+        changed = False
+        for sample in self.samples:
+            flag = is_holdout_sample_id(sample.sample_id)
+            if sample.is_holdout != flag:
+                sample.is_holdout = flag
+                changed = True
+        if changed:
+            self._persist()
+        holdout_count = sum(1 for s in self.samples if s.is_holdout)
+        return {"holdout": holdout_count, "training": len(self.samples) - holdout_count}
 
     def get_sample_count(self) -> int:
         """获取样本数量"""

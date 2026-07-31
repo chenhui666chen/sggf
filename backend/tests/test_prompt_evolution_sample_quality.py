@@ -7,6 +7,7 @@ from app.services.prompt_evolution.test_samples import (
     TestSample as EvolutionTestSample,
     TestSampleManager as EvolutionTestSampleManager,
 )
+from app.services.tencent_ai_detect import tencent_ai_detect_service
 
 
 @pytest.mark.asyncio
@@ -18,14 +19,12 @@ async def test_prepare_samples_removes_zero_score_samples_from_every_source(tmp_
     ]
     manager = EvolutionTestSampleManager(samples=samples, storage_dir=str(tmp_path))
     detector = AsyncMock()
-    detector.detect_ai_content = AsyncMock(side_effect=[
-        {"success": True, "ai_score": 0},
-        {"success": True, "ai_score": 0},
-        {"success": True, "ai_score": 65},
-        {"success": True, "ai_score": 72},
-        {"success": True, "ai_score": 0},
-        {"success": True, "ai_score": 81},
-    ])
+    scores = {"d": 0, "c": 0, "a": 65, "r": 72, "z": 0, "s": 81}
+
+    async def detect_by_content(text: str):
+        return {"success": True, "ai_score": scores[text[0]]}
+
+    detector.detect_ai_content = AsyncMock(side_effect=detect_by_content)
     replacements = [
         EvolutionTestSample(sample_id="replacement_1", text="r" * 120, genre="玄幻", source="auto"),
         EvolutionTestSample(sample_id="replacement_zero", text="z" * 120, genre="玄幻", source="auto"),
@@ -107,3 +106,105 @@ def test_prompt_version_serializes_llm_and_local_dimension_reviews():
 
     assert payload["rewritten_multi_score"]["readability_score"] == 88
     assert payload["llm_review"]["semantic_fidelity"]["score"] == 93
+
+
+@pytest.mark.asyncio
+async def test_sample_detection_is_persisted_and_reused_after_manager_reload(tmp_path):
+    sample = EvolutionTestSample(
+        sample_id="persisted", text="original" * 30, genre="通用", source="custom"
+    )
+    manager = EvolutionTestSampleManager(samples=[sample], storage_dir=str(tmp_path))
+    detector = AsyncMock()
+    detector.detect_ai_content = AsyncMock(
+        return_value={"success": True, "ai_score": 67, "label": "Normal", "suggestion": "Pass"}
+    )
+
+    selected = await manager.prepare_evaluation_samples(1, detector, genre="通用")
+    assert selected[0].ai_detection_score == 67
+
+    reloaded = EvolutionTestSampleManager(storage_dir=str(tmp_path))
+    second_detector = AsyncMock()
+    second_detector.detect_ai_content = AsyncMock()
+    selected_again = await reloaded.prepare_evaluation_samples(1, second_detector, genre="通用")
+
+    assert selected_again[0].ai_detection_score == 67
+    second_detector.detect_ai_content.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_sample_detection_is_invalidated_when_text_changes(tmp_path):
+    sample = EvolutionTestSample(sample_id="changed", text="before" * 30, genre="通用")
+    sample.store_ai_detection(
+        {"success": True, "ai_score": 60, "label": "Normal", "suggestion": "Pass"},
+        tencent_ai_detect_service.detection_policy_version,
+    )
+    sample.text = "after" * 30
+    manager = EvolutionTestSampleManager(samples=[sample], storage_dir=str(tmp_path))
+    detector = AsyncMock()
+    detector.detect_ai_content = AsyncMock(
+        return_value={"success": True, "ai_score": 72, "label": "Normal", "suggestion": "Pass"}
+    )
+
+    selected = await manager.prepare_evaluation_samples(1, detector, genre="通用")
+
+    assert selected[0].ai_detection_score == 72
+    detector.detect_ai_content.assert_awaited_once_with(sample.text)
+
+
+@pytest.mark.asyncio
+async def test_sample_preparation_stops_detecting_after_enough_valid_samples(tmp_path):
+    samples = [
+        EvolutionTestSample(sample_id=f"sample_{index}", text=str(index) * 120, genre="通用")
+        for index in range(5)
+    ]
+    manager = EvolutionTestSampleManager(samples=samples, storage_dir=str(tmp_path))
+    detector = AsyncMock()
+    detector.detect_ai_content = AsyncMock(
+        return_value={"success": True, "ai_score": 65, "label": "Normal", "suggestion": "Pass"}
+    )
+
+    selected = await manager.prepare_evaluation_samples(1, detector, genre="通用")
+
+    assert len(selected) == 1
+    assert detector.detect_ai_content.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_samples_with_identical_text_share_one_detection(tmp_path):
+    shared_text = "same content" * 20
+    samples = [
+        EvolutionTestSample(sample_id="first", text=shared_text, genre="通用"),
+        EvolutionTestSample(sample_id="second", text=shared_text, genre="通用"),
+    ]
+    manager = EvolutionTestSampleManager(samples=samples, storage_dir=str(tmp_path))
+    detector = AsyncMock()
+    detector.detect_ai_content = AsyncMock(
+        return_value={"success": True, "ai_score": 66, "label": "Normal", "suggestion": "Pass"}
+    )
+
+    selected = await manager.prepare_evaluation_samples(2, detector, genre="通用")
+
+    assert len(selected) == 2
+    assert detector.detect_ai_content.await_count == 1
+    assert selected[0].ai_detection_text_hash == selected[1].ai_detection_text_hash
+
+
+@pytest.mark.asyncio
+async def test_evaluator_reuses_persisted_sample_baseline():
+    evaluator = PromptEvaluator()
+    evaluator._rewrite_text = AsyncMock(return_value="rewritten" * 30)
+    evaluator.ai_detector = AsyncMock()
+    evaluator.ai_detector.detect_ai_content = AsyncMock(
+        return_value={"success": True, "ai_score": 20}
+    )
+    sample = EvolutionTestSample(sample_id="cached", text="original" * 30, genre="通用")
+    sample.store_ai_detection(
+        {"success": True, "ai_score": 70, "label": "Normal", "suggestion": "Pass"},
+        tencent_ai_detect_service.detection_policy_version,
+    )
+
+    _, results = await evaluator.evaluate_prompt("prompt", [sample])
+
+    assert results[0].original_ai_score == 70
+    assert results[0].rewritten_ai_score == 20
+    evaluator.ai_detector.detect_ai_content.assert_awaited_once_with("rewritten" * 30)

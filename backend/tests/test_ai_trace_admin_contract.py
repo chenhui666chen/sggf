@@ -39,6 +39,14 @@ def test_reduce_remains_available_to_authenticated_non_admin_users():
     assert "require_admin" not in dependency_names
 
 
+def test_reduce_response_exposes_returned_variant_field():
+    # 子块 C：reduce 响应新增 returned_variant，未做 returnable 评估时默认 None
+    from app.api.v1.ai_trace import ReduceResponse
+
+    assert "returned_variant" in ReduceResponse.model_fields
+    assert ReduceResponse(success=True).returned_variant is None
+
+
 def test_prompt_evolution_task_controls_require_admin():
     protected_paths = {
         "/api/v1/prompt-evolution/start",

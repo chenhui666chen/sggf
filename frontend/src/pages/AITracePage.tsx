@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback, useEffect, type ChangeEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   Box,
@@ -48,6 +48,7 @@ export default function AITracePage() {
     score: number
     label: string
     suggestion: string
+    text: string
   } | null>(null)
   const [reducedResult, setReducedResult] = useState<{
     score: number
@@ -97,6 +98,14 @@ export default function AITracePage() {
     setError('')
   }, [])
 
+  const handleInputChange = useCallback((event: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+    setInputText(event.target.value)
+    setDetectResult(null)
+    setReducedResult(null)
+    setOutputText('')
+    setError('')
+  }, [])
+
   // 检测AI浓度
   const handleDetect = useCallback(async () => {
     if (!inputText.trim()) {
@@ -105,13 +114,15 @@ export default function AITracePage() {
     }
     setDetecting(true)
     setError('')
+    const detectedText = inputText
     try {
-      const response = await apiClient.client.post('/api/v1/ai-detect', { text: inputText })
+      const response = await apiClient.client.post('/api/v1/ai-detect', { text: detectedText })
       if (response.data.success) {
         setDetectResult({
           score: response.data.ai_score,
           label: response.data.label,
           suggestion: response.data.suggestion,
+          text: detectedText,
         })
       } else {
         setError(response.data.error || '检测失败')
@@ -148,7 +159,7 @@ export default function AITracePage() {
         requestData.genre = genre
       }
 
-      if (detectResult?.score !== undefined) {
+      if (detectResult?.score !== undefined && detectResult.text === inputText) {
         requestData.original_ai_score = detectResult.score
       }
 
@@ -170,6 +181,7 @@ export default function AITracePage() {
             score: response.data.original_ai_score,
             label: 'Unknown',
             suggestion: 'Pass',
+            text: inputText,
           })
         }
       } else {
@@ -193,7 +205,8 @@ export default function AITracePage() {
   }, [outputText])
 
   const charCount = inputText.length
-  const scoreLevel = detectResult ? getScoreLevel(detectResult.score) : null
+  const currentDetectResult = detectResult?.text === inputText ? detectResult : null
+  const scoreLevel = currentDetectResult ? getScoreLevel(currentDetectResult.score) : null
   const reducedLevel = reducedResult ? getScoreLevel(reducedResult.score) : null
 
   return (
@@ -244,7 +257,7 @@ export default function AITracePage() {
                 fullWidth
                 placeholder={'在此粘贴或输入要检测的文本内容...\n\n支持小说、文章、论文等各类文本\n建议文本长度：100-10000字'}
                 value={inputText}
-                onChange={(e) => setInputText(e.target.value)}
+                onChange={handleInputChange}
                 sx={{ flex: 1, '& .MuiOutlinedInput-root': { height: '100%', alignItems: 'flex-start' },
                   '& .MuiInputBase-input': { height: '100% !important', overflow: 'auto !important' } }}
                 InputProps={{ sx: { height: '100%', fontSize: '0.95rem', lineHeight: 1.8 } }}
@@ -299,16 +312,16 @@ export default function AITracePage() {
               </Box>
 
               {/* 检测结果展示 */}
-              {detectResult && scoreLevel && (
+              {currentDetectResult && scoreLevel && (
                 <Fade in>
                   <Box sx={{ mt: 2, p: 2, borderRadius: 2, backgroundColor: `${scoreLevel.color}15`, border: `1px solid ${scoreLevel.color}40` }}>
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
                       <Box sx={{ position: 'relative', display: 'inline-flex' }}>
-                        <CircularProgress variant="determinate" value={detectResult.score} size={60}
+                        <CircularProgress variant="determinate" value={currentDetectResult.score} size={60}
                           sx={{ color: scoreLevel.color }} />
                         <Box sx={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                           <Typography variant="body2" sx={{ fontWeight: 700, color: scoreLevel.color }}>
-                            {detectResult.score}
+                            {currentDetectResult.score}
                           </Typography>
                         </Box>
                       </Box>
@@ -316,7 +329,7 @@ export default function AITracePage() {
                         <Chip icon={<scoreLevel.icon />} label={scoreLevel.label} size="small"
                           sx={{ backgroundColor: scoreLevel.color, color: 'white', fontWeight: 600 }} />
                         <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-                          {detectResult.suggestion === 'Pass' ? '内容可直接使用' : '建议进行优化处理'}
+                          {currentDetectResult.suggestion === 'Pass' ? '内容可直接使用' : '建议进行优化处理'}
                         </Typography>
                       </Box>
                     </Box>
@@ -358,15 +371,15 @@ export default function AITracePage() {
               />
 
               {/* 优化结果对比 */}
-              {reducedResult && reducedLevel && detectResult && (
+              {reducedResult && reducedLevel && currentDetectResult && (
                 <Fade in>
                   <Box sx={{ mt: 2 }}>
                     <Divider sx={{ mb: 2 }} />
                     <Box sx={{ display: 'flex', justifyContent: 'space-around', alignItems: 'center' }}>
                       <Box sx={{ textAlign: 'center' }}>
                         <Typography variant="caption" color="text.secondary">处理前</Typography>
-                        <Typography variant="h5" sx={{ color: getScoreLevel(detectResult.score).color, fontWeight: 700 }}>
-                          {detectResult.score}分
+                        <Typography variant="h5" sx={{ color: getScoreLevel(currentDetectResult.score).color, fontWeight: 700 }}>
+                          {currentDetectResult.score}分
                         </Typography>
                       </Box>
                       <Box sx={{ fontSize: 24 }}>&rarr;</Box>
@@ -376,7 +389,7 @@ export default function AITracePage() {
                           {reducedResult.score}分
                         </Typography>
                       </Box>
-                      <Chip label={`降低 ${detectResult.score - reducedResult.score} 分`} color="success" sx={{ fontWeight: 600 }} />
+                      <Chip label={`降低 ${currentDetectResult.score - reducedResult.score} 分`} color="success" sx={{ fontWeight: 600 }} />
                     </Box>
                   </Box>
                 </Fade>
