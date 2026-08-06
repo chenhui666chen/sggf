@@ -173,3 +173,22 @@ backend/memory_data/
 
 # SSL certificates
 ssl/*.pem
+
+# Media assets (audio/video/zip) — keep out of git history, store locally only
+*.mp3
+*.wav
+*.ogg
+*.flac
+*.m4b
+*.m4a
+*.aac
+*.mp4
+*.mov
+*.mkv
+*.webm
+*.zip
+audiobooks/
+backend/audiobooks/
+backend/data/audio_library/
+backend/backend/
+_media_backup_*/
