@@ -772,6 +772,7 @@ const AudiobookPage = () => {
     handlePreviewSmartChunking,
   } = useAudiobookScriptEditorActions({
     audiobookProject,
+    novelProjectId: selectedProject?.id ?? routeProjectId,
     chapters,
     scriptEditorChapter,
     scriptEditorData,
@@ -781,6 +782,8 @@ const AudiobookPage = () => {
     removeCurrentEditorSyncEntry,
     stopManagedPlayback,
     setScriptEditorDialogOpen,
+    setAudiobookProject,
+    setCurrentAudiobookProjectId,
     setScriptEditorChapter,
     setScriptEditorData,
     setScriptEditorInitialSegmentIndex,
@@ -1118,6 +1121,9 @@ const AudiobookPage = () => {
             onAudioEngineModeChange={setAudioEngineMode}
             onToggleChapter={handleToggleChapter}
             onOpenChapterMenu={handleOpenChapterMenu}
+            onOpenGeneratedChapter={(chapterId) => {
+              void handleOpenScriptEditor(chapterId)
+            }}
             onVoiceChange={handleVoiceChangeAndPersist}
             onTtsModelChangeForCharacter={handleTtsModelChangeForCharacterAndPersist}
             onPreviewCustomVoice={handlePreviewCustomVoice}

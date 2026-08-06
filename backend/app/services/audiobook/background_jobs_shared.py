@@ -140,18 +140,21 @@ def is_chapter_generation_target_active(
         if chapter_audio_id is None:
             return True
 
-        chapter_audio = (
-            db.query(ChapterAudio)
+        # 只取主键的标量查询：始终真正读取数据库已提交的最新状态（可发现
+        # 删除接口在别的会话提交的软删除），又不会像实体查询 + populate_existing
+        # 那样强制刷新 identity map 中的实例——那会把调用方尚未 flush 的脏字段
+        # （如刚赋值的 script_json）还原为数据库旧值，导致剧本静默丢失。
+        chapter_audio_row = (
+            db.query(ChapterAudio.id)
             .filter(
                 ChapterAudio.id == chapter_audio_id,
                 ChapterAudio.audiobook_project_id == audiobook_project_id,
                 ChapterAudio.chapter_id == chapter_id,
                 ChapterAudio.deleted_at.is_(None),
             )
-            .populate_existing()
             .first()
         )
-        return chapter_audio is not None
+        return chapter_audio_row is not None
 
 
 def normalize_audiobook_output_format(value: Optional[str]) -> str:

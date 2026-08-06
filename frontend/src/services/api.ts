@@ -2763,11 +2763,13 @@ class ApiClient {
     const params: Record<string, string> = {}
     if (options.candidateId) {
       params.candidate_id = options.candidateId
-    }
-    if (options.audioPath) {
-      params.audio_path = options.audioPath
+    } else {
+      // 音效/配乐无持久化分轨时，仅凭 preview_type 由服务端按管线时间线实时渲染
       if (options.previewType) {
         params.preview_type = options.previewType
+      }
+      if (options.audioPath) {
+        params.audio_path = options.audioPath
       }
     }
     return this.client.get<Blob>(

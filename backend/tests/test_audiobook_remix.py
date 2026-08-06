@@ -382,6 +382,51 @@ def test_perform_remix_mixes_and_writes_output(cleanup_test_assets, monkeypatch)
     assert run_updates[-1]["checkpoint_patch"]["segment_timings"]
 
 
+def test_perform_remix_cleans_previous_audio_when_output_path_changes(
+    cleanup_test_assets,
+    monkeypatch,
+):
+    """输出路径变化时，旧整章音频必须被回收，不产生孤儿文件。"""
+    remix = _load_remix_module()
+
+    segments = _build_segments_with_audio()
+    previous_path = "audiobooks/project_5/chapter_003.mp3"
+    chapter_audio = SimpleNamespace(
+        id=TEST_CHAPTER_AUDIO_ID,
+        script_json=json.dumps(segments, ensure_ascii=False),
+        audio_path=previous_path,
+    )
+    engine, _ = _build_fake_engine()
+    run_updates = []
+    writes = []
+    cleanups = []
+
+    monkeypatch.setattr(
+        remix,
+        "_cleanup_previous_chapter_artifacts",
+        lambda path, **kwargs: cleanups.append((path, kwargs)),
+    )
+
+    result = remix.perform_chapter_remix(
+        chapter_audio=chapter_audio,
+        chapter_number=3,
+        audiobook_project=SimpleNamespace(project_id=5, id=9),
+        force=False,
+        engine=engine,
+        checkpoint={},
+        run_state_updater=lambda **kwargs: run_updates.append(kwargs),
+        write_output=lambda path, data: writes.append(path),
+        generate_subtitle_artifacts=lambda **kwargs: {"generated": False},
+    )
+
+    assert result["success"] is True
+    # 新路径包含 audiobook_project_id 隔离，与旧路径不同
+    assert writes and writes[0] != previous_path
+    assert chapter_audio.audio_path == writes[0]
+    # 旧整章音频被回收
+    assert cleanups and cleanups[0][0] == previous_path
+
+
 def test_perform_remix_does_not_write_after_output_guard_rejects(cleanup_test_assets):
     """章节产物删除后，重混音不得再写出孤儿整章文件。"""
     remix = _load_remix_module()
@@ -723,6 +768,81 @@ def test_remix_endpoint_force_triggers_background_task(monkeypatch):
     assert len(background_tasks.added) == 1
     assert background_tasks.added[0][0].__name__ == "run_chapter_remix_background"
     assert background_tasks.added[0][2].get("run_id") == 55
+
+
+def test_remix_clamps_overlong_scene_loop_cues():
+    """存量 checkpoint 中被拉伸到章尾的场景循环音效在重新混音时收束。"""
+    from app.services.audiobook.background_jobs_remix import _clamp_overlong_scene_loop_cues
+
+    timeline = {
+        "timeline": [
+            {
+                "scene_id": "scene_1",
+                "timestamp": 38.7,
+                "duration": 477.95,
+                "loop": True,
+                "type": "environment",
+            },
+            {
+                "scene_id": "ambient",
+                "timestamp": 0.0,
+                "duration": 600.0,
+                "loop": True,
+                "type": "environment",
+            },
+            {
+                "scene_id": "scene_0",
+                "timestamp": 10.0,
+                "duration": 2.0,
+                "loop": False,
+                "type": "action",
+            },
+            {
+                "scene_id": "scene_0",
+                "timestamp": 0.0,
+                "duration": 500.0,
+                "loop": True,
+                "type": "environment",
+                "editor_timeline_key": "sfx-0-1",
+            },
+        ],
+    }
+    timings = [
+        {"index": 0, "start": 0.0, "end": 38.7, "duration": 38.7},
+        {"index": 1, "start": 38.7, "end": 90.0, "duration": 51.3},
+    ]
+
+    _clamp_overlong_scene_loop_cues(timeline, timings)
+
+    # 场景环境音收束到所属片段结尾（90s）+5s 宽限
+    assert timeline["timeline"][0]["duration"] == pytest.approx(90.0 + 5.0 - 38.7)
+    # 全章环境床不受影响
+    assert timeline["timeline"][1]["duration"] == pytest.approx(600.0)
+    # 非循环短音效不受影响
+    assert timeline["timeline"][2]["duration"] == pytest.approx(2.0)
+    # 工作台手动调整的条目以用户为准，不自动收束
+    assert timeline["timeline"][3]["duration"] == pytest.approx(500.0)
+
+
+def test_remix_clamp_falls_back_to_fixed_cap_without_timings():
+    """缺少片段 timing 时按固定上限收束，而非继续响到章尾。"""
+    from app.services.audiobook.background_jobs_remix import _clamp_overlong_scene_loop_cues
+
+    timeline = {
+        "timeline": [
+            {
+                "scene_id": "scene_2",
+                "timestamp": 30.0,
+                "duration": 500.0,
+                "loop": True,
+                "type": "environment",
+            },
+        ],
+    }
+
+    _clamp_overlong_scene_loop_cues(timeline, [])
+
+    assert timeline["timeline"][0]["duration"] == pytest.approx(120.0)
 
 
 def asyncio_run(awaitable):

@@ -128,6 +128,71 @@ def collect_chapter_remix_missing_segments(chapter_audio: Any) -> List[Dict[str,
     return missing
 
 
+def _clamp_overlong_scene_loop_cues(
+    timeline_container: Any,
+    segment_timings: List[Dict[str, Any]],
+) -> Any:
+    """收束场景类循环音效的过长 duration，避免锁链等环境音从章头响到章尾。
+
+    历史版本会把剧本标注的环境音拉伸到下一环境音/章尾；存量 checkpoint
+    中已持久化的超长时长在重新混音时按所属片段结尾（+5s 宽限）收束。
+    全章环境床（scene_id=ambient 等无法解析出片段索引）不受影响。
+    """
+    if not isinstance(timeline_container, dict):
+        return timeline_container
+    items = timeline_container.get("timeline")
+    if not isinstance(items, list) or not items:
+        return timeline_container
+
+    ends_by_index: Dict[int, float] = {}
+    for timing in segment_timings or []:
+        if not isinstance(timing, dict):
+            continue
+        try:
+            index = int(timing.get("index", len(ends_by_index)))
+            end = float(timing.get("end") or 0.0)
+        except (TypeError, ValueError):
+            continue
+        if end > 0.0:
+            ends_by_index[index] = max(ends_by_index.get(index, 0.0), end)
+
+    grace_seconds = 5.0
+    fallback_max_seconds = 120.0
+    for item in items:
+        if not isinstance(item, dict) or not item.get("loop"):
+            continue
+        # 工作台手动调整的条目以用户为准，不自动收束
+        if item.get("editor_timeline_key"):
+            continue
+        scene_index = _parse_scene_loop_cue_index(str(item.get("scene_id") or ""))
+        if scene_index is None:
+            continue
+        try:
+            start = float(item.get("timestamp") or 0.0)
+            duration = float(item.get("duration") or 0.0)
+        except (TypeError, ValueError):
+            continue
+        scene_end = ends_by_index.get(scene_index)
+        limit_end = (
+            scene_end + grace_seconds
+            if scene_end is not None
+            else start + fallback_max_seconds
+        )
+        if duration > max(0.0, limit_end - start):
+            item["duration"] = max(0.0, limit_end - start)
+    return timeline_container
+
+
+def _parse_scene_loop_cue_index(scene_id: str) -> Optional[int]:
+    for prefix in ("scene_", "climax_", "shift_"):
+        if scene_id.startswith(prefix):
+            try:
+                return int(scene_id[len(prefix):])
+            except ValueError:
+                return None
+    return None
+
+
 def _rescale_timeline_for_new_duration(
     timeline_container: Any,
     *,
@@ -567,6 +632,7 @@ def perform_chapter_remix(
         effect_timeline,
         overridden_segment_indices=overridden_sfx_segments,
     )
+    effect_timeline = _clamp_overlong_scene_loop_cues(effect_timeline, segment_timings)
     if (
         callable(apply_sound_effects)
         and isinstance(effect_timeline, dict)

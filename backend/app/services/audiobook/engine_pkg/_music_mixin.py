@@ -133,12 +133,21 @@ class MusicMixin:
         base_dir = get_audio_library_dir()
         applied_count = 0
         skipped_count = 0
+
+        def _item_start_ms(it: Dict[str, Any]) -> int:
+            try:
+                return max(0, int(float(it.get("timestamp") or 0.0) * 1000))
+            except (TypeError, ValueError):
+                return 0
+
+        # 按起播位置排序，用于“延续到下一配乐接管/章节结尾”的跨片段计算
+        ordered_items = sorted(timeline_items, key=_item_start_ms)
         
         # 🆕 检查是否启用智能音量平衡
         audio_fx = getattr(self, "_audio_fx_config", None) or {}
         intelligent_balance = audio_fx.get("intelligent_balance", True)
-        # 默认配乐基准音量：在避免喧宾夺主的前提下提升可听度
-        base_bgm_volume_db = audio_fx.get("base_bgm_volume", -18)
+        # 默认配乐基准音量：进一步压低以避免盖过人声，同时保持可听
+        base_bgm_volume_db = audio_fx.get("base_bgm_volume", -24)
         try:
             bgm_crossfade_ms = int(audio_fx.get("bgm_crossfade_ms") or 0)
         except Exception:
@@ -146,7 +155,7 @@ class MusicMixin:
         if bgm_crossfade_ms < 0:
             bgm_crossfade_ms = 0
         
-        for item in timeline_items:
+        for index, item in enumerate(ordered_items):
             file_ref = item.get("file")
             timestamp = item.get("timestamp", 0.0)
             volume = item.get("volume", 0.2)
@@ -181,8 +190,7 @@ class MusicMixin:
                 volume_adjust_db = 20 * math.log10(relative) if relative > 0 else -40
                 bgm_volume_offset = base_gain + volume_adjust_db
 
-            # 统一再降低 3dB，进一步减弱BGM存在感
-            bgm_volume_offset -= 3
+            # 智能平衡已将配乐限制在 -50~-10dB，不再叠加额外全局衰减，避免配乐几乎不可闻
             
             if not file_ref:
                 skipped_count += 1
@@ -221,6 +229,23 @@ class MusicMixin:
                 if bgm_crossfade_ms > 0:
                     fade_in_ms = max(fade_in_ms, bgm_crossfade_ms)
                     fade_out_ms = max(fade_out_ms, bgm_crossfade_ms)
+
+                # 允许配乐跨人声片段延续，避免在片段中间戛然而止：
+                # 有后续配乐时延续到其接管点，最后一个配乐播放到章节结尾
+                next_start_ms = (
+                    _item_start_ms(ordered_items[index + 1])
+                    if index + 1 < len(ordered_items)
+                    else None
+                )
+                if next_start_ms is not None and next_start_ms > position_ms:
+                    if duration_ms is None or position_ms + duration_ms < next_start_ms:
+                        duration_ms = next_start_ms - position_ms
+                    # 接管点补一个短淡出，避免音乐被硬切
+                    fade_out_ms = max(fade_out_ms, 1500)
+                elif next_start_ms is None:
+                    duration_ms = None
+                    # 结尾淡出保底，避免章节末尾音乐突然消失
+                    fade_out_ms = max(fade_out_ms, 2500)
 
                 mixed_audio = self.audio_mixer.add_background_music(
                     mixed_audio,

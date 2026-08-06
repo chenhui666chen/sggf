@@ -124,11 +124,15 @@ export const useAudiobookSegmentPreview = ({
     // options.candidateId 覆盖：候选生成成功后自动播放时，state 尚未更新，避免闭包旧值
     const candidateId = options?.candidateId || pendingRegeneration?.candidateId || ''
     const savedAudioPath = resolveSegmentAudioPath(segment, previewType)
+    // 管线生成的音效/配乐没有持久化分轨：无候选且无已存路径时由服务端按时间线实时渲染
+    const canPreviewPipelineTimeline = !candidateId
+      && !savedAudioPath
+      && (previewType === 'sfx' || previewType === 'bgm')
     const shouldUseChapterAudio = !candidateId && !savedAudioPath && previewType === 'mix' && chapterAudioAvailable
     const chapterStartTime = shouldUseChapterAudio
       ? resolveSegmentTimelineStartTime(segmentTimings, index, options?.startRatio ?? 0)
       : null
-    if (!candidateId && !savedAudioPath && !shouldUseChapterAudio) {
+    if (!candidateId && !savedAudioPath && !shouldUseChapterAudio && !canPreviewPipelineTimeline) {
       setSnackbar({
         open: true,
         message: `暂无可试听${PREVIEW_TYPE_LABELS[previewType]}音频，请先重新生成候选版本`,

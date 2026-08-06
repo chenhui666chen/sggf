@@ -28,6 +28,30 @@ class ProjectAudioRuntimeConfig:
     character_items: List[dict]
 
 
+# 配乐基准音量当前默认值（进一步压低以确保人声清晰）；旧版 Pydantic 默认 -36dB 过低
+BASE_BGM_VOLUME_DB_DEFAULT = -24.0
+
+# 历史上注入过的系统默认值；前端未开放该配置项，命中即视为旧默认可被抬升
+LEGACY_BASE_BGM_VOLUME_DEFAULTS = (-36.0, -18.0, -21.0)
+
+
+def heal_legacy_base_bgm_volume(audio_fx: Dict[str, Any]) -> Dict[str, Any]:
+    """将历史持久化的过低配乐基准音量抬升到当前默认值，保证存量项目配乐可听。
+
+    前端未开放该配置项，库中取值均来自旧版默认注入，因此抬升不会覆盖用户显式意图。
+    """
+    raw_value = audio_fx.get("base_bgm_volume")
+    if raw_value is None:
+        return audio_fx
+    try:
+        value = float(raw_value)
+    except (TypeError, ValueError):
+        return audio_fx
+    if value < BASE_BGM_VOLUME_DB_DEFAULT or value in LEGACY_BASE_BGM_VOLUME_DEFAULTS:
+        audio_fx["base_bgm_volume"] = BASE_BGM_VOLUME_DB_DEFAULT
+    return audio_fx
+
+
 def apply_scene_audio_runtime_to_engine(
     *,
     engine: Any,
@@ -171,7 +195,7 @@ def resolve_project_audio_runtime_config(
             tts_model=tts_model,
         )
 
-    audio_fx = get_audio_fx(raw_config) or {}
+    audio_fx = heal_legacy_base_bgm_volume(dict(get_audio_fx(raw_config) or {}))
 
     return ProjectAudioRuntimeConfig(
         voice_mapping=voice_mapping,

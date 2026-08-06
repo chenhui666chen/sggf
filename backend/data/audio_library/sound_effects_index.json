@@ -198,5 +198,411 @@
     "object_key": "shared/audio_library/sfx/sound_effects/action/realistic/sfx_action_2ab237.mp3",
     "local_cache_path": "sound_effects/action/realistic/sfx_action_2ab237.mp3",
     "asset_scope": "shared_library"
+  },
+  {
+    "id": "ambient_water_ambient_calm_doubao_7b2a5b",
+    "name": "水流涌动",
+    "category": "environment/peaceful",
+    "file_path": "sound_effects/environment/peaceful/ambient_water_ambient_calm_doubao_7b2a5b.mp3",
+    "description": "水流涌动",
+    "tags": [
+      "水",
+      "calm",
+      "environment",
+      "peaceful",
+      "outdoor"
+    ],
+    "source": "ai_generated",
+    "style": "peaceful",
+    "scenes": [
+      "outdoor"
+    ],
+    "quality_score": 100.0,
+    "quality_grade": "B",
+    "quality_status": "accepted",
+    "storage_mode": "durable_cloud",
+    "storage_driver": "aliyun_oss",
+    "cloud_uri": "oss://shared/audio_library/sfx/sound_effects/environment/peaceful/ambient_water_ambient_calm_doubao_7b2a5b.mp3",
+    "public_url": "https://audio.sggf.net/shared/audio_library/sfx/sound_effects/environment/peaceful/ambient_water_ambient_calm_doubao_7b2a5b.mp3",
+    "object_key": "shared/audio_library/sfx/sound_effects/environment/peaceful/ambient_water_ambient_calm_doubao_7b2a5b.mp3",
+    "local_cache_path": "sound_effects/environment/peaceful/ambient_water_ambient_calm_doubao_7b2a5b.mp3",
+    "asset_scope": "shared_library"
+  },
+  {
+    "id": "ambient_scene_ambient_calm_doubao_725975",
+    "name": "锁链晃动",
+    "category": "environment/peaceful",
+    "file_path": "sound_effects/environment/peaceful/ambient_scene_ambient_calm_doubao_725975.mp3",
+    "description": "锁链晃动",
+    "tags": [
+      "calm",
+      "environment",
+      "peaceful",
+      "outdoor"
+    ],
+    "source": "ai_generated",
+    "style": "peaceful",
+    "scenes": [
+      "outdoor"
+    ],
+    "quality_score": 100.0,
+    "quality_grade": "B",
+    "quality_status": "accepted",
+    "storage_mode": "durable_cloud",
+    "storage_driver": "aliyun_oss",
+    "cloud_uri": "oss://shared/audio_library/sfx/sound_effects/environment/peaceful/ambient_scene_ambient_calm_doubao_725975.mp3",
+    "public_url": "https://audio.sggf.net/shared/audio_library/sfx/sound_effects/environment/peaceful/ambient_scene_ambient_calm_doubao_725975.mp3",
+    "object_key": "shared/audio_library/sfx/sound_effects/environment/peaceful/ambient_scene_ambient_calm_doubao_725975.mp3",
+    "local_cache_path": "sound_effects/environment/peaceful/ambient_scene_ambient_calm_doubao_725975.mp3",
+    "asset_scope": "shared_library"
+  },
+  {
+    "id": "sfx_action_ea2578",
+    "name": "金属锁链撞击声",
+    "category": "action/intense",
+    "file_path": "sound_effects/action/intense/sfx_action_ea2578.mp3",
+    "description": "金属锁链撞击声",
+    "tags": [
+      "action",
+      "intense",
+      "general",
+      "scene_2"
+    ],
+    "source": "ai_generated",
+    "style": "intense",
+    "scenes": [
+      "general",
+      "scene_2"
+    ],
+    "quality_score": 65.0,
+    "quality_grade": "C",
+    "quality_status": "accepted",
+    "storage_mode": "durable_cloud",
+    "storage_driver": "aliyun_oss",
+    "cloud_uri": "oss://shared/audio_library/sfx/sound_effects/action/intense/sfx_action_ea2578.mp3",
+    "public_url": "https://audio.sggf.net/shared/audio_library/sfx/sound_effects/action/intense/sfx_action_ea2578.mp3",
+    "object_key": "shared/audio_library/sfx/sound_effects/action/intense/sfx_action_ea2578.mp3",
+    "local_cache_path": "sound_effects/action/intense/sfx_action_ea2578.mp3",
+    "asset_scope": "shared_library"
+  },
+  {
+    "id": "sfx_action_c60ad1",
+    "name": "锁链晃动声",
+    "category": "action/realistic",
+    "file_path": "sound_effects/action/realistic/sfx_action_c60ad1.mp3",
+    "description": "锁链晃动声",
+    "tags": [
+      "action",
+      "realistic",
+      "general",
+      "scene_7"
+    ],
+    "source": "ai_generated",
+    "style": "realistic",
+    "scenes": [
+      "general",
+      "scene_7"
+    ],
+    "quality_score": 100.0,
+    "quality_grade": "B",
+    "quality_status": "accepted",
+    "storage_mode": "durable_cloud",
+    "storage_driver": "aliyun_oss",
+    "cloud_uri": "oss://shared/audio_library/sfx/sound_effects/action/realistic/sfx_action_c60ad1.mp3",
+    "public_url": "https://audio.sggf.net/shared/audio_library/sfx/sound_effects/action/realistic/sfx_action_c60ad1.mp3",
+    "object_key": "shared/audio_library/sfx/sound_effects/action/realistic/sfx_action_c60ad1.mp3",
+    "local_cache_path": "sound_effects/action/realistic/sfx_action_c60ad1.mp3",
+    "asset_scope": "shared_library"
+  },
+  {
+    "id": "ambient_scene_ambient_calm_doubao_1cf300",
+    "name": "低沉嗡鸣",
+    "category": "environment/peaceful",
+    "file_path": "sound_effects/environment/peaceful/ambient_scene_ambient_calm_doubao_1cf300.mp3",
+    "description": "低沉嗡鸣",
+    "tags": [
+      "calm",
+      "environment",
+      "peaceful",
+      "outdoor"
+    ],
+    "source": "ai_generated",
+    "style": "peaceful",
+    "scenes": [
+      "outdoor"
+    ],
+    "quality_score": 100.0,
+    "quality_grade": "B",
+    "quality_status": "accepted",
+    "storage_mode": "durable_cloud",
+    "storage_driver": "aliyun_oss",
+    "cloud_uri": "oss://shared/audio_library/sfx/sound_effects/environment/peaceful/ambient_scene_ambient_calm_doubao_1cf300.mp3",
+    "public_url": "https://audio.sggf.net/shared/audio_library/sfx/sound_effects/environment/peaceful/ambient_scene_ambient_calm_doubao_1cf300.mp3",
+    "object_key": "shared/audio_library/sfx/sound_effects/environment/peaceful/ambient_scene_ambient_calm_doubao_1cf300.mp3",
+    "local_cache_path": "sound_effects/environment/peaceful/ambient_scene_ambient_calm_doubao_1cf300.mp3",
+    "asset_scope": "shared_library"
+  },
+  {
+    "id": "sfx_action_76adbc",
+    "name": "脚步声",
+    "category": "action/realistic",
+    "file_path": "sound_effects/action/realistic/sfx_action_76adbc.mp3",
+    "description": "脚步声",
+    "tags": [
+      "action",
+      "realistic",
+      "general",
+      "scene_9"
+    ],
+    "source": "ai_generated",
+    "style": "realistic",
+    "scenes": [
+      "general",
+      "scene_9"
+    ],
+    "quality_score": 100.0,
+    "quality_grade": "B",
+    "quality_status": "accepted",
+    "storage_mode": "durable_cloud",
+    "storage_driver": "aliyun_oss",
+    "cloud_uri": "oss://shared/audio_library/sfx/sound_effects/action/realistic/sfx_action_76adbc.mp3",
+    "public_url": "https://audio.sggf.net/shared/audio_library/sfx/sound_effects/action/realistic/sfx_action_76adbc.mp3",
+    "object_key": "shared/audio_library/sfx/sound_effects/action/realistic/sfx_action_76adbc.mp3",
+    "local_cache_path": "sound_effects/action/realistic/sfx_action_76adbc.mp3",
+    "asset_scope": "shared_library"
+  },
+  {
+    "id": "sfx_action_8a8e14",
+    "name": "咳嗽声",
+    "category": "action/realistic",
+    "file_path": "sound_effects/action/realistic/sfx_action_8a8e14.mp3",
+    "description": "咳嗽声",
+    "tags": [
+      "action",
+      "realistic",
+      "general",
+      "scene_19"
+    ],
+    "source": "ai_generated",
+    "style": "realistic",
+    "scenes": [
+      "general",
+      "scene_19"
+    ],
+    "quality_score": 80.0,
+    "quality_grade": "B",
+    "quality_status": "accepted",
+    "storage_mode": "durable_cloud",
+    "storage_driver": "aliyun_oss",
+    "cloud_uri": "oss://shared/audio_library/sfx/sound_effects/action/realistic/sfx_action_8a8e14.mp3",
+    "public_url": "https://audio.sggf.net/shared/audio_library/sfx/sound_effects/action/realistic/sfx_action_8a8e14.mp3",
+    "object_key": "shared/audio_library/sfx/sound_effects/action/realistic/sfx_action_8a8e14.mp3",
+    "local_cache_path": "sound_effects/action/realistic/sfx_action_8a8e14.mp3",
+    "asset_scope": "shared_library"
+  },
+  {
+    "id": "sfx_action_85c6d3",
+    "name": "拔刀声",
+    "category": "action/realistic",
+    "file_path": "sound_effects/action/realistic/sfx_action_85c6d3.mp3",
+    "description": "拔刀声",
+    "tags": [
+      "action",
+      "realistic",
+      "battle",
+      "scene_21"
+    ],
+    "source": "ai_generated",
+    "style": "realistic",
+    "scenes": [
+      "battle",
+      "scene_21"
+    ],
+    "quality_score": 85.0,
+    "quality_grade": "B",
+    "quality_status": "accepted",
+    "storage_mode": "durable_cloud",
+    "storage_driver": "aliyun_oss",
+    "cloud_uri": "oss://shared/audio_library/sfx/sound_effects/action/realistic/sfx_action_85c6d3.mp3",
+    "public_url": "https://audio.sggf.net/shared/audio_library/sfx/sound_effects/action/realistic/sfx_action_85c6d3.mp3",
+    "object_key": "shared/audio_library/sfx/sound_effects/action/realistic/sfx_action_85c6d3.mp3",
+    "local_cache_path": "sound_effects/action/realistic/sfx_action_85c6d3.mp3",
+    "asset_scope": "shared_library"
+  },
+  {
+    "id": "sfx_action_a3430f",
+    "name": "刀风",
+    "category": "action/realistic",
+    "file_path": "sound_effects/action/realistic/sfx_action_a3430f.mp3",
+    "description": "刀风",
+    "tags": [
+      "action",
+      "realistic",
+      "outdoor",
+      "battle",
+      "scene_24"
+    ],
+    "source": "ai_generated",
+    "style": "realistic",
+    "scenes": [
+      "outdoor",
+      "battle",
+      "scene_24"
+    ],
+    "quality_score": 80.0,
+    "quality_grade": "B",
+    "quality_status": "accepted",
+    "storage_mode": "durable_cloud",
+    "storage_driver": "aliyun_oss",
+    "cloud_uri": "oss://shared/audio_library/sfx/sound_effects/action/realistic/sfx_action_a3430f.mp3",
+    "public_url": "https://audio.sggf.net/shared/audio_library/sfx/sound_effects/action/realistic/sfx_action_a3430f.mp3",
+    "object_key": "shared/audio_library/sfx/sound_effects/action/realistic/sfx_action_a3430f.mp3",
+    "local_cache_path": "sound_effects/action/realistic/sfx_action_a3430f.mp3",
+    "asset_scope": "shared_library"
+  },
+  {
+    "id": "sfx_action_4a80ef",
+    "name": "兵刃声",
+    "category": "action/realistic",
+    "file_path": "sound_effects/action/realistic/sfx_action_4a80ef.mp3",
+    "description": "兵刃声",
+    "tags": [
+      "action",
+      "realistic",
+      "general",
+      "scene_37"
+    ],
+    "source": "ai_generated",
+    "style": "realistic",
+    "scenes": [
+      "general",
+      "scene_37"
+    ],
+    "quality_score": 100.0,
+    "quality_grade": "B",
+    "quality_status": "accepted",
+    "storage_mode": "durable_cloud",
+    "storage_driver": "aliyun_oss",
+    "cloud_uri": "oss://shared/audio_library/sfx/sound_effects/action/realistic/sfx_action_4a80ef.mp3",
+    "public_url": "https://audio.sggf.net/shared/audio_library/sfx/sound_effects/action/realistic/sfx_action_4a80ef.mp3",
+    "object_key": "shared/audio_library/sfx/sound_effects/action/realistic/sfx_action_4a80ef.mp3",
+    "local_cache_path": "sound_effects/action/realistic/sfx_action_4a80ef.mp3",
+    "asset_scope": "shared_library"
+  },
+  {
+    "id": "sfx_action_4ebb32",
+    "name": "火把熄灭",
+    "category": "action/realistic",
+    "file_path": "sound_effects/action/realistic/sfx_action_4ebb32.mp3",
+    "description": "火把熄灭",
+    "tags": [
+      "action",
+      "realistic",
+      "outdoor",
+      "scene_51"
+    ],
+    "source": "ai_generated",
+    "style": "realistic",
+    "scenes": [
+      "outdoor",
+      "scene_51"
+    ],
+    "quality_score": 100.0,
+    "quality_grade": "B",
+    "quality_status": "accepted",
+    "storage_mode": "durable_cloud",
+    "storage_driver": "aliyun_oss",
+    "cloud_uri": "oss://shared/audio_library/sfx/sound_effects/action/realistic/sfx_action_4ebb32.mp3",
+    "public_url": "https://audio.sggf.net/shared/audio_library/sfx/sound_effects/action/realistic/sfx_action_4ebb32.mp3",
+    "object_key": "shared/audio_library/sfx/sound_effects/action/realistic/sfx_action_4ebb32.mp3",
+    "local_cache_path": "sound_effects/action/realistic/sfx_action_4ebb32.mp3",
+    "asset_scope": "shared_library"
+  },
+  {
+    "id": "sfx_action_288121",
+    "name": "抓挠声",
+    "category": "action/realistic",
+    "file_path": "sound_effects/action/realistic/sfx_action_288121.mp3",
+    "description": "抓挠声",
+    "tags": [
+      "action",
+      "realistic",
+      "general",
+      "scene_10"
+    ],
+    "source": "ai_generated",
+    "style": "realistic",
+    "scenes": [
+      "general",
+      "scene_10"
+    ],
+    "quality_score": 100.0,
+    "quality_grade": "B",
+    "quality_status": "accepted",
+    "storage_mode": "durable_cloud",
+    "storage_driver": "aliyun_oss",
+    "cloud_uri": "oss://shared/audio_library/sfx/sound_effects/action/realistic/sfx_action_288121.mp3",
+    "public_url": "https://audio.sggf.net/shared/audio_library/sfx/sound_effects/action/realistic/sfx_action_288121.mp3",
+    "object_key": "shared/audio_library/sfx/sound_effects/action/realistic/sfx_action_288121.mp3",
+    "local_cache_path": "sound_effects/action/realistic/sfx_action_288121.mp3",
+    "asset_scope": "shared_library"
+  },
+  {
+    "id": "sfx_action_d75bcd",
+    "name": "刀锋破空声",
+    "category": "action/realistic",
+    "file_path": "sound_effects/action/realistic/sfx_action_d75bcd.mp3",
+    "description": "刀锋破空声",
+    "tags": [
+      "action",
+      "realistic",
+      "battle",
+      "scene_36"
+    ],
+    "source": "ai_generated",
+    "style": "realistic",
+    "scenes": [
+      "battle",
+      "scene_36"
+    ],
+    "quality_score": 100.0,
+    "quality_grade": "B",
+    "quality_status": "accepted",
+    "storage_mode": "durable_cloud",
+    "storage_driver": "aliyun_oss",
+    "cloud_uri": "oss://shared/audio_library/sfx/sound_effects/action/realistic/sfx_action_d75bcd.mp3",
+    "public_url": "https://audio.sggf.net/shared/audio_library/sfx/sound_effects/action/realistic/sfx_action_d75bcd.mp3",
+    "object_key": "shared/audio_library/sfx/sound_effects/action/realistic/sfx_action_d75bcd.mp3",
+    "local_cache_path": "sound_effects/action/realistic/sfx_action_d75bcd.mp3",
+    "asset_scope": "shared_library"
+  },
+  {
+    "id": "sfx_emotion_8090da",
+    "name": "回声",
+    "category": "emotion/peaceful",
+    "file_path": "sound_effects/emotion/peaceful/sfx_emotion_8090da.mp3",
+    "description": "回声",
+    "tags": [
+      "emotion",
+      "peaceful",
+      "general",
+      "scene_14"
+    ],
+    "source": "ai_generated",
+    "style": "peaceful",
+    "scenes": [
+      "general",
+      "scene_14"
+    ],
+    "quality_score": 100.0,
+    "quality_grade": "B",
+    "quality_status": "accepted",
+    "storage_mode": "durable_cloud",
+    "storage_driver": "aliyun_oss",
+    "cloud_uri": "oss://shared/audio_library/sfx/sound_effects/emotion/peaceful/sfx_emotion_8090da.mp3",
+    "public_url": "https://audio.sggf.net/shared/audio_library/sfx/sound_effects/emotion/peaceful/sfx_emotion_8090da.mp3",
+    "object_key": "shared/audio_library/sfx/sound_effects/emotion/peaceful/sfx_emotion_8090da.mp3",
+    "local_cache_path": "sound_effects/emotion/peaceful/sfx_emotion_8090da.mp3",
+    "asset_scope": "shared_library"
   }
 ]

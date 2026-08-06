@@ -30,8 +30,14 @@ from app.services.audiobook.project_audio_runtime import (
     resolve_project_audio_runtime_config,
 )
 from app.services.audiobook.mimo_voice_assets import merge_mimo_voice_asset_tts_params
+from app.services.audiobook.background_jobs_shared import (
+    get_latest_run_checkpoint_json,
+)
 from app.services.audiobook import segment_preview_service as _segment_preview_module
 from app.services.audiobook.segment_preview_service import SegmentPreviewService
+from app.services.audiobook.segment_timeline_preview import (
+    render_segment_timeline_preview,
+)
 from app.services.audiobook.segment_asset_ai_generator import (
     generate_segment_bgm_asset,
     generate_segment_sfx_asset,
@@ -83,6 +89,11 @@ DEFAULT_SEGMENT_REGEN_VOICE_ID = "Neil"
 DEFAULT_MINIMAX_SEGMENT_REGEN_VOICE_ID = "male-qn-qingse"
 SEGMENT_REGEN_PREVIEW_TYPES = {"voice", "sfx", "bgm", "mix"}
 MAX_SEGMENT_VOICE_RECORDING_BYTES = 100 * 1024 * 1024
+
+# 时间线试听的 checkpoint 来源优先级：最近一次混音产物 > 管线原始生成
+_SEGMENT_TIMELINE_PREVIEW_RUN_TYPES = ("chapter_remix", "audio_from_scripts", "full")
+# 仅用于解析项目 audio_fx，取值不影响音效配置本身
+_SEGMENT_TIMELINE_PREVIEW_TTS_MODEL = "qwen3-tts-instruct-flash"
 
 
 def _normalize_segment_regeneration_preview_type(value: Optional[str]) -> str:
@@ -541,6 +552,60 @@ def _segment_audio_path_field(preview_type: Optional[str]) -> str:
     if normalized_type == "voice":
         return "audio_path"
     return f"{normalized_type}_audio_path"
+
+
+def _render_segment_timeline_preview(
+    owned: OwnedAudiobookProject,
+    *,
+    audiobook_project_id: int,
+    chapter_id: int,
+    segment_index: int,
+    preview_type: str,
+) -> bytes:
+    """无持久化分轨时，按 checkpoint 时间线实时渲染片段音效/配乐试听。
+
+    管线生成的音效/配乐只存在章节级时间线中，这里取归属该片段的条目
+    渲染，保证试听结果与整章成品一致。
+    """
+    timeline_key = "effect_timeline" if preview_type == "sfx" else "music_timeline"
+    checkpoint: Dict[str, Any] = {}
+    for run_type in _SEGMENT_TIMELINE_PREVIEW_RUN_TYPES:
+        candidate = get_latest_run_checkpoint_json(
+            owned.db,
+            audiobook_project_id=audiobook_project_id,
+            chapter_id=chapter_id,
+            run_type=run_type,
+        )
+        container = candidate.get(timeline_key)
+        if (
+            isinstance(container, dict)
+            and container.get("timeline")
+            and isinstance(candidate.get("segment_timings"), list)
+        ):
+            checkpoint = candidate
+            break
+
+    audio_fx: Dict[str, Any] = {}
+    runtime_config = resolve_project_audio_runtime_config(
+        getattr(owned, "project", None),
+        tts_model=_SEGMENT_TIMELINE_PREVIEW_TTS_MODEL,
+        base_voice_mapping=getattr(owned.audiobook_project, "voice_mapping", None) or {},
+    )
+    audio_fx = runtime_config.audio_fx or {}
+
+    rendered = render_segment_timeline_preview(
+        checkpoint=checkpoint,
+        segment_index=segment_index,
+        preview_type=preview_type,
+        audio_fx=audio_fx,
+    )
+    if not rendered:
+        label = "音效" if preview_type == "sfx" else "配乐"
+        raise HTTPException(
+            status_code=404,
+            detail=f"该片段没有管线生成的{label}时间线，请先配置{label}提示或重新生成章节音频",
+        )
+    return rendered
 
 
 def _cleanup_replaced_persistent_segment_assets(
@@ -1088,10 +1153,17 @@ async def get_segment_regeneration_candidate_audio(
 
     - candidate_id：服务端签发的候选凭证（候选音频试听）
     - audio_path + preview_type：已保存片段音频，服务端校验其与剧本登记值一致
+    - 仅 preview_type=sfx/bgm：无持久化分轨时按管线 checkpoint 时间线实时渲染
     """
     candidate_token = str(candidate_id or "").strip()
     persisted_audio_ref = str(audio_path or "").strip()
-    if not candidate_token and not persisted_audio_ref:
+    normalized_preview_type = _normalize_segment_regeneration_preview_type(preview_type)
+    # 音效/配乐允许仅凭 preview_type 试听：管线产物无持久化分轨，服务端按时间线渲染
+    if (
+        not candidate_token
+        and not persisted_audio_ref
+        and normalized_preview_type not in {"sfx", "bgm"}
+    ):
         raise HTTPException(status_code=400, detail="candidate_id 或 audio_path 不能为空")
 
     chapter_audio = get_active_chapter_audio_for_project(
@@ -1152,18 +1224,30 @@ async def get_segment_regeneration_candidate_audio(
         segments = _load_chapter_segments(chapter_audio)
         segment = _get_segment_or_404(segments, segment_index)
         stored_ref = str(
-            segment.get(_segment_audio_path_field(preview_type)) or ""
+            segment.get(_segment_audio_path_field(normalized_preview_type)) or ""
         ).strip()
-        if (
-            not stored_ref
-            or stored_ref != persisted_audio_ref
-            or not is_persistent_segment_asset_ref(persisted_audio_ref)
-        ):
+        if stored_ref:
+            if (
+                stored_ref != persisted_audio_ref
+                or not is_persistent_segment_asset_ref(persisted_audio_ref)
+            ):
+                raise HTTPException(status_code=400, detail="片段音频路径无效")
+            audio_bytes = load_persistent_segment_audio(persisted_audio_ref)
+            if not audio_bytes:
+                raise HTTPException(status_code=404, detail="片段音频文件不存在")
+            audio_ref = persisted_audio_ref
+        elif normalized_preview_type in {"sfx", "bgm"}:
+            # 管线生成的音效/配乐没有持久化分轨：按 checkpoint 时间线实时渲染
+            audio_bytes = _render_segment_timeline_preview(
+                owned,
+                audiobook_project_id=audiobook_project_id,
+                chapter_id=chapter_id,
+                segment_index=segment_index,
+                preview_type=normalized_preview_type,
+            )
+            audio_ref = "segment_timeline_preview.mp3"
+        else:
             raise HTTPException(status_code=400, detail="片段音频路径无效")
-        audio_bytes = load_persistent_segment_audio(persisted_audio_ref)
-        if not audio_bytes:
-            raise HTTPException(status_code=404, detail="片段音频文件不存在")
-        audio_ref = persisted_audio_ref
 
     return Response(
         content=audio_bytes,

@@ -24,6 +24,8 @@ describe('useAudiobookSegmentPreview source contract', () => {
     expect(previewSource).toContain('resolveSegmentAudioPath')
     expect(previewSource).toContain('pendingSegmentRegenerations[index]?.[previewType]')
     expect(previewSource).not.toContain('apiClient.previewScriptSegmentAudio(')
+    // 管线生成的音效/配乐无持久化分轨时，允许仅凭 preview_type 交由服务端时间线渲染
+    expect(previewSource).toContain('canPreviewPipelineTimeline')
   })
 
   it('can start segment preview playback from a timeline seek ratio', () => {

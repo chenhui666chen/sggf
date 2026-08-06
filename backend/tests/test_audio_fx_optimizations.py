@@ -1022,15 +1022,66 @@ def test_music_timeline_resolves_generated_audio_library_path(tmp_path, monkeypa
                     "mood": "tense",
                     "volume": 0.2,
                     "duration": 12.0,
+                },
+                {
+                    "file": "music_cache/bgm.mp3",
+                    "timestamp": 20.0,
+                    "type": "underscore",
+                    "mood": "tense",
+                    "volume": 0.2,
+                    "duration": 5.0,
                 }
             ]
         },
     )
 
-    assert result == b"voice|bgm"
+    assert result == b"voice|bgm|bgm"
     assert calls[0][0] == b"bgm-bytes"
     assert calls[0][1]["position_ms"] == 2000
-    assert calls[0][1]["duration_ms"] == 12000
+    # 配乐允许跨人声片段：前一个 cue 延续到下一 cue 接管点（20s），而非在 14s 处戛然而止
+    assert calls[0][1]["duration_ms"] == 18000
+    assert calls[0][1]["fade_out_ms"] >= 1500
+    # 最后一个 cue 播放到章节结尾，并保底淡出
+    assert calls[1][1]["duration_ms"] is None
+    assert calls[1][1]["fade_out_ms"] >= 2500
+
+
+def test_music_timeline_keeps_longer_existing_duration_across_segments(tmp_path, monkeypatch):
+    """cue 自身时长已跨过下一接管点时保持原时长，不被收缩。"""
+    from app.services.audiobook.audio_library_paths import AUDIO_LIBRARY_DIR_ENV
+    from app.services.audiobook.engine_pkg._music_mixin import MusicMixin
+
+    audio_library = tmp_path / "audio_library"
+    music_path = audio_library / "music_cache" / "bgm.mp3"
+    music_path.parent.mkdir(parents=True)
+    music_path.write_bytes(b"bgm-bytes")
+    monkeypatch.setenv(AUDIO_LIBRARY_DIR_ENV, str(audio_library))
+
+    calls = []
+
+    class Harness(MusicMixin):
+        def __init__(self):
+            self._audio_fx_config = {}
+            self.audio_mixer = SimpleNamespace(
+                add_background_music=self._add_background_music,
+            )
+
+        def _add_background_music(self, voice_audio, bgm_audio, **kwargs):
+            calls.append(kwargs)
+            return voice_audio + b"|bgm"
+
+    Harness()._apply_background_music(
+        b"voice",
+        {
+            "timeline": [
+                {"file": "music_cache/bgm.mp3", "timestamp": 0.0, "duration": 30.0},
+                {"file": "music_cache/bgm.mp3", "timestamp": 10.0, "duration": 4.0},
+            ]
+        },
+    )
+
+    assert calls[0]["duration_ms"] == 30000
+    assert calls[1]["duration_ms"] is None
 
 
 def test_sound_effect_timeline_rejects_library_external_path(tmp_path, monkeypatch):
@@ -1118,6 +1169,60 @@ def test_intelligent_bgm_volume_adjusts_underscore_moods(mood, expected_volume_d
     )
 
     assert volume_db == pytest.approx(expected_volume_db)
+
+
+def test_music_timeline_no_longer_applies_global_minus_three_db(tmp_path, monkeypatch):
+    """配乐叠加不再额外全局降 3dB，避免混音后配乐几乎不可闻。"""
+    from app.services.audiobook.audio_library_paths import AUDIO_LIBRARY_DIR_ENV
+    from app.services.audiobook.engine_pkg._music_mixin import MusicMixin
+
+    audio_library = tmp_path / "audio_library"
+    music_path = audio_library / "music_cache" / "bgm.mp3"
+    music_path.parent.mkdir(parents=True)
+    music_path.write_bytes(b"bgm-bytes")
+    monkeypatch.setenv(AUDIO_LIBRARY_DIR_ENV, str(audio_library))
+
+    calls = []
+
+    class Harness(MusicMixin):
+        def __init__(self):
+            self._audio_fx_config = {"intelligent_balance": False, "base_bgm_volume": -24}
+            self.audio_mixer = SimpleNamespace(
+                add_background_music=self._add_background_music,
+            )
+
+        def _add_background_music(self, voice_audio, bgm_audio, **kwargs):
+            calls.append(kwargs)
+            return voice_audio + b"|bgm"
+
+    # underscore / volume=0.2：相对调整为 0，期望恰好等于基准 -24dB
+    Harness()._apply_background_music(
+        b"voice",
+        {"timeline": [{"file": "music_cache/bgm.mp3", "type": "underscore", "volume": 0.2}]},
+    )
+
+    assert calls[0]["bgm_volume_offset"] == -24
+
+
+def test_resolve_runtime_config_heals_legacy_low_bgm_volume():
+    """存量项目持久化的过低 base_bgm_volume 应在运行时抬升到当前默认值。"""
+    from app.services.audiobook.project_audio_runtime import heal_legacy_base_bgm_volume
+
+    healed = heal_legacy_base_bgm_volume({"base_bgm_volume": -36.0})
+    assert healed["base_bgm_volume"] == -24.0
+
+    # 历史系统默认 -21 也视为旧默认被抬升，确保存量项目应用新音量
+    healed_legacy_default = heal_legacy_base_bgm_volume({"base_bgm_volume": -21.0})
+    assert healed_legacy_default["base_bgm_volume"] == -24.0
+
+    explicit = heal_legacy_base_bgm_volume({"base_bgm_volume": -12.0})
+    assert explicit["base_bgm_volume"] == -12.0
+
+    untouched = heal_legacy_base_bgm_volume({"enable_music": True})
+    assert "base_bgm_volume" not in untouched
+
+    invalid = heal_legacy_base_bgm_volume({"base_bgm_volume": "invalid"})
+    assert invalid["base_bgm_volume"] == "invalid"
 
 
 def test_music_resolver_uses_audio_library_base_for_relative_index_paths(tmp_path):

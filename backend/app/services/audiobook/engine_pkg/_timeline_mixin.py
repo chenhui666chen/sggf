@@ -243,6 +243,9 @@ class TimelineMixin:
             durations.append(estimate_narration_duration_seconds(text))
         return durations
 
+    # 场景内环境音允许超出所属片段结尾的宽限（秒），避免在片段边界被硬切
+    ENVIRONMENT_SCENE_GRACE_SECONDS = 5.0
+
     def _align_timeline_with_audio(
         self,
         timeline: Optional[Dict[str, Any]],
@@ -256,13 +259,15 @@ class TimelineMixin:
             return timeline
 
         adjusted_items: List[Dict[str, Any]] = []
+        item_scene_indices: List[Optional[int]] = []
         for item in timeline.get("timeline", []):
             new_item = dict(item)
+            scene_id = str(item.get("scene_id") or "")
+            item_scene_indices.append(self._parse_scene_index(scene_id))
             if new_item.get("editor_timeline_key"):
                 adjusted_items.append(new_item)
                 continue
-            scene_id = str(item.get("scene_id") or "")
-            idx = self._parse_scene_index(scene_id)
+            idx = item_scene_indices[-1]
             if idx is not None and idx < len(estimated_offsets) and idx < len(actual_offsets):
                 est_start = estimated_offsets[idx]["start"]
                 actual_start = actual_offsets[idx]["start"]
@@ -283,9 +288,23 @@ class TimelineMixin:
             for pos, idx in enumerate(env_indices):
                 item = adjusted_items[idx]
                 start = float(item.get("timestamp", 0.0))
-                next_start = total_actual_duration
-                if pos + 1 < len(env_indices):
-                    next_start = float(adjusted_items[env_indices[pos + 1]].get("timestamp", total_actual_duration))
+                scene_idx = item_scene_indices[idx]
+                if scene_idx is not None and scene_idx < len(actual_offsets):
+                    # 剧本标注的场景环境音（如锁链、雨声）只覆盖所属场景并留少量宽限，
+                    # 避免被拉伸到下一环境音/章尾而从章头响到章尾
+                    scene_end = (
+                        actual_offsets[scene_idx]["start"]
+                        + actual_offsets[scene_idx]["duration"]
+                    )
+                    next_start = min(
+                        scene_end + self.ENVIRONMENT_SCENE_GRACE_SECONDS,
+                        total_actual_duration,
+                    )
+                else:
+                    # 全章环境床（scene_id=ambient 等）仍覆盖到下一环境床或章节结尾
+                    next_start = total_actual_duration
+                    if pos + 1 < len(env_indices):
+                        next_start = float(adjusted_items[env_indices[pos + 1]].get("timestamp", total_actual_duration))
                 if next_start <= start:
                     continue
                 item["duration"] = max(0.0, next_start - start)

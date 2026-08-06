@@ -41,6 +41,7 @@ def build_render_plan(
     *,
     max_chunk_chars: Optional[int] = None,
     _synchronize_semantics: bool = True,
+    _exclude_engine_style_keys: bool = True,
 ) -> List[RenderChunk]:
     chunks: List[RenderChunk] = []
     chunk_char_limit = _resolve_chunk_char_limit(max_chunk_chars)
@@ -111,6 +112,7 @@ def build_render_plan(
                 voice_params=chunk_voice_params,
                 segment_type=segment_type,
                 performance_notes=performance_notes,
+                exclude_engine_style_keys=_exclude_engine_style_keys,
             )
             chunks.append(
                 RenderChunk(
@@ -308,6 +310,7 @@ def _build_cache_key(
     voice_params: Dict[str, Any],
     segment_type: str,
     performance_notes: str,
+    exclude_engine_style_keys: bool = True,
 ) -> str:
     signature_payload = {
         "version": RENDER_PLAN_VERSION,
@@ -315,7 +318,10 @@ def _build_cache_key(
         "text": text,
         "speaker": speaker,
         "emotion": emotion,
-        "voice_params": _signature_voice_params(voice_params),
+        "voice_params": _signature_voice_params(
+            voice_params,
+            exclude_engine_style_keys=exclude_engine_style_keys,
+        ),
         "segment_type": segment_type,
         "performance_notes": performance_notes,
     }
@@ -323,7 +329,27 @@ def _build_cache_key(
     return hashlib.sha1(serialized.encode("utf-8")).hexdigest()
 
 
-def _signature_voice_params(voice_params: Dict[str, Any]) -> Dict[str, Any]:
+# 管线 _assign_voices 内存注入、不落库的运行时键（详见 _signature_voice_params
+# 忽略集注释）；历史资产的存储签名计入过这些键，仅自愈旧投影时允许保留。
+ENGINE_STYLE_RUNTIME_KEYS = frozenset(
+    {
+        "narration_style",
+        "narration_style_legacy",
+        "narration_style_prompt_legacy",
+        "narration_style_pause_applied",
+        "character_base_speed",
+        "voice_design_prompt",
+        "voice_clone_data_url",
+        "voice_sample_path",
+    }
+)
+
+
+def _signature_voice_params(
+    voice_params: Dict[str, Any],
+    *,
+    exclude_engine_style_keys: bool = True,
+) -> Dict[str, Any]:
     ignored_keys = {
         "mixer_segment_type",
         "pause_before",
@@ -347,7 +373,26 @@ def _signature_voice_params(voice_params: Dict[str, Any]) -> Dict[str, Any]:
         "provider_prompt_snapshot",
         "resolved_tts_model",
         "use_instruct_mode",
+        # 管线 _assign_voices 内存注入、不落库的运行时键：旁白风格 legacy
+        # 审计输入不再覆盖运行时表演参数，停顿标记只作用于被忽略的 pause 字段，
+        # character_base_speed 是音色档案派生的回退基线（instruct 模型会被清除），
+        # 三者均不改变片段 TTS 音频内容；若计入签名，audio_from_scripts
+        # 持久化剧本不含这些键会导致全部旁白片段被误判 stale。
+        "narration_style",
+        "narration_style_legacy",
+        "narration_style_prompt_legacy",
+        "narration_style_pause_applied",
+        "character_base_speed",
+        # 音色档案（mimo 设计/克隆、stepaudio 克隆）配方键：档案创建后不可变，
+        # 合成时音色由已计入签名的 asset id 锁定，配方原文只在创建音色时使用，
+        # 不改变片段 TTS 音频内容；持久化剧本不含这些键，计入签名会把
+        # mimo/stepaudio 资产音色片段全部误判 stale。
+        "voice_design_prompt",
+        "voice_clone_data_url",
+        "voice_sample_path",
     }
+    if not exclude_engine_style_keys:
+        ignored_keys -= ENGINE_STYLE_RUNTIME_KEYS
     return {
         key: value
         for key, value in sorted(_jsonable_dict(voice_params).items())

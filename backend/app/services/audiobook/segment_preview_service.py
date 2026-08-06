@@ -592,7 +592,7 @@ class SegmentPreviewService:
             logger.warning("试听配乐文件不存在: %s", music_path)
             return base_audio
 
-        base_bgm_volume_db = self.audio_fx.get("base_bgm_volume", -18)
+        base_bgm_volume_db = self.audio_fx.get("base_bgm_volume", -24)
         try:
             volume_val = float(cue.get("volume", 0.2))
         except (TypeError, ValueError):
@@ -600,7 +600,8 @@ class SegmentPreviewService:
         volume_val = max(0.05, min(1.0, volume_val))
         relative = volume_val / 0.2
         volume_adjust_db = 20 * math.log10(relative) if relative > 0 else -40
-        bgm_volume_offset = base_bgm_volume_db + volume_adjust_db - 3
+        # 与整章混音保持一致：不再叠加额外全局 -3dB 衰减
+        bgm_volume_offset = base_bgm_volume_db + volume_adjust_db
 
         try:
             bgm_crossfade_ms = int(self.audio_fx.get("bgm_crossfade_ms") or 0)

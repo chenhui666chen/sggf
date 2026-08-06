@@ -69,7 +69,8 @@ class AudioFxConfig(BaseModel):
     music_density: str = "medium"  # low/medium/high/off
     bgm_theme: Optional[str] = None
     bgm_style: Optional[str] = None
-    base_bgm_volume: float = -36.0
+    # 配乐基准音量（dB）：-24 进一步压低配乐确保人声清晰；旧版默认 -36 曾导致配乐几乎不可闻
+    base_bgm_volume: float = -24.0
     intelligent_balance: bool = True
     bgm_crossfade_ms: int = 0
     sound_effect_ducking: bool = True

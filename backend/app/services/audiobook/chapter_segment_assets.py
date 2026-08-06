@@ -397,6 +397,7 @@ def _compute_segment_audio_cache_key(
     default_tts_model: Optional[str] = None,
     render_chunk_max_chars: Any = _UNSET_CHUNK_LIMIT,
     synchronize_semantics: bool,
+    exclude_engine_style_keys: bool = True,
 ) -> str:
     from app.services.audiobook.engine_pkg._tts_mixin import (
         QWEN_RENDER_CHUNK_MAX_CHARS,
@@ -418,6 +419,7 @@ def _compute_segment_audio_cache_key(
         [normalized],
         max_chunk_chars=max_chunk_chars,
         _synchronize_semantics=synchronize_semantics,
+        _exclude_engine_style_keys=exclude_engine_style_keys,
     )
     if not chunks:
         return ""
@@ -487,6 +489,155 @@ def _pre_semantic_sync_signature_matches(
         segment,
         default_tts_model=default_tts_model,
         render_chunk_max_chars=render_chunk_max_chars,
+    )
+    return bool(legacy_key and stored_key == legacy_key)
+
+
+def _engine_style_injected_signature_matches(
+    segment: Dict[str, Any],
+    stored_key: str,
+    *,
+    narration_style: Optional[str],
+    narration_style_prompt: Optional[str] = None,
+    render_chunk_max_chars: Any = _UNSET_CHUNK_LIMIT,
+) -> bool:
+    """复现管线注入旁白风格运行时键后的旧签名投影。
+
+    历史 audio_from_scripts 生成时，引擎 ``_assign_voices`` 在内存为旁白
+    片段注入 narration_style 等运行时键并计入签名，但持久化剧本不含这些
+    键；当前签名算法已忽略这些键，旧存储键只能按注入后投影精确复现。
+    """
+    style_id = str(narration_style or "").strip()
+    if not style_id:
+        return False
+    speaker = str(segment.get("speaker") or "").strip()
+    segment_type = str(segment.get("type") or "").strip().lower()
+    if speaker != "旁白" and segment_type != "narration":
+        return False
+
+    from app.services.audiobook.narration_styles import (
+        find_narration_style_preset,
+        normalize_narration_style_id,
+    )
+
+    raw_voice_params = segment.get("voice_params")
+    injected = dict(raw_voice_params) if isinstance(raw_voice_params, dict) else {}
+    injected["narration_style"] = style_id
+    normalized_style = normalize_narration_style_id(style_id)
+    if normalized_style:
+        injected["narration_style_legacy"] = normalized_style
+    prompt = str(narration_style_prompt or "").strip()
+    if prompt:
+        injected["narration_style_prompt_legacy"] = prompt
+    preset = find_narration_style_preset(normalized_style)
+    pause_multiplier = 1.0
+    if preset:
+        try:
+            pause_multiplier = float(preset.get("pause_multiplier") or 1.0)
+        except (TypeError, ValueError):
+            pause_multiplier = 1.0
+    if pause_multiplier != 1.0:
+        injected["narration_style_pause_applied"] = True
+
+    projected = dict(segment)
+    projected["voice_params"] = injected
+    legacy_key = _compute_segment_audio_cache_key(
+        projected,
+        render_chunk_max_chars=render_chunk_max_chars,
+        synchronize_semantics=True,
+        exclude_engine_style_keys=False,
+    )
+    return bool(legacy_key and stored_key == legacy_key)
+
+
+_ASSET_RECIPE_PROJECTION_PREFIXES = (
+    "mimo_design:",
+    "mimo_clone:",
+    "stepaudio_clone:",
+)
+
+
+def _resolve_asset_recipe_injected_keys(
+    voice_params: Dict[str, Any],
+    *,
+    owner_user_id: Optional[int] = None,
+) -> Dict[str, Any]:
+    """按音色档案重建管线注入的配方键（仅签名相关且持久化剧本不含的键）。
+
+    生成时音色档案会把 voice_design_prompt / voice_clone_data_url /
+    voice_sample_path 等配方键合入内存 voice_params 并计入签名，但
+    持久化剧本只保留 asset id；档案创建后不可变，可按 asset id 从
+    资产库精确重建。解析失败（档案缺失/越权）返回空集，不做迁移。
+    """
+    from app.services.audiobook.mimo_voice_assets import (
+        merge_mimo_voice_asset_tts_params,
+    )
+    from app.services.audiobook.stepaudio_voice_assets import (
+        merge_stepaudio_voice_asset_tts_params,
+    )
+
+    try:
+        if str(voice_params.get("speaker") or "").startswith(
+            ("mimo_design:", "mimo_clone:")
+        ):
+            resolved = merge_mimo_voice_asset_tts_params(
+                {
+                    key: voice_params.get(key)
+                    for key in ("speaker", "voice_id", "mimo_voice_asset_id")
+                    if voice_params.get(key)
+                },
+                owner_user_id=owner_user_id,
+            )
+            return {
+                key: resolved[key]
+                for key in ("voice_design_prompt", "voice_clone_data_url")
+                if resolved.get(key)
+            }
+        if str(voice_params.get("speaker") or "").startswith("stepaudio_clone:"):
+            resolved = merge_stepaudio_voice_asset_tts_params(
+                {
+                    key: voice_params.get(key)
+                    for key in ("speaker", "voice_id", "stepaudio_voice_asset_id")
+                    if voice_params.get(key)
+                },
+                owner_user_id=owner_user_id,
+            )
+            return {
+                key: value
+                for key, value in resolved.items()
+                if key == "voice_sample_path" and value
+            }
+    except Exception as exc:  # 档案缺失/越权/文件丢失：不迁移，保留原样
+        logger.debug("音色档案配方键重建失败，跳过自愈: %s", exc)
+    return {}
+
+
+def _asset_recipe_injected_signature_matches(
+    segment: Dict[str, Any],
+    stored_key: str,
+    *,
+    owner_user_id: Optional[int] = None,
+    render_chunk_max_chars: Any = _UNSET_CHUNK_LIMIT,
+) -> bool:
+    """复现音色档案配方键注入后的旧签名投影（仅资产音色片段）。"""
+    voice_params = segment.get("voice_params")
+    if not isinstance(voice_params, dict):
+        return False
+    speaker = str(voice_params.get("speaker") or "")
+    if not speaker.startswith(_ASSET_RECIPE_PROJECTION_PREFIXES):
+        return False
+    recipe_keys = _resolve_asset_recipe_injected_keys(
+        voice_params, owner_user_id=owner_user_id
+    )
+    if not recipe_keys:
+        return False
+    projected = dict(segment)
+    projected["voice_params"] = {**voice_params, **recipe_keys}
+    legacy_key = _compute_segment_audio_cache_key(
+        projected,
+        render_chunk_max_chars=render_chunk_max_chars,
+        synchronize_semantics=True,
+        exclude_engine_style_keys=False,
     )
     return bool(legacy_key and stored_key == legacy_key)
 
@@ -787,14 +938,18 @@ def persist_generated_chapter_segment_audio(
     return persisted
 
 
-def repair_legacy_segment_signatures(chapter_audio: Any) -> bool:
+def repair_legacy_segment_signatures(
+    chapter_audio: Any,
+    *,
+    owner_user_id: Optional[int] = None,
+) -> bool:
     """惰性迁移可精确验证的旧版片段签名。
 
-    仅当片段记录了生成分块上下文、保存签名精确命中语义同步前投影，
-    且导演字段与历史 voice_params 副本一致时，迁移为当前签名。
-    缺少生成上下文或无法验证的历史资产保持原样，避免把未知音频认证为
-    当前文本、音色和表演指令的产物；实际音频文件不会被删除。
-    返回是否有变更（调用方需 commit）。
+    仅当片段记录了生成分块上下文，且保存签名精确命中任一已知历史投影
+    （语义同步前投影、管线注入旁白风格运行时键的投影，或音色档案配方键
+    注入的投影）时，迁移为当前签名。缺少生成上下文或无法验证的历史资产
+    保持原样，避免把未知音频认证为当前文本、音色和表演指令的产物；
+    实际音频文件不会被删除。返回是否有变更（调用方需 commit）。
     """
     try:
         segments = json.loads(getattr(chapter_audio, "script_json", None) or "[]")
@@ -804,6 +959,8 @@ def repair_legacy_segment_signatures(chapter_audio: Any) -> bool:
         return False
 
     changed = False
+    style_id = str(getattr(chapter_audio, "narration_style", "") or "")
+    style_prompt = getattr(chapter_audio, "narration_style_prompt", None)
     for segment in segments:
         if not isinstance(segment, dict):
             continue
@@ -821,11 +978,25 @@ def repair_legacy_segment_signatures(chapter_audio: Any) -> bool:
             )
             if current_key and stored_key == current_key:
                 continue
-            if not current_key or not _pre_semantic_sync_signature_matches(
+            if not current_key:
+                continue
+            matched_legacy = _pre_semantic_sync_signature_matches(
                 segment,
                 stored_key,
                 render_chunk_max_chars=recorded_limit,
-            ):
+            ) or _engine_style_injected_signature_matches(
+                segment,
+                stored_key,
+                narration_style=style_id,
+                narration_style_prompt=style_prompt,
+                render_chunk_max_chars=recorded_limit,
+            ) or _asset_recipe_injected_signature_matches(
+                segment,
+                stored_key,
+                owner_user_id=owner_user_id,
+                render_chunk_max_chars=recorded_limit,
+            )
+            if not matched_legacy:
                 continue
             segment["audio_cache_key"] = current_key
             segment.pop("audio_chunk_cache_paths", None)

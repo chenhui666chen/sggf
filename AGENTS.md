@@ -89,3 +89,31 @@ description: 专业的软件工程师，严格遵循 SOLID、KISS、DRY、YAGNI 
 - 后端以 Python、FastAPI、SQLAlchemy、Alembic、Pydantic 为主。
 - 前端以 React 18、TypeScript、Vite 5、MUI 5、react-router-dom 6、Vitest 为主。
 - 自动匹配 skill 时不得套用与上述技术栈冲突的规范。
+
+## 任务完成后自动清理
+
+每次修复、修改、增添功能完成并验证通过后，必须执行产物清理：
+
+```powershell
+python scripts/cleanup_task_artifacts.py          # 先 dry-run 列出将删除项
+python scripts/cleanup_task_artifacts.py --apply  # 确认后执行
+```
+
+自动清理范围（白名单，仅删可安全重新生成的内容）：
+
+- pytest 临时目录与缓存：`.pytest-*`、`.pytest_cache`、`.pytest_tmp*`
+- Python `__pycache__`、覆盖率缓存（`.coverage`、`htmlcov`）
+- Vitest/Vite 缓存：`frontend/node_modules/.vite`、`.vitest`
+- 本次测试生成、位于上述临时目录内的音频/字幕/混音片段与候选文件
+
+绝不清理：
+
+- 用户剧本、项目配置、未提交代码
+- 已保存的有声书章节音频和工作台片段
+- `backend/data/audio_library` 等正式音频库、`data/prompt_evolution` 提示词进化数据
+- 数据库中的项目、章节、音色资产和账单记录
+- OSS、云端音频或供应商端资源
+- 没有明确证据证明由当前任务生成的未跟踪文件
+- 仍被章节、checkpoint、缓存索引或数据库记录引用的音频
+
+清理采用“本次运行可追踪产物 + 明确临时目录白名单”方式，禁止对整个仓库按扩展名粗暴删除。本次任务专门创建的一次性排查脚本，完成后也应一并删除。

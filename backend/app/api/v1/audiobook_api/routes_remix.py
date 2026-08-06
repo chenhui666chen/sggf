@@ -61,7 +61,10 @@ async def remix_chapter(
 
     # 存量自愈：旧版不可复现的片段签名重写为当前格式，
     # 避免历史管线片段被误报为 stale_audio 缺失
-    if repair_legacy_segment_signatures(chapter_audio):
+    if repair_legacy_segment_signatures(
+        chapter_audio,
+        owner_user_id=getattr(getattr(owned, "current_user", None), "id", None),
+    ):
         db.commit()
 
     missing_segments = collect_chapter_remix_missing_segments(chapter_audio)

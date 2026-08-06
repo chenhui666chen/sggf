@@ -174,6 +174,12 @@ describe('Audiobook setup source guards', () => {
     expect(chapterSelectionPanelSource).toContain('generatedChapterIds')
     expect(chapterSelectionPanelSource).toContain('已生成')
     expect(chapterSelectionPanelSource).toContain('scrollTop')
+    // 已生成章节点击整行直接进入该章工作台，而不是无响应
+    expect(chapterSelectionPanelSource).toContain('onOpenGeneratedChapter')
+    expect(chapterSelectionPanelSource).toContain('已生成 · 点击进入工作台')
+    expect(setupStepSource).toContain('onOpenGeneratedChapter={onOpenGeneratedChapter}')
+    expect(audiobookPageSource).toContain('onOpenGeneratedChapter={(chapterId) => {')
+    expect(audiobookPageSource).toContain('void handleOpenScriptEditor(chapterId)')
     expect(chapterActionsMenuSource).toContain('canRegenerate')
     expect(chapterActionsMenuSource).toContain('重新生成')
   })

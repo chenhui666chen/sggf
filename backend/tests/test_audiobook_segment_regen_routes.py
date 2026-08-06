@@ -1076,3 +1076,101 @@ def test_preview_segment_drops_server_managed_audio_fields(monkeypatch):
     assert "audio_path" not in captured["segment"]
     assert "mix_audio_path" not in captured["segment"]
     assert captured["segment"]["voice_params"]["provider_prompt_snapshot"] != {"stale": True}
+
+
+def test_saved_segment_sfx_preview_renders_timeline_when_no_persisted_stem(monkeypatch):
+    """管线生成的音效无持久化分轨时，试听回退到 checkpoint 时间线实时渲染。"""
+    session_factory = build_session_factory()
+    captured = {}
+
+    def fake_render(**kwargs):
+        captured.update(kwargs)
+        return b"ID3timeline-preview"
+
+    monkeypatch.setattr(
+        routes_segment_regen,
+        "get_latest_run_checkpoint_json",
+        lambda *args, **kwargs: {
+            "segment_timings": [{"index": 0, "start": 0.0, "end": 10.0}],
+            "effect_timeline": {"timeline": [{"timestamp": 1.0, "file": "e.mp3"}]},
+        },
+    )
+    monkeypatch.setattr(
+        routes_segment_regen,
+        "render_segment_timeline_preview",
+        fake_render,
+    )
+
+    with session_factory() as db:
+        context = seed_segment_context(db)
+        response = asyncio.run(
+            get_segment_regeneration_candidate_audio(
+                audiobook_project_id=context["audiobook_project"].id,
+                chapter_id=context["chapter"].id,
+                segment_index=0,
+                candidate_id=None,
+                preview_type="sfx",
+                owned=build_owned_context(db, context),
+            )
+        )
+
+    assert response.body == b"ID3timeline-preview"
+    assert response.media_type == "audio/mpeg"
+    assert captured["preview_type"] == "sfx"
+    assert captured["segment_index"] == 0
+    assert captured["checkpoint"]["effect_timeline"]["timeline"]
+
+
+def test_saved_segment_bgm_preview_404_when_timeline_missing(monkeypatch):
+    session_factory = build_session_factory()
+
+    monkeypatch.setattr(
+        routes_segment_regen,
+        "get_latest_run_checkpoint_json",
+        lambda *args, **kwargs: {},
+    )
+    monkeypatch.setattr(
+        routes_segment_regen,
+        "render_segment_timeline_preview",
+        lambda **kwargs: None,
+    )
+
+    with session_factory() as db:
+        context = seed_segment_context(db)
+        with pytest.raises(HTTPException) as exc_info:
+            asyncio.run(
+                get_segment_regeneration_candidate_audio(
+                    audiobook_project_id=context["audiobook_project"].id,
+                    chapter_id=context["chapter"].id,
+                    segment_index=0,
+                    candidate_id=None,
+                    preview_type="bgm",
+                    owned=build_owned_context(db, context),
+                )
+            )
+
+    assert exc_info.value.status_code == 404
+    assert "配乐" in exc_info.value.detail
+
+
+def test_saved_segment_voice_preview_still_rejects_missing_audio_path():
+    """人声试听保持原校验：未登记持久化音频时不得回退。"""
+    session_factory = build_session_factory()
+
+    with session_factory() as db:
+        context = seed_segment_context(db)
+        with pytest.raises(HTTPException) as exc_info:
+            asyncio.run(
+                get_segment_regeneration_candidate_audio(
+                    audiobook_project_id=context["audiobook_project"].id,
+                    chapter_id=context["chapter"].id,
+                    segment_index=0,
+                    candidate_id=None,
+                    audio_path="candidate-voice.mp3",
+                    preview_type="voice",
+                    owned=build_owned_context(db, context),
+                )
+            )
+
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.detail == "片段音频路径无效"

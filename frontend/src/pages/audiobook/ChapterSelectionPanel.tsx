@@ -23,6 +23,7 @@ interface ChapterSelectionPanelProps {
   generatedChapterIds: ReadonlySet<number>
   onToggleChapter: (chapterId: number) => void
   onOpenChapterMenu: (event: MouseEvent<HTMLButtonElement>, chapter: Chapter) => void
+  onOpenGeneratedChapter: (chapterId: number) => void
 }
 
 const ChapterSelectionPanel = ({
@@ -31,6 +32,7 @@ const ChapterSelectionPanel = ({
   generatedChapterIds,
   onToggleChapter,
   onOpenChapterMenu,
+  onOpenGeneratedChapter,
 }: ChapterSelectionPanelProps) => {
   const listContainerRef = useRef<HTMLDivElement | null>(null)
   const selectedChapterId = selectedChapters[0]
@@ -101,8 +103,14 @@ const ChapterSelectionPanel = ({
               key={chapter.id}
               data-chapter-id={chapter.id}
               component="div"
-              aria-disabled={generated}
-              onClick={generated ? undefined : () => onToggleChapter(chapter.id)}
+              onClick={() => {
+                if (generated) {
+                  // 已生成章节不可勾选，但点击整行直接进入该章工作台
+                  onOpenGeneratedChapter(chapter.id)
+                  return
+                }
+                onToggleChapter(chapter.id)
+              }}
               secondaryAction={(
                 <Tooltip title="章节操作">
                   <IconButton
@@ -117,7 +125,7 @@ const ChapterSelectionPanel = ({
                 </Tooltip>
               )}
               sx={{
-                cursor: generated ? 'default' : 'pointer',
+                cursor: 'pointer',
                 minHeight: 74,
                 py: 1,
                 px: 1.25,
@@ -135,7 +143,7 @@ const ChapterSelectionPanel = ({
                 },
                 '&:hover': {
                   backgroundColor: generated
-                    ? 'rgba(100, 116, 139, 0.06)'
+                    ? 'rgba(100, 116, 139, 0.14)'
                     : audiobookColors.brandSoft,
                 },
               }}
@@ -169,7 +177,7 @@ const ChapterSelectionPanel = ({
                       <Chip
                         size="small"
                         icon={<LockOutlinedIcon />}
-                        label="已生成"
+                        label="已生成 · 点击进入工作台"
                         sx={{
                           height: 23,
                           flexShrink: 0,

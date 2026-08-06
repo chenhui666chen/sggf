@@ -202,6 +202,45 @@ def test_generation_target_guard_rejects_deleted_source_chapter():
         ) is False
 
 
+def test_generation_target_guard_preserves_unflushed_script_fields():
+    # 回归：新建 ChapterAudio flush 后赋值 script_json，提交前的存活检查
+    # 不得把未 flush 的脏字段刷回数据库旧值（曾导致剧本静默丢失）
+    session_factory = build_session_factory()
+
+    with session_factory() as worker_db:
+        context = seed_runtime_context(worker_db)
+
+        new_audio = ChapterAudio(
+            audiobook_project_id=context["audiobook_project"].id,
+            chapter_id=context["chapter"].id,
+            script_status="pending",
+        )
+        worker_db.add(new_audio)
+        worker_db.flush()
+
+        new_audio.script_json = '[{"type": "narration", "text": "fresh"}]'
+        new_audio.segment_count = 1
+
+        assert is_chapter_generation_target_active(
+            worker_db,
+            audiobook_project_id=context["audiobook_project"].id,
+            chapter_id=context["chapter"].id,
+            chapter_audio_id=new_audio.id,
+        ) is True
+
+        # 检查后脏字段必须仍在，随下一次 commit 完整落库
+        assert new_audio.script_json == '[{"type": "narration", "text": "fresh"}]'
+        assert new_audio.segment_count == 1
+        worker_db.commit()
+        new_audio_id = new_audio.id
+
+    with session_factory() as verify_db:
+        persisted = verify_db.get(ChapterAudio, new_audio_id)
+        assert persisted is not None
+        assert persisted.script_json == '[{"type": "narration", "text": "fresh"}]'
+        assert persisted.segment_count == 1
+
+
 def test_update_chapter_run_state_preserves_deleted_output_tombstone():
     session_factory = build_session_factory()
 

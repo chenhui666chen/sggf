@@ -187,3 +187,59 @@ def test_realign_mixed_timing_keeps_manual_editor_position_authoritative():
     )
 
     assert harness._last_effect_timeline["timeline"][0]["timestamp"] == pytest.approx(9.5)
+
+
+def test_realign_environment_cue_stays_within_its_scene():
+    """剧本标注的场景环境音只覆盖所属场景+宽限，不被拉伸到章尾。"""
+    harness = TimelineHarness()
+    timeline = {
+        "timeline": [
+            {
+                "scene_id": "scene_0",
+                "timestamp": 0.5,
+                "duration": 2.0,
+                "type": "environment",
+                "loop": True,
+            },
+        ],
+    }
+
+    result = harness._align_timeline_with_audio(
+        timeline,
+        estimated_offsets=[{"start": 0.0, "duration": 1.0}, {"start": 1.0, "duration": 1.0}],
+        actual_offsets=[{"start": 0.0, "duration": 4.0}, {"start": 4.0, "duration": 60.0}],
+        total_actual_duration=64.0,
+        align_environment=True,
+    )
+
+    item = result["timeline"][0]
+    assert item["timestamp"] == pytest.approx(0.5)
+    # 所属场景 4s + 5s 宽限，而非 64s 章尾
+    assert item["duration"] == pytest.approx(4.0 + 5.0 - 0.5)
+    assert item["loop"] is True
+
+
+def test_realign_ambient_bed_still_covers_full_chapter():
+    """全章环境床（scene_id=ambient）保持覆盖到章节结尾的行为。"""
+    harness = TimelineHarness()
+    timeline = {
+        "timeline": [
+            {
+                "scene_id": "ambient",
+                "timestamp": 0.0,
+                "duration": 10.0,
+                "type": "environment",
+                "loop": True,
+            },
+        ],
+    }
+
+    result = harness._align_timeline_with_audio(
+        timeline,
+        estimated_offsets=[{"start": 0.0, "duration": 1.0}],
+        actual_offsets=[{"start": 0.0, "duration": 64.0}],
+        total_actual_duration=64.0,
+        align_environment=True,
+    )
+
+    assert result["timeline"][0]["duration"] == pytest.approx(64.0)

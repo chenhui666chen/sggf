@@ -58,4 +58,17 @@ describe('script editor initial segment focus', () => {
     expect(editorDialogSource).toContain('resolveInitialScriptSegmentFocus(')
     expect(reviewDialogSource).toContain('onOpenScriptEditor(data.chapterId, selectedSegmentIndex)')
   })
+
+  it('auto-resolves the audiobook project detail before opening the workbench', () => {
+    // 首次进入路由（无会话恢复）时 detail 为空，打开工作台需与历史记录入口一致自动补齐，
+    // 而不是直接报“请先创建有声书项目”
+    expect(editorActionsSource).toContain('novelProjectId: number | null')
+    expect(editorActionsSource).toContain('apiClient.getAudiobookProjectsByProject(novelProjectId)')
+    expect(editorActionsSource).toContain("item?.status === 'completed'")
+    expect(editorActionsSource).toContain('apiClient.getAudiobookProject(latestCompleted.id)')
+    expect(editorActionsSource).toContain('setAudiobookProject(targetProject)')
+    expect(editorActionsSource).toContain('setCurrentAudiobookProjectId(targetProject.id)')
+    expect(editorActionsSource).toContain('getAudiobookChapterScript(targetProject.id, chapterId)')
+    expect(pageSource).toContain('novelProjectId: selectedProject?.id ?? routeProjectId,')
+  })
 })

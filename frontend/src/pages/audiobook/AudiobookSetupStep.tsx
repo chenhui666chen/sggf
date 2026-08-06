@@ -81,6 +81,7 @@ interface AudiobookSetupStepProps {
   onAudioEngineModeChange: (value: AudioEngineMode) => void
   onToggleChapter: (chapterId: number) => void
   onOpenChapterMenu: (event: MouseEvent<HTMLButtonElement>, chapter: Chapter) => void
+  onOpenGeneratedChapter: (chapterId: number) => void
   onVoiceChange: (characterId: number, voiceId: string, preset?: VoicePreset) => void
   onTtsModelChangeForCharacter: (characterId: number, nextModel: TtsModel) => void
   onPreviewCustomVoice: (voice: VoicePreset, model?: TtsModel) => void
@@ -181,6 +182,7 @@ const AudiobookSetupStep = ({
   onAudioEngineModeChange,
   onToggleChapter,
   onOpenChapterMenu,
+  onOpenGeneratedChapter,
   onVoiceChange,
   onTtsModelChangeForCharacter,
   onPreviewCustomVoice,
@@ -286,6 +288,7 @@ const AudiobookSetupStep = ({
             generatedChapterIds={generatedChapterIds}
             onToggleChapter={onToggleChapter}
             onOpenChapterMenu={onOpenChapterMenu}
+            onOpenGeneratedChapter={onOpenGeneratedChapter}
           />
         </SetupPanel>
         <SetupPanel
