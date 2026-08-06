@@ -25,6 +25,9 @@ const normalizePositiveProjectId = (value: unknown): number | null => {
 export const isActiveAudiobookTask = (task: TaskStatus | null | undefined): task is TaskStatus =>
   Boolean(task && (task.status === 'pending' || task.status === 'running'))
 
+export const isPausedAudiobookTask = (task: TaskStatus | null | undefined): task is TaskStatus =>
+  Boolean(task && (task.status === 'paused' || task.status === 'pause_requested'))
+
 export const getTaskSortTimestamp = (
   task: Pick<TaskStatus, 'updated_at' | 'created_at'>,
 ): number => {
@@ -78,6 +81,17 @@ export const selectActiveProjectTasks = (
   return Object.values(taskStatuses)
     .filter((task) => trackedIds.size === 0 || trackedIds.has(task.audiobook_project_id))
     .filter((task) => isActiveAudiobookTask(task))
+    .sort(compareTaskByRecency)
+}
+
+export const selectPausedProjectTasks = (
+  taskStatuses: Record<string, TaskStatus>,
+  trackedProjectIds: readonly number[],
+): TaskStatus[] => {
+  const trackedIds = new Set(trackedProjectIds)
+  return Object.values(taskStatuses)
+    .filter((task) => trackedIds.size === 0 || trackedIds.has(task.audiobook_project_id))
+    .filter((task) => isPausedAudiobookTask(task))
     .sort(compareTaskByRecency)
 }
 
@@ -224,12 +238,15 @@ export const shouldAutofocusActiveTask = ({
   currentTaskId,
   generating,
   activeStep,
+  progressViewDismissed,
 }: {
   currentTaskId: string | null
   generating: boolean
   activeStep: number
+  progressViewDismissed: boolean
 }): boolean =>
-  Boolean(currentTaskId) || generating || activeStep === 0 || activeStep === 1
+  !progressViewDismissed
+  && (Boolean(currentTaskId) || generating || activeStep === 0 || activeStep === 1)
 
 export const getTaskPollDelayMs = ({
   failureCount,

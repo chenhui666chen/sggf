@@ -1,5 +1,9 @@
 import type { NarrationStyleId } from './narrationStyles'
 import type { AudiobookTtsModel } from '../../types/audiobook'
+import type { RemixMissingSegment as ApiRemixMissingSegment } from '../../services/api'
+
+/** 整章重新混音时缺失音频的片段信息（后端返回）。 */
+export type RemixMissingSegment = ApiRemixMissingSegment
 
 export interface Project {
   id: number
@@ -53,6 +57,12 @@ export interface GenerationCheckpoint {
   completed_segments: number
   completed_segment_indices?: number[]
   cached_audio_paths?: Record<string, string>
+  /** 合成失败的 render chunk 索引（可断点重试）。 */
+  failed_segment_indices?: number[]
+  /** render chunk 索引 -> { error_type, error_message }。 */
+  failed_segment_errors?: Record<string, MissingSegmentError>
+  /** 缺失片段人类可读报告（含源剧本索引/角色/请求音色/错误类型）。 */
+  missing_segments?: MissingSegmentInfo[]
   can_resume: boolean
   run_id?: number | null
   run_status?: string | null
@@ -63,12 +73,63 @@ export interface GenerationCheckpoint {
   estimated_remaining_time?: number | null
 }
 
-export type StageStatus = 'pending' | 'running' | 'completed' | 'failed'
+export interface MissingSegmentError {
+  error_type?: string | null
+  error_message?: string | null
+}
+
+export interface MissingSegmentInfo {
+  /** render chunk 索引。 */
+  index: number
+  /** 映射回源剧本片段的索引（长文本拆块后可能多个）。 */
+  source_segment_indices?: number[]
+  text?: string | null
+  speaker?: string | null
+  voice?: string | null
+  segment_type?: string | null
+  error_type?: string | null
+  error_message?: string | null
+}
+
+// ─── Phase 2: 换音色恢复 ─────────────────────────────────────────────
+
+export interface VoiceOverride {
+  voice_id: string
+  tts_model?: string | null
+  reference_source?: string | null
+  reference_audio_url?: string | null
+  voice_reference_asset_id?: string | null
+  voice_pool_publication_id?: string | null
+}
+
+export type RecoverAction = 'retry_missing' | 'replace_voice_missing' | 'replace_voice_all'
+
+export interface RecoverSegmentsRequest {
+  action: RecoverAction
+  voice_overrides: Record<string, VoiceOverride>
+  target_characters?: string[] | null
+}
+
+export interface RecoverSegmentsResponse {
+  message: string
+  action: RecoverAction
+  job_id: string
+  voice_overrides_applied?: string[]
+  affected_segment_indices?: string[]
+  temporary_voice_substitution?: boolean
+  resumed_from_run_id?: number | null
+}
+
+export type StageStatus = 'pending' | 'running' | 'completed' | 'failed' | 'paused' | 'pause_requested'
 
 export type PreviewType = 'voice' | 'sfx' | 'bgm' | 'mix'
 
+export type SegmentSourceMode = 'library' | 'ai_generate'
+
 export interface SegmentPreviewPlaybackOptions {
   startRatio?: number
+  /** 候选生成成功后自动播放时传入，绕过 state 异步更新的闭包旧值 */
+  candidateId?: string
 }
 
 export interface ScriptSegmentTiming {
@@ -236,6 +297,10 @@ export interface ScriptReviewIssue {
   category?: string
   description?: string
   suggestion?: string
+  dimension?: string
+  fix_type?: string
+  target_fields?: string[]
+  segment_index?: number
 }
 
 export interface ScriptQualityMetrics {
@@ -271,6 +336,13 @@ export interface ScriptPacingMetrics {
   total_segments?: number
 }
 
+export interface LLMDimensionScore {
+  score?: number
+  label?: string
+  category?: string
+  comment?: string
+}
+
 export interface ScriptReviewDetail {
   overall_score?: number
   overall_grade?: string
@@ -281,12 +353,16 @@ export interface ScriptReviewDetail {
   revision_suggestions?: string[]
   issues?: ScriptReviewIssue[]
   audio_warnings?: ScriptAudioWarning[]
+  llm_dimensions?: Record<string, LLMDimensionScore>
 }
 
 export interface ScriptSegmentVoiceParams {
   speaker?: string | null
+  tts_model?: string | null
+  resolved_tts_model?: string | null
   speed?: number | null
   rate?: number | null
+  character_base_speed?: number | null
   pitch?: number | null
   volume?: number | null
   emotion?: string | null
@@ -378,6 +454,14 @@ export interface ScriptSegmentSoundEffectDetail {
   id?: string | null
   effect_id?: string | null
   name?: string | null
+  layer?: string | null
+  volume?: number | null
+  timing?: string | null
+  position_3d?: string | null
+  duration?: number | null
+  fade_in?: number | null
+  fade_out?: number | null
+  delay?: number | null
 }
 
 export interface ScriptSegmentMusicCueDetail {
@@ -385,6 +469,12 @@ export interface ScriptSegmentMusicCueDetail {
   style?: string | null
   name?: string | null
   mood?: string | null
+  volume?: number | null
+  fade_in?: number | null
+  fade_out?: number | null
+  duration?: number | null
+  start_time?: number | null
+  emotion_follow?: boolean | null
 }
 
 export interface AudioAssetSelection {
@@ -397,6 +487,7 @@ export interface AudioAssetSelection {
 }
 
 export interface ScriptSegment {
+  segment_key?: string | null
   index?: number | null
   type?: string | null
   speaker?: string | null
@@ -426,7 +517,7 @@ export interface ScriptSegment {
 }
 
 export interface PendingSegmentRegeneration {
-  candidateAudioPath: string
+  candidateId: string
   previewType: PreviewType
   segment: ScriptSegment
   generatedAt?: string
@@ -450,6 +541,8 @@ export interface ScriptEditorStateData {
   scriptSegments: ScriptSegment[]
   chapterAudioAvailable?: boolean
   chapterAudioUrl?: string
+  /** 应用人声候选后本地标记：整章混音已过期，禁用整章试听直至重新混音 */
+  chapterAudioStale?: boolean
   segmentTimings?: ScriptSegmentTiming[]
   scriptReview: ScriptReviewDetail | null
 }
@@ -567,6 +660,8 @@ export interface ScriptEditorDialogProps {
   loading: boolean
   chapter: ScriptEditorChapterRef | null
   data: ScriptEditorStateData | null
+  initialSegmentIndex?: number | null
+  onInitialSegmentIndexConsumed?: () => void
   onClose: () => void
   onChangeSegmentText: (index: number, value: string) => void
   onSaveScript: (options: { nextStatus?: 'reviewed' | 'approved' }) => void
@@ -576,7 +671,12 @@ export interface ScriptEditorDialogProps {
     previewType: PreviewType,
     options?: SegmentPreviewPlaybackOptions,
   ) => void
-  onRegenerateSegment: (index: number, segment: ScriptSegment, previewType: PreviewType) => void
+  onRegenerateSegment: (
+    index: number,
+    segment: ScriptSegment,
+    previewType: PreviewType,
+    sourceMode?: SegmentSourceMode,
+  ) => void
   onStartSegmentVoiceRecording: (index: number, segment: ScriptSegment) => void
   onStopSegmentVoiceRecording: () => void
   onApplySegmentRegeneration: (index: number, previewType: PreviewType) => void
@@ -607,6 +707,14 @@ export interface ScriptEditorDialogProps {
   onApplyIncomingDraft?: () => void
   onKeepLocalDraft?: () => void
   projectId?: number
+  // 整章重新混音
+  onRemixChapter?: () => void
+  remixingChapter?: boolean
+  remixError?: string | null
+  remixMissingDialogOpen?: boolean
+  remixMissingSegments?: RemixMissingSegment[]
+  onForceRemixChapter?: () => void
+  onCloseRemixMissingDialog?: () => void
 }
 
 export interface AudiobookProjectHistoryItem {
@@ -626,7 +734,7 @@ export interface HistoryDialogProps {
   selectedProject: Project | null
   onCloseHistory: () => void
   onViewHistory: (audiobookProjectId: number) => Promise<void>
-  onDeleteHistory: (audiobookProjectId: number) => Promise<void>
+  onDeleteHistory: (audiobookProjectId: number, options?: { delete_reason?: string; delete_files?: boolean }) => Promise<void>
 }
 
 export type NavigationType =

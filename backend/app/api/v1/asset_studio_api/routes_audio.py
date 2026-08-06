@@ -23,6 +23,7 @@ from app.core.security import get_current_user
 from app.db.base import get_db
 from app.models.user import User
 from app.services.audiobook.ai_music import MusicGenerationRequest, MusicStyle, create_music_generator
+from app.services.audiobook.voice_parameter_policy import stabilize_instruct_model_speed
 from app.services.points_usage_pricing import estimate_asset_studio_basis_yuan
 from adapters.volcengine.audio_generation import DEFAULT_AUDIO_CONFIG
 from core.model_catalog_runtime import get_model_catalog_runtime_index
@@ -61,6 +62,7 @@ async def generate_audio_asset(
     voice_id: str = Form(default=""),
     instruction: str = Form(default=""),
     rate: float = Form(default=1.0),
+    # 兼容旧客户端字段；固定音色运行时禁止应用片段级音高控制。
     pitch: float = Form(default=1.0),
     volume: int = Form(default=50),
     emotion: str = Form(default="neutral"),
@@ -301,12 +303,12 @@ async def generate_audio_asset(
         voice_params: dict[str, Any] = {
             "speaker": cleaned_voice_id,
             "rate": float(rate or 1.0),
-            "pitch": float(pitch or 1.0),
             "volume": int(volume),
         }
         cleaned_instruction = str(instruction or "").strip()
         if cleaned_instruction:
             voice_params["instruction"] = cleaned_instruction
+        voice_params = stabilize_instruct_model_speed(voice_params, resolved_model_id)
 
         mode = "text_to_speech"
         basis_yuan = estimate_asset_studio_basis_yuan(
@@ -363,8 +365,8 @@ async def generate_audio_asset(
                         "generation_type": normalized_generation_type,
                         "voice_id": cleaned_voice_id,
                         "instruction": cleaned_instruction or None,
-                        "rate": float(rate or 1.0),
-                        "pitch": float(pitch or 1.0),
+                        "pace_control": "numeric" if "rate" in voice_params else "semantic",
+                        **({"rate": float(voice_params["rate"])} if "rate" in voice_params else {}),
                         "volume": int(volume),
                         "emotion": str(emotion or "neutral").strip() or "neutral",
                         "format": format_hint or suffix.lstrip("."),

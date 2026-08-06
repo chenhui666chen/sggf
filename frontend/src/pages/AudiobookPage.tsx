@@ -8,7 +8,7 @@
  * 4. 进度监控
  * 5. 音频播放与下载
  */
-import { useCallback, useMemo } from 'react'
+import { useCallback, useMemo, useRef } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import BrowserPlayer from '../components/audiobook/BrowserPlayer'
 import AudiobookCompletionStep from './audiobook/AudiobookCompletionStep'
@@ -33,6 +33,7 @@ import { useAudiobookCharacterVoiceState } from './audiobook/useAudiobookCharact
 import { useAudiobookCharacterVoiceSettings } from './audiobook/useAudiobookCharacterVoiceSettings'
 import { useAudiobookChapterAudioActions } from './audiobook/useAudiobookChapterAudioActions'
 import { useAudiobookChapterDeleteActions } from './audiobook/useAudiobookChapterDeleteActions'
+import { useAudiobookChapterRemix } from './audiobook/useAudiobookChapterRemix'
 import { useAudiobookEditorSessionSync } from './audiobook/useAudiobookEditorSessionSync'
 import { useAudiobookGenerationActions } from './audiobook/useAudiobookGenerationActions'
 import { useAudiobookGenerationState } from './audiobook/useAudiobookGenerationState'
@@ -66,6 +67,7 @@ import { useAudiobookSetupState } from './audiobook/useAudiobookSetupState'
 import { useAudiobookSnackbarState } from './audiobook/useAudiobookSnackbarState'
 import { useAudiobookSourceChapterFocus } from './audiobook/useAudiobookSourceChapterFocus'
 import { useAudiobookTaskFocusActions } from './audiobook/useAudiobookTaskFocusActions'
+import { useAudiobookTaskPauseResume } from './audiobook/useAudiobookTaskPauseResume'
 import { useAudiobookTaskPolling } from './audiobook/useAudiobookTaskPolling'
 import { useAudiobookTaskPointsPrecheckState } from './audiobook/useAudiobookTaskPointsPrecheckState'
 import { useAudiobookTaskSessionSync } from './audiobook/useAudiobookTaskSessionSync'
@@ -74,7 +76,7 @@ import { useAudiobookTtsModelReadyGuard } from './audiobook/useAudiobookTtsModel
 import { useAudiobookVoiceActions } from './audiobook/useAudiobookVoiceActions'
 import { useAudiobookVoiceCatalog } from './audiobook/useAudiobookVoiceCatalog'
 import { useAudiobookVoiceConfigAutosave } from './audiobook/useAudiobookVoiceConfigAutosave'
-import type { TtsModel, VoicePreset } from './audiobook/types'
+import type { PreviewType, TtsModel, VoicePreset } from './audiobook/types'
 import { useCosyVoiceWorkbench } from './audiobook/useCosyVoiceWorkbench'
 import {
   AUDIOBOOK_SESSION_STORAGE_KEY,
@@ -160,6 +162,8 @@ const AudiobookPage = () => {
     setScriptEditorChapter,
     scriptEditorData,
     setScriptEditorData,
+    scriptEditorInitialSegmentIndex,
+    setScriptEditorInitialSegmentIndex,
     scriptEditorLoading,
     setScriptEditorLoading,
     smartChunkPreview,
@@ -201,6 +205,8 @@ const AudiobookPage = () => {
     setLastGenerationMode,
     activeStep,
     setActiveStep,
+    progressViewDismissed,
+    setProgressViewDismissed,
     clearActiveGenerationState,
   } = useAudiobookGenerationState()
   const {
@@ -214,6 +220,8 @@ const AudiobookPage = () => {
     audiobookProjectId: audiobookProject?.id,
     setSnackbar,
   })
+
+  const chapterDeleteRefreshRef = useRef<(() => void) | null>(null)
 
   const {
     chapterMenuAnchor,
@@ -236,6 +244,9 @@ const AudiobookPage = () => {
     setChapters,
     setSelectedChapters,
     setSnackbar,
+    projectId: selectedProjectId ?? routeProjectId,
+    audiobookProjectId: audiobookProject?.id,
+    onDeletedRef: chapterDeleteRefreshRef,
   })
 
   const {
@@ -257,6 +268,9 @@ const AudiobookPage = () => {
     ttsModel,
     characterVoices,
   })
+
+  // 候选生成成功后自动播放：评审 hook 先于预览 hook 创建，通过 ref 延迟绑定播放回调
+  const segmentCandidatePlaybackRef = useRef<(index: number, previewType: PreviewType, candidateId: string) => void>(() => {})
 
   const {
     reviewMode,
@@ -280,6 +294,39 @@ const AudiobookPage = () => {
     ttsModel,
     setSnackbar,
     setScriptEditorData,
+    onCandidateGenerated: (index, previewType, candidateId) => {
+      segmentCandidatePlaybackRef.current(index, previewType, candidateId)
+    },
+  })
+
+  const reloadScriptEditorRef = useRef<() => Promise<void>>(async () => {})
+  // 混音完成后的起播回调：在 handlePlayAudio 定义后绑定
+  const remixCompletedPlaybackRef = useRef<(chapterId: number) => void>(() => {})
+
+  const {
+    remixMissingDialogOpen,
+    remixMissingSegments,
+    remixing: remixingChapter,
+    remixError,
+    handleRemixChapter,
+    handleForceRemixChapter,
+    handleCloseRemixMissingDialog,
+  } = useAudiobookChapterRemix({
+    audiobookProjectId: audiobookProject?.id,
+    chapterId: scriptEditorChapter?.chapterId,
+    setSnackbar,
+    onRemixCompleted: () => {
+      if (audiobookProject?.id) {
+        void refreshAudiobookProjectDetail(audiobookProject.id)
+      }
+      // 已打开的工作台同步刷新，避免继续展示旧时间轴与已过期状态
+      void reloadScriptEditorRef.current()
+      // 混音完成后直接起播该章节的最新整章音频
+      const remixedChapterId = scriptEditorChapter?.chapterId
+      if (remixedChapterId) {
+        remixCompletedPlaybackRef.current(remixedChapterId)
+      }
+    },
   })
 
   const {
@@ -333,6 +380,10 @@ const AudiobookPage = () => {
     setSnackbar,
   })
 
+  remixCompletedPlaybackRef.current = (chapterId) => {
+    void handlePlayAudio(chapterId, { restart: true })
+  }
+
   const {
     previewingCharacterId,
     handlePreviewCharacterVoice,
@@ -379,6 +430,13 @@ const AudiobookPage = () => {
     setSnackbar,
   })
 
+  // 每次渲染重新绑定，保证回调内取到最新的片段数据与播放函数（用户点击菜单在先，满足浏览器自动播放策略）
+  segmentCandidatePlaybackRef.current = (index, previewType, candidateId) => {
+    const segment = scriptEditorData?.scriptSegments?.[index]
+    if (!segment) return
+    void handlePreviewScriptSegmentAudio(index, segment, previewType, { candidateId })
+  }
+
   const { resetScriptEditorTransientState } = useAudiobookScriptEditorTransientReset({
     resetSegmentPreviewState,
     resetSegmentReviewState,
@@ -397,6 +455,8 @@ const AudiobookPage = () => {
     handleDeleteHistory,
   } = useAudiobookHistoryActions({
     selectedProjectId,
+    currentAudiobookProjectId,
+    audiobookProjectDetailId: audiobookProject?.id ?? null,
     clearActiveGenerationState,
     resetBrowserPlayer,
     setAudiobookProject,
@@ -409,6 +469,7 @@ const AudiobookPage = () => {
     trackedAudiobookProjectIds,
     trackedAudiobookProjectIdKey,
     activeProjectTasks,
+    pausedProjectTasks,
     hasActiveM4bExportTask,
     hasActiveAudacityExportTask,
     persistedActiveTaskRefs,
@@ -572,7 +633,20 @@ const AudiobookPage = () => {
     setActiveStep,
     setTaskStatuses,
     setLastGenerationMode,
+    setProgressViewDismissed,
     setSnackbar,
+  })
+
+  const {
+    pauseResuming,
+    handlePauseTask,
+    handleResumeTask,
+  } = useAudiobookTaskPauseResume({
+    currentTaskId,
+    setTaskStatuses,
+    setSnackbar,
+    activateQueuedAudiobookTask,
+    setProgressViewDismissed,
   })
 
   const { handleCreateNewAudiobookProject } = useAudiobookNewProjectAction({
@@ -597,10 +671,16 @@ const AudiobookPage = () => {
     audiobookProject,
     chapters,
   })
-  const generatedChapterIds = useAudiobookGeneratedChapterIds({
+  const { generatedChapterIds, refreshGeneratedChapterIds } = useAudiobookGeneratedChapterIds({
     projectId: selectedProjectId ?? routeProjectId,
     currentChapterAudios,
   })
+  chapterDeleteRefreshRef.current = () => {
+    void refreshGeneratedChapterIds()
+    if (audiobookProject?.id) {
+      void refreshAudiobookProjectDetail(audiobookProject.id)
+    }
+  }
 
   useAudiobookRouteProjectLoader({
     routeProjectId,
@@ -686,6 +766,7 @@ const AudiobookPage = () => {
 
   const {
     handleOpenScriptEditor,
+    handleReloadScriptEditor,
     handleCloseScriptEditorDialog,
     handleSaveScript,
     handlePreviewSmartChunking,
@@ -702,12 +783,14 @@ const AudiobookPage = () => {
     setScriptEditorDialogOpen,
     setScriptEditorChapter,
     setScriptEditorData,
+    setScriptEditorInitialSegmentIndex,
     setScriptEditorLoading,
     setSmartChunkPreview,
     setSmartChunkPreviewLoading,
     setTimelineEdits,
     setSnackbar,
   })
+  reloadScriptEditorRef.current = handleReloadScriptEditor
 
   const {
     handleApplyIncomingEditorDraft,
@@ -942,12 +1025,14 @@ const AudiobookPage = () => {
     currentAudiobookProjectDetailId: audiobookProject?.id,
     generating,
     activeStep,
+    progressViewDismissed,
     taskStatuses,
     setTaskStatuses,
     setCurrentTaskId,
     setCurrentAudiobookProjectId,
     setGenerating,
     setActiveStep,
+    setProgressViewDismissed,
     setSnackbar,
     focusAudiobookTask,
     refreshAudiobookProjectDetail,
@@ -979,16 +1064,21 @@ const AudiobookPage = () => {
           activeStep={activeStep}
           lastGenerationMode={lastGenerationMode}
           audioEngineMode={audioEngineMode}
+          hasChapterAudios={hasChapterAudios}
           taskPointsPrecheckError={taskPointsPrecheckError}
           activeProjectTasks={activeProjectTasks}
           generating={generating}
           resumableChapterEntries={resumableChapterEntries}
           resumingChapterId={resumingChapterId}
           resumeCheckpointLoading={resumeCheckpointLoading}
+          audiobookProjectId={audiobookProject?.id ?? 0}
+          pausedProjectTasks={pausedProjectTasks}
+          pauseResuming={pauseResuming}
           getTaskLabel={formatActiveTaskLabel}
           onCloseTaskPointsPrecheck={clearTaskPointsPrecheckError}
           onFocusActiveTask={handleFocusActiveProjectTask}
           onResumeChapterGeneration={handleResumeChapterGeneration}
+          onResumePausedTask={(taskId) => { void handleResumeTask(taskId) }}
         />
 
         {/* 步骤1: 配置音色（章节选择 + 角色音频设置） */}
@@ -1043,10 +1133,17 @@ const AudiobookPage = () => {
             activeProjectTasks={activeProjectTasks}
             activeTaskId={activeTaskStatus?.task_id}
             progressTaskStatus={progressTaskStatus}
+            pauseResuming={pauseResuming}
             getTaskLabel={formatActiveTaskLabel}
             onFocusTask={handleFocusActiveProjectTask}
             onOpenStageMetrics={handleOpenStageMetricsDialog}
             onOpenScriptReview={handleOpenScriptReviewDialog}
+            onBack={() => {
+              setProgressViewDismissed(true)
+              setActiveStep(0)
+            }}
+            onPauseTask={() => { void handlePauseTask() }}
+            onResumeTask={() => { void handleResumeTask() }}
           />
         )}
 
@@ -1129,6 +1226,8 @@ const AudiobookPage = () => {
         loading={scriptEditorLoading}
         chapter={scriptEditorChapter}
         data={scriptEditorData}
+        initialSegmentIndex={scriptEditorInitialSegmentIndex}
+        onInitialSegmentIndexConsumed={() => setScriptEditorInitialSegmentIndex(null)}
         onClose={handleCloseScriptEditorDialog}
         onChangeSegmentText={handleChangeScriptSegmentText}
         onSaveScript={handleSaveScript}
@@ -1164,6 +1263,13 @@ const AudiobookPage = () => {
         onApplyIncomingDraft={handleApplyIncomingEditorDraft}
         onKeepLocalDraft={handleKeepLocalEditorDraft}
         projectId={audiobookProject?.id}
+        onRemixChapter={handleRemixChapter}
+        remixingChapter={remixingChapter}
+        remixError={remixError}
+        remixMissingDialogOpen={remixMissingDialogOpen}
+        remixMissingSegments={remixMissingSegments}
+        onForceRemixChapter={handleForceRemixChapter}
+        onCloseRemixMissingDialog={handleCloseRemixMissingDialog}
       />
       
       {/* 新增：历史记录对话框 */}
@@ -1205,11 +1311,9 @@ const AudiobookPage = () => {
         open={deleteChapterDialogOpen}
         chapter={selectedChapterForMenu}
         reason={deleteChapterReason}
-        deleteFiles={deleteChapterFiles}
         deleting={deletingChapter}
         onClose={handleCloseDeleteChapterDialog}
         onReasonChange={setDeleteChapterReason}
-        onDeleteFilesChange={setDeleteChapterFiles}
         onDelete={handleDeleteChapter}
       />
     </Box>

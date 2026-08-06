@@ -193,7 +193,10 @@ class MergeMixin:
             return False
 
         if "..." in text or "……" in text:
-            return False
+            # 省略号在末尾且无终止标点 → 可能是未完成语句，不视为自然短句
+            # 省略号在中间（表示犹豫/停顿）且以终止标点结尾 → 允许继续判断
+            if text.endswith(("...", "……")):
+                return False
 
         if seg.type == "narration":
             return self._is_natural_short_narration_beat(text, seg)
@@ -216,7 +219,7 @@ class MergeMixin:
             if length >= 8:
                 return True
 
-        if text[-1] in ("。", "！", "?", "？", "!") and length >= 3:
+        if text[-1] in ("。", "！", "?", "？", "!") and length >= 2:
             return True
 
         return False

@@ -40,7 +40,7 @@ class ExperienceRecord:
 
 
 # 初始提示词模板（小说专用版）
-INITIAL_PROMPT = """你是一位资深网文作者，擅长将文字改写得更具"人味"，同时保持文笔优美流畅，尽量降低AI生成痕迹。
+_REMOVED_LEGACY_INITIAL_PROMPT = """你是一位资深网文作者，擅长将文字改写得更具"人味"，同时保持文笔优美流畅，尽量降低AI生成痕迹。
 
 # 核心任务
 将输入的小说片段进行深度改写，保持故事内容不变，同时：
@@ -225,7 +225,7 @@ AI检测器通过多维度"指纹"识别AI文本，需要综合优化：
 2. **句式结构均匀**
    - AI句子长度相似，缺乏长短变化
    - AI喜欢"主句+逗号+从句+句号"的固定模式
-   - 人类写作有碎片化表达、倒装、省略
+   - 只在语义和语法允许时调整句长与句法，不能刻意制造碎片、倒装或省略
 
 3. **词汇选择**
    - 检查高频模板词、空泛修饰和重复搭配
@@ -234,7 +234,7 @@ AI检测器通过多维度"指纹"识别AI文本，需要综合优化：
 
 4. **过渡词模式化**
    - "首先/其次/此外/然而/因此"是AI标志词
-   - 人类用"其实/说白了/反正/话说回来"等口语过渡
+   - 仅减少不承载逻辑的机械过渡，不统一替换成口语连接词
 
 5. **情感表达**
    - 检查情感表达是否重复使用固定模板
@@ -257,18 +257,18 @@ AI检测器通过多维度"指纹"识别AI文本，需要综合优化：
 
 2. **句式层**：
    - 句子长度是否有变化（长短交替）？
-   - 是否有碎片句、省略句？
-   - 是否打破了"主谓宾"的工整结构？
+   - 是否减少了连续同构句，同时保持语法和语义完整？
+   - 句法调整是否自然，而非机械打破正常结构？
 
 3. **情感层**（最重要！）：
-   - 是否还有"他感到xxx"的直接陈述？
-   - 是否用身体反应/动作展示情感？
-   - 是否还有"心中一凛/眼中闪过"等AI套路？
+   - 是否减少了重复套用的情感表达模板？
+   - 是否保留原文已有的情绪、动作和主观信息？
+   - 是否避免用固定身体反应替换原文情感陈述？
 
 4. **对话层**：
-   - 对话是否口语化？有无语气词（嗯/啊/呢/吧）？
-   - 是否有打断、省略、话说一半？
-   - 对话是否过于礼貌和完整？
+   - 对话是否符合人物身份和原文语域？
+   - 是否避免统一添加语气词、方言、打断或省略？
+   - 是否完整保留说话者、事实信息和态度？
 
 5. **描写层**：
    - 是否还在堆砌形容词？
@@ -277,8 +277,8 @@ AI检测器通过多维度"指纹"识别AI文本，需要综合优化：
 
 6. **结构层**：
    - 是否还有"首先/其次/最后"的三段式？
-   - 段落长度是否参差不齐？
-   - 是否有适度的"废话"和留白？
+   - 是否减少段落模板循环，同时保持原有段落功能？
+   - 是否清理不承载信息的套话，而非主动增加废话或留白？
 
 7. **🆕 文笔层**（顺畅易懂维度）：
    - 读起来是否顺畅？有没有卡顿的地方？
@@ -481,11 +481,76 @@ class MetaOptimizer:
             "破坏叙事逻辑", "重构内在逻辑", "插入不相关联想", "无关细节",
             "改变事件顺序", "重排事件", "极致口语化", "强制口语化",
             "制造不完美", "逻辑是跳跃的", "非线性叙事", "改变叙事视角",
-            "改名", "替换人物姓名", "删除原文信息",
+            "改名", "替换人物姓名", "删除原文信息", "用身体反应替代",
+            "统一改成现代口语", "删除全场震惊类结尾", "加入口头禅和语气词",
         )
         return bool(prompt.strip()) and not any(pattern in prompt for pattern in unsafe_patterns)
 
-    def _get_genre_specific_addon(self, genre: str) -> str:
+    @staticmethod
+    def _validate_strategy_safety(strategy: str) -> bool:
+        """在生成完整提示词前拒绝主动制造低质量特征的实验策略。"""
+        if not strategy.strip() or not MetaOptimizer._validate_prompt_safety(strategy):
+            return False
+
+        direct_unsafe_patterns = (
+            "模拟非理性", "下意识强调", "人为制造停顿", "故意制造语病",
+            "随机插入", "无意义重复", "无关紧要的词语", "无意义短句",
+        )
+        if any(pattern in strategy for pattern in direct_unsafe_patterns):
+            return False
+
+        harmful_actions = ("刻意", "故意", "主动增加", "人为制造", "模拟", "随机")
+        harmful_features = ("重复", "语病", "废话", "停顿", "跳跃", "错别字", "不完整句")
+        return not (
+            any(action in strategy for action in harmful_actions)
+            and any(feature in strategy for feature in harmful_features)
+        )
+
+    @staticmethod
+    def _strategy_fingerprint(strategy: str) -> str:
+        """提取策略的动作和语言维度，用于低成本确定性去重。"""
+        normalized = re.sub(r"[\W_]+", "", strategy.lower())
+        action = "reduce" if any(
+            word in normalized for word in ("减少", "降低", "清理", "删除", "打散", "避免")
+        ) else "adjust"
+        dimensions = []
+        dimension_keywords = {
+            "repeated_syntax": ("同构句", "相同句法", "句法骨架", "重复句式", "重复程度"),
+            "sentence_length": ("句长", "句子长度", "长短句"),
+            "template_words": ("模板词", "模板化", "连接词", "总结词"),
+            "empty_phrases": ("套话", "空泛", "重复解释"),
+            "fidelity": ("保真", "事实", "事件顺序", "因果", "人物姓名"),
+        }
+        for dimension, keywords in dimension_keywords.items():
+            if any(keyword in normalized for keyword in keywords):
+                dimensions.append(dimension)
+        return f"{action}:{','.join(dimensions)}" if dimensions else normalized
+
+    @classmethod
+    def _filter_candidate_strategies(
+        cls,
+        strategies: List[str],
+        explored_directions: List[str],
+        limit: int,
+    ) -> List[str]:
+        """过滤危险策略及与历史方向重复的策略。"""
+        seen = {cls._strategy_fingerprint(item) for item in explored_directions if item.strip()}
+        accepted = []
+        for strategy in strategies:
+            fingerprint = cls._strategy_fingerprint(strategy)
+            if not cls._validate_strategy_safety(strategy):
+                logger.warning("丢弃高风险探索策略: %s", strategy[:80])
+                continue
+            if fingerprint in seen:
+                logger.info("跳过与历史方向重复的探索策略: %s", strategy[:80])
+                continue
+            seen.add(fingerprint)
+            accepted.append(strategy)
+            if len(accepted) >= limit:
+                break
+        return accepted
+
+    def _removed_legacy_genre_specific_addon(self, genre: str) -> str:
         """🔧 获取题材专用的提示词补充"""
         genre_addons = {
             "玄幻": """
@@ -914,6 +979,9 @@ class MetaOptimizer:
         
         # 🆕 第二步：根据随机策略生成变体
         for i, strategy_desc in enumerate(strategies, 1):
+            if not self._validate_strategy_safety(strategy_desc):
+                logger.warning("生成提示词前丢弃高风险A/B策略: %s", strategy_desc[:80])
+                continue
             # 探索模式使用更高温度
             temperature = 0.95 if exploration_mode else 0.8
             variant_prompt = await self._generate_variant_from_strategy(
@@ -946,7 +1014,7 @@ class MetaOptimizer:
         Returns:
             策略描述列表
         """
-        mode_desc = "激进探索" if exploration_mode else "温和优化"
+        mode_desc = "受控探索" if exploration_mode else "温和优化"
 
         # 🆕 汇总历史已探索方向（跨批次经验 + 本周期已生成的变体策略），用于避免重复探索
         explored_directions = (
@@ -960,29 +1028,20 @@ class MetaOptimizer:
         if explored_directions:
             explored_lines = "\n".join(f"- {d[:60]}" for d in explored_directions)
             explored_section = f"""
-【历史已探索方向】（以下方向已被尝试过，避免生成语义重复的策略，优先探索显著不同的维度或新颖组合）
+【历史已探索方向】（以下方向已被尝试过，不得改写措辞后重复提交）
 {explored_lines}
 """
 
-        prompt = f"""你是提示词优化专家，擅长发现降低AI痕迹的创新方法。
+        prompt = f"""你是提示词优化专家。所有实验必须降低机械语言特征并保持原文事实与表达质量。
 
-你的任务：**随机生成 {num_strategies} 个不同的{mode_desc}策略**，用于测试和改进"降低AI痕迹"提示词。
+你的任务：生成 {num_strategies} 个不同的{mode_desc}策略，用于测试和改进"降低AI痕迹"提示词。
 {explored_section}
 【核心要求】
-1. **完全随机创造**：每次生成都应该不同，不要重复固定模式
-2. **多维度探索**：从不同角度切入（词汇、句式、情感、对话、标点、描写、节奏等）
-3. **创新思维**：可以提出反常规的、实验性的方法
-4. {'扩大语言统计维度组合，但不得突破内容保真边界' if exploration_mode else '保持温和：策略应该可控且有效'}
-
-【可能的探索方向示例】（仅供参考，你需要随机创造新的）
-- 标点类：如“禁用句号主导”、“增加省略号使用”、“问号感叹号交替”
-- 句式类：如“降低连续同构句比例”、“按语义调整句长”、“减少机械复合句”
-- 词汇类：如“减少模板化连接词”、“删除空泛套话”、“保留题材语域”
-- 情感类：如“隐性情感表达”、“身体反应主导”、“环境映射情绪”
-- 对话类：如“方言化对话”、“不完整句式”、“语气词密集”
-- 描写类：如“感官细节主导”、“删除抽象描述”、“具体画面感”
-- 结构类：如“减少段落模板重复”、“保持事件顺序下调整段内表达”
-- 节奏类：如“加快节奏”、“停顿增加”、“韵律变化”
+1. 每条策略只改变一个可观测变量，且只能属于以下方向：减少模板化词汇、减少重复句法、自然调整句长分布、减少机械连接、清理空泛套话。
+2. “重复”只能被减少或打散，绝对不得主动增加无意义重复。
+3. 不得刻意制造语病、错别字、废话、非理性停顿、不完整表达或随机标点。
+4. 不得改名、改变设定、叙事视角、事件顺序、因果、否定关系，不得删除事实或添加原文没有的细节。
+5. {'可以组合尚未共同验证的统计指标，但每条策略仍只测试一个主要变量' if exploration_mode else '保持温和、可控，优先对已有有效方向做小幅参数调整'}。
 
 【输出格式】
 请直接输出 {num_strategies} 条策略，每行一条，不要编号，不要解释。
@@ -993,11 +1052,11 @@ class MetaOptimizer:
 清理不承载事实的套话和重复解释，保留全部具体信息
 对话只在原有语气范围内轻度自然化，不新增方言或语气词
 
-请开始随机生成："""
+请开始生成："""
         
         try:
             messages = [
-                {"role": "system", "content": "你是创意探索专家，擅长随机生成多样化的优化策略。"},
+                {"role": "system", "content": "你是严谨的中文文本统计特征优化专家，只生成保真且可控的单变量策略。"},
                 {"role": "user", "content": prompt}
             ]
             
@@ -1023,8 +1082,11 @@ class MetaOptimizer:
                     if cleaned:
                         strategies.append(cleaned)
             
-            # 只取需要的数量
-            strategies = strategies[:num_strategies]
+            strategies = self._filter_candidate_strategies(
+                strategies,
+                explored_directions,
+                num_strategies,
+            )
 
             # 🆕 记入本周期策略历史，供下次生成时去重
             self._session_strategy_history.extend(strategies)
@@ -1418,29 +1480,26 @@ class MetaOptimizer:
         instruction_parts.append("当前处于探索模式，可以扩大语言统计特征的组合范围，但内容保真边界不可突破：")
         instruction_parts.append("")
         instruction_parts.append("1. **扩大可控实验范围**")
-        instruction_parts.append("   - 你可以大幅调整现有策略的权重和优先级")
+        instruction_parts.append("   - 只允许测试模板化词汇、重复句法、句长均匀、机械连接和空泛套话")
         instruction_parts.append("   - 每次优先改变一个语言变量，便于判断真实贡献")
         instruction_parts.append("   - 句式和标点实验必须服从语义、语法和题材语域")
         instruction_parts.append("")
         instruction_parts.append("2. **增加多样性**")
-        instruction_parts.append("   - 可以探索新的词汇、句法和重复模式指标，不得改变叙事视角")
-        instruction_parts.append("   - 尝试组合之前未曾组合的策略")
-        instruction_parts.append("   - 实验性地添加新的禁用词或规则")
+        instruction_parts.append("   - 可以调整五类允许维度的阈值或作用范围，不得主动增加无意义重复")
+        instruction_parts.append("   - 不得刻意增加碎片句、语气词、废话、随机标点或非理性停顿")
+        instruction_parts.append("   - 不得把单一词表替换包装成新策略")
         instruction_parts.append("")
         instruction_parts.append("3. **跳出局部最优**")
         instruction_parts.append("   - 可以重新检验历史语言策略，但不得忽略内容保真约束")
         instruction_parts.append("   - 重新评估之前认为无效的策略")
-        instruction_parts.append("   - 🆕 可以质疑【历史验证的有效方向】：若怀疑其已过时，允许尝试相反方向")
-        instruction_parts.append("   - 寻找全新的优化方向")
+        instruction_parts.append("   - 新实验必须与历史策略具有不同的允许维度或明确不同的可测参数")
         instruction_parts.append("")
         
         if reverse_optimization:
             instruction_parts.append("4. **🔀 反向优化模式激活**")
-            instruction_parts.append("   - 尝试与历史成功策略相反的方向")
-            instruction_parts.append("   - 例如：如果之前倾向于短句，现在尝试长短结合")
-            instruction_parts.append("   - 例如：如果之前强调碎片化，现在尝试流畅连贯")
-            instruction_parts.append("   - 例如：如果之前减少形容词，现在尝试精选形容词")
-            instruction_parts.append("   - 目的：探索是否之前的方向过于极端")
+            instruction_parts.append("   - 反向优化只允许回调历史策略的强度，不允许反向增加已知低质量特征")
+            instruction_parts.append("   - 例如：若句长调整过强，则降低调整幅度并恢复自然连贯")
+            instruction_parts.append("   - 目的：检验历史策略是否过度，而不是突破质量与保真边界")
             instruction_parts.append("")
         
         instruction_parts.append("⚠️ 注意：探索模式不是放弃原则，仍需：")

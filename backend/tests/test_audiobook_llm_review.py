@@ -58,6 +58,8 @@ def test_llm_review_prompt_includes_audiobook_cadence_contract():
     assert "narration 超过 140 字" in prompt
     assert "连续动作按“发动 -> 受击 -> 后果 -> 反应”拆" in prompt
     assert "不要在拆出的每段重复同一音效/配乐" in prompt
+    assert "固定音色表演边界" in prompt
+    assert "片段级不得要求改变音高、声线或音色质感" in prompt
 
 
 def test_llm_review_prompt_includes_fidelity_contract():

@@ -11,7 +11,7 @@ AudioQualityReviewer - 音频质量评审官Agent
 import logging
 import re
 from typing import Dict, List, Any, Optional
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from app.services.audiobook.duration_estimator import estimate_narration_duration_seconds
 from app.services.audiobook.script_render_mode import normalize_script_audio_engine_mode
@@ -65,6 +65,11 @@ class QualityIssue:
     category: str  # script/audio/pacing
     description: str
     suggestion: str
+    # 扩展字段（LLM 维度评审，向后兼容）
+    dimension: str = ""  # 所属维度 key（如 dialogue_naturalness）
+    fix_type: str = ""  # deterministic / llm_rewrite / none
+    target_fields: List[str] = field(default_factory=list)  # 建议修改的字段
+    segment_index: int = -1  # 对应片段下标（-1 表示未指定）
 
 
 @dataclass
@@ -88,6 +93,9 @@ class AudioQualityReport:
     
     # 修订建议
     revision_suggestions: List[str]
+
+    # LLM 维度评审结果（融合后填充）
+    llm_dimensions: Dict[str, Any] = field(default_factory=dict)
 
 
 class AudioQualityReviewer:
@@ -1004,3 +1012,105 @@ class AudioQualityReviewer:
         return {
             "quality_standards": self.quality_standards
         }
+
+    # ------------------------------------------------------------------
+    # LLM 维度评审融合
+    # ------------------------------------------------------------------
+
+    def merge_llm_review(
+        self,
+        report: AudioQualityReport,
+        llm_report: Any,
+        *,
+        rule_weight: float = 0.5,
+        llm_weight: float = 0.5,
+    ) -> AudioQualityReport:
+        """
+        将 LLM 维度评审结果融合到规则评审报告中。
+
+        Args:
+            report: 规则评审产出的 AudioQualityReport
+            llm_report: LLMQualityReport 实例（可为 None / 空报告）
+            rule_weight: 规则分权重（默认 0.5）
+            llm_weight: LLM 分权重（默认 0.5）
+
+        Returns:
+            融合后的 report（原地修改并返回）
+        """
+        # 空报告降级：LLM 评审失败或无维度分时，保留纯规则分
+        if (
+            llm_report is None
+            or not getattr(llm_report, "dimensions", None)
+            or getattr(llm_report, "avg_score", 0) <= 0
+        ):
+            return report
+
+        # 1. 填充 llm_dimensions
+        report.llm_dimensions = dict(llm_report.dimensions)
+
+        # 2. 融合 LLM issues 到 report.issues
+        llm_issues = getattr(llm_report, "issues", None) or []
+        for llm_issue in llm_issues:
+            merged_issue = QualityIssue(
+                location=f"segment_{getattr(llm_issue, 'segment_index', -1)}",
+                severity=getattr(llm_issue, "severity", "minor"),
+                category="llm_quality",
+                description=getattr(llm_issue, "description", ""),
+                suggestion=getattr(llm_issue, "suggestion", ""),
+                dimension=getattr(llm_issue, "dimension", ""),
+                fix_type=getattr(llm_issue, "fix_type", "none"),
+                target_fields=list(getattr(llm_issue, "target_fields", None) or []),
+                segment_index=getattr(llm_issue, "segment_index", -1),
+            )
+            report.issues.append(merged_issue)
+
+        # 3. 计算融合总分
+        rule_score = report.overall_score  # 0-100
+        llm_avg = float(getattr(llm_report, "avg_score", 0))  # 0-10
+        llm_score_100 = llm_avg * 10  # 转换为 0-100
+
+        fused_score = round(
+            rule_weight * rule_score + llm_weight * llm_score_100, 1
+        )
+        fused_score = max(0.0, min(100.0, fused_score))
+        report.overall_score = fused_score
+        report.overall_grade = self._score_to_grade(fused_score)
+
+        # 4. 补充修订建议
+        llm_major = [i for i in llm_issues if getattr(i, "severity", "") in ("critical", "major")]
+        if llm_major:
+            report.revision_suggestions.append(
+                f"【LLM维度】优化 {len(llm_major)} 个质感问题"
+                f"（均分 {llm_avg:.1f}/10）"
+            )
+
+        logger.info(
+            "融合评审: rule=%.1f + llm=%.1f → fused=%.1f (%s)",
+            rule_score, llm_score_100, fused_score, report.overall_grade,
+        )
+        return report
+
+    @staticmethod
+    def _score_to_grade(score: float) -> str:
+        """分数转等级。"""
+        if score >= 95:
+            return "A+"
+        elif score >= 90:
+            return "A"
+        elif score >= 85:
+            return "A-"
+        elif score >= 80:
+            return "B+"
+        elif score >= 75:
+            return "B"
+        elif score >= 70:
+            return "B-"
+        elif score >= 65:
+            return "C+"
+        elif score >= 60:
+            return "C"
+        elif score >= 55:
+            return "C-"
+        elif score >= 50:
+            return "D"
+        return "F"

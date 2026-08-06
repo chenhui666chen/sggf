@@ -16,12 +16,21 @@ from app.services.audiobook.llm_json import (
 from app.services.audiobook.tts_model_ids import (
     COSYVOICE_V35_PLUS_MODEL_ID,
     DEFAULT_AUDIOBOOK_TTS_MODEL,
+    MIMO_V25_TTS_MODEL,
+    MIMO_V25_TTS_VOICE_CLONE_MODEL,
+    MINIMAX_SPEECH_28_HD_MODEL,
+    MINIMAX_SPEECH_28_TURBO_MODEL,
     SEED_TTS_20_EXPRESSIVE_MODEL,
+    STEPAUDIO_25_TTS_MODEL,
     normalize_audiobook_tts_model,
 )
 from app.services.audiobook.script_render_mode import (
     build_script_transform_engine_guidance,
     normalize_script_audio_engine_mode,
+)
+from app.services.audiobook.tts_pause import AudiobookPauseRequested
+from app.services.audiobook.voice_identity_policy import (
+    FIXED_VOICE_PERFORMANCE_BOUNDARY_PROMPT,
 )
 
 from ._dataclasses import ScriptSegment
@@ -51,6 +60,7 @@ class TransformMixin:
         audio_adaptation_brief: str = "",
         progress_callback: Optional[Callable[[int, int], None]] = None,
         character_profiles: Optional[List[Dict[str, Any]]] = None,
+        pause_check: Optional[Callable[[], bool]] = None,
     ) -> List[ScriptSegment]:
         """
         剧本转化：听觉化改写
@@ -76,6 +86,22 @@ class TransformMixin:
         degraded_batches: List[Dict[str, Any]] = []
 
         for idx, para in enumerate(merged_paragraphs, 1):
+            # 批次级暂停检查：检测到暂停请求时不再继续转化后续批次
+            if pause_check is not None:
+                try:
+                    paused = pause_check()
+                except Exception as pause_exc:
+                    logger.warning("暂停状态检查失败，继续剧本转化: %s", pause_exc)
+                    paused = False
+                if paused:
+                    logger.info(
+                        "⏸️ 检测到暂停请求，停止剧本转化（已完成 %s/%s 批次）",
+                        idx - 1,
+                        total_paras,
+                    )
+                    raise AudiobookPauseRequested(
+                        f"pause_requested_before_transform_batch_{idx}"
+                    )
             logger.info(f"   ⏳ [{idx}/{total_paras}] 处理段落 ({len(para)}字)...")
             
             try:
@@ -99,7 +125,7 @@ class TransformMixin:
             except Exception as e:
                 logger.error(f"   ❌ [{idx}/{total_paras}] 失败: {e}")
                 # 保留原文兜底，避免整批正文静默丢失，并记录降级
-                fallback_segments = build_script_segments([], fallback_text=para)
+                fallback_segments = build_script_segments([], fallback_text=para, tts_model=self.tts_model)
                 all_segments.extend(fallback_segments)
                 continuity_context = self._build_transform_continuity_context(all_segments)
                 degraded_batches.append({
@@ -392,7 +418,7 @@ class TransformMixin:
 """
             instruct_block = """**Seed-TTS 2.0 表演提示**
 - performance_notes 会由确定性发送层编译到 Query-Response 的 context_texts；请写成清晰、可执行的导演指令。
-- 每个片段都要说明情绪变化过程，而不只是静态情绪词：起始状态 → 转折触发 → 结束状态，并补充语速、音量、音调、重读和停顿。
+- 每个片段都要说明情绪变化过程，而不只是静态情绪词：起始状态 → 转折触发 → 结束状态，并补充语速、音量、语势、重读和停顿。
 - 笑声、哭腔、吸气、喘息、尖叫、呻吟等微表演应写入具体 performance_notes；不要把“用悲伤语气说”等舞台说明混入 text。
 - 音频标签仅适合短句、强情绪和明确微表演；是否启用及标签格式由发送层根据 delivery plan 决定。
 - 长旁白和复杂情绪变化优先使用自然语言上下文，避免堆叠标签导致朗读正文、角色漂移或节奏失控。
@@ -406,6 +432,59 @@ class TransformMixin:
             instruct_block = """**Qwen3 Instruct 提示**\n- 请输出结构化指令字段：instruct_emotion / instruct_scene / instruct_role / instruct_identity\n- performance_notes 会一并映射到 Qwen instructions，请写成可直接执行的演绎说明\n- qwen3-tts-instruct-flash 不依赖 SSML，请直接描述情绪、场景、身份与语气目标\n"""
             model_contract_reminders = """- instruct_emotion / instruct_scene / instruct_role / instruct_identity 用于构建 Qwen instructions
 - performance_notes 必须是可直接执行的自然语言演绎说明，不要输出 SSML"""
+        elif normalized_model in (
+            MINIMAX_SPEECH_28_HD_MODEL,
+            MINIMAX_SPEECH_28_TURBO_MODEL,
+        ):
+            tts_block = """**当前TTS模型：MiniMax speech-2.8（基础参数模式）**
+- 适合：稳定旁白与对白、成本敏感章节
+- 特性：仅支持 emotion 枚举与 speed/volume 基础表演参数，以及少量内联语气词标签（如 (laughs)）；固定音色请求不传递片段 pitch
+- 限制：不支持自然语言 instruction 指令，也不支持 SSML；不要生成自由文本演绎指令字段
+"""
+            instruct_block = """**MiniMax 表演提示**
+- instruct_emotion 只能取值：happy、sad、angry、fearful、disgusted、surprised、calm、neutral（MiniMax 2.8 不支持 whisper/低语类情绪）。
+- 语速、音量由发送层规范化为确定性 speed/volume 参数；供应商协议要求的 pitch 固定为中性值 0，不读取片段情绪或提示；performance_notes 可描述目标韵律，但不要承诺 MiniMax 会完整执行自由文本指令。
+- 笑声、喘息等微表演仅可使用 MiniMax 明确支持的内联语气词标签（如 (laughs)）；不要输出 SSML 或其他私用标签语法。
+- 保留供应商中立的 performance_notes（供审稿、回放与未来更换模型），但明确它不会被 MiniMax 逐条执行。
+"""
+            model_contract_reminders = """- instruct_emotion 限用 happy/sad/angry/fearful/disgusted/surprised/calm/neutral
+- 不要输出自然语言 instruction 请求字段或 SSML；MiniMax 不支持自由文本指令
+- performance_notes 保留供应商中立的表演意图，发送层会编译为 speed/volume 与受控内联标签"""
+        elif normalized_model in (
+            MIMO_V25_TTS_MODEL,
+            MIMO_V25_TTS_VOICE_CLONE_MODEL,
+        ):
+            tts_block = """**当前TTS模型：MiMo V2.5 TTS（小米，导演模式/音频标签）**
+- 适合：角色配音、影视级高表现力章节、复合情绪与微表演
+- 特性：自然语言指令（user 消息）+ 音频标签（assistant 消息内 (风格) 前缀与 [音频标签]）；支持多风格切换、复合情绪、段落/句/词/字多粒度控制与唱歌模式
+- 约束：剧本层只描述目标表演，不直接拼接 (风格)/[音频标签] 等供应商语法
+"""
+            instruct_block = """**MiMo 表演提示**
+- performance_notes 会由发送层编译为导演模式提示（角色/场景/指导三维度）或自然语言指令，请写成清晰、可执行的导演指令。
+- 每个片段说明情绪变化过程（起始 → 转折 → 结束），并补充语速、气息、停顿、重音与语势变化。
+- 笑声、哭腔、吸气、喘息、颤抖等微表演写入 performance_notes；发送层会决定是否编译为 [音频标签]。
+- 复合情绪（如“压抑的愤怒”“带着哽咽的笑意”）可直接描述，MiMo 支持多情绪混合。
+- 输出保持供应商中立：不要输出 (风格) 前缀、[音频标签]、style_control_method 等供应商请求字段。
+"""
+            model_contract_reminders = """- instruct_* 与 performance_notes 只表达供应商中立的表演意图
+- 不要输出 (风格) 前缀、[音频标签] 或 SSML 等供应商私有语法；标签编译由发送层决定
+- 复合情绪与多粒度控制（段落/句/词/字）可直接用自然语言描述"""
+        elif normalized_model == STEPAUDIO_25_TTS_MODEL:
+            tts_block = """**当前TTS模型：StepAudio 2.5 TTS（阶跃星辰，Contextual TTS）**
+- 适合：需要细腻语境控制、复合意图与零样本音色复刻的精品章节
+- 特性：Global Context（全局语境 instruction，≤200 字符）定整段基调 + Inline Context（文中括号，不朗读）逐句精控情绪/停顿/气息
+- 约束：单次输入 ≤1000 字符；剧本层只描述目标表演，不直接拼接括号内联指令
+"""
+            instruct_block = """**StepAudio 表演提示**
+- performance_notes 会由发送层编译为全局语境 instruction（≤200 字符）与文中括号内联指令；请写成精炼、可执行的语境描述。
+- 整段基调（情绪、语速、语气）写入 performance_notes；发送层会截断到 200 字符，请优先保留最关键信息。
+- 句内细节（停顿、气息、重音、语气转折）写入 performance_notes，发送层会决定是否编译为文中括号指令。
+- 支持复合意图（如“克制的悲伤，不哭腔，轻轻发颤”），可直接用自然语言描述。
+- 输出保持供应商中立：不要输出 () 括号内联指令、style_control_method 等供应商请求字段。
+"""
+            model_contract_reminders = """- instruct_* 与 performance_notes 只表达供应商中立的表演意图
+- 不要输出 () 括号内联指令或 SSML 等供应商私有语法；全局/文中语境编译由发送层决定
+- 全局语境 instruction 上限 200 字符，performance_notes 请精炼表达整段基调"""
         else:
             tts_block = f"""**当前TTS模型：{normalized_model}**
 - 使用模型无关的有声书剧本结构，具体供应商参数由发送层转换
@@ -413,7 +492,7 @@ class TransformMixin:
 """
             instruct_block = """**通用表演提示**
 - 使用 instruct_emotion / instruct_scene / instruct_role / instruct_identity 表达供应商中立的表演意图。
-- performance_notes 描述语速、音调、音量、重读、停顿和情绪变化，不输出供应商私有字段或语法。
+- performance_notes 描述语速、语势、音量、重读、停顿和情绪变化，不输出供应商私有字段或语法。
 """
             model_contract_reminders = """- instruct_* 与 performance_notes 只表达供应商中立的表演意图
 - 不要输出供应商私有请求字段或标签语法"""
@@ -440,12 +519,12 @@ class TransformMixin:
             analysis_guidance_lines.append(f"- 改编难点：{adaptation_challenges}")
         if isinstance(voice_control_strategy, dict):
             pace_changes = str(voice_control_strategy.get("pace_changes") or "").strip()
-            pitch_variations = str(voice_control_strategy.get("pitch_variations") or "").strip()
+            prosody_variations = str(voice_control_strategy.get("prosody_variations") or "").strip()
             pause_points = str(voice_control_strategy.get("pause_points") or "").strip()
             if pace_changes:
                 analysis_guidance_lines.append(f"- 语速策略：{pace_changes}")
-            if pitch_variations:
-                analysis_guidance_lines.append(f"- 音调策略：{pitch_variations}")
+            if prosody_variations:
+                analysis_guidance_lines.append(f"- 语势策略：{prosody_variations}")
             if pause_points:
                 analysis_guidance_lines.append(f"- 停顿策略：{pause_points}")
         analysis_guidance_block = (
@@ -505,6 +584,8 @@ class TransformMixin:
 
 {instruct_block}
 
+{FIXED_VOICE_PERFORMANCE_BOUNDARY_PROMPT}
+
 {engine_block}
 
 {input_guard_block}
@@ -533,7 +614,7 @@ class TransformMixin:
 3【长叙事的有声化拆分】
    - 连续动作描写：按“发动 → 受击 → 后果 → 反应”拆分。
    - 逃亡/追逐/战斗：每个片段保留一个清晰动作，使用 pause_after 制造呼吸点。
-   - 回忆切入：单独成段，给出更慢、更低的 performance_notes，并可添加轻微转场音效。
+   - 回忆切入：单独成段，给出更慢、更收敛的 performance_notes，并可添加轻微转场音效。
    - 有明显音效的动作（倒地、骨裂、风声、脚步、墓前静默）应单独标注 sound_effects，不要只写在 text 里。
 
 4【对话与旁白关系】
@@ -544,7 +625,7 @@ class TransformMixin:
 
 5【旁白情绪层次】
    - 旁白也必须有情绪层次，不要整章都使用 neutral。根据场景张力选择 tense、fearful、mysterious、sad、solemn 等更准确的 emotion。
-   - 旁白的 performance_notes 必须具体可执行：说明语速、声线、重读位置、停顿目标；例如“低沉克制但有压迫感，关键意象处放慢并加重，句尾留悬念停顿”。
+   - 旁白的 performance_notes 必须具体可执行：说明语速、语势、重读位置、停顿目标；例如“沉重而克制地讲述，关键意象处放慢并加重，句尾留悬念停顿”。
    - 旁白要丰富但不抢角色台词：保持讲述者身份，不替角色喊台词，不把角色对白写进 narration。
         
 总之：**请优先保证片段听起来像有声小说分镜，而不是长段朗读；语义完整和播讲呼吸必须同时满足。**
@@ -584,11 +665,10 @@ class TransformMixin:
       "emotion": "{format_valid_emotions_for_prompt()}",
       "instruct_emotion": "neutral|fearful|angry|sad|surprised|happy|disgusted",
       "instruct_scene": "紧张逃亡场景",
-      "instruct_role": "沉稳有压迫感的有声书旁白",
+      "instruct_role": "有声书旁白",
       "instruct_identity": "故事讲述者",
       "voice_params": {{
-        "rate": 1.0,
-        "pitch": 1.0,
+        "volume": 50,
         "pause_before": 0.2,
         "pause_after": 0.3
       }},
@@ -641,7 +721,8 @@ class TransformMixin:
 - 不要在JSON中添加解释性文字
 - emotion字段必须使用推荐情感之一，不要自行发明
 {model_contract_reminders}
-- voice_params必须包含rate和pitch参数，根据情感调整
+- 片段级 voice_params 不得包含 pitch、pitch_ratio 或 pitch_semitones；片段表演通过语气、语势、强弱和韵律表达，角色基础 pitch 不变
+- voice_params 只填写 volume 与 pause_before/pause_after 等表演参数；不要输出数值 rate/speed 调整语速，语速变化写进 performance_notes，发送层会按模型能力编译（不支持指令的模型会自动转为数值语速参数）
 - pause_before/after单位为秒，范围：0.1-2.0
 - 优先使用happy/sad/tense等有强烈情感的标签，避免过多使用neutral
 - performance_notes要具体可执行，帮助TTS调节韵律和语气
@@ -756,14 +837,14 @@ class TransformMixin:
                 logger.warning("⚠️ LLM返回了中文字段名，已自动转换为英文")
             
             # 转换为ScriptSegment对象
-            script_segments = build_script_segments(cleaned_segments, fallback_text=paragraph)
+            script_segments = build_script_segments(cleaned_segments, fallback_text=paragraph, tts_model=self.tts_model)
             if not script_segments:
                 raise RuntimeError("LLM returned no valid script segments")
             return script_segments
             
         except Exception as e:
             logger.error(f"段落转化失败: {e}")
-            return build_script_segments([], fallback_text=paragraph)
+            return build_script_segments([], fallback_text=paragraph, tts_model=self.tts_model)
 
     def _format_json_error_context(self, json_text: str, json_err: Exception, radius: int = 320) -> str:
         """生成解析失败位置附近的上下文，便于定位模型输出污染点。"""

@@ -8,7 +8,7 @@
 
 TTS能力：多模型适配
 - 语气与演绎：instructions / instruction
-- 语速、音调、停顿：rate / pitch / pause
+- 语速、音量、停顿：rate / volume / pause
 - 模型专属能力由下游 TTS 适配层处理
 """
 
@@ -51,7 +51,7 @@ class AdaptationStrategy:
     
     # TTS高级参数利用
     use_advanced_rate_control: bool = True  # 使用语速控制
-    use_pitch_modulation: bool = True  # 使用音调调节
+    use_pitch_modulation: bool = False  # 兼容字段；固定音色禁止片段级音高调节
     use_precise_pauses: bool = True  # 使用精确停顿
     use_emphasis: bool = True  # 使用重音强调
     
@@ -149,7 +149,7 @@ class AudioDirector:
             voice_differentiation=True,
             # 商业版：全面启用 TTS 高级参数
             use_advanced_rate_control=True,
-            use_pitch_modulation=True,
+            use_pitch_modulation=False,
             use_precise_pauses=True,
             use_emphasis=True
         )
@@ -194,7 +194,7 @@ class AudioDirector:
         tasks.append(TaskAssignment(
             agent_name="AudiobookScriptAdapter",
             task_description=f"""改编章节内容为有声剧本，风格：{self.current_strategy.style.value}。
-充分利用 instructions、rate/pitch/pause 等通用控制字段；模型专属能力由下游 TTS 适配层处理。
+充分利用 instructions、rate/volume/pause 等表演控制字段；模型专属能力由下游 TTS 适配层处理，禁止片段级 pitch 调节。
 
 ⚠️ 语义完整性约束：
 - 最小片段长度: {self.current_strategy.min_segment_length}字
@@ -209,7 +209,7 @@ class AudioDirector:
         if self.current_strategy.voice_differentiation:
             tasks.append(TaskAssignment(
                 agent_name="VoiceDesigner",
-                task_description="为主要角色设计差异化音色，结合性别、年龄、角色气质与 rate/pitch 参数进行精细调整。",
+                task_description="为主要角色分配独立音色并建立固定参数基线；片段表演不得通过 pitch 改造已选音色。",
                 priority=2,
                 status="pending"
             ))

@@ -12,8 +12,10 @@ import AudiobookCompletionStats from './AudiobookCompletionStats'
 import AudiobookScriptCompletionStep from './AudiobookScriptCompletionStep'
 import ChapterAudioResults from './ChapterAudioResults'
 import ProjectExportActions from './ProjectExportActions'
-import PromptAudioReviewSummaryPanel from './PromptAudioReviewSummaryPanel'
-import { resolveAudiobookCompletionMode } from './completionViewUtils'
+import {
+  resolveAudiobookCompletionMode,
+  resolveScriptReviewTargetChapterId,
+} from './completionViewUtils'
 import { audiobookButtonRowSx, audiobookButtonSx, audiobookColors } from './audiobookTheme'
 import type {
   AudioEngineMode,
@@ -97,6 +99,7 @@ const AudiobookCompletionStep = ({
     requestedMode: lastGenerationMode,
     chapterAudios: currentChapterAudios,
   })
+  const scriptEditorTargetChapterId = resolveScriptReviewTargetChapterId(currentChapterAudios)
 
   if (completionMode === 'script_only') {
     return (
@@ -134,8 +137,6 @@ const AudiobookCompletionStep = ({
         <AudiobookCompletionStats audiobookProject={audiobookProject} />
       )}
 
-      <PromptAudioReviewSummaryPanel audiobookProjectId={audiobookProject?.id} />
-
       <Box sx={audiobookButtonRowSx.centeredWrap}>
         {hasChapterAudios && (
           <Button
@@ -163,10 +164,15 @@ const AudiobookCompletionStep = ({
         {hasScriptReview && (
           <Button
             variant="outlined"
-            onClick={onOpenScriptReview}
+            onClick={() => {
+              if (scriptEditorTargetChapterId) {
+                onOpenScriptEditor(scriptEditorTargetChapterId)
+              }
+            }}
+            disabled={!scriptEditorTargetChapterId}
             sx={audiobookButtonSx.brandOutlined}
           >
-            查看剧本评审
+            打开剧本编辑器
           </Button>
         )}
 

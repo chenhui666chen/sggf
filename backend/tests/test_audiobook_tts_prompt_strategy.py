@@ -77,8 +77,10 @@ def test_template_renderer_prioritizes_narration_rhythm_before_character_context
     )
 
     joined = "；".join(parts)
-    assert "旁白模板：讲述者视角，信息清晰，语气稳定" in parts[0]
+    assert parts[0].startswith("音色约束：保持已选音色")
+    assert "旁白模板：讲述者视角，信息清晰，情感随剧情起伏" in joined
     assert "说话角色：" not in joined
+    assert joined.index("音色约束：") < joined.index("旁白模板：")
     assert joined.index("韵律控制：") < joined.index("停顿策略：句尾留白")
     assert joined.index("停顿策略：句尾留白") < joined.index("情绪目标：fearful")
     assert joined.index("情绪目标：fearful") < joined.index("角色设定：全知叙述者")
@@ -105,12 +107,12 @@ def test_cosyvoice_prompt_parts_prioritize_short_performance_cues() -> None:
         model="cosyvoice-v3.5-plus",
     )
 
-    assert parts == [
-        "emotion=surprised",
-        "pause=新鲜的指纹前短停",
-        "重读=新鲜的指纹",
-        "act=先压住情绪,结尾加重但不要喊",
-    ]
+    assert parts[0] == "原音色不变;仅表演"
+    assert "act=压住情绪,加重不喊" in parts
+    assert "emotion=surprised" in parts
+    assert "重读=新鲜的指纹" in parts
+    assert "pause=新鲜的指纹前短停" in parts
+    assert not any("声音描述" in part or "性别：女性" in part for part in parts)
 
 
 def test_stepaudio_prompt_parts_prioritize_global_performance_cues_before_long_context() -> None:
@@ -138,9 +140,89 @@ def test_stepaudio_prompt_parts_prioritize_global_performance_cues_before_long_c
 
     joined = "；".join(parts)
 
+    assert parts[0].startswith("音色约束：保持已选音色")
     assert "情绪目标：压抑的惊惧" in joined
-    assert "演绎要求：压低声音，真相两个字前短停，结尾加重但不要喊。" in joined
+    assert "演绎要求：压低声音，真相两个字前短停，结尾加重但不要喊" in joined
     assert "停顿策略：真相前短停，句尾留白" in joined
     assert "重读词：真相" in joined
-    assert joined.index("情绪目标：压抑的惊惧") < joined.index("声音描述：")
-    assert joined.index("演绎要求：压低声音") < joined.index("声音描述：")
+    assert "导演指导：真相前短停，结尾保持克制" in joined
+    assert "声音描述：" not in joined
+    assert "性别：女性" not in joined
+    assert joined.index("音色约束：") < joined.index("情绪目标：压抑的惊惧")
+    assert joined.index("情绪目标：压抑的惊惧") < joined.index("演绎要求：压低声音")
+
+
+def test_fixed_voice_prompt_parts_filter_unqualified_hoarseness_and_voice_profile() -> None:
+    from app.services.audiobook.tts_prompt_strategy import build_common_prompt_parts
+
+    voice_params = {
+        "segment_speaker": "旁白",
+        "segment_type": "narration",
+        "voice_description": "VOICE_PROFILE_MUST_NOT_REACH_TTS",
+        "performance_notes": "声音沙哑、虚弱，句尾带少量气声。",
+    }
+
+    for model in (
+        "qwen3-tts-instruct-flash",
+        "seed-tts-2.0-expressive",
+        "stepaudio-2.5-tts",
+        "cosyvoice-v3.5-plus",
+    ):
+        parts = build_common_prompt_parts(voice_params, model=model)
+        joined = "；".join(parts)
+        if model == "cosyvoice-v3.5-plus":
+            assert joined.startswith("原音色不变;仅表演")
+        else:
+            assert "已选音色" in joined
+            assert "身份" in joined
+            assert "年龄" in joined
+            assert "声线" in joined
+            assert "辨识度" in joined
+        assert "表演" in joined
+        assert "VOICE_PROFILE_MUST_NOT_REACH_TTS" not in joined
+        assert not any(
+            "沙哑" in part and part.startswith(("演绎要求：", "act="))
+            for part in parts
+        )
+        assert "虚弱" in joined
+        assert "气声" in joined
+        assert "轻度" in joined
+
+
+def test_common_prompt_parts_sanitize_fallback_emotion_identity_text() -> None:
+    from app.services.audiobook.tts_prompt_strategy import build_common_prompt_parts
+
+    parts = build_common_prompt_parts(
+        {"segment_type": "narration", "segment_speaker": "旁白"},
+        emotion="苍老男声，永久沙哑",
+        model="seed-tts-2.0-expressive",
+    )
+    joined = "；".join(parts)
+
+    assert "苍老男声" not in joined
+    assert "永久沙哑" not in joined
+    assert joined.startswith("音色约束：保持已选音色")
+
+
+def test_fixed_voice_prompt_parts_allow_temporary_hoarseness_only_on_original_voice() -> None:
+    from app.services.audiobook.tts_prompt_strategy import build_common_prompt_parts
+
+    voice_params = {
+        "segment_speaker": "旁白",
+        "segment_type": "narration",
+        "performance_notes": "因重伤失血而声音轻微沙哑，句尾逐渐减弱。",
+    }
+
+    for model in (
+        "qwen3-tts-instruct-flash",
+        "seed-tts-2.0-expressive",
+        "stepaudio-2.5-tts",
+        "cosyvoice-v3.5-plus",
+    ):
+        parts = build_common_prompt_parts(voice_params, model=model)
+        joined = "；".join(parts)
+
+        assert "沙哑" in joined
+        assert "原音色基础" in joined or "原声轻度" in joined
+        assert "轻微" in joined or "轻度" in joined
+        assert "短暂" in joined or "原声轻度" in joined

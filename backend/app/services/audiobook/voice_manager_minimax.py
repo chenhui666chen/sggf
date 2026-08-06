@@ -15,6 +15,16 @@ from .voice_catalog import load_voice_catalog_for_model
 logger = logging.getLogger(__name__)
 
 
+def _is_clone_voice_id(voice_id: str) -> bool:
+    """检查 voice_id 是否为克隆/自定义音色（不在静态音色目录中）。
+
+    包括 MiniMax 官方克隆音色（mmx_ 前缀）和用户创建的克隆音色（voice_clone_ 前缀）。
+    克隆音色由用户专门创建，应被视为最高优先级，不应被硬编码默认值覆盖。
+    """
+    value = str(voice_id or "").strip()
+    return is_minimax_custom_voice_id(value) or value.startswith("voice_clone_")
+
+
 class MiniMaxVoiceManager(VoiceManager):
     """MiniMax Speech 2.8 声音管理器
     
@@ -61,7 +71,7 @@ class MiniMaxVoiceManager(VoiceManager):
         voice_config: Optional[Dict[str, Any]] = None,
     ) -> VoiceProfile:
         entry = self.get_voice_entry(voice_id)
-        if entry is None and is_minimax_custom_voice_id(voice_id):
+        if entry is None and _is_clone_voice_id(voice_id):
             entry = {
                 "id": voice_id,
                 "speaker": voice_id,
@@ -76,8 +86,13 @@ class MiniMaxVoiceManager(VoiceManager):
 
         defaults = entry.get("default_params") or {}
         config = voice_config or {}
+        pitch_value = config.get("pitch")
+        if pitch_value is None:
+            pitch_value = defaults.get("pitch")
+        if pitch_value is None:
+            pitch_value = 0
         profile_config = {
-            "pitch_base": int(config.get("pitch", defaults.get("pitch", 50)) or 50),
+            "pitch_base": int(pitch_value),
             "speed_base": float(config.get("speed", defaults.get("speed", 1.0)) or 1.0),
             "volume_base": int(config.get("volume", defaults.get("volume", 50)) or 50),
             "default_emotion": "calm",
@@ -205,8 +220,12 @@ class MiniMaxVoiceManager(VoiceManager):
         return default_voice
 
     def validate_voice(self, voice_id: str) -> bool:
-        """验证音色ID是否有效"""
-        return voice_id in self.voice_catalog.get("voices_by_id", {}) or is_minimax_custom_voice_id(voice_id)
+        """验证音色ID是否有效
+
+        克隆/自定义音色（mmx_ / voice_clone_ 前缀）不在静态目录中，但属于用户合法配置，
+        直接通过验证，避免被 select_voice_for_character 覆盖为硬编码默认值。
+        """
+        return voice_id in self.voice_catalog.get("voices_by_id", {}) or _is_clone_voice_id(voice_id)
 
     def get_supported_emotions(self) -> List[str]:
         """获取 MiniMax 支持的情感列表"""

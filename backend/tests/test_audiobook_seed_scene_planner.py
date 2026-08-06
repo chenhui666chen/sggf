@@ -393,6 +393,22 @@ def test_voice_reference_resolver_rejects_other_provider_official_voice() -> Non
         )
 
 
+def test_voice_reference_resolver_rejects_fixed_voice_without_model_binding() -> None:
+    resolver = VoiceReferenceResolver()
+
+    with pytest.raises(ValueError, match="固定音色缺少所属 TTS 模型"):
+        resolver.resolve(
+            ["旁白"],
+            voice_mapping={
+                "旁白": {
+                    "voice_id": "zh_male_yuanboxiaoshu_uranus_bigtts",
+                    "voice_description": "苍老低沉男声",
+                }
+            },
+            default_tts_model="",
+        )
+
+
 def test_voice_reference_resolver_keeps_doubao_clone_id_as_speaker() -> None:
     resolver = VoiceReferenceResolver()
     clone_speaker_id = "S_account_voice_clone_001"

@@ -256,7 +256,6 @@ export interface AudiobookScriptSegmentVoiceParamsPayload {
   speaker?: string | null
   speed?: number | null
   rate?: number | null
-  pitch?: number | null
   volume?: number | null
   emotion?: string | null
   voice_clone_data_url?: string | null
@@ -266,17 +265,35 @@ export interface AudiobookScriptSegmentVoiceParamsPayload {
 }
 
 export interface AudiobookScriptSegmentSoundEffectPayload {
+  asset_id?: string | null
   id?: string | null
   effect_id?: string | null
   name?: string | null
+  layer?: string | null
+  volume?: number | null
+  timing?: string | null
+  position_3d?: string | null
+  duration?: number | null
+  fade_in?: number | null
+  fade_out?: number | null
+  delay?: number | null
 }
 
 export interface AudiobookScriptSegmentMusicCuePayload {
+  asset_id?: string | null
   style?: string | null
   name?: string | null
+  mood?: string | null
+  volume?: number | null
+  fade_in?: number | null
+  fade_out?: number | null
+  duration?: number | null
+  start_time?: number | null
+  emotion_follow?: boolean | null
 }
 
 export interface AudiobookScriptSegmentPayload {
+  segment_key?: string | null
   index?: number | null
   type?: string | null
   speaker?: string | null
@@ -323,19 +340,21 @@ export interface RegenerateAudiobookSegmentPayload {
   preview_type?: AudiobookPreviewType
   voice_id?: string
   emotion?: string
+  source_mode?: 'library' | 'ai_generate'
 }
 
 export interface RegenerateAudiobookSegmentResponse {
   success: boolean
   segment_index: number
   audio_path?: string | null
+  chapter_audio_stale?: boolean
   segment?: AudiobookScriptSegmentPayload
 }
 
 export interface GenerateAudiobookSegmentRegenerationCandidateResponse {
   success: boolean
   segment_index: number
-  candidate_audio_path?: string | null
+  candidate_id?: string | null
   preview_type?: AudiobookPreviewType
   audio_size?: number
   model_used?: string | null
@@ -348,9 +367,8 @@ export interface UploadAudiobookSegmentVoiceRecordingCandidatePayload {
 }
 
 export interface ApplyAudiobookSegmentRegenerationCandidatePayload {
-  candidate_audio_path: string
+  candidate_id: string
   reason?: string
-  segment?: AudiobookScriptSegmentPayload
   preview_type?: AudiobookPreviewType
 }
 
@@ -359,7 +377,79 @@ export interface ApplyAudiobookSegmentRegenerationCandidateResponse {
   segment_index: number
   audio_path?: string | null
   preview_type?: AudiobookPreviewType
+  chapter_audio_stale?: boolean
   segment?: AudiobookScriptSegmentPayload
+}
+
+export type SegmentDirectionCueType = 'voice' | 'sfx' | 'bgm'
+
+export interface SegmentDirectionAssistPayload {
+  cue_type: SegmentDirectionCueType
+  description: string
+  segment?: AudiobookScriptSegmentPayload
+  tts_model?: string
+}
+
+export interface SegmentDirectionAssistResponse {
+  cue_type: SegmentDirectionCueType
+  description?: string
+  source: 'llm' | 'rules' | 'omni_reading'
+  patch: AudiobookScriptSegmentPayload
+  intent: Record<string, unknown>
+  model_capabilities: {
+    model?: string
+    model_family?: string
+    style_control_modes?: string[]
+    supports_audio_tags?: boolean
+    supports_word_level_control?: boolean
+  }
+  warnings: string[]
+  spoken_transcript?: string
+  performance_summary?: string
+  provider?: string
+  model?: string
+}
+
+export type RemixMissingSegmentReason =
+  | 'no_audio_path'
+  | 'expired_temporary_audio'
+  | 'file_missing'
+  | 'stale_audio'
+  | 'invalid_segment'
+
+export interface RemixMissingSegment {
+  index: number
+  speaker?: string
+  text_preview?: string
+  reason?: RemixMissingSegmentReason
+  asset_type?: 'voice' | 'mix' | 'sfx' | 'bgm'
+}
+
+export interface RemixChapterPayload {
+  force?: boolean
+  output_format?: string
+  generate_subtitle?: boolean
+}
+
+export interface RemixChapterResponse {
+  success: boolean
+  status?: string
+  force?: boolean
+  requires_confirmation?: boolean
+  missing_segments?: RemixMissingSegment[]
+}
+
+export interface ChapterRemixStatusResponse {
+  success: boolean
+  remix_status: string
+  current_stage?: string | null
+  progress?: number
+  error_message?: string | null
+  output_path?: string | null
+  duration?: number | null
+  segment_timings?: unknown[]
+  missing_segments?: RemixMissingSegment[]
+  updated_at?: string | null
 }
 
 export interface PreviewScriptSegmentAudioPayload {
@@ -766,55 +856,6 @@ export interface PromptAudioManualReviewResponse {
   model: string
   manual_review_fields?: Record<string, unknown>
   prompt_audio_quality?: Record<string, unknown>
-}
-
-export interface PromptAudioReviewSummaryCoverage {
-  chapter_audio_count: number
-  chapter_audio_with_quality_count: number
-  skipped_chapter_audio_count: number
-  model_count: number
-  reviewed_model_count: number
-  tag_parse_reviewed_count: number
-  tag_parse_success_count: number
-  text_contamination_reviewed_count: number
-  text_contamination_count: number
-  score_reviewed_count: number
-  asr_assist_count: number
-  asr_tag_residue_count: number
-  asr_suggested_contamination_count: number
-  asr_suggested_tag_parse_failure_count: number
-}
-
-export interface PromptAudioReviewSummaryModel {
-  model: string
-  model_family: string
-  chapter_audio_count: number
-  reviewed_model_count: number
-  tag_parse_reviewed_count: number
-  tag_parse_success_count: number
-  tag_parse_success_rate: number | null
-  text_contamination_reviewed_count: number
-  text_contamination_count: number
-  text_contamination_rate: number | null
-  score_reviewed_count: number
-  average_score: number | null
-  notes_count: number
-  asr_assist_count: number
-  asr_tag_residue_count: number
-  asr_suggested_contamination_count: number
-  asr_suggested_tag_parse_failure_count: number
-  segment_count: number
-  audio_segment_count: number
-  missing_audio_count: number
-  manual_review_segment_count: number
-  latest_reviewed_at?: string | null
-}
-
-export interface PromptAudioReviewSummaryResponse {
-  success: boolean
-  audiobook_project_id: number
-  coverage: PromptAudioReviewSummaryCoverage
-  models: PromptAudioReviewSummaryModel[]
 }
 
 interface DreamweaverLibraryPromptSuggestRequest {
@@ -2492,23 +2533,6 @@ class ApiClient {
     )
   }
 
-  getPromptAudioReviewSummary(audiobookProjectId: number) {
-    return this.client.get<PromptAudioReviewSummaryResponse>(
-      `/api/v1/audiobook/projects/${audiobookProjectId}/prompt-audio-review-summary`,
-    )
-  }
-
-  downloadPromptAudioReviewSummaryCsv(audiobookProjectId: number) {
-    return this.client.get<Blob>(
-      `/api/v1/audiobook/projects/${audiobookProjectId}/prompt-audio-review-summary.csv`,
-      {
-        responseType: 'blob',
-        timeout: 60000,
-        params: { _ts: Date.now() },
-      },
-    )
-  }
-
   getAudiobookChapterAudioFile(audiobookProjectId: number, chapterId: number) {
     return this.client.get<Blob>(`/api/v1/audiobook/download/${audiobookProjectId}/${chapterId}`, {
       responseType: 'blob',
@@ -2596,6 +2620,10 @@ class ApiClient {
 
   deleteChapterAudio(chapterAudioId: number, data?: { delete_reason?: string; delete_files?: boolean }) {
     return this.client.delete(`/api/v1/audiobook/chapter-audios/${chapterAudioId}`, { data })
+  }
+
+  deleteChapterAudiobookOutput(audiobookProjectId: number, chapterId: number, data?: { delete_reason?: string; delete_files?: boolean }) {
+    return this.client.delete(`/api/v1/audiobook/projects/${audiobookProjectId}/chapters/${chapterId}/output`, { data })
   }
 
   restoreAudiobookProject(audiobookProjectId: number) {
@@ -2726,14 +2754,42 @@ class ApiClient {
     audiobookProjectId: number,
     chapterId: number,
     segmentIndex: number,
-    audioPath: string
+    options: {
+      candidateId?: string
+      audioPath?: string
+      previewType?: AudiobookPreviewType
+    }
   ) {
+    const params: Record<string, string> = {}
+    if (options.candidateId) {
+      params.candidate_id = options.candidateId
+    }
+    if (options.audioPath) {
+      params.audio_path = options.audioPath
+      if (options.previewType) {
+        params.preview_type = options.previewType
+      }
+    }
     return this.client.get<Blob>(
       `/api/v1/audiobook/projects/${audiobookProjectId}/chapters/${chapterId}/segments/${segmentIndex}/regeneration-candidate/audio`,
       {
-        params: { audio_path: audioPath },
+        params,
         responseType: 'blob',
       },
+    )
+  }
+
+  // 整章重新混音 API
+  remixChapter(audiobookProjectId: number, chapterId: number, payload: RemixChapterPayload = {}) {
+    return this.client.post<RemixChapterResponse>(
+      `/api/v1/audiobook/projects/${audiobookProjectId}/chapters/${chapterId}/remix`,
+      payload
+    )
+  }
+
+  getChapterRemixStatus(audiobookProjectId: number, chapterId: number) {
+    return this.client.get<ChapterRemixStatusResponse>(
+      `/api/v1/audiobook/projects/${audiobookProjectId}/chapters/${chapterId}/remix-status`
     )
   }
 
@@ -2781,6 +2837,22 @@ class ApiClient {
     )
   }
 
+  // Phase 2: 统一片段恢复（retry_missing / replace_voice_all / replace_voice_missing）
+  recoverSegments(
+    audiobookProjectId: number,
+    chapterId: number,
+    body: {
+      action: 'retry_missing' | 'replace_voice_missing' | 'replace_voice_all'
+      voice_overrides: Record<string, { voice_id: string; tts_model?: string; reference_source?: string; voice_reference_asset_id?: string; voice_pool_publication_id?: string }>
+      target_characters?: string[]
+    }
+  ) {
+    return this.client.post(
+      `/api/v1/audiobook/projects/${audiobookProjectId}/chapters/${chapterId}/recover-segments`,
+      body
+    )
+  }
+
   // 获取章节字幕文件 API
   getChapterSubtitle(audiobookProjectId: number, chapterId: number, format: string = 'srt') {
     return this.client.get<Blob>(
@@ -2809,6 +2881,20 @@ class ApiClient {
   getAudiobookTaskStatus(taskId: string) {
     return this.client.get(`/api/v1/audiobook/tasks/${taskId}/status`, {
       timeout: 15000,
+      validateStatus: () => true,
+    })
+  }
+
+  pauseAudiobookTask(taskId: string) {
+    return this.client.post(`/api/v1/audiobook/tasks/${taskId}/pause`, null, {
+      timeout: 15000,
+      validateStatus: () => true,
+    })
+  }
+
+  resumeAudiobookTask(taskId: string) {
+    return this.client.post(`/api/v1/audiobook/tasks/${taskId}/resume`, null, {
+      timeout: 30000,
       validateStatus: () => true,
     })
   }
@@ -3551,6 +3637,35 @@ class ApiClient {
     }>(
       `/api/v1/audiobook/audio-library/assets/${libraryType}/${encodeURIComponent(assetId)}/rating`,
       { score },
+    )
+  }
+
+  assistSegmentDirection(
+    audiobookProjectId: number,
+    chapterId: number,
+    segmentIndex: number,
+    payload: SegmentDirectionAssistPayload,
+  ) {
+    return this.client.post<SegmentDirectionAssistResponse>(
+      `/api/v1/audiobook/projects/${audiobookProjectId}/chapters/${chapterId}/segments/${segmentIndex}/direction-assist`,
+      payload,
+      { timeout: 45000 },
+    )
+  }
+
+  analyzeSegmentDirectionReading(
+    audiobookProjectId: number,
+    chapterId: number,
+    segmentIndex: number,
+    payload: FormData,
+  ) {
+    return this.client.post<SegmentDirectionAssistResponse>(
+      `/api/v1/audiobook/projects/${audiobookProjectId}/chapters/${chapterId}/segments/${segmentIndex}/direction-audio/analyze`,
+      payload,
+      {
+        headers: { 'Content-Type': 'multipart/form-data' },
+        timeout: 60000,
+      },
     )
   }
 

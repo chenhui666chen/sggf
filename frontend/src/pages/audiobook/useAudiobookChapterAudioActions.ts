@@ -181,11 +181,15 @@ export const useAudiobookChapterAudioActions = ({
     updateCollectingChapterIds,
   ])
 
-  const handlePlayAudio = useCallback(async (chapterId: number) => {
+  const handlePlayAudio = useCallback(async (
+    chapterId: number,
+    options?: { restart?: boolean },
+  ) => {
     if (!audiobookProject) return
 
     try {
-      if (playingChapter === chapterId) {
+      // restart：同章节音频已更新（如重新混音完成），跳过 toggle 停止，直接重新播放
+      if (playingChapter === chapterId && !options?.restart) {
         stopManagedPlayback()
         setPlayingChapter(null)
         return

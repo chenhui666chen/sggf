@@ -26,6 +26,7 @@ interface UseAudiobookTaskListPollingParams {
   currentAudiobookProjectDetailId?: number | null
   generating: boolean
   activeStep: number
+  progressViewDismissed: boolean
   setTaskStatusesAndRef: Dispatch<SetStateAction<Record<string, TaskStatus>>>
   setGenerating: Dispatch<SetStateAction<boolean>>
   setActiveStep: Dispatch<SetStateAction<number>>
@@ -46,6 +47,7 @@ export const useAudiobookTaskListPolling = ({
   currentAudiobookProjectDetailId,
   generating,
   activeStep,
+  progressViewDismissed,
   setTaskStatusesAndRef,
   setGenerating,
   setActiveStep,
@@ -102,7 +104,7 @@ export const useAudiobookTaskListPolling = ({
         const activeTasks = selectActiveProjectTasks(normalizedTaskMap, trackedAudiobookProjectIds)
         if (
           activeTasks.length === 0
-          || !shouldAutofocusActiveTask({ currentTaskId, generating, activeStep })
+          || !shouldAutofocusActiveTask({ currentTaskId, generating, activeStep, progressViewDismissed })
         ) {
           return
         }
@@ -149,6 +151,7 @@ export const useAudiobookTaskListPolling = ({
     currentAudiobookProjectDetailId,
     generating,
     activeStep,
+    progressViewDismissed,
     focusAudiobookTask,
     setTaskStatusesAndRef,
     setGenerating,

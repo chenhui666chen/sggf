@@ -20,12 +20,14 @@ interface UseAudiobookTaskPollingParams {
   currentAudiobookProjectDetailId?: number | null
   generating: boolean
   activeStep: number
+  progressViewDismissed: boolean
   taskStatuses: Record<string, TaskStatus>
   setTaskStatuses: Dispatch<SetStateAction<Record<string, TaskStatus>>>
   setCurrentTaskId: Dispatch<SetStateAction<string | null>>
   setCurrentAudiobookProjectId: Dispatch<SetStateAction<number | null>>
   setGenerating: Dispatch<SetStateAction<boolean>>
   setActiveStep: Dispatch<SetStateAction<number>>
+  setProgressViewDismissed: Dispatch<SetStateAction<boolean>>
   setSnackbar: SetSnackbar
   focusAudiobookTask: (task: TaskStatus, options?: FocusAudiobookTaskOptions) => Promise<void>
   refreshAudiobookProjectDetail: (audiobookProjectId: number) => Promise<AudiobookProjectDetail>
@@ -41,12 +43,14 @@ export const useAudiobookTaskPolling = ({
   currentAudiobookProjectDetailId,
   generating,
   activeStep,
+  progressViewDismissed,
   taskStatuses,
   setTaskStatuses,
   setCurrentTaskId,
   setCurrentAudiobookProjectId,
   setGenerating,
   setActiveStep,
+  setProgressViewDismissed,
   setSnackbar,
   focusAudiobookTask,
   refreshAudiobookProjectDetail,
@@ -78,6 +82,7 @@ export const useAudiobookTaskPolling = ({
     currentAudiobookProjectDetailId,
     generating,
     activeStep,
+    progressViewDismissed,
     setTaskStatusesAndRef,
     setGenerating,
     setActiveStep,
@@ -93,6 +98,7 @@ export const useAudiobookTaskPolling = ({
     setCurrentAudiobookProjectId,
     setGenerating,
     setActiveStep,
+    setProgressViewDismissed,
     setSnackbar,
     focusAudiobookTask,
     refreshAudiobookProjectDetail,

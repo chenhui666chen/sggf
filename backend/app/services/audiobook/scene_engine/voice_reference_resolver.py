@@ -84,6 +84,10 @@ class VoiceReferenceResolver:
 
         reference_source = str(config.get("reference_source") or "").strip().lower()
         if reference_source not in _AUTHORIZED_AUDIO_REFERENCE_SOURCES:
+            if voice_id and not model:
+                raise ValueError(
+                    "固定音色缺少所属 TTS 模型，不能在 Seed Audio 中改用声音描述重建设计"
+                )
             if model and voice_id:
                 raise ValueError(
                     "Seed Audio 不接受其他供应商官方音色试听；"

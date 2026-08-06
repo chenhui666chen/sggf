@@ -12,6 +12,7 @@ from dataclasses import asdict, is_dataclass
 from ..script_adapter import AudiobookScriptAgent, ScriptSegment, ChapterStructure
 from ..voice_manager_factory import create_voice_manager
 from ..audio_mixer import AudioMixer
+from ..voice_identity_policy import is_current_voice_identity_snapshot
 from app.services.chapter_adaptation_assets import build_audio_adaptation_hint
 from core.unified_media_runtime import create_tts_engine
 
@@ -147,6 +148,14 @@ class ReviewMixin:
         for index, segment in enumerate(script_segments):
             voice_params = self._segment_voice_params(segment)
             snapshot = voice_params.get("provider_prompt_snapshot") if isinstance(voice_params, dict) else None
+            expected_model = voice_params.get("resolved_tts_model") or voice_params.get("tts_model")
+            expected_voice = voice_params.get("speaker") or voice_params.get("voice_id")
+            if not is_current_voice_identity_snapshot(
+                snapshot,
+                model=expected_model or None,
+                voice_id=expected_voice or None,
+            ):
+                snapshot = None
             provider_prompt = snapshot.get("provider_prompt") if isinstance(snapshot, dict) else None
             strategy = provider_prompt.get("inline_tag_strategy") if isinstance(provider_prompt, dict) else None
 

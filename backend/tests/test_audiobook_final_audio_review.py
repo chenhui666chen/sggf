@@ -17,6 +17,9 @@ from app.services.audiobook.audio_mixer import (
     AudioQualityReport,
 )
 from app.services.audiobook.engine_pkg._review_mixin import ReviewMixin
+from app.services.audiobook.voice_identity_policy import (
+    VOICE_IDENTITY_POLICY_VERSION,
+)
 
 
 class FakeAudioMixer:
@@ -53,6 +56,7 @@ def test_final_audio_review_includes_prompt_audio_quality_feedback_by_model():
             voice_params={
                 "resolved_tts_model": "mimo-v2.5-tts",
                 "provider_prompt_snapshot": {
+                    "voice_identity_policy_version": VOICE_IDENTITY_POLICY_VERSION,
                     "model": "mimo-v2.5-tts",
                     "provider_prompt": {
                         "inline_tag_strategy": {
@@ -69,8 +73,9 @@ def test_final_audio_review_includes_prompt_audio_quality_feedback_by_model():
         {
             "voice_params": {
                 "resolved_tts_model": "seed-tts-2.0-expressive",
-                "provider_prompt_snapshot": {
-                    "model": "seed-tts-2.0-expressive",
+                    "provider_prompt_snapshot": {
+                        "voice_identity_policy_version": VOICE_IDENTITY_POLICY_VERSION,
+                        "model": "seed-tts-2.0-expressive",
                     "provider_prompt": {
                         "inline_tag_strategy": {
                             "model_family": "doubao",
@@ -86,8 +91,9 @@ def test_final_audio_review_includes_prompt_audio_quality_feedback_by_model():
         SimpleNamespace(
             voice_params={
                 "resolved_tts_model": "qwen3-tts-instruct-flash",
-                "provider_prompt_snapshot": {
-                    "model": "qwen3-tts-instruct-flash",
+                    "provider_prompt_snapshot": {
+                        "voice_identity_policy_version": VOICE_IDENTITY_POLICY_VERSION,
+                        "model": "qwen3-tts-instruct-flash",
                     "provider_prompt": {"instructions": "Read calmly."},
                 },
             }

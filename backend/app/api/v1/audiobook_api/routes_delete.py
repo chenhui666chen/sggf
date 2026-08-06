@@ -10,11 +10,17 @@ from sqlalchemy.orm import Session
 from app.core.security import get_current_user
 from app.db.base import get_db
 from app.models.user import User
-from app.models.audiobook import ChapterAudio
+from app.models.audiobook import ChapterAudio, ChapterAudioRun
 from app.schemas.audiobook import AudiobookDeleteRequest, ChapterAudioDeleteRequest
 from app.api.v1.audiobook_api.dependencies import (
     resolve_owned_audiobook_project,
     resolve_owned_chapter_audio,
+)
+from app.services.audiobook.chapter_segment_assets import (
+    delete_chapter_persistent_segment_assets,
+)
+from app.services.audiobook.temp_segment_janitor import (
+    expire_chapter_run_temp_assets,
 )
 from app.services.audiobook.project_exporter import (
     collect_project_export_output_files,
@@ -108,6 +114,122 @@ def _delete_physical_files(paths: List[Path]) -> tuple[int, List[str]]:
     return deleted_files, failed_files
 
 
+def _delete_chapter_persistent_segments(chapter_audio: ChapterAudio) -> int:
+    """删除章节的持久化片段音频（工作台/管线生成），返回删除文件数。
+
+    清理失败不阻断产物删除主流程，仅记录告警。
+    """
+    try:
+        summary = delete_chapter_persistent_segment_assets(chapter_audio)
+    except Exception as exc:
+        logger.warning(
+            "删除章节持久化片段音频失败: chapter_audio_id=%s error=%s",
+            getattr(chapter_audio, "id", None),
+            exc,
+        )
+        return 0
+    return int((summary or {}).get("removed_files") or 0)
+
+
+_CHAPTER_OUTPUT_GENERATION_RUN_TYPES = {
+    "full",
+    "script_only",
+    "audio_from_scripts",
+    "chapter_remix",
+}
+_CANCELABLE_GENERATION_RUN_STATUSES = {
+    "queued",
+    "pending",
+    "running",
+    "pause_requested",
+    "paused",
+    "failed",
+    "cancelled",
+    "canceled",
+}
+_SEGMENT_CANDIDATE_RUN_TYPE = "segment_candidate"
+
+
+def _cancel_chapter_output_runs(
+    db: Session,
+    *,
+    audiobook_project_id: int,
+    chapter_id: Optional[int] = None,
+) -> Dict[str, int]:
+    """使章节产物删除后的生成 run 与候选登记不可再写入或恢复。
+
+    首次生成可能尚未创建 ``ChapterAudio``，因此删除意图必须写入
+    ``ChapterAudioRun``。后台 worker 以该不可恢复墓碑停止结果写回；
+    已签发但未应用的片段候选也同时失效，避免删除后继续 apply。
+    """
+    now = utc_now()
+    query = db.query(ChapterAudioRun).filter(
+        ChapterAudioRun.audiobook_project_id == audiobook_project_id,
+        ChapterAudioRun.run_type.in_(
+            tuple(_CHAPTER_OUTPUT_GENERATION_RUN_TYPES | {_SEGMENT_CANDIDATE_RUN_TYPE})
+        ),
+    )
+    if chapter_id is not None:
+        query = query.filter(ChapterAudioRun.chapter_id == chapter_id)
+    cancelled_generation_runs = 0
+    cancelled_remix_runs = 0
+    cancelled_candidate_runs = 0
+    deleted_candidate_files = 0
+    cancelled_runs: List[ChapterAudioRun] = []
+    for run in query.all():
+        run_type = str(run.run_type or "").strip().lower()
+        run_status = str(run.status or "").strip().lower()
+        if run_type == _SEGMENT_CANDIDATE_RUN_TYPE:
+            should_cancel = bool(run.resumable)
+        else:
+            should_cancel = (
+                run_status in _CANCELABLE_GENERATION_RUN_STATUSES
+                and (
+                    run_status in {"queued", "pending", "running", "pause_requested"}
+                    or bool(run.resumable)
+                )
+            )
+        if not should_cancel:
+            continue
+
+        if run_type == _SEGMENT_CANDIDATE_RUN_TYPE:
+            try:
+                cleanup_summary = expire_chapter_run_temp_assets(run, now=now)
+                deleted_candidate_files += int(
+                    (cleanup_summary or {}).get("removed_temp_files") or 0
+                )
+            except Exception as exc:
+                logger.warning(
+                    "删除章节产物时回收候选文件失败: run_id=%s error=%s",
+                    getattr(run, "id", None),
+                    exc,
+                )
+
+        run.status = "cancelled"
+        run.current_stage = "cancelled"
+        run.resumable = False
+        run.error_message = "chapter_output_deleted"
+        run.expires_at = now
+        run.finished_at = now
+        run.updated_at = now
+        db.add(run)
+        cancelled_runs.append(run)
+        if run_type == _SEGMENT_CANDIDATE_RUN_TYPE:
+            cancelled_candidate_runs += 1
+        else:
+            cancelled_generation_runs += 1
+            if run_type == "chapter_remix":
+                cancelled_remix_runs += 1
+    if cancelled_runs:
+        db.commit()
+    return {
+        "cancelled_generation_runs": cancelled_generation_runs,
+        "cancelled_remix_runs": cancelled_remix_runs,
+        "cancelled_candidate_runs": cancelled_candidate_runs,
+        "deleted_candidate_files": deleted_candidate_files,
+    }
+
+
 @router.delete("/projects/{audiobook_project_id:int}")
 async def delete_audiobook_project(
     audiobook_project_id: int,
@@ -135,6 +257,12 @@ async def delete_audiobook_project(
         forbidden_detail="无权限删除此项目",
     )
     audiobook_project = owned.audiobook_project
+
+    # 项目删除会清理其全部章节产物，先让后台生成与候选登记停止写盘。
+    cancelled_runs = _cancel_chapter_output_runs(
+        db,
+        audiobook_project_id=audiobook_project_id,
+    )
     
     # 2. 执行软删除并记录审计日志
     audit_log = AudiobookProjectRepository.soft_delete(
@@ -162,8 +290,10 @@ async def delete_audiobook_project(
         )
 
         paths_to_delete: List[Path] = []
+        persistent_deleted = 0
         for chapter_audio in chapter_audios:
             paths_to_delete.extend(_collect_chapter_audio_artifact_files(chapter_audio))
+            persistent_deleted += _delete_chapter_persistent_segments(chapter_audio)
         paths_to_delete.extend(
             collect_project_export_output_files(
                 project_id=audiobook_project.project_id,
@@ -171,6 +301,7 @@ async def delete_audiobook_project(
             )
         )
         deleted_files, failed_files = _delete_physical_files(paths_to_delete)
+        deleted_files += persistent_deleted
     
     logger.info(f"✅ 有声书项目软删除成功: audiobook_project_id={audiobook_project_id}, audit_id={audit_log.id}")
     
@@ -182,6 +313,7 @@ async def delete_audiobook_project(
         "failed_files": failed_files,
         "affected_chapters": audit_log.affected_chapters,
         "affected_tasks": audit_log.affected_tasks,
+        **cancelled_runs,
         "total_size": audit_log.total_size
     }
 
@@ -213,6 +345,12 @@ async def delete_chapter_audio(
         forbidden_detail="无权限删除此章节音频",
     )
     chapter_audio = owned_audio.chapter_audio
+
+    cancelled_runs = _cancel_chapter_output_runs(
+        db,
+        audiobook_project_id=chapter_audio.audiobook_project_id,
+        chapter_id=chapter_audio.chapter_id,
+    )
     
     # 3. 执行软删除并记录审计日志
     audit_log = ChapterAudioRepository.soft_delete(
@@ -239,6 +377,7 @@ async def delete_chapter_audio(
         deleted_files, failed_files = _delete_physical_files(
             _collect_chapter_audio_artifact_files(chapter_audio)
         )
+        deleted_files += _delete_chapter_persistent_segments(chapter_audio)
         deleted_file = deleted_files > 0
         failed_file = failed_files[0] if failed_files else None
     
@@ -252,8 +391,111 @@ async def delete_chapter_audio(
         "deleted_files": deleted_files,
         "failed_file": failed_file,
         "failed_files": failed_files,
+        **cancelled_runs,
         "affected_tasks": audit_log.affected_tasks,
         "file_size": audit_log.total_size
+    }
+
+
+@router.delete("/projects/{audiobook_project_id:int}/chapters/{chapter_id:int}/output")
+async def delete_chapter_audiobook_output(
+    audiobook_project_id: int,
+    chapter_id: int,
+    request: Optional[ChapterAudioDeleteRequest] = Body(default=None),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    删除章节的有声书产出（剧本、音频、任务），保留原始章节内容不受影响。
+
+    工作流：
+    1. 根据 chapter_id 查找关联的 ChapterAudio 记录
+    2. 验证权限
+    3. 软删除并记录审计日志
+    4. 强制清理全部产物文件（物理文件与持久化/候选片段音频）
+    """
+    delete_request = _resolve_chapter_audio_delete_request(request)
+    delete_reason = delete_request.delete_reason
+    delete_files = delete_request.delete_files
+    logger.info(
+        "🗑️ 用户 %s 请求删除章节有声书产出: audiobook_project_id=%s, chapter_id=%s, delete_files=%s",
+        current_user.id, audiobook_project_id, chapter_id, delete_files,
+    )
+
+    resolve_owned_audiobook_project(
+        db=db,
+        current_user=current_user,
+        audiobook_project_id=audiobook_project_id,
+        forbidden_detail="无权限删除此章节的有声书产出",
+    )
+
+    # 先写入不可恢复的 run 墓碑。首次 full/script_only 运行尚未创建
+    # ChapterAudio 时，这仍能表达“删除且不允许后台稍后写回”的意图。
+    cancelled_runs = _cancel_chapter_output_runs(
+        db,
+        audiobook_project_id=audiobook_project_id,
+        chapter_id=chapter_id,
+    )
+
+    # 仅查找当前有声书项目中该章节关联的活跃 ChapterAudio 记录。
+    chapter_audios = (
+        db.query(ChapterAudio)
+        .filter(
+            ChapterAudio.audiobook_project_id == audiobook_project_id,
+            ChapterAudio.chapter_id == chapter_id,
+            ChapterAudio.deleted_at.is_(None),
+        )
+        .all()
+    )
+
+    if not chapter_audios and not any(cancelled_runs.values()):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="该章节没有已生成的有声书产出"
+        )
+    deleted_count = 0
+    total_deleted_files = 0
+    all_failed_files: List[str] = []
+    audit_ids: List[int] = []
+
+    for chapter_audio in chapter_audios:
+        # 软删除
+        audit_log = ChapterAudioRepository.soft_delete(
+            db=db,
+            chapter_audio_id=chapter_audio.id,
+            user_id=current_user.id,
+            user_name=current_user.username,
+            delete_reason=delete_reason,
+        )
+        if audit_log:
+            deleted_count += 1
+            audit_ids.append(audit_log.id)
+
+        # 本接口语义为“删除章节有声书产出”：无条件清理全部产物
+        # （物理文件 + 工作台/管线持久化片段 + 候选资产），
+        # delete_files 仅为兼容旧客户端保留，不再改变清理行为；
+        # 避免默认确认删除后整章音频与片段残留
+        files_deleted, files_failed = _delete_physical_files(
+            _collect_chapter_audio_artifact_files(chapter_audio)
+        )
+        total_deleted_files += files_deleted
+        total_deleted_files += _delete_chapter_persistent_segments(chapter_audio)
+        all_failed_files.extend(files_failed)
+
+    logger.info(
+        "✅ 章节有声书产出删除完成: chapter_id=%s, deleted_audios=%s, deleted_files=%s",
+        chapter_id, deleted_count, total_deleted_files,
+    )
+
+    return {
+        "success": True,
+        "message": "章节有声书产出已删除，原始章节内容未受影响",
+        "chapter_id": chapter_id,
+        "deleted_audios": deleted_count,
+        "audit_ids": audit_ids,
+        **cancelled_runs,
+        "deleted_files": total_deleted_files,
+        "failed_files": all_failed_files,
     }
 
 

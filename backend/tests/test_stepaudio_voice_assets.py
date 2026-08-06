@@ -160,6 +160,7 @@ def test_stepaudio_clone_asset_with_file_id_is_available_for_synthesis(tmp_path,
     preset = asset.to_voice_preset()
 
     assert preset["id"] == f"stepaudio_clone:{asset.id}"
+    assert "pitch" not in preset["default_params"]
     assert "disabled" not in preset
     assert "disabledReason" not in preset
 
@@ -333,7 +334,7 @@ def test_stepaudio_clone_asset_preview_route_returns_audio_without_saving_asset(
             "text": "这是一段试听。",
             "file_id": "file-preview",
             "sample_text": "智能阶跃，十倍每一个人的可能",
-            "instruction": "语气自然，语速中等，保持参考音色特征。",
+            "instruction": "语气自然，语速中等，保持参考音色特征",
         }
     ]
 

@@ -13,8 +13,8 @@ from ..script_adapter import AudiobookScriptAgent, ScriptSegment, ChapterStructu
 from ..script_adapter_pkg._segment_validation import NARRATOR, split_long_script_segment
 from ..script_adapter_pkg._segment_validation import build_script_segments
 from ..script_adapter_pkg._llm_review import calculate_text_coverage
-from ..llm_client import call_audiobook_llm_sync
-from ..llm_json import LLMJsonParseError, parse_llm_json_array
+from ..llm_client import call_audiobook_llm_sync, run_async_from_sync
+from ..llm_json import LLMJsonParseError, clean_llm_json_text, parse_llm_json_array
 from ..voice_manager_factory import create_voice_manager
 from ..audio_mixer import AudioMixer
 from ..agent_message import MessageBus
@@ -22,6 +22,10 @@ from ..task_tracker import TaskTracker
 from ..tts_delivery_plan import build_delivery_plan, resolve_segment_tts_model
 from ..tts_style_control import build_model_style_control, build_provider_prompt_snapshot
 from ..chapter_cadence import apply_chapter_cadence
+from ..voice_identity_policy import (
+    FIXED_VOICE_PERFORMANCE_BOUNDARY_PROMPT,
+    is_current_voice_identity_snapshot,
+)
 from ..project_audio_config import get_audio_engine_mode, get_seed_audio_model
 from app.services.chapter_adaptation_assets import build_audio_adaptation_hint
 from core.unified_media_runtime import create_tts_engine
@@ -43,12 +47,17 @@ from ..agents import (
     SoundEffectDesigner,
     MusicComposer,
 )
+from ..agents.llm_quality_reviewer import LLMQualityReviewer
 
 logger = logging.getLogger(__name__)
 
 QUALITY_GATE_DEFAULT_THRESHOLD = 70.0
 QUALITY_GATE_MAX_REVISION_ROUNDS = 2
 QUALITY_GATE_LLM_REVISION_TIMEOUT_SECONDS = 75
+# LLM 修订需要完整重写整个剧本 JSON，必须预留充足的输出 token，
+# 否则输出会在 max_tokens 处被截断，产生 "Unterminated string" 解析失败。
+QUALITY_REVISION_MAX_TOKEN_CAP = 32768
+QUALITY_REVISION_RETRY_MAX_TOKEN_CAP = 49152
 QUALITY_GATE_STRONG_EMOTIONS = {
     "angry",
     "excited",
@@ -59,6 +68,13 @@ QUALITY_GATE_STRONG_EMOTIONS = {
     "surprised",
     "tense",
 }
+
+
+def _llm_json_response_closed(response: str) -> bool:
+    """判断 LLM 返回的 JSON 文本是否结构闭合（未被 max_tokens 截断）。"""
+    cleaned = clean_llm_json_text(response).rstrip()
+    return cleaned.endswith("}") or cleaned.endswith("]")
+
 
 class AudiobookEngineBase:
     """有声书生成引擎 - 专业多Agent协作模式"""
@@ -89,6 +105,7 @@ class AudiobookEngineBase:
         self.sound_effect_designer = SoundEffectDesigner(llm_client=llm_client)
         self.music_composer = MusicComposer()
         self.audio_quality_reviewer = AudioQualityReviewer(llm_client=llm_client)
+        self.llm_quality_reviewer = LLMQualityReviewer(llm_client=llm_client)
         
         # 初始化基础组件
         self.tts_model = tts_model
@@ -260,7 +277,13 @@ class AudiobookEngineBase:
             if not isinstance(voice_params, dict):
                 continue
             snapshot = voice_params.get("provider_prompt_snapshot")
-            if not isinstance(snapshot, dict):
+            expected_model = voice_params.get("resolved_tts_model") or voice_params.get("tts_model")
+            expected_voice = voice_params.get("speaker") or voice_params.get("voice_id")
+            if not is_current_voice_identity_snapshot(
+                snapshot,
+                model=expected_model or None,
+                voice_id=expected_voice or None,
+            ):
                 continue
             provider_prompt = snapshot.get("provider_prompt")
             if not isinstance(provider_prompt, dict):
@@ -371,13 +394,25 @@ class AudiobookEngineBase:
         novel_genre: str,
         quality_threshold: float = QUALITY_GATE_DEFAULT_THRESHOLD,
         max_revision_rounds: int = QUALITY_GATE_MAX_REVISION_ROUNDS,
+        enable_llm_quality_review: bool = True,
+        enable_llm_revision: bool = True,
     ) -> Tuple[Any, Dict[str, Any]]:
-        """评审剧本，并用评审结果驱动确定性自动修订。"""
+        """评审剧本，并用评审结果驱动确定性自动修订。
+
+        enable_llm_quality_review: 是否运行 LLM 多维度评分（只读评分，不改剧本）。
+        enable_llm_revision: 是否允许 LLM 全量重写剧本。音频渲染阶段应关闭，
+            避免重复消耗 LLM 调用、输出截断，以及覆盖用户手工编辑的剧本。
+        """
         threshold = self._coerce_quality_threshold(quality_threshold)
         max_rounds = max(0, int(max_revision_rounds or 0))
         revision_rounds: List[Dict[str, Any]] = []
         quality_report = None
         apply_chapter_cadence(script_segments)
+
+        # 检查 audio_fx 配置中的开关
+        audio_fx = getattr(self, "_audio_fx_config", None) or {}
+        if not audio_fx.get("enable_llm_quality_review", enable_llm_quality_review):
+            enable_llm_quality_review = False
 
         for round_index in range(max_rounds + 1):
             review_segments = self._build_review_segments(script_segments)
@@ -386,7 +421,25 @@ class AudiobookEngineBase:
                 novel_genre=novel_genre,
             )
 
-            if round_index > 0 and float(getattr(quality_report, "overall_score", 0.0) or 0.0) >= threshold:
+            # LLM 维度评审融合（非阻断，失败降级为纯规则分）
+            if enable_llm_quality_review:
+                quality_report = self._run_llm_dimension_review(
+                    quality_report,
+                    review_segments,
+                    novel_genre=novel_genre,
+                )
+
+            score = float(getattr(quality_report, "overall_score", 0.0) or 0.0)
+            has_actionable_issues = self._has_actionable_issues(quality_report)
+            has_llm_rewrite_issues = self._has_llm_rewrite_issues(quality_report)
+
+            # 停止条件：分数达标 且 无 critical/major 问题 且 无待 LLM 改写的问题
+            if (
+                round_index > 0
+                and score >= threshold
+                and not has_actionable_issues
+                and not has_llm_rewrite_issues
+            ):
                 break
 
             if round_index >= max_rounds:
@@ -400,15 +453,22 @@ class AudiobookEngineBase:
                 script_segments,
                 self.audio_quality_reviewer.quality_standards,
             )
-            llm_revision = {"applied": False}
             applied = bool(script_revision.get("applied") or audio_balance_revision.get("applied"))
-            if not applied and float(getattr(quality_report, "overall_score", 0.0) or 0.0) < threshold:
+            # LLM 修订与确定性修订处理不同类型问题，不互斥：
+            # - 存在 fix_type=llm_rewrite 的问题（对白自然度/语义重复等，确定性修订无法处理）→ 必须跑 LLM 修订
+            # - 或分数不达标且确定性修订未生效 → 跑 LLM 修订兑底
+            llm_revision = {"applied": False}
+            needs_llm_revision = enable_llm_revision and (
+                has_llm_rewrite_issues
+                or (score < threshold and not applied)
+            )
+            if needs_llm_revision:
                 llm_revision = self._llm_revise_script_segments_from_quality_report(
                     script_segments,
                     quality_report,
                     novel_genre=novel_genre,
                 )
-                applied = bool(llm_revision.get("applied"))
+                applied = applied or bool(llm_revision.get("applied"))
             if not applied:
                 break
 
@@ -445,6 +505,52 @@ class AudiobookEngineBase:
             },
         }
 
+    def _run_llm_dimension_review(
+        self,
+        quality_report: Any,
+        review_segments: List[Dict[str, Any]],
+        *,
+        novel_genre: str = "",
+    ) -> Any:
+        """LLM 维度评审 + 融合（非阻断，失败保留纯规则报告）。"""
+        try:
+            source_text = str(getattr(self, "_last_source_text_for_script_revision", "") or "")
+            audio_engine_mode = getattr(self, "_audio_engine_mode", "legacy_stems")
+
+            llm_report = run_async_from_sync(
+                lambda: self.llm_quality_reviewer.review(
+                    review_segments,
+                    source_text=source_text,
+                    novel_genre=novel_genre,
+                    audio_engine_mode=audio_engine_mode,
+                ),
+                timeout_seconds=120,
+            )
+            quality_report = self.audio_quality_reviewer.merge_llm_review(
+                quality_report, llm_report
+            )
+        except Exception as exc:  # noqa: BLE001 - LLM评审不能阻断主链路
+            logger.warning("LLM维度评审失败，保留纯规则评审: %s", exc)
+        return quality_report
+
+    @staticmethod
+    def _has_actionable_issues(quality_report: Any) -> bool:
+        """检查是否存在 critical/major 级别的问题，无论总分多高都应触发修订。"""
+        issues = getattr(quality_report, "issues", None) or []
+        return any(
+            getattr(issue, "severity", "") in ("critical", "major")
+            for issue in issues
+        )
+
+    @staticmethod
+    def _has_llm_rewrite_issues(quality_report: Any) -> bool:
+        """检查是否存在 fix_type=llm_rewrite 的问题（只能由 LLM 修订处理）。"""
+        issues = getattr(quality_report, "issues", None) or []
+        return any(
+            getattr(issue, "fix_type", "") == "llm_rewrite"
+            for issue in issues
+        )
+
     def _llm_revise_script_segments_from_quality_report(
         self,
         script_segments: List[ScriptSegment],
@@ -473,27 +579,57 @@ class AudiobookEngineBase:
             quality_report,
             novel_genre=novel_genre,
         )
+        messages = [
+            {
+                "role": "system",
+                "content": "你是有声小说剧本修订器，只根据评审意见修订结构化剧本，严格输出 JSON。",
+            },
+            {"role": "user", "content": prompt},
+        ]
 
-        try:
-            response = call_audiobook_llm_sync(
+        def _invoke_revision_llm(budget: int) -> str:
+            timeout_seconds = self._estimate_quality_revision_timeout_seconds(budget)
+            return call_audiobook_llm_sync(
                 llm_client,
-                messages=[
-                    {
-                        "role": "system",
-                        "content": "你是有声小说剧本修订器，只根据评审意见修订结构化剧本，严格输出 JSON。",
-                    },
-                    {"role": "user", "content": prompt},
-                ],
-                max_tokens=self._estimate_quality_revision_max_tokens(payload_json),
+                messages=messages,
+                max_tokens=budget,
                 temperature=0.2,
-                timeout=QUALITY_GATE_LLM_REVISION_TIMEOUT_SECONDS,
-                timeout_seconds=QUALITY_GATE_LLM_REVISION_TIMEOUT_SECONDS,
+                timeout=timeout_seconds,
+                timeout_seconds=timeout_seconds,
                 max_retries=1,
                 use_cache=False,
                 response_format={"type": "json_object"},
             )
+
+        max_tokens = self._estimate_quality_revision_max_tokens(payload_json)
+        try:
+            response = _invoke_revision_llm(max_tokens)
+            response_closed = _llm_json_response_closed(response)
             revised_data = parse_llm_json_array(response)
-            revised_segments = build_script_segments(revised_data)
+            # 首次响应未闭合（被 max_tokens 截断）：即使 salvage 已恢复前缀片段，
+            # 也要扩容重试一次以争取完整输出，避免尾部片段始终得不到修订。
+            if not response_closed:
+                retry_budget = min(QUALITY_REVISION_RETRY_MAX_TOKEN_CAP, int(max_tokens * 1.8))
+                if retry_budget > max_tokens:
+                    logger.warning(
+                        "LLM 剧本质量修订输出被截断（max_tokens=%s，已恢复 %s 个片段），扩容至 %s 重试一次",
+                        max_tokens, len(revised_data), retry_budget,
+                    )
+                    try:
+                        retry_response = _invoke_revision_llm(retry_budget)
+                        retry_closed = _llm_json_response_closed(retry_response)
+                        retry_data = parse_llm_json_array(retry_response)
+                    except Exception as retry_exc:  # noqa: BLE001 - 重试失败不影响首次已恢复的结果
+                        logger.warning("LLM 剧本质量修订重试失败，沿用首次响应恢复的前缀: %s", retry_exc)
+                    else:
+                        if retry_closed or len(retry_data) >= len(revised_data):
+                            response = retry_response
+                            response_closed = retry_closed
+                            revised_data = retry_data
+            revised_segments = build_script_segments(
+                revised_data,
+                tts_model=getattr(self, "tts_model", ""),
+            )
         except (LLMJsonParseError, Exception) as exc:  # noqa: BLE001 - 修订失败必须降级为不应用
             logger.warning("LLM 剧本质量修订失败，保留当前剧本: %s", exc)
             return {
@@ -504,6 +640,15 @@ class AudiobookEngineBase:
 
         if not revised_segments:
             return {"applied": False, "reason": "llm_revision_returned_empty", "source": "llm_feedback"}
+
+        # 截断抢救：若响应未闭合且只恢复了前缀片段，用原始片段补齐尾部，
+        # 避免丢失未修订部分的正文（后续覆盖率闸门会再次校验质量）。
+        if not response_closed and len(revised_segments) < len(original_segments):
+            logger.info(
+                "LLM 修订输出截断，恢复 %s/%s 个片段，尾部用原剧本补齐",
+                len(revised_segments), len(original_segments),
+            )
+            revised_segments = list(revised_segments) + list(original_segments[len(revised_segments):])
 
         coverage_ratio = calculate_text_coverage(original_segments, revised_segments)
         if coverage_ratio < 0.82:
@@ -523,6 +668,12 @@ class AudiobookEngineBase:
             }
 
         script_segments[:] = revised_segments
+        logger.info(
+            "✅ LLM 剧本质量修订已应用: %s 个片段, 覆盖率 %.3f%s",
+            len(revised_segments),
+            coverage_ratio,
+            "" if response_closed else "（输出曾截断，尾部由原剧本补齐）",
+        )
         return {
             "applied": True,
             "reason": "llm_revision_applied",
@@ -553,6 +704,9 @@ class AudiobookEngineBase:
                 f"{json.dumps(llm_script_review, ensure_ascii=False, default=str)[:1200]}\n"
             )
 
+        # 维度驱动的 LLM 修订指令（fix_type=llm_rewrite 的 issues 按维度分组）
+        dimension_revision_block = self._build_dimension_revision_block(quality_report)
+
         return f"""请根据质量评审意见修订有声小说剧本片段，使其能够通过 TTS 前质量闸门。
 
 小说类型：{novel_genre or "未知"}
@@ -568,6 +722,8 @@ class AudiobookEngineBase:
 - 如果需要拆分片段，按动作拍点、情绪转折、因果推进拆分；不要丢失原文语义。
 - 每个 segment 尽量保留字段：type、text、speaker、emotion、performance_notes、pause_before、pause_after、voice_params、instruct_emotion、instruct_scene、instruct_role、instruct_identity、sound_effects、music_cue、sound_effects_simple、music_cue_simple、original_text、adaptation_reason。
 
+{FIXED_VOICE_PERFORMANCE_BOUNDARY_PROMPT}
+{dimension_revision_block}
 输出要求：
 - 只返回 JSON 对象，格式为 {{"segments": [ ... ]}}。
 - 不要输出 markdown，不要解释。
@@ -579,6 +735,39 @@ class AudiobookEngineBase:
 当前剧本 JSON：
 {payload_json}
 """
+
+    def _build_dimension_revision_block(self, quality_report: Any) -> str:
+        """构建维度驱动的 LLM 修订指令块（fix_type=llm_rewrite 的 issues）。"""
+        issues = getattr(quality_report, "issues", None) or []
+        llm_rewrite_issues = [
+            i for i in issues
+            if getattr(i, "fix_type", "") == "llm_rewrite"
+        ]
+        if not llm_rewrite_issues:
+            return ""
+
+        # 按维度分组
+        from collections import defaultdict
+        grouped: Dict[str, List[Any]] = defaultdict(list)
+        for issue in llm_rewrite_issues:
+            dim = getattr(issue, "dimension", "") or "general"
+            grouped[dim].append(issue)
+
+        lines = ["\n维度质感修订指令（仅修改 target_fields 指示的字段，保留正文覆盖率，不得新增剧情）："]
+        for dim_key, dim_issues in grouped.items():
+            lines.append(f"  [{dim_key}]")
+            for issue in dim_issues[:5]:  # 每维度最多 5 条
+                seg_idx = getattr(issue, "segment_index", -1)
+                desc = getattr(issue, "description", "")
+                suggestion = getattr(issue, "suggestion", "")
+                target_fields = getattr(issue, "target_fields", []) or []
+                fields_str = ",".join(target_fields) if target_fields else "text"
+                lines.append(
+                    f"    - 片段{seg_idx}: {desc}"
+                    f" → 建议: {suggestion}"
+                    f" → 修改字段: [{fields_str}]"
+                )
+        return "\n".join(lines) + "\n"
 
     def _quality_report_feedback_text(self, quality_report: Any) -> str:
         lines = [
@@ -601,6 +790,16 @@ class AudiobookEngineBase:
                     f"{getattr(issue, 'description', '')}；"
                     f"建议：{getattr(issue, 'suggestion', '')}"
                 )
+
+        # LLM 维度评审摘要
+        llm_dimensions = getattr(quality_report, "llm_dimensions", None) or {}
+        if llm_dimensions:
+            lines.append("llm_dimensions:")
+            for dim_key, dim_data in llm_dimensions.items():
+                score = dim_data.get("score", 0) if isinstance(dim_data, dict) else 0
+                label = dim_data.get("label", dim_key) if isinstance(dim_data, dict) else dim_key
+                lines.append(f"  - {label}({dim_key}): {score}/10")
+
         return "\n".join(lines)
 
     def _script_segment_to_revision_payload(self, segment: ScriptSegment, *, index: int) -> Dict[str, Any]:
@@ -609,8 +808,16 @@ class AudiobookEngineBase:
         return payload
 
     def _estimate_quality_revision_max_tokens(self, payload_json: str) -> int:
-        estimated = int(len(payload_json or "") * 1.3) + 1200
-        return max(1800, min(9000, estimated))
+        # 输出需完整重写整个剧本 JSON，且 LLM 通常输出带缩进的格式化 JSON（比输入的
+        # 紧凑 JSON 占用更多 tokens），中文 token 密度也偏高，故按 2.5 倍 + 固定余量估算，
+        # 避免输出在 max_tokens 处截断（max_tokens 仅为上限，调高不会增加实际生成量）。
+        estimated = int(len(payload_json or "") * 2.5) + 1500
+        return max(2000, min(QUALITY_REVISION_MAX_TOKEN_CAP, estimated))
+
+    @staticmethod
+    def _estimate_quality_revision_timeout_seconds(max_tokens: int) -> int:
+        """按输出预算预留生成时间，避免大预算重写被超时截断。"""
+        return max(QUALITY_GATE_LLM_REVISION_TIMEOUT_SECONDS, int(max_tokens / 100) + 45)
 
     def _segments_changed_for_quality_revision(
         self,
@@ -799,7 +1006,7 @@ class AudiobookEngineBase:
     def _default_performance_note_for_segment(self, segment: ScriptSegment) -> str:
         emotion = str(getattr(segment, "emotion", "") or "").lower()
         if emotion in {"tense", "fearful", "nervous", "mysterious"}:
-            return "压低声线，语速略收，句尾留出紧张停顿"
+            return "收紧语势，语速略收，句尾留出紧张停顿"
         if emotion in {"angry", "shout"}:
             return "语气有力量，重音清晰，句尾短暂停顿"
         if emotion in {"excited", "surprised"}:

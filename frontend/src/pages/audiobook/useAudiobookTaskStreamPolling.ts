@@ -38,6 +38,7 @@ interface UseAudiobookTaskStreamPollingParams {
   setCurrentAudiobookProjectId: Dispatch<SetStateAction<number | null>>
   setGenerating: Dispatch<SetStateAction<boolean>>
   setActiveStep: Dispatch<SetStateAction<number>>
+  setProgressViewDismissed: Dispatch<SetStateAction<boolean>>
   setSnackbar: SetSnackbar
   focusAudiobookTask: (task: TaskStatus, options?: FocusAudiobookTaskOptions) => Promise<void>
   refreshAudiobookProjectDetail: (audiobookProjectId: number) => Promise<AudiobookProjectDetail>
@@ -67,6 +68,7 @@ export const useAudiobookTaskStreamPolling = ({
   setCurrentAudiobookProjectId,
   setGenerating,
   setActiveStep,
+  setProgressViewDismissed,
   setSnackbar,
   focusAudiobookTask,
   refreshAudiobookProjectDetail,
@@ -194,6 +196,7 @@ export const useAudiobookTaskStreamPolling = ({
 
         setGenerating(false)
         setActiveStep(2)
+        setProgressViewDismissed(false)
         if (resolvedAudiobookProjectId) {
           try {
             await refreshAudiobookProjectDetail(resolvedAudiobookProjectId)
@@ -222,6 +225,7 @@ export const useAudiobookTaskStreamPolling = ({
 
         setGenerating(false)
         setActiveStep(0)
+        setProgressViewDismissed(false)
         if (resolvedAudiobookProjectId) {
           try {
             await refreshAudiobookProjectDetail(resolvedAudiobookProjectId)
@@ -235,6 +239,17 @@ export const useAudiobookTaskStreamPolling = ({
           severity: 'error',
         })
         setCurrentTaskId(null)
+        return
+      }
+
+      if (normalized.status === 'paused') {
+        if (terminalHandled) {
+          return
+        }
+        terminalHandled = true
+        // 任务已暂停：停止轮询并释放 generating，保留 currentTaskId 与当前视图，
+        // 以便进度页/任务横幅展示暂停状态与恢复入口。
+        setGenerating(false)
         return
       }
 
@@ -447,6 +462,7 @@ export const useAudiobookTaskStreamPolling = ({
     setCurrentAudiobookProjectId,
     setGenerating,
     setActiveStep,
+    setProgressViewDismissed,
     setCurrentTaskId,
     setSnackbar,
     setStreamStatus,

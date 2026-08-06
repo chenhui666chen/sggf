@@ -9,7 +9,9 @@ import {
   getTtsModelCapabilities,
   modelRequiresCustomVoice,
   modelSupportsCustomVoiceWorkbench,
+  modelSupportsInstructStyleControl,
   modelSupportsVoiceTuning,
+  modelUsesBasicNumericSpeedControl,
   modelUsesInlineCustomVoiceInput,
   normalizeTtsModelOptions,
   normalizeTtsModelValue,
@@ -282,6 +284,30 @@ describe('audiobook ttsModels', () => {
         natural_language: 'req_params.additions.context_texts',
       },
     })
+  })
+
+  it('separates instruction pace models from basic numeric fallback models', () => {
+    for (const model of [
+      'qwen3-tts-instruct-flash',
+      'cosyvoice-v3.5-plus',
+      'mimo-v2.5-tts',
+      'mimo-v2.5-tts-voicedesign',
+      'mimo-v2.5-tts-voiceclone',
+      'stepaudio-2.5-tts',
+      'seed-tts-2.0-expressive',
+    ] as const) {
+      expect(modelSupportsInstructStyleControl(model)).toBe(true)
+    }
+
+    expect(modelSupportsInstructStyleControl('minimax-speech-2.8-hd')).toBe(false)
+    expect(modelSupportsInstructStyleControl('minimax-speech-2.8-turbo')).toBe(false)
+    expect(modelSupportsInstructStyleControl(null)).toBe(false)
+
+    expect(modelUsesBasicNumericSpeedControl('minimax-speech-2.8-hd')).toBe(true)
+    expect(modelUsesBasicNumericSpeedControl('minimax/speech-2.8-turbo')).toBe(true)
+    expect(modelUsesBasicNumericSpeedControl('seed-tts-2.0-expressive')).toBe(false)
+    expect(modelUsesBasicNumericSpeedControl('unknown-model')).toBe(false)
+    expect(modelUsesBasicNumericSpeedControl(null)).toBe(false)
   })
 
   it('builds readable style control labels from model capabilities', () => {

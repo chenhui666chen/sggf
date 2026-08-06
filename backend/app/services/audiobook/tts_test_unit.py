@@ -69,15 +69,14 @@ _MODEL_TEST_CASES: dict[str, list[dict[str, Any]]] = {
         {
             "id": "basic_prosody",
             "name": "基础韵律降级（HD）",
-            "purpose": "验证高级提示被明确降级为较慢语速、较低音高和受控音量。",
+            "purpose": "验证高级提示被明确降级为较慢语速和受控音量，不改变固定音色。",
             "text": "雨声贴着窗沿落下，她沉默片刻，才轻声说出那个名字。",
             "emotion": "sad",
             "segment_type": "narration",
-            "performance_notes": "语速放慢，音调降低，情绪克制。",
+            "performance_notes": "语速放慢，语气收紧，情绪克制。",
             "delivery_plan": {
                 "delivery_mode": "narration",
                 "pace": "slow",
-                "pitch": "lower",
                 "intensity": "low",
                 "pause_strategy": "沉默片刻后继续",
             },
@@ -87,7 +86,7 @@ _MODEL_TEST_CASES: dict[str, list[dict[str, Any]]] = {
         {
             "id": "basic_prosody_turbo",
             "name": "基础韵律降级（Turbo）",
-            "purpose": "验证低延迟模型仅使用支持的 speed/volume/pitch 参数。",
+            "purpose": "验证低延迟模型仅使用支持的 speed/volume 表演参数。",
             "text": "快走，门后的脚步已经追上来了。",
             "emotion": "fearful",
             "segment_type": "dialogue",
@@ -95,7 +94,6 @@ _MODEL_TEST_CASES: dict[str, list[dict[str, Any]]] = {
             "delivery_plan": {
                 "delivery_mode": "dialogue",
                 "pace": "fast",
-                "pitch": "higher",
                 "intensity": "high",
             },
         }
@@ -217,7 +215,6 @@ def _base_voice_params(model: str, case: dict[str, Any]) -> dict[str, Any]:
         "speed": 1.0,
         "rate": 1.0,
         "volume": 50,
-        "pitch": 50,
     }
     for key in ("style_control_method", "style_tags", "inline_audio_tags"):
         if case.get(key):

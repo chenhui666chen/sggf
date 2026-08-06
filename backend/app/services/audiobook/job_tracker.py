@@ -3,8 +3,9 @@ Helpers for persisting Celery audiobook job progress.
 """
 from __future__ import annotations
 
+import logging
 from datetime import timedelta
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional, Sequence
 
 from sqlalchemy.orm import Session
 
@@ -17,6 +18,13 @@ from app.services.audiobook.task_trace import (
     merge_audiobook_trace_context,
 )
 from app.utils.datetime_utils import utc_now
+
+logger = logging.getLogger(__name__)
+
+# 任务级暂停状态：API 将 running 任务标记为 pause_requested，
+# Worker 在章节循环边界检测到后调用 mark_paused 落库为 paused。
+PAUSE_REQUESTED_STATUS = "pause_requested"
+PAUSED_STATUS = "paused"
 
 
 class AudiobookJobTracker:
@@ -155,6 +163,13 @@ class AudiobookJobTracker:
                     .order_by(ChapterAudioRun.created_at.desc(), ChapterAudioRun.id.desc())
                     .first()
                 )
+            if (
+                run is not None
+                and str(run.status or "").strip().lower() in {"cancelled", "canceled"}
+                and not bool(run.resumable)
+                and str(run.error_message or "").strip() == "chapter_output_deleted"
+            ):
+                return
             if not run:
                 run = ChapterAudioRun(
                     audiobook_project_id=task.audiobook_project_id,
@@ -346,3 +361,137 @@ class AudiobookJobTracker:
         )
         self._mark_unfinished_chapter_runs_failed(error_message)
         self._emit_sse_progress(task_snapshot)
+
+    def is_pause_requested(self) -> bool:
+        """检查任务是否被 API 标记为请求暂停。"""
+        session = self._with_session()
+        try:
+            task = session.query(AudiobookTask).filter(AudiobookTask.id == self.task_db_id).first()
+            if not task:
+                return False
+            return str(task.status or "").strip().lower() == PAUSE_REQUESTED_STATUS
+        finally:
+            session.close()
+
+    def mark_paused(
+        self,
+        *,
+        remaining_chapter_ids: Optional[Sequence[int]] = None,
+        stage: Optional[str] = None,
+        message: Optional[str] = None,
+    ) -> None:
+        """将任务落库为暂停状态，并记录剩余待生成章节以便恢复。"""
+        session = self._with_session()
+        try:
+            task = session.query(AudiobookTask).filter(AudiobookTask.id == self.task_db_id).first()
+            if not task:
+                return
+            detail = dict(task.detail_json or {})
+            if remaining_chapter_ids is not None:
+                detail["remaining_chapter_ids"] = [int(chapter_id) for chapter_id in remaining_chapter_ids]
+            if message:
+                detail["message"] = message
+            task.detail_json = detail
+            task.status = PAUSED_STATUS
+            task.current_stage = stage or PAUSED_STATUS
+            task.updated_at = utc_now()
+            session.commit()
+            task_snapshot = {
+                "celery_task_id": task.celery_task_id,
+                "status": task.status,
+                "current_stage": task.current_stage,
+                "progress": task.progress,
+                "detail_json": task.detail_json or {},
+                "error_message": task.error_message,
+            }
+        finally:
+            session.close()
+        self._mark_unfinished_chapter_runs_paused()
+        self._emit_sse_progress(task_snapshot)
+
+    def _mark_unfinished_chapter_runs_paused(self) -> None:
+        from app.services.audiobook.task_support import (
+            RESUME_WINDOW_HOURS,
+            build_run_checkpoint_document,
+        )
+
+        session = self._with_session()
+        try:
+            task = session.query(AudiobookTask).filter(AudiobookTask.id == self.task_db_id).first()
+            if not task or not task.celery_task_id:
+                return
+
+            run_query = session.query(ChapterAudioRun).filter(
+                ChapterAudioRun.audiobook_project_id == task.audiobook_project_id,
+                ChapterAudioRun.run_type == task.task_type,
+                ChapterAudioRun.celery_task_id == task.celery_task_id,
+                ~ChapterAudioRun.status.in_(self._TERMINAL_CHAPTER_RUN_STATUSES),
+            )
+            if task.chapter_id is not None:
+                run_query = run_query.filter(ChapterAudioRun.chapter_id == task.chapter_id)
+
+            runs = run_query.all()
+            if not runs:
+                return
+
+            paused_at = utc_now()
+            for run in runs:
+                if run.expires_at is None:
+                    run.expires_at = paused_at + timedelta(hours=RESUME_WINDOW_HOURS)
+                checkpoint_payload = build_run_checkpoint_document(
+                    session,
+                    run=run,
+                    chapter_id=run.chapter_id,
+                    audiobook_project_id=run.audiobook_project_id,
+                    status=PAUSED_STATUS,
+                    current_stage=run.current_stage or PAUSED_STATUS,
+                )
+                run.status = PAUSED_STATUS
+                run.error_message = None
+                run.finished_at = paused_at
+                run.updated_at = paused_at
+                run.checkpoint_json = checkpoint_payload
+                session.add(run)
+
+            session.commit()
+        finally:
+            session.close()
+
+
+def handle_pause_checkpoint(
+    tracker: Optional[Any],
+    *,
+    chapter_ids: Sequence[int],
+    current_index: int,
+    stage: Optional[str] = None,
+) -> bool:
+    """在章节循环边界检查并处理任务级暂停。
+
+    应在每个章节迭代开始、尚未对该章节做任何工作前调用。
+    若检测到暂停请求，则将任务落库为 paused（记录剩余章节）并返回 True，
+    调用者应立即 return 停止后续章节处理。
+
+    tracker 以鸭子类型方式使用（StageTracker Protocol 仅约束 update_stage），
+    传入 None 或不支持暂停的 tracker 时安全返回 False。
+    """
+    if tracker is None:
+        return False
+    check = getattr(tracker, "is_pause_requested", None)
+    if not callable(check):
+        return False
+    try:
+        if not check():
+            return False
+    except Exception as exc:  # pragma: no cover - 暂停检查失败不应中断生成
+        logger.warning("暂停状态检查失败，忽略并继续生成: %s", exc)
+        return False
+
+    remaining = list(chapter_ids)[max(current_index - 1, 0):] if current_index >= 1 else list(chapter_ids)
+    mark = getattr(tracker, "mark_paused", None)
+    if callable(mark):
+        try:
+            mark(remaining_chapter_ids=remaining, stage=stage)
+        except Exception as exc:  # pragma: no cover - 落库失败不阻断 Worker 退出
+            logger.exception("标记任务暂停失败: %s", exc)
+    logger.info("⏸️ 检测到暂停请求，任务已在章节边界暂停，剩余章节数=%s", len(remaining))
+    return True

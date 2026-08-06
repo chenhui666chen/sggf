@@ -61,7 +61,6 @@ from core.unified_media_runtime import (  # noqa: E402
 DEFAULT_PREVIEW_TEXT = "当你真的喜欢一个人的时候就容易说傻话办蠢事。"
 DEFAULT_VOLUME = 50
 DEFAULT_SPEED = 1.0
-DEFAULT_PITCH = 50
 
 
 def _get_preview_text(model_name: str, voice_id: str) -> str:
@@ -109,7 +108,6 @@ def _build_cache_key(model_name: str, speaker_id: str, voice_params: dict, voice
         text=_get_preview_text(model_name, voice_id),
         volume=DEFAULT_VOLUME,
         speed=DEFAULT_SPEED,
-        pitch=DEFAULT_PITCH,
         emotion=str(voice_params.get("emotion") or "neutral"),
         voice_type="",
         mimo_voice_asset_id="",
@@ -286,7 +284,7 @@ async def _run(args: argparse.Namespace) -> int:
 
     print(f"待预热模型: {target_models}")
     print(f"试听文本: {DEFAULT_PREVIEW_TEXT}")
-    print(f"参数: volume={DEFAULT_VOLUME} speed={DEFAULT_SPEED} pitch={DEFAULT_PITCH}")
+    print(f"参数: volume={DEFAULT_VOLUME} speed={DEFAULT_SPEED}")
     print(f"force={args.force} limit_per_model={args.limit_per_model} dry_run={args.dry_run}")
 
     retry_config = routes_tts._PREVIEW_RETRY_CONFIG

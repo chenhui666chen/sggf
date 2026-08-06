@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import json
 import os
 import sys
@@ -23,13 +24,33 @@ from app.api.v1.audiobook_api import routes_segment_preview, routes_segment_rege
 from app.api.v1.audiobook_api.dependencies import OwnedAudiobookProject
 from app.api.v1.audiobook_api.routes_review import get_chapter_review_status
 from app.api.v1.audiobook_api.routes_segment_preview import preview_script_segment_audio
-from app.api.v1.audiobook_api.routes_segment_regen import regenerate_segment, review_segment
+from app.api.v1.audiobook_api.routes_segment_regen import (
+    get_segment_regeneration_candidate_audio,
+    regenerate_segment,
+    review_segment,
+)
 from app.db.base import Base
 from app.models.audiobook import AudiobookProject, ChapterAudio
 from app.models.project import Chapter, Project
 from app.models.user import User
 from app.schemas.audiobook import ScriptSegmentPreviewRequest, SegmentRegenerateRequest, SegmentReviewRequest
 from app.services.audiobook.temp_segment_store import TempSegmentStoreError
+
+
+def _expected_candidate_revision():
+    from app.services.audiobook.voice_identity_policy import (
+        VOICE_IDENTITY_POLICY_VERSION,
+    )
+
+    return f"2:{VOICE_IDENTITY_POLICY_VERSION}"
+
+
+def _compute_compiled_segment_fingerprint(segment):
+    from app.services.audiobook.segment_synthesis_contract import (
+        compute_compiled_segment_fingerprint,
+    )
+
+    return compute_compiled_segment_fingerprint(segment)
 
 
 def build_session_factory():
@@ -50,6 +71,23 @@ def build_session_factory():
         ],
     )
     return session_factory
+
+
+@pytest.fixture(autouse=True)
+def cleanup_persistent_segment_dirs_after_each():
+    """本文件测试使用 chapter_audio.id=1/2 真实落盘持久化片段，测试后清理避免污染其他测试文件。"""
+    yield
+    from types import SimpleNamespace
+
+    from app.services.audiobook import chapter_segment_assets
+
+    for chapter_id in (1, 2):
+        try:
+            chapter_segment_assets.delete_chapter_persistent_segment_assets(
+                SimpleNamespace(id=chapter_id, script_json="[]")
+            )
+        except Exception:
+            pass
 
 
 def seed_segment_context(db):
@@ -389,9 +427,87 @@ def test_regenerate_segment_uses_current_qwen_default_voice_when_missing_voice(m
         assert payload["success"] is True
         assert synthesize_call["model_id"] == "qwen3-tts-instruct-flash"
         assert synthesize_call["voice_params"]["speaker"] == "Neil"
-        assert synthesize_call["voice_params"]["segment_speaker"] == "narrator"
+        assert synthesize_call["voice_params"]["segment_speaker"] == "旁白"
         assert segments[0]["regenerated"] is True
-        assert segments[0]["audio_path"].endswith("segment.mp3")
+        assert "chapter_segments_persistent_voice" in segments[0]["audio_path"]
+        assert segments[0]["audio_path"].endswith(".mp3")
+
+
+def test_candidate_payload_uses_project_voice_mapping_before_model_default():
+    request = SegmentRegenerateRequest(tts_model="qwen3-tts-instruct-flash")
+
+    payload = routes_segment_regen._build_segment_synthesis_payload(
+        request,
+        {
+            "type": "narration",
+            "speaker": "narrator",
+            "text": "Mapped narrator.",
+            "emotion": "neutral",
+        },
+        voice_mapping={"narrator": {"voice_id": "project-narrator-voice"}},
+    )
+
+    assert payload["voice_params"]["speaker"] == "project-narrator-voice"
+
+
+def test_candidate_payload_restores_owned_mimo_design_asset_recipe(monkeypatch):
+    merge_call = {}
+
+    def fake_merge(config, *, owner_user_id=None):
+        merge_call["config"] = dict(config)
+        merge_call["owner_user_id"] = owner_user_id
+        return {
+            **config,
+            "mimo_voice_asset_id": "asset-1",
+            "voice_design_prompt": "资产库中的权威青年女性音色配方",
+            "voice_description": "不应进入候选合同的冗余音色描述",
+        }
+
+    monkeypatch.setattr(
+        routes_segment_regen,
+        "merge_mimo_voice_asset_tts_params",
+        fake_merge,
+        raising=False,
+    )
+
+    payload = routes_segment_regen._build_segment_synthesis_payload(
+        SegmentRegenerateRequest(
+            tts_model="mimo-v2.5-tts-voice-design",
+            voice_id="mimo_design:asset-1",
+        ),
+        {
+            "type": "narration",
+            "speaker": "旁白",
+            "text": "别回头。",
+            "performance_notes": "语速缓慢，句尾拖长。",
+            "voice_params": {
+                "speaker": "mimo_design:asset-1",
+                "mimo_voice_asset_id": "asset-2-client-forged",
+                "pitch": 0.7,
+                "voice_description": "客户端伪造的老人音色",
+                "voice_design_prompt": "客户端伪造的老人设计配方",
+            },
+        },
+        owner_user_id=42,
+    )
+
+    assert merge_call["owner_user_id"] == 42
+    assert merge_call["config"]["mimo_voice_asset_id"] == "asset-1"
+    assert "pitch" not in merge_call["config"]
+    assert "voice_description" not in merge_call["config"]
+    assert "voice_design_prompt" not in merge_call["config"]
+    params = payload["voice_params"]
+    assert params["mimo_voice_asset_id"] == "asset-1"
+    assert params["voice_design_prompt"] == "资产库中的权威青年女性音色配方"
+    assert "voice_description" not in params
+    assert "客户端伪造" not in json.dumps(payload, ensure_ascii=False)
+    assert payload["voice_identity_binding"] == {
+        "asset_type": "design",
+        "mimo_voice_asset_id": "asset-1",
+        "voice_design_prompt_sha1": hashlib.sha1(
+            "资产库中的权威青年女性音色配方".encode("utf-8")
+        ).hexdigest(),
+    }
 
 
 def test_regenerate_segment_uses_minimax_default_voice_when_missing_voice(monkeypatch):
@@ -463,11 +579,15 @@ def test_regenerate_segment_converts_temp_store_failures_to_http_error(monkeypat
     async def fake_synthesize_speech(**kwargs):
         return b"ID3fake-audio"
 
-    def fail_save_segment_audio_map(**kwargs):
+    def fail_save_persistent_segment_audio(**kwargs):
         raise TempSegmentStoreError("temp store unavailable")
 
     monkeypatch.setattr(routes_segment_regen, "runtime_synthesize_speech", fake_synthesize_speech)
-    monkeypatch.setattr(routes_segment_regen, "save_segment_audio_map", fail_save_segment_audio_map)
+    monkeypatch.setattr(
+        routes_segment_regen,
+        "save_persistent_segment_audio",
+        fail_save_persistent_segment_audio,
+    )
 
     with session_factory() as db:
         context = seed_segment_context(db)
@@ -595,3 +715,364 @@ def test_preview_segment_preserves_minimax_model_selection(monkeypatch):
         assert response.body == b"ID3minimax-preview"
         assert synthesize_call["model_id"] == "minimax-speech-2.8-hd"
         assert synthesize_call["voice_params"]["speaker"] == "male-qn-qingse"
+
+
+def test_candidate_audio_preview_rejects_registry_fingerprint_mismatch(monkeypatch):
+    session_factory = build_session_factory()
+
+    with session_factory() as db:
+        context = seed_segment_context(db)
+        monkeypatch.setattr(
+            routes_segment_regen,
+            "verify_segment_candidate_token",
+            lambda *args, **kwargs: {
+                "run": "candidate-run",
+                "chi": context["chapter"].id,
+                "sha1": "a" * 40,
+                "ext": "mp3",
+                "pt": "voice",
+                "fp": "base-fingerprint",
+                "efp": "effective-fingerprint",
+                "sfp": "synthesis-fingerprint",
+                "rev": _expected_candidate_revision(),
+            },
+        )
+        monkeypatch.setattr(
+            routes_segment_regen,
+            "build_segment_asset_ref",
+            lambda **kwargs: "candidate-ref",
+        )
+        monkeypatch.setattr(
+            routes_segment_regen,
+            "load_segment_candidate_contract",
+            lambda *args, **kwargs: {
+                "revision": _expected_candidate_revision(),
+                "preview_type": "voice",
+                "base_segment_fingerprint": "different-base",
+                "effective_segment_fingerprint": "effective-fingerprint",
+                "synthesis_fingerprint": "synthesis-fingerprint",
+            },
+        )
+
+        with pytest.raises(HTTPException) as exc_info:
+            asyncio.run(
+                get_segment_regeneration_candidate_audio(
+                    audiobook_project_id=context["audiobook_project"].id,
+                    chapter_id=context["chapter"].id,
+                    segment_index=0,
+                    candidate_id="candidate-token",
+                    owned=build_owned_context(db, context),
+                )
+            )
+
+        assert exc_info.value.status_code == 400
+        assert exc_info.value.detail == "候选登记与凭证不一致，请重新生成候选"
+
+
+def test_candidate_audio_preview_rejects_stale_registry_contract_revision(monkeypatch):
+    session_factory = build_session_factory()
+
+    with session_factory() as db:
+        context = seed_segment_context(db)
+        effective_segment = {
+            "type": "narration",
+            "speaker": "narrator",
+            "text": "candidate text",
+            "voice_params": {"speaker": "voice-a"},
+        }
+        effective_fingerprint = _compute_compiled_segment_fingerprint(
+            effective_segment
+        )
+        candidate_payload = {
+            "run": "candidate-run",
+            "chi": context["chapter"].id,
+            "sha1": "a" * 40,
+            "ext": "mp3",
+            "pt": "voice",
+            "fp": "base-fingerprint",
+            "efp": effective_fingerprint,
+            "sfp": "synthesis-fingerprint",
+            "rev": _expected_candidate_revision(),
+        }
+        monkeypatch.setattr(
+            routes_segment_regen,
+            "verify_segment_candidate_token",
+            lambda *args, **kwargs: candidate_payload,
+        )
+        monkeypatch.setattr(
+            routes_segment_regen,
+            "build_segment_asset_ref",
+            lambda **kwargs: "candidate-ref",
+        )
+        monkeypatch.setattr(
+            routes_segment_regen,
+            "load_segment_candidate_contract",
+            lambda *args, **kwargs: {
+                "revision": "1:4",
+                "preview_type": "voice",
+                "base_segment_fingerprint": "base-fingerprint",
+                "effective_segment": effective_segment,
+                "effective_segment_fingerprint": effective_fingerprint,
+                "synthesis_fingerprint": "synthesis-fingerprint",
+            },
+        )
+        monkeypatch.setattr(
+            routes_segment_regen,
+            "load_cached_segment_audio",
+            lambda *args, **kwargs: {0: b"ID3 stale candidate"},
+        )
+
+        with pytest.raises(HTTPException) as exc_info:
+            asyncio.run(
+                get_segment_regeneration_candidate_audio(
+                    audiobook_project_id=context["audiobook_project"].id,
+                    chapter_id=context["chapter"].id,
+                    segment_index=0,
+                    candidate_id="candidate-token",
+                    owned=build_owned_context(db, context),
+                )
+            )
+
+        assert exc_info.value.status_code == 400
+
+
+def test_preview_segment_compiles_server_owned_delivery_contract(monkeypatch):
+    session_factory = build_session_factory()
+    captured = {}
+
+    class FakePreviewService:
+        def __init__(self, **kwargs):
+            captured["service_model"] = kwargs["tts_model"]
+
+        def resolve_voice_params(self, segment):
+            return "painful", {"speaker": "voice-selected"}
+
+        async def generate_preview(self, segment, *, preview_type):
+            captured["segment"] = segment
+            captured["preview_type"] = preview_type
+            return type("Preview", (), {"audio": b"ID3 compiled-preview", "media_type": "audio/mpeg"})()
+
+    monkeypatch.setattr(routes_segment_preview, "SegmentPreviewService", FakePreviewService)
+
+    with session_factory() as db:
+        context = seed_segment_context(db)
+        response = asyncio.run(
+            preview_script_segment_audio(
+                audiobook_project_id=context["audiobook_project"].id,
+                chapter_id=context["chapter"].id,
+                request=ScriptSegmentPreviewRequest(
+                    segment={
+                        "type": "narration",
+                        "speaker": "narrator",
+                        "text": "Preview with a fresh direction.",
+                        "performance_notes": "slow and painful",
+                        "voice_params": {
+                            "tts_model": "seed-tts-2.0-expressive",
+                            "delivery_plan": {"director_guidance": "STALE_CLIENT_PLAN"},
+                            "provider_prompt_snapshot": {"mode": "STALE_CLIENT_SNAPSHOT"},
+                        },
+                    },
+                    tts_model="qwen3-tts-instruct-flash",
+                    preview_type="voice",
+                ),
+                owned=build_owned_context(db, context),
+            )
+        )
+
+        assert response.body == b"ID3 compiled-preview"
+        assert captured["service_model"] == "seed-tts-2.0-expressive"
+        assert captured["preview_type"] == "voice"
+        compiled_params = captured["segment"]["voice_params"]
+        assert compiled_params["speaker"] == "voice-selected"
+        assert "director_guidance" not in compiled_params["delivery_plan"]
+        assert compiled_params["delivery_plan"]["style_instruction"] == "slow and painful"
+        assert compiled_params["provider_prompt_snapshot"]["mode"] != "STALE_CLIENT_SNAPSHOT"
+
+
+def test_preview_segment_rehydrates_owned_mimo_design_asset_baseline(monkeypatch):
+    from app.services.audiobook import mimo_voice_assets
+
+    session_factory = build_session_factory()
+    captured = {}
+    asset_calls = []
+
+    class FakePreviewService:
+        def __init__(self, **kwargs):
+            pass
+
+        async def generate_preview(self, segment, *, preview_type):
+            captured["segment"] = segment
+            return type(
+                "Preview",
+                (),
+                {"audio": b"ID3 mimo-design-preview", "media_type": "audio/mpeg"},
+            )()
+
+    def fake_resolve_asset(asset_id, *, owner_user_id=None):
+        asset_calls.append((asset_id, owner_user_id))
+        return {
+            "mimo_voice_asset_id": "asset-1",
+            "voice_design_prompt": "服务端固定青年女性声线",
+            "voice_description": "服务端固定青年女性声线",
+        }
+
+    monkeypatch.setattr(routes_segment_preview, "SegmentPreviewService", FakePreviewService)
+    monkeypatch.setattr(
+        mimo_voice_assets,
+        "resolve_mimo_voice_asset_tts_params",
+        fake_resolve_asset,
+    )
+
+    with session_factory() as db:
+        context = seed_segment_context(db)
+        response = asyncio.run(
+            preview_script_segment_audio(
+                audiobook_project_id=context["audiobook_project"].id,
+                chapter_id=context["chapter"].id,
+                request=ScriptSegmentPreviewRequest(
+                    segment={
+                        "type": "narration",
+                        "speaker": "narrator",
+                        "text": "Preview fixed MiMo design voice.",
+                        "performance_notes": "改成老人声，语速缓慢，句尾拖长。",
+                        "voice_params": {
+                            "speaker": "mimo_design:asset-1",
+                            "tts_model": "mimo-v2.5-tts-voicedesign",
+                            "voice_design_prompt": "客户端伪造的老人声",
+                        },
+                    },
+                    tts_model="mimo-v2.5-tts-voicedesign",
+                    preview_type="voice",
+                ),
+                owned=build_owned_context(db, context),
+            )
+        )
+
+        assert response.body == b"ID3 mimo-design-preview"
+        assert asset_calls == [("asset-1", context["user"].id)]
+        compiled_params = captured["segment"]["voice_params"]
+        assert compiled_params["voice_design_prompt"] == "服务端固定青年女性声线"
+        serialized = json.dumps(compiled_params, ensure_ascii=False)
+        assert "客户端伪造的老人声" not in serialized
+        assert "固定声音设定保持不变" in serialized
+
+
+def test_preview_segment_keeps_explicit_bound_voice_in_compiled_contract(monkeypatch):
+    """工作台试听必须使用片段绑定的 speaker，而不是按角色名重新分配默认音色。"""
+    session_factory = build_session_factory()
+    synthesize_call = {}
+
+    class FakeVoiceProfile:
+        def get_tts_params(self, emotion):
+            return {
+                "speaker": "manager-default-voice",
+                "emotion": emotion,
+                "voice_description": "项目默认旁白音色",
+            }
+
+    class FakeVoiceManager:
+        def apply_project_voice_mapping(self, mapping):
+            return None
+
+        def get_narrator_voice(self):
+            return FakeVoiceProfile()
+
+        def get_voice(self, speaker):
+            return None
+
+        def assign_voice(self, speaker):
+            return FakeVoiceProfile()
+
+    async def fake_synthesize_speech(**kwargs):
+        synthesize_call.update(kwargs)
+        return b"ID3 bound-voice-preview"
+
+    from app.services.audiobook import segment_preview_service
+
+    monkeypatch.setattr(
+        segment_preview_service,
+        "create_voice_manager",
+        lambda **kwargs: FakeVoiceManager(),
+    )
+    monkeypatch.setattr(routes_segment_preview, "runtime_synthesize_speech", fake_synthesize_speech)
+
+    with session_factory() as db:
+        context = seed_segment_context(db)
+        response = asyncio.run(
+            preview_script_segment_audio(
+                audiobook_project_id=context["audiobook_project"].id,
+                chapter_id=context["chapter"].id,
+                request=ScriptSegmentPreviewRequest(
+                    segment={
+                        "type": "narration",
+                        "speaker": "narrator",
+                        "text": "Preview bound voice.",
+                        "performance_notes": "slow and restrained",
+                        "voice_params": {
+                            "speaker": "bound-voice-id",
+                            "tts_model": "seed-tts-2.0-expressive",
+                        },
+                    },
+                    tts_model="qwen3-tts-instruct-flash",
+                    preview_type="voice",
+                ),
+                owned=build_owned_context(db, context),
+            )
+        )
+
+        assert response.body == b"ID3 bound-voice-preview"
+        assert synthesize_call["model_id"] == "seed-tts-2.0-expressive"
+        assert synthesize_call["voice_params"]["speaker"] == "bound-voice-id"
+        delivery_plan = synthesize_call["voice_params"]["delivery_plan"]
+        assert "director_guidance" not in delivery_plan
+        assert delivery_plan["style_instruction"] == "slow and restrained"
+        snapshot = synthesize_call["voice_params"]["provider_prompt_snapshot"]
+        assert snapshot["voice_id"] == "bound-voice-id"
+        assert snapshot["delivery_plan"]["style_instruction"] == "slow and restrained"
+
+
+def test_preview_segment_drops_server_managed_audio_fields(monkeypatch):
+    session_factory = build_session_factory()
+    captured = {}
+
+    class FakePreviewService:
+        def __init__(self, **kwargs):
+            pass
+
+        def resolve_voice_params(self, segment):
+            return "neutral", {"speaker": "preview-voice"}
+
+        async def generate_preview(self, segment, *, preview_type):
+            captured["segment"] = segment
+            return type("Preview", (), {"audio": b"ID3 sanitized-preview", "media_type": "audio/mpeg"})()
+
+    monkeypatch.setattr(routes_segment_preview, "SegmentPreviewService", FakePreviewService)
+
+    with session_factory() as db:
+        context = seed_segment_context(db)
+        response = asyncio.run(
+            preview_script_segment_audio(
+                audiobook_project_id=context["audiobook_project"].id,
+                chapter_id=context["chapter"].id,
+                request=ScriptSegmentPreviewRequest(
+                    segment={
+                        "type": "narration",
+                        "speaker": "narrator",
+                        "text": "Preview sanitized fields.",
+                        "audio_path": "../../outside.mp3",
+                        "mix_audio_path": "C:/outside/mix.mp3",
+                        "voice_params": {
+                            "speaker": "preview-voice",
+                            "provider_prompt_snapshot": {"stale": True},
+                        },
+                    },
+                    preview_type="voice",
+                ),
+                owned=build_owned_context(db, context),
+            )
+        )
+
+    assert response.body == b"ID3 sanitized-preview"
+    assert "audio_path" not in captured["segment"]
+    assert "mix_audio_path" not in captured["segment"]
+    assert captured["segment"]["voice_params"]["provider_prompt_snapshot"] != {"stale": True}

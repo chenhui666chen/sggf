@@ -16,13 +16,40 @@ from app.services.audiobook.audio_library_paths import (
 )
 from app.services.audiobook.audio_mixer import AudioMixer
 from app.services.audiobook.duration_estimator import estimate_narration_duration_seconds
+from app.services.audiobook.segment_synthesis_contract import PROVIDER_PROMPT_DERIVED_FIELDS
+from app.services.audiobook.tts_delivery_plan import resolve_segment_tts_model
 from app.services.audiobook.tts_engine import RetryConfig as TTSRetryConfig
+from app.services.audiobook.voice_identity_policy import (
+    is_current_voice_identity_snapshot,
+)
 from app.services.audiobook.voice_manager_factory import create_voice_manager
+from app.services.audiobook.voice_parameter_policy import (
+    merge_segment_performance_params,
+    stabilize_fixed_voice_pitch,
+    stabilize_instruct_model_speed,
+)
 from core.unified_media_runtime import synthesize_speech as runtime_synthesize_speech
 
 logger = logging.getLogger(__name__)
 
 SynthesizeSpeech = Callable[..., Awaitable[bytes]]
+
+
+def _find_library_file_by_stem(base_dir: Path, stem: str, *, subdirectory: str) -> Optional[Path]:
+    """在素材库指定子目录内按文件 stem 查找，拒绝用户提供的任意文件路径。"""
+    normalized_stem = str(stem or "").strip()
+    if not normalized_stem or any(char in normalized_stem for char in "*?[]"):
+        return None
+    root = (base_dir / subdirectory).resolve()
+    if not root.is_dir():
+        return None
+    for candidate in root.rglob("*"):
+        if not candidate.is_file() or candidate.stem != normalized_stem:
+            continue
+        resolved = resolve_audio_library_file_path(candidate, base_dir)
+        if resolved:
+            return resolved
+    return None
 
 
 @dataclass(frozen=True)
@@ -74,10 +101,16 @@ class SegmentPreviewService:
         segment_voice_params = segment.get("voice_params") or {}
         if not isinstance(segment_voice_params, dict):
             segment_voice_params = {}
-        for key, value in segment_voice_params.items():
-            if value is None or key == "speaker":
-                continue
-            voice_params[key] = value
+        preview_overrides = {
+            key: value
+            for key, value in segment_voice_params.items()
+            if key not in PROVIDER_PROMPT_DERIVED_FIELDS
+            and (key != "speaker" or str(value).strip())
+        }
+        voice_params = merge_segment_performance_params(
+            voice_params,
+            preview_overrides,
+        )
 
         if instruct_emotion and instruct_emotion != "neutral":
             voice_params["emotion"] = instruct_emotion
@@ -115,7 +148,49 @@ class SegmentPreviewService:
         ):
             voice_params["use_instruct_mode"] = True
 
+        resolved_model = resolve_segment_tts_model(
+            voice_params,
+            getattr(self, "tts_model", None),
+        )
+        voice_params = stabilize_instruct_model_speed(voice_params, resolved_model)
         return emotion_for_params, voice_params
+
+    def _resolve_compiled_voice_params(
+        self,
+        segment: Dict[str, Any],
+    ) -> Optional[tuple[str, Dict[str, Any]]]:
+        """识别并原样返回服务端已编译、模型与音色自洽的合成合同。"""
+        voice_params = segment.get("voice_params") or {}
+        if not isinstance(voice_params, dict):
+            return None
+
+        delivery_plan = voice_params.get("delivery_plan")
+        snapshot = voice_params.get("provider_prompt_snapshot")
+        if not isinstance(delivery_plan, dict) or not isinstance(snapshot, dict):
+            return None
+
+        voice_id = str(voice_params.get("speaker") or "").strip()
+        contract_model = resolve_segment_tts_model(
+            voice_params,
+            getattr(self, "tts_model", None),
+        )
+        if not is_current_voice_identity_snapshot(
+            snapshot,
+            model=contract_model,
+            voice_id=voice_id,
+        ):
+            return None
+
+        emotion = str(
+            voice_params.get("instruct_emotion")
+            or segment.get("instruct_emotion")
+            or voice_params.get("emotion")
+            or segment.get("emotion")
+            or "neutral"
+        ).strip() or "neutral"
+        stabilized = stabilize_fixed_voice_pitch(voice_params)
+        stabilized = stabilize_instruct_model_speed(stabilized, contract_model)
+        return emotion, stabilized
 
     @staticmethod
     def estimate_duration_seconds(text_value: str) -> float:
@@ -213,16 +288,39 @@ class SegmentPreviewService:
     def resolve_effect_path(file_ref: str, name_hint: str, base_dir: Path) -> Optional[Path]:
         if not file_ref:
             return None
-        effect_path = Path(file_ref)
-        if not effect_path.is_absolute():
-            effect_path = base_dir / file_ref
-        if effect_path.exists():
+        effect_path = resolve_audio_library_file_path(file_ref, base_dir)
+        if effect_path:
             return effect_path
         candidate_name = Path(file_ref).stem or name_hint
-        if candidate_name:
-            for candidate in (base_dir / "sound_effects").rglob(f"{candidate_name}.*"):
-                return candidate
-        return None
+        return _find_library_file_by_stem(
+            base_dir,
+            candidate_name,
+            subdirectory="sound_effects",
+        )
+
+    def collect_missing_effect_names(
+        self,
+        effect_specs: List[Dict[str, Any]],
+        effect_timeline: List[Dict[str, Any]],
+    ) -> List[str]:
+        """收集未在素材库匹配到可用素材的音效名称，用于试听时明确提示。"""
+        resolved_descriptions = set()
+        for item in effect_timeline:
+            description = str(item.get("description") or "").strip()
+            file_ref = str(item.get("file") or "").strip()
+            if not description or not file_ref:
+                continue
+            # placeholder 为匹配失败时的占位音效，视为无素材
+            if Path(file_ref).stem.lower() == "placeholder":
+                continue
+            if self.resolve_effect_path(file_ref, description, self.audio_library_dir):
+                resolved_descriptions.add(description)
+        missing: List[str] = []
+        for spec in effect_specs:
+            name = str(spec.get("name") or "").strip()
+            if name and name not in resolved_descriptions and name not in missing:
+                missing.append(name)
+        return missing
 
     def apply_sound_effects(
         self,
@@ -238,10 +336,10 @@ class SegmentPreviewService:
         ducking_reduction_db = self.audio_fx.get("sound_effect_ducking_reduction_db", -6.0)
         ducking_chunk_ms = self.audio_fx.get("sound_effect_ducking_chunk_ms", 250)
         base_gain_map = {
-            "environment": -14.0,
-            "action": -14.0,
-            "emotion": -16.0,
-            "transition": -18.0,
+            "environment": -7.0,
+            "action": -7.0,
+            "emotion": -9.0,
+            "transition": -11.0,
         }
         for item in timeline:
             file_ref = item.get("file")
@@ -395,6 +493,7 @@ class SegmentPreviewService:
         base_dir: Path,
         music_index: List[Dict[str, Any]],
         asset_id: str = "",
+        allow_any_fallback: bool = True,
     ) -> Optional[Path]:
         normalized_asset_id = str(asset_id or "").strip()
         if normalized_asset_id and music_index:
@@ -412,15 +511,17 @@ class SegmentPreviewService:
             logger.warning("试听配乐素材 ID 不存在或文件不可用，将回退到提示匹配: %s", normalized_asset_id)
 
         if file_ref:
-            music_path = Path(file_ref)
-            if not music_path.is_absolute():
-                music_path = base_dir / file_ref
-            if music_path.exists():
+            music_path = resolve_audio_library_file_path(file_ref, base_dir)
+            if music_path:
                 return music_path
             candidate_name = Path(file_ref).stem
-            if candidate_name:
-                for candidate in (base_dir / "music_cache").rglob(f"{candidate_name}.*"):
-                    return candidate
+            music_path = _find_library_file_by_stem(
+                base_dir,
+                candidate_name,
+                subdirectory="music_cache",
+            )
+            if music_path:
+                return music_path
 
         style_hint = (style_hint or "").strip()
         mood_hint = (mood_hint or "").strip().lower()
@@ -445,6 +546,12 @@ class SegmentPreviewService:
                         )
                         if resolved:
                             return resolved
+
+        # 任意素材回退仅适用于 mix 等宽松场景；单轨配乐预览需要明确提示无匹配素材
+        if not allow_any_fallback:
+            return None
+
+        if music_index:
             for entry in music_index:
                 resolved = resolve_audio_library_file_path(
                     entry.get("file_path"),
@@ -453,8 +560,11 @@ class SegmentPreviewService:
                 if resolved:
                     return resolved
 
-        for candidate in (base_dir / "music_cache").rglob("*.mp3"):
-            return candidate
+        for candidate in (base_dir / "music_cache").rglob("*"):
+            if candidate.is_file():
+                resolved = resolve_audio_library_file_path(candidate, base_dir)
+                if resolved:
+                    return resolved
         return None
 
     def apply_background_music(
@@ -482,7 +592,7 @@ class SegmentPreviewService:
             logger.warning("试听配乐文件不存在: %s", music_path)
             return base_audio
 
-        base_bgm_volume_db = self.audio_fx.get("base_bgm_volume", -36)
+        base_bgm_volume_db = self.audio_fx.get("base_bgm_volume", -18)
         try:
             volume_val = float(cue.get("volume", 0.2))
         except (TypeError, ValueError):
@@ -589,7 +699,7 @@ class SegmentPreviewService:
                 text=text,
                 voice_params=voice_params,
                 emotion=emotion,
-                model_id=self.tts_model,
+                model_id=resolve_segment_tts_model(voice_params, self.tts_model),
                 enable_cache=False,
                 max_concurrent=1,
                 request_delay=0.0,
@@ -616,13 +726,17 @@ class SegmentPreviewService:
         preview_type: str,
     ) -> SegmentPreviewResult:
         text = str(segment.get("text") or "").strip()
-        if not text:
+        if not text and preview_type in {"voice", "mix"}:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="台词不能为空",
             )
 
-        emotion, voice_params = self.resolve_voice_params(segment)
+        compiled_voice = self._resolve_compiled_voice_params(segment)
+        if compiled_voice is None:
+            emotion, voice_params = self.resolve_voice_params(segment)
+        else:
+            emotion, voice_params = compiled_voice
 
         voice_audio: Optional[bytes] = None
         if preview_type in {"voice", "mix"}:
@@ -642,20 +756,57 @@ class SegmentPreviewService:
         if preview_type in {"sfx", "mix"}:
             effect_specs = self.normalize_sound_effects(segment)
             effect_timeline = self.build_effect_timeline(effect_specs)
-            if preview_type == "sfx" and not effect_timeline:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="该片段未配置音效，无法试听音效",
+            if preview_type == "sfx":
+                if not effect_specs:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="该片段未配置音效，无法试听音效",
+                    )
+                missing_effect_names = self.collect_missing_effect_names(
+                    effect_specs, effect_timeline
                 )
+                if missing_effect_names:
+                    raise HTTPException(
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        detail=(
+                            "素材库中没有找到匹配的音效素材："
+                            f"{'、'.join(missing_effect_names)}。"
+                            "可改用「音效 AI 重新生成」，或先上传对应音效素材。"
+                        ),
+                    )
 
         music_cue = None
         if preview_type in {"bgm", "mix"}:
             music_cue = self.normalize_music_cue(segment)
-            if preview_type == "bgm" and not music_cue:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="该片段未配置配乐，无法试听配乐",
+            if preview_type == "bgm":
+                if not music_cue:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="该片段未配置配乐，无法试听配乐",
+                    )
+                music_index = self.load_music_index(self.audio_library_dir)
+                style_hint = str(music_cue.get("style") or "").strip()
+                mood_hint = str(
+                    music_cue.get("mood") or self.infer_music_mood(emotion)
+                ).strip()
+                matched_music_path = self.resolve_music_path(
+                    music_cue.get("file"),
+                    style_hint,
+                    mood_hint,
+                    self.audio_library_dir,
+                    music_index,
+                    asset_id=str(music_cue.get("asset_id") or ""),
+                    allow_any_fallback=False,
                 )
+                if not matched_music_path:
+                    raise HTTPException(
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        detail=(
+                            "素材库中没有找到匹配的配乐素材"
+                            f"（风格：{style_hint or '未指定'}，情绪：{mood_hint or '未指定'}）。"
+                            "可改用「配乐 AI 重新生成」，或先上传对应配乐素材。"
+                        ),
+                    )
 
         base_duration = self.resolve_base_duration(
             estimated_duration=estimated_duration,

@@ -13,6 +13,7 @@ import {
 } from './voiceCloneAudioUtils'
 import { DEFAULT_DESIGN_PREVIEW_TEXT } from './pageSessionUtils'
 import { applyProjectVoiceAssignments } from './projectAudioConfigUtils'
+import { modelUsesBasicNumericSpeedControl } from './ttsModels'
 import { useCosyVoiceCloneRecording } from './useCosyVoiceCloneRecording'
 
 const COSYVOICE_PREVIEW_MIME_BY_FORMAT: Record<string, string> = {
@@ -178,8 +179,6 @@ export const useAudiobookVoiceActions = ({
         text: DEFAULT_DESIGN_PREVIEW_TEXT,
         voice_id: voiceId,
         volume: 50,
-        speed: 1.0,
-        pitch: 50,
         model: 'cosyvoice-v3.5-plus',
       })
       if (response.audioUrl) {
@@ -204,8 +203,9 @@ export const useAudiobookVoiceActions = ({
         text: DEFAULT_DESIGN_PREVIEW_TEXT,
         voice_id: voiceId,
         volume: voice.default_params?.volume ?? 50,
-        speed: voice.default_params?.speed ?? 1.0,
-        pitch: voice.default_params?.pitch ?? 50,
+        ...(modelUsesBasicNumericSpeedControl(model)
+          ? { speed: voice.default_params?.speed ?? 1.0 }
+          : {}),
         model,
       })
       if (response.audioUrl) {

@@ -30,7 +30,7 @@ interface ScriptQualityReviewDialogProps {
   selectedIssueIndex?: number | null
   selectedSegmentIndex?: number | null
   onClose: () => void
-  onOpenScriptEditor?: (chapterId: number) => void | Promise<void>
+  onOpenScriptEditor?: (chapterId: number, initialSegmentIndex?: number | null) => void | Promise<void>
   onSelectIssue?: (index: number | null) => void
   onSelectSegment?: (index: number | null) => void
 }
@@ -58,7 +58,7 @@ const ScriptQualityReviewDialog = ({
   const handleOpenScriptEditor = () => {
     if (!data?.chapterId || !onOpenScriptEditor) return
     onClose()
-    void onOpenScriptEditor(data.chapterId)
+    void onOpenScriptEditor(data.chapterId, selectedSegmentIndex)
   }
 
   const handleSubmitFeedback = async () => {

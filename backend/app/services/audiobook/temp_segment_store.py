@@ -250,8 +250,11 @@ def _resolve_oss_public_url(asset_ref: str) -> Optional[str]:
     raw = str(asset_ref or "").strip()
     if not raw:
         return None
+    # 安全约束：拒绝客户端可控的任意 HTTP(S) URL，防止跨资产读取与 SSRF；
+    # 仅允许 oss:// 受控 key 由服务端拼接公共访问地址。
     if raw.startswith("http://") or raw.startswith("https://"):
-        return raw
+        logger.warning("拒绝加载任意 HTTP 资产引用: asset_ref=%s", raw[:160])
+        return None
 
     key = _extract_oss_key(raw)
     if not key:
@@ -421,7 +424,8 @@ class LocalFSTempSegmentStorageBackend:
         for index, audio_bytes in _iter_normalized_audio_items(audio_map):
             filename = _build_segment_filename(index, audio_bytes, extension)
             file_path = prefix_abs / filename
-            pattern = f"{_SEGMENT_FILE_STEM}_{index:05d}_*.{extension}"
+            # 跨扩展名清理同一片段的旧版本：切换输出格式后旧格式文件也应及时释放
+            pattern = f"{_SEGMENT_FILE_STEM}_{index:05d}_*.*"
             for stale_path in prefix_abs.glob(pattern):
                 if stale_path.name == filename:
                     continue
@@ -820,6 +824,24 @@ def _segment_audio_matches_integrity_metadata(
         return False
 
     return True
+
+
+def build_segment_asset_ref(
+    *,
+    run_id: str,
+    chapter_id: int,
+    segment_index: int,
+    content_sha1: str,
+    extension: str,
+) -> str:
+    """按存储驱动重建确定性片段资产 ref（供服务端签发 token 后还原，不接受客户端路径）。"""
+    digest = str(content_sha1 or "").strip().lower()[:12]
+    ext = normalize_audio_extension(extension)
+    filename = f"{_SEGMENT_FILE_STEM}_{int(segment_index):05d}_{digest}.{ext}"
+    if _resolve_active_driver_name() == _DRIVER_DASHSCOPE_OSS:
+        prefix_key = _build_oss_prefix_key(run_id=run_id, chapter_id=chapter_id)
+        return f"oss://{prefix_key}/{filename}"
+    return (_build_local_prefix_path(run_id=run_id, chapter_id=chapter_id) / filename).as_posix()
 
 
 def load_cached_segment_audio(

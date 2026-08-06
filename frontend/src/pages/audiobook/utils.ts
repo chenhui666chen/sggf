@@ -7,6 +7,7 @@ import {
 } from './constants'
 export { buildAudiobookChapterAssetUuid } from '../../utils/audiobookAssetIds'
 import type {
+  LLMDimensionScore,
   NavigationType,
   ScriptReviewDetail,
   StageConfig,
@@ -76,7 +77,14 @@ export const createEmptyStageMap = (): Record<StageKey, StageInfo> =>
   }, {} as Record<StageKey, StageInfo>)
 
 export const coerceStageStatus = (value: unknown): StageStatus => {
-  if (value === 'running' || value === 'completed' || value === 'failed' || value === 'pending') {
+  if (
+    value === 'running'
+    || value === 'completed'
+    || value === 'failed'
+    || value === 'pending'
+    || value === 'paused'
+    || value === 'pause_requested'
+  ) {
     return value
   }
   return 'pending'
@@ -266,6 +274,7 @@ export const categoryLabelMap: Record<string, string> = {
   audio: '音频',
   audio_assets: '音效素材',
   pacing: '节奏',
+  llm_quality: 'LLM维度',
 }
 
 const normalizeScriptQualityMetrics = (
@@ -320,6 +329,13 @@ const normalizeScriptReviewIssues = (value: unknown): NonNullable<ScriptReviewDe
           category: getStringValue(issue, 'category'),
           description: getStringValue(issue, 'description'),
           suggestion: getStringValue(issue, 'suggestion'),
+          dimension: getStringValue(issue, 'dimension'),
+          fix_type: getStringValue(issue, 'fix_type'),
+          target_fields: getStringArrayValue(issue.target_fields),
+          segment_index:
+            typeof issue.segment_index === 'number' && Number.isFinite(issue.segment_index)
+              ? issue.segment_index
+              : undefined,
         }))
     : []
 
@@ -334,6 +350,22 @@ const normalizeAudioWarnings = (value: unknown): NonNullable<ScriptReviewDetail[
         }))
         .filter((warning) => Boolean(warning.message || warning.code))
     : []
+
+const normalizeLLMDimensions = (value: unknown): Record<string, LLMDimensionScore> | undefined => {
+  if (!isRecord(value)) return undefined
+  const result: Record<string, LLMDimensionScore> = {}
+  for (const [key, dim] of Object.entries(value)) {
+    if (isRecord(dim)) {
+      result[key] = {
+        score: typeof dim.score === 'number' && Number.isFinite(dim.score) ? dim.score : undefined,
+        label: typeof dim.label === 'string' ? dim.label : undefined,
+        category: typeof dim.category === 'string' ? dim.category : undefined,
+        comment: typeof dim.comment === 'string' ? dim.comment : undefined,
+      }
+    }
+  }
+  return Object.keys(result).length > 0 ? result : undefined
+}
 
 export const normalizeScriptReview = (raw: unknown): ScriptReviewDetail | null => {
   if (!isRecord(raw)) return null
@@ -352,6 +384,7 @@ export const normalizeScriptReview = (raw: unknown): ScriptReviewDetail | null =
     revision_suggestions: getStringArrayValue(raw.revision_suggestions),
     issues: safeIssues,
     audio_warnings: audioWarnings,
+    llm_dimensions: normalizeLLMDimensions(raw.llm_dimensions),
   }
 }
 

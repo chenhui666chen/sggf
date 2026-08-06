@@ -60,7 +60,7 @@ DEFAULT_OUTPUT_DIR = PROJECT_ROOT / "backend/data/tts_debug/prompt_strategy_acce
 DEFAULT_COSYVOICE_VOICE_ID = "cosyvoice-v3.5-plus-vc25dfd3e-d15265b4a4f74c7996ffa3faa097ee21"
 DEFAULT_STEP_AUDIO_VOICE_ID = "cixingnansheng"
 DEFAULT_MIMO_VOICE_ID = "mimo_default"
-DEFAULT_DOUBAO_VOICE_ID = "saturn_zh_female_keainvsheng_tob"
+DEFAULT_DOUBAO_VOICE_ID = "ICL_uranus_zh_female_keainvsheng_tob"
 
 
 @dataclass(frozen=True)

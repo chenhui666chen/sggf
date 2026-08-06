@@ -22,11 +22,14 @@ export const resolveAudiobookCompletionMode = ({
   requestedMode: AudiobookCompletionMode
   chapterAudios: readonly ChapterAudio[]
 }): AudiobookCompletionMode => {
-  if (requestedMode === 'script_only') {
-    return 'script_only'
-  }
+  // 可播放章节音频优先：剧本先行流程生成音频/混音完成后，
+  // 即使 lastGenerationMode 仍为 script_only（默认值或刷新后未持久化），
+  // 也必须展示音频完成视图，避免误回到剧本审阅页而无法播放
   if (hasPlayableChapterAudio(chapterAudios)) {
     return 'full'
+  }
+  if (requestedMode === 'script_only') {
+    return 'script_only'
   }
   return chapterAudios.some((item) => Boolean(item.has_script)) ? 'script_only' : 'full'
 }

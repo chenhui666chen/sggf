@@ -25,6 +25,8 @@ const STAGE_STATUS_COLORS: Record<StageStatus, { bg: string; border: string; tex
   running: audiobookColorRoles.taskStatus.running,
   completed: audiobookColorRoles.taskStatus.completed,
   failed: audiobookColorRoles.taskStatus.failed,
+  paused: audiobookColorRoles.taskStatus.paused,
+  pause_requested: audiobookColorRoles.taskStatus.pause_requested,
 }
 
 const DEFAULT_PENDING_STAGE_INFO: StageInfo = {

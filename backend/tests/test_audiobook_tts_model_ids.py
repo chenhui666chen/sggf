@@ -437,7 +437,8 @@ def test_stepaudio_emotion_is_not_downgraded_by_generic_aliyun_mapping() -> None
 
 def test_narrator_speed_is_stable_across_emotions() -> None:
     """旁白语速不应随逐段 emotion 标签机械变速（导致忽快忽慢），
-    情绪层次交给风格指令/performance_notes 表达；角色台词仍保留情感变速。"""
+    情绪层次交给风格指令/performance_notes 表达；
+    不支持指令的模型上，角色台词仍保留情感变速。"""
     from app.services.audiobook.voice_manager import VoiceProfile
 
     narrator = VoiceProfile(
@@ -449,20 +450,55 @@ def test_narrator_speed_is_stable_across_emotions() -> None:
         tts_speaker_id="stepaudio_narrator",
         speed_base=1.0,
     )
-    assert narrator.get_tts_params("fearful")["speed"] == 1.0
-    assert narrator.get_tts_params("sad")["speed"] == 1.0
+    assert "speed" not in narrator.get_tts_params("fearful")
+    assert "speed" not in narrator.get_tts_params("sad")
 
+    # 不支持指令的模型（basic 模式）：角色台词保留情感数值变速
     role = VoiceProfile(
         voice_id="role_voice",
         character_name="张三",
         gender="male",
         age_group="adult",
         personality="calm",
-        tts_speaker_id="stepaudio_role",
+        tts_model=MINIMAX_SPEECH_28_HD_MODEL,
+        tts_speaker_id="minimax_role",
         speed_base=1.0,
     )
     assert role.get_tts_params("fearful")["speed"] == pytest.approx(1.15)
     assert role.get_tts_params("sad")["speed"] == pytest.approx(0.85)
+
+    # 支持指令的模型：角色语速只由表演指令表达，不再发送数值基线。
+    instruct_role = VoiceProfile(
+        voice_id="role_voice_instruct",
+        character_name="张三",
+        gender="male",
+        age_group="adult",
+        personality="calm",
+        tts_model="seed-tts-2.0-expressive",
+        tts_speaker_id="seed_role",
+        speed_base=1.0,
+    )
+    assert "speed" not in instruct_role.get_tts_params("fearful")
+
+
+def test_tts_speed_control_capability_separates_semantic_and_basic_models() -> None:
+    for model in (
+        "qwen3-tts-instruct-flash",
+        "cosyvoice-v3.5-plus",
+        "mimo-v2.5-tts",
+        "mimo-v2.5-tts-voicedesign",
+        "mimo-v2.5-tts-voiceclone",
+        "stepaudio-2.5-tts",
+        "seed-tts-2.0-expressive",
+    ):
+        assert tts_model_ids.model_supports_instruct_style_control(model) is True
+        assert tts_model_ids.model_uses_basic_numeric_speed_control(model) is False
+
+    for model in (MINIMAX_SPEECH_28_HD_MODEL, MINIMAX_SPEECH_28_TURBO_MODEL):
+        assert tts_model_ids.model_supports_instruct_style_control(model) is False
+        assert tts_model_ids.model_uses_basic_numeric_speed_control(model) is True
+
+    assert tts_model_ids.model_uses_basic_numeric_speed_control("unknown-model") is False
 
 
 def test_minimax_voice_catalog_accepts_registry_model_id_alias() -> None:
@@ -501,10 +537,10 @@ def test_seed_tts_voice_catalog_contains_doubao_20_expressive_voices() -> None:
     assert catalog["meta"]["voice_count"] >= 99
     assert {
         "zh_female_vv_uranus_bigtts",
-        "saturn_zh_female_keainvsheng_tob",
-        "saturn_zh_female_tiaopigongzhu_tob",
-        "saturn_zh_male_shuanglangshaonian_tob",
-        "saturn_zh_male_tiancaitongzhuo_tob",
+        "ICL_uranus_zh_female_keainvsheng_tob",
+        "ICL_uranus_zh_female_tiaopigongzhu_tob",
+        "ICL_uranus_zh_male_shuanglangshaonian_tob",
+        "ICL_uranus_zh_male_tiancaitongzhuo_tob",
         "en_male_tim_uranus_bigtts",
         "zh_male_xuanyijieshuo_uranus_bigtts",
     }.issubset(voice_ids)
@@ -514,10 +550,10 @@ def test_seed_tts_voice_catalog_contains_doubao_20_expressive_voices() -> None:
         if voice.get("supports_inline_voice_labels")
     }
     assert {
-        "saturn_zh_female_keainvsheng_tob",
-        "saturn_zh_female_tiaopigongzhu_tob",
-        "saturn_zh_male_shuanglangshaonian_tob",
-        "saturn_zh_male_tiancaitongzhuo_tob",
+        "ICL_uranus_zh_female_keainvsheng_tob",
+        "ICL_uranus_zh_female_tiaopigongzhu_tob",
+        "ICL_uranus_zh_male_shuanglangshaonian_tob",
+        "ICL_uranus_zh_male_tiancaitongzhuo_tob",
     }.issubset(tag_ready)
 
 
@@ -549,7 +585,7 @@ def test_minimax_project_mapping_applies_voice_type_params() -> None:
     profile = manager.get_voice("Hero")
     assert profile.tts_speaker_id == "male-qn-qingse"
     assert profile.speed_base == pytest.approx(1.15)
-    assert profile.pitch_base == 52
+    assert profile.pitch_base == 50
     assert profile.volume_base == 50
     assert profile.default_emotion == "happy"
 
@@ -593,7 +629,7 @@ def test_mimo_voice_design_mapping_preserves_design_prompt() -> None:
     assert profile.tts_model == MIMO_V25_TTS_VOICE_DESIGN_MODEL
     assert params["speaker"] == ""
     assert params["voice_design_prompt"] == "青年女性，中音，语速中等，清亮但克制，适合有声书对白"
-    assert params["speed"] == pytest.approx(1.05)
+    assert "speed" not in params
 
 
 def test_qwen_voice_manager_prefers_unused_voice_for_same_traits() -> None:
@@ -730,7 +766,7 @@ def test_qwen_voice_manager_loads_cross_model_project_mapping() -> None:
     assert profile.volume_base == 58
 
 
-def test_tts_preview_applies_voice_type_params() -> None:
+def test_tts_preview_ignores_voice_type_identity_params_for_fixed_voice() -> None:
     request = TTSPreviewRequest(
         text="试听文本",
         voice_id="Neil",
@@ -743,11 +779,11 @@ def test_tts_preview_applies_voice_type_params() -> None:
     params = routes_tts._build_preview_voice_params(request, "Neil")
 
     assert params["speaker"] == "Neil"
-    assert params["rate"] == pytest.approx(1.0)
-    assert params["speed"] == pytest.approx(1.0)
-    assert params["pitch"] == 48
-    assert params["volume"] == 60
-    assert params["emotion"] == "angry"
+    assert "rate" not in params
+    assert "speed" not in params
+    assert "pitch" not in params
+    assert params["volume"] == 50
+    assert "emotion" not in params
 
 
 def test_tts_preview_expands_asset_reference_from_voice_id(monkeypatch) -> None:
@@ -769,6 +805,35 @@ def test_tts_preview_expands_asset_reference_from_voice_id(monkeypatch) -> None:
     assert captured["mimo_voice_asset_id"] == "mimo_clone:unit"
     assert captured["voice_id"] == "mimo_clone:unit"
     assert params["voice_clone_data_url"] == "data:audio/wav;base64,AAAA"
+
+
+def test_fixed_voice_preview_drops_asset_injected_voice_design_fields(monkeypatch) -> None:
+    def fake_merge(config, **_kwargs):
+        return {
+            **config,
+            "voice_clone_data_url": "data:audio/wav;base64,AAAA",
+            "voice_description": "苍老男性，低沉沙哑",
+            "voice_design_prompt": "改成陌生老人的声音",
+            "provider_prompt_snapshot": {"provider_prompt": {"instructions": "旧提示"}},
+        }
+
+    monkeypatch.setattr(routes_tts, "merge_mimo_voice_asset_tts_params", fake_merge)
+    request = TTSPreviewRequest(
+        text="试听文本",
+        voice_id="mimo_clone:unit",
+        model="mimo-v2.5-tts-voiceclone",
+    )
+
+    params = routes_tts._build_preview_voice_params(
+        request,
+        "mimo_clone:unit",
+        model_name="mimo-v2.5-tts-voiceclone",
+    )
+
+    assert params["voice_clone_data_url"] == "data:audio/wav;base64,AAAA"
+    assert "voice_description" not in params
+    assert "voice_design_prompt" not in params
+    assert "provider_prompt_snapshot" not in params
 
 
 def test_cosyvoice_voice_manager_logs_clone_catalog_failure(monkeypatch, caplog) -> None:

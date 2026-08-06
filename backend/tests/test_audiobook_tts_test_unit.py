@@ -42,6 +42,10 @@ def test_model_cases_compile_to_their_native_prompt_surfaces() -> None:
     stepaudio = get_tts_test_case("stepaudio-2.5-tts", "global_and_inline_context")
     seed = get_tts_test_case("seed-tts-2.0-expressive", "query_response_tags")
 
+    for case in (qwen, cosy, minimax, mimo, stepaudio, seed):
+        assert "pitch" not in case["voice_params"]
+        assert "pitch" not in case["voice_params"].get("delivery_plan", {})
+
     qwen_prompt = qwen["provider_prompt_snapshot"]["provider_prompt"]
     assert qwen["style_control_mode"] == "natural_language"
     assert "情绪目标" in qwen_prompt["instructions"]
@@ -87,9 +91,10 @@ def test_custom_voice_variants_are_marked_without_hiding_prompt_compilation() ->
     assert mimo_clone["requires_custom_voice"] is True
     assert mimo_design["provider_prompt_snapshot"]["provider_prompt"]["messages"]
     assert mimo_clone["provider_prompt_snapshot"]["provider_prompt"]["messages"]
+    assert "pitch" not in mimo_clone["voice_params"]
 
 
-def test_preview_endpoint_synthesizes_with_the_displayed_prompt_snapshot(monkeypatch) -> None:
+def test_fixed_voice_prompt_preview_rebuilds_snapshot_at_engine_boundary(monkeypatch) -> None:
     from app.api.v1.audiobook_api import routes_tts
     from app.schemas.audiobook import TTSPromptTestPreviewRequest
 
@@ -122,4 +127,6 @@ def test_preview_endpoint_synthesizes_with_the_displayed_prompt_snapshot(monkeyp
     assert response.case_id == "emotion_pause_stress"
     assert response.audio_data_base64
     assert captured["text"] == response.text
-    assert captured["voice_params"]["provider_prompt_snapshot"] == snapshot
+    assert snapshot
+    assert "provider_prompt_snapshot" not in captured["voice_params"]
+    assert "pitch" not in captured["voice_params"]

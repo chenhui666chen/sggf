@@ -105,6 +105,18 @@ export const audiobookColorRoles = {
       text: audiobookColors.dangerMain,
       chipBg: audiobookColors.dangerMain,
     },
+    paused: {
+      bg: audiobookColors.warningSoft,
+      border: audiobookColors.warningMain,
+      text: audiobookColors.warning,
+      chipBg: audiobookColors.warningMain,
+    },
+    pause_requested: {
+      bg: audiobookColors.warningSoft,
+      border: audiobookColors.warningMain,
+      text: audiobookColors.warning,
+      chipBg: audiobookColors.warningMain,
+    },
   },
   notice: {
     warning: {

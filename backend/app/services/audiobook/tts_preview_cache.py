@@ -17,10 +17,16 @@ import tempfile
 from pathlib import Path
 from typing import Any, Optional
 
+from app.services.audiobook.tts_model_ids import model_uses_basic_numeric_speed_control
+from app.services.audiobook.voice_identity_policy import (
+    VOICE_IDENTITY_POLICY_VERSION,
+    is_voice_design_creation_request,
+)
+
 logger = logging.getLogger(__name__)
 
 _OSS_SUBDIR = "tts_preview"
-_CACHE_SCHEMA_VERSION = "tts-preview-cache-v2"
+_CACHE_SCHEMA_VERSION = "tts-preview-cache-v4"
 
 
 def _normalize_preview_cache_value(value: Any) -> Any:
@@ -55,24 +61,26 @@ def _build_preview_cache_key(
     """根据试听参数构建缓存键 (SHA256)。"""
     payload = {
         "schema_version": _CACHE_SCHEMA_VERSION,
+        "voice_identity_policy_version": VOICE_IDENTITY_POLICY_VERSION,
         "model": str(model or "").strip(),
         "text": str(text or "").strip(),
     }
     if voice_params is not None:
         payload["voice_params"] = _normalize_preview_cache_value(voice_params)
     else:
-        payload["voice_params"] = _normalize_preview_cache_value(
-            {
-                "speaker": str(voice_id or "").strip(),
-                "volume": int(volume),
-                "speed": round(float(speed), 6),
-                "pitch": int(pitch),
-                "emotion": str(emotion or "neutral").strip().lower(),
-                "voice_type": str(voice_type or "").strip(),
-                "mimo_voice_asset_id": str(mimo_voice_asset_id or "").strip(),
-                "stepaudio_voice_asset_id": str(stepaudio_voice_asset_id or "").strip(),
-            }
-        )
+        fallback_voice_params = {
+            "speaker": str(voice_id or "").strip(),
+            "volume": int(volume),
+            "emotion": str(emotion or "neutral").strip().lower(),
+            "voice_type": str(voice_type or "").strip(),
+            "mimo_voice_asset_id": str(mimo_voice_asset_id or "").strip(),
+            "stepaudio_voice_asset_id": str(stepaudio_voice_asset_id or "").strip(),
+        }
+        if model_uses_basic_numeric_speed_control(model):
+            fallback_voice_params["speed"] = round(float(speed), 6)
+        if is_voice_design_creation_request(model, fallback_voice_params):
+            fallback_voice_params["pitch"] = int(pitch)
+        payload["voice_params"] = _normalize_preview_cache_value(fallback_voice_params)
     raw = json.dumps(payload, ensure_ascii=False, sort_keys=True)
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 

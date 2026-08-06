@@ -49,16 +49,19 @@ class MusicMixin:
     ) -> Optional[Path]:
         """解析配乐文件路径（支持索引回退与缓存目录搜索）。"""
         if file_ref:
-            music_path = Path(file_ref)
-            if not music_path.is_absolute():
-                music_path = base_dir / file_ref
-            if music_path.exists():
+            music_path = resolve_audio_library_file_path(file_ref, base_dir)
+            if music_path:
                 return music_path
 
             candidate_name = Path(file_ref).stem
             if candidate_name:
-                for candidate in (base_dir / "music_cache").rglob(f"{candidate_name}.*"):
-                    return candidate
+                music_root = (base_dir / "music_cache").resolve()
+                for candidate in music_root.rglob("*"):
+                    if not candidate.is_file() or candidate.stem != candidate_name:
+                        continue
+                    resolved = resolve_audio_library_file_path(candidate, base_dir)
+                    if resolved:
+                        return resolved
 
         style_hint = (style_hint or "").strip()
         mood_hint = (mood_hint or "").strip().lower()
@@ -100,7 +103,9 @@ class MusicMixin:
                         return resolved
 
         for candidate in (base_dir / "music_cache").rglob("*.mp3"):
-            return candidate
+            resolved = resolve_audio_library_file_path(candidate, base_dir)
+            if resolved:
+                return resolved
         return None
     
     def _apply_background_music(
@@ -132,8 +137,8 @@ class MusicMixin:
         # 🆕 检查是否启用智能音量平衡
         audio_fx = getattr(self, "_audio_fx_config", None) or {}
         intelligent_balance = audio_fx.get("intelligent_balance", True)
-        # 将默认配乐基准音量从 -30dB 再降低到 -36dB，避免喧宾夺主
-        base_bgm_volume_db = audio_fx.get("base_bgm_volume", -36)
+        # 默认配乐基准音量：在避免喧宾夺主的前提下提升可听度
+        base_bgm_volume_db = audio_fx.get("base_bgm_volume", -18)
         try:
             bgm_crossfade_ms = int(audio_fx.get("bgm_crossfade_ms") or 0)
         except Exception:
@@ -183,21 +188,15 @@ class MusicMixin:
                 skipped_count += 1
                 continue
             
-            music_path = Path(file_ref)
-            if not music_path.is_absolute():
-                # 相对路径：相对于 audio_library 根目录
-                music_path = base_dir / file_ref
-            
-            if not music_path.exists():
-                resolved = self._resolve_music_path(
+            music_path = resolve_audio_library_file_path(file_ref, base_dir)
+            if not music_path:
+                music_path = self._resolve_music_path(
                     str(file_ref or ""),
                     base_dir,
                     style_hint=str(item.get("description") or ""),
                     mood_hint=str(mood or ""),
                 )
-                if resolved:
-                    music_path = resolved
-            if not music_path.exists():
+            if not music_path:
                 logger.warning(f"⚠️ 配乐文件不存在: {music_path}")
                 skipped_count += 1
                 continue

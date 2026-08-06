@@ -8,6 +8,7 @@ const readSource = (relativePath: string) => readFileSync(
 
 const textImportSource = readSource('../TextProjectImportDialog.tsx')
 const chapterDeleteSource = readSource('../ChapterDeleteConfirmDialog.tsx')
+const audiobookPageSource = readSource('../../AudiobookPage.tsx')
 const clonePanelSource = readSource('../CosyVoiceCloneVoicePanel.tsx')
 const designPanelSource = readSource('../CosyVoiceDesignVoicePanel.tsx')
 const characterConfigSource = readSource('../CharacterVoiceConfigPanel.tsx')
@@ -34,6 +35,14 @@ describe('Audiobook loading button source guards', () => {
     expect(designPanelSource).toContain('startIcon={designLoading ? <CircularProgress')
     expect(characterConfigSource).toContain('startIcon={autoAssigningVoices ? <CircularProgress')
     expect(characterCardSource).toContain('startIcon={isPreviewing ? <CircularProgress')
+  })
+
+  it('does not expose optional file deletion for chapter outputs', () => {
+    expect(chapterDeleteSource).not.toContain('deleteFiles')
+    expect(chapterDeleteSource).not.toContain('onDeleteFilesChange')
+    expect(chapterDeleteSource).toContain('全部产物')
+    expect(audiobookPageSource).not.toContain('deleteFiles={deleteChapterFiles}')
+    expect(audiobookPageSource).not.toContain('onDeleteFilesChange={setDeleteChapterFiles}')
   })
 
   it('switches CosyVoice design creation to preview playback after design succeeds', () => {
@@ -112,6 +121,11 @@ describe('Audiobook loading button source guards', () => {
     expect(characterVoicePreviewSource).not.toContain('speed: cv.speed')
     expect(characterVoicePreviewSource).not.toContain('pitch: cv.pitch')
     expect(characterVoicePreviewSource).not.toContain('voice_type: cv.voiceType')
+    expect(characterVoiceSettingsSource).not.toContain('patch.pitch')
+    expect(voiceActionsSource).not.toContain('pitch: voice.default_params?.pitch')
+    expect(voiceActionsSource).not.toContain('pitch: 50')
+    expect(voiceActionsSource).toContain('modelUsesBasicNumericSpeedControl(model)')
+    expect(voiceActionsSource).not.toContain('speed: 1.0,')
   })
 
   it('keeps menu item primary labels stable while loading state moves to secondary text', () => {

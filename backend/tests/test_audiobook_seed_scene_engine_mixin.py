@@ -194,7 +194,7 @@ class Harness(SceneRenderMixin):
     def _create_scene_audio_assembler(self):
         return self.assembler
 
-    async def _render_legacy_scene_fallback(self, scene, script_segments, output_root):
+    async def _render_legacy_scene_fallback(self, scene, script_segments, output_root, pause_check=None):
         self.fallback_calls.append((scene.plan.scene_id, tuple(script_segments)))
         self.tts_engine.estimated_cost_yuan += self.fallback_tts_cost_increment
         return _write_wav(Path(output_root) / f"{scene.plan.scene_id}-fallback.wav")
@@ -475,6 +475,52 @@ def test_scene_render_mixin_renders_seed_scenes_and_only_falls_back_failed_scene
     assert ("task-1", StageType.AUDIO_MIXING) in harness.task_tracker.started
     assert ("task-1", StageType.FINAL_AUDIO_REVIEW) in harness.task_tracker.started
     assert harness.task_tracker.completed_tasks == ["task-1"]
+
+
+def test_scene_render_mixin_removes_internal_chapter_staging_file_when_output_omitted(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    seed_audio = _write_wav(tmp_path / "seed.wav")
+    plan = _plan("scene_0001", (0,))
+    pipeline = FakePipeline(
+        ChapterScenePipelineResult(
+            scenes=(
+                ChapterSceneRender(
+                    plan=plan,
+                    result=SceneRenderResult(
+                        scene_id=plan.scene_id,
+                        status="passed",
+                        action="assemble",
+                        attempts=1,
+                        audio_path=seed_audio,
+                        subtitle_payload=None,
+                        quality_report=None,
+                    ),
+                ),
+            )
+        )
+    )
+    assembler = FakeAssembler()
+    harness = Harness(pipeline=pipeline, assembler=assembler)
+    harness._audio_engine_mode = "seed_scene"
+    monkeypatch.setattr(scene_render_mixin_module, "get_backend_root", lambda: tmp_path)
+
+    result = asyncio.run(
+        harness._try_generate_seed_scene_chapter(
+            script_segments=[ScriptSegment("narration", "test", "narrator", "neutral")],
+            chapter_id=3,
+            task_id="task-staging-cleanup",
+            output_path=None,
+            output_format="wav",
+            enable_quality_review=False,
+        )
+    )
+
+    staging_path = assembler.calls[0]["output_path"]
+    assert result is not None
+    assert result["audio_data"] == b"CHAPTER_AUDIO"
+    assert staging_path.exists() is False
 
 
 def test_scene_render_mixin_reuses_valid_local_fallback_artifact(

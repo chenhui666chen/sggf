@@ -58,4 +58,6 @@ export const STAGE_STATUS_LABELS: Record<StageStatus, string> = {
   running: '进行中',
   completed: '已完成',
   failed: '失败',
+  paused: '已暂停',
+  pause_requested: '暂停中',
 }

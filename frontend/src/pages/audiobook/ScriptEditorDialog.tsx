@@ -7,9 +7,9 @@ import {
   Chip,
   CircularProgress,
   Collapse,
-  Divider,
   Dialog,
   DialogContent,
+  Divider,
   IconButton,
   LinearProgress,
   Slider,
@@ -48,11 +48,28 @@ import type {
   ScriptEditorDialogProps,
   ScriptSegment,
 } from './types'
+import type { SegmentDirectionCueType } from '../../services/api'
+
+const REQUIRE_CONFIRMATION_REASON_LABELS: Record<string, string> = {
+  no_audio_path: '未生成音频',
+  expired_temporary_audio: '仅有已过期的临时音频',
+  file_missing: '音频文件不存在',
+  stale_audio: '音频与当前片段文本或演绎参数不一致',
+  invalid_segment: '片段数据无效',
+}
+const REQUIRE_CONFIRMATION_ASSET_LABELS: Record<string, string> = {
+  voice: '人声',
+  mix: '片段混音',
+  sfx: '音效',
+  bgm: '配乐',
+}
 import ScriptReviewReport from './ScriptReviewReport'
 import ScriptEditorConflictNotice from './ScriptEditorConflictNotice'
 import ScriptSegmentActions from './ScriptSegmentActions'
 import ScriptSegmentDetailsPanel from './ScriptSegmentDetailsPanel'
 import SmartChunkPreviewPanel from './SmartChunkPreviewPanel'
+import SegmentCueEditorDialog from './SegmentCueEditorDialog'
+import { resolveInitialScriptSegmentFocus } from './scriptEditorUtils'
 import {
   formatScriptSegmentSummary,
   getScriptSegmentSpeakerLabel,
@@ -825,6 +842,8 @@ const ScriptEditorDialog = ({
   loading,
   chapter,
   data,
+  initialSegmentIndex,
+  onInitialSegmentIndexConsumed,
   onClose,
   onChangeSegmentText,
   onSaveScript,
@@ -860,9 +879,17 @@ const ScriptEditorDialog = ({
   onApplyIncomingDraft,
   onKeepLocalDraft,
   projectId,
+  onRemixChapter,
+  remixingChapter = false,
+  remixError,
+  remixMissingDialogOpen = false,
+  remixMissingSegments = [],
+  onForceRemixChapter,
+  onCloseRemixMissingDialog,
 }: ScriptEditorDialogProps) => {
   const [consistencyChecking, setConsistencyChecking] = useState(false)
   const [selectedSegmentIndex, setSelectedSegmentIndex] = useState(0)
+  const initialSegmentFocusConsumedRef = useRef(false)
   const [selectedTimelineClipKey, setSelectedTimelineClipKey] = useState<string | null>(null)
   const [timelineScale, setTimelineScale] = useState(1)
   const [timelineSeeking, setTimelineSeeking] = useState(false)
@@ -885,6 +912,7 @@ const ScriptEditorDialog = ({
     sfx: false,
     music: false,
   })
+  const [cueEditorType, setCueEditorType] = useState<SegmentDirectionCueType | null>(null)
   const [copiedText, setCopiedText] = useState<string | null>(null)
   const [consistencyResult, setConsistencyResult] = useState<{
     is_consistent: boolean
@@ -893,10 +921,39 @@ const ScriptEditorDialog = ({
   } | null>(null)
   const [consistencyError, setConsistencyError] = useState<string | null>(null)
   const scriptSegments = data?.scriptSegments || []
+
+  useEffect(() => {
+    if (!open) {
+      initialSegmentFocusConsumedRef.current = false
+      return
+    }
+
+    const focusedSegmentIndex = resolveInitialScriptSegmentFocus(
+      initialSegmentIndex,
+      scriptSegments.length,
+      initialSegmentFocusConsumedRef.current,
+    )
+    if (focusedSegmentIndex === null) return
+
+    initialSegmentFocusConsumedRef.current = true
+    setSelectedTimelineClipKey(null)
+    setSelectedSegmentIndex(focusedSegmentIndex)
+    onInitialSegmentIndexConsumed?.()
+  }, [initialSegmentIndex, onInitialSegmentIndexConsumed, open, scriptSegments.length])
+
   const safeSelectedSegmentIndex = scriptSegments.length
     ? Math.min(selectedSegmentIndex, scriptSegments.length - 1)
     : 0
   const selectedSegment = scriptSegments[safeSelectedSegmentIndex] || null
+
+  const openCueEditor = useCallback((type: SegmentDirectionCueType) => {
+    if (!selectedSegment) return
+    setCueEditorType(type)
+  }, [selectedSegment])
+
+  const closeCueEditor = useCallback(() => {
+    setCueEditorType(null)
+  }, [])
 
   // 提前定义基础导航函数（供后续useEffect使用）
   const handleSelectSegment = useCallback((index: number) => {
@@ -934,7 +991,7 @@ const ScriptEditorDialog = ({
     ? selectedSegment.emotion || selectedSegment.voice_params?.emotion || '未标注'
     : '未选择'
   const reviewedCount = useMemo(() => Object.keys(segmentReviews).length, [segmentReviews])
-  const chapterAudioAvailable = data?.chapterAudioAvailable === true
+  const chapterAudioAvailable = data?.chapterAudioAvailable === true && data?.chapterAudioStale !== true
   const visibleSegmentCards = useMemo(
     () => scriptSegments.map((segment, index) => {
       const sfx = getSoundEffectsInputValue(segment)
@@ -1657,7 +1714,12 @@ const ScriptEditorDialog = ({
                     }}
                   >
                     {/* 人声提示面板 */}
-                    <Box sx={editorCuePanelSx(EDITOR_TRACK_COLORS.scriptVoice)}>
+                    <Box
+                      sx={{ ...editorCuePanelSx(EDITOR_TRACK_COLORS.scriptVoice), cursor: 'pointer' }}
+                      onClick={() => openCueEditor('voice')}
+                      role="group"
+                      aria-label="人声提示"
+                    >
                       <Stack direction="row" spacing={0.75} alignItems="center" justifyContent="space-between" sx={{ mb: 0.5 }}>
                         <Stack direction="row" spacing={0.75} alignItems="center">
                           <TextSnippetIcon sx={{ fontSize: 17, color: EDITOR_TRACK_COLORS.scriptVoice }} />
@@ -1665,7 +1727,10 @@ const ScriptEditorDialog = ({
                         </Stack>
                         <IconButton
                           size="small"
-                          onClick={() => togglePanelCollapse('voice')}
+                          onClick={(event) => {
+                            event.stopPropagation()
+                            togglePanelCollapse('voice')
+                          }}
                           sx={{ p: 0.25 }}
                         >
                           {collapsedPanels.voice ? <ExpandMoreIcon sx={{ fontSize: 16 }} /> : <ExpandLessIcon sx={{ fontSize: 16 }} />}
@@ -1679,7 +1744,12 @@ const ScriptEditorDialog = ({
                     </Box>
 
                     {/* 音效提示面板 */}
-                    <Box sx={editorCuePanelSx(EDITOR_TRACK_COLORS.sfx)}>
+                    <Box
+                      sx={{ ...editorCuePanelSx(EDITOR_TRACK_COLORS.sfx), cursor: 'pointer' }}
+                      onClick={() => openCueEditor('sfx')}
+                      role="group"
+                      aria-label="音效提示"
+                    >
                       <Stack direction="row" spacing={0.75} alignItems="center" justifyContent="space-between" sx={{ mb: 0.5 }}>
                         <Stack direction="row" spacing={0.75} alignItems="center">
                           <GraphicEqIcon sx={{ fontSize: 17, color: EDITOR_TRACK_COLORS.sfx }} />
@@ -1687,7 +1757,10 @@ const ScriptEditorDialog = ({
                         </Stack>
                         <IconButton
                           size="small"
-                          onClick={() => togglePanelCollapse('sfx')}
+                          onClick={(event) => {
+                            event.stopPropagation()
+                            togglePanelCollapse('sfx')
+                          }}
                           sx={{ p: 0.25 }}
                         >
                           {collapsedPanels.sfx ? <ExpandMoreIcon sx={{ fontSize: 16 }} /> : <ExpandLessIcon sx={{ fontSize: 16 }} />}
@@ -1713,7 +1786,12 @@ const ScriptEditorDialog = ({
                     </Box>
 
                     {/* 配乐提示面板 */}
-                    <Box sx={editorCuePanelSx(EDITOR_TRACK_COLORS.music)}>
+                    <Box
+                      sx={{ ...editorCuePanelSx(EDITOR_TRACK_COLORS.music), cursor: 'pointer' }}
+                      onClick={() => openCueEditor('bgm')}
+                      role="group"
+                      aria-label="配乐提示"
+                    >
                       <Stack direction="row" spacing={0.75} alignItems="center" justifyContent="space-between" sx={{ mb: 0.5 }}>
                         <Stack direction="row" spacing={0.75} alignItems="center">
                           <LibraryMusicIcon sx={{ fontSize: 17, color: EDITOR_TRACK_COLORS.music }} />
@@ -1721,7 +1799,10 @@ const ScriptEditorDialog = ({
                         </Stack>
                         <IconButton
                           size="small"
-                          onClick={() => togglePanelCollapse('music')}
+                          onClick={(event) => {
+                            event.stopPropagation()
+                            togglePanelCollapse('music')
+                          }}
                           sx={{ p: 0.25 }}
                         >
                           {collapsedPanels.music ? <ExpandMoreIcon sx={{ fontSize: 16 }} /> : <ExpandLessIcon sx={{ fontSize: 16 }} />}
@@ -1765,7 +1846,6 @@ const ScriptEditorDialog = ({
                       index={safeSelectedSegmentIndex}
                       onUpdateSegment={onUpdateSegment}
                       sx={editorDetailsPanelSx}
-                      audioPickerPaperSx={editorFloatingPaperSx}
                       mutedTextColor={EDITOR_SURFACE_COLORS.muted}
                     />
                   )}
@@ -2195,6 +2275,24 @@ const ScriptEditorDialog = ({
                 >
                   批准剧本
                 </Button>
+                <Tooltip title="用最新保存的片段音频重新混合成整章音频">
+                  <span>
+                    <Button
+                      size="small"
+                      variant="outlined"
+                      color="secondary"
+                      onClick={onRemixChapter}
+                      disabled={loading || !data || remixingChapter || !onRemixChapter}
+                    >
+                      {remixingChapter ? '混音中…' : '重新混合整章'}
+                    </Button>
+                  </span>
+                </Tooltip>
+                {remixError ? (
+                  <Typography variant="caption" color="error" sx={{ width: '100%', textAlign: 'right' }}>
+                    {remixError}
+                  </Typography>
+                ) : null}
               </Stack>
             </Box>
 
@@ -2355,6 +2453,62 @@ const ScriptEditorDialog = ({
         </Box>
       )}
     </DialogContent>
+
+    {selectedSegment && cueEditorType && (
+      <SegmentCueEditorDialog
+        open={Boolean(cueEditorType)}
+        cueType={cueEditorType}
+        projectId={projectId}
+        chapterId={chapter?.chapterId}
+        segmentIndex={safeSelectedSegmentIndex}
+        segment={selectedSegment}
+        ttsModel={String(selectedSegment.voice_params?.tts_model || selectedSegment.voice_params?.resolved_tts_model || '')}
+        onClose={closeCueEditor}
+        onApplyPatch={(patch) => {
+          onUpdateSegment(safeSelectedSegmentIndex, patch)
+        }}
+      />
+    )}
+
+    {/* 整章重新混音：片段缺失确认对话框 */}
+    <Dialog
+      open={remixMissingDialogOpen}
+      onClose={onCloseRemixMissingDialog}
+      maxWidth="sm"
+      fullWidth
+    >
+      <Box sx={{ display: 'flex', alignItems: 'center', px: 3, pt: 2 }}>
+        <Typography variant="h6">片段音频不可用</Typography>
+      </Box>
+      <DialogContent dividers>
+        <Alert severity="warning" sx={{ mb: 1.5 }}>
+          以下片段没有可用于当前剧本版本的完整音频，无法完整重新混音。继续混音将跳过这些片段；
+          建议先在工作台检查相应轨道并重新生成或保存音频后再试。
+        </Alert>
+        <Box component="ul" sx={{ m: 0, pl: 2, '& li': { mb: 0.5 } }}>
+          {remixMissingSegments.map((segment) => (
+            <li key={`${segment.index}-${segment.asset_type || 'voice'}-${segment.reason || 'unknown'}`}>
+              <Typography variant="body2">
+                #{segment.index + 1} {segment.speaker || '未知角色'}
+                {segment.asset_type
+                  ? `【${REQUIRE_CONFIRMATION_ASSET_LABELS[segment.asset_type] || segment.asset_type}】`
+                  : ''}
+                {segment.text_preview ? `：${segment.text_preview}` : ''}
+                {segment.reason ? `（${REQUIRE_CONFIRMATION_REASON_LABELS[segment.reason] || segment.reason}）` : ''}
+              </Typography>
+            </li>
+          ))}
+        </Box>
+      </DialogContent>
+      <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 1, px: 3, py: 2 }}>
+        <Button size="small" onClick={onCloseRemixMissingDialog}>
+          取消
+        </Button>
+        <Button size="small" variant="contained" color="warning" onClick={onForceRemixChapter}>
+          仍要混音
+        </Button>
+      </Box>
+    </Dialog>
   </Dialog>
   )
 }

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, List, Optional
 
@@ -133,6 +134,31 @@ def sanitize_voice_description(value: Any) -> str:
     for term in (*_VAGUE_TERMS, *_IMITATION_TERMS):
         result = result.replace(term, "")
     return " ".join(result.split())
+
+
+def stable_voice_description(value: Any) -> str:
+    """Remove segment-level pace and emotion from a fixed voice description."""
+
+    sanitized = sanitize_voice_description(value)
+    fields = _parse_voice_description_fields(sanitized)
+    if fields:
+        stable_fields = ("性别", "年龄感", "音调", "特点", "用途")
+        return "，".join(
+            f"{field_name}：{fields[field_name]}"
+            for field_name in stable_fields
+            if fields.get(field_name)
+        )
+
+    clauses = [
+        clause.strip()
+        for clause in re.split(r"[，,；;]+", sanitized)
+        if clause.strip()
+    ]
+    return "，".join(
+        clause
+        for clause in clauses
+        if not re.match(r"^(?:语速|情绪)(?:[:：]|为|偏|较|很|极|缓|快|慢)", clause)
+    )
 
 
 def _parse_voice_description_fields(value: str) -> Dict[str, str]:

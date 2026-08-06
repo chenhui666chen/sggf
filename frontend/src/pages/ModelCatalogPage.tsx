@@ -826,16 +826,16 @@ function normalizeCatalogEntryForDisplay(entry: CatalogEntry): CatalogEntry {
         },
         {
           name: 'volume',
-          label: 'volume / speed / pitch',
+          label: 'volume',
           supported: true,
-          note: '试听接口支持音量、语速、音高微调；段落试听和工作台链路会按场景透传。',
+          note: '项目试听接口仅允许数值音量调节；固定 voice_id 的段落试听与工作台会删除片段级 pitch。支持 instruction 的模型通过表演指令控制语速，只有 MiniMax basic 模型使用数值语速降级。',
         },
         {
           name: 'voice_prompt',
           label: 'voice_prompt',
           supported: true,
           required: true,
-          note: '声音设计接口必填；建议在 500 字符内使用中文或英文，从性别、年龄、音调、语速、情感、音色特点和用途等维度描述声音特质，不要请求模仿名人或演员。',
+          note: '声音设计接口必填；建议在 500 字符内使用中文或英文，从性别、年龄、音调、语速、情感、音色特点和用途等维度描述声音特质，不要请求模仿名人或演员。该字段仅用于创建新的设计音色资产；固定 voice_id 合成不会从片段透传或动态改写 voice_prompt。',
         },
         {
           name: 'preview_text',
@@ -981,7 +981,7 @@ const audio = await apiClient.previewTTS({
   model: 'cosyvoice-v3.5-plus',
   text: '这是试听文本',
   voice_id: clone.data?.voice_id,
-  speed: 1,
+  instruction: '语速中等，表达自然。',
 })`,
       },
     },

@@ -4,11 +4,12 @@ import json
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, Iterable, List, Optional
 
 from sqlalchemy.orm import Session
 
-from app.models.audiobook import AudiobookProject, ChapterAudio
+from app.models.audiobook import AudiobookProject, ChapterAudio, ChapterAudioRun
+from app.models.project import Chapter
 from app.services.audiobook import AudiobookEngine, set_engine_instance
 from app.services.audiobook.failure_diagnostics import (
     attach_failure_diagnostic_to_checkpoint_patch,
@@ -53,6 +54,106 @@ class ChapterGenerationOutputContext:
 _SUPPORTED_AUDIO_OUTPUT_FORMATS = {"mp3", "wav", "m4b"}
 
 
+def is_audiobook_project_active(db: Session, *, audiobook_project_id: int) -> bool:
+    """返回有声书项目是否仍可接收后台任务写入。"""
+    with db.no_autoflush:
+        return (
+            db.query(AudiobookProject)
+            .filter(
+                AudiobookProject.id == audiobook_project_id,
+                AudiobookProject.deleted_at.is_(None),
+            )
+            .populate_existing()
+            .first()
+            is not None
+        )
+
+
+def is_chapter_generation_target_active(
+    db: Session,
+    *,
+    audiobook_project_id: int,
+    chapter_id: int,
+    chapter_audio_id: Optional[int] = None,
+    run_id: Optional[int] = None,
+) -> bool:
+    """在生成结果写入前重新确认目标仍属于活动产物。
+
+    后台任务通常会在 TTS/LLM 调用期间持有数分钟以前读取的 ORM 对象。
+    删除接口可能在此期间软删除项目或章节音频，因此不能仅依赖内存对象
+    的 ``deleted_at`` 值。``populate_existing`` 强制从数据库刷新当前状态。
+    ``chapter_audio_id`` 为空表示允许首轮生成新记录；非空时则要求原记录
+    仍然存在且未被删除，防止删除后把旧对象重新写活。提供 ``run_id`` 时，
+    删除流程写入的不可恢复取消状态同样视为目标失效，可覆盖尚未创建
+    ``ChapterAudio`` 的首次生成。
+    """
+    with db.no_autoflush:
+        audiobook_project = (
+            db.query(AudiobookProject)
+            .filter(
+                AudiobookProject.id == audiobook_project_id,
+                AudiobookProject.deleted_at.is_(None),
+            )
+            .populate_existing()
+            .first()
+        )
+        if audiobook_project is None:
+            return False
+
+        chapter = (
+            db.query(Chapter)
+            .filter(
+                Chapter.id == chapter_id,
+                Chapter.deleted_at.is_(None),
+            )
+            .populate_existing()
+            .first()
+        )
+        if chapter is None:
+            return False
+
+        if run_id is not None:
+            run = (
+                db.query(ChapterAudioRun)
+                .filter(
+                    ChapterAudioRun.id == run_id,
+                    ChapterAudioRun.audiobook_project_id == audiobook_project_id,
+                    ChapterAudioRun.chapter_id == chapter_id,
+                )
+                .populate_existing()
+                .first()
+            )
+            if run is None:
+                return False
+            if str(run.status or "").strip().lower() in {
+                "cancelled",
+                "canceled",
+                "expired",
+            }:
+                return False
+            if (
+                not bool(run.resumable)
+                and str(run.error_message or "").strip() == "chapter_output_deleted"
+            ):
+                return False
+
+        if chapter_audio_id is None:
+            return True
+
+        chapter_audio = (
+            db.query(ChapterAudio)
+            .filter(
+                ChapterAudio.id == chapter_audio_id,
+                ChapterAudio.audiobook_project_id == audiobook_project_id,
+                ChapterAudio.chapter_id == chapter_id,
+                ChapterAudio.deleted_at.is_(None),
+            )
+            .populate_existing()
+            .first()
+        )
+        return chapter_audio is not None
+
+
 def normalize_audiobook_output_format(value: Optional[str]) -> str:
     normalized = str(value or "mp3").strip().lower().lstrip(".")
     if normalized == "m4a":
@@ -67,8 +168,17 @@ def build_chapter_audio_output_path(
     project_id: int,
     chapter_number: int,
     output_format: Optional[str] = None,
+    audiobook_project_id: Optional[int] = None,
 ) -> str:
     extension = normalize_audiobook_output_format(output_format)
+    # 同一小说项目可派生多个有声书项目，输出路径必须包含
+    # audiobook_project_id 隔离，否则不同有声书会互相覆盖整章音频
+    if audiobook_project_id:
+        return (
+            f"audiobooks/project_{project_id}/"
+            f"audiobook_{int(audiobook_project_id)}/"
+            f"chapter_{chapter_number:03d}.{extension}"
+        )
     return f"audiobooks/project_{project_id}/chapter_{chapter_number:03d}.{extension}"
 
 
@@ -80,6 +190,96 @@ def build_subtitle_artifact_paths(output_path: str) -> Dict[str, str]:
         "ass": f"{base_path}.ass",
         "audacity_labels": f"{base_path}.labels.txt",
     }
+
+
+def cleanup_aborted_chapter_generation_artifacts(
+    *,
+    output_path: Optional[str],
+    result: Optional[Dict[str, Any]] = None,
+    persistent_asset_refs: Optional[Iterable[str]] = None,
+) -> Dict[str, int]:
+    """回收目标失效后由本次生成留下的整章、字幕及片段资产。"""
+    from app.services.audiobook.project_exporter import resolve_existing_audio_path
+    from app.services.audiobook.temp_segment_store import delete_temp_segment_prefix
+
+    candidates: List[str] = []
+    normalized_output_path = str(output_path or "").strip()
+    if normalized_output_path:
+        candidates.append(normalized_output_path)
+        candidates.extend(build_subtitle_artifact_paths(normalized_output_path).values())
+
+    safe_result = result if isinstance(result, dict) else {}
+    subtitle_artifacts = safe_result.get("subtitle_artifacts")
+    if isinstance(subtitle_artifacts, dict):
+        subtitle_path = str(subtitle_artifacts.get("subtitle_path") or "").strip()
+        if subtitle_path:
+            candidates.append(subtitle_path)
+        subtitle_paths = subtitle_artifacts.get("paths")
+        if isinstance(subtitle_paths, dict):
+            candidates.extend(
+                str(path).strip()
+                for path in subtitle_paths.values()
+                if str(path or "").strip()
+            )
+
+    removed_output_files = 0
+    seen_paths: set[str] = set()
+    for raw_path in candidates:
+        resolved = resolve_existing_audio_path(raw_path)
+        if resolved is None:
+            continue
+        key = resolved.as_posix().lower()
+        if key in seen_paths:
+            continue
+        seen_paths.add(key)
+        try:
+            resolved.unlink(missing_ok=True)
+            removed_output_files += 1
+        except OSError as exc:
+            logger.warning("回收已中止章节生成文件失败: path=%s error=%s", resolved, exc)
+
+    removed_temp_files = 0
+    temp_cache = safe_result.get("temp_segment_cache")
+    if isinstance(temp_cache, dict):
+        temp_asset_prefix = str(temp_cache.get("temp_asset_prefix") or "").strip()
+        if temp_asset_prefix:
+            try:
+                removed_temp_files = int(
+                    max(delete_temp_segment_prefix(temp_asset_prefix, temp_cache), 0)
+                )
+            except Exception as exc:
+                logger.warning(
+                    "回收已中止章节生成临时片段失败: prefix=%s error=%s",
+                    temp_asset_prefix,
+                    exc,
+                )
+
+    summary = {
+        "removed_output_files": removed_output_files,
+        "removed_temp_files": removed_temp_files,
+    }
+    normalized_persistent_refs = {
+        str(asset_ref or "").strip()
+        for asset_ref in (persistent_asset_refs or [])
+        if str(asset_ref or "").strip()
+    }
+    if normalized_persistent_refs:
+        from app.services.audiobook.chapter_segment_assets import (
+            delete_segment_asset_refs,
+        )
+
+        try:
+            summary["removed_persistent_files"] = int(
+                max(delete_segment_asset_refs(normalized_persistent_refs), 0)
+            )
+        except Exception as exc:
+            logger.warning(
+                "回收已中止章节生成持久片段失败: refs=%s error=%s",
+                len(normalized_persistent_refs),
+                exc,
+            )
+            summary["removed_persistent_files"] = 0
+    return summary
 
 
 def generate_subtitle_artifacts(
@@ -276,6 +476,10 @@ def build_checkpoint_patch_from_generation_result(
     if isinstance(effect_timeline, dict) and isinstance(effect_timeline.get("timeline"), list):
         patch["effect_timeline"] = effect_timeline
 
+    music_timeline = result.get("music_timeline")
+    if isinstance(music_timeline, dict) and isinstance(music_timeline.get("timeline"), list):
+        patch["music_timeline"] = music_timeline
+
     scene_checkpoints = result.get("scene_checkpoints")
     if isinstance(scene_checkpoints, dict) and scene_checkpoints:
         patch["scene_checkpoints"] = {
@@ -333,6 +537,12 @@ def build_checkpoint_patch_from_generation_result(
     if isinstance(failed_segment_errors, dict) and failed_segment_errors:
         patch["failed_segment_errors"] = failed_segment_errors
 
+    # 缺失片段人类可读报告（含源剧本索引/角色/请求音色/错误类型），
+    # 供前端“部分片段失败可重试”弹窗直接展示。
+    missing_segments = result.get("missing_segments")
+    if isinstance(missing_segments, list) and missing_segments:
+        patch["missing_segments"] = missing_segments
+
     for key in ("render_plan_version", "render_chunk_count", "render_plan"):
         value = temp_segment_cache.get(key)
         if value:
@@ -355,6 +565,7 @@ def mark_chapter_generation_failed(
     resume_checkpoint: Optional[Dict[str, Any]] = None,
     task_id: Optional[str] = None,
     default_error_message: str = "generation_failed",
+    run_id: Optional[int] = None,
 ) -> Dict[str, Any]:
     safe_result = result if isinstance(result, dict) else None
     failure_stats = safe_result.get("stats") if safe_result else {}
@@ -410,6 +621,7 @@ def mark_chapter_generation_failed(
         total_segment_count=failure_total_segments,
         checkpoint_patch=checkpoint_patch,
         error_message=error_message,
+        run_id=run_id,
     )
 
     return {
@@ -476,6 +688,7 @@ def mark_chapter_preflight_failed(
     run_type: str,
     error_message: str,
     failed_chapters: int,
+    run_id: Optional[int] = None,
 ) -> int:
     next_failed_chapters = failed_chapters + 1
     _update_chapter_run_state(
@@ -487,6 +700,7 @@ def mark_chapter_preflight_failed(
         current_stage="failed",
         progress=0.0,
         error_message=error_message,
+        run_id=run_id,
     )
     refresh_audiobook_project_audio_totals(
         db,
@@ -539,13 +753,23 @@ def prune_completed_run_temp_assets(
     audiobook_project_id: int,
     chapter_id: int,
     run_type: str,
+    run_id: Optional[int] = None,
 ) -> Dict[str, Any]:
-    run = ChapterAudioRunRepository.get_latest_run(
-        db,
-        audiobook_project_id=audiobook_project_id,
-        chapter_id=chapter_id,
-        run_type=run_type,
-    )
+    run = None
+    if run_id is not None:
+        run = ChapterAudioRunRepository.get_run_by_id(db, run_id=run_id)
+        if run is not None and (
+            run.audiobook_project_id != audiobook_project_id
+            or run.chapter_id != chapter_id
+        ):
+            run = None
+    if run is None:
+        run = ChapterAudioRunRepository.get_latest_run(
+            db,
+            audiobook_project_id=audiobook_project_id,
+            chapter_id=chapter_id,
+            run_type=run_type,
+        )
     if not run:
         return {
             "run_id": None,
@@ -566,12 +790,14 @@ def prune_and_log_completed_run_temp_assets(
     audiobook_project_id: int,
     chapter_id: int,
     run_type: str,
+    run_id: Optional[int] = None,
 ) -> Dict[str, Any]:
     cleanup_summary = prune_completed_run_temp_assets(
         db,
         audiobook_project_id=audiobook_project_id,
         chapter_id=chapter_id,
         run_type=run_type,
+        run_id=run_id,
     )
     if cleanup_summary.get("cleanup_skipped"):
         logger.warning(
@@ -600,6 +826,7 @@ def persist_chapter_run_tts_progress(
     completed_segment_indices: List[int],
     temp_segment_cache: Optional[Dict[str, Any]],
     scene_checkpoints: Optional[Dict[str, Any]] = None,
+    run_id: Optional[int] = None,
 ) -> None:
     if total_segment_count <= 0:
         return
@@ -645,6 +872,7 @@ def persist_chapter_run_tts_progress(
         total_segment_count=total_segment_count,
         completed_segment_count=completed_segment_count,
         checkpoint_patch=checkpoint_patch,
+        run_id=run_id,
     )
 
 
@@ -654,13 +882,23 @@ def get_latest_run_checkpoint_json(
     audiobook_project_id: int,
     chapter_id: int,
     run_type: str,
+    run_id: Optional[int] = None,
 ) -> Dict[str, Any]:
-    run = ChapterAudioRunRepository.get_latest_run(
-        db,
-        audiobook_project_id=audiobook_project_id,
-        chapter_id=chapter_id,
-        run_type=run_type,
-    )
+    run = None
+    if run_id is not None:
+        run = ChapterAudioRunRepository.get_run_by_id(db, run_id=run_id)
+        if run is not None and (
+            run.audiobook_project_id != audiobook_project_id
+            or run.chapter_id != chapter_id
+        ):
+            run = None
+    if run is None:
+        run = ChapterAudioRunRepository.get_latest_run(
+            db,
+            audiobook_project_id=audiobook_project_id,
+            chapter_id=chapter_id,
+            run_type=run_type,
+        )
     checkpoint_json = getattr(run, "checkpoint_json", None)
     return dict(checkpoint_json or {}) if isinstance(checkpoint_json, dict) else {}
 
@@ -673,12 +911,14 @@ def prepare_chapter_generation_output_context(
     chapter_id: int,
     chapter_number: int,
     run_type: str,
+    run_id: Optional[int] = None,
 ) -> ChapterGenerationOutputContext:
     resume_checkpoint = get_latest_run_checkpoint_json(
         db,
         audiobook_project_id=audiobook_project.id,
         chapter_id=chapter_id,
         run_type=run_type,
+        run_id=run_id,
     )
     output_format = normalize_audiobook_output_format(
         resume_checkpoint.get("output_format")
@@ -696,6 +936,16 @@ def prepare_chapter_generation_output_context(
         project_id=audiobook_project.project_id,
         chapter_number=chapter_number,
         output_format=output_format,
+        audiobook_project_id=audiobook_project.id,
+    )
+    logger.info(
+        "📁 章节生成输出上下文: audiobook_project_id=%s chapter_id=%s "
+        "run_type=%s run_id=%s output_path=%s",
+        audiobook_project.id,
+        chapter_id,
+        run_type,
+        run_id,
+        output_path,
     )
 
     def handle_tts_progress(progress_payload: Dict[str, Any]) -> None:
@@ -710,6 +960,7 @@ def prepare_chapter_generation_output_context(
             completed_segment_indices=payload.get("completed_segment_indices") or [],
             temp_segment_cache=payload.get("temp_segment_cache"),
             scene_checkpoints=payload.get("scene_checkpoints"),
+            run_id=run_id,
         )
 
     return ChapterGenerationOutputContext(
@@ -721,19 +972,164 @@ def prepare_chapter_generation_output_context(
     )
 
 
+def merge_workbench_segment_audio_into_checkpoint(
+    *,
+    script_segments: List[Any],
+    resume_checkpoint: Optional[Dict[str, Any]],
+    default_tts_model: Optional[str] = None,
+) -> Dict[str, Any]:
+    """把编辑工作台已生成保存的片段音频合并进 resume checkpoint。
+
+    仅注入同时满足以下条件的持久化片段（引擎按 render chunk 签名 remap 复用）：
+
+    - 片段 ``audio_path`` 为持久化资产 ref（不受 run 临时资产过期清理影响）；
+    - 片段 ``audio_cache_key`` 与当前剧本对应 render chunk 的签名一致；
+    - 该片段的每个 render chunk 均为其独占（未与其他片段合并）；
+    - 单 chunk 片段直接使用片段音频；多 chunk 片段要求存在与全部
+      chunk 签名一一对应的持久化单块音频（``audio_chunk_cache_paths``）；
+    - 持久化文件仍然存在。
+
+    工作台片段放入当前 checkpoint，原 run checkpoint 挂到 ``source_checkpoint``，
+    引擎的双源合并机制保证两份音频源都可复用且工作台音频优先。
+    无可注入片段时原样返回原 checkpoint。
+    """
+    from app.services.audiobook.chapter_segment_assets import (
+        _normalize_segment_for_render_plan,
+        combine_chunk_cache_keys,
+        is_persistent_segment_asset_ref,
+        persistent_segment_audio_exists,
+    )
+    from app.services.audiobook.engine_pkg._tts_mixin import (
+        QWEN_RENDER_CHUNK_MAX_CHARS,
+        _is_qwen_tts_model,
+        _item_tts_model,
+    )
+    from app.services.audiobook.render_plan import (
+        build_render_plan,
+        render_plan_to_payload,
+    )
+
+    base_checkpoint = dict(resume_checkpoint) if isinstance(resume_checkpoint, dict) else {}
+    raw_segments = list(script_segments or [])
+    if not raw_segments:
+        return base_checkpoint
+
+    # 与引擎 _build_render_chunks 保持一致的分块策略，保证签名可比对
+    normalized_segments = [
+        _normalize_segment_for_render_plan(segment) for segment in raw_segments
+    ]
+    segment_models = [_item_tts_model(item) for item in normalized_segments]
+    has_qwen_model = _is_qwen_tts_model(default_tts_model) or any(
+        _is_qwen_tts_model(model) for model in segment_models if model
+    )
+    max_chunk_chars = QWEN_RENDER_CHUNK_MAX_CHARS if has_qwen_model else None
+    render_chunks = build_render_plan(normalized_segments, max_chunk_chars=max_chunk_chars)
+    if not render_chunks:
+        return base_checkpoint
+
+    seed_paths: Dict[int, str] = {}
+    # 片段级复用要求片段全部 render chunk 均为其独占；
+    # 存在跨片段合并 chunk 的片段无法按块注入，整体跳过
+    chunks_by_segment: Dict[int, List[Any]] = {}
+    for chunk in render_chunks:
+        source_indices = list(chunk.source_segment_indices or [])
+        if len(source_indices) != 1:
+            continue
+        chunks_by_segment.setdefault(source_indices[0], []).append(chunk)
+    for chunk in render_chunks:
+        source_indices = list(chunk.source_segment_indices or [])
+        if len(source_indices) == 1:
+            continue
+        for shared_index in source_indices:
+            chunks_by_segment.pop(shared_index, None)
+    for segment_index in sorted(chunks_by_segment):
+        segment_chunks = sorted(chunks_by_segment[segment_index], key=lambda c: int(c.index))
+        if not 0 <= segment_index < len(raw_segments):
+            continue
+        segment = raw_segments[segment_index]
+        if not isinstance(segment, dict):
+            continue
+        audio_ref = str(segment.get("audio_path") or "").strip()
+        if not audio_ref or not is_persistent_segment_asset_ref(audio_ref):
+            continue
+        stored_key = str(segment.get("audio_cache_key") or "").strip()
+        chunk_keys = [str(chunk.cache_key or "").strip() for chunk in segment_chunks]
+        if not stored_key or not all(chunk_keys):
+            continue
+        if stored_key != combine_chunk_cache_keys(chunk_keys):
+            continue
+        if len(segment_chunks) == 1:
+            chunk = segment_chunks[0]
+            if stored_key != str(chunk.cache_key or "").strip():
+                continue
+            if not persistent_segment_audio_exists(audio_ref):
+                logger.info(
+                    "工作台片段持久化文件缺失，跳过复用: segment_index=%s ref=%s",
+                    segment_index,
+                    audio_ref,
+                )
+                continue
+            seed_paths[int(chunk.index)] = audio_ref
+            continue
+        # 多 chunk 片段：要求存在与全部 chunk 签名一一对应的持久化单块音频
+        chunk_cache_paths = segment.get("audio_chunk_cache_paths")
+        if not isinstance(chunk_cache_paths, dict) or not chunk_cache_paths:
+            continue
+        chunk_refs: Dict[int, str] = {}
+        for chunk in segment_chunks:
+            chunk_key = str(chunk.cache_key or "").strip()
+            chunk_ref = str(chunk_cache_paths.get(chunk_key) or "").strip()
+            if not chunk_ref or not is_persistent_segment_asset_ref(chunk_ref):
+                chunk_refs = {}
+                break
+            if not persistent_segment_audio_exists(chunk_ref):
+                logger.info(
+                    "工作台片段 chunk 持久化文件缺失，跳过复用: "
+                    "segment_index=%s chunk=%s ref=%s",
+                    segment_index,
+                    chunk.index,
+                    chunk_ref,
+                )
+                chunk_refs = {}
+                break
+            chunk_refs[int(chunk.index)] = chunk_ref
+        seed_paths.update(chunk_refs)
+
+    if not seed_paths:
+        return base_checkpoint
+
+    seed_checkpoint = dict(base_checkpoint)
+    seed_checkpoint["cached_audio_paths"] = seed_paths
+    seed_checkpoint["render_plan"] = render_plan_to_payload(render_chunks)
+    seed_checkpoint["total_segments"] = len(render_chunks)
+    seed_checkpoint["completed_segment_indices"] = sorted(seed_paths)
+    if base_checkpoint:
+        seed_checkpoint["source_checkpoint"] = base_checkpoint
+    logger.info(
+        "🎯 工作台片段音频并入 resume checkpoint: reused=%d total_chunks=%d",
+        len(seed_paths),
+        len(render_chunks),
+    )
+    return seed_checkpoint
+
+
 __all__ = [
     "AudiobookProjectAudioTotals",
     "apply_chapter_audio_generation_result",
     "build_checkpoint_patch_from_generation_result",
     "build_chapter_audio_output_path",
     "build_subtitle_artifact_paths",
+    "cleanup_aborted_chapter_generation_artifacts",
     "compute_audio_project_totals",
     "create_background_engine",
     "generate_and_apply_subtitle_artifacts",
     "generate_subtitle_artifacts",
     "get_latest_run_checkpoint_json",
+    "is_audiobook_project_active",
+    "is_chapter_generation_target_active",
     "mark_chapter_generation_failed",
     "mark_chapter_preflight_failed",
+    "merge_workbench_segment_audio_into_checkpoint",
     "normalize_audiobook_output_format",
     "parse_duration_seconds",
     "parse_estimated_cost",

@@ -71,7 +71,6 @@ export const useAudiobookCharacterVoiceSettings = ({
       if (!current.voiceId && preset?.default_params) {
         patch.volume = preset.default_params.volume ?? current.volume
         patch.speed = preset.default_params.speed ?? current.speed
-        patch.pitch = preset.default_params.pitch ?? current.pitch
       }
       return patch
     })

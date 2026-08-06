@@ -8,11 +8,13 @@ from dataclasses import asdict, dataclass, is_dataclass
 from typing import Any, Dict, Iterable, List, Optional
 
 from .pause_tags import split_pause_tag_text
+from .voice_identity_policy import VOICE_IDENTITY_POLICY_VERSION
 
 
 RENDER_PLAN_VERSION = 1
 DEFAULT_RENDER_CHUNK_MAX_CHARS = 420
 MIN_RENDER_CHUNK_MAX_CHARS = 80
+WHOLE_SEGMENT_RENDER_MODE = "whole_segment"
 
 _SENTENCE_BOUNDARIES = set("。！？!?")
 _PHRASE_BOUNDARIES = set("，,、；;：:—–")
@@ -38,6 +40,7 @@ def build_render_plan(
     script_segments: Iterable[Any],
     *,
     max_chunk_chars: Optional[int] = None,
+    _synchronize_semantics: bool = True,
 ) -> List[RenderChunk]:
     chunks: List[RenderChunk] = []
     chunk_char_limit = _resolve_chunk_char_limit(max_chunk_chars)
@@ -46,28 +49,40 @@ def build_render_plan(
         pause_parts = split_pause_tag_text(original_text)
         pause_tag_applied = any(part.applied for part in pause_parts)
         voice_params = _segment_voice_params(segment)
+        if _synchronize_semantics:
+            voice_params = _synchronize_segment_semantics(segment, voice_params)
         if pause_tag_applied:
             voice_params.setdefault("original_tts_text", original_text)
             voice_params["pause_tag_applied"] = True
-        performance_notes = str(getattr(segment, "performance_notes", "") or "").strip()
-        if performance_notes:
-            voice_params.setdefault("performance_notes", performance_notes)
+        performance_notes = str(
+            (
+                _segment_field(segment, "performance_notes")
+                if _has_segment_field(segment, "performance_notes")
+                else voice_params.get("performance_notes", "")
+            )
+            or ""
+        ).strip()
 
         speaker = str(getattr(segment, "speaker", "") or voice_params.get("segment_speaker") or "").strip()
-        emotion = str(
-            getattr(segment, "instruct_emotion", "")
-            or getattr(segment, "emotion", "")
-            or voice_params.get("instruct_emotion")
-            or voice_params.get("emotion")
-            or "neutral"
-        ).strip() or "neutral"
+        emotion = _resolve_segment_emotion(segment, voice_params)
         segment_type = str(getattr(segment, "type", "") or voice_params.get("segment_type") or "").strip()
 
         render_text_parts: List[tuple[str, Optional[int]]] = []
+        segment_render_mode = str(
+            _segment_field(segment, "audio_render_mode") or ""
+        ).strip().lower()
+        segment_chunk_limit = (
+            0
+            if segment_render_mode == WHOLE_SEGMENT_RENDER_MODE
+            else chunk_char_limit
+        )
         if not pause_parts:
             render_text_parts.append(("", None))
         for pause_part in pause_parts:
-            text_parts = split_render_text(pause_part.text, max_chars=chunk_char_limit) or [""]
+            text_parts = split_render_text(
+                pause_part.text,
+                max_chars=segment_chunk_limit,
+            ) or [""]
             for text_part_index, chunk_text in enumerate(text_parts):
                 pause_after_ms = (
                     pause_part.pause_after_ms
@@ -126,6 +141,7 @@ def render_plan_to_payload(render_chunks: Iterable[RenderChunk]) -> List[Dict[st
                 "cache_key": chunk.cache_key,
                 "text_hash": chunk.text_hash,
                 "speaker": chunk.speaker,
+                "voice_id": str((chunk.voice_params or {}).get("speaker") or ""),
                 "emotion": chunk.emotion,
                 "segment_type": chunk.segment_type,
                 "char_count": len(chunk.text or ""),
@@ -215,6 +231,75 @@ def _segment_voice_params(segment: Any) -> Dict[str, Any]:
     return _jsonable_dict(raw_params)
 
 
+def _has_segment_field(segment: Any, field_name: str) -> bool:
+    if isinstance(segment, dict):
+        return field_name in segment
+    return hasattr(segment, field_name)
+
+
+def _segment_field(segment: Any, field_name: str) -> Any:
+    if isinstance(segment, dict):
+        return segment.get(field_name)
+    return getattr(segment, field_name, None)
+
+
+def _resolve_segment_emotion(segment: Any, voice_params: Dict[str, Any]) -> str:
+    has_top_level_emotion = _has_segment_field(segment, "instruct_emotion") or _has_segment_field(
+        segment, "emotion"
+    )
+    if has_top_level_emotion:
+        return str(
+            _segment_field(segment, "instruct_emotion")
+            or _segment_field(segment, "emotion")
+            or "neutral"
+        ).strip() or "neutral"
+    return str(
+        voice_params.get("instruct_emotion")
+        or voice_params.get("emotion")
+        or "neutral"
+    ).strip() or "neutral"
+
+
+def _synchronize_segment_semantics(
+    segment: Any,
+    voice_params: Dict[str, Any],
+) -> Dict[str, Any]:
+    """以顶层持久化语义覆盖旧的供应商派生副本，稳定缓存签名。"""
+    synchronized = dict(voice_params or {})
+
+    for field_name in (
+        "performance_notes",
+        "instruct_scene",
+        "instruct_role",
+        "instruct_identity",
+    ):
+        if not _has_segment_field(segment, field_name):
+            continue
+        value = str(_segment_field(segment, field_name) or "").strip()
+        if value:
+            synchronized[field_name] = value
+        else:
+            synchronized.pop(field_name, None)
+
+    for top_level_field, voice_param_field in (
+        ("speaker", "segment_speaker"),
+        ("type", "segment_type"),
+    ):
+        if _has_segment_field(segment, top_level_field):
+            synchronized[voice_param_field] = str(
+                _segment_field(segment, top_level_field) or ""
+            )
+
+    if _has_segment_field(segment, "instruct_emotion") or _has_segment_field(
+        segment, "emotion"
+    ):
+        emotion = _resolve_segment_emotion(segment, synchronized)
+        synchronized["instruct_emotion"] = emotion
+        synchronized["emotion"] = emotion
+
+    return synchronized
+
+
 def _build_cache_key(
     *,
     text: str,
@@ -226,6 +311,7 @@ def _build_cache_key(
 ) -> str:
     signature_payload = {
         "version": RENDER_PLAN_VERSION,
+        "voice_identity_policy_version": VOICE_IDENTITY_POLICY_VERSION,
         "text": text,
         "speaker": speaker,
         "emotion": emotion,
@@ -251,6 +337,16 @@ def _signature_voice_params(voice_params: Dict[str, Any]) -> Dict[str, Any]:
         "source_chunk_count",
         "source_chunk_index",
         "source_segment_index",
+        # 混音层韵律字段（整章混音阶段写入，不改变片段 TTS 音频内容）
+        "timeline_pause_after_ms",
+        "cadence_profile",
+        "cadence_reason",
+        "timeline_boundary_managed",
+        # TTS 交付运行时产物（生成后回填，不影响音频内容的可复现参数）
+        "delivery_plan",
+        "provider_prompt_snapshot",
+        "resolved_tts_model",
+        "use_instruct_mode",
     }
     return {
         key: value

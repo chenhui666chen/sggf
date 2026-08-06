@@ -5,11 +5,15 @@ import logging
 import re
 from collections import Counter
 from dataclasses import asdict, dataclass, is_dataclass
-from typing import Any, Dict, Iterable, List, Optional, Sequence
+from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence
 
 from app.services.audiobook.llm_client import call_audiobook_llm_async
 from app.services.audiobook.llm_json import LLMJsonParseError, parse_llm_json_array
 from app.services.audiobook.script_render_mode import build_script_review_engine_guidance
+from app.services.audiobook.tts_pause import AudiobookPauseRequested
+from app.services.audiobook.voice_identity_policy import (
+    FIXED_VOICE_PERFORMANCE_BOUNDARY_PROMPT,
+)
 
 from ._dataclasses import ScriptSegment
 from ._segment_validation import NARRATOR, build_script_segments
@@ -57,6 +61,8 @@ async def review_script_segments_with_llm(
     audio_engine_mode: str = "legacy_stems",
     batch_size: int = DEFAULT_REVIEW_BATCH_SIZE,
     min_text_coverage: float = DEFAULT_MIN_TEXT_COVERAGE,
+    pause_check: Optional[Callable[[], bool]] = None,
+    tts_model: str = "",
 ) -> ScriptLLMReviewResult:
     original_segments = list(script_segments or [])
     report: Dict[str, Any] = {
@@ -80,6 +86,22 @@ async def review_script_segments_with_llm(
 
     batches = list(_iter_batches(original_segments, max(1, int(batch_size or DEFAULT_REVIEW_BATCH_SIZE))))
     for batch_index, batch in enumerate(batches, start=1):
+        # 批次级暂停检查：检测到暂停请求时不再继续后续审稿批次
+        if pause_check is not None:
+            try:
+                paused = pause_check()
+            except Exception as pause_exc:
+                logger.warning("暂停状态检查失败，继续剧本审稿: %s", pause_exc)
+                paused = False
+            if paused:
+                logger.info(
+                    "⏸️ 检测到暂停请求，停止剧本审稿（已完成 %s/%s 批次）",
+                    batch_index - 1,
+                    len(batches),
+                )
+                raise AudiobookPauseRequested(
+                    f"pause_requested_before_review_batch_{batch_index}"
+                )
         batch_start = sum(len(previous_batch) for previous_batch in batches[: batch_index - 1])
         batch_end = batch_start + len(batch)
         batch_report: Dict[str, Any] = {
@@ -100,6 +122,7 @@ async def review_script_segments_with_llm(
                 previous_context=_build_neighbor_context(original_segments[max(0, batch_start - 2):batch_start]),
                 next_context=_build_neighbor_context(original_segments[batch_end:batch_end + 2]),
                 audio_engine_mode=audio_engine_mode,
+                tts_model=tts_model,
             )
             coverage_ratio = calculate_text_coverage(batch, reviewed_batch)
             batch_report["coverage_ratio"] = coverage_ratio
@@ -156,6 +179,7 @@ async def _review_batch(
     previous_context: str = "",
     next_context: str = "",
     audio_engine_mode: str = "legacy_stems",
+    tts_model: str = "",
 ) -> List[ScriptSegment]:
     payload = [_segment_to_payload(segment, index=index) for index, segment in enumerate(batch)]
     payload_json = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
@@ -196,7 +220,7 @@ async def _review_batch(
         raise RuntimeError(f"script_review_json_parse_failed:{exc}") from exc
 
     normalized_data = [_normalize_review_item(item) for item in reviewed_data]
-    reviewed_segments = build_script_segments(normalized_data)
+    reviewed_segments = build_script_segments(normalized_data, tts_model=tts_model)
     if not reviewed_segments:
         raise RuntimeError("script_review_returned_no_valid_segments")
     return reviewed_segments
@@ -243,6 +267,8 @@ def _build_review_prompt(
 {source_block}
 {previous_context_block}{next_context_block}
 {engine_review_block}
+
+{FIXED_VOICE_PERFORMANCE_BOUNDARY_PROMPT}
 
 输出要求：
 - 只返回 JSON 对象，格式为 {{"segments": [ ... ]}}。

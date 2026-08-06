@@ -24,8 +24,109 @@ from schemas.common import Priority, Modality
 from core.router import router as smart_router, RoutingResult
 from core.execution_engine import engine as execution_engine, ExecutionResult
 from adapters.registry import registry as model_registry
+from app.services.audiobook.tts_model_ids import normalize_audiobook_tts_model
+from app.services.audiobook.segment_synthesis_contract import (
+    resolve_server_owned_mimo_design_params,
+)
+from app.services.audiobook.voice_identity_policy import (
+    is_voice_design_creation_request,
+    sanitize_fixed_voice_prompt_params,
+)
+from app.services.audiobook.voice_parameter_policy import (
+    stabilize_fixed_voice_pitch,
+    stabilize_instruct_model_speed,
+)
 
 logger = logging.getLogger(__name__)
+
+
+_DISPATCH_MODEL_FIELDS = ("resolved_tts_model", "tts_model", "model_id")
+
+
+def _normalize_dispatch_model(kwargs: Dict[str, Any]) -> str:
+    models = {
+        normalize_audiobook_tts_model(kwargs.get(field), default="")
+        for field in _DISPATCH_MODEL_FIELDS
+        if str(kwargs.get(field) or "").strip()
+    }
+    models.discard("")
+    if len(models) > 1:
+        raise ValueError("TTS 调度参数包含互相冲突的模型绑定")
+    return next(iter(models), "")
+
+
+def _sanitize_dispatch_kwargs(
+    kwargs: Dict[str, Any],
+    *,
+    tts_model: str,
+    voice_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Apply the fixed-voice contract before either routing or direct fallback."""
+
+    sanitized = dict(kwargs or {})
+    owner_user_id = sanitized.pop("owner_user_id", None)
+    identity_context = dict(sanitized)
+    if voice_id:
+        identity_context["voice_id"] = voice_id
+
+    def _sanitize_mapping(
+        value: Dict[str, Any],
+        *,
+        identity_context: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        context = dict(value or {})
+        for field_name in ("voice_id", "speaker", "mimo_voice_asset_id"):
+            if not context.get(field_name) and identity_context:
+                context[field_name] = identity_context.get(field_name)
+        params = stabilize_instruct_model_speed(value, tts_model)
+        if is_voice_design_creation_request(tts_model, context):
+            return params
+
+        params, _ = sanitize_fixed_voice_prompt_params(params)
+        params = stabilize_fixed_voice_pitch(params)
+        for field_name in (
+            "voice_description",
+            "voice_clone_data_url",
+            "voice_design_prompt",
+            "mimo_voice_asset_id",
+            "provider_prompt",
+            "provider_prompt_snapshot",
+        ):
+            params.pop(field_name, None)
+        return params
+
+    nested = sanitized.get("voice_params")
+    if isinstance(nested, dict):
+        for field_name in ("voice_id", "speaker", "mimo_voice_asset_id"):
+            if not identity_context.get(field_name) and nested.get(field_name):
+                identity_context[field_name] = nested[field_name]
+    server_owned_voice_params = resolve_server_owned_mimo_design_params(
+        tts_model=tts_model,
+        voice_id=str(
+            voice_id
+            or identity_context.get("voice_id")
+            or identity_context.get("speaker")
+            or ""
+        ),
+        mimo_voice_asset_id=str(identity_context.get("mimo_voice_asset_id") or ""),
+        owner_user_id=owner_user_id,
+    )
+
+    if isinstance(nested, dict):
+        sanitized_nested = _sanitize_mapping(
+            nested,
+            identity_context=identity_context,
+        )
+        sanitized_nested.update(server_owned_voice_params)
+        sanitized["voice_params"] = sanitized_nested
+
+    result = _sanitize_mapping(
+        sanitized,
+        identity_context=identity_context,
+    )
+    if not isinstance(nested, dict):
+        result.update(server_owned_voice_params)
+    return result
 
 
 @dataclass
@@ -116,6 +217,28 @@ class AgentSmartDispatchClient:
         Returns:
             TTSDispatchResult: 合成结果
         """
+        try:
+            requested_model = _normalize_dispatch_model(kwargs)
+        except ValueError as exc:
+            return TTSDispatchResult(success=False, error=str(exc))
+        if voice_id and not requested_model:
+            return TTSDispatchResult(
+                success=False,
+                error="固定音色必须绑定所属 TTS 模型，禁止跨模型路由或降级",
+            )
+        try:
+            safe_kwargs = _sanitize_dispatch_kwargs(
+                kwargs,
+                tts_model=requested_model,
+                voice_id=voice_id,
+            )
+        except ValueError as exc:
+            return TTSDispatchResult(success=False, error=str(exc))
+        if requested_model:
+            safe_kwargs["tts_model"] = requested_model
+            safe_kwargs.pop("resolved_tts_model", None)
+            safe_kwargs.pop("model_id", None)
+
         if not strategy:
             if agent_type and agent_type in self.AGENT_STRATEGY_DEFAULTS:
                 strategy = self.AGENT_STRATEGY_DEFAULTS[agent_type]
@@ -137,17 +260,30 @@ class AgentSmartDispatchClient:
                 "voice_id": voice_id,
                 "strategy": strategy,
                 "agent_type": agent_type,
-                **kwargs,
+                **safe_kwargs,
             },
         )
 
         routing_result: Optional[RoutingResult] = None
         try:
-            routing_result = self._router.route_with_fallback_by_strategy(
-                task=task,
-                strategy=mapped_strategy,
-                max_fallbacks=2,
-            )
+            if requested_model:
+                selected_model = model_registry.get_spec(requested_model)
+                if selected_model is None:
+                    raise ValueError(f"固定音色所属 TTS 模型未注册: {requested_model}")
+                routing_result = RoutingResult(
+                    selected_model=selected_model,
+                    fallback_models=[],
+                    score=1.0,
+                    base_score=1.0,
+                    reasons=["固定音色绑定模型，禁用跨模型降级"],
+                    strategy=mapped_strategy,
+                )
+            else:
+                routing_result = self._router.route_with_fallback_by_strategy(
+                    task=task,
+                    strategy=mapped_strategy,
+                    max_fallbacks=2,
+                )
             logger.info(
                 "TTS 路由决策: 主模型=%s, 降级模型=%s, 策略=%s",
                 routing_result.selected_model.id,
@@ -161,15 +297,22 @@ class AgentSmartDispatchClient:
                 "fallback_models": [m.id for m in routing_result.fallback_models],
             })
         except Exception as e:
+            if requested_model:
+                logger.warning("固定音色模型绑定失败，禁止跨模型降级: %s", e)
+                return TTSDispatchResult(
+                    success=False,
+                    error=str(e),
+                    trace={"strategy": strategy, "fixed_voice_model": requested_model},
+                )
             logger.warning("TTS 路由失败，使用默认模型: %s", e)
-            return self._synthesize_fallback(text, voice_id, strategy, kwargs)
+            return self._synthesize_fallback(text, voice_id, strategy, safe_kwargs)
 
         try:
             exec_result: ExecutionResult = self._engine.execute(
                 task=task,
                 strategy=mapped_strategy,
-                use_fallback=True,
-                max_attempts=3,
+                use_fallback=not bool(requested_model),
+                max_attempts=1 if requested_model else 3,
                 timeout=120.0,
                 routing_result=routing_result,
             )
@@ -188,6 +331,7 @@ class AgentSmartDispatchClient:
         texts: List[str],
         strategy: Optional[str] = None,
         voice_ids: Optional[List[str]] = None,
+        tts_models: Optional[List[str]] = None,
         agent_type: Optional[str] = None,
         max_concurrent: int = 5,
         **kwargs,
@@ -198,6 +342,7 @@ class AgentSmartDispatchClient:
             texts: 要合成的文本列表
             strategy: 调度策略
             voice_ids: 音色 ID 列表（与 texts 对应）
+            tts_models: 音色所属 TTS 模型列表（与 texts 对应）
             agent_type: Agent 类型
             max_concurrent: 最大并发数
             **kwargs: 其他 TTS 参数
@@ -209,24 +354,41 @@ class AgentSmartDispatchClient:
             return []
 
         voice_ids = voice_ids or [None] * len(texts)
+        tts_models = tts_models or [None] * len(texts)
+        if len(voice_ids) != len(texts) or len(tts_models) != len(texts):
+            raise ValueError("texts、voice_ids 与 tts_models 长度必须一致")
 
         import concurrent.futures
 
         results: List[TTSDispatchResult] = [None] * len(texts)
 
-        def _synthesize_with_index(idx: int, text: str, vid: Optional[str]):
+        def _synthesize_with_index(
+            idx: int,
+            text: str,
+            vid: Optional[str],
+            tts_model: Optional[str],
+        ):
+            item_kwargs = dict(kwargs)
+            if tts_model:
+                item_kwargs["tts_model"] = tts_model
             result = self.synthesize(
                 text=text,
                 strategy=strategy,
                 voice_id=vid,
                 agent_type=agent_type,
-                **kwargs,
+                **item_kwargs,
             )
             return idx, result
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=max_concurrent) as executor:
             futures = [
-                executor.submit(_synthesize_with_index, i, text, voice_ids[i])
+                executor.submit(
+                    _synthesize_with_index,
+                    i,
+                    text,
+                    voice_ids[i],
+                    tts_models[i],
+                )
                 for i, text in enumerate(texts)
             ]
 

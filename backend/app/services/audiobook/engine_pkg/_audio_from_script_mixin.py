@@ -11,6 +11,7 @@ from app.services.audiobook.render_plan import render_chunks_to_timing_segments_
 from app.services.audiobook.chapter_cadence import apply_chapter_cadence
 from app.services.audiobook.temp_segment_store import save_segment_audio_batch, save_segment_audio_map
 from app.services.audiobook.atomic_files import write_bytes_atomic
+from app.services.audiobook.tts_pause import TTSPauseRequested
 from app.services.audiobook.engine_pkg._tts_mixin import (
     collect_tts_cost_stats,
     subtract_tts_cost_stats,
@@ -37,15 +38,24 @@ class AudioFromScriptMixin:
         novel_theme: str = "未知主题",
         enable_quality_review: bool = True,
         quality_threshold: float = 70.0,
+        enable_llm_quality_review: bool = False,
+        enable_llm_revision: bool = False,
         audiobook_project_id: Optional[int] = None,
         output_format: str = "mp3",
         resume_checkpoint: Optional[Dict[str, Any]] = None,
         timeline_edits: Optional[Dict[str, Dict[str, float]]] = None,
         tts_progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
+        segment_voice_overrides: Optional[Dict[int, Dict[str, Any]]] = None,
+        pause_check: Optional[Callable[[], bool]] = None,
     ) -> Dict[str, Any]:
         """使用已经生成/人工编辑后的剧本片段生成章节音频。
 
         用于两阶段流程的第2阶段：从 ChapterAudio.script_json 直接进入 TTS + 混音。
+
+        本阶段默认禁用 LLM 评审与 LLM 全量修订（enable_llm_quality_review /
+        enable_llm_revision 默认 False）：剧本已在第1阶段评审定稿，重复跑 LLM
+        只会额外耗时、可能输出截断，并会覆盖用户手工编辑的剧本；仅保留轻量
+        规则闸门（TTS 约束校验）与最终音频评审。
         """
         start_time = time.time()
         tts_cost_baseline = collect_tts_cost_stats(self)
@@ -93,7 +103,11 @@ class AudioFromScriptMixin:
             # 将dict列表转换为 ScriptSegment 对象列表
             script_segments: List[ScriptSegment] = []
             for index, seg_dict in enumerate(script_segments_data):
-                validated_segment = build_script_segment(seg_dict, index=index)
+                validated_segment = build_script_segment(
+                    seg_dict,
+                    index=index,
+                    tts_model=getattr(self, "tts_model", ""),
+                )
                 if validated_segment is not None:
                     script_segments.append(validated_segment)
 
@@ -133,6 +147,8 @@ class AudioFromScriptMixin:
                     script_segments,
                     novel_genre=novel_genre,
                     quality_threshold=quality_threshold,
+                    enable_llm_quality_review=enable_llm_quality_review,
+                    enable_llm_revision=enable_llm_revision,
                 )
                 issues_preview = [
                     {
@@ -219,6 +235,11 @@ class AudioFromScriptMixin:
             # ============ 阶段7：音频提示词审阅 ============
             apply_chapter_cadence(script_segments)
             self._assign_voices(script_segments)
+
+            # Phase 2: replace_voice_missing 选择性音色覆盖
+            if segment_voice_overrides:
+                self._apply_segment_voice_overrides(script_segments, segment_voice_overrides)
+
             self.task_tracker.start_stage(task_id, StageType.AUDIO_PROMPT_REVIEW)
             build_prompt_metrics = getattr(self, "_build_audio_prompt_review_metrics", None)
             prompt_metrics = build_prompt_metrics(script_segments) if callable(build_prompt_metrics) else {}
@@ -237,6 +258,7 @@ class AudioFromScriptMixin:
                     script_quality_report=quality_report,
                     tts_progress_callback=tts_progress_callback,
                     audiobook_project_id=audiobook_project_id,
+                    pause_check=pause_check,
                 )
                 if callable(try_seed_scene)
                 else None
@@ -338,6 +360,7 @@ class AudioFromScriptMixin:
                 debug_save_segments=debug_save_segments,
                 debug_output_dir=f"backend/data/tts_debug/chapter_{chapter_id}",
                 progress_callback=handle_tts_progress,
+                pause_check=pause_check,
             )
             audio_list = synthesis_result["audio_list"]
             reused_segment_indices = synthesis_result.get("reused_indices") or []
@@ -367,6 +390,51 @@ class AudioFromScriptMixin:
                 collect_tts_cost_stats(self),
                 tts_cost_baseline,
             )
+
+            # ============ 混音前硬完整性闸门 ============
+            # 章节完整性不变量：存在任何 TTS 缺失片段时，章节不得进入混音
+            # 或标记成功。失败片段绝不能以空字节静默混入成片。
+            # 确保 temp_segment_cache 携带最新的失败索引/错误（供 checkpoint 持久化）。
+            attach_render_plan_metadata = getattr(self, "_attach_render_plan_metadata", None)
+            if callable(attach_render_plan_metadata):
+                temp_segment_cache = attach_render_plan_metadata(
+                    temp_segment_cache, synthesis_result
+                )
+            failed_segment_indices = synthesis_result.get("failed_segment_indices") or []
+            if failed_segment_indices:
+                missing_segments = self._build_missing_segments_report(
+                    synthesis_result, script_segments
+                )
+                logger.error(
+                    "⛔ 章节存在 %s 个 TTS 缺失片段，停止混音: chapter_id=%s missing=%s",
+                    len(failed_segment_indices),
+                    chapter_id,
+                    [item.get("index") for item in missing_segments],
+                )
+                self.task_tracker.fail_stage(
+                    task_id,
+                    StageType.TTS_SYNTHESIS,
+                    f"segments_missing: {len(failed_segment_indices)} 个片段合成失败",
+                )
+                return {
+                    "success": False,
+                    "error": "segments_missing",
+                    "task_id": task_id,
+                    "audio_data": None,
+                    "duration": 0,
+                    "file_size": 0,
+                    "missing_segments": missing_segments,
+                    "failed_segment_indices": list(failed_segment_indices),
+                    "failed_segment_errors": synthesis_result.get("failed_segment_errors") or {},
+                    "temp_segment_cache": temp_segment_cache,
+                    "stats": {
+                        "generation_time": f"{time.time() - start_time:.1f}秒",
+                        "mode": "script_only_pipeline",
+                        "script_segments": len(script_segments),
+                        "tts_stats": tts_stats,
+                        "missing_segment_count": len(failed_segment_indices),
+                    },
+                }
 
             self.task_tracker.complete_stage(
                 task_id,
@@ -591,6 +659,8 @@ class AudioFromScriptMixin:
             }
             if self._last_effect_timeline and self._last_effect_timeline.get("timeline"):
                 result["effect_timeline"] = self._last_effect_timeline
+            if self._last_music_timeline and self._last_music_timeline.get("timeline"):
+                result["music_timeline"] = self._last_music_timeline
 
             logger.info(f"{'='*70}")
             if len(final_audio) > 0:
@@ -606,6 +676,9 @@ class AudioFromScriptMixin:
 
             return result
 
+        except TTSPauseRequested:
+            # 暂停信号需向上透传给后台任务，由其落库为 paused，不当作失败处理
+            raise
         except Exception as e:
             elapsed_time = time.time() - start_time
             logger.error(f"❌ 从剧本生成章节音频失败: {e}")
@@ -656,4 +729,45 @@ class AudioFromScriptMixin:
             if "temp_segment_cache" in locals() and temp_segment_cache:
                 failure_result["temp_segment_cache"] = temp_segment_cache
             return failure_result
+
+    def _build_missing_segments_report(
+        self,
+        synthesis_result: Dict[str, Any],
+        script_segments: List[ScriptSegment],
+    ) -> List[Dict[str, Any]]:
+        """根据合成结果构造缺失片段报告。
+
+        failed_segment_indices 是 render chunk 索引，长文本拆块后与源
+        script_segments 非 1:1。这里依据 render_plan 中每个 chunk 的
+        source_segment_indices 映射回源剧本片段，避免前端标错原始片段。
+        """
+        render_plan = synthesis_result.get("render_plan") or []
+        failed_errors = synthesis_result.get("failed_segment_errors") or {}
+        failed_indices = synthesis_result.get("failed_segment_indices") or []
+
+        report: List[Dict[str, Any]] = []
+        for chunk_index in failed_indices:
+            chunk_payload = (
+                render_plan[chunk_index]
+                if isinstance(render_plan, list) and 0 <= chunk_index < len(render_plan)
+                else {}
+            )
+            source_segment_indices = [
+                int(index)
+                for index in (chunk_payload.get("source_segment_indices") or [])
+            ]
+            error_info = failed_errors.get(str(chunk_index)) or failed_errors.get(chunk_index) or {}
+            report.append(
+                {
+                    "index": int(chunk_index),
+                    "source_segment_indices": source_segment_indices,
+                    "text": chunk_payload.get("text_preview") or "",
+                    "speaker": chunk_payload.get("speaker") or "",
+                    "voice": chunk_payload.get("voice_id") or "",
+                    "segment_type": chunk_payload.get("segment_type") or "",
+                    "error_type": error_info.get("error_type") or "TTSSegmentError",
+                    "error_message": error_info.get("error_message") or "tts_segment_failed",
+                }
+            )
+        return report
 

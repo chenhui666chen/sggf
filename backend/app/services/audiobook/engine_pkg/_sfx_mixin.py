@@ -14,7 +14,10 @@ from ..voice_manager_factory import create_voice_manager
 from ..audio_mixer import AudioMixer
 from app.services.chapter_adaptation_assets import build_audio_adaptation_hint
 from core.unified_media_runtime import create_tts_engine
-from app.services.audiobook.audio_library_paths import get_audio_library_dir
+from app.services.audiobook.audio_library_paths import (
+    get_audio_library_dir,
+    resolve_audio_library_file_path,
+)
 
 try:
     from ..agent_dispatch_client import client as tts_dispatch_client
@@ -66,12 +69,12 @@ class SfxMixin:
 
             # 根据时间线中的类型和音量，计算对应的音量衰减（dB）
             effect_type_str = item.get("type", "action")
-            # 🔧 已降低所有音效约 5-6dB，使其相对人声更小
+            # 🔧 音效基准增益：在不过度压过人声的前提下提升可听度（在初始基准上累计上调约 7dB）
             base_gain_map = {
-                "environment": -14.0,  # 环境音（降低 6dB）
-                "action": -14.0,       # 动作音（降低 6dB）
-                "emotion": -16.0,      # 情绪音（降低 6dB）
-                "transition": -18.0,   # 过渡音（降低 6dB）
+                "environment": -7.0,   # 环境音
+                "action": -7.0,        # 动作音
+                "emotion": -9.0,       # 情绪音
+                "transition": -11.0,   # 过渡音
             }
             base_gain = base_gain_map.get(effect_type_str, -16.0)
             duration = item.get("duration")
@@ -97,17 +100,18 @@ class SfxMixin:
                 skipped_count += 1
                 continue
             
-            effect_path = Path(file_ref)
-            if not effect_path.is_absolute():
-                # 相对路径：相对于 audio_library 根目录
-                effect_path = base_dir / file_ref
-            if not effect_path.exists():
+            effect_path = resolve_audio_library_file_path(file_ref, base_dir)
+            if not effect_path:
                 effect_name = Path(file_ref).stem or str(item.get("description") or "").strip()
                 if effect_name:
-                    for candidate in (base_dir / "sound_effects").rglob(f"{effect_name}.*"):
-                        effect_path = candidate
-                        break
-            if not effect_path.exists():
+                    sound_effect_root = (base_dir / "sound_effects").resolve()
+                    for candidate in sound_effect_root.rglob("*"):
+                        if not candidate.is_file() or candidate.stem != effect_name:
+                            continue
+                        effect_path = resolve_audio_library_file_path(candidate, base_dir)
+                        if effect_path:
+                            break
+            if not effect_path:
                 logger.warning(f"⚠️ 音效文件不存在: {effect_path}")
                 skipped_count += 1
                 continue

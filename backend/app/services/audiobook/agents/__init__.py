@@ -15,6 +15,7 @@ from .voice_designer import VoiceDesigner
 from .sound_effect_designer import SoundEffectDesigner
 from .music_composer import MusicComposer
 from .audio_quality_reviewer import AudioQualityReviewer
+from .llm_quality_reviewer import LLMQualityReviewer
 
 __all__ = [
     "AudioDirector",
@@ -22,4 +23,5 @@ __all__ = [
     "SoundEffectDesigner",
     "MusicComposer",
     "AudioQualityReviewer",
+    "LLMQualityReviewer",
 ]

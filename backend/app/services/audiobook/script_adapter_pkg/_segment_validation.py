@@ -6,6 +6,7 @@ from dataclasses import asdict, is_dataclass, replace
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from ..pause_tags import strip_spoken_pause_directives
+from ..tts_model_ids import model_supports_instruct_style_control
 from ._dataclasses import MusicCue, ScriptSegment, SoundEffect
 
 logger = logging.getLogger(__name__)
@@ -244,10 +245,10 @@ _AMBIGUOUS_SPEAKER_CANDIDATES = {
     "孩子",
 }
 _NARRATION_PERFORMANCE_NOTES = {
-    "mysterious": "旁白保持低沉克制但有压迫感，关键意象处放慢并加重，句尾留悬念停顿",
+    "mysterious": "旁白保持克制而沉重的语气并带有压迫感，关键意象处放慢并加重，句尾留悬念停顿",
     "tense": "旁白保持紧张推进感，动作转折处收短句并加重，句尾留出呼吸停顿",
-    "fearful": "旁白压低声线，带轻微不安和压迫感，危险意象处放慢，句尾留悬念停顿",
-    "sad": "旁白放慢语速，声线更低更沉，重读失落意象，句尾留出沉默感",
+    "fearful": "旁白收紧语势，带轻微不安和压迫感，危险意象处放慢，句尾留悬念停顿",
+    "sad": "旁白放慢语速，语气更沉重、更收敛，重读失落意象，句尾留出沉默感",
     "angry": "旁白保持克制的怒意和推进感，重点动词加重，避免过度喊叫",
     "surprised": "旁白略微提起语势，突发信息前后留短停顿，突出转折感",
     "excited": "旁白加快少许语速，保持明亮推进感，关键结果处加重并短暂停顿",
@@ -258,10 +259,11 @@ def build_script_segments(
     raw_segments: Iterable[Any],
     *,
     fallback_text: str = "",
+    tts_model: str = "",
 ) -> List[ScriptSegment]:
     segments: List[ScriptSegment] = []
     for index, raw_segment in enumerate(raw_segments or []):
-        segment = build_script_segment(raw_segment, index=index)
+        segment = build_script_segment(raw_segment, index=index, tts_model=tts_model)
         if segment is not None:
             segments.extend(split_long_script_segment(segment))
 
@@ -275,6 +277,7 @@ def build_script_segments(
                 "adaptation_reason": "fallback_from_invalid_llm_segments",
             },
             index=0,
+            tts_model=tts_model,
         )
         if fallback_segment is not None:
             segments.extend(split_long_script_segment(fallback_segment))
@@ -282,8 +285,8 @@ def build_script_segments(
     return segments
 
 
-def build_script_segment(raw_segment: Any, *, index: int = 0) -> Optional[ScriptSegment]:
-    data = sanitize_script_segment_dict(raw_segment, index=index)
+def build_script_segment(raw_segment: Any, *, index: int = 0, tts_model: str = "") -> Optional[ScriptSegment]:
+    data = sanitize_script_segment_dict(raw_segment, index=index, tts_model=tts_model)
     if data is None:
         return None
     return ScriptSegment(**data)
@@ -446,7 +449,7 @@ def _find_spoken_cut_index(text: str, *, max_chars: int) -> int:
     return max_chars
 
 
-def sanitize_script_segment_dict(raw_segment: Any, *, index: int = 0) -> Optional[Dict[str, Any]]:
+def sanitize_script_segment_dict(raw_segment: Any, *, index: int = 0, tts_model: str = "") -> Optional[Dict[str, Any]]:
     if is_dataclass(raw_segment):
         raw_data = asdict(raw_segment)
     elif isinstance(raw_segment, dict):
@@ -494,7 +497,7 @@ def sanitize_script_segment_dict(raw_segment: Any, *, index: int = 0) -> Optiona
         if inferred_emotion:
             emotion = inferred_emotion
     instruct_emotion = _normalize_instruct_emotion(raw_data.get("instruct_emotion"))
-    voice_params = _sanitize_voice_params(raw_data.get("voice_params"))
+    voice_params = _sanitize_voice_params(raw_data.get("voice_params"), tts_model=tts_model)
     pause_before = _coerce_float(raw_data.get("pause_before"), 0.0, 0.0, 2.0)
     pause_after = _coerce_float(raw_data.get("pause_after"), 0.0, 0.0, 2.0)
     voice_params.setdefault("pause_before", pause_before)
@@ -727,20 +730,28 @@ def _normalize_speaker(value: Any) -> str:
     return normalized or NARRATOR
 
 
-def _sanitize_voice_params(value: Any) -> Dict[str, Any]:
+def _sanitize_voice_params(value: Any, *, tts_model: str = "") -> Dict[str, Any]:
     if not isinstance(value, dict):
         return {}
 
     output = dict(value)
-    if "rate" in output:
-        output["rate"] = _coerce_float(output.get("rate"), 1.0, 0.5, 2.0)
-    if "speed" in output:
-        output["speed"] = _coerce_float(output.get("speed"), 1.0, 0.5, 2.0)
+    # 支持指令风格控制的模型：语速由表演指令（performance_notes/instruct）表达，
+    # 禁止片段级 LLM 用数值 speed/rate 覆盖角色基线，避免章节内语速忽快忽慢。
+    if model_supports_instruct_style_control(tts_model):
+        output.pop("rate", None)
+        output.pop("speed", None)
+        output.pop("character_base_speed", None)
+    else:
+        if "rate" in output:
+            output["rate"] = _coerce_float(output.get("rate"), 1.0, 0.5, 2.0)
+        if "speed" in output:
+            output["speed"] = _coerce_float(output.get("speed"), 1.0, 0.5, 2.0)
     if "volume" in output:
         output["volume"] = _coerce_int(output.get("volume"), 50, 0, 100)
-    if "pitch" in output:
-        pitch = _coerce_float(output.get("pitch"), 1.0, -100.0, 100.0)
-        output["pitch"] = max(0.5, min(2.0, pitch)) if pitch <= 10 else max(0, min(100, pitch))
+    # pitch 属于角色/项目级固定音色参数，禁止片段 LLM 按情绪覆盖。
+    output.pop("pitch", None)
+    output.pop("pitch_ratio", None)
+    output.pop("pitch_semitones", None)
     if "pause_before" in output:
         output["pause_before"] = _coerce_float(output.get("pause_before"), 0.0, 0.0, 2.0)
     if "pause_after" in output:

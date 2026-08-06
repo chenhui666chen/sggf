@@ -251,6 +251,49 @@ def test_update_stage_adds_trace_context_to_task_and_chapter_detail(monkeypatch)
     ]
 
 
+def test_update_stage_does_not_overwrite_deleted_output_run_tombstone(monkeypatch):
+    session_factory = build_session_factory()
+
+    with session_factory() as db:
+        context = seed_tracker_context(db, celery_task_id="celery-deleted-output")
+        run = get_run(db, context["run_ids"]["running"])
+        chapter_id = run.chapter_id
+        run.status = "cancelled"
+        run.current_stage = "cancelled"
+        run.resumable = False
+        run.error_message = "chapter_output_deleted"
+        run.checkpoint_json = {
+            "status": "cancelled",
+            "last_error": "chapter_output_deleted",
+        }
+        db.commit()
+
+    monkeypatch.setattr(
+        AudiobookJobTracker,
+        "_with_session",
+        lambda self: session_factory(),
+    )
+    monkeypatch.setattr(job_tracker.sse_tracker, "emit_progress", lambda task_id, payload: None)
+
+    AudiobookJobTracker(context["task_id"]).update_stage(
+        "tts_synthesis",
+        3,
+        5,
+        detail={"chapter_id": chapter_id, "status": "running"},
+    )
+
+    with session_factory() as db:
+        run = get_run(db, context["run_ids"]["running"])
+        assert run.status == "cancelled"
+        assert run.current_stage == "cancelled"
+        assert run.resumable is False
+        assert run.error_message == "chapter_output_deleted"
+        assert run.checkpoint_json == {
+            "status": "cancelled",
+            "last_error": "chapter_output_deleted",
+        }
+
+
 def test_mark_failed_marks_unfinished_runs_for_same_celery_task(monkeypatch):
     session_factory = build_session_factory()
 

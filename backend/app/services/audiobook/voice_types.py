@@ -57,7 +57,7 @@ class VoiceTypeProfile:
     description: str
     # 声音参数调整
     speed_modifier: float = 1.0  # 语速调整（1.0 为标准）
-    pitch_modifier: int = 0  # 音调调整（0 为标准，-5~+5）
+    pitch_modifier: int = 0  # 已弃用兼容字段；运行时不应用到固定音色
     volume_modifier: int = 0  # 音量调整（0 为标准，-20~+20）
     # 情感配置
     emotion_intensity: float = 0.5  # 情感强度（0-1）
@@ -79,7 +79,7 @@ VOICE_TYPE_PRESETS: Dict[str, VoiceTypeProfile] = {
         name="威严",
         description="庄重、有气势，适合帝王、长者、权威人物",
         speed_modifier=0.85,  # 稍慢
-        pitch_modifier=-2,  # 稍低
+        pitch_modifier=0,
         emotion_intensity=0.6,
         emotion_tendency="positive",
         default_emotion="calm",
@@ -92,7 +92,7 @@ VOICE_TYPE_PRESETS: Dict[str, VoiceTypeProfile] = {
         name="温柔",
         description="温和、亲切，适合母亲、恋人、治愈系角色",
         speed_modifier=0.9,
-        pitch_modifier=1,
+        pitch_modifier=0,
         volume_modifier=-5,
         emotion_intensity=0.4,
         emotion_tendency="positive",
@@ -106,7 +106,7 @@ VOICE_TYPE_PRESETS: Dict[str, VoiceTypeProfile] = {
         name="活泼",
         description="明快、有活力，适合年轻人、儿童、喜剧角色",
         speed_modifier=1.15,
-        pitch_modifier=2,
+        pitch_modifier=0,
         emotion_intensity=0.8,
         emotion_tendency="positive",
         default_emotion="happy",
@@ -119,7 +119,7 @@ VOICE_TYPE_PRESETS: Dict[str, VoiceTypeProfile] = {
         name="沧桑",
         description="沧桑、有故事感，适合老兵、流浪者、饱经风霜者",
         speed_modifier=0.9,
-        pitch_modifier=-1,
+        pitch_modifier=0,
         emotion_intensity=0.5,
         emotion_tendency="negative",
         default_emotion="sad",
@@ -145,7 +145,7 @@ VOICE_TYPE_PRESETS: Dict[str, VoiceTypeProfile] = {
         name="温暖",
         description="阳光、亲切，适合暖男、治愈系、正能量角色",
         speed_modifier=1.0,
-        pitch_modifier=1,
+        pitch_modifier=0,
         emotion_intensity=0.5,
         emotion_tendency="positive",
         default_emotion="happy",
@@ -157,7 +157,7 @@ VOICE_TYPE_PRESETS: Dict[str, VoiceTypeProfile] = {
         name="神秘",
         description="低沉、有磁性，适合隐士、智者、神秘人物",
         speed_modifier=0.85,
-        pitch_modifier=-1,
+        pitch_modifier=0,
         emotion_intensity=0.3,
         emotion_tendency="neutral",
         default_emotion="calm",
@@ -170,7 +170,7 @@ VOICE_TYPE_PRESETS: Dict[str, VoiceTypeProfile] = {
         name="力量",
         description="有力、震撼，适合战士、英雄、强者",
         speed_modifier=1.0,
-        pitch_modifier=-2,
+        pitch_modifier=0,
         volume_modifier=10,
         emotion_intensity=0.7,
         emotion_tendency="positive",
@@ -196,7 +196,7 @@ VOICE_TYPE_PRESETS: Dict[str, VoiceTypeProfile] = {
         name="俏皮",
         description="灵动、有趣，适合喜剧角色、小丑、开心果",
         speed_modifier=1.2,
-        pitch_modifier=3,
+        pitch_modifier=0,
         emotion_intensity=0.9,
         emotion_tendency="positive",
         default_emotion="happy",
@@ -311,8 +311,15 @@ def recommend_voice_type(
 def apply_voice_type_to_tts_params(
     voice_type: str,
     base_params: Dict[str, Any],
+    *,
+    preserve_pitch: bool = False,
 ) -> Dict[str, Any]:
-    """将声音类型应用到 TTS 参数"""
+    """将声音类型应用到表演参数，不新增或改写音高。
+
+    ``preserve_pitch`` 仅为旧调用兼容参数；无论取值如何，调用方已有的
+    ``pitch`` 都保持原样，缺失时也不会由声音类型预设补入。
+    """
+    del preserve_pitch
     preset = get_voice_type_preset(voice_type)
     if not preset:
         return base_params
@@ -325,12 +332,6 @@ def apply_voice_type_to_tts_params(
     else:
         # 在原有语速基础上调整
         updated["speed"] *= preset.speed_modifier
-
-    # 应用音调调整
-    if "pitch" not in updated or updated["pitch"] is None:
-        updated["pitch"] = preset.pitch_modifier
-    else:
-        updated["pitch"] += preset.pitch_modifier
 
     # 应用音量调整
     if "volume" not in updated or updated["volume"] is None:
@@ -369,13 +370,18 @@ def create_character_voice_profile(
         enhanced = apply_voice_type_to_tts_params(voice_type, base_params)
         profile.update({
             "speed": enhanced.get("speed"),
-            "pitch": enhanced.get("pitch"),
             "volume": enhanced.get("volume"),
             "emotion": enhanced.get("emotion"),
         })
 
     # 自定义设置覆盖
     if custom_settings:
-        profile.update(custom_settings)
+        profile.update(
+            {
+                key: value
+                for key, value in custom_settings.items()
+                if key not in {"pitch", "pitch_ratio", "pitch_semitones", "character_base_pitch"}
+            }
+        )
 
     return profile

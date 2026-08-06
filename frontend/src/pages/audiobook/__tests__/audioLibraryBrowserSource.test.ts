@@ -21,6 +21,11 @@ const segmentDetailsSource = readFileSync(
   'utf8',
 )
 
+const cueEditorSource = readFileSync(
+  new URL('../SegmentCueEditorDialog.tsx', import.meta.url),
+  'utf8',
+)
+
 const displaySource = readFileSync(
   new URL('../audioLibraryDisplay.ts', import.meta.url),
   'utf8',
@@ -79,9 +84,21 @@ describe('AudioLibraryBrowser source guards', () => {
   it('passes explicit library selections to structured script segment fields', () => {
     expect(pickerSource).toContain('onSelectAsset?: (selection: AudioAssetSelection) => void')
     expect(pickerSource).toContain('onSelectAsset?.(')
-    expect(segmentDetailsSource).toContain('onSelectAsset={')
-    expect(segmentDetailsSource).toContain('buildSoundEffectAssetPatch')
-    expect(segmentDetailsSource).toContain('buildMusicAssetPatch')
+    expect(cueEditorSource).toContain('onSelectAsset={(selection) =>')
+    expect(cueEditorSource).toContain('mergeAssistPatchWithSelectedAsset')
+    expect(cueEditorSource).toContain('appendSoundEffectAssetPatch')
+    expect(cueEditorSource).toContain('music_cue')
+    expect(segmentDetailsSource).not.toContain('<AudioPicker')
+  })
+
+  it('only exposes numeric speed editing for explicit basic models', () => {
+    expect(segmentDetailsSource).not.toContain('音高 pitch')
+    expect(segmentDetailsSource).not.toContain('updateVoiceParams({ pitch:')
+    expect(segmentDetailsSource).toContain('modelUsesBasicNumericSpeedControl')
+    expect(segmentDetailsSource).not.toContain('!modelSupportsInstructStyleControl')
+    expect(segmentDetailsSource).toContain('showNumericSpeedControl &&')
+    expect(segmentDetailsSource).toContain('语速 rate')
+    expect(segmentDetailsSource).toContain('音量 volume')
   })
 
   it('keeps library browsing interactions responsive on large result sets', () => {

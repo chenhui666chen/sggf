@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import {
   normalizeSingleChapterSelection,
+  resolveAudiobookProjectIdForChapter,
   resolveGeneratedChapterIds,
   resolveGeneratedChapterIdsFromProjects,
   toggleSingleChapterSelection,
@@ -78,5 +79,15 @@ describe('audiobook chapter selection utils', () => {
     )
 
     expect([...generatedChapterIds]).toEqual([1, 2, 3])
+  })
+
+  it('resolves the audiobook project that owns a generated chapter', () => {
+    const audiobookProjectId = resolveAudiobookProjectIdForChapter([
+      { id: 11, chapter_audios: [{ id: 21, chapter_id: 1, has_script: true }] },
+      { id: 12, chapter_audios: [{ id: 22, chapter_id: 2, audio_path: '/chapter-2.mp3' }] },
+    ], 2)
+
+    expect(audiobookProjectId).toBe(12)
+    expect(resolveAudiobookProjectIdForChapter([], 2)).toBeNull()
   })
 })

@@ -1033,6 +1033,64 @@ def test_music_timeline_resolves_generated_audio_library_path(tmp_path, monkeypa
     assert calls[0][1]["duration_ms"] == 12000
 
 
+def test_sound_effect_timeline_rejects_library_external_path(tmp_path, monkeypatch):
+    """整章混音不能读取素材库外的绝对路径或目录穿越引用。"""
+    from app.services.audiobook.audio_library_paths import AUDIO_LIBRARY_DIR_ENV
+    from app.services.audiobook.engine_pkg._sfx_mixin import SfxMixin
+
+    audio_library = tmp_path / "audio_library"
+    audio_library.mkdir()
+    outside = tmp_path / "outside.wav"
+    outside.write_bytes(b"outside")
+    monkeypatch.setenv(AUDIO_LIBRARY_DIR_ENV, str(audio_library))
+
+    calls = []
+
+    class Harness(SfxMixin):
+        def __init__(self):
+            self._audio_fx_config = {}
+            self.audio_mixer = SimpleNamespace(
+                add_sound_effect=lambda *args, **kwargs: calls.append(args) or b"mixed",
+            )
+
+    result = Harness()._apply_sound_effects(
+        b"voice",
+        {"timeline": [{"file": str(outside), "type": "action"}]},
+    )
+
+    assert result == b"voice"
+    assert calls == []
+
+
+def test_music_timeline_rejects_library_external_path(tmp_path, monkeypatch):
+    """整章混音不能读取素材库外的配乐文件。"""
+    from app.services.audiobook.audio_library_paths import AUDIO_LIBRARY_DIR_ENV
+    from app.services.audiobook.engine_pkg._music_mixin import MusicMixin
+
+    audio_library = tmp_path / "audio_library"
+    audio_library.mkdir()
+    outside = tmp_path / "outside.mp3"
+    outside.write_bytes(b"outside")
+    monkeypatch.setenv(AUDIO_LIBRARY_DIR_ENV, str(audio_library))
+
+    calls = []
+
+    class Harness(MusicMixin):
+        def __init__(self):
+            self._audio_fx_config = {}
+            self.audio_mixer = SimpleNamespace(
+                add_background_music=lambda *args, **kwargs: calls.append(args) or b"mixed",
+            )
+
+    result = Harness()._apply_background_music(
+        b"voice",
+        {"timeline": [{"file": str(outside), "type": "underscore"}]},
+    )
+
+    assert result == b"voice"
+    assert calls == []
+
+
 @pytest.mark.parametrize(
     ("mood", "expected_volume_db"),
     [

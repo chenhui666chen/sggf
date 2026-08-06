@@ -2,9 +2,13 @@ import { describe, expect, it } from 'vitest'
 
 import {
   formatReviewScore,
+  getDimensionLabel,
+  getDimensionScoreVisual,
   getExtraReviewIssueCount,
+  getFixTypeLabel,
   getReviewIssueDisplay,
   getReviewScoreVisual,
+  groupDimensionsByCategory,
 } from '../scriptReviewReportUtils'
 
 describe('scriptReviewReportUtils', () => {
@@ -51,5 +55,57 @@ describe('scriptReviewReportUtils', () => {
       categoryLabel: '其他',
       description: '未提供描述',
     })
+  })
+
+  it('shows dimension and fix_type labels on issues', () => {
+    const display = getReviewIssueDisplay({
+      severity: 'major',
+      category: 'llm_quality',
+      description: '对白生硬',
+      dimension: 'dialogue_naturalness',
+      fix_type: 'llm_rewrite',
+    })
+    expect(display.dimensionLabel).toBe('对白自然')
+    expect(display.fixTypeLabel).toBe('LLM改写')
+    expect(display.categoryLabel).toBe('LLM维度')
+  })
+
+  it('maps dimension keys to Chinese labels', () => {
+    expect(getDimensionLabel('semantic_coherence')).toBe('语义连贯')
+    expect(getDimensionLabel('speakability')).toBe('可播讲性')
+    expect(getDimensionLabel('unknown_key')).toBe('unknown_key')
+    expect(getDimensionLabel(undefined)).toBe('未分类')
+  })
+
+  it('maps fix_type keys to labels', () => {
+    expect(getFixTypeLabel('deterministic')).toBe('规则修复')
+    expect(getFixTypeLabel('llm_rewrite')).toBe('LLM改写')
+    expect(getFixTypeLabel('none')).toBe('仅提示')
+    expect(getFixTypeLabel(undefined)).toBe('')
+  })
+
+  it('provides dimension score visuals', () => {
+    expect(getDimensionScoreVisual(8.5).color).toBe('#2e7d32')
+    expect(getDimensionScoreVisual(6.5).color).toBe('#f57c00')
+    expect(getDimensionScoreVisual(4).color).toBe('#c62828')
+  })
+
+  it('groups dimensions by category', () => {
+    const groups = groupDimensionsByCategory({
+      semantic_coherence: { score: 8, label: '语义连贯', category: 'content_narrative', comment: '' },
+      dialogue_naturalness: { score: 7, label: '对白自然', category: 'character_dialogue', comment: '' },
+      speakability: { score: 9, label: '可播讲', category: 'audio_production', comment: '' },
+    })
+
+    expect(groups).toHaveLength(3)
+    const contentGroup = groups.find((g) => g.category === 'content_narrative')
+    expect(contentGroup?.categoryLabel).toBe('内容与叙事')
+    expect(contentGroup?.items).toHaveLength(1)
+    expect(contentGroup?.items[0].label).toBe('语义连贯')
+  })
+
+  it('returns empty array for missing dimensions', () => {
+    expect(groupDimensionsByCategory(undefined)).toEqual([])
+    expect(groupDimensionsByCategory({})).toEqual([])
   })
 })

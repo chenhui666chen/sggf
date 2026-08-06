@@ -5,6 +5,7 @@ import {
   clearAudiobookRouteSessionStorage,
   readMatchingAudiobookSession,
   removeStoredSessionWhenProjectMismatch,
+  removeStoredTaskSessionForAudiobookProject,
   shouldRestoreAudiobookRouteSession,
 } from '../routeProjectSessionUtils'
 import { AUDIOBOOK_SESSION_STORAGE_KEY } from '../utils'
@@ -133,5 +134,46 @@ describe('audiobook route project session utils', () => {
       restoredAudiobookProjectId: 11,
       lastSessionTimestamp: Date.parse('2026-05-01T08:00:00.000Z'),
     })
+  })
+
+  it('removes the stored task session when it references the deleted audiobook project', () => {
+    const storage = new MemoryStorage()
+    storage.setItem(AUDIOBOOK_SESSION_STORAGE_KEY, JSON.stringify({
+      projectId: 8,
+      audiobookProjectId: 25,
+      activeStep: 3,
+    }))
+
+    removeStoredTaskSessionForAudiobookProject({ storage, audiobookProjectId: 25 })
+
+    expect(storage.getItem(AUDIOBOOK_SESSION_STORAGE_KEY)).toBeNull()
+  })
+
+  it('removes the stored task session when an active task references the deleted audiobook project', () => {
+    const storage = new MemoryStorage()
+    storage.setItem(AUDIOBOOK_SESSION_STORAGE_KEY, JSON.stringify({
+      projectId: 8,
+      audiobookProjectId: 30,
+      activeStep: 2,
+      activeTasks: [{ taskId: 'task-x', audiobookProjectId: 25 }],
+    }))
+
+    removeStoredTaskSessionForAudiobookProject({ storage, audiobookProjectId: 25 })
+
+    expect(storage.getItem(AUDIOBOOK_SESSION_STORAGE_KEY)).toBeNull()
+  })
+
+  it('keeps the stored task session when it does not reference the deleted audiobook project', () => {
+    const storage = new MemoryStorage()
+    const payload = JSON.stringify({
+      projectId: 8,
+      audiobookProjectId: 30,
+      activeStep: 2,
+    })
+    storage.setItem(AUDIOBOOK_SESSION_STORAGE_KEY, payload)
+
+    removeStoredTaskSessionForAudiobookProject({ storage, audiobookProjectId: 25 })
+
+    expect(storage.getItem(AUDIOBOOK_SESSION_STORAGE_KEY)).toBe(payload)
   })
 })

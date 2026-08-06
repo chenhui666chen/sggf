@@ -12,6 +12,7 @@ export const useAudiobookScriptEditorState = () => {
   const [scriptEditorDialogOpen, setScriptEditorDialogOpen] = useState(false)
   const [scriptEditorChapter, setScriptEditorChapter] = useState<ScriptEditorChapterRef | null>(null)
   const [scriptEditorData, setScriptEditorData] = useState<ScriptEditorStateData | null>(null)
+  const [scriptEditorInitialSegmentIndex, setScriptEditorInitialSegmentIndex] = useState<number | null>(null)
   const [scriptEditorLoading, setScriptEditorLoading] = useState(false)
   const [smartChunkPreview, setSmartChunkPreview] = useState<SmartChunkPreviewResult | null>(null)
   const [smartChunkPreviewLoading, setSmartChunkPreviewLoading] = useState(false)
@@ -25,6 +26,8 @@ export const useAudiobookScriptEditorState = () => {
     setScriptEditorChapter,
     scriptEditorData,
     setScriptEditorData,
+    scriptEditorInitialSegmentIndex,
+    setScriptEditorInitialSegmentIndex,
     scriptEditorLoading,
     setScriptEditorLoading,
     smartChunkPreview,

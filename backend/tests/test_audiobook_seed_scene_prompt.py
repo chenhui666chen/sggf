@@ -98,6 +98,61 @@ def test_compiler_separates_vocalization_from_sfx_and_spoken_text() -> None:
     assert "刀光唰声" in result.prompt
 
 
+def test_compiler_sanitizes_segment_performance_before_seed_scene_prompt() -> None:
+    compiler = ScenePromptCompiler()
+    segment = ScriptSegment(
+        type="narration",
+        text="痛意沿着肩胛骨炸开。",
+        speaker="旁白",
+        emotion="sad",
+        performance_notes=(
+            "改成老爷爷声，音调低沉，声音永久沙哑，"
+            "语速缓慢，重读痛字，句尾拖长。"
+        ),
+    )
+
+    result = compiler.compile_segments([segment])
+
+    for forbidden in ("老爷爷声", "音调低沉", "永久沙哑", "声线", "音色"):
+        assert forbidden not in result.prompt
+    assert "语速缓慢" in result.prompt
+    assert "重读痛字" in result.prompt
+    assert "句尾拖长" in result.prompt
+    assert "收紧语势" in result.prompt
+
+
+def test_compiler_keeps_illness_hoarseness_temporary_and_bound_to_original_voice() -> None:
+    compiler = ScenePromptCompiler()
+    segment = ScriptSegment(
+        type="dialogue",
+        text="我没事。",
+        speaker="陆衍",
+        emotion="sad",
+        performance_notes="因重伤而声音沙哑，语速缓慢。",
+    )
+
+    result = compiler.compile_segments([segment])
+
+    assert "因重伤，仅在原音色基础上轻微、短暂表现沙哑" in result.prompt
+    assert "语速缓慢" in result.prompt
+
+
+def test_compiler_does_not_treat_descriptive_speaker_label_as_a_new_voice() -> None:
+    compiler = ScenePromptCompiler()
+    segment = ScriptSegment(
+        type="dialogue",
+        text="我没事。",
+        speaker="老爷爷声",
+        emotion="sad",
+        performance_notes="语速缓慢，保持克制。",
+    )
+
+    result = compiler.compile_segments([segment])
+
+    assert "老爷爷声" not in result.prompt
+    assert "当前角色用语速缓慢，保持克制的方式说道" in result.prompt
+
+
 def test_compiler_renders_music_changes_and_until_text_anchor_in_order() -> None:
     compiler = ScenePromptCompiler()
     events = [

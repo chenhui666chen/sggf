@@ -1,6 +1,7 @@
 import json
 import os
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 from sqlalchemy import create_engine
@@ -27,14 +28,20 @@ from app.models.user import User
 from app.services.audiobook import background_jobs_shared
 from app.services.audiobook.background_jobs_shared import (
     apply_chapter_audio_generation_result,
+    cleanup_aborted_chapter_generation_artifacts,
     generate_and_apply_subtitle_artifacts,
+    is_audiobook_project_active,
+    is_chapter_generation_target_active,
     mark_chapter_generation_failed,
     parse_estimated_cost,
     prepare_chapter_generation_output_context,
     release_audiobook_project_billing,
     settle_audiobook_project_billing,
 )
-from app.services.audiobook.task_support import build_generation_checkpoint_payload
+from app.services.audiobook.task_support import (
+    build_generation_checkpoint_payload,
+    update_chapter_run_state,
+)
 
 
 def test_parse_estimated_cost_accepts_supported_currency_symbols():
@@ -123,6 +130,160 @@ def seed_runtime_context(db):
         "audiobook_project": audiobook_project,
         "chapter_audio": chapter_audio,
     }
+
+
+def test_generation_target_guard_refreshes_external_chapter_audio_delete():
+    session_factory = build_session_factory()
+
+    with session_factory() as worker_db:
+        context = seed_runtime_context(worker_db)
+        assert is_chapter_generation_target_active(
+            worker_db,
+            audiobook_project_id=context["audiobook_project"].id,
+            chapter_id=context["chapter"].id,
+            chapter_audio_id=context["chapter_audio"].id,
+        ) is True
+        worker_db.rollback()
+
+        with session_factory() as delete_db:
+            delete_audio = delete_db.get(ChapterAudio, context["chapter_audio"].id)
+            delete_audio.deleted_at = datetime.now(timezone.utc)
+            delete_db.commit()
+
+        assert is_chapter_generation_target_active(
+            worker_db,
+            audiobook_project_id=context["audiobook_project"].id,
+            chapter_id=context["chapter"].id,
+            chapter_audio_id=context["chapter_audio"].id,
+        ) is False
+
+
+def test_generation_target_guard_rejects_deleted_project_for_new_audio():
+    session_factory = build_session_factory()
+
+    with session_factory() as worker_db:
+        context = seed_runtime_context(worker_db)
+        worker_db.rollback()
+        with session_factory() as delete_db:
+            delete_project = delete_db.get(
+                AudiobookProject,
+                context["audiobook_project"].id,
+            )
+            delete_project.deleted_at = datetime.now(timezone.utc)
+            delete_db.commit()
+
+        assert is_audiobook_project_active(
+            worker_db,
+            audiobook_project_id=context["audiobook_project"].id,
+        ) is False
+        assert is_chapter_generation_target_active(
+            worker_db,
+            audiobook_project_id=context["audiobook_project"].id,
+            chapter_id=context["chapter"].id,
+        ) is False
+
+
+def test_generation_target_guard_rejects_deleted_source_chapter():
+    session_factory = build_session_factory()
+
+    with session_factory() as worker_db:
+        context = seed_runtime_context(worker_db)
+        worker_db.rollback()
+        with session_factory() as delete_db:
+            delete_chapter = delete_db.get(Chapter, context["chapter"].id)
+            delete_chapter.deleted_at = datetime.now(timezone.utc)
+            delete_db.commit()
+
+        assert is_chapter_generation_target_active(
+            worker_db,
+            audiobook_project_id=context["audiobook_project"].id,
+            chapter_id=context["chapter"].id,
+            chapter_audio_id=context["chapter_audio"].id,
+        ) is False
+
+
+def test_update_chapter_run_state_preserves_deleted_output_tombstone():
+    session_factory = build_session_factory()
+
+    with session_factory() as db:
+        context = seed_runtime_context(db)
+        run = ChapterAudioRun(
+            audiobook_project_id=context["audiobook_project"].id,
+            chapter_id=context["chapter"].id,
+            run_type="full",
+            status="cancelled",
+            current_stage="cancelled",
+            resumable=False,
+            error_message="chapter_output_deleted",
+            checkpoint_json={"status": "cancelled"},
+        )
+        db.add(run)
+        db.commit()
+
+        update_chapter_run_state(
+            db,
+            audiobook_project_id=context["audiobook_project"].id,
+            chapter_id=context["chapter"].id,
+            run_type="full",
+            run_id=run.id,
+            status="completed",
+            current_stage="completed",
+            progress=1.0,
+            checkpoint_patch={"status": "completed"},
+        )
+
+        db.refresh(run)
+        assert run.status == "cancelled"
+        assert run.current_stage == "cancelled"
+        assert run.resumable is False
+        assert run.error_message == "chapter_output_deleted"
+        assert run.checkpoint_json == {"status": "cancelled"}
+
+
+def test_aborted_generation_cleanup_removes_output_and_subtitles(tmp_path):
+    output_path = tmp_path / "chapter.mp3"
+    artifact_paths = [
+        output_path,
+        output_path.with_suffix(".srt"),
+        output_path.with_suffix(".vtt"),
+        output_path.with_suffix(".ass"),
+        output_path.with_suffix(".labels.txt"),
+    ]
+    for artifact_path in artifact_paths:
+        artifact_path.write_bytes(b"artifact")
+
+    summary = cleanup_aborted_chapter_generation_artifacts(
+        output_path=str(output_path),
+        result={},
+    )
+
+    assert summary == {
+        "removed_output_files": len(artifact_paths),
+        "removed_temp_files": 0,
+    }
+    assert all(not artifact_path.exists() for artifact_path in artifact_paths)
+
+
+def test_aborted_generation_cleanup_removes_only_explicit_new_persistent_assets(
+    monkeypatch,
+):
+    removed_refs = []
+
+    monkeypatch.setattr(
+        "app.services.audiobook.chapter_segment_assets.delete_segment_asset_refs",
+        lambda refs: removed_refs.append(set(refs)) or len(set(refs)),
+    )
+
+    summary = cleanup_aborted_chapter_generation_artifacts(
+        output_path=None,
+        result={},
+        persistent_asset_refs={"persistent/new-voice.mp3", "persistent/new-chunk.mp3"},
+    )
+
+    assert removed_refs == [
+        {"persistent/new-voice.mp3", "persistent/new-chunk.mp3"}
+    ]
+    assert summary["removed_persistent_files"] == 2
 
 
 class FakeNarrationStyleEngine:
@@ -245,7 +406,9 @@ def test_prepare_chapter_generation_output_context_uses_run_checkpoint_and_persi
 
         assert output_context.output_format == "m4b"
         assert output_context.generate_subtitle is False
-        assert output_context.output_path == "audiobooks/project_1/chapter_001.m4b"
+        assert output_context.output_path == (
+            f"audiobooks/project_1/audiobook_{context['audiobook_project'].id}/chapter_001.m4b"
+        )
         assert output_context.resume_checkpoint["narration_style"] == "dramatic"
         assert engine.applied_style == ("dramatic", "压低声线，保留停顿")
 

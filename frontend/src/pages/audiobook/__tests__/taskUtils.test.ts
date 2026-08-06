@@ -302,10 +302,15 @@ describe('audiobook task utils', () => {
   })
 
   it('decides when an active task should autofocus', () => {
-    expect(shouldAutofocusActiveTask({ currentTaskId: 'task-a', generating: false, activeStep: 2 })).toBe(true)
-    expect(shouldAutofocusActiveTask({ currentTaskId: null, generating: true, activeStep: 2 })).toBe(true)
-    expect(shouldAutofocusActiveTask({ currentTaskId: null, generating: false, activeStep: 1 })).toBe(true)
-    expect(shouldAutofocusActiveTask({ currentTaskId: null, generating: false, activeStep: 2 })).toBe(false)
+    expect(shouldAutofocusActiveTask({ currentTaskId: 'task-a', generating: false, activeStep: 2, progressViewDismissed: false })).toBe(true)
+    expect(shouldAutofocusActiveTask({ currentTaskId: null, generating: true, activeStep: 2, progressViewDismissed: false })).toBe(true)
+    expect(shouldAutofocusActiveTask({ currentTaskId: null, generating: false, activeStep: 1, progressViewDismissed: false })).toBe(true)
+    expect(shouldAutofocusActiveTask({ currentTaskId: null, generating: false, activeStep: 2, progressViewDismissed: false })).toBe(false)
+  })
+
+  it('skips autofocus after the user dismissed the progress view', () => {
+    expect(shouldAutofocusActiveTask({ currentTaskId: 'task-a', generating: true, activeStep: 1, progressViewDismissed: true })).toBe(false)
+    expect(shouldAutofocusActiveTask({ currentTaskId: null, generating: false, activeStep: 0, progressViewDismissed: true })).toBe(false)
   })
 
   it('backs off task polling on failures and slows down hidden tabs', () => {

@@ -90,6 +90,7 @@ class SceneRenderMixin:
         script_quality_report: Any = None,
         tts_progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
         audiobook_project_id: Optional[int] = None,
+        pause_check: Optional[Callable[[], bool]] = None,
     ) -> Optional[Dict[str, Any]]:
         if str(getattr(self, "_audio_engine_mode", "legacy_stems")) != "seed_scene":
             return None
@@ -284,6 +285,7 @@ class SceneRenderMixin:
                     scene,
                     script_segments,
                     fallback_output_root,
+                    pause_check=pause_check,
                 )
                 updated_checkpoint = self._checkpoint_with_fallback_artifact(
                     checkpoint_updates.get(scene_id),
@@ -331,6 +333,25 @@ class SceneRenderMixin:
             fallback_audio_paths=fallback_audio_paths,
         )
         audio_data = assembly.audio_path.read_bytes()
+        if output_path is None:
+            staging_path = Path(assembly.audio_path).resolve(strict=False)
+            try:
+                staging_path.relative_to(run_root.resolve(strict=False))
+            except ValueError:
+                logger.warning(
+                    "Seed Scene staging path escaped run root; skip cleanup: path=%s root=%s",
+                    staging_path,
+                    run_root,
+                )
+            else:
+                try:
+                    staging_path.unlink(missing_ok=True)
+                except OSError as exc:
+                    logger.warning(
+                        "Seed Scene staging audio cleanup failed: path=%s error=%s",
+                        staging_path,
+                        exc,
+                    )
         audio_info = {
             "duration_seconds": assembly.duration_s,
             "file_size": len(audio_data),
@@ -545,6 +566,7 @@ class SceneRenderMixin:
         scene: ChapterSceneRender,
         script_segments: Sequence[Any],
         output_root: Path,
+        pause_check: Optional[Callable[[], bool]] = None,
     ) -> Path:
         selected_segments = [
             script_segments[index]
@@ -553,6 +575,7 @@ class SceneRenderMixin:
         synthesis = await self._synthesize_segments_with_resume(
             selected_segments,
             resume_checkpoint=None,
+            pause_check=pause_check,
         )
         audio_list = list(synthesis.get("audio_list") or [])
         if not any(audio_list):

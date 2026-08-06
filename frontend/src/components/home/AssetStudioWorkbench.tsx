@@ -34,6 +34,7 @@ import {
 import { buildAssetStudioCollectedAssetMetadataContract } from '@/contracts/userAssetMetadataBuilders'
 import { buildAssetStudioCollectedSourcePayload } from '@/contracts/userAssetSourcePayloadBuilders'
 import { useAssetStudioModelCatalog } from '@/hooks/useAssetStudioModelCatalog'
+import { modelUsesBasicNumericSpeedControl } from '@/pages/audiobook/ttsModels'
 import { extractLocalAssetStorageMetadata } from '@/utils/localAssetVault'
 import { saveExplicitLocalUserAsset } from '@/utils/userAssetExplicitLocalCollection'
 
@@ -1559,7 +1560,6 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
   const [audioInstruction, setAudioInstruction] = useState('')
   const [audioSpeakerIds, setAudioSpeakerIds] = useState('')
   const [audioRate, setAudioRate] = useState('1.0')
-  const [audioPitch, setAudioPitch] = useState('1.0')
   const [audioVolume, setAudioVolume] = useState('50')
   const [audioVoicePresets, setAudioVoicePresets] = useState<SpeechVoicePreset[]>([])
   const [audioVoiceLoading, setAudioVoiceLoading] = useState(false)
@@ -1704,6 +1704,8 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
     return (left.label || left.id).localeCompare(right.label || right.id, 'zh-CN')
   })
   const isCosyVoiceSpeechMode = audioGenerationType === 'speech' && audioModelId === 'cosyvoice-v3.5-plus'
+  const showAudioNumericSpeedControl =
+    audioGenerationType === 'speech' && modelUsesBasicNumericSpeedControl(audioModelId)
 
   const applyAudioVoicePresets = (voices: SpeechVoicePreset[], preferredVoiceId?: string) => {
     setAudioVoicePresets(voices)
@@ -2462,8 +2464,9 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
         formData.append('model_id', audioModelId)
         formData.append('voice_id', audioVoiceId)
         formData.append('instruction', audioInstruction.trim())
-        formData.append('rate', audioRate)
-        formData.append('pitch', audioPitch)
+        if (showAudioNumericSpeedControl) {
+          formData.append('rate', audioRate)
+        }
         formData.append('volume', audioVolume)
 
         const response = await apiClient.generateAssetStudioAudio(formData)
@@ -3175,24 +3178,17 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
                   />
 
                   <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5}>
-                    <TextField
-                      size="small"
-                      fullWidth
-                      label="语速"
-                      value={audioRate}
-                      onChange={(event) => setAudioRate(event.target.value)}
-                      InputLabelProps={{ sx: { color: 'rgba(255,255,255,0.62)' } }}
-                      sx={{ '& .MuiOutlinedInput-root': { color: 'white', backgroundColor: 'rgba(255,255,255,0.03)' } }}
-                    />
-                    <TextField
-                      size="small"
-                      fullWidth
-                      label="音调"
-                      value={audioPitch}
-                      onChange={(event) => setAudioPitch(event.target.value)}
-                      InputLabelProps={{ sx: { color: 'rgba(255,255,255,0.62)' } }}
-                      sx={{ '& .MuiOutlinedInput-root': { color: 'white', backgroundColor: 'rgba(255,255,255,0.03)' } }}
-                    />
+                    {showAudioNumericSpeedControl ? (
+                      <TextField
+                        size="small"
+                        fullWidth
+                        label="语速"
+                        value={audioRate}
+                        onChange={(event) => setAudioRate(event.target.value)}
+                        InputLabelProps={{ sx: { color: 'rgba(255,255,255,0.62)' } }}
+                        sx={{ '& .MuiOutlinedInput-root': { color: 'white', backgroundColor: 'rgba(255,255,255,0.03)' } }}
+                      />
+                    ) : null}
                     <TextField
                       size="small"
                       fullWidth

@@ -17,6 +17,17 @@ from app.utils.datetime_utils import utc_now
 _UNSET = object()
 
 
+def _is_after(candidate: Any, reference: datetime) -> bool:
+    """比较两个时间戳；部分驱动（如 SQLite）会把时区感知时间读成 naive，
+    直接比较会抛 TypeError，此时退化为视为不晚于参考时间。"""
+    if candidate is None:
+        return False
+    try:
+        return candidate > reference
+    except TypeError:
+        return False
+
+
 def _build_checkpoint_temp_cleanup_document(
     checkpoint_json: Optional[Dict[str, Any]],
     *,
@@ -141,7 +152,7 @@ def expire_chapter_run_temp_assets(
     run.temp_asset_prefix = None
     if not getattr(run, "error_message", None):
         run.error_message = "checkpoint_expired"
-    if getattr(run, "expires_at", None) is None or run.expires_at > cleanup_time:
+    if getattr(run, "expires_at", None) is None or _is_after(run.expires_at, cleanup_time):
         run.expires_at = cleanup_time
     if getattr(run, "finished_at", None) is None:
         run.finished_at = cleanup_time

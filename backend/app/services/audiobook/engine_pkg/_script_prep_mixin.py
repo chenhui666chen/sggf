@@ -16,6 +16,7 @@ from ..audio_mixer import AudioMixer
 from ..task_tracker import StageType
 from app.services.chapter_adaptation_assets import build_audio_adaptation_hint
 from app.services.audiobook.chapter_cadence import apply_chapter_cadence
+from app.services.audiobook.tts_pause import AudiobookPauseRequested
 from core.unified_media_runtime import create_tts_engine
 
 try:
@@ -59,6 +60,7 @@ class ScriptPrepMixin:
         chapter_summary: str = "",
         summary_data: Any = None,
         character_profiles: Optional[List[Dict[str, Any]]] = None,
+        pause_check: Optional[Callable[[], bool]] = None,
     ) -> Dict[str, Any]:
         """仅生成章节剧本与剧本质量评审，不执行TTS和混音。
 
@@ -165,6 +167,7 @@ class ScriptPrepMixin:
                 adaptation_context=audio_adaptation_context,
                 progress_callback=on_script_progress,
                 enable_llm_script_review=enable_quality_review,
+                pause_check=pause_check,
             )
 
             if isinstance(adapted_result, ChapterStructure):
@@ -296,6 +299,10 @@ class ScriptPrepMixin:
                             "category": i.category,
                             "description": i.description,
                             "suggestion": i.suggestion,
+                            "dimension": getattr(i, "dimension", "") or "",
+                            "fix_type": getattr(i, "fix_type", "") or "",
+                            "target_fields": list(getattr(i, "target_fields", None) or []),
+                            "segment_index": getattr(i, "segment_index", -1),
                         }
                         for i in quality_report_obj.issues
                     ],
@@ -303,6 +310,7 @@ class ScriptPrepMixin:
                     "quality_gate": auto_revision.get("quality_gate"),
                     "llm_script_review": llm_script_review,
                     "transform_degradation": transform_degradation if has_degraded_batches else None,
+                    "llm_dimensions": getattr(quality_report_obj, "llm_dimensions", None) or {},
                 }
 
                 issues_preview = quality_report["issues"][:20]
@@ -316,6 +324,7 @@ class ScriptPrepMixin:
                     "revision_suggestions": quality_report_obj.revision_suggestions,
                     "issues": issues_preview,
                     "quality_gate": auto_revision.get("quality_gate"),
+                    "llm_dimensions": getattr(quality_report_obj, "llm_dimensions", None) or {},
                 }
                 if auto_revision.get("applied"):
                     stage_metrics["auto_revision"] = auto_revision
@@ -331,18 +340,22 @@ class ScriptPrepMixin:
                 
                 # 📡 WebSocket推送：评审阶段完成
                 if WEBSOCKET_AVAILABLE and audiobook_project_id:
+                    ws_metrics = {
+                        'overall_score': quality_report_obj.overall_score,
+                        'overall_grade': quality_report_obj.overall_grade,
+                        'issues_count': len(quality_report_obj.issues),
+                        'quality_gate': auto_revision.get("quality_gate"),
+                    }
+                    llm_dims = getattr(quality_report_obj, "llm_dimensions", None) or {}
+                    if llm_dims:
+                        ws_metrics['llm_dimensions'] = llm_dims
                     await ws_manager.send_audiobook_progress(
                         audiobook_project_id=audiobook_project_id,
                         chapter_id=chapter_id,
                         stage='quality_review',
                         progress=100,
                         message=f'剧本质量评审完成：{quality_report_obj.overall_grade} ({quality_report_obj.overall_score:.1f}分)',
-                        stage_metrics={
-                            'overall_score': quality_report_obj.overall_score,
-                            'overall_grade': quality_report_obj.overall_grade,
-                            'issues_count': len(quality_report_obj.issues),
-                            'quality_gate': auto_revision.get("quality_gate"),
-                        }
+                        stage_metrics=ws_metrics,
                     )
 
                 if quality_report_obj.overall_score < quality_threshold:
@@ -418,6 +431,9 @@ class ScriptPrepMixin:
             self.task_tracker.complete_task(task_id)
             return result
 
+        except AudiobookPauseRequested:
+            # 暂停信号需向上透传给后台任务，由其落库为 paused，不当作失败处理
+            raise
         except Exception as e:
             elapsed_time = time.time() - start_time
             logger.error(f"❌ 剧本生成失败: {e}")

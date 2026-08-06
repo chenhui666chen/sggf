@@ -54,6 +54,7 @@ import { formatSeedSceneTestError } from './audiobook/seedSceneTestErrorUtils'
 import { SEED_REFERENCE_VOICE_PREVIEW_TEXT } from './audiobook/voicePreviewText'
 import {
   FALLBACK_TTS_MODEL_OPTIONS,
+  modelUsesBasicNumericSpeedControl,
   normalizeTtsModelOptions,
   type TtsModelOption,
 } from './audiobook/ttsModels'
@@ -226,8 +227,9 @@ const ReferenceSlotRow = ({
         voice_id: selectedVoiceId,
         model: selectedModel,
         volume: selectedVoice?.default_params?.volume ?? 50,
-        speed: selectedVoice?.default_params?.speed ?? 1,
-        pitch: selectedVoice?.default_params?.pitch ?? 50,
+        ...(modelUsesBasicNumericSpeedControl(selectedModel)
+          ? { speed: selectedVoice?.default_params?.speed ?? 1 }
+          : {}),
       })
       if (result.audioUrl) {
         onAssign(buildSeedSceneReferencePayload({

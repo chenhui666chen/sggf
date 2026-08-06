@@ -133,8 +133,8 @@ def test_assign_voices_normalizes_conflicting_instruct_rate_and_pause_fields():
     assert segment.emotion == "fearful"
     assert segment.voice_params["emotion"] == "fearful"
     assert segment.voice_params["instruct_emotion"] == "fearful"
-    assert segment.voice_params["rate"] == 0.8
-    assert segment.voice_params["speed"] == 0.8
+    assert "rate" not in segment.voice_params
+    assert "speed" not in segment.voice_params
     assert segment.pause_before == 0.3
     assert segment.pause_after == 0.5
 

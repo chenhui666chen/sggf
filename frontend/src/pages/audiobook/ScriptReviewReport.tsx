@@ -2,6 +2,7 @@ import {
   Box,
 } from '@mui/material'
 
+import ScriptReviewDimensions from './ScriptReviewDimensions'
 import ScriptReviewIssueList from './ScriptReviewIssueList'
 import ScriptReviewMetricSections from './ScriptReviewMetricSections'
 import ScriptReviewSuggestions from './ScriptReviewSuggestions'
@@ -46,6 +47,7 @@ const ScriptReviewReport = ({
         audioBalance={audioBalance}
         pacing={pacing}
       />
+      <ScriptReviewDimensions llmDimensions={review.llm_dimensions} />
       <ScriptReviewIssueList
         issues={issues}
         extraIssues={extraIssues}

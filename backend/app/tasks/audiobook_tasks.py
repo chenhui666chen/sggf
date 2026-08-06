@@ -116,6 +116,7 @@ def run_full_audiobook_task(
                 chapter_ids=chapter_ids,
                 tts_model=tts_model,
                 tracker=tracker,
+                celery_task_id=celery_task_id,
             )
         )
         tracker.mark_completed()
@@ -167,6 +168,7 @@ def run_script_generation_task(
                 tts_model=tts_model,
                 force_regenerate=force_regenerate,
                 tracker=tracker,
+                celery_task_id=celery_task_id,
             )
         )
         tracker.mark_completed()
@@ -218,6 +220,7 @@ def run_audio_from_scripts_task(
                 tts_model=tts_model,
                 timeline_edits_by_chapter=timeline_edits_by_chapter or {},
                 tracker=tracker,
+                celery_task_id=celery_task_id,
             )
         )
         tracker.mark_completed()

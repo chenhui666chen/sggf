@@ -12,6 +12,7 @@
 """
 import asyncio
 import hashlib
+import json
 import logging
 import random
 import os
@@ -22,6 +23,7 @@ from enum import Enum
 
 from ..constants import INSTRUCT_SPEAKER_IDS, normalize_speaker_id
 from ..voice_catalog import get_voice_entry
+from app.services.audiobook.voice_identity_policy import VOICE_IDENTITY_POLICY_VERSION
 
 logger = logging.getLogger(__name__)
 
@@ -467,19 +469,6 @@ class MinimaxMixin:
         if self._is_ssml_text(text):
             return text
 
-        def _to_float(value: Any, default: float) -> float:
-            try:
-                return float(value)
-            except (TypeError, ValueError):
-                return default
-
-        rate = _to_float(voice_params.get("rate", voice_params.get("speed", 1.0)), 1.0)
-        pitch = _to_float(voice_params.get("pitch", 1.0), 1.0)
-        if pitch > 10:
-            pitch = pitch / 50.0
-        rate = max(0.5, min(2.0, rate))
-        pitch = max(0.5, min(2.0, pitch))
-
         volume = voice_params.get("volume", 50)
         try:
             volume = int(volume)
@@ -497,7 +486,9 @@ class MinimaxMixin:
         if pause_after:
             parts.append(f"<break time=\"{pause_after}\"/>")
 
-        attrs = [f'rate="{rate:.2f}"', f'pitch="{pitch:.2f}"', f'volume="{volume}"']
+        # Fixed audiobook voices use SSML only for delivery controls. Pitch is
+        # omitted because it changes the selected voice rather than delivery.
+        attrs = ['rate="1.00"', f'volume="{volume}"']
         return f"<speak {' '.join(attrs)}>{''.join(parts)}</speak>"
 
     def _build_instruction_text(self, voice_params: Dict[str, Any], emotion: str) -> str:
@@ -551,14 +542,30 @@ class MinimaxMixin:
             str(getattr(provider, "value", provider))
             for provider in getattr(self, "fallback_providers", []) or []
         ]
+        structured_performance = {
+            key: voice_params.get(key)
+            for key in (
+                "delivery_plan",
+                "style_tags",
+                "inline_audio_tags",
+                "style_control_method",
+                "style_control_mode",
+                "pause_before",
+                "pause_after",
+                "timeline_pause_after_ms",
+                "cadence_profile",
+                "cadence_reason",
+            )
+            if voice_params.get(key) is not None
+        }
         key_parts = [
             str(getattr(self, "model", "")),
             str(getattr(getattr(self, "primary_provider", ""), "value", getattr(self, "primary_provider", ""))),
             ",".join(fallback_values),
             _TTS_CACHE_VALIDATION_VERSION,
+            str(VOICE_IDENTITY_POLICY_VERSION),
             text,
             str(voice_params.get("speaker", "")),
-            str(voice_params.get("pitch", "")),
             str(voice_params.get("rate", voice_params.get("speed", ""))),
             str(voice_params.get("volume", "")),
             emotion,
@@ -571,6 +578,13 @@ class MinimaxMixin:
             str(voice_params.get("instruct_identity", "")),
             str(voice_params.get("use_instruct_mode", "")),
             str(voice_params.get("optimize_instructions", "")),
+            json.dumps(
+                structured_performance,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+                default=str,
+            ),
         ]
         key_string = "|".join(key_parts)
         

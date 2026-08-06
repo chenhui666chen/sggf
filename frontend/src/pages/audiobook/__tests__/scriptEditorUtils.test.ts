@@ -30,9 +30,20 @@ describe('audiobook script editor utils', () => {
     expect(normalizeAudiobookChapterScriptData({
       script_status: 'reviewed',
       script_segments: [
-        { text: 'Line 1', speaker: 'Narrator' },
+        {
+          text: 'Line 1',
+          speaker: 'Narrator',
+          voice_params: {
+            tts_model: 'seed-tts-2.0-expressive',
+            speed: 0.9,
+            rate: 0.9,
+            character_base_speed: 1.0,
+            pitch: 42,
+          },
+        },
       ],
       chapter_audio_available: true,
+      chapter_audio_stale: true,
       chapter_audio_url: '/api/v1/audiobook/download/3/9',
       segment_timings: [
         { index: 0, start: 1.2, end: 3.4, duration: 2.2 },
@@ -44,9 +55,14 @@ describe('audiobook script editor utils', () => {
     })).toMatchObject({
       scriptStatus: 'reviewed',
       scriptSegments: [
-        { text: 'Line 1', speaker: 'Narrator' },
+        {
+          text: 'Line 1',
+          speaker: 'Narrator',
+          voice_params: { tts_model: 'seed-tts-2.0-expressive' },
+        },
       ],
       chapterAudioAvailable: true,
+      chapterAudioStale: true,
       chapterAudioUrl: '/api/v1/audiobook/download/3/9',
       segmentTimings: [
         { index: 0, start: 1.2, end: 3.4, duration: 2.2 },
@@ -61,6 +77,7 @@ describe('audiobook script editor utils', () => {
       scriptStatus: 'pending',
       scriptSegments: [],
       chapterAudioAvailable: false,
+      chapterAudioStale: false,
       chapterAudioUrl: '',
       segmentTimings: [],
       scriptReview: null,
@@ -68,14 +85,29 @@ describe('audiobook script editor utils', () => {
   })
 
   it('builds update payloads without mutating editor segments', () => {
-    const segments: ScriptSegment[] = [{ text: 'Line 1' }]
+    const segments: ScriptSegment[] = [{
+      segment_key: 'seg-1',
+      text: 'Line 1',
+      voice_params: {
+        tts_model: 'seed-tts-2.0-expressive',
+        speed: 1.1,
+        rate: 1.1,
+        character_base_speed: 1.0,
+        pitch: 42,
+      },
+    }]
     const payload = buildUpdateChapterScriptPayload(segments, 'approved')
 
     expect(payload).toEqual({
-      script_segments: [{ text: 'Line 1' }],
+      script_segments: [{
+        segment_key: 'seg-1',
+        text: 'Line 1',
+        voice_params: { tts_model: 'seed-tts-2.0-expressive' },
+      }],
       script_status: 'approved',
     })
     expect(payload.script_segments).not.toBe(segments)
+    expect(segments[0].voice_params?.pitch).toBe(42)
   })
 
   it('builds audio generation payloads for one chapter or approved chapters', () => {

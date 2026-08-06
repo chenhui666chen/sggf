@@ -29,7 +29,19 @@ from ..tts_model_ids import (
 )
 from ..tts_batch_planner import plan_tts_batches
 from ..tts_output_validator import TTSValidationResult, validate_tts_audio
+from ..tts_pause import TTSPauseRequested
 from ..voice_catalog import get_voice_entry
+from ..voice_identity_policy import (
+    is_voice_design_creation_request,
+    is_voice_design_model,
+    sanitize_fixed_voice_performance_text,
+    sanitize_fixed_voice_prompt_params,
+    sanitize_fixed_voice_ssml_text,
+)
+from ..voice_parameter_policy import (
+    stabilize_fixed_voice_pitch,
+    stabilize_instruct_model_speed,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -274,6 +286,35 @@ class TTSEngineBase:
         """
         self._reset_last_synthesis_metadata()
 
+        # Keep the low-level engine boundary consistent with route/workbench
+        # contracts. Direct callers must not be able to reintroduce segment
+        # pitch, voice descriptions, stale snapshots, or SSML voice controls.
+        voice_design_creation = is_voice_design_creation_request(
+            self.model,
+            voice_params,
+        )
+        voice_params = stabilize_instruct_model_speed(voice_params, self.model)
+        if not voice_design_creation:
+            voice_params, blocked_identity = sanitize_fixed_voice_prompt_params(
+                dict(voice_params or {})
+            )
+            voice_params = stabilize_fixed_voice_pitch(voice_params)
+            voice_params.pop("voice_description", None)
+            if not is_voice_design_model(self.model):
+                voice_params.pop("voice_design_prompt", None)
+            voice_params.pop("provider_prompt", None)
+            voice_params.pop("provider_prompt_snapshot", None)
+            safe_emotion, blocked_emotion = sanitize_fixed_voice_performance_text(emotion)
+            emotion = safe_emotion or "neutral"
+            if blocked_identity or blocked_emotion:
+                logger.warning(
+                    "固定音色引擎已过滤身份/音高控制: %s",
+                    [*blocked_identity, *blocked_emotion],
+                )
+            text, blocked_ssml = sanitize_fixed_voice_ssml_text(text)
+            if blocked_ssml:
+                logger.warning("固定音色引擎已过滤 SSML 身份控制: %s", blocked_ssml)
+
         # 📊 埋点：记录请求次数
         if METRICS_ENABLED:
             metrics_collector.increment_counter(
@@ -310,12 +351,10 @@ class TTSEngineBase:
         
         # 📊 情感参数日志（便于调试和验证）
         speaker = voice_params_with_emotion.get("speaker", "unknown")
-        pitch = voice_params_with_emotion.get("pitch", 50)
         speed = voice_params_with_emotion.get("speed", voice_params_with_emotion.get("rate", 1.0))
         volume = voice_params_with_emotion.get("volume", 50)
         logger.debug(
             f"🎭 [{speaker}] emotion={emotion} | "
-            f"pitch={pitch} (base+offset) | "
             f"speed={speed:.2f}x | "
             f"volume={volume}"
         )
@@ -428,6 +467,7 @@ class TTSEngineBase:
         debug_save_segments: bool = False,  # 调试：是否保存每个片段的原始音频
         debug_output_dir: Optional[str] = None,  # 调试：保存目录
         progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
+        pause_check: Optional[Callable[[], bool]] = None,
     ) -> List[bytes]:
         """
         批量合成（分批处理，避免阿里云配额限制）
@@ -436,6 +476,7 @@ class TTSEngineBase:
             segments: 片段列表，每个包含 text, voice_params, emotion
             batch_size: 每批处理数量（默认10个）
             batch_interval: 批次间暂停时间（默认0秒，已取消节流）
+            pause_check: 可选的暂停检查回调，返回 True 时抛出 TTSPauseRequested
         
         Returns:
             音频列表
@@ -471,6 +512,22 @@ class TTSEngineBase:
             batch_audio_list: List[bytes] = []
             for i, seg in enumerate(batch_segments):
                 global_idx = start_idx + i
+                # 片段级暂停检查：检测到暂停请求时立即中断，不再继续合成后续片段
+                if pause_check is not None:
+                    try:
+                        paused = pause_check()
+                    except Exception as pause_exc:
+                        logger.warning("暂停状态检查失败，继续合成: %s", pause_exc)
+                        paused = False
+                    if paused:
+                        logger.info(
+                            "⏸️ 检测到暂停请求，停止片段合成（已完成 %s/%s 片段）",
+                            len(audio_list),
+                            total,
+                        )
+                        raise TTSPauseRequested(
+                            f"pause_requested_before_segment_{global_idx}"
+                        )
                 error_message = None
                 error_type = None
                 try:

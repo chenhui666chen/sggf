@@ -2,10 +2,13 @@ import { useCallback, useEffect, useState, type Dispatch, type SetStateAction } 
 
 import { apiClient, extractApiErrorMessage } from '../../services/api'
 import type { SetSnackbar } from './hookTypes'
+import { removeStoredTaskSessionForAudiobookProject } from './routeProjectSessionUtils'
 import type { AudiobookProjectDetail, AudiobookProjectHistoryItem } from './types'
 
 interface UseAudiobookHistoryActionsParams {
   selectedProjectId: number | null
+  currentAudiobookProjectId: number | null
+  audiobookProjectDetailId: number | null
   clearActiveGenerationState: () => void
   resetBrowserPlayer: () => void
   setAudiobookProject: Dispatch<SetStateAction<AudiobookProjectDetail | null>>
@@ -25,6 +28,8 @@ const getHttpStatusFromError = (error: unknown): number | null => {
 
 export const useAudiobookHistoryActions = ({
   selectedProjectId,
+  currentAudiobookProjectId,
+  audiobookProjectDetailId,
   clearActiveGenerationState,
   resetBrowserPlayer,
   setAudiobookProject,
@@ -105,9 +110,24 @@ export const useAudiobookHistoryActions = ({
     setSnackbar,
   ])
 
-  const handleDeleteHistory = useCallback(async (audiobookProjectId: number) => {
+  const handleDeleteHistory = useCallback(async (audiobookProjectId: number, options?: { delete_reason?: string; delete_files?: boolean }) => {
     try {
-      await apiClient.deleteAudiobookProject(audiobookProjectId, { delete_files: true })
+      await apiClient.deleteAudiobookProject(audiobookProjectId, {
+        delete_files: options?.delete_files ?? true,
+        delete_reason: options?.delete_reason,
+      })
+      // 清除指向被删除有声书项目的本地任务会话，避免重新进入项目时恢复到已删除的生成步骤
+      removeStoredTaskSessionForAudiobookProject({ storage: localStorage, audiobookProjectId })
+      // 同步重置引用被删除项目的内存状态：否则会话同步 effect 会在清除后
+      // 立即把陈旧的 activeStep/任务焦点重新写回 localStorage，导致清除失效
+      if (audiobookProjectId === currentAudiobookProjectId || audiobookProjectId === audiobookProjectDetailId) {
+        clearActiveGenerationState()
+        resetBrowserPlayer()
+        if (audiobookProjectId === audiobookProjectDetailId) {
+          setAudiobookProject(null)
+        }
+        setActiveStep(0)
+      }
       setSnackbar({ open: true, message: '项目已删除', severity: 'success' })
       await fetchHistory({ showLoading: false })
     } catch (error: unknown) {
@@ -116,7 +136,16 @@ export const useAudiobookHistoryActions = ({
         : await extractApiErrorMessage(error, '删除失败，请重试')
       setSnackbar({ open: true, message: errorMessage, severity: 'error' })
     }
-  }, [fetchHistory, setSnackbar])
+  }, [
+    fetchHistory,
+    setSnackbar,
+    currentAudiobookProjectId,
+    audiobookProjectDetailId,
+    clearActiveGenerationState,
+    resetBrowserPlayer,
+    setAudiobookProject,
+    setActiveStep,
+  ])
 
   return {
     loadingHistory,

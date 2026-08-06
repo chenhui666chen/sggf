@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 
 import { apiClient } from '../../services/api'
 import { resolveGeneratedChapterIdsFromProjects } from './chapterSelectionUtils'
@@ -14,6 +14,21 @@ export const useAudiobookGeneratedChapterIds = ({
 }) => {
   const [projectHistory, setProjectHistory] = useState<AudiobookProjectDetail[]>([])
 
+  const loadGeneratedChapters = useCallback(async () => {
+    if (!projectId) {
+      setProjectHistory([])
+      return
+    }
+    try {
+      const response = await apiClient.getAudiobookProjectsByProject(projectId, {
+        include_chapter_audios: true,
+      })
+      setProjectHistory(Array.isArray(response.data) ? response.data : [])
+    } catch {
+      setProjectHistory([])
+    }
+  }, [projectId])
+
   useEffect(() => {
     if (!projectId) {
       setProjectHistory([])
@@ -22,7 +37,7 @@ export const useAudiobookGeneratedChapterIds = ({
 
     let cancelled = false
     setProjectHistory([])
-    const loadGeneratedChapters = async () => {
+    const load = async () => {
       try {
         const response = await apiClient.getAudiobookProjectsByProject(projectId, {
           include_chapter_audios: true,
@@ -37,14 +52,16 @@ export const useAudiobookGeneratedChapterIds = ({
       }
     }
 
-    void loadGeneratedChapters()
+    void load()
     return () => {
       cancelled = true
     }
   }, [projectId])
 
-  return useMemo(
+  const generatedChapterIds = useMemo(
     () => resolveGeneratedChapterIdsFromProjects(projectHistory, currentChapterAudios),
     [currentChapterAudios, projectHistory],
   )
+
+  return { generatedChapterIds, refreshGeneratedChapterIds: loadGeneratedChapters }
 }

@@ -13,6 +13,7 @@ import {
   hasPreviewableSoundEffects,
   parseCommaSeparatedList,
   parseOptionalNumberInput,
+  sanitizeScriptSegmentVoiceIdentityControls,
 } from '../scriptSegmentCardUtils'
 
 describe('script segment card utils', () => {
@@ -62,6 +63,53 @@ describe('script segment card utils', () => {
     })
   })
 
+  it('appends and deduplicates sound effect assets without dropping existing prompts', () => {
+    const utils = scriptSegmentCardUtils as unknown as {
+      appendSoundEffectAssetPatch: (
+        segment: {
+          sound_effects_simple?: string[]
+          sound_effects?: Array<string | { asset_id?: string; name?: string }>
+        },
+        selection: { id: string; type: 'sfx'; label: string; name?: string },
+        description?: string,
+      ) => unknown
+    }
+
+    const first = utils.appendSoundEffectAssetPatch({
+      sound_effects_simple: ['风声'],
+      sound_effects: [{ asset_id: 'sfx-door', name: '旧木门' }],
+    }, {
+      id: 'sfx-water',
+      type: 'sfx',
+      label: '水滴声',
+      name: '水滴声',
+    }, '持续水滴声，近距离，音量很低')
+
+    expect(first).toEqual({
+      sound_effects: [
+        { asset_id: 'sfx-door', name: '旧木门' },
+        { name: '风声' },
+        { asset_id: 'sfx-water', name: '持续水滴声，近距离，音量很低' },
+      ],
+      sound_effects_simple: [],
+    })
+
+    expect(utils.appendSoundEffectAssetPatch({
+      sound_effects: (first as { sound_effects: Array<{ asset_id?: string; name: string }> }).sound_effects,
+    }, {
+      id: 'sfx-water',
+      type: 'sfx',
+      label: '水滴声',
+    }, '更远的水滴声')).toEqual({
+      sound_effects: [
+        { asset_id: 'sfx-door', name: '旧木门' },
+        { name: '风声' },
+        { asset_id: 'sfx-water', name: '更远的水滴声' },
+      ],
+      sound_effects_simple: [],
+    })
+  })
+
   it('parses optional numeric input without forcing blank values to zero', () => {
     expect(parseOptionalNumberInput('1.25')).toBe(1.25)
     expect(parseOptionalNumberInput(' 0 ')).toBe(0)
@@ -78,9 +126,73 @@ describe('script segment card utils', () => {
   })
 
   it('normalizes voice params safely', () => {
-    const params = { speed: 1.1, pitch: 42 }
-    expect(getScriptSegmentVoiceParams({ voice_params: params })).toBe(params)
+    const params = {
+      tts_model: 'seed-tts-2.0-expressive',
+      speed: 1.1,
+      rate: 1.1,
+      character_base_speed: 1.0,
+      pitch: 42,
+      pitch_ratio: 0.9,
+      pitch_semitones: -2,
+      character_base_pitch: 50,
+    }
+    expect(getScriptSegmentVoiceParams({ voice_params: params })).toEqual({
+      tts_model: 'seed-tts-2.0-expressive',
+    })
+    expect(getScriptSegmentVoiceParams({
+      voice_params: {
+        tts_model: 'minimax-speech-2.8-hd',
+        speed: 1.1,
+        rate: 1.1,
+        character_base_speed: 1.0,
+      },
+    })).toEqual({
+      tts_model: 'minimax-speech-2.8-hd',
+      speed: 1.1,
+      rate: 1.1,
+      character_base_speed: 1.0,
+    })
     expect(getScriptSegmentVoiceParams({ voice_params: null })).toEqual({})
+  })
+
+  it('removes fixed-voice identity overrides from nested segment payloads', () => {
+    const segment = {
+      text: 'Line 1',
+      pitch: 41,
+      voice_description: 'change the speaker identity',
+      speed: 1.2,
+      voice_params: {
+        speaker: 'voice-1',
+        tts_model: 'seed-tts-2.0-expressive',
+        speed: 0.9,
+        rate: 0.9,
+        character_base_speed: 1.0,
+        pitch: 42,
+        voice_description: 'older and hoarse',
+        voice_design_prompt: 'design another voice',
+        provider_prompt_snapshot: {
+          delivery_plan: {
+            pace: 'slow',
+            pitch_ratio: 0.8,
+            character_base_pitch: 50,
+          },
+        },
+      },
+    }
+
+    expect(sanitizeScriptSegmentVoiceIdentityControls(segment)).toEqual({
+      text: 'Line 1',
+      voice_params: {
+        speaker: 'voice-1',
+        tts_model: 'seed-tts-2.0-expressive',
+        provider_prompt_snapshot: {
+          delivery_plan: {
+            pace: 'slow',
+          },
+        },
+      },
+    })
+    expect(segment.voice_params.pitch).toBe(42)
   })
 
   it('summarizes provider prompt inline tag strategy for review display', () => {

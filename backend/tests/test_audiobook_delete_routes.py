@@ -24,12 +24,13 @@ from app.api.v1.audiobook_api import routes_delete
 from app.api.v1.audiobook_api.routes_delete import (
     delete_audiobook_project,
     delete_chapter_audio,
+    delete_chapter_audiobook_output,
     list_deleted_chapter_audios,
     restore_audiobook_project,
     restore_chapter_audio,
 )
 from app.db.base import Base
-from app.models.audiobook import AudiobookProject, ChapterAudio
+from app.models.audiobook import AudiobookProject, ChapterAudio, ChapterAudioRun
 from app.models.audiobook_delete_audit import AudiobookDeleteAudit
 from app.models.audiobook_task import AudiobookTask
 from app.models.project import Chapter, Project
@@ -53,11 +54,29 @@ def build_session_factory():
             Chapter.__table__,
             AudiobookProject.__table__,
             ChapterAudio.__table__,
+            ChapterAudioRun.__table__,
             AudiobookTask.__table__,
             AudiobookDeleteAudit.__table__,
         ],
     )
     return session_factory
+
+
+@pytest.fixture(autouse=True)
+def cleanup_small_persistent_segment_dirs():
+    """清除小 id（本文件 seed 常用 id=1/2）的持久化片段残留，避免跨测试文件污染 deleted_files 断言。"""
+    from types import SimpleNamespace
+
+    from app.services.audiobook import chapter_segment_assets
+
+    for chapter_id in (1, 2):
+        try:
+            chapter_segment_assets.delete_chapter_persistent_segment_assets(
+                SimpleNamespace(id=chapter_id, script_json="[]")
+            )
+        except Exception:
+            pass
+    yield
 
 
 def seed_delete_context(
@@ -280,6 +299,192 @@ def test_delete_chapter_audio_rejects_soft_deleted_parent_project():
         assert db.query(AudiobookDeleteAudit).count() == 0
 
 
+def test_delete_chapter_output_scopes_records_to_the_active_audiobook_project():
+    session_factory = build_session_factory()
+
+    with session_factory() as db:
+        context = seed_delete_context(db)
+        deleted_project = AudiobookProject(
+            project_id=context["project"].id,
+            status="completed",
+            total_chapters=1,
+            completed_chapters=1,
+            deleted_at=datetime.now(timezone.utc),
+        )
+        db.add(deleted_project)
+        db.flush()
+        stale_chapter_audio = ChapterAudio(
+            audiobook_project_id=deleted_project.id,
+            chapter_id=context["chapter"].id,
+            audio_path="audiobooks/project_1/stale_chapter_001.mp3",
+            duration=10.0,
+            file_size=1024,
+        )
+        db.add(stale_chapter_audio)
+        db.commit()
+
+        payload = asyncio.run(
+            delete_chapter_audiobook_output(
+                chapter_id=context["chapter"].id,
+                audiobook_project_id=context["audiobook_project"].id,
+                current_user=context["user"],
+                db=db,
+            )
+        )
+
+        db.refresh(context["chapter_audio"])
+        db.refresh(stale_chapter_audio)
+        assert payload["success"] is True
+        assert payload["deleted_audios"] == 1
+        assert context["chapter_audio"].deleted_at is not None
+        assert stale_chapter_audio.deleted_at is None
+
+
+def test_delete_chapter_output_cancels_active_remix_run(monkeypatch):
+    session_factory = build_session_factory()
+    monkeypatch.setattr(routes_delete, "_delete_physical_files", lambda paths: (0, []))
+
+    with session_factory() as db:
+        context = seed_delete_context(db)
+        remix_run = ChapterAudioRun(
+            audiobook_project_id=context["audiobook_project"].id,
+            chapter_id=context["chapter"].id,
+            run_type="chapter_remix",
+            status="running",
+            current_stage="remixing",
+            progress=0.5,
+            resumable=True,
+        )
+        db.add(remix_run)
+        db.commit()
+
+        payload = asyncio.run(
+            delete_chapter_audiobook_output(
+                audiobook_project_id=context["audiobook_project"].id,
+                chapter_id=context["chapter"].id,
+                current_user=context["user"],
+                db=db,
+            )
+        )
+
+        db.refresh(remix_run)
+        assert payload["success"] is True
+        assert remix_run.status == "cancelled"
+        assert remix_run.current_stage == "cancelled"
+        assert remix_run.resumable is False
+        assert remix_run.error_message == "chapter_output_deleted"
+        assert remix_run.finished_at is not None
+
+
+def test_delete_chapter_output_cancels_first_generation_without_chapter_audio(monkeypatch):
+    from app.services.audiobook.background_jobs_shared import (
+        is_chapter_generation_target_active,
+    )
+
+    session_factory = build_session_factory()
+    monkeypatch.setattr(routes_delete, "_delete_physical_files", lambda paths: (0, []))
+
+    with session_factory() as db:
+        context = seed_delete_context(db)
+        db.delete(context["chapter_audio"])
+        db.commit()
+
+        runs = []
+        for run_type, status_value in (
+            ("full", "running"),
+            ("script_only", "queued"),
+            ("audio_from_scripts", "pending"),
+            ("chapter_remix", "paused"),
+        ):
+            run = ChapterAudioRun(
+                audiobook_project_id=context["audiobook_project"].id,
+                chapter_id=context["chapter"].id,
+                run_type=run_type,
+                status=status_value,
+                current_stage=status_value,
+                resumable=True,
+            )
+            db.add(run)
+            runs.append(run)
+        db.commit()
+
+        payload = asyncio.run(
+            delete_chapter_audiobook_output(
+                audiobook_project_id=context["audiobook_project"].id,
+                chapter_id=context["chapter"].id,
+                current_user=context["user"],
+                db=db,
+            )
+        )
+
+        assert payload["success"] is True
+        assert payload["deleted_audios"] == 0
+        assert payload["cancelled_generation_runs"] == 4
+        assert payload["cancelled_remix_runs"] == 1
+        for run in runs:
+            db.refresh(run)
+            assert run.status == "cancelled"
+            assert run.current_stage == "cancelled"
+            assert run.resumable is False
+            assert run.error_message == "chapter_output_deleted"
+            assert run.finished_at is not None
+            assert is_chapter_generation_target_active(
+                db,
+                audiobook_project_id=context["audiobook_project"].id,
+                chapter_id=context["chapter"].id,
+                run_id=run.id,
+            ) is False
+
+
+def test_delete_chapter_output_invalidates_active_segment_candidates(monkeypatch):
+    session_factory = build_session_factory()
+    monkeypatch.setattr(routes_delete, "_delete_physical_files", lambda paths: (0, []))
+    cleanup_calls = []
+
+    def fake_expire_candidate(run, *, now):
+        cleanup_calls.append(run.id)
+        return {"removed_temp_files": 1}
+
+    monkeypatch.setattr(
+        routes_delete,
+        "expire_chapter_run_temp_assets",
+        fake_expire_candidate,
+        raising=False,
+    )
+
+    with session_factory() as db:
+        context = seed_delete_context(db)
+        candidate_run = ChapterAudioRun(
+            audiobook_project_id=context["audiobook_project"].id,
+            chapter_id=context["chapter"].id,
+            run_type="segment_candidate",
+            status="completed",
+            current_stage="candidate_ready",
+            resumable=True,
+            checkpoint_json={"cached_audio_paths": {"0": "tmp/candidate.mp3"}},
+        )
+        db.add(candidate_run)
+        db.commit()
+
+        payload = asyncio.run(
+            delete_chapter_audiobook_output(
+                audiobook_project_id=context["audiobook_project"].id,
+                chapter_id=context["chapter"].id,
+                current_user=context["user"],
+                db=db,
+            )
+        )
+
+        db.refresh(candidate_run)
+        assert payload["success"] is True
+        assert payload["cancelled_candidate_runs"] == 1
+        assert payload["deleted_candidate_files"] == 1
+        assert cleanup_calls == [candidate_run.id]
+        assert candidate_run.status == "cancelled"
+        assert candidate_run.resumable is False
+        assert candidate_run.error_message == "chapter_output_deleted"
+
+
 def test_delete_project_uses_delete_request_schema():
     session_factory = build_session_factory()
 
@@ -302,6 +507,72 @@ def test_delete_project_uses_delete_request_schema():
         assert payload["success"] is True
         assert audit.delete_reason == "cleanup project"
         assert payload["deleted_files"] == 0
+
+
+def test_delete_project_cancels_active_remix_runs(monkeypatch):
+    session_factory = build_session_factory()
+    monkeypatch.setattr(routes_delete, "_delete_physical_files", lambda paths: (0, []))
+
+    with session_factory() as db:
+        context = seed_delete_context(db)
+        remix_run = ChapterAudioRun(
+            audiobook_project_id=context["audiobook_project"].id,
+            chapter_id=context["chapter"].id,
+            run_type="chapter_remix",
+            status="running",
+            current_stage="remixing",
+            resumable=True,
+        )
+        db.add(remix_run)
+        db.commit()
+
+        payload = asyncio.run(
+            delete_audiobook_project(
+                audiobook_project_id=context["audiobook_project"].id,
+                request=AudiobookDeleteRequest(delete_files=False),
+                current_user=context["user"],
+                db=db,
+            )
+        )
+
+        db.refresh(remix_run)
+        assert payload["success"] is True
+        assert remix_run.status == "cancelled"
+        assert remix_run.resumable is False
+        assert remix_run.error_message == "chapter_output_deleted"
+
+
+def test_delete_chapter_audio_cancels_active_remix_runs(monkeypatch):
+    session_factory = build_session_factory()
+    monkeypatch.setattr(routes_delete, "_delete_physical_files", lambda paths: (0, []))
+
+    with session_factory() as db:
+        context = seed_delete_context(db)
+        remix_run = ChapterAudioRun(
+            audiobook_project_id=context["audiobook_project"].id,
+            chapter_id=context["chapter"].id,
+            run_type="chapter_remix",
+            status="running",
+            current_stage="remixing",
+            resumable=True,
+        )
+        db.add(remix_run)
+        db.commit()
+
+        payload = asyncio.run(
+            delete_chapter_audio(
+                chapter_audio_id=context["chapter_audio"].id,
+                request=ChapterAudioDeleteRequest(delete_files=False),
+                current_user=context["user"],
+                db=db,
+            )
+        )
+
+        db.refresh(remix_run)
+        assert payload["success"] is True
+        assert remix_run.status == "cancelled"
+        assert remix_run.resumable is False
+        assert remix_run.error_message == "chapter_output_deleted"
 
 
 def test_delete_chapter_audio_accepts_deprecated_delete_file_field(monkeypatch):
@@ -483,3 +754,106 @@ def test_list_deleted_chapter_audios_returns_only_current_user_records():
         assert item["delete_reason"] == "cleanup take"
         assert item["file_size"] == 1024
         assert item["total_size"] == 1024
+
+
+def _track_persistent_segment_cleanup(monkeypatch):
+    calls = []
+
+    def fake_delete_persistent_assets(chapter_audio):
+        calls.append(chapter_audio.id)
+        return {"removed_files": 2, "deleted_refs": 1}
+
+    monkeypatch.setattr(
+        routes_delete,
+        "delete_chapter_persistent_segment_assets",
+        fake_delete_persistent_assets,
+    )
+    return calls
+
+
+def test_delete_chapter_audio_removes_persistent_segment_assets(monkeypatch):
+    session_factory = build_session_factory()
+    cleanup_calls = _track_persistent_segment_cleanup(monkeypatch)
+    monkeypatch.setattr(routes_delete, "_delete_physical_files", lambda paths: (0, []))
+
+    with session_factory() as db:
+        context = seed_delete_context(db)
+
+        payload = asyncio.run(
+            delete_chapter_audio(
+                chapter_audio_id=context["chapter_audio"].id,
+                request=ChapterAudioDeleteRequest(delete_files=True),
+                current_user=context["user"],
+                db=db,
+            )
+        )
+
+        assert payload["success"] is True
+        # 删除章节产物时必须同步删除工作台/管线持久化的片段音频
+        assert cleanup_calls == [context["chapter_audio"].id]
+        assert payload["deleted_files"] == 2
+
+
+def test_delete_chapter_audio_keeps_persistent_segments_without_delete_files(monkeypatch):
+    session_factory = build_session_factory()
+    cleanup_calls = _track_persistent_segment_cleanup(monkeypatch)
+
+    with session_factory() as db:
+        context = seed_delete_context(db)
+
+        payload = asyncio.run(
+            delete_chapter_audio(
+                chapter_audio_id=context["chapter_audio"].id,
+                request=ChapterAudioDeleteRequest(delete_files=False),
+                current_user=context["user"],
+                db=db,
+            )
+        )
+
+        assert payload["success"] is True
+        assert cleanup_calls == []
+
+
+def test_delete_chapter_output_removes_persistent_segment_assets(monkeypatch):
+    session_factory = build_session_factory()
+    cleanup_calls = _track_persistent_segment_cleanup(monkeypatch)
+    monkeypatch.setattr(routes_delete, "_delete_physical_files", lambda paths: (0, []))
+
+    with session_factory() as db:
+        context = seed_delete_context(db)
+
+        payload = asyncio.run(
+            delete_chapter_audiobook_output(
+                audiobook_project_id=context["audiobook_project"].id,
+                chapter_id=context["chapter"].id,
+                request=ChapterAudioDeleteRequest(delete_files=True),
+                current_user=context["user"],
+                db=db,
+            )
+        )
+
+        assert payload["success"] is True
+        assert cleanup_calls == [context["chapter_audio"].id]
+        assert payload["deleted_files"] == 2
+
+
+def test_delete_project_removes_persistent_segment_assets_for_all_chapters(monkeypatch):
+    session_factory = build_session_factory()
+    cleanup_calls = _track_persistent_segment_cleanup(monkeypatch)
+    monkeypatch.setattr(routes_delete, "_delete_physical_files", lambda paths: (0, []))
+
+    with session_factory() as db:
+        context = seed_delete_context(db)
+
+        payload = asyncio.run(
+            delete_audiobook_project(
+                audiobook_project_id=context["audiobook_project"].id,
+                request=AudiobookDeleteRequest(delete_files=True),
+                current_user=context["user"],
+                db=db,
+            )
+        )
+
+        assert payload["success"] is True
+        assert cleanup_calls == [context["chapter_audio"].id]
+        assert payload["deleted_files"] == 2

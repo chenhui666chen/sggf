@@ -24,6 +24,7 @@ from app.services.audiobook.tts_model_ids import (
     normalize_audiobook_tts_model,
 )
 from app.services.audiobook.tts_engine_pkg._constants import TTSUserInputError
+from app.services.audiobook.voice_identity_policy import sanitize_fixed_voice_performance_text
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +49,16 @@ SEED_TTS_API_KEY_ENV_NAMES = (
     "VOLCENGINE_SPEECH_API_KEY",
     "DOUBAO_SPEECH_API_KEY",
 )
+# MiniMax 同音色有限重试：总共 3 次调用（非"初次+3次"），退避 0s/1s/3s。
+# 全程只用原请求音色，绝不切换候选音色（音色属于角色身份，不能因网络失败换人）。
+MINIMAX_TTS_MAX_ATTEMPTS = 3
+MINIMAX_TTS_RETRY_BACKOFF_SECONDS = (0.0, 1.0, 3.0)
+# 分离连接/读取/写入/连接池超时，避免笼统 60s 让连接挂起也占用读取预算。
+MINIMAX_TTS_TIMEOUT = {"connect": 10.0, "read": 60.0, "write": 15.0, "pool": 10.0}
+# 可重试的 HTTP 状态码：限流与网关/服务端瞬时错误。
+MINIMAX_TTS_RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 504}
 QWEN_TTS_PRIORITY_INSTRUCTION_PREFIXES = (
+    "音色约束：",
     "情绪目标：",
     "停顿策略：",
     "重读词：",
@@ -63,6 +73,7 @@ QWEN_TTS_PRIORITY_INSTRUCTION_PREFIXES = (
     "场景氛围：",
     "身份设定：",
 )
+QWEN_TTS_COMPACT_IDENTITY_INSTRUCTION = "保持已选音色身份和基础声线，仅调整表演"
 QWEN_TTS_LOW_PRIORITY_INSTRUCTION_PREFIXES = (
     "旁白模板：",
     "对白模板：",
@@ -82,6 +93,8 @@ def _split_qwen_instruction_parts(instructions: str) -> List[str]:
 
 
 def _qwen_instruction_priority(part: str) -> int:
+    if part == QWEN_TTS_COMPACT_IDENTITY_INSTRUCTION:
+        return -1
     for index, prefix in enumerate(QWEN_TTS_PRIORITY_INSTRUCTION_PREFIXES):
         if part.startswith(prefix):
             return index
@@ -93,12 +106,27 @@ def _qwen_instruction_priority(part: str) -> int:
 def _refit_qwen_structured_instructions(instructions: str, budget: int) -> str:
     parts = _split_qwen_instruction_parts(instructions)
     if len(parts) <= 1:
-        return str(instructions or "")[:budget].strip()
+        single = str(instructions or "").strip()
+        if single.startswith("音色约束：") and len(single) > budget:
+            return (
+                QWEN_TTS_COMPACT_IDENTITY_INSTRUCTION
+                if len(QWEN_TTS_COMPACT_IDENTITY_INSTRUCTION) <= budget
+                else ""
+            )
+        return single[:budget].strip()
+
+    normalized_parts: List[str] = []
+    for part in parts:
+        if part.startswith("音色约束："):
+            if len(QWEN_TTS_COMPACT_IDENTITY_INSTRUCTION) <= budget:
+                normalized_parts.append(QWEN_TTS_COMPACT_IDENTITY_INSTRUCTION)
+            continue
+        normalized_parts.append(part)
 
     prioritized_parts = [
         part
         for _, part in sorted(
-            enumerate(parts),
+            enumerate(normalized_parts),
             key=lambda item: (_qwen_instruction_priority(item[1]), item[0]),
         )
     ]
@@ -208,11 +236,9 @@ def _extract_stepaudio_error_message(response) -> str:
 
 
 def _provider_prompt_from_snapshot(voice_params: Dict[str, Any]) -> Dict[str, Any]:
-    snapshot = voice_params.get("provider_prompt_snapshot")
-    if not isinstance(snapshot, dict):
-        return {}
-    provider_prompt = snapshot.get("provider_prompt")
-    return dict(provider_prompt) if isinstance(provider_prompt, dict) else {}
+    """Provider snapshots are audit artifacts, never synthesis inputs."""
+
+    return {}
 
 
 def _snapshot_instructions(voice_params: Dict[str, Any]) -> str:
@@ -828,14 +854,6 @@ class AliyunMixin:
                 pause_params["pause_after"] = pause_after
             return pause_params
 
-        rate = _to_float(voice_params.get("rate", voice_params.get("speed", 1.0)), 1.0)
-        rate = max(0.5, min(2.0, rate))
-
-        pitch = _to_float(voice_params.get("pitch", 1.0), 1.0)
-        if pitch > 10:
-            pitch = pitch / 50.0
-        pitch = max(0.5, min(2.0, pitch))
-
         volume = _to_int(voice_params.get("volume", 50), 50)
         volume = max(0, min(100, volume))
 
@@ -853,8 +871,8 @@ class AliyunMixin:
             "format": audio_format,
             "sample_rate": sample_rate,
             "volume": volume,
-            "rate": rate,
-            "pitch": pitch,
+            # CosyVoice 使用 instruction 表达语速；协议字段保持中性，避免二次变速。
+            "rate": 1.0,
             "enable_ssml": self._is_ssml_text(text),
         }
         parameters.update(_cosyvoice_pause_parameters(voice_params))
@@ -1078,29 +1096,16 @@ class AliyunMixin:
         return b"".join(audio_chunks)
 
     def _build_minimax_voice_candidates(self, voice: str) -> List[str]:
-        from app.services.audiobook.minimax_voice_clone_client import is_minimax_custom_voice_id
+        """返回 MiniMax 请求音色候选列表。
 
+        音色一致性不变量：一次生成中不得未经用户确认替换请求音色。
+        因此这里只返回精确请求音色，不做任何字符串推测变换
+        （如 female-qn-x→female-x、取最后连字符段、硬编码 known_working_voices）。
+        这些变换无法假定语义等价，会在网络失败时把角色换成另一个人。
+        如确有供应商历史别名，须维护显式且经验证的映射表，不得靠字符串规则猜测。
+        """
         requested_voice = str(voice or "").strip()
-        if is_minimax_custom_voice_id(requested_voice):
-            return [requested_voice]
-
-        known_working_voices = [
-            "male-qn-qingse",
-            "Chinese (Mandarin)_News_Anchor",
-        ]
-        candidates = [requested_voice]
-        if candidates[0].startswith("female-qn-"):
-            candidates.append(candidates[0].replace("female-qn-", "female-"))
-        elif candidates[0].startswith("male-qn-"):
-            candidates.append(candidates[0].replace("male-qn-", "male-"))
-
-        if "-" in candidates[0]:
-            parts = candidates[0].split("-")
-            if len(parts) >= 2:
-                candidates.append(parts[-1])
-
-        candidates.extend(known_working_voices)
-        return [item for item in dict.fromkeys(candidates) if item]
+        return [requested_voice] if requested_voice else []
 
     def _build_minimax_http_payload(
         self,
@@ -1120,14 +1125,11 @@ class AliyunMixin:
         if isinstance(basic_settings, dict):
             speed_source = basic_settings.get("speed", voice_params.get("rate", voice_params.get("speed", 1.0)))
             volume_source = basic_settings.get("volume", voice_params.get("volume", 50))
-            pitch_source = basic_settings.get("pitch", voice_params.get("pitch", 0))
         else:
             speed_source = voice_params.get("rate", voice_params.get("speed", 1.0))
             volume_source = voice_params.get("volume", 50)
-            pitch_source = voice_params.get("pitch", 0)
         speed = float(speed_source or 1.0)
         volume = int(volume_source or 50)
-        pitch = int(pitch_source or 0)
         return {
             "input": {
                 "action": "tts",
@@ -1137,7 +1139,8 @@ class AliyunMixin:
                     "voice_id": voice,
                     "speed": max(0.0, min(2.0, speed)),
                     "vol": max(0.0, min(100.0, volume)) / 100.0,
-                    "pitch": max(-100, min(100, pitch)),
+                    # MiniMax 要求该字段存在；固定为中性值，避免片段参数改变已选音色。
+                    "pitch": 0,
                 },
                 "audio_setting": {
                     "sample_rate": 16000,
@@ -1173,12 +1176,13 @@ class AliyunMixin:
             if text or not _to_bool_flag(voice_params.get("optimize_text_preview")):
                 messages.append({"role": "assistant", "content": text})
         elif style_control.mode == "mimo_audio_tags":
-            messages = [
+            messages = list(style_control.messages)
+            messages.append(
                 {
                     "role": "assistant",
                     "content": prepare_text_for_style_control(text, style_control),
                 }
-            ]
+            )
         else:
             messages = list(style_control.messages)
             messages.append({"role": "assistant", "content": text})
@@ -1284,9 +1288,6 @@ class AliyunMixin:
         response_format = str(voice_params.get("format") or voice_params.get("response_format") or "").strip().lower()
         if response_format in STEPAUDIO_TTS_RESPONSE_FORMATS:
             payload["response_format"] = response_format
-        speed = voice_params.get("speed")
-        if isinstance(speed, (int, float)) and not isinstance(speed, bool) and 0.5 <= float(speed) <= 2.0:
-            payload["speed"] = float(speed)
         volume = voice_params.get("volume")
         if isinstance(volume, (int, float)) and not isinstance(volume, bool) and 0.1 <= float(volume) <= 2.0:
             payload["volume"] = float(volume)
@@ -1324,7 +1325,7 @@ class AliyunMixin:
         }
         if clean_preview_text and clean_sample_text:
             payload["sample_text"] = clean_preview_text
-        clean_instruction = str(instruction or "").strip()
+        clean_instruction, _ = sanitize_fixed_voice_performance_text(instruction)
         if clean_instruction:
             payload["instruction"] = clean_instruction[:STEPAUDIO_TTS_INSTRUCTION_MAX_CHARS]
         return payload
@@ -1342,17 +1343,6 @@ class AliyunMixin:
 
     def _seed_tts_rate_from_ratio(self, ratio: float) -> int:
         return int(round(max(-50.0, min(100.0, (ratio - 1.0) * 100.0))))
-
-    def _seed_tts_pitch_from_ui_value(self, value: Any) -> int:
-        try:
-            pitch = float(value)
-        except (TypeError, ValueError):
-            return 0
-        if -12 <= pitch <= 12:
-            return int(round(pitch))
-        if 0 <= pitch <= 100:
-            return int(round(max(-12.0, min(12.0, (pitch - 50.0) / 50.0 * 12.0))))
-        return 0
 
     def _build_seed_tts_context_texts(
         self,
@@ -1378,12 +1368,31 @@ class AliyunMixin:
                 for item in context_texts
                 if str(item or "").strip()
             ]
-        instruction = str(
-            voice_params.get("instructions")
-            or voice_params.get("instruction")
-            or ""
-        ).strip()
-        return [instruction] if instruction else []
+        return []
+
+    def _build_seed_tts_style_request(
+        self,
+        *,
+        model: str,
+        text: str,
+        voice_params: Dict[str, Any],
+    ) -> tuple[Any, str, List[str], bool]:
+        """Compile Seed-TTS text controls exclusively from server-owned style data."""
+
+        style_control = build_model_style_control(
+            model,
+            voice_params,
+            str(voice_params.get("emotion") or "neutral"),
+        )
+        prepared_text = prepare_text_for_style_control(str(text or ""), style_control)
+        context_texts = self._build_seed_tts_context_texts(
+            voice_params,
+            style_control,
+        )
+        use_tag_parser = _to_bool_flag(
+            style_control.provider_fields.get("use_tag_parser")
+        )
+        return style_control, prepared_text, context_texts, use_tag_parser
 
     def _build_seed_tts_http_payload(
         self,
@@ -1402,21 +1411,14 @@ class AliyunMixin:
         if not isinstance(sample_rate, int) or isinstance(sample_rate, bool) or sample_rate not in SEED_TTS_SAMPLE_RATES:
             sample_rate = 24000
 
-        speed = self._seed_tts_ratio_from_ui_value(voice_params.get("speed", voice_params.get("rate", 1.0)))
         volume = self._seed_tts_ratio_from_ui_value(voice_params.get("volume", 50))
-        pitch = self._seed_tts_pitch_from_ui_value(voice_params.get("pitch", 50))
-        snapshot_prefix = _snapshot_text_prefix(voice_params)
-        if snapshot_prefix:
-            prepared_text = f"{snapshot_prefix}{str(text or '')}"
-            style_control = None
-        else:
-            style_control = build_model_style_control(
-                normalized_model,
-                voice_params,
-                str(voice_params.get("emotion") or "neutral"),
+        _, prepared_text, context_texts, use_tag_parser = (
+            self._build_seed_tts_style_request(
+                model=normalized_model,
+                text=text,
+                voice_params=voice_params,
             )
-            prepared_text = prepare_text_for_style_control(str(text or ""), style_control)
-        context_texts = self._build_seed_tts_context_texts(voice_params, style_control)
+        )
 
         req_params: Dict[str, Any] = {
             "model": normalized_model,
@@ -1424,11 +1426,6 @@ class AliyunMixin:
             "text_type": "plain",
             "with_timestamp": 0,
         }
-        use_tag_parser = _to_bool_flag(voice_params.get("use_tag_parser")) or (
-            _to_bool_flag(style_control.provider_fields.get("use_tag_parser"))
-            if style_control is not None
-            else False
-        )
         if context_texts or use_tag_parser:
             req_params["additions"] = _build_seed_tts_additions(
                 context_texts=context_texts,
@@ -1438,11 +1435,10 @@ class AliyunMixin:
         req_params["audio_params"] = {
             "format": response_format,
             "sample_rate": sample_rate,
-            "speech_rate": self._seed_tts_rate_from_ratio(speed),
+            # Seed-TTS 通过 context_texts / audio tags 表达语速，数值字段固定中性。
+            "speech_rate": 0,
             "loudness_rate": self._seed_tts_rate_from_ratio(volume),
         }
-        if pitch:
-            req_params["post_process"] = {"pitch": pitch}
 
         return {
             "user": {"uid": str(voice_params.get("uid") or "audiobook")},
@@ -1622,11 +1618,7 @@ class AliyunMixin:
             sample_rate = 24000
 
         # Convert UI values to API ranges
-        speed = self._seed_tts_ratio_from_ui_value(voice_params.get("speed", voice_params.get("rate", 1.0)))
         volume = self._seed_tts_ratio_from_ui_value(voice_params.get("volume", 50))
-        pitch = self._seed_tts_pitch_from_ui_value(voice_params.get("pitch", 50))
-
-        speech_rate = self._seed_tts_rate_from_ratio(speed)
         loudness_rate = self._seed_tts_rate_from_ratio(volume)
 
         # Build req_params
@@ -1637,23 +1629,29 @@ class AliyunMixin:
                 "audio_params": {
                     "format": response_format,
                     "sample_rate": sample_rate,
-                    "speech_rate": speech_rate,
+                    "speech_rate": 0,
                     "loudness_rate": loudness_rate,
                 },
             },
         }
 
-        # Add optional parameters
-        context_texts = self._build_seed_tts_context_texts(voice_params, None)
+        # Add optional parameters via additions JSON string (official protocol)
+        _, prepared_text, context_texts, use_tag_parser = (
+            self._build_seed_tts_style_request(
+                model=model,
+                text=text,
+                voice_params=voice_params,
+            )
+        )
+        additions_dict: Dict[str, Any] = {}
         if context_texts:
-            base_request["req_params"]["context_texts"] = context_texts
-
-        use_tag_parser = _to_bool_flag(voice_params.get("use_tag_parser"))
+            additions_dict["context_texts"] = context_texts
         if use_tag_parser:
-            base_request["req_params"]["use_tag_parser"] = True
-
-        if pitch:
-            base_request["req_params"]["post_process"] = {"pitch": pitch}
+            additions_dict["use_tag_parser"] = True
+        if additions_dict:
+            base_request["req_params"]["additions"] = json.dumps(
+                additions_dict, ensure_ascii=False, separators=(",", ":")
+            )
 
         websocket = None
         audio_data = bytearray()
@@ -1694,7 +1692,7 @@ class AliyunMixin:
             # Send TaskRequest with full text
             task_request_data = copy.deepcopy(base_request)
             task_request_data["event"] = EventType.TaskRequest
-            task_request_data["req_params"]["text"] = text
+            task_request_data["req_params"]["text"] = prepared_text
 
             await task_request(
                 websocket,
@@ -2002,21 +2000,40 @@ class AliyunMixin:
         voice: str,
         voice_params: Dict[str, Any],
     ) -> bytes:
-        """调用 MiniMax TTS via DashScope HTTP API"""
+        """调用 MiniMax TTS via DashScope HTTP API。
+
+        音色一致性：全程只用原请求音色，按错误类别做同音色有限重试，
+        绝不切换候选音色。仅重试瞬时错误（超时/限流/网关与服务端 5xx/
+        成功状态但响应为空或临时不可用）；鉴权、参数、音色不存在等
+        永久性错误立即抛出，不重试。
+        """
         import httpx
 
-        voice_formats = self._build_minimax_voice_candidates(voice)
-        logger.info(f"尝试语音格式: {voice_formats}")
+        requested_voice = str(voice or "").strip()
+        if not requested_voice:
+            raise TTSUserInputError("MiniMax TTS 缺少请求音色")
 
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            for try_voice in voice_formats:
+        timeout = httpx.Timeout(**MINIMAX_TTS_TIMEOUT)
+        last_error: Optional[Exception] = None
+
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            for attempt in range(MINIMAX_TTS_MAX_ATTEMPTS):
+                if attempt > 0:
+                    backoff = MINIMAX_TTS_RETRY_BACKOFF_SECONDS[
+                        min(attempt, len(MINIMAX_TTS_RETRY_BACKOFF_SECONDS) - 1)
+                    ]
+                    if backoff > 0:
+                        await asyncio.sleep(backoff)
                 try:
-                    logger.info(f"尝试语音: {try_voice}")
+                    logger.info(
+                        f"MiniMax TTS 请求 (语音: {requested_voice}, "
+                        f"第 {attempt + 1}/{MINIMAX_TTS_MAX_ATTEMPTS} 次)"
+                    )
 
                     payload = self._build_minimax_http_payload(
                         model=model,
                         text=text,
-                        voice=try_voice,
+                        voice=requested_voice,
                         voice_params=voice_params,
                     )
 
@@ -2031,26 +2048,73 @@ class AliyunMixin:
 
                     if response.status_code == 200:
                         data = response.json()
-                        logger.info(f"百炼 MiniMax 响应 (语音: {try_voice}): {str(data)[:500]}")
+                        logger.info(
+                            f"百炼 MiniMax 响应 (语音: {requested_voice}): {str(data)[:500]}"
+                        )
 
                         if "output" in data and "base_resp" in data["output"]:
                             base_resp = data["output"]["base_resp"]
                             if "status_code" in base_resp and base_resp["status_code"] != 0:
-                                logger.warning(f"语音 {try_voice} 失败: {base_resp}")
+                                # 供应商业务状态码非 0：视为临时不可用，可重试。
+                                last_error = RuntimeError(
+                                    f"MiniMax 业务状态码非 0 (语音 {requested_voice}): {base_resp}"
+                                )
+                                logger.warning(
+                                    f"MiniMax 业务失败 (语音: {requested_voice}, "
+                                    f"第 {attempt + 1}/{MINIMAX_TTS_MAX_ATTEMPTS} 次): {base_resp}"
+                                )
                                 continue
 
                         audio_result = await self._try_parse_minimax_audio(data, client)
                         if audio_result:
-                            logger.info(f"成功! 使用语音: {try_voice}")
+                            logger.info(f"成功! 使用语音: {requested_voice}")
                             return audio_result
-                    else:
-                        logger.warning(f"语音 {try_voice} 返回 {response.status_code}: {response.text[:200]}")
+                        # 成功状态但响应体为空：视为临时不可用，可重试。
+                        last_error = RuntimeError(
+                            f"MiniMax 返回 200 但未解析到音频数据 (语音 {requested_voice})"
+                        )
+                        logger.warning(
+                            f"MiniMax 响应无音频 (语音: {requested_voice}, "
+                            f"第 {attempt + 1}/{MINIMAX_TTS_MAX_ATTEMPTS} 次)"
+                        )
+                        continue
 
-                except Exception as e:
-                    logger.warning(f"尝试语音 {try_voice} 时出错: {e}")
+                    if response.status_code in MINIMAX_TTS_RETRYABLE_STATUS_CODES:
+                        last_error = RuntimeError(
+                            f"MiniMax HTTP {response.status_code} (语音 {requested_voice}): "
+                            f"{response.text[:200]}"
+                        )
+                        logger.warning(
+                            f"MiniMax 返回可重试状态 {response.status_code} "
+                            f"(语音: {requested_voice}, 第 {attempt + 1}/{MINIMAX_TTS_MAX_ATTEMPTS} 次): "
+                            f"{response.text[:200]}"
+                        )
+                        continue
+
+                    # 401/403 鉴权、4xx 参数/音色不存在等永久性错误：不重试。
+                    raise RuntimeError(
+                        f"MiniMax TTS 请求失败 HTTP {response.status_code} "
+                        f"(语音 {requested_voice}): {response.text[:300]}"
+                    )
+
+                except (RuntimeError, TTSUserInputError):
+                    # 上面主动抛出的永久性错误，直接向上传播，不重试。
+                    raise
+                except Exception as exc:
+                    # 传输层异常（ConnectTimeout/ReadTimeout/WriteTimeout/PoolTimeout/
+                    # 连接错误/协议错误等）：记录异常类型与 repr，可重试。
+                    last_error = exc
+                    logger.warning(
+                        f"MiniMax TTS 请求异常 (语音: {requested_voice}, "
+                        f"第 {attempt + 1}/{MINIMAX_TTS_MAX_ATTEMPTS} 次) "
+                        f"{type(exc).__name__}: {exc!r}"
+                    )
                     continue
 
-            raise Exception("所有 MiniMax 语音格式尝试均失败，尝试的语音: " + str(voice_formats))
+        raise RuntimeError(
+            f"MiniMax TTS 经 {MINIMAX_TTS_MAX_ATTEMPTS} 次尝试仍失败 "
+            f"(语音 {requested_voice}): {type(last_error).__name__}: {last_error!r}"
+        )
 
     async def _try_parse_minimax_audio(self, data: dict, client) -> Optional[bytes]:
         """解析 MiniMax 响应中的音频数据"""

@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import hashlib
 import json
@@ -794,13 +794,38 @@ def update_chapter_run_state(
     completed_segment_count: Optional[int] = None,
     checkpoint_patch: Optional[Dict[str, Any]] = None,
     error_message: Optional[str] = None,
+    run_id: Optional[int] = None,
 ) -> None:
-    run = ChapterAudioRunRepository.get_latest_run(
-        db,
-        audiobook_project_id=audiobook_project_id,
-        chapter_id=chapter_id,
-        run_type=run_type,
-    )
+    # 优先按具体 run_id 定位，避免早启动、晚完成的任务覆盖新任务状态；
+    # 未提供 run_id 时兼容旧行为（同类型最新 run）
+    run = None
+    if run_id is not None:
+        run = ChapterAudioRunRepository.get_run_by_id(db, run_id=run_id)
+        if run is not None and (
+            run.audiobook_project_id != audiobook_project_id
+            or run.chapter_id != chapter_id
+        ):
+            run = None
+    if run is None:
+        run = ChapterAudioRunRepository.get_latest_run(
+            db,
+            audiobook_project_id=audiobook_project_id,
+            chapter_id=chapter_id,
+            run_type=run_type,
+        )
+    if (
+        run is not None
+        and status not in {"cancelled", "canceled"}
+        and str(run.status or "").strip().lower() in {"cancelled", "canceled"}
+        and not bool(run.resumable)
+        and str(run.error_message or "").strip() == "chapter_output_deleted"
+    ):
+        logger.info(
+            "章节产物已删除，忽略后台任务状态回写: run_id=%s requested_status=%s",
+            getattr(run, "id", None),
+            status,
+        )
+        return
     if not run:
         run = ChapterAudioRunRepository.create_run(
             db,
@@ -817,6 +842,12 @@ def update_chapter_run_state(
         run.expires_at = utc_now() + timedelta(hours=RESUME_WINDOW_HOURS)
     elif status == "completed":
         run.expires_at = None
+    if status in {"cancelled", "canceled"} and error_message in {
+        "chapter_audio_not_found",
+        "chapter_output_deleted",
+    }:
+        # 章节产物已被删除时，这次 run 不应再出现在可恢复任务列表中。
+        run.resumable = False
 
     checkpoint_json = build_run_checkpoint_document(
         db,
@@ -849,7 +880,7 @@ def update_chapter_run_state(
         changes["completed_segment_count"] = completed_segment_count
     if status == "running" and run.started_at is None:
         changes["started_at"] = utc_now()
-    if status in {"completed", "failed"}:
+    if status in {"completed", "failed", "cancelled", "canceled"}:
         changes["finished_at"] = utc_now()
     ChapterAudioRunRepository.update_run(db, run, **changes)
 
@@ -1071,6 +1102,24 @@ def _build_generation_checkpoint_payload_for_run(
     completed_indices = _extract_checkpoint_segment_indices(checkpoint_data)
     cached_paths = extract_cached_segment_paths(checkpoint_data)
 
+    raw_failed_indices = checkpoint_data.get("failed_segment_indices")
+    failed_segment_indices: List[int] = []
+    if isinstance(raw_failed_indices, list):
+        for raw_index in raw_failed_indices:
+            try:
+                failed_index = int(raw_index)
+            except Exception:
+                continue
+            if failed_index >= 0:
+                failed_segment_indices.append(failed_index)
+        failed_segment_indices = sorted(set(failed_segment_indices))
+    failed_segment_errors = checkpoint_data.get("failed_segment_errors")
+    if not isinstance(failed_segment_errors, dict):
+        failed_segment_errors = {}
+    missing_segments = checkpoint_data.get("missing_segments")
+    if not isinstance(missing_segments, list):
+        missing_segments = []
+
     if chapter_run and (chapter_run.total_segment_count or 0) > 0:
         total_segments = int(chapter_run.total_segment_count or 0)
     elif chapter_audio and (chapter_audio.segment_count or 0) > 0:
@@ -1123,6 +1172,9 @@ def _build_generation_checkpoint_payload_for_run(
         "completed_segments": completed_count,
         "completed_segment_indices": completed_indices,
         "cached_audio_paths": cached_paths,
+        "failed_segment_indices": failed_segment_indices,
+        "failed_segment_errors": failed_segment_errors,
+        "missing_segments": missing_segments,
         "can_resume": can_resume,
         "estimated_remaining_time": estimated_remaining,
         "run_id": chapter_run.id if chapter_run else None,

@@ -14,6 +14,14 @@ from app.services.audiobook.tts_model_ids import (
     normalize_audiobook_tts_emotion,
 )
 from app.services.audiobook.voice_description_policy import sanitize_voice_description
+from app.services.audiobook.voice_identity_policy import (
+    extract_fixed_voice_temporary_hoarseness_instructions,
+    filter_fixed_voice_identity_tags,
+    is_voice_design_creation_request,
+    sanitize_fixed_voice_performance_text,
+    sanitize_fixed_voice_prompt_params,
+    stable_director_role,
+)
 
 
 @dataclass(frozen=True)
@@ -30,6 +38,12 @@ class _CommonPromptContext:
     delivery_plan_parts: List[str] = field(default_factory=list)
 
 
+_TEMPORARY_TEXTURE_TERMS = (
+    ("沙哑", ("沙哑", "嘶哑", "烟嗓", "hoarse", "raspy", "husky")),
+    ("气声", ("气声", "气音", "气息微弱")),
+)
+
+
 def _text(value: Any) -> str:
     return str(value or "").strip()
 
@@ -44,6 +58,73 @@ def _unique_nonempty(values: List[Any]) -> List[str]:
         result.append(value)
         seen.add(value)
     return result
+
+
+def performance_instruction_source(voice_params: Dict[str, Any]) -> str:
+    """Collect every segment-level surface that can ask the model to change delivery."""
+
+    plan = voice_params.get("delivery_plan")
+    plan = plan if isinstance(plan, dict) else {}
+    values: List[Any] = [
+        voice_params.get("performance_notes"),
+        voice_params.get("instructions"),
+        voice_params.get("instruction"),
+        plan.get("director_guidance"),
+        plan.get("style_instruction"),
+        *(_coerce_string_list(voice_params.get("style_tags"))),
+        *(_coerce_string_list(voice_params.get("inline_audio_tags"))),
+    ]
+    return "；".join(_unique_nonempty(values))
+
+
+def fixed_voice_identity_instruction(model: Any, performance_notes: Any = "") -> str:
+    """Keep segment performance controls subordinate to the selected voice."""
+
+    if model is None:
+        return ""
+    capabilities = get_audiobook_tts_style_capabilities(model)
+    if capabilities.get("preferred_style_control_mode") == "voice_design":
+        return ""
+    if not capabilities.get("supports_voice_description"):
+        return ""
+
+    notes = _text(performance_notes)
+    has_authorized_hoarseness = bool(
+        extract_fixed_voice_temporary_hoarseness_instructions(notes)
+    )
+    temporary_textures: List[str] = []
+    blocked_textures: List[str] = []
+    for label, aliases in _TEMPORARY_TEXTURE_TERMS:
+        if not any(alias in notes for alias in aliases):
+            continue
+        if label != "沙哑" or has_authorized_hoarseness:
+            temporary_textures.append(label)
+        else:
+            blocked_textures.append(label)
+    model_family = _text(capabilities.get("model_family"))
+    if model_family == "cosyvoice":
+        instruction = "原音色不变;仅表演"
+        if temporary_textures:
+            instruction += f";{'/'.join(temporary_textures)}=原声轻度"
+        if blocked_textures:
+            instruction += f";{'/'.join(blocked_textures)}=非临时忽略"
+        return instruction
+
+    instruction = (
+        "音色约束：保持已选音色的说话人身份、年龄感、基础声线和辨识度不变，"
+        "只在原音色基础上调整当前片段表演。"
+    )
+    if temporary_textures:
+        instruction += (
+            f"{'、'.join(temporary_textures)}等临时质感仅在原音色基础上轻度表现，"
+            "不改变说话人身份。"
+        )
+    if blocked_textures:
+        instruction += (
+            f"未明确为短暂状态的{'、'.join(blocked_textures)}要求应忽略，"
+            "不得据此改变基础音色。"
+        )
+    return instruction
 
 
 def _measure_text(value: str) -> int:
@@ -185,7 +266,10 @@ def _delivery_plan_pause_seconds(plan: Dict[str, Any]) -> float | None:
     return None
 
 
-def render_stepaudio_inline_prefix(voice_params: Dict[str, Any], emotion: str = "neutral") -> str:
+def build_stepaudio_inline_prefix(
+    voice_params: Dict[str, Any],
+    emotion: str = "neutral",
+) -> tuple[str, List[str]]:
     delivery_plan = voice_params.get("delivery_plan") if isinstance(voice_params.get("delivery_plan"), dict) else {}
     pause_seconds = (
         _coerce_pause_seconds(voice_params.get("pause_before"))
@@ -194,12 +278,18 @@ def render_stepaudio_inline_prefix(voice_params: Dict[str, Any], emotion: str = 
     inline_tags = _unique_nonempty(_coerce_string_list(voice_params.get("inline_audio_tags")))
     inline_tags.extend(tag for tag in delivery_plan_inline_tags(delivery_plan) if tag not in inline_tags)
     inline_tags.extend(tag for tag in _coerce_string_list(delivery_plan.get("emotion_mix")) if tag not in inline_tags)
+    inline_tags, blocked_identity_tags = filter_fixed_voice_identity_tags(inline_tags)
 
     chunks: List[str] = []
     if pause_seconds is not None:
         chunks.append(f"（停顿{_format_pause_seconds(pause_seconds)}秒）")
     chunks.extend(f"（{tag}）" for tag in inline_tags)
-    return "".join(chunks)
+    return "".join(chunks), blocked_identity_tags
+
+
+def render_stepaudio_inline_prefix(voice_params: Dict[str, Any], emotion: str = "neutral") -> str:
+    prefix, _ = build_stepaudio_inline_prefix(voice_params, emotion)
+    return prefix
 
 
 def _delivery_plan_parts_matching(parts: List[str], prefixes: tuple[str, ...]) -> List[str]:
@@ -219,11 +309,20 @@ def _build_common_prompt_context(
     target_emotion = _text(voice_params.get("instruct_emotion")) or _text(emotion)
     if model is not None:
         target_emotion = normalize_audiobook_tts_emotion(target_emotion, model)
+    requested_role = _text(voice_params.get("instruct_role"))
+    if model is not None and get_audiobook_tts_style_capabilities(model).get(
+        "preferred_style_control_mode"
+    ) != "voice_design":
+        requested_role = stable_director_role(
+            segment_type=voice_params.get("segment_type"),
+            segment_speaker=voice_params.get("segment_speaker"),
+            requested_role=requested_role,
+        )
     return _CommonPromptContext(
         voice_description=sanitize_voice_description(voice_params.get("voice_description")),
         segment_speaker=_text(voice_params.get("segment_speaker")),
         segment_type=_text(voice_params.get("segment_type")),
-        role=_text(voice_params.get("instruct_role")),
+        role=requested_role,
         identity=_text(voice_params.get("instruct_identity")),
         scene=_text(voice_params.get("instruct_scene")),
         target_emotion=target_emotion,
@@ -236,7 +335,7 @@ def _build_common_prompt_context(
 
 
 def _build_narration_parts(context: _CommonPromptContext) -> List[str]:
-    parts: List[str] = ["旁白模板：讲述者视角，信息清晰，语气稳定"]
+    parts: List[str] = ["旁白模板：讲述者视角，信息清晰，情感随剧情起伏"]
     rhythm_parts = _delivery_plan_parts_matching(context.delivery_plan_parts, ("韵律控制：", "停顿策略："))
     remaining_plan_parts = _delivery_plan_parts_except(context.delivery_plan_parts, ("韵律控制：", "停顿策略："))
 
@@ -377,7 +476,14 @@ def _cosyvoice_short_action_cue(notes: str) -> str:
         selected = clauses[:1]
     elif len(selected) > 1:
         selected = [selected[0], selected[-1]]
-    return _compact_cosyvoice_value(",".join(selected[:2]), 28)
+    cue = ",".join(selected[:2])
+    cue = (
+        cue.replace("先压住", "压住")
+        .replace("结尾加重", "加重")
+        .replace("但不要喊", "不喊")
+        .replace("但别喊", "不喊")
+    )
+    return _compact_cosyvoice_value(cue, 20)
 
 
 def _cosyvoice_pause_cue(plan: Dict[str, Any], stress_words: List[str]) -> str:
@@ -398,17 +504,6 @@ def _build_cosyvoice_parts(context: _CommonPromptContext) -> List[str]:
     plan = dict(context.delivery_plan or {})
     parts: List[str] = []
 
-    if context.target_emotion and context.target_emotion != "neutral":
-        parts.append(f"emotion={context.target_emotion}")
-
-    stress_words = _coerce_string_list(plan.get("stress_words"))
-    pause_cue = _cosyvoice_pause_cue(plan, stress_words)
-    if pause_cue:
-        parts.append(f"pause={pause_cue}")
-
-    if stress_words:
-        parts.append("重读=" + _compact_cosyvoice_value("、".join(stress_words), 26))
-
     action_cue = _cosyvoice_short_action_cue(
         context.performance_notes
         or _text(plan.get("director_guidance"))
@@ -416,6 +511,17 @@ def _build_cosyvoice_parts(context: _CommonPromptContext) -> List[str]:
     )
     if action_cue:
         parts.append(f"act={action_cue}")
+
+    if context.target_emotion and context.target_emotion != "neutral":
+        parts.append(f"emotion={context.target_emotion}")
+
+    stress_words = _coerce_string_list(plan.get("stress_words"))
+    if stress_words:
+        parts.append("重读=" + _compact_cosyvoice_value("、".join(stress_words), 26))
+
+    pause_cue = _cosyvoice_pause_cue(plan, stress_words)
+    if pause_cue:
+        parts.append(f"pause={pause_cue}")
 
     delivery_mode = _text(plan.get("delivery_mode"))
     if delivery_mode and delivery_mode not in {"narration", "dialogue", "monologue"}:
@@ -471,18 +577,32 @@ def build_common_prompt_parts(
     *,
     model: Any = None,
 ) -> List[str]:
-    context = _build_common_prompt_context(voice_params, emotion, model=model)
+    prompt_params = dict(voice_params or {})
+    prompt_emotion = emotion
+    if model is not None and not is_voice_design_creation_request(model, prompt_params):
+        prompt_params, _ = sanitize_fixed_voice_prompt_params(prompt_params)
+        prompt_params.pop("voice_description", None)
+        prompt_emotion, _ = sanitize_fixed_voice_performance_text(emotion)
+        prompt_emotion = prompt_emotion or "neutral"
+    context = _build_common_prompt_context(prompt_params, prompt_emotion, model=model)
     model_family = _prompt_model_family(model)
     if model_family == "cosyvoice":
-        return _build_cosyvoice_parts(context)
-    if model_family == "stepaudio":
-        return _build_stepaudio_parts(context)
+        parts = _build_cosyvoice_parts(context)
+    elif model_family == "stepaudio":
+        parts = _build_stepaudio_parts(context)
+    else:
+        segment_type = context.segment_type.lower()
+        if segment_type == "narration":
+            parts = _build_narration_parts(context)
+        elif segment_type in {"monologue", "inner_monologue"}:
+            parts = _build_monologue_parts(context)
+        elif segment_type == "dialogue":
+            parts = _build_dialogue_parts(context)
+        else:
+            parts = _build_generic_parts(context)
 
-    segment_type = context.segment_type.lower()
-    if segment_type == "narration":
-        return _build_narration_parts(context)
-    if segment_type in {"monologue", "inner_monologue"}:
-        return _build_monologue_parts(context)
-    if segment_type == "dialogue":
-        return _build_dialogue_parts(context)
-    return _build_generic_parts(context)
+    identity_instruction = fixed_voice_identity_instruction(
+        model,
+        performance_instruction_source(prompt_params),
+    )
+    return [identity_instruction, *parts] if identity_instruction else parts

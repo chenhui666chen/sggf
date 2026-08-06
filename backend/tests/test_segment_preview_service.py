@@ -1,8 +1,12 @@
 import asyncio
+import json
 import os
 import sys
 from pathlib import Path
 from types import SimpleNamespace
+
+import pytest
+from fastapi import HTTPException
 
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
@@ -70,7 +74,7 @@ def test_segment_preview_service_resolves_voice_params(monkeypatch):
             "performance_notes": "keep it quiet",
             "pause_before": 0.25,
             "voice_params": {
-                "speaker": "should-not-override",
+                "speaker": "explicit-bound-voice",
                 "speed": 1.2,
                 "pause_after": 0.4,
             },
@@ -79,9 +83,9 @@ def test_segment_preview_service_resolves_voice_params(monkeypatch):
 
     assert manager.applied_mapping == {"旁白": {"voice_id": "voice-a"}}
     assert emotion == "whispering"
-    assert params["speaker"] == "profile-speaker"
-    assert params["speed"] == 1.2
-    assert params["rate"] == 1.2
+    assert params["speaker"] == "explicit-bound-voice"
+    assert "speed" not in params
+    assert "rate" not in params
     assert params["pause_before"] == 0.25
     assert params["pause_after"] == 0.4
     assert params["segment_speaker"] == "narrator"
@@ -91,7 +95,7 @@ def test_segment_preview_service_resolves_voice_params(monkeypatch):
     assert params["use_instruct_mode"] is True
 
 
-def test_segment_preview_service_keeps_rate_speed_and_emotion_consistent(monkeypatch):
+def test_segment_preview_service_uses_instruction_pace_and_keeps_emotion_consistent(monkeypatch):
     install_fake_voice_manager(monkeypatch)
     service = SegmentPreviewService(
         tts_model="qwen3-tts-instruct-flash",
@@ -117,8 +121,8 @@ def test_segment_preview_service_keeps_rate_speed_and_emotion_consistent(monkeyp
 
     assert emotion == "fearful"
     assert params["emotion"] == "fearful"
-    assert params["rate"] == 0.8
-    assert params["speed"] == 0.8
+    assert "rate" not in params
+    assert "speed" not in params
     assert params["pause_before"] == 0.3
     assert params["pause_after"] == 0.5
 
@@ -267,6 +271,25 @@ def test_segment_preview_service_resolves_music_by_asset_id_before_style(tmp_pat
     assert resolved == selected_file
 
 
+def test_segment_preview_service_rejects_library_external_audio_paths(tmp_path):
+    audio_library = tmp_path / "audio_library"
+    sound_effects = audio_library / "sound_effects"
+    music_cache = audio_library / "music_cache"
+    sound_effects.mkdir(parents=True)
+    music_cache.mkdir(parents=True)
+    outside_effect = tmp_path / "outside-effect.wav"
+    outside_music = tmp_path / "outside-music.mp3"
+    outside_effect.write_bytes(b"effect")
+    outside_music.write_bytes(b"music")
+
+    assert SegmentPreviewService.resolve_effect_path(
+        str(outside_effect), "outside-effect", audio_library
+    ) is None
+    assert SegmentPreviewService.resolve_music_path(
+        str(outside_music), "outside", "peaceful", audio_library, []
+    ) is None
+
+
 def test_segment_preview_service_uses_shared_narration_duration_estimate():
     assert SegmentPreviewService.estimate_duration_seconds("甲" * 45) == 10.0
     assert SegmentPreviewService.estimate_duration_seconds("短句") == 3.0
@@ -305,3 +328,252 @@ def test_segment_preview_service_generates_voice_preview(monkeypatch):
     assert synthesize_call["enable_cache"] is False
     assert synthesize_call["retry_config"].max_retries == 4
     assert synthesize_call["retry_config"].max_delay == 8.0
+
+
+def test_segment_preview_service_allows_empty_text_for_sfx(monkeypatch):
+    install_fake_voice_manager(monkeypatch)
+    service = SegmentPreviewService(
+        tts_model="qwen3-tts-instruct-flash",
+        voice_mapping={},
+        audio_fx={},
+    )
+    service.audio_mixer = SimpleNamespace(
+        create_silence=lambda *_args, **_kwargs: b"ID3silence"
+    )
+    monkeypatch.setattr(
+        service,
+        "build_effect_timeline",
+        lambda _specs: [{"file": "sound_effects/water.mp3", "description": "持续水滴声"}],
+    )
+    monkeypatch.setattr(
+        service,
+        "resolve_effect_path",
+        lambda _file_ref, _name_hint, _base_dir: Path("water.mp3"),
+    )
+    monkeypatch.setattr(
+        service,
+        "apply_sound_effects",
+        lambda _base_audio, _timeline: b"ID3mixed-sfx",
+    )
+
+    result = asyncio.run(
+        service.generate_preview(
+            {
+                "type": "sound_effect",
+                "text": "",
+                "sound_effects_simple": ["持续水滴声"],
+            },
+            preview_type="sfx",
+        )
+    )
+
+    assert result.audio == b"ID3mixed-sfx"
+    assert result.media_type == "audio/mpeg"
+
+
+def _install_placeholder_designer(monkeypatch, matched_files=None):
+    """桩 SoundEffectDesigner：matched_files 中的描述返回真实素材，其余返回占位音效。"""
+    matched_files = matched_files or {}
+
+    class FakeDesigner:
+        def __init__(self, llm_client=None):
+            pass
+
+        def _match_effect(self, description, timestamp, scene_id):
+            if description in matched_files:
+                return SimpleNamespace(
+                    effect_type=SimpleNamespace(value="action"),
+                    audio_file=matched_files[description],
+                    volume=0.5,
+                    duration=2.0,
+                    fade_in=0.0,
+                    fade_out=0.0,
+                    loop=False,
+                )
+            return SimpleNamespace(
+                effect_type=SimpleNamespace(value="action"),
+                audio_file="placeholder.mp3",
+                volume=0.3,
+                duration=3.0,
+                fade_in=0.0,
+                fade_out=0.5,
+                loop=False,
+            )
+
+    monkeypatch.setattr(segment_preview_service, "SoundEffectDesigner", FakeDesigner)
+
+
+def test_sfx_preview_raises_when_library_has_no_matching_effect(monkeypatch):
+    install_fake_voice_manager(monkeypatch)
+    _install_placeholder_designer(monkeypatch)
+    service = SegmentPreviewService(
+        tts_model="qwen3-tts-instruct-flash",
+        voice_mapping={},
+        audio_fx={},
+    )
+
+    with pytest.raises(HTTPException) as excinfo:
+        asyncio.run(
+            service.generate_preview(
+                {
+                    "type": "sound_effect",
+                    "text": "",
+                    "sound_effects_simple": ["门吱呀声"],
+                },
+                preview_type="sfx",
+            )
+        )
+
+    assert excinfo.value.status_code == 404
+    detail = str(excinfo.value.detail)
+    assert "门吱呀声" in detail
+    assert "素材库" in detail
+    assert "AI" in detail
+
+
+def test_sfx_preview_lists_only_missing_effect_names(monkeypatch, tmp_path):
+    install_fake_voice_manager(monkeypatch)
+    audio_library = tmp_path / "audio_library"
+    door_file = audio_library / "sound_effects" / "door.wav"
+    door_file.parent.mkdir(parents=True)
+    door_file.write_bytes(b"door")
+    _install_placeholder_designer(
+        monkeypatch,
+        matched_files={"door": "sound_effects/door.wav"},
+    )
+    service = SegmentPreviewService(
+        tts_model="qwen3-tts-instruct-flash",
+        voice_mapping={},
+        audio_fx={},
+        audio_library_dir=audio_library,
+    )
+
+    with pytest.raises(HTTPException) as excinfo:
+        asyncio.run(
+            service.generate_preview(
+                {
+                    "type": "sound_effect",
+                    "text": "",
+                    "sound_effects_simple": ["door", "thunder"],
+                },
+                preview_type="sfx",
+            )
+        )
+
+    detail = str(excinfo.value.detail)
+    assert "thunder" in detail
+    assert "door" not in detail.replace("thunder", "")
+
+
+def test_bgm_preview_raises_when_library_has_no_matching_music(monkeypatch, tmp_path):
+    install_fake_voice_manager(monkeypatch)
+    audio_library = tmp_path / "audio_library"
+    audio_library.mkdir(parents=True)
+    service = SegmentPreviewService(
+        tts_model="qwen3-tts-instruct-flash",
+        voice_mapping={},
+        audio_fx={},
+        audio_library_dir=audio_library,
+    )
+
+    with pytest.raises(HTTPException) as excinfo:
+        asyncio.run(
+            service.generate_preview(
+                {
+                    "type": "narration",
+                    "text": "雨夜的街道",
+                    "music_cue": {"style": "悬疑", "mood": "tense"},
+                },
+                preview_type="bgm",
+            )
+        )
+
+    assert excinfo.value.status_code == 404
+    detail = str(excinfo.value.detail)
+    assert "配乐" in detail
+    assert "AI" in detail
+
+
+def test_bgm_preview_succeeds_when_style_matches_library(monkeypatch, tmp_path):
+    install_fake_voice_manager(monkeypatch)
+    audio_library = tmp_path / "audio_library"
+    music_file = audio_library / "music_cache" / "suspense.mp3"
+    music_file.parent.mkdir(parents=True)
+    music_file.write_bytes(b"music")
+    (audio_library / "music_index.json").write_text(
+        json.dumps(
+            [
+                {
+                    "id": "music-suspense",
+                    "style": "悬疑",
+                    "mood": "tense",
+                    "file_path": "music_cache/suspense.mp3",
+                }
+            ],
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    service = SegmentPreviewService(
+        tts_model="qwen3-tts-instruct-flash",
+        voice_mapping={},
+        audio_fx={},
+        audio_library_dir=audio_library,
+    )
+    service.audio_mixer = SimpleNamespace(create_silence=lambda *_a, **_k: b"ID3silence")
+    applied = {}
+
+    def fake_apply_background_music(base_audio, cue, *, duration_seconds, emotion):
+        applied["cue"] = cue
+        return b"ID3bgm-mixed"
+
+    monkeypatch.setattr(service, "apply_background_music", fake_apply_background_music)
+
+    result = asyncio.run(
+        service.generate_preview(
+            {
+                "type": "narration",
+                "text": "雨夜的街道",
+                "music_cue": {"style": "悬疑", "mood": "tense"},
+            },
+            preview_type="bgm",
+        )
+    )
+
+    assert result.audio == b"ID3bgm-mixed"
+    assert applied["cue"]["style"] == "悬疑"
+
+
+def test_resolve_music_path_strict_mode_skips_arbitrary_fallback(tmp_path):
+    audio_library = tmp_path / "audio_library"
+    music_file = audio_library / "music_cache" / "other.wav"
+    music_file.parent.mkdir(parents=True)
+    music_file.write_bytes(b"other")
+    music_index = [
+        {
+            "id": "music-other",
+            "style": "欢快",
+            "mood": "joyful",
+            "file_path": "music_cache/other.wav",
+        }
+    ]
+
+    assert (
+        SegmentPreviewService.resolve_music_path(
+            None,
+            "悬疑",
+            "tense",
+            audio_library,
+            music_index,
+            allow_any_fallback=False,
+        )
+        is None
+    )
+    # 默认宽松模式仍允许任意素材回退（mix 预览依赖该行为）
+    assert SegmentPreviewService.resolve_music_path(
+        None,
+        "悬疑",
+        "tense",
+        audio_library,
+        music_index,
+    ) == music_file

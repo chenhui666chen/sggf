@@ -243,21 +243,25 @@ def test_tts_voice_catalog_only_merges_current_users_minimax_clones(tmp_path, mo
 
 def test_dashscope_adapter_passes_requested_minimax_custom_voice(monkeypatch):
     adapter_module = importlib.import_module("adapters.dashscope.tts")
-    calls = []
+    adapter_helpers = importlib.import_module("adapters.adapter_helpers")
+    captured = {}
 
-    def fake_post(url, *, json, headers, timeout):
-        calls.append(json)
-        return FakeResponse(
-            {
-                "output": {
-                    "base_resp": {"status_code": 0},
-                    "data": {"audio": b"tts-audio".hex()},
-                }
-            }
+    def fake_synthesize_speech_sync(**kwargs):
+        captured.update(kwargs)
+        return SimpleNamespace(
+            success=True,
+            outputs=[],
+            error=None,
+            error_code=None,
+            cost=0.0,
+            latency=0.01,
+            metadata={},
+            model_id=kwargs["model_id"],
+            binary=b"tts-audio",
+            data={"audio_bytes": b"tts-audio", "format": "mp3"},
         )
 
-    monkeypatch.setattr(adapter_module, "DASHSCOPE_API_KEY", "unit-key")
-    monkeypatch.setattr(adapter_module.requests, "post", fake_post)
+    monkeypatch.setattr(adapter_helpers, "synthesize_speech_sync", fake_synthesize_speech_sync)
 
     adapter_class = adapter_module.MiniMaxSpeechHDAdapter
     result = adapter_class(adapter_class.get_model_spec()).generate(
@@ -266,4 +270,6 @@ def test_dashscope_adapter_passes_requested_minimax_custom_voice(monkeypatch):
     )
 
     assert result.success is True
-    assert calls[0]["input"]["voice_setting"]["voice_id"] == "mmx_0123456789abcdef"
+    assert captured["text"] == "正式合成文本"
+    assert captured["model_id"] == "MiniMax/speech-2.8-hd"
+    assert captured["voice_params"]["speaker"] == "mmx_0123456789abcdef"

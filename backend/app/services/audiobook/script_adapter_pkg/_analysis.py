@@ -18,6 +18,9 @@ from app.services.audiobook.tts_model_ids import (
     SEED_TTS_20_EXPRESSIVE_MODEL,
     normalize_audiobook_tts_model,
 )
+from app.services.audiobook.voice_identity_policy import (
+    FIXED_VOICE_PERFORMANCE_BOUNDARY_PROMPT,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -70,7 +73,7 @@ class AnalysisMixin:
             instruct_block = (
                 "**Instruct 情绪提示（CosyVoice 专用）**\n"
                 "- cosyvoice-v3.5-plus 无系统音色，请默认假设上游已经选定复刻/设计 voice_id\n"
-                "- 请在 performance_notes 中写清角色身份、场景张力、目标语气（如【愤怒/紧张/平静】），便于后续注入 instruction\n"
+                "- 请在 performance_notes 中写清场景张力、目标语气、语速、重音和停顿，便于后续注入 instruction；角色身份只用于台词归属\n"
             )
         elif normalized_model == SEED_TTS_20_EXPRESSIVE_MODEL:
             tts_block = (
@@ -82,7 +85,7 @@ class AnalysisMixin:
             instruct_block = (
                 "**Seed-TTS 2.0 分析提示**\n"
                 "- 请重点识别情绪变化过程（起始状态 → 转折触发 → 结束状态）、韵律节奏和微表演机会（笑声、哭腔、吸气、喘息等）。\n"
-                "- 角色声音特征分析要为后续 performance_notes 提供可执行的导演视角素材。\n"
+                "- 分析角色当前情绪、韵律、气息和微表演机会，为后续 performance_notes 提供可执行的导演视角素材。\n"
             )
         elif normalized_model.startswith("qwen3-tts"):
             tts_block = "**当前TTS模型：Qwen3-TTS Instruct Flash（默认模式）**\n- 适合：长篇连载 / 日更章节 / 需要低成本但仍要一定表现力的内容\n- 特性：49 音色、稳定性强、成本低，并支持通过自然语言 instructions 控制语气与演绎\n- 限制：当前链路重点是 instructions，不要输出 SSML 语法\n"
@@ -95,12 +98,12 @@ class AnalysisMixin:
             tts_block = (
                 f"**当前TTS模型：{normalized_model}**\n"
                 "- 使用模型无关的有声书剧本结构，具体供应商参数由发送层转换\n"
-                "- 分析时重点关注角色声音特征、情绪基调与表演机会\n"
+                "- 分析时重点关注剧情语气、情绪基调、韵律变化与表演机会\n"
             )
             instruct_block = (
                 "**通用表演分析提示**\n"
                 "- 用供应商中立的自然语言描述情绪、场景、身份与语气目标。\n"
-                "- performance_notes 素材应描述语速、音调、音量、重读、停顿和情绪变化。\n"
+                "- performance_notes 素材应描述语速、语势、音量、重读、停顿和情绪变化。\n"
             )
 
         def _build_analysis_sample(text: str, max_len: int = 6000) -> str:
@@ -156,6 +159,8 @@ class AnalysisMixin:
 
 {instruct_block}
 
+{FIXED_VOICE_PERFORMANCE_BOUNDARY_PROMPT}
+
 {engine_block}
 
 {input_guard_block}
@@ -183,7 +188,7 @@ class AnalysisMixin:
     "recommended_emotions": ["建议使用的主要情感标签"],
     "voice_control_strategy": {{
         "pace_changes": "语速变化策略",
-        "pitch_variations": "音调变化建议",
+        "prosody_variations": "语势与韵律变化建议",
         "pause_points": "关键停顿位置"
     }}
 }}

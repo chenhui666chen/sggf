@@ -79,7 +79,6 @@ describe('ScriptEditorDialog editing-workbench layout', () => {
       'TIMELINE_AUDIO_TRACK_HEIGHT',
       'timelineTracksHeight',
       'menuPaperSx={editorFloatingPaperSx}',
-      'audioPickerPaperSx={editorFloatingPaperSx}',
       'onSelectClip',
       'onAdjustClip',
       'handleAdjustTimelineClip',

@@ -50,6 +50,97 @@ class DummyAnalysis(AnalysisMixin):
         self.audio_engine_mode = "legacy_stems"
 
 
+@pytest.mark.parametrize(
+    "tts_model",
+    (
+        "qwen3-tts-instruct-flash",
+        "cosyvoice-v3.5-plus",
+        "seed-tts-2.0-expressive",
+        "mimo-v2.5-tts",
+        "stepaudio-2.5-tts",
+        "unknown-tts-model",
+    ),
+)
+@pytest.mark.asyncio
+async def test_analysis_prompt_keeps_segment_direction_separate_from_voice_identity(tts_model: str):
+    llm = CapturingLLM(
+        '{"theme":"雨夜追捕","emotional_tone":"tense","emotion_transitions":[],'
+        '"rhythm_pattern":"变化丰富","highlight_scenes":[],"adaptation_challenges":[],'
+        '"recommended_emotions":["tense"],"voice_control_strategy":{}}'
+    )
+    analysis = DummyAnalysis(llm)
+    analysis.tts_model = tts_model
+
+    await analysis._analyze_chapter(
+        content="雨声中，两个人冲进车站。",
+        title="雨夜",
+        genre="悬疑",
+    )
+
+    prompt = llm.messages[0]["content"]
+    assert "固定音色表演边界" in prompt
+    assert "说话人身份、性别、年龄感、基础声线、口音和辨识度不可改变" in prompt
+    assert "在原音色基础上轻微、短暂表现沙哑" in prompt
+    assert '"prosody_variations"' in prompt
+    assert '"pitch_variations"' not in prompt
+    for forbidden in (
+        "performance_notes 中写清角色身份",
+        "角色声音特征分析要为后续 performance_notes 提供",
+        "重点关注角色声音特征",
+        "performance_notes 素材应描述语速、音调",
+    ):
+        assert forbidden not in prompt
+
+
+@pytest.mark.parametrize(
+    "tts_model",
+    (
+        "qwen3-tts-instruct-flash",
+        "cosyvoice-v3.5-plus",
+        "seed-tts-2.0-expressive",
+        "minimax-speech-2.8-hd",
+        "mimo-v2.5-tts",
+        "stepaudio-2.5-tts",
+        "unknown-tts-model",
+    ),
+)
+@pytest.mark.asyncio
+async def test_transform_prompt_only_requests_performance_controls_for_selected_voice(tts_model: str):
+    llm = CapturingLLM(
+        '{"segments":[{"type":"narration","text":"门外脚步逼近。","speaker":"旁白",'
+        '"emotion":"tense","performance_notes":"收紧语势，句尾停顿。",'
+        '"sound_effects":[],"music_cue":null}]}'
+    )
+    transform = DummyTransform(llm)
+    transform.tts_model = tts_model
+
+    await transform._transform_paragraph(
+        paragraph="门外脚步逼近。",
+        character_list=[],
+        analysis={
+            "emotional_tone": "tense",
+            "recommended_emotions": ["tense"],
+            "voice_control_strategy": {
+                "prosody_variations": "危险出现前收紧语势",
+                "pitch_variations": "旧数据要求降低音调",
+            },
+        },
+    )
+
+    prompt = llm.messages[0]["content"]
+    assert "固定音色表演边界" in prompt
+    assert "危险出现前收紧语势" in prompt
+    assert "旧数据要求降低音调" not in prompt
+    assert "片段级不得要求改变音高、声线或音色质感" in prompt
+    for forbidden in (
+        "整段基调（情绪、语速、声线）",
+        "语速、气息、停顿、重音与共鸣质感",
+        "说明语速、声线、重读位置",
+        "音高只写入 performance_notes",
+    ):
+        assert forbidden not in prompt
+
+
 @pytest.mark.asyncio
 async def test_analysis_prompt_marks_chapter_text_as_data_not_instructions():
     llm = CapturingLLM(
@@ -149,7 +240,8 @@ async def test_transform_prompt_carries_analysis_strategy_enum_and_input_guard()
             "adaptation_challenges": ["称谓和真实角色关系需要保持清楚"],
             "voice_control_strategy": {
                 "pace_changes": "逃亡段压低语速但保持推进",
-                "pitch_variations": "危机前降低音调",
+                "prosody_variations": "危机前收紧语势",
+                "pitch_variations": "旧数据要求降低音调",
                 "pause_points": "危险意象后短暂停顿",
             },
         },
@@ -161,7 +253,8 @@ async def test_transform_prompt_carries_analysis_strategy_enum_and_input_guard()
     assert "雨夜逃亡" in prompt
     assert "称谓和真实角色关系需要保持清楚" in prompt
     assert "逃亡段压低语速但保持推进" in prompt
-    assert "危机前降低音调" in prompt
+    assert "危机前收紧语势" in prompt
+    assert "旧数据要求降低音调" not in prompt
     assert "危险意象后短暂停顿" in prompt
 
     emotion_schema_line = next(
@@ -250,6 +343,95 @@ async def test_transform_prompt_uses_seed_tts_delivery_contract():
     assert "情绪变化过程" in prompt
     assert "不要输出 style_control_method、style_tags、inline_audio_tags" in prompt
     assert "供应商中立" in prompt
+    assert "片段级 voice_params 不得包含 pitch" in prompt
+
+
+@pytest.mark.asyncio
+async def test_transform_prompt_uses_minimax_basic_contract():
+    """MiniMax 专属分支：限制情绪枚举、禁止自然语言 instruction 与 SSML。"""
+    llm = CapturingLLM(
+        '{"segments":[{"type":"dialogue","text":"别过来。","speaker":"陆衍",'
+        '"emotion":"fearful","performance_notes":"压低声音。","sound_effects":[],"music_cue":null}]}'
+    )
+    transform = DummyTransform(llm)
+    transform.tts_model = "minimax-speech-2.8-hd"
+
+    await transform._transform_paragraph(
+        paragraph='陆衍压低声音说：“别过来。”',
+        character_list=["陆衍"],
+        analysis={"emotional_tone": "fearful", "recommended_emotions": ["fearful"]},
+    )
+
+    prompt = llm.messages[0]["content"]
+    assert "当前TTS模型：MiniMax speech-2.8" in prompt
+    assert "Qwen3-TTS" not in prompt
+    # 情绪限制到供应商支持的枚举，且明确 2.8 不支持 whisper。
+    assert "happy、sad、angry、fearful、disgusted、surprised、calm、neutral" in prompt
+    assert "不支持 whisper" in prompt
+    # 明确禁止把自由文本 instruction 当作 MiniMax 请求字段，且不支持 SSML。
+    assert "不要输出自然语言 instruction 请求字段或 SSML" in prompt
+    assert "不支持自然语言 instruction" in prompt
+    # 保留供应商中立的 performance_notes（供审稿/回放/换模型）。
+    assert "保留供应商中立的 performance_notes" in prompt
+    assert "供应商协议要求的 pitch 固定为中性值 0，不读取片段情绪或提示" in prompt
+    assert "片段级 voice_params 不得包含 pitch" in prompt
+
+
+@pytest.mark.asyncio
+async def test_transform_prompt_uses_mimo_director_contract():
+    """MiMo 专属分支：导演模式/音频标签，禁止输出供应商私有语法。"""
+    llm = CapturingLLM(
+        '{"segments":[{"type":"dialogue","text":"压抑的愤怒。","speaker":"陆衍",'
+        '"emotion":"angry","performance_notes":"压住怒火。","sound_effects":[],"music_cue":null}]}'
+    )
+    transform = DummyTransform(llm)
+    transform.tts_model = "mimo-v2.5-tts"
+
+    await transform._transform_paragraph(
+        paragraph='陆衍压住怒火说：“压抑的愤怒。”',
+        character_list=["陆衍"],
+        analysis={"emotional_tone": "angry", "recommended_emotions": ["angry"]},
+    )
+
+    prompt = llm.messages[0]["content"]
+    assert "当前TTS模型：MiMo V2.5 TTS" in prompt
+    assert "Qwen3-TTS" not in prompt
+    # 导演模式与音频标签能力描述（官方文档核实）。
+    assert "导演模式" in prompt
+    assert "[音频标签]" in prompt
+    assert "复合情绪" in prompt
+    # 明确禁止输出供应商私有语法，标签编译由发送层决定。
+    assert "不要输出 (风格) 前缀、[音频标签] 或 SSML" in prompt
+    assert "供应商中立" in prompt
+
+
+@pytest.mark.asyncio
+async def test_transform_prompt_uses_stepaudio_contextual_contract():
+    """StepAudio 专属分支：全局/文中语境控制，禁止输出括号内联指令。"""
+    llm = CapturingLLM(
+        '{"segments":[{"type":"narration","text":"克制的悲伤。","speaker":"旁白",'
+        '"emotion":"sad","performance_notes":"轻轻发颤。","sound_effects":[],"music_cue":null}]}'
+    )
+    transform = DummyTransform(llm)
+    transform.tts_model = "stepaudio-2.5-tts"
+
+    await transform._transform_paragraph(
+        paragraph="旁白克制地悲伤，轻轻发颤。",
+        character_list=[],
+        analysis={"emotional_tone": "sad", "recommended_emotions": ["sad"]},
+    )
+
+    prompt = llm.messages[0]["content"]
+    assert "当前TTS模型：StepAudio 2.5 TTS" in prompt
+    assert "Qwen3-TTS" not in prompt
+    # 全局语境 + 文中语境双档控制与字符限制（官方文档核实）。
+    assert "Global Context" in prompt
+    assert "Inline Context" in prompt
+    assert "200 字符" in prompt
+    assert "1000 字符" in prompt
+    # 明确禁止输出括号内联指令与 SSML，语境编译由发送层决定。
+    assert "不要输出 () 括号内联指令或 SSML" in prompt
+    assert "供应商中立" in prompt
 
 
 @pytest.mark.asyncio
@@ -336,7 +518,8 @@ def test_audio_director_task_prompts_are_model_neutral():
     assert "v3-plus" not in task_text
     assert "Qwen" not in task_text
     assert "instructions" in task_text
-    assert "rate/pitch/pause" in task_text
+    assert "rate/volume/pause" in task_text
+    assert "禁止片段级 pitch 调节" in task_text
 
 
 def test_music_prompt_library_has_short_opening_prompt_for_audiobook_intro():

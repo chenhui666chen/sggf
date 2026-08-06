@@ -27,6 +27,14 @@ export const resolveGeneratedChapterIdsFromProjects = (
   ...currentChapterAudios,
 ])
 
+export const resolveAudiobookProjectIdForChapter = (
+  audiobookProjects: readonly { id: number; chapter_audios?: ChapterAudio[] | null }[],
+  chapterId: number,
+): number | null => (
+  audiobookProjects.find((project) => project.chapter_audios?.some((audio) => audio.chapter_id === chapterId))?.id
+  ?? null
+)
+
 export const normalizeSingleChapterSelection = ({
   chapters,
   selectedChapterIds,

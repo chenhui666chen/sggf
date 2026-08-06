@@ -22,13 +22,19 @@ def get_audio_library_dir() -> Path:
 
 
 def resolve_audio_library_file_path(file_ref: object, base_dir: Path) -> Optional[Path]:
-    """按素材库根目录解析文件引用，兼容旧绝对路径和新相对路径。"""
+    """按素材库根目录解析文件引用，并拒绝越过素材库根目录的路径。"""
     raw = str(file_ref or "").strip()
     if not raw:
         return None
-    path = Path(raw)
-    candidate = path if path.is_absolute() else base_dir / path
-    return candidate if candidate.exists() else None
+    root = Path(base_dir).expanduser().resolve()
+    path = Path(raw).expanduser()
+    candidate = path if path.is_absolute() else root / path
+    try:
+        resolved = candidate.resolve()
+        resolved.relative_to(root)
+    except (OSError, ValueError):
+        return None
+    return resolved if resolved.is_file() else None
 
 
 __all__ = [

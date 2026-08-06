@@ -2,13 +2,11 @@ import {
   Alert,
   Box,
   Button,
-  Checkbox,
   CircularProgress,
   Dialog,
   DialogActions,
   DialogContent,
   DialogTitle,
-  FormControlLabel,
   List,
   ListItem,
   ListItemText,
@@ -25,11 +23,9 @@ interface ChapterDeleteConfirmDialogProps {
   open: boolean
   chapter: Chapter | null
   reason: string
-  deleteFiles: boolean
   deleting: boolean
   onClose: () => void
   onReasonChange: (value: string) => void
-  onDeleteFilesChange: (value: boolean) => void
   onDelete: () => void
 }
 
@@ -37,11 +33,9 @@ const ChapterDeleteConfirmDialog = ({
   open,
   chapter,
   reason,
-  deleteFiles,
   deleting,
   onClose,
   onReasonChange,
-  onDeleteFilesChange,
   onDelete,
 }: ChapterDeleteConfirmDialogProps) => (
   <Dialog
@@ -58,11 +52,11 @@ const ChapterDeleteConfirmDialog = ({
     </DialogTitle>
     <DialogContent>
       <Alert severity="warning" sx={{ mb: 2 }}>
-        此操作将删除章节及其相关数据，请谨慎操作！
+        此操作将删除该章节的全部有声书产物，原始章节内容不受影响。
       </Alert>
 
       <Typography variant="body1" sx={{ mb: 2 }}>
-        确定要删除以下章节吗？
+        确定要删除以下章节的全部有声书产物吗？
       </Typography>
 
       <Paper variant="outlined" sx={{ p: 2, mb: 2, backgroundColor: audiobookColorRoles.destructiveAction.softBg }}>
@@ -75,21 +69,21 @@ const ChapterDeleteConfirmDialog = ({
       </Paper>
 
       <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-        删除后将影响以下内容：
+        删除后以下全部产物都会被清理：
       </Typography>
 
       <List dense>
         <ListItem>
-          <ListItemText primary="章节内容" secondary="章节的文本内容将被删除" />
-        </ListItem>
-        <ListItem>
           <ListItemText primary="有声剧本" secondary="已生成的有声剧本将被删除" />
         </ListItem>
         <ListItem>
-          <ListItemText primary="音频文件" secondary="已生成的音频文件将被删除（可选）" />
+          <ListItemText
+            primary="整章与片段音频"
+            secondary="整章音频、工作台试听片段及管线片段都会被删除"
+          />
         </ListItem>
         <ListItem>
-          <ListItemText primary="章节关联" secondary="章节与角色、设定的关联将被移除" />
+          <ListItemText primary="生成任务" secondary="关联的生成任务记录将被清除" />
         </ListItem>
       </List>
 
@@ -104,21 +98,6 @@ const ChapterDeleteConfirmDialog = ({
         sx={{ mb: 2 }}
       />
 
-      <FormControlLabel
-        control={
-          <Checkbox
-            checked={deleteFiles}
-            onChange={(event) => onDeleteFilesChange(event.target.checked)}
-            sx={{
-              color: audiobookColorRoles.destructiveAction.main,
-              '&.Mui-checked': {
-                color: audiobookColorRoles.destructiveAction.main,
-              },
-            }}
-          />
-        }
-        label="同时删除音频文件（不可恢复）"
-      />
     </DialogContent>
     <DialogActions>
       <Button onClick={onClose} disabled={deleting}>

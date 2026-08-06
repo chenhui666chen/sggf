@@ -104,6 +104,29 @@ export const removeStoredSessionWhenProjectMismatch = ({
   }
 }
 
+export const removeStoredTaskSessionForAudiobookProject = ({
+  storage,
+  audiobookProjectId,
+  storageKey = AUDIOBOOK_SESSION_STORAGE_KEY,
+}: {
+  storage: RouteSessionStorage
+  audiobookProjectId: number
+  storageKey?: string
+}): void => {
+  const saved = readJsonRecord<AudiobookSessionState>(storage, storageKey)
+  if (!saved) {
+    return
+  }
+
+  const referencesDeletedProject = (
+    saved.audiobookProjectId === audiobookProjectId
+    || (saved.activeTasks || []).some((task) => task.audiobookProjectId === audiobookProjectId)
+  )
+  if (referencesDeletedProject) {
+    removeStoredRouteSession(storage, storageKey)
+  }
+}
+
 export const clearAudiobookRouteSessionStorage = ({
   localStorageRef,
   sessionStorageRef,

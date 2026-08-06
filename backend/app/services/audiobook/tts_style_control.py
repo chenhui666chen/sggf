@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List
 
 from app.services.audiobook.tts_model_ids import (
+    MIMO_V25_TTS_MODEL,
     MIMO_V25_TTS_VOICE_DESIGN_MODEL,
     SEED_TTS_20_EXPRESSIVE_MODEL,
     STEPAUDIO_25_TTS_MODEL,
@@ -24,11 +25,26 @@ from app.services.audiobook.tts_delivery_plan import (
     delivery_plan_style_tags,
 )
 from app.services.audiobook.tts_prompt_strategy import (
+    build_stepaudio_inline_prefix,
     build_common_prompt_parts,
     compact_instruction_parts,
+    fixed_voice_identity_instruction,
     measure_cosyvoice_instruction_units,
-    render_stepaudio_inline_prefix,
+    performance_instruction_source,
     truncate_cosyvoice_instruction_units,
+)
+from app.services.audiobook.voice_identity_policy import (
+    VOICE_IDENTITY_POLICY_VERSION,
+    extract_fixed_voice_temporary_hoarseness_instructions,
+    filter_fixed_voice_identity_tags,
+    is_voice_design_creation_request,
+    sanitize_fixed_voice_performance_text,
+    sanitize_fixed_voice_prompt_params,
+    stable_director_role,
+)
+from app.services.audiobook.voice_parameter_policy import (
+    stabilize_fixed_voice_pitch,
+    stabilize_instruct_model_speed,
 )
 
 
@@ -64,6 +80,7 @@ class _InlineTagStrategy:
     style_tags: List[str] = field(default_factory=list)
     inline_tags: List[str] = field(default_factory=list)
     use_tag_parser: bool = False
+    blocked_identity_tags: List[str] = field(default_factory=list)
 
     def to_provider_field(self) -> Dict[str, Any]:
         return {
@@ -169,10 +186,6 @@ def _delivery_plan_pause_seconds(plan: Dict[str, Any]) -> float | None:
     return None
 
 
-def _build_stepaudio_inline_prefix(voice_params: Dict[str, Any], emotion: str = "neutral") -> str:
-    return render_stepaudio_inline_prefix(voice_params, emotion)
-
-
 def _delivery_plan_parts_matching(parts: List[str], prefixes: tuple[str, ...]) -> List[str]:
     return [part for part in parts if part.startswith(prefixes)]
 
@@ -204,7 +217,7 @@ def _build_common_prompt_context(
 
 
 def _build_narration_parts(context: _CommonPromptContext) -> List[str]:
-    parts: List[str] = ["旁白模板：讲述者视角，信息清晰，语气稳定"]
+    parts: List[str] = ["旁白模板：讲述者视角，信息清晰，情感随剧情起伏"]
     rhythm_parts = _delivery_plan_parts_matching(context.delivery_plan_parts, ("韵律控制：", "停顿策略："))
     remaining_plan_parts = _delivery_plan_parts_except(context.delivery_plan_parts, ("韵律控制：", "停顿策略："))
 
@@ -318,18 +331,54 @@ def _build_common_instruction(
 ) -> tuple[str, Dict[str, Any], List[str]]:
     explicit = _text(voice_params.get("instructions") or voice_params.get("instruction"))
     parts = _build_common_parts(voice_params, emotion, model=model)
+    identity_instruction = fixed_voice_identity_instruction(
+        model,
+        performance_instruction_source(voice_params),
+    )
+    remaining_parts = [part for part in parts if part != identity_instruction]
     instruction_parts: List[str] = []
     model_family = get_audiobook_tts_style_capabilities(model).get("model_family")
     if model_family == "cosyvoice":
         instruction_parts.extend(part for part in parts if part and part not in explicit)
         if explicit:
             instruction_parts.append(explicit)
-        return compact_instruction_parts(
-            instruction_parts,
-            budget,
-            measure_text=measure_cosyvoice_instruction_units,
-            truncate_text=truncate_cosyvoice_instruction_units,
-        )
+        if not budget or budget <= 0:
+            return compact_instruction_parts(
+                instruction_parts,
+                budget,
+                measure_text=measure_cosyvoice_instruction_units,
+                truncate_text=truncate_cosyvoice_instruction_units,
+            )
+
+        fitting_parts: List[str] = []
+        dropped_parts: List[str] = []
+        for index, part in enumerate(_unique_nonempty(instruction_parts)):
+            used = measure_cosyvoice_instruction_units("；".join(fitting_parts))
+            delimiter_cost = measure_cosyvoice_instruction_units("；") if fitting_parts else 0
+            remaining = budget - used - delimiter_cost
+            if remaining <= 0:
+                dropped_parts.extend(_unique_nonempty(instruction_parts)[index:])
+                break
+            if measure_cosyvoice_instruction_units(part) <= remaining:
+                fitting_parts.append(part)
+                continue
+            if explicit and part == explicit:
+                compacted = truncate_cosyvoice_instruction_units(part, remaining)
+                if compacted:
+                    fitting_parts.append(compacted)
+            else:
+                dropped_parts.append(part)
+
+        instruction = "；".join(fitting_parts).strip("；")
+        used = measure_cosyvoice_instruction_units(instruction)
+        budget_payload = {
+            "limit": budget,
+            "used": used,
+            "truncated": bool(dropped_parts) or (bool(explicit) and explicit not in fitting_parts),
+            "dropped_fields": dropped_parts,
+        }
+        warnings = [f"instruction 已按 {budget} 字预算压缩"] if budget_payload["truncated"] else []
+        return instruction, budget_payload, warnings
     if model_family == "stepaudio" and not explicit and budget:
         priority_parts = [part for part in parts if part and not part.startswith("声音描述：")]
         voice_parts = [part for part in parts if part.startswith("声音描述：")]
@@ -367,9 +416,11 @@ def _build_common_instruction(
             )
             warnings = [f"instruction 已按 {budget} 字预算压缩"]
         return instruction, budget_payload, warnings
+    if identity_instruction:
+        instruction_parts.append(identity_instruction)
     if explicit:
         instruction_parts.append(explicit)
-    instruction_parts.extend(part for part in parts if part and part not in explicit)
+    instruction_parts.extend(part for part in remaining_parts if part and part not in explicit)
     return _compact_instruction_parts(instruction_parts, budget)
 
 
@@ -390,6 +441,10 @@ def _build_mimo_director_prompt(voice_params: Dict[str, Any], emotion: str = "ne
     )
     scene_text = _text(delivery_plan.get("director_scene")) or scene or "根据当前有声书片段的上下文进行自然演绎。"
     guidance_parts = _unique_nonempty([
+        fixed_voice_identity_instruction(
+            MIMO_V25_TTS_MODEL,
+            performance_instruction_source(voice_params),
+        ),
         voice_description,
         explicit,
         target_emotion if target_emotion != "neutral" else "",
@@ -401,7 +456,12 @@ def _build_mimo_director_prompt(voice_params: Dict[str, Any], emotion: str = "ne
     return f"角色：{role_text}\n场景：{scene_text}\n指导：{guidance}"
 
 
-def _build_mimo_voice_design_prompt(voice_params: Dict[str, Any], emotion: str = "neutral") -> str:
+def _build_mimo_voice_design_prompt(
+    voice_params: Dict[str, Any],
+    emotion: str = "neutral",
+    *,
+    fixed_asset: bool = False,
+) -> str:
     explicit_design = _text(voice_params.get("voice_design_prompt"))
     explicit_instruction = _text(voice_params.get("instructions") or voice_params.get("instruction"))
     voice_description = sanitize_voice_description(voice_params.get("voice_description"))
@@ -412,7 +472,13 @@ def _build_mimo_voice_design_prompt(voice_params: Dict[str, Any], emotion: str =
     ]
 
     prompt_parts: List[str] = []
-    if explicit_design:
+    if fixed_asset and explicit_design:
+        prompt_parts.append(f"固定声音设定（不可改变）：{explicit_design}")
+        prompt_parts.append(
+            "固定声音设定保持不变，只调整当前片段的情绪、语气、语速、音量、强弱、"
+            "停顿、断句、重读、呼吸和句尾处理。"
+        )
+    elif explicit_design:
         prompt_parts.append(explicit_design)
     if voice_description and voice_description not in explicit_design:
         prompt_parts.append(voice_description)
@@ -456,6 +522,16 @@ def _build_inline_tag_strategy(
     fallback_style_tags = delivery_plan_style_tags(delivery_plan, _text(voice_params.get("instruct_emotion")) or emotion)
     inline_tags = _unique_nonempty(_coerce_string_list(voice_params.get("inline_audio_tags")))
     inline_tags.extend(tag for tag in delivery_plan_inline_tags(delivery_plan) if tag not in inline_tags)
+    blocked_identity_tags: List[str] = []
+    if model_family in {"mimo", "doubao"}:
+        style_tags, blocked_style_tags = filter_fixed_voice_identity_tags(style_tags)
+        fallback_style_tags, blocked_fallback_tags = filter_fixed_voice_identity_tags(
+            fallback_style_tags
+        )
+        inline_tags, blocked_inline_tags = filter_fixed_voice_identity_tags(inline_tags)
+        blocked_identity_tags = _unique_nonempty(
+            [*blocked_style_tags, *blocked_fallback_tags, *blocked_inline_tags]
+        )
     if not style_tags:
         style_tags.extend(fallback_style_tags)
     elif model_family == "doubao" and not inline_tags:
@@ -466,6 +542,7 @@ def _build_inline_tag_strategy(
         style_tags=style_tags,
         inline_tags=inline_tags,
         use_tag_parser=use_tag_parser,
+        blocked_identity_tags=blocked_identity_tags,
     )
 
 
@@ -480,6 +557,22 @@ def _render_mimo_audio_tag_prefix(strategy: _InlineTagStrategy) -> str:
 def _render_doubao_voice_label_prefix(strategy: _InlineTagStrategy) -> str:
     inline_tags = strategy.inline_tags or strategy.style_tags
     return f"[{'，'.join(inline_tags)}]" if inline_tags else ""
+
+
+def _identity_tag_filter_warning(model_name: str, tags: List[str]) -> str:
+    return (
+        f"{model_name} audio-tags 已忽略可能改变已选音色身份、年龄感或基础声线的标签："
+        + "、".join(tags)
+        + "；沙哑只允许用于生病、受伤、哭喊后等明确临时状态，并在原音色基础上表现。"
+    )
+
+
+def _identity_text_filter_warning(fragments: List[str]) -> str:
+    return (
+        "已忽略可能改变已选音色身份、年龄感或基础声线的片段指令："
+        + "、".join(fragments)
+        + "。固定音色链路只接受语速、强弱、情绪、停顿、重读和表演状态。"
+    )
 
 
 def _coerce_basic_float(value: Any, default: float) -> float:
@@ -498,19 +591,12 @@ def _build_basic_voice_settings(
 
     speed = _coerce_basic_float(voice_params.get("rate", voice_params.get("speed")), 1.0)
     volume = _coerce_basic_float(voice_params.get("volume"), 50.0)
-    pitch = _coerce_basic_float(voice_params.get("pitch"), 0.0)
-
     pace = _text(delivery_plan.get("pace")).lower()
-    if pace == "slow":
-        speed *= 0.9
-    elif pace == "fast":
-        speed *= 1.1
-
-    pitch_hint = _text(delivery_plan.get("pitch")).lower()
-    if pitch_hint == "lower":
-        pitch -= 8
-    elif pitch_hint == "higher":
-        pitch += 8
+    speed = {
+        "slow": 0.9,
+        "medium": 1.0,
+        "fast": 1.1,
+    }.get(pace, speed)
 
     intensity = _text(delivery_plan.get("intensity")).lower()
     if intensity == "high":
@@ -521,10 +607,12 @@ def _build_basic_voice_settings(
     settings = {
         "speed": round(max(0.5, min(2.0, speed)), 2),
         "volume": int(round(max(0, min(100, volume)))),
-        "pitch": int(round(max(-100, min(100, pitch)))),
     }
 
-    warnings = ["MiniMax basic 模式不支持自然语言/标签风格控制，已降级为 speed/volume/pitch 基础参数"]
+    warnings = [
+        "MiniMax basic 模式不支持自然语言/标签风格控制，"
+        "已降级为 speed/volume 表演参数；片段级 pitch 已忽略"
+    ]
     unsupported_fields = [
         field_name
         for field_name in (
@@ -532,6 +620,7 @@ def _build_basic_voice_settings(
             "emotion_mix",
             "micro_tags",
             "pause_strategy",
+            "pitch",
             "stress_words",
             "director_guidance",
             "style_instruction",
@@ -560,6 +649,16 @@ def build_model_style_control(
 
     params = dict(voice_params or {})
     normalized_model = normalize_audiobook_tts_model(model, default=str(model or ""))
+    identity_warnings: List[str] = []
+    voice_design_creation = is_voice_design_creation_request(normalized_model, params)
+    if not voice_design_creation:
+        sanitized_emotion, blocked_emotion = sanitize_fixed_voice_performance_text(emotion)
+        emotion = sanitized_emotion or "neutral"
+        params, blocked_identity_text = sanitize_fixed_voice_prompt_params(params)
+        params.pop("voice_description", None)
+        blocked_identity_text = [*blocked_emotion, *blocked_identity_text]
+        if blocked_identity_text:
+            identity_warnings.append(_identity_text_filter_warning(blocked_identity_text))
     capabilities = get_audiobook_tts_style_capabilities(normalized_model)
     control_modes = set(_coerce_string_list(capabilities.get("style_control_modes")))
     preferred_mode = _text(capabilities.get("preferred_style_control_mode"))
@@ -568,6 +667,12 @@ def build_model_style_control(
         budget_value: int | None = instruction_budget
     else:
         budget_value = None
+    if normalized_model != MIMO_V25_TTS_VOICE_DESIGN_MODEL:
+        params["instruct_role"] = stable_director_role(
+            segment_type=params.get("segment_type"),
+            segment_speaker=params.get("segment_speaker"),
+            requested_role=params.get("instruct_role"),
+        )
     if preferred_mode == "basic" and "natural_language" not in control_modes:
         if isinstance(params.get("delivery_plan"), dict):
             params["delivery_plan"] = build_delivery_plan(
@@ -579,7 +684,7 @@ def build_model_style_control(
         return TTSStyleControl(
             mode="basic",
             provider_fields=provider_fields,
-            warnings=warnings,
+            warnings=[*identity_warnings, *warnings],
         )
 
     if isinstance(params.get("delivery_plan"), dict):
@@ -591,24 +696,31 @@ def build_model_style_control(
     selected_voice = params.get("voice") or params.get("speaker")
     segment_type = _text(params.get("segment_type")).lower()
     fallback_use_case = "有声书旁白" if segment_type == "narration" else "有声书角色对白"
-    description_result = reconcile_voice_description_with_selected_voice(
-        model=normalized_model,
-        voice_id=selected_voice,
-        requested_description=params.get("voice_description"),
-        fallback_emotion=params.get("instruct_emotion") or emotion,
-        fallback_use_case=fallback_use_case,
-    )
-    if description_result.description:
-        params["voice_description"] = description_result.description
+    description_warnings: List[str] = []
+    if voice_design_creation:
+        description_result = reconcile_voice_description_with_selected_voice(
+            model=normalized_model,
+            voice_id=selected_voice,
+            requested_description=params.get("voice_description"),
+            fallback_emotion=params.get("instruct_emotion") or emotion,
+            fallback_use_case=fallback_use_case,
+        )
+        description_warnings = list(description_result.warnings)
+        if description_result.description:
+            params["voice_description"] = description_result.description
 
     if is_mimo_style_control_model(normalized_model):
         if normalized_model == MIMO_V25_TTS_VOICE_DESIGN_MODEL:
-            prompt = _build_mimo_voice_design_prompt(params, emotion)
+            prompt = _build_mimo_voice_design_prompt(
+                params,
+                emotion,
+                fixed_asset=not voice_design_creation,
+            )
             return TTSStyleControl(
                 mode="mimo_voice_design",
                 provider_fields={"style_control_mode": "voice_design"},
                 messages=[{"role": "user", "content": prompt}] if prompt else [],
-                warnings=description_result.warnings,
+                warnings=[*identity_warnings, *description_warnings],
             )
 
         if _style_control_method(params) in {"audio_tags", "tags", "label", "labels"}:
@@ -618,16 +730,40 @@ def build_model_style_control(
                 emotion,
                 placement="assistant_prefix",
             )
-            prefix = _render_mimo_audio_tag_prefix(tag_strategy)
+            tag_prefix = _render_mimo_audio_tag_prefix(tag_strategy)
+            identity_instruction = fixed_voice_identity_instruction(
+                normalized_model,
+                performance_instruction_source(params),
+            )
+            identity_guidance = "；".join(
+                _unique_nonempty(
+                    [
+                        identity_instruction,
+                        *extract_fixed_voice_temporary_hoarseness_instructions(
+                            performance_instruction_source(params)
+                        ),
+                    ]
+                )
+            )
+            warnings = [*identity_warnings, *description_warnings]
+            if tag_strategy.blocked_identity_tags:
+                warnings.append(
+                    _identity_tag_filter_warning(
+                        "MiMo",
+                        tag_strategy.blocked_identity_tags,
+                    )
+                )
             return TTSStyleControl(
                 mode="mimo_audio_tags",
                 provider_fields={
                     "style_control_mode": "audio_tags",
                     "inline_tag_strategy": tag_strategy.to_provider_field(),
                 },
-                messages=[{"role": "assistant", "content": prefix}] if prefix else [],
-                text_prefix=prefix,
-                warnings=description_result.warnings,
+                messages=[{"role": "user", "content": identity_guidance}]
+                if identity_guidance
+                else [],
+                text_prefix=tag_prefix,
+                warnings=warnings,
             )
 
         prompt = _build_mimo_director_prompt(params, emotion)
@@ -635,7 +771,7 @@ def build_model_style_control(
             mode="mimo_director",
             provider_fields={"style_control_mode": "natural_language"},
             messages=[{"role": "user", "content": prompt}] if prompt else [],
-            warnings=description_result.warnings,
+            warnings=[*identity_warnings, *description_warnings],
         )
 
     if normalized_model == STEPAUDIO_25_TTS_MODEL or is_stepaudio_style_control_model(normalized_model):
@@ -645,8 +781,15 @@ def build_model_style_control(
             model=normalized_model,
             budget=budget_value,
         )
-        text_prefix = _build_stepaudio_inline_prefix(params, emotion)
-        warnings = [*description_result.warnings, *budget_warnings]
+        text_prefix, blocked_identity_tags = build_stepaudio_inline_prefix(params, emotion)
+        warnings = [*identity_warnings, *description_warnings, *budget_warnings]
+        if blocked_identity_tags:
+            warnings.append(
+                _identity_tag_filter_warning(
+                    "StepAudio",
+                    blocked_identity_tags,
+                )
+            )
         if not instruction and not text_prefix and not params.get("use_instruct_mode"):
             return TTSStyleControl(mode="none", warnings=warnings, budget=budget)
         return TTSStyleControl(
@@ -682,7 +825,14 @@ def build_model_style_control(
             else None
         )
         label_prefix = _render_doubao_voice_label_prefix(tag_strategy) if tag_strategy else ""
-        warnings = [*description_result.warnings, *budget_warnings]
+        warnings = [*identity_warnings, *description_warnings, *budget_warnings]
+        if tag_strategy and tag_strategy.blocked_identity_tags:
+            warnings.append(
+                _identity_tag_filter_warning(
+                    "Seed-TTS",
+                    tag_strategy.blocked_identity_tags,
+                )
+            )
         if not instruction and not params.get("use_instruct_mode") and not label_prefix:
             return TTSStyleControl(mode="none", warnings=warnings, budget=budget)
         provider_fields = {}
@@ -708,7 +858,7 @@ def build_model_style_control(
         model=normalized_model,
         budget=budget_value,
     )
-    warnings = [*description_result.warnings, *budget_warnings]
+    warnings = [*identity_warnings, *description_warnings, *budget_warnings]
     if not instruction and not params.get("use_instruct_mode"):
         return TTSStyleControl(mode="none", warnings=warnings, budget=budget)
 
@@ -783,10 +933,14 @@ def build_provider_prompt_snapshot(
         provider_prompt["inline_tag_strategy"] = normalized_inline_tag_strategy
 
     return {
+        "voice_identity_policy_version": VOICE_IDENTITY_POLICY_VERSION,
         "model": normalized_model,
         "voice_id": _text(voice_id),
         "mode": style_control.mode,
-        "delivery_plan": dict(delivery_plan or {}),
+        "delivery_plan": stabilize_instruct_model_speed(
+            stabilize_fixed_voice_pitch(delivery_plan),
+            normalized_model,
+        ),
         "provider_prompt": provider_prompt,
         "budget": budget,
         "warnings": list(style_control.warnings or []),

@@ -59,9 +59,18 @@ describe('audiobook completion view utils', () => {
       requestedMode: 'full',
       chapterAudios: [{ id: 4, chapter_id: 14, audio_path: '/audio/chapter-14.mp3' }],
     })).toBe('full')
+  })
+
+  it('prefers the playable audio view even when the last run was script-only', () => {
+    // 剧本先行流程生成音频/混音完成后，即使 lastGenerationMode 仍为
+    // script_only（默认值/刷新后未持久化），有可播放章节音频就必须展示播放视图
     expect(resolveAudiobookCompletionMode({
       requestedMode: 'script_only',
       chapterAudios: [{ id: 4, chapter_id: 14, audio_path: '/audio/chapter-14.mp3' }],
+    })).toBe('full')
+    expect(resolveAudiobookCompletionMode({
+      requestedMode: 'script_only',
+      chapterAudios,
     })).toBe('script_only')
   })
 

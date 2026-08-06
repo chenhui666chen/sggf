@@ -80,6 +80,10 @@ describe('audiobook script review utils', () => {
         category: 'pacing',
         description: '开头可更紧凑',
         suggestion: undefined,
+        dimension: undefined,
+        fix_type: undefined,
+        target_fields: [],
+        segment_index: undefined,
       },
     ])
   })
@@ -123,5 +127,69 @@ describe('audiobook script review utils', () => {
     expect(formatOneDecimal(12.34)).toBe('12.3')
     expect(formatTenScale(Number.NaN)).toBe('—')
     expect(formatOneDecimal(undefined)).toBe('—')
+  })
+
+  it('normalizes llm_dimensions from review payload', () => {
+    const review = normalizeScriptReview({
+      overall_score: 78,
+      overall_grade: 'B',
+      issues: [],
+      llm_dimensions: {
+        semantic_coherence: { score: 8.0, label: '语义连贯', category: 'content_narrative', comment: '好' },
+        dialogue_naturalness: { score: 6.5, label: '对白自然', category: 'character_dialogue', comment: '一般' },
+        invalid_dim: 'not-an-object',
+      },
+    })
+
+    expect(review?.llm_dimensions).toBeDefined()
+    expect(review?.llm_dimensions?.semantic_coherence).toEqual({
+      score: 8.0,
+      label: '语义连贯',
+      category: 'content_narrative',
+      comment: '好',
+    })
+    expect(review?.llm_dimensions?.dialogue_naturalness?.score).toBe(6.5)
+    // 非对象维度被过滤
+    expect(review?.llm_dimensions?.invalid_dim).toBeUndefined()
+  })
+
+  it('returns undefined llm_dimensions when absent or invalid', () => {
+    const review = normalizeScriptReview({
+      overall_score: 80,
+      issues: [],
+    })
+    expect(review?.llm_dimensions).toBeUndefined()
+
+    const review2 = normalizeScriptReview({
+      overall_score: 80,
+      issues: [],
+      llm_dimensions: 'invalid',
+    })
+    expect(review2?.llm_dimensions).toBeUndefined()
+  })
+
+  it('normalizes issue dimension and fix_type fields', () => {
+    const review = normalizeScriptReview({
+      overall_score: 75,
+      issues: [
+        {
+          severity: 'major',
+          category: 'llm_quality',
+          description: '对白生硬',
+          suggestion: '口语化',
+          dimension: 'dialogue_naturalness',
+          fix_type: 'llm_rewrite',
+          target_fields: ['text', 'performance_notes'],
+          segment_index: 3,
+        },
+      ],
+    })
+
+    expect(review?.issues?.[0]).toMatchObject({
+      dimension: 'dialogue_naturalness',
+      fix_type: 'llm_rewrite',
+      target_fields: ['text', 'performance_notes'],
+      segment_index: 3,
+    })
   })
 })

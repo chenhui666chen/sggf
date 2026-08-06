@@ -14,8 +14,13 @@ from ..voice_manager_factory import create_voice_manager
 from ..audio_mixer import AudioMixer
 from ..narration_styles import apply_narration_style_to_tts_params
 from ..pause_tags import coerce_pause_ms, strip_pause_tags
+from ..segment_synthesis_contract import PROVIDER_PROMPT_DERIVED_FIELDS
 from ..tts_delivery_plan import build_delivery_plan, resolve_segment_tts_model
 from ..tts_style_control import build_model_style_control, build_provider_prompt_snapshot
+from ..voice_parameter_policy import (
+    merge_segment_performance_params,
+    stabilize_instruct_model_speed,
+)
 from app.services.chapter_adaptation_assets import build_audio_adaptation_hint
 from core.unified_media_runtime import create_tts_engine
 
@@ -60,14 +65,14 @@ class ScriptUtilsMixin:
             return {
                 "emotion": "tense",
                 "instruct_emotion": "fearful",
-                "performance_notes": "低沉克制，带悬念感；关键词略加重，句尾短暂停顿。",
+                "performance_notes": "克制而紧迫地讲述，带悬念感；关键词略加重，句尾短暂停顿。",
             }
 
         if any(keyword in normalized_text for keyword in mysterious_keywords):
             return {
                 "emotion": "mysterious",
                 "instruct_emotion": "neutral",
-                "performance_notes": "压低声线，保留悬念感；信息点清晰，结尾留白。",
+                "performance_notes": "收紧语势，保留悬念感；信息点清晰，结尾留白。",
             }
 
         return {
@@ -320,10 +325,11 @@ class ScriptUtilsMixin:
             voice_params_dict = voice_profile.get_tts_params(emotion_for_params)
 
             segment_voice_params = getattr(segment, "voice_params", None) or {}
-            for key, value in segment_voice_params.items():
-                if value is None or key == "speaker":
-                    continue
-                voice_params_dict[key] = value
+            voice_params_dict = merge_segment_performance_params(
+                voice_params_dict,
+                segment_voice_params,
+                ignored_fields={"speaker", *PROVIDER_PROMPT_DERIVED_FIELDS},
+            )
 
             if "rate" not in voice_params_dict and "speed" in voice_params_dict:
                 voice_params_dict["rate"] = voice_params_dict["speed"]
@@ -345,6 +351,15 @@ class ScriptUtilsMixin:
                 or getattr(self, "tts_model", "")
             )
             voice_params_dict = self._normalize_final_voice_params(segment, voice_params_dict)
+            resolved_model = resolve_segment_tts_model(
+                voice_params_dict,
+                getattr(self, "tts_model", None),
+            )
+            voice_params_dict = stabilize_instruct_model_speed(
+                voice_params_dict,
+                resolved_model,
+            )
+            voice_params_dict["resolved_tts_model"] = resolved_model
             
             # 🔍 调试：输出最终参数
             speed_for_log = voice_params_dict.get("speed")
@@ -355,7 +370,6 @@ class ScriptUtilsMixin:
             logger.info(
                 f"🎵 [{segment.speaker}] 最终voice_params: "
                 f"speaker={voice_params_dict.get('speaker')}, "
-                f"pitch={voice_params_dict.get('pitch')}, "
                 f"speed={speed_text}, "
                 f"volume={voice_params_dict.get('volume')}"
             )
@@ -375,11 +389,6 @@ class ScriptUtilsMixin:
             if instruct_emotion or segment.voice_params["instruct_scene"] or segment.voice_params["instruct_role"] or segment.voice_params["instruct_identity"]:
                 segment.voice_params["use_instruct_mode"] = True
 
-            resolved_model = resolve_segment_tts_model(
-                segment.voice_params,
-                getattr(self, "tts_model", None),
-            )
-            segment.voice_params["resolved_tts_model"] = resolved_model
             segment.voice_params["delivery_plan"] = build_delivery_plan(
                 segment=segment,
                 voice_params=segment.voice_params,
@@ -396,4 +405,33 @@ class ScriptUtilsMixin:
                 voice_id=segment.voice_params.get("speaker") or segment.voice_params.get("voice_id") or "",
                 style_control=style_control,
                 delivery_plan=segment.voice_params["delivery_plan"],
+            )
+
+    def _apply_segment_voice_overrides(
+        self,
+        script_segments: List,
+        segment_voice_overrides: Dict[int, Dict[str, Any]],
+    ) -> None:
+        """Phase 2 replace_voice_missing：对指定源片段索引选择性覆盖音色。
+
+        仅替换 voice_params["speaker"]（即 voice_id），使目标片段的 cache_key
+        变化从而触发重生成，其余片段（含同角色成功片段）保持原音色复用缓存。
+        """
+        for index, segment in enumerate(script_segments):
+            override = segment_voice_overrides.get(index)
+            if not override:
+                continue
+            new_voice_id = str(override.get("voice_id") or override.get("speaker") or "")
+            if not new_voice_id:
+                continue
+            voice_params = getattr(segment, "voice_params", None) or {}
+            old_voice = voice_params.get("speaker") or ""
+            voice_params["speaker"] = new_voice_id
+            segment.voice_params = voice_params
+            logger.info(
+                "🔄 [replace_voice_missing] 片段 #%d (%s) 音色覆盖: %s -> %s",
+                index,
+                getattr(segment, "speaker", ""),
+                old_voice,
+                new_voice_id,
             )

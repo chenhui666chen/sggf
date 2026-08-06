@@ -588,6 +588,40 @@ export const getTtsModelCapabilities = (
 ): TtsModelCapabilities => findTtsModelOption(model, modelOptions)?.capabilities
   || getFallbackTtsModelCapabilities(model)
 
+const INSTRUCT_STYLE_CONTROL_MODES = new Set([
+  'audio_tags',
+  'director',
+  'global_context',
+  'inline_context',
+  'natural_language',
+  'query_response',
+  'voice_design',
+])
+
+const BASIC_NUMERIC_SPEED_MODELS = new Set<TtsModel>([
+  'minimax-speech-2.8-hd',
+  'minimax-speech-2.8-turbo',
+])
+
+export const modelSupportsInstructStyleControl = (
+  model: unknown,
+  modelOptions: readonly TtsModelOption[] = [],
+): boolean => {
+  const normalized = normalizeTtsModelValue(model)
+  if (!normalized) {
+    return false
+  }
+  const remoteCapabilities = findTtsModelOption(normalized, modelOptions)?.capabilities
+  const fallbackCapabilities = FALLBACK_TTS_MODEL_CAPABILITIES[normalized]
+  const modes = remoteCapabilities?.styleControlModes || fallbackCapabilities?.styleControlModes || []
+  return modes.some((mode) => INSTRUCT_STYLE_CONTROL_MODES.has(mode))
+}
+
+export const modelUsesBasicNumericSpeedControl = (model: unknown): boolean => {
+  const normalized = normalizeTtsModelValue(model)
+  return Boolean(normalized && BASIC_NUMERIC_SPEED_MODELS.has(normalized))
+}
+
 export const modelRequiresCustomVoice = (
   model: TtsModel,
   modelOptions: readonly TtsModelOption[] = [],
@@ -653,7 +687,6 @@ const QWEN_FLASH_ONLY_TO_INSTRUCT: Record<string, string> = {
   Bodega: 'Ethan',
   Dolce: 'Vincent',
   Dylan: 'Ethan',
-  Ebona: 'Bellona',
   Emilien: 'Ethan',
   Eric: 'Nofish',
   Jada: 'Mia',
@@ -710,6 +743,23 @@ const COSYVOICE_V3_PLUS_LEGACY_ALIASES: Record<string, string> = {
 
 const LEGACY_COSYVOICE_SYSTEM_VOICES = new Set(['longanyang', 'longanhuan'])
 
+// 克隆/自定义音色前缀：这些音色由用户专门创建，不在任何预设列表中，
+// 不应被 validVoiceIds 校验或 getFallbackVoiceId 覆盖为硬编码默认值。
+const CLONE_VOICE_PREFIXES = [
+  'voice_clone_',
+  'mmx_',
+  'mimo_design:',
+  'mimo_clone:',
+  'stepaudio_clone:',
+  'cosyvoice-v3.5-plus-',
+  'cosyvoice-v3-plus-',
+] as const
+
+export const isCloneVoiceId = (voiceId?: string | null): boolean => {
+  const value = typeof voiceId === 'string' ? voiceId.trim() : ''
+  return value !== '' && CLONE_VOICE_PREFIXES.some((prefix) => value.startsWith(prefix))
+}
+
 export const normalizeVoiceId = (
   model: TtsModel,
   voiceId?: string | null,
@@ -729,12 +779,12 @@ export const normalizeVoiceId = (
     }
   }
 
-  // 如果提供了有效音色列表,验证规范化后的音色ID是否在列表中
-  if (validVoiceIds) {
+  // 克隆/自定义音色由用户专门创建，不在任何预设列表中，跳过目录校验
+  if (validVoiceIds && !isCloneVoiceId(normalizedVoiceId)) {
     const validVoiceIdSet: Set<string> =
       validVoiceIds instanceof Set ? validVoiceIds : new Set(validVoiceIds)
     const isValid = validVoiceIdSet.has(normalizedVoiceId)
-    
+
     if (!isValid) {
       // 音色不在有效列表中,返回空字符串让前端使用默认值
       console.warn(

@@ -599,6 +599,44 @@ def get_audiobook_tts_style_capabilities(model: Any) -> dict[str, Any]:
     return capabilities
 
 
+# 可用自然语言/标签等表演指令控制韵律的风格控制模式；
+# 命中其一的模型，语速等韵律应由表演指令表达，而非片段级数值参数。
+INSTRUCT_STYLE_CONTROL_MODES: Final[frozenset[str]] = frozenset(
+    {
+        "audio_tags",
+        "director",
+        "global_context",
+        "inline_context",
+        "natural_language",
+        "query_response",
+        "voice_design",
+    }
+)
+
+BASIC_NUMERIC_SPEED_MODELS: Final[frozenset[str]] = frozenset(
+    {
+        MINIMAX_SPEECH_28_HD_MODEL,
+        MINIMAX_SPEECH_28_TURBO_MODEL,
+    }
+)
+
+
+def model_supports_instruct_style_control(model: Any) -> bool:
+    """判断模型是否支持指令式风格控制（自然语言/音频标签等）。"""
+    normalized = normalize_audiobook_tts_model(model, default="")
+    if not normalized:
+        return False
+    modes = get_audiobook_tts_style_capabilities(normalized).get("style_control_modes") or []
+    return bool(INSTRUCT_STYLE_CONTROL_MODES.intersection(modes))
+
+
+def model_uses_basic_numeric_speed_control(model: Any) -> bool:
+    """Return whether semantic pace must be degraded to provider numeric speed."""
+
+    normalized = normalize_audiobook_tts_model(model, default="")
+    return normalized in BASIC_NUMERIC_SPEED_MODELS
+
+
 _EMOTION_KEYWORD_ALIASES: Final[tuple[tuple[str, str], ...]] = (
     ("\u7d27\u5f20", "fearful"),
     ("\u6050\u60e7", "fearful"),

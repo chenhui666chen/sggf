@@ -14,6 +14,7 @@ import {
 import type { SxProps, Theme } from '@mui/material/styles'
 import CancelIcon from '@mui/icons-material/Cancel'
 import CheckCircleIcon from '@mui/icons-material/CheckCircle'
+import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome'
 import GraphicEqIcon from '@mui/icons-material/GraphicEq'
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown'
 import LibraryMusicIcon from '@mui/icons-material/LibraryMusic'
@@ -27,6 +28,7 @@ import type {
   PendingSegmentRegeneration,
   PreviewType,
   ScriptSegment,
+  SegmentSourceMode,
 } from './types'
 
 const previewOptions: Array<{
@@ -40,7 +42,44 @@ const previewOptions: Array<{
   { type: 'mix', label: '融合', icon: <SurroundSoundIcon fontSize="small" /> },
 ]
 
-const regenerateOptions = previewOptions
+const regenerateOptions: Array<{
+  key: string
+  type: PreviewType
+  label: string
+  icon: JSX.Element
+  sourceMode?: SegmentSourceMode
+}> = [
+  { key: 'voice', type: 'voice', label: '人声', icon: <MicIcon fontSize="small" /> },
+  {
+    key: 'sfx-library',
+    type: 'sfx',
+    label: '音效重新生成（从库匹配）',
+    icon: <GraphicEqIcon fontSize="small" />,
+    sourceMode: 'library',
+  },
+  {
+    key: 'sfx-ai',
+    type: 'sfx',
+    label: '音效 AI 重新生成',
+    icon: <AutoAwesomeIcon fontSize="small" />,
+    sourceMode: 'ai_generate',
+  },
+  {
+    key: 'bgm-library',
+    type: 'bgm',
+    label: '配乐重新生成（从库匹配）',
+    icon: <LibraryMusicIcon fontSize="small" />,
+    sourceMode: 'library',
+  },
+  {
+    key: 'bgm-ai',
+    type: 'bgm',
+    label: '配乐 AI 重新生成',
+    icon: <AutoAwesomeIcon fontSize="small" />,
+    sourceMode: 'ai_generate',
+  },
+  { key: 'mix', type: 'mix', label: '融合', icon: <SurroundSoundIcon fontSize="small" /> },
+]
 
 interface ScriptSegmentActionsProps {
   segment: ScriptSegment
@@ -55,7 +94,12 @@ interface ScriptSegmentActionsProps {
   voiceRecordingDisabled: boolean
   chapterAudioAvailable?: boolean
   onPreviewAudio: (index: number, segment: ScriptSegment, previewType: PreviewType) => void
-  onRegenerate: (index: number, segment: ScriptSegment, previewType: PreviewType) => void
+  onRegenerate: (
+    index: number,
+    segment: ScriptSegment,
+    previewType: PreviewType,
+    sourceMode?: SegmentSourceMode,
+  ) => void
   onStartVoiceRecording: (index: number, segment: ScriptSegment) => void
   onStopVoiceRecording: () => void
   onApplyRegeneration: (index: number, previewType: PreviewType) => void
@@ -123,9 +167,9 @@ const ScriptSegmentActions = ({
     onPreviewAudio(index, segment, option.type)
   }
 
-  const handleRegenerate = (option: { type: PreviewType }) => {
+  const handleRegenerate = (option: { type: PreviewType; sourceMode?: SegmentSourceMode }) => {
     handleCloseRegenerateMenu()
-    onRegenerate(index, segment, option.type)
+    onRegenerate(index, segment, option.type, option.sourceMode)
   }
 
   const handleVoiceRecordingClick = () => {
@@ -208,7 +252,7 @@ const ScriptSegmentActions = ({
       >
         {regenerateOptions.map((option) => (
           <MenuItem
-            key={option.type}
+            key={option.key}
             onClick={() => handleRegenerate(option)}
             disabled={regenerating || !hasText}
           >

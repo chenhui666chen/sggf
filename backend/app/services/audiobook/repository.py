@@ -6,8 +6,11 @@
 """
 from __future__ import annotations
 
+import logging
+from pathlib import Path
 from typing import Any, Iterable, List, Optional
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
 
 from app.models.audiobook import AudiobookProject, ChapterAudio, ChapterAudioRun
@@ -17,6 +20,8 @@ from app.models.character import Character
 from app.models.project import Chapter, Project
 from app.models.user import User
 from app.utils.datetime_utils import utc_now
+
+logger = logging.getLogger(__name__)
 
 
 def _safe_iso(value: Any) -> Optional[str]:
@@ -600,8 +605,60 @@ class ChapterAudioRepository:
                 ChapterAudio.chapter_id.in_(ids),
                 ChapterAudio.deleted_at.is_(None),
             )
+            .order_by(ChapterAudio.id.asc())
             .all()
         )
+
+    @staticmethod
+    def soft_delete_older_duplicates(
+        db: Session,
+        chapter_audios: List[ChapterAudio],
+    ) -> List[ChapterAudio]:
+        """同一章节存在多条活跃记录时，软删除旧记录并清除其音频文件，只保留最新一条。
+
+        返回去重后的列表（每个 chapter_id 仅保留 id 最大的记录）。
+        """
+        if not chapter_audios:
+            return []
+
+        # 按 chapter_id 分组，保留 id 最大的
+        newest_by_chapter: dict[int, ChapterAudio] = {}
+        for record in chapter_audios:
+            existing = newest_by_chapter.get(record.chapter_id)
+            if existing is None or record.id > existing.id:
+                newest_by_chapter[record.chapter_id] = record
+
+        kept_ids = {r.id for r in newest_by_chapter.values()}
+        now = utc_now()
+        stale_count = 0
+        for record in chapter_audios:
+            if record.id not in kept_ids:
+                record.deleted_at = now
+                stale_count += 1
+                # 彻底清除旧记录关联的音频和字幕文件
+                for file_path_str in (record.audio_path, record.subtitle_path):
+                    if not file_path_str:
+                        continue
+                    try:
+                        file_path = Path(file_path_str)
+                        if file_path.is_file():
+                            file_path.unlink()
+                            logger.info(
+                                "🗑️ 已删除旧音频文件: %s (record_id=%s)",
+                                file_path_str,
+                                record.id,
+                            )
+                    except OSError as exc:
+                        logger.warning(
+                            "⚠️ 删除旧音频文件失败: %s, error=%s",
+                            file_path_str,
+                            exc,
+                        )
+
+        if stale_count:
+            db.flush()
+
+        return list(newest_by_chapter.values())
 
     @staticmethod
     def list_active_approved_scripts(
@@ -712,6 +769,7 @@ class ChapterAudioRepository:
                 ChapterAudio.chapter_id == chapter_id,
                 ChapterAudio.deleted_at.is_(None),
             )
+            .order_by(ChapterAudio.id.desc())
             .first()
         )
 
@@ -949,6 +1007,35 @@ class ChapterAudioRunRepository:
         return query.order_by(ChapterAudioRun.created_at.desc(), ChapterAudioRun.id.desc()).first()
 
     @staticmethod
+    def get_run_by_id(
+        db: Session,
+        *,
+        run_id: int,
+    ) -> Optional[ChapterAudioRun]:
+        return db.query(ChapterAudioRun).filter(ChapterAudioRun.id == run_id).first()
+
+    @staticmethod
+    def get_run_by_celery_task_id(
+        db: Session,
+        *,
+        celery_task_id: str,
+        audiobook_project_id: int,
+        chapter_id: int,
+        run_type: Optional[str] = None,
+    ) -> Optional[ChapterAudioRun]:
+        normalized_task_id = str(celery_task_id or "").strip()
+        if not normalized_task_id:
+            return None
+        query = db.query(ChapterAudioRun).filter(
+            ChapterAudioRun.celery_task_id == normalized_task_id,
+            ChapterAudioRun.audiobook_project_id == audiobook_project_id,
+            ChapterAudioRun.chapter_id == chapter_id,
+        )
+        if run_type:
+            query = query.filter(ChapterAudioRun.run_type == run_type)
+        return query.order_by(ChapterAudioRun.id.desc()).first()
+
+    @staticmethod
     def get_latest_completed_run(
         db: Session,
         *,
@@ -963,7 +1050,10 @@ class ChapterAudioRunRepository:
         )
         if run_type:
             query = query.filter(ChapterAudioRun.run_type == run_type)
-        return query.order_by(ChapterAudioRun.created_at.desc(), ChapterAudioRun.id.desc()).first()
+        return query.order_by(
+            func.coalesce(ChapterAudioRun.finished_at, ChapterAudioRun.created_at).desc(),
+            ChapterAudioRun.id.desc(),
+        ).first()
 
     @staticmethod
     def list_completed_runs_for_chapter(
@@ -987,7 +1077,10 @@ class ChapterAudioRunRepository:
         if normalized_run_types:
             query = query.filter(ChapterAudioRun.run_type.in_(normalized_run_types))
         return (
-            query.order_by(ChapterAudioRun.created_at.desc(), ChapterAudioRun.id.desc())
+            query.order_by(
+                func.coalesce(ChapterAudioRun.finished_at, ChapterAudioRun.created_at).desc(),
+                ChapterAudioRun.id.desc(),
+            )
             .limit(max(1, int(limit or 1)))
             .all()
         )

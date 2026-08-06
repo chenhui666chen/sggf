@@ -52,7 +52,7 @@ def test_segment_validation_normalizes_core_fields():
     assert segment.pause_after == 2.0
     assert segment.voice_params["rate"] == 2.0
     assert segment.voice_params["speed"] == 0.5
-    assert segment.voice_params["pitch"] == 100
+    assert "pitch" not in segment.voice_params
     assert segment.voice_params["volume"] == 100
     assert isinstance(segment.sound_effects[0], SoundEffect)
     assert segment.sound_effects[0].volume == 1.0
@@ -61,6 +61,89 @@ def test_segment_validation_normalizes_core_fields():
     assert segment.music_cue.volume == 1.0
     assert segment.music_cue.duration is None
     assert segment.music_cue.emotion_follow is False
+
+
+def test_script_segment_default_voice_params_do_not_define_segment_pitch():
+    from app.services.audiobook.script_adapter_pkg._dataclasses import ScriptSegment
+
+    segment = ScriptSegment(
+        type="narration",
+        text="夜色压下来。",
+        speaker="旁白",
+        emotion="neutral",
+    )
+
+    assert "pitch" not in segment.voice_params
+
+
+def test_instruct_capable_model_strips_llm_numeric_speed_from_voice_params():
+    """支持指令风格控制的模型：片段级数值语速由表演指令表达，LLM 输出必须剔除。"""
+    from app.services.audiobook.script_adapter_pkg._segment_validation import build_script_segment
+
+    segment = build_script_segment(
+        {
+            "type": "narration",
+            "text": "走廊尽头的灯灭了。",
+            "speaker": "旁白",
+            "emotion": "fearful",
+            "voice_params": {"rate": 1.1, "speed": 1.1, "volume": 45, "pause_after": 0.4},
+        },
+        tts_model="seed-tts-2.0-expressive",
+    )
+
+    assert segment is not None
+    assert "rate" not in segment.voice_params
+    assert "speed" not in segment.voice_params
+    assert segment.voice_params["volume"] == 45
+    assert segment.voice_params["pause_after"] == 0.4
+
+
+def test_basic_mode_model_keeps_llm_numeric_speed_in_voice_params():
+    """不支持指令的模型（如 MiniMax basic）：保留数值语速通道。"""
+    from app.services.audiobook.script_adapter_pkg._segment_validation import build_script_segment
+
+    segment = build_script_segment(
+        {
+            "type": "narration",
+            "text": "走廊尽头的灯灭了。",
+            "speaker": "旁白",
+            "emotion": "fearful",
+            "voice_params": {"rate": 0.9, "volume": 45},
+        },
+        tts_model="minimax-speech-2.8-hd",
+    )
+
+    assert segment is not None
+    assert segment.voice_params["rate"] == 0.9
+
+
+def test_build_script_segments_propagates_tts_model_speed_policy():
+    from app.services.audiobook.script_adapter_pkg._segment_validation import build_script_segments
+
+    segments = build_script_segments(
+        [
+            {
+                "type": "narration",
+                "text": "他屏住呼吸。",
+                "speaker": "旁白",
+                "voice_params": {"rate": 1.1},
+            }
+        ],
+        tts_model="qwen3-tts-instruct-flash",
+    )
+
+    assert segments
+    assert "rate" not in segments[0].voice_params
+    assert "speed" not in segments[0].voice_params
+
+
+def test_model_supports_instruct_style_control_helper():
+    from app.services.audiobook.tts_model_ids import model_supports_instruct_style_control
+
+    assert model_supports_instruct_style_control("seed-tts-2.0-expressive") is True
+    assert model_supports_instruct_style_control("qwen3-tts-instruct-flash") is True
+    assert model_supports_instruct_style_control("minimax-speech-2.8-hd") is False
+    assert model_supports_instruct_style_control("") is False
 
 
 def test_segment_validation_preserves_explicit_audio_library_asset_ids():
@@ -339,6 +422,28 @@ def test_segment_validation_enriches_tense_narration_performance():
     assert segment.instruct_emotion == "fearful"
     assert "压迫感" in segment.performance_notes
     assert "悬念停顿" in segment.performance_notes
+    for forbidden in ("声线", "音色", "低沉", "更低更沉"):
+        assert forbidden not in segment.performance_notes
+
+
+@pytest.mark.parametrize("emotion", ("mysterious", "fearful", "sad"))
+def test_narration_default_performance_notes_never_change_selected_voice(emotion: str):
+    from app.services.audiobook.script_adapter_pkg._segment_validation import build_script_segment
+
+    segment = build_script_segment(
+        {
+            "type": "narration",
+            "text": "门外的脚步突然停下，房间里只剩压抑的呼吸声。",
+            "speaker": "旁白",
+            "emotion": emotion,
+        }
+    )
+
+    assert segment is not None
+    assert segment.performance_notes
+    for forbidden in ("声线", "音色", "低沉", "高亢", "童声", "老人声"):
+        assert forbidden not in segment.performance_notes
+    assert any(term in segment.performance_notes for term in ("语速", "语势", "重读", "停顿"))
 
 
 def test_segment_validation_removes_thinking_blocks_from_spoken_text():
@@ -548,7 +653,8 @@ async def test_transform_paragraph_validates_llm_segments():
     assert segments[0].type == "narration"
     assert segments[0].emotion == "excited"
     assert segments[0].instruct_emotion == "fearful"
-    assert segments[0].voice_params["rate"] == 2.0
+    # qwen3-tts 支持指令风格控制：片段级数值 rate 必须被剔除，语速交给表演指令
+    assert "rate" not in segments[0].voice_params
     assert segments[0].voice_params["pause_after"] == 2.0
     assert harness.llm_client.calls[0]["model"] == "deepseek-v4-flash"
     assert TRANSFORM_OUTPUT_TOKEN_MIN <= harness.llm_client.calls[0]["max_tokens"] < 32000

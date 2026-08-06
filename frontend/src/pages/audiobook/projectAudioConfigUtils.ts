@@ -8,6 +8,7 @@ import type {
 } from './types'
 import {
   getFallbackVoiceId,
+  isCloneVoiceId,
   normalizeTtsModelValue,
   normalizeVoiceId,
 } from './ttsModels'
@@ -80,6 +81,13 @@ export const normalizeProjectAudioFxConfig = (
   }
 }
 
+/**
+ * 构建旁白默认音色配置。
+ *
+ * 优先级链：用户显式配置的音色 > 克隆音色 > 模型默认音色 > 系统默认音色。
+ * 此函数仅提供最后的系统默认回退值（getFallbackVoiceId），
+ * 用户配置的克隆音色在 buildInitialProjectVoiceSettings 中优先恢复。
+ */
 export const buildBaseNarratorVoice = (
   ttsModel: TtsModel,
   voicePresets: Array<Pick<VoicePreset, 'id'>> = [],
@@ -172,9 +180,11 @@ const resolvePayloadVoiceId = (
   voicePresets: Array<Pick<VoicePreset, 'id'>>,
 ): string => {
   const explicitVoiceId = voice.voiceId.trim()
+  // 用户显式配置的音色（包括克隆音色）优先返回，不触达 getFallbackVoiceId 回退逻辑
   if (explicitVoiceId) {
     return explicitVoiceId
   }
+  // 旁白没有显式配置音色时，使用模型默认回退值
   return isNarratorVoiceSetting(voice) ? getFallbackVoiceId(ttsModel, voicePresets) : ''
 }
 
@@ -216,20 +226,19 @@ export const buildProjectCharacterVoiceSettings = ({
   characters,
   savedCharacters = [],
   ttsModel,
-  voicePresets = [],
 }: {
   characters: readonly ProjectCharacterSummary[]
   savedCharacters?: readonly SavedCharacterAudioConfig[]
   ttsModel: TtsModel
-  voicePresets?: Array<Pick<VoicePreset, 'id'>>
 }): CharacterVoiceSetting[] => {
-  // 音色目录尚未加载完成时不做合法性校验，避免误丢弃已保存的音色配置
-  const validVoiceIds = voicePresets.length > 0 ? new Set(voicePresets.map((p) => p.id)) : undefined
-  
+  // 每个角色可能配置了与全局模型不同的 TTS 模型（跨模型音色），此处若用全局模型的
+  // 音色目录做合法性校验，会把合法的跨模型音色误判为无效并清空，导致已保存的音色
+  // 配置在加载时丢失（固定化失效）。因此加载时不做目录校验，原样保留已保存音色；
+  // 渲染层会按各角色自身模型的音色目录进行展示与处理。
   return characters.map((character) => {
     const saved = findSavedCharacterConfig(savedCharacters, character.id)
     const savedTtsModel = normalizeTtsModelValue(saved?.tts_model) || ttsModel
-    const savedVoiceId = normalizeVoiceId(savedTtsModel, saved?.voice_id, validVoiceIds)
+    const savedVoiceId = normalizeVoiceId(savedTtsModel, saved?.voice_id)
     const legacyAssetVoiceId = resolveLegacyVoiceAssetReference({
       characterId: character.id,
       name: character.name,
@@ -283,20 +292,32 @@ export const buildInitialProjectVoiceSettings = ({
   const savedCharacters = projectAudioConfig?.characters || []
   const baseNarratorVoice = buildBaseNarratorVoice(ttsModel, voicePresets)
   const narratorSaved = findSavedNarratorConfig(savedCharacters)
+  // 旁白同样可能配置了与全局模型不同的 TTS 模型（跨模型音色）。此前这里漏掉了
+  // 恢复已保存的 tts_model，旁白 ttsModel 为空后重新保存会被全局模型覆盖
+  // （buildProjectAudioConfigPayload 的 voice.ttsModel || ttsModel），造成 voice_id
+  // 与 tts_model 错配（如 minimax/SeedTTS 音色被按全局模型解析），生成时旁白音色
+  // 无法解析而被跳过（固定化失效）。此处与普通角色一致，恢复已保存的 tts_model。
+  const narratorSavedTtsModel = normalizeTtsModelValue(narratorSaved?.tts_model) || ttsModel
+  // 克隆音色（voice_clone_ / mmx_ 等前缀）是用户专门创建的，应被视为最高优先级。
+  // normalizeVoiceId 已对克隆音色跳过目录校验，确保原样保留。
+  const savedNarratorVoiceId = normalizeVoiceId(narratorSavedTtsModel, narratorSaved?.voice_id)
+  // 额外防御：如果 normalizeVoiceId 返回空但原始值确为克隆音色，直接使用原始值
+  const rawSavedVoiceId = typeof narratorSaved?.voice_id === 'string'
+    ? narratorSaved.voice_id.trim()
+    : ''
+  const cloneVoiceFallback = rawSavedVoiceId && isCloneVoiceId(rawSavedVoiceId) ? rawSavedVoiceId : ''
   const narratorVoice: CharacterVoiceSetting = {
     ...baseNarratorVoice,
-    voiceId: normalizeVoiceId(
-      ttsModel,
-      narratorSaved?.voice_id,
-      // 音色目录尚未加载完成时不做合法性校验，避免误丢弃已保存的音色配置
-      voicePresets.length > 0 ? new Set(voicePresets.map((p) => p.id)) : undefined,
-    )
+    ttsModel: narratorSavedTtsModel,
+    // 优先级：用户保存的音色（含克隆） > 克隆音色原始值 > 遗留资产引用 > 系统默认回退值
+    voiceId: savedNarratorVoiceId
+      || cloneVoiceFallback
       || resolveLegacyVoiceAssetReference({
         characterId: NARRATOR_CHARACTER_ID,
         name: NARRATOR_NAME,
         voiceId: '',
         volume: baseNarratorVoice.volume,
-        ttsModel,
+        ttsModel: narratorSavedTtsModel,
         mimoVoiceAssetId: trimOptionalText(narratorSaved?.mimo_voice_asset_id),
         stepaudioVoiceAssetId: trimOptionalText(narratorSaved?.stepaudio_voice_asset_id),
       }, ttsModel)
@@ -316,7 +337,6 @@ export const buildInitialProjectVoiceSettings = ({
       characters,
       savedCharacters,
       ttsModel,
-      voicePresets,
     }),
   ]
 }

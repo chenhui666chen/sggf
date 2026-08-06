@@ -18,6 +18,7 @@ from app.services.audiobook.chapter_cadence import apply_chapter_cadence
 from app.services.audiobook.render_plan import render_chunks_to_timing_segments_payload
 from app.services.audiobook.temp_segment_store import save_segment_audio_batch, save_segment_audio_map
 from app.services.audiobook.atomic_files import write_bytes_atomic
+from app.services.audiobook.tts_pause import TTSPauseRequested
 from app.services.audiobook.engine_pkg._tts_mixin import (
     collect_tts_cost_stats,
     subtract_tts_cost_stats,
@@ -69,6 +70,7 @@ class GenerationMixin:
         character_profiles: Optional[List[Dict[str, Any]]] = None,
         resume_checkpoint: Optional[Dict[str, Any]] = None,
         tts_progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
+        pause_check: Optional[Callable[[], bool]] = None,
     ) -> Dict[str, Any]:
         """
         生成单章节有声书
@@ -188,6 +190,7 @@ class GenerationMixin:
                 adaptation_context=audio_adaptation_context,
                 progress_callback=on_script_progress,
                 enable_llm_script_review=enable_quality_review,
+                pause_check=pause_check,
             )
             
             # 兼容 ChapterStructure 与纯片段列表两种返回形式
@@ -304,6 +307,10 @@ class GenerationMixin:
                         "category": issue.category,
                         "description": issue.description,
                         "suggestion": issue.suggestion,
+                        "dimension": getattr(issue, "dimension", "") or "",
+                        "fix_type": getattr(issue, "fix_type", "") or "",
+                        "target_fields": list(getattr(issue, "target_fields", None) or []),
+                        "segment_index": getattr(issue, "segment_index", -1),
                     }
                     for issue in quality_report.issues[:20]
                 ]
@@ -319,6 +326,7 @@ class GenerationMixin:
                     "issues": issues_preview,
                     "auto_revision": auto_revision if auto_revision.get("applied") else None,
                     "quality_gate": auto_revision.get("quality_gate"),
+                    "llm_dimensions": getattr(quality_report, "llm_dimensions", None) or {},
                 }
                 if llm_script_review_summary:
                     quality_stage_metrics["llm_script_review"] = llm_script_review_summary
@@ -344,18 +352,22 @@ class GenerationMixin:
                 
                 # 📡 WebSocket推送：剧本质量评审完成
                 if WEBSOCKET_AVAILABLE and audiobook_project_id:
+                    ws_stage_metrics = {
+                        'overall_score': quality_report.overall_score,
+                        'overall_grade': quality_report.overall_grade,
+                        'issues_count': len(quality_report.issues),
+                        'quality_gate': quality_gate,
+                    }
+                    llm_dims = getattr(quality_report, "llm_dimensions", None) or {}
+                    if llm_dims:
+                        ws_stage_metrics['llm_dimensions'] = llm_dims
                     await ws_manager.send_audiobook_progress(
                         audiobook_project_id=audiobook_project_id,
                         chapter_id=chapter_id,
                         stage='quality_review',
                         progress=100,
                         message=f'剧本质量评审完成：{quality_report.overall_grade} ({quality_report.overall_score:.1f}分)',
-                        stage_metrics={
-                            'overall_score': quality_report.overall_score,
-                            'overall_grade': quality_report.overall_grade,
-                            'issues_count': len(quality_report.issues),
-                            'quality_gate': quality_gate,
-                        }
+                        stage_metrics=ws_stage_metrics,
                     )
 
                 if auto_revision.get("applied"):
@@ -493,6 +505,7 @@ class GenerationMixin:
                 script_quality_report=quality_report,
                 tts_progress_callback=tts_progress_callback,
                 audiobook_project_id=audiobook_project_id,
+                pause_check=pause_check,
             )
             if scene_chapter_result is not None:
                 scene_chapter_result["quality_report_detail"] = self._quality_report_to_payload(
@@ -594,6 +607,7 @@ class GenerationMixin:
                 script_segments,
                 resume_checkpoint=resume_checkpoint,
                 progress_callback=handle_tts_progress,
+                pause_check=pause_check,
             )
             audio_list = synthesis_result["audio_list"]
             reused_segment_indices = synthesis_result.get("reused_indices") or []
@@ -844,6 +858,8 @@ class GenerationMixin:
             }
             if self._last_effect_timeline and self._last_effect_timeline.get("timeline"):
                 result["effect_timeline"] = self._last_effect_timeline
+            if self._last_music_timeline and self._last_music_timeline.get("timeline"):
+                result["music_timeline"] = self._last_music_timeline
             
             logger.info(f"{'='*70}")
             if len(final_audio) > 0:
@@ -859,6 +875,9 @@ class GenerationMixin:
             
             return result
                 
+        except TTSPauseRequested:
+            # 暂停信号需向上透传给后台任务，由其落库为 paused，不当作失败处理
+            raise
         except Exception as e:
             elapsed_time = time.time() - start_time
             logger.error(f"❌ 章节生成失败: {e}")

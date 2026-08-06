@@ -18,7 +18,9 @@ describe('useAudiobookSegmentPreview source contract', () => {
   it('plays candidate or committed segment audio without generating a fresh preview', () => {
     expect(previewSource).toContain('pendingRegeneration')
     expect(previewSource).toContain('getSegmentRegenerationCandidateAudio')
-    expect(previewSource).toContain('candidateAudioPath')
+    expect(previewSource).toContain('candidateId')
+    expect(previewSource).toContain('audioPath: savedAudioPath, previewType')
+    expect(previewSource).not.toContain('candidateAudioPath')
     expect(previewSource).toContain('resolveSegmentAudioPath')
     expect(previewSource).toContain('pendingSegmentRegenerations[index]?.[previewType]')
     expect(previewSource).not.toContain('apiClient.previewScriptSegmentAudio(')

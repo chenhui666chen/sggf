@@ -7,15 +7,18 @@ import {
   Alert,
   Box,
   Button,
+  Checkbox,
   Chip,
   CircularProgress,
   Dialog,
   DialogActions,
   DialogContent,
   DialogTitle,
+  FormControlLabel,
   IconButton,
   List,
   ListItem,
+  TextField,
   Typography,
 } from '@mui/material'
 
@@ -33,21 +36,32 @@ const HistoryDialog = ({
 }: HistoryDialogProps) => {
   const [deleteProjectId, setDeleteProjectId] = useState<number | null>(null)
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
+  const [deleteReason, setDeleteReason] = useState('')
+  const [deleteFiles, setDeleteFiles] = useState(true)
+  const [deleting, setDeleting] = useState(false)
 
   const handleOpenDeleteDialog = (projectId: number) => {
     setDeleteProjectId(projectId)
     setDeleteDialogOpen(true)
+    setDeleteReason('')
+    setDeleteFiles(true)
   }
 
   const handleCloseDeleteDialog = () => {
     setDeleteDialogOpen(false)
     setDeleteProjectId(null)
+    setDeleteReason('')
+    setDeleteFiles(true)
   }
 
   const handleConfirmDelete = async () => {
-    if (deleteProjectId) {
-      await onDeleteHistory(deleteProjectId)
+    if (!deleteProjectId) return
+    setDeleting(true)
+    try {
+      await onDeleteHistory(deleteProjectId, { delete_reason: deleteReason || undefined, delete_files: deleteFiles })
       handleCloseDeleteDialog()
+    } finally {
+      setDeleting(false)
     }
   }
 
@@ -180,7 +194,7 @@ const HistoryDialog = ({
         </DialogActions>
       </Dialog>
 
-      <Dialog open={deleteDialogOpen} onClose={handleCloseDeleteDialog}>
+      <Dialog open={deleteDialogOpen} onClose={handleCloseDeleteDialog} maxWidth="sm" fullWidth>
         <DialogTitle>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
             <WarningIcon sx={{ color: audiobookColorRoles.destructiveAction.main }} />
@@ -189,26 +203,47 @@ const HistoryDialog = ({
         </DialogTitle>
         <DialogContent>
           <Alert severity="warning" sx={{ mb: 2 }}>
-            此操作将永久删除该有声书项目！
+            此操作将删除该有声书项目的产出，原始章节内容不受影响。
           </Alert>
-          <Typography variant="body1" sx={{ mb: 2 }}>
-            确定要删除这个有声书项目吗？
-          </Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
             项目ID: {deleteProjectId}
           </Typography>
-          <Alert severity="info" sx={{ mb: 2 }}>
-            将默认同时删除音频文件（不可恢复）。
-          </Alert>
+          <TextField
+            fullWidth
+            multiline
+            rows={3}
+            label="删除原因（可选）"
+            placeholder="请说明删除原因..."
+            value={deleteReason}
+            onChange={(event) => setDeleteReason(event.target.value)}
+            sx={{ mb: 2 }}
+          />
+          <FormControlLabel
+            control={
+              <Checkbox
+                checked={deleteFiles}
+                onChange={(event) => setDeleteFiles(event.target.checked)}
+                sx={{
+                  color: audiobookColorRoles.destructiveAction.main,
+                  '&.Mui-checked': {
+                    color: audiobookColorRoles.destructiveAction.main,
+                  },
+                }}
+              />
+            }
+            label="同时删除音频文件（不可恢复）"
+          />
         </DialogContent>
         <DialogActions>
-          <Button onClick={handleCloseDeleteDialog}>取消</Button>
+          <Button onClick={handleCloseDeleteDialog} disabled={deleting}>取消</Button>
           <Button
             onClick={handleConfirmDelete}
+            disabled={deleting}
             variant="contained"
+            startIcon={deleting ? <CircularProgress size={18} color="inherit" /> : undefined}
             sx={audiobookButtonSx.dangerContained}
           >
-            确认删除
+            {deleting ? '删除中...' : '确认删除'}
           </Button>
         </DialogActions>
       </Dialog>

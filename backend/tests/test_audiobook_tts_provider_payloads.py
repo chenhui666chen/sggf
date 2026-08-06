@@ -20,6 +20,7 @@ from app.services.audiobook.tts_engine import TTSEngine
 from app.services.audiobook.engine_pkg._tts_mixin import QWEN_RENDER_CHUNK_MAX_CHARS, TTSMixin
 from app.services.audiobook.tts_engine_pkg._base import redact_tts_voice_params_for_log
 from app.services.audiobook.tts_engine_pkg._aliyun_mixin import (
+    QWEN_TTS_COMPACT_IDENTITY_INSTRUCTION,
     QWEN_TTS_INPUT_SAFETY_CHARS,
     QWEN_TTS_MAX_INPUT_CHARS,
     SEED_TTS_API_KEY_ENV_NAMES,
@@ -36,6 +37,7 @@ from app.services.audiobook.tts_style_control import (
     build_model_style_control,
     prepare_text_for_style_control,
 )
+from app.services.audiobook.voice_identity_policy import VOICE_IDENTITY_POLICY_VERSION
 
 
 def test_qwen_http_payload_preserves_voice_language_and_instructions() -> None:
@@ -106,13 +108,14 @@ def test_qwen_explicit_instructions_merge_with_structured_prompt() -> None:
     assert payload["input"]["language_type"] == "Auto"
     assert payload["parameters"]["optimize_instructions"] is False
     instructions = payload["parameters"]["instructions"]
-    assert instructions.startswith("慢速、温柔、带一点回忆感")
+    assert instructions.startswith("音色约束：保持已选音色")
+    assert instructions.index("音色约束：") < instructions.index("慢速、温柔、带一点回忆感")
     assert "说话角色：林晚" in instructions
     assert "片段类型：dialogue" in instructions
     assert "角色设定：克制但紧张的调查员" in instructions
     assert "场景氛围：雨夜逃亡" in instructions
     assert "情绪目标：fearful" in instructions
-    assert "演绎要求：句尾短暂停顿。" in instructions
+    assert "演绎要求：句尾短暂停顿" in instructions
 
 
 def test_qwen_payload_ignores_legacy_narration_style_runtime_overrides() -> None:
@@ -135,7 +138,8 @@ def test_qwen_payload_ignores_legacy_narration_style_runtime_overrides() -> None
     )
 
     instructions = payload["parameters"]["instructions"]
-    assert "声音描述：性别：男性" in instructions
+    assert instructions.startswith("音色约束：保持已选音色")
+    assert "声音描述：" not in instructions
     assert "片段类型：narration" in instructions
     assert "温和、舒缓、放松" not in instructions
     assert "语速：缓慢" not in instructions
@@ -158,8 +162,12 @@ def test_qwen_http_payload_truncates_instructions_to_provider_input_limit() -> N
     assert payload["input"]["text"] == text
     assert "parameters" in payload
     instructions = payload["parameters"]["instructions"]
+    instruction_budget = QWEN_TTS_MAX_INPUT_CHARS - QWEN_TTS_INPUT_SAFETY_CHARS - len(text)
     assert len(text) + len(instructions) <= QWEN_TTS_MAX_INPUT_CHARS - QWEN_TTS_INPUT_SAFETY_CHARS
-    assert instructions == "y" * (QWEN_TTS_MAX_INPUT_CHARS - QWEN_TTS_INPUT_SAFETY_CHARS - len(text))
+    assert len(instructions) == instruction_budget
+    assert instructions.startswith(f"{QWEN_TTS_COMPACT_IDENTITY_INSTRUCTION}；")
+    assert "y" in instructions
+    assert instructions.endswith("…")
     assert payload["parameters"]["optimize_instructions"] is False
 
 
@@ -213,7 +221,7 @@ def test_qwen_http_payload_drops_instructions_when_text_uses_budget() -> None:
     assert "parameters" not in payload
 
 
-def test_qwen_http_payload_reuses_provider_prompt_snapshot_instruction() -> None:
+def test_qwen_http_payload_treats_provider_prompt_snapshot_as_audit_only() -> None:
     engine = TTSEngine(model="qwen3-tts-instruct-flash", enable_cache=False, request_delay=0)
 
     payload = engine._build_qwen_http_payload(
@@ -221,17 +229,48 @@ def test_qwen_http_payload_reuses_provider_prompt_snapshot_instruction() -> None
         text="她终于停下。",
         voice_id="Neil",
         voice_params={
-            "instructions": "不要重新构建这条 instruction",
+            "speaker": "Neil",
+            "instructions": "语速缓慢，保持克制",
             "provider_prompt_snapshot": {
+                "voice_identity_policy_version": VOICE_IDENTITY_POLICY_VERSION,
+                "model": "qwen3-tts-instruct-flash",
+                "voice_id": "Neil",
                 "provider_prompt": {
-                    "instructions": "快照中的最终 Qwen 指令",
+                    "instructions": "Use an elderly male voice and permanent HUSKY VOICE",
                 }
             },
         },
     )
 
-    assert payload["parameters"]["instructions"] == "快照中的最终 Qwen 指令"
-    assert "不要重新构建" not in payload["parameters"]["instructions"]
+    instructions = payload["parameters"]["instructions"]
+    assert instructions.startswith("音色约束：保持已选音色")
+    assert "语速缓慢，保持克制" in instructions
+    assert "elderly male voice" not in instructions.lower()
+    assert "husky voice" not in instructions.lower()
+
+
+def test_qwen_http_payload_rebuilds_stale_provider_prompt_snapshot_instruction() -> None:
+    engine = TTSEngine(model="qwen3-tts-instruct-flash", enable_cache=False, request_delay=0)
+
+    payload = engine._build_qwen_http_payload(
+        model="qwen3-tts-instruct-flash",
+        text="她终于停下。",
+        voice_id="Neil",
+        voice_params={
+            "instructions": "按当前合同重新构建",
+            "provider_prompt_snapshot": {
+                "voice_identity_policy_version": VOICE_IDENTITY_POLICY_VERSION - 1,
+                "provider_prompt": {
+                    "instructions": "旧策略快照",
+                },
+            },
+        },
+    )
+
+    instructions = payload["parameters"]["instructions"]
+    assert instructions.startswith("音色约束：保持已选音色")
+    assert "按当前合同重新构建" in instructions
+    assert "旧策略快照" not in instructions
 
 
 def test_qwen_render_chunks_use_conservative_limit() -> None:
@@ -274,14 +313,15 @@ def test_cosyvoice_websocket_parameters_and_commands_are_stable() -> None:
     assert parameters["format"] == "mp3"
     assert parameters["sample_rate"] == 22050
     assert parameters["volume"] == 100
-    assert parameters["rate"] == 2.0
-    assert parameters["pitch"] == 1.2
+    assert parameters["rate"] == 1.0
+    assert "pitch" not in parameters
     assert parameters["enable_ssml"] is True
     assert parameters["word_timestamp_enabled"] is True
     assert parameters["phoneme_timestamp_enabled"] is True
     assert parameters["seed"] == 42
     assert parameters["language_hints"] == ["zh", "en", "ja", "ko", "fr"]
-    assert parameters["instruction"].startswith("温柔但坚定")
+    assert parameters["instruction"].startswith("原音色不变;仅表演；")
+    assert "温柔但坚定" in parameters["instruction"]
     assert len(parameters["instruction"].encode("utf-8")) > 0
 
     run_task = engine._build_cosyvoice_run_task_command(
@@ -391,37 +431,44 @@ def test_cosyvoice_instruction_prioritizes_performance_cues_within_provider_limi
     assert "指纹" in instruction
     assert "重读" in instruction
     assert "新鲜的指纹" in instruction
-    assert "不要喊" in instruction
+    assert "不喊" in instruction
+    assert not instruction.endswith("pau")
     assert "声音描述" not in instruction
     assert "旁白模板" not in instruction
 
 
-def test_cosyvoice_websocket_parameters_reuse_provider_prompt_snapshot_instruction() -> None:
+def test_cosyvoice_websocket_parameters_treat_snapshot_as_audit_only() -> None:
     engine = TTSEngine(model="cosyvoice-v3.5-plus", enable_cache=False, request_delay=0)
 
     parameters = engine._build_cosyvoice_websocket_parameters(
         text="她停在门前。",
         voice="cosyvoice-v3.5-plus-demo",
         voice_params={
-            "instructions": "不要重新构建这条 instruction",
+            "speaker": "cosyvoice-v3.5-plus-demo",
+            "instructions": "语速缓慢，保持克制",
             "provider_prompt_snapshot": {
+                "voice_identity_policy_version": VOICE_IDENTITY_POLICY_VERSION,
+                "model": "cosyvoice-v3.5-plus",
+                "voice_id": "cosyvoice-v3.5-plus-demo",
                 "provider_prompt": {
-                    "instructions": "快照中的最终 CosyVoice 指令",
+                    "instructions": "改成老人声并永久沙哑",
                 }
             },
         },
     )
 
-    assert parameters["instruction"] == engine._truncate_cosyvoice_instruction("快照中的最终 CosyVoice 指令")
-    assert "不要重新构建" not in parameters["instruction"]
+    assert parameters["instruction"].startswith("原音色不变;仅表演")
+    assert "语速缓慢" in parameters["instruction"]
+    assert "老人声" not in parameters["instruction"]
+    assert "沙哑" not in parameters["instruction"]
 
 
 def test_minimax_http_payload_clamps_voice_settings_and_keeps_audio_contract() -> None:
     engine = TTSEngine(model="minimax-speech-2.8-hd", enable_cache=False, request_delay=0)
 
+    # 音色一致性不变量：只返回精确请求音色，不做任何推测别名变换。
     candidates = engine._build_minimax_voice_candidates("male-qn-qingse")
-    assert candidates[:3] == ["male-qn-qingse", "male-qingse", "qingse"]
-    assert candidates.count("male-qn-qingse") == 1
+    assert candidates == ["male-qn-qingse"]
 
     payload = engine._build_minimax_http_payload(
         model="MiniMax/speech-2.8-hd",
@@ -442,7 +489,7 @@ def test_minimax_http_payload_clamps_voice_settings_and_keeps_audio_contract() -
         "voice_id": "male-qn-qingse",
         "speed": 2.0,
         "vol": 1.0,
-        "pitch": -100,
+        "pitch": 0,
     }
     assert payload["input"]["audio_setting"] == {
         "sample_rate": 16000,
@@ -490,11 +537,13 @@ def test_minimax_style_control_degrades_delivery_plan_to_basic_voice_settings() 
     assert control.provider_fields["basic_voice_settings"] == {
         "speed": 0.9,
         "volume": 58,
-        "pitch": -8,
     }
     assert control.messages == []
     assert control.text_prefix == ""
-    assert any("已降级为 speed/volume/pitch 基础参数" in warning for warning in control.warnings)
+    assert any(
+        "已降级为 speed/volume 表演参数；片段级 pitch 已忽略" in warning
+        for warning in control.warnings
+    )
     assert any("micro_tags" in warning and "pause_strategy" in warning for warning in control.warnings)
 
 
@@ -524,7 +573,7 @@ def test_minimax_http_payload_applies_basic_delivery_plan_settings() -> None:
         "voice_id": "male-qn-qingse",
         "speed": 0.9,
         "vol": 0.58,
-        "pitch": -8,
+        "pitch": 0,
     }
 
 
@@ -562,22 +611,23 @@ def test_model_style_control_adapts_same_context_for_qwen_and_mimo() -> None:
     mimo_control = build_model_style_control("mimo-v2.5-tts", voice_params, "neutral")
 
     assert qwen_control.mode == "natural_language"
-    assert qwen_control.provider_fields["instructions"].startswith("说话角色：岑霜")
-    assert "角色设定：百年门阀岑家的现任大当家" in qwen_control.provider_fields["instructions"]
-    assert "指导：" not in qwen_control.provider_fields["instructions"]
+    qwen_instruction = qwen_control.provider_fields["instructions"]
+    assert qwen_instruction.startswith("音色约束：保持已选音色")
+    assert qwen_instruction.index("音色约束：") < qwen_instruction.index("说话角色：岑霜")
+    assert "角色设定：百年门阀岑家的现任大当家" in qwen_instruction
+    assert "指导：" not in qwen_instruction
     assert qwen_control.text_prefix == ""
 
     assert mimo_control.mode == "mimo_director"
-    assert mimo_control.messages == [
-        {
-            "role": "user",
-            "content": (
-                "角色：百年门阀岑家的现任大当家\n"
-                "场景：祠堂阴影里，她要用冷硬阶级壁垒逼退对方。\n"
-                "指导：压抑的愤怒；语速极慢，句间留长停顿，在“真心”尾音加入轻微气音。"
-            ),
-        }
-    ]
+    assert len(mimo_control.messages) == 1
+    assert mimo_control.messages[0]["role"] == "user"
+    mimo_prompt = mimo_control.messages[0]["content"]
+    assert mimo_prompt.startswith("角色：百年门阀岑家的现任大当家\n")
+    assert "场景：祠堂阴影里，她要用冷硬阶级壁垒逼退对方" in mimo_prompt
+    assert "指导：音色约束：保持已选音色" in mimo_prompt
+    assert "压抑的愤怒" in mimo_prompt
+    assert "语速极慢，句间留长停顿，在“真心”尾音加入轻微气音" in mimo_prompt
+    assert "声音描述：" not in mimo_prompt
     assert mimo_control.provider_fields == {"style_control_mode": "natural_language"}
     assert mimo_control.text_prefix == ""
 
@@ -682,7 +732,104 @@ def test_seed_tts_style_control_uses_query_response_context_texts() -> None:
     assert "context_texts" in control.provider_fields
     assert "说话角色：岑霜" in control.provider_fields["context_texts"][0]
     assert "情绪目标：带着哽咽的笑意" in control.provider_fields["context_texts"][0]
-    assert "演绎要求：语速偏慢，句尾轻微气声。" in control.provider_fields["context_texts"][0]
+    context_text = control.provider_fields["context_texts"][0]
+    assert context_text.startswith("音色约束：保持已选音色")
+    assert "演绎要求：语速偏慢，句尾轻微气声" in context_text
+    assert "声音描述：" not in context_text
+
+
+@pytest.mark.parametrize(
+    ("model", "prompt_field"),
+    [
+        ("qwen3-tts-instruct-flash", "instructions"),
+        ("cosyvoice-v3.5-plus", "instructions"),
+        (STEPAUDIO_25_TTS_MODEL, "instruction"),
+        (SEED_TTS_20_EXPRESSIVE_MODEL, "context_texts"),
+    ],
+)
+def test_fixed_voice_provider_prompts_preserve_identity_during_temporary_texture(
+    model: str,
+    prompt_field: str,
+) -> None:
+    control = build_model_style_control(
+        model,
+        {
+            "speaker": "selected-voice",
+            "segment_speaker": "陆衍",
+            "segment_type": "dialogue",
+            "performance_notes": "生病后声音明显沙哑、虚弱，句尾带气声。",
+        },
+        "sad",
+    )
+
+    raw_prompt = control.provider_fields[prompt_field]
+    prompt = raw_prompt[0] if isinstance(raw_prompt, list) else raw_prompt
+
+    if model == "cosyvoice-v3.5-plus":
+        assert prompt.startswith("原音色不变;仅表演")
+    else:
+        assert "已选音色" in prompt
+        assert "身份" in prompt
+        assert "年龄" in prompt
+        assert "声线" in prompt
+        assert "辨识度" in prompt
+    assert "表演" in prompt
+    assert "沙哑" in prompt
+    assert "气声" in prompt
+    assert "轻度" in prompt
+    assert "原音色" in prompt or "原声" in prompt
+
+
+def test_fixed_voice_identity_constraint_survives_long_explicit_instruction_budget() -> None:
+    control = build_model_style_control(
+        "qwen3-tts-instruct-flash",
+        {
+            "speaker": "Neil",
+            "instructions": "用户表演要求" * 120,
+        },
+        "neutral",
+    )
+
+    instruction = control.provider_fields["instructions"]
+
+    assert instruction.startswith("音色约束：保持已选音色")
+    assert len(instruction) <= 600
+
+
+def test_mimo_director_locks_selected_voice_but_voice_design_remains_unrestricted() -> None:
+    fixed_voice_control = build_model_style_control(
+        MIMO_V25_TTS_MODEL,
+        {
+            "speaker": "Chloe",
+            "segment_speaker": "陆衍",
+            "segment_type": "dialogue",
+            "performance_notes": "重伤后声音沙哑、虚弱，句尾带气声。",
+        },
+        "sad",
+    )
+    voice_design_control = build_model_style_control(
+        MIMO_V25_TTS_VOICE_DESIGN_MODEL,
+        {
+            "voice_description": "设计为苍老沙哑的男性声线，气息虚弱。",
+            "performance_notes": "语速缓慢。",
+        },
+        "sad",
+    )
+
+    director_prompt = fixed_voice_control.messages[0]["content"]
+    design_prompt = voice_design_control.messages[0]["content"]
+
+    assert "保持已选音色" in director_prompt
+    assert "说话人身份" in director_prompt
+    assert "年龄感" in director_prompt
+    assert "基础声线" in director_prompt
+    assert "辨识度" in director_prompt
+    assert "只在原音色基础上调整当前片段表演" in director_prompt
+    assert "沙哑、气声" in director_prompt
+    assert "因重伤，仅在原音色基础上轻微、短暂表现沙哑" in director_prompt
+    assert "轻度" in director_prompt
+    assert "保持已选音色" not in design_prompt
+    assert "苍老沙哑的男性声线" in design_prompt
 
 
 def test_mimo_label_control_prefixes_text_without_polluting_other_models() -> None:
@@ -696,10 +843,63 @@ def test_mimo_label_control_prefixes_text_without_polluting_other_models() -> No
     qwen_control = build_model_style_control("qwen3-tts-instruct-flash", voice_params, "fearful")
 
     assert mimo_control.mode == "mimo_audio_tags"
-    assert mimo_control.messages == [{"role": "assistant", "content": "（紧张，深呼吸）[小声]"}]
+    assert len(mimo_control.messages) == 1
+    assert mimo_control.messages[0]["role"] == "user"
+    assert mimo_control.messages[0]["content"].startswith("音色约束：保持已选音色")
+    assert mimo_control.text_prefix == "（紧张，深呼吸）[小声]"
     assert prepare_text_for_style_control("别停下。", mimo_control) == "（紧张，深呼吸）[小声]别停下。"
     assert qwen_control.text_prefix == ""
     assert prepare_text_for_style_control("别停下。", qwen_control) == "别停下。"
+
+
+def test_mimo_audio_tags_filter_identity_changes_and_prefix_identity_constraint() -> None:
+    control = build_model_style_control(
+        MIMO_V25_TTS_MODEL,
+        {
+            "speaker": "Chloe",
+            "style_control_method": "audio_tags",
+            "style_tags": ["紧张", "少女音", "沙哑"],
+            "inline_audio_tags": ["小声", "变声"],
+            "performance_notes": "生病后轻微沙哑，但保持原本身份。",
+        },
+        "fearful",
+    )
+
+    assert control.mode == "mimo_audio_tags"
+    assert control.messages[0]["role"] == "user"
+    assert control.messages[0]["content"].startswith("音色约束：保持已选音色")
+    assert "（紧张）" in control.text_prefix
+    assert "[小声]" in control.text_prefix
+    assert "少女音" not in control.text_prefix
+    assert "变声" not in control.text_prefix
+    assert "[沙哑]" not in control.text_prefix
+    assert any(
+        "少女音" in warning and "沙哑" in warning and "变声" in warning
+        for warning in control.warnings
+    )
+
+
+def test_mimo_audio_tags_payload_places_identity_constraint_before_safe_tags() -> None:
+    engine = TTSEngine(model=MIMO_V25_TTS_MODEL, enable_cache=False, request_delay=0)
+
+    payload = engine._build_mimo_chat_payload(
+        model=MIMO_V25_TTS_MODEL,
+        text="别停下。",
+        voice="Chloe",
+        voice_params={
+            "style_control_method": "audio_tags",
+            "style_tags": ["紧张", "童声"],
+            "inline_audio_tags": ["低语"],
+        },
+    )
+
+    assert payload["messages"][0]["role"] == "user"
+    assert payload["messages"][0]["content"].startswith("音色约束：保持已选音色")
+    assert payload["messages"][1] == {
+        "role": "assistant",
+        "content": "（紧张）[低语]别停下。",
+    }
+    assert "童声" not in json.dumps(payload["messages"], ensure_ascii=False)
 
 
 def test_inline_tag_strategy_audits_mimo_and_doubao_tag_placement() -> None:
@@ -818,17 +1018,14 @@ def test_mimo_chat_payload_places_natural_language_control_in_user_message() -> 
     )
 
     assert payload["model"] == MIMO_V25_TTS_MODEL
-    assert payload["messages"] == [
-        {
-            "role": "user",
-            "content": (
-                "角色：冷硬疏离的世家掌权人\n"
-                "场景：祠堂里，对方试图带她逃离家族。\n"
-                "指导：温柔但疲惫；语速极慢，实音偏重，句末轻微气音。"
-            ),
-        },
-        {"role": "assistant", "content": "你所谓的真心，太廉价了。"},
-    ]
+    assert payload["messages"][0]["role"] == "user"
+    director_prompt = payload["messages"][0]["content"]
+    assert director_prompt.startswith("角色：冷硬疏离的世家掌权人\n")
+    assert "场景：祠堂里，对方试图带她逃离家族" in director_prompt
+    assert "指导：音色约束：保持已选音色" in director_prompt
+    assert "温柔但疲惫" in director_prompt
+    assert "语速极慢，实音偏重，句末轻微气音" in director_prompt
+    assert payload["messages"][1] == {"role": "assistant", "content": "你所谓的真心，太廉价了。"}
     assert payload["audio"] == {"voice": "Chloe", "format": "wav"}
 
 
@@ -901,7 +1098,7 @@ def test_seed_tts_http_payload_uses_context_texts_and_audio_params() -> None:
     assert payload["req_params"]["audio_params"] == {
         "format": "mp3",
         "sample_rate": 24000,
-        "speech_rate": 20,
+        "speech_rate": 0,
         "loudness_rate": 0,
     }
     assert payload["req_params"]["model"] == SEED_TTS_20_EXPRESSIVE_MODEL
@@ -909,8 +1106,111 @@ def test_seed_tts_http_payload_uses_context_texts_and_audio_params() -> None:
     assert payload["req_params"]["text_type"] == "plain"
     assert payload["req_params"]["with_timestamp"] == 0
     additions = json.loads(payload["req_params"]["additions"])
-    assert "温柔但疲惫" in additions["context_texts"][0]
-    assert "语速偏慢，停顿更长。" in additions["context_texts"][0]
+    context_text = additions["context_texts"][0]
+    assert context_text.startswith("音色约束：保持已选音色")
+    assert "温柔但疲惫" in context_text
+    assert "语速偏慢，停顿更长" in context_text
+    assert "声音描述：" not in context_text
+
+
+@pytest.mark.parametrize(
+    "voice_params",
+    [
+        {"pitch": 0.9},
+        {"pitch": 1.0},
+        {"pitch": 50},
+        {"pitch_semitones": -3, "pitch": 0.9},
+        {"pitch_ratio": 2.0, "pitch": 50},
+    ],
+)
+def test_seed_tts_http_payload_ignores_all_segment_pitch_controls(
+    voice_params: dict[str, float],
+) -> None:
+    engine = TTSEngine(model=SEED_TTS_20_EXPRESSIVE_MODEL, enable_cache=False, request_delay=0)
+
+    payload = engine._build_seed_tts_http_payload(
+        model=SEED_TTS_20_EXPRESSIVE_MODEL,
+        text="保持原音色。",
+        voice="zh_male_yuanboxiaoshu_uranus_bigtts",
+        voice_params=voice_params,
+    )
+
+    additions = json.loads(payload["req_params"].get("additions", "{}"))
+    assert "post_process" not in additions
+
+
+def test_tts_cache_key_ignores_segment_pitch_contract_fields() -> None:
+    engine = TTSEngine(model=SEED_TTS_20_EXPRESSIVE_MODEL, enable_cache=False, request_delay=0)
+
+    neutral_key = engine._generate_cache_key(
+        "保持原音色。",
+        {"speaker": "voice-a", "pitch_semitones": 0},
+        "neutral",
+    )
+    lowered_key = engine._generate_cache_key(
+        "保持原音色。",
+        {"speaker": "voice-a", "pitch_semitones": -2},
+        "neutral",
+    )
+    ratio_key = engine._generate_cache_key(
+        "保持原音色。",
+        {"speaker": "voice-a", "pitch_ratio": 0.9},
+        "neutral",
+    )
+
+    assert neutral_key == lowered_key == ratio_key
+
+
+def test_tts_cache_key_includes_voice_identity_policy_version(monkeypatch) -> None:
+    from app.services.audiobook.tts_engine_pkg import _minimax_mixin
+
+    engine = TTSEngine(model=SEED_TTS_20_EXPRESSIVE_MODEL, enable_cache=False, request_delay=0)
+    base_key = engine._generate_cache_key(
+        "保持原音色。",
+        {"speaker": "voice-a", "performance_notes": "语速缓慢"},
+        "neutral",
+    )
+
+    monkeypatch.setattr(
+        _minimax_mixin,
+        "VOICE_IDENTITY_POLICY_VERSION",
+        _minimax_mixin.VOICE_IDENTITY_POLICY_VERSION + 1,
+    )
+    upgraded_key = engine._generate_cache_key(
+        "保持原音色。",
+        {"speaker": "voice-a", "performance_notes": "语速缓慢"},
+        "neutral",
+    )
+
+    assert upgraded_key != base_key
+
+
+def test_tts_cache_key_includes_structured_performance_contract() -> None:
+    engine = TTSEngine(model=SEED_TTS_20_EXPRESSIVE_MODEL, enable_cache=False, request_delay=0)
+    slow_key = engine._generate_cache_key(
+        "痛。",
+        {
+            "speaker": "voice-a",
+            "delivery_plan": {
+                "pace": "slow",
+                "stress_words": ["痛"],
+            },
+        },
+        "sad",
+    )
+    fast_key = engine._generate_cache_key(
+        "痛。",
+        {
+            "speaker": "voice-a",
+            "delivery_plan": {
+                "pace": "fast",
+                "stress_words": [],
+            },
+        },
+        "sad",
+    )
+
+    assert slow_key != fast_key
 
 
 def test_seed_tts_http_payload_supports_official_inline_voice_labels() -> None:
@@ -919,7 +1219,7 @@ def test_seed_tts_http_payload_supports_official_inline_voice_labels() -> None:
     payload = engine._build_seed_tts_http_payload(
         model=SEED_TTS_20_EXPRESSIVE_MODEL,
         text="可当他的手触碰到对方的身体时，却感觉一阵冰冷僵硬。",
-        voice="saturn_zh_female_keainvsheng_tob",
+        voice="ICL_uranus_zh_female_keainvsheng_tob",
         voice_params={
             "style_control_method": "labels",
             "inline_audio_tags": ["旁白", "语调惊恐", "强调触摸到尸体般触感的恐怖"],
@@ -931,12 +1231,29 @@ def test_seed_tts_http_payload_supports_official_inline_voice_labels() -> None:
     assert "use_tag_parser" not in payload["req_params"]
     additions = json.loads(payload["req_params"]["additions"])
     assert additions["use_tag_parser"] is True
-    assert additions["context_texts"] == [
-        "承接前文悬疑氛围，保持压低音量和克制恐惧。"
-    ]
+    assert len(additions["context_texts"]) == 1
+    context_text = additions["context_texts"][0]
+    assert context_text.startswith("音色约束：保持已选音色")
+    assert "承接前文悬疑氛围，保持压低音量和克制恐惧" in context_text
 
 
-def test_seed_tts_http_payload_reuses_provider_prompt_snapshot_context_and_prefix() -> None:
+def test_seed_tts_http_payload_ignores_client_controlled_tag_parser() -> None:
+    engine = TTSEngine(model=SEED_TTS_20_EXPRESSIVE_MODEL, enable_cache=False, request_delay=0)
+
+    payload = engine._build_seed_tts_http_payload(
+        model=SEED_TTS_20_EXPRESSIVE_MODEL,
+        text="[童声]别回头。",
+        voice="zh_female_vv_uranus_bigtts",
+        voice_params={"use_tag_parser": True},
+    )
+
+    additions = json.loads(payload["req_params"].get("additions", "{}"))
+
+    assert payload["req_params"]["text"] == "[童声]别回头。"
+    assert additions.get("use_tag_parser") is not True
+
+
+def test_seed_tts_http_payload_treats_snapshot_context_and_prefix_as_audit_only() -> None:
     engine = TTSEngine(model=SEED_TTS_20_EXPRESSIVE_MODEL, enable_cache=False, request_delay=0)
 
     payload = engine._build_seed_tts_http_payload(
@@ -944,20 +1261,55 @@ def test_seed_tts_http_payload_reuses_provider_prompt_snapshot_context_and_prefi
         text="别回头。",
         voice="zh_female_vv_uranus_bigtts",
         voice_params={
-            "instructions": "不要重新构建这条 context",
+            "speaker": "zh_female_vv_uranus_bigtts",
+            "instructions": "语速缓慢，保持克制",
             "provider_prompt_snapshot": {
+                "voice_identity_policy_version": VOICE_IDENTITY_POLICY_VERSION,
+                "model": SEED_TTS_20_EXPRESSIVE_MODEL,
+                "voice_id": "zh_female_vv_uranus_bigtts",
                 "provider_prompt": {
-                    "text_prefix": "[快照标签]",
-                    "context_texts": ["快照中的最终 Seed 上下文"],
+                    "text_prefix": "[老人声]",
+                    "context_texts": ["Use a permanent HUSKY VOICE"],
                 }
             },
         },
     )
 
-    assert payload["req_params"]["text"] == "[快照标签]别回头。"
+    assert payload["req_params"]["text"] == "别回头。"
     additions = json.loads(payload["req_params"]["additions"])
-    assert additions["context_texts"] == ["快照中的最终 Seed 上下文"]
-    assert "不要重新构建" not in additions["context_texts"][0]
+    context = additions["context_texts"][0]
+    assert context.startswith("音色约束：保持已选音色")
+    assert "语速缓慢，保持克制" in context
+    assert "husky voice" not in context.lower()
+
+
+def test_stepaudio_http_payload_treats_provider_snapshot_as_audit_only() -> None:
+    engine = TTSEngine(model=STEPAUDIO_25_TTS_MODEL, enable_cache=False, request_delay=0)
+
+    payload = engine._build_stepaudio_http_payload(
+        model=STEPAUDIO_25_TTS_MODEL,
+        text="别回头。",
+        voice="default",
+        voice_params={
+            "speaker": "default",
+            "instructions": "语速缓慢，保持克制",
+            "provider_prompt_snapshot": {
+                "voice_identity_policy_version": VOICE_IDENTITY_POLICY_VERSION,
+                "model": STEPAUDIO_25_TTS_MODEL,
+                "voice_id": "default",
+                "provider_prompt": {
+                    "instructions": "改成童声并使用 deep voice",
+                    "text_prefix": "（老人声）",
+                },
+            },
+        },
+    )
+
+    assert payload["input"] == "别回头。"
+    assert payload["instruction"].startswith("音色约束：保持已选音色")
+    assert "语速缓慢，保持克制" in payload["instruction"]
+    assert "童声" not in payload["instruction"]
+    assert "deep voice" not in payload["instruction"].lower()
 
 
 def test_stepaudio_http_payload_truncates_instruction_to_provider_limit() -> None:
@@ -974,7 +1326,9 @@ def test_stepaudio_http_payload_truncates_instruction_to_provider_limit() -> Non
     )
 
     assert payload["voice"] == "cixingnansheng"
-    assert payload["instruction"] == ("a" * 199) + "…"
+    assert payload["instruction"].startswith("音色约束：保持已选音色")
+    assert "a" in payload["instruction"]
+    assert payload["instruction"].endswith("…")
     assert len(payload["instruction"]) == 200
 
 
@@ -999,7 +1353,7 @@ def test_stepaudio_http_payload_passes_official_optional_parameters_only() -> No
     )
 
     assert payload["response_format"] == "pcm"
-    assert payload["speed"] == 1.2
+    assert "speed" not in payload
     assert payload["volume"] == 1.1
     assert payload["sample_rate"] == 48000
     assert payload["pronunciation_map"] == {"tone": ["扁舟/偏舟", "LOL/laugh out loudly"]}
@@ -1078,16 +1432,22 @@ def test_stepaudio_http_call_uses_stepfun_speech_endpoint(monkeypatch) -> None:
         "Authorization": "Bearer unit-step-key",
         "Content-Type": "application/json",
     }
+    assert captured["json"]["model"] == STEPAUDIO_25_TTS_MODEL
+    assert captured["json"]["voice"] == "cixingnansheng"
+    assert captured["json"]["input"] == "她停下脚步。（压低声音）你真的想清楚了吗？"
+    instruction = captured["json"]["instruction"]
+    assert instruction.startswith("音色约束：保持已选音色")
+    assert instruction.endswith("语气克制，语速偏慢")
     assert captured["json"] == {
         "model": STEPAUDIO_25_TTS_MODEL,
         "voice": "cixingnansheng",
         "input": "她停下脚步。（压低声音）你真的想清楚了吗？",
-        "instruction": "语气克制，语速偏慢",
+        "instruction": instruction,
     }
     metadata = engine.get_last_synthesis_metadata()
     assert metadata["provider"] == "stepfun"
     assert metadata["endpoint"] == "/audio/speech"
-    assert metadata["instruction"] == "语气克制，语速偏慢"
+    assert metadata["instruction"] == instruction
 
 
 def test_seed_tts_http_call_uses_volcengine_v3_endpoint(monkeypatch) -> None:
@@ -1149,7 +1509,10 @@ def test_seed_tts_http_call_uses_volcengine_v3_endpoint(monkeypatch) -> None:
     assert captured["json"]["req_params"]["audio_params"]["format"] == "mp3"
     assert captured["json"]["req_params"]["model"] == SEED_TTS_20_EXPRESSIVE_MODEL
     assert captured["json"]["req_params"]["text"] == "她终于笑了。"
-    assert json.loads(captured["json"]["req_params"]["additions"])["context_texts"] == ["带着哽咽的笑意，语速偏慢。"]
+    context_texts = json.loads(captured["json"]["req_params"]["additions"])["context_texts"]
+    assert len(context_texts) == 1
+    assert context_texts[0].startswith("音色约束：保持已选音色")
+    assert "带着哽咽的笑意，语速偏慢" in context_texts[0]
     metadata = engine.get_last_synthesis_metadata()
     assert metadata["provider"] == "volcengine"
     assert metadata["endpoint"] == "/api/v3/tts/unidirectional"
@@ -1215,6 +1578,7 @@ def test_seed_tts_websocket_sends_finish_session_before_awaiting_session_finishe
         def __init__(self) -> None:
             self.response = SimpleNamespace(headers={})
             self.events: list[int] = []
+            self.task_request_payload = None
             self._queue: asyncio.Queue = asyncio.Queue()
 
         def _reply(self, msg) -> None:
@@ -1232,6 +1596,7 @@ def test_seed_tts_websocket_sends_finish_session_before_awaiting_session_finishe
                     )
                 )
             elif msg.event == E.TaskRequest:
+                self.task_request_payload = json.loads(msg.payload.decode("utf-8"))
                 self._reply(protocols.Message(type=M.AudioOnlyServer, payload=b"seed-head"))
             elif msg.event == E.FinishSession:
                 self._reply(protocols.Message(type=M.AudioOnlyServer, payload=b"-tail"))
@@ -1260,14 +1625,24 @@ def test_seed_tts_websocket_sends_finish_session_before_awaiting_session_finishe
         engine._call_seed_tts_websocket(
             model=SEED_TTS_20_EXPRESSIVE_MODEL,
             api_key="unit-seed-key",
-            text="她终于笑了。",
+            text="[童声]她终于笑了。",
             voice="zh_female_vv_uranus_bigtts",
-            voice_params={},
+            voice_params={
+                "use_tag_parser": True,
+                "pitch": 0.8,
+                "pitch_ratio": 0.8,
+                "pitch_semitones": -4,
+            },
             resource_id="seed-tts-2.0",
         )
     )
 
     assert result == b"seed-head-tail", "FinishSession 后到达的尾部音频不应被丢弃"
+    task_req_params = fake_ws.task_request_payload["req_params"]
+    task_additions = json.loads(task_req_params.get("additions", "{}"))
+    assert task_req_params["text"] == "[童声]她终于笑了。"
+    assert task_additions.get("use_tag_parser") is not True
+    assert "post_process" not in task_additions
     finish_idx = fake_ws.events.index(int(E.FinishSession))
     # FinishSession 应紧随 TaskRequest 发送，而不是等接收循环超时后才补发
     assert fake_ws.events[finish_idx - 1] == int(E.TaskRequest)
@@ -1558,13 +1933,16 @@ def test_stepaudio_clone_asset_synthesis_uses_voice_preview_when_file_id_exists(
     )
 
     assert result == b"preview-audio"
+    instruction = captured["preview"]["instruction"]
+    assert instruction.startswith("音色约束：保持已选音色")
+    assert instruction.endswith("Warm voice，slow pace.")
     assert captured["preview"] == {
         "model": STEPAUDIO_25_TTS_MODEL,
         "api_key": "unit-step-key",
         "text": "Preview line.",
         "file_id": "file-unit",
         "sample_text": "Sample text.",
-        "instruction": "Warm voice, slow pace.",
+        "instruction": instruction,
     }
 
 
@@ -1608,7 +1986,7 @@ def test_mimo_chat_payload_uses_official_default_preset_voice() -> None:
     assert payload["audio"] == {"voice": "mimo_default", "format": "wav"}
 
 
-def test_mimo_director_prompt_includes_voice_description_in_guidance() -> None:
+def test_mimo_director_prompt_omits_fixed_voice_description_from_guidance() -> None:
     control = build_model_style_control(
         "mimo-v2.5-tts",
         {
@@ -1624,13 +2002,16 @@ def test_mimo_director_prompt_includes_voice_description_in_guidance() -> None:
     assert control.mode == "mimo_director"
     content = control.messages[0]["content"]
     assert content.startswith("角色：冷硬疏离的世家掌权人\n")
-    assert "场景：祠堂里，对方试图带她逃离家族。" in content
-    assert "指导：性别：女性，年龄感：青年" in content
-    assert "温柔但疲惫" in content
-    assert "句末轻微气音。" in content
+    assert "场景：祠堂里，对方试图带她逃离家族" in content
+    assert "指导：音色约束：保持已选音色" in content
+    assert "性别：女性" not in content
+    assert "年龄感：青年" not in content
+    assert "语速：缓慢" not in content
+    assert "情绪：温柔但疲惫" not in content
+    assert "句末轻微气音" in content
 
 
-def test_mimo_director_prompt_merges_explicit_instruction_with_voice_description() -> None:
+def test_mimo_director_prompt_keeps_explicit_performance_without_voice_description() -> None:
     control = build_model_style_control(
         "mimo-v2.5-tts",
         {
@@ -1645,9 +2026,11 @@ def test_mimo_director_prompt_merges_explicit_instruction_with_voice_description
     content = control.messages[0]["content"]
 
     assert content.startswith("角色：长期压抑情绪的继承人\n")
-    assert "场景：雨夜，她终于说出真相。" in content
-    assert "性别：女性，年龄感：青年" in content
-    assert "整体保持冷静克制，重读关键转折。" in content
+    assert "场景：雨夜，她终于说出真相" in content
+    assert "指导：音色约束：保持已选音色" in content
+    assert "性别：女性" not in content
+    assert "年龄感：青年" not in content
+    assert "整体保持冷静克制，重读关键转折" in content
 
 
 def test_mimo_chat_payload_places_audio_tags_in_assistant_message() -> None:
@@ -1664,9 +2047,12 @@ def test_mimo_chat_payload_places_audio_tags_in_assistant_message() -> None:
         },
     )
 
-    assert payload["messages"] == [
-        {"role": "assistant", "content": "（紧张，深呼吸）[小声]呼……冷静，冷静。"}
-    ]
+    assert payload["messages"][0]["role"] == "user"
+    assert payload["messages"][0]["content"].startswith("音色约束：保持已选音色")
+    assert payload["messages"][1] == {
+        "role": "assistant",
+        "content": "（紧张，深呼吸）[小声]呼……冷静，冷静。",
+    }
     assert payload["audio"] == {"voice": "冰糖", "format": "wav"}
 
 
@@ -1736,9 +2122,12 @@ def test_mimo_voice_clone_payload_uses_audio_data_url_as_voice() -> None:
     )
 
     assert payload["model"] == MIMO_V25_TTS_VOICE_CLONE_MODEL
-    assert payload["messages"] == [
-        {"role": "assistant", "content": "（温柔）[轻声]别怕，我就在这里。"}
-    ]
+    assert payload["messages"][0]["role"] == "user"
+    assert payload["messages"][0]["content"].startswith("音色约束：保持已选音色")
+    assert payload["messages"][1] == {
+        "role": "assistant",
+        "content": "（温柔）[轻声]别怕，我就在这里。",
+    }
     assert payload["audio"] == {"voice": sample_voice, "format": "wav"}
 
 

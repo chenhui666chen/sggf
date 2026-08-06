@@ -17,8 +17,9 @@ os.environ.setdefault("DATABASE_URL", "postgresql://test:test@127.0.0.1:5432/tes
 
 from app.api.v1.audiobook_api import routes_tts
 from app.scripts import warmup_tts_voice_previews
-from app.services.audiobook import voice_catalog
+from app.services.audiobook import tts_preview_cache, voice_catalog
 from app.services.audiobook.tts_preview_cache import build_default_preview_cache_key
+from app.services.audiobook.tts_model_ids import MIMO_V25_TTS_VOICE_DESIGN_MODEL
 
 
 class DummyRequest:
@@ -37,6 +38,188 @@ class DummyRequest:
         self.stepaudio_voice_asset_id = ""
         self.word_timestamp_enabled = False
         self.phoneme_timestamp_enabled = False
+
+
+def test_saved_mimo_design_preview_uses_asset_identity_and_filters_segment_voice_changes(
+    monkeypatch,
+) -> None:
+    request = routes_tts.TTSPreviewRequest(
+        text="别回头。",
+        model=MIMO_V25_TTS_VOICE_DESIGN_MODEL,
+        voice_id="mimo_design:asset-1",
+        mimo_voice_asset_id="asset-1",
+        pitch=20,
+        voice_design_prompt="客户端试图覆盖音色",
+        instruction="改成老人声，语速缓慢，句尾拖长。",
+    )
+
+    monkeypatch.setattr(
+        routes_tts,
+        "merge_mimo_voice_asset_tts_params",
+        lambda config, **_: {
+            **config,
+            "mimo_voice_asset_id": "asset-1",
+            "voice_design_prompt": "青年女性，中音，声线清晰",
+            "voice_description": "青年女性，中音，声线清晰",
+        },
+    )
+
+    params = routes_tts._build_preview_voice_params(
+        request,
+        "mimo_design:asset-1",
+        model_name=MIMO_V25_TTS_VOICE_DESIGN_MODEL,
+        owner_user_id=7,
+    )
+
+    assert "pitch" not in params
+    assert params["voice_design_prompt"] == "青年女性，中音，声线清晰"
+    assert "voice_description" not in params
+    assert "老人声" not in params["instruction"]
+    assert "语速缓慢" in params["instruction"]
+    assert "句尾拖长" in params["instruction"]
+
+
+def test_mimo_voice_design_creation_preview_keeps_design_controls_but_drops_numeric_speed() -> None:
+    request = routes_tts.TTSPreviewRequest(
+        text="设计试听。",
+        model=MIMO_V25_TTS_VOICE_DESIGN_MODEL,
+        voice_id="",
+        speed=1.1,
+        pitch=38,
+        voice_design_prompt="设计一位年长女性的声音",
+    )
+
+    params = routes_tts._build_preview_voice_params(
+        request,
+        "",
+        model_name=MIMO_V25_TTS_VOICE_DESIGN_MODEL,
+    )
+
+    assert params["pitch"] == 38
+    assert params["voice_design_prompt"] == "设计一位年长女性的声音"
+    assert "speed" not in params
+    assert "rate" not in params
+
+
+def test_mimo_voice_design_creation_cache_identity_ignores_legacy_numeric_speed() -> None:
+    common = {
+        "text": "设计试听。",
+        "model": MIMO_V25_TTS_VOICE_DESIGN_MODEL,
+        "voice_id": "",
+        "pitch": 38,
+        "voice_design_prompt": "设计一位年长女性的声音",
+    }
+    slow_request = routes_tts.TTSPreviewRequest(**common, speed=0.8)
+    fast_request = routes_tts.TTSPreviewRequest(**common, speed=1.2)
+
+    slow_params = routes_tts._build_preview_voice_params(
+        slow_request,
+        "",
+        model_name=MIMO_V25_TTS_VOICE_DESIGN_MODEL,
+    )
+    fast_params = routes_tts._build_preview_voice_params(
+        fast_request,
+        "",
+        model_name=MIMO_V25_TTS_VOICE_DESIGN_MODEL,
+    )
+
+    assert slow_params == fast_params
+    assert tts_preview_cache._build_preview_cache_key(
+        model=MIMO_V25_TTS_VOICE_DESIGN_MODEL,
+        voice_id="",
+        text="设计试听。",
+        pitch=38,
+        voice_params=slow_params,
+    ) == tts_preview_cache._build_preview_cache_key(
+        model=MIMO_V25_TTS_VOICE_DESIGN_MODEL,
+        voice_id="",
+        text="设计试听。",
+        pitch=38,
+        voice_params=fast_params,
+    )
+
+
+def test_preview_cache_key_changes_with_voice_identity_policy_version(monkeypatch) -> None:
+    cache_key_args = {
+        "model": "qwen3-tts-instruct-flash",
+        "voice_id": "Vincent",
+        "text": "固定试听文本",
+        "voice_params": {
+            "speaker": "Vincent",
+            "volume": 50,
+            "voice_id": "Vincent",
+        },
+    }
+
+    monkeypatch.setattr(
+        tts_preview_cache,
+        "VOICE_IDENTITY_POLICY_VERSION",
+        1,
+        raising=False,
+    )
+    key_v1 = tts_preview_cache._build_preview_cache_key(**cache_key_args)
+
+    monkeypatch.setattr(
+        tts_preview_cache,
+        "VOICE_IDENTITY_POLICY_VERSION",
+        2,
+        raising=False,
+    )
+    key_v2 = tts_preview_cache._build_preview_cache_key(**cache_key_args)
+
+    assert key_v1 != key_v2
+
+
+def test_preview_cache_fallback_ignores_pitch_for_fixed_voice() -> None:
+    common = {
+        "model": "qwen3-tts-instruct-flash",
+        "voice_id": "Vincent",
+        "text": "固定试听文本",
+    }
+
+    low_pitch = tts_preview_cache._build_preview_cache_key(**common, pitch=20)
+    high_pitch = tts_preview_cache._build_preview_cache_key(**common, pitch=80)
+
+    assert low_pitch == high_pitch
+
+
+def test_preview_cache_fallback_ignores_numeric_speed_for_instruction_model() -> None:
+    common = {
+        "model": "qwen3-tts-instruct-flash",
+        "voice_id": "Vincent",
+        "text": "固定试听文本",
+    }
+
+    slow = tts_preview_cache._build_preview_cache_key(**common, speed=0.8)
+    fast = tts_preview_cache._build_preview_cache_key(**common, speed=1.2)
+
+    assert slow == fast
+
+
+def test_preview_cache_fallback_keeps_numeric_speed_for_basic_model() -> None:
+    common = {
+        "model": "minimax-speech-2.8-hd",
+        "voice_id": "unit-voice",
+        "text": "固定试听文本",
+    }
+
+    slow = tts_preview_cache._build_preview_cache_key(**common, speed=0.9)
+    fast = tts_preview_cache._build_preview_cache_key(**common, speed=1.1)
+
+    assert slow != fast
+
+
+def test_preview_cache_fallback_keeps_pitch_for_explicit_voice_design_creation() -> None:
+    common = {
+        "model": MIMO_V25_TTS_VOICE_DESIGN_MODEL,
+        "voice_id": "",
+        "text": "创建音色试听",
+    }
+
+    low_pitch = tts_preview_cache._build_preview_cache_key(**common, pitch=20)
+    high_pitch = tts_preview_cache._build_preview_cache_key(**common, pitch=80)
+
+    assert low_pitch != high_pitch
 
 
 def test_preview_cached_returns_json_audio_url_when_oss_cache_hits(monkeypatch) -> None:
@@ -58,6 +241,53 @@ def test_preview_cached_returns_json_audio_url_when_oss_cache_hits(monkeypatch) 
         "storage": "oss",
         "response_format": "mp3",
     }
+
+
+def test_preview_cached_uses_sanitized_speed_for_instruction_model_cache_contract(
+    monkeypatch,
+) -> None:
+    captured: dict = {}
+    request = DummyRequest()
+    request.speed = 1.1
+
+    monkeypatch.setattr(routes_tts, "get_voice_entry", lambda *_, **__: {"speaker": "unit-voice"})
+    monkeypatch.setattr(routes_tts, "check_oss_preview_exists", lambda cache_key, ext="mp3": "https://cdn.example/preview.mp3")
+
+    def capture_cache_key(**kwargs):
+        captured.update(kwargs)
+        return "unit-cache-key"
+
+    monkeypatch.setattr(routes_tts, "_build_preview_cache_key", capture_cache_key)
+
+    asyncio.run(routes_tts.tts_preview_cached(request, current_user=SimpleNamespace(id=1)))
+
+    assert captured["speed"] == 1.0
+    assert "speed" not in captured["voice_params"]
+    assert "rate" not in captured["voice_params"]
+
+
+def test_preview_cached_keeps_numeric_speed_for_basic_model_cache_contract(
+    monkeypatch,
+) -> None:
+    captured: dict = {}
+    request = DummyRequest()
+    request.model = "minimax-speech-2.8-hd"
+    request.speed = 1.1
+
+    monkeypatch.setattr(routes_tts, "get_voice_entry", lambda *_, **__: {"speaker": "unit-voice"})
+    monkeypatch.setattr(routes_tts, "check_oss_preview_exists", lambda cache_key, ext="mp3": "https://cdn.example/preview.mp3")
+
+    def capture_cache_key(**kwargs):
+        captured.update(kwargs)
+        return "unit-cache-key"
+
+    monkeypatch.setattr(routes_tts, "_build_preview_cache_key", capture_cache_key)
+
+    asyncio.run(routes_tts.tts_preview_cached(request, current_user=SimpleNamespace(id=1)))
+
+    assert captured["speed"] == 1.1
+    assert captured["voice_params"]["speed"] == 1.1
+    assert captured["voice_params"]["rate"] == 1.1
 
 
 def test_docker_compose_uses_headable_oss_driver_for_shared_preview_cache() -> None:

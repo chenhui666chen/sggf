@@ -14,6 +14,7 @@ import type {
   TimelineClipEditMap,
   TtsModel,
 } from './types'
+import { sanitizeScriptSegmentVoiceIdentityControls } from './scriptSegmentCardUtils'
 import { normalizeScriptReview } from './utils'
 
 type ScriptSaveStatus = NonNullable<UpdateAudiobookChapterScriptPayload['script_status']>
@@ -42,6 +43,23 @@ const normalizeSegmentTimings = (raw: unknown): ScriptSegmentTiming[] => {
   })
 }
 
+export const resolveInitialScriptSegmentFocus = (
+  initialSegmentIndex: number | null | undefined,
+  segmentCount: number,
+  hasConsumed: boolean,
+): number | null => {
+  if (
+    hasConsumed
+    || typeof initialSegmentIndex !== 'number'
+    || !Number.isInteger(initialSegmentIndex)
+    || segmentCount <= 0
+  ) {
+    return null
+  }
+
+  return Math.max(0, Math.min(initialSegmentIndex, segmentCount - 1))
+}
+
 export const buildScriptEditorChapterRef = (
   chapterId: number,
   chapters: readonly Pick<Chapter, 'id' | 'chapter_number' | 'title'>[],
@@ -61,6 +79,7 @@ export const normalizeAudiobookChapterScriptData = (
         script_segments?: unknown
         script_review?: unknown
         chapter_audio_available?: unknown
+        chapter_audio_stale?: unknown
         chapter_audio_url?: unknown
         segment_timings?: unknown
       }
@@ -71,9 +90,11 @@ export const normalizeAudiobookChapterScriptData = (
       ? data.script_status
       : 'pending',
     scriptSegments: Array.isArray(data.script_segments)
-      ? data.script_segments as ScriptSegment[]
+      ? (data.script_segments as ScriptSegment[])
+          .map(sanitizeScriptSegmentVoiceIdentityControls)
       : [],
     chapterAudioAvailable: data.chapter_audio_available === true,
+    chapterAudioStale: data.chapter_audio_stale === true,
     chapterAudioUrl: typeof data.chapter_audio_url === 'string'
       ? data.chapter_audio_url
       : '',
@@ -87,7 +108,7 @@ export const buildUpdateChapterScriptPayload = (
   nextStatus?: ScriptSaveStatus,
 ): UpdateAudiobookChapterScriptPayload => {
   const payload: UpdateAudiobookChapterScriptPayload = {
-    script_segments: [...scriptSegments],
+    script_segments: scriptSegments.map(sanitizeScriptSegmentVoiceIdentityControls),
   }
   if (nextStatus) {
     payload.script_status = nextStatus
@@ -150,7 +171,9 @@ export const normalizeSmartChunkPreviewResponse = (
   raw: unknown,
 ): SmartChunkPreviewResult => {
   const data = raw && typeof raw === 'object' ? raw as Record<string, unknown> : {}
-  const chunks = Array.isArray(data.chunks) ? data.chunks as ScriptSegment[] : []
+  const chunks = Array.isArray(data.chunks)
+    ? (data.chunks as ScriptSegment[]).map(sanitizeScriptSegmentVoiceIdentityControls)
+    : []
   const originalSegments = getNumberValue(data, 'original_segments')
   const chunkedSegments = getNumberValue(data, 'chunked_segments', chunks.length)
   const stats = normalizeSmartChunkStats(data.stats)

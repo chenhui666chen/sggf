@@ -13,24 +13,18 @@ import type {
   ScriptSegment,
   ScriptSegmentVoiceParams,
 } from './types'
-import AudioPicker from './AudioPicker'
 import {
-  buildMusicAssetPatch,
-  buildSoundEffectAssetPatch,
   getInlineTagStrategySummary,
-  getMusicCueInputValue,
   getScriptSegmentVoiceParams,
-  getSoundEffectsInputValue,
-  parseCommaSeparatedList,
   parseOptionalNumberInput,
 } from './scriptSegmentCardUtils'
+import { modelUsesBasicNumericSpeedControl } from './ttsModels'
 
 interface ScriptSegmentDetailsPanelProps {
   segment: ScriptSegment
   index: number
   onUpdateSegment: (index: number, patch: Partial<ScriptSegment>) => void
   sx?: SxProps<Theme>
-  audioPickerPaperSx?: SxProps<Theme>
   mutedTextColor?: string
 }
 
@@ -39,13 +33,12 @@ const ScriptSegmentDetailsPanel = ({
   index,
   onUpdateSegment,
   sx,
-  audioPickerPaperSx,
   mutedTextColor,
 }: ScriptSegmentDetailsPanelProps) => {
   const voiceParams = getScriptSegmentVoiceParams(segment)
   const inlineTagStrategy = getInlineTagStrategySummary(segment)
-  const soundEffectsValue = getSoundEffectsInputValue(segment)
-  const musicCueValue = getMusicCueInputValue(segment)
+  const segmentTtsModel = voiceParams.resolved_tts_model || voiceParams.tts_model
+  const showNumericSpeedControl = modelUsesBasicNumericSpeedControl(segmentTtsModel)
   const mutedCaptionSx = {
     color: mutedTextColor || 'text.secondary',
     display: 'block',
@@ -87,7 +80,7 @@ const ScriptSegmentDetailsPanel = ({
         Instruct：{segment.instruct_emotion || '—'} / {segment.instruct_scene || '—'} / {segment.instruct_role || '—'} / {segment.instruct_identity || '—'}
       </Typography>
       <Typography variant="caption" sx={{ display: 'block' }}>
-        音色参数：{segment.voice_params ? JSON.stringify(segment.voice_params) : '—'}
+        音色参数：{Object.keys(voiceParams).length > 0 ? JSON.stringify(voiceParams) : '—'}
       </Typography>
       {inlineTagStrategy && (
         <Box sx={{ mt: 0.75 }}>
@@ -172,59 +165,22 @@ const ScriptSegmentDetailsPanel = ({
           }
         />
       </Box>
-      <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: 'repeat(3, minmax(0, 1fr))' }, gap: 1, mt: 1 }}>
-        <TextField
-          size="small"
-          label="语速 rate"
-          type="number"
-          value={voiceParams.rate ?? voiceParams.speed ?? ''}
-          onChange={(event) => updateVoiceParams({ rate: parseOptionalNumberInput(event.target.value) })}
-        />
-        <TextField
-          size="small"
-          label="音高 pitch"
-          type="number"
-          value={voiceParams.pitch ?? ''}
-          onChange={(event) => updateVoiceParams({ pitch: parseOptionalNumberInput(event.target.value) })}
-        />
+      <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, minmax(0, 1fr))' }, gap: 1, mt: 1 }}>
+        {showNumericSpeedControl && (
+          <TextField
+            size="small"
+            label="语速 rate"
+            type="number"
+            value={voiceParams.rate ?? voiceParams.speed ?? ''}
+            onChange={(event) => updateVoiceParams({ rate: parseOptionalNumberInput(event.target.value) })}
+          />
+        )}
         <TextField
           size="small"
           label="音量 volume"
           type="number"
           value={voiceParams.volume ?? ''}
           onChange={(event) => updateVoiceParams({ volume: parseOptionalNumberInput(event.target.value) })}
-        />
-      </Box>
-      <AudioPicker
-        type="sfx"
-        value={soundEffectsValue}
-        onChange={(v) =>
-          onUpdateSegment(index, {
-            sound_effects_simple: v ? parseCommaSeparatedList(v) : [],
-            sound_effects: [],
-          })
-        }
-        onSelectAsset={(selection) =>
-          onUpdateSegment(index, buildSoundEffectAssetPatch(selection))
-        }
-        label="音效提示（可从库中选择）"
-        paperSx={audioPickerPaperSx}
-      />
-      <Box sx={{ mt: 1 }}>
-        <AudioPicker
-          type="music"
-          value={musicCueValue}
-          onChange={(v) =>
-            onUpdateSegment(index, {
-              music_cue_simple: v || null,
-              music_cue: null,
-            })
-          }
-          onSelectAsset={(selection) =>
-            onUpdateSegment(index, buildMusicAssetPatch(selection))
-          }
-          label="配乐提示（可从库中选择）"
-          paperSx={audioPickerPaperSx}
         />
       </Box>
     </Paper>

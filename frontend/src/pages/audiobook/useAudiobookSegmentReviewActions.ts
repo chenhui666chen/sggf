@@ -8,8 +8,10 @@ import type {
   PreviewType,
   ScriptEditorStateData,
   ScriptSegment,
+  SegmentSourceMode,
   TtsModel,
 } from './types'
+import { sanitizeScriptSegmentVoiceIdentityControls } from './scriptSegmentCardUtils'
 
 type SegmentReviews = NonNullable<AudiobookEditorSessionState['segmentReviews']>
 
@@ -19,6 +21,8 @@ interface UseAudiobookSegmentReviewActionsParams {
   ttsModel: TtsModel
   setSnackbar: SetSnackbar
   setScriptEditorData: Dispatch<SetStateAction<ScriptEditorStateData | null>>
+  /** 候选生成成功后回调（用于自动播放试听） */
+  onCandidateGenerated?: (index: number, previewType: PreviewType, candidateId: string) => void
 }
 
 interface SegmentVoiceRecordingContext {
@@ -52,6 +56,7 @@ export const useAudiobookSegmentReviewActions = ({
   ttsModel,
   setSnackbar,
   setScriptEditorData,
+  onCandidateGenerated,
 }: UseAudiobookSegmentReviewActionsParams) => {
   const [reviewMode, setReviewMode] = useState(false)
   const [segmentReviews, setSegmentReviews] = useState<SegmentReviews>({})
@@ -62,6 +67,8 @@ export const useAudiobookSegmentReviewActions = ({
   const segmentVoiceStreamRef = useRef<MediaStream | null>(null)
   const segmentVoiceChunksRef = useRef<Blob[]>([])
   const segmentVoiceContextRef = useRef<SegmentVoiceRecordingContext | null>(null)
+  const segmentVoiceRequestIdRef = useRef(0)
+  const segmentVoiceRequestPendingRef = useRef(false)
 
   const stopSegmentVoiceRecordingStream = useCallback(() => {
     segmentVoiceStreamRef.current?.getTracks().forEach((track) => track.stop())
@@ -69,6 +76,8 @@ export const useAudiobookSegmentReviewActions = ({
   }, [])
 
   const abortSegmentVoiceRecording = useCallback(() => {
+    segmentVoiceRequestIdRef.current += 1
+    segmentVoiceRequestPendingRef.current = false
     const recorder = segmentVoiceRecorderRef.current
     if (recorder) {
       recorder.ondataavailable = null
@@ -116,22 +125,32 @@ export const useAudiobookSegmentReviewActions = ({
     index: number,
     segment: ScriptSegment,
     previewType: PreviewType,
+    sourceMode?: SegmentSourceMode,
   ) => {
     if (!audiobookProjectId || !chapterId) return
     setRegeneratingSegments((prev) => new Set([...prev, index]))
+    if (sourceMode === 'ai_generate') {
+      setSnackbar({
+        open: true,
+        message: `片段 #${index + 1} 正在 AI 生成${PREVIEW_TYPE_LABELS[previewType]}，耗时可能较长，请稍候`,
+        severity: 'info',
+      })
+    }
     try {
-      const voiceParams = segment.voice_params || {}
+      const sanitizedSegment = sanitizeScriptSegmentVoiceIdentityControls(segment)
+      const voiceParams = sanitizedSegment.voice_params || {}
       const candidateResponse = await apiClient.generateSegmentRegenerationCandidate(audiobookProjectId, chapterId, index, {
         reason: `${PREVIEW_TYPE_LABELS[previewType]}候选重新生成`,
         tts_model: ttsModel,
-        segment,
+        segment: sanitizedSegment,
         preview_type: previewType,
         voice_id: previewType === 'voice' || previewType === 'mix' ? voiceParams.speaker ?? undefined : undefined,
         emotion: previewType === 'voice' || previewType === 'mix' ? voiceParams.emotion ?? undefined : undefined,
+        source_mode: sourceMode,
       })
-      const candidateAudioPath = candidateResponse.data?.candidate_audio_path
-      if (!candidateAudioPath) {
-        throw new Error('候选音频路径缺失')
+      const candidateId = candidateResponse.data?.candidate_id
+      if (!candidateId) {
+        throw new Error('候选凭证缺失')
       }
 
       setPendingSegmentRegenerations((prev) => ({
@@ -139,12 +158,12 @@ export const useAudiobookSegmentReviewActions = ({
         [index]: {
           ...(prev[index] || {}),
           [previewType]: {
-            candidateAudioPath,
+            candidateId,
             previewType: candidateResponse.data?.preview_type || previewType,
-            segment: {
-              ...segment,
+            segment: sanitizeScriptSegmentVoiceIdentityControls({
+              ...sanitizedSegment,
               ...(candidateResponse.data?.segment || {}),
-            },
+            }),
             generatedAt: new Date().toISOString(),
           },
         },
@@ -154,6 +173,7 @@ export const useAudiobookSegmentReviewActions = ({
         message: `片段 #${index + 1} 已生成${PREVIEW_TYPE_LABELS[previewType]}候选版本，可试听后保存或取消`,
         severity: 'success',
       })
+      onCandidateGenerated?.(index, previewType, candidateId)
     } catch (error: unknown) {
       const message = await extractApiErrorMessage(error, '请稍后重试')
       setSnackbar({ open: true, message: `${PREVIEW_TYPE_LABELS[previewType]}重新生成失败: ${message}`, severity: 'error' })
@@ -164,7 +184,7 @@ export const useAudiobookSegmentReviewActions = ({
         return next
       })
     }
-  }, [audiobookProjectId, chapterId, setSnackbar, ttsModel])
+  }, [audiobookProjectId, chapterId, onCandidateGenerated, setSnackbar, ttsModel])
 
   const uploadSegmentVoiceRecording = useCallback(async (
     index: number,
@@ -176,6 +196,7 @@ export const useAudiobookSegmentReviewActions = ({
     setRegeneratingSegments((prev) => new Set([...prev, index]))
     try {
       const file = createSegmentVoiceRecordingFile(blob)
+      const sanitizedSegment = sanitizeScriptSegmentVoiceIdentityControls(segment)
       const candidateResponse = await apiClient.uploadSegmentVoiceRecordingCandidate(
         audiobookProjectId,
         chapterId,
@@ -183,12 +204,12 @@ export const useAudiobookSegmentReviewActions = ({
         file,
         {
           reason: '真人配音',
-          segment,
+          segment: sanitizedSegment,
         },
       )
-      const candidateAudioPath = candidateResponse.data?.candidate_audio_path
-      if (!candidateAudioPath) {
-        throw new Error('配音候选音频路径缺失')
+      const candidateId = candidateResponse.data?.candidate_id
+      if (!candidateId) {
+        throw new Error('配音候选凭证缺失')
       }
 
       setPendingSegmentRegenerations((prev) => ({
@@ -196,12 +217,12 @@ export const useAudiobookSegmentReviewActions = ({
         [index]: {
           ...(prev[index] || {}),
           [voicePreviewType]: {
-            candidateAudioPath,
+            candidateId,
             previewType: candidateResponse.data?.preview_type || 'voice',
-            segment: {
-              ...segment,
+            segment: sanitizeScriptSegmentVoiceIdentityControls({
+              ...sanitizedSegment,
               ...(candidateResponse.data?.segment || {}),
-            },
+            }),
             generatedAt: new Date().toISOString(),
           },
         },
@@ -211,6 +232,7 @@ export const useAudiobookSegmentReviewActions = ({
         message: `片段 #${index + 1} 真人配音已生成候选，可试听后保存或取消`,
         severity: 'success',
       })
+      onCandidateGenerated?.(index, voicePreviewType, candidateId)
     } catch (error: unknown) {
       const message = await extractApiErrorMessage(error, '上传配音失败')
       setSnackbar({ open: true, message, severity: 'error' })
@@ -221,13 +243,19 @@ export const useAudiobookSegmentReviewActions = ({
         return next
       })
     }
-  }, [audiobookProjectId, chapterId, setSnackbar])
+  }, [audiobookProjectId, chapterId, onCandidateGenerated, setSnackbar])
 
   const handleStartSegmentVoiceRecording = useCallback(async (
     index: number,
     segment: ScriptSegment,
   ) => {
-    if (!audiobookProjectId || !chapterId || recordingSegmentIndex !== null || regeneratingSegments.has(index)) return
+    if (
+      !audiobookProjectId
+      || !chapterId
+      || recordingSegmentIndex !== null
+      || segmentVoiceRequestPendingRef.current
+      || regeneratingSegments.has(index)
+    ) return
     if (
       typeof navigator === 'undefined'
       || !navigator.mediaDevices?.getUserMedia
@@ -237,8 +265,17 @@ export const useAudiobookSegmentReviewActions = ({
       return
     }
 
+    const requestId = segmentVoiceRequestIdRef.current + 1
+    segmentVoiceRequestIdRef.current = requestId
+    segmentVoiceRequestPendingRef.current = true
+
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      if (requestId !== segmentVoiceRequestIdRef.current) {
+        stream.getTracks().forEach((track) => track.stop())
+        return
+      }
+      segmentVoiceRequestPendingRef.current = false
       segmentVoiceStreamRef.current = stream
       segmentVoiceChunksRef.current = []
       segmentVoiceContextRef.current = { index, segment }
@@ -279,6 +316,8 @@ export const useAudiobookSegmentReviewActions = ({
       setRecordingSegmentIndex(index)
       setSnackbar({ open: true, message: `片段 #${index + 1} 正在配音录制，完成后点击结束配音`, severity: 'info' })
     } catch (error: unknown) {
+      if (requestId !== segmentVoiceRequestIdRef.current) return
+      segmentVoiceRequestPendingRef.current = false
       abortSegmentVoiceRecording()
       const message = await extractApiErrorMessage(error, '无法访问麦克风，请检查浏览器权限')
       setSnackbar({ open: true, message, severity: 'error' })
@@ -312,21 +351,27 @@ export const useAudiobookSegmentReviewActions = ({
     setRegeneratingSegments((prev) => new Set([...prev, index]))
     try {
       const applyResponse = await apiClient.applySegmentRegenerationCandidate(audiobookProjectId, chapterId, index, {
-        candidate_audio_path: pending.candidateAudioPath,
+        candidate_id: pending.candidateId,
         reason: `应用${PREVIEW_TYPE_LABELS[previewType]}候选版本`,
-        segment: pending.segment,
         preview_type: previewType,
       })
       const appliedSegment = applyResponse.data?.segment
-      if (appliedSegment) {
+      const chapterAudioStale = applyResponse.data?.chapter_audio_stale === true
+      if (appliedSegment || chapterAudioStale) {
         setScriptEditorData((prev) => {
           if (!prev) return prev
           const nextSegments = [...prev.scriptSegments]
-          nextSegments[index] = {
-            ...nextSegments[index],
-            ...appliedSegment,
+          if (appliedSegment) {
+            nextSegments[index] = sanitizeScriptSegmentVoiceIdentityControls({
+              ...nextSegments[index],
+              ...appliedSegment,
+            })
           }
-          return { ...prev, scriptSegments: nextSegments }
+          return {
+            ...prev,
+            scriptSegments: nextSegments,
+            chapterAudioStale: prev.chapterAudioStale || chapterAudioStale,
+          }
         })
       }
       setPendingSegmentRegenerations((prev) => {
@@ -342,7 +387,9 @@ export const useAudiobookSegmentReviewActions = ({
       })
       setSnackbar({
         open: true,
-        message: `片段 #${index + 1} ${PREVIEW_TYPE_LABELS[previewType]}候选版本已保存`,
+        message: chapterAudioStale
+          ? `片段 #${index + 1} ${PREVIEW_TYPE_LABELS[previewType]}候选版本已保存，整章混音已过期，请重新混音`
+          : `片段 #${index + 1} ${PREVIEW_TYPE_LABELS[previewType]}候选版本已保存`,
         severity: 'success',
       })
     } catch (error: unknown) {

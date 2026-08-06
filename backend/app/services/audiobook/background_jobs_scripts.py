@@ -9,8 +9,17 @@ from app.models.audiobook import AudiobookProject, ChapterAudio
 from app.models.character import Character
 from app.models.project import Project
 from app.services.audiobook.background_jobs_prefetch import prefetch_chapter_generation_records
-from app.services.audiobook.background_jobs_shared import create_background_engine, parse_duration_seconds
+from app.services.audiobook.background_jobs_shared import (
+    create_background_engine,
+    is_audiobook_project_active,
+    is_chapter_generation_target_active,
+    parse_duration_seconds,
+    release_audiobook_project_billing,
+)
 from app.services.audiobook.chapter_character_scope import select_chapter_characters
+from app.services.audiobook.job_tracker import handle_pause_checkpoint
+from app.services.audiobook.repository import ChapterAudioRunRepository
+from app.services.audiobook.tts_pause import AudiobookPauseRequested
 from app.services.audiobook.project_audio_runtime import (
     apply_scene_audio_runtime_to_engine,
     resolve_project_audio_runtime_config,
@@ -150,6 +159,7 @@ async def generate_audiobook_scripts_background(
     tts_model: str = "qwen3-tts-instruct-flash",
     force_regenerate: bool = False,
     tracker: Optional[StageTracker] = None,
+    celery_task_id: Optional[str] = None,
 ) -> None:
     """后台生成有声书【剧本+评审】任务（不执行 TTS 和混音）。"""
     db = SessionLocal()
@@ -160,7 +170,8 @@ async def generate_audiobook_scripts_background(
         logger.info("📝 开始后台生成有声书剧本: audiobook_project_id=%s", audiobook_project_id)
 
         audiobook_project = db.query(AudiobookProject).filter(
-            AudiobookProject.id == audiobook_project_id
+            AudiobookProject.id == audiobook_project_id,
+            AudiobookProject.deleted_at.is_(None),
         ).first()
         if not audiobook_project:
             logger.error("❌ 有声书项目不存在: %s", audiobook_project_id)
@@ -184,6 +195,11 @@ async def generate_audiobook_scripts_background(
 
         logger.info("📋 项目角色档案数量: %s", len(character_profiles))
 
+        # 注入资产归属用户，使后台任务能解析项目所有者的私有音色资产
+        # （mimo 声音设计/克隆），避免归属校验拒绝导致自定义音色静默失效。
+        if project is not None and getattr(project, "user_id", None) is not None:
+            engine.voice_manager.owner_user_id = int(project.user_id)
+
         _load_existing_voice_mapping(engine, audiobook_project)
         try:
             _apply_script_stage_project_audio_config(
@@ -205,7 +221,23 @@ async def generate_audiobook_scripts_background(
 
         failed_in_run = 0
 
+        pause_check_fn = getattr(tracker, "is_pause_requested", None) if tracker else None
+
         for index, chapter_id in enumerate(chapter_ids, 1):
+            if handle_pause_checkpoint(
+                tracker,
+                chapter_ids=chapter_ids,
+                current_index=index,
+            ):
+                audiobook_project.status = "paused"
+                db.commit()
+                release_audiobook_project_billing(
+                    logger,
+                    db,
+                    audiobook_project_id=audiobook_project_id,
+                    reason="有声书剧本生成任务已暂停，已释放冻结积分。",
+                )
+                return
             try:
                 logger.info(
                     "📖 [脚本阶段] 处理章节 %s/%s: chapter_id=%s",
@@ -213,6 +245,31 @@ async def generate_audiobook_scripts_background(
                     len(chapter_ids),
                     chapter_id,
                 )
+
+                run_id: Optional[int] = None
+                if celery_task_id:
+                    dispatch_run = ChapterAudioRunRepository.get_run_by_celery_task_id(
+                        db,
+                        celery_task_id=celery_task_id,
+                        audiobook_project_id=audiobook_project_id,
+                        chapter_id=chapter_id,
+                        run_type="script_only",
+                    )
+                    run_id = dispatch_run.id if dispatch_run else None
+
+                # 章节可能在排队或上一次 LLM 调用期间被删除；先挡住本轮所有写入。
+                if not is_chapter_generation_target_active(
+                    db,
+                    audiobook_project_id=audiobook_project_id,
+                    chapter_id=chapter_id,
+                    run_id=run_id,
+                ):
+                    logger.info(
+                        "章节产物已删除，跳过剧本生成: audiobook_project_id=%s chapter_id=%s",
+                        audiobook_project_id,
+                        chapter_id,
+                    )
+                    continue
 
                 chapter = chapter_by_id.get(chapter_id)
                 if not chapter:
@@ -228,6 +285,7 @@ async def generate_audiobook_scripts_background(
                         current_stage="failed",
                         progress=0.0,
                         error_message="chapter_not_found",
+                        run_id=run_id,
                     )
                     continue
 
@@ -255,6 +313,7 @@ async def generate_audiobook_scripts_background(
                                 "reuse_existing_script": True,
                                 "script_status": chapter_audio.script_status,
                             },
+                            run_id=run_id,
                         )
                         db.commit()
                         continue
@@ -291,6 +350,7 @@ async def generate_audiobook_scripts_background(
                     chapter_title=chapter.title or "",
                     chapter_summary=chapter.summary or "",
                     summary_data=chapter.summary_data,
+                    pause_check=pause_check_fn,
                 )
 
                 if not result.get("success"):
@@ -298,13 +358,67 @@ async def generate_audiobook_scripts_background(
                         f"剧本生成失败: {result.get('error') or '未知错误'}"
                     )
 
+                original_chapter_audio_id = getattr(chapter_audio, "id", None)
+                if not is_chapter_generation_target_active(
+                    db,
+                    audiobook_project_id=audiobook_project_id,
+                    chapter_id=chapter_id,
+                    chapter_audio_id=original_chapter_audio_id,
+                    run_id=run_id,
+                ):
+                    logger.info(
+                        "章节在剧本生成期间被删除，放弃写回 script_json: "
+                        "audiobook_project_id=%s chapter_id=%s",
+                        audiobook_project_id,
+                        chapter_id,
+                    )
+                    db.rollback()
+                    continue
+
+                if original_chapter_audio_id is not None:
+                    # 使用刚刚确认过的活动记录，避免把已删除的旧 ORM 对象重新挂回会话。
+                    chapter_audio = (
+                        db.query(ChapterAudio)
+                        .filter(
+                            ChapterAudio.id == original_chapter_audio_id,
+                            ChapterAudio.audiobook_project_id == audiobook_project_id,
+                            ChapterAudio.chapter_id == chapter_id,
+                            ChapterAudio.deleted_at.is_(None),
+                        )
+                        .populate_existing()
+                        .first()
+                    )
+                    if chapter_audio is None:
+                        db.rollback()
+                        continue
+
                 if not chapter_audio:
                     chapter_audio = ChapterAudio(
                         audiobook_project_id=audiobook_project_id,
                         chapter_id=chapter_id,
                     )
                     db.add(chapter_audio)
+                    db.flush()
                     chapter_audio_by_chapter_id[chapter_id] = chapter_audio
+
+                # 新建记录 flush 后再次确认父项目/章节仍有效；删除竞态下回滚本轮对象，
+                # 避免提交一个孤立的 ChapterAudio。
+                if not is_chapter_generation_target_active(
+                    db,
+                    audiobook_project_id=audiobook_project_id,
+                    chapter_id=chapter_id,
+                    chapter_audio_id=chapter_audio.id,
+                    run_id=run_id,
+                ):
+                    logger.info(
+                        "章节在剧本写回前被删除，放弃提交 ChapterAudio: "
+                        "audiobook_project_id=%s chapter_id=%s",
+                        audiobook_project_id,
+                        chapter_id,
+                    )
+                    db.rollback()
+                    chapter_audio_by_chapter_id.pop(chapter_id, None)
+                    continue
 
                 stats = result.get("stats", {})
                 parse_stats = stats.get("parse_stats", {})
@@ -335,6 +449,24 @@ async def generate_audiobook_scripts_background(
                         chapter_audio.script_status,
                     )
 
+                if not is_chapter_generation_target_active(
+                    db,
+                    audiobook_project_id=audiobook_project_id,
+                    chapter_id=chapter_id,
+                    chapter_audio_id=chapter_audio.id,
+                    run_id=run_id,
+                ):
+                    logger.info(
+                        "章节在 script_json 提交前已删除，回滚本轮写入: "
+                        "audiobook_project_id=%s chapter_id=%s",
+                        audiobook_project_id,
+                        chapter_id,
+                    )
+                    db.rollback()
+                    if original_chapter_audio_id is None:
+                        chapter_audio_by_chapter_id.pop(chapter_id, None)
+                    continue
+
                 _update_chapter_run_state(
                     db,
                     audiobook_project_id=audiobook_project_id,
@@ -349,6 +481,7 @@ async def generate_audiobook_scripts_background(
                         "engine_task_id": result.get("task_id"),
                         "script_status": chapter_audio.script_status,
                     },
+                    run_id=run_id,
                 )
                 audiobook_project.completed_chapters += 1
 
@@ -377,6 +510,25 @@ async def generate_audiobook_scripts_background(
 
                 db.commit()
 
+            except AudiobookPauseRequested:
+                # 章节剧本生成过程中收到暂停请求：落库为 paused（包含当前章节），
+                # 恢复时重新生成该章节剧本，不当作失败处理
+                logger.info("⏸️ [脚本阶段] 章节 %s 生成中被暂停请求中断", chapter_id)
+                handle_pause_checkpoint(
+                    tracker,
+                    chapter_ids=chapter_ids,
+                    current_index=index,
+                    stage="script_adaptation",
+                )
+                audiobook_project.status = "paused"
+                db.commit()
+                release_audiobook_project_billing(
+                    logger,
+                    db,
+                    audiobook_project_id=audiobook_project_id,
+                    reason="有声书剧本生成任务已暂停，已释放冻结积分。",
+                )
+                return
             except Exception as exc:
                 logger.error("❌ [脚本阶段] 章节 %s 处理异常: %s", chapter_id, exc)
                 audiobook_project.failed_chapters += 1
@@ -390,6 +542,7 @@ async def generate_audiobook_scripts_background(
                     current_stage="failed",
                     progress=0.0,
                     error_message=str(exc),
+                    run_id=run_id,
                 )
                 db.commit()
                 import traceback
@@ -397,6 +550,16 @@ async def generate_audiobook_scripts_background(
                 traceback.print_exc()
 
         # 本次运行有失败章节时置为 failed，避免掩盖局部失败
+        if not is_audiobook_project_active(
+            db,
+            audiobook_project_id=audiobook_project_id,
+        ):
+            logger.info(
+                "有声书项目已删除，跳过 script_only 任务最终状态写回: audiobook_project_id=%s",
+                audiobook_project_id,
+            )
+            return
+
         audiobook_project.status = "completed" if failed_in_run == 0 else "failed"
         db.commit()
 

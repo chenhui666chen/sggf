@@ -27,6 +27,7 @@ from app.services.audiobook.tts_model_ids import (
     MIMO_V25_TTS_VOICE_CLONE_MODEL,
     MIMO_V25_TTS_VOICE_DESIGN_MODEL,
 )
+from app.services.audiobook import voice_manager_mimo
 from app.services.audiobook.voice_manager_mimo import MiMoVoiceManager
 
 
@@ -298,6 +299,35 @@ def test_mimo_voice_asset_id_is_preserved_and_expanded_by_voice_manager(tmp_path
     assert mapping_item["mimo_voice_asset_id"] == asset.id
     assert params["mimo_voice_asset_id"] == asset.id
     assert params["voice_design_prompt"] == "young female, medium pitch, calm audiobook voice"
+
+
+def test_mimo_voice_manager_does_not_fallback_to_inline_prompt_when_asset_resolution_fails(
+    monkeypatch,
+):
+    def fail_asset_resolution(config, *, owner_user_id=None):
+        raise MiMoVoiceAssetError("MiMo voice asset does not belong to this user")
+
+    monkeypatch.setattr(
+        voice_manager_mimo,
+        "merge_mimo_voice_asset_tts_params",
+        fail_asset_resolution,
+    )
+    manager = MiMoVoiceManager(MIMO_V25_TTS_VOICE_DESIGN_MODEL)
+    manager.owner_user_id = 7
+
+    with pytest.raises(MiMoVoiceAssetError, match="does not belong"):
+        manager.apply_project_voice_mapping(
+            {
+                "Narrator": {
+                    "voice_id": "mimo_design:asset-owned-by-another-user",
+                    "mimo_voice_asset_id": "asset-owned-by-another-user",
+                    "voice_design_prompt": "客户端伪造的回退配方",
+                    "tts_model": MIMO_V25_TTS_VOICE_DESIGN_MODEL,
+                }
+            }
+        )
+
+    assert manager.get_voice("Narrator") is None
 
 
 def test_base_voice_manager_resolves_mimo_design_cross_model_voice(tmp_path, monkeypatch):

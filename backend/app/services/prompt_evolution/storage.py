@@ -11,6 +11,7 @@ import logging
 
 from .models import PromptVersion, EvolutionHistory, ApprovalStatus
 from .genre import normalize_genre
+from app.services.ai_trace_storage import AtomicJsonStore
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +38,9 @@ class EvolutionStorage:
         self.history_file = self.storage_dir / "evolution_history.json"
         self.best_prompts_file = self.storage_dir / "best_prompts.json"
         self.approved_prompts_file = self.storage_dir / "approved_prompts.json"
+        self._history_store = AtomicJsonStore(self.history_file, root_type=list)
+        self._best_prompts_store = AtomicJsonStore(self.best_prompts_file, root_type=list)
+        self._approved_prompts_store = AtomicJsonStore(self.approved_prompts_file, root_type=list)
         self.experience_dir = self.storage_dir / "experience_reports"
         self.experience_dir.mkdir(parents=True, exist_ok=True)
 
@@ -44,23 +48,18 @@ class EvolutionStorage:
 
     def save_evolution_history(self, history: EvolutionHistory) -> None:
         """保存进化历史"""
-        # 读取现有历史
-        all_histories = self._load_all_histories()
-
-        # 更新或添加
         history_dict = self._history_to_dict(history)
-        found = False
-        for i, h in enumerate(all_histories):
-            if h.get("evolution_id") == history.evolution_id:
-                all_histories[i] = history_dict
-                found = True
-                break
-        if not found:
-            all_histories.append(history_dict)
 
-        # 保存
-        with open(self.history_file, "w", encoding="utf-8") as f:
-            json.dump(all_histories, f, ensure_ascii=False, indent=2)
+        def update_histories(all_histories: List[Dict]) -> List[Dict]:
+            for index, item in enumerate(all_histories):
+                if item.get("evolution_id") == history.evolution_id:
+                    all_histories[index] = history_dict
+                    break
+            else:
+                all_histories.append(history_dict)
+            return all_histories
+
+        self._history_store.update(update_histories)
 
         logger.info(f"💾 保存进化历史: {history.evolution_id}")
 
@@ -126,8 +125,7 @@ class EvolutionStorage:
             return False  # 没找到
 
         # 保存
-        with open(self.history_file, "w", encoding="utf-8") as f:
-            json.dump(all_histories, f, ensure_ascii=False, indent=2)
+        self._history_store.write(all_histories)
 
         # 同时删除经验报告
         experience_file = self.experience_dir / f"{evolution_id}.json"
@@ -186,8 +184,7 @@ class EvolutionStorage:
 
         if deleted_count > 0:
             # 保存
-            with open(self.history_file, "w", encoding="utf-8") as f:
-                json.dump(new_histories, f, ensure_ascii=False, indent=2)
+            self._history_store.write(new_histories)
 
             # 删除对应的经验报告
             deleted_ids = set(h.get("evolution_id") for h in all_histories) - keep_ids
@@ -206,8 +203,7 @@ class EvolutionStorage:
         sorted_versions = sorted(versions, key=lambda v: v.avg_composite_score)[:keep_top_n]
 
         data = [v.to_dict() for v in sorted_versions]
-        with open(self.best_prompts_file, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
+        self._best_prompts_store.write(data)
 
         logger.info(f"💾 保存最佳提示词: {len(sorted_versions)} 个（按综合评分排序）")
 
@@ -216,8 +212,7 @@ class EvolutionStorage:
         if not self.best_prompts_file.exists():
             return []
 
-        with open(self.best_prompts_file, "r", encoding="utf-8") as f:
-            data = json.load(f)
+        data = self._best_prompts_store.read()
 
         return [PromptVersion.from_dict(d) for d in data]
 
@@ -275,8 +270,7 @@ class EvolutionStorage:
         approved_list = self._load_approved_prompts()
         approved_list.append(approved_data)
 
-        with open(self.approved_prompts_file, "w", encoding="utf-8") as f:
-            json.dump(approved_list, f, ensure_ascii=False, indent=2)
+        self._approved_prompts_store.write(approved_list)
 
         logger.info(f"✅ 批准提示词: {version_id}")
         return True
@@ -300,8 +294,7 @@ class EvolutionStorage:
         approved_list = self._load_approved_prompts()
         approved_list = [p for p in approved_list if not (p.get("version_id") == version_id and p.get("evolution_id") == evolution_id)]
 
-        with open(self.approved_prompts_file, "w", encoding="utf-8") as f:
-            json.dump(approved_list, f, ensure_ascii=False, indent=2)
+        self._approved_prompts_store.write(approved_list)
 
         logger.info(f"🔄 取消批准提示词: {version_id}")
         return True
@@ -333,8 +326,7 @@ class EvolutionStorage:
                 item["genre"] = histories[item["evolution_id"]]
                 migrated = True
         if migrated:
-            with open(self.approved_prompts_file, "w", encoding="utf-8") as f:
-                json.dump(approved, f, ensure_ascii=False, indent=2)
+            self._approved_prompts_store.write(approved)
 
         for candidate_genre in (target_genre, "通用"):
             matches = [
@@ -385,8 +377,7 @@ class EvolutionStorage:
             return False  # 没有找到要移除的版本
 
         # 保存更新后的列表
-        with open(self.approved_prompts_file, "w", encoding="utf-8") as f:
-            json.dump(approved_list, f, ensure_ascii=False, indent=2)
+        self._approved_prompts_store.write(approved_list)
 
         logger.info(f"🗑️ 从已批准列表中移除提示词: {version_id}")
         return True
@@ -502,15 +493,13 @@ class EvolutionStorage:
         """加载所有历史记录"""
         if not self.history_file.exists():
             return []
-        with open(self.history_file, "r", encoding="utf-8") as f:
-            return json.load(f)
+        return self._history_store.read()
 
     def _load_approved_prompts(self) -> List[Dict]:
         """加载已批准提示词列表"""
         if not self.approved_prompts_file.exists():
             return []
-        with open(self.approved_prompts_file, "r", encoding="utf-8") as f:
-            return json.load(f)
+        return self._approved_prompts_store.read()
 
     def _history_to_dict(self, history: EvolutionHistory) -> Dict:
         """将历史对象转换为字典"""
@@ -581,8 +570,7 @@ class EvolutionStorage:
                 continue
 
         if marked_count > 0:
-            with open(self.history_file, "w", encoding="utf-8") as f:
-                json.dump(all_histories, f, ensure_ascii=False, indent=2)
+            self._history_store.write(all_histories)
 
         return marked_count
 

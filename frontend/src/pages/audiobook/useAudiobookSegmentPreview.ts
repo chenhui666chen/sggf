@@ -121,12 +121,14 @@ export const useAudiobookSegmentPreview = ({
     if (!audiobookProjectId || !chapterId) return
 
     const pendingRegeneration = pendingSegmentRegenerations[index]?.[previewType]
-    const candidateAudioPath = pendingRegeneration?.candidateAudioPath || resolveSegmentAudioPath(segment, previewType)
-    const shouldUseChapterAudio = !candidateAudioPath && previewType === 'mix' && chapterAudioAvailable
+    // options.candidateId 覆盖：候选生成成功后自动播放时，state 尚未更新，避免闭包旧值
+    const candidateId = options?.candidateId || pendingRegeneration?.candidateId || ''
+    const savedAudioPath = resolveSegmentAudioPath(segment, previewType)
+    const shouldUseChapterAudio = !candidateId && !savedAudioPath && previewType === 'mix' && chapterAudioAvailable
     const chapterStartTime = shouldUseChapterAudio
       ? resolveSegmentTimelineStartTime(segmentTimings, index, options?.startRatio ?? 0)
       : null
-    if (!candidateAudioPath && !shouldUseChapterAudio) {
+    if (!candidateId && !savedAudioPath && !shouldUseChapterAudio) {
       setSnackbar({
         open: true,
         message: `暂无可试听${PREVIEW_TYPE_LABELS[previewType]}音频，请先重新生成候选版本`,
@@ -182,7 +184,9 @@ export const useAudiobookSegmentPreview = ({
         audiobookProjectId,
         chapterId,
         index,
-        candidateAudioPath,
+        candidateId
+          ? { candidateId }
+          : { audioPath: savedAudioPath, previewType },
       )
       const url = window.URL.createObjectURL(response.data)
 
@@ -209,7 +213,7 @@ export const useAudiobookSegmentPreview = ({
         },
       })
       if (isCurrentPreviewRequest()) {
-        const versionLabel = pendingRegeneration ? '候选' : '片段'
+        const versionLabel = candidateId ? '候选' : '片段'
         setSnackbar({ open: true, message: `${versionLabel}${PREVIEW_TYPE_LABELS[previewType]}音频已开始播放`, severity: 'success' })
       }
     } catch (error) {

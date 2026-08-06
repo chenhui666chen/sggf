@@ -1,7 +1,7 @@
 {
   "model": "qwen3-tts-instruct-flash",
-  "updated_at": "2026-04-21",
-  "source": "https://help.aliyun.com/zh/model-studio/qwen-tts-api | https://help.aliyun.com/zh/model-studio/qwen-tts-voice-list",
+  "updated_at": "2026-08-02",
+  "source": "https://help.aliyun.com/zh/model-studio/qwen-tts-voice-list (verified 2026-08-02, removed deprecated Ebona)",
   "voices": [
     {
       "id": "Cherry",
@@ -10,9 +10,24 @@
       "gender": "female",
       "style": "gentle",
       "category": "general",
-      "languages": ["zh", "en", "fr", "de", "ru", "it", "es", "pt", "ja", "ko"],
+      "languages": [
+        "zh",
+        "en",
+        "fr",
+        "de",
+        "ru",
+        "it",
+        "es",
+        "pt",
+        "ja",
+        "ko"
+      ],
       "description": "阳光积极、亲切自然小姐姐",
-      "default_params": { "pitch": 50, "speed": 1.0, "volume": 50 }
+      "default_params": {
+        "pitch": 50,
+        "speed": 1.0,
+        "volume": 50
+      }
     },
     {
       "id": "Serena",
@@ -21,9 +36,24 @@
       "gender": "female",
       "style": "gentle",
       "category": "general",
-      "languages": ["zh", "en", "fr", "de", "ru", "it", "es", "pt", "ja", "ko"],
+      "languages": [
+        "zh",
+        "en",
+        "fr",
+        "de",
+        "ru",
+        "it",
+        "es",
+        "pt",
+        "ja",
+        "ko"
+      ],
       "description": "温柔小姐姐",
-      "default_params": { "pitch": 50, "speed": 1.0, "volume": 50 }
+      "default_params": {
+        "pitch": 50,
+        "speed": 1.0,
+        "volume": 50
+      }
     },
     {
       "id": "Ethan",
@@ -32,9 +62,24 @@
       "gender": "male",
       "style": "warm",
       "category": "general",
-      "languages": ["zh", "en", "fr", "de", "ru", "it", "es", "pt", "ja", "ko"],
+      "languages": [
+        "zh",
+        "en",
+        "fr",
+        "de",
+        "ru",
+        "it",
+        "es",
+        "pt",
+        "ja",
+        "ko"
+      ],
       "description": "标准普通话，带部分北方口音。阳光、温暖、活力、朝气",
-      "default_params": { "pitch": 50, "speed": 1.0, "volume": 50 }
+      "default_params": {
+        "pitch": 50,
+        "speed": 1.0,
+        "volume": 50
+      }
     },
     {
       "id": "Chelsie",
@@ -43,9 +88,24 @@
       "gender": "female",
       "style": "cute",
       "category": "general",
-      "languages": ["zh", "en", "fr", "de", "ru", "it", "es", "pt", "ja", "ko"],
+      "languages": [
+        "zh",
+        "en",
+        "fr",
+        "de",
+        "ru",
+        "it",
+        "es",
+        "pt",
+        "ja",
+        "ko"
+      ],
       "description": "二次元虚拟女友",
-      "default_params": { "pitch": 50, "speed": 1.0, "volume": 50 }
+      "default_params": {
+        "pitch": 50,
+        "speed": 1.0,
+        "volume": 50
+      }
     },
     {
       "id": "Momo",
@@ -54,9 +114,24 @@
       "gender": "female",
       "style": "cute",
       "category": "general",
-      "languages": ["zh", "en", "fr", "de", "ru", "it", "es", "pt", "ja", "ko"],
+      "languages": [
+        "zh",
+        "en",
+        "fr",
+        "de",
+        "ru",
+        "it",
+        "es",
+        "pt",
+        "ja",
+        "ko"
+      ],
       "description": "撒娇搞怪，逗你开心",
-      "default_params": { "pitch": 50, "speed": 1.0, "volume": 50 }
+      "default_params": {
+        "pitch": 50,
+        "speed": 1.0,
+        "volume": 50
+      }
     },
     {
       "id": "Vivian",
@@ -65,9 +140,24 @@
       "gender": "female",
       "style": "energetic",
       "category": "general",
-      "languages": ["zh", "en", "fr", "de", "ru", "it", "es", "pt", "ja", "ko"],
+      "languages": [
+        "zh",
+        "en",
+        "fr",
+        "de",
+        "ru",
+        "it",
+        "es",
+        "pt",
+        "ja",
+        "ko"
+      ],
       "description": "拽拽的、可爱的小暴躁",
-      "default_params": { "pitch": 50, "speed": 1.0, "volume": 50 }
+      "default_params": {
+        "pitch": 50,
+        "speed": 1.0,
+        "volume": 50
+      }
     },
     {
       "id": "Moon",
@@ -76,9 +166,24 @@
       "gender": "male",
       "style": "energetic",
       "category": "general",
-      "languages": ["zh", "en", "fr", "de", "ru", "it", "es", "pt", "ja", "ko"],
+      "languages": [
+        "zh",
+        "en",
+        "fr",
+        "de",
+        "ru",
+        "it",
+        "es",
+        "pt",
+        "ja",
+        "ko"
+      ],
       "description": "率性帅气的月白",
-      "default_params": { "pitch": 50, "speed": 1.0, "volume": 50 }
+      "default_params": {
+        "pitch": 50,
+        "speed": 1.0,
+        "volume": 50
+      }
     },
     {
       "id": "Maia",
@@ -87,9 +192,24 @@
       "gender": "female",
       "style": "elegant",
       "category": "general",
-      "languages": ["zh", "en", "fr", "de", "ru", "it", "es", "pt", "ja", "ko"],
+      "languages": [
+        "zh",
+        "en",
+        "fr",
+        "de",
+        "ru",
+        "it",
+        "es",
+        "pt",
+        "ja",
+        "ko"
+      ],
       "description": "知性与温柔的碰撞",
-      "default_params": { "pitch": 50, "speed": 1.0, "volume": 50 }
+      "default_params": {
+        "pitch": 50,
+        "speed": 1.0,
+        "volume": 50
+      }
     },
     {
       "id": "Kai",
@@ -98,9 +218,24 @@
       "gender": "male",
       "style": "soothing",
       "category": "general",
-      "languages": ["zh", "en", "fr", "de", "ru", "it", "es", "pt", "ja", "ko"],
+      "languages": [
+        "zh",
+        "en",
+        "fr",
+        "de",
+        "ru",
+        "it",
+        "es",
+        "pt",
+        "ja",
+        "ko"
+      ],
       "description": "耳朵的一场SPA",
-      "default_params": { "pitch": 50, "speed": 1.0, "volume": 50 }
+      "default_params": {
+        "pitch": 50,
+        "speed": 1.0,
+        "volume": 50
+      }
     },
     {
       "id": "Nofish",
@@ -109,9 +244,24 @@
       "gender": "male",
       "style": "calm",
       "category": "general",
-      "languages": ["zh", "en", "fr", "de", "ru", "it", "es", "pt", "ja", "ko"],
+      "languages": [
+        "zh",
+        "en",
+        "fr",
+        "de",
+        "ru",
+        "it",
+        "es",
+        "pt",
+        "ja",
+        "ko"
+      ],
       "description": "不会翘舌音的设计师",
-      "default_params": { "pitch": 50, "speed": 1.0, "volume": 50 }
+      "default_params": {
+        "pitch": 50,
+        "speed": 1.0,
+        "volume": 50
+      }
     },
     {
       "id": "Bella",
@@ -120,9 +270,24 @@
       "gender": "female",
       "style": "cute",
       "category": "general",
-      "languages": ["zh", "en", "fr", "de", "ru", "it", "es", "pt", "ja", "ko"],
+      "languages": [
+        "zh",
+        "en",
+        "fr",
+        "de",
+        "ru",
+        "it",
+        "es",
+        "pt",
+        "ja",
+        "ko"
+      ],
       "description": "喝酒不打醉拳的小萝莉",
-      "default_params": { "pitch": 50, "speed": 1.0, "volume": 50 }
+      "default_params": {
+        "pitch": 50,
+        "speed": 1.0,
+        "volume": 50
+      }
     },
     {
       "id": "Jennifer",
@@ -131,9 +296,24 @@
       "gender": "female",
       "style": "clear",
       "category": "general",
-      "languages": ["zh", "en", "fr", "de", "ru", "it", "es", "pt", "ja", "ko"],
+      "languages": [
+        "zh",
+        "en",
+        "fr",
+        "de",
+        "ru",
+        "it",
+        "es",
+        "pt",
+        "ja",
+        "ko"
+      ],
       "description": "品牌级、电影质感般美语女声",
-      "default_params": { "pitch": 50, "speed": 1.0, "volume": 50 }
+      "default_params": {
+        "pitch": 50,
+        "speed": 1.0,
+        "volume": 50
+      }
     },
     {
       "id": "Ryan",
@@ -142,9 +322,24 @@
       "gender": "male",
       "style": "energetic",
       "category": "general",
-      "languages": ["zh", "en", "fr", "de", "ru", "it", "es", "pt", "ja", "ko"],
+      "languages": [
+        "zh",
+        "en",
+        "fr",
+        "de",
+        "ru",
+        "it",
+        "es",
+        "pt",
+        "ja",
+        "ko"
+      ],
       "description": "节奏拉满，戏感炸裂，真实与张力共舞",
-      "default_params": { "pitch": 50, "speed": 1.0, "volume": 50 }
+      "default_params": {
+        "pitch": 50,
+        "speed": 1.0,
+        "volume": 50
+      }
     },
     {
       "id": "Katerina",
@@ -153,9 +348,24 @@
       "gender": "female",
       "style": "elegant",
       "category": "general",
-      "languages": ["zh", "en", "fr", "de", "ru", "it", "es", "pt", "ja", "ko"],
+      "languages": [
+        "zh",
+        "en",
+        "fr",
+        "de",
+        "ru",
+        "it",
+        "es",
+        "pt",
+        "ja",
+        "ko"
+      ],
       "description": "御姐音色，韵律回味十足",
-      "default_params": { "pitch": 50, "speed": 1.0, "volume": 50 }
+      "default_params": {
+        "pitch": 50,
+        "speed": 1.0,
+        "volume": 50
+      }
     },
     {
       "id": "Aiden",
@@ -164,9 +374,24 @@
       "gender": "male",
       "style": "energetic",
       "category": "general",
-      "languages": ["zh", "en", "fr", "de", "ru", "it", "es", "pt", "ja", "ko"],
+      "languages": [
+        "zh",
+        "en",
+        "fr",
+        "de",
+        "ru",
+        "it",
+        "es",
+        "pt",
+        "ja",
+        "ko"
+      ],
       "description": "精通厨艺的美语大男孩",
-      "default_params": { "pitch": 50, "speed": 1.0, "volume": 50 }
+      "default_params": {
+        "pitch": 50,
+        "speed": 1.0,
+        "volume": 50
+      }
     },
     {
       "id": "Eldric Sage",
@@ -175,9 +400,24 @@
       "gender": "male",
       "style": "elder",
       "category": "general",
-      "languages": ["zh", "en", "fr", "de", "ru", "it", "es", "pt", "ja", "ko"],
+      "languages": [
+        "zh",
+        "en",
+        "fr",
+        "de",
+        "ru",
+        "it",
+        "es",
+        "pt",
+        "ja",
+        "ko"
+      ],
       "description": "沉稳睿智的老者，沧桑如松却心明如镜",
-      "default_params": { "pitch": 50, "speed": 1.0, "volume": 50 }
+      "default_params": {
+        "pitch": 50,
+        "speed": 1.0,
+        "volume": 50
+      }
     },
     {
       "id": "Mia",
@@ -186,9 +426,24 @@
       "gender": "female",
       "style": "gentle",
       "category": "general",
-      "languages": ["zh", "en", "fr", "de", "ru", "it", "es", "pt", "ja", "ko"],
+      "languages": [
+        "zh",
+        "en",
+        "fr",
+        "de",
+        "ru",
+        "it",
+        "es",
+        "pt",
+        "ja",
+        "ko"
+      ],
       "description": "温顺如春水，乖巧如初雪",
-      "default_params": { "pitch": 50, "speed": 1.0, "volume": 50 }
+      "default_params": {
+        "pitch": 50,
+        "speed": 1.0,
+        "volume": 50
+      }
     },
     {
       "id": "Mochi",
@@ -197,9 +452,24 @@
       "gender": "male",
       "style": "cute",
       "category": "general",
-      "languages": ["zh", "en", "fr", "de", "ru", "it", "es", "pt", "ja", "ko"],
+      "languages": [
+        "zh",
+        "en",
+        "fr",
+        "de",
+        "ru",
+        "it",
+        "es",
+        "pt",
+        "ja",
+        "ko"
+      ],
       "description": "聪明伶俐的小大人，童真未泯却早慧如禅",
-      "default_params": { "pitch": 50, "speed": 1.0, "volume": 50 }
+      "default_params": {
+        "pitch": 50,
+        "speed": 1.0,
+        "volume": 50
+      }
     },
     {
       "id": "Bellona",
@@ -208,9 +478,24 @@
       "gender": "female",
       "style": "powerful",
       "category": "general",
-      "languages": ["zh", "en", "fr", "de", "ru", "it", "es", "pt", "ja", "ko"],
+      "languages": [
+        "zh",
+        "en",
+        "fr",
+        "de",
+        "ru",
+        "it",
+        "es",
+        "pt",
+        "ja",
+        "ko"
+      ],
       "description": "声音洪亮，吐字清晰，人物鲜活，听得人热血沸腾；金戈铁马入梦来，字正腔圆间尽显千面人声的江湖",
-      "default_params": { "pitch": 50, "speed": 1.0, "volume": 50 }
+      "default_params": {
+        "pitch": 50,
+        "speed": 1.0,
+        "volume": 50
+      }
     },
     {
       "id": "Vincent",
@@ -219,9 +504,24 @@
       "gender": "male",
       "style": "magnetic",
       "category": "general",
-      "languages": ["zh", "en", "fr", "de", "ru", "it", "es", "pt", "ja", "ko"],
+      "languages": [
+        "zh",
+        "en",
+        "fr",
+        "de",
+        "ru",
+        "it",
+        "es",
+        "pt",
+        "ja",
+        "ko"
+      ],
       "description": "一口独特的沙哑烟嗓，一开口便道尽了千军万马与江湖豪情",
-      "default_params": { "pitch": 50, "speed": 1.0, "volume": 50 }
+      "default_params": {
+        "pitch": 50,
+        "speed": 1.0,
+        "volume": 50
+      }
     },
     {
       "id": "Bunny",
@@ -230,9 +530,24 @@
       "gender": "female",
       "style": "cute",
       "category": "general",
-      "languages": ["zh", "en", "fr", "de", "ru", "it", "es", "pt", "ja", "ko"],
+      "languages": [
+        "zh",
+        "en",
+        "fr",
+        "de",
+        "ru",
+        "it",
+        "es",
+        "pt",
+        "ja",
+        "ko"
+      ],
       "description": "“萌属性”爆棚的小萝莉",
-      "default_params": { "pitch": 50, "speed": 1.0, "volume": 50 }
+      "default_params": {
+        "pitch": 50,
+        "speed": 1.0,
+        "volume": 50
+      }
     },
     {
       "id": "Neil",
@@ -241,9 +556,24 @@
       "gender": "male",
       "style": "clear",
       "category": "general",
-      "languages": ["zh", "en", "fr", "de", "ru", "it", "es", "pt", "ja", "ko"],
+      "languages": [
+        "zh",
+        "en",
+        "fr",
+        "de",
+        "ru",
+        "it",
+        "es",
+        "pt",
+        "ja",
+        "ko"
+      ],
       "description": "平直的基线语调，字正腔圆的咬字发音，这就是最专业的新闻主持人",
-      "default_params": { "pitch": 50, "speed": 1.0, "volume": 50 }
+      "default_params": {
+        "pitch": 50,
+        "speed": 1.0,
+        "volume": 50
+      }
     },
     {
       "id": "Elias",
@@ -252,9 +582,24 @@
       "gender": "female",
       "style": "calm",
       "category": "general",
-      "languages": ["zh", "en", "fr", "de", "ru", "it", "es", "pt", "ja", "ko"],
+      "languages": [
+        "zh",
+        "en",
+        "fr",
+        "de",
+        "ru",
+        "it",
+        "es",
+        "pt",
+        "ja",
+        "ko"
+      ],
       "description": "既保持学科严谨性，又通过叙事技巧将复杂知识转化为可消化的认知模块",
-      "default_params": { "pitch": 50, "speed": 1.0, "volume": 50 }
+      "default_params": {
+        "pitch": 50,
+        "speed": 1.0,
+        "volume": 50
+      }
     },
     {
       "id": "Arthur",
@@ -263,9 +608,24 @@
       "gender": "male",
       "style": "elder",
       "category": "general",
-      "languages": ["zh", "en", "fr", "de", "ru", "it", "es", "pt", "ja", "ko"],
+      "languages": [
+        "zh",
+        "en",
+        "fr",
+        "de",
+        "ru",
+        "it",
+        "es",
+        "pt",
+        "ja",
+        "ko"
+      ],
       "description": "被岁月和旱烟浸泡过的质朴嗓音，不疾不徐地摇开了满村的奇闻异事",
-      "default_params": { "pitch": 50, "speed": 1.0, "volume": 50 }
+      "default_params": {
+        "pitch": 50,
+        "speed": 1.0,
+        "volume": 50
+      }
     },
     {
       "id": "Nini",
@@ -274,20 +634,24 @@
       "gender": "female",
       "style": "cute",
       "category": "general",
-      "languages": ["zh", "en", "fr", "de", "ru", "it", "es", "pt", "ja", "ko"],
+      "languages": [
+        "zh",
+        "en",
+        "fr",
+        "de",
+        "ru",
+        "it",
+        "es",
+        "pt",
+        "ja",
+        "ko"
+      ],
       "description": "糯米糍一样又软又黏的嗓音，那一声声拉长了的“哥哥”，甜得能把人的骨头都叫酥了",
-      "default_params": { "pitch": 50, "speed": 1.0, "volume": 50 }
-    },
-    {
-      "id": "Ebona",
-      "speaker": "Ebona",
-      "label": "诡婆婆 (Ebona)",
-      "gender": "female",
-      "style": "elder",
-      "category": "general",
-      "languages": ["zh", "en", "fr", "de", "ru", "it", "es", "pt", "ja", "ko"],
-      "description": "她的低语像一把生锈的钥匙，缓慢转动你内心最深处的幽暗角落——那里藏着所有你不敢承认的童年阴影与未知恐惧",
-      "default_params": { "pitch": 50, "speed": 1.0, "volume": 50 }
+      "default_params": {
+        "pitch": 50,
+        "speed": 1.0,
+        "volume": 50
+      }
     },
     {
       "id": "Seren",
@@ -296,9 +660,24 @@
       "gender": "female",
       "style": "soothing",
       "category": "general",
-      "languages": ["zh", "en", "fr", "de", "ru", "it", "es", "pt", "ja", "ko"],
+      "languages": [
+        "zh",
+        "en",
+        "fr",
+        "de",
+        "ru",
+        "it",
+        "es",
+        "pt",
+        "ja",
+        "ko"
+      ],
       "description": "温和舒缓的声线，助你更快地进入睡眠，晚安，好梦",
-      "default_params": { "pitch": 50, "speed": 1.0, "volume": 50 }
+      "default_params": {
+        "pitch": 50,
+        "speed": 1.0,
+        "volume": 50
+      }
     },
     {
       "id": "Pip",
@@ -307,9 +686,24 @@
       "gender": "male",
       "style": "cute",
       "category": "general",
-      "languages": ["zh", "en", "fr", "de", "ru", "it", "es", "pt", "ja", "ko"],
+      "languages": [
+        "zh",
+        "en",
+        "fr",
+        "de",
+        "ru",
+        "it",
+        "es",
+        "pt",
+        "ja",
+        "ko"
+      ],
       "description": "调皮捣蛋却充满童真的他来了，这是你记忆中的小新吗",
-      "default_params": { "pitch": 50, "speed": 1.0, "volume": 50 }
+      "default_params": {
+        "pitch": 50,
+        "speed": 1.0,
+        "volume": 50
+      }
     },
     {
       "id": "Stella",
@@ -318,9 +712,24 @@
       "gender": "female",
       "style": "energetic",
       "category": "general",
-      "languages": ["zh", "en", "fr", "de", "ru", "it", "es", "pt", "ja", "ko"],
+      "languages": [
+        "zh",
+        "en",
+        "fr",
+        "de",
+        "ru",
+        "it",
+        "es",
+        "pt",
+        "ja",
+        "ko"
+      ],
       "description": "平时是甜到发腻的迷糊少女音，但在喊出“代表月亮消灭你”时，瞬间充满不容置疑的爱与正义",
-      "default_params": { "pitch": 50, "speed": 1.0, "volume": 50 }
+      "default_params": {
+        "pitch": 50,
+        "speed": 1.0,
+        "volume": 50
+      }
     },
     {
       "id": "Bodega",
@@ -329,9 +738,24 @@
       "gender": "male",
       "style": "energetic",
       "category": "general",
-      "languages": ["zh", "en", "fr", "de", "ru", "it", "es", "pt", "ja", "ko"],
+      "languages": [
+        "zh",
+        "en",
+        "fr",
+        "de",
+        "ru",
+        "it",
+        "es",
+        "pt",
+        "ja",
+        "ko"
+      ],
       "description": "热情的西班牙大叔",
-      "default_params": { "pitch": 50, "speed": 1.0, "volume": 50 }
+      "default_params": {
+        "pitch": 50,
+        "speed": 1.0,
+        "volume": 50
+      }
     },
     {
       "id": "Sonrisa",
@@ -340,9 +764,24 @@
       "gender": "female",
       "style": "energetic",
       "category": "general",
-      "languages": ["zh", "en", "fr", "de", "ru", "it", "es", "pt", "ja", "ko"],
+      "languages": [
+        "zh",
+        "en",
+        "fr",
+        "de",
+        "ru",
+        "it",
+        "es",
+        "pt",
+        "ja",
+        "ko"
+      ],
       "description": "热情开朗的拉美大姐",
-      "default_params": { "pitch": 50, "speed": 1.0, "volume": 50 }
+      "default_params": {
+        "pitch": 50,
+        "speed": 1.0,
+        "volume": 50
+      }
     },
     {
       "id": "Alek",
@@ -351,9 +790,24 @@
       "gender": "male",
       "style": "calm",
       "category": "general",
-      "languages": ["zh", "en", "fr", "de", "ru", "it", "es", "pt", "ja", "ko"],
+      "languages": [
+        "zh",
+        "en",
+        "fr",
+        "de",
+        "ru",
+        "it",
+        "es",
+        "pt",
+        "ja",
+        "ko"
+      ],
       "description": "一开口，是战斗民族的冷，也是毛呢大衣下的暖",
-      "default_params": { "pitch": 50, "speed": 1.0, "volume": 50 }
+      "default_params": {
+        "pitch": 50,
+        "speed": 1.0,
+        "volume": 50
+      }
     },
     {
       "id": "Dolce",
@@ -362,9 +816,24 @@
       "gender": "male",
       "style": "calm",
       "category": "general",
-      "languages": ["zh", "en", "fr", "de", "ru", "it", "es", "pt", "ja", "ko"],
+      "languages": [
+        "zh",
+        "en",
+        "fr",
+        "de",
+        "ru",
+        "it",
+        "es",
+        "pt",
+        "ja",
+        "ko"
+      ],
       "description": "慵懒的意大利大叔",
-      "default_params": { "pitch": 50, "speed": 1.0, "volume": 50 }
+      "default_params": {
+        "pitch": 50,
+        "speed": 1.0,
+        "volume": 50
+      }
     },
     {
       "id": "Sohee",
@@ -373,9 +842,24 @@
       "gender": "female",
       "style": "gentle",
       "category": "general",
-      "languages": ["zh", "en", "fr", "de", "ru", "it", "es", "pt", "ja", "ko"],
+      "languages": [
+        "zh",
+        "en",
+        "fr",
+        "de",
+        "ru",
+        "it",
+        "es",
+        "pt",
+        "ja",
+        "ko"
+      ],
       "description": "温柔开朗，情绪丰富的韩国欧尼",
-      "default_params": { "pitch": 50, "speed": 1.0, "volume": 50 }
+      "default_params": {
+        "pitch": 50,
+        "speed": 1.0,
+        "volume": 50
+      }
     },
     {
       "id": "Ono Anna",
@@ -384,9 +868,24 @@
       "gender": "female",
       "style": "lively",
       "category": "general",
-      "languages": ["zh", "en", "fr", "de", "ru", "it", "es", "pt", "ja", "ko"],
+      "languages": [
+        "zh",
+        "en",
+        "fr",
+        "de",
+        "ru",
+        "it",
+        "es",
+        "pt",
+        "ja",
+        "ko"
+      ],
       "description": "鬼灵精怪的青梅竹马",
-      "default_params": { "pitch": 50, "speed": 1.0, "volume": 50 }
+      "default_params": {
+        "pitch": 50,
+        "speed": 1.0,
+        "volume": 50
+      }
     },
     {
       "id": "Lenn",
@@ -395,9 +894,24 @@
       "gender": "male",
       "style": "calm",
       "category": "general",
-      "languages": ["zh", "en", "fr", "de", "ru", "it", "es", "pt", "ja", "ko"],
+      "languages": [
+        "zh",
+        "en",
+        "fr",
+        "de",
+        "ru",
+        "it",
+        "es",
+        "pt",
+        "ja",
+        "ko"
+      ],
       "description": "理性是底色，叛逆藏在细节里——穿西装也听后朋克的德国青年",
-      "default_params": { "pitch": 50, "speed": 1.0, "volume": 50 }
+      "default_params": {
+        "pitch": 50,
+        "speed": 1.0,
+        "volume": 50
+      }
     },
     {
       "id": "Emilien",
@@ -406,9 +920,24 @@
       "gender": "male",
       "style": "gentle",
       "category": "general",
-      "languages": ["zh", "en", "fr", "de", "ru", "it", "es", "pt", "ja", "ko"],
+      "languages": [
+        "zh",
+        "en",
+        "fr",
+        "de",
+        "ru",
+        "it",
+        "es",
+        "pt",
+        "ja",
+        "ko"
+      ],
       "description": "浪漫的法国大哥哥",
-      "default_params": { "pitch": 50, "speed": 1.0, "volume": 50 }
+      "default_params": {
+        "pitch": 50,
+        "speed": 1.0,
+        "volume": 50
+      }
     },
     {
       "id": "Andre",
@@ -417,9 +946,24 @@
       "gender": "male",
       "style": "calm",
       "category": "general",
-      "languages": ["zh", "en", "fr", "de", "ru", "it", "es", "pt", "ja", "ko"],
+      "languages": [
+        "zh",
+        "en",
+        "fr",
+        "de",
+        "ru",
+        "it",
+        "es",
+        "pt",
+        "ja",
+        "ko"
+      ],
       "description": "声音磁性，自然舒服、沉稳男生",
-      "default_params": { "pitch": 50, "speed": 1.0, "volume": 50 }
+      "default_params": {
+        "pitch": 50,
+        "speed": 1.0,
+        "volume": 50
+      }
     },
     {
       "id": "Radio Gol",
@@ -428,11 +972,25 @@
       "gender": "male",
       "style": "energetic",
       "category": "general",
-      "languages": ["zh", "en", "fr", "de", "ru", "it", "es", "pt", "ja", "ko"],
+      "languages": [
+        "zh",
+        "en",
+        "fr",
+        "de",
+        "ru",
+        "it",
+        "es",
+        "pt",
+        "ja",
+        "ko"
+      ],
       "description": "足球诗人Rádio Gol！今天我要用名字为你们解说足球。",
-      "default_params": { "pitch": 50, "speed": 1.0, "volume": 50 }
+      "default_params": {
+        "pitch": 50,
+        "speed": 1.0,
+        "volume": 50
+      }
     },
-
     {
       "id": "Jada",
       "speaker": "Jada",
@@ -440,9 +998,25 @@
       "gender": "female",
       "style": "dialect",
       "category": "dialect",
-      "languages": ["zh_dialect", "zh", "en", "fr", "de", "ru", "it", "es", "pt", "ja", "ko"],
+      "languages": [
+        "zh_dialect",
+        "zh",
+        "en",
+        "fr",
+        "de",
+        "ru",
+        "it",
+        "es",
+        "pt",
+        "ja",
+        "ko"
+      ],
       "description": "风风火火的沪上阿姐",
-      "default_params": { "pitch": 50, "speed": 1.0, "volume": 50 }
+      "default_params": {
+        "pitch": 50,
+        "speed": 1.0,
+        "volume": 50
+      }
     },
     {
       "id": "Dylan",
@@ -451,9 +1025,25 @@
       "gender": "male",
       "style": "dialect",
       "category": "dialect",
-      "languages": ["zh_dialect", "zh", "en", "fr", "de", "ru", "it", "es", "pt", "ja", "ko"],
+      "languages": [
+        "zh_dialect",
+        "zh",
+        "en",
+        "fr",
+        "de",
+        "ru",
+        "it",
+        "es",
+        "pt",
+        "ja",
+        "ko"
+      ],
       "description": "北京胡同里长大的少年",
-      "default_params": { "pitch": 50, "speed": 1.0, "volume": 50 }
+      "default_params": {
+        "pitch": 50,
+        "speed": 1.0,
+        "volume": 50
+      }
     },
     {
       "id": "Li",
@@ -462,9 +1052,25 @@
       "gender": "male",
       "style": "dialect",
       "category": "dialect",
-      "languages": ["zh_dialect", "zh", "en", "fr", "de", "ru", "it", "es", "pt", "ja", "ko"],
+      "languages": [
+        "zh_dialect",
+        "zh",
+        "en",
+        "fr",
+        "de",
+        "ru",
+        "it",
+        "es",
+        "pt",
+        "ja",
+        "ko"
+      ],
       "description": "耐心的瑜伽老师",
-      "default_params": { "pitch": 50, "speed": 1.0, "volume": 50 }
+      "default_params": {
+        "pitch": 50,
+        "speed": 1.0,
+        "volume": 50
+      }
     },
     {
       "id": "Marcus",
@@ -473,9 +1079,25 @@
       "gender": "male",
       "style": "dialect",
       "category": "dialect",
-      "languages": ["zh_dialect", "zh", "en", "fr", "de", "ru", "it", "es", "pt", "ja", "ko"],
+      "languages": [
+        "zh_dialect",
+        "zh",
+        "en",
+        "fr",
+        "de",
+        "ru",
+        "it",
+        "es",
+        "pt",
+        "ja",
+        "ko"
+      ],
       "description": "面宽话短，心实声沉——老陕的味道",
-      "default_params": { "pitch": 50, "speed": 1.0, "volume": 50 }
+      "default_params": {
+        "pitch": 50,
+        "speed": 1.0,
+        "volume": 50
+      }
     },
     {
       "id": "Roy",
@@ -484,9 +1106,25 @@
       "gender": "male",
       "style": "dialect",
       "category": "dialect",
-      "languages": ["zh_dialect", "zh", "en", "fr", "de", "ru", "it", "es", "pt", "ja", "ko"],
+      "languages": [
+        "zh_dialect",
+        "zh",
+        "en",
+        "fr",
+        "de",
+        "ru",
+        "it",
+        "es",
+        "pt",
+        "ja",
+        "ko"
+      ],
       "description": "诙谐直爽、市井活泼的台湾哥仔形象",
-      "default_params": { "pitch": 50, "speed": 1.0, "volume": 50 }
+      "default_params": {
+        "pitch": 50,
+        "speed": 1.0,
+        "volume": 50
+      }
     },
     {
       "id": "Peter",
@@ -495,9 +1133,25 @@
       "gender": "male",
       "style": "dialect",
       "category": "dialect",
-      "languages": ["zh_dialect", "zh", "en", "fr", "de", "ru", "it", "es", "pt", "ja", "ko"],
+      "languages": [
+        "zh_dialect",
+        "zh",
+        "en",
+        "fr",
+        "de",
+        "ru",
+        "it",
+        "es",
+        "pt",
+        "ja",
+        "ko"
+      ],
       "description": "天津相声，专业捧哏",
-      "default_params": { "pitch": 50, "speed": 1.0, "volume": 50 }
+      "default_params": {
+        "pitch": 50,
+        "speed": 1.0,
+        "volume": 50
+      }
     },
     {
       "id": "Sunny",
@@ -506,9 +1160,25 @@
       "gender": "female",
       "style": "dialect",
       "category": "dialect",
-      "languages": ["zh_dialect", "zh", "en", "fr", "de", "ru", "it", "es", "pt", "ja", "ko"],
+      "languages": [
+        "zh_dialect",
+        "zh",
+        "en",
+        "fr",
+        "de",
+        "ru",
+        "it",
+        "es",
+        "pt",
+        "ja",
+        "ko"
+      ],
       "description": "甜到你心里的川妹子",
-      "default_params": { "pitch": 50, "speed": 1.0, "volume": 50 }
+      "default_params": {
+        "pitch": 50,
+        "speed": 1.0,
+        "volume": 50
+      }
     },
     {
       "id": "Eric",
@@ -517,9 +1187,25 @@
       "gender": "male",
       "style": "dialect",
       "category": "dialect",
-      "languages": ["zh_dialect", "zh", "en", "fr", "de", "ru", "it", "es", "pt", "ja", "ko"],
+      "languages": [
+        "zh_dialect",
+        "zh",
+        "en",
+        "fr",
+        "de",
+        "ru",
+        "it",
+        "es",
+        "pt",
+        "ja",
+        "ko"
+      ],
       "description": "一个跳脱市井的四川成都男子",
-      "default_params": { "pitch": 50, "speed": 1.0, "volume": 50 }
+      "default_params": {
+        "pitch": 50,
+        "speed": 1.0,
+        "volume": 50
+      }
     },
     {
       "id": "Rocky",
@@ -528,9 +1214,25 @@
       "gender": "male",
       "style": "dialect",
       "category": "dialect",
-      "languages": ["zh_dialect", "zh", "en", "fr", "de", "ru", "it", "es", "pt", "ja", "ko"],
+      "languages": [
+        "zh_dialect",
+        "zh",
+        "en",
+        "fr",
+        "de",
+        "ru",
+        "it",
+        "es",
+        "pt",
+        "ja",
+        "ko"
+      ],
       "description": "幽默风趣的阿强，在线陪聊",
-      "default_params": { "pitch": 50, "speed": 1.0, "volume": 50 }
+      "default_params": {
+        "pitch": 50,
+        "speed": 1.0,
+        "volume": 50
+      }
     },
     {
       "id": "Kiki",
@@ -539,9 +1241,25 @@
       "gender": "female",
       "style": "dialect",
       "category": "dialect",
-      "languages": ["zh_dialect", "zh", "en", "fr", "de", "ru", "it", "es", "pt", "ja", "ko"],
+      "languages": [
+        "zh_dialect",
+        "zh",
+        "en",
+        "fr",
+        "de",
+        "ru",
+        "it",
+        "es",
+        "pt",
+        "ja",
+        "ko"
+      ],
       "description": "甜美的港妹闺蜜",
-      "default_params": { "pitch": 50, "speed": 1.0, "volume": 50 }
+      "default_params": {
+        "pitch": 50,
+        "speed": 1.0,
+        "volume": 50
+      }
     }
   ]
 }

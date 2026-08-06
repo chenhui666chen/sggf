@@ -60,8 +60,6 @@ class CosyVoiceV3PlusProfile:
         # cosyvoice-v3.5-plus 支持 instruction；这里仅按 emotion 控制是否开启 instruct 模式。
         return {
             "speaker": self.tts_speaker_id,
-            "pitch": int(max(0, min(100, self.pitch_base))),
-            "speed": float(max(0.5, min(2.0, self.speed_base))),
             "volume": int(max(0, min(100, self.volume_base))),
             "emotion": emotion,
             "use_instruct_mode": emotion != "neutral",
@@ -247,15 +245,12 @@ class CosyVoiceV3PlusVoiceManager:
                 {
                     "volume": volume,
                     "speed": speed,
-                    "pitch": pitch,
                 },
             )
             if enhanced.get("volume") is not None:
                 volume = int(max(0, min(100, enhanced["volume"])))
             if enhanced.get("speed") is not None:
                 speed = float(max(0.5, min(2.0, enhanced["speed"])))
-            if enhanced.get("pitch") is not None:
-                pitch = int(max(0, min(100, enhanced["pitch"])))
             if enhanced.get("emotion"):
                 default_emotion = str(enhanced["emotion"])
 

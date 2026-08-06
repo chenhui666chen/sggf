@@ -38,6 +38,16 @@ from app.services.audiobook.tts_model_ids import (
     normalize_audiobook_tts_model,
 )
 from app.services.audiobook.voice_types import apply_voice_type_to_tts_params
+from app.services.audiobook.voice_identity_policy import (
+    is_voice_design_creation_request,
+    is_voice_design_model,
+    sanitize_fixed_voice_performance_text,
+    sanitize_fixed_voice_prompt_params,
+)
+from app.services.audiobook.voice_parameter_policy import (
+    stabilize_fixed_voice_pitch,
+    stabilize_instruct_model_speed,
+)
 from app.services.audiobook.voice_manager import VoiceManager
 from app.services.audiobook.voice_catalog import get_preview_quote_for_voice, get_voice_entry, load_voice_catalog_for_model
 from app.services.audiobook.mimo_voice_assets import (
@@ -414,15 +424,31 @@ def _build_preview_voice_params(
     request: TTSPreviewRequest,
     speaker_id: str,
     *,
+    model_name: str | None = None,
     owner_user_id: int | None = None,
 ) -> dict:
+    resolved_model = normalize_audiobook_tts_model(
+        model_name or request.model or DEFAULT_TTS_MODEL
+    )
+    voice_design = is_voice_design_model(resolved_model)
+    request_voice_id = str(getattr(request, "voice_id", "") or "").strip()
+    mimo_voice_asset_id = str(getattr(request, "mimo_voice_asset_id", "") or "").strip()
+    voice_design_creation = is_voice_design_creation_request(
+        resolved_model,
+        {
+            "speaker": speaker_id,
+            "voice_id": request_voice_id,
+            "mimo_voice_asset_id": mimo_voice_asset_id,
+        },
+    )
     base_params = {
         "volume": request.volume,
         "speed": request.speed,
-        "pitch": request.pitch,
     }
     voice_type = str(request.voice_type or "").strip()
-    if voice_type:
+    if voice_design_creation:
+        base_params["pitch"] = request.pitch
+    if voice_design_creation and voice_type:
         base_params = apply_voice_type_to_tts_params(
             voice_type,
             {
@@ -436,13 +462,12 @@ def _build_preview_voice_params(
         "speaker": speaker_id,
         "volume": base_params.get("volume"),
     }
-    request_voice_id = str(getattr(request, "voice_id", "") or "").strip()
     if request_voice_id:
         voice_params["voice_id"] = request_voice_id
     if base_params.get("speed") is not None:
         voice_params["rate"] = base_params["speed"]
         voice_params["speed"] = base_params["speed"]
-    if base_params.get("pitch") is not None:
+    if voice_design_creation and base_params.get("pitch") is not None:
         voice_params["pitch"] = base_params["pitch"]
     if base_params.get("emotion"):
         voice_params["emotion"] = base_params["emotion"]
@@ -456,10 +481,9 @@ def _build_preview_voice_params(
         voice_params["voice_clone_data_url"] = voice_clone_data_url
 
     voice_design_prompt = str(getattr(request, "voice_design_prompt", "") or "").strip()
-    if voice_design_prompt:
+    if voice_design_creation and voice_design_prompt:
         voice_params["voice_design_prompt"] = voice_design_prompt
 
-    mimo_voice_asset_id = str(getattr(request, "mimo_voice_asset_id", "") or "").strip()
     if not mimo_voice_asset_id and (
         request_voice_id.startswith("mimo_clone:")
         or request_voice_id.startswith("mimo_design:")
@@ -497,6 +521,24 @@ def _build_preview_voice_params(
         voice_params["word_timestamp_enabled"] = True
     if getattr(request, "phoneme_timestamp_enabled", False):
         voice_params["phoneme_timestamp_enabled"] = True
+
+    voice_design_creation = is_voice_design_creation_request(
+        resolved_model,
+        voice_params,
+    )
+    if not voice_design_creation:
+        voice_params, _ = sanitize_fixed_voice_prompt_params(voice_params)
+        voice_params = stabilize_fixed_voice_pitch(voice_params)
+        for derived_identity_field in (
+            "voice_description",
+            "provider_prompt",
+            "provider_prompt_snapshot",
+        ):
+            voice_params.pop(derived_identity_field, None)
+        if not voice_design:
+            voice_params.pop("voice_design_prompt", None)
+
+    voice_params = stabilize_instruct_model_speed(voice_params, resolved_model)
 
     return voice_params
 
@@ -580,8 +622,19 @@ def _build_prompt_test_voice_params(
         except StepAudioVoiceAssetError as exc:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
-    # The provider adapter must consume exactly the snapshot shown by the test page.
-    voice_params["provider_prompt_snapshot"] = test_case["provider_prompt_snapshot"]
+    voice_design_creation = is_voice_design_creation_request(model_name, voice_params)
+    if voice_design_creation:
+        # The explicit creation test consumes exactly the snapshot shown by the page.
+        voice_params["provider_prompt_snapshot"] = test_case["provider_prompt_snapshot"]
+    else:
+        voice_params, _ = sanitize_fixed_voice_prompt_params(voice_params)
+        voice_params = stabilize_fixed_voice_pitch(voice_params)
+        voice_params.pop("voice_description", None)
+        voice_params.pop("provider_prompt", None)
+        voice_params.pop("provider_prompt_snapshot", None)
+        if not is_voice_design_model(model_name):
+            voice_params.pop("voice_design_prompt", None)
+    voice_params = stabilize_instruct_model_speed(voice_params, model_name)
     return voice_id, voice_params
 
 
@@ -598,7 +651,12 @@ async def preview_tts_prompt_test_case(
     request: TTSPromptTestPreviewRequest,
     current_user: User = Depends(get_current_user),
 ):
-    """Synthesize one independent case using its displayed provider prompt snapshot."""
+    """Synthesize an independent case under the current voice-identity policy.
+
+    Explicit new-voice creation may reuse the server-built displayed snapshot.
+    Fixed voices discard it and rebuild at the engine boundary so stale prompt
+    data cannot bypass identity sanitization.
+    """
     try:
         test_case = get_tts_test_case(request.model, request.case_id)
     except ValueError as exc:
@@ -671,6 +729,7 @@ async def tts_preview(
     voice_params = _build_preview_voice_params(
         request,
         speaker_id,
+        model_name=model_name,
         owner_user_id=int(current_user.id),
     )
 
@@ -724,19 +783,21 @@ async def tts_preview_cached(
     voice_params = _build_preview_voice_params(
         request,
         speaker_id,
+        model_name=model_name,
         owner_user_id=int(current_user.id),
     )
 
     # 构建缓存键
+    voice_design = is_voice_design_creation_request(model_name, voice_params)
     cache_key = _build_preview_cache_key(
         model=model_name,
         voice_id=speaker_id,
         text=text,
         volume=int(request.volume),
-        speed=float(request.speed or 1.0),
-        pitch=int(request.pitch or 50),
+        speed=float(voice_params.get("speed") or voice_params.get("rate") or 1.0),
+        pitch=int(request.pitch or 50) if voice_design else 50,
         emotion=str(voice_params.get("emotion") or "neutral"),
-        voice_type=str(request.voice_type or ""),
+        voice_type=str(request.voice_type or "") if voice_design else "",
         mimo_voice_asset_id=str(getattr(request, "mimo_voice_asset_id", "") or ""),
         stepaudio_voice_asset_id=str(getattr(request, "stepaudio_voice_asset_id", "") or ""),
         voice_params=voice_params,
@@ -877,6 +938,7 @@ async def materialize_voice_reference_preview(
     voice_params = _build_preview_voice_params(
         preview_request,
         speaker_id,
+        model_name=model_name,
         owner_user_id=int(current_user.id),
     )
     cache_key = _build_preview_cache_key(
@@ -1037,6 +1099,7 @@ async def tts_preview_with_timestamps(
     voice_params = _build_preview_voice_params(
         request,
         speaker_id,
+        model_name=model_name,
         owner_user_id=int(current_user.id),
     )
 
@@ -1687,13 +1750,14 @@ async def preview_stepaudio_voice_clone_asset(
             request_delay=0.0,
             retry_config=_PREVIEW_RETRY_CONFIG,
         )
+        safe_instruction, _ = sanitize_fixed_voice_performance_text(instruction)
         audio_bytes = await engine._call_stepaudio_voice_preview_http(
             model=STEPAUDIO_25_TTS_MODEL,
             api_key=stepaudio_api_key,
             text=(str(preview_text or "").strip() or DEFAULT_STEPAUDIO_CLONE_PREVIEW_TEXT),
             file_id=resolved_file_id,
             sample_text=clean_sample_text,
-            instruction=str(instruction or "").strip() or DEFAULT_STEPAUDIO_CLONE_PREVIEW_INSTRUCTION,
+            instruction=safe_instruction or DEFAULT_STEPAUDIO_CLONE_PREVIEW_INSTRUCTION,
         )
         audio_mime_type = "audio/wav" if audio_bytes.startswith(b"RIFF") else "audio/mpeg"
         audio_format = "wav" if audio_mime_type == "audio/wav" else "mp3"
@@ -1701,7 +1765,7 @@ async def preview_stepaudio_voice_clone_asset(
             "file_id": resolved_file_id,
             "sample_text": clean_sample_text,
             "preview_text": str(preview_text or "").strip() or DEFAULT_STEPAUDIO_CLONE_PREVIEW_TEXT,
-            "instruction": str(instruction or "").strip() or DEFAULT_STEPAUDIO_CLONE_PREVIEW_INSTRUCTION,
+            "instruction": safe_instruction or DEFAULT_STEPAUDIO_CLONE_PREVIEW_INSTRUCTION,
             "audio_data_base64": base64.b64encode(audio_bytes).decode("utf-8"),
             "audio_mime_type": audio_mime_type,
             "audio_format": audio_format,

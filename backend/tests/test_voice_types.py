@@ -123,7 +123,7 @@ def test_apply_voice_type_to_tts_params_basic(voice_types_module):
     enhanced = voice_types_module.apply_voice_type_to_tts_params("majestic", base_params)
     
     assert enhanced["speed"] == 0.85
-    assert enhanced["pitch"] == -2
+    assert "pitch" not in enhanced
     assert enhanced["emotion"] == "calm"
 
 
@@ -137,9 +137,29 @@ def test_apply_voice_type_to_tts_params_with_existing(voice_types_module):
     }
     enhanced = voice_types_module.apply_voice_type_to_tts_params("lively", base_params)
     
-    # 应该叠加调整
+    # 只叠加表演参数，不改变调用方显式提供的音高。
     assert enhanced["speed"] == pytest.approx(1.0 * 1.15)  # 1.0 * 1.15
-    assert enhanced["pitch"] == 0 + 2  # 0 + 2
+    assert enhanced["pitch"] == 0
+
+
+def test_apply_voice_type_preserves_fixed_voice_pitch_for_legacy_keyword(voice_types_module):
+    """兼容参数不改变统一规则：声音类型永远不改写音高。"""
+    base_params = {
+        "speed": 1.0,
+        "pitch": 47,
+        "volume": 50,
+    }
+
+    enhanced = voice_types_module.apply_voice_type_to_tts_params(
+        "powerful",
+        base_params,
+        preserve_pitch=True,
+    )
+
+    assert enhanced["pitch"] == 47
+    assert enhanced["speed"] == pytest.approx(1.0)
+    assert enhanced["volume"] == 60
+    assert enhanced["emotion"] == "angry"
 
 
 def test_apply_voice_type_nonexistent(voice_types_module):
@@ -165,7 +185,7 @@ def test_create_character_voice_profile_with_type(voice_types_module):
     assert profile["voice_type"] == "lively"
     assert profile["personality"] == "extrovert"
     assert "speed" in profile
-    assert "pitch" in profile
+    assert "pitch" not in profile
 
 
 def test_create_character_voice_profile_with_custom(voice_types_module):
@@ -174,10 +194,16 @@ def test_create_character_voice_profile_with_custom(voice_types_module):
         character_name="配角",
         voice_id="longxiaochun",
         voice_type="gentle",
-        custom_settings={"custom_field": "custom_value"},
+        custom_settings={
+            "custom_field": "custom_value",
+            "pitch": 25,
+            "pitch_ratio": 0.8,
+        },
     )
     
     assert profile["custom_field"] == "custom_value"
+    assert "pitch" not in profile
+    assert "pitch_ratio" not in profile
 
 
 def test_voice_type_preset_structure(voice_types_module):
@@ -187,7 +213,7 @@ def test_voice_type_preset_structure(voice_types_module):
         assert preset.name is not None
         assert preset.description is not None
         assert 0.5 <= preset.speed_modifier <= 1.5  # 语速应在合理范围
-        assert -5 <= preset.pitch_modifier <= 5  # 音调应在合理范围
+        assert preset.pitch_modifier == 0  # 兼容字段不再影响固定音色
         assert 0 <= preset.emotion_intensity <= 1  # 情感强度应在 0-1 范围
         assert preset.emotion_tendency in ["positive", "negative", "neutral", "variable"]
 

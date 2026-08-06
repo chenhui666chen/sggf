@@ -38,7 +38,6 @@ class TTSParams:
     """TTS参数（适配Qwen3-TTS Flash，兼容CosyVoice v3-plus）"""
     speaker: str = "Ethan"  # 音色ID（v3-plus支持300+种）
     rate: float = 1.0  # 语速 (0.5-2.0)
-    pitch: float = 1.0  # 音调 (0.5-2.0)
     volume: int = 50  # 音量 (0-100)
     emotion: str = "neutral"  # 情感标签
     # v3-plus高级参数
@@ -112,7 +111,7 @@ class VoiceDesigner:
         tts_params = self._match_tts_params(characteristics, character_info)
         tts_params.speaker = normalize_speaker_id(tts_params.speaker)
         
-        # 3. 差异化调整：如果与已有角色过于相似，调整pitch/rate
+        # 3. 差异化调整：同音色只允许调整表演节奏，不改变声音身份
         tts_params = self._adjust_for_differentiation(character_name, tts_params, characteristics)
         
         # 4. 生成描述
@@ -134,7 +133,7 @@ class VoiceDesigner:
         )
         
         self.voice_profiles[character_name] = profile
-        logger.info(f"   ✅ 音色设计完成: {tts_params.speaker} (pitch={tts_params.pitch:.2f}, rate={tts_params.rate:.2f})")
+        logger.info(f"   ✅ 音色设计完成: {tts_params.speaker} (rate={tts_params.rate:.2f})")
         
         return profile
     
@@ -229,15 +228,6 @@ class VoiceDesigner:
             else:
                 speaker = "Dylan"  # 默认青年男声
         
-        # 音调 (v3-plus: 0.5-2.0)
-        pitch = 1.0
-        if "低沉" in characteristics.tone:
-            pitch = 0.9
-        elif "清亮" in characteristics.tone:
-            pitch = 1.1
-        elif "活泼" in characteristics.tone:
-            pitch = 1.15
-        
         # 语速 (v3-plus: 0.5-2.0)
         rate = 1.0
         if "快速" in characteristics.speaking_pace:
@@ -248,7 +238,6 @@ class VoiceDesigner:
         return TTSParams(
             speaker=speaker,
             rate=rate,
-            pitch=pitch,
             volume=50,
             emotion="neutral",
             pause_before=0.2,
@@ -313,7 +302,7 @@ class VoiceDesigner:
                 new_characteristics.tone == existing_char.tone):
                 
                 notes.append(
-                    f"与 {existing_name} 音色相似，建议调整语速或音调以区分"
+                    f"与 {existing_name} 音色相似，建议改用不同 voice_id；表演差异仅用于当前片段"
                 )
         
         if notes:
@@ -328,7 +317,7 @@ class VoiceDesigner:
         characteristics: VoiceCharacteristics
     ) -> TTSParams:
         """
-        差异化调整：如果与已有角色使用相同的speaker，调整pitch/rate以产生差异
+        同一 speaker 仅调整允许的表演节奏，不通过 pitch 伪造另一种音色。
         """
         # 统计已经使用该speaker的角色数量
         same_speaker_count = 0
@@ -336,21 +325,22 @@ class VoiceDesigner:
             if existing_profile.tts_params.speaker == tts_params.speaker:
                 same_speaker_count += 1
         
-        # 如果已经有角色使用该speaker，调整pitch和rate以产生差异
+        # 如果已经有角色使用该 speaker，只做轻量语速区分。
         if same_speaker_count > 0:
-            # 每增加一个同speaker的角色，就调整一些参数
-            pitch_adjust = 0.08 * same_speaker_count  # 每个增加8%
             rate_adjust = 0.10 * same_speaker_count   # 每个增加10%
             
             # 交替调高/调低，防止全部往一个方向
             if same_speaker_count % 2 == 0:
-                tts_params.pitch = min(2.0, tts_params.pitch + pitch_adjust)
                 tts_params.rate = max(0.5, tts_params.rate - rate_adjust)
             else:
-                tts_params.pitch = max(0.5, tts_params.pitch - pitch_adjust)
                 tts_params.rate = min(2.0, tts_params.rate + rate_adjust)
             
-            logger.info(f"   🔊 差异化调整: {character_name} 与其他 {same_speaker_count} 个角色同speaker，调整 pitch={tts_params.pitch:.2f}, rate={tts_params.rate:.2f}")
+            logger.info(
+                "   🔊 表演节奏调整: %s 与其他 %d 个角色同 speaker，rate=%.2f",
+                character_name,
+                same_speaker_count,
+                tts_params.rate,
+            )
         
         return tts_params
     
@@ -379,7 +369,7 @@ class VoiceDesigner:
         character_name: str,
         emotion: str = "neutral"
     ) -> Optional[TTSParams]:
-        """获取TTS参数（带情感调整，适配v3-plus）"""
+        """获取TTS参数；情感只调整允许的表演参数。"""
         profile = self.voice_profiles.get(character_name)
         if not profile:
             return None
@@ -389,7 +379,6 @@ class VoiceDesigner:
         adjusted_params = TTSParams(
             speaker=params.speaker,
             rate=params.rate,
-            pitch=params.pitch,
             volume=params.volume,
             emotion=emotion,
             pause_before=params.pause_before,
@@ -397,18 +386,15 @@ class VoiceDesigner:
             emphasis_level=params.emphasis_level
         )
         
-        # 情感调整（利用v3-plus的rate/pitch控制）
+        # 情感只调整语速、停顿和重音。
         if emotion == "angry":
-            adjusted_params.pitch = min(2.0, params.pitch * 1.15)  # 音调升高
             adjusted_params.rate = min(2.0, params.rate * 1.2)  # 语速加快
             adjusted_params.emphasis_level = "strong"
         elif emotion == "sad":
-            adjusted_params.pitch = max(0.5, params.pitch * 0.9)  # 音调降低
             adjusted_params.rate = max(0.5, params.rate * 0.85)  # 语速放慢
             adjusted_params.pause_after = 0.5  # 增加停顿
         elif emotion == "excited":
             adjusted_params.rate = min(2.0, params.rate * 1.3)  # 语速明显加快
-            adjusted_params.pitch = min(2.0, params.pitch * 1.1)
             adjusted_params.emphasis_level = "moderate"
         elif emotion == "calm":
             adjusted_params.rate = params.rate * 0.95  # 略放慢
@@ -416,7 +402,6 @@ class VoiceDesigner:
             adjusted_params.pause_after = 0.4
         elif emotion == "tense":
             adjusted_params.rate = min(2.0, params.rate * 1.25)
-            adjusted_params.pitch = min(2.0, params.pitch * 1.05)
         
         return adjusted_params
     

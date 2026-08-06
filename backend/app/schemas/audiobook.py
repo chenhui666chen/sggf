@@ -1,7 +1,7 @@
 """
 有声书相关的请求/响应 Schema 定义
 """
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -111,6 +111,12 @@ class CharacterVoiceConfig(BaseModel):
     reference_audio_url: Optional[str] = None
     voice_reference_asset_id: Optional[str] = None
     voice_pool_publication_id: Optional[str] = None
+
+    def model_dump(self, **kwargs: Any) -> Dict[str, Any]:
+        # 默认排除 None 字段：持久化/合并配置时避免用 None 覆盖已有值，
+        # 保证 dump 结果只保留模型与有效音色引用字段。
+        kwargs.setdefault("exclude_none", True)
+        return super().model_dump(**kwargs)
 
 
 class TTSPreviewRequest(BaseModel):
@@ -359,6 +365,25 @@ class ScriptSegmentPreviewRequest(BaseModel):
     preview_type: Optional[str] = "voice"  # voice/sfx/bgm/mix
 
 
+class SegmentDirectionAssistRequest(BaseModel):
+    """单片段工作台提示描述的受控整理请求。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    cue_type: Literal["voice", "sfx", "bgm"]
+    description: str = Field(min_length=1, max_length=1000)
+    segment: Dict[str, Any] = Field(default_factory=dict)
+    tts_model: Optional[str] = None
+
+    @field_validator("description")
+    @classmethod
+    def normalize_description(cls, value: str) -> str:
+        description = str(value or "").strip()
+        if not description:
+            raise ValueError("description 不能为空")
+        return description
+
+
 class SegmentRegenerateRequest(BaseModel):
     """单个片段重新生成请求"""
     segment_index: Optional[int] = None  # 片段在章节中的索引；路径参数已携带时可省略
@@ -368,14 +393,33 @@ class SegmentRegenerateRequest(BaseModel):
     preview_type: Optional[str] = "voice"
     voice_id: Optional[str] = None  # 可选：使用不同的音色
     emotion: Optional[str] = None  # 可选：调整情感
+    source_mode: Optional[str] = "library"  # 素材来源：library=素材库匹配（默认）/ ai_generate=AI 生成（仅 sfx/bgm）
 
 
 class SegmentRegenerationCandidateApplyRequest(BaseModel):
-    """Apply a generated segment-audio candidate to script_json."""
-    candidate_audio_path: str
+    """Apply a generated segment-audio candidate to script_json.
+
+    仅接受服务端签发的 candidate_id，不再信任客户端传入的音频路径。
+    """
+    candidate_id: str
     reason: Optional[str] = None
-    segment: Optional[Dict[str, Any]] = None
+    segment: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Deprecated compatibility field; server ignores it and applies the immutable candidate snapshot.",
+        json_schema_extra={"deprecated": True},
+    )
     preview_type: Optional[str] = "voice"
+
+
+class RemixChapterRequest(BaseModel):
+    """整章重新混音请求。
+
+    片段缺失时由用户决定是否继续（force=True 跳过缺失片段混音）。
+    """
+
+    force: Optional[bool] = False
+    output_format: Optional[str] = "mp3"  # mp3/wav/m4b
+    generate_subtitle: Optional[bool] = True
 
 
 class SegmentReviewRequest(BaseModel):
@@ -585,6 +629,10 @@ class GenerationCheckpointResponse(BaseModel):
     completed_segments: int
     completed_segment_indices: List[int] = Field(default_factory=list)
     cached_audio_paths: Dict[int, str] = Field(default_factory=dict)  # segment_index -> audio_path
+    # 可恢复的片段失败信息（供“部分片段失败可重试”弹窗展示）。
+    failed_segment_indices: List[int] = Field(default_factory=list)
+    failed_segment_errors: Dict[str, Any] = Field(default_factory=dict)
+    missing_segments: List[Dict[str, Any]] = Field(default_factory=list)
     can_resume: bool = True
     run_id: Optional[int] = None
     run_status: Optional[str] = None
@@ -652,3 +700,33 @@ class VoiceTypeRecommendationResponse(BaseModel):
     """声音类型推荐响应"""
     recommended_types: List[str]
     character_name: Optional[str] = None
+
+
+# ─── Phase 2: 换音色恢复 ───────────────────────────────────────────────
+
+
+class VoiceOverride(BaseModel):
+    """换音色恢复：单个角色的目标音色描述"""
+    voice_id: str
+    tts_model: Optional[str] = None
+    reference_source: Optional[str] = None
+    reference_audio_url: Optional[str] = None
+    voice_reference_asset_id: Optional[str] = None
+    voice_pool_publication_id: Optional[str] = None
+
+
+class RecoverSegmentsRequest(BaseModel):
+    """统一片段恢复请求（retry_missing / replace_voice_missing / replace_voice_all）"""
+    action: str = Field(
+        ...,
+        pattern=r"^(retry_missing|replace_voice_missing|replace_voice_all)$",
+        description="恢复动作",
+    )
+    voice_overrides: Dict[str, VoiceOverride] = Field(
+        default_factory=dict,
+        description="角色名 -> 新音色（replace_voice_* 必填）",
+    )
+    target_characters: Optional[List[str]] = Field(
+        default=None,
+        description="可选，限定受影响角色（replace_voice_all）",
+    )

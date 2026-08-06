@@ -169,8 +169,9 @@ class ScriptSegment:
     pause_before: float = 0.0  # 前停顿（秒）
     pause_after: float = 0.0  # 后停顿（秒）
     
-    # v3-plus音声参数控制
-    voice_params: Optional[Dict[str, float]] = None  # {"rate": 1.0, "pitch": 1.0, "pause_before": 0.2, "pause_after": 0.3}
+    # 片段级表演参数。pitch 属于角色音色身份，不在片段层定义；
+    # 语速由角色基线 + 表演指令决定，片段层不再默认注入数值 rate。
+    voice_params: Optional[Dict[str, float]] = None  # {"pause_before": 0.2, "pause_after": 0.3}
 
     # cosyvoice-v3.5-plus Instruct 结构化字段（用于指令模板拼装）
     instruct_emotion: str = ""  # neutral/fearful/angry/sad/surprised/happy/disgusted
@@ -194,8 +195,6 @@ class ScriptSegment:
         # 兼容处理：如果LLM返回的是旧版格式，自动转换
         if self.voice_params is None:
             self.voice_params = {
-                "rate": 1.0,
-                "pitch": 1.0,
                 "pause_before": self.pause_before,
                 "pause_after": self.pause_after
             }

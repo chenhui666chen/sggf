@@ -8,7 +8,7 @@ from typing import Any
 from urllib.parse import quote
 
 from fastapi import Depends, HTTPException, Query, status
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from jose import JWTError, jwt
 from sqlalchemy.orm import Session
 
@@ -290,15 +290,23 @@ async def stream_chapter_audio(
     
     logger.info(f"✅ 流式播放文件: {file_path}")
 
-    # 返回文件流（inline模式，浏览器直接播放；Bearer 鉴权场景下前端仍需要 fetch Blob）
-    return FileResponse(
-        path=file_path,
+    # 读取文件内容后立即释放句柄，避免 Windows 文件锁阻止删除
+    try:
+        content = Path(file_path).read_bytes()
+    except OSError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"读取音频文件失败: {exc}",
+        ) from exc
+
+    return Response(
+        content=content,
         media_type=media_type,
         headers={
             "Content-Disposition": "inline",
             "Accept-Ranges": "bytes",
-            "Access-Control-Expose-Headers": "Content-Length, Content-Range"
-        }
+            "Access-Control-Expose-Headers": "Content-Length, Content-Range",
+        },
     )
 
 

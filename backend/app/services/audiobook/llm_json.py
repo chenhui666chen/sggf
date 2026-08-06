@@ -52,13 +52,48 @@ def clean_llm_json_text(text: str) -> str:
 
 
 def salvage_truncated_json_array(text: str) -> str | None:
+    """从被截断的 JSON 数组文本中恢复最后一个完整顶层元素之前的有效前缀。
+
+    使用深度 + 字符串状态扫描，避免 rfind("}") 落在未闭合元素内部的嵌套括号上，
+    导致拼接出仍然无法解析的 JSON。
+    """
     value = str(text or "").strip()
     first_bracket = value.find("[")
-    last_brace = value.rfind("}")
-    if first_bracket == -1 or last_brace == -1 or last_brace <= first_bracket:
+    if first_bracket == -1:
         return None
 
-    salvaged = value[first_bracket:last_brace + 1].rstrip()
+    depth = 0
+    in_string = False
+    escaped = False
+    last_element_end = -1
+
+    for index in range(first_bracket, len(value)):
+        char = value[index]
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+            continue
+        if char == '"':
+            in_string = True
+        elif char in "[{":
+            depth += 1
+        elif char in "]}":
+            depth -= 1
+            if depth == 1 and char == "}":
+                # 一个完整的顶层对象元素结束
+                last_element_end = index
+            elif depth <= 0:
+                # 数组本身已闭合，不属于截断场景
+                return None
+
+    if last_element_end == -1:
+        return None
+
+    salvaged = value[first_bracket:last_element_end + 1].rstrip()
     if salvaged.endswith(","):
         salvaged = salvaged[:-1].rstrip()
     return salvaged + "]"

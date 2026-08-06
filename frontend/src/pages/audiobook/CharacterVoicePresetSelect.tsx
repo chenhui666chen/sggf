@@ -30,24 +30,12 @@ const CharacterVoicePresetSelect = ({
   onVoiceChange,
 }: CharacterVoicePresetSelectProps) => {
   const hasNoVoicePresets = currentVoicePresets.length === 0
+  const isValueInPresets = currentVoicePresets.some((preset) => preset.id === value)
 
-  // 验证当前 value 是否在可用选项中,如果不在则使用空字符串(默认值)
-  // 这样可以避免 MUI Select 的 "out-of-range value" 警告
-  const safeValue = hasNoVoicePresets || voiceLoading
-    ? ''
-    : currentVoicePresets.some((preset) => preset.id === value)
-      ? value
-      : ''
-
-  // 如果 value 无效且不是 loading/empty 状态,通知父组件重置为默认值
-  if (value && value !== safeValue && !voiceLoading && !hasNoVoicePresets) {
-    console.warn(
-      `[CharacterVoicePresetSelect] Character ${characterId}: ` +
-      `Invalid voice ID "${value}", resetting to default.`
-    )
-    // 延迟执行,避免在渲染期间调用 setState
-    setTimeout(() => onVoiceChange(characterId, ''), 0)
-  }
+  // 始终保留并展示已配置的音色：即使它暂时不在当前目录中（跨模型音色、目录未加载完成、
+  // 自定义音色等），也不能在渲染期静默重置为空。重置会触发自动保存，把空配置回写后端，
+  // 永久覆盖用户已保存的音色（固定化失效）。这里仅补充一个占位选项避免 MUI out-of-range 警告。
+  const safeValue = value
 
   return (
     <FormControl size="small" fullWidth>
@@ -68,6 +56,14 @@ const CharacterVoicePresetSelect = ({
         <MenuItem value="">
           <em>自动（AI 选择）</em>
         </MenuItem>
+        {value && !isValueInPresets && (
+          <MenuItem value={value}>
+            <em>
+              {value}
+              {voiceLoading || hasNoVoicePresets ? '' : '（不在当前音色库）'}
+            </em>
+          </MenuItem>
+        )}
         {voiceLoading && hasNoVoicePresets && (
           <MenuItem disabled value="__loading">
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>

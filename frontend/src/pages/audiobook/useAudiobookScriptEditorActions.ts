@@ -33,6 +33,7 @@ interface UseAudiobookScriptEditorActionsParams {
   setScriptEditorDialogOpen: Dispatch<SetStateAction<boolean>>
   setScriptEditorChapter: Dispatch<SetStateAction<ScriptEditorChapterRef | null>>
   setScriptEditorData: Dispatch<SetStateAction<ScriptEditorStateData | null>>
+  setScriptEditorInitialSegmentIndex: Dispatch<SetStateAction<number | null>>
   setScriptEditorLoading: Dispatch<SetStateAction<boolean>>
   setSmartChunkPreview: Dispatch<SetStateAction<SmartChunkPreviewResult | null>>
   setSmartChunkPreviewLoading: Dispatch<SetStateAction<boolean>>
@@ -53,18 +54,23 @@ export const useAudiobookScriptEditorActions = ({
   setScriptEditorDialogOpen,
   setScriptEditorChapter,
   setScriptEditorData,
+  setScriptEditorInitialSegmentIndex,
   setScriptEditorLoading,
   setSmartChunkPreview,
   setSmartChunkPreviewLoading,
   setTimelineEdits,
   setSnackbar,
 }: UseAudiobookScriptEditorActionsParams) => {
-  const handleOpenScriptEditor = useCallback(async (chapterId: number) => {
+  const handleOpenScriptEditor = useCallback(async (
+    chapterId: number,
+    initialSegmentIndex?: number | null,
+  ) => {
     if (!audiobookProject) {
       setSnackbar({ open: true, message: '请先创建有声书项目', severity: 'error' })
       return
     }
 
+    setScriptEditorInitialSegmentIndex(initialSegmentIndex ?? null)
     setScriptEditorChapter(buildScriptEditorChapterRef(chapterId, chapters))
 
     try {
@@ -78,6 +84,7 @@ export const useAudiobookScriptEditorActions = ({
       setScriptEditorData(normalizeAudiobookChapterScriptData(res.data))
       setScriptEditorDialogOpen(true)
     } catch (err: unknown) {
+      setScriptEditorInitialSegmentIndex(null)
       setSnackbar({
         open: true,
         message: await extractApiErrorMessage(err, '获取章节剧本失败'),
@@ -93,7 +100,37 @@ export const useAudiobookScriptEditorActions = ({
     setScriptEditorChapter,
     setScriptEditorData,
     setScriptEditorDialogOpen,
+    setScriptEditorInitialSegmentIndex,
     setScriptEditorLoading,
+    setSmartChunkPreview,
+    setSmartChunkPreviewLoading,
+    setTimelineEdits,
+    setSnackbar,
+  ])
+
+  const handleReloadScriptEditor = useCallback(async () => {
+    if (!audiobookProject || !scriptEditorChapter) return
+
+    try {
+      resetScriptEditorTransientState()
+      setSmartChunkPreview(null)
+      setSmartChunkPreviewLoading(false)
+      setTimelineEdits({})
+
+      const res = await apiClient.getAudiobookChapterScript(audiobookProject.id, scriptEditorChapter.chapterId)
+      setScriptEditorData(normalizeAudiobookChapterScriptData(res.data))
+    } catch (err: unknown) {
+      setSnackbar({
+        open: true,
+        message: await extractApiErrorMessage(err, '刷新章节剧本失败，请重新打开工作台'),
+        severity: 'warning',
+      })
+    }
+  }, [
+    audiobookProject,
+    resetScriptEditorTransientState,
+    scriptEditorChapter,
+    setScriptEditorData,
     setSmartChunkPreview,
     setSmartChunkPreviewLoading,
     setTimelineEdits,
@@ -107,6 +144,7 @@ export const useAudiobookScriptEditorActions = ({
     setScriptEditorDialogOpen(false)
     setScriptEditorData(null)
     setScriptEditorChapter(null)
+    setScriptEditorInitialSegmentIndex(null)
     setSmartChunkPreview(null)
     setSmartChunkPreviewLoading(false)
     setTimelineEdits({})
@@ -115,6 +153,7 @@ export const useAudiobookScriptEditorActions = ({
     resetScriptEditorTransientState,
     setScriptEditorChapter,
     setScriptEditorData,
+    setScriptEditorInitialSegmentIndex,
     setSmartChunkPreview,
     setSmartChunkPreviewLoading,
     setTimelineEdits,
@@ -131,7 +170,7 @@ export const useAudiobookScriptEditorActions = ({
       resetSegmentPreviewState()
       setScriptEditorLoading(true)
 
-      await apiClient.updateAudiobookChapterScript(
+      const response = await apiClient.updateAudiobookChapterScript(
         audiobookProject.id,
         scriptEditorChapter.chapterId,
         buildUpdateChapterScriptPayload(
@@ -140,11 +179,27 @@ export const useAudiobookScriptEditorActions = ({
         ),
       )
 
-      if (options.nextStatus) {
-        setScriptEditorData((current) => current
-          ? { ...current, scriptStatus: options.nextStatus as 'reviewed' | 'approved' }
-          : current)
-      }
+      // 保存后同步服务端按签名/时间线派生的整章音频状态，避免本地 stale 标记失真
+      const savedData = response?.data && typeof response.data === 'object'
+        ? response.data as Record<string, unknown>
+        : null
+
+      setScriptEditorData((current) => {
+        if (!current) return current
+        const next: ScriptEditorStateData = { ...current }
+        if (options.nextStatus) {
+          next.scriptStatus = options.nextStatus as 'reviewed' | 'approved'
+        }
+        if (savedData) {
+          if (typeof savedData.chapter_audio_available === 'boolean') {
+            next.chapterAudioAvailable = savedData.chapter_audio_available
+          }
+          if (typeof savedData.chapter_audio_stale === 'boolean') {
+            next.chapterAudioStale = savedData.chapter_audio_stale
+          }
+        }
+        return next
+      })
 
       try {
         await refreshAudiobookProjectDetail(audiobookProject.id)
@@ -209,6 +264,7 @@ export const useAudiobookScriptEditorActions = ({
 
   return {
     handleOpenScriptEditor,
+    handleReloadScriptEditor,
     handleCloseScriptEditorDialog,
     handleSaveScript,
     handlePreviewSmartChunking,

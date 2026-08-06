@@ -70,6 +70,65 @@ def _import_tts_components() -> tuple[Any, Any]:
         return TTSEngine, RetryConfig
 
 
+def _resolve_tts_model_id(
+    model_id: Optional[str],
+    voice_params: Optional[Dict[str, Any]],
+) -> Optional[str]:
+    """Keep a model-scoped voice bound to the model stored in its profile."""
+
+    params = voice_params or {}
+    requested_model = normalize_model_id(model_id)
+    profile_model = normalize_model_id(
+        params.get("resolved_tts_model") or params.get("tts_model")
+    )
+    if requested_model and profile_model and requested_model != profile_model:
+        raise ValueError(
+            "TTS model conflicts with the model-scoped voice profile: "
+            f"requested={requested_model}, profile={profile_model}"
+        )
+    return requested_model or profile_model
+
+
+def _resolve_tts_batch_model_id(
+    model_id: Optional[str],
+    segments: Sequence[Dict[str, Any]],
+) -> Optional[str]:
+    """Resolve one engine model for a batch without breaking voice bindings.
+
+    ``TTSEngine.synthesize_batch`` owns one model for the whole call.  A
+    model-scoped voice therefore has to agree with the outer model, and all
+    model-scoped voices in the batch must agree with one another.  Silently
+    choosing the first/outer model would make a fixed voice either fail at the
+    provider or, worse, render with a different voice.
+    """
+
+    requested_model = normalize_model_id(model_id)
+    profile_models: set[str] = set()
+    for segment in segments or []:
+        if not isinstance(segment, dict):
+            continue
+        voice_params = segment.get("voice_params")
+        if not isinstance(voice_params, dict):
+            voice_params = {}
+        profile_model = normalize_model_id(
+            voice_params.get("resolved_tts_model") or voice_params.get("tts_model")
+        )
+        if profile_model:
+            profile_models.add(profile_model)
+
+    if len(profile_models) > 1:
+        models = ", ".join(sorted(profile_models))
+        raise ValueError(f"batch contains multiple TTS models: {models}")
+
+    profile_model = next(iter(profile_models), None)
+    if requested_model and profile_model and requested_model != profile_model:
+        raise ValueError(
+            "TTS model conflicts with the model-scoped voice profile: "
+            f"requested={requested_model}, profile={profile_model}"
+        )
+    return requested_model or profile_model
+
+
 @dataclass
 class UnifiedMediaResult:
     success: bool
@@ -450,12 +509,32 @@ class UnifiedMediaRuntime:
         provider: Optional[str] = None,
     ) -> Any:
         del provider
-        spec = self.select_model(
-            operation="synthesize_speech",
-            modality="text_to_speech",
-            preferred_model=model_id or model,
-            strategy=strategy,
-        )
+        requested_model = normalize_model_id(model_id or model)
+        if requested_model:
+            spec = self._registry.get_spec(requested_model)
+            if spec is None:
+                raise ValueError(f"Model not registered: {requested_model}")
+            if (
+                requested_model not in _OPERATION_MODEL_IDS["synthesize_speech"]
+                or "text_to_speech" not in (spec.modality or [])
+            ):
+                raise ValueError(
+                    f"Model {requested_model} does not support synthesize_speech:text_to_speech"
+                )
+            if getattr(spec.status, "value", spec.status) != "active":
+                raise ValueError(f"Requested TTS model is not active: {requested_model}")
+            signal = get_model_catalog_runtime_index().get_signal(requested_model)
+            if signal.blocked:
+                raise ValueError(
+                    f"Requested TTS model is blocked by runtime catalog: {requested_model}"
+                )
+        else:
+            spec = self.select_model(
+                operation="synthesize_speech",
+                modality="text_to_speech",
+                preferred_model=None,
+                strategy=strategy,
+            )
         TTSEngine, _RetryConfig = _import_tts_components()
         if retry_config is not None and _RetryConfig is not None and not isinstance(retry_config, _RetryConfig):
             raise TypeError("retry_config must be a RetryConfig instance")
@@ -480,8 +559,9 @@ class UnifiedMediaRuntime:
         request_delay: float = 0.5,
         retry_config: Optional[Any] = None,
     ) -> bytes:
+        resolved_model_id = _resolve_tts_model_id(model_id, voice_params)
         engine = self.create_tts_engine(
-            model_id=model_id,
+            model_id=resolved_model_id,
             strategy=strategy,
             enable_cache=enable_cache,
             max_concurrent=max_concurrent,
@@ -504,10 +584,11 @@ class UnifiedMediaRuntime:
         retry_config: Optional[Any] = None,
     ) -> UnifiedMediaResult:
         start_time = time.perf_counter()
-        resolved_model = normalize_model_id(model_id) or ""
+        resolved_model_id = _resolve_tts_model_id(model_id, voice_params)
+        resolved_model = normalize_model_id(resolved_model_id) or ""
         try:
             engine = self.create_tts_engine(
-                model_id=model_id,
+                model_id=resolved_model_id,
                 strategy=strategy,
                 enable_cache=enable_cache,
                 max_concurrent=max_concurrent,
@@ -566,8 +647,9 @@ class UnifiedMediaRuntime:
         retry_config: Optional[Any] = None,
         **kwargs: Any,
     ) -> List[bytes]:
+        resolved_model_id = _resolve_tts_batch_model_id(model_id, segments)
         engine = self.create_tts_engine(
-            model_id=model_id,
+            model_id=resolved_model_id,
             strategy=strategy,
             enable_cache=enable_cache,
             max_concurrent=max_concurrent,

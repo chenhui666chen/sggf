@@ -6,6 +6,7 @@ import {
   buildTrackedAudiobookProjectIdKey,
   selectActiveProjectTasks,
   selectActiveTaskStatus,
+  selectPausedProjectTasks,
   selectTrackedAudiobookProjectIds,
 } from './taskUtils'
 
@@ -42,6 +43,11 @@ export const useAudiobookActiveTasks = ({
     [taskStatuses, trackedAudiobookProjectIds],
   )
 
+  const pausedProjectTasks = useMemo(
+    () => selectPausedProjectTasks(taskStatuses, trackedAudiobookProjectIds),
+    [taskStatuses, trackedAudiobookProjectIds],
+  )
+
   const hasActiveM4bExportTask = useMemo(
     () => activeProjectTasks.some((task) => task.task_type === 'export_m4b'),
     [activeProjectTasks],
@@ -66,6 +72,7 @@ export const useAudiobookActiveTasks = ({
     trackedAudiobookProjectIds,
     trackedAudiobookProjectIdKey,
     activeProjectTasks,
+    pausedProjectTasks,
     hasActiveM4bExportTask,
     hasActiveAudacityExportTask,
     persistedActiveTaskRefs,

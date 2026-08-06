@@ -5,9 +5,11 @@ from typing import List, Dict, Any, Optional, Callable, Set
 
 from ..prompt_normalizer import normalize_tts_prompt
 from ..pause_tags import strip_pause_tags
-from ..tts_delivery_plan import build_delivery_plan, resolve_segment_tts_model
+from ..segment_synthesis_contract import compile_segment_prompt_contract
+from ..tts_delivery_plan import resolve_segment_tts_model
 from ..tts_language import apply_detected_language_type
 from ..tts_model_ids import DEFAULT_AUDIOBOOK_TTS_MODEL, normalize_audiobook_tts_model
+from ..tts_pause import TTSPauseRequested
 from app.services.audiobook.render_plan import (
     RENDER_PLAN_VERSION,
     RenderChunk,
@@ -191,6 +193,26 @@ def _item_tts_model(item: Any) -> str:
     return ""
 
 
+def _item_fixed_voice_id(item: Any) -> str:
+    """Return a model-scoped voice identifier when one is present."""
+
+    if isinstance(item, dict):
+        raw_params = item.get("voice_params")
+    else:
+        raw_params = getattr(item, "voice_params", None)
+    if not isinstance(raw_params, dict):
+        return ""
+    for field_name in ("speaker", "voice", "voice_id", "tts_voice_id"):
+        value = str(raw_params.get(field_name) or "").strip()
+        if value:
+            return value
+    return ""
+
+
+def _contains_fixed_voice(items: Any) -> bool:
+    return any(_item_fixed_voice_id(item) for item in (items or []))
+
+
 def _build_segment_statuses(
     *,
     total_segments: int,
@@ -337,6 +359,7 @@ class TTSMixin:
         debug_save_segments: bool = False,
         debug_output_dir: Optional[str] = None,
         progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
+        pause_check: Optional[Callable[[], bool]] = None,
     ) -> List[bytes]:
         audio_list: List[bytes] = []
 
@@ -348,6 +371,22 @@ class TTSMixin:
             debug_dir.mkdir(parents=True, exist_ok=True)
 
         for index, item in enumerate(batch_data):
+            # 片段级暂停检查：检测到暂停请求时立即中断混合模型合成
+            if pause_check is not None:
+                try:
+                    paused = pause_check()
+                except Exception as pause_exc:
+                    logger.warning("暂停状态检查失败，继续合成: %s", pause_exc)
+                    paused = False
+                if paused:
+                    logger.info(
+                        "⏸️ 检测到暂停请求，停止混合模型片段合成（已完成 %s/%s 片段）",
+                        len(audio_list),
+                        len(batch_data),
+                    )
+                    raise TTSPauseRequested(
+                        f"pause_requested_before_segment_{index}"
+                    )
             text = str(item.get("text") or "")
             voice_params = dict(item.get("voice_params") or {})
             emotion = str(item.get("emotion") or "neutral")
@@ -420,22 +459,52 @@ class TTSMixin:
         voice_params = apply_detected_language_type(voice_params, normalized_text)
         performance_notes = str(getattr(seg, "performance_notes", "") or "").strip()
         if performance_notes:
-            voice_params.setdefault("performance_notes", performance_notes)
+            voice_params["performance_notes"] = performance_notes
+        else:
+            voice_params.pop("performance_notes", None)
+
+        segment_speaker = getattr(seg, "speaker", None)
+        if segment_speaker is not None:
+            voice_params["segment_speaker"] = str(segment_speaker or "")
+        segment_type = getattr(seg, "type", None)
+        if segment_type is None:
+            segment_type = getattr(seg, "segment_type", None)
+        if segment_type is not None:
+            voice_params["segment_type"] = str(segment_type or "")
+        for field_name in (
+            "instruct_emotion",
+            "instruct_scene",
+            "instruct_role",
+            "instruct_identity",
+        ):
+            if hasattr(seg, field_name):
+                voice_params[field_name] = str(getattr(seg, field_name, "") or "")
+
+        resolved_emotion = str(
+            getattr(seg, "instruct_emotion", "")
+            or voice_params.get("instruct_emotion")
+            or voice_params.get("emotion")
+            or getattr(seg, "emotion", "neutral")
+            or "neutral"
+        ).strip() or "neutral"
         resolved_model = resolve_segment_tts_model(
             voice_params,
             getattr(self, "tts_model", None) or DEFAULT_AUDIOBOOK_TTS_MODEL,
         )
         voice_params["resolved_tts_model"] = resolved_model
-        voice_params["delivery_plan"] = build_delivery_plan(
+        voice_params["use_instruct_mode"] = bool(
+            voice_params.get("instruct_emotion")
+            or voice_params.get("instruct_scene")
+            or voice_params.get("instruct_role")
+            or voice_params.get("instruct_identity")
+            or performance_notes
+        )
+        voice_params = compile_segment_prompt_contract(
             segment=seg,
-            voice_params={**voice_params, "text": normalized_text},
-            model=resolved_model,
-            emotion=(
-                getattr(seg, "instruct_emotion", "")
-                or voice_params.get("instruct_emotion")
-                or voice_params.get("emotion")
-                or getattr(seg, "emotion", "neutral")
-            ),
+            voice_params=voice_params,
+            tts_model=resolved_model,
+            voice_id=str(voice_params.get("speaker") or ""),
+            emotion=resolved_emotion,
         )
 
         if pause_result.applied:
@@ -457,12 +526,7 @@ class TTSMixin:
         return {
             "text": normalized_text,
             "voice_params": voice_params,
-            "emotion": (
-                getattr(seg, "instruct_emotion", "")
-                or voice_params.get("instruct_emotion")
-                or voice_params.get("emotion")
-                or getattr(seg, "emotion", "neutral")
-            ),
+            "emotion": resolved_emotion,
         }
 
     def _attach_render_plan_metadata(
@@ -496,6 +560,7 @@ class TTSMixin:
         debug_save_segments: bool = False,
         debug_output_dir: Optional[str] = None,
         progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
+        pause_check: Optional[Callable[[], bool]] = None,
     ) -> List[bytes]:
         """批量合成剧本片段"""
         # 准备批量数据
@@ -516,6 +581,7 @@ class TTSMixin:
                 debug_save_segments=debug_save_segments,
                 debug_output_dir=debug_output_dir,
                 progress_callback=progress_callback,
+                pause_check=pause_check,
             )
 
         if batch_models:
@@ -532,6 +598,7 @@ class TTSMixin:
             debug_save_segments=debug_save_segments,
             debug_output_dir=debug_output_dir,
             progress_callback=progress_callback,
+            pause_check=pause_check,
         )
         
         return audio_list
@@ -566,44 +633,29 @@ class TTSMixin:
         merged_audio_by_index: Dict[int, bytes] = {}
         used_sources: List[str] = []
         for source_name, checkpoint_candidate in checkpoint_candidates:
-            raw_total_segments = checkpoint_candidate.get("total_segments")
-            try:
-                checkpoint_total_segments = int(raw_total_segments) if raw_total_segments is not None else None
-            except Exception:
-                checkpoint_total_segments = None
-
             checkpoint_signatures = extract_render_signatures(checkpoint_candidate)
-
-            if checkpoint_total_segments not in {None, 0, total_segments} and not checkpoint_signatures:
+            if not checkpoint_signatures:
                 logger.info(
-                    "Skip resume cache from %s due to total_segments mismatch: checkpoint=%s current=%s",
+                    "Skip unsigned resume cache from %s: render signatures missing",
                     source_name,
-                    checkpoint_total_segments,
-                    total_segments,
                 )
                 continue
 
-            if checkpoint_signatures:
-                cached_paths = extract_cached_segment_paths(checkpoint_candidate)
-                signature_to_path: Dict[str, str] = {}
-                for old_index, signature in checkpoint_signatures.items():
-                    path_value = cached_paths.get(old_index)
-                    if signature and path_value:
-                        signature_to_path.setdefault(signature, path_value)
-                remapped_paths = {
-                    current_index: signature_to_path[signature]
-                    for current_index, signature in current_signatures.items()
-                    if signature in signature_to_path
-                }
-                audio_by_index = load_cached_segment_audio(
-                    {"cached_audio_paths": remapped_paths},
-                    max_segment_count=total_segments,
-                )
-            else:
-                audio_by_index = load_cached_segment_audio(
-                    checkpoint_candidate,
-                    max_segment_count=total_segments,
-                )
+            cached_paths = extract_cached_segment_paths(checkpoint_candidate)
+            signature_to_path: Dict[str, str] = {}
+            for old_index, signature in checkpoint_signatures.items():
+                path_value = cached_paths.get(old_index)
+                if signature and path_value:
+                    signature_to_path.setdefault(signature, path_value)
+            remapped_paths = {
+                current_index: signature_to_path[signature]
+                for current_index, signature in current_signatures.items()
+                if signature in signature_to_path
+            }
+            audio_by_index = load_cached_segment_audio(
+                {"cached_audio_paths": remapped_paths},
+                max_segment_count=total_segments,
+            )
             if not audio_by_index:
                 continue
 
@@ -631,6 +683,7 @@ class TTSMixin:
         debug_save_segments: bool = False,
         debug_output_dir: Optional[str] = None,
         progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
+        pause_check: Optional[Callable[[], bool]] = None,
     ) -> Dict[str, Any]:
         render_chunks = self._build_render_chunks(script_segments)
         render_plan_payload = render_plan_to_payload(render_chunks)
@@ -764,6 +817,7 @@ class TTSMixin:
                 debug_save_segments=debug_save_segments,
                 debug_output_dir=debug_output_dir,
                 progress_callback=handle_missing_progress,
+                pause_check=pause_check,
             )
             for index, audio_bytes in zip(missing_indices, synthesized_audio_list):
                 payload_bytes = bytes(audio_bytes or b"")
@@ -848,6 +902,15 @@ class TTSMixin:
             logger.warning("TTS 智能调度系统未启用")
             return None
 
+        # A provider voice ID is scoped to its TTS model. Smart routing may
+        # select another provider and interpret the same ID as a different
+        # voice, so fixed-voice audiobook synthesis must use the bound engine.
+        if str(voice_id or kwargs.get("speaker") or kwargs.get("voice") or "").strip():
+            raise ValueError(
+                "fixed voice_id cannot use cross-model TTS smart dispatch; "
+                "use the model-bound audiobook engine"
+            )
+
         return tts_dispatch_client.synthesize(
             text=text,
             strategy=strategy,
@@ -871,14 +934,30 @@ class TTSMixin:
                 debug_output_dir=debug_output_dir,
             )
 
+        if _contains_fixed_voice(script_segments):
+            logger.warning(
+                "检测到固定 voice_id，跳过跨模型智能调度并使用片段绑定模型合成"
+            )
+            return await self._synthesize_segments(
+                script_segments,
+                debug_save_segments=debug_save_segments,
+                debug_output_dir=debug_output_dir,
+            )
+
         batch_data = [self._build_tts_batch_item(seg) for seg in script_segments]
         texts = [seg["text"] for seg in batch_data]
         voice_ids = [seg["voice_params"].get("speaker") for seg in batch_data]
+        tts_models = [
+            seg["voice_params"].get("resolved_tts_model")
+            or seg["voice_params"].get("tts_model")
+            for seg in batch_data
+        ]
 
         dispatch_results = tts_dispatch_client.synthesize_batch(
             texts=texts,
             strategy=strategy,
             voice_ids=voice_ids,
+            tts_models=tts_models,
             max_concurrent=5,
         )
 

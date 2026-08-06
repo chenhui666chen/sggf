@@ -30,6 +30,7 @@ interface AudioPickerProps {
   onSelectAsset?: (selection: AudioAssetSelection) => void
   label: string
   paperSx?: SxProps<Theme>
+  textFieldSx?: SxProps<Theme>
 }
 
 interface SfxOption {
@@ -58,6 +59,7 @@ const AudioPicker = ({
   onSelectAsset,
   label,
   paperSx,
+  textFieldSx,
 }: AudioPickerProps) => {
   const [options, setOptions] = useState<AudioOption[]>([])
   const [open, setOpen] = useState(false)
@@ -191,6 +193,7 @@ const AudioPicker = ({
             {...params}
             label={label}
             placeholder="搜索素材库或手动输入..."
+            sx={textFieldSx}
           />
         )}
         PaperComponent={({ children }) => (

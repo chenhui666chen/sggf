@@ -9,6 +9,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import httpx
+import pytest
 
 
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
@@ -62,6 +63,7 @@ class _DummyResumeTTSMixin(TTSMixin):
         debug_save_segments=False,
         debug_output_dir=None,
         progress_callback=None,
+        pause_check=None,
     ):
         audio_list = []
         total_segments = len(script_segments)
@@ -114,6 +116,7 @@ class _RecordingResumeTTSMixin(TTSMixin):
         debug_save_segments=False,
         debug_output_dir=None,
         progress_callback=None,
+        pause_check=None,
     ):
         self.calls.append([getattr(segment, "text", "") for segment in script_segments])
         audio_list = []
@@ -165,6 +168,7 @@ class _DummyFailingResumeTTSMixin(TTSMixin):
         debug_save_segments=False,
         debug_output_dir=None,
         progress_callback=None,
+        pause_check=None,
     ):
         audio_list = []
         total_segments = len(script_segments)
@@ -833,17 +837,20 @@ def test_synthesize_segments_with_resume_reuses_cached_audio_and_only_generates_
             SimpleNamespace(text="seg-1"),
             SimpleNamespace(text="seg-2"),
         ]
+        render_plan = render_plan_to_payload(build_render_plan(script_segments))
 
         result = asyncio.run(
             dummy._synthesize_segments_with_resume(
                 script_segments,
                 resume_checkpoint={
                     "total_segments": 3,
+                    "render_plan": render_plan,
                     "cached_audio_paths": {
                         "0": temp_cache["cached_audio_paths"][0],
                     },
                     "source_checkpoint": {
                         "total_segments": 3,
+                        "render_plan": render_plan,
                         "cached_audio_paths": {
                             "2": temp_cache["cached_audio_paths"][2],
                         },
@@ -859,6 +866,52 @@ def test_synthesize_segments_with_resume_reuses_cached_audio_and_only_generates_
             b"cached-0",
             b"generated::seg-1",
             b"cached-2",
+        ]
+    finally:
+        _cleanup_run_assets(run_id=run_id, chapter_id=chapter_id)
+
+
+def test_synthesize_segments_with_resume_rejects_unsigned_current_and_source_checkpoints():
+    run_id = f"pytest_{uuid.uuid4().hex}"
+    chapter_id = 924
+
+    try:
+        temp_cache = save_segment_audio_batch(
+            run_id=run_id,
+            chapter_id=chapter_id,
+            audio_list=[b"unsigned-current", b"unsigned-source"],
+            format="mp3",
+        )
+        dummy = _DummyResumeTTSMixin()
+        script_segments = [
+            SimpleNamespace(text="seg-0"),
+            SimpleNamespace(text="seg-1"),
+        ]
+
+        result = asyncio.run(
+            dummy._synthesize_segments_with_resume(
+                script_segments,
+                resume_checkpoint={
+                    "total_segments": 2,
+                    "cached_audio_paths": {
+                        "0": temp_cache["cached_audio_paths"][0],
+                    },
+                    "source_checkpoint": {
+                        "total_segments": 2,
+                        "cached_audio_paths": {
+                            "1": temp_cache["cached_audio_paths"][1],
+                        },
+                    },
+                },
+            )
+        )
+
+        assert result["resume_source"] is None
+        assert result["reused_indices"] == []
+        assert result["synthesized_indices"] == [0, 1]
+        assert result["audio_list"] == [
+            b"generated::seg-0",
+            b"generated::seg-1",
         ]
     finally:
         _cleanup_run_assets(run_id=run_id, chapter_id=chapter_id)
@@ -949,6 +1002,7 @@ def test_synthesize_segments_with_resume_falls_back_to_source_checkpoint():
         )
         dummy = _DummyResumeTTSMixin()
         script_segments = [SimpleNamespace(text="seg-0")]
+        render_plan = render_plan_to_payload(build_render_plan(script_segments))
 
         result = asyncio.run(
             dummy._synthesize_segments_with_resume(
@@ -960,6 +1014,7 @@ def test_synthesize_segments_with_resume_falls_back_to_source_checkpoint():
                     },
                     "source_checkpoint": {
                         "total_segments": 1,
+                        "render_plan": render_plan,
                         "cached_audio_paths": {
                             "0": temp_cache["cached_audio_paths"][0],
                         },
@@ -994,12 +1049,14 @@ def test_synthesize_segments_with_resume_reports_incremental_progress_payloads()
             SimpleNamespace(text="seg-1"),
             SimpleNamespace(text="seg-2"),
         ]
+        render_plan = render_plan_to_payload(build_render_plan(script_segments))
 
         asyncio.run(
             dummy._synthesize_segments_with_resume(
                 script_segments,
                 resume_checkpoint={
                     "total_segments": 3,
+                    "render_plan": render_plan,
                     "cached_audio_paths": {
                         "0": temp_cache["cached_audio_paths"][0],
                     },
@@ -1254,6 +1311,68 @@ def test_synthesize_batch_uses_planned_voice_boundaries():
     assert batch_events[1]["end_idx"] == 2
     assert batch_events[0]["batch_audio_list"] == [b"audio::seg-0"]
     assert batch_events[1]["batch_audio_list"] == [b"audio::seg-1"]
+
+
+def test_synthesize_batch_stops_on_pause_request():
+    from app.services.audiobook.tts_pause import TTSPauseRequested
+
+    engine = _DummyBatchProgressTTSEngine(
+        enable_cache=False,
+        max_concurrent=1,
+        request_delay=0,
+    )
+    state = {"paused": False}
+    progress_events = []
+
+    def handle_progress(event):
+        progress_events.append(event)
+        # 第一个片段完成后请求暂停，后续片段不应再合成
+        if event.get("event") == "segment":
+            state["paused"] = True
+
+    with pytest.raises(TTSPauseRequested):
+        asyncio.run(
+            engine.synthesize_batch(
+                [
+                    {"text": "seg-0", "voice_params": {}, "emotion": "neutral"},
+                    {"text": "seg-1", "voice_params": {}, "emotion": "neutral"},
+                    {"text": "seg-2", "voice_params": {}, "emotion": "neutral"},
+                ],
+                batch_size=10,
+                batch_interval=0,
+                progress_callback=handle_progress,
+                pause_check=lambda: state["paused"],
+            )
+        )
+
+    segment_events = [event for event in progress_events if event["event"] == "segment"]
+    assert len(segment_events) == 1
+    assert segment_events[0]["audio_bytes"] == b"audio::seg-0"
+
+
+def test_synthesize_batch_continues_when_pause_check_raises():
+    engine = _DummyBatchProgressTTSEngine(
+        enable_cache=False,
+        max_concurrent=1,
+        request_delay=0,
+    )
+
+    def broken_pause_check():
+        raise RuntimeError("db unavailable")
+
+    audio_list = asyncio.run(
+        engine.synthesize_batch(
+            [
+                {"text": "seg-0", "voice_params": {}, "emotion": "neutral"},
+                {"text": "seg-1", "voice_params": {}, "emotion": "neutral"},
+            ],
+            batch_size=10,
+            batch_interval=0,
+            pause_check=broken_pause_check,
+        )
+    )
+
+    assert audio_list == [b"audio::seg-0", b"audio::seg-1"]
 
 
 def test_save_segment_audio_batch_supports_dashscope_oss(monkeypatch):

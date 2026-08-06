@@ -12,10 +12,13 @@ from app.api.v1.audiobook_api import routes_tasks
 from app.api.v1.audiobook_api import routes_download
 from app.api.v1.audiobook_api import routes_script
 from app.api.v1.audiobook_api import routes_segment_preview
+from app.api.v1.audiobook_api import routes_segment_direction
 from app.api.v1.audiobook_api import routes_segment_regen
+from app.api.v1.audiobook_api import routes_remix
 from app.api.v1.audiobook_api import routes_review
 from app.api.v1.audiobook_api import routes_prompt_audio_review
 from app.api.v1.audiobook_api import routes_subtitle
+from app.api.v1.audiobook_api import routes_recover
 from app.api.v1.audiobook_api import routes_smart_chunk
 from app.api.v1.audiobook_api import routes_misc
 from app.api.v1.audiobook_api import routes_audio_library

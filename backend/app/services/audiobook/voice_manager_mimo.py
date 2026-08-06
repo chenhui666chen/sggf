@@ -12,7 +12,7 @@ from .tts_model_ids import (
     MIMO_V25_TTS_VOICE_DESIGN_MODEL,
     normalize_audiobook_tts_model,
 )
-from .mimo_voice_assets import MiMoVoiceAssetError, merge_mimo_voice_asset_tts_params
+from .mimo_voice_assets import merge_mimo_voice_asset_tts_params
 from .voice_catalog import load_voice_catalog_for_model
 from .voice_manager import VoiceManager, VoiceProfile
 
@@ -41,11 +41,8 @@ class MiMoInlineVoiceProfile:
         emotion = (emotion or "").strip() or self.default_emotion or "neutral"
         params: Dict[str, Any] = {
             "speaker": self.voice_id,
-            "pitch": int(max(0, min(100, self.pitch_base))),
-            "speed": float(max(0.5, min(2.0, self.speed_base))),
             "volume": int(max(0, min(100, self.volume_base))),
             "emotion": emotion,
-            "voice_description": self.voice_design_prompt,
         }
         if self.voice_clone_data_url:
             params["voice_clone_data_url"] = self.voice_clone_data_url
@@ -135,10 +132,12 @@ class MiMoVoiceManager(VoiceManager):
         voice_config: Optional[Dict[str, Any]] = None,
     ) -> MiMoInlineVoiceProfile:
         config = voice_config or {}
-        try:
-            config = merge_mimo_voice_asset_tts_params(config)
-        except MiMoVoiceAssetError as exc:
-            logger.warning("Failed to resolve MiMo voice asset for %s: %s", character_name, exc)
+        # 已保存的自定义音色以资产库为唯一身份来源。资产缺失或越权时必须失败，
+        # 禁止继续使用旧配置或调用方携带的内联设计配方。
+        config = merge_mimo_voice_asset_tts_params(
+            config,
+            owner_user_id=getattr(self, "owner_user_id", None),
+        )
 
         def _int_value(value: Any, default: int) -> int:
             try:

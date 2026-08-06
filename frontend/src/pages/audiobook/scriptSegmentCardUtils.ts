@@ -4,6 +4,7 @@ import type {
   ScriptSegment,
   ScriptSegmentVoiceParams,
 } from './types'
+import { modelUsesBasicNumericSpeedControl } from './ttsModels'
 
 export const parseOptionalNumberInput = (value: string): number | null => {
   const trimmed = value.trim()
@@ -20,22 +21,141 @@ export const parseCommaSeparatedList = (value: string): string[] =>
     .map((item) => item.trim())
     .filter((item) => item.length > 0)
 
+const FIXED_VOICE_IDENTITY_CONTROL_KEYS = new Set([
+  'pitch',
+  'pitch_ratio',
+  'pitch_semitones',
+  'character_base_pitch',
+  'voice_description',
+  'voice_design_prompt',
+])
+
+const NUMERIC_SPEED_CONTROL_KEYS = new Set([
+  'speed',
+  'rate',
+  'character_base_speed',
+])
+
+const sanitizeVoiceControlValue = (
+  value: unknown,
+  allowNumericSpeed: boolean,
+): unknown => {
+  if (Array.isArray(value)) {
+    return value.map((item) => sanitizeVoiceControlValue(item, allowNumericSpeed))
+  }
+  if (!value || typeof value !== 'object') {
+    return value
+  }
+  return Object.fromEntries(
+    Object.entries(value)
+      .filter(([key]) =>
+        !FIXED_VOICE_IDENTITY_CONTROL_KEYS.has(key)
+        && (allowNumericSpeed || !NUMERIC_SPEED_CONTROL_KEYS.has(key)),
+      )
+      .map(([key, nestedValue]) => [
+        key,
+        sanitizeVoiceControlValue(nestedValue, allowNumericSpeed),
+      ]),
+  )
+}
+
+const voiceParamsAllowNumericSpeed = (voiceParams: unknown): boolean => {
+  if (!voiceParams || typeof voiceParams !== 'object') {
+    return false
+  }
+  const params = voiceParams as Record<string, unknown>
+  return modelUsesBasicNumericSpeedControl(
+    params.resolved_tts_model || params.tts_model,
+  )
+}
+
+export const sanitizeScriptSegmentVoiceParams = (
+  voiceParams: unknown,
+): ScriptSegmentVoiceParams =>
+  voiceParams && typeof voiceParams === 'object'
+    ? sanitizeVoiceControlValue(
+        voiceParams,
+        voiceParamsAllowNumericSpeed(voiceParams),
+      ) as ScriptSegmentVoiceParams
+    : {}
+
+export const sanitizeScriptSegmentVoiceIdentityControls = <
+  T extends Partial<ScriptSegment>,
+>(segment: T): T => {
+  const allowNumericSpeed = voiceParamsAllowNumericSpeed(segment.voice_params)
+  const sanitized = Object.fromEntries(
+    Object.entries(segment)
+      .filter(([key]) =>
+        !FIXED_VOICE_IDENTITY_CONTROL_KEYS.has(key)
+        && (allowNumericSpeed || !NUMERIC_SPEED_CONTROL_KEYS.has(key)),
+      )
+      .map(([key, value]) => [
+        key,
+        key === 'voice_params' && value !== null
+          ? sanitizeScriptSegmentVoiceParams(value)
+          : value,
+      ]),
+  )
+  return sanitized as T
+}
+
 export const getScriptSegmentVoiceParams = (
   segment: Pick<ScriptSegment, 'voice_params'>,
-): ScriptSegmentVoiceParams =>
-  segment.voice_params && typeof segment.voice_params === 'object' ? segment.voice_params : {}
+): ScriptSegmentVoiceParams => sanitizeScriptSegmentVoiceParams(segment.voice_params)
 
 const normalizeText = (value: unknown): string => (typeof value === 'string' ? value.trim() : '')
 
 export const buildSoundEffectAssetPatch = (
   selection: AudioAssetSelection,
 ): Pick<ScriptSegment, 'sound_effects' | 'sound_effects_simple'> => ({
-  sound_effects: [{
-    asset_id: normalizeText(selection.id),
-    name: normalizeText(selection.name) || normalizeText(selection.label) || normalizeText(selection.id),
-  }],
-  sound_effects_simple: [],
+  ...appendSoundEffectAssetPatch({}, selection),
 })
+
+export const appendSoundEffectAssetPatch = (
+  segment: Pick<ScriptSegment, 'sound_effects_simple' | 'sound_effects'>,
+  selection: AudioAssetSelection,
+  description?: string,
+): Pick<ScriptSegment, 'sound_effects' | 'sound_effects_simple'> => {
+  const effects: Array<Record<string, unknown>> = []
+  const seenAssetIds = new Set<string>()
+  const append = (raw: unknown) => {
+    if (typeof raw === 'string') {
+      const name = normalizeText(raw)
+      if (name) effects.push({ name })
+      return
+    }
+    if (!raw || typeof raw !== 'object') return
+    const item = { ...(raw as Record<string, unknown>) }
+    const assetId = normalizeText(item.asset_id || item.id || item.effect_id)
+    if (assetId && seenAssetIds.has(assetId)) return
+    if (assetId) seenAssetIds.add(assetId)
+    const name = normalizeText(item.name || item.effect_id || item.id || item.asset_id)
+    if (name || assetId) effects.push({ ...item, ...(name ? { name } : {}) })
+  }
+
+  ;(Array.isArray(segment.sound_effects) ? segment.sound_effects : []).forEach(append)
+  ;(Array.isArray(segment.sound_effects_simple) ? segment.sound_effects_simple : []).forEach(append)
+
+  const assetId = normalizeText(selection.id)
+  const selectedName = normalizeText(description)
+    || normalizeText(selection.name)
+    || normalizeText(selection.label)
+    || assetId
+  const selectedIndex = assetId
+    ? effects.findIndex((item) => normalizeText(item.asset_id || item.id || item.effect_id) === assetId)
+    : -1
+  const selectedItem = { asset_id: assetId, name: selectedName }
+  if (selectedIndex >= 0) {
+    effects[selectedIndex] = { ...effects[selectedIndex], ...selectedItem }
+  } else if (assetId || selectedName) {
+    effects.push(selectedItem)
+  }
+
+  return {
+    sound_effects: effects as ScriptSegment['sound_effects'],
+    sound_effects_simple: [],
+  }
+}
 
 export const buildMusicAssetPatch = (
   selection: AudioAssetSelection,

@@ -77,6 +77,8 @@ def _infer_audio_mime_type(path: str) -> str:
         return "audio/flac"
     if suffix == ".ogg":
         return "audio/ogg"
+    if suffix == ".webm":
+        return "audio/webm"
     return "audio/mpeg"
 
 
@@ -803,6 +805,123 @@ class FunAsrFlashPromptAudioAsrProvider:
         )
 
 
+_QWEN_OMNI_DIRECTION_INSTRUCTION = (
+    "这是一段针对有声书片段朗读的口述要求录音。请完成两部分输出："
+    "第一部分逐字转写录音中说出的内容；"
+    "第二部分若录音包含朗读示范，只用简洁中文描述其语速、语势、强弱、情绪、"
+    "重音、停顿、断句、呼吸与句尾处理；若仅为口述要求则总结其中提到的表演要求。"
+    "不得推断或描述性别、年龄感、基础声线或音色身份；不得输出童声、老人声、男声、"
+    "女声、变声、换声、模仿对象或永久音色质感。生病、受伤等特殊状态下的沙哑只能"
+    "描述为在原音色基础上的轻微短暂状态。直接输出结果，不要附加解释。"
+)
+
+
+class QwenOmniPromptAudioAsrProvider:
+    """用 qwen3.5-omni 音频理解能力转写口述要求并描述朗读示范的表演特征。"""
+
+    name = "qwen_omni"
+    supports_timestamps = False
+
+    def __init__(
+        self,
+        *,
+        api_key: Optional[str] = None,
+        base_url: Optional[str] = None,
+        model: Optional[str] = None,
+        timeout_seconds: float = 180.0,
+    ):
+        self.api_key = api_key or _env_value(
+            "QWEN_OMNI_DIRECTION_API_KEY",
+            "DASHSCOPE_ASR_API_KEY",
+            "DASHSCOPE_API_KEY",
+            "ALIYUN_API_KEY",
+        )
+        base = (
+            base_url
+            or os.getenv("QWEN_OMNI_DIRECTION_BASE_URL")
+            or "https://dashscope.aliyuncs.com/compatible-mode/v1"
+        ).rstrip("/")
+        self.base_url = base
+        self.endpoint = f"{base}/chat/completions"
+        self.model = model or os.getenv("QWEN_OMNI_DIRECTION_MODEL") or "qwen3.5-omni-flash"
+        self.timeout_seconds = timeout_seconds
+
+    @property
+    def configured(self) -> bool:
+        return bool(self.api_key)
+
+    def transcribe(self, audio_path: str, instruction: Optional[str] = None, **kwargs: Any) -> PromptAudioAsrResult:
+        if not self.configured:
+            raise PromptAudioAsrProviderError(
+                "asr_provider_not_configured",
+                "未配置 QWEN_OMNI_DIRECTION_API_KEY 或 DASHSCOPE_API_KEY",
+            )
+
+        import httpx
+
+        audio_bytes = Path(audio_path).read_bytes()
+        audio_data = base64.b64encode(audio_bytes).decode("ascii")
+        mime_type = _infer_audio_mime_type(audio_path)
+        fmt = Path(audio_path).suffix.lower().lstrip(".") or "mp3"
+        payload = {
+            "model": self.model,
+            "modalities": ["text"],
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "input_audio",
+                            "input_audio": {
+                                "data": f"data:{mime_type};base64,{audio_data}",
+                                "format": fmt,
+                            },
+                        },
+                        {"type": "text", "text": str(instruction) if instruction else _QWEN_OMNI_DIRECTION_INSTRUCTION},
+                    ],
+                }
+            ],
+        }
+        response = httpx.post(
+            self.endpoint,
+            headers={
+                "Authorization": f"Bearer {self.api_key}",
+                "Content-Type": "application/json",
+            },
+            json=payload,
+            timeout=self.timeout_seconds,
+        )
+        if response.status_code >= 400:
+            detail = _provider_error_detail(response)
+            raise PromptAudioAsrProviderError(
+                "asr_provider_request_failed",
+                f"qwen-omni 音频理解请求失败: status={response.status_code}"
+                f"{f' {detail}' if detail else ''}",
+            )
+
+        data = _safe_json(response)
+        transcript = _first_text(data.get("choices"))
+        if not transcript:
+            transcript = _first_text(data)
+        if not transcript:
+            raise PromptAudioAsrProviderError("asr_empty_transcript", "qwen-omni 未返回转写文本")
+
+        metadata: Dict[str, Any] = {"analysis_mode": "audio_understanding"}
+        response_id = data.get("id")
+        if response_id:
+            metadata["response_id"] = response_id
+        usage = data.get("usage")
+        if isinstance(usage, dict):
+            metadata["usage"] = usage
+        return PromptAudioAsrResult(
+            provider=self.name,
+            model=self.model,
+            transcript=transcript,
+            subtitle_payload=None,
+            metadata=metadata,
+        )
+
+
 def create_prompt_audio_asr_provider(provider: Optional[str] = None) -> Optional[PromptAudioAsrProvider]:
     normalized = str(provider or os.getenv("PROMPT_AUDIO_ASR_PROVIDER") or DEFAULT_PROMPT_AUDIO_ASR_PROVIDER).strip().lower()
     timeout_seconds = load_prompt_audio_asr_budget_policy().timeout_seconds
@@ -816,6 +935,8 @@ def create_prompt_audio_asr_provider(provider: Optional[str] = None) -> Optional
         service = DoubaoPromptAudioAsrProvider(timeout_seconds=timeout_seconds)
     elif normalized in {"funasr_flash", "fun-asr-flash", "funasr", "fun_asr_flash", "fun-asr"}:
         service = FunAsrFlashPromptAudioAsrProvider(timeout_seconds=timeout_seconds)
+    elif normalized in {"qwen_omni", "qwen-omni", "qwenomni", "qwen3.5-omni", "qwen3.5-omni-flash", "omni"}:
+        service = QwenOmniPromptAudioAsrProvider(timeout_seconds=timeout_seconds)
     else:
         raise PromptAudioAsrProviderError("asr_provider_unsupported", f"不支持的 ASR provider: {normalized}")
     if not getattr(service, "configured", False):

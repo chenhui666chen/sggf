@@ -5,22 +5,35 @@ import logging
 from typing import Dict, List, Optional
 
 from app.db.base import SessionLocal
-from app.models.audiobook import AudiobookProject
+from app.models.audiobook import AudiobookProject, ChapterAudio
 from app.models.project import Project
 from app.services.audiobook.background_jobs_prefetch import prefetch_chapter_generation_records
 from app.services.audiobook.background_jobs_shared import (
     apply_chapter_audio_generation_result,
     build_checkpoint_patch_from_generation_result,
+    cleanup_aborted_chapter_generation_artifacts,
     create_background_engine,
     generate_and_apply_subtitle_artifacts,
+    is_audiobook_project_active,
+    is_chapter_generation_target_active,
     mark_chapter_generation_failed,
     mark_chapter_preflight_failed,
+    merge_workbench_segment_audio_into_checkpoint,
     prepare_chapter_generation_output_context,
     prune_and_log_completed_run_temp_assets,
     refresh_audiobook_project_audio_totals,
     release_audiobook_project_billing,
     settle_audiobook_project_billing,
 )
+from app.services.audiobook.atomic_files import write_bytes_atomic
+from app.services.audiobook.chapter_segment_assets import (
+    collect_chapter_segment_asset_refs,
+    delete_replaced_segment_asset_refs,
+    persist_generated_chapter_segment_audio,
+)
+from app.services.audiobook.job_tracker import handle_pause_checkpoint
+from app.services.audiobook.repository import ChapterAudioRunRepository
+from app.services.audiobook.tts_pause import TTSPauseRequested
 from app.services.audiobook.project_audio_runtime import (
     apply_scene_audio_runtime_to_engine,
     resolve_project_audio_runtime_config,
@@ -51,6 +64,7 @@ async def generate_audiobook_audio_from_scripts_background(
     tts_model: str = "qwen3-tts-instruct-flash",
     timeline_edits_by_chapter: Optional[Dict[int, Dict[str, Dict[str, float]]]] = None,
     tracker: Optional[StageTracker] = None,
+    celery_task_id: Optional[str] = None,
 ) -> None:
     """后台生成有声书音频任务（基于已生成或人工审核后的剧本）。"""
     db = SessionLocal()
@@ -65,7 +79,8 @@ async def generate_audiobook_audio_from_scripts_background(
         )
 
         audiobook_project = db.query(AudiobookProject).filter(
-            AudiobookProject.id == audiobook_project_id
+            AudiobookProject.id == audiobook_project_id,
+            AudiobookProject.deleted_at.is_(None),
         ).first()
         if not audiobook_project:
             logger.error("❌ 有声书项目不存在: %s", audiobook_project_id)
@@ -90,6 +105,11 @@ async def generate_audiobook_audio_from_scripts_background(
         project = db.query(Project).filter(Project.id == audiobook_project.project_id).first()
         novel_genre = (project.genre or "科幻") if project else "科幻"
         novel_theme = (project.sub_genre or "未知主题") if project else "未知主题"
+
+        # 注入资产归属用户，使后台任务能解析项目所有者的私有音色资产
+        # （mimo 声音设计/克隆），避免归属校验拒绝导致自定义音色静默失效。
+        if project is not None and getattr(project, "user_id", None) is not None:
+            engine.voice_manager.owner_user_id = int(project.user_id)
 
         runtime_config = resolve_project_audio_runtime_config(
             project=project,
@@ -124,7 +144,23 @@ async def generate_audiobook_audio_from_scripts_background(
         chapter_by_id = generation_records.chapter_by_id
         chapter_audio_by_chapter_id = generation_records.chapter_audio_by_chapter_id
 
+        pause_check_fn = getattr(tracker, "is_pause_requested", None) if tracker else None
+
         for index, chapter_id in enumerate(chapter_ids, 1):
+            if handle_pause_checkpoint(
+                tracker,
+                chapter_ids=chapter_ids,
+                current_index=index,
+            ):
+                audiobook_project.status = "paused"
+                db.commit()
+                release_audiobook_project_billing(
+                    logger,
+                    db,
+                    audiobook_project_id=audiobook_project_id,
+                    reason="有声书音频生成任务已暂停，已释放冻结积分。",
+                )
+                return
             chapter = None
             resume_checkpoint = {}
             script_segments_data = None
@@ -137,6 +173,19 @@ async def generate_audiobook_audio_from_scripts_background(
                     len(chapter_ids),
                     chapter_id,
                 )
+
+                # 通过 celery_task_id 精确定位本次派发创建的 run 记录，
+                # 避免并发任务按“同类型最新 run”回退定位时互相串写状态
+                run_id: Optional[int] = None
+                if celery_task_id:
+                    dispatch_run = ChapterAudioRunRepository.get_run_by_celery_task_id(
+                        db,
+                        celery_task_id=celery_task_id,
+                        audiobook_project_id=audiobook_project_id,
+                        chapter_id=chapter_id,
+                        run_type="audio_from_scripts",
+                    )
+                    run_id = dispatch_run.id if dispatch_run else None
 
                 chapter_audio = chapter_audio_by_chapter_id.get(chapter_id)
                 if not chapter_audio or not chapter_audio.script_json:
@@ -151,6 +200,7 @@ async def generate_audiobook_audio_from_scripts_background(
                         run_type="audio_from_scripts",
                         error_message="script_missing",
                         failed_chapters=current_run_failed_chapters,
+                        run_id=run_id,
                     )
                     db.commit()
                     continue
@@ -169,6 +219,7 @@ async def generate_audiobook_audio_from_scripts_background(
                         run_type="audio_from_scripts",
                         error_message=f"script_not_approved:{chapter_audio.script_status}",
                         failed_chapters=current_run_failed_chapters,
+                        run_id=run_id,
                     )
                     db.commit()
                     continue
@@ -183,6 +234,7 @@ async def generate_audiobook_audio_from_scripts_background(
                         run_type="audio_from_scripts",
                         error_message="chapter_not_found",
                         failed_chapters=current_run_failed_chapters,
+                        run_id=run_id,
                     )
                     db.commit()
                     continue
@@ -202,6 +254,7 @@ async def generate_audiobook_audio_from_scripts_background(
                         run_type="audio_from_scripts",
                         error_message=f"invalid_script_json:{parse_err}",
                         failed_chapters=current_run_failed_chapters,
+                        run_id=run_id,
                     )
                     db.commit()
                     continue
@@ -219,6 +272,7 @@ async def generate_audiobook_audio_from_scripts_background(
                         run_type="audio_from_scripts",
                         error_message=f"invalid_script_payload:{type(script_segments_data)}",
                         failed_chapters=current_run_failed_chapters,
+                        run_id=run_id,
                     )
                     db.commit()
                     continue
@@ -230,8 +284,13 @@ async def generate_audiobook_audio_from_scripts_background(
                     chapter_id=chapter_id,
                     chapter_number=chapter.chapter_number,
                     run_type="audio_from_scripts",
+                    run_id=run_id,
                 )
-                resume_checkpoint = output_context.resume_checkpoint
+                resume_checkpoint = merge_workbench_segment_audio_into_checkpoint(
+                    script_segments=script_segments_data,
+                    resume_checkpoint=output_context.resume_checkpoint,
+                    default_tts_model=getattr(engine, "tts_model", None),
+                )
                 output_format = output_context.output_format
                 generate_subtitle = output_context.generate_subtitle
                 output_path = output_context.output_path
@@ -240,10 +299,19 @@ async def generate_audiobook_audio_from_scripts_background(
                     or resume_checkpoint.get("timeline_edits")
                 )
 
+                # Phase 2: replace_voice_missing 选择性音色覆盖
+                raw_segment_overrides = resume_checkpoint.get("segment_voice_overrides")
+                segment_voice_overrides = None
+                if isinstance(raw_segment_overrides, dict) and raw_segment_overrides:
+                    segment_voice_overrides = {
+                        int(k): v for k, v in raw_segment_overrides.items()
+                        if isinstance(v, dict)
+                    }
+
                 result = await engine.generate_chapter_audio_from_script(
                     script_segments_data=script_segments_data,
                     chapter_id=chapter_id,
-                    output_path=output_path,
+                    output_path=None,
                     output_format=output_format,
                     novel_genre=novel_genre,
                     novel_theme=novel_theme,
@@ -252,12 +320,76 @@ async def generate_audiobook_audio_from_scripts_background(
                     resume_checkpoint=resume_checkpoint,
                     timeline_edits=chapter_timeline_edits if isinstance(chapter_timeline_edits, dict) else None,
                     tts_progress_callback=output_context.tts_progress_callback,
+                    segment_voice_overrides=segment_voice_overrides,
+                    pause_check=pause_check_fn,
                 )
 
                 task_id = result.get("task_id")
                 logger.info("🎯 [音频阶段] Chapter %s TaskID: %s", chapter_id, task_id)
 
+                # 生成耗时较长，写入前复核章节/章节音频是否在生成期间被删除，
+                # 避免与删除流程竞争导致已删记录被复活或孤儿文件写入
+                if not is_chapter_generation_target_active(
+                    db,
+                    audiobook_project_id=audiobook_project_id,
+                    chapter_id=chapter_id,
+                    chapter_audio_id=chapter_audio.id,
+                    run_id=run_id,
+                ):
+                    logger.warning(
+                        "⚠️ 章节 %s 在生成期间已被删除，放弃写入生成结果",
+                        chapter_id,
+                    )
+                    cleanup_aborted_chapter_generation_artifacts(
+                        output_path=output_path,
+                        result=result,
+                    )
+                    db.rollback()
+                    continue
+
                 if result.get("success"):
+                    active_chapter_audio = (
+                        db.query(ChapterAudio)
+                        .filter(
+                            ChapterAudio.id == chapter_audio.id,
+                            ChapterAudio.audiobook_project_id == audiobook_project_id,
+                            ChapterAudio.chapter_id == chapter_id,
+                            ChapterAudio.deleted_at.is_(None),
+                        )
+                        .populate_existing()
+                        .first()
+                    )
+                    if active_chapter_audio is None:
+                        logger.info(
+                            "章节在 audio_from_scripts 结果写回前已删除，放弃写入: "
+                            "audiobook_project_id=%s chapter_id=%s",
+                            audiobook_project_id,
+                            chapter_id,
+                        )
+                        db.rollback()
+                        continue
+                    chapter_audio = active_chapter_audio
+                    existing_persistent_asset_refs = collect_chapter_segment_asset_refs(
+                        chapter_audio
+                    )
+                    audio_data = result.get("audio_data")
+                    if not isinstance(audio_data, (bytes, bytearray)) or not audio_data:
+                        raise RuntimeError("generated_audio_missing")
+                    write_bytes_atomic(output_path, bytes(audio_data))
+                    if not is_chapter_generation_target_active(
+                        db,
+                        audiobook_project_id=audiobook_project_id,
+                        chapter_id=chapter_id,
+                        chapter_audio_id=chapter_audio.id,
+                        run_id=run_id,
+                    ):
+                        cleanup_aborted_chapter_generation_artifacts(
+                            output_path=output_path,
+                            result=result,
+                        )
+                        db.rollback()
+                        continue
+
                     result_metadata = apply_chapter_audio_generation_result(
                         chapter_audio=chapter_audio,
                         result=result,
@@ -276,6 +408,49 @@ async def generate_audiobook_audio_from_scripts_background(
                         title=chapter.title or f"Chapter {chapter.chapter_number}",
                         generate_subtitle=generate_subtitle,
                     )
+
+                    # 在 run 临时资产清理前固化片段音频并写回 script_json，
+                    # 供工作台分段试听与整章重新混音使用
+                    if not is_chapter_generation_target_active(
+                        db,
+                        audiobook_project_id=audiobook_project_id,
+                        chapter_id=chapter_id,
+                        chapter_audio_id=chapter_audio.id,
+                        run_id=run_id,
+                    ):
+                        cleanup_aborted_chapter_generation_artifacts(
+                            output_path=output_path,
+                            result=result,
+                        )
+                        db.rollback()
+                        continue
+
+                    persist_generated_chapter_segment_audio(
+                        chapter_audio=chapter_audio,
+                        result=result,
+                        tts_model=getattr(engine, "tts_model", None),
+                    )
+                    new_persistent_asset_refs = collect_chapter_segment_asset_refs(
+                        chapter_audio
+                    )
+
+                    if not is_chapter_generation_target_active(
+                        db,
+                        audiobook_project_id=audiobook_project_id,
+                        chapter_id=chapter_id,
+                        chapter_audio_id=chapter_audio.id,
+                        run_id=run_id,
+                    ):
+                        cleanup_aborted_chapter_generation_artifacts(
+                            output_path=output_path,
+                            result=result,
+                            persistent_asset_refs=(
+                                new_persistent_asset_refs
+                                - existing_persistent_asset_refs
+                            ),
+                        )
+                        db.rollback()
+                        continue
 
                     _update_chapter_run_state(
                         db,
@@ -298,6 +473,7 @@ async def generate_audiobook_audio_from_scripts_background(
                             task_id=task_id,
                             output_path=output_path,
                         ),
+                        run_id=run_id,
                     )
                     prune_and_log_completed_run_temp_assets(
                         logger,
@@ -305,6 +481,7 @@ async def generate_audiobook_audio_from_scripts_background(
                         audiobook_project_id=audiobook_project_id,
                         chapter_id=chapter_id,
                         run_type="audio_from_scripts",
+                        run_id=run_id,
                     )
                     logger.info("✅ 章节 %s 音频生成成功", chapter_id)
                 else:
@@ -322,6 +499,7 @@ async def generate_audiobook_audio_from_scripts_background(
                         resume_checkpoint=resume_checkpoint,
                         task_id=task_id,
                         default_error_message="audio_generation_failed",
+                        run_id=run_id,
                     )
 
                 refresh_audiobook_project_audio_totals(
@@ -330,7 +508,38 @@ async def generate_audiobook_audio_from_scripts_background(
                     failed_chapters=current_run_failed_chapters,
                 )
                 db.commit()
+                if result.get("success"):
+                    try:
+                        delete_replaced_segment_asset_refs(
+                            existing_persistent_asset_refs,
+                            new_persistent_asset_refs,
+                        )
+                    except Exception as cleanup_exc:
+                        logger.warning(
+                            "回收管线已替换片段资产失败: chapter_id=%s error=%s",
+                            chapter_id,
+                            cleanup_exc,
+                        )
 
+            except TTSPauseRequested:
+                # 章节合成过程中收到暂停请求：落库为 paused（包含当前章节，
+                # 恢复时可复用已合成片段），不当作失败处理
+                logger.info("⏸️ [音频阶段] 章节 %s 合成中被暂停请求中断", chapter_id)
+                handle_pause_checkpoint(
+                    tracker,
+                    chapter_ids=chapter_ids,
+                    current_index=index,
+                    stage="tts_synthesis",
+                )
+                audiobook_project.status = "paused"
+                db.commit()
+                release_audiobook_project_billing(
+                    logger,
+                    db,
+                    audiobook_project_id=audiobook_project_id,
+                    reason="有声书音频生成任务已暂停，已释放冻结积分。",
+                )
+                return
             except Exception as exc:
                 logger.error("❌ 章节 %s 音频阶段处理异常: %s", chapter_id, exc)
                 current_run_failed_chapters += 1
@@ -347,6 +556,7 @@ async def generate_audiobook_audio_from_scripts_background(
                     resume_checkpoint=resume_checkpoint if isinstance(resume_checkpoint, dict) else {},
                     task_id=task_id,
                     default_error_message="audio_generation_failed",
+                    run_id=run_id,
                 )
                 refresh_audiobook_project_audio_totals(
                     db,
@@ -359,6 +569,16 @@ async def generate_audiobook_audio_from_scripts_background(
                 traceback.print_exc()
 
         # 本次运行有失败章节时置为 failed，避免掩盖局部失败
+        if not is_audiobook_project_active(
+            db,
+            audiobook_project_id=audiobook_project_id,
+        ):
+            logger.info(
+                "有声书项目已删除，跳过 audio_from_scripts 任务最终状态写回: audiobook_project_id=%s",
+                audiobook_project_id,
+            )
+            return
+
         audiobook_project.status = "completed" if current_run_failed_chapters == 0 else "failed"
         final_totals = refresh_audiobook_project_audio_totals(
             db,
@@ -387,7 +607,10 @@ async def generate_audiobook_audio_from_scripts_background(
 
         traceback.print_exc()
 
-        if audiobook_project:
+        if audiobook_project and is_audiobook_project_active(
+            db,
+            audiobook_project_id=audiobook_project_id,
+        ):
             audiobook_project.status = "failed"
             db.commit()
             release_audiobook_project_billing(

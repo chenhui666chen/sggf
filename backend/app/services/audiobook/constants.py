@@ -42,7 +42,6 @@ QWEN_FLASH_ONLY_TO_INSTRUCT = {
     "Bodega": "Ethan",
     "Dolce": "Vincent",
     "Dylan": "Ethan",
-    "Ebona": "Bellona",
     "Emilien": "Ethan",
     "Eric": "Nofish",
     "Jada": "Mia",

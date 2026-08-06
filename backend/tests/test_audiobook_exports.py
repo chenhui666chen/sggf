@@ -173,6 +173,13 @@ def test_output_format_normalization_and_output_path():
         chapter_number=3,
         output_format="m4b",
     ) == "audiobooks/project_12/chapter_003.m4b"
+    # 同一小说项目的多个有声书项目必须按 audiobook_project_id 隔离输出路径
+    assert build_chapter_audio_output_path(
+        project_id=12,
+        chapter_number=3,
+        output_format="m4b",
+        audiobook_project_id=77,
+    ) == "audiobooks/project_12/audiobook_77/chapter_003.m4b"
 
 
 @pytest.mark.skipif(not FFMPEG_AVAILABLE, reason="ffmpeg unavailable")

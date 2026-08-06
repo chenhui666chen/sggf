@@ -3,8 +3,10 @@ import { describe, expect, it } from 'vitest'
 import {
   buildCreateAudiobookProjectPayload,
   extractQueuedAudiobookProjectTask,
+  hasRecoverableSegmentFailure,
   markResumeCheckpointQueued,
   resolveAudiobookGenerationMode,
+  resolveMissingSegments,
   resolveProjectIdForAudiobookGeneration,
   resolveResumeGenerationMode,
 } from '../generationActionUtils'
@@ -150,5 +152,56 @@ describe('audiobook generation action utils', () => {
       chapterId: 9,
       jobId: 'job-9',
     })).toBe(checkpoints)
+  })
+
+  it('detects recoverable segment failures only when failed indices and cached audio exist', () => {
+    expect(hasRecoverableSegmentFailure(buildCheckpoint({
+      failed_segment_indices: [3],
+      cached_audio_paths: { '0': 'temp.mp3' },
+    }))).toBe(true)
+    // 无缓存音频：不构成可恢复片段失败。
+    expect(hasRecoverableSegmentFailure(buildCheckpoint({
+      failed_segment_indices: [3],
+    }))).toBe(false)
+    // 无失败索引：普通可恢复进度，不是片段失败。
+    expect(hasRecoverableSegmentFailure(buildCheckpoint({
+      cached_audio_paths: { '0': 'temp.mp3' },
+    }))).toBe(false)
+    // 不可恢复（如已入队）：不提示片段失败。
+    expect(hasRecoverableSegmentFailure(buildCheckpoint({
+      can_resume: false,
+      failed_segment_indices: [3],
+      cached_audio_paths: { '0': 'temp.mp3' },
+    }))).toBe(false)
+  })
+
+  it('resolves missing segments preferring backend report then falling back to indices', () => {
+    const report = [{
+      index: 3,
+      source_segment_indices: [2],
+      text: '第二段。',
+      speaker: '旁白',
+      voice: 'badao_shaoye',
+      error_type: 'ReadTimeout',
+      error_message: 'timed out',
+    }]
+    expect(resolveMissingSegments(buildCheckpoint({ missing_segments: report }))).toEqual(report)
+
+    const fallback = resolveMissingSegments(buildCheckpoint({
+      failed_segment_indices: [5],
+      failed_segment_errors: { '5': { error_type: 'HTTPStatusError', error_message: 'HTTP 500' } },
+    }))
+    expect(fallback).toEqual([{
+      index: 5,
+      source_segment_indices: [],
+      text: '',
+      speaker: '',
+      voice: '',
+      segment_type: '',
+      error_type: 'HTTPStatusError',
+      error_message: 'HTTP 500',
+    }])
+
+    expect(resolveMissingSegments(buildCheckpoint())).toEqual([])
   })
 })

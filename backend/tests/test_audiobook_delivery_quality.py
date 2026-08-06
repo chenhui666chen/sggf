@@ -13,6 +13,9 @@ for candidate in (str(ROOT), str(BACKEND_ROOT)):
 def test_audio_prompt_review_metrics_summarize_inline_tag_strategy_snapshots():
     from app.services.audiobook.engine_pkg._base import AudiobookEngineBase
     from app.services.audiobook.script_adapter_pkg._dataclasses import ScriptSegment
+    from app.services.audiobook.voice_identity_policy import (
+        VOICE_IDENTITY_POLICY_VERSION,
+    )
 
     engine = AudiobookEngineBase.__new__(AudiobookEngineBase)
     segments = [
@@ -26,6 +29,8 @@ def test_audio_prompt_review_metrics_summarize_inline_tag_strategy_snapshots():
             instruct_emotion="tense",
             voice_params={
                 "provider_prompt_snapshot": {
+                    "voice_identity_policy_version": VOICE_IDENTITY_POLICY_VERSION,
+                    "model": "mimo-v2.5-tts",
                     "provider_prompt": {
                         "inline_tag_strategy": {
                             "model_family": "mimo",
@@ -45,6 +50,8 @@ def test_audio_prompt_review_metrics_summarize_inline_tag_strategy_snapshots():
             "music_cue_simple": "",
             "voice_params": {
                 "provider_prompt_snapshot": {
+                    "voice_identity_policy_version": VOICE_IDENTITY_POLICY_VERSION,
+                    "model": "seed-tts-2.0-expressive",
                     "provider_prompt": {
                         "inline_tag_strategy": {
                             "model_family": "doubao",

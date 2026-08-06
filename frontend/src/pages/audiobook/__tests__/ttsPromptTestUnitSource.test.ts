@@ -63,6 +63,8 @@ describe('independent TTS prompt test unit source contract', () => {
     expect(scenePanelSource).toContain('apiClient.getTtsVoices')
     expect(scenePanelSource).toContain('apiClient.previewTTSCached')
     expect(scenePanelSource).toContain('SEED_REFERENCE_VOICE_PREVIEW_TEXT')
+    expect(scenePanelSource).toContain('modelUsesBasicNumericSpeedControl(selectedModel)')
+    expect(scenePanelSource).not.toContain('speed: selectedVoice?.default_params?.speed ?? 1,')
     expect(scenePanelSource).toContain('buildSeedSceneReferencePayload')
     expect(scenePanelSource).toContain('原生 speaker')
     expect(scenePanelSource).toContain('audioUrl: result.audioUrl')

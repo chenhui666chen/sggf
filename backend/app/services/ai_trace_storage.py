@@ -49,25 +49,25 @@ def _locked(path: Path) -> Iterator[None]:
 class AtomicJsonStore:
     """带进程锁、原子替换和上一版本备份的 JSON 存储。"""
 
-    def __init__(self, path: Path):
+    def __init__(self, path: Path, root_type: type = dict):
         self.path = Path(path)
         self.backup_path = self.path.with_suffix(self.path.suffix + ".bak")
+        self.root_type = root_type
 
-    @staticmethod
-    def _read_path(path: Path) -> Dict[str, Any]:
+    def _read_path(self, path: Path) -> Any:
         with open(path, "r", encoding="utf-8") as file:
             data = json.load(file)
-        if not isinstance(data, dict):
-            raise ValueError("JSON root must be an object")
+        if not isinstance(data, self.root_type):
+            raise ValueError(f"JSON root must be {self.root_type.__name__}")
         return data
 
-    def read(self) -> Dict[str, Any]:
+    def read(self) -> Any:
         with _locked(self.path):
             return self._read_unlocked()
 
-    def _read_unlocked(self) -> Dict[str, Any]:
+    def _read_unlocked(self) -> Any:
         if not self.path.exists():
-            return {}
+            return self.root_type()
         try:
             return self._read_path(self.path)
         except (json.JSONDecodeError, OSError, ValueError):
@@ -75,11 +75,13 @@ class AtomicJsonStore:
                 return self._read_path(self.backup_path)
             raise
 
-    def write(self, data: Dict[str, Any]) -> None:
+    def write(self, data: Any) -> None:
         with _locked(self.path):
             self._write_unlocked(data)
 
-    def _write_unlocked(self, data: Dict[str, Any]) -> None:
+    def _write_unlocked(self, data: Any) -> None:
+        if not isinstance(data, self.root_type):
+            raise ValueError(f"JSON root must be {self.root_type.__name__}")
         self.path.parent.mkdir(parents=True, exist_ok=True)
         if self.path.exists():
             try:
@@ -98,7 +100,7 @@ class AtomicJsonStore:
             if temp_path.exists():
                 temp_path.unlink()
 
-    def update(self, transform: Callable[[Dict[str, Any]], Dict[str, Any]]) -> Dict[str, Any]:
+    def update(self, transform: Callable[[Any], Any]) -> Any:
         with _locked(self.path):
             updated = transform(self._read_unlocked())
             self._write_unlocked(updated)

@@ -5,6 +5,9 @@ from typing import Any, Dict, List, Optional
 
 from app.models.audiobook import ChapterAudio
 from app.services.audiobook.stt_verifier import STTVerifier
+from app.services.audiobook.voice_identity_policy import (
+    is_current_voice_identity_snapshot,
+)
 
 
 def _is_truthy(value: Any) -> bool:
@@ -39,10 +42,31 @@ def _segment_voice_params(segment: Dict[str, Any]) -> Dict[str, Any]:
     return voice_params if isinstance(voice_params, dict) else {}
 
 
-def _segment_model(segment: Dict[str, Any]) -> str:
+def _current_segment_snapshot(segment: Dict[str, Any]) -> Dict[str, Any]:
     voice_params = _segment_voice_params(segment)
     snapshot = voice_params.get("provider_prompt_snapshot")
-    if isinstance(snapshot, dict):
+    expected_model = str(
+        voice_params.get("resolved_tts_model")
+        or voice_params.get("tts_model")
+        or segment.get("tts_model")
+        or ""
+    ).strip()
+    expected_voice = str(
+        voice_params.get("speaker") or voice_params.get("voice_id") or ""
+    ).strip()
+    if not is_current_voice_identity_snapshot(
+        snapshot,
+        model=expected_model or None,
+        voice_id=expected_voice or None,
+    ):
+        return {}
+    return dict(snapshot)
+
+
+def _segment_model(segment: Dict[str, Any]) -> str:
+    voice_params = _segment_voice_params(segment)
+    snapshot = _current_segment_snapshot(segment)
+    if snapshot:
         model = str(snapshot.get("model") or "").strip()
         if model:
             return model
@@ -54,9 +78,8 @@ def _segment_model(segment: Dict[str, Any]) -> str:
 
 
 def _segment_inline_tag_strategy(segment: Dict[str, Any]) -> Dict[str, Any]:
-    voice_params = _segment_voice_params(segment)
-    snapshot = voice_params.get("provider_prompt_snapshot")
-    provider_prompt = snapshot.get("provider_prompt") if isinstance(snapshot, dict) else None
+    snapshot = _current_segment_snapshot(segment)
+    provider_prompt = snapshot.get("provider_prompt") if snapshot else None
     strategy = provider_prompt.get("inline_tag_strategy") if isinstance(provider_prompt, dict) else None
     return strategy if isinstance(strategy, dict) else {}
 

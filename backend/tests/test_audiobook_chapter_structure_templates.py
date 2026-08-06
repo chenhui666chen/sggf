@@ -140,7 +140,9 @@ def test_opening_segment_gets_performable_tense_delivery():
     assert opening_segment.emotion in {"tense", "mysterious", "solemn"}
     assert opening_segment.instruct_emotion
     assert opening_segment.performance_notes != "章节片头"
-    assert "悬念" in opening_segment.performance_notes or "低沉" in opening_segment.performance_notes
+    assert "悬念" in opening_segment.performance_notes
+    assert "声线" not in opening_segment.performance_notes
+    assert "低沉" not in opening_segment.performance_notes
 
 
 def test_professional_narration_legacy_style_does_not_merge_runtime_instructions():

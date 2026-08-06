@@ -2,7 +2,14 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Any, Dict, Iterable, List, Sequence, Tuple
+
+from app.services.audiobook.voice_identity_policy import (
+    sanitize_fixed_voice_performance_text,
+    sanitize_fixed_voice_scene_text,
+    stable_prompt_speaker,
+)
 
 from .models import (
     DEFERRED_PREVIEW_REFERENCE_FIELD,
@@ -90,7 +97,7 @@ class ScenePromptCompiler:
         scene_description: str = "",
         ending_description: str = "",
     ) -> ScenePromptCompileResult:
-        ordered_events = tuple(events)
+        ordered_events = tuple(self._sanitize_event_speaker(event) for event in events)
         expected_texts = tuple(
             str(event.exact_text)
             for event in ordered_events
@@ -98,7 +105,7 @@ class ScenePromptCompiler:
         )
         appearing_speakers = self._appearing_speakers(ordered_events)
         profiles_by_name = {
-            str(profile.name).strip(): profile
+            stable_prompt_speaker(str(profile.name).strip()): profile
             for profile in voice_profiles
         }
         references, reference_speakers = self._resolve_references(
@@ -110,8 +117,9 @@ class ScenePromptCompiler:
             for index, speaker in enumerate(reference_speakers, start=1)
         }
 
+        safe_scene_description, _ = sanitize_fixed_voice_scene_text(scene_description)
         lines = [
-            f"场景：{str(scene_description or '').strip() or '按剧情顺序生成自然、连贯的有声小说场景。'}",
+            f"场景：{safe_scene_description or '按剧情顺序生成自然、连贯的有声小说场景。'}",
             "",
             "角色与声音：",
         ]
@@ -146,7 +154,7 @@ class ScenePromptCompiler:
             f"{index}. {self._render_event(event)}"
             for index, event in enumerate(ordered_events, start=1)
         )
-        ending = str(ending_description or "").strip()
+        ending, _ = sanitize_fixed_voice_scene_text(ending_description)
         if ending:
             lines.extend(["", f"场景收尾：{ending.rstrip('。')}。"])
 
@@ -169,7 +177,10 @@ class ScenePromptCompiler:
         include_music: bool = True,
     ) -> List[SceneAudioEvent]:
         events: List[SceneAudioEvent] = []
-        speaker = str(getattr(segment, "speaker", "") or "旁白").strip() or "旁白"
+        speaker = stable_prompt_speaker(
+            str(getattr(segment, "speaker", "") or "旁白").strip() or "旁白",
+            segment_type=getattr(segment, "type", None),
+        )
         text = str(getattr(segment, "text", "") or "")
         performance = self._segment_performance(segment)
 
@@ -252,6 +263,13 @@ class ScenePromptCompiler:
                 speakers.append(speaker)
         return tuple(speakers)
 
+    @staticmethod
+    def _sanitize_event_speaker(event: SceneAudioEvent) -> SceneAudioEvent:
+        speaker = stable_prompt_speaker(event.speaker)
+        if speaker == event.speaker:
+            return event
+        return replace(event, speaker=speaker)
+
     def _resolve_references(
         self,
         appearing_speakers: Sequence[str],
@@ -278,7 +296,9 @@ class ScenePromptCompiler:
     def _segment_performance(segment: Any) -> str:
         notes = str(getattr(segment, "performance_notes", "") or "").strip().rstrip("。")
         if notes:
-            return notes
+            cleaned, _ = sanitize_fixed_voice_performance_text(notes)
+            if cleaned:
+                return cleaned
         emotion = str(getattr(segment, "emotion", "") or "").strip()
         return f"以{emotion}情绪自然表达" if emotion and emotion != "neutral" else "自然、清晰"
 
@@ -399,13 +419,19 @@ class ScenePromptCompiler:
 
     def _render_event(self, event: SceneAudioEvent) -> str:
         if event.kind == "speech":
-            performance = str(event.performance or "自然、清晰").strip().rstrip("。")
-            speaker = str(event.speaker or "旁白").strip()
+            performance, _ = sanitize_fixed_voice_performance_text(
+                event.performance or "自然、清晰"
+            )
+            performance = performance or "自然、清晰"
+            speaker = stable_prompt_speaker(event.speaker or "旁白") or "旁白"
             verb = "讲述" if speaker == "旁白" else "说道"
             return f"{speaker}用{performance}的方式{verb}：“{event.exact_text}”"
 
         description = str(event.acoustic or event.performance or "自然呈现").strip().rstrip("。")
-        speaker = str(event.speaker or "").strip()
+        if event.kind == "scene":
+            description, _ = sanitize_fixed_voice_scene_text(description)
+            description = description or "自然呈现"
+        speaker = stable_prompt_speaker(event.speaker)
         if event.kind == "vocalization":
             action = f"{speaker}发出{description}等非语言声音" if speaker else f"出现{description}等非语言人声"
         elif event.kind == "music":

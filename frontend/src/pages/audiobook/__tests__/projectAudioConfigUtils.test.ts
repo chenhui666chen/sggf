@@ -79,8 +79,6 @@ describe('audiobook project audio config utils', () => {
           voice_design_prompt: '青年女性，中音，语速中等，温柔但疲惫',
         },
       ],
-      // 提供有效的音色列表,让 female-shaonv 被视为无效(因为不在列表中)
-      voicePresets: [{ id: 'valid-voice-1' }, { id: 'valid-voice-2' }],
     })
 
     expect(voices).toEqual([
@@ -89,7 +87,7 @@ describe('audiobook project audio config utils', () => {
         name: 'Alice',
         gender: 'female',
         role: 'lead',
-        voiceId: '', // female-shaonv 对 minimax 模型无效,被重置为空
+        voiceId: 'female-shaonv', // 跨模型音色原样保留，不用全局目录校验而误清空
         volume: 66,
         speed: 1.2,
         pitch: 44,
@@ -191,7 +189,7 @@ describe('audiobook project audio config utils', () => {
     expect(voices[0]).toMatchObject({
       characterId: 0,
       name: '旁白',
-      voiceId: 'male-qn-qingse', // narrator-saved 无效,回退到 baseNarratorVoice
+      voiceId: 'narrator-saved', // 已保存的旁白音色原样保留，不因目录校验而丢失
       volume: 70,
       speed: 0.9,
       pitch: 40,
@@ -199,8 +197,68 @@ describe('audiobook project audio config utils', () => {
     expect(voices[1]).toMatchObject({
       characterId: 7,
       name: 'Hero',
-      voiceId: '', // hero-saved 对 minimax 模型无效,被重置为空
+      voiceId: 'hero-saved', // 已保存音色原样保留，不用全局目录校验而误清空
       volume: 55,
+    })
+  })
+
+  it('restores saved narrator tts_model for cross-model voice', () => {
+    const voices = buildInitialProjectVoiceSettings({
+      ttsModel: 'qwen3-tts-instruct-flash',
+      voicePresets: [{ id: 'Neil' }],
+      characters: [],
+      projectAudioConfig: {
+        characters: [
+          {
+            character_id: 0,
+            name: '旁白',
+            voice_id: 'male-qn-badaoshaoye',
+            tts_model: 'minimax-speech-2.8-hd',
+            volume: 60,
+          },
+        ],
+      },
+    })
+
+    expect(voices[0]).toMatchObject({
+      characterId: 0,
+      name: '旁白',
+      voiceId: 'male-qn-badaoshaoye',
+      // 旁白已保存的跨模型 tts_model 必须恢复，避免重存时被全局模型覆盖导致音色固定化失效
+      ttsModel: 'minimax-speech-2.8-hd',
+      volume: 60,
+    })
+  })
+
+  it('preserves narrator cross-model tts_model across load-save round trip', () => {
+    const voices = buildInitialProjectVoiceSettings({
+      ttsModel: 'qwen3-tts-instruct-flash',
+      voicePresets: [{ id: 'Neil' }],
+      characters: [],
+      projectAudioConfig: {
+        characters: [
+          {
+            character_id: 0,
+            name: '旁白',
+            voice_id: 'male-qn-badaoshaoye',
+            tts_model: 'minimax-speech-2.8-hd',
+          },
+        ],
+      },
+    })
+
+    const payload = buildProjectAudioConfigPayload({
+      characterVoices: voices,
+      audioFxConfig: createDefaultAudioFxConfig(),
+      ttsModel: 'qwen3-tts-instruct-flash',
+      voicePresets: [{ id: 'Neil' }],
+    })
+
+    const narrator = payload.characters.find((item) => item.name === '旁白')
+    expect(narrator).toMatchObject({
+      voice_id: 'male-qn-badaoshaoye',
+      // 加载-保存往返后仍保持 minimax，不被全局 qwen3 覆盖
+      tts_model: 'minimax-speech-2.8-hd',
     })
   })
 

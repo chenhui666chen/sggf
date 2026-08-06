@@ -44,6 +44,9 @@ const ScriptReviewIssueList = ({
                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
                     <Chip label={display.severityLabel} size="small" color={display.color} />
                     <Chip label={display.categoryLabel} size="small" variant="outlined" />
+                    {display.dimensionLabel && (
+                      <Chip label={display.dimensionLabel} size="small" variant="outlined" color="info" />
+                    )}
                     <Typography variant="body2" sx={{ fontWeight: 600 }}>
                       {display.description}
                     </Typography>

@@ -10,6 +10,7 @@ import type {
   PendingSegmentRegeneration,
   PreviewType,
   ScriptSegment,
+  SegmentSourceMode,
 } from './types'
 import {
   formatScriptSegmentSummary,
@@ -32,7 +33,12 @@ interface ScriptSegmentCardProps {
   voiceRecordingDisabled: boolean
   onChangeText: (index: number, value: string) => void
   onPreviewAudio: (index: number, segment: ScriptSegment, previewType: PreviewType) => void
-  onRegenerate: (index: number, segment: ScriptSegment, previewType: PreviewType) => void
+  onRegenerate: (
+    index: number,
+    segment: ScriptSegment,
+    previewType: PreviewType,
+    sourceMode?: SegmentSourceMode,
+  ) => void
   onStartVoiceRecording: (index: number, segment: ScriptSegment) => void
   onStopVoiceRecording: () => void
   onApplyRegeneration: (index: number, previewType: PreviewType) => void

@@ -577,3 +577,138 @@ def test_asr_remaining_timeout_uses_one_absolute_deadline(monkeypatch) -> None:
     ) as error:
         provider_module._remaining_asr_timeout(deadline, cap=30.0)
     assert error.value.code == "asr_provider_timeout"
+
+
+def test_qwen_omni_provider_sends_audio_understanding_request(monkeypatch, tmp_path) -> None:
+    from app.services.audiobook.prompt_audio_asr_provider import (
+        QwenOmniPromptAudioAsrProvider,
+    )
+
+    audio_file = tmp_path / "direction.webm"
+    audio_file.write_bytes(b"fake webm bytes")
+    captured: dict[str, object] = {}
+
+    class FakeResponse:
+        status_code = 200
+
+        def json(self):
+            return {
+                "id": "chatcmpl-unit",
+                "choices": [
+                    {
+                        "message": {
+                            "content": "口述原文：痛字重读。\n表演特征：语速缓慢，语气低沉。",
+                        }
+                    }
+                ],
+                "usage": {"input_tokens": 120, "output_tokens": 32},
+            }
+
+    def fake_post(url, *, headers, json, timeout):
+        captured["url"] = url
+        captured["headers"] = headers
+        captured["json"] = json
+        captured["timeout"] = timeout
+        return FakeResponse()
+
+    monkeypatch.setattr("httpx.post", fake_post)
+
+    provider = QwenOmniPromptAudioAsrProvider(
+        api_key="unit-key",
+        base_url="https://example.test/compatible-mode/v1",
+    )
+    result = provider.transcribe(str(audio_file))
+
+    assert result.provider == "qwen_omni"
+    assert result.model == "qwen3.5-omni-flash"
+    assert "痛字重读" in result.transcript
+    assert result.subtitle_payload is None
+    assert result.metadata["analysis_mode"] == "audio_understanding"
+    assert result.metadata["usage"] == {"input_tokens": 120, "output_tokens": 32}
+    assert captured["url"] == "https://example.test/compatible-mode/v1/chat/completions"
+    assert captured["headers"]["Authorization"] == "Bearer unit-key"
+    assert captured["json"]["model"] == "qwen3.5-omni-flash"
+    assert captured["json"]["modalities"] == ["text"]
+    content = captured["json"]["messages"][0]["content"]
+    assert content[0]["type"] == "input_audio"
+    assert content[0]["input_audio"]["data"].startswith("data:audio/webm;base64,")
+    assert content[0]["input_audio"]["format"] == "webm"
+    assert content[1]["type"] == "text"
+    assert "转写" in content[1]["text"]
+    assert "不得推断或描述性别、年龄感、基础声线或音色身份" in content[1]["text"]
+    assert "童声" in content[1]["text"]
+    assert "老人声" in content[1]["text"]
+    assert "变声" in content[1]["text"]
+
+
+def test_qwen_omni_provider_accepts_custom_instruction(monkeypatch, tmp_path) -> None:
+    from app.services.audiobook.prompt_audio_asr_provider import (
+        QwenOmniPromptAudioAsrProvider,
+    )
+
+    audio_file = tmp_path / "reading.webm"
+    audio_file.write_bytes(b"fake webm bytes")
+    captured: dict[str, object] = {}
+
+    class FakeResponse:
+        status_code = 200
+
+        def json(self):
+            return {"choices": [{"message": {"content": "{\"text_match\": true}"}}]}
+
+    def fake_post(url, *, headers, json, timeout):
+        captured["json"] = json
+        return FakeResponse()
+
+    monkeypatch.setattr("httpx.post", fake_post)
+
+    provider = QwenOmniPromptAudioAsrProvider(api_key="unit-key")
+    result = provider.transcribe(
+        str(audio_file),
+        instruction="朗读分析专用指令：仅输出JSON。",
+    )
+
+    content = captured["json"]["messages"][0]["content"]
+    assert content[1]["text"] == "朗读分析专用指令：仅输出JSON。"
+    assert '{"text_match": true}' in result.transcript
+
+
+def test_qwen_omni_provider_requires_configured_api_key(tmp_path, monkeypatch) -> None:
+    from app.services.audiobook.prompt_audio_asr_provider import (
+        PromptAudioAsrProviderError,
+        QwenOmniPromptAudioAsrProvider,
+    )
+
+    for key in (
+        "QWEN_OMNI_DIRECTION_API_KEY",
+        "DASHSCOPE_ASR_API_KEY",
+        "DASHSCOPE_API_KEY",
+        "ALIYUN_API_KEY",
+    ):
+        monkeypatch.delenv(key, raising=False)
+
+    audio_file = tmp_path / "direction.mp3"
+    audio_file.write_bytes(b"fake mp3 bytes")
+    provider = QwenOmniPromptAudioAsrProvider(api_key="")
+
+    assert provider.configured is False
+    with pytest.raises(PromptAudioAsrProviderError) as error:
+        provider.transcribe(str(audio_file))
+    assert error.value.code == "asr_provider_not_configured"
+
+
+def test_create_prompt_audio_asr_provider_returns_qwen_omni(monkeypatch) -> None:
+    from app.services.audiobook.prompt_audio_asr_provider import (
+        QwenOmniPromptAudioAsrProvider,
+        create_prompt_audio_asr_provider,
+    )
+
+    monkeypatch.delenv("DASHSCOPE_ASR_API_KEY", raising=False)
+    monkeypatch.delenv("QWEN_OMNI_DIRECTION_API_KEY", raising=False)
+    monkeypatch.setenv("DASHSCOPE_API_KEY", "unit-key")
+
+    for alias in ("qwen_omni", "qwen-omni", "qwen3.5-omni-flash", "qwen3.5-omni"):
+        provider = create_prompt_audio_asr_provider(alias)
+        assert isinstance(provider, QwenOmniPromptAudioAsrProvider)
+    provider = create_prompt_audio_asr_provider("qwen_omni")
+    assert provider is not None and provider.supports_timestamps is False

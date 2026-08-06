@@ -97,7 +97,7 @@ class StepAudioVoiceAsset:
             "description": description,
             "style": "voice_clone_reference",
             "supportsInstruct": True,
-            "default_params": {"volume": 50, "speed": 1.0, "pitch": 50},
+            "default_params": {"volume": 50, "speed": 1.0},
         }
         if not self.file_id:
             preset["disabled"] = True

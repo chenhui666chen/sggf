@@ -12,12 +12,15 @@ from typing import Dict, List, Any, Optional, Tuple
 from dataclasses import dataclass, field, asdict
 import json
 
-from .constants import INSTRUCT_SPEAKER_IDS, normalize_speaker_id
+from .constants import normalize_speaker_id
 from .llm_client import call_audiobook_llm_sync
 from .llm_json import LLMJsonParseError, parse_llm_json_object
-from .tts_model_ids import DEFAULT_AUDIOBOOK_TTS_MODEL, normalize_audiobook_tts_model
+from .tts_model_ids import (
+    DEFAULT_AUDIOBOOK_TTS_MODEL,
+    model_supports_instruct_style_control,
+    normalize_audiobook_tts_model,
+)
 from .voice_catalog import load_voice_catalog, load_voice_catalog_for_model
-from .voice_description_policy import build_quality_voice_description
 
 logger = logging.getLogger(__name__)
 
@@ -128,7 +131,16 @@ for preset_id, cfg in _BASE_PRESET_VOICES.items():
 
 # 用户自建/克隆音色的 voice_id 前缀：这些资产不在静态音色目录内，
 # 需交由所属模型的专用 manager 解析。
-_CUSTOM_ASSET_VOICE_PREFIXES = ("mimo_design:", "mimo_clone:", "stepaudio_clone:")
+# - mimo_design:/mimo_clone:/stepaudio_clone: 携带 asset 参数的跨模型音色
+# - mmx_ MiniMax 官方克隆音色前缀
+# - voice_clone_ 用户创建的克隆音色前缀
+_CUSTOM_ASSET_VOICE_PREFIXES = (
+    "mimo_design:",
+    "mimo_clone:",
+    "stepaudio_clone:",
+    "mmx_",
+    "voice_clone_",
+)
 
 
 
@@ -146,35 +158,34 @@ class VoiceProfile:
     # TTS参数
     tts_model: str = "qwen3-tts-instruct-flash"  # 🆕 适用的TTS模型
     tts_speaker_id: str = ""  # TTS服务的音色ID
-    pitch_base: int = 50  # 基础音高 0-100
+    pitch_base: int = 50  # 旧配置兼容元数据；固定音色合成请求不会发送该值
     speed_base: float = 1.0  # 基础语速 0.5-2.0
     volume_base: int = 50  # 基础音量 0-100
     default_emotion: str = "neutral"  # 默认情感（反派音色专用）
     is_villain_voice: bool = False  # 是否为反派音色（自动加大情绪张力）
     
-    # 情感参数映射（扩展版 - 在阿里云API限制内最大化情感表现力）
-    # pitch范围: 0-100 (基础50), offset范围: -50~+50 (对应API的0.5-2.0倍率)
+    # 情感参数只调整表演维度；固定音色的逐段情绪不改变基础音高。
     # speed范围: 0.5-2.0倍率, volume范围: 0-100
     emotion_adjustments: Dict[str, Dict[str, Any]] = field(default_factory=lambda: {
         # === 基础情感（6种） ===
-        "neutral": {"pitch_offset": 0, "speed_multiplier": 1.0, "volume_offset": 0},
-        "happy": {"pitch_offset": 10, "speed_multiplier": 1.12, "volume_offset": 5},      # 开心：音高↑10%，语速↑12%，音量↑
-        "sad": {"pitch_offset": -15, "speed_multiplier": 0.85, "volume_offset": -8},       # 悲伤：音高↓15%，语速↓15%，音量↓
-        "angry": {"pitch_offset": 12, "speed_multiplier": 1.15, "volume_offset": 8},      # 愤怒：音高↑12%，语速↑15%，音量↑↑（降低幅度避免API 428错误）
-        "excited": {"pitch_offset": 8, "speed_multiplier": 1.10, "volume_offset": 5},     # 兴奋：音高↑8%，语速↑10%，音量↑（降低幅度避免API 428错误）
-        "calm": {"pitch_offset": -8, "speed_multiplier": 0.92, "volume_offset": -3},       # 平静：音高↓8%，语速↓8%，音量略↓
+        "neutral": {"speed_multiplier": 1.0, "volume_offset": 0},
+        "happy": {"speed_multiplier": 1.12, "volume_offset": 5},
+        "sad": {"speed_multiplier": 0.85, "volume_offset": -8},
+        "angry": {"speed_multiplier": 1.15, "volume_offset": 8},
+        "excited": {"speed_multiplier": 1.10, "volume_offset": 5},
+        "calm": {"speed_multiplier": 0.92, "volume_offset": -3},
         
         # === 扩展情感（10种） ===
-        "fearful": {"pitch_offset": 10, "speed_multiplier": 1.15, "volume_offset": -5},    # 恐惧：音高↑10%，语速↑15%，音量↓（降低幅度避免API 428错误）
-        "tense": {"pitch_offset": 8, "speed_multiplier": 1.12, "volume_offset": -2},      # 紧张：音高↑8%，语速↑12%，音量略↓
-        "surprised": {"pitch_offset": 12, "speed_multiplier": 1.18, "volume_offset": 5},   # 惊讶：音高↑12%，语速↑18%，音量↑（降低幅度避免API 428错误）
-        "disgusted": {"pitch_offset": -12, "speed_multiplier": 0.88, "volume_offset": 3},  # 厌恶：音高↓12%，语速↓12%，音量略↑
-        "tender": {"pitch_offset": -5, "speed_multiplier": 0.90, "volume_offset": -5},     # 温柔：音高↓5%，语速↓10%，音量↓
-        "serious": {"pitch_offset": -10, "speed_multiplier": 0.95, "volume_offset": 0},    # 严肃：音高↓10%，语速↓5%，音量不变
-        "gentle": {"pitch_offset": -6, "speed_multiplier": 0.93, "volume_offset": -4},     # 轻柔：音高↓6%，语速↓7%，音量↓
-        "nervous": {"pitch_offset": 8, "speed_multiplier": 1.12, "volume_offset": -3},    # 紧张不安：音高↑8%，语速↑12%，音量略↓（降低幅度避免API 428错误）
-        "whisper": {"pitch_offset": -18, "speed_multiplier": 0.75, "volume_offset": -20},  # 低语：音高↓18%，语速↓25%，音量↓↓
-        "shout": {"pitch_offset": 28, "speed_multiplier": 1.20, "volume_offset": 15},      # 呼喊：音高↑28%，语速↑20%，音量↑↑↑
+        "fearful": {"speed_multiplier": 1.15, "volume_offset": -5},
+        "tense": {"speed_multiplier": 1.12, "volume_offset": -2},
+        "surprised": {"speed_multiplier": 1.18, "volume_offset": 5},
+        "disgusted": {"speed_multiplier": 0.88, "volume_offset": 3},
+        "tender": {"speed_multiplier": 0.90, "volume_offset": -5},
+        "serious": {"speed_multiplier": 0.95, "volume_offset": 0},
+        "gentle": {"speed_multiplier": 0.93, "volume_offset": -4},
+        "nervous": {"speed_multiplier": 1.12, "volume_offset": -3},
+        "whisper": {"speed_multiplier": 0.75, "volume_offset": -20},
+        "shout": {"speed_multiplier": 1.20, "volume_offset": 15},
     })
     
     def get_tts_params(self, emotion: str = "") -> Dict[str, Any]:
@@ -183,18 +194,14 @@ class VoiceProfile:
             emotion = self.default_emotion
         
         adjustment = self.emotion_adjustments.get(emotion, self.emotion_adjustments["neutral"])
-        is_instruct_voice = self.tts_speaker_id in INSTRUCT_SPEAKER_IDS
-        use_instruct_mode = bool(is_instruct_voice and emotion and emotion != "neutral")
+        supports_instruct_style = model_supports_instruct_style_control(self.tts_model)
+        use_instruct_mode = bool(emotion and emotion != "neutral") and supports_instruct_style
         is_narrator = str(self.character_name).strip() in ("旁白", "narrator")
         
         volume_offset = adjustment.get("volume_offset", 0)
         final_volume = max(0, min(100, self.volume_base + volume_offset))
         
-        if use_instruct_mode:
-            pitch_value = max(0, min(100, self.pitch_base))
-            speed_value = max(0.5, min(2.0, self.speed_base))
-        else:
-            pitch_value = max(0, min(100, self.pitch_base + adjustment["pitch_offset"]))
+        if not supports_instruct_style:
             if is_narrator:
                 # 旁白语速保持稳定：逐段 emotion 标签直接乘变速会让旁白忽快忽慢，
                 # 情绪起伏交给风格指令/performance_notes 表达
@@ -206,59 +213,25 @@ class VoiceProfile:
 
         params = {
             "speaker": speaker_id,
-            "pitch": pitch_value,
-            "speed": speed_value,
             "volume": final_volume,
             "pause_before": self._get_pause_before(emotion),
             "pause_after": self._get_pause_after(emotion),
-            "character_base_pitch": max(0, min(100, self.pitch_base)),
-            "character_base_speed": max(0.5, min(2.0, self.speed_base)),
-            "voice_description": self._build_voice_description(emotion, speed_value),
         }
+        if not supports_instruct_style:
+            params["speed"] = speed_value
+            params["character_base_speed"] = max(0.5, min(2.0, self.speed_base))
         
         if use_instruct_mode:
             params["use_instruct_mode"] = True
         
-        try:
-            logger.debug(
-                f"get_tts_params -> speaker={params.get('speaker')}, "
-                f"pitch={params.get('pitch')}, speed={params.get('speed'):.2f}, volume={params.get('volume')}"
-            )
-        except Exception:
-            pass
+        logger.debug(
+            "get_tts_params -> speaker=%s, speed=%s, volume=%s",
+            params.get("speaker"),
+            params.get("speed", "instruction"),
+            params.get("volume"),
+        )
         
         return params
-
-    def _build_voice_description(self, emotion: str, speed_value: float) -> str:
-        """生成可被模型风格控制层复用的结构化声音描述。"""
-        age_map = {
-            "child": "儿童",
-            "teen": "青少年",
-            "young": "青年",
-            "adult": "中年",
-            "elder": "老年",
-        }
-        personality_traits = {
-            "calm": ["沉稳", "吐字清晰"],
-            "energetic": ["明亮", "有活力"],
-            "gentle": ["温柔", "亲切自然"],
-            "serious": ["严肃", "有力"],
-            "cold": ["冷静", "克制"],
-            "warm": ["温暖", "亲切自然"],
-            "dialect": ["地域口音", "生活化"],
-        }
-        pitch_label = "偏高" if self.pitch_base >= 62 else "偏低" if self.pitch_base <= 38 else "中音"
-        pace_label = "快速" if speed_value >= 1.15 else "缓慢" if speed_value <= 0.9 else "中速"
-        traits = personality_traits.get(str(self.personality or "").strip().lower(), ["吐字清晰"])
-        return build_quality_voice_description(
-            gender=self.gender,
-            age_group=age_map.get(str(self.age_group or "").strip().lower(), "青年"),
-            pitch=pitch_label,
-            pace=pace_label,
-            emotion=emotion or self.default_emotion or "neutral",
-            traits=traits,
-            use_case="有声书角色对白",
-        )
 
     def _get_pause_before(self, emotion: str) -> float:
         """根据情感计算前停顿时长（秒）"""
@@ -311,6 +284,9 @@ class VoiceManager:
         self.used_voice_ids = set()
         self.llm_client = llm_client
         self._fuzzy_threshold = 0.80
+        # 资产归属用户 ID：解析用户私有音色资产（mimo 声音设计/克隆等）时用于归属校验。
+        # 后台生成任务应设置为项目所有者 user_id，API 路径则由当前登录用户传入。
+        self.owner_user_id: Optional[int] = None
 
     def _fuzzy_match_character(self, character_name: str) -> Optional[str]:
         """模糊匹配角色名，返回已存在的规范角色名
@@ -426,6 +402,9 @@ class VoiceManager:
             # 直接返回 None 避免无意义的自我递归。
             if type(delegate) is VoiceManager:
                 return None
+            # 传播资产归属用户，避免委派出的 manager 解析私有音色资产时因
+            # owner_user_id 缺失被归属校验拒绝（后台生成任务无当前用户上下文）。
+            delegate.owner_user_id = getattr(self, "owner_user_id", None)
             delegate.apply_project_voice_mapping({character_name: dict(config)})
             return delegate.get_voice(character_name)
         except Exception as exc:  # noqa: BLE001
@@ -450,15 +429,13 @@ class VoiceManager:
                 {
                     "volume": voice_config.get("volume_base"),
                     "speed": voice_config.get("speed_base"),
-                    "pitch": voice_config.get("pitch_base"),
                 },
             )
             if enhanced.get("volume") is not None:
                 voice_config["volume_base"] = int(max(0, min(100, enhanced["volume"])))
             if enhanced.get("speed") is not None:
                 voice_config["speed_base"] = float(max(0.5, min(2.0, enhanced["speed"])))
-            if enhanced.get("pitch") is not None:
-                voice_config["pitch_base"] = int(max(0, min(100, enhanced["pitch"])))
+            # voice_type 是表演预设，不能改变已选固定音色的基础音高。
             if enhanced.get("emotion"):
                 voice_config["default_emotion"] = enhanced["emotion"]
         except Exception as exc:
@@ -1316,16 +1293,22 @@ class VoiceManager:
         """
         mapping = {}
         for character_name, profile in self.character_voices.items():
+            # character_voices 可能含多种 profile 类型（VoiceProfile / MiMoInlineVoiceProfile /
+            # CosyVoiceV3PlusProfile），后两者缺少 gender/age_group(/personality/tts_model) 字段。
+            # 直接属性访问会抛 AttributeError 导致音色映射无法持久化，这里统一用 getattr 兜底。
+            gender = getattr(profile, "gender", None)
+            age_group = getattr(profile, "age_group", None)
+            tts_model = getattr(profile, "tts_model", None)
             mapping[character_name] = {
                 "voice_id": profile.voice_id,
                 "volume": profile.volume_base,
                 "speed": profile.speed_base,
                 "pitch": profile.pitch_base,
-                "gender": profile.gender if profile.gender != "unknown" else None,
-                "age_group": profile.age_group if profile.age_group != "unknown" else None,
+                "gender": gender if gender != "unknown" else None,
+                "age_group": age_group if age_group != "unknown" else None,
                 "role_type": getattr(profile, 'role_type', None),
-                "personality": profile.personality,
-                "tts_model": profile.tts_model if profile.tts_model != "qwen3-tts-instruct-flash" else None,  # 🆕 TTS模型
+                "personality": getattr(profile, "personality", None),
+                "tts_model": tts_model if tts_model != "qwen3-tts-instruct-flash" else None,  # 🆕 TTS模型
             }
         return mapping
     
@@ -1354,8 +1337,11 @@ class VoiceManager:
         age_dist = {}
         
         for profile in self.character_voices.values():
-            gender_dist[profile.gender] = gender_dist.get(profile.gender, 0) + 1
-            age_dist[profile.age_group] = age_dist.get(profile.age_group, 0) + 1
+            # profile 可能为异构类型（缺少 gender/age_group），用 getattr 兜底避免 AttributeError。
+            gender = getattr(profile, "gender", "unknown")
+            age_group = getattr(profile, "age_group", "unknown")
+            gender_dist[gender] = gender_dist.get(gender, 0) + 1
+            age_dist[age_group] = age_dist.get(age_group, 0) + 1
         
         return {
             "total_characters": len(self.character_voices),

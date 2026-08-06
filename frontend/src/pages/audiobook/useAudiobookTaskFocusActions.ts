@@ -21,6 +21,7 @@ interface UseAudiobookTaskFocusActionsParams {
   setActiveStep: Dispatch<SetStateAction<number>>
   setTaskStatuses: Dispatch<SetStateAction<Record<string, TaskStatus>>>
   setLastGenerationMode: Dispatch<SetStateAction<'full' | 'script_only'>>
+  setProgressViewDismissed: Dispatch<SetStateAction<boolean>>
   setSnackbar: SetSnackbar
 }
 
@@ -34,6 +35,7 @@ export const useAudiobookTaskFocusActions = ({
   setActiveStep,
   setTaskStatuses,
   setLastGenerationMode,
+  setProgressViewDismissed,
   setSnackbar,
 }: UseAudiobookTaskFocusActionsParams) => {
   const formatActiveTaskLabel = useCallback(
@@ -54,6 +56,7 @@ export const useAudiobookTaskFocusActions = ({
       }
 
       if (options?.activateProgressView) {
+        setProgressViewDismissed(false)
         setActiveStep(1)
       } else if (options?.forceGenerating ?? isActiveAudiobookTask(task)) {
         setActiveStep((prev) => (prev === 0 ? 1 : prev))
@@ -78,6 +81,7 @@ export const useAudiobookTaskFocusActions = ({
       setCurrentAudiobookProjectId,
       setCurrentTaskId,
       setGenerating,
+      setProgressViewDismissed,
     ],
   )
 

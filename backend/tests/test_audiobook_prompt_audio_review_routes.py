@@ -34,6 +34,9 @@ from app.services.audiobook.prompt_audio_asr_provider import PromptAudioAsrResul
 from app.services.audiobook.prompt_audio_transcript_runner import (
     execute_prompt_audio_transcript,
 )
+from app.services.audiobook.voice_identity_policy import (
+    VOICE_IDENTITY_POLICY_VERSION,
+)
 
 
 class CompatTestClient:
@@ -212,6 +215,7 @@ def seed_prompt_audio_review_context(session_factory) -> dict[str, int]:
                         "text": "The door opened slowly.",
                         "voice_params": {
                             "provider_prompt_snapshot": {
+                                "voice_identity_policy_version": VOICE_IDENTITY_POLICY_VERSION,
                                 "model": "minimax-speech-2.8-hd",
                                 "provider_prompt": {
                                     "inline_tag_strategy": {
@@ -228,6 +232,7 @@ def seed_prompt_audio_review_context(session_factory) -> dict[str, int]:
                         "text": "She whispered from the hallway.",
                         "voice_params": {
                             "provider_prompt_snapshot": {
+                                "voice_identity_policy_version": VOICE_IDENTITY_POLICY_VERSION,
                                 "model": "doubao-tts",
                                 "provider_prompt": {
                                     "inline_tag_strategy": {

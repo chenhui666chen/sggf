@@ -138,10 +138,13 @@ class ParallelMixin:
             for char_name in characters_in_script:
                 existing_profile = self.voice_manager.get_voice(char_name)
                 if existing_profile:
+                    # get_voice 可能返回多种 profile 类型（VoiceProfile / MiMoInlineVoiceProfile /
+                    # CosyVoiceV3PlusProfile 等），后两者缺少 gender/age_group(/personality) 字段。
+                    # 直接属性访问会抛 AttributeError 导致整个剧本生成失败，这里用 getattr 兜底。
                     known_traits[char_name] = {
-                        "gender": existing_profile.gender,
-                        "age_group": existing_profile.age_group,
-                        "personality": existing_profile.personality,
+                        "gender": getattr(existing_profile, "gender", "neutral"),
+                        "age_group": getattr(existing_profile, "age_group", "adult"),
+                        "personality": getattr(existing_profile, "personality", "calm"),
                     }
 
             if characters_in_script and not known_traits:

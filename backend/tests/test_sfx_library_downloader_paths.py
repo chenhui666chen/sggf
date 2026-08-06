@@ -27,3 +27,24 @@ def test_sfx_downloader_uses_backend_audio_library_dir_by_default(monkeypatch):
     downloader = downloader_module.SfxLibraryDownloader()
     assert downloader.index_path == expected_dir / "sound_effects_index.json"
     assert downloader.output_dir == expected_dir / "sound_effects"
+
+
+def test_audio_library_path_resolver_rejects_paths_outside_library(tmp_path):
+    paths_module = importlib.import_module("app.services.audiobook.audio_library_paths")
+    library_root = tmp_path / "audio_library"
+    inside = library_root / "music" / "inside.mp3"
+    outside = tmp_path / "outside.mp3"
+    inside.parent.mkdir(parents=True)
+    inside.write_bytes(b"inside")
+    outside.write_bytes(b"outside")
+
+    assert (
+        paths_module.resolve_audio_library_file_path("music/inside.mp3", library_root)
+        == inside.resolve()
+    )
+    assert paths_module.resolve_audio_library_file_path(inside, library_root) == inside.resolve()
+    assert paths_module.resolve_audio_library_file_path(outside, library_root) is None
+    assert (
+        paths_module.resolve_audio_library_file_path("../outside.mp3", library_root)
+        is None
+    )

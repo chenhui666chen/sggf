@@ -9,6 +9,7 @@ from typing import List, Dict, Any, Optional, Callable
 from ._dataclasses import ScriptSegment, ChapterStructure
 from ._llm_review import review_script_segments_with_llm
 from app.services.audiobook.llm_config import is_audiobook_script_review_enabled
+from app.services.audiobook.tts_pause import AudiobookPauseRequested
 from app.services.chapter_adaptation_assets import format_audio_adaptation_brief
 
 logger = logging.getLogger(__name__)
@@ -50,6 +51,7 @@ class AudiobookScriptAgentBase:
         progress_callback: Optional[Callable[[float, Optional[Dict[str, Any]]], None]] = None,
         character_profiles: Optional[List[Dict[str, Any]]] = None,
         enable_llm_script_review: Optional[bool] = None,
+        pause_check: Optional[Callable[[], bool]] = None,
     ) -> List[ScriptSegment]:
         """
         将章节改编为有声剧本
@@ -83,6 +85,20 @@ class AudiobookScriptAgentBase:
             except Exception as exc:
                 logger.warning("进度回调失败: %s", exc)
 
+        def check_pause(phase: str) -> None:
+            """阶段/批次边界暂停检查，检测到暂停请求时中断剧本生成。"""
+            if pause_check is None:
+                return
+            try:
+                paused = pause_check()
+            except Exception as exc:
+                logger.warning("暂停状态检查失败，继续剧本生成: %s", exc)
+                return
+            if paused:
+                logger.info("⏸️ 检测到暂停请求，停止剧本生成 (phase=%s)", phase)
+                raise AudiobookPauseRequested(f"pause_requested_at_{phase}")
+
+        check_pause("analysis")
         report_progress(0.02, {"phase": "analysis"})
         analysis = await self._analyze_chapter(
             chapter_content,
@@ -98,6 +114,7 @@ class AudiobookScriptAgentBase:
         transform_span = 0.80
 
         def on_transform_progress(batch_index: int, batch_total: int) -> None:
+            check_pause(f"transform_batch_{batch_index}")
             if batch_total <= 0:
                 report_progress(transform_base, {"phase": "transform", "batch": "0/0"})
                 return
@@ -111,6 +128,7 @@ class AudiobookScriptAgentBase:
             audio_adaptation_brief=audio_adaptation_brief,
             progress_callback=on_transform_progress,
             character_profiles=character_profiles,
+            pause_check=pause_check,
         )
         report_progress(0.94, {"phase": "transform_done"})
         logger.info(f"   转化完成: {len(script_segments)} 个片段")
@@ -129,6 +147,8 @@ class AudiobookScriptAgentBase:
                 script_segments,
                 source_text=chapter_content,
                 audio_engine_mode=self.audio_engine_mode,
+                pause_check=pause_check,
+                tts_model=self.tts_model,
             )
             self.last_script_review = review_result.report
             if review_result.report.get("applied"):

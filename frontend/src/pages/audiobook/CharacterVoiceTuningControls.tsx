@@ -43,14 +43,12 @@ interface CharacterVoiceTuningControlsProps {
   characterVoice: CharacterVoiceSetting
   onVolumeChange: (characterId: number, volume: number) => void
   onSpeedChange: (characterId: number, speed: number) => void
-  onPitchChange: (characterId: number, pitch: number) => void
 }
 
 const CharacterVoiceTuningControls = ({
   characterVoice,
   onVolumeChange,
   onSpeedChange,
-  onPitchChange,
 }: CharacterVoiceTuningControlsProps) => {
   const characterId = characterVoice.characterId
 
@@ -71,14 +69,6 @@ const CharacterVoiceTuningControls = ({
         max={2.0}
         step={0.1}
         onChange={(value) => onSpeedChange(characterId, value)}
-      />
-      <TuningSlider
-        label="音高"
-        value={characterVoice.pitch ?? 50}
-        min={0}
-        max={100}
-        step={5}
-        onChange={(value) => onPitchChange(characterId, value)}
       />
     </>
   )

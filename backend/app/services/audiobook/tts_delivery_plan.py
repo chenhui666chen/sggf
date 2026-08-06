@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any, Dict, Iterable, List
 
 from app.services.audiobook.tts_model_ids import (
     DEFAULT_AUDIOBOOK_TTS_MODEL,
     get_audiobook_tts_style_capabilities,
+    model_uses_basic_numeric_speed_control,
     normalize_audiobook_tts_model,
 )
 
@@ -77,9 +79,9 @@ def build_delivery_plan(
         params.get("segment_speaker"),
     )
     performance_notes = _first_text(
-        plan.get("performance_notes"),
         getattr(segment, "performance_notes", ""),
         params.get("performance_notes"),
+        plan.get("performance_notes"),
     )
     text = _first_text(getattr(segment, "text", ""), params.get("text"))
     target_emotion = _first_text(
@@ -110,8 +112,17 @@ def build_delivery_plan(
     plan.setdefault("emotion_primary", target_emotion or "neutral")
     plan.setdefault("emotion", target_emotion or "neutral")
     plan.setdefault("emotion_mix", _infer_emotion_mix(performance_notes))
-    plan.setdefault("pace", _infer_pace(params, performance_notes))
-    plan.setdefault("pitch", _infer_pitch(performance_notes))
+    plan.setdefault(
+        "pace",
+        _infer_pace(
+            params,
+            performance_notes,
+            allow_numeric_fallback=model_uses_basic_numeric_speed_control(resolved_model),
+        ),
+    )
+    # Segment-level pitch is a voice-identity control, not a performance
+    # control. Keep it out of the provider-neutral plan for every model.
+    plan.pop("pitch", None)
     plan.setdefault("intensity", _infer_intensity(plan["delivery_mode"], target_emotion, performance_notes))
     plan.setdefault("micro_tags", _infer_micro_tags(performance_notes, text))
     pause_strategy = _infer_pause_strategy(performance_notes)
@@ -129,10 +140,17 @@ def build_delivery_plan(
         plan["cadence_profile"] = cadence_profile
     if cadence_reason:
         plan["cadence_reason"] = cadence_reason
-    stress_words = _coerce_string_list(plan.get("stress_words"))
+    stress_words = _coerce_string_list(plan.get("stress_words")) or _infer_stress_words(performance_notes)
     if stress_words:
         plan["stress_words"] = stress_words
-    role = _first_text(plan.get("director_role"), params.get("instruct_role"), getattr(segment, "instruct_role", ""))
+    ending_style = _first_text(plan.get("ending_style"), _infer_ending_style(performance_notes))
+    if ending_style:
+        plan["ending_style"] = ending_style
+    role = _first_text(
+        params.get("instruct_role"),
+        getattr(segment, "instruct_role", ""),
+        plan.get("director_role"),
+    )
     scene = _first_text(plan.get("director_scene"), params.get("instruct_scene"), getattr(segment, "instruct_scene", ""))
     identity = _first_text(
         plan.get("director_identity"),
@@ -140,15 +158,40 @@ def build_delivery_plan(
         getattr(segment, "instruct_identity", ""),
     )
     if role:
-        plan.setdefault("director_role", role)
+        plan["director_role"] = role
     if scene:
         plan.setdefault("director_scene", scene)
     if identity:
         plan.setdefault("director_identity", identity)
-    guidance = _first_text(plan.get("director_guidance"), params.get("instructions"), performance_notes)
+    auto_guidance_values = {
+        value
+        for value in (
+            performance_notes,
+            _text(plan.get("performance_notes")),
+            _text(plan.get("style_instruction")),
+        )
+        if value
+    }
+    guidance = next(
+        (
+            candidate
+            for candidate in (
+                _text(plan.get("director_guidance")),
+                _text(params.get("instructions")),
+            )
+            if candidate and candidate not in auto_guidance_values
+        ),
+        "",
+    )
     if guidance:
         plan["director_guidance"] = guidance
-    plan.setdefault("style_instruction", _build_style_instruction(plan, performance_notes))
+    else:
+        plan.pop("director_guidance", None)
+    style_instruction = _build_style_instruction(plan, performance_notes)
+    if style_instruction:
+        plan["style_instruction"] = style_instruction
+    else:
+        plan.pop("style_instruction", None)
 
     return _compact_plan(plan)
 
@@ -158,22 +201,20 @@ def delivery_plan_instruction_parts(plan: Dict[str, Any] | None) -> List[str]:
     parts: List[str] = []
     delivery_mode = _text(value.get("delivery_mode"))
     pace = _text(value.get("pace"))
-    pitch = _text(value.get("pitch"))
     intensity = _text(value.get("intensity"))
     emotion_mix = _coerce_string_list(value.get("emotion_mix"))
     micro_tags = _coerce_string_list(value.get("micro_tags"))
     pause_strategy = _text(value.get("pause_strategy"))
     stress_words = _coerce_string_list(value.get("stress_words"))
+    ending_style = _text(value.get("ending_style"))
     guidance = _text(value.get("director_guidance"))
 
     if delivery_mode:
         parts.append(f"朗读方式：{delivery_mode}")
-    if pace or pitch or intensity:
+    if pace or intensity:
         controls = []
         if pace:
             controls.append(f"语速={pace}")
-        if pitch:
-            controls.append(f"音调={pitch}")
         if intensity:
             controls.append(f"强度={intensity}")
         parts.append("韵律控制：" + "，".join(controls))
@@ -193,6 +234,10 @@ def delivery_plan_instruction_parts(plan: Dict[str, Any] | None) -> List[str]:
         parts.append("剧情节奏：" + "，".join(cadence_parts))
     if stress_words:
         parts.append("重读词：" + "、".join(stress_words))
+    if ending_style == "lengthened":
+        parts.append("收尾方式：句尾拖长")
+    elif ending_style == "clipped":
+        parts.append("收尾方式：短促收尾")
     if guidance:
         parts.append(f"导演指导：{guidance}")
     return parts
@@ -238,12 +283,19 @@ def _infer_emotion_mix(notes: str) -> List[str]:
     return [item for item in candidates if item in source]
 
 
-def _infer_pace(params: Dict[str, Any], notes: str) -> str:
+def _infer_pace(
+    params: Dict[str, Any],
+    notes: str,
+    *,
+    allow_numeric_fallback: bool = True,
+) -> str:
     source = _text(notes)
     if _contains_any(source, ("极慢", "偏慢", "放慢", "缓慢", "慢速")):
         return "slow"
     if _contains_any(source, ("偏快", "加快", "快速", "急促")):
         return "fast"
+    if not allow_numeric_fallback:
+        return "medium"
     raw_speed = params.get("rate", params.get("speed"))
     try:
         speed = float(raw_speed)
@@ -254,15 +306,6 @@ def _infer_pace(params: Dict[str, Any], notes: str) -> str:
     if speed > 1.08:
         return "fast"
     return "medium"
-
-
-def _infer_pitch(notes: str) -> str:
-    source = _text(notes)
-    if _contains_any(source, ("压低", "低沉", "低音", "声线更低")):
-        return "lower"
-    if _contains_any(source, ("提高", "高亢", "上扬", "提起")):
-        return "higher"
-    return "neutral"
 
 
 def _infer_intensity(delivery_mode: str, emotion: str, notes: str) -> str:
@@ -293,8 +336,38 @@ def _infer_micro_tags(notes: str, text: str) -> List[str]:
 
 def _infer_pause_strategy(notes: str) -> str:
     source = _text(notes)
-    if _contains_any(source, ("留白", "长停顿", "停顿")):
-        return source
+    pause_clauses = [
+        clause.strip()
+        for clause in re.split(r"[，,；;。！？!?]+", source)
+        if clause.strip()
+        and _contains_any(
+            clause,
+            ("留白", "停顿", "短停", "长停", "停半拍", "停一下", "pause"),
+        )
+    ]
+    return "，".join(_unique(pause_clauses))
+
+
+def _infer_stress_words(notes: str) -> List[str]:
+    patterns = (
+        r"(?:重读|强调|加重)\s*[\"'“‘]?([^\"'”’\s，。！？；：]{1,12})[\"'”’]?\s*字?",
+        r"[\"'“‘]([^\"'”’]{1,12})[\"'”’]\s*字?\s*(?:重读|强调|加重)",
+    )
+    values: List[str] = []
+    for pattern in patterns:
+        for match in re.finditer(pattern, _text(notes)):
+            value = match.group(1).strip()
+            if value and value not in values:
+                values.append(value)
+    return values[:8]
+
+
+def _infer_ending_style(notes: str) -> str:
+    source = _text(notes)
+    if _contains_any(source, ("句尾拖长", "尾音拖长", "尾音拉长", "结尾拖长")):
+        return "lengthened"
+    if _contains_any(source, ("句尾收紧", "短促收尾", "干脆收尾")):
+        return "clipped"
     return ""
 
 
