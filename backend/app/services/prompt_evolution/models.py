@@ -108,6 +108,10 @@ class PromptVersion:
                     "sample_id": r.sample_id,
                     "original_text": r.original_text[:100] + "..." if len(r.original_text) > 100 else r.original_text,
                     "rewritten_text": r.rewritten_text[:100] + "..." if len(r.rewritten_text) > 100 else r.rewritten_text,
+                    # 🔧 篇幅可追溯：文本存档截断为100字，完整长度单独记录，
+                    # 便于审计改写缩短问题（此前缩短在数据上完全不可追溯）
+                    "original_text_length": len(r.original_text),
+                    "rewritten_text_length": len(r.rewritten_text),
                     "original_ai_score": r.original_ai_score,
                     "rewritten_ai_score": r.rewritten_ai_score,
                     "score_reduction": r.score_reduction,

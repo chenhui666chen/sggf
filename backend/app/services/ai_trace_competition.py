@@ -310,7 +310,18 @@ class ModelConfigStorage:
             if next_count >= self.AVAILABILITY_FAILURE_THRESHOLD:
                 eliminated = config.setdefault("eliminated_models", {}).setdefault(target_genre, [])
                 if result.model_id not in eliminated:
-                    eliminated.append(result.model_id)
+                    # 存活模型地板保护：降到下限后不再熔断淘汰，避免可用模型池见底
+                    alive_count = sum(
+                        1 for m in REWRITE_CAPABLE_MODELS
+                        if m.model_id not in set(eliminated)
+                    )
+                    if alive_count > self.MIN_ALIVE_MODELS:
+                        eliminated.append(result.model_id)
+                    else:
+                        logger.warning(
+                            f"⚠️ 熔断地板保护[{target_genre}]: {result.model_id} 连续失败达阈值，"
+                            f"但存活模型已至下限（{self.MIN_ALIVE_MODELS}），暂不淘汰"
+                        )
             return config
 
         updated = self._config_store.update(update)
@@ -666,6 +677,7 @@ class ModelConfigStorage:
     ELIMINATION_MIN_EVALS = 5       # 至少评估N次后才参与淘汰判定
     ELIMINATION_MIN_MODELS = 2      # 至少N个成熟模型后才开始横向比较
     ELIMINATION_SCORE_GAP = 20      # 与最佳模型分差超过此值则淘汰
+    MIN_ALIVE_MODELS = 4            # 淘汰后至少保留N个存活模型（性能淘汰与熔断共用地板）
     CHALLENGE_INTERVAL = 5          # 每N轮进化迭代触发一次挑战赛
     CHALLENGE_PICK_COUNT = 1        # 每次挑战赛从淘汰池选取的模型数
     CHALLENGE_REVIVE_RANK = 3       # 挑战者进入前N名时复活
@@ -708,18 +720,29 @@ class ModelConfigStorage:
         # 淘汰门槛
         threshold = best_score + self.ELIMINATION_SCORE_GAP
 
-        # 找出应被淘汰的模型
-        newly_eliminated = []
+        # 找出应被淘汰的模型（按平均分降序从最差开始，保留至少 MIN_ALIVE_MODELS 个存活模型）
         config = self.load_config()
         eliminated_map = config.get("eliminated_models", {})
         current_eliminated = set(eliminated_map.get(target_genre, []))
 
-        for model_id, rec in qualified.items():
-            if model_id in current_eliminated:
-                continue  # 已淘汰
-            if rec.avg_ai_score > threshold:
-                newly_eliminated.append(model_id)
-                current_eliminated.add(model_id)
+        candidates = [
+            model_id for model_id, rec in qualified.items()
+            if model_id not in current_eliminated and rec.avg_ai_score > threshold
+        ]
+        candidates.sort(key=lambda mid: -records[mid].avg_ai_score)
+
+        alive_count = sum(
+            1 for m in REWRITE_CAPABLE_MODELS if m.model_id not in current_eliminated
+        )
+        quota = max(0, alive_count - self.MIN_ALIVE_MODELS)
+        newly_eliminated = candidates[:quota]
+        for model_id in newly_eliminated:
+            current_eliminated.add(model_id)
+        if len(candidates) > quota:
+            logger.warning(
+                f"⚠️ 淘汰地板保护[{target_genre}]: {len(candidates) - quota} 个模型达淘汰门槛，"
+                f"因存活模型下限（{self.MIN_ALIVE_MODELS}）保留"
+            )
 
         if newly_eliminated:
             eliminated_map[target_genre] = list(current_eliminated)

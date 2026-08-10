@@ -592,7 +592,7 @@ class SegmentPreviewService:
             logger.warning("试听配乐文件不存在: %s", music_path)
             return base_audio
 
-        base_bgm_volume_db = self.audio_fx.get("base_bgm_volume", -24)
+        base_bgm_volume_db = self.audio_fx.get("base_bgm_volume", -27)
         try:
             volume_val = float(cue.get("volume", 0.2))
         except (TypeError, ValueError):

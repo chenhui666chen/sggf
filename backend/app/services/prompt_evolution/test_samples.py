@@ -20,6 +20,11 @@ logger = logging.getLogger(__name__)
 # 按 sample_id 哈希取固定比例划入留出集，同一样本恒定归属，增删样本不漂移。
 HOLDOUT_RATIO = 0.3
 
+# 有效样本最低字数：朱雀实测对约300字以下文本返回0分（检测盲区），
+# 且用户端真实使用场景为约3000字章节改写；低于该长度的样本会被跳过
+# 并从池中清除，避免短文本虚假信号污染进化排名
+MIN_SAMPLE_TEXT_LENGTH = 2500
+
 
 def is_holdout_sample_id(sample_id: str) -> bool:
     """按 sample_id 哈希做确定性留出划分（同一 ID 恒定结果，不随机漂移）。"""
@@ -138,68 +143,15 @@ class TestSample:
         )
 
 
-DEFAULT_TEST_SAMPLES = [
-    TestSample(
-        sample_id="fantasy_001",
-        text="林凡站在悬崖边，望着远处的云海。他的修为已经达到了金丹期巅峰，只差一步就能突破到元婴期。这十年来，他经历了无数生死考验，从一个小小的炼气期修士，一步步走到今天。",
-        genre="玄幻",
-        description="玄幻小说典型场景，修炼突破"
-    ),
-    TestSample(
-        sample_id="urban_001",
-        text="李明推开办公室的门，看到同事们都在忙碌地工作。他刚从国外留学回来，接手了家族企业。虽然压力很大，但他相信凭借自己的能力，一定能把公司经营得更好。",
-        genre="都市",
-        description="都市职场场景，回国创业"
-    ),
-    TestSample(
-        sample_id="romance_001",
-        text="苏晴看着窗外的雨，想起了三年前那个夏天。那天她在图书馆遇到了陈浩，两人因为一本书结缘。从那以后，他们一起度过了许多美好的时光，直到陈浩出国留学。",
-        genre="言情",
-        description="言情小说场景，回忆初恋"
-    ),
-    TestSample(
-        sample_id="suspense_001",
-        text="侦探走进案发现场，仔细观察每一个细节。地上有一滩血迹，墙上有一枚模糊的指纹。他蹲下身，用放大镜仔细查看，发现了一些不寻常的痕迹。",
-        genre="悬疑",
-        description="悬疑小说场景，侦探破案"
-    ),
-    TestSample(
-        sample_id="scifi_001",
-        text="飞船穿越了虫洞，来到了一个未知的星系。船长看着屏幕上的数据，惊讶地发现这里的物理法则与地球完全不同。重力是地球的三倍，时间流速也异常缓慢。",
-        genre="科幻",
-        description="科幻小说场景，太空探索"
-    ),
-    TestSample(
-        sample_id="historical_001",
-        text="将军站在城墙上，看着远处的敌军。这场仗已经打了三个月，双方都损失惨重。他知道，这一战将决定整个王朝的命运。他握紧了手中的剑，准备迎接最后的决战。",
-        genre="历史",
-        description="历史小说场景，将军守城"
-    ),
-    TestSample(
-        sample_id="martial_arts_001",
-        text="剑客拔出长剑，剑光如水，寒气逼人。他练剑三十年，从未遇到对手。今天，他终于遇到了一个值得他全力以赴的对手。两人相对而立，气氛紧张到了极点。",
-        genre="武侠",
-        description="武侠小说场景，高手对决"
-    ),
-    TestSample(
-        sample_id="fantasy_002",
-        text="少女睁开眼睛，发现自己躺在一片花海中。她记得自己明明在实验室里做实验，怎么会突然来到这里？她站起身，看到远处有一座高耸入云的塔楼，塔顶闪烁着奇异的光芒。",
-        genre="玄幻",
-        description="玄幻小说场景，异界穿越"
-    ),
-    TestSample(
-        sample_id="urban_002",
-        text="程序员看着屏幕上的代码，眉头紧锁。这个bug已经困扰了他三天，无论怎么调试都无法解决。他喝了一口咖啡，决定从头开始分析问题。",
-        genre="都市",
-        description="都市职场场景，程序员工作"
-    ),
-    TestSample(
-        sample_id="romance_002",
-        text="婚礼现场，新娘穿着洁白的婚纱，美丽动人。新郎深情地看着她，眼中满是爱意。他们在亲朋好友的见证下，许下了相守一生的誓言。",
-        genre="言情",
-        description="言情小说场景，婚礼仪式"
-    )
-]
+def _load_default_samples() -> List[TestSample]:
+    """加载内置默认样本（约3000字章节级文本，对齐用户端真实改写场景）。"""
+    data_file = Path(__file__).resolve().parent / "default_samples_3000.json"
+    with data_file.open("r", encoding="utf-8") as f:
+        payload = json.load(f)
+    return [TestSample(**item) for item in payload]
+
+
+DEFAULT_TEST_SAMPLES = _load_default_samples()
 
 
 class TestSampleManager:
@@ -315,12 +267,22 @@ class TestSampleManager:
             if (result := sample.get_ai_detection(policy_version)) is not None
         }
         invalid_ids: List[str] = []
+        short_ids: List[str] = []
         selected: List[TestSample] = []
         persistence_changed = False
 
         for sample in target_samples:
             if len(selected) >= count:
                 break
+            if len(sample.text.strip()) < MIN_SAMPLE_TEXT_LENGTH:
+                if sample.source == SampleSource.CUSTOM:
+                    logger.warning(
+                        "自定义样本 %s 长度不足 %d 字，本轮跳过（保留样本）",
+                        sample.sample_id, MIN_SAMPLE_TEXT_LENGTH,
+                    )
+                else:
+                    short_ids.append(sample.sample_id)
+                continue
             result = sample.get_ai_detection(policy_version)
             if result is None:
                 cache_key = sample.detection_cache_key(policy_version)
@@ -336,12 +298,19 @@ class TestSampleManager:
             elif result.get("success"):
                 selected.append(sample)
 
-        removed_genres = [self._sample_index[sample_id].genre for sample_id in invalid_ids]
-        if invalid_ids:
-            invalid_set = set(invalid_ids)
-            self.samples = [sample for sample in self.samples if sample.sample_id not in invalid_set]
+        removed_ids = invalid_ids + short_ids
+        removed_genres = [self._sample_index[sample_id].genre for sample_id in removed_ids]
+        if removed_ids:
+            removed_set = set(removed_ids)
+            self.samples = [sample for sample in self.samples if sample.sample_id not in removed_set]
             self._rebuild_index()
+        if invalid_ids:
             logger.warning("已清除 AI 率为 0 的测试样本: %s", ", ".join(invalid_ids))
+        if short_ids:
+            logger.warning(
+                "已清除长度不足 %d 字的测试样本: %s",
+                MIN_SAMPLE_TEXT_LENGTH, ", ".join(short_ids),
+            )
 
         if len(selected) < count and generator is not None:
             replacement_genres = removed_genres or ([genre] if genre else []) or ["通用"]
@@ -376,7 +345,7 @@ class TestSampleManager:
                     else:
                         logger.warning("丢弃 AI 率为 0 或检测失败的替代样本: %s", sample.sample_id)
 
-        if invalid_ids or persistence_changed:
+        if invalid_ids or short_ids or persistence_changed:
             self._persist()
 
         if len(selected) < count:
@@ -492,15 +461,15 @@ class TestSampleManager:
 # 自动生成器
 # ============================================================================
 
-# LLM 生成提示模板（按题材）
+# LLM 生成提示模板（按题材，对齐用户端约3000字章节的真实使用场景）
 _GENRE_GENERATION_PROMPTS: Dict[str, str] = {
-    "玄幻": "请写一段200-350字的玄幻小说片段，包含修炼、法宝、妖兽等元素。要有具体的场景描写和人物动作，不要使用对话格式。",
-    "都市": "请写一段200-350字的都市小说片段，包含职场、生活、城市场景。要有细腻的心理描写和日常细节，不要使用对话格式。",
-    "言情": "请写一段200-350字的言情小说片段，描写人物间的情感互动或内心独白。要有氛围描写和细腻的情感表达，不要使用对话格式。",
-    "悬疑": "请写一段200-350字的悬疑小说片段，包含线索发现、推理思考或紧张氛围。要有环境描写和心理活动，不要使用对话格式。",
-    "科幻": "请写一段200-350字的科幻小说片段，包含未来科技、太空或AI等元素。要有想象力和科技感的细节描写，不要使用对话格式。",
-    "历史": "请写一段200-350字的历史小说片段，包含古代场景、人物和时代氛围。要有时代特征的细节和人物心理，不要使用对话格式。",
-    "武侠": "请写一段200-350字的武侠小说片段，包含江湖、武功、侠义等元素。要有动作描写和江湖氛围，不要使用对话格式。",
+    "玄幻": "请写一段约3000字的玄幻小说章节正文，包含修炼、法宝、妖兽等元素。要有完整的场景推进、人物动作和心理描写，情节连贯有起承转合，不要使用对话格式。",
+    "都市": "请写一段约3000字的都市小说章节正文，包含职场、生活、城市场景。要有细腻的心理描写和日常细节，情节连贯有起承转合，不要使用对话格式。",
+    "言情": "请写一段约3000字的言情小说章节正文，描写人物间的情感互动或内心独白。要有氛围描写和细腻的情感表达，情节连贯有起承转合，不要使用对话格式。",
+    "悬疑": "请写一段约3000字的悬疑小说章节正文，包含线索发现、推理思考或紧张氛围。要有环境描写和心理活动，情节连贯有起承转合，不要使用对话格式。",
+    "科幻": "请写一段约3000字的科幻小说章节正文，包含未来科技、太空或AI等元素。要有想象力和科技感的细节描写，情节连贯有起承转合，不要使用对话格式。",
+    "历史": "请写一段约3000字的历史小说章节正文，包含古代场景、人物和时代氛围。要有时代特征的细节和人物心理，情节连贯有起承转合，不要使用对话格式。",
+    "武侠": "请写一段约3000字的武侠小说章节正文，包含江湖、武功、侠义等元素。要有动作描写和江湖氛围，情节连贯有起承转合，不要使用对话格式。",
 }
 
 
@@ -542,7 +511,7 @@ async def generate_samples_via_llm(
                     use_cache=False,
                 )
 
-                if result and len(result.strip()) >= 100:
+                if result and len(result.strip()) >= MIN_SAMPLE_TEXT_LENGTH:
                     sample_id = f"auto_{genre}_{uuid.uuid4().hex[:8]}"
                     generated.append(TestSample(
                         sample_id=sample_id,
@@ -554,7 +523,9 @@ async def generate_samples_via_llm(
                     ))
                     logger.info(f"自动生成样本: {sample_id} ({genre}, {len(result.strip())}字)")
                 else:
-                    logger.warning(f"自动生成样本过短或为空: {genre} #{i+1}")
+                    logger.warning(
+                        f"自动生成样本长度不足 {MIN_SAMPLE_TEXT_LENGTH} 字或为空: {genre} #{i+1}"
+                    )
             except Exception as e:
                 logger.error(f"自动生成样本失败: {genre} #{i+1}: {e}")
 

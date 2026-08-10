@@ -5,7 +5,11 @@
 """
 import asyncio
 import hashlib
+import json
 import logging
+import uuid
+from datetime import datetime
+from pathlib import Path
 from typing import List, Tuple, Optional, Dict, Any
 
 from app.services.tencent_ai_detect import tencent_ai_detect_service
@@ -40,7 +44,24 @@ class _CachedDetectorProxy:
 
 class PromptEvaluator:
     """提示词评估器"""
-    
+
+    # 样本级评估最大并发数：改写/检测/评审为 IO 密集调用，4 路并发可压缩评估段耗时
+    EVALUATION_CONCURRENCY = 4
+    # 🔧 篇幅守门参数：改写长度不得低于原文 MIN_REWRITE_RATIO；
+    # 原文≥ GATE_ABSOLUTE_ORIGINAL_THRESHOLD 字时另受 MIN_REWRITTEN_LENGTH 绝对下限约束
+    MIN_REWRITE_RATIO = 0.5
+    MIN_REWRITTEN_LENGTH = 600
+    GATE_ABSOLUTE_ORIGINAL_THRESHOLD = 1200
+    # 🔧 改写空响应重试上限：改写模型偶发返回空串（历史题材实测 3/4 样本），
+    # 不重试会导致样本硬失败、变体/基线被批量取消资格
+    REWRITE_MAX_ATTEMPTS = 3
+    # 🔧 改写链路需定向关思考的模型：改写是风格转换任务不依赖推理，
+    # M3 思考耗尽输出预算触发空响应，seed-evolving 常开思考导致非流式超时
+    REWRITE_THINKING_DISABLED_MODELS = frozenset({
+        "MiniMax/MiniMax-M3",
+        "doubao-seed-evolving",
+    })
+
     def __init__(self):
         self.llm_client = get_llm_client()
         self.ai_detector = tencent_ai_detect_service
@@ -50,6 +71,12 @@ class PromptEvaluator:
         self._original_detect_cache: Dict[str, Dict[str, Any]] = {}
         # 🆕 缓存代理检测器：基线检测与评估共享同一缓存
         self.cached_detector = _CachedDetectorProxy(self)
+        # 🔧 样本级并发限流：惰性创建以绑定首次使用时的事件循环
+        self._sample_semaphore: Optional[asyncio.Semaphore] = None
+        self._original_cache_lock: Optional[asyncio.Lock] = None
+        # 🔧 改写全文临时工作区：由引擎在本批次启动时注入，评估批次落盘
+        # 完整原文/改写/评审记录供过程中取证；批次结束后由引擎整目录删除
+        self.workspace_dir: Optional[Path] = None
 
     async def _detect_original_cached(self, text: str) -> Dict[str, Any]:
         """检测原始文本AI率（带样本级缓存，避免重复付费检测）"""
@@ -59,10 +86,17 @@ class PromptEvaluator:
         if cached is not None:
             logger.debug("   ♻️ 命中原文检测缓存，跳过重复检测")
             return cached
-        result = await self.ai_detector.detect_ai_content(prepared_text)
-        # 仅缓存成功结果，失败时下次仍可重试
-        if result.get("success"):
-            self._original_detect_cache[cache_key] = result
+        # 🔧 并发评估下防止同一原文被重复检测（双重检查锁定）
+        if self._original_cache_lock is None:
+            self._original_cache_lock = asyncio.Lock()
+        async with self._original_cache_lock:
+            cached = self._original_detect_cache.get(cache_key)
+            if cached is not None:
+                return cached
+            result = await self.ai_detector.detect_ai_content(prepared_text)
+            # 仅缓存成功结果，失败时下次仍可重试
+            if result.get("success"):
+                self._original_detect_cache[cache_key] = result
         return result
 
     def get_cached_original_score(self, text: str) -> Optional[int]:
@@ -93,209 +127,117 @@ class PromptEvaluator:
         Returns:
             (平均AI得分, 评估结果列表)
         """
-        results: List[EvaluationResult] = []
-        total_score = 0
-        success_count = 0
         
-        for sample in samples:
-            logger.debug(f"📝 [评估器] 评估样本: {sample.sample_id} ({sample.genre})")
-            logger.info(f"📝 评估样本: {sample.sample_id} ({sample.genre})")
+        results: List[EvaluationResult] = await self._evaluate_samples_concurrently(
+            prompt, samples, temperature, model_id
+        )
 
-            try:
-                # 1. 先检测原始文本（样本级缓存：首次进入本次进化时检测一次）
-                logger.debug(f"   ⏳ 检测原始文本AI率...")
-                policy_version = tencent_ai_detect_service.detection_policy_version
-                original_result = sample.get_ai_detection(policy_version)
-                if original_result is not None:
-                    prepared_text = tencent_ai_detect_service.prepare_text(sample.text)
-                    cache_key = hashlib.md5(prepared_text.encode("utf-8")).hexdigest()
-                    self._original_detect_cache.setdefault(cache_key, original_result)
-                else:
-                    original_result = await self._detect_original_cached(sample.text)
-                    if original_result.get("success"):
-                        sample.store_ai_detection(original_result, policy_version)
-                if original_result.get("success") and original_result.get("ai_score") == 0:
-                    logger.warning("样本 %s 原始 AI 率为 0，已排除", sample.sample_id)
-                    results.append(EvaluationResult(
-                        sample_id=sample.sample_id,
-                        original_text=sample.text,
-                        rewritten_text="",
-                        original_ai_score=0,
-                        rewritten_ai_score=None,
-                        score_reduction=0,
-                        success=False,
-                        error="原始样本AI率为0，已排除"
-                    ))
-                    continue
+        # 计算平均得分
+        total_score = sum(
+            r.rewritten_ai_score for r in results
+            if r.success and r.rewritten_ai_score is not None
+        )
+        success_count = sum(1 for r in results if r.success)
 
-                # 2. 使用提示词改写文本
-                logger.debug(f"   ⏳ 正在改写文本...")
-                rewritten = await self._rewrite_text(prompt, sample.text, temperature, model_id=model_id)
-                logger.debug(f"   ✅ 改写完成，长度: {len(rewritten)}")
-                
-                if not rewritten or len(rewritten.strip()) < 50:
-                    results.append(EvaluationResult(
-                        sample_id=sample.sample_id,
-                        original_text=sample.text,
-                        rewritten_text="",
-                        original_ai_score=None,
-                        rewritten_ai_score=None,
-                        score_reduction=0,
-                        success=False,
-                        error="改写结果过短或为空"
-                    ))
-                    continue
-                
-                original_trace_detail = None
+        avg_score = total_score / success_count if success_count > 0 else 100.0
+
+        logger.info(f"📊 评估完成: 平均AI得分 = {avg_score:.1f}")
+
+        # 🔧 工作区落盘：完整记录本评估批次（含失格候选），供过程中取证分析
+        self._dump_workspace(prompt, temperature, model_id, results)
+
+        return avg_score, results
+
+    def _dump_workspace(
+        self,
+        prompt: str,
+        temperature: float,
+        model_id: Optional[str],
+        results: List[EvaluationResult],
+    ) -> None:
+        """将本评估批次的完整记录落盘到临时工作区（未启用时跳过）。
+
+        历史存档对改写文本统一截断100字且失格候选不落盘，导致硬失败无法
+        取证；此处保存全文，批次结束后由引擎整目录删除，不积留文件。
+        落盘失败不影响评估主流程。
+        """
+        if self.workspace_dir is None:
+            return
+        try:
+            record = {
+                "dumped_at": datetime.now().isoformat(),
+                "prompt": prompt,
+                "temperature": temperature,
+                "model_id": model_id,
+                "results": [
+                    {
+                        "sample_id": r.sample_id,
+                        "original_text": r.original_text,
+                        "rewritten_text": r.rewritten_text,
+                        "original_text_length": len(r.original_text),
+                        "rewritten_text_length": len(r.rewritten_text),
+                        "original_ai_score": r.original_ai_score,
+                        "rewritten_ai_score": r.rewritten_ai_score,
+                        "score_reduction": r.score_reduction,
+                        "success": r.success,
+                        "error": r.error,
+                        "llm_review": r.llm_review,
+                    }
+                    for r in results
+                ],
+            }
+            filename = f"eval_{datetime.now().strftime('%H%M%S%f')}_{uuid.uuid4().hex[:6]}.json"
+            with open(self.workspace_dir / filename, "w", encoding="utf-8") as f:
+                json.dump(record, f, ensure_ascii=False, indent=1)
+        except Exception as dump_err:
+            logger.warning(f"⚠️ 工作区落盘失败（不影响评估）: {dump_err}")
+
+    async def _evaluate_single_sample(
+        self,
+        prompt: str,
+        sample: TestSample,
+        temperature: float,
+        model_id: Optional[str] = None,
+    ) -> EvaluationResult:
+        """评估单个样本：改写 → 朱雀检测 → 语义评审 → 多维评分。
+
+        并发执行时由 _evaluate_samples_concurrently 的信号量限流。
+        """
+        logger.debug(f"📝 [评估器] 评估样本: {sample.sample_id} ({sample.genre})")
+        logger.info(f"📝 评估样本: {sample.sample_id} ({sample.genre})")
+        try:
+            # 1. 先检测原始文本（样本级缓存：首次进入本次进化时检测一次）
+            logger.debug(f"   ⏳ 检测原始文本AI率...")
+            policy_version = tencent_ai_detect_service.detection_policy_version
+            original_result = sample.get_ai_detection(policy_version)
+            if original_result is not None:
+                prepared_text = tencent_ai_detect_service.prepare_text(sample.text)
+                cache_key = hashlib.md5(prepared_text.encode("utf-8")).hexdigest()
+                self._original_detect_cache.setdefault(cache_key, original_result)
+            else:
+                original_result = await self._detect_original_cached(sample.text)
                 if original_result.get("success"):
-                    original_score = original_result.get("ai_score", 100)
-                    # 提取AI痕迹详情
-                    trace_data = original_result.get("ai_trace_details", {})
-                    if trace_data:
-                        original_trace_detail = AITraceDetail(
-                            hit_keywords=trace_data.get("hit_keywords", []),
-                            hit_positions=trace_data.get("hit_positions", []),
-                            detection_method=trace_data.get("detection_method", ""),
-                            label_scores=trace_data.get("label_scores", {}),
-                            problematic_segments=trace_data.get("problematic_segments", [])
-                        )
-                else:
-                    original_score = 100
-                    logger.debug(f"   ⚠️ 原始文本检测失败: {original_result.get('error', '未知错误')}")
-                logger.debug(f"   📊 原始AI得分: {original_score}")
-
-                # 3. 检测改写后文本的AI率
-                logger.debug(f"   ⏳ 检测改写后文本AI率...")
-                rewritten_result = await self.ai_detector.detect_ai_content(rewritten)
-                rewritten_trace_detail = None
-                if rewritten_result.get("success"):
-                    rewritten_score = rewritten_result.get("ai_score", 100)
-                    # 提取AI痕迹详情
-                    trace_data = rewritten_result.get("ai_trace_details", {})
-                    if trace_data:
-                        rewritten_trace_detail = AITraceDetail(
-                            hit_keywords=trace_data.get("hit_keywords", []),
-                            hit_positions=trace_data.get("hit_positions", []),
-                            detection_method=trace_data.get("detection_method", ""),
-                            label_scores=trace_data.get("label_scores", {}),
-                            problematic_segments=trace_data.get("problematic_segments", [])
-                        )
-                        # 输出发现的问题
-                        if trace_data.get("hit_keywords"):
-                            logger.debug(f"   🔍 发现AI痕迹关键词: {trace_data['hit_keywords']}")
-                        if trace_data.get("detection_method"):
-                            logger.debug(f"   🔍 检测方法: {trace_data['detection_method']}")
-                else:
-                    rewritten_score = 100
-                    logger.debug(f"   ⚠️ 改写文本检测失败: {rewritten_result.get('error', '未知错误')}")
-                logger.debug(f"   📊 改写后AI得分: {rewritten_score}")
-
-                # 4. 计算得分下降
-                score_reduction = original_score - rewritten_score
-
-                # 5. 计算量化指标
-                original_metrics = calculate_text_metrics(sample.text)
-                rewritten_metrics = calculate_text_metrics(rewritten)
-                metrics_comparison = compare_metrics(original_metrics, rewritten_metrics)
-
-                logger.debug(f"   📈 原文指标: {original_metrics.to_summary()}")
-                logger.debug(f"   📈 改写指标: {rewritten_metrics.to_summary()}")
-                logger.debug(f"   📈 指标变化: {metrics_comparison}")
-
-                # 🆕 6. 计算多维评分（含可读性 + 保真度）
-                # 🔧 传入AI检测分数，应用AI率软性约束
-                original_multi_score = calculate_multi_dimension_score(
-                    sample.text, original_metrics, ai_score=original_score
-                )
-                # 🆕 改写后评分：需要计算保真度（与原文的相似度）
-                rewritten_multi_score = calculate_multi_dimension_score(
-                    rewritten, rewritten_metrics, ai_score=rewritten_score
-                )
-                # 🆕 计算保真度得分（越低越好，表示改动越小）
-                fidelity_score = _calculate_fidelity_score(sample.text, rewritten)
-                rewritten_multi_score.fidelity_score = fidelity_score
-                rewritten_multi_score.details["fidelity"] = f"相似度{100-fidelity_score:.0f}%"
-
-                llm_review = await self.semantic_judge.evaluate(
-                    sample.text, rewritten, sample.genre
-                )
-                rewritten_multi_score.overall_score = calculate_hybrid_score(
-                    rewritten_score, rewritten_multi_score.overall_score, llm_review
-                )
-
-                logger.debug(f"   🎯 原文多维评分: {original_multi_score.to_summary()}", flush=True)
-                logger.debug(f"   🎯 改写多维评分: {rewritten_multi_score.to_summary()}", flush=True)
-
-                # 🔧 显示AI率调整信息
-                if "ai_rate_adjustment" in rewritten_multi_score.details:
-                    logger.debug(f"   📊 AI率调整: {rewritten_multi_score.details['ai_rate_adjustment']}", flush=True)
-
-                # 🆕 显示可读性警告
-                if rewritten_multi_score.readability_warnings:
-                    logger.debug(f"   ⚠️ 可读性警告:", flush=True)
-                    for warning in rewritten_multi_score.readability_warnings[:3]:  # 最多显示3条
-                        logger.debug(f"      - {warning}", flush=True)
-
-                # 🆕 可读性严重下降时给出强警告
-                if rewritten_multi_score.readability_score < 60:
-                    logger.debug(f"   🚨 可读性严重下降! (得分: {rewritten_multi_score.readability_score:.0f})", flush=True)
-                    logger.debug(f"      建议: 当前改写可能过度优化，影响阅读体验", flush=True)
-
-                evaluation_success = not llm_review.get("hard_fail", False)
-                evaluation_error = None
-                if not evaluation_success:
-                    evaluation_error = "；".join(llm_review.get("hard_fail_reasons", []))
-
-                results.append(EvaluationResult(
+                    sample.store_ai_detection(original_result, policy_version)
+            if original_result.get("success") and original_result.get("ai_score") == 0:
+                logger.warning("样本 %s 原始 AI 率为 0，已排除", sample.sample_id)
+                return EvaluationResult(
                     sample_id=sample.sample_id,
                     original_text=sample.text,
-                    rewritten_text=rewritten,
-                    original_ai_score=original_score,
-                    rewritten_ai_score=rewritten_score,
-                    score_reduction=score_reduction,
-                    success=evaluation_success,
-                    error=evaluation_error,
-                    original_trace_detail=original_trace_detail,
-                    rewritten_trace_detail=rewritten_trace_detail,
-                    # 🆕 量化指标
-                    original_metrics={
-                        "period_ratio": original_metrics.period_ratio,
-                        "emotion_punct_ratio": original_metrics.emotion_punct_ratio,
-                        "avg_sentence_length": original_metrics.avg_sentence_length,
-                        "sentence_length_variance": original_metrics.sentence_length_variance,
-                        "short_sentence_ratio": original_metrics.short_sentence_ratio,
-                        "forbidden_word_count": original_metrics.forbidden_word_count,
-                    },
-                    rewritten_metrics={
-                        "period_ratio": rewritten_metrics.period_ratio,
-                        "emotion_punct_ratio": rewritten_metrics.emotion_punct_ratio,
-                        "avg_sentence_length": rewritten_metrics.avg_sentence_length,
-                        "sentence_length_variance": rewritten_metrics.sentence_length_variance,
-                        "short_sentence_ratio": rewritten_metrics.short_sentence_ratio,
-                        "forbidden_word_count": rewritten_metrics.forbidden_word_count,
-                    },
-                    metrics_comparison=metrics_comparison,
-                    # 🆕 多维评分
-                    original_multi_score=original_multi_score.to_dict(),
-                    rewritten_multi_score=rewritten_multi_score.to_dict(),
-                    llm_review=llm_review,
-                ))
-                
-                if evaluation_success:
-                    total_score += rewritten_score
-                    success_count += 1
-                
-                logger.info(
-                    f"  ✅ 原始: {original_score} → 改写后: {rewritten_score} "
-                    f"(下降 {score_reduction})"
+                    rewritten_text="",
+                    original_ai_score=0,
+                    rewritten_ai_score=None,
+                    score_reduction=0,
+                    success=False,
+                    error="原始样本AI率为0，已排除"
                 )
-                
-                # 避免API限流
-                await asyncio.sleep(1)
-                
-            except Exception as e:
-                logger.error(f"  ❌ 评估失败: {e}")
-                results.append(EvaluationResult(
+
+            # 2. 使用提示词改写文本
+            logger.debug(f"   ⏳ 正在改写文本...")
+            rewritten = await self._rewrite_text(prompt, sample.text, temperature, model_id=model_id)
+            logger.debug(f"   ✅ 改写完成，长度: {len(rewritten)}")
+
+            if not rewritten or len(rewritten.strip()) < 50:
+                return EvaluationResult(
                     sample_id=sample.sample_id,
                     original_text=sample.text,
                     rewritten_text="",
@@ -303,16 +245,226 @@ class PromptEvaluator:
                     rewritten_ai_score=None,
                     score_reduction=0,
                     success=False,
-                    error=str(e)
-                ))
-        
-        # 计算平均得分
-        avg_score = total_score / success_count if success_count > 0 else 100.0
-        
-        logger.info(f"📊 评估完成: 平均AI得分 = {avg_score:.1f}")
-        
-        return avg_score, results
-    
+                    error="改写结果过短或为空"
+                )
+
+            # 🔧 篇幅守门：改写不得低于原文 MIN_REWRITE_RATIO；长样本另设绝对下限，
+            # 防止大幅缩短落入检测器盲区（朱雀约300字以下返回0分）产生虚假满分降分
+            if len(sample.text) >= self.GATE_ABSOLUTE_ORIGINAL_THRESHOLD:
+                min_rewrite_len = max(
+                    self.MIN_REWRITTEN_LENGTH,
+                    int(len(sample.text) * self.MIN_REWRITE_RATIO),
+                )
+            else:
+                min_rewrite_len = int(len(sample.text) * self.MIN_REWRITE_RATIO)
+            if len(rewritten.strip()) < min_rewrite_len:
+                logger.warning(
+                    f"   ⚠️ 篇幅守门拦截: 改写{len(rewritten.strip())}字 < 下限{min_rewrite_len}字"
+                    f"（原文{len(sample.text)}字），疑似内容丢失"
+                )
+                return EvaluationResult(
+                    sample_id=sample.sample_id,
+                    original_text=sample.text,
+                    rewritten_text=rewritten,
+                    original_ai_score=None,
+                    rewritten_ai_score=None,
+                    score_reduction=0,
+                    success=False,
+                    error=(
+                        f"改写篇幅严重偏离原文（{len(rewritten.strip())}/{len(sample.text)}字），"
+                        "疑似信息丢失"
+                    )
+                )
+
+            original_trace_detail = None
+            if original_result.get("success"):
+                original_score = original_result.get("ai_score", 100)
+                # 提取AI痕迹详情
+                trace_data = original_result.get("ai_trace_details", {})
+                if trace_data:
+                    original_trace_detail = AITraceDetail(
+                        hit_keywords=trace_data.get("hit_keywords", []),
+                        hit_positions=trace_data.get("hit_positions", []),
+                        detection_method=trace_data.get("detection_method", ""),
+                        label_scores=trace_data.get("label_scores", {}),
+                        problematic_segments=trace_data.get("problematic_segments", [])
+                    )
+            else:
+                original_score = 100
+                logger.debug(f"   ⚠️ 原始文本检测失败: {original_result.get('error', '未知错误')}")
+            logger.debug(f"   📊 原始AI得分: {original_score}")
+
+            # 3. 检测改写后文本的AI率
+            logger.debug(f"   ⏳ 检测改写后文本AI率...")
+            rewritten_result = await self.ai_detector.detect_ai_content(rewritten)
+            rewritten_trace_detail = None
+            if rewritten_result.get("success"):
+                rewritten_score = rewritten_result.get("ai_score", 100)
+                # 提取AI痕迹详情
+                trace_data = rewritten_result.get("ai_trace_details", {})
+                if trace_data:
+                    rewritten_trace_detail = AITraceDetail(
+                        hit_keywords=trace_data.get("hit_keywords", []),
+                        hit_positions=trace_data.get("hit_positions", []),
+                        detection_method=trace_data.get("detection_method", ""),
+                        label_scores=trace_data.get("label_scores", {}),
+                        problematic_segments=trace_data.get("problematic_segments", [])
+                    )
+                    # 输出发现的问题
+                    if trace_data.get("hit_keywords"):
+                        logger.debug(f"   🔍 发现AI痕迹关键词: {trace_data['hit_keywords']}")
+                    if trace_data.get("detection_method"):
+                        logger.debug(f"   🔍 检测方法: {trace_data['detection_method']}")
+            else:
+                rewritten_score = 100
+                logger.debug(f"   ⚠️ 改写文本检测失败: {rewritten_result.get('error', '未知错误')}")
+            logger.debug(f"   📊 改写后AI得分: {rewritten_score}")
+
+            # 4. 计算得分下降
+            score_reduction = original_score - rewritten_score
+
+            # 5. 计算量化指标
+            original_metrics = calculate_text_metrics(sample.text)
+            rewritten_metrics = calculate_text_metrics(rewritten)
+            metrics_comparison = compare_metrics(original_metrics, rewritten_metrics)
+
+            logger.debug(f"   📈 原文指标: {original_metrics.to_summary()}")
+            logger.debug(f"   📈 改写指标: {rewritten_metrics.to_summary()}")
+            logger.debug(f"   📈 指标变化: {metrics_comparison}")
+
+            # 🆕 6. 计算多维评分（含可读性 + 保真度）
+            # 🔧 传入AI检测分数，应用AI率软性约束
+            original_multi_score = calculate_multi_dimension_score(
+                sample.text, original_metrics, ai_score=original_score
+            )
+            # 🆕 改写后评分：需要计算保真度（与原文的相似度）
+            rewritten_multi_score = calculate_multi_dimension_score(
+                rewritten, rewritten_metrics, ai_score=rewritten_score
+            )
+            # 🆕 计算保真度得分（越低越好，表示改动越小）
+            fidelity_score = _calculate_fidelity_score(sample.text, rewritten)
+            rewritten_multi_score.fidelity_score = fidelity_score
+            rewritten_multi_score.details["fidelity"] = f"相似度{100-fidelity_score:.0f}%"
+
+            llm_review = await self.semantic_judge.evaluate(
+                sample.text, rewritten, sample.genre
+            )
+            rewritten_multi_score.overall_score = calculate_hybrid_score(
+                rewritten_score, rewritten_multi_score.overall_score, llm_review
+            )
+
+            logger.debug(f"   🎯 原文多维评分: {original_multi_score.to_summary()}", flush=True)
+            logger.debug(f"   🎯 改写多维评分: {rewritten_multi_score.to_summary()}", flush=True)
+
+            # 🔧 显示AI率调整信息
+            if "ai_rate_adjustment" in rewritten_multi_score.details:
+                logger.debug(f"   📊 AI率调整: {rewritten_multi_score.details['ai_rate_adjustment']}", flush=True)
+
+            # 🆕 显示可读性警告
+            if rewritten_multi_score.readability_warnings:
+                logger.debug(f"   ⚠️ 可读性警告:", flush=True)
+                for warning in rewritten_multi_score.readability_warnings[:3]:  # 最多显示3条
+                    logger.debug(f"      - {warning}", flush=True)
+
+            # 🆕 可读性严重下降时给出强警告
+            if rewritten_multi_score.readability_score < 60:
+                logger.debug(f"   🚨 可读性严重下降! (得分: {rewritten_multi_score.readability_score:.0f})", flush=True)
+                logger.debug(f"      建议: 当前改写可能过度优化，影响阅读体验", flush=True)
+
+            evaluation_success = not llm_review.get("hard_fail", False)
+            evaluation_error = None
+            if not evaluation_success:
+                evaluation_error = "；".join(llm_review.get("hard_fail_reasons", []))
+
+            result = EvaluationResult(
+                sample_id=sample.sample_id,
+                original_text=sample.text,
+                rewritten_text=rewritten,
+                original_ai_score=original_score,
+                rewritten_ai_score=rewritten_score,
+                score_reduction=score_reduction,
+                success=evaluation_success,
+                error=evaluation_error,
+                original_trace_detail=original_trace_detail,
+                rewritten_trace_detail=rewritten_trace_detail,
+                # 🆕 量化指标
+                original_metrics={
+                    "period_ratio": original_metrics.period_ratio,
+                    "emotion_punct_ratio": original_metrics.emotion_punct_ratio,
+                    "avg_sentence_length": original_metrics.avg_sentence_length,
+                    "sentence_length_variance": original_metrics.sentence_length_variance,
+                    "short_sentence_ratio": original_metrics.short_sentence_ratio,
+                    "forbidden_word_count": original_metrics.forbidden_word_count,
+                },
+                rewritten_metrics={
+                    "period_ratio": rewritten_metrics.period_ratio,
+                    "emotion_punct_ratio": rewritten_metrics.emotion_punct_ratio,
+                    "avg_sentence_length": rewritten_metrics.avg_sentence_length,
+                    "sentence_length_variance": rewritten_metrics.sentence_length_variance,
+                    "short_sentence_ratio": rewritten_metrics.short_sentence_ratio,
+                    "forbidden_word_count": rewritten_metrics.forbidden_word_count,
+                },
+                metrics_comparison=metrics_comparison,
+                # 🆕 多维评分
+                original_multi_score=original_multi_score.to_dict(),
+                rewritten_multi_score=rewritten_multi_score.to_dict(),
+                llm_review=llm_review,
+            )
+
+
+            logger.info(
+                f"  ✅ 原始: {original_score} → 改写后: {rewritten_score} "
+                f"(下降 {score_reduction})"
+            )
+
+            return result
+
+        except Exception as e:
+            logger.error(f"  ❌ 评估失败: {e}")
+            return EvaluationResult(
+                sample_id=sample.sample_id,
+                original_text=sample.text,
+                rewritten_text="",
+                original_ai_score=None,
+                rewritten_ai_score=None,
+                score_reduction=0,
+                success=False,
+                error=str(e)
+            )
+
+
+    async def _evaluate_samples_concurrently(
+        self,
+        prompt: str,
+        samples: List[TestSample],
+        temperature: float,
+        model_id: Optional[str] = None,
+    ) -> List[EvaluationResult]:
+        """并发评估多个样本（信号量限流），结果顺序与输入样本一致。"""
+        if self._sample_semaphore is None:
+            self._sample_semaphore = asyncio.Semaphore(self.EVALUATION_CONCURRENCY)
+
+        async def _limited(sample: TestSample) -> EvaluationResult:
+            async with self._sample_semaphore:
+                try:
+                    return await self._evaluate_single_sample(
+                        prompt, sample, temperature, model_id=model_id
+                    )
+                except Exception as e:
+                    logger.error(f"  ❌ 评估失败: {e}")
+                    return EvaluationResult(
+                        sample_id=sample.sample_id,
+                        original_text=sample.text,
+                        rewritten_text="",
+                        original_ai_score=None,
+                        rewritten_ai_score=None,
+                        score_reduction=0,
+                        success=False,
+                        error=str(e)
+                    )
+
+        return await asyncio.gather(*[_limited(s) for s in samples])
+
     async def _rewrite_text(self, prompt: str, original_text: str, temperature: float, model_id: Optional[str] = None) -> str:
         """使用提示词改写文本（三层架构：预处理 → LLM改写 → 后处理）
 
@@ -348,7 +500,22 @@ class PromptEvaluator:
             # 使用 REWRITE 任务类型（自动选择适合改写的快速模型）
             chat_kwargs["task_type"] = TaskType.REWRITE
 
-        llm_result = await self.llm_client.chat(**chat_kwargs)
+        # 🔧 思考模型在改写任务中收益极低代价高：M3 adaptive 思考耗尽输出预算
+        #    （实测 11833/16384）触发空响应；seed-evolving 常开思考导致生成超
+        #    300s 非流式超时。改写是风格转换任务不依赖推理，定向关闭思考
+        if model_id in self.REWRITE_THINKING_DISABLED_MODELS:
+            chat_kwargs["extra_body"] = {"thinking": {"type": "disabled"}}
+
+        # 🔧 空响应重试：改写模型偶发返回空串，直接判硬失败会批量拖垮变体/基线
+        llm_result = ""
+        for attempt in range(1, self.REWRITE_MAX_ATTEMPTS + 1):
+            llm_result = await self.llm_client.chat(**chat_kwargs) or ""
+            if llm_result.strip():
+                break
+            logger.warning(
+                f"   ⚠️ 改写返回空响应（第{attempt}/{self.REWRITE_MAX_ATTEMPTS}次）"
+                f" model={model_id or '默认路由'}"
+            )
 
         # ========== 第3层：规则后处理 ==========
         final_result, postprocess_logs = postprocess_text(llm_result.strip())

@@ -29,6 +29,7 @@ import RocketLaunchIcon from '@mui/icons-material/RocketLaunch'
 import RestartAltIcon from '@mui/icons-material/RestartAlt'
 import { apiClient, extractApiErrorMessage } from '@/services/api'
 import { AI_TRACE_GENRES } from '../aiTraceGenre'
+import { formatScore } from '@/utils/promptEvolutionScore'
 
 interface EvolutionStatus {
   is_running: boolean
@@ -1161,8 +1162,8 @@ export default function PromptEvolutionPage() {
                     {selectedPrompt.evaluation_results.map((sample, idx) => (
                       <TableRow key={sample.sample_id || idx}>
                         <TableCell><Typography variant="caption">{sample.sample_id?.substring(0, 8)}...</Typography></TableCell>
-                        <TableCell><Typography sx={{ color: getScoreColor(sample.original_ai_score), fontWeight: 'bold' }}>{sample.original_ai_score.toFixed(1)}</Typography></TableCell>
-                        <TableCell><Typography sx={{ color: getScoreColor(sample.rewritten_ai_score), fontWeight: 'bold' }}>{sample.rewritten_ai_score.toFixed(1)}</Typography></TableCell>
+                        <TableCell>{sample.original_ai_score != null ? <Typography sx={{ color: getScoreColor(sample.original_ai_score), fontWeight: 'bold' }}>{formatScore(sample.original_ai_score)}</Typography> : '-'}</TableCell>
+                        <TableCell>{sample.rewritten_ai_score != null ? <Typography sx={{ color: getScoreColor(sample.rewritten_ai_score), fontWeight: 'bold' }}>{formatScore(sample.rewritten_ai_score)}</Typography> : '-'}</TableCell>
                         <TableCell><Typography sx={{ color: sample.score_reduction > 0 ? 'success.main' : 'error.main', fontWeight: 'bold' }}>{sample.score_reduction.toFixed(1)}</Typography></TableCell>
                         <TableCell>
                           <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap', minWidth: 132 }}>

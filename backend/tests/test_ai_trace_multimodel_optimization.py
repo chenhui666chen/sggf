@@ -540,3 +540,65 @@ def test_old_evaluation_policy_is_not_used_for_production_routing(tmp_path):
     storage.save_combination_performance(records, "玄幻")
 
     assert storage.get_best_model_for_prompt_version("玄幻", "p1") is None
+
+
+# 模型池共 9 个；以下测试验证淘汰后至少保留 MIN_ALIVE_MODELS=4 个存活模型
+_POOL = [
+    "qwen3.7-plus", "deepseek-v4-flash", "doubao-seed-character", "kimi/kimi-k2.6",
+    "glm-5.2", "MiniMax/MiniMax-M3", "mimo-v2.5", "doubao-seed-evolving", "step-3.7-flash",
+]
+
+
+def test_elimination_keeps_at_least_four_alive_models(tmp_path):
+    # 已淘汰 4 个（alive=5），两个模型超门槛，只允许淘汰最差的一个保留到 4
+    storage = ModelConfigStorage(str(tmp_path))
+    storage.save_config({"eliminated_models": {"玄幻": _POOL[1:5]}})
+    storage.save_performance(
+        {
+            "qwen3.7-plus": _mature_record("qwen3.7-plus", 10),
+            "mimo-v2.5": _mature_record("mimo-v2.5", 50),
+            "step-3.7-flash": _mature_record("step-3.7-flash", 60),
+        },
+        "玄幻",
+    )
+
+    assert storage.evaluate_elimination("玄幻") == ["step-3.7-flash"]
+    assert len(storage.get_active_models("玄幻")) == 4
+
+
+def test_elimination_blocked_when_alive_already_at_floor(tmp_path):
+    # 已淘汰 5 个（alive=4 到底），即使有模型超门槛也不再淘汰
+    storage = ModelConfigStorage(str(tmp_path))
+    storage.save_config({"eliminated_models": {"玄幻": _POOL[1:6]}})
+    storage.save_performance(
+        {
+            "qwen3.7-plus": _mature_record("qwen3.7-plus", 10),
+            "step-3.7-flash": _mature_record("step-3.7-flash", 60),
+        },
+        "玄幻",
+    )
+
+    assert storage.evaluate_elimination("玄幻") == []
+    assert len(storage.get_active_models("玄幻")) == 4
+
+
+def _failed_result(model_id: str) -> SingleModelResult:
+    return SingleModelResult(
+        model_id, model_id, "test", "", 0, 0.0, success=False, error="timeout"
+    )
+
+
+def test_availability_circuit_breaker_respects_alive_floor(tmp_path):
+    # 存活只剩 4 个时，连续失败熔断不得再淘汰（避免可用模型池见底）
+    floor_storage = ModelConfigStorage(str(tmp_path / "floor"))
+    floor_storage.save_config({"eliminated_models": {"玄幻": _POOL[1:6]}})
+    for _ in range(3):
+        floor_storage.update_availability_status(_failed_result("qwen3.7-plus"), "玄幻")
+    assert "qwen3.7-plus" not in floor_storage.get_eliminated_models("玄幻")
+
+    # 存活 5 个时熔断照常生效
+    ok_storage = ModelConfigStorage(str(tmp_path / "ok"))
+    ok_storage.save_config({"eliminated_models": {"玄幻": _POOL[1:5]}})
+    for _ in range(3):
+        ok_storage.update_availability_status(_failed_result("qwen3.7-plus"), "玄幻")
+    assert "qwen3.7-plus" in ok_storage.get_eliminated_models("玄幻")

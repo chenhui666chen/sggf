@@ -43,6 +43,12 @@ class SemanticJudge:
     def _system_prompt() -> str:
         return """你是独立的中文小说改写质量评审。比较原文和候选改写，不评价AI生成概率。
 重点识别否定反转、人物/时间/数量/因果/设定变化、关键信息遗漏、病句和过度重写。
+保真评分按四层判据执行：
+1事实层（硬，计入fact_consistency）：专名、数字、时空、因果、物品属性（如武器名）、动作姿态，任何改变都扣分。
+2命题层（硬，计入semantic_fidelity）：句子断言须等价，包括肯否定、主客关系、数量、程度、事件顺序。
+3情绪方向层（计入semantic_fidelity）：情绪极性与强度须不变（悲仍悲、紧张不减）；承载情绪的意象与比喻允许同喻域等义替换，仅意象载体更换而情绪方向一致时不得扣semantic_fidelity；情绪方向或强度明显偏离才扣分；整段删除意象计入information_completeness而非保真。
+4表达层（零扣分）：措辞、句法、句长、语序、语域属改写的合法操作空间，表达差异不是缺陷，一律不扣分。
+语病、生造词（如“上个古遗迹”）计入readability或writing_naturalness，不计入fact_consistency。
 所有分数为0-100且越高越好。只输出合法JSON，不要Markdown。每个维度必须包含score、reason、issues。
 六个评分维度格式固定为：{"score": 数值, "reason": "原因", "issues": []}。
 over_rewrite_risk格式固定为：{"level": "low|medium|high", "reason": "原因", "issues": []}。
@@ -58,7 +64,7 @@ confidence必须是0-1数值。输出字段：semantic_fidelity、fact_consisten
 【候选改写】
 {rewritten[:5000]}
 
-按约定JSON结构评价。不要因措辞不同扣分，只有语义、事实、信息或阅读质量变化才扣分。"""
+按约定JSON结构评价。严格按四层判据归类扣分：事实与命题变化才扣保真；情绪意象同喻域替换不扣保真；措辞、句法、句长等表达差异零扣分。"""
 
     @staticmethod
     def _parse_json(response: Any) -> Dict[str, Any]:

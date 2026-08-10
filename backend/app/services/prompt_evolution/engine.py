@@ -5,7 +5,9 @@
 """
 import asyncio
 import logging
+import shutil
 from datetime import datetime
+from pathlib import Path
 from typing import Optional, Callable, Awaitable, List, Dict, Tuple, Any
 
 from .models import (
@@ -157,11 +159,46 @@ class PromptEvolutionEngine:
             and all(result.success for result in results)
         )
 
+    # 质量硬失败容忍策略：失败（含缺失）样本占比超过该比例才取消资格，
+    # 否则保留资格但按比例加罚，避免单样本硬失败一票否决整个候选
+    QUALITY_DISQUALIFY_FAILURE_RATIO = 0.5
+    # 按失败占比折算的排名罚分（占比 1.0 对应满额罚分）
+    QUALITY_FAILURE_RANK_PENALTY = 60.0
+    # 🔧 best 入选 AI 分上限：与起点选择门槛（avg_ai_score < 80）对齐，
+    # 防止降分无效的高分版本（如 97+ 分）占据最佳位被消费端当真冠军使用
+    # （2026-08-07 批次 4cf9057b 取证：97.25~98.5 三版本入选污染传承链）
+    BEST_VERSION_MAX_AI_SCORE = 80.0
+    # 🔧 成功率门槛：成功样本占比低于该值的版本不得入选最佳列表，
+    # 防止坍塔型提示词（超短/空输出）凭少数成功样本的分数获得虚高适应度
+    # （2026-08-08 都市批 bd6c6b78 取证：iter4 半数样本篇幅守门失败仍以均值 0.0 入选）
+    BEST_VERSION_MIN_SUCCESS_RATIO = 0.75
+
+    @staticmethod
+    def _quality_failure_ratio(
+        results: List[EvaluationResult], expected_count: int
+    ) -> float:
+        """失败（含缺失）样本占比；缺失样本按失败计。"""
+        if expected_count <= 0:
+            return 1.0
+        passed = sum(1 for result in results if result.success)
+        return max(0.0, (expected_count - passed) / expected_count)
+
+    @staticmethod
+    def _summarize_quality_failures(results: List[EvaluationResult]) -> str:
+        """汇总硬失败样本的原因，用于日志诊断。"""
+        reasons = [result.error or "未知原因" for result in results if not result.success]
+        return "；".join(reasons) if reasons else "无"
+
     @classmethod
     def _ab_rank_score(
         cls, score: float, results: List[EvaluationResult], expected_count: int
     ) -> float:
-        return score if cls._is_complete_quality_evaluation(results, expected_count) else 101.0
+        if cls._is_complete_quality_evaluation(results, expected_count):
+            return score
+        ratio = cls._quality_failure_ratio(results, expected_count)
+        if ratio > cls.QUALITY_DISQUALIFY_FAILURE_RATIO:
+            return 101.0
+        return score + ratio * cls.QUALITY_FAILURE_RANK_PENALTY
 
     def _calculate_composite_score(
         self,
@@ -634,6 +671,10 @@ class PromptEvolutionEngine:
             # 🆕 重置停止条件追踪
             self._reset_stop_tracking()
 
+            # 🔧 准备改写全文临时工作区（清理残留 + 创建本批次目录），
+            # 进化过程中可取证完整原文/改写，批次结束在 finally 中整目录删除
+            self._prepare_rewrite_workspace()
+
             logger.debug("🚀🚀🚀 [进化引擎] 开始提示词进化优化...")
             logger.info("🚀 开始提示词进化优化")
             await self._notify_progress(on_progress, "🚀 开始提示词进化优化", 0, {})
@@ -744,12 +785,19 @@ class PromptEvolutionEngine:
                 # 缓存结果（传入综合评分）
                 # 此时还未计算综合评分，先用AI分数
                 self._cache_evaluation(initial_prompt, avg_score, results, composite_score=avg_score)
-            initial_quality_complete = self._is_complete_quality_evaluation(
-                results, len(samples)
-            )
-            if not initial_quality_complete:
-                logger.warning("初始提示词存在缺失或质量硬失败样本，版本评分按不合格处理")
+            initial_failure_ratio = self._quality_failure_ratio(results, len(samples))
+            if initial_failure_ratio > self.QUALITY_DISQUALIFY_FAILURE_RATIO:
+                logger.warning(
+                    "初始提示词多数样本缺失或质量硬失败（%s），版本评分按不合格处理",
+                    self._summarize_quality_failures(results),
+                )
                 avg_score = 100.0
+            elif initial_failure_ratio > 0:
+                logger.warning(
+                    "初始提示词存在少量质量硬失败样本（占比 %.0f%%）: %s",
+                    initial_failure_ratio * 100,
+                    self._summarize_quality_failures(results),
+                )
             current_version.avg_ai_score = avg_score
             current_version.evaluation_results = results
             current_version.avg_score_reduction = self._calc_avg_reduction(results)
@@ -766,7 +814,7 @@ class PromptEvolutionEngine:
             current_version.avg_readability = sum(readability_scores) / len(readability_scores) if readability_scores else 80
             current_version.avg_writing = sum(writing_scores) / len(writing_scores) if writing_scores else 50
             current_version.avg_composite_score = sum(composite_scores) / len(composite_scores) if composite_scores else avg_score
-            if not initial_quality_complete:
+            if initial_failure_ratio > self.QUALITY_DISQUALIFY_FAILURE_RATIO:
                 current_version.avg_composite_score = 100.0
             logger.debug(f"📖 初始版本多维评分 - 可读性: {current_version.avg_readability:.1f}, 文笔: {current_version.avg_writing:.1f}, 综合: {current_version.avg_composite_score:.1f}")
 
@@ -881,36 +929,57 @@ class PromptEvolutionEngine:
                         )
                         best_score = orig_rank_score
                         if orig_rank_score > 100:
-                            logger.warning("   原始A/B候选存在缺失或质量硬失败样本，取消获胜资格")
+                            logger.warning(
+                                "   原始A/B候选多数样本缺失或质量硬失败，取消获胜资格: %s",
+                                self._summarize_quality_failures(orig_results),
+                            )
+                        elif not self._is_complete_quality_evaluation(orig_results, ab_sample_count):
+                            logger.warning(
+                                "   原始A/B候选存在少量质量硬失败样本，按比例加罚: %s",
+                                self._summarize_quality_failures(orig_results),
+                            )
 
                         # 收集所有变体得分用于统计
                         all_scores = [(orig_rank_score, improved_prompt, "原始版本")]
 
-                        # 🆕 评估变体（优先使用缓存）
-                        for i, (variant_prompt, variant_desc) in enumerate(filtered_variants, 1):
-                            variant_hash = self._get_prompt_hash(variant_prompt)
-
-                            # 检查缓存
+                        # 🆕 评估变体（优先使用缓存；并行评估，样本级并发由评估器信号量限流）
+                        async def _evaluate_variant(variant_prompt: str):
                             cached_var = self._get_cached_evaluation(variant_prompt)
                             if cached_var:
-                                var_score, var_results = cached_var
-                                logger.debug(f"   📊 变体{i}得分: {var_score:.1f} ({variant_desc}) (💾缓存)")
-                            else:
-                                var_score, var_results = await self.evaluator.evaluate_prompt(
-                                    variant_prompt, ab_samples, self.config.temperature,
-                                    model_id=self.rewrite_model_id
-                                )
-                                logger.debug(f"   📊 变体{i}得分: {var_score:.1f} ({variant_desc})")
-                                # 缓存变体评估结果
-                                self._cache_evaluation(variant_prompt, var_score, var_results)
+                                return cached_var[0], cached_var[1], True
+                            var_score, var_results = await self.evaluator.evaluate_prompt(
+                                variant_prompt, ab_samples, self.config.temperature,
+                                model_id=self.rewrite_model_id
+                            )
+                            # 缓存变体评估结果
+                            self._cache_evaluation(variant_prompt, var_score, var_results)
+                            return var_score, var_results, False
+
+                        variant_outcomes = await asyncio.gather(
+                            *[_evaluate_variant(vp) for vp, _ in filtered_variants]
+                        )
+
+                        for i, ((variant_prompt, variant_desc), outcome) in enumerate(
+                            zip(filtered_variants, variant_outcomes), 1
+                        ):
+                            var_score, var_results, from_cache = outcome
+                            cache_note = " (💾缓存)" if from_cache else ""
+                            logger.debug(f"   📊 变体{i}得分: {var_score:.1f} ({variant_desc}){cache_note}")
 
                             var_rank_score = self._ab_rank_score(
                                 var_score, var_results, ab_sample_count
                             )
                             if var_rank_score > 100:
                                 logger.warning(
-                                    "   变体%d存在缺失或质量硬失败样本，取消获胜资格: %s",
+                                    "   变体%d多数样本缺失或质量硬失败，取消获胜资格: %s | 原因: %s",
                                     i, variant_desc,
+                                    self._summarize_quality_failures(var_results),
+                                )
+                            elif not self._is_complete_quality_evaluation(var_results, ab_sample_count):
+                                logger.warning(
+                                    "   变体%d存在少量质量硬失败样本，按比例加罚: %s | 原因: %s",
+                                    i, variant_desc,
+                                    self._summarize_quality_failures(var_results),
                                 )
                             all_scores.append((var_rank_score, variant_prompt, variant_desc))
 
@@ -956,12 +1025,19 @@ class PromptEvolutionEngine:
                     best_prompt, samples, current_temp,
                     model_id=self.rewrite_model_id
                 )
-                full_quality_complete = self._is_complete_quality_evaluation(
-                    results, len(samples)
-                )
-                if not full_quality_complete:
-                    logger.warning("当前提示词存在缺失或质量硬失败样本，版本评分按不合格处理")
+                full_failure_ratio = self._quality_failure_ratio(results, len(samples))
+                if full_failure_ratio > self.QUALITY_DISQUALIFY_FAILURE_RATIO:
+                    logger.warning(
+                        "当前提示词多数样本缺失或质量硬失败（%s），版本评分按不合格处理",
+                        self._summarize_quality_failures(results),
+                    )
                     avg_score = 100.0
+                elif full_failure_ratio > 0:
+                    logger.warning(
+                        "当前提示词存在少量质量硬失败样本（占比 %.0f%%）: %s",
+                        full_failure_ratio * 100,
+                        self._summarize_quality_failures(results),
+                    )
                 new_version.avg_ai_score = avg_score
                 new_version.evaluation_results = results
                 new_version.avg_score_reduction = self._calc_avg_reduction(results)
@@ -992,7 +1068,7 @@ class PromptEvolutionEngine:
                     if r.success and r.rewritten_multi_score:
                         composite_scores.append(r.rewritten_multi_score.get("composite_score", avg_score))
                 avg_composite = sum(composite_scores) / len(composite_scores) if composite_scores else avg_score
-                if not full_quality_complete:
+                if full_failure_ratio > self.QUALITY_DISQUALIFY_FAILURE_RATIO:
                     avg_composite = 100.0
 
                 new_version.avg_readability = avg_readability
@@ -1217,15 +1293,97 @@ class PromptEvolutionEngine:
             raise
         finally:
             self.is_running = False
+            # 🔧 无论成功/失败，批次结束删除本批次改写全文临时工作区，不积留文件
+            self._cleanup_rewrite_workspace()
+
+    def _prepare_rewrite_workspace(self) -> None:
+        """准备改写全文临时工作区：清理残留目录 + 创建本批次目录并注入评估器。
+
+        残留目录来自上一次进程被杀死的异常退出，启动时自愈清理。
+        """
+        self._workspace_batch_dir: Optional[Path] = None
+        if not self.history:
+            return
+        root = self.storage.storage_dir / "rewrite_workspace"
+        root.mkdir(parents=True, exist_ok=True)
+        for entry in root.iterdir():
+            if entry.name != self.history.evolution_id:
+                if entry.is_dir():
+                    shutil.rmtree(entry, ignore_errors=True)
+                else:
+                    entry.unlink(missing_ok=True)
+        batch_dir = root / self.history.evolution_id
+        batch_dir.mkdir(parents=True, exist_ok=True)
+        self._workspace_batch_dir = batch_dir
+        self.evaluator.workspace_dir = batch_dir
+        logger.info(f"🗂️ 改写全文临时工作区: {batch_dir}")
+
+    def _cleanup_rewrite_workspace(self) -> None:
+        """批次结束：整目录删除本批次改写全文工作区并清除注入。"""
+        self.evaluator.workspace_dir = None
+        batch_dir = getattr(self, "_workspace_batch_dir", None)
+        if batch_dir is not None:
+            if batch_dir.exists():
+                shutil.rmtree(batch_dir, ignore_errors=True)
+                logger.info("🧹 已清理改写全文临时工作区")
+            self._workspace_batch_dir = None
 
     def _update_best_versions(self, version: PromptVersion) -> None:
         """更新最佳版本列表（保留前N个）"""
+        # 🔧 分数门槛：平均 AI 分超过起点门槛的版本降分无效，不得入选，
+        # 防止高分版本凭低 composite（可读性/文笔权重拉低）占据最佳位
+        if version.avg_ai_score is None or version.avg_ai_score > self.BEST_VERSION_MAX_AI_SCORE:
+            logger.warning(
+                f"🚫 版本 {version.version_id} 平均AI分 {version.avg_ai_score} 超过上限 "
+                f"{self.BEST_VERSION_MAX_AI_SCORE}，降分无效不得入选最佳列表"
+            )
+            return
+        # 🔧 保真门槛：含硬失败或语义保真<90样本的版本不得入选最佳列表，
+        # 防止带毒提示词（授权增量/固定语境示例）凭高降分进入传承链
+        # （2026-08-07 批次 db1cdd3e 取证：85分评审仍入选最佳导致污染闭环）
+        if self._version_has_fidelity_failure(version):
+            logger.warning(f"🚫 版本 {version.version_id} 含硬失败或低保真样本，不得入选最佳列表")
+            return
+        # 🔧 成功率门槛：篇幅守门失败样本无评审记录，会穿透保真门槛；
+        # 均值只统计成功样本，坍塔型版本借此获得虚高适应度，须按成功率拒绝
+        results = version.evaluation_results or []
+        if results:
+            success_ratio = sum(1 for r in results if r.success) / len(results)
+            if success_ratio < self.BEST_VERSION_MIN_SUCCESS_RATIO:
+                logger.warning(
+                    f"🚫 版本 {version.version_id} 成功样本占比 {success_ratio:.0%} "
+                    f"低于下限 {self.BEST_VERSION_MIN_SUCCESS_RATIO:.0%}，疑似坍塔型提示词，不得入选最佳列表"
+                )
+                return
+        # 🔧 安全门槛：提示词文本未通过安全校验不得入选（2026-08-07 批次 17d57ae2
+        # 取证：fa2f6e3c 凭一次 A/B 恰好全过的评估携带毒文本入选 best_prompts）
+        safety_reason = MetaOptimizer._prompt_safety_reason(version.prompt_text)
+        if safety_reason is not None:
+            logger.warning(
+                f"🚫 版本 {version.version_id} 提示词未通过安全校验，不得入选最佳列表（原因: {safety_reason}）"
+            )
+            return
+
         self.history.best_versions.append(version)
         self.history.best_versions.sort(key=lambda v: v.avg_ai_score)
         self.history.best_versions = self.history.best_versions[:self.config.keep_top_n]
 
         # 同时保存到文件
         self.storage.save_best_prompts(self.history.best_versions, self.config.keep_top_n)
+
+    @staticmethod
+    def _version_has_fidelity_failure(version: PromptVersion) -> bool:
+        """检查版本评估结果中是否存在硬失败或语义保真<90的样本。"""
+        for r in version.evaluation_results or []:
+            review = r.llm_review
+            if not isinstance(review, dict):
+                continue
+            if review.get("hard_fail"):
+                return True
+            score = (review.get("semantic_fidelity") or {}).get("score")
+            if isinstance(score, (int, float)) and score < 90:
+                return True
+        return False
 
     def _calc_avg_reduction(self, results: List[EvaluationResult]) -> float:
         """计算平均得分下降"""
@@ -1297,6 +1455,15 @@ class PromptEvolutionEngine:
         # 1. 🆕 检查历史最佳提示词（优先选择同题材）
         # 🆕 使用全局历史最佳集合，而非上一轮
         best_prompts = self.storage.load_global_best_prompts()
+        # 🔧 传承链安全校验：守门建立前的历史带毒版本（授权增量/固定语境示例）
+        # 不得被选为起点（2026-08-07 批次 17d57ae2 实证：42cd8e6e 漏网导致
+        # "幽影短剑→短刀"在四个批次稳定复现硬失败）
+        if best_prompts:
+            safe_prompts = [p for p in best_prompts if MetaOptimizer._validate_prompt_safety(p.prompt_text)]
+            skipped = len(best_prompts) - len(safe_prompts)
+            if skipped:
+                logger.warning(f"🚫 起点选择跳过 {skipped} 个未通过安全校验的历史最佳版本")
+            best_prompts = safe_prompts
         if best_prompts:
             # 🆕 先筛选同题材的提示词
             if self.genre:
@@ -1330,6 +1497,9 @@ class PromptEvolutionEngine:
 
         # 2. 检查已批准的提示词（仅当比历史最佳更好时使用）
         approved = self.storage.get_latest_approved_prompt()
+        if approved and approved.get("prompt_text") and not MetaOptimizer._validate_prompt_safety(approved["prompt_text"]):
+            logger.warning("🚫 已批准提示词未通过安全校验，跳过")
+            approved = None
         if approved and approved.get("prompt_text"):
             # 🔧 优先使用综合评分，如果没有则回退到AI分数
             approved_score = approved.get("avg_composite_score", approved.get("avg_ai_score", 100))

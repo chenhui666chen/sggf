@@ -26,6 +26,7 @@ import CheckCircleIcon from '@mui/icons-material/CheckCircle'
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import ExpandLessIcon from '@mui/icons-material/ExpandLess'
 import { apiClient, extractApiErrorMessage } from '@/services/api'
+import { formatScore } from '@/utils/promptEvolutionScore'
 
 interface EvolutionStatus {
   is_running: boolean
@@ -472,8 +473,8 @@ export default function PromptEvolutionPage() {
               {selectedPrompt.evaluation_results.map((r, i) => (
                 <Paper key={i} variant="outlined" sx={{ p: 2, mb: 2 }}>
                   <Box sx={{ display: 'flex', gap: 2, mb: 1 }}>
-                    <Chip label={`原始: ${r.original_ai_score}`} color="error" size="small" />
-                    <Chip label={`改写后: ${r.rewritten_ai_score}`} color="success" size="small" />
+                    <Chip label={`原始: ${formatScore(r.original_ai_score)}`} color="error" size="small" />
+                    <Chip label={`改写后: ${formatScore(r.rewritten_ai_score)}`} color="success" size="small" />
                     <Chip label={`降低: ${r.score_reduction.toFixed(1)}`} size="small" />
                   </Box>
                   <Grid container spacing={2}>

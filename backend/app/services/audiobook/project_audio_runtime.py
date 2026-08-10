@@ -28,11 +28,11 @@ class ProjectAudioRuntimeConfig:
     character_items: List[dict]
 
 
-# 配乐基准音量当前默认值（进一步压低以确保人声清晰）；旧版 Pydantic 默认 -36dB 过低
-BASE_BGM_VOLUME_DB_DEFAULT = -24.0
+# 配乐基准音量当前默认值（继续压低以确保人声清晰）；旧版 Pydantic 默认 -36dB 过低
+BASE_BGM_VOLUME_DB_DEFAULT = -27.0
 
 # 历史上注入过的系统默认值；前端未开放该配置项，命中即视为旧默认可被抬升
-LEGACY_BASE_BGM_VOLUME_DEFAULTS = (-36.0, -18.0, -21.0)
+LEGACY_BASE_BGM_VOLUME_DEFAULTS = (-36.0, -18.0, -21.0, -24.0)
 
 
 def heal_legacy_base_bgm_volume(audio_fx: Dict[str, Any]) -> Dict[str, Any]:

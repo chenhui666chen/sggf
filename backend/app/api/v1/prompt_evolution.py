@@ -21,7 +21,8 @@ from app.services.prompt_evolution import (
     PromptEvolutionEngine,
     EvolutionConfig,
     EvolutionHistory,
-    ApprovalStatus
+    ApprovalStatus,
+    PromptVersion
 )
 from app.services.prompt_evolution.storage import get_evolution_storage
 
@@ -645,9 +646,17 @@ async def resume_evolution(
             if engine.rewrite_model_id:
                 logger.info(f"🏆 恢复进化改写使用竞争胜出模型: {engine.rewrite_model_id}")
 
+            # 🔧 经验库初始化与正常进化路径一致：预置经验注入 + 历史批次传承
+            engine.meta_optimizer.reset_experience()
+            historical_reports = storage.get_all_experience_reports()
+            if historical_reports:
+                loaded_count = engine.meta_optimizer.load_historical_experience(
+                    historical_reports, genre=engine.genre or history.genre
+                )
+                logger.info(f"📚 恢复进化加载历史经验: {loaded_count} 条")
+
             # 创建当前版本（从上次最佳开始）
-            from .models import PromptVersion as PV
-            current_version = PV(prompt_text=start_prompt, iteration=resume_from_iteration)
+            current_version = PromptVersion(prompt_text=start_prompt, iteration=resume_from_iteration)
 
             # 评估当前版本作为基线
             avg_score, results = await engine.evaluator.evaluate_prompt(
@@ -668,7 +677,7 @@ async def resume_evolution(
                     current_version, config.target_score, engine.history.all_versions
                 )
 
-                new_version = PV(
+                new_version = PromptVersion(
                     prompt_text=improved_prompt,
                     iteration=iteration,
                     parent_version_id=current_version.version_id,

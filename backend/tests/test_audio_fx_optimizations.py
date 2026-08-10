@@ -1186,7 +1186,7 @@ def test_music_timeline_no_longer_applies_global_minus_three_db(tmp_path, monkey
 
     class Harness(MusicMixin):
         def __init__(self):
-            self._audio_fx_config = {"intelligent_balance": False, "base_bgm_volume": -24}
+            self._audio_fx_config = {"intelligent_balance": False, "base_bgm_volume": -27}
             self.audio_mixer = SimpleNamespace(
                 add_background_music=self._add_background_music,
             )
@@ -1195,13 +1195,13 @@ def test_music_timeline_no_longer_applies_global_minus_three_db(tmp_path, monkey
             calls.append(kwargs)
             return voice_audio + b"|bgm"
 
-    # underscore / volume=0.2：相对调整为 0，期望恰好等于基准 -24dB
+    # underscore / volume=0.2：相对调整为 0，期望恰好等于基准 -27dB
     Harness()._apply_background_music(
         b"voice",
         {"timeline": [{"file": "music_cache/bgm.mp3", "type": "underscore", "volume": 0.2}]},
     )
 
-    assert calls[0]["bgm_volume_offset"] == -24
+    assert calls[0]["bgm_volume_offset"] == -27
 
 
 def test_resolve_runtime_config_heals_legacy_low_bgm_volume():
@@ -1209,11 +1209,15 @@ def test_resolve_runtime_config_heals_legacy_low_bgm_volume():
     from app.services.audiobook.project_audio_runtime import heal_legacy_base_bgm_volume
 
     healed = heal_legacy_base_bgm_volume({"base_bgm_volume": -36.0})
-    assert healed["base_bgm_volume"] == -24.0
+    assert healed["base_bgm_volume"] == -27.0
 
     # 历史系统默认 -21 也视为旧默认被抬升，确保存量项目应用新音量
     healed_legacy_default = heal_legacy_base_bgm_volume({"base_bgm_volume": -21.0})
-    assert healed_legacy_default["base_bgm_volume"] == -24.0
+    assert healed_legacy_default["base_bgm_volume"] == -27.0
+
+    # 上一档系统默认 -24 同样被抬升，存量项目 remix 后应用新基准
+    healed_previous_default = heal_legacy_base_bgm_volume({"base_bgm_volume": -24.0})
+    assert healed_previous_default["base_bgm_volume"] == -27.0
 
     explicit = heal_legacy_base_bgm_volume({"base_bgm_volume": -12.0})
     assert explicit["base_bgm_volume"] == -12.0

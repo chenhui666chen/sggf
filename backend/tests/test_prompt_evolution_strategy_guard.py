@@ -61,12 +61,13 @@ def make_result(*, reduction=30, success=True, semantic=95, fact=95, complete=95
 
 
 def test_new_initial_prompt_targets_detector_patterns_without_content_distortion():
+    # v2 整合版起点：断言锁定保真铁律与检测器杠杆的语义等价条款
     prompt = MetaOptimizer().get_initial_prompt("玄幻")
 
-    assert "不得改变人物姓名" in prompt
-    assert "不得改变事件顺序" in prompt
-    assert "避免句长和句式高度均匀" in prompt
-    assert "减少模板化连接词" in prompt
+    assert "不得改变或增删人物姓名" in prompt
+    assert "事件顺序" in prompt
+    assert "禁止连续三句以上以相同人名" in prompt
+    assert "不承载事实的机械连接词" in prompt
     assert "极致口语化" not in prompt
     assert "制造不完美" not in prompt
     assert "可以用现代口语" not in prompt
@@ -221,6 +222,121 @@ def test_ab_candidate_requires_every_planned_sample_to_pass_quality():
     assert PromptEvolutionEngine._is_complete_quality_evaluation([passed, passed], 2) is True
     assert PromptEvolutionEngine._is_complete_quality_evaluation([passed, failed], 2) is False
     assert PromptEvolutionEngine._is_complete_quality_evaluation([passed], 2) is False
+
+
+def test_ab_rank_penalizes_minority_hard_failures_but_disqualifies_majority():
+    passed = make_result()
+    failed = make_result(success=False)
+    failed.error = "事实一致性低于90"
+
+    # 全部通过：保持原分
+    assert PromptEvolutionEngine._ab_rank_score(30.0, [passed] * 4, 4) == 30.0
+    # 少数（1/4）硬失败：保留资格但按比例加罚分
+    minority_score = PromptEvolutionEngine._ab_rank_score(
+        30.0, [passed, passed, passed, failed], 4
+    )
+    assert 30.0 < minority_score <= 100.0
+    assert minority_score == pytest.approx(45.0)
+    # 多数（3/4）硬失败：取消资格
+    assert PromptEvolutionEngine._ab_rank_score(
+        30.0, [passed, failed, failed, failed], 4
+    ) == 101.0
+    # 样本缺失按失败计：缺 3 个即多数失败
+    assert PromptEvolutionEngine._ab_rank_score(30.0, [passed], 4) == 101.0
+
+
+def test_quality_failure_summary_collects_hard_fail_reasons():
+    failed_a = make_result(success=False)
+    failed_a.error = "事实一致性低于90"
+    failed_b = make_result(success=False)
+    failed_b.error = None
+
+    summary = PromptEvolutionEngine._summarize_quality_failures(
+        [make_result(), failed_a, failed_b]
+    )
+
+    assert "事实一致性低于90" in summary
+    assert "未知原因" in summary
+
+
+@pytest.mark.asyncio
+async def test_variant_prompt_always_carries_fact_fidelity_constraint():
+    optimizer = MetaOptimizer()
+    optimizer._generate_random_exploration_strategies = AsyncMock(
+        return_value=["交替句首结构，打破连续相同句法骨架"]
+    )
+    optimizer._generate_variant_from_strategy = AsyncMock(
+        return_value="请交替使用主语开头与状语前置，避免连续平行句式。"
+    )
+
+    variants = await optimizer.generate_prompt_variants("安全基础提示词", 1)
+
+    assert len(variants) == 1
+    variant_prompt, _ = variants[0]
+    assert "【事实保真硬性约束】" in variant_prompt
+    assert "不得改变人物姓名" in variant_prompt
+
+
+@pytest.mark.asyncio
+async def test_variant_prompt_does_not_duplicate_existing_fidelity_constraint():
+    optimizer = MetaOptimizer()
+    optimizer._generate_random_exploration_strategies = AsyncMock(
+        return_value=["清理空泛套话"]
+    )
+    base_variant = "请删除套话。\n\n【事实保真硬性约束】不得改变人物姓名等事实。"
+    optimizer._generate_variant_from_strategy = AsyncMock(return_value=base_variant)
+
+    variants = await optimizer.generate_prompt_variants("安全基础提示词", 1)
+
+    variant_prompt, _ = variants[0]
+    assert variant_prompt.count("【事实保真硬性约束】") == 1
+
+
+def test_initial_prompt_embeds_measured_detection_levers():
+    # 朱雀实测三优先级：禁升华收尾 > 句式口语化 > 删套路句型
+    prompt = MetaOptimizer().get_initial_prompt("玄幻")
+
+    assert "升华" in prompt
+    assert "口语化" in prompt
+    assert "套路" in prompt
+    # 保持既有语域保护边界：不是无差别口语化
+    assert "极致口语化" not in prompt
+    assert "可以用现代口语" not in prompt
+
+
+def test_detection_strategy_constraint_covers_three_priorities():
+    constraint = meta_optimizer.VARIANT_DETECTION_STRATEGY_CONSTRAINT
+
+    assert meta_optimizer.VARIANT_DETECTION_STRATEGY_MARKER in constraint
+    assert "升华" in constraint
+    assert "口语化" in constraint
+    assert "套路" in constraint
+
+
+@pytest.mark.asyncio
+async def test_variant_prompt_carries_detection_strategy_constraint_once():
+    optimizer = MetaOptimizer()
+    optimizer._generate_random_exploration_strategies = AsyncMock(
+        return_value=["交替句首结构，打破连续相同句法骨架"]
+    )
+    # 变体自带一份策略约束，不得重复追加
+    base_variant = (
+        "请交替句首结构。\n\n"
+        f"{meta_optimizer.VARIANT_DETECTION_STRATEGY_MARKER}已有的约束。"
+    )
+    optimizer._generate_variant_from_strategy = AsyncMock(return_value=base_variant)
+
+    variants = await optimizer.generate_prompt_variants("安全基础提示词", 1)
+
+    assert len(variants) == 1
+    variant_prompt, _ = variants[0]
+    assert variant_prompt.count(meta_optimizer.VARIANT_DETECTION_STRATEGY_MARKER) == 1
+    assert "【事实保真硬性约束】" in variant_prompt
+
+
+def test_meta_optimizer_prompt_states_measured_levers():
+    # 元优化器的检测原理说明需同步实测结论，避免进化方向偏离已验证杠杆
+    assert "升华" in meta_optimizer.META_OPTIMIZER_PROMPT
 
 
 @pytest.mark.asyncio

@@ -146,8 +146,8 @@ class MusicMixin:
         # 🆕 检查是否启用智能音量平衡
         audio_fx = getattr(self, "_audio_fx_config", None) or {}
         intelligent_balance = audio_fx.get("intelligent_balance", True)
-        # 默认配乐基准音量：进一步压低以避免盖过人声，同时保持可听
-        base_bgm_volume_db = audio_fx.get("base_bgm_volume", -24)
+        # 默认配乐基准音量：继续压低以避免盖过人声，同时保持可听
+        base_bgm_volume_db = audio_fx.get("base_bgm_volume", -27)
         try:
             bgm_crossfade_ms = int(audio_fx.get("bgm_crossfade_ms") or 0)
         except Exception:

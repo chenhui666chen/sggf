@@ -213,6 +213,28 @@ class OpenAICompatibleAdapter(BaseLLMAdapter):
 
         return normalized
 
+    def _log_empty_response_diagnostic(
+        self,
+        message: Any,
+        finish_reason: Optional[str],
+        usage: Any,
+    ) -> None:
+        """空响应诊断：HTTP 200 但 content 为空时记录关键字段。
+
+        典型根因：思考模型 adaptive 思考耗尽 max_tokens 总预算
+        （finish_reason=length，思考 token 计入 completion 而正文为空）、
+        网关内容过滤等。历史上此处只能看到 content=""，属排查盲区。
+        """
+        reasoning = getattr(message, "reasoning_content", None) or ""
+        completion_tokens = getattr(usage, "completion_tokens", None) if usage is not None else None
+        logger.warning(
+            "⚠️ 空响应诊断 | 模型: %s | finish_reason=%s | reasoning=%d字 | completion_tokens=%s",
+            self.spec.id,
+            finish_reason,
+            len(reasoning),
+            completion_tokens,
+        )
+
     def _build_request_timeout(self, timeout_value: Optional[Any]) -> Optional[Any]:
         if timeout_value is None:
             return None
@@ -373,6 +395,14 @@ class OpenAICompatibleAdapter(BaseLLMAdapter):
 
             message = response.choices[0].message
             content = message.content or ""
+            if not content.strip():
+                # 🔧 空响应诊断：HTTP 200 但 content 为空时记录关键字段，
+                #    避免思考模型预算耗尽等根因成为排查盲区
+                self._log_empty_response_diagnostic(
+                    message=message,
+                    finish_reason=response.choices[0].finish_reason,
+                    usage=response.usage,
+                )
             metadata = self._extract_reasoning_metadata(message)
 
             usage = {}

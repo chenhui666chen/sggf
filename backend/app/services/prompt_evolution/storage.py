@@ -127,10 +127,8 @@ class EvolutionStorage:
         # 保存
         self._history_store.write(all_histories)
 
-        # 同时删除经验报告
-        experience_file = self.experience_dir / f"{evolution_id}.json"
-        if experience_file.exists():
-            experience_file.unlink()
+        # 🔧 不连带删除经验报告：经验报告（experience_reports/*_experience.json）
+        # 是跨批次传承资产，与进化历史解耦；删除历史仅移除迭代记录本身
 
         logger.info(f"🗑️ 删除进化历史: {evolution_id}")
         return True
@@ -186,12 +184,7 @@ class EvolutionStorage:
             # 保存
             self._history_store.write(new_histories)
 
-            # 删除对应的经验报告
-            deleted_ids = set(h.get("evolution_id") for h in all_histories) - keep_ids
-            for eid in deleted_ids:
-                experience_file = self.experience_dir / f"{eid}.json"
-                if experience_file.exists():
-                    experience_file.unlink()
+            # 🔧 与单条删除一致：不连带删除经验报告（跨批次传承资产）
 
             logger.info(f"🧹 自动清理历史: 删除 {deleted_count} 个，保留 {len(new_histories)} 个")
 
