@@ -1,5 +1,5 @@
 ﻿# ========= 拾光工坊 - 开发环境清理脚本（精确打击版） =========
-# 用途: 一次性关闭本项目四个服务(Backend / Celery Audiobook / Celery DreamWeaver / Frontend)
+# 用途: 一次性关闭本项目五个服务(Backend / Celery Audiobook / Celery DreamWeaver / Celery Beat / Frontend)
 #       仅按命令行特征匹配本项目进程，不误杀系统里其他 python / node 进程
 # 使用方法: .\dev-kill.ps1
 
@@ -129,7 +129,7 @@ if ($residual) {
 Write-Host ""
 Write-Host "========================================" -ForegroundColor Cyan
 if ($allClean) {
-    Write-Host "[SUCCESS] 清理完成！四个服务已全部关闭" -ForegroundColor Green
+    Write-Host "[SUCCESS] 清理完成！五个服务已全部关闭" -ForegroundColor Green
 } else {
     Write-Host "[WARN] 部分目标未能完全清理，请按上方提示手动检查" -ForegroundColor Yellow
 }
