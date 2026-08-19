@@ -586,13 +586,13 @@
       "emotion",
       "peaceful",
       "general",
-      "scene_14"
+      "scene_18"
     ],
     "source": "ai_generated",
     "style": "peaceful",
     "scenes": [
       "general",
-      "scene_14"
+      "scene_18"
     ],
     "quality_score": 100.0,
     "quality_grade": "B",
@@ -603,6 +603,323 @@
     "public_url": "https://audio.sggf.net/shared/audio_library/sfx/sound_effects/emotion/peaceful/sfx_emotion_8090da.mp3",
     "object_key": "shared/audio_library/sfx/sound_effects/emotion/peaceful/sfx_emotion_8090da.mp3",
     "local_cache_path": "sound_effects/emotion/peaceful/sfx_emotion_8090da.mp3",
+    "asset_scope": "shared_library"
+  },
+  {
+    "id": "segment_sfx_53cbdcf8240c",
+    "name": "锁链撞击声",
+    "category": "action/intense",
+    "file_path": "sound_effects/action/segment_workbench/segment_sfx_53cbdcf8240c.mp3",
+    "description": "锁链撞击声",
+    "tags": [
+      "单片段工作台",
+      "AI生成",
+      "action",
+      "intense",
+      "general"
+    ],
+    "source": "ai_generated",
+    "style": "intense",
+    "scenes": [
+      "general"
+    ],
+    "quality_score": 85.0,
+    "quality_grade": "B",
+    "quality_status": "accepted",
+    "storage_mode": "durable_cloud",
+    "storage_driver": "aliyun_oss",
+    "cloud_uri": "oss://shared/audio_library/sfx/sound_effects/action/segment_workbench/segment_sfx_53cbdcf8240c.mp3",
+    "public_url": "https://audio.sggf.net/shared/audio_library/sfx/sound_effects/action/segment_workbench/segment_sfx_53cbdcf8240c.mp3",
+    "object_key": "shared/audio_library/sfx/sound_effects/action/segment_workbench/segment_sfx_53cbdcf8240c.mp3",
+    "local_cache_path": "sound_effects/action/segment_workbench/segment_sfx_53cbdcf8240c.mp3",
+    "asset_scope": "shared_library"
+  },
+  {
+    "id": "ambient_scene_ambient_calm_doubao_935fc5",
+    "name": "灵力涌动声",
+    "category": "environment/peaceful",
+    "file_path": "sound_effects/environment/peaceful/ambient_scene_ambient_calm_doubao_935fc5.mp3",
+    "description": "灵力涌动声",
+    "tags": [
+      "calm",
+      "environment",
+      "peaceful",
+      "outdoor"
+    ],
+    "source": "ai_generated",
+    "style": "peaceful",
+    "scenes": [
+      "outdoor"
+    ],
+    "quality_score": 85.0,
+    "quality_grade": "B",
+    "quality_status": "accepted",
+    "storage_mode": "durable_cloud",
+    "storage_driver": "aliyun_oss",
+    "cloud_uri": "oss://shared/audio_library/sfx/sound_effects/environment/peaceful/ambient_scene_ambient_calm_doubao_935fc5.mp3",
+    "public_url": "https://audio.sggf.net/shared/audio_library/sfx/sound_effects/environment/peaceful/ambient_scene_ambient_calm_doubao_935fc5.mp3",
+    "object_key": "shared/audio_library/sfx/sound_effects/environment/peaceful/ambient_scene_ambient_calm_doubao_935fc5.mp3",
+    "local_cache_path": "sound_effects/environment/peaceful/ambient_scene_ambient_calm_doubao_935fc5.mp3",
+    "asset_scope": "shared_library"
+  },
+  {
+    "id": "ambient_scene_wind_calm_doubao_e54aef",
+    "name": "风声",
+    "category": "environment/peaceful",
+    "file_path": "sound_effects/environment/peaceful/ambient_scene_wind_calm_doubao_e54aef.mp3",
+    "description": "风声",
+    "tags": [
+      "风",
+      "calm",
+      "environment",
+      "peaceful",
+      "outdoor"
+    ],
+    "source": "ai_generated",
+    "style": "peaceful",
+    "scenes": [
+      "outdoor"
+    ],
+    "quality_score": 85.0,
+    "quality_grade": "B",
+    "quality_status": "accepted",
+    "storage_mode": "durable_cloud",
+    "storage_driver": "aliyun_oss",
+    "cloud_uri": "oss://shared/audio_library/sfx/sound_effects/environment/peaceful/ambient_scene_wind_calm_doubao_e54aef.mp3",
+    "public_url": "https://audio.sggf.net/shared/audio_library/sfx/sound_effects/environment/peaceful/ambient_scene_wind_calm_doubao_e54aef.mp3",
+    "object_key": "shared/audio_library/sfx/sound_effects/environment/peaceful/ambient_scene_wind_calm_doubao_e54aef.mp3",
+    "local_cache_path": "sound_effects/environment/peaceful/ambient_scene_wind_calm_doubao_e54aef.mp3",
+    "asset_scope": "shared_library"
+  },
+  {
+    "id": "ambient_scene_ambient_calm_doubao_eb8c8e",
+    "name": "回声",
+    "category": "environment/peaceful",
+    "file_path": "sound_effects/environment/peaceful/ambient_scene_ambient_calm_doubao_eb8c8e.mp3",
+    "description": "回声",
+    "tags": [
+      "calm",
+      "environment",
+      "peaceful",
+      "outdoor"
+    ],
+    "source": "ai_generated",
+    "style": "peaceful",
+    "scenes": [
+      "outdoor"
+    ],
+    "quality_score": 100.0,
+    "quality_grade": "B",
+    "quality_status": "accepted",
+    "storage_mode": "durable_cloud",
+    "storage_driver": "aliyun_oss",
+    "cloud_uri": "oss://shared/audio_library/sfx/sound_effects/environment/peaceful/ambient_scene_ambient_calm_doubao_eb8c8e.mp3",
+    "public_url": "https://audio.sggf.net/shared/audio_library/sfx/sound_effects/environment/peaceful/ambient_scene_ambient_calm_doubao_eb8c8e.mp3",
+    "object_key": "shared/audio_library/sfx/sound_effects/environment/peaceful/ambient_scene_ambient_calm_doubao_eb8c8e.mp3",
+    "local_cache_path": "sound_effects/environment/peaceful/ambient_scene_ambient_calm_doubao_eb8c8e.mp3",
+    "asset_scope": "shared_library"
+  },
+  {
+    "id": "sfx_action_9f6bde",
+    "name": "铁链轻响",
+    "category": "action/realistic",
+    "file_path": "sound_effects/action/realistic/sfx_action_9f6bde.mp3",
+    "description": "铁链轻响",
+    "tags": [
+      "action",
+      "realistic",
+      "general",
+      "scene_1"
+    ],
+    "source": "ai_generated",
+    "style": "realistic",
+    "scenes": [
+      "general",
+      "scene_1"
+    ],
+    "quality_score": 100.0,
+    "quality_grade": "B",
+    "quality_status": "accepted",
+    "storage_mode": "durable_cloud",
+    "storage_driver": "aliyun_oss",
+    "cloud_uri": "oss://shared/audio_library/sfx/sound_effects/action/realistic/sfx_action_9f6bde.mp3",
+    "public_url": "https://audio.sggf.net/shared/audio_library/sfx/sound_effects/action/realistic/sfx_action_9f6bde.mp3",
+    "object_key": "shared/audio_library/sfx/sound_effects/action/realistic/sfx_action_9f6bde.mp3",
+    "local_cache_path": "sound_effects/action/realistic/sfx_action_9f6bde.mp3",
+    "asset_scope": "shared_library"
+  },
+  {
+    "id": "sfx_action_ced031",
+    "name": "能量流动声",
+    "category": "action/realistic",
+    "file_path": "sound_effects/action/realistic/sfx_action_ced031.mp3",
+    "description": "能量流动声",
+    "tags": [
+      "action",
+      "realistic",
+      "general",
+      "scene_5"
+    ],
+    "source": "ai_generated",
+    "style": "realistic",
+    "scenes": [
+      "general",
+      "scene_5"
+    ],
+    "quality_score": 100.0,
+    "quality_grade": "B",
+    "quality_status": "accepted",
+    "storage_mode": "durable_cloud",
+    "storage_driver": "aliyun_oss",
+    "cloud_uri": "oss://shared/audio_library/sfx/sound_effects/action/realistic/sfx_action_ced031.mp3",
+    "public_url": "https://audio.sggf.net/shared/audio_library/sfx/sound_effects/action/realistic/sfx_action_ced031.mp3",
+    "object_key": "shared/audio_library/sfx/sound_effects/action/realistic/sfx_action_ced031.mp3",
+    "local_cache_path": "sound_effects/action/realistic/sfx_action_ced031.mp3",
+    "asset_scope": "shared_library"
+  },
+  {
+    "id": "sfx_action_aaed1d",
+    "name": "能量吸收声",
+    "category": "action/realistic",
+    "file_path": "sound_effects/action/realistic/sfx_action_aaed1d.mp3",
+    "description": "能量吸收声",
+    "tags": [
+      "action",
+      "realistic",
+      "general",
+      "scene_12"
+    ],
+    "source": "ai_generated",
+    "style": "realistic",
+    "scenes": [
+      "general",
+      "scene_12"
+    ],
+    "quality_score": 100.0,
+    "quality_grade": "B",
+    "quality_status": "accepted",
+    "storage_mode": "durable_cloud",
+    "storage_driver": "aliyun_oss",
+    "cloud_uri": "oss://shared/audio_library/sfx/sound_effects/action/realistic/sfx_action_aaed1d.mp3",
+    "public_url": "https://audio.sggf.net/shared/audio_library/sfx/sound_effects/action/realistic/sfx_action_aaed1d.mp3",
+    "object_key": "shared/audio_library/sfx/sound_effects/action/realistic/sfx_action_aaed1d.mp3",
+    "local_cache_path": "sound_effects/action/realistic/sfx_action_aaed1d.mp3",
+    "asset_scope": "shared_library"
+  },
+  {
+    "id": "segment_sfx_e8ae4eab37d7",
+    "name": "一个男性，低声自嘲般的一声轻笑",
+    "category": "action/realistic",
+    "file_path": "sound_effects/action/segment_workbench/segment_sfx_e8ae4eab37d7.mp3",
+    "description": "一个男性，低声自嘲般的一声轻笑",
+    "tags": [
+      "单片段工作台",
+      "AI生成",
+      "action",
+      "realistic",
+      "general"
+    ],
+    "source": "ai_generated",
+    "style": "realistic",
+    "scenes": [
+      "general"
+    ],
+    "quality_score": 100.0,
+    "quality_grade": "B",
+    "quality_status": "accepted",
+    "storage_mode": "durable_cloud",
+    "storage_driver": "aliyun_oss",
+    "cloud_uri": "oss://shared/audio_library/sfx/sound_effects/action/segment_workbench/segment_sfx_e8ae4eab37d7.mp3",
+    "public_url": "https://audio.sggf.net/shared/audio_library/sfx/sound_effects/action/segment_workbench/segment_sfx_e8ae4eab37d7.mp3",
+    "object_key": "shared/audio_library/sfx/sound_effects/action/segment_workbench/segment_sfx_e8ae4eab37d7.mp3",
+    "local_cache_path": "sound_effects/action/segment_workbench/segment_sfx_e8ae4eab37d7.mp3",
+    "asset_scope": "shared_library"
+  },
+  {
+    "id": "segment_sfx_a39ae31aa282",
+    "name": "一个男性，低声自嘲般的一声轻笑，2秒左右，无其他杂音",
+    "category": "action/realistic",
+    "file_path": "sound_effects/action/segment_workbench/segment_sfx_a39ae31aa282.mp3",
+    "description": "一个男性，低声自嘲般的一声轻笑，2秒左右，无其他杂音",
+    "tags": [
+      "单片段工作台",
+      "AI生成",
+      "action",
+      "realistic",
+      "general"
+    ],
+    "source": "ai_generated",
+    "style": "realistic",
+    "scenes": [
+      "general"
+    ],
+    "quality_score": 100.0,
+    "quality_grade": "B",
+    "quality_status": "accepted",
+    "storage_mode": "durable_cloud",
+    "storage_driver": "aliyun_oss",
+    "cloud_uri": "oss://shared/audio_library/sfx/sound_effects/action/segment_workbench/segment_sfx_a39ae31aa282.mp3",
+    "public_url": "https://audio.sggf.net/shared/audio_library/sfx/sound_effects/action/segment_workbench/segment_sfx_a39ae31aa282.mp3",
+    "object_key": "shared/audio_library/sfx/sound_effects/action/segment_workbench/segment_sfx_a39ae31aa282.mp3",
+    "local_cache_path": "sound_effects/action/segment_workbench/segment_sfx_a39ae31aa282.mp3",
+    "asset_scope": "shared_library"
+  },
+  {
+    "id": "segment_sfx_d2c6192993da",
+    "name": "一声男性自嘲般地轻笑",
+    "category": "action/realistic",
+    "file_path": "sound_effects/action/segment_workbench/segment_sfx_d2c6192993da.mp3",
+    "description": "一声男性自嘲般地轻笑",
+    "tags": [
+      "单片段工作台",
+      "AI生成",
+      "action",
+      "realistic",
+      "general"
+    ],
+    "source": "ai_generated",
+    "style": "realistic",
+    "scenes": [
+      "general"
+    ],
+    "quality_score": 100.0,
+    "quality_grade": "B",
+    "quality_status": "accepted",
+    "storage_mode": "durable_cloud",
+    "storage_driver": "aliyun_oss",
+    "cloud_uri": "oss://shared/audio_library/sfx/sound_effects/action/segment_workbench/segment_sfx_d2c6192993da.mp3",
+    "public_url": "https://audio.sggf.net/shared/audio_library/sfx/sound_effects/action/segment_workbench/segment_sfx_d2c6192993da.mp3",
+    "object_key": "shared/audio_library/sfx/sound_effects/action/segment_workbench/segment_sfx_d2c6192993da.mp3",
+    "local_cache_path": "sound_effects/action/segment_workbench/segment_sfx_d2c6192993da.mp3",
+    "asset_scope": "shared_library"
+  },
+  {
+    "id": "segment_sfx_515b81979f71",
+    "name": "一声男性自嘲般地轻笑。",
+    "category": "action/realistic",
+    "file_path": "sound_effects/action/segment_workbench/segment_sfx_515b81979f71.mp3",
+    "description": "一声男性自嘲般地轻笑。",
+    "tags": [
+      "单片段工作台",
+      "AI生成",
+      "action",
+      "realistic",
+      "general"
+    ],
+    "source": "ai_generated",
+    "style": "realistic",
+    "scenes": [
+      "general"
+    ],
+    "quality_score": 100.0,
+    "quality_grade": "B",
+    "quality_status": "accepted",
+    "storage_mode": "durable_cloud",
+    "storage_driver": "aliyun_oss",
+    "cloud_uri": "oss://shared/audio_library/sfx/sound_effects/action/segment_workbench/segment_sfx_515b81979f71.mp3",
+    "public_url": "https://audio.sggf.net/shared/audio_library/sfx/sound_effects/action/segment_workbench/segment_sfx_515b81979f71.mp3",
+    "object_key": "shared/audio_library/sfx/sound_effects/action/segment_workbench/segment_sfx_515b81979f71.mp3",
+    "local_cache_path": "sound_effects/action/segment_workbench/segment_sfx_515b81979f71.mp3",
     "asset_scope": "shared_library"
   }
 ]
