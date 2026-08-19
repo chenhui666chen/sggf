@@ -48,7 +48,7 @@ curl.exe -I "https://audio.sggf.net/shared/audio_library/healthcheck.txt"
 期望结果：
 
 - DNS 能解析到 CDN/OSS 或服务器地址。
-- HTTPS 证书覆盖 `audio.sggf.net`。
+- HTTPS 证书覆盖 `audio.sggf.net`（证书续期机制见根目录 [SSL_AUTO_RENEW_GUIDE.md](../SSL_AUTO_RENEW_GUIDE.md) 的 audio.sggf.net 章节）。
 - 测试对象返回 `200` 或 `206`。
 - `Content-Type` 对音频文件正确。
 - Range 请求可用，音频播放器可拖动进度。
