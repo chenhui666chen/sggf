@@ -54,6 +54,8 @@ interface AudiobookCompletionStepProps {
   onDownloadAudio: (chapterId: number) => void
   onCollectChapterAudio: (chapterAudio: ChapterAudio) => void
   onOpenScriptEditor: (chapterId: number) => void
+  /** GUIDE §2.5：seed_scene 章节审阅入口分流到场景编辑器。 */
+  onOpenSceneEditor?: (chapterId: number) => void
   onResumeChapterGeneration: (chapterId: number) => void
   onOpenScriptReview: () => void
   onOpenScriptReviewFromApi?: (audiobookProjectId: number, chapterId: number) => void
@@ -89,6 +91,7 @@ const AudiobookCompletionStep = ({
   onDownloadAudio,
   onCollectChapterAudio,
   onOpenScriptEditor,
+  onOpenSceneEditor,
   onResumeChapterGeneration,
   onOpenScriptReview,
   onOpenScriptReviewFromApi,
@@ -111,6 +114,7 @@ const AudiobookCompletionStep = ({
         hasScriptReview={hasScriptReview}
         audiobookProjectId={audiobookProjectId}
         onOpenScriptEditor={onOpenScriptEditor}
+        onOpenSceneEditor={onOpenSceneEditor}
         onOpenScriptReview={onOpenScriptReview}
         onOpenScriptReviewFromApi={onOpenScriptReviewFromApi}
         onGenerateApprovedChapterAudio={onGenerateApprovedChapterAudio}

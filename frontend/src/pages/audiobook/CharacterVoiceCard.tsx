@@ -13,6 +13,7 @@ import {
   CharacterVoicePresetSelect,
 } from './CharacterVoiceCardControls'
 import { audiobookColors } from './audiobookTheme'
+import { SEED_SCENE_INCOMPATIBLE_VOICE_REASON } from './seedSceneVoiceCompatibility'
 import {
   modelRequiresCustomVoice,
 } from './ttsModels'
@@ -54,6 +55,13 @@ const CharacterVoiceCard = ({
   const effectiveVoicePresets = voicePresetsByModel[effectiveTtsModel] || currentVoicePresets
   const effectiveModelRequiresCustomVoice = modelRequiresCustomVoice(effectiveTtsModel, ttsModelOptions)
   const canPreview = Boolean(characterVoice.voiceId.trim())
+  // 已配置音色被白名单标记为不兼容（场景生成模式下的其他供应商官方音色）时给出警告
+  const currentPreset = effectiveVoicePresets.find((preset) => preset.id === characterVoice.voiceId)
+  const voiceIncompatible = Boolean(
+    characterVoice.voiceId
+    && currentPreset?.disabled
+    && currentPreset.disabledReason === SEED_SCENE_INCOMPATIBLE_VOICE_REASON,
+  )
 
   return (
     <ListItem
@@ -111,9 +119,9 @@ const CharacterVoiceCard = ({
           <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
             {characterVoice.voiceId && (
               <Chip
-                label="已配置"
+                label={voiceIncompatible ? '已配置（场景生成不兼容）' : '已配置'}
                 size="small"
-                color="success"
+                color={voiceIncompatible ? 'warning' : 'success'}
                 sx={{ height: 18 }}
               />
             )}

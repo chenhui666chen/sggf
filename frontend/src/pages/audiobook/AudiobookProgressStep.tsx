@@ -12,6 +12,7 @@ import ActiveProjectTasksAlert from './ActiveProjectTasksAlert'
 import TaskStageDetails from './TaskStageDetails'
 import { audiobookButtonSx, audiobookColors } from './audiobookTheme'
 import type {
+  AudioEngineMode,
   StageConfig,
   StageInfo,
   TaskStatus,
@@ -21,6 +22,7 @@ interface AudiobookProgressStepProps {
   activeProjectTasks: TaskStatus[]
   activeTaskId?: string | null
   progressTaskStatus: TaskStatus
+  engineMode?: AudioEngineMode | null
   pauseResuming: boolean
   getTaskLabel: (task: TaskStatus) => string
   onFocusTask: (task: TaskStatus) => void
@@ -35,6 +37,7 @@ const AudiobookProgressStep = ({
   activeProjectTasks,
   activeTaskId = null,
   progressTaskStatus,
+  engineMode = null,
   pauseResuming,
   getTaskLabel,
   onFocusTask,
@@ -117,6 +120,7 @@ const AudiobookProgressStep = ({
       </Typography>
       <TaskStageDetails
         taskStatus={progressTaskStatus}
+        engineMode={engineMode}
         onOpenStageMetrics={onOpenStageMetrics}
       />
       {progressTaskStatus.stages?.quality_review?.status === 'completed' && (

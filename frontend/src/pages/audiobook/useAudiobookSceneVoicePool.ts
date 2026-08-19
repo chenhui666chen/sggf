@@ -11,7 +11,7 @@ import type { TtsModel, VoicePreset } from './types'
 
 const isHttpUrl = (value?: string) => Boolean(value?.startsWith('http://') || value?.startsWith('https://'))
 
-export const useAudiobookSceneVoicePool = () => {
+export const useAudiobookSceneVoicePool = (enabled = true) => {
   const [privateAssets, setPrivateAssets] = useState<VoiceReferenceAssetRecord[]>([])
   const [publicVoices, setPublicVoices] = useState<VoicePoolVoiceRecord[]>([])
   const [taxonomy, setTaxonomy] = useState<Record<string, string[] | string>>({})
@@ -38,8 +38,10 @@ export const useAudiobookSceneVoicePool = () => {
   }, [])
 
   useEffect(() => {
-    void refresh()
-  }, [refresh])
+    if (enabled) {
+      void refresh()
+    }
+  }, [enabled, refresh])
 
   const presets = useMemo<VoicePreset[]>(() => {
     const privatePresets = privateAssets.map((asset): VoicePreset => {

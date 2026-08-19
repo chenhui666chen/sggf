@@ -43,7 +43,13 @@ export const normalizeVoiceCatalogPayload = (
   payload?: VoiceCatalogPayload | null,
 ): NormalizedVoiceCatalog => {
   const rawVoices = Array.isArray(payload?.voices) ? payload.voices : []
-  const voices = rawVoices.filter(isVoicePresetLike).map(normalizeVoicePreset)
+  const voices = rawVoices
+    .filter(isVoicePresetLike)
+    .map((voice) => ({
+      // 音色目录按模型过滤返回，为官方音色补上所属模型，供 seed_scene 兼容性判定使用
+      ...normalizeVoicePreset(voice),
+      sourceModel: (voice.sourceModel as TtsModel | undefined) || model,
+    }))
   const voiceCount = typeof payload?.voice_count === 'number'
     ? payload.voice_count
     : voices.length

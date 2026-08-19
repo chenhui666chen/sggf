@@ -25,6 +25,10 @@ const scriptEditorActionsSource = readFileSync(
   new URL('../useAudiobookScriptEditorActions.ts', import.meta.url),
   'utf8',
 )
+const chapterScriptResultsSource = readFileSync(
+  new URL('../ChapterScriptResults.tsx', import.meta.url),
+  'utf8',
+)
 
 describe('audiobook completion stage boundaries', () => {
   it('routes script-only completion into a dedicated review view', () => {
@@ -33,6 +37,20 @@ describe('audiobook completion stage boundaries', () => {
     expect(scriptCompletionSource).toContain('场景剧本已生成')
     expect(scriptCompletionSource).toContain('审阅并批准')
     expect(scriptCompletionSource).toContain('生成场景音频')
+  })
+
+  it('routes script completion review entries to the scene editor for seed_scene batches', () => {
+    // GUIDE §2.5：完成步骤的审阅入口必须按引擎分流，
+    // seed_scene 章节禁止落入 legacy 单片段工作台
+    expect(scriptCompletionSource).toContain('onOpenSceneEditor')
+    expect(scriptCompletionSource).toContain('isSeedScene && onOpenSceneEditor')
+    expect(scriptCompletionSource).toContain('onOpenSceneEditor={onOpenSceneEditor}')
+    expect(chapterScriptResultsSource).toContain("audioEngineMode === 'seed_scene'")
+    expect(chapterScriptResultsSource).toContain('onOpenSceneEditor')
+    expect(completionStepSource).toContain('onOpenSceneEditor={onOpenSceneEditor}')
+    expect(audiobookPageSource).toContain('onOpenSceneEditor={handleOpenCompletionSceneChapter}')
+    expect(audiobookPageSource).toContain('const handleOpenCompletionSceneChapter')
+    expect(audiobookPageSource).toContain('setSceneEditorTarget')
   })
 
   it('keeps audio-only controls outside the script completion component', () => {
@@ -56,9 +74,18 @@ describe('audiobook completion stage boundaries', () => {
   it('approves scripts without bypassing the dedicated scene-audio action', () => {
     expect(scriptEditorSource).toContain("onSaveScript({ nextStatus: 'approved' })")
     expect(scriptEditorSource).toContain('批准剧本')
-    expect(scriptEditorSource).not.toContain('generateAudio')
+    // 编辑器不直接调用生成 API；生成编排由页面层回调承担
+    expect(scriptEditorSource).not.toContain('generateAudioFromScripts')
     expect(scriptEditorActionsSource).not.toContain('generateAudioFromScripts')
     expect(scriptEditorActionsSource).toContain('await refreshAudiobookProjectDetail(audiobookProject.id)')
     expect(audiobookPageSource).toContain('scriptEditorData,\n    refreshAudiobookProjectDetail,')
+  })
+
+  it('offers an approve-and-generate shortcut wired at page level', () => {
+    // 批准→生成音频链路缩短：编辑台内置组合按钮，编排在 AudiobookPage
+    expect(scriptEditorSource).toContain('批准并生成音频')
+    expect(scriptEditorSource).toContain('onApproveAndGenerateAudio')
+    expect(audiobookPageSource).toContain('onApproveAndGenerateAudio={handleApproveAndGenerateAudio}')
+    expect(audiobookPageSource).toContain("handleSaveScript({ nextStatus: 'approved' })")
   })
 })

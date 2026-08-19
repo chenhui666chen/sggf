@@ -8,7 +8,7 @@
  * 4. 进度监控
  * 5. 音频播放与下载
  */
-import { useCallback, useMemo, useRef } from 'react'
+import { useCallback, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import BrowserPlayer from '../components/audiobook/BrowserPlayer'
 import AudiobookCompletionStep from './audiobook/AudiobookCompletionStep'
@@ -22,9 +22,11 @@ import ChapterDeleteConfirmDialog from './audiobook/ChapterDeleteConfirmDialog'
 import HistoryDialog from './audiobook/HistoryDialog'
 import ScriptQualityReviewDialog from './audiobook/ScriptQualityReviewDialog'
 import ScriptEditorDialog from './audiobook/ScriptEditorDialog'
+import SceneChapterEditor from './audiobook/SceneChapterEditor'
 import TextProjectImportDialog from './audiobook/TextProjectImportDialog'
 import StageMetricsDialog from './audiobook/StageMetricsDialog'
 import { useAudiobookActiveTasks } from './audiobook/useAudiobookActiveTasks'
+import { resolveAudiobookProjectForChapter } from './audiobook/chapterSelectionUtils'
 import { useAudiobookBrowserPlayer } from './audiobook/useAudiobookBrowserPlayer'
 import { useAudiobookChapterSelectionActions } from './audiobook/useAudiobookChapterSelectionActions'
 import { useAudiobookCharacterVoicePreview } from './audiobook/useAudiobookCharacterVoicePreview'
@@ -35,6 +37,7 @@ import { useAudiobookChapterAudioActions } from './audiobook/useAudiobookChapter
 import { useAudiobookChapterDeleteActions } from './audiobook/useAudiobookChapterDeleteActions'
 import { useAudiobookChapterRemix } from './audiobook/useAudiobookChapterRemix'
 import { useAudiobookEditorSessionSync } from './audiobook/useAudiobookEditorSessionSync'
+import { useAudiobookEngineModeSwitch } from './audiobook/useAudiobookEngineModeSwitch'
 import { useAudiobookGenerationActions } from './audiobook/useAudiobookGenerationActions'
 import { useAudiobookGenerationState } from './audiobook/useAudiobookGenerationState'
 import { useAudiobookGeneratedChapterIds } from './audiobook/useAudiobookGeneratedChapterIds'
@@ -671,9 +674,22 @@ const AudiobookPage = () => {
     audiobookProject,
     chapters,
   })
-  const { generatedChapterIds, refreshGeneratedChapterIds } = useAudiobookGeneratedChapterIds({
+  const executionStatusByChapter = useMemo(() => {
+    const statusByChapter: Record<number, string | null> = {}
+    for (const [chapterId, checkpoint] of Object.entries(resumeCheckpoints)) {
+      const numericChapterId = Number(chapterId)
+      if (Number.isFinite(numericChapterId) && checkpoint?.run_status) {
+        statusByChapter[numericChapterId] = checkpoint.run_status
+      }
+    }
+    return statusByChapter
+  }, [resumeCheckpoints])
+  const { generatedChapterIds, chapterStateById, allProjectHistory, refreshGeneratedChapterIds, refreshAllProjects } = useAudiobookGeneratedChapterIds({
     projectId: selectedProjectId ?? routeProjectId,
     currentChapterAudios,
+    currentBatchEngineMode: audiobookProject?.engine_mode,
+    engineMode: audioEngineMode,
+    executionStatusByChapter,
   })
   chapterDeleteRefreshRef.current = () => {
     void refreshGeneratedChapterIds()
@@ -724,6 +740,15 @@ const AudiobookPage = () => {
     setAudioEngineMode,
     setActiveStep,
     setSnackbar,
+  })
+
+  const { handleEngineModeChange } = useAudiobookEngineModeSwitch({
+    projectId: selectedProjectId ?? routeProjectId,
+    ttsModel,
+    voicePresetsByModel,
+    setAudioEngineMode,
+    setCharacterVoicesForCurrentModel,
+    setAudioFxConfig,
   })
 
   const {
@@ -794,6 +819,43 @@ const AudiobookPage = () => {
     setSnackbar,
   })
   reloadScriptEditorRef.current = handleReloadScriptEditor
+
+  // §3.1：场景编辑器分流状态（seed_scene 章节）；null 表示未打开
+  const [sceneEditorTarget, setSceneEditorTarget] = useState<{
+    chapterId: number
+    /** 章节序号（对话框标题展示用，避免直接暴露内部 id）。 */
+    chapterNumber?: number | null
+    audiobookProjectId: number
+    renderStatus: string | null
+  } | null>(null)
+
+  // §3.1：点击已生成章节按引擎分流——legacy_stems → 剧本编辑器；
+  // seed_scene → 场景编辑器（§2.5 多批次选择规则定位批次，替换"取第一个"）
+  const handleOpenGeneratedChapter = useCallback((chapterId: number) => {
+    const selection = resolveAudiobookProjectForChapter(allProjectHistory, chapterId)
+    if (!selection || selection.engineMode !== 'seed_scene') {
+      void handleOpenScriptEditor(chapterId)
+      return
+    }
+    setSceneEditorTarget({
+      chapterId,
+      chapterNumber: chapters.find((chapter) => chapter.id === chapterId)?.chapter_number ?? null,
+      audiobookProjectId: selection.audiobookProjectId,
+      renderStatus: selection.renderStatus,
+    })
+  }, [allProjectHistory, handleOpenScriptEditor])
+
+  // §2.5：完成步骤审阅入口——script_only 批次章节可能尚未进入历史批次投影，
+  // 不能用跨批次定位，直接按当前批次打开场景编辑器，避免落入 legacy 单片段工作台
+  const handleOpenCompletionSceneChapter = useCallback((chapterId: number) => {
+    if (!audiobookProject) return
+    setSceneEditorTarget({
+      chapterId,
+      chapterNumber: chapters.find((chapter) => chapter.id === chapterId)?.chapter_number ?? null,
+      audiobookProjectId: audiobookProject.id,
+      renderStatus: currentChapterAudios.find((item) => item.chapter_id === chapterId)?.render_status ?? null,
+    })
+  }, [audiobookProject, chapters, currentChapterAudios])
 
   const {
     handleApplyIncomingEditorDraft,
@@ -1019,6 +1081,15 @@ const AudiobookPage = () => {
     setSnackbar,
   })
 
+  // 编辑台“批准并生成音频”：批准落库后直接提交已批准章节生成，
+  // 免去批准→关闭→回页面找生成按钮的长跳转（页面层编排，不下沉到编辑器）
+  const handleApproveAndGenerateAudio = useCallback(async () => {
+    const saved = await handleSaveScript({ nextStatus: 'approved' })
+    if (!saved) return
+    handleCloseScriptEditorDialog()
+    await handleGenerateAudioForApprovedChapters()
+  }, [handleCloseScriptEditorDialog, handleGenerateAudioForApprovedChapters, handleSaveScript])
+
   useAudiobookTaskPolling({
     selectedProjectId,
     trackedAudiobookProjectIds,
@@ -1099,6 +1170,7 @@ const AudiobookPage = () => {
             chapters={chapters}
             selectedChapters={selectedChapters}
             generatedChapterIds={generatedChapterIds}
+            chapterStateById={chapterStateById}
             loadingCharacters={loadingCharacters}
             characterScopeLoading={characterScopeLoading}
             characterScopeError={characterScopeError}
@@ -1118,12 +1190,10 @@ const AudiobookPage = () => {
             }}
             onOutputFormatChange={setOutputFormat}
             onAudioFxConfigChange={setAudioFxConfig}
-            onAudioEngineModeChange={setAudioEngineMode}
+            onAudioEngineModeChange={handleEngineModeChange}
             onToggleChapter={handleToggleChapter}
             onOpenChapterMenu={handleOpenChapterMenu}
-            onOpenGeneratedChapter={(chapterId) => {
-              void handleOpenScriptEditor(chapterId)
-            }}
+            onOpenGeneratedChapter={handleOpenGeneratedChapter}
             onVoiceChange={handleVoiceChangeAndPersist}
             onTtsModelChangeForCharacter={handleTtsModelChangeForCharacterAndPersist}
             onPreviewCustomVoice={handlePreviewCustomVoice}
@@ -1139,6 +1209,7 @@ const AudiobookPage = () => {
             activeProjectTasks={activeProjectTasks}
             activeTaskId={activeTaskStatus?.task_id}
             progressTaskStatus={progressTaskStatus}
+            engineMode={audiobookProject?.engine_mode ?? audioEngineMode}
             pauseResuming={pauseResuming}
             getTaskLabel={formatActiveTaskLabel}
             onFocusTask={handleFocusActiveProjectTask}
@@ -1182,7 +1253,8 @@ const AudiobookPage = () => {
             onPlayAudio={handlePlayAudio}
             onDownloadAudio={handleDownloadAudio}
             onCollectChapterAudio={handleCollectChapterAudio}
-            onOpenScriptEditor={handleOpenScriptEditor}
+            onOpenScriptEditor={handleOpenGeneratedChapter}
+            onOpenSceneEditor={handleOpenCompletionSceneChapter}
             onResumeChapterGeneration={handleResumeChapterGeneration}
             onOpenScriptReview={handleOpenScriptReviewDialog}
             onOpenScriptReviewFromApi={handleOpenScriptReviewFromApi}
@@ -1215,7 +1287,7 @@ const AudiobookPage = () => {
         selectedIssueIndex={scriptReviewSelectedIssueIndex}
         selectedSegmentIndex={scriptReviewSelectedSegmentIndex}
         onClose={handleCloseScriptReviewDialog}
-        onOpenScriptEditor={handleOpenScriptEditor}
+        onOpenScriptEditor={handleOpenGeneratedChapter}
         onSelectIssue={setScriptReviewSelectedIssueIndex}
         onSelectSegment={setScriptReviewSelectedSegmentIndex}
       />
@@ -1237,6 +1309,7 @@ const AudiobookPage = () => {
         onClose={handleCloseScriptEditorDialog}
         onChangeSegmentText={handleChangeScriptSegmentText}
         onSaveScript={handleSaveScript}
+        onApproveAndGenerateAudio={handleApproveAndGenerateAudio}
         onPreviewSegmentAudio={handlePreviewScriptSegmentAudio}
         onRegenerateSegment={handleRegenerateSegment}
         onStartSegmentVoiceRecording={handleStartSegmentVoiceRecording}
@@ -1276,6 +1349,42 @@ const AudiobookPage = () => {
         remixMissingSegments={remixMissingSegments}
         onForceRemixChapter={handleForceRemixChapter}
         onCloseRemixMissingDialog={handleCloseRemixMissingDialog}
+      />
+
+      {/* §3.1：场景编辑器（seed_scene 章节分流入口） */}
+      <SceneChapterEditor
+        open={sceneEditorTarget !== null}
+        chapterId={sceneEditorTarget?.chapterId ?? 0}
+        chapterNumber={sceneEditorTarget?.chapterNumber ?? null}
+        audiobookProjectId={sceneEditorTarget?.audiobookProjectId ?? 0}
+        engineMode="seed_scene"
+        renderStatus={sceneEditorTarget?.renderStatus ?? null}
+        batches={allProjectHistory}
+        onSwitchBatch={(nextProjectId) => {
+          setSceneEditorTarget((prev) => {
+            if (!prev) return prev
+            // 目标批次下该章节的 render_status（切换批次后展示对应产物状态）
+            const batch = allProjectHistory.find((project) => project.id === nextProjectId)
+            const audio = batch?.chapter_audios?.find((item) => item.chapter_id === prev.chapterId)
+            return {
+              ...prev,
+              audiobookProjectId: nextProjectId,
+              renderStatus: audio?.render_status ?? null,
+            }
+          })
+        }}
+        onPreviewAudio={(url) => {
+          void playExternalUrl(url)
+        }}
+        onSaved={() => {
+          // 保存成功后刷新章节状态表与项目详情（§3.5）
+          void refreshGeneratedChapterIds()
+          void refreshAllProjects()
+          if (audiobookProject?.id) {
+            void refreshAudiobookProjectDetail(audiobookProject.id)
+          }
+        }}
+        onClose={() => setSceneEditorTarget(null)}
       />
       
       {/* 新增：历史记录对话框 */}

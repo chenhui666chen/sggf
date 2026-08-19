@@ -203,8 +203,8 @@ export const useAudiobookScriptEditorActions = ({
 
   const handleSaveScript = useCallback(async (options: {
     nextStatus?: 'reviewed' | 'approved'
-  }) => {
-    if (!audiobookProject || !scriptEditorChapter || !scriptEditorData) return
+  }): Promise<boolean> => {
+    if (!audiobookProject || !scriptEditorChapter || !scriptEditorData) return false
 
     try {
       resetSegmentPreviewState()
@@ -249,19 +249,22 @@ export const useAudiobookScriptEditorActions = ({
           message: '剧本已保存，但项目状态刷新失败，请重新打开项目',
           severity: 'warning',
         })
-        return
+        // 保存/审批已落库，后续动作（如生成音频）仍可基于服务端状态继续
+        return true
       }
       setSnackbar({
         open: true,
         message: options.nextStatus === 'approved' ? '剧本已批准' : '剧本已保存',
         severity: 'success',
       })
+      return true
     } catch (err: unknown) {
       setSnackbar({
         open: true,
         message: await extractApiErrorMessage(err, '保存失败，请稍后重试'),
         severity: 'error',
       })
+      return false
     } finally {
       setScriptEditorLoading(false)
     }

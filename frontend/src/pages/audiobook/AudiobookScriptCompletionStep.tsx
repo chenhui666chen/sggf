@@ -33,6 +33,8 @@ interface AudiobookScriptCompletionStepProps {
   hasScriptReview: boolean
   audiobookProjectId?: number
   onOpenScriptEditor: (chapterId: number) => void
+  /** GUIDE §2.5：seed_scene 章节的审阅入口分流到场景编辑器。 */
+  onOpenSceneEditor?: (chapterId: number) => void
   onOpenScriptReview: () => void
   onOpenScriptReviewFromApi?: (audiobookProjectId: number, chapterId: number) => void
   onGenerateApprovedChapterAudio: () => void
@@ -47,6 +49,7 @@ const AudiobookScriptCompletionStep = ({
   hasScriptReview,
   audiobookProjectId,
   onOpenScriptEditor,
+  onOpenSceneEditor,
   onOpenScriptReview,
   onOpenScriptReviewFromApi,
   onGenerateApprovedChapterAudio,
@@ -156,9 +159,13 @@ const AudiobookScriptCompletionStep = ({
           startIcon={<EditNoteIcon />}
           disabled={reviewTargetChapterId === null}
           onClick={() => {
-            if (reviewTargetChapterId !== null) {
-              onOpenScriptEditor(reviewTargetChapterId)
+            if (reviewTargetChapterId === null) return
+            // GUIDE §2.5：seed_scene 章节走场景编辑器，避免落入 legacy 单片段工作台
+            if (isSeedScene && onOpenSceneEditor) {
+              onOpenSceneEditor(reviewTargetChapterId)
+              return
             }
+            onOpenScriptEditor(reviewTargetChapterId)
           }}
           sx={audiobookButtonSx.brandContained}
         >
@@ -214,7 +221,9 @@ const AudiobookScriptCompletionStep = ({
         chapterAudios={currentChapterAudios}
         chapters={chapters}
         audiobookProjectId={audiobookProjectId}
+        audioEngineMode={audioEngineMode}
         onOpenScriptEditor={onOpenScriptEditor}
+        onOpenSceneEditor={onOpenSceneEditor}
         onOpenScriptReview={onOpenScriptReviewFromApi}
       />
     </Paper>

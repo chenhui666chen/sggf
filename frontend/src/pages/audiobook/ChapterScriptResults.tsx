@@ -9,13 +9,16 @@ import FactCheckIcon from '@mui/icons-material/FactCheck'
 
 import { resolveScriptStatusPresentation } from './completionViewUtils'
 import { audiobookButtonSx, audiobookColors } from './audiobookTheme'
-import type { Chapter, ChapterAudio } from './types'
+import type { AudioEngineMode, Chapter, ChapterAudio } from './types'
 
 interface ChapterScriptResultsProps {
   chapterAudios: ChapterAudio[]
   chapters: Chapter[]
   audiobookProjectId?: number
+  /** GUIDE §2.5：按批次引擎分流审阅入口（seed_scene → 场景编辑器）。 */
+  audioEngineMode?: AudioEngineMode
   onOpenScriptEditor: (chapterId: number) => void
+  onOpenSceneEditor?: (chapterId: number) => void
   onOpenScriptReview?: (audiobookProjectId: number, chapterId: number) => void
 }
 
@@ -37,11 +40,40 @@ const statusToneSx = {
   },
 } as const
 
+// 导出供单测：后端统计仅计 dialogue/narration，片段总数含 monologue，
+// 此处按差值回填独白计数，避免出现 "48 片段 ≠ 14 对白 + 32 旁白" 的口径疑义
+export const buildChapterScriptMetadata = (counts: {
+  segment_count?: number | null
+  dialogue_count?: number | null
+  narration_count?: number | null
+  character_count?: number | null
+}): string[] => {
+  const segmentCount = Math.max(0, Number(counts.segment_count) || 0)
+  const dialogueCount = Math.max(0, Number(counts.dialogue_count) || 0)
+  const narrationCount = Math.max(0, Number(counts.narration_count) || 0)
+  const monologueCount = Math.max(0, segmentCount - dialogueCount - narrationCount)
+
+  const metadata = [
+    `${segmentCount} 个片段`,
+    `${dialogueCount} 段对白`,
+    `${narrationCount} 段旁白`,
+  ]
+  if (monologueCount > 0) {
+    metadata.push(`${monologueCount} 段独白`)
+  }
+  if (counts.character_count) {
+    metadata.push(`${Math.max(0, Number(counts.character_count) || 0)} 个角色`)
+  }
+  return metadata
+}
+
 const ChapterScriptResults = ({
   chapterAudios,
   chapters,
   audiobookProjectId,
+  audioEngineMode,
   onOpenScriptEditor,
+  onOpenSceneEditor,
   onOpenScriptReview,
 }: ChapterScriptResultsProps) => {
   const scriptChapters = chapterAudios.filter((item) => Boolean(item.has_script))
@@ -80,14 +112,7 @@ const ChapterScriptResults = ({
             const canOpenReview = Boolean(
               chapterAudio.has_review && audiobookProjectId && onOpenScriptReview,
             )
-            const metadata = [
-              `${Math.max(0, Number(chapterAudio.segment_count) || 0)} 个片段`,
-              `${Math.max(0, Number(chapterAudio.dialogue_count) || 0)} 段对白`,
-              `${Math.max(0, Number(chapterAudio.narration_count) || 0)} 段旁白`,
-              chapterAudio.character_count
-                ? `${Math.max(0, Number(chapterAudio.character_count) || 0)} 个角色`
-                : null,
-            ].filter(Boolean)
+            const metadata = buildChapterScriptMetadata(chapterAudio)
 
             return (
               <Box
@@ -142,7 +167,14 @@ const ChapterScriptResults = ({
                     size="small"
                     variant="outlined"
                     startIcon={<EditNoteIcon />}
-                    onClick={() => onOpenScriptEditor(chapterAudio.chapter_id)}
+                    onClick={() => {
+                      // GUIDE §2.5：seed_scene 章节走场景编辑器，避免落入 legacy 单片段工作台
+                      if (audioEngineMode === 'seed_scene' && onOpenSceneEditor) {
+                        onOpenSceneEditor(chapterAudio.chapter_id)
+                        return
+                      }
+                      onOpenScriptEditor(chapterAudio.chapter_id)
+                    }}
                     sx={audiobookButtonSx.brandOutlined}
                   >
                     {status.tone === 'success' ? '查看剧本' : '审阅并批准'}

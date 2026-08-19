@@ -7,6 +7,7 @@ import {
 } from '@mui/material'
 
 import type {
+  AudioEngineMode,
   StageConfig,
   StageInfo,
   StageStatus,
@@ -17,16 +18,19 @@ import { getStageConfigForTask } from './utils'
 
 interface TaskStageDetailsProps {
   taskStatus: TaskStatus
+  engineMode?: AudioEngineMode | null
   onOpenStageMetrics: (stage: StageConfig, stageInfo: StageInfo) => void
 }
 
-const STAGE_STATUS_COLORS: Record<StageStatus, { bg: string; border: string; text: string }> = {
+export const STAGE_STATUS_COLORS: Record<StageStatus, { bg: string; border: string; text: string }> = {
   pending: audiobookColorRoles.taskStatus.pending,
   running: audiobookColorRoles.taskStatus.running,
   completed: audiobookColorRoles.taskStatus.completed,
   failed: audiobookColorRoles.taskStatus.failed,
   paused: audiobookColorRoles.taskStatus.paused,
   pause_requested: audiobookColorRoles.taskStatus.pause_requested,
+  cancelled: audiobookColorRoles.taskStatus.cancelled,
+  completed_with_partial_failure: audiobookColorRoles.taskStatus.completed_with_partial_failure,
 }
 
 const DEFAULT_PENDING_STAGE_INFO: StageInfo = {
@@ -34,8 +38,13 @@ const DEFAULT_PENDING_STAGE_INFO: StageInfo = {
   progress: 0,
 }
 
-const formatStageStatusText = (stageInfo: StageInfo): string => {
+// 导出供单测：running 阶段无中间进度时隐藏误导性的 0%
+// （如 quality_review 的 LLM 评审调用全程阻塞）
+export const formatStageStatusText = (stageInfo: StageInfo): string => {
   if (stageInfo.status === 'running') {
+    if (stageInfo.progress <= 0) {
+      return '进行中'
+    }
     return `进行中 ${Math.round(stageInfo.progress * 100)}%`
   }
   if (stageInfo.status === 'completed') {
@@ -54,8 +63,8 @@ const formatMetricPreviewValue = (value: unknown): string => {
   return (preview ?? '').slice(0, 20)
 }
 
-const TaskStageDetails = ({ taskStatus, onOpenStageMetrics }: TaskStageDetailsProps) => {
-  const stageConfig = getStageConfigForTask(taskStatus)
+const TaskStageDetails = ({ taskStatus, engineMode = null, onOpenStageMetrics }: TaskStageDetailsProps) => {
+  const stageConfig = getStageConfigForTask(taskStatus, engineMode)
   const stageValues = Object.values(taskStatus.stages || {})
   const hasLiveProgress = stageValues.some((stage) => stage?.status && stage.status !== 'pending')
 
@@ -152,7 +161,7 @@ const TaskStageDetails = ({ taskStatus, onOpenStageMetrics }: TaskStageDetailsPr
               </Box>
 
               <LinearProgress
-                variant="determinate"
+                variant={isActive && stageInfo.progress <= 0 ? 'indeterminate' : 'determinate'}
                 value={stageInfo.progress * 100}
                 sx={{
                   height: 4,

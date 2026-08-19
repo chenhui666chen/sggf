@@ -24,6 +24,7 @@ describe('audiobook voiceCatalog', () => {
         speaker: 'Neil',
         label: 'Neil',
         supportsInstruct: true,
+        sourceModel: 'qwen3-tts-instruct-flash',
       },
     ])
     expect(catalog.meta).toEqual({
@@ -71,8 +72,38 @@ describe('audiobook voiceCatalog', () => {
         speaker: 'male-qn-qingse',
         label: 'male-qn-qingse',
         supportsInstruct: false,
+        sourceModel: 'minimax-speech-2.8-turbo',
       },
     ])
     expect(catalog.meta.voice_count).toBe(1)
+  })
+
+  it('injects the owning model as sourceModel for official voices', () => {
+    const catalog = normalizeVoiceCatalogPayload('seed-tts-2.0-expressive', {
+      voices: [
+        {
+          id: 'zh_male_yuanboxiaoshu_uranus_bigtts',
+          speaker: 'zh_male_yuanboxiaoshu_uranus_bigtts',
+          label: '渊博小叔 2.0',
+        },
+      ],
+    })
+
+    expect(catalog.voices[0].sourceModel).toBe('seed-tts-2.0-expressive')
+  })
+
+  it('keeps an explicit sourceModel provided by the backend', () => {
+    const catalog = normalizeVoiceCatalogPayload('qwen3-tts-instruct-flash', {
+      voices: [
+        {
+          id: 'Neil',
+          speaker: 'Neil',
+          label: 'Neil',
+          sourceModel: 'minimax-speech-2.8-hd',
+        },
+      ],
+    })
+
+    expect(catalog.voices[0].sourceModel).toBe('minimax-speech-2.8-hd')
   })
 })

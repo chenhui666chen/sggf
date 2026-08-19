@@ -7,6 +7,7 @@ import {
 } from './constants'
 export { buildAudiobookChapterAssetUuid } from '../../utils/audiobookAssetIds'
 import type {
+  AudioEngineMode,
   LLMDimensionScore,
   NavigationType,
   ScriptReviewDetail,
@@ -84,6 +85,8 @@ export const coerceStageStatus = (value: unknown): StageStatus => {
     || value === 'pending'
     || value === 'paused'
     || value === 'pause_requested'
+    || value === 'cancelled'
+    || value === 'completed_with_partial_failure'
   ) {
     return value
   }
@@ -107,12 +110,26 @@ const hasSceneRenderingProgress = (task: StageConfigTask): boolean => {
     || Boolean(sceneStage && (sceneStage.status !== 'pending' || sceneStage.progress > 0))
 }
 
-export const getStageConfigForTask = (task: StageConfigTask): readonly StageConfig[] => {
+// seed_scene 阶段模板：剧本阶段（前 7 阶段）+ 场景渲染；分轨专属的
+// TTS 合成/音频混合/最终评审不展示，避免 script_only 任务末尾永远
+// 停在"等待中"误导用户卡死
+const SEED_SCENE_STAGE_CONFIG: readonly StageConfig[] = [
+  ...GENERATION_STAGE_CONFIG.slice(0, 7),
+  SEED_SCENE_RENDER_STAGE_CONFIG,
+]
+
+export const getStageConfigForTask = (
+  task: StageConfigTask,
+  engineMode?: AudioEngineMode | null,
+): readonly StageConfig[] => {
   if (isProjectExportTask(task)) {
     return EXPORT_STAGE_CONFIG
   }
   if (isPromptAudioAsrTranscriptTask(task)) {
     return PROMPT_AUDIO_ASR_STAGE_CONFIG
+  }
+  if (engineMode === 'seed_scene') {
+    return SEED_SCENE_STAGE_CONFIG
   }
   if (!hasSceneRenderingProgress(task)) {
     return GENERATION_STAGE_CONFIG

@@ -117,6 +117,18 @@ export const audiobookColorRoles = {
       text: audiobookColors.warning,
       chipBg: audiobookColors.warningMain,
     },
+    cancelled: {
+      bg: audiobookColors.warningFaint,
+      border: audiobookColors.warningMain,
+      text: audiobookColors.warning,
+      chipBg: audiobookColors.warningMain,
+    },
+    completed_with_partial_failure: {
+      bg: audiobookColors.warningSoft,
+      border: audiobookColors.warningMain,
+      text: audiobookColors.warning,
+      chipBg: audiobookColors.warningMain,
+    },
   },
   notice: {
     warning: {

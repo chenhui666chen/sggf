@@ -10,9 +10,13 @@ import {
   DialogTitle,
   Paper,
   Stack,
+  ToggleButton,
+  ToggleButtonGroup,
   Tooltip,
   Typography,
 } from '@mui/material'
+import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome'
+import GraphicEqIcon from '@mui/icons-material/GraphicEq'
 import LibraryMusicIcon from '@mui/icons-material/LibraryMusic'
 import PlaylistAddCheckIcon from '@mui/icons-material/PlaylistAddCheck'
 import VoiceIcon from '@mui/icons-material/RecordVoiceOver'
@@ -23,6 +27,7 @@ import NarrationAudioConfigPanel from './NarrationAudioConfigPanel'
 import VoiceCatalogStatusPanel from './VoiceCatalogStatusPanel'
 import VoicePoolWorkbench from './VoicePoolWorkbench'
 import { useAudiobookSceneVoicePool } from './useAudiobookSceneVoicePool'
+import { markSeedSceneIncompatibleVoicePresets } from './seedSceneVoiceCompatibility'
 import {
   audiobookButtonRowSx,
   audiobookColors,
@@ -42,6 +47,7 @@ import type {
   AudioEngineMode,
   AudioOutputFormat,
   Chapter,
+  ChapterRenderState,
   CharacterVoiceSetting,
   TtsModel,
   VoiceCatalogMeta,
@@ -61,6 +67,7 @@ interface AudiobookSetupStepProps {
   chapters: Chapter[]
   selectedChapters: number[]
   generatedChapterIds: ReadonlySet<number>
+  chapterStateById?: Record<number, ChapterRenderState>
   loadingCharacters: boolean
   characterScopeLoading: boolean
   characterScopeError: string | null
@@ -162,6 +169,7 @@ const AudiobookSetupStep = ({
   chapters,
   selectedChapters,
   generatedChapterIds,
+  chapterStateById,
   loadingCharacters,
   characterScopeLoading,
   characterScopeError,
@@ -256,9 +264,12 @@ const AudiobookSetupStep = ({
     const next: Record<TtsModel, VoicePreset[]> = { ...voicePresetsByModel }
     for (const model of models) {
       const merged = [...(voicePresetsByModel[model] || []), ...sceneVoicePool.presets]
-      next[model] = merged.filter(
+      const deduped = merged.filter(
         (preset, index) => merged.findIndex((item) => item.id === preset.id) === index,
       )
+      // 场景生成模式白名单：标记不兼容音色（其他供应商官方音色）为禁用，
+      // 与后端 voice_reference_resolver 的白名单保持一致，避免渲染时被拒绝。
+      next[model] = markSeedSceneIncompatibleVoicePresets(deduped)
     }
     return next
   }, [audioEngineMode, characterVoices, sceneVoicePool.presets, ttsModel, voicePresetsByModel])
@@ -282,10 +293,53 @@ const AudiobookSetupStep = ({
           title="章节队列"
           subtitle="选择一个未生成章节"
         >
+          <Box
+            sx={{
+              mb: 1.5,
+              p: 1.25,
+              borderRadius: 1,
+              backgroundColor: 'action.hover',
+              border: '1px solid',
+              borderColor: 'divider',
+            }}
+          >
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.75 }}>
+              生成引擎
+            </Typography>
+            <ToggleButtonGroup
+              exclusive
+              size="small"
+              fullWidth
+              aria-label="生成引擎"
+              value={audioEngineMode}
+              onChange={(_, value: AudioEngineMode | null) => {
+                if (value) onAudioEngineModeChange(value)
+              }}
+              sx={{
+                height: 36,
+                '& .MuiToggleButton-root': {
+                  gap: 0.75,
+                  px: 1.25,
+                  letterSpacing: 0,
+                  whiteSpace: 'nowrap',
+                },
+              }}
+            >
+              <ToggleButton value="legacy_stems" aria-label="分轨合成">
+                <GraphicEqIcon fontSize="small" />
+                分轨合成
+              </ToggleButton>
+              <ToggleButton value="seed_scene" aria-label="场景生成">
+                <AutoAwesomeIcon fontSize="small" />
+                场景生成
+              </ToggleButton>
+            </ToggleButtonGroup>
+          </Box>
           <ChapterSelectionPanel
             chapters={chapters}
             selectedChapters={selectedChapters}
             generatedChapterIds={generatedChapterIds}
+            chapterStateById={chapterStateById}
             onToggleChapter={onToggleChapter}
             onOpenChapterMenu={onOpenChapterMenu}
             onOpenGeneratedChapter={onOpenGeneratedChapter}
@@ -302,7 +356,6 @@ const AudiobookSetupStep = ({
             audioEngineMode={audioEngineMode}
             onOutputFormatChange={onOutputFormatChange}
             onAudioFxConfigChange={onAudioFxConfigChange}
-            onAudioEngineModeChange={onAudioEngineModeChange}
           />
         </SetupPanel>
       </Stack>

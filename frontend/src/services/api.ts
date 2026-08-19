@@ -208,12 +208,25 @@ export interface AudiobookProjectAudioCharacterConfigPayload {
   source?: string | null
 }
 
+export interface AudiobookProjectEngineTtsModelConfigPayload {
+  characters: AudiobookProjectAudioCharacterConfigPayload[]
+}
+
+export interface AudiobookProjectEngineBranchConfigPayload {
+  tts_models?: Record<string, AudiobookProjectEngineTtsModelConfigPayload>
+  audio_fx?: AudiobookAudioFxConfigPayload | null
+  scene_generation_preferences?: Record<string, unknown> | null
+  characters?: AudiobookProjectAudioCharacterConfigPayload[]
+}
+
 export interface AudiobookProjectAudioConfigPayload {
   characters: AudiobookProjectAudioCharacterConfigPayload[]
   audio_fx?: AudiobookAudioFxConfigPayload | null
   audio_engine_mode?: AudiobookAudioEngineMode
-  // multilingual 变体暂不启用，仅开放 seed-audio-1.0。
-  seed_audio_model?: 'seed-audio-1.0'
+  // 阶段 1 起开放两个 Seed Audio 模型；新任务默认 multilingual。
+  seed_audio_model?: 'seed-audio-1.0' | 'seed-audio-1.0-multilingual'
+  // 引擎分支持久化（GUIDE §2.2）：engines.{mode}.tts_models.{model}.characters
+  engines?: Record<string, AudiobookProjectEngineBranchConfigPayload>
 }
 
 export interface AudiobookVoiceConfigPayloadItem {
@@ -323,6 +336,58 @@ export interface UpdateAudiobookChapterScriptPayload {
   script_status?: 'pending' | 'reviewed' | 'approved'
 }
 
+// 场景编辑器（GUIDE 阶段 3.2/3.3）
+export interface SceneEditorSceneDto {
+  scene_id: string
+  status: string
+  source_segment_indices?: number[]
+  source_segment_keys?: string[]
+  attempts?: number
+  reused_checkpoint?: boolean
+  fallback_reason?: string | null
+  fallback_artifact?: Record<string, unknown> | null
+  scene_audio_url?: string | null
+  quality_report?: Record<string, unknown> | null
+  metadata?: Record<string, unknown>
+}
+
+export interface SceneEditorRevisionHeadDto {
+  revision_id: number
+  revision_hash: string
+  created_at?: string | null
+}
+
+export interface SceneEditorDocument {
+  chapter_id: number
+  audiobook_project_id: number
+  engine_mode: string
+  execution_status: string
+  published_render_status?: string | null
+  desired_render_status?: string | null
+  published_provenance?: string | null
+  source_script_revision: string
+  director_plan_revision?: string | null
+  scene_topology_hash?: string | null
+  scenes: SceneEditorSceneDto[]
+  editable_overrides: Record<string, unknown>
+  artifact_references: Record<string, unknown>
+  last_revisions: Record<string, SceneEditorRevisionHeadDto | null>
+  revision_set_hash?: string | null
+  script_status?: string
+  chapter_audio_available?: boolean
+  chapter_audio_stale?: boolean
+  chapter_audio_url?: string | null
+  updated_at?: string | null
+}
+
+export interface SceneEditSaveResponse {
+  success: boolean
+  revision_heads: Record<string, SceneEditorRevisionHeadDto | null>
+  revision_set_hash?: string | null
+  script_status?: string
+  semantic_changed?: boolean
+}
+
 export interface GenerateAudioFromScriptsPayload {
   chapter_ids?: number[]
   tts_model?: string
@@ -331,6 +396,8 @@ export interface GenerateAudioFromScriptsPayload {
   output_format?: string
   generate_subtitle?: boolean
   timeline_edits?: Record<string, { startUnit: number; durationUnits: number; volume?: number }>
+  /** 场景编辑器重渲染基线（§3.2；与当前 heads 不一致返回 409）。 */
+  revision_set_hash?: string
 }
 
 export interface RegenerateAudiobookSegmentPayload {
@@ -2372,7 +2439,10 @@ class ApiClient {
   }
 
   // 有声书 API
-  getAudiobookProjectsByProject(projectId: number, params?: { include_chapter_audios?: boolean }) {
+  getAudiobookProjectsByProject(projectId: number, params?: {
+    include_chapter_audios?: boolean
+    engine_mode?: 'legacy_stems' | 'seed_scene'
+  }) {
     return this.client.get(`/api/v1/audiobook/projects/by-project/${projectId}`, { params })
   }
 
@@ -2677,6 +2747,40 @@ class ApiClient {
   ) {
     return this.client.put(
       `/api/v1/audiobook/projects/${audiobookProjectId}/chapters/${chapterId}/script`,
+      payload
+    )
+  }
+
+  // 场景编辑器 API（GUIDE 阶段 3.2/3.4）
+  getSceneEditorDocument(audiobookProjectId: number, chapterId: number) {
+    return this.client.get<SceneEditorDocument>(
+      `/api/v1/audiobook/projects/${audiobookProjectId}/chapters/${chapterId}/editor-document`
+    )
+  }
+
+  updateSceneEditorDocument(
+    audiobookProjectId: number,
+    chapterId: number,
+    editType: 'dialogue' | 'director_override' | 'voice_binding',
+    payload: Record<string, unknown>,
+  ) {
+    return this.client.put<SceneEditSaveResponse>(
+      `/api/v1/audiobook/projects/${audiobookProjectId}/chapters/${chapterId}/editor-document?edit_type=${editType}`,
+      payload
+    )
+  }
+
+  reviewSceneDialogue(
+    audiobookProjectId: number,
+    chapterId: number,
+    payload: {
+      verdict: 'reviewed' | 'approved'
+      review_json: Record<string, unknown>
+      base_revision_set_hash?: string | null
+    },
+  ) {
+    return this.client.post<SceneEditSaveResponse>(
+      `/api/v1/audiobook/projects/${audiobookProjectId}/chapters/${chapterId}/dialogue-review`,
       payload
     )
   }

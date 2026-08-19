@@ -847,6 +847,7 @@ const ScriptEditorDialog = ({
   onClose,
   onChangeSegmentText,
   onSaveScript,
+  onApproveAndGenerateAudio,
   onPreviewSegmentAudio,
   onRegenerateSegment,
   onStartSegmentVoiceRecording,
@@ -2275,6 +2276,21 @@ const ScriptEditorDialog = ({
                 >
                   批准剧本
                 </Button>
+                {onApproveAndGenerateAudio && (
+                  <Tooltip title="批准当前剧本并立即将已批准章节提交音频生成">
+                    <span>
+                      <Button
+                        size="small"
+                        variant="contained"
+                        color="success"
+                        onClick={onApproveAndGenerateAudio}
+                        disabled={loading || !data}
+                      >
+                        批准并生成音频
+                      </Button>
+                    </span>
+                  </Tooltip>
+                )}
                 <Tooltip title="用最新保存的片段音频重新混合成整章音频">
                   <span>
                     <Button

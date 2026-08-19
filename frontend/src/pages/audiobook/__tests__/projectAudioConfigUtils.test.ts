@@ -9,6 +9,7 @@ import {
   buildProjectCharacterVoiceSettings,
   createDefaultAudioFxConfig,
   normalizeProjectAudioFxConfig,
+  resolveBranchSavedCharacters,
 } from '../projectAudioConfigUtils'
 
 describe('audiobook project audio config utils', () => {
@@ -399,6 +400,15 @@ describe('audiobook project audio config utils', () => {
       characters: [],
       audio_fx: audioFxConfig,
       audio_engine_mode: 'seed_scene',
+      engines: {
+        seed_scene: {
+          tts_models: {
+            'qwen3-tts-instruct-flash': {
+              characters: [],
+            },
+          },
+        },
+      },
     })
   })
 
@@ -677,5 +687,113 @@ describe('audiobook project audio config utils', () => {
         voice_pool_publication_id: 'vp_unit',
       },
     ])
+  })
+
+  // ── GUIDE §2.2 引擎分支持久化 ──────────────────────────────────────────
+
+  it('resolves branch characters by exact tts model key', () => {
+    const config = {
+      characters: [{ character_id: 0, name: 'Narrator', voice_id: 'top-level' }],
+      engines: {
+        seed_scene: {
+          tts_models: {
+            'qwen3-tts-instruct-flash': {
+              characters: [{ character_id: 5, name: 'BranchHero', voice_id: 'branch-voice' }],
+            },
+          },
+        },
+      },
+    }
+
+    expect(resolveBranchSavedCharacters(config, 'seed_scene', 'qwen3-tts-instruct-flash')).toEqual([
+      { character_id: 5, name: 'BranchHero', voice_id: 'branch-voice' },
+    ])
+  })
+
+  it('resolves branch characters by fallback model key when exact key missing', () => {
+    const config = {
+      engines: {
+        seed_scene: {
+          tts_models: {
+            'cosyvoice-v3-plus': {
+              characters: [{ character_id: 6, name: 'LegacyKeyHero', voice_id: 'legacy-key' }],
+            },
+          },
+        },
+      },
+    }
+
+    expect(resolveBranchSavedCharacters(config, 'seed_scene', 'cosyvoice-v3.5-plus')).toEqual([
+      { character_id: 6, name: 'LegacyKeyHero', voice_id: 'legacy-key' },
+    ])
+  })
+
+  it('falls back to legacy top-level characters only for legacy_stems branch', () => {
+    const config = {
+      characters: [{ character_id: 0, name: 'Narrator', voice_id: 'top-level' }],
+    }
+
+    expect(resolveBranchSavedCharacters(config, 'legacy_stems', 'qwen3-tts-instruct-flash')).toEqual([
+      { character_id: 0, name: 'Narrator', voice_id: 'top-level' },
+    ])
+    expect(resolveBranchSavedCharacters(config, 'seed_scene', 'qwen3-tts-instruct-flash')).toEqual([])
+  })
+
+  it('reads branch binding in buildInitialProjectVoiceSettings when engineMode given', () => {
+    const voices = buildInitialProjectVoiceSettings({
+      ttsModel: 'qwen3-tts-instruct-flash',
+      voicePresets: [{ id: 'Neil' }],
+      characters: [{ id: 7, name: 'Hero' }],
+      projectAudioConfig: {
+        characters: [{ character_id: 0, name: 'Narrator', voice_id: 'top-level-narrator' }],
+        engines: {
+          seed_scene: {
+            tts_models: {
+              'qwen3-tts-instruct-flash': {
+                characters: [{ character_id: 7, name: 'Hero', voice_id: 'seed-hero-voice' }],
+              },
+            },
+          },
+        },
+      },
+      engineMode: 'seed_scene',
+    })
+
+    const heroVoice = voices.find((voice) => voice.characterId === 7)
+    expect(heroVoice?.voiceId).toBe('seed-hero-voice')
+  })
+
+  it('writes current engine branch into payload engines field', () => {
+    const audioFxConfig = createDefaultAudioFxConfig()
+    const payload = buildProjectAudioConfigPayload({
+      ttsModel: 'qwen3-tts-instruct-flash',
+      voicePresets: [],
+      audioFxConfig,
+      audioEngineMode: 'seed_scene',
+      characterVoices: [
+        {
+          characterId: 7,
+          name: 'Hero',
+          voiceId: 'seed-hero-voice',
+          volume: 50,
+          ttsModel: 'qwen3-tts-instruct-flash',
+        },
+      ],
+    })
+
+    expect(payload.engines).toEqual({
+      seed_scene: {
+        tts_models: {
+          'qwen3-tts-instruct-flash': {
+            characters: [
+              { character_id: 7, name: 'Hero', voice_id: 'seed-hero-voice', tts_model: 'qwen3-tts-instruct-flash' },
+            ],
+          },
+        },
+      },
+    })
+    // 顶层字段保留用于向后兼容
+    expect(payload.characters[0]).toMatchObject({ character_id: 7, voice_id: 'seed-hero-voice' })
+    expect(payload.audio_engine_mode).toBe('seed_scene')
   })
 })

@@ -3,6 +3,7 @@ import type {
   AudioFxConfig,
   CharacterVoiceSetting,
   ProjectAudioConfig,
+  ProjectCharacterAudioConfig,
   TtsModel,
   VoicePreset,
 } from './types'
@@ -106,6 +107,41 @@ const findSavedCharacterConfig = (
   savedCharacters: readonly SavedCharacterAudioConfig[],
   characterId: number,
 ) => savedCharacters.find((saved) => saved.character_id === characterId)
+
+/**
+ * 按引擎分支读取角色配置（GUIDE §2.2 解析侧）。
+ *
+ * 优先级：engines.{mode}.tts_models.{model}.characters（先精确 key，再
+ * 遍历分支内任意模型 key 兜底）→ engines.{mode}.characters（旧分支形态）
+ * → 顶层 characters（仅 legacy_stems 旧数据回退，保持向后兼容）。
+ */
+export const resolveBranchSavedCharacters = (
+  config: Partial<Pick<ProjectAudioConfig, 'characters' | 'engines'>> | null | undefined,
+  engineMode: AudioEngineMode,
+  ttsModel: TtsModel,
+): ProjectCharacterAudioConfig[] => {
+  const branch = config?.engines?.[engineMode]
+  const branchTtsModels = branch?.tts_models
+  if (branchTtsModels) {
+    const exactMatch = branchTtsModels[ttsModel]?.characters
+    if (exactMatch?.length) {
+      return exactMatch
+    }
+    for (const modelConfig of Object.values(branchTtsModels)) {
+      const characters = modelConfig?.characters
+      if (characters?.length) {
+        return characters
+      }
+    }
+  }
+  if (branch?.characters?.length) {
+    return branch.characters
+  }
+  if (engineMode === 'legacy_stems' && config?.characters?.length) {
+    return config.characters
+  }
+  return []
+}
 
 const findSavedNarratorConfig = (
   savedCharacters: readonly SavedCharacterAudioConfig[],
@@ -283,13 +319,18 @@ export const buildInitialProjectVoiceSettings = ({
   projectAudioConfig,
   ttsModel,
   voicePresets,
+  engineMode,
 }: {
   characters: readonly ProjectCharacterSummary[]
   projectAudioConfig?: ProjectAudioConfig | null
   ttsModel: TtsModel
   voicePresets: Array<Pick<VoicePreset, 'id'>>
+  // 指定时按引擎分支读取已保存绑定（GUIDE §2.2）；缺省回退顶层 characters
+  engineMode?: AudioEngineMode
 }): CharacterVoiceSetting[] => {
-  const savedCharacters = projectAudioConfig?.characters || []
+  const savedCharacters = engineMode
+    ? resolveBranchSavedCharacters(projectAudioConfig, engineMode, ttsModel)
+    : (projectAudioConfig?.characters || [])
   const baseNarratorVoice = buildBaseNarratorVoice(ttsModel, voicePresets)
   const narratorSaved = findSavedNarratorConfig(savedCharacters)
   // 旁白同样可能配置了与全局模型不同的 TTS 模型（跨模型音色）。此前这里漏掉了
@@ -405,8 +446,8 @@ export const buildProjectAudioConfigPayload = ({
   audioEngineMode?: AudioEngineMode
   ttsModel: TtsModel
   voicePresets: Array<Pick<VoicePreset, 'id'>>
-}): ProjectAudioConfig => ({
-  characters: characterVoices
+}): ProjectAudioConfig => {
+  const characters = characterVoices
     .filter(shouldIncludeVoiceSettingForModel)
     .map((voice) => {
       return {
@@ -423,10 +464,25 @@ export const buildProjectAudioConfigPayload = ({
           ? { voice_pool_publication_id: voice.voicePoolPublicationId }
           : {}),
       }
-    }),
-  audio_fx: audioFxConfig,
-  ...(audioEngineMode ? { audio_engine_mode: audioEngineMode } : {}),
-})
+    })
+  return {
+    // 顶层字段保留用于向后兼容；后端 PUT 在 engines 非空时只落分支（GUIDE §2.2）
+    characters,
+    audio_fx: audioFxConfig,
+    ...(audioEngineMode ? { audio_engine_mode: audioEngineMode } : {}),
+    ...(audioEngineMode
+      ? {
+          engines: {
+            [audioEngineMode]: {
+              tts_models: {
+                [ttsModel]: { characters },
+              },
+            },
+          },
+        }
+      : {}),
+  }
+}
 
 export const buildAudiobookVoiceConfigPayload = ({
   characterVoices,

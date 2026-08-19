@@ -15,21 +15,82 @@ import LockOutlinedIcon from '@mui/icons-material/LockOutlined'
 import MoreVertIcon from '@mui/icons-material/MoreVert'
 
 import { audiobookButtonSx, audiobookColors, audiobookColorRoles } from './audiobookTheme'
-import type { Chapter } from './types'
+import type { Chapter, ChapterRenderState } from './types'
+import { CHAPTER_RENDER_STATUS } from './types'
 
 interface ChapterSelectionPanelProps {
   chapters: Chapter[]
   selectedChapters: number[]
   generatedChapterIds: ReadonlySet<number>
+  chapterStateById?: Record<number, ChapterRenderState>
   onToggleChapter: (chapterId: number) => void
   onOpenChapterMenu: (event: MouseEvent<HTMLButtonElement>, chapter: Chapter) => void
   onOpenGeneratedChapter: (chapterId: number) => void
+}
+
+// 进行中执行态（GUIDE §2.3 章节状态表：执行中 execution_status 优先展示）
+const ACTIVE_EXECUTION_STATUSES = new Set(['queued', 'pending', 'running', 'pause_requested'])
+
+interface ChapterStateChipMeta {
+  label: string
+  color: string
+  backgroundColor: string
+}
+
+const resolveChapterStateChipMeta = (state: ChapterRenderState): ChapterStateChipMeta => {
+  if (state.executionStatus && ACTIVE_EXECUTION_STATUSES.has(state.executionStatus)) {
+    return {
+      label: '生成中 · 点击进入工作台',
+      color: audiobookColorRoles.taskStatus.running.text,
+      backgroundColor: audiobookColorRoles.taskStatus.running.bg,
+    }
+  }
+  switch (state.renderStatus) {
+    case CHAPTER_RENDER_STATUS.RENDERED_ALL_SEED:
+      return {
+        label: '已生成 · 点击进入工作台',
+        color: audiobookColorRoles.taskStatus.completed.text,
+        backgroundColor: audiobookColorRoles.taskStatus.completed.bg,
+      }
+    case CHAPTER_RENDER_STATUS.RENDERED_WITH_FALLBACK:
+      return {
+        label: '含回退场景 · 点击进入工作台',
+        color: audiobookColorRoles.reviewRisk.warning.text,
+        backgroundColor: audiobookColorRoles.reviewRisk.warning.bg,
+      }
+    case CHAPTER_RENDER_STATUS.STALE:
+      return {
+        label: '已过期 · 点击进入工作台',
+        color: 'text.secondary',
+        backgroundColor: 'action.hover',
+      }
+    case CHAPTER_RENDER_STATUS.MANUAL_REVIEW_REQUIRED:
+      return {
+        label: '待人工评审 · 点击进入工作台',
+        color: audiobookColorRoles.reviewRisk.warning.text,
+        backgroundColor: audiobookColorRoles.reviewRisk.warning.bg,
+      }
+    case CHAPTER_RENDER_STATUS.FAILED:
+      return {
+        label: '生成失败 · 点击进入工作台',
+        color: audiobookColorRoles.taskStatus.failed.text,
+        backgroundColor: audiobookColorRoles.taskStatus.failed.bg,
+      }
+    default:
+      // render_status 为空：历史产物（legacy_unverified），回退旧完成条件
+      return {
+        label: '历史产物 · 点击进入工作台',
+        color: 'text.secondary',
+        backgroundColor: 'action.hover',
+      }
+  }
 }
 
 const ChapterSelectionPanel = ({
   chapters,
   selectedChapters,
   generatedChapterIds,
+  chapterStateById,
   onToggleChapter,
   onOpenChapterMenu,
   onOpenGeneratedChapter,
@@ -173,19 +234,29 @@ const ChapterSelectionPanel = ({
                     >
                       第{chapter.chapter_number}章 · {chapter.title}
                     </Typography>
-                    {generated && (
-                      <Chip
-                        size="small"
-                        icon={<LockOutlinedIcon />}
-                        label="已生成 · 点击进入工作台"
-                        sx={{
-                          height: 23,
-                          flexShrink: 0,
-                          color: audiobookColorRoles.taskStatus.completed.text,
-                          backgroundColor: audiobookColorRoles.taskStatus.completed.bg,
-                        }}
-                      />
-                    )}
+                    {generated && (() => {
+                      const state = chapterStateById?.[chapter.id]
+                      const chipMeta = state
+                        ? resolveChapterStateChipMeta(state)
+                        : {
+                            label: '已生成 · 点击进入工作台',
+                            color: audiobookColorRoles.taskStatus.completed.text,
+                            backgroundColor: audiobookColorRoles.taskStatus.completed.bg,
+                          }
+                      return (
+                        <Chip
+                          size="small"
+                          icon={<LockOutlinedIcon />}
+                          label={chipMeta.label}
+                          sx={{
+                            height: 23,
+                            flexShrink: 0,
+                            color: chipMeta.color,
+                            backgroundColor: chipMeta.backgroundColor,
+                          }}
+                        />
+                      )
+                    })()}
                   </Box>
                 )}
                 secondary={chapter.content ? chapter.content.slice(0, 64) : '暂无内容'}

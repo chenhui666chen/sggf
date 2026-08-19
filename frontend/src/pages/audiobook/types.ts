@@ -36,11 +36,14 @@ export interface ChapterAudio {
   generation_time?: number | null
   tts_cost?: number | null
   prompt_audio_quality?: Record<string, unknown> | null
+  render_status?: string | null
+  render_status_detail?: Record<string, unknown> | null
 }
 
 export interface AudiobookProjectDetail {
   id: number
   project_id?: number | null
+  engine_mode?: 'legacy_stems' | 'seed_scene' | null
   status?: string | null
   total_chapters?: number | null
   completed_chapters?: number | null
@@ -50,6 +53,110 @@ export interface AudiobookProjectDetail {
   total_size?: number | null
   chapter_audios?: ChapterAudio[]
 }
+
+/**
+ * 章节渲染状态（§2.3 结构化状态，GUIDE 阶段 2）。
+ *
+ * - legacy_stems：renderStatus 来自 script_json/audio_path/script_status 完成条件；
+ * - seed_scene：renderStatus 来自三维投影（published_render_status + desired_render_status）；
+ * - executionStatus：进行中任务的 run 状态（queued/running/paused/succeeded/failed/cancelled）。
+ */
+export interface ChapterRenderState {
+  renderStatus: string | null
+  executionStatus: string | null
+  audioUrl: string | null
+  locked: boolean
+  exportable: boolean
+}
+
+export const CHAPTER_RENDER_STATUS = {
+  RENDERED_ALL_SEED: 'rendered_all_seed',
+  RENDERED_WITH_FALLBACK: 'rendered_with_fallback',
+  STALE: 'stale',
+  MANUAL_REVIEW_REQUIRED: 'manual_review_required',
+  FAILED: 'failed',
+} as const
+
+// ─── 场景编辑器（GUIDE 阶段 3.5） ──────────────────────────────────
+
+/** 场景编辑 revision 链 head 投影（§2.9 last_revisions 元素）。 */
+export interface SceneEditRevisionHead {
+  revision_id: number
+  revision_hash: string
+  created_at?: string | null
+}
+
+/** 导演覆盖项（§2.6 stable_anchors 合同）。 */
+export interface SceneDirectionOverrideItem {
+  direction_type: 'performance' | 'sfx' | 'music' | 'acoustic' | string
+  content: string
+}
+
+/** 场景编辑器场景条目（SceneEditorDocument.scenes 元素）。 */
+export interface SceneEditorScene {
+  scene_id: string
+  status: string
+  source_segment_indices?: number[]
+  source_segment_keys?: string[]
+  attempts?: number
+  reused_checkpoint?: boolean
+  fallback_reason?: string | null
+  fallback_artifact?: Record<string, unknown> | null
+  scene_audio_url?: string | null
+  quality_report?: Record<string, unknown> | null
+  metadata?: Record<string, unknown>
+  /** 渲染时发送的完整提示词（旧 checkpoint 无记录时为空） */
+  prompt?: string | null
+  prompt_hash?: string | null
+}
+
+/** 场景编辑视图的稳定投影（§3.3）。 */
+export interface SceneEditorDocument {
+  chapter_id: number
+  audiobook_project_id: number
+  engine_mode: string
+  execution_status: string
+  published_render_status?: string | null
+  desired_render_status?: string | null
+  published_provenance?: string | null
+  source_script_revision: string
+  director_plan_revision?: string | null
+  scene_topology_hash?: string | null
+  scenes: SceneEditorScene[]
+  editable_overrides: Record<string, unknown>
+  /** 当前生效的音色绑定（voice_binding head payload），供音色编辑表单回显。 */
+  voice_binding_current?: {
+    tts_model?: string | null
+    characters?: Array<Record<string, unknown>>
+  } | null
+  artifact_references: Record<string, unknown>
+  last_revisions: Record<string, SceneEditRevisionHead | null>
+  revision_set_hash?: string | null
+  script_status?: string
+  chapter_audio_available?: boolean
+  chapter_audio_stale?: boolean
+  chapter_audio_url?: string | null
+  updated_at?: string | null
+}
+
+/** 场景编辑保存响应（revision_heads + revision_set_hash）。 */
+export interface SceneEditSaveResponse {
+  success: boolean
+  revision_heads: Record<string, SceneEditRevisionHead | null>
+  revision_set_hash?: string | null
+  script_status?: string
+  semantic_changed?: boolean
+}
+
+/** 引擎分支配置（§2.1 engines.{mode}，场景编辑器音色编辑用）。 */
+export interface EngineBranchConfig {
+  tts_models?: Record<string, {
+    characters?: Record<string, unknown>
+  }>
+  scene_generation_preferences?: Record<string, unknown>
+}
+
+export type SceneEditType = 'dialogue' | 'director_override' | 'voice_binding'
 
 export interface GenerationCheckpoint {
   chapter_id: number
@@ -120,7 +227,15 @@ export interface RecoverSegmentsResponse {
   resumed_from_run_id?: number | null
 }
 
-export type StageStatus = 'pending' | 'running' | 'completed' | 'failed' | 'paused' | 'pause_requested'
+export type StageStatus =
+  | 'pending'
+  | 'running'
+  | 'completed'
+  | 'failed'
+  | 'paused'
+  | 'pause_requested'
+  | 'cancelled'
+  | 'completed_with_partial_failure'
 
 export type PreviewType = 'voice' | 'sfx' | 'bgm' | 'mix'
 
@@ -227,32 +342,58 @@ export interface AudioFxConfig {
 
 export type AudioEngineMode = 'legacy_stems' | 'seed_scene'
 
+export interface ProjectCharacterAudioConfig {
+  character_id: number
+  name: string
+  voice_id: string
+  volume?: number | null
+  speed?: number | null
+  pitch?: number | null
+  tts_model?: TtsModel | null
+  voice_type?: string | null
+  personality?: string | null
+  emotion_tendency?: string | null
+  voice_clone_data_url?: string | null
+  voice_design_prompt?: string | null
+  mimo_voice_asset_id?: string | null
+  stepaudio_voice_asset_id?: string | null
+  reference_source?: 'user_private' | 'public_pool' | null
+  reference_audio_url?: string | null
+  voice_reference_asset_id?: string | null
+  voice_pool_publication_id?: string | null
+  source?: string | null
+}
+
+export interface ProjectEngineTtsModelConfig {
+  characters: ProjectCharacterAudioConfig[]
+}
+
+/** 引擎分支配置（GUIDE §2.2 engines.{mode}） */
+export interface ProjectEngineBranchConfig {
+  tts_models?: Record<string, ProjectEngineTtsModelConfig>
+  audio_fx?: AudioFxConfig | null
+  scene_generation_preferences?: {
+    music_enabled?: boolean
+    music_style?: string | null
+    soundscape_intensity?: string
+    performance_style?: string
+    timeline_mode?: string
+    terminal_policy?: string
+    semantic_review_enabled?: boolean
+    semantic_review_mode?: string
+  } | null
+  // 旧分支形态（无 tts_models 归组时的兼容读取）
+  characters?: ProjectCharacterAudioConfig[]
+}
+
 export interface ProjectAudioConfig {
-  characters: {
-    character_id: number
-    name: string
-    voice_id: string
-    volume?: number | null
-    speed?: number | null
-    pitch?: number | null
-    tts_model?: TtsModel | null
-    voice_type?: string | null
-    personality?: string | null
-    emotion_tendency?: string | null
-    voice_clone_data_url?: string | null
-    voice_design_prompt?: string | null
-    mimo_voice_asset_id?: string | null
-    stepaudio_voice_asset_id?: string | null
-    reference_source?: 'user_private' | 'public_pool' | null
-    reference_audio_url?: string | null
-    voice_reference_asset_id?: string | null
-    voice_pool_publication_id?: string | null
-    source?: string | null
-  }[]
+  characters: ProjectCharacterAudioConfig[]
   audio_fx?: AudioFxConfig | null
   audio_engine_mode?: 'legacy_stems' | 'seed_scene' | 'auto'
-  // multilingual 变体暂不启用，仅开放 seed-audio-1.0。
-  seed_audio_model?: 'seed-audio-1.0'
+  // 阶段 1 起开放两个 Seed Audio 模型；新任务默认 multilingual。
+  seed_audio_model?: 'seed-audio-1.0' | 'seed-audio-1.0-multilingual'
+  // 引擎分支持久化（GUIDE §2.2）：engines.{mode}.tts_models.{model}.characters
+  engines?: Record<string, ProjectEngineBranchConfig>
 }
 
 export interface VoiceDefaultParams {
@@ -665,6 +806,8 @@ export interface ScriptEditorDialogProps {
   onClose: () => void
   onChangeSegmentText: (index: number, value: string) => void
   onSaveScript: (options: { nextStatus?: 'reviewed' | 'approved' }) => void
+  /** 批准当前剧本后立即提交已批准章节生成音频（页面层编排，缩短跳转链路）。 */
+  onApproveAndGenerateAudio?: () => void
   onPreviewSegmentAudio: (
     index: number,
     segment: ScriptSegment,
@@ -720,10 +863,13 @@ export interface ScriptEditorDialogProps {
 export interface AudiobookProjectHistoryItem {
   id: number
   status?: string | null
+  engine_mode?: 'legacy_stems' | 'seed_scene' | null
   created_at?: string | null
   updated_at?: string | null
   completed_chapters?: number | null
   total_chapters?: number | null
+  // 音频已落盘（audio_path）章节数：区分"剧本完成、音频未生成"与"全部完成"
+  audio_completed_chapters?: number | null
   total_duration?: number | null
 }
 

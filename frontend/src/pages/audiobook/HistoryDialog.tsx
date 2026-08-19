@@ -23,7 +23,34 @@ import {
 } from '@mui/material'
 
 import { audiobookButtonSx, audiobookColorRoles, audiobookColors } from './audiobookTheme'
-import type { HistoryDialogProps } from './types'
+import type { AudiobookProjectHistoryItem, HistoryDialogProps } from './types'
+
+const getEngineModeLabel = (engineMode: AudiobookProjectHistoryItem['engine_mode']) => (
+  engineMode === 'seed_scene' ? '场景生成' : '分轨合成'
+)
+
+// 完成阶段标签：剧本-only 批次 status 也是 completed，
+// 须按音频落盘章节数区分，避免被误读为整体完成
+const getHistoryStatusChip = (project: AudiobookProjectHistoryItem) => {
+  if (project.status === 'processing') {
+    return { label: '生成中', chipBg: audiobookColorRoles.taskStatus.running.chipBg }
+  }
+  if (project.status === 'failed') {
+    return { label: '失败', chipBg: audiobookColorRoles.taskStatus.failed.chipBg }
+  }
+  if (project.status === 'completed') {
+    const totalChapters = project.total_chapters || 0
+    const audioCompleted = project.audio_completed_chapters || 0
+    if (totalChapters > 0 && audioCompleted >= totalChapters) {
+      return { label: '全部完成', chipBg: audiobookColorRoles.taskStatus.completed.chipBg }
+    }
+    if (audioCompleted > 0) {
+      return { label: '部分完成', chipBg: audiobookColors.warningMain }
+    }
+    return { label: '剧本完成·音频未生成', chipBg: audiobookColorRoles.notice.warning.text }
+  }
+  return { label: '等待中', chipBg: audiobookColorRoles.taskStatus.pending.chipBg }
+}
 
 const HistoryDialog = ({
   open,
@@ -108,7 +135,10 @@ const HistoryDialog = ({
             </Box>
           ) : (
             <List>
-              {historyProjects.map((project) => (
+              {historyProjects.map((project) => {
+                const statusChip = getHistoryStatusChip(project)
+                const audioCompleted = project.audio_completed_chapters || 0
+                return (
                 <ListItem
                   key={project.id}
                   sx={{
@@ -123,39 +153,37 @@ const HistoryDialog = ({
                   onClick={() => onViewHistory(project.id)}
                 >
                   <Box sx={{ flex: 1 }}>
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1, flexWrap: 'wrap' }}>
                       <Chip
-                        label={
-                          project.status === 'completed'
-                            ? '已完成'
-                            : project.status === 'processing'
-                            ? '生成中'
-                            : project.status === 'failed'
-                            ? '失败'
-                            : '等待中'
-                        }
+                        label={statusChip.label}
                         size="small"
                         sx={{
-                          backgroundColor:
-                            project.status === 'completed'
-                              ? audiobookColorRoles.taskStatus.completed.chipBg
-                              : project.status === 'processing'
-                              ? audiobookColorRoles.taskStatus.running.chipBg
-                              : project.status === 'failed'
-                              ? audiobookColorRoles.taskStatus.failed.chipBg
-                              : audiobookColorRoles.taskStatus.pending.chipBg,
+                          backgroundColor: statusChip.chipBg,
                           color: 'white',
                         }}
+                      />
+                      <Chip
+                        label={getEngineModeLabel(project.engine_mode)}
+                        size="small"
+                        variant="outlined"
+                        sx={{ color: audiobookColors.brand, borderColor: audiobookColors.brand }}
                       />
                       <Typography variant="caption" color="text.secondary">
                         {formatProjectCreatedAt(project.created_at)}
                       </Typography>
                     </Box>
-                    <Box sx={{ display: 'flex', gap: 2 }}>
+                    <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
                       <Typography variant="body2">
-                        章节：{project.completed_chapters}/{project.total_chapters}
+                        剧本：{project.completed_chapters}/{project.total_chapters}
                       </Typography>
-                      {project.status === 'completed' && (
+                      <Typography
+                        variant="body2"
+                        color={audioCompleted > 0 ? 'text.primary' : undefined}
+                        sx={audioCompleted > 0 ? undefined : { color: audiobookColorRoles.notice.warning.text }}
+                      >
+                        音频：{audioCompleted}/{project.total_chapters}
+                      </Typography>
+                      {audioCompleted > 0 && (
                         <Typography variant="body2" color="text.secondary">
                           时长：{((project.total_duration || 0) / 60).toFixed(1)}分钟
                         </Typography>
@@ -185,7 +213,8 @@ const HistoryDialog = ({
                     </IconButton>
                   </Box>
                 </ListItem>
-              ))}
+                )
+              })}
             </List>
           )}
         </DialogContent>

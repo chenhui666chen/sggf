@@ -1,4 +1,4 @@
-﻿import { lazy, Suspense, useCallback, useEffect, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import {
   Container,
@@ -257,6 +257,9 @@ export default function KnowledgeBasePage() {
 
   // 设定同步到工作流状态
   const [syncingSettings, setSyncingSettings] = useState(false)
+
+  // 候选设定合并状态
+  const [mergingCandidates, setMergingCandidates] = useState(false)
 
   // 鎻愮ず娑堟伅
   const [snackbarOpen, setSnackbarOpen] = useState(false)
@@ -1046,6 +1049,35 @@ export default function KnowledgeBasePage() {
     }
   }
 
+  // 合并高置信候选设定（修复 P3-3：候选确认闭环）
+  const handleMergeCandidates = async () => {
+    if (!projectId) return
+
+    setMergingCandidates(true)
+    try {
+      const response = await apiClient.autoMergeSettings(Number(projectId))
+      const merged = response.data?.merged_count ?? 0
+      const skipped = response.data?.skipped_count ?? 0
+      showSnackbar(
+        merged > 0
+          ? `已合并 ${merged} 项高置信候选设定（跳过 ${skipped} 项）`
+          : `暂无可合并的高置信候选（候选池中 ${skipped} 项置信度不足）`,
+        'success',
+      )
+      if (merged > 0) {
+        await loadSettingCollections()
+        if (selectedCollection) {
+          await loadSettingItems(selectedCollection.id)
+        }
+      }
+    } catch (err) {
+      logger.error('合并候选设定失败:', err)
+      showSnackbar('合并候选设定失败', 'error')
+    } finally {
+      setMergingCandidates(false)
+    }
+  }
+
   // ==================== 娓叉煋 ====================
 
   return (
@@ -1490,6 +1522,28 @@ export default function KnowledgeBasePage() {
                         disabled={syncingSettings || collections.length === 0}
                       >
                         {syncingSettings ? '校验中...' : '校验工作流摘要'}
+                      </Button>
+                    </span>
+                  </Tooltip>
+
+                  {/* 合并高置信候选设定按钮（修复 P3-3：候选确认闭环） */}
+                  <Tooltip
+                    title="将候选集合中高置信度的设定项自动合并到对应正式体系；置信度不足的保留待人工确认。"
+                    placement="top"
+                    arrow
+                  >
+                    <span>
+                      <Button
+                        variant="outlined"
+                        color="secondary"
+                        size="small"
+                        fullWidth
+                        sx={{ mt: 1 }}
+                        startIcon={mergingCandidates ? <CircularProgress size={16} /> : <AutoFixHighIcon />}
+                        onClick={handleMergeCandidates}
+                        disabled={mergingCandidates}
+                      >
+                        {mergingCandidates ? '合并中...' : '合并候选设定'}
                       </Button>
                     </span>
                   </Tooltip>
