@@ -33,7 +33,8 @@ class AudiobookTask(Base):
     chapter_id = Column(Integer, ForeignKey("chapters.id", ondelete="CASCADE"), nullable=True, index=True)
 
     task_type = Column(String(32), nullable=False)  # full | script_only | audio_from_scripts
-    status = Column(String(20), default="pending", nullable=False)
+    # 扩至 32 容纳父聚合值 completed_with_partial_failure（GUIDE §1.1；值域 CHECK 两阶段收窄由迁移施加）
+    status = Column(String(32), default="pending", nullable=False)
     current_stage = Column(String(64), nullable=True)
     progress = Column(Float, default=0.0)
     completed_units = Column(Integer, default=0)

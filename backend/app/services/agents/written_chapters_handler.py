@@ -279,6 +279,38 @@ def build_written_chapter_outline_from_assets(
     }
 
 
+# 设定摘要标记（build_project_settings_summary 的输出以该标题开头）
+_SETTINGS_SUMMARY_MARKER = "## 世界观设定体系"
+
+
+def _shrink_combined_world_setting(
+    combined_world_setting: str,
+    *,
+    max_length: int = 800,
+) -> str:
+    """压缩合并世界观文本，修复 P1-1 的 [:500] 硬截断问题。
+
+    此前 combined_world_setting[:500] 会把设定中心摘要整体截掉
+    （摘要在合并文本的后半段）。现在：预算内直接返回；超预算时
+    保留世界观开头 + 优先保留设定摘要段。
+    """
+    text = (combined_world_setting or "").strip()
+    if not text or len(text) <= max_length:
+        return text
+
+    marker_index = text.find(_SETTINGS_SUMMARY_MARKER)
+    if marker_index < 0:
+        return text[:max_length] + "…"
+
+    head_budget = max(150, max_length // 3)
+    head = text[:head_budget]
+    summary_part = text[marker_index:]
+    remaining = max_length - head_budget
+    if len(summary_part) > remaining:
+        summary_part = summary_part[:remaining] + "…"
+    return f"{head}\n…\n{summary_part}"
+
+
 async def process_written_chapters(
     project_id: int,
     preserve_written_mode: str,
@@ -423,7 +455,7 @@ async def process_written_chapters(
                     chapter_number=chapter_data["chapter_number"],
                     chapter_title=chapter_data["title"] or f"第{chapter_data['chapter_number']}章",
                     genre=project_genre,
-                    world_context=combined_world_setting[:500],
+                    world_context=_shrink_combined_world_setting(combined_world_setting),
                 )
                 extracted_results.append((chapter_data["row_index"], outline_data))
                 progress_callback(current, total, chapter_data["chapter_number"])

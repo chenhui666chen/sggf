@@ -6,6 +6,7 @@
 from typing import Tuple
 
 from app.services.prompts.manager import prompt_manager
+from app.services.prompts.narrative_quality import FAILURE_CODE_OUTPUT_SPEC
 from app.services.prompts.stages.structure_design import StructureDesignPrompts
 from app.services.prompts.stages.world_building import (
     CharacterDesignPrompts,
@@ -26,7 +27,14 @@ STANDARD_CHAPTER_REVIEW_RUBRIC = """## 网文6维度评审体系（统一评分�
 5. 文笔流畅度（权重10%）
 6. 内容一致性（权重15%）
 
-综合评分必须按以上六个维度及权重裁决。初评、复评、最终验收都使用同一套评分口径，不能把“是否执行修改”混入综合评分。"""
+综合评分必须按以上六个维度及权重裁决。初评、复评、最终验收都使用同一套评分口径，不能把“是否执行修改”混入综合评分。
+
+## 综合评分分档锚点（防止评分趋中与通胀）
+- 9-10分：可直接发布水平。六维全部达标，且至少两个维度突出（如爽点兑现有力且钩子强烈），无任何【必改】项。
+- 7-8分：整体成立但有明确短板。存在1-2个可通过局部修改解决的问题，不影响主线框架与核心推进。
+- 5-6分：框架勉强成立但执行乏力。存在结构性问题（核心推进未发生、钩子断裂、大段注水），需要实质性重写部分段落。
+- 3-4分：不达标。存在人设漂移、逻辑硬伤或整章原地踏步，需要整体重写。
+- 评分纪律：不要把大多数章节都压在8-9分区间；只要问题列表存在【必改】项，综合评分不得高于8分；评分必须与所列问题的严重度一致。"""
 
 
 _DEFAULT_CONCEPT_HARD_CONSTRAINTS = """- 除非用户明确要求，否则不要使用“林尘”作为主角名。
@@ -428,6 +436,8 @@ def build_iteration_revision_user_prompt(
     iteration_plan: str = "",
     recent_chapter_assets_summary: str = "",
     include_history_hint: bool = False,
+    revision_mode_hint: str = "",
+    repair_hints: str = "",
 ) -> str:
     review_section_title = "【必须执行的所有评审意见（包含历史轮次）】" if include_history_hint else "【评审意见】"
     intro = (
@@ -445,6 +455,16 @@ def build_iteration_revision_user_prompt(
         if iteration_plan
         else "（本轮未提供单独的协调计划，请直接依据评审意见中的高优先级问题修订。）"
     )
+    revision_mode_block = (
+        f"【修订模式指令】（由失败码路由自动判定，必须遵守）\n{revision_mode_hint}"
+        if revision_mode_hint
+        else ""
+    )
+    repair_hints_block = (
+        f"【失败码机制修复指引】（按失败类型对应的模型机制修复，优先于个人经验的改法）\n{repair_hints}"
+        if repair_hints
+        else ""
+    )
     return f"""{intro}
 
 【当前章节内容】
@@ -458,6 +478,10 @@ def build_iteration_revision_user_prompt(
 
 【本轮迭代协调计划】（优先执行“本轮必做项”）
 {iteration_plan_block}
+
+{revision_mode_block}
+
+{repair_hints_block}
 
 【修订要求】
 1. 必须优先执行本轮迭代协调计划中的“本轮必做项”。
@@ -546,6 +570,8 @@ def build_iteration_loop_review_user_prompt(
 3. 如果未达标，只保留最影响通过的3条剩余问题。
 4. 明确给出“通过 / 继续修改 / 风险较高”结论。
 
+{FAILURE_CODE_OUTPUT_SPEC}
+
 【输出格式】
 综合评分：X/10分
 六维评分：
@@ -559,6 +585,10 @@ def build_iteration_loop_review_user_prompt(
 ## 评审要求执行核验表
 | 要求ID/来源 | 状态（已执行/部分执行/未执行） | 修改后证据 | 未完成原因 |
 |---|---|---|---|
+
+## 失败码清单
+失败码|严重度|位置或证据
+（逐行列出，无问题时输出：无）
 
 ## 剩余关键问题
 1. ...

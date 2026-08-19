@@ -103,13 +103,13 @@ class ExecutionMixin:
 {("、".join(character_names) if character_names else "暂无")}
 
 【世界观摘要】
-{(world_setting or "暂无")[:3000]}
+{(world_setting or "暂无")[:self.CONTEXT_BUDGET_WORLD]}
 
 【当前大纲原文】
-{(current_outline or "暂无")[:8000]}
+{(current_outline or "暂无")[:self.CONTEXT_BUDGET_OUTLINE]}
 
 【当前人物原文】
-{(characters or "暂无")[:6000]}
+{(characters or "暂无")[:self.CONTEXT_BUDGET_CHARACTERS]}
 
 【目标】
 - 当前章节数：{current_chapter_count}
@@ -222,10 +222,10 @@ class ExecutionMixin:
 {chr(10).join(relationship_hints) if relationship_hints else "请自行补充与旧角色或新角色之间的关键关系"}
 
 【世界观】
-{(world_setting or "暂无")[:2500]}
+{(world_setting or "暂无")[:self.CONTEXT_BUDGET_WORLD]}
 
 【大纲摘要】
-{(current_outline or "暂无")[:5000]}
+{(current_outline or "暂无")[:self.CONTEXT_BUDGET_OUTLINE]}
 
 请只返回 JSON，对象结构如下：
 {{
@@ -286,10 +286,10 @@ class ExecutionMixin:
 {chr(10).join(relationship_hints) if relationship_hints else "请自行补充与旧角色或新角色之间的关键关系"}
 
 【世界观】
-{(world_setting or "暂无")[:2500]}
+{(world_setting or "暂无")[:self.CONTEXT_BUDGET_WORLD]}
 
 【大纲摘要】
-{(current_outline or "暂无")[:5000]}
+{(current_outline or "暂无")[:self.CONTEXT_BUDGET_OUTLINE]}
 
 输出要求：
 1. 只输出新增角色，不要复述旧角色。
@@ -352,6 +352,65 @@ class ExecutionMixin:
 
         return fallback
 
+    @classmethod
+    def _split_delta_chapter_batches(cls, count: int) -> List[int]:
+        """把单次大纲增量拆成多批（每批 ≤ DELTA_CHAPTER_BATCH_MAX_PER_CALL 章，批量均衡）。
+
+        单次 JSON 调用生成过多章节会稀释单章字段质量（冲突设计趋同、钩子套路化），
+        与 volume_detail 模式的分段生成保护对齐。
+        """
+        if count <= cls.DELTA_CHAPTER_BATCH_MAX_PER_CALL:
+            return [count]
+        batch_count = math.ceil(count / cls.DELTA_CHAPTER_BATCH_MAX_PER_CALL)
+        base, extra = divmod(count, batch_count)
+        return [base + (1 if i < extra else 0) for i in range(batch_count)]
+
+    @staticmethod
+    def _summarize_generated_chapter_dicts(chapters: List[Dict[str, Any]]) -> str:
+        """把已生成批次压缩为衔接摘要（标题+关键事件+钩子），供后续批次延续梯度。"""
+        lines: List[str] = []
+        for index, item in enumerate(chapters, start=1):
+            title = str(item.get("title") or item.get("chapter_title") or "").strip()
+            events = str(item.get("key_events") or item.get("events") or "").strip()
+            hook = str(item.get("ending_hook") or item.get("cliffhanger") or "").strip()
+            line = f"第{index}章：{title or '（未命名）'}"
+            if events:
+                line += f"（关键事件：{events[:60]}）"
+            if hook:
+                line += f"（钩子：{hook[:30]}）"
+            lines.append(line)
+        return "\n".join(lines)
+
+    @staticmethod
+    def _build_character_presence_hint(
+        chapters: List[Dict[str, Any]],
+        characters_text: str,
+    ) -> str:
+        """统计前批人物出场率，输出零/低出场人物的补戏提示（防人物戏份稀释）。"""
+        if not chapters:
+            return ""
+        # 从人物卡提取名单（限主要人物，避免群演噪声）
+        names = [name for name in extract_character_names(characters_text or "") if len(name) <= 6][:12]
+        if not names:
+            return ""
+        presence: Dict[str, int] = {name: 0 for name in names}
+        total = len(chapters)
+        for item in chapters:
+            involved = item.get("involved_characters") or item.get("characters") or []
+            if isinstance(involved, str):
+                involved = [involved]
+            involved_text = "、".join(str(c) for c in involved)
+            for name in names:
+                if name in involved_text:
+                    presence[name] += 1
+        weak = [name for name, count in presence.items() if count == 0]
+        if not weak:
+            return ""
+        return (
+            f"前 {total} 批人物戏份统计：{'、'.join(f'{n} {c}/{total}' for n, c in presence.items() if c < total)}\n"
+            f"- 零出场人物：{'、'.join(weak)} → 本批必须为其设计实质行动线（involved_characters 纳入并推动剧情），不得继续闲置"
+        )
+
     def _generate_new_chapters_for_op(
         self,
         op: Dict[str, Any],
@@ -396,8 +455,38 @@ class ExecutionMixin:
             else "无，表示可在结尾延展"
         )
 
-        json_prompt = f"""
-你是小说章节拓展策划师。请只生成 {count} 个新增章节，不允许改写旧章节。
+        # 🆕 分批生成：count > DELTA_CHAPTER_BATCH_MAX_PER_CALL 时拆批调用，
+        # 批间携带已生成批次摘要，保持冲突升级梯度与钩子递进（防单次负载稀释）
+        batches = self._split_delta_chapter_batches(count)
+        collected_chapters: List[Dict[str, Any]] = []
+        logger.info("delta 分批生成：共 %s 批 %s 章", len(batches), batches)
+        structural_debt = getattr(self, "_alignment_structural_debt", "")
+        debt_section = ""
+        if structural_debt:
+            debt_section = f"""
+【上轮遗留结构债】（上轮对齐验证判定的情节级缺口，本批新增章节必须优先承接兑现）
+{structural_debt[:1200]}
+- 上述问题靠修改旧章无法解决，请在本次新增章节中设计实质性情节承接（主动行动线/渐进铺垫/承载节点）"""
+        for batch_index, batch_size in enumerate(batches):
+            previous_summary = self._summarize_generated_chapter_dicts(collected_chapters)
+            presence_hint = self._build_character_presence_hint(collected_chapters, characters_text)
+            batch_section = ""
+            if len(batches) > 1:
+                if previous_summary:
+                    batch_section = f"""
+【同轮前批已生成章节】（后续批次必须承接前批结尾推进，延续冲突升级梯度与钩子递进，禁止与前批冲突设计或钩子模式雷同）
+{previous_summary}
+- 本批是第 {batch_index + 1}/{len(batches)} 批，不要复述已发生事件"""
+                    if presence_hint:
+                        batch_section += f"""
+【前批人物戏份提示】
+{presence_hint}"""
+                else:
+                    batch_section = f"""
+- 本批是第 {batch_index + 1}/{len(batches)} 批（首批），本批结尾需为后续批次留出升级空间"""
+
+            json_prompt = f"""
+你是小说章节拓展策划师。请只生成 {batch_size} 个新增章节，不允许改写旧章节。
 
 【插入位置】
 {placement}
@@ -414,14 +503,18 @@ class ExecutionMixin:
 【本次重点人物】
 {("、".join(op.get("focus_characters") or []) if op.get("focus_characters") else "请按剧情自行分配")}
 
+【人物覆盖约束】
+- 每章 involved_characters 中的人物必须有实质行动（推进信息/冲突/关系），不得只挂名出场
+- 主要人物轮转出场，单一人物不得连续缺席超过 2 章{debt_section}
+
 【新增角色卡】
-{(new_character_cards or "本轮未新增角色")[:3500]}
+{(new_character_cards or "本轮未新增角色")[:self.CONTEXT_BUDGET_NEW_CHARACTER_CARDS]}
 
 【完整人物上下文】
-{(characters_text or "暂无")[:4000]}
+{(characters_text or "暂无")[:self.CONTEXT_BUDGET_CHARACTERS]}
 
 【世界观】
-{(world_setting or "暂无")[:2500]}
+{(world_setting or "暂无")[:self.CONTEXT_BUDGET_WORLD]}{batch_section}
 
 请只返回 JSON，对象结构如下：
 {{
@@ -441,13 +534,39 @@ class ExecutionMixin:
       ]
 }}
 """
+            structured_payload = self._invoke_chapter_json(
+                json_prompt,
+                fallback={"chapters": []},
+                chapter_count=batch_size,
+            )
+            batch_items = [
+                item
+                for item in (structured_payload.get("chapters") or [])
+                if isinstance(item, dict)
+            ]
+            if not batch_items:
+                # 批内失败即时重试一次（恢复瞬时解析失败，避免整批章节静默丢失）
+                structured_payload = self._invoke_chapter_json(
+                    json_prompt,
+                    fallback={"chapters": []},
+                    chapter_count=batch_size,
+                )
+                batch_items = [
+                    item
+                    for item in (structured_payload.get("chapters") or [])
+                    if isinstance(item, dict)
+                ]
+            if batch_items:
+                collected_chapters.extend(batch_items)
+            else:
+                logger.warning(
+                    "delta 分批生成：第 %s/%s 批重试后仍未返回有效章节，跳过该批",
+                    batch_index + 1,
+                    len(batches),
+                )
 
-        structured_payload = self._invoke_json(
-            json_prompt,
-            fallback={"chapters": []},
-        )
         raw_text = self._render_structured_chapter_blocks(
-            structured_payload.get("chapters"),
+            collected_chapters,
             detailed=True,
         )
 
@@ -470,14 +589,18 @@ class ExecutionMixin:
 【本次重点人物】
 {("、".join(op.get("focus_characters") or []) if op.get("focus_characters") else "请按剧情自行分配")}
 
+【人物覆盖约束】
+- 每章 involved_characters 中的人物必须有实质行动（推进信息/冲突/关系），不得只挂名出场
+- 主要人物轮转出场，单一人物不得连续缺席超过 2 章{debt_section}
+
 【新增角色卡】
-{(new_character_cards or "本轮未新增角色")[:3500]}
+{(new_character_cards or "本轮未新增角色")[:self.CONTEXT_BUDGET_NEW_CHARACTER_CARDS]}
 
 【完整人物上下文】
-{(characters_text or "暂无")[:4000]}
+{(characters_text or "暂无")[:self.CONTEXT_BUDGET_CHARACTERS]}
 
 【世界观】
-{(world_setting or "暂无")[:2500]}
+{(world_setting or "暂无")[:self.CONTEXT_BUDGET_WORLD]}
 
 输出要求：
 1. 只输出新增章节。
@@ -529,22 +652,55 @@ class ExecutionMixin:
             }
 
         if not blocks:
-            structured_payload = self._invoke_json(
-                f"""
+            # 🆕 无显式章节大纲同样走分批保护（count > 上限时拆批 + 批间摘要），
+            # 与已有章节场景对齐，避免单次负载稀释单章字段质量
+            batches = self._split_delta_chapter_batches(chapters_needed)
+            collected_chapters: List[Dict[str, Any]] = []
+            logger.info("delta 无章节大纲分批生成：共 %s 批 %s 章", len(batches), batches)
+            structural_debt = getattr(self, "_alignment_structural_debt", "")
+            debt_section = ""
+            if structural_debt:
+                debt_section = f"""
+【上轮遗留结构债】（上轮对齐验证判定的情节级缺口，本批新增章节必须优先承接兑现）
+{structural_debt[:1200]}
+- 上述问题靠修改旧章无法解决，请在本次新增章节中设计实质性情节承接（主动行动线/渐进铺垫/承载节点）"""
+            for batch_index, batch_size in enumerate(batches):
+                previous_summary = self._summarize_generated_chapter_dicts(collected_chapters)
+                presence_hint = self._build_character_presence_hint(collected_chapters, characters_text)
+                batch_section = ""
+                if len(batches) > 1:
+                    if previous_summary:
+                        batch_section = f"""
+【同轮前批已生成章节】（后续批次必须承接前批结尾推进，延续冲突升级梯度与钩子递进，禁止与前批冲突设计或钩子模式雷同）
+{previous_summary}
+- 本批是第 {batch_index + 1}/{len(batches)} 批，不要复述已发生事件"""
+                        if presence_hint:
+                            batch_section += f"""
+【前批人物戏份提示】
+{presence_hint}"""
+                    else:
+                        batch_section = f"""
+- 本批是第 {batch_index + 1}/{len(batches)} 批（首批），本批结尾需为后续批次留出升级空间"""
+
+                json_prompt = f"""
 你是小说章节拓展策划师。当前原版大纲没有显式章节，视为锁定总纲。
-请基于它新增 {chapters_needed} 个章节卡，不要重写原文。
+请基于它新增 {batch_size} 个章节卡，不要重写原文。
 
 【锁定原版大纲】
-{(current_outline or "暂无")[:6000]}
+{(current_outline or "暂无")[:self.CONTEXT_BUDGET_OUTLINE]}
 
 【人物上下文】
-{(characters_text or "暂无")[:4000]}
+{(characters_text or "暂无")[:self.CONTEXT_BUDGET_CHARACTERS]}
 
 【新增角色卡】
-{(new_character_cards or "本轮未新增角色")[:3000]}
+{(new_character_cards or "本轮未新增角色")[:self.CONTEXT_BUDGET_NEW_CHARACTER_CARDS]}
+
+【人物覆盖约束】
+- 每章 involved_characters 中的人物必须有实质行动（推进信息/冲突/关系），不得只挂名出场
+- 主要人物轮转出场，单一人物不得连续缺席超过 2 章{debt_section}
 
 【世界观】
-{(world_setting or "暂无")[:2500]}
+{(world_setting or "暂无")[:self.CONTEXT_BUDGET_WORLD]}{batch_section}
 
 请只返回 JSON，对象结构如下：
 {{
@@ -563,11 +719,40 @@ class ExecutionMixin:
     }}
   ]
 }}
-""",
-                fallback={"chapters": []},
-            )
+"""
+                structured_payload = self._invoke_chapter_json(
+                    json_prompt,
+                    fallback={"chapters": []},
+                    chapter_count=batch_size,
+                )
+                batch_items = [
+                    item
+                    for item in (structured_payload.get("chapters") or [])
+                    if isinstance(item, dict)
+                ]
+                if not batch_items:
+                    # 批内失败即时重试一次（恢复瞬时解析失败，避免整批章节静默丢失）
+                    structured_payload = self._invoke_chapter_json(
+                        json_prompt,
+                        fallback={"chapters": []},
+                        chapter_count=batch_size,
+                    )
+                    batch_items = [
+                        item
+                        for item in (structured_payload.get("chapters") or [])
+                        if isinstance(item, dict)
+                    ]
+                if batch_items:
+                    collected_chapters.extend(batch_items)
+                else:
+                    logger.warning(
+                        "delta 无章节大纲分批生成：第 %s/%s 批重试后仍未返回有效章节，跳过该批",
+                        batch_index + 1,
+                        len(batches),
+                    )
+
             raw_text = self._render_structured_chapter_blocks(
-                structured_payload.get("chapters"),
+                collected_chapters,
                 detailed=True,
             )
             if not raw_text:
@@ -577,16 +762,16 @@ class ExecutionMixin:
 请基于它新增 {chapters_needed} 个章节卡，不要重写原文。
 
 【锁定原版大纲】
-{(current_outline or "暂无")[:6000]}
+{(current_outline or "暂无")[:self.CONTEXT_BUDGET_OUTLINE]}
 
 【人物上下文】
-{(characters_text or "暂无")[:4000]}
+{(characters_text or "暂无")[:self.CONTEXT_BUDGET_CHARACTERS]}
 
 【新增角色卡】
-{(new_character_cards or "本轮未新增角色")[:3000]}
+{(new_character_cards or "本轮未新增角色")[:self.CONTEXT_BUDGET_NEW_CHARACTER_CARDS]}
 
 【世界观】
-{(world_setting or "暂无")[:2500]}
+{(world_setting or "暂无")[:self.CONTEXT_BUDGET_WORLD]}
 
 请严格输出 {chapters_needed} 个章节，格式如下：
 第1章：章节标题
@@ -1574,7 +1759,7 @@ class ExecutionMixin:
 
         framework_world_setting = world_setting or ""
         if current_outline and current_outline.strip():
-            outline_context = current_outline[:6000]
+            outline_context = current_outline[: self.CONTEXT_BUDGET_OUTLINE]
             framework_world_setting = (
                 f"{framework_world_setting}\n\n【现有主线与基础大纲】\n{outline_context}"
                 if framework_world_setting
@@ -1915,7 +2100,11 @@ class ExecutionMixin:
         epic_config: Optional[Dict[str, Any]] = None,
         volume_detail_config: Optional[Dict[str, Any]] = None,
         auto_supplement_plan: Optional[Dict[str, Any]] = None,
+        structural_debt: str = "",
     ) -> Dict[str, Any]:
+        # 上轮扩展遗留的情节级结构债（failed_after_retry/deferred 时记录），
+        # 注入本轮章节生成 prompt，由新增章节承接（跨轮修复）
+        self._alignment_structural_debt = str(structural_debt or "").strip()
         current_outline = sanitize_outline_alignment_placeholders(current_outline or "")
         mode_info = self.determine_execution_mode(
             current_outline=current_outline,
@@ -1964,7 +2153,7 @@ class ExecutionMixin:
 
         mode = mode_info["mode"]
         if mode == "volume_detail":
-            return self._execute_volume_detail_mode(
+            result = self._execute_volume_detail_mode(
                 current_outline=current_outline,
                 characters=characters,
                 world_setting=world_setting,
@@ -1974,8 +2163,8 @@ class ExecutionMixin:
                 mode_info=mode_info,
                 volume_detail_config=volume_detail_config,
             )
-        if mode == "epic":
-            return self._execute_epic_mode(
+        elif mode == "epic":
+            result = self._execute_epic_mode(
                 current_outline=current_outline,
                 characters=characters,
                 world_setting=world_setting,
@@ -1985,8 +2174,8 @@ class ExecutionMixin:
                 mode_info=mode_info,
                 epic_config=epic_config,
             )
-        if mode == "iterative":
-            return self._execute_iterative_mode(
+        elif mode == "iterative":
+            result = self._execute_iterative_mode(
                 current_outline=current_outline,
                 characters=characters,
                 world_setting=world_setting,
@@ -1996,12 +2185,26 @@ class ExecutionMixin:
                 mode_info=mode_info,
                 auto_supplement_plan=auto_supplement_plan,
             )
-        return self._execute_delta_mode(
-            current_outline=current_outline,
-            characters=characters,
-            world_setting=world_setting,
-            target_total_chapters=target_total_chapters,
-            target_total_characters=target_total_characters,
-            strategy=strategy,
-            mode_info=mode_info,
+        else:
+            result = self._execute_delta_mode(
+                current_outline=current_outline,
+                characters=characters,
+                world_setting=world_setting,
+                target_total_chapters=target_total_chapters,
+                target_total_characters=target_total_characters,
+                strategy=strategy,
+                mode_info=mode_info,
+            )
+
+        # 🆕 统一后处理：LLM 人物-情节对齐验证 + 低分闸门修复（重跑上限 1 次）
+        alignment = self._run_character_plot_alignment_validation(
+            characters=str(result.get("characters") or characters or ""),
+            plot_outline=str(result.get("plot_outline") or current_outline or ""),
+            world_setting=str(world_setting or ""),
+        )
+        return self._apply_alignment_gate(
+            result,
+            alignment,
+            characters=characters or "",
+            world_setting=world_setting or "",
         )

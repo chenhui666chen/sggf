@@ -395,6 +395,10 @@ async def _handle_retry_missing(
             checkpoint_json=resumed_checkpoint_json,
         )
 
+    # R11/P0-2：入队 + 冻结同事务（账户锁 → enqueue → freeze → 统一 commit）
+    from app.services.audiobook.task_support import lock_billing_account as _lock_billing_account
+
+    _lock_billing_account(db, current_user.id)
     _, async_result = _enqueue_audiobook_task(
         db,
         audiobook_project_id=audiobook_project_id,
@@ -406,6 +410,7 @@ async def _handle_retry_missing(
         narration_style_prompt=narration_style_prompt,
         generate_subtitle=generate_subtitle,
         before_dispatch=bind_resume_checkpoint_before_dispatch,
+        commit_result=False,
     )
 
     _safe_record_audiobook_billing_freeze(
@@ -426,7 +431,18 @@ async def _handle_retry_missing(
             tts_model=tts_model,
             cost_precheck_id=precheck.cost_precheck_id,
         ),
+        raise_on_error=True,
     )
+    db.commit()
+    # 提交后即时派发（best-effort；失败由 dispatcher beat 兜底，R11/P0-1）
+    try:
+        from app.services.audiobook.task_support import (
+            dispatch_pending_runs as _dispatch_pending_runs,
+        )
+
+        _dispatch_pending_runs(db, async_result.runs)
+    except Exception as _exc:
+        logger.warning("提交后派发失败（dispatcher 兜底）: %s", _exc)
 
     logger.info(
         "Recover retry_missing queued: audiobook_project_id=%s chapter_id=%s job_id=%s",
@@ -512,6 +528,10 @@ async def _handle_replace_voice_all(
             checkpoint_json=recovery_checkpoint_json,
         )
 
+    # R11/P0-2：入队 + 冻结同事务（账户锁 → enqueue → freeze → 统一 commit）
+    from app.services.audiobook.task_support import lock_billing_account as _lock_billing_account
+
+    _lock_billing_account(db, current_user.id)
     _, async_result = _enqueue_audiobook_task(
         db,
         audiobook_project_id=audiobook_project_id,
@@ -523,6 +543,7 @@ async def _handle_replace_voice_all(
         narration_style_prompt=narration_style_prompt,
         generate_subtitle=generate_subtitle,
         before_dispatch=bind_voice_recovery_checkpoint,
+        commit_result=False,
     )
 
     _safe_record_audiobook_billing_freeze(
@@ -543,7 +564,18 @@ async def _handle_replace_voice_all(
             tts_model=tts_model,
             cost_precheck_id=precheck.cost_precheck_id,
         ),
+        raise_on_error=True,
     )
+    db.commit()
+    # 提交后即时派发（best-effort；失败由 dispatcher beat 兜底，R11/P0-1）
+    try:
+        from app.services.audiobook.task_support import (
+            dispatch_pending_runs as _dispatch_pending_runs,
+        )
+
+        _dispatch_pending_runs(db, async_result.runs)
+    except Exception as _exc:
+        logger.warning("提交后派发失败（dispatcher 兜底）: %s", _exc)
 
     logger.info(
         "Recover replace_voice_all queued: audiobook_project_id=%s chapter_id=%s overrides=%s job_id=%s",
@@ -632,6 +664,10 @@ async def _handle_replace_voice_missing(
             checkpoint_json=recovery_checkpoint_json,
         )
 
+    # R11/P0-2：入队 + 冻结同事务（账户锁 → enqueue → freeze → 统一 commit）
+    from app.services.audiobook.task_support import lock_billing_account as _lock_billing_account
+
+    _lock_billing_account(db, current_user.id)
     _, async_result = _enqueue_audiobook_task(
         db,
         audiobook_project_id=audiobook_project_id,
@@ -643,6 +679,7 @@ async def _handle_replace_voice_missing(
         narration_style_prompt=narration_style_prompt,
         generate_subtitle=generate_subtitle,
         before_dispatch=bind_voice_recovery_checkpoint,
+        commit_result=False,
     )
 
     _safe_record_audiobook_billing_freeze(
@@ -663,7 +700,18 @@ async def _handle_replace_voice_missing(
             tts_model=tts_model,
             cost_precheck_id=precheck.cost_precheck_id,
         ),
+        raise_on_error=True,
     )
+    db.commit()
+    # 提交后即时派发（best-effort；失败由 dispatcher beat 兜底，R11/P0-1）
+    try:
+        from app.services.audiobook.task_support import (
+            dispatch_pending_runs as _dispatch_pending_runs,
+        )
+
+        _dispatch_pending_runs(db, async_result.runs)
+    except Exception as _exc:
+        logger.warning("提交后派发失败（dispatcher 兜底）: %s", _exc)
 
     logger.info(
         "Recover replace_voice_missing queued: audiobook_project_id=%s chapter_id=%s overrides=%s segments=%s job_id=%s",

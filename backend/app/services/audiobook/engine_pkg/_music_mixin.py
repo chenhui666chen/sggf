@@ -247,7 +247,7 @@ class MusicMixin:
                     # 结尾淡出保底，避免章节末尾音乐突然消失
                     fade_out_ms = max(fade_out_ms, 2500)
 
-                mixed_audio = self.audio_mixer.add_background_music(
+                result_audio = self.audio_mixer.add_background_music(
                     mixed_audio,
                     bgm_bytes,
                     bgm_volume_offset=int(bgm_volume_offset),
@@ -259,8 +259,15 @@ class MusicMixin:
                     sync_with_dialogue=bool(sync_with_dialogue),
                     dialogue_volume_reduction=float(dialogue_volume_reduction or 0.0),
                 )
-                logger.info(f"✅ 已叠加配乐: {music_path.name}, 音量偏移={bgm_volume_offset:.1f}dB")
-                applied_count += 1
+                # add_background_music 内部失败/空窗时原样返回入参对象：
+                # 用对象同一性区分真实叠加与静默跳过，避免 applied 计数误导
+                if result_audio is mixed_audio:
+                    logger.warning("⚠️ 配乐叠加未生效（静默跳过）: %s @%sms", music_path.name, position_ms)
+                    skipped_count += 1
+                else:
+                    mixed_audio = result_audio
+                    applied_count += 1
+                    logger.info(f"✅ 已叠加配乐: {music_path.name}, 音量偏移={bgm_volume_offset:.1f}dB")
             except Exception as e:
                 logger.warning(f"⚠️ 叠加配乐失败 {music_path}: {e}")
                 skipped_count += 1
@@ -287,34 +294,34 @@ class MusicMixin:
         Returns:
             最终BGM音量偏移（dB）
         
-        🎯 智能调整规则：
-        1. 开场/片尾音乐：可适当提升音量 (+5dB)
-        2. 高潮情绪(tense/epic)：提升音量 (+8dB)
+        🎯 智能调整规则（增益已收窄，确保配乐不遮挡人声）：
+        1. 开场/片尾音乐：可适当提升音量 (+3dB)
+        2. 高潮情绪(tense/epic)：提升音量 (+4dB)
         3. 平静情绪(peaceful/sad)：降低音量 (-5dB)
         4. 背景音乐(underscore)：保持基础音量
-        5. 角色主题音乐(theme)：稍微提升 (+3dB)
+        5. 角色主题音乐(theme)：稍微提升 (+2dB)
         """
         # 从基础音量开始
         adjusted_volume = base_volume_db
         
         # 1. 根据音乐类型调整
         if music_type == "opening" or music_type == "ending":
-            adjusted_volume += 5  # 开场/结尾可以更响亮
-            logger.debug(f"  🎬 开场/结尾音乐: +5dB")
+            adjusted_volume += 3  # 开场/结尾可适当提升（收窄：+5 → +3）
+            logger.debug(f"  🎬 开场/结尾音乐: +3dB")
         elif music_type == "theme":
-            adjusted_volume += 3  # 主题音乐稍微突出
-            logger.debug(f"  🎭 主题音乐: +3dB")
+            adjusted_volume += 2  # 主题音乐稍微突出（收窄：+3 → +2）
+            logger.debug(f"  🎭 主题音乐: +2dB")
         
         # 2. 根据情绪调整
         if mood in ["tense", "epic"]:
-            adjusted_volume += 8  # 紧张/史诗场景，配乐加强
-            logger.debug(f"  🔥 高潮情绪({mood}): +8dB")
+            adjusted_volume += 4  # 紧张/史诗场景，配乐加强（收窄：+8 → +4）
+            logger.debug(f"  🔥 高潮情绪({mood}): +4dB")
         elif mood in ["peaceful", "sad"]:
             adjusted_volume -= 5  # 平静/悲伤场景，配乐低调
             logger.debug(f"  🌙 平静情绪({mood}): -5dB")
         elif mood in ["joyful", "romantic"]:
-            adjusted_volume += 2  # 欢快/浪漫场景，稍微提升
-            logger.debug(f"  ✨ 欢快情绪({mood}): +2dB")
+            adjusted_volume += 1  # 欢快/浪漫场景，稍微提升（收窄：+2 → +1）
+            logger.debug(f"  ✨ 欢快情绪({mood}): +1dB")
         
         # 3. 根据目标音量做相对调整
         try:
@@ -328,8 +335,8 @@ class MusicMixin:
         volume_adjust_db = 20 * math.log10(relative) if relative > 0 else -40
         adjusted_volume += volume_adjust_db
         
-        # 4. 限制在合理范围内 (-50dB 到 -10dB)
-        adjusted_volume = max(-50, min(-10, adjusted_volume))
+        # 4. 限制在合理范围内 (-50dB 到 -12dB，上限收窄保证人声领先)
+        adjusted_volume = max(-50, min(-12, adjusted_volume))
         
         logger.debug(
             f"  🎶 最终音量: {base_volume_db:.1f}dB → {adjusted_volume:.1f}dB "

@@ -7,6 +7,7 @@
 from typing import Dict, Any
 
 from app.services.prompts.workflow_runtime import STANDARD_CHAPTER_REVIEW_RUBRIC
+from app.services.prompts.narrative_quality import FAILURE_CODE_OUTPUT_SPEC
 
 
 # 题材专属评审模块配置
@@ -610,15 +611,17 @@ class GenreAdaptiveReviewPrompts:
 - 是否延续或回应了最近章节留下的结尾钩子、伏笔和未完成事项？
 - 问题：...
 """
-        
+
         if genre:
             user_prompt += f"""
 ### 7. {genre}题材专项评审 ⭐⭐⭐
 - 评价：...
 - 问题：...
 """
-        
-        user_prompt += """
+
+        user_prompt += f"""
+{FAILURE_CODE_OUTPUT_SPEC}
+
 ### 🔧 具体修改建议（按优先级排序）
 1. 【必改】...
 2. 【建议】...

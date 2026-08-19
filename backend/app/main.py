@@ -128,7 +128,19 @@ async def lifespan(app: FastAPI):
     loop = asyncio.get_running_loop()
     set_main_event_loop(loop)
     logging.info("✅ 主事件循环已初始化")
-    
+
+    # 启动自愈：清理上一进程残留的 running/pending 任务（进程内协程已随重启消亡）
+    try:
+        from app.db.base import SessionLocal
+        from app.services.stale_task_cleaner import cleanup_stale_generation_tasks
+
+        with SessionLocal() as session:
+            cleaned = cleanup_stale_generation_tasks(session)
+        if cleaned:
+            logging.warning("🧹 启动自愈：已将 %d 条残留任务标记为 failed", cleaned)
+    except Exception as exc:  # noqa: BLE001 - 清理失败不阻断启动
+        logging.error("启动自愈清理残留任务失败（不影响启动）: %s", exc)
+
     yield
     
     # 关闭时：清理资源

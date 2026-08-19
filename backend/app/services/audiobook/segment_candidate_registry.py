@@ -15,6 +15,7 @@ import copy
 import logging
 from datetime import timedelta
 from typing import Any, Dict, List, Mapping, Optional
+from uuid import uuid4
 
 from sqlalchemy.orm import Session
 
@@ -199,6 +200,16 @@ def register_segment_candidate_asset(
     if preview_type not in {"voice", "sfx", "bgm", "mix"}:
         preview_type = "voice"
 
+    # Contract 收窄后 chapter_audio_id NOT NULL（§5.27）：候选 run 同样需要
+    # 运行作用域，复用查/建 active ChapterAudio 的既有 helper
+    from app.services.audiobook.task_support import _ensure_active_chapter_audio
+
+    chapter_audio = _ensure_active_chapter_audio(
+        db,
+        audiobook_project_id=audiobook_project_id,
+        chapter_id=chapter_id,
+    )
+
     for stale_run in _list_active_candidate_runs(
         db, audiobook_project_id=audiobook_project_id, chapter_id=chapter_id
     ):
@@ -231,6 +242,11 @@ def register_segment_candidate_asset(
         audiobook_project_id=audiobook_project_id,
         chapter_id=chapter_id,
         run_type=CANDIDATE_RUN_TYPE,
+        # Contract 收窄后 celery_task_id NOT NULL + UNIQUE（§5.27）：候选为
+        # 请求内同步生成，无真实 Celery 任务，用每 run 独立 uuid 占位
+        # （与 outbox 逐 run uuid 语义一致）
+        celery_task_id=str(uuid4()),
+        chapter_audio_id=chapter_audio.id,
         status="completed",
         current_stage="candidate_ready",
         output_format=str(temp_segment_cache.get("output_format") or "") or None,

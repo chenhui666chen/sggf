@@ -812,7 +812,11 @@ class AudiobookEngineBase:
         # 紧凑 JSON 占用更多 tokens），中文 token 密度也偏高，故按 2.5 倍 + 固定余量估算，
         # 避免输出在 max_tokens 处截断（max_tokens 仅为上限，调高不会增加实际生成量）。
         estimated = int(len(payload_json or "") * 2.5) + 1500
-        return max(2000, min(QUALITY_REVISION_MAX_TOKEN_CAP, estimated))
+        if estimated > QUALITY_REVISION_MAX_TOKEN_CAP:
+            # 剧本体积较大、估算已超出常规上限：首次调用直接采用重试档预算，
+            # 避免“32768 截断 → 扩容 49152 重试”的二次 LLM 调用浪费。
+            return QUALITY_REVISION_RETRY_MAX_TOKEN_CAP
+        return max(2000, estimated)
 
     @staticmethod
     def _estimate_quality_revision_timeout_seconds(max_tokens: int) -> int:

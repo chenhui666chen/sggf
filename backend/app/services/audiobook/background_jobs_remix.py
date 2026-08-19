@@ -454,13 +454,16 @@ def perform_chapter_remix(
     write_output: Optional[Callable[[str, bytes], None]] = None,
     before_write_output: Optional[Callable[[str, bytes], bool]] = None,
     generate_subtitle_artifacts: Optional[Callable[..., Dict[str, Any]]] = None,
+    run_id: Optional[int] = None,
+    on_output_ready: Optional[Callable[[Dict[str, Any]], None]] = None,
 ) -> Dict[str, Any]:
     """执行整章重新混音（纯逻辑，依赖注入便于测试）。
 
     ``run_state_updater`` 缺省时使用 task_support 的 run 状态更新（需 db 会话闭包）；
     ``write_output`` 缺省时原子写盘；``before_write_output`` 可在写盘前确认
     章节产物仍然有效；``generate_subtitle_artifacts`` 缺省时
-    按 output_path 重建字幕。
+    按 output_path 重建字幕；``run_id`` 提供时输出落 run 级路径；
+    ``on_output_ready`` 在 run 置 completed 后回调（输出登记 + 发布，由调用方实现）。
     """
     from app.services.audiobook.background_jobs_shared import (
         generate_subtitle_artifacts as _default_subtitle_artifacts,
@@ -683,6 +686,7 @@ def perform_chapter_remix(
         chapter_number=chapter_number,
         output_format=output_format,
         audiobook_project_id=getattr(audiobook_project, "id", None),
+        run_id=run_id,
     )
     if before_write_output is not None:
         try:
@@ -765,13 +769,6 @@ def perform_chapter_remix(
     if post_subtitle_abort is not None:
         return post_subtitle_abort
 
-    chapter_audio.audio_path = output_path
-    chapter_audio.duration = duration_seconds
-    chapter_audio.file_size = len(final_audio)
-    if subtitle_artifacts.get("generated"):
-        chapter_audio.subtitle_path = subtitle_artifacts.get("subtitle_path")
-        chapter_audio.subtitle_format = subtitle_artifacts.get("subtitle_format") or "srt"
-
     checkpoint_patch = {
         "output_path": output_path,
         "segment_timings": segment_timings,
@@ -784,7 +781,26 @@ def perform_chapter_remix(
     if missing_segments:
         checkpoint_patch["missing_segments"] = missing_segments
 
+    # 终态写回必须先于 on_output_ready：发布协议谓词要求 run.status=completed，
+    # 顺序颠倒会让 publish_legacy_chapter_output 永远命中 run_not_completed
     mark_run("completed", progress=1.0, checkpoint_patch=checkpoint_patch)
+
+    # §1.5/R8：不再直写 ChapterAudio 镜像列——输出登记（staged）与发布由
+    # on_output_ready 回调经发布事务完成（镜像列只由发布事务改写）
+    if on_output_ready is not None:
+        try:
+            on_output_ready(
+                {
+                    "output_path": output_path,
+                    "duration": duration_seconds,
+                    "file_size": len(final_audio),
+                    "subtitle_artifacts": subtitle_artifacts,
+                    "segment_timings": segment_timings,
+                    "missing_segments": missing_segments,
+                }
+            )
+        except Exception as exc:
+            logger.error("整章混音输出登记/发布失败: %s", exc)
 
     logger.info(
         "✅ 整章重新混音完成: chapter_id=%s duration=%.1fs segments=%d missing=%d",
@@ -890,16 +906,34 @@ def run_chapter_remix_background(
 
         audio_fx: Optional[Dict[str, Any]] = None
         try:
-            project = (
-                db.query(Project)
-                .filter(Project.id == audiobook_project.project_id)
-                .first()
+            from app.services.audiobook.project_audio_config import (
+                parse_engine_config_snapshot,
             )
-            runtime_config = resolve_project_audio_runtime_config(
-                project=project,
-                tts_model=_DEFAULT_REMIX_TTS_MODEL,
-                base_voice_mapping=getattr(audiobook_project, "voice_mapping", None) or {},
+            from app.services.audiobook.project_audio_runtime import (
+                resolve_from_snapshot,
             )
+
+            # §1.5：从批次快照解析运行时配置（冻结事实，不读实时可变配置）
+            batch_snapshot = parse_engine_config_snapshot(
+                getattr(audiobook_project, "engine_config_snapshot", None)
+            )
+            if batch_snapshot:
+                runtime_config = resolve_from_snapshot(
+                    batch_snapshot,
+                    tts_model=_DEFAULT_REMIX_TTS_MODEL,
+                )
+            else:
+                # 无批次快照（legacy_unverified 等）：回退实时解析（读兼容）
+                project = (
+                    db.query(Project)
+                    .filter(Project.id == audiobook_project.project_id)
+                    .first()
+                )
+                runtime_config = resolve_project_audio_runtime_config(
+                    project=project,
+                    tts_model=_DEFAULT_REMIX_TTS_MODEL,
+                    base_voice_mapping=getattr(audiobook_project, "voice_mapping", None) or {},
+                )
             audio_fx = getattr(runtime_config, "audio_fx", None) or None
         except Exception as exc:
             logger.warning("整章混音解析项目音效配置失败: %s", exc)
@@ -953,6 +987,75 @@ def run_chapter_remix_background(
                 **kwargs,
             )
 
+        def on_output_ready(output_info: Dict[str, Any]) -> None:
+            """run 置 completed 后登记 staged 输出并执行 legacy 发布协议（§1.5/R8）。
+
+            与 run 终态写回同事务：upsert ChapterAudioOutput（staged）→
+            publish_legacy_chapter_output（CAS 镜像列 + supersede 旧输出）。
+            """
+            if run_id is None:
+                return
+            from app.services.audiobook.chapter_output_publish import (
+                publish_legacy_chapter_output,
+                upsert_staged_chapter_output,
+            )
+
+            try:
+                # 补全 run 运行作用域（历史/直建 run 可能缺 chapter_audio_id）
+                current_run = (
+                    db.query(ChapterAudioRun)
+                    .filter(ChapterAudioRun.id == run_id)
+                    .first()
+                )
+                if current_run is not None and current_run.chapter_audio_id is None:
+                    current_run.chapter_audio_id = chapter_audio.id
+                    db.flush()
+
+                # remix 端点预创建 run 时不推进 desired_run_id（仅派发流程推进），
+                # 而发布 CAS 要求 desired_run_id == run_id；产物就绪即推进。
+                # 单调守卫：desired 已指向更新（id 更大）的 run 时不抢占，
+                # 避免晚完成的旧 remix 覆盖新任务的发布权
+                if chapter_audio.desired_run_id != run_id and (
+                    chapter_audio.desired_run_id is None
+                    or chapter_audio.desired_run_id < run_id
+                ):
+                    chapter_audio.desired_run_id = run_id
+                    db.flush()
+
+                subtitle_artifacts = output_info.get("subtitle_artifacts") or {}
+                subtitle_path = (
+                    str(subtitle_artifacts.get("subtitle_path") or "").strip()
+                    if subtitle_artifacts.get("generated")
+                    else None
+                )
+                upsert_staged_chapter_output(
+                    db,
+                    run_id=run_id,
+                    chapter_audio_id=chapter_audio.id,
+                    audiobook_project_id=audiobook_project_id,
+                    chapter_id=chapter_id,
+                    audio_path=output_info.get("output_path") or "",
+                    duration=output_info.get("duration"),
+                    file_size=output_info.get("file_size"),
+                    subtitle_path=subtitle_path,
+                    subtitle_format=(
+                        str(subtitle_artifacts.get("subtitle_format") or "srt")
+                        if subtitle_path
+                        else None
+                    ),
+                )
+                publish_result = publish_legacy_chapter_output(
+                    db,
+                    run_id=run_id,
+                    chapter_audio_id=chapter_audio.id,
+                    render_status="completed",
+                )
+                logger.info(
+                    "整章混音发布结果: %s", publish_result,
+                )
+            except Exception as exc:
+                logger.error("整章混音输出登记/发布异常: %s", exc)
+
         result = perform_chapter_remix(
             chapter_audio=chapter_audio,
             chapter_number=chapter_number,
@@ -964,6 +1067,8 @@ def run_chapter_remix_background(
             audio_fx=audio_fx,
             run_state_updater=run_state_updater,
             before_write_output=lambda _path, _data: chapter_audio_is_active(),
+            run_id=run_id,
+            on_output_ready=on_output_ready,
         )
         if result.get("error") == "chapter_audio_not_found":
             # 章节可能在写盘竞态中被软删除；不要把会话中残留的对象变更刷回数据库。

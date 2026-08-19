@@ -132,28 +132,59 @@ def get_genre_chapter_plan_guide(genre: str) -> str:
     return _get_genre_chapter_plan_guide(genre)
 
 
-def get_climax_instruction(chapter_number: int) -> str:
+def get_climax_instruction(chapter_number: int, chapter_outline: str = "") -> str:
     """
-    获取高潮章节指示
-    
+    获取高潮章节指示（大纲节奏优先）
+
+    优先依据本章细纲自带的节奏标注（章节定位 / 爽点强度 / 情节作用）生成指示，
+    避免与大纲层精心设计的爽点节奏互相打架；
+    仅当细纲缺失或无任何节奏标注时，才回退到"约每5章小高潮、每25章大高潮"
+    的经验节奏，并明确声明以大纲为准。
+
     Args:
         chapter_number: 章节编号
-    
+        chapter_outline: 本章细纲文本（来自情节大纲的当前章节块）
+
     Returns:
-        高潮章节指示字符串，如非高潮章返回空字符串
+        高潮章节指示字符串，非高潮章返回空字符串
     """
+    outline_text = (chapter_outline or "").strip()
+
+    if outline_text:
+        # 大纲驱动：按细纲中的节奏标注判断本章定位
+        major_markers = ("大高潮", "爆爽", "卷末收束", "完结收束", "终局对决")
+        minor_markers = ("小高潮", "中爽", "小爽", "爆点前置", "爆点")
+
+        if any(marker in outline_text for marker in major_markers):
+            return f"""
+⚠️ 【大高潮章节】第{chapter_number}章按大纲节奏为爆点章，需要：
+- 设计一个让读者拍案叫绝的大爽点
+- 本阶段主要矛盾要有阶段性解决
+- 为后续剧情埋下新的悬念"""
+        if any(marker in outline_text for marker in minor_markers):
+            return f"""
+⚠️ 【小高潮章节】第{chapter_number}章按大纲节奏需要设计一个明确的爽点：
+- 可以是：打脸嘲讽者/突破升级/获得宝物/反转翻盘/装逼成功
+- 爽点类型以细纲中标注的爽点类型为准"""
+
+        # 细纲存在但无节奏标注：不注入硬性节奏指令，交由规划器按大纲自行判断
+        return ""
+
+    # 回退：无细纲时的经验节奏（若与大纲冲突，以大纲为准）
     is_major_climax = chapter_number % 25 == 0   # 每25章一个大高潮
     is_climax_chapter = chapter_number % 5 == 0  # 每5章一个小高潮
-    
+
     if is_major_climax:
         return f"""
-⚠️ 【卷末大高潮章节】第{chapter_number}章是本卷结尾，需要：
+⚠️ 【卷末大高潮章节】第{chapter_number}章按经验节奏为本卷结尾，需要：
 - 设计一个让读者拍案叫绝的大爽点
 - 本卷主要矛盾要有阶段性解决
-- 为下一卷埋下新的悬念"""
+- 为下一卷埋下新的悬念
+- 此为无细纲时的经验节奏，若与大纲节奏冲突，以大纲为准"""
     elif is_climax_chapter:
         return f"""
-⚠️ 【小高潮章节】第{chapter_number}章需要设计一个明确的爽点：
-- 可以是：打脸嘲讽者/突破升级/获得宝物/反转翻盘/装逼成功"""
-    
+⚠️ 【小高潮章节】第{chapter_number}章按经验节奏需要设计一个明确的爽点：
+- 可以是：打脸嘲讽者/突破升级/获得宝物/反转翻盘/装逼成功
+- 此为无细纲时的经验节奏，若与大纲节奏冲突，以大纲为准"""
+
     return ""

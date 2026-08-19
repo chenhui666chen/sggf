@@ -118,6 +118,11 @@ def _apply_script_stage_project_audio_config(
         engine=engine,
         runtime_config=runtime_config,
     )
+    logger.info(
+        "🎬 [剧本阶段] 音频引擎配置: audio_engine_mode=%s, seed_audio_model=%s",
+        runtime_config.audio_engine_mode,
+        runtime_config.seed_audio_model,
+    )
     effective_voice_mapping = runtime_config.voice_mapping
 
     for item in runtime_config.character_items:
@@ -485,28 +490,9 @@ async def generate_audiobook_scripts_background(
                 )
                 audiobook_project.completed_chapters += 1
 
-                try:
-                    voice_mapping_to_save = engine.voice_manager.export_to_db()
-                    if voice_mapping_to_save:
-                        existing_mapping = audiobook_project.voice_mapping or {}
-                        if isinstance(existing_mapping, str):
-                            try:
-                                existing_mapping = json.loads(existing_mapping)
-                            except (json.JSONDecodeError, TypeError):
-                                existing_mapping = {}
-                        if not isinstance(existing_mapping, dict):
-                            existing_mapping = {}
-
-                        audiobook_project.voice_mapping = {
-                            **existing_mapping,
-                            **voice_mapping_to_save,
-                        }
-                        logger.info(
-                            "💾 已保存音色分配到数据库: %s 个角色",
-                            len(voice_mapping_to_save),
-                        )
-                except Exception as save_err:
-                    logger.warning("⚠️ 保存音色分配到数据库失败: %s", save_err)
+                logger.info(
+                    "已分配音色（通过引擎分支持久化链路写入，不再写回 voice_mapping）"
+                )
 
                 db.commit()
 

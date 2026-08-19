@@ -899,6 +899,7 @@ class ChapterAudioRunRepository:
         chapter_id: int,
         run_type: str,
         celery_task_id: Optional[str] = None,
+        chapter_audio_id: Optional[int] = None,
         status: str = "pending",
         current_stage: Optional[str] = None,
         progress: float = 0.0,
@@ -924,6 +925,7 @@ class ChapterAudioRunRepository:
             chapter_id=chapter_id,
             run_type=run_type,
             celery_task_id=celery_task_id,
+            chapter_audio_id=chapter_audio_id,
             status=status,
             current_stage=current_stage,
             progress=progress,
@@ -957,6 +959,7 @@ class ChapterAudioRunRepository:
         chapter_ids: Iterable[int],
         run_type: str,
         celery_task_id: Optional[str] = None,
+        chapter_audio_ids: Optional[Dict[int, int]] = None,
         status: str = "pending",
         current_stage: Optional[str] = None,
         tts_model: Optional[str] = None,
@@ -965,12 +968,16 @@ class ChapterAudioRunRepository:
         narration_style_prompt: Optional[str] = None,
         resumable: bool = True,
     ) -> List[ChapterAudioRun]:
+        # chapter_audio_ids：chapter_id → chapter_audio_id（Contract 收窄后
+        # chapter_audio_id NOT NULL，创建 run 时必须携带运行作用域）
+        chapter_audio_ids = chapter_audio_ids or {}
         runs = [
             ChapterAudioRun(
                 audiobook_project_id=audiobook_project_id,
                 chapter_id=chapter_id,
                 run_type=run_type,
                 celery_task_id=celery_task_id,
+                chapter_audio_id=chapter_audio_ids.get(chapter_id),
                 status=status,
                 current_stage=current_stage,
                 progress=0.0,
@@ -1199,6 +1206,21 @@ class AudiobookTaskRepository:
 
     @staticmethod
     def get_task_for_user(db: Session, celery_task_id: str, user_id: int) -> Optional[AudiobookTask]:
+        # R13/P1-a：兼容 ``task:{AudiobookTask.id}`` 命名空间（job_id 语义）与
+        # 既有 celery_task_id（兼容期分别解析，验收 68）
+        normalized = str(celery_task_id or "").strip()
+        if normalized.startswith("task:") and normalized[5:].isdigit():
+            return (
+                db.query(AudiobookTask)
+                .join(AudiobookProject, AudiobookProject.id == AudiobookTask.audiobook_project_id)
+                .join(Project, Project.id == AudiobookProject.project_id)
+                .filter(
+                    AudiobookTask.id == int(normalized[5:]),
+                    Project.user_id == user_id,
+                    AudiobookProject.deleted_at.is_(None),
+                )
+                .first()
+            )
         return (
             db.query(AudiobookTask)
             .join(AudiobookProject, AudiobookProject.id == AudiobookTask.audiobook_project_id)

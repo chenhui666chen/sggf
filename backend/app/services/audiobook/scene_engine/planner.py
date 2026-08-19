@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from typing import Any, List, Sequence, Tuple
+from typing import Any, List, Mapping, Sequence, Tuple
 
 from app.services.audiobook.duration_estimator import estimate_narration_duration_seconds
 
@@ -14,6 +14,32 @@ from .quality_policy import (
     DEFAULT_SCENE_AUDIO_QUALITY_POLICY,
     SceneAudioQualityPolicy,
 )
+from .scene_local_context import build_scene_local_description
+
+
+# 叙事换场词：旁白/独白文本开头出现时间或空间跳转时构成语义边界。
+# 只保留强信号词，避免误伤连续场景描述（与 instruct_scene 变化互补）。
+_NARRATIVE_TRANSITION_CUES = (
+    "第二天",
+    "第三天",
+    "次日",
+    "翌日",
+    "数日后",
+    "三天后",
+    "一周后",
+    "几天后",
+    "转眼",
+    "与此同时",
+    "另一边",
+    "同一时刻",
+    "当晚",
+    "当夜",
+    "片刻之后",
+    "不多时",
+    "镜头一转",
+)
+
+_TRANSITION_PREFIX_CHARS = 12
 
 
 class ScenePlanner:
@@ -26,15 +52,26 @@ class ScenePlanner:
         target_max_duration_s: float = 75.0,
         soft_max_duration_s: float = 90.0,
         hard_max_duration_s: float = 105.0,
+        early_min_duration_s: float = 20.0,
+        boundary_lookahead: int = 3,
         prompt_max_chars: int = 2800,
         quality_policy: SceneAudioQualityPolicy = DEFAULT_SCENE_AUDIO_QUALITY_POLICY,
     ) -> None:
         if not (0 < target_min_duration_s <= target_max_duration_s <= soft_max_duration_s <= hard_max_duration_s):
             raise ValueError("scene duration limits must be positive and ordered")
+        if early_min_duration_s <= 0:
+            raise ValueError("early_min_duration_s must be positive")
+        if boundary_lookahead < 0:
+            raise ValueError("boundary_lookahead must be non-negative")
         self.target_min_duration_s = target_min_duration_s
         self.target_max_duration_s = target_max_duration_s
         self.soft_max_duration_s = soft_max_duration_s
         self.hard_max_duration_s = hard_max_duration_s
+        # 语义边界优先：到达边界的场景允许早于 target_min 收场（下限 early_min，
+        # 钳制不超过 target_min 以保持原边界规则语义），超过 target_max 时
+        # 允许在软上限内延展到最近的语义边界再切。
+        self.early_min_duration_s = min(early_min_duration_s, target_min_duration_s)
+        self.boundary_lookahead = boundary_lookahead
         self.prompt_max_chars = int(prompt_max_chars)
         self.quality_policy_hash = quality_policy.fingerprint()
         self.compiler = ScenePromptCompiler(max_prompt_chars=prompt_max_chars)
@@ -45,15 +82,24 @@ class ScenePlanner:
         *,
         voice_profiles: Sequence[SceneVoiceProfile] = (),
         scene_description: str = "",
+        chapter_facts: Mapping[str, Any] | None = None,
+        director_style: str = "",
     ) -> Tuple[SceneRenderPlan, ...]:
         if not segments:
             return ()
 
+        # 分组估算使用章节级上下文；逐场景局部描述在 _build_plan 内构造（§7.1）。
+        chapter_context = build_scene_local_description(
+            segments,
+            direction_context=scene_description,
+            chapter_facts=chapter_facts,
+            director_style=director_style,
+        )
         grouped_indices: List[Tuple[int, ...]] = []
         current: List[int] = []
         base_prompt_estimate = self._base_prompt_char_estimate(
             voice_profiles,
-            scene_description,
+            chapter_context,
         )
         current_prompt_estimate = base_prompt_estimate
         for index in range(len(segments)):
@@ -67,7 +113,7 @@ class ScenePlanner:
                 current,
                 segments,
                 voice_profiles=voice_profiles,
-                scene_description=scene_description,
+                scene_description=chapter_context,
                 candidate_prompt_estimate=candidate_prompt_estimate,
             ):
                 grouped_indices.append(tuple(current))
@@ -88,7 +134,9 @@ class ScenePlanner:
                 indices=indices,
                 segments=segments,
                 voice_profiles=voice_profiles,
-                scene_description=scene_description,
+                direction_context=scene_description,
+                chapter_facts=chapter_facts,
+                director_style=director_style,
             )
             for scene_number, indices in enumerate(grouped_indices, start=1)
         ]
@@ -101,6 +149,8 @@ class ScenePlanner:
         *,
         voice_profiles: Sequence[SceneVoiceProfile] = (),
         scene_description: str = "",
+        chapter_facts: Mapping[str, Any] | None = None,
+        director_style: str = "",
     ) -> SceneRenderPlan:
         """Recompile one existing scene topology after references are materialized."""
         return self._build_plan(
@@ -108,7 +158,9 @@ class ScenePlanner:
             indices=plan.source_segment_indices,
             segments=segments,
             voice_profiles=voice_profiles,
-            scene_description=scene_description,
+            direction_context=scene_description,
+            chapter_facts=chapter_facts,
+            director_style=director_style,
         )
 
     def split_plan_once(
@@ -118,6 +170,8 @@ class ScenePlanner:
         *,
         voice_profiles: Sequence[SceneVoiceProfile] = (),
         scene_description: str = "",
+        chapter_facts: Mapping[str, Any] | None = None,
+        director_style: str = "",
     ) -> Tuple[SceneRenderPlan, ...]:
         """Split a failed multi-segment scene once at the best complete boundary."""
         indices = tuple(plan.source_segment_indices)
@@ -153,7 +207,9 @@ class ScenePlanner:
                 indices=part_indices,
                 segments=segments,
                 voice_profiles=voice_profiles,
-                scene_description=scene_description,
+                direction_context=scene_description,
+                chapter_facts=chapter_facts,
+                director_style=director_style,
             )
             for part_number, part_indices in enumerate(parts, start=1)
         )
@@ -178,9 +234,15 @@ class ScenePlanner:
             candidate_duration > self.target_max_duration_s
             and current_duration >= self.target_min_duration_s
         ):
+            if self._has_semantic_boundary(current, candidate[-1], segments):
+                return True
+            # 语义边界优先：软上限内可到达最近边界时延展到边界再切，
+            # 避免把连续场景按纯时长切散；找不到可达边界则按时长兜底切分。
+            if self._reachable_boundary_fits(candidate, segments):
+                return False
             return True
         if (
-            current_duration >= self.target_min_duration_s
+            current_duration >= self.early_min_duration_s
             and self._has_semantic_boundary(current, candidate[-1], segments)
         ):
             return True
@@ -242,9 +304,17 @@ class ScenePlanner:
             getattr(segment, "instruct_emotion", ""),
             getattr(segment, "emotion", ""),
         )
-        sound_effects = getattr(segment, "sound_effects", ()) or ()
-        effect_chars = sum(len(str(effect)) for effect in sound_effects)
-        music_chars = len(str(getattr(segment, "music_cue", "") or ""))
+        # §9.5：字符估算复用实际事件渲染 helper，不使用 str(dataclass)。
+        effect_chars = 0
+        for effect in list(getattr(segment, "sound_effects", None) or []):
+            effect_event = ScenePromptCompiler._sound_effect_event(effect, related_text=None)
+            effect_chars += len(str(effect_event.acoustic or ""))
+        music_cue = getattr(segment, "music_cue", None)
+        music_chars = (
+            len(ScenePromptCompiler._describe_music_cue(music_cue))
+            if music_cue is not None
+            else 0
+        )
         content_chars = sum(len(str(value or "")) for value in text_fields)
         return 120 + (content_chars + effect_chars + music_chars) * 2
 
@@ -266,12 +336,46 @@ class ScenePlanner:
         if cls._music_signature(previous) != cls._music_signature(following):
             return True
 
+        # 旁白/独白开头的换场词（时间/空间跳转）构成确定性语义边界，
+        # 覆盖 instruct_scene 未标注换场的情况。
+        if cls._has_narrative_transition_cue(following):
+            return True
+
         following_speaker = cls._speaker_name(following)
         current_speakers = {cls._speaker_name(segments[index]) for index in current}
         return (
             following_speaker not in current_speakers
             and cls._emotion_signature(previous) != cls._emotion_signature(following)
         )
+
+    @staticmethod
+    def _has_narrative_transition_cue(segment: Any) -> bool:
+        segment_type = str(getattr(segment, "type", "") or "").strip().casefold()
+        if segment_type not in {"narration", "monologue"}:
+            return False
+        text = str(getattr(segment, "text", "") or "").strip()
+        if not text:
+            return False
+        prefix = text[:_TRANSITION_PREFIX_CHARS]
+        return any(cue in prefix for cue in _NARRATIVE_TRANSITION_CUES)
+
+    def _reachable_boundary_fits(
+        self,
+        candidate: Sequence[int],
+        segments: Sequence[Any],
+    ) -> bool:
+        """candidate 之后 lookahead 窗口内最近的语义边界能否在软上限内到达。"""
+        last_index = candidate[-1]
+        for probe in range(
+            last_index + 1,
+            min(last_index + 1 + self.boundary_lookahead, len(segments)),
+        ):
+            if not self._has_semantic_boundary((probe - 1,), probe, segments):
+                continue
+            extended = tuple(candidate) + tuple(range(last_index + 1, probe))
+            # 最近边界都放不下时，更远的边界只会更长，直接放弃延展
+            return self._estimate_duration(extended, segments) <= self.soft_max_duration_s
+        return False
 
     @staticmethod
     def _normalized_field(segment: Any, field: str) -> str:
@@ -304,8 +408,17 @@ class ScenePlanner:
         indices: Sequence[int],
         segments: Sequence[Any],
         voice_profiles: Sequence[SceneVoiceProfile],
-        scene_description: str,
+        direction_context: str = "",
+        chapter_facts: Mapping[str, Any] | None = None,
+        director_style: str = "",
     ) -> SceneRenderPlan:
+        # §7.1：每场景按自身 source segments 构造局部描述，不把整章摘要原样下发。
+        scene_description = build_scene_local_description(
+            [segments[index] for index in indices],
+            direction_context=direction_context,
+            chapter_facts=chapter_facts,
+            director_style=director_style,
+        )
         compiled = self._compile_indices(
             indices,
             segments,

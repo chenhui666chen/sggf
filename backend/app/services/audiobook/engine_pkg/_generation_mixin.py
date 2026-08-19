@@ -113,46 +113,67 @@ class GenerationMixin:
             auto_revision: Dict[str, Any] = {"applied": False}
             # ============ 阶段1：制定改编策略 ============
             self.task_tracker.start_stage(task_id, StageType.STRATEGY)
-            logger.info("🎭 [1/6] AudioDirector制定改编策略...")
-            
-            # 📡 WebSocket推送：策略阶段开始
-            if WEBSOCKET_AVAILABLE and audiobook_project_id:
-                await ws_manager.send_audiobook_progress(
-                    audiobook_project_id=audiobook_project_id,
-                    chapter_id=chapter_id,
-                    stage='strategy',
-                    progress=0,
-                    message='正在制定改编策略...'
+            # 引擎分流（GUIDE §2.4）：seed_scene 跳过 AudioDirector 策略与
+            # 音效/配乐密度微调，直接进入场景导演链路；legacy_stems 保持旧策略
+            is_seed_scene = str(getattr(self, "_audio_engine_mode", "legacy_stems")) == "seed_scene"
+            strategy: Optional[Any] = None
+            if is_seed_scene:
+                logger.info("🎭 [1/6] seed_scene 跳过 AudioDirector 策略，场景导演链路接管...")
+                self.task_tracker.complete_stage(task_id, StageType.STRATEGY, metrics={
+                    "engine_mode": "seed_scene",
+                    "strategy_skipped": True
+                })
+                # 📡 WebSocket推送：策略阶段跳过
+                if WEBSOCKET_AVAILABLE and audiobook_project_id:
+                    await ws_manager.send_audiobook_progress(
+                        audiobook_project_id=audiobook_project_id,
+                        chapter_id=chapter_id,
+                        stage='strategy',
+                        progress=100,
+                        message='seed_scene 跳过旧策略（场景导演接管）',
+                        stage_metrics={'engine_mode': 'seed_scene', 'strategy_skipped': True}
+                    )
+            else:
+                logger.info("🎭 [1/6] AudioDirector制定改编策略...")
+                
+                # 📡 WebSocket推送：策略阶段开始
+                if WEBSOCKET_AVAILABLE and audiobook_project_id:
+                    await ws_manager.send_audiobook_progress(
+                        audiobook_project_id=audiobook_project_id,
+                        chapter_id=chapter_id,
+                        stage='strategy',
+                        progress=0,
+                        message='正在制定改编策略...'
+                    )
+                
+                strategy = self.audio_director.formulate_strategy(
+                    novel_genre=novel_genre,
+                    novel_theme=novel_theme,
+                    target_audience="通用听众"
                 )
-            
-            strategy = self.audio_director.formulate_strategy(
-                novel_genre=novel_genre,
-                novel_theme=novel_theme,
-                target_audience="通用听众"
-            )
 
-            # 应用项目级音效/BGM 配置对策略进行微调（如控制音效/配乐密度）
-            self._apply_audio_fx_to_strategy(strategy)
+                # 应用项目级音效/BGM 配置对策略进行微调（如控制音效/配乐密度）
+                self._apply_audio_fx_to_strategy(strategy)
 
-            # 将导演策略传递给剧本改编Agent，启用语义完整性控制
-            self.script_adapter.strategy = strategy
-            
-            self.task_tracker.complete_stage(task_id, StageType.STRATEGY, metrics={
-                "style": strategy.style.value,
-                "sound_density": strategy.sound_effect_density
-            })
-            logger.info(f"   ✅ 策略: {strategy.style.value}, 音效密度: {strategy.sound_effect_density}")
-            
-            # 📡 WebSocket推送：策略阶段完成
-            if WEBSOCKET_AVAILABLE and audiobook_project_id:
-                await ws_manager.send_audiobook_progress(
-                    audiobook_project_id=audiobook_project_id,
-                    chapter_id=chapter_id,
-                    stage='strategy',
-                    progress=100,
-                    message=f'策略完成: {strategy.style.value}',
-                    stage_metrics={'style': strategy.style.value, 'sound_density': strategy.sound_effect_density}
-                )
+                # 将导演策略传递给剧本改编Agent，启用语义完整性控制
+                self.script_adapter.strategy = strategy
+                
+                self.task_tracker.complete_stage(task_id, StageType.STRATEGY, metrics={
+                    "style": strategy.style.value,
+                    "sound_density": strategy.sound_effect_density
+                })
+                logger.info(f"   ✅ 策略: {strategy.style.value}, 音效密度: {strategy.sound_effect_density}")
+                
+                # 📡 WebSocket推送：策略阶段完成
+                if WEBSOCKET_AVAILABLE and audiobook_project_id:
+                    await ws_manager.send_audiobook_progress(
+                        audiobook_project_id=audiobook_project_id,
+                        chapter_id=chapter_id,
+                        stage='strategy',
+                        progress=100,
+                        message=f'策略完成: {strategy.style.value}',
+                        stage_metrics={'style': strategy.style.value, 'sound_density': strategy.sound_effect_density}
+                    )
             
             # ============ 阶段2：剧本改编 ============
             self.task_tracker.start_stage(task_id, StageType.SCRIPT_ADAPTATION)
@@ -506,6 +527,10 @@ class GenerationMixin:
                 tts_progress_callback=tts_progress_callback,
                 audiobook_project_id=audiobook_project_id,
                 pause_check=pause_check,
+                chapter_summary=chapter_summary,
+                summary_data=summary_data,
+                character_profiles=character_profiles,
+                director_style=strategy.style.value if strategy else "",
             )
             if scene_chapter_result is not None:
                 scene_chapter_result["quality_report_detail"] = self._quality_report_to_payload(

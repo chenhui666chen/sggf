@@ -90,6 +90,244 @@ class StoryExpansionCoordinatorBase:
     STORY_EXPANSION_MEDIUM_RISK_QUALITY_FLOOR = 9.0
     STORY_EXPANSION_HIGH_RISK_QUALITY_FLOOR = 9.5
     STORY_EXPANSION_OUTPUT_HEADROOM_RATIO = 0.85
+    # 扩展链路上下文预算（字符级）。
+    # 协调器选型已要求 1M 上下文档位模型（STORY_EXPANSION_MIN_CONTEXT_TOKENS），
+    # 旧的 2500/5000 字符粗截断会把长篇大纲后半段与完整世界观挡在决策视野外，
+    # 导致新增角色与后期剧情错位。以下预算按 1M 窗口的保守占用设计。
+    CONTEXT_BUDGET_WORLD = 8000
+    CONTEXT_BUDGET_OUTLINE = 20000
+    CONTEXT_BUDGET_CHARACTERS = 12000
+    CONTEXT_BUDGET_NEW_CHARACTER_CARDS = 6000
+    # delta 单批生成章数上限：超过该值时拆批调用，避免单次 JSON 负载过大稀释单章字段质量
+    # （与 volume_detail 的分段生成保护对齐）
+    DELTA_CHAPTER_BATCH_MAX_PER_CALL = 4
+    # 人物-情节对齐闸门：评分低于该值或问题数达到该值时触发一次性自动修复
+    ALIGNMENT_GATE_SCORE_THRESHOLD = 50
+    ALIGNMENT_GATE_ISSUE_COUNT_THRESHOLD = 3
+
+    def _run_character_plot_alignment_validation(
+        self,
+        characters: str,
+        plot_outline: str,
+        world_setting: str,
+    ) -> Optional[Dict[str, Any]]:
+        """对新协调结果执行 LLM 级人物-情节对齐验证（非阻塞）。
+
+        规则级 evaluate_story_coordination 只能确认"人物名是否出现在大纲中"，
+        无法发现人物在场但对情节无推动、角色冗余、关系设定未落地等深层错位；
+        此处把 legacy 路径的 LLM 验证器接入新协调路径。
+        """
+        try:
+            from app.services.agents.character_plot_validator import CharacterPlotValidator
+
+            # 优先复用扩展运行时已验证可用的 planner 模型，
+            # 避免 default 任务模型未配置 Key 时验证器静默失效
+            runtime_model = (self._story_expansion_runtime_model_plan or {}).get("planner_model")
+            validation = CharacterPlotValidator(
+                model=runtime_model,
+            ).validate_character_plot_alignment(
+                characters=characters or "",
+                plot_outline=plot_outline or "",
+                world_setting=world_setting or "",
+            )
+            if validation.get("success"):
+                return validation
+            logger.warning(
+                "人物-情节对齐验证未成功: %s",
+                validation.get("error"),
+            )
+            return None
+        except Exception as exc:
+            logger.warning("人物-情节对齐验证失败（不影响扩展结果）: %s", exc)
+            return None
+
+    @staticmethod
+    def _merge_character_plot_alignment_into_result(
+        result: Dict[str, Any],
+        alignment: Optional[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        """把 LLM 对齐验证结论合并进扩展结果（追加告警，不阻断流程）。"""
+        if not isinstance(result, dict) or not alignment or not alignment.get("success"):
+            return result
+
+        compact = {
+            "score": alignment.get("score") or 0,
+            "redundant_characters": list(alignment.get("redundant_characters") or []),
+            "missing_characters": list(alignment.get("missing_characters") or []),
+            "relationship_issues": list(alignment.get("relationship_issues") or []),
+            "suggestions": list(alignment.get("suggestions") or [])[:5],
+        }
+        result["character_plot_alignment"] = compact
+
+        notes: List[str] = []
+        score = int(compact["score"] or 0)
+        if score and score < 60:
+            notes.append(f"人物-情节对齐评分 {score}/100 偏低")
+        redundant = [str(item).strip() for item in compact["redundant_characters"][:3] if str(item).strip()]
+        missing = [str(item).strip() for item in compact["missing_characters"][:3] if str(item).strip()]
+        issues = [str(item).strip() for item in compact["relationship_issues"][:2] if str(item).strip()]
+        if redundant:
+            notes.append("疑似冗余人物：" + "；".join(redundant))
+        if missing:
+            notes.append("疑似缺失人物：" + "；".join(missing))
+        if issues:
+            notes.append("关系问题：" + "；".join(issues))
+
+        if notes:
+            warning_text = "【人物-情节对齐】" + "；".join(notes)
+            warnings = list(result.get("alignment_warnings") or [])
+            warnings.append(warning_text)
+            result["alignment_warnings"] = warnings
+            summary = str(result.get("coordination_summary") or "").strip()
+            result["coordination_summary"] = f"{summary} {warning_text}".strip() if summary else warning_text
+        return result
+
+    @classmethod
+    def _alignment_gate_should_retry(cls, alignment: Optional[Dict[str, Any]]) -> bool:
+        """判断对齐验证结果是否触发一次性闸门修复（评分过低或问题项过多）。"""
+        if not isinstance(alignment, dict) or not alignment.get("success"):
+            return False
+        try:
+            score = int(alignment.get("score") or 0)
+        except (TypeError, ValueError):
+            score = 0
+        issue_count = (
+            len(alignment.get("redundant_characters") or [])
+            + len(alignment.get("missing_characters") or [])
+            + len(alignment.get("relationship_issues") or [])
+        )
+        return (
+            score < cls.ALIGNMENT_GATE_SCORE_THRESHOLD
+            or issue_count >= cls.ALIGNMENT_GATE_ISSUE_COUNT_THRESHOLD
+        )
+
+    @staticmethod
+    def _format_alignment_issue_brief(alignment: Dict[str, Any]) -> str:
+        """把首轮对齐问题压缩为修复指令可用的简报。"""
+        def _clean(items: Any) -> List[str]:
+            return [str(x).strip() for x in (items or []) if str(x).strip()]
+
+        try:
+            score = int(alignment.get("score") or 0)
+        except (TypeError, ValueError):
+            score = 0
+        parts = [f"对齐评分：{score}/100"]
+        redundant = _clean(alignment.get("redundant_characters"))
+        missing = _clean(alignment.get("missing_characters"))
+        issues = _clean(alignment.get("relationship_issues"))
+        if redundant:
+            parts.append("冗余人物（在场但无情节推动）：" + "；".join(redundant[:5]))
+        if missing:
+            parts.append("缺失人物（剧情需要但无人承担）：" + "；".join(missing[:5]))
+        if issues:
+            parts.append("关系合理性问题：" + "；".join(issues[:5]))
+        return "\n".join(parts)
+
+    def _apply_alignment_gate(
+        self,
+        result: Dict[str, Any],
+        alignment: Optional[Dict[str, Any]],
+        *,
+        characters: str,
+        world_setting: str,
+    ) -> Dict[str, Any]:
+        """对齐闸门：低分/多问题时触发一次性增量修复，修复后复验。
+
+        语义：
+        - 首验通过 → alignment_gate_status = "passed"，零额外调用
+        - 触发修复 → 修复器先分类问题层级：
+          - 注记级问题 → 生成增量补丁（只增不改，保持 delta 锁定语义）→ 应用 → 复验
+            - 复验通过 → "repaired"
+            - 复验仍不通过 → "failed_after_retry"（放行但显著标记）
+          - 情节级问题（跨多章行动线/渐进铺垫，注记补丁无法落地）→ 不浪费修复+复验调用，
+            记为 "deferred"，问题清单写入 alignment_structural_debt，
+            由下一轮扩展的章节生成 prompt 承接（跨轮修复）
+        - 验证器本身不可用（无 Key/异常）→ 不设状态，维持非阻塞兜底
+        """
+        if not isinstance(alignment, dict) or not alignment.get("success"):
+            return self._merge_character_plot_alignment_into_result(result, alignment)
+
+        result = self._merge_character_plot_alignment_into_result(result, alignment)
+        # 本轮验证可用即重置结构债（后续情节级问题会重新写入；
+        # 显式空值让调用方以最新状态覆盖存储，避免旧债无法清除）
+        result["alignment_structural_debt"] = ""
+
+        if not self._alignment_gate_should_retry(alignment):
+            result["alignment_gate_status"] = "passed"
+            return result
+
+        issue_brief = self._format_alignment_issue_brief(alignment)
+        patch_applied: Dict[str, int] = {"cards": 0, "duty_patches": 0, "relationship_patches": 0}
+        try:
+            patch = self._generate_alignment_repair_patch(
+                plot_outline=str(result.get("plot_outline") or ""),
+                characters=str(result.get("characters") or characters or ""),
+                world_setting=str(world_setting or ""),
+                issue_brief=issue_brief,
+            )
+            result, patch_applied = self._apply_alignment_repair_patch(result, patch)
+        except Exception as exc:
+            logger.warning("对齐闸门修复调用失败（放行并标记）: %s", exc)
+            result["alignment_gate_status"] = "failed_after_retry"
+            result["alignment_gate_retry"] = {"issues": issue_brief, "error": str(exc)[:200]}
+            return result
+
+        plot_level_issues = [
+            str(item).strip()
+            for item in (patch.get("plot_level_issues") or [])
+            if str(item).strip()
+        ]
+        if plot_level_issues:
+            result["alignment_structural_debt"] = "\n".join(
+                f"- {issue}" for issue in plot_level_issues[:10]
+            )
+
+        total_applied = sum(patch_applied.values())
+        if total_applied == 0:
+            if plot_level_issues:
+                # 全部为情节级问题：注记补丁无意义，跳过注定失败的复验，
+                # 转为 deferred 结构债，由下轮扩展新增章节承接
+                logger.info(
+                    "对齐闸门：%s 项情节级问题转为结构债（deferred），下轮扩展承接",
+                    len(plot_level_issues),
+                )
+                result["alignment_gate_status"] = "deferred"
+                result["alignment_gate_retry"] = {
+                    "issues": issue_brief,
+                    "patch_applied": patch_applied,
+                    "plot_level_issues": plot_level_issues[:10],
+                }
+                return result
+            # 修复器认为无可补：保守起见按情节级问题处理（首验问题清单整体转为结构债，
+            # 由下轮扩展承接；若确属误报，注入 prompt 的提示无害）
+            logger.info(
+                "对齐闸门：修复器无可补输出，首验 %s 项问题整体转为结构债（deferred）",
+                issue_brief.count("\n") or len(issue_brief),
+            )
+            result["alignment_gate_status"] = "deferred"
+            result["alignment_structural_debt"] = issue_brief[:2000]
+            result["alignment_gate_retry"] = {"issues": issue_brief, "patch_applied": patch_applied}
+            return result
+
+        # 复验一次（重跑上限 1 次）
+        recheck = self._run_character_plot_alignment_validation(
+            characters=str(result.get("characters") or characters or ""),
+            plot_outline=str(result.get("plot_outline") or ""),
+            world_setting=str(world_setting or ""),
+        )
+        if isinstance(recheck, dict) and recheck.get("success"):
+            result = self._merge_character_plot_alignment_into_result(result, recheck)
+            result["alignment_gate_status"] = (
+                "repaired" if not self._alignment_gate_should_retry(recheck) else "failed_after_retry"
+            )
+        else:
+            result["alignment_gate_status"] = "failed_after_retry"
+        result["alignment_gate_retry"] = {
+            "issues": issue_brief,
+            "patch_applied": patch_applied,
+            **({"plot_level_issues": plot_level_issues[:10]} if plot_level_issues else {}),
+        }
+        return result
 
     def __init__(
         self,
@@ -140,6 +378,101 @@ class StoryExpansionCoordinatorBase:
         if isinstance(parsed, dict):
             return parsed
         return fallback
+
+    def _invoke_chapter_json(
+        self,
+        prompt: str,
+        fallback: Dict[str, Any],
+        *,
+        chapter_count: int = 1,
+    ) -> Dict[str, Any]:
+        """章节卡 JSON 专用调用：独立大输出预算，避免与 planner 小预算共用导致截断。
+
+        动态选模给 planner 的 max_tokens 按小规划 JSON 估算（约 4K），
+        而章节卡 JSON 每章 10 个中文字段，输出量大（每章约 1.2K-1.5K token），
+        复用 planner 预算会截断 JSON 导致整批解析失败（只能走文本回退）。
+        """
+        try:
+            per_chapter_tokens = 1500
+            budget = max(8192, per_chapter_tokens * max(1, int(chapter_count)) + 3072)
+            llm = self._build_story_expansion_runtime_llm(
+                (self._story_expansion_runtime_model_plan or {}).get("planner_model")
+                or "deepseek-v4-pro",
+                role="planner",
+                requested_max_tokens=budget,
+                response_format={"type": "json_object"},
+            )
+            response = llm.invoke(prompt)
+            raw_text = response.content if hasattr(response, "content") else str(response)
+        except Exception as exc:
+            logger.warning("章节卡 JSON 调用异常（回退 planner 预算重试）: %s", exc)
+            raw_text = self._invoke_text(prompt, use_planner=True)
+        parsed = self._extract_json(raw_text)
+        if isinstance(parsed, dict):
+            return parsed
+        salvaged = self._salvage_truncated_chapter_json(raw_text)
+        if salvaged and salvaged.get("chapters"):
+            logger.warning(
+                "章节卡 JSON 尾部截断，抢救回收 %s/%s 章完整章节卡：raw_len=%s",
+                len(salvaged["chapters"]),
+                chapter_count,
+                len(raw_text or ""),
+            )
+            return salvaged
+        logger.warning(
+            "章节卡 JSON 解析失败：raw_len=%s head=%r tail=%r",
+            len(raw_text or ""),
+            (raw_text or "")[:120],
+            (raw_text or "")[-120:],
+        )
+        return fallback
+
+    @staticmethod
+    def _salvage_truncated_chapter_json(text: str) -> Optional[Dict[str, Any]]:
+        """从尾部截断的章节卡 JSON 中抢救完整章节对象。
+
+        思考型模型思考 token 挤占输出预算时，JSON 会在字符串中间被截断，
+        整批解析失败即整批丢失；此处按括号配对回收已完整的章节卡，降级不减质。
+        """
+        match = re.search(r'"chapters"\s*:\s*\[', text or "")
+        if not match:
+            return None
+        chapters: List[Any] = []
+        depth = 0
+        in_string = False
+        escaped = False
+        obj_start = -1
+        for index in range(match.end(), len(text)):
+            ch = text[index]
+            if in_string:
+                if escaped:
+                    escaped = False
+                elif ch == "\\":
+                    escaped = True
+                elif ch == '"':
+                    in_string = False
+                continue
+            if ch == '"':
+                in_string = True
+            elif ch == "{":
+                if depth == 0:
+                    obj_start = index
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0 and obj_start >= 0:
+                    fragment = text[obj_start : index + 1]
+                    try:
+                        chapters.append(json.loads(fragment))
+                    except Exception:
+                        pass
+                    obj_start = -1
+            elif ch == "]" and depth == 0:
+                break
+        valid_chapters = [item for item in chapters if isinstance(item, dict)]
+        if not valid_chapters:
+            return None
+        return {"chapters": valid_chapters}
 
     @staticmethod
     def _extract_json(text: str) -> Optional[Any]:
@@ -786,6 +1119,7 @@ class StoryExpansionCoordinatorBase:
         role: str,
         requested_max_tokens: Optional[int] = None,
         timeout_seconds: Optional[int] = None,
+        response_format: Optional[Dict[str, Any]] = None,
     ) -> Any:
         candidate_specs = self._get_story_expansion_candidate_specs()
         selected_spec = next(
@@ -812,6 +1146,7 @@ class StoryExpansionCoordinatorBase:
             temperature=temperature,
             max_tokens=max_tokens,
             timeout=effective_timeout_seconds or None,
+            response_format=response_format,
         )
 
     def _configure_story_expansion_runtime_models(

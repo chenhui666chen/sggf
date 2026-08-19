@@ -139,7 +139,7 @@ class EpicFrameworkMixin:
         
         for attempt in range(max_retries):
             try:
-                framework_content = self.creative_director.process(framework_prompt, {})
+                framework_content = self.creative_director_pro.process(framework_prompt, {})
                 logger.debug("✅ 史诗框架生成完成\n")
                 break  # 成功则跳出重试循环
             except Exception as e:

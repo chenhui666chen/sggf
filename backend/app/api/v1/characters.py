@@ -94,7 +94,10 @@ async def list_characters(
 
     characters = (
         db.query(Character)
-        .filter(Character.project_id == project_id)
+        .filter(
+            Character.project_id == project_id,
+            Character.archived_at.is_(None),
+        )
         .order_by(Character.id)
         .all()
     )

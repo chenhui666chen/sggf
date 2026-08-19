@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 CHINESE_CHAPTER_NUMBER_PATTERN = r"[0-9一二三四五六七八九十百千万零两〇]+"
 CHAPTER_HEADING_PATTERN = re.compile(
-    rf"(?m)^(?P<prefix>#{{1,6}}\s*)?(?:\*\*)?\s*(?:[一二三四五六七八九十百千万零两〇]+[、.．]\s*)?"
+    rf"(?m)^(?P<prefix>#{{1,6}}\s*)?(?:\*\*)?\s*(?:新增\s*)?(?:[一二三四五六七八九十百千万零两〇]+[、.．]\s*)?"
     rf"第\s*(?P<number>{CHINESE_CHAPTER_NUMBER_PATTERN})\s*章(?:\s*[：:、\-]\s*|\s+)?"
     rf"(?P<title>[^\n]*?)\s*(?:\*\*)?\s*$"
 )

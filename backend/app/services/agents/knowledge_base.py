@@ -308,7 +308,14 @@ class NovelKnowledgeBase:
             try:
                 return self.vectorstore.similarity_search(query, k=k, filter=filter_dict)
             except Exception as exc:
-                logger.debug("Vector similarity search with filter failed, fallback to unfiltered search: %s", exc)
+                # 带过滤检索失败时禁止回退到无过滤检索：
+                # 无过滤会跨项目返回数据，造成不同项目的设定/人物串扰
+                logger.warning(
+                    "Vector similarity search with filter failed, returning empty result "
+                    "(unfiltered fallback disabled to avoid cross-project leakage): %s",
+                    exc,
+                )
+                return []
 
         try:
             return self.vectorstore.similarity_search(query, k=k)
@@ -327,10 +334,13 @@ class NovelKnowledgeBase:
             try:
                 return self.vectorstore.similarity_search_with_score(query, k=k, filter=filter_dict)
             except Exception as exc:
-                logger.debug(
-                    "Vector similarity search with score and filter failed, fallback to unfiltered search: %s",
+                # 同上：带过滤检索失败禁止无过滤回退，防止跨项目数据泄漏
+                logger.warning(
+                    "Vector similarity search with score and filter failed, returning empty result "
+                    "(unfiltered fallback disabled to avoid cross-project leakage): %s",
                     exc,
                 )
+                return []
 
         try:
             return self.vectorstore.similarity_search_with_score(query, k=k)

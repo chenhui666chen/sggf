@@ -11,6 +11,7 @@ import re
 import tempfile
 import time
 from dataclasses import asdict, dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
@@ -19,6 +20,16 @@ import httpx
 from adapters.volcengine.audio_generation import DEFAULT_AUDIO_CONFIG
 from app.services.audiobook.atomic_files import write_bytes_atomic
 from app.services.audiobook.project_audio_config import DEFAULT_SEED_AUDIO_MODEL
+
+from .checkpoint_contracts import (
+    CURRENT_SEED_SCENE_CHECKPOINT_SCHEMA_VERSION,
+    SEED_SCENE_CHECKPOINT_SIGNATURE_CONTRACT_VERSION,
+    SEED_SCENE_CHECKPOINT_TYPE,
+)
+from .checkpoint_migration import (
+    MIGRATION_STATUS_MIGRATED,
+    migrate_seed_scene_checkpoint,
+)
 from app.services.audiobook.prompt_audio_asr_provider import (
     sanitize_asr_audit_metadata,
 )
@@ -39,7 +50,7 @@ from .quality_gate import SceneAudioQualityGate, SceneAudioQualityReport
 
 logger = logging.getLogger(__name__)
 
-CHECKPOINT_SCHEMA_VERSION = 1
+CHECKPOINT_SCHEMA_VERSION = CURRENT_SEED_SCENE_CHECKPOINT_SCHEMA_VERSION
 SCENE_RENDERER_VERSION = "scene-render-service-v2"
 RETRY_PROMPT_SUFFIX = "重试约束：严格保留所有原文台词，禁止新增、删减、改写或替换任何可辨识对白。"
 RETRYABLE_DOWNLOAD_STATUS_CODES = frozenset({408, 425, 429, 500, 502, 503, 504})
@@ -937,6 +948,10 @@ class SceneRenderService:
     ) -> SceneRenderResult | None:
         if not checkpoint:
             return None
+        resolved = self._resolve_checkpoint_schema(checkpoint)
+        if resolved is None:
+            return None
+        checkpoint = resolved
         status = str(checkpoint.get("status") or "").strip()
         if status not in {"passed", "legacy_stems"}:
             return None
@@ -986,6 +1001,31 @@ class SceneRenderService:
             reused_checkpoint=True,
             metadata=dict(checkpoint.get("metadata") or {}),
         )
+
+    def _resolve_checkpoint_schema(
+        self,
+        checkpoint: Mapping[str, Any],
+    ) -> Mapping[str, Any] | None:
+        """把历史 checkpoint 解析到当前 schema：v1 走 append-only 迁移。
+
+        迁移成功后写回新版本（旧签名字段不覆盖）并继续复用流程；
+        无法证明兼容（legacy_checkpoint_incompatible）时不复用，
+        也不破坏旧 checkpoint，由后续重新生成路径接管。
+        """
+        if checkpoint.get("schema_version") == CHECKPOINT_SCHEMA_VERSION:
+            return checkpoint
+        now_iso = datetime.now(timezone.utc).isoformat()
+        result = migrate_seed_scene_checkpoint(checkpoint, now_iso=now_iso)
+        if result.status != MIGRATION_STATUS_MIGRATED or result.checkpoint is None:
+            logger.info(
+                "Seed Audio 场景 checkpoint 不可迁移，放弃复用: status=%s reasons=%s",
+                result.status,
+                ",".join(result.reasons),
+            )
+            return None
+        # append-only：新版本引用旧 checkpoint，旧签名字段只读保留。
+        self._write_checkpoint(result.checkpoint)
+        return result.checkpoint
 
     def _fallback(
         self,
@@ -1053,6 +1093,12 @@ class SceneRenderService:
         ]
         return {
             "schema_version": CHECKPOINT_SCHEMA_VERSION,
+            "checkpoint_type": SEED_SCENE_CHECKPOINT_TYPE,
+            "signature_contract_version": (
+                SEED_SCENE_CHECKPOINT_SIGNATURE_CONTRACT_VERSION
+            ),
+            "producer_version": SCENE_RENDERER_VERSION,
+            "created_at": datetime.now(timezone.utc).isoformat(),
             "renderer_version": SCENE_RENDERER_VERSION,
             "model": model,
             "audio_config": dict(audio_config),
@@ -1069,6 +1115,7 @@ class SceneRenderService:
             "duration": duration,
             "subtitle_payload": result.subtitle_payload,
             "quality_report": quality_payload,
+            "prompt": plan.prompt,
             "prompt_hash": plan.prompt_hash,
             "quality_policy_hash": plan.quality_policy_hash,
             "reference_hashes": list(plan.reference_hashes),

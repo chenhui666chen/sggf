@@ -4,6 +4,7 @@
 从 chapter_prompt_builder.py 提取的内容创作相关提示词
 """
 
+import re
 from typing import Dict, Optional, Tuple
 from dataclasses import dataclass
 
@@ -196,22 +197,32 @@ GENRE_CREATION_GUIDES: Dict[str, str] = {
 }
 
 
-# 开头方式定义
+# 开头方式定义（单一来源：routes_chapter 等调用方统一从此导入，禁止内嵌副本）
 OPENING_STYLES: Dict[str, Tuple[str, str, str]] = {
     "对话开头": ("对话开头", "直接进入冲突或紧张场景，用对话抽出矛盾", ""),
     "动作开头": ("动作开头", "从正在发生的动态事件开始，制造紧迫感", ""),
     "悬念开头": ("悬念开头", "抛出问题或异常现象，引发读者好奇，创造独特的开场", ""),
     "场景开头": ("场景开头", "通过环境氛围描写快速建立情境，融入题材特色", ""),
     "反转开头": ("反转开头", "与上章结尾形成对比或反差，制造意外效果", ""),
+    "内心独白开头": ("内心独白开头", "从人物内心思绪入手，展现心理冲突或决策过程", ""),
+    "回忆插入开头": ("回忆插入开头", "通过回忆或闪回提供关键背景，丰富当前情节", ""),
+    "疯狂开头": ("疯狂开头", "从激烈冲突或混乱场面开始，立即抓住读者注意力", ""),
+    "对比开头": ("对比开头", "通过前后对比或境遇差异，强化情绪冲击", ""),
+    "时间跳跃开头": ("时间跳跃开头", "直接跳转到事件后的关键时刻，略过过程增加节奏", ""),
 }
 
-# 结尾方式定义
+# 结尾方式定义（单一来源）
 ENDING_STYLES: Dict[str, Tuple[str, str, str]] = {
     "悬念式": ("悬念式", "关键信息揭露一半，留下悬念让读者想继续阅读", ""),
     "转折式": ("转折式", "意外事件发生，打破读者预期", ""),
-    "动作中断式": ("动作中断式", "危机时刻戈然而止，制造紧张感", ""),
+    "动作中断式": ("动作中断式", "危机时刻戛然而止，制造紧张感", ""),
     "信息炸弹式": ("信息炸弹式", "揭露惊人真相或身份，制造震撼效果", ""),
-    "选择困境式": ("选择困境式", "主角面临艰难拉择，强化情绪张力", ""),
+    "选择困境式": ("选择困境式", "主角面临艰难抉择，强化情绪张力", ""),
+    "情感升华式": ("情感升华式", "通过情感浓度提升结束，留下余韵", ""),
+    "环境渲染式": ("环境渲染式", "以环境气氛变化暗示危机或转机", ""),
+    "对话留白式": ("对话留白式", "关键对话说一半留一半，制造疑问", ""),
+    "时间压力式": ("时间压力式", "引入倒计时或期限，增加紧迫感", ""),
+    "身份揭露式": ("身份揭露式", "暗示或半揭露人物真实身份，激发好奇", ""),
 }
 
 # 情节类型 → 推荐的开头/结尾方式
@@ -233,6 +244,74 @@ SCENE_STYLE_RULES: Dict[str, Dict] = {
     "升级": {"keywords": ["突破", "升级", "进阶", "觉醒", "获得", "传承", "机缘", "宝物", "功法", "神通"],
             "opening": "悬念开头", "ending": "信息炸弹式"},
 }
+
+
+# 章节定位枚举（与 chapter_planning.py 规划输出字段保持一致）
+CHAPTER_POSITIONS = [
+    "普通推进", "开篇定调", "小高潮", "大高潮", "关键转折",
+    "伏笔回收", "人物突破", "世界观揭示", "卷末收束", "完结收束",
+]
+
+# 章节定位 → 推荐开头/结尾/节奏指导（第一优先级路由，叙事动机驱动，取代纯关键词计数）
+POSITION_STYLE_RULES: Dict[str, Dict[str, str]] = {
+    "普通推进": {
+        "opening": "场景开头", "ending": "悬念式",
+        "rhythm": "平稳推进中埋入至少一个不安定因素，为后续章节蓄力；禁止整章无波动的流水账。",
+    },
+    "开篇定调": {
+        "opening": "悬念开头", "ending": "悬念式",
+        "rhythm": "快速建立世界规则与主角处境，信息分批释放，结尾必须立起贯穿性核心悬念。",
+    },
+    "小高潮": {
+        "opening": "动作开头", "ending": "动作中断式",
+        "rhythm": "冲突集中爆发，节奏前紧后松再收紧；爽点兑现后立刻抛出新压力，不留情绪空窗。",
+    },
+    "大高潮": {
+        "opening": "疯狂开头", "ending": "信息炸弹式",
+        "rhythm": "全程高张力，场景切换加快；前文铺垫的冲突与伏笔在本章集中兑现，结尾留更大层级的震撼。",
+    },
+    "关键转折": {
+        "opening": "反转开头", "ending": "信息炸弹式",
+        "rhythm": "先按既有预期推进再打破预期；反转前必须有可回溯的伏笔支点，转折后人物关系或局势不可逆。",
+    },
+    "伏笔回收": {
+        "opening": "悬念开头", "ending": "选择困境式",
+        "rhythm": "回收时让读者能对上前文埋设点；回收本身要产生新的局势变化，不要为回收而回收。",
+    },
+    "人物突破": {
+        "opening": "内心独白开头", "ending": "情感升华式",
+        "rhythm": "突破要有代价、征兆与外界反馈三层落地；突破后立刻展示能力变化带来的具体后果。",
+    },
+    "世界观揭示": {
+        "opening": "回忆插入开头", "ending": "对话留白式",
+        "rhythm": "设定信息拆进冲突与对话中释放，禁止大段旁白式说明；揭示必须改变人物当下决策。",
+    },
+    "卷末收束": {
+        "opening": "对比开头", "ending": "时间压力式",
+        "rhythm": "收拢本卷未决冲突，给出阶段性结果同时埋下下一卷引子；节奏由紧到缓再起钩。",
+    },
+    "完结收束": {
+        "opening": "对话开头", "ending": "情感升华式",
+        "rhythm": "主线收口，情绪浓度优先于情节密度；给主要人物明确归宿感，留一分余味。",
+    },
+}
+
+
+def extract_chapter_position(chapter_plan: str) -> Optional[str]:
+    """
+    从章节规划文本中提取章节定位
+
+    规划输出格式为“- 章节定位：小高潮”，与 review_feature_gate 的提取口径保持一致。
+    """
+    text = str(chapter_plan or "")
+    match = re.search(r"(?:章节定位|本章定位)\s*[：:]\s*([^\n\r]+)", text)
+    if not match:
+        return None
+    position_text = match.group(1)
+    for position in CHAPTER_POSITIONS:
+        if position in position_text:
+            return position
+    return None
 
 
 def match_scene_type(chapter_plan: str) -> Optional[str]:
@@ -262,40 +341,112 @@ def match_scene_type(chapter_plan: str) -> Optional[str]:
 def get_recommended_styles(
     chapter_plan: str,
     chapter_number: int
-) -> Tuple[Tuple[str, str, str], Tuple[str, str, str], str]:
+) -> Tuple[Tuple[str, str, str], Tuple[str, str, str], str, str]:
     """
-    获取推荐的开头/结尾方式
-    
+    获取推荐的开头/结尾方式与节奏指导
+
+    路由优先级：
+    1. 章节定位路由：解析规划中的结构化定位字段（叙事动机驱动，首选）
+    2. 情节类型关键词匹配：定位字段缺失时的降级方案
+    3. 章节编号轮换：兜底
+
     Args:
         chapter_plan: 章节规划内容
         chapter_number: 章节编号
-    
+
     Returns:
-        (开头方式, 结尾方式, 匹配方法描述)
+        (开头方式, 结尾方式, 匹配方法描述, 节奏指导)
     """
+    # 1) 章节定位路由
+    position = extract_chapter_position(chapter_plan)
+    if position:
+        rule = POSITION_STYLE_RULES[position]
+        selected_opening = OPENING_STYLES[rule["opening"]]
+        selected_ending = ENDING_STYLES[rule["ending"]]
+        match_method = f"章节定位路由({position})"
+        return selected_opening, selected_ending, match_method, rule["rhythm"]
+
+    # 2) 情节类型关键词匹配
     matched_scene_type = match_scene_type(chapter_plan)
-    
     if matched_scene_type:
         rule = SCENE_STYLE_RULES[matched_scene_type]
         selected_opening = OPENING_STYLES[rule["opening"]]
         selected_ending = ENDING_STYLES[rule["ending"]]
         match_method = f"关键词匹配({matched_scene_type}场景)"
-    else:
-        # 回退到章节编号轮换
-        opening_list = list(OPENING_STYLES.values())
-        ending_list = list(ENDING_STYLES.values())
-        opening_index = (chapter_number - 1) % len(opening_list)
-        ending_index = (chapter_number + 2) % len(ending_list)
-        selected_opening = opening_list[opening_index]
-        selected_ending = ending_list[ending_index]
-        match_method = "章节编号轮换(未匹配到关键词)"
-    
-    return selected_opening, selected_ending, match_method
+        return selected_opening, selected_ending, match_method, ""
+
+    # 3) 章节编号轮换（兜底）
+    opening_list = list(OPENING_STYLES.values())
+    ending_list = list(ENDING_STYLES.values())
+    opening_index = (chapter_number - 1) % len(opening_list)
+    ending_index = (chapter_number + 2) % len(ending_list)
+    match_method = "章节编号轮换(未匹配到定位与关键词)"
+    return opening_list[opening_index], ending_list[ending_index], match_method, ""
 
 
 def get_genre_creation_guide(genre: str) -> str:
     """获取题材专属创作指导"""
     return GENRE_CREATION_GUIDES.get(genre, "")
+
+
+# ---------------------------------------------------------------------------
+# 场景分段（P2-1）：按章节规划关键事件拆分为2-3段，抑制长文后半段质量衰减
+# ---------------------------------------------------------------------------
+_KEY_EVENT_SECTION_RE = re.compile(
+    r"##\s*\d*\.?\s*核心事件\s*\n(.*?)(?=\n##|\Z)", re.DOTALL
+)
+_KEY_EVENT_LEGACY_RE = re.compile(
+    r"关键事件\s*[：:]\s*\n?(.*?)(?=\n[-#]|\Z)", re.DOTALL
+)
+_EVENT_ITEM_RE = re.compile(r"^(?:[-*·]|\d+[\.、)])\s*(.{8,})")
+
+
+def extract_key_events(chapter_plan: str) -> list:
+    """从章节规划中提取关键事件条目（兼容新版 `## 核心事件` 与旧版 `- 关键事件：` 两种格式）。"""
+    text = str(chapter_plan or "")
+    section = ""
+    m = _KEY_EVENT_SECTION_RE.search(text)
+    if m:
+        section = m.group(1)
+    if not section:
+        m2 = _KEY_EVENT_LEGACY_RE.search(text)
+        if m2:
+            section = m2.group(1)
+    events: list = []
+    for line in section.splitlines():
+        line = line.strip()
+        em = _EVENT_ITEM_RE.match(line)
+        if em:
+            event = em.group(1).strip()
+            if event and event not in events:
+                events.append(event)
+    return events
+
+
+def split_scene_segments(chapter_plan: str, total_words: int = 3000, max_segments: int = 3) -> list:
+    """将关键事件均匀分配为2-3个场景段，返回分段任务列表；不足2个事件时返回空列表（回退单遍生成）。"""
+    events = extract_key_events(chapter_plan)
+    if len(events) < 2:
+        return []
+    seg_count = min(len(events), max_segments)
+    base, extra = divmod(len(events), seg_count)
+    segments: list = []
+    idx = 0
+    for i in range(seg_count):
+        take = base + (1 if i < extra else 0)
+        segments.append(events[idx:idx + take])
+        idx += take
+    base_words = total_words // seg_count
+    result = []
+    for i, evts in enumerate(segments):
+        target = base_words + (total_words - base_words * seg_count if i == seg_count - 1 else 0)
+        result.append({
+            "index": i + 1,
+            "total": seg_count,
+            "events": evts,
+            "target_words": target,
+        })
+    return result
 
 class FirstChapterPrompts:
     """第1章创作提示词（用于agent_coordinator的阶段3）"""

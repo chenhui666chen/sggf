@@ -31,6 +31,22 @@ from app.services.prompts.workflow_runtime import (
     get_iteration_loop_review_system_prompt,
     get_iteration_revision_system_prompt,
 )
+from app.services.prompts.narrative_quality import (
+    build_repair_hints,
+    extract_failure_codes,
+    extract_unresolved_issues,
+    format_foreshadow_ledger,
+    format_quality_memory,
+    register_foreshadowing,
+    resolve_revision_mode,
+    update_quality_memory,
+)
+from app.services.prompts.stages.content_creation import (
+    extract_chapter_position,
+    extract_key_events,
+    split_scene_segments,
+)
+from app.services.agents.chapter_prompt_builder import extract_segment_tail
 from app.services.auto_system_detector import auto_create_system_collections
 from app.services.agents import review_feature_gate
 from app.services.agents.multi_model_review_service import MultiModelReviewService
@@ -358,6 +374,9 @@ def _guard_chapter_plan_prompt_sections(
         "climax_instruction": 0.02,
         "chapter_plan_guide": 0.06,
         "concept": 0.03,
+        "foreshadow_ledger_text": 0.03,
+        "project_quality_memory_text": 0.03,
+        "settings_catalog": 0.05,
     }
     guarded: Dict[str, str] = {}
     for key, value in sections.items():
@@ -383,6 +402,9 @@ def _build_chapter_plan_user_prompt(
     previous_ending: str,
     climax_instruction: str = "",
     chapter_plan_guide: str = "",
+    foreshadow_ledger_text: str = "",
+    project_quality_memory_text: str = "",
+    settings_catalog: str = "",
     model_name: Optional[str] = None,
     max_prompt_tokens: Optional[int] = None,
 ) -> str:
@@ -401,6 +423,9 @@ def _build_chapter_plan_user_prompt(
         "previous_ending": "（这是第一章，没有前一章）",
         "climax_instruction": "",
         "chapter_plan_guide": "",
+        "foreshadow_ledger_text": "",
+        "project_quality_memory_text": "",
+        "settings_catalog": "",
     }
     raw_sections = {
         "concept": concept,
@@ -417,6 +442,9 @@ def _build_chapter_plan_user_prompt(
         "previous_ending": previous_ending,
         "climax_instruction": climax_instruction,
         "chapter_plan_guide": chapter_plan_guide,
+        "foreshadow_ledger_text": foreshadow_ledger_text,
+        "project_quality_memory_text": project_quality_memory_text,
+        "settings_catalog": settings_catalog,
     }
 
     def normalize_sections(source: Dict[str, str]) -> Dict[str, str]:
@@ -431,6 +459,34 @@ def _build_chapter_plan_user_prompt(
             genre_specific = f"""
 【题材专属细化】（以下为通用规划要求的具体落地方式）
 {sections["chapter_plan_guide"]}"""
+
+        ledger_block = ""
+        if sections["foreshadow_ledger_text"]:
+            ledger_block = f"""
+【未回收伏笔账本】（前文已埋设且尚未回收的伏笔，规划时优先考虑回收时机，禁止遗忘）
+{sections["foreshadow_ledger_text"]}
+"""
+
+        memory_block = ""
+        if sections["project_quality_memory_text"]:
+            memory_block = f"""
+【项目级高频问题记忆】（本项目历次评审中的高频未解决问题，规划时必须主动规避，不要让同类问题再次发生）
+{sections["project_quality_memory_text"]}
+"""
+
+        settings_catalog_block = ""
+        if sections["settings_catalog"]:
+            settings_catalog_block = f"""
+【项目设定清单】（项目设定中心已有的设定名称，规划时优先从中选择复用；确需新设定时须与既有设定不冲突）
+{sections["settings_catalog"]}"""
+
+        settings_output_section = ""
+        if sections["settings_catalog"]:
+            settings_output_section = """
+## 8. 设定调用
+- 本章涉及的已有设定（功法/武器/丹药/地点/势力等）：名称必须与【项目设定清单】中的名称完全一致，注明使用者与用途
+- 本章引入的新设定（如无则写"无"）：新设定不得与既有设定冲突，命名避免与清单中名称近似
+"""
 
         return f"""请为第{next_chapter_number}章制定创作计划。
 
@@ -466,7 +522,7 @@ def _build_chapter_plan_user_prompt(
 
 【最近章节连续性资产】（优先承接拆书细纲、未完成冲突、人物状态、伏笔与钩子）
 {sections["recent_chapter_assets_summary"]}
-
+{ledger_block}{memory_block}{settings_catalog_block}
 【前一章结尾】
 {sections["previous_ending"]}
 {sections["climax_instruction"]}
@@ -474,6 +530,7 @@ def _build_chapter_plan_user_prompt(
 【输出要求】
 请为第{next_chapter_number}章制定创作计划，必须包含：
 ## 1. 本章定位
+- 章节定位：从【普通推进/开篇定调/小高潮/大高潮/关键转折/伏笔回收/人物突破/世界观揭示/卷末收束/完结收束】中严格选择一个，不要自造标签
 - 在整体情节中的位置（起承转合哪个阶段）
 - 本章类型：【日常/过渡/冲突/高潮/转折】
 
@@ -500,6 +557,9 @@ def _build_chapter_plan_user_prompt(
 - 时间、地点、氛围
 - 场景转换节点
 
+## 7. 伏笔事项
+- 伏笔事项：本章新埋设或回收的伏笔（如无则写"无"）；若回收，注明对应第几章埋设的伏笔
+{settings_output_section}
 【约束】
 - 确保与整本书情节大纲、前文剧情和结构化记忆保持一致
 - 如提供当前章节精确细纲，必须优先落实场景目标、关键事件、人物出场、冲突推进、结尾钩子和伏笔
@@ -1171,8 +1231,11 @@ async def execute_generate_next_chapter_task(
             get_climax_instruction
         )
 
-        # 🆕 获取高潮章节指示（使用模块化函数）
-        climax_instruction = get_climax_instruction(next_chapter_number)
+        # 🆕 获取高潮章节指示（大纲节奏优先：以本章细纲标注为准，取模节奏仅兜底）
+        climax_instruction = get_climax_instruction(
+            next_chapter_number,
+            chapter_outline=chapter_generation_context.current_chapter_outline or "",
+        )
         
         # 🆕 获取项目题材
         plan_project_genre = project_profile.genre or ""
@@ -1247,6 +1310,30 @@ async def execute_generate_next_chapter_task(
         # 🆕 构建章节规划提示词（使用模块化系统）
         plan_system_prompt = ChapterPlanningPrompts.get_system_prompt(plan_project_genre)
         plan_prompt_budget = _get_chapter_plan_prompt_token_budget(selected_plan_model)
+        # 🆕 P1-2/P1-3：加载项目级质量记忆与伏笔账本（持久化于 project_settings.review_meta）
+        try:
+            project_review_meta = workflow_context_builder.load_review_meta(project_id) or {}
+        except Exception as meta_error:
+            logger.warning(f"   ⚠️ 加载 review_meta 失败，跳过记忆/账本注入: {meta_error}")
+            project_review_meta = {}
+        foreshadow_ledger_text = format_foreshadow_ledger(project_review_meta, next_chapter_number)
+        project_quality_memory_text = format_quality_memory(project_review_meta)
+        if foreshadow_ledger_text:
+            logger.info(f"   📌 伏笔账本注入：{foreshadow_ledger_text.count(chr(10)) + 1} 条未回收伏笔")
+        if project_quality_memory_text:
+            logger.info("   🧠 项目级高频问题记忆注入（前3条）")
+        # 🆕 设定清单：项目设定中心全部设定名称，供规划选择复用并在"设定调用"字段点名
+        try:
+            from app.services.setting_templates import build_settings_catalog_text
+
+            plan_settings_catalog = build_settings_catalog_text(project_id, db)
+        except Exception as catalog_error:
+            logger.warning(f"   ⚠️ 设定清单生成失败，跳过注入: {catalog_error}")
+            plan_settings_catalog = ""
+        if plan_settings_catalog:
+            logger.info(
+                f"   📖 设定清单注入：{len(plan_settings_catalog):,}字符"
+            )
         plan_user_prompt = _build_chapter_plan_user_prompt(
             next_chapter_number=next_chapter_number,
             concept=plan_optimized_context.get('project_concept', concept),
@@ -1266,6 +1353,9 @@ async def execute_generate_next_chapter_task(
             previous_ending=plan_optimized_context.get('previous_ending', previous_ending),
             climax_instruction=climax_instruction,
             chapter_plan_guide=chapter_plan_guide,
+            foreshadow_ledger_text=foreshadow_ledger_text,
+            project_quality_memory_text=project_quality_memory_text,
+            settings_catalog=plan_settings_catalog,
             model_name=selected_plan_model,
             max_prompt_tokens=plan_prompt_budget,
         )
@@ -1401,78 +1491,14 @@ async def execute_generate_next_chapter_task(
                 is_complete=False
             )
 
-        logger.info(f"   📐 开始匹配场景类型...")
+        logger.info(f"   📐 匹配章节定位与场景类型...")
 
-        # 🆕 开头/结尾方式定义（与 agent_coordinator 保持同步）
-        opening_styles = {
-            "对话开头": ("对话开头", "直接进入冲突或紧张场景，用对话抽出矛盾", ""),
-            "动作开头": ("动作开头", "从正在发生的动态事件开始，制造紧迫感", ""),
-            "悬念开头": ("悬念开头", "抛出问题或异常现象，引发读者好奇，创造独特的开场", ""),
-            "场景开头": ("场景开头", "通过环境氛围描写快速建立情境，融入题材特色", ""),
-            "反转开头": ("反转开头", "与上章结尾形成对比或反差，制造意外效果", ""),
-            "内心独白开头": ("内心独白开头", "从人物内心思绪入手，展现心理冲突或决策过程", ""),
-            "回忆插入开头": ("回忆插入开头", "通过回忆或闪回提供关键背景，丰富当前情节", ""),
-            "疯狂开头": ("疯狂开头", "从激烈冲突或混乱场面开始，立即抽住读者注意力", ""),
-            "对比开头": ("对比开头", "通过前后对比或境遇差异，强化情绪冲击", ""),
-            "时间跳跃开头": ("时间跳跃开头", "直接跳转到事件后的关键时刻，略过过程增加节奏", ""),
-        }
-        ending_styles = {
-            "悬念式": ("悬念式", "关键信息揭露一半，留下悬念让读者想继续阅读", ""),
-            "转折式": ("转折式", "意外事件发生，打破读者预期", ""),
-            "动作中断式": ("动作中断式", "危机时刻戈然而止，制造紧张感", ""),
-            "信息炸弹式": ("信息炸弹式", "揭露惊人真相或身份，制造震撑效果", ""),
-            "选择困境式": ("选择困境式", "主角面临艰难拉择，强化情绪张力", ""),
-            "情感升华式": ("情感升华式", "通过情感浓度提升结束，留下余韵", ""),
-            "环境渲染式": ("环境渲染式", "以环境气氛变化暗示危机或转机", ""),
-            "对话留白式": ("对话留白式", "关键对话说一半留一半，制造疑问", ""),
-            "时间压力式": ("时间压力式", "引入倒计时或期限，增加紧迫感", ""),
-            "身份揭露式": ("身份揭露式", "暗示或半揭露人物真实身份，激发好奇", ""),
-        }
+        # 🆕 开头/结尾方式与节奏指导：统一从 content_creation 单一来源导入（章节定位路由优先，禁止内嵌副本）
+        from app.services.prompts.stages.content_creation import get_recommended_styles
 
-        # 🆕 情节类型 → 推荐的开头/结尾方式
-        scene_style_rules = {
-            "战斗": {"keywords": ["战斗", "打斗", "厮杀", "对决", "交手", "出招", "攻击", "防御", "刀剑", "拳脚"],
-                    "opening": "动作开头", "ending": "动作中断式"},
-            "悬疑": {"keywords": ["悬疑", "推理", "谜团", "线索", "真相", "秘密", "调查", "疑点", "隐情", "身世"],
-                    "opening": "悬念开头", "ending": "悬念式"},
-            "转折": {"keywords": ["转折", "揭秘", "真相大白", "身份", "背叛", "反转", "意外", "惊人", "原来", "竟然"],
-                    "opening": "反转开头", "ending": "信息炸弹式"},
-            "情感": {"keywords": ["告别", "离别", "重逢", "表白", "感情", "思念", "回忆", "温情", "感动", "眼泪"],
-                    "opening": "场景开头", "ending": "选择困境式"},
-            "危机": {"keywords": ["危机", "危险", "生死", "逃亡", "追杀", "困境", "绝境", "险境", "紧急", "千钧一发"],
-                    "opening": "动作开头", "ending": "动作中断式"},
-            "对话": {"keywords": ["谈判", "对话", "交涉", "质问", "争执", "辩论", "说服", "威胁", "警告", "摊牌"],
-                    "opening": "对话开头", "ending": "转折式"},
-            "日常": {"keywords": ["日常", "休息", "准备", "旅途", "修炼", "学习", "训练", "恢复", "整顿", "计划"],
-                    "opening": "场景开头", "ending": "悬念式"},
-            "升级": {"keywords": ["突破", "升级", "进阶", "觉醒", "获得", "传承", "机缘", "宝物", "功法", "神通"],
-                    "opening": "悬念开头", "ending": "信息炸弹式"},
-        }
-
-        # 🆕 分析章节规划，匹配情节类型
-        matched_scene_type = None
-        max_keyword_count = 0
-        for scene_type, rule in scene_style_rules.items():
-            keyword_count = sum(1 for kw in rule["keywords"] if kw in chapter_plan)
-            if keyword_count > max_keyword_count:
-                max_keyword_count = keyword_count
-                matched_scene_type = scene_type
-
-        # 🆕 根据匹配结果选择开头/结尾方式
-        if matched_scene_type and max_keyword_count >= 1:
-            rule = scene_style_rules[matched_scene_type]
-            selected_opening = opening_styles[rule["opening"]]
-            selected_ending = ending_styles[rule["ending"]]
-            match_method = f"关键词匹配({matched_scene_type}场景, 命中{max_keyword_count}个关键词)"
-        else:
-            # 回退到章节编号轮换
-            opening_list = list(opening_styles.values())
-            ending_list = list(ending_styles.values())
-            opening_index = (next_chapter_number - 1) % len(opening_list)
-            ending_index = (next_chapter_number + 2) % len(ending_list)
-            selected_opening = opening_list[opening_index]
-            selected_ending = ending_list[ending_index]
-            match_method = "章节编号轮换(未匹配到关键词)"
+        selected_opening, selected_ending, match_method, position_rhythm_hint = get_recommended_styles(
+            chapter_plan, next_chapter_number
+        )
 
         logger.info(f"   📝 第{next_chapter_number}章 - 开头: {selected_opening[0]}, 结尾: {selected_ending[0]} [{match_method}]")
         logger.info(f"   💬 构建内容创作提示词...")
@@ -1517,20 +1543,33 @@ async def execute_generate_next_chapter_task(
             )
             if part and part.strip()
         )
+        # 🆕 P2 检索质量：embedding query 用短句（出场人物+关键事件），避免整章规划长文本稀释语义
+        compact_query_parts = list(chapter_generation_context.focus_character_names or [])
+        compact_query_parts.extend(extract_key_events(chapter_plan)[:3])
+        rag_search_query = "；".join(part for part in compact_query_parts if part) or (chapter_plan[:800])
         rag_bundle = workflow_context_builder.build_typed_rag_context(
             project_id,
-            rag_query_text or chapter_plan,
+            rag_search_query or chapter_plan,
             fallback_max_content_length=200,
+            current_chapter_number=next_chapter_number,
+            category_source_text=rag_query_text or chapter_plan,
+            focus_character_names=(
+                chapter_generation_context.focus_character_names
+                or chapter_generation_context.core_character_names
+            ),
+            chapter_plan=chapter_plan,
         )
         rag_character_context = rag_bundle.rag_character_context
         rag_world_context = rag_bundle.rag_world_context
+        rag_previous_context = rag_bundle.rag_previous_context
         if rag_bundle.relevant_categories:
             logger.info(f"   📆 章节规划涉及体系: {rag_bundle.relevant_categories}")
         if rag_bundle.used_vector_search:
             logger.info(
-                "   📚 RAG注入：人物%s条，设定%s条",
+                "   📚 RAG注入：人物%s条，设定%s条，前文章节%s条",
                 rag_bundle.character_hits,
                 rag_bundle.world_hits,
+                rag_bundle.previous_hits,
             )
         if rag_bundle.used_summary_fallback:
             logger.info(
@@ -1555,14 +1594,17 @@ async def execute_generate_next_chapter_task(
             rag_world_context=rag_world_context,
             selected_opening=selected_opening,
             selected_ending=selected_ending,
+            position_rhythm_hint=position_rhythm_hint,
+            project_quality_memory_text=project_quality_memory_text,
             current_chapter_outline=chapter_generation_context.current_chapter_outline,
             current_volume_context=chapter_generation_context.current_volume_context,
             core_character_anchor_context=chapter_generation_context.core_character_anchor_context,
             focus_character_relationship_context=chapter_generation_context.focus_character_relationship_context,
             character_runtime_context=chapter_generation_context.character_prompt_context,
             epic_framework_context=chapter_generation_context.epic_framework_context,
+            rag_previous_context=rag_previous_context,
         )
-        
+
         # 📊 输出精简版 prompt 统计
         logger.info(f"   📉 Prompt优化（精简版）：")
         logger.info(f"      - 章节规划: {len(chapter_plan)} 字")
@@ -1574,16 +1616,76 @@ async def execute_generate_next_chapter_task(
 
         # 🆕 使用真流式 LLM 调用（智能选择模型）
         logger.info(f"   🚀 开始调用流式 LLM 服务生成章节内容...")
-        try:
-            chapter_draft = await streaming_service.generate_chapter_streaming(
-                prompt=content_user_prompt,
-                system_prompt=content_system_prompt,
-                on_chunk=on_content_chunk,
-                temperature=0.7,
-                model=selected_content_model,  # 🔥 使用智能选择的模型
-                max_retries=max_llm_attempts,
-                require_exact_model=require_exact_model,
+
+        # 🆕 P2-1 场景分段生成：关键事件≥2时按段生成（每段只聚焦本段事件），缓解长文质量衰减
+        chapter_draft = ""
+        segments = split_scene_segments(chapter_plan)
+        if segments:
+            logger.info(
+                f"   ✂️ 场景分段生成：{len(segments)}段，各段事件数={[len(s['events']) for s in segments]}"
             )
+            try:
+                segment_parts = []
+                previous_segment_tail = ""
+                for seg_idx, seg in enumerate(segments):
+                    seg_user_prompt = builder.build_segment_user_prompt(
+                        next_chapter_number=next_chapter_number,
+                        chapter_plan=chapter_plan,
+                        segments=segments,
+                        seg_index=seg_idx,
+                        previous_segment_tail=previous_segment_tail,
+                        previous_ending=previous_ending or "",
+                        recent_chapter_assets_summary=recent_chapter_assets_summary or "",
+                        rag_character_context=rag_character_context,
+                        rag_world_context=rag_world_context,
+                        selected_opening=selected_opening,
+                        selected_ending=selected_ending,
+                        position_rhythm_hint=position_rhythm_hint,
+                        project_quality_memory_text=project_quality_memory_text,
+                        current_chapter_outline=chapter_generation_context.current_chapter_outline,
+                        current_volume_context=chapter_generation_context.current_volume_context,
+                        core_character_anchor_context=chapter_generation_context.core_character_anchor_context,
+                        focus_character_relationship_context=chapter_generation_context.focus_character_relationship_context,
+                        character_runtime_context=chapter_generation_context.character_prompt_context,
+                        epic_framework_context=chapter_generation_context.epic_framework_context,
+                        rag_previous_context=rag_previous_context,
+                    )
+                    seg_content = await streaming_service.generate_chapter_streaming(
+                        prompt=seg_user_prompt,
+                        system_prompt=content_system_prompt,
+                        on_chunk=on_content_chunk,
+                        temperature=0.7,
+                        model=selected_content_model,  # 🔥 使用智能选择的模型
+                        max_retries=max_llm_attempts,
+                        require_exact_model=require_exact_model,
+                    )
+                    segment_parts.append(seg_content.strip())
+                    previous_segment_tail = extract_segment_tail(seg_content)
+                    logger.info(
+                        f"   ✓ 第{seg['index']}/{len(segments)}段完成，字数: {len(seg_content)}"
+                    )
+                chapter_draft = "\n\n".join(segment_parts)
+                logger.info(
+                    f"   ✓ 章节初稿分段合成完成（真流式 + {selected_content_model}），字数: {len(chapter_draft)}"
+                )
+            except Exception as seg_error:
+                # 🔒 锁定模型档位下失败不可回退（回退路径模型不受控），直接终止
+                if require_exact_model:
+                    logger.error(f"   ❌ 锁定模型分段生成失败且禁止回退: {seg_error}")
+                    raise
+                logger.warning(f"   ⚠️ 分段生成失败，回退单遍生成: {seg_error}")
+
+        try:
+            if not chapter_draft:  # 分段生成未产出时走单遍生成（含分段失败的回退）
+                chapter_draft = await streaming_service.generate_chapter_streaming(
+                    prompt=content_user_prompt,
+                    system_prompt=content_system_prompt,
+                    on_chunk=on_content_chunk,
+                    temperature=0.7,
+                    model=selected_content_model,  # 🔥 使用智能选择的模型
+                    max_retries=max_llm_attempts,
+                    require_exact_model=require_exact_model,
+                )
             logger.info(f"   ✓ 章节初稿已完成（真流式 + {selected_content_model}），字数: {len(chapter_draft)}")
         except Exception as e:
             # 🆕 锁定模型档位下禁止回退到协调器（回退路径模型不受控），直接终止
@@ -1928,6 +2030,17 @@ async def execute_generate_next_chapter_task(
             # 🆕 累积所有轮次的评审意见，作为改稿参考
             all_reviews = [f"【第0轮评审（初稿）】\n{current_review}"]
 
+            # 🆕 P1-1 失败码修订路由：从初始评审解析失败码，判定轻/重修订模式
+            initial_failure_codes = extract_failure_codes(current_review)
+            revision_mode, revision_mode_hint = resolve_revision_mode(initial_failure_codes)
+            # 🆕 P2-2 T1 修复相位：失败码直检命中案例库，注入机制修复指引
+            repair_hints_text = build_repair_hints(initial_failure_codes)
+            if revision_mode:
+                logger.info(
+                    f"   🧭 初始评审失败码路由: 模式={revision_mode}, 码数={len(initial_failure_codes)} "
+                    f"({', '.join(fc['code'] for fc in initial_failure_codes[:5])})"
+                )
+
             if skip_iteration_optimization:
                 logger.info(
                     f"   🎉 初始评审已达标（{initial_review_score:.1f}/10 >= {pass_score_threshold:.1f}/10），"
@@ -2017,6 +2130,8 @@ async def execute_generate_next_chapter_task(
                     iteration_plan=iteration_plan_text,
                     recent_chapter_assets_summary=recent_chapter_assets_summary,
                     include_history_hint=True,
+                    revision_mode_hint=revision_mode_hint,
+                    repair_hints=repair_hints_text,
                 )
 
                 # 仅在最后一轮向前端流式输出正文；前几轮不推送正文
@@ -2062,6 +2177,16 @@ async def execute_generate_next_chapter_task(
                 score = _extract_iteration_review_score(new_review_report)
                 has_unresolved_required_items = _iteration_review_has_unresolved_required_items(new_review_report)
                 logger.info(f"   🧮 第{round_idx}轮评分：{score:.1f}/10")
+                # 🆕 P1-1：复评后按最新失败码刷新修订模式（轻码→局部修订，重码→实质性重写）
+                round_failure_codes = extract_failure_codes(new_review_report)
+                revision_mode, revision_mode_hint = resolve_revision_mode(round_failure_codes)
+                # 🆕 P2-2 T1：同步刷新机制修复指引，下一轮改稿使用最新失败码命中的修复机制
+                repair_hints_text = build_repair_hints(round_failure_codes)
+                if revision_mode:
+                    logger.info(
+                        f"   🧭 第{round_idx}轮失败码路由刷新: 模式={revision_mode}, "
+                        f"码数={len(round_failure_codes)}"
+                    )
                 if has_unresolved_required_items:
                     logger.info("   🚧 第%s轮仍有必改项未执行，本轮不作为可采用版本", round_idx)
                 await ws_manager.send_task_progress(
@@ -2193,6 +2318,31 @@ async def execute_generate_next_chapter_task(
         )
         logger.info(f"   ✓ 最终版本已同步到数据库")
 
+        # 🆕 P1-2/P1-3：沉淀项目级质量记忆与伏笔账本（写入 review_meta，供后续章节注入）
+        try:
+            latest_review_meta = workflow_context_builder.load_review_meta(project_id) or {}
+            # 质量记忆：从最终评审提取未解决问题（达标章通常无剩余问题，未达标章自动沉淀）
+            unresolved_issues = extract_unresolved_issues(current_review or review_report or "")
+            if unresolved_issues:
+                update_quality_memory(latest_review_meta, next_chapter_number, unresolved_issues)
+            # 伏笔账本：登记本章伏笔埋设/回收
+            register_foreshadowing(
+                latest_review_meta,
+                next_chapter_number,
+                chapter_plan,
+                chapter_position=extract_chapter_position(chapter_plan),
+            )
+            workflow_context_builder.update_project_settings_fields(
+                project_id,
+                review_meta=latest_review_meta,
+            )
+            if unresolved_issues:
+                logger.info(
+                    f"   🧠 已沉淀 {len(unresolved_issues)} 条未解决问题到项目级质量记忆"
+                )
+        except Exception as memory_error:
+            logger.warning(f"   ⚠️ 质量记忆/伏笔账本沉淀失败（不影响本章产出）: {memory_error}")
+
         await ws_manager.send_task_progress(
             project_id=project_id,
             task_id=task_id,
@@ -2270,33 +2420,9 @@ async def execute_generate_next_chapter_task(
         # 见: start_chapter_post_save_task -> chapter_post_save.py -> unified_extraction.py
         # 所有设定提取现在都经过AI处理，生成高质量描述
 
-        # 🆕 阶段3：自动合并高置信度设定项到正式集合
-        try:
-            from app.services.setting_auto_merge import SettingAutoMergeService
-            
-            # 获取候选集合
-            candidate_collection = db.query(SettingCollection).filter(
-                SettingCollection.project_id == project_id,
-                SettingCollection.category == "candidate"
-            ).first()
-            
-            if candidate_collection:
-                merge_result = SettingAutoMergeService.auto_merge_high_confidence_items(
-                    db=db,
-                    project_id=project_id,
-                    candidate_collection_id=candidate_collection.id,
-                    chapter_plan=chapter_plan or "",
-                    chapter_content=final_version or "",
-                )
-                
-                if merge_result["merged_count"] > 0:
-                    logger.info(
-                        f"   ✓ 自动合并高置信度设定: "
-                        f"成功 {merge_result['merged_count']} 项, "
-                        f"跳过 {merge_result['skipped_count']} 项"
-                    )
-        except Exception as e:
-            logger.warning(f"   ⚠️ 自动合并设定失败: {e}")
+        # 🆕 设定回流（自动合并高置信候选 + 一致性检测）已移至后台任务内执行：
+        # 原先此处同步执行 auto_merge 早于后台提取，本章新提取的候选要等下一章才被合并；
+        # 现在由 process_chapter_post_save 在提取落库后立即回流（auto_merge_settings=True）。
 
         # ✅ 章节保存完成，立即更新任务状态并推送完成事件
         # 注意：摘要生成和统一提取将在后台异步执行，不阻塞主流程
@@ -2345,6 +2471,9 @@ async def execute_generate_next_chapter_task(
                 generate_summary=True,  # 🆕 工作流场景需要生成摘要
                 # 🆕 免费档后置提取/摘要同样锁定模型；标准档传 None 保持现有行为
                 post_processing_model=(workflow_generation_model if require_exact_model else None),
+                # 🆕 提取完成后执行设定回流：合并高置信候选 + 一致性检测（修复 P0-2 时序倒挂）
+                chapter_plan=chapter_plan or "",
+                auto_merge_settings=True,
             )
             
             logger.info(f"✅ 后台任务已启动，将在后台异步执行")

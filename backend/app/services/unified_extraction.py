@@ -23,6 +23,7 @@ class UnifiedExtractionService:
         chapter_content: str,
         project_id: int,
         model: Optional[str] = None,
+        project_categories: Optional[List[Dict[str, Any]]] = None,
     ) -> Dict[str, Any]:
         """
         一次性从章节内容中提取所有信息
@@ -71,7 +72,25 @@ class UnifiedExtractionService:
             or "deepseek-v4-pro"
         )
         llm = create_model_llm(model=model, temperature=0.7)
-        
+
+        # 🆕 项目体系提示：让 LLM 直接语义归类到项目实际体系（减少候选积压）
+        # 并提供体系内既有分类节点，供 subcategory 层级归位
+        category_hint_block = ""
+        if project_categories:
+            hint_lines = []
+            for cat in project_categories:
+                top_nodes = cat.get("top_nodes") or []
+                top_part = f"｜已有分类：{'、'.join(top_nodes)}" if top_nodes else ""
+                hint_lines.append(f"- {cat['key']}（{cat['name']}）{top_part}")
+            category_hint_block = f"""
+**项目已有设定体系**（优先归类到这些体系）：
+{chr(10).join(hint_lines)}
+
+每个实体额外输出两个字段：
+- category：从上述体系 key（或体系名）中选择最匹配的一个；都不匹配时输出 null
+- subcategory：仅当该体系"已有分类"中存在更精确的分类时填写对应分类名，否则输出 null
+"""
+
         # 构建统一提示词
         prompt = f"""你是一个小说设定提取专家。请从以下章节中**一次性**提取所有重要信息，包括：
 
@@ -127,7 +146,7 @@ class UnifiedExtractionService:
 - 从属关系：主仆、上下级
 
 ---
-
+{category_hint_block}
 **章节标题**：{chapter_title}
 
 **章节内容**：
@@ -142,7 +161,9 @@ class UnifiedExtractionService:
       "name": "实体名称",
       "type": "实体类型（必须从以下选择：人物/境界/功法/丹药/阵法/法宝/资源/地点/势力/符箓/魔法/职业/武道/异能/道具/血脉/官制/军事/经济/礼制/律法/情报/历史/风俗/人脉）",
       "content": "详细描述（不少于30字）",
-      "confidence": 0.8
+      "confidence": 0.8,
+      "category": "项目已有体系的key或null",
+      "subcategory": "体系内已有分类名或null"
     }}
   ],
   "locations": [
@@ -227,7 +248,7 @@ class UnifiedExtractionService:
         """验证实体数据格式"""
         if not isinstance(entities, list):
             return []
-        
+
         validated = []
         for e in entities:
             if not isinstance(e, dict):
@@ -235,8 +256,13 @@ class UnifiedExtractionService:
             if all(k in e for k in ['name', 'type', 'content']):
                 if 'confidence' not in e:
                     e['confidence'] = 0.6
+                # 🆕 规范化语义归类字段（null/空串/None 统一为 None）
+                raw_category = str(e.get('category') or '').strip()
+                raw_subcategory = str(e.get('subcategory') or '').strip()
+                e['category'] = raw_category if raw_category and raw_category.lower() != 'null' else None
+                e['subcategory'] = raw_subcategory if raw_subcategory and raw_subcategory.lower() != 'null' else None
                 validated.append(e)
-        
+
         return validated
     
     @staticmethod

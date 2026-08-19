@@ -61,9 +61,15 @@ class DoubaoSfxGenerator:
         return self._adapter
 
     @staticmethod
-    def build_text_prompt(prompt: str, duration: float) -> str:
-        """把音效描述与目标时长编译为纯音效生成提示词"""
+    def build_text_prompt(prompt: str, duration: Optional[float]) -> str:
+        """把音效描述与目标时长编译为纯音效生成提示词
+
+        duration 为 None 表示描述本身已包含明确时长（如“2秒左右”），
+        不再追加时长提示，避免两个矛盾时长同时出现在提示词里。
+        """
         description = str(prompt or "").strip().rstrip("。")
+        if duration is None:
+            return f"{description}。"
         duration_sec = max(1, round(float(duration or 0) or 5))
         return f"{description}。时长约{duration_sec}秒。"
 
@@ -71,7 +77,7 @@ class DoubaoSfxGenerator:
         self,
         *,
         prompt: str,
-        duration: float,
+        duration: Optional[float],
     ) -> DoubaoSfxResult:
         """调用豆包 seed-audio-1.0 生成音效素材"""
         try:

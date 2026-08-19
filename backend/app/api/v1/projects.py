@@ -1,10 +1,10 @@
-﻿"""
+"""
 项目API路由
 """
 from fastapi import APIRouter, Body, Depends, HTTPException, status, Query
 from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
-from typing import List, Literal, Optional
+from typing import Dict, List, Literal, Optional
 import logging
 import re
 from pydantic import BaseModel, ValidationError
@@ -28,12 +28,16 @@ from app.services.audiobook.project_audio_config import (
     get_audio_engine_mode,
     get_audio_fx,
     get_characters_for_model,
+    get_engine_branch,
+    get_scene_generation_preferences,
     get_seed_audio_model,
     parse_project_audio_config,
+    resolve_engine_mode,
     set_audio_fx,
     set_audio_engine_mode,
     set_seed_audio_model,
     set_characters_for_model,
+    set_engine_branch,
 )
 from app.services.audiobook.tts_model_ids import normalize_audiobook_tts_model
 from app.services.audiobook.chapter_character_scope import select_chapter_characters
@@ -59,6 +63,9 @@ class CharacterAudioConfig(BaseModel):
     mimo_voice_asset_id: Optional[str] = None
     stepaudio_voice_asset_id: Optional[str] = None
     source: Optional[str] = None  # "user" | "ai_suggest" | None
+    reference_source: Optional[str] = None
+    reference_audio_url: Optional[str] = None
+    voice_pool_publication_id: Optional[str] = None
 
 
 class AudioFxConfig(BaseModel):
@@ -76,8 +83,33 @@ class AudioFxConfig(BaseModel):
     sound_effect_ducking: bool = True
     sound_effect_priority: str = "dialogue"  # dialogue/sfx
     sound_effect_ducking_threshold_dbfs: float = -35.0
-    sound_effect_ducking_reduction_db: float = -6.0
+    # ducking 衰减：-4dB 保留人声优先同时让归一化后的触发音可穿透对白（旧值 -6 曾致掩蔽）
+    sound_effect_ducking_reduction_db: float = -4.0
     sound_effect_ducking_chunk_ms: int = 250
+
+
+class SceneGenerationPreferences(BaseModel):
+    """场景生成创作偏好（仅 seed_scene）"""
+    music_enabled: bool = True
+    music_style: Optional[str] = None
+    soundscape_intensity: str = "medium"
+    performance_style: str = "cinematic"
+    timeline_mode: str = "natural"
+    terminal_policy: str = "manual_review"
+    semantic_review_enabled: bool = True
+    semantic_review_mode: str = "shadow"
+
+
+class EngineTtsModelConfig(BaseModel):
+    """引擎分支下单个 TTS 模型的角色配置"""
+    characters: List[CharacterAudioConfig] = []
+
+
+class EngineBranchConfig(BaseModel):
+    """引擎分支配置"""
+    tts_models: Optional[Dict[str, EngineTtsModelConfig]] = None
+    audio_fx: Optional[AudioFxConfig] = None
+    scene_generation_preferences: Optional[SceneGenerationPreferences] = None
 
 
 class ProjectAudioConfig(BaseModel):
@@ -85,8 +117,15 @@ class ProjectAudioConfig(BaseModel):
     characters: List[CharacterAudioConfig] = []
     audio_fx: Optional[AudioFxConfig] = None
     audio_engine_mode: Optional[Literal["legacy_stems", "seed_scene", "auto"]] = None
-    # multilingual 变体暂不启用，仅开放 seed-audio-1.0；恢复时同步放开此处与 SEED_AUDIO_MODELS。
-    seed_audio_model: Optional[Literal["seed-audio-1.0"]] = None
+    seed_audio_model: Optional[Literal["seed-audio-1.0", "seed-audio-1.0-multilingual"]] = None
+    engines: Optional[Dict[str, EngineBranchConfig]] = None
+
+
+class EnginePreferencesResponse(BaseModel):
+    """引擎创作偏好响应"""
+    engine_mode: str
+    scene_generation_preferences: Optional[SceneGenerationPreferences] = None
+    audio_fx: Optional[AudioFxConfig] = None
 
 
 PERSISTED_CHARACTER_AUDIO_CONFIG_FIELDS = (
@@ -465,18 +504,26 @@ async def get_project_audio_config(
         )
 
     data = parse_project_audio_config(project.audio_config or "")
+    resolved_mode = resolve_engine_mode(data)
 
     characters = [
         _dump_persisted_character_audio_config(CharacterAudioConfig(**item))
-        for item in get_characters_for_model(data, tts_model)
+        for item in get_characters_for_model(data, tts_model, engine_mode=resolved_mode)
     ]
-    audio_fx = get_audio_fx(data)
-    # 让 Pydantic 处理具体字段校验
+    audio_fx = get_audio_fx(data, engine_mode=resolved_mode)
+
+    # 按当前引擎分支构建完整的 engines 字段供前端消费
+    engines_raw = data.get("engines")
+    engines = None
+    if isinstance(engines_raw, dict):
+        engines = engines_raw
+
     return ProjectAudioConfig(
         characters=characters,
         audio_fx=audio_fx,
-        audio_engine_mode=get_audio_engine_mode(data),
+        audio_engine_mode=resolved_mode,
         seed_audio_model=get_seed_audio_model(data),
+        engines=engines,
     )
 
 
@@ -500,18 +547,29 @@ async def update_project_audio_config(
         )
 
     data = parse_project_audio_config(project.audio_config or "")
+    # 先落 audio_engine_mode，使 resolved_mode 反映本次请求的目标引擎
+    # （GUIDE §2.2：前端切换引擎后保存到目标分支）
+    if config.audio_engine_mode is not None:
+        set_audio_engine_mode(data, config.audio_engine_mode)
+    resolved_mode = resolve_engine_mode(data)
+
     characters = [
         _dump_persisted_character_audio_config(c)
         for c in (config.characters or [])
     ]
-    set_characters_for_model(
-        data,
-        tts_model,
-        characters,
-    )
-    set_audio_fx(data, config.audio_fx.model_dump(exclude_none=True) if config.audio_fx else None)
-    if config.audio_engine_mode is not None:
-        set_audio_engine_mode(data, config.audio_engine_mode)
+    if config.engines is not None:
+        # 新客户端：engines 分支显式写入（engines.{mode}.tts_models.{model}.characters），
+        # 顶层 characters/audio_fx 不落位，避免空列表清空其他引擎分支
+        for mode, branch in config.engines.items():
+            set_engine_branch(data, mode, branch.model_dump(exclude_none=True) if branch else {})
+    else:
+        # 旧客户端：顶层 characters/audio_fx 按当前引擎分支落位（向后兼容）
+        set_characters_for_model(data, tts_model, characters, engine_mode=resolved_mode)
+        set_audio_fx(
+            data,
+            config.audio_fx.model_dump(exclude_none=True) if config.audio_fx else None,
+            engine_mode=resolved_mode,
+        )
     if config.seed_audio_model is not None:
         set_seed_audio_model(data, config.seed_audio_model)
     project.audio_config = json.dumps(data, ensure_ascii=False)
@@ -519,11 +577,19 @@ async def update_project_audio_config(
     db.commit()
     db.refresh(project)
 
+    # 重新读回已保存的分支数据（含 engines 字段）
+    saved_data = parse_project_audio_config(project.audio_config or "")
+    saved_engines_raw = saved_data.get("engines")
+    saved_engines = None
+    if isinstance(saved_engines_raw, dict):
+        saved_engines = saved_engines_raw
+
     return ProjectAudioConfig(
         characters=characters,
         audio_fx=config.audio_fx,
-        audio_engine_mode=get_audio_engine_mode(data),
+        audio_engine_mode=resolved_mode,
         seed_audio_model=get_seed_audio_model(data),
+        engines=saved_engines,
     )
 
 
@@ -586,13 +652,17 @@ async def auto_assign_project_audio_voices(
 
     # 解析现有 audio_config
     data = parse_project_audio_config(project.audio_config or "")
-    existing_characters = get_characters_for_model(data, tts_model)
-    audio_fx = get_audio_fx(data)
+    resolved_mode = resolve_engine_mode(data)
+    existing_characters = get_characters_for_model(data, tts_model, engine_mode=resolved_mode)
+    audio_fx = get_audio_fx(data, engine_mode=resolved_mode)
 
     # 载入项目角色，并按本次所选章节收敛推荐范围。
     characters = (
         db.query(Character)
-        .filter(Character.project_id == project_id)
+        .filter(
+            Character.project_id == project_id,
+            Character.archived_at.is_(None),
+        )
         .order_by(Character.id)
         .all()
     )
@@ -899,14 +969,70 @@ async def auto_assign_project_audio_voices(
     db.commit()
     db.refresh(project)
 
-    set_characters_for_model(data, tts_model, result_characters)
-    set_audio_fx(data, audio_fx)
+    set_characters_for_model(data, tts_model, result_characters, engine_mode=resolved_mode)
+    set_audio_fx(data, audio_fx, engine_mode=resolved_mode)
     project.audio_config = json.dumps(data, ensure_ascii=False)
     db.add(project)
     db.commit()
     db.refresh(project)
 
-    return ProjectAudioConfig(characters=result_characters, audio_fx=audio_fx)
+    # 重新读回已保存的分支数据用于响应
+    saved_data = parse_project_audio_config(project.audio_config or "")
+    saved_engines_raw = saved_data.get("engines")
+    saved_engines = None
+    if isinstance(saved_engines_raw, dict):
+        saved_engines = saved_engines_raw
+
+    return ProjectAudioConfig(
+        characters=result_characters,
+        audio_fx=audio_fx,
+        audio_engine_mode=resolved_mode,
+        seed_audio_model=get_seed_audio_model(data),
+        engines=saved_engines,
+    )
+
+
+@router.get("/{project_id}/audio-config/engine-preferences", response_model=EnginePreferencesResponse)
+async def get_project_audio_engine_preferences(
+    project_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> EnginePreferencesResponse:
+    """获取当前引擎的创作偏好。
+
+    - seed_scene 返回 scene_generation_preferences
+    - legacy_stems 返回 audio_fx
+    """
+    project = db.query(Project).filter(
+        (Project.id == project_id) & (Project.user_id == current_user.id)
+    ).first()
+
+    if not project:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Project not found",
+        )
+
+    data = parse_project_audio_config(project.audio_config or "")
+    resolved_mode = resolve_engine_mode(data)
+
+    scene_prefs = None
+    audio_fx = None
+
+    if resolved_mode == "seed_scene":
+        raw_prefs = get_scene_generation_preferences(data, resolved_mode)
+        if raw_prefs:
+            scene_prefs = SceneGenerationPreferences(**raw_prefs)
+    else:
+        raw_fx = get_audio_fx(data, engine_mode=resolved_mode)
+        if raw_fx:
+            audio_fx = AudioFxConfig(**raw_fx)
+
+    return EnginePreferencesResponse(
+        engine_mode=resolved_mode,
+        scene_generation_preferences=scene_prefs,
+        audio_fx=audio_fx,
+    )
 
 
 # 章节路由

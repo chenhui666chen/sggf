@@ -12,20 +12,55 @@ SSE (Server-Sent Events) 进度推送服务
 import asyncio
 import json
 import logging
+import time
 import uuid
 from contextlib import suppress
 from datetime import datetime
 from typing import Any, Dict, Optional, Set
+from urllib.parse import urlsplit, urlunsplit
 
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
 REDIS_CHANNEL_PREFIX = "audiobook:sse:task:"
+# 本地 Redis 偶发慢响应不应导致 SSE 事件全部丢失：连接/读写超时放宽到 2s
+REDIS_SOCKET_TIMEOUT_SECONDS = 2.0
+# Redis 不可用后进入冷却期：冷却期内不再反复创建连接；冷却期过后重新探测，
+# 避免“一次失败永久禁用”导致 Redis 恢复后 SSE 仍然静默丢失。
+REDIS_RETRY_COOLDOWN_SECONDS = 30.0
 
 
 def _format_sse_message(event: Dict[str, Any]) -> str:
     return f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+
+
+def _redact_redis_url(redis_url: str) -> str:
+    """仅保留连接位置，移除 Redis 凭据和查询参数。"""
+    try:
+        parsed = urlsplit(redis_url)
+        host = parsed.hostname or "configured"
+        if ":" in host and not host.startswith("["):
+            host = f"[{host}]"
+        netloc = f"{host}:{parsed.port}" if parsed.port is not None else host
+        return urlunsplit((parsed.scheme or "redis", netloc, parsed.path, "", ""))
+    except (TypeError, ValueError):
+        return "redis://configured"
+
+
+def _build_redis_client(redis_url: str, *, async_client: bool = False):
+    """按同步/异步模式创建 Redis 客户端（统一超时配置，供发布与订阅复用）。"""
+    if async_client:
+        import redis.asyncio as redis
+    else:
+        import redis
+    return redis.from_url(
+        redis_url,
+        encoding="utf-8",
+        decode_responses=True,
+        socket_connect_timeout=REDIS_SOCKET_TIMEOUT_SECONDS,
+        socket_timeout=REDIS_SOCKET_TIMEOUT_SECONDS,
+    )
 
 
 class SSEProgressTracker:
@@ -38,6 +73,26 @@ class SSEProgressTracker:
         self._redis_publish_client = None
         self._redis_checked = False
         self._redis_available = False
+        self._redis_failed_at: Optional[float] = None
+
+    def _redis_in_cooldown(self) -> bool:
+        """Redis 失败后是否仍处于冷却期（冷却期内跳过 Redis 路径）。"""
+        if not self._redis_checked or self._redis_available or not self._redis_failed_at:
+            return False
+        return (time.monotonic() - self._redis_failed_at) < REDIS_RETRY_COOLDOWN_SECONDS
+
+    def _mark_redis_failure(self) -> None:
+        self._redis_publish_client = None
+        self._redis_checked = True
+        self._redis_available = False
+        self._redis_failed_at = time.monotonic()
+
+    def _mark_redis_success(self, client: Any = None) -> None:
+        if client is not None:
+            self._redis_publish_client = client
+        self._redis_checked = True
+        self._redis_available = True
+        self._redis_failed_at = None
 
     def register_client(self, task_id: str) -> asyncio.Queue:
         """注册客户端到指定任务"""
@@ -75,64 +130,46 @@ class SSEProgressTracker:
         }
 
     async def _get_redis_publish_client(self):
-        if self._redis_checked and not self._redis_available:
+        if self._redis_in_cooldown():
             return None
         if self._redis_checked and self._redis_publish_client is not None:
             return self._redis_publish_client
 
-        self._redis_checked = True
         redis_url = str(getattr(settings, "REDIS_URL", "") or "").strip()
         if not redis_url:
+            self._mark_redis_failure()
             return None
 
         try:
-            import redis.asyncio as redis
-
-            client = redis.from_url(
-                redis_url,
-                encoding="utf-8",
-                decode_responses=True,
-                socket_connect_timeout=0.2,
-                socket_timeout=0.2,
-            )
+            client = _build_redis_client(redis_url, async_client=True)
             await client.ping()
-            self._redis_publish_client = client
-            self._redis_available = True
-            logger.info("Audiobook SSE Redis pub/sub enabled: %s", redis_url)
+            self._mark_redis_success(client)
+            logger.info(
+                "Audiobook SSE Redis pub/sub enabled: %s",
+                _redact_redis_url(redis_url),
+            )
         except Exception as exc:  # noqa: BLE001
-            self._redis_publish_client = None
-            self._redis_available = False
+            self._mark_redis_failure()
             logger.warning("Audiobook SSE Redis unavailable, using process-local queues: %s", exc)
 
         return self._redis_publish_client
 
     def _publish_event_to_redis_sync(self, task_id: str, event: Dict[str, Any]) -> None:
-        if self._redis_checked and not self._redis_available:
+        if self._redis_in_cooldown():
             return
 
         redis_url = str(getattr(settings, "REDIS_URL", "") or "").strip()
         if not redis_url:
-            self._redis_checked = True
-            self._redis_available = False
+            self._mark_redis_failure()
             return
 
         client = None
         try:
-            import redis
-
-            client = redis.from_url(
-                redis_url,
-                encoding="utf-8",
-                decode_responses=True,
-                socket_connect_timeout=0.2,
-                socket_timeout=0.2,
-            )
+            client = _build_redis_client(redis_url, async_client=False)
             client.publish(self._redis_channel(task_id), json.dumps(event, ensure_ascii=False))
-            self._redis_checked = True
-            self._redis_available = True
+            self._mark_redis_success()
         except Exception as exc:  # noqa: BLE001
-            self._redis_checked = True
-            self._redis_available = False
+            self._mark_redis_failure()
             logger.warning("Audiobook SSE Redis sync publish unavailable: %s", exc)
         finally:
             if client is not None:
@@ -145,15 +182,7 @@ class SSEProgressTracker:
             return None
 
         try:
-            import redis.asyncio as redis
-
-            client = redis.from_url(
-                redis_url,
-                encoding="utf-8",
-                decode_responses=True,
-                socket_connect_timeout=0.2,
-                socket_timeout=0.2,
-            )
+            client = _build_redis_client(redis_url, async_client=True)
             await client.ping()
             return client
         except Exception as exc:  # noqa: BLE001
@@ -227,10 +256,17 @@ class SSEProgressTracker:
         await self._publish_event_to_redis(task_id, event)
 
     def emit_progress(self, task_id: Optional[str], data: dict):
-        """从同步任务代码中安全触发 SSE 进度事件。"""
+        """从同步任务代码中安全触发 SSE 进度事件。
+
+        R13/P1-a：事件 data 携带 ``run_id``（detail 透传）与父 ``job_id``
+        （兼容期值 = task_id；前端按 job_id 聚合多 run 事件）。
+        """
         if not task_id:
             return
-        event = self._build_progress_event(data)
+        event_data = dict(data or {})
+        if "job_id" not in event_data:
+            event_data["job_id"] = task_id
+        event = self._build_progress_event(event_data)
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:

@@ -28,9 +28,10 @@ class GenerationFeedback(Base):
     """生成结果反馈记录 — 用户评分 + QC质检结果回流。"""
 
     __tablename__ = "generation_feedbacks"
+    # 注意：user_id/model_id/applied_to_profile 已由列级 index=True 生成同名索引
+    # （ix_generation_feedbacks_{user_id|model_id|applied_to_profile}），
+    # 此处不再显式注册，避免 create_all 重复建同名索引报错。
     __table_args__ = (
-        Index("ix_generation_feedbacks_model_id", "model_id"),
-        Index("ix_generation_feedbacks_user_id", "user_id"),
         Index("ix_generation_feedbacks_task_type", "task_type"),
         Index("ix_generation_feedbacks_created_at", "created_at"),
     )

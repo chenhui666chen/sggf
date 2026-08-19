@@ -40,8 +40,10 @@ class WorkflowRagContext:
     relevant_categories: List[str] = field(default_factory=list)
     rag_character_context: str = ""
     rag_world_context: str = ""
+    rag_previous_context: str = ""
     character_hits: int = 0
     world_hits: int = 0
+    previous_hits: int = 0
     used_vector_search: bool = False
     used_summary_fallback: bool = False
 
@@ -1344,14 +1346,61 @@ class WorkflowContextBuilder:
         character_k: Optional[int] = None,
         world_k: Optional[int] = None,
         fallback_max_content_length: int = 200,
+        current_chapter_number: Optional[int] = None,
+        previous_chapter_k: Optional[int] = None,
+        recent_chapter_window: int = 3,
+        category_source_text: Optional[str] = None,
+        focus_character_names: Optional[List[str]] = None,
+        chapter_plan: Optional[str] = None,
     ) -> WorkflowRagContext:
         normalized_query = _decode_prompt_text(query_text)
-        relevant_categories = extract_relevant_categories_from_text(normalized_query)
+        # 类别提取用原文（子串匹配，文本越全越准）；embedding 检索用短 query（避免长文本稀释语义）
+        relevant_categories = extract_relevant_categories_from_text(
+            _decode_prompt_text(category_source_text) if category_source_text else normalized_query
+        )
+
+        # 🆕 场景驱动设定召回：按细纲场景（战斗/炼制等）与焦点人物，
+        # 确定性召回人物当前可用的功法/武器/丹药/境界，先于 RAG 注入。
+        scene_pack = None
+        try:
+            from app.services.scene_setting_retriever import build_scene_setting_pack
+
+            scene_pack = build_scene_setting_pack(
+                self.db,
+                project_id,
+                focus_character_names,
+                current_chapter_number=current_chapter_number,
+                source_text=_decode_prompt_text(category_source_text) if category_source_text else normalized_query,
+            )
+            if scene_pack:
+                logger.info(
+                    "   ⚔️ 场景设定包命中：场景=%s，设定项=%d",
+                    scene_pack.scene_types,
+                    len(scene_pack.setting_ids),
+                )
+        except Exception as exc:
+            logger.warning("场景设定包构建失败（忽略，不影响RAG）: %s", exc)
+
+        # 🆕 规划点名设定召回：章节规划中明确提到的设定名，
+        # 确定性注入详情（与场景包互补，重复项去重）。
+        planned_setting_items: List[Any] = []
+        planned_setting_lines: List[str] = []
+        try:
+            from app.services.scene_setting_retriever import extract_planned_settings
+
+            raw_plan = _decode_prompt_text(chapter_plan) if chapter_plan else ""
+            planned_setting_items = extract_planned_settings(self.db, project_id, raw_plan)
+            if planned_setting_items:
+                logger.info("   📌 规划点名设定命中：%s", "、".join(it.name for it in planned_setting_items))
+        except Exception as exc:
+            logger.warning("规划点名设定提取失败（忽略，不影响RAG）: %s", exc)
 
         rag_character_context = ""
         rag_world_context = ""
+        rag_previous_context = ""
         character_hits = 0
         world_hits = 0
+        previous_hits = 0
         used_vector_search = False
         used_summary_fallback = False
 
@@ -1363,7 +1412,6 @@ class WorkflowContextBuilder:
 
             kb = get_vector_kb()
             if kb and getattr(settings, "ENABLE_TYPED_RAG", True) and normalized_query.strip():
-                used_vector_search = True
                 char_docs = kb.search(
                     query=normalized_query,
                     k=character_k or getattr(settings, "TYPED_RAG_K_CHAR", 4),
@@ -1376,6 +1424,40 @@ class WorkflowContextBuilder:
                     filter_type="world_setting",
                     project_id=project_id,
                 )
+
+                # 🆕 前文章节长程检索：召回本章之前、近期窗口之外的章节片段。
+                # 近 recent_chapter_window 章已由结构化连续性资产覆盖，这里只取更早的长期细节。
+                previous_lines: List[str] = []
+                if current_chapter_number and current_chapter_number > 1:
+                    prev_k = previous_chapter_k or getattr(settings, "TYPED_RAG_K_PREV", 2)
+                    chapter_docs = kb.search(
+                        query=normalized_query,
+                        k=max(prev_k * 5, 10),
+                        filter_type="chapter",
+                        project_id=project_id,
+                    )
+                    earliest_allowed = current_chapter_number - recent_chapter_window
+                    seen_chapters = set()
+                    for doc in chapter_docs:
+                        meta = doc.metadata or {}
+                        raw_num = meta.get("chapter_num") or meta.get("chapter_number")
+                        try:
+                            doc_chapter = int(raw_num)
+                        except (TypeError, ValueError):
+                            continue
+                        if doc_chapter >= earliest_allowed or doc_chapter in seen_chapters:
+                            continue
+                        seen_chapters.add(doc_chapter)
+                        snippet = smart_truncate_for_context(
+                            doc.page_content, max_tokens=150, content_type="rag_doc", preserve_ratio=0.9
+                        )
+                        title = meta.get("title") or f"第{doc_chapter}章"
+                        previous_lines.append(f"- 第{doc_chapter}章《{title}》片段: {snippet}")
+                        if len(previous_lines) >= prev_k:
+                            break
+                    if previous_lines:
+                        rag_previous_context = "\n".join(previous_lines)
+                        previous_hits = len(previous_lines)
 
                 if relevant_categories and world_docs:
                     category_aliases = set(
@@ -1391,6 +1473,16 @@ class WorkflowContextBuilder:
                         else:
                             fallback_docs.append(doc)
                     world_docs = prioritized_docs + fallback_docs
+
+                # 🆕 场景设定包/规划点名去重：已确定性注入的设定项不再通过 RAG 重复注入
+                planned_setting_ids = {item.id for item in planned_setting_items}
+                if (scene_pack or planned_setting_ids) and world_docs:
+                    injected_ids = set(scene_pack.setting_ids if scene_pack else set()) | planned_setting_ids
+                    world_docs = [
+                        doc
+                        for doc in world_docs
+                        if doc.metadata.get("setting_id") not in injected_ids
+                    ]
 
                 deduped_char_docs = []
                 seen_character_keys = set()
@@ -1424,6 +1516,9 @@ class WorkflowContextBuilder:
                             for doc in world_docs
                         ]
                     )
+
+                # 🆕 标志语义修正：向量检索真正命中（任一类型有结果）才算生效
+                used_vector_search = bool(deduped_char_docs or world_docs or previous_lines)
         except Exception as exc:
             logger.warning("统一 Typed-RAG 上下文构建失败: %s", exc)
 
@@ -1436,14 +1531,57 @@ class WorkflowContextBuilder:
             )
             used_summary_fallback = bool(rag_world_context)
 
+        # 🆕 场景设定包前置注入：人物当前可用设定优先级高于 RAG/摘要
+        if scene_pack and scene_pack.text:
+            rag_world_context = (
+                f"{scene_pack.text}\n{rag_world_context}" if rag_world_context else scene_pack.text
+            )
+            world_hits += len(scene_pack.setting_ids)
+
+        # 🆕 规划点名设定注入：章节规划明确点到的设定详情（与场景包去重）
+        if planned_setting_items:
+            try:
+                from app.services.agents.intelligent_truncator import smart_truncate_for_context
+            except Exception:
+                smart_truncate_for_context = None  # type: ignore[assignment]
+
+            scene_pack_ids = set(scene_pack.setting_ids) if scene_pack else set()
+            fresh_items = [item for item in planned_setting_items if item.id not in scene_pack_ids]
+            if fresh_items:
+                def _render_setting_content(raw: str) -> str:
+                    if not raw.strip():
+                        return ""
+                    if smart_truncate_for_context is None:
+                        return raw[:400]
+                    return smart_truncate_for_context(
+                        raw, max_tokens=250, content_type="rag_doc", preserve_ratio=0.9
+                    )
+
+                planned_lines = [
+                    f"- {item.name}: {_render_setting_content(item.content or '')}"
+                    for item in fresh_items
+                    if (item.content or "").strip()
+                ]
+                if planned_lines:
+                    planned_block = (
+                        "【规划指定设定】（章节规划明确调用的设定，正文写作必须严格遵守）\n"
+                        + "\n".join(planned_lines)
+                    )
+                    rag_world_context = (
+                        f"{planned_block}\n{rag_world_context}" if rag_world_context else planned_block
+                    )
+                    world_hits += len(planned_lines)
+
         return WorkflowRagContext(
             project_id=project_id,
             query_text=normalized_query,
             relevant_categories=relevant_categories,
             rag_character_context=rag_character_context,
             rag_world_context=rag_world_context,
+            rag_previous_context=rag_previous_context,
             character_hits=character_hits,
             world_hits=world_hits,
+            previous_hits=previous_hits,
             used_vector_search=used_vector_search,
             used_summary_fallback=used_summary_fallback,
         )

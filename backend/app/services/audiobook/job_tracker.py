@@ -171,11 +171,20 @@ class AudiobookJobTracker:
             ):
                 return
             if not run:
+                # Contract 收窄后 chapter_audio_id NOT NULL：兜底创建时解析 active ChapterAudio
+                from app.services.audiobook.task_support import _ensure_active_chapter_audio
+
+                _chapter_audio = _ensure_active_chapter_audio(
+                    session,
+                    audiobook_project_id=task.audiobook_project_id,
+                    chapter_id=chapter_id,
+                )
                 run = ChapterAudioRun(
                     audiobook_project_id=task.audiobook_project_id,
                     chapter_id=chapter_id,
                     run_type=task.task_type,
                     celery_task_id=task.celery_task_id,
+                    chapter_audio_id=_chapter_audio.id,
                     status=status or task.status or "running",
                     current_stage=stage,
                     progress=progress,

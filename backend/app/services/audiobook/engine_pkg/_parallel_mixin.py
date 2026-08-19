@@ -101,6 +101,10 @@ class ParallelMixin:
         """
         audio_fx_for_generation = getattr(self, "_audio_fx_config", None) or {}
         is_seed_scene = str(getattr(self, "_audio_engine_mode", "legacy_stems")) == "seed_scene"
+        if is_seed_scene:
+            # seed_scene 引擎不产出分轨素材/时间线（场景导演自产渲染资产），
+            # prepare_render_assets 由管线按引擎模式强制关闭，不依赖调用方传参
+            prepare_render_assets = False
 
         def asset_generation_enabled(enable_key: str, density_key: str) -> bool:
             if not audio_fx_for_generation:

@@ -661,82 +661,88 @@ class IncrementalExpansionMixin:
             characters,
             detail_limit=EPIC_FRAMEWORK_CHARACTER_CONTEXT_LIMIT,
         ) or "（暂无核心人物卡）"
-        schema = json.dumps(
-            {
-                "story_positioning": {
-                    "genre_type": "题材类型",
-                    "global_theme": "全局主题",
-                    "story_premise": "故事总纲",
-                    "core_hook": "核心卖点",
-                    "endgame_direction": "终局方向",
-                    "core_contradiction": "核心矛盾",
-                },
-                "stage_roadmap": [
-                    {
-                        "stage": "阶段名称",
-                        "volume_span": "第1-3卷",
-                        "chapter_span": "1-180",
-                        "phase_goal": "阶段目标",
-                        "main_conflict": "阶段主冲突",
-                        "growth_focus": "成长重点",
-                        "ending_signal": "阶段收束标记",
-                    }
+        # 两段生成：卷数较多时单次 JSON 负载过重会稀释卷间梯度逻辑（冲突升级/收束递进），
+        # 第一段只出结构性骨架，第二段以骨架为约束补全伏笔表与人物生命周期
+        skeleton_schema = {
+            "story_positioning": {
+                "genre_type": "题材类型",
+                "global_theme": "全局主题",
+                "story_premise": "故事总纲",
+                "core_hook": "核心卖点",
+                "endgame_direction": "终局方向",
+                "core_contradiction": "核心矛盾",
+            },
+            "stage_roadmap": [
+                {
+                    "stage": "阶段名称",
+                    "volume_span": "第1-3卷",
+                    "chapter_span": "1-180",
+                    "phase_goal": "阶段目标",
+                    "main_conflict": "阶段主冲突",
+                    "growth_focus": "成长重点",
+                    "ending_signal": "阶段收束标记",
+                }
+            ],
+            "power_progression": [
+                {
+                    "volume_span": "第1-2卷",
+                    "chapter_span": "1-120",
+                    "realm_stage": "力量或地位成长",
+                    "conflict_upgrade": "冲突升级方式",
+                    "notes": "说明",
+                }
+            ],
+            "rolling_strategy": {
+                "planning_principle": "总纲到卷纲再到当前卷细化",
+                "detail_window": "后续只细化当前卷，并保留下一卷接口",
+                "continuity_focus": "如何保持连续性",
+                "anti_drift_rules": [
+                    "每次细化前回看上一卷结尾和人物状态",
+                    "严格对齐当前阶段目标与卷末交接"
                 ],
-                "power_progression": [
-                    {
-                        "volume_span": "第1-2卷",
-                        "chapter_span": "1-120",
-                        "realm_stage": "力量或地位成长",
-                        "conflict_upgrade": "冲突升级方式",
-                        "notes": "说明",
-                    }
-                ],
-                "rolling_strategy": {
-                    "planning_principle": "总纲到卷纲再到当前卷细化",
-                    "detail_window": "后续只细化当前卷，并保留下一卷接口",
-                    "continuity_focus": "如何保持连续性",
-                    "anti_drift_rules": [
-                        "每次细化前回看上一卷结尾和人物状态",
-                        "严格对齐当前阶段目标与卷末交接"
-                    ],
-                    "character_collaboration": [
-                        "主角线负责推动主冲突",
-                        "盟友线负责情报/情感/支线承接"
-                    ],
-                },
-                "volumes": [
-                    {
-                        "volume_index": 1,
-                        "title": "卷名",
-                        "chapter_span": "60-80",
-                        "stage_positioning": "本卷在全书中的定位",
-                        "core_goal": "本卷核心目标",
-                        "main_conflict": "本卷主冲突",
-                        "character_focus": "本卷重点人物协同",
-                        "foreshadowing_task": "本卷伏笔任务",
-                        "ending_climax": "卷末爆点",
-                        "next_volume_hook": "下卷交接"
-                    }
-                ],
-                "foreshadowings": [
-                    {
-                        "content": "伏笔内容",
-                        "plant_at": "第1卷",
-                        "pave_at": ["第2卷"],
-                        "reveal_at": "第4卷",
-                        "purpose": "这条伏笔承担的作用"
-                    }
-                ],
-                "character_lifecycle": [
-                    {
-                        "character": "角色名",
-                        "debut": "第1卷",
-                        "active_span": "1-6卷",
-                        "transition": "阶段变化",
-                        "volume_role": "卷级职责"
-                    }
+                "character_collaboration": [
+                    "主角线负责推动主冲突",
+                    "盟友线负责情报/情感/支线承接"
                 ],
             },
+            "volumes": [
+                {
+                    "volume_index": 1,
+                    "title": "卷名",
+                    "chapter_span": "60-80",
+                    "stage_positioning": "本卷在全书中的定位",
+                    "core_goal": "本卷核心目标",
+                    "main_conflict": "本卷主冲突",
+                    "character_focus": "本卷重点人物协同",
+                    "foreshadowing_task": "本卷伏笔任务",
+                    "ending_climax": "卷末爆点",
+                    "next_volume_hook": "下卷交接"
+                }
+            ],
+        }
+        detail_schema = {
+            "foreshadowings": [
+                {
+                    "content": "伏笔内容",
+                    "plant_at": "第1卷",
+                    "pave_at": ["第2卷"],
+                    "reveal_at": "第4卷",
+                    "purpose": "这条伏笔承担的作用"
+                }
+            ],
+            "character_lifecycle": [
+                {
+                    "character": "角色名",
+                    "debut": "第1卷",
+                    "active_span": "1-6卷",
+                    "transition": "阶段变化",
+                    "volume_role": "卷级职责"
+                }
+            ],
+        }
+        use_split_stages = total_volumes >= 6
+        schema = json.dumps(
+            skeleton_schema if use_split_stages else {**skeleton_schema, **detail_schema},
             ensure_ascii=False,
             indent=2,
         )
@@ -768,14 +774,58 @@ class IncrementalExpansionMixin:
 """
 
         payload = self._story_invoke_agent_json(
-            self.creative_director,
+            self.creative_director_pro,
             framework_prompt,
             fallback={"volumes": []},
         )
+        logger.info(
+            "🏗️ epic 框架第一阶段（结构骨架）完成：volumes=%s, stage_roadmap=%s",
+            len(payload.get("volumes") or []) if isinstance(payload, dict) else 0,
+            len(payload.get("stage_roadmap") or []) if isinstance(payload, dict) else 0,
+        )
+
+        # 🆕 第二段：以第一段骨架为约束，补全伏笔表与人物生命周期（仅分卷较多时启用）
+        if use_split_stages:
+            skeleton_json = json.dumps(payload, ensure_ascii=False)
+            if len(skeleton_json) > 8000:
+                skeleton_json = skeleton_json[:8000] + "…（已截断）"
+            detail_prompt = f"""你是长篇网文总策划。全书结构骨架（第一阶段已定稿）如下，请基于它补全全书伏笔布局与核心人物生命周期。
+
+【全书结构骨架】（必须严格遵守，不得改动其中的卷规划与阶段划分）
+{skeleton_json}
+
+【要求】
+1. 伏笔表：覆盖核心跨卷伏笔，写清埋设（plant_at）/铺垫（pave_at）/回收（reveal_at）三段位置与作用。
+2. 人物生命周期：主要人物的登场、活跃跨度、阶段变化、卷级职责，必须与骨架中的卷规划一致。
+3. 只返回合法 JSON 对象，不要解释，不要 Markdown 代码块。
+
+【输出 JSON Schema】
+{json.dumps(detail_schema, ensure_ascii=False, indent=2)}
+"""
+            detail_payload = self._story_invoke_agent_json(
+                self.creative_director_pro,
+                detail_prompt,
+                fallback={"foreshadowings": [], "character_lifecycle": []},
+            )
+            if isinstance(detail_payload, dict):
+                for key in detail_schema:
+                    if detail_payload.get(key):
+                        payload[key] = detail_payload[key]
+            logger.info(
+                "🗺️ epic 框架第二阶段（伏笔表+人物生命周期）完成：foreshadowings=%s, character_lifecycle=%s",
+                len(detail_payload.get("foreshadowings") or []) if isinstance(detail_payload, dict) else 0,
+                len(detail_payload.get("character_lifecycle") or []) if isinstance(detail_payload, dict) else 0,
+            )
+
         framework_text = self._story_render_epic_framework(payload, total_volumes)
         if not self._story_has_expected_volume_sections(framework_text, total_volumes):
             existing_indexes = self._story_list_parseable_volume_indexes(framework_text)
             existing_indexes_text = "、".join(str(index) for index in existing_indexes) if existing_indexes else "无"
+            logger.warning(
+                "epic 框架卷数校验未通过：期望 %s 卷，实际可解析卷：%s，启用文本兜底重生成",
+                total_volumes,
+                existing_indexes_text,
+            )
             fallback_prompt = f"""你是长篇网文总策划，请按以下结构输出长篇框架：
 
 ## 一、故事总纲与终局
@@ -820,7 +870,12 @@ class IncrementalExpansionMixin:
 3. 必须完整列出【第1卷】到【第{total_volumes}卷】，总数严格等于 {total_volumes} 卷，不能缺少任何一卷。
 4. 如果已有草稿只覆盖了部分卷（当前仅检测到：{existing_indexes_text}），请直接补全并重写完整的 1-{total_volumes} 卷分卷规划，不要只保留前几卷。
 5. 若输出长度受限，请压缩每卷描述，但不要减少卷数。"""
-            framework_text = self.creative_director.process(fallback_prompt, {})
+            framework_text = self.creative_director_pro.process(fallback_prompt, {})
+            if not self._story_has_expected_volume_sections(framework_text, total_volumes):
+                logger.warning(
+                    "epic 框架文本兜底重生成后卷数仍不完整（期望 %s 卷）",
+                    total_volumes,
+                )
         return {
             "expanded_outline": framework_text,
             "framework_type": "epic",

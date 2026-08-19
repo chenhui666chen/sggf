@@ -39,6 +39,38 @@ from .pause_tags import coerce_pause_ms
 
 logger = logging.getLogger(__name__)
 
+# 音效叠加的响度归一化目标（dBFS）：
+# 音效素材源能量参差（实测 -13 ~ -32dBFS），按资产绝对能量口径叠加固定偏移时，
+# 触发类音效会被人声（约 -28dBFS）听觉掩蔽、静音底轨试听近乎无声。
+# 归一化把素材统一到按类型的响度基准，timeline volume 参数（0~1，0.5 为默认）
+# 由此成为真实的相对响度偏移。
+SFX_TARGET_LOUDNESS_DBFS = {
+    "environment": -32.0,   # 环境床音：铺底，明显低于人声
+    "action": -20.0,        # 触发类动作音：ducking 后仍高于人声约 2dB，可穿透对白
+    "emotion": -25.0,       # 情绪音
+    "transition": -27.0,    # 过渡音
+}
+_SFX_DEFAULT_TARGET_LOUDNESS_DBFS = -27.0
+
+
+def sfx_loudness_plan(effect_type: Any, timeline_volume: Any) -> Tuple[float, float]:
+    """按时间线条目类型与音量计算 (normalize_target_dbfs, effect_volume_offset)。
+
+    normalize_target_dbfs 为响度归一化目标；effect_volume_offset 为音量参数相对
+    默认音量（0.5）的偏移，不再携带资产能量偏差。
+    """
+    try:
+        volume = float(timeline_volume)
+    except (TypeError, ValueError):
+        volume = 0.5
+    # 避免 0 导致 log10 计算错误，做一点下限保护
+    volume = max(0.05, min(1.0, volume))
+    volume_adjust_db = 20 * math.log10(volume / 0.5)
+    target = SFX_TARGET_LOUDNESS_DBFS.get(
+        str(effect_type or "action"), _SFX_DEFAULT_TARGET_LOUDNESS_DBFS
+    )
+    return target, volume_adjust_db
+
 # 检查 FFmpeg 是否可用
 def _check_ffmpeg_available() -> bool:
     """检查 FFmpeg 是否安装"""
@@ -117,6 +149,9 @@ class AudioMixer:
         # 🆕 新增：响度标准化参数
         enable_loudness_norm: bool = True,
         target_loudness_lufs: float = -16.0,  # EBU R128 标准响度
+        # 🆕 新增：逐段响度对齐参数（消除多供应商 TTS 原生响度差异）
+        enable_segment_loudness_norm: bool = True,
+        target_segment_dbfs: float = -20.0,  # 逐段对齐基准（dBFS）
         # 🆕 新增：语义停顿参数
         enable_semantic_pause: bool = True,
         paragraph_pause_ms: int = 1500,  # 段落间停顿
@@ -137,6 +172,8 @@ class AudioMixer:
 
         self.enable_loudness_norm = enable_loudness_norm
         self.target_loudness_lufs = target_loudness_lufs
+        self.enable_segment_loudness_norm = enable_segment_loudness_norm
+        self.target_segment_dbfs = target_segment_dbfs
 
         self.enable_semantic_pause = enable_semantic_pause
         self.paragraph_pause_ms = paragraph_pause_ms
@@ -577,12 +614,61 @@ class AudioMixer:
             logger.warning(f"⚠️ 静音修剪失败: {e}，返回原始音频")
             return audio
 
+    # 逐段对齐的最大提升量，避免放大低响度段的底噪
+    SEGMENT_NORM_MAX_BOOST_DB = 12.0
+    # 提升后峰值不得超过此值，防止削波
+    SEGMENT_NORM_PEAK_HEADROOM_DB = -1.0
+
+    def _match_segment_loudness(self, audio: AudioSegment) -> AudioSegment:
+        """
+        逐段响度对齐：将每个 TTS 段拉齐到统一 dBFS 基准。
+
+        多供应商 TTS 的原生响度差异很大（同一章内不同模型可差 6dB+），
+        拼接前逐段对齐可消除段间响度跳变，并保证 sidechain ducking
+        阈值对各段一致生效。这里只做段间相对对齐（dBFS 近似即可），
+        绝对响度由整轨 loudnorm（_normalize_loudness）负责。
+
+        Args:
+            audio: 单个 TTS 音频片段
+
+        Returns:
+            响度对齐后的音频片段（不可对齐时原样返回）
+        """
+        if not self.enable_segment_loudness_norm:
+            return audio
+
+        try:
+            current = audio.dBFS
+            if current == float("-inf"):
+                return audio
+
+            adjustment = self.target_segment_dbfs - current
+            if abs(adjustment) < 1.0:
+                return audio
+
+            # 提升上限：底噪保护 + 峰值削波保护
+            adjustment = min(adjustment, self.SEGMENT_NORM_MAX_BOOST_DB)
+            adjustment = min(adjustment, self.SEGMENT_NORM_PEAK_HEADROOM_DB - audio.max_dBFS)
+            if adjustment <= -60.0:
+                return audio
+
+            normalized = audio + adjustment
+            logger.debug(
+                f"📊 逐段响度对齐: {current:.1f}dBFS -> {normalized.dBFS:.1f}dBFS "
+                f"(基准: {self.target_segment_dbfs}dBFS, 增益: {adjustment:+.1f}dB)"
+            )
+            return normalized
+        except Exception as e:
+            logger.warning(f"⚠️ 逐段响度对齐失败: {e}，返回原始片段")
+            return audio
+
     def _normalize_loudness(self, audio: AudioSegment) -> AudioSegment:
         """
         EBU R128 响度标准化
         
         将音频响度调整到目标 LUFS 值（默认 -16.0 LUFS，播客/有声书标准）。
-        使用 pydub 的 normalize 函数，但手动控制目标响度。
+        优先使用 ffmpeg loudnorm 两遍处理（真实 EBU R128）；ffmpeg 不可用
+        或失败时降级为 dBFS 近似（已知偏差约 5 LU，仅作兜底）。
         
         Args:
             audio: 原始音频片段
@@ -593,6 +679,43 @@ class AudioMixer:
         if not self.enable_loudness_norm:
             return audio
 
+        normalized = self._normalize_loudness_with_loudnorm(audio)
+        if normalized is not None:
+            return normalized
+        return self._normalize_loudness_dbfs_approx(audio)
+
+    def _normalize_loudness_with_loudnorm(self, audio: AudioSegment) -> Optional[AudioSegment]:
+        """用 ffmpeg loudnorm 两遍处理做真实 EBU R128 归一化；不可用时返回 None。"""
+        if not FFMPEG_AVAILABLE:
+            return None
+
+        from app.services.audiobook.scene_engine.loudness_normalizer import (
+            FFmpegLoudnessNormalizer,
+        )
+
+        try:
+            with tempfile.TemporaryDirectory(prefix="audiobook_loudnorm_") as tmp_dir:
+                source = Path(tmp_dir) / "input.wav"
+                target = Path(tmp_dir) / "output.wav"
+                audio.export(str(source), format="wav")
+                normalizer = FFmpegLoudnessNormalizer(
+                    target_i=self.target_loudness_lufs,
+                    target_tp=-1.5,
+                    target_lra=11.0,
+                )
+                result = normalizer.normalize(source, target, output_format="wav")
+                normalized = AudioSegment.from_file(str(target), format="wav")
+            logger.debug(
+                f"📊 响度标准化(loudnorm): input_i={result.get('input_i')}LUFS -> "
+                f"output_i={result.get('output_i')}LUFS (目标: {self.target_loudness_lufs}LUFS)"
+            )
+            return normalized
+        except Exception as e:
+            logger.warning(f"⚠️ ffmpeg loudnorm 失败: {e}，降级为 dBFS 近似")
+            return None
+
+    def _normalize_loudness_dbfs_approx(self, audio: AudioSegment) -> AudioSegment:
+        """dBFS 近似的响度标准化（兜底路径，与真实 LUFS 存在约 5 LU 偏差）。"""
         try:
             current_loudness = audio.dBFS
             if current_loudness == float("-inf"):
@@ -812,6 +935,7 @@ class AudioMixer:
                 if self.enable_silence_trim:
                     segment = self._trim_silence(segment)
                 segment = self._limit_internal_silence(segment)
+                segment = self._match_segment_loudness(segment)
 
                 seg_type = ""
                 if source_index < len(segment_types):
@@ -931,8 +1055,9 @@ class AudioMixer:
         ducking_enabled: bool = True,
         ducking_priority: str = "dialogue",
         ducking_threshold_dbfs: float = -35.0,
-        ducking_reduction_db: float = -6.0,
+        ducking_reduction_db: float = -4.0,
         ducking_chunk_ms: int = 250,
+        normalize_target_dbfs: Optional[float] = None,
     ) -> bytes:
         """
         叠加音效（时间轴定位，纯pydub版）
@@ -951,6 +1076,8 @@ class AudioMixer:
             ducking_threshold_dbfs: 触发ducking的对白响度阈值（dBFS）
             ducking_reduction_db: ducking 时的音量衰减（负数，dB）
             ducking_chunk_ms: ducking 分段分析窗口（毫秒）
+            normalize_target_dbfs: 响度归一化目标（dBFS）；提供时截断后先归一化
+                素材响度到该目标再叠加相对音量偏移，None 保持旧绝对偏移语义
         
         Returns:
             叠加音效后的音频
@@ -960,9 +1087,6 @@ class AudioMixer:
             try:
                 voice = AudioSegment.from_file(io.BytesIO(voice_audio))
                 effect = AudioSegment.from_file(io.BytesIO(effect_audio))
-                
-                # 调整音效音量
-                effect = effect + effect_volume_offset
 
                 if effect_duration_ms is not None:
                     target_len = max(0, int(effect_duration_ms))
@@ -971,7 +1095,26 @@ class AudioMixer:
                     if loop_fill and len(effect) > 0 and len(effect) < target_len:
                         loops_needed = (target_len // len(effect)) + 1
                         effect = effect * loops_needed
+                    # 截断时优先保留高能窗口：一次性音效的声体常在素材中后段，
+                    # 盲取头部会只剩静默前奏，叠加后完全不可闻（试听同理）
+                    if not loop_fill:
+                        effect = self._select_energetic_window(effect, target_len)
                     effect = effect[:target_len]
+
+                # 响度归一化：截断后的高能窗口才是实际发声段，此处测量最贴近真实响度；
+                # 把不同源能量的素材统一到目标响度后再叠加相对音量偏移，
+                # 未提供归一化目标时保持旧的绝对偏移语义
+                if normalize_target_dbfs is not None:
+                    try:
+                        measured_dbfs = effect.dBFS
+                    except (ZeroDivisionError, ValueError):
+                        measured_dbfs = float("-inf")
+                    if measured_dbfs != float("-inf"):
+                        normalize_gain = float(normalize_target_dbfs) - measured_dbfs
+                        # 限幅：避免极静素材被过度放大或异常压低
+                        normalize_gain = max(-40.0, min(24.0, normalize_gain))
+                        effect = effect + normalize_gain
+                effect = effect + effect_volume_offset
 
                 if fade_in_ms > 0:
                     effect = effect.fade_in(min(int(fade_in_ms), len(effect)))
@@ -1038,6 +1181,26 @@ class AudioMixer:
         # 最终降级：返回原始人声
         logger.warning("⚠️ 音效叠加不可用")
         return voice_audio
+
+    @staticmethod
+    def _select_energetic_window(effect: Any, target_len: int) -> Any:
+        """从素材中选取能量最高的 target_len 窗口，避免截断只剩静默头。
+
+        能量接近（6dB 内）时优先取更早的窗口，尽量保留音效起始手感；
+        素材不超长时原样返回。
+        """
+        if target_len >= len(effect) or len(effect) <= 0:
+            return effect
+        step = max(20, target_len // 20)
+        best_start, best_dbfs = 0, float("-inf")
+        for start in range(0, len(effect) - target_len + 1, step):
+            dbfs = effect[start:start + target_len].dBFS
+            if dbfs > best_dbfs:
+                best_dbfs, best_start = dbfs, start
+        for start in range(0, best_start, step):
+            if effect[start:start + target_len].dBFS >= best_dbfs - 6.0:
+                return effect[start:start + target_len]
+        return effect[best_start:best_start + target_len]
 
     def analyze_quality(
         self,

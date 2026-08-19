@@ -176,39 +176,43 @@ class AutoTrackingService:
                         if chapter_id not in referenced_chapters:
                             referenced_chapters.append(chapter_id)
                             item.referenced_chapters = json.dumps(referenced_chapters)
-                            item.usage_count = len(referenced_chapters)
+                            # 🆕 增量 +1 而非 len() 重算：避免覆盖 DreamWeaver 等
+                            # 非章节来源写入的 usage_count（修复 P3-1 计数脱节）
+                            item.usage_count = (item.usage_count or 0) + 1
                             item.last_referenced_at = utc_now()
                             added_count += 1
                             logger.debug(f"  ✅ {name} ({collection.category}) 初始追踪: 第{chapter_id}章")
                     continue
-                
+
                 # 🔄 差异检测模式
                 # 检测变化
                 was_mentioned = AutoTrackingService._name_matches(name, old_content)
                 now_mentioned = AutoTrackingService._name_matches(name, new_content)
-                
+
                 if was_mentioned == now_mentioned:
                     unchanged_count += 1
                     continue
-                
+
                 referenced_chapters = json.loads(item.referenced_chapters or "[]")
-                
+
                 if now_mentioned and not was_mentioned:
                     # 🆕 新增引用
                     if chapter_id not in referenced_chapters:
                         referenced_chapters.append(chapter_id)
                         item.referenced_chapters = json.dumps(referenced_chapters)
-                        item.usage_count = len(referenced_chapters)
+                        # 🆕 增量 +1 而非 len() 重算（修复 P3-1）
+                        item.usage_count = (item.usage_count or 0) + 1
                         item.last_referenced_at = utc_now()
                         added_count += 1
                         logger.debug(f"  ✅ {name} ({collection.category}) 新增引用: 第{chapter_id}章")
-                
+
                 elif was_mentioned and not now_mentioned:
                     # 🗑️ 移除引用
                     if chapter_id in referenced_chapters:
                         referenced_chapters.remove(chapter_id)
                         item.referenced_chapters = json.dumps(referenced_chapters)
-                        item.usage_count = len(referenced_chapters)
+                        # 🆕 增量 -1（不为负）而非 len() 重算：保留非章节来源计数（修复 P3-1）
+                        item.usage_count = max(0, (item.usage_count or 1) - 1)
                         # last_referenced_at 不更新（保留最后一次真实引用时间）
                         removed_count += 1
                         logger.debug(f"  ❌ {name} ({collection.category}) 移除引用: 第{chapter_id}章")

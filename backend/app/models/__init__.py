@@ -10,9 +10,21 @@ from .graph import KnowledgeGraphEdge
 from .role import Role, Permission, user_roles, role_permissions
 from .admin_log import AdminOperationLog, AdminLoginLog
 from .book_parser import BookSource, BookChapter, BookAnalysis, SourceType, ParseStatus, AnalysisType
-from .audiobook import AudiobookProject, ChapterAudio, ChapterAudioRun
+from .audiobook import (
+    AudiobookProject,
+    AudiobookTaskDispatch,
+    ChapterAudio,
+    ChapterAudioOutput,
+    ChapterAudioRun,
+    ProviderDispatchCapability,
+    SceneAudioArtifact,
+    SceneEditRevision,
+    SceneEditRevisionHead,
+)
 from .audiobook_delete_audit import AudiobookDeleteAudit
 from .audiobook_task import AudiobookTask
+from .billing_usage_ledger import BillingUsageLedger, LedgerReconciliationAudit
+from .canonical_migration_progress import AudiobookCanonicalMigrationProgress
 from .dreamweaver import DreamweaverProject, DreamweaverEpisode, DreamweaverShot, DreamweaverAsset, DreamweaverRunEvent
 from .model_catalog import ModelCatalogEntry, ModelCatalogSource
 from .user_asset_record import UserAssetRecord
@@ -56,6 +68,15 @@ __all__ = [
     "AudiobookProject",
     "ChapterAudio",
     "ChapterAudioRun",
+    "ChapterAudioOutput",
+    "SceneEditRevision",
+    "SceneEditRevisionHead",
+    "SceneAudioArtifact",
+    "AudiobookTaskDispatch",
+    "ProviderDispatchCapability",
+    "BillingUsageLedger",
+    "LedgerReconciliationAudit",
+    "AudiobookCanonicalMigrationProgress",
     "AudiobookDeleteAudit",
     "AudiobookTask",
     "DreamweaverProject",

@@ -82,6 +82,10 @@ def sync_parsed_characters_to_db(
                 existing.summary = parsed.build_summary() or existing.summary
                 existing.profile = parsed.build_profile() or existing.profile
 
+                # 扩展管线重新引用该卡片：标记来源并解除历史归档
+                existing.source = "expansion"
+                existing.archived_at = None
+
                 # 更新关系字段（JSON格式）
                 if parsed.relationships:
                     existing.relations = json.dumps(
@@ -114,6 +118,7 @@ def sync_parsed_characters_to_db(
                     ),
                     appearance_status="未出场",  # 默认未出场
                     life_status="存活",  # 默认存活
+                    source="expansion",
                 )
                 db_session.add(new_char)
                 created_count += 1
@@ -182,8 +187,71 @@ def parse_and_sync_characters(
     # 2. 同步到数据库
     sync_result = sync_parsed_characters_to_db(project_id, parsed_characters, db_session)
     sync_result["parsed"] = len(parsed_characters)
+    sync_result["normalized_names"] = sorted(
+        {
+            key
+            for key in (
+                normalize_character_name(item.name) or (item.name or "").strip()
+                for item in parsed_characters
+            )
+            if key
+        }
+    )
 
     return sync_result
+
+
+def archive_orphan_expansion_characters(
+    project_id: int,
+    keep_normalized_names: List[str],
+    db_session: Any,
+) -> Dict[str, Any]:
+    """epic 框架重建后，归档新框架不再引用的扩展管线人物卡。
+
+    只归档 source='expansion' 且未归档、且规范化名称不在新名单中的卡片；
+    手动创建或历史卡片（source 为 NULL）永不触碰。
+    """
+    from datetime import timezone
+    from app.models.character import Character
+    from app.utils.datetime_utils import utc_now
+
+    keep_set = {str(name).strip() for name in (keep_normalized_names or []) if str(name).strip()}
+
+    candidates = (
+        db_session.query(Character)
+        .filter(
+            Character.project_id == project_id,
+            Character.source == "expansion",
+            Character.archived_at.is_(None),
+        )
+        .all()
+    )
+
+    orphans = [
+        item
+        for item in candidates
+        if (normalize_character_name(item.name) or (item.name or "").strip()) not in keep_set
+    ]
+
+    archived_names: List[str] = []
+    now = utc_now()
+    for item in orphans:
+        item.archived_at = now.replace(tzinfo=timezone.utc) if now.tzinfo is None else now
+        archived_names.append(item.name)
+
+    if orphans:
+        try:
+            db_session.commit()
+            logger.info(
+                f"🗂️ epic 框架重建归档完成：project_id={project_id}, "
+                f"archived={len(orphans)}, names={archived_names[:20]}"
+            )
+        except Exception as e:
+            db_session.rollback()
+            logger.error(f"❌ 归档孤立人物卡失败: {e}")
+            raise
+
+    return {"archived": len(orphans), "names": archived_names}
 
 
 def parse_and_sync_relationships(

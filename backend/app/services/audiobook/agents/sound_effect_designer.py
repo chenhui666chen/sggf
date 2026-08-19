@@ -287,6 +287,8 @@ class SoundEffectDesigner:
         best_score = 0
         best_is_resolvable = False
 
+        query_bigrams = self._chinese_bigrams(description)
+
         for effect_name, effect_info in self.sound_library.items():
             desc_text = effect_info.get("description", "")
             tags = effect_info.get("tags", [])
@@ -300,6 +302,16 @@ class SoundEffectDesigner:
             for tag in tags:
                 if tag and tag in description:
                     score += 1
+
+            # 中文二元词组模糊匹配：剧本描述与库条目描述共享特征词时加分。
+            # 至少 2 个公共词，或 1 个非泛化词（排除“XX声/XX音/XX响”结尾的
+            # 通用后缀，避免“裂声”等碎片化词造成误匹配）。
+            if query_bigrams:
+                candidate_bigrams = self._chinese_bigrams(desc_text)
+                shared = query_bigrams & candidate_bigrams
+                meaningful = [b for b in shared if not b.endswith(("声", "音", "响"))]
+                if len(shared) >= 2 or meaningful:
+                    score += 2
 
             is_resolvable = self._has_resolvable_audio_file(effect_info.get("file", ""))
             if score > best_score or (score == best_score and score > 0 and is_resolvable and not best_is_resolvable):
@@ -343,6 +355,12 @@ class SoundEffectDesigner:
             duration=default_duration,
             mix_mode="background" if inferred_type == EffectType.ENVIRONMENT else "foreground",
         ), effect_request)
+
+    @staticmethod
+    def _chinese_bigrams(text: str) -> set:
+        """提取文本中的连续中文二元词组（滑动窗口），用于音效描述的模糊匹配。"""
+        chars = re.findall(r"[\u4e00-\u9fff]", str(text or ""))
+        return {chars[i] + chars[i + 1] for i in range(len(chars) - 1)}
 
     def _normalize_effect_request(self, value: Any) -> Dict[str, Any]:
         """将字符串/字典/音效对象统一成内部音效请求。"""

@@ -12,9 +12,14 @@ logger = logging.getLogger(__name__)
 class CharacterPlotValidator:
     """人物-大纲协同验证器"""
 
-    def __init__(self):
-        """初始化验证器"""
-        self.llm = create_task_llm(temperature=0.3)
+    def __init__(self, model: Optional[str] = None):
+        """初始化验证器
+
+        Args:
+            model: 可选的指定模型 ID；缺省时走 default 任务路由。
+                调用方在 default 任务模型不可用时应传入已验证可用的模型。
+        """
+        self.llm = create_task_llm(model=model, temperature=0.3)
 
     def validate_character_plot_alignment(
         self,
@@ -35,13 +40,13 @@ class CharacterPlotValidator:
         prompt = f"""你是一位资深小说编辑。请分析人物设定与情节大纲的匹配度。
 
 【人物设定】
-{characters[:2000]}
+{characters[:8000]}
 
 【情节大纲】
-{plot_outline[:2000]}
+{plot_outline[:8000]}
 
 【世界观】
-{world_setting[:1000]}
+{world_setting[:4000]}
 
 请分析以下问题：
 
@@ -96,7 +101,7 @@ class CharacterPlotValidator:
             return validation_result
 
         except Exception as e:
-            logger.debug(f"❌ 验证失败: {e}")
+            logger.warning(f"⚠️ 人物-情节对齐验证失败: {e}")
             return {
                 "success": False,
                 "error": str(e),
@@ -128,34 +133,40 @@ class CharacterPlotValidator:
             "raw_text": text
         }
 
-        # 提取评分
-        score_match = re.search(r'总分[：:]\s*(\d+)', text)
+        # 提取评分（容忍冒号粗体/空格变体："总分：85"、"总分**: **85/100"、"总分 85分"）
+        score_match = re.search(r'总分[^0-9\n]{0,16}(\d{1,3})', text)
         if score_match:
-            result["score"] = int(score_match.group(1))
+            result["score"] = min(100, int(score_match.group(1)))
 
-        # 提取冗余人物
-        redundant_section = re.search(r'## 冗余人物\s*\n(.*?)(?=\n##|\Z)', text, re.DOTALL)
+        # 提取冗余人物（容忍 "## 冗余人物"、"## 1. 冗余人物"、"**冗余人物**" 等标题变体）
+        redundant_section = re.search(r'#+\s*\d*[.、)]?\s*\*{0,2}冗余人物\*{0,2}\s*\n(.*?)(?=\n#|\Z)', text, re.DOTALL)
         if redundant_section:
             lines = redundant_section.group(1).strip().split('\n')
             for line in lines:
-                if line.strip().startswith('-'):
-                    result["redundant_characters"].append(line.strip()[1:].strip())
+                if line.strip().startswith(('-', '•', '*')):
+                    item = line.strip().lstrip('-•*').strip()
+                    if item:
+                        result["redundant_characters"].append(item)
 
         # 提取缺失人物
-        missing_section = re.search(r'## 缺失人物\s*\n(.*?)(?=\n##|\Z)', text, re.DOTALL)
+        missing_section = re.search(r'#+\s*\d*[.、)]?\s*\*{0,2}缺失人物\*{0,2}\s*\n(.*?)(?=\n#|\Z)', text, re.DOTALL)
         if missing_section:
             lines = missing_section.group(1).strip().split('\n')
             for line in lines:
-                if line.strip().startswith('-'):
-                    result["missing_characters"].append(line.strip()[1:].strip())
+                if line.strip().startswith(('-', '•', '*')):
+                    item = line.strip().lstrip('-•*').strip()
+                    if item:
+                        result["missing_characters"].append(item)
 
         # 提取关系问题
-        relationship_section = re.search(r'## 关系合理性问题\s*\n(.*?)(?=\n##|\Z)', text, re.DOTALL)
+        relationship_section = re.search(r'#+\s*\d*[.、)]?\s*\*{0,2}关系合理性问题\*{0,2}\s*\n(.*?)(?=\n#|\Z)', text, re.DOTALL)
         if relationship_section:
             lines = relationship_section.group(1).strip().split('\n')
             for line in lines:
-                if line.strip().startswith('-'):
-                    result["relationship_issues"].append(line.strip()[1:].strip())
+                if line.strip().startswith(('-', '•', '*')):
+                    item = line.strip().lstrip('-•*').strip()
+                    if item:
+                        result["relationship_issues"].append(item)
 
         # 提取改进建议
         suggestions_section = re.search(r'## 改进建议\s*\n(.*?)(?=\Z)', text, re.DOTALL)

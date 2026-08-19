@@ -118,6 +118,16 @@ class Character(Base):
         Text, nullable=True, comment="题材专属字段(JSON)，键名由 genre_registry 定义"
     )
 
+    # 卡片来源：expansion=协同扩展管线创建/更新；NULL=历史数据或手动创建（永不自动归档）
+    source: Mapped[Optional[str]] = mapped_column(
+        String(30), nullable=True, comment="卡片来源：expansion=协同扩展管线"
+    )
+
+    # 归档时间：epic 框架重建后，新框架不再引用的扩展管线卡片被软归档
+    archived_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True, comment="归档时间；非空=已随框架重建归档"
+    )
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

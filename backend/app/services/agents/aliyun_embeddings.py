@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import logging
 import os
+import time
 from typing import Any, List, Optional
 
 import requests
@@ -13,6 +14,12 @@ from langchain.embeddings.base import Embeddings
 from .config import Config
 
 logger = logging.getLogger(__name__)
+
+# DashScope compatible-mode /embeddings 单次批量上限
+_BATCH_SIZE = 10
+# 失败重试次数（不含首次请求）
+_MAX_RETRIES = 2
+_RETRY_BACKOFF_SECONDS = 1.0
 
 
 # 禁用代理，避免本地向量检索与 embedding 请求被宿主机代理干扰。
@@ -56,60 +63,96 @@ class AliyunEmbeddings(Embeddings):
             raise ValueError("Aliyun embedding API key is required. Please set DASHSCOPE_API_KEY or EMBEDDING_API_KEY.")
 
     def embed_documents(self, texts: List[str]) -> List[List[float]]:
-        return [self._get_embedding(text) for text in texts]
+        """按批请求 embedding，避免逐条 HTTP 往返；批次内失败带重试。"""
+        results: List[List[float]] = []
+        for start in range(0, len(texts), _BATCH_SIZE):
+            batch = texts[start:start + _BATCH_SIZE]
+            results.extend(self._get_embeddings_batch(batch))
+        return results
 
     def embed_query(self, text: str) -> List[float]:
-        return self._get_embedding(text)
+        return self._get_embeddings_batch([text])[0]
 
-    def _build_payload(self, text: str) -> dict[str, Any]:
+    def _build_payload(self, input_value: Any) -> dict[str, Any]:
         payload: dict[str, Any] = {
             "model": self.model,
-            "input": text,
+            "input": input_value,
         }
         if self.dimensions > 0:
             payload["dimensions"] = self.dimensions
         return payload
 
-    def _get_embedding(self, text: str) -> List[float]:
-        try:
-            response = requests.post(
-                f"{self.api_base}/embeddings",
-                headers={
-                    "Authorization": f"Bearer {self.api_key}",
-                    "Content-Type": "application/json",
-                },
-                json=self._build_payload(text),
-                timeout=self.request_timeout,
-                proxies={"http": None, "https": None},
-            )
-            response.raise_for_status()
-        except requests.RequestException as exc:
-            raise EmbeddingRequestError(
-                f"Aliyun embedding request failed for model={self.model}: {exc}"
-            ) from exc
+    def _get_embeddings_batch(self, texts: List[str]) -> List[List[float]]:
+        """批量获取 embeddings；按响应 index 还原顺序；带指数退避重试。"""
+        last_error: Optional[Exception] = None
+        for attempt in range(_MAX_RETRIES + 1):
+            try:
+                response = requests.post(
+                    f"{self.api_base}/embeddings",
+                    headers={
+                        "Authorization": f"Bearer {self.api_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json=self._build_payload(texts),
+                    timeout=self.request_timeout,
+                    proxies={"http": None, "https": None},
+                )
+                response.raise_for_status()
+                payload = response.json()
+                return self._parse_batch_payload(payload, expected_count=len(texts))
+            except (requests.RequestException, ValueError, EmbeddingRequestError) as exc:
+                last_error = exc
+                if attempt < _MAX_RETRIES:
+                    delay = _RETRY_BACKOFF_SECONDS * (2 ** attempt)
+                    logger.warning(
+                        "Aliyun embedding batch failed (attempt %s/%s, batch_size=%s), retrying in %.1fs: %s",
+                        attempt + 1,
+                        _MAX_RETRIES + 1,
+                        len(texts),
+                        delay,
+                        exc,
+                    )
+                    time.sleep(delay)
 
-        try:
-            payload = response.json()
-        except ValueError as exc:
-            raise EmbeddingRequestError("Aliyun embedding response is not valid JSON.") from exc
+        raise EmbeddingRequestError(
+            f"Aliyun embedding request failed for model={self.model} after {_MAX_RETRIES + 1} attempts: {last_error}"
+        ) from last_error
+
+    def _parse_batch_payload(self, payload: Any, *, expected_count: int) -> List[List[float]]:
+        if not isinstance(payload, dict):
+            raise EmbeddingRequestError("Aliyun embedding response is not valid JSON.")
 
         data = payload.get("data")
         if not isinstance(data, list) or not data:
             raise EmbeddingRequestError(f"Aliyun embedding response has no data field: {payload}")
 
-        embedding = data[0].get("embedding")
-        if not isinstance(embedding, list) or not embedding:
-            raise EmbeddingRequestError(f"Aliyun embedding response has invalid embedding payload: {payload}")
+        # 按 index 字段还原请求顺序（批量响应不保证顺序）
+        indexed: List[tuple[int, List[float]]] = []
+        for entry in data:
+            embedding = entry.get("embedding") if isinstance(entry, dict) else None
+            if not isinstance(embedding, list) or not embedding:
+                raise EmbeddingRequestError(f"Aliyun embedding response has invalid embedding payload: {payload}")
+            index = entry.get("index", len(indexed))
+            indexed.append((int(index), embedding))
 
-        if self.dimensions > 0 and len(embedding) != self.dimensions:
+        indexed.sort(key=lambda item: item[0])
+        embeddings = [embedding for _, embedding in indexed]
+
+        if len(embeddings) != expected_count:
+            logger.warning(
+                "Aliyun embedding batch count mismatch: expected=%s actual=%s model=%s",
+                expected_count,
+                len(embeddings),
+                self.model,
+            )
+        if embeddings and self.dimensions > 0 and len(embeddings[0]) != self.dimensions:
             logger.warning(
                 "Aliyun embedding dimension mismatch: expected=%s actual=%s model=%s",
                 self.dimensions,
-                len(embedding),
+                len(embeddings[0]),
                 self.model,
             )
-
-        return embedding
+        return embeddings
 
 
 def create_aliyun_embeddings() -> AliyunEmbeddings:

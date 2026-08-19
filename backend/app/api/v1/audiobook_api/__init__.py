@@ -23,3 +23,4 @@ from app.api.v1.audiobook_api import routes_smart_chunk
 from app.api.v1.audiobook_api import routes_misc
 from app.api.v1.audiobook_api import routes_audio_library
 from app.api.v1.audiobook_api import routes_voice_pool
+from app.api.v1.audiobook_api import routes_scene_editor

@@ -18,12 +18,21 @@ from .models import (
 )
 from .planner import ScenePlanner
 from .provider_attempt_ledger import ProviderAttemptLedger
+from .provider_recovery_store import ProviderRecoveryStore
+from .raw_transcript_store import RawTranscriptStore
 from .preview_reference_asset import (
     PreviewReferenceAsset,
     PreviewReferenceMaterializationError,
     PreviewReferenceMaterializer,
 )
 from .prompt_compiler import ScenePromptCompiler
+from .prompt_consume import (
+    DURATION_BUDGET_PLANNING_MAX_S,
+    compile_decision_prompt,
+    derive_scene_description,
+    verify_director_dialogue_fidelity,
+    verify_duration_budget,
+)
 from .quality_gate import SceneAudioQualityGate, SceneAudioQualityReport
 from .quality_policy import SceneAudioQualityPolicy
 from .scene_assembler import (
@@ -40,6 +49,7 @@ __all__ = [
     "ChapterScenePipeline",
     "ChapterScenePipelineResult",
     "ChapterSceneRender",
+    "DURATION_BUDGET_PLANNING_MAX_S",
     "SceneAudioEvent",
     "SceneAudioQualityGate",
     "SceneAudioQualityReport",
@@ -62,7 +72,13 @@ __all__ = [
     "PreviewReferenceMaterializationError",
     "PreviewReferenceMaterializer",
     "ProviderAttemptLedger",
+    "ProviderRecoveryStore",
+    "RawTranscriptStore",
     "SceneRenderPlan",
     "SceneVoiceProfile",
     "VoiceReferenceResolver",
+    "compile_decision_prompt",
+    "derive_scene_description",
+    "verify_director_dialogue_fidelity",
+    "verify_duration_budget",
 ]

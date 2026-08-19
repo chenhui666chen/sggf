@@ -16,6 +16,7 @@ from .character_parser_pkg import (
     sync_parsed_characters_to_db,
     parse_and_sync_characters,
     parse_and_sync_relationships,
+    archive_orphan_expansion_characters,
 )
 
 __all__ = [
@@ -36,4 +37,5 @@ __all__ = [
     "sync_parsed_characters_to_db",
     "parse_and_sync_characters",
     "parse_and_sync_relationships",
+    "archive_orphan_expansion_characters",
 ]

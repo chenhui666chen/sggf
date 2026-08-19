@@ -5,6 +5,7 @@
 - 基于项目配置 / 请求参数 / 角色信息构建 voice_mapping
 - 创建 AudiobookProject 记录
 """
+import json
 import logging
 from dataclasses import dataclass
 from typing import Any, Dict, List, Sequence
@@ -21,6 +22,11 @@ from app.services.audiobook.repository import (
     ChapterRepository,
     CharacterRepository,
     ProjectRepository,
+)
+from app.services.audiobook.project_audio_config import (
+    build_engine_config_snapshot,
+    parse_project_audio_config,
+    resolve_engine_mode,
 )
 from app.services.audiobook.project_audio_runtime import (
     resolve_project_audio_runtime_config,
@@ -248,7 +254,14 @@ class AudiobookAppService:
             chapters=prepared_request.chapters,
         )
 
-        # 4. 创建 AudiobookProject
+        # 4. 解析引擎模式并构建快照（Phase 1.4：批次创建冻结）
+        audio_config_dict = parse_project_audio_config(
+            str(getattr(project, "audio_config", "") or "")
+        )
+        resolved_engine_mode = resolve_engine_mode(audio_config_dict)
+        snapshot = build_engine_config_snapshot(audio_config_dict, resolved_engine_mode)
+
+        # 5. 创建 AudiobookProject（Contract 态：引擎隔离字段必须显式写入，GUIDE R19/P2-1）
         audiobook_project = AudiobookProject(
             project_id=request.project_id,
             status="pending",
@@ -260,6 +273,10 @@ class AudiobookAppService:
             failed_chapters=0,
             total_duration=0.0,
             total_cost=0.0,
+            engine_mode=resolved_engine_mode,
+            engine_config_snapshot=json.dumps(snapshot, ensure_ascii=False),
+            engine_config_fingerprint=snapshot["engine_config_fingerprint"],
+            snapshot_status="frozen",
         )
 
         self.db.add(audiobook_project)

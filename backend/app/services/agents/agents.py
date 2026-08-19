@@ -403,8 +403,10 @@ class CreativeDirectorAgent(BaseAgent):
     """创意总监Agent - 整体创作方向把控与工作流程协调"""
 
     def __init__(self, knowledge_base: Optional[NovelKnowledgeBase] = None,
-                 memory_manager: Optional[NovelMemoryManager] = None):
-        super().__init__("创意总监", "creative_director", knowledge_base, memory_manager, task_type="concept")
+                 memory_manager: Optional[NovelMemoryManager] = None,
+                 llm: Optional[Any] = None):  # 🎆 支持传入自定义LLM（epic 框架等超长输出场景）
+        super().__init__("创意总监", "creative_director", knowledge_base, memory_manager,
+                        task_type="concept", llm=llm)
 
     def get_system_prompt(self) -> str:
         from app.services.prompts.manager import prompt_manager

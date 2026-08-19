@@ -172,10 +172,20 @@ def build_chapter_audio_output_path(
     chapter_number: int,
     output_format: Optional[str] = None,
     audiobook_project_id: Optional[int] = None,
+    run_id: Optional[int] = None,
 ) -> str:
     extension = normalize_audiobook_output_format(output_format)
     # 同一小说项目可派生多个有声书项目，输出路径必须包含
     # audiobook_project_id 隔离，否则不同有声书会互相覆盖整章音频
+    if audiobook_project_id and run_id:
+        # run 级路径（§1.5/R8）：输出落 run 级目录，供 ChapterAudioOutput 登记与
+        # 发布事务消费；发布后镜像列指向已发布 run 的 run 级路径
+        return (
+            f"audiobooks/project_{project_id}/"
+            f"audiobook_{int(audiobook_project_id)}/"
+            f"run_{int(run_id)}/"
+            f"chapter_{chapter_number:03d}.{extension}"
+        )
     if audiobook_project_id:
         return (
             f"audiobooks/project_{project_id}/"
@@ -386,6 +396,7 @@ def apply_chapter_audio_generation_result(
     require_audio_metrics: bool = False,
     logger: Any = None,
     chapter_id: Optional[int] = None,
+    skip_mirror_columns: bool = False,
 ) -> Dict[str, Dict[str, Any]]:
     raw_stats = result.get("stats") or {}
     stats = raw_stats if isinstance(raw_stats, dict) else {}
@@ -394,13 +405,16 @@ def apply_chapter_audio_generation_result(
     parse_stats = raw_parse_stats if isinstance(raw_parse_stats, dict) else {}
     tts_stats = raw_tts_stats if isinstance(raw_tts_stats, dict) else {}
 
-    chapter_audio.audio_path = output_path
-    if require_audio_metrics:
-        chapter_audio.duration = result["duration"]
-        chapter_audio.file_size = result["file_size"]
-    else:
-        chapter_audio.duration = result.get("duration") or 0.0
-        chapter_audio.file_size = result.get("file_size") or 0
+    # §2.5：seed_scene 引擎镜像列（audio_path/duration/file_size）改由发布事务
+    # 按 §2.4 规则 4 CAS 写入；生成代码只写 run 级输出登记（staged）
+    if not skip_mirror_columns:
+        chapter_audio.audio_path = output_path
+        if require_audio_metrics:
+            chapter_audio.duration = result["duration"]
+            chapter_audio.file_size = result["file_size"]
+        else:
+            chapter_audio.duration = result.get("duration") or 0.0
+            chapter_audio.file_size = result.get("file_size") or 0
 
     count_defaults = {
         "total_segments": chapter_audio.segment_count if preserve_existing_counts else 0,
@@ -569,6 +583,8 @@ def mark_chapter_generation_failed(
     task_id: Optional[str] = None,
     default_error_message: str = "generation_failed",
     run_id: Optional[int] = None,
+    result_render_status: Optional[str] = None,
+    result_render_detail: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     safe_result = result if isinstance(result, dict) else None
     failure_stats = safe_result.get("stats") if safe_result else {}
@@ -625,6 +641,8 @@ def mark_chapter_generation_failed(
         checkpoint_patch=checkpoint_patch,
         error_message=error_message,
         run_id=run_id,
+        result_render_status=result_render_status,
+        result_render_detail=result_render_detail,
     )
 
     return {

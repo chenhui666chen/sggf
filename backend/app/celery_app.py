@@ -22,6 +22,13 @@ celery_app = Celery(
     "novel_writing_agent",
     broker=settings.CELERY_BROKER_URL,
     backend=settings.CELERY_RESULT_BACKEND,
+    # beat 调度任务的定义分散在 services 模块与未被 app.tasks.__init__ 导入的
+    # experiment_tasks 中，autodiscover 覆盖不到；显式 include 保证 worker 注册
+    include=[
+        "app.services.audiobook.dispatch_service",
+        "app.services.audiobook.billing_finalizer_service",
+        "app.tasks.experiment_tasks",
+    ],
 )
 
 # 确保 worker 侧也具备最新表结构（开发环境 create_all 兜底；生产建议用 Alembic）
@@ -46,6 +53,18 @@ celery_app.conf.update(
     enable_utc=True,
     broker_connection_retry_on_startup=True,
     beat_schedule={
+        # 可靠派发：每 2 分钟认领 stale pending run + 接管过期 worker 租约
+        "audiobook-dispatch-stale-pending": {
+            "task": "audiobook.dispatch_stale_pending",
+            "schedule": crontab(minute="*/2"),
+            "args": (20,),
+        },
+        # 计费 finalizer：每 3 分钟扫描可结算 run
+        "audiobook-billing-finalizer-scan": {
+            "task": "audiobook.billing_finalizer_scan",
+            "schedule": crontab(minute="*/3"),
+            "args": (20,),
+        },
         "audiobook-cleanup-expired-temp-assets-hourly": {
             "task": "audiobook.cleanup_expired_temp_assets",
             "schedule": crontab(minute=17),

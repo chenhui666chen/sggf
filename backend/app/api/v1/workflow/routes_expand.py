@@ -1,4 +1,4 @@
-﻿"""Workflow API module."""
+"""Workflow API module."""
 import logging
 import asyncio
 from fastapi import APIRouter, Depends, HTTPException, status, Body, BackgroundTasks
@@ -81,6 +81,47 @@ from app.schemas.story_expansion import (
     StoryExpansionStartResponse,
     StoryExpansionTaskResultResponse,
 )
+
+
+def _load_structural_debt_from_history(db: Session, project_id: int) -> str:
+    """读取最近一次协同扩展遗留的情节级结构债（跨轮修复输入）。
+
+    扫描最近若干条已完成记录，取最新的非空 alignment_structural_debt；
+    验证器不可用的轮次不写该字段，向前回溯保证债务不被误清。
+    """
+    try:
+        rows = db.execute(
+            text(
+                """
+                SELECT result
+                FROM generation_history
+                WHERE project_id = :project_id
+                  AND task_type = 'expand_story'
+                  AND status = 'completed'
+                ORDER BY id DESC
+                LIMIT 5
+                """
+            ),
+            {"project_id": project_id},
+        ).fetchall()
+        for row in rows:
+            raw_result = row[0] if row else None
+            if not raw_result:
+                continue
+            payload = raw_result if isinstance(raw_result, dict) else json.loads(raw_result)
+            if "alignment_structural_debt" not in payload:
+                continue
+            debt = str(payload.get("alignment_structural_debt") or "").strip()
+            if debt:
+                logger.info(
+                    "加载上轮结构债（%s 字符）注入本轮扩展",
+                    len(debt),
+                )
+            return debt
+        return ""
+    except Exception as exc:
+        logger.warning("读取上轮结构债失败（忽略，按无债处理）: %s", exc)
+        return ""
 
 
 def _apply_story_expansion_duration_calibration_safely(
@@ -537,6 +578,69 @@ async def repair_expand_story_score(
                 if repair_scope == "epic_framework" and epic_framework_state.epic_framework:
                     update_fields["epic_framework"] = repaired_outline
 
+                # 读取链路会用 epic_volumes_detail 重建 plot_outline（卷细纲是权威源），
+                # 必须把人物承接修复同步进卷细纲，否则修复会在下次读取时被静默回滚。
+                volumes_detail_raw = (epic_framework_state.epic_volumes_detail or "").strip()
+                if volumes_detail_raw:
+                    from app.services.outline_merger import (
+                        get_volume_state,
+                        merge_volumes_to_outline,
+                        parse_epic_volumes_json,
+                        update_volume_detail,
+                    )
+
+                    volumes_data = parse_epic_volumes_json(volumes_detail_raw)
+                    volumes_map = (
+                        volumes_data.get("volumes") or {} if isinstance(volumes_data, dict) else {}
+                    )
+                    remaining_names = list(target_character_names)
+                    for volume_key in sorted(volumes_map.keys(), key=lambda item: int(item)):
+                        if not remaining_names:
+                            break
+                        volume_entry = volumes_map.get(volume_key) or {}
+                        detail_content = str(volume_entry.get("detail") or "").strip()
+                        if not detail_content:
+                            continue
+                        repaired_detail, volume_repairs = StoryExpansionCoordinator._repair_outline_character_references(
+                            detail_content,
+                            remaining_names,
+                            characters_text=characters_text,
+                        )
+                        if not volume_repairs:
+                            continue
+                        chapter_range = list(volume_entry.get("chapters_range") or [0, 0])
+                        volumes_data = update_volume_detail(
+                            volumes_data,
+                            int(volume_key),
+                            repaired_detail,
+                            chapter_range,
+                        )
+                        volumes_map = (
+                            volumes_data.get("volumes") or {} if isinstance(volumes_data, dict) else {}
+                        )
+                        repaired_volume_names = {
+                            str(record.get("character_name") or "") for record in volume_repairs
+                        }
+                        remaining_names = [
+                            name for name in remaining_names if name not in repaired_volume_names
+                        ]
+                    if not remaining_names:
+                        merged_outline = merge_volumes_to_outline(volumes_data)
+                        if merged_outline.strip():
+                            repaired_outline = merged_outline
+                            repaired_outline_delta = StoryExpansionCoordinator._extract_outline_delta_text(
+                                repair_source_outline,
+                                repaired_outline,
+                            )
+                            update_fields["plot_outline"] = repaired_outline
+                            update_fields["epic_volumes_detail"] = json.dumps(
+                                volumes_data,
+                                ensure_ascii=False,
+                            )
+                            epic_total_volumes = int(get_volume_state(volumes_data).get("totalVolumes") or 0)
+                            if repair_scope == "epic_framework" and epic_framework_state.epic_framework:
+                                update_fields["epic_framework"] = repaired_outline
+
         if update_fields:
             context_builder.update_project_settings_fields(request.project_id, **update_fields)
             _sync_story_repaired_outline_to_vector(request.project_id, repaired_outline)
@@ -882,6 +986,7 @@ async def execute_expand_story_task(
             epic_config=epic_config,
             volume_detail_config=volume_detail_config,
             auto_supplement_plan=auto_supplement_plan,
+            structural_debt=_load_structural_debt_from_history(db, project_id),
         )
 
         await ws_manager.send_task_progress(
@@ -892,6 +997,12 @@ async def execute_expand_story_task(
         )
 
         workflow_context_builder = WorkflowContextBuilder(db)
+        # 捕获执行前的 epic 框架状态：用于判定本次 epic 是"重建"还是"首次创建"
+        _prior_epic_state = workflow_context_builder.load_epic_framework_state(project_id)
+        had_epic_framework_before = bool(
+            (_prior_epic_state.epic_framework or "").strip()
+            or (_prior_epic_state.epic_volumes_detail or "").strip()
+        )
         update_fields = {
             "plot_outline": result["plot_outline"],
             "characters": result["characters"],
@@ -931,11 +1042,13 @@ async def execute_expand_story_task(
 
         sync_result = {"parsed": 0, "created": 0, "updated": 0, "skipped": 0}
         relationship_result = {"parsed": 0, "saved": 0, "characters_updated": 0}
+        character_archive = {"archived": 0, "names": []}
 
         try:
             from app.services.character_parser import (
                 parse_and_sync_characters,
                 parse_and_sync_relationships,
+                archive_orphan_expansion_characters,
             )
 
             character_sync_text, character_sync_source = _select_story_character_sync_source(result)
@@ -953,6 +1066,29 @@ async def execute_expand_story_task(
                     sync_result.get("created", 0),
                     sync_result.get("updated", 0),
                 )
+
+                # epic 框架重建：归档旧框架遗留、新框架不再引用的扩展管线人物卡。
+                # 仅当本轮成功解析出人物卡时执行（解析失败时不清空整表）；
+                # 手动创建/历史卡片（source 为 NULL）不受影响。
+                if (
+                    result.get("execution_mode") == "epic"
+                    and had_epic_framework_before
+                    and sync_result.get("parsed", 0) > 0
+                ):
+                    try:
+                        character_archive = archive_orphan_expansion_characters(
+                            project_id=project_id,
+                            keep_normalized_names=sync_result.get("normalized_names") or [],
+                            db_session=db,
+                        )
+                        if character_archive.get("archived"):
+                            logger.info(
+                                "🗂️ epic 重建归档孤立人物卡：project_id=%s, archived=%s",
+                                project_id,
+                                character_archive.get("archived"),
+                            )
+                    except Exception as archive_error:
+                        logger.warning(f"⚠️ epic 重建归档孤立人物卡失败: {archive_error}")
             else:
                 logger.info(
                     "ℹ️ 协同拓展未检测到可解析人物卡，跳过同步：project_id=%s",
@@ -991,7 +1127,14 @@ async def execute_expand_story_task(
                     },
                 )
 
-            characters_in_db = db.query(Character).filter(Character.project_id == project_id).all()
+            characters_in_db = (
+                db.query(Character)
+                .filter(
+                    Character.project_id == project_id,
+                    Character.archived_at.is_(None),
+                )
+                .all()
+            )
             for char in characters_in_db:
                 char_content = f"""
 人物名称: {char.name}
@@ -1128,6 +1271,10 @@ async def execute_expand_story_task(
                 "execution_rounds": result.get("execution_rounds", []),
                 "new_characters": result.get("new_characters", []),
                 "alignment_repairs": result.get("alignment_repairs", []),
+                "alignment_gate_status": result.get("alignment_gate_status"),
+                "alignment_gate_retry": result.get("alignment_gate_retry"),
+                "alignment_structural_debt": result.get("alignment_structural_debt"),
+                "character_plot_alignment": result.get("character_plot_alignment"),
                 "story_strategy": result.get("strategy", effective_strategy),
                 "story_intent": effective_intent,
                 "story_expansion_mode": effective_expansion_mode,
@@ -1144,6 +1291,10 @@ async def execute_expand_story_task(
                 "validation_after": after_stats,
                 "alignment_warnings": alignment_warnings,
                 "character_sync": normalized_character_sync,
+                "character_archive": {
+                    "archived": int(character_archive.get("archived", 0) or 0),
+                    "names": list(character_archive.get("names") or [])[:50],
+                },
                 "stop_reasons": stop_reasons,
                 "expansion_analysis": analysis,
                 "epic_total_volumes": result.get("epic_total_volumes"),

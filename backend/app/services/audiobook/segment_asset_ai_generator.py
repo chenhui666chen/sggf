@@ -15,7 +15,7 @@ import re
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from fastapi import HTTPException
 
@@ -72,6 +72,50 @@ def _collect_sound_effect_descriptions(segment: Dict[str, Any]) -> List[str]:
     ]
 
 
+# 描述中自带时长（如“2秒左右”）时不再追加系统时长提示，避免矛盾
+_SFX_DURATION_IN_TEXT_PATTERN = re.compile(r"\d+(?:\.\d+)?\s*秒")
+# 描述含这些人声元素时不追加“无人声”约束，否则与用户描述自相矛盾
+# （如“一声轻笑”被“无人声”压制，生成结果偏离预期）
+_SFX_HUMAN_VOICE_KEYWORDS = (
+    "人声", "说话", "台词", "笑声", "笑", "哭声", "哭",
+    "喊", "低语", "呢喃", "叹息", "咳嗽", "哼",
+)
+
+
+def _build_sfx_guardrail_suffix(combined_description: str) -> str:
+    """纯音效固定护栏；仅保留与用户描述不冲突的约束。"""
+    parts = ["纯音效"]
+    if not any(keyword in combined_description for keyword in _SFX_HUMAN_VOICE_KEYWORDS):
+        parts.append("无人声")
+    parts.append("无背景音乐")
+    return "，".join(parts) + "。"
+
+
+def _resolve_sfx_target_duration(
+    segment: Dict[str, Any],
+    combined_description: str,
+) -> Optional[float]:
+    """确定音效生成目标时长；返回 None 表示不追加时长提示。
+
+    优先级：描述自带时长 > 工作台配置的音效 duration > 不加时长提示。
+    不再用旁白时长估算：短促触发音（如“一声轻笑”）与旁白长度无关，
+    强加“时长约8秒”会迫使模型把音效拉伸变形。
+    """
+    if _SFX_DURATION_IN_TEXT_PATTERN.search(combined_description):
+        return None
+    explicit: List[float] = []
+    for spec in SegmentPreviewService.normalize_sound_effects(segment):
+        try:
+            value = float(spec.get("duration"))
+        except (TypeError, ValueError):
+            continue
+        if value > 0:
+            explicit.append(value)
+    if explicit:
+        return max(1.0, min(30.0, max(explicit)))
+    return None
+
+
 def _resolve_music_style(style_hint: str) -> MusicStyle:
     hint = str(style_hint or "").strip()
     if hint:
@@ -105,18 +149,9 @@ async def generate_segment_sfx_asset(segment: Dict[str, Any]) -> SegmentAssetGen
             detail="未配置豆包音频密钥，无法 AI 生成音效，可改用素材库匹配",
         )
 
-    prompt = f"有声书场景音效：{'；'.join(descriptions)}。纯音效，无人声，无背景音乐。"
-    duration = max(
-        3.0,
-        min(
-            10.0,
-            float(
-                estimate_narration_duration_seconds(
-                    str(segment.get("text") or ""), min_duration=3.0
-                )
-            ),
-        ),
-    )
+    combined = "；".join(descriptions)
+    prompt = f"有声书场景音效：{combined}。{_build_sfx_guardrail_suffix(combined)}"
+    duration = _resolve_sfx_target_duration(segment, combined)
 
     generator = create_doubao_sfx_generator()
     result = await generator.generate_audio_async(prompt=prompt, duration=duration)

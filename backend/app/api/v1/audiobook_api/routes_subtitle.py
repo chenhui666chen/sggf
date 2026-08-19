@@ -237,6 +237,11 @@ async def resume_chapter_generation(
             checkpoint_json=resumed_checkpoint_json,
         )
 
+    # R11/P0-2：入队 + 冻结同事务（账户锁 → enqueue → freeze → 统一 commit）
+    from app.services.audiobook.task_support import lock_billing_account as _lock_billing_account
+
+    if resume_task_type != "script_only":
+        _lock_billing_account(db, current_user.id)
     _, async_result = _enqueue_audiobook_task(
         db,
         audiobook_project_id=audiobook_project_id,
@@ -248,6 +253,7 @@ async def resume_chapter_generation(
         narration_style_prompt=narration_style_prompt,
         generate_subtitle=generate_subtitle,
         before_dispatch=bind_resume_checkpoint_before_dispatch,
+        commit_result=False,
     )
 
     if resume_task_type != "script_only":
@@ -269,7 +275,19 @@ async def resume_chapter_generation(
                 tts_model=tts_model,
                 cost_precheck_id=precheck.cost_precheck_id,
             ),
+            raise_on_error=True,
         )
+    # 统一提交（R10/P0-3：事务所有权归最外层应用服务）
+    db.commit()
+    # 提交后即时派发（best-effort；失败由 dispatcher beat 兜底，R11/P0-1）
+    try:
+        from app.services.audiobook.task_support import (
+            dispatch_pending_runs as _dispatch_pending_runs,
+        )
+
+        _dispatch_pending_runs(db, async_result.runs)
+    except Exception as _exc:
+        logger.warning("提交后派发失败（dispatcher 兜底）: %s", _exc)
 
     logger.info(
         "Resume queued for audiobook_project_id=%s chapter_id=%s source_run_id=%s new_job_id=%s completed=%s/%s task_type=%s",

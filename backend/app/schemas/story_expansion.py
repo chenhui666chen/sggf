@@ -222,6 +222,19 @@ class StoryExpansionCharacterSyncResponse(_StrictModel):
     relationships: Optional[StoryExpansionCharacterSyncRelationshipsResponse] = None
 
 
+class StoryExpansionCharacterArchiveResponse(_StrictModel):
+    archived: int = 0
+    names: list[str] = Field(default_factory=list)
+
+
+class StoryExpansionAlignmentCompactResponse(_StrictModel):
+    score: int = 0
+    redundant_characters: list[str] = Field(default_factory=list)
+    missing_characters: list[str] = Field(default_factory=list)
+    relationship_issues: list[str] = Field(default_factory=list)
+    suggestions: list[str] = Field(default_factory=list)
+
+
 class StoryExpansionTaskResultResponse(_StrictModel):
     expanded_outline: str
     all_characters: str
@@ -234,6 +247,10 @@ class StoryExpansionTaskResultResponse(_StrictModel):
     execution_rounds: list[StoryExpansionExecutionRoundResponse] = Field(default_factory=list)
     new_characters: list[str] = Field(default_factory=list)
     alignment_repairs: list[str] = Field(default_factory=list)
+    alignment_gate_status: Optional[str] = None
+    alignment_gate_retry: Optional[dict[str, Any]] = None
+    alignment_structural_debt: Optional[str] = None
+    character_plot_alignment: Optional[StoryExpansionAlignmentCompactResponse] = None
     story_strategy: Optional[str] = None
     story_intent: Optional[str] = None
     story_expansion_mode: Optional[str] = None
@@ -250,6 +267,7 @@ class StoryExpansionTaskResultResponse(_StrictModel):
     validation_after: Optional[StoryExpansionValidationStatsResponse] = None
     alignment_warnings: list[str] = Field(default_factory=list)
     character_sync: Optional[StoryExpansionCharacterSyncResponse] = None
+    character_archive: Optional[StoryExpansionCharacterArchiveResponse] = None
     stop_reasons: list[str] = Field(default_factory=list)
     expansion_analysis: Optional[StoryExpansionAnalysisPayload] = None
     epic_total_volumes: Optional[int] = None

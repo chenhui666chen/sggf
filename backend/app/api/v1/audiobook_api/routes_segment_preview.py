@@ -7,7 +7,11 @@ from app.api.v1.audiobook_api.dependencies import (
     get_owned_audiobook_project,
 )
 from app.schemas.audiobook import ScriptSegmentPreviewRequest
-from app.services.audiobook.project_audio_runtime import resolve_project_audio_runtime_config
+from app.services.audiobook.project_audio_config import parse_engine_config_snapshot
+from app.services.audiobook.project_audio_runtime import (
+    resolve_from_snapshot,
+    resolve_project_audio_runtime_config,
+)
 from app.services.audiobook.mimo_voice_assets import merge_mimo_voice_asset_tts_params
 from app.services.audiobook.repository import ChapterRepository
 from app.services.audiobook.segment_preview_service import SegmentPreviewService
@@ -62,11 +66,18 @@ async def preview_script_segment_audio(
     # 片段绑定模型与候选、整章生成使用同一来源；页面模型只作为回退。
     tts_model = resolve_segment_tts_model(segment_voice_params, request.tts_model)
 
-    runtime_config = resolve_project_audio_runtime_config(
-        project,
-        tts_model=tts_model,
-        base_voice_mapping=audiobook_project.voice_mapping or {},
+    # Phase 1.5：优先从 engine_config_snapshot 解析，确保试听与批次冻结配置一致
+    snapshot = parse_engine_config_snapshot(
+        str(audiobook_project.engine_config_snapshot or "") if audiobook_project else None
     )
+    if snapshot:
+        runtime_config = resolve_from_snapshot(snapshot, tts_model=tts_model)
+    else:
+        runtime_config = resolve_project_audio_runtime_config(
+            project,
+            tts_model=tts_model,
+            base_voice_mapping=audiobook_project.voice_mapping or {},
+        )
     preview_service = SegmentPreviewService(
         tts_model=tts_model,
         voice_mapping=runtime_config.voice_mapping,

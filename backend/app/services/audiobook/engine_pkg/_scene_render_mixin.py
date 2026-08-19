@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
+import shutil
 import threading
 from dataclasses import asdict, is_dataclass
 from pathlib import Path
@@ -14,6 +15,9 @@ from app.core.env_loader import get_backend_root
 from app.services.audiobook.atomic_files import write_bytes_atomic
 from app.services.audiobook.duration_estimator import (
     estimate_narration_duration_seconds,
+)
+from app.services.audiobook.scene_edit_revision_service import (
+    derive_scene_topology_hash,
 )
 from app.services.audiobook.prompt_audio_asr_provider import (
     create_prompt_audio_asr_provider,
@@ -34,8 +38,14 @@ from app.services.audiobook.scene_engine.preview_reference_asset import (
 from app.services.audiobook.scene_engine.provider_attempt_ledger import (
     ProviderAttemptLedger,
 )
+from app.services.audiobook.scene_direction.chapter_director_run import (
+    run_chapter_direction,
+)
 from app.services.audiobook.scene_engine.scene_billing import (
     build_seed_scene_billing_summary,
+)
+from app.services.audiobook.scene_quality.qwen_omni_reviewer import (
+    build_omni_scene_signature,
 )
 from app.services.audiobook.scene_engine.scene_assembler import (
     SceneAssemblyResult,
@@ -51,6 +61,162 @@ from app.services.audiobook.engine_pkg._tts_mixin import aggregate_tts_cost_stat
 
 
 logger = logging.getLogger(__name__)
+
+# §3.4：场景音频正式 artifact 存储根目录（与 routes_scene_editor 的流式端点一致）
+SCENE_ARTIFACT_ROOT = get_backend_root() / "data" / "scene_audio_artifacts"
+
+# 章节事实键：与 scene_local_context 的构造约定一致（时间/地点/情绪）。
+_CHAPTER_FACT_SOURCE_KEYS = (
+    ("time", ("time", "time_of_day", "location_time")),
+    ("location", ("location", "place", "scene_location")),
+    ("mood", ("mood", "emotion_curve", "atmosphere")),
+)
+
+
+def build_scene_entry_context(
+    *,
+    summary_data: Any = None,
+    chapter_summary: str = "",
+    character_profiles: Sequence[Mapping[str, Any]] | None = None,
+) -> Dict[str, Any]:
+    """从入口可见的章节上下文构造 pipeline 贯通参数（指导文档 §7）。
+
+    - ``chapter_facts``：章节结构化摘要中的时间/地点/情绪事实；
+      无结构化字段时用章节摘要截断兜底；
+    - ``descriptions``：角色档案的统一文字描述（voice mapping 内部字段
+      由 resolver 按优先级回退）。
+    """
+    summary: Dict[str, Any] = {}
+    if isinstance(summary_data, Mapping):
+        summary = dict(summary_data)
+
+    facts: Dict[str, str] = {}
+    for fact_key, source_keys in _CHAPTER_FACT_SOURCE_KEYS:
+        for source_key in source_keys:
+            value = str(summary.get(source_key) or "").strip()
+            if value:
+                facts[fact_key] = value[:80]
+                break
+    if not facts:
+        fallback_summary = str(chapter_summary or "").strip()
+        if fallback_summary:
+            facts["mood"] = fallback_summary[:100]
+
+    descriptions: Dict[str, str] = {}
+    for profile in character_profiles or ():
+        if not isinstance(profile, Mapping):
+            continue
+        name = str(profile.get("name") or profile.get("character_name") or "").strip()
+        if not name:
+            continue
+        for description_key in (
+            "voice_description",
+            "description",
+            "voice_design_prompt",
+            "personality",
+        ):
+            value = str(profile.get(description_key) or "").strip()
+            if value:
+                descriptions[name] = value
+                break
+
+    return {"chapter_facts": facts, "descriptions": descriptions}
+
+
+SEED_RENDER_STATUS_VALUES = frozenset(
+    {"rendered_all_seed", "rendered_with_fallback", "manual_review_required", "failed"}
+)
+
+
+def aggregate_scene_render_status(
+    scene_result: Dict[str, Any],
+    *,
+    terminal_policy: Any = None,
+) -> tuple[str, Dict[str, Any]]:
+    """聚合场景渲染结果为 Seed 四态 + render_status_detail（GUIDE §2.4/§2.5）。
+
+    - ``rendered_all_seed``：全部场景 passed（无回退、无人工评审）；
+    - ``rendered_with_fallback``：存在 legacy_stems 回退场景、无 manual_review；
+    - ``manual_review_required``：存在 manual_review 场景（或按 terminal_policy 触发）；
+    - ``failed``：无任何可用场景产物。
+
+    返回 (render_status, render_status_detail)；detail 记录
+    local_fallback_count / manual_review_scene_ids / terminal_policy。
+    """
+    raw_checkpoints = (scene_result or {}).get("scene_checkpoints") or {}
+    checkpoints = (
+        dict(raw_checkpoints)
+        if isinstance(raw_checkpoints, Mapping)
+        else {}
+    )
+    manual_review_scene_ids: list[str] = []
+    fallback_scene_ids: list[str] = []
+    passed_count = 0
+    for scene_id, checkpoint in checkpoints.items():
+        if not isinstance(checkpoint, Mapping):
+            continue
+        scene_status = str(checkpoint.get("status") or "").strip()
+        if scene_status == "manual_review":
+            manual_review_scene_ids.append(str(scene_id))
+        elif scene_status == "legacy_stems":
+            fallback_scene_ids.append(str(scene_id))
+        elif scene_status == "passed":
+            passed_count += 1
+    detail: Dict[str, Any] = {
+        "local_fallback_count": len(fallback_scene_ids),
+        "manual_review_scene_ids": manual_review_scene_ids,
+        "terminal_policy": terminal_policy,
+    }
+    if manual_review_scene_ids:
+        return "manual_review_required", detail
+    if fallback_scene_ids:
+        return "rendered_with_fallback", detail
+    if passed_count > 0 or checkpoints:
+        return "rendered_all_seed", detail
+    return "failed", detail
+
+
+def drop_superseded_split_parent_checkpoints(
+    checkpoint_updates: Dict[str, Any],
+    pipeline_result: Any,
+) -> list[str]:
+    """剔除被拆分场景取代的父场景残留 checkpoint（§3.4 发布完整性合同）。
+
+    质量闸门拆分后管线最终输出只含拆分场景，但父场景失败尝试的 checkpoint
+    仍残留在 ``checkpoint_updates``；不剔除会让发布协议的 checkpoint 场景键
+    与 staged artifact 键集合全等校验失败，整章输出永久停留 staged。
+    保守守卫：仅当父场景的全部拆分场景（``<parent>_split_`` 前缀的
+    checkpoint 键）都进入最终输出时才删除，防断点续跑误重渲染。
+    返回被剔除的父场景 ID 列表。
+    """
+    scenes = tuple(getattr(pipeline_result, "scenes", None) or ())
+    final_scene_ids = {
+        str(getattr(getattr(scene, "plan", None), "scene_id", "") or "")
+        for scene in scenes
+    }
+    parent_ids: set[str] = set()
+    for scene in scenes:
+        metadata = getattr(getattr(scene, "result", None), "metadata", None) or {}
+        parent_id = str(metadata.get("split_parent_scene_id") or "").strip()
+        if parent_id:
+            parent_ids.add(parent_id)
+    dropped: list[str] = []
+    for parent_id in sorted(parent_ids):
+        if parent_id not in checkpoint_updates or parent_id in final_scene_ids:
+            continue
+        split_keys = [
+            key
+            for key in checkpoint_updates
+            if key.startswith(f"{parent_id}_split_")
+        ]
+        if not split_keys or not all(key in final_scene_ids for key in split_keys):
+            continue
+        checkpoint_updates.pop(parent_id, None)
+        dropped.append(parent_id)
+    if dropped:
+        logger.info("场景拆分后剔除被取代的父场景 checkpoint: %s", dropped)
+    return dropped
+
 
 try:
     from app.websocket.manager import ws_manager
@@ -91,6 +257,10 @@ class SceneRenderMixin:
         tts_progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
         audiobook_project_id: Optional[int] = None,
         pause_check: Optional[Callable[[], bool]] = None,
+        chapter_summary: str = "",
+        summary_data: Any = None,
+        character_profiles: Optional[Sequence[Mapping[str, Any]]] = None,
+        director_style: str = "",
     ) -> Optional[Dict[str, Any]]:
         if str(getattr(self, "_audio_engine_mode", "legacy_stems")) != "seed_scene":
             return None
@@ -240,12 +410,36 @@ class SceneRenderMixin:
                     chapter_id,
                     exc,
                 )
+        entry_context = build_scene_entry_context(
+            summary_data=summary_data,
+            chapter_summary=chapter_summary,
+            character_profiles=character_profiles,
+        )
+        # 阶段 7：V2 导演前置编排（门控默认关闭）；降级/异常不中断章节生产，
+        # directed_prompts 缺省时渲染层保持既有 V1 确定性编译路径。
+        directed_prompts, director_meta = await self._run_seed_scene_director(
+            script_segments,
+            chapter_summary=chapter_summary,
+        )
         pipeline_result = await asyncio.to_thread(
             pipeline.render,
             script_segments,
             voice_mapping=dict(getattr(self, "_scene_voice_mapping", {}) or {}),
+            descriptions=entry_context["descriptions"],
+            default_tts_model=str(getattr(self, "tts_model", "") or ""),
+            chapter_facts=entry_context["chapter_facts"],
+            director_style=director_style,
+            directed_prompts=directed_prompts,
             model=seed_audio_model,
             checkpoints=scene_checkpoints,
+        )
+        # 拆分成功后父场景的失败 checkpoint 残留会破坏发布完整性校验的
+        # 场景键集合全等（§3.4/R9），装配前剔除被拆分取代的父场景
+        drop_superseded_split_parent_checkpoints(checkpoint_updates, pipeline_result)
+        # Stage 7: Omni shadow review (gate + reviewer, default off)
+        omni_review_meta = await self._run_seed_scene_omni_review(
+            pipeline_result,
+            chapter_facts=entry_context.get("chapter_facts"),
         )
         if pending_progress_tasks:
             progress_results = await asyncio.gather(
@@ -369,6 +563,19 @@ class SceneRenderMixin:
             },
         )
 
+        # §2.5：整章装配完成后聚合本次渲染结果（Seed 四态 + 三维投影 detail），
+        # 无论是否发布都由调用方先写 ChapterAudioRun.result_render_status
+        audio_fx_config = getattr(self, "_audio_fx_config", None) or {}
+        scene_preferences = audio_fx_config.get("scene_generation_preferences")
+        render_status, render_status_detail = aggregate_scene_render_status(
+            {"scene_checkpoints": checkpoint_updates},
+            terminal_policy=(
+                scene_preferences.get("terminal_policy")
+                if isinstance(scene_preferences, Mapping)
+                else None
+            ),
+        )
+
         self.task_tracker.start_stage(task_id, StageType.FINAL_AUDIO_REVIEW)
         if enable_quality_review and callable(getattr(self, "_final_audio_review", None)):
             segment_audio_presence = [False] * len(script_segments)
@@ -400,6 +607,22 @@ class SceneRenderMixin:
             task_id,
             StageType.FINAL_AUDIO_REVIEW,
             metrics=final_audio_review,
+        )
+
+        # §3.4：装配段登记场景音频 artifact（复制到正式存储目录 + 计算
+        # content_digest/segment_keys/scene_topology_hash/source_kind）；
+        # 由完成回调写入 SceneAudioArtifact 行（status='staged'），
+        # 仅发布事务内 staged → active。
+        scene_artifact_entries = self._build_scene_artifact_entries(
+            scenes=pipeline_result.scenes,
+            fallback_audio_paths=fallback_audio_paths,
+            script_segments=script_segments,
+            checkpoint_updates=checkpoint_updates,
+            task_id=task_id,
+        )
+        scene_topology_hash = derive_scene_topology_hash(
+            {"scene_checkpoints": checkpoint_updates},
+            [self._serialize_scene_segment(segment) for segment in script_segments],
         )
         self.task_tracker.complete_task(task_id)
 
@@ -447,6 +670,10 @@ class SceneRenderMixin:
             ],
             "scene_checkpoints": checkpoint_updates,
             "scene_render": scene_metrics,
+            "scene_artifacts": scene_artifact_entries,
+            "scene_topology_hash": scene_topology_hash or "",
+            "render_status": render_status,
+            "render_status_detail": render_status_detail,
             "stats": {
                 "mode": "seed_scene",
                 "parse_stats": {
@@ -459,8 +686,170 @@ class SceneRenderMixin:
                 "audio_info": audio_info,
                 "scene_render": scene_metrics,
                 "scene_billing": scene_billing,
+                "omni_review": omni_review_meta,
+                "director": director_meta,
                 "final_audio_review": final_audio_review,
             },
+        }
+
+    async def _run_seed_scene_director(
+        self,
+        script_segments: Sequence[Any],
+        *,
+        chapter_summary: str = "",
+    ) -> tuple[Any, Optional[Dict[str, Any]]]:
+        """阶段 7：V2 导演前置编排（门控 _seed_scene_director_enabled）。
+
+        返回 (directed_prompts, director_meta)：
+
+        - 门控关闭 → (None, None)，行为与接入前完全一致；
+        - use_v2_direction → 按 scene_key 的编译 Prompt + 审计元数据；
+        - 降级/客户端缺失/意外异常 → (None, meta)，章节按既有 V1
+          确定性编译路径继续生产，reason code 可审计。
+        """
+        if not bool(getattr(self, "_seed_scene_director_enabled", False)):
+            return None, None
+        llm_client = self._resolve_seed_scene_director_llm_client()
+        if llm_client is None:
+            return None, {
+                "action": "degrade_v1",
+                "reason_code": "director_llm_client_missing",
+                "decision_hash": "",
+            }
+        try:
+            run = await run_chapter_direction(
+                script_segments,
+                llm_client=llm_client,
+                chapter_context=chapter_summary,
+            )
+        except Exception as exc:
+            logger.warning(
+                "Seed Audio V2 导演编排异常，降级 V1: chapter_summary=%s error=%s",
+                bool(chapter_summary),
+                exc,
+            )
+            return None, {
+                "action": "degrade_v1",
+                "reason_code": "director_unexpected_error",
+                "decision_hash": "",
+            }
+        meta = {
+            "action": run.action,
+            "reason_code": run.reason_code,
+            "decision_hash": run.decision_hash,
+        }
+        if run.action != "use_v2_direction":
+            return None, meta
+        return dict(run.prompts_by_scene), meta
+
+    def _resolve_seed_scene_director_llm_client(self) -> Any:
+        """按引擎现有持有链解析导演用 LLM 客户端；缺失时返回 None。"""
+        direct = getattr(self, "llm_client", None)
+        if direct is not None and hasattr(direct, "chat"):
+            return direct
+        for holder_name in ("script_adapter", "audio_director"):
+            holder = getattr(self, holder_name, None)
+            client = getattr(holder, "llm_client", None) if holder else None
+            if client is not None and hasattr(client, "chat"):
+                return client
+        return None
+
+    async def _run_seed_scene_omni_review(
+        self,
+        pipeline_result: Any,
+        *,
+        chapter_facts: Optional[Mapping[str, str]] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """阶段 7：Omni 影子评审（门控 + reviewer 注入）。
+
+        在渲染完成后按通过场景逐帧提交影子评审；
+        任何失败不中断章节生产，review 错误在 stats 中可审计。
+        """
+        if not bool(getattr(self, "_seed_scene_omni_review_enabled", False)):
+            return None
+        reviewer = getattr(self, "_seed_scene_omni_reviewer", None)
+        if reviewer is None:
+            return None
+
+        reviewer.begin_chapter()
+        scene_reviews: list[Dict[str, Any]] = []
+
+        for scene in pipeline_result.scenes:
+            if scene.result.status != "passed":
+                continue
+            audio_path = scene.result.audio_path
+            if audio_path is None or not Path(audio_path).exists():
+                continue
+
+            try:
+                audio_artifact_hash = self._file_sha256(Path(audio_path))
+            except Exception:
+                continue
+
+            try:
+                signature = build_omni_scene_signature(
+                    audio_artifact_hash=audio_artifact_hash,
+                    audio_duration_s=scene.plan.expected_duration_s,
+                    expected_text=scene.plan.expected_text,
+                    speaker_names=scene.plan.speaker_names,
+                    expected_vocalizations=scene.plan.expected_vocalizations,
+                    chapter_facts=chapter_facts,
+                    model_id=reviewer.model_id,
+                    policy=reviewer.policy,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "Omni shadow review signature build failed: scene=%s error=%s",
+                    scene.plan.scene_id,
+                    exc,
+                )
+                scene_reviews.append(
+                    {
+                        "scene_id": scene.plan.scene_id,
+                        "outcome_status": "signature_error",
+                        "error": str(exc),
+                    }
+                )
+                continue
+
+            try:
+                outcome = await reviewer.review_scene(
+                    signature=signature,
+                    audio_path=str(audio_path),
+                    audio_duration_s=scene.plan.expected_duration_s,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "Omni shadow review call failed: scene=%s error=%s",
+                    scene.plan.scene_id,
+                    exc,
+                )
+                scene_reviews.append(
+                    {
+                        "scene_id": scene.plan.scene_id,
+                        "outcome_status": "review_error",
+                        "error": str(exc),
+                    }
+                )
+                continue
+
+            scene_reviews.append(
+                {
+                    "scene_id": scene.plan.scene_id,
+                    "outcome_status": outcome.status,
+                    "error_kind": outcome.error_kind,
+                    "reused": outcome.reused,
+                }
+            )
+
+        return {
+            "scenes": scene_reviews,
+            "total_reviewed": sum(
+                1
+                for r in scene_reviews
+                if r.get("outcome_status") == "reviewed"
+            ),
+            "total_scenes": len(pipeline_result.scenes),
         }
 
     def _create_chapter_scene_pipeline(
@@ -479,15 +868,20 @@ class SceneRenderMixin:
         if adapter is None:
             raise RuntimeError("Seed Audio adapter is unavailable")
 
+        # 场景并发渲染时 checkpoint 写入共享 dict 并触发 DB 持久化回调，
+        # 加锁串行化临界区（会话非线程安全），不影响合成并发本身。
+        checkpoint_lock = threading.Lock()
+
         def write_checkpoint(payload: Dict[str, Any]) -> None:
             scene_id = str(payload.get("scene_id") or "").strip()
             if scene_id:
-                checkpoint_updates[scene_id] = dict(payload)
-                if checkpoint_persist_callback:
-                    checkpoint_persist_callback(
-                        dict(checkpoint_updates),
-                        dict(payload),
-                    )
+                with checkpoint_lock:
+                    checkpoint_updates[scene_id] = dict(payload)
+                    if checkpoint_persist_callback:
+                        checkpoint_persist_callback(
+                            dict(checkpoint_updates),
+                            dict(payload),
+                        )
 
         provider_attempt_ledger = ProviderAttemptLedger(
             run_root / "provider_attempts.jsonl"
@@ -894,6 +1288,104 @@ class SceneRenderMixin:
         if "total_cues" in local_timeline:
             local_timeline["total_cues"] = len(adjusted_items)
         return local_timeline
+
+    def _build_scene_artifact_entries(
+        self,
+        *,
+        scenes: Sequence[Any],
+        fallback_audio_paths: Mapping[str, Any],
+        script_segments: Sequence[Any],
+        checkpoint_updates: Mapping[str, Any],
+        task_id: str,
+    ) -> list[Dict[str, Any]]:
+        """§3.4：装配段构建场景音频 artifact 登记条目。
+
+        对每个有产物的场景（passed 用场景音频、legacy_stems 用回退音频）
+        复制音频到 ``backend/data/scene_audio_artifacts/`` 并计算
+        content_digest/segment_keys/scene_topology_hash/source_kind；
+        manual_review 或无产物场景不登记。复制失败仅记录告警并跳过该
+        场景（发布前置校验会因 staged 缺场景而拒绝发布，失败显式化）。
+        """
+        serialized_segments = [
+            self._serialize_scene_segment(segment) for segment in script_segments
+        ]
+        segment_keys = [
+            str(segment.get("segment_key") or "")
+            for segment in serialized_segments
+            if isinstance(segment, Mapping) and segment.get("segment_key")
+        ]
+        scene_topology_hash = derive_scene_topology_hash(
+            {"scene_checkpoints": checkpoint_updates},
+            serialized_segments,
+        )
+        entries: list[Dict[str, Any]] = []
+        for scene in scenes:
+            plan = getattr(scene, "plan", None)
+            result = getattr(scene, "result", None)
+            if plan is None or result is None:
+                continue
+            scene_id = str(getattr(plan, "scene_id", "") or "")
+            status = str(getattr(result, "status", "") or "")
+            if not scene_id:
+                continue
+            if status == "passed":
+                source_path = getattr(result, "audio_path", None)
+                source_kind = "seed"
+            elif status == "legacy_stems":
+                source_path = fallback_audio_paths.get(scene_id)
+                source_kind = "legacy_fallback"
+            else:
+                continue
+            if not source_path:
+                continue
+            source = Path(source_path)
+            if not source.is_file():
+                logger.warning(
+                    "Seed Audio artifact source missing, skip: scene=%s path=%s",
+                    scene_id,
+                    source_path,
+                )
+                continue
+            artifact_id = "art_{}".format(
+                hashlib.sha256(
+                    f"{task_id}:{scene_id}".encode("utf-8")
+                ).hexdigest()[:40]
+            )
+            extension = source.suffix.lstrip(".").lower() or "mp3"
+            target = SCENE_ARTIFACT_ROOT / f"{artifact_id}.{extension}"
+            try:
+                target.parent.mkdir(parents=True, exist_ok=True)
+                if not target.exists() or target.stat().st_size != source.stat().st_size:
+                    shutil.copy2(source, target)
+            except OSError as exc:
+                logger.warning(
+                    "Seed Audio artifact copy failed, skip: scene=%s error=%s",
+                    scene_id,
+                    exc,
+                )
+                continue
+            indices = list(getattr(plan, "source_segment_indices", None) or [])
+            keys = [
+                segment_keys[index]
+                for index in indices
+                if isinstance(index, int) and 0 <= index < len(segment_keys)
+            ]
+            entries.append(
+                {
+                    "artifact_id": artifact_id,
+                    "scene_id": scene_id,
+                    "source_kind": source_kind,
+                    "source_run_path": str(source),
+                    "stored_rel_path": f"{artifact_id}.{extension}",
+                    "content_digest": self._file_sha256(target),
+                    "segment_keys": keys,
+                    "scene_topology_hash": scene_topology_hash or "",
+                    "duration_s": float(
+                        getattr(plan, "expected_duration_s", None) or 0.0
+                    ),
+                }
+            )
+        return entries
 
     @staticmethod
     def _scene_render_metrics(

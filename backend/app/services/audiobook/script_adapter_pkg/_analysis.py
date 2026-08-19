@@ -22,6 +22,8 @@ from app.services.audiobook.voice_identity_policy import (
     FIXED_VOICE_PERFORMANCE_BOUNDARY_PROMPT,
 )
 
+from ._seed_scene_capability import build_seed_scene_main_generation_block
+
 logger = logging.getLogger(__name__)
 
 
@@ -58,11 +60,7 @@ class AnalysisMixin:
         )
         engine_block = build_script_analysis_engine_guidance(audio_engine_mode)
         if audio_engine_mode == "seed_scene":
-            tts_block = (
-                "**主生成模型：seed-audio-1.0（完整声音场景模式）**\n"
-                "- 负责在同一次生成中完成旁白、多人对白、非语言人声、环境、动作音效和配乐。\n"
-                f"- 当前选择的逐句 TTS 模型 {model_name} 仅用于试听参考音色和局部回退，不决定主场景剧本结构。\n"
-            )
+            tts_block = build_seed_scene_main_generation_block(model_name)
             instruct_block = (
                 "**Seed Audio 场景分析提示**\n"
                 "- 优先识别连续场景、声音事件相对时序、声学空间、音乐生命周期和角色表演变化。\n"

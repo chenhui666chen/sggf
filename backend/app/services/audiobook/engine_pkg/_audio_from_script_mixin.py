@@ -79,23 +79,33 @@ class AudioFromScriptMixin:
 
             # ============ 阶段1：制定改编策略（用于后续设计阶段的风格参考） ============
             self.task_tracker.start_stage(task_id, StageType.STRATEGY)
-            strategy = self.audio_director.formulate_strategy(
-                novel_genre=novel_genre,
-                novel_theme=novel_theme,
-                target_audience="通用听众",
-            )
-            # 应用项目级音效/BGM 配置对策略进行微调
-            self._apply_audio_fx_to_strategy(strategy)
-            # 虽然不再改编剧本，但仍将策略传入，便于音效/配乐设计阶段参考
-            self.script_adapter.strategy = strategy
-            self.task_tracker.complete_stage(
-                task_id,
-                StageType.STRATEGY,
-                metrics={
-                    "style": strategy.style.value,
-                    "sound_density": strategy.sound_effect_density,
-                },
-            )
+            is_seed_scene = str(getattr(self, "_audio_engine_mode", "legacy_stems")) == "seed_scene"
+            strategy: Optional[Any] = None
+            if is_seed_scene:
+                logger.info("🎭 [1/8] seed_scene 跳过 AudioDirector 策略，场景导演链路接管...")
+                self.task_tracker.complete_stage(
+                    task_id,
+                    StageType.STRATEGY,
+                    metrics={"engine_mode": "seed_scene", "strategy_skipped": True},
+                )
+            else:
+                strategy = self.audio_director.formulate_strategy(
+                    novel_genre=novel_genre,
+                    novel_theme=novel_theme,
+                    target_audience="通用听众",
+                )
+                # 应用项目级音效/BGM 配置对策略进行微调
+                self._apply_audio_fx_to_strategy(strategy)
+                # 虽然不再改编剧本，但仍将策略传入，便于音效/配乐设计阶段参考
+                self.script_adapter.strategy = strategy
+                self.task_tracker.complete_stage(
+                    task_id,
+                    StageType.STRATEGY,
+                    metrics={
+                        "style": strategy.style.value,
+                        "sound_density": strategy.sound_effect_density,
+                    },
+                )
 
             # ============ 阶段2：剧本改编（已完成，这里直接使用传入剧本） ============
             self.task_tracker.start_stage(task_id, StageType.SCRIPT_ADAPTATION)
@@ -259,6 +269,7 @@ class AudioFromScriptMixin:
                     tts_progress_callback=tts_progress_callback,
                     audiobook_project_id=audiobook_project_id,
                     pause_check=pause_check,
+                    director_style=strategy.style.value if strategy else "",
                 )
                 if callable(try_seed_scene)
                 else None

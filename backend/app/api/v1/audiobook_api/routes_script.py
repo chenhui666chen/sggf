@@ -469,6 +469,15 @@ async def update_chapter_script(
             detail="章节不存在或不属于该项目",
         )
 
+    # seed_scene 批次禁止直写 script_json（GUIDE §2.9 旧剧本接口统一拒绝）：
+    # 台词编辑必须走场景编辑器（routes_scene_editor，edit_type=dialogue）的
+    # revision 并发链，防绕过。legacy_stems 批次保持现状。
+    if str(getattr(owned.audiobook_project, "engine_mode", None) or "") == "seed_scene":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="seed_scene 批次请使用场景编辑器修改台词（editor-document 接口）",
+        )
+
     # 获取或创建章节音频记录
     chapter_audio = ChapterAudioRepository.get_active_by_project_chapter(
         db,

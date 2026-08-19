@@ -101,6 +101,12 @@ class OutlineExpanderBase:
         )
         self.plot_architect_large = PlotArchitectAgent(self.knowledge_base, self.memory_manager, llm=large_volume_llm)
 
+        # epic 框架两段式生成（全书结构骨架 + 伏笔表/人物生命周期）是协同扩展中
+        # 最大的单次 LLM 调用（est_output≈2 万 token），默认 task_type='concept'
+        # 路由到 qwen3.7-flash 曾出现流式卡死 20 分钟后 ReadTimeout（任务89实测），
+        # 统一切到 deepseek-v4-pro 超长输出配置。
+        self.creative_director_pro = CreativeDirectorAgent(self.knowledge_base, self.memory_manager, llm=large_volume_llm)
+
         logger.debug("🚀 卷细化协同统一使用 deepseek-v4-pro 模型（384K 超长输出）")
         
         # 🎆 初始化分层摘要器

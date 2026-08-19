@@ -11,7 +11,9 @@ from app.services.audiobook.project_audio_config import (
     get_audio_engine_mode,
     get_seed_audio_model,
     get_characters_for_model,
+    parse_engine_config_snapshot,
     parse_project_audio_config,
+    resolve_engine_mode,
 )
 from app.services.audiobook.voice_reference_asset_repository import (
     get_active_voice_reference_asset,
@@ -175,13 +177,19 @@ def resolve_project_audio_runtime_config(
     *,
     tts_model: str,
     base_voice_mapping: Any = None,
+    engine_mode: Optional[str] = None,
 ) -> ProjectAudioRuntimeConfig:
+    """从项目实时配置解析运行时配置。
+
+    engine_mode 为 None 时自动 resolve（从 config 判定）。
+    """
     raw_config = (
         parse_project_audio_config(project.audio_config or "")
         if project and project.audio_config
         else {}
     )
-    character_items = get_characters_for_model(raw_config, tts_model)
+    resolved_mode = engine_mode or get_audio_engine_mode(raw_config)
+    character_items = get_characters_for_model(raw_config, tts_model, engine_mode=resolved_mode)
 
     voice_mapping = normalize_base_voice_mapping(base_voice_mapping)
     for item in character_items:
@@ -195,13 +203,52 @@ def resolve_project_audio_runtime_config(
             tts_model=tts_model,
         )
 
-    audio_fx = heal_legacy_base_bgm_volume(dict(get_audio_fx(raw_config) or {}))
+    audio_fx = heal_legacy_base_bgm_volume(dict(get_audio_fx(raw_config, engine_mode=resolved_mode) or {}))
 
     return ProjectAudioRuntimeConfig(
         voice_mapping=voice_mapping,
         audio_fx=dict(audio_fx),
-        audio_engine_mode=get_audio_engine_mode(raw_config),
+        audio_engine_mode=resolved_mode,
         seed_audio_model=get_seed_audio_model(raw_config),
         raw_config=dict(raw_config),
         character_items=list(character_items),
+    )
+
+
+def resolve_from_snapshot(snapshot: Dict[str, Any], *, tts_model: str) -> ProjectAudioRuntimeConfig:
+    """从 engine_config_snapshot 解析运行时配置（不含 billing/run 上下文）。"""
+    engine_branch = snapshot.get("engine_branch_config", {})
+    engine_mode = snapshot.get("engine_mode", "legacy_stems")
+    # 快照的 engine_branch_config 是分支体（无 engines 嵌套，GUIDE §2.1），
+    # 包装成分支结构以复用 §2.2 读取优先级，否则 seed_scene 角色音色/音效配置全部丢失。
+    branch_config = {"engines": {engine_mode: engine_branch}}
+    character_items = get_characters_for_model(branch_config, tts_model, engine_mode=engine_mode)
+
+    voice_mapping: Dict[str, Dict[str, Any]] = {}
+    for item in character_items:
+        if not isinstance(item, Mapping):
+            continue
+        name = item.get("name")
+        if not name:
+            continue
+        voice_mapping[str(name)] = build_character_voice_mapping_item(item, tts_model=tts_model)
+
+    audio_fx = heal_legacy_base_bgm_volume(dict(get_audio_fx(branch_config, engine_mode=engine_mode) or {}))
+
+    return ProjectAudioRuntimeConfig(
+        voice_mapping=voice_mapping,
+        audio_fx=dict(audio_fx),
+        audio_engine_mode=engine_mode,
+        seed_audio_model=get_seed_audio_model(engine_branch),
+        raw_config=dict(snapshot),
+        character_items=list(character_items),
+    )
+
+
+def resolve_from_run_input(run_input_snapshot: Dict[str, Any], *, tts_model: str) -> ProjectAudioRuntimeConfig:
+    """从 run_input_snapshot 解析运行时配置（运行期消费，不读实时配置）。"""
+    engine_payload = run_input_snapshot.get("signed_payload", {}).get("engine_config_payload", {})
+    return resolve_from_snapshot(
+        {"engine_mode": engine_payload.get("engine_mode", "legacy_stems"), "engine_branch_config": engine_payload},
+        tts_model=tts_model,
     )

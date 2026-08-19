@@ -87,6 +87,105 @@ async def _broadcast_project_event(
         return False
 
 
+def run_post_extraction_setting_flow(
+    db: Session,
+    *,
+    project_id: int,
+    chapter_plan: str = "",
+    chapter_content: str = "",
+    notify: bool = True,
+) -> Dict[str, Any]:
+    """提取完成后的设定回流统一入口（修复 P0-2 时序倒挂）。
+
+    此前 auto_merge 在章节保存后同步执行（早于后台提取），导致本章新提取的
+    候选设定最早要到第 N+2 章才进入上下文。现在统一在提取完成后执行：
+
+    1. 自动合并高置信候选 → 正式集合（含向量同步）
+    2. 设定一致性检测（P2-2），冲突 > 0 时推送通知
+
+    Args:
+        db: 数据库会话
+        project_id: 项目ID
+        chapter_plan: 章节规划文本（参与置信度打分）
+        chapter_content: 章节正文（参与置信度打分）
+        notify: 是否推送 WebSocket 通知（测试/手动调用可关闭）
+
+    Returns:
+        {"merged_count": int, "skipped_count": int, "conflict_summary": dict | None}
+    """
+    result: Dict[str, Any] = {"merged_count": 0, "skipped_count": 0, "conflict_summary": None}
+
+    # 1. 自动合并高置信候选（时机修正：在提取落库之后执行）
+    try:
+        from app.models.setting import SettingCollection
+        from app.services.setting_auto_merge import SettingAutoMergeService
+
+        candidate_collection = (
+            db.query(SettingCollection)
+            .filter(
+                SettingCollection.project_id == project_id,
+                SettingCollection.category == "candidate",
+            )
+            .first()
+        )
+        if candidate_collection:
+            merge_result = SettingAutoMergeService.auto_merge_high_confidence_items(
+                db=db,
+                project_id=project_id,
+                candidate_collection_id=candidate_collection.id,
+                chapter_plan=chapter_plan or "",
+                chapter_content=chapter_content or "",
+            )
+            result["merged_count"] = merge_result["merged_count"]
+            result["skipped_count"] = merge_result["skipped_count"]
+            if merge_result["merged_count"] > 0:
+                logger.info(
+                    f"   ✓ 提取后自动合并设定: 成功 {merge_result['merged_count']} 项, "
+                    f"跳过 {merge_result['skipped_count']} 项"
+                )
+    except Exception as exc:
+        logger.warning(f"   ⚠️ 提取后自动合并设定失败: {exc}")
+
+    # 2. 设定一致性检测（P2-2：自动触发，冲突即时可见）
+    try:
+        from app.services.setting_consistency import SettingConsistencyService
+
+        conflict_summary = SettingConsistencyService.detect_all_conflicts(db, project_id)
+        result["conflict_summary"] = conflict_summary
+
+        total_conflicts = sum(
+            len(v) if isinstance(v, list) else 0
+            for v in (conflict_summary or {}).values()
+        )
+        if total_conflicts > 0:
+            logger.warning(f"   ⚠️ 设定一致性检测发现 {total_conflicts} 个潜在冲突")
+            if notify:
+                try:
+                    future = asyncio.run_coroutine_threadsafe(
+                        _notify_setting_conflicts(project_id, total_conflicts),
+                        get_main_event_loop(),
+                    )
+                    future.result(timeout=5)
+                except Exception as ws_exc:
+                    logger.warning(f"   ⚠️ 冲突通知推送失败: {ws_exc}")
+    except Exception as exc:
+        logger.warning(f"   ⚠️ 设定一致性检测失败（不影响主流程）: {exc}")
+
+    return result
+
+
+async def _notify_setting_conflicts(project_id: int, total_conflicts: int) -> None:
+    """通过 WebSocket 推送设定冲突提醒（前端 onNotification 已有 snackbar 兜底）。"""
+    from app.websocket.manager import ws_manager
+
+    await ws_manager.send_notification(
+        project_id=project_id,
+        message=f"设定一致性检测发现 {total_conflicts} 个潜在冲突，建议在设定中心检查",
+        type="warning",
+        data={"conflict_count": total_conflicts},
+    )
+
+
 async def _save_character_relations(
     db: Session,
     project_id: int,
@@ -218,14 +317,17 @@ async def process_chapter_post_save(
     project_id: int,
     generate_summary: bool = False,  # 🆕 新增参数：是否生成摘要
     post_processing_model: Optional[str] = None,  # 🆕 后置处理锁定模型（免费档），缺省保持现有行为
+    chapter_plan: str = "",  # 🆕 章节规划文本（供提取后设定回流置信度打分）
+    auto_merge_settings: bool = False,  # 🆕 提取完成后是否执行设定回流（合并+一致性检测）
 ):
     """
     章节保存后的后台处理任务
-    
+
     包含：
     1. 统一提取（实体、地点、关系、人物关系）
-    2. 生成章节摘要（仅工作流场景）
-    
+    2. 设定回流（提取后合并高置信候选 + 一致性检测；auto_merge_settings=True 时）
+    3. 生成章节摘要（仅工作流场景）
+
     Args:
         chapter_id: 章节ID
         chapter_title: 章节标题
@@ -234,6 +336,8 @@ async def process_chapter_post_save(
         project_id: 项目ID
         generate_summary: 是否生成摘要（默认False，仅工作流场景为True）
         post_processing_model: 后置提取/摘要使用的锁定模型（默认None，保持各服务现有模型选择）
+        chapter_plan: 章节规划文本（工作流场景传入，供设定回流置信度打分）
+        auto_merge_settings: 提取完成后是否执行设定回流（工作流场景为True）
     """
     # 创建独立的数据库会话
     db = SessionLocal()
@@ -261,7 +365,29 @@ async def process_chapter_post_save(
                 logger.warning("⚠️ 任务开始事件未成功推送")
         except Exception as ws_error:
             logger.warning(f"⚠️ WebSocket 推送失败: {ws_error}")
-        
+
+        # ==================== 步骤0：同步章节正文到向量库 ====================
+        # 工作流生成的章节此前从不向量化，导致前文章节检索（长程连续性召回）无数据可用。
+        # sync_to_vector_db 内部会先删除同章旧向量再写入，天然幂等。
+        try:
+            from app.services.vector_sync import sync_to_vector_db
+
+            def _sync_chapter_vectors() -> None:
+                sync_to_vector_db(
+                    kb_type="chapter",
+                    name=f"第{chapter_number}章 {chapter_title}".strip(),
+                    content=chapter_content,
+                    metadata={
+                        "project_id": str(project_id),
+                        "chapter_number": str(chapter_number),
+                    },
+                )
+
+            await asyncio.to_thread(_sync_chapter_vectors)
+            logger.info(f"   ✅ 章节已同步到向量库（第{chapter_number}章）")
+        except Exception as vector_error:
+            logger.warning(f"⚠️ 章节向量同步失败（不影响后续处理）: {vector_error}")
+
         # ==================== 步骤1：统一提取（实体、地点、关系） ====================
         try:
             from app.services.unified_extraction import UnifiedExtractionService
@@ -271,6 +397,19 @@ async def process_chapter_post_save(
             
             logger.info(f"   🚀 统一提取（1次AI调用）...")
             
+            # 🆕 构建项目体系归类提示：LLM 语义归类到项目实际体系（减少候选积压）
+            try:
+                from app.services.entity_extraction import build_project_category_hints
+
+                project_category_hints = build_project_category_hints(db, project_id)
+                if project_category_hints:
+                    logger.info(
+                        f"   📂 归类提示注入：{len(project_category_hints)} 个项目体系"
+                    )
+            except Exception as hints_error:
+                logger.warning(f"   ⚠️ 归类提示构建失败（回退字典归类）: {hints_error}")
+                project_category_hints = None
+
             # 🚀 优先使用统一提取（1次AI调用）
             try:
                 unified_result = await UnifiedExtractionService.extract_all_from_chapter(
@@ -278,6 +417,7 @@ async def process_chapter_post_save(
                     chapter_content=chapter_content,
                     project_id=project_id,
                     model=post_processing_model,
+                    project_categories=project_category_hints,
                 )
                 
                 entities = unified_result.get("entities", [])
@@ -302,6 +442,7 @@ async def process_chapter_post_save(
                     chapter_content=chapter_content,
                     project_id=project_id,
                     model=post_processing_model,
+                    project_categories=project_category_hints,
                 )
                 logger.info(f"   ✅ 抽取到 {len(entities)} 个实体")
                 
@@ -420,7 +561,22 @@ async def process_chapter_post_save(
             logger.warning(f"   ⚠️ 统一提取失败: {e}")
             import traceback
             traceback.print_exc()
-        
+
+        # ==================== 步骤1.5：设定回流（提取后合并 + 一致性检测） ====================
+        # 修复 P0-2：原先 auto_merge 在章节保存后同步执行（早于本任务），本章新提取的
+        # 候选设定要等下一章生成才被合并。现在提取落库后立即回流，第 N+1 章即可见。
+        if auto_merge_settings:
+            try:
+                await asyncio.to_thread(
+                    run_post_extraction_setting_flow,
+                    db,
+                    project_id=project_id,
+                    chapter_plan=chapter_plan,
+                    chapter_content=chapter_content,
+                )
+            except Exception as reflow_error:
+                logger.warning(f"   ⚠️ 设定回流失败（不影响后续处理）: {reflow_error}")
+
         # ==================== 步顲2：生成章节摘要（仅工作流场景） ====================
         if generate_summary:
             try:
@@ -483,10 +639,12 @@ def start_chapter_post_save_task(
     project_id: int,
     generate_summary: bool = False,  # 🆕 新增参数：是否生成摘要
     post_processing_model: Optional[str] = None,  # 🆕 后置处理锁定模型（免费档），缺省保持现有行为
+    chapter_plan: str = "",  # 🆕 章节规划文本（供提取后设定回流置信度打分）
+    auto_merge_settings: bool = False,  # 🆕 提取完成后是否执行设定回流（工作流场景传True）
 ):
     """
     启动章节保存后的后台处理任务
-    
+
     Args:
         chapter_id: 章节ID
         chapter_title: 章节标题
@@ -495,6 +653,8 @@ def start_chapter_post_save_task(
         project_id: 项目ID
         generate_summary: 是否生成摘要（默认False，仅工作流场景为True）
         post_processing_model: 后置提取/摘要使用的锁定模型（默认None，保持各服务现有模型选择）
+        chapter_plan: 章节规划文本（工作流场景传入，供设定回流置信度打分）
+        auto_merge_settings: 提取完成后是否执行设定回流（默认False）
     """
     def run_async_task():
         """在新的事件循环中运行异步任务"""
@@ -510,6 +670,8 @@ def start_chapter_post_save_task(
                     project_id=project_id,
                     generate_summary=generate_summary,  # 🆕 传递摘要生成参数
                     post_processing_model=post_processing_model,  # 🆕 传递后置处理锁定模型
+                    chapter_plan=chapter_plan,  # 🆕 传递章节规划文本
+                    auto_merge_settings=auto_merge_settings,  # 🆕 传递设定回流开关
                 )
             )
         finally:

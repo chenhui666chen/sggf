@@ -95,6 +95,8 @@ def _serialize_chapter_audio_summary(
         "has_script": bool(chapter_audio.script_json),
         "has_review": bool(chapter_audio.script_review_json),
         "prompt_audio_quality": _load_prompt_audio_quality_for_response(chapter_audio),
+        "render_status": chapter_audio.render_status,
+        "render_status_detail": chapter_audio.render_status_detail,
     }
 
 
@@ -255,6 +257,13 @@ async def create_audiobook_project(
         _ensure_audiobook_points_precheck_passed(precheck)
 
     audiobook_project = service.create_audiobook_project(request, prepared=prepared_request)
+
+    # R11/P0-2：入队 + 冻结同事务（账户锁 → enqueue → freeze → 统一 commit）；
+    # 冻结失败整体回滚，不产生"未冻结先执行"残留
+    from app.services.audiobook.task_support import lock_billing_account as _lock_billing_account
+
+    if job_type != "script_only":
+        _lock_billing_account(db, current_user.id)
     _, async_result = _enqueue_audiobook_task(
         db,
         audiobook_project_id=audiobook_project.id,
@@ -266,6 +275,7 @@ async def create_audiobook_project(
         narration_style_prompt=request.narration_style_prompt,
         generate_subtitle=request.generate_subtitle,
         force_regenerate_script=request.force_regenerate_script,
+        commit_result=False,
     )
 
     if job_type != "script_only":
@@ -286,7 +296,19 @@ async def create_audiobook_project(
                 tts_model=tts_model,
                 cost_precheck_id=precheck.cost_precheck_id,
             ),
+            raise_on_error=True,
         )
+    # 统一提交（R10/P0-3：事务所有权归最外层应用服务）
+    db.commit()
+    # 提交后即时派发（best-effort；失败由 dispatcher beat 兜底，R11/P0-1）
+    try:
+        from app.services.audiobook.task_support import (
+            dispatch_pending_runs as _dispatch_pending_runs,
+        )
+
+        _dispatch_pending_runs(db, async_result.runs)
+    except Exception as _exc:
+        logger.warning("提交后派发失败（dispatcher 兜底）: %s", _exc)
 
     return {
         "success": True,
@@ -395,6 +417,41 @@ async def generate_audio_from_scripts(
     if request.timeline_edits and len(requested_chapter_ids) == 1:
         timeline_edits_by_chapter[requested_chapter_ids[0]] = request.timeline_edits
 
+    # §3.2 重渲染入口：携带 revision_set_hash 时校验与当前编辑基线一致（失配 409），
+    # 并把三条链 head 投影透传给 enqueue，创建 run 时冻结进 run_input_snapshot
+    revision_heads_by_chapter: Dict[int, Dict[str, Any]] = {}
+    if request.revision_set_hash:
+        from app.services.audiobook.scene_edit_revision_service import (
+            compute_revision_set_hash,
+            get_revision_heads_projection,
+        )
+
+        for revision_chapter_id in requested_chapter_ids:
+            heads = get_revision_heads_projection(
+                db,
+                audiobook_project_id=audiobook_project_id,
+                chapter_id=revision_chapter_id,
+            )
+            current_set_hash = compute_revision_set_hash(heads)
+            if current_set_hash != request.revision_set_hash:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail={
+                        "message": "场景编辑基线已变化，请刷新后重试",
+                        "current_revision_set_hash": current_set_hash,
+                    },
+                )
+            revision_heads_by_chapter[revision_chapter_id] = {
+                "revision_set_hash": current_set_hash,
+                "dialogue": heads.get("dialogue"),
+                "director_override": heads.get("director_override"),
+                "voice_binding": heads.get("voice_binding"),
+                "projection": heads,
+            }
+
+    from app.services.audiobook.task_support import lock_billing_account as _lock_billing_account
+
+    _lock_billing_account(db, current_user.id)
     _, async_result = _enqueue_audiobook_task(
         db,
         audiobook_project_id=audiobook_project_id,
@@ -406,7 +463,9 @@ async def generate_audio_from_scripts(
         narration_style_prompt=request.narration_style_prompt,
         generate_subtitle=request.generate_subtitle,
         timeline_edits_by_chapter=timeline_edits_by_chapter or None,
+        revision_heads_by_chapter=revision_heads_by_chapter or None,
         before_dispatch=bind_resume_checkpoints_before_dispatch,
+        commit_result=False,
     )
 
     _safe_record_audiobook_billing_freeze(
@@ -426,7 +485,19 @@ async def generate_audio_from_scripts(
             tts_model=tts_model,
             cost_precheck_id=precheck.cost_precheck_id,
         ),
+        raise_on_error=True,
     )
+    # 统一提交（R11/P0-2 同事务冻结）
+    db.commit()
+    # 提交后即时派发（best-effort；失败由 dispatcher beat 兜底，R11/P0-1）
+    try:
+        from app.services.audiobook.task_support import (
+            dispatch_pending_runs as _dispatch_pending_runs,
+        )
+
+        _dispatch_pending_runs(db, async_result.runs)
+    except Exception as _exc:
+        logger.warning("提交后派发失败（dispatcher 兜底）: %s", _exc)
 
     return {
         "success": True,
@@ -662,6 +733,7 @@ async def get_audiobook_project(
 async def list_audiobook_projects(
     project_id: int,
     include_chapter_audios: bool = Query(False, description="是否包含章节音频列表"),
+    engine_mode: Optional[str] = Query(None, description="按引擎模式过滤（legacy_stems/seed_scene）"),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
@@ -677,24 +749,39 @@ async def list_audiobook_projects(
 
     audiobook_projects = AudiobookProjectRepository.list_by_project(db, project_id)
 
-    if not include_chapter_audios:
-        return [
-            {
-                "id": ap.id,
-                "status": ap.status,
-                "total_chapters": ap.total_chapters,
-                "completed_chapters": ap.completed_chapters,
-                "total_duration": ap.total_duration,
-                "created_at": ap.created_at.isoformat() if ap.created_at else None,
-            }
-            for ap in audiobook_projects
-        ]
+    # Phase 1.6：按 engine_mode 过滤
+    if engine_mode:
+        audiobook_projects = [ap for ap in audiobook_projects if ap.engine_mode == engine_mode]
 
     audiobook_project_ids = [ap.id for ap in audiobook_projects]
     chapter_audios: List[ChapterAudio] = ChapterAudioRepository.list_active_by_audiobook_projects(
         db,
         audiobook_project_ids,
     )
+
+    # 音频完成章节数（audio_path 落盘口径，与 compute_audio_project_totals 一致）：
+    # 供前端区分"剧本完成、音频未生成"与"全部完成"，避免剧本-only 批次被误读为整体完成
+    audio_completed_by_project: Dict[int, int] = {}
+    for ca in chapter_audios:
+        if str(ca.audio_path or "").strip():
+            audio_completed_by_project[ca.audiobook_project_id] = (
+                audio_completed_by_project.get(ca.audiobook_project_id, 0) + 1
+            )
+
+    if not include_chapter_audios:
+        return [
+            {
+                "id": ap.id,
+                "engine_mode": ap.engine_mode,
+                "status": ap.status,
+                "total_chapters": ap.total_chapters,
+                "completed_chapters": ap.completed_chapters,
+                "audio_completed_chapters": audio_completed_by_project.get(ap.id, 0),
+                "total_duration": ap.total_duration,
+                "created_at": ap.created_at.isoformat() if ap.created_at else None,
+            }
+            for ap in audiobook_projects
+        ]
 
     audios_by_project: Dict[int, List[ChapterAudio]] = {}
     chapter_ids: List[int] = []
@@ -712,9 +799,11 @@ async def list_audiobook_projects(
         results.append(
             {
                 "id": ap.id,
+                "engine_mode": ap.engine_mode,
                 "status": ap.status,
                 "total_chapters": ap.total_chapters,
                 "completed_chapters": ap.completed_chapters,
+                "audio_completed_chapters": audio_completed_by_project.get(ap.id, 0),
                 "total_duration": ap.total_duration,
                 "created_at": ap.created_at.isoformat() if ap.created_at else None,
                 "chapter_audios": [

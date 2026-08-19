@@ -35,6 +35,7 @@ from app.services.audiobook.voice_identity_policy import (
 
 from ._dataclasses import ScriptSegment
 from ._fidelity import audit_script_fidelity
+from ._seed_scene_capability import build_seed_scene_main_generation_block
 from ._segment_validation import build_script_segments, format_valid_emotions_for_prompt
 
 logger = logging.getLogger(__name__)
@@ -47,6 +48,95 @@ TRANSFORM_OUTPUT_TOKEN_MIN = 1800
 TRANSFORM_OUTPUT_TOKEN_MAX = 8000
 TRANSFORM_CONTINUITY_SEGMENTS = 4
 TRANSFORM_CONTINUITY_MAX_CHARS = 520
+
+SEED_SCENE_OUTPUT_CONTRACT = """**Seed 场景事件字段合约**：
+- 输出仍以 `segments` 保存审定台词事实，但声音说明必须面向完整场景生成，不得输出分轨混音参数。
+- `instruct_scene` 描述连续空间、环境底音和声学状态；相邻片段位于同一场景时保持一致。
+- `sound_effects` 不限制为每片段两个，可按剧情顺序表达连续动作和音效蒙太奇；每个事件只填写自然语言名称、相对 `timing`，以及原文明确或剧情必需时的 `duration`。
+- `music_cue.style` 描述音乐进入、延续、变化、停止、主要乐器和整体情绪；不要填写音量、淡入淡出曲线或素材 ID。
+- `performance_notes` 描述情绪过程、语速、语势、重读、停顿及可辨识的微表演，不得改写 `text`。
+
+```json
+{
+  "segments": [
+    {
+      "type": "narration|dialogue|monologue",
+      "text": "实际要朗读的文本",
+      "speaker": "角色名或旁白",
+      "emotion": "推荐情感枚举",
+      "instruct_scene": "潮湿封闭的地下水牢，持续水滴声，空间混响明显",
+      "performance_notes": "由压抑转为警觉，前半低声克制，发现异动后语速略快",
+      "sound_effects": [
+        {
+          "name": "水滴声持续，随后铁链轻响",
+          "timing": "先作为环境底音持续，铁链声伴随台词后半段出现",
+          "duration": 3.0
+        }
+      ],
+      "music_cue": {
+        "style": "低频弦乐从场景开头进入，台词转折处增强，场景结束时停止"
+      },
+      "original_text": "对应的原文",
+      "adaptation_reason": "保留原文事实并补充完整声音场景的相对时序"
+    }
+  ]
+}
+```
+"""
+
+LEGACY_STEMS_OUTPUT_CONTRACT = """**分轨字段合约**：
+- 优先使用 `sound_effects` / `music_cue` 的精品字段；只有无法判断参数时才使用 `sound_effects_simple` / `music_cue_simple`。
+- `sound_effects` 每个片段最多 2 个；没有关键音效时使用空数组。
+- `music_cue` 只在开场、转场、高潮、强情绪片段出现；普通片段使用 null 或省略。
+- 如果使用 `sound_effects`，则 `sound_effects_simple` 必须为 []；如果使用 `music_cue`，则 `music_cue_simple` 必须为空字符串。
+
+```json
+{
+  "segments": [
+    {
+      "type": "narration|dialogue|monologue",
+      "text": "实际要朗读的文本",
+      "speaker": "角色名或旁白",
+      "emotion": "推荐情感枚举",
+      "voice_params": {
+        "volume": 50,
+        "pause_before": 0.2,
+        "pause_after": 0.3
+      },
+      "performance_notes": "低声、短促，句尾留出紧张停顿",
+      "sound_effects": [
+        {
+          "name": "脚步声",
+          "layer": "action",
+          "volume": 0.3,
+          "timing": "trigger",
+          "position_3d": "left_to_right",
+          "duration": 2.0,
+          "fade_out": 0.5
+        }
+      ],
+      "music_cue": {
+        "style": "悬疑低频弦乐",
+        "volume": 0.2,
+        "fade_in": 2.0,
+        "fade_out": 2.0,
+        "emotion_follow": true
+      },
+      "sound_effects_simple": [],
+      "music_cue_simple": "",
+      "original_text": "对应的原文",
+      "adaptation_reason": "按动作拍点拆分，并用停顿营造压迫感"
+    }
+  ]
+}
+```
+
+**音效/配乐标注指南**：
+- bottom（底音）：持续环境音，音量0.08-0.15。
+- action（动作）：触发式音效，音量0.3-0.5。
+- atmosphere（氛围）：情绪加强音效，音量0.2-0.4。
+- 配乐按剧情填写音量、起止和淡入淡出，并为对白保留前景空间。
+"""
 
 
 class TransformMixin:
@@ -386,10 +476,7 @@ class TransformMixin:
         )
         engine_block = build_script_transform_engine_guidance(audio_engine_mode)
         if audio_engine_mode == "seed_scene":
-            tts_block = f"""**主生成模型：seed-audio-1.0（完整声音场景模式）**
-- 负责一次生成旁白、多人对白、非语言人声、环境、动作音效和配乐
-- 当前选择的逐句 TTS 模型 {normalized_model} 仅用于试听参考音色和局部回退，不决定主场景剧本结构
-"""
+            tts_block = build_seed_scene_main_generation_block(normalized_model)
             instruct_block = """**Seed Audio 场景表演提示**
 - 使用 instruct_scene 保存连续的环境、空间和声学状态，使用 performance_notes 保存角色可执行的表演过程。
 - 使用 sound_effects.timing 表达声音相对台词的先后关系，使用 music_cue.style 表达配乐进入、延续、变化或停止。
@@ -535,7 +622,21 @@ class TransformMixin:
             else ""
         )
 
-        six_step_block = """**有声剧本 6 步听觉化重构流程（请严格遵守）**
+        if audio_engine_mode == "seed_scene":
+            six_step_block = """**Seed 场景听觉化重构流程（请严格遵守）**
+1. 保持台词、说话人、动作和因果关系来自原文，不为增强效果新增剧情事实。
+2. 按连续空间和表演过程组织片段；同一地点的环境底音、混响和远近关系保持连续。
+3. 把动作、环境音、非语言人声与台词的先于、伴随、随后、持续关系写清，不拆成独立素材任务。
+4. 对话保持口语自然和角色归属准确；背景插话、重叠关系及微表演必须保留可执行时序。
+5. 使用自然语言描述音乐进入、延续、变化和停止，避免分轨音量、淡入淡出曲线和素材参数。
+6. 按完整声音场景组织可播讲单元，不要为了逐句 TTS 或本地混音机械切碎连续表演。
+"""
+            output_contract_block = SEED_SCENE_OUTPUT_CONTRACT.replace(
+                "推荐情感枚举",
+                format_valid_emotions_for_prompt(),
+            )
+        else:
+            six_step_block = """**有声剧本 6 步听觉化重构流程（请严格遵守）**
 1. 心理活动 → 改写为可听见的独白或用音效/环境暗示呈现，避免长篇抽象描写。
 2. 环境描写 → 提炼为可感知的音效标签（如“雨声渐密”“地铁驶过”），填入 sound_effects。
 3. 动作与场景切换 → 用短句 + 停顿 + 过渡性音效，避免连续大段说明。
@@ -546,6 +647,10 @@ class TransformMixin:
    - 配乐覆盖建议 15%-40%，低密度时仅保留开头/结尾/高潮等关键位置。
    - 原文中的 [pause:xs]、[break]、%P% 是结构停顿提示，不要当成文字朗读；请转成 pause_before/pause_after，或保留在相邻 text 末尾交给渲染层识别。
 """
+            output_contract_block = LEGACY_STEMS_OUTPUT_CONTRACT.replace(
+                "推荐情感枚举",
+                format_valid_emotions_for_prompt(),
+            )
 
         fidelity_block = """**原文保真约束（硬性要求）**
 - 不得新增原文不存在的武器、招式、道具、台词或人物行动。
@@ -644,77 +749,7 @@ class TransformMixin:
 **输出格式**：
 请以**纯净的JSON对象格式**输出剧本片段（不要包含任何注释或说明文字），顶层必须是 `segments` 数组：
 
-**字段合约**：
-- 优先使用 `sound_effects` / `music_cue` 的精品字段；只有无法判断参数时才使用 `sound_effects_simple` / `music_cue_simple`。
-- JSON 内不要写 `//`、`/* */` 或解释性文字。
-- 不要同时为同一个听觉事件重复填写精品字段和 simple 字段。
-- 每个片段对象中每个 key 只能出现一次，禁止重复输出 `performance_notes`、`sound_effects`、`music_cue` 等字段。
-- `type=dialogue` 时 `speaker` 必须是角色名，禁止使用旁白；不确定说话人时才退回 narration。
-- `type=narration` 时 `speaker` 必须为旁白，且 text 中不得包含角色引号台词。
-- `sound_effects` 每个片段最多 2 个；没有关键音效时使用空数组。
-- `music_cue` 只在开场、转场、高潮、强情绪片段出现；普通片段使用 null 或省略，不要整段铺满 BGM。
-- 如果使用 `sound_effects`，则 `sound_effects_simple` 必须为 []；如果使用 `music_cue`，则 `music_cue_simple` 必须为空字符串。
-
-```json
-{{
-  "segments": [
-    {{
-      "type": "narration|dialogue|monologue",
-      "text": "实际要朗读的文本",
-      "speaker": "角色名或旁白",
-      "emotion": "{format_valid_emotions_for_prompt()}",
-      "instruct_emotion": "neutral|fearful|angry|sad|surprised|happy|disgusted",
-      "instruct_scene": "紧张逃亡场景",
-      "instruct_role": "有声书旁白",
-      "instruct_identity": "故事讲述者",
-      "voice_params": {{
-        "volume": 50,
-        "pause_before": 0.2,
-        "pause_after": 0.3
-      }},
-      "performance_notes": "低声、短促，句尾留出紧张停顿",
-      "sound_effects": [
-        {{
-          "name": "脚步声",
-          "layer": "action",
-          "volume": 0.3,
-          "timing": "trigger",
-          "position_3d": "left_to_right",
-          "duration": 2.0,
-          "fade_out": 0.5
-        }}
-      ],
-      "music_cue": {{
-        "style": "悬疑低频弦乐",
-        "volume": 0.2,
-        "fade_in": 2.0,
-        "fade_out": 2.0,
-        "emotion_follow": true
-      }},
-      "sound_effects_simple": [],
-      "music_cue_simple": "",
-      "original_text": "对应的原文",
-      "adaptation_reason": "按动作拍点拆分，并用停顿营造压迫感"
-    }}
-  ]
-}}
-```
-
-**🎵 音效/配乐标注指南**：
-
-1. **音效分层原则**：
-   - bottom（底音）：持续的环境音，如"雨声""风声""火光燃烧噪噪声"，音量0.08-0.15
-   - action（动作）：触发式音效，如"脚步声""开门声""剑刃碰撞"，音量0.3-0.5
-   - atmosphere（氛围）：情绪加强，如"诡异回声""雷声""人群噪声"，音量0.2-0.4
-
-2. **3D位置使用**：
-   - 角色移动：使用 left_to_right 或 right_to_left
-   - 静态场景：center（主角视角）、left/right（配角）、back（远处）
-
-3. **配乐音量控制**：
-   - 日常场景：0.15-0.2
-   - 情绪高涨：0.3-0.4
-   - 高潮场景：0.4-0.5（关键处留白，突出台词）
+{output_contract_block}
 
 *重要提醒**：
 - 只输出 JSON 对象，顶层格式为 {{"segments": [...]}}，不要添加任何 // 注释或 /* 注释 */

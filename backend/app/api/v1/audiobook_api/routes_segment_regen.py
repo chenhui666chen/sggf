@@ -25,8 +25,10 @@ from app.services.audiobook.tts_model_ids import (
     MINIMAX_SPEECH_28_HD_MODEL,
     MINIMAX_SPEECH_28_TURBO_MODEL,
 )
+from app.services.audiobook.project_audio_config import parse_engine_config_snapshot
 from app.services.audiobook.project_audio_runtime import (
     ProjectAudioRuntimeConfig,
+    resolve_from_snapshot,
     resolve_project_audio_runtime_config,
 )
 from app.services.audiobook.mimo_voice_assets import merge_mimo_voice_asset_tts_params
@@ -338,6 +340,28 @@ async def _synthesize_segment_audio(
     }
 
 
+def _resolve_runtime_config_from_batch(
+    owned: OwnedAudiobookProject,
+    *,
+    tts_model: str,
+) -> ProjectAudioRuntimeConfig:
+    """从批次快照解析运行时配置（§1.5：冻结事实，不读实时可变配置）。
+
+    缺快照的批次（legacy_unfrozen/legacy_unverified）回退实时解析（读兼容）。
+    """
+    audiobook_project = getattr(owned, "audiobook_project", None)
+    batch_snapshot = parse_engine_config_snapshot(
+        getattr(audiobook_project, "engine_config_snapshot", None)
+    ) if audiobook_project is not None else None
+    if batch_snapshot:
+        return resolve_from_snapshot(batch_snapshot, tts_model=tts_model)
+    return resolve_project_audio_runtime_config(
+        getattr(owned, "project", None),
+        tts_model=tts_model,
+        base_voice_mapping=getattr(audiobook_project, "voice_mapping", None) or {},
+    )
+
+
 def _resolve_segment_regeneration_runtime_config(
     owned: OwnedAudiobookProject,
     request: SegmentRegenerateRequest,
@@ -350,11 +374,9 @@ def _resolve_segment_regeneration_runtime_config(
         segment_voice_params,
         request.tts_model,
     )
-    audiobook_project = getattr(owned, "audiobook_project", None)
-    return resolve_project_audio_runtime_config(
-        getattr(owned, "project", None),
+    return _resolve_runtime_config_from_batch(
+        owned,
         tts_model=resolved_tts_model,
-        base_voice_mapping=getattr(audiobook_project, "voice_mapping", None) or {},
     )
 
 
@@ -586,10 +608,9 @@ def _render_segment_timeline_preview(
             break
 
     audio_fx: Dict[str, Any] = {}
-    runtime_config = resolve_project_audio_runtime_config(
-        getattr(owned, "project", None),
+    runtime_config = _resolve_runtime_config_from_batch(
+        owned,
         tts_model=_SEGMENT_TIMELINE_PREVIEW_TTS_MODEL,
-        base_voice_mapping=getattr(owned.audiobook_project, "voice_mapping", None) or {},
     )
     audio_fx = runtime_config.audio_fx or {}
 

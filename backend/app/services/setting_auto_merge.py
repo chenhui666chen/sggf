@@ -6,7 +6,7 @@ import json
 import logging
 import re
 from datetime import datetime
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from sqlalchemy.orm import Session
 
@@ -26,8 +26,14 @@ class SettingAutoMergeService:
         item_content: str,
         chapter_plan: str,
         chapter_content: str,
+        ai_confidence: Optional[float] = None,
     ) -> float:
-        """根据文本命中情况估算候选设定置信度。"""
+        """根据文本命中情况估算候选设定置信度。
+
+        修复 P2-1：规则分与提取时的 AI 置信度加权（0.6 规则 + 0.4 AI），
+        AI 低置信时即使规则分达标也会被拉低，防止"格式对+够长"的误合并。
+        无 AI 置信度时保持纯规则分（向后兼容）。
+        """
         score = 0.0
 
         format_patterns = [
@@ -39,6 +45,10 @@ class SettingAutoMergeService:
             if re.search(pattern, item_content):
                 score += 0.3
                 break
+        else:
+            # 候选标准前缀（classify_and_save_entities 写入的 "类型：X"）视为可靠格式
+            if re.search(r"类型[:：]", item_content):
+                score += 0.3
 
         if item_name in chapter_plan and item_name in chapter_content:
             score += 0.4
@@ -48,7 +58,17 @@ class SettingAutoMergeService:
         if len(item_content) > 50:
             score += 0.3
 
-        return min(score, 1.0)
+        rule_score = min(score, 1.0)
+
+        if ai_confidence is None:
+            return rule_score
+        try:
+            ai_value = float(ai_confidence)
+        except (TypeError, ValueError):
+            return rule_score
+        if not 0.0 <= ai_value <= 1.0:
+            return rule_score
+        return min(0.6 * rule_score + 0.4 * ai_value, 1.0)
 
     @staticmethod
     def create_snapshot(item: SettingItem) -> Dict[str, Any]:
@@ -170,8 +190,10 @@ class SettingAutoMergeService:
                 item.content or "",
                 chapter_plan,
                 chapter_content,
+                ai_confidence=item.confidence_score,
             )
-            item.confidence_score = confidence
+            # 注意：不把加权分写回 item.confidence_score，
+            # 该字段保留提取时的原始 AI 置信度，避免多次运行导致分数漂移。
 
             if confidence < SettingAutoMergeService.HIGH_CONFIDENCE_THRESHOLD:
                 skipped_count += 1

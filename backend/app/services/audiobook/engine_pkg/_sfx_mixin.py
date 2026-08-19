@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-import math
 import json
 from typing import List, Dict, Any, Optional, Callable
 from pathlib import Path
@@ -11,7 +10,7 @@ from dataclasses import asdict, is_dataclass
 
 from ..script_adapter import AudiobookScriptAgent, ScriptSegment, ChapterStructure
 from ..voice_manager_factory import create_voice_manager
-from ..audio_mixer import AudioMixer
+from ..audio_mixer import AudioMixer, sfx_loudness_plan
 from app.services.chapter_adaptation_assets import build_audio_adaptation_hint
 from core.unified_media_runtime import create_tts_engine
 from app.services.audiobook.audio_library_paths import (
@@ -58,7 +57,7 @@ class SfxMixin:
         ducking_enabled = audio_fx.get("sound_effect_ducking", True)
         ducking_priority = audio_fx.get("sound_effect_priority", "dialogue")
         ducking_threshold_dbfs = audio_fx.get("sound_effect_ducking_threshold_dbfs", -35.0)
-        ducking_reduction_db = audio_fx.get("sound_effect_ducking_reduction_db", -6.0)
+        ducking_reduction_db = audio_fx.get("sound_effect_ducking_reduction_db", -4.0)
         ducking_chunk_ms = audio_fx.get("sound_effect_ducking_chunk_ms", 250)
         applied_count = 0
         skipped_count = 0
@@ -67,34 +66,17 @@ class SfxMixin:
             file_ref = item.get("file")
             timestamp = item.get("timestamp", 0.0)
 
-            # 根据时间线中的类型和音量，计算对应的音量衰减（dB）
+            # 根据时间线中的类型和音量，计算响度归一化目标与相对音量偏移：
+            # 归一化把不同源能量的素材统一到类型响度基准（见 audio_mixer.SFX_TARGET_LOUDNESS_DBFS），
+            # volume 参数（0~1，0.5 为默认）由此成为真实相对响度，避免触发音被人声掩蔽
             effect_type_str = item.get("type", "action")
-            # 🔧 音效基准增益：在不过度压过人声的前提下提升可听度（在初始基准上累计上调约 7dB）
-            base_gain_map = {
-                "environment": -7.0,   # 环境音
-                "action": -7.0,        # 动作音
-                "emotion": -9.0,       # 情绪音
-                "transition": -11.0,   # 过渡音
-            }
-            base_gain = base_gain_map.get(effect_type_str, -16.0)
+            normalize_target_dbfs, effect_volume_offset = sfx_loudness_plan(
+                effect_type_str, item.get("volume", 0.5)
+            )
             duration = item.get("duration")
             fade_in = item.get("fade_in", 0.0)
             fade_out = item.get("fade_out", 0.0)
             loop = bool(item.get("loop")) or effect_type_str == "environment"
-
-            # timeline volume 约定为 0.0~1.0，0.5 视为“默认音量”
-            timeline_volume = item.get("volume", 0.5)
-            try:
-                timeline_volume = float(timeline_volume)
-            except (TypeError, ValueError):
-                timeline_volume = 0.5
-            # 避免 0 导致 log10 计算错误，做一点下限保护
-            timeline_volume = max(0.05, min(1.0, timeline_volume))
-
-            # 以 0.5 为基准做相对音量调整
-            relative = timeline_volume / 0.5
-            volume_adjust_db = 20 * math.log10(relative)
-            effect_volume_offset = base_gain + volume_adjust_db
 
             if not file_ref:
                 skipped_count += 1
@@ -132,7 +114,7 @@ class SfxMixin:
                     effect_duration_ms = None
                 fade_in_ms = int(float(fade_in) * 1000) if fade_in else 0
                 fade_out_ms = int(float(fade_out) * 1000) if fade_out else 0
-                mixed_audio = self.audio_mixer.add_sound_effect(
+                result_audio = self.audio_mixer.add_sound_effect(
                     mixed_audio,
                     effect_bytes,
                     position_ms=position_ms,
@@ -146,8 +128,16 @@ class SfxMixin:
                     ducking_threshold_dbfs=float(ducking_threshold_dbfs),
                     ducking_reduction_db=float(ducking_reduction_db),
                     ducking_chunk_ms=int(ducking_chunk_ms),
+                    normalize_target_dbfs=normalize_target_dbfs,
                 )
-                applied_count += 1
+                # add_sound_effect 内部失败/空窗时原样返回入参对象：
+                # 用对象同一性区分真实叠加与静默跳过，避免 applied 计数误导
+                if result_audio is mixed_audio:
+                    logger.warning("⚠️ 音效叠加未生效（静默跳过）: %s @%sms", effect_path, position_ms)
+                    skipped_count += 1
+                else:
+                    mixed_audio = result_audio
+                    applied_count += 1
             except Exception as e:
                 logger.warning(f"⚠️ 叠加音效失败 {effect_path}: {e}")
                 skipped_count += 1

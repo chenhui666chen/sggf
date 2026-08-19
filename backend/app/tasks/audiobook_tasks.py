@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import threading
 from typing import Any, Dict, List, Optional
 
 from app.celery_app import celery_app
@@ -602,3 +603,233 @@ def cleanup_expired_temp_assets_task(limit: int = 100) -> dict:
         result.get("removed_temp_files"),
     )
     return result
+
+
+# ---------------------------------------------------------------------------
+# 逐 run 派发消费任务（R10/P0-2 每 run 独立消息；R11/P1-1 worker 租约协议）
+# ---------------------------------------------------------------------------
+
+@celery_app.task(name="audiobook.run_chapter_dispatch", bind=True)
+def run_chapter_dispatch_task(self, run_id: int) -> None:
+    """逐 run 派发消费入口（dispatcher 重放/直投场景）。
+
+    流程：CAS 租约认领 → 心跳续租（独立线程，R12/P0-1）→ 按 run_type 调用
+    现有 background 单章任务 → 终态处理（清租约 + 终态关账 + finalizer + 父聚合）。
+    """
+    from app.db.base import SessionLocal
+    from app.models.audiobook import ChapterAudioRun
+    from app.services.audiobook.dispatch_service import (
+        WORKER_HEARTBEAT_INTERVAL_SECONDS,
+        acquire_worker_lease,
+    )
+
+    db = SessionLocal()
+    try:
+        claim_token = acquire_worker_lease(db, run_id=run_id)
+        if claim_token is None:
+            logger.info(
+                "run_id=%s 租约认领失败（已认领/已取消/未派发/已封口），跳过执行",
+                run_id,
+            )
+            return
+        run = db.query(ChapterAudioRun).filter(ChapterAudioRun.id == run_id).first()
+        if run is None:
+            return
+        project_id = run.audiobook_project_id
+        chapter_id = run.chapter_id
+        run_type = run.run_type or "full"
+        tts_model = run.tts_model or ""
+        celery_task_id = run.celery_task_id
+        db.commit()  # 提交租约认领，避免长事务持有 run 行锁
+    finally:
+        db.close()
+
+    # 父任务 tracker：阶段进度持久化（detail_json.stages）+ 协作式暂停检测，
+    # 与旧批量任务行为对齐。cutover 初期传 tracker=None 导致前端阶段网格
+    # 永远停留“等待中”且暂停协作失效。父子关系经 AudiobookTaskDispatch
+    # （run_id → task_id）解析——outbox 设计下 run.celery_task_id 是每 run
+    # 独立 uuid（R11/P0-1），与父任务 celery_task_id 不同，不能作为查找键。
+    tracker: Optional[AudiobookJobTracker] = None
+    tracker_db = SessionLocal()
+    try:
+        from app.models.audiobook import AudiobookTaskDispatch
+        from app.models.audiobook_task import AudiobookTask
+
+        dispatch_link = (
+            tracker_db.query(AudiobookTaskDispatch)
+            .filter(AudiobookTaskDispatch.run_id == run_id)
+            .first()
+        )
+        parent_task = None
+        if dispatch_link is not None:
+            parent_task = (
+                tracker_db.query(AudiobookTask)
+                .filter(AudiobookTask.id == dispatch_link.task_id)
+                .first()
+            )
+        if parent_task is not None:
+            tracker = AudiobookJobTracker(parent_task.id)
+            parent_status = str(parent_task.status or "").strip().lower()
+            if parent_status not in {"running", "pause_requested", "paused"}:
+                # SSE 以父任务 celery_task_id 为 key，mark_running 必须传
+                # 父任务自身 ID，不能传 run 的 outbox uuid
+                tracker.mark_running(parent_task.celery_task_id)
+    except Exception:
+        logger.exception("run_id=%s 解析父任务 tracker 失败（降级为无阶段持久化）", run_id)
+        tracker = None
+    finally:
+        tracker_db.close()
+
+    # 心跳线程：独立 session 续租（R12/P0-1：heartbeat 独立于阻塞的供应商调用）
+    stop_heartbeat = threading.Event()
+
+    def _heartbeat_loop() -> None:
+        while not stop_heartbeat.wait(WORKER_HEARTBEAT_INTERVAL_SECONDS):
+            try:
+                from app.services.audiobook.dispatch_service import heartbeat_lease
+
+                hb_db = SessionLocal()
+                try:
+                    heartbeat_lease(hb_db, run_id=run_id, claim_token=claim_token)
+                finally:
+                    hb_db.close()
+            except Exception:
+                logger.exception("heartbeat 续租异常 run_id=%s", run_id)
+
+    heartbeat_thread = threading.Thread(
+        target=_heartbeat_loop,
+        daemon=True,
+        name=f"lease-hb-{run_id}",
+    )
+    heartbeat_thread.start()
+
+    try:
+        if run_type == "script_only":
+            from app.services.audiobook.background_jobs import (
+                generate_audiobook_scripts_background,
+            )
+
+            _run_async(
+                generate_audiobook_scripts_background(
+                    audiobook_project_id=project_id,
+                    chapter_ids=[chapter_id],
+                    tts_model=tts_model,
+                    force_regenerate=False,
+                    tracker=tracker,
+                    celery_task_id=celery_task_id,
+                )
+            )
+        elif run_type == "audio_from_scripts":
+            from app.services.audiobook.background_jobs import (
+                generate_audiobook_audio_from_scripts_background,
+            )
+
+            _run_async(
+                generate_audiobook_audio_from_scripts_background(
+                    audiobook_project_id=project_id,
+                    chapter_ids=[chapter_id],
+                    tts_model=tts_model,
+                    timeline_edits_by_chapter=None,
+                    tracker=tracker,
+                    celery_task_id=celery_task_id,
+                )
+            )
+        else:
+            from app.services.audiobook.background_jobs import (
+                generate_audiobook_background,
+            )
+
+            _run_async(
+                generate_audiobook_background(
+                    audiobook_project_id=project_id,
+                    chapter_ids=[chapter_id],
+                    tts_model=tts_model,
+                    tracker=tracker,
+                    celery_task_id=celery_task_id,
+                )
+            )
+    except Exception as exc:  # pragma: no cover - 兜底失败落库
+        logger.exception("逐 run 任务执行失败 run_id=%s: %s", run_id, exc)
+        _mark_run_failed(run_id=run_id, error_message=str(exc))
+    finally:
+        stop_heartbeat.set()
+        heartbeat_thread.join(timeout=5)
+        # 终态处理（独立事务）：清租约 + 关账 + finalizer + 父任务聚合
+        _post_run_execution(run_id=run_id, claim_token=claim_token)
+
+
+def _mark_run_failed(*, run_id: int, error_message: str) -> None:
+    """兜底：逐 run 任务执行异常时置 run 终态 failed。"""
+    from app.db.base import SessionLocal
+    from app.models.audiobook import ChapterAudioRun
+    from app.utils.datetime_utils import utc_now
+
+    db = SessionLocal()
+    try:
+        run = db.query(ChapterAudioRun).filter(ChapterAudioRun.id == run_id).first()
+        if run is not None and str(run.status or "") not in {
+            "completed", "failed", "cancelled", "canceled",
+        }:
+            run.status = "failed"
+            run.current_stage = "failed"
+            run.error_message = str(error_message or "")[:500]
+            run.finished_at = utc_now()
+            db.commit()
+    except Exception:
+        db.rollback()
+        logger.exception("失败落库异常 run_id=%s", run_id)
+    finally:
+        db.close()
+
+
+def _post_run_execution(*, run_id: int, claim_token: str) -> None:
+    """逐 run 任务终态处理：清租约 → 关账 → finalizer → 父任务聚合。
+
+    独立短事务执行，锁序：账户 advisory 锁 → run 行锁（finalizer 内部）
+    → ledger 行锁（关账），符合 R19/P0 统一三层锁序。
+    """
+    from sqlalchemy import text
+
+    from app.db.base import SessionLocal
+    from app.models.audiobook import AudiobookTaskDispatch, ChapterAudioRun
+    from app.services.audiobook.billing_finalizer_service import try_finalize_run
+    from app.services.audiobook.dispatch_service import clear_worker_lease
+    from app.services.audiobook.ledger_transition_service import (
+        close_accounting_on_run_terminal,
+    )
+    from app.services.audiobook.task_aggregation_service import (
+        refresh_parent_task_aggregation,
+    )
+
+    db = SessionLocal()
+    try:
+        run = db.query(ChapterAudioRun).filter(ChapterAudioRun.id == run_id).first()
+        if run is None:
+            return
+        # 1. 清租约（token 匹配防误清）
+        clear_worker_lease(db, run_id=run_id, claim_token=claim_token)
+        # 2. 终态关账（按证据关账全部 pending ledger，R18/P0）
+        close_accounting_on_run_terminal(db, run_id=run_id)
+        # 3. 统一 finalizer（账户 advisory 锁 → run 行锁 → ledger 锁）
+        if run.billing_account_user_id:
+            db.execute(
+                text("SELECT pg_advisory_xact_lock(:key)"),
+                {"key": int(run.billing_account_user_id)},
+            )
+        finalize_result = try_finalize_run(db, run_id=run_id)
+        if finalize_result.get("finalized"):
+            logger.info("逐 run 任务结算完成 run_id=%s", run_id)
+        # 4. 父任务聚合（R13/P0-a）
+        dispatch = (
+            db.query(AudiobookTaskDispatch)
+            .filter(AudiobookTaskDispatch.run_id == run_id)
+            .first()
+        )
+        if dispatch is not None:
+            refresh_parent_task_aggregation(db, task_id=dispatch.task_id)
+        db.commit()
+    except Exception:
+        db.rollback()
+        logger.exception("终态处理异常 run_id=%s", run_id)
+    finally:
+        db.close()

@@ -14,7 +14,7 @@ from app.services.audiobook.audio_library_paths import (
     get_audio_library_dir,
     resolve_audio_library_file_path,
 )
-from app.services.audiobook.audio_mixer import AudioMixer
+from app.services.audiobook.audio_mixer import AudioMixer, sfx_loudness_plan
 from app.services.audiobook.duration_estimator import estimate_narration_duration_seconds
 from app.services.audiobook.segment_synthesis_contract import PROVIDER_PROMPT_DERIVED_FIELDS
 from app.services.audiobook.tts_delivery_plan import resolve_segment_tts_model
@@ -333,14 +333,8 @@ class SegmentPreviewService:
         ducking_enabled = self.audio_fx.get("sound_effect_ducking", True)
         ducking_priority = self.audio_fx.get("sound_effect_priority", "dialogue")
         ducking_threshold_dbfs = self.audio_fx.get("sound_effect_ducking_threshold_dbfs", -35.0)
-        ducking_reduction_db = self.audio_fx.get("sound_effect_ducking_reduction_db", -6.0)
+        ducking_reduction_db = self.audio_fx.get("sound_effect_ducking_reduction_db", -4.0)
         ducking_chunk_ms = self.audio_fx.get("sound_effect_ducking_chunk_ms", 250)
-        base_gain_map = {
-            "environment": -7.0,
-            "action": -7.0,
-            "emotion": -9.0,
-            "transition": -11.0,
-        }
         for item in timeline:
             file_ref = item.get("file")
             effect_path = self.resolve_effect_path(
@@ -351,16 +345,10 @@ class SegmentPreviewService:
                 continue
 
             effect_type_str = item.get("type", "action")
-            base_gain = base_gain_map.get(effect_type_str, -16.0)
-            timeline_volume = item.get("volume", 0.5)
-            try:
-                timeline_volume = float(timeline_volume)
-            except (TypeError, ValueError):
-                timeline_volume = 0.5
-            timeline_volume = max(0.05, min(1.0, timeline_volume))
-            relative = timeline_volume / 0.5
-            volume_adjust_db = 20 * math.log10(relative)
-            effect_volume_offset = base_gain + volume_adjust_db
+            # 与整章混音同口径：响度归一化 + 相对音量偏移，试听结果与成品一致
+            normalize_target_dbfs, effect_volume_offset = sfx_loudness_plan(
+                effect_type_str, item.get("volume", 0.5)
+            )
 
             duration = item.get("duration")
             fade_in = item.get("fade_in", 0.0)
@@ -397,6 +385,7 @@ class SegmentPreviewService:
                     ducking_threshold_dbfs=float(ducking_threshold_dbfs),
                     ducking_reduction_db=float(ducking_reduction_db),
                     ducking_chunk_ms=int(ducking_chunk_ms),
+                    normalize_target_dbfs=normalize_target_dbfs,
                 )
             except Exception as exc:
                 logger.warning("叠加试听音效失败 %s: %s", effect_path, exc)

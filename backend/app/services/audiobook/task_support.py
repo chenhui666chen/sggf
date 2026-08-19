@@ -9,16 +9,25 @@ from dataclasses import asdict, dataclass, is_dataclass
 from typing import Any, Callable, Dict, List, Optional, Protocol, Tuple
 
 from fastapi import HTTPException, status
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.celery_app import celery_app
-from app.models.audiobook import ChapterAudio
+from app.models.audiobook import (
+    AudiobookProject,
+    AudiobookTaskDispatch,
+    ChapterAudio,
+    ChapterAudioRun,
+)
 from app.models.audiobook_task import AudiobookTask
 from app.models.user import User
 from app.schemas.audiobook import AudiobookTaskStatus
+from app.services.audiobook.billing_snapshot_builder import build_billing_snapshot
 from app.services.audiobook.project_audio_config import (
-    get_audio_engine_mode,
+    build_run_input_snapshot,
+    parse_engine_config_snapshot,
     parse_project_audio_config,
+    resolve_engine_mode,
 )
 from app.services.audiobook.repository import AudiobookTaskRepository, ChapterAudioRunRepository
 from app.services.audiobook.scene_engine.scene_billing import SEED_AUDIO_MODEL
@@ -53,7 +62,7 @@ def resolve_audiobook_billing_pricing_context(
     config = parse_project_audio_config(
         str(getattr(project, "audio_config", "") or "")
     )
-    audio_engine_mode = get_audio_engine_mode(config)
+    audio_engine_mode = resolve_engine_mode(config)
     pricing_key = (
         SEED_AUDIO_MODEL
         if audio_engine_mode == "seed_scene"
@@ -89,6 +98,24 @@ def ensure_audiobook_points_precheck_passed(precheck: object) -> None:
     raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=detail)
 
 
+def lock_billing_account(db: Session, user_id: int) -> None:
+    """R11/P0-2：入队事务开头取账户 advisory 锁（锁序最前端）。
+
+    与冻结/结算/finalizer 使用同一锁键，串行化同账户的并发入队冻结裁决。
+    非 PostgreSQL 方言（SQLite 测试环境）降级为 no-op——并发账户锁语义
+    由真实 PG 保证（E2E/生产均为 PG）。
+    """
+    from sqlalchemy import text
+
+    dialect = str(getattr(getattr(db, "bind", None), "dialect", None))
+    if dialect and not dialect.startswith("postgresql"):
+        return
+    db.execute(
+        text("SELECT pg_advisory_xact_lock(:key)"),
+        {"key": int(user_id)},
+    )
+
+
 def safe_record_audiobook_billing_freeze(
     *,
     db: Session,
@@ -99,6 +126,7 @@ def safe_record_audiobook_billing_freeze(
     tts_pricing_key: str,
     trace_context: Optional[Dict[str, Any]] = None,
     estimated_yuan_override: Optional[float] = None,
+    raise_on_error: bool = False,
 ) -> None:
     try:
         payload = {
@@ -122,6 +150,10 @@ def safe_record_audiobook_billing_freeze(
             chapter_ids,
             exc,
         )
+        if raise_on_error:
+            # R11/P0-2 同事务冻结：失败向上抛使整个入队事务回滚
+            # （run/指针/快照/冻结一并消失，不产生"未冻结先执行"残留）
+            raise
 
 
 def serialize_dataclass_to_dict(obj: Any):
@@ -151,6 +183,8 @@ def build_task_status_response(task: AudiobookTask) -> AudiobookTaskStatus:
         updated_at=task.updated_at.isoformat() if task.updated_at else None,
         started_at=task.started_at.isoformat() if task.started_at else None,
         finished_at=task.finished_at.isoformat() if task.finished_at else None,
+        # R13/P1-a：job_id = task:{AudiobookTask.id} 命名空间字符串
+        job_id=f"task:{task.id}",
     )
 
 
@@ -388,6 +422,143 @@ def _mark_checkpoint_recorded_segment_statuses(checkpoint_document: Dict[str, An
     checkpoint_document["segment_statuses"] = updated
 
 
+def _parse_run_input_snapshot(raw: Any) -> Optional[Dict[str, Any]]:
+    """解析 run_input_snapshot JSON；缺失/损坏返回 None（历史 run 回退实时解析）。"""
+    if raw is None:
+        return None
+    if isinstance(raw, dict):
+        return raw if raw.get("signed_payload") else None
+    try:
+        data = json.loads(raw)
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(data, dict) or not data.get("signed_payload"):
+        return None
+    return data
+
+
+def _read_revision_heads_projection(
+    db: Session,
+    *,
+    audiobook_project_id: int,
+    chapter_id: int,
+) -> Optional[Dict[str, Any]]:
+    """读三条编辑链 head 投影（创建运行同一事务内，验收 19）。"""
+    try:
+        from app.services.audiobook.scene_edit_revision_service import (
+            compute_revision_set_hash,
+            get_revision_heads_projection,
+        )
+
+        heads = get_revision_heads_projection(
+            db,
+            audiobook_project_id=audiobook_project_id,
+            chapter_id=chapter_id,
+        )
+        if not any(heads.values()):
+            return None
+        return {
+            "revision_set_hash": compute_revision_set_hash(heads),
+            "dialogue": heads.get("dialogue"),
+            "director_override": heads.get("director_override"),
+            "voice_binding": heads.get("voice_binding"),
+            "projection": heads,
+        }
+    except Exception:
+        logger.warning(
+            "读取场景编辑基线投影失败，快照不带 revision_heads: batch=%s chapter=%s",
+            audiobook_project_id,
+            chapter_id,
+        )
+        return None
+
+
+def build_run_input_snapshot_for_chapter(
+    db: Session,
+    *,
+    audiobook_project_id: int,
+    chapter_id: int,
+    run_type: str,
+    tts_model: Optional[str] = None,
+    output_format: Optional[str] = None,
+    narration_style: Optional[str] = None,
+    narration_style_prompt: Optional[str] = None,
+    generate_subtitle: Optional[bool] = True,
+    timeline_edits: Optional[Dict[str, Any]] = None,
+    revision_heads: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """构建章节 run 的 run_input_snapshot（GUIDE 验收 8/19，方案 A 自包含正文）。
+
+    full/script_only 冻结原章正文（script_facts=None）；audio_from_scripts/场景
+    重渲染在创建运行同一事务内读已审批 script_json 为 script_facts 正文，并携带
+    编辑基线投影（revision_heads）。批量构建可传入预读的 revision_heads。
+    """
+    from app.models.audiobook import AudiobookProject
+    from app.models.project import Chapter
+
+    audiobook_project = (
+        db.query(AudiobookProject)
+        .filter(AudiobookProject.id == audiobook_project_id)
+        .first()
+    )
+    batch_snapshot = (
+        parse_engine_config_snapshot(
+            getattr(audiobook_project, "engine_config_snapshot", None)
+        )
+        if audiobook_project is not None
+        else None
+    )
+    if not batch_snapshot:
+        # 无批次快照（legacy_unverified 等）：退化为空配置，快照仍携带正文
+        batch_snapshot = {"engine_mode": "legacy_stems", "engine_branch_config": {}}
+
+    chapter = db.query(Chapter).filter(Chapter.id == chapter_id).first()
+    chapter_audio = (
+        db.query(ChapterAudio)
+        .filter(
+            ChapterAudio.audiobook_project_id == audiobook_project_id,
+            ChapterAudio.chapter_id == chapter_id,
+            ChapterAudio.deleted_at.is_(None),
+        )
+        .first()
+    )
+
+    normalized_run_type = str(run_type or "").strip().lower()
+    script_facts = None
+    source_chapter_content = None
+    if normalized_run_type == "audio_from_scripts":
+        script_facts = _safe_json_value(
+            getattr(chapter_audio, "script_json", None)
+            if chapter_audio is not None
+            else None
+        )
+        if revision_heads is None:
+            revision_heads = _read_revision_heads_projection(
+                db,
+                audiobook_project_id=audiobook_project_id,
+                chapter_id=chapter_id,
+            )
+    else:
+        # full/script_only 按 run_type 合同冻结原章输入，不携带编辑基线投影
+        revision_heads = None
+        source_chapter_content = getattr(chapter, "content", None) if chapter is not None else None
+
+    return build_run_input_snapshot(
+        batch_snapshot,
+        {
+            "tts_model": tts_model,
+            "output_format": output_format or "mp3",
+            "narration_style": narration_style,
+            "narration_style_prompt": narration_style_prompt,
+            "generate_subtitle": generate_subtitle is not False,
+            "timeline_edits": timeline_edits,
+            "source_chapter_content": source_chapter_content,
+        },
+        revision_heads=revision_heads,
+        script_facts=script_facts,
+    )
+
+
 def _build_resume_input_context(
     db: Session,
     *,
@@ -398,7 +569,10 @@ def _build_resume_input_context(
 ) -> Dict[str, Any]:
     from app.models.audiobook import AudiobookProject
     from app.models.project import Chapter, Project
-    from app.services.audiobook.project_audio_runtime import resolve_project_audio_runtime_config
+    from app.services.audiobook.project_audio_runtime import (
+        resolve_from_run_input,
+        resolve_project_audio_runtime_config,
+    )
 
     audiobook_project = (
         db.query(AudiobookProject)
@@ -430,35 +604,84 @@ def _build_resume_input_context(
     resolved_output_format = str(
         getattr(chapter_run, "output_format", None) or "mp3"
     ).strip() or "mp3"
-    resolved_narration_style = (
-        getattr(chapter_run, "narration_style", None)
-        or getattr(chapter_audio, "narration_style", None)
-    )
-    resolved_narration_style_prompt = (
-        getattr(chapter_run, "narration_style_prompt", None)
-        or getattr(chapter_audio, "narration_style_prompt", None)
-    )
-
-    runtime_config = resolve_project_audio_runtime_config(
-        project,
-        tts_model=resolved_tts_model,
-    )
-    voice_config_payload = {
-        "model": resolved_tts_model,
-        "characters": runtime_config.character_items,
-    }
-    audio_fx_payload = runtime_config.audio_fx
 
     run_type = str(getattr(chapter_run, "run_type", "") or "").strip().lower()
-    if run_type == "audio_from_scripts":
-        script_source_payload = _safe_json_value(getattr(chapter_audio, "script_json", None))
-    else:
-        script_source_payload = {
-            "chapter_title": getattr(chapter, "title", None),
-            "chapter_content": getattr(chapter, "content", None),
-            "chapter_summary": getattr(chapter, "summary", None),
-            "summary_data": _safe_json_value(getattr(chapter, "summary_data", None)),
+
+    # 验收 8/19：恢复只消费 run_input_snapshot（方案 A 自包含正文），不读取
+    # 项目当前活跃引擎与实时配置；无快照的历史 run 回退实时解析（向后兼容）
+    run_input_snapshot = _parse_run_input_snapshot(
+        getattr(chapter_run, "run_input_snapshot", None)
+    )
+    if run_input_snapshot is not None:
+        signed = run_input_snapshot.get("signed_payload") or {}
+        run_options = signed.get("run_options") or {}
+        resolved_narration_style = (
+            run_options.get("narration_style")
+            or getattr(chapter_run, "narration_style", None)
+            or getattr(chapter_audio, "narration_style", None)
+        )
+        resolved_narration_style_prompt = (
+            run_options.get("narration_style_prompt")
+            or getattr(chapter_run, "narration_style_prompt", None)
+            or getattr(chapter_audio, "narration_style_prompt", None)
+        )
+        resolved_output_format = str(
+            run_options.get("output_format") or resolved_output_format
+        ).strip() or "mp3"
+        # 运行期消费快照冻结的规范化配置（不读实时 audio_config）
+        runtime_config = resolve_from_run_input(
+            run_input_snapshot,
+            tts_model=resolved_tts_model,
+        )
+        voice_config_payload = {
+            "model": resolved_tts_model,
+            "characters": runtime_config.character_items,
         }
+        audio_fx_payload = runtime_config.audio_fx
+        if run_type == "audio_from_scripts":
+            script_facts = signed.get("script_facts")
+            script_source_payload = (
+                script_facts
+                if script_facts is not None
+                else _safe_json_value(getattr(chapter_audio, "script_json", None))
+            )
+        else:
+            script_source_payload = {
+                "chapter_title": getattr(chapter, "title", None),
+                "chapter_content": signed.get("source_chapter_content")
+                or getattr(chapter, "content", None),
+                "chapter_summary": getattr(chapter, "summary", None),
+                "summary_data": _safe_json_value(getattr(chapter, "summary_data", None)),
+            }
+    else:
+        resolved_narration_style = (
+            getattr(chapter_run, "narration_style", None)
+            or getattr(chapter_audio, "narration_style", None)
+        )
+        resolved_narration_style_prompt = (
+            getattr(chapter_run, "narration_style_prompt", None)
+            or getattr(chapter_audio, "narration_style_prompt", None)
+        )
+
+        runtime_config = resolve_project_audio_runtime_config(
+            project,
+            tts_model=resolved_tts_model,
+        )
+        voice_config_payload = {
+            "model": resolved_tts_model,
+            "characters": runtime_config.character_items,
+        }
+        audio_fx_payload = runtime_config.audio_fx
+
+        if run_type == "audio_from_scripts":
+            script_source_payload = _safe_json_value(getattr(chapter_audio, "script_json", None))
+        else:
+            script_source_payload = {
+                "chapter_title": getattr(chapter, "title", None),
+                "chapter_content": getattr(chapter, "content", None),
+                "chapter_summary": getattr(chapter, "summary", None),
+                "summary_data": _safe_json_value(getattr(chapter, "summary_data", None)),
+            }
 
     return {
         "tts_model": resolved_tts_model,
@@ -626,6 +849,7 @@ def build_progress_handler(
 
         detail_payload = {
             "chapter_id": chapter_id,
+            "run_id": snapshot.get("run_id"),
             "task_id": snapshot.get("task_id"),
             "overall_progress": snapshot.get("overall_progress"),
             "stages": snapshot.get("stages"),
@@ -638,6 +862,116 @@ def build_progress_handler(
         _tracker_update(tracker, stage_name, completed_units, total, message, detail_payload)
 
     return handle_progress
+
+
+def _ensure_active_chapter_audio(
+    db: Session,
+    *,
+    audiobook_project_id: int,
+    chapter_id: int,
+) -> ChapterAudio:
+    """查/建唯一 active ChapterAudio（R10/P0-4）。
+
+    部分唯一索引 ``UNIQUE (audiobook_project_id, chapter_id) WHERE deleted_at IS NULL``
+    保护：并发首次创建仅一个成功，loser 按 SAVEPOINT 协议回滚重读复用。
+    """
+    audio = (
+        db.query(ChapterAudio)
+        .filter(
+            ChapterAudio.audiobook_project_id == audiobook_project_id,
+            ChapterAudio.chapter_id == chapter_id,
+            ChapterAudio.deleted_at.is_(None),
+        )
+        .first()
+    )
+    if audio is not None:
+        return audio
+    try:
+        with db.begin_nested():
+            audio = ChapterAudio(
+                audiobook_project_id=audiobook_project_id,
+                chapter_id=chapter_id,
+            )
+            db.add(audio)
+            db.flush()
+        return audio
+    except IntegrityError:
+        # 并发 loser：回滚到 SAVEPOINT 后重读复用（R10/P0-4）
+        return (
+            db.query(ChapterAudio)
+            .filter(
+                ChapterAudio.audiobook_project_id == audiobook_project_id,
+                ChapterAudio.chapter_id == chapter_id,
+                ChapterAudio.deleted_at.is_(None),
+            )
+            .first()
+        )
+
+
+def _freeze_billing_snapshot_into_run(
+    db: Session,
+    *,
+    run: ChapterAudioRun,
+    engine_mode: str,
+    billing_account_user_id: Optional[int],
+) -> None:
+    """冻结不可变计价快照进 run_input_snapshot（验收 19/23，六步闭环①）。
+
+    billing_snapshot 已存在（重渲染/恢复等场景）时不覆盖——冻结事实不可变。
+    """
+    snapshot_payload = (
+        json.loads(run.run_input_snapshot) if run.run_input_snapshot else {}
+    )
+    if not isinstance(snapshot_payload, dict):
+        snapshot_payload = {}
+    signed = snapshot_payload.setdefault("signed_payload", {})
+    if not isinstance(signed, dict):
+        signed = {}
+        snapshot_payload["signed_payload"] = signed
+    billing_ctx = signed.setdefault("billing_context", {})
+    if not isinstance(billing_ctx, dict):
+        billing_ctx = {}
+        signed["billing_context"] = billing_ctx
+
+    changed = False
+    if billing_ctx.get("billing_snapshot") is None:
+        billing_ctx["billing_snapshot"] = build_billing_snapshot(
+            db,
+            audiobook_project_id=run.audiobook_project_id,
+            run_type=run.run_type or "full",
+            tts_model=run.tts_model,
+            engine_mode=engine_mode,
+        )
+        changed = True
+    if billing_ctx.get("billing_account_user_id") is None and billing_account_user_id is not None:
+        billing_ctx["billing_account_user_id"] = int(billing_account_user_id)
+        changed = True
+    if changed:
+        run.run_input_snapshot = json.dumps(snapshot_payload, ensure_ascii=False)
+        run.billing_account_user_id = int(billing_account_user_id) if billing_account_user_id is not None else None
+
+
+def _compensate_failed_enqueue_dispatch(db: Session, runs: List[ChapterAudioRun]) -> None:
+    """批量派发明确失败后的条件补偿（R11/P1-4）。
+
+    锁定 ChapterAudio + CAS 回退 desired_run_id（仅当仍指向失败 run），
+    run 置 cancelled、dispatch_status='cancelled'。
+    """
+    now = utc_now()
+    for run in runs:
+        if run.chapter_audio_id:
+            db.query(ChapterAudio).filter(
+                ChapterAudio.id == run.chapter_audio_id,
+                ChapterAudio.desired_run_id == run.id,
+            ).update(
+                {ChapterAudio.desired_run_id: run.predecessor_run_id},
+                synchronize_session=False,
+            )
+        run.status = "cancelled"
+        run.dispatch_status = "cancelled"
+        run.finished_at = now
+        run.error_message = "dispatch_failed: Celery apply_async raised exception"
+    db.flush()
 
 
 def enqueue_chapter_runs(
@@ -653,16 +987,31 @@ def enqueue_chapter_runs(
     narration_style_prompt: Optional[str] = None,
     generate_subtitle: Optional[bool] = True,
     timeline_edits_by_chapter: Optional[Dict[int, Dict[str, Dict[str, float]]]] = None,
-) -> None:
+    revision_heads_by_chapter: Optional[Dict[int, Dict[str, Any]]] = None,
+    task_id: Optional[int] = None,
+) -> List[ChapterAudioRun]:
     normalized_ids = [chapter_id for chapter_id in dict.fromkeys(chapter_ids or []) if chapter_id is not None]
     if not normalized_ids:
-        return
+        return []
+    # Contract 收窄后 chapter_audio_id NOT NULL：创建 run 前先解析/创建唯一 active
+    # ChapterAudio（运行作用域，R9/P0-3/R10/P0-4），随 INSERT 一并落库
+    chapter_audio_by_chapter: Dict[int, ChapterAudio] = {}
+    for chapter_id in normalized_ids:
+        chapter_audio_by_chapter[chapter_id] = _ensure_active_chapter_audio(
+            db,
+            audiobook_project_id=audiobook_project_id,
+            chapter_id=chapter_id,
+        )
     runs = ChapterAudioRunRepository.create_runs(
         db,
         audiobook_project_id=audiobook_project_id,
         chapter_ids=normalized_ids,
         run_type=run_type,
         celery_task_id=celery_task_id,
+        chapter_audio_ids={
+            chapter_id: audio.id
+            for chapter_id, audio in chapter_audio_by_chapter.items()
+        },
         status="queued",
         current_stage="queued",
         tts_model=tts_model,
@@ -671,6 +1020,32 @@ def enqueue_chapter_runs(
         narration_style_prompt=narration_style_prompt,
         resumable=True,
     )
+    # 批次引擎模式与计费账户（billing_snapshot 冻结用）
+    audiobook_project = (
+        db.query(AudiobookProject)
+        .filter(AudiobookProject.id == audiobook_project_id)
+        .first()
+    )
+    batch_snapshot = parse_engine_config_snapshot(
+        getattr(audiobook_project, "engine_config_snapshot", None)
+        if audiobook_project is not None
+        else None
+    )
+    engine_mode = (
+        str((batch_snapshot or {}).get("engine_mode") or "")
+        or (getattr(audiobook_project, "engine_mode", None) or "legacy_stems")
+    )
+    billing_account_user_id = None
+    if audiobook_project is not None:
+        from app.models.project import Project
+        project = (
+            db.query(Project)
+            .filter(Project.id == audiobook_project.project_id)
+            .first()
+        )
+        if project is not None:
+            billing_account_user_id = getattr(project, "user_id", None)
+
     for run in runs:
         checkpoint_patch: Dict[str, Any] = {"generate_subtitle": generate_subtitle is not False}
         chapter_timeline_edits = (
@@ -689,9 +1064,73 @@ def enqueue_chapter_runs(
             current_stage=run.current_stage,
             checkpoint_patch=checkpoint_patch,
         )
+        # 验收 8/19：创建运行同一事务内构建 run_input_snapshot（方案 A 自包含正文）
+        run_input_snapshot = build_run_input_snapshot_for_chapter(
+            db,
+            audiobook_project_id=audiobook_project_id,
+            chapter_id=run.chapter_id,
+            run_type=run_type,
+            tts_model=tts_model,
+            output_format=output_format,
+            narration_style=narration_style,
+            narration_style_prompt=narration_style_prompt,
+            generate_subtitle=generate_subtitle,
+            timeline_edits=chapter_timeline_edits,
+            revision_heads=(
+                (revision_heads_by_chapter or {}).get(run.chapter_id)
+                if revision_heads_by_chapter
+                else None
+            ),
+        )
+        run.run_input_snapshot = json.dumps(run_input_snapshot, ensure_ascii=False)
+
+        # 运行作用域（R9/P0-3，R10/P0-4）：创建时已携带 chapter_audio_id，
+        # 此处复用预解析的 active ChapterAudio（Contract 收窄后非空）
+        chapter_audio = chapter_audio_by_chapter.get(run.chapter_id)
+        if chapter_audio is None:
+            chapter_audio = _ensure_active_chapter_audio(
+                db,
+                audiobook_project_id=audiobook_project_id,
+                chapter_id=run.chapter_id,
+            )
+        run.chapter_audio_id = chapter_audio.id
+        run.predecessor_run_id = chapter_audio.desired_run_id
+        # 先落库 run 的 chapter_audio_id：双指针复合外键与 TaskDispatch 复合外键
+        # 都要求 (run_id, chapter_audio_id) 在 chapter_audio_runs 中可匹配，
+        # 必须在 desired_run_id 更新之前保证 run 行已带正确作用域
+        db.flush()
+        chapter_audio.desired_run_id = run.id
+        db.flush()
+
+        # 派发意图 outbox（R11/P0-1）：每 run 独立固定 celery_task_id + 意图字段
+        run.celery_task_id = str(uuid4())
+        run.dispatch_status = "pending"
+        run.dispatch_attempts = 0
+        run.next_dispatch_at = utc_now()
+
+        # 任务-派发父子关系（R11/P0-3）
+        if task_id is not None:
+            db.add(
+                AudiobookTaskDispatch(
+                    task_id=int(task_id),
+                    run_id=run.id,
+                    chapter_audio_id=chapter_audio.id,
+                )
+            )
+
+        # 计费事实冻结（验收 19/23）：不可变计价快照 + 计费账户
+        _freeze_billing_snapshot_into_run(
+            db,
+            run=run,
+            engine_mode=engine_mode,
+            billing_account_user_id=billing_account_user_id,
+        )
         db.add(run)
     if runs:
-        db.commit()
+        # R10/P0-3：内部不 commit（只 flush）——事务所有权归最外层应用服务，
+        # 由调用方与计费冻结在同一事务内统一提交（R11/P0-2 同事务冻结）
+        db.flush()
+    return runs
 
 
 def enqueue_audiobook_task(
@@ -707,7 +1146,9 @@ def enqueue_audiobook_task(
     generate_subtitle: Optional[bool] = True,
     timeline_edits_by_chapter: Optional[Dict[int, Dict[str, Dict[str, float]]]] = None,
     force_regenerate_script: bool = False,
+    revision_heads_by_chapter: Optional[Dict[int, Dict[str, Any]]] = None,
     before_dispatch: Optional[Callable[[AudiobookTask, str], None]] = None,
+    commit_result: bool = True,
 ) -> Tuple[AudiobookTask, Any]:
     normalized_chapter_ids = [chapter_id for chapter_id in dict.fromkeys(chapter_ids or []) if chapter_id is not None]
     if not normalized_chapter_ids:
@@ -724,42 +1165,9 @@ def enqueue_audiobook_task(
         total_units=len(normalized_chapter_ids),
     )
 
-    if job_type == "script_only":
-        signature = celery_app.signature(
-            "audiobook.run_script_only",
-            args=[
-                task_record.id,
-                audiobook_project_id,
-                normalized_chapter_ids,
-                tts_model,
-                force_regenerate_script,
-            ],
-        )
-    elif job_type == "audio_from_scripts":
-        signature = celery_app.signature(
-            "audiobook.run_audio_from_scripts",
-            args=[
-                task_record.id,
-                audiobook_project_id,
-                normalized_chapter_ids,
-                tts_model,
-                timeline_edits_by_chapter or {},
-            ],
-        )
-    else:
-        signature = celery_app.signature(
-            "audiobook.run_full",
-            args=[
-                task_record.id,
-                audiobook_project_id,
-                normalized_chapter_ids,
-                tts_model,
-            ],
-        )
-
     celery_task_id = str(uuid4())
     AudiobookTaskRepository.attach_celery_id(db, task_record.id, celery_task_id)
-    enqueue_chapter_runs(
+    runs = enqueue_chapter_runs(
         db,
         audiobook_project_id=audiobook_project_id,
         chapter_ids=normalized_chapter_ids,
@@ -771,13 +1179,51 @@ def enqueue_audiobook_task(
         narration_style_prompt=narration_style_prompt,
         generate_subtitle=generate_subtitle,
         timeline_edits_by_chapter=timeline_edits_by_chapter,
+        revision_heads_by_chapter=revision_heads_by_chapter,
+        task_id=task_record.id,
     )
 
     if before_dispatch is not None:
         before_dispatch(task_record, celery_task_id)
 
-    async_result = signature.apply_async(task_id=celery_task_id)
+    # R11/P0-1（outbox）：run 即派发意图——事务提交后由 dispatcher beat /
+    # 调用方显式 dispatch_pending_runs 投递（严禁在事务内 send_task：worker
+    # 消费时 run 尚未提交为 dispatched，租约认领必失败）。
+    if runs and commit_result:
+        # 无同事务冻结要求的调用方：内部提交（提交后 run 可见为 pending）
+        db.commit()
+
+    # 兼容调用方：async_result.id = 父任务 celery_task_id（job_id/审计占位）；
+    # runs 随结果返回，供调用方在统一 commit 后显式派发（dispatch_pending_runs）
+    from types import SimpleNamespace as _SimpleNamespace
+
+    async_result = _SimpleNamespace(id=celery_task_id, runs=runs)
     return task_record, async_result
+
+
+def dispatch_pending_runs(db: Session, runs: List[ChapterAudioRun]) -> Dict[str, int]:
+    """事务提交后逐 run 即时派发（best-effort，R11/P0-1 先落库后投递）。
+
+    调用方在统一 commit（入队+冻结同事务）后调用；失败由 dispatcher beat
+    stale-pending 扫描兜底重放，不阻塞响应。
+    返回 ``{"dispatched": int, "failed": int, "unknown": int}``。
+    """
+    from app.services.audiobook.dispatch_service import try_dispatch_run
+
+    summary = {"dispatched": 0, "failed": 0, "unknown": 0}
+    for run in runs:
+        try:
+            outcome = try_dispatch_run(db, run_id=run.id)
+        except Exception as exc:
+            logger.error("逐 run 派发异常 run_id=%s: %s", run.id, exc)
+            outcome = "unknown"
+        if outcome not in summary:
+            outcome = "unknown"
+        summary[outcome] += 1
+    if runs:
+        db.commit()
+    logger.info("逐 run 派发结果 runs=%d: %s", len(runs), summary)
+    return summary
 
 
 def update_chapter_run_state(
@@ -795,6 +1241,8 @@ def update_chapter_run_state(
     checkpoint_patch: Optional[Dict[str, Any]] = None,
     error_message: Optional[str] = None,
     run_id: Optional[int] = None,
+    result_render_status: Optional[str] = None,
+    result_render_detail: Optional[Dict[str, Any]] = None,
 ) -> None:
     # 优先按具体 run_id 定位，避免早启动、晚完成的任务覆盖新任务状态；
     # 未提供 run_id 时兼容旧行为（同类型最新 run）
@@ -827,12 +1275,21 @@ def update_chapter_run_state(
         )
         return
     if not run:
+        # Contract 收窄后 chapter_audio_id NOT NULL：兜底创建时解析 active ChapterAudio
+        _chapter_audio = _ensure_active_chapter_audio(
+            db,
+            audiobook_project_id=audiobook_project_id,
+            chapter_id=chapter_id,
+        )
         run = ChapterAudioRunRepository.create_run(
             db,
             audiobook_project_id=audiobook_project_id,
             chapter_id=chapter_id,
             run_type=run_type,
-            celery_task_id=celery_task_id,
+            # Contract 收窄后 celery_task_id NOT NULL + UNIQUE（§5.27）：
+            # 调用方未携带时生成每 run 独立 uuid 占位，避免写路径撞约束
+            celery_task_id=celery_task_id or str(uuid4()),
+            chapter_audio_id=_chapter_audio.id,
             status=status,
             current_stage=current_stage,
             progress=progress,
@@ -882,7 +1339,34 @@ def update_chapter_run_state(
         changes["started_at"] = utc_now()
     if status in {"completed", "failed", "cancelled", "canceled"}:
         changes["finished_at"] = utc_now()
+        # 派发协议状态机收敛：终态 run 不得再留在 pending/dispatched，
+        # 否则 beat 扫描（未认领重投）会把已完成 run 反复重投/再派发。
+        # 收敛值沿用 cancelled（先例：synthetic_migration_run_backfill）
+        if run.dispatch_status in {"pending", "dispatched"}:
+            changes["dispatch_status"] = "cancelled"
+    # §2.5 三维投影：本次运行结果（无论是否发布）随终态一并写入
+    if result_render_status is not None:
+        changes["result_render_status"] = result_render_status
+    if result_render_detail is not None:
+        changes["result_render_detail"] = result_render_detail
     ChapterAudioRunRepository.update_run(db, run, **changes)
+
+    # 域 3/4（R18/P0）：run 终态时清空 worker 租约 + 按证据关账全部 pending ledger。
+    # 关账只处理 pending 行（CAS 语义），与人工收敛路径不产生双写；
+    # 真正的 finalizer 结算由逐 run 任务外层 / beat 扫描器在账户锁内执行。
+    if status in {"completed", "failed", "cancelled", "canceled"}:
+        try:
+            from app.services.audiobook.dispatch_service import clear_worker_lease
+            from app.services.audiobook.ledger_transition_service import (
+                close_accounting_on_run_terminal,
+            )
+
+            clear_worker_lease(db, run_id=run.id)
+            close_accounting_on_run_terminal(db, run_id=run.id)
+        except Exception:
+            logger.exception(
+                "run 终态关账异常 run_id=%s status=%s", run.id, status,
+            )
 
 
 def _resolve_resume_task_type(

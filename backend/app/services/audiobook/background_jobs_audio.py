@@ -26,6 +26,11 @@ from app.services.audiobook.background_jobs_shared import (
     settle_audiobook_project_billing,
 )
 from app.services.audiobook.atomic_files import write_bytes_atomic
+from app.services.audiobook.chapter_output_publish import (
+    publish_seed_scene_chapter_output,
+    register_scene_audio_artifacts,
+    upsert_staged_chapter_output,
+)
 from app.services.audiobook.chapter_segment_assets import (
     collect_chapter_segment_asset_refs,
     delete_replaced_segment_asset_refs,
@@ -34,8 +39,10 @@ from app.services.audiobook.chapter_segment_assets import (
 from app.services.audiobook.job_tracker import handle_pause_checkpoint
 from app.services.audiobook.repository import ChapterAudioRunRepository
 from app.services.audiobook.tts_pause import TTSPauseRequested
+from app.services.audiobook.project_audio_config import parse_engine_config_snapshot
 from app.services.audiobook.project_audio_runtime import (
     apply_scene_audio_runtime_to_engine,
+    resolve_from_snapshot,
     resolve_project_audio_runtime_config,
     validate_project_voice_references,
 )
@@ -111,11 +118,18 @@ async def generate_audiobook_audio_from_scripts_background(
         if project is not None and getattr(project, "user_id", None) is not None:
             engine.voice_manager.owner_user_id = int(project.user_id)
 
-        runtime_config = resolve_project_audio_runtime_config(
-            project=project,
-            tts_model=tts_model,
-            base_voice_mapping=audiobook_project.voice_mapping or {},
+        # Phase 1.5：优先从 engine_config_snapshot 解析，回退实时配置
+        snapshot = parse_engine_config_snapshot(
+            str(audiobook_project.engine_config_snapshot or "") if audiobook_project else None
         )
+        if snapshot:
+            runtime_config = resolve_from_snapshot(snapshot, tts_model=tts_model)
+        else:
+            runtime_config = resolve_project_audio_runtime_config(
+                project=project,
+                tts_model=tts_model,
+                base_voice_mapping=audiobook_project.voice_mapping or {},
+            )
         if project is not None:
             validate_project_voice_references(
                 db,
@@ -376,6 +390,12 @@ async def generate_audiobook_audio_from_scripts_background(
                     if not isinstance(audio_data, (bytes, bytearray)) or not audio_data:
                         raise RuntimeError("generated_audio_missing")
                     write_bytes_atomic(output_path, bytes(audio_data))
+                    # §2.5：识别 seed_scene 渲染结果（stats.mode），走发布协议链路；
+                    # run_id 缺失（非 celery 派发路径）时降级旧直写行为
+                    is_seed_scene_result = (
+                        (result.get("stats") or {}).get("mode") == "seed_scene"
+                    )
+                    use_publish_protocol = is_seed_scene_result and run_id is not None
                     if not is_chapter_generation_target_active(
                         db,
                         audiobook_project_id=audiobook_project_id,
@@ -397,6 +417,7 @@ async def generate_audiobook_audio_from_scripts_background(
                         preserve_existing_counts=True,
                         logger=logger,
                         chapter_id=chapter_id,
+                        skip_mirror_columns=use_publish_protocol,
                     )
                     parse_stats = result_metadata["parse_stats"]
 
@@ -408,6 +429,39 @@ async def generate_audiobook_audio_from_scripts_background(
                         title=chapter.title or f"Chapter {chapter.chapter_number}",
                         generate_subtitle=generate_subtitle,
                     )
+
+                    # §2.5：seed_scene 引擎登记 run 级输出（staged），整章可导出
+                    # 镜像列改由发布事务 CAS 写入（§2.4 规则 3/4）
+                    if use_publish_protocol:
+                        subtitle_artifacts = result.get("subtitle_artifacts")
+                        subtitle_artifacts = (
+                            subtitle_artifacts
+                            if isinstance(subtitle_artifacts, dict)
+                            else {}
+                        )
+                        upsert_staged_chapter_output(
+                            db,
+                            run_id=run_id,
+                            chapter_audio_id=chapter_audio.id,
+                            audiobook_project_id=audiobook_project_id,
+                            chapter_id=chapter_id,
+                            audio_path=output_path,
+                            duration=result.get("duration"),
+                            file_size=result.get("file_size"),
+                            subtitle_path=subtitle_artifacts.get("subtitle_path"),
+                            subtitle_format=(
+                                subtitle_artifacts.get("subtitle_format") or "srt"
+                            ),
+                        )
+                        # §3.4：装配段产物就绪 → 登记场景音频 artifact（staged）
+                        register_scene_audio_artifacts(
+                            db,
+                            run_id=run_id,
+                            chapter_audio_id=chapter_audio.id,
+                            audiobook_project_id=audiobook_project_id,
+                            chapter_id=chapter_id,
+                            scene_artifacts=result.get("scene_artifacts"),
+                        )
 
                     # 在 run 临时资产清理前固化片段音频并写回 script_json，
                     # 供工作台分段试听与整章重新混音使用
@@ -474,7 +528,24 @@ async def generate_audiobook_audio_from_scripts_background(
                             output_path=output_path,
                         ),
                         run_id=run_id,
+                        result_render_status=(
+                            result.get("render_status") if is_seed_scene_result else None
+                        ),
+                        result_render_detail=(
+                            result.get("render_status_detail")
+                            if is_seed_scene_result
+                            else None
+                        ),
                     )
+                    # §2.5：整章装配完成 → 先写 run 投影（上方）→ 幂等完整发布协议
+                    if use_publish_protocol:
+                        publish_seed_scene_chapter_output(
+                            db,
+                            run_id=run_id,
+                            chapter_audio_id=chapter_audio.id,
+                            render_status=result.get("render_status"),
+                            render_status_detail=result.get("render_status_detail"),
+                        )
                     prune_and_log_completed_run_temp_assets(
                         logger,
                         db,
@@ -487,6 +558,10 @@ async def generate_audiobook_audio_from_scripts_background(
                 else:
                     current_run_failed_chapters += 1
                     logger.error("❌ 章节 %s 音频生成失败: %s", chapter_id, result.get("error"))
+                    is_seed_scene_failure = (
+                        isinstance(result, dict)
+                        and (result.get("stats") or {}).get("mode") == "seed_scene"
+                    )
                     mark_chapter_generation_failed(
                         db,
                         audiobook_project_id=audiobook_project_id,
@@ -500,6 +575,16 @@ async def generate_audiobook_audio_from_scripts_background(
                         task_id=task_id,
                         default_error_message="audio_generation_failed",
                         run_id=run_id,
+                        result_render_status=(
+                            result.get("render_status") or "failed"
+                            if is_seed_scene_failure
+                            else None
+                        ),
+                        result_render_detail=(
+                            result.get("render_status_detail")
+                            if is_seed_scene_failure
+                            else None
+                        ),
                     )
 
                 refresh_audiobook_project_audio_totals(
@@ -543,6 +628,10 @@ async def generate_audiobook_audio_from_scripts_background(
             except Exception as exc:
                 logger.error("❌ 章节 %s 音频阶段处理异常: %s", chapter_id, exc)
                 current_run_failed_chapters += 1
+                is_seed_scene_failure = (
+                    isinstance(result, dict)
+                    and (result.get("stats") or {}).get("mode") == "seed_scene"
+                )
                 mark_chapter_generation_failed(
                     db,
                     audiobook_project_id=audiobook_project_id,
@@ -557,6 +646,14 @@ async def generate_audiobook_audio_from_scripts_background(
                     task_id=task_id,
                     default_error_message="audio_generation_failed",
                     run_id=run_id,
+                    result_render_status=(
+                        "failed" if is_seed_scene_failure else None
+                    ),
+                    result_render_detail=(
+                        result.get("render_status_detail")
+                        if is_seed_scene_failure
+                        else None
+                    ),
                 )
                 refresh_audiobook_project_audio_totals(
                     db,

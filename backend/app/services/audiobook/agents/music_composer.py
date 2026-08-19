@@ -324,6 +324,7 @@ class MusicComposer:
 
             loaded = 0
             bucket_groups: Dict[str, List[str]] = {}
+            missing_files: List[str] = []
 
             for item in records:
                 if is_community_rejected_status(item.get("quality_status")):
@@ -342,7 +343,7 @@ class MusicComposer:
                     continue
 
                 if not self._music_file_exists(file_path):
-                    logger.warning("⚠️ 音乐索引条目文件不存在: %s", file_path)
+                    missing_files.append(file_path)
                     continue
 
                 existing = self.music_library.get(entry_id)
@@ -360,6 +361,13 @@ class MusicComposer:
 
                 if bucket and file_path:
                     bucket_groups.setdefault(bucket, []).append(file_path)
+
+            if missing_files:
+                # 汇总提示缺失条目，避免每次加载逐条刷屏（本地缓存缺失、云端可恢复的条目）
+                preview = ", ".join(missing_files[:5])
+                if len(missing_files) > 5:
+                    preview = f"{preview} ... 共 {len(missing_files)} 条"
+                logger.warning("⚠️ 音乐索引 %s 个条目文件缺失（已跳过）: %s", len(missing_files), preview)
 
             if bucket_groups:
                 for bucket_key, paths in bucket_groups.items():

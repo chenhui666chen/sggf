@@ -212,14 +212,21 @@ def build_project_settings_summary(
     db: Session,
     relevant_categories: Optional[List[str]] = None,
     max_content_length: int = 300,
+    max_items_per_collection: int = 12,
+    max_total_length: int = 2400,
 ) -> str:
     """为指定项目生成世界观设定摘要（供AI Prompt或前端展示使用）
+
+    修复 P1-1：此前条目数量无上限，长篇项目数百条设定会无限膨胀挤占生成预算。
+    现按双层预算控制：每集合最多 max_items_per_collection 条 + 总长 max_total_length。
 
     Args:
         project_id: 项目ID
         db: 数据库会话
         relevant_categories: 需要包含的体系类别列表，None 表示全部
         max_content_length: 单条设定内容的最大长度
+        max_items_per_collection: 每个集合最多列出的设定项数量
+        max_total_length: 摘要总长度上限（字符）
     """
     query = db.query(SettingCollection).filter(
         SettingCollection.project_id == project_id,
@@ -246,17 +253,40 @@ def build_project_settings_summary(
 
     lines: List[str] = []
     lines.append("## 世界观设定体系")
+    total_length = len(lines[0])
 
     for collection in collections:
+        if total_length >= max_total_length:
+            break
+
+        collection_items = items_by_collection.get(collection.id, [])
+        # 预算控制：每集合最多保留 max_items_per_collection 条
+        shown_items = collection_items[:max_items_per_collection]
+        if not shown_items and not collection.description:
+            continue
+
         lines.append("")
         title = collection.name or "未命名集合"
         lines.append(f"### {title}")
+        total_length += len(title) + 5
         if collection.category:
             lines.append(f"- 分类：{collection.category}")
+            total_length += len(collection.category) + 6
         if collection.description:
-            lines.append(collection.description.strip())
+            desc = collection.description.strip()
+            lines.append(desc)
+            total_length += len(desc) + 1
 
-        for item in items_by_collection.get(collection.id, []):
+        truncated_hint = ""
+        if len(collection_items) > max_items_per_collection:
+            truncated_hint = (
+                f"（其余 {len(collection_items) - max_items_per_collection} 项略）"
+            )
+
+        for item in shown_items:
+            if total_length >= max_total_length:
+                truncated_hint = "（超出预算，其余项略）"
+                break
             try:
                 tags = json.loads(item.tags) if item.tags else None
             except Exception:
@@ -265,14 +295,84 @@ def build_project_settings_summary(
             code_part = f"（{item.code}）" if item.code else ""
 
             indent = "  " * max((item.depth or 1) - 1, 0)
-            lines.append(f"{indent}- {item.name}{code_part}{tag_str}")
+            name_line = f"{indent}- {item.name}{code_part}{tag_str}"
+            lines.append(name_line)
+            total_length += len(name_line) + 1
             if item.content:
                 content = item.content.strip()
                 if len(content) > max_content_length:
                     content = content[:max_content_length] + "..."
-                lines.append(f"{indent}  - {content}")
+                content_line = f"{indent}  - {content}"
+                lines.append(content_line)
+                total_length += len(content_line) + 1
 
-    return "\n".join(lines)
+        if truncated_hint:
+            lines.append(f"- {truncated_hint}")
+
+    summary = "\n".join(lines)
+    if len(summary) > max_total_length:
+        summary = summary[:max_total_length] + "…"
+    return summary
+
+
+def build_settings_catalog_text(
+    project_id: int,
+    db: Session,
+    *,
+    max_names_per_category: int = 15,
+    max_total_length: int = 1500,
+) -> str:
+    """生成项目设定中心的紧凑设定清单（仅供章节规划引用，不含内容）。
+
+    按体系类别分组列出设定项名称，供章节规划 LLM 在"设定调用"字段中
+    选择复用，避免规划发明与设定中心冲突的新设定。
+
+    Args:
+        project_id: 项目ID
+        db: 数据库会话
+        max_names_per_category: 每个类别最多列出的设定名称数
+        max_total_length: 清单总长度上限（字符）
+    """
+    collections = (
+        db.query(SettingCollection)
+        .filter(
+            SettingCollection.project_id == project_id,
+            SettingCollection.category != "candidate",
+        )
+        .order_by(SettingCollection.order, SettingCollection.id)
+        .all()
+    )
+    if not collections:
+        return ""
+
+    collection_ids = [collection.id for collection in collections]
+    items = (
+        db.query(SettingItem)
+        .filter(SettingItem.collection_id.in_(collection_ids))
+        .order_by(SettingItem.collection_id, SettingItem.order, SettingItem.id)
+        .all()
+    )
+    names_by_collection: Dict[int, List[str]] = {}
+    for item in items:
+        name = (item.name or "").strip()
+        if name:
+            names_by_collection.setdefault(item.collection_id, []).append(name)
+
+    lines: List[str] = []
+    for collection in collections:
+        names = names_by_collection.get(collection.id, [])
+        if not names:
+            continue
+        if len(names) > max_names_per_category:
+            shown = names[:max_names_per_category]
+            lines.append(f"- {collection.name}（{len(names)}项）：{'、'.join(shown)}等")
+        else:
+            lines.append(f"- {collection.name}：{'、'.join(names)}")
+
+    catalog = "\n".join(lines)
+    if len(catalog) > max_total_length:
+        catalog = catalog[:max_total_length] + "…"
+    return catalog
 
 
 def extract_relevant_categories_from_text(text: str) -> List[str]:

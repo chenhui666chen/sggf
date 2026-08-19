@@ -479,8 +479,25 @@ class AlignmentMixin:
                 continue
 
             addition_line = f"- 涉及人物：{name}"
-            if target_block.body and target_block.body.strip():
-                target_block.body = f"{target_block.body.rstrip()}\n{addition_line}".rstrip()
+            target_body = str(target_block.body or "").rstrip()
+            if target_body:
+                # 最后一章的 block.body 可能延伸到文本末尾（含卷尾小节 / </details> 等
+                # 尾部结构），直接追加会让注入行脱离章节字段区域、随后被 normalize
+                # 丢弃；因此插入到首个尾部结构行之前。
+                body_lines = target_body.splitlines()
+                insert_at = len(body_lines)
+                for line_index, line in enumerate(body_lines):
+                    stripped_line = line.strip()
+                    if (
+                        stripped_line.startswith("## ")
+                        or stripped_line.startswith("### ")
+                        or stripped_line == "</details>"
+                    ):
+                        insert_at = line_index
+                        break
+                target_block.body = "\n".join(
+                    body_lines[:insert_at] + [addition_line] + body_lines[insert_at:]
+                )
             else:
                 target_block.body = addition_line
 
@@ -501,6 +518,141 @@ class AlignmentMixin:
             preserved_tail_sections,
         )
         return repaired_outline, repairs
+
+    # ------------------------------------------------------------------
+    # 对齐闸门：LLM 级增量修复（只增不改，保持 delta 锁定语义）
+    # ------------------------------------------------------------------
+
+    def _generate_alignment_repair_patch(
+        self,
+        plot_outline: str,
+        characters: str,
+        world_setting: str,
+        issue_brief: str,
+    ) -> Dict[str, Any]:
+        """基于首轮对齐问题清单生成增量修复补丁。
+
+        补丁只允许三类增量：缺失人物卡、既有章节的人物职责补充行、关系补丁；
+        禁止改写已有章节或人物卡，与 delta 锁定语义一致。
+        """
+        prompt = f"""你是小说人物-情节协同修复师。以下是扩展后的大纲与人物设定，对齐验证发现问题。
+请先对每个问题分类，再只输出"增量补丁"，禁止改写或复述已有内容。
+
+【对齐验证问题清单】
+{issue_brief}
+
+【人物设定】
+{(characters or "暂无")[:self.CONTEXT_BUDGET_CHARACTERS]}
+
+【情节大纲】
+{(plot_outline or "暂无")[:self.CONTEXT_BUDGET_OUTLINE]}
+
+【世界观】
+{(world_setting or "暂无")[:self.CONTEXT_BUDGET_WORLD]}
+
+【修复原则】
+1. 先分类：注记级问题（补人物卡/补职责行/补关系即可落地）才生成补丁；
+   情节级问题（需要跨多章的主动行动线、渐进转变铺垫、承载新人物的情节节点——
+   一行职责补充无法兑现）不要强行生成补丁，原样列入 plot_level_issues。
+2. 缺失人物 → 确属注记级可解（补卡即有承接位）时生成完整人物卡（### 【姓名】：开头，含故事立场/角色定位/核心动机/关键关系/主线绑定等字段）；
+   若需要为其新造情节节点才有意义，则列入 plot_level_issues。
+3. 冗余人物 → 在其本应承担职责的既有章节追加"人物职责补充"（写清该章中此人推进什么/兑现什么，20-40字）。
+4. 关系问题 → 在相关章节追加职责行落地该关系，或输出关系补丁。
+5. chapter_marker 必须是大纲中真实存在的章节（形如"第12章"），不得虚构。
+
+请只返回 JSON，结构如下：
+{{
+  "missing_character_cards": ["完整人物卡文本"],
+  "chapter_duty_patches": [
+    {{"chapter_marker": "第12章", "character": "角色名", "duty": "该章中此人的情节职责（20-40字）"}}
+  ],
+  "relationship_patches": [
+    {{"source": "角色A", "target": "角色B", "type": "盟友/对手/师徒等", "description": "15字以内"}}
+  ],
+  "plot_level_issues": ["情节级问题原文（注记补丁无法落地，需下轮扩展新增章节承接）"]
+}}
+"""
+        return self._invoke_json(
+            prompt,
+            fallback={"missing_character_cards": [], "chapter_duty_patches": [], "relationship_patches": []},
+        )
+
+    @staticmethod
+    def _apply_alignment_repair_patch(
+        result: Dict[str, Any],
+        patch: Dict[str, Any],
+    ) -> Tuple[Dict[str, Any], Dict[str, int]]:
+        """把闸门修复补丁增量合入扩展结果（只增不改），返回结果与实际应用计数。"""
+        if not isinstance(patch, dict):
+            return result, {"cards": 0, "duty_patches": 0, "relationship_patches": 0}
+
+        applied = {"cards": 0, "duty_patches": 0, "relationship_patches": 0}
+
+        # 1) 缺失人物卡 → 追加到人物文本末尾
+        cards = [str(c).strip() for c in (patch.get("missing_character_cards") or []) if str(c).strip()]
+        if cards:
+            characters_text = str(result.get("characters") or "")
+            separator = "\n\n" if characters_text.strip() else ""
+            result["characters"] = characters_text + separator + "\n\n".join(cards)
+            applied["cards"] = len(cards)
+
+        # 2) 章节职责补充 → 按章节标题行定位，插入该章块内最后一行内容之后
+        duty_patches = [p for p in (patch.get("chapter_duty_patches") or []) if isinstance(p, dict)]
+        if duty_patches:
+            outline_text = str(result.get("plot_outline") or "")
+            if outline_text:
+                lines = outline_text.splitlines()
+                for patch_item in duty_patches:
+                    marker = str(patch_item.get("chapter_marker") or "").strip()
+                    character = str(patch_item.get("character") or "").strip()
+                    duty = str(patch_item.get("duty") or "").strip()
+                    if not (marker and character and duty):
+                        continue
+                    marker_match = re.search(r"第\s*(\d+)\s*章", marker)
+                    if not marker_match:
+                        continue
+                    chapter_token = marker_match.group(1)
+                    starts = [
+                        index
+                        for index, line in enumerate(lines)
+                        if re.match(rf"^\s*第\s*{re.escape(chapter_token)}\s*章[\s：:]", line)
+                    ]
+                    if not starts:
+                        continue
+                    start_index = starts[0]
+                    next_start = next(
+                        (
+                            index
+                            for index, line in enumerate(lines)
+                            if index > start_index and re.match(r"^\s*第\s*\d+\s*章[\s：:]", line)
+                        ),
+                        len(lines),
+                    )
+                    last_content = start_index
+                    for index in range(start_index + 1, next_start):
+                        if lines[index].strip():
+                            last_content = index
+                    lines.insert(last_content + 1, f"- 人物职责补充：{character}：{duty}")
+                    applied["duty_patches"] += 1
+                if applied["duty_patches"]:
+                    result["plot_outline"] = "\n".join(lines)
+
+        # 3) 关系补丁 → 追加到关系文本
+        rel_patches = [p for p in (patch.get("relationship_patches") or []) if isinstance(p, dict)]
+        if rel_patches:
+            relationship_text = str(result.get("character_relationships") or "")
+            new_lines = [
+                f"{str(p.get('source') or '').strip()} → {str(p.get('target') or '').strip()}"
+                f"（{str(p.get('type') or '').strip()}）：{str(p.get('description') or '').strip()}"
+                for p in rel_patches
+                if str(p.get("source") or "").strip() and str(p.get("target") or "").strip()
+            ]
+            if new_lines:
+                separator = "\n" if relationship_text.strip() else ""
+                result["character_relationships"] = relationship_text + separator + "\n".join(new_lines)
+                applied["relationship_patches"] = len(new_lines)
+
+        return result, applied
 
     @staticmethod
     def _select_balanced_round_order(

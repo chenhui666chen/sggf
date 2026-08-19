@@ -32,6 +32,7 @@ class GenerateAudioFromScriptsRequest(BaseModel):
     generate_subtitle: Optional[bool] = True  # 是否生成字幕文件
     resume_from_checkpoint: Optional[bool] = True  # 是否从断点续传
     timeline_edits: Optional[Dict[str, Dict[str, float]]] = None  # 前端音频时间线调整（单章节生成时使用）
+    revision_set_hash: Optional[str] = None  # 场景编辑器重渲染基线（§3.2；不一致 409）
 
 
 class ChapterScriptUpdateRequest(BaseModel):
@@ -568,6 +569,8 @@ class AudiobookTaskStatus(BaseModel):
     updated_at: Optional[str] = None
     started_at: Optional[str] = None
     finished_at: Optional[str] = None
+    # R13/P1-a：job_id = ``task:{AudiobookTask.id}`` 命名空间字符串（父任务聚合视图）
+    job_id: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)
 
