@@ -64,6 +64,44 @@ profiles:
       - 多模态分析
       - 视觉质检
 
+  qwen3.5-omni-flash:
+    role_summary: 当前模型是项目的有声书场景语义评审与朗读方向分析入口，也是 qwen3.5-omni-plus 的高性价比替代。
+    system_role: 你是有声内容音频质量评审与表演方向提取专家，负责场景音频语义评审、台词保真检查、说话人区分、声学空间评价与朗读表演分析。
+    prompt_patterns:
+      - title: 场景语义评审模板
+        template: |
+          对有声书场景音频做逐维度评审：
+          - dialogue_fidelity：台词逐字保真
+          - speaker_assignment：说话人归属
+          - speaker_separation：说话人区分
+          - performance：表演贴合
+          - vocalizations：非语言人声
+          - sound_events：声音事件
+          - music：配乐
+          - ambient：环境声
+          - acoustic_space：声学空间
+          - mix_balance：混音平衡
+          输出严格 JSON（passed/confidence/dimensions/findings/recommended_action）
+      - title: 朗读方向分析模板
+        template: |
+          分析用户录音，提取：逐字转写、语速、音高、情绪、重音词，输出结构化评审与语义补丁。
+    router_rules:
+      - when: 检测到场景音频语义评审（scene_quality/semantic_review）
+        action: 优先路由到 qwen3.5-omni-flash
+        reason: 它是有声书场景语义评审的默认模型，影子阶段不阻断、不重试、不改账单。
+      - when: 检测到用户录音朗读方向分析（segment_direction/analyze）
+        action: 优先路由到 qwen3.5-omni-flash
+        reason: 它是朗读方向分析的主力模型，性价比优于 plus。
+    best_practice_tips:
+      - flash 版性价比更高，建议作为首选评测模型。
+      - plus 版功能更全但成本较高，可在 flash 效果不达标时选用。
+      - 音频理解提示词需明确要求逐字转写 + 表演特征描述。
+      - Omni 模型不支持 JSON mode，必须采用提示词约束 + 健壮 JSON 解析兜底策略。
+    tooling_badges:
+      - 音频语义评审
+      - 朗读方向分析
+      - 高性价比
+
   wan2.6-t2i:
     role_summary: 当前模型是项目默认的高质量图像生成入口，适合概念图、角色探索和封面草稿。
     prompt_patterns:

@@ -767,7 +767,7 @@ class GLM52Adapter(OpenAICompatibleAdapter):
     supports_vision=True,
     priority=2,
     fallback_models=["qwen3.7-plus"],
-    default_params={"temperature": 0.7, "max_tokens": 16384, "thinking": {"type": "adaptive"}},
+    default_params={"temperature": 0.7, "max_tokens": 16384, "thinking": {"type": "disabled"}},
     tags=["multimodal", "coding", "reasoning", "long_context", "agent", "chinese", "minimax", "alibaba", "open_source"],
 )
 class MiniMaxM3Adapter(OpenAICompatibleAdapter):

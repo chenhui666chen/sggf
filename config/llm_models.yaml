@@ -561,7 +561,7 @@ llm_models:
       temperature: 0.7
       max_tokens: 16384
       thinking:
-        type: adaptive
+        type: disabled
 
     summary: 稀宇科技（MiniMax）2026年6月发布的旗舰开源大模型，采用 MSA（MiniMax Sparse Attention）稀疏注意力架构，原生支持100万tokens超长上下文，是国内首个集齐"前沿Coding能力、1M上下文、原生多模态"三要素的开源模型，SWE-Bench Pro/Terminal Bench/MCP Atlas 等多项基准达到国际领先水平，经阿里云百炼平台 OpenAI 兼容接口接入。
     recommended_scenarios:
@@ -579,7 +579,7 @@ llm_models:
       - 通过阿里云百炼 OpenAI 兼容接口接入，模型名为 MiniMax/MiniMax-M3
       - 使用阿里云百炼 API Key（DASHSCOPE_API_KEY）
       - '思考模式通过 extra_body={"thinking": {"type": "adaptive"|"disabled"}} 控制'
-      - adaptive 为默认值，模型自主判断是否需要思考
+      - disabled 为默认值（项目优化：避免思考 token 挤占输出预算导致空响应/截断），复杂任务可按需改回 adaptive
       - disabled 关闭思考，响应更快，适合对话、代码补全等延迟敏感场景
       - 支持 Function Calling 与结构化 JSON 输出
       - 上下文缓存隐式自动开启，命中部分按输入 Token 单价的 20% 计费

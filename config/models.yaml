@@ -573,13 +573,21 @@ models:
             一位少女在森林中奔跑，镜头跟随\",\n    duration=5,\n    resolution=\"1080P\"\n)\n"
         - name: 多镜头叙事视频
           code: "result = media_runtime.generate_video(\n    model_id=\"wan2.7-t2v\"\
-            ,\n    prompt=\"\"\"\n    一段紧张刺激的侦探追查故事。\n    第 1 个镜头 [0-3 秒] 全景：雨夜的纽约街头，侦探快步行走。\n\
+            ,
+    prompt=\"\"\"
+    一段紧张刺激的侦探追查故事。
+    第 1 个镜头 [0-3 秒] 全景：雨夜的纽约街头，侦探快步行走。
+\
             \    第 2 个镜头 [3-6 秒] 中景：侦探进入老旧建筑。\n    第 3 个镜头 [6-9 秒] 特写：侦探眼神坚毅。\n  \
             \  \"\"\",\n    duration=9,\n    resolution=\"1080P\"\n)\n"
         - name: 带参考图的视频生成
           code: "result = media_runtime.generate_video(\n    model_id=\"wan2.7-t2v\"\
             ,\n    prompt=\"角色在城市场景中行走，镜头缓慢推进\",\n    reference_image=\"character.png\"\
-            ,\n    duration=5,\n    camera_motion=\"push_in\"\n)\n"
+            ,
+    duration=5,
+    camera_motion=\"push_in\"
+)
+"
         - name: 带音频的声画同步视频
           code: "result = media_runtime.generate_video(\n    model_id=\"wan2.7-t2v\"\
             ,\n    prompt=\"角色在森林中奔跑，脚步声与背景音乐同步\",\n    audio=\"background_music.mp3\"\
@@ -940,7 +948,11 @@ models:
         - name: 带镜头运动的图生视频
           code: "result = media_runtime.generate_video(\n    model_id=\"wan2.7-i2v\"\
             ,\n    prompt=\"镜头缓慢推进，角色保持微笑，背景中的树叶轻轻摇动\",\n    reference_image=\"scene.png\"\
-            ,\n    duration=5,\n    camera_motion=\"push_in\",\n    motion_intensity=0.3\n\
+            ,
+    duration=5,
+    camera_motion=\"push_in\",
+    motion_intensity=0.3
+\
             )\n"
         - name: 场景动画化
           code: "result = media_runtime.generate_video(\n    model_id=\"wan2.7-i2v\"\
@@ -1327,11 +1339,20 @@ models:
             \ media_runtime.generate_video(\n    model_id=\"wan2.7-r2v\",\n    prompt=\"\
             角色在森林中奔跑，镜头跟随\",\n    reference_images=[\n        {\"url\": \"character.png\"\
             , \"weight\": 0.9},\n        {\"url\": \"forest_scene.jpg\", \"weight\"\
-            : 0.6}\n    ],\n    duration=5.0,\n    resolution=\"1080p\"\n)\n"
+            : 0.6}
+    ],
+    duration=5.0,
+    resolution=\"1080p\"
+)
+"
         - name: 首尾帧动画
           code: "result = media_runtime.generate_video(\n    model_id=\"wan2.7-r2v\"\
             ,\n    prompt=\"角色从站立姿势平滑过渡到坐下姿势\",\n    first_frame=\"standing_pose.jpg\"\
-            ,\n    last_frame=\"sitting_pose.jpg\",\n    duration=5.0\n)\n"
+            ,
+    last_frame=\"sitting_pose.jpg\",
+    duration=5.0
+)
+"
         - name: 多参考输入
           code: "result = media_runtime.generate_video(\n    model_id=\"wan2.7-r2v\"\
             ,\n    prompt=\"使用参考风格，生成角色在城市场景中行走的镜头\",\n    reference_images=[\n  \
@@ -1593,7 +1614,11 @@ models:
           example: "messages = [\n  {\n    \"role\": \"user\",\n    \"content\": [\n\
             \      {\"type\": \"text\", \"text\": \"请将这张图片中的人物服装改为红色\"},\n      {\"\
             type\": \"image_url\", \"image_url\": {\"url\": \"https://example.com/image.jpg\"\
-            }}\n    ]\n  }\n]\n"
+            }}
+    ]
+  }
+]
+"
         multi_image_scenarios:
         - scenario: 风格迁移
           description: 将图1的风格应用到图2
@@ -1953,7 +1978,11 @@ models:
           enabled: true
           description: 返回每个词的开始和结束时间
           format: "{\n  \"words\": [\n    {\"word\": \"这是\", \"start\": 0.0, \"end\"\
-            : 0.3},\n    {\"word\": \"测试\", \"start\": 0.3, \"end\": 0.6}\n  ]\n}\n"
+            : 0.3},
+    {\"word\": \"测试\", \"start\": 0.3, \"end\": 0.6}
+  ]
+}
+"
         phoneme_timestamps:
           enabled: true
           description: 返回音素级别时间戳，适合精确口型同步
@@ -1966,7 +1995,11 @@ models:
             ,\n    language_type=\"Chinese\",\n)\n"
         - name: 批量章节合成
           code: "import os\nimport dashscope\n\nchapters = [\"第一章内容...\", \"第二章内容...\"\
-            , \"第三章内容...\"]\n\nfor chapter in chapters:\n    response = dashscope.MultiModalConversation.call(\n\
+            , \"第三章内容...\"]
+
+for chapter in chapters:
+    response = dashscope.MultiModalConversation.call(
+\
             \        model=\"qwen3-tts-instruct-flash\",\n        api_key=os.getenv(\"\
             DASHSCOPE_API_KEY\"),\n        text=chapter,\n        voice=\"Neil\"\
             ,\n        language_type=\"Chinese\",\n        instructions=\"用沉稳、清晰的有声书旁白语气朗读。\"\
@@ -2150,9 +2183,18 @@ models:
         cloning_time_minutes: 5
         usage_example: "# 1. 创建克隆音色\nclone_response = await api_client.post(\"/api/v1/audiobook/voice-clones\"\
           , {\n  \"name\": \"我的角色音色\",\n  \"audio_file\": upload(audio),\n  \"description\"\
-          : \"小说主角的音色\"\n})\nvoice_id = clone_response.id\n\n# 2. 使用克隆音色\naudio =\
+          : \"小说主角的音色\"
+})
+voice_id = clone_response.id
+
+# 2. 使用克隆音色
+audio =\
           \ await media_runtime.synthesize_speech(\n  model_id=\"cosyvoice-v3.5-plus\"\
-          ,\n  text=\"这是用克隆音色合成的文本\",\n  speaker=voice_id\n)\n"
+          ,
+  text=\"这是用克隆音色合成的文本\",
+  speaker=voice_id
+)
+"
       timestamp_support:
         word_timestamps:
           enabled: true
@@ -3172,7 +3214,11 @@ models:
           code: "from core.unified_media_runtime import media_runtime\n\nresult =\
             \ media_runtime.generate_audio(\n    model_id=\"mureka-o1-instrumental\"\
             ,\n    prompt=\"夜晚的城市街道，霓虹灯光闪烁，神秘而紧张的氛围\",\n    style=\"electronic\",\n\
-            \    mood=\"tense\",\n    tempo=\"medium\",\n    duration=30\n)\n"
+            \    mood=\"tense\",
+    tempo=\"medium\",
+    duration=30
+)
+"
         - name: 氛围音乐生成
           code: "result = media_runtime.generate_audio(\n    model_id=\"mureka-o1-instrumental\"\
             ,\n    prompt=\"森林中的清晨，鸟鸣声，宁静祥和\",\n    style=\"ambient\",\n    mood=\"\
@@ -4512,6 +4558,100 @@ models:
   - alibaba
   - professional
   - high_quality
+- id: qwen3.5-omni-flash
+  name: Qwen3.5 Omni Flash
+  provider: alibaba
+  version: 3.5 Omni Flash
+  status: active
+  modality:
+  - text_to_text
+  - image_to_text
+  - audio_to_text
+  capabilities:
+  - name: text_understanding
+    support_level: native
+    description: 深度文本理解
+    source: 'TODO: verify from official docs'
+    verified_at: '2026-04-17'
+    confidence: medium
+  - name: image_analysis
+    support_level: native
+    description: 图像分析
+    source: 'TODO: verify from official docs'
+    verified_at: '2026-04-17'
+    confidence: medium
+  - name: audio_understanding
+    support_level: native
+    description: 音频理解（转写、语气、情绪、韵律描述），用于有声书场景语义评审与朗读方向分析
+    source: https://help.aliyun.com/zh/model-studio/qwen3-5-omni-flash
+    verified_at: '2026-08-11'
+    confidence: high
+  - name: multi_modal_reasoning
+    support_level: native
+    description: 多模态推理
+    source: 'TODO: verify from official docs'
+    verified_at: '2026-04-17'
+    confidence: medium
+  constraints:
+    max_prompt_length: 16000
+    max_output_length: 4000
+    context_window: 16000
+    max_audio_duration_s: 120
+    supported_audio_formats:
+    - wav
+    - mp3
+    - m4a
+  quality_metrics:
+    overall_score: 8.5
+    understanding: 0.88
+    multi_modal: 0.85
+  avg_latency_seconds: 3.0
+  summary: Qwen3.5 Omni Flash，通义千问多模态理解模型的高性价比版本，适合音频理解与基础多模态分析任务。
+  recommended_scenarios:
+  - 有声书场景音频语义评审
+  - 朗读方向分析与 TTS 指令提取
+  - 基础图像理解
+  limitations:
+  - 综合能力弱于 Omni Plus
+  - 不支持视频输入
+  - 不支持 JSON mode，输出需显式约束 + 健壮 JSON 解析兜底
+  integration_notes:
+  - 通过阿里云百炼平台 API 调用
+  - 与 qwen3.5-omni-plus 共享同一 API endpoint 和鉴权
+  - 音频理解提示词需明确要求输出逐字转写 + 表演特征描述
+  - 计费通过阿里云百炼平台
+  - 价格以百炼平台实时价格为准
+  documentation_url: https://help.aliyun.com/zh/model-studio/qwen3.5-omni-flash-api-reference
+  source_urls:
+  - https://help.aliyun.com/zh/model-studio/qwen3.5-omni-flash-api-reference
+  - https://help.aliyun.com/zh/model-studio/pricing
+  pricing_info:
+    unit: 每千 tokens
+    currency: CNY
+    last_updated: 2026-04
+    source: 阿里云百炼官方价格文档
+    pricing_url: https://help.aliyun.com/zh/model-studio/pricing
+    note: ⚠️ flash 版成本显著低于 plus，高性价比选项；价格可能调整，以阿里云百炼平台实时价格为准。
+    verification_required: true
+    verification_source: https://help.aliyun.com/zh/model-studio/pricing
+  api_config:
+    base_url: https://dashscope.aliyuncs.com/api/v1
+    endpoint: /api/v1/services/aigc/multimodal-generation/generation
+    auth_type: alibaba_cloud_dashscope
+    api_key_env: DASHSCOPE_API_KEY
+    pricing_endpoint: https://help.aliyun.com/zh/model-studio/pricing
+    pricing_verification:
+      enabled: true
+      source_type: official_website
+      cache_hours: 24
+  tags:
+  - multi_modal
+  - text_to_text
+  - image_to_text
+  - audio_to_text
+  - qwen
+  - alibaba
+  - cost_effective
 - id: qwen3.5-omni-plus
   name: Qwen3.5 Omni Plus
   provider: alibaba
@@ -7808,6 +7948,199 @@ models:
               prompt="雨夜中，两名男子低声交谈，远处有汽车驶过，配乐紧张悬疑。",
               references=[{"speaker": "<speaker_id>"}],
               audio_config={"format": "mp3", "sample_rate": 48000},
+          )
+      speaker_reference:
+        enabled: true
+        param_name: references[].speaker
+        required: false
+      output:
+        delivery: url
+        duration_fields:
+        - duration
+        - original_duration
+
+- id: seed-audio-1.0-multilingual
+  name: 豆包音频生成模型 1.0（多语种）
+  provider: volcengine
+  version: '1.0'
+  status: active
+  model_family: Seed Audio
+  modality:
+  - text_to_audio
+  capabilities:
+  - name: text_to_audio
+    label: 文本生成完整音频
+    support_level: native
+    description: 根据自然语言提示一次生成包含对白、环境音、音效和音乐的完整音频
+    source: https://docs.volcengine.com/docs/6561/2550782?lang=zh
+    confidence: high
+  - name: multi_speaker_dialogue
+    label: 多角色对白
+    support_level: native
+    description: 可在同一段提示词中描述多个角色的性别、年龄、口音、音色和说话情绪
+    source: https://docs.volcengine.com/docs/6561/2550782?lang=zh
+    confidence: high
+  - name: sound_effect_generation
+    label: 场景与音效生成
+    support_level: native
+    description: 支持按时间顺序描述环境声、拟音和事件音效
+    source: https://docs.volcengine.com/docs/6561/2550782?lang=zh
+    confidence: high
+  - name: music_generation
+    label: 配乐生成
+    support_level: native
+    description: 支持描述主奏乐器、配器、节奏及整体情绪
+    source: https://docs.volcengine.com/docs/6561/2550782?lang=zh
+    confidence: high
+  - name: speaker_reference
+    label: 说话人引用
+    support_level: native
+    description: references 参数支持通过 speaker ID 指定参考说话人
+    source: https://docs.volcengine.com/docs/6561/2550782?lang=zh
+    confidence: high
+  - name: audio_parameter_control
+    label: 音频参数控制
+    support_level: native
+    description: 支持配置输出格式、采样率、音调、语速和响度
+    source: https://docs.volcengine.com/docs/6561/2550782?lang=zh
+    confidence: high
+  - name: multilingual_text
+    label: 多语种文本支持
+    support_level: native
+    description: 面向多语种文本的音频生成变体，接口合同与普通 1.0 一致
+    source: https://docs.volcengine.com/docs/6561/2550782?lang=zh
+    confidence: high
+  - name: timeline_control
+    label: 时间轴控制
+    support_level: native
+    description: 支持 [start:end] 事件时间窗标注；阶段 0 实测（run_20260810T164647Z）确认 strict 与 bounded 双模式 eligible，单事件窗口上限 120 秒
+    source: backend/data/timeline_validation/run_20260810T164647Z/eligibility.json
+    confidence: high
+  constraints:
+    request_timeout_seconds: 300
+    max_duration_seconds: 120
+    max_prompt_chars: 3000
+    max_audio_references: 3
+    max_reference_duration_seconds: 30
+    max_reference_size_mb: 10
+    supported_formats:
+    - wav
+    - mp3
+    - pcm
+    - ogg_opus
+    supported_sample_rates:
+    - 8000
+    - 16000
+    - 24000
+    - 32000
+    - 44100
+    - 48000
+    verified_formats:
+    - wav
+    verified_sample_rates:
+    - 48000
+    pitch_rate_default: 0
+    speech_rate_default: 0
+    loudness_rate_default: 0
+    response_delivery: url
+    requires_api_key: true
+    api_key_header: X-Api-Key
+  quality_metrics:
+    feature_completeness: 0.95
+    prompt_controllability: 0.90
+    multi_element_audio: 0.95
+  cost_profile:
+    unit: per_second
+    price: 0.0166666667
+    currency: CNY
+    pricing_status: public_postpaid
+    pricing_basis: public_list_price
+    price_per_minute: 1.0
+    source: volcengine_public_postpaid_2026-07-22
+  avg_latency_seconds: 30.0
+  summary: 豆包音频生成模型 1.0 的多语种变体，接口合同与普通 1.0 一致，额外通过阶段 0 实测验证了事件时间轴控制能力；项目内新任务默认使用该模型。
+  recommended_scenarios:
+  - 有声剧和广播剧片段生成
+  - 小说章节的对白、环境音与配乐一体化制作
+  - 需要事件时间轴控制的广告与场景音频
+  - 多语种对白与氛围音效合成
+  limitations:
+  - 生成结果通过临时 URL 或 Base64 返回，调用方应及时下载并持久化
+  - 单事件时间窗超过 120 秒会导致请求失败（阶段 0 实测 HTTP 500）
+  - 空事件集 Prompt 会触发描述文本被朗读的异常模式，生产 Prompt 必须保证事件集非空
+  - references 中的 speaker ID 必须来自当前火山引擎账号可用的说话人资源
+  integration_notes:
+  - 项目模型 ID 与官方请求模型 ID 均为 seed-audio-1.0-multilingual
+  - 使用 OpenSpeech HTTP 接口 POST /api/v3/tts/create，与普通 1.0 共用认证链
+  - 请求主体使用 text_prompt，不是常规 TTS 接口的 text 字段
+  - 价格继承普通 1.0（同一公开后付费单价），账单记录真实模型 ID 以区分计费
+  - 成功响应可返回 Base64 audio、两小时有效 url、duration、original_duration 和 subtitle
+  documentation_url: https://docs.volcengine.com/docs/6561/2550782?lang=zh
+  source_urls:
+  - https://docs.volcengine.com/docs/6561/2550782?lang=zh
+  tags:
+  - audio
+  - text-to-audio
+  - audio-generation
+  - multi-speaker
+  - dialogue
+  - sound-effect
+  - music
+  - timeline
+  - multilingual
+  - doubao
+  - seed-audio
+  - volcengine
+  api_config:
+    base_url: https://openspeech.bytedance.com
+    endpoint: /api/v3/tts/create
+    auth_type: x_api_key
+    api_key_env: DOUBAO_API_KEY
+    api_key_env_override: VOLCENGINE_OPEN_SPEECH_API_KEY
+    timeout_seconds: 300
+    request_format:
+      model: seed-audio-1.0-multilingual
+      text_prompt: string
+      references: array_optional
+      audio_config:
+        format: wav
+        sample_rate: 48000
+        pitch_rate: 0
+        speech_rate: 0
+        loudness_rate: 0
+        enable_subtitle: true
+      watermark: object_optional
+    response_headers:
+      request_id: X-Tt-Logid
+    response_format:
+      code: integer
+      message: string
+      audio: base64_string_optional
+      url: string
+      duration: number
+      original_duration: number
+      subtitle: object_optional
+  detailed_specs:
+    audio_generation:
+      prompt_language: natural_language
+      prompt_elements:
+      - dialogue
+      - speaker_profile
+      - emotion
+      - ambient_sound
+      - sound_effect
+      - music
+      - event_timeline_window
+      calling_method:
+        param_name: text_prompt
+        required: true
+        example: |
+          from adapters.registry import registry
+
+          adapter = registry.get_adapter("seed-audio-1.0-multilingual")
+          result = adapter.generate(
+              prompt="总时长 8 秒。旁白[0.0s:3.0s]：夜色渐深。音效[3.0s:4.5s]：远处钟声。",
+              audio_config={"format": "wav", "sample_rate": 48000, "enable_subtitle": True},
           )
       speaker_reference:
         enabled: true
