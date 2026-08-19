@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -14,7 +15,11 @@ for candidate in (str(ROOT), str(BACKEND_ROOT)):
 
 
 from app.services.audiobook.agents.audio_quality_reviewer import AudioQualityReviewer
-from app.services.audiobook.engine_pkg._base import AudiobookEngineBase
+from app.services.audiobook.engine_pkg._base import (
+    QUALITY_REVISION_MAX_TOKEN_CAP,
+    QUALITY_REVISION_RETRY_MAX_TOKEN_CAP,
+    AudiobookEngineBase,
+)
 from app.services.audiobook.script_adapter_pkg._dataclasses import ScriptSegment
 
 
@@ -204,3 +209,21 @@ def test_llm_quality_revision_retries_with_larger_budget_when_output_truncated()
     assert segments[1].performance_notes == "加重语气，威胁感。"
     # 旁白片段的 performance_notes 会被 _enrich_narration_delivery 追加演绎提示，只需验证 LLM 修订内容已生效
     assert segments[2].performance_notes.startswith("节奏加快。")
+
+
+def test_estimate_quality_revision_max_tokens_uses_retry_cap_for_large_payload():
+    """大剧本按 2.5 倍估算超过常规上限时，应直接采用重试档预算，
+    避免首次调用在 32768 截断后再扩容重试的二次 LLM 调用浪费。"""
+    engine = make_engine('{"segments": []}')
+    # 约 4 万字的剧本：len(payload) * 2.5 + 1500 远超 32768
+    payload_json = json.dumps({"segments": [{"text": "陆衍" * 20000}]})
+    estimated = engine._estimate_quality_revision_max_tokens(payload_json)
+    assert estimated == QUALITY_REVISION_RETRY_MAX_TOKEN_CAP
+
+
+def test_estimate_quality_revision_max_tokens_small_payload_stays_in_normal_cap():
+    engine = make_engine('{"segments": []}')
+    small_payload = json.dumps({"segments": [{"text": "陆衍从后窗翻出。"}]})
+    estimated = engine._estimate_quality_revision_max_tokens(small_payload)
+    assert estimated <= QUALITY_REVISION_MAX_TOKEN_CAP
+    assert estimated >= 2000

@@ -35,6 +35,8 @@ def test_project_chapter_summary_exposes_script_review_metadata(monkeypatch):
         script_status="reviewed",
         script_json='[{"text":"第一句"}]',
         script_review_json='{"overall_score": 90}',
+        render_status=None,
+        render_status_detail=None,
         segment_count=18,
         dialogue_count=8,
         narration_count=10,

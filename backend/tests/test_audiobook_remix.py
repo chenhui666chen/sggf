@@ -350,6 +350,7 @@ def test_perform_remix_mixes_and_writes_output(cleanup_test_assets, monkeypatch)
     engine, mixer_calls = _build_fake_engine()
     run_updates = []
     written = {}
+    output_infos = []
 
     def fake_write_output(path, data):
         written["path"] = path
@@ -368,18 +369,236 @@ def test_perform_remix_mixes_and_writes_output(cleanup_test_assets, monkeypatch)
         run_state_updater=lambda **kwargs: run_updates.append(kwargs),
         write_output=fake_write_output,
         generate_subtitle_artifacts=lambda **kwargs: {"generated": True},
+        on_output_ready=lambda info: output_infos.append(info),
     )
 
     assert result["success"] is True
     assert mixer_calls["mix"] is True
     assert mixer_calls["segment_count"] == 2
     assert written["path"].endswith("chapter_003.mp3")
-    assert chapter_audio.audio_path == written["path"]
-    assert chapter_audio.duration == 12.5
+    # §1.5/R8：不再直写 ChapterAudio 镜像列，输出经 on_output_ready 登记发布
+    assert not hasattr(chapter_audio, "audio_path") or chapter_audio.audio_path is None
+    assert output_infos and output_infos[0]["output_path"] == written["path"]
+    assert output_infos[0]["duration"] == 12.5
     assert result["duration"] == 12.5
     assert run_updates[-1]["status"] == "completed"
     assert run_updates[-1]["run_type"] == "chapter_remix"
     assert run_updates[-1]["checkpoint_patch"]["segment_timings"]
+
+
+def test_perform_remix_marks_completed_before_output_ready(cleanup_test_assets):
+    """发布协议要求 run.status=completed，终态写回必须先于 on_output_ready。
+
+    回归背景：on_output_ready 在 mark_run("completed") 之前触发，
+    publish_legacy_chapter_output 谓词永远命中 run_not_completed:running，
+    整章重混产物永远无法发布，用户持续听到旧 run 的成品。
+    """
+    remix = _load_remix_module()
+
+    segments = _build_segments_with_audio()
+    chapter_audio = SimpleNamespace(
+        id=TEST_CHAPTER_AUDIO_ID,
+        script_json=json.dumps(segments, ensure_ascii=False),
+    )
+    engine, _ = _build_fake_engine()
+    events = []
+
+    result = remix.perform_chapter_remix(
+        chapter_audio=chapter_audio,
+        chapter_number=3,
+        audiobook_project=SimpleNamespace(project_id=5),
+        force=False,
+        engine=engine,
+        checkpoint={},
+        run_state_updater=lambda **kwargs: events.append(
+            ("status", kwargs.get("status"))),
+        write_output=lambda path, data: None,
+        generate_subtitle_artifacts=lambda **kwargs: {"generated": False},
+        on_output_ready=lambda info: events.append(("output_ready", info)),
+    )
+
+    assert result["success"] is True
+    completed_index = next(
+        (i for i, event in enumerate(events)
+         if event[0] == "status" and event[1] == "completed"),
+        None,
+    )
+    ready_index = next(
+        (i for i, event in enumerate(events) if event[0] == "output_ready"),
+        None,
+    )
+    assert completed_index is not None and ready_index is not None
+    assert completed_index < ready_index, (
+        f"终态写回必须先于发布回调: {events}"
+    )
+
+
+def test_remix_on_output_ready_advances_desired_run_before_publish():
+    """remix 发布前必须把 desired_run_id 推进到本 run，否则 CAS 永不命中。
+
+    回归背景：remix 端点预创建 run 但不推进 desired_run_id，发布 CAS
+    要求 desired_run_id == run_id，命中不了则成品永不发布（线上
+    run 142 实际复现：run 成功但用户听到的仍是旧 run 132 的文件）。
+    """
+    from app.db.base import Base
+    from app.models.audiobook import (
+        AudiobookProject,
+        ChapterAudio,
+        ChapterAudioOutput,
+        ChapterAudioRun,
+        SceneAudioArtifact,
+    )
+    from app.models.project import Chapter, Project
+    from app.models.user import User
+    from sqlalchemy import create_engine, text
+    from sqlalchemy.orm import sessionmaker
+    from sqlalchemy.pool import StaticPool
+
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    session_factory = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+    Base.metadata.create_all(
+        bind=engine,
+        tables=[
+            User.__table__,
+            Project.__table__,
+            Chapter.__table__,
+            AudiobookProject.__table__,
+            ChapterAudioRun.__table__,
+            ChapterAudio.__table__,
+            ChapterAudioOutput.__table__,
+            SceneAudioArtifact.__table__,
+        ],
+    )
+    with engine.begin() as conn:
+        conn.execute(text("DROP INDEX IF EXISTS uq_chapter_audio_output_published"))
+
+    db = session_factory()
+    try:
+        user = User(
+            username="remix_publish_user",
+            email="remix_publish@example.com",
+            password_hash="hash",
+            is_active=True,
+        )
+        db.add(user)
+        db.flush()
+        project = Project(
+            user_id=user.id,
+            display_no=1,
+            title="Remix Publish Project",
+            audio_config="{}",
+            status="draft",
+        )
+        db.add(project)
+        db.flush()
+        chapter = Chapter(
+            project_id=project.id,
+            chapter_number=1,
+            title="Chapter 1",
+            content="content",
+            summary="summary",
+        )
+        db.add(chapter)
+        db.flush()
+        audiobook_project = AudiobookProject(
+            project_id=project.id,
+            status="processing",
+            total_chapters=1,
+            engine_mode="legacy",
+        )
+        db.add(audiobook_project)
+        db.flush()
+        chapter_audio = ChapterAudio(
+            audiobook_project_id=audiobook_project.id,
+            chapter_id=chapter.id,
+            script_status="pending",
+        )
+        db.add(chapter_audio)
+        db.flush()
+
+        old_run = ChapterAudioRun(
+            audiobook_project_id=audiobook_project.id,
+            chapter_id=chapter.id,
+            chapter_audio_id=chapter_audio.id,
+            run_type="audio_from_scripts",
+            status="completed",
+            input_signature="sig-old",
+        )
+        db.add(old_run)
+        db.flush()
+        chapter_audio.desired_run_id = old_run.id
+        chapter_audio.published_run_id = old_run.id
+        chapter_audio.published_input_signature = "sig-old"
+        db.add(ChapterAudioOutput(
+            run_id=old_run.id,
+            chapter_audio_id=chapter_audio.id,
+            audiobook_project_id=audiobook_project.id,
+            chapter_id=chapter.id,
+            status="published",
+            audio_path="audio_old.mp3",
+            duration=10.0,
+            file_size=1000,
+        ))
+        db.flush()
+
+        remix_run = ChapterAudioRun(
+            audiobook_project_id=audiobook_project.id,
+            chapter_id=chapter.id,
+            chapter_audio_id=chapter_audio.id,
+            run_type="chapter_remix",
+            status="running",
+            input_signature="sig-new",
+        )
+        db.add(remix_run)
+        db.flush()
+        db.commit()
+
+        import app.services.audiobook.background_jobs_remix as remix_module
+
+        captured = {}
+
+        def fake_perform(**kwargs):
+            captured["on_output_ready"] = kwargs.get("on_output_ready")
+            # 模拟真实流程：混音完成后 run 置 completed 再回调
+            remix_run.status = "completed"
+            db.flush()
+            kwargs["on_output_ready"]({
+                "output_path": "audiobooks/project_1/audiobook_1/run_x/chapter_001.mp3",
+                "duration": 12.5,
+                "file_size": 2048,
+                "subtitle_artifacts": {"generated": False},
+                "segment_timings": [],
+                "missing_segments": [],
+            })
+            return {"success": True}
+
+        import unittest.mock as mock
+
+        with mock.patch.object(remix_module, "perform_chapter_remix", fake_perform), \
+                mock.patch.object(remix_module, "SessionLocal", session_factory):
+            result = remix_module.run_chapter_remix_background(
+                audiobook_project_id=audiobook_project.id,
+                chapter_id=chapter.id,
+                force=True,
+                run_id=remix_run.id,
+            )
+
+        assert result.get("success") is True
+        db.expire_all()
+        refreshed = db.query(ChapterAudio).filter(
+            ChapterAudio.id == chapter_audio.id).first()
+        assert refreshed.published_run_id == remix_run.id, (
+            "remix 完成后新产物必须发布，用户不能继续听到旧 run 成品"
+        )
+        output = db.query(ChapterAudioOutput).filter(
+            ChapterAudioOutput.run_id == remix_run.id).first()
+        assert output is not None and output.status == "published"
+    finally:
+        db.close()
 
 
 def test_perform_remix_cleans_previous_audio_when_output_path_changes(
@@ -400,6 +619,7 @@ def test_perform_remix_cleans_previous_audio_when_output_path_changes(
     run_updates = []
     writes = []
     cleanups = []
+    output_infos = []
 
     monkeypatch.setattr(
         remix,
@@ -417,12 +637,14 @@ def test_perform_remix_cleans_previous_audio_when_output_path_changes(
         run_state_updater=lambda **kwargs: run_updates.append(kwargs),
         write_output=lambda path, data: writes.append(path),
         generate_subtitle_artifacts=lambda **kwargs: {"generated": False},
+        on_output_ready=lambda info: output_infos.append(info),
     )
 
     assert result["success"] is True
     # 新路径包含 audiobook_project_id 隔离，与旧路径不同
     assert writes and writes[0] != previous_path
-    assert chapter_audio.audio_path == writes[0]
+    # §1.5/R8：不再直写镜像列，输出信息经 on_output_ready 交付登记/发布
+    assert output_infos and output_infos[0]["output_path"] == writes[0]
     # 旧整章音频被回收
     assert cleanups and cleanups[0][0] == previous_path
 

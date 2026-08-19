@@ -210,6 +210,10 @@ def test_generation_target_guard_preserves_unflushed_script_fields():
     with session_factory() as worker_db:
         context = seed_runtime_context(worker_db)
 
+        # R10/P0-4 唯一 active：重开新记录前先软删旧记录
+        context["chapter_audio"].deleted_at = datetime.now(timezone.utc)
+        worker_db.flush()
+
         new_audio = ChapterAudio(
             audiobook_project_id=context["audiobook_project"].id,
             chapter_id=context["chapter"].id,

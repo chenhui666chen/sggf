@@ -1145,17 +1145,17 @@ def test_music_timeline_rejects_library_external_path(tmp_path, monkeypatch):
 @pytest.mark.parametrize(
     ("mood", "expected_volume_db"),
     [
-        ("tense", -28.0),
-        ("epic", -28.0),
+        ("tense", -32.0),
+        ("epic", -32.0),
         ("peaceful", -41.0),
         ("sad", -41.0),
-        ("joyful", -34.0),
-        ("romantic", -34.0),
+        ("joyful", -35.0),
+        ("romantic", -35.0),
         ("mysterious", -36.0),
     ],
 )
 def test_intelligent_bgm_volume_adjusts_underscore_moods(mood, expected_volume_db):
-    """V3-12: underscore 携带 mood 时也应参与智能 BGM 音量调整。"""
+    """V3-12: underscore 携带 mood 时也应参与智能 BGM 音量调整（增益已收窄）。"""
     from app.services.audiobook.engine_pkg._music_mixin import MusicMixin
 
     class Harness(MusicMixin):
@@ -1169,6 +1169,157 @@ def test_intelligent_bgm_volume_adjusts_underscore_moods(mood, expected_volume_d
     )
 
     assert volume_db == pytest.approx(expected_volume_db)
+
+
+def test_intelligent_bgm_volume_clamped_at_minus_twelve():
+    """配乐增益上限收窄到 -12dB，避免高基准+多重叠加时配乐接近人声。"""
+    from app.services.audiobook.engine_pkg._music_mixin import MusicMixin
+
+    class Harness(MusicMixin):
+        pass
+
+    volume_db = Harness()._calculate_intelligent_bgm_volume(
+        base_volume_db=-10.0,
+        music_type="opening",
+        mood="epic",
+        target_volume=1.0,
+    )
+
+    assert volume_db == pytest.approx(-12.0)
+
+
+# ============== 逐段响度对齐与真实 loudnorm 测试 ==============
+
+
+def _make_tone(db_change: float = 0.0, duration_ms: int = 1000, frequency: int = 440):
+    """构造已知响度的正弦测试音（满幅正弦 RMS ≈ -3dBFS，再叠加增益）。"""
+    import math
+    import struct
+    from pydub import AudioSegment
+
+    frame_rate = 22050
+    frames = int(duration_ms * frame_rate / 1000)
+    # 16-bit 避免小幅度下的量化误差导致 dBFS 漂移
+    data = b"".join(
+        struct.pack("<h", int(32767 * math.sin(2 * math.pi * frequency * i / frame_rate)))
+        for i in range(frames)
+    )
+    tone = AudioSegment(data=data, sample_width=2, frame_rate=frame_rate, channels=1)
+    return tone + db_change
+
+
+def test_segment_loudness_alignment_converges(audio_mixer_module):
+    """多供应商 TTS 响度差应在拼接前逐段拉齐到统一基准。"""
+    mixer = audio_mixer_module["AudioMixer"](
+        enable_segment_loudness_norm=True,
+        target_segment_dbfs=-20.0,
+    )
+
+    quiet = _make_tone(-12)   # ≈ -15dBFS，需压低
+    loud = _make_tone(-1)     # ≈ -4dBFS，需压低更多
+    assert loud.dBFS - quiet.dBFS > 8.0  # 前置：两段原生响度差异显著
+
+    aligned_quiet = mixer._match_segment_loudness(quiet)
+    aligned_loud = mixer._match_segment_loudness(loud)
+
+    assert aligned_quiet.dBFS == pytest.approx(-20.0, abs=1.5)
+    assert aligned_loud.dBFS == pytest.approx(-20.0, abs=1.5)
+
+
+def test_segment_loudness_alignment_caps_boost(audio_mixer_module):
+    """低响度段提升受底噪上限保护，不会被无限放大。"""
+    mixer = audio_mixer_module["AudioMixer"](
+        enable_segment_loudness_norm=True,
+        target_segment_dbfs=-20.0,
+    )
+
+    very_quiet = _make_tone(-30)  # ≈ -33dBFS，需要 +13dB 超出上限
+    aligned = mixer._match_segment_loudness(very_quiet)
+
+    assert aligned.dBFS > very_quiet.dBFS
+    assert aligned.dBFS <= very_quiet.dBFS + mixer.SEGMENT_NORM_MAX_BOOST_DB + 0.1
+
+
+def test_segment_loudness_alignment_respects_peak_headroom(audio_mixer_module):
+    """峰值接近满幅的片段提升受峰值保护约束，不会削波。"""
+    from pydub import AudioSegment
+
+    # 构造峰值高、RMS 极低的尖峰信号（单点高幅值 + 长静音底）
+    raw = bytearray([128] * 22050)
+    raw[1000] = 250
+    peaky = AudioSegment(data=bytes(raw), sample_width=1, frame_rate=22050, channels=1)
+
+    mixer = audio_mixer_module["AudioMixer"](
+        enable_segment_loudness_norm=True,
+        target_segment_dbfs=-20.0,
+    )
+    aligned = mixer._match_segment_loudness(peaky)
+
+    assert aligned.max_dBFS <= mixer.SEGMENT_NORM_PEAK_HEADROOM_DB + 0.5
+
+
+def test_load_segments_applies_loudness_alignment(audio_mixer_module):
+    """混音加载链路应对每段应用响度对齐（与 build_segment_timeline 共享同一入口）。"""
+    import io
+
+    mixer = audio_mixer_module["AudioMixer"](
+        enable_segment_loudness_norm=True,
+        target_segment_dbfs=-20.0,
+    )
+
+    def to_wav_bytes(segment):
+        buf = io.BytesIO()
+        segment.export(buf, format="wav")
+        return buf.getvalue()
+
+    segments = [to_wav_bytes(_make_tone(-12)), to_wav_bytes(_make_tone(-1))]
+    loaded = mixer._load_audio_segments_for_mix(segments)
+
+    assert len(loaded) == 2
+    loudness_values = [item[1].dBFS for item in loaded]
+    assert loudness_values[0] == pytest.approx(loudness_values[1], abs=1.5)
+
+
+def test_normalize_loudness_uses_real_loudnorm(tmp_path, audio_mixer_module):
+    """启用 ffmpeg 时整轨归一化应达到真实 EBU R128 目标（而非 dBFS 近似）。"""
+    import shutil as shutil_mod
+
+    if not shutil_mod.which("ffmpeg"):
+        pytest.skip("ffmpeg 不可用，无法验证真实 loudnorm")
+
+    from app.services.audiobook.scene_engine.loudness_normalizer import (
+        FFmpegLoudnessNormalizer,
+    )
+
+    mixer = audio_mixer_module["AudioMixer"](
+        enable_loudness_norm=True,
+        target_loudness_lufs=-16.0,
+    )
+    quiet = _make_tone(-27, duration_ms=4000, frequency=1000)  # 1kHz K 权重≈ 0
+
+    normalized = mixer._normalize_loudness(quiet)
+
+    source = tmp_path / "normalized.wav"
+    normalized.export(str(source), format="wav")
+    measured = FFmpegLoudnessNormalizer().measure(source)
+    assert measured["input_i"] == pytest.approx(-16.0, abs=2.5)
+
+
+def test_normalize_loudness_falls_back_without_ffmpeg(monkeypatch, audio_mixer_module):
+    """ffmpeg 不可用时降级为 dBFS 近似，行为保持可用。"""
+    import app.services.audiobook.audio_mixer as audio_mixer_mod
+
+    monkeypatch.setattr(audio_mixer_mod, "FFMPEG_AVAILABLE", False)
+    mixer = audio_mixer_module["AudioMixer"](
+        enable_loudness_norm=True,
+        target_loudness_lufs=-16.0,
+    )
+    quiet = _make_tone(-27, duration_ms=2000)
+
+    normalized = mixer._normalize_loudness(quiet)
+
+    # dBFS 近似路径：直接按 dBFS 拉向目标值
+    assert normalized.dBFS == pytest.approx(-16.0, abs=1.0)
 
 
 def test_music_timeline_no_longer_applies_global_minus_three_db(tmp_path, monkeypatch):
@@ -1403,77 +1554,10 @@ def test_parallel_design_seed_scene_skips_local_asset_generation():
     assert harness._last_music_timeline is None
 
 
-def test_parallel_design_seed_scene_keeps_legacy_fallback_assets_by_default():
-    from app.services.audiobook.engine_pkg._parallel_mixin import ParallelMixin
-
-    class FallbackSoundDesigner:
-        def __init__(self):
-            self.calls = 0
-            self.effect_cues = []
-
-        def design_effects(self, *args, **kwargs):
-            self.calls += 1
-            self.effect_cues = [SimpleNamespace()]
-            return self.effect_cues
-
-        def optimize_effect_density(self, **kwargs):
-            return self.effect_cues
-
-        def export_effect_timeline(self):
-            return {"timeline": [{"description": "关门声"}]}
-
-    class FallbackMusicComposer:
-        def __init__(self):
-            self.calls = 0
-            self.music_cues = []
-
-        async def design_music(self, *args, **kwargs):
-            self.calls += 1
-            self.music_cues = [SimpleNamespace()]
-            return self.music_cues
-
-        def optimize_music_placement(self, **kwargs):
-            return self.music_cues
-
-        def export_music_timeline(self):
-            return {"timeline": [{"description": "紧张配乐"}]}
-
-    class Harness(ParallelMixin):
-        def __init__(self):
-            self._audio_engine_mode = "seed_scene"
-            self._audio_fx_config = {
-                "enable_sound_effects": True,
-                "sound_effect_density": "medium",
-                "enable_music": True,
-                "music_density": "medium",
-            }
-            self.sound_effect_designer = FallbackSoundDesigner()
-            self.music_composer = FallbackMusicComposer()
-
-    harness = Harness()
-    asyncio.run(
-        harness._parallel_design(
-            task_id="task",
-            script_segments=[
-                SimpleNamespace(
-                    text="门被猛地关上。",
-                    emotion="tense",
-                    sound_effects=[SimpleNamespace(name="关门声")],
-                    sound_effects_simple=[],
-                    music_cue=SimpleNamespace(style="紧张弦乐进入"),
-                    music_cue_simple="",
-                )
-            ],
-            chapter_content="门被猛地关上。",
-            skip_stage_tracking=True,
-            include_voice_design=False,
-        )
-    )
-
-    assert harness.sound_effect_designer.calls == 1
-    assert harness.music_composer.calls == 1
-    assert harness._last_effect_timeline["timeline"]
-    assert harness._last_music_timeline["timeline"]
+# 注：原 test_parallel_design_seed_scene_keeps_legacy_fallback_assets_by_default 已删除。
+# R5 引擎隔离后 seed_scene 不再在章节级保留 legacy 分轨素材
+# （由 test_parallel_design_seed_scene_skips_local_asset_generation 覆盖新行为，
+# 回退素材改由 SceneRenderer 场景级 fallback 负责），旧断言与新架构直接冲突。
 
 
 def test_parallel_music_scene_builder_preserves_explicit_asset_selection():
@@ -2212,7 +2296,7 @@ def test_music_composer_external_index_skips_missing_files(
     composer = MusicComposer(enable_ai=False, index_path=str(index_path))
 
     assert "missing_music" not in composer.music_library
-    assert "音乐索引条目文件不存在" in caplog.text
+    assert "文件缺失" in caplog.text
 
 
 def test_music_composer_external_index_skips_community_rejected_entries(

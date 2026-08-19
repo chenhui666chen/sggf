@@ -48,7 +48,7 @@ async def test_evaluate_prompt_runs_samples_concurrently_within_limit():
     max_active = 0
     order_lock = asyncio.Lock()
 
-    async def rewrite(prompt, text, temperature, model_id=None):
+    async def rewrite(prompt, text, temperature, model_id=None, targeted_hint=""):
         nonlocal active, max_active
         async with order_lock:
             active += 1
@@ -74,7 +74,7 @@ async def test_evaluate_prompt_runs_samples_concurrently_within_limit():
 async def test_evaluate_prompt_preserves_sample_order():
     """并行执行下结果顺序必须与输入样本顺序一致。"""
 
-    async def rewrite(prompt, text, temperature, model_id=None):
+    async def rewrite(prompt, text, temperature, model_id=None, targeted_hint=""):
         # 首个样本最慢完成，验证顺序不被完成顺序打乱
         if "片段0" in text:
             await asyncio.sleep(0.2)
@@ -95,7 +95,7 @@ async def test_evaluate_prompt_preserves_sample_order():
 async def test_evaluate_prompt_isolates_single_sample_failure():
     """单样本改写异常只影响该样本，其余样本正常产出结果。"""
 
-    async def rewrite(prompt, text, temperature, model_id=None):
+    async def rewrite(prompt, text, temperature, model_id=None, targeted_hint=""):
         if "片段1" in text:
             raise RuntimeError("改写服务异常")
         # 长度需过篇幅守门（原文400字→下限200字）

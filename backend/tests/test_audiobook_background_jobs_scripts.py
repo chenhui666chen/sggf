@@ -72,7 +72,7 @@ def test_load_existing_voice_mapping_keeps_voice_manager_failures_non_blocking(c
     assert "从数据库加载音色分配失败" in caplog.text
 
 
-def test_script_stage_applies_project_audio_engine_mode(monkeypatch):
+def test_script_stage_applies_project_audio_engine_mode(monkeypatch, caplog):
     applied_runtime = []
     engine = build_engine()
     engine.apply_scene_audio_runtime_config = lambda **kwargs: applied_runtime.append(kwargs)
@@ -80,6 +80,7 @@ def test_script_stage_applies_project_audio_engine_mode(monkeypatch):
         voice_mapping={},
         audio_fx={},
         audio_engine_mode="seed_scene",
+        seed_audio_model="seed-audio-1.0-multilingual",
         character_items=[],
     )
     monkeypatch.setattr(
@@ -88,17 +89,20 @@ def test_script_stage_applies_project_audio_engine_mode(monkeypatch):
         lambda *args, **kwargs: runtime_config,
     )
 
-    background_jobs_scripts._apply_script_stage_project_audio_config(
-        engine=engine,
-        project=SimpleNamespace(),
-        tts_model="qwen3-tts-instruct-flash",
-        character_profiles=[],
-    )
+    with caplog.at_level("INFO", logger="app.services.audiobook.background_jobs_scripts"):
+        background_jobs_scripts._apply_script_stage_project_audio_config(
+            engine=engine,
+            project=SimpleNamespace(),
+            tts_model="qwen3-tts-instruct-flash",
+            character_profiles=[],
+        )
 
     assert applied_runtime == [
         {
             "audio_engine_mode": "seed_scene",
-            "seed_audio_model": "seed-audio-1.0",
+            "seed_audio_model": "seed-audio-1.0-multilingual",
             "voice_mapping": {},
         }
     ]
+    assert "audio_engine_mode=seed_scene" in caplog.text
+    assert "seed_audio_model=seed-audio-1.0-multilingual" in caplog.text

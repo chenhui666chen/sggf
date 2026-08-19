@@ -994,3 +994,206 @@ def test_both_chapter_entries_call_shared_scene_pipeline_before_legacy_tts(
     )
     assert "tts_progress_callback=tts_progress_callback" in source
     assert "audiobook_project_id=audiobook_project_id" in source
+
+
+def _split_render(scene_id: str, indices: tuple[int, ...], parent_id: str) -> ChapterSceneRender:
+    plan = _plan(scene_id, indices)
+    return ChapterSceneRender(
+        plan=plan,
+        result=SceneRenderResult(
+            scene_id=plan.scene_id,
+            status="passed",
+            action="assemble",
+            attempts=1,
+            audio_path=None,
+            subtitle_payload=None,
+            quality_report=None,
+            metadata={"split_parent_scene_id": parent_id},
+        ),
+    )
+
+
+def test_drop_superseded_split_parent_checkpoint_removes_parent() -> None:
+    """拆分成功后父场景失败 checkpoint 残留 → 发布完整性校验场景键集合不等，
+    整章输出永久停留 staged；必须在装配前剔除被取代的父场景 checkpoint。"""
+    checkpoint_updates = {
+        "scene_0001": {"scene_id": "scene_0001", "status": "legacy_stems"},
+        "scene_0001_split_01": {"scene_id": "scene_0001_split_01", "status": "passed"},
+        "scene_0001_split_02": {"scene_id": "scene_0001_split_02", "status": "passed"},
+        "scene_0002": {"scene_id": "scene_0002", "status": "passed"},
+    }
+    pipeline_result = ChapterScenePipelineResult(
+        scenes=(
+            _split_render("scene_0001_split_01", (0, 1), "scene_0001"),
+            _split_render("scene_0001_split_02", (2,), "scene_0001"),
+            ChapterSceneRender(
+                plan=_plan("scene_0002", (3,)),
+                result=SceneRenderResult(
+                    scene_id="scene_0002",
+                    status="passed",
+                    action="assemble",
+                    attempts=1,
+                    audio_path=None,
+                    subtitle_payload=None,
+                    quality_report=None,
+                ),
+            ),
+        ),
+    )
+
+    dropped = scene_render_mixin_module.drop_superseded_split_parent_checkpoints(
+        checkpoint_updates, pipeline_result
+    )
+
+    assert dropped == ["scene_0001"]
+    assert sorted(checkpoint_updates) == [
+        "scene_0001_split_01",
+        "scene_0001_split_02",
+        "scene_0002",
+    ]
+
+
+def test_drop_superseded_split_parent_checkpoint_keeps_parent_in_final_scenes() -> None:
+    """父场景本身仍在最终输出中（未拆分路径）时不得剔除。"""
+    checkpoint_updates = {
+        "scene_0001": {"scene_id": "scene_0001", "status": "legacy_stems"},
+    }
+    plan = _plan("scene_0001", (0,))
+    pipeline_result = ChapterScenePipelineResult(
+        scenes=(
+            ChapterSceneRender(
+                plan=plan,
+                result=SceneRenderResult(
+                    scene_id=plan.scene_id,
+                    status="legacy_stems",
+                    action="legacy_stems",
+                    attempts=2,
+                    audio_path=None,
+                    subtitle_payload=None,
+                    quality_report=None,
+                ),
+            ),
+        ),
+    )
+
+    dropped = scene_render_mixin_module.drop_superseded_split_parent_checkpoints(
+        checkpoint_updates, pipeline_result
+    )
+
+    assert dropped == []
+    assert "scene_0001" in checkpoint_updates
+
+
+def test_drop_superseded_split_parent_checkpoint_keeps_parent_when_split_missing() -> None:
+    """拆分场景未全部进入最终输出时保守保留父 checkpoint（防断点续跑误重渲染）。"""
+    checkpoint_updates = {
+        "scene_0001": {"scene_id": "scene_0001", "status": "legacy_stems"},
+        "scene_0001_split_01": {"scene_id": "scene_0001_split_01", "status": "passed"},
+        "scene_0001_split_02": {"scene_id": "scene_0001_split_02", "status": "legacy_stems"},
+    }
+    pipeline_result = ChapterScenePipelineResult(
+        scenes=(
+            _split_render("scene_0001_split_01", (0, 1), "scene_0001"),
+            _split_render("scene_0001_split_02", (2,), "scene_0001"),
+        ),
+    )
+    # 模拟 split_02 未进入最终装配输出（被过滤）→ 仅 split_01 在 scenes 中
+    pipeline_result = ChapterScenePipelineResult(scenes=pipeline_result.scenes[:1])
+
+    dropped = scene_render_mixin_module.drop_superseded_split_parent_checkpoints(
+        checkpoint_updates, pipeline_result
+    )
+
+    assert dropped == []
+    assert "scene_0001" in checkpoint_updates
+
+
+def test_try_generate_seed_scene_chapter_drops_superseded_split_parent(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """复现生产 run 160：父场景失败 checkpoint 残留 → 发布完整性校验
+    场景键集合不等 → 整章输出永久 staged；剔除后 render_status 不再误判 fallback。"""
+    monkeypatch.setenv("DOUBAO_SEED_AUDIO_PRICE_PER_SECOND_YUAN", "0.02")
+    seed_audio = _write_wav(tmp_path / "seed.wav")
+    first_split_plan = _plan("scene_0001_split_01", (0, 1))
+    second_split_plan = _plan("scene_0001_split_02", (2,))
+    pipeline = FakePipeline(
+        ChapterScenePipelineResult(
+            scenes=(
+                ChapterSceneRender(
+                    plan=first_split_plan,
+                    result=SceneRenderResult(
+                        scene_id=first_split_plan.scene_id,
+                        status="passed",
+                        action="assemble",
+                        attempts=1,
+                        audio_path=seed_audio,
+                        subtitle_payload=None,
+                        quality_report=None,
+                        metadata={"split_parent_scene_id": "scene_0001"},
+                    ),
+                ),
+                ChapterSceneRender(
+                    plan=second_split_plan,
+                    result=SceneRenderResult(
+                        scene_id=second_split_plan.scene_id,
+                        status="passed",
+                        action="assemble",
+                        attempts=1,
+                        audio_path=seed_audio,
+                        subtitle_payload=None,
+                        quality_report=None,
+                        metadata={"split_parent_scene_id": "scene_0001"},
+                    ),
+                ),
+            )
+        )
+    )
+    harness = Harness(pipeline=pipeline, assembler=FakeAssembler())
+    harness._audio_engine_mode = "seed_scene"
+    segments = [
+        ScriptSegment("narration", "第一句", "旁白", "neutral"),
+        ScriptSegment("narration", "第二句", "旁白", "neutral"),
+        ScriptSegment("narration", "第三句", "旁白", "neutral"),
+    ]
+
+    result = asyncio.run(
+        harness._try_generate_seed_scene_chapter(
+            script_segments=segments,
+            chapter_id=3,
+            task_id="split-parent-drop-task",
+            output_path=str(tmp_path / "chapter.wav"),
+            output_format="wav",
+            resume_checkpoint={
+                "scene_checkpoints": {
+                    # 父场景失败尝试的残留 checkpoint（拆分前写入）
+                    "scene_0001": {
+                        "status": "legacy_stems",
+                        "fallback_reason": "transcript_fidelity_failed",
+                        "source_segment_indices": [0, 1, 2],
+                    },
+                    "scene_0001_split_01": {
+                        "status": "passed",
+                        "source_segment_indices": [0, 1],
+                        "billing_duration_s": 5.0,
+                    },
+                    "scene_0001_split_02": {
+                        "status": "passed",
+                        "source_segment_indices": [2],
+                        "billing_duration_s": 5.0,
+                    },
+                }
+            },
+            enable_quality_review=False,
+        )
+    )
+
+    assert result is not None
+    assert sorted(result["scene_checkpoints"]) == [
+        "scene_0001_split_01",
+        "scene_0001_split_02",
+    ]
+    assert result["render_status"] == "rendered_all_seed"
+    assert result["render_status_detail"]["local_fallback_count"] == 0
+    assert harness.fallback_calls == []

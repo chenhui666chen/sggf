@@ -25,7 +25,8 @@ def test_resolve_audiobook_billing_context_uses_seed_scene_pricing_key():
     )
 
     assert context.audio_engine_mode == "seed_scene"
-    assert context.pricing_key == "seed-audio-1.0"
+    # 阶段 1：计费键跟随当前默认模型（两模型单价一致且计费可区分）
+    assert context.pricing_key == "seed-audio-1.0-multilingual"
 
 
 def test_resolve_audiobook_billing_context_keeps_legacy_tts_pricing_key():

@@ -51,8 +51,14 @@ from app.services.audiobook.temp_segment_store import (
 )
 
 
+def _repo_path(relative: str) -> Path:
+    """服务返回相对仓库根的路径；锚定后不依赖 pytest 运行时的 cwd。"""
+    p = Path(relative)
+    return p if p.is_absolute() else Path(BACKEND_ROOT.parent, p)
+
+
 def _cleanup_run_assets(*, run_id: str, chapter_id: int) -> None:
-    prefix_path = Path(build_temp_segment_prefix(run_id=run_id, chapter_id=chapter_id))
+    prefix_path = _repo_path(build_temp_segment_prefix(run_id=run_id, chapter_id=chapter_id))
     shutil.rmtree(prefix_path.parent, ignore_errors=True)
 
 
@@ -254,13 +260,13 @@ def test_save_segment_audio_batch_persists_files_and_metadata():
             format="mp3",
         )
 
-        prefix_path = Path(result["temp_asset_prefix"])
+        prefix_path = _repo_path(result["temp_asset_prefix"])
         assert prefix_path.exists()
         assert result["segment_count"] == 2
         assert result["output_format"] == "mp3"
 
-        first_path = Path(result["cached_audio_paths"][0])
-        second_path = Path(result["cached_audio_paths"][1])
+        first_path = _repo_path(result["cached_audio_paths"][0])
+        second_path = _repo_path(result["cached_audio_paths"][1])
         assert first_path.exists()
         assert second_path.exists()
         assert first_path.read_bytes() == audio_list[0]
@@ -270,7 +276,8 @@ def test_save_segment_audio_batch_persists_files_and_metadata():
         assert first_segment["status"] == "cached"
         assert first_segment["file_size"] == len(audio_list[0])
         assert first_segment["content_sha1"] == hashlib.sha1(audio_list[0]).hexdigest()
-        assert first_segment["temp_object_key"] == first_path.as_posix()
+        # temp_object_key 与服务返回一致为相对仓库根的 posix 路径
+        assert first_segment["temp_object_key"] == result["cached_audio_paths"][0]
     finally:
         _cleanup_run_assets(run_id=run_id, chapter_id=chapter_id)
 
@@ -287,7 +294,7 @@ def test_checkpoint_path_exists_detects_missing_temp_asset():
             format="mp3",
         )
 
-        cached_path = Path(result["cached_audio_paths"][0])
+        cached_path = _repo_path(result["cached_audio_paths"][0])
         assert _checkpoint_path_exists(cached_path.as_posix())
 
         cached_path.unlink()
@@ -308,7 +315,7 @@ def test_delete_temp_segment_prefix_removes_only_expected_tree():
             format="mp3",
         )
 
-        prefix_path = Path(result["temp_asset_prefix"])
+        prefix_path = _repo_path(result["temp_asset_prefix"])
         assert prefix_path.exists()
 
         removed_files = delete_temp_segment_prefix(result["temp_asset_prefix"])
@@ -379,7 +386,7 @@ def test_load_cached_segment_audio_skips_content_mismatch():
             audio_list=[b"zero", b"one"],
             format="mp3",
         )
-        Path(temp_cache["cached_audio_paths"][0]).write_bytes(b"ZERO")
+        _repo_path(temp_cache["cached_audio_paths"][0]).write_bytes(b"ZERO")
 
         loaded = load_cached_segment_audio(temp_cache, max_segment_count=2)
 
@@ -407,8 +414,8 @@ def test_save_segment_audio_map_persists_sparse_segments():
 
         assert result["segment_count"] == 2
         assert sorted(result["cached_audio_paths"].keys()) == [0, 2]
-        assert Path(result["cached_audio_paths"][0]).read_bytes() == b"zero"
-        assert Path(result["cached_audio_paths"][2]).read_bytes() == b"two"
+        assert _repo_path(result["cached_audio_paths"][0]).read_bytes() == b"zero"
+        assert _repo_path(result["cached_audio_paths"][2]).read_bytes() == b"two"
     finally:
         _cleanup_run_assets(run_id=run_id, chapter_id=chapter_id)
 
@@ -759,7 +766,7 @@ def test_expire_chapter_run_temp_assets_marks_run_expired_and_deletes_files():
         assert run.error_message == "checkpoint_expired"
         assert run.checkpoint_json["cached_audio_paths"] == {}
         assert run.checkpoint_json["segments"] == {}
-        assert not Path(temp_cache["temp_asset_prefix"]).exists()
+        assert not _repo_path(temp_cache["temp_asset_prefix"]).exists()
     finally:
         _cleanup_run_assets(run_id=run_id, chapter_id=chapter_id)
 
@@ -815,7 +822,7 @@ def test_finalize_completed_chapter_run_temp_assets_preserves_completed_state():
         assert run.checkpoint_json["output_path"] == "audiobooks/project_1/chapter_091.mp3"
         assert run.checkpoint_json["cleanup"]["cleanup_reason"] == "completed_temp_assets_pruned"
         assert run.checkpoint_json["last_error"] is None
-        assert not Path(temp_cache["temp_asset_prefix"]).exists()
+        assert not _repo_path(temp_cache["temp_asset_prefix"]).exists()
     finally:
         _cleanup_run_assets(run_id=run_id, chapter_id=chapter_id)
 

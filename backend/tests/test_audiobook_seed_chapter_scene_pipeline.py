@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import sys
+import threading
+import time
 from pathlib import Path
 from typing import Any
 
@@ -90,8 +92,102 @@ def _semantic_planner() -> ScenePlanner:
     )
 
 
+class ConcurrencyTrackingRenderer:
+    """记录并发峰值的渲染器：每场景模拟固定耗时，用于并发行为断言。"""
+
+    def __init__(self, delays_s: list[float] | float = 0.05) -> None:
+        self.delays_s = delays_s
+        self.calls: list[dict[str, Any]] = []
+        self._lock = threading.Lock()
+        self._active = 0
+        self.peak_active = 0
+
+    def render(self, plan, **kwargs):
+        self.calls.append({"plan": plan, **kwargs})
+        with self._lock:
+            self._active += 1
+            self.peak_active = max(self.peak_active, self._active)
+            delay = (
+                self.delays_s[len(self.calls) - 1]
+                if isinstance(self.delays_s, list)
+                else float(self.delays_s)
+            )
+        time.sleep(delay)
+        with self._lock:
+            self._active -= 1
+        return SceneRenderResult(
+            scene_id=plan.scene_id,
+            status="passed",
+            action="assemble",
+            attempts=1,
+            audio_path=Path(f"{plan.scene_id}.mp3"),
+            subtitle_payload=None,
+            quality_report=None,
+        )
+
+
+def _four_scene_segments() -> list[ScriptSegment]:
+    return [
+        _segment("第一段对白发生在雨夜。", speaker="男主", scene="雨夜室内", pause_after=5),
+        _segment("第二段对白发生在清晨。", speaker="女主", scene="清晨街道", pause_after=5),
+        _segment("第三段对白发生在宫殿。", speaker="太后", scene="深宫殿内", pause_after=5),
+        _segment("第四段对白发生在码头。", speaker="船夫", scene="黄昏码头"),
+    ]
+
+
 def test_chapter_scene_pipeline_is_available() -> None:
     assert ChapterScenePipeline is not None
+
+
+def test_chapter_pipeline_renders_scenes_concurrently_and_keeps_plan_order() -> None:
+    # 首场景耗时最长 → 完成顺序与提交顺序相反，验证结果仍按计划顺序装配
+    renderer = ConcurrencyTrackingRenderer([0.12, 0.08, 0.04, 0.01])
+    pipeline = ChapterScenePipeline(
+        planner=_semantic_planner(),
+        reference_materializer=FakeMaterializer(),
+        renderer=renderer,
+        max_scene_concurrency=2,
+    )
+
+    result = pipeline.render(_four_scene_segments(), voice_mapping={})
+
+    assert renderer.peak_active == 2
+    assert [scene.plan.scene_id for scene in result.scenes] == [
+        "scene_0001",
+        "scene_0002",
+        "scene_0003",
+        "scene_0004",
+    ]
+    assert all(scene.result.status == "passed" for scene in result.scenes)
+
+
+def test_chapter_pipeline_serial_mode_keeps_single_inflight_scene(monkeypatch) -> None:
+    monkeypatch.setenv("AUDIOBOOK_SEED_SCENE_RENDER_CONCURRENCY", "1")
+    renderer = ConcurrencyTrackingRenderer(0.01)
+    pipeline = ChapterScenePipeline(
+        planner=_semantic_planner(),
+        reference_materializer=FakeMaterializer(),
+        renderer=renderer,
+    )
+
+    result = pipeline.render(_four_scene_segments(), voice_mapping={})
+
+    assert pipeline.max_scene_concurrency == 1
+    assert renderer.peak_active == 1
+    assert len(result.scenes) == 4
+
+
+def test_chapter_pipeline_concurrency_resolution_defaults_and_clamps(monkeypatch) -> None:
+    from app.services.audiobook.scene_engine import chapter_pipeline as pipeline_module
+
+    monkeypatch.delenv("AUDIOBOOK_SEED_SCENE_RENDER_CONCURRENCY", raising=False)
+    assert pipeline_module.resolve_scene_render_concurrency() == 4
+    monkeypatch.setenv("AUDIOBOOK_SEED_SCENE_RENDER_CONCURRENCY", "3")
+    assert pipeline_module.resolve_scene_render_concurrency() == 3
+    monkeypatch.setenv("AUDIOBOOK_SEED_SCENE_RENDER_CONCURRENCY", "0")
+    assert pipeline_module.resolve_scene_render_concurrency() == 1
+    monkeypatch.setenv("AUDIOBOOK_SEED_SCENE_RENDER_CONCURRENCY", "not-a-number")
+    assert pipeline_module.resolve_scene_render_concurrency() == 4
 
 
 def test_chapter_pipeline_materializes_authorized_private_reference_once_per_chapter() -> None:

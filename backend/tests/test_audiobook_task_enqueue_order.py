@@ -1,7 +1,6 @@
 import os
 import sys
 from pathlib import Path
-from types import SimpleNamespace
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -16,7 +15,8 @@ os.environ.setdefault("DEBUG", "false")
 os.environ.setdefault("DATABASE_URL", "postgresql://test:test@127.0.0.1:5432/test_db")
 
 from app.db.base import Base
-from app.models.audiobook import AudiobookProject, ChapterAudio, ChapterAudioRun
+from app.models.admin_log import AdminOperationLog
+from app.models.audiobook import AudiobookProject, AudiobookTaskDispatch, ChapterAudio, ChapterAudioRun
 from app.models.audiobook_task import AudiobookTask
 from app.models.project import Chapter, Project
 from app.models.user import User
@@ -40,6 +40,10 @@ def build_session_factory():
             ChapterAudio.__table__,
             ChapterAudioRun.__table__,
             AudiobookTask.__table__,
+            # enqueue 流程读取积分定价策略审计投影（points_pricing_policy）
+            AdminOperationLog.__table__,
+            # per-run 派发写入任务-派发父子关系（R12/P1-1）
+            AudiobookTaskDispatch.__table__,
         ],
     )
     return session_factory
@@ -89,45 +93,28 @@ def seed_project(db):
     }
 
 
-class FakeSignature:
-    def __init__(self, *, db, snapshots):
-        self.db = db
-        self.snapshots = snapshots
-
-    def delay(self):
-        raise AssertionError("enqueue_audiobook_task must not dispatch before runs are ready")
-
-    def apply_async(self, *, task_id):
-        task = self.db.query(AudiobookTask).one()
-        runs = self.db.query(ChapterAudioRun).all()
-        self.snapshots.append({
-            "event": "apply_async",
-            "task_id": task_id,
-            "task_celery_task_id": task.celery_task_id,
-            "run_count": len(runs),
-            "run_celery_task_ids": [run.celery_task_id for run in runs],
-            "run_checkpoint_json": [dict(run.checkpoint_json or {}) for run in runs],
-        })
-        return SimpleNamespace(id=task_id)
-
-
 def test_enqueue_audiobook_task_prepares_task_runs_and_checkpoint_before_dispatch(monkeypatch):
+    from app.services.audiobook import dispatch_service
+
     session_factory = build_session_factory()
 
     with session_factory() as db:
         context = seed_project(db)
         snapshots = []
 
-        def fake_signature(name, args):
+        def fake_try_dispatch_run(db, *, run_id):
+            runs = db.query(ChapterAudioRun).all()
             snapshots.append({
-                "event": "signature",
-                "name": name,
-                "args": args,
+                "event": "dispatch",
+                "run_id": run_id,
+                "run_count": len(runs),
+                "run_celery_task_ids": [run.celery_task_id for run in runs],
+                "run_checkpoint_json": [dict(run.checkpoint_json or {}) for run in runs],
             })
-            return FakeSignature(db=db, snapshots=snapshots)
+            return "dispatched"
 
         monkeypatch.setattr(task_support, "uuid4", lambda: "fixed-celery-task-id")
-        monkeypatch.setattr(task_support.celery_app, "signature", fake_signature)
+        monkeypatch.setattr(dispatch_service, "try_dispatch_run", fake_try_dispatch_run)
 
         def before_dispatch(task_record, celery_task_id):
             db.refresh(task_record)
@@ -163,14 +150,15 @@ def test_enqueue_audiobook_task_prepares_task_runs_and_checkpoint_before_dispatc
 
         assert async_result.id == "fixed-celery-task-id"
         assert task_record.id
-        assert [snapshot["event"] for snapshot in snapshots] == [
-            "signature",
-            "before_dispatch",
-            "apply_async",
-        ]
+        # R11/P0-1（outbox）：enqueue 阶段不派发，仅 before_dispatch 回调；
+        # run 即派发意图，由 commit 后的 dispatch_pending_runs 显式投递
+        assert [snapshot["event"] for snapshot in snapshots] == ["before_dispatch"]
+
+        runs = db.query(ChapterAudioRun).all()
+        summary = task_support.dispatch_pending_runs(db, runs)
+        assert summary == {"dispatched": 1, "failed": 0, "unknown": 0}
         dispatch_snapshot = snapshots[-1]
-        assert dispatch_snapshot["task_id"] == "fixed-celery-task-id"
-        assert dispatch_snapshot["task_celery_task_id"] == "fixed-celery-task-id"
+        assert dispatch_snapshot["event"] == "dispatch"
         assert dispatch_snapshot["run_count"] == 1
         assert dispatch_snapshot["run_celery_task_ids"] == ["fixed-celery-task-id"]
         assert dispatch_snapshot["run_checkpoint_json"][0]["generate_subtitle"] is True
@@ -181,8 +169,3 @@ def test_enqueue_audiobook_task_prepares_task_runs_and_checkpoint_before_dispatc
             dispatch_snapshot["run_checkpoint_json"][0]["resume_requested_at"]
             == "2026-05-03T00:00:00+00:00"
         )
-        assert snapshots[0]["args"][-1] == {
-            context["chapter"].id: {
-                "sfx-0-0": {"startUnit": 12, "durationUnits": 48},
-            },
-        }

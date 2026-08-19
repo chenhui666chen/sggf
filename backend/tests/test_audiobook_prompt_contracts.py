@@ -190,7 +190,9 @@ async def test_analysis_prompt_uses_seed_scene_analysis_contract():
 
     prompt = llm.messages[0]["content"]
     assert "当前音频引擎：豆包 Seed Audio 场景生成（seed_scene）" in prompt
-    assert "主生成模型：seed-audio-1.0" in prompt
+    assert "主生成路径：Seed Audio 完整声音场景模式" in prompt
+    # 上游 Prompt 不得含过期硬编码主模型声明
+    assert "seed-audio-1.0" not in prompt
     assert "当前TTS模型：Qwen3-TTS" not in prompt
     assert "试听参考音色和局部回退" in prompt
     assert "完整声音场景" in prompt
@@ -451,13 +453,21 @@ async def test_transform_prompt_uses_seed_scene_render_contract():
 
     prompt = llm.messages[0]["content"]
     assert "当前音频引擎：豆包 Seed Audio 场景生成（seed_scene）" in prompt
-    assert "主生成模型：seed-audio-1.0" in prompt
+    assert "主生成路径：Seed Audio 完整声音场景模式" in prompt
+    # 上游 Prompt 不得含过期硬编码主模型声明
+    assert "seed-audio-1.0" not in prompt
     assert "当前TTS模型：Qwen3-TTS" not in prompt
     assert "试听参考音色和局部回退" in prompt
     assert "instruct_scene 必须描述可持续的空间、环境底音和声学状态" in prompt
     assert "先于台词、伴随台词、随后发生或持续到场景结束" in prompt
     assert "不要输出或依赖素材 asset_id" in prompt
     assert "不要把每句话机械切成独立场景" in prompt
+    assert "Seed 场景事件字段合约" in prompt
+    assert "音量0.08-0.15" not in prompt
+    assert '"volume": 0.3' not in prompt
+    assert '"position_3d"' not in prompt
+    assert '"fade_out"' not in prompt
+    assert "sound_effects 每个片段最多 2 个" not in prompt
 
 
 @pytest.mark.asyncio
@@ -479,6 +489,9 @@ async def test_transform_prompt_uses_legacy_stems_render_contract():
     assert "每个 TTS 片段都必须能够独立合成" in prompt
     assert "volume、delay、fade_in、fade_out" in prompt
     assert "不得依赖整场模型" in prompt
+    assert "音量0.08-0.15" in prompt
+    assert '"position_3d"' in prompt
+    assert '"fade_out"' in prompt
 
 
 def test_review_prompt_has_seed_scene_specific_checks():

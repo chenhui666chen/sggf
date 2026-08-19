@@ -133,6 +133,63 @@ def test_register_candidate_creates_reclaimable_run_record():
         assert run.expires_at - run.started_at == timedelta(seconds=3600)
 
 
+def test_register_candidate_satisfies_contract_not_null_constraints(monkeypatch):
+    """Contract 收窄后 celery_task_id NOT NULL+UNIQUE、chapter_audio_id NOT NULL：
+    同步候选登记路径必须携带每 run 独立 celery_task_id 与运行作用域（§5.27/§5.34）。
+
+    monkeypatch 说明：真实 helper 走全局 Table 对象查询，套件内其他测试的
+    残留内存库会污染结果；此处用会话内直查等价替换，契约断言不受影响。
+    """
+    from app.models.audiobook import ChapterAudio as _ChapterAudio
+
+    def _resolve_active(db, *, audiobook_project_id, chapter_id):
+        return (
+            db.query(_ChapterAudio)
+            .filter(
+                _ChapterAudio.audiobook_project_id == audiobook_project_id,
+                _ChapterAudio.chapter_id == chapter_id,
+                _ChapterAudio.deleted_at.is_(None),
+            )
+            .first()
+        )
+
+    import app.services.audiobook.task_support as _task_support
+
+    monkeypatch.setattr(
+        _task_support, "_ensure_active_chapter_audio", _resolve_active
+    )
+
+    session_factory = build_session_factory()
+    with session_factory() as db:
+        context = seed_context(db)
+        first = register_segment_candidate_asset(
+            db,
+            audiobook_project_id=context["audiobook_project"].id,
+            chapter_id=context["chapter"].id,
+            segment_index=1,
+            temp_segment_cache={
+                "cached_audio_paths": {1: "backend/data/tmp/audiobook_runs/run_a/chapter_00001/segment_00001_ab.mp3"},
+            },
+        )
+        second = register_segment_candidate_asset(
+            db,
+            audiobook_project_id=context["audiobook_project"].id,
+            chapter_id=context["chapter"].id,
+            segment_index=2,
+            temp_segment_cache={
+                "cached_audio_paths": {2: "backend/data/tmp/audiobook_runs/run_a/chapter_00001/segment_00002_ab.mp3"},
+            },
+        )
+
+        assert first is not None and second is not None
+        assert first.celery_task_id
+        assert second.celery_task_id
+        # UNIQUE 约束要求每 run 独立，不能共用占位值
+        assert first.celery_task_id != second.celery_task_id
+        assert first.chapter_audio_id == context["chapter_audio"].id
+        assert second.chapter_audio_id == context["chapter_audio"].id
+
+
 def test_register_candidate_persists_and_loads_immutable_candidate_contract():
     session_factory = build_session_factory()
     load_segment_candidate_contract = getattr(

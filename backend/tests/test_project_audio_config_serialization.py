@@ -113,21 +113,20 @@ def test_project_audio_config_validates_and_persists_seed_audio_model():
     ).seed_audio_model == "seed-audio-1.0"
 
 
-def test_project_audio_config_disables_multilingual_seed_audio_model():
-    # multilingual 变体已实现但暂不启用：set 拒绝、get 回退默认、schema 校验失败。
-    with pytest.raises(ValueError, match="unsupported seed_audio_model"):
-        set_seed_audio_model({}, "seed-audio-1.0-multilingual")
+def test_project_audio_config_supports_multilingual_seed_audio_model():
+    # 阶段 1：multilingual 已启用为默认：set 接受、get 原样返回、schema 校验通过。
+    data = {}
+    set_seed_audio_model(data, "seed-audio-1.0-multilingual")
 
     assert (
         get_seed_audio_model({"seed_audio_model": "seed-audio-1.0-multilingual"})
-        == "seed-audio-1.0"
+        == "seed-audio-1.0-multilingual"
     )
 
-    with pytest.raises(ValidationError):
-        ProjectAudioConfig(
-            characters=[],
-            seed_audio_model="seed-audio-1.0-multilingual",
-        )
+    assert ProjectAudioConfig(
+        characters=[],
+        seed_audio_model="seed-audio-1.0-multilingual",
+    ).seed_audio_model == "seed-audio-1.0-multilingual"
 
 
 def test_project_audio_config_rejects_unknown_seed_audio_model():

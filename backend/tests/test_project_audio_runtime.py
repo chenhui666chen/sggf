@@ -10,6 +10,7 @@ if str(ROOT_DIR) not in sys.path:
 from app.services.audiobook.project_audio_runtime import (
     build_character_voice_mapping_item,
     normalize_base_voice_mapping,
+    resolve_from_snapshot,
     resolve_project_audio_runtime_config,
 )
 from app.services.audiobook import project_audio_runtime as project_audio_runtime_module
@@ -47,7 +48,8 @@ def test_engine_rejects_unknown_scene_audio_runtime_mode():
     )
 
     assert engine._audio_engine_mode == "legacy_stems"
-    assert engine._seed_audio_model == "seed-audio-1.0"
+    # 阶段 1：未知模型回退到当前默认（multilingual）
+    assert engine._seed_audio_model == "seed-audio-1.0-multilingual"
 
 
 def test_apply_scene_audio_runtime_to_engine_passes_mode_and_mapping():
@@ -225,6 +227,47 @@ def test_resolve_project_audio_runtime_config_tolerates_empty_or_invalid_config(
     assert runtime.character_items == []
     assert runtime.voice_mapping == {"保留角色": {"voice_id": "existing"}}
     assert "项目音频配置 JSON 损坏，已忽略" in caplog.text
+
+
+def test_resolve_from_snapshot_restores_voice_mapping_from_flat_branch():
+    """GUIDE §2.1：engine_branch_config 是分支体（无 engines 嵌套），
+    快照解析必须从中恢复角色音色映射，否则回退合成静默退回预设音色。
+    """
+    snapshot = {
+        "snapshot_version": 1,
+        "engine_mode": "seed_scene",
+        "engine_branch_config": {
+            "seed_audio_model": "seed-audio-1.0-multilingual",
+            "providers": {
+                "fallback_tts_model": "qwen3-tts-instruct-flash",
+            },
+            "tts_models": {
+                "qwen3-tts-instruct-flash": {
+                    "characters": [
+                        {
+                            "name": "旁白",
+                            "voice_id": "ICL_uranus_zh_male_xiaohouye_tob",
+                            "tts_model": "seed-tts-2.0-expressive",
+                        },
+                        {"name": "陆衍", "voice_id": "ICL_uranus_zh_male_anrenqinzhu_tob",
+                         "tts_model": "seed-tts-2.0-expressive"},
+                    ]
+                }
+            },
+            "audio_fx": {"enable_sound_effects": True},
+        },
+    }
+
+    runtime = resolve_from_snapshot(snapshot, tts_model="qwen3-tts-instruct-flash")
+
+    assert runtime.audio_engine_mode == "seed_scene"
+    assert runtime.seed_audio_model == "seed-audio-1.0-multilingual"
+    assert runtime.voice_mapping["旁白"] == {
+        "voice_id": "ICL_uranus_zh_male_xiaohouye_tob",
+        "tts_model": "seed-tts-2.0-expressive",
+    }
+    assert runtime.voice_mapping["陆衍"]["voice_id"] == "ICL_uranus_zh_male_anrenqinzhu_tob"
+    assert runtime.audio_fx == {"enable_sound_effects": True}
 
 
 def test_normalize_base_voice_mapping_accepts_json_string_and_ignores_invalid_items():

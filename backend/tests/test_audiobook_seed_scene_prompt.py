@@ -150,7 +150,8 @@ def test_compiler_does_not_treat_descriptive_speaker_label_as_a_new_voice() -> N
     result = compiler.compile_segments([segment])
 
     assert "老爷爷声" not in result.prompt
-    assert "当前角色用语速缓慢，保持克制的方式说道" in result.prompt
+    # §9.2：无显式动作时用中性模板，不再套用“用……的方式说道”。
+    assert "当前角色说道：“我没事。”（语速缓慢，保持克制）" in result.prompt
 
 
 def test_compiler_renders_music_changes_and_until_text_anchor_in_order() -> None:
@@ -183,7 +184,8 @@ def test_compiler_renders_music_changes_and_until_text_anchor_in_order() -> None
     )
 
     assert result.prompt.index("紧张弦乐") < result.prompt.index("脑子进水")
-    assert "持续至对应台词说完三八二字" in result.prompt
+    # §9.4：中性措辞，related_text 为目标台词子串。
+    assert "持续至对应台词中的“三八”说完" in result.prompt
     assert result.prompt.index("持续至对应台词") < result.prompt.index("音乐停止")
 
 
@@ -330,3 +332,73 @@ def test_compiler_deduplicates_unchanged_music_cues_across_segments() -> None:
     result = compiler.compile_segments(segments)
 
     assert result.prompt.count("铜管低音与定音鼓") == 1
+
+
+# ---------- P3 叙事流编译风格（官方 seed-audio 示例对齐） ----------
+
+
+def test_compiler_renders_narrative_flow_without_numbered_list() -> None:
+    compiler = ScenePromptCompiler()
+    segment = ScriptSegment(
+        type="dialogue",
+        text="进来。",
+        speaker="太后",
+        emotion="cold",
+        sound_effects=[SoundEffect(name="两声布鞋踏上木台阶", timing="before")],
+    )
+
+    result = compiler.compile_segments([segment])
+
+    # 去掉编号清单，正文为连贯叙事行
+    assert "1. " not in result.prompt
+    lines = [line for line in result.prompt.splitlines() if "“进来。”" in line]
+    assert len(lines) == 1
+    # 前导音效内联到台词同句（官方风格：伴随X，{说话人}说道）
+    assert "伴随着两声布鞋踏上木台阶，太后说道：“进来。”" in lines[0]
+
+
+def test_compiler_anchors_after_sfx_and_stop_music_to_speech_line() -> None:
+    compiler = ScenePromptCompiler()
+    segment = ScriptSegment(
+        type="dialogue",
+        text="停车！",
+        speaker="女警察",
+        emotion="angry",
+        performance_notes="突然拔高音量，急促命令",
+        sound_effects=[
+            SoundEffect(
+                name="一声尖锐的汽车刹车声",
+                timing="after",
+                delay=0.4,
+            )
+        ],
+        music_cue=MusicCue(style="音乐停止"),
+    )
+
+    result = compiler.compile_segments([segment])
+
+    lines = [line for line in result.prompt.splitlines() if "“停车！”" in line]
+    assert len(lines) == 1
+    line = lines[0]
+    # 台词、随后音效、音乐停止动态锚定同句，顺序与叙事一致
+    assert "随后是一声尖锐的汽车刹车声" in line
+    assert "此时，音乐停止" in line
+    assert line.index("停车！") < line.index("汽车刹车声") < line.index("音乐停止")
+
+
+def test_compiler_inlines_during_sfx_into_speech_line() -> None:
+    compiler = ScenePromptCompiler()
+    segment = ScriptSegment(
+        type="dialogue",
+        text="谁在外头？",
+        speaker="沈砚",
+        emotion="tense",
+        sound_effects=[SoundEffect(name="木门被缓缓推开的吱呀声", timing="trigger")],
+    )
+
+    result = compiler.compile_segments([segment])
+
+    lines = [line for line in result.prompt.splitlines() if "“谁在外头？”" in line]
+    assert len(lines) == 1
+    assert "伴随木门被缓缓推开的吱呀声" in lines[0]
+    assert "台词期间伴随" not in result.prompt

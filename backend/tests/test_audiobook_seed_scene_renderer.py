@@ -117,9 +117,17 @@ def test_scene_renderer_persists_audio_runs_quality_gate_and_writes_checkpoint(t
     assert adapter.calls[0]["watermark"] == {}
     assert checkpoints[-1]["status"] == "passed"
     assert checkpoints[-1]["prompt_hash"] == "prompt-hash"
-    assert checkpoints[-1]["schema_version"] == 1
+    # P1 提示词透明化：checkpoint 携带 prompt 全文，供场景编辑器投影展示
+    assert checkpoints[-1]["prompt"] == '旁白清晰地说："第一句"，随后说："第二句"。'
+    # 阶段 1：新产出 checkpoint 使用当前 schema（v2）并携带显式元数据
+    assert checkpoints[-1]["schema_version"] == 2
+    assert checkpoints[-1]["checkpoint_type"] == "seed_scene_checkpoint"
+    assert checkpoints[-1]["signature_contract_version"] == "1.0.0"
+    assert checkpoints[-1]["producer_version"] == "scene-render-service-v2"
+    assert checkpoints[-1]["created_at"]
     assert checkpoints[-1]["renderer_version"] == "scene-render-service-v2"
-    assert checkpoints[-1]["model"] == "seed-audio-1.0"
+    # 阶段 1：新任务默认请求 multilingual
+    assert checkpoints[-1]["model"] == "seed-audio-1.0-multilingual"
     assert checkpoints[-1]["audio_config"] == {
         "format": "mp3",
         "sample_rate": 48000,
@@ -777,7 +785,7 @@ def test_seed_scene_billing_summary_ignores_legacy_supplier_rate_override(
     }
     monkeypatch.setenv("DOUBAO_SEED_AUDIO_PRICE_PER_SECOND_YUAN", "0.02")
 
-    summary = build_seed_scene_billing_summary(checkpoints)
+    summary = build_seed_scene_billing_summary(checkpoints, model="seed-audio-1.0")
 
     assert summary == {
         "model": "seed-audio-1.0",
@@ -970,17 +978,18 @@ def test_scene_renderer_does_not_reuse_checkpoint_for_different_model(tmp_path: 
     )
     service.render(_plan())
 
+    # 默认为 multilingual，改请求普通 1.0 时不得复用 checkpoint。
     rerendered = service.render(
         _plan(),
-        model="seed-audio-1.0-multilingual",
+        model="seed-audio-1.0",
         checkpoint=checkpoints[-1],
     )
 
     assert rerendered.status == "passed"
     assert rerendered.reused_checkpoint is False
     assert len(adapter.calls) == 2
-    assert adapter.calls[-1]["model"] == "seed-audio-1.0-multilingual"
-    assert checkpoints[-1]["model"] == "seed-audio-1.0-multilingual"
+    assert adapter.calls[-1]["model"] == "seed-audio-1.0"
+    assert checkpoints[-1]["model"] == "seed-audio-1.0"
 
 
 def test_scene_renderer_does_not_reuse_checkpoint_for_different_audio_config(tmp_path: Path) -> None:
@@ -1118,3 +1127,134 @@ def test_scene_renderer_rejects_unmaterialized_preview_reference(tmp_path: Path)
     assert result.attempts == 1
     assert result.fallback_reason == "unmaterialized_preview_reference"
     assert adapter.calls == []
+
+
+class TestCheckpointSchemaMigrationIntegration:
+    """阶段 1：renderer 层历史 checkpoint 的 append-only 迁移集成语义。
+
+    - 历史 v1 checkpoint 自动迁移为 v2 并写回，随后复用且不重烧音频；
+    - 迁移幂等：已是 v2 的 checkpoint 不再迁移、不重复写回；
+    - 缺字段等不兼容 checkpoint 不复用、不破坏，转重新生成。
+    """
+
+    def _v1_checkpoint(self, audio_path: Path) -> dict:
+        plan = _plan()
+        return {
+            "schema_version": 1,
+            "renderer_version": "scene-render-service-v2",
+            "model": "seed-audio-1.0",
+            "audio_config": {
+                "format": "mp3",
+                "sample_rate": 48000,
+                "pitch_rate": 0,
+                "speech_rate": 0,
+                "loudness_rate": 0,
+                "enable_subtitle": True,
+            },
+            "scene_id": plan.scene_id,
+            "source_segment_indices": list(plan.source_segment_indices),
+            "source_text_hash": "text-hash",
+            "prompt_hash": plan.prompt_hash,
+            "quality_policy_hash": plan.quality_policy_hash,
+            "reference_hashes": list(plan.reference_hashes),
+            "status": "passed",
+            "attempts": 1,
+            "audio_path": str(audio_path),
+            "billing_duration_s": 1.25,
+            "provider_request_ids": ["request-legacy-1"],
+        }
+
+    def test_renderer_migrates_v1_checkpoint_and_reuses_without_reburn(
+        self, tmp_path: Path
+    ) -> None:
+        audio_path = tmp_path / "scene_0001.wav"
+        audio_path.write_bytes(_wav_bytes())
+        legacy = self._v1_checkpoint(audio_path)
+
+        checkpoints: list[dict] = []
+        adapter = FakeAdapter([])
+        service = SceneRenderService(
+            adapter=adapter,
+            output_root=tmp_path,
+            checkpoint_writer=checkpoints.append,
+        )
+
+        result = service.render(_plan(), model="seed-audio-1.0", checkpoint=legacy)
+
+        # 迁移后复用既有音频，不重烧 Seed
+        assert result.status == "passed"
+        assert result.reused_checkpoint is True
+        assert result.audio_path == audio_path
+        assert adapter.calls == []
+        # append-only 迁移写回新版本，旧签名字段逐项保留
+        assert len(checkpoints) == 1
+        migrated = checkpoints[-1]
+        assert migrated["schema_version"] == 2
+        assert migrated["migration_status"] == "migrated"
+        assert migrated["model"] == "seed-audio-1.0"
+        assert migrated["prompt_hash"] == "prompt-hash"
+        assert migrated["billing_duration_s"] == 1.25
+        assert migrated["provider_request_ids"] == ["request-legacy-1"]
+
+    def test_renderer_does_not_migrate_v2_checkpoint_again(
+        self, tmp_path: Path
+    ) -> None:
+        audio_path = tmp_path / "scene_0001.wav"
+        audio_path.write_bytes(_wav_bytes())
+
+        checkpoints: list[dict] = []
+        adapter = FakeAdapter([])
+        service = SceneRenderService(
+            adapter=adapter,
+            output_root=tmp_path,
+            checkpoint_writer=checkpoints.append,
+        )
+
+        # 第一次：v1 → 迁移写回 v2
+        first = service.render(
+            _plan(), model="seed-audio-1.0", checkpoint=self._v1_checkpoint(audio_path)
+        )
+        assert first.reused_checkpoint is True
+        migrated = checkpoints[-1]
+
+        # 第二次：已是 v2，直接复用，不再迁移、不再写回
+        second = service.render(
+            _plan(), model="seed-audio-1.0", checkpoint=migrated
+        )
+        assert second.reused_checkpoint is True
+        assert len(checkpoints) == 1
+        assert adapter.calls == []
+
+    def test_renderer_preserves_incompatible_checkpoint_and_regenerates(
+        self, tmp_path: Path
+    ) -> None:
+        audio_path = tmp_path / "scene_0001.wav"
+        audio_path.write_bytes(_wav_bytes())
+        broken = self._v1_checkpoint(audio_path)
+        del broken["model"]
+        snapshot = dict(broken)
+
+        checkpoints: list[dict] = []
+        adapter = FakeAdapter(
+            [
+                _success_response(
+                    _wav_bytes(),
+                    subtitles=[{"text": "第一句"}, {"text": "第二句"}],
+                )
+            ]
+        )
+        service = SceneRenderService(
+            adapter=adapter,
+            output_root=tmp_path,
+            checkpoint_writer=checkpoints.append,
+        )
+
+        result = service.render(_plan(), checkpoint=broken)
+
+        # 缺字段不得静默当作命中：不复用、不破坏旧 checkpoint，转重新生成
+        assert result.reused_checkpoint is False
+        assert broken == snapshot
+        assert len(adapter.calls) == 1
+        # 重新生成后写入的是全新 v2 checkpoint
+        assert checkpoints[-1]["schema_version"] == 2
+        assert "migration_status" not in checkpoints[-1]

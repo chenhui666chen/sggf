@@ -321,6 +321,122 @@ def test_scene_planner_recompiles_existing_topology_with_materialized_reference(
     assert final_plan.reference_hashes != topology_plan.reference_hashes
 
 
+def test_scene_planner_extends_past_target_max_to_reach_semantic_boundary() -> None:
+    # 语义边界优先：超过 target_max 但软上限内可到达边界时，延展到边界再切
+    planner = ScenePlanner(
+        target_min_duration_s=10,
+        target_max_duration_s=20,
+        soft_max_duration_s=40,
+        hard_max_duration_s=60,
+    )
+    long_text = "他沿着长廊一步步往前走，灯笼把影子拉得很长。"  # 25 字 ≈ 5.6s
+    segments = [
+        ScriptSegment(
+            type="narration",
+            text=long_text * 2,
+            speaker="旁白",
+            emotion="tense",
+            instruct_scene="深夜内殿",
+        ),
+        ScriptSegment(
+            type="narration",
+            text=long_text * 2,
+            speaker="旁白",
+            emotion="tense",
+            instruct_scene="深夜内殿",
+        ),
+        ScriptSegment(
+            type="narration",
+            text=long_text * 2,
+            speaker="旁白",
+            emotion="tense",
+            instruct_scene="深夜内殿",
+        ),
+        ScriptSegment(
+            type="narration",
+            text=long_text * 2,
+            speaker="旁白",
+            emotion="calm",
+            instruct_scene="清晨城门",
+        ),
+    ]
+
+    plans = planner.plan(segments)
+
+    # 无延展时会在 idx2 处按 target_max 切开；有边界延展后应整段保留到边界
+    assert [plan.source_segment_indices for plan in plans] == [(0, 1, 2), (3,)]
+
+
+def test_scene_planner_splits_at_narrative_transition_cue_after_early_minimum() -> None:
+    # 换场词（旁白文本中的时间/空间跳转）构成语义边界，允许早于 target_min 收场
+    planner = ScenePlanner(
+        target_min_duration_s=10,
+        target_max_duration_s=100,
+        soft_max_duration_s=110,
+        hard_max_duration_s=120,
+        early_min_duration_s=8,
+    )
+    segments = [
+        ScriptSegment(
+            type="narration",
+            text="宫灯下，侍从垂手等候，内殿里只剩更漏声。",
+            speaker="旁白",
+            emotion="tense",
+            pause_after=5,
+            instruct_scene="深夜宫殿内殿",
+        ),
+        ScriptSegment(
+            type="narration",
+            text="第二天清晨，城门口已经排起长队。",
+            speaker="旁白",
+            emotion="calm",
+            instruct_scene="深夜宫殿内殿",
+        ),
+    ]
+
+    plans = planner.plan(segments)
+
+    assert [plan.source_segment_indices for plan in plans] == [(0,), (1,)]
+
+
+def test_scene_planner_still_splits_past_target_max_without_boundary() -> None:
+    # 回归：无语义边界时仍按 target_max 切分（时长兜底不变）
+    planner = ScenePlanner(
+        target_min_duration_s=10,
+        target_max_duration_s=20,
+        soft_max_duration_s=40,
+        hard_max_duration_s=60,
+    )
+    long_text = "他沿着长廊一步步往前走，灯笼把影子拉得很长。"
+    segments = [
+        ScriptSegment(
+            type="narration",
+            text=long_text * 2,
+            speaker="旁白",
+            emotion="tense",
+            instruct_scene="深夜内殿",
+        ),
+        ScriptSegment(
+            type="narration",
+            text=long_text * 2,
+            speaker="旁白",
+            emotion="tense",
+            instruct_scene="深夜内殿",
+        ),
+        ScriptSegment(
+            type="narration",
+            text=long_text * 2,
+            speaker="旁白",
+            emotion="tense",
+            instruct_scene="深夜内殿",
+        ),
+    ]
+
+    plans = planner.plan(segments)
+
+    assert [plan.source_segment_indices for plan in plans] == [(0, 1), (2,)]
+
+
 def test_scene_planner_splits_failed_plan_at_explicit_semantic_boundary() -> None:
     planner = ScenePlanner(
         target_min_duration_s=60,
