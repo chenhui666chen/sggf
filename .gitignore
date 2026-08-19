@@ -192,3 +192,9 @@ backend/audiobooks/
 backend/data/audio_library/
 backend/backend/
 _media_backup_*/
+
+# Celery beat runtime state (local scheduler cache, not source)
+celerybeat-schedule
+celerybeat-schedule-sdb
+celerybeat-schedule-shm
+celerybeat-schedule-wal
