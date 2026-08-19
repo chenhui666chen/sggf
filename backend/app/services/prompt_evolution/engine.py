@@ -94,6 +94,10 @@ class PromptEvolutionEngine:
         # 🆕 A/B测试优化：失败变体记录
         self._failed_variants: Dict[str, int] = {}  # variant_hash -> fail_count
 
+        # 🔧 候选挑战者注入追踪：确定性候选变体每批次只参与一轮 A/B，
+        # 跨批次由失败计数（3次）淘汰，批次重置时清空注入记录
+        self._injected_candidate_descs: set = set()
+
     def _get_genre_weights(self, genre: str) -> Dict[str, float]:
         """
         🆕 获取题材权重配置
@@ -506,6 +510,30 @@ class PromptEvolutionEngine:
         self.exploration_mode = False
         self.exploration_attempts = 0
         self.reverse_optimization_mode = False  # 🆕 反向优化模式标志
+        self._injected_candidate_descs = set()  # 🔧 候选挑战者注入追踪重置
+
+    def _inject_candidate_challengers(
+        self, filtered_variants: List[Tuple[str, str]]
+    ) -> List[Tuple[str, str]]:
+        """确定性注入候选挑战者变体（外部 skill 基准实验拆零件产出）。
+
+        候选变体与 LLM 生成变体同台 A/B 竞争，每批次只注入一次
+        （批次重置时清空注入记录）；跨批次由失败计数淘汰，历史失败
+        达阈值的候选跳过（与既有失败变体过滤一致）。
+        """
+        from .meta_optimizer import build_candidate_challengers
+
+        for prompt, desc in build_candidate_challengers(self.genre):
+            if desc in self._injected_candidate_descs:
+                continue
+            variant_hash = self._get_prompt_hash(prompt)
+            if self._failed_variants.get(variant_hash, 0) >= 3:
+                logger.debug(f"   ⏭️ 跳过候选挑战者（已失败多次）: {desc}")
+                continue
+            filtered_variants.append((prompt, desc))
+            self._injected_candidate_descs.add(desc)
+            logger.info(f"   🎯 注入候选挑战者参与A/B: {desc}")
+        return filtered_variants
 
     def _get_current_temperature(self) -> float:
         """🔧 获取当前温度（探索模式使用更高温度）"""
@@ -898,6 +926,9 @@ class PromptEvolutionEngine:
                                 skipped_count += 1
                             else:
                                 filtered_variants.append((variant_prompt, variant_desc))
+
+                    # 🔧 确定性注入候选挑战者（单次运行只参与一轮 A/B）
+                    filtered_variants = self._inject_candidate_challengers(filtered_variants)
 
                     if not filtered_variants:
                         logger.debug(f"   ℹ️ 所有变体均已失败，跳过A/B测试")

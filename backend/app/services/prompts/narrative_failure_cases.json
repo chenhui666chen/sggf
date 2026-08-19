@@ -1,0 +1,162 @@
+{
+  "version": "1.0.0",
+  "description": "小说叙事失败案例库：双相位知识（T3事前预防 + T1事后机制修复）。字段对齐 AI Director OS CF 库规范：structured triggers（trigger_condition 维度 + judgment_signals）+ disposition（预防处置）+ repair_model（基于生成机制的修复，优先于导演视角建议）。",
+  "cases": [
+    {
+      "code": "HOOK_WEAK",
+      "name": "钩子乏力",
+      "class": "light",
+      "triggers": {
+        "scene_types": ["日常"],
+        "positions": ["普通推进", "世界观揭示"],
+        "genres": []
+      },
+      "judgment_signals": ["结尾仅总结情绪无新信息", "无未闭合冲突", "无点下一章动机"],
+      "prevention": "结尾前从三选一落钩：①未闭合冲突（对抗未分胜负）②半揭示信息（关键信息只揭50%）③新威胁征兆（异动/来客/期限）。禁止用情绪总结收尾。",
+      "repair_model": "保留正文主体，仅重写末段：从本章冲突中提取一个未闭合点，在信息揭示50%处中断；新末段不超过200字，最后一句必须是悬置状态（提问/逼近/未说完的话）。"
+    },
+    {
+      "code": "PACING_DRAG",
+      "name": "局部节奏拖沓",
+      "class": "light",
+      "triggers": {
+        "scene_types": ["日常", "对话"],
+        "positions": ["普通推进"],
+        "genres": []
+      },
+      "judgment_signals": ["连续段落无事件推进", "对话超过8轮无新信息", "纯氛围描写超3段"],
+      "prevention": "每个场景写前自问：本场景改变了什么？无改变则压缩或删除；连续对话不超过6轮必插入动作/事件打断。",
+      "repair_model": "定位无推进连续描写段，压缩至原文1/3并保留唯一必要信息点；拖沓对话保留首尾两轮（目标建立+结果落定），中间轮转为一句叙述带过。"
+    },
+    {
+      "code": "DESC_ABSTRACT",
+      "name": "描写空洞",
+      "class": "light",
+      "triggers": {
+        "scene_types": ["战斗", "升级"],
+        "positions": [],
+        "genres": ["修仙", "玄幻"]
+      },
+      "judgment_signals": ["剑光如虹/光芒大作/威压爆发类套词", "战斗无具体动作链", "突破只有气势描写无规则反馈"],
+      "prevention": "战斗/突破描写执行动作链机制：主体→具体动作→对象→可见后果，每一步落到物理反馈（位移/破损/消耗）；禁用『剑光如虹』『力量涌动』类空词。",
+      "repair_model": "将形容词句逐句改写为动作句：找出句中主体，补其具体动作与对象，追加可见后果；每个招式必须产生至少一处可观察的环境或身体变化。"
+    },
+    {
+      "code": "DIALOG_STIFF",
+      "name": "对话失真",
+      "class": "light",
+      "triggers": {
+        "scene_types": ["对话", "情感"],
+        "positions": [],
+        "genres": ["都市"]
+      },
+      "judgment_signals": ["台词在解释设定", "人物说话方式同质化", "无潜台词"],
+      "prevention": "台词三要素：说话目标（想要什么）+ 遮掩方式（不直说什么）+ 泄露点（哪句露了真心）；每个人物保持既定口癖与句长。",
+      "repair_model": "按人设重写失真对话：先标出该人物此场景的真实目标，台词围绕目标推进并保留一处言不由衷；插入打断、停顿或动作打断长对白。"
+    },
+    {
+      "code": "AI_TRACE",
+      "name": "AI痕迹",
+      "class": "light",
+      "triggers": {
+        "scene_types": [],
+        "positions": [],
+        "genres": []
+      },
+      "judgment_signals": ["连续排比句", "重复句式开头", "高频总结句"],
+      "prevention": "",
+      "repair_model": "扫描同构句（相同开头/相同长度连排），保留最强一句，其余改写为长短交错的变体；删除段末总结句，让信息留在事件中。"
+    },
+    {
+      "code": "EMOTION_FLAT",
+      "name": "情绪平淡",
+      "class": "light",
+      "triggers": {
+        "scene_types": ["情感"],
+        "positions": ["人物突破", "完结收束"],
+        "genres": []
+      },
+      "judgment_signals": ["直接命名情绪（他很愤怒）", "无身体反应", "重大时刻一笔带过"],
+      "prevention": "情绪禁直名，用三层落地：生理反应（呼吸/心跳/指尖）→ 失控微动作（捏碎/失语/踉跄）→ 环境投射（声音远去/光线变形）。",
+      "repair_model": "在每个情绪节点插入三层结构（生理反应+失控细节+环境投射），替换原有情绪命名句；重大情绪时刻至少给3句慢镜头。"
+    },
+    {
+      "code": "STALL_NO_PROGRESS",
+      "name": "原地踏步",
+      "class": "heavy",
+      "triggers": {
+        "scene_types": [],
+        "positions": ["普通推进"],
+        "genres": []
+      },
+      "judgment_signals": ["读完不知本章改变了什么", "冲突状态与上章相同", "只有铺垫无兑现"],
+      "prevention": "动笔前列出本章三项改变（关系/信息/局势至少各一），正文必须实际发生其中至少一项；铺垫章也须兑现一个次要信息点。",
+      "repair_model": "重构事件链：先明确本章结束时哪个状态相对开头发生了不可逆变化，删掉与该变化无关的场景，围绕变化点重排起因-冲突-落点。"
+    },
+    {
+      "code": "LOGIC_BREAK",
+      "name": "逻辑硬伤",
+      "class": "heavy",
+      "triggers": {
+        "scene_types": ["悬疑", "转折"],
+        "positions": ["关键转折"],
+        "genres": ["悬疑"]
+      },
+      "judgment_signals": ["突然想到式推理", "因果跳步", "人物知晓不该知道的信息"],
+      "prevention": "推理链显式三步：证据→推断→验证，每步可回溯；人物只能使用其视角内可获得的信息。",
+      "repair_model": "重建因果链：列出断裂点前后事件，在断点前补最小铺垫段（证据出现/动机揭示），使行为可追溯；删除无法铺垫的跳跃，改用两步过渡。"
+    },
+    {
+      "code": "OOC_MAJOR",
+      "name": "人设漂移",
+      "class": "heavy",
+      "triggers": {
+        "scene_types": ["情感", "对话"],
+        "positions": [],
+        "genres": []
+      },
+      "judgment_signals": ["人物行为违背既有动机", "能力超出当前设定", "语气突变"],
+      "prevention": "人物重大决定前自查：该选择是否符合其核心动机与当前能力？若必须偏离，需先建立足够压力情境。",
+      "repair_model": "对照人物锚点定位漂移行为：优先改回人设内行为；若剧情必须偏离，在漂移点前补压力条件（威胁/代价/新信息）使偏离合理化。"
+    },
+    {
+      "code": "CONTINUITY_BREAK",
+      "name": "连续性断裂",
+      "class": "heavy",
+      "triggers": {
+        "scene_types": [],
+        "positions": ["伏笔回收", "卷末收束"],
+        "genres": []
+      },
+      "judgment_signals": ["与前文状态矛盾", "伏笔回收对不上埋设点", "道具/伤势/位置凭空变化"],
+      "prevention": "回收伏笔前先对照埋设章原文；涉及前文状态（伤势/物品/位置）时以最近章节连续性资产为准。",
+      "repair_model": "列出与前文冲突的具体点，全部以前文状态为准重写冲突段落；伏笔回收需引用埋设时的具体细节（物品特征/原话/场景）以建立呼应。"
+    },
+    {
+      "code": "STRUCT_BROKEN",
+      "name": "结构断裂",
+      "class": "heavy",
+      "triggers": {
+        "scene_types": ["转折"],
+        "positions": ["关键转折", "大高潮"],
+        "genres": []
+      },
+      "judgment_signals": ["开头结尾与正文脱节", "转折无支点", "高潮在前中段爆发后疲软"],
+      "prevention": "按比例预排结构：铺垫40%→升级30%→转折/高潮20%→余韵10%；转折点必须落在可回溯的伏笔支点上。",
+      "repair_model": "重排场景顺序满足结构比例，将转折/高潮点移至章节60-80%处；删除转折后多余的重复渲染，保留一处余韵收尾。"
+    },
+    {
+      "code": "INFO_DUMP",
+      "name": "设定倾倒",
+      "class": "heavy",
+      "triggers": {
+        "scene_types": ["日常"],
+        "positions": ["世界观揭示", "开篇定调"],
+        "genres": ["科幻"]
+      },
+      "judgment_signals": ["连续旁白式设定说明", "人物为解释设定而说教", "单段超5句无情节"],
+      "prevention": "设定信息拆进冲突释放：单段设定说明不超过3句；每个设定点绑定一个当下事件后果。",
+      "repair_model": "把说明段转为场景：找出『谁在此刻需要这个信息』，改写为追问-回应-代价的对话/事件；无法场景化的设定删除，留待后文按需释放。"
+    }
+  ]
+}

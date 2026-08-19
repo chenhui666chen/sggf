@@ -23,7 +23,8 @@ from .novel_rules import (
     preprocess_text, postprocess_text, ALL_FORBIDDEN_WORDS,
     calculate_text_metrics, compare_metrics, TextMetrics,
     calculate_multi_dimension_score, MultiDimensionScore,
-    _calculate_fidelity_score  # 🆕 新增：保真度计算函数
+    _calculate_fidelity_score,  # 🆕 新增：保真度计算函数
+    locate_high_risk_segments, build_targeted_rewrite_hint,  # 🔧 统计预检→定点改写
 )
 
 logger = logging.getLogger(__name__)
@@ -61,6 +62,9 @@ class PromptEvaluator:
         "MiniMax/MiniMax-M3",
         "doubao-seed-evolving",
     })
+    # 🔧 深区定点改写阈值：基线≥此分才附定点提示；低分样本无差别全文
+    # 改写已有效，附提示反而限制发挥（基准实验：深区对全文改写免疫）
+    DEEP_ZONE_HINT_THRESHOLD = 90
 
     def __init__(self):
         self.llm_client = get_llm_client()
@@ -231,9 +235,23 @@ class PromptEvaluator:
                     error="原始样本AI率为0，已排除"
                 )
 
+            # 🔧 统计预检：深区（基线≥阈值）先定位高风险结构句式再定点改写，
+            # 比无差别全文改写有效（humanize_mba 工程闭环实证）；低分样本
+            # 零污染，继续走普通全文改写链路
+            targeted_hint = ""
+            original_findings: List[Dict[str, Any]] = []
+            if original_result.get("success") and (
+                original_result.get("ai_score") or 0
+            ) >= self.DEEP_ZONE_HINT_THRESHOLD:
+                original_findings = locate_high_risk_segments(sample.text)
+                targeted_hint = build_targeted_rewrite_hint(original_findings)
+
             # 2. 使用提示词改写文本
             logger.debug(f"   ⏳ 正在改写文本...")
-            rewritten = await self._rewrite_text(prompt, sample.text, temperature, model_id=model_id)
+            rewritten = await self._rewrite_text(
+                prompt, sample.text, temperature,
+                model_id=model_id, targeted_hint=targeted_hint,
+            )
             logger.debug(f"   ✅ 改写完成，长度: {len(rewritten)}")
 
             if not rewritten or len(rewritten.strip()) < 50:
@@ -395,6 +413,8 @@ class PromptEvaluator:
                     "sentence_length_variance": original_metrics.sentence_length_variance,
                     "short_sentence_ratio": original_metrics.short_sentence_ratio,
                     "forbidden_word_count": original_metrics.forbidden_word_count,
+                    # 🔧 复测闭环：原文/改写命中数双侧落盘，供定点消除效果对比
+                    "high_risk_hits": len(original_findings),
                 },
                 rewritten_metrics={
                     "period_ratio": rewritten_metrics.period_ratio,
@@ -403,6 +423,7 @@ class PromptEvaluator:
                     "sentence_length_variance": rewritten_metrics.sentence_length_variance,
                     "short_sentence_ratio": rewritten_metrics.short_sentence_ratio,
                     "forbidden_word_count": rewritten_metrics.forbidden_word_count,
+                    "high_risk_hits": len(locate_high_risk_segments(rewritten)),
                 },
                 metrics_comparison=metrics_comparison,
                 # 🆕 多维评分
@@ -465,7 +486,7 @@ class PromptEvaluator:
 
         return await asyncio.gather(*[_limited(s) for s in samples])
 
-    async def _rewrite_text(self, prompt: str, original_text: str, temperature: float, model_id: Optional[str] = None) -> str:
+    async def _rewrite_text(self, prompt: str, original_text: str, temperature: float, model_id: Optional[str] = None, targeted_hint: str = "") -> str:
         """使用提示词改写文本（三层架构：预处理 → LLM改写 → 后处理）
 
         Args:
@@ -473,6 +494,7 @@ class PromptEvaluator:
             original_text: 原始文本
             temperature: LLM温度参数
             model_id: 指定使用的模型ID（可选，None时使用默认路由）
+            targeted_hint: 定点消除指令（深区样本统计预检命中时附加，可选）
         """
 
         # ========== 第1层：规则预处理 ==========
@@ -481,9 +503,12 @@ class PromptEvaluator:
             logger.debug(f"📝 预处理: {', '.join(preprocess_logs)}")
 
         # ========== 第2层：LLM改写 ==========
+        user_content = f"请改写以下文本，降低其AI痕迹：\n\n{preprocessed_text}"
+        if targeted_hint:
+            user_content += "\n" + targeted_hint
         messages = [
             {"role": "system", "content": prompt},
-            {"role": "user", "content": f"请改写以下文本，降低其AI痕迹：\n\n{preprocessed_text}"}
+            {"role": "user", "content": user_content}
         ]
 
         # 构建调用参数

@@ -715,6 +715,7 @@ PRESET_INEFFECTIVE_STRATEGIES = [
     "名词、专名、事实类替换（实测对降分零贡献，只损耗保真）",
     "对高分文本只做局部零星修饰（插几句口语、零星删套路句），检测器是全局分布分类器，局部人味化不改变整体分数",
     "对99分深区文本只做单维度改写（口语化/不完美感注入/语域混搭任一单项），反向隔离实验实测分数不动",
+    "纯词表排查/审美清单类提示词对高分深区文本降幅为0（外部 skill 基准实验 5 个独立来源证伪：检测器匹配句式统计分布而非词表，词表是最重也最无效的资产，禁止再向词表方向进化）",
 ]
 
 # 预置禁止模式
@@ -732,6 +733,125 @@ PRESET_FORBIDDEN_PATTERNS = [
     "为了降低AI率删除结尾结论、关键线索或具体信息",
     "通过删句、删段或以省略替代原文内容大幅缩短改写篇幅，换取检测器盲区的虚假低分",
 ]
+
+
+# ============================================================================
+# 七-B、高风险结构句式定位（统计预检 → 定点改写 → 复测闭环）
+# ============================================================================
+# 来源：外部 skill 基准实验（tmp/skill_bench_report.md 第五/七节）收敛出的
+# 四类结构句式盲区 + 段首模板重复。检测器匹配句式统计分布而非词表，
+# 对深区文本先定位后定点消除，比无差别全文改写更有效（humanize_mba
+# 工程闭环实证）。全部为确定性正则，零 LLM 成本。
+
+HIGH_RISK_PATTERNS: Dict[str, List[str]] = {
+    # 二元对比/否定铺垫句式（5 个外部 skill 独立收敛）
+    "binary_contrast": [
+        r"不是[^。，]{1,12}，而是",
+        r"不只是[^。，]{1,16}，更是",
+        r"并非[^。，]{1,12}，而是",
+        r"与其说是[^。，]{1,12}，不如说是",
+    ],
+    # 叙述者解释腔/预告腔（上帝视角替读者总结）
+    "narrator_explanation": [
+        r"[他她它]不知道的是",
+        r"殊不知",
+        r"这一切只是开始",
+        r"而这一切，才刚刚开始",
+    ],
+    # "通过/基于+名词化"翻译腔骨架
+    "nominalization": [
+        r"通过[^。，]{2,20}(实现|达成|获得|完成)",
+        r"基于[^。，]{2,20}(进行|展开|实现)",
+    ],
+}
+
+# 公式化对话标签（空壳标签：不承载语气/动作信息）
+_DIALOGUE_TAG_PATTERN = re.compile(
+    r"说道|问道|笑道|答道|叹道|缓缓开口|沉声开口|轻声开口"
+)
+
+# 段首同字连续重复的最小段数阈值
+_PARAGRAPH_OPENING_RUN_THRESHOLD = 3
+
+# 对话段开头引号（连续对话/日记体是正常小说结构，不参与段首重复统计）
+_DIALOGUE_OPENING_CHARS = "“「『\"'"
+
+HIGH_RISK_TYPE_LABELS: Dict[str, str] = {
+    "binary_contrast": "'不是X，而是Y'式二元对比铺垫",
+    "narrator_explanation": "叙述者解释腔/预告腔（'他不知道的是…'类）",
+    "dialogue_tags": "公式化对话标签密度过高",
+    "nominalization": "'通过/基于+名词化'翻译腔骨架",
+    "paragraph_opening": "连续段落以相同字词开头",
+}
+
+
+def locate_high_risk_segments(text: str) -> List[Dict[str, Any]]:
+    """统计预检：定位文本中的高风险结构句式（确定性正则，零LLM成本）。
+
+    Returns:
+        命中列表，每项 {"type": 类型键, "paragraph": 段落序号(1起)}；
+        dialogue_tags 为全文级命中，paragraph 为 0。
+    """
+    if not text or not text.strip():
+        return []
+
+    paragraphs = text.split("\n")
+    findings: List[Dict[str, Any]] = []
+
+    # 1-3. 段级句式命中（同段同类型去重）
+    for idx, para in enumerate(paragraphs, start=1):
+        if not para.strip():
+            continue
+        for type_key, patterns in HIGH_RISK_PATTERNS.items():
+            if any(re.search(p, para) for p in patterns):
+                findings.append({"type": type_key, "paragraph": idx})
+
+    # 4. 全文级：公式化对话标签密度（标签≥3 且 标签数/对话段数 > 50%）
+    dialogue_paras = [p for p in paragraphs if "“" in p or "”" in p]
+    if dialogue_paras:
+        tag_count = sum(len(_DIALOGUE_TAG_PATTERN.findall(p)) for p in paragraphs)
+        if tag_count >= 3 and tag_count / len(dialogue_paras) > 0.5:
+            findings.append({"type": "dialogue_tags", "paragraph": 0})
+
+    # 5. 全文级：连续段首同字重复（≥阈值段）。对话段以引号开头是正常
+    # 小说结构（连续对白/日记体），既不触发报告也不并入叙述段 run；
+    # 但作为 run 断点：被对话隔开的叙述段不算连续
+    # （误报取证：suspense_001 三段日记曾被误报并进 hint）
+    non_empty = []
+    for i, p in enumerate(paragraphs, start=1):
+        if not p.strip():
+            continue
+        first = p.strip()[0]
+        non_empty.append((i, None if first in _DIALOGUE_OPENING_CHARS else first))
+
+    run_start = 0
+    for pos in range(1, len(non_empty) + 1):
+        if pos == len(non_empty) or non_empty[pos][1] != non_empty[run_start][1]:
+            run_len = pos - run_start
+            if (
+                non_empty[run_start][1] is not None
+                and run_len >= _PARAGRAPH_OPENING_RUN_THRESHOLD
+            ):
+                findings.append({"type": "paragraph_opening", "paragraph": non_empty[run_start][0]})
+            run_start = pos
+
+    return findings
+
+
+def build_targeted_rewrite_hint(findings: List[Dict[str, Any]]) -> str:
+    """把预检命中渲染为定点消除指令；无命中返回空串（低分样本零污染）。"""
+    if not findings:
+        return ""
+    lines = []
+    for f in findings:
+        label = HIGH_RISK_TYPE_LABELS.get(f["type"], f["type"])
+        pos = f"第{f['paragraph']}段" if f.get("paragraph") else "全文"
+        lines.append(f"- {pos}：{label}")
+    return (
+        "\n\n【定点消除指令】统计预检在以下位置命中高风险结构句式，"
+        "请优先对这些位置做定点重构，消除对应句式；未命中的段落"
+        "按常规要求处理，不得为凑改动而破坏其信息保真：\n" + "\n".join(lines)
+    )
 
 
 # ============================================================================

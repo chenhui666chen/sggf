@@ -408,6 +408,7 @@ TEXTURE_TARGET_BLOCK = """# 质地转换验收标准（转换后的文本应具�
 - 比喻陌生化：优先与当前场景绑定的新鲜表达，避免高频套路意象。
 - 零套路句：不出现模式化的环境渲染句与升华收尾。
 - 对白与动作推进优先：叙事段落以人物动作和对白带动节奏，减少全知视角的均匀铺陈。
+- 真人爆款语料的节奏分布参照：逗号间隔多在八九字上下，整句多在二十余字上下，多数逗号分句偏长、靠少量短句破节奏。此为校准参照而非执行目标：不得为凑数值机械拆句、碎片化或截断句子，与反过度改写条款冲突时以后者为准。
 以上特征必须整体、自然地体现在全文，不得为了凑特征而破坏语义、事实与阅读流畅。"""
 
 # 🆕 经验注入块标记与上限：起点提示词注入历史实测有效策略，避免每批从裸基线重新摸索
@@ -545,6 +546,74 @@ VARIANT_DETECTION_STRATEGY_CONSTRAINT = (
     "④上述操作必须全文整体执行（全文质地转换），不得只在局部段落零星修饰："
     "检测器按全文统计分布判定，单维度局部改写对高分文本无效。"
 )
+
+
+# 🔧 候选挑战者变体（外部 skill 基准实验拆零件产出，取证
+# tmp/skill_bench_report.md 第五节）：与六法独立竞争而非混合（用户侧
+# A/B 实验实测增补注入会与六法互相拉扯）。待 A/B 验证后由经验回流进池。
+# 条款均转写为无引号抽象规则（对齐 ANTI_* 块风格，过安全检查）。
+
+# 候选条款：四类结构句式禁令（负面清单真实空白区，stop-slop /
+# story-deslop / shuorenhua 三源独立收敛；词汇层已证伪，结构句式层未覆盖）
+# 注：块内标题不带开发态状态字样（如"候选"），防止被改写模型理解为可选项
+STRUCTURE_CLAUSE_MARKER = "# 结构句式定点禁令"
+STRUCTURE_CLAUSE_BLOCK = """# 结构句式定点禁令
+除既有负面清单外，另须消除以下四类高频结构句式（检测器匹配句式统计分布，此类句式是高分文本的主要残留特征）：
+- 禁止二元对比与否定铺垫句式（先否定一项再引出另一项的对称框架，含递进变体）；需要对比时直接陈述后者，不搭建否定铺垫。
+- 禁止叙述者解释腔与预告腔：不用上帝视角替读者总结局势、预告走向或暗示命运，叙事停在人物与事件本身。
+- 禁止公式化对话标签：对白不以空壳标签逐句挂载，改用动作、表情或上下文自然交代说话人。
+- 禁止介词引导的名词化翻译腔骨架（凭某手段达成某结果的固定框架），改为直接陈述动作与结果。"""
+STRUCTURE_CLAUSE_DESC = "结构句式四类禁令候选条款（负面清单空白区，待验证）"
+
+# 独立策略族：去精致化（shuorenhua / story-deslop 理论内核：AI味源于
+# 过度圆滑、工整、解释充分；轻规则产物实测 +33~36）。独立提示词，
+# 不携带六法指令，作为独立 arm 与六法竞争。
+DESLOP_CHALLENGER_DESC = "去精致化独立策略族（与六法竞争，不混合）"
+DESLOP_CHALLENGER_PROMPT = """你是一位把文字改得朴素直接的编辑。任务：把AI生成的小说片段改写成朴素、直接、去精致化的人类表达，严格保留原文全部事实与信息。
+
+# 铁律：信息保真
+- 人物姓名、时间、地点、数量、因果关系、事件顺序与既有设定逐字锁定，不增不删。
+- 不新增原文未暗示的情节、对话、心理活动或细节；原文结尾是什么状态就保持什么状态。
+- 改写后篇幅与原文偏差不得超过两成，不得删句、删段或以省略替代内容。
+
+# 去精致化改写方向
+- 说人话：把每句改成像普通人顺手写下的话，直接、简短、不绕。
+- 不堆砌：删除一切不承载事实的华丽修饰、排比、渲染与抒情。
+- 不解释：删除叙述者替读者做的总结、铺垫与点题；人物情绪用具体动作带过，不做心理分析。
+- 不工整：允许句子长短不一、衔接随意一些，不追求对仗与节奏均匀。
+- 对白按人物身份说口语，不加方言、语气词和网络用语。
+
+# 输出要求
+- 只输出改写后的正文，不输出标题、说明、分析或Markdown。"""
+
+
+def build_candidate_challengers(genre: Optional[str] = None) -> List[Tuple[str, str]]:
+    """确定性候选挑战者变体：[(提示词, 描述), ...]。
+
+    结构条款变体 = 基线提示词 + 条款块（独立 arm）；去精致化变体 =
+    独立提示词（不与六法混合）。两者均追加题材约束（去精致化的
+    朴素化方向有把古典语域拉向现代口语的风险，需与六法同款防护）
+    并经 _enforce_fidelity_constraint 追加硬约束，供引擎 A/B 轮次注入验证。
+    """
+    genre_addon = SAFE_GENRE_ADDONS.get(genre, "") if genre else ""
+
+    structure_base = SAFE_INITIAL_PROMPT
+    if genre_addon:
+        structure_base = structure_base + "\n\n" + genre_addon
+    structure_prompt = MetaOptimizer._enforce_fidelity_constraint(
+        structure_base.rstrip() + "\n\n" + STRUCTURE_CLAUSE_BLOCK
+    )
+
+    deslop_base = DESLOP_CHALLENGER_PROMPT
+    if genre_addon:
+        deslop_base = deslop_base + "\n\n" + genre_addon
+    deslop_prompt = MetaOptimizer._enforce_fidelity_constraint(
+        deslop_base.rstrip()
+    )
+    return [
+        (structure_prompt, STRUCTURE_CLAUSE_DESC),
+        (deslop_prompt, DESLOP_CHALLENGER_DESC),
+    ]
 
 
 class MetaOptimizer:
@@ -1161,12 +1230,16 @@ class MetaOptimizer:
         # 使用 REVIEW_CHECK 任务类型，会自动选择 chat 模型（更快）
         # 🆕 探索模式使用更高温度
         temperature = 0.9 if exploration_mode else 0.7
+        # 🔧 优化任务需要固定模板的长输出而非深度推理；显式关闭思考，覆盖
+        # REVIEW_CHECK 路由到的 deepseek-v4-pro 默认 thinking 开启（其思考
+        # tokens 会吃掉 max_tokens 预算导致 finish_reason=length、输出为空）
         response = await self.llm_client.chat(
             messages=messages,
             task_type=TaskType.REVIEW_CHECK,
             temperature=temperature,
             max_tokens=self.OPTIMIZER_RESPONSE_MAX_TOKENS,
-            use_cache=False
+            use_cache=False,
+            extra_body={"thinking": {"type": "disabled"}}
         )
 
         # 先在当前实例上解析；若候选不安全，则用快照完整回滚经验变更。
