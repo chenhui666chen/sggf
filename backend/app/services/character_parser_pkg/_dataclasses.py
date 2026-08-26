@@ -33,6 +33,7 @@ class ParsedCharacter:
     growth_direction: Optional[str] = None
     relationships: Optional[str] = None
     mainline_clues: Optional[str] = None
+    speech_style: Optional[str] = None
     
     raw_text: str = ""
     
@@ -90,5 +91,7 @@ class ParsedCharacter:
             sections.append(f"【主线绑定】\n{mainline_binding}")
         if self.growth_direction:
             sections.append(f"【成长方向】\n{self.growth_direction}")
-        
+        if self.speech_style:
+            sections.append(f"【说话风格】\n{self.speech_style}")
+
         return "\n\n".join(sections) if sections else self.raw_text

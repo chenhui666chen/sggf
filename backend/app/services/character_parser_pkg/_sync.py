@@ -82,6 +82,14 @@ def sync_parsed_characters_to_db(
                 existing.summary = parsed.build_summary() or existing.summary
                 existing.profile = parsed.build_profile() or existing.profile
 
+                # P2 稳定基线字段：非空优先，空解析不覆盖已有值
+                existing.personality = parsed.personality or existing.personality
+                existing.worldview = parsed.worldview or existing.worldview
+                existing.motivation = parsed.motivation or existing.motivation
+                existing.limitation = parsed.limitation or existing.limitation
+                existing.growth_direction = parsed.growth_direction or existing.growth_direction
+                existing.speech_style = parsed.speech_style or existing.speech_style
+
                 # 扩展管线重新引用该卡片：标记来源并解除历史归档
                 existing.source = "expansion"
                 existing.archived_at = None
@@ -108,6 +116,13 @@ def sync_parsed_characters_to_db(
                     importance_level=parsed.importance_level,
                     summary=parsed.build_summary(),
                     profile=parsed.build_profile(),
+                    # P2 稳定基线字段
+                    personality=parsed.personality,
+                    worldview=parsed.worldview,
+                    motivation=parsed.motivation,
+                    limitation=parsed.limitation,
+                    growth_direction=parsed.growth_direction,
+                    speech_style=parsed.speech_style,
                     relations=(
                         json.dumps(
                             build_character_relations_payload(parsed.relationships),

@@ -1,9 +1,15 @@
 """
 第三方登录服务
 """
+import base64
+import json
+import re
 from typing import Any, Dict, Optional
 
 import httpx
+from cryptography.exceptions import InvalidSignature
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import padding
 from fastapi import HTTPException, status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -12,14 +18,91 @@ from app.core.security import create_access_token, make_unusable_password_hash
 from app.models.user import User
 
 
+def _normalize_key_material(material: str, label: str) -> bytes:
+    """将单行 Base64 或 PEM 格式的密钥材料归一化为 PEM 字节串。"""
+    text = str(material or "").strip()
+    if text.startswith("-----BEGIN"):
+        return text.encode("utf-8")
+    body = "".join(text.split())
+    if not body:
+        raise ValueError("空的密钥材料")
+    lines = [body[i : i + 64] for i in range(0, len(body), 64)]
+    return "-----BEGIN {label}-----\n{body}\n-----END {label}-----\n".format(
+        label=label, body="\n".join(lines)
+    ).encode("utf-8")
+
+
+def load_alipay_private_key(material: str):
+    """加载支付宝应用私钥（支持单行 Base64 或 PEM）。"""
+    return serialization.load_pem_private_key(
+        _normalize_key_material(material, "PRIVATE KEY"), password=None
+    )
+
+
+def load_alipay_public_key(material: str):
+    """加载支付宝公钥（支持单行 Base64 或 PEM）。"""
+    return serialization.load_pem_public_key(
+        _normalize_key_material(material, "PUBLIC KEY")
+    )
+
+
+def build_sign_content(params: Dict[str, Any]) -> str:
+    """按支付宝规则拼接待签名串：键 ASCII 升序，剔除 sign 与空值，值不做 URL 编码。"""
+    return "&".join(
+        f"{key}={params[key]}"
+        for key in sorted(params)
+        if key != "sign" and params[key] not in (None, "")
+    )
+
+
+def strip_sign_fields(raw_text: str) -> str:
+    """从响应原文中剔除 sign/sign_type 字段，得到待验签串。"""
+    stripped = re.sub(r'"sign"\s*:\s*"[^"]*"\s*,?', "", raw_text)
+    stripped = re.sub(r'"sign_type"\s*:\s*"[^"]*"\s*,?', "", stripped)
+    return re.sub(r",\s*}", "}", stripped)
+
+
 class AlipayOAuthService:
-    """支付宝 OAuth 服务。"""
+    """支付宝 OAuth 服务（请求需 RSA2 签名，响应使用支付宝公钥验签）。"""
 
     def __init__(self, app_id: str, private_key: str, public_key: str):
         self.app_id = app_id
-        self.private_key = private_key
-        self.public_key = public_key
         self.auth_url = "https://openapi.alipay.com/gateway.do"
+        try:
+            self._private_key = load_alipay_private_key(private_key)
+            self._public_key = load_alipay_public_key(public_key)
+        except (ValueError, TypeError) as exc:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="支付宝密钥配置格式错误，请检查 ALIPAY_PRIVATE_KEY / ALIPAY_PUBLIC_KEY",
+            ) from exc
+
+    def _sign(self, params: Dict[str, Any]) -> str:
+        """使用应用私钥对请求参数做 RSA2（SHA256withRSA）签名。"""
+        content = build_sign_content(params)
+        signature = self._private_key.sign(
+            content.encode("utf-8"), padding.PKCS1v15(), hashes.SHA256()
+        )
+        return base64.b64encode(signature).decode("ascii")
+
+    def _verify_response(self, raw_text: str, payload: Dict[str, Any]) -> bool:
+        """使用支付宝公钥验证响应签名；未配置公钥时跳过验签。"""
+        if self._public_key is None:
+            return True
+        sign = str(payload.get("sign") or "")
+        if not sign:
+            return False
+        content = strip_sign_fields(raw_text)
+        try:
+            self._public_key.verify(
+                base64.b64decode(sign),
+                content.encode("utf-8"),
+                padding.PKCS1v15(),
+                hashes.SHA256(),
+            )
+        except (InvalidSignature, ValueError):
+            return False
+        return True
 
     def get_auth_url(self, redirect_uri: str, state: Optional[str] = None) -> str:
         """获取支付宝授权地址。"""
@@ -37,23 +120,29 @@ class AlipayOAuthService:
         return f"https://openauth.alipay.com/oauth2/publicAppAuthorize.htm?{urlencode(params)}"
 
     async def get_access_token(self, code: str) -> Dict[str, Any]:
-        """通过授权码换取访问令牌。"""
+        """通过授权码换取访问令牌（请求带 RSA2 签名）。"""
+        params = {
+            "app_id": self.app_id,
+            "method": "alipay.system.oauth.token",
+            "charset": "utf-8",
+            "sign_type": "RSA2",
+            "timestamp": self._get_timestamp(),
+            "version": "1.0",
+            "grant_type": "authorization_code",
+            "code": code,
+        }
+        params["sign"] = self._sign(params)
+
         async with httpx.AsyncClient(timeout=15.0) as client:
-            response = await client.post(
-                self.auth_url,
-                data={
-                    "app_id": self.app_id,
-                    "method": "alipay.system.oauth.token",
-                    "charset": "utf-8",
-                    "sign_type": "RSA2",
-                    "timestamp": self._get_timestamp(),
-                    "version": "1.0",
-                    "grant_type": "authorization_code",
-                    "code": code,
-                },
-            )
+            response = await client.post(self.auth_url, data=params)
             response.raise_for_status()
-            payload = response.json()
+            payload = json.loads(response.text)
+
+        if not self._verify_response(response.text, payload):
+            return {
+                "error": "alipay_sign_verify_failed",
+                "error_description": "支付宝响应验签失败",
+            }
 
         token_data = payload.get("alipay_system_oauth_token_response", payload)
         if str(token_data.get("code", "10000")) != "10000":
@@ -64,22 +153,28 @@ class AlipayOAuthService:
         return token_data
 
     async def get_user_info(self, access_token: str) -> Dict[str, Any]:
-        """获取支付宝用户信息。"""
+        """获取支付宝用户信息（请求带 RSA2 签名）。"""
+        params = {
+            "app_id": self.app_id,
+            "method": "alipay.user.info.share",
+            "charset": "utf-8",
+            "sign_type": "RSA2",
+            "timestamp": self._get_timestamp(),
+            "version": "1.0",
+            "auth_token": access_token,
+        }
+        params["sign"] = self._sign(params)
+
         async with httpx.AsyncClient(timeout=15.0) as client:
-            response = await client.post(
-                self.auth_url,
-                data={
-                    "app_id": self.app_id,
-                    "method": "alipay.user.info.share",
-                    "charset": "utf-8",
-                    "sign_type": "RSA2",
-                    "timestamp": self._get_timestamp(),
-                    "version": "1.0",
-                    "auth_token": access_token,
-                },
-            )
+            response = await client.post(self.auth_url, data=params)
             response.raise_for_status()
-            payload = response.json()
+            payload = json.loads(response.text)
+
+        if not self._verify_response(response.text, payload):
+            return {
+                "error": "alipay_sign_verify_failed",
+                "error_description": "支付宝响应验签失败",
+            }
 
         user_info = payload.get("alipay_user_info_share_response", payload)
         if str(user_info.get("code", "10000")) != "10000":

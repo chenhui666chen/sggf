@@ -260,6 +260,7 @@ export default function EditorPage() {
         project_id: parseInt(projectId),
         chapter_id: parseInt(chapterId),
         reason,
+        user_feedback: reason,
       })
       const data = response.data
       setSaveMessage('🔄 已提交重新生成任务,正在后台处理...（预计60-120秒）')
@@ -294,8 +295,8 @@ export default function EditorPage() {
           try {
             const result = typeof data.result === 'string' ? JSON.parse(data.result) : data.result
 
-            if (result && result.content) {
-              dispatch(setContent(result.content))
+            if (result && (result.content || result.regenerated_content)) {
+              dispatch(setContent(result.content || result.regenerated_content))
               setSaveMessage('✅ 重新生成完成！章节内容已更新')
             } else {
               setSaveError('重新生成结果为空，请重试')

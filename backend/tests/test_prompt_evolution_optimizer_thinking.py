@@ -16,11 +16,14 @@ from app.services.prompt_evolution.meta_optimizer import MetaOptimizer
 
 
 def test_optimize_prompt_passes_thinking_disabled():
-    """optimize_prompt 调用 LLM 必须显式关闭思考（防 deepseek-v4-pro 吃掉预算）。"""
+    """optimize_prompt 调用 LLM 必须显式关闭思考（防 deepseek-v4-pro 吃掉预算）。
+
+    三合一参数注入重构后（core.model_resolution.build_thinking_disabled_extra_body
+    按模型族分发互斥参数），断言改为检查注入函数调用仍存在。
+    """
     source = inspect.getsource(MetaOptimizer.optimize_prompt)
 
-    assert '"disabled"' in source
-    assert "thinking" in source
+    assert "build_thinking_disabled_extra_body" in source
     assert "extra_body" in source
 
 

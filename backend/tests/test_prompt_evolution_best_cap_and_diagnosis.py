@@ -52,22 +52,22 @@ def _make_version(prompt_text: str, avg_ai_score: float) -> PromptVersion:
 
 
 class TestBestVersionScoreCap:
-    """漏洞C：avg_ai_score 超过起点门槛（80）的版本不得入选最佳列表。"""
+    """漏洞C修正（2026-08-23 黄金对照实验证伪 TMS）：avg_ai_score 上限门槛移除。
 
-    def test_high_score_version_rejected(self, tmp_path):
+    TMS 为反向文风分类器（GPT人工化金标准(朱雀0%)得 TMS=97、AI文学腔
+    原文得 TMS=0），按 TMS 分拒版本会把真正的人感版本挡在最佳列表外；
+    降分有效性改由 composite（语义人感）与保真/成功率门槛保障。
+    """
+
+    def test_high_score_version_no_longer_rejected_by_tms(self, tmp_path):
+        """TMS 高分（97+）不再一票否决（朱雀人感版本可能恰是高 TMS 分）。"""
         engine = _make_engine(tmp_path)
         engine._update_best_versions(_make_version(CLEAN_PROMPT, 97.25))
-        assert engine.history.best_versions == []
+        assert len(engine.history.best_versions) == 1
 
     def test_low_score_version_accepted(self, tmp_path):
         engine = _make_engine(tmp_path)
         engine._update_best_versions(_make_version(CLEAN_PROMPT, 63.5))
-        assert len(engine.history.best_versions) == 1
-
-    def test_boundary_score_80_accepted(self, tmp_path):
-        # 边界 80.0 保留（与既有保真门槛测试语义一致；起点选择另有 <80 门槛）
-        engine = _make_engine(tmp_path)
-        engine._update_best_versions(_make_version(CLEAN_PROMPT, 80.0))
         assert len(engine.history.best_versions) == 1
 
 

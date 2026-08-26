@@ -4,7 +4,7 @@ import logging
 import re
 from typing import Any, Dict
 
-from core.model_resolution import TaskType
+from core.model_resolution import TaskType, build_thinking_disabled_extra_body
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +22,11 @@ class SemanticJudge:
 
     async def evaluate(self, original: str, rewritten: str, genre: str) -> Dict[str, Any]:
         try:
+            # 🔧 评审是 checklist 式清单打分，不依赖深度推理；显式关思考以避免
+            #    thinking tokens 吃光 max_tokens 导致 finish_reason=length 截断
+            #    JSON（与 meta_optimizer 的同名修复一致）。REVIEW_CHECK 主路由
+            #    deepseek-v4-pro 的 YAML 默认 thinking=enabled，需调用方覆盖。
+            #    参数按模型族分发（doubao 系拒绝 reasoning_effort+thinking 同传）。
             response = await self.llm_client.chat(
                 messages=[
                     {"role": "system", "content": self._system_prompt()},
@@ -30,6 +35,7 @@ class SemanticJudge:
                 task_type=TaskType.REVIEW_CHECK,
                 temperature=0.0,
                 use_cache=False,
+                extra_body=build_thinking_disabled_extra_body(),
             )
             return self._normalize(self._parse_json(response))
         except (json.JSONDecodeError, TypeError, ValueError, KeyError) as exc:
@@ -45,9 +51,9 @@ class SemanticJudge:
 重点识别否定反转、人物/时间/数量/因果/设定变化、关键信息遗漏、病句和过度重写。
 保真评分按四层判据执行：
 1事实层（硬，计入fact_consistency）：专名、数字、时空、因果、物品属性（如武器名）、动作姿态，任何改变都扣分。
-2命题层（硬，计入semantic_fidelity）：句子断言须等价，包括肯否定、主客关系、数量、程度、事件顺序。
+2命题层（硬，计入semantic_fidelity）：句子断言须等价，包括肯否定、主客关系、数量、程度；段落与句子的出场顺序不属于断言，顺序不同不构成保真损失。
 3情绪方向层（计入semantic_fidelity）：情绪极性与强度须不变（悲仍悲、紧张不减）；承载情绪的意象与比喻允许同喻域等义替换，仅意象载体更换而情绪方向一致时不得扣semantic_fidelity；情绪方向或强度明显偏离才扣分；整段删除意象计入information_completeness而非保真。
-4表达层（零扣分）：措辞、句法、句长、语序、语域属改写的合法操作空间，表达差异不是缺陷，一律不扣分。
+4表达层（零扣分）：措辞、句法、句长、语序、语域、段落与句子的出场顺序属改写的合法操作空间，顺序调整但信息点完整不扣分，表达差异不是缺陷，一律不扣分。
 语病、生造词（如“上个古遗迹”）计入readability或writing_naturalness，不计入fact_consistency。
 所有分数为0-100且越高越好。只输出合法JSON，不要Markdown。每个维度必须包含score、reason、issues。
 六个评分维度格式固定为：{"score": 数值, "reason": "原因", "issues": []}。
@@ -173,16 +179,34 @@ confidence必须是0-1数值。输出字段：semantic_fidelity、fact_consisten
 
 
 def calculate_hybrid_score(ai_score: float, local_score: float, review: Dict[str, Any]) -> float:
-    """将朱雀、本地规则和语义评审归一为越低越好的成本分。"""
+    """将朱雀、本地规则和语义评审归一为越低越好的成本分。
+
+    2026-08-23 黄金对照实验证伪 TMS：GPT人工化金标准(朱雀0%) TMS=97、
+    AI原文 TMS=0、用户手写 TMS=92、金庸 TMS=0——TMS 是文风分类器
+    (长句文学腔→0/短句网文腔→高)，与真实AI痕迹反向且与题材强相关，
+    任何正向权重都会把优化方向拉向"文学腔"，故权重清零（保留参数
+    兼容调用方，不再参与计分）。主信号：语义人感 writing_naturalness
+    (0.20)、genre_consistency(0.15)、over_rewrite_risk(0.10 加项)、
+    事实/保真维度，控制"自然化不得以失真为代价"。
+    """
     if not review.get("available"):
         return local_score
+
+    def _d(key: str) -> float:
+        v = review.get(key)
+        return v.get("score", 100) if isinstance(v, dict) else 100.0
+
+    over = str(review.get("over_rewrite_risk", "low")).strip().lower()
+    over_cost = {"low": 0, "medium": 25, "high": 60}.get(over, 0)
+
     score = (
-        ai_score * 0.35
-        + (100 - review["semantic_fidelity"]["score"]) * 0.20
-        + (100 - review["fact_consistency"]["score"]) * 0.10
-        + (100 - review["information_completeness"]["score"]) * 0.10
-        + (100 - review["readability"]["score"]) * 0.10
-        + (100 - review["writing_naturalness"]["score"]) * 0.10
-        + local_score * 0.05
+        (100 - _d("semantic_fidelity")) * 0.20
+        + (100 - _d("fact_consistency")) * 0.15
+        + (100 - _d("information_completeness")) * 0.15
+        + (100 - _d("readability")) * 0.05
+        + (100 - _d("writing_naturalness")) * 0.20
+        + (100 - _d("genre_consistency")) * 0.15
+        + local_score * 0.10
+        + over_cost * 0.10
     )
     return max(0.0, min(100.0, score))

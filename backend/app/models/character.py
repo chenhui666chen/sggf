@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Optional, List, TYPE_CHECKING
 
-from sqlalchemy import String, Text, ForeignKey, DateTime, Integer
+from sqlalchemy import String, Text, ForeignKey, DateTime, Integer, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 
@@ -95,6 +95,26 @@ class Character(Base):
     )
     profile: Mapped[Optional[str]] = mapped_column(  # 完整人物档案
         Text, nullable=True
+    )
+
+    # 稳定人物基线（P2：与章节级动态状态快照分离，禁止被动态值覆盖）
+    personality: Mapped[Optional[str]] = mapped_column(  # 性格锚点
+        Text, nullable=True, comment="稳定基线：性格锚点"
+    )
+    worldview: Mapped[Optional[str]] = mapped_column(  # 价值倾向
+        Text, nullable=True, comment="稳定基线：世界观/价值倾向"
+    )
+    motivation: Mapped[Optional[str]] = mapped_column(  # 原始核心动机
+        Text, nullable=True, comment="稳定基线：原始核心动机"
+    )
+    limitation: Mapped[Optional[str]] = mapped_column(  # 能力限制
+        Text, nullable=True, comment="稳定基线：能力/弱点限制"
+    )
+    growth_direction: Mapped[Optional[str]] = mapped_column(  # 成长方向
+        Text, nullable=True, comment="稳定基线：成长方向"
+    )
+    speech_style: Mapped[Optional[str]] = mapped_column(  # 说话风格短摘要
+        Text, nullable=True, comment="稳定基线：说话风格（语气/称谓/回避表达等短摘要）"
     )
 
     # 结构化扩展字段（JSON 字符串形式存储）
@@ -222,5 +242,83 @@ class CharacterTechnique(Base):
         return (
             f"<CharacterTechnique id={self.id} "
             f"character_id={self.character_id} technique_item_id={self.technique_item_id}>"
+        )
+
+
+class CharacterStateSnapshot(Base):
+    """章节级人物动态状态快照表（P2）
+
+    保存剧情驱动的人物动态状态（当前目标/信念/情绪/关系/已知信息），
+    与 Character 基线列分离：动态状态绝不写回基线。
+    同一角色同一章节唯一，重复保存幂等（覆盖更新）。
+    """
+
+    __tablename__ = "character_state_snapshots"
+    __table_args__ = (
+        UniqueConstraint(
+            "project_id",
+            "character_id",
+            "chapter_id",
+            name="uq_character_state_snapshot_project_character_chapter",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    project_id: Mapped[int] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    character_id: Mapped[int] = mapped_column(
+        ForeignKey("characters.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    chapter_id: Mapped[int] = mapped_column(
+        ForeignKey("chapters.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    # 章节号冗余存储：支持按章节号排序与"恢复第 N 章前状态"查询
+    chapter_number: Mapped[Optional[int]] = mapped_column(
+        Integer, nullable=True, index=True, comment="章节号（用于按章节排序/恢复）"
+    )
+
+    # 动态状态
+    current_motivation: Mapped[Optional[str]] = mapped_column(
+        Text, nullable=True, comment="当前目标/动机"
+    )
+    current_belief: Mapped[Optional[str]] = mapped_column(
+        Text, nullable=True, comment="当前信念"
+    )
+    emotional_state: Mapped[Optional[str]] = mapped_column(
+        Text, nullable=True, comment="情绪状态"
+    )
+    relationship_state_json: Mapped[Optional[str]] = mapped_column(
+        Text, nullable=True, comment="关系状态(JSON)"
+    )
+    known_information: Mapped[Optional[str]] = mapped_column(
+        Text, nullable=True, comment="已知信息"
+    )
+    state_changes_json: Mapped[Optional[str]] = mapped_column(
+        Text, nullable=True, comment="状态变更记录(JSON)"
+    )
+    evidence_text: Mapped[Optional[str]] = mapped_column(
+        Text, nullable=True, comment="状态证据文本片段"
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    # 关系定义
+    character: Mapped["Character"] = relationship(
+        "Character", lazy="select", foreign_keys=[character_id]
+    )
+
+    def __repr__(self) -> str:  # pragma: no cover - 调试辅助
+        return (
+            f"<CharacterStateSnapshot id={self.id} "
+            f"character_id={self.character_id} chapter_id={self.chapter_id}>"
         )
 

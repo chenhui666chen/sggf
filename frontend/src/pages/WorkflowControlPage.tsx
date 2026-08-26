@@ -86,6 +86,8 @@ import {
   formatWorkflowGenerationModelTooltip,
 } from '@/utils/workflowGenerationModelDisplay'
 import { buildStoryExpansionCompletionMessage } from '@/utils/storyExpansionFeedback'
+import { resolveRestoredRunningTask } from '@/utils/restoreRunningWorkflowTask'
+import { selectLatestChapterForOverwrite } from '@/utils/selectLatestChapterForOverwrite'
 import {
   getStoryExpansionResultFromTaskComplete,
   isStoryExpansionTaskId,
@@ -1259,32 +1261,52 @@ export default function WorkflowControlPage() {
 
                 // 恢复最新的任务
                 const latestTask = runningTasks[0]
-                const taskType = latestTask.task_type
+                const restoredTask = resolveRestoredRunningTask(latestTask)
 
-                // 从 task_type 提取 stage （例如："workflow_stage_concept" -> "concept"）
-                const stageName = taskType.replace('workflow_stage_', '')
-                const stageType = stageName as StageType
+                if (restoredTask?.kind === 'generate_next_chapter') {
+                  const workflowState = store.getState().workflow.generateNextChapter
+                  const existingTaskId = workflowState.taskId
+                  const existingChapterNumber = workflowState.chapterNumber
+                  const knownChapters = store.getState().editor.chapters || []
+                  const restoredChapterNumber =
+                    restoredTask.chapterNumber
+                    ?? existingChapterNumber
+                    ?? (knownChapters.reduce(
+                      (maxChapter: number, chapter: { chapter_number?: number }) =>
+                        Math.max(maxChapter, Number(chapter.chapter_number) || 0),
+                      0,
+                    ) + 1)
 
-                // 🔧 验证 stageType 是否有效
-                const validStages: StageType[] = ['concept', 'structure', 'content', 'review', 'iteration']
-                if (!validStages.includes(stageType)) {
-                } else {
-                  // 🔧 新增：显示任务运行时间
-                  const ageMinutes = latestTask.age_minutes || 0
+                  if (existingTaskId !== restoredTask.taskId) {
+                    dispatch(startGenerateNextChapter({
+                      taskId: restoredTask.taskId,
+                      chapterNumber: restoredChapterNumber,
+                    }))
+                  }
 
-                  // 更新状态
-                  setCurrentTaskId(latestTask.task_id)
+                  setGeneratingNextChapter(true)
+                  setIsGenerateNextChapterFlow(true)
+                  hasRestoredRunningTask = true
+                  restoredStage = 'structure'
+                  dispatch(setCurrentStage('structure'))
+
+                  setSnackbarMessage(`✅ 已恢复生成第${restoredChapterNumber}章（已运行${restoredTask.ageMinutes.toFixed(0)}分钟）`)
+                  setSnackbarSeverity('success')
+                  setSnackbarOpen(true)
+                } else if (restoredTask?.kind === 'workflow_stage') {
+                  const ageMinutes = restoredTask.ageMinutes
+                  const stageType = restoredTask.stageType
+
+                  setCurrentTaskId(restoredTask.taskId)
                   setIsRunning(true)
-                  // 🔧 关键修复：使用局部变量记录恢复状态，避免后续代码覆盖
                   hasRestoredRunningTask = true
                   restoredStage = stageType
 
                   dispatch(setCurrentStage(stageType))
                   dispatch(updateStageStatus({ stage: stageType, status: 'active' }))
 
-                  // 🔔 关键：开始轮询任务状态（如果 WebSocket 未连接）
                   if (!workflowWebSocket.isConnected()) {
-                    pollTaskStatus(latestTask.task_id, stageType)
+                    pollTaskStatus(restoredTask.taskId, stageType)
                   }
 
                   setSnackbarMessage(`✅ 工作流已恢复，继续执行 ${stageNames[stageType]}（已运行${ageMinutes.toFixed(0)}分钟）`)
@@ -1300,6 +1322,8 @@ export default function WorkflowControlPage() {
                   clearInterval(taskPollingInterval)
                   setTaskPollingInterval(null)
                 }
+                // 生成下一章完成后若错过 WebSocket，刷新时仍要拉回最新章节列表
+                dispatch(fetchChapters(requestedProjectId))
               }
             }
           } catch {
@@ -1963,10 +1987,9 @@ export default function WorkflowControlPage() {
       // 如果用户没有输入标题，后端会自动生成
       const titleToSave = chapterTitle.trim() || ''
 
-      // 🔥 修复：直接创建章节记录 - 使用apiClient，URL末尾添加斜杠避免307重定向
-      const response = await apiClient.post('/api/v1/chapters/', {
-        project_id: parseInt(projectId),
-        content: content,
+      const numericProjectId = parseInt(projectId)
+      const response = await apiClient.createChapter(numericProjectId, {
+        content,
         title: titleToSave || undefined, // 如果为空则自动生成
       })
 
@@ -2015,7 +2038,6 @@ export default function WorkflowControlPage() {
     }
 
     try {
-      // 获取最新的迭代阶段内容
       const getContentResponse = await apiClient.get(`/api/v1/workflow/${projectId}/stage/iteration/content`)
       const contentData = getContentResponse.data
       const content = contentData.content || ''
@@ -2027,21 +2049,25 @@ export default function WorkflowControlPage() {
         return
       }
 
-      // 创建章节记录（标题自动生成）
-      const response = await apiClient.post('/api/v1/chapters/', {
-        project_id: parseInt(projectId),
-        content: content,
-        // 不传title，让后端自动生成
-      })
+      const numericProjectId = parseInt(projectId)
+      const chaptersResponse = await apiClient.getChapters(numericProjectId)
+      const existingChapters = Array.isArray(chaptersResponse.data) ? chaptersResponse.data : []
+      const latestChapter = selectLatestChapterForOverwrite(existingChapters)
+
+      const response = latestChapter?.id
+        ? await apiClient.updateChapter(latestChapter.id, { content })
+        : await apiClient.createChapter(numericProjectId, { content })
 
       const data = response.data
-
-      // 显示成功提示
-      setSnackbarMessage(`✅ 章节已自动保存：${data.title} (${data.word_count} 字)`)
+      setSnackbarMessage(
+        latestChapter?.id
+          ? `✅ 已覆盖第${data.chapter_number ?? latestChapter.chapter_number}章：${data.title} (${data.word_count} 字)`
+          : `✅ 章节已自动保存：${data.title} (${data.word_count} 字)`
+      )
       setSnackbarSeverity('success')
       setSnackbarOpen(true)
+      dispatch(fetchChapters(numericProjectId))
 
-      // 1.5秒后跳转到Dashboard
       setTimeout(() => {
         navigate(`/dashboard?projectId=${projectId}`)
       }, 1500)
@@ -2060,8 +2086,6 @@ export default function WorkflowControlPage() {
       setSnackbarOpen(true)
     }
   }
-
-
 
   const getWorkflowStageContent = async (stage: 'structure' | 'content' | 'review' | 'iteration') => {
     if (!projectId) return null
@@ -2335,14 +2359,13 @@ export default function WorkflowControlPage() {
       // ✅ 重置后续阶段状态
       dispatch(resetFollowingStages('review'))
 
-      // ✅ 显示删除章节的消息（如果有的话）
-      if (saveData.deleted_chapters_count) {
-        setSnackbarMessage(`已删除 ${saveData.deleted_chapters_count} 个章节，正在重新生成...`)
-      } else {
-        setSnackbarMessage('评审报告已保存，正在启动迭代优化...')
-      }
+      setSnackbarMessage('评审报告已保存，正在按评审意见改写当前最后一章（完成后覆盖旧稿，不新建章节）')
       setSnackbarSeverity('success')
       setSnackbarOpen(true)
+
+      if (saveData.task_id) {
+        setCurrentTaskId(saveData.task_id)
+      }
 
       handleCloseReviewDialog()
 
@@ -2387,15 +2410,19 @@ export default function WorkflowControlPage() {
       // ✅ 关键修复：重置后续阶段状态
       dispatch(resetFollowingStages('content'))
 
-      // ✅ 显示删除成功的消息（如果有的话）
-      if (saveData.deleted_chapter) {
-        setSnackbarMessage(`已更新第${saveData.deleted_chapter.chapter_number}章并启动后续工作流...`)
+      const updatedChapter = saveData.updated_chapter || saveData.deleted_chapter
+      if (updatedChapter) {
+        setSnackbarMessage(`已更新第${updatedChapter.chapter_number}章并启动后续评审（不会清空前面章节）`)
       } else {
-        setSnackbarMessage('内容已保存，正在启动后续工作流...')
+        setSnackbarMessage('内容已保存，正在启动后续评审...')
       }
 
       setSnackbarSeverity('success')
       setSnackbarOpen(true)
+
+      if (saveData.task_id) {
+        setCurrentTaskId(saveData.task_id)
+      }
 
       handleCloseContentDialog()
 
@@ -2818,7 +2845,7 @@ export default function WorkflowControlPage() {
       )}
 
       {/* 异步任务进度提示 */}
-      {currentTaskId && (
+      {currentTaskId && !generateNextChapterTaskId && (
         <Alert severity="info" sx={{ mb: 3 }}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
             <CircularProgress size={20} />

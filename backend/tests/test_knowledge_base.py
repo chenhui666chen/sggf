@@ -98,3 +98,43 @@ def test_add_plot_outline_preserves_plot_outline_type():
     assert len(kb.vectorstore.added_documents) == 1
     assert kb.vectorstore.added_documents[0].metadata["type"] == "plot_outline"
     assert kb.vectorstore.added_documents[0].metadata["project_id"] == "15"
+
+def test_incompatible_fallback_uses_fresh_cleanroom(monkeypatch, tmp_path):
+    import sqlite3
+    from pathlib import Path as P
+
+    primary = tmp_path / "primary_dir"
+    fallback = tmp_path / "primary_dir_runtime_fallback"
+    stale_cleanroom = tmp_path / "primary_dir_runtime_fallback_cleanroom"
+    for folder in (primary, fallback, stale_cleanroom):
+        folder.mkdir()
+        db = folder / "chroma.sqlite3"
+        conn = sqlite3.connect(db)
+        conn.execute("CREATE TABLE migrations (dir TEXT, version INTEGER, filename TEXT)")
+        conn.execute("INSERT INTO migrations VALUES ('sysdb', 10, '00010-collection-schema.sqlite.sql')")
+        conn.commit()
+        conn.close()
+
+    opened = []
+
+    class _CaptureClient(_FakePersistentClient):
+        def __init__(self, path, settings):
+            opened.append(path)
+            super().__init__(path, settings)
+
+    _install_fake_chromadb(monkeypatch, _CaptureClient)
+    monkeypatch.setattr(knowledge_base_module, "AliyunEmbeddings", _FakeEmbeddings)
+    monkeypatch.setattr(knowledge_base_module, "Chroma", _FakeChroma)
+    monkeypatch.setattr(
+        knowledge_base_module,
+        "_load_supported_migration_versions",
+        lambda: {"sysdb": 9, "metadb": 5, "embeddings_queue": 2},
+    )
+
+    kb = knowledge_base_module.NovelKnowledgeBase(persist_directory=str(primary))
+
+    assert kb.vectorstore_mode == "persistent"
+    assert kb.active_persist_directory is not None
+    assert "_cleanroom_" in P(kb.active_persist_directory).name
+    assert kb.active_persist_directory != str(stale_cleanroom)
+    assert opened[-1] == kb.active_persist_directory

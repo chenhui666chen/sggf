@@ -24,6 +24,7 @@ from datetime import datetime
 from typing import List, Optional, Dict, Any
 
 from core.unified_llm_client import get_llm_client
+from core.model_resolution import build_thinking_disabled_extra_body
 from app.services.tencent_ai_detect import tencent_ai_detect_service
 from app.services.prompt_evolution.novel_rules import (
     _calculate_fidelity_score,
@@ -110,6 +111,54 @@ class CombinationPerformanceRecord:
     ai_score_stddev: float = 0.0
     confidence_score: float = 100.0
     evaluation_policy_version: str = EVALUATION_POLICY_VERSION
+
+
+def rank_by_ai_score(results: List[SingleModelResult]) -> List[SingleModelResult]:
+    """质量门槛内按 AI 分数升序排（降分最大者居首）；hybrid_score 仅作展示参考。
+
+    资格门槛（is_eligible_result 七项）已保证质量，排序再计入质量分只会
+    重复奖励少改写，使恒等映射占优（2026-08-19 玄幻轮实证：降 0 分模型
+    当选最佳并被选为进化改写执行模型）。AI 分数直接对应竞争目的本身。
+    """
+    return sorted(results, key=lambda r: r.ai_score)
+
+
+def collect_rejection_reasons(
+    result: SingleModelResult, min_improvement: int
+) -> List[str]:
+    """逐项推导未入选竞争的原因，供诊断日志使用（与 is_eligible_result 同步）。"""
+    reasons: List[str] = []
+    if result.improvement < min_improvement:
+        reasons.append(f"降幅{result.improvement}分低于门槛{min_improvement}分")
+    review = result.semantic_review or {}
+    if not review.get("available"):
+        if result.fidelity_similarity < ModelConfigStorage.FALLBACK_FIDELITY_SIMILARITY:
+            reasons.append(
+                f"评审不可用且文本相似度{result.fidelity_similarity:.0f}低于回退门槛"
+            )
+    else:
+        if review.get("hard_fail"):
+            reasons.append("评审硬失败")
+        risk = review.get("over_rewrite_risk")
+        if risk != "low":
+            reasons.append(f"过度改写风险={risk}")
+        confidence = review.get("confidence") or 0
+        if confidence < 0.6:
+            reasons.append(f"评审置信度低({confidence})")
+        for label, key, threshold in (
+            ("语义保真", "semantic_fidelity", 80),
+            ("事实一致", "fact_consistency", 90),
+            ("信息完整", "information_completeness", 75),
+        ):
+            score = (review.get(key) or {}).get("score", 0)
+            if score < threshold:
+                reasons.append(f"{label}={score}低于{threshold}")
+    if result.fidelity_similarity < ModelConfigStorage.MIN_FIDELITY_SIMILARITY:
+        reasons.append(
+            f"文本相似度{result.fidelity_similarity:.0f}低于"
+            f"{ModelConfigStorage.MIN_FIDELITY_SIMILARITY}"
+        )
+    return reasons
 
 
 # ============================================================================
@@ -217,11 +266,17 @@ class ModelConfigStorage:
     FALLBACK_FIDELITY_SIMILARITY = 70.0
     EVALUATION_DETAIL_LIMIT = 5000
     AVAILABILITY_FAILURE_THRESHOLD = 3
+    # 🎯 最低降幅门槛：降幅不足此值的结果没有竞争与统计价值，不进本次
+    # 成功列表、不计历史表现（零降幅恒等映射曾当选最佳并抑制进化，
+    # 2026-08-19 玄幻轮取证）
+    MIN_REQUIRED_IMPROVEMENT = 3
 
     @classmethod
     def is_eligible_result(cls, result: SingleModelResult) -> bool:
-        """只有完整成功且满足保真门槛的结果才能参与竞争统计。"""
+        """只有完整成功、达到降幅门槛且满足保真门槛的结果才能参与竞争统计。"""
         if not result.success:
+            return False
+        if result.improvement < cls.MIN_REQUIRED_IMPROVEMENT:
             return False
         review = result.semantic_review or {}
         if not review.get("available"):
@@ -282,12 +337,18 @@ class ModelConfigStorage:
             pass
 
     def load_config(self) -> Dict[str, Any]:
-        """加载模型配置（含管理员选定的活跃模型）"""
+        """加载模型配置（含管理员选定的活跃模型、连续失败跳隔计数）"""
         data = self._config_store.read()
-        return data or {
+        if data:
+            data.setdefault("admin_selected_model", None)
+            data.setdefault("auto_best_by_genre", {})
+            data.setdefault("consecutive_mm_fail_count", 0)  # 🔧 全 0/N 成功时累加，跳过后续评测
+            return data
+        return {
             "admin_selected_model": None,  # 管理员手动选定的模型ID（全局覆盖）
             "auto_best_by_genre": {},      # 按题材自动最优 {"通用": "model_id", "玄幻": ...}
             "updated_at": "",
+            "consecutive_mm_fail_count": 0,
         }
 
     def save_config(self, config: Dict[str, Any]) -> None:
@@ -677,7 +738,7 @@ class ModelConfigStorage:
     ELIMINATION_MIN_EVALS = 5       # 至少评估N次后才参与淘汰判定
     ELIMINATION_MIN_MODELS = 2      # 至少N个成熟模型后才开始横向比较
     ELIMINATION_SCORE_GAP = 20      # 与最佳模型分差超过此值则淘汰
-    MIN_ALIVE_MODELS = 4            # 淘汰后至少保留N个存活模型（性能淘汰与熔断共用地板）
+    MIN_ALIVE_MODELS = 6            # 淘汰后至少保留N个存活模型（性能淘汰与熔断共用地板），关思考后放宽到6
     CHALLENGE_INTERVAL = 5          # 每N轮进化迭代触发一次挑战赛
     CHALLENGE_PICK_COUNT = 1        # 每次挑战赛从淘汰池选取的模型数
     CHALLENGE_REVIVE_RANK = 3       # 挑战者进入前N名时复活
@@ -890,27 +951,22 @@ class MultiModelEvaluationService:
     2. 管理员手动触发全模型评测，查看表现排行
     """
 
-    MODEL_CONCURRENCY = 5
+    MODEL_CONCURRENCY = 8
     DETECT_CONCURRENCY = 3
-    SINGLE_MODEL_TIMEOUT = 120.0
-    MODEL_EVALUATION_POLICIES = {
-        "doubao-seed-evolving": {
-            "timeout": 90.0,
-            "max_tokens": 4096,
-            "extra_body": {"thinking": {"type": "disabled"}},
-        }
-    }
+    SINGLE_MODEL_TIMEOUT = 90.0
+    # 🔧 多模型评测默认关思考：改写+检测+评审链路属风格转换/清单打分任务，
+    #    无深度推理收益；thinking tokens 曾吃光 max_tokens 导致 finish_reason=length
+    #    空输出（历史题材实测多模型评测 0/4 成功）。
+    #    extra_body 按模型族分发（doubao 系拒绝 reasoning_effort+thinking 同传，
+    #    400 InvalidParameter 九模型验证实测），max_tokens 统一 4096。
 
     @classmethod
     def get_model_evaluation_policy(cls, model_id: str) -> Dict[str, Any]:
-        policy = cls.MODEL_EVALUATION_POLICIES.get(model_id)
-        if policy:
-            return {
-                "timeout": policy["timeout"],
-                "max_tokens": policy["max_tokens"],
-                "extra_body": dict(policy["extra_body"]),
-            }
-        return {"timeout": cls.SINGLE_MODEL_TIMEOUT, "max_tokens": None, "extra_body": {}}
+        return {
+            "timeout": cls.SINGLE_MODEL_TIMEOUT,
+            "max_tokens": 4096,
+            "extra_body": build_thinking_disabled_extra_body(model_id),
+        }
 
     def __init__(self):
         self.llm_client = get_llm_client()
@@ -919,6 +975,24 @@ class MultiModelEvaluationService:
         self._detect_semaphore = asyncio.Semaphore(self.DETECT_CONCURRENCY)
         self._review_semaphore = asyncio.Semaphore(3)
         self.semantic_judge = SemanticJudge(self.llm_client)
+
+    def should_skip_mm_eval(self) -> bool:
+        """
+        🔧 是否跳过本次多模型评测（用于失败批次后的节流）。
+        每次全 0/N 成功后，consecutive_mm_fail_count 累加；若当前计数>0，
+        则跳过本次并将计数-1（等价于每失败 1 次跳过后续 1 个触发间隔）。
+        """
+        cfg = self.config_storage.load_config()
+        count = int(cfg.get("consecutive_mm_fail_count", 0))
+        if count <= 0:
+            return False
+        cfg["consecutive_mm_fail_count"] = count - 1
+        self.config_storage.save_config(cfg)
+        logger.info(
+            "⏭️ 因上一次多模型评测 0/N 成功，跳过本次评测（剩余跳过次数: %d）",
+            cfg["consecutive_mm_fail_count"],
+        )
+        return True
 
     def get_available_models(self, genre: Optional[str] = None) -> List[Dict[str, Any]]:
         """获取所有可参与评估的模型列表（含历史表现和淘汰状态）"""
@@ -1108,7 +1182,20 @@ class MultiModelEvaluationService:
             if self.config_storage.is_eligible_result(r):
                 success_results.append(r)
 
-        success_results.sort(key=lambda r: r.hybrid_score)
+        # 质量门槛内按 AI 分数升序排（降分最大者居首）；
+        # hybrid_score 仅作展示参考，质量由 is_eligible_result 门槛保证
+        success_results = rank_by_ai_score(success_results)
+
+        # 🔧 未入选原因落日志：可诊断性（方案 C）——逐项推导被拒原因，
+        # 避免事后靠猜（如 2026-08-19 降 0 分当选最佳因排序键误用）
+        for r in results:
+            if r.success and not self.config_storage.is_eligible_result(r):
+                detail = "；".join(
+                    collect_rejection_reasons(
+                        r, self.config_storage.MIN_REQUIRED_IMPROVEMENT
+                    )
+                )
+                logger.info(f"  [未入选] {r.model_name}: {detail}")
 
         # 更新该题材的自动最优模型
         self.config_storage.update_auto_best_model(genre)
@@ -1123,10 +1210,31 @@ class MultiModelEvaluationService:
             f"耗时={total_time:.1f}秒"
         )
         if success_results:
+            best = success_results[0]
+            review = best.semantic_review or {}
+            fid = (review.get("semantic_fidelity") or {}).get("score")
+            fact = (review.get("fact_consistency") or {}).get("score")
+            comp = (review.get("information_completeness") or {}).get("score")
             logger.info(
-                f"  最佳: {success_results[0].model_name} "
-                f"(AI分数={success_results[0].ai_score}, 降低{success_results[0].improvement}分)"
+                f"  最佳: {best.model_name} (AI分数={best.ai_score}, "
+                f"降低{best.improvement}分, 耗时={best.latency_seconds:.1f}秒, "
+                f"hybrid={best.hybrid_score:.2f}, "
+                f"评审 保真={fid}/事实={fact}/完整={comp}, "
+                f"文本相似度={best.fidelity_similarity:.1f})"
             )
+
+        # 🔧 更新多模型评测连续失败计数：0/N 成功则累加，有成功则清零
+        #    防止全 0 批重复浪费 token（下一次引擎触发时会被跳过 1 个触发间隔）
+        cfg = self.config_storage.load_config()
+        if success_results:
+            cfg["consecutive_mm_fail_count"] = 0
+        else:
+            cfg["consecutive_mm_fail_count"] = int(cfg.get("consecutive_mm_fail_count", 0)) + 1
+            logger.warning(
+                f"🚫 多模型评测 0/{len(participate)} 成功，连续失败计数: "
+                f"{cfg['consecutive_mm_fail_count']}"
+            )
+        self.config_storage.save_config(cfg)
 
         return {
             "success": len(success_results) > 0,
@@ -1173,7 +1281,7 @@ class MultiModelEvaluationService:
                     {"role": "user", "content": f"请改写以下文本，降低其AI痕迹：\n\n{preprocessed}"},
                 ]
 
-                call_options: Dict[str, Any] = {"use_cache": False}
+                call_options: Dict[str, Any] = {"use_cache": False, "disable_fallback": True}
                 if policy["max_tokens"] is not None:
                     call_options["max_tokens"] = policy["max_tokens"]
                 if policy["extra_body"]:

@@ -38,7 +38,7 @@ def test_preset_experiences_stay_within_detector_features_and_fidelity_boundary(
         "模板化连接词",
         "句子长度相近",
         "人物姓名",
-        "事件顺序",
+        "信息点",
         "因果关系",
     ):
         assert required_direction in combined
@@ -65,8 +65,11 @@ def test_new_initial_prompt_targets_detector_patterns_without_content_distortion
     prompt = MetaOptimizer().get_initial_prompt("玄幻")
 
     assert "不得改变或增删人物姓名" in prompt
-    assert "事件顺序" in prompt
-    assert "禁止连续三句以上以相同人名" in prompt
+    assert "允许调整段落与句子的出场顺序" in prompt
+    assert "全部信息点必须保留" in prompt
+    # 自然化理念已放开：不再禁止向上连续人名重复，改为"允许自然重复、不刻意换指代"
+    assert "禁止连续三句以上以相同人名" not in prompt
+    assert "人名与名词自然重复" in prompt
     assert "不承载事实的机械连接词" in prompt
     assert "极致口语化" not in prompt
     assert "制造不完美" not in prompt
@@ -225,18 +228,18 @@ def test_ab_candidate_requires_every_planned_sample_to_pass_quality():
 
 
 def test_ab_rank_penalizes_minority_hard_failures_but_disqualifies_majority():
-    passed = make_result()
+    passed = make_result()  # 语义评审全部95/低过度改写 → 人感成本 = 2.0
     failed = make_result(success=False)
     failed.error = "事实一致性低于90"
 
-    # 全部通过：保持原分
-    assert PromptEvolutionEngine._ab_rank_score(30.0, [passed] * 4, 4) == 30.0
-    # 少数（1/4）硬失败：保留资格但按比例加罚分
+    # 全部通过：排名分取成功样本"人感成本"中位数（2.0），而非 TMS 均值 30.0 或中位数 69
+    assert PromptEvolutionEngine._ab_rank_score(30.0, [passed] * 4, 4) == 2.0
+    # 少数（1/4）硬失败：保留资格但按比例加罚分（中位数 2.0 + 1/4*60）
     minority_score = PromptEvolutionEngine._ab_rank_score(
         30.0, [passed, passed, passed, failed], 4
     )
-    assert 30.0 < minority_score <= 100.0
-    assert minority_score == pytest.approx(45.0)
+    assert 2.0 < minority_score <= 100.0
+    assert minority_score == pytest.approx(17.0)
     # 多数（3/4）硬失败：取消资格
     assert PromptEvolutionEngine._ab_rank_score(
         30.0, [passed, failed, failed, failed], 4

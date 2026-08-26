@@ -26,6 +26,9 @@ from core.model_runtime import run_async_compat
 from .intelligent_truncator import smart_truncate_for_context
 from . import review_feature_gate
 from .multi_model_review_service import MultiModelReviewService
+from app.services.character_runtime_context import (
+    build_initial_character_contexts_from_text,
+)
 
 # 导入模块化提示词
 from app.services.prompts.stages.world_building import (
@@ -35,7 +38,6 @@ from app.services.prompts.base.format import get_output_format
 from app.services.prompts.stages.structure_design import (
     get_genre_rhythm_guide
 )
-from app.services.prompts.stages.content_creation import FirstChapterPrompts
 from app.services.prompts.workflow_runtime import (
     build_first_chapter_review_prompts,
     build_runtime_structure_prompts,
@@ -1094,7 +1096,11 @@ class CreativeDirectorCoordinator:
             preserve_ratio=0.85,
         )
 
+        workflow_generation_model = self.project_context.get("workflow_generation_model")
+        original_validator_llm = getattr(validator, "llm", None)
         try:
+            if workflow_generation_model:
+                validator.llm = create_model_llm(model=workflow_generation_model, temperature=0.3)
             validation_result = validator.validate_events(
                 truncated_outline,
                 context={
@@ -1108,6 +1114,9 @@ class CreativeDirectorCoordinator:
         except Exception:
             logger.exception("事件验证失败，保留原始结构大纲")
             return ""
+        finally:
+            if workflow_generation_model and original_validator_llm is not None:
+                validator.llm = original_validator_llm
 
         if isinstance(validation_result, str):
             return validation_result.strip()
@@ -1197,6 +1206,11 @@ class CreativeDirectorCoordinator:
         # 🆕 使用ChapterPromptBuilder（与生成下一章保持一致）
         from .chapter_prompt_builder import ChapterPromptBuilder
         
+        # P1 统一人物上下文：首章使用初始基线（身份、动机、性格锚点、价值倾向、关系底色）
+        initial_character_contexts = build_initial_character_contexts_from_text(
+            characters or ""
+        )
+        
         builder = ChapterPromptBuilder(genre=current_genre)
         content_system_prompt = builder.build_system_prompt()
         content_user_prompt = builder.build_user_prompt(
@@ -1204,6 +1218,9 @@ class CreativeDirectorCoordinator:
             chapter_plan=chapter_plan,  # ✅ 只传第1章规划(~1500字)
             previous_ending="",  # 第1章无前文
             recent_chapter_assets_summary="",  # 第1章无连续性资产
+            core_character_anchor_context=initial_character_contexts.core_character_anchor_context,
+            focus_character_relationship_context=initial_character_contexts.focus_character_relationship_context,
+            character_runtime_context=initial_character_contexts.character_runtime_context,
             rag_character_context="",  # 初始化时RAG还是空的
             rag_world_context="",  # 初始化时RAG还是空的
             selected_opening=selected_opening,
@@ -1257,13 +1274,24 @@ class CreativeDirectorCoordinator:
         }
 
     def _run_single_model_quality_review(self, truncated_content: str) -> str:
-        review_system_prompt, review_user_prompt = build_first_chapter_review_prompts(
-            chapter_draft=truncated_content,
-        )
-        review_result = self.quality_reviewer._process_with_system_prompt(
-            review_user_prompt,
-            system_prompt=review_system_prompt,
-        )
+        workflow_generation_model = self.project_context.get("workflow_generation_model")
+        original_reviewer_llm = getattr(self.quality_reviewer, "llm", None)
+        try:
+            if workflow_generation_model:
+                self.quality_reviewer.llm = create_model_llm(
+                    model=workflow_generation_model,
+                    temperature=0.2,
+                )
+            review_system_prompt, review_user_prompt = build_first_chapter_review_prompts(
+                chapter_draft=truncated_content,
+            )
+            review_result = self.quality_reviewer._process_with_system_prompt(
+                review_user_prompt,
+                system_prompt=review_system_prompt,
+            )
+        finally:
+            if workflow_generation_model and original_reviewer_llm is not None:
+                self.quality_reviewer.llm = original_reviewer_llm
         return review_result if isinstance(review_result, str) else review_result.get("output", "评审报告")
 
     @staticmethod

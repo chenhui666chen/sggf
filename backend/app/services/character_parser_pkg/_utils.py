@@ -105,6 +105,7 @@ def _merge_parsed_character(base: "ParsedCharacter", incoming: "ParsedCharacter"
         "growth_direction",
         "relationships",
         "mainline_clues",
+        "speech_style",
     ):
         cur = getattr(base, field_name, None)
         nxt = getattr(incoming, field_name, None)

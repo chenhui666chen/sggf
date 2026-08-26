@@ -56,6 +56,7 @@ import {
   getStoryExpansionResultFromTaskComplete,
   isStoryExpansionTaskId,
 } from '@/utils/storyExpansionEvents'
+import { readStoredWorkflowGenerationModel } from '@/utils/workflowGenerationModelPreference'
 
 function extractFilenameFromContentDisposition(contentDisposition?: string | null, fallback: string = 'download.bin') {
   const header = String(contentDisposition || '').trim()
@@ -635,7 +636,9 @@ export default function DashboardPage() {
     try {
       logger.log('📍 开始生成下一章（异步模式）...')
 
-      const response = await apiClient.generateNextWorkflowChapter(projectId)
+      const response = await apiClient.generateNextWorkflowChapter(projectId, {
+        workflowGenerationModel: readStoredWorkflowGenerationModel() || undefined,
+      })
 
       if (response.status >= 200 && response.status < 300) {
         const data = response.data

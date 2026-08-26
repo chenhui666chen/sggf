@@ -141,9 +141,9 @@ def test_revived_model_starts_new_statistics_with_challenge_result(tmp_path):
     )
     competitors = [
         challenge,
-        SingleModelResult("m1", "M1", "p", "文本", 10, 1),
-        SingleModelResult("m2", "M2", "p", "文本", 30, 1),
-        SingleModelResult("m3", "M3", "p", "文本", 40, 1),
+        SingleModelResult("m1", "M1", "p", "文本", 10, 1, improvement=40),
+        SingleModelResult("m2", "M2", "p", "文本", 30, 1, improvement=20),
+        SingleModelResult("m3", "M3", "p", "文本", 40, 1, improvement=10),
     ]
 
     revived = storage.process_challenge_results("玄幻", [challenge], competitors)
@@ -246,21 +246,21 @@ def test_success_clears_model_failure_streak(tmp_path):
 def test_challenger_revives_only_when_ranked_in_top_three(tmp_path):
     storage = ModelConfigStorage(str(tmp_path))
     storage.save_config({"eliminated_models": {"玄幻": ["qwen3.7-plus"]}})
-    third = SingleModelResult("qwen3.7-plus", "Qwen", "p", "文本", 30, 1)
+    third = SingleModelResult("qwen3.7-plus", "Qwen", "p", "文本", 30, 1, improvement=20)
     results = [
-        SingleModelResult("m1", "M1", "p", "文本", 10, 1),
-        SingleModelResult("m2", "M2", "p", "文本", 20, 1),
+        SingleModelResult("m1", "M1", "p", "文本", 10, 1, improvement=40),
+        SingleModelResult("m2", "M2", "p", "文本", 20, 1, improvement=30),
         third,
-        SingleModelResult("m3", "M3", "p", "文本", 40, 1),
+        SingleModelResult("m3", "M3", "p", "文本", 40, 1, improvement=10),
     ]
     assert storage.process_challenge_results("玄幻", [third], results) == ["qwen3.7-plus"]
 
     storage.save_config({"eliminated_models": {"玄幻": ["qwen3.7-plus"]}})
-    fourth = SingleModelResult("qwen3.7-plus", "Qwen", "p", "文本", 35, 1)
+    fourth = SingleModelResult("qwen3.7-plus", "Qwen", "p", "文本", 35, 1, improvement=15)
     results = [
-        SingleModelResult("m1", "M1", "p", "文本", 10, 1),
-        SingleModelResult("m2", "M2", "p", "文本", 20, 1),
-        SingleModelResult("m3", "M3", "p", "文本", 30, 1),
+        SingleModelResult("m1", "M1", "p", "文本", 10, 1, improvement=40),
+        SingleModelResult("m2", "M2", "p", "文本", 20, 1, improvement=30),
+        SingleModelResult("m3", "M3", "p", "文本", 30, 1, improvement=20),
         fourth,
     ]
     assert storage.process_challenge_results("玄幻", [fourth], results) == []
@@ -368,7 +368,7 @@ def test_best_combination_excludes_results_below_fidelity_gate(tmp_path):
     )
     faithful = SingleModelResult(
         "deepseek-v4-flash", "DeepSeek", "deepseek", "文本", 20, 1,
-        fidelity_similarity=85,
+        fidelity_similarity=85, improvement=30,
     )
     storage.update_combination_performance(low_ai_but_unfaithful, "玄幻", "bad", "失真提示词")
     storage.update_combination_performance(faithful, "玄幻", "good", "保真提示词")
@@ -402,17 +402,17 @@ def test_semantic_review_allows_lower_lexical_fidelity_but_requires_low_risk():
     }
     accepted = SingleModelResult(
         "m1", "M1", "p", "文本", 0, 1,
-        fidelity_similarity=33,
+        fidelity_similarity=33, improvement=50,
         semantic_review=review,
     )
     medium_risk = SingleModelResult(
         "m2", "M2", "p", "文本", 0, 1,
-        fidelity_similarity=45,
+        fidelity_similarity=45, improvement=50,
         semantic_review={**review, "over_rewrite_risk": "medium"},
     )
     no_review = SingleModelResult(
         "m3", "M3", "p", "文本", 0, 1,
-        fidelity_similarity=45,
+        fidelity_similarity=45, improvement=50,
         semantic_review={"available": False},
     )
 
@@ -442,14 +442,14 @@ def test_best_model_for_selected_prompt_never_uses_another_prompt_version(tmp_pa
         storage.update_combination_performance(
             SingleModelResult(
                 "qwen3.7-plus", "Qwen", "alibaba", "文本", 30, 1,
-                fidelity_similarity=90,
+                fidelity_similarity=90, improvement=30,
             ),
             "玄幻", "approved", "已批准提示词", sample_hash=f"approved-{index}",
         )
         storage.update_combination_performance(
             SingleModelResult(
                 "deepseek-v4-flash", "DeepSeek", "deepseek", "文本", 5, 1,
-                fidelity_similarity=90,
+                fidelity_similarity=90, improvement=55,
             ),
             "玄幻", "other", "其他提示词", sample_hash=f"other-{index}",
         )
@@ -464,7 +464,7 @@ def test_repeated_same_sample_does_not_mature_combination(tmp_path):
     storage = ModelConfigStorage(str(tmp_path))
     result = SingleModelResult(
         "qwen3.7-plus", "Qwen", "alibaba", "文本", 20, 1,
-        fidelity_similarity=90,
+        fidelity_similarity=90, improvement=40,
     )
     for _ in range(5):
         storage.update_combination_performance(
@@ -515,7 +515,7 @@ def test_combination_tracks_variance_and_penalizes_uncertainty(tmp_path):
         storage.update_combination_performance(
             SingleModelResult(
                 "qwen3.7-plus", "Qwen", "alibaba", "文本", score, 1,
-                fidelity_similarity=90,
+                fidelity_similarity=90, improvement=60 - score,
             ),
             "玄幻", "p1", "提示词", sample_hash=f"s{index}",
         )
@@ -529,7 +529,7 @@ def test_old_evaluation_policy_is_not_used_for_production_routing(tmp_path):
     storage = ModelConfigStorage(str(tmp_path))
     result = SingleModelResult(
         "qwen3.7-plus", "Qwen", "alibaba", "文本", 10, 1,
-        fidelity_similarity=90,
+        fidelity_similarity=90, improvement=50,
     )
     for index in range(3):
         storage.update_combination_performance(
@@ -549,10 +549,10 @@ _POOL = [
 ]
 
 
-def test_elimination_keeps_at_least_four_alive_models(tmp_path):
-    # 已淘汰 4 个（alive=5），两个模型超门槛，只允许淘汰最差的一个保留到 4
+def test_elimination_keeps_at_least_six_alive_models(tmp_path):
+    # 已淘汰 2 个（alive=7），两个模型超门槛，只允许淘汰最差的一个保留到 6（地板已放宽到 6）
     storage = ModelConfigStorage(str(tmp_path))
-    storage.save_config({"eliminated_models": {"玄幻": _POOL[1:5]}})
+    storage.save_config({"eliminated_models": {"玄幻": _POOL[1:3]}})
     storage.save_performance(
         {
             "qwen3.7-plus": _mature_record("qwen3.7-plus", 10),
@@ -563,7 +563,7 @@ def test_elimination_keeps_at_least_four_alive_models(tmp_path):
     )
 
     assert storage.evaluate_elimination("玄幻") == ["step-3.7-flash"]
-    assert len(storage.get_active_models("玄幻")) == 4
+    assert len(storage.get_active_models("玄幻")) == 6
 
 
 def test_elimination_blocked_when_alive_already_at_floor(tmp_path):
@@ -596,9 +596,9 @@ def test_availability_circuit_breaker_respects_alive_floor(tmp_path):
         floor_storage.update_availability_status(_failed_result("qwen3.7-plus"), "玄幻")
     assert "qwen3.7-plus" not in floor_storage.get_eliminated_models("玄幻")
 
-    # 存活 5 个时熔断照常生效
+    # 存活 7 个（高于地板 6）时熔断照常生效
     ok_storage = ModelConfigStorage(str(tmp_path / "ok"))
-    ok_storage.save_config({"eliminated_models": {"玄幻": _POOL[1:5]}})
+    ok_storage.save_config({"eliminated_models": {"玄幻": _POOL[1:3]}})
     for _ in range(3):
         ok_storage.update_availability_status(_failed_result("qwen3.7-plus"), "玄幻")
     assert "qwen3.7-plus" in ok_storage.get_eliminated_models("玄幻")

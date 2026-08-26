@@ -15,6 +15,9 @@ from app.services.character_runtime_context import (
     build_focus_character_relationship_context_from_text,
     extract_core_character_names_from_text,
 )
+from app.services.character_state_snapshot import (
+    build_character_state_context_from_snapshots,
+)
 from app.services.setting_templates import (
     build_project_settings_summary,
     extract_relevant_categories_from_text,
@@ -114,6 +117,7 @@ class WorkflowChapterGenerationContext:
     epic_framework_context: str = ""
     planning_character_prompt_context: str = ""
     character_prompt_context: str = ""
+    character_state_context: str = ""
     core_character_anchor_context: str = ""
     focus_character_relationship_context: str = ""
     content_character_context: str = ""
@@ -1081,8 +1085,16 @@ class WorkflowContextBuilder:
 
         normalized_fields = dict(fields)
         if "review_meta" in normalized_fields:
+            incoming_meta = normalized_fields["review_meta"]
+            if not isinstance(incoming_meta, dict):
+                incoming_meta = _parse_storage_value(incoming_meta, {})
+            if not isinstance(incoming_meta, dict):
+                incoming_meta = {}
+            existing_meta = self.load_review_meta(project_id)
+            merged_meta = dict(existing_meta or {})
+            merged_meta.update(incoming_meta)
             normalized_fields["review_meta"] = json.dumps(
-                normalized_fields["review_meta"] or {},
+                merged_meta,
                 ensure_ascii=False,
             )
 
@@ -1291,7 +1303,7 @@ class WorkflowContextBuilder:
             normalized_characters,
             preferred_names=prioritized_character_names,
             max_characters=4,
-            detail_limit=720,
+            detail_limit=960,
         )
         focus_character_relationship_context = (
             build_focus_character_relationship_context_from_text(
@@ -1301,6 +1313,12 @@ class WorkflowContextBuilder:
                 max_characters=4,
                 detail_limit=520,
             )
+        )
+        # 闭环读取端：注入第 N-1 章及更早的最新人物状态快照（无快照时为空）
+        character_state_context = build_character_state_context_from_snapshots(
+            self.db,
+            project_id=project_id,
+            before_chapter_number=chapter_number,
         )
         content_character_context = _join_context_sections(
             core_character_anchor_context,
@@ -1329,6 +1347,7 @@ class WorkflowContextBuilder:
             epic_framework_context=epic_framework_context,
             planning_character_prompt_context=planning_character_prompt_context,
             character_prompt_context=character_prompt_context,
+            character_state_context=character_state_context,
             core_character_anchor_context=core_character_anchor_context,
             focus_character_relationship_context=focus_character_relationship_context,
             content_character_context=content_character_context,

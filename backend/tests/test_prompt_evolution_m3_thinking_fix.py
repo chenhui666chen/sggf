@@ -38,7 +38,10 @@ async def test_m3_rewrite_disables_thinking():
     await evaluator._rewrite_text("prompt", "原文内容", 0.7, model_id=M3_MODEL_ID)
 
     kwargs = evaluator.llm_client.chat.await_args.kwargs
-    assert kwargs.get("extra_body") == {"thinking": {"type": "disabled"}}
+    # M3 走百炼端点：thinking.disabled + enable_thinking=False 双参数互保险
+    assert kwargs.get("extra_body") == {
+        "thinking": {"type": "disabled"}, "enable_thinking": False,
+    }
 
 
 @pytest.mark.asyncio
@@ -55,8 +58,8 @@ async def test_seed_evolving_rewrite_disables_thinking():
 
 
 @pytest.mark.asyncio
-async def test_other_model_rewrite_keeps_default_thinking():
-    """思考模型集合之外的模型不注入思考覆盖，保持各模型 default_params 行为。"""
+async def test_other_model_rewrite_disables_thinking():
+    """全链路禁思考（2026-08-23 用户指令）：doubao 系同样注入 disabled。"""
     evaluator = PromptEvaluator()
     evaluator.llm_client = AsyncMock()
     evaluator.llm_client.chat = AsyncMock(return_value="正常的改写结果文本内容")
@@ -64,12 +67,13 @@ async def test_other_model_rewrite_keeps_default_thinking():
     await evaluator._rewrite_text("prompt", "原文内容", 0.7, model_id="doubao-seed-character")
 
     kwargs = evaluator.llm_client.chat.await_args.kwargs
-    assert "extra_body" not in kwargs
+    # doubao 系拒绝 reasoning_effort+thinking 同传（400 实测），只传 thinking
+    assert kwargs.get("extra_body") == {"thinking": {"type": "disabled"}}
 
 
 @pytest.mark.asyncio
-async def test_default_route_rewrite_keeps_default_thinking():
-    """默认路由（无 model_id）不注入思考覆盖。"""
+async def test_default_route_rewrite_disables_thinking():
+    """全链路禁思考：默认路由（无 model_id）也注入禁思考参数。"""
     evaluator = PromptEvaluator()
     evaluator.llm_client = AsyncMock()
     evaluator.llm_client.chat = AsyncMock(return_value="正常的改写结果文本内容")
@@ -77,7 +81,9 @@ async def test_default_route_rewrite_keeps_default_thinking():
     await evaluator._rewrite_text("prompt", "原文内容", 0.7)
 
     kwargs = evaluator.llm_client.chat.await_args.kwargs
-    assert "extra_body" not in kwargs
+    assert kwargs.get("extra_body") == {
+        "thinking": {"type": "disabled"}, "enable_thinking": False,
+    }
 
 
 def test_extra_body_passthrough_overrides_default_thinking():

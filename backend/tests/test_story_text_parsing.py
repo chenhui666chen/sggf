@@ -17,6 +17,9 @@ from app.models.character import Character
 from app.services.character_runtime_context import (
     build_character_prompt_context_from_text,
     build_character_relations_payload,
+    build_character_runtime_brief,
+    build_character_runtime_metadata,
+    build_core_character_anchor_context_from_text,
     build_current_mainline_summary,
     build_current_relationship_summary,
     normalize_character_relations_payload,
@@ -323,3 +326,117 @@ def test_build_character_prompt_context_from_text_uses_runtime_summary_instead_o
     assert "当前关系" in context
     assert "黑风煞" not in context
     assert "背景信息背景信息背景信息" not in context
+
+
+def test_build_character_runtime_brief_includes_personality_and_worldview() -> None:
+    brief = build_character_runtime_brief(
+        name="顾长歌",
+        role="主角方",
+        role_position="主角",
+        personality="谨慎多疑，先验证后行动",
+        worldview="重承诺胜过个人利益",
+        motivation="查明内鬼来源",
+    )
+
+    assert "顾长歌" in brief
+    assert "性格：谨慎多疑，先验证后行动" in brief
+    assert "价值倾向：重承诺胜过个人利益" in brief
+
+
+def test_build_character_runtime_brief_includes_limitation_and_growth_direction() -> None:
+    brief = build_character_runtime_brief(
+        name="影舞",
+        role="反派方",
+        limitation="不能暴露真名",
+        growth_direction="从猎手走向独行者",
+    )
+
+    assert "限制：不能暴露真名" in brief
+    assert "成长方向：从猎手走向独行者" in brief
+
+
+def test_build_character_runtime_brief_distinguishes_same_identity_different_personality() -> None:
+    common_kwargs = {
+        "role": "主角方",
+        "role_position": "主角",
+        "motivation": "夺回家族传承",
+    }
+
+    brief_calm = build_character_runtime_brief(
+        name="林昭", personality="冷静缜密，谋定后动", **common_kwargs
+    )
+    brief_rash = build_character_runtime_brief(
+        name="林昭", personality="暴烈冲动，以力破局", **common_kwargs
+    )
+
+    assert "冷静缜密" in brief_calm
+    assert "暴烈冲动" not in brief_calm
+    assert "暴烈冲动" in brief_rash
+    assert "冷静缜密" not in brief_rash
+    assert brief_calm != brief_rash
+
+
+def test_build_character_runtime_brief_keeps_legacy_output_when_personality_missing() -> None:
+    brief = build_character_runtime_brief(
+        name="苏晚晴",
+        role="亦正亦邪",
+        role_position="危险盟友",
+        motivation="借顾长歌之手钓出幕后黑手",
+    )
+
+    assert "苏晚晴" in brief
+    assert "动机：借顾长歌之手钓出幕后黑手" in brief
+    assert "性格" not in brief
+    assert "价值倾向" not in brief
+
+
+def test_build_character_runtime_brief_truncates_long_fields_within_total_limit() -> None:
+    brief = build_character_runtime_brief(
+        name="测试角色",
+        personality="多疑" * 60,
+        worldview="重诺" * 60,
+        motivation="守住最后底线",
+        max_length=200,
+    )
+
+    assert len(brief) <= 200
+    assert "动机：守住最后底线" in brief
+
+
+def test_runtime_context_from_text_exposes_personality_anchor() -> None:
+    characters = (
+        "### 【姓名】：顾长歌\n"
+        "【故事立场】：主角方\n"
+        "【角色定位】：主角\n"
+        "【性格特点】：谨慎多疑，先验证后行动\n"
+        "【世界观/价值观立场】：重承诺胜过个人利益\n"
+        "【核心动机】：查明内鬼来源\n"
+    )
+
+    anchor_context = build_core_character_anchor_context_from_text(characters)
+    prompt_context = build_character_prompt_context_from_text(
+        characters,
+        detail_limit=600,
+        summary_limit=200,
+    )
+
+    assert "性格：谨慎多疑，先验证后行动" in anchor_context
+    assert "价值倾向：重承诺胜过个人利益" in anchor_context
+    assert "性格：谨慎多疑，先验证后行动" in prompt_context
+    assert "价值倾向：重承诺胜过个人利益" in prompt_context
+
+
+def test_build_character_runtime_metadata_exposes_personality_in_runtime_summary() -> None:
+    profile = (
+        "### 【姓名】：顾长歌\n"
+        "【故事立场】：主角方\n"
+        "【角色定位】：主角\n"
+        "【性格特点】：谨慎多疑，先验证后行动\n"
+        "【世界观/价值观立场】：重承诺胜过个人利益\n"
+        "【核心动机】：查明内鬼来源\n"
+    )
+
+    metadata = build_character_runtime_metadata("顾长歌", profile)
+
+    assert "性格：谨慎多疑，先验证后行动" in metadata["runtime_summary"]
+    assert "价值倾向：重承诺胜过个人利益" in metadata["runtime_summary"]

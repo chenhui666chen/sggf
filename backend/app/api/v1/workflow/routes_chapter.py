@@ -33,6 +33,7 @@ from app.services.prompts.workflow_runtime import (
 )
 from app.services.prompts.narrative_quality import (
     build_repair_hints,
+    calibrate_review_score_to_rubric,
     extract_failure_codes,
     extract_unresolved_issues,
     format_foreshadow_ledger,
@@ -47,6 +48,7 @@ from app.services.prompts.stages.content_creation import (
     split_scene_segments,
 )
 from app.services.agents.chapter_prompt_builder import extract_segment_tail
+from app.core.config import settings
 from app.services.auto_system_detector import auto_create_system_collections
 from app.services.agents import review_feature_gate
 from app.services.agents.multi_model_review_service import MultiModelReviewService
@@ -78,18 +80,40 @@ async def _keep_generation_lock_alive(
             raise RuntimeError(f"项目 {lock_handle.project_id} 生成锁续租失败")
 
 _active_generate_next_chapter_task_ids: set[str] = set()
+_active_generate_next_chapter_tasks: dict[int, asyncio.Task] = {}
 
 
-def mark_generate_next_chapter_task_active(task_id: str) -> None:
+def mark_generate_next_chapter_task_active(
+    task_id: str,
+    project_id: int | None = None,
+    *,
+    aio_task: asyncio.Task | None = None,
+) -> None:
     _active_generate_next_chapter_task_ids.add(str(task_id))
+    if project_id is not None and aio_task is not None:
+        _active_generate_next_chapter_tasks[int(project_id)] = aio_task
 
 
-def mark_generate_next_chapter_task_inactive(task_id: str) -> None:
+def mark_generate_next_chapter_task_inactive(task_id: str, project_id: int | None = None) -> None:
     _active_generate_next_chapter_task_ids.discard(str(task_id))
+    if project_id is not None:
+        current = _active_generate_next_chapter_tasks.get(int(project_id))
+        if current is None or current.done():
+            _active_generate_next_chapter_tasks.pop(int(project_id), None)
 
 
 def is_generate_next_chapter_task_active(task_id: str) -> bool:
     return str(task_id) in _active_generate_next_chapter_task_ids
+
+
+def has_active_generate_next_chapter_for_project(project_id: int) -> bool:
+    aio_task = _active_generate_next_chapter_tasks.get(int(project_id))
+    if aio_task is None:
+        return False
+    if aio_task.done():
+        _active_generate_next_chapter_tasks.pop(int(project_id), None)
+        return False
+    return True
 
 
 def _select_iteration_fallback_version(
@@ -102,8 +126,12 @@ def _select_iteration_fallback_version(
 
 
 def _iteration_review_has_unresolved_required_items(review_text: str) -> bool:
-    """检测复评核验表中是否仍有必改项未执行。"""
-    for raw_line in str(review_text or "").splitlines():
+    """检测复评中是否仍有必改项未执行。
+
+    核验表优先；若复评未输出表格，剩余关键问题里残留的【必改】/MUST 也视为未执行。
+    """
+    text = str(review_text or "")
+    for raw_line in text.splitlines():
         line = raw_line.strip()
         if not line.startswith("|"):
             continue
@@ -115,10 +143,54 @@ def _iteration_review_has_unresolved_required_items(review_text: str) -> bool:
         is_required_item = "MUST" in source or "必改" in cells[0]
         if is_required_item and "未执行" in status_text:
             return True
+    remaining = ""
+    marker = "## 剩余关键问题"
+    if marker in text:
+        remaining = text.split(marker, 1)[1]
+        for stop in ("\n## ", "\n结论", "\n结论："):
+            if stop in remaining:
+                remaining = remaining.split(stop, 1)[0]
+                break
+    else:
+        remaining = text
+    for raw_line in remaining.splitlines():
+        line = raw_line.strip()
+        if "【必改】" in line or "MUST" in line.upper():
+            return True
     return False
 
 
-def _split_stream_text(text: str, *, chunk_size: int = 1200) -> list[str]:
+# 章节正文合法收尾字符（句末标点/引号/括号收口）；结尾不在此集合视为疑似截断
+_CHAPTER_ENDING_CHARS = set('。！？…！?~"\'\'』」》）).')
+
+
+def _is_likely_truncated_chapter(text: str) -> bool:
+    """启发式检测章节正文是否被截断：以非句末标点收尾（如'离她二十'）视为疑似截断。
+
+    仅用于生成后的完整性守卫：命中后静默重试一次，不作为硬失败。
+    """
+    if not text or len(text) < 200:
+        return False  # 空稿/极短稿走既有失败路径
+    stripped = text.rstrip()
+    if not stripped:
+        return False
+    return stripped[-1] not in _CHAPTER_ENDING_CHARS
+
+
+# 结构级失败码：命中即视为章内结构断裂（同场复述/整弧重启/原地踏步），改稿无法修复，需重生成
+STRUCTURAL_FAILURE_CODES = {"STRUCT_BROKEN", "STALL_NO_PROGRESS"}
+
+
+def _extract_structural_failure_codes(review_text: str) -> set:
+    """提取评审文本中的结构失败码，用于结构门控（重生成判定）与验收硬停止标记。"""
+    return {
+        str(fc.get("code") or "")
+        for fc in extract_failure_codes(str(review_text or ""))
+        if str(fc.get("code") or "") in STRUCTURAL_FAILURE_CODES
+    }
+
+
+def _split_stream_text(text: str, *, chunk_size: int = 1200) -> list:
     if not text:
         return []
     safe_chunk_size = max(1, int(chunk_size or 1))
@@ -202,17 +274,25 @@ async def _run_single_next_chapter_streaming_review(
             prompt=review_user_prompt,
             system_prompt=review_system_prompt,
             on_chunk=on_review_chunk,
-            temperature=0.7,
+            # 评审是判别任务：低温保证同一文本多次评审结论稳定（高温曾导致
+            # 初评/终评对同一特征给出相反判断、失败码漂移）
+            temperature=0.2,
             model=review_model,
             task_type="review",
             max_retries=max_llm_attempts,
             require_exact_model=require_exact_model,
+            disable_thinking=True,
         )
         logger.info(
             f"   ✓ 评审完成（真流式 + {'锁定模型 ' + review_model if review_model else 'review任务路由'}），"
             f"报告长度: {len(review_report)}"
         )
-        return review_report
+        # 🆕 评分锚点程序化校准：评审模型存在"零问题仍压 7 分"的先验惯性
+        # （六维全"无"+零失败码却给 7 分），提示词纪律无法根除，此处兜底对齐锚点
+        calibrated = calibrate_review_score_to_rubric(review_report)
+        if calibrated != review_report:
+            logger.info("   🎚️ 评审分已按锚点校准（零必改低分/带必改高分修正）")
+        return calibrated
     except Exception as e:
         # 🆕 锁定模型档位下禁止回退到协调器（回退路径模型不受控），直接终止
         if require_exact_model:
@@ -220,12 +300,12 @@ async def _run_single_next_chapter_streaming_review(
             raise
         logger.error(f"   ⚠️ 真流式调用失败，回退到同步调用: {e}")
         if real_coordinator is not None and hasattr(real_coordinator, "review_chapter"):
-            return await asyncio.to_thread(
+            return calibrate_review_score_to_rubric(await asyncio.to_thread(
                 real_coordinator.review_chapter,
                 chapter_draft=chapter_draft,
                 chapter_plan=chapter_plan,
                 plot_outline=plot_outline,
-            )
+            ))
         return "质量评审：章节符合要求，可以继续优化。"
 
 
@@ -376,6 +456,7 @@ def _guard_chapter_plan_prompt_sections(
         "concept": 0.03,
         "foreshadow_ledger_text": 0.03,
         "project_quality_memory_text": 0.03,
+        "narrative_state_text": 0.03,
         "settings_catalog": 0.05,
     }
     guarded: Dict[str, str] = {}
@@ -404,6 +485,7 @@ def _build_chapter_plan_user_prompt(
     chapter_plan_guide: str = "",
     foreshadow_ledger_text: str = "",
     project_quality_memory_text: str = "",
+    narrative_state_text: str = "",
     settings_catalog: str = "",
     model_name: Optional[str] = None,
     max_prompt_tokens: Optional[int] = None,
@@ -425,6 +507,7 @@ def _build_chapter_plan_user_prompt(
         "chapter_plan_guide": "",
         "foreshadow_ledger_text": "",
         "project_quality_memory_text": "",
+        "narrative_state_text": "",
         "settings_catalog": "",
     }
     raw_sections = {
@@ -444,6 +527,7 @@ def _build_chapter_plan_user_prompt(
         "chapter_plan_guide": chapter_plan_guide,
         "foreshadow_ledger_text": foreshadow_ledger_text,
         "project_quality_memory_text": project_quality_memory_text,
+        "narrative_state_text": narrative_state_text,
         "settings_catalog": settings_catalog,
     }
 
@@ -479,6 +563,13 @@ def _build_chapter_plan_user_prompt(
             settings_catalog_block = f"""
 【项目设定清单】（项目设定中心已有的设定名称，规划时优先从中选择复用；确需新设定时须与既有设定不冲突）
 {sections["settings_catalog"]}"""
+
+        narrative_state_block = ""
+        if sections["narrative_state_text"]:
+            narrative_state_block = f"""
+【叙事状态增量】（写后消化沉淀的执行结果：未偿还债务必须优先承接，人物按最新状态安排，未闭合事件不可当作未发生）
+{sections["narrative_state_text"]}
+"""
 
         settings_output_section = ""
         if sections["settings_catalog"]:
@@ -522,8 +613,8 @@ def _build_chapter_plan_user_prompt(
 
 【最近章节连续性资产】（优先承接拆书细纲、未完成冲突、人物状态、伏笔与钩子）
 {sections["recent_chapter_assets_summary"]}
-{ledger_block}{memory_block}{settings_catalog_block}
-【前一章结尾】
+{ledger_block}{memory_block}{narrative_state_block}{settings_catalog_block}
+【前一章结尾】（⚠️ 本章规划必须显式回应其结尾钩子/悬念：推进、升级、部分揭示或在"伏笔事项"标注悬置原因；结尾点名的威胁人物/关键人物本章须有着落——出场、被感知、被提及或主角对其的心理评估，不得无声消失）
 {sections["previous_ending"]}
 {sections["climax_instruction"]}
 
@@ -563,6 +654,7 @@ def _build_chapter_plan_user_prompt(
 【约束】
 - 确保与整本书情节大纲、前文剧情和结构化记忆保持一致
 - 如提供当前章节精确细纲，必须优先落实场景目标、关键事件、人物出场、冲突推进、结尾钩子和伏笔
+- 不得把细纲短过场扩写成与前章同构的重头戏；若同一功能场景再现，情况变化必须写清（例如宽限已过、威胁升级、当众撕破脸），篇幅上仍应是过场而非重播
 - 人物动机、关系和主线绑定优先以人物运行态摘要为准
 - 如果最近章节连续性资产已有场景目标、人物状态、伏笔或钩子，必须优先承接
 - 推进故事发展，不能原地踏步；爽点和钩子必须具体、可执行{genre_specific}"""
@@ -654,9 +746,7 @@ async def generate_next_chapter(
         "next_chapter_number": X
     }
     """
-    import asyncio
-    from sqlalchemy import text
-
+    # 注意：asyncio/text 已在模块顶部导入；函数内禁止就地 import（会遮蔽整个函数作用域）
     logger = logging.getLogger("uvicorn.error")
 
     # 🆕 项目生成锁：跨进程/跨实例互斥，任务启动后转交后台任务释放
@@ -712,6 +802,40 @@ async def generate_next_chapter(
         
         logger.info(f"   ✓ 项目验证通过: {project.title}")
 
+        # 🆕 P4：熔断检查——暂停状态阻断自动推进，仅人工确认（resume_after_confirmation）后恢复
+        try:
+            from app.services.narrative_circuit_breaker import (
+                confirm_and_resume,
+                get_pause_info,
+                is_paused,
+            )
+
+            breaker_meta = workflow_context_builder.load_review_meta(project_id) or {}
+            if is_paused(breaker_meta):
+                if request and request.resume_after_confirmation:
+                    confirm_and_resume(breaker_meta)
+                    workflow_context_builder.update_project_settings_fields(
+                        project_id,
+                        review_meta=breaker_meta,
+                    )
+                    logger.info("   🔁 熔断已由人工确认解除，恢复自动推进")
+                else:
+                    pause_info = get_pause_info(breaker_meta)
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail={
+                            "message": (
+                                "项目自动推进已被熔断暂停，请查看闸门/消化报告，"
+                                "确认后携带 resume_after_confirmation 重试"
+                            ),
+                            "circuit_breaker": pause_info,
+                        },
+                    )
+        except HTTPException:
+            raise
+        except Exception as breaker_error:
+            logger.warning(f"   ⚠️ 熔断检查失败（不阻断生成）: {breaker_error}")
+
         # 🆕 1.5 获取项目生成锁（Redis SET NX + token + TTL，全档位生效）
         # Redis 故障时：标准档回退进程内互斥并告警；免费档 fail closed 直接拒绝
         try:
@@ -719,6 +843,31 @@ async def generate_next_chapter(
                 project_id,
                 allow_local_fallback=(generation_profile.tier != "free"),
             )
+            if lock_handle is None:
+                # 🆕 残留锁回收：后端重启/进程被杀会中断后台任务，但 Redis 锁最长残留 30 分钟，
+                # 表现为"没有任何可见任务却持续 409"。存活任务心跳每 300s 续租回满 TTL，
+                # 锁剩余 TTL 低于阈值即判定持有任务已死 → 原子回收后重试获取一次
+                stale_released = await lock_service.force_release_stale(project_id)
+                if stale_released:
+                    logger.warning(
+                        f"   🧹 项目 {project_id} 存在残留生成锁（持有任务已中断），已自动回收"
+                    )
+                    lock_handle = await lock_service.acquire(
+                        project_id,
+                        allow_local_fallback=(generation_profile.tier != "free"),
+                    )
+                elif not has_active_generate_next_chapter_for_project(project_id):
+                    # 本进程已无真正在跑的生成任务，但锁仍被占用：
+                    # 常见于前端断流/热重载后心跳协程还活着，TTL 一直被续满。
+                    orphan_released = await lock_service.force_release(project_id)
+                    if orphan_released:
+                        logger.warning(
+                            f"   🧹 项目 {project_id} 生成锁被孤儿任务占用（本进程无活跃生成），已强制回收"
+                        )
+                        lock_handle = await lock_service.acquire(
+                            project_id,
+                            allow_local_fallback=(generation_profile.tier != "free"),
+                        )
         except LockServiceUnavailableError as exc:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -727,7 +876,7 @@ async def generate_next_chapter(
         if lock_handle is None:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
-                detail="该项目已有生成任务进行中，请等待完成后再试",
+                detail="该项目正在生成章节中，请稍后重试；可在对应项目的创作流程页查看进度",
             )
         logger.info(f"   🔒 已获取项目生成锁 (backend={lock_handle.backend})")
 
@@ -782,10 +931,12 @@ async def generate_next_chapter(
         logger.info(f"   ✓ 项目设定已加载")
         
         # 3. 获取已生成章节
+        # 🆕 过滤软删除行：否则已删除章节仍被计入 next_chapter_number 并进入连续性上下文
         query = text("""
             SELECT id, chapter_number, title, content, summary
             FROM chapters
             WHERE project_id = :project_id
+              AND deleted_at IS NULL
             ORDER BY chapter_number ASC
         """)
         chapters_result = db.execute(query, {"project_id": project_id}).fetchall()
@@ -812,13 +963,15 @@ async def generate_next_chapter(
             db.commit()
             logger.info(f"   ✅ 已重置章节草稿与阶段状态，将从第1章章节规划开始重新生成")
 
-        # 4. 提取前一章结尾（用于衔接）
+        # 4. 提取前一章结尾（用于衔接）与完整正文（用于重复输出检测）
         previous_ending = ""
+        previous_chapter_content = ""
         if existing_chapters:
             previous_chapter = existing_chapters[-1]
             if previous_chapter[3]:  # 有内容
                 # 提取最后500个字符
                 content = previous_chapter[3]
+                previous_chapter_content = str(content)
                 previous_ending = content[-500:] if len(content) > 500 else content
         
         # 5. 生成已完成章节摘要，并为内容创作准备结构化的上一章信息
@@ -993,8 +1146,7 @@ async def generate_next_chapter(
             )
 
         # 7. 启动后台任务
-        mark_generate_next_chapter_task_active(task_id)
-        asyncio.create_task(
+        generation_task = asyncio.create_task(
             execute_generate_next_chapter_task(
                 task_id=task_id,
                 project_id=project_id,
@@ -1018,6 +1170,7 @@ async def generate_next_chapter(
                 quota_enabled=generation_profile.quota_enabled,
             )
         )
+        mark_generate_next_chapter_task_active(task_id, project_id, aio_task=generation_task)
         background_task_started = True
         logger.info(f"   🚀 后台任务已启动")
 
@@ -1061,8 +1214,6 @@ async def generate_next_chapter(
 @router.get("/free-generation/quota")
 async def get_free_generation_quota(current_user=Depends(get_current_user)):
     """Return the authenticated user's free chapter allowance."""
-    from app.core.config import settings
-
     try:
         quota = await get_free_quota_service().get_status(current_user.id)
     except QuotaServiceUnavailableError as exc:
@@ -1111,9 +1262,7 @@ async def execute_generate_next_chapter_task(
     3. 质量评审（50-75%）- 使用真流式 LLM 调用
     4. 迭代优化（75-100%）- 使用真流式 LLM 调用
     """
-    from sqlalchemy import text
-    from app.db.base import SessionLocal
-
+    # 注意：text/SessionLocal 已在模块顶部导入；函数内禁止就地 import（会遮蔽整个函数作用域）
     logger = logging.getLogger("uvicorn.error")
     logger.info(
         f"🚀 开始执行后台任务: {task_id}, 生成第{next_chapter_number}章 | "
@@ -1121,7 +1270,7 @@ async def execute_generate_next_chapter_task(
     )
     # 🆕 锁定模型档位（免费档）：禁止回退时全链路严格校验模型，重路由即终止
     require_exact_model = not allow_model_fallback
-    mark_generate_next_chapter_task_active(task_id)
+    mark_generate_next_chapter_task_active(task_id, project_id)
 
     # 获取流式服务
     streaming_service = get_streaming_service()
@@ -1316,8 +1465,80 @@ async def execute_generate_next_chapter_task(
         except Exception as meta_error:
             logger.warning(f"   ⚠️ 加载 review_meta 失败，跳过记忆/账本注入: {meta_error}")
             project_review_meta = {}
-        foreshadow_ledger_text = format_foreshadow_ledger(project_review_meta, next_chapter_number)
+        foreshadow_ledger_text = ""
+        unified_foreshadow_tasks: list = []
+        try:
+            # P0：统一伏笔上下文适配器——将框架/章节两层伏笔投影为统一任务格式；
+            # 解析失败时回退旧账本格式，不阻断章节生成
+            from app.services.foreshadow_adapter import (
+                build_unified_foreshadow_tasks,
+                extract_volume_foreshadow_texts,
+                format_unified_foreshadow_section,
+            )
+
+            epic_framework_state = workflow_context_builder.load_epic_framework_state(project_id)
+            # 🆕 卷级 new_foreshadowings 接线：从卷明细/卷上下文规则提取伏笔摘要，
+            # 与框架伏笔、章节账本合并为三层统一任务
+            volume_foreshadow_texts = extract_volume_foreshadow_texts(
+                getattr(epic_framework_state, "epic_volumes_detail", "") or "",
+                chapter_generation_context.current_volume_context or "",
+            )
+            unified_foreshadow_tasks = build_unified_foreshadow_tasks(
+                framework_text=getattr(epic_framework_state, "epic_framework", "") or "",
+                review_meta=project_review_meta,
+                volume_foreshadow_texts=volume_foreshadow_texts,
+                current_chapter=next_chapter_number,
+            )
+            foreshadow_ledger_text = format_unified_foreshadow_section(
+                unified_foreshadow_tasks,
+                current_chapter=next_chapter_number,
+            )
+        except Exception as foreshadow_adapter_error:
+            logger.warning(
+                f"   ⚠️ 统一伏笔适配失败，回退旧账本格式: {foreshadow_adapter_error}"
+            )
+            unified_foreshadow_tasks = []
+            # 🆕 P4：账本存在但适配解析失败，视为账本损坏 → 熔断信号（立即暂停）
+            if (project_review_meta or {}).get("foreshadow_ledger"):
+                try:
+                    from app.services.narrative_circuit_breaker import record_generation_signal
+
+                    record_generation_signal(
+                        project_review_meta,
+                        chapter_number=next_chapter_number,
+                        event="ledger_corrupt",
+                        detail=str(foreshadow_adapter_error)[:200],
+                    )
+                    workflow_context_builder.update_project_settings_fields(
+                        project_id,
+                        review_meta=project_review_meta,
+                    )
+                except Exception as breaker_signal_error:
+                    logger.warning(f"   ⚠️ 熔断信号记录失败: {breaker_signal_error}")
+        if not foreshadow_ledger_text:
+            foreshadow_ledger_text = format_foreshadow_ledger(project_review_meta, next_chapter_number)
         project_quality_memory_text = format_quality_memory(project_review_meta)
+        # 🆕 P2：叙事状态增量（写后消化沉淀，优先承接债务/人物变化/未闭合事件）
+        narrative_state_text = ""
+        try:
+            from app.services.narrative_state_extractor import format_narrative_state_section
+
+            narrative_state_text = format_narrative_state_section(
+                project_review_meta, next_chapter_number
+            )
+        except Exception as narrative_state_error:
+            logger.warning(f"   ⚠️ 叙事状态增量加载失败，跳过注入: {narrative_state_error}")
+        # 🆕 P3：质量趋势告警作为证据注入（与失败码配合，不替代修订路由）
+        try:
+            from app.services.narrative_metrics import format_quality_trend_advice
+
+            quality_trend_advice = format_quality_trend_advice(project_review_meta)
+            if quality_trend_advice:
+                project_quality_memory_text = (
+                    f"{project_quality_memory_text}\n\n{quality_trend_advice}".strip()
+                )
+        except Exception as trend_error:
+            logger.warning(f"   ⚠️ 质量趋势告警加载失败，跳过注入: {trend_error}")
         if foreshadow_ledger_text:
             logger.info(f"   📌 伏笔账本注入：{foreshadow_ledger_text.count(chr(10)) + 1} 条未回收伏笔")
         if project_quality_memory_text:
@@ -1355,6 +1576,7 @@ async def execute_generate_next_chapter_task(
             chapter_plan_guide=chapter_plan_guide,
             foreshadow_ledger_text=foreshadow_ledger_text,
             project_quality_memory_text=project_quality_memory_text,
+            narrative_state_text=narrative_state_text,
             settings_catalog=plan_settings_catalog,
             model_name=selected_plan_model,
             max_prompt_tokens=plan_prompt_budget,
@@ -1376,6 +1598,7 @@ async def execute_generate_next_chapter_task(
                 model=selected_plan_model,  # 🔥 使用智能选择的模型
                 max_retries=max_llm_attempts,
                 require_exact_model=require_exact_model,
+                disable_thinking=True,  # 🆕 规划默认关闭思考模式，避免 reasoning 占用上下文
             )
             logger.info(f"   ✓ 章节规划已完成（真流式 + {selected_plan_model}），长度: {len(chapter_plan)}")
         except Exception as e:
@@ -1406,6 +1629,147 @@ async def execute_generate_next_chapter_task(
                 )
             else:
                 chapter_plan = f"第{next_chapter_number}章创作规划\n\n根据情节大纲和前序章节，本章将继续推进故事发展..."
+
+        # 🆕 P1：细纲驱动的写前连续性闸门（纯规则校验，验证规划能否在当前叙事状态下执行）
+        gate_issues: list = []
+        gate_warning_section = ""
+        try:
+            from app.services.pre_generation_gate import (
+                build_gate_report,
+                format_gate_feedback,
+                format_gate_warning_section,
+                has_blocking_issues,
+                infer_current_volume,
+                run_pre_generation_gate,
+            )
+
+            gate_character_rows = db.execute(
+                text(
+                    """
+                    SELECT name, appearance_status, life_status
+                    FROM characters
+                    WHERE project_id = :project_id
+                    """
+                ),
+                {"project_id": project_id},
+            ).fetchall()
+            gate_character_states = [
+                {
+                    "name": row[0],
+                    "appearance_status": row[1],
+                    "life_status": row[2],
+                }
+                for row in gate_character_rows
+            ]
+            gate_current_volume = infer_current_volume(
+                chapter_generation_context.current_volume_context or "",
+                chapter_generation_context.current_chapter_outline or "",
+            )
+
+            def _run_gate() -> list:
+                return run_pre_generation_gate(
+                    chapter_plan=chapter_plan,
+                    chapter_outline=chapter_generation_context.current_chapter_outline or "",
+                    unified_tasks=unified_foreshadow_tasks,
+                    character_states=gate_character_states,
+                    current_volume=gate_current_volume,
+                    current_chapter=next_chapter_number,
+                    settings_catalog=plan_settings_catalog,
+                )
+
+            gate_issues = _run_gate()
+            if has_blocking_issues(gate_issues):
+                # blocking → 附加闸门反馈重规划，最多2轮；仍失败则保留草稿与报告转人工确认
+                max_gate_replans = 2
+                for gate_round in range(1, max_gate_replans + 1):
+                    blocking_count = sum(
+                        1 for issue in gate_issues if issue.get("severity") == "blocking"
+                    )
+                    logger.warning(
+                        f"   🚧 写前闸门 blocking×{blocking_count}，重规划第{gate_round}/{max_gate_replans}轮"
+                    )
+                    await ws_manager.send_task_progress(
+                        project_id=project_id,
+                        task_id=task_id,
+                        progress=25,
+                        message=f"写前闸门发现冲突，重规划中（{gate_round}/{max_gate_replans}）",
+                    )
+                    chapter_plan = await streaming_service.generate_chapter_streaming(
+                        prompt=plan_user_prompt + "\n\n" + format_gate_feedback(gate_issues),
+                        system_prompt=plan_system_prompt,
+                        on_chunk=on_plan_chunk,
+                        temperature=0.5,
+                        model=selected_plan_model,
+                        max_retries=max_llm_attempts,
+                        require_exact_model=require_exact_model,
+                        disable_thinking=True,  # 🆕 重规划同样关闭思考模式
+                    )
+                    gate_issues = _run_gate()
+                    if not has_blocking_issues(gate_issues):
+                        logger.info(f"   ✓ 写前闸门第{gate_round}轮重规划后通过")
+                        break
+
+                if has_blocking_issues(gate_issues):
+                    # 不丢弃规划：保存草稿与闸门报告到 review_meta，任务失败转人工确认
+                    gate_report = build_gate_report(
+                        gate_issues,
+                        chapter_number=next_chapter_number,
+                        rounds=max_gate_replans,
+                    )
+                    try:
+                        gate_review_meta = workflow_context_builder.load_review_meta(project_id) or {}
+                        gate_review_meta["pre_generation_gate"] = {
+                            "report": gate_report,
+                            "plan_draft": chapter_plan[:8000],
+                        }
+                        # 🆕 P4：闸门连续 blocking 信号 → 熔断（连续两章未解决则暂停）
+                        try:
+                            from app.services.narrative_circuit_breaker import record_generation_signal
+
+                            record_generation_signal(
+                                gate_review_meta,
+                                chapter_number=next_chapter_number,
+                                event="gate_blocking",
+                                detail=f"重规划后仍有 {gate_report['blocking_count']} 项 blocking 未解决",
+                            )
+                        except Exception as breaker_signal_error:
+                            logger.warning(f"   ⚠️ 熔断信号记录失败: {breaker_signal_error}")
+                        workflow_context_builder.update_project_settings_fields(
+                            project_id,
+                            review_meta=gate_review_meta,
+                        )
+                    except Exception as gate_save_error:
+                        logger.warning(f"   ⚠️ 闸门报告保存失败: {gate_save_error}")
+                    raise RuntimeError(
+                        f"第{next_chapter_number}章写前闸门重规划{max_gate_replans}轮后仍存在"
+                        f"{gate_report['blocking_count']}项 blocking 冲突，规划草稿与闸门报告已保存至"
+                        " review_meta.pre_generation_gate，请人工确认或调整细纲后重试"
+                    )
+            gate_warning_section = format_gate_warning_section(gate_issues)
+            if gate_issues:
+                logger.info(
+                    f"   🚧 写前闸门通过：blocking=0，warning={sum(1 for i in gate_issues if i.get('severity') == 'warning')}"
+                )
+        except RuntimeError:
+            raise
+        except Exception as gate_error:
+            logger.warning(f"   ⚠️ 写前闸门接入异常，跳过闸门: {gate_error}")
+            gate_issues = []
+            gate_warning_section = ""
+
+        try:
+            plan_meta = workflow_context_builder.load_review_meta(project_id) or {}
+            plan_meta["last_chapter_plan"] = {
+                "chapter_number": next_chapter_number,
+                "plan": chapter_plan[:12000],
+                "outline": (chapter_generation_context.current_chapter_outline or "")[:4000],
+            }
+            workflow_context_builder.update_project_settings_fields(
+                project_id,
+                review_meta=plan_meta,
+            )
+        except Exception as plan_persist_error:
+            logger.warning(f"   ⚠️ 章节规划落库失败（不阻断生成）: {plan_persist_error}")
 
         await ws_manager.send_stream_end(project_id, 'structure', len(chapter_plan), f"第{next_chapter_number}章规划完成")
         # 🔔 推送阶段完成状态（生成下一章 - 步骤1）
@@ -1579,12 +1943,18 @@ async def execute_generate_next_chapter_task(
 
         # 🆕 构建内容创作提示词（精简版 - 章节规划已消化大部分上下文）
         from app.services.agents.chapter_prompt_builder import ChapterPromptBuilder
-        
+        from app.services.character_state_snapshot import merge_character_state_context
+
         # 获取项目题材
         project_genre = project_profile.genre or ""
-        
+
         builder = ChapterPromptBuilder(genre=project_genre)
         content_system_prompt = builder.build_system_prompt()
+        # 闭环读取端：人物当前状态（快照）在前，运行态摘要（基线）在后
+        merged_character_runtime_context = merge_character_state_context(
+            chapter_generation_context.character_state_context,
+            chapter_generation_context.character_prompt_context,
+        )
         content_user_prompt = builder.build_user_prompt(
             next_chapter_number=next_chapter_number,
             chapter_plan=chapter_plan,
@@ -1600,10 +1970,13 @@ async def execute_generate_next_chapter_task(
             current_volume_context=chapter_generation_context.current_volume_context,
             core_character_anchor_context=chapter_generation_context.core_character_anchor_context,
             focus_character_relationship_context=chapter_generation_context.focus_character_relationship_context,
-            character_runtime_context=chapter_generation_context.character_prompt_context,
+            character_runtime_context=merged_character_runtime_context,
             epic_framework_context=chapter_generation_context.epic_framework_context,
             rag_previous_context=rag_previous_context,
         )
+        # 🆕 P1：写前闸门 warning 注入正文 prompt（允许生成，但进入创作提醒）
+        if gate_warning_section:
+            content_user_prompt = f"{content_user_prompt}\n\n{gate_warning_section}"
 
         # 📊 输出精简版 prompt 统计
         logger.info(f"   📉 Prompt优化（精简版）：")
@@ -1617,9 +1990,13 @@ async def execute_generate_next_chapter_task(
         # 🆕 使用真流式 LLM 调用（智能选择模型）
         logger.info(f"   🚀 开始调用流式 LLM 服务生成章节内容...")
 
-        # 🆕 P2-1 场景分段生成：关键事件≥2时按段生成（每段只聚焦本段事件），缓解长文质量衰减
+        # 🆕 P2-1 场景分段生成：默认关闭（SCENE_SEGMENTATION_ENABLED，见 config 注释）。
+        # 事件条目切片保证不了"一段一景"，历史三次跨项目结构事故（同场复述/整弧重启）均源于分段互盲
         chapter_draft = ""
-        segments = split_scene_segments(chapter_plan)
+        segments = []
+        if getattr(settings, "SCENE_SEGMENTATION_ENABLED", False):
+            segments = split_scene_segments(chapter_plan)
+        draft_is_segmented = bool(segments)
         if segments:
             logger.info(
                 f"   ✂️ 场景分段生成：{len(segments)}段，各段事件数={[len(s['events']) for s in segments]}"
@@ -1646,10 +2023,12 @@ async def execute_generate_next_chapter_task(
                         current_volume_context=chapter_generation_context.current_volume_context,
                         core_character_anchor_context=chapter_generation_context.core_character_anchor_context,
                         focus_character_relationship_context=chapter_generation_context.focus_character_relationship_context,
-                        character_runtime_context=chapter_generation_context.character_prompt_context,
+                        character_runtime_context=merged_character_runtime_context,
                         epic_framework_context=chapter_generation_context.epic_framework_context,
                         rag_previous_context=rag_previous_context,
                     )
+                    if gate_warning_section:
+                        seg_user_prompt = f"{seg_user_prompt}\n\n{gate_warning_section}"
                     seg_content = await streaming_service.generate_chapter_streaming(
                         prompt=seg_user_prompt,
                         system_prompt=content_system_prompt,
@@ -1658,6 +2037,7 @@ async def execute_generate_next_chapter_task(
                         model=selected_content_model,  # 🔥 使用智能选择的模型
                         max_retries=max_llm_attempts,
                         require_exact_model=require_exact_model,
+                        disable_thinking=True,  # 🆕 正文生成关闭思考模式，避免思考文本混入产出
                     )
                     segment_parts.append(seg_content.strip())
                     previous_segment_tail = extract_segment_tail(seg_content)
@@ -1685,6 +2065,7 @@ async def execute_generate_next_chapter_task(
                     model=selected_content_model,  # 🔥 使用智能选择的模型
                     max_retries=max_llm_attempts,
                     require_exact_model=require_exact_model,
+                    disable_thinking=True,  # 🆕 正文生成关闭思考模式，避免思考文本混入产出
                 )
             logger.info(f"   ✓ 章节初稿已完成（真流式 + {selected_content_model}），字数: {len(chapter_draft)}")
         except Exception as e:
@@ -1718,6 +2099,67 @@ async def execute_generate_next_chapter_task(
             else:
                 logger.warning("   ⚠️ 协调器没有 generate_chapter_content 方法，使用默认模板")
                 chapter_draft = f"第{next_chapter_number}章内容\n\n{chapter_plan}\n\n（此处为生成的章节内容）"
+
+        # 🆕 截断守卫：初稿以非句末标点收尾（如 max_tokens 耗尽/流中断，结尾停在"离她二十"）
+        # → 静默重试一次（no-op 回调，避免前端流式文本重复）；仍截断则保留原稿进后续流程
+        if _is_likely_truncated_chapter(chapter_draft):
+            logger.warning(
+                f"   ⚠️ 章节初稿疑似截断（结尾 20 字: …{chapter_draft[-20:]}），静默重试一次"
+            )
+
+            async def _silent_retry_chunk(chunk: str, idx: int):
+                return
+
+            try:
+                retry_draft = await streaming_service.generate_chapter_streaming(
+                    prompt=content_user_prompt,
+                    system_prompt=content_system_prompt,
+                    on_chunk=_silent_retry_chunk,
+                    temperature=0.7,
+                    model=selected_content_model,
+                    max_retries=max_llm_attempts,
+                    require_exact_model=require_exact_model,
+                    disable_thinking=True,
+                )
+                if retry_draft and not _is_likely_truncated_chapter(retry_draft) and len(retry_draft) > 200:
+                    chapter_draft = retry_draft
+                    logger.info(f"   ✓ 截断重试成功，初稿字数: {len(chapter_draft)}")
+                else:
+                    logger.warning("   ⚠️ 截断重试仍不完整，保留原初稿进入后续流程")
+            except Exception as retry_error:
+                logger.warning(f"   ⚠️ 截断重试失败，保留原初稿进入后续流程: {retry_error}")
+
+        # 🆕 P4：空/无效/高度重复输出检测 → empty_output 熔断信号（立即暂停）并终止任务；
+        # 放在额度确认前，失败时免费档 reservation 仍为 pending 可退还
+        # previous_chapter_content 只在 HTTP 入口准备；后台任务从 payload 还原上一章全文。
+        previous_full_text = ""
+        if previous_chapters_payload:
+            last_payload = previous_chapters_payload[-1] if isinstance(previous_chapters_payload, list) else None
+            if isinstance(last_payload, dict):
+                previous_full_text = str(last_payload.get("content") or "")
+        from app.services.narrative_circuit_breaker import detect_invalid_chapter_output
+        _invalid_output_detail = detect_invalid_chapter_output(chapter_draft, previous_full_text)
+        if _invalid_output_detail:
+            try:
+                from app.services.narrative_circuit_breaker import record_generation_signal
+
+                empty_output_meta = workflow_context_builder.load_review_meta(project_id) or {}
+                record_generation_signal(
+                    empty_output_meta,
+                    chapter_number=next_chapter_number,
+                    event="empty_output",
+                    detail=_invalid_output_detail,
+                )
+                workflow_context_builder.update_project_settings_fields(
+                    project_id,
+                    review_meta=empty_output_meta,
+                )
+            except Exception as breaker_signal_error:
+                logger.warning(f"   ⚠️ 熔断信号记录失败: {breaker_signal_error}")
+            raise RuntimeError(
+                f"第{next_chapter_number}章{_invalid_output_detail}，已触发熔断暂停，"
+                "请人工确认后携带 resume_after_confirmation 重试"
+            )
 
         # 🆕 免费档：首次正文产出成功，额度转为已消耗（此后失败不退额，防主动断连刷生成）
         chapter_content_produced = True
@@ -1867,12 +2309,94 @@ async def execute_generate_next_chapter_task(
         logger.info(f"   📡 已发送 {len(step3_agents)} 个 Agent 完成状态（步骤3）")
 
         # 保存评审报告到 project_settings
+        # 🆕 同时留存初评全文到 review_meta.initial_review：终稿编辑评审会覆盖 review_report，
+        # 初评是生成侧质量的真实基线（prompt 优化的观测对象），必须可追溯
+        if isinstance(review_meta, dict) and review_report:
+            review_meta["initial_review"] = review_report
         workflow_context_builder.update_project_settings_fields(
             project_id,
             review_report=review_report,
             review_meta=review_meta,
         )
         logger.info(f"   ✓ 评审报告已同步到数据库")
+
+        # 🆕 结构失败码门控：分段初稿被评审判结构断裂（同场复述/整弧重启）时，
+        # 改稿没有删除原语、修不干净（历史表现为"各留一点"），直接丢弃分段初稿、
+        # 单遍重生成一次并静默复评；一次封顶，防循环。程序检测（n-gram/词表）对
+        # "换细节的两次发明"不可行（已用真实初稿校准验证），评审即为检测器。
+        if draft_is_segmented:
+            structural_regen_codes = _extract_structural_failure_codes(review_report)
+            if structural_regen_codes:
+                logger.warning(
+                    f"   🚧 分段初稿被评审判结构失败({', '.join(sorted(structural_regen_codes))})，"
+                    f"跳过改稿直接单遍重生成"
+                )
+                await ws_manager.send_task_progress(
+                    project_id=project_id,
+                    task_id=task_id,
+                    progress=78,
+                    message=f"步骤 3/4: 检测到结构复述（{', '.join(sorted(structural_regen_codes))}），单遍重生成中...",
+                )
+                try:
+                    async def _silent_chunk(chunk: str, idx: int):
+                        return
+
+                    regenerated_draft = await streaming_service.generate_chapter_streaming(
+                        prompt=content_user_prompt,
+                        system_prompt=content_system_prompt,
+                        on_chunk=_silent_chunk,
+                        temperature=0.7,
+                        model=selected_content_model,
+                        max_retries=max_llm_attempts,
+                        require_exact_model=require_exact_model,
+                        disable_thinking=True,
+                    )
+                    if regenerated_draft and len(regenerated_draft) > 200:
+                        chapter_draft = regenerated_draft
+                        # 单模型静默复评，保证后续迭代基于新稿与新评审
+                        review_report = await _run_single_next_chapter_streaming_review(
+                            chapter_draft=chapter_draft,
+                            chapter_plan=chapter_plan,
+                            plot_outline=plot_outline,
+                            genre=review_project_genre,
+                            next_chapter_number=next_chapter_number,
+                            recent_chapter_assets_summary=recent_chapter_assets_summary,
+                            streaming_service=streaming_service,
+                            on_review_chunk=_silent_chunk,
+                            real_coordinator=real_coordinator,
+                            review_model=(workflow_generation_model if require_exact_model else None),
+                            max_llm_attempts=max_llm_attempts,
+                            require_exact_model=require_exact_model,
+                        )
+                        workflow_context_builder.update_project_settings_fields(
+                            project_id,
+                            chapter_draft=chapter_draft,
+                            review_report=review_report,
+                        )
+                        await ws_manager.send_stage_update(
+                            project_id=project_id,
+                            stage='content',
+                            status='completed',
+                            output=chapter_draft,
+                            progress=50,
+                        )
+                        await ws_manager.send_stage_update(
+                            project_id=project_id,
+                            stage='review',
+                            status='completed',
+                            output=review_report,
+                            progress=75,
+                        )
+                        logger.info(
+                            f"   ✅ 结构门控单遍重生成完成（{len(chapter_draft)}字），复评报告已更新"
+                        )
+                    else:
+                        logger.warning("   ⚠️ 单遍重生成产出为空/过短，保留分段初稿进入迭代")
+                except Exception as regen_error:
+                    if require_exact_model:
+                        logger.error(f"   ❌ 锁定模型单遍重生成失败且禁止回退: {regen_error}")
+                        raise
+                    logger.warning(f"   ⚠️ 单遍重生成失败，保留分段初稿进入迭代: {regen_error}")
 
         await ws_manager.send_task_progress(
             project_id=project_id,
@@ -1884,8 +2408,8 @@ async def execute_generate_next_chapter_task(
         # ==================== 步骤4：迭代优化（真流式） ====================
         # 🆕 推送步骤4的 Agent 开始工作状态
         step4_agents = STEP_AGENTS['iteration']
+        # 注意：settings 已在模块顶部导入；函数内禁止再就地 import（会遮蔽整个函数作用域）
         try:
-            from app.core.config import settings
             pass_score_threshold = float(getattr(settings, 'ITERATION_PASS_SCORE', 9.0))
             max_rounds = int(getattr(settings, 'ITERATION_MAX_ROUNDS', 2))
         except Exception:
@@ -1963,6 +2487,10 @@ async def execute_generate_next_chapter_task(
         iteration_coordination_system_prompt = get_iteration_coordination_system_prompt()
         iteration_system_prompt = get_iteration_revision_system_prompt()
 
+        # 🆕 标记迭代循环是否正常执行完毕（跳过迭代/异常回退时保持 False）：
+        # 仅正常执行后补跑"终稿编辑评审"（那两条路径终稿=初稿，初评已配套且为全量格式）
+        iteration_loop_ran = False
+
         # 🆕 使用迭代优化（max改稿 + R1打分循环,达到阈值后再输出）
         try:
             # 🎯 根据实际输入长度动态选择改稿模型
@@ -2022,8 +2550,11 @@ async def execute_generate_next_chapter_task(
             current_version = chapter_draft
             current_review = review_report
             final_version = current_version
+            # 🆕 终稿配套评审：始终与最终输出版本同源的评审报告（初始为初稿评审）
+            final_review = review_report
             reached_pass = skip_iteration_optimization
             best_version = current_version
+            best_review = current_review
             latest_revised_version = ""
             # 初始化最佳分数为已有评审的分数（若无法提取则为0）
             best_score = _extract_iteration_review_score(current_review)
@@ -2106,6 +2637,7 @@ async def execute_generate_next_chapter_task(
                         model=selected_revision_model,
                         max_retries=max_llm_attempts,
                         require_exact_model=require_exact_model,
+                        disable_thinking=True,
                     )
                     logger.info(f"   ✓ 第{round_idx}轮迭代计划生成完成，长度: {len(iteration_plan_text)}")
                 except Exception as coordination_error:
@@ -2132,6 +2664,8 @@ async def execute_generate_next_chapter_task(
                     include_history_hint=True,
                     revision_mode_hint=revision_mode_hint,
                     repair_hints=repair_hints_text,
+                    chapter_plan=chapter_plan,
+                    current_chapter_outline=chapter_generation_context.current_chapter_outline,
                 )
 
                 # 仅在最后一轮向前端流式输出正文；前几轮不推送正文
@@ -2144,9 +2678,36 @@ async def execute_generate_next_chapter_task(
                     model=selected_revision_model,
                     max_retries=max_llm_attempts,
                     require_exact_model=require_exact_model,
+                    disable_thinking=True,
                 )
                 latest_revised_version = revised_version
                 logger.info(f"   ✓ 第{round_idx}轮改稿完成（{selected_revision_model}），字数: {len(revised_version)}")
+
+                # 🆕 截断守卫：改稿以非句末标点收尾 → 静默重试一次；仍截断保留原改稿
+                if _is_likely_truncated_chapter(revised_version):
+                    logger.warning(
+                        f"   ⚠️ 第{round_idx}轮改稿疑似截断（结尾 20 字: …{revised_version[-20:]}），静默重试一次"
+                    )
+                    try:
+                        retry_revised = await streaming_service.generate_chapter_streaming(
+                            prompt=iteration_user_prompt_round,
+                            system_prompt=iteration_system_prompt,
+                            on_chunk=noop_chunk,
+                            temperature=0.7,
+                            model=selected_revision_model,
+                            max_retries=max_llm_attempts,
+                            require_exact_model=require_exact_model,
+                            disable_thinking=True,
+                        )
+                        if retry_revised and not _is_likely_truncated_chapter(retry_revised) and len(retry_revised) > 200:
+                            revised_version = retry_revised
+                            latest_revised_version = revised_version
+                            logger.info(f"   ✓ 截断重试成功，第{round_idx}轮改稿字数: {len(revised_version)}")
+                        else:
+                            logger.warning(f"   ⚠️ 第{round_idx}轮改稿截断重试仍不完整，保留原改稿")
+                    except Exception as retry_error:
+                        logger.warning(f"   ⚠️ 第{round_idx}轮改稿截断重试失败，保留原改稿: {retry_error}")
+
                 await ws_manager.send_task_progress(
                     project_id=project_id,
                     task_id=task_id,
@@ -2173,6 +2734,7 @@ async def execute_generate_next_chapter_task(
                     task_type="review",
                     max_retries=max_llm_attempts,
                     require_exact_model=require_exact_model,
+                    disable_thinking=True,
                 )
                 score = _extract_iteration_review_score(new_review_report)
                 has_unresolved_required_items = _iteration_review_has_unresolved_required_items(new_review_report)
@@ -2205,9 +2767,19 @@ async def execute_generate_next_chapter_task(
                 if score_improved:
                     best_score = score
                     best_version = revised_version
+                    best_review = new_review_report
 
-                # 判定是否达标
-                if score >= pass_score_threshold and not has_unresolved_required_items:
+                # 判定是否达标（🆕 结构失败码残留为硬停止条件：改稿修不掉结构断裂，不允许判达标）
+                round_structural_codes = _extract_structural_failure_codes(new_review_report)
+                if round_structural_codes:
+                    logger.warning(
+                        f"   🚧 第{round_idx}轮复评仍有结构失败码 {sorted(round_structural_codes)}，本轮不判达标"
+                    )
+                if (
+                    score >= pass_score_threshold
+                    and not has_unresolved_required_items
+                    and not round_structural_codes
+                ):
                     final_version = revised_version
                     current_review = new_review_report
                     reached_pass = True
@@ -2233,6 +2805,12 @@ async def execute_generate_next_chapter_task(
                     latest_revised_version=latest_revised_version,
                     best_version=best_version,
                 )
+                # 输出为最高分版本 → 配套评审取该版本当轮的评审
+                final_review = best_review
+            else:
+                # 达标（或跳过迭代）：current_review 即与 final_version 配套的评审
+                final_review = current_review
+            iteration_loop_ran = True
             logger.info(f"   ✅ 迭代优化结束，输出最终版本，长度: {len(final_version)}")
         except Exception as e:
             # 🆕 锁定模型档位下禁止回退到协调器（回退路径模型不受控），直接终止
@@ -2240,6 +2818,8 @@ async def execute_generate_next_chapter_task(
                 logger.error(f"   ❌ 锁定模型迭代优化失败且禁止回退: {e}")
                 raise
             logger.error(f"   ⚠️ 真流式迭代优化失败，回退到同步调用: {e}")
+            # 回退路径输出初稿 → 配套评审回到初评
+            final_review = review_report
             # 回退到同步调用
             if hasattr(real_coordinator, 'optimize_chapter'):
                 final_version = await asyncio.to_thread(
@@ -2278,11 +2858,31 @@ async def execute_generate_next_chapter_task(
         # 🆕 安全保护：如果优化后字数远小于原稿，则认为可能被压缩成摘要，回退为原始章节内容
         original_len = len(chapter_draft or "")
         optimized_len = len(final_version or "")
-        if original_len >= 500 and optimized_len > 0 and optimized_len < original_len * 0.6:
+        from app.services.chapter_structure_guard import should_revert_short_revision
+        # 注意：extract_failure_codes 已在模块顶部导入；此处若再就地 import，
+        # 会将整个函数作用域内的该名字绑定为局部变量，导致循环前的首次调用抛 UnboundLocalError
+        structural_codes = {"STRUCT_BROKEN", "STALL_NO_PROGRESS"}
+        has_structural_failure = any(
+            str(fc.get("code") or "") in structural_codes
+            for fc in extract_failure_codes(review_report or "")
+        )
+        if should_revert_short_revision(
+            chapter_draft,
+            final_version,
+            has_structural_failure=has_structural_failure,
+        ):
             logger.warning(
-                f"   ⚠️ 优化后长度({optimized_len}) 远小于原稿({original_len})，疑似被压缩为摘要，本次将保留原始章节内容"
+                f"   ?? ?????({optimized_len}) ?????({original_len})?????????????????????"
             )
             final_version = chapter_draft
+            # 回滚为初稿 → 配套评审回到初评；初评已是对该文本的全量评审，无需再跑终稿编辑评审
+            final_review = review_report
+            iteration_loop_ran = False
+        elif original_len >= 500 and optimized_len > 0 and optimized_len < original_len * 0.6:
+            logger.info(
+                f"   ? ?????????{optimized_len}/{original_len}???????"
+            )
+
 
         if not skip_iteration_optimization:
             for chunk in _split_stream_text(final_version):
@@ -2311,18 +2911,94 @@ async def execute_generate_next_chapter_task(
             )
         logger.info(f"   📡 已发送 {len(step4_agents)} 个 Agent 完成状态（步骤4）")
 
+        # 🆕 终稿编辑评审：迭代循环正常执行后，以初评同款全量格式（六维分析+必改/建议/可选+亮点）
+        # 对最终版本重新评审一次，作为用户人工精修的参考——循环复评的核验表服务于机器验收
+        # （判通过/失败码/未执行检测），不适合编辑参考；且通过的章节此前没有任何"本章可精修项"指引。
+        # 展示增强类调用：失败仅降级为保留循环复评，不得让已生成完毕的章节整体失败。
+        if iteration_loop_ran and final_version and len(final_version) > 200:
+            try:
+                await ws_manager.send_task_progress(
+                    project_id=project_id,
+                    task_id=task_id,
+                    progress=93,
+                    message="步骤 4/4: 正在生成终稿编辑评审（人工精修参考）...",
+                )
+
+                async def _editorial_review_chunk(chunk: str, idx: int):
+                    return
+
+                editorial_review = await _run_single_next_chapter_streaming_review(
+                    chapter_draft=final_version,
+                    chapter_plan=chapter_plan,
+                    plot_outline=plot_outline,
+                    genre=review_project_genre,
+                    next_chapter_number=next_chapter_number,
+                    recent_chapter_assets_summary=recent_chapter_assets_summary,
+                    streaming_service=streaming_service,
+                    on_review_chunk=_editorial_review_chunk,
+                    real_coordinator=real_coordinator,
+                    review_model=(workflow_generation_model if require_exact_model else None),
+                    max_llm_attempts=max_llm_attempts,
+                    require_exact_model=require_exact_model,
+                )
+                if editorial_review and len(editorial_review) > 100:
+                    final_review = editorial_review
+                    logger.info(
+                        f"   ✅ 终稿编辑评审完成（人工精修参考），长度: {len(editorial_review)}"
+                    )
+                else:
+                    logger.warning("   ⚠️ 终稿编辑评审产出为空/过短，保留循环复评作为终稿评审")
+            except Exception as editorial_error:
+                logger.warning(
+                    f"   ⚠️ 终稿编辑评审失败，保留循环复评作为终稿评审: {editorial_error}"
+                )
+
         # 保存最终版本到 project_settings
+        # 🆕 同时以"终稿配套评审"覆盖 review_report：迭代正常执行后为终稿编辑评审（人工精修参考，
+        # 全量六维格式）；循环复评（核验表）仅服务于机器验收。final_review 与 final_version 严格同版本配对
         workflow_context_builder.update_project_settings_fields(
             project_id,
             final_version=final_version,
+            review_report=final_review,
         )
-        logger.info(f"   ✓ 最终版本已同步到数据库")
+        logger.info(
+            f"   ✓ 最终版本已同步到数据库（评审报告已更新为终稿配套评审，长度: {len(final_review or '')}）"
+        )
+
+        # 🆕 实时刷新前端评审面板：终稿评审替换初评显示（前端 stage_update 处理器会更新评审内容状态）
+        if not skip_iteration_optimization and final_review and final_review != review_report:
+            await ws_manager.send_stage_update(
+                project_id=project_id,
+                stage='review',
+                status='completed',
+                output=final_review,
+                progress=75
+            )
+            logger.info(f"   📡 已推送终稿评审到前端评审面板")
 
         # 🆕 P1-2/P1-3：沉淀项目级质量记忆与伏笔账本（写入 review_meta，供后续章节注入）
         try:
             latest_review_meta = workflow_context_builder.load_review_meta(project_id) or {}
+            # 🆕 验收硬停止标记：最终评审仍含结构失败码时，照常输出最高分版本
+            # （章节不能空），但不允许静默当"完成"——标记 review_meta 并向用户透出警告
+            final_structural_codes = _extract_structural_failure_codes(
+                final_review or review_report or ""
+            )
+            if final_structural_codes:
+                latest_review_meta["structural_failure_unresolved"] = True
+                latest_review_meta["structural_failure_codes"] = sorted(final_structural_codes)
+                logger.warning(
+                    f"   🚧 验收硬停止：最终评审仍含结构失败码 {sorted(final_structural_codes)}，"
+                    f"已标记 review_meta.structural_failure_unresolved，请人工复核本章"
+                )
+                await ws_manager.send_task_progress(
+                    project_id=project_id,
+                    task_id=task_id,
+                    progress=95,
+                    message=f"⚠️ 本章最终稿仍存在结构问题（{', '.join(sorted(final_structural_codes))}），已标记待人工复核",
+                )
             # 质量记忆：从最终评审提取未解决问题（达标章通常无剩余问题，未达标章自动沉淀）
-            unresolved_issues = extract_unresolved_issues(current_review or review_report or "")
+            unresolved_issues = extract_unresolved_issues(final_review or review_report or "")
             if unresolved_issues:
                 update_quality_memory(latest_review_meta, next_chapter_number, unresolved_issues)
             # 伏笔账本：登记本章伏笔埋设/回收
@@ -2332,6 +3008,17 @@ async def execute_generate_next_chapter_task(
                 chapter_plan,
                 chapter_position=extract_chapter_position(chapter_plan),
             )
+            # 🆕 P4：本章正常完成，重置熔断的闸门连续计数
+            try:
+                from app.services.narrative_circuit_breaker import record_generation_signal
+
+                record_generation_signal(
+                    latest_review_meta,
+                    chapter_number=next_chapter_number,
+                    event="generation_success",
+                )
+            except Exception as breaker_signal_error:
+                logger.warning(f"   ⚠️ 熔断信号记录失败: {breaker_signal_error}")
             workflow_context_builder.update_project_settings_fields(
                 project_id,
                 review_meta=latest_review_meta,
@@ -2516,7 +3203,7 @@ async def execute_generate_next_chapter_task(
             error=str(e)
         )
     finally:
-        mark_generate_next_chapter_task_inactive(task_id)
+        mark_generate_next_chapter_task_inactive(task_id, project_id)
         if lock_heartbeat_task is not None:
             lock_heartbeat_task.cancel()
             try:
@@ -2530,5 +3217,4 @@ async def execute_generate_next_chapter_task(
             released = await get_generation_lock_service().release(lock_handle)
             logger.info(f"   🔓 项目 {project_id} 生成锁释放{'成功' if released else '失败（由 TTL 兜底）'}")
         db.close()
-
 

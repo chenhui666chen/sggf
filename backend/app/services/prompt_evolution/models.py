@@ -232,9 +232,9 @@ class EvolutionConfig:
     """进化配置"""
     target_score: int = 30              # 目标AI得分阈值
     max_iterations: int = 10            # 最大迭代次数
-    samples_per_iteration: int = 3      # 每次迭代使用的样本数
+    samples_per_iteration: int = 8      # 每次迭代使用的样本数
     early_stop_threshold: int = 10      # 提前停止阈值
-    temperature: float = 0.8            # LLM温度参数
+    temperature: float = 0.35           # LLM温度参数（改写是风格转换任务，低温收敛可比评估，防二值分布）
     keep_top_n: int = 5                 # 保留最佳版本数量
 
     # 🆕 多维停止条件
@@ -253,13 +253,13 @@ class EvolutionConfig:
 
     # 🔧 A/B测试配置
     ab_test_interval: int = 2             # A/B测试间隔（每N轮进行一次）
-    ab_test_sample_count: int = 4         # A/B测试使用的样本数（2→4）
+    ab_test_sample_count: int = 8         # A/B测试使用的样本数（与 samples_per_iteration 对齐：A/B 是进化方向判定的核心，样本数不足时二值分布方差会淹没信号）
     ab_test_variant_count: int = 3        # A/B测试变体数量（2→3）
     ab_test_min_diff: float = 3.0         # A/B测试最小显著差异（分数差超过此值才判定胜出）
 
     # 🔧 探索模式配置
     exploration_mode_threshold: int = 5   # 连续多少次无明显改善后进入探索模式
-    exploration_temperature: float = 1.0  # 探索模式使用的更高温度
+    exploration_temperature: float = 0.5  # 探索模式使用的更高温度（相对主温度上调，避免极端发散）
     
     # 🆕 题材定制化配置
     genre: Optional[str] = None           # 目标题材（玄幻/都市/言情/悬疑等）

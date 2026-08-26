@@ -180,6 +180,11 @@ class Settings(BaseSettings):
     # 全局免费发放量护栏（当日免费章数封顶，注意：章数不等于成本）
     FREE_TIER_GLOBAL_DAILY_LIMIT: int = 500
 
+    # 场景分段生成（P2-1）：默认关闭。
+    # 原因：按"关键事件条目"切片保证不了"一段一景"，三个项目先后出现同场复述/整弧重启类结构事故；
+    # 单遍生成恢复规划中段可见性。仅当场景互斥切片（一段一场）方案就绪后，经 .env 开启实验。
+    SCENE_SEGMENTATION_ENABLED: bool = False
+
     # 日志配置
     LOG_LEVEL: str = "INFO"
     LOG_FILE: str = "./logs/app.log"
@@ -193,6 +198,11 @@ class Settings(BaseSettings):
     TENCENT_SECRET_KEY: str = ""
     TENCENT_REGION: str = "ap-guangzhou"
     TENCENT_BIZTYPE: str = ""  # 可选，策略编号
+
+    # 朱雀 AIGC 检测（EdgeOne AI 网关 zhuque-text）
+    ZHUQUE_GATEWAY_URL: str = ""  # 创建网关后分配的域名，如 https://xxxx.edgeone.app
+    ZHUQUE_API_KEY: str = ""  # 网关 API Key（Bearer 鉴权）
+    ZHUQUE_IS_MERGE: bool = True  # 是否合并段落输出整体置信度
 
     # 支付宝OAuth配置
     ALIPAY_APP_ID: str = ""

@@ -59,7 +59,7 @@ def test_model_performance_concurrent_updates_do_not_lose_results(tmp_path):
     storage = ModelConfigStorage(str(tmp_path))
     result = SingleModelResult(
         "qwen3.7-plus", "Qwen", "alibaba", "文本", 20, 1,
-        fidelity_similarity=90,
+        fidelity_similarity=90, improvement=40,
     )
 
     with ThreadPoolExecutor(max_workers=8) as executor:

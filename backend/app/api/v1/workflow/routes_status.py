@@ -336,6 +336,7 @@ async def save_stage_content(
     }
     """
     import logging
+    from sqlalchemy import text
     logger = logging.getLogger("uvicorn.error")
     
     try:
@@ -350,149 +351,49 @@ async def save_stage_content(
                 detail="Project not found"
             )
 
-        # 🆕 2. 智能章节覆盖：如果是内容创作阶段或质量评审阶段
+        # 2. 内容阶段可原地更新当前最后一章；评审继续不得改写章节正文。
         deleted_chapter = None
         deleted_chapters_count = 0
 
-        # 质量评审阶段：用户修改评审报告后继续，需要删除所有现有章节重新生成
-        if stage == 'review' and request.continue_workflow:
-            logger.info(f"🔍 检测到质量评审阶段继续工作流，检查是否需要清理现有章节...")
-
-            from sqlalchemy import text
-            # 获取当前已保存的所有章节
+        # 内容创作保存：原地更新当前最后一章正文，不得删除章节行。
+        # 评审保存并继续：不得改写/删除章节正文（request.content 是评审报告，不是章节）。
+        updated_chapter = None
+        if stage == 'content':
+            logger.info("🔍 检测到内容创作阶段，检查是否需要更新当前章节旧稿...")
             chapters_query = text("""
                 SELECT id, chapter_number, title, word_count
                 FROM chapters
                 WHERE project_id = :project_id
-                ORDER BY chapter_number
-            """)
-            chapters_result = db.execute(chapters_query, {"project_id": project_id}).fetchall()
-            chapters = [{"id": r[0], "chapter_number": r[1], "title": r[2], "word_count": r[3]} for r in chapters_result]
-
-            if chapters:
-                logger.info(f"   📊 发现 {len(chapters)} 个已保存章节，准备清理...")
-
-                # 清理记忆管理中的章节引用
-                try:
-                    from app.models.memory import Memory
-                    db.query(Memory).filter(
-                        Memory.project_id == project_id
-                    ).update({Memory.current_chapter: None}, synchronize_session=False)
-                    logger.info(f"      ✅ 已清理记忆管理中的章节引用")
-                except Exception as e:
-                    logger.warning(f"   ⚠️  记忆清理失败（非致命错误）: {e}")
-
-                # 删除所有章节记录
-                delete_chapters_query = text("""
-                    DELETE FROM chapters
-                    WHERE project_id = :project_id
-                """)
-                db.execute(delete_chapters_query, {"project_id": project_id})
-                db.commit()
-
-                deleted_chapters_count = len(chapters)
-                logger.info(f"   ✅ 已删除 {deleted_chapters_count} 个章节，准备重新生成")
-            else:
-                logger.info(f"   ✅ 未发现已保存章节，无需清理")
-
-        # 内容创作阶段：智能覆盖最后一章
-        elif stage == 'content':
-            logger.info(f"🔍 检测到内容创作阶段，检查是否需要更新现有章节...")
-            
-            # 获取当前已保存的章节列表
-            from sqlalchemy import text
-            # 使用原生SQL替代ORM查询
-            chapters_query = text("""
-                SELECT id, chapter_number, title, word_count 
-                FROM chapters 
-                WHERE project_id = :project_id 
                 ORDER BY chapter_number DESC
             """)
             chapters_result = db.execute(chapters_query, {"project_id": project_id}).fetchall()
             chapters = [{"id": r[0], "chapter_number": r[1], "title": r[2], "word_count": r[3]} for r in chapters_result]
-            
-            # 目标章节号应该是当前最大章节号（用户想更新这一章）
             if chapters:
-                # 如果已有章节，检查最后一章（用户可能想更新）
-                target_chapter_number = chapters[0]["chapter_number"]
-            else:
-                # 如果没有章节，说明这是第一章
-                target_chapter_number = 1
-            
-            logger.info(f"   📊 已有章节数: {len(chapters)}，目标章节编号: {target_chapter_number}")
-            
-            # 检查是否已存在目标章节
-            # 使用原生SQL替代ORM查询
-            existing_chapter_query = text("""
-                SELECT id, chapter_number, title, word_count 
-                FROM chapters 
-                WHERE project_id = :project_id AND chapter_number = :chapter_number
-            """)
-            existing_chapter_result = db.execute(existing_chapter_query, {
-                "project_id": project_id,
-                "chapter_number": target_chapter_number
-            }).fetchone()
-            
-            if existing_chapter_result:
-                existing_chapter = {
-                    "id": existing_chapter_result[0],
-                    "chapter_number": existing_chapter_result[1],
-                    "title": existing_chapter_result[2],
-                    "word_count": existing_chapter_result[3]
-                }
-                
-                logger.info(f"   ⚠️  发现已存在第{target_chapter_number}章（ID={existing_chapter['id']}），准备更新...")
-                
-                # 更新现有章节信息
-                deleted_chapter_info = {
-                    "id": existing_chapter["id"],
-                    "chapter_number": existing_chapter["chapter_number"],
-                    "title": existing_chapter["title"],
-                    "word_count": existing_chapter["word_count"]
-                }
-                
-                # 🧹 1) 清理 ChromaDB 向量数据
-                try:
-                    logger.info(f"   🗂️  清理ChromaDB中的章节向量...")
-                    from app.services.agents.knowledge_base import NovelKnowledgeBase
-                    kb = NovelKnowledgeBase()
-                    deleted_count = kb.delete_chapter(
-                        chapter_number=target_chapter_number,
-                        project_id=project_id
-                    )
-                    if deleted_count > 0:
-                        logger.info(f"      ✅ 已删除 {deleted_count} 个向量文档")
-                except Exception as e:
-                    logger.warning(f"   ⚠️  ChromaDB清理失败（非致命错误）: {e}")
-
-                # 🧹 2) 清理记忆管理中的章节引用
-                try:
-                    logger.info(f"   🧠 清理记忆管理中的章节引用...")
-                    
-                    from app.models.memory import Memory
-                    db.query(Memory).filter(
-                        (Memory.project_id == project_id) &
-                        (Memory.current_chapter == target_chapter_number)
-                    ).update({Memory.current_chapter: None})
-                    
-                    logger.info(f"      ✅ 已清理记忆管理中的章节引用")
-                except Exception as e:
-                    logger.warning(f"   ⚠️  记忆清理失败（非致命错误）: {e}")
-                
-                # 🗑️ 删除章节记录（会自动级联删除评审记录）
-                logger.info(f"   🗑️  删除旧章节记录...")
-                # 使用原生SQL删除章节
-                delete_chapter_query = text("""
-                    DELETE FROM chapters 
-                    WHERE id = :chapter_id
-                """)
-                db.execute(delete_chapter_query, {"chapter_id": existing_chapter["id"]})
+                target = chapters[0]
+                logger.info(f"   📊 已有章节数: {len(chapters)}，原地更新第{target['chapter_number']}章")
+                db.execute(
+                    text("""
+                        UPDATE chapters
+                        SET content = :content,
+                            word_count = :word_count
+                        WHERE id = :chapter_id
+                    """),
+                    {
+                        "content": request.content or "",
+                        "word_count": len(request.content or ""),
+                        "chapter_id": target["id"],
+                    },
+                )
                 db.commit()
-                
-                deleted_chapter = deleted_chapter_info
-                logger.info(f"   ✅ 已删除第{target_chapter_number}章，准备更新为新内容")
+                updated_chapter = {
+                    "id": target["id"],
+                    "chapter_number": target["chapter_number"],
+                    "title": target["title"],
+                    "word_count": len(request.content or ""),
+                }
+                logger.info(f"   ✅ 已原地更新第{target['chapter_number']}章，未删除章节行")
             else:
-                logger.info(f"   ✅ 未发现重复章节，将创建新章节")
+                logger.info("   ✅ 未发现已保存章节，仅写入阶段草稿")
 
         # 3. 保存内容到 project_settings 表
         workflow_context_builder = WorkflowContextBuilder(db)
@@ -570,15 +471,11 @@ async def save_stage_content(
             "continue_workflow": request.continue_workflow
         }
 
-        # 🆕 如果删除了章节，包含在响应中
-        if deleted_chapter:
-            response["deleted_chapter"] = deleted_chapter
-            response["message"] = f"已删除第{deleted_chapter['chapter_number']}章并保存新内容"
-
-        # 🆕 如果是评审阶段删除了多个章节
-        if deleted_chapters_count > 0:
-            response["deleted_chapters_count"] = deleted_chapters_count
-            response["message"] = f"已删除 {deleted_chapters_count} 个章节，准备重新生成"
+        if updated_chapter:
+            response["updated_chapter"] = updated_chapter
+            # 兼容旧前端：仍返回 deleted_chapter 字段名，但语义已变为原地更新。
+            response["deleted_chapter"] = updated_chapter
+            response["message"] = f"已更新第{updated_chapter['chapter_number']}章并保存新内容"
 
         return response
 

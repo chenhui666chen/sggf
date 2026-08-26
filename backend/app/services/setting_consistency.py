@@ -90,12 +90,109 @@ class SettingConsistencyService:
             return 0.0
         return len(ngrams_a & ngrams_b) / len(union)
 
+    COMPLEMENTARY_COLLECTION_GROUPS: Tuple[Set[str], ...] = (
+        {"\u5730\u56fe\u4f53\u7cfb", "\u7ec4\u7ec7\u52bf\u529b\u4f53\u7cfb"},
+        {"\u89d2\u8272\u4f53\u7cfb", "\u5f02\u80fd\u4f53\u7cfb"},
+        {"\u9053\u5177\u9057\u7269\u4f53\u7cfb", "\u6c11\u751f\u98ce\u4fd7\u4f53\u7cfb"},
+    )
+    _NEGATION_MARKERS = (
+        "\u4ece\u672a",
+        "\u6ca1\u6709",
+        "\u5e76\u975e",
+        "\u4e0d\u662f",
+        "\u5df2\u5e9f\u5f03",
+        "\u5df2\u5931\u6548",
+        "\u65e0\u5173",
+        "\u4e0d\u5b58\u5728",
+    )
+
+    @classmethod
+    def _collection_facet_group(cls, collection_name: str) -> Optional[int]:
+        name = str(collection_name or "").strip()
+        for index, group in enumerate(cls.COMPLEMENTARY_COLLECTION_GROUPS):
+            if name in group:
+                return index
+        return None
+
+    @classmethod
+    def _looks_contradictory(cls, text_a: str, text_b: str) -> bool:
+        left = str(text_a or "")
+        right = str(text_b or "")
+        if not left or not right:
+            return False
+        return any(marker in left or marker in right for marker in cls._NEGATION_MARKERS)
+
+    @classmethod
+    def collect_duplicate_name_conflicts(
+        cls,
+        grouped_items: Dict[str, List[Dict[str, Any]]],
+        *,
+        similarity_threshold: float = 0.4,
+    ) -> List[Dict[str, Any]]:
+        """\u6839\u636e\u5df2\u5206\u7ec4\u7684\u540c\u540d\u8bbe\u5b9a\u5224\u65ad\u51b2\u7a81\uff08\u7eaf\u89c4\u5219\uff0c\u4fbf\u4e8e\u5355\u6d4b\uff09\u3002"""
+        conflicts: List[Dict[str, Any]] = []
+        for name, items in (grouped_items or {}).items():
+            if len(items) < 2:
+                continue
+            collections = [str(item.get("collection") or "") for item in items]
+            contents = [str(item.get("content") or "") for item in items]
+            facet_groups = {cls._collection_facet_group(collection) for collection in collections}
+            unique_collections = {collection for collection in collections if collection}
+            complementary_only = (
+                len(unique_collections) >= 2
+                and len(facet_groups) == 1
+                and None not in facet_groups
+            )
+            min_similarity = 1.0
+            has_low_similarity = False
+            has_same_collection_conflict = False
+            has_contradiction = False
+            for left_index in range(len(contents)):
+                for right_index in range(left_index + 1, len(contents)):
+                    similarity = cls._text_similarity(contents[left_index], contents[right_index])
+                    min_similarity = min(min_similarity, similarity)
+                    same_collection = collections[left_index] == collections[right_index]
+                    if similarity < similarity_threshold:
+                        has_low_similarity = True
+                        if same_collection:
+                            has_same_collection_conflict = True
+                    if cls._looks_contradictory(contents[left_index], contents[right_index]):
+                        has_contradiction = True
+            if complementary_only and not has_contradiction:
+                continue
+            if not (has_same_collection_conflict or has_contradiction or (has_low_similarity and not complementary_only)):
+                continue
+            if min_similarity < 0.15:
+                severity = "high"
+            elif min_similarity < 0.3:
+                severity = "medium"
+            else:
+                severity = "low"
+            conflicts.append(
+                {
+                    "conflict_type": ConflictType.DUPLICATE_NAME,
+                    "name": name,
+                    "similarity": round(min_similarity, 3),
+                    "items": [
+                        {
+                            "id": item.get("id"),
+                            "collection": item.get("collection") or "\u672a\u77e5",
+                            "content": (
+                                f"{str(item.get('content') or '')[:100]}..."
+                                if item.get("content") and len(str(item.get("content"))) > 100
+                                else (item.get("content") or "")
+                            ),
+                        }
+                        for item in items
+                    ],
+                    "severity": severity,
+                }
+            )
+        return conflicts
+
     @staticmethod
     def detect_duplicate_names(db: Session, project_id: int) -> List[Dict[str, Any]]:
-        """检测同名但定义冲突的设定项。"""
-        similarity_threshold = 0.4
-        conflicts: List[Dict[str, Any]] = []
-
+        """\u68c0\u6d4b\u540c\u540d\u4f46\u5b9a\u4e49\u51b2\u7a81\u7684\u8bbe\u5b9a\u9879\u3002"""
         collections = (
             db.query(SettingCollection)
             .filter(
@@ -113,61 +210,17 @@ class SettingConsistencyService:
             .filter(SettingItem.collection_id.in_(collection_ids))
             .all()
         )
-
-        grouped_items: Dict[str, List[SettingItem]] = {}
-        for item in all_items:
-            grouped_items.setdefault(item.name, []).append(item)
-
+        grouped_payload: Dict[str, List[Dict[str, Any]]] = {}
         collection_map = {collection.id: collection.name for collection in collections}
-        for name, items in grouped_items.items():
-            if len(items) < 2:
-                continue
-
-            min_similarity = 1.0
-            has_conflict = False
-            contents = [item.content or "" for item in items]
-
-            for left_index in range(len(contents)):
-                for right_index in range(left_index + 1, len(contents)):
-                    similarity = SettingConsistencyService._text_similarity(
-                        contents[left_index], contents[right_index]
-                    )
-                    min_similarity = min(min_similarity, similarity)
-                    if similarity < similarity_threshold:
-                        has_conflict = True
-
-            if not has_conflict:
-                continue
-
-            if min_similarity < 0.15:
-                severity = "high"
-            elif min_similarity < 0.3:
-                severity = "medium"
-            else:
-                severity = "low"
-
-            conflicts.append(
+        for item in all_items:
+            grouped_payload.setdefault(item.name, []).append(
                 {
-                    "conflict_type": ConflictType.DUPLICATE_NAME,
-                    "name": name,
-                    "similarity": round(min_similarity, 3),
-                    "items": [
-                        {
-                            "id": item.id,
-                            "collection": collection_map.get(item.collection_id, "未知"),
-                            "content": (
-                                f"{item.content[:100]}..."
-                                if item.content and len(item.content) > 100
-                                else item.content or ""
-                            ),
-                        }
-                        for item in items
-                    ],
-                    "severity": severity,
+                    "id": item.id,
+                    "collection": collection_map.get(item.collection_id, "\u672a\u77e5"),
+                    "content": item.content or "",
                 }
             )
-
-        return conflicts
+        return SettingConsistencyService.collect_duplicate_name_conflicts(grouped_payload)
 
     @classmethod
     def _extract_realm_rank(cls, realm_text: str) -> Optional[int]:

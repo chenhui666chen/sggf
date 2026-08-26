@@ -19,13 +19,9 @@ from pathlib import Path
 
 import pytest
 
-# 本文件位于 backend/data/scene_audio_artifacts/ 下：
-# parents[2]=backend（app 包根），parents[3]=项目根（core 等模块）
-ROOT_DIR = Path(__file__).resolve().parents[2]
-PROJECT_ROOT = Path(__file__).resolve().parents[3]
-for _path in (str(ROOT_DIR), str(PROJECT_ROOT)):
-    if _path not in sys.path:
-        sys.path.insert(0, _path)
+ROOT_DIR = Path(__file__).resolve().parents[1]
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
 
 from app.services.audiobook.engine_pkg._scene_render_mixin import (  # noqa: E402
     SceneRenderMixin,

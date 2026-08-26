@@ -798,7 +798,7 @@ class MiniMaxM3Adapter(OpenAICompatibleAdapter):
     supports_vision=True,
     priority=3,
     fallback_models=["qwen3.7-plus"],
-    default_params={"temperature": 0.7, "max_tokens": 16384, "reasoning_level": "medium"},
+    default_params={"temperature": 0.7, "max_tokens": 16384, "reasoning_effort": "low"},
     tags=["multimodal", "reasoning", "agent", "coding", "fast", "long_context", "web_search", "chinese", "stepfun", "open_source"],
 )
 class Step37FlashAdapter(OpenAICompatibleAdapter):

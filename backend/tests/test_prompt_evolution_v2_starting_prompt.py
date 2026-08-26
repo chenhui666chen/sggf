@@ -23,17 +23,21 @@ from app.services.prompt_evolution import meta_optimizer as mo
 class TestV2CoreStructure:
     def test_contains_six_method_reconstruction(self):
         # v2 核心操作升级为六法重构
+        # （2026-08-23 自然化纪律重构：心理呈现外部化->心理去解释化、
+        #   静态描写动态化->氛围句限流，禁止把心理全动作化与强制动态化）
         prompt = mo.SAFE_INITIAL_PROMPT
         assert "六法重构" in prompt
-        for method in ("句法异构化", "修饰关系动态化", "静态描写动态化",
+        for method in ("句法异构化", "修饰关系动态化", "氛围句限流",
                        "逻辑连接内隐化", "去模板化收尾"):
             assert method in prompt, f"缺失方法：{method}"
 
     def test_contains_psychological_externalization(self):
         # v1 缺失的初代核心杠杆：情绪名词与心理解释动词不得保留
+        # （自然化纪律重构后为心理去解释化：保留信息、压缩重复解释、
+        #   不强转动作、不新增身体反应）
         prompt = mo.SAFE_INITIAL_PROMPT
-        assert "心理呈现外部化" in prompt
-        assert "禁止保留情绪名词" in prompt
+        assert "心理去解释化" in prompt
+        assert "禁止保留抽象情绪名词" in prompt
 
     def test_contains_execution_flow_checklist(self):
         # d15b07f4 新范式杠杆：五步工作程序
@@ -43,12 +47,14 @@ class TestV2CoreStructure:
             assert step in prompt, f"缺失流程步骤：{step}"
 
     def test_contains_language_refinement(self):
-        # d15b07f4 杠杆：僵化修饰与万能动词治理、施受关系不变的主语切换
+        # d15b07f4 杠杆：僵化修饰与万能动词治理
+        # （自然化纪律重构：主语自然切换->人名与名词自然重复，禁止为
+        #   词汇丰富强行换指代/换主语）
         prompt = mo.SAFE_INITIAL_PROMPT
         assert "# 语言精炼" in prompt
         assert "缓缓、微微" in prompt
         assert "进行、做出、感到" in prompt
-        assert "动作发起者与承受者不变" in prompt
+        assert "人名与名词自然重复" in prompt
 
     def test_negative_list_is_union_of_generations(self):
         # 负面清单为历代黑名单并集（含 d15b07f4 扩展词与二代套路意象句）

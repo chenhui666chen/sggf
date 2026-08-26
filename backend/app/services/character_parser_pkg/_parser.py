@@ -74,6 +74,8 @@ class CharacterTextParser:
         "关键关系": "关键关系",
         "关联线索": "关联线索",
         "主线绑定": "主线绑定",
+        "说话风格": "说话风格",
+        "语言风格": "说话风格",
     }
     NON_CHARACTER_HEADING_KEYWORDS = (
         "关系补丁",
@@ -114,6 +116,7 @@ class CharacterTextParser:
         'growth_direction': r'(?:\*\*)?【(?:人物成长线|成长方向)】(?:\*\*)?[：:]\s*(.+?)(?=【|##|$)',
         'relationships': r'(?:\*\*)?【关键关系】(?:\*\*)?[：:]\s*(.+?)(?=【|##|$)',
         'mainline_clues': r'(?:\*\*)?【关联线索】(?:\*\*)?[：:]\s*(.+?)(?=【|##|$)',
+        'speech_style': r'(?:\*\*)?【(?:说话风格|语言风格)】(?:\*\*)?[：:]\s*(.+?)(?=【|##|$)',
     }
     
     # 阵营识别模式
@@ -363,7 +366,8 @@ class CharacterTextParser:
         # 解析其他字段
         for field_name in ['appearance', 'personality', 'background', 'worldview',
                            'motivation', 'abilities', 'limitation', 'mainline_role',
-                           'growth_direction', 'relationships', 'mainline_clues']:
+                           'growth_direction', 'relationships', 'mainline_clues',
+                           'speech_style']:
             pattern = self.FIELD_PATTERNS.get(field_name)
             if pattern:
                 matches = list(re.finditer(pattern, block, re.DOTALL))

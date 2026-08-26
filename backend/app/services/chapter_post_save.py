@@ -186,6 +186,110 @@ async def _notify_setting_conflicts(project_id: int, total_conflicts: int) -> No
     )
 
 
+async def _notify_behavior_consistency_issues(
+    project_id: int,
+    issue_count: int,
+    high_count: int,
+) -> None:
+    """通过 WebSocket 推送人物行为一致性提醒（P3：只报告不阻断）。"""
+    from app.websocket.manager import ws_manager
+
+    await ws_manager.send_notification(
+        project_id=project_id,
+        message=(
+            f"人物行为一致性检查发现 {issue_count} 个问题"
+            f"（高危 {high_count} 个），建议核对角色说话风格设定"
+        ),
+        type="warning",
+        data={"issue_count": issue_count, "high_count": high_count},
+    )
+
+
+def run_character_behavior_consistency_check(
+    db: Session,
+    *,
+    project_id: int,
+    chapter_number: int,
+    chapter_content: str,
+    notify: bool = True,
+) -> Dict[str, Any]:
+    """章节保存后的人物行为一致性检查（P3：只报告不阻断）。
+
+    从 Character 表读取说话风格基线，检查本章正文对白是否违背
+    回避表达、是否存在对白同质化。历史项目无说话风格数据时跳过。
+    """
+    result: Dict[str, Any] = {"checked": False, "issues": []}
+
+    try:
+        from app.models.character import Character
+        from app.services.character_behavior_consistency import (
+            check_character_behavior_consistency,
+        )
+
+        characters = (
+            db.query(Character)
+            .filter(
+                Character.project_id == project_id,
+                Character.archived_at.is_(None),
+            )
+            .all()
+        )
+
+        card_parts = []
+        for char in characters:
+            speech_style = (char.speech_style or "").strip()
+            if not speech_style:
+                continue
+            card_parts.append(f"### 【姓名】：{char.name}\n【说话风格】：{speech_style}")
+
+        if not card_parts:
+            logger.info("   ℹ️ 无说话风格数据，跳过人物行为一致性检查")
+            return result
+
+        issues = check_character_behavior_consistency(
+            chapter_content,
+            "\n\n".join(card_parts),
+            chapter_number=chapter_number,
+        )
+        result["checked"] = True
+        result["issues"] = [
+            {
+                "character_name": issue.character_name,
+                "check_type": issue.check_type,
+                "severity": issue.severity,
+                "reason": issue.reason,
+                "evidence_text": issue.evidence_text,
+            }
+            for issue in issues
+        ]
+
+        if issues:
+            high_count = sum(1 for issue in issues if issue.severity == "high")
+            logger.warning(
+                f"   ⚠️ 人物行为一致性检查发现 {len(issues)} 个问题（高危 {high_count}）"
+            )
+            for issue in issues:
+                logger.warning(
+                    f"      [{issue.severity}] {issue.character_name}: {issue.reason}"
+                    f" | 证据: {issue.evidence_text[:80]}"
+                )
+            if notify:
+                try:
+                    future = asyncio.run_coroutine_threadsafe(
+                        _notify_behavior_consistency_issues(
+                            project_id, len(issues), high_count
+                        ),
+                        get_main_event_loop(),
+                    )
+                    future.result(timeout=5)
+                except Exception as ws_exc:
+                    logger.warning(f"   ⚠️ 行为一致性通知推送失败: {ws_exc}")
+    except Exception as exc:
+        logger.warning(f"   ⚠️ 人物行为一致性检查失败（不影响主流程）: {exc}")
+
+    return result
+
+
 async def _save_character_relations(
     db: Session,
     project_id: int,
@@ -576,6 +680,104 @@ async def process_chapter_post_save(
                 )
             except Exception as reflow_error:
                 logger.warning(f"   ⚠️ 设定回流失败（不影响后续处理）: {reflow_error}")
+
+        # ==================== 步骤1.6：人物行为一致性检查（P3：只报告不阻断） ====================
+        # 基于角色说话风格基线，检查本章对白是否违背回避表达、是否存在对白同质化。
+        # 纯文本规则无 AI 调用；历史项目无说话风格数据时自动跳过。
+        try:
+            await asyncio.to_thread(
+                run_character_behavior_consistency_check,
+                db,
+                project_id=project_id,
+                chapter_number=chapter_number,
+                chapter_content=chapter_content,
+            )
+        except Exception as behavior_error:
+            logger.warning(f"   ⚠️ 人物行为一致性检查失败（不影响后续处理）: {behavior_error}")
+
+        # ==================== 步骤1.7：人物状态提取落库（闭环写入端） ====================
+        # LLM 提取本章人物动态状态并幂等保存快照（character_state_snapshots），
+        # 下一章生成时经 build_chapter_generation_context 注入【人物当前状态】。
+        try:
+            from app.services.character_state_extractor import (
+                run_character_state_extraction_flow,
+            )
+
+            state_result = await run_character_state_extraction_flow(
+                db,
+                project_id=project_id,
+                chapter_id=chapter_id,
+                chapter_number=chapter_number,
+                chapter_title=chapter_title,
+                chapter_content=chapter_content,
+                model=post_processing_model,
+            )
+            if state_result["saved"] > 0:
+                logger.info(
+                    f"   📸 人物状态快照落库：{state_result['saved']} 个角色（第{chapter_number}章）"
+                )
+        except Exception as state_error:
+            logger.warning(f"   ⚠️ 人物状态提取落库失败（不影响后续处理）: {state_error}")
+
+        # ==================== 步骤1.8：写后结构化消化（P2：narrative_state_v1 增量沉淀） ====================
+        # 对比规划与正文，只沉淀执行增量（事件偏差/计划外事实/人物变化/伏笔证据/叙事债务），
+        # 幂等写入 review_meta.narrative_state_v1；消化失败不影响正文保存。
+        try:
+            from app.services.narrative_state_extractor import (
+                run_narrative_state_extraction_flow,
+            )
+
+            digest_result = await run_narrative_state_extraction_flow(
+                db,
+                project_id=project_id,
+                chapter_id=chapter_id,
+                chapter_number=chapter_number,
+                chapter_content=chapter_content,
+                chapter_plan=chapter_plan or "",
+                model=post_processing_model,
+            )
+            # 🆕 P4：消化成功/失败信号 → 熔断（连续 3 章失败则暂停）
+            try:
+                from app.services.narrative_circuit_breaker import record_generation_signal
+                from app.services.workflow_context_builder import WorkflowContextBuilder
+
+                digest_ok = bool(digest_result.get("extracted"))
+                breaker_builder = WorkflowContextBuilder(db)
+                breaker_meta = breaker_builder.load_review_meta(project_id) or {}
+                record_generation_signal(
+                    breaker_meta,
+                    chapter_number=chapter_number,
+                    event="digest_success" if digest_ok else "digest_failure",
+                    detail="消化提取成功" if digest_ok else "消化提取失败或无产出",
+                )
+                breaker_builder.update_project_settings_fields(
+                    project_id, review_meta=breaker_meta
+                )
+            except Exception as breaker_error:
+                logger.warning(f"   ⚠️ 熔断信号记录失败（不影响后续处理）: {breaker_error}")
+        except Exception as digest_error:
+            logger.warning(f"   ⚠️ 写后结构化消化失败（不影响后续处理）: {digest_error}")
+
+        # ==================== 步骤1.9：浅层文风趋势（P3：纯规则，只记录不覆盖稿件） ====================
+        # 计算本章浅层风格特征并与项目基线对比，漂移时记录修订信号到 review_meta.style_trend。
+        try:
+            from app.services.narrative_metrics import record_style_trend
+            from app.services.workflow_context_builder import WorkflowContextBuilder
+
+            style_builder = WorkflowContextBuilder(db)
+            style_review_meta = style_builder.load_review_meta(project_id) or {}
+            style_result = record_style_trend(style_review_meta, chapter_number, chapter_content)
+            if style_result.get("features"):
+                style_builder.update_project_settings_fields(
+                    project_id, review_meta=style_review_meta
+                )
+                if style_result.get("drift"):
+                    logger.warning(
+                        f"   ⚠️ 文风漂移信号：第{chapter_number}章 "
+                        f"{[flag.get('field') for flag in style_result.get('flags') or []]}（仅作修订提示）"
+                    )
+        except Exception as style_error:
+            logger.warning(f"   ⚠️ 文风趋势记录失败（不影响后续处理）: {style_error}")
 
         # ==================== 步顲2：生成章节摘要（仅工作流场景） ====================
         if generate_summary:

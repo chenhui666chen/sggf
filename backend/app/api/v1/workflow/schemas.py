@@ -61,6 +61,8 @@ class GenerateNextChapterRequest(BaseModel):
     workflow_generation_model: Optional[str] = None
     # 🆕 生成档位意图（"free" | "standard"），最终档位由服务端权益判定决定
     generation_tier: Optional[str] = None
+    # 🆕 P4：项目被熔断暂停后，人工确认恢复自动推进
+    resume_after_confirmation: bool = False
 
 class ExpandStoryRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")

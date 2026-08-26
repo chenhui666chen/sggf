@@ -42,6 +42,7 @@ class StreamingService:
         max_tokens: Optional[int] = None,
         max_retries: int = 3,
         require_exact_model: bool = False,
+        disable_thinking: bool = False,
     ) -> str:
         normalized_task_type = normalize_task_type(task_type)
         explicit_model = normalize_model_id(model)
@@ -50,6 +51,11 @@ class StreamingService:
             or explicit_model
             or self.default_model
         )
+        # 🆕 思考模式控制：小说主链路（规划/正文）默认关闭 reasoning，
+        # 避免思考文本占用上下文或混入产出；经 extra_body 透传至适配器
+        call_kwargs: Dict[str, object] = {}
+        if disable_thinking:
+            call_kwargs["extra_body"] = {"thinking": {"type": "disabled"}}
         last_error: Optional[Exception] = None
 
         for attempt in range(max_retries):
@@ -84,6 +90,7 @@ class StreamingService:
                     temperature=temperature,
                     max_tokens=max_tokens,
                     max_retries=1,
+                    **call_kwargs,
                 )
 
                 if on_complete:
@@ -121,6 +128,7 @@ class StreamingService:
         task_type: Optional[str] = None,
         max_retries: int = 3,
         require_exact_model: bool = False,
+        disable_thinking: bool = False,
     ) -> str:
         messages = [
             {"role": "system", "content": system_prompt},
@@ -135,6 +143,7 @@ class StreamingService:
             task_type=task_type,
             max_retries=max_retries,
             require_exact_model=require_exact_model,
+            disable_thinking=disable_thinking,
         )
 
 

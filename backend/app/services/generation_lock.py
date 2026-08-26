@@ -22,6 +22,9 @@ logger = logging.getLogger("uvicorn.error")
 
 LOCK_KEY_PREFIX = "inspiration_ark:chapter_gen_lock:"
 DEFAULT_LOCK_TTL_SECONDS = 30 * 60  # 略大于单章生成最长耗时
+# 心跳每 300s 续租回满 TTL，因此存活任务的锁剩余 TTL 恒 >= TTL-300。
+# 低于 TTL-600（错过两个心跳周期）即判定持有任务已死（后端重启/进程被杀）。
+LOCK_STALE_THRESHOLD_SECONDS = DEFAULT_LOCK_TTL_SECONDS - 2 * 300
 
 # 比对 token 后删除，避免误删其他任务续租后的锁
 _RELEASE_LUA = """
@@ -38,6 +41,20 @@ if redis.call('GET', KEYS[1]) == ARGV[1] then
 else
     return 0
 end
+"""
+
+# 原子"检查 TTL 过短即删除"：只回收持有任务已死的残留锁，
+# TTL 新鲜（任务存活）或锁已被新任务重新持有时不误删
+_FORCE_RELEASE_STALE_LUA = """
+local ttl = redis.call('TTL', KEYS[1])
+if ttl > 0 and ttl < tonumber(ARGV[1]) then
+    return redis.call('DEL', KEYS[1])
+end
+return 0
+"""
+
+_FORCE_RELEASE_LUA = """
+return redis.call('DEL', KEYS[1])
 """
 
 
@@ -188,20 +205,68 @@ class ChapterGenerationLockService:
             self._redis_client = None
             logger.warning("续租项目 %s 生成锁失败: %s", handle.project_id, exc)
             return False
-        if handle.backend == "local":
-            return self._release_local(handle)
+
+    async def force_release_stale(
+        self,
+        project_id: int,
+        *,
+        stale_threshold_seconds: int = LOCK_STALE_THRESHOLD_SECONDS,
+    ) -> bool:
+        """回收残留锁（持有任务已死：后端重启/进程被杀导致心跳停止）。
+
+        判定依据：存活任务的心跳每 300s 续租回满 TTL，锁剩余 TTL 恒
+        >= TTL-300；剩余 TTL 低于阈值（默认错过两个心跳周期）即判定
+        持有者已死。原子"TTL 检查+DEL"避免误删被新任务重新持有的锁。
+
+        Returns:
+            True: 回收了残留锁（调用方可重试获取）
+            False: 无残留锁（锁不存在/任务存活/Redis 故障）
+        """
         try:
             client = await self._get_redis_client()
             released = await client.eval(
-                _RELEASE_LUA, 1, self._lock_key(handle.project_id), handle.token
+                _FORCE_RELEASE_STALE_LUA,
+                1,
+                self._lock_key(project_id),
+                str(stale_threshold_seconds),
             )
             return bool(released)
         except Exception as exc:
             self._redis_client = None
-            logger.warning(
-                f"⚠️ 释放项目 {handle.project_id} 生成锁失败（将由 TTL 兜底过期）: {exc}"
+            logger.warning("回收项目 %s 残留生成锁失败（Redis 故障，尝试本地兜底锁）: %s", project_id, exc)
+        # Redis 故障时锁在进程内（acquire 的本地兜底路径），同语义回收
+        now = time.monotonic()
+        with self._local_mutex:
+            existing = self._local_locks.get(project_id)
+            if existing and (existing[1] - now) < stale_threshold_seconds:
+                del self._local_locks[project_id]
+                return True
+        return False
+
+    async def force_release(self, project_id: int) -> bool:
+        """Force-delete a project lock regardless of remaining TTL.
+
+        Only for orphan recovery: this process has no active generate-next-chapter
+        task, but Redis/local still holds a lock that would otherwise 409 forever.
+        """
+        released = False
+        try:
+            client = await self._get_redis_client()
+            deleted = await client.eval(
+                _FORCE_RELEASE_LUA,
+                1,
+                self._lock_key(project_id),
+                "",
             )
-            return False
+            released = bool(deleted)
+        except Exception as exc:
+            self._redis_client = None
+            logger.warning("强制释放项目 %s 生成锁失败（Redis 故障，尝试本地兜底锁）: %s", project_id, exc)
+        with self._local_mutex:
+            if project_id in self._local_locks:
+                del self._local_locks[project_id]
+                released = True
+        return released
 
 
 _lock_service: Optional[ChapterGenerationLockService] = None

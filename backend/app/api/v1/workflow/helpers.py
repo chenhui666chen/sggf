@@ -469,6 +469,8 @@ def _build_iteration_revision_prompt(
     include_history_hint: bool = False,
     revision_mode_hint: str = "",
     repair_hints: str = "",
+    chapter_plan: str = "",
+    current_chapter_outline: str = "",
 ) -> str:
     return build_iteration_revision_user_prompt(
         chapter_number=chapter_number,
@@ -479,6 +481,8 @@ def _build_iteration_revision_prompt(
         include_history_hint=include_history_hint,
         revision_mode_hint=revision_mode_hint,
         repair_hints=repair_hints,
+        chapter_plan=chapter_plan,
+        current_chapter_outline=current_chapter_outline,
     )
 
 

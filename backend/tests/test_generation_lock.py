@@ -28,7 +28,7 @@ from app.services.generation_lock import (  # noqa: E402
 
 
 class FakeRedis:
-    """最小化模拟 SET NX / EVAL(compare-del) 语义。"""
+    """最小化模拟 SET NX / EVAL(compare-del) / EVAL(ttl-check-del) 语义。"""
 
     def __init__(self):
         self.store = {}
@@ -46,6 +46,20 @@ class FakeRedis:
         return True
 
     async def eval(self, script, numkeys, key, token, *args):
+        # 强制释放：无条件删除
+        if "DEL" in script and "TTL" not in script and "GET" not in script:
+            if key in self.store:
+                del self.store[key]
+                self.ttls.pop(key, None)
+                return 1
+            return 0
+        # 残留锁回收脚本：TTL 处于 (0, threshold) 才删除
+        if "TTL" in script and "DEL" in script:
+            ttl = self.ttls.get(key)
+            if key in self.store and ttl is not None and 0 < ttl < int(token):
+                del self.store[key]
+                return 1
+            return 0
         if self.store.get(key) == token:
             if "EXPIRE" in script:
                 self.ttls[key] = int(args[0])
@@ -262,6 +276,97 @@ def test_local_lock_expires_by_ttl():
 
         second = await service.acquire(8, allow_local_fallback=True)
         assert second is not None
+
+    asyncio.run(run())
+
+
+# ============ C组：残留锁回收（后端重启后"无可见任务却持续409"） ============
+
+
+def test_force_release_stale_recovers_stale_lock():
+    """锁剩余 TTL 低于阈值（持有任务已死）→ 回收成功，可重新获取。"""
+
+    async def run():
+        service = make_redis_service()
+        # 模拟：任务获取锁后进程被杀，TTL 从 1800 自然衰减到 900（错过两个心跳周期）
+        handle = await service.acquire(21, allow_local_fallback=True, ttl_seconds=1800)
+        assert handle is not None
+        key = "inspiration_ark:chapter_gen_lock:21"
+        service._redis_client.ttls[key] = 900  # 模拟时间流逝后的剩余 TTL
+
+        assert await service.force_release_stale(21) is True
+        # 回收后新任务可获取
+        new_handle = await service.acquire(21, allow_local_fallback=True)
+        assert new_handle is not None
+
+    asyncio.run(run())
+
+
+def test_force_release_stale_keeps_live_lock():
+    """存活任务（TTL 新鲜，心跳正常续租）的锁不得被回收。"""
+
+    async def run():
+        service = make_redis_service()
+        handle = await service.acquire(22, allow_local_fallback=True, ttl_seconds=1800)
+        assert handle is not None
+        # 心跳刚续租过，剩余 TTL 仍接近满值
+        key = "inspiration_ark:chapter_gen_lock:22"
+        service._redis_client.ttls[key] = 1700
+
+        assert await service.force_release_stale(22) is False
+        # 锁仍被持有，新任务仍被拒
+        assert await service.acquire(22, allow_local_fallback=True) is None
+
+    asyncio.run(run())
+
+
+def test_force_release_stale_no_lock_is_noop():
+    """锁不存在（从未持有/已过期）→ 回收返回 False 不报错。"""
+
+    async def run():
+        service = make_redis_service()
+        assert await service.force_release_stale(23) is False
+
+    asyncio.run(run())
+
+
+def test_force_release_stale_local_fallback():
+    """Redis 故障（本地兜底锁）时同语义回收：剩余时间过短即删除。"""
+
+    async def run():
+        import time as _time
+
+        service = make_broken_service()
+        handle = await service.acquire(24, allow_local_fallback=True)
+        assert handle is not None and handle.backend == "local"
+
+        # 模拟：剩余时间只剩 900s（低于阈值 1200）→ 视为持有任务已死
+        token, _ = service._local_locks[24]
+        service._local_locks[24] = (token, _time.monotonic() + 900)
+        assert await service.force_release_stale(24) is True
+        assert await service.acquire(24, allow_local_fallback=True) is not None
+
+        # 新锁剩余时间充足 → 不回收
+        token2, _ = service._local_locks[24]
+        service._local_locks[24] = (token2, _time.monotonic() + 1800)
+        assert await service.force_release_stale(24) is False
+
+    asyncio.run(run())
+
+
+
+def test_force_release_clears_fresh_orphan_lock():
+    async def run():
+        service = make_redis_service()
+        handle = await service.acquire(25, allow_local_fallback=True, ttl_seconds=1800)
+        assert handle is not None
+        key = "inspiration_ark:chapter_gen_lock:25"
+        service._redis_client.ttls[key] = 1700
+
+        assert await service.force_release_stale(25) is False
+        assert await service.force_release(25) is True
+        new_handle = await service.acquire(25, allow_local_fallback=True)
+        assert new_handle is not None
 
     asyncio.run(run())
 

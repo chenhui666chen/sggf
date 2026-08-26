@@ -4,7 +4,7 @@ from .user import User
 from .project import Project
 from .memory import Memory
 from .setting import SettingCollection, SettingItem
-from .character import Character, CharacterTechnique
+from .character import Character, CharacterTechnique, CharacterStateSnapshot
 from .review import Review
 from .graph import KnowledgeGraphEdge
 from .role import Role, Permission, user_roles, role_permissions
@@ -51,6 +51,7 @@ __all__ = [
     "SettingItem",
     "Character",
     "CharacterTechnique",
+    "CharacterStateSnapshot",
     "Review",
     "KnowledgeGraphEdge",
     "Role",

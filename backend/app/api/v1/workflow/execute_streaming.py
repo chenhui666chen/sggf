@@ -18,7 +18,10 @@ from app.core.security import get_current_user
 from app.models.project import Project, Chapter
 from app.models.setting import SettingCollection
 from app.websocket.manager import ws_manager
-from app.services.character_runtime_context import build_character_prompt_context_from_text
+from app.services.character_runtime_context import (
+    build_character_prompt_context_from_text,
+    build_initial_character_contexts_from_text,
+)
 from app.services.workflow_context_builder import WorkflowContextBuilder
 from app.utils.datetime_utils import parse_datetime_utc, utc_now
 from core.model_resolution import normalize_model_id
@@ -284,6 +287,11 @@ async def execute_stage_with_streaming(
                             preserve_ratio=0.9,
                         )
 
+                    # P1 统一人物上下文：首章使用初始基线（身份、动机、性格锚点、价值倾向、关系底色）
+                    initial_character_contexts = (
+                        build_initial_character_contexts_from_text(characters)
+                    )
+
                     real_coord = coordinator.get_real_coordinator(project_id)
                     project_context = getattr(real_coord, "project_context", {}) if real_coord else {}
                     project_genre = (
@@ -298,6 +306,9 @@ async def execute_stage_with_streaming(
                         chapter_plan=content_plan,
                         previous_ending="",
                         recent_chapter_assets_summary="",
+                        core_character_anchor_context=initial_character_contexts.core_character_anchor_context,
+                        focus_character_relationship_context=initial_character_contexts.focus_character_relationship_context,
+                        character_runtime_context=initial_character_contexts.character_runtime_context,
                         rag_character_context=rag_character_context,
                         rag_world_context=rag_world_context,
                         selected_opening=selected_opening,

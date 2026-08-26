@@ -185,7 +185,7 @@ def _quiet_post_save(monkeypatch):
 def test_post_save_passes_model_to_unified_and_summary(monkeypatch, _quiet_post_save):
     captured = {}
 
-    async def _fake_unified(*, chapter_title, chapter_content, project_id, model=None):
+    async def _fake_unified(*, chapter_title, chapter_content, project_id, model=None, project_categories=None):
         captured["unified_model"] = model
         return {"entities": [], "locations": [], "relations": [], "character_relations": []}
 
@@ -217,10 +217,10 @@ def test_post_save_passes_model_to_fallback_extractors(monkeypatch, _quiet_post_
     """统一提取失败 → 三段回退提取同样收到锁定模型（上线门槛：回退路径纳入锁定测试）。"""
     captured = {}
 
-    async def _fail_unified(*, chapter_title, chapter_content, project_id, model=None):
+    async def _fail_unified(*, chapter_title, chapter_content, project_id, model=None, project_categories=None):
         raise RuntimeError("simulated unified failure")
 
-    async def _fake_entities(*, chapter_title, chapter_content, project_id, model=None):
+    async def _fake_entities(*, chapter_title, chapter_content, project_id, model=None, project_categories=None):
         captured["entities_model"] = model
         return [{"name": "A", "type": "人物", "content": "x"}, {"name": "B", "type": "人物", "content": "y"}]
 
@@ -255,7 +255,7 @@ def test_post_save_default_model_is_none(monkeypatch, _quiet_post_save):
     """缺省调用（标准档/手动章节）：透传 None，各服务保持现有行为。"""
     captured = {}
 
-    async def _fake_unified(*, chapter_title, chapter_content, project_id, model=None):
+    async def _fake_unified(*, chapter_title, chapter_content, project_id, model=None, project_categories=None):
         captured["unified_model"] = model
         return {"entities": [], "locations": [], "relations": [], "character_relations": []}
 

@@ -163,8 +163,14 @@ def _detect_incompatible_persist_directory(
 
 
 def _build_cleanroom_persist_directory(persist_directory: str) -> str:
+    """Build a fresh persist dir that current chromadb can initialize.
+    Reusing a previous *_cleanroom is unsafe: once opened by a newer runtime
+    it may already be sysdb=10 and will panic the older runtime again.
+    """
+    from datetime import datetime
     base_path = Path(persist_directory)
-    return str(base_path.parent / f"{base_path.name}_cleanroom")
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    return str(base_path.parent / f"{base_path.name}_cleanroom_{stamp}")
 
 
 class NovelKnowledgeBase:
@@ -221,7 +227,7 @@ class NovelKnowledgeBase:
                 if fallback_skip_reason:
                     cleanroom_directory = _build_cleanroom_persist_directory(fallback_directory)
                     logger.warning(
-                        "Fallback persistent Chroma directory is incompatible, switching to cleanroom directory %s: %s",
+                        "Fallback persistent Chroma directory is incompatible, switching to a fresh cleanroom directory %s: %s. Existing chapter vectors in the primary store cannot be read by this chromadb runtime.",
                         cleanroom_directory,
                         fallback_skip_reason,
                     )

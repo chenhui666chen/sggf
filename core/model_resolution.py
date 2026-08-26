@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from enum import Enum
-from typing import Any, Optional
+from typing import Any, Dict, Optional
 
 
 class TaskType(str, Enum):
@@ -100,3 +100,22 @@ def normalize_model_id(model_id: Any) -> Optional[str]:
 
     normalized = text.strip().lower()
     return MODEL_ALIASES.get(normalized, normalized)
+
+
+def build_thinking_disabled_extra_body(model_id: Optional[str] = None) -> Dict[str, Any]:
+    """构造指定模型的"关闭思考" extra_body，按模型族分发互斥参数。
+
+    各 API 厂商的关思考参数互不兼容，不能一股脑全传：
+    - 火山 doubao 系：同时收到 reasoning_effort 与 thinking 会报 400
+      （InvalidParameter: Invalid combination of reasoning_effort and thinking
+      type: low + disabled，2026-08-23 九模型并行验证实测），只传 thinking
+    - StepFun 系：认 reasoning_effort（项目 Hard Constraints 要求 low）
+    - 其余（阿里百炼 qwen/kimi/glm、deepseek/minimax/mimo 及未指定模型）：
+      thinking + enable_thinking 并存，各 API 取自己认的那一个
+    """
+    mid = (model_id or "").strip().lower()
+    if mid.startswith("doubao"):
+        return {"thinking": {"type": "disabled"}}
+    if mid.startswith("step"):
+        return {"thinking": {"type": "disabled"}, "reasoning_effort": "low"}
+    return {"thinking": {"type": "disabled"}, "enable_thinking": False}

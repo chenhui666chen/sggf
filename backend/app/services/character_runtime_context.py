@@ -2,7 +2,17 @@ from __future__ import annotations
 
 import json
 import re
+from dataclasses import dataclass
 from typing import Any, Iterable, Optional
+
+
+@dataclass
+class InitialCharacterContexts:
+    """首章人物初始基线上下文（无前文状态时使用）。"""
+
+    core_character_anchor_context: str = ""
+    focus_character_relationship_context: str = ""
+    character_runtime_context: str = ""
 
 
 RELATION_LABEL_PREFIXES = (
@@ -644,7 +654,12 @@ def build_character_runtime_brief(
     role: Any = None,
     role_position: Any = None,
     faction: Any = None,
+    personality: Any = None,
+    worldview: Any = None,
     motivation: Any = None,
+    limitation: Any = None,
+    growth_direction: Any = None,
+    speech_style: Any = None,
     relationships: Any = None,
     mainline_role: Any = None,
     mainline_clues: Any = None,
@@ -672,6 +687,17 @@ def build_character_runtime_brief(
     if motivation_text:
         fragments.append(f"\u52a8\u673a\uff1a{motivation_text}")
 
+    # 稳定基线：性格与价值倾向，避免角色扁平化（缺失时保持旧输出兼容）
+    personality_text = _truncate_text(_clean_text(personality), 36)
+    worldview_text = _truncate_text(_clean_text(worldview), 32)
+    anchor_parts = []
+    if personality_text:
+        anchor_parts.append(f"\u6027\u683c\uff1a{personality_text}")
+    if worldview_text:
+        anchor_parts.append(f"\u4ef7\u503c\u503e\u5411\uff1a{worldview_text}")
+    if anchor_parts:
+        fragments.append("\uff1b".join(anchor_parts))
+
     relationship_text = build_current_relationship_summary(
         relationships,
         max_items=4,
@@ -689,6 +715,22 @@ def build_character_runtime_brief(
     )
     if mainline_text:
         fragments.append(f"\u5f53\u524d\u4e3b\u7ebf\uff1a{mainline_text}")
+
+    # 稳定基线补充：能力限制与成长方向，排在动态状态之后，预算紧张时优先保留动态状态
+    limitation_text = _truncate_text(_clean_text(limitation), 24)
+    growth_text = _truncate_text(_clean_text(growth_direction), 28)
+    baseline_extra_parts = []
+    if limitation_text:
+        baseline_extra_parts.append(f"\u9650\u5236\uff1a{limitation_text}")
+    if growth_text:
+        baseline_extra_parts.append(f"\u6210\u957f\u65b9\u5411\uff1a{growth_text}")
+    if baseline_extra_parts:
+        fragments.append("\uff1b".join(baseline_extra_parts))
+
+    # 说话风格短摘要（防对白同质化；缺失时不输出，保持旧格式兼容）
+    speech_style_text = _truncate_text(_clean_text(speech_style), 40)
+    if speech_style_text:
+        fragments.append(f"\u8bf4\u8bdd\u98ce\u683c\uff1a{speech_style_text}")
 
     return _truncate_text(" | ".join(fragment for fragment in fragments if fragment), max_length)
 
@@ -721,7 +763,12 @@ def build_character_runtime_metadata(name: str, profile_text: Any) -> dict[str, 
         role=first.role,
         role_position=first.role_position,
         faction=first.faction,
+        personality=first.personality,
+        worldview=first.worldview,
         motivation=first.motivation,
+        limitation=first.limitation,
+        growth_direction=first.growth_direction,
+        speech_style=first.speech_style,
         relationships=first.relationships,
         mainline_role=first.mainline_role,
         mainline_clues=first.mainline_clues,
@@ -866,7 +913,7 @@ def build_core_character_anchor_context_from_text(
     *,
     preferred_names: Optional[list[str]] = None,
     max_characters: int = 4,
-    detail_limit: int = 720,
+    detail_limit: int = 960,
 ) -> str:
     content, parsed_characters = _parse_characters_from_text(characters_text)
     if not content:
@@ -891,11 +938,16 @@ def build_core_character_anchor_context_from_text(
             role=character.role,
             role_position=character.role_position,
             faction=character.faction,
+            personality=character.personality,
+            worldview=character.worldview,
             motivation=character.motivation,
+            limitation=character.limitation,
+            growth_direction=character.growth_direction,
+            speech_style=character.speech_style,
             relationships=character.relationships,
             mainline_role=character.mainline_role,
             mainline_clues=character.mainline_clues,
-            max_length=180,
+            max_length=240,
         )
         if not brief:
             continue
@@ -1007,11 +1059,16 @@ def build_character_prompt_context_from_text(
             role=character.role,
             role_position=character.role_position,
             faction=character.faction,
+            personality=character.personality,
+            worldview=character.worldview,
             motivation=character.motivation,
+            limitation=character.limitation,
+            growth_direction=character.growth_direction,
+            speech_style=character.speech_style,
             relationships=character.relationships,
             mainline_role=character.mainline_role,
             mainline_clues=character.mainline_clues,
-            max_length=220,
+            max_length=280,
         )
         if not brief:
             continue
@@ -1048,3 +1105,51 @@ def build_character_prompt_context_from_text(
             f"\u3010\u4eba\u7269\u8fd0\u884c\u6458\u8981\u3011\n{detail_excerpt}"
         )
     return detail_excerpt
+
+
+def build_initial_character_contexts_from_text(
+    characters_text: Any,
+    *,
+    max_characters: int = 4,
+) -> InitialCharacterContexts:
+    """统一构建首章人物初始基线上下文。
+
+    首章没有前文状态，使用角色卡的初始基线（身份、动机、性格锚点、价值倾向、关系底色），
+    所有章节生成入口共用本函数，避免各链路自行拼装角色文本。
+    输入为空或解析失败时返回空字符串，不阻断章节 prompt 构建。
+    """
+    content, parsed_characters = _parse_characters_from_text(characters_text)
+    if not content or not parsed_characters:
+        return InitialCharacterContexts()
+
+    core_character_names = extract_core_character_names_from_text(
+        content,
+        max_characters=max_characters,
+    )
+
+    core_character_anchor_context = build_core_character_anchor_context_from_text(
+        content,
+        preferred_names=core_character_names,
+        max_characters=max_characters,
+    )
+    focus_character_relationship_context = (
+        build_focus_character_relationship_context_from_text(
+            content,
+            focus_names=core_character_names,
+            fallback_names=core_character_names,
+            max_characters=max_characters,
+        )
+    )
+    character_runtime_context = build_character_prompt_context_from_text(
+        content,
+        detail_limit=1200,
+        summary_limit=360,
+        max_characters=12,
+        preferred_names=core_character_names,
+    )
+
+    return InitialCharacterContexts(
+        core_character_anchor_context=core_character_anchor_context,
+        focus_character_relationship_context=focus_character_relationship_context,
+        character_runtime_context=character_runtime_context,
+    )

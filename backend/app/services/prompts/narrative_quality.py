@@ -41,7 +41,7 @@ NOVEL_FAILURE_CODES: Dict[str, Dict[str, str]] = {
     "LOGIC_BREAK":       {"name": "逻辑硬伤",     "class": "heavy", "hint": "因果链断裂，需重排事件逻辑"},
     "OOC_MAJOR":         {"name": "人设漂移",     "class": "heavy", "hint": "人物行为背离既有人设，相关段落重写"},
     "CONTINUITY_BREAK":  {"name": "连续性断裂",   "class": "heavy", "hint": "与前文状态/设定冲突，需对齐后重写"},
-    "STRUCT_BROKEN":     {"name": "结构断裂",     "class": "heavy", "hint": "开头/结尾与正文脱节，需整体重排"},
+    "STRUCT_BROKEN":     {"name": "结构断裂",     "class": "heavy", "hint": "开头/结尾脱节或全文双环重复时，删除重复线后只保留一条叙事，不要只重排首尾"},
     "INFO_DUMP":         {"name": "设定倾倒",     "class": "heavy", "hint": "大段旁白式设定说明，需拆进冲突重写"},
 }
 
@@ -84,6 +84,65 @@ def extract_failure_codes(review_text: str) -> List[Dict[str, str]]:
             "class": NOVEL_FAILURE_CODES[code]["class"],
         })
     return results
+
+
+# 综合评分行：**综合评分**：X/10分（"分"可省略；整段替换避免残留尾字）
+_REVIEW_SCORE_LINE_RE = re.compile(
+    r"(综合评分\**\s*[：:]\s*)([0-9]+(?:\.[0-9]+)?)\s*/\s*10\s*分?"
+)
+
+
+def calibrate_review_score_to_rubric(review_text: str) -> str:
+    """按评分锚点校准评审综合分（程序化兜底，治"零问题低分"的模型先验惯性）。
+
+    规则（与 STANDARD_CHAPTER_REVIEW_RUBRIC 锚点一致）：
+    - 无【必改】建议 且 无 HIGH/MED 失败码 → 分数不得低于 8.0（8-8.5 档下限）
+    - 存在【必改】建议 或 HIGH 失败码 → 分数不得高于 7.5
+
+    仅在明显违规时改写分数行并附校准说明；轻度越界（±0.5 内按档内解释）不动。
+    """
+    text = str(review_text or "")
+    match = _REVIEW_SCORE_LINE_RE.search(text)
+    if not match:
+        return text
+    try:
+        score = float(match.group(2))
+    except (TypeError, ValueError):
+        return text
+
+    codes = extract_failure_codes(text)
+    has_high_or_med = any(fc.get("severity") in ("HIGH", "MED") for fc in codes)
+    # 【必改】判定：修改建议区存在【必改】条目（排除"无必改"字样）
+    must_fix_hits = [
+        m for m in re.finditer(r"【必改】", text)
+        if "无必改" not in text[max(0, m.start() - 6):m.start()]
+    ]
+    has_must_fix = bool(must_fix_hits)
+
+    calibrated = None
+    reason = ""
+    if (not has_must_fix) and (not has_high_or_med) and score < 7.5 and score >= 6.5:
+        # 零必改+零中高级失败码却压到 7 档以下：按锚点应为 8-8.5 档
+        calibrated = 8.0
+        reason = "无必改项且无 HIGH/MED 失败码，按评分锚点应为 8-8.5 档"
+    elif (has_must_fix or any(fc.get("severity") == "HIGH" for fc in codes)) and score > 8.0:
+        # 有必改项/HIGH 码却给出 8+ 高分：按锚点不得高于 7.5
+        calibrated = 7.5
+        reason = "存在必改项或 HIGH 失败码，按评分锚点不得高于 7.5 分"
+
+    if calibrated is None:
+        return text
+
+    old_line = match.group(0)
+    new_line = f"{match.group(1)}{calibrated:g}/10分"
+    text = text.replace(old_line, new_line, 1)
+    # 透明标注校准痕迹（追加在评分行后，不侵入正文结构）
+    text = text.replace(
+        new_line,
+        f"{new_line}（评分校准：原评 {score:g} 分；{reason}）",
+        1,
+    )
+    return text
 
 
 def resolve_revision_mode(failure_codes: List[Dict[str, str]]) -> Tuple[Optional[str], str]:
@@ -192,7 +251,9 @@ def format_quality_memory(review_meta: Dict[str, Any], top_n: int = 3) -> str:
 # ---------------------------------------------------------------------------
 # 伏笔账本（P1-3）
 # ---------------------------------------------------------------------------
-_FORESHADOW_FIELD_RE = re.compile(r"(?:伏笔事项|伏笔)[：:]\s*([^\n]+)")
+# 标签与冒号之间允许 markdown 强调（**伏笔事项**：）与空白；
+# 旧正则匹配不到加粗格式导致规划伏笔解析为空 → 写前闸门 A2 误判"未声明回收"、账本漏登记
+_FORESHADOW_FIELD_RE = re.compile(r"(?:伏笔事项|伏笔)\s*\**\s*[：:]\s*([^\n]+)")
 
 
 def _parse_foreshadow_items(chapter_plan: str) -> List[str]:

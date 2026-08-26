@@ -106,7 +106,7 @@ class StartEvolutionRequest(BaseModel):
     """启动进化请求"""
     target_score: int = Field(default=25, ge=0, le=100, description="目标AI得分阈值")
     max_iterations: int = Field(default=6, ge=1, le=50, description="最大迭代次数")
-    samples_per_iteration: int = Field(default=4, ge=1, le=10, description="每次迭代样本数")
+    samples_per_iteration: int = Field(default=8, ge=1, le=20, description="每次迭代样本数")
     genre: Optional[str] = Field(default=None, description="目标题材；为空时自动检测")
     run_all_genres: bool = Field(default=False, description="按固定顺序优化全部题材")
 

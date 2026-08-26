@@ -186,6 +186,15 @@ class ModelHub:
             )
 
         if not self.registry._is_available(model_id):
+            # 🔧 评估场景（disable_fallback=True）禁止切换模型：回退模型产出
+            # 无法归因到被测模型，污染 A/B 与多模型评测数据
+            if kwargs.get("disable_fallback"):
+                return LLMResult(
+                    success=False,
+                    model_id=model_id,
+                    error=f"模型 {model_id} 不可用（已禁用回退）",
+                    error_code="model_unavailable"
+                )
             fallback_id = self._select_fallback_model(spec, attempted)
             if fallback_id:
                 fallback_max_tokens = self._normalize_max_tokens_for_model(fallback_id, max_tokens)
@@ -226,6 +235,8 @@ class ModelHub:
 
         max_retries = self._resolve_max_retries(spec, kwargs)
         retry_kwargs = dict(kwargs)
+        # 🔧 disable_fallback 是调用编排层标志（本函数内消费），不透传 API
+        retry_kwargs.pop("disable_fallback", None)
         timeout_auto_tuning_enabled = retry_kwargs.pop("disable_timeout_auto_tuning", False) is not True
         last_result = None
 
@@ -344,6 +355,17 @@ class ModelHub:
                     return alt_result
             # 所有内容安全回退均失败，返回原始结果
             return last_result
+
+        # 🔧 评估场景（disable_fallback=True）禁止失败回退：限流/超时等失败
+        # 切换到回退模型后，产出无法归因到被测模型（2026-08-23 九模型实测：
+        # step 限流 429 时静默 fallback 到 qwen，两行 doubao 数据被污染）
+        if kwargs.get("disable_fallback"):
+            return last_result or LLMResult(
+                success=False,
+                model_id=model_id,
+                error="调用失败（已禁用回退）",
+                error_code="call_failed"
+            )
 
         fallback_id = self._select_fallback_model(spec, attempted)
         if fallback_id:

@@ -229,6 +229,37 @@ def test_update_project_settings_fields_accepts_review_meta() -> None:
     assert json.loads(params["review_meta"]) == {"multi_model": True, "preset": "key_chapter_5"}
 
 
+def test_update_project_settings_fields_merges_review_meta_without_dropping_narrative_state() -> None:
+    existing_meta = {
+        "narrative_state_v1": {
+            "latest_chapter": 4,
+            "open_debts": [{"content": "打捞许可未办", "since_chapter": 4}],
+            "chapters": {"4": {"chapter": 4, "narrative_debts": [{"content": "打捞许可未办"}]}},
+        },
+        "quality_memory": {"items": [{"issue": "旧问题", "hits": 1}]},
+        "foreshadow_ledger": {"entries": [{"id": "fs_1"}]},
+        "multi_model": False,
+    }
+    incoming_meta = {
+        "multi_model": True,
+        "preset": "key_chapter_5",
+        "quality_memory": {"items": [{"issue": "新问题", "hits": 1}]},
+    }
+    db = DummySession(rows=[(1,), (json.dumps(existing_meta, ensure_ascii=False),)])
+
+    builder = WorkflowContextBuilder(db)
+    builder.update_project_settings_fields(9, review_meta=incoming_meta)
+
+    sql, params = db.executed[-1]
+    persisted = json.loads(params["review_meta"])
+    assert persisted["multi_model"] is True
+    assert persisted["preset"] == "key_chapter_5"
+    assert persisted["narrative_state_v1"]["latest_chapter"] == 4
+    assert persisted["narrative_state_v1"]["open_debts"][0]["content"] == "打捞许可未办"
+    assert persisted["foreshadow_ledger"]["entries"][0]["id"] == "fs_1"
+    assert persisted["quality_memory"]["items"][0]["issue"] == "新问题"
+
+
 def test_update_project_settings_fields_normalizes_plot_outline_before_persisting() -> None:
     db = DummySession(rows=[(1,)])
     legacy_outline = (

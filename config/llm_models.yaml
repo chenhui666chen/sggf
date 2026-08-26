@@ -703,7 +703,7 @@ llm_models:
     default_params:
       temperature: 0.7
       max_tokens: 16384
-      reasoning_level: medium
+      reasoning_effort: low
 
     summary: 阶跃星辰2026年6月发布并开源的生产级Agent高效率Flash模型，198B稀疏MoE架构（196B语言+1.8B视觉编码器，激活11B），最高生成速度400 tokens/s，原生多模态理解，三档推理强度可调，ClawEval-1.1/SimpleVQA(Search)等多项Agent与视觉基准第一，直接调用StepFun官方OpenAI兼容接口。
     recommended_scenarios:

@@ -686,6 +686,8 @@ class ContentReviserAgent(BaseAgent):
             iteration_plan=runtime_context.get("iteration_plan", ""),
             recent_chapter_assets_summary=runtime_context.get("recent_chapter_assets_summary", ""),
             include_history_hint=bool(runtime_context.get("include_history_hint", False)),
+            chapter_plan=str(runtime_context.get("chapter_plan") or ""),
+            current_chapter_outline=str(runtime_context.get("current_chapter_outline") or ""),
         )
         return self._process_with_system_prompt(
             revision_prompt,

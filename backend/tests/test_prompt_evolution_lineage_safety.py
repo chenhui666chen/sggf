@@ -69,9 +69,10 @@ class TestSafeDefaultNotFalsePositive:
         assert MetaOptimizer._validate_prompt_safety(prompt)
 
     def test_positive_context_still_flagged(self):
-        # 同样措辞出现在肯定语境仍须拦截（真实毒条款复测）
+        # 同样措辞出现在肯定语境仍须拦截（真实毒条款复测；
+        # 2026-08-19 重排放行后事件顺序不再属毒条款，样本换成仍被拦的叙事视角）
         for clause in (
-            "你可以改变事件顺序以增强戏剧性",
+            "你可以改变叙事视角以增强戏剧性",
             "将所有叙述统一改成现代口语",
             "你被授权且必须补充感官证据",
             "你必须为原文中一切抽象描写补全其必然或高度合理的物理伴随现象",

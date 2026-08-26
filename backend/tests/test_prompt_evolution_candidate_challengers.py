@@ -13,6 +13,7 @@ from app.services.prompt_evolution.meta_optimizer import (
     DESLOP_CHALLENGER_DESC,
     DESLOP_CHALLENGER_PROMPT,
     MetaOptimizer,
+    NARRATIVE_CHALLENGER_DESC,
     STRUCTURE_CLAUSE_BLOCK,
     STRUCTURE_CLAUSE_DESC,
     STRUCTURE_CLAUSE_MARKER,
@@ -22,13 +23,14 @@ from app.services.prompt_evolution.engine import PromptEvolutionEngine
 
 
 class TestBuildCandidateChallengers:
-    def test_returns_two_variants(self):
-        """固定产出两个候选变体：结构条款 + 去精致化。"""
+    def test_returns_three_variants(self):
+        """固定产出三个候选变体：结构条款 + 去精致化 + 叙事组织减法版。"""
         variants = build_candidate_challengers()
-        assert len(variants) == 2
+        assert len(variants) == 3
         descs = [desc for _, desc in variants]
         assert STRUCTURE_CLAUSE_DESC in descs
         assert DESLOP_CHALLENGER_DESC in descs
+        assert NARRATIVE_CHALLENGER_DESC in descs
 
     def test_structure_variant_is_base_plus_clause_block(self):
         """结构条款变体 = 基线提示词 + 条款块（独立 arm，不混合改写）。"""
@@ -115,7 +117,7 @@ class TestEngineCandidateInjection:
         engine = self._make_engine()
         first = engine._inject_candidate_challengers([])
         second = engine._inject_candidate_challengers([])
-        assert len(first) == 2
+        assert len(first) == 3
         assert second == []
 
     def test_skip_failed_candidate(self):

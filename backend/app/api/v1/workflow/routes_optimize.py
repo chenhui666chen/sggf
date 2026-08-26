@@ -30,7 +30,12 @@ logger = logging.getLogger(__name__)
 from app.api.v1.workflow import router
 from app.api.v1.workflow.schemas import *
 from app.api.v1.workflow.helpers import *
+from app.api.v1.workflow.helpers import (
+    _estimate_tokens_by_chars,
+    _select_text_model_by_input_tokens,
+)
 
+@router.post("/optimize-chapter")
 async def optimize_chapter(
     request: dict,
     background_tasks: BackgroundTasks,
@@ -133,6 +138,32 @@ async def optimize_chapter(
         "message": "优化任务已提交"
     }
 
+
+def _update_history_progress(
+    db: Session,
+    *,
+    task_id: str,
+    progress: int,
+    message: str,
+) -> None:
+    db.execute(
+        text(
+            """
+            UPDATE generation_history
+            SET progress = :progress, message = :message, updated_at = :updated_at
+            WHERE task_id = :task_id
+            """
+        ),
+        {
+            "task_id": task_id,
+            "progress": progress,
+            "message": message,
+            "updated_at": utc_now().isoformat(),
+        },
+    )
+    db.commit()
+
+
 def _safe_db_rollback(db: Session, reason: Optional[str] = None) -> None:
     try:
         db.rollback()
@@ -225,6 +256,68 @@ def _load_project_chapter_context(db: Session, *, project_id: int) -> Dict[str, 
     }
 
 
+def _clip_context(text: str, limit: int) -> str:
+    value = (text or "").strip()
+    if len(value) <= limit:
+        return value
+    return value[:limit].rstrip() + "..."
+
+def _build_editor_chapter_context(db: Session, *, project_id: int, chapter_number: int, chapter_plan: str = "") -> Dict[str, Any]:
+    project_context = _load_project_chapter_context(db, project_id=project_id)
+    builder = WorkflowContextBuilder(db)
+    stage_context = builder.load_stage_text_context(project_id)
+    generation_context = builder.build_chapter_generation_context(
+        project_id,
+        chapter_number,
+        plot_outline=stage_context.plot_outline or project_context["outline"],
+        characters=stage_context.characters or project_context["characters"],
+    )
+    previous_chapter = db.query(Chapter).filter((Chapter.project_id == project_id) & (Chapter.chapter_number == chapter_number - 1)).first()
+    previous_ending = ""
+    if previous_chapter and previous_chapter.content:
+        previous_ending = _clip_context(previous_chapter.content, 800)
+    chapter_outline = (chapter_plan or "").strip() or (generation_context.current_chapter_outline or "").strip()
+    return {
+        "genre": project_context["genre"],
+        "world_setting": project_context["world_setting"],
+        "characters": generation_context.content_character_context or generation_context.character_prompt_context or project_context["characters"],
+        "chapter_outline": chapter_outline,
+        "volume_context": generation_context.current_volume_context or "",
+        "character_state": generation_context.character_state_context or "",
+        "character_anchor": generation_context.core_character_anchor_context or "",
+        "focus_relationships": generation_context.focus_character_relationship_context or "",
+        "previous_ending": previous_ending,
+        "focus_character_names": list(generation_context.focus_character_names or []),
+    }
+
+def _build_regenerate_user_prompt(*, chapter, user_feedback: str, context: Dict[str, Any]) -> str:
+    feedback = (user_feedback or "").strip()
+    feedback_block = ("USER_REWRITE: " + feedback) if feedback else "No extra user instruction. Rewrite strictly from this chapter outline/plan."
+    names = ", ".join(context.get("focus_character_names") or []) or "characters from outline"
+    parts = [
+        "Rewrite this chapter body and replace the old draft. Do not continue into the next chapter.",
+        f"Chapter {chapter.chapter_number}: {chapter.title or ""}",
+        "Genre: " + (context.get("genre") or "general"),
+        "Chapter outline/plan:",
+        _clip_context(context.get("chapter_outline") or "", 2400),
+        "Volume context:",
+        _clip_context(context.get("volume_context") or "", 1200),
+        "World setting excerpt:",
+        _clip_context(context.get("world_setting") or "", 1200),
+        "Focus characters: " + names,
+        "Character runtime state:",
+        _clip_context(context.get("character_state") or "", 1200),
+        "Character anchors:",
+        _clip_context(context.get("character_anchor") or context.get("characters") or "", 1600),
+        "Focus relationships:",
+        _clip_context(context.get("focus_relationships") or "", 800),
+        "Previous chapter ending:",
+        context.get("previous_ending") or "None",
+        feedback_block,
+        "Output only the complete chapter body. Follow the previous ending, realize this chapter outline events and ending hook, and do not repeat an already written full plot loop.",
+    ]
+    return chr(10).join(part for part in parts if part)
+
 async def _optimize_chapter_task(
     task_id: str,
     project_id: int,
@@ -299,12 +392,12 @@ async def _optimize_chapter_task(
             SET progress = :progress, message = :message, updated_at = :updated_at
             WHERE task_id = :task_id
         """)
-        db.execute(update_query, {
-            "task_id": task_id,
-            "progress": 20,
-            "message": "📝 正在评审章节质量...",
-            "updated_at": utc_now().isoformat()
-        })
+        _update_history_progress(
+            db,
+            task_id=task_id,
+            progress=20,
+            message="📝 正在评审章节质量...",
+        )
         db.commit()
         logger.info(f"📝 [{task_id}] 开始评审章节质量...")
         
@@ -343,24 +436,32 @@ async def _optimize_chapter_task(
         
         review_report = review_agent.process(review_prompt)
         
-        # 解析评分
-        import re
-        score_match = re.search(r'综合评分[:\uff1a]\s*(\d+(?:\.\d+)?)', review_report)
-        current_score = float(score_match.group(1)) if score_match else 0.0
+        current_score = _extract_iteration_review_score(review_report)
         
         logger.info(f"📊 当前章节评分: {current_score}")
         
         # 🔧 步骤2：迭代优化
-        db.execute(update_query, {
-            "task_id": task_id,
-            "progress": 50,
-            "message": f"🔧 正在优化章节（当前评分: {current_score}）...",
-            "updated_at": utc_now().isoformat()
-        })
+        _update_history_progress(
+            db,
+            task_id=task_id,
+            progress=50,
+            message=f"🔧 正在优化章节（当前评分: {current_score}）...",
+        )
         db.commit()
         logger.info(f"🔧 [{task_id}] 开始优化章节...")
         
         # 使用ContentCreatorAgent进行改稿（但需要明确指示修改而非重写）
+        editor_context = _build_editor_chapter_context(
+            db,
+            project_id=project_id,
+            chapter_number=chapter.chapter_number,
+            chapter_plan=chapter_plan or "",
+        )
+        chapter_plan = editor_context.get("chapter_outline") or chapter_plan
+        outline_excerpt = _clip_context(editor_context.get("chapter_outline") or chapter_plan or "", 1800)
+        state_excerpt = _clip_context(editor_context.get("character_state") or "", 800)
+        prev_excerpt = editor_context.get("previous_ending") or "无"
+
         content_agent = ContentCreatorAgent()
         
         # 构造改稿提示词（强调修改而非重写）
@@ -385,6 +486,9 @@ async def _optimize_chapter_task(
 【章节信息】
 - 章节号：第{chapter.chapter_number}章
 - 题材：{genre or '通用'}
+- 本章细纲/规划：{outline_excerpt}
+- 人物运行态：{state_excerpt}
+- 上一章结尾：{prev_excerpt}
 
 【系统评审意见】
 {review_report}{user_feedback_section}
@@ -419,6 +523,27 @@ async def _optimize_chapter_task(
         
         if not optimized_content:
             raise Exception("优化结果为空")
+        chapter.content = optimized_content
+        chapter.word_count = len(optimized_content or "")
+        chapter.updated_at = utc_now()
+        db.commit()
+
+        try:
+            from app.services.chapter_post_save import start_chapter_post_save_task
+
+            start_chapter_post_save_task(
+                chapter_id=chapter.id,
+                chapter_title=chapter.title or f"第{chapter.chapter_number}章",
+                chapter_content=optimized_content,
+                chapter_number=chapter.chapter_number,
+                project_id=project_id,
+                generate_summary=True,
+                chapter_plan=chapter_plan or "",
+                auto_merge_settings=True,
+            )
+        except Exception as post_save_error:
+            logger.warning(f"optimize post_save failed: {post_save_error}")
+
         
         # 完成 - 更新进度
         db.execute(update_query, {
@@ -445,6 +570,7 @@ async def _optimize_chapter_task(
             "status": "completed",
             "result": json.dumps({
                 "optimized_content": optimized_content,
+                "content": optimized_content,
                 "original_score": current_score,
                 "review_report": review_report,
             }, ensure_ascii=False),
@@ -516,7 +642,7 @@ async def regenerate_chapter(
     
     project_id = request.get("project_id")
     chapter_id = request.get("chapter_id")
-    user_feedback = request.get("user_feedback", "")
+    user_feedback = request.get("user_feedback") or request.get("reason") or ""
     
     if not project_id or not chapter_id:
         raise HTTPException(
@@ -660,69 +786,79 @@ async def _regenerate_chapter_task(
             logger.warning(f"获取项目设定失败: {e}")
         
         # 更新进度：准备生成
-        db.execute(update_query, {
-            "task_id": task_id,
-            "progress": 20,
-            "message": "📝 正在准备生成章节...",
-            "updated_at": utc_now().isoformat()
-        })
-        db.commit()
+        _update_history_progress(
+            db,
+            task_id=task_id,
+            progress=20,
+            message="📝 正在准备生成章节...",
+        )
         
-        # 构建章节信息
-        chapter_info = {
-            "chapter_number": chapter.chapter_number,
-            "title": chapter.title,
-            "outline": chapter_plan or outline,
-            "main_characters": [],  # 可以从character_designer中解析
-            "setting": world_setting,
-            "project_genre": genre,
-            "world_builder": world_setting,
-            "character_designer": characters,
-            "characters": characters,
-            "user_feedback": user_feedback
-        }
-        
+        editor_context = _build_editor_chapter_context(
+            db,
+            project_id=project_id,
+            chapter_number=chapter.chapter_number,
+            chapter_plan=chapter_plan or "",
+        )
+        regenerate_prompt = _build_regenerate_user_prompt(
+            chapter=chapter,
+            user_feedback=user_feedback,
+            context=editor_context,
+        )
+        chapter_plan = editor_context.get("chapter_outline") or chapter_plan
+
         # 更新进度：生成中
-        db.execute(update_query, {
-            "task_id": task_id,
-            "progress": 50,
-            "message": "✍️ 正在生成章节内容...",
-            "updated_at": utc_now().isoformat()
-        })
-        db.commit()
-        
-        # 使用ContentCreatorAgent重新生成章节
+        _update_history_progress(
+            db,
+            task_id=task_id,
+            progress=50,
+            message="正在生成章节内容...",
+        )
+
         content_agent = ContentCreatorAgent()
         content_agent.set_project_context(project_id)
-        
-        result = content_agent.create_chapter(chapter_info)
-        new_content = result.get("content", "")
+        new_content = content_agent.process(regenerate_prompt)
+        result = {"content": new_content}
         
         if not new_content:
             raise Exception("生成内容为空")
         
         # 更新进度：保存中
-        db.execute(update_query, {
-            "task_id": task_id,
-            "progress": 80,
-            "message": "💾 正在保存章节内容...",
-            "updated_at": utc_now().isoformat()
-        })
-        db.commit()
+        _update_history_progress(
+            db,
+            task_id=task_id,
+            progress=80,
+            message="💾 正在保存章节内容...",
+        )
         
         # 更新章节内容
         chapter.content = new_content
+        chapter.word_count = len(new_content or "")
         chapter.updated_at = utc_now()
         db.commit()
+        try:
+            from app.services.chapter_post_save import start_chapter_post_save_task
+
+            start_chapter_post_save_task(
+                chapter_id=chapter.id,
+                chapter_title=chapter.title or f"第{chapter.chapter_number}章",
+                chapter_content=new_content,
+                chapter_number=chapter.chapter_number,
+                project_id=project_id,
+                generate_summary=True,
+                chapter_plan=chapter_plan or "",
+                auto_merge_settings=True,
+            )
+        except Exception as post_save_error:
+            logger.warning(f"regenerate post_save failed: {post_save_error}")
+
         
         # 完成 - 更新进度
-        db.execute(update_query, {
-            "task_id": task_id,
-            "progress": 100,
-            "message": "✅ 章节重新生成完成",
-            "updated_at": utc_now().isoformat()
-        })
-        db.commit()
+        _update_history_progress(
+            db,
+            task_id=task_id,
+            progress=100,
+            message="✅ 章节重新生成完成",
+        )
         logger.info(f"✅ [{task_id}] 章节重新生成完成")
         
         # 更新任务状态为完成，并存储结果
@@ -739,6 +875,7 @@ async def _regenerate_chapter_task(
             "task_id": task_id,
             "status": "completed",
             "result": json.dumps({
+                "content": new_content,
                 "regenerated_content": new_content,
                 "consistency_analysis": result.get("consistency_analysis", {}),
                 "optimization_info": result.get("optimization_info", {}),

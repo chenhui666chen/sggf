@@ -112,38 +112,41 @@ class PromptEvolutionEngine:
         if self.config.genre_weight_config:
             return self.config.genre_weight_config
 
-        # 预设题材权重
+        # 预设题材权重（2026-08-23 黄金对照实验证伪 TMS：TMS 为反向文风分类器，
+        # GPT人工化金标准(朱雀0%)得 TMS=97、AI原文得 TMS=0，任何正向 ai_score
+        # 权重都会把进化方向拉向"文学腔"。全部题材 ai_score 清零，权重转移到
+        # readability/writing/fidelity）
         genre_weights = {
             "玄幻": {
-                "ai_score": 0.35,      # AI痕迹权重
-                "readability": 0.25,   # 可读性权重
-                "writing": 0.25,       # 文笔权重
-                "fidelity": 0.15       # 保真度权重
+                "ai_score": 0.0,        # TMS 已证伪，不参与计分
+                "readability": 0.35,   # 可读性权重
+                "writing": 0.35,       # 文笔权重
+                "fidelity": 0.30       # 保真度权重
             },
             "都市": {
-                "ai_score": 0.40,      # 都市文更注重AI痕迹
-                "readability": 0.30,   # 可读性重要
-                "writing": 0.20,       # 文笔要求适中
-                "fidelity": 0.10       # 保真度相对较低
+                "ai_score": 0.0,        # TMS 已证伪，不参与计分
+                "readability": 0.40,   # 可读性重要
+                "writing": 0.30,       # 文笔要求适中
+                "fidelity": 0.30       # 保真度
             },
             "言情": {
-                "ai_score": 0.30,      # AI痕迹权重适中
-                "readability": 0.25,   # 可读性重要
-                "writing": 0.35,       # 言情文最注重文笔
-                "fidelity": 0.10       # 保真度适中
+                "ai_score": 0.0,        # TMS 已证伪，不参与计分
+                "readability": 0.30,   # 可读性重要
+                "writing": 0.40,       # 言情文最注重文笔
+                "fidelity": 0.30       # 保真度
             },
             "悬疑": {
-                "ai_score": 0.35,      # AI痕迹权重
-                "readability": 0.30,   # 可读性很重要
-                "writing": 0.20,       # 文笔要求适中
-                "fidelity": 0.15       # 保真度重要（逻辑严密）
+                "ai_score": 0.0,        # TMS 已证伪，不参与计分
+                "readability": 0.35,   # 可读性很重要
+                "writing": 0.30,       # 文笔要求适中
+                "fidelity": 0.35       # 保真度重要（逻辑严密）
             },
             # 🆕 通用题材（默认权重，适用于多题材混合或未指定题材）
             "通用": {
-                "ai_score": 0.35,      # 平衡AI痕迹
-                "readability": 0.25,   # 平衡可读性
-                "writing": 0.25,       # 平衡文笔
-                "fidelity": 0.15       # 平衡保真度
+                "ai_score": 0.0,        # TMS 已证伪，不参与计分
+                "readability": 0.35,   # 平衡可读性
+                "writing": 0.35,       # 平衡文笔
+                "fidelity": 0.30       # 平衡保真度
             }
         }
 
@@ -168,10 +171,6 @@ class PromptEvolutionEngine:
     QUALITY_DISQUALIFY_FAILURE_RATIO = 0.5
     # 按失败占比折算的排名罚分（占比 1.0 对应满额罚分）
     QUALITY_FAILURE_RANK_PENALTY = 60.0
-    # 🔧 best 入选 AI 分上限：与起点选择门槛（avg_ai_score < 80）对齐，
-    # 防止降分无效的高分版本（如 97+ 分）占据最佳位被消费端当真冠军使用
-    # （2026-08-07 批次 4cf9057b 取证：97.25~98.5 三版本入选污染传承链）
-    BEST_VERSION_MAX_AI_SCORE = 80.0
     # 🔧 成功率门槛：成功样本占比低于该值的版本不得入选最佳列表，
     # 防止坍塔型提示词（超短/空输出）凭少数成功样本的分数获得虚高适应度
     # （2026-08-08 都市批 bd6c6b78 取证：iter4 半数样本篇幅守门失败仍以均值 0.0 入选）
@@ -194,15 +193,169 @@ class PromptEvolutionEngine:
         return "；".join(reasons) if reasons else "无"
 
     @classmethod
+    def _diagnose_initial_failure(cls, results: List[EvaluationResult]) -> str:
+        """初始全失格的归因诊断，供后续题材重试时切换活跃模型参考。"""
+        if not results:
+            return "改写全失格"
+        failures = [r for r in results if not r.success]
+        # 篇幅守门：error 含篇幅/守门/字数/minimum 等关键词
+        if failures and all(
+            any(k in (f.error or "") for k in ("篇幅", "守门", "字数", "minimum", "length"))
+            for f in failures
+        ):
+            return "篇幅守门拦截"
+        # 检测失败：error 明确指向 AI 检测接口
+        if failures and all(
+            any(k in (f.error or "").lower() for k in ("检测", "detect", "ai_content", "腾讯"))
+            for f in failures
+        ):
+            return "检测失败"
+        # 活跃模型对文本的降分无反应：改写前后朱雀分绝对差 ≤ 5（成功样本）
+        scored_success = [
+            r for r in results
+            if r.success and r.original_ai_score is not None and r.rewritten_ai_score is not None
+        ]
+        if scored_success and all(
+            abs(r.original_ai_score - r.rewritten_ai_score) <= 5 for r in scored_success
+        ):
+            return "活跃模型全降不动"
+        return "改写全失格"
+
+    @staticmethod
+    def _now_iso() -> str:
+        # 与文件内既有时间戳写法（L1301 completed_at）保持一致，使用本地时间
+        return datetime.now().isoformat()
+
+    @classmethod
     def _ab_rank_score(
         cls, score: float, results: List[EvaluationResult], expected_count: int
     ) -> float:
+        # 🔧 A/B 排名分改用"人感成本"中位数：实测 text_nlp_tianji 对改写后
+        # 人感文本(朱雀判人工)系统性高报到 8x-9x，TMS 已不能作为"判人工"主指标，
+        # 故不再以 rewritten_ai_score 做排名，改以语义评审的人感信号(writing_
+        # naturalness/genre_consistency/over_rewrite_risk)为主；TMS 仅在语义
+        # 评审不可用时回退，并保留为"深区 AI 粗门槛"（见 _median_human_cost）。
+        # score 参数（均值）仅为保持调用兼容，不再参与排名。
+        median = cls._median_human_cost(results)
         if cls._is_complete_quality_evaluation(results, expected_count):
-            return score
-        ratio = cls._quality_failure_ratio(results, expected_count)
-        if ratio > cls.QUALITY_DISQUALIFY_FAILURE_RATIO:
-            return 101.0
-        return score + ratio * cls.QUALITY_FAILURE_RANK_PENALTY
+            base = median
+        else:
+            ratio = cls._quality_failure_ratio(results, expected_count)
+            if ratio > cls.QUALITY_DISQUALIFY_FAILURE_RATIO:
+                base = 101.0
+            else:
+                base = median + ratio * cls.QUALITY_FAILURE_RANK_PENALTY
+        return base + cls._variance_collapse_penalty(results)
+
+    @staticmethod
+    def _median_rewritten_score(results: List[EvaluationResult]) -> float:
+        """成功样本 rewritten_ai_score 的中位数（偶数样本取中间两数均值）。
+
+        无成功样本时返回 100.0，等价于"全部失格"的高分位，配合
+        _ab_rank_score 的质量硬失败判定（ratio>阈值时直接置 101）使用。
+        """
+        scores = sorted(
+            r.rewritten_ai_score
+            for r in results
+            if r.success and r.rewritten_ai_score is not None
+        )
+        if not scores:
+            return 100.0
+        n = len(scores)
+        mid = n // 2
+        if n % 2 == 1:
+            return float(scores[mid])
+        return (scores[mid - 1] + scores[mid]) / 2.0
+
+    @classmethod
+    def _single_human_cost(cls, result: "EvaluationResult") -> Optional[float]:
+        """单个 AC option: 语义人感成本（越低越像人）。
+
+        优先用 LLM 语义评审的人感信号；语义评审不可用时返回 None
+        （2026-08-23 黄金对照实验证伪 TMS：GPT人工化金标准(朱雀0%) TMS=97、
+        AI原文 TMS=0——TMS 与真实人感反向，不能作代理，宁缺毋滥从
+        中位数中排除该样本）。
+        """
+        review = result.llm_review or {}
+        if not review.get("available"):
+            return None  # 语义评审不可用：不用反向的 TMS 代理，排除出中位数
+
+        def _d(key: str) -> float:
+            v = review.get(key)
+            return v.get("score", 100) if isinstance(v, dict) else 100.0
+
+        over = str(review.get("over_rewrite_risk", "low")).strip().lower()
+        over_cost = {"low": 0, "medium": 25, "high": 60}.get(over, 0)
+        # 人感成本：满分100指最不像人。writing_naturalness/genre/over_rewrite 为主，
+        # 事实与保真维度兜底，防止"自然化"以失真为代价。
+        cost = (
+            (100 - _d("writing_naturalness")) * 0.25
+            + (100 - _d("genre_consistency")) * 0.20
+            + (100 - _d("semantic_fidelity")) * 0.20
+            + (100 - _d("fact_consistency")) * 0.10
+            + (100 - _d("information_completeness")) * 0.10
+            + over_cost * 0.15
+        )
+        return max(0.0, min(100.0, cost))
+
+    @classmethod
+    def _median_human_cost(cls, results: List["EvaluationResult"]) -> float:
+        """成功样本"人感成本"的中位数（偶数取中间两数均值）。
+
+        无成功样本时返回 100.0，等价于"全部失格"的高分位，配合
+        _ab_rank_score 的质量硬失败判定使用。
+        """
+        costs = sorted(
+            c for c in (cls._single_human_cost(r) for r in results if r.success)
+            if c is not None
+        )
+        if not costs:
+            return 100.0
+        n = len(costs)
+        mid = n // 2
+        if n % 2 == 1:
+            return float(costs[mid])
+        return (costs[mid - 1] + costs[mid]) / 2.0
+
+    # 🔧 反退化守门：句式方差塌缩罚分（守门而非目标）
+    # 有效降分文本的特征是句式模式不稳定（完整书面句、单字句、直陈句混用），
+    # 句长方差自然不低；把文本洗平（各句长度趋同、每句都刚刚好）是
+    # "AI 润色腔"退化信号（2026-08-23 人工改写实验：刻意短句化/白描化
+    # 策略反而全文被判疑似）。只罚严重塌缩，不奖励高方差——旧版
+    # "方差必须高于原文"的量化指标曾诱导机械制造方差。
+    VARIANCE_COLLAPSE_RATIO = 0.5   # 改写稿方差 < 原文×此比例视为塌缩
+    VARIANCE_COLLAPSE_PENALTY = 10.0  # 多数样本塌缩时的排名罚分
+
+    @classmethod
+    def _variance_collapse_penalty(cls, results: List[EvaluationResult]) -> float:
+        """成功样本的改写稿句长方差相对原文严重塌缩（过半样本）时罚分。"""
+        from .novel_rules import calculate_text_metrics
+
+        pairs = [
+            (r.original_text, r.rewritten_text)
+            for r in results
+            if r.success and r.original_text and r.rewritten_text
+        ]
+        if not pairs:
+            return 0.0
+
+        collapsed = 0
+        for original, rewritten in pairs:
+            orig_var = calculate_text_metrics(original).sentence_length_variance
+            if orig_var <= 0:
+                continue
+            new_var = calculate_text_metrics(rewritten).sentence_length_variance
+            if new_var < orig_var * cls.VARIANCE_COLLAPSE_RATIO:
+                collapsed += 1
+
+        # 严格过半样本塌缩才罚：个别样本塌缩可能只是段落特性，不构成退化信号
+        if collapsed * 2 > len(pairs):
+            logger.debug(
+                "📉 句式方差塌缩守门命中: %d/%d 样本方差低于原文%.0f%%",
+                collapsed, len(pairs), cls.VARIANCE_COLLAPSE_RATIO * 100,
+            )
+            return cls.VARIANCE_COLLAPSE_PENALTY
+        return 0.0
 
     def _calculate_composite_score(
         self,
@@ -228,7 +381,10 @@ class PromptEvolutionEngine:
             weights = self.genre_weights
         else:
             # 默认使用通用权重
-            weights = {"ai_score": 0.35, "readability": 0.25, "writing": 0.25, "fidelity": 0.15}
+            # （2026-08-23 黄金对照实验证伪 TMS：GPT人工化金标准(朱雀0%) TMS=97、
+            #  AI原文 TMS=0——TMS 为反向文风分类器，权重清零，保留键以兼容
+            #  题材权重结构与调用方签名）
+            weights = {"ai_score": 0.0, "readability": 0.35, "writing": 0.35, "fidelity": 0.30}
 
         # 保真度需要反转（100 - fidelity，因为我们希望综合分越低越好）
         fidelity_normalized = 100 - fidelity
@@ -318,6 +474,15 @@ class PromptEvolutionEngine:
                 logger.warning("今日全模型评测预算已用尽，跳过本轮多模型评测")
                 return None
             multi_model_service = _get_multi_model_service()
+            # 🔧 失败节流：上一次全 0/N 成功时，按累计计数跳过后续 1 个触发间隔
+            if multi_model_service.should_skip_mm_eval():
+                if on_progress:
+                    await on_progress(
+                        "⏭️ 多模型评估：上一轮全失败，跳过本次（节流）",
+                        progress_pct,
+                        {"multi_model_eval": True, "skipped": True},
+                    )
+                return None
 
             logger.info("🔬 启动多模型评估...")
             if on_progress:
@@ -425,7 +590,10 @@ class PromptEvolutionEngine:
             )
 
         # === 2. 成功停止（达到理想状态）===
-        ai_ok = ai_score <= self.config.early_stop_threshold
+        # （2026-08-23 证伪 TMS：金标准(朱雀0%) TMS=97、AI文学腔原文 TMS=0，
+        # 低 TMS 分不代表人工化成功——早停的 AI 条件永久视为不满足，
+        # 由可读性/文笔/保真三维共同决定是否停机）
+        ai_ok = False
         readability_ok = readability_score >= self.config.min_readability_score
         writing_ok = writing_score <= self.config.max_writing_score
         fidelity_ok = fidelity_similarity >= self.config.min_fidelity_similarity
@@ -846,6 +1014,38 @@ class PromptEvolutionEngine:
                 current_version.avg_composite_score = 100.0
             logger.debug(f"📖 初始版本多维评分 - 可读性: {current_version.avg_readability:.1f}, 文笔: {current_version.avg_writing:.1f}, 综合: {current_version.avg_composite_score:.1f}")
 
+            # 🔧 初始评估即全失格：硬停止，不进入迭代
+            #    实测 08-23 科幻/历史题材：6 轮迭代全部 56 分钟跑完 best_versions=空，
+            #    完全是模型侧降分能力问题，提示词无法通过进化解决，浪费 token。
+            #    失败归因四类：改写全失格/篇幅守门拦截/检测失败/活跃模型全降不动。
+            all_failed_hard = (
+                initial_failure_ratio > self.QUALITY_DISQUALIFY_FAILURE_RATIO
+                or (len(samples) > 0 and all(not r.success for r in results))
+                or current_version.avg_composite_score >= 100.0
+            )
+            if all_failed_hard:
+                attribution = self._diagnose_initial_failure(results)
+                fail_detail = self._summarize_quality_failures(results)
+                abort_msg = (
+                    f"初始评估中止：{attribution}（失败占比{initial_failure_ratio:.0%}，"
+                    f"综合分{current_version.avg_composite_score:.1f}）。{fail_detail}"
+                )
+                logger.warning("🛑 %s", abort_msg)
+                self.history.error_message = abort_msg
+                self.history.completed_at = self._now_iso()
+                self._save_progress()
+                # 中断兜底保存：初始失败通常在经验基线建立之后已落盘快照，
+                # 但本轮未产生新迭代→new_count==0，_save_experience_on_interrupt
+                # 内部会跳过不落盘，不污染跨题材经验池。
+                self._save_experience_on_interrupt()
+                await self._notify_progress(
+                    on_progress,
+                    f"🛑 {abort_msg}",
+                    100,
+                    {"iteration": 0, "aborted": True, "attribution": attribution},
+                )
+                return self.history
+
             self._update_best_versions(current_version)
             self.history.all_versions.append(current_version)
             self._save_progress()
@@ -939,7 +1139,15 @@ class PromptEvolutionEngine:
                         # 🔧 使用配置的样本数进行A/B评估
                         ab_sample_count = min(self.config.ab_test_sample_count, len(samples))
                         ab_samples = samples[:ab_sample_count]
-                        logger.debug(f"   📋 使用 {ab_sample_count} 个样本进行A/B评估（{len(filtered_variants)}个有效变体）")
+                        # 🆕 A/B 统一执行模型（进化启动时锁定的题材活跃模型）：
+                        # 提示词效应是模型条件性的（同一提示词 step=0 分、
+                        # doubao=94 分，九模型实测），日志显式记录执行模型，
+                        # 供挑战者模型条件性追溯
+                        logger.debug(
+                            f"   📋 使用 {ab_sample_count} 个样本进行A/B评估"
+                            f"（{len(filtered_variants)}个有效变体，"
+                            f"执行模型={self.rewrite_model_id or '默认路由'}）"
+                        )
 
                         # 🆕 评估原始版本（优先使用缓存）
                         cached_orig = self._get_cached_evaluation(improved_prompt)
@@ -1361,14 +1569,10 @@ class PromptEvolutionEngine:
 
     def _update_best_versions(self, version: PromptVersion) -> None:
         """更新最佳版本列表（保留前N个）"""
-        # 🔧 分数门槛：平均 AI 分超过起点门槛的版本降分无效，不得入选，
-        # 防止高分版本凭低 composite（可读性/文笔权重拉低）占据最佳位
-        if version.avg_ai_score is None or version.avg_ai_score > self.BEST_VERSION_MAX_AI_SCORE:
-            logger.warning(
-                f"🚫 版本 {version.version_id} 平均AI分 {version.avg_ai_score} 超过上限 "
-                f"{self.BEST_VERSION_MAX_AI_SCORE}，降分无效不得入选最佳列表"
-            )
-            return
+        # 🔧 分数门槛（2026-08-23 黄金对照实验证伪 TMS 后移除）：TMS 为反向
+        # 文风分类器（GPT人工化金标准 TMS=97、AI文学腔原文 TMS=0），按
+        # avg_ai_score 设上限会把真正的人感版本挡在最佳列表外。降分有效性
+        # 改由 composite（语义人感）与保真/成功率门槛保障。
         # 🔧 保真门槛：含硬失败或语义保真<90样本的版本不得入选最佳列表，
         # 防止带毒提示词（授权增量/固定语境示例）凭高降分进入传承链
         # （2026-08-07 批次 db1cdd3e 取证：85分评审仍入选最佳导致污染闭环）
@@ -1503,7 +1707,9 @@ class PromptEvolutionEngine:
                     # 选择同题材中综合评分最低（效果最好）的
                     history_best = min(same_genre_prompts, key=lambda p: p.avg_composite_score)
                     logger.debug(f"🎭 同题材「{self.genre}」最佳: {history_best.version_id}, 综合评分: {history_best.avg_composite_score}, AI分数: {history_best.avg_ai_score}")
-                    if history_best.avg_composite_score < best_score and history_best.avg_ai_score < 80:
+                    # （2026-08-23 证伪 TMS：金标准(朱雀0%)得 TMS=97，按 avg_ai_score
+                    #  <80 设门槛会拒掉真正的人感版本，只看 composite）
+                    if history_best.avg_composite_score < best_score:
                         best_score = history_best.avg_composite_score
                         best_ai_score = history_best.avg_ai_score
                         best_prompt = history_best.prompt_text
@@ -1517,7 +1723,8 @@ class PromptEvolutionEngine:
                 # 🔧 选择综合评分最低（效果最好）的
                 history_best = min(best_prompts, key=lambda p: p.avg_composite_score)
                 logger.debug(f"📊 历史最佳: {history_best.version_id}, 综合评分: {history_best.avg_composite_score}, AI分数: {history_best.avg_ai_score}")
-                if history_best.avg_composite_score < best_score and history_best.avg_ai_score < 80:
+                # （2026-08-23 证伪 TMS：同上，只看 composite，不再设 avg_ai_score 门槛）
+                if history_best.avg_composite_score < best_score:
                     best_score = history_best.avg_composite_score
                     best_ai_score = history_best.avg_ai_score
                     best_prompt = history_best.prompt_text
