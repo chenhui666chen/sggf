@@ -1,3 +1,4 @@
+import type { TFunction } from 'i18next'
 import type { DreamweaverAssetPlanItem, LibraryDisplayItem, LibraryAsset, DreamweaverLibraryPlanItem, DreamweaverScriptEntities } from '@/types/dreamweaver'
 import type { SafetyBlockedShotItem } from './diagnosticSections'
 import {
@@ -52,6 +53,7 @@ interface CreateRunPagePreviewRenderersDeps {
   snapshotScriptGeneration: unknown
   safetyBlockedShots: SafetyBlockedShotItem[]
   openSafetyBlockedShot: (shotId: string) => void
+  t: TFunction
 }
 
 export function createRunPagePreviewRenderers(deps: CreateRunPagePreviewRenderersDeps) {
@@ -83,6 +85,7 @@ export function createRunPagePreviewRenderers(deps: CreateRunPagePreviewRenderer
     snapshotScriptGeneration,
     safetyBlockedShots,
     openSafetyBlockedShot,
+    t,
   } = deps
 
   const renderRunAssetPreviewGrid = (title: string, uris: string[], kind: 'image' | 'video') => (
@@ -103,7 +106,7 @@ export function createRunPagePreviewRenderers(deps: CreateRunPagePreviewRenderer
   )
 
   const resolveLibraryDisplayCardStateLocal = (item: LibraryDisplayItem) =>
-    resolveLibraryDisplayCardState(item, missingRoleSet, libraryPreviewLoading, libraryPreviewErrors)
+    resolveLibraryDisplayCardState(item, missingRoleSet, libraryPreviewLoading, libraryPreviewErrors, t)
 
   const renderLibraryDisplayCard = (item: LibraryDisplayItem) => {
     const state = resolveLibraryDisplayCardStateLocal(item)
@@ -141,8 +144,8 @@ export function createRunPagePreviewRenderers(deps: CreateRunPagePreviewRenderer
         assetPlanItems={assetPlanItems}
         assetPlanSummary={assetPlanSummary}
         mergedVideoPlan={mergedVideoPlan ?? null}
-        assetPlanGrid={hasNonMergedVideoAssets ? renderAssetPlanGrid('素材占位卡', nonMergedVideoAssets) : null}
-        mergedVideoPlanGrid={hasMergedVideoPlan ? renderAssetPlanGrid('合成视频占位', [mergedVideoPlan!]) : null}
+        assetPlanGrid={hasNonMergedVideoAssets ? renderAssetPlanGrid(t('dreamweaverRun.assetPlaceholderCard'), nonMergedVideoAssets) : null}
+        mergedVideoPlanGrid={hasMergedVideoPlan ? renderAssetPlanGrid(t('dreamweaverRun.mergedVideoPlaceholder'), [mergedVideoPlan!]) : null}
       />
     )
   }
@@ -156,7 +159,7 @@ export function createRunPagePreviewRenderers(deps: CreateRunPagePreviewRenderer
       audioMarkers={snapshotAudioMarkers}
       scriptEntities={snapshotScriptEntities}
       scriptGeneration={snapshotScriptGeneration}
-      entitySummary={summarizeScriptEntities(snapshotScriptEntities)}
+      entitySummary={summarizeScriptEntities(snapshotScriptEntities, t)}
     />
   )
 

@@ -1,3 +1,5 @@
+import type { TFunction } from 'i18next'
+
 import type {
   UserCenterPointsAccount,
   UserCenterPointsPricingPolicyOverview,
@@ -34,22 +36,28 @@ export type BuildUserCenterOverviewTabMetricsOptions = {
   getPricingBasisLabel: (basis?: UserCenterPointsPricingPolicyOverview['user_price_basis'] | null) => string
   formatPercentRate: (value?: number | null) => string
   formatUpdatedAtLabel: (value: string) => string
+  /** 可选翻译函数：缺省时原样返回 key（便于测试与纯计算场景）。 */
+  t?: TFunction
 }
+
+const DEFAULT_TRANSLATE: TFunction = ((key: string) => key) as TFunction
 
 export function buildUserCenterOverviewTabPointsAccountStatusMeta(
   pointsAccountStatus?: UserCenterPointsAccount['status'] | null,
+  t?: TFunction,
 ): UserCenterOverviewTabPointsAccountStatusMeta {
+  const translate = t ?? DEFAULT_TRANSLATE
   if (pointsAccountStatus === 'partial') {
     return {
-      label: '已接入账本',
-      description: '已有真实积分账本与任务计费链路接入用户中心，后续会继续扩展更多消费和权益来源。',
+      label: translate('userCenter.points.statusConnectedLedger'),
+      description: translate('userCenter.points.statusConnectedLedgerDesc'),
       color: 'info',
     }
   }
 
   return {
-    label: '逐步扩展',
-    description: '积分账户结构已就绪，当前已支持积分预检和部分任务计费，更多权益与消费来源会继续接入。',
+    label: translate('userCenter.points.statusGradual'),
+    description: translate('userCenter.points.statusGradualDesc'),
     color: 'warning',
   }
 }
@@ -59,8 +67,11 @@ export function buildUserCenterOverviewTabPricingPolicyPresentation(options: {
   getPricingBasisLabel: (basis?: UserCenterPointsPricingPolicyOverview['user_price_basis'] | null) => string
   formatPercentRate: (value?: number | null) => string
   formatUpdatedAtLabel: (value: string) => string
+  /** 可选翻译函数：缺省时原样返回 key（便于测试与纯计算场景）。 */
+  t?: TFunction
 }): UserCenterOverviewTabPricingPolicyPresentation | null {
   const { pricingPolicy } = options
+  const translate = options.t ?? DEFAULT_TRANSLATE
 
   if (!pricingPolicy) {
     return null
@@ -68,18 +79,20 @@ export function buildUserCenterOverviewTabPricingPolicyPresentation(options: {
 
   return {
     sourceColor: pricingPolicy.source === 'admin_log' ? 'primary' : 'default',
-    sourceLabel: pricingPolicy.source === 'admin_log' ? '后台定价快照' : '系统默认定价',
-    userPriceBasisLabel: `用户按 ${options.getPricingBasisLabel(pricingPolicy.user_price_basis)} 计点`,
-    description: '用户侧按公开价或内部标准价折算积分，不额外加价；运行中任务会按当前缓冲比例预留建议冻结值。',
+    sourceLabel: translate(pricingPolicy.source === 'admin_log' ? 'userCenter.points.sourceAdmin' : 'userCenter.points.sourceDefault'),
+    userPriceBasisLabel: translate('userCenter.points.priceBasisTemplate', {
+      basis: translate(options.getPricingBasisLabel(pricingPolicy.user_price_basis)),
+    }),
+    description: translate('userCenter.points.pricingPolicyDescription'),
     summaryItems: [
-      { label: '积分汇率', value: `1 元 = ${pricingPolicy.points_per_yuan} 积分` },
-      { label: '用户计价基准', value: options.getPricingBasisLabel(pricingPolicy.user_price_basis) },
-      { label: '用户计价系数', value: `${pricingPolicy.user_price_rate.toFixed(2)} ×` },
-      { label: '冻结缓冲', value: options.formatPercentRate(pricingPolicy.freeze_buffer_rate) },
+      { label: translate('userCenter.points.exchangeRate'), value: translate('userCenter.points.exchangeRateValue', { value: pricingPolicy.points_per_yuan }) },
+      { label: translate('userCenter.points.pricingBasis'), value: translate(options.getPricingBasisLabel(pricingPolicy.user_price_basis)) },
+      { label: translate('userCenter.points.pricingRate'), value: translate('userCenter.points.pricingRateValue', { rate: pricingPolicy.user_price_rate.toFixed(2) }) },
+      { label: translate('userCenter.points.freezeBuffer'), value: options.formatPercentRate(pricingPolicy.freeze_buffer_rate) },
     ],
     updatedAtLabel: pricingPolicy.updated_at
-      ? `最近调整：${options.formatUpdatedAtLabel(pricingPolicy.updated_at)}`
-      : '最近调整：尚未人工调整',
+      ? translate('userCenter.points.adjustedAt', { time: options.formatUpdatedAtLabel(pricingPolicy.updated_at) })
+      : translate('userCenter.points.notAdjustedFull'),
   }
 }
 
@@ -87,12 +100,13 @@ export function buildUserCenterOverviewTabMetrics(
   options: BuildUserCenterOverviewTabMetricsOptions,
 ): UserCenterOverviewTabMetrics {
   return {
-    pointsAccountStatusMeta: buildUserCenterOverviewTabPointsAccountStatusMeta(options.pointsAccountStatus),
+    pointsAccountStatusMeta: buildUserCenterOverviewTabPointsAccountStatusMeta(options.pointsAccountStatus, options.t),
     pricingPolicyPresentation: buildUserCenterOverviewTabPricingPolicyPresentation({
       pricingPolicy: options.pricingPolicy,
       getPricingBasisLabel: options.getPricingBasisLabel,
       formatPercentRate: options.formatPercentRate,
       formatUpdatedAtLabel: options.formatUpdatedAtLabel,
+      t: options.t,
     }),
   }
 }

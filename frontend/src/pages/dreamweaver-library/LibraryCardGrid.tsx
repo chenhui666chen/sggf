@@ -19,6 +19,7 @@ import { CHARACTER_VIEW_ORDER, characterViewLabel, characterViewRole, parseLibra
 import { resolveLibraryAssetImageState } from '@/utils/dreamweaverLibraryAssetState'
 import type { LibraryCard, LibraryCardGroupKey, LibraryAsset, CollectState, CharacterCard } from './libraryPageUtils'
 import { LIBRARY_CARD_GROUP_ORDER, assetToCssAspectRatio, getKlingProviderRef, getLibraryAssetDisplayTitle } from './libraryPageUtils'
+import { useTranslation } from 'react-i18next'
 
 export interface LibraryCardGridProps {
   cards: LibraryCard[]
@@ -52,6 +53,7 @@ export interface LibraryCardGridProps {
 const INITIAL_CARD_LIMIT = 20
 
 export function LibraryCardGrid(props: LibraryCardGridProps) {
+  const { t } = useTranslation()
   const {
     cards,
     cardGroups,
@@ -107,12 +109,12 @@ export function LibraryCardGrid(props: LibraryCardGridProps) {
     const blockedViews = viewItems.filter((item) => item.asset && item.state.safetyBlocked).length
     const approvedViews = viewItems.filter((item) => item.asset && item.state.hasRenderableImage && Boolean(item.asset.meta?.approved)).length
 
-    let emptyText = '暂无预览'
+    let emptyText = t('dreamweaverRun.libraryNoPreview')
     if (generatedViews <= 0) {
-      if (missingViews >= totalViews) emptyText = '未生成（缺失）'
-      else if (blockedViews > 0) emptyText = '安全拦截'
-      else if (placeholderViews > 0) emptyText = '占位图'
-      else emptyText = '未生成'
+      if (missingViews >= totalViews) emptyText = t('dreamweaverRun.libraryPreviewMissingAll')
+      else if (blockedViews > 0) emptyText = t('dreamweaverRun.libraryStatusSafetyBlocked')
+      else if (placeholderViews > 0) emptyText = t('dreamweaverRun.libraryPlaceholderImage')
+      else emptyText = t('dreamweaverRun.libraryPreviewNotGenerated')
     }
 
     return (
@@ -138,7 +140,7 @@ export function LibraryCardGrid(props: LibraryCardGridProps) {
         onClick={() => onOpenCharacterViews(card)}
         role="button"
         tabIndex={0}
-        aria-label={`查看角色多视角：${card.title}`}
+        aria-label={t('dreamweaverRun.libraryViewAriaLabel', { title: card.title })}
       >
         <Box sx={{ width: '100%', aspectRatio: coverAspectRatio, bgcolor: 'rgba(0,0,0,0.25)', position: 'relative' }}>
           {coverPreview && coverAsset && (
@@ -166,14 +168,14 @@ export function LibraryCardGrid(props: LibraryCardGridProps) {
         </Box>
         <Box sx={{ p: 1 }}>
           <Typography variant="caption" sx={{ fontWeight: 700, color: 'rgba(255,255,255,0.92)' }} display="block">
-            角色：{card.title}
+            {t('dreamweaverRun.libraryRoleLabel', { title: card.title })}
           </Typography>
           <Stack direction="row" spacing={1} alignItems="center" mt={0.5} flexWrap="wrap">
-            <Chip size="small" label={`六视角：${generatedViews}/${totalViews}`} variant="outlined" />
-            <Chip size="small" label={`已通过：${approvedViews}/${totalViews}`} color={approvedViews ? 'success' : 'default'} variant="outlined" />
-            {missingViews > 0 && <Chip size="small" label={`缺失：${missingViews}`} color="warning" variant="outlined" />}
-            {placeholderViews > 0 && <Chip size="small" label={`占位：${placeholderViews}`} variant="outlined" />}
-            {blockedViews > 0 && <Chip size="small" label={`拦截：${blockedViews}`} color="error" variant="outlined" />}
+            <Chip size="small" label={t('dreamweaverRun.libraryViewCountChip', { generated: generatedViews, total: totalViews })} variant="outlined" />
+            <Chip size="small" label={t('dreamweaverRun.libraryApprovedViewChip', { approved: approvedViews, total: totalViews })} color={approvedViews ? 'success' : 'default'} variant="outlined" />
+            {missingViews > 0 && <Chip size="small" label={t('dreamweaverRun.libraryMissingViewChip', { count: missingViews })} color="warning" variant="outlined" />}
+            {placeholderViews > 0 && <Chip size="small" label={t('dreamweaverRun.libraryPlaceholderViewChip', { count: placeholderViews })} variant="outlined" />}
+            {blockedViews > 0 && <Chip size="small" label={t('dreamweaverRun.libraryBlockedViewChip', { count: blockedViews })} color="error" variant="outlined" />}
           </Stack>
           {card.descriptor && (
             <Typography
@@ -205,11 +207,11 @@ export function LibraryCardGrid(props: LibraryCardGridProps) {
               }}
               sx={{ mt: 0.75, fontSize: 11, color: 'rgba(255,255,255,0.85)', borderColor: 'rgba(255,255,255,0.35)', '&:hover': { borderColor: 'rgba(255,255,255,0.7)', backgroundColor: 'rgba(255,255,255,0.08)' } }}
             >
-              重生成缺失视角 ({missingViews})
+              {t('dreamweaverRun.libraryRegenerateMissingViews', { count: missingViews })}
             </Button>
           )}
           <Typography variant="caption" sx={{ display: 'block', mt: 0.75, color: 'rgba(255,255,255,0.55)' }}>
-            点击查看六视角详情并生成/替换；已通过的单视角素材可收录到用户中心
+            {t('dreamweaverRun.libraryCardClickHint')}
           </Typography>
         </Box>
       </ImageListItem>
@@ -228,16 +230,22 @@ export function LibraryCardGrid(props: LibraryCardGridProps) {
     const collectState = collectStates[asset.id] || { loading: false, feedback: null }
     const chineseRole =
       parsed.entityType === 'scene'
-        ? '场景卡'
+        ? t('dreamweaverRun.libraryTypeScene')
         : parsed.entityType === 'prop'
-          ? '道具卡'
+          ? t('dreamweaverRun.libraryTypeProp')
           : parsed.entityType === 'character' && parsed.view
-            ? `角色立绘（${characterViewLabel(parsed.view)}）`
+            ? t('dreamweaverRun.libraryTypeCharacterView', { view: characterViewLabel(parsed.view) })
             : ''
     const showRawRole = parsed.entityType === 'unknown'
     const descriptor = String(asset?.meta?.descriptor || '').trim()
     const promptPreview = String(asset?.meta?.prompt || asset?.meta?.suggested_prompt || '').trim()
-    const statusText = missing ? '未生成（缺失）' : imageState.safetyBlocked ? '安全拦截' : placeholder ? '占位图' : '暂无预览'
+    const statusText = missing
+      ? t('dreamweaverRun.libraryPreviewMissingAll')
+      : imageState.safetyBlocked
+        ? t('dreamweaverRun.libraryStatusSafetyBlocked')
+        : placeholder
+          ? t('dreamweaverRun.libraryPlaceholderImage')
+          : t('dreamweaverRun.libraryNoPreview')
 
     return (
       <ImageListItem
@@ -303,10 +311,10 @@ export function LibraryCardGrid(props: LibraryCardGridProps) {
             {title}
           </Typography>
           <Stack direction="row" spacing={1} alignItems="center" mt={0.5} flexWrap="wrap">
-            <Chip size="small" label={approved ? '已通过' : '待审核'} color={approved ? 'success' : 'default'} />
-            {missing && <Chip size="small" label="缺失" color="warning" variant="outlined" />}
-            {placeholder && <Chip size="small" label="占位" variant="outlined" />}
-            {imageState.safetyBlocked && <Chip size="small" label="安全拦截" color="error" variant="outlined" />}
+            <Chip size="small" label={approved ? t('dreamweaverRun.libraryStatusApproved') : t('dreamweaverRun.libraryStatusPendingReview')} color={approved ? 'success' : 'default'} />
+            {missing && <Chip size="small" label={t('dreamweaverRun.libraryStatusMissing')} color="warning" variant="outlined" />}
+            {placeholder && <Chip size="small" label={t('dreamweaverRun.libraryStatusPlaceholder')} variant="outlined" />}
+            {imageState.safetyBlocked && <Chip size="small" label={t('dreamweaverRun.libraryStatusSafetyBlocked')} color="error" variant="outlined" />}
             {chineseRole && <Chip size="small" label={chineseRole} variant="outlined" />}
             {showRawRole && (
               <Typography variant="caption" sx={{ color: 'rgba(255,255,255,0.65)', fontFamily: 'monospace' }}>
@@ -357,7 +365,7 @@ export function LibraryCardGrid(props: LibraryCardGridProps) {
               onClick={() => void onApprove(asset.role, !approved)}
               disabled={loading || !imageState.hasRenderableImage || imageState.safetyBlocked}
             >
-              {approved ? '撤销通过' : '通过'}
+              {approved ? t('dreamweaverRun.libraryRevokeApproval') : t('dreamweaverRun.libraryApprove')}
             </Button>
             <Button
               size="small"
@@ -366,7 +374,7 @@ export function LibraryCardGrid(props: LibraryCardGridProps) {
               startIcon={<UploadFileIcon fontSize="small" />}
               disabled={loading}
             >
-              上传替换
+              {t('dreamweaverRun.libraryUploadReplace')}
               <input
                 hidden
                 type="file"
@@ -386,7 +394,7 @@ export function LibraryCardGrid(props: LibraryCardGridProps) {
               onClick={() => onRegenerate(asset)}
               disabled={loading}
             >
-              {imageState.hasRenderableImage ? '重生成' : '生成'}
+              {imageState.hasRenderableImage ? t('dreamweaverRun.libraryRegenerate') : t('dreamweaverRun.libraryGenerate')}
             </Button>
             <Button
               size="small"
@@ -394,7 +402,7 @@ export function LibraryCardGrid(props: LibraryCardGridProps) {
               onClick={() => void onCollect(asset)}
               disabled={loading || collectState.loading || !approved || !imageState.hasRenderableImage || imageState.safetyBlocked}
             >
-              {collectState.loading ? '收录中...' : '收录到用户资产'}
+              {collectState.loading ? t('dreamweaverRun.libraryCollecting') : t('dreamweaverRun.libraryCollectToUserAssets')}
             </Button>
           </Stack>
           {imageState.hasRenderableImage ? (
@@ -418,7 +426,7 @@ export function LibraryCardGrid(props: LibraryCardGridProps) {
                       disabled={providerSyncSubmitting && providerSyncAssetId === asset.id}
                       sx={{ minWidth: 'auto', px: 0.5, fontSize: 11 }}
                     >
-                      {providerSyncSubmitting && providerSyncAssetId === asset.id ? '同步中...' : '同步'}
+                      {providerSyncSubmitting && providerSyncAssetId === asset.id ? t('dreamweaverRun.librarySyncing') : t('dreamweaverRun.librarySync')}
                     </Button>
                     <Button
                       size="small"
@@ -427,7 +435,7 @@ export function LibraryCardGrid(props: LibraryCardGridProps) {
                       onClick={() => onOpenProviderRefDialog(asset)}
                       sx={{ minWidth: 'auto', px: 0.5, fontSize: 11 }}
                     >
-                      解绑
+                      {t('dreamweaverRun.libraryUnbind')}
                     </Button>
                   </>
                 ) : (
@@ -438,7 +446,7 @@ export function LibraryCardGrid(props: LibraryCardGridProps) {
                     onClick={() => onOpenProviderRefDialog(asset)}
                     sx={{ minWidth: 'auto', px: 0.5, fontSize: 11 }}
                   >
-                    绑定 Kling
+                    {t('dreamweaverRun.libraryBindKling')}
                   </Button>
                 )
               })()}
@@ -451,7 +459,7 @@ export function LibraryCardGrid(props: LibraryCardGridProps) {
           ) : null}
           {!approved && imageState.hasRenderableImage && !imageState.safetyBlocked ? (
             <Typography variant="caption" sx={{ display: 'block', mt: 0.75, color: 'rgba(255,255,255,0.55)' }}>
-              建议先通过审核，再收录到用户中心，避免把未确认素材沉淀为可复用资产。
+              {t('dreamweaverRun.libraryApproveFirstHint')}
             </Typography>
           ) : null}
         </Box>
@@ -475,13 +483,13 @@ export function LibraryCardGrid(props: LibraryCardGridProps) {
           <Box key={group.key}>
             <Stack direction="row" spacing={1} alignItems="center" mb={1} flexWrap="wrap">
               <Typography variant="subtitle2" sx={{ color: 'rgba(255,255,255,0.95)', fontWeight: 700 }}>
-                {group.label}
+                {t(group.labelKey)}
               </Typography>
-              <Chip size="small" label={`数量：${items.length}`} variant="outlined" />
+              <Chip size="small" label={t('dreamweaverRun.libraryItemCount', { count: items.length })} variant="outlined" />
               {hasMore && !showAllCards && (
                 <Chip
                   size="small"
-                  label={`显示更多`}
+                  label={t('dreamweaverRun.libraryShowMore')}
                   variant="outlined"
                   color="primary"
                   onClick={() => onShowAllCards(true)}
@@ -499,7 +507,7 @@ export function LibraryCardGrid(props: LibraryCardGridProps) {
                 onClick={() => onShowAllCards(true)}
                 sx={{ mt: 1, color: 'rgba(255,255,255,0.85)', borderColor: 'rgba(255,255,255,0.3)' }}
               >
-                显示全部 {items.length} 个素材
+                {t('dreamweaverRun.libraryShowAll', { count: items.length })}
               </Button>
             )}
           </Box>
@@ -512,7 +520,7 @@ export function LibraryCardGrid(props: LibraryCardGridProps) {
           onClick={() => onShowAllCards(false)}
           sx={{ color: 'rgba(255,255,255,0.85)', borderColor: 'rgba(255,255,255,0.3)' }}
         >
-          收起
+          {t('dreamweaverRun.libraryCollapse')}
         </Button>
       )}
     </Stack>

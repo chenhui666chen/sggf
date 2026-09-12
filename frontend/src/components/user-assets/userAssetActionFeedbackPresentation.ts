@@ -1,48 +1,67 @@
+import type { TFunction } from 'i18next'
+
 import type { UserAssetBatchActionCommand } from './userAssetListPresentation'
 
-export function buildUserAssetUpdateSuccessMessage(successText = '资产信息已更新'): string {
-  return successText
+const DEFAULT_TRANSLATE: TFunction = ((key: string) => key) as TFunction
+
+export function buildUserAssetUpdateSuccessMessage(successText?: string, t?: TFunction): string {
+  const translate = t ?? DEFAULT_TRANSLATE
+  return successText || translate('userAsset.feedback.updateSuccessDefault')
 }
 
-export function buildUserAssetUpdateErrorFallback(): string {
-  return '更新用户资产失败'
+export function buildUserAssetUpdateErrorFallback(t?: TFunction): string {
+  const translate = t ?? DEFAULT_TRANSLATE
+  return translate('userAsset.feedback.updateError')
 }
 
 export function buildUserAssetBatchSuccessMessage(
   command: Pick<UserAssetBatchActionCommand, 'successText'>,
   updatedCount: number,
+  t?: TFunction,
 ): string {
-  return `${command.successText}，共处理 ${updatedCount} 项资产`
+  const translate = t ?? DEFAULT_TRANSLATE
+  return translate('userAsset.feedback.batchSuccess', {
+    successText: command.successText,
+    count: updatedCount,
+  })
 }
 
 export function buildUserAssetBatchErrorFallback(
   command: Pick<UserAssetBatchActionCommand, 'label'>,
+  t?: TFunction,
 ): string {
-  return `${command.label}失败`
+  const translate = t ?? DEFAULT_TRANSLATE
+  return translate('userAsset.feedback.batchFailed', { label: command.label })
 }
 
-export function buildUserAssetEditorSaveSuccessMessage(): string {
-  return '资产内容已保存'
+export function buildUserAssetEditorSaveSuccessMessage(t?: TFunction): string {
+  const translate = t ?? DEFAULT_TRANSLATE
+  return translate('userAsset.feedback.saveSuccess')
 }
 
-export function buildUserAssetEditorSaveErrorFallback(): string {
-  return '保存资产失败'
+export function buildUserAssetEditorSaveErrorFallback(t?: TFunction): string {
+  const translate = t ?? DEFAULT_TRANSLATE
+  return translate('userAsset.feedback.saveError')
 }
 
-export function buildUserAssetLocalCopyClearSuccessMessage(cleared: boolean): string {
-  return cleared ? '已清理当前浏览器中的本地副本' : '当前浏览器未发现本地副本'
+export function buildUserAssetLocalCopyClearSuccessMessage(cleared: boolean, t?: TFunction): string {
+  const translate = t ?? DEFAULT_TRANSLATE
+  return cleared ? translate('userAsset.feedback.clearSuccess') : translate('userAsset.feedback.clearNoCopy')
 }
 
-export function buildUserAssetLocalCopyClearErrorFallback(): string {
-  return '清理本地副本失败'
+export function buildUserAssetLocalCopyClearErrorFallback(t?: TFunction): string {
+  const translate = t ?? DEFAULT_TRANSLATE
+  return translate('userAsset.feedback.clearError')
 }
 
-export function buildUserAssetLocalCopyRestoreSuccessMessage(restored: boolean): string {
-  return restored ? '已重新收录到本地' : '当前浏览器已存在本地副本'
+export function buildUserAssetLocalCopyRestoreSuccessMessage(restored: boolean, t?: TFunction): string {
+  const translate = t ?? DEFAULT_TRANSLATE
+  return restored ? translate('userAsset.feedback.restoreSuccess') : translate('userAsset.feedback.restoreAlreadyExists')
 }
 
-export function buildUserAssetLocalCopyRestoreErrorFallback(): string {
-  return '重新收录到本地失败'
+export function buildUserAssetLocalCopyRestoreErrorFallback(t?: TFunction): string {
+  const translate = t ?? DEFAULT_TRANSLATE
+  return translate('userAsset.feedback.restoreError')
 }
 
 type UserAssetLocalCopyBatchSummary = {
@@ -54,36 +73,50 @@ type UserAssetLocalCopyBatchSummary = {
 
 export function buildUserAssetLocalCopyBatchRestoreSuccessMessage(
   summary: UserAssetLocalCopyBatchSummary,
+  t?: TFunction,
 ): string {
+  const translate = t ?? DEFAULT_TRANSLATE
   if (summary.restoredCount === 0 && summary.existingCount > 0) {
-    return '所选资产当前浏览器中已存在本地副本'
+    return translate('userAsset.feedback.batchRestoreAllExists')
   }
 
   if (summary.existingCount === 0) {
-    return `已重新收录 ${summary.restoredCount} 项本地副本`
+    return translate('userAsset.feedback.batchRestoreCount', { count: summary.restoredCount })
   }
 
-  return `已重新收录 ${summary.restoredCount} 项本地副本，${summary.existingCount} 项当前浏览器已存在本地副本`
+  return translate('userAsset.feedback.batchRestoreMixed', {
+    restored: summary.restoredCount,
+    existing: summary.existingCount,
+  })
 }
 
 export function buildUserAssetLocalCopyBatchRestoreErrorMessage(
   summary: UserAssetLocalCopyBatchSummary,
+  t?: TFunction,
 ): string {
+  const translate = t ?? DEFAULT_TRANSLATE
   if (
     summary.restoredCount === 0
     && summary.existingCount === 0
     && (summary.blockedCount || 0) > 0
     && (summary.failedCount || 0) === 0
   ) {
-    return `所选资产当前无法恢复到登记的本地存储，共 ${summary.blockedCount || 0} 项受阻`
+    return translate('userAsset.feedback.batchRestoreBlocked', { count: summary.blockedCount || 0 })
   }
 
   if (summary.restoredCount === 0 && summary.existingCount === 0) {
-    return `批量重新收录到本地失败，共 ${summary.failedCount || 0} 项失败`
+    return translate('userAsset.feedback.batchRestoreError', { count: summary.failedCount || 0 })
   }
 
-  const blockedText = summary.blockedCount ? `，${summary.blockedCount} 项因目标存储不可用未恢复` : ''
-  return `批量重新收录到本地时有 ${summary.failedCount || 0} 项失败；已重新收录 ${summary.restoredCount} 项，${summary.existingCount} 项已存在本地副本${blockedText}`
+  const blockedText = summary.blockedCount
+    ? translate('userAsset.feedback.batchRestoreBlockedSuffix', { count: summary.blockedCount })
+    : ''
+  return translate('userAsset.feedback.batchRestorePartial', {
+    failed: summary.failedCount || 0,
+    restored: summary.restoredCount,
+    existing: summary.existingCount,
+    blocked: blockedText,
+  })
 }
 
 type UserAssetLocalCopyBatchClearSummary = {
@@ -94,24 +127,35 @@ type UserAssetLocalCopyBatchClearSummary = {
 
 export function buildUserAssetLocalCopyBatchClearSuccessMessage(
   summary: UserAssetLocalCopyBatchClearSummary,
+  t?: TFunction,
 ): string {
+  const translate = t ?? DEFAULT_TRANSLATE
   if (summary.clearedCount === 0 && summary.missingCount > 0) {
-    return '当前浏览器未发现所选资产的本地副本'
+    return translate('userAsset.feedback.batchClearAllMissing')
   }
 
   if (summary.missingCount === 0) {
-    return `已清理 ${summary.clearedCount} 项本地副本`
+    return translate('userAsset.feedback.batchClearCount', { count: summary.clearedCount })
   }
 
-  return `已清理 ${summary.clearedCount} 项本地副本，${summary.missingCount} 项当前浏览器未发现本地副本`
+  return translate('userAsset.feedback.batchClearMixed', {
+    cleared: summary.clearedCount,
+    missing: summary.missingCount,
+  })
 }
 
 export function buildUserAssetLocalCopyBatchClearErrorMessage(
   summary: UserAssetLocalCopyBatchClearSummary,
+  t?: TFunction,
 ): string {
+  const translate = t ?? DEFAULT_TRANSLATE
   if (summary.clearedCount === 0 && summary.missingCount === 0) {
-    return `批量清理本地副本失败，共 ${summary.failedCount || 0} 项失败`
+    return translate('userAsset.feedback.batchClearError', { count: summary.failedCount || 0 })
   }
 
-  return `批量清理本地副本时有 ${summary.failedCount || 0} 项失败；已清理 ${summary.clearedCount} 项，${summary.missingCount} 项未发现本地副本`
+  return translate('userAsset.feedback.batchClearPartial', {
+    failed: summary.failedCount || 0,
+    cleared: summary.clearedCount,
+    missing: summary.missingCount,
+  })
 }

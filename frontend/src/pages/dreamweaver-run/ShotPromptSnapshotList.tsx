@@ -1,5 +1,6 @@
 import { Button, List, ListItem, ListItemText, Typography } from '@mui/material'
 import { useCallback, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 
 type ShotSnapshot = {
   shot_index?: number | null
@@ -34,6 +35,7 @@ export interface ShotPromptSnapshotListProps {
 }
 
 export function ShotPromptSnapshotList({ shots, maxItems = 12 }: ShotPromptSnapshotListProps) {
+  const { t } = useTranslation()
   const [shotPromptExpanded, setShotPromptExpanded] = useState<Record<string, boolean>>({})
 
   const toggleShotPromptExpanded = useCallback((key: string) => {
@@ -43,7 +45,7 @@ export function ShotPromptSnapshotList({ shots, maxItems = 12 }: ShotPromptSnaps
   }, [])
 
   return (
-    <List dense sx={{ bgcolor: '#fff', border: '1px solid #eee', borderRadius: 2 }}>
+    <List dense sx={{ bgcolor: 'background.paper', border: '1px solid', borderColor: 'divider', borderRadius: 2 }}>
       {shots.slice(0, maxItems).map((shot, idx) => {
         const shotKey = String(getShotId(shot) || shot.shot_index || idx).trim()
         const expanded = Boolean(shotPromptExpanded[shotKey])
@@ -53,10 +55,10 @@ export function ShotPromptSnapshotList({ shots, maxItems = 12 }: ShotPromptSnaps
         const hasPrompt = Boolean(headPrompt || tailPrompt || overridePrompt)
         const promptLines: string[] = []
         const formatPrompt = (value: string) => (expanded || value.length <= 120 ? value : `${value.slice(0, 120)}...`)
-        if (headPrompt) promptLines.push(`首帧: ${formatPrompt(headPrompt)}`)
-        if (tailPrompt) promptLines.push(`尾帧: ${formatPrompt(tailPrompt)}`)
-        if (overridePrompt) promptLines.push(`视频覆盖: ${formatPrompt(overridePrompt)}`)
-        const promptText = hasPrompt ? promptLines.join('\n') : '暂无提示词快照'
+        if (headPrompt) promptLines.push(t('dreamweaverRun.pendingHeadFrame', { text: formatPrompt(headPrompt) }))
+        if (tailPrompt) promptLines.push(t('dreamweaverRun.pendingTailFrame', { text: formatPrompt(tailPrompt) }))
+        if (overridePrompt) promptLines.push(t('dreamweaverRun.pendingVideoOverride', { text: formatPrompt(overridePrompt) }))
+        const promptText = hasPrompt ? promptLines.join('\n') : t('dreamweaverRun.pendingNoPromptSnapshot')
         const durationText = typeof shot.duration_s === 'number' ? shot.duration_s.toFixed(1) : '-'
         return (
           <ListItem key={shotKey || String(idx)} disablePadding sx={{ px: 1, py: 0.25 }}>
@@ -65,7 +67,7 @@ export function ShotPromptSnapshotList({ shots, maxItems = 12 }: ShotPromptSnaps
               secondary={
                 <>
                   <Typography variant="caption" color="text.secondary" display="block">
-                    场景: {shot.scene_id != null ? String(shot.scene_id) : '-'}  时长: {durationText}s
+                    {t('dreamweaverRun.spSceneDuration', { scene: shot.scene_id != null ? String(shot.scene_id) : '-', duration: durationText })}
                   </Typography>
                   <Typography variant="caption" color="text.secondary" display="block" sx={{ whiteSpace: 'pre-wrap' }}>
                     {promptText}
@@ -77,7 +79,7 @@ export function ShotPromptSnapshotList({ shots, maxItems = 12 }: ShotPromptSnaps
                     disabled={!hasPrompt}
                     sx={{ px: 0, mt: 0.25 }}
                   >
-                    {expanded ? '收起提示词' : '展开提示词'}
+                    {expanded ? t('dreamweaverRun.spCollapsePrompts') : t('dreamweaverRun.spExpandPrompts')}
                   </Button>
                 </>
               }

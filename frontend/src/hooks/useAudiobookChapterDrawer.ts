@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { apiClient } from '@/services/api'
 import type { AudiobookProjectSummary, Chapter, MergedChapterAudioRef, Project } from '@/types/audiobook'
 
@@ -8,6 +9,7 @@ type NotifyPayload = {
 }
 
 export default function useAudiobookChapterDrawer({ onNotify }: { onNotify?: (payload: NotifyPayload) => void } = {}) {
+  const { t } = useTranslation()
   const notify = useCallback(
     (payload: NotifyPayload) => {
       onNotify?.(payload)
@@ -138,7 +140,7 @@ export default function useAudiobookChapterDrawer({ onNotify }: { onNotify?: (pa
 
         const latestCompleted = completedSorted[0]
         if (!latestCompleted) {
-          setError('该项目暂无有声书，请先生成。')
+          setError(t('audiobook.chapterDrawer.noAudiobookError'))
           return
         }
 
@@ -157,7 +159,7 @@ export default function useAudiobookChapterDrawer({ onNotify }: { onNotify?: (pa
         }
         setMergedChapterAudiosByNumber(merged)
       } catch {
-        setError('加载章节目录失败，请稍后重试。')
+        setError(t('audiobook.chapterDrawer.loadError'))
       } finally {
         if (requestId !== requestIdRef.current) return
         setLoading(false)
@@ -185,7 +187,7 @@ export default function useAudiobookChapterDrawer({ onNotify }: { onNotify?: (pa
     async (chapterNumber: number) => {
       const mergedRef = mergedChapterAudiosByNumber[chapterNumber]
       if (!mergedRef?.chapterAudio?.audio_path) {
-        notify({ message: '该章节尚未生成音频', severity: 'info' })
+        notify({ message: t('audiobook.chapterDrawer.noChapterAudio'), severity: 'info' })
         return
       }
 
@@ -217,7 +219,7 @@ export default function useAudiobookChapterDrawer({ onNotify }: { onNotify?: (pa
         await audio.play()
         setPlayingChapterNumber(chapterNumber)
       } catch {
-        notify({ message: '播放失败，请稍后重试', severity: 'error' })
+        notify({ message: t('audiobook.chapterDrawer.playFailed'), severity: 'error' })
         setPlayingChapterNumber(null)
       }
     },

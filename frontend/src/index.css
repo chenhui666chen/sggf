@@ -13,10 +13,13 @@
 html,
 body {
   height: 100%;
-  font-family: 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', sans-serif;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
 }
+
+/*
+ * 字体族、字体平滑与滚动条外观全部交给 CssBaseline（见 src/theme/globalStyles.ts）。
+ * 本文件在 Emotion 之后入栈（App.tsx 的 cache 用了 prepend），同特异性下这里会赢，
+ * 所以任何写死的颜色/字体都会直接盖掉主题，深色模式首先崩的就是这些。
+ */
 
 #root {
   height: 100%;
@@ -52,23 +55,4 @@ body {
   .editor-content {
     padding: 12px;
   }
-}
-
-/* 滚动条样式 */
-::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
-}
-
-::-webkit-scrollbar-track {
-  background: #f1f1f1;
-}
-
-::-webkit-scrollbar-thumb {
-  background: #888;
-  border-radius: 4px;
-}
-
-::-webkit-scrollbar-thumb:hover {
-  background: #555;
 }

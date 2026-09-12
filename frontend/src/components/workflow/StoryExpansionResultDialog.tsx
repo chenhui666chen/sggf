@@ -9,6 +9,7 @@ import {
   Stack,
   Typography,
 } from '@mui/material'
+import { useTranslation } from 'react-i18next'
 import { getStoryExpansionSignals } from '@/utils/storyExpansionFeedback'
 import { getStoryExpansionExecutionModeLabel } from '@/utils/storyExpansionLabels'
 import { createStoryExpansionResultView } from '@/utils/storyExpansionResultModel'
@@ -62,9 +63,10 @@ export default function StoryExpansionResultDialog({
   onClose,
   onCopied,
 }: StoryExpansionResultDialogProps) {
+  const { t } = useTranslation()
   const view = useMemo(() => createStoryExpansionResultView(result), [result])
   const normalizedResult = view?.result ?? null
-  const executionModeLabel = getStoryExpansionExecutionModeLabel(normalizedResult?.execution_mode)
+  const executionModeLabel = getStoryExpansionExecutionModeLabel(normalizedResult?.execution_mode, undefined, t)
   const { repairedMessages, advisoryMessages } = getStoryExpansionSignals(normalizedResult)
   const summaryRef = useRef<HTMLDivElement | null>(null)
   const changesRef = useRef<HTMLDivElement | null>(null)
@@ -79,8 +81,8 @@ export default function StoryExpansionResultDialog({
       writtenContextLabel,
       repairedMessages,
       advisoryMessages,
-    }),
-    [advisoryMessages, repairedMessages, summary?.label, view, writtenContextLabel],
+    }, t),
+    [advisoryMessages, repairedMessages, summary?.label, t, view, writtenContextLabel],
   )
   const sectionRefs = useMemo<Record<StoryExpansionResultSectionKey, RefObject<HTMLDivElement | null>>>(
     () => ({
@@ -104,7 +106,7 @@ export default function StoryExpansionResultDialog({
     () => (
       onAutoImprove && resultDisplay.canAutoImprove
         ? {
-          label: resultDisplay.autoImproveActionLabel || '一键自动改进',
+          label: resultDisplay.autoImproveActionLabel || t('storyExpansion.result.autoImproveActionLabel'),
           hint: resultDisplay.autoImproveHint,
           loading: repairingAutoImprove,
           onClick: onAutoImprove,
@@ -137,8 +139,8 @@ export default function StoryExpansionResultDialog({
 
   return (
     <Dialog open={open} onClose={onClose} maxWidth="xl" fullWidth>
-      <DialogTitle sx={{ pb: 1.5 }}>协同扩展结果</DialogTitle>
-      <DialogContent dividers sx={{ bgcolor: '#f8fafc' }}>
+      <DialogTitle sx={{ pb: 1.5 }}>{t('storyExpansion.resultDialog.title')}</DialogTitle>
+      <DialogContent dividers sx={{ bgcolor: 'grey.100' }}>
         {view ? (
           <Stack spacing={2.25}>
             <StoryExpansionOverviewSection
@@ -188,7 +190,7 @@ export default function StoryExpansionResultDialog({
             />
           </Stack>
         ) : (
-          <Typography color="text.secondary">暂无协同结果</Typography>
+          <Typography color="text.secondary">{t('storyExpansion.resultDialog.noResult')}</Typography>
         )}
       </DialogContent>
       <DialogActions sx={{ px: 3, py: 2 }}>
@@ -200,11 +202,11 @@ export default function StoryExpansionResultDialog({
             disabled={autoImproveAction.loading}
             sx={{ borderRadius: 2 }}
           >
-            {autoImproveAction.loading ? '自动改进中...' : autoImproveAction.label}
+            {autoImproveAction.loading ? t('storyExpansion.resultSections.improving') : autoImproveAction.label}
           </Button>
         ) : null}
         <Button onClick={onClose} variant="contained" sx={{ borderRadius: 2 }}>
-          关闭
+          {t('action.close')}
         </Button>
       </DialogActions>
     </Dialog>

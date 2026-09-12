@@ -1,4 +1,5 @@
 import { useMemo, type RefObject } from 'react'
+import { useTranslation } from 'react-i18next'
 import {
   Box,
   Button,
@@ -8,8 +9,10 @@ import {
   Stack,
   Typography,
 } from '@mui/material'
+import type { Theme } from '@mui/material/styles'
 import ContentCopyIcon from '@mui/icons-material/ContentCopy'
 import FormattedContent from '../common/FormattedContent'
+import { withAlpha } from '@/theme'
 import {
   formatStoryExpansionDocument,
   type StoryExpansionContentKind,
@@ -51,31 +54,34 @@ interface TextSectionCardProps {
 }
 
 function getChangeCardAppearance(tone: StoryExpansionChangeCardTone): {
-  borderColor: string
-  background?: string
-  backgroundColor?: string
-  itemBackground: string
+  borderColor: string | ((theme: Theme) => string)
+  background?: string | ((theme: Theme) => string)
+  backgroundColor?: string | ((theme: Theme) => string)
+  itemBackground: string | ((theme: Theme) => string)
 } {
   if (tone === 'success') {
     return {
-      borderColor: 'rgba(22, 163, 74, 0.24)',
-      background: 'linear-gradient(180deg, rgba(240,253,244,0.94) 0%, rgba(255,255,255,0.98) 100%)',
-      itemBackground: '#f7fff9',
+      // 状态卡：边框与底色走 success 语义 token，双模反相
+      borderColor: (theme) => withAlpha(theme.palette.success.main, 0.24),
+      background: (theme) =>
+        `linear-gradient(180deg, ${theme.palette.success.light} 0%, ${theme.palette.background.paper} 100%)`,
+      itemBackground: (theme) => withAlpha(theme.palette.success.main, 0.05),
     }
   }
 
   if (tone === 'warning') {
     return {
-      borderColor: 'rgba(217, 119, 6, 0.25)',
-      background: 'linear-gradient(180deg, rgba(255,251,235,0.92) 0%, rgba(255,255,255,0.98) 100%)',
-      itemBackground: '#fffdf7',
+      borderColor: (theme) => withAlpha(theme.palette.warning.main, 0.25),
+      background: (theme) =>
+        `linear-gradient(180deg, ${theme.palette.warning.light} 0%, ${theme.palette.background.paper} 100%)`,
+      itemBackground: (theme) => withAlpha(theme.palette.warning.main, 0.05),
     }
   }
 
   return {
     borderColor: 'divider',
     backgroundColor: 'background.paper',
-    itemBackground: '#fffdf5',
+    itemBackground: 'grey.100',
   }
 }
 
@@ -83,7 +89,7 @@ function MetricCard({
   label,
   value,
   helperText,
-  accentColor = '#0f766e',
+  accentColor = '#0f766e', // sg-color-fixed: 模块 teal 指标色（颜色即数据）
 }: MetricCardProps) {
   return (
     <Paper
@@ -92,9 +98,9 @@ function MetricCard({
         p: 1.75,
         height: '100%',
         borderRadius: 2,
-        borderColor: 'rgba(15, 118, 110, 0.16)',
-        background:
-          'linear-gradient(180deg, rgba(255,255,255,0.98) 0%, rgba(248,250,252,0.98) 100%)',
+        borderColor: 'rgba(15, 118, 110, 0.16)', // sg-color-fixed: teal 品牌边框（低 alpha 数据色）
+        background: (theme) =>
+          `linear-gradient(180deg, ${theme.palette.background.paper} 0%, ${theme.palette.grey[100]} 100%)`,
       }}
     >
       <Typography variant="caption" color="text.secondary">
@@ -124,11 +130,12 @@ function MetricCard({
 function TextSectionCard({
   title,
   content,
-  emptyText = '内容为空',
+  emptyText,
   contentKind = 'generic',
   minHeight = 220,
   onCopy,
 }: TextSectionCardProps) {
+  const { t } = useTranslation()
   const formattedContent = useMemo(
     () => formatStoryExpansionDocument(content || '', contentKind),
     [content, contentKind],
@@ -166,7 +173,7 @@ function TextSectionCard({
             onClick={onCopy}
             sx={{ borderRadius: 1.5, textTransform: 'none' }}
           >
-            复制
+            {t('storyExpansion.resultSections.copy')}
           </Button>
         ) : null}
       </Box>
@@ -180,7 +187,7 @@ function TextSectionCard({
           borderRadius: 2,
           border: '1px solid',
           borderColor: 'divider',
-          bgcolor: '#fbfcfe',
+          bgcolor: 'grey.100',
         }}
       >
         {formattedContent ? (
@@ -199,7 +206,7 @@ function TextSectionCard({
           />
         ) : (
           <Typography variant="body2" color="text.secondary">
-            {emptyText}
+            {emptyText || t('storyExpansion.resultSections.emptyContent')}
           </Typography>
         )}
       </Box>
@@ -224,6 +231,7 @@ export function StoryExpansionOverviewSection({
   executionModeLabel,
   resultDisplay,
 }: StoryExpansionOverviewSectionProps) {
+  const { t } = useTranslation()
   return (
     <Paper
       elevation={0}
@@ -231,9 +239,9 @@ export function StoryExpansionOverviewSection({
         p: 2.25,
         borderRadius: 3,
         border: '1px solid',
-        borderColor: 'rgba(15, 118, 110, 0.18)',
-        background:
-          'linear-gradient(135deg, rgba(240,253,250,0.95) 0%, rgba(248,250,252,0.98) 52%, rgba(255,255,255,0.98) 100%)',
+        borderColor: 'rgba(15, 118, 110, 0.18)', // sg-color-fixed: teal 品牌边框（低 alpha 数据色）
+        background: (theme) =>
+          `linear-gradient(135deg, ${withAlpha(theme.palette.success.main, 0.05)} 0%, ${theme.palette.grey[100]} 52%, ${theme.palette.background.paper} 100%)`,
       }}
     >
       <Stack spacing={1.5}>
@@ -247,8 +255,14 @@ export function StoryExpansionOverviewSection({
           }}
         >
           <Box>
-            <Typography variant="overline" sx={{ color: '#0f766e', letterSpacing: 1.4 }}>
-              协同总览
+            <Typography
+              variant="overline"
+              sx={{
+                color: '#0f766e', // sg-color-fixed: teal 品牌字色（颜色即数据）
+                letterSpacing: 1.4,
+              }}
+            >
+              {t('storyExpansion.resultSections.overviewTitle')}
             </Typography>
             <Typography variant="h5" sx={{ fontWeight: 800, mt: 0.5 }}>
               {expansionModeLabel}
@@ -261,7 +275,7 @@ export function StoryExpansionOverviewSection({
               sx={{
                 mt: 0.75,
                 fontWeight: 600,
-                color: resultDisplay.completionStatusTone === 'warning' ? '#b45309' : '#0f766e',
+                color: resultDisplay.completionStatusTone === 'warning' ? '#b45309' : '#0f766e', // sg-color-fixed: 完成状态数据色（琥珀/teal）
               }}
             >
               {resultDisplay.completionStatusDescription}
@@ -277,42 +291,42 @@ export function StoryExpansionOverviewSection({
             {resultDisplay.remainingGoalChipLabel ? (
               <Chip label={resultDisplay.remainingGoalChipLabel} color="warning" variant="outlined" />
             ) : null}
-            <Chip label={`策略：${strategyLabel}`} color="primary" variant="outlined" />
-            <Chip label={`意图：${intentLabel}`} color="secondary" variant="outlined" />
-            <Chip label={`正文处理：${preserveWrittenModeLabel}`} variant="outlined" />
-            <Chip label={`执行方式：${executionModeLabel}`} variant="outlined" />
+            <Chip label={t('storyExpansion.resultSections.strategyChip', { label: strategyLabel })} color="primary" variant="outlined" />
+            <Chip label={t('storyExpansion.resultSections.intentChip', { label: intentLabel })} color="secondary" variant="outlined" />
+            <Chip label={t('storyExpansion.resultSections.writtenContextChip', { label: preserveWrittenModeLabel })} variant="outlined" />
+            <Chip label={t('storyExpansion.resultSections.executionModeChip', { label: executionModeLabel })} variant="outlined" />
           </Stack>
         </Box>
 
         <Grid container spacing={1.5}>
           <Grid item xs={12} sm={6} lg={3}>
             <MetricCard
-              label="细化章节变化"
+              label={t('storyExpansion.resultSections.metricChapters')}
               value={resultDisplay.chapterMetricValue}
-              accentColor="#0f766e"
+              accentColor="#0f766e" // sg-color-fixed: 状态数据色
             />
           </Grid>
           <Grid item xs={12} sm={6} lg={3}>
             <MetricCard
-              label="人物变化"
+              label={t('storyExpansion.resultSections.metricCharacters')}
               value={resultDisplay.characterMetricValue}
-              accentColor="#15803d"
+              accentColor="#15803d" // sg-color-fixed: 状态数据色
             />
           </Grid>
           <Grid item xs={12} sm={6} lg={3}>
             <MetricCard
-              label="协同评分"
+              label={t('storyExpansion.resultSections.metricScore')}
               value={resultDisplay.scoreMetricValue}
               helperText={resultDisplay.scoreMetricHelperText}
-              accentColor="#b45309"
+              accentColor="#b45309" // sg-color-fixed: 状态数据色
             />
           </Grid>
           <Grid item xs={12} sm={6} lg={3}>
             <MetricCard
-              label="执行轮次"
+              label={t('storyExpansion.resultSections.metricRounds')}
               value={resultDisplay.roundsMetricValue}
               helperText={resultDisplay.roundsMetricHelperText}
-              accentColor="#1d4ed8"
+              accentColor="#1d4ed8" // sg-color-fixed: 状态数据色
             />
           </Grid>
         </Grid>
@@ -360,6 +374,7 @@ export function StoryExpansionQuickJumpBar({
   items,
   onJump,
 }: StoryExpansionQuickJumpBarProps) {
+  const { t } = useTranslation()
   return (
     <Paper
       elevation={0}
@@ -368,7 +383,7 @@ export function StoryExpansionQuickJumpBar({
         borderRadius: 2.5,
         border: '1px solid',
         borderColor: 'divider',
-        backgroundColor: 'rgba(248, 250, 252, 0.92)',
+        backgroundColor: (theme) => withAlpha(theme.palette.background.paper, 0.92),
         backdropFilter: 'blur(8px)',
         position: 'sticky',
         top: -17,
@@ -376,7 +391,7 @@ export function StoryExpansionQuickJumpBar({
       }}
     >
       <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
-        快速定位
+        {t('storyExpansion.resultSections.quickJumpTitle')}
       </Typography>
       <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
         {items.map((item) => (
@@ -441,6 +456,7 @@ export function StoryExpansionChangeCardsSection({
   cards,
   autoImproveAction,
 }: StoryExpansionChangeCardsSectionProps) {
+  const { t } = useTranslation()
   return (
     <Grid container spacing={2}>
       {cards.map((card) => {
@@ -494,7 +510,7 @@ export function StoryExpansionChangeCardsSection({
                         disabled={autoImproveAction.loading}
                         sx={{ borderRadius: 2, textTransform: 'none' }}
                       >
-                        {autoImproveAction.loading ? '自动改进中...' : autoImproveAction.label}
+                        {autoImproveAction.loading ? t('storyExpansion.resultSections.improving') : autoImproveAction.label}
                       </Button>
                       {autoImproveAction.hint ? (
                         <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.9 }}>
@@ -568,6 +584,7 @@ interface StoryExpansionExecutionRoundsSectionProps {
 export function StoryExpansionExecutionRoundsSection({
   rounds,
 }: StoryExpansionExecutionRoundsSectionProps) {
+  const { t } = useTranslation()
   return (
     <Paper
       elevation={0}
@@ -580,7 +597,7 @@ export function StoryExpansionExecutionRoundsSection({
       }}
     >
       <Typography variant="subtitle1" sx={{ fontWeight: 700, mb: 1.25 }}>
-        协同轮次详情
+        {t('storyExpansion.resultSections.roundsDetailTitle')}
       </Typography>
       <Grid container spacing={1.5}>
         {rounds.map((round) => (

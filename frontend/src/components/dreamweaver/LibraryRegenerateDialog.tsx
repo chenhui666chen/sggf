@@ -11,6 +11,7 @@ import {
   TextField,
   Typography,
 } from '@mui/material'
+import { useTranslation } from 'react-i18next'
 
 interface LibraryRegenerateDialogProps {
   open: boolean
@@ -46,6 +47,7 @@ interface LibraryRegenerateDialogProps {
 }
 
 export default function LibraryRegenerateDialog(props: LibraryRegenerateDialogProps) {
+  const { t } = useTranslation()
   const {
     open,
     title,
@@ -88,12 +90,12 @@ export default function LibraryRegenerateDialog(props: LibraryRegenerateDialogPr
       fullWidth
       maxWidth="md"
     >
-      <DialogTitle>重生成素材：{title}</DialogTitle>
+      <DialogTitle>{t('dreamweaverRun.regenerateAsset', { title })}</DialogTitle>
       <DialogContent dividers>
         <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1 }}>
           {imageEditActive
-            ? '图像编辑模式：将基于参考图生成，提交后状态变为“待审核”。'
-            : '可在下方编辑提示词并重生成素材，生成后将变为待审核状态。'}
+            ? t('dreamweaverRun.regenModeHintImageEdit')
+            : t('dreamweaverRun.regenModeHintTextEdit')}
         </Typography>
         {showDerivedViewHint && derivedViewHintText && (
           <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1 }}>
@@ -113,10 +115,10 @@ export default function LibraryRegenerateDialog(props: LibraryRegenerateDialogPr
             onClick={onSuggest}
             disabled={suggestDisabled}
           >
-            {suggesting ? '提示词生成中…' : '智能生成提示词'}
+            {suggesting ? t('dreamweaverRun.promptSuggesting') : t('dreamweaverRun.promptSmartGenerate')}
           </Button>
           {forceImageEdit ? (
-            <Chip size="small" color="secondary" variant="outlined" label="图像编辑：强制" />
+            <Chip size="small" color="secondary" variant="outlined" label={t('dreamweaverRun.promptImageEditForced')} />
           ) : (
             <Button
               size="small"
@@ -126,7 +128,7 @@ export default function LibraryRegenerateDialog(props: LibraryRegenerateDialogPr
               onClick={onToggleImageEdit}
               disabled={!canToggleImageEdit}
             >
-              {imageEditActive ? '图像编辑：开启' : '使用图像编辑'}
+              {imageEditActive ? t('dreamweaverRun.promptImageEditOn') : t('dreamweaverRun.promptUseImageEdit')}
             </Button>
           )}
         </Stack>
@@ -134,22 +136,26 @@ export default function LibraryRegenerateDialog(props: LibraryRegenerateDialogPr
           <Alert severity={hasImageBase ? 'info' : 'error'} sx={{ mb: 1 }}>
             <Typography variant="body2">
               {hasImageBase
-                ? `参考基底：${imageBaseLabel}。${
+                ? `${t('dreamweaverRun.promptReferenceBase', { label: imageBaseLabel })} ${
                     readyReferenceLabel
-                      ? `参考图已就绪：${readyReferenceLabel}${
-                          readyReferenceCount > 1
-                            ? '（生成时将自动上传；额外参考图在模型支持多参考时生效）。'
-                            : '（生成时将自动上传）。'
-                        }`
-                      : '参考图已就绪。'
+                      ? `${t('dreamweaverRun.promptReferenceReady', {
+                          label: readyReferenceLabel,
+                          note:
+                            readyReferenceCount > 1
+                              ? t('dreamweaverRun.promptReferenceMultiNote')
+                              : t('dreamweaverRun.promptReferenceSingleNote'),
+                        })}`
+                      : t('dreamweaverRun.promptReferenceReadyNone')
                   }`
-                : `缺少参考图：${missingReferenceLabel || '前序视角'}。请先生成前序视角。`}
+                : t('dreamweaverRun.promptMissingReference', {
+                    label: missingReferenceLabel || t('dreamweaverRun.promptPreviousView'),
+                  })}
             </Typography>
           </Alert>
         )}
         {!forceImageEdit && !hasImageBase && (
           <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1 }}>
-            当前素材没有可编辑底图，将回退到文生图模式。
+            {t('dreamweaverRun.promptNoEditableBase')}
           </Typography>
         )}
         {suggestError && (
@@ -159,7 +165,7 @@ export default function LibraryRegenerateDialog(props: LibraryRegenerateDialogPr
         )}
         {imageEditActive && imageEditAutoCleared && (
           <Typography variant="caption" color="text.disabled" display="block" sx={{ mb: 1 }}>
-            已清空原提示词，请填写本次需要修改的内容。
+            {t('dreamweaverRun.promptOverrideCleared')}
           </Typography>
         )}
         <TextField
@@ -180,7 +186,7 @@ export default function LibraryRegenerateDialog(props: LibraryRegenerateDialogPr
       </DialogContent>
       <DialogActions>
         <Button onClick={onClose} disabled={submitting}>
-          取消
+          {t('common.cancel')}
         </Button>
         <Button
           variant="contained"
@@ -188,10 +194,10 @@ export default function LibraryRegenerateDialog(props: LibraryRegenerateDialogPr
           disabled={submitDisabled}
         >
           {submitting
-            ? '生成中…'
+            ? t('dreamweaverRun.regenSubmitGenerating')
             : imageEditActive
-              ? '开始生成（图像编辑）'
-              : '开始生成（提示词）'}
+              ? t('dreamweaverRun.regenSubmitImageEdit')
+              : t('dreamweaverRun.regenSubmitPrompt')}
         </Button>
       </DialogActions>
     </Dialog>

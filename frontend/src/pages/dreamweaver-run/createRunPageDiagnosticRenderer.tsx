@@ -1,3 +1,4 @@
+import type { TFunction } from 'i18next'
 import {
   DiagnosticFrameAccordion,
   DiagnosticJson,
@@ -87,6 +88,7 @@ interface CreateRunPageDiagnosticRendererDeps {
   taskStage: string | null
   hasDiagnosticShots: boolean
   telemetryAbVariant: string | undefined
+  t: TFunction
 }
 
 export function createRunPageDiagnosticRenderer(deps: CreateRunPageDiagnosticRendererDeps) {
@@ -128,6 +130,7 @@ export function createRunPageDiagnosticRenderer(deps: CreateRunPageDiagnosticRen
     taskStage,
     hasDiagnosticShots,
     telemetryAbVariant,
+    t,
   } = deps
 
   const renderDiagnosticJson = (value: unknown) => (
@@ -239,7 +242,7 @@ export function createRunPageDiagnosticRenderer(deps: CreateRunPageDiagnosticRen
         details={
           <DreamweaverDiagnosticShotDetails
             storyboardAccordion={renderTitledDiagnosticJsonAccordion({
-              title: '分镜（storyboard）',
+              title: t('dreamweaverRun.storyboardTitle'),
               value: sb,
               marginTop: 0,
             })}
@@ -248,10 +251,10 @@ export function createRunPageDiagnosticRenderer(deps: CreateRunPageDiagnosticRen
               title: 'AutoQC',
               value: shotAutoQC,
             })}
-            headFrame={renderDiagnosticFrame('首帧（head）', frames.head, 'image')}
-            tailFrame={renderDiagnosticFrame('尾帧（tail）', frames.tail, 'image')}
-            midFrame={renderDiagnosticFrame('中间帧（mid）', frames.mid, 'image')}
-            videoFrame={renderDiagnosticFrame('镜头片段（video_clip）', videoClip, 'video')}
+            headFrame={renderDiagnosticFrame(t('dreamweaverRun.frameHead'), frames.head, 'image')}
+            tailFrame={renderDiagnosticFrame(t('dreamweaverRun.frameTail'), frames.tail, 'image')}
+            midFrame={renderDiagnosticFrame(t('dreamweaverRun.frameMid'), frames.mid, 'image')}
+            videoFrame={renderDiagnosticFrame(t('dreamweaverRun.frameVideoClip'), videoClip, 'video')}
           />
         }
       />
@@ -357,7 +360,7 @@ export function createRunPageDiagnosticRenderer(deps: CreateRunPageDiagnosticRen
     const { cameraCount, sceneCount } = resolveCameraCounts(diagnosticCameraDiagnostics)
     const scenePreview = hasDiagnosticCameraSceneUris
       ? renderRunAssetPreviewGrid(
-          '相机场景（每个相机首镜头 head）',
+          t('dreamweaverRun.cameraScene'),
           diagnosticCameraSceneUris.slice(0, 12),
           'image',
         )
@@ -408,7 +411,7 @@ export function createRunPageDiagnosticRenderer(deps: CreateRunPageDiagnosticRen
       diagnosticPreflight,
       diagnosticProviderTrace,
       diagnosticSmartDispatchTrace,
-    })
+    }, t)
 
     const diagnosticShotAccordions = hasDiagnosticShots ? diagnosticShots.map(renderShotDiagnosticAccordion) : null
 

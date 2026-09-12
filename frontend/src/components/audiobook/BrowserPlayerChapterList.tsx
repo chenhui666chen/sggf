@@ -6,6 +6,7 @@ import {
   ListItemText,
   Typography,
 } from '@mui/material'
+import { useTranslation } from 'react-i18next'
 
 import { formatBrowserPlayerTime } from './browserPlayerUtils'
 import type { BrowserPlayerChapter } from './browserPlayerTypes'
@@ -20,7 +21,9 @@ const BrowserPlayerChapterList: React.FC<BrowserPlayerChapterListProps> = ({
   chapters,
   currentChapterIndex,
   onSelectChapter,
-}) => (
+}) => {
+  const { t } = useTranslation()
+  return (
   <Box
     sx={{
       width: { xs: '100%', md: 280 },
@@ -35,7 +38,7 @@ const BrowserPlayerChapterList: React.FC<BrowserPlayerChapterListProps> = ({
     }}
   >
     <Typography variant="subtitle2" sx={{ mb: 1, fontWeight: 600 }}>
-      章节列表
+      {t('audiobook.browserPlayer.chapterListTitle')}
     </Typography>
     <List dense>
       {chapters.map((chapter, index) => (
@@ -45,7 +48,7 @@ const BrowserPlayerChapterList: React.FC<BrowserPlayerChapterListProps> = ({
             onClick={() => onSelectChapter(index)}
           >
             <ListItemText
-              primary={`第${chapter.chapter_number || index + 1}章`}
+              primary={t('audiobook.chapterNumber', { number: chapter.chapter_number || index + 1 })}
               secondary={chapter.chapter_title || ''}
               primaryTypographyProps={{
                 variant: 'body2',
@@ -63,6 +66,7 @@ const BrowserPlayerChapterList: React.FC<BrowserPlayerChapterListProps> = ({
       ))}
     </List>
   </Box>
-)
+  )
+}
 
 export default BrowserPlayerChapterList

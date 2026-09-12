@@ -1,5 +1,8 @@
-import { describe, expect, it } from 'vitest'
+import { beforeAll, describe, expect, it } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
+import type { TFunction } from 'i18next'
+
+import { bootstrapI18n } from '@/i18n'
 
 import UserCenterAssetConnectedOverviewRow from '@/components/user-assets/UserCenterAssetConnectedOverviewRow'
 
@@ -8,6 +11,13 @@ import {
   type UserCenterAssetConnectedOverviewRowsFacade,
   useUserCenterAssetConnectedOverviewRows,
 } from '../useUserCenterAssetConnectedOverviewRows'
+
+let t: TFunction
+
+beforeAll(async () => {
+  const instance = await bootstrapI18n('zh-CN')
+  t = instance.t.bind(instance)
+})
 
 describe('useUserCenterAssetConnectedOverviewRows', () => {
   it('builds a facade from shared rows output', () => {
@@ -70,6 +80,7 @@ describe('useUserCenterAssetConnectedOverviewRows', () => {
         formatPointsValueLabel: (value) => `P${value.toFixed(1)}`,
         formatUpdatedAtLabel: (value) => `FMT(${value})`,
         getSourceLabel: () => '后台规则快照',
+        t,
       })
 
       return null

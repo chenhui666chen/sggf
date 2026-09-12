@@ -1,3 +1,7 @@
+import type { TFunction } from 'i18next'
+
+const DEFAULT_TRANSLATE: TFunction = ((key: string) => key) as TFunction
+
 export type UserCenterAssetConnectedOverviewItem = {
   key: string
   label: string
@@ -31,31 +35,33 @@ type BuildUserCenterAssetConnectedOverviewSectionPropsOptions = {
 
 export function buildUserCenterAssetConnectedOverviewItems(
   options: BuildUserCenterAssetConnectedOverviewItemsOptions,
+  t?: TFunction,
 ): UserCenterAssetConnectedOverviewItem[] {
+  const translate = t ?? DEFAULT_TRANSLATE
   return [
     {
       key: 'connected-project-count',
-      label: '项目数',
+      label: translate('userAsset.connected.projectCount'),
       value: options.projectCount,
     },
     {
       key: 'connected-user-asset-count',
-      label: '用户资产数',
+      label: translate('userAsset.connected.userAssetCount'),
       value: options.userAssetCount,
     },
     {
       key: 'connected-audiobook-project-count',
-      label: '有声书项目数',
+      label: translate('userAsset.connected.audiobookProjectCount'),
       value: options.audiobookProjectCount,
     },
     {
       key: 'connected-audiobook-total-cost',
-      label: '有声书累计成本',
+      label: translate('userAsset.connected.audiobookTotalCost'),
       value: options.totalAudiobookCostLabel,
     },
     {
       key: 'connected-dreamweaver-run-count',
-      label: '短剧运行次数',
+      label: translate('userAsset.connected.dreamweaverRunCount'),
       value: options.dreamweaverRunCount,
     },
   ]
@@ -63,6 +69,7 @@ export function buildUserCenterAssetConnectedOverviewItems(
 
 export function buildUserCenterAssetConnectedOverviewSectionProps(
   options: BuildUserCenterAssetConnectedOverviewSectionPropsOptions,
+  t?: TFunction,
 ): UserCenterAssetConnectedOverviewSectionProps {
   return {
     items: buildUserCenterAssetConnectedOverviewItems({
@@ -72,6 +79,6 @@ export function buildUserCenterAssetConnectedOverviewSectionProps(
         options.connectedAudiobookProjectCount ?? options.fallbackAudiobookProjectCount,
       totalAudiobookCostLabel: options.totalAudiobookCostLabel,
       dreamweaverRunCount: options.dreamweaverRunCount,
-    }),
+    }, t),
   }
 }

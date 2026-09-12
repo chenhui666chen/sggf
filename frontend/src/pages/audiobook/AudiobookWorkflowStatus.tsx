@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next'
 import {
   Alert,
   Box,
@@ -59,21 +60,22 @@ const AudiobookWorkflowStatus = ({
   onResumeChapterGeneration,
   onResumePausedTask,
 }: AudiobookWorkflowStatusProps) => {
+  const { t } = useTranslation()
   // 已有可播放章节音频时（剧本先行流程生成/混音完成），
   // 步骤条同步展示音频流程，避免停留在“审阅场景剧本”误导用户
   const steps = lastGenerationMode === 'script_only' && !hasChapterAudios
-    ? ['章节与声音', '生成场景剧本', '审阅场景剧本']
+    ? ['audiobook.workflowStatus.stepChapterVoice', 'audiobook.workflowStatus.stepGenerateScript', 'audiobook.workflowStatus.stepReviewScript']
     : audioEngineMode === 'seed_scene'
-      ? ['剧本已批准', '生成场景音频', '音频完成']
-      : ['剧本已批准', '生成分轨音频', '音频完成']
+      ? ['audiobook.workflowStatus.stepScriptApproved', 'audiobook.workflowStatus.stepGenerateAudio', 'audiobook.workflowStatus.stepAudioComplete']
+      : ['audiobook.workflowStatus.stepScriptApproved', 'audiobook.workflowStatus.stepGenerateStems', 'audiobook.workflowStatus.stepAudioComplete']
 
   return (
     <>
     <Paper sx={{ p: 3, mb: 3, backgroundColor: audiobookColors.surfacePaper }}>
       <Stepper activeStep={activeStep}>
-        {steps.map((label) => (
-          <Step key={label}>
-            <StepLabel>{label}</StepLabel>
+        {steps.map((labelKey) => (
+          <Step key={labelKey}>
+            <StepLabel>{t(labelKey)}</StepLabel>
           </Step>
         ))}
       </Stepper>
@@ -90,8 +92,8 @@ const AudiobookWorkflowStatus = ({
     {activeProjectTasks.length > 0 && activeStep !== 1 && (
       <ActiveProjectTasksAlert
         tasks={activeProjectTasks}
-        title={`当前项目下有 ${activeProjectTasks.length} 个任务仍在后台运行`}
-        description="刷新后这些任务会继续被自动发现与轮询。你可以随时切回进度页查看任一任务。"
+        title={t('audiobook.workflowStatus.activeTasksTitle', { count: activeProjectTasks.length })}
+        description={t('audiobook.workflowStatus.activeTasksDescription')}
         mode="background"
         getTaskLabel={getTaskLabel}
         onFocusTask={onFocusActiveTask}
@@ -103,10 +105,10 @@ const AudiobookWorkflowStatus = ({
         <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
           <Box>
             <Typography variant="body2" sx={{ fontWeight: 600 }}>
-              {`有 ${pausedProjectTasks.length} 个生成任务已暂停`}
+              {t('audiobook.workflowStatus.pausedTasksTitle', { count: pausedProjectTasks.length })}
             </Typography>
             <Typography variant="caption" color="text.secondary">
-              已完成章节的进度已保存，随时可以恢复继续生成。
+              {t('audiobook.workflowStatus.pausedTasksCaption')}
             </Typography>
           </Box>
           <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
@@ -119,7 +121,7 @@ const AudiobookWorkflowStatus = ({
                 onClick={() => onResumePausedTask(task.task_id)}
                 sx={audiobookButtonSx.brandContained}
               >
-                {task.status === 'pause_requested' ? '暂停中...' : `恢复：${getTaskLabel(task)}`}
+                {task.status === 'pause_requested' ? t('audiobook.workflowStatus.pausing') : t('audiobook.workflowStatus.resumeTask', { task: getTaskLabel(task) })}
               </Button>
             ))}
           </Box>

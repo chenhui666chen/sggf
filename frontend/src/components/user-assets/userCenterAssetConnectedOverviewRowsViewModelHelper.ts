@@ -1,3 +1,5 @@
+import type { TFunction } from 'i18next'
+
 import type { UserCenterAssetConnectedOverviewCompanionViewModel } from './userCenterAssetConnectedOverviewCompanionViewModelHelper'
 import {
   buildUserCenterAssetConnectedOverviewPointsRulesCompanionContent,
@@ -5,6 +7,8 @@ import {
 } from './UserCenterAssetConnectedOverviewCompanion'
 import type { UserCenterAssetConnectedOverviewRowSlotOptions } from './UserCenterAssetConnectedOverviewRow'
 import type { UserCenterAssetConnectedOverviewSectionSlotBridge } from './UserCenterAssetConnectedOverviewSectionBridge'
+
+const DEFAULT_TRANSLATE: TFunction = ((key: string) => key) as TFunction
 
 export type UserCenterAssetConnectedOverviewRowsViewModel = {
   strategyRowSlotOptions: UserCenterAssetConnectedOverviewRowSlotOptions
@@ -18,18 +22,20 @@ export type BuildUserCenterAssetConnectedOverviewRowsViewModelOptions = {
 
 export function buildUserCenterAssetConnectedOverviewRowsViewModel(
   options: BuildUserCenterAssetConnectedOverviewRowsViewModelOptions,
+  t?: TFunction,
 ): UserCenterAssetConnectedOverviewRowsViewModel {
+  const translate = t ?? DEFAULT_TRANSLATE
   return {
     strategyRowSlotOptions: {
       overviewBridge: options.overviewBridge,
-      companionTitle: '资产接入策略',
+      companionTitle: translate('userCenter.points.strategyCompanionTitle'),
       companionContent: buildUserCenterAssetConnectedOverviewStrategyCompanionContent(
         options.companionViewModel.strategyCompanionContentOptions,
       ),
     },
     pointsRulesRowSlotOptions: {
       overviewBridge: options.overviewBridge,
-      companionTitle: '当前积分规则',
+      companionTitle: translate('userCenter.points.rulesCompanionTitle'),
       companionContent: buildUserCenterAssetConnectedOverviewPointsRulesCompanionContent(
         options.companionViewModel.pointsRulesCompanionContentOptions,
       ),

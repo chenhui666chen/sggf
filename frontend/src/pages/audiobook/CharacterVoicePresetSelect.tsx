@@ -10,6 +10,8 @@ import {
   Typography,
 } from '@mui/material'
 
+import { useTranslation } from 'react-i18next'
+
 import type { VoicePreset } from './types'
 
 interface CharacterVoicePresetSelectProps {
@@ -29,6 +31,7 @@ const CharacterVoicePresetSelect = ({
   currentVoicePresets,
   onVoiceChange,
 }: CharacterVoicePresetSelectProps) => {
+  const { t } = useTranslation()
   const hasNoVoicePresets = currentVoicePresets.length === 0
   const isValueInPresets = currentVoicePresets.some((preset) => preset.id === value)
 
@@ -39,9 +42,9 @@ const CharacterVoicePresetSelect = ({
 
   return (
     <FormControl size="small" fullWidth>
-      <InputLabel>音色</InputLabel>
+      <InputLabel>{t('audiobook.characterVoicePresetSelect.label')}</InputLabel>
       <Select
-        label="音色"
+        label={t('audiobook.characterVoicePresetSelect.label')}
         value={safeValue}
         onChange={(event) => {
           const voiceId = event.target.value as string
@@ -54,13 +57,13 @@ const CharacterVoicePresetSelect = ({
         disabled={voiceLoading && hasNoVoicePresets}
       >
         <MenuItem value="">
-          <em>自动（AI 选择）</em>
+          <em>{t('audiobook.characterVoicePresetSelect.auto')}</em>
         </MenuItem>
         {value && !isValueInPresets && (
           <MenuItem value={value}>
             <em>
               {value}
-              {voiceLoading || hasNoVoicePresets ? '' : '（不在当前音色库）'}
+              {voiceLoading || hasNoVoicePresets ? '' : t('audiobook.characterVoicePresetSelect.notInCurrentLibrary')}
             </em>
           </MenuItem>
         )}
@@ -68,15 +71,15 @@ const CharacterVoicePresetSelect = ({
           <MenuItem disabled value="__loading">
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
               <CircularProgress size={14} />
-              <Typography variant="caption">同步官方音色...</Typography>
+              <Typography variant="caption">{t('audiobook.characterVoicePresetSelect.syncing')}</Typography>
             </Box>
           </MenuItem>
         )}
         {!voiceLoading && hasNoVoicePresets && (
           <MenuItem disabled value="__empty">
             {requiresCustomVoice
-              ? '暂无可用自定义音色，请先创建'
-              : '暂无官方音色，请稍后重试'}
+              ? t('audiobook.characterVoicePresetSelect.emptyCustom')
+              : t('audiobook.characterVoicePresetSelect.emptyOfficial')}
           </MenuItem>
         )}
         {currentVoicePresets.map((preset) => (
@@ -96,11 +99,11 @@ const CharacterVoicePresetSelect = ({
                 </Typography>
               )}
               <Typography variant="caption" color="text.secondary">
-                {(preset.languages?.join('/') || '中英')} · {preset.style || '通用'}
+                {(preset.languages?.join('/') || t('audiobook.characterVoicePresetSelect.defaultLanguages'))} · {preset.style || t('audiobook.characterVoicePresetSelect.defaultStyle')}
               </Typography>
             </Box>
             {preset.supportsInstruct && (
-              <Tooltip title="该音色支持 instruction/SSML，情绪和语气可通过 Instruct 参数控制。">
+              <Tooltip title={t('audiobook.characterVoicePresetSelect.supportsInstructTooltip')}>
                 <Chip
                   label="Instruct"
                   size="small"

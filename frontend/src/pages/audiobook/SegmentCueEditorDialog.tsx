@@ -22,6 +22,7 @@ import MicIcon from '@mui/icons-material/Mic'
 import StopIcon from '@mui/icons-material/Stop'
 
 import { apiClient, extractApiErrorMessage } from '../../services/api'
+import { useTranslation } from 'react-i18next'
 import type {
   AudiobookScriptSegmentPayload,
   SegmentDirectionAssistResponse,
@@ -51,10 +52,10 @@ interface SegmentCueEditorDialogProps {
   onApplyPatch: (patch: Partial<ScriptSegment>) => void
 }
 
-const CUE_LABELS: Record<SegmentDirectionCueType, string> = {
-  voice: '人声提示',
-  sfx: '音效提示',
-  bgm: '配乐提示',
+const CUE_LABEL_KEYS: Record<SegmentDirectionCueType, string> = {
+  voice: 'audiobook.segmentCueEditor.cueLabels.voice',
+  sfx: 'audiobook.segmentCueEditor.cueLabels.sfx',
+  bgm: 'audiobook.segmentCueEditor.cueLabels.bgm',
 }
 
 const CUE_COLORS: Record<SegmentDirectionCueType, string> = {
@@ -63,21 +64,21 @@ const CUE_COLORS: Record<SegmentDirectionCueType, string> = {
   bgm: '#8b5cf6',
 }
 
-const CUE_EXAMPLES: Record<SegmentDirectionCueType, string[]> = {
+const CUE_EXAMPLE_KEYS: Record<SegmentDirectionCueType, string[]> = {
   voice: [
-    '语速缓慢，声音低沉沙哑，重读“痛”字，句尾拖长，营造痛苦氛围。',
-    '语气急促慌乱，气息不稳，尾音发颤，表现恐惧与无助。',
-    '平静克制地叙述，关键词略微加重，段落结尾留白停顿。',
+    'audiobook.segmentCueEditor.examples.voice0',
+    'audiobook.segmentCueEditor.examples.voice1',
+    'audiobook.segmentCueEditor.examples.voice2',
   ],
   sfx: [
-    '水滴声持续循环，底层铺垫，音量较低，淡入 1 秒。',
-    '远处闷雷一次，随后铁链拖地声由远及近，音量渐强。',
-    '开门吱呀声一次，紧跟轻微回声，突出空间空旷感。',
+    'audiobook.segmentCueEditor.examples.sfx0',
+    'audiobook.segmentCueEditor.examples.sfx1',
+    'audiobook.segmentCueEditor.examples.sfx2',
   ],
   bgm: [
-    '低沉弦乐缓慢进入，音量压低，淡入 2 秒，持续跟随情绪。',
-    '紧张鼓点渐强，节奏加快，在句尾戛然而止。',
-    '空灵钢琴独奏，缓慢淡出 3 秒，留出情绪余韵。',
+    'audiobook.segmentCueEditor.examples.bgm0',
+    'audiobook.segmentCueEditor.examples.bgm1',
+    'audiobook.segmentCueEditor.examples.bgm2',
   ],
 }
 
@@ -166,6 +167,7 @@ const SegmentCueEditorDialog = ({
   onClose,
   onApplyPatch,
 }: SegmentCueEditorDialogProps) => {
+  const { t } = useTranslation()
   const [description, setDescription] = useState('')
   const [selectedAsset, setSelectedAsset] = useState<AudioAssetSelection | null>(null)
   const [assistResult, setAssistResult] = useState<SegmentDirectionAssistResponse | null>(null)
@@ -253,7 +255,7 @@ const SegmentCueEditorDialog = ({
       setAssistResult(response.data)
     } catch (caught: unknown) {
       if (sessionId !== readingSessionRef.current) return
-      setError(await extractApiErrorMessage(caught, '朗读分析失败，请对照上方文本重新朗读'))
+      setError(await extractApiErrorMessage(caught, t('audiobook.segmentCueEditor.analyzeFailed')))
     } finally {
       if (sessionId === readingSessionRef.current) setAnalyzing(false)
     }
@@ -266,11 +268,11 @@ const SegmentCueEditorDialog = ({
     }
     if (analyzing || assistLoading) return
     if (!projectId || !chapterId || !segment) {
-      setError('章节上下文不可用，无法分析朗读')
+      setError(t('audiobook.segmentCueEditor.chapterContextMissing'))
       return
     }
     if (!String(segment.text || '').trim()) {
-      setError('片段台词为空，无法分析朗读')
+      setError(t('audiobook.segmentCueEditor.segmentTextEmpty'))
       return
     }
     if (
@@ -278,7 +280,7 @@ const SegmentCueEditorDialog = ({
       || !navigator.mediaDevices?.getUserMedia
       || typeof MediaRecorder === 'undefined'
     ) {
-      setError('当前浏览器不支持录音，请换用支持麦克风录制的浏览器')
+      setError(t('audiobook.segmentCueEditor.recorderUnsupported'))
       return
     }
     const sessionId = readingSessionRef.current + 1
@@ -305,7 +307,7 @@ const SegmentCueEditorDialog = ({
         setRecording(false)
         if (sessionId !== readingSessionRef.current) return
         if (chunks.length === 0) {
-          setError('未获取到朗读录音数据，请重试')
+          setError(t('audiobook.segmentCueEditor.noRecordingData'))
           return
         }
         const blob = new Blob(chunks, { type: chunks[0]?.type || 'audio/webm' })
@@ -316,7 +318,7 @@ const SegmentCueEditorDialog = ({
         chunksRef.current = []
         stopReadingStream()
         setRecording(false)
-        if (sessionId === readingSessionRef.current) setError('朗读录制失败，请重试')
+        if (sessionId === readingSessionRef.current) setError(t('audiobook.segmentCueEditor.recordingFailed'))
       }
       recorder.start()
       setRecording(true)
@@ -329,13 +331,13 @@ const SegmentCueEditorDialog = ({
       if (sessionId !== readingSessionRef.current) return
       stopReadingStream()
       setRecording(false)
-      setError(await extractApiErrorMessage(caught, '无法访问麦克风，请检查浏览器权限'))
+      setError(await extractApiErrorMessage(caught, t('audiobook.segmentCueEditor.micAccessFailed')))
     }
   }
 
   const handleAssist = async () => {
     if (!cueType || !segment || !projectId || !chapterId || !description.trim()) {
-      setError('请先输入提示描述')
+      setError(t('audiobook.segmentCueEditor.descriptionRequired'))
       return
     }
     setAssistLoading(true)
@@ -349,7 +351,7 @@ const SegmentCueEditorDialog = ({
       })
       setAssistResult(response.data)
     } catch (caught: unknown) {
-      setError(await extractApiErrorMessage(caught, '提示整理失败'))
+      setError(await extractApiErrorMessage(caught, t('audiobook.segmentCueEditor.assistFailed')))
     } finally {
       setAssistLoading(false)
     }
@@ -393,7 +395,7 @@ const SegmentCueEditorDialog = ({
   }
 
   if (!cueType || !segment) return null
-  const title = CUE_LABELS[cueType]
+  const title = t(CUE_LABEL_KEYS[cueType])
   const color = CUE_COLORS[cueType]
   const canAssist = Boolean(projectId && chapterId && description.trim())
   const intentEntries = Object.entries(assistResult?.intent || {})
@@ -420,17 +422,17 @@ const SegmentCueEditorDialog = ({
       <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 1, pb: 1 }}>
         <Box sx={{ flex: 1, minWidth: 0 }}>
           <Typography variant="subtitle1" sx={{ fontWeight: 800 }}>{title}</Typography>
-          <Typography variant="caption" sx={{ color: '#9aa4b2' }}>片段 #{segmentIndex + 1}</Typography>
+          <Typography variant="caption" sx={{ color: '#9aa4b2' }}>{t('audiobook.segmentCueEditor.segmentNumber', { number: segmentIndex + 1 })}</Typography>
         </Box>
-        <Tooltip title="关闭">
-          <IconButton aria-label="关闭提示编辑" onClick={handleClose}><CloseIcon /></IconButton>
+        <Tooltip title={t('audiobook.segmentCueEditor.closeTooltip')}>
+          <IconButton aria-label={t('audiobook.segmentCueEditor.closeEditorAria')} onClick={handleClose}><CloseIcon /></IconButton>
         </Tooltip>
       </DialogTitle>
       <DialogContent dividers sx={{ borderColor: 'rgba(255,255,255,0.08)' }}>
         <Stack spacing={1.5}>
           {cueType === 'voice' && String(segment.text || '').trim() && (
             <Box
-              aria-label="要朗读的文本"
+              aria-label={t('audiobook.segmentCueEditor.readingTextAria')}
               sx={{
                 px: 1.25,
                 py: 1,
@@ -440,7 +442,7 @@ const SegmentCueEditorDialog = ({
               }}
             >
               <Typography variant="caption" sx={{ display: 'block', color: '#9aa4b2', mb: 0.5 }}>
-                要朗读的文本{segment.speaker ? `（${segment.speaker}）` : ''}
+                {t('audiobook.segmentCueEditor.readingTextLabel', { speaker: segment.speaker ? `（${segment.speaker}）` : '' })}
               </Typography>
               <Typography variant="body2" sx={{ color: '#f4f7fb', lineHeight: 1.7, whiteSpace: 'pre-wrap' }}>
                 {String(segment.text || '').trim()}
@@ -449,9 +451,9 @@ const SegmentCueEditorDialog = ({
           )}
           <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 0.5 }}>
             <Typography variant="caption" sx={{ color: '#9aa4b2' }}>
-              {cueType === 'voice' ? '表演描述' : '声音设计描述'}
+              {cueType === 'voice' ? t('audiobook.segmentCueEditor.performanceLabel') : t('audiobook.segmentCueEditor.soundDesignLabel')}
             </Typography>
-            <Tooltip title="用户输入保留为语义字段；供应商运行时参数由服务端重新编译。">
+            <Tooltip title={t('audiobook.segmentCueEditor.semanticFieldTooltip')}>
               <InfoOutlinedIcon sx={{ fontSize: 16, color: '#9aa4b2' }} />
             </Tooltip>
           </Box>
@@ -464,10 +466,10 @@ const SegmentCueEditorDialog = ({
               value={description}
               onChange={(event) => handleDescriptionChange(event.target.value)}
               placeholder={cueType === 'voice'
-                ? '例如：语速缓慢，重读“痛”字，句尾拖长，营造压抑感。'
+                ? t('audiobook.segmentCueEditor.placeholderVoice')
                 : cueType === 'sfx'
-                  ? '例如：近距离持续水滴声，底层，音量较低。'
-                  : '例如：低沉弦乐缓慢进入，保持压抑，淡入 2 秒。'}
+                  ? t('audiobook.segmentCueEditor.placeholderSfx')
+                  : t('audiobook.segmentCueEditor.placeholderBgm')}
               inputProps={{ maxLength: 1000 }}
               sx={{
                 '& .MuiOutlinedInput-root': { bgcolor: '#0f131a', color: '#f4f7fb' },
@@ -476,10 +478,10 @@ const SegmentCueEditorDialog = ({
             />
             {cueType === 'voice' && (
               <Tooltip title={recording
-                ? '停止朗读录音'
-                : '朗读这段台词，AI 将分析你的语速、重音与停顿并生成语音合成指令'}>
+                ? t('audiobook.segmentCueEditor.stopRecording')
+                : t('audiobook.segmentCueEditor.recordReading')}>
                 <IconButton
-                  aria-label={recording ? '停止朗读录音' : '朗读这段台词'}
+                  aria-label={recording ? t('audiobook.segmentCueEditor.stopRecording') : t('audiobook.segmentCueEditor.recordReadingAria')}
                   onClick={() => void handleReadingRecording()}
                   disabled={analyzing || assistLoading}
                   sx={{
@@ -497,15 +499,15 @@ const SegmentCueEditorDialog = ({
 
           {cueType === 'voice' && recording && (
             <Alert severity="info">
-              正在朗读录音（最长 {MAX_READING_RECORDING_SECONDS} 秒），点击停止后自动分析
+              {t('audiobook.segmentCueEditor.recordingHint', { seconds: MAX_READING_RECORDING_SECONDS })}
             </Alert>
           )}
           {cueType === 'voice' && analyzing && (
-            <Alert severity="info" icon={<CircularProgress size={16} />}>AI 正在分析你的朗读特点（含文本一致性校验）</Alert>
+            <Alert severity="info" icon={<CircularProgress size={16} />}>{t('audiobook.segmentCueEditor.analyzingHint')}</Alert>
           )}
 
           <Box
-            aria-label="提示词示例"
+            aria-label={t('audiobook.segmentCueEditor.examplesAria')}
             sx={{
               px: 1.25,
               py: 1,
@@ -515,15 +517,15 @@ const SegmentCueEditorDialog = ({
             }}
           >
             <Typography variant="caption" sx={{ display: 'block', color: '#7d8794', mb: 0.5 }}>
-              参考示例
+              {t('audiobook.segmentCueEditor.referenceExamples')}
             </Typography>
-            {CUE_EXAMPLES[cueType].map((example) => (
+            {CUE_EXAMPLE_KEYS[cueType].map((exampleKey) => (
               <Typography
-                key={example}
+                key={exampleKey}
                 variant="caption"
                 sx={{ display: 'block', color: '#7d8794', lineHeight: 1.7 }}
               >
-                · {example}
+                · {t(exampleKey)}
               </Typography>
             ))}
           </Box>
@@ -540,7 +542,7 @@ const SegmentCueEditorDialog = ({
                 setSelectedAsset(selection)
                 setAssistResult(null)
               }}
-              label={cueType === 'sfx' ? '从素材库选择音效' : '从素材库选择配乐'}
+              label={cueType === 'sfx' ? t('audiobook.segmentCueEditor.pickSfxLabel') : t('audiobook.segmentCueEditor.pickMusicLabel')}
               textFieldSx={{
                 '& .MuiInputLabel-root': { color: '#9aa4b2' },
                 '& .MuiInputLabel-root.Mui-focused': { color: '#9aa4b2' },
@@ -557,22 +559,22 @@ const SegmentCueEditorDialog = ({
               <Stack spacing={0.75}>
                 <Typography variant="caption" sx={{ color: '#9aa4b2' }}>
                   {assistResult.source === 'omni_reading'
-                    ? '朗读分析'
-                    : `已生成 ${assistResult.source === 'llm' ? '模型' : '规则'} 语义建议`}
+                    ? t('audiobook.segmentCueEditor.assistTypeReading')
+                    : t('audiobook.segmentCueEditor.assistTypeGenerated', { source: assistResult.source === 'llm' ? t('audiobook.segmentCueEditor.assistSourceModel') : t('audiobook.segmentCueEditor.assistSourceRule') })}
                 </Typography>
                 {assistResult.source === 'omni_reading' && assistResult.performance_summary && (
                   <Typography variant="caption" sx={{ color: '#f4f7fb' }}>
-                    朗读特点：{assistResult.performance_summary}
+                    {t('audiobook.segmentCueEditor.readingFeatures', { summary: assistResult.performance_summary })}
                   </Typography>
                 )}
                 {assistResult.source === 'omni_reading' && assistResult.spoken_transcript && (
                   <Typography variant="caption" sx={{ color: '#9aa4b2' }}>
-                    识别朗读：{assistResult.spoken_transcript}
+                    {t('audiobook.segmentCueEditor.spokenTranscript', { transcript: assistResult.spoken_transcript })}
                   </Typography>
                 )}
                 {model_capabilities?.model_family && (
                   <Typography variant="caption" sx={{ color: '#9aa4b2' }}>
-                    模型能力：{model_capabilities.model_family}
+                    {t('audiobook.segmentCueEditor.modelCapability', { family: model_capabilities.model_family })}
                   </Typography>
                 )}
                 <Stack direction="row" spacing={0.5} useFlexGap flexWrap="wrap">
@@ -589,14 +591,14 @@ const SegmentCueEditorDialog = ({
         </Stack>
       </DialogContent>
       <DialogActions sx={{ px: 2, py: 1.5, borderColor: 'rgba(255,255,255,0.08)' }}>
-        <Button onClick={handleClose} startIcon={<CloseIcon />}>取消</Button>
+        <Button onClick={handleClose} startIcon={<CloseIcon />}>{t('action.cancel')}</Button>
         <Button
           variant="outlined"
           startIcon={assistLoading ? <CircularProgress size={16} /> : <AutoAwesomeIcon />}
           disabled={!canAssist || assistLoading || recording || analyzing}
           onClick={() => void handleAssist()}
         >
-          智能整理
+          {t('audiobook.segmentCueEditor.smartAssist')}
         </Button>
         <Button
           variant="contained"
@@ -605,7 +607,7 @@ const SegmentCueEditorDialog = ({
           onClick={handleApply}
           sx={{ bgcolor: color, '&:hover': { bgcolor: color, filter: 'brightness(1.12)' } }}
         >
-          应用到片段
+          {t('audiobook.segmentCueEditor.applyToSegment')}
         </Button>
       </DialogActions>
     </Dialog>

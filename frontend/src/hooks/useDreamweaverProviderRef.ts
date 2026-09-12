@@ -1,4 +1,5 @@
 import { useState, useCallback } from 'react'
+import { useTranslation } from 'react-i18next'
 import { apiClient, extractApiErrorMessage } from '../services/api'
 
 export interface UseDreamweaverProviderRefParams {
@@ -25,6 +26,7 @@ export function useDreamweaverProviderRef(
   params: UseDreamweaverProviderRefParams,
 ): UseDreamweaverProviderRefReturn {
   const { onRefresh } = params
+  const { t } = useTranslation()
 
   const [providerRefDialogOpen, setProviderRefDialogOpen] = useState(false)
   const [providerRefAssetId, setProviderRefAssetId] = useState<number | null>(null)
@@ -62,11 +64,11 @@ export function useDreamweaverProviderRef(
       setProviderRefDialogOpen(false)
       await onRefresh()
     } catch (e: any) {
-      setProviderRefError(await extractApiErrorMessage(e, '绑定 Kling 主体失败'))
+      setProviderRefError(await extractApiErrorMessage(e, t('dreamweaverRun.bindKlingProviderFailed')))
     } finally {
       setProviderRefSubmitting(false)
     }
-  }, [providerRefAssetId, providerRefSubjectId, onRefresh])
+  }, [providerRefAssetId, providerRefSubjectId, onRefresh, t])
 
   const syncProviderRef = useCallback(
     async (assetId: number) => {

@@ -43,6 +43,7 @@ import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import ExpandLessIcon from '@mui/icons-material/ExpandLess'
 
 import { apiClient, extractApiErrorMessage } from '../../services/api'
+import { useTranslation } from 'react-i18next'
 import type {
   PreviewType,
   ScriptEditorDialogProps,
@@ -50,18 +51,18 @@ import type {
 } from './types'
 import type { SegmentDirectionCueType } from '../../services/api'
 
-const REQUIRE_CONFIRMATION_REASON_LABELS: Record<string, string> = {
-  no_audio_path: '未生成音频',
-  expired_temporary_audio: '仅有已过期的临时音频',
-  file_missing: '音频文件不存在',
-  stale_audio: '音频与当前片段文本或演绎参数不一致',
-  invalid_segment: '片段数据无效',
+const REQUIRE_CONFIRMATION_REASON_LABEL_KEYS: Record<string, string> = {
+  no_audio_path: 'audiobook.scriptEditor.reasonLabels.noAudioPath',
+  expired_temporary_audio: 'audiobook.scriptEditor.reasonLabels.expiredTemporaryAudio',
+  file_missing: 'audiobook.scriptEditor.reasonLabels.fileMissing',
+  stale_audio: 'audiobook.scriptEditor.reasonLabels.staleAudio',
+  invalid_segment: 'audiobook.scriptEditor.reasonLabels.invalidSegment',
 }
-const REQUIRE_CONFIRMATION_ASSET_LABELS: Record<string, string> = {
-  voice: '人声',
-  mix: '片段混音',
-  sfx: '音效',
-  bgm: '配乐',
+const REQUIRE_CONFIRMATION_ASSET_LABEL_KEYS: Record<string, string> = {
+  voice: 'audiobook.scriptEditor.assetLabels.voice',
+  mix: 'audiobook.scriptEditor.assetLabels.mix',
+  sfx: 'audiobook.scriptEditor.assetLabels.sfx',
+  bgm: 'audiobook.scriptEditor.assetLabels.bgm',
 }
 import ScriptReviewReport from './ScriptReviewReport'
 import ScriptEditorConflictNotice from './ScriptEditorConflictNotice'
@@ -627,7 +628,9 @@ const TimelineTrack = ({
   ) => void
   locked?: boolean
   muted?: boolean
-}) => (
+}) => {
+  const { t } = useTranslation()
+  return (
   <Box sx={{ ...timelineTrackContentSx, width: contentWidth, height }}>
     {clips.map((clip) => {
       const clipLeft = TIMELINE_SIDE_PADDING + Math.round(clip.startUnit * scale)
@@ -677,15 +680,15 @@ const TimelineTrack = ({
             <Box sx={{ maxWidth: 300 }}>
               <Typography variant="caption" sx={{ fontWeight: 600 }}>
                 {clip.segmentIndex === clip.endSegmentIndex
-                  ? `片段 #${clip.segmentIndex + 1}`
-                  : `片段 #${clip.segmentIndex + 1}-#${clip.endSegmentIndex + 1}`}
+                  ? t('audiobook.scriptEditor.clipLabel', { n: clip.segmentIndex + 1 })
+                  : t('audiobook.scriptEditor.clipLabelRange', { a: clip.segmentIndex + 1, b: clip.endSegmentIndex + 1 })}
               </Typography>
               <Typography variant="caption" sx={{ display: 'block', mt: 0.5, whiteSpace: 'pre-wrap' }}>
                 {clip.textPreview || clip.label}
               </Typography>
               {clip.speakerLabel && (
                 <Typography variant="caption" sx={{ display: 'block', mt: 0.5, color: 'rgba(255,255,255,0.72)' }}>
-                  {clip.speakerLabel} · {clip.emotionLabel || '未标注'}
+                  {clip.speakerLabel} · {clip.emotionLabel || t('audiobook.scriptEditor.emotionUnmarked')}
                 </Typography>
               )}
             </Box>
@@ -695,7 +698,7 @@ const TimelineTrack = ({
           <Box
             role="button"
             tabIndex={0}
-            aria-label={`${clip.label}${editable ? '，可拖动调整' : ''}`}
+            aria-label={editable ? t('audiobook.scriptEditor.draggableAria', { label: clip.label }) : clip.label}
             onClick={() => !locked && onSelectClip(clip)}
             onDoubleClick={() => !locked && onSelectClip(clip)}
             onPointerDown={(event) => handlePointerEdit(event, 'move')}
@@ -835,7 +838,8 @@ const TimelineTrack = ({
       )
     })}
   </Box>
-)
+  )
+}
 
 const ScriptEditorDialog = ({
   open,
@@ -888,6 +892,7 @@ const ScriptEditorDialog = ({
   onForceRemixChapter,
   onCloseRemixMissingDialog,
 }: ScriptEditorDialogProps) => {
+  const { t } = useTranslation()
   const [consistencyChecking, setConsistencyChecking] = useState(false)
   const [selectedSegmentIndex, setSelectedSegmentIndex] = useState(0)
   const initialSegmentFocusConsumedRef = useRef(false)
@@ -989,8 +994,8 @@ const ScriptEditorDialog = ({
     ? `${safeSelectedSegmentIndex + 1} / ${scriptSegments.length}`
     : '0 / 0'
   const selectedSegmentEmotion = selectedSegment
-    ? selectedSegment.emotion || selectedSegment.voice_params?.emotion || '未标注'
-    : '未选择'
+    ? selectedSegment.emotion || selectedSegment.voice_params?.emotion || t('audiobook.scriptEditor.emotionUnmarked')
+    : t('audiobook.scriptEditor.notSelected')
   const reviewedCount = useMemo(() => Object.keys(segmentReviews).length, [segmentReviews])
   const chapterAudioAvailable = data?.chapterAudioAvailable === true && data?.chapterAudioStale !== true
   const visibleSegmentCards = useMemo(
@@ -1000,14 +1005,14 @@ const ScriptEditorDialog = ({
       const text = String(segment.text || '').trim()
       return {
         index,
-        summary: formatScriptSegmentSummary(segment, index),
-        textPreview: text || '空片段',
+        summary: formatScriptSegmentSummary(segment, index, t),
+        textPreview: text || t('audiobook.scriptEditor.emptySegment'),
         hasSfx: sfx.length > 0,
         hasMusic: music.length > 0,
         reviewed: Boolean(segmentReviews[index]),
       }
     }),
-    [scriptSegments, segmentReviews],
+    [scriptSegments, segmentReviews, t],
   )
   const audioCueStats = useMemo(() => {
     let sfxCueCount = 0
@@ -1027,8 +1032,8 @@ const ScriptEditorDialog = ({
     return { sfxCueCount, musicCueCount, totalTextLength }
   }, [scriptSegments])
   const timelineModel = useMemo(
-    () => buildTimelineModel(scriptSegments),
-    [scriptSegments],
+    () => buildTimelineModel(scriptSegments, t),
+    [scriptSegments, t],
   )
   const editedTimelineModel = useMemo(
     () => applyTimelineEdits(timelineModel, timelineEdits),
@@ -1049,9 +1054,9 @@ const ScriptEditorDialog = ({
     ? selectedTimelineClip.volume ?? getDefaultTimelineClipVolume(selectedTimelineClip)
     : 0
   const selectedTimelineClipTrackLabel = selectedTimelineClip?.track === 'music'
-    ? '配乐轨'
+    ? t('audiobook.scriptEditor.trackLabels.music')
     : selectedTimelineClip?.track === 'sfx'
-      ? '音效轨'
+      ? t('audiobook.scriptEditor.trackLabels.sfx')
       : ''
   const timelineContentWidth = Math.max(
     TIMELINE_MIN_CONTENT_WIDTH,
@@ -1158,7 +1163,7 @@ const ScriptEditorDialog = ({
   }> = [
     {
       key: 'scriptVoice',
-      label: '脚本/人声',
+      label: t('audiobook.scriptEditor.trackLabels.scriptVoice'),
       icon: <MicIcon sx={{ fontSize: 16 }} />,
       color: EDITOR_TRACK_COLORS.scriptVoice,
       height: TIMELINE_PRIMARY_TRACK_HEIGHT,
@@ -1166,7 +1171,7 @@ const ScriptEditorDialog = ({
     },
     {
       key: 'sfx',
-      label: '音效轨',
+      label: t('audiobook.scriptEditor.trackLabels.sfx'),
       icon: <GraphicEqIcon sx={{ fontSize: 16 }} />,
       color: EDITOR_TRACK_COLORS.sfx,
       height: TIMELINE_AUDIO_TRACK_HEIGHT,
@@ -1174,7 +1179,7 @@ const ScriptEditorDialog = ({
     },
     {
       key: 'music',
-      label: '配乐轨',
+      label: t('audiobook.scriptEditor.trackLabels.music'),
       icon: <LibraryMusicIcon sx={{ fontSize: 16 }} />,
       color: EDITOR_TRACK_COLORS.music,
       height: TIMELINE_AUDIO_TRACK_HEIGHT,
@@ -1260,7 +1265,7 @@ const ScriptEditorDialog = ({
         analysis_summary: res.data.consistency_check.analysis_summary,
       })
     } catch (err: unknown) {
-      setConsistencyError(await extractApiErrorMessage(err, '一致性检查失败'))
+      setConsistencyError(await extractApiErrorMessage(err, t('audiobook.scriptEditor.consistencyCheckFailed')))
     } finally {
       setConsistencyChecking(false)
     }
@@ -1387,7 +1392,7 @@ const ScriptEditorDialog = ({
         </Box>
       ) : !data ? (
         <Typography variant="body2" sx={editorMutedTextSx}>
-          暂无剧本数据，请先生成剧本。
+          {t('audiobook.scriptEditor.noScriptData')}
         </Typography>
       ) : (
         <Box sx={editorShellSx}>
@@ -1406,11 +1411,11 @@ const ScriptEditorDialog = ({
             <Box sx={segmentNavigatorSx}>
               <Box sx={panelHeaderSx}>
                 <Box sx={{ minWidth: 0, display: 'flex', alignItems: 'center', gap: 1 }}>
-                  <Tooltip title="关闭编辑器">
+                  <Tooltip title={t('audiobook.scriptEditor.closeEditor')}>
                     <span>
                       <IconButton
                         size="small"
-                        aria-label="关闭编辑器"
+                        aria-label={t('audiobook.scriptEditor.closeEditor')}
                         onClick={onClose}
                         disabled={loading}
                         sx={{
@@ -1437,10 +1442,10 @@ const ScriptEditorDialog = ({
                       variant="subtitle1"
                       sx={{ fontWeight: 800, lineHeight: 1.25, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}
                     >
-                      {chapter?.title || '章节剪辑'}
+                      {chapter?.title || t('audiobook.scriptEditor.chapterTitleFallback')}
                     </Typography>
                     <Typography variant="caption" sx={editorMutedTextSx}>
-                      {filteredSegmentCards.length} / {scriptSegments.length} 段 · {audioCueStats.totalTextLength} 字
+                      {t('audiobook.scriptEditor.segmentCountSummary', { shown: filteredSegmentCards.length, total: scriptSegments.length, chars: audioCueStats.totalTextLength })}
                     </Typography>
                   </Box>
                 </Box>
@@ -1451,7 +1456,7 @@ const ScriptEditorDialog = ({
                 <TextField
                   fullWidth
                   size="small"
-                  placeholder="搜索片段内容..."
+                  placeholder={t('audiobook.scriptEditor.searchPlaceholder')}
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   InputProps={{
@@ -1466,38 +1471,38 @@ const ScriptEditorDialog = ({
 
                 {/* 过滤按钮 */}
                 <Stack direction="row" spacing={0.5} sx={{ flexWrap: 'wrap', gap: 0.5 }}>
-                  <Tooltip title="显示全部片段">
+                  <Tooltip title={t('audiobook.scriptEditor.filterAll')}>
                     <Chip
                       size="small"
-                      label={`全部 (${scriptSegments.length})`}
+                      label={t('audiobook.scriptEditor.filterAllLabel', { count: scriptSegments.length })}
                       onClick={() => setFilterType('all')}
                       variant={filterType === 'all' ? 'filled' : 'outlined'}
                       sx={editorFilterChipSx(filterType === 'all', EDITOR_SURFACE_COLORS.accent)}
                     />
                   </Tooltip>
-                  <Tooltip title="有音效的片段">
+                  <Tooltip title={t('audiobook.scriptEditor.filterSfx')}>
                     <Chip
                       size="small"
-                      label={`音效 (${audioCueStats.sfxCueCount})`}
+                      label={t('audiobook.scriptEditor.filterSfxLabel', { count: audioCueStats.sfxCueCount })}
                       onClick={() => setFilterType('sfx')}
                       variant={filterType === 'sfx' ? 'filled' : 'outlined'}
                       sx={editorFilterChipSx(filterType === 'sfx', EDITOR_TRACK_COLORS.sfx)}
                     />
                   </Tooltip>
-                  <Tooltip title="有配乐的片段">
+                  <Tooltip title={t('audiobook.scriptEditor.filterMusic')}>
                     <Chip
                       size="small"
-                      label={`配乐 (${audioCueStats.musicCueCount})`}
+                      label={t('audiobook.scriptEditor.filterMusicLabel', { count: audioCueStats.musicCueCount })}
                       onClick={() => setFilterType('music')}
                       variant={filterType === 'music' ? 'filled' : 'outlined'}
                       sx={editorFilterChipSx(filterType === 'music', EDITOR_TRACK_COLORS.music)}
                     />
                   </Tooltip>
                   {reviewMode && (
-                    <Tooltip title="已评审的片段">
+                    <Tooltip title={t('audiobook.scriptEditor.filterReviewed')}>
                       <Chip
                         size="small"
-                        label={`已评 (${reviewedCount})`}
+                        label={t('audiobook.scriptEditor.filterReviewedLabel', { count: reviewedCount })}
                         onClick={() => setFilterType('review')}
                         variant={filterType === 'review' ? 'filled' : 'outlined'}
                         sx={editorFilterChipSx(filterType === 'review', EDITOR_SURFACE_COLORS.success)}
@@ -1511,7 +1516,7 @@ const ScriptEditorDialog = ({
                 {filteredSegmentCards.length === 0 ? (
                   <Box sx={{ p: 2, textAlign: 'center' }}>
                     <Typography variant="body2" sx={editorMutedTextSx}>
-                      未找到匹配的片段
+                      {t('audiobook.scriptEditor.noMatchingSegments')}
                     </Typography>
                   </Box>
                 ) : (
@@ -1552,7 +1557,7 @@ const ScriptEditorDialog = ({
                               #{item.index + 1}
                             </Typography>
                             <Typography variant="caption" sx={editorMutedTextSx}>
-                              {item.textPreview.length} 字
+                              {t('audiobook.scriptEditor.charCount', { count: item.textPreview.length })}
                             </Typography>
                           </Stack>
                           <Typography
@@ -1563,15 +1568,15 @@ const ScriptEditorDialog = ({
                           </Typography>
                           <Stack direction="row" spacing={0.5} sx={{ mt: 0.75, flexWrap: 'wrap', rowGap: 0.5 }}>
                             <Badge badgeContent={item.hasSfx ? null : 0} color="warning">
-                              <Chip size="small" label="音效" color={item.hasSfx ? 'warning' : 'default'} />
+                              <Chip size="small" label={t('audiobook.scriptEditor.sfxChip')} color={item.hasSfx ? 'warning' : 'default'} />
                             </Badge>
                             <Badge badgeContent={item.hasMusic ? null : 0} color="secondary">
-                              <Chip size="small" label="配乐" color={item.hasMusic ? 'secondary' : 'default'} />
+                              <Chip size="small" label={t('audiobook.scriptEditor.musicChip')} color={item.hasMusic ? 'secondary' : 'default'} />
                             </Badge>
                             {reviewMode && (
                               <Chip
                                 size="small"
-                                label={item.reviewed ? '✓ 已评' : '待评'}
+                                label={item.reviewed ? t('audiobook.scriptEditor.reviewed') : t('audiobook.scriptEditor.pendingReview')}
                                 color={item.reviewed ? 'success' : 'default'}
                                 sx={{ fontWeight: item.reviewed ? 600 : 400 }}
                               />
@@ -1589,14 +1594,14 @@ const ScriptEditorDialog = ({
               <Box sx={panelHeaderSx}>
                 <Box sx={{ minWidth: 0 }}>
                   <Typography variant="subtitle1" sx={{ fontWeight: 800 }}>
-                    单片段工作台
+                    {t('audiobook.scriptEditor.singleSegmentWorkbench')}
                   </Typography>
                   <Typography variant="caption" sx={editorMutedTextSx}>
-                    当前位置：{selectedSegmentProgress}
+                    {t('audiobook.scriptEditor.currentPosition', { position: selectedSegmentProgress })}
                   </Typography>
                 </Box>
                 <Stack direction="row" spacing={0.75} alignItems="center">
-                  <Tooltip title="上一段">
+                  <Tooltip title={t('audiobook.scriptEditor.previousSegment')}>
                     <span>
                       <IconButton
                         size="small"
@@ -1607,7 +1612,7 @@ const ScriptEditorDialog = ({
                       </IconButton>
                     </span>
                   </Tooltip>
-                  <Tooltip title="下一段">
+                  <Tooltip title={t('audiobook.scriptEditor.nextSegment')}>
                     <span>
                       <IconButton
                         size="small"
@@ -1627,12 +1632,12 @@ const ScriptEditorDialog = ({
                     <Stack spacing={0.5} sx={{ minWidth: 0 }}>
                       <Stack direction="row" spacing={0.75} alignItems="center" sx={{ flexWrap: 'wrap', rowGap: 0.5 }}>
                         <Chip size="small" label={`#${safeSelectedSegmentIndex + 1}`} color="primary" />
-                        <Chip size="small" label={getScriptSegmentTypeLabel(selectedSegment)} />
-                        <Chip size="small" label={getScriptSegmentSpeakerLabel(selectedSegment)} />
-                        <Chip size="small" label={`情绪 ${selectedSegmentEmotion}`} />
+                        <Chip size="small" label={getScriptSegmentTypeLabel(selectedSegment, t)} />
+                        <Chip size="small" label={getScriptSegmentSpeakerLabel(selectedSegment, t)} />
+                        <Chip size="small" label={t('audiobook.scriptEditor.emotionPrefix', { emotion: selectedSegmentEmotion })} />
                       </Stack>
                       <Typography variant="caption" sx={editorMutedTextSx}>
-                        字数 {selectedSegmentTextLength} · 音效 {selectedSegmentSfxCount} · 配乐 {selectedSegmentMusic ? '已配置' : '未配置'}
+                        {t('audiobook.scriptEditor.segmentStats', { chars: selectedSegmentTextLength, sfx: selectedSegmentSfxCount, music: selectedSegmentMusic ? t('audiobook.scriptEditor.configured') : t('audiobook.scriptEditor.notConfigured') })}
                       </Typography>
                     </Stack>
                     <Box sx={{ width: { xs: '100%', md: 220 } }}>
@@ -1647,10 +1652,10 @@ const ScriptEditorDialog = ({
                   {/* 文本编辑器头部工具栏 */}
                   <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 0.5 }}>
                     <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
-                      片段文本
+                      {t('audiobook.scriptEditor.segmentTextLabel')}
                     </Typography>
                     <Stack direction="row" spacing={0.5}>
-                      <Tooltip title={`复制${copiedText === selectedSegment.text ? '成功！' : ''}`}>
+                      <Tooltip title={copiedText === selectedSegment.text ? t('audiobook.scriptEditor.copyTooltipSuccess') : t('audiobook.scriptEditor.copyTooltip')}>
                         <IconButton
                           size="small"
                           onClick={() => handleCopyText(selectedSegment.text || '')}
@@ -1659,7 +1664,7 @@ const ScriptEditorDialog = ({
                           <ContentCopyIcon fontSize="small" />
                         </IconButton>
                       </Tooltip>
-                      <Tooltip title="粘贴文本">
+                      <Tooltip title={t('audiobook.scriptEditor.pasteText')}>
                         <IconButton
                           size="small"
                           onClick={() => handlePasteText(safeSelectedSegmentIndex)}
@@ -1667,7 +1672,7 @@ const ScriptEditorDialog = ({
                           <ContentPasteIcon fontSize="small" />
                         </IconButton>
                       </Tooltip>
-                      <Tooltip title="清空文本">
+                      <Tooltip title={t('audiobook.scriptEditor.clearText')}>
                         <IconButton
                           size="small"
                           onClick={() => handleClearText(safeSelectedSegmentIndex)}
@@ -1684,7 +1689,7 @@ const ScriptEditorDialog = ({
                     multiline
                     minRows={7}
                     maxRows={14}
-                    label="片段文本"
+                    label={t('audiobook.scriptEditor.segmentTextLabel')}
                     value={selectedSegment.text || ''}
                     onChange={(event) => onChangeSegmentText(safeSelectedSegmentIndex, event.target.value)}
                     InputProps={{
@@ -1697,12 +1702,12 @@ const ScriptEditorDialog = ({
                               fontWeight: selectedSegmentTextLength > 500 ? 600 : 400,
                             }}
                           >
-                            {selectedSegmentTextLength} 字
+                            {t('audiobook.scriptEditor.charCount', { count: selectedSegmentTextLength })}
                           </Typography>
                         </InputAdornment>
                       ),
                     }}
-                    helperText={selectedSegmentTextLength > 500 ? '文本长度超过建议值（500字）' : ''}
+                    helperText={selectedSegmentTextLength > 500 ? t('audiobook.scriptEditor.textTooLongHint') : ''}
                   />
 
                   {/* 可折叠的提示面板 */}
@@ -1719,12 +1724,12 @@ const ScriptEditorDialog = ({
                       sx={{ ...editorCuePanelSx(EDITOR_TRACK_COLORS.scriptVoice), cursor: 'pointer' }}
                       onClick={() => openCueEditor('voice')}
                       role="group"
-                      aria-label="人声提示"
+                      aria-label={t('audiobook.scriptEditor.voiceCue')}
                     >
                       <Stack direction="row" spacing={0.75} alignItems="center" justifyContent="space-between" sx={{ mb: 0.5 }}>
                         <Stack direction="row" spacing={0.75} alignItems="center">
                           <TextSnippetIcon sx={{ fontSize: 17, color: EDITOR_TRACK_COLORS.scriptVoice }} />
-                          <Typography variant="caption" sx={{ fontWeight: 700 }}>人声提示</Typography>
+                          <Typography variant="caption" sx={{ fontWeight: 700 }}>{t('audiobook.scriptEditor.voiceCue')}</Typography>
                         </Stack>
                         <IconButton
                           size="small"
@@ -1749,12 +1754,12 @@ const ScriptEditorDialog = ({
                       sx={{ ...editorCuePanelSx(EDITOR_TRACK_COLORS.sfx), cursor: 'pointer' }}
                       onClick={() => openCueEditor('sfx')}
                       role="group"
-                      aria-label="音效提示"
+                      aria-label={t('audiobook.scriptEditor.sfxCue')}
                     >
                       <Stack direction="row" spacing={0.75} alignItems="center" justifyContent="space-between" sx={{ mb: 0.5 }}>
                         <Stack direction="row" spacing={0.75} alignItems="center">
                           <GraphicEqIcon sx={{ fontSize: 17, color: EDITOR_TRACK_COLORS.sfx }} />
-                          <Typography variant="caption" sx={{ fontWeight: 700 }}>音效提示</Typography>
+                          <Typography variant="caption" sx={{ fontWeight: 700 }}>{t('audiobook.scriptEditor.sfxCue')}</Typography>
                         </Stack>
                         <IconButton
                           size="small"
@@ -1770,7 +1775,7 @@ const ScriptEditorDialog = ({
                       {!collapsedPanels.sfx && (
                         <>
                           <Typography variant="caption" sx={{ ...editorMutedTextSx, display: 'block', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                            {selectedSegmentSfx || '未配置'}
+                            {selectedSegmentSfx || t('audiobook.scriptEditor.notConfigured')}
                           </Typography>
                           {selectedSegmentSfxCount > 0 && (
                             <Stack direction="row" spacing={0.5} sx={{ mt: 0.5, flexWrap: 'wrap' }}>
@@ -1791,12 +1796,12 @@ const ScriptEditorDialog = ({
                       sx={{ ...editorCuePanelSx(EDITOR_TRACK_COLORS.music), cursor: 'pointer' }}
                       onClick={() => openCueEditor('bgm')}
                       role="group"
-                      aria-label="配乐提示"
+                      aria-label={t('audiobook.scriptEditor.musicCue')}
                     >
                       <Stack direction="row" spacing={0.75} alignItems="center" justifyContent="space-between" sx={{ mb: 0.5 }}>
                         <Stack direction="row" spacing={0.75} alignItems="center">
                           <LibraryMusicIcon sx={{ fontSize: 17, color: EDITOR_TRACK_COLORS.music }} />
-                          <Typography variant="caption" sx={{ fontWeight: 700 }}>配乐提示</Typography>
+                          <Typography variant="caption" sx={{ fontWeight: 700 }}>{t('audiobook.scriptEditor.musicCue')}</Typography>
                         </Stack>
                         <IconButton
                           size="small"
@@ -1811,7 +1816,7 @@ const ScriptEditorDialog = ({
                       </Stack>
                       {!collapsedPanels.music && (
                         <Typography variant="caption" sx={{ ...editorMutedTextSx, display: 'block', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                          {selectedSegmentMusic || '未配置'}
+                          {selectedSegmentMusic || t('audiobook.scriptEditor.notConfigured')}
                         </Typography>
                       )}
                     </Box>
@@ -1860,7 +1865,7 @@ const ScriptEditorDialog = ({
               ) : (
                 <Box sx={{ p: 2 }}>
                   <Typography variant="body2" sx={editorMutedTextSx}>
-                    暂无可编辑片段。
+                    {t('audiobook.scriptEditor.noEditableSegment')}
                   </Typography>
                 </Box>
               )}
@@ -1870,10 +1875,10 @@ const ScriptEditorDialog = ({
               <Box sx={panelHeaderSx}>
                 <Box sx={{ minWidth: 0 }}>
                   <Typography variant="subtitle1" sx={{ fontWeight: 800 }}>
-                    属性检查器
+                    {t('audiobook.scriptEditor.inspectorTitle')}
                   </Typography>
                   <Typography variant="caption" sx={editorMutedTextSx}>
-                    评审、诊断与一致性状态
+                    {t('audiobook.scriptEditor.inspectorSubtitle')}
                   </Typography>
                 </Box>
                 <Button
@@ -1883,7 +1888,7 @@ const ScriptEditorDialog = ({
                   onClick={onToggleReviewMode}
                   sx={reviewMode ? editorPrimaryActionSx : undefined}
                 >
-                  {reviewMode ? '退出标注' : '评审标注'}
+                  {reviewMode ? t('audiobook.scriptEditor.exitReview') : t('audiobook.scriptEditor.enterReview')}
                 </Button>
               </Box>
 
@@ -1894,10 +1899,10 @@ const ScriptEditorDialog = ({
                 variant="fullWidth"
                 sx={editorTabsSx}
               >
-                <Tab label="概览" value="overview" />
-                <Tab label="评审报告" value="review" />
-                <Tab label="一致性" value="consistency" />
-                <Tab label="诊断" value="diagnosis" />
+                <Tab label={t('audiobook.scriptEditor.tabs.overview')} value="overview" />
+                <Tab label={t('audiobook.scriptEditor.tabs.review')} value="review" />
+                <Tab label={t('audiobook.scriptEditor.tabs.consistency')} value="consistency" />
+                <Tab label={t('audiobook.scriptEditor.tabs.diagnosis')} value="diagnosis" />
               </Tabs>
 
               <Box sx={{ minHeight: 0, overflow: 'auto', p: 1.5 }}>
@@ -1907,30 +1912,30 @@ const ScriptEditorDialog = ({
                     <Box sx={{ ...editorInlinePanelSx, mb: 1.5 }}>
                       <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 1 }}>
                         <Typography variant="subtitle2" sx={{ fontWeight: 800 }}>
-                          当前片段
+                          {t('audiobook.scriptEditor.currentSegment')}
                         </Typography>
                         <Typography variant="caption" sx={editorMutedTextSx}>
-                          {selectedSegment ? `#${safeSelectedSegmentIndex + 1}` : '未选择'}
+                          {selectedSegment ? `#${safeSelectedSegmentIndex + 1}` : t('audiobook.scriptEditor.notSelected')}
                         </Typography>
                       </Stack>
                       {selectedSegment ? (
                         <Stack spacing={0.75}>
                           <Typography variant="body2">
-                            {getScriptSegmentTypeLabel(selectedSegment)} · {getScriptSegmentSpeakerLabel(selectedSegment)}
+                            {getScriptSegmentTypeLabel(selectedSegment, t)} · {getScriptSegmentSpeakerLabel(selectedSegment, t)}
                           </Typography>
                           <Typography variant="caption" sx={editorMutedTextSx}>
-                            当前位置：{selectedSegmentProgress}
+                            {t('audiobook.scriptEditor.currentPosition', { position: selectedSegmentProgress })}
                           </Typography>
                           <Typography variant="caption" sx={editorMutedTextSx}>
-                            情绪：{selectedSegmentEmotion}
+                            {t('audiobook.scriptEditor.emotionLabel', { emotion: selectedSegmentEmotion })}
                           </Typography>
                           <Typography variant="caption" sx={editorMutedTextSx}>
-                            字数 {selectedSegmentTextLength} · 音效 {selectedSegmentSfxCount} · 配乐 {selectedSegmentMusic ? '已配置' : '未配置'}
+                            {t('audiobook.scriptEditor.segmentStats', { chars: selectedSegmentTextLength, sfx: selectedSegmentSfxCount, music: selectedSegmentMusic ? t('audiobook.scriptEditor.configured') : t('audiobook.scriptEditor.notConfigured') })}
                           </Typography>
                         </Stack>
                       ) : (
                         <Typography variant="body2" sx={editorMutedTextSx}>
-                          暂无可检查的片段。
+                          {t('audiobook.scriptEditor.noInspectableSegment')}
                         </Typography>
                       )}
                     </Box>
@@ -1939,7 +1944,7 @@ const ScriptEditorDialog = ({
                       <Box sx={{ mb: 1.5 }}>
                         <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
                           <Typography variant="caption" sx={editorMutedTextSx}>
-                            审查进度
+                            {t('audiobook.scriptEditor.reviewProgress')}
                           </Typography>
                           <Typography variant="caption" sx={editorMutedTextSx}>
                             {reviewedCount} / {scriptSegments.length || 0}
@@ -1957,7 +1962,7 @@ const ScriptEditorDialog = ({
                     <Stack spacing={1}>
                       <Box sx={editorMetricPanelSx(EDITOR_SURFACE_COLORS.accent)}>
                         <Typography variant="caption" sx={{ fontWeight: 600, color: EDITOR_SURFACE_COLORS.muted }}>
-                          总片段数
+                          {t('audiobook.scriptEditor.totalSegments')}
                         </Typography>
                         <Typography variant="h6" sx={{ fontWeight: 800, color: EDITOR_SURFACE_COLORS.accent }}>
                           {scriptSegments.length}
@@ -1965,7 +1970,7 @@ const ScriptEditorDialog = ({
                       </Box>
                       <Box sx={editorMetricPanelSx(EDITOR_TRACK_COLORS.sfx)}>
                         <Typography variant="caption" sx={{ fontWeight: 600, color: EDITOR_SURFACE_COLORS.muted }}>
-                          音效提示词
+                          {t('audiobook.scriptEditor.sfxPromptCount')}
                         </Typography>
                         <Typography variant="h6" sx={{ fontWeight: 800, color: EDITOR_TRACK_COLORS.sfx }}>
                           {audioCueStats.sfxCueCount}
@@ -1973,7 +1978,7 @@ const ScriptEditorDialog = ({
                       </Box>
                       <Box sx={editorMetricPanelSx(EDITOR_TRACK_COLORS.music)}>
                         <Typography variant="caption" sx={{ fontWeight: 600, color: EDITOR_SURFACE_COLORS.muted }}>
-                          配乐提示词
+                          {t('audiobook.scriptEditor.musicPromptCount')}
                         </Typography>
                         <Typography variant="h6" sx={{ fontWeight: 800, color: EDITOR_TRACK_COLORS.music }}>
                           {audioCueStats.musicCueCount}
@@ -1990,7 +1995,7 @@ const ScriptEditorDialog = ({
                       <Box sx={{ mb: 1.5 }}>
                         <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
                           <Typography variant="caption" sx={editorMutedTextSx}>
-                            审查进度
+                            {t('audiobook.scriptEditor.reviewProgress')}
                           </Typography>
                           <Typography variant="caption" sx={editorMutedTextSx}>
                             {reviewedCount} / {scriptSegments.length || 0}
@@ -2005,7 +2010,7 @@ const ScriptEditorDialog = ({
                     )}
 
                     <Typography variant="subtitle2" sx={{ fontWeight: 800, mb: 1 }}>
-                      评审报告
+                      {t('audiobook.scriptEditor.reviewReport')}
                     </Typography>
                     {data.scriptReview ? (
                       <Box sx={editorEmbeddedContentSx}>
@@ -2013,7 +2018,7 @@ const ScriptEditorDialog = ({
                       </Box>
                     ) : (
                       <Typography variant="body2" sx={editorMutedTextSx}>
-                        暂无评审数据。
+                        {t('audiobook.scriptEditor.noReviewData')}
                       </Typography>
                     )}
                   </>
@@ -2024,7 +2029,7 @@ const ScriptEditorDialog = ({
                   <>
                     <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 1 }}>
                       <Typography variant="subtitle2" sx={{ fontWeight: 800 }}>
-                        一致性检查
+                        {t('audiobook.scriptEditor.consistencyCheck')}
                       </Typography>
                       <Button
                         size="small"
@@ -2033,7 +2038,7 @@ const ScriptEditorDialog = ({
                         onClick={handleCheckConsistency}
                         disabled={consistencyChecking || !scriptSegments.length}
                       >
-                        {consistencyChecking ? '检查中...' : '重新检查'}
+                        {consistencyChecking ? t('audiobook.scriptEditor.checking') : t('audiobook.scriptEditor.recheck')}
                       </Button>
                     </Stack>
 
@@ -2046,9 +2051,9 @@ const ScriptEditorDialog = ({
                             icon={consistencyResult.is_consistent ? <CheckCircleIcon /> : <ErrorIcon />}
                           >
                             <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                              {consistencyResult.is_consistent ? '未发现一致性问题' : '发现潜在不一致'}
+                              {consistencyResult.is_consistent ? t('audiobook.scriptEditor.consistent') : t('audiobook.scriptEditor.inconsistent')}
                               {consistencyResult.consistency_score > 0 && (
-                                <>（评分：{(consistencyResult.consistency_score * 100).toFixed(0)}%）</>
+                                t('audiobook.scriptEditor.scoreSuffix', { score: (consistencyResult.consistency_score * 100).toFixed(0) })
                               )}
                             </Typography>
                             {consistencyResult.analysis_summary && (
@@ -2062,7 +2067,7 @@ const ScriptEditorDialog = ({
                     </Collapse>
                     {!consistencyResult && !consistencyError && (
                       <Typography variant="body2" sx={editorMutedTextSx}>
-                        尚未执行检查。点击"重新检查"开始分析。
+                        {t('audiobook.scriptEditor.noCheckYet')}
                       </Typography>
                     )}
                   </>
@@ -2073,7 +2078,7 @@ const ScriptEditorDialog = ({
                   <>
                     <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 1 }}>
                       <Typography variant="subtitle2" sx={{ fontWeight: 800 }}>
-                        分块诊断
+                        {t('audiobook.scriptEditor.chunkDiagnosis')}
                       </Typography>
                       <Button
                         size="small"
@@ -2081,7 +2086,7 @@ const ScriptEditorDialog = ({
                         onClick={onPreviewSmartChunking}
                         disabled={smartChunkPreviewLoading}
                       >
-                        {smartChunkPreviewLoading ? '诊断中...' : '重新诊断'}
+                        {smartChunkPreviewLoading ? t('audiobook.scriptEditor.diagnosing') : t('audiobook.scriptEditor.rediagnose')}
                       </Button>
                     </Stack>
 
@@ -2093,7 +2098,7 @@ const ScriptEditorDialog = ({
                       />
                     ) : (
                       <Typography variant="body2" sx={editorMutedTextSx}>
-                        暂无诊断结果。点击"重新诊断"开始分析。
+                        {t('audiobook.scriptEditor.noDiagnosisYet')}
                       </Typography>
                     )}
                   </>
@@ -2110,7 +2115,7 @@ const ScriptEditorDialog = ({
                     borderColor: EDITOR_SURFACE_COLORS.border,
                   }}
                 >
-                  💡 提示：修改剧本后，建议重新生成该章节音频以保证文本与音频一致。
+                  {t('audiobook.scriptEditor.consistencyTip')}
                 </Typography>
               </Box>
             </Box>
@@ -2133,7 +2138,7 @@ const ScriptEditorDialog = ({
               <Box>
                 <Stack direction="row" spacing={1} alignItems="center">
                   <Typography variant="subtitle2" sx={{ fontWeight: 700, color: EDITOR_SURFACE_COLORS.text }}>
-                    剪辑工作台
+                    {t('audiobook.scriptEditor.editWorkbench')}
                   </Typography>
                   <Chip
                     size="small"
@@ -2148,8 +2153,8 @@ const ScriptEditorDialog = ({
                   />
                 </Stack>
                 <Typography variant="caption" sx={{ color: EDITOR_SURFACE_COLORS.muted, mt: 0.25 }}>
-                  主轨 {editedTimelineModel.clipsByTrack.scriptVoice.length} · 音效 {editedTimelineModel.clipsByTrack.sfx.length} · 配乐 {editedTimelineModel.clipsByTrack.music.length}
-                  {Object.keys(timelineEdits).length > 0 && ` · 已调整 ${Object.keys(timelineEdits).length}`}
+                  {t('audiobook.scriptEditor.trackStats', { voice: editedTimelineModel.clipsByTrack.scriptVoice.length, sfx: editedTimelineModel.clipsByTrack.sfx.length, music: editedTimelineModel.clipsByTrack.music.length })}
+                  {Object.keys(timelineEdits).length > 0 && t('audiobook.scriptEditor.adjustedSuffix', { count: Object.keys(timelineEdits).length })}
                 </Typography>
               </Box>
 
@@ -2160,7 +2165,7 @@ const ScriptEditorDialog = ({
                     {index > 0 && (
                       <Divider orientation="vertical" flexItem sx={{ borderColor: 'rgba(255,255,255,0.15)', mx: 0.5 }} />
                     )}
-                    <Tooltip title={trackLocks[track.key] ? `解锁${track.label}` : `锁定${track.label}`}>
+                    <Tooltip title={trackLocks[track.key] ? t('audiobook.scriptEditor.unlockTrack', { label: track.label }) : t('audiobook.scriptEditor.lockTrack', { label: track.label })}>
                       <IconButton
                         size="small"
                         onClick={() => toggleTrackLock(track.key)}
@@ -2172,7 +2177,7 @@ const ScriptEditorDialog = ({
                         {trackLocks[track.key] ? <LockIcon sx={{ fontSize: 16 }} /> : track.icon}
                       </IconButton>
                     </Tooltip>
-                    <Tooltip title={trackMutes[track.key] ? `取消静音${track.label}` : `静音${track.label}`}>
+                    <Tooltip title={trackMutes[track.key] ? t('audiobook.scriptEditor.unmuteTrack', { label: track.label }) : t('audiobook.scriptEditor.muteTrack', { label: track.label })}>
                       <IconButton
                         size="small"
                         onClick={() => toggleTrackMute(track.key)}
@@ -2199,7 +2204,7 @@ const ScriptEditorDialog = ({
               >
                 <Box sx={{ minWidth: 0 }}>
                   <Typography variant="caption" sx={{ display: 'block', color: EDITOR_SURFACE_COLORS.muted }}>
-                    片段音量
+                    {t('audiobook.scriptEditor.clipVolume')}
                   </Typography>
                   <Typography
                     variant="caption"
@@ -2214,12 +2219,12 @@ const ScriptEditorDialog = ({
                   >
                     {selectedTimelineClip
                       ? `${selectedTimelineClipTrackLabel} ${Math.round(selectedTimelineClipVolume * 100)}%`
-                      : '未选择'}
+                      : t('audiobook.scriptEditor.notSelected')}
                   </Typography>
                 </Box>
                 <Slider
                   size="small"
-                  aria-label="选中音频片段音量"
+                  aria-label={t('audiobook.scriptEditor.volumeAria')}
                   min={0}
                   max={1}
                   step={0.05}
@@ -2241,11 +2246,11 @@ const ScriptEditorDialog = ({
               {/* 缩放控制 */}
               <Box sx={{ display: 'grid', gridTemplateColumns: '36px minmax(0, 1fr)', gap: 1, alignItems: 'center', minWidth: 0 }}>
                 <Typography variant="caption" sx={{ color: EDITOR_SURFACE_COLORS.muted }}>
-                  缩放
+                  {t('audiobook.scriptEditor.zoomLabel')}
                 </Typography>
                 <Slider
                   size="small"
-                  aria-label="时间线缩放"
+                  aria-label={t('audiobook.scriptEditor.timelineZoomAria')}
                   value={timelineScale}
                   min={0.8}
                   max={1.35}
@@ -2265,7 +2270,7 @@ const ScriptEditorDialog = ({
                   onClick={() => onSaveScript({ nextStatus: 'reviewed' })}
                   disabled={loading || !data}
                 >
-                  保存
+                  {t('action.save')}
                 </Button>
                 <Button
                   size="small"
@@ -2274,10 +2279,10 @@ const ScriptEditorDialog = ({
                   disabled={loading || !data}
                   sx={editorPrimaryActionSx}
                 >
-                  批准剧本
+                  {t('audiobook.scriptEditor.approveScript')}
                 </Button>
                 {onApproveAndGenerateAudio && (
-                  <Tooltip title="批准当前剧本并立即将已批准章节提交音频生成">
+                  <Tooltip title={t('audiobook.scriptEditor.approveAndGenerateTooltip')}>
                     <span>
                       <Button
                         size="small"
@@ -2286,12 +2291,12 @@ const ScriptEditorDialog = ({
                         onClick={onApproveAndGenerateAudio}
                         disabled={loading || !data}
                       >
-                        批准并生成音频
+                        {t('audiobook.scriptEditor.approveAndGenerate')}
                       </Button>
                     </span>
                   </Tooltip>
                 )}
-                <Tooltip title="用最新保存的片段音频重新混合成整章音频">
+                <Tooltip title={t('audiobook.scriptEditor.remixTooltip')}>
                   <span>
                     <Button
                       size="small"
@@ -2300,7 +2305,7 @@ const ScriptEditorDialog = ({
                       onClick={onRemixChapter}
                       disabled={loading || !data || remixingChapter || !onRemixChapter}
                     >
-                      {remixingChapter ? '混音中…' : '重新混合整章'}
+                      {remixingChapter ? t('audiobook.scriptEditor.remixing') : t('audiobook.scriptEditor.remixChapter')}
                     </Button>
                   </span>
                 </Tooltip>
@@ -2323,7 +2328,7 @@ const ScriptEditorDialog = ({
             >
               <Box sx={timelineLabelsColumnSx}>
                 <Box sx={{ ...trackLabelSx, height: TIMELINE_RULER_HEIGHT }}>
-                  时间尺
+                  {t('audiobook.scriptEditor.timelineRuler')}
                 </Box>
                 {timelineTracks.map((track) => {
                   const locked = trackLocks[track.key]
@@ -2367,7 +2372,7 @@ const ScriptEditorDialog = ({
                     <Box
                       role="slider"
                       tabIndex={0}
-                      aria-label="拖动播放头定位播放"
+                      aria-label={t('audiobook.scriptEditor.playheadAria')}
                       aria-valuemin={1}
                       aria-valuemax={scriptSegments.length}
                       aria-valuenow={safeSelectedSegmentIndex + 1}
@@ -2494,23 +2499,22 @@ const ScriptEditorDialog = ({
       fullWidth
     >
       <Box sx={{ display: 'flex', alignItems: 'center', px: 3, pt: 2 }}>
-        <Typography variant="h6">片段音频不可用</Typography>
+        <Typography variant="h6">{t('audiobook.scriptEditor.remixMissingTitle')}</Typography>
       </Box>
       <DialogContent dividers>
         <Alert severity="warning" sx={{ mb: 1.5 }}>
-          以下片段没有可用于当前剧本版本的完整音频，无法完整重新混音。继续混音将跳过这些片段；
-          建议先在工作台检查相应轨道并重新生成或保存音频后再试。
+          {t('audiobook.scriptEditor.remixMissingBody')}
         </Alert>
         <Box component="ul" sx={{ m: 0, pl: 2, '& li': { mb: 0.5 } }}>
           {remixMissingSegments.map((segment) => (
             <li key={`${segment.index}-${segment.asset_type || 'voice'}-${segment.reason || 'unknown'}`}>
               <Typography variant="body2">
-                #{segment.index + 1} {segment.speaker || '未知角色'}
+                #{segment.index + 1} {segment.speaker || t('audiobook.scriptEditor.unknownRole')}
                 {segment.asset_type
-                  ? `【${REQUIRE_CONFIRMATION_ASSET_LABELS[segment.asset_type] || segment.asset_type}】`
+                  ? `【${REQUIRE_CONFIRMATION_ASSET_LABEL_KEYS[segment.asset_type] ? t(REQUIRE_CONFIRMATION_ASSET_LABEL_KEYS[segment.asset_type]) : segment.asset_type}】`
                   : ''}
                 {segment.text_preview ? `：${segment.text_preview}` : ''}
-                {segment.reason ? `（${REQUIRE_CONFIRMATION_REASON_LABELS[segment.reason] || segment.reason}）` : ''}
+                {segment.reason ? `（${REQUIRE_CONFIRMATION_REASON_LABEL_KEYS[segment.reason] ? t(REQUIRE_CONFIRMATION_REASON_LABEL_KEYS[segment.reason]) : segment.reason}）` : ''}
               </Typography>
             </li>
           ))}
@@ -2518,10 +2522,10 @@ const ScriptEditorDialog = ({
       </DialogContent>
       <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 1, px: 3, py: 2 }}>
         <Button size="small" onClick={onCloseRemixMissingDialog}>
-          取消
+          {t('action.cancel')}
         </Button>
         <Button size="small" variant="contained" color="warning" onClick={onForceRemixChapter}>
-          仍要混音
+          {t('audiobook.scriptEditor.forceRemix')}
         </Button>
       </Box>
     </Dialog>

@@ -1,5 +1,9 @@
-import { describe, expect, it, vi } from 'vitest'
+import { beforeAll, describe, expect, it, vi } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
+import type { ReactElement } from 'react'
+import type { i18n as I18nInstance } from 'i18next'
+
+import { bootstrapI18n, I18nProvider } from '@/i18n'
 
 import UserAssetWorkspaceContent from '../user-assets/UserAssetWorkspaceContent'
 
@@ -14,9 +18,23 @@ function extractVisibleText(markup: string): string {
     .trim()
 }
 
+/**
+ * 工作区里的本地目录面板与资产卡片都会读当前界面语言（时间文案跟着语言走），
+ * 因此渲染必须包一层 I18nProvider，与 main.tsx 的层级一致。
+ */
+let i18nInstance: I18nInstance
+
+beforeAll(async () => {
+  i18nInstance = await bootstrapI18n('zh-CN')
+})
+
+function renderWithI18n(node: ReactElement): string {
+  return renderToStaticMarkup(<I18nProvider instance={i18nInstance}>{node}</I18nProvider>)
+}
+
 describe('UserAssetWorkspaceContent', () => {
   it('能渲染资产工作区概览、诊断提示与空态文案', () => {
-    const text = extractVisibleText(renderToStaticMarkup(
+    const text = extractVisibleText(renderWithI18n(
       <UserAssetWorkspaceContent
         workspaceSectionProps={{
           overviewMetrics: [

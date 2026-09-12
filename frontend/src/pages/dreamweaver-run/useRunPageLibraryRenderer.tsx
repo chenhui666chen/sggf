@@ -1,3 +1,4 @@
+import type { TFunction } from 'i18next'
 import { ImageList, Stack } from '@mui/material'
 import {
   DreamweaverCharacterLibraryBucketSection,
@@ -52,6 +53,7 @@ interface CreateRunPageLibraryRendererDeps {
   renderArtifactsDebugPanel: () => React.ReactNode
   renderRunSnapshotPreviewPane: (options: { shotEmptyText: string }) => React.ReactNode
   renderLibraryDisplayCard: RenderLibraryDisplayCard
+  t: TFunction
 }
 
 export function createRunPageLibraryRenderer(deps: CreateRunPageLibraryRendererDeps) {
@@ -77,6 +79,7 @@ export function createRunPageLibraryRenderer(deps: CreateRunPageLibraryRendererD
     renderArtifactsDebugPanel,
     renderRunSnapshotPreviewPane,
     renderLibraryDisplayCard,
+    t,
   } = deps
 
   const renderCharacterLibraryBucketSection = (bucket: CharacterLibraryBucket) => {
@@ -103,7 +106,7 @@ export function createRunPageLibraryRenderer(deps: CreateRunPageLibraryRendererD
   )
 
   const renderCharacterLibraryGroupGrid = (items: LibraryDisplayItem[]) => {
-    const orderedBuckets = buildCharacterLibraryBuckets(items)
+    const orderedBuckets = buildCharacterLibraryBuckets(items, t)
 
     return (
       <Stack spacing={1}>
@@ -128,12 +131,12 @@ export function createRunPageLibraryRenderer(deps: CreateRunPageLibraryRendererD
     <DreamweaverLibraryGroupSection
       groupKey={group.key}
       label={group.label}
-      summaryChips={renderLibrarySummaryChips(group.summary, '总计')}
+      summaryChips={renderLibrarySummaryChips(group.summary, t('dreamweaverRun.libraryTotal'))}
       content={renderLibraryGroupGrid(group)}
     />
   )
 
-  const renderPendingLibrarySummaryChips = () => renderLibrarySummaryChips(librarySummary, '占位')
+  const renderPendingLibrarySummaryChips = () => renderLibrarySummaryChips(librarySummary, t('dreamweaverRun.libraryTotalPlaceholder'))
 
   const approveAllLibrary = () => approveLibrary({ approve_all: true, approved: true })
 
@@ -175,7 +178,7 @@ export function createRunPageLibraryRenderer(deps: CreateRunPageLibraryRendererD
         }
         summarySection={
           <PendingLibrarySummarySection
-            emptyText="未加载素材库或当前项目暂无可审核素材。"
+            emptyText={t('dreamweaverRun.libraryEmptyNotLoaded')}
             summaryChips={librarySummaryChips}
             groups={libraryGroupSections}
           />
@@ -212,7 +215,7 @@ export function createRunPageLibraryRenderer(deps: CreateRunPageLibraryRendererD
           />
         }
         snapshotPreview={renderRunSnapshotPreviewPane({
-          shotEmptyText: '尚无可用分镜快照（可能尚未落库）。',
+          shotEmptyText: t('dreamweaverRun.libraryNoSnapshotAvailable'),
         })}
       />
     )

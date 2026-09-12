@@ -1,5 +1,7 @@
 import type { ReactNode } from 'react'
 
+import { useTranslation } from 'react-i18next'
+
 import BugReportIcon from '@mui/icons-material/BugReport'
 import ContentCopyIcon from '@mui/icons-material/ContentCopy'
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
@@ -107,13 +109,14 @@ export function DreamweaverDiagnosticPreflightSection({
   onCopy,
   jsonAccordion,
 }: DreamweaverDiagnosticPreflightSectionProps) {
+  const { t } = useTranslation()
   return (
     <Accordion defaultExpanded={!allowed} sx={{ mb: 1 }}>
       <AccordionSummary expandIcon={<ExpandMoreIcon />}>
         <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
           <WarningIcon color={allowed ? 'warning' : 'error'} fontSize="small" />
           <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
-            运行预检
+            {t('dreamweaverRun.diagnosticPreflight')}
           </Typography>
           <Chip size="small" color={allowed ? 'success' : 'error'} label={allowed ? 'allowed' : 'blocked'} />
           <Chip size="small" label={`errors: ${errorCount}`} />
@@ -125,7 +128,7 @@ export function DreamweaverDiagnosticPreflightSection({
       <AccordionDetails>
         <Stack direction="row" spacing={1} flexWrap="wrap" alignItems="center" sx={{ mb: 1 }}>
           <Button size="small" variant="outlined" startIcon={<ContentCopyIcon fontSize="small" />} onClick={onCopy}>
-            复制 Preflight
+            {t('dreamweaverRun.diagnosticCopyPreflight')}
           </Button>
           <DreamweaverDiagnosticRouteFeatureChips {...featureFlags} />
         </Stack>
@@ -161,13 +164,14 @@ export function DreamweaverDiagnosticProviderTraceSection({
   onCopy,
   jsonAccordion,
 }: DreamweaverDiagnosticProviderTraceSectionProps) {
+  const { t } = useTranslation()
   return (
     <Accordion defaultExpanded sx={{ mb: 1 }}>
       <AccordionSummary expandIcon={<ExpandMoreIcon />}>
         <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
           <BugReportIcon color="primary" fontSize="small" />
           <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
-            Provider 路由
+            {t('dreamweaverRun.diagnosticProviderRoute')}
           </Typography>
           {providerMode && <Chip size="small" variant="outlined" label={`provider_mode: ${providerMode}`} />}
           {selectorMode && <Chip size="small" variant="outlined" label={`selector_mode: ${selectorMode}`} />}
@@ -180,7 +184,7 @@ export function DreamweaverDiagnosticProviderTraceSection({
       <AccordionDetails>
         <Stack direction="row" spacing={1} flexWrap="wrap" alignItems="center" sx={{ mb: 1 }}>
           <Button size="small" variant="outlined" startIcon={<ContentCopyIcon fontSize="small" />} onClick={onCopy}>
-            复制 Provider Trace
+            {t('dreamweaverRun.diagnosticCopyProviderTrace')}
           </Button>
           <DreamweaverDiagnosticRouteFeatureChips {...featureFlags} />
         </Stack>
@@ -233,6 +237,7 @@ export function DreamweaverDiagnosticSmartDispatchSection({
   promptAccordion,
   routingAccordion,
 }: DreamweaverDiagnosticSmartDispatchSectionProps) {
+  const { t } = useTranslation()
   const attemptedChips = Array.isArray(attemptedModels)
     ? attemptedModels
         .map((item) => String(item || '').trim())
@@ -254,7 +259,7 @@ export function DreamweaverDiagnosticSmartDispatchSection({
         <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
           <BugReportIcon color="primary" fontSize="small" />
           <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
-            智能调度
+            {t('dreamweaverRun.diagnosticSmartDispatch')}
           </Typography>
           {stage && <Chip size="small" variant="outlined" label={`stage: ${stage}`} />}
           {strategy && <Chip size="small" variant="outlined" label={`strategy: ${strategy}`} />}
@@ -276,7 +281,7 @@ export function DreamweaverDiagnosticSmartDispatchSection({
       <AccordionDetails>
         <Stack direction="row" spacing={1} flexWrap="wrap" alignItems="center" sx={{ mb: 1 }}>
           <Button size="small" variant="outlined" startIcon={<ContentCopyIcon fontSize="small" />} onClick={onCopy}>
-            复制调度 Trace
+            {t('dreamweaverRun.diagnosticCopyDispatchTrace')}
           </Button>
         </Stack>
         <DreamweaverDiagnosticOutlinedChipStack items={attemptedChips} />
@@ -310,18 +315,19 @@ export function DreamweaverDiagnosticTelemetrySection({
   counterChips,
   jsonAccordion,
 }: DreamweaverDiagnosticTelemetrySectionProps) {
+  const { t } = useTranslation()
   return (
     <Accordion defaultExpanded sx={{ mb: 1 }}>
       <AccordionSummary expandIcon={<ExpandMoreIcon />}>
         <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
-          运行耗时（Telemetry）
+          {t('dreamweaverRun.diagnosticTelemetry')}
         </Typography>
       </AccordionSummary>
       <AccordionDetails>
         <Stack direction="row" spacing={1} flexWrap="wrap" alignItems="center" sx={{ mb: 1 }}>
-          {typeof totalSeconds === 'number' && <Chip size="small" label={`总耗时: ${totalSeconds.toFixed(1)}s`} />}
+          {typeof totalSeconds === 'number' && <Chip size="small" label={t('dreamweaverRun.diagnosticTotalSeconds', { seconds: totalSeconds.toFixed(1) })} />}
           {terminalState && <Chip size="small" label={`terminal: ${terminalState}`} variant="outlined" />}
-          {typeof reworkCount === 'number' && <Chip size="small" label={`返工: ${reworkCount}`} variant="outlined" />}
+          {typeof reworkCount === 'number' && <Chip size="small" label={t('dreamweaverRun.diagnosticRework', { count: reworkCount })} variant="outlined" />}
           {abVariant && <Chip size="small" label={`variant: ${abVariant}`} variant="outlined" />}
         </Stack>
 
@@ -357,13 +363,14 @@ export function DreamweaverDiagnosticCameraDiagnosticsSection({
   cameraStatesAccordion,
   cameraScenesAccordion,
 }: DreamweaverDiagnosticCameraDiagnosticsSectionProps) {
+  const { t } = useTranslation()
   return (
     <Accordion sx={{ mb: 1 }}>
       <AccordionSummary expandIcon={<ExpandMoreIcon />}>
         <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
           <PhotoCameraIcon color="primary" fontSize="small" />
           <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
-            相机依赖（Camera Tree）
+            {t('dreamweaverRun.diagnosticCameraTree')}
           </Typography>
           {mode && <Chip size="small" label={`mode: ${mode}`} variant="outlined" />}
           {typeof cameraCount === 'number' && <Chip size="small" label={`cameras: ${cameraCount}`} />}
@@ -373,7 +380,7 @@ export function DreamweaverDiagnosticCameraDiagnosticsSection({
       <AccordionDetails>
         <Stack direction="row" spacing={1} flexWrap="wrap" alignItems="center" sx={{ mb: 1 }}>
           <Button size="small" variant="outlined" startIcon={<ContentCopyIcon fontSize="small" />} onClick={onCopy}>
-            复制 Camera 诊断
+            {t('dreamweaverRun.diagnosticCopyCamera')}
           </Button>
         </Stack>
         {scenePreview ?? null}
@@ -405,6 +412,7 @@ export function DiagnosticFrameAccordion({
   copyText,
   safeJsonStringify,
 }: DiagnosticFrameAccordionProps) {
+  const { t } = useTranslation()
   if (!frame || typeof frame !== 'object') return null
   const frameRecord = frame as Record<string, unknown>
   const uri = String(frameRecord.path || '').trim()
@@ -449,18 +457,18 @@ export function DiagnosticFrameAccordion({
       <AccordionDetails>
         <Stack direction="row" spacing={1} flexWrap="wrap" alignItems="center" sx={{ mb: 1 }}>
           <Button size="small" variant="outlined" startIcon={<ContentCopyIcon fontSize="small" />} onClick={() => copyText(safeJsonStringify(meta))}>
-            复制 meta
+            {t('dreamweaverRun.diagnosticCopyMeta')}
           </Button>
           <Button size="small" variant="text" onClick={() => copyText(uri)}>
-            复制路径
+            {t('dreamweaverRun.diagnosticCopyPath')}
           </Button>
         </Stack>
 
-        {renderPreviewGrid('预览', [uri], kind)}
+        {renderPreviewGrid(t('dreamweaverRun.diagnosticPreview'), [uri], kind)}
 
         {hasCandidates &&
           renderPreviewGrid(
-            '候选图（keep_candidates）',
+            t('dreamweaverRun.diagnosticCandidateGrid'),
             candidates
               .map((c) => (typeof c === 'string' ? c.trim() : ''))
               .filter(Boolean)
@@ -484,8 +492,9 @@ export function DebugJsonBox({ value, maxHeight, safeJsonStringify }: { value: u
         whiteSpace: 'pre-wrap',
         fontFamily: 'monospace',
         fontSize: 12,
-        bgcolor: '#fafafa',
-        border: '1px solid #eee',
+        bgcolor: 'grey.100',
+        border: '1px solid',
+        borderColor: 'divider',
         borderRadius: 2,
         p: 1.5,
         ...(typeof maxHeight === 'number'
@@ -576,13 +585,14 @@ export interface ShotDiagnosticUploadActionsProps {
 }
 
 export function ShotDiagnosticUploadActions({ shotId, uploadDisabled, onUpload }: ShotDiagnosticUploadActionsProps) {
+  const { t } = useTranslation()
   if (!shotId) return null
   return (
     <>
-      <DiagnosticUploadButton label="上传首帧" accept="image/png" shotId={shotId} assetRole="head_frame" disabled={uploadDisabled} onUpload={onUpload} />
-      <DiagnosticUploadButton label="上传尾帧" accept="image/png" shotId={shotId} assetRole="tail_frame" disabled={uploadDisabled} onUpload={onUpload} />
-      <DiagnosticUploadButton label="上传中间帧" accept="image/png" shotId={shotId} assetRole="mid_frame" disabled={uploadDisabled} onUpload={onUpload} />
-      <DiagnosticUploadButton label="上传镜头视频" accept="video/mp4" shotId={shotId} assetRole="video_clip" disabled={uploadDisabled} onUpload={onUpload} />
+      <DiagnosticUploadButton label={t('dreamweaverRun.diagnosticUploadHead')} accept="image/png" shotId={shotId} assetRole="head_frame" disabled={uploadDisabled} onUpload={onUpload} />
+      <DiagnosticUploadButton label={t('dreamweaverRun.diagnosticUploadTail')} accept="image/png" shotId={shotId} assetRole="tail_frame" disabled={uploadDisabled} onUpload={onUpload} />
+      <DiagnosticUploadButton label={t('dreamweaverRun.diagnosticUploadMid')} accept="image/png" shotId={shotId} assetRole="mid_frame" disabled={uploadDisabled} onUpload={onUpload} />
+      <DiagnosticUploadButton label={t('dreamweaverRun.diagnosticUploadVideo')} accept="video/mp4" shotId={shotId} assetRole="video_clip" disabled={uploadDisabled} onUpload={onUpload} />
     </>
   )
 }
@@ -602,6 +612,7 @@ export function ShotDiagnosticPromptRegenerateActions({
   onPromptAndRegenerateKeyframe,
   getDiagnosticStoryboardPrompt,
 }: ShotDiagnosticPromptRegenerateActionsProps) {
+  const { t } = useTranslation()
   if (!shotId) return null
   return (
     <>
@@ -611,7 +622,7 @@ export function ShotDiagnosticPromptRegenerateActions({
         onClick={() => void onPromptAndRegenerateKeyframe(shotId, 'head', getDiagnosticStoryboardPrompt(sb, 'head_frame'))}
         disabled={actionDisabled}
       >
-        改首帧提示词并重跑
+        {t('dreamweaverRun.diagnosticRegenHead')}
       </Button>
       <Button
         size="small"
@@ -619,7 +630,7 @@ export function ShotDiagnosticPromptRegenerateActions({
         onClick={() => void onPromptAndRegenerateKeyframe(shotId, 'tail', getDiagnosticStoryboardPrompt(sb, 'tail_frame'))}
         disabled={actionDisabled}
       >
-        改尾帧提示词并重跑
+        {t('dreamweaverRun.diagnosticRegenTail')}
       </Button>
     </>
   )
@@ -670,14 +681,15 @@ export interface SafetyBlockedAlertProps {
 }
 
 export function SafetyBlockedAlert({ shots, onOpenShot }: SafetyBlockedAlertProps) {
+  const { t } = useTranslation()
   if (!shots.length) return null
   return (
     <Alert severity="warning" sx={{ mb: 1 }}>
       <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
-        检测到内容安全拦截：部分镜头产物被安全过滤
+        {t('dreamweaverRun.diagnosticSafetyBlockedTitle')}
       </Typography>
       <Typography variant="body2" color="text.secondary">
-        请点击下方镜头编号查看/修改提示词后重试生成。
+        {t('dreamweaverRun.diagnosticSafetyBlockedHint')}
       </Typography>
       <Stack direction="row" spacing={1} flexWrap="wrap" sx={{ mt: 1 }}>
         {shots.map((item) => {
@@ -691,7 +703,7 @@ export function SafetyBlockedAlert({ shots, onOpenShot }: SafetyBlockedAlertProp
       </Stack>
       {shots[0]?.errorSample && (
         <Typography variant="caption" color="text.secondary" display="block" sx={{ mt: 1 }}>
-          示例错误：{shots[0].errorSample}
+          {t('dreamweaverRun.diagnosticErrorSample', { sample: shots[0].errorSample })}
         </Typography>
       )}
     </Alert>

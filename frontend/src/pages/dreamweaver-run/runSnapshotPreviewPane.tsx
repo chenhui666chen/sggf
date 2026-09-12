@@ -2,6 +2,8 @@ import type { ReactNode } from 'react'
 
 import { Alert, Box, Button, Chip, LinearProgress, Stack, Typography } from '@mui/material'
 
+import { useTranslation } from 'react-i18next'
+
 type RunSnapshotPreviewPaneProps = {
   refreshControls?: ReactNode
   errorAlert?: ReactNode
@@ -56,9 +58,10 @@ export function RunSnapshotRefreshButton({
   disabled = false,
   loading = false,
 }: RunSnapshotRefreshButtonProps) {
+  const { t } = useTranslation()
   return (
     <Button size="small" variant="outlined" onClick={onClick} disabled={disabled}>
-      {loading ? '加载中…' : label}
+      {loading ? t('dreamweaverRun.libraryLoadingText') : label}
     </Button>
   )
 }
@@ -70,11 +73,12 @@ type RunSnapshotLoadedChipProps = {
 
 export function RunSnapshotLoadedChip({
   visible,
-  label = '快照已加载',
+  label,
 }: RunSnapshotLoadedChipProps) {
+  const { t } = useTranslation()
   if (!visible) return null
 
-  return <Chip size="small" label={label} color="success" />
+  return <Chip size="small" label={label ?? t('dreamweaverRun.spSnapshotLoaded')} color="success" />
 }
 
 type RunSnapshotErrorAlertProps = {
@@ -240,13 +244,14 @@ export function RunSnapshotAssetPreviewSection({
   midframeGrid,
   videoClipGrid,
 }: RunSnapshotAssetPreviewSectionProps) {
+  const { t } = useTranslation()
   if (!visible) return null
 
   return (
     <Box sx={{ mb: 1 }}>
       <Stack direction="row" spacing={1} flexWrap="wrap" mb={0.5}>
-        <Chip size="small" label={`镜头: ${shotCount}`} />
-        <Chip size="small" label={`资产: ${assetCount}`} />
+        <Chip size="small" label={t('dreamweaverRun.snapshotShotsChip', { count: shotCount })} />
+        <Chip size="small" label={t('dreamweaverRun.snapshotAssetsChip', { count: assetCount })} />
         <Chip size="small" label={`KF: ${keyframeCount}`} />
         <Chip size="small" label={`MF: ${midframeCount}`} />
         <Chip size="small" label={`VC: ${videoClipCount}`} />

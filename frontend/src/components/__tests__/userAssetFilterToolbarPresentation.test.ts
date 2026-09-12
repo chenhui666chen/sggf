@@ -1,10 +1,20 @@
-import { describe, expect, it } from 'vitest'
+import { beforeAll, describe, expect, it } from 'vitest'
+import type { TFunction } from 'i18next'
+
+import { bootstrapI18n } from '@/i18n'
 
 import {
   buildUserAssetFilterToolbarPresentation,
   isUserAssetArchiveFilter,
   isUserAssetViewFilter,
 } from '../user-assets/userAssetFilterToolbarPresentation'
+
+let t: TFunction
+
+beforeAll(async () => {
+  const instance = await bootstrapI18n('zh-CN')
+  t = instance.t.bind(instance)
+})
 
 describe('userAssetFilterToolbarPresentation', () => {
   it('builds filter fields, result summary and refresh action', () => {
@@ -21,7 +31,7 @@ describe('userAssetFilterToolbarPresentation', () => {
       tagOptions: ['角色', '成片'],
       filteredCount: 12,
       loading: true,
-    })
+    }, t)
 
     expect(presentation.fields.map((field) => field.key)).toEqual([
       'viewFilter',

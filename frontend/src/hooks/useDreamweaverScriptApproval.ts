@@ -1,4 +1,5 @@
 import { useState, useCallback, useRef } from 'react'
+import { useTranslation } from 'react-i18next'
 import type { DreamweaverScriptEntities } from '@/types/dreamweaver'
 import { apiClient, extractApiErrorMessage } from '@/services/api'
 
@@ -32,6 +33,7 @@ function toDreamweaverScriptEntities(value: unknown): DreamweaverScriptEntities 
 }
 
 export function useDreamweaverScriptApproval() {
+  const { t } = useTranslation()
   const [scriptLoading, setScriptLoading] = useState(false)
   const [scriptError, setScriptError] = useState<string | null>(null)
   const [scriptText, setScriptText] = useState<string>('')
@@ -76,16 +78,16 @@ export function useDreamweaverScriptApproval() {
       setScriptEntities(toDreamweaverScriptEntities(data?.script_entities))
       setScriptGeneration(sg)
     } catch (e: unknown) {
-      setScriptError(await extractApiErrorMessage(e, '加载剧本失败'))
+      setScriptError(await extractApiErrorMessage(e, t('dreamweaverRun.loadScriptFailed')))
     } finally {
       setScriptLoading(false)
     }
-  }, [])
+  }, [t])
 
   const saveScript = useCallback(async (currentRunId: string) => {
     if (!currentRunId) return
     if (!scriptText.trim()) {
-      setScriptError('剧本不能为空')
+      setScriptError(t('dreamweaverRun.scriptEmpty'))
       return
     }
     setScriptLoading(true)
@@ -94,11 +96,11 @@ export function useDreamweaverScriptApproval() {
       await apiClient.updateDreamweaverRunScript(currentRunId, { script_text: scriptText })
       await loadScript(currentRunId)
     } catch (e: unknown) {
-      setScriptError(await extractApiErrorMessage(e, '保存剧本失败'))
+      setScriptError(await extractApiErrorMessage(e, t('dreamweaverRun.saveScriptFailed')))
     } finally {
       setScriptLoading(false)
     }
-  }, [scriptText, loadScript])
+  }, [scriptText, loadScript, t])
 
   const approveScript = useCallback(async (currentRunId: string, approved: boolean) => {
     if (!currentRunId) return
@@ -108,11 +110,11 @@ export function useDreamweaverScriptApproval() {
       await apiClient.approveDreamweaverRunScript(currentRunId, { approved })
       await loadScript(currentRunId)
     } catch (e: unknown) {
-      setScriptError(await extractApiErrorMessage(e, '更新剧本审核状态失败'))
+      setScriptError(await extractApiErrorMessage(e, t('dreamweaverRun.updateScriptApprovalFailed')))
     } finally {
       setScriptLoading(false)
     }
-  }, [loadScript])
+  }, [loadScript, t])
 
   const autoLoadIfNeeded = useCallback((currentRunId: string | null, waitingScriptApproval: boolean) => {
     if (!waitingScriptApproval) return

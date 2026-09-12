@@ -1,4 +1,6 @@
 import { useMemo, useState } from 'react'
+import { useTranslation } from 'react-i18next'
+import type { TFunction } from 'i18next'
 import {
   Alert,
   Box,
@@ -32,18 +34,26 @@ interface ResumableChaptersAlertProps {
   onResumeChapterGeneration: (chapterId: number) => void
 }
 
-const getResumableChapterLabel = (entry: ResumableChapterEntry) => {
+const getResumableChapterLabel = (entry: ResumableChapterEntry, t: TFunction) => {
   if (entry.chapter) {
-    return `继续第${entry.chapter.chapter_number}章`
+    return t('audiobook.resumableChaptersAlert.resumeChapterLabel', {
+      number: entry.chapter.chapter_number,
+    })
   }
-  return `继续章节${entry.chapterAudio.chapter_id}`
+  return t('audiobook.resumableChaptersAlert.resumeChapterIdLabel', {
+    number: entry.chapterAudio.chapter_id,
+  })
 }
 
-const getChapterLabel = (entry: ResumableChapterEntry) => {
+const getChapterLabel = (entry: ResumableChapterEntry, t: TFunction) => {
   if (entry.chapter) {
-    return `第${entry.chapter.chapter_number}章`
+    return t('audiobook.resumableChaptersAlert.chapterLabel', {
+      number: entry.chapter.chapter_number,
+    })
   }
-  return `章节${entry.chapterAudio.chapter_id}`
+  return t('audiobook.resumableChaptersAlert.chapterIdLabel', {
+    number: entry.chapterAudio.chapter_id,
+  })
 }
 
 const ResumableChaptersAlert = ({
@@ -53,6 +63,7 @@ const ResumableChaptersAlert = ({
   audiobookProjectId,
   onResumeChapterGeneration,
 }: ResumableChaptersAlertProps) => {
+  const { t } = useTranslation()
   const [missingDialogEntry, setMissingDialogEntry] = useState<ResumableChapterEntry | null>(null)
   const [voiceDialogEntry, setVoiceDialogEntry] = useState<ResumableChapterEntry | null>(null)
   const [voiceOverrides, setVoiceOverrides] = useState<Record<string, string>>({})
@@ -132,10 +143,12 @@ const ResumableChaptersAlert = ({
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
             <Box>
               <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                {`${segmentFailureEntries.length} 个章节存在部分片段合成失败`}
+                {t('audiobook.resumableChaptersAlert.segmentFailureSummary', {
+                  total: segmentFailureEntries.length,
+                })}
               </Typography>
               <Typography variant="caption" color="text.secondary">
-                已成功片段已缓存，重试只会重新合成缺失片段，不会改变其他片段的声音。
+                {t('audiobook.resumableChaptersAlert.segmentFailureHint')}
               </Typography>
             </Box>
 
@@ -153,13 +166,16 @@ const ResumableChaptersAlert = ({
                     disabled={resumingChapterId !== null}
                     sx={audiobookButtonSx.dangerOutlined}
                   >
-                    {`${getChapterLabel(entry)}：${missingCount} 个片段缺失`}
+                    {t('audiobook.resumableChaptersAlert.missingCountSummary', {
+                      chapter: getChapterLabel(entry, t),
+                      total: missingCount,
+                    })}
                   </Button>
                 )
               })}
               {segmentFailureEntries.length > 3 && (
                 <Typography variant="caption" color="text.secondary" sx={{ alignSelf: 'center' }}>
-                  其余章节可在下方结果区查看
+                  {t('audiobook.resumableChaptersAlert.othersInResults')}
                 </Typography>
               )}
               {isAnyResuming(segmentFailureEntries, resumingChapterId) && (
@@ -179,10 +195,12 @@ const ResumableChaptersAlert = ({
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
             <Box>
               <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                检测到 {plainEntries.length} 个章节存在可继续生成的进度
+                {t('audiobook.resumableChaptersAlert.resumableSummary', {
+                  total: plainEntries.length,
+                })}
               </Typography>
               <Typography variant="caption" color="text.secondary">
-                页面只负责发现入口，是否可恢复与如何入队由服务端 checkpoint 规则判定。
+                {t('audiobook.resumableChaptersAlert.resumableHint')}
               </Typography>
             </Box>
 
@@ -205,20 +223,22 @@ const ResumableChaptersAlert = ({
                     }
                     sx={audiobookButtonSx.warningOutlined}
                   >
-                    {isResuming ? '提交中...' : getResumableChapterLabel(entry)}
+                    {isResuming
+                      ? t('audiobook.resumableChaptersAlert.submittingText')
+                      : getResumableChapterLabel(entry, t)}
                   </Button>
                 )
               })}
 
               {plainEntries.length > 3 && (
                 <Typography variant="caption" color="text.secondary" sx={{ alignSelf: 'center' }}>
-                  其余章节可在下方结果区继续生成
+                  {t('audiobook.resumableChaptersAlert.othersInResultsContinue')}
                 </Typography>
               )}
 
               {resumeCheckpointLoading && (
                 <Typography variant="caption" color="text.secondary" sx={{ alignSelf: 'center' }}>
-                  正在同步最新断点信息...
+                  {t('audiobook.resumableChaptersAlert.syncingCheckpointText')}
                 </Typography>
               )}
             </Box>
@@ -234,12 +254,14 @@ const ResumableChaptersAlert = ({
       >
         <DialogTitle>
           {missingDialogEntry
-            ? `${getChapterLabel(missingDialogEntry)} 部分片段合成失败`
-            : '部分片段合成失败'}
+            ? t('audiobook.resumableChaptersAlert.dialogTitleWithChapter', {
+                chapter: getChapterLabel(missingDialogEntry, t),
+              })
+            : t('audiobook.resumableChaptersAlert.dialogTitle')}
         </DialogTitle>
         <DialogContent dividers>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
-            以下片段未合成成功，章节尚未混音。重试将保持原音色，仅重新合成缺失片段。
+            {t('audiobook.resumableChaptersAlert.dialogBody')}
           </Typography>
           <List dense disablePadding>
             {dialogMissingSegments.map((segment) => (
@@ -249,10 +271,16 @@ const ResumableChaptersAlert = ({
                 sx={{ display: 'block', alignItems: 'flex-start', py: 0.75 }}
               >
                 <Typography variant="caption" color="text.secondary">
-                  {`片段 #${segment.index}`}
-                  {segment.speaker ? ` · ${segment.speaker}` : ''}
-                  {segment.voice ? ` · 音色 ${segment.voice}` : ''}
-                  {segment.error_type ? ` · ${segment.error_type}` : ''}
+                  {t('audiobook.resumableChaptersAlert.segmentIndex', { index: segment.index })}
+                  {segment.speaker
+                    ? t('audiobook.resumableChaptersAlert.segmentSpeaker', { speaker: segment.speaker })
+                    : ''}
+                  {segment.voice
+                    ? t('audiobook.resumableChaptersAlert.segmentVoice', { voice: segment.voice })
+                    : ''}
+                  {segment.error_type
+                    ? t('audiobook.resumableChaptersAlert.segmentErrorType', { errorType: segment.error_type })
+                    : ''}
                 </Typography>
                 {segment.text ? (
                   <Typography variant="body2" noWrap sx={{ maxWidth: '100%' }}>
@@ -270,7 +298,7 @@ const ResumableChaptersAlert = ({
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setMissingDialogEntry(null)} color="inherit">
-            稍后处理
+            {t('audiobook.resumableChaptersAlert.laterAction')}
           </Button>
           <Button
             variant="outlined"
@@ -278,7 +306,7 @@ const ResumableChaptersAlert = ({
             disabled={resumingChapterId !== null || !missingDialogEntry}
             onClick={() => missingDialogEntry && handleOpenVoiceDialog(missingDialogEntry)}
           >
-            换音色重试…
+            {t('audiobook.resumableChaptersAlert.retryWithVoice')}
           </Button>
           <Button
             variant="contained"
@@ -290,8 +318,8 @@ const ResumableChaptersAlert = ({
             sx={audiobookButtonSx.brandContained}
           >
             {missingDialogEntry && resumingChapterId === missingDialogEntry.chapterAudio.chapter_id
-              ? '提交中...'
-              : '重试缺失片段'}
+              ? t('audiobook.resumableChaptersAlert.submittingText')
+              : t('audiobook.resumableChaptersAlert.retryMissingSegments')}
           </Button>
         </DialogActions>
       </Dialog>
@@ -303,23 +331,22 @@ const ResumableChaptersAlert = ({
         maxWidth="sm"
         fullWidth
       >
-        <DialogTitle>换音色恢复</DialogTitle>
+        <DialogTitle>{t('audiobook.resumableChaptersAlert.voiceDialogTitle')}</DialogTitle>
         <DialogContent dividers>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-            为缺失片段涉及的角色指定新音色。“换音色重生成整个角色”会重新合成该角色所有片段（语义正确）；
-            “仅缺失片段临时换色”只重合成失败片段（同角色可能出现两种声音）。
+            {t('audiobook.resumableChaptersAlert.voiceDialogBody')}
           </Typography>
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
             {voiceDialogSpeakers.map((speaker) => (
               <TextField
                 key={speaker}
-                label={`${speaker} 新音色 ID`}
+                label={t('audiobook.resumableChaptersAlert.speakerVoiceIdLabel', { speaker })}
                 size="small"
                 value={voiceOverrides[speaker] || ''}
                 onChange={(e) =>
                   setVoiceOverrides((prev) => ({ ...prev, [speaker]: e.target.value }))
                 }
-                placeholder="输入目标 voice_id"
+                placeholder={t('audiobook.resumableChaptersAlert.voiceIdPlaceholder')}
                 fullWidth
               />
             ))}
@@ -327,7 +354,7 @@ const ResumableChaptersAlert = ({
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setVoiceDialogEntry(null)} color="inherit">
-            取消
+            {t('action.cancel')}
           </Button>
           <Button
             variant="outlined"
@@ -335,7 +362,7 @@ const ResumableChaptersAlert = ({
             disabled={voiceRecoverySubmitting}
             onClick={() => handleVoiceRecoverySubmit('replace_voice_missing')}
           >
-            仅缺失片段临时换色
+            {t('audiobook.resumableChaptersAlert.replaceVoiceMissing')}
           </Button>
           <Button
             variant="contained"
@@ -343,7 +370,9 @@ const ResumableChaptersAlert = ({
             onClick={() => handleVoiceRecoverySubmit('replace_voice_all')}
             sx={audiobookButtonSx.brandContained}
           >
-            {voiceRecoverySubmitting ? '提交中...' : '换音色重生成整个角色'}
+            {voiceRecoverySubmitting
+              ? t('audiobook.resumableChaptersAlert.submittingText')
+              : t('audiobook.resumableChaptersAlert.replaceVoiceAll')}
           </Button>
         </DialogActions>
       </Dialog>

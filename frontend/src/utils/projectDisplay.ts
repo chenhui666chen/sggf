@@ -1,3 +1,5 @@
+import type { TranslateFn } from '@/pages/audiobook/audioLibraryDisplay'
+
 export interface ProjectDisplayInfo {
   id?: number | null
   display_no?: number | null
@@ -19,15 +21,21 @@ export function resolveProjectDisplayNo(
 export function formatProjectSequenceLabel(
   project?: ProjectDisplayInfo | null,
   fallbackId?: number | null,
+  t?: TranslateFn,
 ): string {
   const value = resolveProjectDisplayNo(project, fallbackId)
-  return value ? `项目序号: ${value}` : '项目序号'
+  return value
+    ? (t ? t('dreamweaverRun.projectSequenceValue', { value }) : `项目序号: ${value}`)
+    : (t ? t('dreamweaverRun.projectSequenceLabel') : '项目序号')
 }
 
 export function formatProjectCompactLabel(
   project?: ProjectDisplayInfo | null,
   fallbackId?: number | null,
+  t?: TranslateFn,
 ): string {
   const value = resolveProjectDisplayNo(project, fallbackId)
-  return value ? `项目 #${value}` : '项目'
+  return value
+    ? (t ? t('dreamweaverRun.projectCompactValue', { value }) : `项目 #${value}`)
+    : (t ? t('dreamweaverRun.projectCompactLabel') : '项目')
 }

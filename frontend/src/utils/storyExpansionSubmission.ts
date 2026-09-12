@@ -10,6 +10,7 @@ import {
   shouldConfirmStoryExpansionVolumeOverwrite,
   type StoryExpansionRequestPlan,
 } from './storyExpansionPlanning'
+import type { TFunction } from 'i18next'
 import {
   createStoryExpansionRequestPayloadFromForm,
   createStoryExpansionRequestPlanFromForm,
@@ -56,66 +57,85 @@ export type StoryExpansionConfirmAction = (
   confirmDialog: StoryExpansionConfirmDialogConfig,
 ) => boolean | Promise<boolean>
 
-function getStoryExpansionVolumeLabel(targetVolumeIndex: number | null | undefined): string {
-  return Number.isFinite(targetVolumeIndex) ? `第 ${targetVolumeIndex} 卷` : '当前卷'
+function getStoryExpansionVolumeLabel(
+  targetVolumeIndex: number | null | undefined,
+  t?: TFunction,
+): string {
+  if (!Number.isFinite(targetVolumeIndex)) {
+    return t ? t('storyExpansion.submission.volumeFallback') : '当前卷'
+  }
+  return t ? t('storyExpansion.submission.volumeLabel', { n: targetVolumeIndex }) : `第 ${targetVolumeIndex} 卷`
 }
 
 export function getStoryExpansionVolumeOverwriteConfirmMessage(
   targetVolumeIndex: number | null | undefined,
+  t?: TFunction,
 ): string {
-  return `第${targetVolumeIndex}卷细纲已存在，重新协同生成将覆盖现有细纲。\n\n确认继续吗？`
+  return t
+    ? t('storyExpansion.submission.overwriteMsg', { n: targetVolumeIndex })
+    : `第${targetVolumeIndex}卷细纲已存在，重新协同生成将覆盖现有细纲。\n\n确认继续吗？`
 }
 
-export function getStoryExpansionFrameworkResetConfirmMessage(): string {
-  return '当前项目已存在长篇框架与卷细纲。\n\n继续使用“常规协同”补细化章节会清空旧框架状态，后续将以新的章节大纲为准。\n\n确认继续吗？'
+export function getStoryExpansionFrameworkResetConfirmMessage(t?: TFunction): string {
+  return t
+    ? t('storyExpansion.submission.resetMsg')
+    : '当前项目已存在长篇框架与卷细纲。\n\n继续使用“常规协同”补细化章节会清空旧框架状态，后续将以新的章节大纲为准。\n\n确认继续吗？'
 }
 
-export function getStoryExpansionFrameworkRegenerateConfirmMessage(): string {
-  return '当前项目已存在长篇框架与卷细纲。\n\n继续使用“长篇框架协同”重新生成后，会覆盖现有框架，并清空已展开卷的细纲。\n\n确认继续吗？'
+export function getStoryExpansionFrameworkRegenerateConfirmMessage(t?: TFunction): string {
+  return t
+    ? t('storyExpansion.submission.regenerateMsg')
+    : '当前项目已存在长篇框架与卷细纲。\n\n继续使用“长篇框架协同”重新生成后，会覆盖现有框架，并清空已展开卷的细纲。\n\n确认继续吗？'
 }
 
 export function getStoryExpansionVolumeOverwriteConfirmDialog(
   targetVolumeIndex: number | null | undefined,
+  t?: TFunction,
 ): StoryExpansionConfirmDialogConfig {
-  const volumeLabel = getStoryExpansionVolumeLabel(targetVolumeIndex)
+  const volumeLabel = getStoryExpansionVolumeLabel(targetVolumeIndex, t)
 
   return {
     kind: 'volume_overwrite',
-    title: '覆盖现有细纲',
-    description: `${volumeLabel}已存在细纲。重新协同生成会覆盖当前卷的现有内容。`,
-    detail: `确认后将按当前配置重新生成${volumeLabel}细纲，不影响其他卷。`,
-    confirmLabel: '继续覆盖',
-    cancelLabel: '取消',
-    message: getStoryExpansionVolumeOverwriteConfirmMessage(targetVolumeIndex),
+    title: t ? t('storyExpansion.submission.overwriteTitle') : '覆盖现有细纲',
+    description: t
+      ? t('storyExpansion.submission.overwriteDescription', { volume: volumeLabel })
+      : `${volumeLabel}已存在细纲。重新协同生成会覆盖当前卷的现有内容。`,
+    detail: t
+      ? t('storyExpansion.submission.overwriteDetail', { volume: volumeLabel })
+      : `确认后将按当前配置重新生成${volumeLabel}细纲，不影响其他卷。`,
+    confirmLabel: t ? t('storyExpansion.submission.overwriteConfirm') : '继续覆盖',
+    cancelLabel: t ? t('action.cancel') : '取消',
+    message: getStoryExpansionVolumeOverwriteConfirmMessage(targetVolumeIndex, t),
   }
 }
 
-export function getStoryExpansionFrameworkResetConfirmDialog(): StoryExpansionConfirmDialogConfig {
+export function getStoryExpansionFrameworkResetConfirmDialog(t?: TFunction): StoryExpansionConfirmDialogConfig {
   return {
     kind: 'framework_reset',
-    title: '重置长篇框架状态',
-    description: '当前项目已存在长篇框架与卷细纲。继续使用“常规协同”补细化章节，会清空现有框架状态。',
-    detail: '后续将以新的章节大纲为准，原有卷级细纲需要重新协同生成。',
-    confirmLabel: '继续重置',
-    cancelLabel: '取消',
-    message: getStoryExpansionFrameworkResetConfirmMessage(),
+    title: t ? t('storyExpansion.submission.resetTitle') : '重置长篇框架状态',
+    description: t ? t('storyExpansion.submission.resetDescription') : '当前项目已存在长篇框架与卷细纲。继续使用“常规协同”补细化章节，会清空现有框架状态。',
+    detail: t ? t('storyExpansion.submission.resetDetail') : '后续将以新的章节大纲为准，原有卷级细纲需要重新协同生成。',
+    confirmLabel: t ? t('storyExpansion.submission.resetConfirm') : '继续重置',
+    cancelLabel: t ? t('action.cancel') : '取消',
+    message: getStoryExpansionFrameworkResetConfirmMessage(t),
   }
 }
 
-export function getStoryExpansionFrameworkRegenerateConfirmDialog(): StoryExpansionConfirmDialogConfig {
+export function getStoryExpansionFrameworkRegenerateConfirmDialog(t?: TFunction): StoryExpansionConfirmDialogConfig {
   return {
     kind: 'framework_regenerate',
-    title: '重新生成长篇框架',
-    description: '当前项目已存在长篇框架与卷细纲。继续重新生成会覆盖现有框架，并清空已展开卷的细纲。',
-    detail: '成功后将以新的分卷框架为准，原有单卷细化内容需要按新框架重新生成。',
-    confirmLabel: '继续重生成',
-    cancelLabel: '取消',
-    message: getStoryExpansionFrameworkRegenerateConfirmMessage(),
+    title: t ? t('storyExpansion.submission.regenerateTitle') : '重新生成长篇框架',
+    description: t ? t('storyExpansion.submission.regenerateDescription') : '当前项目已存在长篇框架与卷细纲。继续重新生成会覆盖现有框架，并清空已展开卷的细纲。',
+    detail: t ? t('storyExpansion.submission.regenerateDetail') : '成功后将以新的分卷框架为准，原有单卷细化内容需要按新框架重新生成。',
+    confirmLabel: t ? t('storyExpansion.submission.regenerateConfirm') : '继续重生成',
+    cancelLabel: t ? t('action.cancel') : '取消',
+    message: getStoryExpansionFrameworkRegenerateConfirmMessage(t),
   }
 }
 
 export function createStoryExpansionSubmitPreflight(
   input: StoryExpansionSubmitPreflightInput,
+  t?: TFunction,
 ): StoryExpansionSubmitPreflight {
   const requestPlan = createStoryExpansionRequestPlanFromForm(input)
 
@@ -148,15 +168,15 @@ export function createStoryExpansionSubmitPreflight(
   const confirmDialogs: StoryExpansionConfirmDialogConfig[] = []
 
   if (requiresVolumeOverwriteConfirm) {
-    confirmDialogs.push(getStoryExpansionVolumeOverwriteConfirmDialog(input.form.targetVolumeIndex))
+    confirmDialogs.push(getStoryExpansionVolumeOverwriteConfirmDialog(input.form.targetVolumeIndex, t))
   }
 
   if (requiresResetFrameworkConfirm) {
-    confirmDialogs.push(getStoryExpansionFrameworkResetConfirmDialog())
+    confirmDialogs.push(getStoryExpansionFrameworkResetConfirmDialog(t))
   }
 
   if (requiresFrameworkRegenerateConfirm) {
-    confirmDialogs.push(getStoryExpansionFrameworkRegenerateConfirmDialog())
+    confirmDialogs.push(getStoryExpansionFrameworkRegenerateConfirmDialog(t))
   }
 
   return {

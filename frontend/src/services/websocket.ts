@@ -357,18 +357,13 @@ class WorkflowWebSocket {
       return
     }
 
-    const token = localStorage.getItem('access_token')
-    if (!token) {
-      return
-    }
-
+    // P2-4.5 收尾：认证来自握手 httpOnly cookie（后端 join_project 从 sid 会话取用户）
     if (previousProjectId && previousProjectId !== projectId) {
       socket.emit('leave_project', { project_id: previousProjectId })
     }
 
     socket.emit('join_project', {
       project_id: projectId,
-      token,
     })
   }
 
@@ -400,10 +395,7 @@ class WorkflowWebSocket {
       return
     }
 
-    const token = localStorage.getItem('access_token')
-    if (!token) {
-      return
-    }
+    // P2-4.5 收尾：认证来自握手 httpOnly cookie（后端 join_audiobook 从 sid 会话取用户）
     if (
       previousAudiobookProjectId
       && previousAudiobookProjectId !== audiobookProjectId
@@ -414,7 +406,6 @@ class WorkflowWebSocket {
     }
     socket.emit('join_audiobook', {
       audiobook_project_id: audiobookProjectId,
-      token,
     })
   }
 

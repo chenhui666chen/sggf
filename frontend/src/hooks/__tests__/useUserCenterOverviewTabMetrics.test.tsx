@@ -88,13 +88,13 @@ describe('useUserCenterOverviewTabMetrics', () => {
     expect(metrics.pendingLedgerSourceCount).toBe(2)
     expect(metrics.pointsAccountBalance).toBe(120)
     expect(metrics.pointsAccountStatusMeta).toEqual({
-      label: '已接入账本',
-      description: '已有真实积分账本与任务计费链路接入用户中心，后续会继续扩展更多消费和权益来源。',
+      label: 'userCenter.points.statusConnectedLedger',
+      description: 'userCenter.points.statusConnectedLedgerDesc',
       color: 'info',
     })
     expect(metrics.pricingPolicyPresentation).toEqual(expect.objectContaining({
-      sourceLabel: '后台定价快照',
-      updatedAtLabel: '最近调整：FMT(2026-04-24T00:00:00Z)',
+      sourceLabel: 'userCenter.points.sourceAdmin',
+      updatedAtLabel: 'userCenter.points.adjustedAt',
     }))
   })
 })

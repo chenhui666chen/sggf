@@ -18,7 +18,7 @@ export default function UserAssetOverviewMetrics(props: UserAssetOverviewMetrics
     <Grid container spacing={2}>
       {metrics.map((metric) => (
         <Grid key={metric.key} item xs={12} md={4}>
-          <Card variant="outlined" sx={{ height: '100%', borderRadius: 3, borderColor: 'rgba(15, 23, 42, 0.08)' }}>
+          <Card variant="outlined" sx={{ height: '100%', borderRadius: 3, borderColor: 'divider' }}>
             <CardContent>
               <Typography variant="body2" color="text.secondary">
                 {metric.title}

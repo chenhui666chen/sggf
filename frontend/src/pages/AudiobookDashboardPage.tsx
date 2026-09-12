@@ -43,7 +43,8 @@ import LogoutIcon from '@mui/icons-material/Logout'
 import SearchIcon from '@mui/icons-material/Search'
 import ScienceIcon from '@mui/icons-material/Science'
 import { useDispatch } from 'react-redux'
-import { logout } from '@/store/slices/authSlice'
+import { performLogout } from '@/store/slices/authSlice'
+import type { AppDispatch } from '@/store/store'
 import ChapterDrawer from '@/components/audiobook/ChapterDrawer'
 import ProjectCard from '@/components/audiobook/ProjectCard'
 import useAudiobookChapterDrawer from '@/hooks/useAudiobookChapterDrawer'
@@ -58,10 +59,16 @@ import type {
   DeletedAudiobookProject,
   Project,
 } from '@/types/audiobook'
+import { useFormats } from '@/i18n'
+import { useTranslation } from 'react-i18next'
 
 const AudiobookDashboardPage = () => {
+  const { t } = useTranslation()
+  // 只解构 formatDateTime：下面已有一个本地 formatTime（把秒数渲染成时长），
+  // 与 useFormats 的 formatTime（把时间戳渲染成时刻）同名但语义相反，不能被遮蔽。
+  const { formatDateTime } = useFormats()
   const navigate = useNavigate()
-  const dispatch = useDispatch()
+  const dispatch = useDispatch<AppDispatch>()
   
   // 状态管理
   const [projects, setProjects] = useState<Project[]>([])
@@ -120,7 +127,7 @@ const AudiobookDashboardPage = () => {
       const res = await apiClient.getProjects()
       setProjects(res.data)
     } catch {
-      setSnackbar({ open: true, message: '网络错误，无法加载项目列表', severity: 'error' })
+      setSnackbar({ open: true, message: t('audiobook.audiobookDashboard.snackbarLoadProjectsFailed'), severity: 'error' })
     } finally {
       setLoading(false)
     }
@@ -173,7 +180,7 @@ const AudiobookDashboardPage = () => {
     } catch (error: any) {
       setSnackbar({
         open: true,
-        message: await extractApiErrorMessage(error, '加载回收站失败，请稍后重试'),
+        message: await extractApiErrorMessage(error, t('audiobook.audiobookDashboard.snackbarRecycleBinLoadFailed')),
         severity: 'error',
       })
     } finally {
@@ -190,13 +197,13 @@ const AudiobookDashboardPage = () => {
     setRestoringAudiobookProjectId(audiobookProjectId)
     try {
       await apiClient.restoreAudiobookProject(audiobookProjectId)
-      setSnackbar({ open: true, message: '已恢复到项目列表', severity: 'success' })
+      setSnackbar({ open: true, message: t('audiobook.audiobookDashboard.snackbarProjectRestored'), severity: 'success' })
       await fetchRecycleBinEntries()
       await fetchProjects()
     } catch (error: any) {
       setSnackbar({
         open: true,
-        message: await extractApiErrorMessage(error, '恢复失败，请稍后重试'),
+        message: await extractApiErrorMessage(error, t('audiobook.audiobookDashboard.snackbarRestoreProjectFailed')),
         severity: 'error',
       })
     } finally {
@@ -208,7 +215,7 @@ const AudiobookDashboardPage = () => {
     setRestoringChapterAudioId(chapterAudioId)
     try {
       await apiClient.restoreChapterAudio(chapterAudioId)
-      setSnackbar({ open: true, message: '章节音频已恢复', severity: 'success' })
+      setSnackbar({ open: true, message: t('audiobook.audiobookDashboard.snackbarChapterAudioRestored'), severity: 'success' })
       if (chapterDrawer.open) {
         await chapterDrawer.refresh()
       }
@@ -216,7 +223,7 @@ const AudiobookDashboardPage = () => {
     } catch (error: any) {
       setSnackbar({
         open: true,
-        message: await extractApiErrorMessage(error, '恢复章节音频失败，请稍后重试'),
+        message: await extractApiErrorMessage(error, t('audiobook.audiobookDashboard.snackbarRestoreChapterAudioFailed')),
         severity: 'error',
       })
     } finally {
@@ -234,7 +241,7 @@ const AudiobookDashboardPage = () => {
     setProjectImpact({
       chapters: audiobookProject.total_chapters || chapterDrawer.chapters.length,
       audioFiles: audiobookProject.chapter_audios?.filter((a) => Boolean(a.audio_path)).length || 0,
-      totalSize: '计算中...',
+      totalSize: t('audiobook.audiobookDashboard.sizeCalculating'),
     })
     setDeleteDialogOpen(true)
   }
@@ -245,14 +252,14 @@ const AudiobookDashboardPage = () => {
     setLoadingDelete(true)
     try {
       await apiClient.deleteAudiobookProject(audiobookProjectIdToDelete, { delete_files: true })
-      setSnackbar({ open: true, message: '有声书已成功删除', severity: 'success' })
+      setSnackbar({ open: true, message: t('audiobook.audiobookDashboard.snackbarAudiobookDeleted'), severity: 'success' })
       setDeleteDialogOpen(false)
       chapterDrawer.closeDrawer()
       await fetchProjects()
     } catch (error: any) {
       setSnackbar({
         open: true,
-        message: await extractApiErrorMessage(error, '删除有声书失败，请稍后重试'),
+        message: await extractApiErrorMessage(error, t('audiobook.audiobookDashboard.snackbarDeleteAudiobookFailed')),
         severity: 'error',
       })
     } finally {
@@ -276,13 +283,13 @@ const AudiobookDashboardPage = () => {
         await chapterDrawer.refresh()
       }
 
-      setSnackbar({ open: true, message: '章节音频已删除', severity: 'success' })
+      setSnackbar({ open: true, message: t('audiobook.audiobookDashboard.snackbarChapterAudioDeleted'), severity: 'success' })
       setDeleteChapterDialogOpen(false)
       setChapterAudioToDelete(null)
     } catch (error: any) {
       setSnackbar({
         open: true,
-        message: await extractApiErrorMessage(error, '删除章节音频失败，请稍后重试'),
+        message: await extractApiErrorMessage(error, t('audiobook.audiobookDashboard.snackbarDeleteChapterAudioFailed')),
         severity: 'error',
       })
     } finally {
@@ -326,7 +333,7 @@ const AudiobookDashboardPage = () => {
     setOpeningProjectId(project.id)
     setSnackbar({
       open: true,
-      message: '正在进入项目配置，首次加载可能需要几秒，请稍候',
+      message: t('audiobook.audiobookDashboard.snackbarEnteringProject'),
       severity: 'info',
     })
     preloadAudiobookPage()
@@ -341,14 +348,14 @@ const AudiobookDashboardPage = () => {
   }
 
   const handleLogout = () => {
-    dispatch(logout())
+    dispatch(performLogout())
     navigate('/login')
   }
 
   const handleBookUploadSuccess = (book: BookSource) => {
     setSnackbar({
       open: true,
-      message: `书籍《${book.title}》已上传、完成拆书分析并自动导入灵感方舟，可继续用于有声书改编`,
+      message: t('audiobook.audiobookDashboard.snackbarBookUploaded', { title: book.title }),
       severity: 'success',
     })
   }
@@ -384,7 +391,7 @@ const AudiobookDashboardPage = () => {
                   backgroundColor: 'rgba(255,255,255,0.1)',
                   '&:hover': { backgroundColor: 'rgba(255,255,255,0.2)' },
                 }}
-                title="返回创作工坊"
+                title={t('dashboard.backToStudio')}
               >
                 <ArrowBackIcon />
               </IconButton>
@@ -395,13 +402,13 @@ const AudiobookDashboardPage = () => {
                     variant="h5"
                     sx={{ color: 'white', fontWeight: 700, letterSpacing: '0.5px' }}
                   >
-                    耳畔星河
+                    {t('audiobook.audiobookPageHeader.productName')}
                   </Typography>
                   <Typography
                     variant="body2"
                     sx={{ color: 'rgba(255,255,255,0.8)', fontSize: '0.85rem' }}
                   >
-                    有声小说创作 · 管理您的有声项目
+                    {t('audiobook.audiobookDashboard.tagline')}
                   </Typography>
                 </Box>
               </Box>
@@ -422,7 +429,7 @@ const AudiobookDashboardPage = () => {
                   },
                 }}
               >
-                TTS 测试
+                {t('audiobook.audiobookDashboard.ttsTest')}
               </Button>
               <Button
                 variant="outlined"
@@ -437,7 +444,7 @@ const AudiobookDashboardPage = () => {
                   },
                 }}
               >
-                回收站
+                {t('audiobook.audiobookDashboard.recycleBin')}
               </Button>
               <Button
                 variant="outlined"
@@ -452,7 +459,7 @@ const AudiobookDashboardPage = () => {
                   },
                 }}
               >
-                退出登录
+                {t('shell.account.logout')}
               </Button>
             </Box>
           </Box>
@@ -471,7 +478,7 @@ const AudiobookDashboardPage = () => {
           }}
         >
           <TextField
-            placeholder="搜索项目..."
+            placeholder={t('audiobook.audiobookDashboard.searchProjects')}
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             size="small"
@@ -499,7 +506,7 @@ const AudiobookDashboardPage = () => {
           {genres.length > 0 && (
             <Box sx={{ mt: 1.5, display: 'flex', gap: 1, flexWrap: 'wrap' }}>
               <Chip
-                label="全部"
+                label={t('audiobook.audiobookDashboard.filterAll')}
                 onClick={() => setSelectedGenre('all')}
                 sx={{
                   cursor: 'pointer',
@@ -545,10 +552,10 @@ const AudiobookDashboardPage = () => {
               >
                 <HeadphonesIcon sx={{ fontSize: 64, color: 'rgba(255,255,255,0.85)', mb: 2 }} />
                 <Typography variant="h6" sx={{ mb: 1, color: 'rgba(255,255,255,0.92)' }}>
-                  {searchQuery ? '未找到匹配的项目' : '暂无项目'}
+                  {searchQuery ? t('audiobook.audiobookDashboard.emptySearchTitle') : t('audiobook.audiobookDashboard.emptyTitle')}
                 </Typography>
                 <Typography variant="body2" sx={{ mb: 3, color: 'rgba(255,255,255,0.75)' }}>
-                  {searchQuery ? '请尝试其他搜索关键词' : '请先创建小说项目'}
+                  {searchQuery ? t('audiobook.audiobookDashboard.emptySearchHint') : t('audiobook.audiobookDashboard.emptyHint')}
                 </Typography>
                 {!searchQuery && (
                   <Button
@@ -562,7 +569,7 @@ const AudiobookDashboardPage = () => {
                       '&:hover': { backgroundColor: 'rgba(255,255,255,0.9)' },
                     }}
                   >
-                    创建第一个项目
+                    {t('audiobook.audiobookDashboard.createFirstProject')}
                   </Button>
                 )}
               </Box>
@@ -663,7 +670,7 @@ const AudiobookDashboardPage = () => {
                             mb: 0.5,
                           }}
                         >
-                          新建有声项目
+                          {t('audiobook.audiobookDashboard.newProject')}
                         </Typography>
                         <Typography
                           sx={{
@@ -671,7 +678,7 @@ const AudiobookDashboardPage = () => {
                             fontSize: '0.85rem',
                           }}
                         >
-                          上传书籍创建项目
+                          {t('audiobook.audiobookDashboard.newProjectHint')}
                         </Typography>
                       </Box>
                     </CardContent>
@@ -692,7 +699,7 @@ const AudiobookDashboardPage = () => {
         maxWidth="md"
         fullWidth
       >
-        <DialogTitle>回收站</DialogTitle>
+        <DialogTitle>{t('audiobook.audiobookDashboard.recycleBin')}</DialogTitle>
         <DialogContent dividers>
           {recycleBinLoading ? (
             <Box sx={{ py: 2, display: 'flex', justifyContent: 'center' }}>
@@ -700,14 +707,14 @@ const AudiobookDashboardPage = () => {
             </Box>
           ) : !hasRecycleBinItems ? (
             <Alert severity="info" sx={{ mt: 1 }}>
-              暂无已删除的有声书记录。
+              {t('audiobook.audiobookDashboard.recycleBinEmpty')}
             </Alert>
           ) : (
             <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
               {deletedAudiobookProjects.length > 0 ? (
                 <Box>
                   <Typography variant="subtitle2" sx={{ mb: 0.5, fontWeight: 700 }}>
-                    已删除有声书项目
+                    {t('audiobook.audiobookDashboard.deletedProjectsSection')}
                   </Typography>
                   <List dense disablePadding>
                     {deletedAudiobookProjects.map((item) => (
@@ -727,23 +734,23 @@ const AudiobookDashboardPage = () => {
                               ) : undefined
                             }
                           >
-                            恢复
+                            {t('trash.restore')}
                           </Button>
                         }
                       >
                         <ListItemText
-                          primary={item.project_title ? `《${item.project_title}》` : `有声书项目 #${item.id}`}
+                          primary={item.project_title ? `《${item.project_title}》` : t('audiobook.audiobookDashboard.audiobookProjectFallback', { id: item.id })}
                           secondary={
                             <>
                               <Typography variant="caption" color="text.secondary" display="block">
-                                删除时间：{item.deleted_at ? new Date(item.deleted_at).toLocaleString() : '未知'}
+                                {t('audiobook.audiobookDashboard.deletedAt', { time: item.deleted_at ? formatDateTime(item.deleted_at) : t('userCenter.records.unknown') })}
                               </Typography>
                               <Typography variant="caption" color="text.secondary" display="block">
-                                影响：{item.affected_chapters ?? 0} 章 · {formatBytes(item.total_size ?? 0)}
+                                {t('audiobook.audiobookDashboard.impactLine', { count: item.affected_chapters ?? 0, size: formatBytes(item.total_size ?? 0) })}
                               </Typography>
                               {item.delete_reason ? (
                                 <Typography variant="caption" color="text.secondary" display="block">
-                                  原因：{item.delete_reason}
+                                  {t('audiobook.audiobookDashboard.reasonLine', { reason: item.delete_reason })}
                                 </Typography>
                               ) : null}
                             </>
@@ -760,7 +767,7 @@ const AudiobookDashboardPage = () => {
               {deletedChapterAudios.length > 0 ? (
                 <Box>
                   <Typography variant="subtitle2" sx={{ mb: 0.5, fontWeight: 700 }}>
-                    已删除章节音频
+                    {t('audiobook.audiobookDashboard.deletedChapterAudiosSection')}
                   </Typography>
                   <List dense disablePadding>
                     {deletedChapterAudios.map((item) => (
@@ -780,30 +787,30 @@ const AudiobookDashboardPage = () => {
                               ) : undefined
                             }
                           >
-                            恢复
+                            {t('trash.restore')}
                           </Button>
                         }
                       >
                         <ListItemText
                           primary={
                             item.chapter_title
-                              ? `第${item.chapter_number ?? '?'}章 ${item.chapter_title}`
-                              : `章节音频 #${item.chapter_audio_id}`
+                              ? t('audiobook.audiobookDashboard.chapterWithNumber', { number: item.chapter_number ?? '?', title: item.chapter_title })
+                              : t('audiobook.audiobookDashboard.chapterAudioFallback', { id: item.chapter_audio_id })
                           }
                           secondary={
                             <>
                               <Typography variant="caption" color="text.secondary" display="block">
-                                所属项目：{item.project_title ? `《${item.project_title}》` : `项目 #${item.project_id ?? '-'}`}
+                                {t('audiobook.audiobookDashboard.ownedProject', { name: item.project_title ? `《${item.project_title}》` : t('audiobook.audiobookDashboard.projectFallback', { id: item.project_id ?? '-' }) })}
                               </Typography>
                               <Typography variant="caption" color="text.secondary" display="block">
-                                删除时间：{item.deleted_at ? new Date(item.deleted_at).toLocaleString() : '未知'}
+                                {t('audiobook.audiobookDashboard.deletedAt', { time: item.deleted_at ? formatDateTime(item.deleted_at) : t('userCenter.records.unknown') })}
                               </Typography>
                               <Typography variant="caption" color="text.secondary" display="block">
-                                音频：{formatTime(item.duration ?? 0)} · {formatBytes(item.total_size ?? item.file_size ?? 0)}
+                                {t('audiobook.audiobookDashboard.audioLine', { duration: formatTime(item.duration ?? 0), size: formatBytes(item.total_size ?? item.file_size ?? 0) })}
                               </Typography>
                               {item.delete_reason ? (
                                 <Typography variant="caption" color="text.secondary" display="block">
-                                  原因：{item.delete_reason}
+                                  {t('audiobook.audiobookDashboard.reasonLine', { reason: item.delete_reason })}
                                 </Typography>
                               ) : null}
                             </>
@@ -822,7 +829,7 @@ const AudiobookDashboardPage = () => {
             onClick={() => setRecycleBinOpen(false)}
             disabled={recycleBinBusy}
           >
-            关闭
+            {t('action.close')}
           </Button>
         </DialogActions>
       </Dialog>
@@ -874,34 +881,34 @@ const AudiobookDashboardPage = () => {
         fullWidth
       >
         <DialogTitle sx={{ color: '#f44336' }}>
-          删除有声书确认
+          {t('audiobook.audiobookDashboard.deleteAudiobookTitle')}
         </DialogTitle>
         <DialogContent>
           <Alert severity="warning" sx={{ mb: 2 }}>
-            此操作将删除 "{projectToDelete?.title}" 的整本有声书（含相关音频文件），此操作不可恢复！
+            {t('audiobook.audiobookDashboard.deleteAudiobookWarning', { title: projectToDelete?.title ?? '' })}
           </Alert>
 
           {projectImpact && (
             <Paper variant="outlined" sx={{ p: 2, mb: 2, backgroundColor: 'rgba(255, 152, 0, 0.05)' }}>
               <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 1 }}>
-                删除影响范围：
+                {t('audiobook.audiobookDashboard.impactScope')}
               </Typography>
               <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
                 <Typography variant="body2">
-                  • 章节数量：{projectImpact.chapters} 章
+                  {t('audiobook.audiobookDashboard.chapterCount', { count: projectImpact.chapters })}
                 </Typography>
                 <Typography variant="body2">
-                  • 已生成音频：{projectImpact.audioFiles} 个
+                  {t('audiobook.audiobookDashboard.audioFileCount', { count: projectImpact.audioFiles })}
                 </Typography>
                 <Typography variant="body2">
-                  • 音频文件大小：{projectImpact.totalSize}
+                  {t('audiobook.audiobookDashboard.audioFileSize', { size: projectImpact.totalSize })}
                 </Typography>
               </Box>
             </Paper>
           )}
 
           <Alert severity="info" sx={{ mt: 1 }}>
-            将默认同时删除音频文件（不可恢复）。
+            {t('audiobook.audiobookDashboard.deleteFilesNote')}
           </Alert>
         </DialogContent>
         <DialogActions>
@@ -909,7 +916,7 @@ const AudiobookDashboardPage = () => {
             onClick={() => setDeleteDialogOpen(false)}
             disabled={loadingDelete}
           >
-            取消
+            {t('action.cancel')}
           </Button>
           <Button
             onClick={handleDeleteAudiobook}
@@ -920,7 +927,7 @@ const AudiobookDashboardPage = () => {
               '&:hover': { backgroundColor: '#d32f2f' },
             }}
           >
-            {loadingDelete ? <CircularProgress size={20} color="inherit" /> : '确认删除'}
+            {loadingDelete ? <CircularProgress size={20} color="inherit" /> : t('dashboard.confirmDelete')}
           </Button>
         </DialogActions>
       </Dialog>
@@ -932,15 +939,15 @@ const AudiobookDashboardPage = () => {
         maxWidth="xs"
         fullWidth
       >
-        <DialogTitle sx={{ color: '#f44336' }}>删除章节音频确认</DialogTitle>
+        <DialogTitle sx={{ color: '#f44336' }}>{t('audiobook.audiobookDashboard.deleteChapterAudioTitle')}</DialogTitle>
         <DialogContent>
           <Alert severity="warning">
-            将删除第{chapterAudioToDelete?.chapterNumber}章《{chapterAudioToDelete?.chapterTitle}》的音频文件，此操作不可恢复！
+            {t('audiobook.audiobookDashboard.deleteChapterAudioWarning', { number: chapterAudioToDelete?.chapterNumber, title: chapterAudioToDelete?.chapterTitle })}
           </Alert>
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setDeleteChapterDialogOpen(false)} disabled={loadingDeleteChapter}>
-            取消
+            {t('action.cancel')}
           </Button>
           <Button
             onClick={handleDeleteChapterAudio}
@@ -948,7 +955,7 @@ const AudiobookDashboardPage = () => {
             disabled={loadingDeleteChapter}
             sx={{ backgroundColor: '#f44336', '&:hover': { backgroundColor: '#d32f2f' } }}
           >
-            {loadingDeleteChapter ? <CircularProgress size={20} color="inherit" /> : '确认删除'}
+            {loadingDeleteChapter ? <CircularProgress size={20} color="inherit" /> : t('dashboard.confirmDelete')}
           </Button>
         </DialogActions>
       </Dialog>

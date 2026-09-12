@@ -1,7 +1,31 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
 
 import ReviewMetaPanel, { extractSourceModels } from '../workflow/ReviewMetaPanel'
+
+// 组件已 i18n 化：mock useTranslation，返回 zh 映射（未映射的 key 原样返回）
+vi.mock('react-i18next', () => ({
+  useTranslation: () => {
+    const zhMap: Record<string, string> = {
+      'workflow.reviewMeta.multiModel': '多模型评审',
+      'workflow.reviewMeta.singleFallback': '单模型回退',
+      'workflow.reviewMeta.chiefModel': '主审 {{model}}',
+      'workflow.reviewMeta.chiefReused': '主审参与独立评审',
+      'workflow.reviewMeta.consensus': '一致意见',
+      'workflow.reviewMeta.divergence': '分歧意见',
+      'workflow.reviewMeta.fallbackDefaultReason': '多模型评审未产出足够结果，已回退单模型评审',
+      'workflow.reviewMeta.participantModels': '参与模型',
+      'workflow.reviewMeta.sourceModels': 'source_models',
+      'workflow.reviewMeta.presetBalanced3': '普通增强 3 评审',
+      'workflow.reviewMeta.presetKeyChapter5': '重点章节 5 评审',
+      'workflow.reviewMeta.presetDeep7': '深度 7 评审',
+    }
+    return {
+      t: (key: string, params?: Record<string, string>) =>
+        (zhMap[key] ?? key).replace(/\{\{(\w+)\}\}/g, (_, name: string) => params?.[name] || ''),
+    }
+  },
+}))
 
 function visibleText(markup: string): string {
   return markup

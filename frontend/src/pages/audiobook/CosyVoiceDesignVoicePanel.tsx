@@ -8,6 +8,8 @@ import {
   Typography,
 } from '@mui/material'
 
+import { useTranslation } from 'react-i18next'
+
 import { audiobookButtonSx } from './audiobookTheme'
 
 interface CosyVoiceDesignVoicePanelProps {
@@ -39,6 +41,7 @@ const CosyVoiceDesignVoicePanel = ({
   onCreateDesignVoice,
   onPreviewDesignVoice,
 }: CosyVoiceDesignVoicePanelProps) => {
+  const { t } = useTranslation()
   const hasDesignPreviewTarget = Boolean(designPreviewAudioUrl.trim() || designPreviewVoiceId.trim())
 
   return (
@@ -52,10 +55,10 @@ const CosyVoiceDesignVoicePanel = ({
     >
       <Box sx={{ minWidth: 0, maxWidth: 720 }}>
         <Typography variant="subtitle1" sx={{ fontWeight: 800, lineHeight: 1.25 }}>
-          声音设计
+          {t('audiobook.cosyVoiceDesignVoicePanel.title')}
         </Typography>
         <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5, lineHeight: 1.75 }}>
-          用文字描述声线、年龄感和情绪，生成后使用默认角色试听文本试听。
+          {t('audiobook.cosyVoiceDesignVoicePanel.description')}
         </Typography>
       </Box>
 
@@ -72,7 +75,7 @@ const CosyVoiceDesignVoicePanel = ({
         <TextField
           size="small"
           fullWidth
-          label="设计名称"
+          label={t('audiobook.cosyVoiceDesignVoicePanel.nameLabel')}
           value={designName}
           onChange={(event) => onDesignNameChange(event.target.value)}
           disabled={busy}
@@ -92,7 +95,7 @@ const CosyVoiceDesignVoicePanel = ({
           startIcon={designLoading ? <CircularProgress size={18} color="inherit" /> : undefined}
           sx={{ ...audiobookButtonSx.brandContained, minHeight: 40 }}
         >
-          {designLoading ? '设计中...' : hasDesignPreviewTarget ? '试听' : '开始设计'}
+          {designLoading ? t('audiobook.cosyVoiceDesignVoicePanel.designing') : hasDesignPreviewTarget ? t('audiobook.cosyVoiceDesignVoicePanel.preview') : t('audiobook.cosyVoiceDesignVoicePanel.startDesign')}
         </Button>
         <TextField
           size="small"
@@ -100,8 +103,8 @@ const CosyVoiceDesignVoicePanel = ({
           multiline
           minRows={3}
           maxRows={5}
-          label="声音描述"
-          placeholder="如：沉稳的中年男性播报员，语速平稳，富有磁性。"
+          label={t('audiobook.cosyVoiceDesignVoicePanel.promptLabel')}
+          placeholder={t('audiobook.cosyVoiceDesignVoicePanel.promptPlaceholder')}
           value={designPrompt}
           onChange={(event) => onDesignPromptChange(event.target.value)}
           disabled={busy}

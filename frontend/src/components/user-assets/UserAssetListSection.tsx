@@ -11,6 +11,7 @@ import {
   Stack,
   Typography,
 } from '@mui/material'
+import { useTranslation } from 'react-i18next'
 
 import UserAssetBatchToolbar, {
   type UserAssetBatchToolbarProps,
@@ -47,6 +48,7 @@ export type UserAssetListSectionProps = {
 }
 
 export default function UserAssetListSection(props: UserAssetListSectionProps) {
+  const { t } = useTranslation()
   const {
     filterToolbar,
     batchToolbar,
@@ -92,7 +94,13 @@ export default function UserAssetListSection(props: UserAssetListSectionProps) {
               <CardContent>
                 <Stack direction={{ xs: 'column', md: 'row' }} spacing={2} justifyContent="space-between" alignItems={{ xs: 'flex-start', md: 'center' }}>
                   <Typography variant="body2" color="text.secondary">
-                    {`第 ${pagination.page} / ${Math.max(pagination.totalPages, 1)} 页，共 ${pagination.totalItems} 条，当前展示 ${pagination.currentPageCount} 条，每页 ${pagination.pageSize} 条`}
+                    {t('userAsset.list.pagination', {
+                      page: pagination.page,
+                      totalPages: Math.max(pagination.totalPages, 1),
+                      totalItems: pagination.totalItems,
+                      currentPageCount: pagination.currentPageCount,
+                      pageSize: pagination.pageSize,
+                    })}
                   </Typography>
                   <Pagination
                     color="primary"

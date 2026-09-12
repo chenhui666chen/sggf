@@ -1,7 +1,10 @@
 import type { ChipProps } from '@mui/material'
+import type { TFunction } from 'i18next'
 
 import type { UserAssetSourceInfo } from '@/contracts/userAssetSourceReaders'
 import type { UserAssetRecord } from '@/services/api'
+
+const DEFAULT_TRANSLATE: TFunction = ((key: string) => key) as TFunction
 
 export type UserAssetCardChipSpec = {
   key: string
@@ -50,7 +53,9 @@ export function buildUserAssetCardPresentation(
   >,
   sourceInfo: UserAssetSourceInfo,
   options: BuildUserAssetCardPresentationOptions,
+  t?: TFunction,
 ): UserAssetCardPresentation {
+  const translate = t ?? DEFAULT_TRANSLATE
   const headerChips: UserAssetCardChipSpec[] = [
     {
       key: `asset-kind-${asset.id}`,
@@ -58,12 +63,12 @@ export function buildUserAssetCardPresentation(
     },
     {
       key: `asset-class-${asset.id}`,
-      label: asset.asset_class === 'deliverable' ? '成品资产' : '可复用素材',
+      label: asset.asset_class === 'deliverable' ? translate('userAsset.card.deliverable') : translate('userAsset.card.reusable'),
       color: asset.asset_class === 'deliverable' ? 'warning' : 'secondary',
     },
     {
       key: `asset-source-${asset.id}`,
-      label: `来源：${sourceInfo.label}`,
+      label: translate('userAsset.card.sourcePrefix', { source: sourceInfo.label }),
       variant: 'outlined',
     },
   ]
@@ -71,7 +76,7 @@ export function buildUserAssetCardPresentation(
   if (asset.is_favorite) {
     headerChips.push({
       key: `asset-favorite-${asset.id}`,
-      label: '重点资产',
+      label: translate('userAsset.card.favorite'),
       color: 'primary',
     })
   }
@@ -79,7 +84,7 @@ export function buildUserAssetCardPresentation(
   if (asset.archived_at) {
     headerChips.push({
       key: `asset-archived-${asset.id}`,
-      label: '已归档',
+      label: translate('userAsset.card.archived'),
       variant: 'outlined',
     })
   }
@@ -115,7 +120,7 @@ export function buildUserAssetCardPresentation(
   if (showRestoreLocalAction) {
     detailChips.push({
       key: `asset-local-restore-${asset.id}`,
-      label: '本地副本待恢复',
+      label: translate('userAsset.card.localRestorePending'),
       color: 'warning',
     })
   }
@@ -123,34 +128,34 @@ export function buildUserAssetCardPresentation(
   return {
     headerChips,
     detailChips,
-    description: asset.description?.trim() || '当前资产尚未补充说明，可以在用户中心内完善标题、描述和标签。',
+    description: asset.description?.trim() || translate('userAsset.card.noDescription'),
     sourceSummary: sourceInfo.summary,
-    selectionLabel: '纳入批量操作',
-    createdAtLabel: `收录时间：${options.createdAtLabel}`,
+    selectionLabel: translate('userAsset.card.selection'),
+    createdAtLabel: translate('userAsset.card.createdAt', { time: options.createdAtLabel }),
     sourceAction: sourceInfo.backPath
       ? {
-          label: sourceInfo.backLabel || '查看来源',
+          label: sourceInfo.backLabel || translate('userAsset.common.viewSource'),
           path: sourceInfo.backPath,
         }
       : null,
     restoreLocalAction: showRestoreLocalAction
       ? {
-          label: '重新收录到本地',
+          label: translate('userAsset.card.restoreLocal'),
         }
       : null,
     clearLocalAction: asset.storage_mode === 'local_mirror' && asset.asset_uuid.trim()
       ? {
-          label: '清理本地副本',
+          label: translate('userAsset.card.clearLocal'),
         }
       : null,
     editAction: {
-      label: '编辑信息',
+      label: translate('userAsset.card.edit'),
     },
     favoriteAction: {
-      label: asset.is_favorite ? '取消重点' : '设为重点',
+      label: asset.is_favorite ? translate('userAsset.card.unFavorite') : translate('userAsset.card.favoriteAction'),
     },
     archiveAction: {
-      label: asset.archived_at ? '恢复活跃' : '归档',
+      label: asset.archived_at ? translate('userAsset.card.restoreActive') : translate('userAsset.card.archive'),
     },
   }
 }

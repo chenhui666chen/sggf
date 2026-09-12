@@ -6,6 +6,7 @@ import DescriptionIcon from '@mui/icons-material/Description'
 import RefreshIcon from '@mui/icons-material/Refresh'
 import AddIcon from '@mui/icons-material/Add'
 import DeleteIcon from '@mui/icons-material/Delete'
+import { useTranslation } from 'react-i18next'
 import { apiClient } from '@/services/api'
 import type {
   SettingItem,
@@ -36,6 +37,7 @@ interface SettingTreeViewProps {
 
 export default function SettingTreeView(props: SettingTreeViewProps) {
   const { collectionId, selectedItemId, onSelectItem, onSelectCategory, onSelectInstance, onAddItem, onDeleteItem, title, showHeader = true, showActions = true, refreshTrigger = 0 } = props
+  const { t } = useTranslation()
   const [hoveredPath, setHoveredPath] = useState<string | null>(null)
 
   const [loading, setLoading] = useState(false)
@@ -73,7 +75,7 @@ export default function SettingTreeView(props: SettingTreeViewProps) {
       treeWithPath.forEach((n) => initialExpanded.add(n.path))
       setExpanded(initialExpanded)
     } catch {
-      setError('加载设定树失败')
+      setError(t('settingTree.loadError'))
     } finally {
       setLoading(false)
     }
@@ -167,7 +169,7 @@ export default function SettingTreeView(props: SettingTreeViewProps) {
               <Stack direction="row" spacing={0} sx={{ ml: 1 }}>
                 {/* 添加子节点按钮 */}
                 {onAddItem && (
-                  <Tooltip title="添加子项" placement="top">
+                  <Tooltip title={t('settingTree.addChild')} placement="top">
                     <IconButton
                       size="small"
                       onClick={(e) => handleAdd(e, node)}
@@ -179,7 +181,7 @@ export default function SettingTreeView(props: SettingTreeViewProps) {
                 )}
                 {/* 删除按钮 - 所有层级都可删除 */}
                 {onDeleteItem && (
-                  <Tooltip title={node.is_leaf ? "删除" : "删除整个分类"} placement="top">
+                  <Tooltip title={node.is_leaf ? t('settingTree.deleteItem') : t('settingTree.deleteCategory')} placement="top">
                     <IconButton
                       size="small"
                       onClick={(e) => handleDelete(e, node)}
@@ -207,12 +209,12 @@ export default function SettingTreeView(props: SettingTreeViewProps) {
       {showHeader && (
         <Box px={1.5} py={1} display="flex" alignItems="center" justifyContent="space-between">
           <Typography variant="subtitle2">
-            {title || '层级视图'}
+            {title || t('settingTree.defaultTitle')}
           </Typography>
           <Stack direction="row" spacing={0.5}>
             {/* 顶层添加按钮 */}
             {showActions && onAddItem && (
-              <Tooltip title="添加根级项" placement="top">
+              <Tooltip title={t('settingTree.addRoot')} placement="top">
                 <IconButton size="small" onClick={() => onAddItem('', null)}>
                   <AddIcon fontSize="small" />
                 </IconButton>
@@ -242,7 +244,7 @@ export default function SettingTreeView(props: SettingTreeViewProps) {
       {!loading && !error && !tree.length && (
         <Box px={2} py={1}>
           <Typography variant="body2" color="text.secondary">
-            暂无设定项
+            {t('settingTree.empty')}
           </Typography>
         </Box>
       )}

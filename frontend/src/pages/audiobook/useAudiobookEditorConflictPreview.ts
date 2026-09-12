@@ -1,5 +1,9 @@
 import { useMemo } from 'react'
 
+import { useTranslation } from 'react-i18next'
+
+import { useFormats } from '@/i18n'
+
 import {
   buildAudiobookEditorConflictPreview,
   extractOpenSegmentDetailIndices,
@@ -33,16 +37,14 @@ export const useAudiobookEditorConflictPreview = ({
   scriptEditorData,
   editorCrossTabConflict,
 }: UseAudiobookEditorConflictPreviewParams) => {
-  const editorConflictTimeLabel =
-    editorCrossTabConflict?.updatedAt
-      ? new Date(editorCrossTabConflict.updatedAt).toLocaleString('zh-CN', {
-          month: '2-digit',
-          day: '2-digit',
-          hour: '2-digit',
-          minute: '2-digit',
-          second: '2-digit',
-        })
-      : null
+  const { t } = useTranslation()
+  const { formatMonthDayTimeWithSeconds } = useFormats()
+
+  // 跨标签冲突的时刻要看到秒：两个标签页往往就在同一分钟内先后写入，
+  // 少了秒分不出哪一份更新。无效时间继续给 null，不给空串。
+  const editorConflictTimeLabel = editorCrossTabConflict?.updatedAt
+    ? formatMonthDayTimeWithSeconds(editorCrossTabConflict.updatedAt) || null
+    : null
 
   const editorConflictPreview = useMemo(
     () => buildAudiobookEditorConflictPreview(
@@ -55,6 +57,7 @@ export const useAudiobookEditorConflictPreview = ({
         data: scriptEditorData,
       },
       editorCrossTabConflict,
+      t,
     ),
     [
       chapterId,

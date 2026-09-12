@@ -2,7 +2,8 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import type { MouseEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useDispatch } from 'react-redux'
-import { logout } from '@/store/slices/authSlice'
+import { performLogout } from '@/store/slices/authSlice'
+import type { AppDispatch } from '@/store/store'
 import { apiClient } from '@/services/api'
 import {
   Alert,
@@ -37,6 +38,8 @@ import SearchIcon from '@mui/icons-material/Search'
 import LogoutIcon from '@mui/icons-material/Logout'
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline'
 import AddIcon from '@mui/icons-material/Add'
+import { useTranslation } from 'react-i18next'
+
 import BookParserUploadDialog from '@/components/BookParserUploadDialog'
 import type { BookSource } from '@/services/bookParserApi'
 
@@ -74,13 +77,16 @@ function classifyRunStatus(run: LatestRunSummary): RunStatusLabel {
   return 'unknown'
 }
 
-const RUN_STATUS_CHIP_PROPS: Record<RunStatusLabel, { label: string; color: 'success' | 'warning' | 'error' | 'default' | 'info' }> = {
-  running: { label: '生成中', color: 'info' },
-  waiting: { label: '等待审核', color: 'warning' },
-  completed: { label: '已完成', color: 'success' },
-  failed: { label: '失败', color: 'error' },
-  timeout: { label: '超时', color: 'error' },
-  unknown: { label: '未知', color: 'default' },
+const RUN_STATUS_CHIP_PROPS: Record<
+  RunStatusLabel,
+  { label: string; labelKey: string; color: 'success' | 'warning' | 'error' | 'default' | 'info' }
+> = {
+  running: { label: '生成中', color: 'info', labelKey: 'dreamweaverPage.runStatusRunning' },
+  waiting: { label: '等待审核', color: 'warning', labelKey: 'dreamweaverPage.runStatusWaiting' },
+  completed: { label: '已完成', color: 'success', labelKey: 'dreamweaverPage.runStatusCompleted' },
+  failed: { label: '失败', color: 'error', labelKey: 'dreamweaverPage.runStatusFailed' },
+  timeout: { label: '超时', color: 'error', labelKey: 'dreamweaverPage.runStatusTimeout' },
+  unknown: { label: '未知', color: 'default', labelKey: 'dreamweaverPage.runStatusUnknown' },
 }
 
 const perforationHoles = Array.from({ length: 8 })
@@ -133,7 +139,8 @@ function FilmPerforationColumn() {
 
 export default function DreamWeaverPage() {
   const navigate = useNavigate()
-  const dispatch = useDispatch()
+  const dispatch = useDispatch<AppDispatch>()
+  const { t } = useTranslation()
 
   const [projects, setProjects] = useState<Project[]>([])
   const [loading, setLoading] = useState(true)
@@ -184,7 +191,7 @@ export default function DreamWeaverPage() {
         }
         setLatestRunsByProject(runsMap)
       } catch (e: any) {
-        setError(e?.message || '获取项目失败，请稍后重试')
+        setError(e?.message || t('dreamweaverPage.loadProjectsFailed'))
       } finally {
         setLoading(false)
       }
@@ -278,14 +285,14 @@ export default function DreamWeaverPage() {
   }
 
   const handleLogout = () => {
-    dispatch(logout())
+    dispatch(performLogout())
     navigate('/login')
   }
 
   const handleBookUploadSuccess = (book: BookSource) => {
     setActionAlert({
       severity: 'success',
-      message: `书籍《${book.title}》已上传、完成拆书分析并自动导入灵感方舟，可直接用于短剧生成`,
+      message: t('dreamweaverPage.bookUploadSuccess', { title: book.title }),
     })
   }
 
@@ -344,7 +351,7 @@ export default function DreamWeaverPage() {
   const saveProjectTitle = async (projectId: number) => {
     const nextTitle = editedTitle.trim()
     if (!nextTitle) {
-      setActionAlert({ severity: 'error', message: '项目名称不能为空' })
+      setActionAlert({ severity: 'error', message: t('dreamweaverPage.titleRequired') })
       return
     }
 
@@ -357,7 +364,7 @@ export default function DreamWeaverPage() {
       setProjects((prev) => prev.map((p) => (p.id === projectId ? { ...p, title: nextTitle } : p)))
       setEditingProjectId(null)
       setEditedTitle('')
-      setActionAlert({ severity: 'success', message: '项目名称已更新' })
+      setActionAlert({ severity: 'success', message: t('dreamweaverPage.titleUpdated') })
       trackDreamweaverEvent('project_rename_save', {
         action: 'rename',
         source: 'inline_edit',
@@ -379,7 +386,7 @@ export default function DreamWeaverPage() {
         (detail && typeof detail === 'object' && typeof detail.message === 'string' && detail.message) ||
         (typeof detail === 'string' && detail) ||
         e?.message ||
-        '更新项目名称失败，请稍后重试'
+        t('dreamweaverPage.titleUpdateFailed')
       setActionAlert({ severity: 'error', message: msg })
       trackDreamweaverEvent('project_rename_save', {
         action: 'rename',
@@ -425,15 +432,17 @@ export default function DreamWeaverPage() {
       const deletedLibraryDir = Boolean(res.data?.deleted_library_dir)
       const deletedLibraryAssets = Number(res.data?.deleted_library_assets || 0)
       const failedPaths = Array.isArray(res.data?.failed_paths) ? res.data.failed_paths : []
+      const libraryStatus = librarySkipped
+        ? t('dreamweaverPage.purgeLibrarySkipped')
+        : deletedLibraryDir || deletedLibraryAssets > 0
+          ? t('dreamweaverPage.purgeLibraryCleared')
+          : t('dreamweaverPage.purgeLibraryNone')
+      const failedSuffix = failedPaths.length
+        ? t('dreamweaverPage.purgeFailedSuffix', { count: failedPaths.length })
+        : ''
       setActionAlert({
         severity: 'success',
-        message: `清理完成：已删除 ${deletedRuns} 个 run；跳过 ${skippedRuns} 个；素材库${
-          librarySkipped
-            ? '未清理（存在运行中/排队任务）'
-            : (deletedLibraryDir || deletedLibraryAssets > 0)
-              ? '已清理'
-              : '无可清理'
-        }${failedPaths.length ? `；失败路径 ${failedPaths.length} 个` : ''}`,
+        message: t('dreamweaverPage.purgeComplete', { deletedRuns, skippedRuns, libraryStatus, failedSuffix }),
       })
       trackDreamweaverEvent('project_delete_confirm', {
         action: 'delete_generated_confirm',
@@ -450,7 +459,7 @@ export default function DreamWeaverPage() {
         (detail && typeof detail === 'object' && typeof detail.message === 'string' && detail.message) ||
         (typeof detail === 'string' && detail) ||
         e?.message ||
-        '清理失败，请稍后重试'
+        t('dreamweaverPage.purgeFailed')
       setPurgeDialogError(msg)
       setActionAlert({ severity: 'error', message: msg })
       trackDreamweaverEvent('project_delete_confirm', {
@@ -493,7 +502,7 @@ export default function DreamWeaverPage() {
                   '&:hover': { backgroundColor: 'rgba(255,255,255,0.2)' },
                   ...keyboardFocusRingSx,
                 }}
-                title="返回创作工坊"
+                title={t('dreamweaverPage.backToStudio')}
               >
                 <ArrowBackIcon />
               </IconButton>
@@ -501,10 +510,10 @@ export default function DreamWeaverPage() {
                 <MovieIcon sx={{ fontSize: 32, color: 'white' }} />
                 <Box>
                   <Typography variant="h5" sx={{ color: 'white', fontWeight: 700, letterSpacing: '0.5px' }}>
-                    织梦映心
+                    {t('dreamweaverPage.productName')}
                   </Typography>
                   <Typography variant="body2" sx={{ color: 'rgba(255,255,255,0.8)', fontSize: '0.85rem' }}>
-                    短剧创作 · 选择项目进入生成流程
+                    {t('dreamweaverPage.subtitle')}
                   </Typography>
                 </Box>
               </Box>
@@ -522,7 +531,7 @@ export default function DreamWeaverPage() {
                   ...keyboardFocusRingSx,
                 }}
               >
-                退出登录
+                {t('dreamweaverPage.logout')}
               </Button>
             </Box>
           </Box>
@@ -542,8 +551,8 @@ export default function DreamWeaverPage() {
         >
           <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', flexWrap: 'wrap' }}>
             <TextField
-              placeholder="搜索项目..."
-              inputProps={{ 'aria-label': '搜索项目' }}
+              placeholder={t('dreamweaverPage.searchPlaceholder')}
+              inputProps={{ 'aria-label': t('dreamweaverPage.searchPlaceholder') }}
               value={searchQuery}
               onChange={(e) => handleSearchQueryChange(e.target.value)}
               size="small"
@@ -568,13 +577,13 @@ export default function DreamWeaverPage() {
               }}
             />
             <Typography variant="caption" sx={{ color: 'rgba(255,255,255,0.82)', whiteSpace: 'nowrap' }}>
-              共 {sortedFilteredProjects.length} / {projects.length} 个项目
+              {t('dreamweaverPage.projectCount', { shown: sortedFilteredProjects.length, total: projects.length })}
             </Typography>
           </Box>
 
           <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', mt: 1 }}>
             <Chip
-              label="全部"
+              label={t('dreamweaverPage.allGenres')}
               clickable
               onClick={() => handleGenreSelect('all')}
               sx={{
@@ -651,8 +660,8 @@ export default function DreamWeaverPage() {
                   >
                     <CardActionArea
                       component="button"
-                      aria-label={`进入项目「${displayTitle}」生成流程`}
-                      title="进入生成流程"
+                      aria-label={t('dreamweaverPage.enterProjectAria', { title: displayTitle })}
+                      title={t('dreamweaverPage.enterGeneration')}
                       onClick={() => navigateToRunPage(project, 'card')}
                       sx={{
                         display: 'flex',
@@ -717,7 +726,7 @@ export default function DreamWeaverPage() {
                               return (
                                 <Chip
                                   size="small"
-                                  label={chipProps.label}
+                                  label={t(chipProps.labelKey)}
                                   color={chipProps.color}
                                   variant="outlined"
                                   sx={{ height: 22 }}
@@ -738,12 +747,12 @@ export default function DreamWeaverPage() {
                                 overflow: 'hidden',
                               }}
                             >
-                              {displayTitle}
+                              {isUntitled ? t('dreamweaverPage.untitledProject') : displayTitle}
                             </Typography>
                             {isUntitled && !isEditing && (
                               <Chip
                                 size="small"
-                                label="待命名"
+                                label={t('dreamweaverPage.untitledChip')}
                                 sx={{
                                   mt: 0.75,
                                   height: 20,
@@ -767,7 +776,7 @@ export default function DreamWeaverPage() {
                               minHeight: 42,
                             }}
                           >
-                            {project.description || '从项目章节生成剧本、分镜与视频片段'}
+                            {project.description || t('dreamweaverPage.descriptionFallback')}
                           </Typography>
 
                           {!isEditing && (
@@ -783,20 +792,20 @@ export default function DreamWeaverPage() {
                             >
                               <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.25 }}>
                                 <Typography variant="caption" sx={{ color: 'rgba(255,255,255,0.74)', fontWeight: 600 }}>
-                                  点击进入生成流程
+                                  {t('dreamweaverPage.clickToEnter')}
                                 </Typography>
                                 {(() => {
                                   const latestRun = latestRunsByProject[project.id]
                                   if (!latestRun || latestRun.status !== 'running') return null
                                   return (
                                     <Typography variant="caption" sx={{ color: 'rgba(255,255,255,0.5)', fontSize: 10 }}>
-                                      进度 {latestRun.progress}%
+                                      {t('dreamweaverPage.progressLabel', { progress: latestRun.progress })}
                                     </Typography>
                                   )
                                 })()}
                               </Box>
                               <Box sx={{ display: 'flex', gap: 0.75 }}>
-                                <Tooltip title="进入素材库" placement="top" arrow>
+                                <Tooltip title={t('dreamweaverPage.enterLibrary')} placement="top" arrow>
                                   <IconButton
                                     size="small"
                                     onClick={(e) => {
@@ -814,16 +823,16 @@ export default function DreamWeaverPage() {
                                       '&:hover': { backgroundColor: 'rgba(245,158,11,0.3)' },
                                       ...keyboardFocusRingSx,
                                     }}
-                                    aria-label="进入素材库"
+                                    aria-label={t('dreamweaverPage.enterLibrary')}
                                   >
                                     <PhotoLibraryIcon sx={{ fontSize: 20 }} />
                                   </IconButton>
                                 </Tooltip>
-                                <Tooltip title="更多操作" placement="top" arrow>
+                                <Tooltip title={t('dreamweaverPage.moreActions')} placement="top" arrow>
                                   <IconButton
                                     size="small"
                                     onClick={(e) => openActionMenu(e, project)}
-                                    aria-label="更多操作"
+                                    aria-label={t('dreamweaverPage.moreActions')}
                                     aria-haspopup="menu"
                                     aria-controls={isMenuActive ? actionMenuId : undefined}
                                     aria-expanded={isMenuActive ? 'true' : undefined}
@@ -865,8 +874,8 @@ export default function DreamWeaverPage() {
                             fullWidth
                             value={editedTitle}
                             disabled={renameSubmitting}
-                            inputProps={{ 'aria-label': '项目名称' }}
-                            placeholder="请输入项目名称"
+                            inputProps={{ 'aria-label': t('dreamweaverPage.projectNameAria') }}
+                            placeholder={t('dreamweaverPage.projectNamePlaceholder')}
                             onChange={(e) => setEditedTitle(e.target.value)}
                             onKeyDown={(e) => {
                               if (e.key === 'Enter') saveProjectTitle(project.id)
@@ -886,7 +895,7 @@ export default function DreamWeaverPage() {
                             size="small"
                             disabled={renameSubmitting}
                             onClick={() => saveProjectTitle(project.id)}
-                            aria-label="保存项目名称"
+                            aria-label={t('dreamweaverPage.saveTitleAria')}
                             sx={{
                               width: 30,
                               height: 30,
@@ -902,7 +911,7 @@ export default function DreamWeaverPage() {
                             size="small"
                             disabled={renameSubmitting}
                             onClick={cancelRenameProject}
-                            aria-label="取消重命名"
+                            aria-label={t('dreamweaverPage.cancelRenameAria')}
                             sx={{
                               width: 30,
                               height: 30,
@@ -928,7 +937,7 @@ export default function DreamWeaverPage() {
                         }}
                       >
                         <Typography variant="caption" sx={{ color: 'rgba(255,255,255,0.92)' }}>
-                          正在清理该项目的生成内容...
+                          {t('dreamweaverPage.purgingInProgress')}
                         </Typography>
                       </Box>
                     )}
@@ -1018,7 +1027,7 @@ export default function DreamWeaverPage() {
                           mb: 0.5,
                         }}
                       >
-                        创建新项目
+                        {t('dreamweaverPage.createProject')}
                       </Typography>
                       <Typography
                         variant="body2"
@@ -1027,7 +1036,7 @@ export default function DreamWeaverPage() {
                           textAlign: 'center',
                         }}
                       >
-                        上传书籍创建项目
+                        {t('dreamweaverPage.uploadBookToCreate')}
                       </Typography>
                     </Box>
                     <FilmPerforationColumn />
@@ -1059,7 +1068,7 @@ export default function DreamWeaverPage() {
             }}
           >
             <EditOutlinedIcon sx={{ mr: 1, fontSize: 18 }} />
-            重命名项目
+            {t('dreamweaverPage.renameProject')}
           </MenuItem>
           <MenuItem
             onClick={() => {
@@ -1070,7 +1079,7 @@ export default function DreamWeaverPage() {
             sx={{ color: 'rgba(248,113,113,0.95)' }}
           >
             <DeleteOutlineIcon sx={{ mr: 1, fontSize: 18 }} />
-            删除生成内容（不可恢复）
+            {t('dreamweaverPage.deleteGenerated')}
           </MenuItem>
         </Menu>
 
@@ -1083,21 +1092,27 @@ export default function DreamWeaverPage() {
           aria-describedby="dreamweaver-purge-dialog-desc"
         >
           <DialogTitle id="dreamweaver-purge-dialog-title">
-            删除生成内容：{purgeTarget ? getDisplayTitle(purgeTarget.title) : '-'}
+            {t('dreamweaverPage.deleteGeneratedTitle', {
+              title: purgeTarget
+                ? isUntitledProject(purgeTarget.title)
+                  ? t('dreamweaverPage.untitledProject')
+                  : getDisplayTitle(purgeTarget.title)
+                : '-',
+            })}
           </DialogTitle>
           <DialogContent dividers>
             <Alert severity="warning" sx={{ mb: 2 }}>
-              此操作不可恢复，将清理该项目已生成的内容（历史 runs 与素材库图片）。
+              {t('dreamweaverPage.purgeWarning')}
             </Alert>
             <Typography variant="body2" color="text.secondary">
-              将删除：
+              {t('dreamweaverPage.willDelete')}
             </Typography>
             <Typography variant="body2" sx={{ mt: 1, whiteSpace: 'pre-wrap' }}>
-              - 历史 runs（数据库记录 + runs/{'{run_id}'} 产物文件）
-              - 素材库图片（runs/library/project_{'{project_id}'}）
+              {t('dreamweaverPage.purgeRunsItem')}
+              {t('dreamweaverPage.purgeLibraryItem')}
             </Typography>
             <Typography id="dreamweaver-purge-dialog-desc" variant="caption" color="text.secondary" display="block" sx={{ mt: 1 }}>
-              注意：运行中/排队中的 run 会跳过；若存在运行/排队任务，将不会清理素材库以避免影响任务。
+              {t('dreamweaverPage.purgeNote')}
             </Typography>
             {purgeDialogError && (
               <Alert severity="error" sx={{ mt: 2 }}>
@@ -1107,7 +1122,7 @@ export default function DreamWeaverPage() {
           </DialogContent>
           <DialogActions>
             <Button onClick={closePurgeDialog} disabled={purgeSubmitting} sx={keyboardFocusRingSx}>
-              取消
+              {t('action.cancel')}
             </Button>
             <Button
               variant="contained"
@@ -1116,7 +1131,7 @@ export default function DreamWeaverPage() {
               disabled={purgeSubmitting || !purgeTarget}
               sx={keyboardFocusRingSx}
             >
-              {purgeSubmitting ? '删除中…' : '确认删除'}
+              {purgeSubmitting ? t('dreamweaverDelete.deleting') : t('dreamweaverDelete.confirmDelete')}
             </Button>
           </DialogActions>
         </Dialog>

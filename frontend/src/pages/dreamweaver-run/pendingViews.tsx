@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import { useTranslation } from 'react-i18next'
 
 import BugReportIcon from '@mui/icons-material/BugReport'
 import ContentCopyIcon from '@mui/icons-material/ContentCopy'
@@ -41,7 +42,7 @@ export function PendingVideoConfirmationView({
       </Stack>
 
       {state.hasJobs ? (
-        <List dense sx={{ bgcolor: '#fff', border: '1px solid #eee', borderRadius: 2 }}>
+        <List dense sx={{ bgcolor: 'background.paper', border: '1px solid', borderColor: 'divider', borderRadius: 2 }}>
           {jobItems}
         </List>
       ) : (
@@ -119,13 +120,14 @@ export function PendingRunningArtifactsSummary({
   onOpenDiagnostic,
   diagnosticDisabled,
 }: PendingRunningArtifactsSummaryProps) {
+  const { t } = useTranslation()
   return (
     <Stack direction="row" spacing={1} flexWrap="wrap" mb={1} alignItems="center">
       {chips.map((item) => (
         <Chip key={item.key} label={`${item.label}: ${item.value}`} size="small" variant={item.variant ?? 'filled'} />
       ))}
       <Button size="small" variant="text" startIcon={<ContentCopyIcon fontSize="small" />} onClick={onCopyDebug}>
-        复制调试信息
+        {t('dreamweaverPending.copyDebugInfo')}
       </Button>
       <Button
         size="small"
@@ -134,7 +136,7 @@ export function PendingRunningArtifactsSummary({
         onClick={onOpenDiagnostic}
         disabled={diagnosticDisabled}
       >
-        诊断面板
+        {t('dreamweaverPending.diagnosticPanel')}
       </Button>
     </Stack>
   )
@@ -181,14 +183,15 @@ export function PendingScriptApprovalShell({
   editor,
   debugPanel,
 }: PendingScriptApprovalShellProps) {
+  const { t } = useTranslation()
   const showStatusChips = Boolean(state.generationLabel || state.showDirtyChip)
 
   return (
     <Box>
       {showStatusChips && (
         <Stack direction="row" spacing={1} flexWrap="wrap" mb={1} alignItems="center">
-          {state.generationLabel && <Chip label={`剧本生成: ${state.generationLabel}`} size="small" />}
-          {state.showDirtyChip && <Chip label="未保存" size="small" color="warning" />}
+          {state.generationLabel && <Chip label={t('dreamweaverPending.scriptChip', { label: state.generationLabel })} size="small" />}
+          {state.showDirtyChip && <Chip label={t('dreamweaverPending.unsaved')} size="small" color="warning" />}
         </Stack>
       )}
 
@@ -198,30 +201,30 @@ export function PendingScriptApprovalShell({
 
       {state.showDirtyAlert && (
         <Alert severity="info" sx={{ mb: 1 }}>
-          剧本已修改但未保存：请先点击“保存”，再点击“通过”。
+          {t('dreamweaverPending.dirtyAlert')}
         </Alert>
       )}
 
       {state.fallbackError && (
         <Alert severity="info" sx={{ mb: 1 }}>
-          LLM 调用失败，已回退为规则剧本：{state.fallbackError}
+          {t('dreamweaverPending.fallbackTitle', { error: state.fallbackError })}
           <br />
-          建议检查 `.env` 的 `DASHSCOPE_API_KEY` / `DASHSCOPE_API_BASE` 以及 `DREAMWEAVER_*_MODEL`，并重启后端与 Celery worker。
+          {t('dreamweaverPending.fallbackHint')}
         </Alert>
       )}
 
       <Stack direction="row" spacing={1} flexWrap="wrap" mb={1}>
         <Button size="small" variant="contained" onClick={onLoadScript} disabled={!state.canLoadScript}>
-          加载剧本
+          {t('dreamweaverPending.loadScript')}
         </Button>
         <Button size="small" variant="outlined" onClick={onSaveScript} disabled={!state.canSaveScript}>
-          保存
+          {t('common.save')}
         </Button>
         <Button size="small" variant="contained" color="success" onClick={onApproveScript} disabled={!state.canApproveScript}>
-          通过
+          {t('dreamweaverPending.approve')}
         </Button>
         <Button size="small" variant="text" onClick={onRevokeScript} disabled={!state.canRevokeScript}>
-          撤销通过
+          {t('dreamweaverPending.revokeApproval')}
         </Button>
         <Button size="small" variant="contained" color="success" onClick={onResume} disabled={!state.canResume}>
           {state.resumeButtonLabel}
@@ -256,9 +259,10 @@ export function PendingScriptApprovalEditor({
   onChange,
   disabled,
 }: PendingScriptApprovalEditorProps) {
+  const { t } = useTranslation()
   return (
     <TextField
-      label="剧本（可编辑）"
+      label={t('dreamweaverPending.scriptEditableLabel')}
       value={value}
       onChange={(e) => onChange(e.target.value)}
       fullWidth
@@ -266,7 +270,7 @@ export function PendingScriptApprovalEditor({
       minRows={10}
       maxRows={22}
       disabled={disabled}
-      sx={{ bgcolor: '#fff' }}
+      sx={{ bgcolor: 'background.paper' }}
     />
   )
 }
@@ -320,7 +324,7 @@ export function PendingPromptReviewView({
       )}
 
       {state.hasShots ? (
-        <List dense sx={{ bgcolor: '#fff', border: '1px solid #eee', borderRadius: 2 }}>
+        <List dense sx={{ bgcolor: 'background.paper', border: '1px solid', borderColor: 'divider', borderRadius: 2 }}>
           {shotItems}
         </List>
       ) : (
@@ -413,16 +417,17 @@ export function PendingLibraryControls({
   resumeDisabled,
   resumeLoading,
 }: PendingLibraryControlsProps) {
+  const { t } = useTranslation()
   return (
     <Stack direction="row" spacing={1} flexWrap="wrap" mb={1}>
       <Button size="small" variant="contained" onClick={onLoadLibrary} disabled={loadDisabled}>
-        加载素材库
+        {t('dreamweaverPending.loadLibrary')}
       </Button>
       <Button size="small" variant="outlined" onClick={onApproveAll} disabled={approveDisabled}>
-        全部通过
+        {t('dreamweaverPending.approveAll')}
       </Button>
       <Button size="small" variant="contained" color="success" onClick={onResume} disabled={resumeDisabled}>
-        {resumeLoading ? '继续生成中…' : '继续生成'}
+        {resumeLoading ? t('dreamweaverPending.resumeGenerating') : t('dreamweaverPending.resume')}
       </Button>
     </Stack>
   )
@@ -437,9 +442,10 @@ export function PendingLibraryReviewStatus({
   missingCount,
   unapprovedCount,
 }: PendingLibraryReviewStatusProps) {
+  const { t } = useTranslation()
   return (
     <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1 }}>
-      审核状态：缺失 {missingCount}，未通过 {unapprovedCount}
+      {t('dreamweaverPending.reviewStatus', { missing: missingCount, unapproved: unapprovedCount })}
     </Typography>
   )
 }
@@ -491,18 +497,19 @@ export function PendingLibraryReadyActions({
   resumeDisabled,
   resumeLoading,
 }: PendingLibraryReadyActionsProps) {
+  const { t } = useTranslation()
   return (
     <Stack direction="row" spacing={1} alignItems="center">
       <Button size="small" variant="text" onClick={onViewLibrary}>
-        查看素材库
+        {t('dreamweaverPending.viewLibrary')}
       </Button>
       {showPromptReviewAction && (
         <Button size="small" variant="text" onClick={onViewPromptReview}>
-          查看提示词
+          {t('dreamweaverPending.viewPromptReview')}
         </Button>
       )}
       <Button size="small" variant="contained" color="success" onClick={onResume} disabled={resumeDisabled}>
-        {resumeLoading ? '继续生成中…' : '继续生成'}
+        {resumeLoading ? t('dreamweaverPending.resumeGenerating') : t('dreamweaverPending.resume')}
       </Button>
     </Stack>
   )

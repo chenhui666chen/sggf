@@ -1,4 +1,7 @@
-import { describe, expect, it } from 'vitest'
+import { beforeAll, describe, expect, it } from 'vitest'
+import type { TFunction } from 'i18next'
+
+import { bootstrapI18n } from '@/i18n'
 
 import {
   buildUserCenterAssetProjectTitleMap,
@@ -6,12 +9,21 @@ import {
   extractUserCenterConnectedUserAssetCount,
 } from '../user-assets/userCenterAssetWorkspaceInputHelper'
 
+let t: TFunction
+
+beforeAll(async () => {
+  const instance = await bootstrapI18n('zh-CN')
+  t = instance.t.bind(instance)
+})
+
 describe('userCenterAssetWorkspaceInputHelper', () => {
   it('builds a project title map with trimmed titles and fallback labels', () => {
     const projectTitleMap = buildUserCenterAssetProjectTitleMap([
       { id: 1, title: ' 海城剧场 ' },
       { id: 2, title: '   ' },
-    ])
+    ],
+    t,
+  )
 
     expect(projectTitleMap.get(1)).toBe('海城剧场')
     expect(projectTitleMap.get(2)).toBe('项目 #2')
@@ -54,6 +66,7 @@ describe('userCenterAssetWorkspaceInputHelper', () => {
           dreamweaver_run_count: 0,
         },
       },
+      t,
     })
 
     expect(input.projectTitleMap.get(7)).toBe('星港计划')

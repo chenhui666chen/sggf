@@ -3,6 +3,8 @@
  * 管理控制台内部页面，用于自动优化"降低 AI 痕迹"的提示词
  */
 import { useState, useEffect, useCallback } from 'react'
+import type { TFunction } from 'i18next'
+import { useTranslation } from 'react-i18next'
 import {
   Box, Card, CardContent, Button, Typography, Alert,
   CircularProgress, LinearProgress, Chip, Dialog, DialogTitle,
@@ -27,8 +29,9 @@ import LeaderboardIcon from '@mui/icons-material/Leaderboard'
 import StarIcon from '@mui/icons-material/Star'
 import RocketLaunchIcon from '@mui/icons-material/RocketLaunch'
 import RestartAltIcon from '@mui/icons-material/RestartAlt'
+import { useFormats } from '@/i18n'
 import { apiClient, extractApiErrorMessage } from '@/services/api'
-import { AI_TRACE_GENRES } from '../aiTraceGenre'
+import { AI_TRACE_GENRES, AI_TRACE_GENRE_LABEL_KEYS, AI_TRACE_SAMPLE_GENRES, type AITraceGenreValue } from '../aiTraceGenre'
 import { formatScore } from '@/utils/promptEvolutionScore'
 
 interface EvolutionStatus {
@@ -124,27 +127,30 @@ interface ReviewDimension {
   issues: string[]
 }
 
-const REVIEW_DIMENSIONS: Array<[string, keyof NonNullable<PromptDetail['evaluation_results'][number]['llm_review']>]> = [
-  ['语义保真', 'semantic_fidelity'],
-  ['事实一致', 'fact_consistency'],
-  ['信息完整', 'information_completeness'],
-  ['可读性', 'readability'],
-  ['文笔自然', 'writing_naturalness'],
-  ['题材一致', 'genre_consistency'],
-]
-
+function getReviewDimensions(t: TFunction): Array<[string, keyof NonNullable<PromptDetail['evaluation_results'][number]['llm_review']>]> {
+  return [
+    [t('admin.promptEvolution.review.dimSemantic'), 'semantic_fidelity'],
+    [t('admin.promptEvolution.review.dimFact'), 'fact_consistency'],
+    [t('admin.promptEvolution.review.dimComplete'), 'information_completeness'],
+    [t('admin.promptEvolution.review.dimReadable'), 'readability'],
+    [t('admin.promptEvolution.review.dimNatural'), 'writing_naturalness'],
+    [t('admin.promptEvolution.review.dimGenre'), 'genre_consistency'],
+  ]
+}
 function QualityReviewSummary({ sample }: { sample: PromptDetail['evaluation_results'][number] }) {
+  const { t } = useTranslation()
   const review = sample.llm_review
   const local = sample.rewritten_multi_score
+  const reviewDimensions = getReviewDimensions(t)
   return (
     <Box sx={{ py: 1 }}>
-      <Typography variant="subtitle2" gutterBottom>大模型智能评审</Typography>
+      <Typography variant="subtitle2" gutterBottom>{t('admin.promptEvolution.review.title')}</Typography>
       {!review?.available ? (
-        <Alert severity="warning">{review?.error || '该历史结果没有智能评审数据'}</Alert>
+        <Alert severity="warning">{review?.error || t('admin.promptEvolution.review.noData')}</Alert>
       ) : (
         <>
           <Grid container spacing={1}>
-            {REVIEW_DIMENSIONS.map(([label, key]) => {
+            {reviewDimensions.map(([label, key]) => {
               const dimension = review[key] as ReviewDimension | undefined
               return (
                 <Grid item xs={12} sm={6} md={4} key={key}>
@@ -153,7 +159,7 @@ function QualityReviewSummary({ sample }: { sample: PromptDetail['evaluation_res
                       <Typography variant="body2" fontWeight={600}>{label}</Typography>
                       <Chip size="small" label={dimension ? dimension.score.toFixed(0) : '-'} color={dimension && dimension.score >= 85 ? 'success' : dimension && dimension.score >= 70 ? 'warning' : 'error'} />
                     </Box>
-                    <Typography variant="caption" color="text.secondary">{dimension?.reason || '无评语'}</Typography>
+                    <Typography variant="caption" color="text.secondary">{dimension?.reason || t('admin.promptEvolution.review.noComment')}</Typography>
                     {dimension?.issues?.map((issue, issueIndex) => (
                       <Typography key={issueIndex} variant="caption" color="error" display="block">{issue}</Typography>
                     ))}
@@ -163,30 +169,30 @@ function QualityReviewSummary({ sample }: { sample: PromptDetail['evaluation_res
             })}
           </Grid>
           <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mt: 1 }}>
-            <Chip size="small" label={`过度改写：${review.over_rewrite_risk || '-'}`} color={review.over_rewrite_risk === 'high' ? 'error' : review.over_rewrite_risk === 'medium' ? 'warning' : 'success'} />
-            <Chip size="small" label={`置信度：${review.confidence != null ? `${(review.confidence * 100).toFixed(0)}%` : '-'}`} variant="outlined" />
-            {review.hard_fail && <Chip size="small" label={review.hard_fail_reasons?.join('；') || '智能评审未通过'} color="error" />}
+            <Chip size="small" label={t('admin.promptEvolution.review.overRewrite', { risk: review.over_rewrite_risk || '-' })} color={review.over_rewrite_risk === 'high' ? 'error' : review.over_rewrite_risk === 'medium' ? 'warning' : 'success'} />
+            <Chip size="small" label={t('admin.promptEvolution.review.confidence', { value: review.confidence != null ? `${(review.confidence * 100).toFixed(0)}%` : '-' })} variant="outlined" />
+            {review.hard_fail && <Chip size="small" label={review.hard_fail_reasons?.join('；') || t('admin.promptEvolution.review.hardFail')} color="error" />}
           </Box>
           {review.over_rewrite_reason && (
             <Typography variant="caption" color={review.over_rewrite_risk === 'high' ? 'error' : 'text.secondary'} display="block" sx={{ mt: 1 }}>
-              过度改写判断：{review.over_rewrite_reason}
+              {t('admin.promptEvolution.review.overRewriteReason', { reason: review.over_rewrite_reason })}
             </Typography>
           )}
         </>
       )}
       <Divider sx={{ my: 1.5 }} />
-      <Typography variant="subtitle2" gutterBottom>本地规则</Typography>
+      <Typography variant="subtitle2" gutterBottom>{t('admin.promptEvolution.review.localRuleTitle')}</Typography>
       <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
-        <Chip size="small" label={`词汇成本 ${local?.vocabulary_score?.toFixed(0) ?? '-'}`} variant="outlined" />
-        <Chip size="small" label={`句式成本 ${local?.sentence_score?.toFixed(0) ?? '-'}`} variant="outlined" />
-        <Chip size="small" label={`标点成本 ${local?.punctuation_score?.toFixed(0) ?? '-'}`} variant="outlined" />
-        <Chip size="small" label={`情感成本 ${local?.emotion_score?.toFixed(0) ?? '-'}`} variant="outlined" />
-        <Chip size="small" label={`对话成本 ${local?.dialogue_score?.toFixed(0) ?? '-'}`} variant="outlined" />
-        <Chip size="small" label={`结构成本 ${local?.structure_score?.toFixed(0) ?? '-'}`} variant="outlined" />
-        <Chip size="small" label={`文笔成本 ${local?.writing_score?.toFixed(0) ?? '-'}`} variant="outlined" />
-        <Chip size="small" label={`规则可读性 ${local?.readability_score?.toFixed(0) ?? '-'}`} variant="outlined" />
-        <Chip size="small" label={`字面保真 ${local?.fidelity_score != null ? (100 - local.fidelity_score).toFixed(0) : '-'}`} variant="outlined" />
-        <Chip size="small" label={`混合成本 ${local?.composite_score?.toFixed(1) ?? '-'}`} color="primary" variant="outlined" />
+        <Chip size="small" label={t('admin.promptEvolution.review.vocabCost', { score: local?.vocabulary_score?.toFixed(0) ?? '-' })} variant="outlined" />
+        <Chip size="small" label={t('admin.promptEvolution.review.sentenceCost', { score: local?.sentence_score?.toFixed(0) ?? '-' })} variant="outlined" />
+        <Chip size="small" label={t('admin.promptEvolution.review.punctuationCost', { score: local?.punctuation_score?.toFixed(0) ?? '-' })} variant="outlined" />
+        <Chip size="small" label={t('admin.promptEvolution.review.emotionCost', { score: local?.emotion_score?.toFixed(0) ?? '-' })} variant="outlined" />
+        <Chip size="small" label={t('admin.promptEvolution.review.dialogueCost', { score: local?.dialogue_score?.toFixed(0) ?? '-' })} variant="outlined" />
+        <Chip size="small" label={t('admin.promptEvolution.review.structureCost', { score: local?.structure_score?.toFixed(0) ?? '-' })} variant="outlined" />
+        <Chip size="small" label={t('admin.promptEvolution.review.writingCost', { score: local?.writing_score?.toFixed(0) ?? '-' })} variant="outlined" />
+        <Chip size="small" label={t('admin.promptEvolution.review.readabilityCost', { score: local?.readability_score?.toFixed(0) ?? '-' })} variant="outlined" />
+        <Chip size="small" label={t('admin.promptEvolution.review.fidelityCost', { score: local?.fidelity_score != null ? (100 - local.fidelity_score).toFixed(0) : '-' })} variant="outlined" />
+        <Chip size="small" label={t('admin.promptEvolution.review.compositeCost', { score: local?.composite_score?.toFixed(1) ?? '-' })} color="primary" variant="outlined" />
       </Box>
     </Box>
   )
@@ -269,6 +275,12 @@ interface BackgroundOptimizationStatus {
 }
 
 export default function PromptEvolutionPage() {
+  const { t } = useTranslation()
+  const { formatDate, formatTime } = useFormats()
+  const genreLabel = (genre: unknown) => {
+    const value = (String(genre ?? '').trim() || '通用') as AITraceGenreValue
+    return AI_TRACE_GENRE_LABEL_KEYS[value] ? t(AI_TRACE_GENRE_LABEL_KEYS[value]) : value
+  }
   const [status, setStatus] = useState<EvolutionStatus | null>(null)
   const [histories, setHistories] = useState<any[]>([])
   const [selectedDetail, setSelectedDetail] = useState<EvolutionDetail | null>(null)
@@ -390,21 +402,21 @@ export default function PromptEvolutionPage() {
         genre: runAllGenres || modelGenre === '通用' ? null : modelGenre,
         run_all_genres: runAllGenres,
       })
-      setMessage({ type: 'success', text: '进化任务已启动' })
+      setMessage({ type: 'success', text: t('admin.promptEvolution.snack.taskStarted') })
       setStartDialogOpen(false)
       fetchStatus()
     } catch (e: any) {
-      setMessage({ type: 'error', text: await extractApiErrorMessage(e, '启动失败') })
+      setMessage({ type: 'error', text: await extractApiErrorMessage(e, t('admin.promptEvolution.snack.startFailed')) })
     } finally { setLoading(false) }
   }
 
   const handleStop = async () => {
     try {
       await apiClient.client.post('/api/v1/prompt-evolution/stop')
-      setMessage({ type: 'info', text: '任务已停止' })
+      setMessage({ type: 'info', text: t('admin.promptEvolution.snack.taskStopped') })
       fetchStatus()
     } catch (e: any) {
-      setMessage({ type: 'error', text: await extractApiErrorMessage(e, '停止失败') })
+      setMessage({ type: 'error', text: await extractApiErrorMessage(e, t('admin.promptEvolution.snack.stopFailed')) })
     }
   }
 
@@ -415,7 +427,7 @@ export default function PromptEvolutionPage() {
       setSelectedDetail(res.data)
       setDetailDialogOpen(true)
     } catch (e) {
-      setMessage({ type: 'error', text: '获取详情失败' })
+      setMessage({ type: 'error', text: t('admin.promptEvolution.snack.detailFailed') })
     } finally { setLoading(false) }
   }
 
@@ -426,7 +438,7 @@ export default function PromptEvolutionPage() {
       setSelectedPrompt(res.data)
       setPromptDialogOpen(true)
     } catch (e) {
-      setMessage({ type: 'error', text: '获取提示词失败' })
+      setMessage({ type: 'error', text: t('admin.promptEvolution.snack.promptFetchFailed') })
     } finally { setLoading(false) }
   }
 
@@ -435,57 +447,57 @@ export default function PromptEvolutionPage() {
     try {
       if (isCurrentlyApproved) {
         await apiClient.client.post('/api/v1/prompt-evolution/revoke', { evolution_id: evolutionId, version_id: versionId })
-        setMessage({ type: 'info', text: '已取消批准' })
+        setMessage({ type: 'info', text: t('admin.promptEvolution.snack.revoked') })
       } else {
         await apiClient.client.post('/api/v1/prompt-evolution/approve', { evolution_id: evolutionId, version_id: versionId })
-        setMessage({ type: 'success', text: '提示词已批准！' })
+        setMessage({ type: 'success', text: t('admin.promptEvolution.snack.approved') })
       }
       await handleViewDetail(evolutionId)
       fetchHistories()
     } catch (e: any) {
-      setMessage({ type: 'error', text: await extractApiErrorMessage(e, '操作失败') })
+      setMessage({ type: 'error', text: await extractApiErrorMessage(e, t('admin.promptEvolution.snack.operationFailed')) })
     } finally { setLoading(false) }
   }
 
   const copyToClipboard = (text: string) => {
     navigator.clipboard.writeText(text)
-    setMessage({ type: 'success', text: '已复制到剪贴板' })
+    setMessage({ type: 'success', text: t('admin.promptEvolution.snack.copied') })
   }
 
   const handleDelete = async (evolutionId: string) => {
-    if (!confirm('确定要删除这条历史记录吗？')) return
+    if (!confirm(t('admin.promptEvolution.confirm.deleteHistory'))) return
     try {
       await apiClient.client.delete(`/api/v1/prompt-evolution/history/${evolutionId}`)
-      setMessage({ type: 'success', text: '删除成功' })
+      setMessage({ type: 'success', text: t('admin.promptEvolution.snack.deleteSuccess') })
       fetchHistories()
     } catch (e: any) {
-      setMessage({ type: 'error', text: await extractApiErrorMessage(e, '删除失败') })
+      setMessage({ type: 'error', text: await extractApiErrorMessage(e, t('admin.promptEvolution.snack.deleteFailed')) })
     }
   }
 
   const handleCleanup = async () => {
-    if (!confirm('确定要自动清理历史记录吗？\n\n将保留：\n- 最近 10 个记录\n- 得分最好的 5 个记录\n- 已批准的记录')) return
+    if (!confirm(t('admin.promptEvolution.confirm.cleanup'))) return
     try {
       const res = await apiClient.client.post('/api/v1/prompt-evolution/history/cleanup')
       setMessage({ type: 'success', text: res.data.message })
       fetchHistories()
     } catch (e: any) {
-      setMessage({ type: 'error', text: await extractApiErrorMessage(e, '清理失败') })
+      setMessage({ type: 'error', text: await extractApiErrorMessage(e, t('admin.promptEvolution.snack.cleanupFailed')) })
     }
   }
 
   const handleResume = async (evolutionId: string) => {
     try {
-      setMessage({ type: 'info', text: '正在恢复进化任务...' })
+      setMessage({ type: 'info', text: t('admin.promptEvolution.snack.resuming') })
       const res = await apiClient.client.post('/api/v1/prompt-evolution/resume', {
         evolution_id: evolutionId,
         additional_iterations: 5,
       })
-      setMessage({ type: 'success', text: res.data.message || '已恢复进化任务' })
+      setMessage({ type: 'success', text: res.data.message || t('admin.promptEvolution.snack.resumed') })
       fetchStatus()
       fetchHistories()
     } catch (e: any) {
-      setMessage({ type: 'error', text: await extractApiErrorMessage(e, '恢复失败') })
+      setMessage({ type: 'error', text: await extractApiErrorMessage(e, t('admin.promptEvolution.snack.resumeFailed')) })
     }
   }
 
@@ -495,30 +507,30 @@ export default function PromptEvolutionPage() {
   }
 
   const handleRemoveApproved = async (versionId: string) => {
-    if (!confirm('确定要从已批准列表中移除这个提示词吗？')) return
+    if (!confirm(t('admin.promptEvolution.confirm.removeApproved'))) return
     try {
       await apiClient.client.delete(`/api/v1/prompt-evolution/approved/${versionId}`)
-      setMessage({ type: 'success', text: '已从批准列表中移除' })
+      setMessage({ type: 'success', text: t('admin.promptEvolution.snack.removedFromApproved') })
       fetchApprovedPrompts()
       fetchHistories()
     } catch (e: any) {
-      setMessage({ type: 'error', text: await extractApiErrorMessage(e, '移除失败') })
+      setMessage({ type: 'error', text: await extractApiErrorMessage(e, t('admin.promptEvolution.snack.removeFailed')) })
     }
   }
 
   const handleSetActiveModel = async (modelId: string | null) => {
     try {
       await apiClient.client.post('/api/v1/ai-trace/model-config', { model_id: modelId })
-      setMessage({ type: 'success', text: modelId ? '活跃模型已设置' : '已切换为自动最优' })
+      setMessage({ type: 'success', text: modelId ? t('admin.promptEvolution.snack.modelSet') : t('admin.promptEvolution.snack.modelAutoBest') })
       fetchModels()
     } catch (e: any) {
-      setMessage({ type: 'error', text: await extractApiErrorMessage(e, '设置失败') })
+      setMessage({ type: 'error', text: await extractApiErrorMessage(e, t('admin.promptEvolution.snack.modelSetFailed')) })
     }
   }
 
   const handleEvaluateModels = async () => {
     if (!evalText.trim() || evalText.trim().length < 50) {
-      setMessage({ type: 'error', text: '请输入至少50字的测试文本' })
+      setMessage({ type: 'error', text: t('admin.promptEvolution.snack.evalTextTooShort') })
       return
     }
     setEvaluating(true)
@@ -530,16 +542,16 @@ export default function PromptEvolutionPage() {
         genre: modelGenre,
       }, { timeout: 300000 })
       setEvalResults(res.data)
-      setMessage({ type: 'success', text: `评测完成：${res.data.total_models_success}/${res.data.total_models_tried} 个模型成功` })
+      setMessage({ type: 'success', text: t('admin.promptEvolution.snack.evalDone', { success: res.data.total_models_success, tried: res.data.total_models_tried }) })
       fetchModels()
     } catch (e: any) {
-      setMessage({ type: 'error', text: await extractApiErrorMessage(e, '评测失败') })
+      setMessage({ type: 'error', text: await extractApiErrorMessage(e, t('admin.promptEvolution.snack.evalFailed')) })
     } finally { setEvaluating(false) }
   }
 
   const handleAddSample = async () => {
     if (!newSampleText.trim() || newSampleText.trim().length < 50) {
-      setMessage({ type: 'error', text: '样本文本至少50字' })
+      setMessage({ type: 'error', text: t('admin.promptEvolution.snack.sampleTextTooShort') })
       return
     }
     try {
@@ -547,24 +559,24 @@ export default function PromptEvolutionPage() {
         text: newSampleText,
         genre: newSampleGenre,
       })
-      setMessage({ type: 'success', text: '样本已添加' })
+      setMessage({ type: 'success', text: t('admin.promptEvolution.snack.sampleAdded') })
       setAddSampleOpen(false)
       setNewSampleText('')
       setNewSampleGenre('其他')
       fetchSamples()
     } catch (e: any) {
-      setMessage({ type: 'error', text: await extractApiErrorMessage(e, '添加失败') })
+      setMessage({ type: 'error', text: await extractApiErrorMessage(e, t('admin.promptEvolution.snack.sampleAddFailed')) })
     }
   }
 
   const handleDeleteSample = async (sampleId: string) => {
-    if (!confirm('确定删除此样本？')) return
+    if (!confirm(t('admin.promptEvolution.confirm.deleteSample'))) return
     try {
       await apiClient.client.delete(`/api/v1/prompt-evolution/samples/${sampleId}`)
-      setMessage({ type: 'success', text: '样本已删除' })
+      setMessage({ type: 'success', text: t('admin.promptEvolution.snack.sampleDeleted') })
       fetchSamples()
     } catch (e: any) {
-      setMessage({ type: 'error', text: await extractApiErrorMessage(e, '删除失败') })
+      setMessage({ type: 'error', text: await extractApiErrorMessage(e, t('admin.promptEvolution.snack.deleteFailed')) })
     }
   }
 
@@ -576,10 +588,10 @@ export default function PromptEvolutionPage() {
         setMessage({ type: 'success', text: res.data.message })
         fetchSamples()
       } else {
-        setMessage({ type: 'error', text: res.data.error || '生成失败' })
+        setMessage({ type: 'error', text: res.data.error || t('admin.promptEvolution.snack.generateFailed') })
       }
     } catch (e: any) {
-      setMessage({ type: 'error', text: await extractApiErrorMessage(e, '生成失败') })
+      setMessage({ type: 'error', text: await extractApiErrorMessage(e, t('admin.promptEvolution.snack.generateFailed')) })
     } finally { setGenerating(false) }
   }
 
@@ -590,19 +602,19 @@ export default function PromptEvolutionPage() {
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
           <ScienceIcon color="primary" sx={{ fontSize: 32 }} />
-          <Typography variant="h5">提示词进化优化（实验性）</Typography>
+          <Typography variant="h5">{t('admin.promptEvolution.title')}</Typography>
         </Box>
-        <Button startIcon={<RefreshIcon />} onClick={() => { fetchStatus(); fetchHistories() }}>刷新</Button>
+        <Button startIcon={<RefreshIcon />} onClick={() => { fetchStatus(); fetchHistories() }}>{t('admin.common.refresh')}</Button>
       </Box>
 
       {message && <Alert severity={message.type} onClose={() => setMessage(null)} sx={{ mb: 2 }}>{message.text}</Alert>}
 
       <Card sx={{ mb: 3, bgcolor: 'info.dark', color: 'white' }}>
         <CardContent>
-          <Typography variant="h6" gutterBottom>🧪 这是什么？</Typography>
+          <Typography variant="h6" gutterBottom>{t('admin.promptEvolution.whatIsTitle')}</Typography>
           <Typography variant="body2">
-            利用 AI 检测接口作为反馈信号，自动迭代优化"降低 AI 痕迹"的提示词。
-            <strong> 所有优化结果需要人工审核确认后才能使用。</strong>
+            {t('admin.promptEvolution.whatIsBody')}
+            <strong>{t('admin.promptEvolution.whatIsStrong')}</strong>
           </Typography>
         </CardContent>
       </Card>
@@ -611,33 +623,33 @@ export default function PromptEvolutionPage() {
         <Grid item xs={12} md={4}>
           <Card>
             <CardContent>
-              <Typography variant="h6" gutterBottom><PlayArrowIcon sx={{ mr: 1, verticalAlign: 'middle' }} />控制面板</Typography>
+              <Typography variant="h6" gutterBottom><PlayArrowIcon sx={{ mr: 1, verticalAlign: 'middle' }} />{t('admin.promptEvolution.controlPanel')}</Typography>
               <Divider sx={{ my: 2 }} />
               {status && (
                 <Box sx={{ mb: 3 }}>
-                  <Chip label={status.is_running ? '运行中' : '空闲'} color={status.is_running ? 'primary' : 'default'} size="small" />
+                  <Chip label={status.is_running ? t('admin.common.running') : t('admin.common.idle')} color={status.is_running ? 'primary' : 'default'} size="small" />
                   {status.is_running && status.max_iterations != null && (
                     <Box sx={{ mt: 2 }}>
                       {status.queue_mode && (
                         <Box sx={{ mb: 1.5 }}>
                           <Typography variant="body2" fontWeight={600}>
-                            当前题材：{status.current_genre || '准备中'}
+                            {t('admin.promptEvolution.currentGenre', { genre: status.current_genre || t('admin.promptEvolution.preparing') })}
                           </Typography>
                           <Typography variant="body2" color="text.secondary">
-                            题材进度：{status.queue_current ?? 0} / {status.queue_total ?? 0}
+                            {t('admin.promptEvolution.genreProgress', { current: status.queue_current ?? 0, total: status.queue_total ?? 0 })}
                           </Typography>
                           <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.75, mt: 1 }}>
                             {status.completed_genres?.map((genre) => (
-                              <Chip key={genre} size="small" color="success" label={`${genre} 已完成`} />
+                              <Chip key={genre} size="small" color="success" label={t('admin.promptEvolution.genreCompleted', { genre })} />
                             ))}
                             {status.failed_genres?.map((genre) => (
-                              <Chip key={genre} size="small" color="error" label={`${genre} 失败`} />
+                              <Chip key={genre} size="small" color="error" label={t('admin.promptEvolution.genreFailed', { genre })} />
                             ))}
                           </Box>
                         </Box>
                       )}
                       <Typography variant="body2">
-                        当前题材迭代：{status.current_iteration ?? 0} / {status.max_iterations}
+                        {t('admin.promptEvolution.genreIteration', { current: status.current_iteration ?? 0, max: status.max_iterations })}
                       </Typography>
                       <LinearProgress
                         variant="determinate"
@@ -646,7 +658,7 @@ export default function PromptEvolutionPage() {
                       />
                       {status.best_score != null && (
                         <Typography variant="body2" sx={{ mt: 1, color: getScoreColor(status.best_score) }}>
-                          最佳得分：{status.best_score.toFixed(1)}
+                          {t('admin.promptEvolution.bestScore', { score: status.best_score.toFixed(1) })}
                         </Typography>
                       )}
                     </Box>
@@ -655,7 +667,7 @@ export default function PromptEvolutionPage() {
               )}
               <Divider sx={{ my: 2 }} />
               {status?.is_running ? (
-                <Button variant="contained" color="error" fullWidth startIcon={<StopIcon />} onClick={handleStop}>停止进化</Button>
+                <Button variant="contained" color="error" fullWidth startIcon={<StopIcon />} onClick={handleStop}>{t('admin.promptEvolution.stopBtn')}</Button>
               ) : (
                 <Button
                   variant="contained"
@@ -664,7 +676,7 @@ export default function PromptEvolutionPage() {
                   startIcon={<PlayArrowIcon />}
                   onClick={() => setStartDialogOpen(true)}
                   disabled={backgroundStatus?.is_running}
-                >启动进化优化</Button>
+                >{t('admin.promptEvolution.startBtn')}</Button>
               )}
               <Button
                 variant="outlined"
@@ -674,7 +686,7 @@ export default function PromptEvolutionPage() {
                 onClick={handleOpenApprovedDialog}
                 sx={{ mt: 2 }}
               >
-                已批准提示词
+                {t('admin.promptEvolution.approvedBtn')}
               </Button>
             </CardContent>
           </Card>
@@ -684,43 +696,43 @@ export default function PromptEvolutionPage() {
           <Card>
             <CardContent>
               <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <Typography variant="h6"><HistoryIcon sx={{ mr: 1, verticalAlign: 'middle' }} />进化历史</Typography>
+                <Typography variant="h6"><HistoryIcon sx={{ mr: 1, verticalAlign: 'middle' }} />{t('admin.promptEvolution.historyTitle')}</Typography>
                 {histories.length > 5 && (
-                  <Button size="small" startIcon={<CleaningServicesIcon />} onClick={handleCleanup}>自动清理</Button>
+                  <Button size="small" startIcon={<CleaningServicesIcon />} onClick={handleCleanup}>{t('admin.promptEvolution.autoCleanup')}</Button>
                 )}
               </Box>
               <Divider sx={{ my: 2 }} />
               {histories.length === 0 ? (
-                <Typography color="text.secondary" sx={{ textAlign: 'center', py: 4 }}>暂无进化历史</Typography>
+                <Typography color="text.secondary" sx={{ textAlign: 'center', py: 4 }}>{t('admin.promptEvolution.historyEmpty')}</Typography>
               ) : (
                 <TableContainer>
                   <Table size="small">
                     <TableHead>
                       <TableRow>
-                        <TableCell>ID</TableCell>
-                        <TableCell>题材</TableCell>
-                        <TableCell>状态</TableCell>
-                        <TableCell>综合评分</TableCell>
-                        <TableCell>AI 分数</TableCell>
-                        <TableCell>时间</TableCell>
-                        <TableCell>操作</TableCell>
+                        <TableCell>{t('admin.common.id')}</TableCell>
+                        <TableCell>{t('admin.common.genre')}</TableCell>
+                        <TableCell>{t('admin.common.status')}</TableCell>
+                        <TableCell>{t('admin.promptEvolution.colScore')}</TableCell>
+                        <TableCell>{t('admin.promptEvolution.colAiScore')}</TableCell>
+                        <TableCell>{t('admin.common.time')}</TableCell>
+                        <TableCell>{t('admin.common.actions')}</TableCell>
                       </TableRow>
                     </TableHead>
                     <TableBody>
                       {histories.map((h) => (
                         <TableRow key={h.evolution_id}>
                           <TableCell><Typography variant="body2" sx={{ fontFamily: 'monospace' }}>{h.evolution_id?.substring(0, 8)}...</Typography></TableCell>
-                          <TableCell><Chip label={h.genre || '通用'} size="small" variant="outlined" /></TableCell>
+                          <TableCell><Chip label={genreLabel(h.genre)} size="small" variant="outlined" /></TableCell>
                           <TableCell><Chip label={h.status} color={h.status === 'completed' ? 'success' : h.status === 'running' ? 'primary' : h.status === 'interrupted' ? 'warning' : 'error'} size="small" /></TableCell>
                           <TableCell>{h.best_score != null ? <Typography sx={{ color: getScoreColor(h.best_score), fontWeight: 'bold' }}>{h.best_score.toFixed(1)}</Typography> : '-'}</TableCell>
                           <TableCell>{h.ai_score != null ? <Typography sx={{ color: getScoreColor(h.ai_score), fontWeight: 'bold' }}>{h.ai_score.toFixed(1)}</Typography> : '-'}</TableCell>
-                          <TableCell><Typography variant="caption">{new Date(h.started_at).toLocaleDateString()}</Typography></TableCell>
+                          <TableCell><Typography variant="caption">{formatDate(h.started_at)}</Typography></TableCell>
                           <TableCell>
-                            <Tooltip title="查看详情"><IconButton size="small" onClick={() => handleViewDetail(h.evolution_id)}><VisibilityIcon fontSize="small" /></IconButton></Tooltip>
+                            <Tooltip title={t('admin.common.viewDetail')}><IconButton size="small" onClick={() => handleViewDetail(h.evolution_id)}><VisibilityIcon fontSize="small" /></IconButton></Tooltip>
                             {(h.status === 'interrupted' || h.status === 'failed') && (
-                              <Tooltip title="恢复进化"><IconButton size="small" color="primary" onClick={() => handleResume(h.evolution_id)}><RestartAltIcon fontSize="small" /></IconButton></Tooltip>
+                              <Tooltip title={t('admin.common.resume')}><IconButton size="small" color="primary" onClick={() => handleResume(h.evolution_id)}><RestartAltIcon fontSize="small" /></IconButton></Tooltip>
                             )}
-                            <Tooltip title="删除">
+                            <Tooltip title={t('admin.common.delete')}>
                               <span>
                                 <IconButton size="small" color="error" onClick={() => handleDelete(h.evolution_id)} disabled={h.status === 'running'}><DeleteIcon fontSize="small" /></IconButton>
                               </span>
@@ -741,61 +753,61 @@ export default function PromptEvolutionPage() {
       <Card sx={{ mt: 3 }}>
         <CardContent>
           <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-            <Typography variant="h6"><SmartToyIcon sx={{ mr: 1, verticalAlign: 'middle' }} />模型管理</Typography>
+            <Typography variant="h6"><SmartToyIcon sx={{ mr: 1, verticalAlign: 'middle' }} />{t('admin.promptEvolution.modelSection.title')}</Typography>
             <Box sx={{ display: 'flex', gap: 1 }}>
               <TextField
                 select
                 size="small"
-                label="题材"
+                label={t('admin.promptEvolution.modelSection.genreLabel')}
                 value={modelGenre}
                 onChange={(event) => setModelGenre(event.target.value)}
                 sx={{ minWidth: 100 }}
               >
                 {AI_TRACE_GENRES.map((option) => (
-                  <MenuItem key={option} value={option}>{option}</MenuItem>
+                  <MenuItem key={option} value={option}>{genreLabel(option)}</MenuItem>
                 ))}
               </TextField>
               {modelConfig?.admin_selected_model && (
-                <Button size="small" variant="outlined" onClick={() => handleSetActiveModel(null)}>切换自动最优</Button>
+                <Button size="small" variant="outlined" onClick={() => handleSetActiveModel(null)}>{t('admin.promptEvolution.modelSection.switchAutoBest')}</Button>
               )}
-              <Button size="small" variant="contained" startIcon={<RocketLaunchIcon />} onClick={() => setEvalDialogOpen(true)} disabled={backgroundStatus?.is_running || backgroundStatus?.budget_remaining === 0}>全模型评测</Button>
-              <Button size="small" startIcon={<RefreshIcon />} onClick={fetchModels}>刷新</Button>
+              <Button size="small" variant="contained" startIcon={<RocketLaunchIcon />} onClick={() => setEvalDialogOpen(true)} disabled={backgroundStatus?.is_running || backgroundStatus?.budget_remaining === 0}>{t('admin.promptEvolution.modelSection.fullEval')}</Button>
+              <Button size="small" startIcon={<RefreshIcon />} onClick={fetchModels}>{t('admin.common.refresh')}</Button>
             </Box>
           </Box>
 
           {modelConfig && (
             <Alert severity="info" sx={{ mb: 2 }}>
-              当前活跃模型：<strong>{modelConfig.active_model_name || '默认路由'}</strong>
-              {modelConfig.admin_selected_model ? ' （管理员选定）' : modelConfig.auto_best_model ? ' （自动最优）' : ''}
+              {t('admin.promptEvolution.modelSection.activeModelPrefix')}<strong>{modelConfig.active_model_name || t('admin.promptEvolution.modelSection.defaultRoute')}</strong>
+              {modelConfig.admin_selected_model ? t('admin.promptEvolution.modelSection.adminSelected') : modelConfig.auto_best_model ? t('admin.promptEvolution.modelSection.autoBest') : ''}
               {modelConfig.active_model_provider && ` · ${modelConfig.active_model_provider}`}
             </Alert>
           )}
 
           {evaluationMetrics && (
             <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', mb: 2 }}>
-              <Chip label={`评测 ${evaluationMetrics.total} 次`} size="small" />
-              <Chip label={`成功率 ${(evaluationMetrics.success_rate * 100).toFixed(1)}%`} size="small" color="success" variant="outlined" />
-              <Chip label={`保真拒绝 ${(evaluationMetrics.fidelity_rejection_rate * 100).toFixed(1)}%`} size="small" color="warning" variant="outlined" />
-              <Chip label={`超时 ${evaluationMetrics.timeout_count} 次`} size="small" color="error" variant="outlined" />
+              <Chip label={t('admin.promptEvolution.modelSection.evalCount', { count: evaluationMetrics.total })} size="small" />
+              <Chip label={t('admin.promptEvolution.modelSection.successRate', { rate: (evaluationMetrics.success_rate * 100).toFixed(1) })} size="small" color="success" variant="outlined" />
+              <Chip label={t('admin.promptEvolution.modelSection.fidelityReject', { rate: (evaluationMetrics.fidelity_rejection_rate * 100).toFixed(1) })} size="small" color="warning" variant="outlined" />
+              <Chip label={t('admin.promptEvolution.modelSection.timeoutCount', { count: evaluationMetrics.timeout_count })} size="small" color="error" variant="outlined" />
             </Box>
           )}
 
           {backgroundStatus && (
             <Alert severity={backgroundStatus.is_running ? 'warning' : 'info'} sx={{ mb: 2 }}>
               <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', alignItems: 'center' }}>
-                <strong>{backgroundStatus.is_running ? '后台任务运行中' : '后台任务空闲'}</strong>
-                {backgroundStatus.task_type && <Chip size="small" label={`类型：${backgroundStatus.task_type}`} />}
-                {backgroundStatus.genre && <Chip size="small" label={`题材：${backgroundStatus.genre}`} />}
-                {backgroundStatus.started_at && <Chip size="small" label={`开始：${new Date(backgroundStatus.started_at * 1000).toLocaleTimeString()}`} />}
-                <Chip size="small" label={`预算：${backgroundStatus.budget_used}/${backgroundStatus.daily_budget}`} />
-                <Chip size="small" label={`剩余：${backgroundStatus.budget_remaining}`} />
+                <strong>{backgroundStatus.is_running ? t('admin.promptEvolution.modelSection.bgRunning') : t('admin.promptEvolution.modelSection.bgIdle')}</strong>
+                {backgroundStatus.task_type && <Chip size="small" label={t('admin.promptEvolution.modelSection.bgType', { type: backgroundStatus.task_type })} />}
+                {backgroundStatus.genre && <Chip size="small" label={t('admin.promptEvolution.modelSection.bgGenre', { genre: backgroundStatus.genre })} />}
+                {backgroundStatus.started_at && <Chip size="small" label={t('admin.promptEvolution.modelSection.bgStarted', { time: formatTime(backgroundStatus.started_at * 1000) })} />}
+                <Chip size="small" label={t('admin.promptEvolution.modelSection.budget', { used: backgroundStatus.budget_used, total: backgroundStatus.daily_budget })} />
+                <Chip size="small" label={t('admin.promptEvolution.modelSection.remaining', { count: backgroundStatus.budget_remaining })} />
                 {(backgroundStatus.expected_models || 0) > 0 && (
-                  <Chip size="small" label={`模型：${backgroundStatus.completed_models || 0}/${backgroundStatus.expected_models}`} />
+                  <Chip size="small" label={t('admin.promptEvolution.modelSection.bgModels', { done: backgroundStatus.completed_models || 0, expected: backgroundStatus.expected_models })} />
                 )}
-                {(backgroundStatus.success_models || 0) > 0 && <Chip size="small" color="success" label={`成功：${backgroundStatus.success_models}`} />}
-                {(backgroundStatus.failed_models || 0) > 0 && <Chip size="small" color="error" label={`失败：${backgroundStatus.failed_models}`} />}
+                {(backgroundStatus.success_models || 0) > 0 && <Chip size="small" color="success" label={t('admin.promptEvolution.modelSection.bgSuccess', { count: backgroundStatus.success_models })} />}
+                {(backgroundStatus.failed_models || 0) > 0 && <Chip size="small" color="error" label={t('admin.promptEvolution.modelSection.bgFailed', { count: backgroundStatus.failed_models })} />}
                 {!backgroundStatus.is_running && (backgroundStatus.cooldown_until || 0) * 1000 > Date.now() && (
-                  <Chip size="small" color="warning" label={`冷却至：${new Date((backgroundStatus.cooldown_until || 0) * 1000).toLocaleTimeString()}`} />
+                  <Chip size="small" color="warning" label={t('admin.promptEvolution.modelSection.cooldownUntil', { time: formatTime((backgroundStatus.cooldown_until || 0) * 1000) })} />
                 )}
               </Box>
             </Alert>
@@ -805,14 +817,14 @@ export default function PromptEvolutionPage() {
             <Table size="small">
               <TableHead>
                 <TableRow>
-                  <TableCell>模型</TableCell>
-                  <TableCell>服务商</TableCell>
-                  <TableCell align="center">评测次数</TableCell>
-                  <TableCell align="center">平均AI分</TableCell>
-                  <TableCell align="center">平均降分</TableCell>
-                  <TableCell align="center">最佳AI分</TableCell>
-                  <TableCell align="center">平均延迟</TableCell>
-                  <TableCell align="center">操作</TableCell>
+                  <TableCell>{t('admin.promptEvolution.modelSection.colModel')}</TableCell>
+                  <TableCell>{t('admin.promptEvolution.modelSection.colProvider')}</TableCell>
+                  <TableCell align="center">{t('admin.promptEvolution.modelSection.colEvalCount')}</TableCell>
+                  <TableCell align="center">{t('admin.promptEvolution.modelSection.colAvgAi')}</TableCell>
+                  <TableCell align="center">{t('admin.promptEvolution.modelSection.colAvgDrop')}</TableCell>
+                  <TableCell align="center">{t('admin.promptEvolution.modelSection.colBestAi')}</TableCell>
+                  <TableCell align="center">{t('admin.promptEvolution.modelSection.colAvgLatency')}</TableCell>
+                  <TableCell align="center">{t('admin.common.actions')}</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
@@ -829,7 +841,7 @@ export default function PromptEvolutionPage() {
                       <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
                         {m.is_active && <StarIcon sx={{ fontSize: 16, color: 'warning.main' }} />}
                         <Typography variant="body2" fontWeight={m.is_active ? 'bold' : 'normal'}>{m.name}</Typography>
-                        {m.is_eliminated && <Chip label="已淘汰" size="small" color="default" sx={{ ml: 0.5 }} />}
+                        {m.is_eliminated && <Chip label={t('admin.promptEvolution.modelSection.eliminated')} size="small" color="default" sx={{ ml: 0.5 }} />}
                       </Box>
                     </TableCell>
                     <TableCell><Chip label={m.provider} size="small" variant="outlined" /></TableCell>
@@ -860,7 +872,7 @@ export default function PromptEvolutionPage() {
                     </TableCell>
                     <TableCell align="center">
                       {!m.is_active && (
-                        <Tooltip title="设为活跃模型">
+                        <Tooltip title={t('admin.promptEvolution.modelSection.setActive')}>
                           <IconButton size="small" color="primary" onClick={() => handleSetActiveModel(m.model_id)}>
                             <LeaderboardIcon fontSize="small" />
                           </IconButton>
@@ -873,27 +885,27 @@ export default function PromptEvolutionPage() {
             </Table>
           </TableContainer>
 
-          <Typography variant="subtitle2" sx={{ mt: 2, mb: 1 }}>提示词与模型联合排行</Typography>
+          <Typography variant="subtitle2" sx={{ mt: 2, mb: 1 }}>{t('admin.promptEvolution.combo.title')}</Typography>
           <TableContainer component={Paper} variant="outlined">
             <Table size="small">
               <TableHead><TableRow>
-                <TableCell>提示词版本</TableCell><TableCell>模型</TableCell>
-                <TableCell align="right">成功/样本</TableCell><TableCell align="right">AI分</TableCell>
-                <TableCell align="right">保真度</TableCell><TableCell align="right">综合分</TableCell>
+                <TableCell>{t('admin.promptEvolution.combo.colPromptVer')}</TableCell><TableCell>{t('admin.promptEvolution.combo.colModel')}</TableCell>
+                <TableCell align="right">{t('admin.promptEvolution.combo.colSuccessSample')}</TableCell><TableCell align="right">{t('admin.promptEvolution.combo.colAi')}</TableCell>
+                <TableCell align="right">{t('admin.promptEvolution.combo.colFidelity')}</TableCell><TableCell align="right">{t('admin.promptEvolution.combo.colComposite')}</TableCell>
               </TableRow></TableHead>
               <TableBody>
                 {modelCombinations.slice(0, 20).map((item) => {
                   const qualification = item.is_current
-                    ? '当前生产使用'
+                    ? t('admin.promptEvolution.combo.qualCurrent')
                     : item.evaluation_policy_version !== 'ai-trace-v2'
-                    ? '策略已过期'
+                    ? t('admin.promptEvolution.combo.qualExpired')
                     : item.total_success < 3
-                      ? '数据不足'
+                      ? t('admin.promptEvolution.combo.qualNoData')
                       : item.distinct_sample_count < 3
-                        ? '样本不足'
+                        ? t('admin.promptEvolution.combo.qualNoSample')
                         : item.avg_fidelity_similarity < 70
-                          ? '保真不合格'
-                          : '可参与路由'
+                          ? t('admin.promptEvolution.combo.qualFidelityFail')
+                          : t('admin.promptEvolution.combo.qualEligible')
                   return (
                   <TableRow key={`${item.prompt_version_id}:${item.model_id}`}>
                     <TableCell>{item.prompt_version_id}</TableCell>
@@ -903,12 +915,12 @@ export default function PromptEvolutionPage() {
                     <TableCell align="right">{item.avg_fidelity_similarity.toFixed(1)}%</TableCell>
                     <TableCell align="right">
                       {item.composite_score.toFixed(1)}
-                      <Chip size="small" sx={{ ml: 1 }} color={qualification === '可参与路由' || qualification === '当前生产使用' ? 'success' : 'default'} label={qualification} />
+                      <Chip size="small" sx={{ ml: 1 }} color={qualification === t('admin.promptEvolution.combo.qualEligible') || qualification === t('admin.promptEvolution.combo.qualCurrent') ? 'success' : 'default'} label={qualification} />
                     </TableCell>
                   </TableRow>
                   )
                 })}
-                {modelCombinations.length === 0 && <TableRow><TableCell colSpan={6} align="center">暂无成熟联合评测数据</TableCell></TableRow>}
+                {modelCombinations.length === 0 && <TableRow><TableCell colSpan={6} align="center">{t('admin.promptEvolution.combo.empty')}</TableCell></TableRow>}
               </TableBody>
             </Table>
           </TableContainer>
@@ -920,18 +932,18 @@ export default function PromptEvolutionPage() {
         <CardContent>
           <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-              <Typography variant="h6">📝 测试样本</Typography>
+              <Typography variant="h6">{t('admin.promptEvolution.samples.title')}</Typography>
               {sampleSummary && (
-                <Chip label={`共 ${sampleSummary.total_samples} 个`} size="small" variant="outlined" />
+                <Chip label={t('admin.promptEvolution.samples.totalCount', { count: sampleSummary.total_samples })} size="small" variant="outlined" />
               )}
             </Box>
             <Box sx={{ display: 'flex', gap: 1 }}>
-              <Button size="small" variant="contained" onClick={() => setAddSampleOpen(true)}>添加样本</Button>
+              <Button size="small" variant="contained" onClick={() => setAddSampleOpen(true)}>{t('admin.promptEvolution.samples.add')}</Button>
               <Button size="small" variant="outlined" onClick={handleGenerateSamples} disabled={generating}>
                 {generating ? <CircularProgress size={16} sx={{ mr: 0.5 }} /> : null}
-                自动生成
+                {t('admin.promptEvolution.samples.autoGenerate')}
               </Button>
-              <Button size="small" startIcon={<RefreshIcon />} onClick={fetchSamples}>刷新</Button>
+              <Button size="small" startIcon={<RefreshIcon />} onClick={fetchSamples}>{t('admin.common.refresh')}</Button>
             </Box>
           </Box>
 
@@ -940,7 +952,7 @@ export default function PromptEvolutionPage() {
               {Object.entries(sampleSummary.source_distribution as Record<string, number>).map(([src, cnt]) => (
                 <Chip
                   key={src}
-                  label={`${src === 'custom' ? '自定义' : src === 'auto' ? '自动生成' : '内置'}: ${cnt}`}
+                  label={t('admin.promptEvolution.samples.sourceDist', { label: src === 'custom' ? t('admin.promptEvolution.samples.custom') : src === 'auto' ? t('admin.promptEvolution.samples.autoGen') : t('admin.promptEvolution.samples.builtin'), count: cnt })}
                   size="small"
                   color={src === 'custom' ? 'primary' : src === 'auto' ? 'secondary' : 'default'}
                   variant="outlined"
@@ -953,11 +965,11 @@ export default function PromptEvolutionPage() {
             <Table size="small" stickyHeader>
               <TableHead>
                 <TableRow>
-                  <TableCell>ID</TableCell>
-                  <TableCell>题材</TableCell>
-                  <TableCell>来源</TableCell>
-                  <TableCell>文本预览</TableCell>
-                  <TableCell align="center">操作</TableCell>
+                  <TableCell>{t('admin.common.id')}</TableCell>
+                  <TableCell>{t('admin.common.genre')}</TableCell>
+                  <TableCell>{t('admin.promptEvolution.samples.colSource')}</TableCell>
+                  <TableCell>{t('admin.promptEvolution.samples.colPreview')}</TableCell>
+                  <TableCell align="center">{t('admin.common.actions')}</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
@@ -967,7 +979,7 @@ export default function PromptEvolutionPage() {
                     <TableCell><Chip label={s.genre} size="small" /></TableCell>
                     <TableCell>
                       <Chip
-                        label={s.source === 'custom' ? '自定义' : s.source === 'auto' ? '自动' : '内置'}
+                        label={s.source === 'custom' ? t('admin.promptEvolution.samples.custom') : s.source === 'auto' ? t('admin.promptEvolution.samples.auto') : t('admin.promptEvolution.samples.builtin')}
                         size="small"
                         color={s.source === 'custom' ? 'primary' : s.source === 'auto' ? 'secondary' : 'default'}
                         variant="outlined"
@@ -979,7 +991,7 @@ export default function PromptEvolutionPage() {
                       </Typography>
                     </TableCell>
                     <TableCell align="center">
-                      <Tooltip title="删除">
+                      <Tooltip title={t('admin.common.delete')}>
                         <IconButton size="small" color="error" onClick={() => handleDeleteSample(s.sample_id)}>
                           <DeleteIcon fontSize="small" />
                         </IconButton>
@@ -995,43 +1007,43 @@ export default function PromptEvolutionPage() {
 
       {/* 添加样本对话框 */}
       <Dialog open={addSampleOpen} onClose={() => setAddSampleOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle>添加自定义测试样本</DialogTitle>
+        <DialogTitle>{t('admin.promptEvolution.samples.addDialogTitle')}</DialogTitle>
         <DialogContent>
           <TextField
             select
             fullWidth
-            label="题材"
+            label={t('admin.common.genre')}
             value={newSampleGenre}
             onChange={(e) => setNewSampleGenre(e.target.value)}
             sx={{ mt: 2, mb: 2 }}
             SelectProps={{ native: true }}
           >
-            {['玄幻', '都市', '言情', '悬疑', '科幻', '历史', '武侠', '其他'].map((g) => (
-              <option key={g} value={g}>{g}</option>
+            {AI_TRACE_SAMPLE_GENRES.map((g) => (
+              <option key={g} value={g}>{genreLabel(g)}</option>
             ))}
           </TextField>
           <TextField
             fullWidth
             multiline
             rows={5}
-            label="样本文本（至少50字）"
+            label={t('admin.promptEvolution.samples.sampleTextLabel')}
             value={newSampleText}
             onChange={(e) => setNewSampleText(e.target.value)}
-            helperText={`${newSampleText.length} 字`}
+            helperText={t('admin.promptEvolution.samples.charCount', { count: newSampleText.length })}
           />
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setAddSampleOpen(false)}>取消</Button>
-          <Button variant="contained" onClick={handleAddSample} disabled={newSampleText.trim().length < 50}>添加</Button>
+          <Button onClick={() => setAddSampleOpen(false)}>{t('action.cancel')}</Button>
+          <Button variant="contained" onClick={handleAddSample} disabled={newSampleText.trim().length < 50}>{t('admin.common.add')}</Button>
         </DialogActions>
       </Dialog>
 
       {/* 启动配置对话框 */}
       <Dialog open={startDialogOpen} onClose={() => setStartDialogOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle>配置进化参数</DialogTitle>
+        <DialogTitle>{t('admin.promptEvolution.config.title')}</DialogTitle>
         <DialogContent>
           <Box sx={{ mt: 2 }}>
-            <Typography gutterBottom>优化范围</Typography>
+            <Typography gutterBottom>{t('admin.promptEvolution.config.scope')}</Typography>
             <ToggleButtonGroup
               exclusive
               fullWidth
@@ -1040,52 +1052,52 @@ export default function PromptEvolutionPage() {
               onChange={(_, value) => value && setRunAllGenres(value === 'all')}
               sx={{ mb: 2 }}
             >
-              <ToggleButton value="single">当前题材</ToggleButton>
-              <ToggleButton value="all">全部题材</ToggleButton>
+              <ToggleButton value="single">{t('admin.promptEvolution.config.currentOnly')}</ToggleButton>
+              <ToggleButton value="all">{t('admin.promptEvolution.config.allGenres')}</ToggleButton>
             </ToggleButtonGroup>
             {runAllGenres ? (
               <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.75, mb: 2 }}>
                 {AI_TRACE_GENRES.filter((genre) => genre !== '通用').map((genre) => (
-                  <Chip key={genre} label={genre} size="small" variant="outlined" />
+                  <Chip key={genre} label={genreLabel(genre)} size="small" variant="outlined" />
                 ))}
               </Box>
             ) : (
               <Alert severity="info" sx={{ mb: 2 }}>
-                当前选择：{modelGenre === '通用' ? '通用（运行时自动检测）' : modelGenre}
+                {t('admin.promptEvolution.config.currentSelection', { genre: modelGenre === '通用' ? t('admin.promptEvolution.config.generalAutoDetect') : genreLabel(modelGenre) })}
               </Alert>
             )}
-            <Typography gutterBottom>目标 AI 率：{targetScore}</Typography>
+            <Typography gutterBottom>{t('admin.promptEvolution.config.targetAiRate', { score: targetScore })}</Typography>
             <Slider value={targetScore} onChange={(_, v) => setTargetScore(v as number)} min={0} max={50} step={5} marks valueLabelDisplay="auto" />
-            <Typography gutterBottom>最大迭代次数：{maxIterations}</Typography>
+            <Typography gutterBottom>{t('admin.promptEvolution.config.maxIterations', { count: maxIterations })}</Typography>
             <Slider value={maxIterations} onChange={(_, v) => setMaxIterations(v as number)} min={3} max={20} step={1} marks valueLabelDisplay="auto" />
-            <Typography gutterBottom sx={{ mt: 2 }}>每次测试样本数：{samplesPerIteration}</Typography>
+            <Typography gutterBottom sx={{ mt: 2 }}>{t('admin.promptEvolution.config.samplesPerIteration', { count: samplesPerIteration })}</Typography>
             <Slider value={samplesPerIteration} onChange={(_, v) => setSamplesPerIteration(v as number)} min={1} max={5} step={1} marks valueLabelDisplay="auto" />
           </Box>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setStartDialogOpen(false)}>取消</Button>
-          <Button variant="contained" onClick={handleStart} disabled={loading}>{loading ? <CircularProgress size={20} /> : '启动'}</Button>
+          <Button onClick={() => setStartDialogOpen(false)}>{t('action.cancel')}</Button>
+          <Button variant="contained" onClick={handleStart} disabled={loading}>{loading ? <CircularProgress size={20} /> : t('admin.common.start')}</Button>
         </DialogActions>
       </Dialog>
 
       {/* 详情对话框 */}
       <Dialog open={detailDialogOpen} onClose={() => setDetailDialogOpen(false)} maxWidth="md" fullWidth>
-        <DialogTitle>进化详情</DialogTitle>
+        <DialogTitle>{t('admin.promptEvolution.detail.title')}</DialogTitle>
         <DialogContent>
           {selectedDetail && (
             <Box>
-              <Typography variant="subtitle2" color="text.secondary">题材：{selectedDetail.genre || '通用'} | 状态：{selectedDetail.status} | 迭代：{selectedDetail.current_iteration}/{selectedDetail.max_iterations}</Typography>
+              <Typography variant="subtitle2" color="text.secondary">{t('admin.promptEvolution.detail.meta', { genre: genreLabel(selectedDetail.genre), status: selectedDetail.status, current: selectedDetail.current_iteration, max: selectedDetail.max_iterations })}</Typography>
               <Divider sx={{ my: 2 }} />
-              <Typography variant="h6" gutterBottom>最佳提示词版本（前 5）</Typography>
+              <Typography variant="h6" gutterBottom>{t('admin.promptEvolution.detail.bestVersions')}</Typography>
               <TableContainer component={Paper} variant="outlined">
                 <Table size="small">
                   <TableHead>
                     <TableRow>
-                      <TableCell>迭代</TableCell>
-                      <TableCell>AI 得分</TableCell>
-                      <TableCell>降分幅度</TableCell>
-                      <TableCell>分析</TableCell>
-                      <TableCell>操作</TableCell>
+                      <TableCell>{t('admin.promptEvolution.detail.colIter')}</TableCell>
+                      <TableCell>{t('admin.promptEvolution.detail.colAiScore')}</TableCell>
+                      <TableCell>{t('admin.promptEvolution.detail.colDrop')}</TableCell>
+                      <TableCell>{t('admin.promptEvolution.detail.colAnalysis')}</TableCell>
+                      <TableCell>{t('admin.common.actions')}</TableCell>
                     </TableRow>
                   </TableHead>
                   <TableBody>
@@ -1098,8 +1110,8 @@ export default function PromptEvolutionPage() {
                           <TableCell>{v.avg_score_reduction.toFixed(1)}</TableCell>
                           <TableCell><Typography variant="caption" sx={{ maxWidth: 200, display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{v.analysis}</Typography></TableCell>
                           <TableCell>
-                            <Tooltip title="查看完整提示词"><IconButton size="small" onClick={() => handleViewPrompt(selectedDetail.evolution_id, v.version_id)}><VisibilityIcon fontSize="small" /></IconButton></Tooltip>
-                            <Tooltip title={isApproved ? "取消批准" : "批准此版本"}>
+                            <Tooltip title={t('admin.promptEvolution.detail.viewFullPrompt')}><IconButton size="small" onClick={() => handleViewPrompt(selectedDetail.evolution_id, v.version_id)}><VisibilityIcon fontSize="small" /></IconButton></Tooltip>
+                            <Tooltip title={isApproved ? t('admin.promptEvolution.detail.revokeApproval') : t('admin.promptEvolution.detail.approveVersion')}>
                               <IconButton
                                 size="small"
                                 onClick={() => handleToggleApproval(selectedDetail.evolution_id, v.version_id, isApproved)}
@@ -1121,41 +1133,41 @@ export default function PromptEvolutionPage() {
             </Box>
           )}
         </DialogContent>
-        <DialogActions><Button onClick={() => setDetailDialogOpen(false)}>关闭</Button></DialogActions>
+        <DialogActions><Button onClick={() => setDetailDialogOpen(false)}>{t('action.close')}</Button></DialogActions>
       </Dialog>
 
       {/* 提示词详情对话框 */}
       <Dialog open={promptDialogOpen} onClose={() => setPromptDialogOpen(false)} maxWidth="lg" fullWidth>
-        <DialogTitle>提示词详情</DialogTitle>
+        <DialogTitle>{t('admin.promptEvolution.prompt.title')}</DialogTitle>
         <DialogContent dividers>
           {selectedPrompt && (
             <Box>
               <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
                 <Box>
-                  <Chip label={`迭代 #${selectedPrompt.iteration}`} sx={{ mr: 1 }} />
-                  <Chip label={`AI 得分：${selectedPrompt.avg_ai_score.toFixed(1)}`} color={selectedPrompt.avg_ai_score <= 30 ? 'success' : selectedPrompt.avg_ai_score <= 50 ? 'warning' : 'error'} />
+                  <Chip label={t('admin.promptEvolution.prompt.iterBadge', { iteration: selectedPrompt.iteration })} sx={{ mr: 1 }} />
+                  <Chip label={t('admin.promptEvolution.prompt.aiScoreBadge', { score: selectedPrompt.avg_ai_score.toFixed(1) })} color={selectedPrompt.avg_ai_score <= 30 ? 'success' : selectedPrompt.avg_ai_score <= 50 ? 'warning' : 'error'} />
                 </Box>
-                <Button startIcon={<ContentCopyIcon />} onClick={() => copyToClipboard(selectedPrompt.prompt_text)} size="small">复制</Button>
+                <Button startIcon={<ContentCopyIcon />} onClick={() => copyToClipboard(selectedPrompt.prompt_text)} size="small">{t('admin.common.copy')}</Button>
               </Box>
               <Alert severity="info" sx={{ mb: 2 }}>
                 <Typography variant="body2" sx={{ fontFamily: 'monospace', whiteSpace: 'pre-wrap' }}>{selectedPrompt.prompt_text}</Typography>
               </Alert>
-              <Typography variant="h6" gutterBottom>优化分析</Typography>
+              <Typography variant="h6" gutterBottom>{t('admin.promptEvolution.prompt.analysisTitle')}</Typography>
               <Alert severity={selectedPrompt.avg_score_reduction > 0 ? 'success' : 'warning'} sx={{ mb: 2 }}>
                 {selectedPrompt.analysis}
               </Alert>
-              <Typography variant="h6" gutterBottom>测试样本（{selectedPrompt.evaluation_results.length}个）</Typography>
+              <Typography variant="h6" gutterBottom>{t('admin.promptEvolution.prompt.evalSamples', { count: selectedPrompt.evaluation_results.length })}</Typography>
               <TableContainer>
                 <Table size="small">
                   <TableHead>
                     <TableRow>
-                      <TableCell>样本 ID</TableCell>
-                      <TableCell>原始得分</TableCell>
-                      <TableCell>优化后得分</TableCell>
-                      <TableCell>降分幅度</TableCell>
-                      <TableCell>质量评审</TableCell>
-                      <TableCell>状态</TableCell>
-                      <TableCell>操作</TableCell>
+                      <TableCell>{t('admin.promptEvolution.prompt.colSampleId')}</TableCell>
+                      <TableCell>{t('admin.promptEvolution.prompt.colOrigScore')}</TableCell>
+                      <TableCell>{t('admin.promptEvolution.prompt.colRewrittenScore')}</TableCell>
+                      <TableCell>{t('admin.promptEvolution.prompt.colDrop')}</TableCell>
+                      <TableCell>{t('admin.promptEvolution.prompt.colQuality')}</TableCell>
+                      <TableCell>{t('admin.common.status')}</TableCell>
+                      <TableCell>{t('admin.common.actions')}</TableCell>
                     </TableRow>
                   </TableHead>
                   <TableBody>
@@ -1167,15 +1179,15 @@ export default function PromptEvolutionPage() {
                         <TableCell><Typography sx={{ color: sample.score_reduction > 0 ? 'success.main' : 'error.main', fontWeight: 'bold' }}>{sample.score_reduction.toFixed(1)}</Typography></TableCell>
                         <TableCell>
                           <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap', minWidth: 132 }}>
-                            <Chip size="small" label={`语义 ${sample.llm_review?.semantic_fidelity?.score?.toFixed(0) ?? '-'}`} variant="outlined" />
-                            <Chip size="small" label={`可读 ${sample.llm_review?.readability?.score?.toFixed(0) ?? '-'}`} variant="outlined" />
+                            <Chip size="small" label={t('admin.promptEvolution.prompt.semanticScore', { score: sample.llm_review?.semantic_fidelity?.score?.toFixed(0) ?? '-' })} variant="outlined" />
+                            <Chip size="small" label={t('admin.promptEvolution.prompt.readabilityScore', { score: sample.llm_review?.readability?.score?.toFixed(0) ?? '-' })} variant="outlined" />
                           </Box>
                         </TableCell>
-                        <TableCell><Chip label={sample.success ? '成功' : '失败'} color={sample.success ? 'success' : 'error'} size="small" /></TableCell>
+                        <TableCell><Chip label={sample.success ? t('admin.common.success') : t('admin.common.fail')} color={sample.success ? 'success' : 'error'} size="small" /></TableCell>
                         <TableCell>
-                          <Tooltip title="查看原文"><IconButton size="small" onClick={() => { setExpandedPromptId(expandedPromptId === `original-${idx}` ? null : `original-${idx}`) }}><VisibilityIcon fontSize="small" /></IconButton></Tooltip>
-                          <Tooltip title="查看优化后"><IconButton size="small" onClick={() => { setExpandedPromptId(expandedPromptId === `rewritten-${idx}` ? null : `rewritten-${idx}`) }}><VisibilityIcon fontSize="small" /></IconButton></Tooltip>
-                          <Tooltip title="查看全部质量维度"><IconButton size="small" onClick={() => { setExpandedPromptId(expandedPromptId === `quality-${idx}` ? null : `quality-${idx}`) }}><LeaderboardIcon fontSize="small" /></IconButton></Tooltip>
+                          <Tooltip title={t('admin.promptEvolution.prompt.viewOriginal')}><IconButton size="small" onClick={() => { setExpandedPromptId(expandedPromptId === `original-${idx}` ? null : `original-${idx}`) }}><VisibilityIcon fontSize="small" /></IconButton></Tooltip>
+                          <Tooltip title={t('admin.promptEvolution.prompt.viewRewritten')}><IconButton size="small" onClick={() => { setExpandedPromptId(expandedPromptId === `rewritten-${idx}` ? null : `rewritten-${idx}`) }}><VisibilityIcon fontSize="small" /></IconButton></Tooltip>
+                          <Tooltip title={t('admin.promptEvolution.prompt.viewAllQuality')}><IconButton size="small" onClick={() => { setExpandedPromptId(expandedPromptId === `quality-${idx}` ? null : `quality-${idx}`) }}><LeaderboardIcon fontSize="small" /></IconButton></Tooltip>
                         </TableCell>
                       </TableRow>
                     ))}
@@ -1186,13 +1198,13 @@ export default function PromptEvolutionPage() {
                 <Box key={`original-${idx}`} sx={{ mt: 2 }}>
                   {expandedPromptId === `original-${idx}` && (
                     <Alert severity="info" sx={{ mt: 1 }}>
-                      <Typography variant="subtitle2" gutterBottom>原文：</Typography>
+                      <Typography variant="subtitle2" gutterBottom>{t('admin.promptEvolution.prompt.originalLabel')}</Typography>
                       <Typography variant="body2" sx={{ fontFamily: 'monospace', whiteSpace: 'pre-wrap' }}>{sample.original_text}</Typography>
                     </Alert>
                   )}
                   {expandedPromptId === `rewritten-${idx}` && (
                     <Alert severity="success" sx={{ mt: 1 }}>
-                      <Typography variant="subtitle2" gutterBottom>优化后：</Typography>
+                      <Typography variant="subtitle2" gutterBottom>{t('admin.promptEvolution.prompt.rewrittenLabel')}</Typography>
                       <Typography variant="body2" sx={{ fontFamily: 'monospace', whiteSpace: 'pre-wrap' }}>{sample.rewritten_text}</Typography>
                     </Alert>
                   )}
@@ -1204,24 +1216,24 @@ export default function PromptEvolutionPage() {
             </Box>
           )}
         </DialogContent>
-        <DialogActions><Button onClick={() => setPromptDialogOpen(false)}>关闭</Button></DialogActions>
+        <DialogActions><Button onClick={() => setPromptDialogOpen(false)}>{t('action.close')}</Button></DialogActions>
       </Dialog>
 
       {/* 已批准提示词对话框 */}
       <Dialog open={approvedDialogOpen} onClose={() => setApprovedDialogOpen(false)} maxWidth="md" fullWidth>
-        <DialogTitle>已批准提示词列表</DialogTitle>
+        <DialogTitle>{t('admin.promptEvolution.approved.title')}</DialogTitle>
         <DialogContent>
           {approvedPrompts.length === 0 ? (
-            <Typography color="text.secondary" sx={{ textAlign: 'center', py: 4 }}>暂无已批准的提示词</Typography>
+            <Typography color="text.secondary" sx={{ textAlign: 'center', py: 4 }}>{t('admin.promptEvolution.approved.empty')}</Typography>
           ) : (
             <TableContainer>
               <Table size="small">
                 <TableHead>
                   <TableRow>
-                    <TableCell>ID</TableCell>
-                    <TableCell>AI 得分</TableCell>
-                    <TableCell>批准时间</TableCell>
-                    <TableCell>操作</TableCell>
+                    <TableCell>{t('admin.common.id')}</TableCell>
+                    <TableCell>{t('admin.promptEvolution.detail.colAiScore')}</TableCell>
+                    <TableCell>{t('admin.promptEvolution.approved.colApprovedAt')}</TableCell>
+                    <TableCell>{t('admin.common.actions')}</TableCell>
                   </TableRow>
                 </TableHead>
                 <TableBody>
@@ -1229,10 +1241,10 @@ export default function PromptEvolutionPage() {
                     <TableRow key={p.version_id}>
                       <TableCell><Typography variant="body2" sx={{ fontFamily: 'monospace' }}>{p.version_id?.substring(0, 8)}...</Typography></TableCell>
                       <TableCell><Typography sx={{ color: getScoreColor(p.avg_ai_score), fontWeight: 'bold' }}>{p.avg_ai_score.toFixed(1)}</Typography></TableCell>
-                      <TableCell><Typography variant="caption">{new Date(p.approved_at).toLocaleDateString()}</Typography></TableCell>
+                      <TableCell><Typography variant="caption">{formatDate(p.approved_at)}</Typography></TableCell>
                       <TableCell>
-                        <Tooltip title="查看"><IconButton size="small" onClick={() => handleViewPrompt(p.evolution_id, p.version_id)}><VisibilityIcon fontSize="small" /></IconButton></Tooltip>
-                        <Tooltip title="移除">
+                        <Tooltip title={t('admin.common.view')}><IconButton size="small" onClick={() => handleViewPrompt(p.evolution_id, p.version_id)}><VisibilityIcon fontSize="small" /></IconButton></Tooltip>
+                        <Tooltip title={t('admin.common.remove')}>
                           <IconButton size="small" color="error" onClick={() => handleRemoveApproved(p.version_id)}><DeleteIcon fontSize="small" /></IconButton>
                         </Tooltip>
                       </TableCell>
@@ -1243,21 +1255,21 @@ export default function PromptEvolutionPage() {
             </TableContainer>
           )}
         </DialogContent>
-        <DialogActions><Button onClick={() => setApprovedDialogOpen(false)}>关闭</Button></DialogActions>
+        <DialogActions><Button onClick={() => setApprovedDialogOpen(false)}>{t('action.close')}</Button></DialogActions>
       </Dialog>
 
       {/* 全模型评测对话框 */}
       <Dialog open={evalDialogOpen} onClose={() => { if (!evaluating) setEvalDialogOpen(false) }} maxWidth="md" fullWidth>
-        <DialogTitle>全模型评测</DialogTitle>
+        <DialogTitle>{t('admin.promptEvolution.eval.title')}</DialogTitle>
         <DialogContent>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-            输入测试文本，将同时调用所有 9 个模型进行改写并检测 AI 分数，结果自动更新排行榜。
+            {t('admin.promptEvolution.eval.hint')}
           </Typography>
           <TextField
             fullWidth
             multiline
             rows={4}
-            label="测试文本（至少50字）"
+            label={t('admin.promptEvolution.eval.textLabel')}
             value={evalText}
             onChange={(e) => setEvalText(e.target.value)}
             disabled={evaluating}
@@ -1267,26 +1279,24 @@ export default function PromptEvolutionPage() {
             <Box sx={{ mb: 2 }}>
               <LinearProgress />
               <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
-                正在评测所有模型，预计需要 1-3 分钟…
+                {t('admin.promptEvolution.eval.progress')}
               </Typography>
             </Box>
           )}
           {evalResults && (
             <Box>
               <Alert severity="success" sx={{ mb: 2 }}>
-                评测完成：原始 AI 分数 {evalResults.original_ai_score}，
-                {evalResults.total_models_success}/{evalResults.total_models_tried} 个模型成功，
-                耗时 {evalResults.total_time_seconds?.toFixed(1)}s
+                {t('admin.promptEvolution.eval.done', { original: evalResults.original_ai_score, success: evalResults.total_models_success, tried: evalResults.total_models_tried, seconds: evalResults.total_time_seconds?.toFixed(1) })}
               </Alert>
               <TableContainer component={Paper} variant="outlined">
                 <Table size="small">
                   <TableHead>
                     <TableRow>
-                      <TableCell>#</TableCell>
-                      <TableCell>模型</TableCell>
-                      <TableCell align="center">AI分数</TableCell>
-                      <TableCell align="center">降分幅度</TableCell>
-                      <TableCell align="center">耗时</TableCell>
+                      <TableCell>{t('admin.promptEvolution.eval.colRank')}</TableCell>
+                      <TableCell>{t('admin.common.model')}</TableCell>
+                      <TableCell align="center">{t('admin.promptEvolution.eval.colAi')}</TableCell>
+                      <TableCell align="center">{t('admin.promptEvolution.detail.colDrop')}</TableCell>
+                      <TableCell align="center">{t('admin.promptEvolution.eval.colLatency')}</TableCell>
                     </TableRow>
                   </TableHead>
                   <TableBody>
@@ -1312,9 +1322,9 @@ export default function PromptEvolutionPage() {
           )}
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => { setEvalDialogOpen(false); setEvalResults(null) }} disabled={evaluating}>关闭</Button>
+          <Button onClick={() => { setEvalDialogOpen(false); setEvalResults(null) }} disabled={evaluating}>{t('action.close')}</Button>
           <Button variant="contained" onClick={handleEvaluateModels} disabled={evaluating || !evalText.trim() || backgroundStatus?.is_running || backgroundStatus?.budget_remaining === 0}>
-            {evaluating ? <CircularProgress size={20} /> : '开始评测'}
+            {evaluating ? <CircularProgress size={20} /> : t('admin.promptEvolution.eval.startBtn')}
           </Button>
         </DialogActions>
       </Dialog>

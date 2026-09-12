@@ -1,5 +1,7 @@
 import { useCallback, type Dispatch, type SetStateAction } from 'react'
 
+import { useTranslation } from 'react-i18next'
+
 import type { ActivateQueuedAudiobookTaskOptions, SetSnackbar } from './hookTypes'
 import type { AudiobookProjectDetail, Chapter, TaskStatus } from './types'
 import { formatAudiobookTaskLabel, isActiveAudiobookTask } from './taskUtils'
@@ -38,9 +40,10 @@ export const useAudiobookTaskFocusActions = ({
   setProgressViewDismissed,
   setSnackbar,
 }: UseAudiobookTaskFocusActionsParams) => {
+  const { t } = useTranslation()
   const formatActiveTaskLabel = useCallback(
-    (task: TaskStatus) => formatAudiobookTaskLabel(task, chapters),
-    [chapters],
+    (task: TaskStatus) => formatAudiobookTaskLabel(task, chapters, t),
+    [chapters, t],
   )
 
   const focusAudiobookTask = useCallback(

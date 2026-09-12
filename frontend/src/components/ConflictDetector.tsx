@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { useTranslation } from 'react-i18next'
 import {
   Box,
   Button,
@@ -62,7 +63,9 @@ interface ConflictDetectorProps {
 }
 
 export default function ConflictDetector(props: ConflictDetectorProps) {
-  const { projectId, onSelectItem, title = '冲突检测' } = props
+  const { projectId, onSelectItem, title: titleProp } = props
+  const { t } = useTranslation()
+  const title = titleProp ?? t('workflow.conflictDetector.title')
 
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -98,7 +101,7 @@ export default function ConflictDetector(props: ConflictDetectorProps) {
       setTotalConflicts(data.total_conflicts || 0)
       setHasDetected(true)
     } catch (err: any) {
-      setError(await extractApiErrorMessage(err, '检测失败'))
+      setError(await extractApiErrorMessage(err, t('workflow.conflictDetector.detectFailed')))
     } finally {
       setLoading(false)
     }
@@ -120,13 +123,13 @@ export default function ConflictDetector(props: ConflictDetectorProps) {
   const getSeverityLabel = (severity: string) => {
     switch (severity) {
       case 'high':
-        return '严重'
+        return t('workflow.conflictDetector.severityHigh')
       case 'medium':
-        return '中等'
+        return t('workflow.conflictDetector.severityMedium')
       case 'low':
-        return '轻微'
+        return t('workflow.conflictDetector.severityLow')
       default:
-        return '未知'
+        return t('workflow.conflictDetector.severityUnknown')
     }
   }
 
@@ -141,13 +144,13 @@ export default function ConflictDetector(props: ConflictDetectorProps) {
             </Typography>
             {hasDetected && (
               <Chip
-                label={totalConflicts > 0 ? `发现${totalConflicts}个冲突` : '无冲突'}
+                label={totalConflicts > 0 ? t('workflow.conflictDetector.conflictCount', { count: totalConflicts }) : t('workflow.conflictDetector.noConflict')}
                 size="small"
                 color={totalConflicts > 0 ? 'warning' : 'success'}
               />
             )}
           </Box>
-          <Tooltip title="刷新检测">
+          <Tooltip title={t('workflow.conflictDetector.refresh')}>
             <IconButton size="small" onClick={handleDetect} disabled={loading}>
               <RefreshIcon fontSize="small" />
             </IconButton>
@@ -157,7 +160,7 @@ export default function ConflictDetector(props: ConflictDetectorProps) {
         {!hasDetected && (
           <Box textAlign="center" py={3}>
             <Typography variant="body2" color="text.secondary" mb={2}>
-              点击下方按钮开始检测设定冲突
+              {t('workflow.conflictDetector.startHint')}
             </Typography>
             <Button
               variant="contained"
@@ -166,7 +169,7 @@ export default function ConflictDetector(props: ConflictDetectorProps) {
               disabled={loading}
               startIcon={loading ? <CircularProgress size={16} /> : <WarningIcon />}
             >
-              {loading ? '检测中...' : '开始检测'}
+              {loading ? t('workflow.conflictDetector.detecting') : t('workflow.conflictDetector.startDetect')}
             </Button>
           </Box>
         )}
@@ -186,7 +189,7 @@ export default function ConflictDetector(props: ConflictDetectorProps) {
         {hasDetected && !loading && totalConflicts === 0 && (
           <Alert severity="success" icon={<CheckCircleIcon />}>
             <Typography variant="body2">
-              ✅ 未发现设定冲突，世界观设定一致性良好！
+              ✅ {t('workflow.conflictDetector.allClear')}
             </Typography>
           </Alert>
         )}
@@ -198,7 +201,7 @@ export default function ConflictDetector(props: ConflictDetectorProps) {
               <Box mb={2}>
                 <Typography variant="subtitle2" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                   <ErrorOutlineIcon fontSize="small" color="error" />
-                  同名不同定义 ({duplicateNames.length})
+                  {t('workflow.conflictDetector.duplicateNameSection', { count: duplicateNames.length })}
                 </Typography>
                 <List dense>
                   {duplicateNames.map((conflict, index) => (
@@ -216,7 +219,7 @@ export default function ConflictDetector(props: ConflictDetectorProps) {
                               sx={{ height: 20 }}
                             />
                             <Typography variant="caption" color="text.secondary" ml="auto">
-                              {conflict.items.length} 个定义
+                              {t('workflow.conflictDetector.itemCount', { count: conflict.items.length })}
                             </Typography>
                           </Box>
                         </AccordionSummary>
@@ -263,7 +266,7 @@ export default function ConflictDetector(props: ConflictDetectorProps) {
               <Box>
                 <Typography variant="subtitle2" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                   <ErrorOutlineIcon fontSize="small" color="warning" />
-                  能力与境界不符 ({abilityMismatches.length})
+                  {t('workflow.conflictDetector.abilityMismatchSection', { count: abilityMismatches.length })}
                 </Typography>
                 <List dense>
                   {abilityMismatches.map((conflict, index) => (
@@ -280,7 +283,7 @@ export default function ConflictDetector(props: ConflictDetectorProps) {
                           primary={
                             <Box display="flex" alignItems="center" gap={1} mb={0.5}>
                               <Typography variant="body2" fontWeight={500}>
-                                {conflict.character} 使用 {conflict.technique}
+                                {t('workflow.conflictDetector.usesTechnique', { character: conflict.character, technique: conflict.technique })}
                               </Typography>
                               <Chip
                                 label={getSeverityLabel(conflict.severity)}
@@ -293,10 +296,10 @@ export default function ConflictDetector(props: ConflictDetectorProps) {
                           secondary={
                             <Box>
                               <Typography variant="caption" display="block">
-                                当前境界: {conflict.character_realm || '未设置'}
+                                {t('workflow.conflictDetector.currentRealm', { realm: conflict.character_realm || t('workflow.conflictDetector.unset') })}
                               </Typography>
                               <Typography variant="caption" display="block" color="error.main">
-                                要求境界: {conflict.required_realm}
+                                {t('workflow.conflictDetector.requiredRealm', { realm: conflict.required_realm })}
                               </Typography>
                             </Box>
                           }
@@ -313,7 +316,7 @@ export default function ConflictDetector(props: ConflictDetectorProps) {
               <Box>
                 <Typography variant="subtitle2" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                   <ErrorOutlineIcon fontSize="small" color="error" />
-                  关系矛盾 ({relationConflictCount})
+                  {t('workflow.conflictDetector.relationSection', { count: relationConflictCount })}
                 </Typography>
                 <List dense>
                   {relationConflicts.map((conflict, index) => (

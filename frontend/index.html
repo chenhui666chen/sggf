@@ -1,14 +1,94 @@
 <!doctype html>
-<html lang="en">
+<html lang="zh-CN" data-theme="light">
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#f2eee6" />
     <title>拾光工坊</title>
+    <!--
+      启动样式：只依赖 <html data-theme>，不依赖运行时注入的 CSS-in-JS。
+      紧跟其后的内联脚本会同步把这个属性改成用户真实的偏好，因此首帧底色
+      就是对的，不会先白一下再变暗。
+
+      这里的颜色必须与 src/theme/themeModeDom.ts 的 BOOT_COLORS 一致，
+      由 src/theme/__tests__/indexHtml.test.ts 逐字比对，改 token 时漏改会红。
+    -->
+    <style>
+      html[data-theme='light'] {
+        background-color: #f2eee6;
+        color: #1a1815;
+        color-scheme: light;
+      }
+      html[data-theme='dark'] {
+        background-color: #0d0e10;
+        color: #edebe6;
+        color-scheme: dark;
+      }
+    </style>
+    <script>
+      // 防闪烁（FOUC）：必须在 React 挂载前跑完，所以是内联同步脚本而非 module。
+      // 逻辑与 src/theme/themeMode.ts 保持同构：读 localStorage → 解析 system →
+      // 写 data-theme。同样由 indexHtml.test.ts 守护键名与媒体查询串。
+      (function () {
+        var STORAGE_KEY = 'sg.theme-mode';
+        var mode = 'system';
+
+        try {
+          var stored = window.localStorage.getItem(STORAGE_KEY);
+          if (stored === 'light' || stored === 'dark' || stored === 'system') {
+            mode = stored;
+          }
+        } catch {
+          // Safari 隐私模式下访问 localStorage 会抛异常，回退到系统偏好。
+        }
+
+        var resolved = mode;
+        if (mode === 'system') {
+          var prefersDark =
+            typeof window.matchMedia === 'function' &&
+            window.matchMedia('(prefers-color-scheme: dark)').matches;
+          resolved = prefersDark ? 'dark' : 'light';
+        }
+
+        document.documentElement.setAttribute('data-theme', resolved);
+
+        // 地址栏颜色没法用 CSS 选择器驱动，这里先写一次，之后由
+        // ThemeModeProvider 接管，避免深色模式下地址栏在加载期一直是白的。
+        var meta = document.querySelector('meta[name="theme-color"]');
+        if (meta) {
+          meta.setAttribute('content', resolved === 'dark' ? '#0d0e10' : '#f2eee6');
+        }
+      })();
+    </script>
+    <script>
+      // 标题防闪：上面那个静态 <title> 是中文，而写标题的代码要等语言
+      // chunk 到位（约一百毫秒），上次选了英文的用户会先看到一下「拾光工坊」。
+      //
+      // 必须排在 <title> 之后：解析器读到 <title> 会把 document.title 覆盖回去。
+      // TITLES 这份副本与 src/i18n/resources/*/common.json 的 app.name 逐字比对，
+      // 由 src/theme/__tests__/indexHtml.test.ts 守护，口径同上面的 BOOT_COLORS。
+      //
+      // sg.lang 存的已经是归一后的语言码（persistLanguage 只写受支持的值），
+      // 所以这里不用重抄 zh-TW → zh-CN 那套归一逻辑：查不到就什么都不做，
+      // 静态的中文标题与 lang 正好对上引导失败时的降级实例（见 main.tsx）。
+      (function () {
+        var TITLES = { 'zh-CN': '拾光工坊', 'en-US': 'Shiguang Studio' };
+
+        try {
+          var stored = window.localStorage.getItem('sg.lang');
+          if (stored && TITLES[stored]) {
+            document.title = TITLES[stored];
+            document.documentElement.setAttribute('lang', stored);
+          }
+        } catch {
+          // Safari 隐私模式下访问 localStorage 会抛异常，留在静态的中文标题上。
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
-

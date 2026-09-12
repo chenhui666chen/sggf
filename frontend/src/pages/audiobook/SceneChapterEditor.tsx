@@ -37,6 +37,8 @@ import PlayArrowIcon from '@mui/icons-material/PlayArrow'
 import RefreshIcon from '@mui/icons-material/Refresh'
 
 import { apiClient, extractApiErrorMessage } from '../../services/api'
+import { useTranslation } from 'react-i18next'
+import type { TFunction } from 'i18next'
 import {
   applySegmentDetailDraft,
   segmentMusicCueDraftValue,
@@ -91,41 +93,41 @@ export interface SceneChapterEditorProps {
   disablePortal?: boolean
 }
 
-export const SCENE_STATUS_LABELS: Record<string, { label: string; color: 'success' | 'warning' | 'info' | 'default' | 'error' }> = {
-  passed: { label: '已通过', color: 'success' },
-  manual_review: { label: '人工评审', color: 'warning' },
-  legacy_stems: { label: '回退素材', color: 'info' },
-  stale: { label: '已过期', color: 'default' },
-  failed: { label: '失败', color: 'error' },
+export const SCENE_STATUS_LABELS: Record<string, { labelKey: string; color: 'success' | 'warning' | 'info' | 'default' | 'error' }> = {
+  passed: { labelKey: 'audiobook.sceneChapterEditor.statusLabels.passed', color: 'success' },
+  manual_review: { labelKey: 'audiobook.sceneChapterEditor.statusLabels.manualReview', color: 'warning' },
+  legacy_stems: { labelKey: 'audiobook.sceneChapterEditor.statusLabels.legacyStems', color: 'info' },
+  stale: { labelKey: 'audiobook.sceneChapterEditor.statusLabels.stale', color: 'default' },
+  failed: { labelKey: 'audiobook.sceneChapterEditor.statusLabels.failed', color: 'error' },
 }
 
 export const EDIT_TYPE_LABELS: Record<SceneEditType, string> = {
-  dialogue: '台词编辑',
-  director_override: '导演覆盖',
-  voice_binding: '音色编辑',
+  dialogue: 'audiobook.sceneChapterEditor.editTypeTabs.dialogue',
+  director_override: 'audiobook.sceneChapterEditor.editTypeTabs.directorOverride',
+  voice_binding: 'audiobook.sceneChapterEditor.editTypeTabs.voiceBinding',
 }
 
 /** P2：导演覆盖类型中文标签与用途说明。 */
 export const DIRECTION_TYPE_LABELS: Record<string, string> = {
-  performance: '表演',
-  sfx: '音效',
-  music: '配乐',
-  acoustic: '声学环境',
+  performance: 'audiobook.sceneChapterEditor.directionTypeLabels.performance',
+  sfx: 'audiobook.sceneChapterEditor.directionTypeLabels.sfx',
+  music: 'audiobook.sceneChapterEditor.directionTypeLabels.music',
+  acoustic: 'audiobook.sceneChapterEditor.directionTypeLabels.acoustic',
 }
 
 export const DIRECTION_TYPE_HINTS: Record<string, string> = {
-  performance: '调整语气、节奏等表演方式，不改动台词原文',
-  sfx: '追加或强调场景音效，如开门声、雨声',
-  music: '调整配乐的进入、延续或停止',
-  acoustic: '调整空间感，如室内回声、开阔原野',
+  performance: 'audiobook.sceneChapterEditor.directionTypeHints.performance',
+  sfx: 'audiobook.sceneChapterEditor.directionTypeHints.sfx',
+  music: 'audiobook.sceneChapterEditor.directionTypeHints.music',
+  acoustic: 'audiobook.sceneChapterEditor.directionTypeHints.acoustic',
 }
 
-const sceneStatusChip = (status: string) => {
+const sceneStatusChip = (status: string, t: TFunction) => {
   const config = SCENE_STATUS_LABELS[String(status || '').toLowerCase()] ?? {
-    label: status || 'unknown',
+    labelKey: status || 'unknown',
     color: 'default' as const,
   }
-  return <Chip size="small" color={config.color} variant="outlined" label={config.label} />
+  return <Chip size="small" color={config.color} variant="outlined" label={t(config.labelKey)} />
 }
 
 const SceneChapterEditor = ({
@@ -141,6 +143,7 @@ const SceneChapterEditor = ({
   onClose,
   disablePortal = false,
 }: SceneChapterEditorProps) => {
+  const { t } = useTranslation()
   const [document, setDocument] = useState<SceneEditorDocument | null>(null)
   const [scriptSegments, setScriptSegments] = useState<ScriptSegment[]>([])
   const [scriptStatus, setScriptStatus] = useState('pending')
@@ -211,7 +214,7 @@ const SceneChapterEditor = ({
         return doc.scenes[0]?.scene_id ?? null
       })
     } catch (err: unknown) {
-      setError(await extractApiErrorMessage(err, '加载场景编辑器失败'))
+      setError(await extractApiErrorMessage(err, t('audiobook.sceneChapterEditor.loadFailed')))
     } finally {
       setLoading(false)
     }
@@ -272,11 +275,11 @@ const SceneChapterEditor = ({
   const handleConflict = useCallback(async (err: unknown) => {
     const status = (err as { response?: { status?: number } })?.response?.status
     if (status === 409) {
-      setConflictMessage('文档已被他人修改，请刷新后重试')
+      setConflictMessage(t('audiobook.sceneChapterEditor.conflictMessage'))
       await loadDocument()
       return true
     }
-    setConflictMessage(await extractApiErrorMessage(err, '保存失败'))
+    setConflictMessage(await extractApiErrorMessage(err, t('audiobook.sceneChapterEditor.saveFailed')))
     return false
   }, [loadDocument])
 
@@ -287,7 +290,7 @@ const SceneChapterEditor = ({
       revision_set_hash: response.revision_set_hash ?? prev.revision_set_hash,
       script_status: response.script_status ?? prev.script_status,
     } : prev))
-    setSaveMessage(`${EDIT_TYPE_LABELS[editType]}已保存`)
+    setSaveMessage(t('audiobook.sceneChapterEditor.savedMessage', { type: t(EDIT_TYPE_LABELS[editType]) }))
     setConflictMessage(null)
     onSaved?.()
   }, [onSaved])
@@ -358,7 +361,7 @@ const SceneChapterEditor = ({
     if (!document) return
     const characters = serializeVoiceCharacters(voiceRows)
     if (characters.length === 0) {
-      setConflictMessage('请至少填写一个角色（角色名 + 音色 ID）')
+      setConflictMessage(t('audiobook.sceneChapterEditor.noCharacters'))
       return
     }
     setSaving(true)
@@ -390,7 +393,7 @@ const SceneChapterEditor = ({
         chapter_ids: [chapterId],
         revision_set_hash: document.revision_set_hash,
       })
-      setSaveMessage('已提交重渲染，请在任务队列中查看进度')
+      setSaveMessage(t('audiobook.sceneChapterEditor.rerenderSubmitted'))
       setConflictMessage(null)
       onSaved?.()
     } catch (err: unknown) {
@@ -413,7 +416,7 @@ const SceneChapterEditor = ({
       const nextStatus = response.script_status ?? 'approved'
       setDocument((prev) => (prev ? { ...prev, script_status: nextStatus } : prev))
       setScriptStatus(nextStatus)
-      setSaveMessage('剧本已批准，可重渲染整章')
+      setSaveMessage(t('audiobook.sceneChapterEditor.scriptApproved'))
       setConflictMessage(null)
       onSaved?.()
     } catch (err: unknown) {
@@ -447,7 +450,7 @@ const SceneChapterEditor = ({
         <Stack direction="row" alignItems="center" spacing={1} flexWrap="wrap">
           <GraphicEqIcon color="primary" />
           <Typography variant="h6" sx={{ flexGrow: 1 }}>
-            场景编辑器 · 第 {chapterNumber ?? chapterId} 章
+            {t('audiobook.sceneChapterEditor.title', { number: chapterNumber ?? chapterId })}
           </Typography>
           {renderStatus && (
             <Chip size="small" color="primary" variant="outlined" label={renderStatus} />
@@ -461,7 +464,7 @@ const SceneChapterEditor = ({
         {seedBatches.length > 1 && (
           <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 2, flexWrap: 'wrap' }}>
             <Typography variant="caption" color="text.secondary">
-              批次切换：
+              {t('audiobook.sceneChapterEditor.batchSwitcher')}
             </Typography>
             <ToggleButtonGroup
               size="small"
@@ -495,7 +498,7 @@ const SceneChapterEditor = ({
             {/* 左侧：场景列表 */}
             <Box sx={{ width: 300, flexShrink: 0, overflowY: 'auto', maxHeight: 520 }}>
               <Typography variant="subtitle2" sx={{ mb: 1 }}>
-                场景列表（{document.scenes.length}）
+                {t('audiobook.sceneChapterEditor.sceneListTitle', { count: document.scenes.length })}
               </Typography>
               <List dense disablePadding>
                 {document.scenes.map((scene) => (
@@ -511,7 +514,7 @@ const SceneChapterEditor = ({
                           <Typography variant="body2" sx={{ fontFamily: 'monospace' }}>
                             {scene.scene_id}
                           </Typography>
-                          {sceneStatusChip(scene.status)}
+                          {sceneStatusChip(scene.status, t)}
                         </Stack>
                       }
                       secondary={(
@@ -521,13 +524,13 @@ const SceneChapterEditor = ({
                               ? `${scene.metadata.expected_duration_s.toFixed(1)}s`
                               : '--'}
                           </Typography>
-                          {scene.attempts ? `重试 ${scene.attempts}` : ''}
+                          {scene.attempts ? t('audiobook.sceneChapterEditor.retryCount', { count: scene.attempts }) : ''}
                         </Stack>
                       )}
                     />
                     <IconButton
                       size="small"
-                      aria-label={`试听 ${scene.scene_id}`}
+                      aria-label={t('audiobook.sceneChapterEditor.previewAria', { id: scene.scene_id })}
                       disabled={!scene.scene_audio_url}
                       onClick={(event) => {
                         event.stopPropagation()
@@ -541,9 +544,9 @@ const SceneChapterEditor = ({
               </List>
               <Divider sx={{ my: 1 }} />
               <Typography variant="caption" color="text.secondary">
-                执行状态：{document.execution_status}
+                {t('audiobook.sceneChapterEditor.executionStatus', { status: document.execution_status })}
                 {document.desired_render_status
-                  ? ` · 期望：${document.desired_render_status}`
+                  ? t('audiobook.sceneChapterEditor.desiredStatusSuffix', { status: document.desired_render_status })
                   : ''}
               </Typography>
             </Box>
@@ -557,9 +560,9 @@ const SceneChapterEditor = ({
                 onChange={(_, value: SceneEditType) => setActiveTab(value)}
                 sx={{ mb: 1 }}
               >
-                <Tab label="台词编辑" value="dialogue" />
-                <Tab label="导演覆盖" value="director_override" />
-                <Tab label="音色编辑" value="voice_binding" />
+                <Tab label={t(EDIT_TYPE_LABELS.dialogue)} value="dialogue" />
+                <Tab label={t(EDIT_TYPE_LABELS.director_override)} value="director_override" />
+                <Tab label={t(EDIT_TYPE_LABELS.voice_binding)} value="voice_binding" />
               </Tabs>
 
               {conflictMessage && (
@@ -576,14 +579,14 @@ const SceneChapterEditor = ({
               {activeTab === 'dialogue' && (
                 <Box sx={{ maxHeight: 420, overflowY: 'auto' }}>
                   <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1 }}>
-                    <Typography variant="subtitle2">审定台词</Typography>
+                    <Typography variant="subtitle2">{t('audiobook.sceneChapterEditor.reviewedScript')}</Typography>
                     <Chip size="small" label={`script_status: ${scriptStatus}`} />
                     {document.chapter_audio_stale && (
-                      <Chip size="small" color="warning" variant="outlined" label="音频已过期" />
+                      <Chip size="small" color="warning" variant="outlined" label={t('audiobook.sceneChapterEditor.audioStale')} />
                     )}
                     {document.script_status === 'pending' && (
-                      <Tooltip title="语义变化后需重新审批（dialogue-review）方可重渲染">
-                        <Chip size="small" color="warning" variant="outlined" label="待审批" />
+                      <Tooltip title={t('audiobook.sceneChapterEditor.pendingReviewTooltip')}>
+                        <Chip size="small" color="warning" variant="outlined" label={t('audiobook.sceneChapterEditor.pendingReview')} />
                       </Tooltip>
                     )}
                   </Stack>
@@ -592,10 +595,10 @@ const SceneChapterEditor = ({
                     <Box sx={{ mb: 1.5 }}>
                       <Stack direction="row" alignItems="center" spacing={1} flexWrap="wrap">
                         <Button size="small" onClick={() => setShowPrompt((prev) => !prev)}>
-                          {showPrompt ? '收起渲染提示词' : '查看渲染提示词'}
+                          {showPrompt ? t('audiobook.sceneChapterEditor.hidePrompt') : t('audiobook.sceneChapterEditor.showPrompt')}
                         </Button>
                         <Typography variant="caption" color="text.secondary">
-                          该场景发送给 Seed Audio 的完整提示词；修改台词/声音设计并保存后重渲染会自动重新编译
+                          {t('audiobook.sceneChapterEditor.promptExplain')}
                         </Typography>
                       </Stack>
                       <Collapse in={showPrompt}>
@@ -619,7 +622,7 @@ const SceneChapterEditor = ({
                             </Typography>
                           ) : (
                             <Typography variant="caption" color="text.secondary">
-                              该场景来自旧 checkpoint，未记录渲染提示词；重渲染后可查看。
+                              {t('audiobook.sceneChapterEditor.promptMissingLegacy')}
                             </Typography>
                           )}
                         </Box>
@@ -628,7 +631,7 @@ const SceneChapterEditor = ({
                   )}
                   {sceneSegments.length === 0 && (
                     <Typography variant="body2" color="text.secondary">
-                      当前场景无关联台词分段（或未生成剧本）。
+                      {t('audiobook.sceneChapterEditor.noSceneSegments')}
                     </Typography>
                   )}
                   {sceneSegments.map((segment) => {
@@ -651,7 +654,7 @@ const SceneChapterEditor = ({
                           multiline
                           minRows={2}
                           sx={{ mb: 1 }}
-                          label={`${segment.speaker || segment.speaker_name || '旁白'} · ${segment.segment_key || `#${segment.index ?? ''}`}`}
+                          label={`${segment.speaker || segment.speaker_name || t('audiobook.sceneChapterEditor.narrator')} · ${segment.segment_key || `#${segment.index ?? ''}`}`}
                           value={draft?.text ?? segment.text ?? ''}
                           onChange={(event) => updateDialogueDraft(draftKey, { text: event.target.value })}
                         />
@@ -659,8 +662,8 @@ const SceneChapterEditor = ({
                           size="small"
                           fullWidth
                           sx={{ mb: 1 }}
-                          label="场景环境"
-                          placeholder="如：雨夜的旧宅走廊，木质地板偶尔吱作响"
+                          label={t('audiobook.sceneChapterEditor.sceneEnvLabel')}
+                          placeholder={t('audiobook.sceneChapterEditor.sceneEnvPlaceholder')}
                           value={draft?.instruct_scene ?? segment.instruct_scene ?? ''}
                           onChange={(event) => updateDialogueDraft(draftKey, { instruct_scene: event.target.value })}
                         />
@@ -668,8 +671,8 @@ const SceneChapterEditor = ({
                           size="small"
                           fullWidth
                           sx={{ mb: 1 }}
-                          label="表演指导"
-                          placeholder="如：压着嗓子说，语气急促而不安"
+                          label={t('audiobook.sceneChapterEditor.performanceLabel')}
+                          placeholder={t('audiobook.sceneChapterEditor.performancePlaceholder')}
                           value={draft?.performance_notes ?? segment.performance_notes ?? ''}
                           onChange={(event) => updateDialogueDraft(draftKey, { performance_notes: event.target.value })}
                         />
@@ -679,18 +682,18 @@ const SceneChapterEditor = ({
                           multiline
                           minRows={2}
                           sx={{ mb: 1 }}
-                          label="伴随音效（每行一条，可多条）"
-                          placeholder={"金属碰撞\n急促的脚步声"}
-                          helperText="按片段剧情自由决定数量，保存后随台词转译进渲染提示词"
+                          label={t('audiobook.sceneChapterEditor.sfxLabel')}
+                          placeholder={t('audiobook.sceneChapterEditor.sfxPlaceholder')}
+                          helperText={t('audiobook.sceneChapterEditor.sfxHelper')}
                           value={draft?.sound_effects ?? segmentSoundEffectsDraftValue(segment)}
                           onChange={(event) => updateDialogueDraft(draftKey, { sound_effects: event.target.value })}
                         />
                         <TextField
                           size="small"
                           fullWidth
-                          label="配乐"
-                          placeholder="如：悬疑感的低频弦乐，在台词停止时停止"
-                          helperText="可描述进入、延续、变化、停止等动态；留空表示该片段不配乐"
+                          label={t('audiobook.sceneChapterEditor.musicLabel')}
+                          placeholder={t('audiobook.sceneChapterEditor.musicPlaceholder')}
+                          helperText={t('audiobook.sceneChapterEditor.musicHelper')}
                           value={draft?.music_cue ?? segmentMusicCueDraftValue(segment)}
                           onChange={(event) => updateDialogueDraft(draftKey, { music_cue: event.target.value })}
                         />
@@ -704,12 +707,12 @@ const SceneChapterEditor = ({
                       disabled={saving || Object.keys(dialogueDraft).length === 0}
                       onClick={() => void handleSaveDialogue()}
                     >
-                      保存台词与声音设计
+                      {t('audiobook.sceneChapterEditor.saveDialogue')}
                     </Button>
                   )}
                   <Stack direction="row" alignItems="center" spacing={1} sx={{ mt: 2 }}>
                     {document.script_status !== 'approved' && (
-                      <Tooltip title="批准后解锁重渲染（dialogue-review 直批）">
+                      <Tooltip title={t('audiobook.sceneChapterEditor.approveTooltip')}>
                         <span>
                           <Button
                             variant="contained"
@@ -718,14 +721,14 @@ const SceneChapterEditor = ({
                             disabled={saving || loading}
                             onClick={() => void handleApproveScript()}
                           >
-                            批准剧本
+                            {t('audiobook.sceneChapterEditor.approve')}
                           </Button>
                         </span>
                       </Tooltip>
                     )}
                     <Tooltip title={document.script_status === 'approved' && document.revision_set_hash
-                      ? '以当前编辑基线（台词/导演覆盖/音色）重渲染整章音频'
-                      : '需 dialogue-review 审批通过后方可重渲染'}>
+                      ? t('audiobook.sceneChapterEditor.rerenderTooltipReady')
+                      : t('audiobook.sceneChapterEditor.rerenderTooltipBlocked')}>
                       <span>
                         <Button
                           variant="outlined"
@@ -734,13 +737,13 @@ const SceneChapterEditor = ({
                           disabled={saving || document.script_status !== 'approved' || !document.revision_set_hash}
                           onClick={() => void handleRerender()}
                         >
-                          重渲染整章
+                          {t('audiobook.sceneChapterEditor.rerender')}
                         </Button>
                       </span>
                     </Tooltip>
                     {document.script_status !== 'approved' && (
                       <Typography variant="caption" color="text.secondary">
-                        当前状态 {scriptStatus}：审批通过后可用
+                        {t('audiobook.sceneChapterEditor.approveHint', { status: scriptStatus })}
                       </Typography>
                     )}
                   </Stack>
@@ -750,17 +753,17 @@ const SceneChapterEditor = ({
               {activeTab === 'director_override' && (
                 <Box sx={{ maxHeight: 420, overflowY: 'auto' }}>
                   <Typography variant="subtitle2" sx={{ mb: 1 }}>
-                    导演覆盖 · {selectedScene?.scene_id ?? '未选择场景'}
+                    {t('audiobook.sceneChapterEditor.directorOverrideTitle', { id: selectedScene?.scene_id ?? t('audiobook.sceneChapterEditor.noSceneSelected') })}
                   </Typography>
                   <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
-                    稳定锚点：{selectedScene?.source_segment_keys?.join(', ') || '（无）'}
+                    {t('audiobook.sceneChapterEditor.stableAnchors', { anchors: selectedScene?.source_segment_keys?.join(', ') || t('audiobook.sceneChapterEditor.noAnchors') })}
                   </Typography>
                   <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
-                    覆盖指令会附加到该场景的渲染提示词，不修改台词原文；已保存的覆盖在选中场景时自动回显。
+                    {t('audiobook.sceneChapterEditor.overrideExplain')}
                   </Typography>
-                  {Object.entries(DIRECTION_TYPE_LABELS).map(([type, label]) => (
+                  {Object.entries(DIRECTION_TYPE_LABELS).map(([type, labelKey]) => (
                     <Typography key={type} variant="caption" color="text.secondary" sx={{ display: 'block' }}>
-                      {label}（{type}）：{DIRECTION_TYPE_HINTS[type]}
+                      {t('audiobook.sceneChapterEditor.directionTypeLine', { label: t(labelKey), type, hint: t(DIRECTION_TYPE_HINTS[type]) })}
                     </Typography>
                   ))}
                   <Box sx={{ height: 8 }} />
@@ -770,7 +773,7 @@ const SceneChapterEditor = ({
                         select
                         size="small"
                         sx={{ width: 180 }}
-                        label="类型"
+                        label={t('audiobook.sceneChapterEditor.overrideTypeLabel')}
                         value={item.direction_type}
                         onChange={(event) => {
                           setOverrideDraft((prev) => prev.map((entry, i) => (
@@ -780,7 +783,7 @@ const SceneChapterEditor = ({
                       >
                         {['performance', 'sfx', 'music', 'acoustic'].map((type) => (
                           <option key={type} value={type}>
-                            {`${DIRECTION_TYPE_LABELS[type]}（${type}）`}
+                            {t('audiobook.sceneChapterEditor.overrideTypeOption', { label: t(DIRECTION_TYPE_LABELS[type]), type })}
                           </option>
                         ))}
                       </TextField>
@@ -788,7 +791,7 @@ const SceneChapterEditor = ({
                         size="small"
                         fullWidth
                         multiline
-                        label="指令内容（不修改原文）"
+                        label={t('audiobook.sceneChapterEditor.overrideContentLabel')}
                         value={item.content}
                         onChange={(event) => {
                           setOverrideDraft((prev) => prev.map((entry, i) => (
@@ -817,7 +820,7 @@ const SceneChapterEditor = ({
                         ])
                       }}
                     >
-                      添加指令
+                      {t('audiobook.sceneChapterEditor.addOverride')}
                     </Button>
                     <Button
                       variant="contained"
@@ -825,7 +828,7 @@ const SceneChapterEditor = ({
                       disabled={saving || !selectedScene}
                       onClick={() => void handleSaveDirectorOverride()}
                     >
-                      保存覆盖
+                      {t('audiobook.sceneChapterEditor.saveOverride')}
                     </Button>
                   </Stack>
                 </Box>
@@ -834,14 +837,14 @@ const SceneChapterEditor = ({
               {activeTab === 'voice_binding' && (
                 <Box sx={{ maxHeight: 420, overflowY: 'auto' }}>
                   <Typography variant="subtitle2" sx={{ mb: 1 }}>
-                    音色绑定（当前章节局部覆盖 + 未来批次默认值）
+                    {t('audiobook.sceneChapterEditor.voiceBindingTitle')}
                   </Typography>
                   <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
-                    为每个角色从音色库选择音色（也可手动输入音色 ID），保存后用于本章后续渲染；完全空白的行会被忽略。
+                    {t('audiobook.sceneChapterEditor.voiceBindingExplain')}
                   </Typography>
                   {sceneVoicePool.error && (
                     <Alert severity="warning" sx={{ mb: 1 }}>
-                      音色库加载失败：{sceneVoicePool.error}（仍可手动输入音色 ID）
+                      {t('audiobook.sceneChapterEditor.voicePoolError', { error: sceneVoicePool.error })}
                     </Alert>
                   )}
                   <TextField
@@ -849,13 +852,13 @@ const SceneChapterEditor = ({
                     fullWidth
                     select
                     sx={{ mb: 1.5 }}
-                    label="TTS 模型"
-                    helperText="本章渲染使用的语音合成模型，建议与生成配置保持一致"
+                    label={t('audiobook.sceneChapterEditor.ttsModelLabel')}
+                    helperText={t('audiobook.sceneChapterEditor.ttsModelHelper')}
                     value={ttsModelDraft}
                     onChange={(event) => setTtsModelDraft(event.target.value)}
                   >
                     {ttsModelDraft && !(TTS_MODELS as readonly string[]).includes(ttsModelDraft) && (
-                      <MenuItem value={ttsModelDraft}>{ttsModelDraft}（当前配置）</MenuItem>
+                      <MenuItem value={ttsModelDraft}>{t('audiobook.sceneChapterEditor.ttsModelCurrent', { model: ttsModelDraft })}</MenuItem>
                     )}
                     {TTS_MODELS.map((model) => (
                       <MenuItem key={model} value={model}>
@@ -877,8 +880,8 @@ const SceneChapterEditor = ({
                         <TextField
                           size="small"
                           sx={{ width: 140 }}
-                          label="角色名"
-                          placeholder="如：林晚"
+                          label={t('audiobook.sceneChapterEditor.characterNameLabel')}
+                          placeholder={t('audiobook.sceneChapterEditor.characterNamePlaceholder')}
                           value={row.character_name}
                           onChange={(event) => updateRow({ character_name: event.target.value })}
                         />
@@ -929,8 +932,8 @@ const SceneChapterEditor = ({
                           renderInput={(params) => (
                             <TextField
                               {...params}
-                              label="音色（从音色库选择）"
-                              placeholder="选择我的复刻/设计、公共音色池，或输入音色 ID"
+                              label={t('audiobook.sceneChapterEditor.voiceLabel')}
+                              placeholder={t('audiobook.sceneChapterEditor.voicePlaceholder')}
                             />
                           )}
                         />
@@ -938,17 +941,17 @@ const SceneChapterEditor = ({
                           size="small"
                           select
                           sx={{ width: 150 }}
-                          label="音色来源"
+                          label={t('audiobook.sceneChapterEditor.voiceSourceLabel')}
                           value={row.reference_source}
                           onChange={(event) => updateRow({ reference_source: event.target.value })}
                         >
-                          <MenuItem value="">自动（不指定）</MenuItem>
-                          <MenuItem value="user_private">自有复刻/设计</MenuItem>
-                          <MenuItem value="public_pool">公共音色池</MenuItem>
+                          <MenuItem value="">{t('audiobook.sceneChapterEditor.voiceSourceAuto')}</MenuItem>
+                          <MenuItem value="user_private">{t('audiobook.sceneChapterEditor.voiceSourcePrivate')}</MenuItem>
+                          <MenuItem value="public_pool">{t('audiobook.sceneChapterEditor.voiceSourcePublic')}</MenuItem>
                         </TextField>
                         <IconButton
                           size="small"
-                          aria-label="删除角色行"
+                          aria-label={t('audiobook.sceneChapterEditor.deleteRowAria')}
                           disabled={voiceRows.length === 1}
                           onClick={() => {
                             setVoiceRows((prev) => prev.filter((_, i) => i !== rowIndex))
@@ -970,7 +973,7 @@ const SceneChapterEditor = ({
                         ])
                       }}
                     >
-                      添加角色
+                      {t('audiobook.sceneChapterEditor.addCharacter')}
                     </Button>
                     <Button
                       variant="contained"
@@ -978,7 +981,7 @@ const SceneChapterEditor = ({
                       disabled={saving || !ttsModelDraft.trim()}
                       onClick={() => void handleSaveVoiceBinding()}
                     >
-                      保存音色绑定
+                      {t('audiobook.sceneChapterEditor.saveVoiceBinding')}
                     </Button>
                   </Stack>
                 </Box>
@@ -994,15 +997,15 @@ const SceneChapterEditor = ({
             startIcon={<PlayArrowIcon />}
             onClick={() => onPreviewAudio?.(document.chapter_audio_url as string)}
           >
-            试听整章
+            {t('audiobook.sceneChapterEditor.previewChapter')}
           </Button>
         )}
         <Box sx={{ flexGrow: 1 }} />
         <Button size="small" startIcon={<RefreshIcon />} onClick={() => void loadDocument()}>
-          刷新
+          {t('admin.common.refresh')}
         </Button>
         <Button size="small" onClick={onClose}>
-          关闭
+          {t('action.close')}
         </Button>
       </DialogActions>
     </Dialog>

@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 
+import { useTranslation } from 'react-i18next'
+
 import {
   apiClient,
   extractApiErrorMessage,
@@ -12,7 +14,8 @@ import type { TtsModel, VoicePreset } from './types'
 const isHttpUrl = (value?: string) => Boolean(value?.startsWith('http://') || value?.startsWith('https://'))
 
 export const useAudiobookSceneVoicePool = (enabled = true) => {
-  const [privateAssets, setPrivateAssets] = useState<VoiceReferenceAssetRecord[]>([])
+  const { t } = useTranslation()
+  const [privateAssets, setPrivateAssets] = useState<VoiceReferenceAssetRecord[]>([]) 
   const [publicVoices, setPublicVoices] = useState<VoicePoolVoiceRecord[]>([])
   const [taxonomy, setTaxonomy] = useState<Record<string, string[] | string>>({})
   const [loading, setLoading] = useState(false)
@@ -31,7 +34,7 @@ export const useAudiobookSceneVoicePool = (enabled = true) => {
       setTaxonomy(taxonomyResponse.data || {})
       setError(null)
     } catch (requestError: unknown) {
-      setError(await extractApiErrorMessage(requestError, '加载场景音色库失败'))
+      setError(await extractApiErrorMessage(requestError, t('audiobook.useAudiobookSceneVoicePool.loadFailed')))
     } finally {
       setLoading(false)
     }
@@ -55,23 +58,23 @@ export const useAudiobookSceneVoicePool = (enabled = true) => {
       return {
         id: `private:${asset.asset_id}`,
         speaker: sourceVoiceId,
-        label: `${isDesign ? '我的设计' : '我的复刻'} · ${sourceVoiceId}`,
+        label: t('audiobook.useAudiobookSceneVoicePool.privateVoiceLabel', { type: t(isDesign ? 'audiobook.useAudiobookSceneVoicePool.myDesignLabel' : 'audiobook.useAudiobookSceneVoicePool.myCloneLabel'), voiceId: sourceVoiceId }),
         category: 'custom',
         customType: isDesign ? 'design' : 'clone',
         provider: asset.provider,
-        description: referenceUrl ? '已准备标准参考试听' : '需要先生成标准参考试听',
+        description: referenceUrl ? t('audiobook.useAudiobookSceneVoicePool.referenceReady') : t('audiobook.useAudiobookSceneVoicePool.referenceNeeded'),
         sourceModel: (asset.source_model || '') as TtsModel,
         referenceSource: 'user_private',
         referenceAudioUrl: referenceUrl,
         voiceReferenceAssetId: asset.asset_id,
         disabled: !referenceUrl,
-        disabledReason: !referenceUrl ? '请先在音色管理中生成标准参考试听' : undefined,
+        disabledReason: !referenceUrl ? t('audiobook.useAudiobookSceneVoicePool.generateReferenceFirst') : undefined,
       }
     })
     const publicPresets = publicVoices.map((voice): VoicePreset => ({
       id: `public:${voice.publication_id}`,
       speaker: `voice_pool:${voice.publication_id}`,
-      label: `公共 · ${voice.display_name}`,
+      label: t('audiobook.useAudiobookSceneVoicePool.publicVoiceLabel', { name: voice.display_name }),
       category: 'public',
       description: voice.description,
       style: voice.primary_style,
@@ -82,7 +85,7 @@ export const useAudiobookSceneVoicePool = (enabled = true) => {
       voicePoolPublicationId: voice.publication_id,
     }))
     return [...privatePresets, ...publicPresets]
-  }, [privateAssets, publicVoices])
+  }, [privateAssets, publicVoices, t])
 
   return {
     privateAssets,

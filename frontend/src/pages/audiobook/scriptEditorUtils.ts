@@ -16,6 +16,7 @@ import type {
 } from './types'
 import { sanitizeScriptSegmentVoiceIdentityControls } from './scriptSegmentCardUtils'
 import { normalizeScriptReview } from './utils'
+import type { TranslateFn } from './audioLibraryDisplay'
 
 type ScriptSaveStatus = NonNullable<UpdateAudiobookChapterScriptPayload['script_status']>
 
@@ -63,11 +64,12 @@ export const resolveInitialScriptSegmentFocus = (
 export const buildScriptEditorChapterRef = (
   chapterId: number,
   chapters: readonly Pick<Chapter, 'id' | 'chapter_number' | 'title'>[],
+  t?: TranslateFn,
 ): ScriptEditorChapterRef => {
   const chapter = chapters.find((item) => item.id === chapterId)
   return chapter
-    ? { chapterId, title: `第${chapter.chapter_number}章 - ${chapter.title}` }
-    : { chapterId, title: `章节 ${chapterId}` }
+    ? { chapterId, title: t ? t('audiobook.chapterNumber', { number: chapter.chapter_number }) + ' - ' + chapter.title : `第${chapter.chapter_number}章 - ${chapter.title}` }
+    : { chapterId, title: t ? t('audiobook.scriptEditor.chapterIdLabel', { id: chapterId }) : `章节 ${chapterId}` }
 }
 
 export const normalizeAudiobookChapterScriptData = (

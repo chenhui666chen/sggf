@@ -1,3 +1,5 @@
+import type { TFunction } from 'i18next'
+
 export interface WorkflowGenerationModelDisplayLike {
   id: string
   name?: string | null
@@ -13,6 +15,21 @@ interface WorkflowGenerationModelProfile {
 const FAST_SPEED = '响应较快，适合连续章节推进。'
 const SLOW_SPEED = '偏慢，首包通常超过 30 秒。'
 const VERY_SLOW_SPEED = '很慢，首包可能超过 1 分钟。'
+
+// 模型 id → workflow.model.features.* key（小写归一后匹配；未登记模型走 fallback）
+const PROFILE_FEATURE_KEY_BY_ID: Record<string, string> = {
+  'mimo-v2.5': 'mimo',
+  'mimo-v2.5-pro': 'mimoPro',
+  'deepseek-v4-flash': 'deepseekFlash',
+  'deepseek-v4-pro': 'deepseekPro',
+  'doubao-seed-character': 'doubaoCharacter',
+  'doubao-seed-evolving': 'doubaoEvolving',
+  'glm-5.2': 'glm',
+  'kimi/kimi-k2.6': 'kimi',
+  'minimax/minimax-m3': 'minimax',
+  'qwen3.7-plus': 'qwen',
+  'step-3.7-flash': 'step',
+}
 
 const WORKFLOW_GENERATION_MODEL_PROFILES: Record<string, WorkflowGenerationModelProfile> = {
   'mimo-v2.5': {
@@ -72,26 +89,63 @@ function getWorkflowGenerationModelProfile(modelId: string): WorkflowGenerationM
   }
 }
 
+// 速度档位 → workflow.model.speeds.* key（fallback 档案不在此列）
+function getSpeedKey(modelId: string): 'fast' | 'slow' | 'verySlow' {
+  const profile = getWorkflowGenerationModelProfile(modelId)
+  if (profile.speed === FAST_SPEED) return 'fast'
+  if (profile.speed === SLOW_SPEED) return 'slow'
+  return 'verySlow'
+}
+
 export function formatWorkflowGenerationModelOptionLabel(
   model: WorkflowGenerationModelDisplayLike,
+  t?: TFunction,
 ): string {
   const baseLabel = getBaseLabel(model)
   const costLabel = model.cost_label?.trim()
 
-  if (!costLabel) {
-    return `${baseLabel} · 成本未知`
+  if (!t) {
+    if (!costLabel) {
+      return `${baseLabel} · 成本未知`
+    }
+
+    return `${baseLabel} · 约 ${costLabel}`
   }
 
-  return `${baseLabel} · 约 ${costLabel}`
+  if (!costLabel) {
+    return t('workflow.model.optionNoCost', { base: baseLabel })
+  }
+
+  return t('workflow.model.optionCost', { base: baseLabel, cost: costLabel })
 }
 
 export function formatWorkflowGenerationModelTooltip(
   model: WorkflowGenerationModelDisplayLike,
+  t?: TFunction,
 ): string {
   const baseLabel = getBaseLabel(model)
-  const profile = getWorkflowGenerationModelProfile(model.id)
   const costLabel = model.cost_label?.trim()
   const costBasisLabel = model.relative_cost_basis_label?.trim()
+
+  if (t) {
+    const featureKey = PROFILE_FEATURE_KEY_BY_ID[model.id.trim().toLowerCase()]
+    const feature = featureKey
+      ? t(`workflow.model.features.${featureKey}`)
+      : t('workflow.model.fallbackFeature')
+    const speed = featureKey
+      ? t(`workflow.model.speeds.${getSpeedKey(model.id)}`)
+      : t('workflow.model.fallbackSpeed')
+    const price = costLabel
+      ? t('workflow.model.priceCost', {
+          cost: costLabel,
+          basis: costBasisLabel ? t('workflow.model.priceBasis', { costBasis: costBasisLabel }) : '',
+        })
+      : t('workflow.model.priceNoCost')
+
+    return t('workflow.model.tooltip', { base: baseLabel, feature, speed, price })
+  }
+
+  const profile = getWorkflowGenerationModelProfile(model.id)
   const price = costLabel
     ? `约 ${costLabel}${costBasisLabel ? `（${costBasisLabel}）` : ''}。`
     : '成本未知。'

@@ -23,6 +23,16 @@ import {
 import CloseIcon from '@mui/icons-material/Close'
 import PlayArrowIcon from '@mui/icons-material/PlayArrow'
 import type { Chapter, DreamweaverProjectLockedGenerationConfig } from '@/types/dreamweaver'
+import {
+  IMAGE_MODEL_OPTIONS,
+  IMAGE_RATIOS_LABELS,
+  IMAGE_RESOLUTIONS_LABELS,
+  STYLE_PRESET_LABELS,
+  VIDEO_EDIT_MODEL_OPTIONS,
+  VIDEO_MODEL_OPTIONS,
+  VISION_MODEL_OPTIONS,
+} from '@/constants/dreamweaver'
+import { useTranslation } from 'react-i18next'
 
 interface ConfigPanelProps {
   open: boolean
@@ -67,60 +77,11 @@ interface ConfigPanelProps {
   lockedConfigError: string | null
 }
 
-const STYLE_PRESET_OPTIONS = [
-  { value: 'cinematic_realistic', label: '电影写实' },
-  { value: 'anime', label: '动漫风格' },
-  { value: 'ink_wash', label: '水墨风格' },
-  { value: 'cyberpunk', label: '赛博朋克' },
-]
+const STYLE_PRESET_OPTIONS = Object.keys(STYLE_PRESET_LABELS).map((value) => ({ value, label: STYLE_PRESET_LABELS[value] }))
 
-const IMAGE_RATIO_OPTIONS = [
-  { value: '16:9', label: '横屏 16:9' },
-  { value: '9:16', label: '竖屏 9:16' },
-]
+const IMAGE_RATIO_OPTIONS = Object.keys(IMAGE_RATIOS_LABELS).map((value) => ({ value, label: IMAGE_RATIOS_LABELS[value] }))
 
-const IMAGE_RESOLUTION_OPTIONS = [
-  { value: '720p', label: '高清 720p' },
-  { value: '1080p', label: '全高清 1080p' },
-]
-
-const IMAGE_MODEL_OPTIONS = [
-  { value: 'wan2.6-t2i', label: 'Wan 2.6 T2I（主力文生图）' },
-  { value: 'qwen-image-2.0', label: 'Qwen Image 2.0' },
-  { value: 'qwen-image-2.0-pro', label: 'Qwen Image 2.0 Pro（旗舰）' },
-  { value: 'wan2.7-image', label: 'Wan 2.7 Image' },
-  { value: 'doubao-seedream-4-5', label: 'Doubao Seedream 4.5' },
-  { value: 'doubao-seedream-5-0', label: 'Doubao Seedream 5.0（最新）' },
-  { value: 'kling-v3-image-generation', label: 'Kling V3 图像生成' },
-  { value: 'kling-v3-omni-image-generation', label: 'Kling V3 Omni 图像生成' },
-  { value: 'qwen-image-edit-plus', label: 'Qwen Image Edit Plus（编辑）' },
-]
-
-const VIDEO_MODEL_OPTIONS = [
-  { value: 'wan2.7-t2v', label: 'Wan 2.7 T2V（主力视频）' },
-  { value: 'wan2.6-t2v-fast', label: 'Wan 2.6 T2V Fast（快速预览）' },
-  { value: 'wan2.7-i2v', label: 'Wan 2.7 I2V（首帧驱动）' },
-  { value: 'doubao-seedance-2-0', label: 'Doubao Seedance 2.0（SOTA）' },
-  { value: 'doubao-seedance-2-0-fast', label: 'Doubao Seedance 2.0 Fast' },
-  { value: 'doubao-seedance-1-5-pro', label: 'Doubao Seedance 1.5 Pro' },
-  { value: 'kling-v3-video-generation', label: 'Kling V3（可灵）' },
-  { value: 'kling-v3-omni-video-generation', label: 'Kling V3 Omni（全能）' },
-  { value: 'pixverse-v6-t2v', label: 'PixVerse V6' },
-  { value: 'vidu-q3-pro-text2video', label: 'Vidu Q3 Pro 文生视频' },
-  { value: 'vidu-q3-pro-img2video', label: 'Vidu Q3 Pro 图生视频' },
-  { value: 'vidu-q3-pro-start-end2video', label: 'Vidu Q3 Pro 首尾帧' },
-]
-
-const VIDEO_EDIT_MODEL_OPTIONS = [
-  { value: 'wan2.7-videoedit', label: 'Wan 2.7 VideoEdit（万相编辑）' },
-  { value: 'doubao-seedance-2-0', label: 'Doubao Seedance 2.0' },
-  { value: 'kling-v3-video-generation', label: 'Kling V3' },
-]
-
-const VISION_MODEL_OPTIONS = [
-  { value: 'qwen3-vl-plus', label: 'Qwen3-VL-Plus（视觉理解）' },
-  { value: 'qwen3.5-omni-plus', label: 'Qwen3.5 Omni Plus（全能）' },
-]
+const IMAGE_RESOLUTION_OPTIONS = Object.keys(IMAGE_RESOLUTIONS_LABELS).map((value) => ({ value, label: IMAGE_RESOLUTIONS_LABELS[value] }))
 
 export function ConfigPanel({
   open,
@@ -164,6 +125,7 @@ export function ConfigPanel({
   lockedConfig,
   lockedConfigError,
 }: ConfigPanelProps) {
+  const { t } = useTranslation()
   const isLocked = lockedConfig?.locked ?? false
   const allSelected = chapters.length > 0 && selectedChapterIds.length === chapters.length
 
@@ -178,7 +140,7 @@ export function ConfigPanel({
     <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>
       <DialogTitle>
         <Stack direction="row" alignItems="center" justifyContent="space-between">
-          <Typography variant="h6">生成配置</Typography>
+          <Typography variant="h6">{t('dreamweaverRun.configTitle')}</Typography>
           <IconButton onClick={onClose} size="small">
             <CloseIcon />
           </IconButton>
@@ -195,22 +157,22 @@ export function ConfigPanel({
           {isLocked && (
             <Paper variant="outlined" sx={{ p: 2, bgcolor: 'warning.lighter' }}>
               <Typography variant="body2" color="warning.dark">
-                当前项目已锁定配置，部分选项不可修改
+                {t('dreamweaverRun.configLockedNotice')}
               </Typography>
             </Paper>
           )}
 
           <Box>
             <Typography variant="subtitle2" gutterBottom>
-              章节选择
+              {t('dreamweaverRun.configChapterSection')}
             </Typography>
             <Paper variant="outlined" sx={{ p: 1, maxHeight: 200, overflow: 'auto' }}>
               <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1 }}>
                 <Typography variant="caption" color="text.secondary">
-                  已选 {selectedChapterIds.length} / {chapters.length} 章
+                  {t('dreamweaverRun.configSelectedCount', { selected: selectedChapterIds.length, total: chapters.length })}
                 </Typography>
                 <Button size="small" onClick={onSelectAll}>
-                  {allSelected ? '取消全选' : '全选'}
+                  {t(allSelected ? 'dreamweaverRun.configDeselectAll' : 'dreamweaverRun.configSelectAll')}
                 </Button>
               </Stack>
               <Divider sx={{ my: 1 }} />
@@ -227,7 +189,7 @@ export function ConfigPanel({
                       }
                       label={
                         <Typography variant="body2" noWrap>
-                          第{chapter.chapter_number}章: {chapter.title}
+                          {t('dreamweaverRun.configChapterItem', { number: chapter.chapter_number, title: chapter.title })}
                         </Typography>
                       }
                     />
@@ -239,36 +201,36 @@ export function ConfigPanel({
 
           <Box>
             <Typography variant="subtitle2" gutterBottom>
-              质量设置
+              {t('dreamweaverRun.configQualitySection')}
             </Typography>
             <Paper variant="outlined" sx={{ p: 2 }}>
               <Grid container spacing={2}>
                 <Grid item xs={12} sm={6}>
                   <FormControl fullWidth size="small">
-                    <InputLabel>质量模式</InputLabel>
+                    <InputLabel>{t('dreamweaverRun.configQualityMode')}</InputLabel>
                     <Select
                       value={highQuality ? 'quality' : 'cost'}
-                      label="质量模式"
+                      label={t('dreamweaverRun.configQualityMode')}
                       onChange={(e) => onQualityChange(e.target.value === 'quality')}
                       disabled={isLocked && lockedConfig?.quality_mode != null}
                     >
-                      <MenuItem value="quality">高质量（较慢）</MenuItem>
-                      <MenuItem value="cost">经济模式（较快）</MenuItem>
+                      <MenuItem value="quality">{t('dreamweaverRun.configQualityHigh')}</MenuItem>
+                      <MenuItem value="cost">{t('dreamweaverRun.configQualityCost')}</MenuItem>
                     </Select>
                   </FormControl>
                 </Grid>
                 <Grid item xs={12} sm={6}>
                   <FormControl fullWidth size="small">
-                    <InputLabel>风格预设</InputLabel>
+                    <InputLabel>{t('dreamweaverRun.regenStylePresetLabel')}</InputLabel>
                     <Select
                       value={stylePreset}
-                      label="风格预设"
+                      label={t('dreamweaverRun.regenStylePresetLabel')}
                       onChange={(e) => onStylePresetChange(e.target.value)}
                       disabled={isLocked && lockedConfig?.style_preset != null}
                     >
                       {STYLE_PRESET_OPTIONS.map((preset) => (
                         <MenuItem key={preset.value} value={preset.value}>
-                          {preset.label}
+                          {t(preset.label)}
                         </MenuItem>
                       ))}
                     </Select>
@@ -276,16 +238,16 @@ export function ConfigPanel({
                 </Grid>
                 <Grid item xs={12} sm={6}>
                   <FormControl fullWidth size="small">
-                    <InputLabel>图片比例</InputLabel>
+                    <InputLabel>{t('dreamweaverRun.regenImageRatioLabel')}</InputLabel>
                     <Select
                       value={imageRatio}
-                      label="图片比例"
+                      label={t('dreamweaverRun.regenImageRatioLabel')}
                       onChange={(e) => onImageRatioChange(e.target.value)}
                       disabled={isLocked && lockedConfig?.image_ratio != null}
                     >
                       {IMAGE_RATIO_OPTIONS.map((ratio) => (
                         <MenuItem key={ratio.value} value={ratio.value}>
-                          {ratio.label}
+                          {t(ratio.label)}
                         </MenuItem>
                       ))}
                     </Select>
@@ -293,16 +255,16 @@ export function ConfigPanel({
                 </Grid>
                 <Grid item xs={12} sm={6}>
                   <FormControl fullWidth size="small">
-                    <InputLabel>图片分辨率</InputLabel>
+                    <InputLabel>{t('dreamweaverRun.configImageResolution')}</InputLabel>
                     <Select
                       value={imageResolution}
-                      label="图片分辨率"
+                      label={t('dreamweaverRun.configImageResolution')}
                       onChange={(e) => onImageResolutionChange(e.target.value)}
                       disabled={isLocked && lockedConfig?.image_resolution != null}
                     >
                       {IMAGE_RESOLUTION_OPTIONS.map((res) => (
                         <MenuItem key={res.value} value={res.value}>
-                          {res.label}
+                          {t(res.label)}
                         </MenuItem>
                       ))}
                     </Select>
@@ -310,16 +272,16 @@ export function ConfigPanel({
                 </Grid>
                 <Grid item xs={12} sm={6}>
                   <FormControl fullWidth size="small">
-                    <InputLabel>图像模型</InputLabel>
+                    <InputLabel>{t('dreamweaverRun.configImageModel')}</InputLabel>
                     <Select
                       value={imageModel}
-                      label="图像模型"
+                      label={t('dreamweaverRun.configImageModel')}
                       onChange={(e) => onImageModelChange(e.target.value)}
                       disabled={isLocked && lockedConfig?.image_model != null}
                     >
                       {IMAGE_MODEL_OPTIONS.map((model) => (
                         <MenuItem key={model.value} value={model.value}>
-                          {model.label}
+                          {t(model.label)}
                         </MenuItem>
                       ))}
                     </Select>
@@ -327,16 +289,16 @@ export function ConfigPanel({
                 </Grid>
                 <Grid item xs={12} sm={6}>
                   <FormControl fullWidth size="small">
-                    <InputLabel>视频模型</InputLabel>
+                    <InputLabel>{t('dreamweaverRun.configVideoModel')}</InputLabel>
                     <Select
                       value={videoModel}
-                      label="视频模型"
+                      label={t('dreamweaverRun.configVideoModel')}
                       onChange={(e) => onVideoModelChange(e.target.value)}
                       disabled={isLocked && lockedConfig?.video_model != null}
                     >
                       {VIDEO_MODEL_OPTIONS.map((model) => (
                         <MenuItem key={model.value} value={model.value}>
-                          {model.label}
+                          {t(model.label)}
                         </MenuItem>
                       ))}
                     </Select>
@@ -348,7 +310,7 @@ export function ConfigPanel({
 
           <Box>
             <Typography variant="subtitle2" gutterBottom>
-              模型配置与联动
+              {t('dreamweaverRun.configModelSection')}
             </Typography>
             <Paper variant="outlined" sx={{ p: 2 }}>
               <Grid container spacing={2}>
@@ -361,20 +323,20 @@ export function ConfigPanel({
                         disabled={isLocked && lockedConfig?.enable_vision_review != null}
                       />
                     }
-                    label="启用视觉理解审查"
+                    label={t('dreamweaverRun.configEnableVisionReview')}
                   />
                   {enableVisionReview && (
                     <FormControl fullWidth size="small" sx={{ mt: 1 }}>
-                      <InputLabel>视觉理解模型</InputLabel>
+                      <InputLabel>{t('dreamweaverRun.configVisionModel')}</InputLabel>
                       <Select
                         value={visionModel}
-                        label="视觉理解模型"
+                        label={t('dreamweaverRun.configVisionModel')}
                         onChange={(e) => onVisionModelChange(e.target.value)}
                         disabled={isLocked && lockedConfig?.vision_model != null}
                       >
                         {VISION_MODEL_OPTIONS.map((model) => (
                           <MenuItem key={model.value} value={model.value}>
-                            {model.label}
+                            {t(model.label)}
                           </MenuItem>
                         ))}
                       </Select>
@@ -390,20 +352,20 @@ export function ConfigPanel({
                         disabled={isLocked && lockedConfig?.enable_video_edit != null}
                       />
                     }
-                    label="启用视频编辑"
+                    label={t('dreamweaverRun.configEnableVideoEdit')}
                   />
                   {enableVideoEdit && (
                     <FormControl fullWidth size="small" sx={{ mt: 1 }}>
-                      <InputLabel>视频编辑模型</InputLabel>
+                      <InputLabel>{t('dreamweaverRun.configVideoEditModel')}</InputLabel>
                       <Select
                         value={videoEditModel}
-                        label="视频编辑模型"
+                        label={t('dreamweaverRun.configVideoEditModel')}
                         onChange={(e) => onVideoEditModelChange(e.target.value)}
                         disabled={isLocked && lockedConfig?.video_edit_model != null}
                       >
                         {VIDEO_EDIT_MODEL_OPTIONS.map((model) => (
                           <MenuItem key={model.value} value={model.value}>
-                            {model.label}
+                            {t(model.label)}
                           </MenuItem>
                         ))}
                       </Select>
@@ -412,7 +374,7 @@ export function ConfigPanel({
                 </Grid>
                 <Grid item xs={12}>
                   <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
-                    视觉理解模型用于生成过程中自动评估图像/视频质量，视频编辑模型用于分镜素材的精剪和风格迁移。
+                    {t('dreamweaverRun.configVisionVideoEditHint')}
                   </Typography>
                 </Grid>
               </Grid>
@@ -421,7 +383,7 @@ export function ConfigPanel({
 
           <Box>
             <Typography variant="subtitle2" gutterBottom>
-              高级选项
+              {t('dreamweaverRun.configAdvancedSection')}
             </Typography>
             <Paper variant="outlined" sx={{ p: 2 }}>
               <Grid container spacing={2}>
@@ -434,7 +396,7 @@ export function ConfigPanel({
                         disabled={isLocked && lockedConfig?.smart_tuning != null}
                       />
                     }
-                    label="智能调优"
+                    label={t('dreamweaverRun.strategyTitleSmartTuning')}
                   />
                 </Grid>
                 <Grid item xs={12} sm={6}>
@@ -446,7 +408,7 @@ export function ConfigPanel({
                         disabled={isLocked && lockedConfig?.video_require_confirmation != null}
                       />
                     }
-                    label="视频确认"
+                    label={t('dreamweaverRun.strategyTitleVideoConfirmation')}
                   />
                 </Grid>
                 <Grid item xs={12} sm={6}>
@@ -458,7 +420,7 @@ export function ConfigPanel({
                         disabled={isLocked && lockedConfig?.prompt_review_required != null}
                       />
                     }
-                    label="提示词审核"
+                    label={t('dreamweaverRun.strategyTitlePromptReview')}
                   />
                 </Grid>
                 <Grid item xs={12} sm={6}>
@@ -469,17 +431,17 @@ export function ConfigPanel({
                         onChange={(e) => onQcAllowFailChange(e.target.checked)}
                       />
                     }
-                    label="允许QC失败"
+                    label={t('dreamweaverRun.strategyTitleQcFail')}
                   />
                 </Grid>
                 <Grid item xs={12}>
                   <TextField
                     fullWidth
                     size="small"
-                    label="AB测试变体"
+                    label={t('dreamweaverRun.configAbVariant')}
                     value={abVariant}
                     onChange={(e) => onAbVariantChange(e.target.value)}
-                    placeholder="留空表示不启用AB测试"
+                    placeholder={t('dreamweaverRun.configAbVariantPlaceholder')}
                   />
                 </Grid>
               </Grid>
@@ -488,14 +450,14 @@ export function ConfigPanel({
         </Stack>
       </DialogContent>
       <DialogActions>
-        <Button onClick={onClose}>取消</Button>
+        <Button onClick={onClose}>{t('common.cancel')}</Button>
         <Button
           variant="contained"
           startIcon={<PlayArrowIcon />}
           onClick={handleRun}
           disabled={running || selectedChapterIds.length === 0}
         >
-          {running ? '启动中...' : '开始生成'}
+          {t(running ? 'dreamweaverRun.configStarting' : 'dreamweaverRun.configStartGenerating')}
         </Button>
       </DialogActions>
     </Dialog>

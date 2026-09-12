@@ -1,4 +1,5 @@
 import { useEffect } from 'react'
+import { useTranslation } from 'react-i18next'
 import { apiClient, extractApiErrorMessage } from '@/services/api'
 import {
   toDreamweaverTaskStatus,
@@ -36,6 +37,8 @@ export function useDreamweaverTaskPolling(options: UseDreamweaverTaskPollingOpti
     applyFailedStatus,
   } = options
 
+  const { t } = useTranslation()
+
   useEffect(() => {
     if (!taskId) return
 
@@ -48,7 +51,7 @@ export function useDreamweaverTaskPolling(options: UseDreamweaverTaskPollingOpti
         const data = toDreamweaverTaskStatus(res.data)
         if (cancelled) return
         if (!data) {
-          setError('任务状态响应格式无效')
+          setError(t('dreamweaverRun.taskStatusFormatInvalid'))
           applyTerminalStatus({ run_id: null })
           return
         }
@@ -81,11 +84,11 @@ export function useDreamweaverTaskPolling(options: UseDreamweaverTaskPollingOpti
           }
         } else {
           applyFailedStatus(data)
-          setError((data as { error?: string }).error || '任务执行失败')
+          setError((data as { error?: string }).error || t('dreamweaverRun.taskFailed'))
         }
       } catch (e: unknown) {
         if (cancelled) return
-        const message = await extractApiErrorMessage(e, '任务状态查询失败')
+        const message = await extractApiErrorMessage(e, t('dreamweaverRun.taskStatusQueryFailed'))
         const status = getThrownErrorStatus(e)
         const isTimeout = isTimeoutErrorLike(e)
         const isNetworkError = isNetworkErrorLike(e)
@@ -107,5 +110,5 @@ export function useDreamweaverTaskPolling(options: UseDreamweaverTaskPollingOpti
       cancelled = true
       if (timer) clearTimeout(timer)
     }
-  }, [taskId, applyQueuedStatus, applyRunningStatus, applyWaitingStatus, applyTerminalStatus, applyCompletedStatus, applyFailedStatus, setError, setResult, setRunPreflight])
+  }, [taskId, applyQueuedStatus, applyRunningStatus, applyWaitingStatus, applyTerminalStatus, applyCompletedStatus, applyFailedStatus, setError, setResult, setRunPreflight, t])
 }

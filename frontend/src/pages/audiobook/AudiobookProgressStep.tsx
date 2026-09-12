@@ -1,6 +1,7 @@
 import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import PauseCircleOutlineIcon from '@mui/icons-material/PauseCircleOutline'
 import PlayCircleOutlineIcon from '@mui/icons-material/PlayCircleOutline'
+import { useTranslation } from 'react-i18next'
 import {
   Box,
   Button,
@@ -47,6 +48,7 @@ const AudiobookProgressStep = ({
   onPauseTask,
   onResumeTask,
 }: AudiobookProgressStepProps) => {
+  const { t } = useTranslation()
   const taskStatus = progressTaskStatus.status
   const isPaused = taskStatus === 'paused'
   const isPauseRequested = taskStatus === 'pause_requested'
@@ -62,7 +64,7 @@ const AudiobookProgressStep = ({
         sx={audiobookButtonSx.neutralOutlined}
         variant="outlined"
       >
-        返回配置
+        {t('audiobook.audiobookProgressStep.backToConfig')}
       </Button>
       <Box sx={{ display: 'flex', gap: 1.5, flexWrap: 'wrap' }}>
         {isPaused || isPauseRequested ? (
@@ -74,7 +76,9 @@ const AudiobookProgressStep = ({
             disabled={pauseResuming}
             sx={audiobookButtonSx.brandContained}
           >
-            {pauseResuming ? '继续中...' : '继续生成'}
+            {pauseResuming
+              ? t('audiobook.audiobookProgressStep.resuming')
+              : t('audiobook.audiobookProgressStep.resumeLabel')}
           </Button>
         ) : (
           <Button
@@ -85,7 +89,9 @@ const AudiobookProgressStep = ({
             disabled={!canPause || isPauseRequested}
             sx={audiobookButtonSx.warningOutlined}
           >
-            {isPauseRequested ? '暂停中...' : '暂停生成'}
+            {isPauseRequested
+              ? t('audiobook.audiobookProgressStep.pausing')
+              : t('audiobook.audiobookProgressStep.pauseLabel')}
           </Button>
         )}
       </Box>
@@ -93,20 +99,20 @@ const AudiobookProgressStep = ({
 
     {isPaused && (
       <Typography variant="body2" sx={{ mb: 2, color: 'warning.main' }}>
-        任务已暂停，已完成章节的进度已保存。点击“恢复生成”将从暂停处继续。
+        {t('audiobook.audiobookProgressStep.pausedHint')}
       </Typography>
     )}
     {isPauseRequested && (
       <Typography variant="body2" sx={{ mb: 2, color: 'text.secondary' }}>
-        已请求暂停：当前模型或语音请求完成后会立即停止。点击“继续生成”可撤销暂停请求。
+        {t('audiobook.audiobookProgressStep.pauseRequestedHint')}
       </Typography>
     )}
 
     {activeProjectTasks.length > 0 && (
       <ActiveProjectTasksAlert
         tasks={activeProjectTasks}
-        title={`已恢复 ${activeProjectTasks.length} 个进行中的任务`}
-        description="当前展示的是焦点任务，你可以在这里切换查看不同章节或不同批次任务的阶段进度。"
+        title={t('audiobook.audiobookProgressStep.restoredTasksTitle', { total: activeProjectTasks.length })}
+        description={t('audiobook.audiobookProgressStep.focusedTaskDescription')}
         mode="progress"
         focusedTaskId={activeTaskId}
         getTaskLabel={getTaskLabel}
@@ -116,7 +122,7 @@ const AudiobookProgressStep = ({
 
     <Box sx={{ mt: 3 }}>
       <Typography variant="h6" sx={{ mb: 2, fontWeight: 600, color: 'text.primary' }}>
-        当前阶段进度
+        {t('audiobook.audiobookProgressStep.currentStageTitle')}
       </Typography>
       <TaskStageDetails
         taskStatus={progressTaskStatus}
@@ -131,14 +137,14 @@ const AudiobookProgressStep = ({
             onClick={onOpenScriptReview}
             sx={audiobookButtonSx.brandOutlined}
           >
-            查看剧本评审详情
+            {t('audiobook.audiobookProgressStep.viewReviewDetails')}
           </Button>
         </Box>
       )}
     </Box>
 
     <Typography variant="caption" sx={{ display: 'block', textAlign: 'center', mt: 1, color: 'text.secondary' }}>
-      生成任务在后台运行，您可以随时返回或关闭页面，任务会继续执行。
+      {t('audiobook.audiobookProgressStep.backgroundHint')}
     </Typography>
   </Paper>
   )

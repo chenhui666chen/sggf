@@ -4,6 +4,7 @@ import type {
   ScriptSegment,
   ScriptSegmentVoiceParams,
 } from './types'
+import type { TranslateFn } from './audioLibraryDisplay'
 import { modelUsesBasicNumericSpeedControl } from './ttsModels'
 
 export const parseOptionalNumberInput = (value: string): number | null => {
@@ -222,19 +223,23 @@ export const getInlineTagStrategySummary = (
 
 export const getScriptSegmentTypeLabel = (
   segment: Pick<ScriptSegment, 'type'>,
+  t?: TranslateFn,
 ): string => {
   const type = normalizeText(segment.type)
-  return type === 'dialogue' ? '对白' : type || '旁白'
+  return type === 'dialogue'
+    ? (t ? t('audiobook.scriptQualityReviewDialog.dialogueType') : '对白')
+    : type || (t ? t('audiobook.editorSession.speakerFallback') : '旁白')
 }
 
 export const getScriptSegmentSpeakerLabel = (
   segment: Pick<ScriptSegment, 'speaker' | 'speaker_name' | 'character_name' | 'role_name'>,
+  t?: TranslateFn,
 ): string =>
   normalizeText(segment.speaker)
   || normalizeText(segment.speaker_name)
   || normalizeText(segment.character_name)
   || normalizeText(segment.role_name)
-  || '旁白'
+  || (t ? t('audiobook.editorSession.speakerFallback') : '旁白')
 
 export const formatScriptSegmentSummary = (
   segment: Pick<
@@ -242,10 +247,11 @@ export const formatScriptSegmentSummary = (
     'type' | 'speaker' | 'speaker_name' | 'character_name' | 'role_name' | 'emotion'
   >,
   index: number,
+  t?: TranslateFn,
 ): string => {
   const emotion = normalizeText(segment.emotion)
-  return `#${index + 1} [${getScriptSegmentTypeLabel(segment)}] ${getScriptSegmentSpeakerLabel(segment)}${
-    emotion ? ` · 情绪: ${emotion}` : ''
+  return `#${index + 1} [${getScriptSegmentTypeLabel(segment, t)}] ${getScriptSegmentSpeakerLabel(segment, t)}${
+    emotion ? (t ? t('audiobook.segmentLabel.emotionSuffix', { emotion }) : ` · 情绪: ${emotion}`) : ''
   }`
 }
 

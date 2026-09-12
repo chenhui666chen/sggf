@@ -1,3 +1,5 @@
+import type { TFunction } from 'i18next'
+
 import type { StoryExpansionResult } from '@/types/storyExpansion'
 import { coerceStoryExpansionResult } from './storyExpansionResultModel'
 
@@ -26,6 +28,7 @@ function truncateText(text: string, maxLength = 88): string {
 
 function getStoryExpansionCharacterPhasePlanText(
   result: StoryExpansionResult | null | undefined,
+  t?: TFunction,
 ): string {
   const normalized = coerceStoryExpansionResult(result)
   const characterPlan = normalized?.expansion_analysis?.auto_supplement?.character_plan
@@ -62,19 +65,31 @@ function getStoryExpansionCharacterPhasePlanText(
     return ''
   }
 
-  const parts = [`全书建议规模约为 ${recommendedRangeText} 人，${stageLabel}先补到 ${stageTarget} 人`]
+  const parts = [
+    t
+      ? t('storyExpansion.planLead', { range: recommendedRangeText, stage: stageLabel, target: stageTarget })
+      : `全书建议规模约为 ${recommendedRangeText} 人，${stageLabel}先补到 ${stageTarget} 人`,
+  ]
   if (taskTarget > stageTarget) {
-    parts.push('点击一次开始后，系统会自动连续执行多轮，首轮人物数不是整次任务上限')
+    parts.push(t ? t('storyExpansion.multiRoundHint') : '点击一次开始后，系统会自动连续执行多轮，首轮人物数不是整次任务上限')
     parts.push(
       taskTargetIncrement > 0
-        ? `本次自动协同预计补到 ${taskTarget} 人（约新增 ${taskTargetIncrement} 人）`
-        : `本次自动协同预计补到 ${taskTarget} 人`,
+        ? (t
+          ? t('storyExpansion.taskTargetWithIncrement', { target: taskTarget, increment: taskTargetIncrement })
+          : `本次自动协同预计补到 ${taskTarget} 人（约新增 ${taskTargetIncrement} 人）`)
+        : (t
+          ? t('storyExpansion.taskTarget', { target: taskTarget })
+          : `本次自动协同预计补到 ${taskTarget} 人`),
     )
   }
   if (remainingToFloor > 0 && followUpPhase) {
-    parts.push(`剩余约 ${remainingToFloor} 人会在${followUpPhase}继续补齐`)
+    parts.push(
+      t
+        ? t('storyExpansion.remainingInPhase', { remaining: remainingToFloor, phase: followUpPhase })
+        : `剩余约 ${remainingToFloor} 人会在${followUpPhase}继续补齐`,
+    )
   }
-  return parts.join('；')
+  return parts.join(t ? '; ' : '；')
 }
 
 export function getStoryExpansionSignals(result: StoryExpansionResult | null | undefined): {
@@ -108,16 +123,17 @@ export function getStoryExpansionSignalCounts(result: StoryExpansionResult | nul
 
 export function getStoryExpansionSummary(
   result: StoryExpansionResult | null | undefined,
+  t?: TFunction,
 ): { label: string; text: string } | null {
   const normalized = coerceStoryExpansionResult(result)
-  const characterPhasePlanText = getStoryExpansionCharacterPhasePlanText(normalized)
+  const characterPhasePlanText = getStoryExpansionCharacterPhasePlanText(normalized, t)
 
   const coordinationSummary =
     typeof normalized?.coordination_summary === 'string'
       ? normalized.coordination_summary.trim()
       : ''
   if (coordinationSummary) {
-    return { label: '协同摘要', text: coordinationSummary }
+    return { label: t ? t('storyExpansion.summaryLabel') : '协同摘要', text: coordinationSummary }
   }
 
   const analysisSummary =
@@ -125,23 +141,27 @@ export function getStoryExpansionSummary(
       ? normalized.expansion_analysis.analysis_summary.trim()
       : ''
   if (analysisSummary) {
-    return { label: '协同摘要', text: analysisSummary }
+    return { label: t ? t('storyExpansion.summaryLabel') : '协同摘要', text: analysisSummary }
   }
 
   const { repairedMessages, advisoryMessages } = getStoryExpansionSignals(normalized)
   if (repairedMessages.length > 0 && advisoryMessages.length <= 0) {
-    return { label: '协同修复', text: repairedMessages.join('；') }
+    return { label: t ? t('storyExpansion.repairLabel') : '协同修复', text: repairedMessages.join('；') }
   }
   if (advisoryMessages.length > 0) {
     const parts = [advisoryMessages.join('；')]
     if (repairedMessages.length > 0) {
-      parts.push(`系统已自动修复：${repairedMessages.join('；')}`)
+      parts.push(
+        t
+          ? t('storyExpansion.systemRepaired', { messages: repairedMessages.join('；') })
+          : `系统已自动修复：${repairedMessages.join('；')}`,
+      )
     }
-    return { label: '协同提醒', text: parts.join('；') }
+    return { label: t ? t('storyExpansion.alertLabel') : '协同提醒', text: parts.join('；') }
   }
 
   if (characterPhasePlanText) {
-    return { label: '人物计划', text: characterPhasePlanText }
+    return { label: t ? t('storyExpansion.planLabel') : '人物计划', text: characterPhasePlanText }
   }
 
   return null
@@ -150,17 +170,18 @@ export function getStoryExpansionSummary(
 export function buildStoryExpansionCompletionMessage(
   baseMessage: string,
   result: StoryExpansionResult | null | undefined,
+  t?: TFunction,
 ): string {
   const { repairCount, advisoryCount } = getStoryExpansionSignalCounts(result)
-  const summary = getStoryExpansionSummary(result)
-  const characterPhasePlanText = getStoryExpansionCharacterPhasePlanText(result)
+  const summary = getStoryExpansionSummary(result, t)
+  const characterPhasePlanText = getStoryExpansionCharacterPhasePlanText(result, t)
   const statusParts: string[] = []
 
   if (repairCount > 0) {
-    statusParts.push(`已自动修复 ${repairCount} 处人物承接`)
+    statusParts.push(t ? t('storyExpansion.repairsDone', { count: repairCount }) : `已自动修复 ${repairCount} 处人物承接`)
   }
   if (advisoryCount > 0) {
-    statusParts.push(`仍有 ${advisoryCount} 条协同提醒`)
+    statusParts.push(t ? t('storyExpansion.advisoriesLeft', { count: advisoryCount }) : `仍有 ${advisoryCount} 条协同提醒`)
   }
 
   if (!summary && !characterPhasePlanText && statusParts.length <= 0) {
@@ -171,8 +192,12 @@ export function buildStoryExpansionCompletionMessage(
   if (statusParts.length > 0) {
     parts.push(statusParts.join('；'))
   }
-  if (characterPhasePlanText && summary?.label !== '人物计划') {
-    parts.push(`人物计划：${truncateText(characterPhasePlanText, 72)}`)
+  if (characterPhasePlanText && summary?.label !== (t ? t('storyExpansion.planLabel') : '人物计划')) {
+    parts.push(
+      t
+        ? t('storyExpansion.planPrefix', { text: truncateText(characterPhasePlanText, 72) })
+        : `人物计划：${truncateText(characterPhasePlanText, 72)}`,
+    )
   }
   if (summary) {
     parts.push(`${summary.label}：${truncateText(summary.text)}`)

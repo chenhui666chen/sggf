@@ -1,4 +1,7 @@
+import type { TFunction } from 'i18next'
 import type { UserAssetRecord } from '@/services/api'
+
+const DEFAULT_TRANSLATE: TFunction = ((key: string) => key) as TFunction
 
 export type UserAssetPreviewPresentation =
   | { kind: 'placeholder'; message: string }
@@ -18,14 +21,18 @@ function readTrimmedString(value: string | null | undefined): string {
 export function buildUserAssetPreviewPresentation(
   asset: Pick<UserAssetRecord, 'asset_kind' | 'title'>,
   options: BuildUserAssetPreviewPresentationOptions = {},
+  t?: TFunction,
 ): UserAssetPreviewPresentation {
+  const translate = t ?? DEFAULT_TRANSLATE
   const previewUrl = readTrimmedString(options.previewUrl)
   const title = readTrimmedString(asset.title)
 
   if (!previewUrl) {
     return {
       kind: 'placeholder',
-      message: options.isProtectedAssetPending ? '受保护资源加载中...' : '暂无预览',
+      message: options.isProtectedAssetPending
+        ? translate('userAsset.preview.protectedLoading')
+        : translate('userAsset.preview.noPreview'),
     }
   }
 
@@ -46,6 +53,6 @@ export function buildUserAssetPreviewPresentation(
   return {
     kind: 'image',
     src: previewUrl,
-    alt: title || '用户资产预览',
+    alt: title || translate('userAsset.preview.assetPreview'),
   }
 }

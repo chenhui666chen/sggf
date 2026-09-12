@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 
+import { useTranslation } from 'react-i18next'
+
 import { apiClient, extractApiErrorMessage } from '../../services/api'
 import type {
   CharacterVoiceSetting,
@@ -47,6 +49,7 @@ export const useAudiobookVoiceCatalog = ({
   ttsModel,
   characterVoices,
 }: UseAudiobookVoiceCatalogParams) => {
+  const { t } = useTranslation()
   const [voiceLoading, setVoiceLoading] = useState(false)
   const [voiceError, setVoiceError] = useState<string | null>(null)
   const [ttsModelOptions, setTtsModelOptions] = useState<readonly TtsModelOption[]>(
@@ -108,16 +111,17 @@ export const useAudiobookVoiceCatalog = ({
     const modelLabel = currentTtsModelOption?.name || getTtsModelLabel(ttsModel)
     const updatedAt = voiceCatalogMeta.updated_at || '—'
     if (currentModelRequiresCustomVoice) {
-      return `${modelLabel}：官方无系统音色，当前展示 ${currentVoicePresets.length} 个可用自定义音色，最近同步 ${updatedAt}。`
+      return t('audiobook.useAudiobookVoiceCatalog.summaryNoSystemVoices', { model: modelLabel, total: currentVoicePresets.length, updatedAt })
     }
 
     const voiceCount = voiceCatalogMeta.voice_count ?? currentVoicePresets.length
-    const capabilityText = currentTtsModelOption?.catalogNote || '适合角色对白、旁白与批量生成。'
-    return `${modelLabel}：官方 ${voiceCount} 种音色，最近更新 ${updatedAt}，${capabilityText}`
+    const capabilityText = currentTtsModelOption?.catalogNote || t('audiobook.useAudiobookVoiceCatalog.capabilityFallback')
+    return t('audiobook.useAudiobookVoiceCatalog.summaryWithCatalog', { model: modelLabel, total: voiceCount, updatedAt, capability: capabilityText })
   }, [
     currentModelRequiresCustomVoice,
     currentTtsModelOption,
     currentVoicePresets.length,
+    t,
     ttsModel,
     voiceCatalogMeta,
   ])
@@ -125,23 +129,23 @@ export const useAudiobookVoiceCatalog = ({
   const voiceCatalogNotice = useMemo(() => {
     const modelLabel = currentTtsModelOption?.name || getTtsModelLabel(ttsModel)
     if (currentTtsModelOption?.catalogStatus === 'unavailable') {
-      return `${modelLabel}：${currentTtsModelOption.catalogError || '音色目录不可用，请检查后端 voice catalog 配置。'}`
+      return t('audiobook.useAudiobookVoiceCatalog.noticeWithError', { model: modelLabel, error: currentTtsModelOption.catalogError || t('audiobook.useAudiobookVoiceCatalog.catalogUnavailable') })
     }
     if (currentTtsModelOption?.runtimeStatus === 'unavailable') {
-      return `${modelLabel}：${currentTtsModelOption.runtimeError || 'TTS 运行时模型不可用，请检查后端 adapter 注册。'}`
+      return t('audiobook.useAudiobookVoiceCatalog.noticeWithError', { model: modelLabel, error: currentTtsModelOption.runtimeError || t('audiobook.useAudiobookVoiceCatalog.runtimeUnavailable') })
     }
     if (currentTtsModelOption?.source === 'fallback') {
       if (voiceLoading) {
-        return `${modelLabel}：正在同步后端模型目录与音色目录。`
+        return t('audiobook.useAudiobookVoiceCatalog.syncingNotice', { model: modelLabel })
       }
-      return `${modelLabel}：暂时使用前端内置模型配置，后端模型目录未返回该模型。`
+      return t('audiobook.useAudiobookVoiceCatalog.fallbackModelNotice', { model: modelLabel })
     }
     const note = currentTtsModelOption?.catalogNote
     if (note) {
       return `${modelLabel}：${note}`
     }
-    return `${modelLabel}：使用后端模型目录与音色目录配置。`
-  }, [currentTtsModelOption, ttsModel, voiceLoading])
+    return t('audiobook.useAudiobookVoiceCatalog.backendConfigNotice', { model: modelLabel })
+  }, [currentTtsModelOption, t, ttsModel, voiceLoading])
   const voiceCatalogNoticeSeverity: VoiceCatalogNoticeSeverity = currentTtsModelOption?.catalogStatus === 'unavailable'
     || currentTtsModelOption?.runtimeStatus === 'unavailable'
     ? 'warning'
@@ -159,13 +163,13 @@ export const useAudiobookVoiceCatalog = ({
         setVoiceError(null)
       }
     } catch (error: unknown) {
-      const message = await extractApiErrorMessage(error, `刷新 ${getTtsModelLabel(model)} 音色库失败`)
+      const message = await extractApiErrorMessage(error, t('audiobook.useAudiobookVoiceCatalog.refreshFailed', { model: getTtsModelLabel(model) }))
       if (model === ttsModel) {
         setVoiceError(message)
       }
       console.error(`刷新 ${model} 音色库失败:`, error)
     }
-  }, [ttsModel])
+  }, [t, ttsModel])
 
   const fetchVoiceCatalog = useCallback(async () => {
     setVoiceLoading(true)
@@ -232,7 +236,7 @@ export const useAudiobookVoiceCatalog = ({
           const firstFailure = results.find((result): result is PromiseRejectedResult =>
             result.status === 'rejected',
           )
-          throw firstFailure?.reason || new Error('加载音色库失败')
+          throw firstFailure?.reason || new Error(t('audiobook.useAudiobookVoiceCatalog.loadFailed'))
         }
 
         const newPresetsByModel: Record<TtsModel, VoicePreset[]> = {}
@@ -249,13 +253,13 @@ export const useAudiobookVoiceCatalog = ({
         if (failedModels.length === 0) {
           setVoiceError(null)
         } else if (failedModels.includes(ttsModel)) {
-          setVoiceError(`加载 ${getTtsModelLabel(ttsModel)} 音色库失败，请重新同步。`)
+          setVoiceError(t('audiobook.useAudiobookVoiceCatalog.reloadFailedWithModel', { model: getTtsModelLabel(ttsModel) }))
         } else {
-          setVoiceError(`部分音色库加载失败：${failedModels.map(getTtsModelLabel).join('、')}。`)
+          setVoiceError(t('audiobook.useAudiobookVoiceCatalog.partialLoadFailed', { models: failedModels.map(getTtsModelLabel).join('、') }))
         }
       } catch (error: unknown) {
         if (!cancelled) {
-          const message = await extractApiErrorMessage(error, '加载音色库失败')
+          const message = await extractApiErrorMessage(error, t('audiobook.useAudiobookVoiceCatalog.loadFailed'))
           setVoiceError(message)
         }
       } finally {
@@ -270,7 +274,7 @@ export const useAudiobookVoiceCatalog = ({
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [t])
 
   useEffect(() => {
     if (voiceCatalogMetaByModel[ttsModel] || voiceLoading) {

@@ -29,6 +29,7 @@ import {
   Badge,
   Snackbar,
   Alert as MuiAlert,
+  alpha,
 } from '@mui/material'
 import RefreshIcon from '@mui/icons-material/Refresh'
 import SaveIcon from '@mui/icons-material/Save'
@@ -92,15 +93,41 @@ import {
   getStoryExpansionResultFromTaskComplete,
   isStoryExpansionTaskId,
 } from '@/utils/storyExpansionEvents'
+import { useFormats } from '@/i18n'
+import { useTranslation } from 'react-i18next'
 
 
 const stages: StageType[] = ['concept', 'structure', 'content', 'review', 'iteration']
-const stageNames = {
+
+// 阶段中文名：写入对话记忆（AI 上下文），属于内容数据，不参与 i18n
+const STAGE_NAME_ZH: Record<StageType, string> = {
   concept: '概念开发',
   structure: '结构设计',
   content: '内容创作',
   review: '质量评审',
   iteration: '迭代优化',
+}
+
+// 阶段名 i18n key：UI 展示用
+const stageNameKeys: Record<StageType, string> = {
+  concept: 'workflow.stageNames.concept',
+  structure: 'workflow.stageNames.structure',
+  content: 'workflow.stageNames.content',
+  review: 'workflow.stageNames.review',
+  iteration: 'workflow.stageNames.iteration',
+}
+
+// 题材中文 value → i18n key（value 提交后端保持中文，仅展示标签走翻译）
+const genreLabelKeys: Record<string, string> = {
+  '修仙': 'workflow.genres.xiuxian',
+  '玄幻': 'workflow.genres.xuanhuan',
+  '奇幻': 'workflow.genres.fantasy',
+  '都市': 'workflow.genres.urban',
+  '言情': 'workflow.genres.romance',
+  '耽美': 'workflow.genres.danmei',
+  '悬疑': 'workflow.genres.suspense',
+  '科幻': 'workflow.genres.sciFi',
+  '纯文学': 'workflow.genres.literary',
 }
 
 const isStageType = (value: string | null | undefined): value is StageType => {
@@ -122,6 +149,8 @@ const coerceAgentStatus = (value: string | null | undefined): AgentStatus => {
 }
 
 export default function WorkflowControlPage() {
+  const { t } = useTranslation()
+  const { formatMonthDayTime } = useFormats()
   const { projectId } = useParams<{ projectId: string }>()
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
@@ -650,7 +679,7 @@ export default function WorkflowControlPage() {
               agentId: agent.id,
               status: 'completed',
               progress: 100,
-              message: '执行完成'
+              message: t('workflow.progress.agentDone')
             }))
           })
           
@@ -708,7 +737,7 @@ export default function WorkflowControlPage() {
             agentId: agent.id,
             status: 'working',
             progress: 0,
-            message: '执行中...'
+            message: t('workflow.progress.agentWorking')
           }))
         })
       } else if (data.status === 'completed') {
@@ -726,7 +755,7 @@ export default function WorkflowControlPage() {
             agentId: agent.id,
             status: 'completed',
             progress: 100,
-            message: '执行完成'
+            message: t('workflow.progress.agentDone')
           }))
         })
         
@@ -842,7 +871,7 @@ export default function WorkflowControlPage() {
               agentId: agent.id,
               status: 'working',
               progress: data.progress || 0,  // ✅ 添加默认值
-              message: `进度: ${data.progress}%`
+              message: t('workflow.progress.agentProgress', { progress: data.progress || 0 })
             }))
           }
         })
@@ -891,7 +920,7 @@ export default function WorkflowControlPage() {
         setProgressMessage(
           data.message ||
           (currentStep === 4
-            ? '正在内部改稿和复评，最终版本确认后会展示正文，请等待...'
+            ? t('workflow.progress.reviewingDraft')
             : '')
         )
 
@@ -955,7 +984,7 @@ export default function WorkflowControlPage() {
 
           dispatch(fetchChapters(parseInt(projectId)))
         }
-        setSnackbarMessage(buildStoryExpansionCompletionMessage('协同拓展完成，已刷新大纲与人物内容', result))
+        setSnackbarMessage(buildStoryExpansionCompletionMessage(t('workflow.snack.collabExpansionDone'), result, t))
         setSnackbarSeverity('success')
         setSnackbarOpen(true)
         return
@@ -993,9 +1022,9 @@ export default function WorkflowControlPage() {
         // 提取章节信息
         const chapter = completedResult?.chapter
         if (chapter) {
-          setSnackbarMessage(`🎉 第${chapter.chapter_number}章已生成：${chapter.title} (${chapter.word_count}字)`)
+          setSnackbarMessage(t('workflow.snack.chapterGenerated', { number: chapter.chapter_number, title: chapter.title, words: chapter.word_count }))
         } else {
-          setSnackbarMessage('✅ 章节生成完成！')
+          setSnackbarMessage(t('workflow.snack.chapterGenerationDone'))
         }
         setSnackbarSeverity('success')
         setSnackbarOpen(true)
@@ -1026,7 +1055,7 @@ export default function WorkflowControlPage() {
         }
       }
 
-      setSnackbarMessage('任务完成！')
+      setSnackbarMessage(t('workflow.snack.taskCompleted'))
       setSnackbarSeverity('success')
       setSnackbarOpen(true)
     })
@@ -1045,7 +1074,7 @@ export default function WorkflowControlPage() {
         dispatch(completeGenerateNextChapter())
         setGeneratingNextChapter(false)
 
-        setSnackbarMessage(`生成章节失败: ${data.error}`)
+        setSnackbarMessage(t('workflow.snack.chapterGenFailed', { error: data.error }))
         setSnackbarSeverity('error')
         setSnackbarOpen(true)
         return
@@ -1061,7 +1090,7 @@ export default function WorkflowControlPage() {
       // 🆕 清空进度消息（任务失败）
       setProgressMessage('')
 
-      setSnackbarMessage(`任务失败: ${data.error}`)
+      setSnackbarMessage(t('workflow.snack.taskFailed', { error: data.error }))
       setSnackbarSeverity('error')
       setSnackbarOpen(true)
 
@@ -1136,7 +1165,7 @@ export default function WorkflowControlPage() {
         setEditedFinalVersionContent('')
       }
 
-      setSnackbarMessage(data.message || `${data.stage} 阶段开始生成内容...`)
+      setSnackbarMessage(data.message || t('workflow.snack.stageStartStream', { stage: t(stageNameKeys[data.stage as StageType] ?? data.stage) }))
       setSnackbarSeverity('info')
       setSnackbarOpen(true)
     })
@@ -1208,7 +1237,7 @@ export default function WorkflowControlPage() {
       // 🆕 清空进度消息（流式输出结束）
       setProgressMessage('')
 
-      setSnackbarMessage(data.message || `${data.stage} 阶段内容生成完成，共 ${data.total_chars} 字`)
+      setSnackbarMessage(data.message || t('workflow.snack.stageStreamEnd', { stage: t(stageNameKeys[data.stage as StageType] ?? data.stage), chars: data.total_chars }))
       setSnackbarSeverity('success')
       setSnackbarOpen(true)
     })
@@ -1252,7 +1281,7 @@ export default function WorkflowControlPage() {
 
               // 🔧 新增：显示超时任务提示
               if (timeoutTasks.length > 0) {
-                setSnackbarMessage(`⏰ 检测到 ${timeoutTasks.length} 个超时任务已被自动清理`)
+                setSnackbarMessage(t('workflow.snack.timeoutTasksCleaned', { count: timeoutTasks.length }))
                 setSnackbarSeverity('warning')
                 setSnackbarOpen(true)
               }
@@ -1290,7 +1319,7 @@ export default function WorkflowControlPage() {
                   restoredStage = 'structure'
                   dispatch(setCurrentStage('structure'))
 
-                  setSnackbarMessage(`✅ 已恢复生成第${restoredChapterNumber}章（已运行${restoredTask.ageMinutes.toFixed(0)}分钟）`)
+                  setSnackbarMessage(t('workflow.snack.resumeChapterGen', { number: restoredChapterNumber, minutes: restoredTask.ageMinutes.toFixed(0) }))
                   setSnackbarSeverity('success')
                   setSnackbarOpen(true)
                 } else if (restoredTask?.kind === 'workflow_stage') {
@@ -1309,7 +1338,7 @@ export default function WorkflowControlPage() {
                     pollTaskStatus(restoredTask.taskId, stageType)
                   }
 
-                  setSnackbarMessage(`✅ 工作流已恢复，继续执行 ${stageNames[stageType]}（已运行${ageMinutes.toFixed(0)}分钟）`)
+                  setSnackbarMessage(t('workflow.snack.resumeWorkflow', { stage: t(stageNameKeys[stageType]), minutes: ageMinutes.toFixed(0) }))
                   setSnackbarSeverity('success')
                   setSnackbarOpen(true)
                 }
@@ -1529,13 +1558,27 @@ export default function WorkflowControlPage() {
           writing_goal: requirement || '创作小说',
         }
 
-        const blob = new Blob([JSON.stringify(memoryData)], { type: 'application/json' })
-        const token = localStorage.getItem('access_token')
-
-        // sendBeacon 不支持自定义 headers，需要通过 URL 参数传递 token
-        // 或者使用特殊的 endpoint 来处理
-        const url = `/api/v1/projects/${projectId}/memories/auto-save?token=${token}`
-        navigator.sendBeacon(url, blob)
+        // P1-3.6 + P2-4.5 收尾：fetch keepalive 走 /api 同源路径，由 httpOnly cookie 自动认证
+        // （不附加 Authorization 头）；unsafe 方法携带 X-CSRF-Token 头（真双重提交）
+        const csrfPart = document.cookie
+          .split(';')
+          .map((part) => part.trim())
+          .find((part) => {
+            const name = part.split('=')[0] ?? ''
+            return name === 'csrf' || name.endsWith('-csrf')
+          })
+        const csrfToken = csrfPart ? csrfPart.slice(csrfPart.indexOf('=') + 1) : ''
+        fetch(`/api/v1/projects/${projectId}/memories/auto-save`, {
+          method: 'POST',
+          keepalive: true,
+          headers: {
+            'Content-Type': 'application/json',
+            ...(csrfToken ? { 'X-CSRF-Token': csrfToken } : {}),
+          },
+          body: JSON.stringify(memoryData),
+        }).catch(() => {
+          // 卸载期保存为尽力而为，失败静默
+        })
       }
     }
 
@@ -1568,7 +1611,7 @@ export default function WorkflowControlPage() {
 
         // 仅在手动保存时显示提示
         if (trigger === 'manual') {
-          setSnackbarMessage('✅ 记忆快照已保存')
+          setSnackbarMessage(t('workflow.snack.memorySnapshotSaved'))
           setSnackbarSeverity('success')
           setSnackbarOpen(true)
         }
@@ -1590,18 +1633,12 @@ export default function WorkflowControlPage() {
       dispatch(updateStageStatus({ stage, status: 'active' }))
 
       // 🆕 收集用户输入到对话历史
-      const stageNames: Record<string, string> = {
-        concept: '概念开发',
-        structure: '结构设计',
-        content: '内容创作',
-        review: '质量评审',
-        iteration: '迭代优化'
-      }
+      // 写入记忆的消息属于 AI 上下文（内容数据），保持中文不翻译
       setConversationHistory(prev => [
         ...prev,
         {
           role: 'user',
-          content: `执行${stageNames[stage] || stage}阶段: ${requirement || '创作小说'}`,
+          content: `执行${STAGE_NAME_ZH[stage] || stage}阶段: ${requirement || '创作小说'}`,
           stage: stage,
           timestamp: new Date().toISOString()
         }
@@ -1644,14 +1681,14 @@ export default function WorkflowControlPage() {
 
       if (response.status < 200 || response.status >= 300) {
         const errorData = response.data as { detail?: string; error?: string } | undefined
-        throw new Error(errorData?.detail || errorData?.error || ('提交任务失败: ' + response.status))
+        throw new Error(errorData?.detail || errorData?.error || t('workflow.snack.submitTaskFailed', { status: response.status }))
       }
 
       const data = response.data
       const taskId = data.task_id
 
       if (!taskId) {
-        throw new Error('未返回task_id')
+        throw new Error(t('workflow.snack.noTaskId'))
       }
 
       setCurrentTaskId(taskId)
@@ -1677,7 +1714,7 @@ export default function WorkflowControlPage() {
     } catch {
       // 🔧 失败时重置状态
       dispatch(updateStageStatus({ stage, status: 'error' }))
-      setSnackbarMessage(`执行${stageNames[stage]}失败，请重试`)
+      setSnackbarMessage(t('workflow.snack.stageExecFailed', { stage: t(stageNameKeys[stage]) }))
       setSnackbarSeverity('error')
       setSnackbarOpen(true)
     }
@@ -1711,7 +1748,7 @@ export default function WorkflowControlPage() {
 
               dispatch(updateStageStatus({ stage, status: 'error' }))
 
-              setSnackbarMessage(`❌ 任务查询失败：后端未找到任务，请检查后端服务是否正常`)
+              setSnackbarMessage(t('workflow.snack.taskQueryFailed'))
               setSnackbarSeverity('error')
               setSnackbarOpen(true)
 
@@ -1721,7 +1758,7 @@ export default function WorkflowControlPage() {
             return
           }
 
-          throw new Error(`查询任务状态失败: ${response.status}`)
+          throw new Error(t('workflow.snack.taskStatusQueryFailed', { status: response.status }))
         }
 
         // 🔧 成功响应，重置错误计数
@@ -1755,7 +1792,7 @@ export default function WorkflowControlPage() {
             setContentDraftContent(resultContent)
           }
 
-          setSnackbarMessage(`✅ ${stageNames[stage]}完成！`)
+          setSnackbarMessage(t('workflow.snack.stageCompleted', { stage: t(stageNameKeys[stage]) }))
           setSnackbarSeverity('success')
           setSnackbarOpen(true)
 
@@ -1798,7 +1835,7 @@ export default function WorkflowControlPage() {
 
           dispatch(updateStageStatus({ stage, status: 'error' }))
 
-          setSnackbarMessage(`❌ ${stageNames[stage]}失败: ${data.error || '未知错误'}`)
+          setSnackbarMessage(t('workflow.snack.stageFailed', { stage: t(stageNameKeys[stage]), error: data.error || t('workflow.snack.unknownError') }))
           setSnackbarSeverity('error')
           setSnackbarOpen(true)
 
@@ -1811,7 +1848,7 @@ export default function WorkflowControlPage() {
 
           dispatch(updateStageStatus({ stage, status: 'error' }))
 
-          setSnackbarMessage(`❌ ${stageNames[stage]}超时，请重试`)
+          setSnackbarMessage(t('workflow.snack.stageTimeout', { stage: t(stageNameKeys[stage]) }))
           setSnackbarSeverity('error')
           setSnackbarOpen(true)
 
@@ -1829,7 +1866,7 @@ export default function WorkflowControlPage() {
 
           dispatch(updateStageStatus({ stage, status: 'error' }))
 
-          setSnackbarMessage(`❌ 轮询失败，请重试`)
+          setSnackbarMessage(t('workflow.snack.pollFailed'))
           setSnackbarSeverity('error')
           setSnackbarOpen(true)
         }
@@ -1864,7 +1901,7 @@ export default function WorkflowControlPage() {
   const handleStartWorkflow = async () => {
     if (!projectId || !requirement.trim()) {
       // 使用 Snackbar 显示错误提示（取代 alert）
-      setSnackbarMessage('请输入创作需求')
+      setSnackbarMessage(t('workflow.snack.requirementRequired'))
       setSnackbarSeverity('info')
       setSnackbarOpen(true)
       return
@@ -1913,14 +1950,14 @@ export default function WorkflowControlPage() {
       // 🆕 如果是重新开始模式，刷新章节列表
       if (isRestartMode) {
         dispatch(fetchChapters(parseInt(projectId)))
-        setSnackbarMessage('已清空旧内容，开始全新创作')
+        setSnackbarMessage(t('workflow.snack.restartedClean'))
         setSnackbarSeverity('success')
         setSnackbarOpen(true)
       }
     } catch {
       setIsStarting(false)  // 启动失败，隐藏加载状态
       setIsRestartMode(false)  // 🆕 重置重新开始标志
-      setSnackbarMessage('启动工作流失败，请重试')
+      setSnackbarMessage(t('workflow.snack.startFailed'))
       setSnackbarSeverity('error')
       setSnackbarOpen(true)
     }
@@ -1960,7 +1997,7 @@ export default function WorkflowControlPage() {
 
   const handleSaveAsChapter = async () => {
     if (!projectId) {
-      setSnackbarMessage('项目ID不存在')
+      setSnackbarMessage(t('workflow.snack.projectIdMissing'))
       setSnackbarSeverity('error')
       setSnackbarOpen(true)
       return
@@ -1977,7 +2014,7 @@ export default function WorkflowControlPage() {
       const content = contentData.content || ''
 
       if (!content || content.trim() === '') {
-        setSnackbarMessage('没有可保存的章节内容')
+        setSnackbarMessage(t('workflow.snack.noChapterContent'))
         setSnackbarSeverity('error')
         setSnackbarOpen(true)
         setSavingChapter(false)  // ✅ 重置保存状态
@@ -1996,7 +2033,7 @@ export default function WorkflowControlPage() {
       // axios成功响应（2xx状态码）
       const data = response.data
 
-      setSnackbarMessage(`✅ 章节已保存：${data.title} (${data.word_count} 字)`)
+      setSnackbarMessage(t('workflow.snack.chapterSaved', { title: data.title, words: data.word_count }))
       setSnackbarSeverity('success')
       setSnackbarOpen(true)
 
@@ -2009,14 +2046,14 @@ export default function WorkflowControlPage() {
         navigate(`/dashboard?projectId=${projectId}`)  // 带projectId参数，自动展开章节列表
       }, 1500)
     } catch (error: any) {
-      let errorMessage = '保存章节失败，请重试'
+      let errorMessage = t('workflow.snack.saveChapterFailed')
 
       if (error.response) {
         // 服务器返回错误响应
         errorMessage = await extractApiErrorMessage(error, errorMessage)
       } else if (error.request) {
         // 请求已发送但无响应
-        errorMessage = '无法连接到服务器，请检查后端服务是否启动'
+        errorMessage = t('workflow.snack.cannotConnect')
       } else {
         // 其他错误
         errorMessage = error.message || errorMessage
@@ -2043,7 +2080,7 @@ export default function WorkflowControlPage() {
       const content = contentData.content || ''
 
       if (!content || content.trim() === '') {
-        setSnackbarMessage('⚠️ 没有可保存的章节内容')
+        setSnackbarMessage(t('workflow.snack.noChapterContentWarning'))
         setSnackbarSeverity('error')
         setSnackbarOpen(true)
         return
@@ -2061,8 +2098,8 @@ export default function WorkflowControlPage() {
       const data = response.data
       setSnackbarMessage(
         latestChapter?.id
-          ? `✅ 已覆盖第${data.chapter_number ?? latestChapter.chapter_number}章：${data.title} (${data.word_count} 字)`
-          : `✅ 章节已自动保存：${data.title} (${data.word_count} 字)`
+          ? t('workflow.snack.chapterOverwritten', { number: data.chapter_number ?? latestChapter.chapter_number, title: data.title, words: data.word_count })
+          : t('workflow.snack.chapterAutoSaved', { title: data.title, words: data.word_count })
       )
       setSnackbarSeverity('success')
       setSnackbarOpen(true)
@@ -2073,12 +2110,12 @@ export default function WorkflowControlPage() {
       }, 1500)
 
     } catch (error: any) {
-      let errorMessage = '自动保存失败'
+      let errorMessage = t('workflow.snack.autoSaveFailed')
 
       if (error.response) {
         errorMessage = await extractApiErrorMessage(error, errorMessage)
       } else if (error.request) {
-        errorMessage = '无法连接到服务器'
+        errorMessage = t('workflow.snack.cannotConnectShort')
       }
 
       setSnackbarMessage(`❌ ${errorMessage}`)
@@ -2137,12 +2174,12 @@ export default function WorkflowControlPage() {
         setStructureContent(data.content || '')
         setEditedStructureContent(data.content || '')
       } else {
-        setSnackbarMessage('获取情节大纲失败')
+        setSnackbarMessage(t('workflow.snack.fetchStructureFailed'))
         setSnackbarSeverity('error')
         setSnackbarOpen(true)
       }
     } catch {
-      setSnackbarMessage('获取情节大纲失败')
+      setSnackbarMessage(t('workflow.snack.fetchStructureFailed'))
       setSnackbarSeverity('error')
       setSnackbarOpen(true)
     } finally {
@@ -2172,18 +2209,18 @@ export default function WorkflowControlPage() {
         // ✅ 更新state，保持已保存的内容
         setStructureContent(editedStructureContent)
 
-        setSnackbarMessage('内容已保存')
+        setSnackbarMessage(t('workflow.snack.contentSaved'))
         setSnackbarSeverity('success')
         setSnackbarOpen(true)
 
         handleCloseStructureDialog()
       } else {
-        setSnackbarMessage('保存失败，请重试')
+        setSnackbarMessage(t('workflow.snack.saveFailed'))
         setSnackbarSeverity('error')
         setSnackbarOpen(true)
       }
     } catch {
-      setSnackbarMessage('保存失败，请重试')
+      setSnackbarMessage(t('workflow.snack.saveFailed'))
       setSnackbarSeverity('error')
       setSnackbarOpen(true)
     } finally {
@@ -2211,12 +2248,12 @@ export default function WorkflowControlPage() {
         setContentDraftContent(content)
         setEditedContentDraftContent(content)
       } else {
-        setSnackbarMessage('获取章节初稿失败')
+        setSnackbarMessage(t('workflow.snack.fetchContentFailed'))
         setSnackbarSeverity('error')
         setSnackbarOpen(true)
       }
     } catch {
-      setSnackbarMessage('获取章节初稿失败')
+      setSnackbarMessage(t('workflow.snack.fetchContentFailed'))
       setSnackbarSeverity('error')
       setSnackbarOpen(true)
     } finally {
@@ -2251,12 +2288,12 @@ export default function WorkflowControlPage() {
         setReviewReportContent(content)
         setEditedReviewReportContent(content)
       } else {
-        setSnackbarMessage('获取评审报告失败')
+        setSnackbarMessage(t('workflow.snack.fetchReviewFailed'))
         setSnackbarSeverity('error')
         setSnackbarOpen(true)
       }
     } catch {
-      setSnackbarMessage('获取评审报告失败')
+      setSnackbarMessage(t('workflow.snack.fetchReviewFailed'))
       setSnackbarSeverity('error')
       setSnackbarOpen(true)
     } finally {
@@ -2271,7 +2308,7 @@ export default function WorkflowControlPage() {
   }
 
   const handleReviewSettingsSaved = async () => {
-    setSnackbarMessage('评审设置已保存')
+    setSnackbarMessage(t('workflow.snack.reviewSettingsSaved'))
     setSnackbarSeverity('success')
     setSnackbarOpen(true)
     if (projectId) {
@@ -2311,17 +2348,17 @@ export default function WorkflowControlPage() {
       if (response && response.status >= 200 && response.status < 300) {
         // 更新缓存
         setReviewReportContent(editedReviewReportContent)
-        setSnackbarMessage('评审报告已保存')
+        setSnackbarMessage(t('workflow.snack.reviewSaved'))
         setSnackbarSeverity('success')
         setSnackbarOpen(true)
       } else {
         const errorData = response?.data || {}
-        setSnackbarMessage(errorData.detail || '保存失败')
+        setSnackbarMessage(errorData.detail || t('workflow.snack.saveFailedShort'))
         setSnackbarSeverity('error')
         setSnackbarOpen(true)
       }
     } catch {
-      setSnackbarMessage('保存评审报告失败')
+      setSnackbarMessage(t('workflow.snack.saveReviewFailed'))
       setSnackbarSeverity('error')
       setSnackbarOpen(true)
     } finally {
@@ -2341,7 +2378,7 @@ export default function WorkflowControlPage() {
 
       if (!saveResponse || saveResponse.status < 200 || saveResponse.status >= 300) {
         const errorData = saveResponse?.data || {}
-        setSnackbarMessage(errorData.detail || '保存失败，请重试')
+        setSnackbarMessage(errorData.detail || t('workflow.snack.saveFailed'))
         setSnackbarSeverity('error')
         setSnackbarOpen(true)
         return
@@ -2359,7 +2396,7 @@ export default function WorkflowControlPage() {
       // ✅ 重置后续阶段状态
       dispatch(resetFollowingStages('review'))
 
-      setSnackbarMessage('评审报告已保存，正在按评审意见改写当前最后一章（完成后覆盖旧稿，不新建章节）')
+      setSnackbarMessage(t('workflow.snack.reviewContinueRewrite'))
       setSnackbarSeverity('success')
       setSnackbarOpen(true)
 
@@ -2373,7 +2410,7 @@ export default function WorkflowControlPage() {
       setIsRunning(true)
       dispatch(setCurrentStage('iteration'))
     } catch {
-      setSnackbarMessage('保存失败，请重试')
+      setSnackbarMessage(t('workflow.snack.saveFailed'))
       setSnackbarSeverity('error')
       setSnackbarOpen(true)
     } finally {
@@ -2392,7 +2429,7 @@ export default function WorkflowControlPage() {
       const saveResponse = await saveWorkflowStageContent('content', editedContentDraftContent, true)
 
       if (!saveResponse || saveResponse.status < 200 || saveResponse.status >= 300) {
-        setSnackbarMessage('保存失败，请重试')
+        setSnackbarMessage(t('workflow.snack.saveFailed'))
         setSnackbarSeverity('error')
         setSnackbarOpen(true)
         return
@@ -2412,9 +2449,9 @@ export default function WorkflowControlPage() {
 
       const updatedChapter = saveData.updated_chapter || saveData.deleted_chapter
       if (updatedChapter) {
-        setSnackbarMessage(`已更新第${updatedChapter.chapter_number}章并启动后续评审（不会清空前面章节）`)
+        setSnackbarMessage(t('workflow.snack.chapterUpdatedAndReview', { number: updatedChapter.chapter_number }))
       } else {
-        setSnackbarMessage('内容已保存，正在启动后续评审...')
+        setSnackbarMessage(t('workflow.snack.contentSavedReviewing'))
       }
 
       setSnackbarSeverity('success')
@@ -2430,7 +2467,7 @@ export default function WorkflowControlPage() {
       setIsRunning(true)
       dispatch(setCurrentStage('review'))
     } catch {
-      setSnackbarMessage('保存失败，请重试')
+      setSnackbarMessage(t('workflow.snack.saveFailed'))
       setSnackbarSeverity('error')
       setSnackbarOpen(true)
     } finally {
@@ -2452,18 +2489,18 @@ export default function WorkflowControlPage() {
         // ✅ 更新state，保持已保存的内容
         setContentDraftContent(editedContentDraftContent)
 
-        setSnackbarMessage('内容已保存')
+        setSnackbarMessage(t('workflow.snack.contentSaved'))
         setSnackbarSeverity('success')
         setSnackbarOpen(true)
 
         handleCloseContentDialog()
       } else {
-        setSnackbarMessage('保存失败，请重试')
+        setSnackbarMessage(t('workflow.snack.saveFailed'))
         setSnackbarSeverity('error')
         setSnackbarOpen(true)
       }
     } catch {
-      setSnackbarMessage('保存失败，请重试')
+      setSnackbarMessage(t('workflow.snack.saveFailed'))
       setSnackbarSeverity('error')
       setSnackbarOpen(true)
     } finally {
@@ -2501,12 +2538,12 @@ export default function WorkflowControlPage() {
         setFinalVersionContent(content)
         setEditedFinalVersionContent(content)
       } else {
-        setSnackbarMessage('获取最终版本失败')
+        setSnackbarMessage(t('workflow.snack.fetchFinalFailed'))
         setSnackbarSeverity('error')
         setSnackbarOpen(true)
       }
     } catch {
-      setSnackbarMessage('获取最终版本失败')
+      setSnackbarMessage(t('workflow.snack.fetchFinalFailed'))
       setSnackbarSeverity('error')
       setSnackbarOpen(true)
     } finally {
@@ -2547,8 +2584,8 @@ export default function WorkflowControlPage() {
         setIsGenerateNextChapterFlow(true)
 
         // 🆕 免费档展示剩余额度
-        const quotaSuffix = typeof remaining_quota === 'number' ? `（今日免费额度剩余 ${remaining_quota} 次）` : ''
-        setSnackbarMessage(`🚀 已开始生成第${next_chapter_number}章，请等待...${quotaSuffix}`)
+        const quotaSuffix = typeof remaining_quota === 'number' ? t('workflow.snack.quotaSuffix', { remaining: remaining_quota }) : ''
+        setSnackbarMessage(t('workflow.snack.chapterGenStarted', { number: next_chapter_number, quotaSuffix }))
         setSnackbarSeverity('info')
         setSnackbarOpen(true)
 
@@ -2559,17 +2596,17 @@ export default function WorkflowControlPage() {
         const detail = errorData.detail
         const detailMessage = typeof detail === 'string' ? detail : detail?.message
 
-        let message = detailMessage || errorData.error || '创建生成任务失败，请重试'
+        let message = detailMessage || errorData.error || t('workflow.snack.createTaskFailed')
         if (response.status === 429 && typeof detail === 'object' && detail?.reset_at) {
           const resetTime = new Date(detail.reset_at)
           const resetText = Number.isNaN(resetTime.getTime())
             ? detail.reset_at
-            : resetTime.toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })
-          message = `${detailMessage || '今日免费生成额度已用完'}，${resetText} 重置`
+            : formatMonthDayTime(resetTime)
+          message = t('workflow.snack.freeQuotaExhaustedReset', { reason: detailMessage || t('workflow.snack.freeQuotaExhausted'), resetText })
         } else if (response.status === 409) {
-          message = detailMessage || '该项目已有生成任务进行中，请等待完成后再试'
+          message = detailMessage || t('workflow.snack.taskInProgress')
         } else if (response.status === 503) {
-          message = detailMessage || '生成服务暂不可用，请稍后再试'
+          message = detailMessage || t('workflow.snack.serviceUnavailable')
         }
 
         setSnackbarMessage(message)
@@ -2578,7 +2615,7 @@ export default function WorkflowControlPage() {
         setGeneratingNextChapter(false)
       }
     } catch {
-      setSnackbarMessage('创建生成任务失败，请重试')
+      setSnackbarMessage(t('workflow.snack.createTaskFailedRetry'))
       setSnackbarSeverity('error')
       setSnackbarOpen(true)
       setGeneratingNextChapter(false)
@@ -2589,7 +2626,7 @@ export default function WorkflowControlPage() {
   const handleSubmitRegenerateConcept = async () => {
     if (!projectId) return
     if (workflow.stages.concept.status === 'active' || workflow.stages.concept.agents.some(a => a.status === 'working')) {
-      setSnackbarMessage('概念阶段执行中，请稍后再试')
+      setSnackbarMessage(t('workflow.snack.conceptBusy'))
       setSnackbarSeverity('warning')
       setSnackbarOpen(true)
       return
@@ -2612,18 +2649,18 @@ export default function WorkflowControlPage() {
       })
       if (response.status < 200 || response.status >= 300) {
         const err = response.data as { detail?: string; error?: string } | undefined
-        setSnackbarMessage(err?.detail || err?.error || '提交重新生成失败')
+        setSnackbarMessage(err?.detail || err?.error || t('workflow.snack.submitRegenerateFailed'))
         setSnackbarSeverity('error')
         setSnackbarOpen(true)
         setIsRunning(false)
         return
       }
-      setSnackbarMessage('已提交重新生成，请稍候完成')
+      setSnackbarMessage(t('workflow.snack.regenerateSubmitted'))
       setSnackbarSeverity('success')
       setSnackbarOpen(true)
       // 等待任务完成后由现有状态/事件再决定是否再次弹出确认
     } catch {
-      setSnackbarMessage('提交重新生成失败，请重试')
+      setSnackbarMessage(t('workflow.snack.submitRegenerateFailedRetry'))
       setSnackbarSeverity('error')
       setSnackbarOpen(true)
       setIsRunning(false)
@@ -2642,7 +2679,7 @@ export default function WorkflowControlPage() {
   // 保存为章节（从最终版本）
   const handleSaveAsChapterFromFinalVersion = async () => {
     if (!projectId || !editedFinalVersionContent) {
-      setSnackbarMessage('没有可保存的内容')
+      setSnackbarMessage(t('workflow.snack.noContentToSave'))
       setSnackbarSeverity('error')
       setSnackbarOpen(true)
       return
@@ -2669,7 +2706,7 @@ export default function WorkflowControlPage() {
       handleCloseFinalVersionDialog()
 
       // 显示成功消息（后端直接返回章节对象，不是嵌套在chapter字段中）
-      setSnackbarMessage(`✅ 第${data.chapter_number}章已保存：${data.title} (${data.word_count}字)`)
+      setSnackbarMessage(t('workflow.snack.chapterNthSaved', { number: data.chapter_number, title: data.title, words: data.word_count }))
       setSnackbarSeverity('success')
       setSnackbarOpen(true)
 
@@ -2679,14 +2716,14 @@ export default function WorkflowControlPage() {
       }, 1000)
     } catch (error: any) {
       // axios错误响应（非2xx状态码或网络错误）
-      let errorMessage = '保存章节失败，请重试'
+      let errorMessage = t('workflow.snack.saveChapterFailed')
 
       if (error.response) {
         // 服务器返回错误响应
         errorMessage = await extractApiErrorMessage(error, errorMessage)
       } else if (error.request) {
         // 请求已发送但无响应
-        errorMessage = '无法连接到服务器，请检查后端服务是否启动'
+        errorMessage = t('workflow.snack.cannotConnect')
       } else {
         // 其他错误
         errorMessage = error.message || errorMessage
@@ -2757,7 +2794,7 @@ export default function WorkflowControlPage() {
             minHeight: { xs: 32, sm: 36 }
           }}
         >
-          返回
+          {t('action.back')}
         </Button>
 
         {/* 主标题 - 居中显示 */}
@@ -2784,15 +2821,16 @@ export default function WorkflowControlPage() {
           </Typography>
           <Typography 
             variant="h5" 
-            sx={{ 
+            sx={(theme) => ({ 
               fontWeight: 700,
-              background: 'linear-gradient(135deg, #667eea 0%, #764ba2 50%, #f093fb 100%)',
+              // 旧紫渐变标题走 primary 双阶反相（shimmer 扫光保持）。
+              background: `linear-gradient(135deg, ${theme.palette.primary.main} 0%, ${theme.palette.primary.dark} 50%, ${theme.palette.primary.main} 100%)`,
               backgroundClip: 'text',
               WebkitBackgroundClip: 'text',
               WebkitTextFillColor: 'transparent',
               fontStyle: 'italic',
               letterSpacing: { xs: '1px', sm: '2px' },
-              textShadow: '2px 2px 4px rgba(0,0,0,0.1)',
+              textShadow: `2px 2px 4px ${alpha(theme.palette.text.primary, 0.12)}`,
               animation: 'shimmer 3s ease-in-out infinite',
               '@keyframes shimmer': {
                 '0%': { backgroundPosition: '0% 50%' },
@@ -2801,9 +2839,9 @@ export default function WorkflowControlPage() {
               },
               backgroundSize: '200% 200%',
               fontSize: { xs: '1.1rem', sm: '1.4rem', md: '1.5rem' }
-            }}
+            })}
           >
-            灵感方舟
+            {t('workflow.title')}
           </Typography>
         </Box>
 
@@ -2815,7 +2853,7 @@ export default function WorkflowControlPage() {
       {(currentProject || workflow.projectId) && (
         <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: { xs: 1, sm: 1.5 }, flexWrap: 'wrap', mb: { xs: 1.5, sm: 2 } }}>
           <Typography variant="body2" color="text.secondary" sx={{ fontSize: { xs: '0.75rem', sm: '0.875rem' } }}>
-            当前项目:
+            {t('workflow.page.currentProject')}
           </Typography>
           {currentProject && (
             <Chip
@@ -2828,7 +2866,7 @@ export default function WorkflowControlPage() {
           )}
           {workflow.projectId && (
             <Chip
-              label={formatProjectSequenceLabel(currentProject, workflow.projectId)}
+              label={formatProjectSequenceLabel(currentProject, workflow.projectId, t)}
               variant="outlined"
               size="small"
               sx={{ height: { xs: 24, sm: 28 }, fontSize: { xs: '0.7rem', sm: '0.8rem' } }}
@@ -2852,7 +2890,7 @@ export default function WorkflowControlPage() {
             <Box sx={{ flex: 1 }}>
               <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
                 <Typography variant="body2">
-                  正在执行 {stageNames[workflow.currentStage]}... ({taskProgress}%)
+                  {t('workflow.page.executingStage', { stage: t(stageNameKeys[workflow.currentStage]), progress: taskProgress })}
                 </Typography>
                 {estimatedRemainingTime > 0 && (() => {
                   // 🆕 置信区间显示逻辑
@@ -2862,13 +2900,13 @@ export default function WorkflowControlPage() {
                   if (showRange) {
                     return (
                       <Typography variant="caption" color="text.secondary">
-                        预计剩余: {Math.ceil(estimatedRemainingTimeMin)}-{Math.ceil(estimatedRemainingTimeMax)}秒
+                        {t('workflow.page.etaRangeSeconds', { min: Math.ceil(estimatedRemainingTimeMin), max: Math.ceil(estimatedRemainingTimeMax) })}
                       </Typography>
                     )
                   } else {
                     return (
                       <Typography variant="caption" color="text.secondary">
-                        预计剩余: {Math.ceil(estimatedRemainingTime)}秒
+                        {t('workflow.page.etaSeconds', { seconds: Math.ceil(estimatedRemainingTime) })}
                       </Typography>
                     )
                   }
@@ -2888,13 +2926,13 @@ export default function WorkflowControlPage() {
             <Box sx={{ flex: 1 }}>
               <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
                 <Typography variant="body2">
-                  🚀 正在生成第{generateNextChapterNumber}章... ({generateNextChapterProgress}%)
+                  {t('workflow.page.generatingChapter', { number: generateNextChapterNumber, progress: generateNextChapterProgress })}
                 </Typography>
                 <Typography variant="caption" color="text.secondary">
-                  {generateNextChapterProgress < 25 ? '步骤1/4: 章节规划' :
-                   generateNextChapterProgress < 50 ? '步骤2/4: 内容创作' :
-                   generateNextChapterProgress < 75 ? '步骤3/4: 质量评审' :
-                   '步骤4/4: 迭代优化'}
+                  {generateNextChapterProgress < 25 ? t('workflow.page.stepPlan') :
+                   generateNextChapterProgress < 50 ? t('workflow.page.stepContent') :
+                   generateNextChapterProgress < 75 ? t('workflow.page.stepReview') :
+                   t('workflow.page.stepIteration')}
                 </Typography>
               </Box>
               <LinearProgress variant="determinate" value={generateNextChapterProgress} />
@@ -2906,7 +2944,7 @@ export default function WorkflowControlPage() {
       {/* 主内容区域 */}
       <Box sx={{ position: 'relative' }}>
         {/* 左侧抽屉切换按钮 */}
-        <Tooltip title={leftDrawerOpen ? "收起侧边栏" : "展开侧边栏"} placement="right">
+        <Tooltip title={leftDrawerOpen ? t('workflow.page.collapseSidebar') : t('workflow.page.expandSidebar')} placement="right">
           <IconButton
             onClick={() => setLeftDrawerOpen(!leftDrawerOpen)}
             sx={{
@@ -2948,7 +2986,7 @@ export default function WorkflowControlPage() {
             <CardContent sx={{ py: 1.5, px: 2, '&:last-child': { pb: 1.5 } }}>
               <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 0.75 }}>
                 <Typography variant="subtitle2" sx={{ fontWeight: 600, fontSize: '0.85rem' }}>
-                  📈 总体进度
+                  {t('workflow.page.overallProgress')}
                 </Typography>
                 <Typography variant="subtitle2" sx={{ fontWeight: 700, color: 'primary.main', fontSize: '0.85rem' }}>
                   {workflow.overallProgress}%
@@ -2965,10 +3003,10 @@ export default function WorkflowControlPage() {
           <Card sx={{ mb: 1.5 }}>
             <CardContent sx={{ py: 1.5, px: 2, '&:last-child': { pb: 1.5 } }}>
               <FormControl fullWidth size="small">
-                <InputLabel>创作模型</InputLabel>
+                <InputLabel>{t('workflow.page.creationModel')}</InputLabel>
                 <Select
                   value={workflowGenerationModel}
-                  label="创作模型"
+                  label={t('workflow.page.creationModel')}
                   onChange={(event) => handleWorkflowGenerationModelChange(String(event.target.value))}
                   disabled={workflowGenerationModelsLoading || isStarting || isRunning || generatingNextChapter}
                 >
@@ -2980,7 +3018,7 @@ export default function WorkflowControlPage() {
                       <Tooltip
                         title={
                           <Box sx={{ whiteSpace: 'pre-line' }}>
-                            {formatWorkflowGenerationModelTooltip(model)}
+                            {formatWorkflowGenerationModelTooltip(model, t)}
                           </Box>
                         }
                         placement="right"
@@ -2996,7 +3034,7 @@ export default function WorkflowControlPage() {
                             lineHeight: 1.35,
                           }}
                         >
-                          {formatWorkflowGenerationModelOptionLabel(model)}
+                          {formatWorkflowGenerationModelOptionLabel(model, t)}
                         </Box>
                       </Tooltip>
                     </MenuItem>
@@ -3013,7 +3051,7 @@ export default function WorkflowControlPage() {
           <Card sx={{ mb: 0, flex: 1 }}>
             <CardContent sx={{ py: 1.5, px: 2, '&:last-child': { pb: 1.5 } }}>
               <Typography variant="subtitle2" sx={{ mb: 1, fontSize: '0.85rem', fontWeight: 600 }}>
-                📊 Agent状态
+                {t('workflow.page.agentStatus')}
               </Typography>
               {workflow.stages[workflow.currentStage].agents.map((agent) => (
                 <AgentStatusIndicator key={agent.id} agent={agent} />
@@ -3048,7 +3086,7 @@ export default function WorkflowControlPage() {
                     // 跳转到对应阶段
                     dispatch(setCurrentStage(stage))
                     // 显示提示
-                    setSnackbarMessage(`已切换到 ${stageNames[stage]}`)
+                    setSnackbarMessage(t('workflow.snack.stageSwitched', { stage: t(stageNameKeys[stage]) }))
                     setSnackbarSeverity('info')
                     setSnackbarOpen(true)
                   }}
@@ -3067,16 +3105,16 @@ export default function WorkflowControlPage() {
                     }}
                   >
                     <Box component="span" sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.75 }}>
-                      <Box component="span">{stageNames[stage]}</Box>
+                      <Box component="span">{t(stageNameKeys[stage])}</Box>
                       {stage === 'review' && projectId ? (
-                        <Tooltip title="多模型评审设置" arrow>
+                        <Tooltip title={t('workflow.page.reviewSettings')} arrow>
                           <Box
                             component="span"
                             onClick={(event) => event.stopPropagation()}
                             sx={{ display: 'inline-flex' }}
                           >
                             <IconButton
-                              aria-label="多模型评审设置"
+                              aria-label={t('workflow.page.reviewSettings')}
                               size="small"
                               onClick={(event) => {
                                 event.stopPropagation()
@@ -3143,7 +3181,7 @@ export default function WorkflowControlPage() {
             onClick={handlePreviousStage}
             disabled={workflow.loading || isRunning}
           >
-            上一步
+            {t('workflow.page.previousStep')}
           </Button>
         )}
 
@@ -3157,21 +3195,22 @@ export default function WorkflowControlPage() {
                 color="primary"
                 onClick={() => setShowDecisionDialog(true)}
                 disabled={workflow.stages.concept.status === 'active' || workflow.stages.concept.agents.some(a => a.status === 'working')}
-                sx={{
+                sx={(theme) => ({
                 animation: 'pulse 1.5s ease-in-out infinite, wave 2.4s linear infinite',
                   '@keyframes pulse': {
                     '0%': { transform: 'scale(1)' },
                     '50%': { transform: 'scale(1.06)' },
                     '100%': { transform: 'scale(1)' },
                   },
+                  // 评审结果脉冲光环走 primary token 反相（原 MUI 蓝写死）。
                   '@keyframes wave': {
-                    '0%': { boxShadow: '0 0 0 0 rgba(25,118,210,0.35)' },
-                    '50%': { boxShadow: '0 0 0 8px rgba(25,118,210,0.12)' },
-                    '100%': { boxShadow: '0 0 0 0 rgba(25,118,210,0.35)' },
+                    '0%': { boxShadow: `0 0 0 0 ${alpha(theme.palette.primary.main, 0.35)}` },
+                    '50%': { boxShadow: `0 0 0 8px ${alpha(theme.palette.primary.main, 0.12)}` },
+                    '100%': { boxShadow: `0 0 0 0 ${alpha(theme.palette.primary.main, 0.35)}` },
                   },
-                }}
+                })}
               >
-                {(workflow.stages.concept.status === 'active' || workflow.stages.concept.agents.some(a => a.status === 'working')) ? '生成中' : '评审结果'}
+                {(workflow.stages.concept.status === 'active' || workflow.stages.concept.agents.some(a => a.status === 'working')) ? t('workflow.page.generating') : t('workflow.page.reviewResult')}
               </Button>
               </Badge>
             )}
@@ -3181,7 +3220,7 @@ export default function WorkflowControlPage() {
               disabled={!conceptContent && workflow.stages.concept.status !== 'completed'}
               startIcon={<DescriptionIcon />}
             >
-              故事概念
+              {t('workflow.page.storyConcept')}
             </Button>
             <Button
               variant="outlined"
@@ -3189,7 +3228,7 @@ export default function WorkflowControlPage() {
               disabled={!worldContent && workflow.stages.concept.status !== 'completed'}
               startIcon={<PublicIcon />}
             >
-              世界观设定
+              {t('workflow.page.worldSetting')}
             </Button>
             <Button
               variant="outlined"
@@ -3197,7 +3236,7 @@ export default function WorkflowControlPage() {
               disabled={!characterContent && workflow.stages.concept.status !== 'completed'}
               startIcon={<PeopleIcon />}
             >
-              人物设定
+              {t('workflow.page.characterSetting')}
             </Button>
           </Box>
         ) : workflow.currentStage === 'structure' ? (
@@ -3209,7 +3248,7 @@ export default function WorkflowControlPage() {
               disabled={!structureContent && workflow.stages.structure.status !== 'completed'}
               startIcon={<ArticleIcon />}
             >
-              情节大纲
+              {t('workflow.page.plotOutline')}
             </Button>
           </Box>
         ) : workflow.currentStage === 'content' ? (
@@ -3220,7 +3259,7 @@ export default function WorkflowControlPage() {
             disabled={!contentDraftContent && workflow.stages.content.status !== 'completed'}
             startIcon={<EditNoteIcon />}
           >
-            章节初稿
+            {t('workflow.page.chapterDraft')}
           </Button>
         ) : workflow.currentStage === 'review' ? (
           /* 质量评审阶段：显示"评审报告"按钮 */
@@ -3231,7 +3270,7 @@ export default function WorkflowControlPage() {
               disabled={!reviewReportContent && workflow.stages.review.status !== 'completed'}
               startIcon={<ArticleIcon />}
             >
-              评审报告
+              {t('workflow.page.reviewReport')}
             </Button>
             <Button
               variant="outlined"
@@ -3239,7 +3278,7 @@ export default function WorkflowControlPage() {
               disabled={!contentDraftContent || isRunning || isStarting || generatingNextChapter}
               startIcon={<RefreshIcon />}
             >
-              多模型重评
+              {t('workflow.page.multiModelReview')}
             </Button>
           </Box>
         ) : workflow.currentStage === 'iteration' ? (
@@ -3251,7 +3290,7 @@ export default function WorkflowControlPage() {
               disabled={!finalVersionContent && workflow.stages.iteration.status !== 'completed'}
               startIcon={<CheckCircleIcon />}
             >
-              最终成品
+              {t('workflow.page.finalProduct')}
             </Button>
             <Button
               variant="outlined"
@@ -3259,7 +3298,7 @@ export default function WorkflowControlPage() {
               disabled={workflow.stages.iteration.status !== 'completed' || generatingNextChapter}
               startIcon={generatingNextChapter ? <CircularProgress size={20} /> : <NavigateNextIcon />}
             >
-              {generatingNextChapter ? '生成中...' : '生成下一章'}
+              {generatingNextChapter ? t('workflow.page.generatingEllipsis') : t('workflow.page.generateNextChapter')}
             </Button>
           </Box>
         ) : (
@@ -3270,7 +3309,7 @@ export default function WorkflowControlPage() {
             disabled={workflow.loading || !isRunning}
             startIcon={<RefreshIcon />}
           >
-            重新生成
+            {t('workflow.page.regenerate')}
           </Button>
         )}
 
@@ -3280,7 +3319,7 @@ export default function WorkflowControlPage() {
             onClick={handleNextStage}
             disabled={workflow.loading || isRunning}
           >
-            下一步
+            {t('workflow.page.nextStep')}
           </Button>
         )}
           </Box>
@@ -3298,22 +3337,22 @@ export default function WorkflowControlPage() {
       >
         <Box sx={{ p: 3 }}>
           <Typography variant="h6" sx={{ mb: 2, display: 'flex', alignItems: 'center', gap: 1 }}>
-            ⚠️ 警告：此项目已有内容
+            {t('workflow.warning.title')}
           </Typography>
 
           <Alert severity="warning" sx={{ mb: 3 }}>
             <Typography variant="body2" sx={{ mb: 1 }}>
-              <strong>此项目已有 {existingChaptersCount} 章内容</strong>
-              {workflow.stages.concept.status === 'completed' && '，以及已完成的故事概念'}
-              {workflow.stages.structure.status === 'completed' && '、情节大纲'}。
+              <strong>{t('workflow.warning.hasChapters', { count: existingChaptersCount })}</strong>
+              {workflow.stages.concept.status === 'completed' && t('workflow.warning.andConcept')}
+              {workflow.stages.structure.status === 'completed' && t('workflow.warning.andOutline')}。
             </Typography>
             <Typography variant="body2">
-              重新开始创作将<strong style={{ color: '#d32f2f' }}>覆盖所有现有内容</strong>，此操作不可撤销！
+              {t('workflow.warning.overwriteStart')}<strong style={{ color: 'var(--sg-error)' }}>{t('workflow.warning.overwriteStrong')}</strong>{t('workflow.warning.overwriteEnd')}
             </Typography>
           </Alert>
 
           <Typography variant="body2" sx={{ mb: 2, color: 'text.secondary' }}>
-            您想要的操作是：
+            {t('workflow.warning.whatDoYouWant')}
           </Typography>
 
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
@@ -3326,9 +3365,9 @@ export default function WorkflowControlPage() {
                 sx={{ justifyContent: 'flex-start', py: 1.5 }}
               >
                 <Box sx={{ textAlign: 'left' }}>
-                  <Typography variant="button">继续创作下一章</Typography>
+                  <Typography variant="button">{t('workflow.warning.continueNextChapter')}</Typography>
                   <Typography variant="caption" sx={{ display: 'block', opacity: 0.8 }}>
-                    基于现有内容，生成第 {existingChaptersCount + 1} 章（推荐）
+                    {t('workflow.warning.continueNextChapterHint', { number: existingChaptersCount + 1 })}
                   </Typography>
                 </Box>
               </Button>
@@ -3345,13 +3384,13 @@ export default function WorkflowControlPage() {
                 sx={{ justifyContent: 'flex-start', py: 1.5 }}
               >
                 <Box sx={{ textAlign: 'left' }}>
-                  <Typography variant="button">免费生成下一章</Typography>
+                  <Typography variant="button">{t('workflow.warning.freeNextChapter')}</Typography>
                   <Typography variant="caption" sx={{ display: 'block', opacity: 0.8 }}>
                     {freeQuota?.globalAvailable === false
-                      ? '今日免费发放量已用完'
+                      ? t('workflow.warning.freeQuotaExhausted')
                       : freeQuota
-                        ? `使用免费模型生成第 ${existingChaptersCount + 1} 章，今日剩余 ${freeQuota.remaining} 章`
-                        : `使用免费模型生成第 ${existingChaptersCount + 1} 章，每日限 2 章`}
+                        ? t('workflow.warning.freeRemaining', { number: existingChaptersCount + 1, remaining: freeQuota.remaining })
+                        : t('workflow.warning.freeDailyLimit', { number: existingChaptersCount + 1 })}
                   </Typography>
                 </Box>
               </Button>
@@ -3365,9 +3404,9 @@ export default function WorkflowControlPage() {
               sx={{ justifyContent: 'flex-start', py: 1.5 }}
             >
               <Box sx={{ textAlign: 'left' }}>
-                <Typography variant="button">重新开始（覆盖所有）</Typography>
+                <Typography variant="button">{t('workflow.warning.restartOverwrite')}</Typography>
                 <Typography variant="caption" sx={{ display: 'block', opacity: 0.8 }}>
-                  删除现有内容，从头开始创作
+                  {t('workflow.warning.restartOverwriteHint')}
                 </Typography>
               </Box>
             </Button>
@@ -3377,7 +3416,7 @@ export default function WorkflowControlPage() {
               onClick={() => setShowContentWarningDialog(false)}
               sx={{ justifyContent: 'flex-start' }}
             >
-              取消
+              {t('action.cancel')}
             </Button>
           </Box>
         </Box>
@@ -3392,7 +3431,7 @@ export default function WorkflowControlPage() {
       >
         <Box sx={{ p: 3 }}>
           <Typography variant="h6" sx={{ mb: 2 }}>
-            开始创作 - 配置项目参数
+            {t('workflow.startDialog.title')}
           </Typography>
 
           {/* 启动中的加载提示 */}
@@ -3401,19 +3440,19 @@ export default function WorkflowControlPage() {
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                 <CircularProgress size={20} />
                 <Typography variant="body2">
-                  正在启动工作流，请稍候...
+                  {t('workflow.startDialog.starting')}
                 </Typography>
               </Box>
             </Alert>
           )}
           
           <FormControl fullWidth sx={{ mb: 2 }}>
-            <InputLabel>创作模型</InputLabel>
+            <InputLabel>{t('workflow.page.creationModel')}</InputLabel>
             <Select
               value={workflowGenerationModel}
               onChange={(e) => handleWorkflowGenerationModelChange(String(e.target.value))}
               disabled={isStarting || workflowGenerationModelsLoading}
-              label="创作模型"
+              label={t('workflow.page.creationModel')}
             >
               {workflowGenerationModels.length === 0 && (
                 <MenuItem value={workflowGenerationModel}>{workflowGenerationModel}</MenuItem>
@@ -3423,7 +3462,7 @@ export default function WorkflowControlPage() {
                   <Tooltip
                     title={
                       <Box sx={{ whiteSpace: 'pre-line' }}>
-                        {formatWorkflowGenerationModelTooltip(model)}
+                        {formatWorkflowGenerationModelTooltip(model, t)}
                       </Box>
                     }
                     placement="right"
@@ -3439,7 +3478,7 @@ export default function WorkflowControlPage() {
                         lineHeight: 1.35,
                       }}
                     >
-                      {formatWorkflowGenerationModelOptionLabel(model)}
+                      {formatWorkflowGenerationModelOptionLabel(model, t)}
                     </Box>
                   </Tooltip>
                 </MenuItem>
@@ -3449,30 +3488,30 @@ export default function WorkflowControlPage() {
 
           {/* 🆕 题材选择 */}
           <FormControl fullWidth sx={{ mb: 2 }}>
-            <InputLabel>题材类型</InputLabel>
+            <InputLabel>{t('workflow.startDialog.genreType')}</InputLabel>
             <Select
               value={genre}
               onChange={(e) => setGenre(e.target.value)}
               disabled={isStarting}
-              label="题材类型"
+              label={t('workflow.startDialog.genreType')}
             >
-              <MenuItem value="">请选择</MenuItem>
-              <MenuItem value="修仙">修仙</MenuItem>
-              <MenuItem value="玄幻">玄幻</MenuItem>
-              <MenuItem value="奇幻">奇幻</MenuItem>
-              <MenuItem value="都市">都市</MenuItem>
-              <MenuItem value="言情">言情</MenuItem>
-              <MenuItem value="耽美">耽美</MenuItem>
-              <MenuItem value="悬疑">悬疑</MenuItem>
-              <MenuItem value="科幻">科幻</MenuItem>
-              <MenuItem value="纯文学">纯文学</MenuItem>
+              <MenuItem value="">{t('workflow.startDialog.pleaseSelect')}</MenuItem>
+              <MenuItem value="修仙">{t('workflow.genres.xiuxian')}</MenuItem>
+              <MenuItem value="玄幻">{t('workflow.genres.xuanhuan')}</MenuItem>
+              <MenuItem value="奇幻">{t('workflow.genres.fantasy')}</MenuItem>
+              <MenuItem value="都市">{t('workflow.genres.urban')}</MenuItem>
+              <MenuItem value="言情">{t('workflow.genres.romance')}</MenuItem>
+              <MenuItem value="耽美">{t('workflow.genres.danmei')}</MenuItem>
+              <MenuItem value="悬疑">{t('workflow.genres.suspense')}</MenuItem>
+              <MenuItem value="科幻">{t('workflow.genres.sciFi')}</MenuItem>
+              <MenuItem value="纯文学">{t('workflow.genres.literary')}</MenuItem>
             </Select>
-            <FormHelperText>AI将根据题材自动调整创作风格和节奏</FormHelperText>
+            <FormHelperText>{t('workflow.startDialog.genreHelper')}</FormHelperText>
           </FormControl>
           
           {/* 🆕 篇幅选择 */}
           <FormControl fullWidth sx={{ mb: 2 }}>
-            <InputLabel>篇幅规划</InputLabel>
+            <InputLabel>{t('workflow.startDialog.lengthPlan')}</InputLabel>
             <Select
               value={plannedLengthType}
               onChange={(e) => {
@@ -3494,25 +3533,28 @@ export default function WorkflowControlPage() {
                 }
               }}
               disabled={isStarting}
-              label="篇幅规划"
+              label={t('workflow.startDialog.lengthPlan')}
             >
-              <MenuItem value="">请选择</MenuItem>
-              <MenuItem value="short">短篇 (3-30章)</MenuItem>
-              <MenuItem value="mid">中篇 (31-300章)</MenuItem>
-              <MenuItem value="long">长篇 (301-799章)</MenuItem>
-              <MenuItem value="epic">超长篇 (800+章)</MenuItem>
+              <MenuItem value="">{t('workflow.startDialog.pleaseSelect')}</MenuItem>
+              <MenuItem value="short">{t('workflow.lengthTypes.short')}</MenuItem>
+              <MenuItem value="mid">{t('workflow.lengthTypes.mid')}</MenuItem>
+              <MenuItem value="long">{t('workflow.lengthTypes.long')}</MenuItem>
+              <MenuItem value="epic">{t('workflow.lengthTypes.epic')}</MenuItem>
             </Select>
-            <FormHelperText>系统将根据篇幅推荐适合的大纲扩展模式</FormHelperText>
+            <FormHelperText>{t('workflow.startDialog.lengthHelper')}</FormHelperText>
           </FormControl>
 
           {/* 💡 智能推荐简化提示 */}
           {genre && plannedLengthType && (
             <Alert 
               severity="info" 
-              sx={{ mb: 2, backgroundColor: '#e3f2fd' }}
+              sx={{ mb: 2, backgroundColor: 'info.light' }}
             >
               <Typography variant="body2">
-                💡 系统将根据「{genre}」题材和「{plannedLengthType === 'short' ? '短篇' : plannedLengthType === 'mid' ? '中篇' : plannedLengthType === 'long' ? '长篇' : '超长篇'}」篇幅推荐适合的大纲扩展模式
+                {t('workflow.startDialog.genreLengthHint', {
+                  genre: t(genreLabelKeys[genre] ?? genre),
+                  length: t(plannedLengthType === 'short' ? 'workflow.startDialog.lengthShort' : plannedLengthType === 'mid' ? 'workflow.startDialog.lengthMid' : plannedLengthType === 'long' ? 'workflow.startDialog.lengthLong' : 'workflow.startDialog.lengthEpic'),
+                })}
               </Typography>
             </Alert>
           )}
@@ -3520,7 +3562,7 @@ export default function WorkflowControlPage() {
           {/* 🆕 章节范围 */}
           <Box sx={{ display: 'flex', gap: 2, mb: 2 }}>
             <TextField
-              label="最少章节数"
+              label={t('workflow.startDialog.minChapters')}
               type="number"
               value={plannedChaptersMin}
               onChange={(e) => setPlannedChaptersMin(e.target.value ? parseInt(e.target.value) : '')}
@@ -3529,7 +3571,7 @@ export default function WorkflowControlPage() {
               inputProps={{ min: 1 }}
             />
             <TextField
-              label="最多章节数"
+              label={t('workflow.startDialog.maxChapters')}
               type="number"
               value={plannedChaptersMax}
               onChange={(e) => setPlannedChaptersMax(e.target.value ? parseInt(e.target.value) : '')}
@@ -3543,8 +3585,8 @@ export default function WorkflowControlPage() {
             fullWidth
             multiline
             rows={4}
-            label="创作需求"
-            placeholder="请输入您的创作需求，例如：创作一部关于时空旅行的科幻小说..."
+            label={t('workflow.startDialog.requirement')}
+            placeholder={t('workflow.startDialog.requirementPlaceholder')}
             value={requirement}
             onChange={(e) => setRequirement(e.target.value)}
             sx={{ mb: 2 }}
@@ -3556,25 +3598,25 @@ export default function WorkflowControlPage() {
             fullWidth
             multiline
             rows={4}
-            label="自定义大纲规划（可选）"
+            label={t('workflow.startDialog.customOutline')}
             placeholder={
               genre && plannedLengthType ? (
-                `🎵 节奏建议：${
-                  genre === '修仙' && plannedLengthType === 'long' ? '修仙长篇推荐境界逐层递进，每5-8章一个小爆点，每卷结束有境界突破大高潮' :
-                  genre === '修仙' && plannedLengthType !== 'long' ? '修仙题材注意境界体系设计，确保修炼节奏合理' :
-                  genre === '玄幻' && plannedLengthType === 'long' ? '玄幻长篇推荐天赋觉醒与实力突破交替，每5-8章一个小爆点' :
-                  genre === '玄幻' && plannedLengthType !== 'long' ? '玄幻题材注意血脉天赋体系设计，确保等级压制清晰' :
-                  genre === '奇幻' && plannedLengthType === 'long' ? '奇幻长篇推荐奇妙世界规则逐渐展开，每5-8章一个世界观揭秘或冒险突破' :
-                  genre === '奇幻' && plannedLengthType !== 'long' ? '奇幻题材注意奇幻种族、魔法体系设计，保持冒险与探索节奏' :
-                  genre === '悬疑' ? '悬疑题材注意线索布局，每3-5章揭露一个小真相，每卷一个大反转' :
-                  genre === '都市' ? '都市题材建议多线穿插（商战+感情+亲情），每卷一个事业里程碑' :
-                  genre === '言情' ? '言情题材注意感情递进（相识→相知→相守），每5-10章一个甜蜜时刻' :
-                  genre === '耽美' ? '耽美题材注意昧昧张力与情感突破交替，每5-10章一个关系进展节点' :
-                  genre === '科幻' ? '科幻题材注意科技突破节奏，每卷一次探索升级（地球→星系→宇宙）' :
-                  genre === '纯文学' ? '纯文学题材注重内心世界与外部环境的张力，节奏可适当放缓' :
-                  '根据题材特点自动适配叙事节奏'
-                }\n\n💡 未检测到自定义规划，将随机智能生成大纲`
-              ) : '可输入您的卷结构规划，例如：\n第一卷：引气境 (10章)\n第二卷：筑基境 (15章)\n...'
+                `${t('workflow.startDialog.pacePrefix')}：${
+                  genre === '修仙' && plannedLengthType === 'long' ? t('workflow.startDialog.paceCultivationLong') :
+                  genre === '修仙' && plannedLengthType !== 'long' ? t('workflow.startDialog.paceCultivation') :
+                  genre === '玄幻' && plannedLengthType === 'long' ? t('workflow.startDialog.paceXuanhuanLong') :
+                  genre === '玄幻' && plannedLengthType !== 'long' ? t('workflow.startDialog.paceXuanhuan') :
+                  genre === '奇幻' && plannedLengthType === 'long' ? t('workflow.startDialog.paceFantasyLong') :
+                  genre === '奇幻' && plannedLengthType !== 'long' ? t('workflow.startDialog.paceFantasy') :
+                  genre === '悬疑' ? t('workflow.startDialog.paceSuspense') :
+                  genre === '都市' ? t('workflow.startDialog.paceUrban') :
+                  genre === '言情' ? t('workflow.startDialog.paceRomance') :
+                  genre === '耽美' ? t('workflow.startDialog.paceDanmei') :
+                  genre === '科幻' ? t('workflow.startDialog.paceSciFi') :
+                  genre === '纯文学' ? t('workflow.startDialog.paceLiterary') :
+                  t('workflow.startDialog.paceDefault')
+                }\n\n${t('workflow.startDialog.noCustomPlanSuffix')}`
+              ) : t('workflow.startDialog.customOutlinePlaceholder')
             }
             value={userOutlinePlan}
             onChange={(e) => setUserOutlinePlan(e.target.value)}
@@ -3587,7 +3629,7 @@ export default function WorkflowControlPage() {
               onClick={() => setOpenDialog(false)}
               disabled={isStarting}
             >
-              取消
+              {t('action.cancel')}
             </Button>
             <Button
               variant="contained"
@@ -3596,7 +3638,7 @@ export default function WorkflowControlPage() {
               disabled={workflow.loading || isStarting}
               startIcon={isStarting ? <CircularProgress size={20} /> : undefined}
             >
-              {isStarting ? '启动中...' : '开始'}
+              {isStarting ? t('workflow.startDialog.startingEllipsis') : t('workflow.startDialog.start')}
             </Button>
           </Box>
         </Box>
@@ -3606,20 +3648,20 @@ export default function WorkflowControlPage() {
       <Dialog open={showSaveDialog} onClose={() => setShowSaveDialog(false)} maxWidth="sm" fullWidth>
         <Box sx={{ p: 3 }}>
           <Typography variant="h6" sx={{ mb: 2 }}>
-            🎉 工作流程已完成！
+            {t('workflow.saveDialog.title')}
           </Typography>
           <Alert severity="success" sx={{ mb: 2 }}>
-            所有5个阶段已成功完成，现在可以将生成的内容保存为新章节。
+            {t('workflow.saveDialog.desc')}
           </Alert>
           <TextField
             fullWidth
-            label="章节标题（可选）"
-            placeholder="例如：冒险开始（留空则自动生成）"
+            label={t('workflow.saveDialog.chapterTitleLabel')}
+            placeholder={t('workflow.saveDialog.chapterTitlePlaceholder')}
             value={chapterTitle}
             onChange={(e) => setChapterTitle(e.target.value)}
             sx={{ mb: 2 }}
             disabled={savingChapter}
-            helperText="如果不输入标题，系统会根据章节内容自动生成标题，格式为：第一章 {AI生成的标题}"
+            helperText={t('workflow.saveDialog.chapterTitleHelper')}
           />
           <Box sx={{ display: 'flex', gap: 2, justifyContent: 'flex-end', mt: 3 }}>
             <Button
@@ -3629,7 +3671,7 @@ export default function WorkflowControlPage() {
               }}
               disabled={savingChapter}
             >
-              稍后保存
+              {t('workflow.saveDialog.saveLater')}
             </Button>
             <Button
               variant="contained"
@@ -3638,7 +3680,7 @@ export default function WorkflowControlPage() {
               disabled={savingChapter}
               startIcon={savingChapter ? <CircularProgress size={20} /> : <SaveIcon />}
             >
-              {savingChapter ? '保存中...' : '保存为章节'}
+              {savingChapter ? t('workflow.action.saving') : t('workflow.saveDialog.saveAsChapter')}
             </Button>
           </Box>
         </Box>
@@ -3648,7 +3690,7 @@ export default function WorkflowControlPage() {
       <Dialog open={showStructureDialog} onClose={handleCloseStructureDialog} maxWidth="md" fullWidth>
         <Box sx={{ p: 3 }}>
           <Typography variant="h6" sx={{ mb: 2 }}>
-            📋 情节大纲文档
+            {t('workflow.structureDialog.title')}
           </Typography>
 
           {structureLoading ? (
@@ -3664,7 +3706,7 @@ export default function WorkflowControlPage() {
                   rows={12}
                   value={editedStructureContent}
                   onChange={(e) => setEditedStructureContent(e.target.value)}
-                  placeholder="情节大纲文本内容..."
+                  placeholder={t('workflow.structureDialog.placeholder')}
                   sx={{ mb: 2 }}
                   disabled={structureSaving}
                   InputProps={{
@@ -3682,7 +3724,7 @@ export default function WorkflowControlPage() {
                       onClick={handleCloseStructureDialog}
                       disabled={structureSaving}
                     >
-                      取消
+                      {t('action.cancel')}
                     </Button>
                     <Button
                       variant="contained"
@@ -3691,7 +3733,7 @@ export default function WorkflowControlPage() {
                       disabled={structureSaving}
                       startIcon={structureSaving ? <CircularProgress size={20} /> : <SaveIcon />}
                     >
-                      {structureSaving ? '保存中...' : '保存'}
+                      {structureSaving ? t('workflow.action.saving') : t('action.save')}
                     </Button>
                   </Box>
                 </Box>
@@ -3705,7 +3747,7 @@ export default function WorkflowControlPage() {
       <Dialog open={showContentDialog} onClose={handleCloseContentDialog} maxWidth="md" fullWidth>
         <Box sx={{ p: 3 }}>
           <Typography variant="h6" sx={{ mb: 2 }}>
-            ✍️ 章节初稿文档
+            {t('workflow.contentDialog.title')}
           </Typography>
 
           {contentLoading ? (
@@ -3720,7 +3762,7 @@ export default function WorkflowControlPage() {
                 rows={12}
                 value={editedContentDraftContent}
                 onChange={(e) => setEditedContentDraftContent(e.target.value)}
-                placeholder="章节初稿文本内容..."
+                placeholder={t('workflow.contentDialog.placeholder')}
                 sx={{ mb: 2 }}
                 disabled={contentSaving}
                 InputProps={{
@@ -3736,7 +3778,7 @@ export default function WorkflowControlPage() {
                   onClick={handleCloseContentDialog}
                   disabled={contentSaving}
                 >
-                  取消
+                  {t('action.cancel')}
                 </Button>
                 <Button
                   variant="outlined"
@@ -3744,7 +3786,7 @@ export default function WorkflowControlPage() {
                   disabled={contentSaving}
                   startIcon={contentSaving ? <CircularProgress size={20} /> : <SaveIcon />}
                 >
-                  {contentSaving ? '保存中...' : '仅保存'}
+                  {contentSaving ? t('workflow.action.saving') : '仅保存'}
                 </Button>
                 <Button
                   variant="contained"
@@ -3753,7 +3795,7 @@ export default function WorkflowControlPage() {
                   disabled={contentSaving}
                   startIcon={contentSaving ? <CircularProgress size={20} /> : <SaveIcon />}
                 >
-                  {contentSaving ? '保存中...' : '保存并继续'}
+                  {contentSaving ? t('workflow.action.saving') : '保存并继续'}
                 </Button>
               </Box>
             </>
@@ -3765,7 +3807,7 @@ export default function WorkflowControlPage() {
       <Dialog open={showReviewDialog} onClose={handleCloseReviewDialog} maxWidth="md" fullWidth>
         <Box sx={{ p: 3 }}>
           <Typography variant="h6" sx={{ mb: 2 }}>
-            📋 质量评审报告
+            {t('workflow.reviewDialog.title')}
           </Typography>
 
           {reviewLoading ? (
@@ -3780,7 +3822,7 @@ export default function WorkflowControlPage() {
                 rows={12}
                 value={editedReviewReportContent}
                 onChange={(e) => setEditedReviewReportContent(e.target.value)}
-                placeholder="评审报告内容..."
+                placeholder={t('workflow.reviewDialog.placeholder')}
                 sx={{ mb: 2 }}
                 disabled={reviewSaving}
                 InputProps={{
@@ -3796,7 +3838,7 @@ export default function WorkflowControlPage() {
                   onClick={handleCloseReviewDialog}
                   disabled={reviewSaving}
                 >
-                  取消
+                  {t('action.cancel')}
                 </Button>
                 <Button
                   variant="outlined"
@@ -3804,7 +3846,7 @@ export default function WorkflowControlPage() {
                   disabled={reviewSaving}
                   startIcon={reviewSaving ? <CircularProgress size={20} /> : <SaveIcon />}
                 >
-                  {reviewSaving ? '保存中...' : '仅保存'}
+                  {reviewSaving ? t('workflow.action.saving') : '仅保存'}
                 </Button>
                 <Button
                   variant="contained"
@@ -3813,7 +3855,7 @@ export default function WorkflowControlPage() {
                   disabled={reviewSaving}
                   startIcon={reviewSaving ? <CircularProgress size={20} /> : <SaveIcon />}
                 >
-                  {reviewSaving ? '保存中...' : '保存并继续'}
+                  {reviewSaving ? t('workflow.action.saving') : '保存并继续'}
                 </Button>
               </Box>
             </>
@@ -3825,7 +3867,7 @@ export default function WorkflowControlPage() {
       <Dialog open={showFinalVersionDialog} onClose={handleCloseFinalVersionDialog} maxWidth="md" fullWidth>
         <Box sx={{ p: 3 }}>
           <Typography variant="h6" sx={{ mb: 2 }}>
-            ✨ 最终版本文档
+            {t('workflow.finalDialog.title')}
           </Typography>
 
           {finalVersionLoading ? (
@@ -3840,7 +3882,7 @@ export default function WorkflowControlPage() {
                 rows={12}
                 value={editedFinalVersionContent}
                 onChange={(e) => setEditedFinalVersionContent(e.target.value)}
-                placeholder="最终版本文本内容..."
+                placeholder={t('workflow.finalDialog.placeholder')}
                 sx={{ mb: 2 }}
                 disabled={savingChapter}
               />
@@ -3848,13 +3890,13 @@ export default function WorkflowControlPage() {
               {/* 章节标题输入框 */}
               <TextField
                 fullWidth
-                label="章节标题（可选）"
-                placeholder="例如：冒险开始（留空则自动生成）"
+                label={t('workflow.saveDialog.chapterTitleLabel')}
+                placeholder={t('workflow.saveDialog.chapterTitlePlaceholder')}
                 value={chapterTitleInput}
                 onChange={(e) => setChapterTitleInput(e.target.value)}
                 sx={{ mb: 2 }}
                 disabled={savingChapter}
-                helperText="如果不输入标题，系统会根据章节内容自动生成标题"
+                helperText={t('workflow.finalDialog.titleHelper')}
               />
 
               <Box sx={{ display: 'flex', gap: 2, justifyContent: 'flex-end' }}>
@@ -3862,7 +3904,7 @@ export default function WorkflowControlPage() {
                   onClick={handleCloseFinalVersionDialog}
                   disabled={savingChapter}
                 >
-                  取消
+                  {t('action.cancel')}
                 </Button>
                 <Button
                   variant="contained"
@@ -3871,7 +3913,7 @@ export default function WorkflowControlPage() {
                   disabled={savingChapter || !editedFinalVersionContent}
                   startIcon={savingChapter ? <CircularProgress size={20} /> : <SaveIcon />}
                 >
-                  {savingChapter ? '保存中...' : '保存为章节'}
+                  {savingChapter ? t('workflow.action.saving') : t('workflow.saveDialog.saveAsChapter')}
                 </Button>
               </Box>
             </>
@@ -3882,9 +3924,9 @@ export default function WorkflowControlPage() {
       {/* 概念阶段决策弹窗（一次性，手动触发） */}
       <Dialog open={workflow.currentStage === 'concept' && showDecisionDialog} onClose={() => setShowDecisionDialog(false)} maxWidth="sm" fullWidth>
         <Box sx={{ p: 3 }}>
-          <Typography variant="h6" sx={{ mb: 2 }}>概念阶段完成</Typography>
+          <Typography variant="h6" sx={{ mb: 2 }}>{t('workflow.decisionDialog.title')}</Typography>
           <Typography variant="body2" sx={{ mb: 2, color: 'text.secondary' }}>
-            本轮故事概念和世界观设定已生成，满意可点击进入下一阶段，不满意可点击重新生成或者
+            {t('workflow.decisionDialog.descPart1')}
             <Typography
               component="span"
               sx={{
@@ -3900,9 +3942,9 @@ export default function WorkflowControlPage() {
                 navigate(`/knowledge-base/${projectId}`)
               }}
             >
-              前往知识库
+              {t('workflow.decisionDialog.goToKnowledgeBase')}
             </Typography>
-            手动编辑修改。
+            {t('workflow.decisionDialog.descPart3')}
           </Typography>
           <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 1.5 }}>
             <Button
@@ -3919,14 +3961,14 @@ export default function WorkflowControlPage() {
                 executeStageAsync(nextStage)
               }}
             >
-              进入下一阶段
+              {t('workflow.decisionDialog.nextStage')}
             </Button>
             <Button
               variant="outlined"
               disabled={workflow.stages.concept.status === 'active' || workflow.stages.concept.agents.some(a => a.status === 'working')}
               onClick={() => setShowRegenerateDialog(true)}
             >
-              重新生成
+              {t('workflow.page.regenerate')}
             </Button>
 
           </Box>
@@ -3937,14 +3979,14 @@ export default function WorkflowControlPage() {
       <Dialog open={showRegenerateDialog} onClose={() => setShowRegenerateDialog(false)} maxWidth="sm" fullWidth>
         <Box sx={{ p: 3 }}>
           <Typography variant="h6" sx={{ mb: 2 }}>
-            重新生成设置
+            {t('workflow.regenerateDialog.title')}
           </Typography>
 
           <TextField
             fullWidth
             multiline
             rows={4}
-            placeholder="可在此处输入您的想法，否则系统将随机重新生成。（选填）"
+            placeholder={t('workflow.regenerateDialog.feedbackPlaceholder')}
             value={regenerateFeedback}
             onChange={(e) => setRegenerateFeedback(e.target.value)}
             sx={{ mb: 2 }}
@@ -3954,14 +3996,14 @@ export default function WorkflowControlPage() {
             <Tooltip 
               title={
                 autoInferFeedback 
-                  ? "开启后，若未填写想法，系统将基于当前内容进行优化改进"
-                  : "关闭后,若未填写想法,系统将完全随机重新生成"
+                  ? t('workflow.regenerateDialog.autoInferTooltipOn')
+                  : t('workflow.regenerateDialog.autoInferTooltipOff')
               }
               arrow
               placement="top"
             >
               <Chip
-                label={autoInferFeedback ? '自动推断：开' : '自动推断：关'}
+                label={autoInferFeedback ? t('workflow.regenerateDialog.autoInferOn') : t('workflow.regenerateDialog.autoInferOff')}
                 size="small"
                 variant="outlined"
                 onClick={() => setAutoInferFeedback((v) => !v)}
@@ -3969,36 +4011,36 @@ export default function WorkflowControlPage() {
               />
             </Tooltip>
             <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-              {autoInferFeedback ? '将基于当前内容微调优化' : '将完全随机重新生成'}
+              {autoInferFeedback ? t('workflow.regenerateDialog.autoInferHintOn') : t('workflow.regenerateDialog.autoInferHintOff')}
             </Typography>
           </Box>
 
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 2 }}>
-            <Typography variant="body2" sx={{ color: 'text.secondary' }}>目标：</Typography>
-            <Button variant={regenerateTarget === 'story' ? 'contained' : 'outlined'} size="small" onClick={() => setRegenerateTarget('story')}>重生故事概念</Button>
-            <Button variant={regenerateTarget === 'world' ? 'contained' : 'outlined'} size="small" onClick={() => setRegenerateTarget('world')}>重生世界观</Button>
-            <Button variant={regenerateTarget === 'both' ? 'contained' : 'outlined'} size="small" onClick={() => setRegenerateTarget('both')}>重生两者</Button>
+            <Typography variant="body2" sx={{ color: 'text.secondary' }}>{t('workflow.regenerateDialog.target')}</Typography>
+            <Button variant={regenerateTarget === 'story' ? 'contained' : 'outlined'} size="small" onClick={() => setRegenerateTarget('story')}>{t('workflow.regenerateDialog.regenerateStory')}</Button>
+            <Button variant={regenerateTarget === 'world' ? 'contained' : 'outlined'} size="small" onClick={() => setRegenerateTarget('world')}>{t('workflow.regenerateDialog.regenerateWorld')}</Button>
+            <Button variant={regenerateTarget === 'both' ? 'contained' : 'outlined'} size="small" onClick={() => setRegenerateTarget('both')}>{t('workflow.regenerateDialog.regenerateBoth')}</Button>
           </Box>
 
           <Box sx={{ mb: 2 }}>
             <Alert severity="info" icon={false}>
               <Typography variant="caption">
-                人物重生请前往知识库的人物设定页使用“拓展人物”，此处仅针对故事概念/世界观。
+                {t('workflow.regenerateDialog.characterHint')}
               </Typography>
               <Box sx={{ mt: 1 }}>
-                <Button size="small" variant="outlined" onClick={() => navigate(`/knowledge-base/${projectId}`)}>去知识库拓展人物</Button>
+                <Button size="small" variant="outlined" onClick={() => navigate(`/knowledge-base/${projectId}`)}>{t('workflow.regenerateDialog.goExtendCharacter')}</Button>
               </Box>
             </Alert>
           </Box>
 
           <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 1.5 }}>
-            <Button onClick={() => setShowRegenerateDialog(false)}>取消</Button>
+            <Button onClick={() => setShowRegenerateDialog(false)}>{t('action.cancel')}</Button>
             <Button
               variant="contained"
               disabled={workflow.stages.concept.status === 'active' || workflow.stages.concept.agents.some(a => a.status === 'working')}
               onClick={handleSubmitRegenerateConcept}
             >
-              提交并重新生成
+              {t('workflow.regenerateDialog.submit')}
             </Button>
           </Box>
         </Box>
@@ -4014,30 +4056,30 @@ export default function WorkflowControlPage() {
 
       <Dialog open={showManualReviewDialog} onClose={() => setShowManualReviewDialog(false)} maxWidth="xs" fullWidth>
         <Box sx={{ p: 3, display: 'flex', flexDirection: 'column', gap: 2.25 }}>
-          <Typography variant="h6">升级本次质量评审</Typography>
+          <Typography variant="h6">{t('workflow.reviewUpgradeDialog.title')}</Typography>
           <Typography variant="body2" sx={{ color: 'text.secondary' }}>
-            仅重新评审当前章节初稿，不修改项目自动策略。
+            {t('workflow.reviewUpgradeDialog.desc')}
           </Typography>
           <FormControl fullWidth size="small">
-            <InputLabel>评审强度</InputLabel>
+            <InputLabel>{t('workflow.reviewUpgradeDialog.intensity')}</InputLabel>
             <Select
-              label="评审强度"
+              label={t('workflow.reviewUpgradeDialog.intensity')}
               value={manualReviewPreset}
               onChange={(event) => setManualReviewPreset(event.target.value as ReviewPreset)}
             >
-              <MenuItem value="balanced_3">普通增强（3 评审）</MenuItem>
-              <MenuItem value="key_chapter_5">重点章节（5 评审）</MenuItem>
-              <MenuItem value="deep_7">深度人工（7 评审）</MenuItem>
+              <MenuItem value="balanced_3">{t('workflow.reviewUpgradeDialog.balanced')}</MenuItem>
+              <MenuItem value="key_chapter_5">{t('workflow.reviewUpgradeDialog.keyChapter')}</MenuItem>
+              <MenuItem value="deep_7">{t('workflow.reviewUpgradeDialog.deep')}</MenuItem>
             </Select>
           </FormControl>
           <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 1 }}>
-            <Button onClick={() => setShowManualReviewDialog(false)}>取消</Button>
+            <Button onClick={() => setShowManualReviewDialog(false)}>{t('action.cancel')}</Button>
             <Button
               variant="contained"
               onClick={handleConfirmManualMultiModelReview}
               disabled={!contentDraftContent || isRunning || isStarting || generatingNextChapter}
             >
-              开始重评
+              {t('workflow.reviewUpgradeDialog.startReview')}
             </Button>
           </Box>
         </Box>

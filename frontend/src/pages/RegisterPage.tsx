@@ -1,53 +1,67 @@
-import { useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { useEffect, useState } from 'react'
+import { Link as RouterLink, useNavigate } from 'react-router-dom'
 import { useDispatch, useSelector } from 'react-redux'
 import {
   Alert,
   Box,
   Button,
-  Container,
-  Fade,
   Grid,
   IconButton,
   InputAdornment,
-  Paper,
+  Link as MuiLink,
   Step,
   StepLabel,
   Stepper,
+  Stack,
   TextField,
   Typography,
-  Zoom,
 } from '@mui/material'
 import AccountCircle from '@mui/icons-material/AccountCircle'
 import CheckCircle from '@mui/icons-material/CheckCircle'
 import Email from '@mui/icons-material/Email'
 import Lock from '@mui/icons-material/Lock'
 import Phone from '@mui/icons-material/Phone'
-import RocketLaunch from '@mui/icons-material/RocketLaunch'
 import Visibility from '@mui/icons-material/Visibility'
 import VisibilityOff from '@mui/icons-material/VisibilityOff'
 
+import AuthScreen from '@/components/layout/AuthScreen'
+import ConsentCheckboxes, { type ConsentOption } from '@/components/ConsentCheckboxes'
+import PrivacyPolicyDialog from '@/components/PrivacyPolicyDialog'
+import { buildConsentPayload, type ConsentType } from '@/constants/consent'
+import { checkPasswordStrength } from '@/utils/passwordPolicy'
 import { RootState, AppDispatch } from '@/store/store'
-import { clearError, register } from '@/store/slices/authSlice'
+import { clearError, register, sendRegisterCode } from '@/store/slices/authSlice'
+import { apiClient, extractApiErrorMessage } from '@/services/api'
+import { useTranslation } from 'react-i18next'
 
 const EMAIL_PATTERN = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/
 const PHONE_PATTERN = /^1[3-9]\d{9}$/
-
-const steps = ['填写信息', '确认提交', '完成']
 
 function trimOrEmpty(value: string) {
   return value.trim()
 }
 
 export default function RegisterPage() {
+  const { t } = useTranslation()
   const navigate = useNavigate()
   const dispatch = useDispatch<AppDispatch>()
   const { isLoading, error } = useSelector((state: RootState) => state.auth)
+
+  const steps = [t('register.stepInfo'), t('register.stepEmail'), t('register.stepDone')]
 
   const [showPassword, setShowPassword] = useState(false)
   const [showConfirmPassword, setShowConfirmPassword] = useState(false)
   const [activeStep, setActiveStep] = useState(0)
   const [formErrors, setFormErrors] = useState<Record<string, string>>({})
+  // P1-3.8：两步注册第二步——邮箱验证码输入与重发倒计时（后端返回的 resend_in 驱动）
+  const [verificationCode, setVerificationCode] = useState('')
+  const [resendSeconds, setResendSeconds] = useState(0)
+  const [sendingCode, setSendingCode] = useState(false)
+  // 短信抢占：提交前先查手机号占用；已占用才进入短信验码流程（未占用直绑不发短信）
+  const [phoneOccupied, setPhoneOccupied] = useState<boolean | null>(null)
+  const [phoneCode, setPhoneCode] = useState('')
+  const [phoneResendSeconds, setPhoneResendSeconds] = useState(0)
+  const [phoneCodeSending, setPhoneCodeSending] = useState(false)
   const [formData, setFormData] = useState({
     username: '',
     email: '',
@@ -55,6 +69,10 @@ export default function RegisterPage() {
     password: '',
     confirmPassword: '',
   })
+  // P2-5.2：条款勾选状态——未勾选的项不会传给后端，后端也不会代为记录
+  const [consentChecked, setConsentChecked] = useState<Partial<Record<ConsentType, boolean>>>({})
+  // P2-5.5 修订：《隐私政策》页内弹窗开关（就地查阅，避免新标签页导致已填内容"丢失"）
+  const [privacyDialogOpen, setPrivacyDialogOpen] = useState(false)
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target
@@ -70,10 +88,123 @@ export default function RegisterPage() {
       }))
     }
 
+    if (name === 'phone' && phoneOccupied !== null) {
+      // 手机号变更：作废占用结论与已输入的短信码，需重新检查
+      setPhoneOccupied(null)
+      setPhoneCode('')
+      setPhoneResendSeconds(0)
+    }
+
     if (error) {
       dispatch(clearError())
     }
   }
+
+  const handleCodeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    // 只保留数字，最长 6 位（后端验证码为 6 位数字）
+    setVerificationCode(e.target.value.replace(/\D/g, '').slice(0, 6))
+    if (error) {
+      dispatch(clearError())
+    }
+  }
+
+  // 重发倒计时：到 0 后才允许再次发送验证码（与后端重发间隔对齐）
+  useEffect(() => {
+    if (resendSeconds <= 0) return
+    const timer = window.setTimeout(() => setResendSeconds((prev) => prev - 1), 1000)
+    return () => window.clearTimeout(timer)
+  }, [resendSeconds])
+
+  // 短信码重发倒计时（与后端重发间隔对齐）
+  useEffect(() => {
+    if (phoneResendSeconds <= 0) return
+    const timer = window.setTimeout(() => setPhoneResendSeconds((prev) => prev - 1), 1000)
+    return () => window.clearTimeout(timer)
+  }, [phoneResendSeconds])
+
+  const sendCodeToEmail = async () => {
+    const email = trimOrEmpty(formData.email).toLowerCase()
+    setSendingCode(true)
+    try {
+      const response = await dispatch(sendRegisterCode(email)).unwrap()
+      setResendSeconds(response.resend_in)
+      return true
+    } catch {
+      // 错误文案已由 sendRegisterCode.rejected 写入 state.error
+      return false
+    } finally {
+      setSendingCode(false)
+    }
+  }
+
+  // 短信抢占：失焦即查占用——未占用直绑不发短信；已占用展示短信验码入口（申诉绑定）
+  const handleCheckPhoneOccupied = async () => {
+    const phone = trimOrEmpty(formData.phone)
+    if (!phone || !PHONE_PATTERN.test(phone) || phoneOccupied !== null) return
+    try {
+      const response = await apiClient.phoneCheckStatus(phone)
+      setPhoneOccupied(response.data?.occupied ?? false)
+    } catch (checkError) {
+      // 占用查询失败不阻断填写，提交时后端会再次校验并统一兜底
+      const message = await extractApiErrorMessage(checkError, t('register.errorPhoneCheck'))
+      setFormErrors((prev) => ({ ...prev, phone: message }))
+    }
+  }
+
+  const handleSendPhoneCode = async () => {
+    const phone = trimOrEmpty(formData.phone)
+    if (!phone || phoneResendSeconds > 0 || phoneCodeSending) return
+    setPhoneCodeSending(true)
+    try {
+      const response = await apiClient.phoneSendCode({ phone, purpose: 'takeover' })
+      setPhoneResendSeconds(response.data?.resend_in || 60)
+    } catch (sendError) {
+      const message = await extractApiErrorMessage(sendError, t('register.errorPhoneCodeSend'))
+      setFormErrors((prev) => ({ ...prev, phone: message }))
+    } finally {
+      setPhoneCodeSending(false)
+    }
+  }
+
+  // P2-5.2：注册需勾选的条款。填了手机号（敏感个人信息）时额外要求手机号收集同意；
+  // 合规修订：建号必须勾选"年满 14 周岁"自我声明（age_eligibility），
+  // 未勾选的项不会出现在提交给后端的 consent 里，后端也不会代为记录。
+  const phoneProvided = Boolean(trimOrEmpty(formData.phone))
+  const consentOptions: ConsentOption[] = [
+    {
+      type: 'privacy_policy',
+      required: true,
+      // P2-5.5 修订：政策正文页内弹窗查阅，不打断勾选流程也不丢失已填内容
+      label: (
+        <>
+          {t('register.consentPrivacyPrefix')}
+          <MuiLink
+            component="button"
+            type="button"
+            onClick={(e: React.MouseEvent) => {
+              // 阻止冒泡/默认行为，避免连带触发外层勾选框
+              e.preventDefault()
+              e.stopPropagation()
+              setPrivacyDialogOpen(true)
+            }}
+            sx={{ mx: 0.4 }}
+          >
+            {t('register.consentPrivacyLink')}
+          </MuiLink>
+        </>
+      ),
+    },
+    { type: 'age_eligibility', required: true, label: t('register.consentAge') },
+    ...(phoneProvided
+      ? [
+          {
+            type: 'phone_collection' as ConsentType,
+            required: true,
+            label: t('register.consentPhone'),
+          },
+        ]
+      : []),
+  ]
 
   const validateCurrentStep = () => {
     const username = trimOrEmpty(formData.username)
@@ -82,23 +213,31 @@ export default function RegisterPage() {
     const errors: Record<string, string> = {}
 
     if (username.length < 2 || username.length > 50) {
-      errors.username = '用户名长度必须在 2-50 个字符之间'
+      errors.username = t('register.errorUsername')
     }
 
     if (!EMAIL_PATTERN.test(email)) {
-      errors.email = '请输入有效的邮箱地址'
+      errors.email = t('register.errorEmail')
     }
 
     if (phone && !PHONE_PATTERN.test(phone)) {
-      errors.phone = '请输入有效的手机号'
+      errors.phone = t('register.errorPhone')
     }
 
-    if (formData.password.length < 6 || formData.password.length > 50) {
-      errors.password = '密码长度必须在 6-50 个字符之间'
+    // P2-4.6：与后端策略同源（utils/passwordPolicy.ts 与 app/core/password_policy.py 同规则）；
+    // 密码强度错误文案走 i18n passwordPolicy.message
+    const passwordError = checkPasswordStrength(formData.password)
+    if (passwordError) {
+      errors.password = t('passwordPolicy.message')
     }
 
     if (formData.confirmPassword !== formData.password) {
-      errors.confirmPassword = '两次输入的密码不一致'
+      errors.confirmPassword = t('register.errorMismatch')
+    }
+
+    // P2-5.2：必选条款未勾选不放行（与后端校验同语义：未同意不处理个人信息）
+    if (consentOptions.some((option) => option.required && !consentChecked[option.type])) {
+      errors.consent = t('register.errorConsent')
     }
 
     setFormErrors(errors)
@@ -113,7 +252,35 @@ export default function RegisterPage() {
         return
       }
 
-      setActiveStep(1)
+      // 短信抢占：提交前确保完成占用检查——已占用必须输入 6 位短信码才可主张号码所有权
+      const phone = trimOrEmpty(formData.phone)
+      if (phone && PHONE_PATTERN.test(phone)) {
+        let occupied = phoneOccupied
+        if (occupied === null) {
+          try {
+            const response = await apiClient.phoneCheckStatus(phone)
+            occupied = response.data?.occupied ?? false
+            setPhoneOccupied(occupied)
+          } catch (checkError) {
+            const message = await extractApiErrorMessage(checkError, t('register.errorPhoneCheck'))
+            setFormErrors((prev) => ({ ...prev, phone: message }))
+            return
+          }
+        }
+        if (occupied && phoneCode.length !== 6) {
+          setFormErrors((prev) => ({
+            ...prev,
+            phone: t('register.errorPhoneOccupied'),
+          }))
+          return
+        }
+      }
+
+      // P1-3.8：第一步校验通过后先发验证码，发送成功才进入验证码输入步；失败停留原步展示错误
+      const sent = await sendCodeToEmail()
+      if (sent) {
+        setActiveStep(1)
+      }
       return
     }
 
@@ -121,11 +288,21 @@ export default function RegisterPage() {
       return
     }
 
+    if (verificationCode.length !== 6) {
+      setFormErrors((prev) => ({ ...prev, code: t('register.errorCodeFormat') }))
+      return
+    }
+
     const payload = {
       username: trimOrEmpty(formData.username),
       email: trimOrEmpty(formData.email).toLowerCase(),
       password: formData.password,
+      code: verificationCode,
       ...(trimOrEmpty(formData.phone) ? { phone: trimOrEmpty(formData.phone) } : {}),
+      // 短信抢占：已占用且验码通过时携带短信码，后端据此转移号码绑定权
+      ...(phoneOccupied && phoneCode.length === 6 ? { phone_code: phoneCode } : {}),
+      // P2-5.2：只提交用户实际勾选的条款，未勾选的项后端不记录
+      consent: buildConsentPayload(consentChecked),
     }
 
     const result = await dispatch(register(payload))
@@ -137,6 +314,11 @@ export default function RegisterPage() {
     }
   }
 
+  const handleResendCode = async () => {
+    if (resendSeconds > 0 || sendingCode) return
+    await sendCodeToEmail()
+  }
+
   const isStepValid =
     trimOrEmpty(formData.username) &&
     trimOrEmpty(formData.email) &&
@@ -144,417 +326,362 @@ export default function RegisterPage() {
     formData.confirmPassword
 
   return (
-    <Box
-      sx={{
-        minHeight: '100vh',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-        position: 'relative',
-        overflow: 'hidden',
-        '&::before': {
-          content: '""',
-          position: 'absolute',
-          inset: 0,
-          background:
-            'url("data:image/svg+xml,%3Csvg width=\'60\' height=\'60\' viewBox=\'0 0 60 60\' xmlns=\'http://www.w3.org/2000/svg\'%3E%3Cg fill=\'none\' fill-rule=\'evenodd\'%3E%3Cg fill=\'%23ffffff\' fill-opacity=\'0.05\'%3E%3Cpath d=\'M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z\'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E")',
-          opacity: 0.3,
-        },
-      }}
-    >
-      <Box
-        sx={{
-          position: 'absolute',
-          width: '600px',
-          height: '600px',
-          borderRadius: '50%',
-          background: 'rgba(255, 255, 255, 0.1)',
-          top: '-200px',
-          right: '-200px',
-          zIndex: 0,
-        }}
-      />
-      <Box
-        sx={{
-          position: 'absolute',
-          width: '400px',
-          height: '400px',
-          borderRadius: '50%',
-          background: 'rgba(255, 255, 255, 0.08)',
-          bottom: '-100px',
-          left: '-100px',
-          zIndex: 0,
-        }}
-      />
+    <AuthScreen title={t('register.title')} subtitle={t('register.subtitle')} maxWidth="md">
+      <Stepper activeStep={activeStep} sx={{ mb: 4, '& .MuiStepLabel-label': { color: 'primary.main' } }}>
+        {steps.map((label) => (
+          <Step key={label}>
+            <StepLabel>{label}</StepLabel>
+          </Step>
+        ))}
+      </Stepper>
 
-      <Zoom in timeout={1000}>
-        <Container maxWidth="md" sx={{ position: 'relative', zIndex: 1, px: 3 }}>
-          <Fade in timeout={1500}>
-            <Paper
-              elevation={24}
-              sx={{
-                p: { xs: 4, sm: 5 },
-                borderRadius: 4,
-                backdropFilter: 'blur(10px)',
-                backgroundColor: 'rgba(255, 255, 255, 0.95)',
-                boxShadow: '0 20px 60px rgba(0, 0, 0, 0.3)',
-              }}
-            >
-              <Box sx={{ textAlign: 'center', mb: 4 }}>
-                <Zoom in timeout={2000}>
-                  <Box
+      {error ? (
+        <Alert severity="error" onClose={() => dispatch(clearError())} sx={{ mb: 3 }}>
+          {error}
+        </Alert>
+      ) : null}
+
+      <Box component="form" onSubmit={handleSubmit} noValidate>
+        {activeStep === 0 && (
+          <Grid container spacing={3}>
+            <Grid item xs={12}>
+              <TextField
+                fullWidth
+                label={t('register.usernameLabel')}
+                name="username"
+                value={formData.username}
+                onChange={handleChange}
+                required
+                autoComplete="nickname"
+                error={!!formErrors.username}
+                helperText={formErrors.username || t('register.usernameHint')}
+                InputProps={{
+                  startAdornment: (
+                    <InputAdornment position="start">
+                      <AccountCircle sx={{ color: 'text.secondary' }} />
+                    </InputAdornment>
+                  ),
+                }}
+              />
+            </Grid>
+            <Grid item xs={12}>
+              <TextField
+                fullWidth
+                label={t('register.emailLabel')}
+                name="email"
+                type="email"
+                value={formData.email}
+                onChange={handleChange}
+                required
+                autoComplete="email"
+                error={!!formErrors.email}
+                helperText={formErrors.email || t('register.emailHint')}
+                InputProps={{
+                  startAdornment: (
+                    <InputAdornment position="start">
+                      <Email sx={{ color: 'text.secondary' }} />
+                    </InputAdornment>
+                  ),
+                }}
+              />
+            </Grid>
+            <Grid item xs={12}>
+              <TextField
+                fullWidth
+                label={t('register.phoneLabel')}
+                name="phone"
+                type="tel"
+                value={formData.phone}
+                onChange={handleChange}
+                autoComplete="tel"
+                onBlur={() => void handleCheckPhoneOccupied()}
+                error={!!formErrors.phone}
+                helperText={
+                  formErrors.phone ||
+                  (phoneOccupied
+                    ? t('register.phoneOccupiedHint')
+                    : t('register.phoneHintOptional'))
+                }
+                InputProps={{
+                  startAdornment: (
+                    <InputAdornment position="start">
+                      <Phone sx={{ color: 'text.secondary' }} />
+                    </InputAdornment>
+                  ),
+                }}
+              />
+            </Grid>
+            {phoneOccupied && (
+              <Grid item xs={12}>
+                <Alert severity="info" sx={{ mb: 1.5 }}>
+                  {t('register.phoneOccupiedAlert')}
+                </Alert>
+                <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5}>
+                  <TextField
+                    fullWidth
+                    label={t('register.smsCodeLabel')}
+                    value={phoneCode}
+                    onChange={(e) => setPhoneCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                    autoComplete="one-time-code"
+                    inputProps={{ inputMode: 'numeric', maxLength: 6 }}
+                    helperText={t('register.smsCodeHint')}
+                    InputProps={{
+                      startAdornment: (
+                        <InputAdornment position="start">
+                          <Phone sx={{ color: 'text.secondary' }} />
+                        </InputAdornment>
+                      ),
+                    }}
+                  />
+                  <Button
+                    variant="outlined"
+                    onClick={() => void handleSendPhoneCode()}
+                    disabled={phoneCodeSending || phoneResendSeconds > 0}
                     sx={{
-                      width: 80,
-                      height: 80,
-                      mx: 'auto',
-                      mb: 2,
-                      borderRadius: 3,
-                      background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      boxShadow: '0 8px 24px rgba(102, 126, 234, 0.4)',
+                      whiteSpace: 'nowrap',
+                      borderColor: 'primary.main',
+                      color: 'primary.main',
+                      minWidth: 150,
+                      py: 1.4,
                     }}
                   >
-                    <RocketLaunch sx={{ fontSize: 40, color: '#fff' }} />
-                  </Box>
-                </Zoom>
-                <Typography
-                  variant="h4"
-                  component="h1"
-                  fontWeight="bold"
-                  sx={{
-                    background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-                    backgroundClip: 'text',
-                    WebkitBackgroundClip: 'text',
-                    WebkitTextFillColor: 'transparent',
-                    mb: 1,
-                  }}
-                >
-                  创建账户
-                </Typography>
-                <Typography variant="body2" color="text.secondary">
-                  加入拾光工坊，开启创作之旅
-                </Typography>
-              </Box>
+                    {phoneCodeSending
+                      ? t('register.sending')
+                      : phoneResendSeconds > 0
+                        ? t('register.phoneResendCountdown', { seconds: phoneResendSeconds })
+                        : t('register.phoneSendCode')}
+                  </Button>
+                </Stack>
+              </Grid>
+            )}
+            <Grid item xs={12} sm={6}>
+              <TextField
+                fullWidth
+                label={t('register.passwordLabel')}
+                name="password"
+                type={showPassword ? 'text' : 'password'}
+                value={formData.password}
+                onChange={handleChange}
+                required
+                autoComplete="new-password"
+                error={!!formErrors.password}
+                helperText={formErrors.password || t('register.passwordHint')}
+                InputProps={{
+                  startAdornment: (
+                    <InputAdornment position="start">
+                      <Lock sx={{ color: 'text.secondary' }} />
+                    </InputAdornment>
+                  ),
+                  endAdornment: (
+                    <InputAdornment position="end">
+                      <IconButton onClick={() => setShowPassword((prev) => !prev)} edge="end">
+                        {showPassword ? <VisibilityOff /> : <Visibility />}
+                      </IconButton>
+                    </InputAdornment>
+                  ),
+                }}
+              />
+            </Grid>
+            <Grid item xs={12} sm={6}>
+              <TextField
+                fullWidth
+                label={t('register.confirmPasswordLabel')}
+                name="confirmPassword"
+                type={showConfirmPassword ? 'text' : 'password'}
+                value={formData.confirmPassword}
+                onChange={handleChange}
+                required
+                autoComplete="new-password"
+                error={!!formErrors.confirmPassword}
+                helperText={formErrors.confirmPassword || t('register.confirmPasswordHint')}
+                InputProps={{
+                  startAdornment: (
+                    <InputAdornment position="start">
+                      <Lock sx={{ color: 'text.secondary' }} />
+                    </InputAdornment>
+                  ),
+                  endAdornment: (
+                    <InputAdornment position="end">
+                      <IconButton onClick={() => setShowConfirmPassword((prev) => !prev)} edge="end">
+                        {showConfirmPassword ? <VisibilityOff /> : <Visibility />}
+                      </IconButton>
+                    </InputAdornment>
+                  ),
+                }}
+              />
+            </Grid>
 
-              <Stepper activeStep={activeStep} sx={{ mb: 4, '& .MuiStepLabel-label': { color: '#667eea' } }}>
-                {steps.map((label) => (
-                  <Step key={label}>
-                    <StepLabel>{label}</StepLabel>
-                  </Step>
-                ))}
-              </Stepper>
+            {/* P2-5.2：条款勾选——只提交用户实际勾选的项 */}
+            <Grid item xs={12}>
+              <ConsentCheckboxes
+                options={consentOptions}
+                checked={consentChecked}
+                onChange={(type, isChecked) => {
+                  setConsentChecked((prev) => ({ ...prev, [type]: isChecked }))
+                  if (formErrors.consent) {
+                    setFormErrors((prev) => ({ ...prev, consent: '' }))
+                  }
+                }}
+                error={formErrors.consent}
+              />
+            </Grid>
+          </Grid>
+        )}
 
-              <Fade in={!!error}>
-                <Box>
-                  <Alert severity="error" onClose={() => dispatch(clearError())} sx={{ mb: 3 }}>
-                    {error}
-                  </Alert>
-                </Box>
-              </Fade>
+        {activeStep === 1 && (
+          <Box sx={{ textAlign: 'center', py: 4 }}>
+            <Box
+              sx={{
+                width: 120,
+                height: 120,
+                mx: 'auto',
+                mb: 3,
+                borderRadius: '50%',
+                bgcolor: 'primary.light',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+            >
+              <Email sx={{ fontSize: 60, color: 'primary.main' }} />
+            </Box>
+            <Typography variant="h6" fontWeight="bold" sx={{ mb: 1 }}>
+              {t('register.emailStepTitle')}
+            </Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+              {t('register.emailSentHint', { email: trimOrEmpty(formData.email).toLowerCase() })}
+            </Typography>
+            <TextField
+              fullWidth
+              label={t('register.emailCodeLabel')}
+              name="code"
+              value={verificationCode}
+              onChange={handleCodeChange}
+              required
+              autoComplete="one-time-code"
+              inputProps={{ inputMode: 'numeric', maxLength: 6 }}
+              error={!!formErrors.code}
+              helperText={formErrors.code || t('register.emailCodeHint')}
+              InputProps={{
+                startAdornment: (
+                  <InputAdornment position="start">
+                    <Lock sx={{ color: 'text.secondary' }} />
+                  </InputAdornment>
+                ),
+              }}
+              sx={{ mb: 2 }}
+            />
+            <Button
+              size="small"
+              onClick={() => void handleResendCode()}
+              disabled={resendSeconds > 0 || sendingCode}
+              sx={{ color: 'primary.main', fontWeight: 'bold' }}
+            >
+              {sendingCode
+                ? t('register.sending')
+                : resendSeconds > 0
+                  ? t('register.resendCountdown', { seconds: resendSeconds })
+                  : t('register.resend')}
+            </Button>
+          </Box>
+        )}
 
-              <Box component="form" onSubmit={handleSubmit} noValidate>
-                {activeStep === 0 && (
-                  <Fade in timeout={800}>
-                    <Grid container spacing={3}>
-                      <Grid item xs={12}>
-                        <TextField
-                          fullWidth
-                          label="用户名"
-                          name="username"
-                          value={formData.username}
-                          onChange={handleChange}
-                          required
-                          autoComplete="nickname"
-                          error={!!formErrors.username}
-                          helperText={formErrors.username || '用于登录和系统内展示'}
-                          InputProps={{
-                            startAdornment: (
-                              <InputAdornment position="start">
-                                <AccountCircle sx={{ color: '#667eea' }} />
-                              </InputAdornment>
-                            ),
-                          }}
-                        />
-                      </Grid>
-                      <Grid item xs={12}>
-                        <TextField
-                          fullWidth
-                          label="邮箱"
-                          name="email"
-                          type="email"
-                          value={formData.email}
-                          onChange={handleChange}
-                          required
-                          autoComplete="email"
-                          error={!!formErrors.email}
-                          helperText={formErrors.email || '邮箱也可用于登录'}
-                          InputProps={{
-                            startAdornment: (
-                              <InputAdornment position="start">
-                                <Email sx={{ color: '#667eea' }} />
-                              </InputAdornment>
-                            ),
-                          }}
-                        />
-                      </Grid>
-                      <Grid item xs={12}>
-                        <TextField
-                          fullWidth
-                          label="手机号（可选）"
-                          name="phone"
-                          type="tel"
-                          value={formData.phone}
-                          onChange={handleChange}
-                          autoComplete="tel"
-                          error={!!formErrors.phone}
-                          helperText={formErrors.phone || '手机号也可用于登录'}
-                          InputProps={{
-                            startAdornment: (
-                              <InputAdornment position="start">
-                                <Phone sx={{ color: '#667eea' }} />
-                              </InputAdornment>
-                            ),
-                          }}
-                        />
-                      </Grid>
-                      <Grid item xs={12} sm={6}>
-                        <TextField
-                          fullWidth
-                          label="密码"
-                          name="password"
-                          type={showPassword ? 'text' : 'password'}
-                          value={formData.password}
-                          onChange={handleChange}
-                          required
-                          autoComplete="new-password"
-                          error={!!formErrors.password}
-                          helperText={formErrors.password || '长度必须在 6-50 个字符之间'}
-                          InputProps={{
-                            startAdornment: (
-                              <InputAdornment position="start">
-                                <Lock sx={{ color: '#667eea' }} />
-                              </InputAdornment>
-                            ),
-                            endAdornment: (
-                              <InputAdornment position="end">
-                                <IconButton onClick={() => setShowPassword((prev) => !prev)} edge="end">
-                                  {showPassword ? <VisibilityOff /> : <Visibility />}
-                                </IconButton>
-                              </InputAdornment>
-                            ),
-                          }}
-                        />
-                      </Grid>
-                      <Grid item xs={12} sm={6}>
-                        <TextField
-                          fullWidth
-                          label="确认密码"
-                          name="confirmPassword"
-                          type={showConfirmPassword ? 'text' : 'password'}
-                          value={formData.confirmPassword}
-                          onChange={handleChange}
-                          required
-                          autoComplete="new-password"
-                          error={!!formErrors.confirmPassword}
-                          helperText={formErrors.confirmPassword || '请再次输入密码'}
-                          InputProps={{
-                            startAdornment: (
-                              <InputAdornment position="start">
-                                <Lock sx={{ color: '#667eea' }} />
-                              </InputAdornment>
-                            ),
-                            endAdornment: (
-                              <InputAdornment position="end">
-                                <IconButton onClick={() => setShowConfirmPassword((prev) => !prev)} edge="end">
-                                  {showConfirmPassword ? <VisibilityOff /> : <Visibility />}
-                                </IconButton>
-                              </InputAdornment>
-                            ),
-                          }}
-                        />
-                      </Grid>
-                    </Grid>
-                  </Fade>
-                )}
+        {activeStep === 2 && (
+          <Box sx={{ textAlign: 'center', py: 4 }}>
+            <Box
+              sx={{
+                width: 120,
+                height: 120,
+                mx: 'auto',
+                mb: 3,
+                borderRadius: '50%',
+                bgcolor: 'primary.light',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+            >
+              <CheckCircle sx={{ fontSize: 60, color: 'primary.main' }} />
+            </Box>
+            <Typography variant="h5" fontWeight="bold" sx={{ mb: 1 }}>
+              {t('register.successTitle')}
+            </Typography>
+            <Typography variant="body1" color="text.secondary">
+              {t('register.successHint')}
+            </Typography>
+          </Box>
+        )}
 
-                {activeStep === 1 && (
-                  <Fade in timeout={800}>
-                    <Box sx={{ textAlign: 'center', py: 4 }}>
-                      <Zoom in timeout={1000}>
-                        <Box
-                          sx={{
-                            width: 120,
-                            height: 120,
-                            mx: 'auto',
-                            mb: 3,
-                            borderRadius: '50%',
-                            background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            boxShadow: '0 8px 24px rgba(102, 126, 234, 0.4)',
-                          }}
-                        >
-                          <CheckCircle sx={{ fontSize: 60, color: '#fff' }} />
-                        </Box>
-                      </Zoom>
-                      <Typography variant="h6" fontWeight="bold" sx={{ mb: 2 }}>
-                        确认提交信息
-                      </Typography>
-                      <Box
-                        sx={{
-                          mt: 3,
-                          p: 3,
-                          borderRadius: 2,
-                          backgroundColor: 'rgba(102, 126, 234, 0.05)',
-                          border: '1px solid rgba(102, 126, 234, 0.2)',
-                        }}
-                      >
-                        <Grid container spacing={2}>
-                          <Grid item xs={6} sx={{ textAlign: 'left' }}>
-                            <Typography variant="body2" color="text.secondary">
-                              用户名
-                            </Typography>
-                            <Typography variant="body1" fontWeight="medium">
-                              {trimOrEmpty(formData.username)}
-                            </Typography>
-                          </Grid>
-                          <Grid item xs={6} sx={{ textAlign: 'left' }}>
-                            <Typography variant="body2" color="text.secondary">
-                              邮箱
-                            </Typography>
-                            <Typography variant="body1" fontWeight="medium">
-                              {trimOrEmpty(formData.email).toLowerCase()}
-                            </Typography>
-                          </Grid>
-                          <Grid item xs={12} sx={{ textAlign: 'left' }}>
-                            <Typography variant="body2" color="text.secondary">
-                              手机号
-                            </Typography>
-                            <Typography variant="body1" fontWeight="medium">
-                              {trimOrEmpty(formData.phone) || '未填写'}
-                            </Typography>
-                          </Grid>
-                          <Grid item xs={12} sx={{ textAlign: 'left' }}>
-                            <Typography variant="body2" color="text.secondary">
-                              密码
-                            </Typography>
-                            <Typography variant="body1" fontWeight="medium">
-                              {'*'.repeat(formData.password.length)}
-                            </Typography>
-                          </Grid>
-                        </Grid>
-                      </Box>
-                    </Box>
-                  </Fade>
-                )}
+        {activeStep < 2 && (
+          <Box sx={{ display: 'flex', gap: 2, mt: 4 }}>
+            {activeStep > 0 && (
+              <Button
+                fullWidth
+                variant="outlined"
+                onClick={() => setActiveStep((prev) => prev - 1)}
+                disabled={isLoading}
+                sx={{
+                  py: 1.8,
+                  borderRadius: 2,
+                  fontSize: '1rem',
+                  fontWeight: 'bold',
+                  borderColor: 'primary.main',
+                  color: 'primary.main',
+                }}
+              >
+                {t('register.stepperBack')}
+              </Button>
+            )}
+            <Button
+              fullWidth
+              variant="contained"
+              type="submit"
+              size="large"
+              disabled={
+                isLoading ||
+                sendingCode ||
+                phoneCodeSending ||
+                (activeStep === 0 && !isStepValid) ||
+                (activeStep === 1 && verificationCode.length !== 6)
+              }
+              sx={{
+                py: 1.8,
+                borderRadius: 2,
+                fontSize: '1rem',
+                fontWeight: 'bold',
+              }}
+            >
+              {isLoading || sendingCode || phoneCodeSending
+                ? t('register.submitting')
+                : activeStep === 0
+                  ? t('register.stepperNext')
+                  : t('register.submit')}
+            </Button>
+          </Box>
+        )}
+      </Box>
 
-                {activeStep === 2 && (
-                  <Fade in timeout={800}>
-                    <Box sx={{ textAlign: 'center', py: 4 }}>
-                      <Zoom in timeout={1000}>
-                        <Box
-                          sx={{
-                            width: 120,
-                            height: 120,
-                            mx: 'auto',
-                            mb: 3,
-                            borderRadius: '50%',
-                            background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            boxShadow: '0 8px 24px rgba(102, 126, 234, 0.4)',
-                          }}
-                        >
-                          <CheckCircle sx={{ fontSize: 60, color: '#fff' }} />
-                        </Box>
-                      </Zoom>
-                      <Typography variant="h5" fontWeight="bold" sx={{ mb: 1 }}>
-                        注册成功
-                      </Typography>
-                      <Typography variant="body1" color="text.secondary">
-                        正在跳转到首页...
-                      </Typography>
-                    </Box>
-                  </Fade>
-                )}
+      {activeStep === 0 && (
+        <Box sx={{ mt: 3, textAlign: 'center' }}>
+          <Typography variant="body2" color="text.secondary">
+            {t('register.hasAccount')}{' '}
+            <MuiLink
+              component={RouterLink}
+              to="/login"
+              sx={{
+                color: 'primary.main',
+                textDecoration: 'none',
+                fontWeight: 'bold',
+              }}
+            >
+              {t('register.goLogin')}
+            </MuiLink>
+          </Typography>
+        </Box>
+      )}
 
-                {activeStep < 2 && (
-                  <Box sx={{ display: 'flex', gap: 2, mt: 4 }}>
-                    {activeStep > 0 && (
-                      <Button
-                        fullWidth
-                        variant="outlined"
-                        onClick={() => setActiveStep((prev) => prev - 1)}
-                        disabled={isLoading}
-                        sx={{
-                          py: 1.8,
-                          borderRadius: 2,
-                          fontSize: '1rem',
-                          fontWeight: 'bold',
-                          borderColor: '#667eea',
-                          color: '#667eea',
-                        }}
-                      >
-                        上一步
-                      </Button>
-                    )}
-                    <Button
-                      fullWidth
-                      variant="contained"
-                      type="submit"
-                      size="large"
-                      disabled={isLoading || (activeStep === 0 && !isStepValid)}
-                      sx={{
-                        py: 1.8,
-                        borderRadius: 2,
-                        fontSize: '1rem',
-                        fontWeight: 'bold',
-                        background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-                        boxShadow: '0 4px 14px rgba(102, 126, 234, 0.4)',
-                        '&:hover': {
-                          boxShadow: '0 6px 20px rgba(102, 126, 234, 0.6)',
-                          transform: 'translateY(-2px)',
-                        },
-                        '&:disabled': {
-                          background: 'rgba(0, 0, 0, 0.12)',
-                          color: 'rgba(0, 0, 0, 0.26)',
-                        },
-                      }}
-                    >
-                      {isLoading ? '提交中...' : activeStep === 0 ? '下一步' : '确认注册'}
-                    </Button>
-                  </Box>
-                )}
-              </Box>
-
-              {activeStep === 0 && (
-                <Fade in timeout={1800}>
-                  <Box sx={{ mt: 3, textAlign: 'center' }}>
-                    <Typography variant="body2" color="text.secondary">
-                      已有账户？{' '}
-                      <Link
-                        to="/login"
-                        style={{
-                          color: '#667eea',
-                          textDecoration: 'none',
-                          fontWeight: 'bold',
-                        }}
-                      >
-                        立即登录
-                      </Link>
-                    </Typography>
-                  </Box>
-                </Fade>
-              )}
-            </Paper>
-          </Fade>
-        </Container>
-      </Zoom>
-    </Box>
+      {/* P2-5.5 修订：页内弹窗查阅隐私政策，关闭后表单填写内容原样保留 */}
+      <PrivacyPolicyDialog open={privacyDialogOpen} onClose={() => setPrivacyDialogOpen(false)} />
+    </AuthScreen>
   )
 }

@@ -7,6 +7,7 @@ import {
 } from '@mui/material'
 import CheckIcon from '@mui/icons-material/CheckCircle'
 import HeadphonesIcon from '@mui/icons-material/Headphones'
+import { useTranslation } from 'react-i18next'
 
 import AudiobookCompletionStats from './AudiobookCompletionStats'
 import AudiobookScriptCompletionStep from './AudiobookScriptCompletionStep'
@@ -98,6 +99,7 @@ const AudiobookCompletionStep = ({
   onGenerateApprovedChapterAudio,
   onCreateNewProject,
 }: AudiobookCompletionStepProps) => {
+  const { t } = useTranslation()
   const completionMode = resolveAudiobookCompletionMode({
     requestedMode: lastGenerationMode,
     chapterAudios: currentChapterAudios,
@@ -128,12 +130,12 @@ const AudiobookCompletionStep = ({
       <Box sx={{ textAlign: 'center', mb: 3 }}>
         <CheckIcon sx={{ fontSize: 64, color: audiobookColors.successMain, mb: 1.5 }} />
         <Typography variant="h5" sx={{ mb: 1 }}>
-          音频生成完成
+          {t('audiobook.audiobookCompletionStep.title')}
         </Typography>
         <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
           {audioEngineMode === 'seed_scene'
-            ? '场景音频已完成渲染，可以试听、验收或导出。'
-            : '章节音频已生成，可以试听、验收或导出。'}
+            ? t('audiobook.audiobookCompletionStep.seedSceneDoneHint')
+            : t('audiobook.audiobookCompletionStep.trackDoneHint')}
         </Typography>
       </Box>
 
@@ -150,7 +152,9 @@ const AudiobookCompletionStep = ({
             disabled={browserPlayerLoading}
             sx={audiobookButtonSx.brandContained}
           >
-            {browserPlayerLoading ? '加载播放器...' : '打开浏览器播放器'}
+            {browserPlayerLoading
+              ? t('audiobook.audiobookCompletionStep.playerLoading')
+              : t('audiobook.audiobookCompletionStep.openBrowserPlayer')}
           </Button>
         )}
 
@@ -176,7 +180,7 @@ const AudiobookCompletionStep = ({
             disabled={!scriptEditorTargetChapterId}
             sx={audiobookButtonSx.brandOutlined}
           >
-            打开剧本编辑器
+            {t('audiobook.audiobookCompletionStep.openScriptEditor')}
           </Button>
         )}
 
@@ -185,7 +189,7 @@ const AudiobookCompletionStep = ({
           onClick={onCreateNewProject}
           sx={audiobookButtonSx.brandContained}
         >
-          生成新项目
+          {t('audiobook.audiobookCompletionStep.createNewProject')}
         </Button>
       </Box>
 

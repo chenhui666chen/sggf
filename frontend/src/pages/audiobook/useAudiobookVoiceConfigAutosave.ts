@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
+import { useTranslation } from 'react-i18next'
+
 import { apiClient } from '../../services/api'
 import type { SetSnackbar } from './hookTypes'
 import { buildProjectAudioConfigPayload } from './projectAudioConfigUtils'
@@ -39,6 +41,7 @@ export const useAudiobookVoiceConfigAutosave = ({
   currentVoicePresets,
   setSnackbar,
 }: UseAudiobookVoiceConfigAutosaveParams) => {
+  const { t } = useTranslation()
   const [dirtyCounter, setDirtyCounter] = useState(0)
   const pendingProjectIdRef = useRef<number | null>(null)
 
@@ -68,7 +71,7 @@ export const useAudiobookVoiceConfigAutosave = ({
       apiClient.updateProjectAudioConfig(projectId, payload, ttsModel).catch(() => {
         setSnackbar({
           open: true,
-          message: '音色配置自动保存失败，生成前请再次确认音色选择',
+          message: t('audiobook.useAudiobookVoiceConfigAutosave.autosaveFailed'),
           severity: 'warning',
         })
       })
@@ -84,6 +87,7 @@ export const useAudiobookVoiceConfigAutosave = ({
     ttsModel,
     currentVoicePresets,
     setSnackbar,
+    t,
   ])
 
   return { scheduleVoiceConfigSave }

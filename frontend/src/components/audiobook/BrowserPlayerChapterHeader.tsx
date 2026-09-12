@@ -1,5 +1,6 @@
 import { Box, Button, Chip, Typography } from '@mui/material'
 import DownloadIcon from '@mui/icons-material/Download'
+import { useTranslation } from 'react-i18next'
 
 import type { SubtitleFormat } from './browserPlayerUtils'
 import type { BrowserPlayerChapter } from './browserPlayerTypes'
@@ -20,13 +21,15 @@ const BrowserPlayerChapterHeader: React.FC<BrowserPlayerChapterHeaderProps> = ({
   subtitleFormat,
   onDownloadSubtitle,
   onDownloadAudacityLabels,
-}) => (
+}) => {
+  const { t } = useTranslation()
+  return (
   <Box sx={{ mb: 2 }}>
     <Box display="flex" alignItems="center" gap={1} flexWrap="wrap">
       <Typography variant="h6">
-        第{currentChapter?.chapter_number || currentChapterIndex + 1}章：{currentChapter?.chapter_title || ''}
+        {t('audiobook.browserPlayer.chapterHeaderTitle', { number: currentChapter?.chapter_number || currentChapterIndex + 1, title: currentChapter?.chapter_title || '' })}
       </Typography>
-      {usingLocalAsset && <Chip label="本地音频" size="small" color="success" variant="outlined" />}
+      {usingLocalAsset && <Chip label={t('audiobook.browserPlayer.localAudio')} size="small" color="success" variant="outlined" />}
     </Box>
     {(currentChapter?.has_subtitle || currentChapter?.audacity_labels_url) && (
       <Box display="flex" gap={1} flexWrap="wrap" sx={{ mt: 0.5 }}>
@@ -36,7 +39,7 @@ const BrowserPlayerChapterHeader: React.FC<BrowserPlayerChapterHeaderProps> = ({
             startIcon={<DownloadIcon />}
             onClick={onDownloadSubtitle}
           >
-            下载字幕 ({subtitleFormat.toUpperCase()})
+            {t('audiobook.browserPlayer.downloadSubtitle', { format: subtitleFormat.toUpperCase() })}
           </Button>
         )}
         {currentChapter?.audacity_labels_url && (
@@ -45,12 +48,13 @@ const BrowserPlayerChapterHeader: React.FC<BrowserPlayerChapterHeaderProps> = ({
             startIcon={<DownloadIcon />}
             onClick={onDownloadAudacityLabels}
           >
-            下载 Labels
+            {t('audiobook.browserPlayer.downloadLabels')}
           </Button>
         )}
       </Box>
     )}
   </Box>
-)
+  )
+}
 
 export default BrowserPlayerChapterHeader

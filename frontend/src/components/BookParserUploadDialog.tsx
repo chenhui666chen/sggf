@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import {
   Alert,
   Box,
@@ -34,6 +35,7 @@ export default function BookParserUploadDialog({
   initialTitle = '',
   initialContent = '',
 }: BookParserUploadDialogProps) {
+  const { t } = useTranslation()
   const [tabIndex, setTabIndex] = useState(0)
   const [title, setTitle] = useState('')
   const [author, setAuthor] = useState('')
@@ -96,10 +98,10 @@ export default function BookParserUploadDialog({
     while (true) {
       const nextStatus = await bookParserApi.getParseStatus(bookId)
       setProgress(mapProgress(nextStatus))
-      setStatusText(nextStatus.message || '正在处理...')
+      setStatusText(nextStatus.message || t('bookParserUpload.processing'))
 
       if (nextStatus.status === 'failed') {
-        throw new Error(nextStatus.error || nextStatus.message || '拆书任务失败')
+        throw new Error(nextStatus.error || nextStatus.message || t('bookParserUpload.taskFailed'))
       }
 
       if (terminalStatuses.includes(nextStatus.status)) {
@@ -114,14 +116,14 @@ export default function BookParserUploadDialog({
     setLoading(true)
     setError('')
     setProgress(2)
-    setStatusText('正在上传书籍...')
+    setStatusText(t('bookParserUpload.uploading'))
 
     try {
       let book: BookSource
 
       if (tabIndex === 0) {
         if (!title.trim() || !content.trim()) {
-          setError('请填写书名和内容')
+          setError(t('bookParserUpload.fillTitleAndContent'))
           setLoading(false)
           return
         }
@@ -133,7 +135,7 @@ export default function BookParserUploadDialog({
         })
       } else {
         if (!file) {
-          setError('请选择文件')
+          setError(t('bookParserUpload.selectFile'))
           setLoading(false)
           return
         }
@@ -146,19 +148,19 @@ export default function BookParserUploadDialog({
       }
 
       setProgress(8)
-      setStatusText('上传成功，开始切分章节...')
+      setStatusText(t('bookParserUpload.uploadOkChapters'))
       await bookParserApi.parseBook(book.id)
       const parseStatus = await waitForBookStatus(book.id, ['chapters_done', 'completed'])
 
       if (parseStatus.status !== 'completed') {
         setProgress(56)
-        setStatusText('章节切分完成，开始 AI 分析...')
+        setStatusText(t('bookParserUpload.chaptersOkAnalyzing'))
         await bookParserApi.analyzeBook(book.id)
         await waitForBookStatus(book.id, ['completed'])
       }
 
       setProgress(88)
-      setStatusText('拆书分析完成，正在导入灵感方舟...')
+      setStatusText(t('bookParserUpload.analyzingImporting'))
 
       const importResult = await bookParserApi.importToProject(book.id, {
         project_title: title.trim() || book.title,
@@ -173,12 +175,12 @@ export default function BookParserUploadDialog({
       }
 
       setProgress(100)
-      setStatusText('拆书分析完成，已自动导入灵感方舟')
+      setStatusText(t('bookParserUpload.analyzingImported'))
       onUploadSuccess?.(importedBook)
       resetForm()
       onClose()
     } catch (err: any) {
-      const errMsg = await extractApiErrorMessage(err, '上传、拆书或导入失败')
+      const errMsg = await extractApiErrorMessage(err, t('bookParserUpload.uploadParseImportFailed'))
       setError(errMsg)
     } finally {
       setLoading(false)
@@ -196,15 +198,15 @@ export default function BookParserUploadDialog({
       fullWidth
       disableEscapeKeyDown={loading}
     >
-      <DialogTitle>上传书籍</DialogTitle>
+      <DialogTitle>{t('bookParserUpload.title')}</DialogTitle>
       <DialogContent>
         <Tabs value={tabIndex} onChange={(_, value) => setTabIndex(value)} sx={{ mb: 2 }}>
-          <Tab label="粘贴文本" />
-          <Tab label="上传文件" />
+          <Tab label={t('bookParserUpload.tabPaste')} />
+          <Tab label={t('bookParserUpload.tabUpload')} />
         </Tabs>
 
         <Alert severity="info" sx={{ mb: 2 }}>
-          上传成功后会自动执行章节切分、AI 分析，并自动导入灵感方舟。
+          {t('bookParserUpload.autoFlowHint')}
         </Alert>
 
         {error && (
@@ -217,7 +219,7 @@ export default function BookParserUploadDialog({
           <Box sx={{ mb: 2 }}>
             <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.75 }}>
               <Typography variant="body2" color="text.secondary">
-                {statusText || '正在处理...'}
+                {statusText || t('bookParserUpload.processing')}
               </Typography>
               <Typography variant="body2" color="text.secondary">
                 {progress}%
@@ -229,7 +231,7 @@ export default function BookParserUploadDialog({
 
         <TextField
           fullWidth
-          label="书名"
+          label={t('bookParserUpload.bookTitle')}
           value={title}
           onChange={(e) => setTitle(e.target.value)}
           sx={{ mb: 2 }}
@@ -237,7 +239,7 @@ export default function BookParserUploadDialog({
         />
         <TextField
           fullWidth
-          label="作者（可选）"
+          label={t('bookParserUpload.authorOptional')}
           value={author}
           onChange={(e) => setAuthor(e.target.value)}
           sx={{ mb: 2 }}
@@ -249,8 +251,8 @@ export default function BookParserUploadDialog({
             fullWidth
             multiline
             rows={12}
-            label="书籍内容"
-            placeholder="将书籍内容粘贴到这里..."
+            label={t('bookParserUpload.bookContent')}
+            placeholder={t('bookParserUpload.contentPlaceholder')}
             value={content}
             onChange={(e) => setContent(e.target.value)}
             disabled={loading}
@@ -286,20 +288,20 @@ export default function BookParserUploadDialog({
               color={file ? 'success.main' : 'text.secondary'}
               sx={file ? { fontWeight: 600 } : undefined}
             >
-              {file ? file.name : '点击选择 TXT / Markdown / EPUB / PDF 文件'}
+              {file ? file.name : t('bookParserUpload.clickSelectFile')}
             </Typography>
             <Typography variant="caption" color="text.secondary">
-              支持 TXT、Markdown、EPUB、PDF，文本支持 UTF-8、GBK 编码
+              {t('bookParserUpload.supportedFormats')}
             </Typography>
           </Box>
         )}
       </DialogContent>
       <DialogActions>
         <Button onClick={handleClose} disabled={loading}>
-          取消
+          {t('action.cancel')}
         </Button>
         <Button variant="contained" onClick={handleSubmit} disabled={loading}>
-          {loading ? <CircularProgress size={20} /> : '上传并开始分析'}
+          {loading ? <CircularProgress size={20} /> : t('bookParserUpload.uploadAndAnalyze')}
         </Button>
       </DialogActions>
     </Dialog>

@@ -11,6 +11,8 @@ import {
 } from '@mui/material'
 import type { SelectChangeEvent } from '@mui/material/Select'
 
+import { useTranslation } from 'react-i18next'
+
 export interface NarrationStylePreset {
   id: string
   name: string
@@ -44,12 +46,13 @@ const NarrationStyleSelector = ({
   formatModelLabel,
   currentModel,
 }: NarrationStyleSelectorProps) => {
+  const { t } = useTranslation()
   const selectedStyleData = styles.find((s) => s.id === selectedStyle)
   const selectedColor = selectedStyleData?.color
   const selectedDescription = selectedStyleData?.description
   const supportedModelText = selectedStyleData?.supported_models?.length
     ? selectedStyleData.supported_models.map((modelId) => formatModelLabel?.(modelId) || modelId).join(', ')
-    : '全部模型'
+    : t('audiobook.narrationStyleSelector.allModels')
   const isStyleSupported = (style: NarrationStylePreset) =>
     !currentModel
     || !style.supported_models?.length
@@ -69,17 +72,17 @@ const NarrationStyleSelector = ({
     <Box>
       {styles.length === 0 ? (
         <Typography variant="body2" color="text.secondary">
-          暂无可用叙事风格
+          {t('audiobook.narrationStyleSelector.empty')}
         </Typography>
       ) : (
         <FormControl fullWidth size="small" disabled={disabled}>
-          <InputLabel id="narration-style-label">叙事风格</InputLabel>
+          <InputLabel id="narration-style-label">{t('audiobook.narrationStyleSelector.label')}</InputLabel>
           <Select
             labelId="narration-style-label"
-            label="叙事风格"
+            label={t('audiobook.narrationStyleSelector.label')}
             value={selectedStyleData ? selectedStyle : ''}
             onChange={handleStyleChange}
-            renderValue={() => selectedStyleData?.name || '选择叙事风格'}
+            renderValue={() => selectedStyleData?.name || t('audiobook.narrationStyleSelector.selectPlaceholder')}
             MenuProps={{
               PaperProps: {
                 sx: { maxWidth: 420 },
@@ -90,7 +93,7 @@ const NarrationStyleSelector = ({
               const styleSupported = isStyleSupported(style)
               const supportText = styleSupported
                 ? style.description
-                : `当前模型不支持 · ${style.description}`
+                : t('audiobook.narrationStyleSelector.modelUnsupported', { description: style.description })
 
               return (
                 <MenuItem key={style.id} value={style.id} disabled={!styleSupported}>
@@ -118,8 +121,8 @@ const NarrationStyleSelector = ({
             fullWidth
             multiline
             rows={3}
-            label="自定义叙事风格提示词"
-            placeholder="例如：温柔、克制，情绪递进时放慢语速并保留长停顿"
+            label={t('audiobook.narrationStyleSelector.customPromptLabel')}
+            placeholder={t('audiobook.narrationStyleSelector.customPromptPlaceholder')}
             value={customPrompt ?? ''}
             onChange={(e) => onPromptChange(e.target.value)}
             size="small"
@@ -131,7 +134,7 @@ const NarrationStyleSelector = ({
       {selectedStyleData && (
         <Box sx={{ mt: 1, display: 'flex', flexDirection: 'column', gap: 0.5 }}>
           <Chip
-            label={`已选择：${selectedStyleData.name}`}
+            label={t('audiobook.narrationStyleSelector.selectedLabel', { name: selectedStyleData.name })}
             size="small"
             color={selectedStyleSupported ? 'primary' : 'warning'}
             variant="outlined"
@@ -142,7 +145,7 @@ const NarrationStyleSelector = ({
             }
           />
           <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
-            支持模型：{supportedModelText}
+            {t('audiobook.narrationStyleSelector.supportedModels', { models: supportedModelText })}
           </Typography>
           {selectedDescription && selectedStyle !== 'custom' && (
             <Typography variant="caption" color="text.secondary">

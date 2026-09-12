@@ -6,24 +6,26 @@ import LogoutIcon from '@mui/icons-material/Logout'
 import AdminPanelSettingsIcon from '@mui/icons-material/AdminPanelSettings'
 import PermMediaOutlinedIcon from '@mui/icons-material/PermMediaOutlined'
 import { useDispatch, useSelector } from 'react-redux'
+import { useTranslation } from 'react-i18next'
 
 import AssetStudioWorkbench from '@/components/home/AssetStudioWorkbench'
 import ModelUseEntryStrip from '@/components/home/ModelUseEntryStrip'
 import { modelUseEntries } from '@/components/home/modelEntryData'
 import type { AssetStudioTabId } from '@/components/home/modelEntryData'
-import { logout } from '@/store/slices/authSlice'
-import type { RootState } from '@/store/store'
+import { performLogout } from '@/store/slices/authSlice'
+import type { RootState, AppDispatch } from '@/store/store'
 
 export default function AssetStudioPage() {
+  const { t } = useTranslation()
   const navigate = useNavigate()
-  const dispatch = useDispatch()
+  const dispatch = useDispatch<AppDispatch>()
   const { user } = useSelector((state: RootState) => state.auth)
   const [activeModelEntryId, setActiveModelEntryId] = useState<AssetStudioTabId>(modelUseEntries[0]?.id || 'image')
 
   const hasAdminRole = user?.roles?.some((role: any) => role.code === 'admin' || role.code === 'super_admin')
 
   const handleLogout = () => {
-    dispatch(logout())
+    dispatch(performLogout())
     navigate('/login')
   }
 
@@ -76,7 +78,7 @@ export default function AssetStudioPage() {
                   fontSize: { xs: '1.5rem', sm: '1.75rem', md: '2rem' },
                 }}
               >
-                资产生成工作台
+                {t('assetStudio.page.title')}
               </Typography>
             </Box>
           </Box>
@@ -105,7 +107,7 @@ export default function AssetStudioPage() {
                 },
               }}
             >
-              返回创作工坊
+              {t('dashboard.backToStudio')}
             </Button>
             {hasAdminRole && (
               <Button
@@ -124,7 +126,7 @@ export default function AssetStudioPage() {
                   },
                 }}
               >
-                管理控制台
+                {t('admin.layout.title')}
               </Button>
             )}
             <Button
@@ -143,7 +145,7 @@ export default function AssetStudioPage() {
                 },
               }}
             >
-              退出登录
+              {t('shell.account.logout')}
             </Button>
           </Box>
         </Box>

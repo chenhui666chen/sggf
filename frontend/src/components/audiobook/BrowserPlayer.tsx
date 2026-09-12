@@ -16,6 +16,7 @@ import {
   useTheme,
 } from '@mui/material'
 import { apiClient } from '@/services/api'
+import { useTranslation } from 'react-i18next'
 import { getLocalAssetBlob, saveLocalAsset } from '@/utils/localAssetVault'
 import { triggerBlobDownload } from '@/utils/blobDownload'
 import {
@@ -45,6 +46,7 @@ interface BrowserPlayerProps {
 }
 
 const BrowserPlayer: React.FC<BrowserPlayerProps> = ({ projectData, open, onClose }) => {
+  const { t } = useTranslation()
   const theme = useTheme()
   const fullScreen = useMediaQuery(theme.breakpoints.down('sm'))
   const [currentChapterIndex, setCurrentChapterIndex] = useState(0)
@@ -310,7 +312,7 @@ const BrowserPlayer: React.FC<BrowserPlayerProps> = ({ projectData, open, onClos
       </DialogContent>
 
       <DialogActions>
-        <Button onClick={onClose}>关闭</Button>
+        <Button onClick={onClose}>{t('action.close')}</Button>
       </DialogActions>
     </Dialog>
   )

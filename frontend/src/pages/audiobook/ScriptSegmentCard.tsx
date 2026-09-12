@@ -1,4 +1,5 @@
 import { memo } from 'react'
+import { useTranslation } from 'react-i18next'
 import {
   Box,
   ListItem,
@@ -15,6 +16,7 @@ import type {
 import {
   formatScriptSegmentSummary,
 } from './scriptSegmentCardUtils'
+import { audiobookColors } from './audiobookTheme'
 import ScriptSegmentActions from './ScriptSegmentActions'
 import ScriptSegmentDetailsPanel from './ScriptSegmentDetailsPanel'
 
@@ -74,6 +76,7 @@ const ScriptSegmentCard = ({
   onUpdateSegment,
   onSelect,
 }: ScriptSegmentCardProps) => {
+  const { t } = useTranslation()
   return (
     <ListItem
       alignItems="flex-start"
@@ -82,9 +85,10 @@ const ScriptSegmentCard = ({
       sx={{
         mb: 1,
         border: '1px solid',
-        borderColor: selected ? 'primary.main' : 'transparent',
+        borderColor: selected ? audiobookColors.primary : 'transparent',
         borderRadius: 1,
-        bgcolor: selected ? 'rgba(37, 99, 235, 0.06)' : '#ffffff',
+        // 选中态走模块蓝 token（与 audiobook 其余组件一致），底卡用 surfacePaper。
+        bgcolor: selected ? audiobookColors.infoSoft : audiobookColors.surfacePaper,
         contentVisibility: 'auto',
         containIntrinsicSize: '220px',
         transition: 'background-color 120ms ease, border-color 120ms ease',
@@ -92,7 +96,7 @@ const ScriptSegmentCard = ({
     >
       <Box sx={{ width: '100%' }}>
         <Typography variant="caption" color="text.secondary">
-          {formatScriptSegmentSummary(segment, index)}
+          {formatScriptSegmentSummary(segment, index, t)}
         </Typography>
         <TextField
           fullWidth

@@ -1,3 +1,4 @@
+import type { TFunction } from 'i18next'
 import type {
   AudiobookEditorSessionState,
   AudiobookEditorSyncRegistry,
@@ -14,30 +15,31 @@ export const AUDIOBOOK_EDITOR_SYNC_TTL_MS = 10 * 60 * 1000
 export const AUDIOBOOK_EDITOR_SYNC_HEARTBEAT_MS = 30 * 1000
 
 const SCRIPT_EDITOR_CONFLICT_SEGMENT_FIELDS = [
-  { key: 'text', label: '文本', maxLength: 96 },
-  { key: 'performance_notes', label: '表演提示', maxLength: 72 },
-  { key: 'pause_before', label: '前停顿', maxLength: 24 },
-  { key: 'pause_after', label: '后停顿', maxLength: 24 },
-  { key: 'instruct_emotion', label: '情绪指令', maxLength: 48 },
-  { key: 'instruct_scene', label: '场景指令', maxLength: 48 },
-  { key: 'instruct_role', label: '角色指令', maxLength: 48 },
-  { key: 'instruct_identity', label: '身份指令', maxLength: 48 },
-  { key: 'voice_params', label: '音色参数', maxLength: 72 },
-  { key: 'sound_effects_simple', label: '简易音效', maxLength: 72 },
-  { key: 'sound_effects', label: '详细音效', maxLength: 72 },
-  { key: 'music_cue_simple', label: '简易配乐', maxLength: 56 },
-  { key: 'music_cue', label: '详细配乐', maxLength: 72 },
+  { key: 'text', label: '文本', labelKey: 'audiobook.editorSession.segmentField.text', maxLength: 96 },
+  { key: 'performance_notes', label: '表演提示', labelKey: 'audiobook.editorSession.segmentField.performanceNotes', maxLength: 72 },
+  { key: 'pause_before', label: '前停顿', labelKey: 'audiobook.editorSession.segmentField.pauseBefore', maxLength: 24 },
+  { key: 'pause_after', label: '后停顿', labelKey: 'audiobook.editorSession.segmentField.pauseAfter', maxLength: 24 },
+  { key: 'instruct_emotion', label: '情绪指令', labelKey: 'audiobook.editorSession.segmentField.instructEmotion', maxLength: 48 },
+  { key: 'instruct_scene', label: '场景指令', labelKey: 'audiobook.editorSession.segmentField.instructScene', maxLength: 48 },
+  { key: 'instruct_role', label: '角色指令', labelKey: 'audiobook.editorSession.segmentField.instructRole', maxLength: 48 },
+  { key: 'instruct_identity', label: '身份指令', labelKey: 'audiobook.editorSession.segmentField.instructIdentity', maxLength: 48 },
+  { key: 'voice_params', label: '音色参数', labelKey: 'audiobook.editorSession.segmentField.voiceParams', maxLength: 72 },
+  { key: 'sound_effects_simple', label: '简易音效', labelKey: 'audiobook.editorSession.segmentField.soundEffectsSimple', maxLength: 72 },
+  { key: 'sound_effects', label: '详细音效', labelKey: 'audiobook.editorSession.segmentField.soundEffects', maxLength: 72 },
+  { key: 'music_cue_simple', label: '简易配乐', labelKey: 'audiobook.editorSession.segmentField.musicCueSimple', maxLength: 56 },
+  { key: 'music_cue', label: '详细配乐', labelKey: 'audiobook.editorSession.segmentField.musicCue', maxLength: 72 },
 ] as const satisfies ReadonlyArray<{
   key: keyof ScriptSegment
   label: string
+  labelKey: string
   maxLength: number
 }>
 
 const SCRIPT_STATUS_LABELS: Record<string, string> = {
-  pending: '待处理',
-  generated: '已生成',
-  reviewed: '已审查',
-  approved: '已通过',
+  pending: 'audiobook.editorSession.status.pending',
+  generated: 'audiobook.editorSession.status.generated',
+  reviewed: 'audiobook.editorSession.status.reviewed',
+  approved: 'audiobook.editorSession.status.approved',
 }
 
 export const parseSessionTimestamp = (value: unknown): number => {
@@ -425,47 +427,53 @@ const formatDiffPreviewText = (value: unknown, maxLength: number = 72): string =
 const buildEditorConflictFieldDiffPreview = ({
   key,
   label,
+  labelKey,
   currentValue,
   incomingValue,
   maxLength = 72,
 }: {
   key: string
   label: string
+  labelKey?: string
   currentValue: unknown
   incomingValue: unknown
   maxLength?: number
 }): EditorConflictFieldDiffPreview => ({
   key,
   label,
+  labelKey,
   currentValue: formatDiffPreviewText(currentValue, maxLength),
   incomingValue: formatDiffPreviewText(incomingValue, maxLength),
 })
 
-const formatScriptStatusPreviewText = (value: unknown): string => {
+const formatScriptStatusPreviewText = (value: unknown, t?: TFunction): string => {
   if (typeof value !== 'string' || !value.trim()) {
     return '—'
   }
 
-  return SCRIPT_STATUS_LABELS[value.trim()] || value.trim()
+  const normalized = value.trim()
+  return t && SCRIPT_STATUS_LABELS[normalized] ? t(SCRIPT_STATUS_LABELS[normalized]) : SCRIPT_STATUS_LABELS[normalized] || normalized
 }
 
-const formatReviewModePreviewText = (value: unknown): string =>
-  value ? '审查模式' : '普通编辑'
+const formatReviewModePreviewText = (value: unknown, t?: TFunction): string =>
+  t ? (value ? t('audiobook.editorSession.reviewModeOn') : t('audiobook.editorSession.reviewModeOff')) : (value ? '审查模式' : '普通编辑')
 
-const formatOpenSegmentDetailIndicesSummary = (value: unknown): string => {
+const formatOpenSegmentDetailIndicesSummary = (value: unknown, t?: TFunction): string => {
   const indices = normalizeSegmentDetailIndices(value)
   if (indices.length === 0) {
-    return '无展开详情'
+    return t ? t('audiobook.editorSession.openNoDetails') : '无展开详情'
   }
 
   const preview = indices.slice(0, 4).map((index) => `#${index + 1}`).join('、')
+  const count = indices.length
   return indices.length > 4
-    ? `${preview} 等 ${indices.length} 个片段已展开`
-    : `${preview} 已展开`
+    ? (t ? t('audiobook.editorSession.openMany', { preview, count }) : '展开 ' + count + ' 个片段（' + preview + ' 等）')
+    : (t ? t('audiobook.editorSession.openFew', { preview }) : '已展开 ' + preview)
 }
 
 const formatSegmentReviewSummary = (
   reviews: unknown,
+  t?: TFunction,
 ): string => {
   const normalizedReviews = normalizeSegmentReviews(reviews)
   const entries = Object.entries(normalizedReviews)
@@ -476,45 +484,48 @@ const formatSegmentReviewSummary = (
     .sort((left, right) => left.index - right.index)
 
   if (entries.length === 0) {
-    return '无审查结果'
+    return t ? t('audiobook.editorSession.reviewNoResults') : '无审查结果'
   }
 
   const ratedCount = entries.filter(({ review }) => typeof review.quality_score === 'number').length
   const regenerateCount = entries.filter(({ review }) => review.needs_regenerate).length
   const previewIndices = entries.slice(0, 4).map(({ index }) => `#${index + 1}`).join('、')
+  const count = entries.length
 
   return entries.length > 4
-    ? `评分 ${ratedCount} 条，待重生成 ${regenerateCount} 条，涉及 ${previewIndices} 等 ${entries.length} 个片段`
-    : `评分 ${ratedCount} 条，待重生成 ${regenerateCount} 条，涉及 ${previewIndices}`
+    ? (t ? t('audiobook.editorSession.reviewMany', { ratedCount, regenerateCount, previewIndices, count }) : '评分 ' + ratedCount + ' 条，待重生成 ' + regenerateCount + ' 条，涉及 ' + previewIndices + ' 等 ' + count + ' 个片段')
+    : (t ? t('audiobook.editorSession.reviewFew', { ratedCount, regenerateCount, previewIndices }) : '评分 ' + ratedCount + ' 条，待重生成 ' + regenerateCount + ' 条，涉及 ' + previewIndices)
 }
 
-const formatTimelineEditsSummary = (edits: unknown): string => {
+const formatTimelineEditsSummary = (edits: unknown, t?: TFunction): string => {
   const normalizedEdits = normalizeTimelineEdits(edits)
   const entries = Object.keys(normalizedEdits)
 
   if (entries.length === 0) {
-    return '无时间线调整'
+    return t ? t('audiobook.editorSession.timelineNoEdits') : '无时间线调整'
   }
 
   const previewKeys = entries.slice(0, 3).join('、')
+  const count = entries.length
   return entries.length > 3
-    ? `${entries.length} 个片段已调整，包含 ${previewKeys} 等`
-    : `${entries.length} 个片段已调整，包含 ${previewKeys}`
+    ? (t ? t('audiobook.editorSession.timelineMany', { count, previewKeys }) : '共 ' + count + ' 个片段已调整，包含 ' + previewKeys + ' 等')
+    : (t ? t('audiobook.editorSession.timelineFew', { count, previewKeys }) : '共 ' + count + ' 个片段已调整，包含 ' + previewKeys)
 }
 
-const resolveScriptSegmentSpeaker = (segment: ScriptSegment | null | undefined): string => {
+const resolveScriptSegmentSpeaker = (segment: ScriptSegment | null | undefined, t?: TFunction): string => {
   const speaker =
     segment?.speaker
     || segment?.speaker_name
     || segment?.character_name
     || segment?.role_name
 
-  return typeof speaker === 'string' && speaker.trim() ? speaker.trim() : '旁白'
+  return typeof speaker === 'string' && speaker.trim() ? speaker.trim() : (t ? t('audiobook.editorSession.speakerFallback') : '旁白')
 }
 
 export const buildAudiobookEditorConflictPreview = (
   localSession: Partial<AudiobookEditorSessionState> | null | undefined,
   incomingSession: Partial<AudiobookEditorSessionState> | null | undefined,
+  t?: TFunction,
 ): EditorConflictDiffPreview | null => {
   const normalizedLocalSession = normalizeAudiobookEditorSessionState(localSession)
   const normalizedIncomingSession = normalizeAudiobookEditorSessionState(incomingSession)
@@ -529,8 +540,9 @@ export const buildAudiobookEditorConflictPreview = (
       buildEditorConflictFieldDiffPreview({
         key: 'scriptStatus',
         label: '剧本状态',
-        currentValue: formatScriptStatusPreviewText(normalizedLocalSession.data.scriptStatus),
-        incomingValue: formatScriptStatusPreviewText(normalizedIncomingSession.data.scriptStatus),
+        labelKey: 'audiobook.editorSession.diff.scriptStatus',
+        currentValue: formatScriptStatusPreviewText(normalizedLocalSession.data.scriptStatus, t),
+        incomingValue: formatScriptStatusPreviewText(normalizedIncomingSession.data.scriptStatus, t),
         maxLength: 32,
       }),
     )
@@ -540,8 +552,9 @@ export const buildAudiobookEditorConflictPreview = (
       buildEditorConflictFieldDiffPreview({
         key: 'reviewMode',
         label: '编辑模式',
-        currentValue: formatReviewModePreviewText(normalizedLocalSession.reviewMode),
-        incomingValue: formatReviewModePreviewText(normalizedIncomingSession.reviewMode),
+        labelKey: 'audiobook.editorSession.diff.reviewMode',
+        currentValue: formatReviewModePreviewText(normalizedLocalSession.reviewMode, t),
+        incomingValue: formatReviewModePreviewText(normalizedIncomingSession.reviewMode, t),
         maxLength: 24,
       }),
     )
@@ -556,8 +569,9 @@ export const buildAudiobookEditorConflictPreview = (
       buildEditorConflictFieldDiffPreview({
         key: 'openSegmentDetailIndices',
         label: '详情展开',
-        currentValue: formatOpenSegmentDetailIndicesSummary(normalizedLocalSession.openSegmentDetailIndices),
-        incomingValue: formatOpenSegmentDetailIndicesSummary(normalizedIncomingSession.openSegmentDetailIndices),
+        labelKey: 'audiobook.editorSession.diff.openSegmentDetailIndices',
+        currentValue: formatOpenSegmentDetailIndicesSummary(normalizedLocalSession.openSegmentDetailIndices, t),
+        incomingValue: formatOpenSegmentDetailIndicesSummary(normalizedIncomingSession.openSegmentDetailIndices, t),
         maxLength: 56,
       }),
     )
@@ -567,8 +581,9 @@ export const buildAudiobookEditorConflictPreview = (
       buildEditorConflictFieldDiffPreview({
         key: 'segmentReviews',
         label: '片段审查',
-        currentValue: formatSegmentReviewSummary(normalizedLocalSession.segmentReviews),
-        incomingValue: formatSegmentReviewSummary(normalizedIncomingSession.segmentReviews),
+        labelKey: 'audiobook.editorSession.diff.segmentReviews',
+        currentValue: formatSegmentReviewSummary(normalizedLocalSession.segmentReviews, t),
+        incomingValue: formatSegmentReviewSummary(normalizedIncomingSession.segmentReviews, t),
         maxLength: 80,
       }),
     )
@@ -578,8 +593,9 @@ export const buildAudiobookEditorConflictPreview = (
       buildEditorConflictFieldDiffPreview({
         key: 'timelineEdits',
         label: '音频时间线',
-        currentValue: formatTimelineEditsSummary(normalizedLocalSession.timelineEdits),
-        incomingValue: formatTimelineEditsSummary(normalizedIncomingSession.timelineEdits),
+        labelKey: 'audiobook.editorSession.diff.timelineEdits',
+        currentValue: formatTimelineEditsSummary(normalizedLocalSession.timelineEdits, t),
+        incomingValue: formatTimelineEditsSummary(normalizedIncomingSession.timelineEdits, t),
         maxLength: 80,
       }),
     )
@@ -631,6 +647,7 @@ export const buildAudiobookEditorConflictPreview = (
           buildEditorConflictFieldDiffPreview({
             key: field.key,
             label: field.label,
+            labelKey: field.labelKey,
             currentValue,
             incomingValue: nextValue,
             maxLength: field.maxLength,
@@ -650,8 +667,9 @@ export const buildAudiobookEditorConflictPreview = (
         buildEditorConflictFieldDiffPreview({
           key: 'segment_presence',
           label: '片段存在状态',
-          currentValue: localSegment ? '本页存在' : '本页缺失',
-          incomingValue: incomingSegment ? '对方存在' : '对方缺失',
+          labelKey: 'audiobook.editorSession.diff.segmentPresence',
+          currentValue: t ? (localSegment ? t('audiobook.editorSession.presence.presentLocal') : t('audiobook.editorSession.presence.presentMissing')) : (localSegment ? '本页存在' : '本页缺失'),
+          incomingValue: t ? (incomingSegment ? t('audiobook.editorSession.presence.incomingPresent') : t('audiobook.editorSession.presence.incomingMissing')) : (incomingSegment ? '对方存在' : '对方缺失'),
           maxLength: 24,
         }),
       )
@@ -659,7 +677,7 @@ export const buildAudiobookEditorConflictPreview = (
 
     segmentDiffs.push({
       index,
-      speaker: resolveScriptSegmentSpeaker(incomingSegment || localSegment),
+      speaker: resolveScriptSegmentSpeaker(incomingSegment || localSegment, t),
       changeType,
       fieldDiffs: segmentFieldDiffs,
     })

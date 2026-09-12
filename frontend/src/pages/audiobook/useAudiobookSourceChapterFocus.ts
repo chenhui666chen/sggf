@@ -1,5 +1,7 @@
 import { useEffect, type Dispatch, type MutableRefObject, type SetStateAction } from 'react'
 
+import { useTranslation } from 'react-i18next'
+
 import { extractApiErrorMessage } from '../../services/api'
 import {
   buildAudiobookSourceFocusPlan,
@@ -42,6 +44,7 @@ export const useAudiobookSourceChapterFocus = ({
   setCurrentAudiobookProjectId,
   setSnackbar,
 }: UseAudiobookSourceChapterFocusParams) => {
+  const { t } = useTranslation()
   useEffect(() => {
     const focusPlan = buildAudiobookSourceFocusPlan({
       selectedProjectId,
@@ -71,7 +74,7 @@ export const useAudiobookSourceChapterFocus = ({
             handledSourceChapterKeyRef.current = focusPlan.focusKey
             setSnackbar({
               open: true,
-              message: await extractApiErrorMessage(error, '加载有声书项目失败'),
+              message: await extractApiErrorMessage(error, t('audiobook.useAudiobookSourceChapterFocus.loadFailed')),
               severity: 'error',
             })
           }
@@ -104,5 +107,6 @@ export const useAudiobookSourceChapterFocus = ({
     setCurrentAudiobookProjectId,
     setShowHistory,
     setSnackbar,
+    t,
   ])
 }

@@ -10,6 +10,8 @@ import {
   Typography,
 } from '@mui/material'
 
+import { useTranslation } from 'react-i18next'
+
 import { audiobookButtonSx } from './audiobookTheme'
 
 interface CosyVoiceCloneVoicePanelProps {
@@ -40,7 +42,9 @@ const CosyVoiceCloneVoicePanel = ({
   onCreateCloneVoice,
   onOpenCloneRecordDialog,
   onUploadCloneAudio,
-}: CosyVoiceCloneVoicePanelProps) => (
+}: CosyVoiceCloneVoicePanelProps) => {
+  const { t } = useTranslation()
+  return (
   <Paper
     variant="outlined"
     sx={{
@@ -51,10 +55,10 @@ const CosyVoiceCloneVoicePanel = ({
   >
     <Box sx={{ minWidth: 0, maxWidth: 720 }}>
       <Typography variant="subtitle1" sx={{ fontWeight: 800, lineHeight: 1.25 }}>
-        声音复刻
+        {t('audiobook.cosyVoiceCloneVoicePanel.title')}
       </Typography>
       <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5, lineHeight: 1.75 }}>
-        上传或录制真实样本，填写临时 URL 后创建专属复刻音色。
+        {t('audiobook.cosyVoiceCloneVoicePanel.description')}
       </Typography>
     </Box>
 
@@ -71,7 +75,7 @@ const CosyVoiceCloneVoicePanel = ({
       <TextField
         size="small"
         fullWidth
-        label="声音名称"
+        label={t('audiobook.cosyVoiceCloneVoicePanel.nameLabel')}
         value={cloneName}
         onChange={(event) => onCloneNameChange(event.target.value)}
         disabled={busy}
@@ -80,8 +84,8 @@ const CosyVoiceCloneVoicePanel = ({
       <TextField
         size="small"
         fullWidth
-        label="音频 URL"
-        placeholder="http/https 或 oss://"
+        label={t('audiobook.cosyVoiceCloneVoicePanel.urlLabel')}
+        placeholder={t('audiobook.cosyVoiceCloneVoicePanel.urlPlaceholder')}
         value={cloneUrl}
         onChange={(event) => onCloneUrlChange(event.target.value)}
         disabled={busy}
@@ -95,7 +99,7 @@ const CosyVoiceCloneVoicePanel = ({
         startIcon={cloneLoading ? <CircularProgress size={18} color="inherit" /> : undefined}
         sx={{ ...audiobookButtonSx.brandContained, minHeight: 40 }}
       >
-        {cloneLoading ? '提交中...' : '开始复刻'}
+        {cloneLoading ? t('audiobook.cosyVoiceCloneVoicePanel.submitting') : t('audiobook.cosyVoiceCloneVoicePanel.startClone')}
       </Button>
     </Box>
 
@@ -106,7 +110,7 @@ const CosyVoiceCloneVoicePanel = ({
         disabled={busy}
         sx={audiobookButtonSx.neutralOutlined}
       >
-        录音
+        {t('audiobook.cosyVoiceCloneVoicePanel.record')}
       </Button>
       <Button
         variant="outlined"
@@ -115,7 +119,7 @@ const CosyVoiceCloneVoicePanel = ({
         startIcon={cloneUploading ? <CircularProgress size={16} color="inherit" /> : undefined}
         sx={audiobookButtonSx.brandOutlined}
       >
-        {cloneUploading ? '上传中...' : '上传音频'}
+        {cloneUploading ? t('audiobook.cosyVoiceCloneVoicePanel.uploading') : t('audiobook.cosyVoiceCloneVoicePanel.uploadAudio')}
         <input
           type="file"
           hidden
@@ -124,7 +128,7 @@ const CosyVoiceCloneVoicePanel = ({
         />
       </Button>
       <Typography variant="caption" color="text.secondary" sx={{ minWidth: 220, flex: '1 1 260px' }}>
-        支持 http/https 或 oss://，临时 URL 有效期 48 小时。
+        {t('audiobook.cosyVoiceCloneVoicePanel.urlHint')}
       </Typography>
     </Box>
 
@@ -139,6 +143,7 @@ const CosyVoiceCloneVoicePanel = ({
       </Alert>
     )}
   </Paper>
-)
+  )
+}
 
 export default CosyVoiceCloneVoicePanel

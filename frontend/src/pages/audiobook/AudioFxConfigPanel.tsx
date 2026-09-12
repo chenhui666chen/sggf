@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import {
   Box,
   Button,
@@ -28,6 +29,7 @@ interface AudioFxConfigPanelProps {
 }
 
 const AudioFxConfigPanel = ({ value, onChange }: AudioFxConfigPanelProps) => {
+  const { t } = useTranslation()
   const [libraryBrowserOpen, setLibraryBrowserOpen] = useState(false)
   const updateValue = (patch: Partial<AudioFxConfig>) => {
     onChange({ ...value, ...patch })
@@ -38,7 +40,7 @@ const AudioFxConfigPanel = ({ value, onChange }: AudioFxConfigPanelProps) => {
       sx={{
         p: 1.5,
         borderRadius: 1.5,
-        backgroundColor: 'rgba(0, 137, 123, 0.035)',
+        backgroundColor: audiobookColors.collectSoft,
         border: `1px solid ${audiobookColors.surfaceBorder}`,
       }}
     >
@@ -53,7 +55,7 @@ const AudioFxConfigPanel = ({ value, onChange }: AudioFxConfigPanelProps) => {
         }}
       >
         <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
-          音效与配乐
+          {t('audiobook.audioFxConfigPanel.title')}
         </Typography>
         <Button
           size="small"
@@ -62,7 +64,7 @@ const AudioFxConfigPanel = ({ value, onChange }: AudioFxConfigPanelProps) => {
           onClick={() => setLibraryBrowserOpen(true)}
           sx={{ alignSelf: { xs: 'flex-start', sm: 'center' } }}
         >
-          浏览素材库
+          {t('audiobook.audioFxConfigPanel.browseLibrary')}
         </Button>
       </Box>
       <AudioLibraryBrowser
@@ -70,7 +72,7 @@ const AudioFxConfigPanel = ({ value, onChange }: AudioFxConfigPanelProps) => {
         onClose={() => setLibraryBrowserOpen(false)}
       />
       <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1.5 }}>
-        这里的设置会作为项目级默认配置保存，下次进入该项目会自动带出，并影响音效/配乐是否启用及大致密度。
+        {t('audiobook.audioFxConfigPanel.hint')}
       </Typography>
       <Grid container spacing={1.5}>
         <Grid item xs={12} md={6}>
@@ -86,12 +88,12 @@ const AudioFxConfigPanel = ({ value, onChange }: AudioFxConfigPanelProps) => {
                   color="primary"
                 />
               }
-              label="开启音效"
+              label={t('audiobook.audioFxConfigPanel.enableSfx')}
             />
             <FormControl size="small" fullWidth disabled={!value.enable_sound_effects}>
-              <InputLabel>音效密度</InputLabel>
+              <InputLabel>{t('audiobook.audioFxConfigPanel.sfxDensity')}</InputLabel>
               <Select
-                label="音效密度"
+                label={t('audiobook.audioFxConfigPanel.sfxDensity')}
                 value={value.sound_effect_density}
                 onChange={(event) =>
                   updateValue({
@@ -99,10 +101,10 @@ const AudioFxConfigPanel = ({ value, onChange }: AudioFxConfigPanelProps) => {
                   })
                 }
               >
-                <MenuItem value="off">关闭（不使用音效）</MenuItem>
-                <MenuItem value="low">稀疏（仅关键场景）</MenuItem>
-                <MenuItem value="medium">适中（推荐）</MenuItem>
-                <MenuItem value="high">丰富（沉浸感更强）</MenuItem>
+                <MenuItem value="off">{t('audiobook.audioFxConfigPanel.sfxOff')}</MenuItem>
+                <MenuItem value="low">{t('audiobook.audioFxConfigPanel.sfxLow')}</MenuItem>
+                <MenuItem value="medium">{t('audiobook.audioFxConfigPanel.sfxMedium')}</MenuItem>
+                <MenuItem value="high">{t('audiobook.audioFxConfigPanel.sfxHigh')}</MenuItem>
               </Select>
             </FormControl>
           </Stack>
@@ -120,12 +122,12 @@ const AudioFxConfigPanel = ({ value, onChange }: AudioFxConfigPanelProps) => {
                   color="primary"
                 />
               }
-              label="开启配乐"
+              label={t('audiobook.audioFxConfigPanel.enableMusic')}
             />
             <FormControl size="small" fullWidth disabled={!value.enable_music}>
-              <InputLabel>配乐密度</InputLabel>
+              <InputLabel>{t('audiobook.audioFxConfigPanel.musicDensity')}</InputLabel>
               <Select
-                label="配乐密度"
+                label={t('audiobook.audioFxConfigPanel.musicDensity')}
                 value={value.music_density}
                 onChange={(event) =>
                   updateValue({
@@ -133,10 +135,10 @@ const AudioFxConfigPanel = ({ value, onChange }: AudioFxConfigPanelProps) => {
                   })
                 }
               >
-                <MenuItem value="off">关闭（不使用配乐）</MenuItem>
-                <MenuItem value="low">稀疏（仅片头/片尾）</MenuItem>
-                <MenuItem value="medium">适中（推荐）</MenuItem>
-                <MenuItem value="high">丰富（几乎全程有配乐）</MenuItem>
+                <MenuItem value="off">{t('audiobook.audioFxConfigPanel.musicOff')}</MenuItem>
+                <MenuItem value="low">{t('audiobook.audioFxConfigPanel.musicLow')}</MenuItem>
+                <MenuItem value="medium">{t('audiobook.audioFxConfigPanel.musicMedium')}</MenuItem>
+                <MenuItem value="high">{t('audiobook.audioFxConfigPanel.musicHigh')}</MenuItem>
               </Select>
             </FormControl>
           </Stack>
@@ -146,14 +148,14 @@ const AudioFxConfigPanel = ({ value, onChange }: AudioFxConfigPanelProps) => {
       {value.enable_sound_effects && (
         <Box sx={{ mt: 1.5, p: 1.25, backgroundColor: audiobookColors.infoSoft, borderRadius: 1 }}>
           <Typography variant="caption" color="text.secondary">
-            提示：音效将由 AI 根据章节内容智能匹配，支持大雨、街道、森林等场景识别。
+            {t('audiobook.audioFxConfigPanel.sfxHint')}
           </Typography>
         </Box>
       )}
       {value.enable_music && (
         <Box sx={{ mt: 1.5, p: 1.25, backgroundColor: audiobookColors.infoSoft, borderRadius: 1 }}>
           <Typography variant="caption" color="text.secondary">
-            提示：配乐将由 AI 根据情节节奏和情感基调自动设计，支持悬疑、史诗、浪漫等多种风格。
+            {t('audiobook.audioFxConfigPanel.musicHint')}
           </Typography>
         </Box>
       )}

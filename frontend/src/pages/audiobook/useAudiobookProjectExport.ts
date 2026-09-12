@@ -1,5 +1,7 @@
 import { useCallback, useState } from 'react'
 
+import { useTranslation } from 'react-i18next'
+
 import { apiClient, extractApiErrorMessage } from '../../services/api'
 import { triggerBlobDownload } from '../../utils/blobDownload'
 import type { ActivateQueuedAudiobookTask, SetSnackbar } from './hookTypes'
@@ -22,6 +24,7 @@ export const useAudiobookProjectExport = ({
   activateQueuedAudiobookTask,
   setSnackbar,
 }: UseAudiobookProjectExportParams) => {
+  const { t } = useTranslation()
   const [exportingProjectM4b, setExportingProjectM4b] = useState(false)
   const [exportingProjectAudacity, setExportingProjectAudacity] = useState(false)
 
@@ -30,12 +33,12 @@ export const useAudiobookProjectExport = ({
 
   const handleExportProjectM4b = useCallback(async () => {
     if (!audiobookProjectId) {
-      setSnackbar({ open: true, message: '缺少有声书项目，无法导出', severity: 'error' })
+      setSnackbar({ open: true, message: t('audiobook.useAudiobookProjectExport.missingProject'), severity: 'error' })
       return
     }
 
     if (!completedChapters) {
-      setSnackbar({ open: true, message: '暂无已生成章节，无法导出整本 M4B', severity: 'warning' })
+      setSnackbar({ open: true, message: t('audiobook.useAudiobookProjectExport.noCompletedM4b'), severity: 'warning' })
       return
     }
 
@@ -47,32 +50,32 @@ export const useAudiobookProjectExport = ({
       )
       const jobId = extractQueuedAudiobookJobId(response.data)
       if (!jobId) {
-        throw new Error('M4B 导出任务未返回 job_id')
+        throw new Error(t('audiobook.useAudiobookProjectExport.m4bJobIdMissing'))
       }
 
       await activateQueuedAudiobookTask(audiobookProjectId, jobId, {
         taskType: 'export_m4b',
-        successMessage: '整本 M4B 导出任务已进入队列，完成后会自动下载',
+        successMessage: t('audiobook.useAudiobookProjectExport.m4bQueued'),
       })
     } catch (error: unknown) {
       setSnackbar({
         open: true,
-        message: await extractApiErrorMessage(error, '整本 M4B 导出排队失败，请确认章节音频存在且 ffmpeg 可用'),
+        message: await extractApiErrorMessage(error, t('audiobook.useAudiobookProjectExport.m4bQueueFailed')),
         severity: 'error',
       })
     } finally {
       setExportingProjectM4b(false)
     }
-  }, [activateQueuedAudiobookTask, audiobookProjectId, completedChapters, projectTitle, setSnackbar])
+  }, [activateQueuedAudiobookTask, audiobookProjectId, completedChapters, projectTitle, setSnackbar, t])
 
   const handleExportProjectAudacity = useCallback(async () => {
     if (!audiobookProjectId) {
-      setSnackbar({ open: true, message: '缺少有声书项目，无法导出', severity: 'error' })
+      setSnackbar({ open: true, message: t('audiobook.useAudiobookProjectExport.missingProject'), severity: 'error' })
       return
     }
 
     if (!completedChapters) {
-      setSnackbar({ open: true, message: '暂无已生成章节，无法导出 Audacity ZIP', severity: 'warning' })
+      setSnackbar({ open: true, message: t('audiobook.useAudiobookProjectExport.noCompletedAudacity'), severity: 'warning' })
       return
     }
 
@@ -81,23 +84,23 @@ export const useAudiobookProjectExport = ({
       const response = await apiClient.queueAudiobookProjectAudacityExport(audiobookProjectId)
       const jobId = extractQueuedAudiobookJobId(response.data)
       if (!jobId) {
-        throw new Error('Audacity ZIP 导出任务未返回 job_id')
+        throw new Error(t('audiobook.useAudiobookProjectExport.audacityJobIdMissing'))
       }
 
       await activateQueuedAudiobookTask(audiobookProjectId, jobId, {
         taskType: 'export_audacity',
-        successMessage: 'Audacity ZIP 导出任务已进入队列，完成后会自动下载',
+        successMessage: t('audiobook.useAudiobookProjectExport.audacityQueued'),
       })
     } catch (error: unknown) {
       setSnackbar({
         open: true,
-        message: await extractApiErrorMessage(error, 'Audacity ZIP 导出排队失败，请确认章节音频存在'),
+        message: await extractApiErrorMessage(error, t('audiobook.useAudiobookProjectExport.audacityQueueFailed')),
         severity: 'error',
       })
     } finally {
       setExportingProjectAudacity(false)
     }
-  }, [activateQueuedAudiobookTask, audiobookProjectId, completedChapters, setSnackbar])
+  }, [activateQueuedAudiobookTask, audiobookProjectId, completedChapters, setSnackbar, t])
 
   const downloadCompletedProjectExport = useCallback(async (task: TaskStatus) => {
     const title = resolveProjectExportTitle(projectTitle)
@@ -109,7 +112,7 @@ export const useAudiobookProjectExport = ({
         `${title}.m4b`,
       )
       triggerBlobDownload(response.data, filename)
-      setSnackbar({ open: true, message: '整本 M4B 已导出并开始下载', severity: 'success' })
+      setSnackbar({ open: true, message: t('audiobook.useAudiobookProjectExport.m4bDownloaded'), severity: 'success' })
       return true
     }
 
@@ -120,12 +123,12 @@ export const useAudiobookProjectExport = ({
         `${title}_audacity.zip`,
       )
       triggerBlobDownload(response.data, filename)
-      setSnackbar({ open: true, message: 'Audacity ZIP 已导出并开始下载', severity: 'success' })
+      setSnackbar({ open: true, message: t('audiobook.useAudiobookProjectExport.audacityDownloaded'), severity: 'success' })
       return true
     }
 
     return false
-  }, [projectTitle, setSnackbar])
+  }, [projectTitle, setSnackbar, t])
 
   return {
     exportingProjectM4b,

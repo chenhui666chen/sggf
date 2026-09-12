@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback } from 'react'
+import { useTranslation } from 'react-i18next'
 import ReactFlow, {
   Node,
   Edge,
@@ -36,6 +37,7 @@ interface RelationshipGraphProps {
 
 export default function RelationshipGraph(props: RelationshipGraphProps) {
   const { itemId, itemName, onNodeClick } = props
+  const { t } = useTranslation()
 
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -157,9 +159,9 @@ export default function RelationshipGraph(props: RelationshipGraphProps) {
             ),
           },
           style: {
-            background: isCenter ? '#1976d2' : '#fff',
-            color: isCenter ? '#fff' : '#000',
-            border: isCenter ? '2px solid #1976d2' : '1px solid #ddd',
+            background: isCenter ? 'var(--sg-accent)' : 'var(--sg-bg-paper)',
+            color: isCenter ? 'var(--sg-on-accent)' : 'var(--sg-text)',
+            border: isCenter ? '2px solid var(--sg-accent)' : '1px solid var(--sg-divider)',
             borderRadius: 8,
             padding: 10,
             width: 150,
@@ -171,7 +173,7 @@ export default function RelationshipGraph(props: RelationshipGraphProps) {
 
       const flowEdges: Edge[] = graphEdges.map((edge: any) => {
         const confidence = typeof edge.confidence === 'number' ? edge.confidence : 0
-        const accentColor = confidence > 0.8 ? '#1976d2' : '#999'
+        const accentColor = confidence > 0.8 ? 'var(--sg-accent)' : 'var(--sg-text-disabled)'
         return {
           id: String(edge.id ?? `${edge.source}-${edge.target}-${edge.relation_type}`),
           source: String(edge.source),
@@ -187,15 +189,15 @@ export default function RelationshipGraph(props: RelationshipGraphProps) {
             type: MarkerType.ArrowClosed,
             color: accentColor,
           },
-          labelStyle: { fontSize: 12, fill: '#666' },
-          labelBgStyle: { fill: '#fff', fillOpacity: 0.9 },
+          labelStyle: { fontSize: 12, fill: 'var(--sg-text-secondary)' },
+          labelBgStyle: { fill: 'var(--sg-bg-paper)', fillOpacity: 0.9 },
         }
       })
 
       setNodes(flowNodes)
       setEdges(flowEdges)
     } catch (err: any) {
-      setError(await extractApiErrorMessage(err, '加载失败'))
+      setError(await extractApiErrorMessage(err, t('workflow.relationshipGraph.loadFailed')))
     } finally {
       setLoading(false)
     }
@@ -218,36 +220,36 @@ export default function RelationshipGraph(props: RelationshipGraphProps) {
       <CardContent>
         <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
           <Typography variant="h6" fontWeight={600}>
-            关系网络图 - {itemName}
+            {t('workflow.relationshipGraph.title', { itemName })}
           </Typography>
           <Box display="flex" gap={2} alignItems="center">
             <FormControl size="small" sx={{ minWidth: 120 }}>
-              <InputLabel>方向</InputLabel>
+              <InputLabel>{t('workflow.relationshipGraph.direction')}</InputLabel>
               <Select
                 value={direction}
-                label="方向"
+                label={t('workflow.relationshipGraph.direction')}
                 onChange={(e) => setDirection(e.target.value as any)}
               >
-                <MenuItem value="both">双向</MenuItem>
-                <MenuItem value="out">出边</MenuItem>
-                <MenuItem value="in">入边</MenuItem>
+                <MenuItem value="both">{t('workflow.relationshipGraph.directionBoth')}</MenuItem>
+                <MenuItem value="out">{t('workflow.relationshipGraph.directionOut')}</MenuItem>
+                <MenuItem value="in">{t('workflow.relationshipGraph.directionIn')}</MenuItem>
               </Select>
             </FormControl>
 
             <FormControl size="small" sx={{ minWidth: 100 }}>
-              <InputLabel>深度</InputLabel>
+              <InputLabel>{t('workflow.relationshipGraph.depth')}</InputLabel>
               <Select
                 value={maxDepth}
-                label="深度"
+                label={t('workflow.relationshipGraph.depth')}
                 onChange={(e) => setMaxDepth(Number(e.target.value))}
               >
-                <MenuItem value={1}>1跳</MenuItem>
-                <MenuItem value={2}>2跳</MenuItem>
-                <MenuItem value={3}>3跳</MenuItem>
+                <MenuItem value={1}>{t('workflow.relationshipGraph.depthJump', { count: 1 })}</MenuItem>
+                <MenuItem value={2}>{t('workflow.relationshipGraph.depthJump', { count: 2 })}</MenuItem>
+                <MenuItem value={3}>{t('workflow.relationshipGraph.depthJump', { count: 3 })}</MenuItem>
               </Select>
             </FormControl>
 
-            <Tooltip title="刷新">
+            <Tooltip title={t('workflow.relationshipGraph.refresh')}>
               <span>
                 <IconButton size="small" onClick={loadGraph} disabled={loading}>
                   <RefreshIcon />
@@ -271,12 +273,12 @@ export default function RelationshipGraph(props: RelationshipGraphProps) {
 
         {!loading && !error && nodes.length === 0 && (
           <Alert severity="info">
-            暂无关系数据
+            {t('workflow.relationshipGraph.empty')}
           </Alert>
         )}
 
         {!loading && !error && nodes.length > 0 && (
-          <Box sx={{ height: 700, border: '1px solid #ddd', borderRadius: 1 }}>
+          <Box sx={{ height: 700, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
             <ReactFlow
               nodes={nodes}
               edges={edges}
@@ -296,13 +298,13 @@ export default function RelationshipGraph(props: RelationshipGraphProps) {
 
         <Box mt={2} display="flex" gap={2} alignItems="center">
           <Typography variant="caption" color="text.secondary">
-            节点总数: {nodes.length}
+            {t('workflow.relationshipGraph.nodeCount', { count: nodes.length })}
           </Typography>
           <Typography variant="caption" color="text.secondary">
-            关系总数: {edges.length}
+            {t('workflow.relationshipGraph.edgeCount', { count: edges.length })}
           </Typography>
           <Chip
-            label="蓝色边=高置信度(>0.8)"
+            label={t('workflow.relationshipGraph.confidenceLegend')}
             size="small"
             sx={{ height: 20, fontSize: '0.7rem' }}
           />

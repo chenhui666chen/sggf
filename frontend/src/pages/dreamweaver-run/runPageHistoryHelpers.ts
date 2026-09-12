@@ -1,3 +1,7 @@
+import type { AppLanguage } from '@/i18n'
+
+import type { TFunction } from 'i18next'
+
 import { formatDateTime } from './runPageFormatUtils'
 
 export type HistoryStatusColor = 'default' | 'primary' | 'success' | 'error' | 'warning' | 'info'
@@ -7,15 +11,15 @@ export type HistoryStatusMeta = {
   color: HistoryStatusColor
 }
 
-export function getHistoryStatusMeta(status: string): HistoryStatusMeta {
+export function getHistoryStatusMeta(status: string, t?: TFunction): HistoryStatusMeta {
   const normalized = String(status || '').trim().toLowerCase()
-  if (normalized === 'completed') return { label: '已完成', color: 'success' }
-  if (normalized === 'waiting') return { label: '待审核', color: 'warning' }
-  if (normalized === 'failed') return { label: '失败', color: 'error' }
-  if (normalized === 'timeout') return { label: '超时', color: 'warning' }
-  if (normalized === 'running') return { label: '运行中', color: 'info' }
-  if (normalized === 'queued') return { label: '排队中', color: 'info' }
-  return { label: normalized || '未知', color: 'default' }
+  if (normalized === 'completed') return { label: t ? t('dreamweaverRun.statusCompleted') : '已完成', color: 'success' }
+  if (normalized === 'waiting') return { label: t ? t('dreamweaverRun.statusPendingReview') : '待审核', color: 'warning' }
+  if (normalized === 'failed') return { label: t ? t('dreamweaverRun.statusFailed') : '失败', color: 'error' }
+  if (normalized === 'timeout') return { label: t ? t('dreamweaverRun.statusTimeout') : '超时', color: 'warning' }
+  if (normalized === 'running') return { label: t ? t('dreamweaverRun.statusRunning') : '运行中', color: 'info' }
+  if (normalized === 'queued') return { label: t ? t('dreamweaverRun.statusQueued') : '排队中', color: 'info' }
+  return { label: normalized || (t ? t('common.unknown') : '未知'), color: 'default' }
 }
 
 export const HISTORY_FILTER_STATUSES = ['running', 'queued', 'waiting', 'failed', 'timeout', 'completed'] as const
@@ -58,11 +62,11 @@ export function buildHistoryFilterItems(params: {
   statusCounts: Record<string, number>
   onClearFilters: () => void
   onToggleFilter: (status: string) => void
-}): HistoryFilterItem[] {
+}, t?: TFunction): HistoryFilterItem[] {
   return [
     {
       key: 'all',
-      label: '全部',
+      label: t ? t('common.all') : '全部',
       count: params.totalRuns,
       color: 'default',
       selected: params.statusFilters.length === 0,
@@ -71,7 +75,7 @@ export function buildHistoryFilterItems(params: {
     ...HISTORY_FILTER_STATUSES.map((status) => {
       const enabled = params.statusFilters.includes(status)
       const count = params.statusCounts[status] || 0
-      const { label, color } = getHistoryStatusMeta(status)
+      const { label, color } = getHistoryStatusMeta(status, t)
       return {
         key: status,
         label,
@@ -112,12 +116,16 @@ export interface MappedHistoryRunItem {
   errorMessage: string | null
 }
 
-export function mapHistoryRunsToItems(runs: HistoryRunItem[]): MappedHistoryRunItem[] {
+export function mapHistoryRunsToItems(
+  runs: HistoryRunItem[],
+  locale?: AppLanguage,
+  t?: TFunction,
+): MappedHistoryRunItem[] {
   return runs.map((run) => {
     const progressValue =
       typeof run.progress === 'number' ? Math.max(0, Math.min(100, Math.round(run.progress))) : null
     const statusRaw = String(run.status || '').trim().toLowerCase()
-    const { label: statusLabel, color: statusColor } = getHistoryStatusMeta(statusRaw)
+    const { label: statusLabel, color: statusColor } = getHistoryStatusMeta(statusRaw, t)
     return {
       runId: run.run_id,
       statusLabel,
@@ -128,7 +136,7 @@ export function mapHistoryRunsToItems(runs: HistoryRunItem[]): MappedHistoryRunI
       cameraCount: run.camera_count ?? null,
       cameraStatesCount: run.camera_states_count ?? null,
       cameraScenesCount: run.camera_scenes_count ?? null,
-      timeText: formatDateTime(run.updated_at || run.created_at),
+      timeText: formatDateTime(run.updated_at || run.created_at, locale),
       errorMessage: run.error_message ?? null,
     }
   })

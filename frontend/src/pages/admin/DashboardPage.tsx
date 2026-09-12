@@ -11,6 +11,8 @@ import AdminIcon from '@mui/icons-material/AdminPanelSettings'
 import FolderIcon from '@mui/icons-material/Folder'
 import HeadphonesIcon from '@mui/icons-material/Headphones'
 import PeopleIcon from '@mui/icons-material/People'
+import { useFormats } from '@/i18n'
+import { useTranslation } from 'react-i18next'
 import { apiClient } from '@/services/api'
 
 interface StatsOverview {
@@ -24,6 +26,9 @@ interface StatsOverview {
 }
 
 export default function AdminDashboardPage() {
+  // 必须放在下面两个 early return（loading / error）之前，否则 hook 调用数会随渲染路径变。
+  const { t } = useTranslation()
+  const { formatNumber } = useFormats()
   const [stats, setStats] = useState<StatsOverview | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -38,7 +43,7 @@ export default function AdminDashboardPage() {
       const response = await apiClient.get('/api/v1/admin/stats/overview')
       setStats(response.data)
     } catch (err: any) {
-      setError(err.response?.data?.detail || '获取统计数据失败')
+      setError(err.response?.data?.detail || t('admin.dashboard.messages.fetchFailed'))
     } finally {
       setLoading(false)
     }
@@ -62,43 +67,43 @@ export default function AdminDashboardPage() {
 
   const statCards = [
     {
-      title: '总用户数',
+      title: t('admin.dashboard.statCards.totalUsers'),
       value: stats?.total_users || 0,
-      subValue: `今日新增: ${stats?.new_users_today || 0}`,
+      subValue: t('admin.dashboard.statCards.newToday', { count: stats?.new_users_today || 0 }),
       icon: <PeopleIcon sx={{ fontSize: 40 }} />,
-      color: '#1976d2',
+      color: '#1976d2', // sg-color-fixed: 统计卡身份色（颜色即数据）
     },
     {
-      title: '活跃用户（30天）',
+      title: t('admin.dashboard.statCards.activeUsers30d'),
       value: stats?.active_users_30d || 0,
       icon: <PeopleIcon sx={{ fontSize: 40 }} />,
-      color: '#2e7d32',
+      color: '#2e7d32', // sg-color-fixed: 统计卡身份色（颜色即数据）
     },
     {
-      title: '总项目数',
+      title: t('admin.dashboard.statCards.totalProjects'),
       value: stats?.total_projects || 0,
-      subValue: `进行中: ${stats?.active_projects || 0}`,
+      subValue: t('admin.dashboard.statCards.inProgress', { count: stats?.active_projects || 0 }),
       icon: <FolderIcon sx={{ fontSize: 40 }} />,
-      color: '#ed6c02',
+      color: '#ed6c02', // sg-color-fixed: 统计卡身份色（颜色即数据）
     },
     {
-      title: '有声书任务',
+      title: t('admin.dashboard.statCards.audiobookTasks'),
       value: stats?.total_audiobook_tasks || 0,
       icon: <HeadphonesIcon sx={{ fontSize: 40 }} />,
-      color: '#9c27b0',
+      color: '#9c27b0', // sg-color-fixed: 统计卡身份色（颜色即数据）
     },
     {
-      title: '今日管理操作',
+      title: t('admin.dashboard.statCards.adminOpsToday'),
       value: stats?.admin_operations_today || 0,
       icon: <AdminIcon sx={{ fontSize: 40 }} />,
-      color: '#dc004e',
+      color: '#dc004e', // sg-color-fixed: 统计卡身份色（颜色即数据）
     },
   ]
 
   return (
     <Box>
       <Typography variant="h4" gutterBottom sx={{ mb: 3 }}>
-        数据仪表盘
+        {t('admin.dashboard.title')}
       </Typography>
       
       <Grid container spacing={3}>
@@ -112,7 +117,7 @@ export default function AdminDashboardPage() {
                       {card.title}
                     </Typography>
                     <Typography variant="h4" component="div" sx={{ fontWeight: 'bold', color: card.color }}>
-                      {card.value.toLocaleString()}
+                      {formatNumber(card.value)}
                     </Typography>
                     {card.subValue && (
                       <Typography variant="body2" color="textSecondary" sx={{ mt: 1 }}>

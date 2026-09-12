@@ -734,6 +734,7 @@ export interface AudiobookEditorSessionState {
 export interface EditorConflictFieldDiffPreview {
   key: string
   label: string
+  labelKey?: string
   currentValue: string
   incomingValue: string
 }

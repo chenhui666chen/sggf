@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
+import type { TFunction } from 'i18next'
 
 import {
   buildUserCenterAssetConnectedOverviewPointsRulesCompanionContentOptionsFromInput,
@@ -9,17 +10,22 @@ describe('userCenterAssetConnectedOverviewCompanionInputHelper', () => {
   it('builds shared strategy companion items without page-local literals', () => {
     expect(buildUserCenterAssetConnectedOverviewStrategyCompanionContentOptionsFromInput()).toEqual({
       items: [
-        '过程态资产继续保留在生成模块，避免用户中心承接复杂上下文操作。',
-        '稳定素材、成片和跨模块复用结果进入用户中心，便于统一检索、标记和权益联动。',
-        '不同类型资产采取不同策略，生成链路负责生产，用户中心负责汇总与治理。',
+        'userCenter.points.strategyKeepProcess',
+        'userCenter.points.strategyCentralizeStable',
+        'userCenter.points.strategyDifferentiated',
       ],
     })
+
+    const translate = ((key: string) => `T:${key}`) as TFunction
+    expect(buildUserCenterAssetConnectedOverviewStrategyCompanionContentOptionsFromInput(translate).items[0]).toBe(
+      'T:userCenter.points.strategyKeepProcess',
+    )
   })
 
   it('adapts points rules into shared companion content options', () => {
     const formatPointsValueLabel = vi.fn((value: number) => `P${value.toFixed(1)}`)
     const formatUpdatedAtLabel = vi.fn((value: string) => `FMT(${value})`)
-    const getSourceLabel = vi.fn(() => '后台规则快照')
+    const getSourceLabel = vi.fn(() => 'userCenter.points.sourceAdmin')
 
     const options = buildUserCenterAssetConnectedOverviewPointsRulesCompanionContentOptionsFromInput({
       pointsRules: {
@@ -47,24 +53,67 @@ describe('userCenterAssetConnectedOverviewCompanionInputHelper', () => {
     expect(getSourceLabel).toHaveBeenCalledWith('admin_log')
     expect(options).toEqual({
       content: {
-        sourceLabel: '后台规则快照',
+        sourceLabel: 'userCenter.points.sourceAdmin',
         sourceColor: 'primary',
-        updatedAtLabel: '最近更新：FMT(2026-04-24T00:00:00Z)',
-        description: '这里展示当前积分模型实际采用的奖励、冻结和过期规则。',
+        updatedAtLabel: 'userCenter.points.recentlyUpdated',
+        description: 'userCenter.points.rulesDescription',
         summaryItems: [
-          { label: '复用资产奖励', value: 'P2.0 积分' },
-          { label: '交付资产奖励', value: 'P4.0 积分' },
-          { label: '有声书完成奖励', value: 'P6.0 积分' },
-          { label: '短剧完成奖励', value: 'P8.0 积分' },
-          { label: '有声书运行冻结', value: 'P10.0 积分' },
-          { label: '短剧运行冻结', value: 'P12.0 积分' },
-          { label: '奖励有效期', value: '30 天' },
-          { label: '到期提醒窗口', value: '7 天' },
+          { label: 'userCenter.points.reusableReward', value: 'userCenter.points.pointsValue' },
+          { label: 'userCenter.points.deliverableReward', value: 'userCenter.points.pointsValue' },
+          { label: 'userCenter.points.audiobookCompletionReward', value: 'userCenter.points.pointsValue' },
+          { label: 'userCenter.points.dreamweaverCompletionReward', value: 'userCenter.points.pointsValue' },
+          { label: 'userCenter.points.runningAudiobookFrozen', value: 'userCenter.points.pointsValue' },
+          { label: 'userCenter.points.runningDreamweaverFrozen', value: 'userCenter.points.pointsValue' },
+          { label: 'userCenter.points.rewardValidity', value: 'userCenter.points.days' },
+          { label: 'userCenter.points.expiringNoticeWindow', value: 'userCenter.points.days' },
         ],
-        updatedByLabel: '最近操作人：ops',
+        updatedByLabel: 'userCenter.points.updatedBy',
       },
-      emptyText: '暂无可展示的积分规则快照。',
+      emptyText: 'userCenter.points.rulesEmpty',
     })
+  })
+
+  it('localizes points rules companion content when a translator is provided', () => {
+    const translate = ((key: string) => `T:${key}`) as TFunction
+    const options = buildUserCenterAssetConnectedOverviewPointsRulesCompanionContentOptionsFromInput({
+      pointsRules: {
+        reusable_asset_reward: 2,
+        deliverable_asset_reward: 4,
+        audiobook_completion_reward: 6,
+        dreamweaver_completion_reward: 8,
+        running_audiobook_frozen: 10,
+        running_dreamweaver_frozen: 12,
+        reward_ttl_days: 30,
+        expiring_notice_days: 7,
+        source: 'admin_log',
+        updated_at: null,
+        updated_by_user_id: 1,
+        updated_by_username: 'ops',
+      },
+      formatPointsValueLabel: (value: number) => `P${value.toFixed(1)}`,
+      formatUpdatedAtLabel: (value: string) => `FMT(${value})`,
+      getSourceLabel: () => 'userCenter.points.sourceAdmin',
+      t: translate,
+    })
+
+    expect(options.content).toEqual({
+      sourceLabel: 'T:userCenter.points.sourceAdmin',
+      sourceColor: 'primary',
+      updatedAtLabel: 'T:userCenter.points.notAdjusted',
+      description: 'T:userCenter.points.rulesDescription',
+      summaryItems: [
+        { label: 'T:userCenter.points.reusableReward', value: 'T:userCenter.points.pointsValue' },
+        { label: 'T:userCenter.points.deliverableReward', value: 'T:userCenter.points.pointsValue' },
+        { label: 'T:userCenter.points.audiobookCompletionReward', value: 'T:userCenter.points.pointsValue' },
+        { label: 'T:userCenter.points.dreamweaverCompletionReward', value: 'T:userCenter.points.pointsValue' },
+        { label: 'T:userCenter.points.runningAudiobookFrozen', value: 'T:userCenter.points.pointsValue' },
+        { label: 'T:userCenter.points.runningDreamweaverFrozen', value: 'T:userCenter.points.pointsValue' },
+        { label: 'T:userCenter.points.rewardValidity', value: 'T:userCenter.points.days' },
+        { label: 'T:userCenter.points.expiringNoticeWindow', value: 'T:userCenter.points.days' },
+      ],
+      updatedByLabel: 'T:userCenter.points.updatedBy',
+    })
+    expect(options.emptyText).toBe('T:userCenter.points.rulesEmpty')
   })
 
   it('keeps points rules companion empty state when rules are unavailable', () => {
@@ -75,7 +124,7 @@ describe('userCenterAssetConnectedOverviewCompanionInputHelper', () => {
       getSourceLabel: () => '默认规则',
     })).toEqual({
       content: null,
-      emptyText: '暂无可展示的积分规则快照。',
+      emptyText: 'userCenter.points.rulesEmpty',
     })
   })
 })

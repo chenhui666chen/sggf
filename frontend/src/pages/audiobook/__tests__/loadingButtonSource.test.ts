@@ -23,11 +23,13 @@ const cosyVoiceListSource = readSource('../CosyVoiceCustomVoiceList.tsx')
 describe('Audiobook loading button source guards', () => {
   it('keeps regular buttons using startIcon spinners instead of replacing action text', () => {
     expect(textImportSource).toContain('startIcon={creating ? <CircularProgress')
-    expect(textImportSource).toContain("{creating ? '创建中...' : '创建并开始配置音色'}")
+    expect(textImportSource).toContain("t('audiobook.textProjectImportDialog.creating')")
+    expect(textImportSource).toContain("t('audiobook.textProjectImportDialog.submit')")
     expect(textImportSource).not.toMatch(/>\s*\{creating \? <CircularProgress/)
 
     expect(chapterDeleteSource).toContain('startIcon={deleting ? <CircularProgress')
-    expect(chapterDeleteSource).toContain("{deleting ? '删除中...' : '确认删除'}")
+    expect(chapterDeleteSource).toContain("t('audiobook.chapterDeleteConfirmDialog.deleting')")
+    expect(chapterDeleteSource).toContain("t('audiobook.chapterDeleteConfirmDialog.confirmDelete')")
     expect(chapterDeleteSource).not.toMatch(/>\s*\{deleting \? <CircularProgress/)
 
     expect(clonePanelSource).toContain('startIcon={cloneLoading ? <CircularProgress')
@@ -40,7 +42,7 @@ describe('Audiobook loading button source guards', () => {
   it('does not expose optional file deletion for chapter outputs', () => {
     expect(chapterDeleteSource).not.toContain('deleteFiles')
     expect(chapterDeleteSource).not.toContain('onDeleteFilesChange')
-    expect(chapterDeleteSource).toContain('全部产物')
+    expect(chapterDeleteSource).toContain("t('audiobook.chapterDeleteConfirmDialog.cleanupIntro')")
     expect(audiobookPageSource).not.toContain('deleteFiles={deleteChapterFiles}')
     expect(audiobookPageSource).not.toContain('onDeleteFilesChange={setDeleteChapterFiles}')
   })
@@ -50,8 +52,8 @@ describe('Audiobook loading button source guards', () => {
     expect(designPanelSource).toContain('designPreviewVoiceId')
     expect(designPanelSource).toContain('onPreviewDesignVoice')
     expect(designPanelSource).toContain('hasDesignPreviewTarget')
-    expect(designPanelSource).toContain("'试听'")
-    expect(designPanelSource).toContain('label="声音描述"')
+    expect(designPanelSource).toContain("t('audiobook.cosyVoiceDesignVoicePanel.preview')")
+    expect(designPanelSource).toContain("t('audiobook.cosyVoiceDesignVoicePanel.promptLabel')")
     expect(designPanelSource).toContain('minRows={3}')
     expect(designPanelSource).not.toContain('label="试听文本"')
     expect(designPanelSource).not.toContain('onDesignPreviewTextChange')
@@ -90,7 +92,7 @@ describe('Audiobook loading button source guards', () => {
     expect(characterCardSource).not.toContain('getTtsStyleControlLabels')
     expect(characterCardSource).not.toContain('styleControlLabels.map')
     expect(characterCardSource).not.toContain('控制方式')
-    expect(characterCardSource).toContain('音色管理')
+    expect(characterCardSource).toContain("t('audiobook.characterVoiceCard.manage')")
     expect(characterCardSource).toContain('onOpenVoiceManagement')
   })
 
@@ -129,8 +131,8 @@ describe('Audiobook loading button source guards', () => {
   })
 
   it('keeps menu item primary labels stable while loading state moves to secondary text', () => {
-    expect(chapterAudioItemSource).toContain('primary="继续生成"')
-    expect(chapterAudioItemSource).toContain("secondary={resumingChapterId === chapterAudio.chapter_id ? '提交中...' : undefined}")
-    expect(chapterAudioItemSource).not.toContain("primary={resumingChapterId === chapterAudio.chapter_id ? '提交中...' : '继续生成'}")
+    expect(chapterAudioItemSource).toContain("primary={t('audiobook.chapterAudioResultItem.resumeLabel')}")
+    expect(chapterAudioItemSource).toContain("secondary={resumingChapterId === chapterAudio.chapter_id ? t('audiobook.chapterAudioResultItem.submittingText') : undefined}")
+    expect(chapterAudioItemSource).not.toContain("primary={resumingChapterId === chapterAudio.chapter_id ? t('audiobook.chapterAudioResultItem.submittingText') : t('audiobook.chapterAudioResultItem.resumeLabel')}")
   })
 })

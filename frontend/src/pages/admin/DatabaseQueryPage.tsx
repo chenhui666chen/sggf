@@ -38,6 +38,7 @@ import PlayArrowIcon from '@mui/icons-material/PlayArrow'
 import RefreshIcon from '@mui/icons-material/Refresh'
 import TableChartIcon from '@mui/icons-material/TableChart'
 import { apiClient } from '../../services/api'
+import { useTranslation } from 'react-i18next'
 
 interface QueryResult {
   columns: string[]
@@ -80,6 +81,7 @@ interface QueryTemplate {
 }
 
 const DatabaseQueryPage: React.FC = () => {
+  const { t } = useTranslation()
   const [tabValue, setTabValue] = useState(0)
   const [sqlQuery, setSqlQuery] = useState('SELECT * FROM users LIMIT 10;')
   const [description, setDescription] = useState('')
@@ -93,19 +95,19 @@ const DatabaseQueryPage: React.FC = () => {
 
   const queryTemplates: QueryTemplate[] = [
     {
-      name: '用户列表',
+      name: t('admin.queryPage.templates.userList'),
       sql: 'SELECT id, username, email, created_at FROM users ORDER BY created_at DESC LIMIT 20;',
     },
     {
-      name: '角色列表',
+      name: t('admin.queryPage.templates.roleList'),
       sql: 'SELECT * FROM roles;',
     },
     {
-      name: '项目统计',
+      name: t('admin.queryPage.templates.projectStats'),
       sql: 'SELECT status, COUNT(*) as count FROM projects GROUP BY status;',
     },
     {
-      name: '最近操作日志',
+      name: t('admin.queryPage.templates.recentLogs'),
       sql: 'SELECT * FROM admin_operation_logs ORDER BY created_at DESC LIMIT 20;',
     },
   ]
@@ -125,7 +127,7 @@ const DatabaseQueryPage: React.FC = () => {
         setQueryResult(response.data as QueryResult)
       }
     } catch (error: any) {
-      setErrorMessage(error.response?.data?.detail || '查询执行失败')
+      setErrorMessage(error.response?.data?.detail || t('admin.queryPage.messages.queryFailed'))
     } finally {
       setIsLoading(false)
     }
@@ -183,10 +185,10 @@ const DatabaseQueryPage: React.FC = () => {
   return (
     <Box sx={{ p: 3 }}>
       <Typography variant="h4" gutterBottom>
-        数据库查询管理
+        {t('admin.queryPage.title')}
       </Typography>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-        安全的 SQL 查询工具 - 只读查询 | 自动脱敏 | 审计日志 | 查询限制
+        {t('admin.queryPage.subtitle')}
       </Typography>
 
       <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 3 }}>
@@ -195,9 +197,9 @@ const DatabaseQueryPage: React.FC = () => {
           onChange={(_e, newValue) => setTabValue(newValue)}
           aria-label="database query tabs"
         >
-          <Tab icon={<CodeIcon />} label="查询执行" iconPosition="start" />
-          <Tab icon={<TableChartIcon />} label="表结构" iconPosition="start" />
-          <Tab icon={<HistoryIcon />} label="历史记录" iconPosition="start" />
+          <Tab icon={<CodeIcon />} label={t('admin.queryPage.tabs.execute')} iconPosition="start" />
+          <Tab icon={<TableChartIcon />} label={t('admin.queryPage.tabs.schema')} iconPosition="start" />
+          <Tab icon={<HistoryIcon />} label={t('admin.queryPage.tabs.history')} iconPosition="start" />
         </Tabs>
       </Box>
 
@@ -208,13 +210,13 @@ const DatabaseQueryPage: React.FC = () => {
             <Card>
               <CardContent>
                 <Typography variant="h6" gutterBottom>
-                  SQL 查询编辑器
+                  {t('admin.queryPage.editor.title')}
                 </Typography>
 
                 {/* 快捷模板 */}
                 <Box sx={{ mb: 2 }}>
                   <Typography variant="subtitle2" gutterBottom>
-                    快捷模板:
+                    {t('admin.queryPage.editor.templates')}
                   </Typography>
                   <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
                     {queryTemplates.map((template) => (
@@ -236,7 +238,7 @@ const DatabaseQueryPage: React.FC = () => {
                   rows={8}
                   value={sqlQuery}
                   onChange={(e) => setSqlQuery(e.target.value)}
-                  placeholder="请输入 SQL 查询语句..."
+                  placeholder={t('admin.queryPage.editor.sqlPlaceholder')}
                   variant="outlined"
                   sx={{
                     fontFamily: 'monospace',
@@ -253,7 +255,7 @@ const DatabaseQueryPage: React.FC = () => {
                   fullWidth
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
-                  placeholder="查询描述（可选，用于审计日志）"
+                  placeholder={t('admin.queryPage.editor.descPlaceholder')}
                   sx={{ mt: 2 }}
                   size="small"
                 />
@@ -268,7 +270,7 @@ const DatabaseQueryPage: React.FC = () => {
                     disabled={isLoading}
                     size="large"
                   >
-                    执行查询
+                    {t('admin.queryPage.editor.execute')}
                   </Button>
                   <Button
                     variant="outlined"
@@ -276,7 +278,7 @@ const DatabaseQueryPage: React.FC = () => {
                     onClick={clearResult}
                     size="large"
                   >
-                    清空
+                    {t('admin.queryPage.editor.clear')}
                   </Button>
                 </Box>
               </CardContent>
@@ -287,13 +289,13 @@ const DatabaseQueryPage: React.FC = () => {
             <Card>
               <CardContent>
                 <Typography variant="h6" gutterBottom>
-                  查询结果
+                  {t('admin.queryPage.result.title')}
                 </Typography>
 
                 {/* 错误信息 */}
                 {errorMessage && (
                   <Alert severity="error" sx={{ mb: 2 }}>
-                    <AlertTitle>查询失败</AlertTitle>
+                    <AlertTitle>{t('admin.queryPage.result.errorTitle')}</AlertTitle>
                     {errorMessage}
                   </Alert>
                 )}
@@ -304,18 +306,18 @@ const DatabaseQueryPage: React.FC = () => {
                     {/* 统计信息 */}
                     <Box sx={{ display: 'flex', gap: 1, mb: 2, flexWrap: 'wrap' }}>
                       <Chip
-                        label={`行数：${queryResult.row_count}`}
+                        label={t('admin.queryPage.result.rowCount', { count: queryResult.row_count })}
                         color="primary"
                         size="small"
                       />
                       <Chip
-                        label={`执行时间：${queryResult.execution_time_ms}ms`}
+                        label={t('admin.queryPage.result.executionTime', { ms: queryResult.execution_time_ms })}
                         color="success"
                         size="small"
                       />
                       {queryResult.masked_fields.length > 0 && (
                         <Chip
-                          label="已脱敏"
+                          label={t('admin.queryPage.result.masked')}
                           color="warning"
                           size="small"
                         />
@@ -378,13 +380,13 @@ const DatabaseQueryPage: React.FC = () => {
             <Card>
               <CardContent>
                 <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-                  <Typography variant="h6">数据库表</Typography>
+                  <Typography variant="h6">{t('admin.queryPage.schema.tables')}</Typography>
                   <Button
                     startIcon={<RefreshIcon />}
                     onClick={loadTables}
                     size="small"
                   >
-                    刷新
+                    {t('admin.common.refresh')}
                   </Button>
                 </Box>
 
@@ -398,7 +400,7 @@ const DatabaseQueryPage: React.FC = () => {
                             size="small"
                             onClick={() => loadTableSchema(table.name)}
                           >
-                            查看结构
+                            {t('admin.queryPage.schema.viewSchema')}
                           </Button>
                         }
                       >
@@ -408,13 +410,13 @@ const DatabaseQueryPage: React.FC = () => {
                               {table.name}
                             </Typography>
                           }
-                          secondary={`${table.row_count} 行`}
+                          secondary={t('admin.queryPage.schema.rowCountSuffix', { count: table.row_count })}
                         />
                       </ListItem>
                     ))}
                   </List>
                 ) : (
-                  <Typography color="text.secondary">点击刷新表列表加载</Typography>
+                  <Typography color="text.secondary">{t('admin.queryPage.schema.loadHint')}</Typography>
                 )}
               </CardContent>
             </Card>
@@ -425,17 +427,17 @@ const DatabaseQueryPage: React.FC = () => {
               <Card>
                 <CardContent>
                   <Typography variant="h6" gutterBottom>
-                    表结构：{tableSchema.table_name}
+                    {t('admin.queryPage.schema.tableTitle', { name: tableSchema.table_name })}
                   </Typography>
 
                   <TableContainer component={Paper} sx={{ mb: 2 }}>
                     <Table size="small">
                       <TableHead>
                         <TableRow>
-                          <TableCell>列名</TableCell>
-                          <TableCell>类型</TableCell>
-                          <TableCell>可空</TableCell>
-                          <TableCell>敏感度</TableCell>
+                          <TableCell>{t('admin.queryPage.schema.columnName')}</TableCell>
+                          <TableCell>{t('admin.queryPage.schema.columnType')}</TableCell>
+                          <TableCell>{t('admin.queryPage.schema.nullable')}</TableCell>
+                          <TableCell>{t('admin.queryPage.schema.sensitivity')}</TableCell>
                         </TableRow>
                       </TableHead>
                       <TableBody>
@@ -447,10 +449,10 @@ const DatabaseQueryPage: React.FC = () => {
                             <TableCell>
                               <code>{column.type}</code>
                             </TableCell>
-                            <TableCell>{column.nullable ? '是' : '否'}</TableCell>
+                            <TableCell>{column.nullable ? t('admin.queryPage.schema.yes') : t('admin.queryPage.schema.no')}</TableCell>
                             <TableCell>
                               {column.sensitive ? (
-                                <Chip label="敏感" color="error" size="small" />
+                                <Chip label={t('admin.queryPage.schema.sensitive')} color="error" size="small" />
                               ) : (
                                 '-'
                               )}
@@ -463,7 +465,7 @@ const DatabaseQueryPage: React.FC = () => {
 
                   {tableSchema.sensitive_columns.length > 0 && (
                     <Alert severity="warning">
-                      敏感字段：{tableSchema.sensitive_columns.join(', ')}
+                      {t('admin.queryPage.schema.sensitiveFields', { fields: tableSchema.sensitive_columns.join(', ') })}
                     </Alert>
                   )}
                 </CardContent>
@@ -478,13 +480,13 @@ const DatabaseQueryPage: React.FC = () => {
         <Card>
           <CardContent>
             <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-              <Typography variant="h6">查询历史</Typography>
+              <Typography variant="h6">{t('admin.queryPage.history.title')}</Typography>
               <Button
                 startIcon={<RefreshIcon />}
                 onClick={loadHistory}
                 size="small"
               >
-                刷新历史
+                {t('admin.queryPage.history.refresh')}
               </Button>
             </Box>
 
@@ -522,16 +524,16 @@ const DatabaseQueryPage: React.FC = () => {
                     <AccordionDetails>
                       <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
                         <Typography variant="body2">
-                          <strong>描述：</strong>{item.description || 'N/A'}
+                          <strong>{t('admin.queryPage.history.desc')}</strong>{item.description || 'N/A'}
                         </Typography>
                         <Typography variant="body2">
-                          <strong>行数：</strong>{item.row_count}
+                          <strong>{t('admin.queryPage.history.rowCount')}</strong>{item.row_count}
                         </Typography>
                         <Typography variant="body2">
-                          <strong>执行时间：</strong>{item.execution_time_ms}ms
+                          <strong>{t('admin.queryPage.history.executionTime')}</strong>{item.execution_time_ms}ms
                         </Typography>
                         <Typography variant="body2" sx={{ fontFamily: 'monospace', wordBreak: 'break-all' }}>
-                          <strong>完整 SQL:</strong> {item.sql}
+                          <strong>{t('admin.queryPage.history.fullSql')}</strong> {item.sql}
                         </Typography>
                       </Box>
                     </AccordionDetails>
@@ -539,7 +541,7 @@ const DatabaseQueryPage: React.FC = () => {
                 ))}
               </Box>
             ) : (
-              <Typography color="text.secondary">暂无查询历史</Typography>
+              <Typography color="text.secondary">{t('admin.queryPage.history.empty')}</Typography>
             )}
           </CardContent>
         </Card>

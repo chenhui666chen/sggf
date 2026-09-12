@@ -1,5 +1,6 @@
 import MoreVertIcon from '@mui/icons-material/MoreVert'
 import { Box, Card, CardContent, Chip, CircularProgress, IconButton, Typography } from '@mui/material'
+import { useTranslation } from 'react-i18next'
 import type { BookColors, Project } from '@/types/audiobook'
 
 export default function ProjectCard({
@@ -17,6 +18,7 @@ export default function ProjectCard({
   onOpenChapterDrawer: (project: Project) => void
   onPreloadProject?: (project: Project) => void
 }) {
+  const { t } = useTranslation()
   const handlePreloadProject = () => {
     onPreloadProject?.(project)
   }
@@ -86,7 +88,7 @@ export default function ProjectCard({
         >
           <CircularProgress size={28} sx={{ color: 'rgba(255,255,255,0.92)' }} />
           <Typography sx={{ fontSize: '0.9rem', fontWeight: 700 }}>
-            正在进入项目配置
+            {t('appEntry.loadingProjectConfig')}
           </Typography>
         </Box>
       ) : null}
@@ -99,6 +101,8 @@ export default function ProjectCard({
           bottom: 8,
           right: 8,
           zIndex: 3,
+          // 常暗媒体卡：菜单图标钉死白叠色，避免浅色模式下继承 text.primary 变深图标压暗底不可见（方案 A）。
+          color: 'rgba(255,255,255,0.85)',
         }}
         onMouseDown={(e) => e.stopPropagation()}
         onClick={(e) => {
@@ -209,7 +213,7 @@ export default function ProjectCard({
 
               <Box sx={{ display: 'flex', justifyContent: 'center' }}>
                 <Chip
-                  label={project.genre || '未分类'}
+                  label={project.genre || t('audiobook.projectCard.unclassified')}
                   size="small"
                   sx={{
                     height: 22,
@@ -329,7 +333,7 @@ export default function ProjectCard({
                 lineHeight: 1.5,
               }}
             >
-              {project.description || '点击进入有声生成与管理'}
+              {project.description || t('audiobook.projectCard.enterHint')}
             </Typography>
             <Box sx={{ mt: 1.25, display: 'flex', gap: 0.8, alignItems: 'flex-end' }}>
               {[10, 16, 12, 18, 11, 14, 9].map((h, idx) => (

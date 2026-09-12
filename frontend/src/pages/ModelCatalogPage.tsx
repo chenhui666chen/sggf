@@ -27,6 +27,10 @@ import OpenInNewIcon from '@mui/icons-material/OpenInNew'
 import ContentCopyIcon from '@mui/icons-material/ContentCopy'
 import CheckCircleIcon from '@mui/icons-material/CheckCircle'
 
+import type { TFunction } from 'i18next'
+import { useTranslation } from 'react-i18next'
+
+import { EMPTY_PLACEHOLDER, useFormats } from '@/i18n'
 import { apiClient, extractApiErrorMessage } from '@/services/api'
 
 type VerificationStatus = 'verified' | 'partial' | 'failed' | 'pending'
@@ -499,36 +503,21 @@ interface DetailedSpecs {
 
 type CategoryFilter = 'all' | 'llm' | 'image' | 'audio' | 'video' | 'multimodal'
 
-const STATUS_META: Record<VerificationStatus, { color: 'success' | 'warning' | 'error' | 'default'; label: string }> = {
-  verified: { color: 'success', label: '已验证' },
-  partial: { color: 'warning', label: '部分验证' },
-  failed: { color: 'error', label: '未通过' },
-  pending: { color: 'default', label: '待手动验证' },
+const STATUS_META: Record<VerificationStatus, { color: 'success' | 'warning' | 'error' | 'default'; label: string; labelKey?: string }> = {
+  verified: { color: 'success', label: '已验证', labelKey: 'modelCatalog.page.statusVerified' },
+  partial: { color: 'warning', label: '部分验证', labelKey: 'modelCatalog.page.statusPartial' },
+  failed: { color: 'error', label: '未通过', labelKey: 'modelCatalog.page.statusFailed' },
+  pending: { color: 'default', label: '待手动验证', labelKey: 'modelCatalog.page.statusPending' },
 }
 
-const CATEGORY_OPTIONS: { key: CategoryFilter; label: string; icon: ReactElement }[] = [
-  { key: 'all', label: '全部', icon: <HubIcon fontSize="small" /> },
-  { key: 'llm', label: '文本LLM', icon: <HubIcon fontSize="small" /> },
-  { key: 'image', label: '图像生成', icon: <HubIcon fontSize="small" /> },
-  { key: 'audio', label: '音频生成', icon: <HubIcon fontSize="small" /> },
-  { key: 'video', label: '视频生成', icon: <HubIcon fontSize="small" /> },
-  { key: 'multimodal', label: '多模态', icon: <HubIcon fontSize="small" /> },
+const CATEGORY_OPTIONS: { key: CategoryFilter; label: string; labelKey?: string; icon: ReactElement }[] = [
+  { key: 'all', label: '全部', labelKey: 'modelCatalog.page.categoryAll', icon: <HubIcon fontSize="small" /> },
+  { key: 'llm', label: '文本LLM', labelKey: 'modelCatalog.page.categoryLlm', icon: <HubIcon fontSize="small" /> },
+  { key: 'image', label: '图像生成', labelKey: 'modelCatalog.page.categoryImage', icon: <HubIcon fontSize="small" /> },
+  { key: 'audio', label: '音频生成', labelKey: 'modelCatalog.page.categoryAudio', icon: <HubIcon fontSize="small" /> },
+  { key: 'video', label: '视频生成', labelKey: 'modelCatalog.page.categoryVideo', icon: <HubIcon fontSize="small" /> },
+  { key: 'multimodal', label: '多模态', labelKey: 'modelCatalog.page.categoryMultimodal', icon: <HubIcon fontSize="small" /> },
 ]
-
-function formatDateTime(iso?: string | null): string {
-  if (!iso) return '—'
-  try {
-    return new Date(iso).toLocaleString('zh-CN', {
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-    })
-  } catch {
-    return iso
-  }
-}
 
 function normalizeCategoryFilter(raw: string | null): CategoryFilter {
   if (!raw || raw === 'all') return 'all'
@@ -1141,26 +1130,28 @@ function intOrZero(value: unknown): number {
   return Number.isFinite(Number(value)) ? Number(value) : 0
 }
 
-function getPendingVerificationCopy(entry: CatalogEntry): string {
+function getPendingVerificationCopy(entry: CatalogEntry, t?: TFunction): string {
   if (isCosyVoiceV35Entry(entry)) {
-    return '手动维护中 · 已按当前接入文档与项目实现同步更新'
+    return t ? t('modelCatalog.page.pendingCopyCosy') : '手动维护中 · 已按当前接入文档与项目实现同步更新'
   }
 
-  return '待手动验证 · 来源信息已清理'
+  return t ? t('modelCatalog.page.pendingCopyGeneric') : '待手动验证 · 来源信息已清理'
 }
 
-function getAiDesignOfficialDocs(entry: CatalogEntry): ResourceLinkItem[] {
+function getAiDesignOfficialDocs(entry: CatalogEntry, t?: TFunction): ResourceLinkItem[] {
   return mergeResourceLinks(
-    entry.documentation_url ? [{ label: '官方文档', url: entry.documentation_url }] : [],
+    entry.documentation_url
+      ? [{ label: t ? t('modelCatalog.page.officialDoc') : '官方文档', url: entry.documentation_url }]
+      : [],
     (entry.source_urls || []).map((url, index) => ({
-      label: `参考文档 ${index + 1}`,
+      label: t ? t('modelCatalog.page.refDoc', { index: index + 1 }) : `参考文档 ${index + 1}`,
       url,
     })),
     entry.resource_navigation?.official_sources,
   )
 }
 
-function buildAiDesignContext(entry: CatalogEntry): AiDesignContext {
+function buildAiDesignContext(entry: CatalogEntry, t?: TFunction): AiDesignContext {
   if (isCosyVoiceV35Entry(entry)) {
     return {
       model_key: entry.model_key,
@@ -1238,7 +1229,7 @@ function buildAiDesignContext(entry: CatalogEntry): AiDesignContext {
         '声音复刻需要支持本地上传和录音两条入口，减少素材准备门槛。',
         '如果后续要做有声小说字幕切分或短剧配音时间轴，优先复用词级时间戳链路；音素级先不要纳入设计前提。',
       ],
-      official_docs: mergeResourceLinks(COSYVOICE_V35_DOC_LINKS, getAiDesignOfficialDocs(entry)),
+      official_docs: mergeResourceLinks(COSYVOICE_V35_DOC_LINKS, getAiDesignOfficialDocs(entry, t)),
     }
   }
 
@@ -1250,16 +1241,16 @@ function buildAiDesignContext(entry: CatalogEntry): AiDesignContext {
   }))
   const inputRequirements = mergeUniqueStrings(
     entry.constraints_summary?.max_prompt_length
-      ? [`最大输入长度：${entry.constraints_summary.max_prompt_length} 字符`]
+      ? [t ? t('modelCatalog.page.maxInputLength', { count: entry.constraints_summary.max_prompt_length }) : `最大输入长度：${entry.constraints_summary.max_prompt_length} 字符`]
       : [],
     entry.constraints_summary?.duration
-      ? [`时长范围：${entry.constraints_summary.duration.min_seconds}s - ${entry.constraints_summary.duration.max_seconds}s`]
+      ? [t ? t('modelCatalog.page.durationRange', { min: entry.constraints_summary.duration.min_seconds, max: entry.constraints_summary.duration.max_seconds }) : `时长范围：${entry.constraints_summary.duration.min_seconds}s - ${entry.constraints_summary.duration.max_seconds}s`]
       : [],
     voiceCloneInput?.supported_formats?.length
-      ? [`支持输入格式：${voiceCloneInput.supported_formats.join(' / ')}`]
+      ? [t ? t('modelCatalog.page.supportedFormats', { formats: voiceCloneInput.supported_formats.join(' / ') }) : `支持输入格式：${voiceCloneInput.supported_formats.join(' / ')}`]
       : [],
     voiceCloneInput?.recommended_duration
-      ? [`推荐输入时长：${voiceCloneInput.recommended_duration}`]
+      ? [t ? t('modelCatalog.page.recommendedDuration', { duration: voiceCloneInput.recommended_duration }) : `推荐输入时长：${voiceCloneInput.recommended_duration}`]
       : [],
     voiceCloneInput?.quality_requirements || [],
   )
@@ -1267,7 +1258,7 @@ function buildAiDesignContext(entry: CatalogEntry): AiDesignContext {
   return {
     model_key: entry.model_key,
     display_name: getCatalogEntryDisplayName(entry),
-    summary: entry.identity_profile?.core_positioning || entry.summary || '暂无模型定位说明',
+    summary: entry.identity_profile?.core_positioning || entry.summary || (t ? t('modelCatalog.page.noPositionSummary') : '暂无模型定位说明'),
     core_capabilities: mergeUniqueStrings(
       entry.primary_strengths,
       entry.identity_profile?.capability_quadrants?.capability_tags,
@@ -1290,13 +1281,13 @@ function buildAiDesignContext(entry: CatalogEntry): AiDesignContext {
       .map((item) => `${item.label}：${item.note}`),
     error_cases: mergeUniqueStrings(
       entry.error_handlers_summary?.content_safety
-        ? [`内容安全：${entry.error_handlers_summary.content_safety.action}`]
+        ? [t ? t('modelCatalog.page.contentSafety', { action: entry.error_handlers_summary.content_safety.action }) : `内容安全：${entry.error_handlers_summary.content_safety.action}`]
         : [],
       entry.error_handlers_summary?.rate_limit
-        ? [`限流：${entry.error_handlers_summary.rate_limit.action}`]
+        ? [t ? t('modelCatalog.page.rateLimit', { action: entry.error_handlers_summary.rate_limit.action }) : `限流：${entry.error_handlers_summary.rate_limit.action}`]
         : [],
       entry.error_handlers_summary?.timeout
-        ? [`超时：${entry.error_handlers_summary.timeout.action}`]
+        ? [t ? t('modelCatalog.page.timeout', { action: entry.error_handlers_summary.timeout.action }) : `超时：${entry.error_handlers_summary.timeout.action}`]
         : [],
     ),
     design_tips: mergeUniqueStrings(
@@ -1326,15 +1317,17 @@ function buildAiDesignPromptPayload(context: AiDesignContext) {
   }
 }
 
-function getVoiceDesignConstraintItems(entry?: CatalogEntry | null): string[] {
+function getVoiceDesignConstraintItems(entry?: CatalogEntry | null, t?: TFunction): string[] {
   const constraints = entry?.detailed_specs?.voice_synthesis?.voice_design?.constraints
   return mergeUniqueStrings(
-    constraints?.max_prompt_chars ? [`voice_prompt 长度不得超过 ${constraints.max_prompt_chars} 个字符。`] : [],
+    constraints?.max_prompt_chars
+      ? [t ? t('modelCatalog.page.voicePromptMax', { count: constraints.max_prompt_chars }) : `voice_prompt 长度不得超过 ${constraints.max_prompt_chars} 个字符。`]
+      : [],
     constraints?.supported_languages?.length
-      ? [`voice_prompt 仅支持 ${constraints.supported_languages.join(' / ')}。`]
+      ? [t ? t('modelCatalog.page.voicePromptLang', { languages: constraints.supported_languages.join(' / ') }) : `voice_prompt 仅支持 ${constraints.supported_languages.join(' / ')}。`]
       : [],
     constraints?.required_target_model
-      ? [`声音复刻/设计创建时 target_model 应固定为 ${constraints.required_target_model}，并与后续合成模型保持一致。`]
+      ? [t ? t('modelCatalog.page.voiceTargetModel', { model: constraints.required_target_model }) : `声音复刻/设计创建时 target_model 应固定为 ${constraints.required_target_model}，并与后续合成模型保持一致。`]
       : [],
     constraints?.forbidden_requests || [],
   )
@@ -1358,7 +1351,13 @@ function getVoiceDesignPrinciples(entry?: CatalogEntry | null): string[] {
   return entry?.detailed_specs?.voice_synthesis?.voice_design?.quality_principles || []
 }
 
-function getStyleControlModeLabel(mode?: string | null): string {
+function getStyleControlModeLabel(mode?: string | null, t?: TFunction): string {
+  const labelKeys: Record<string, string> = {
+    natural_language: 'modelCatalog.page.modeNaturalLanguage',
+    director: 'modelCatalog.page.modeDirector',
+    audio_tags: 'modelCatalog.page.modeAudioTags',
+    basic: 'modelCatalog.page.modeBasic',
+  }
   const labels: Record<string, string> = {
     natural_language: '自然语言指令',
     director: '导演模式',
@@ -1366,10 +1365,16 @@ function getStyleControlModeLabel(mode?: string | null): string {
     basic: '基础参数',
   }
   const normalized = String(mode || '').trim()
+  const key = labelKeys[normalized]
+  if (t && key) return t(key)
   return labels[normalized] || normalized || '-'
 }
 
-function getStyleControlRoleLabel(role?: string | null): string {
+function getStyleControlRoleLabel(role?: string | null, t?: TFunction): string {
+  const labelKeys: Record<string, string> = {
+    user: 'modelCatalog.page.roleUser',
+    assistant: 'modelCatalog.page.roleAssistant',
+  }
   const labels: Record<string, string> = {
     user: 'user 消息',
     assistant: 'assistant 消息',
@@ -1377,29 +1382,31 @@ function getStyleControlRoleLabel(role?: string | null): string {
     'parameters.instruction': 'parameters.instruction',
   }
   const normalized = String(role || '').trim()
+  const key = labelKeys[normalized]
+  if (t && key) return t(key)
   return labels[normalized] || normalized || '-'
 }
 
-function getTtsStyleControlRoleItems(entry?: CatalogEntry | null): LabeledValueItem[] {
+function getTtsStyleControlRoleItems(entry?: CatalogEntry | null, t?: TFunction): LabeledValueItem[] {
   const roles = entry?.detailed_specs?.voice_synthesis?.style_control?.control_message_roles || {}
   return Object.entries(roles).map(([mode, role]) => ({
-    label: getStyleControlModeLabel(mode),
-    value: getStyleControlRoleLabel(role),
+    label: getStyleControlModeLabel(mode, t),
+    value: getStyleControlRoleLabel(role, t),
   }))
 }
 
-function getTtsStyleControlAdvancedLabels(entry?: CatalogEntry | null): string[] {
+function getTtsStyleControlAdvancedLabels(entry?: CatalogEntry | null, t?: TFunction): string[] {
   const styleControl = entry?.detailed_specs?.voice_synthesis?.style_control
   if (!styleControl) return []
 
   return mergeUniqueStrings(
     styleControl.advanced_controls,
-    styleControl.supports_voice_description ? ['声音描述融合'] : [],
-    styleControl.supports_director_mode ? ['导演模式'] : [],
-    styleControl.supports_audio_tags ? ['音频标签'] : [],
-    styleControl.supports_emotion_mixing ? ['复合情绪'] : [],
-    styleControl.supports_micro_tags ? ['微表演标签'] : [],
-    styleControl.supports_word_level_control ? ['词/字级控制'] : [],
+    styleControl.supports_voice_description ? [t ? t('modelCatalog.page.advancedVoiceDesc') : '声音描述融合'] : [],
+    styleControl.supports_director_mode ? [t ? t('modelCatalog.page.advancedDirector') : '导演模式'] : [],
+    styleControl.supports_audio_tags ? [t ? t('modelCatalog.page.advancedAudioTags') : '音频标签'] : [],
+    styleControl.supports_emotion_mixing ? [t ? t('modelCatalog.page.advancedEmotionMixing') : '复合情绪'] : [],
+    styleControl.supports_micro_tags ? [t ? t('modelCatalog.page.advancedMicroTags') : '微表演标签'] : [],
+    styleControl.supports_word_level_control ? [t ? t('modelCatalog.page.advancedWordLevel') : '词/字级控制'] : [],
   )
 }
 
@@ -1425,6 +1432,7 @@ function LabeledValueSection({ title, items }: { title: string; items: LabeledVa
 }
 
 function SupportMatrixSection({ title, items }: { title: string; items: SupportItem[] }) {
+  const { t } = useTranslation()
   return (
     <Paper variant="outlined" sx={{ p: 2.25, borderRadius: 3, height: '100%' }}>
       <Typography variant="subtitle1" sx={{ fontWeight: 700, mb: 1.5 }}>
@@ -1437,7 +1445,7 @@ function SupportMatrixSection({ title, items }: { title: string; items: SupportI
               <Chip
                 size="small"
                 color={item.status_color || (item.supported ? 'success' : 'default')}
-                label={item.status_label || (item.supported ? '支持' : '不支持')}
+                label={item.status_label || t(item.supported ? 'modelCatalog.page.supportChip' : 'modelCatalog.page.notSupportChip')}
               />
               <Typography variant="body2" sx={{ fontWeight: 600 }}>
                 {item.label}
@@ -1454,6 +1462,7 @@ function SupportMatrixSection({ title, items }: { title: string; items: SupportI
 }
 
 function BulletSection({ title, items }: { title: string; items: string[] }) {
+  const { t } = useTranslation()
   return (
     <Paper variant="outlined" sx={{ p: 2.25, borderRadius: 3, height: '100%' }}>
       <Typography variant="subtitle1" sx={{ fontWeight: 700, mb: 1.5 }}>
@@ -1468,7 +1477,7 @@ function BulletSection({ title, items }: { title: string; items: string[] }) {
           ))
         ) : (
           <Typography variant="body2" color="text.secondary">
-            暂无
+            {t('modelCatalog.page.bulletNone')}
           </Typography>
         )}
       </Stack>
@@ -1483,6 +1492,7 @@ function CodeSnippetSectionWithCopy({ title, language, code, onCopy, isCopied }:
   onCopy?: () => void
   isCopied?: boolean
 }) {
+  const { t } = useTranslation()
   return (
     <Paper variant="outlined" sx={{ p: 2.25, borderRadius: 3, height: '100%' }}>
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1.5 }}>
@@ -1497,7 +1507,7 @@ function CodeSnippetSectionWithCopy({ title, language, code, onCopy, isCopied }:
         sx={{
           p: 1.5,
           borderRadius: 2,
-          backgroundColor: 'rgba(15,76,129,0.04)',
+          backgroundColor: 'grey.100', // 代码块底走 bgSubtle 反相（原为写死的蓝灰）
           fontFamily: 'monospace',
           fontSize: '0.85rem',
           whiteSpace: 'pre-wrap',
@@ -1505,16 +1515,17 @@ function CodeSnippetSectionWithCopy({ title, language, code, onCopy, isCopied }:
           maxHeight: 300,
         }}
       >
-        {code || '暂无代码'}
+        {code || t('modelCatalog.page.codeNone')}
       </Box>
       <Typography variant="caption" color="text.secondary" sx={{ mt: 0.8, display: 'block' }}>
-        语言：{language}
+        {t('modelCatalog.page.codeLanguage', { language })}
       </Typography>
     </Paper>
   )
 }
 
 function ResourceLinkSection({ title, items }: { title: string; items: ResourceLinkItem[] }) {
+  const { t } = useTranslation()
   return (
     <Paper variant="outlined" sx={{ p: 2.25, borderRadius: 3, height: '100%' }}>
       <Typography variant="subtitle1" sx={{ fontWeight: 700, mb: 1.5 }}>
@@ -1535,7 +1546,7 @@ function ResourceLinkSection({ title, items }: { title: string; items: ResourceL
         ))}
         {items.length === 0 && (
           <Typography variant="body2" color="text.secondary">
-            暂无链接
+            {t('modelCatalog.page.linkNone')}
           </Typography>
         )}
       </Stack>
@@ -1575,6 +1586,18 @@ function UsageGuideSection({ title, sections }: { title: string; sections: Array
 }
 
 export default function ModelCatalogPage() {
+  const { formatDateTime } = useFormats()
+  const { t } = useTranslation()
+  const statusMetaLabel = (meta: { label: string; labelKey?: string }) => (meta.labelKey ? t(meta.labelKey) : meta.label)
+
+  // 原本在模块级，依赖当前语言之后只能待进组件内。兜底刻意保留：没有时间就给
+  // 占位符，解析不出来就把后端原串显示出来。原来靠 try/catch 兼顾后者，
+  // 而 formatDateTime 对无效输入返回空串，因此 || iso 与 catch 分支等价。
+  const formatVerifiedAt = (iso?: string | null): string => {
+    if (!iso) return EMPTY_PLACEHOLDER
+    return formatDateTime(iso) || iso
+  }
+
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
   const [overview, setOverview] = useState<CatalogOverview | null>(null)
@@ -1656,7 +1679,7 @@ export default function ModelCatalogPage() {
       setOverview(nextOverview)
       setEntries(nextEntries)
     } catch (fetchError) {
-      setError(await extractApiErrorMessage(fetchError, '加载模型档案失败'))
+      setError(await extractApiErrorMessage(fetchError, t('modelCatalog.page.loadCatalogFailed')))
     } finally {
       setLoading(false)
     }
@@ -1677,7 +1700,7 @@ export default function ModelCatalogPage() {
       const response = await apiClient.getModelCatalogEntry(modelKey)
       setSelectedEntry(normalizeCatalogEntryForDisplay(response.data as CatalogEntry))
     } catch (e) {
-      setDetailError(await extractApiErrorMessage(e, '加载模型详情失败'))
+      setDetailError(await extractApiErrorMessage(e, t('modelCatalog.page.loadDetailFailed')))
     } finally {
       setDetailLoading(false)
     }
@@ -1698,7 +1721,7 @@ export default function ModelCatalogPage() {
   })
 
   const visibleEntries = filteredEntries
-  const aiDesignContext = selectedEntry ? buildAiDesignContext(selectedEntry) : null
+  const aiDesignContext = selectedEntry ? buildAiDesignContext(selectedEntry, t) : null
   const aiDesignPromptPayload = aiDesignContext ? buildAiDesignPromptPayload(aiDesignContext) : null
   const overviewScenarios = selectedEntry
     ? mergeUniqueStrings(selectedEntry.recommended_scenarios).slice(0, 6)
@@ -1712,16 +1735,16 @@ export default function ModelCatalogPage() {
     ).slice(0, 6)
     : []
   const overviewRoleSummary = selectedEntry?.identity_profile?.project_fit?.role_summary || ''
-  const voiceDesignConstraints = getVoiceDesignConstraintItems(selectedEntry)
+  const voiceDesignConstraints = getVoiceDesignConstraintItems(selectedEntry, t)
   const voiceDesignDimensions = getVoiceDesignDimensionItems(selectedEntry)
   const voiceDesignPrinciples = getVoiceDesignPrinciples(selectedEntry)
   const voiceLifecycleStatuses = getVoiceLifecycleStatusItems(selectedEntry)
   const ttsStyleControl = selectedEntry?.detailed_specs?.voice_synthesis?.style_control
-  const ttsStyleControlRoleItems = getTtsStyleControlRoleItems(selectedEntry)
-  const ttsStyleControlAdvancedLabels = getTtsStyleControlAdvancedLabels(selectedEntry)
+  const ttsStyleControlRoleItems = getTtsStyleControlRoleItems(selectedEntry, t)
+  const ttsStyleControlAdvancedLabels = getTtsStyleControlAdvancedLabels(selectedEntry, t)
 
   return (
-    <Box sx={{ minHeight: '100vh', backgroundColor: '#f4f7fb', py: 3 }}>
+    <Box sx={{ minHeight: '100vh', backgroundColor: 'background.default', py: 3 }}>
       <Container maxWidth="xl">
         <Stack direction="row" spacing={2} alignItems="center" sx={{ mb: 3 }}>
           <Button
@@ -1729,10 +1752,10 @@ export default function ModelCatalogPage() {
             startIcon={<ArrowBackIcon />}
             onClick={() => navigate('/home')}
           >
-            返回工作台
+            {t('modelCatalog.page.backToStudio')}
           </Button>
-          <Typography variant="h4" sx={{ fontWeight: 800, color: '#113058' }}>
-            模型中心
+          <Typography variant="h4" sx={{ fontWeight: 800, color: 'text.primary' }}>
+            {t('modelCatalog.page.title')}
           </Typography>
         </Stack>
 
@@ -1749,12 +1772,13 @@ export default function ModelCatalogPage() {
             mb: 3,
             p: 2.5,
             borderRadius: 3,
-            backgroundColor: 'rgba(255,255,255,0.95)',
-            border: '1px solid rgba(17,48,88,0.1)',
+            backgroundColor: 'background.paper',
+            border: '1px solid',
+            borderColor: 'divider',
           }}
         >
           <TextField
-            label="搜索模型"
+            label={t('modelCatalog.page.searchPlaceholder')}
             variant="outlined"
             size="small"
             value={keyword}
@@ -1766,7 +1790,7 @@ export default function ModelCatalogPage() {
             {CATEGORY_OPTIONS.map((opt) => (
               <Chip
                 key={opt.key}
-                label={opt.label}
+                label={opt.labelKey ? t(opt.labelKey) : opt.label}
                 onClick={() => setSelectedCategory(opt.key)}
                 color={selectedCategory === opt.key ? 'primary' : 'default'}
                 variant={selectedCategory === opt.key ? 'filled' : 'outlined'}
@@ -1778,19 +1802,19 @@ export default function ModelCatalogPage() {
 
           <Stack direction="row" spacing={1}>
             <Chip
-              label="全部状态"
+              label={t('modelCatalog.page.statusAll')}
               onClick={() => setSelectedStatus('all')}
               color={selectedStatus === 'all' ? 'primary' : 'default'}
               variant={selectedStatus === 'all' ? 'filled' : 'outlined'}
             />
             <Chip
-              label="已验证"
+              label={t('modelCatalog.page.statusVerified')}
               onClick={() => setSelectedStatus('verified')}
               color={selectedStatus === 'verified' ? 'success' : 'default'}
               variant={selectedStatus === 'verified' ? 'filled' : 'outlined'}
             />
             <Chip
-              label="部分验证"
+              label={t('modelCatalog.page.statusPartial')}
               onClick={() => setSelectedStatus('partial')}
               color={selectedStatus === 'partial' ? 'warning' : 'default'}
               variant={selectedStatus === 'partial' ? 'filled' : 'outlined'}
@@ -1800,26 +1824,28 @@ export default function ModelCatalogPage() {
 
         {overview && (
           <Paper
-            sx={{
+            sx={(theme) => ({
               p: 2.5,
               mb: 3,
               borderRadius: 3,
-              background: 'linear-gradient(135deg, #f0f4f8 0%, #e2e8f0 100%)',
-              border: '1px solid rgba(17,48,88,0.1)',
-            }}
+              // 概览汇总卡：灰渐变底走 grey token 反相（浅=暖白灰、暗=墨灰），边框用 divider。
+              background: `linear-gradient(135deg, ${theme.palette.grey[100]} 0%, ${theme.palette.grey[200]} 100%)`,
+              border: '1px solid',
+              borderColor: 'divider',
+            })}
           >
             <Grid container spacing={2} alignItems="center">
               <Grid item xs={12} sm={4}>
                 <Stack spacing={0.5}>
-                  <Typography variant="caption" color="text.secondary">档案总数</Typography>
-                  <Typography variant="h5" sx={{ fontWeight: 800, color: '#113058' }}>
+                  <Typography variant="caption" color="text.secondary">{t('modelCatalog.page.overviewTotal')}</Typography>
+                  <Typography variant="h5" sx={{ fontWeight: 800, color: 'text.primary' }}>
                     {overview.total_entries}
                   </Typography>
                 </Stack>
               </Grid>
               <Grid item xs={6} sm={2}>
                 <Stack spacing={0.5}>
-                  <Typography variant="caption" color="text.secondary">已验证</Typography>
+                  <Typography variant="caption" color="text.secondary">{t('modelCatalog.page.overviewVerified')}</Typography>
                   <Typography variant="h6" sx={{ color: 'success.main', fontWeight: 700 }}>
                     {overview.verified_entries}
                   </Typography>
@@ -1827,7 +1853,7 @@ export default function ModelCatalogPage() {
               </Grid>
               <Grid item xs={6} sm={2}>
                 <Stack spacing={0.5}>
-                  <Typography variant="caption" color="text.secondary">部分验证</Typography>
+                  <Typography variant="caption" color="text.secondary">{t('modelCatalog.page.overviewPartial')}</Typography>
                   <Typography variant="h6" sx={{ color: 'warning.main', fontWeight: 700 }}>
                     {overview.partial_entries}
                   </Typography>
@@ -1835,7 +1861,7 @@ export default function ModelCatalogPage() {
               </Grid>
               <Grid item xs={6} sm={2}>
                 <Stack spacing={0.5}>
-                  <Typography variant="caption" color="text.secondary">未通过</Typography>
+                  <Typography variant="caption" color="text.secondary">{t('modelCatalog.page.overviewFailed')}</Typography>
                   <Typography variant="h6" sx={{ color: 'error.main', fontWeight: 700 }}>
                     {overview.failed_entries}
                   </Typography>
@@ -1843,7 +1869,7 @@ export default function ModelCatalogPage() {
               </Grid>
               <Grid item xs={6} sm={2}>
                 <Stack spacing={0.5}>
-                  <Typography variant="caption" color="text.secondary">待手动验证</Typography>
+                  <Typography variant="caption" color="text.secondary">{t('modelCatalog.page.overviewPending')}</Typography>
                   <Typography variant="h6" sx={{ color: 'text.secondary', fontWeight: 700 }}>
                     {overview.pending_entries}
                   </Typography>
@@ -1851,7 +1877,7 @@ export default function ModelCatalogPage() {
               </Grid>
               <Grid item xs={6} sm={2}>
                 <Stack spacing={0.5}>
-                  <Typography variant="caption" color="text.secondary">模型总数</Typography>
+                  <Typography variant="caption" color="text.secondary">{t('modelCatalog.page.overviewModelCount')}</Typography>
                   <Typography variant="h6" sx={{ fontWeight: 700 }}>
                     {overview.total_entries}
                   </Typography>
@@ -1876,11 +1902,11 @@ export default function ModelCatalogPage() {
                     borderRadius: 4,
                     height: '100%',
                     cursor: 'pointer',
-                    background: 'rgba(255,255,255,0.9)',
+                    backgroundColor: 'background.paper',
                     transition: 'transform 0.2s ease, box-shadow 0.2s ease',
                     '&:hover': {
                       transform: 'translateY(-3px)',
-                      boxShadow: '0 18px 32px rgba(17,48,88,0.08)',
+                      boxShadow: 4,
                     },
                   }}
                   onClick={() => void openEntryDetail(entry.model_key)}
@@ -1894,17 +1920,17 @@ export default function ModelCatalogPage() {
                       </Stack>
                       <Chip
                         size="small"
-                        label={STATUS_META[entry.verification_status].label}
+                        label={statusMetaLabel(STATUS_META[entry.verification_status])}
                         color={STATUS_META[entry.verification_status].color}
                       />
                     </Stack>
 
-                    <Typography variant="h6" sx={{ fontWeight: 700, color: '#113058' }}>
+                    <Typography variant="h6" sx={{ fontWeight: 700, color: 'text.primary' }}>
                       {getCatalogEntryDisplayName(entry)}
                     </Typography>
 
                     <Typography variant="body2" color="text.secondary" sx={{ lineHeight: 1.7 }}>
-                      {entry.summary || '暂无摘要'}
+                      {entry.summary || t('modelCatalog.page.summaryEmpty')}
                     </Typography>
 
                     <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
@@ -1918,21 +1944,21 @@ export default function ModelCatalogPage() {
                     <Stack direction="row" justifyContent="space-between" alignItems="center">
                       {entry.verification_status === 'pending' ? (
                         <Typography variant="caption" color="text.secondary">
-                          {getPendingVerificationCopy(entry)}
+                          {getPendingVerificationCopy(entry, t)}
                         </Typography>
                       ) : (
                         <Stack direction="row" spacing={1.5}>
                           <Typography variant="caption" color="text.secondary">
-                            校验分数：{(entry.verification_score * 100).toFixed(0)}%
+                            {t('modelCatalog.page.verifyScore', { score: (entry.verification_score * 100).toFixed(0) })}
                           </Typography>
                           <Typography variant="caption" color="text.secondary">
-                            来源：{entry.verified_source_count}/{entry.total_source_count}
+                            {t('modelCatalog.page.sourceCount', { verified: entry.verified_source_count, total: entry.total_source_count })}
                           </Typography>
                         </Stack>
                       )}
                       {entry.verification_status !== 'pending' && entry.last_verified_at && (
                         <Typography variant="caption" color="text.secondary">
-                          校验：{formatDateTime(entry.last_verified_at)}
+                          {t('modelCatalog.page.verifiedAt', { time: formatVerifiedAt(entry.last_verified_at) })}
                         </Typography>
                       )}
                     </Stack>
@@ -1945,7 +1971,7 @@ export default function ModelCatalogPage() {
 
         <Dialog open={Boolean(selectedModelKey)} onClose={() => setSelectedModelKey(null)} maxWidth="lg" fullWidth>
           <DialogTitle sx={{ fontWeight: 800, pb: 0 }}>
-            {getCatalogEntryDisplayName(selectedEntry) || selectedModelKey || '模型详情'}
+            {getCatalogEntryDisplayName(selectedEntry) || selectedModelKey || t('modelCatalog.page.detailTitle')}
           </DialogTitle>
           {selectedEntry && (
             <Tabs
@@ -1955,10 +1981,10 @@ export default function ModelCatalogPage() {
               scrollButtons="auto"
               sx={{ px: 3, borderBottom: 1, borderColor: 'divider' }}
             >
-              <Tab label="概览" />
-              <Tab label="使用指南" />
-              <Tab label="API调用" />
-              <Tab label="AI设计" />
+              <Tab label={t('modelCatalog.page.tabOverview')} />
+              <Tab label={t('modelCatalog.page.tabUsageGuide')} />
+              <Tab label={t('modelCatalog.page.tabApi')} />
+              <Tab label={t('modelCatalog.page.tabAiDesign')} />
             </Tabs>
           )}
           <DialogContent dividers>
@@ -1973,16 +1999,17 @@ export default function ModelCatalogPage() {
                 {/* 快速参考卡片 */}
                 <Paper
                   variant="outlined"
-                  sx={{
+                  sx={(theme) => ({
                     p: 2,
                     borderRadius: 3,
-                    background: 'linear-gradient(135deg, #f0f4f8 0%, #e2e8f0 100%)',
-                  }}
+                    // 快速参考卡：同概览汇总卡，灰渐变走 grey token 反相。
+                    background: `linear-gradient(135deg, ${theme.palette.grey[100]} 0%, ${theme.palette.grey[200]} 100%)`,
+                  })}
                 >
                   <Grid container spacing={1.5} alignItems="center">
                     <Grid item xs={12} sm={4}>
                       <Stack direction="row" spacing={1} alignItems="center">
-                        <Typography variant="caption" color="text.secondary">Model Key:</Typography>
+                        <Typography variant="caption" color="text.secondary">{t('modelCatalog.page.quickRefModelKey')}</Typography>
                         <Typography variant="body2" sx={{ fontFamily: 'monospace', fontWeight: 600 }}>
                           {selectedEntry.model_key}
                         </Typography>
@@ -1999,22 +2026,22 @@ export default function ModelCatalogPage() {
                       </Stack>
                     </Grid>
                     <Grid item xs={6} sm={2}>
-                      <Typography variant="caption" color="text.secondary">类型</Typography>
+                      <Typography variant="caption" color="text.secondary">{t('modelCatalog.page.quickRefType')}</Typography>
                       <Typography variant="body2">{selectedEntry.category_label}</Typography>
                     </Grid>
                     <Grid item xs={6} sm={2}>
-                      <Typography variant="caption" color="text.secondary">版本</Typography>
+                      <Typography variant="caption" color="text.secondary">{t('modelCatalog.page.quickRefVersion')}</Typography>
                       <Typography variant="body2">{selectedEntry.subcategory || '-'}</Typography>
                     </Grid>
                     <Grid item xs={6} sm={2}>
-                      <Typography variant="caption" color="text.secondary">供应商</Typography>
+                      <Typography variant="caption" color="text.secondary">{t('modelCatalog.page.quickRefProvider')}</Typography>
                       <Typography variant="body2">{selectedEntry.provider}</Typography>
                     </Grid>
                     <Grid item xs={6} sm={2}>
-                      <Typography variant="caption" color="text.secondary">校验状态</Typography>
+                      <Typography variant="caption" color="text.secondary">{t('modelCatalog.page.quickRefVerifyStatus')}</Typography>
                       <Chip
                         size="small"
-                        label={STATUS_META[selectedEntry.verification_status].label}
+                        label={statusMetaLabel(STATUS_META[selectedEntry.verification_status])}
                         color={STATUS_META[selectedEntry.verification_status].color}
                       />
                     </Grid>
@@ -2025,9 +2052,9 @@ export default function ModelCatalogPage() {
                 {detailTab === 0 && (
                   <Stack spacing={2.5}>
                     <Paper variant="outlined" sx={{ p: 2.5, borderRadius: 3 }}>
-                      <Typography variant="h6" sx={{ fontWeight: 700, mb: 1.5 }}>模型定位</Typography>
+                      <Typography variant="h6" sx={{ fontWeight: 700, mb: 1.5 }}>{t('modelCatalog.page.positionTitle')}</Typography>
                       <Typography variant="body1" sx={{ lineHeight: 1.9, mb: 2 }}>
-                        {selectedEntry.identity_profile?.core_positioning || selectedEntry.summary || '暂无定位说明'}
+                        {selectedEntry.identity_profile?.core_positioning || selectedEntry.summary || t('modelCatalog.page.positionEmpty')}
                       </Typography>
                       <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
                         {(selectedEntry.identity_profile?.capability_quadrants?.strengths || selectedEntry.primary_strengths || []).map((item) => (
@@ -2037,25 +2064,25 @@ export default function ModelCatalogPage() {
                     </Paper>
 
                     <Paper variant="outlined" sx={{ p: 2.5, borderRadius: 3 }}>
-                      <Typography variant="h6" sx={{ fontWeight: 700, mb: 1.5 }}>适用与接入</Typography>
+                      <Typography variant="h6" sx={{ fontWeight: 700, mb: 1.5 }}>{t('modelCatalog.page.fitTitle')}</Typography>
                       <Grid container spacing={2}>
                         <Grid item xs={12} md={6}>
-                          <Typography variant="subtitle2" color="text.secondary" sx={{ mb: 1 }}>推荐场景</Typography>
+                          <Typography variant="subtitle2" color="text.secondary" sx={{ mb: 1 }}>{t('modelCatalog.page.fitScenarios')}</Typography>
                           <Stack spacing={0.8}>
-                            {(overviewScenarios.length > 0 ? overviewScenarios : ['暂无']).map((item) => (
+                            {(overviewScenarios.length > 0 ? overviewScenarios : [t('modelCatalog.page.bulletNone')]).map((item) => (
                               <Typography key={item} variant="body2">• {item}</Typography>
                             ))}
                           </Stack>
                         </Grid>
                         <Grid item xs={12} md={6}>
-                          <Typography variant="subtitle2" color="text.secondary" sx={{ mb: 1 }}>快速接入提示</Typography>
+                          <Typography variant="subtitle2" color="text.secondary" sx={{ mb: 1 }}>{t('modelCatalog.page.fitQuickTips')}</Typography>
                           {overviewRoleSummary && (
                             <Typography variant="body2" color="text.secondary" sx={{ lineHeight: 1.8, mb: 1.2 }}>
                               {overviewRoleSummary}
                             </Typography>
                           )}
                           <Stack spacing={0.8}>
-                            {(overviewWorkflow.length > 0 ? overviewWorkflow : ['暂无接入提示']).map((item) => (
+                            {(overviewWorkflow.length > 0 ? overviewWorkflow : [t('modelCatalog.page.fitEmptyWorkflow')]).map((item) => (
                               <Typography key={item} variant="body2">• {item}</Typography>
                             ))}
                           </Stack>
@@ -2064,37 +2091,40 @@ export default function ModelCatalogPage() {
                     </Paper>
 
                     <Paper variant="outlined" sx={{ p: 2.5, borderRadius: 3 }}>
-                      <Typography variant="h6" sx={{ fontWeight: 700, mb: 1.5 }}>关键限制</Typography>
+                      <Typography variant="h6" sx={{ fontWeight: 700, mb: 1.5 }}>{t('modelCatalog.page.constraintTitle')}</Typography>
                       <Grid container spacing={2}>
                         <Grid item xs={12} md={7}>
-                          <Typography variant="subtitle2" color="text.secondary" sx={{ mb: 1 }}>需要优先注意的边界</Typography>
+                          <Typography variant="subtitle2" color="text.secondary" sx={{ mb: 1 }}>{t('modelCatalog.page.constraintBoundary')}</Typography>
                           <Stack spacing={0.8}>
-                            {(overviewConstraints.length > 0 ? overviewConstraints : ['暂无']).map((item) => (
+                            {(overviewConstraints.length > 0 ? overviewConstraints : [t('modelCatalog.page.bulletNone')]).map((item) => (
                               <Typography key={item} variant="body2" color="text.secondary">• {item}</Typography>
                             ))}
                           </Stack>
                         </Grid>
                         <Grid item xs={12} md={5}>
-                          <Typography variant="subtitle2" color="text.secondary" sx={{ mb: 1 }}>技术约束</Typography>
+                          <Typography variant="subtitle2" color="text.secondary" sx={{ mb: 1 }}>{t('modelCatalog.page.constraintTechnical')}</Typography>
                           {selectedEntry.constraints_summary ? (
                             <Stack spacing={1.1}>
                               {selectedEntry.constraints_summary.duration && (
                                 <Box>
-                                  <Typography variant="caption" color="text.secondary">时长范围</Typography>
+                                  <Typography variant="caption" color="text.secondary">{t('modelCatalog.page.constraintDuration')}</Typography>
                                   <Typography variant="body2">
-                                    {selectedEntry.constraints_summary.duration.min_seconds}s ~ {selectedEntry.constraints_summary.duration.max_seconds}s
+                                    {t('modelCatalog.page.constraintDurationValue', {
+                                      min: selectedEntry.constraints_summary.duration.min_seconds,
+                                      max: selectedEntry.constraints_summary.duration.max_seconds,
+                                    })}
                                   </Typography>
                                 </Box>
                               )}
                               {selectedEntry.constraints_summary.max_prompt_length && (
                                 <Box>
-                                  <Typography variant="caption" color="text.secondary">最大输入长度</Typography>
-                                  <Typography variant="body2">{selectedEntry.constraints_summary.max_prompt_length} 字符</Typography>
+                                  <Typography variant="caption" color="text.secondary">{t('modelCatalog.page.constraintMaxPrompt')}</Typography>
+                                  <Typography variant="body2">{t('modelCatalog.page.constraintMaxPromptValue', { count: selectedEntry.constraints_summary.max_prompt_length })}</Typography>
                                 </Box>
                               )}
                               {selectedEntry.constraints_summary.pricing && (
                                 <Box>
-                                  <Typography variant="caption" color="text.secondary">参考价格</Typography>
+                                  <Typography variant="caption" color="text.secondary">{t('modelCatalog.page.constraintPricing')}</Typography>
                                   <Typography variant="body2">
                                     {selectedEntry.constraints_summary.pricing.currency} {selectedEntry.constraints_summary.pricing.price} / {selectedEntry.constraints_summary.pricing.unit}
                                   </Typography>
@@ -2103,7 +2133,7 @@ export default function ModelCatalogPage() {
                             </Stack>
                           ) : (
                             <Typography variant="body2" color="text.secondary">
-                              暂无额外技术约束。
+                              {t('modelCatalog.page.constraintNone')}
                             </Typography>
                           )}
                         </Grid>
@@ -2112,10 +2142,10 @@ export default function ModelCatalogPage() {
 
                     {selectedEntry.detailed_specs && Object.keys(selectedEntry.detailed_specs).length > 0 && (
                       <Paper variant="outlined" sx={{ p: 2.5, borderRadius: 3 }}>
-                        <Typography variant="h6" sx={{ fontWeight: 700, mb: 2 }}>详细能力规格</Typography>
+                        <Typography variant="h6" sx={{ fontWeight: 700, mb: 2 }}>{t('modelCatalog.page.specsTitle')}</Typography>
                         {selectedEntry.detailed_specs.video_generation && (
                           <Box sx={{ mb: 2 }}>
-                            <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 1, color: 'primary.main' }}>视频生成规格</Typography>
+                            <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 1, color: 'primary.main' }}>{t('modelCatalog.page.specsVideo')}</Typography>
                             {selectedEntry.detailed_specs.video_generation.core_function && (
                               <Typography variant="body2" sx={{ mb: 1, lineHeight: 1.8 }}>
                                 {selectedEntry.detailed_specs.video_generation.core_function.description}
@@ -2125,7 +2155,7 @@ export default function ModelCatalogPage() {
                               <Grid container spacing={1.5}>
                                 {selectedEntry.detailed_specs.video_generation.basic_params.duration && (
                                   <Grid item xs={12} sm={6}>
-                                    <Typography variant="caption" color="text.secondary">支持时长</Typography>
+                                    <Typography variant="caption" color="text.secondary">{t('modelCatalog.page.specsVideoDuration')}</Typography>
                                     <Typography variant="body2">
                                       {selectedEntry.detailed_specs.video_generation.basic_params.duration.supported_values?.join('s, ') || '-'}s
                                     </Typography>
@@ -2133,7 +2163,7 @@ export default function ModelCatalogPage() {
                                 )}
                                 {selectedEntry.detailed_specs.video_generation.basic_params.resolution && (
                                   <Grid item xs={12} sm={6}>
-                                    <Typography variant="caption" color="text.secondary">分辨率选项</Typography>
+                                    <Typography variant="caption" color="text.secondary">{t('modelCatalog.page.specsVideoResolution')}</Typography>
                                     <Typography variant="body2">
                                       {selectedEntry.detailed_specs.video_generation.basic_params.resolution.options?.join(', ') || '-'}
                                     </Typography>
@@ -2145,11 +2175,11 @@ export default function ModelCatalogPage() {
                         )}
                         {selectedEntry.detailed_specs.image_editing && (
                           <Box sx={{ mb: 2 }}>
-                            <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 1, color: 'primary.main' }}>图像编辑规格</Typography>
+                            <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 1, color: 'primary.main' }}>{t('modelCatalog.page.specsImageEdit')}</Typography>
                             {selectedEntry.detailed_specs.image_editing.edit_instructions && (
                               <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-                                {(selectedEntry.detailed_specs.image_editing.edit_instructions.edit_types || []).map((t: any) => (
-                                  <Chip key={t.type} label={t.type} size="small" variant="outlined" />
+                                {(selectedEntry.detailed_specs.image_editing.edit_instructions.edit_types || []).map((editType: any) => (
+                                  <Chip key={editType.type} label={editType.type} size="small" variant="outlined" />
                                 ))}
                               </Stack>
                             )}
@@ -2157,11 +2187,11 @@ export default function ModelCatalogPage() {
                         )}
                         {selectedEntry.detailed_specs.voice_synthesis && (
                           <Box>
-                            <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 1, color: 'primary.main' }}>语音合成规格</Typography>
+                            <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 1, color: 'primary.main' }}>{t('modelCatalog.page.specsVoice')}</Typography>
                             <Stack spacing={1}>
                               {selectedEntry.detailed_specs.voice_synthesis.voice_catalog && (
                                 <Typography variant="body2">
-                                  音色总数：{selectedEntry.detailed_specs.voice_synthesis.voice_catalog.total_count || '-'}
+                                  {t('modelCatalog.page.specsVoiceTotal', { count: selectedEntry.detailed_specs.voice_synthesis.voice_catalog.total_count || '-' })}
                                 </Typography>
                               )}
                               {selectedEntry.detailed_specs.voice_synthesis.voice_catalog?.update_note && (
@@ -2171,31 +2201,32 @@ export default function ModelCatalogPage() {
                               )}
                               <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
                                 {selectedEntry.detailed_specs.voice_synthesis.instruct_control?.enabled && (
-                                  <Chip size="small" color="primary" variant="outlined" label="支持 Instruction 控制" />
+                                  <Chip size="small" color="primary" variant="outlined" label={t('modelCatalog.page.specsVoiceInstructChip')} />
                                 )}
                                 {selectedEntry.detailed_specs.voice_synthesis.voice_clone?.enabled && (
-                                  <Chip size="small" color="success" variant="outlined" label="支持声音复刻" />
+                                  <Chip size="small" color="success" variant="outlined" label={t('modelCatalog.page.specsVoiceCloneChip')} />
                                 )}
                                 {selectedEntry.detailed_specs.voice_synthesis.voice_design?.enabled && (
-                                  <Chip size="small" color="secondary" variant="outlined" label="支持声音设计" />
+                                  <Chip size="small" color="secondary" variant="outlined" label={t('modelCatalog.page.specsVoiceDesignChip')} />
                                 )}
                               </Stack>
                               {selectedEntry.detailed_specs.voice_synthesis.calling_method?.param_name && (
                                 <Typography variant="body2" color="text.secondary">
-                                  调用方式：{selectedEntry.detailed_specs.voice_synthesis.calling_method.param_name}
-                                  {' = '}
-                                  {selectedEntry.detailed_specs.voice_synthesis.calling_method.format || 'voice_id'}
+                                  {t('modelCatalog.page.specsCallingMethod', {
+                                    param: selectedEntry.detailed_specs.voice_synthesis.calling_method.param_name,
+                                    format: selectedEntry.detailed_specs.voice_synthesis.calling_method.format || 'voice_id',
+                                  })}
                                 </Typography>
                               )}
                               {ttsStyleControl && (
                                 <Box sx={{ mt: 0.5 }}>
                                   <Typography variant="caption" color="text.secondary">
-                                    风格控制模式
+                                    {t('modelCatalog.page.styleControlMode')}
                                     {ttsStyleControl.preferred_mode
-                                      ? ` · 推荐 ${getStyleControlModeLabel(ttsStyleControl.preferred_mode)}`
+                                      ? t('modelCatalog.page.styleControlRecommended', { label: getStyleControlModeLabel(ttsStyleControl.preferred_mode, t) })
                                       : ''}
                                     {ttsStyleControl.instruction_budget
-                                      ? ` · 指令预算 ${ttsStyleControl.instruction_budget} 字符`
+                                      ? t('modelCatalog.page.styleControlBudget', { count: ttsStyleControl.instruction_budget })
                                       : ''}
                                   </Typography>
                                   {(ttsStyleControl.modes || []).length > 0 && (
@@ -2206,7 +2237,7 @@ export default function ModelCatalogPage() {
                                           size="small"
                                           color={mode.id === ttsStyleControl.preferred_mode ? 'primary' : 'default'}
                                           variant={mode.id === ttsStyleControl.preferred_mode ? 'filled' : 'outlined'}
-                                          label={mode.label || getStyleControlModeLabel(mode.id)}
+                                          label={mode.label || getStyleControlModeLabel(mode.id, t)}
                                         />
                                       ))}
                                     </Stack>
@@ -2216,7 +2247,7 @@ export default function ModelCatalogPage() {
                                       {ttsStyleControlRoleItems.map((item) => (
                                         <Grid item xs={12} sm={6} md={4} key={item.label}>
                                           <Typography variant="caption" color="text.secondary">
-                                            消息位置 · {item.label}
+                                            {t('modelCatalog.page.styleControlRole', { label: item.label })}
                                           </Typography>
                                           <Typography variant="body2">{item.value}</Typography>
                                         </Grid>
@@ -2226,7 +2257,7 @@ export default function ModelCatalogPage() {
                                   {ttsStyleControlAdvancedLabels.length > 0 && (
                                     <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap sx={{ mt: 0.75 }}>
                                       {ttsStyleControlAdvancedLabels.map((label) => (
-                                        <Chip key={label} size="small" variant="outlined" label={`高级控制：${label}`} />
+                                        <Chip key={label} size="small" variant="outlined" label={t('modelCatalog.page.styleControlAdvanced', { label })} />
                                       ))}
                                     </Stack>
                                   )}
@@ -2234,14 +2265,12 @@ export default function ModelCatalogPage() {
                               )}
                               {selectedEntry.detailed_specs.voice_synthesis.voice_clone?.input_requirements && (
                                 <Typography variant="body2" color="text.secondary">
-                                  复刻样本：
-                                  {(selectedEntry.detailed_specs.voice_synthesis.voice_clone.input_requirements.supported_formats || []).join(' / ') || '-'}
-                                  {' · '}
-                                  {selectedEntry.detailed_specs.voice_synthesis.voice_clone.input_requirements.min_duration_seconds || '-'}
-                                  s - {selectedEntry.detailed_specs.voice_synthesis.voice_clone.input_requirements.max_duration_seconds || '-'}
-                                  s
+                                  {t('modelCatalog.page.cloneSample', {
+                                    formats: (selectedEntry.detailed_specs.voice_synthesis.voice_clone.input_requirements.supported_formats || []).join(' / ') || '-',
+                                    range: `${selectedEntry.detailed_specs.voice_synthesis.voice_clone.input_requirements.min_duration_seconds || '-'}s - ${selectedEntry.detailed_specs.voice_synthesis.voice_clone.input_requirements.max_duration_seconds || '-'}s`,
+                                  })}
                                   {selectedEntry.detailed_specs.voice_synthesis.voice_clone.input_requirements.recommended_duration
-                                    ? `，建议 ${selectedEntry.detailed_specs.voice_synthesis.voice_clone.input_requirements.recommended_duration}`
+                                    ? t('modelCatalog.page.cloneSampleRecommended', { duration: selectedEntry.detailed_specs.voice_synthesis.voice_clone.input_requirements.recommended_duration })
                                     : ''}
                                 </Typography>
                               )}
@@ -2270,11 +2299,11 @@ export default function ModelCatalogPage() {
                   <Stack spacing={2.5}>
                     {selectedEntry.usage_guide && selectedEntry.usage_guide.sections && selectedEntry.usage_guide.sections.length > 0 ? (
                       <UsageGuideSection
-                        title={selectedEntry.usage_guide.title || '使用指南'}
+                        title={selectedEntry.usage_guide.title || t('modelCatalog.page.usageGuideTitle')}
                         sections={selectedEntry.usage_guide.sections}
                       />
                     ) : (
-                      <Alert severity="info">暂无使用指南</Alert>
+                      <Alert severity="info">{t('modelCatalog.page.usageGuideEmpty')}</Alert>
                     )}
                   </Stack>
                 )}
@@ -2285,25 +2314,25 @@ export default function ModelCatalogPage() {
                     <Grid container spacing={2.5}>
                       <Grid item xs={12} md={6}>
                         <LabeledValueSection
-                          title="调用栈与统一入口"
+                          title={t('modelCatalog.page.apiCallStack')}
                           items={selectedEntry.integration_profile?.calling_stack || []}
                         />
                       </Grid>
                       <Grid item xs={12} md={6}>
                         <LabeledValueSection
-                          title="环境变量约定"
+                          title={t('modelCatalog.page.apiEnvBindings')}
                           items={selectedEntry.integration_profile?.environment_bindings || []}
                         />
                       </Grid>
                       <Grid item xs={12} md={6}>
                         <SupportMatrixSection
-                          title="原生参数矩阵"
+                          title={t('modelCatalog.page.apiNativeParams')}
                           items={selectedEntry.integration_profile?.native_parameters || []}
                         />
                       </Grid>
                       <Grid item xs={12} md={6}>
                         <SupportMatrixSection
-                          title="响应能力矩阵"
+                          title={t('modelCatalog.page.apiResponseFeatures')}
                           items={selectedEntry.integration_profile?.response_features || []}
                         />
                       </Grid>
@@ -2311,7 +2340,7 @@ export default function ModelCatalogPage() {
 
                     {selectedEntry.integration_profile?.tooling_badges && selectedEntry.integration_profile.tooling_badges.length > 0 && (
                       <Paper variant="outlined" sx={{ p: 2.25, borderRadius: 3 }}>
-                        <Typography variant="subtitle1" sx={{ fontWeight: 700, mb: 1.5 }}>工具支持</Typography>
+                        <Typography variant="subtitle1" sx={{ fontWeight: 700, mb: 1.5 }}>{t('modelCatalog.page.apiTooling')}</Typography>
                         <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
                           {selectedEntry.integration_profile.tooling_badges.map((item) => (
                             <Chip key={item} label={item} variant="outlined" />
@@ -2321,9 +2350,9 @@ export default function ModelCatalogPage() {
                     )}
 
                     <Paper variant="outlined" sx={{ p: 2.25, borderRadius: 3 }}>
-                      <Typography variant="subtitle1" sx={{ fontWeight: 700, mb: 1.5 }}>封装层建议</Typography>
+                      <Typography variant="subtitle1" sx={{ fontWeight: 700, mb: 1.5 }}>{t('modelCatalog.page.apiWrapperTitle')}</Typography>
                       <Alert severity="success" variant="outlined">
-                        {selectedEntry.integration_profile?.recommended_wrapper || '建议通过统一封装层屏蔽不同供应商 API 差异。'}
+                        {selectedEntry.integration_profile?.recommended_wrapper || t('modelCatalog.page.apiWrapperFallback')}
                       </Alert>
                     </Paper>
 
@@ -2334,7 +2363,7 @@ export default function ModelCatalogPage() {
                         {(selectedEntry.integration_profile?.client_entrypoints || []).length > 0 && (
                           <Grid item xs={12} md={6}>
                             <LabeledValueSection
-                              title="前端调用入口"
+                              title={t('modelCatalog.page.apiClientEntrypoints')}
                               items={selectedEntry.integration_profile?.client_entrypoints || []}
                             />
                           </Grid>
@@ -2342,7 +2371,7 @@ export default function ModelCatalogPage() {
                         {(selectedEntry.integration_profile?.api_references || []).length > 0 && (
                           <Grid item xs={12} md={6}>
                             <ResourceLinkSection
-                              title="API 文档"
+                              title={t('modelCatalog.page.apiDocs')}
                               items={selectedEntry.integration_profile?.api_references || []}
                             />
                           </Grid>
@@ -2350,7 +2379,7 @@ export default function ModelCatalogPage() {
                         {selectedEntry.integration_notes.length > 0 && (
                           <Grid item xs={12}>
                             <BulletSection
-                              title="接入备注"
+                              title={t('modelCatalog.page.apiNotes')}
                               items={selectedEntry.integration_notes}
                             />
                           </Grid>
@@ -2366,7 +2395,7 @@ export default function ModelCatalogPage() {
                         {voiceDesignConstraints.length > 0 && (
                           <Grid item xs={12} md={voiceDesignPrinciples.length > 0 || voiceLifecycleStatuses.length > 0 ? 4 : 6}>
                             <BulletSection
-                              title="声音设计约束"
+                              title={t('modelCatalog.page.voiceDesignConstraints')}
                               items={voiceDesignConstraints}
                             />
                           </Grid>
@@ -2374,7 +2403,7 @@ export default function ModelCatalogPage() {
                         {voiceDesignPrinciples.length > 0 && (
                           <Grid item xs={12} md={voiceLifecycleStatuses.length > 0 ? 4 : 6}>
                             <BulletSection
-                              title="高质量描述原则"
+                              title={t('modelCatalog.page.voiceQualityPrinciples')}
                               items={voiceDesignPrinciples}
                             />
                           </Grid>
@@ -2382,7 +2411,7 @@ export default function ModelCatalogPage() {
                         {voiceLifecycleStatuses.length > 0 && (
                           <Grid item xs={12} md={voiceDesignConstraints.length > 0 || voiceDesignPrinciples.length > 0 ? 4 : 6}>
                             <LabeledValueSection
-                              title="音色状态机"
+                              title={t('modelCatalog.page.voiceLifecycleStatus')}
                               items={voiceLifecycleStatuses}
                             />
                           </Grid>
@@ -2390,7 +2419,7 @@ export default function ModelCatalogPage() {
                         {voiceDesignDimensions.length > 0 && (
                           <Grid item xs={12}>
                             <LabeledValueSection
-                              title="声音描述维度参考"
+                              title={t('modelCatalog.page.voiceDesignDimensions')}
                               items={voiceDesignDimensions}
                             />
                           </Grid>
@@ -2401,7 +2430,7 @@ export default function ModelCatalogPage() {
                     <Grid container spacing={2.5}>
                       <Grid item xs={12} lg={6}>
                         <CodeSnippetSectionWithCopy
-                          title="Python 统一调用模板"
+                          title={t('modelCatalog.page.pythonTemplate')}
                           language="python"
                           code={selectedEntry.integration_profile?.sdk_templates?.python}
                           onCopy={() => {
@@ -2416,7 +2445,7 @@ export default function ModelCatalogPage() {
                       </Grid>
                       <Grid item xs={12} lg={6}>
                         <CodeSnippetSectionWithCopy
-                          title="JavaScript / SDK 模板"
+                          title={t('modelCatalog.page.jsTemplate')}
                           language="javascript"
                           code={selectedEntry.integration_profile?.sdk_templates?.javascript}
                           onCopy={() => {
@@ -2437,13 +2466,13 @@ export default function ModelCatalogPage() {
                 {detailTab === 3 && (
                   <Stack spacing={2.5}>
                     <Alert severity="info" variant="outlined">
-                      这一页是给 AI 设计功能时优先参考的精简上下文。环境变量、SDK 模板和工程接入细节请继续查看“API调用”。
+                      {t('modelCatalog.page.aiDesignAlert')}
                     </Alert>
 
                     <Paper variant="outlined" sx={{ p: 2.5, borderRadius: 3 }}>
-                      <Typography variant="h6" sx={{ fontWeight: 700, mb: 1.5 }}>AI 关注摘要</Typography>
+                      <Typography variant="h6" sx={{ fontWeight: 700, mb: 1.5 }}>{t('modelCatalog.page.aiDesignSummary')}</Typography>
                       <Typography variant="body1" sx={{ lineHeight: 1.9, mb: 2 }}>
-                        {aiDesignContext?.summary || '暂无 AI 设计摘要'}
+                        {aiDesignContext?.summary || t('modelCatalog.page.aiDesignSummaryEmpty')}
                       </Typography>
                       <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
                         {(aiDesignContext?.core_capabilities || []).map((item) => (
@@ -2454,45 +2483,45 @@ export default function ModelCatalogPage() {
 
                     <Grid container spacing={2.5}>
                       <Grid item xs={12} md={6}>
-                        <BulletSection title="硬约束" items={aiDesignContext?.hard_constraints || []} />
+                        <BulletSection title={t('modelCatalog.page.aiHardConstraints')} items={aiDesignContext?.hard_constraints || []} />
                       </Grid>
                       <Grid item xs={12} md={6}>
-                        <BulletSection title="必经流程" items={aiDesignContext?.required_workflow || []} />
+                        <BulletSection title={t('modelCatalog.page.aiRequiredWorkflow')} items={aiDesignContext?.required_workflow || []} />
                       </Grid>
                       <Grid item xs={12} md={6}>
                         <LabeledValueSection
-                          title="关键参数"
+                          title={t('modelCatalog.page.aiCriticalParams')}
                           items={
                             (aiDesignContext?.critical_parameters || []).length > 0
                               ? (aiDesignContext?.critical_parameters || []).map((item) => ({
                                 label: `${item.name}${item.required ? ' *' : ''}`,
                                 value: item.meaning,
                               }))
-                              : [{ label: '暂无参数', value: '当前模型未补充关键参数说明。' }]
+                              : [{ label: t('modelCatalog.page.aiParamsEmpty'), value: t('modelCatalog.page.aiParamsEmptyDesc') }]
                           }
                         />
                       </Grid>
                       <Grid item xs={12} md={6}>
-                        <BulletSection title="输入要求" items={aiDesignContext?.input_requirements || []} />
+                        <BulletSection title={t('modelCatalog.page.aiInputRequirements')} items={aiDesignContext?.input_requirements || []} />
                       </Grid>
                       <Grid item xs={12} md={6}>
-                        <BulletSection title="输出契约" items={aiDesignContext?.output_contract || []} />
+                        <BulletSection title={t('modelCatalog.page.aiOutputContract')} items={aiDesignContext?.output_contract || []} />
                       </Grid>
                       <Grid item xs={12} md={6}>
-                        <BulletSection title="异常场景" items={aiDesignContext?.error_cases || []} />
+                        <BulletSection title={t('modelCatalog.page.aiErrorCases')} items={aiDesignContext?.error_cases || []} />
                       </Grid>
                       <Grid item xs={12}>
-                        <BulletSection title="设计提示" items={aiDesignContext?.design_tips || []} />
+                        <BulletSection title={t('modelCatalog.page.aiDesignTips')} items={aiDesignContext?.design_tips || []} />
                       </Grid>
                     </Grid>
 
                     <Grid container spacing={2.5}>
                       <Grid item xs={12} md={5}>
-                        <ResourceLinkSection title="官方文档" items={aiDesignContext?.official_docs || []} />
+                        <ResourceLinkSection title={t('modelCatalog.page.aiOfficialDocs')} items={aiDesignContext?.official_docs || []} />
                       </Grid>
                       <Grid item xs={12} md={7}>
                         <CodeSnippetSectionWithCopy
-                          title="AI 精简上下文 JSON"
+                          title={t('modelCatalog.page.aiContextJson')}
                           language="json"
                           code={aiDesignPromptPayload ? JSON.stringify(aiDesignPromptPayload, null, 2) : ''}
                           onCopy={() => {
@@ -2511,13 +2540,13 @@ export default function ModelCatalogPage() {
                       <Grid container spacing={2.5}>
                         {voiceDesignConstraints.length > 0 && (
                           <Grid item xs={12} md={6}>
-                            <BulletSection title="声音设计规则" items={voiceDesignConstraints} />
+                            <BulletSection title={t('modelCatalog.page.aiVoiceDesignRules')} items={voiceDesignConstraints} />
                           </Grid>
                         )}
                         {voiceLifecycleStatuses.length > 0 && (
                           <Grid item xs={12} md={6}>
                             <LabeledValueSection
-                              title="音色状态机"
+                              title={t('modelCatalog.page.voiceLifecycleStatus')}
                               items={voiceLifecycleStatuses}
                             />
                           </Grid>
@@ -2525,7 +2554,7 @@ export default function ModelCatalogPage() {
                         {voiceDesignDimensions.length > 0 && (
                           <Grid item xs={12}>
                             <LabeledValueSection
-                              title="声音描述维度"
+                              title={t('modelCatalog.page.aiVoiceDesignDimensions')}
                               items={voiceDesignDimensions}
                             />
                           </Grid>
@@ -2536,7 +2565,7 @@ export default function ModelCatalogPage() {
                 )}
               </Stack>
             ) : (
-              <Alert severity="info">请选择一个模型查看详情。</Alert>
+              <Alert severity="info">{t('modelCatalog.page.selectModelHint')}</Alert>
             )}
           </DialogContent>
         </Dialog>

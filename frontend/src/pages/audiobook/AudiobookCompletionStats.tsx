@@ -3,15 +3,17 @@ import {
   Paper,
   Typography,
 } from '@mui/material'
+import { useTranslation } from 'react-i18next'
 
 import { audiobookColors } from './audiobookTheme'
+import type { TranslateFn } from './audioLibraryDisplay'
 import type { AudiobookProjectDetail } from './types'
 
 interface AudiobookCompletionStatsProps {
   audiobookProject: AudiobookProjectDetail
 }
 
-const buildCompletionStats = (audiobookProject: AudiobookProjectDetail) => {
+const buildCompletionStats = (audiobookProject: AudiobookProjectDetail, t: TranslateFn) => {
   const total = audiobookProject.total_chapters || 0
   const completed = audiobookProject.completed_chapters || 0
   const failed = audiobookProject.failed_chapters || 0
@@ -20,15 +22,15 @@ const buildCompletionStats = (audiobookProject: AudiobookProjectDetail) => {
 
   return [
     {
-      label: '完成章节',
+      label: t('audiobook.audiobookCompletionStats.completedChapters'),
       value: `${completed}/${total}`,
-      sub: failed > 0 ? `${failed} 章失败` : undefined,
+      sub: failed > 0 ? t('audiobook.audiobookCompletionStats.failedChapters', { total: failed }) : undefined,
       backgroundColor: audiobookColors.brandSoft,
       color: audiobookColors.brand,
       borderColor: audiobookColors.brand,
     },
     {
-      label: '完成率',
+      label: t('audiobook.audiobookCompletionStats.completionRate'),
       value: `${completionRate}%`,
       sub: undefined,
       backgroundColor: audiobookColors.successSoft,
@@ -36,7 +38,7 @@ const buildCompletionStats = (audiobookProject: AudiobookProjectDetail) => {
       borderColor: audiobookColors.successMain,
     },
     {
-      label: '总时长(分钟)',
+      label: t('audiobook.audiobookCompletionStats.totalDuration'),
       value: ((audiobookProject.total_duration || 0) / 60).toFixed(1),
       sub: totalSizeMB !== '0.0' ? `${totalSizeMB} MB` : undefined,
       backgroundColor: audiobookColors.infoSoft,
@@ -44,21 +46,23 @@ const buildCompletionStats = (audiobookProject: AudiobookProjectDetail) => {
       borderColor: audiobookColors.primary,
     },
     {
-      label: '总成本',
+      label: t('audiobook.audiobookCompletionStats.totalCost'),
       value: `￥${(audiobookProject.total_cost || 0).toFixed(2)}`,
       sub: undefined,
-      backgroundColor: '#fff3e0',
-      color: '#e65100',
-      borderColor: '#ff9800',
+      backgroundColor: audiobookColors.warningSoft,
+      color: audiobookColors.warning,
+      borderColor: audiobookColors.warningMain,
     },
   ]
 }
 
 const AudiobookCompletionStats = ({
   audiobookProject,
-}: AudiobookCompletionStatsProps) => (
+}: AudiobookCompletionStatsProps) => {
+  const { t } = useTranslation()
+  return (
   <Grid container spacing={2} sx={{ mb: 3 }}>
-    {buildCompletionStats(audiobookProject).map((item) => (
+    {buildCompletionStats(audiobookProject, t).map((item) => (
       <Grid key={item.label} item xs={12} sm={3}>
         <Paper
           sx={{
@@ -86,6 +90,7 @@ const AudiobookCompletionStats = ({
       </Grid>
     ))}
   </Grid>
-)
+  )
+}
 
 export default AudiobookCompletionStats

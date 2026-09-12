@@ -5,6 +5,7 @@ import {
 } from '@mui/material'
 import DeleteIcon from '@mui/icons-material/Delete'
 import ReplayIcon from '@mui/icons-material/Replay'
+import { useTranslation } from 'react-i18next'
 
 import { audiobookColorRoles } from './audiobookTheme'
 
@@ -22,7 +23,9 @@ const ChapterActionsMenu = ({
   onClose,
   onRegenerate,
   onOpenDeleteDialog,
-}: ChapterActionsMenuProps) => (
+}: ChapterActionsMenuProps) => {
+  const { t } = useTranslation()
+  return (
   <Menu
     anchorEl={anchorEl}
     open={Boolean(anchorEl)}
@@ -39,15 +42,16 @@ const ChapterActionsMenu = ({
     {canRegenerate && (
       <MenuItem onClick={onRegenerate}>
         <ReplayIcon fontSize="small" sx={{ mr: 1 }} />
-        重新生成
+        {t('audiobook.chapterActionsMenu.regenerate')}
       </MenuItem>
     )}
     {canRegenerate && <Divider />}
     <MenuItem onClick={onOpenDeleteDialog} sx={{ color: audiobookColorRoles.destructiveAction.main }}>
       <DeleteIcon fontSize="small" sx={{ mr: 1 }} />
-      删除章节
+      {t('audiobook.chapterActionsMenu.deleteChapter')}
     </MenuItem>
   </Menu>
-)
+  )
+}
 
 export default ChapterActionsMenu

@@ -36,5 +36,6 @@ export function buildUserCenterAssetConnectedOverviewRowsOptionsFromInput(
     formatPointsValueLabel: options.formatPointsValueLabel,
     formatUpdatedAtLabel: options.formatUpdatedAtLabel,
     getSourceLabel: options.getSourceLabel,
+    t: options.t,
   }
 }

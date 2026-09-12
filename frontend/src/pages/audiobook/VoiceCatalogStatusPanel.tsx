@@ -4,6 +4,7 @@ import {
   Button,
   Typography,
 } from '@mui/material'
+import { useTranslation } from 'react-i18next'
 
 import CosyVoiceVoiceWorkbench from './CosyVoiceVoiceWorkbench'
 import type { CosyVoiceWorkbench } from './CosyVoiceVoiceWorkbench'
@@ -18,10 +19,10 @@ import type {
 
 type VoiceCatalogNoticeSeverity = 'success' | 'warning' | 'info'
 
-const MIMO_VOICE_CLONE_NOTICE = 'MiMo Voice Clone 使用 audio.voice 样本；请在音色管理窗口上传或录制授权样本并保存为可复用音色，再到角色音色下拉中选用。'
-const MIMO_VOICE_DESIGN_NOTICE = 'MiMo Voice Design 不创建系统音色；请先在上方 MiMo 本地音色中填写 voice design prompt 并保存为可复用音色，再到角色音色下拉中选用。生成时后端会把该音色展开到 role=user，朗读文本仍放在 role=assistant。'
+const MIMO_VOICE_CLONE_NOTICE = 'audiobook.voiceCatalogStatusPanel.mimoCloneNotice'
+const MIMO_VOICE_DESIGN_NOTICE = 'audiobook.voiceCatalogStatusPanel.mimoDesignNotice'
 
-const STEPAUDIO_VOICE_CLONE_NOTICE = 'StepAudio 2.5 TTS 支持 Zero-shot 复刻试听；当前先保存本地参考样本和可选 file_id，正式自生成音色资产创建接口待官方合同确认后再接入。'
+const STEPAUDIO_VOICE_CLONE_NOTICE = 'audiobook.voiceCatalogStatusPanel.stepAudioCloneNotice'
 
 interface VoiceCatalogStatusPanelProps {
   ttsModel: TtsModel
@@ -53,7 +54,9 @@ const VoiceCatalogStatusPanel = ({
   customVoicePreviewingId,
   onPreviewCustomVoice,
   onFetchVoiceCatalog,
-}: VoiceCatalogStatusPanelProps) => (
+}: VoiceCatalogStatusPanelProps) => {
+  const { t } = useTranslation()
+  return (
   <Box sx={{ flex: 1, minWidth: 260 }}>
     {voiceCatalogMeta && (
       <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
@@ -97,17 +100,17 @@ const VoiceCatalogStatusPanel = ({
     )}
     {ttsModel === 'mimo-v2.5-tts-voiceclone' && (
       <Alert severity="info" sx={{ mb: 1 }}>
-        {MIMO_VOICE_CLONE_NOTICE}
+        {t(MIMO_VOICE_CLONE_NOTICE)}
       </Alert>
     )}
     {ttsModel === 'mimo-v2.5-tts-voicedesign' && (
       <Alert severity="info" sx={{ mb: 1 }}>
-        {MIMO_VOICE_DESIGN_NOTICE}
+        {t(MIMO_VOICE_DESIGN_NOTICE)}
       </Alert>
     )}
     {ttsModel === 'stepaudio-2.5-tts' && (
       <Alert severity="info" sx={{ mb: 1 }}>
-        {STEPAUDIO_VOICE_CLONE_NOTICE}
+        {t(STEPAUDIO_VOICE_CLONE_NOTICE)}
       </Alert>
     )}
     {voiceError && (
@@ -115,7 +118,9 @@ const VoiceCatalogStatusPanel = ({
         severity="warning"
         action={
           <Button size="small" onClick={onFetchVoiceCatalog} disabled={voiceLoading}>
-            {voiceLoading ? '同步中...' : '重新同步'}
+            {voiceLoading
+              ? t('audiobook.voiceCatalogStatusPanel.syncing')
+              : t('audiobook.voiceCatalogStatusPanel.resync')}
           </Button>
         }
         sx={{ mb: 1 }}
@@ -124,6 +129,7 @@ const VoiceCatalogStatusPanel = ({
       </Alert>
     )}
   </Box>
-)
+  )
+}
 
 export default VoiceCatalogStatusPanel

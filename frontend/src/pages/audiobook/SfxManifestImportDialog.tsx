@@ -17,6 +17,7 @@ import {
 } from '@mui/material'
 import CloseIcon from '@mui/icons-material/Close'
 import UploadFileIcon from '@mui/icons-material/UploadFile'
+import { useTranslation } from 'react-i18next'
 
 import { apiClient } from '../../services/api'
 
@@ -45,6 +46,7 @@ const EMPTY_STATS: ImportStats = {
 }
 
 const SfxManifestImportDialog = ({ open, onClose, onImported }: SfxManifestImportDialogProps) => {
+  const { t } = useTranslation()
   const [manifestPath, setManifestPath] = useState('sfx_import_manifest_draft.jsonl')
   const [sourceDir, setSourceDir] = useState('approved_sfx')
   const [overwrite, setOverwrite] = useState(false)
@@ -76,7 +78,7 @@ const SfxManifestImportDialog = ({ open, onClose, onImported }: SfxManifestImpor
 
   const runImport = async (dryRun: boolean) => {
     if (!dryRun && !canImport) {
-      setError('导入条件已变化，请重新执行 dry_run 预检')
+      setError(t('audiobook.sfxManifestImport.staleConditionError'))
       return
     }
     if (dryRun) {
@@ -99,15 +101,20 @@ const SfxManifestImportDialog = ({ open, onClose, onImported }: SfxManifestImpor
       if (dryRun) {
         setPreviewRequestKey(currentRequestKey)
         setConfirmed(false)
-        setMessage(`预检完成：候选 ${res.data.stats.candidates} 个，可导入 ${res.data.records.length} 个。`)
+        setMessage(t('audiobook.sfxManifestImport.precheckDone', {
+          candidates: res.data.stats.candidates,
+          importable: res.data.records.length,
+        }))
       } else {
         setPreviewRequestKey(null)
         setConfirmed(false)
-        setMessage(`manifest 导入完成：已导入 ${res.data.stats.imported} 个音效。`)
+        setMessage(t('audiobook.sfxManifestImport.importDone', { total: res.data.stats.imported }))
         onImported?.()
       }
     } catch {
-      setError(dryRun ? 'manifest 预检失败，请检查路径和授权元数据' : 'manifest 导入失败，请先完成预检并确认导入')
+      setError(dryRun
+        ? t('audiobook.sfxManifestImport.precheckFailed')
+        : t('audiobook.sfxManifestImport.importFailed'))
     } finally {
       setChecking(false)
       setImporting(false)
@@ -127,32 +134,32 @@ const SfxManifestImportDialog = ({ open, onClose, onImported }: SfxManifestImpor
   return (
     <Dialog open={open} onClose={handleClose} maxWidth="sm" fullWidth>
       <DialogTitle sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        manifest 导入
+        {t('audiobook.sfxManifestImport.title')}
         <IconButton onClick={handleClose} size="small">
           <CloseIcon />
         </IconButton>
       </DialogTitle>
       <DialogContent dividers>
         <Alert severity="info" sx={{ mb: 2 }}>
-          仅导入本地已授权素材。请先 dry_run 预检，确认许可、来源和文件均通过后再执行实际导入。
+          {t('audiobook.sfxManifestImport.infoHint')}
         </Alert>
 
         <Box sx={{ display: 'grid', gap: 1.5 }}>
           <TextField
             size="small"
-            label="manifest 路径"
+            label={t('audiobook.sfxManifestImport.manifestPathLabel')}
             value={manifestPath}
             onChange={(event) => setManifestPath(event.target.value)}
             disabled={checking || importing}
-            helperText="必须位于音频素材库目录内"
+            helperText={t('audiobook.sfxManifestImport.manifestPathHelper')}
           />
           <TextField
             size="small"
-            label="本地素材目录"
+            label={t('audiobook.sfxCandidateReview.sourceDirLabel')}
             value={sourceDir}
             onChange={(event) => setSourceDir(event.target.value)}
             disabled={checking || importing}
-            helperText="manifest 中的 file 字段会按该目录解析"
+            helperText={t('audiobook.sfxManifestImport.sourceDirHelper')}
           />
           <FormControlLabel
             control={
@@ -162,19 +169,19 @@ const SfxManifestImportDialog = ({ open, onClose, onImported }: SfxManifestImpor
                 disabled={checking || importing}
               />
             }
-            label="允许覆盖已存在文件"
+            label={t('audiobook.sfxManifestImport.overwriteLabel')}
           />
         </Box>
 
         {stats && (
           <Box sx={{ display: 'flex', gap: 0.75, flexWrap: 'wrap', mt: 2 }}>
-            <Chip label={`候选 ${stats.candidates}`} size="small" />
-            <Chip label={`可导入 ${recordCount}`} size="small" color="success" />
-            <Chip label={`已导入 ${stats.imported}`} size="small" color="success" variant="outlined" />
-            <Chip label={`许可拒绝 ${stats.rejected_license}`} size="small" />
-            <Chip label={`文件拒绝 ${stats.rejected_file}`} size="small" />
-            <Chip label={`质量拒绝 ${stats.rejected_quality}`} size="small" />
-            <Chip label={`已存在 ${stats.skipped_existing}`} size="small" />
+            <Chip label={t('audiobook.sfxManifestImport.candidateChip', { total: stats.candidates })} size="small" />
+            <Chip label={t('audiobook.sfxManifestImport.importableChip', { total: recordCount })} size="small" color="success" />
+            <Chip label={t('audiobook.sfxManifestImport.importedChip', { total: stats.imported })} size="small" color="success" variant="outlined" />
+            <Chip label={t('audiobook.sfxManifestImport.licenseRejectedChip', { total: stats.rejected_license })} size="small" />
+            <Chip label={t('audiobook.sfxManifestImport.fileRejectedChip', { total: stats.rejected_file })} size="small" />
+            <Chip label={t('audiobook.sfxManifestImport.qualityRejectedChip', { total: stats.rejected_quality })} size="small" />
+            <Chip label={t('audiobook.sfxManifestImport.existingChip', { total: stats.skipped_existing })} size="small" />
           </Box>
         )}
 
@@ -190,20 +197,20 @@ const SfxManifestImportDialog = ({ open, onClose, onImported }: SfxManifestImpor
               disabled={!stats || stats.candidates === 0 || !previewIsCurrent || checking || importing}
             />
           }
-          label="我确认这些素材已获得商用授权，并同意写入本地音效库索引"
+          label={t('audiobook.sfxManifestImport.confirmLabel')}
         />
         <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
-          实际导入会复制本地文件并写入 `sound_effects_index.json`。
+          {t('audiobook.sfxManifestImport.indexHint')}
         </Typography>
       </DialogContent>
       <DialogActions>
-        <Button onClick={handleClose}>关闭</Button>
+        <Button onClick={handleClose}>{t('action.close')}</Button>
         <Button
           variant="outlined"
           onClick={() => runImport(true)}
           disabled={checking || importing}
         >
-          {checking ? '预检中...' : 'dry_run 预检'}
+          {checking ? t('audiobook.sfxManifestImport.checkingText') : t('audiobook.sfxManifestImport.dryRunPrecheck')}
         </Button>
         <Button
           variant="contained"
@@ -211,7 +218,7 @@ const SfxManifestImportDialog = ({ open, onClose, onImported }: SfxManifestImpor
           onClick={() => runImport(false)}
           disabled={checking || importing || !canImport}
         >
-          执行导入
+          {t('audiobook.sfxManifestImport.executeImport')}
         </Button>
       </DialogActions>
     </Dialog>

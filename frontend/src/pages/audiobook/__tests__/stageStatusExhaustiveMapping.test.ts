@@ -28,8 +28,8 @@ describe('StageStatus 穷举映射完备（R15/P1-3）', () => {
     for (const status of allStatuses) {
       expect(STAGE_STATUS_LABELS[status], `缺少 label: ${status}`).toBeTruthy()
     }
-    expect(STAGE_STATUS_LABELS.cancelled).toBe('已取消')
-    expect(STAGE_STATUS_LABELS.completed_with_partial_failure).toBe('部分完成')
+    expect(STAGE_STATUS_LABELS.cancelled).toBe('audiobook.stageMetricsDialog.stageStatusCancelled')
+    expect(STAGE_STATUS_LABELS.completed_with_partial_failure).toBe('audiobook.stageMetricsDialog.stageStatusPartialFailure')
   })
 
   it('audiobookTheme.taskStatus 覆盖全部状态键', () => {

@@ -17,6 +17,8 @@ import {
   isUserAssetPreviewPending,
   resolveUserAssetPreviewUrl,
 } from '@/contracts/userAssetPreviewResolvers'
+import { useTranslation } from 'react-i18next'
+
 import type { UserAssetRecord } from '@/services/api'
 
 import UserAssetPreviewMedia from './UserAssetPreviewMedia'
@@ -59,7 +61,8 @@ export default function UserAssetCard(props: UserAssetCardProps) {
     onToggleArchived,
   } = props
 
-  const sourceInfo = getUserAssetSourceInfo(asset, projectTitleMap)
+  const { t } = useTranslation()
+  const sourceInfo = getUserAssetSourceInfo(asset, projectTitleMap, t)
   const previewUrl = resolveUserAssetPreviewUrl(asset, {
     localObjectUrl,
     protectedObjectUrl,
@@ -71,7 +74,7 @@ export default function UserAssetCard(props: UserAssetCardProps) {
   const presentation = buildUserAssetCardPresentation(asset, sourceInfo, {
     createdAtLabel,
     hasLocalObjectUrl: Boolean(localObjectUrl),
-  })
+  }, t)
 
   return (
     <Grid item xs={12} md={6} lg={4}>

@@ -62,18 +62,18 @@ describe('useAudiobookChapterRemix source contract', () => {
       'remixMissingSegments',
       'onForceRemixChapter',
       'onCloseRemixMissingDialog',
-      '重新混合整章',
-      '仍要混音',
-      'REQUIRE_CONFIRMATION_REASON_LABELS',
+      'audiobook.scriptEditor.remixChapter',
+      'audiobook.scriptEditor.forceRemix',
+      'REQUIRE_CONFIRMATION_REASON_LABEL_KEYS',
     ]) {
       expect(editorDialogSource).toContain(marker)
     }
   })
 
   it('describes stale and per-track remix failures without calling existing audio missing', () => {
-    expect(editorDialogSource).toContain("stale_audio: '音频与当前片段文本或演绎参数不一致'")
-    expect(editorDialogSource).toContain('没有可用于当前剧本版本的完整音频')
-    expect(editorDialogSource).toContain('REQUIRE_CONFIRMATION_ASSET_LABELS')
+    expect(editorDialogSource).toContain("stale_audio: 'audiobook.scriptEditor.reasonLabels.staleAudio'")
+    expect(editorDialogSource).toContain('audiobook.scriptEditor.remixMissingBody')
+    expect(editorDialogSource).toContain('REQUIRE_CONFIRMATION_ASSET_LABEL_KEYS')
     expect(editorDialogSource).toContain("segment.asset_type || 'voice'")
     expect(editorDialogSource).not.toContain('以下片段没有可用的持久化音频')
   })

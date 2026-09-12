@@ -1,5 +1,8 @@
+import type { TFunction } from 'i18next'
 import type { UserAssetProjectTitleMap } from '@/contracts/userAssetSourceReaders'
 import type { UserCenterPointsOverviewResponse } from '@/services/api'
+
+const DEFAULT_TRANSLATE: TFunction = ((key: string) => key) as TFunction
 
 export type UserCenterAssetWorkspaceProjectInput = {
   id: number
@@ -18,9 +21,11 @@ export type UserCenterAssetWorkspaceInput = {
 
 export function buildUserCenterAssetProjectTitleMap(
   projects: UserCenterAssetWorkspaceProjectInput[] = [],
+  t?: TFunction,
 ): UserAssetProjectTitleMap {
+  const translate = t ?? DEFAULT_TRANSLATE
   return new Map(
-    projects.map((project) => [project.id, project.title?.trim() || `项目 #${project.id}`] as const),
+    projects.map((project) => [project.id, project.title?.trim() || translate('userAsset.projectFallback', { id: project.id })] as const),
   )
 }
 
@@ -36,9 +41,10 @@ export function extractUserCenterConnectedUserAssetCount(
 export function buildUserCenterAssetWorkspaceInput(options: {
   projects?: UserCenterAssetWorkspaceProjectInput[]
   pointsOverview?: UserCenterAssetWorkspacePointsOverviewInput | null
+  t?: TFunction
 }): UserCenterAssetWorkspaceInput {
   return {
-    projectTitleMap: buildUserCenterAssetProjectTitleMap(options.projects),
+    projectTitleMap: buildUserCenterAssetProjectTitleMap(options.projects, options.t),
     connectedUserAssetCount: extractUserCenterConnectedUserAssetCount(options.pointsOverview),
   }
 }

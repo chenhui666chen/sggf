@@ -54,12 +54,12 @@ export const STAGE_CONFIG: readonly StageConfig[] = [
 export const STAGE_KEYS: StageKey[] = STAGE_CONFIG.map((stage) => stage.key)
 
 export const STAGE_STATUS_LABELS: Record<StageStatus, string> = {
-  pending: '等待中',
-  running: '进行中',
-  completed: '已完成',
-  failed: '失败',
-  paused: '已暂停',
-  pause_requested: '暂停中',
-  cancelled: '已取消',
-  completed_with_partial_failure: '部分完成',
+  pending: 'audiobook.stageMetricsDialog.stageStatusPending',
+  running: 'audiobook.stageMetricsDialog.stageStatusRunning',
+  completed: 'audiobook.stageMetricsDialog.stageStatusCompleted',
+  failed: 'audiobook.stageMetricsDialog.stageStatusFailed',
+  paused: 'audiobook.stageMetricsDialog.stageStatusPaused',
+  pause_requested: 'audiobook.stageMetricsDialog.stageStatusPauseRequested',
+  cancelled: 'audiobook.stageMetricsDialog.stageStatusCancelled',
+  completed_with_partial_failure: 'audiobook.stageMetricsDialog.stageStatusPartialFailure',
 }

@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
+import { useTranslation } from 'react-i18next'
+
 import { apiClient, extractApiErrorMessage } from '../../services/api'
 import type { RemixMissingSegment } from '../../services/api'
 import type { SetSnackbar } from './hookTypes'
@@ -20,6 +22,7 @@ export const useAudiobookChapterRemix = ({
   setSnackbar,
   onRemixCompleted,
 }: UseAudiobookChapterRemixParams) => {
+  const { t } = useTranslation()
   const [remixMissingDialogOpen, setRemixMissingDialogOpen] = useState(false)
   const [remixMissingSegments, setRemixMissingSegments] = useState<RemixMissingSegment[]>([])
   const [remixing, setRemixing] = useState(false)
@@ -46,13 +49,13 @@ export const useAudiobookChapterRemix = ({
         stopRemixPolling()
         setRemixing(false)
         setRemixError(null)
-        setSnackbar({ open: true, message: '整章重新混音完成', severity: 'success' })
+        setSnackbar({ open: true, message: t('audiobook.useAudiobookChapterRemix.remixCompleted'), severity: 'success' })
         onRemixCompletedRef.current?.()
       } else if (data?.remix_status === 'failed') {
         stopRemixPolling()
         setRemixing(false)
-        setRemixError(data?.error_message || '整章重新混音失败')
-        setSnackbar({ open: true, message: `整章重新混音失败：${data?.error_message || '未知错误'}`, severity: 'error' })
+        setRemixError(data?.error_message || t('audiobook.useAudiobookChapterRemix.remixFailed'))
+        setSnackbar({ open: true, message: t('audiobook.useAudiobookChapterRemix.remixFailedWithError', { error: data?.error_message || t('audiobook.useAudiobookChapterRemix.unknownError') }), severity: 'error' })
       } else if (REMIX_TERMINAL_STATUSES.has(data?.remix_status ?? '')) {
         stopRemixPolling()
         setRemixing(false)
@@ -60,10 +63,10 @@ export const useAudiobookChapterRemix = ({
     } catch (error: unknown) {
       stopRemixPolling()
       setRemixing(false)
-      const message = await extractApiErrorMessage(error, '查询整章混音状态失败')
+      const message = await extractApiErrorMessage(error, t('audiobook.useAudiobookChapterRemix.pollStatusFailed'))
       setRemixError(message)
     }
-  }, [audiobookProjectId, chapterId, setSnackbar, stopRemixPolling])
+  }, [audiobookProjectId, chapterId, setSnackbar, stopRemixPolling, t])
 
   const startRemixPolling = useCallback(() => {
     stopRemixPolling()
@@ -96,15 +99,15 @@ export const useAudiobookChapterRemix = ({
         startRemixPolling()
       } else {
         setRemixing(false)
-        setSnackbar({ open: true, message: '整章重新混音未触发', severity: 'warning' })
+        setSnackbar({ open: true, message: t('audiobook.useAudiobookChapterRemix.remixNotTriggered'), severity: 'warning' })
       }
     } catch (error: unknown) {
       setRemixing(false)
-      const message = await extractApiErrorMessage(error, '触发整章重新混音失败')
+      const message = await extractApiErrorMessage(error, t('audiobook.useAudiobookChapterRemix.triggerRemixFailed'))
       setRemixError(message)
       setSnackbar({ open: true, message, severity: 'error' })
     }
-  }, [audiobookProjectId, chapterId, setSnackbar, startRemixPolling])
+  }, [audiobookProjectId, chapterId, setSnackbar, startRemixPolling, t])
 
   const handleForceRemixChapter = useCallback(async () => {
     if (!audiobookProjectId || !chapterId) return
@@ -117,15 +120,15 @@ export const useAudiobookChapterRemix = ({
         startRemixPolling()
       } else {
         setRemixing(false)
-        setSnackbar({ open: true, message: '整章重新混音未触发', severity: 'warning' })
+        setSnackbar({ open: true, message: t('audiobook.useAudiobookChapterRemix.remixNotTriggered'), severity: 'warning' })
       }
     } catch (error: unknown) {
       setRemixing(false)
-      const message = await extractApiErrorMessage(error, '触发整章重新混音失败')
+      const message = await extractApiErrorMessage(error, t('audiobook.useAudiobookChapterRemix.triggerRemixFailed'))
       setRemixError(message)
       setSnackbar({ open: true, message, severity: 'error' })
     }
-  }, [audiobookProjectId, chapterId, setSnackbar, startRemixPolling])
+  }, [audiobookProjectId, chapterId, setSnackbar, startRemixPolling, t])
 
   const handleCloseRemixMissingDialog = useCallback(() => {
     setRemixMissingDialogOpen(false)

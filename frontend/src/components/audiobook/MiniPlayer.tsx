@@ -1,4 +1,5 @@
 import { Box, Slider, Typography } from '@mui/material'
+import { useTranslation } from 'react-i18next'
 
 import { audiobookColors } from '../../pages/audiobook/audiobookTheme'
 
@@ -15,11 +16,12 @@ export default function MiniPlayer({
   onSeekPreview: (nextTime: number) => void
   onSeekCommit: (nextTime: number) => void
 }) {
+  const { t } = useTranslation()
   return (
     <Box sx={{ px: 2, py: 1.5, borderTop: `1px solid ${audiobookColors.surfaceBorder}` }}>
       <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <Typography variant="body2" sx={{ fontWeight: 700 }}>
-          播放进度
+          {t('audiobook.browserPlayer.playbackProgress')}
         </Typography>
         <Typography variant="caption" sx={{ color: 'text.secondary' }}>
           {formatTime(currentTime)} / {formatTime(duration)}

@@ -1,4 +1,5 @@
 import React from 'react'
+import type { TFunction } from 'i18next'
 import type { DreamweaverShotSnapshot, DreamweaverVideoClipJob, DreamweaverScriptEntities } from '@/types/dreamweaver'
 import type { ArtifactChipItem, ArtifactLineItem } from './runPagePropsBuilders'
 import {
@@ -90,6 +91,7 @@ interface CreateRunPagePendingRendererDeps {
   openDiagnosticDialog: () => void
   renderPendingLibraryReviewView: () => React.ReactNode
   renderPendingLibraryReadyView: () => React.ReactNode
+  t: TFunction
 }
 
 export function createRunPagePendingRenderer(deps: CreateRunPagePendingRendererDeps) {
@@ -148,14 +150,15 @@ export function createRunPagePendingRenderer(deps: CreateRunPagePendingRendererD
     openDiagnosticDialog,
     renderPendingLibraryReviewView,
     renderPendingLibraryReadyView,
+    t,
   } = deps
 
   const renderPendingRunningView = () => {
     const state = resolvePendingRunningState({
       taskStatus,
       taskQueue,
-    })
-    const stageHint = PENDING_STAGE_HINTS[previewStep] || ''
+    }, t)
+    const stageHint = PENDING_STAGE_HINTS[previewStep] ? t(PENDING_STAGE_HINTS[previewStep]) : ''
     const stageHintElement = stageHint ? <PendingRunningStageHint message={stageHint} /> : null
     const artifactDetails = hasArtifactLines ? <PendingArtifactDetails lines={artifactLines} /> : null
 
@@ -182,7 +185,7 @@ export function createRunPagePendingRenderer(deps: CreateRunPagePendingRendererD
     )
   }
 
-  const scriptEntitySummary = scriptEntities ? summarizeScriptEntities(scriptEntities) : ''
+  const scriptEntitySummary = scriptEntities ? summarizeScriptEntities(scriptEntities, t) : ''
 
   const confirmScriptApproval = () => approveScriptWrapper(true)
   const revokeScriptApproval = () => approveScriptWrapper(false)
@@ -209,7 +212,7 @@ export function createRunPagePendingRenderer(deps: CreateRunPagePendingRendererD
       resumeLoading,
       scriptError,
       entitySummary: scriptEntitySummary,
-    })
+    }, t)
 
     return (
       <PendingScriptApprovalShell
@@ -239,7 +242,7 @@ export function createRunPagePendingRenderer(deps: CreateRunPagePendingRendererD
       getShotFramePrompt: shotFramePromptGetter,
       getShotVideoPromptOverride: shotVideoPromptOverrideGetter,
       snapshotShotById,
-    })
+    }, t)
 
     return (
       <PendingVideoConfirmationJobItem
@@ -285,7 +288,7 @@ export function createRunPagePendingRenderer(deps: CreateRunPagePendingRendererD
       persistedRunId,
       runSnapshotLoading,
       videoClipJobCount,
-    })
+    }, t)
 
     return (
       <PendingVideoConfirmationView
@@ -316,13 +319,13 @@ export function createRunPagePendingRenderer(deps: CreateRunPagePendingRendererD
       promptReviewShotCount,
       snapshotShotCount: snapshotShots.length,
       promptReviewShowAll,
-    })
+    }, t)
 
     return (
       <PendingPromptReviewView
         state={state}
         shotItems={promptReviewShots.map(renderPendingPromptReviewShotItem)}
-        revokeLabel="撤销确认"
+        revokeLabel={t('dreamweaverRun.revokeConfirm')}
         onRefresh={loadRunSnapshot}
         onApprove={confirmPromptReview}
         onRevoke={revokePromptReview}
@@ -333,7 +336,7 @@ export function createRunPagePendingRenderer(deps: CreateRunPagePendingRendererD
   }
 
   const renderPendingEmptyState = () => (
-    <PendingEmptyState description={`点击"开始生成"后，这里会展示「${previewStepLabel}」相关产物与进度。`} />
+    <PendingEmptyState description={t('dreamweaverRun.pendingEmptyState', { stepLabel: previewStepLabel })} />
   )
 
   const renderPendingView = () => {

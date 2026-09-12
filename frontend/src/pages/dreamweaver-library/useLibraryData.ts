@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { apiClient, extractApiErrorMessage } from '@/services/api'
 import { hasRenderableLibraryImage } from '@/utils/dreamweaverLibraryAssetState'
 import { parseLibraryRole } from '@/utils/dreamweaverLibraryRole'
@@ -40,6 +41,7 @@ export interface UseLibraryDataReturn {
 }
 
 export function useLibraryData(params: UseLibraryDataParams): UseLibraryDataReturn {
+  const { t } = useTranslation()
   const { projectId } = params
 
   const [library, setLibrary] = useState<LibraryPayload | null>(null)
@@ -100,11 +102,11 @@ export function useLibraryData(params: UseLibraryDataParams): UseLibraryDataRetu
       }
       setPreviews(previewMap)
     } catch (e: any) {
-      setError(await extractApiErrorMessage(e, '加载素材库失败'))
+      setError(await extractApiErrorMessage(e, t('dreamweaverRun.errorLoadLibraryFailed')))
     } finally {
       setLoading(false)
     }
-  }, [projectId])
+  }, [projectId, t])
   const loadLibraryRef = useRef<() => Promise<void>>(loadLibrary)
   loadLibraryRef.current = loadLibrary
 
@@ -177,12 +179,12 @@ export function useLibraryData(params: UseLibraryDataParams): UseLibraryDataRetu
         await apiClient.approveDreamweaverLibrary(projectId, { roles: [safeRole], approved })
         await loadLibrary()
       } catch (e: any) {
-        setError(await extractApiErrorMessage(e, '更新审核状态失败'))
+        setError(await extractApiErrorMessage(e, t('dreamweaverRun.errorUpdateApprovalFailed')))
       } finally {
         setLoading(false)
       }
     },
-    [loadLibrary, projectId],
+    [loadLibrary, projectId, t],
   )
 
   const uploadLibraryAsset = useCallback(
@@ -190,12 +192,12 @@ export function useLibraryData(params: UseLibraryDataParams): UseLibraryDataRetu
       if (!projectId) return
       if (!file) return
       if (!String(file.name || '').toLowerCase().endsWith('.png')) {
-        setError('仅支持 PNG 文件')
+        setError(t('dreamweaverRun.errorOnlyPngGeneric'))
         return
       }
       const maxMb = 10
       if (typeof file.size === 'number' && file.size > maxMb * 1024 * 1024) {
-        setError(`文件过大（>${maxMb}MB），请压缩后再上传`)
+        setError(t('dreamweaverRun.errorFileTooLarge', { maxMb }))
         return
       }
       setLoading(true)
@@ -204,12 +206,12 @@ export function useLibraryData(params: UseLibraryDataParams): UseLibraryDataRetu
         await apiClient.uploadDreamweaverLibraryAssetFile(assetId, file)
         await loadLibrary()
       } catch (e: any) {
-        setError(await extractApiErrorMessage(e, '上传失败'))
+        setError(await extractApiErrorMessage(e, t('dreamweaverRun.errorUploadFailed')))
       } finally {
         setLoading(false)
       }
     },
-    [loadLibrary, projectId],
+    [loadLibrary, projectId, t],
   )
 
   const updateCollectState = useCallback((assetId: number, patch: Partial<CollectState>) => {
@@ -280,19 +282,19 @@ export function useLibraryData(params: UseLibraryDataParams): UseLibraryDataRetu
         })
         updateCollectState(assetId, {
           loading: false,
-          feedback: { type: 'success', text: '已收录到用户资产' },
+          feedback: { type: 'success', text: t('dreamweaverRun.libraryCollectAdded') },
         })
       } catch (collectError) {
         updateCollectState(assetId, {
           loading: false,
           feedback: {
             type: 'error',
-            text: await extractApiErrorMessage(collectError, '收录到用户资产失败'),
+            text: await extractApiErrorMessage(collectError, t('dreamweaverRun.libraryCollectFailed')),
           },
         })
       }
     },
-    [characterNameById, projectId, updateCollectState],
+    [characterNameById, projectId, updateCollectState, t],
   )
 
   return {

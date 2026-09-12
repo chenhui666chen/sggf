@@ -8,6 +8,7 @@ import {
   Typography,
 } from '@mui/material'
 import SubtitlesIcon from '@mui/icons-material/Subtitles'
+import { useTranslation } from 'react-i18next'
 
 import {
   normalizeSubtitleFormat,
@@ -28,7 +29,9 @@ const BrowserPlayerHeader: React.FC<BrowserPlayerHeaderProps> = ({
   showSubtitles,
   onSubtitleFormatChange,
   onToggleSubtitles,
-}) => (
+}) => {
+  const { t } = useTranslation()
+  return (
   <Box display="flex" justifyContent="space-between" alignItems="center">
     <Typography variant="h6">{projectTitle}</Typography>
     <Box display="flex" gap={1} alignItems="center">
@@ -42,7 +45,7 @@ const BrowserPlayerHeader: React.FC<BrowserPlayerHeaderProps> = ({
           <MenuItem value="ass">ASS</MenuItem>
         </Select>
       </FormControl>
-      <Tooltip title={showSubtitles ? '隐藏字幕' : '显示字幕'}>
+      <Tooltip title={showSubtitles ? t('audiobook.browserPlayer.hideSubtitles') : t('audiobook.browserPlayer.showSubtitles')}>
         <IconButton
           color={showSubtitles ? 'primary' : 'default'}
           onClick={onToggleSubtitles}
@@ -52,6 +55,7 @@ const BrowserPlayerHeader: React.FC<BrowserPlayerHeaderProps> = ({
       </Tooltip>
     </Box>
   </Box>
-)
+  )
+}
 
 export default BrowserPlayerHeader

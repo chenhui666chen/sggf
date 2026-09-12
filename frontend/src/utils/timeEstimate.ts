@@ -1,3 +1,5 @@
+import type { TFunction } from 'i18next'
+
 export interface StageTimeEstimate {
   stage: string
   estimatedMinutes: number
@@ -76,38 +78,43 @@ export function estimateRemainingTime(
   }
 }
 
-export function formatEstimatedTime(minutes: number): string {
+const STAGE_NAME_LABELS: Record<string, { label: string; labelKey: string }> = {
+  init: { label: '初始化', labelKey: 'timeEstimate.stageInit' },
+  script: { label: '剧本生成', labelKey: 'timeEstimate.stageScript' },
+  waiting_script_approval: { label: '剧本审核', labelKey: 'timeEstimate.stageWaitingScriptApproval' },
+  storyboard: { label: '分镜生成', labelKey: 'timeEstimate.stageStoryboard' },
+  asset_library: { label: '素材生成', labelKey: 'timeEstimate.stageAssetLibrary' },
+  waiting_approval: { label: '素材审核', labelKey: 'timeEstimate.stageWaitingApproval' },
+  keyframes: { label: '关键帧生成', labelKey: 'timeEstimate.stageKeyframes' },
+  midframes: { label: '中间帧生成', labelKey: 'timeEstimate.stageMidframes' },
+  video: { label: '视频生成', labelKey: 'timeEstimate.stageVideo' },
+  waiting_video_confirmation: { label: '视频确认', labelKey: 'timeEstimate.stageWaitingVideoConfirmation' },
+  edit: { label: '剪辑合成', labelKey: 'timeEstimate.stageEdit' },
+  review: { label: '最终审核', labelKey: 'timeEstimate.stageReview' },
+  done: { label: '完成', labelKey: 'timeEstimate.stageDone' },
+  rework: { label: '返工', labelKey: 'timeEstimate.stageRework' },
+  failed: { label: '失败', labelKey: 'timeEstimate.stageFailed' },
+}
+
+export function formatEstimatedTime(minutes: number, t?: TFunction): string {
   if (minutes < 1) {
-    return '不到1分钟'
+    return t ? t('timeEstimate.lessThanMinute') : '不到1分钟'
   } else if (minutes < 60) {
-    return `约${Math.round(minutes)}分钟`
+    return t ? t('timeEstimate.aboutMinutes', { count: Math.round(minutes) }) : `约${Math.round(minutes)}分钟`
   } else {
     const hours = Math.floor(minutes / 60)
     const mins = Math.round(minutes % 60)
     if (mins > 0) {
-      return `约${hours}小时${mins}分钟`
+      return t ? t('timeEstimate.aboutHoursMinutes', { hours, minutes: mins }) : `约${hours}小时${mins}分钟`
     }
-    return `约${hours}小时`
+    return t ? t('timeEstimate.aboutHours', { hours }) : `约${hours}小时`
   }
 }
 
-export function getStageDisplayName(stage: string): string {
-  const names: Record<string, string> = {
-    init: '初始化',
-    script: '剧本生成',
-    waiting_script_approval: '剧本审核',
-    storyboard: '分镜生成',
-    asset_library: '素材生成',
-    waiting_approval: '素材审核',
-    keyframes: '关键帧生成',
-    midframes: '中间帧生成',
-    video: '视频生成',
-    waiting_video_confirmation: '视频确认',
-    edit: '剪辑合成',
-    review: '最终审核',
-    done: '完成',
-    rework: '返工',
-    failed: '失败',
+export function getStageDisplayName(stage: string, t?: TFunction): string {
+  const entry = STAGE_NAME_LABELS[(stage || '').trim().toLowerCase()]
+  if (entry) {
+    return t ? t(entry.labelKey) : entry.label
   }
-  return names[(stage || '').trim().toLowerCase()] || stage || '未知阶段'
+  return stage || (t ? t('timeEstimate.unknownStage') : '未知阶段')
 }

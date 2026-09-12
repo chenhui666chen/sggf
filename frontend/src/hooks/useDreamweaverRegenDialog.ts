@@ -1,4 +1,5 @@
 import { useState, useCallback, useMemo, useRef } from 'react'
+import { useTranslation } from 'react-i18next'
 import { apiClient, extractApiErrorMessage } from '@/services/api'
 import {
   parseLibraryRole,
@@ -19,6 +20,7 @@ type RegenerateLibraryAssetFn = (params: Record<string, unknown>) => Promise<str
 
 export function useDreamweaverRegenDialog(deps: RegenDialogDeps) {
   const { libraryAssetsByRole, missingRoleSet, selectedProjectId, currentRunId } = deps
+  const { t } = useTranslation()
 
   const regenerateLibraryAssetRef = useRef<RegenerateLibraryAssetFn>(async () => 'not initialized')
   const setRegenerateLibraryAsset = useCallback((fn: RegenerateLibraryAssetFn) => {
@@ -93,17 +95,17 @@ export function useDreamweaverRegenDialog(deps: RegenDialogDeps) {
   const regenImageEditActive = regenForceImageEdit || (regenPreferImageEdit && regenHasImageBase)
 
   const regenImageBaseRoleLabel = useMemo(() => {
-    return regenImageBaseRole ? formatReferenceRoleLabel(regenImageBaseRole) : '前序视角'
-  }, [regenImageBaseRole])
+    return regenImageBaseRole ? formatReferenceRoleLabel(regenImageBaseRole) : t('dreamweaverRun.promptPreviousView')
+  }, [regenImageBaseRole, t])
 
   const regenForceViewChainEditBase = regenForceImageEdit && regenIsDerivedCharacterView && regenSmartPromptTriggered
 
   const regenAlertBaseLabel = useMemo(() => {
     if (!regenForceImageEdit) return ''
     if (regenForceViewChainEditBase) return regenImageBaseRoleLabel
-    if (regenHasCurrentImage) return '当前图'
+    if (regenHasCurrentImage) return t('dreamweaverRun.regenImageBaseLabel')
     return regenImageBaseRoleLabel
-  }, [regenForceImageEdit, regenForceViewChainEditBase, regenHasCurrentImage, regenImageBaseRoleLabel])
+  }, [regenForceImageEdit, regenForceViewChainEditBase, regenHasCurrentImage, regenImageBaseRoleLabel, t])
 
   const regenAlertReadyReferenceLabel = useMemo(() => {
     const labels: string[] = []
@@ -119,7 +121,7 @@ export function useDreamweaverRegenDialog(deps: RegenDialogDeps) {
       if (regenHasRenderableBaseImage) push(regenImageBaseRoleLabel)
       for (const role of regenReadyReferenceRoles) push(formatReferenceRoleLabel(role))
     } else if (regenHasCurrentImage) {
-      push('当前图')
+      push(t('dreamweaverRun.regenImageBaseLabel'))
       for (const role of regenReadyReferenceRoles) push(formatReferenceRoleLabel(role))
     } else {
       if (regenHasRenderableBaseImage) push(regenImageBaseRoleLabel)
@@ -134,6 +136,7 @@ export function useDreamweaverRegenDialog(deps: RegenDialogDeps) {
     regenHasRenderableBaseImage,
     regenImageBaseRoleLabel,
     regenReadyReferenceRoles,
+    t,
   ])
 
   const regenAlertMissingReferenceLabel = useMemo(() => {
@@ -173,11 +176,11 @@ export function useDreamweaverRegenDialog(deps: RegenDialogDeps) {
   }, [regenAlertReadyReferenceLabel])
 
   const regenPromptInputLabel = useMemo(() => {
-    if (!(regenImageEditActive && regenImageEditAutoCleared)) return '提示词'
-    if (regenForceViewChainEditBase) return '修改要求（基于参考图）'
-    if (regenHasCurrentImage) return '修改要求（基于当前图）'
-    return '修改要求（基于参考图）'
-  }, [regenForceViewChainEditBase, regenHasCurrentImage, regenImageEditActive, regenImageEditAutoCleared])
+    if (!(regenImageEditActive && regenImageEditAutoCleared)) return t('dreamweaverRun.promptLabel')
+    if (regenForceViewChainEditBase) return t('dreamweaverRun.editReqBasedOnRefImage')
+    if (regenHasCurrentImage) return t('dreamweaverRun.editReqBasedOnCurrentImage')
+    return t('dreamweaverRun.editReqBasedOnRefImage')
+  }, [regenForceViewChainEditBase, regenHasCurrentImage, regenImageEditActive, regenImageEditAutoCleared, t])
 
   const suggestRegeneratePrompt = useCallback(
     async (options: {
@@ -213,14 +216,14 @@ export function useDreamweaverRegenDialog(deps: RegenDialogDeps) {
         }
         return null
       } catch (e: unknown) {
-        const message = await extractApiErrorMessage(e, '生成提示词失败')
+        const message = await extractApiErrorMessage(e, t('dreamweaverRun.suggestPromptFailed'))
         setRegenSuggestError(message)
         return null
       } finally {
         setRegenSuggesting(false)
       }
     },
-    [currentRunId, regenPromptInitial, selectedProjectId],
+    [currentRunId, regenPromptInitial, selectedProjectId, t],
   )
 
   const requestSmartRegeneratePrompt = useCallback(
@@ -285,7 +288,7 @@ export function useDreamweaverRegenDialog(deps: RegenDialogDeps) {
     try {
       const promptText = regenPrompt.trim()
       if (regenImageEditActive && regenImageEditAutoCleared && !promptText) {
-        setRegenError('图像编辑模式下请填写"修改要求"（基于参考原图需要修改的内容）')
+        setRegenError(t('dreamweaverRun.editReqFillHint'))
         return
       }
       const shouldSendPrompt = regenImageEditActive ? true : Boolean(regenPromptDirty && promptText)
@@ -304,7 +307,7 @@ export function useDreamweaverRegenDialog(deps: RegenDialogDeps) {
     } finally {
       setRegenSubmitting(false)
     }
-  }, [regenRole, selectedProjectId, regenPrompt, regenImageEditActive, regenImageEditAutoCleared, regenPromptDirty, currentRunId, regenForceImageEdit, regenPreferImageEdit, regenHasImageBase, regenForceViewChainEditBase])
+  }, [regenRole, selectedProjectId, regenPrompt, regenImageEditActive, regenImageEditAutoCleared, regenPromptDirty, currentRunId, regenForceImageEdit, regenPreferImageEdit, regenHasImageBase, regenForceViewChainEditBase, t])
 
   const toggleRegenImageEditPreference = useCallback(() => {
     if (regenForceImageEdit || !regenHasImageBase) return

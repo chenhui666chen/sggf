@@ -201,7 +201,6 @@ describe('workflowWebSocket', () => {
   it('joinProject 可以在连接完成前缓存项目，并在连上后自动入房', async () => {
     const socket = new MockSocket()
     ioMock.mockReturnValue(socket)
-    globalThis.localStorage.setItem('access_token', 'jwt-token')
 
     const { workflowWebSocket } = await import('../websocket')
 
@@ -214,16 +213,15 @@ describe('workflowWebSocket', () => {
     socket.trigger('connect')
 
     await expect(connectPromise).resolves.toBeUndefined()
+    // P2-4.5 收尾：认证来自握手 httpOnly cookie，join 事件不再携带 body token
     expect(socket.emit).toHaveBeenCalledWith('join_project', {
       project_id: 13,
-      token: 'jwt-token',
     })
   })
 
   it('joinAudiobook 会切换有声书房间并在重连后重新入房', async () => {
     const socket = new MockSocket()
     ioMock.mockReturnValue(socket)
-    globalThis.localStorage.setItem('access_token', 'jwt-token')
 
     const { workflowWebSocket } = await import('../websocket')
 
@@ -235,16 +233,15 @@ describe('workflowWebSocket', () => {
     workflowWebSocket.joinAudiobook(21)
     workflowWebSocket.joinAudiobook(22)
 
+    // P2-4.5 收尾：认证来自握手 httpOnly cookie，join 事件不再携带 body token
     expect(socket.emit).toHaveBeenCalledWith('join_audiobook', {
       audiobook_project_id: 21,
-      token: 'jwt-token',
     })
     expect(socket.emit).toHaveBeenCalledWith('leave_audiobook', {
       audiobook_project_id: 21,
     })
     expect(socket.emit).toHaveBeenCalledWith('join_audiobook', {
       audiobook_project_id: 22,
-      token: 'jwt-token',
     })
 
     socket.connected = false
@@ -255,7 +252,6 @@ describe('workflowWebSocket', () => {
     expect(socket.emit).toHaveBeenCalledTimes(4)
     expect(socket.emit).toHaveBeenLastCalledWith('join_audiobook', {
       audiobook_project_id: 22,
-      token: 'jwt-token',
     })
   })
 

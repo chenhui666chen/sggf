@@ -1,5 +1,7 @@
 import type { ReactNode } from 'react'
 
+import { useTranslation } from 'react-i18next'
+
 import ContentCopyIcon from '@mui/icons-material/ContentCopy'
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import RefreshIcon from '@mui/icons-material/Refresh'
@@ -80,14 +82,15 @@ export function DreamweaverDiagnosticShotActions({
   onRestartVideo,
   restartDisabled,
 }: DreamweaverDiagnosticShotActionsProps) {
+  const { t } = useTranslation()
   return (
     <Stack direction="row" spacing={1} flexWrap="wrap" alignItems="center" sx={{ mb: 1 }}>
       <Button size="small" variant="outlined" startIcon={<ContentCopyIcon fontSize="small" />} onClick={onCopy}>
-        复制镜头诊断
+        {t('dreamweaverRun.diagnosticCopyShot')}
       </Button>
       {onCopyStoryboard && (
         <Button size="small" variant="text" onClick={onCopyStoryboard}>
-          复制分镜
+          {t('dreamweaverRun.diagnosticCopyStoryboard')}
         </Button>
       )}
       {uploadActions ?? null}
@@ -100,7 +103,7 @@ export function DreamweaverDiagnosticShotActions({
           onClick={onRestartVideo}
           disabled={restartDisabled}
         >
-          重跑该镜头视频
+          {t('dreamweaverRun.diagnosticRestartShotVideo')}
         </Button>
       )}
     </Stack>
@@ -126,12 +129,13 @@ export function DreamweaverDiagnosticShotProviderTraceSection({
   metadataText,
   jsonContent,
 }: DreamweaverDiagnosticShotProviderTraceSectionProps) {
+  const { t } = useTranslation()
   return (
     <Accordion sx={{ mt: 1 }}>
       <AccordionSummary expandIcon={<ExpandMoreIcon />}>
         <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
           <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
-            Provider 路由
+            {t('dreamweaverRun.diagnosticProviderRoute')}
           </Typography>
           {reason && <Chip size="small" variant="outlined" label={`reason: ${reason}`} />}
         </Stack>

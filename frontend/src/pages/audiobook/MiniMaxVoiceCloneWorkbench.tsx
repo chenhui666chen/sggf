@@ -1,5 +1,7 @@
 import { useMemo, useState, type ChangeEvent } from 'react'
 
+import { useTranslation } from 'react-i18next'
+
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline'
 import MicIcon from '@mui/icons-material/Mic'
 import PlayArrowIcon from '@mui/icons-material/PlayArrow'
@@ -47,9 +49,9 @@ interface CreatedClonePreview {
   billingNotice: string
 }
 
-const MINIMAX_PREVIEW_PRICES: Record<string, string> = {
-  'minimax-speech-2.8-hd': '3.5 元/万字符',
-  'minimax-speech-2.8-turbo': '2 元/万字符',
+const MINIMAX_PREVIEW_PRICE_KEYS: Record<string, string> = {
+  'minimax-speech-2.8-hd': 'audiobook.minimaxVoiceClone.previewPriceHd',
+  'minimax-speech-2.8-turbo': 'audiobook.minimaxVoiceClone.previewPriceTurbo',
 }
 
 const MiniMaxVoiceCloneWorkbench = ({
@@ -59,6 +61,7 @@ const MiniMaxVoiceCloneWorkbench = ({
   onPreviewCustomVoice,
   onChanged,
 }: MiniMaxVoiceCloneWorkbenchProps) => {
+  const { t } = useTranslation()
   const [name, setName] = useState('')
   const [sampleText, setSampleText] = useState('')
   const [sampleFile, setSampleFile] = useState<File | null>(null)
@@ -80,7 +83,7 @@ const MiniMaxVoiceCloneWorkbench = ({
     [customVoicePresets],
   )
   const busy = creating || uploading || recording
-  const previewPrice = MINIMAX_PREVIEW_PRICES[ttsModel] || '当前模型公开价'
+  const previewPrice = t(MINIMAX_PREVIEW_PRICE_KEYS[ttsModel] || 'audiobook.minimaxVoiceClone.previewPriceUnknown')
   const sampleSummary = sampleFile ? summarizeAudioFile(sampleFile) : ''
   const canCreate = Boolean(name.trim() && sampleText.trim() && sampleFile)
 
@@ -97,12 +100,12 @@ const MiniMaxVoiceCloneWorkbench = ({
     resetMessages()
     try {
       if (!isMimoCloneSupportedAudioFile(file)) {
-        throw new Error('MiniMax 音色复刻参考样本仅支持 mp3 或 wav 音频')
+        throw new Error(t('audiobook.minimaxVoiceClone.sampleFormatError'))
       }
       setSampleFile(file)
-      setMessage('已选择参考样本。请核对逐字内容，创建前会再次确认费用。')
+      setMessage(t('audiobook.minimaxVoiceClone.sampleSelectedNotice'))
     } catch (err: unknown) {
-      setError(await extractApiErrorMessage(err, '选择 MiniMax 参考样本失败'))
+      setError(await extractApiErrorMessage(err, t('audiobook.minimaxVoiceClone.sampleSelectFailed')))
     } finally {
       setUploading(false)
     }
@@ -115,9 +118,9 @@ const MiniMaxVoiceCloneWorkbench = ({
     try {
       const file = await convertRecordedAudioBlobToWavFile(blob)
       setSampleFile(file)
-      setMessage('录音已转换为 WAV 样本。请核对逐字内容，创建前会再次确认费用。')
+      setMessage(t('audiobook.minimaxVoiceClone.wavConvertedNotice'))
     } catch (err: unknown) {
-      setError(await extractApiErrorMessage(err, '录音转换为 WAV 失败，请改用 mp3 或 wav 文件'))
+      setError(await extractApiErrorMessage(err, t('audiobook.minimaxVoiceClone.wavConvertFailed')))
     } finally {
       setUploading(false)
     }
@@ -139,7 +142,7 @@ const MiniMaxVoiceCloneWorkbench = ({
   const handleOpenRecordDialog = () => {
     resetMessages()
     if (!sampleText.trim()) {
-      setError('请先填写准备朗读的逐字内容，再开始录音')
+      setError(t('audiobook.minimaxVoiceClone.transcriptRequiredBeforeRecord'))
       return
     }
     setRecordDialogOpen(true)
@@ -148,15 +151,15 @@ const MiniMaxVoiceCloneWorkbench = ({
   const handleRequestCreate = () => {
     resetMessages()
     if (!name.trim()) {
-      setError('请填写音色名称')
+      setError(t('audiobook.minimaxVoiceClone.nameRequired'))
       return
     }
     if (!sampleText.trim()) {
-      setError('请填写参考音频逐字内容')
+      setError(t('audiobook.minimaxVoiceClone.transcriptRequired'))
       return
     }
     if (!sampleFile) {
-      setError('请先录音或上传 mp3/wav 参考样本')
+      setError(t('audiobook.minimaxVoiceClone.sampleRequired'))
       return
     }
     setBillingConfirmOpen(true)
@@ -186,10 +189,10 @@ const MiniMaxVoiceCloneWorkbench = ({
       setName('')
       setSampleText('')
       setSampleFile(null)
-      setMessage('MiniMax 复刻音色已创建，可在角色音色下拉中选择。')
+      setMessage(t('audiobook.minimaxVoiceClone.cloneCreatedNotice'))
       onChanged()
     } catch (err: unknown) {
-      setError(await extractApiErrorMessage(err, '创建 MiniMax 复刻音色失败'))
+      setError(await extractApiErrorMessage(err, t('audiobook.minimaxVoiceClone.cloneCreateFailed')))
     } finally {
       setCreating(false)
     }
@@ -201,11 +204,11 @@ const MiniMaxVoiceCloneWorkbench = ({
     resetMessages()
     try {
       await apiClient.removeMiniMaxVoiceClone(removeTarget.id)
-      setMessage('已从本系统音色目录移除；百炼账号中的云端音色仍保留。')
+      setMessage(t('audiobook.minimaxVoiceClone.cloneRemovedNotice'))
       setRemoveTarget(null)
       onChanged()
     } catch (err: unknown) {
-      setError(await extractApiErrorMessage(err, '移除 MiniMax 复刻音色失败'))
+      setError(await extractApiErrorMessage(err, t('audiobook.minimaxVoiceClone.cloneRemoveFailed')))
     } finally {
       setRemoving(false)
     }
@@ -215,13 +218,13 @@ const MiniMaxVoiceCloneWorkbench = ({
     <Paper variant="outlined" sx={{ mb: 1, p: { xs: 1.5, md: 2 } }}>
       <Box sx={{ display: 'grid', gap: 0.75, mb: 1.5 }}>
         <Typography variant="subtitle1" sx={{ fontWeight: 800 }}>
-          MiniMax 音色复刻
+          {t('audiobook.minimaxVoiceClone.title')}
         </Typography>
         <Typography variant="body2" color="text.secondary" sx={{ lineHeight: 1.7 }}>
-          上传或录制授权的 mp3/wav 样本，并填写与音频完全一致的逐字内容。创建成功后会得到百炼真实 voice_id，可直接分配给角色。
+          {t('audiobook.minimaxVoiceClone.intro')}
         </Typography>
         <Alert severity="warning">
-          创建复刻试听按 {previewPrice} 计费；该音色首次用于正式语音合成时，阿里云百炼另收 9.9 元音色解锁费。后续重复使用不会按章节再次收取解锁费。
+          {t('audiobook.minimaxVoiceClone.previewBillingWarning', { previewPrice })}
         </Alert>
       </Box>
 
@@ -234,7 +237,7 @@ const MiniMaxVoiceCloneWorkbench = ({
         }}
       >
         <TextField
-          label="音色名称"
+          label={t('audiobook.minimaxVoiceClone.nameLabel')}
           value={name}
           onChange={(event) => setName(event.target.value)}
           size="small"
@@ -242,7 +245,7 @@ const MiniMaxVoiceCloneWorkbench = ({
           disabled={busy}
         />
         <TextField
-          label="参考音频逐字内容"
+          label={t('audiobook.minimaxVoiceClone.sampleTextLabel')}
           value={sampleText}
           onChange={(event) => setSampleText(event.target.value)}
           size="small"
@@ -261,7 +264,7 @@ const MiniMaxVoiceCloneWorkbench = ({
           startIcon={<MicIcon />}
           sx={audiobookButtonSx.neutralOutlined}
         >
-          录音
+          {t('audiobook.minimaxVoiceClone.record')}
         </Button>
         <Button
           variant="outlined"
@@ -270,7 +273,7 @@ const MiniMaxVoiceCloneWorkbench = ({
           startIcon={uploading ? <CircularProgress size={16} color="inherit" /> : <UploadFileIcon />}
           sx={audiobookButtonSx.brandOutlined}
         >
-          {uploading ? '处理中...' : '上传音频'}
+          {uploading ? t('audiobook.minimaxVoiceClone.uploadingText') : t('audiobook.minimaxVoiceClone.uploadAudio')}
           <input
             type="file"
             hidden
@@ -285,25 +288,25 @@ const MiniMaxVoiceCloneWorkbench = ({
           startIcon={creating ? <CircularProgress size={18} color="inherit" /> : undefined}
           sx={audiobookButtonSx.brandContained}
         >
-          {creating ? '创建中...' : '创建复刻音色'}
+          {creating ? t('audiobook.minimaxVoiceClone.creatingText') : t('audiobook.minimaxVoiceClone.createClone')}
         </Button>
         <Typography
           variant="caption"
           color="text.secondary"
           sx={{ minWidth: 240, flex: '1 1 280px', overflowWrap: 'anywhere' }}
         >
-          {sampleSummary || '尚未选择参考音频'}
+          {sampleSummary || t('audiobook.minimaxVoiceClone.noSampleYet')}
         </Typography>
       </Box>
 
       {createdPreview?.audioUrl && (
         <Box sx={{ mb: 1.25 }}>
           <Typography variant="body2" sx={{ fontWeight: 700, mb: 0.5 }}>
-            新音色试听
+            {t('audiobook.minimaxVoiceClone.previewTitle')}
           </Typography>
           <audio controls src={createdPreview.audioUrl} style={{ width: '100%', maxWidth: 560 }} />
           <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
-            voice_id：{createdPreview.voiceId}
+            {t('audiobook.minimaxVoiceClone.voiceIdLabel', { voiceId: createdPreview.voiceId })}
           </Typography>
         </Box>
       )}
@@ -314,7 +317,7 @@ const MiniMaxVoiceCloneWorkbench = ({
         <>
           <Divider sx={{ my: 1.25 }} />
           <Typography variant="subtitle2" sx={{ mb: 0.75 }}>
-            当前模型的复刻音色
+            {t('audiobook.minimaxVoiceClone.currentModelClones')}
           </Typography>
           <Box sx={{ display: 'grid', gap: 0.75, maxHeight: 280, overflowY: 'auto' }}>
             {minimaxPresets.map((preset) => {
@@ -343,24 +346,24 @@ const MiniMaxVoiceCloneWorkbench = ({
                   </Box>
                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.25 }}>
                     <Chip label="MiniMax Clone" size="small" color="success" />
-                    <Tooltip title="试听">
+                    <Tooltip title={t('audiobook.minimaxVoiceClone.preview')}>
                       <span>
                         <IconButton
                           size="small"
                           disabled={Boolean(previewingVoiceId)}
                           onClick={() => onPreviewCustomVoice(preset, ttsModel)}
-                          aria-label={`试听 ${preset.label || preset.id}`}
+                          aria-label={t('audiobook.minimaxVoiceClone.previewAria', { name: preset.label || preset.id })}
                         >
                           {isPreviewing ? <CircularProgress size={18} /> : <PlayArrowIcon fontSize="small" />}
                         </IconButton>
                       </span>
                     </Tooltip>
-                    <Tooltip title="从本系统列表移除">
+                    <Tooltip title={t('audiobook.minimaxVoiceClone.removeFromList')}>
                       <IconButton
                         size="small"
                         color="error"
                         onClick={() => setRemoveTarget(preset)}
-                        aria-label={`移除 ${preset.label || preset.id}`}
+                        aria-label={t('audiobook.minimaxVoiceClone.removeAria', { name: preset.label || preset.id })}
                       >
                         <DeleteOutlineIcon fontSize="small" />
                       </IconButton>
@@ -395,21 +398,21 @@ const MiniMaxVoiceCloneWorkbench = ({
         fullWidth
         maxWidth="xs"
       >
-        <DialogTitle>收费确认</DialogTitle>
+        <DialogTitle>{t('audiobook.minimaxVoiceClone.billingConfirmTitle')}</DialogTitle>
         <DialogContent dividers>
           <Typography variant="body2" sx={{ mb: 1 }}>
-            创建复刻试听按 {previewPrice} 计费。
+            {t('audiobook.minimaxVoiceClone.billingConfirmBody', { previewPrice })}
           </Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-            此操作会调用阿里云百炼创建真实 voice_id。该音色首次用于正式语音合成时另收 9.9 元，后续重复使用不会按章节再次收取解锁费。
+            {t('audiobook.minimaxVoiceClone.billingConfirmUnlock')}
           </Typography>
           <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
-            音色名称：{name.trim() || '未命名'}；模型：{ttsModel}
+            {t('audiobook.minimaxVoiceClone.billingSummary', { name: name.trim() || t('audiobook.minimaxVoiceClone.unnamed'), ttsModel })}
           </Typography>
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setBillingConfirmOpen(false)} disabled={creating}>
-            取消
+            {t('action.cancel')}
           </Button>
           <Button
             variant="contained"
@@ -417,7 +420,7 @@ const MiniMaxVoiceCloneWorkbench = ({
             disabled={creating || !canCreate}
             onClick={handleConfirmCreate}
           >
-            {creating ? '创建中...' : '确认收费并创建'}
+            {creating ? t('audiobook.minimaxVoiceClone.creatingText') : t('audiobook.minimaxVoiceClone.confirmBillingCreate')}
           </Button>
         </DialogActions>
       </Dialog>
@@ -430,16 +433,16 @@ const MiniMaxVoiceCloneWorkbench = ({
         fullWidth
         maxWidth="xs"
       >
-        <DialogTitle>移除本地登记</DialogTitle>
+        <DialogTitle>{t('audiobook.minimaxVoiceClone.removeLocalTitle')}</DialogTitle>
         <DialogContent dividers>
           <Typography variant="body2">
-            仅从当前用户的本系统音色目录移除“{removeTarget?.label || removeTarget?.id}”。百炼账号中的云端音色不会删除，也不会退还已产生的费用。
+            {t('audiobook.minimaxVoiceClone.removeLocalBody', { name: removeTarget?.label || removeTarget?.id })}
           </Typography>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setRemoveTarget(null)} disabled={removing}>取消</Button>
+          <Button onClick={() => setRemoveTarget(null)} disabled={removing}>{t('action.cancel')}</Button>
           <Button color="error" onClick={handleRemove} disabled={removing}>
-            {removing ? '移除中...' : '确认移除'}
+            {removing ? t('audiobook.minimaxVoiceClone.removingText') : t('audiobook.minimaxVoiceClone.confirmRemove')}
           </Button>
         </DialogActions>
       </Dialog>

@@ -2,6 +2,7 @@ import { Alert, Box, Chip, Divider, Stack, Typography } from '@mui/material'
 import AccountTreeIcon from '@mui/icons-material/AccountTree'
 import GavelIcon from '@mui/icons-material/Gavel'
 import SourceIcon from '@mui/icons-material/Source'
+import { useTranslation } from 'react-i18next'
 
 export interface ReviewMetaReport {
   requested_model_id?: string
@@ -40,10 +41,10 @@ interface ReviewMetaPanelProps {
   reviewText?: string
 }
 
-const PRESET_LABELS: Record<string, string> = {
-  balanced_3: '普通增强 3 评审',
-  key_chapter_5: '重点章节 5 评审',
-  deep_7: '深度 7 评审',
+const PRESET_LABEL_KEYS: Record<string, string> = {
+  balanced_3: 'workflow.reviewMeta.presetBalanced3',
+  key_chapter_5: 'workflow.reviewMeta.presetKeyChapter5',
+  deep_7: 'workflow.reviewMeta.presetDeep7',
 }
 
 function uniqueValues(values: Array<string | null | undefined>): string[] {
@@ -77,6 +78,7 @@ export function extractSourceModels(reviewText: string = ''): string[] {
 }
 
 export default function ReviewMetaPanel({ reviewMeta, reviewText = '' }: ReviewMetaPanelProps) {
+  const { t } = useTranslation()
   const reports = reviewMeta?.per_model_reports || []
   const reviewerModels = uniqueValues([
     ...(reviewMeta?.reviewer_models || []),
@@ -122,27 +124,31 @@ export default function ReviewMetaPanel({ reviewMeta, reviewText = '' }: ReviewM
       <Stack direction="row" spacing={0.75} useFlexGap flexWrap="wrap" sx={{ alignItems: 'center' }}>
         <Chip
           icon={<AccountTreeIcon />}
-          label={reviewMeta?.multi_model ? '多模型评审' : '单模型回退'}
+          label={reviewMeta?.multi_model ? t('workflow.reviewMeta.multiModel') : t('workflow.reviewMeta.singleFallback')}
           color={reviewMeta?.multi_model ? 'primary' : 'warning'}
           variant="outlined"
           size="small"
         />
         {reviewMeta?.preset ? (
-          <Chip label={PRESET_LABELS[reviewMeta.preset] || reviewMeta.preset} size="small" variant="outlined" />
+          <Chip
+            label={PRESET_LABEL_KEYS[reviewMeta.preset] ? t(PRESET_LABEL_KEYS[reviewMeta.preset]) : reviewMeta.preset}
+            size="small"
+            variant="outlined"
+          />
         ) : null}
         {reviewMeta?.chief_model ? (
-          <Chip icon={<GavelIcon />} label={`主审 ${reviewMeta.chief_model}`} size="small" variant="outlined" />
+          <Chip icon={<GavelIcon />} label={t('workflow.reviewMeta.chiefModel', { model: reviewMeta.chief_model })} size="small" variant="outlined" />
         ) : null}
         {reviewMeta?.chief_model_reused_as_reviewer ? (
-          <Chip label="主审参与独立评审" color="warning" size="small" variant="outlined" />
+          <Chip label={t('workflow.reviewMeta.chiefReused')} color="warning" size="small" variant="outlined" />
         ) : null}
-        {hasConsensusSection ? <Chip label="一致意见" color="success" size="small" variant="outlined" /> : null}
-        {hasDivergenceSection ? <Chip label="分歧意见" color="info" size="small" variant="outlined" /> : null}
+        {hasConsensusSection ? <Chip label={t('workflow.reviewMeta.consensus')} color="success" size="small" variant="outlined" /> : null}
+        {hasDivergenceSection ? <Chip label={t('workflow.reviewMeta.divergence')} color="info" size="small" variant="outlined" /> : null}
       </Stack>
 
       {reviewMeta?.fallback_required || reviewMeta?.fallback_reason ? (
         <Alert severity="warning" sx={{ mt: 1 }}>
-          {reviewMeta.fallback_reason || '多模型评审未产出足够结果，已回退单模型评审'}
+          {reviewMeta.fallback_reason || t('workflow.reviewMeta.fallbackDefaultReason')}
         </Alert>
       ) : null}
 
@@ -150,7 +156,7 @@ export default function ReviewMetaPanel({ reviewMeta, reviewText = '' }: ReviewM
         <>
           <Divider sx={{ my: 1 }} />
           <Typography variant="caption" sx={{ display: 'block', mb: 0.75, color: 'text.secondary' }}>
-            参与模型
+            {t('workflow.reviewMeta.participantModels')}
           </Typography>
           <Stack direction="row" spacing={0.75} useFlexGap flexWrap="wrap">
             {reviewerModels.map((model) => (
@@ -172,7 +178,7 @@ export default function ReviewMetaPanel({ reviewMeta, reviewText = '' }: ReviewM
         <>
           <Divider sx={{ my: 1 }} />
           <Stack direction="row" spacing={0.75} useFlexGap flexWrap="wrap" sx={{ alignItems: 'center' }}>
-            <Chip icon={<SourceIcon />} label="source_models" size="small" variant="outlined" />
+            <Chip icon={<SourceIcon />} label={t('workflow.reviewMeta.sourceModels')} size="small" variant="outlined" />
             {sourceModels.map((model) => (
               <Chip key={model} label={model} size="small" />
             ))}

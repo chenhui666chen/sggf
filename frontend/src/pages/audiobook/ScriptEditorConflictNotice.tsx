@@ -6,6 +6,7 @@ import {
   Paper,
   Typography,
 } from '@mui/material'
+import { useTranslation } from 'react-i18next'
 
 import type {
   EditorConflictDiffPreview,
@@ -31,24 +32,26 @@ const ScriptEditorConflictNotice = ({
   hiddenSegmentDiffCount,
   onApplyIncomingDraft,
   onKeepLocalDraft,
-}: ScriptEditorConflictNoticeProps) => (
+}: ScriptEditorConflictNoticeProps) => {
+  const { t } = useTranslation()
+  return (
   <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.25 }}>
     <Alert
       severity="warning"
       action={(
         <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
           <Button size="small" color="inherit" onClick={onApplyIncomingDraft}>
-            载入对方草稿
+            {t('audiobook.scriptEditorConflictNotice.loadIncomingDraft')}
           </Button>
           <Button size="small" color="inherit" onClick={onKeepLocalDraft}>
-            保留本页草稿
+            {t('audiobook.scriptEditorConflictNotice.keepLocalDraft')}
           </Button>
         </Box>
       )}
     >
-      检测到另一个标签页刚刚更新了同一章节的未保存草稿
-      {timeLabel ? `（${timeLabel}）` : ''}。
-      你可以先查看字段级差异，再决定载入对方草稿，或继续保留当前标签页的内容。
+      {t('audiobook.scriptEditorConflictNotice.alertTitle')}
+      {timeLabel ? t('audiobook.scriptEditorConflictNotice.timeSuffix', { time: timeLabel }) : ''}。
+      {t('audiobook.scriptEditorConflictNotice.alertHint')}
     </Alert>
 
     {preview && (
@@ -71,17 +74,20 @@ const ScriptEditorConflictNotice = ({
           }}
         >
           <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
-            字段级差异预览
+            {t('audiobook.scriptEditorConflictNotice.fieldDiffPreviewTitle')}
           </Typography>
           <Typography variant="caption" color="text.secondary">
-            顶层 {preview.fieldDiffs.length} 项 · 片段 {preview.segmentDiffs.length} 个
+            {t('audiobook.scriptEditorConflictNotice.fieldDiffSummary', {
+              fieldCount: preview.fieldDiffs.length,
+              segmentCount: preview.segmentDiffs.length,
+            })}
           </Typography>
         </Box>
 
         <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.25 }}>
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.75 }}>
             <Typography variant="caption" color="text.secondary">
-              顶层状态
+              {t('audiobook.scriptEditorConflictNotice.topLevelStatus')}
             </Typography>
             {preview.fieldDiffs.length > 0 ? (
               preview.fieldDiffs.map((fieldDiff) => (
@@ -95,26 +101,26 @@ const ScriptEditorConflictNotice = ({
                   }}
                 >
                   <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                    {fieldDiff.label}
+                    {fieldDiff.labelKey ? t(fieldDiff.labelKey) : fieldDiff.label}
                   </Typography>
                   <Typography variant="caption" color="text.secondary" component="div">
-                    当前：{fieldDiff.currentValue}
+                    {t('audiobook.scriptEditorConflictNotice.currentValue', { value: fieldDiff.currentValue })}
                   </Typography>
                   <Typography variant="caption" color="text.secondary" component="div">
-                    对方：{fieldDiff.incomingValue}
+                    {t('audiobook.scriptEditorConflictNotice.incomingValue', { value: fieldDiff.incomingValue })}
                   </Typography>
                 </Box>
               ))
             ) : (
               <Typography variant="body2" color="text.secondary">
-                顶层字段无差异，当前冲突主要集中在片段内容。
+                {t('audiobook.scriptEditorConflictNotice.topLevelNoDiff')}
               </Typography>
             )}
           </Box>
 
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.75 }}>
             <Typography variant="caption" color="text.secondary">
-              片段差异
+              {t('audiobook.scriptEditorConflictNotice.segmentDiffsTitle')}
             </Typography>
             {visibleSegmentDiffs.length > 0 ? (
               visibleSegmentDiffs.map((segmentDiff) => {
@@ -147,7 +153,10 @@ const ScriptEditorConflictNotice = ({
                       }}
                     >
                       <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                        片段 #{segmentDiff.index + 1} · {segmentDiff.speaker}
+                        {t('audiobook.scriptEditorConflictNotice.segmentLabel', {
+                          index: segmentDiff.index + 1,
+                          speaker: segmentDiff.speaker,
+                        })}
                       </Typography>
                       <Chip
                         size="small"
@@ -161,23 +170,23 @@ const ScriptEditorConflictNotice = ({
                         }
                         label={
                           segmentDiff.changeType === 'added'
-                            ? '对方新增'
+                            ? t('audiobook.scriptEditorConflictNotice.changeAdded')
                             : segmentDiff.changeType === 'removed'
-                              ? '对方已删除'
-                              : '字段变更'
+                              ? t('audiobook.scriptEditorConflictNotice.changeRemoved')
+                              : t('audiobook.scriptEditorConflictNotice.changeModified')
                         }
                       />
                       {segmentDiff.fieldDiffs.slice(0, 4).map((fieldDiff) => (
                         <Chip
                           key={`${segmentDiff.index}-${fieldDiff.key}`}
                           size="small"
-                          label={fieldDiff.label}
+                          label={fieldDiff.labelKey ? t(fieldDiff.labelKey) : fieldDiff.label}
                           variant="outlined"
                         />
                       ))}
                       {segmentDiff.fieldDiffs.length > 4 && (
                         <Typography variant="caption" color="text.secondary">
-                          等 {segmentDiff.fieldDiffs.length} 项
+                          {t('audiobook.scriptEditorConflictNotice.moreItems', { total: segmentDiff.fieldDiffs.length })}
                         </Typography>
                       )}
                     </Box>
@@ -186,19 +195,19 @@ const ScriptEditorConflictNotice = ({
                       {visibleFieldDiffs.map((fieldDiff) => (
                         <Box key={`${segmentDiff.index}-${fieldDiff.key}-detail`}>
                           <Typography variant="caption" sx={{ fontWeight: 600 }}>
-                            {fieldDiff.label}
+                            {fieldDiff.labelKey ? t(fieldDiff.labelKey) : fieldDiff.label}
                           </Typography>
                           <Typography variant="caption" color="text.secondary" component="div">
-                            当前：{fieldDiff.currentValue}
+                            {t('audiobook.scriptEditorConflictNotice.currentValue', { value: fieldDiff.currentValue })}
                           </Typography>
                           <Typography variant="caption" color="text.secondary" component="div">
-                            对方：{fieldDiff.incomingValue}
+                            {t('audiobook.scriptEditorConflictNotice.incomingValue', { value: fieldDiff.incomingValue })}
                           </Typography>
                         </Box>
                       ))}
                       {hiddenFieldDiffCount > 0 && (
                         <Typography variant="caption" color="text.secondary">
-                          其余 {hiddenFieldDiffCount} 个字段差异已折叠。
+                          {t('audiobook.scriptEditorConflictNotice.hiddenFieldDiffs', { total: hiddenFieldDiffCount })}
                         </Typography>
                       )}
                     </Box>
@@ -207,12 +216,12 @@ const ScriptEditorConflictNotice = ({
               })
             ) : (
               <Typography variant="body2" color="text.secondary">
-                片段内容无差异，当前冲突主要集中在顶层状态。
+                {t('audiobook.scriptEditorConflictNotice.segmentNoDiff')}
               </Typography>
             )}
             {hiddenSegmentDiffCount > 0 && (
               <Typography variant="caption" color="text.secondary">
-                其余 {hiddenSegmentDiffCount} 个片段差异已折叠，避免在确认前把弹窗拉得过长。
+                {t('audiobook.scriptEditorConflictNotice.hiddenSegmentDiffs', { total: hiddenSegmentDiffCount })}
               </Typography>
             )}
           </Box>
@@ -220,6 +229,7 @@ const ScriptEditorConflictNotice = ({
       </Paper>
     )}
   </Box>
-)
+  )
+}
 
 export default ScriptEditorConflictNotice

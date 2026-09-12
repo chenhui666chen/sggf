@@ -1,4 +1,5 @@
 import { Alert } from '@mui/material'
+import type { TFunction } from 'i18next'
 import {
   RunSnapshotAssetPreviewSection,
   RunSnapshotErrorAlert,
@@ -42,6 +43,7 @@ interface CreateRunPageSnapshotRendererDeps {
   renderStreamingPreview: (step: number) => ReactNode
   loadRunSnapshot: () => Promise<void>
   setWsError: (v: string | null) => void
+  t: TFunction
 }
 
 export function createRunPageSnapshotRenderer(deps: CreateRunPageSnapshotRendererDeps) {
@@ -66,6 +68,7 @@ export function createRunPageSnapshotRenderer(deps: CreateRunPageSnapshotRendere
     renderStreamingPreview,
     loadRunSnapshot,
     setWsError,
+    t,
   } = deps
 
   const showSnapshotShotList = isStoryboardPreviewStep && !runSnapshotLoading
@@ -74,7 +77,7 @@ export function createRunPageSnapshotRenderer(deps: CreateRunPageSnapshotRendere
   const renderSnapshotShotList = (emptyText: string) => (
     <RunSnapshotShotList
       visible={showSnapshotShotList}
-      title="镜头列表"
+      title={t('dreamweaverRun.shotList')}
       emptyText={emptyText}
       hasShots={hasSnapshotShots}
       shotItems={<ShotPromptSnapshotList shots={snapshotShots} />}
@@ -88,14 +91,14 @@ export function createRunPageSnapshotRenderer(deps: CreateRunPageSnapshotRendere
       snapshotShotsLength: snapshotShots.length,
       snapshotAssetCount,
       snapshotAssetSummary,
-    })
+    }, t)
 
     return (
       <RunSnapshotAssetPreviewSection
         {...props}
-        keyframeGrid={renderRunAssetPreviewGrid('关键帧（快照）', snapshotAssetSummary.keyframes.slice(-6), 'image')}
-        midframeGrid={renderRunAssetPreviewGrid('中间帧（快照）', snapshotAssetSummary.midframes.slice(-6), 'image')}
-        videoClipGrid={renderRunAssetPreviewGrid('镜头片段（快照）', props.tailVideoClipPaths, 'video')}
+        keyframeGrid={renderRunAssetPreviewGrid(t('dreamweaverRun.keyframeSnapshot'), snapshotAssetSummary.keyframes.slice(-6), 'image')}
+        midframeGrid={renderRunAssetPreviewGrid(t('dreamweaverRun.midframeSnapshot'), snapshotAssetSummary.midframes.slice(-6), 'image')}
+        videoClipGrid={renderRunAssetPreviewGrid(t('dreamweaverRun.videoClipSnapshot'), props.tailVideoClipPaths, 'video')}
       />
     )
   }
@@ -106,8 +109,8 @@ export function createRunPageSnapshotRenderer(deps: CreateRunPageSnapshotRendere
   const renderSnapshotMergedVideoSection = () => (
     <RunSnapshotMergedVideoSection
       visible={showSnapshotMergedVideo}
-      title="合成视频（快照）"
-      description={hasSnapshotMergedVideo ? `合成视频：${snapshotMergedVideo}` : '暂无合成视频快照'}
+      title={t('dreamweaverRun.mergedVideoSnapshot')}
+      description={hasSnapshotMergedVideo ? t('dreamweaverRun.mergedVideoWithPath', { path: snapshotMergedVideo }) : t('dreamweaverRun.noMergedVideoSnapshot')}
       panel={hasSnapshotMergedVideo ? <MergedVideoPanel {...mergedVideoPanelProps} /> : null}
     />
   )
@@ -127,7 +130,7 @@ export function createRunPageSnapshotRenderer(deps: CreateRunPageSnapshotRendere
   const snapshotRefreshDisabled = isSnapshotRefreshDisabled(persistedRunId, runSnapshotLoading)
 
   const renderRunSnapshotPreviewPane = ({
-    refreshLabel = '刷新运行快照',
+    refreshLabel = t('dreamweaverRun.refreshRunSnapshot'),
     shotEmptyText,
     includeStreamingPreview = false,
     includeWsError = false,
@@ -169,8 +172,8 @@ export function createRunPageSnapshotRenderer(deps: CreateRunPageSnapshotRendere
     snapshotAssetCount,
     loadRunSnapshot,
   }
-  const snapshotStatusBaseProps: SnapshotStatusProps = buildSnapshotStatusProps({ ...snapshotStatusSharedParams, includeChips: false })
-  const snapshotStatusPropsWithChips: SnapshotStatusProps = buildSnapshotStatusProps({ ...snapshotStatusSharedParams, includeChips: true })
+  const snapshotStatusBaseProps: SnapshotStatusProps = buildSnapshotStatusProps({ ...snapshotStatusSharedParams, includeChips: false }, t)
+  const snapshotStatusPropsWithChips: SnapshotStatusProps = buildSnapshotStatusProps({ ...snapshotStatusSharedParams, includeChips: true }, t)
 
   return {
     renderSnapshotShotList,

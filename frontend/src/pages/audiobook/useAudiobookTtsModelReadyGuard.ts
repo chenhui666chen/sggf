@@ -1,5 +1,7 @@
 import { useCallback } from 'react'
 
+import { useTranslation } from 'react-i18next'
+
 import type { SetSnackbar } from './hookTypes'
 
 interface UseAudiobookTtsModelReadyGuardParams {
@@ -23,11 +25,15 @@ export const useAudiobookTtsModelReadyGuard = ({
   runtimeError,
   setSnackbar,
 }: UseAudiobookTtsModelReadyGuardParams) => {
+  const { t } = useTranslation()
   const ensureCurrentTtsModelReady = useCallback(() => {
     if (catalogUnavailable) {
       setSnackbar({
         open: true,
-        message: `${modelLabel} 音色目录不可用：${catalogError || '请检查后端 voice catalog 配置后再生成。'}`,
+        message: t('audiobook.useAudiobookTtsModelReadyGuard.catalogUnavailable', {
+          model: modelLabel,
+          reason: catalogError || t('audiobook.useAudiobookTtsModelReadyGuard.catalogUnavailableHint'),
+        }),
         severity: 'error',
       })
       return false
@@ -36,7 +42,10 @@ export const useAudiobookTtsModelReadyGuard = ({
     if (runtimeUnavailable) {
       setSnackbar({
         open: true,
-        message: `${modelLabel} 运行时不可用：${runtimeError || '请检查后端 adapter 注册后再生成。'}`,
+        message: t('audiobook.useAudiobookTtsModelReadyGuard.runtimeUnavailable', {
+          model: modelLabel,
+          reason: runtimeError || t('audiobook.useAudiobookTtsModelReadyGuard.runtimeUnavailableHint'),
+        }),
         severity: 'error',
       })
       return false
@@ -48,7 +57,7 @@ export const useAudiobookTtsModelReadyGuard = ({
 
     setSnackbar({
       open: true,
-      message: `${modelLabel} 没有可用系统音色，请先创建或选择至少一个自定义音色再生成。`,
+      message: t('audiobook.useAudiobookTtsModelReadyGuard.noSystemVoices', { model: modelLabel }),
       severity: 'error',
     })
     return false
@@ -61,6 +70,7 @@ export const useAudiobookTtsModelReadyGuard = ({
     runtimeError,
     runtimeUnavailable,
     setSnackbar,
+    t,
   ])
 
   return {

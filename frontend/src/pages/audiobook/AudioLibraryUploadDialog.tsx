@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import {
   Alert,
   Box,
@@ -40,6 +41,7 @@ const AudioLibraryUploadDialog = ({
   onClose,
   onUploaded,
 }: AudioLibraryUploadDialogProps) => {
+  const { t } = useTranslation()
   const [libraryType, setLibraryType] = useState<AudioLibraryType>(initialLibraryType)
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
@@ -72,19 +74,19 @@ const AudioLibraryUploadDialog = ({
   const handleSubmit = async () => {
     const normalizedName = name.trim()
     if (!normalizedName || !/[\u4e00-\u9fff]/.test(normalizedName)) {
-      setError('请输入中文素材名称')
+      setError(t('audiobook.audioLibraryUpload.chineseNameRequired'))
       return
     }
     if (!file) {
-      setError('请选择音频文件')
+      setError(t('audiobook.audioLibraryUpload.fileRequired'))
       return
     }
     if (file.size > MAX_UPLOAD_BYTES) {
-      setError('音频文件不能超过 50MB')
+      setError(t('audiobook.audioLibraryUpload.fileTooLarge'))
       return
     }
     if (!rightsConfirmed) {
-      setError('请确认拥有该音频的共享和使用授权')
+      setError(t('audiobook.audioLibraryUpload.rightsNotConfirmed'))
       return
     }
 
@@ -109,7 +111,7 @@ const AudioLibraryUploadDialog = ({
     } catch (requestError: unknown) {
       const detail = (requestError as { response?: { data?: { detail?: string } } })
         .response?.data?.detail
-      setError(detail || '上传失败，请稍后重试')
+      setError(detail || t('audiobook.audioLibraryUpload.uploadFailed'))
     } finally {
       setSubmitting(false)
     }
@@ -117,7 +119,7 @@ const AudioLibraryUploadDialog = ({
 
   return (
     <Dialog open={open} onClose={submitting ? undefined : onClose} maxWidth="sm" fullWidth>
-      <DialogTitle>上传共享音频素材</DialogTitle>
+      <DialogTitle>{t('audiobook.audioLibraryUpload.title')}</DialogTitle>
       <DialogContent dividers>
         <Stack spacing={2}>
           {error && <Alert severity="error">{error}</Alert>}
@@ -131,19 +133,19 @@ const AudioLibraryUploadDialog = ({
               if (value) setLibraryType(value)
             }}
           >
-            <ToggleButton value="sfx">音效</ToggleButton>
-            <ToggleButton value="music">配乐</ToggleButton>
+            <ToggleButton value="sfx">{t('audiobook.audioLibraryUpload.sfxTab')}</ToggleButton>
+            <ToggleButton value="music">{t('audiobook.audioLibraryUpload.musicTab')}</ToggleButton>
           </ToggleButtonGroup>
 
           <TextField
             required
-            label="中文素材名称"
+            label={t('audiobook.audioLibraryUpload.nameLabel')}
             value={name}
             onChange={(event) => setName(event.target.value)}
             inputProps={{ maxLength: 100 }}
           />
           <TextField
-            label="素材描述"
+            label={t('audiobook.audioLibraryUpload.descriptionLabel')}
             value={description}
             onChange={(event) => setDescription(event.target.value)}
             multiline
@@ -152,29 +154,29 @@ const AudioLibraryUploadDialog = ({
 
           {libraryType === 'sfx' ? (
             <FormControl fullWidth>
-              <InputLabel>音效分类</InputLabel>
+              <InputLabel>{t('audiobook.audioLibraryUpload.sfxCategoryLabel')}</InputLabel>
               <Select
-                label="音效分类"
+                label={t('audiobook.audioLibraryUpload.sfxCategoryLabel')}
                 value={category}
                 onChange={(event) => setCategory(event.target.value)}
               >
-                <MenuItem value="environment/realistic">环境 · 写实</MenuItem>
-                <MenuItem value="action/realistic">动作 · 写实</MenuItem>
-                <MenuItem value="emotion/realistic">情绪 · 写实</MenuItem>
-                <MenuItem value="transition/cinematic">转场 · 电影感</MenuItem>
-                <MenuItem value="environment/fantasy">环境 · 奇幻</MenuItem>
-                <MenuItem value="action/scifi">动作 · 科幻</MenuItem>
+                <MenuItem value="environment/realistic">{t('audiobook.audioLibraryUpload.categoryEnvRealistic')}</MenuItem>
+                <MenuItem value="action/realistic">{t('audiobook.audioLibraryUpload.categoryActionRealistic')}</MenuItem>
+                <MenuItem value="emotion/realistic">{t('audiobook.audioLibraryUpload.categoryEmotionRealistic')}</MenuItem>
+                <MenuItem value="transition/cinematic">{t('audiobook.audioLibraryUpload.categoryTransitionCinematic')}</MenuItem>
+                <MenuItem value="environment/fantasy">{t('audiobook.audioLibraryUpload.categoryEnvFantasy')}</MenuItem>
+                <MenuItem value="action/scifi">{t('audiobook.audioLibraryUpload.categoryActionScifi')}</MenuItem>
               </Select>
             </FormControl>
           ) : (
             <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' }, gap: 1.5 }}>
               <TextField
-                label="配乐风格"
+                label={t('audiobook.audioLibraryUpload.musicStyleLabel')}
                 value={style}
                 onChange={(event) => setStyle(event.target.value)}
               />
               <TextField
-                label="配乐情绪"
+                label={t('audiobook.audioLibraryUpload.musicMoodLabel')}
                 value={mood}
                 onChange={(event) => setMood(event.target.value)}
               />
@@ -182,10 +184,10 @@ const AudioLibraryUploadDialog = ({
           )}
 
           <TextField
-            label="标签"
+            label={t('audiobook.audioLibraryUpload.tagsLabel')}
             value={tags}
             onChange={(event) => setTags(event.target.value)}
-            placeholder="雨声，室内，轻柔"
+            placeholder={t('audiobook.audioLibraryUpload.tagsPlaceholder')}
           />
 
           <Button
@@ -195,7 +197,7 @@ const AudioLibraryUploadDialog = ({
             disabled={submitting}
             sx={{ justifyContent: 'flex-start', minHeight: 44 }}
           >
-            {file ? file.name : '选择音频文件'}
+            {file ? file.name : t('audiobook.audioLibraryUpload.chooseFile')}
             <input
               hidden
               type="file"
@@ -216,7 +218,7 @@ const AudioLibraryUploadDialog = ({
                 onChange={(event) => setLicenseCommercial(event.target.checked)}
               />
             )}
-            label="允许后续使用者用于商业项目"
+            label={t('audiobook.audioLibraryUpload.commercialLabel')}
           />
           <FormControlLabel
             control={(
@@ -225,19 +227,21 @@ const AudioLibraryUploadDialog = ({
                 onChange={(event) => setRightsConfirmed(event.target.checked)}
               />
             )}
-            label="我确认拥有该音频的共享和使用授权"
+            label={t('audiobook.audioLibraryUpload.rightsLabel')}
           />
         </Stack>
       </DialogContent>
       <DialogActions>
-        <Button onClick={onClose} disabled={submitting}>取消</Button>
+        <Button onClick={onClose} disabled={submitting}>{t('action.cancel')}</Button>
         <Button
           variant="contained"
           onClick={handleSubmit}
           disabled={submitting || !file || !rightsConfirmed}
           startIcon={submitting ? undefined : <UploadFileIcon />}
         >
-          {submitting ? '上传中...' : '上传素材'}
+          {submitting
+            ? t('audiobook.mimoVoiceAssetWorkbench.uploadingText')
+            : t('audiobook.audioLibraryUpload.uploadAssetText')}
         </Button>
       </DialogActions>
     </Dialog>

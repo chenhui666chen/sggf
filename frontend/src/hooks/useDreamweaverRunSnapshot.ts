@@ -1,4 +1,5 @@
 import { useState, useCallback } from 'react'
+import { useTranslation } from 'react-i18next'
 import type { Dispatch, SetStateAction } from 'react'
 import { apiClient, extractApiErrorMessage } from '@/services/api'
 import type { DreamweaverRunSnapshot, RunResult, DreamweaverRunPreflight } from '@/types/dreamweaver'
@@ -34,6 +35,8 @@ export function useDreamweaverRunSnapshot(options: UseDreamweaverRunSnapshotOpti
     onSetRunPreflight,
   } = options
 
+  const { t } = useTranslation()
+
   const [runSnapshot, setRunSnapshot] = useState<DreamweaverRunSnapshot | null>(null)
   const [runSnapshotLoading, setRunSnapshotLoading] = useState(false)
   const [runSnapshotError, setRunSnapshotError] = useState<string | null>(null)
@@ -52,7 +55,7 @@ export function useDreamweaverRunSnapshot(options: UseDreamweaverRunSnapshotOpti
       const recovery = resolveNotFoundRecovery(e, getTaskId(), getTaskStatus(), {
         isNotFoundError,
         shouldTreatRunNotFoundAsPending: _shouldTreatRunNotFoundAsPending,
-        pendingMessage: '运行数据尚未落库，稍后自动重试',
+        pendingMessage: t('dreamweaverRun.runDataNotPersisted'),
       })
       if (recovery.handled) {
         if (recovery.pendingMessage) {
@@ -62,11 +65,11 @@ export function useDreamweaverRunSnapshot(options: UseDreamweaverRunSnapshotOpti
         onResetMissingRunState(getSelectedProjectId())
         return
       }
-      setRunSnapshotError(await extractApiErrorMessage(e, '加载运行快照失败'))
+      setRunSnapshotError(await extractApiErrorMessage(e, t('dreamweaverRun.loadRunSnapshotFailed')))
     } finally {
       setRunSnapshotLoading(false)
     }
-  }, [getPersistedRunId, getTaskId, getTaskStatus, getSelectedProjectId, onResetMissingRunState, onSetResult, onSetRunPreflight])
+  }, [getPersistedRunId, getTaskId, getTaskStatus, getSelectedProjectId, onResetMissingRunState, onSetResult, onSetRunPreflight, t])
 
   const rebuildVideoJobs = useCallback(async () => {
     const persistedRunId = getPersistedRunId()
@@ -89,11 +92,11 @@ export function useDreamweaverRunSnapshot(options: UseDreamweaverRunSnapshotOpti
 
       setRunSnapshot((prev) => withRunSnapshotVideoJobs(prev, jobs))
     } catch (e: unknown) {
-      setRunSnapshotError(await extractApiErrorMessage(e, '刷新任务卡失败'))
+      setRunSnapshotError(await extractApiErrorMessage(e, t('dreamweaverRun.refreshTaskCardFailed')))
     } finally {
       setRunSnapshotLoading(false)
     }
-  }, [getPersistedRunId, loadRunSnapshot, runSnapshot])
+  }, [getPersistedRunId, loadRunSnapshot, runSnapshot, t])
 
   const resetSnapshotState = useCallback(() => {
     setRunSnapshot(null)

@@ -1,5 +1,7 @@
 import type { ReactNode } from 'react'
 
+import { useTranslation } from 'react-i18next'
+
 import DeleteIcon from '@mui/icons-material/Delete'
 import HistoryIcon from '@mui/icons-material/History'
 import PlayArrowIcon from '@mui/icons-material/PlayArrow'
@@ -23,11 +25,12 @@ type DreamweaverHistoryDialogTitleProps = {
 }
 
 export function DreamweaverHistoryDialogTitle({ projectTitle }: DreamweaverHistoryDialogTitleProps) {
+  const { t } = useTranslation()
   return (
     <DialogTitle>
       <Stack direction="row" spacing={1} alignItems="center">
         <HistoryIcon color="primary" />
-        <Typography variant="h6">历史记录</Typography>
+        <Typography variant="h6">{t('dreamweaverHistory.title')}</Typography>
         {projectTitle && (
           <Typography variant="body2" color="text.secondary">
             {projectTitle}
@@ -97,10 +100,11 @@ export function DreamweaverHistoryToolbarActions({
   bulkDeleteDisabled,
   bulkDeleteLabel,
 }: DreamweaverHistoryToolbarActionsProps) {
+  const { t } = useTranslation()
   return (
     <>
       <Button size="small" variant="outlined" disabled={refreshDisabled} onClick={onRefresh}>
-        刷新
+        {t('dreamweaverRun.libraryRefresh')}
       </Button>
       <Button size="small" variant="contained" color="error" disabled={bulkDeleteDisabled} onClick={onBulkDelete}>
         {bulkDeleteLabel}
@@ -132,14 +136,15 @@ export function DreamweaverHistoryRunItemSummary({
   cameraStatesCount,
   cameraScenesCount,
 }: DreamweaverHistoryRunItemSummaryProps) {
+  const { t } = useTranslation()
   return (
     <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
       <Chip size="small" label={statusLabel} color={statusColor} />
       <Typography variant="body2" sx={{ fontFamily: 'monospace' }}>
         {runId}
       </Typography>
-      {typeof progressValue === 'number' && <Chip size="small" label={`进度: ${progressValue}%`} />}
-      {stage && <Chip size="small" label={`阶段: ${stage}`} />}
+      {typeof progressValue === 'number' && <Chip size="small" label={t('dreamweaverRun.chipProgress', { value: progressValue })} />}
+      {stage && <Chip size="small" label={t('dreamweaverRun.chipStage', { stage })} />}
       {cameraTreeMode && <Chip size="small" label={`CamTree: ${cameraTreeMode}`} variant="outlined" />}
       {typeof cameraCount === 'number' && <Chip size="small" label={`Cam: ${cameraCount}`} />}
       {typeof cameraStatesCount === 'number' && <Chip size="small" label={`CamState: ${cameraStatesCount}`} />}
@@ -157,13 +162,14 @@ export function DreamweaverHistoryRunItemActions({
   onView,
   onDelete,
 }: DreamweaverHistoryRunItemActionsProps) {
+  const { t } = useTranslation()
   return (
     <Stack direction="row" spacing={1} alignItems="center">
       <Button size="small" variant="text" startIcon={<PlayArrowIcon fontSize="small" />} onClick={onView}>
-        查看
+        {t('dreamweaverRun.hvView')}
       </Button>
       <Button size="small" variant="text" color="error" startIcon={<DeleteIcon fontSize="small" />} onClick={onDelete}>
-        删除
+        {t('common.delete')}
       </Button>
     </Stack>
   )
@@ -197,7 +203,7 @@ export function DreamweaverHistoryRunItem({
   actions,
 }: DreamweaverHistoryRunItemProps) {
   return (
-    <ListItem sx={{ border: '1px solid #eee', borderRadius: 2, mb: 1 }}>
+    <ListItem sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 2, mb: 1 }}>
       <Box sx={{ flex: 1, minWidth: 0 }}>
         {summary}
         {timeText && (
@@ -260,12 +266,13 @@ export function DreamweaverHistoryDialogShell({
   title,
   content,
 }: DreamweaverHistoryDialogShellProps) {
+  const { t } = useTranslation()
   return (
     <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>
       {title}
       {content}
       <DialogActions>
-        <Button onClick={onClose}>关闭</Button>
+        <Button onClick={onClose}>{t('common.close')}</Button>
       </DialogActions>
     </Dialog>
   )
@@ -329,6 +336,7 @@ export function DreamweaverHistoryDialog({
   showEmptyHistory,
   showEmptyFilter,
 }: DreamweaverHistoryDialogProps) {
+  const { t } = useTranslation()
   return (
     <DreamweaverHistoryDialogShell
       open={open}
@@ -367,8 +375,8 @@ export function DreamweaverHistoryDialog({
           }
           emptyState={
             <>
-              {showEmptyHistory && <DreamweaverHistoryEmptyState message="暂无历史任务" />}
-              {showEmptyFilter && <DreamweaverHistoryEmptyState message="筛选结果为空" />}
+              {showEmptyHistory && <DreamweaverHistoryEmptyState message={t('dreamweaverRun.hvEmptyHistory')} />}
+              {showEmptyFilter && <DreamweaverHistoryEmptyState message={t('dreamweaverRun.hvEmptyFilter')} />}
             </>
           }
           runList={

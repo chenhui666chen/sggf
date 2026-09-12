@@ -18,6 +18,7 @@ import LinkIcon from '@mui/icons-material/Link'
 import LinkOffIcon from '@mui/icons-material/LinkOff'
 import SyncIcon from '@mui/icons-material/Sync'
 import UploadFileIcon from '@mui/icons-material/UploadFile'
+import { useTranslation } from 'react-i18next'
 import { CHARACTER_VIEW_ORDER, characterViewLabel, characterViewRole } from '@/utils/dreamweaverLibraryRole'
 import { resolveLibraryAssetImageState } from '@/utils/dreamweaverLibraryAssetState'
 import type { CharacterCard, LibraryAsset, CollectState } from './libraryPageUtils'
@@ -47,6 +48,7 @@ export interface CharacterViewDialogProps {
 }
 
 export function CharacterViewDialog(props: CharacterViewDialogProps) {
+  const { t } = useTranslation()
   const {
     open,
     card,
@@ -72,13 +74,13 @@ export function CharacterViewDialog(props: CharacterViewDialogProps) {
 
   return (
     <Dialog open={open} onClose={onClose} fullWidth maxWidth="md">
-      <DialogTitle>角色多视角：{card?.title || '-'}</DialogTitle>
+      <DialogTitle>{t('dreamweaverRun.libraryViewTitle', { title: card?.title || '-' })}</DialogTitle>
       <DialogContent dividers>
         <Typography variant="body2" color="text.secondary" sx={{ whiteSpace: 'pre-wrap' }}>
-          {card?.descriptor || '暂无角色描述'}
+          {card?.descriptor || t('dreamweaverRun.libraryNoDescriptor')}
         </Typography>
         <Typography variant="caption" color="text.secondary" display="block" sx={{ mt: 1 }}>
-          建议：按六视角顺序生成；非正面视角会优先复用前序视角作为参考，保证角色一致性。
+          {t('dreamweaverRun.libraryViewOrderHint')}
         </Typography>
         <Divider sx={{ my: 2 }} />
         <Box
@@ -100,26 +102,35 @@ export function CharacterViewDialog(props: CharacterViewDialogProps) {
             const missing = Boolean(role && missingRoleSet.has(role)) || state.markedMissing
             const placeholder = Boolean(asset && state.placeholder && !missing && !state.safetyBlocked)
             const collectState = asset ? collectStates[asset.id] || { loading: false, feedback: null } : { loading: false, feedback: null }
-            const stateText = missing ? '未生成（缺失）' : !asset ? '未生成' : state.safetyBlocked ? '安全拦截' : placeholder ? '占位图' : '暂无预览'
+            const stateText = missing
+              ? t('dreamweaverRun.libraryPreviewMissingAll')
+              : !asset
+                ? t('dreamweaverRun.libraryPreviewNotGenerated')
+                : state.safetyBlocked
+                  ? t('dreamweaverRun.libraryStatusSafetyBlocked')
+                  : placeholder
+                    ? t('dreamweaverRun.libraryPlaceholderImage')
+                    : t('dreamweaverRun.libraryNoPreview')
             return (
               <Box
                 key={view}
                 data-library-asset-id={asset?.id}
                 sx={{
-                  border:
+                  border: '1px solid',
+                  borderColor:
                     requestedLibraryAssetId && asset?.id === requestedLibraryAssetId
-                      ? '1px solid rgba(255, 215, 64, 0.95)'
-                      : '1px solid rgba(0,0,0,0.12)',
+                      ? 'rgba(255, 215, 64, 0.95)' // sg-color-fixed: 角色选中金沙（品牌数据色）
+                      : 'divider',
                   borderRadius: 2,
                   overflow: 'hidden',
-                  bgcolor: 'rgba(0,0,0,0.02)',
+                  bgcolor: 'grey.100',
                   boxShadow:
                     requestedLibraryAssetId && asset?.id === requestedLibraryAssetId
-                      ? '0 0 0 2px rgba(255, 215, 64, 0.18)'
+                      ? '0 0 0 2px rgba(255, 215, 64, 0.18)' // sg-color-fixed: 选中金沙光晕（品牌数据色）
                       : 'none',
                 }}
               >
-                <Box sx={{ width: '100%', aspectRatio, bgcolor: 'rgba(0,0,0,0.08)', position: 'relative' }}>
+                <Box sx={{ width: '100%', aspectRatio, bgcolor: 'rgba(0,0,0,0.08)', position: 'relative' }}>{/* sg-color-fixed: 媒体预览容器底（数据色） */}
                   <Chip
                     size="small"
                     label={characterViewLabel(view)}
@@ -127,7 +138,7 @@ export function CharacterViewDialog(props: CharacterViewDialogProps) {
                       position: 'absolute',
                       top: 8,
                       left: 8,
-                      bgcolor: 'rgba(0,0,0,0.62)',
+                      bgcolor: 'rgba(0,0,0,0.62)', // sg-color-fixed: 媒体图上 Chip 黑叠（数据色）
                       color: 'white',
                       fontWeight: 700,
                       zIndex: 1,
@@ -151,7 +162,7 @@ export function CharacterViewDialog(props: CharacterViewDialogProps) {
                     />
                   )}
                   {!preview && (
-                    <Box sx={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'rgba(255,255,255,0.65)', fontSize: 13 }}>
+                    <Box sx={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'rgba(255,255,255,0.65)', fontSize: 13 }}>{/* sg-color-fixed: 媒体图上白叠字（数据色） */}
                       {stateText}
                     </Box>
                   )}
@@ -163,10 +174,10 @@ export function CharacterViewDialog(props: CharacterViewDialogProps) {
                     </Typography>
                   )}
                   <Stack direction="row" spacing={1} alignItems="center" mt={0.75} flexWrap="wrap">
-                    <Chip size="small" label={approved ? '已通过' : '待审核'} color={approved ? 'success' : 'default'} />
-                    {missing && <Chip size="small" label="缺失" color="warning" variant="outlined" />}
-                    {placeholder && <Chip size="small" label="占位" variant="outlined" />}
-                    {state.safetyBlocked && <Chip size="small" label="安全拦截" color="error" variant="outlined" />}
+                    <Chip size="small" label={approved ? t('dreamweaverRun.libraryStatusApproved') : t('dreamweaverRun.libraryStatusPendingReview')} color={approved ? 'success' : 'default'} />
+                    {missing && <Chip size="small" label={t('dreamweaverRun.libraryStatusMissing')} color="warning" variant="outlined" />}
+                    {placeholder && <Chip size="small" label={t('dreamweaverRun.libraryStatusPlaceholder')} variant="outlined" />}
+                    {state.safetyBlocked && <Chip size="small" label={t('dreamweaverRun.libraryStatusSafetyBlocked')} color="error" variant="outlined" />}
                   </Stack>
                   <Stack direction="row" spacing={0.75} alignItems="center" mt={1} sx={{ flexWrap: 'nowrap' }}>
                     <Button
@@ -176,7 +187,7 @@ export function CharacterViewDialog(props: CharacterViewDialogProps) {
                       disabled={loading || !asset || !hasRenderableImage || state.safetyBlocked}
                       sx={{ minWidth: 'auto', px: 0.75 }}
                     >
-                      {approved ? '撤销通过' : '通过'}
+                      {approved ? t('dreamweaverRun.libraryRevokeApproval') : t('dreamweaverRun.libraryApprove')}
                     </Button>
                     <Button
                       size="small"
@@ -190,7 +201,7 @@ export function CharacterViewDialog(props: CharacterViewDialogProps) {
                         '& .MuiButton-startIcon': { mr: 0.5 },
                       }}
                     >
-                      上传替换
+                      {t('dreamweaverRun.libraryUploadReplace')}
                       <input
                         hidden
                         type="file"
@@ -213,7 +224,7 @@ export function CharacterViewDialog(props: CharacterViewDialogProps) {
                           return
                         }
                         if (!role) return
-                        const roleTitle = `${card?.title || '角色'}-${characterViewLabel(view)}`
+                        const roleTitle = `${card?.title || t('dreamweaverRun.libraryGroupCharacter')}-${characterViewLabel(view)}`
                         onRegenerateForRole(role, roleTitle)
                       }}
                       disabled={loading || !role}
@@ -223,7 +234,7 @@ export function CharacterViewDialog(props: CharacterViewDialogProps) {
                         '& .MuiButton-startIcon': { mr: 0.5 },
                       }}
                     >
-                      {hasRenderableImage ? '重生成' : '生成'}
+                      {hasRenderableImage ? t('dreamweaverRun.libraryRegenerate') : t('dreamweaverRun.libraryGenerate')}
                     </Button>
                   </Stack>
                   {asset ? (
@@ -234,7 +245,7 @@ export function CharacterViewDialog(props: CharacterViewDialogProps) {
                       disabled={loading || collectState.loading || !approved || !hasRenderableImage || state.safetyBlocked}
                       sx={{ mt: 1, width: '100%' }}
                     >
-                      {collectState.loading ? '收录中...' : '收录到用户资产'}
+                      {collectState.loading ? t('dreamweaverRun.libraryCollecting') : t('dreamweaverRun.libraryCollectToUserAssets')}
                     </Button>
                   ) : null}
                   {asset && hasRenderableImage ? (
@@ -250,7 +261,7 @@ export function CharacterViewDialog(props: CharacterViewDialogProps) {
                               color="info"
                               variant="outlined"
                             />
-                            <Tooltip title="同步 Kling 主体引用到关联视角" arrow>
+                            <Tooltip title={t('dreamweaverRun.librarySyncKlingTooltip')} arrow>
                               <span>
                                 <Button
                                   size="small"
@@ -260,7 +271,7 @@ export function CharacterViewDialog(props: CharacterViewDialogProps) {
                                   disabled={providerSyncSubmitting && providerSyncAssetId === asset.id}
                                   sx={{ minWidth: 'auto', px: 0.5, fontSize: 11 }}
                                 >
-                                  {providerSyncSubmitting && providerSyncAssetId === asset.id ? '同步中...' : '同步'}
+                                  {providerSyncSubmitting && providerSyncAssetId === asset.id ? t('dreamweaverRun.librarySyncing') : t('dreamweaverRun.librarySync')}
                                 </Button>
                               </span>
                             </Tooltip>
@@ -271,7 +282,7 @@ export function CharacterViewDialog(props: CharacterViewDialogProps) {
                               onClick={() => onOpenProviderRefDialog(asset)}
                               sx={{ minWidth: 'auto', px: 0.5, fontSize: 11 }}
                             >
-                              解绑
+                              {t('dreamweaverRun.libraryUnbind')}
                             </Button>
                           </>
                         ) : (
@@ -282,7 +293,7 @@ export function CharacterViewDialog(props: CharacterViewDialogProps) {
                             onClick={() => onOpenProviderRefDialog(asset)}
                             sx={{ minWidth: 'auto', px: 0.5, fontSize: 11 }}
                           >
-                            绑定 Kling
+                            {t('dreamweaverRun.libraryBindKling')}
                           </Button>
                         )
                       })()}
@@ -301,7 +312,7 @@ export function CharacterViewDialog(props: CharacterViewDialogProps) {
       </DialogContent>
       <DialogActions>
         <Button onClick={onClose} disabled={loading || regenSubmitting}>
-          关闭
+          {t('common.close')}
         </Button>
       </DialogActions>
     </Dialog>

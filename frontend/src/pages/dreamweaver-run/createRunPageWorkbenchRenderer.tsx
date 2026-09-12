@@ -1,4 +1,5 @@
 import React from 'react'
+import type { TFunction } from 'i18next'
 import ContentCopyIcon from '@mui/icons-material/ContentCopy'
 import BugReportIcon from '@mui/icons-material/BugReport'
 import HistoryIcon from '@mui/icons-material/History'
@@ -55,6 +56,7 @@ interface CreateRunPageWorkbenchRendererDeps {
   renderResultView: () => React.ReactNode
   renderWorkbenchDialogs: () => React.ReactNode
   stepLabels: readonly string[]
+  t: TFunction
 }
 
 export function createRunPageWorkbenchRenderer(deps: CreateRunPageWorkbenchRendererDeps) {
@@ -92,6 +94,7 @@ export function createRunPageWorkbenchRenderer(deps: CreateRunPageWorkbenchRende
     renderResultView,
     renderWorkbenchDialogs,
     stepLabels,
+    t,
   } = deps
 
   const closeRestartMenu = () => setRestartAnchorEl(null)
@@ -103,10 +106,10 @@ export function createRunPageWorkbenchRenderer(deps: CreateRunPageWorkbenchRende
 
   const requestRestartVideoShots = () => {
     closeRestartMenu()
-    const raw = window.prompt('请输入需要重跑的镜头 shot_id（多个用逗号分隔）', '')
+    const raw = window.prompt(t('dreamweaverRun.promptShotIds'), '')
     const ids = parsePromptedIds(raw)
     if (ids.length === 0) {
-      setError('未输入有效 shot_id')
+      setError(t('dreamweaverRun.errorInvalidShotId'))
       return
     }
     void restartGeneration('VIDEO', ids)
@@ -114,10 +117,10 @@ export function createRunPageWorkbenchRenderer(deps: CreateRunPageWorkbenchRende
 
   const requestRestartKeyframeCameras = () => {
     closeRestartMenu()
-    const raw = window.prompt('请输入需要重跑的相机 cam_idx（多个用逗号分隔）', '')
+    const raw = window.prompt(t('dreamweaverRun.promptCamIdxs'), '')
     const unique = parsePromptedCameraIndices(raw)
     if (unique.length === 0) {
-      setError('未输入有效 cam_idx')
+      setError(t('dreamweaverRun.errorInvalidCamIdx'))
       return
     }
     void restartGeneration('KEYFRAMES', undefined, unique)
@@ -130,7 +133,7 @@ export function createRunPageWorkbenchRenderer(deps: CreateRunPageWorkbenchRende
   const historyIcon = <HistoryIcon fontSize="small" />
   const restartIcon = <RefreshIcon fontSize="small" />
 
-  const restartActionLabel = restartLoading ? '重跑中…' : '重跑'
+  const restartActionLabel = restartLoading ? t('dreamweaverRun.restarting') : t('dreamweaverRun.restart')
   const restartActionDisabled = isRestartDisabled(currentRunId, running, restartLoading)
   const restartOpen = !!restartAnchorEl
   const followStepVisible = manualPreviewStep && previewStep !== progressStep
@@ -154,7 +157,7 @@ export function createRunPageWorkbenchRenderer(deps: CreateRunPageWorkbenchRende
         copyDebugIcon,
         diagnosticsIcon,
         historyIcon,
-      })}
+      }, t)}
       restartActionLabel={restartActionLabel}
       restartActionDisabled={restartActionDisabled}
       restartActionStartIcon={restartIcon}
@@ -169,7 +172,7 @@ export function createRunPageWorkbenchRenderer(deps: CreateRunPageWorkbenchRende
         requestRestartVideoShots,
         requestRestartKeyframeCameras,
         triggerRestartFromStage,
-      })}
+      }, t)}
       followVisible={followStepVisible}
       onFollow={followProgressStep}
       stepLabels={stepLabels}

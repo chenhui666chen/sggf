@@ -1,5 +1,7 @@
 import type { ReactNode } from 'react'
 
+import { useTranslation } from 'react-i18next'
+
 import { Alert, Button, Dialog, DialogActions, DialogContent, DialogTitle, Stack, TextField, Typography } from '@mui/material'
 
 type DreamweaverPromptEditDialogContentProps = {
@@ -27,16 +29,17 @@ export function DreamweaverPromptEditDialogContent({
   onChangeTail,
   onChangeVideo,
 }: DreamweaverPromptEditDialogContentProps) {
+  const { t } = useTranslation()
   return (
     <DialogContent dividers>
       {shotDescription && (
         <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1 }}>
-          镜头描述：{shotDescription || '-'}
+          {t('dreamweaverRun.promptShotDescription', { desc: shotDescription || '-' })}
         </Typography>
       )}
       <Stack spacing={1.5}>
         <TextField
-          label="首帧提示词"
+          label={t('dreamweaverRun.promptHeadLabel')}
           fullWidth
           multiline
           minRows={3}
@@ -45,7 +48,7 @@ export function DreamweaverPromptEditDialogContent({
           disabled={saving}
         />
         <TextField
-          label="尾帧提示词"
+          label={t('dreamweaverRun.promptTailLabel')}
           fullWidth
           multiline
           minRows={3}
@@ -54,7 +57,7 @@ export function DreamweaverPromptEditDialogContent({
           disabled={saving}
         />
         <TextField
-          label="视频提示词（自动）"
+          label={t('dreamweaverRun.promptVideoAutoLabel')}
           fullWidth
           multiline
           minRows={3}
@@ -62,14 +65,14 @@ export function DreamweaverPromptEditDialogContent({
           InputProps={{ readOnly: true }}
         />
         <TextField
-          label="视频提示词覆盖（可选）"
+          label={t('dreamweaverRun.promptVideoOverrideLabel')}
           fullWidth
           multiline
           minRows={3}
           value={videoPrompt}
           onChange={(e) => onChangeVideo(e.target.value)}
           disabled={saving}
-          placeholder="留空则使用系统拼接的默认视频提示词"
+          placeholder={t('dreamweaverRun.promptVideoOverridePlaceholder')}
         />
       </Stack>
       {error && (
@@ -92,13 +95,14 @@ export function DreamweaverPromptEditDialogActions({
   onClose,
   onSave,
 }: DreamweaverPromptEditDialogActionsProps) {
+  const { t } = useTranslation()
   return (
     <DialogActions>
       <Button onClick={onClose} disabled={saving}>
-        取消
+        {t('common.cancel')}
       </Button>
       <Button variant="contained" onClick={onSave} disabled={saving}>
-        {saving ? '保存中...' : '保存'}
+        {saving ? t('dreamweaverRun.promptEditSaving') : t('common.save')}
       </Button>
     </DialogActions>
   )
@@ -149,6 +153,7 @@ export function DreamweaverRegenerateDialogModeControls({
   onSmartGenerate,
   onToggleImageEdit,
 }: DreamweaverRegenerateDialogModeControlsProps) {
+  const { t } = useTranslation()
   return (
     <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1 }} flexWrap="wrap">
       <Button
@@ -157,11 +162,11 @@ export function DreamweaverRegenerateDialogModeControls({
         onClick={onSmartGenerate}
         disabled={submitting || suggesting || !hasRole}
       >
-        {suggesting ? '提示词生成中...' : '智能生成提示词'}
+        {suggesting ? t('dreamweaverRun.promptSuggesting') : t('dreamweaverRun.promptSmartGenerate')}
       </Button>
       {forceImageEdit ? (
         <Alert severity="info" sx={{ py: 0, px: 1 }}>
-          图像编辑：强制
+          {t('dreamweaverRun.promptImageEditForced')}
         </Alert>
       ) : (
         <Button
@@ -172,7 +177,7 @@ export function DreamweaverRegenerateDialogModeControls({
           onClick={onToggleImageEdit}
           disabled={submitting || suggesting || !hasImageBase}
         >
-          {imageEditActive ? '图像编辑：开启' : '使用图像编辑'}
+          {imageEditActive ? t('dreamweaverRun.promptImageEditOn') : t('dreamweaverRun.promptUseImageEdit')}
         </Button>
       )}
     </Stack>
@@ -245,10 +250,11 @@ export function DreamweaverRegenerateDialogActions({
   onClose,
   onSubmit,
 }: DreamweaverRegenerateDialogActionsProps) {
+  const { t } = useTranslation()
   return (
     <DialogActions>
       <Button onClick={onClose} disabled={submitting}>
-        取消
+        {t('common.cancel')}
       </Button>
       <Button variant="contained" onClick={onSubmit} disabled={submitDisabled}>
         {submitLabel}
@@ -304,28 +310,33 @@ export function DreamweaverRegenerateDialogStatusHints({
   imageEditActive,
   imageEditAutoCleared,
 }: DreamweaverRegenerateDialogStatusHintsProps) {
+  const { t } = useTranslation()
   return (
     <>
       {forceImageEdit && (
         <Alert severity={hasImageBase ? 'info' : 'error'} sx={{ mb: 1 }}>
           <Typography variant="body2">
             {hasImageBase
-              ? `参考基底：${alertBaseLabel}。${
+              ? `${t('dreamweaverRun.promptReferenceBase', { label: alertBaseLabel })} ${
                   alertReadyReferenceLabel
-                    ? `参考图已就绪：${alertReadyReferenceLabel}${
-                        alertReadyReferenceCount > 1
-                          ? '（生成时将自动上传；额外参考图在模型支持多参考时生效）。'
-                          : '（生成时将自动上传）。'
-                      }`
-                    : '参考图已就绪。'
+                    ? `${t('dreamweaverRun.promptReferenceReady', {
+                        label: alertReadyReferenceLabel,
+                        note:
+                          alertReadyReferenceCount > 1
+                            ? t('dreamweaverRun.promptReferenceMultiNote')
+                            : t('dreamweaverRun.promptReferenceSingleNote'),
+                      })}`
+                    : t('dreamweaverRun.promptReferenceReadyNone')
                 }`
-              : `缺少参考图：${alertMissingReferenceLabel || '前序视角'}。请先生成前序视角。`}
+              : t('dreamweaverRun.promptMissingReference', {
+                  label: alertMissingReferenceLabel || t('dreamweaverRun.promptPreviousView'),
+                })}
           </Typography>
         </Alert>
       )}
       {!forceImageEdit && !hasImageBase && (
         <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1 }}>
-          当前素材没有可编辑底图，将回退到文生图模式。
+          {t('dreamweaverRun.promptNoEditableBase')}
         </Typography>
       )}
       {suggestError && (
@@ -335,7 +346,7 @@ export function DreamweaverRegenerateDialogStatusHints({
       )}
       {imageEditActive && imageEditAutoCleared && (
         <Typography variant="caption" color="text.disabled" display="block" sx={{ mb: 1 }}>
-          已清空原提示词，请填写本次需要修改的内容。
+          {t('dreamweaverRun.promptOverrideCleared')}
         </Typography>
       )}
     </>
@@ -375,11 +386,12 @@ export function DreamweaverPromptEditDialog({
   onChangeVideo,
   onSave,
 }: DreamweaverPromptEditDialogProps) {
+  const { t } = useTranslation()
   return (
     <DreamweaverPromptEditDialogShell
       open={open}
       onClose={onClose}
-      title={`提示词审核：${shotTitle}`}
+      title={t('dreamweaverRun.promptReviewTitle', { title: shotTitle })}
       content={
         <DreamweaverPromptEditDialogContent
           shotDescription={shotDescription}

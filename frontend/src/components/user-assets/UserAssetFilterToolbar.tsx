@@ -8,6 +8,7 @@ import {
   Stack,
   TextField,
 } from '@mui/material'
+import { useTranslation } from 'react-i18next'
 
 import type {
   UserAssetListArchiveFilter,
@@ -55,6 +56,8 @@ export default function UserAssetFilterToolbar(props: UserAssetFilterToolbarProp
     onRefresh,
   } = props
 
+  const { t } = useTranslation()
+
   const presentation = buildUserAssetFilterToolbarPresentation({
     filters,
     kindOptions,
@@ -62,7 +65,7 @@ export default function UserAssetFilterToolbar(props: UserAssetFilterToolbarProp
     tagOptions,
     filteredCount,
     loading,
-  })
+  }, t)
 
   const handleFieldChange = (fieldKey: string, value: string) => {
     switch (fieldKey) {

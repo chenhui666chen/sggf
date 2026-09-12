@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type Dispatch, type SetStateAction } from 'react'
 
+import { useTranslation } from 'react-i18next'
+
 import { apiClient, extractApiErrorMessage } from '../../services/api'
 import type { SetSnackbar } from './hookTypes'
 import type {
@@ -37,6 +39,13 @@ const PREVIEW_TYPE_LABELS: Record<PreviewType, string> = {
   mix: '融合',
 }
 
+const PREVIEW_TYPE_LABEL_KEYS: Record<PreviewType, string> = {
+  voice: 'audiobook.useAudiobookSegmentReviewActions.previewVoice',
+  sfx: 'audiobook.useAudiobookSegmentReviewActions.previewSfx',
+  bgm: 'audiobook.useAudiobookSegmentReviewActions.previewBgm',
+  mix: 'audiobook.useAudiobookSegmentReviewActions.previewMix',
+}
+
 const getSegmentVoiceRecordingExtension = (mimeType: string) => {
   const normalized = mimeType.toLowerCase()
   if (normalized.includes('ogg')) return 'ogg'
@@ -58,6 +67,8 @@ export const useAudiobookSegmentReviewActions = ({
   setScriptEditorData,
   onCandidateGenerated,
 }: UseAudiobookSegmentReviewActionsParams) => {
+  const { t } = useTranslation()
+  const previewTypeLabel = useCallback((type: PreviewType): string => t(PREVIEW_TYPE_LABEL_KEYS[type]), [t])
   const [reviewMode, setReviewMode] = useState(false)
   const [segmentReviews, setSegmentReviews] = useState<SegmentReviews>({})
   const [regeneratingSegments, setRegeneratingSegments] = useState<Set<number>>(() => new Set())
@@ -116,10 +127,10 @@ export const useAudiobookSegmentReviewActions = ({
       await apiClient.reviewSegment(audiobookProjectId, chapterId, index, { quality_score: score })
       setSegmentReviews((prev) => ({ ...prev, [index]: { quality_score: score } }))
     } catch (error: unknown) {
-      const message = await extractApiErrorMessage(error, '保存评分失败')
+      const message = await extractApiErrorMessage(error, t('audiobook.useAudiobookSegmentReviewActions.saveScoreFailed'))
       setSnackbar({ open: true, message, severity: 'error' })
     }
-  }, [audiobookProjectId, chapterId, setSnackbar])
+  }, [audiobookProjectId, chapterId, setSnackbar, t])
 
   const handleRegenerateSegment = useCallback(async (
     index: number,
@@ -132,7 +143,7 @@ export const useAudiobookSegmentReviewActions = ({
     if (sourceMode === 'ai_generate') {
       setSnackbar({
         open: true,
-        message: `片段 #${index + 1} 正在 AI 生成${PREVIEW_TYPE_LABELS[previewType]}，耗时可能较长，请稍候`,
+        message: t('audiobook.useAudiobookSegmentReviewActions.aiGeneratingMessage', { index: index + 1, type: previewTypeLabel(previewType) }),
         severity: 'info',
       })
     }
@@ -150,7 +161,7 @@ export const useAudiobookSegmentReviewActions = ({
       })
       const candidateId = candidateResponse.data?.candidate_id
       if (!candidateId) {
-        throw new Error('候选凭证缺失')
+        throw new Error(t('audiobook.useAudiobookSegmentReviewActions.missingCandidateCredential'))
       }
 
       setPendingSegmentRegenerations((prev) => ({
@@ -170,13 +181,13 @@ export const useAudiobookSegmentReviewActions = ({
       }))
       setSnackbar({
         open: true,
-        message: `片段 #${index + 1} 已生成${PREVIEW_TYPE_LABELS[previewType]}候选版本，可试听后保存或取消`,
+        message: t('audiobook.useAudiobookSegmentReviewActions.candidateGeneratedMessage', { index: index + 1, type: previewTypeLabel(previewType) }),
         severity: 'success',
       })
       onCandidateGenerated?.(index, previewType, candidateId)
     } catch (error: unknown) {
-      const message = await extractApiErrorMessage(error, '请稍后重试')
-      setSnackbar({ open: true, message: `${PREVIEW_TYPE_LABELS[previewType]}重新生成失败: ${message}`, severity: 'error' })
+      const message = await extractApiErrorMessage(error, t('audiobook.useAudiobookSegmentReviewActions.retryLater'))
+      setSnackbar({ open: true, message: t('audiobook.useAudiobookSegmentReviewActions.regenerationFailedMessage', { type: previewTypeLabel(previewType), message }), severity: 'error' })
     } finally {
       setRegeneratingSegments((prev) => {
         const next = new Set(prev)
@@ -184,7 +195,7 @@ export const useAudiobookSegmentReviewActions = ({
         return next
       })
     }
-  }, [audiobookProjectId, chapterId, onCandidateGenerated, setSnackbar, ttsModel])
+  }, [audiobookProjectId, chapterId, onCandidateGenerated, previewTypeLabel, setSnackbar, ttsModel])
 
   const uploadSegmentVoiceRecording = useCallback(async (
     index: number,
@@ -209,7 +220,7 @@ export const useAudiobookSegmentReviewActions = ({
       )
       const candidateId = candidateResponse.data?.candidate_id
       if (!candidateId) {
-        throw new Error('配音候选凭证缺失')
+        throw new Error(t('audiobook.useAudiobookSegmentReviewActions.missingVoiceCandidateCredential'))
       }
 
       setPendingSegmentRegenerations((prev) => ({
@@ -229,12 +240,12 @@ export const useAudiobookSegmentReviewActions = ({
       }))
       setSnackbar({
         open: true,
-        message: `片段 #${index + 1} 真人配音已生成候选，可试听后保存或取消`,
+        message: t('audiobook.useAudiobookSegmentReviewActions.voiceCandidateGeneratedMessage', { index: index + 1 }),
         severity: 'success',
       })
       onCandidateGenerated?.(index, voicePreviewType, candidateId)
     } catch (error: unknown) {
-      const message = await extractApiErrorMessage(error, '上传配音失败')
+      const message = await extractApiErrorMessage(error, t('audiobook.useAudiobookSegmentReviewActions.uploadVoiceFailed'))
       setSnackbar({ open: true, message, severity: 'error' })
     } finally {
       setRegeneratingSegments((prev) => {
@@ -243,7 +254,7 @@ export const useAudiobookSegmentReviewActions = ({
         return next
       })
     }
-  }, [audiobookProjectId, chapterId, onCandidateGenerated, setSnackbar])
+  }, [audiobookProjectId, chapterId, onCandidateGenerated, setSnackbar, t])
 
   const handleStartSegmentVoiceRecording = useCallback(async (
     index: number,
@@ -261,7 +272,7 @@ export const useAudiobookSegmentReviewActions = ({
       || !navigator.mediaDevices?.getUserMedia
       || typeof MediaRecorder === 'undefined'
     ) {
-      setSnackbar({ open: true, message: '当前浏览器不支持录音，请换用支持麦克风录制的浏览器', severity: 'error' })
+      setSnackbar({ open: true, message: t('audiobook.useAudiobookSegmentReviewActions.recordingUnsupportedMessage'), severity: 'error' })
       return
     }
 
@@ -298,7 +309,7 @@ export const useAudiobookSegmentReviewActions = ({
 
         if (!context) return
         if (chunks.length === 0) {
-          setSnackbar({ open: true, message: '未获取到配音录音数据，请重试', severity: 'error' })
+          setSnackbar({ open: true, message: t('audiobook.useAudiobookSegmentReviewActions.recordingNoDataMessage'), severity: 'error' })
           return
         }
         const blob = new Blob(chunks, { type: chunks[0]?.type || 'audio/webm' })
@@ -310,22 +321,23 @@ export const useAudiobookSegmentReviewActions = ({
         segmentVoiceContextRef.current = null
         setRecordingSegmentIndex(null)
         stopSegmentVoiceRecordingStream()
-        setSnackbar({ open: true, message: '配音录制失败，请重试', severity: 'error' })
+        setSnackbar({ open: true, message: t('audiobook.useAudiobookSegmentReviewActions.recordingFailedMessage'), severity: 'error' })
       }
       recorder.start()
       setRecordingSegmentIndex(index)
-      setSnackbar({ open: true, message: `片段 #${index + 1} 正在配音录制，完成后点击结束配音`, severity: 'info' })
+      setSnackbar({ open: true, message: t('audiobook.useAudiobookSegmentReviewActions.recordingStartedMessage', { index: index + 1 }), severity: 'info' })
     } catch (error: unknown) {
       if (requestId !== segmentVoiceRequestIdRef.current) return
       segmentVoiceRequestPendingRef.current = false
       abortSegmentVoiceRecording()
-      const message = await extractApiErrorMessage(error, '无法访问麦克风，请检查浏览器权限')
+      const message = await extractApiErrorMessage(error, t('audiobook.useAudiobookSegmentReviewActions.micAccessFailed'))
       setSnackbar({ open: true, message, severity: 'error' })
     }
   }, [
     abortSegmentVoiceRecording,
     audiobookProjectId,
     chapterId,
+    previewTypeLabel,
     recordingSegmentIndex,
     regeneratingSegments,
     setSnackbar,
@@ -388,13 +400,13 @@ export const useAudiobookSegmentReviewActions = ({
       setSnackbar({
         open: true,
         message: chapterAudioStale
-          ? `片段 #${index + 1} ${PREVIEW_TYPE_LABELS[previewType]}候选版本已保存，整章混音已过期，请重新混音`
-          : `片段 #${index + 1} ${PREVIEW_TYPE_LABELS[previewType]}候选版本已保存`,
+          ? t('audiobook.useAudiobookSegmentReviewActions.appliedWithMixStaleMessage', { index: index + 1, type: previewTypeLabel(previewType) })
+          : t('audiobook.useAudiobookSegmentReviewActions.appliedMessage', { index: index + 1, type: previewTypeLabel(previewType) }),
         severity: 'success',
       })
     } catch (error: unknown) {
-      const message = await extractApiErrorMessage(error, '请稍后重试')
-      setSnackbar({ open: true, message: `保存${PREVIEW_TYPE_LABELS[previewType]}候选版本失败: ${message}`, severity: 'error' })
+      const message = await extractApiErrorMessage(error, t('audiobook.useAudiobookSegmentReviewActions.retryLater'))
+      setSnackbar({ open: true, message: t('audiobook.useAudiobookSegmentReviewActions.applyFailedMessage', { type: previewTypeLabel(previewType), message }), severity: 'error' })
     } finally {
       setRegeneratingSegments((prev) => {
         const next = new Set(prev)
@@ -402,7 +414,7 @@ export const useAudiobookSegmentReviewActions = ({
         return next
       })
     }
-  }, [audiobookProjectId, chapterId, pendingSegmentRegenerations, setScriptEditorData, setSnackbar])
+  }, [audiobookProjectId, chapterId, pendingSegmentRegenerations, previewTypeLabel, setScriptEditorData, setSnackbar])
 
   const handleDiscardSegmentRegenerationCandidate = useCallback((index: number, previewType: PreviewType) => {
     setPendingSegmentRegenerations((prev) => {
@@ -419,10 +431,10 @@ export const useAudiobookSegmentReviewActions = ({
     })
     setSnackbar({
       open: true,
-      message: `片段 #${index + 1} ${PREVIEW_TYPE_LABELS[previewType]}候选版本已取消`,
+      message: t('audiobook.useAudiobookSegmentReviewActions.discardMessage', { index: index + 1, type: previewTypeLabel(previewType) }),
       severity: 'info',
     })
-  }, [setSnackbar])
+  }, [previewTypeLabel, setSnackbar])
 
   return {
     reviewMode,

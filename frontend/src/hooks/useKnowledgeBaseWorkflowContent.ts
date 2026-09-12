@@ -1,4 +1,5 @@
 import { useCallback, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import type { Dispatch, SetStateAction } from 'react'
 
 import { apiClient } from '@/services/api'
@@ -20,6 +21,7 @@ interface UseKnowledgeBaseWorkflowContentReturn {
 export function useKnowledgeBaseWorkflowContent(
   projectId?: string,
 ): UseKnowledgeBaseWorkflowContentReturn {
+  const { t } = useTranslation()
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [worldSetting, setWorldSetting] = useState('')
@@ -45,14 +47,14 @@ export function useKnowledgeBaseWorkflowContent(
         return
       }
 
-      setError(String(response.data?.detail || response.data?.error || '加载失败'))
+      setError(String(response.data?.detail || response.data?.error || t('kb.contentLoadFailed')))
     } catch (err) {
       logger.error('❌ 加载工作流数据失败:', err)
-      setError('加载失败，请重试')
+      setError(t('kb.contentLoadFailedRetry'))
     } finally {
       setLoading(false)
     }
-  }, [projectId])
+  }, [projectId, t])
 
   return {
     loading,

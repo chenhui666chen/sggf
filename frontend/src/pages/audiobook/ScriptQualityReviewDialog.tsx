@@ -18,6 +18,7 @@ import {
 } from '@mui/material'
 import EditIcon from '@mui/icons-material/Edit'
 import SendIcon from '@mui/icons-material/Send'
+import { useTranslation } from 'react-i18next'
 
 import { apiClient, extractApiErrorMessage } from '../../services/api'
 import ScriptReviewReport from './ScriptReviewReport'
@@ -46,6 +47,7 @@ const ScriptQualityReviewDialog = ({
   onSelectIssue,
   onSelectSegment,
 }: ScriptQualityReviewDialogProps) => {
+  const { t } = useTranslation()
   const [feedbackOpen, setFeedbackOpen] = useState(false)
   const [feedbackText, setFeedbackText] = useState('')
   const [feedbackSubmitting, setFeedbackSubmitting] = useState(false)
@@ -73,7 +75,7 @@ const ScriptQualityReviewDialog = ({
       })
       setFeedbackSubmitted(true)
     } catch (err: unknown) {
-      setFeedbackError(await extractApiErrorMessage(err, '提交反馈失败'))
+      setFeedbackError(await extractApiErrorMessage(err, t('audiobook.scriptQualityReviewDialog.submitFailed')))
     } finally {
       setFeedbackSubmitting(false)
     }
@@ -95,11 +97,11 @@ const ScriptQualityReviewDialog = ({
       maxWidth="md"
       fullWidth
     >
-      <DialogTitle>剧本质量评审</DialogTitle>
+      <DialogTitle>{t('audiobook.scriptQualityReviewDialog.title')}</DialogTitle>
       <DialogContent dividers>
         {!data ? (
           <Typography variant="body2" color="text.secondary">
-            暂无评审数据
+            {t('audiobook.scriptQualityReviewDialog.emptyData')}
           </Typography>
         ) : (
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
@@ -113,7 +115,7 @@ const ScriptQualityReviewDialog = ({
 
             <Box>
               <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 1 }}>
-                剧本片段预览（前 {data.segments.length} 段）
+                {t('audiobook.scriptQualityReviewDialog.segmentPreviewTitle', { total: data.segments.length })}
               </Typography>
               <Paper
                 variant="outlined"
@@ -122,8 +124,10 @@ const ScriptQualityReviewDialog = ({
                 <List dense>
                   {data.segments.map((seg, index) => {
                     const segmentIndex = typeof seg.index === 'number' ? seg.index : index
-                    const segmentType = seg.type === 'dialogue' ? '对白' : seg.type || '旁白'
-                    const speaker = seg.speaker || seg.speaker_name || seg.character_name || '旁白'
+                    const segmentType = seg.type === 'dialogue'
+                      ? t('audiobook.scriptQualityReviewDialog.dialogueType')
+                      : seg.type || t('audiobook.scriptQualityReviewDialog.narrationType')
+                    const speaker = seg.speaker || seg.speaker_name || seg.character_name || t('audiobook.scriptQualityReviewDialog.narrationType')
 
                     return (
                       <ListItemButton
@@ -164,12 +168,14 @@ const ScriptQualityReviewDialog = ({
                     onClick={() => setFeedbackOpen(!feedbackOpen)}
                     sx={{ mb: 1 }}
                   >
-                    {feedbackOpen ? '收起反馈' : '提交审核反馈'}
+                    {feedbackOpen
+                      ? t('audiobook.scriptQualityReviewDialog.collapseFeedback')
+                      : t('audiobook.scriptQualityReviewDialog.openFeedback')}
                   </Button>
                   <Collapse in={feedbackOpen}>
                     {feedbackSubmitted ? (
                       <Typography variant="body2" color="text.secondary">
-                        反馈已提交，感谢你的意见！
+                        {t('audiobook.scriptQualityReviewDialog.feedbackThankYou')}
                       </Typography>
                     ) : (
                       <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
@@ -179,7 +185,7 @@ const ScriptQualityReviewDialog = ({
                           multiline
                           minRows={2}
                           maxRows={4}
-                          placeholder="请输入你对审核结果的意见或建议..."
+                          placeholder={t('audiobook.scriptQualityReviewDialog.feedbackPlaceholder')}
                           value={feedbackText}
                           onChange={(e) => setFeedbackText(e.target.value)}
                         />
@@ -191,7 +197,9 @@ const ScriptQualityReviewDialog = ({
                             disabled={feedbackSubmitting || !feedbackText.trim()}
                             onClick={handleSubmitFeedback}
                           >
-                            {feedbackSubmitting ? '提交中...' : '提交反馈'}
+                            {feedbackSubmitting
+                              ? t('audiobook.scriptQualityReviewDialog.submitting')
+                              : t('audiobook.scriptQualityReviewDialog.submitFeedback')}
                           </Button>
                           {feedbackError && (
                             <Typography variant="caption" color="error">
@@ -211,10 +219,10 @@ const ScriptQualityReviewDialog = ({
       <DialogActions>
         {canOpenScriptEditor && (
           <Button startIcon={<EditIcon />} onClick={handleOpenScriptEditor}>
-            打开剧本编辑器
+            {t('audiobook.scriptQualityReviewDialog.openScriptEditor')}
           </Button>
         )}
-        <Button onClick={handleClose}>关闭</Button>
+        <Button onClick={handleClose}>{t('action.close')}</Button>
       </DialogActions>
     </Dialog>
   )

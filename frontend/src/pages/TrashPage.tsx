@@ -19,6 +19,8 @@ import {
 } from '@mui/material'
 import DeleteForeverIcon from '@mui/icons-material/DeleteForever'
 import RestoreIcon from '@mui/icons-material/Restore'
+import { useTranslation } from 'react-i18next'
+import { useFormats } from '@/i18n'
 import { apiClient, extractApiErrorMessage } from '@/services/api'
 import { useNavigate } from 'react-router-dom'
 
@@ -34,6 +36,8 @@ interface DeletedChapter {
 }
 
 export default function TrashPage() {
+  const { t } = useTranslation()
+  const { formatDateTime } = useFormats()
   const navigate = useNavigate()
   const [deletedChapters, setDeletedChapters] = useState<DeletedChapter[]>([])
   const [loading, setLoading] = useState(true)
@@ -51,7 +55,7 @@ export default function TrashPage() {
       const response = await apiClient.getDeletedChapters(0) // projectId为0表示获取所有
       setDeletedChapters(response.data || [])
     } catch (err: any) {
-      setError(await extractApiErrorMessage(err, '加载回收站失败'))
+      setError(await extractApiErrorMessage(err, t('trash.loadFailed')))
     } finally {
       setLoading(false)
     }
@@ -67,7 +71,7 @@ export default function TrashPage() {
       await apiClient.restoreChapter(chapterId)
       await loadDeletedChapters()
     } catch (err: any) {
-      setError(await extractApiErrorMessage(err, '恢复章节失败'))
+      setError(await extractApiErrorMessage(err, t('trash.restoreFailed')))
     } finally {
       setRestoring(null)
     }
@@ -87,7 +91,7 @@ export default function TrashPage() {
       setDeleteDialogOpen(false)
       await loadDeletedChapters()
     } catch (err: any) {
-      setError(await extractApiErrorMessage(err, '永久删除失败'))
+      setError(await extractApiErrorMessage(err, t('trash.deleteFailed')))
     } finally {
       setPermanentlyDeleting(null)
       setChapterToDelete(null)
@@ -102,10 +106,10 @@ export default function TrashPage() {
     <Container maxWidth="lg" sx={{ py: 4 }}>
       <Box sx={{ mb: 4 }}>
         <Typography variant="h4" component="h1" gutterBottom>
-          🗑️ 回收站
+          {t('trash.title')}
         </Typography>
         <Typography variant="body1" color="textSecondary">
-          管理所有已删除的章节，可以恢复或永久删除
+          {t('trash.subtitle')}
         </Typography>
       </Box>
 
@@ -121,7 +125,7 @@ export default function TrashPage() {
         </Box>
       ) : deletedChapters.length === 0 ? (
         <Alert severity="info">
-          回收站为空，没有已删除的章节
+          {t('trash.empty')}
         </Alert>
       ) : (
         <Grid container spacing={3}>
@@ -156,13 +160,13 @@ export default function TrashPage() {
 
                   <Box sx={{ mb: 2 }}>
                     <Typography variant="body2" color="textSecondary" gutterBottom>
-                      📝 {chapter.word_count || 0} 字
+                      {t('trash.words', { count: chapter.word_count || 0 })}
                     </Typography>
                     <Typography variant="body2" color="textSecondary" gutterBottom>
-                      📅 创建于 {new Date(chapter.created_at).toLocaleString('zh-CN')}
+                      {t('trash.createdAt', { time: formatDateTime(chapter.created_at) })}
                     </Typography>
                     <Typography variant="body2" color="textSecondary" gutterBottom>
-                      🗑️ 删除于 {new Date(chapter.deleted_at).toLocaleString('zh-CN')}
+                      {t('trash.deletedAt', { time: formatDateTime(chapter.deleted_at) })}
                     </Typography>
                   </Box>
 
@@ -183,7 +187,7 @@ export default function TrashPage() {
                       WebkitLineClamp: 3,
                       WebkitBoxOrient: 'vertical',
                     }}>
-                      {chapter.content || '无内容'}
+                      {chapter.content || t('trash.noContent')}
                     </Typography>
                   </Box>
                 </CardContent>
@@ -197,13 +201,13 @@ export default function TrashPage() {
                     disabled={restoring === chapter.id}
                     fullWidth
                   >
-                    {restoring === chapter.id ? '恢复中...' : '恢复'}
+                    {restoring === chapter.id ? t('trash.restoring') : t('trash.restore')}
                   </Button>
                   <IconButton
                     color="error"
                     onClick={() => handlePermanentDeleteClick(chapter)}
                     disabled={permanentlyDeleting === chapter.id}
-                    title="永久删除"
+                    title={t('trash.permanentDeleteTitle')}
                   >
                     {permanentlyDeleting === chapter.id ? (
                       <CircularProgress size={20} />
@@ -226,21 +230,21 @@ export default function TrashPage() {
         aria-describedby="permanent-delete-dialog-description"
       >
         <DialogTitle id="permanent-delete-dialog-title">
-          确认永久删除
+          {t('trash.confirmTitle')}
         </DialogTitle>
         <DialogContent>
           <DialogContentText id="permanent-delete-dialog-description">
-            你确定要永久删除章节 <strong>"{chapterToDelete?.title}"</strong> 吗？
+            {t('trash.confirmHead')} <strong>"{chapterToDelete?.title}"</strong> {t('trash.confirmTail')}
             <br />
             <br />
-            <strong>警告：此操作不可撤销！</strong>
+            <strong>{t('trash.warning')}</strong>
             <br />
-            章节将被永久删除，无法恢复。
+            {t('trash.deletePermanentBody')}
           </DialogContentText>
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setDeleteDialogOpen(false)} disabled={permanentlyDeleting !== null}>
-            取消
+            {t('action.cancel')}
           </Button>
           <Button
             onClick={handlePermanentDelete}
@@ -249,7 +253,7 @@ export default function TrashPage() {
             disabled={permanentlyDeleting !== null}
             startIcon={permanentlyDeleting !== null ? <CircularProgress size={16} /> : <DeleteForeverIcon />}
           >
-            {permanentlyDeleting !== null ? '删除中...' : '永久删除'}
+            {permanentlyDeleting !== null ? t('trash.deleting') : t('trash.permanentDeleteTitle')}
           </Button>
         </DialogActions>
       </Dialog>

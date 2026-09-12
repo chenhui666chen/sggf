@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef } from 'react'
 
+import { useTranslation } from 'react-i18next'
+
 import { extractApiErrorMessage } from '../../services/api'
 
 interface UseCosyVoiceCloneRecordingParams {
@@ -21,6 +23,7 @@ export const useCosyVoiceCloneRecording = ({
   onCloneError,
   onUploadRecordedCloneAudio,
 }: UseCosyVoiceCloneRecordingParams) => {
+  const { t } = useTranslation()
   const cloneRecorderRef = useRef<MediaRecorder | null>(null)
   const cloneStreamRef = useRef<MediaStream | null>(null)
   const cloneChunksRef = useRef<Blob[]>([])
@@ -54,7 +57,7 @@ export const useCosyVoiceCloneRecording = ({
       || !navigator.mediaDevices?.getUserMedia
       || typeof MediaRecorder === 'undefined'
     ) {
-      onCloneError('当前浏览器不支持录音，请改用上传音频')
+      onCloneError(t('audiobook.useCosyVoiceCloneRecording.recordingUnsupported'))
       return
     }
     onResetCloneMessages()
@@ -76,7 +79,7 @@ export const useCosyVoiceCloneRecording = ({
         setCloneRecording(false)
         stopCloneRecordingStream()
         if (chunks.length === 0) {
-          onCloneError('未获取到录音数据，请重试')
+          onCloneError(t('audiobook.useCosyVoiceCloneRecording.noRecordingData'))
           return
         }
         const blob = new Blob(chunks, { type: chunks[0]?.type || 'audio/webm' })
@@ -86,14 +89,14 @@ export const useCosyVoiceCloneRecording = ({
         cloneRecorderRef.current = null
         setCloneRecording(false)
         stopCloneRecordingStream()
-        onCloneError('录音失败，请重试')
+        onCloneError(t('audiobook.useCosyVoiceCloneRecording.recordingFailed'))
       }
       recorder.start()
       setCloneRecording(true)
     } catch (error: unknown) {
       stopCloneRecordingStream()
       setCloneRecording(false)
-      const message = await extractApiErrorMessage(error, '无法访问麦克风，请检查权限')
+      const message = await extractApiErrorMessage(error, t('audiobook.useCosyVoiceCloneRecording.micAccessFailed'))
       onCloneError(message)
     }
   }, [
@@ -105,6 +108,7 @@ export const useCosyVoiceCloneRecording = ({
     onUploadRecordedCloneAudio,
     setCloneRecording,
     stopCloneRecordingStream,
+    t,
   ])
 
   const handleStopCloneRecording = useCallback(() => {

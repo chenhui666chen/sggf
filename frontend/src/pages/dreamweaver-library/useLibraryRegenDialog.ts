@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { apiClient, extractApiErrorMessage } from '@/services/api'
 import { parseLibraryRole, characterViewLabel } from '@/utils/dreamweaverLibraryRole'
 import { hasRenderableLibraryImage } from '@/utils/dreamweaverLibraryAssetState'
@@ -45,6 +46,7 @@ export interface UseLibraryRegenDialogReturn {
 
 export function useLibraryRegenDialog(params: UseLibraryRegenDialogParams): UseLibraryRegenDialogReturn {
   const { projectId, lockedConfig, assetsByRole, characterNameById, missingRoleSet, loadLibrary } = params
+  const { t } = useTranslation()
 
   const [regenOpen, setRegenOpen] = useState(false)
   const [regenRole, setRegenRole] = useState('')
@@ -103,7 +105,7 @@ export function useLibraryRegenDialog(params: UseLibraryRegenDialogParams): UseL
         return null
       } catch (e: any) {
         if (regenSuggestRequestIdRef.current !== requestId) return null
-        setRegenSuggestError(await extractApiErrorMessage(e, '生成提示词失败'))
+        setRegenSuggestError(await extractApiErrorMessage(e, t('dreamweaverRun.suggestPromptFailed')))
         return null
       } finally {
         if (regenSuggestRequestIdRef.current === requestId) {
@@ -111,7 +113,7 @@ export function useLibraryRegenDialog(params: UseLibraryRegenDialogParams): UseL
         }
       }
     },
-    [projectId, regenImageRatio, regenRole, regenStylePreset],
+    [projectId, regenImageRatio, regenRole, regenStylePreset, t],
   )
 
   const requestSmartRegeneratePrompt = useCallback(
@@ -157,7 +159,7 @@ export function useLibraryRegenDialog(params: UseLibraryRegenDialogParams): UseL
     const rawTitle = String(titleInput || roleAsset?.meta?.entity_name || roleAsset?.role || role).trim()
     let title = rawTitle || role
     if (parsed.entityType === 'character' && parsed.entityId) {
-      const mapped = characterNameById.get(parsed.entityId) || `角色#${parsed.entityId}`
+      const mapped = characterNameById.get(parsed.entityId) || t('dreamweaverRun.characterFallbackId', { id: parsed.entityId })
       if (isPlaceholderEntityName(title) || title === role || title.startsWith('lib_character_portrait')) {
         title = mapped
       }
@@ -181,7 +183,7 @@ export function useLibraryRegenDialog(params: UseLibraryRegenDialogParams): UseL
     setRegenError(null)
     setRegenSuggestError(null)
     setRegenOpen(true)
-  }, [assetsByRole, characterNameById, lockedConfig])
+  }, [assetsByRole, characterNameById, lockedConfig, t])
 
   const openRegenerateDialog = useCallback((asset: LibraryAsset) => {
     openRegenerateDialogForRole(
@@ -207,11 +209,11 @@ export function useLibraryRegenDialog(params: UseLibraryRegenDialogParams): UseL
       await loadLibrary()
       setRegenOpen(false)
     } catch (e: any) {
-      setRegenError(await extractApiErrorMessage(e, '重生成失败'))
+      setRegenError(await extractApiErrorMessage(e, t('dreamweaverRun.regenFailed')))
     } finally {
       setRegenSubmitting(false)
     }
-  }, [loadLibrary, projectId, regenImageRatio, regenPreferImageEdit, regenPrompt, regenRole, regenStylePreset])
+  }, [loadLibrary, projectId, regenImageRatio, regenPreferImageEdit, regenPrompt, regenRole, regenStylePreset, t])
 
   return {
     regenOpen,

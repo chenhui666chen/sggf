@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import { useTranslation } from 'react-i18next'
 
 import WarningIcon from '@mui/icons-material/Warning'
 import {
@@ -24,7 +25,7 @@ function DreamweaverDangerDialogTitle({ title }: DreamweaverDangerDialogTitlePro
   return (
     <DialogTitle>
       <Stack direction="row" spacing={1} alignItems="center">
-        <WarningIcon sx={{ color: '#f44336' }} />
+        <WarningIcon sx={{ color: 'error.main' }} />
         <Typography variant="h6">{title}</Typography>
       </Stack>
     </DialogTitle>
@@ -38,6 +39,7 @@ type DreamweaverBulkDeleteProgressSectionProps = {
 function DreamweaverBulkDeleteProgressSection({
   progress,
 }: DreamweaverBulkDeleteProgressSectionProps) {
+  const { t } = useTranslation()
   if (!progress) return null
 
   const progressValue =
@@ -50,7 +52,7 @@ function DreamweaverBulkDeleteProgressSection({
         value={progressValue}
       />
       <Typography variant="caption" color="text.secondary">
-        进度：{progress.current}/{progress.total}
+        {t('dreamweaverDelete.progress', { current: progress.current, total: progress.total })}
       </Typography>
     </Stack>
   )
@@ -63,11 +65,12 @@ type DreamweaverBulkDeleteResultAlertProps = {
 function DreamweaverBulkDeleteResultAlert({
   result,
 }: DreamweaverBulkDeleteResultAlertProps) {
+  const { t } = useTranslation()
   if (!result) return null
 
   return (
     <Alert severity={result.failed ? 'warning' : 'success'} sx={{ mt: 1 }}>
-      已删除：{result.deleted}；跳过：{result.skipped}；失败：{result.failed}
+      {t('dreamweaverDelete.resultSummary', { deleted: result.deleted, skipped: result.skipped, failed: result.failed })}
       {result.errors.length > 0 && (
         <Box sx={{ mt: 1 }}>
           {result.errors.slice(0, 6).map((msg) => (
@@ -77,7 +80,7 @@ function DreamweaverBulkDeleteResultAlert({
           ))}
           {result.errors.length > 6 && (
             <Typography variant="caption" display="block" color="text.secondary">
-              ...还有 {result.errors.length - 6} 条错误
+              {t('dreamweaverDelete.moreErrors', { count: result.errors.length - 6 })}
             </Typography>
           )}
         </Box>
@@ -101,13 +104,14 @@ export function DreamweaverBulkDeleteDialogContent({
   error,
   result,
 }: DreamweaverBulkDeleteDialogContentProps) {
+  const { t } = useTranslation()
   return (
     <DialogContent dividers>
       <Alert severity="warning" sx={{ mb: 2 }}>
-        此操作将级联删除筛选出的 runs 的数据库记录与 runs/{'{run_id}'} 产物文件，不可恢复；不会删除项目公共素材库，可复用。运行中或排队中的 run 将自动跳过。
+        {t('dreamweaverDelete.bulkDangerHint')}
       </Alert>
       <Typography variant="body2" sx={{ mb: 1 }}>
-        本次将删除：{targetCount} 个 run；跳过：{skippedCount} 个（运行中/排队中）。
+        {t('dreamweaverDelete.bulkTargetSummary', { targetCount, skippedCount })}
       </Typography>
 
       <DreamweaverBulkDeleteProgressSection progress={progress} />
@@ -138,14 +142,15 @@ export function DreamweaverBulkDeleteDialogActions({
   onClose,
   onConfirm,
 }: DreamweaverBulkDeleteDialogActionsProps) {
+  const { t } = useTranslation()
   return (
     <DialogActions>
       <Button onClick={onClose} disabled={submitting}>
-        {hasResult ? '关闭' : '取消'}
+        {hasResult ? t('action.close') : t('action.cancel')}
       </Button>
       {!hasResult && (
         <Button variant="contained" color="error" onClick={onConfirm} disabled={submitting || !hasTargets}>
-          {submitting ? '删除中...' : '确认批量删除'}
+          {submitting ? t('dreamweaverDelete.deleting') : t('dreamweaverDelete.confirmBulkDelete')}
         </Button>
       )}
     </DialogActions>
@@ -165,9 +170,10 @@ export function DreamweaverBulkDeleteDialogShell({
   content,
   actions,
 }: DreamweaverBulkDeleteDialogShellProps) {
+  const { t } = useTranslation()
   return (
     <Dialog open={open} onClose={onClose} fullWidth maxWidth="sm">
-      <DreamweaverDangerDialogTitle title="确认批量删除" />
+      <DreamweaverDangerDialogTitle title={t('dreamweaverDelete.confirmBulkDelete')} />
       {content}
       {actions}
     </Dialog>
@@ -183,10 +189,11 @@ export function DreamweaverDeleteRunDialogContent({
   runId,
   error,
 }: DreamweaverDeleteRunDialogContentProps) {
+  const { t } = useTranslation()
   return (
     <DialogContent dividers>
       <Alert severity="warning" sx={{ mb: 2 }}>
-        此操作将级联删除该次 run 的数据库记录与 runs/{'{run_id}'} 产物文件，不可恢复；不会删除项目公共素材库，可复用。
+        {t('dreamweaverDelete.singleDangerHint')}
       </Alert>
       <Typography variant="body2" sx={{ fontFamily: 'monospace', mb: 1 }}>
         RunID: {runId || '-'}
@@ -213,13 +220,14 @@ export function DreamweaverDeleteRunDialogActions({
   onClose,
   onConfirm,
 }: DreamweaverDeleteRunDialogActionsProps) {
+  const { t } = useTranslation()
   return (
     <DialogActions>
       <Button onClick={onClose} disabled={submitting}>
-        取消
+        {t('action.cancel')}
       </Button>
       <Button variant="contained" color="error" onClick={onConfirm} disabled={submitting || !hasRunId}>
-        {submitting ? '删除中...' : '确认删除'}
+        {submitting ? t('dreamweaverDelete.deleting') : t('dreamweaverDelete.confirmDelete')}
       </Button>
     </DialogActions>
   )
@@ -238,9 +246,10 @@ export function DreamweaverDeleteRunDialogShell({
   content,
   actions,
 }: DreamweaverDeleteRunDialogShellProps) {
+  const { t } = useTranslation()
   return (
     <Dialog open={open} onClose={onClose} fullWidth maxWidth="sm">
-      <DreamweaverDangerDialogTitle title="确认删除" />
+      <DreamweaverDangerDialogTitle title={t('dreamweaverDelete.confirmDelete')} />
       {content}
       {actions}
     </Dialog>

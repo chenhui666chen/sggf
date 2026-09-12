@@ -49,17 +49,17 @@ describe('StepAudio voice asset source wiring', () => {
   it('explains that StepAudio file ids can be generated automatically from uploaded samples', () => {
     const workbenchSource = readSource('src/pages/audiobook/StepAudioVoiceCloneWorkbench.tsx')
 
-    expect(workbenchSource).toContain('留空自动上传生成')
-    expect(workbenchSource).toContain('STEP_API_KEY')
+    expect(workbenchSource).toContain('audiobook.stepAudioWorkbench.fileIdLabel')
+    expect(workbenchSource).toContain('audiobook.stepAudioWorkbench.fileIdHelper')
   })
 
   it('requires StepAudio clone sample text to match the uploaded reference audio', () => {
     const workbenchSource = readSource('src/pages/audiobook/StepAudioVoiceCloneWorkbench.tsx')
 
     expect(workbenchSource).toContain("useState('')")
-    expect(workbenchSource).toContain('参考音频逐字内容')
+    expect(workbenchSource).toContain('audiobook.stepAudioWorkbench.transcriptLabel')
     expect(workbenchSource).toContain('sampleText.trim()')
-    expect(workbenchSource).toContain('官方会校验样本文本与音频 ASR')
+    expect(workbenchSource).toContain('audiobook.stepAudioWorkbench.transcriptHelper')
   })
 
   it('uses strict transcript recording guidance for StepAudio clone recording', () => {
@@ -67,11 +67,11 @@ describe('StepAudio voice asset source wiring', () => {
     const workbenchSource = readSource('src/pages/audiobook/StepAudioVoiceCloneWorkbench.tsx')
 
     expect(dialogSource).toContain('strictTranscriptMode')
-    expect(dialogSource).toContain('必须逐字朗读下方内容')
-    expect(dialogSource).toContain('不要随机朗读其他内容')
+    expect(dialogSource).toContain("t('audiobook.cosyVoiceCloneRecordDialog.strictPrompt'")
+    expect(dialogSource).toContain("t('audiobook.cosyVoiceCloneRecordDialog.strictHint')")
     expect(workbenchSource).toContain('strictTranscriptMode')
     expect(workbenchSource).toContain('transcriptText={sampleText.trim()}')
-    expect(workbenchSource).toContain('请先填写参考音频逐字内容，再开始录音')
+    expect(workbenchSource).toContain('audiobook.stepAudioWorkbench.transcriptRequiredForRecording')
   })
 
   it('uses a preview-before-confirm flow for billable StepAudio clone voices', () => {
@@ -81,9 +81,9 @@ describe('StepAudio voice asset source wiring', () => {
     expect(workbenchSource).toContain('previewResult')
     expect(workbenchSource).toContain('handlePreviewClone')
     expect(workbenchSource).toContain('handleConfirmSave')
-    expect(workbenchSource).toContain('预试听')
-    expect(workbenchSource).toContain('确认保存')
-    expect(workbenchSource).toContain('9.9')
+    expect(workbenchSource).toContain('audiobook.stepAudioWorkbench.previewButton')
+    expect(workbenchSource).toContain('audiobook.stepAudioWorkbench.confirmSave')
+    expect(workbenchSource).toContain('audiobook.stepAudioWorkbench.billingBody1')
   })
 
   it('requires a second billing confirmation before saving paid StepAudio clone voices', () => {
@@ -95,8 +95,8 @@ describe('StepAudio voice asset source wiring', () => {
     expect(workbenchSource).toContain('handleConfirmBillingSave')
     expect(workbenchSource).toContain('onClick={handleRequestConfirmSave}')
     expect(workbenchSource).toContain('onClick={handleConfirmBillingSave}')
-    expect(workbenchSource).toContain('收费确认')
-    expect(workbenchSource).toContain('本次确认保存可能产生 9.9 元/音色费用')
-    expect(workbenchSource).toContain('确认收费并保存')
+    expect(workbenchSource).toContain('audiobook.stepAudioWorkbench.billingTitle')
+    expect(workbenchSource).toContain('audiobook.stepAudioWorkbench.billingBody1')
+    expect(workbenchSource).toContain('audiobook.stepAudioWorkbench.confirmBillingSave')
   })
 })

@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
+import { useTranslation } from 'react-i18next'
+
 import { apiClient, extractApiErrorMessage } from '@/services/api'
 
 export interface UseDreamweaverRunAssetPreviewsParams {
@@ -19,6 +21,7 @@ export function useDreamweaverRunAssetPreviews(
   params: UseDreamweaverRunAssetPreviewsParams,
 ): UseDreamweaverRunAssetPreviewsReturn {
   const { getCurrentRunId } = params
+  const { t } = useTranslation()
 
   const [runAssetPreviews, setRunAssetPreviews] = useState<Record<string, string>>({})
   const [runAssetPreviewLoading, setRunAssetPreviewLoading] = useState<Record<string, boolean>>({})
@@ -49,7 +52,7 @@ export function useDreamweaverRunAssetPreviews(
       if (!targetUri) return
       const runId = getCurrentRunId()
       if (!runId) {
-        setRunAssetPreviewErrors((prev) => ({ ...prev, [targetUri]: '缺少 run_id，无法加载产物预览' }))
+        setRunAssetPreviewErrors((prev) => ({ ...prev, [targetUri]: t('dreamweaverRun.errorMissingRunIdLoadArtifactPreview') }))
         return
       }
 
@@ -74,13 +77,13 @@ export function useDreamweaverRunAssetPreviews(
           return { ...prev, [targetUri]: url }
         })
       } catch (e: unknown) {
-        const msg = await extractApiErrorMessage(e, '加载产物预览失败')
+        const msg = await extractApiErrorMessage(e, t('dreamweaverRun.loadArtifactPreviewFailed'))
         setRunAssetPreviewErrors((prev) => ({ ...prev, [targetUri]: msg }))
       } finally {
         setRunAssetPreviewLoading((prev) => ({ ...prev, [targetUri]: false }))
       }
     },
-    [getCurrentRunId],
+    [getCurrentRunId, t],
   )
 
   const downloadRunAsset = useCallback(
@@ -89,7 +92,7 @@ export function useDreamweaverRunAssetPreviews(
       if (!targetUri) return
       const runId = getCurrentRunId()
       if (!runId) {
-        setRunAssetPreviewErrors((prev) => ({ ...prev, [targetUri]: '缺少 run_id，无法下载产物' }))
+        setRunAssetPreviewErrors((prev) => ({ ...prev, [targetUri]: t('dreamweaverRun.errorMissingRunIdDownloadArtifact') }))
         return
       }
 
@@ -112,13 +115,13 @@ export function useDreamweaverRunAssetPreviews(
           }
         }, 0)
       } catch (e: unknown) {
-        const msg = await extractApiErrorMessage(e, '下载产物失败')
+        const msg = await extractApiErrorMessage(e, t('dreamweaverRun.downloadArtifactFailed'))
         setRunAssetPreviewErrors((prev) => ({ ...prev, [targetUri]: msg }))
       } finally {
         setRunAssetPreviewLoading((prev) => ({ ...prev, [targetUri]: false }))
       }
     },
-    [getCurrentRunId],
+    [getCurrentRunId, t],
   )
 
   return {

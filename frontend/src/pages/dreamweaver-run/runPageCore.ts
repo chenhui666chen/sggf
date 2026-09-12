@@ -7,6 +7,7 @@ export * from './runPageLibraryHelpers'
 export * from './runPageHistoryHelpers'
 export * from './runPageFormatUtils'
 
+import type { TFunction } from 'i18next'
 import type {
   DreamweaverAssetPlanItem,
   DreamweaverRunPreflight,
@@ -101,11 +102,11 @@ export function parsePromptedCameraIndices(raw: string | null): number[] {
 }
 
 export const PENDING_STAGE_HINTS: Record<number, string> = {
-  0: '剧本预览：当前为运行中阶段，进入"剧本待审核"后可加载/编辑/通过。',
-  1: '分镜预览：将展示镜头数量与分镜阶段信息（后续可升级为镜头列表/分镜卡）。',
-  2: '素材预览：素材库在生成后可在此加载并逐项审核。',
-  3: '镜头预览：关键帧/中间帧/片段生成将逐步更新计数与产物路径。',
-  4: '合成预览：合成视频与质检结果将在后续阶段产出。',
+  0: 'dreamweaverRun.stageHintScript',
+  1: 'dreamweaverRun.stageHintStoryboard',
+  2: 'dreamweaverRun.stageHintAssets',
+  3: 'dreamweaverRun.stageHintShots',
+  4: 'dreamweaverRun.stageHintMerged',
 }
 
 export function extractResultPlanText(result: Record<string, unknown> | null): string {
@@ -181,14 +182,14 @@ export function computeActiveStreamKeys(streamMetaByKey: Record<string, { stage?
     .map(([key]) => key)
 }
 
-export function resolveTaskStatusLabel(taskStatus: string | null): string | null {
+export function resolveTaskStatusLabel(taskStatus: string | null, t?: TFunction): string | null {
   const value = (taskStatus || '').trim().toLowerCase()
   if (!value) return null
-  if (value === 'queued') return '排队中'
-  if (value === 'running') return '运行中'
-  if (value === 'waiting') return '等待中'
-  if (value === 'completed') return '已完成'
-  if (value === 'failed') return '失败'
+  if (value === 'queued') return t ? t('dreamweaverRun.statusQueued') : '排队中'
+  if (value === 'running') return t ? t('dreamweaverRun.statusRunning') : '运行中'
+  if (value === 'waiting') return t ? t('dreamweaverRun.statusWaiting') : '等待中'
+  if (value === 'completed') return t ? t('dreamweaverRun.statusCompleted') : '已完成'
+  if (value === 'failed') return t ? t('dreamweaverRun.statusFailed') : '失败'
   return taskStatus
 }
 
@@ -207,14 +208,14 @@ export type ScriptGenerationLike = {
   model?: string | null
 }
 
-export function resolveScriptGenerationLabel(generation: ScriptGenerationLike | null): string | null {
+export function resolveScriptGenerationLabel(generation: ScriptGenerationLike | null, t?: TFunction): string | null {
   const mode = (generation?.mode || '').toString()
   const model = generation?.model ? String(generation.model) : ''
   if (!mode) return null
   if (mode === 'llm') return model ? `LLM（${model}）` : 'LLM'
-  if (mode === 'rule_fallback') return '规则回退'
-  if (mode === 'rule') return '规则'
-  if (mode === 'manual') return '手动编辑'
+  if (mode === 'rule_fallback') return t ? t('dreamweaverRun.generationRuleFallback') : '规则回退'
+  if (mode === 'rule') return t ? t('dreamweaverRun.generationRule') : '规则'
+  if (mode === 'manual') return t ? t('dreamweaverRun.generationManual') : '手动编辑'
   return mode
 }
 

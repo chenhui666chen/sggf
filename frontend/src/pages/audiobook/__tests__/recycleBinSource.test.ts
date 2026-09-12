@@ -22,7 +22,7 @@ describe('Audiobook recycle bin source guards', () => {
     expect(dashboardSource).toContain('apiClient.listDeletedChapterAudios()')
     expect(dashboardSource).toContain('handleRestoreChapterAudio')
     expect(dashboardSource).toContain('apiClient.restoreChapterAudio(chapterAudioId)')
-    expect(dashboardSource).toContain('已删除章节音频')
+    expect(dashboardSource).toContain('audiobook.audiobookDashboard.deletedChapterAudiosSection')
   })
 
   it('keeps the deleted chapter audio response contract typed', () => {

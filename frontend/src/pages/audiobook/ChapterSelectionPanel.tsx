@@ -1,4 +1,5 @@
 import { useEffect, useRef, type MouseEvent } from 'react'
+import { useTranslation } from 'react-i18next'
 
 import {
   Box,
@@ -15,6 +16,7 @@ import LockOutlinedIcon from '@mui/icons-material/LockOutlined'
 import MoreVertIcon from '@mui/icons-material/MoreVert'
 
 import { audiobookButtonSx, audiobookColors, audiobookColorRoles } from './audiobookTheme'
+import type { TranslateFn } from './audioLibraryDisplay'
 import type { Chapter, ChapterRenderState } from './types'
 import { CHAPTER_RENDER_STATUS } from './types'
 
@@ -37,10 +39,10 @@ interface ChapterStateChipMeta {
   backgroundColor: string
 }
 
-const resolveChapterStateChipMeta = (state: ChapterRenderState): ChapterStateChipMeta => {
+const resolveChapterStateChipMeta = (state: ChapterRenderState, t: TranslateFn): ChapterStateChipMeta => {
   if (state.executionStatus && ACTIVE_EXECUTION_STATUSES.has(state.executionStatus)) {
     return {
-      label: '生成中 · 点击进入工作台',
+      label: t('audiobook.chapterSelectionPanel.runningChip'),
       color: audiobookColorRoles.taskStatus.running.text,
       backgroundColor: audiobookColorRoles.taskStatus.running.bg,
     }
@@ -48,38 +50,38 @@ const resolveChapterStateChipMeta = (state: ChapterRenderState): ChapterStateChi
   switch (state.renderStatus) {
     case CHAPTER_RENDER_STATUS.RENDERED_ALL_SEED:
       return {
-        label: '已生成 · 点击进入工作台',
+        label: t('audiobook.chapterSelectionPanel.renderedChip'),
         color: audiobookColorRoles.taskStatus.completed.text,
         backgroundColor: audiobookColorRoles.taskStatus.completed.bg,
       }
     case CHAPTER_RENDER_STATUS.RENDERED_WITH_FALLBACK:
       return {
-        label: '含回退场景 · 点击进入工作台',
+        label: t('audiobook.chapterSelectionPanel.fallbackChip'),
         color: audiobookColorRoles.reviewRisk.warning.text,
         backgroundColor: audiobookColorRoles.reviewRisk.warning.bg,
       }
     case CHAPTER_RENDER_STATUS.STALE:
       return {
-        label: '已过期 · 点击进入工作台',
+        label: t('audiobook.chapterSelectionPanel.staleChip'),
         color: 'text.secondary',
         backgroundColor: 'action.hover',
       }
     case CHAPTER_RENDER_STATUS.MANUAL_REVIEW_REQUIRED:
       return {
-        label: '待人工评审 · 点击进入工作台',
+        label: t('audiobook.chapterSelectionPanel.reviewChip'),
         color: audiobookColorRoles.reviewRisk.warning.text,
         backgroundColor: audiobookColorRoles.reviewRisk.warning.bg,
       }
     case CHAPTER_RENDER_STATUS.FAILED:
       return {
-        label: '生成失败 · 点击进入工作台',
+        label: t('audiobook.chapterSelectionPanel.failedChip'),
         color: audiobookColorRoles.taskStatus.failed.text,
         backgroundColor: audiobookColorRoles.taskStatus.failed.bg,
       }
     default:
       // render_status 为空：历史产物（legacy_unverified），回退旧完成条件
       return {
-        label: '历史产物 · 点击进入工作台',
+        label: t('audiobook.chapterSelectionPanel.legacyChip'),
         color: 'text.secondary',
         backgroundColor: 'action.hover',
       }
@@ -95,6 +97,7 @@ const ChapterSelectionPanel = ({
   onOpenChapterMenu,
   onOpenGeneratedChapter,
 }: ChapterSelectionPanelProps) => {
+  const { t } = useTranslation()
   const listContainerRef = useRef<HTMLDivElement | null>(null)
   const selectedChapterId = selectedChapters[0]
   const generatedCount = chapters.filter((chapter) => generatedChapterIds.has(chapter.id)).length
@@ -126,19 +129,21 @@ const ChapterSelectionPanel = ({
         size="small"
         variant="outlined"
         label={selectedChapterId
-          ? `已选第 ${chapters.find((chapter) => chapter.id === selectedChapterId)?.chapter_number ?? '-'} 章`
-          : '未选择章节'}
+          ? t('audiobook.chapterSelectionPanel.selectedChapterChip', {
+              number: chapters.find((chapter) => chapter.id === selectedChapterId)?.chapter_number ?? '-',
+            })
+          : t('audiobook.chapterSelectionPanel.noSelectionChip')}
         color={selectedChapterId ? 'primary' : 'default'}
       />
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
         <Typography variant="caption" color="text.secondary">
-          可生成 {availableCount} 章
+          {t('audiobook.chapterSelectionPanel.availableCount', { total: availableCount })}
         </Typography>
         <Chip
           size="small"
           variant="outlined"
           icon={<LockOutlinedIcon />}
-          label={`已生成 ${generatedCount}`}
+          label={t('audiobook.chapterSelectionPanel.generatedCount', { total: generatedCount })}
           sx={{ height: 24 }}
         />
       </Box>
@@ -151,7 +156,7 @@ const ChapterSelectionPanel = ({
         overflow: 'auto',
         borderRadius: 1.5,
         border: `1px solid ${audiobookColors.surfaceBorder}`,
-        backgroundColor: 'rgba(255,255,255,0.7)',
+        backgroundColor: audiobookColors.surfaceRaised,
         scrollBehavior: 'smooth',
       }}
     >
@@ -173,11 +178,11 @@ const ChapterSelectionPanel = ({
                 onToggleChapter(chapter.id)
               }}
               secondaryAction={(
-                <Tooltip title="章节操作">
+                <Tooltip title={t('audiobook.chapterSelectionPanel.chapterMenuTooltip')}>
                   <IconButton
                     edge="end"
                     size="small"
-                    aria-label={`第${chapter.chapter_number}章操作`}
+                    aria-label={t('audiobook.chapterSelectionPanel.chapterMenuAria', { number: chapter.chapter_number })}
                     onClick={(event) => onOpenChapterMenu(event, chapter)}
                     sx={audiobookButtonSx.neutralIcon}
                   >
@@ -196,7 +201,7 @@ const ChapterSelectionPanel = ({
                 backgroundColor: selected
                   ? audiobookColors.brandSoft
                   : generated
-                    ? 'rgba(100, 116, 139, 0.06)'
+                    ? audiobookColors.neutralSoft
                     : 'transparent',
                 opacity: generated ? 0.72 : 1,
                 '&:last-of-type': {
@@ -204,7 +209,7 @@ const ChapterSelectionPanel = ({
                 },
                 '&:hover': {
                   backgroundColor: generated
-                    ? 'rgba(100, 116, 139, 0.14)'
+                    ? audiobookColors.neutralChip
                     : audiobookColors.brandSoft,
                 },
               }}
@@ -216,7 +221,7 @@ const ChapterSelectionPanel = ({
                 tabIndex={-1}
                 disableRipple
                 color="primary"
-                inputProps={{ 'aria-label': `选择第${chapter.chapter_number}章` }}
+                inputProps={{ 'aria-label': t('audiobook.chapterSelectionPanel.selectChapterAria', { number: chapter.chapter_number }) }}
               />
               <ListItemText
                 primary={(
@@ -232,14 +237,17 @@ const ChapterSelectionPanel = ({
                         whiteSpace: 'nowrap',
                       }}
                     >
-                      第{chapter.chapter_number}章 · {chapter.title}
+                      {t('audiobook.chapterSelectionPanel.chapterTitle', {
+                        number: chapter.chapter_number,
+                        title: chapter.title,
+                      })}
                     </Typography>
                     {generated && (() => {
                       const state = chapterStateById?.[chapter.id]
                       const chipMeta = state
-                        ? resolveChapterStateChipMeta(state)
+                        ? resolveChapterStateChipMeta(state, t)
                         : {
-                            label: '已生成 · 点击进入工作台',
+                            label: t('audiobook.chapterSelectionPanel.renderedChip'),
                             color: audiobookColorRoles.taskStatus.completed.text,
                             backgroundColor: audiobookColorRoles.taskStatus.completed.bg,
                           }
@@ -259,7 +267,7 @@ const ChapterSelectionPanel = ({
                     })()}
                   </Box>
                 )}
-                secondary={chapter.content ? chapter.content.slice(0, 64) : '暂无内容'}
+                secondary={chapter.content ? chapter.content.slice(0, 64) : t('audiobook.chapterSelectionPanel.noContent')}
                 secondaryTypographyProps={{
                   sx: {
                     mt: 0.35,

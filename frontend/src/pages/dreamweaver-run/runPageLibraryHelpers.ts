@@ -5,6 +5,7 @@ import type {
   LibraryDisplayItem,
   LibraryPayload,
 } from '@/types/dreamweaver'
+import type { TFunction } from 'i18next'
 import {
   CHARACTER_VIEW_ORDER,
   CHARACTER_VIEW_RANK,
@@ -38,7 +39,7 @@ export type LibraryDisplayGroup = {
   summary: LibraryGroupSummary
 }
 
-export function buildCharacterLibraryBuckets(items: LibraryDisplayItem[]): CharacterLibraryBucket[] {
+export function buildCharacterLibraryBuckets(items: LibraryDisplayItem[], t?: TFunction): CharacterLibraryBucket[] {
   const viewSuffixes = CHARACTER_VIEW_ORDER.map((view) => characterViewLabel(view)).sort((a, b) => b.length - a.length)
   const stripViewSuffix = (value: string) => {
     const text = String(value || '').trim()
@@ -54,7 +55,9 @@ export function buildCharacterLibraryBuckets(items: LibraryDisplayItem[]): Chara
     const parsed = parseLibraryRole(item.role)
     const parsedEntityId = typeof parsed.entityId === 'number' ? parsed.entityId : 0
     const entityId = parsed.entityType === 'character' && parsedEntityId > 0 ? parsedEntityId : 0
-    const fallbackName = entityId > 0 ? `角色#${entityId}` : '未命名角色'
+    const fallbackName = entityId > 0
+      ? (t ? t('dreamweaverRun.libraryCharacterFallback', { id: entityId }) : `角色#${entityId}`)
+      : (t ? t('dreamweaverRun.libraryUnnamedCharacter') : '未命名角色')
     const strippedTitle = stripViewSuffix(item.title)
     const baseName = isPlaceholderEntityName(strippedTitle) || strippedTitle === item.role ? fallbackName : strippedTitle
     const bucketKey = entityId > 0 ? `character:${entityId}` : `character:${baseName}`
@@ -107,6 +110,7 @@ export function resolveLibraryDisplayCardState(
   missingRoleSet: Set<string>,
   libraryPreviewLoading: Record<number, boolean>,
   libraryPreviewErrors: Record<number, string>,
+  t?: TFunction,
 ): LibraryDisplayCardState {
   const asset = item.asset ?? null
   const imageState = item.imageState || resolveLibraryAssetImageState(asset || null, { missingRoleSet })
@@ -117,20 +121,20 @@ export function resolveLibraryDisplayCardState(
   const safetyBlocked = Boolean(item.safety_blocked || imageState.safetyBlocked || asset?.meta?.safety_blocked)
   const safetyError = item.safety_error || (asset?.meta?.safety_error as string | undefined) || null
   const statusLabel = missing
-    ? '缺失'
+    ? (t ? t('dreamweaverRun.libraryStatusMissing') : '缺失')
     : safetyBlocked
-      ? '安全拦截'
+      ? (t ? t('dreamweaverRun.libraryStatusSafetyBlocked') : '安全拦截')
       : placeholder
-        ? '占位'
+        ? (t ? t('dreamweaverRun.libraryStatusPlaceholder') : '占位')
         : asset
           ? approved
-            ? '已通过'
-            : '待审核'
+            ? (t ? t('dreamweaverRun.libraryStatusApproved') : '已通过')
+            : (t ? t('dreamweaverRun.libraryStatusPendingReview') : '待审核')
           : item.status === 'done'
-            ? '已生成'
+            ? (t ? t('dreamweaverRun.libraryStatusGenerated') : '已生成')
             : item.status === 'planned'
-              ? '待生成'
-              : '生成中'
+              ? (t ? t('dreamweaverRun.libraryStatusPlanned') : '待生成')
+              : (t ? t('dreamweaverRun.libraryStatusProcessing') : '生成中')
   const statusColor: 'default' | 'success' | 'info' | 'error' | 'warning' = missing
     ? 'error'
     : safetyBlocked
@@ -148,29 +152,29 @@ export function resolveLibraryDisplayCardState(
               : 'info'
   const preview = asset && hasRenderableImage ? item.preview : ''
   const placeholderText = missing
-    ? '素材缺失'
+    ? (t ? t('dreamweaverRun.libraryPlaceholderMissing') : '素材缺失')
     : safetyBlocked
-      ? '安全拦截'
+      ? (t ? t('dreamweaverRun.libraryStatusSafetyBlocked') : '安全拦截')
       : placeholder
-        ? '占位图'
+        ? (t ? t('dreamweaverRun.libraryPlaceholderImage') : '占位图')
         : asset
-          ? '待加载预览'
+          ? (t ? t('dreamweaverRun.libraryPlaceholderLoading') : '待加载预览')
           : item.status === 'done'
-            ? '已生成，等待入库'
+            ? (t ? t('dreamweaverRun.libraryPlaceholderGeneratedAwaiting') : '已生成，等待入库')
             : item.status === 'planned'
-              ? '待生成'
-              : '生成中'
+              ? (t ? t('dreamweaverRun.libraryStatusPlanned') : '待生成')
+              : (t ? t('dreamweaverRun.libraryStatusProcessing') : '生成中')
   const previewLoading = asset ? Boolean(libraryPreviewLoading[asset.id]) : false
   const previewError = asset ? libraryPreviewErrors[asset.id] : null
   const canGenerate = !asset && (missing || item.status === 'done')
   const roleLabel = item.group === 'other' && item.role ? `role: ${item.role}` : ''
-  const backgroundColor = safetyBlocked || missing ? '#fff5f5' : placeholder ? '#fffaf0' : '#f5f5f5'
+  const backgroundColor = safetyBlocked || missing ? '#fff5f5' : placeholder ? '#fffaf0' : '#f5f5f5' // sg-color-fixed: 库卡占位状态底（数据纹理色）
   const placeholderColor = safetyBlocked || missing ? 'error.main' : placeholder ? 'warning.main' : 'text.secondary'
   const placeholderBackgroundImage = safetyBlocked || missing
-    ? 'repeating-linear-gradient(45deg, rgba(211,47,47,0.05) 0, rgba(211,47,47,0.05) 8px, rgba(211,47,47,0.1) 8px, rgba(211,47,47,0.1) 16px)'
+    ? 'repeating-linear-gradient(45deg, rgba(211,47,47,0.05) 0, rgba(211,47,47,0.05) 8px, rgba(211,47,47,0.1) 8px, rgba(211,47,47,0.1) 16px)' // sg-color-fixed: 安全拦截斜纹纹理（数据纹理色）
     : placeholder
-      ? 'repeating-linear-gradient(45deg, rgba(245,124,0,0.05) 0, rgba(245,124,0,0.05) 8px, rgba(245,124,0,0.1) 8px, rgba(245,124,0,0.1) 16px)'
-      : 'repeating-linear-gradient(45deg, rgba(0,0,0,0.02) 0, rgba(0,0,0,0.02) 8px, rgba(0,0,0,0.04) 8px, rgba(0,0,0,0.04) 16px)'
+      ? 'repeating-linear-gradient(45deg, rgba(245,124,0,0.05) 0, rgba(245,124,0,0.05) 8px, rgba(245,124,0,0.1) 8px, rgba(245,124,0,0.1) 16px)' // sg-color-fixed: 占位斜纹纹理（数据纹理色）
+      : 'repeating-linear-gradient(45deg, rgba(0,0,0,0.02) 0, rgba(0,0,0,0.02) 8px, rgba(0,0,0,0.04) 8px, rgba(0,0,0,0.04) 16px)' // sg-color-fixed: 常规斜纹纹理（数据纹理色）
   return {
     asset,
     hasRenderableImage,
@@ -270,7 +274,7 @@ export type ComputeLibraryDisplayItemsParams = {
   missingRoleSet: Set<string>
 }
 
-export function computeLibraryDisplayItems(params: ComputeLibraryDisplayItemsParams): LibraryDisplayItem[] {
+export function computeLibraryDisplayItems(params: ComputeLibraryDisplayItemsParams, t?: TFunction): LibraryDisplayItem[] {
   const { library, libraryPlanItems, libraryPreviews, libraryPreviewAspectRatio, missingRoleSet } = params
   const assets = Array.isArray(library?.assets) ? (library?.assets as LibraryAsset[]) : []
   const normalizedMissingRoles = Array.from(missingRoleSet.values())
@@ -329,7 +333,7 @@ export function computeLibraryDisplayItems(params: ComputeLibraryDisplayItemsPar
     let base = raw || role
     if (parsed.entityType === 'character' && parsed.entityId) {
       const mapped = characterNameById.get(parsed.entityId) || ''
-      const fallbackCharacterName = mapped || `角色#${parsed.entityId}`
+      const fallbackCharacterName = mapped || (t ? t('dreamweaverRun.libraryCharacterFallback', { id: parsed.entityId }) : `角色#${parsed.entityId}`)
       if (raw === role || isPlaceholderEntityName(raw)) {
         base = fallbackCharacterName
       }
@@ -474,13 +478,13 @@ export function computeLibrarySummary(items: LibraryDisplayItem[]): LibraryGroup
   return { total: items.length, generated, processing, planned, approved, pendingReview }
 }
 
-export function computeLibraryGroups(items: LibraryDisplayItem[]): LibraryDisplayGroup[] {
+export function computeLibraryGroups(items: LibraryDisplayItem[], t?: TFunction): LibraryDisplayGroup[] {
   const order: Array<LibraryDisplayItem['group']> = ['character', 'scene', 'prop', 'other']
   const labels: Record<LibraryDisplayItem['group'], string> = {
-    character: '角色',
-    scene: '场景',
-    prop: '道具',
-    other: '其他',
+    character: t ? t('dreamweaverRun.libraryGroupCharacter') : '角色',
+    scene: t ? t('dreamweaverRun.libraryGroupScene') : '场景',
+    prop: t ? t('dreamweaverRun.libraryGroupProp') : '道具',
+    other: t ? t('dreamweaverRun.libraryGroupOther') : '其他',
   }
   const groups = new Map<LibraryDisplayItem['group'], LibraryDisplayItem[]>()
   for (const item of items) {

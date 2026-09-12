@@ -1,4 +1,5 @@
 import { Box, IconButton, Slider, Tooltip, Typography } from '@mui/material'
+import { useTranslation } from 'react-i18next'
 import PauseIcon from '@mui/icons-material/Pause'
 import PlayArrowIcon from '@mui/icons-material/PlayArrow'
 import SkipNextIcon from '@mui/icons-material/SkipNext'
@@ -34,6 +35,7 @@ const BrowserPlayerControls: React.FC<BrowserPlayerControlsProps> = ({
   onNext,
   onVolumeChange,
 }) => {
+  const { t } = useTranslation()
   const previousDisabled = currentChapterIndex === 0
   const nextDisabled = currentChapterIndex >= chapterCount - 1
 
@@ -56,7 +58,7 @@ const BrowserPlayerControls: React.FC<BrowserPlayerControlsProps> = ({
         <Typography variant="caption" sx={{ minWidth: 50 }}>
           {formatBrowserPlayerTime(currentTime)}
         </Typography>
-        <Tooltip title={previousDisabled ? '当前已经是第一章' : '上一章'}>
+        <Tooltip title={previousDisabled ? t('audiobook.browserPlayer.firstChapter') : t('audiobook.browserPlayer.previous')}>
           <span>
             <IconButton onClick={onPrevious} disabled={previousDisabled}>
               <SkipPreviousIcon />
@@ -66,7 +68,7 @@ const BrowserPlayerControls: React.FC<BrowserPlayerControlsProps> = ({
         <IconButton onClick={onPlayPause} size="large">
           {isPlaying ? <PauseIcon fontSize="large" /> : <PlayArrowIcon fontSize="large" />}
         </IconButton>
-        <Tooltip title={nextDisabled ? '当前已经是最后一章' : '下一章'}>
+        <Tooltip title={nextDisabled ? t('audiobook.browserPlayer.lastChapter') : t('audiobook.browserPlayer.next')}>
           <span>
             <IconButton onClick={onNext} disabled={nextDisabled}>
               <SkipNextIcon />

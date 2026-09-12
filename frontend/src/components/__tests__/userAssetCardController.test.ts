@@ -1,5 +1,7 @@
-import { describe, expect, it } from 'vitest'
+import { beforeAll, describe, expect, it } from 'vitest'
+import type { TFunction } from 'i18next'
 
+import { bootstrapI18n } from '@/i18n'
 import type { UserAssetRecord } from '@/services/api'
 
 import {
@@ -25,6 +27,13 @@ function createUserAssetRecord(overrides: Partial<UserAssetRecord> = {}): UserAs
   }
 }
 
+let t: TFunction
+
+beforeAll(async () => {
+  const instance = await bootstrapI18n('zh-CN')
+  t = instance.t.bind(instance)
+})
+
 describe('userAssetCardController', () => {
   it('builds card key, commands and selection state', () => {
     const controller = buildUserAssetCardController(
@@ -37,6 +46,7 @@ describe('userAssetCardController', () => {
         assetActionKey: 'asset-7',
         selectedAssetIdSet: new Set([7]),
       },
+      t,
     )
 
     expect(controller.cardKey).toBe('user-asset-7')
@@ -57,8 +67,25 @@ describe('userAssetCardController', () => {
   })
 
   it('falls back to default time label for invalid timestamps', () => {
-    expect(formatUserAssetCardDateTime()).toBe('暂无时间')
-    expect(formatUserAssetCardDateTime('invalid-date')).toBe('暂无时间')
-    expect(buildUserAssetCardController(createUserAssetRecord({ created_at: '' })).createdAtLabel).toBe('暂无时间')
+    expect(formatUserAssetCardDateTime(undefined, undefined, t)).toBe('暂无时间')
+    expect(formatUserAssetCardDateTime('invalid-date', undefined, t)).toBe('暂无时间')
+    expect(buildUserAssetCardController(createUserAssetRecord({ created_at: '' }), {}, t).createdAtLabel).toBe('暂无时间')
+  })
+
+  it('renders the timestamp in whichever language it is told to', () => {
+    // 卡片时间不再写死 zh-CN：由调用方把当前语言穿进来。
+    const sample = '2026-03-15T08:30:45Z'
+
+    expect(formatUserAssetCardDateTime(sample, 'zh-CN')).toContain('年')
+    expect(formatUserAssetCardDateTime(sample, 'en-US')).toContain('Mar')
+  })
+
+  it('passes the locale through the card controller', () => {
+    const controller = buildUserAssetCardController(
+      createUserAssetRecord({ created_at: '2026-03-15T08:30:45Z' }),
+      { locale: 'en-US' },
+    )
+
+    expect(controller.createdAtLabel).toContain('Mar')
   })
 })

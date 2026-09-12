@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { ChangeEvent } from 'react'
+import { useTranslation } from 'react-i18next'
+import type { TFunction } from 'i18next'
 import AddPhotoAlternateOutlinedIcon from '@mui/icons-material/AddPhotoAlternateOutlined'
 import BoltOutlinedIcon from '@mui/icons-material/BoltOutlined'
 import {
@@ -49,32 +51,34 @@ interface AssetStudioWorkbenchProps {
 }
 
 const IMAGE_SIZE_OPTIONS: SizeOption[] = [
-  { label: '1K 方图', width: 1024, height: 1024, value: '1024x1024' },
-  { label: '2K 竖图', width: 1536, height: 2048, value: '1536x2048' },
-  { label: '宽屏 16:9', width: 1536, height: 864, value: '1536x864' },
-  { label: '竖屏 9:16', width: 864, height: 1536, value: '864x1536' },
+  { labelKey: 'assetStudio.workbench.sizeImage1kSquare', width: 1024, height: 1024, value: '1024x1024' },
+  { labelKey: 'assetStudio.workbench.sizeImage2kPortrait', width: 1536, height: 2048, value: '1536x2048' },
+  { labelKey: 'assetStudio.workbench.sizeImageWide169', width: 1536, height: 864, value: '1536x864' },
+  { labelKey: 'assetStudio.workbench.sizeImagePortrait916', width: 864, height: 1536, value: '864x1536' },
 ]
 
 const VIDEO_SIZE_OPTIONS: SizeOption[] = [
-  { label: '1080p · 16:9', width: 1920, height: 1080, value: '1920x1080' },
-  { label: '720p · 16:9', width: 1280, height: 720, value: '1280x720' },
-  { label: '竖屏 · 9:16', width: 1080, height: 1920, value: '1080x1920' },
-  { label: '方屏 · 1:1', width: 1080, height: 1080, value: '1080x1080' },
+  { labelKey: 'assetStudio.workbench.sizeVideo1080p', width: 1920, height: 1080, value: '1920x1080' },
+  { labelKey: 'assetStudio.workbench.sizeVideo720p', width: 1280, height: 720, value: '1280x720' },
+  { labelKey: 'assetStudio.workbench.sizeVideoPortrait916', width: 1080, height: 1920, value: '1080x1920' },
+  { labelKey: 'assetStudio.workbench.sizeVideoSquare11', width: 1080, height: 1080, value: '1080x1080' },
 ]
 
 interface ModelOption {
   value: string
   label: string
+  labelKey?: string
   helper: string
+  helperKey?: string
 }
 
 interface DurationOption {
   value: string
-  label: string
+  label?: string
 }
 
 interface SizeOption {
-  label: string
+  labelKey: string
   width: number
   height: number
   value: string
@@ -83,7 +87,9 @@ interface SizeOption {
 interface CameraControlOption {
   value: string
   label: string
+  labelKey?: string
   helper: string
+  helperKey?: string
 }
 
 interface SpeechVoicePreset {
@@ -135,7 +141,6 @@ function mapDurationValuesToOptions(values: number[] | undefined | null): Durati
     const normalized = normalizeDurationValue(value)
     return {
       value: normalized,
-      label: `${normalized} 秒`,
     }
   })
 }
@@ -420,41 +425,51 @@ const IMAGE_GENERATION_MODEL_OPTIONS: ModelOption[] = [
   {
     value: 'wan2.6-t2i',
     label: 'Wan 2.6 T2I',
+    helperKey: 'assetStudio.workbench.helper.wan26T2i',
     helper: '主力文生图模型，适合正式出图、封面草图和角色概念图。',
   },
   {
     value: 'qwen-image-2.0',
     label: 'Qwen Image 2.0',
+    helperKey: 'assetStudio.workbench.helper.qwenImage20',
     helper: '通义千问高质量文生图，适合日常图像创作。',
   },
   {
     value: 'qwen-image-2.0-pro',
     label: 'Qwen Image 2.0 Pro',
+    helperKey: 'assetStudio.workbench.helper.qwenImage20Pro',
     helper: '通义千问旗舰级文生图，画质更精细，适合商业级图像。',
   },
   {
     value: 'wan2.7-image',
     label: 'Wan 2.7 Image',
+    helperKey: 'assetStudio.workbench.helper.wan27Image',
     helper: '万相最新图像生成模型，支持多种创作功能。',
   },
   {
     value: 'doubao-seedream-4-5',
     label: 'Doubao Seedream 4.5',
+    helperKey: 'assetStudio.workbench.helper.seedream45',
     helper: '豆包高质量文生图，适合插画和概念设计。',
   },
   {
     value: 'doubao-seedream-5-0',
     label: 'Doubao Seedream 5.0',
+    helperKey: 'assetStudio.workbench.helper.seedream50',
     helper: '豆包最新版本，支持超高分辨率和多种图像创作功能。',
   },
   {
     value: 'kling-v3-image-generation',
     label: 'Kling V3 图像生成',
+    labelKey: 'assetStudio.workbench.model.klingV3Image',
+    helperKey: 'assetStudio.workbench.helper.klingV3Image',
     helper: '快手可灵 V3 图像生成，高质量人物和场景。',
   },
   {
     value: 'kling-v3-omni-image-generation',
     label: 'Kling V3 Omni 图像生成',
+    labelKey: 'assetStudio.workbench.model.klingV3OmniImage',
+    helperKey: 'assetStudio.workbench.helper.klingV3OmniImage',
     helper: '可灵全能版图像生成，支持图生图和风格迁移。',
   },
 ]
@@ -463,11 +478,13 @@ const IMAGE_EDIT_MODEL_OPTIONS: ModelOption[] = [
   {
     value: 'qwen-image-edit-plus',
     label: 'Qwen Image Edit Plus',
+    helperKey: 'assetStudio.workbench.helper.qwenImageEditPlus',
     helper: '参考图编辑主力，适合根据指令做稳定修改。',
   },
   {
     value: 'qwen-image-edit-max',
     label: 'Qwen Image Edit Max',
+    helperKey: 'assetStudio.workbench.helper.qwenImageEditMax',
     helper: '质量更高，适合精修、复杂改图和最终素材处理。',
   },
 ]
@@ -476,61 +493,78 @@ const VIDEO_GENERATION_MODEL_OPTIONS: ModelOption[] = [
   {
     value: 'wan2.7-t2v',
     label: 'Wan 2.7 T2V',
+    helperKey: 'assetStudio.workbench.helper.wan27T2v',
     helper: '质量优先的视频主力模型，支持镜头控制，适合正式生成。',
   },
   {
     value: 'wan2.6-t2v-fast',
     label: 'Wan 2.6 T2V Fast',
+    helperKey: 'assetStudio.workbench.helper.wan26T2vFast',
     helper: '快速预览模型，适合 3 秒或 5 秒的早期验证。',
   },
   {
     value: 'wan2.7-i2v',
     label: 'Wan 2.7 I2V',
+    helperKey: 'assetStudio.workbench.helper.wan27I2v',
     helper: '首帧驱动模型，适合基于参考图生成更稳定的人物或场景视频。',
   },
   {
     value: 'doubao-seedance-2-0',
     label: 'Doubao Seedance 2.0',
+    helperKey: 'assetStudio.workbench.helper.seedance20',
     helper: '支持最多9张参考图+3个参考视频+首尾帧，多模态控制最强。',
   },
   {
     value: 'doubao-seedance-2-0-fast',
     label: 'Doubao Seedance 2.0 Fast',
+    helperKey: 'assetStudio.workbench.helper.seedance20Fast',
     helper: '豆包快速版本，适合原型验证和快速迭代。',
   },
   {
     value: 'doubao-seedance-1-5-pro',
     label: 'Doubao Seedance 1.5 Pro',
+    helperKey: 'assetStudio.workbench.helper.seedance15Pro',
     helper: '豆包上一代专业版本，稳定可靠。',
   },
   {
     value: 'kling-v3-video-generation',
     label: 'Kling V3 视频生成',
+    labelKey: 'assetStudio.workbench.model.klingV3Video',
+    helperKey: 'assetStudio.workbench.helper.klingV3Video',
     helper: '快手可灵 V3，支持最多7张参考图+首尾帧+多镜头。',
   },
   {
     value: 'kling-v3-omni-video-generation',
     label: 'Kling V3 Omni 视频生成',
+    labelKey: 'assetStudio.workbench.model.klingV3OmniVideo',
+    helperKey: 'assetStudio.workbench.helper.klingV3OmniVideo',
     helper: '快手可灵全能版本，支持多模态输入与复杂场景控制。',
   },
   {
     value: 'pixverse-v6-t2v',
     label: 'PixVerse V6',
+    helperKey: 'assetStudio.workbench.helper.pixverseV6',
     helper: 'PixVerse V6 文生视频，支持首尾帧+多镜头+特效模板。',
   },
   {
     value: 'vidu-q3-pro-text2video',
     label: 'Vidu Q3 Pro 文生视频',
+    labelKey: 'assetStudio.workbench.model.viduQ3Text',
+    helperKey: 'assetStudio.workbench.helper.viduQ3Text',
     helper: 'Vidu Q3 Pro 文生视频链路，适合高质量视频创作。',
   },
   {
     value: 'vidu-q3-pro-img2video',
     label: 'Vidu Q3 Pro 图生视频',
+    labelKey: 'assetStudio.workbench.model.viduQ3Img',
+    helperKey: 'assetStudio.workbench.helper.viduQ3Img',
     helper: 'Vidu Q3 Pro 图生视频链路，支持参考图驱动视频生成。',
   },
   {
     value: 'vidu-q3-pro-start-end2video',
     label: 'Vidu Q3 Pro 首尾帧',
+    labelKey: 'assetStudio.workbench.model.viduQ3StartEnd',
+    helperKey: 'assetStudio.workbench.helper.viduQ3StartEnd',
     helper: 'Vidu Q3 Pro 首尾帧控制，适合精确控制视频起始和结束画面。',
   },
 ]
@@ -539,16 +573,21 @@ const VIDEO_EDIT_MODEL_OPTIONS: ModelOption[] = [
   {
     value: 'wan2.7-videoedit',
     label: 'Wan 2.7 VideoEdit',
+    helperKey: 'assetStudio.workbench.helper.wan27VideoEdit',
     helper: '万相视频编辑模型，支持参考视频输入、多片段融合与风格迁移。',
   },
   {
     value: 'doubao-seedance-2-0',
     label: 'Doubao Seedance 2.0（编辑）',
+    labelKey: 'assetStudio.workbench.model.seedanceEdit',
+    helperKey: 'assetStudio.workbench.helper.seedanceEdit',
     helper: '支持视频编辑与延长，电影级质量。',
   },
   {
     value: 'kling-v3-video-generation',
     label: 'Kling V3（编辑）',
+    labelKey: 'assetStudio.workbench.model.klingEdit',
+    helperKey: 'assetStudio.workbench.helper.klingEdit',
     helper: '可灵视频编辑与融合，适合高质量视频创作。',
   },
 ]
@@ -557,96 +596,101 @@ const MOTION_MODEL_OPTIONS: ModelOption[] = [
   {
     value: 'wan2.7-r2v',
     label: 'Wan 2.7 R2V',
+    helperKey: 'assetStudio.workbench.helper.wan27R2v',
     helper: '支持最多5个视频参考+多图+首尾帧，动作控制、主体一致性最强。',
   },
   {
     value: 'doubao-seedance-2-0',
     label: 'Doubao Seedance 2.0',
+    helperKey: 'assetStudio.workbench.helper.seedance20',
     helper: '支持最多9张参考图+3个参考视频+首尾帧，多模态控制最强。',
   },
   {
     value: 'kling-v3-video-generation',
     label: 'Kling V3',
+    helperKey: 'assetStudio.workbench.helper.klingV3',
     helper: '支持最多7张参考图+首尾帧+多镜头生成。',
   },
   {
     value: 'kling-v3-omni-video-generation',
     label: 'Kling V3 Omni',
+    helperKey: 'assetStudio.workbench.helper.klingV3Omni',
     helper: '可灵全能版，支持多模态输入+首尾帧+多镜头。',
   },
   {
     value: 'pixverse-v6-t2v',
     label: 'PixVerse V6',
+    helperKey: 'assetStudio.workbench.helper.pixverseV6',
     helper: '支持首尾帧+多镜头+特效模板，创意视频首选。',
   },
 ]
 
 const VIDEO_DURATION_OPTIONS_BY_MODEL: Record<string, DurationOption[]> = {
   'wan2.7-t2v': [
-    { value: '3', label: '3 秒' },
-    { value: '5', label: '5 秒' },
-    { value: '10', label: '10 秒' },
-    { value: '15', label: '15 秒' },
+    { value: '3' },
+    { value: '5' },
+    { value: '10' },
+    { value: '15' },
   ],
   'wan2.6-t2v-fast': [
-    { value: '3', label: '3 秒' },
-    { value: '5', label: '5 秒' },
+    { value: '3' },
+    { value: '5' },
   ],
   'wan2.7-i2v': [
-    { value: '3', label: '3 秒' },
-    { value: '5', label: '5 秒' },
-    { value: '10', label: '10 秒' },
+    { value: '3' },
+    { value: '5' },
+    { value: '10' },
   ],
   'wan2.7-r2v': [
-    { value: '3', label: '3 秒' },
-    { value: '5', label: '5 秒' },
-    { value: '10', label: '10 秒' },
-    { value: '15', label: '15 秒' },
+    { value: '3' },
+    { value: '5' },
+    { value: '10' },
+    { value: '15' },
   ],
   'wan2.7-videoedit': [
-    { value: '3', label: '3 秒' },
-    { value: '5', label: '5 秒' },
-    { value: '10', label: '10 秒' },
+    { value: '3' },
+    { value: '5' },
+    { value: '10' },
   ],
   'doubao-seedance-2-0': [
-    { value: '5', label: '5 秒' },
-    { value: '10', label: '10 秒' },
-    { value: '30', label: '30 秒' },
+    { value: '5' },
+    { value: '10' },
+    { value: '30' },
   ],
   'doubao-seedance-2-0-fast': [
-    { value: '5', label: '5 秒' },
-    { value: '10', label: '10 秒' },
+    { value: '5' },
+    { value: '10' },
   ],
   'doubao-seedance-1-5-pro': [
-    { value: '5', label: '5 秒' },
-    { value: '10', label: '10 秒' },
+    { value: '5' },
+    { value: '10' },
   ],
   'kling-v3-video-generation': [
-    { value: '3', label: '3 秒' },
-    { value: '5', label: '5 秒' },
-    { value: '10', label: '10 秒' },
+    { value: '3' },
+    { value: '5' },
+    { value: '10' },
   ],
   'kling-v3-omni-video-generation': [
-    { value: '3', label: '3 秒' },
-    { value: '5', label: '5 秒' },
-    { value: '10', label: '10 秒' },
+    { value: '3' },
+    { value: '5' },
+    { value: '10' },
   ],
   'pixverse-v6-t2v': [
-    { value: '3', label: '3 秒' },
-    { value: '5', label: '5 秒' },
-    { value: '10', label: '10 秒' },
+    { value: '3' },
+    { value: '5' },
+    { value: '10' },
   ],
   'vidu-q3-pro-text2video': [
-    { value: '5', label: '5 秒' },
-    { value: '10', label: '10 秒' },
+    { value: '5' },
+    { value: '10' },
   ],
   'vidu-q3-pro-img2video': [
-    { value: '5', label: '5 秒' },
-    { value: '10', label: '10 秒' },
+    { value: '5' },
+    { value: '10' },
   ],
   'vidu-q3-pro-start-end2video': [
-    { value: '5', label: '5 秒' },
-    { value: '10', label: '10 秒' },
+    { value: '5' },
+    { value: '10' },
   ],
 }
 
@@ -654,61 +698,81 @@ const CAMERA_CONTROL_OPTIONS: CameraControlOption[] = [
   {
     value: '',
     label: '自动',
+    labelKey: 'assetStudio.workbench.camera.auto',
+    helperKey: 'assetStudio.workbench.camera.autoHelper',
     helper: '不额外指定镜头运动，让模型自行决定。',
   },
   {
     value: '镜头稳定，以主体动作为主',
     label: '固定机位',
+    labelKey: 'assetStudio.workbench.camera.fixed',
+    helperKey: 'assetStudio.workbench.camera.fixedHelper',
     helper: '更稳，更适合展示人物动作和表情。',
   },
   {
     value: '镜头缓慢推进，聚焦主体',
     label: '缓慢推进',
+    labelKey: 'assetStudio.workbench.camera.push',
+    helperKey: 'assetStudio.workbench.camera.pushHelper',
     helper: '适合突出人物、物体或情绪焦点。',
   },
   {
     value: '镜头轻微平移，保持节奏稳定',
     label: '轻微平移',
+    labelKey: 'assetStudio.workbench.camera.pan',
+    helperKey: 'assetStudio.workbench.camera.panHelper',
     helper: '适合展示空间关系和场景横向变化。',
   },
   {
     value: '镜头轻微跟随主体移动，保持构图稳定',
     label: '轻微跟拍',
+    labelKey: 'assetStudio.workbench.camera.follow',
+    helperKey: 'assetStudio.workbench.camera.followHelper',
     helper: '适合人物走位、奔跑和连续动作。',
   },
   {
     value: '镜头轻微环绕主体，突出空间层次',
     label: '轻微环绕',
+    labelKey: 'assetStudio.workbench.camera.orbit',
+    helperKey: 'assetStudio.workbench.camera.orbitHelper',
     helper: '适合表现空间感、立体感和展示感。',
   },
 ]
 
-const MOTION_LEVEL_HELPERS: Record<string, string> = {
-  low: '更稳，适合微动作、微表情和轻运动。',
-  medium: '平衡动作强度和画面稳定性，适合大多数镜头。',
-  high: '动作更明显，但对构图和稳定性要求更高。',
+const MOTION_LEVEL_HELPER_KEYS: Record<string, string> = {
+  low: 'assetStudio.workbench.motionLevel.low',
+  medium: 'assetStudio.workbench.motionLevel.medium',
+  high: 'assetStudio.workbench.motionLevel.high',
 }
 
-const AUDIO_GENERATION_TYPE_OPTIONS: Array<{ value: AudioGenerationType; label: string; helper: string }> = [
+const AUDIO_GENERATION_TYPE_OPTIONS: Array<{ value: AudioGenerationType; label: string; labelKey: string; helper: string; helperKey: string }> = [
   {
     value: 'music',
     label: '配乐生成',
+    labelKey: 'assetStudio.workbench.audioType.music',
     helper: '适合背景音乐、氛围音乐和预告片配乐。',
+    helperKey: 'assetStudio.workbench.audioType.musicHelper',
   },
   {
     value: 'sound-effect',
     label: '音效生成',
+    labelKey: 'assetStudio.workbench.audioType.soundEffect',
     helper: '适合环境音、动作音和短时音效草案。',
+    helperKey: 'assetStudio.workbench.audioType.soundEffectHelper',
   },
   {
     value: 'scene-audio',
     label: '场景音频',
+    labelKey: 'assetStudio.workbench.audioType.sceneAudio',
     helper: '在一条导演式提示词中统一生成多角色对白、环境声、动作音效和配乐。',
+    helperKey: 'assetStudio.workbench.audioType.sceneAudioHelper',
   },
   {
     value: 'speech',
     label: '语音合成',
+    labelKey: 'assetStudio.workbench.audioType.speech',
     helper: '适合旁白、对白和角色试听，可直接选择 TTS 模型与音色。',
+    helperKey: 'assetStudio.workbench.audioType.speechHelper',
   },
 ]
 
@@ -717,6 +781,7 @@ const AUDIO_MODEL_OPTIONS_BY_TYPE: Record<AudioGenerationType, ModelOption[]> = 
     {
       value: 'mureka-o1-instrumental',
       label: 'mureka-o1-instrumental',
+      helperKey: 'assetStudio.workbench.helper.murekaO1Instrumental',
       helper: '当前资产工作台的纯音乐主力模型，适合配乐和氛围音乐。',
     },
   ],
@@ -724,6 +789,7 @@ const AUDIO_MODEL_OPTIONS_BY_TYPE: Record<AudioGenerationType, ModelOption[]> = 
     {
       value: 'vidu-timing2audio',
       label: 'Vidu Timing2Audio',
+      helperKey: 'assetStudio.workbench.helper.viduTiming2Audio',
       helper: '可控文生音效，支持通过时间轴控制多个音效事件，适合视频音效和有声小说音效。',
     },
   ],
@@ -731,6 +797,8 @@ const AUDIO_MODEL_OPTIONS_BY_TYPE: Record<AudioGenerationType, ModelOption[]> = 
     {
       value: 'seed-audio-1.0',
       label: '豆包音频生成模型 1.0',
+      labelKey: 'assetStudio.workbench.model.seedAudio10',
+      helperKey: 'assetStudio.workbench.helper.seedAudio10',
       helper: '适合有声剧和影视场景预演，可在一次生成中组合对白、环境、音效与音乐。',
     },
   ],
@@ -738,21 +806,25 @@ const AUDIO_MODEL_OPTIONS_BY_TYPE: Record<AudioGenerationType, ModelOption[]> = 
     {
       value: 'qwen3-tts-instruct-flash',
       label: 'Qwen3-TTS Instruct Flash',
+      helperKey: 'assetStudio.workbench.helper.qwen3TtsInstructFlash',
       helper: '速度快、出稿稳，适合旁白草稿、对白验证和大批量试听。',
     },
     {
       value: 'cosyvoice-v3.5-plus',
       label: 'CosyVoice v3.5-plus',
+      helperKey: 'assetStudio.workbench.helper.cosyvoiceV35',
       helper: '高表现力语音模型，支持 instruction，但必须先选择复刻或设计音色。',
     },
     {
       value: 'minimax-speech-2.8-hd',
       label: 'MiniMax Speech 2.8 HD',
+      helperKey: 'assetStudio.workbench.helper.minimaxSpeech28Hd',
       helper: '音质优先，适合高保真语音样稿和更细腻的情感表达。',
     },
     {
       value: 'minimax-speech-2.8-turbo',
       label: 'MiniMax Speech 2.8 Turbo',
+      helperKey: 'assetStudio.workbench.helper.minimaxSpeech28Turbo',
       helper: '兼顾速度和质量，适合快速迭代语音草案。',
     },
   ],
@@ -760,43 +832,43 @@ const AUDIO_MODEL_OPTIONS_BY_TYPE: Record<AudioGenerationType, ModelOption[]> = 
 
 const AUDIO_DURATION_OPTIONS_BY_TYPE: Record<AudioGenerationType, DurationOption[]> = {
   music: [
-    { value: '15', label: '15 秒' },
-    { value: '30', label: '30 秒' },
-    { value: '45', label: '45 秒' },
-    { value: '60', label: '60 秒' },
+    { value: '15' },
+    { value: '30' },
+    { value: '45' },
+    { value: '60' },
   ],
   'sound-effect': [
-    { value: '3', label: '3 秒' },
-    { value: '5', label: '5 秒' },
-    { value: '8', label: '8 秒' },
-    { value: '10', label: '10 秒' },
+    { value: '3' },
+    { value: '5' },
+    { value: '8' },
+    { value: '10' },
   ],
   'scene-audio': [],
   speech: [],
 }
 
 const AUDIO_STYLE_OPTIONS = [
-  { value: '氛围', label: '氛围' },
-  { value: '流行', label: '流行' },
-  { value: '电子', label: '电子' },
-  { value: '钢琴', label: '钢琴' },
-  { value: '悬疑', label: '悬疑' },
-  { value: '史诗', label: '史诗' },
-  { value: '影视配乐', label: '影视配乐' },
+  { value: '氛围', labelKey: 'assetStudio.workbench.audioStyle.ambient' },
+  { value: '流行', labelKey: 'assetStudio.workbench.audioStyle.pop' },
+  { value: '电子', labelKey: 'assetStudio.workbench.audioStyle.electronic' },
+  { value: '钢琴', labelKey: 'assetStudio.workbench.audioStyle.piano' },
+  { value: '悬疑', labelKey: 'assetStudio.workbench.audioStyle.suspense' },
+  { value: '史诗', labelKey: 'assetStudio.workbench.audioStyle.epic' },
+  { value: '影视配乐', labelKey: 'assetStudio.workbench.audioStyle.filmScore' },
 ]
 
 const AUDIO_MOOD_OPTIONS = [
-  { value: 'calm', label: '平静' },
-  { value: 'tense', label: '紧张' },
-  { value: 'exciting', label: '激昂' },
-  { value: 'mysterious', label: '神秘' },
-  { value: 'sad', label: '忧郁' },
+  { value: 'calm', labelKey: 'assetStudio.workbench.audioMood.calm' },
+  { value: 'tense', labelKey: 'assetStudio.workbench.audioMood.tense' },
+  { value: 'exciting', labelKey: 'assetStudio.workbench.audioMood.exciting' },
+  { value: 'mysterious', labelKey: 'assetStudio.workbench.audioMood.mysterious' },
+  { value: 'sad', labelKey: 'assetStudio.workbench.audioMood.sad' },
 ]
 
 const AUDIO_TEMPO_OPTIONS = [
-  { value: 'slow', label: '慢速' },
-  { value: 'medium', label: '中速' },
-  { value: 'fast', label: '快速' },
+  { value: 'slow', labelKey: 'assetStudio.workbench.audioTempo.slow' },
+  { value: 'medium', labelKey: 'assetStudio.workbench.audioTempo.medium' },
+  { value: 'fast', labelKey: 'assetStudio.workbench.audioTempo.fast' },
 ]
 
 const getFallbackDurationOptions = function(
@@ -854,7 +926,6 @@ function getRuntimeDurationOptions(
     const normalized = normalizeDurationValue(value)
     return {
       value: normalized,
-      label: `${normalized} 秒`,
     }
   })
 }
@@ -908,74 +979,77 @@ function getMaxReferenceImages(
   return fallback
 }
 
-function getRoutingStatusLabel(signal?: RuntimeRoutingSignal | null): string {
+function getRoutingStatusLabel(signal?: RuntimeRoutingSignal | null, t?: TFunction): string {
   if (signal?.blocked) {
-    return '近期失败'
+    return t ? t('assetStudio.workbench.routing.statusBlocked') : '近期失败'
   }
   if (signal?.stale) {
-    return '信号过期'
+    return t ? t('assetStudio.workbench.routing.statusStale') : '信号过期'
   }
 
   switch (signal?.verification_status) {
     case 'verified':
-      return '已校验'
+      return t ? t('assetStudio.workbench.routing.statusVerified') : '已校验'
     case 'partial':
-      return '部分校验'
+      return t ? t('assetStudio.workbench.routing.statusPartial') : '部分校验'
     case 'failed':
-      return '校验失败'
+      return t ? t('assetStudio.workbench.routing.statusFailed') : '校验失败'
     case 'pending':
-      return '待校验'
+      return t ? t('assetStudio.workbench.routing.statusPending') : '待校验'
     default:
-      return '未校验'
+      return t ? t('assetStudio.workbench.routing.statusUnverified') : '未校验'
   }
 }
 
-function getRoutingStatusHelper(signal?: RuntimeRoutingSignal | null): string | null {
+function getRoutingStatusHelper(signal?: RuntimeRoutingSignal | null, t?: TFunction): string | null {
   if (signal?.blocked) {
-    return '该模型最近一次联网校验失败，运行时会优先自动改选其他可用模型。'
+    return t ? t('assetStudio.workbench.routing.helperBlocked') : '该模型最近一次联网校验失败，运行时会优先自动改选其他可用模型。'
   }
   if (signal?.stale) {
-    return '该模型的联网校验信号已过期，当前约束可能不是最新官方状态。'
+    return t ? t('assetStudio.workbench.routing.helperStale') : '该模型的联网校验信号已过期，当前约束可能不是最新官方状态。'
   }
 
   switch (signal?.verification_status) {
     case 'verified':
-      return '最近一次联网校验通过，当前模型状态和能力约束可信度更高。'
+      return t ? t('assetStudio.workbench.routing.helperVerified') : '最近一次联网校验通过，当前模型状态和能力约束可信度更高。'
     case 'partial':
-      return '仅完成部分联网校验，建议结合实际生成结果继续确认。'
+      return t ? t('assetStudio.workbench.routing.helperPartial') : '仅完成部分联网校验，建议结合实际生成结果继续确认。'
     case 'failed':
-      return '最近一次联网校验失败，但已超出阻断窗口，运行时仍可能尝试回退使用。'
+      return t ? t('assetStudio.workbench.routing.helperFailed') : '最近一次联网校验失败，但已超出阻断窗口，运行时仍可能尝试回退使用。'
     case 'pending':
-      return '该模型尚未完成联网校验，当前主要依赖本地模型档案。'
+      return t ? t('assetStudio.workbench.routing.helperPending') : '该模型尚未完成联网校验，当前主要依赖本地模型档案。'
     default:
       return null
   }
 }
 
-function formatRoutingAge(ageHours?: number | null): string | null {
+function formatRoutingAge(ageHours?: number | null, t?: TFunction): string | null {
   if (typeof ageHours !== 'number' || !Number.isFinite(ageHours) || ageHours < 0) {
     return null
   }
   if (ageHours < 1) {
-    return '1 小时内'
+    return t ? t('assetStudio.workbench.routing.ageWithinHour') : '1 小时内'
   }
   if (ageHours < 24) {
-    return `${Math.round(ageHours)} 小时前`
+    const hours = Math.round(ageHours)
+    return t ? t('assetStudio.workbench.routing.ageHours', { count: hours }) : `${hours} 小时前`
   }
-  return `${Math.round(ageHours / 24)} 天前`
+  const days = Math.round(ageHours / 24)
+  return t ? t('assetStudio.workbench.routing.ageDays', { count: days }) : `${days} 天前`
 }
 
-function getRoutingStatusMetaLine(signal?: RuntimeRoutingSignal | null): string | null {
+function getRoutingStatusMetaLine(signal?: RuntimeRoutingSignal | null, t?: TFunction): string | null {
   const parts: string[] = []
-  const ageLabel = formatRoutingAge(signal?.age_hours)
+  const ageLabel = formatRoutingAge(signal?.age_hours, t)
   if (ageLabel) {
-    parts.push(`最近校验：${ageLabel}`)
+    parts.push(t ? t('assetStudio.workbench.routing.metaCheckedAt', { label: ageLabel }) : `最近校验：${ageLabel}`)
   }
 
   if (typeof signal?.reason === 'string') {
     const reason = signal.reason.trim()
     if (reason) {
-      parts.push(`原因：${reason.length > 64 ? `${reason.slice(0, 64)}...` : reason}`)
+      const preview = reason.length > 64 ? `${reason.slice(0, 64)}...` : reason
+      parts.push(t ? t('assetStudio.workbench.routing.metaReason', { reason: preview }) : `原因：${preview}`)
     }
   }
 
@@ -1091,7 +1165,7 @@ function getRoutingStatusChipSx(signal?: RuntimeRoutingSignal | null): SystemSty
   }
 }
 
-function renderModelOptionMenuItem(option: ModelOption, signal?: RuntimeRoutingSignal | null) {
+function renderModelOptionMenuItem(option: ModelOption, signal?: RuntimeRoutingSignal | null, t?: TFunction) {
   return (
     <MenuItem key={option.value} value={option.value}>
       <Box
@@ -1113,11 +1187,11 @@ function renderModelOptionMenuItem(option: ModelOption, signal?: RuntimeRoutingS
             whiteSpace: 'nowrap',
           }}
         >
-          {option.label}
+          {option.labelKey ? t?.(option.labelKey) : option.label}
         </Typography>
         <Chip
           size="small"
-          label={getRoutingStatusLabel(signal)}
+          label={getRoutingStatusLabel(signal, t)}
           variant="outlined"
           sx={{
             ...getRoutingStatusChipSx(signal),
@@ -1135,9 +1209,9 @@ function renderModelOptionMenuItem(option: ModelOption, signal?: RuntimeRoutingS
   )
 }
 
-function renderRoutingStatusMeta(signal?: RuntimeRoutingSignal | null) {
-  const helper = getRoutingStatusHelper(signal)
-  const metaLine = getRoutingStatusMetaLine(signal)
+function renderRoutingStatusMeta(signal?: RuntimeRoutingSignal | null, t?: TFunction) {
+  const helper = getRoutingStatusHelper(signal, t)
+  const metaLine = getRoutingStatusMetaLine(signal, t)
   if (!helper && !metaLine) {
     return null
   }
@@ -1167,7 +1241,7 @@ function renderRoutingStatusMeta(signal?: RuntimeRoutingSignal | null) {
             },
           }}
         >
-          当前模型近期联网校验失败，运行时会优先自动改选其他可用模型。
+          {t ? t('assetStudio.workbench.routing.blockedAlert') : '当前模型近期联网校验失败，运行时会优先自动改选其他可用模型。'}
         </Alert>
       ) : null}
     </Stack>
@@ -1179,12 +1253,14 @@ function renderRecommendedModelAction(
   recommendedOption: ModelOption | null,
   runtimeEntries: Record<string, CatalogRuntimeEntry>,
   onApply: () => void,
+  t?: TFunction,
 ) {
   if (!shouldRecommendAlternativeModel(selectedModelId, recommendedOption, runtimeEntries) || !recommendedOption) {
     return null
   }
 
   const recommendedSignal = runtimeEntries[recommendedOption.value]?.runtime_routing_signal
+  const recommendedLabel = recommendedOption.labelKey ? t?.(recommendedOption.labelKey) : recommendedOption.label
 
   return (
     <Stack
@@ -1200,7 +1276,7 @@ function renderRecommendedModelAction(
       }}
     >
       <Typography sx={{ flex: 1, color: 'rgba(226,255,214,0.88)', fontSize: '0.82rem', lineHeight: 1.7 }}>
-        推荐改用 {recommendedOption.label}，当前联网校验状态更优（{getRoutingStatusLabel(recommendedSignal)}）。
+        {t ? t('assetStudio.workbench.routing.recommendSwitch', { model: recommendedLabel, status: getRoutingStatusLabel(recommendedSignal, t) }) : `推荐改用 ${recommendedLabel}，当前联网校验状态更优（${getRoutingStatusLabel(recommendedSignal, t)}）。`}
       </Typography>
       <Button
         size="small"
@@ -1216,7 +1292,7 @@ function renderRecommendedModelAction(
           },
         }}
       >
-        改用推荐模型
+        {t ? t('assetStudio.workbench.routing.switchRecommended') : '改用推荐模型'}
       </Button>
     </Stack>
   )
@@ -1236,6 +1312,19 @@ function buildAssetTitle(prompt: string, fallback: string): string {
   return normalized.length > 28 ? `${normalized.slice(0, 28)}...` : normalized
 }
 
+function renderOptionHelperText(
+  option: { helperKey?: string; helper?: string } | null | undefined,
+  t?: TFunction,
+): string | undefined {
+  if (!option) {
+    return undefined
+  }
+  if (option.helperKey) {
+    return t ? t(option.helperKey) : option.helper
+  }
+  return option.helper
+}
+
 function UploadCard({
   title,
   subtitle,
@@ -1244,6 +1333,7 @@ function UploadCard({
   fileCount,
   fileLabel,
   onChange,
+  t,
 }: {
   title: string
   subtitle: string
@@ -1252,6 +1342,7 @@ function UploadCard({
   fileCount: number
   fileLabel: string
   onChange: (files: FileList | null) => void
+  t?: TFunction
 }) {
   return (
     <Box
@@ -1280,7 +1371,7 @@ function UploadCard({
       <Typography sx={{ color: 'rgba(255,255,255,0.6)', fontSize: '0.82rem', mt: 0.6 }}>{subtitle}</Typography>
       <Chip
         size="small"
-        label={fileCount > 0 ? fileLabel : multiple ? '点击上传多张' : '点击上传'}
+        label={fileCount > 0 ? fileLabel : multiple ? (t ? t('assetStudio.workbench.upload.clickMulti') : '点击上传多张') : (t ? t('assetStudio.workbench.upload.click') : '点击上传')}
         sx={{
           mt: 1.35,
           color: 'white',
@@ -1309,6 +1400,7 @@ function ResultCard({
   onCollect,
   collecting = false,
   collectFeedback = null,
+  t,
 }: {
   title: string
   result: AssetStudioGenerateResponse | null
@@ -1318,6 +1410,7 @@ function ResultCard({
   onCollect?: (() => void) | null
   collecting?: boolean
   collectFeedback?: CollectFeedback | null
+  t?: TFunction
 }) {
   const primaryOutput = resolveResultAssetUrl(getPrimaryResultAsset(result))
   const requestedModelId = typeof result?.metadata?.requested_model_id === 'string'
@@ -1350,10 +1443,10 @@ function ResultCard({
           {result ? (
             <>
               <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap justifyContent="center">
-                <Chip size="small" label={`模式：${result.mode || 'unknown'}`} sx={{ color: 'white' }} variant="outlined" />
-                <Chip size="small" label={`模型：${result.model_id || 'unknown'}`} sx={{ color: 'white' }} variant="outlined" />
+                <Chip size="small" label={t ? t('assetStudio.workbench.result.modeChip', { value: result.mode || 'unknown' }) : `模式：${result.mode || 'unknown'}`} sx={{ color: 'white' }} variant="outlined" />
+                <Chip size="small" label={t ? t('assetStudio.workbench.result.modelChip', { value: result.model_id || 'unknown' }) : `模型：${result.model_id || 'unknown'}`} sx={{ color: 'white' }} variant="outlined" />
                 {hasRequestedModelMismatch ? (
-                  <Chip size="small" label={`请求模型：${requestedModelId}`} sx={{ color: 'white' }} variant="outlined" />
+                  <Chip size="small" label={t ? t('assetStudio.workbench.result.requestedModelChip', { value: requestedModelId }) : `请求模型：${requestedModelId}`} sx={{ color: 'white' }} variant="outlined" />
                 ) : null}
               </Stack>
               {typeof result.metadata?.prompt_preview === 'string' && result.metadata.prompt_preview ? (
@@ -1370,7 +1463,7 @@ function ResultCard({
               ) : null}
             </>
           ) : null}
-          <Typography sx={{ color: 'rgba(255,255,255,0.74)', fontSize: '0.9rem' }}>正在调用模型生成资产...</Typography>
+          <Typography sx={{ color: 'rgba(255,255,255,0.74)', fontSize: '0.9rem' }}>{t ? t('assetStudio.workbench.result.generating') : '正在调用模型生成资产...'}</Typography>
         </Stack>
       ) : error ? (
         <Alert severity="error" sx={{ borderRadius: 2 }}>
@@ -1407,10 +1500,10 @@ function ResultCard({
             )}
           </Box>
           <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-            <Chip size="small" label={`模式：${result?.mode || 'unknown'}`} sx={{ color: 'white' }} variant="outlined" />
-            <Chip size="small" label={`模型：${result?.model_id || 'unknown'}`} sx={{ color: 'white' }} variant="outlined" />
+            <Chip size="small" label={t ? t('assetStudio.workbench.result.modeChip', { value: result?.mode || 'unknown' }) : `模式：${result?.mode || 'unknown'}`} sx={{ color: 'white' }} variant="outlined" />
+            <Chip size="small" label={t ? t('assetStudio.workbench.result.modelChip', { value: result?.model_id || 'unknown' }) : `模型：${result?.model_id || 'unknown'}`} sx={{ color: 'white' }} variant="outlined" />
             {hasRequestedModelMismatch ? (
-              <Chip size="small" label={`请求模型：${requestedModelId}`} sx={{ color: 'white' }} variant="outlined" />
+              <Chip size="small" label={t ? t('assetStudio.workbench.result.requestedModelChip', { value: requestedModelId }) : `请求模型：${requestedModelId}`} sx={{ color: 'white' }} variant="outlined" />
             ) : null}
           </Stack>
           {routingMessage ? (
@@ -1430,7 +1523,9 @@ function ResultCard({
               disabled={!onCollect || collecting}
               sx={{ color: 'white', borderColor: 'rgba(255,255,255,0.18)' }}
             >
-              {collecting ? '收录中...' : '收录到用户资产'}
+              {collecting
+                ? (t ? t('assetStudio.workbench.result.collecting') : '收录中...')
+                : (t ? t('assetStudio.workbench.result.collect') : '收录到用户资产')}
             </Button>
             <Button
               component="a"
@@ -1440,7 +1535,7 @@ function ResultCard({
               variant="outlined"
               sx={{ color: 'white', borderColor: 'rgba(255,255,255,0.18)' }}
             >
-              查看原文件
+              {t ? t('assetStudio.workbench.result.viewOriginal') : '查看原文件'}
             </Button>
           </Stack>
           {collectFeedback ? (
@@ -1452,7 +1547,7 @@ function ResultCard({
       ) : (
         <Stack spacing={1} justifyContent="center" sx={{ minHeight: 160 }}>
           <Typography sx={{ color: 'rgba(255,255,255,0.52)', fontSize: '0.9rem', lineHeight: 1.8 }}>
-            这里会展示最新一次生成结果。当前支持直接调用资产生成 API，不经过项目工作流。
+            {t ? t('assetStudio.workbench.result.emptyHint') : '这里会展示最新一次生成结果。当前支持直接调用资产生成 API，不经过项目工作流。'}
           </Typography>
         </Stack>
       )}
@@ -1465,11 +1560,13 @@ function FooterAction({
   label,
   onClick,
   disabled,
+  t,
 }: {
   loading: boolean
   label: string
   onClick: () => void
   disabled?: boolean
+  t?: TFunction
 }) {
   return (
     <Button
@@ -1491,12 +1588,13 @@ function FooterAction({
         },
       }}
     >
-      {loading ? '生成中...' : label}
+      {loading ? (t ? t('assetStudio.workbench.action.generating') : '生成中...') : label}
     </Button>
   )
 }
 
 export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTabChange }: AssetStudioWorkbenchProps) {
+  const { t } = useTranslation()
   const activeEntry = entries.find((entry) => entry.id === activeTabId) || entries[0]
   const ActiveIcon = activeEntry.icon
   const [catalogRuntimeEntries, setCatalogRuntimeEntries] = useState<Record<string, CatalogRuntimeEntry>>({})
@@ -1577,7 +1675,7 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
   const [audioDesignDialogOpen, setAudioDesignDialogOpen] = useState(false)
   const [audioDesignName, setAudioDesignName] = useState('')
   const [audioDesignPrompt, setAudioDesignPrompt] = useState('')
-  const [audioDesignPreviewText, setAudioDesignPreviewText] = useState('欢迎收听这段声音设计试听，我们从这里开始塑造角色的独特声线。')
+  const [audioDesignPreviewText, setAudioDesignPreviewText] = useState(() => t('assetStudio.workbench.voice.designPreviewDefault'))
   const [audioDesignLoading, setAudioDesignLoading] = useState(false)
   const [audioDesignFeedback, setAudioDesignFeedback] = useState<CollectFeedback | null>(null)
   const [audioVoiceActionFeedback, setAudioVoiceActionFeedback] = useState<CollectFeedback | null>(null)
@@ -1600,7 +1698,7 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
     assetStudioModelCatalog?.groups.image_edit?.map(mapCatalogOptionToModelOption) || IMAGE_EDIT_MODEL_OPTIONS
   const imageModelOptions =
     imageEditModelOptions.length > 0
-      ? [...imageGenerationModelOptions, { value: '---divider---' as const, label: '── 图像编辑 ──' }, ...imageEditModelOptions]
+      ? [...imageGenerationModelOptions, { value: '---divider---' as const, label: t('assetStudio.workbench.model.imageEditDivider') }, ...imageEditModelOptions]
       : imageGenerationModelOptions
   const imageRealModelOptions = imageModelOptions.filter((opt): opt is ModelOption => opt.value !== '---divider---')
   const sortedImageModelOptions = sortModelOptionsByRoutingSignal(imageRealModelOptions, catalogRuntimeEntries)
@@ -1624,7 +1722,7 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
     assetStudioModelCatalog?.groups.video_edit?.map(mapCatalogOptionToModelOption) || VIDEO_EDIT_MODEL_OPTIONS
   const videoModelOptions =
     videoEditModelOptions.length > 0
-      ? [...videoGenerationModelOptions, { value: '---divider---' as const, label: '── 视频编辑 ──' }, ...videoEditModelOptions]
+      ? [...videoGenerationModelOptions, { value: '---divider---' as const, label: t('assetStudio.workbench.model.videoEditDivider') }, ...videoEditModelOptions]
       : videoGenerationModelOptions
   const videoRealModelOptions = videoModelOptions.filter((opt): opt is ModelOption => opt.value !== '---divider---')
   const sortedVideoModelOptions = sortModelOptionsByRoutingSignal(videoRealModelOptions, catalogRuntimeEntries)
@@ -1752,12 +1850,12 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
       const response = await apiClient.uploadCosyVoiceV3PlusCloneSample(file)
       const url = String(response.data?.url || '').trim()
       if (!url) {
-        throw new Error('未返回临时 URL')
+        throw new Error(t('assetStudio.workbench.error.missingTempUrl'))
       }
       setAudioCloneUrl(url)
-      setAudioCloneFeedback({ type: 'success', text: '已上传音频并生成临时 URL（48 小时有效）。' })
+      setAudioCloneFeedback({ type: 'success', text: t('assetStudio.workbench.voice.sampleUploaded') })
     } catch (error) {
-      const message = await extractApiErrorMessage(error, '上传复刻样本失败')
+      const message = await extractApiErrorMessage(error, t('assetStudio.workbench.error.uploadCloneSampleFailed'))
       setAudioCloneFeedback({ type: 'error', text: message })
     } finally {
       setAudioCloneUploading(false)
@@ -1801,13 +1899,13 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
       const response = await apiClient.uploadCosyVoiceV3PlusCloneSample(file)
       const url = String(response.data?.url || '').trim()
       if (!url) {
-        throw new Error('未返回临时 URL')
+        throw new Error(t('assetStudio.workbench.error.missingTempUrl'))
       }
       setAudioCloneUrl(url)
       setAudioCloneRecordDialogOpen(false)
-      setAudioCloneFeedback({ type: 'success', text: '录音已上传并生成临时 URL（48 小时有效）。' })
+      setAudioCloneFeedback({ type: 'success', text: t('assetStudio.workbench.voice.recordingUploaded') })
     } catch (error) {
-      const message = await extractApiErrorMessage(error, '上传录音失败')
+      const message = await extractApiErrorMessage(error, t('assetStudio.workbench.error.uploadRecordingFailed'))
       setAudioCloneFeedback({ type: 'error', text: message })
     } finally {
       setAudioCloneUploading(false)
@@ -1819,7 +1917,7 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
       return
     }
     if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
-      setAudioCloneFeedback({ type: 'error', text: '当前浏览器不支持录音，请改用上传音频。' })
+      setAudioCloneFeedback({ type: 'error', text: t('assetStudio.workbench.voice.recordingUnsupported') })
       return
     }
 
@@ -1843,7 +1941,7 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
         setAudioCloneRecording(false)
         stopAudioCloneRecordingStream()
         if (chunks.length === 0) {
-          setAudioCloneFeedback({ type: 'error', text: '未获取到录音数据，请重试。' })
+          setAudioCloneFeedback({ type: 'error', text: t('assetStudio.workbench.voice.noRecordingData') })
           return
         }
         const blob = new Blob(chunks, { type: chunks[0]?.type || 'audio/webm' })
@@ -1853,14 +1951,14 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
         audioCloneRecorderRef.current = null
         setAudioCloneRecording(false)
         stopAudioCloneRecordingStream()
-        setAudioCloneFeedback({ type: 'error', text: '录音失败，请重试。' })
+        setAudioCloneFeedback({ type: 'error', text: t('assetStudio.workbench.voice.recordingFailed') })
       }
       recorder.start()
       setAudioCloneRecording(true)
     } catch (error) {
       stopAudioCloneRecordingStream()
       setAudioCloneRecording(false)
-      const message = await extractApiErrorMessage(error, '无法访问麦克风，请检查权限')
+      const message = await extractApiErrorMessage(error, t('assetStudio.workbench.error.micAccessDenied'))
       setAudioCloneFeedback({ type: 'error', text: message })
     }
   }
@@ -1907,10 +2005,12 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
       setAudioCloneDialogOpen(false)
       setAudioVoiceActionFeedback({
         type: 'success',
-        text: voiceId ? `已提交声音复刻任务：${voiceId}` : '已提交声音复刻任务，请稍后刷新音色列表。',
+        text: voiceId
+          ? t('assetStudio.workbench.voice.cloneSubmittedWithId', { voiceId })
+          : t('assetStudio.workbench.voice.cloneSubmitted'),
       })
     } catch (error) {
-      const message = await extractApiErrorMessage(error, '创建复刻音色失败')
+      const message = await extractApiErrorMessage(error, t('assetStudio.workbench.error.createCloneFailed'))
       setAudioCloneFeedback({ type: 'error', text: message })
     } finally {
       setAudioCloneLoading(false)
@@ -1931,14 +2031,16 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
       await refreshAudioVoiceCatalog('cosyvoice-v3.5-plus', voiceId || undefined)
       setAudioDesignName('')
       setAudioDesignPrompt('')
-      setAudioDesignPreviewText('欢迎收听这段声音设计试听，我们从这里开始塑造角色的独特声线。')
+      setAudioDesignPreviewText(t('assetStudio.workbench.voice.designPreviewDefault'))
       setAudioDesignDialogOpen(false)
       setAudioVoiceActionFeedback({
         type: 'success',
-        text: voiceId ? `已提交声音设计任务：${voiceId}` : '已提交声音设计任务，请稍后刷新音色列表。',
+        text: voiceId
+          ? t('assetStudio.workbench.voice.designSubmittedWithId', { voiceId })
+          : t('assetStudio.workbench.voice.designSubmitted'),
       })
     } catch (error) {
-      const message = await extractApiErrorMessage(error, '创建设计音色失败')
+      const message = await extractApiErrorMessage(error, t('assetStudio.workbench.error.createDesignFailed'))
       setAudioDesignFeedback({ type: 'error', text: message })
     } finally {
       setAudioDesignLoading(false)
@@ -2093,8 +2195,8 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
         }),
       })
       const successText = didFallbackToBrowserStorage
-        ? '已收录到用户资产，但用户目录当前不可用，文件已回退保存到浏览器本地存储'
-        : '已保存到本地并收录到用户资产'
+        ? t('assetStudio.workbench.collect.fallbackSaved')
+        : t('assetStudio.workbench.collect.saved')
       updateCollectState(key, {
         loading: false,
         feedback: { type: 'success', text: successText },
@@ -2106,7 +2208,7 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
           type: 'error',
           text: await extractApiErrorMessage(
             error,
-            localSaved ? '本地保存成功，但收录到用户资产失败' : '保存到本地资产库失败',
+            localSaved ? t('assetStudio.workbench.collect.localSavedApiFailed') : t('assetStudio.workbench.collect.saveLocalFailed'),
           ),
         },
       })
@@ -2352,7 +2454,7 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
 
   const handleGenerateImage = async () => {
     if (!imagePrompt.trim()) {
-      setImageError('请先填写图片提示词')
+      setImageError(t('assetStudio.workbench.error.imagePromptRequired'))
       return
     }
 
@@ -2371,7 +2473,7 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
       const response = await apiClient.generateAssetStudioImage(formData)
       setImageResult(response.data as AssetStudioGenerateResponse)
     } catch (error) {
-      setImageError(await extractApiErrorMessage(error, '图片生成失败'))
+      setImageError(await extractApiErrorMessage(error, t('assetStudio.workbench.error.imageGenerateFailed')))
     } finally {
       setImageLoading(false)
     }
@@ -2379,7 +2481,7 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
 
   const handleGenerateVideo = async () => {
     if (!videoPrompt.trim()) {
-      setVideoError('请先填写视频提示词')
+      setVideoError(t('assetStudio.workbench.error.videoPromptRequired'))
       return
     }
 
@@ -2403,7 +2505,7 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
       const response = await apiClient.generateAssetStudioVideo(formData)
       setVideoResult(response.data as AssetStudioGenerateResponse)
     } catch (error) {
-      setVideoError(await extractApiErrorMessage(error, '视频生成失败'))
+      setVideoError(await extractApiErrorMessage(error, t('assetStudio.workbench.error.videoGenerateFailed')))
     } finally {
       setVideoLoading(false)
     }
@@ -2411,11 +2513,11 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
 
   const handleGenerateMotion = async () => {
     if (!motionPrompt.trim()) {
-      setMotionError('请先填写动作描述')
+      setMotionError(t('assetStudio.workbench.error.motionPromptRequired'))
       return
     }
     if (!motionReferenceFile) {
-      setMotionError('动作控制至少需要一张参考图')
+      setMotionError(t('assetStudio.workbench.error.motionReferenceRequired'))
       return
     }
 
@@ -2438,7 +2540,7 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
       const response = await apiClient.generateAssetStudioMotion(formData)
       setMotionResult(response.data as AssetStudioGenerateResponse)
     } catch (error) {
-      setMotionError(await extractApiErrorMessage(error, '动作控制生成失败'))
+      setMotionError(await extractApiErrorMessage(error, t('assetStudio.workbench.error.motionGenerateFailed')))
     } finally {
       setMotionLoading(false)
     }
@@ -2447,11 +2549,15 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
   const handleGenerateAudio = async () => {
     if (audioGenerationType === 'speech') {
       if (!audioPrompt.trim()) {
-        setAudioError('请先填写语音文本')
+        setAudioError(t('assetStudio.workbench.error.voicePromptRequired'))
         return
       }
       if (!audioVoiceId) {
-        setAudioError(audioModelId === 'cosyvoice-v3.5-plus' ? '请先选择音色；CosyVoice 需要先创建复刻或设计音色。' : '请先选择音色')
+        setAudioError(
+          audioModelId === 'cosyvoice-v3.5-plus'
+            ? t('assetStudio.workbench.error.voiceIdRequiredCosy')
+            : t('assetStudio.workbench.error.voiceIdRequired'),
+        )
         return
       }
 
@@ -2472,7 +2578,7 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
         const response = await apiClient.generateAssetStudioAudio(formData)
         setAudioResult(response.data as AssetStudioGenerateResponse)
       } catch (error) {
-        setAudioError(await extractApiErrorMessage(error, '语音合成失败'))
+        setAudioError(await extractApiErrorMessage(error, t('assetStudio.workbench.error.voiceGenerateFailed')))
       } finally {
         setAudioLoading(false)
       }
@@ -2481,10 +2587,10 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
     if (!audioPrompt.trim()) {
       setAudioError(
         audioGenerationType === 'music'
-          ? '请先填写配乐提示词'
+          ? t('assetStudio.workbench.error.musicPromptRequired')
           : audioGenerationType === 'scene-audio'
-            ? '请先填写场景音频提示词'
-            : '请先填写音效提示词',
+            ? t('assetStudio.workbench.error.sceneAudioPromptRequired')
+            : t('assetStudio.workbench.error.soundEffectPromptRequired'),
       )
       return
     }
@@ -2509,7 +2615,7 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
       const response = await apiClient.generateAssetStudioAudio(formData)
       setAudioResult(response.data as AssetStudioGenerateResponse)
     } catch (error) {
-      setAudioError(await extractApiErrorMessage(error, '音频生成失败'))
+      setAudioError(await extractApiErrorMessage(error, t('assetStudio.workbench.error.audioGenerateFailed')))
     } finally {
       setAudioLoading(false)
     }
@@ -2566,10 +2672,10 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
         }}
       >
         <ActiveIcon sx={{ fontSize: 20, color: activeEntry.color }} />
-        <Typography sx={{ color: 'white', fontWeight: 700 }}>{activeEntry.title}</Typography>
+        <Typography sx={{ color: 'white', fontWeight: 700 }}>{t(activeEntry.titleKey)}</Typography>
         <Chip
           size="small"
-          label={activeEntry.status === 'ready' ? 'API 可用' : '待接入'}
+          label={activeEntry.status === 'ready' ? t('assetStudio.workbench.status.apiReady') : t('assetStudio.workbench.status.pendingIntegration')}
           sx={{
             color: activeEntry.status === 'ready' ? '#9cff7a' : 'rgba(255,255,255,0.7)',
             backgroundColor: activeEntry.status === 'ready' ? 'rgba(118,255,84,0.14)' : 'rgba(255,255,255,0.08)',
@@ -2583,65 +2689,66 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
             <Stack spacing={2}>
               <Box sx={{ p: 2, borderRadius: 3, border: '1px solid rgba(255,255,255,0.1)', backgroundColor: 'rgba(255,255,255,0.03)' }}>
                 <FormControl fullWidth size="small">
-                  <InputLabel sx={{ color: 'rgba(255,255,255,0.68)' }}>图片模型</InputLabel>
-                  <Select value={imageModelId} label="图片模型" onChange={(event) => setImageModelId(event.target.value)} sx={{ color: 'white' }}>
+                  <InputLabel sx={{ color: 'rgba(255,255,255,0.68)' }}>{t('assetStudio.workbench.label.imageModel')}</InputLabel>
+                  <Select value={imageModelId} label={t('assetStudio.workbench.label.imageModel')} onChange={(event) => setImageModelId(event.target.value)} sx={{ color: 'white' }}>
                     {imageModelOptions.map((option) =>
                       option.value === '---divider---' ? (
                         <MenuItem key={option.value} value={option.value} disabled sx={{ color: 'rgba(255,255,255,0.3)', fontWeight: 600, textAlign: 'center' }}>
                           {option.label}
                         </MenuItem>
                       ) : (
-                        renderModelOptionMenuItem(option as ModelOption, catalogRuntimeEntries[option.value]?.runtime_routing_signal)
+                        renderModelOptionMenuItem(option as ModelOption, catalogRuntimeEntries[option.value]?.runtime_routing_signal, t)
                       )
                     )}
                   </Select>
                   <FormHelperText sx={{ color: 'rgba(255,255,255,0.6)', mx: 0, mt: 1 }}>
-                    {selectedImageModel?.helper}
+                    {renderOptionHelperText(selectedImageModel, t)}
                   </FormHelperText>
                 </FormControl>
                 <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap sx={{ mt: 1.25, display: audioGenerationType === 'speech' ? 'none' : 'flex' }}>
                   <Chip
                     size="small"
-                    label={getRoutingStatusLabel(selectedImageRoutingSignal)}
+                    label={getRoutingStatusLabel(selectedImageRoutingSignal, t)}
                     variant="outlined"
                     sx={getRoutingStatusChipSx(selectedImageRoutingSignal)}
                   />
-                  <Chip size="small" label={imageUsesReferenceMode ? '参考图编辑模式' : '纯提示词生成'} variant="outlined" sx={{ color: 'white' }} />
+                  <Chip size="small" label={imageUsesReferenceMode ? t('assetStudio.workbench.chip.referenceEditMode') : t('assetStudio.workbench.chip.purePromptMode')} variant="outlined" sx={{ color: 'white' }} />
                   <Chip
                     size="small"
-                    label={imageModelId === 'qwen-image-edit-max' ? '质量优先' : '推荐主力'}
+                    label={imageModelId === 'qwen-image-edit-max' ? t('assetStudio.workbench.chip.qualityFirst') : t('assetStudio.workbench.chip.recommendedMain')}
                     variant="outlined"
                     sx={{ color: 'white' }}
                   />
                 </Stack>
-                {renderRoutingStatusMeta(selectedImageRoutingSignal)}
+                {renderRoutingStatusMeta(selectedImageRoutingSignal, t)}
                 {renderRecommendedModelAction(imageModelId, recommendedImageModel, catalogRuntimeEntries, () => {
                   if (recommendedImageModel?.value) {
                     setImageModelId(recommendedImageModel.value)
                   }
-                })}
+                }, t)}
               </Box>
 
               <UploadCard
-                title="参考生图（可选）"
-                subtitle={`上传 1 到 ${imageReferenceLimit} 张参考图后，会自动切到参考图生成链路`}
+                title={t('assetStudio.workbench.upload.imageReferenceTitle')}
+                subtitle={t('assetStudio.workbench.upload.imageReferenceSubtitle', { count: imageReferenceLimit })}
                 multiple
                 accept="image/*"
                 fileCount={imageReferenceFiles.length}
-                fileLabel={`已选 ${imageReferenceFiles.length} 张`}
+                fileLabel={t('assetStudio.workbench.upload.imageReferenceSelected', { count: imageReferenceFiles.length })}
                 onChange={(files) => setImageReferenceFiles(files ? Array.from(files).slice(0, imageReferenceLimit) : [])}
+                t={t}
               />
               <Typography sx={{ color: 'rgba(255,255,255,0.58)', fontSize: '0.82rem', lineHeight: 1.7 }}>
-                当前运行时模型约束允许最多 {imageReferenceLimit} 张参考图，超出部分会自动截断。
+                {t('assetStudio.workbench.dataHint.imageReferenceLimit', { count: imageReferenceLimit })}
               </Typography>
 
               {audioGenerationType === 'speech' ? (
                 <Alert severity={audioModelId === 'cosyvoice-v3.5-plus' && sortedAudioVoicePresets.length === 0 ? 'warning' : 'info'} sx={{ borderRadius: 3 }}>
                   {audioModelId === 'cosyvoice-v3.5-plus'
                     ? sortedAudioVoicePresets.length > 0
-                      ? 'CosyVoice v3.5-plus 已接入语音合成模式，可直接使用你在耳畔星河中创建的复刻/设计音色。'
-                      : 'CosyVoice v3.5-plus 没有系统音色，请先在耳畔星河中创建复刻或设计音色，再回到这里合成。'
-                    : '语音合成会复用统一 TTS 运行时，可直接切换模型、音色与基础说话参数。'}
+                      ? t('assetStudio.workbench.alert.cosyVoiceReady')
+                      : t('assetStudio.workbench.alert.cosyVoiceNoSystem')
+                    : t('assetStudio.workbench.alert.unifiedTts')}
                 </Alert>
               ) : null}
 
@@ -2649,10 +2756,10 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
                 <TextField
                   multiline
                   minRows={8}
-                  label="语音文本"
+                  label={t('assetStudio.workbench.label.voiceText')}
                   value={audioPrompt}
                   onChange={(event) => setAudioPrompt(event.target.value)}
-                  placeholder="例如：欢迎来到深夜电台，今晚我们继续讲述这座城市里那些沉默但温柔的瞬间。"
+                  placeholder={t('assetStudio.workbench.placeholder.voiceText')}
                   InputLabelProps={{ sx: { color: 'rgba(255,255,255,0.62)' } }}
                   sx={{ '& .MuiOutlinedInput-root': { color: 'white', backgroundColor: 'rgba(255,255,255,0.03)' } }}
                 />
@@ -2661,10 +2768,10 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
               <TextField
                 multiline
                 minRows={8}
-                label="图片提示词"
+                label={t('assetStudio.workbench.label.imagePrompt')}
                 value={imagePrompt}
                 onChange={(event) => setImagePrompt(event.target.value)}
-                placeholder="可以直接描述想生成的图片内容，也可以配合参考图做一致性生成。"
+                placeholder={t('assetStudio.workbench.placeholder.imagePrompt')}
                 InputLabelProps={{ sx: { color: 'rgba(255,255,255,0.62)' } }}
                 sx={{ display: audioGenerationType === 'speech' ? 'none' : 'block', '& .MuiOutlinedInput-root': { color: 'white', backgroundColor: 'rgba(255,255,255,0.03)' } }}
               />
@@ -2672,17 +2779,17 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
               <TextField
                 multiline
                 minRows={2}
-                label="反向提示词（可选）"
+                label={t('assetStudio.workbench.label.imageNegativePrompt')}
                 value={imageNegativePrompt}
                 onChange={(event) => setImageNegativePrompt(event.target.value)}
-                placeholder="例如：低质量、模糊、畸形、文字、水印"
+                placeholder={t('assetStudio.workbench.placeholder.imageNegativePrompt')}
                 InputLabelProps={{ sx: { color: 'rgba(255,255,255,0.62)' } }}
                 sx={{ '& .MuiOutlinedInput-root': { color: 'white', backgroundColor: 'rgba(255,255,255,0.03)' } }}
               />
             </Stack>
 
             <ResultCard
-              title="生成结果"
+              title={t('assetStudio.workbench.result.imageTitle')}
               result={imageResult}
               loading={imageLoading}
               error={imageError}
@@ -2691,27 +2798,28 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
                   result: imageResult,
                   assetKind: 'image',
                   prompt: imagePrompt,
-                  fallbackTitle: '图片资产',
+                  fallbackTitle: t('assetStudio.workbench.assetTitle.image'),
                   tags: ['asset_studio', 'image'],
                 })
               }
               collecting={collectStates.image.loading}
               collectFeedback={collectStates.image.feedback}
+              t={t}
             />
           </Box>
 
           <Stack direction={{ xs: 'column', md: 'row' }} justifyContent="space-between" alignItems={{ xs: 'stretch', md: 'center' }} spacing={1.5} sx={{ mt: 2 }}>
               <FormControl size="small" sx={{ minWidth: 180 }}>
-                <InputLabel sx={{ color: 'rgba(255,255,255,0.68)' }}>尺寸</InputLabel>
-                <Select value={imageSize} label="尺寸" onChange={(event) => setImageSize(event.target.value)} sx={{ color: 'white' }}>
+                <InputLabel sx={{ color: 'rgba(255,255,255,0.68)' }}>{t('assetStudio.workbench.label.size')}</InputLabel>
+                <Select value={imageSize} label={t('assetStudio.workbench.label.size')} onChange={(event) => setImageSize(event.target.value)} sx={{ color: 'white' }}>
                   {imageSizeOptions.map((option) => (
                     <MenuItem key={option.value} value={option.value}>
-                      {option.label}
+                      {t(option.labelKey)}
                     </MenuItem>
                   ))}
               </Select>
             </FormControl>
-            <FooterAction loading={imageLoading} label="生成" onClick={handleGenerateImage} />
+            <FooterAction loading={imageLoading} label={t('assetStudio.workbench.action.generate')} onClick={handleGenerateImage} t={t} />
           </Stack>
         </Box>
       ) : null}
@@ -2722,88 +2830,89 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
             <Stack spacing={2}>
               <Box sx={{ p: 2, borderRadius: 3, border: '1px solid rgba(255,255,255,0.1)', backgroundColor: 'rgba(255,255,255,0.03)' }}>
                 <FormControl fullWidth size="small">
-                  <InputLabel sx={{ color: 'rgba(255,255,255,0.68)' }}>视频模型</InputLabel>
-                  <Select value={videoModelId} label="视频模型" onChange={(event) => setVideoModelId(event.target.value)} sx={{ color: 'white' }}>
+                  <InputLabel sx={{ color: 'rgba(255,255,255,0.68)' }}>{t('assetStudio.workbench.label.videoModel')}</InputLabel>
+                  <Select value={videoModelId} label={t('assetStudio.workbench.label.videoModel')} onChange={(event) => setVideoModelId(event.target.value)} sx={{ color: 'white' }}>
                     {videoModelOptions.map((option) =>
                       option.value === '---divider---' ? (
                         <MenuItem key={option.value} value={option.value} disabled sx={{ color: 'rgba(255,255,255,0.3)', fontWeight: 600, textAlign: 'center' }}>
                           {option.label}
                         </MenuItem>
                       ) : (
-                        renderModelOptionMenuItem(option as ModelOption, catalogRuntimeEntries[option.value]?.runtime_routing_signal)
+                        renderModelOptionMenuItem(option as ModelOption, catalogRuntimeEntries[option.value]?.runtime_routing_signal, t)
                       )
                     )}
                   </Select>
                   <FormHelperText sx={{ color: 'rgba(255,255,255,0.6)', mx: 0, mt: 1 }}>
-                    {selectedVideoModel?.helper}
+                    {renderOptionHelperText(selectedVideoModel, t)}
                   </FormHelperText>
                 </FormControl>
                 <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap sx={{ mt: 1.25 }}>
                   <Chip
                     size="small"
-                    label={getRoutingStatusLabel(selectedVideoRoutingSignal)}
+                    label={getRoutingStatusLabel(selectedVideoRoutingSignal, t)}
                     variant="outlined"
                     sx={getRoutingStatusChipSx(selectedVideoRoutingSignal)}
                   />
-                  <Chip size="small" label={videoUsesReferenceMode ? '首帧驱动模式' : '纯文本视频模式'} variant="outlined" sx={{ color: 'white' }} />
+                  <Chip size="small" label={videoUsesReferenceMode ? t('assetStudio.workbench.chip.firstFrameMode') : t('assetStudio.workbench.chip.pureTextMode')} variant="outlined" sx={{ color: 'white' }} />
                   <Chip
                     size="small"
-                    label={videoModelId === 'wan2.6-t2v-fast' ? '快速预览' : videoModelId === 'wan2.7-i2v' ? '稳定主体' : '正式生成'}
+                    label={videoModelId === 'wan2.6-t2v-fast' ? t('assetStudio.workbench.chip.quickPreview') : videoModelId === 'wan2.7-i2v' ? t('assetStudio.workbench.chip.stableSubject') : t('assetStudio.workbench.chip.formalGeneration')}
                     variant="outlined"
                     sx={{ color: 'white' }}
                   />
                 </Stack>
-                {renderRoutingStatusMeta(selectedVideoRoutingSignal)}
+                {renderRoutingStatusMeta(selectedVideoRoutingSignal, t)}
                 {renderRecommendedModelAction(videoModelId, recommendedVideoModel, catalogRuntimeEntries, () => {
                   if (recommendedVideoModel?.value) {
                     setVideoModelId(recommendedVideoModel.value)
                   }
-                })}
+                }, t)}
               </Box>
 
               <UploadCard
-                title="添加首帧参考图（可选）"
-                subtitle="上传后会优先走图生视频链路"
+                title={t('assetStudio.workbench.upload.videoFirstFrameTitle')}
+                subtitle={t('assetStudio.workbench.upload.videoFirstFrameSubtitle')}
                 accept="image/*"
                 fileCount={videoReferenceFile ? 1 : 0}
                 fileLabel={videoReferenceFile ? videoReferenceFile.name : ''}
                 onChange={(files) => setVideoReferenceFile(files?.[0] || null)}
+                t={t}
               />
 
               <TextField
                 multiline
                 minRows={8}
-                label="视频提示词"
+                label={t('assetStudio.workbench.label.videoPrompt')}
                 value={videoPrompt}
                 onChange={(event) => setVideoPrompt(event.target.value)}
-                placeholder="描述镜头、主体、动作和节奏，例如：少女站在雨夜霓虹街头，镜头缓慢推进，发丝与衣摆被风吹动。"
+                placeholder={t('assetStudio.workbench.placeholder.videoPrompt')}
                 InputLabelProps={{ sx: { color: 'rgba(255,255,255,0.62)' } }}
                 sx={{ '& .MuiOutlinedInput-root': { color: 'white', backgroundColor: 'rgba(255,255,255,0.03)' } }}
               />
 
               {videoSupportsCameraControl ? (
                 <FormControl size="small" fullWidth>
-                  <InputLabel sx={{ color: 'rgba(255,255,255,0.68)' }}>镜头控制</InputLabel>
-                  <Select value={videoCameraControl} label="镜头控制" onChange={(event) => setVideoCameraControl(event.target.value)} sx={{ color: 'white' }}>
+                  <InputLabel sx={{ color: 'rgba(255,255,255,0.68)' }}>{t('assetStudio.workbench.label.cameraControl')}</InputLabel>
+                  <Select value={videoCameraControl} label={t('assetStudio.workbench.label.cameraControl')} onChange={(event) => setVideoCameraControl(event.target.value)} sx={{ color: 'white' }}>
                     {CAMERA_CONTROL_OPTIONS.map((option) => (
                       <MenuItem key={option.value || 'auto'} value={option.value}>
-                        {option.label}
+                        {option.labelKey ? t(option.labelKey) : option.label}
                       </MenuItem>
                     ))}
                   </Select>
                   <FormHelperText sx={{ color: 'rgba(255,255,255,0.6)', mx: 0, mt: 1 }}>
-                    {selectedVideoCameraControl.helper}
+                    {renderOptionHelperText(selectedVideoCameraControl, t)}
                   </FormHelperText>
                 </FormControl>
               ) : (
                 <Typography sx={{ color: 'rgba(255,255,255,0.58)', fontSize: '0.82rem', lineHeight: 1.7 }}>
-                  当前模型优先做首帧驱动或快速预览，当前工作台不额外暴露镜头控制参数。
+                  {t('assetStudio.workbench.dataHint.cameraNotExposedVideo')}
                 </Typography>
               )}
             </Stack>
 
             <ResultCard
-              title="视频结果"
+              title={t('assetStudio.workbench.result.videoTitle')}
               result={displayedVideoResult}
               loading={videoLoading}
               error={videoError}
@@ -2813,39 +2922,40 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
                   result: videoResult,
                   assetKind: 'video',
                   prompt: videoPrompt,
-                  fallbackTitle: '视频资产',
+                  fallbackTitle: t('assetStudio.workbench.assetTitle.video'),
                   tags: ['asset_studio', 'video'],
                 })
               }
               collecting={collectStates.video.loading}
               collectFeedback={collectStates.video.feedback}
+              t={t}
             />
           </Box>
 
           <Stack direction={{ xs: 'column', md: 'row' }} justifyContent="space-between" alignItems={{ xs: 'stretch', md: 'center' }} spacing={1.5} sx={{ mt: 2 }}>
             <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5}>
               <FormControl size="small" sx={{ minWidth: 180 }}>
-                <InputLabel sx={{ color: 'rgba(255,255,255,0.68)' }}>尺寸</InputLabel>
-                <Select value={videoSize} label="尺寸" onChange={(event) => setVideoSize(event.target.value)} sx={{ color: 'white' }}>
+                <InputLabel sx={{ color: 'rgba(255,255,255,0.68)' }}>{t('assetStudio.workbench.label.size')}</InputLabel>
+                <Select value={videoSize} label={t('assetStudio.workbench.label.size')} onChange={(event) => setVideoSize(event.target.value)} sx={{ color: 'white' }}>
                   {videoSizeOptions.map((option) => (
                     <MenuItem key={option.value} value={option.value}>
-                      {option.label}
+                      {t(option.labelKey)}
                     </MenuItem>
                   ))}
                 </Select>
               </FormControl>
               <FormControl size="small" sx={{ minWidth: 120 }}>
-                <InputLabel sx={{ color: 'rgba(255,255,255,0.68)' }}>时长</InputLabel>
-                <Select value={videoDuration} label="时长" onChange={(event) => setVideoDuration(event.target.value)} sx={{ color: 'white' }}>
+                <InputLabel sx={{ color: 'rgba(255,255,255,0.68)' }}>{t('assetStudio.workbench.label.duration')}</InputLabel>
+                <Select value={videoDuration} label={t('assetStudio.workbench.label.duration')} onChange={(event) => setVideoDuration(event.target.value)} sx={{ color: 'white' }}>
                   {videoDurationOptions.map((option) => (
                     <MenuItem key={option.value} value={option.value}>
-                      {option.label}
+                      {t('assetStudio.workbench.durationSeconds', { count: option.value })}
                     </MenuItem>
                   ))}
                 </Select>
               </FormControl>
             </Stack>
-            <FooterAction loading={videoLoading} label="生成" onClick={handleGenerateVideo} />
+            <FooterAction loading={videoLoading} label={t('assetStudio.workbench.action.generate')} onClick={handleGenerateVideo} t={t} />
           </Stack>
         </Box>
       ) : null}
@@ -2856,75 +2966,76 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
             <Stack spacing={2}>
               <Box sx={{ p: 2, borderRadius: 3, border: '1px solid rgba(255,255,255,0.1)', backgroundColor: 'rgba(255,255,255,0.03)' }}>
                 <FormControl fullWidth size="small">
-                  <InputLabel sx={{ color: 'rgba(255,255,255,0.68)' }}>动作模型</InputLabel>
-                  <Select value={motionModelId} label="动作模型" onChange={(event) => setMotionModelId(event.target.value)} sx={{ color: 'white' }}>
-                    {sortedMotionModelOptions.map((option) => renderModelOptionMenuItem(option, catalogRuntimeEntries[option.value]?.runtime_routing_signal))}
+                  <InputLabel sx={{ color: 'rgba(255,255,255,0.68)' }}>{t('assetStudio.workbench.label.motionModel')}</InputLabel>
+                  <Select value={motionModelId} label={t('assetStudio.workbench.label.motionModel')} onChange={(event) => setMotionModelId(event.target.value)} sx={{ color: 'white' }}>
+                    {sortedMotionModelOptions.map((option) => renderModelOptionMenuItem(option, catalogRuntimeEntries[option.value]?.runtime_routing_signal, t))}
                   </Select>
                   <FormHelperText sx={{ color: 'rgba(255,255,255,0.6)', mx: 0, mt: 1 }}>
-                    {selectedMotionModel?.helper}
+                    {renderOptionHelperText(selectedMotionModel, t)}
                   </FormHelperText>
                 </FormControl>
                 <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap sx={{ mt: 1.25 }}>
                   <Chip
                     size="small"
-                    label={getRoutingStatusLabel(selectedMotionRoutingSignal)}
+                    label={getRoutingStatusLabel(selectedMotionRoutingSignal, t)}
                     variant="outlined"
                     sx={getRoutingStatusChipSx(selectedMotionRoutingSignal)}
                   />
-                  <Chip size="small" label={motionModelId === 'wan2.7-i2v' ? '参考图驱动' : '镜头语言增强'} variant="outlined" sx={{ color: 'white' }} />
-                  <Chip size="small" label="动作控制" variant="outlined" sx={{ color: 'white' }} />
+                  <Chip size="small" label={motionModelId === 'wan2.7-i2v' ? t('assetStudio.workbench.chip.referenceDriven') : t('assetStudio.workbench.chip.cameraLanguageEnhanced')} variant="outlined" sx={{ color: 'white' }} />
+                  <Chip size="small" label={t('assetStudio.workbench.chip.motionControl')} variant="outlined" sx={{ color: 'white' }} />
                 </Stack>
-                {renderRoutingStatusMeta(selectedMotionRoutingSignal)}
+                {renderRoutingStatusMeta(selectedMotionRoutingSignal, t)}
                 {renderRecommendedModelAction(motionModelId, recommendedMotionModel, catalogRuntimeEntries, () => {
                   if (recommendedMotionModel?.value) {
                     setMotionModelId(recommendedMotionModel.value)
                   }
-                })}
+                }, t)}
               </Box>
 
               <UploadCard
-                title="动作参考图"
-                subtitle="动作控制必须上传一张主体参考图"
+                title={t('assetStudio.workbench.upload.motionRefTitle')}
+                subtitle={t('assetStudio.workbench.upload.motionRefSubtitle')}
                 accept="image/*"
                 fileCount={motionReferenceFile ? 1 : 0}
                 fileLabel={motionReferenceFile ? motionReferenceFile.name : ''}
                 onChange={(files) => setMotionReferenceFile(files?.[0] || null)}
+                t={t}
               />
 
               <TextField
                 multiline
                 minRows={8}
-                label="动作描述"
+                label={t('assetStudio.workbench.label.motionPrompt')}
                 value={motionPrompt}
                 onChange={(event) => setMotionPrompt(event.target.value)}
-                placeholder="例如：角色向前迈步并抬头，右手轻挥，镜头轻微跟拍。"
+                placeholder={t('assetStudio.workbench.placeholder.motionPrompt')}
                 InputLabelProps={{ sx: { color: 'rgba(255,255,255,0.62)' } }}
                 sx={{ '& .MuiOutlinedInput-root': { color: 'white', backgroundColor: 'rgba(255,255,255,0.03)' } }}
               />
 
               {motionSupportsCameraControl ? (
                 <FormControl size="small" fullWidth>
-                  <InputLabel sx={{ color: 'rgba(255,255,255,0.68)' }}>镜头控制</InputLabel>
-                  <Select value={motionCameraControl} label="镜头控制" onChange={(event) => setMotionCameraControl(event.target.value)} sx={{ color: 'white' }}>
+                  <InputLabel sx={{ color: 'rgba(255,255,255,0.68)' }}>{t('assetStudio.workbench.label.cameraControl')}</InputLabel>
+                  <Select value={motionCameraControl} label={t('assetStudio.workbench.label.cameraControl')} onChange={(event) => setMotionCameraControl(event.target.value)} sx={{ color: 'white' }}>
                     {CAMERA_CONTROL_OPTIONS.map((option) => (
                       <MenuItem key={option.value || 'auto'} value={option.value}>
-                        {option.label}
+                        {option.labelKey ? t(option.labelKey) : option.label}
                       </MenuItem>
                     ))}
                   </Select>
                   <FormHelperText sx={{ color: 'rgba(255,255,255,0.6)', mx: 0, mt: 1 }}>
-                    {selectedMotionCameraControl.helper}
+                    {renderOptionHelperText(selectedMotionCameraControl, t)}
                   </FormHelperText>
                 </FormControl>
               ) : (
                 <Typography sx={{ color: 'rgba(255,255,255,0.58)', fontSize: '0.82rem', lineHeight: 1.7 }}>
-                  当前模型优先保证主体一致性和动作稳定性，当前工作台不额外暴露镜头控制参数。
+                  {t('assetStudio.workbench.dataHint.cameraNotExposedMotion')}
                 </Typography>
               )}
             </Stack>
 
             <ResultCard
-              title="动作结果"
+              title={t('assetStudio.workbench.result.motionTitle')}
               result={motionResult}
               loading={motionLoading}
               error={motionError}
@@ -2934,50 +3045,51 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
                   result: motionResult,
                   assetKind: 'video',
                   prompt: motionPrompt,
-                  fallbackTitle: '动作视频资产',
+                  fallbackTitle: t('assetStudio.workbench.assetTitle.motion'),
                   tags: ['asset_studio', 'motion'],
                 })
               }
               collecting={collectStates.motion.loading}
               collectFeedback={collectStates.motion.feedback}
+              t={t}
             />
           </Box>
 
           <Stack direction={{ xs: 'column', md: 'row' }} justifyContent="space-between" alignItems={{ xs: 'stretch', md: 'center' }} spacing={1.5} sx={{ mt: 2 }}>
             <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5}>
               <FormControl size="small" sx={{ minWidth: 180 }}>
-                <InputLabel sx={{ color: 'rgba(255,255,255,0.68)' }}>尺寸</InputLabel>
-                <Select value={motionSize} label="尺寸" onChange={(event) => setMotionSize(event.target.value)} sx={{ color: 'white' }}>
+                <InputLabel sx={{ color: 'rgba(255,255,255,0.68)' }}>{t('assetStudio.workbench.label.size')}</InputLabel>
+                <Select value={motionSize} label={t('assetStudio.workbench.label.size')} onChange={(event) => setMotionSize(event.target.value)} sx={{ color: 'white' }}>
                   {motionSizeOptions.map((option) => (
                     <MenuItem key={option.value} value={option.value}>
-                      {option.label}
+                      {t(option.labelKey)}
                     </MenuItem>
                   ))}
                 </Select>
               </FormControl>
               <FormControl size="small" sx={{ minWidth: 120 }}>
-                <InputLabel sx={{ color: 'rgba(255,255,255,0.68)' }}>时长</InputLabel>
-                <Select value={motionDuration} label="时长" onChange={(event) => setMotionDuration(event.target.value)} sx={{ color: 'white' }}>
+                <InputLabel sx={{ color: 'rgba(255,255,255,0.68)' }}>{t('assetStudio.workbench.label.duration')}</InputLabel>
+                <Select value={motionDuration} label={t('assetStudio.workbench.label.duration')} onChange={(event) => setMotionDuration(event.target.value)} sx={{ color: 'white' }}>
                   {motionDurationOptions.map((option) => (
                     <MenuItem key={option.value} value={option.value}>
-                      {option.label}
+                      {t('assetStudio.workbench.durationSeconds', { count: option.value })}
                     </MenuItem>
                   ))}
                 </Select>
               </FormControl>
               <FormControl size="small" sx={{ minWidth: 140 }}>
-                <InputLabel sx={{ color: 'rgba(255,255,255,0.68)' }}>动作强度</InputLabel>
-                <Select value={motionLevel} label="动作强度" onChange={(event) => setMotionLevel(event.target.value)} sx={{ color: 'white' }}>
-                  <MenuItem value="low">低</MenuItem>
-                  <MenuItem value="medium">中</MenuItem>
-                  <MenuItem value="high">高</MenuItem>
+                <InputLabel sx={{ color: 'rgba(255,255,255,0.68)' }}>{t('assetStudio.workbench.label.motionLevel')}</InputLabel>
+                <Select value={motionLevel} label={t('assetStudio.workbench.label.motionLevel')} onChange={(event) => setMotionLevel(event.target.value)} sx={{ color: 'white' }}>
+                  <MenuItem value="low">{t('assetStudio.workbench.chip.motionLow')}</MenuItem>
+                  <MenuItem value="medium">{t('assetStudio.workbench.chip.motionMedium')}</MenuItem>
+                  <MenuItem value="high">{t('assetStudio.workbench.chip.motionHigh')}</MenuItem>
                 </Select>
                 <FormHelperText sx={{ color: 'rgba(255,255,255,0.6)', mx: 0, mt: 1 }}>
-                  {MOTION_LEVEL_HELPERS[motionLevel] || MOTION_LEVEL_HELPERS.medium}
+                  {t(MOTION_LEVEL_HELPER_KEYS[motionLevel] || MOTION_LEVEL_HELPER_KEYS.medium)}
                 </FormHelperText>
               </FormControl>
             </Stack>
-            <FooterAction loading={motionLoading} label="生成" onClick={handleGenerateMotion} />
+            <FooterAction loading={motionLoading} label={t('assetStudio.workbench.action.generate')} onClick={handleGenerateMotion} t={t} />
           </Stack>
         </Box>
       ) : null}
@@ -2989,37 +3101,37 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
               <Box sx={{ display: 'grid', gap: 2, gridTemplateColumns: { xs: '1fr', md: 'repeat(2, minmax(0, 1fr))' } }}>
               <Box sx={{ p: 2, borderRadius: 3, border: '1px solid rgba(255,255,255,0.1)', backgroundColor: 'rgba(255,255,255,0.03)' }}>
                 <FormControl fullWidth size="small">
-                  <InputLabel sx={{ color: 'rgba(255,255,255,0.68)' }}>生成类型</InputLabel>
+                  <InputLabel sx={{ color: 'rgba(255,255,255,0.68)' }}>{t('assetStudio.workbench.label.generationType')}</InputLabel>
                   <Select
                     value={audioGenerationType}
-                    label="生成类型"
+                    label={t('assetStudio.workbench.label.generationType')}
                     onChange={(event) => setAudioGenerationType(event.target.value as AudioGenerationType)}
                     sx={{ color: 'white' }}
                   >
                     {AUDIO_GENERATION_TYPE_OPTIONS.map((option) => (
                       <MenuItem key={option.value} value={option.value}>
-                        {option.label}
+                        {t(option.labelKey)}
                       </MenuItem>
                     ))}
                   </Select>
                   <FormHelperText sx={{ color: 'rgba(255,255,255,0.6)', mx: 0, mt: 1 }}>
-                    {selectedAudioGenerationType.helper}
+                    {renderOptionHelperText(selectedAudioGenerationType, t)}
                   </FormHelperText>
                 </FormControl>
               </Box>
 
               <Box sx={{ p: 2, borderRadius: 3, border: '1px solid rgba(255,255,255,0.1)', backgroundColor: 'rgba(255,255,255,0.03)' }}>
                 <FormControl fullWidth size="small">
-                  <InputLabel sx={{ color: 'rgba(255,255,255,0.68)' }}>音频模型</InputLabel>
-                  <Select value={audioModelId} label="音频模型" onChange={(event) => setAudioModelId(event.target.value)} sx={{ color: 'white' }}>
+                  <InputLabel sx={{ color: 'rgba(255,255,255,0.68)' }}>{t('assetStudio.workbench.label.audioModel')}</InputLabel>
+                  <Select value={audioModelId} label={t('assetStudio.workbench.label.audioModel')} onChange={(event) => setAudioModelId(event.target.value)} sx={{ color: 'white' }}>
                     {audioModelOptions.map((option) => (
                       <MenuItem key={option.value} value={option.value}>
-                        {option.label}
+                        {option.labelKey ? t(option.labelKey) : option.label}
                       </MenuItem>
                     ))}
                   </Select>
                   <FormHelperText sx={{ color: 'rgba(255,255,255,0.6)', mx: 0, mt: 1 }}>
-                    {selectedAudioModel?.helper}
+                    {renderOptionHelperText(selectedAudioModel, t)}
                   </FormHelperText>
                 </FormControl>
               </Box>
@@ -3028,24 +3140,23 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
 
               {audioGenerationType === 'sound-effect' ? (
                 <Alert severity="info" sx={{ borderRadius: 3 }}>
-                  当前音效链路使用 `Vidu Timing2Audio` 进行可控文生音效生成，支持通过时间轴编排多个音效事件，
-                  适合动作、环境和叙事节点的精细化音效设计。
+                  {t('assetStudio.workbench.audioAlert.soundEffect')}
                 </Alert>
               ) : null}
 
               {audioGenerationType === 'scene-audio' ? (
                 <>
                   <Alert severity="info" sx={{ borderRadius: 3 }}>
-                    豆包 Seed Audio 会按提示词顺序统一编排对白、环境声、动作音效和配乐。输出为 MP3 / 48 kHz，并自动保存到资产工作台。
+                    {t('assetStudio.workbench.audioAlert.sceneAudio')}
                   </Alert>
                   <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
                     {[
-                      ['对白场景', '安静的室内，窗外持续下雨。男子1用低沉严肃的语气说：“你终于来了。”女子1短暂停顿后平静回答：“有些答案，只能当面告诉你。”远处一声闷雷，低音弦乐缓慢进入。'],
-                      ['悬疑追逐', '夜晚地下停车场，急促脚步声由远及近，汽车警报突然响起。男子1喘息着低声说：“别回头，继续跑。”随后传来轮胎摩擦地面的声音，紧张的电子打击乐逐渐增强。'],
-                      ['氛围叙事', '清晨海边，海浪和海鸥声持续。旁白温和地讲述：“天亮以后，小镇又恢复了往日的平静。”木吉他与柔和钢琴缓慢铺开，最后只留下海浪声。'],
-                    ].map(([label, prompt]) => (
-                      <Button key={label} size="small" variant="outlined" onClick={() => setAudioPrompt(prompt)} sx={WORKBENCH_SUBTLE_ACTION_BUTTON_SX}>
-                        {label}
+                      { labelKey: 'assetStudio.workbench.voice.sceneSampleDialogue', prompt: '安静的室内，窗外持续下雨。男子1用低沉严肃的语气说：“你终于来了。”女子1短暂停顿后平静回答：“有些答案，只能当面告诉你。”远处一声闷雷，低音弦乐缓慢进入。' },
+                      { labelKey: 'assetStudio.workbench.voice.sceneSampleChase', prompt: '夜晚地下停车场，急促脚步声由远及近，汽车警报突然响起。男子1喘息着低声说：“别回头，继续跑。”随后传来轮胎摩擦地面的声音，紧张的电子打击乐逐渐增强。' },
+                      { labelKey: 'assetStudio.workbench.voice.sceneSampleAmbient', prompt: '清晨海边，海浪和海鸥声持续。旁白温和地讲述：“天亮以后，小镇又恢复了往日的平静。”木吉他与柔和钢琴缓慢铺开，最后只留下海浪声。' },
+                    ].map((sample) => (
+                      <Button key={sample.labelKey} size="small" variant="outlined" onClick={() => setAudioPrompt(sample.prompt)} sx={WORKBENCH_SUBTLE_ACTION_BUTTON_SX}>
+                        {t(sample.labelKey)}
                       </Button>
                     ))}
                   </Stack>
@@ -3055,15 +3166,15 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
               <TextField
                 multiline
                 minRows={8}
-                label={audioGenerationType === 'music' ? '配乐提示词' : audioGenerationType === 'scene-audio' ? '场景音频提示词' : '音效提示词'}
+                label={audioGenerationType === 'music' ? t('assetStudio.workbench.label.musicPrompt') : audioGenerationType === 'scene-audio' ? t('assetStudio.workbench.label.sceneAudioPrompt') : t('assetStudio.workbench.label.soundEffectPrompt')}
                 value={audioPrompt}
                 onChange={(event) => setAudioPrompt(event.target.value)}
                 placeholder={
                   audioGenerationType === 'music'
-                    ? '例如：夜色都市，低频铺底，缓慢推进，悬疑感钢琴与合成器氛围配乐。'
+                    ? t('assetStudio.workbench.placeholder.musicPrompt')
                     : audioGenerationType === 'scene-audio'
-                      ? '按时间顺序描述环境、角色身份与语气、台词、动作音效、配乐及收尾。'
-                      : '例如：雨夜巷口的脚步声与湿润地面回响，近景、短促、带一点紧张气氛。'
+                      ? t('assetStudio.workbench.placeholder.sceneAudioPrompt')
+                      : t('assetStudio.workbench.placeholder.soundEffectPrompt')
                 }
                 InputLabelProps={{ sx: { color: 'rgba(255,255,255,0.62)' } }}
                 sx={{ '& .MuiOutlinedInput-root': { color: 'white', backgroundColor: 'rgba(255,255,255,0.03)' } }}
@@ -3073,11 +3184,11 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
                 <TextField
                   size="small"
                   fullWidth
-                  label="参考说话人 ID（可选）"
+                  label={t('assetStudio.workbench.label.speakerId')}
                   value={audioSpeakerIds}
                   onChange={(event) => setAudioSpeakerIds(event.target.value)}
-                  placeholder="多个 speaker_id 使用逗号或换行分隔"
-                  helperText="按角色出现顺序填写；留空时由模型根据角色描述生成声音。"
+                  placeholder={t('assetStudio.workbench.placeholder.speakerId')}
+                  helperText={t('assetStudio.workbench.helperText.speakerId')}
                   InputLabelProps={{ sx: { color: 'rgba(255,255,255,0.62)' } }}
                   FormHelperTextProps={{ sx: { color: 'rgba(255,255,255,0.56)', mx: 0 } }}
                   sx={{ '& .MuiOutlinedInput-root': { color: 'white', backgroundColor: 'rgba(255,255,255,0.03)' } }}
@@ -3088,22 +3199,22 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
                 <Stack spacing={1.5}>
                   <Box sx={{ display: 'grid', gap: 1.5, gridTemplateColumns: { xs: '1fr', md: isCosyVoiceSpeechMode ? 'repeat(2, minmax(0, 1fr))' : '1fr' } }}>
                     <FormControl size="small" fullWidth>
-                      <InputLabel sx={{ color: 'rgba(255,255,255,0.68)' }}>音色</InputLabel>
+                      <InputLabel sx={{ color: 'rgba(255,255,255,0.68)' }}>{t('assetStudio.workbench.label.voice')}</InputLabel>
                       <Select
                         value={audioVoiceId}
-                        label="音色"
+                        label={t('assetStudio.workbench.label.voice')}
                         onChange={(event) => setAudioVoiceId(event.target.value)}
                         sx={{ color: 'white' }}
                         disabled={audioVoiceLoading || sortedAudioVoicePresets.length === 0}
                       >
                         {audioVoiceLoading ? (
                           <MenuItem value="" disabled>
-                            正在加载音色...
+                            {t('assetStudio.workbench.voice.voiceLoading')}
                           </MenuItem>
                         ) : null}
                         {!audioVoiceLoading && sortedAudioVoicePresets.length === 0 ? (
                           <MenuItem value="" disabled>
-                            暂无可用音色
+                            {t('assetStudio.workbench.voice.voiceEmpty')}
                           </MenuItem>
                         ) : null}
                         {sortedAudioVoicePresets.map((voice) => (
@@ -3114,7 +3225,7 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
                       </Select>
                       <FormHelperText sx={{ color: 'rgba(255,255,255,0.6)', mx: 0, mt: 1 }}>
                         {sortedAudioVoicePresets.find((voice) => voice.id === audioVoiceId)?.description
-                          || (audioModelId === 'cosyvoice-v3.5-plus' ? 'CosyVoice 只展示你当前账号下可用的复刻/设计音色。' : '选择一个音色后即可直接合成。')}
+                          || (audioModelId === 'cosyvoice-v3.5-plus' ? t('assetStudio.workbench.voice.cosyOnlyHint') : t('assetStudio.workbench.voice.pickOneHint'))}
                       </FormHelperText>
                     </FormControl>
 
@@ -3130,7 +3241,7 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
                             }}
                             disabled={audioCloneLoading || audioCloneUploading || audioDesignLoading}
                           >
-                            声音复刻
+                            {t('assetStudio.workbench.voice.clone')}
                           </Button>
                           <Button
                             variant="outlined"
@@ -3141,20 +3252,20 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
                             }}
                             disabled={audioCloneLoading || audioCloneUploading || audioDesignLoading}
                           >
-                            声音设计
+                            {t('assetStudio.workbench.voice.design')}
                           </Button>
                           <Button
                             variant="outlined"
                             sx={WORKBENCH_SUBTLE_ACTION_BUTTON_SX}
                             onClick={() => {
                               void refreshAudioVoiceCatalog('cosyvoice-v3.5-plus').catch(async (error) => {
-                                const message = await extractApiErrorMessage(error, '刷新音色失败')
+                                const message = await extractApiErrorMessage(error, t('assetStudio.workbench.voice.refreshFailed'))
                                 setAudioVoiceActionFeedback({ type: 'error', text: message })
                               })
                             }}
                             disabled={audioVoiceLoading || audioCloneLoading || audioCloneUploading || audioDesignLoading}
                           >
-                            {audioVoiceLoading ? '同步中...' : '刷新音色'}
+                            {audioVoiceLoading ? t('assetStudio.workbench.voice.syncInProgress') : t('assetStudio.workbench.voice.refresh')}
                           </Button>
                         </Box>
                         {audioVoiceActionFeedback ? (
@@ -3169,10 +3280,10 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
                   <TextField
                     size="small"
                     fullWidth
-                    label="语气指令（可选）"
+                    label={t('assetStudio.workbench.label.instruction')}
                     value={audioInstruction}
                     onChange={(event) => setAudioInstruction(event.target.value)}
-                    placeholder="例如：沉稳克制，吐字清晰，句尾轻收，像深夜电台主持人。"
+                    placeholder={t('assetStudio.workbench.placeholder.instruction')}
                     InputLabelProps={{ sx: { color: 'rgba(255,255,255,0.62)' } }}
                     sx={{ '& .MuiOutlinedInput-root': { color: 'white', backgroundColor: 'rgba(255,255,255,0.03)' } }}
                   />
@@ -3182,7 +3293,7 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
                       <TextField
                         size="small"
                         fullWidth
-                        label="语速"
+                        label={t('assetStudio.workbench.label.speechRate')}
                         value={audioRate}
                         onChange={(event) => setAudioRate(event.target.value)}
                         InputLabelProps={{ sx: { color: 'rgba(255,255,255,0.62)' } }}
@@ -3192,7 +3303,7 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
                     <TextField
                       size="small"
                       fullWidth
-                      label="音量"
+                      label={t('assetStudio.workbench.label.volume')}
                       value={audioVolume}
                       onChange={(event) => setAudioVolume(event.target.value)}
                       InputLabelProps={{ sx: { color: 'rgba(255,255,255,0.62)' } }}
@@ -3204,33 +3315,33 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
 
               <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5} sx={{ display: audioGenerationType === 'speech' || audioGenerationType === 'scene-audio' ? 'none' : 'flex' }}>
                 <FormControl size="small" fullWidth>
-                  <InputLabel sx={{ color: 'rgba(255,255,255,0.68)' }}>时长</InputLabel>
-                  <Select value={audioDuration} label="时长" onChange={(event) => setAudioDuration(event.target.value)} sx={{ color: 'white' }}>
+                  <InputLabel sx={{ color: 'rgba(255,255,255,0.68)' }}>{t('assetStudio.workbench.label.duration')}</InputLabel>
+                  <Select value={audioDuration} label={t('assetStudio.workbench.label.duration')} onChange={(event) => setAudioDuration(event.target.value)} sx={{ color: 'white' }}>
                     {audioDurationOptions.map((option) => (
                       <MenuItem key={option.value} value={option.value}>
-                        {option.label}
+                        {t('assetStudio.workbench.durationSeconds', { count: option.value })}
                       </MenuItem>
                     ))}
                   </Select>
                 </FormControl>
 
                 <FormControl size="small" fullWidth>
-                  <InputLabel sx={{ color: 'rgba(255,255,255,0.68)' }}>情绪</InputLabel>
-                  <Select value={audioMood} label="情绪" onChange={(event) => setAudioMood(event.target.value)} sx={{ color: 'white' }}>
+                  <InputLabel sx={{ color: 'rgba(255,255,255,0.68)' }}>{t('assetStudio.workbench.label.mood')}</InputLabel>
+                  <Select value={audioMood} label={t('assetStudio.workbench.label.mood')} onChange={(event) => setAudioMood(event.target.value)} sx={{ color: 'white' }}>
                     {AUDIO_MOOD_OPTIONS.map((option) => (
                       <MenuItem key={option.value} value={option.value}>
-                        {option.label}
+                        {t(option.labelKey)}
                       </MenuItem>
                     ))}
                   </Select>
                 </FormControl>
 
                 <FormControl size="small" fullWidth>
-                  <InputLabel sx={{ color: 'rgba(255,255,255,0.68)' }}>节奏</InputLabel>
-                  <Select value={audioTempo} label="节奏" onChange={(event) => setAudioTempo(event.target.value)} sx={{ color: 'white' }}>
+                  <InputLabel sx={{ color: 'rgba(255,255,255,0.68)' }}>{t('assetStudio.workbench.label.tempo')}</InputLabel>
+                  <Select value={audioTempo} label={t('assetStudio.workbench.label.tempo')} onChange={(event) => setAudioTempo(event.target.value)} sx={{ color: 'white' }}>
                     {AUDIO_TEMPO_OPTIONS.map((option) => (
                       <MenuItem key={option.value} value={option.value}>
-                        {option.label}
+                        {t(option.labelKey)}
                       </MenuItem>
                     ))}
                   </Select>
@@ -3239,11 +3350,11 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
 
               {audioGenerationType === 'music' ? (
                 <FormControl size="small" fullWidth>
-                  <InputLabel sx={{ color: 'rgba(255,255,255,0.68)' }}>风格</InputLabel>
-                  <Select value={audioStyle} label="风格" onChange={(event) => setAudioStyle(event.target.value)} sx={{ color: 'white' }}>
+                  <InputLabel sx={{ color: 'rgba(255,255,255,0.68)' }}>{t('assetStudio.workbench.label.style')}</InputLabel>
+                  <Select value={audioStyle} label={t('assetStudio.workbench.label.style')} onChange={(event) => setAudioStyle(event.target.value)} sx={{ color: 'white' }}>
                     {AUDIO_STYLE_OPTIONS.map((option) => (
                       <MenuItem key={option.value} value={option.value}>
-                        {option.label}
+                        {t(option.labelKey)}
                       </MenuItem>
                     ))}
                   </Select>
@@ -3252,7 +3363,7 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
             </Stack>
 
             <ResultCard
-              title="音频结果"
+              title={t('assetStudio.workbench.result.audioTitle')}
               result={audioResult}
               loading={audioLoading}
               error={audioError}
@@ -3262,26 +3373,34 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
                   result: audioResult,
                   assetKind: 'audio',
                   prompt: audioPrompt,
-                  fallbackTitle: audioGenerationType === 'music' ? '配乐资产' : audioGenerationType === 'sound-effect' ? '音效资产' : audioGenerationType === 'scene-audio' ? '场景音频资产' : '语音资产',
+                  fallbackTitle:
+                    audioGenerationType === 'music'
+                      ? t('assetStudio.workbench.assetTitle.music')
+                      : audioGenerationType === 'sound-effect'
+                        ? t('assetStudio.workbench.assetTitle.soundEffect')
+                        : audioGenerationType === 'scene-audio'
+                          ? t('assetStudio.workbench.assetTitle.sceneAudio')
+                          : t('assetStudio.workbench.assetTitle.speech'),
                   tags: ['asset_studio', audioGenerationType === 'music' ? 'music' : audioGenerationType === 'sound-effect' ? 'sound-effect' : audioGenerationType === 'scene-audio' ? 'scene-audio' : 'speech'],
                 })
               }
               collecting={collectStates.audio.loading}
               collectFeedback={collectStates.audio.feedback}
+              t={t}
             />
           </Box>
 
           <Stack direction={{ xs: 'column', md: 'row' }} justifyContent="space-between" alignItems={{ xs: 'stretch', md: 'center' }} spacing={1.5} sx={{ mt: 2 }}>
             <Typography sx={{ color: 'rgba(255,255,255,0.58)', fontSize: '0.84rem', lineHeight: 1.7 }}>
               {audioGenerationType === 'music'
-                ? '配乐模式会把风格、情绪和节奏一并传给后端音频服务。'
+                ? t('assetStudio.workbench.dataHint.modeHintMusic')
                 : audioGenerationType === 'sound-effect'
-                ? '音效模式使用 Vidu Timing2Audio 进行时间轴可控的音效生成。'
+                ? t('assetStudio.workbench.dataHint.modeHintSoundEffect')
                 : audioGenerationType === 'scene-audio'
-                ? '场景音频模式使用豆包 Seed Audio 1.0，一次生成对白、环境声、音效与配乐，并持久化临时结果地址。'
-                : '语音模式会调用统一 TTS 运行时，按所选模型、音色和说话参数直接输出语音资产。'}
+                ? t('assetStudio.workbench.dataHint.modeHintSceneAudio')
+                : t('assetStudio.workbench.dataHint.modeHintSpeech')}
             </Typography>
-            <FooterAction loading={audioLoading} label="生成音频" onClick={handleGenerateAudio} />
+            <FooterAction loading={audioLoading} label={t('assetStudio.workbench.action.generateAudio')} onClick={handleGenerateAudio} t={t} />
           </Stack>
         </Box>
       ) : null}
@@ -3298,16 +3417,16 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
         PaperProps={{ sx: WORKBENCH_DIALOG_PAPER_SX }}
         BackdropProps={{ sx: WORKBENCH_DIALOG_BACKDROP_SX }}
       >
-        <DialogTitle sx={WORKBENCH_DIALOG_TITLE_SX}>声音复刻</DialogTitle>
+        <DialogTitle sx={WORKBENCH_DIALOG_TITLE_SX}>{t('assetStudio.workbench.voice.clone')}</DialogTitle>
         <DialogContent dividers sx={WORKBENCH_DIALOG_CONTENT_SX}>
           <Stack spacing={1.5} sx={{ pt: 0.5 }}>
             <Alert severity="info" sx={WORKBENCH_DIALOG_INFO_ALERT_SX}>
-              支持 `http/https` 或上传样本后获得的临时 URL；创建完成后会自动刷新当前 CosyVoice 音色列表。
+              {t('assetStudio.workbench.voice.cloneAlert')}
             </Alert>
             <TextField
               size="small"
               fullWidth
-              label="声音名称"
+              label={t('assetStudio.workbench.label.cloneName')}
               value={audioCloneName}
               onChange={(event) => setAudioCloneName(event.target.value)}
               disabled={audioCloneLoading || audioCloneUploading}
@@ -3316,8 +3435,8 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
             <TextField
               size="small"
               fullWidth
-              label="音频 URL"
-              placeholder="支持 http/https 或 oss:// 临时地址"
+              label={t('assetStudio.workbench.label.cloneUrl')}
+              placeholder={t('assetStudio.workbench.placeholder.cloneUrl')}
               value={audioCloneUrl}
               onChange={(event) => setAudioCloneUrl(event.target.value)}
               disabled={audioCloneLoading || audioCloneUploading}
@@ -3330,7 +3449,7 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
                 disabled={audioCloneLoading || audioCloneUploading}
                 sx={{ alignSelf: 'flex-start', borderColor: 'rgba(138,158,255,0.42)', color: '#d7e1ff' }}
               >
-                {audioCloneUploading ? '上传中...' : '上传音频获取临时 URL'}
+                {audioCloneUploading ? t('assetStudio.workbench.voice.cloneUploading') : t('assetStudio.workbench.voice.cloneUploadUrl')}
                 <input hidden type="file" accept="audio/*" onChange={handleUploadAudioCloneSample} />
               </Button>
               <Button
@@ -3339,10 +3458,10 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
                 disabled={audioCloneLoading || audioCloneUploading || audioCloneRecording}
                 sx={{ alignSelf: 'flex-start', borderColor: 'rgba(138,158,255,0.42)', color: '#d7e1ff' }}
               >
-                {audioCloneRecording ? '录音中...' : '录音获取临时 URL'}
+                {audioCloneRecording ? t('assetStudio.workbench.voice.recordUploading') : t('assetStudio.workbench.voice.recordUploadUrl')}
               </Button>
               <Typography sx={{ color: 'rgba(255,255,255,0.5)', fontSize: '0.78rem', lineHeight: 1.6 }}>
-                上传或录音后会自动把临时 URL 回填到上方输入框。
+                {t('assetStudio.workbench.voice.urlBackfillHint')}
               </Typography>
             </Stack>
             {audioCloneFeedback ? (
@@ -3358,7 +3477,7 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
             disabled={audioCloneLoading || audioCloneUploading || audioCloneRecording}
             sx={{ color: 'rgba(214,224,255,0.9)' }}
           >
-            取消
+            {t('assetStudio.workbench.voice.cancel')}
           </Button>
           <Button
             variant="contained"
@@ -3373,7 +3492,7 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
               boxShadow: '0 12px 28px rgba(76,102,255,0.28)',
             }}
           >
-            {audioCloneLoading ? '提交中...' : '开始复刻'}
+            {audioCloneLoading ? t('assetStudio.workbench.voice.submitting') : t('assetStudio.workbench.voice.startClone')}
           </Button>
         </DialogActions>
       </Dialog>
@@ -3387,25 +3506,25 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
         PaperProps={{ sx: WORKBENCH_DIALOG_PAPER_SX }}
         BackdropProps={{ sx: WORKBENCH_DIALOG_BACKDROP_SX }}
       >
-        <DialogTitle sx={WORKBENCH_DIALOG_TITLE_SX}>录音朗读提示</DialogTitle>
+        <DialogTitle sx={WORKBENCH_DIALOG_TITLE_SX}>{t('assetStudio.workbench.voice.recordTitle')}</DialogTitle>
         <DialogContent dividers sx={WORKBENCH_DIALOG_CONTENT_SX}>
           <Stack spacing={1.25}>
             <Alert severity="info" sx={WORKBENCH_DIALOG_INFO_ALERT_SX}>
-              建议朗读约 10 秒，保持环境安静、音量稳定。录音完成后会自动上传并生成临时 URL。
+              {t('assetStudio.workbench.voice.recordAlert')}
             </Alert>
             <Box sx={{ p: 2, borderRadius: 3, border: '1px solid rgba(255,255,255,0.1)', backgroundColor: 'rgba(255,255,255,0.03)' }}>
               <Typography sx={{ color: 'white', fontSize: '0.95rem', lineHeight: 1.8 }}>
-                示例朗读：“时间会缓和所有的悲伤，当你的悲伤被安抚以后，你就会因为认识过我而感到满足。”
+                {t('assetStudio.workbench.voice.recordSample')}
               </Typography>
               <Typography sx={{ color: 'rgba(255,255,255,0.52)', fontSize: '0.78rem', mt: 1 }}>
-                也可以随机朗读其他内容，只要音质清晰、长度足够即可。
+                {t('assetStudio.workbench.voice.recordAnyText')}
               </Typography>
             </Box>
           </Stack>
         </DialogContent>
         <DialogActions sx={WORKBENCH_DIALOG_ACTIONS_SX}>
           <Button onClick={handleCloseAudioCloneRecordDialog} disabled={audioCloneRecording || audioCloneUploading} sx={{ color: 'rgba(214,224,255,0.9)' }}>
-            关闭
+            {t('assetStudio.workbench.voice.close')}
           </Button>
           <Button
             variant="contained"
@@ -3423,7 +3542,7 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
                 : '0 12px 28px rgba(76,102,255,0.28)',
             }}
           >
-            {audioCloneRecording ? '结束录音并上传' : '开始录音'}
+            {audioCloneRecording ? t('assetStudio.workbench.voice.stopAndUpload') : t('assetStudio.workbench.voice.startRecording')}
           </Button>
         </DialogActions>
       </Dialog>
@@ -3440,16 +3559,16 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
         PaperProps={{ sx: WORKBENCH_DIALOG_PAPER_SX }}
         BackdropProps={{ sx: WORKBENCH_DIALOG_BACKDROP_SX }}
       >
-        <DialogTitle sx={WORKBENCH_DIALOG_TITLE_SX}>声音设计</DialogTitle>
+        <DialogTitle sx={WORKBENCH_DIALOG_TITLE_SX}>{t('assetStudio.workbench.voice.design')}</DialogTitle>
         <DialogContent dividers sx={WORKBENCH_DIALOG_CONTENT_SX}>
           <Stack spacing={1.5} sx={{ pt: 0.5 }}>
             <Alert severity="info" sx={WORKBENCH_DIALOG_INFO_ALERT_SX}>
-              用自然语言描述声线、年龄感、气质和情绪，再提供一段试听文本，即可生成新的设计音色。
+              {t('assetStudio.workbench.voice.designAlert')}
             </Alert>
             <TextField
               size="small"
               fullWidth
-              label="设计名称"
+              label={t('assetStudio.workbench.label.designName')}
               value={audioDesignName}
               onChange={(event) => setAudioDesignName(event.target.value)}
               disabled={audioDesignLoading}
@@ -3458,8 +3577,8 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
             <TextField
               size="small"
               fullWidth
-              label="声音描述"
-              placeholder="例如：青年女性，声线清透冷静，带一点克制感，适合悬疑旁白。"
+              label={t('assetStudio.workbench.label.designPrompt')}
+              placeholder={t('assetStudio.workbench.placeholder.designPrompt')}
               value={audioDesignPrompt}
               onChange={(event) => setAudioDesignPrompt(event.target.value)}
               disabled={audioDesignLoading}
@@ -3470,7 +3589,7 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
               fullWidth
               multiline
               minRows={3}
-              label="试听文本"
+              label={t('assetStudio.workbench.label.designPreviewText')}
               value={audioDesignPreviewText}
               onChange={(event) => setAudioDesignPreviewText(event.target.value)}
               disabled={audioDesignLoading}
@@ -3485,7 +3604,7 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
         </DialogContent>
         <DialogActions sx={WORKBENCH_DIALOG_ACTIONS_SX}>
           <Button onClick={() => setAudioDesignDialogOpen(false)} disabled={audioDesignLoading} sx={{ color: 'rgba(214,224,255,0.9)' }}>
-            取消
+            {t('assetStudio.workbench.voice.cancel')}
           </Button>
           <Button
             variant="contained"
@@ -3500,7 +3619,7 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
               boxShadow: '0 12px 28px rgba(76,102,255,0.28)',
             }}
           >
-            {audioDesignLoading ? '提交中...' : '开始设计'}
+            {audioDesignLoading ? t('assetStudio.workbench.voice.submitting') : t('assetStudio.workbench.voice.startDesign')}
           </Button>
         </DialogActions>
       </Dialog>
@@ -3510,7 +3629,7 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
       <Box sx={{ px: { xs: 1.5, sm: 2.5 }, py: 1.2, borderTop: '1px solid rgba(255,255,255,0.08)', display: 'flex', alignItems: 'center', gap: 1, color: 'rgba(255,255,255,0.42)' }}>
         <BoltOutlinedIcon sx={{ fontSize: 16 }} />
         <Typography sx={{ fontSize: '0.82rem' }}>
-          当前工作台为直连资产生成区，优先调用轻量 API，不走项目章节或长流程状态机。
+          {t('assetStudio.workbench.dataHint.footerNote')}
         </Typography>
       </Box>
     </Box>

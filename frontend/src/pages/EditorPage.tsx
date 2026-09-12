@@ -43,8 +43,10 @@ import {
   autoSaveChapter,
   clearDirty,
 } from '@/store/slices/editorSlice'
+import { useFormats } from '@/i18n'
 import { apiClient } from '@/services/api'
 import SettingRecommendations from '@/components/SettingRecommendations'
+import { useTranslation } from 'react-i18next'
 
 function triggerBlobDownload(blob: Blob, filename: string) {
   const url = window.URL.createObjectURL(blob)
@@ -59,6 +61,9 @@ function triggerBlobDownload(blob: Blob, filename: string) {
 
 
 export default function EditorPage() {
+  // 自动保存与版本历史都要看到秒：同一分钟内的多次保存，少了秒就分不清先后。
+  const { t } = useTranslation()
+  const { formatDateTimeWithSeconds, formatTimeWithSeconds } = useFormats()
   const { projectId, chapterId } = useParams<{ projectId: string; chapterId: string }>()
   const navigate = useNavigate()
   const dispatch = useDispatch<AppDispatch>()
@@ -170,7 +175,7 @@ export default function EditorPage() {
     if (chapterId && currentChapter) {
       try {
         // 🆕 显示智能分析提示
-        setSaveMessage('💾 正在保存章节并进行智能分析（预计30-60秒）...')
+        setSaveMessage(t('chapterEditor.msg.savingHint'))
         
         await dispatch(updateChapter({
           chapterId: parseInt(chapterId),
@@ -180,10 +185,10 @@ export default function EditorPage() {
         setLastSaved(new Date()) // 🆕 设置最后保存时间
         
         // 🆕 显示成功信息，说明AI分析在后台进行
-        setSaveMessage('✅ 章节已保存！🤖 AI正在后台分析人物、地点、关系...')
+        setSaveMessage(t('chapterEditor.msg.savedHint'))
         setTimeout(() => setSaveMessage(''), 5000) // 5秒后清除提示
       } catch (error) {
-        setSaveError('保存失败，请重试')
+        setSaveError(t('chapterEditor.msg.saveFailed'))
         setTimeout(() => setSaveError(''), 3000)
       }
     }
@@ -228,12 +233,12 @@ export default function EditorPage() {
         user_feedback: feedback,
       })
       const data = response.data
-      setSaveMessage('✨ 已提交优化任务,正在后台处理...（预计30-60秒）')
+      setSaveMessage(t('chapterEditor.msg.optimizeSubmitted'))
 
       // 轮询任务状态
       pollOptimizeTaskStatus(data.task_id)
     } catch (error: any) {
-      setSaveError(error.message || '再次优化失败，请稍后重试')
+      setSaveError(error.message || t('chapterEditor.msg.optimizeFailed'))
       setOptimizing(false)
     }
   }
@@ -263,12 +268,12 @@ export default function EditorPage() {
         user_feedback: reason,
       })
       const data = response.data
-      setSaveMessage('🔄 已提交重新生成任务,正在后台处理...（预计60-120秒）')
+      setSaveMessage(t('chapterEditor.msg.regenerateSubmitted'))
 
       // 轮询任务状态
       pollRegenerateTaskStatus(data.task_id)
     } catch (error: any) {
-      setSaveError(error.message || '重新生成章节失败，请稍后重试')
+      setSaveError(error.message || t('chapterEditor.msg.regenerateFailed'))
       setRegenerating(false)
     }
   }
@@ -282,37 +287,8 @@ export default function EditorPage() {
         if (response.status < 200 || response.status >= 300) {
           clearInterval(pollInterval)
           setRegenerating(false)
-          setSaveError('获取任务状态失败')
+          setSaveError(t('chapterEditor.msg.taskStatusFailed'))
           return
-        }
-
-        const data = response.data
-
-        if (data.status === 'completed') {
-          clearInterval(pollInterval)
-
-          // 解析结果（result 是 JSON 字符串）
-          try {
-            const result = typeof data.result === 'string' ? JSON.parse(data.result) : data.result
-
-            if (result && (result.content || result.regenerated_content)) {
-              dispatch(setContent(result.content || result.regenerated_content))
-              setSaveMessage('✅ 重新生成完成！章节内容已更新')
-            } else {
-              setSaveError('重新生成结果为空，请重试')
-            }
-          } catch {
-            setSaveError('解析重新生成结果失败')
-          }
-
-          setRegenerating(false)
-        } else if (data.status === 'failed') {
-          clearInterval(pollInterval)
-          setSaveError('重新生成失败: ' + (data.error || '未知错误'))
-          setRegenerating(false)
-        } else if (data.status === 'running') {
-          // 更新进度提示
-          setSaveMessage(`🔄 重新生成中... (进度: ${data.progress || 50}%)`)
         }
       } catch {
         // 轮询任务状态失败
@@ -324,7 +300,7 @@ export default function EditorPage() {
       clearInterval(pollInterval)
       if (regenerating) {
         setRegenerating(false)
-        setSaveError('重新生成超时，请重试')
+        setSaveError(t('chapterEditor.msg.regenerateTimeout'))
       }
     }, 600000)
   }
@@ -338,7 +314,7 @@ export default function EditorPage() {
         if (response.status < 200 || response.status >= 300) {
           clearInterval(pollInterval)
           setOptimizing(false)
-          setSaveError('获取任务状态失败')
+          setSaveError(t('chapterEditor.msg.taskStatusFailed'))
           return
         }
 
@@ -353,22 +329,22 @@ export default function EditorPage() {
             
             if (result && result.optimized_content) {
               dispatch(setContent(result.optimized_content))
-              setSaveMessage(`✅ 优化完成！评分: ${result.original_score || 'N/A'}`)
+              setSaveMessage(t('chapterEditor.msg.optimizeDone', { score: result.original_score || 'N/A' }))
             } else {
-              setSaveError('优化结果为空，请重试')
+              setSaveError(t('chapterEditor.msg.optimizeEmpty'))
             }
           } catch {
-            setSaveError('解析优化结果失败')
+            setSaveError(t('chapterEditor.msg.optimizeParseFailed'))
           }
           
           setOptimizing(false)
         } else if (data.status === 'failed') {
           clearInterval(pollInterval)
-          setSaveError('优化失败: ' + (data.error || '未知错误'))
+          setSaveError(t('chapterEditor.msg.optimizeFailedDetail', { error: data.error || t('chapterEditor.msg.unknownError') }))
           setOptimizing(false)
         } else if (data.status === 'running') {
           // 更新进度提示
-          setSaveMessage(`🔄 优化中... (进度: ${data.progress || 50}%)`)
+          setSaveMessage(t('chapterEditor.msg.optimizingProgress', { progress: data.progress || 50 }))
         }
       } catch {
         // 轮询任务状态失败
@@ -380,7 +356,7 @@ export default function EditorPage() {
       clearInterval(pollInterval)
       if (optimizing) {
         setOptimizing(false)
-        setSaveError('优化超时，请重试')
+        setSaveError(t('chapterEditor.msg.optimizeTimeout'))
       }
     }, 300000)
   }
@@ -397,7 +373,7 @@ export default function EditorPage() {
       setLogicCheckResult(response.data)
       setLogicCheckDialogOpen(true)
     } catch {
-      setSaveError('调用章节逻辑检查接口时出错，请检查网络连接')
+      setSaveError(t('chapterEditor.msg.logicCheckApiFailed'))
     } finally {
       setCheckingLogic(false)
     }
@@ -419,13 +395,13 @@ export default function EditorPage() {
       const chapter = response.data
       dispatch(setContent(chapter.content))
       dispatch(clearDirty())
-      setSaveMessage('✅ 已成功恢复到指定版本')
+      setSaveMessage(t('chapterEditor.msg.restoreDone'))
       setConfirmDialogOpen(false)
       setHistoryDialogOpen(false)
       // 重新加载版本历史
       setTimeout(() => handleOpenHistory(), 500)
     } catch {
-      setSaveError('恢复版本失败，请检查网络连接')
+      setSaveError(t('chapterEditor.msg.restoreFailed'))
     } finally {
       setRestoringRevision(false)
     }
@@ -439,10 +415,10 @@ export default function EditorPage() {
       const response = await apiClient.get(`/api/v1/chapters/${chapterId}/export/txt`, {
         responseType: 'blob',
       })
-      triggerBlobDownload(response.data as Blob, `${currentChapter?.title || '章节'}.txt`)
-      setSaveMessage('📄 TXT文件导出成功')
+      triggerBlobDownload(response.data as Blob, `${currentChapter?.title || t('chapterEditor.msg.fileNameFallback')}.txt`)
+      setSaveMessage(t('chapterEditor.msg.exportTxtDone'))
     } catch {
-      setSaveError('导出TXT失败，请检查网络连接')
+      setSaveError(t('chapterEditor.msg.exportTxtFailed'))
     } finally {
       setExporting(false)
     }
@@ -456,10 +432,10 @@ export default function EditorPage() {
       const response = await apiClient.get(`/api/v1/chapters/${chapterId}/export/docx`, {
         responseType: 'blob',
       })
-      triggerBlobDownload(response.data as Blob, `${currentChapter?.title || '章节'}.docx`)
-      setSaveMessage('📝 DOCX文件导出成功')
+      triggerBlobDownload(response.data as Blob, `${currentChapter?.title || t('chapterEditor.msg.fileNameFallback')}.docx`)
+      setSaveMessage(t('chapterEditor.msg.exportDocxDone'))
     } catch {
-      setSaveError('导出DOCX失败，请检查网络连接')
+      setSaveError(t('chapterEditor.msg.exportDocxFailed'))
     } finally {
       setExporting(false)
     }
@@ -483,20 +459,20 @@ export default function EditorPage() {
             startIcon={<ArrowBackIcon />}
             onClick={() => navigate(`/dashboard?projectId=${projectId}`)}
           >
-            返回
+            {t('action.back')}
           </Button>
           <Typography variant="h5">
-            {currentChapter?.title || '章节编辑器'}
+            {currentChapter?.title || t('chapterEditor.page.titleFallback')}
           </Typography>
         </Box>
         <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
           {/* 🆕 显示最后保存时间 */}
           {lastSaved && (
             <Typography variant="caption" color="text.secondary">
-              💾 最后保存: {lastSaved.toLocaleTimeString('zh-CN')}
+              {t('chapterEditor.page.lastSaved', { time: formatTimeWithSeconds(lastSaved) })}
             </Typography>
           )}
-          {isDirty && <Typography variant="caption" color="warning.main">未保存的更改</Typography>}
+          {isDirty && <Typography variant="caption" color="warning.main">{t('chapterEditor.page.unsavedChanges')}</Typography>}
           {isSaving && <CircularProgress size={24} />}
 
           {/* 版本历史按钮 */}
@@ -506,7 +482,7 @@ export default function EditorPage() {
             onClick={handleOpenHistory}
             size="small"
           >
-            版本历史
+            {t('chapterEditor.page.history')}
           </Button>
 
           {/* 🆕 再次优化按钮 */}
@@ -518,7 +494,7 @@ export default function EditorPage() {
             startIcon={optimizing ? <CircularProgress size={16} /> : undefined}
             color="secondary"
           >
-            {optimizing ? '优化中...' : '再次优化'}
+            {optimizing ? t('chapterEditor.page.optimizing') : t('chapterEditor.page.reOptimize')}
           </Button>
 
           {/* 🆕 重新生成章节按钮 */}
@@ -530,7 +506,7 @@ export default function EditorPage() {
             startIcon={regenerating ? <CircularProgress size={16} /> : undefined}
             color="error"
           >
-            {regenerating ? '生成中...' : '重新生成'}
+            {regenerating ? t('chapterEditor.page.generating') : t('chapterEditor.page.regenerate')}
           </Button>
 
           {/* 章节逻辑检查按钮 */}
@@ -541,7 +517,7 @@ export default function EditorPage() {
             disabled={checkingLogic}
             startIcon={checkingLogic ? <CircularProgress size={16} /> : undefined}
           >
-            {checkingLogic ? '检查中...' : '逻辑检查'}
+            {checkingLogic ? t('chapterEditor.page.checking') : t('chapterEditor.page.logicCheck')}
           </Button>
 
           {/* 导出按钮 */}
@@ -552,7 +528,7 @@ export default function EditorPage() {
             size="small"
             disabled={exporting}
           >
-            {exporting ? '导出中...' : '导出'}
+            {exporting ? t('chapterEditor.page.exporting') : t('chapterEditor.page.export')}
           </Button>
 
           {/* 导出菜单 */}
@@ -571,11 +547,11 @@ export default function EditorPage() {
           >
             <MenuItem onClick={handleExportTxt} sx={{ gap: 1 }}>
               <DescriptionIcon fontSize="small" />
-              导出为 TXT
+              {t('chapterEditor.page.exportTxt')}
             </MenuItem>
             <MenuItem onClick={handleExportDocx} sx={{ gap: 1 }}>
               <ArticleIcon fontSize="small" />
-              导出为 DOCX
+              {t('chapterEditor.page.exportDocx')}
             </MenuItem>
           </Menu>
 
@@ -587,7 +563,7 @@ export default function EditorPage() {
             onClick={handleSave}
             disabled={!isDirty || isSaving}
           >
-            保存
+            {t('common.save')}
           </Button>
 
           {/* 切换推荐面板 */}
@@ -610,7 +586,7 @@ export default function EditorPage() {
             rows={20}
             value={content}
             onChange={(e) => dispatch(setContent(e.target.value))}
-            placeholder="在这里开始编写你的章节..."
+            placeholder={t('chapterEditor.page.editorPlaceholder')}
             variant="outlined"
             inputRef={contentRef}
             sx={{
@@ -624,14 +600,14 @@ export default function EditorPage() {
           <Box sx={{ mt: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <Box sx={{ display: 'flex', gap: 3 }}>
               <Typography variant="body2" color="text.secondary">
-                📝 字数: <strong>{wordCount}</strong>
+                {t('chapterEditor.page.wordCountLabel')}<strong>{wordCount}</strong>
               </Typography>
               <Typography variant="body2" color="text.secondary">
-                📄 字符: <strong>{charCount}</strong>
+                {t('chapterEditor.page.charCountLabel')}<strong>{charCount}</strong>
               </Typography>
             </Box>
             <Typography variant="caption" color="info.main">
-              ℹ️ 自动保存间隔: 60秒 | 手动保存: Ctrl+S
+              {t('chapterEditor.page.autoSaveHint', { seconds: 60 })}
             </Typography>
           </Box>
         </Grid>
@@ -645,7 +621,7 @@ export default function EditorPage() {
                 limit={10}
                 showInsertButton={true}
                 onInsertItem={(item) => handleInsertSetting(item.name)}
-                title="推荐设定"
+                title={t('chapterEditor.page.recommendTitle')}
               />
             </Paper>
           </Grid>
@@ -678,7 +654,7 @@ export default function EditorPage() {
         autoHideDuration={2000}
         onClose={() => {}}
       >
-        <Alert severity="info">自动保存中...</Alert>
+        <Alert severity="info">{t('chapterEditor.msg.autoSaving')}</Alert>
       </Snackbar>
 
       {/* 版本历史对话框 */}
@@ -703,10 +679,10 @@ export default function EditorPage() {
           pb: 2
         }}>
           <HistoryIcon color="primary" />
-          版本历史
+          {t('chapterEditor.page.history')}
           {revisions.length > 0 && (
             <Typography variant="caption" color="text.secondary">
-              (共 {revisions.length} 个版本)
+              {t('chapterEditor.history.count', { count: revisions.length })}
             </Typography>
           )}
         </DialogTitle>
@@ -723,10 +699,10 @@ export default function EditorPage() {
             }}>
               <HistoryIcon sx={{ fontSize: 64, opacity: 0.3, mb: 2 }} />
               <Typography variant="body1">
-                暂无版本历史
+                {t('chapterEditor.history.empty')}
               </Typography>
               <Typography variant="caption">
-                修改章节内容后会自动创建版本快照
+                {t('chapterEditor.history.emptyHint')}
               </Typography>
             </Box>
           ) : (
@@ -750,7 +726,7 @@ export default function EditorPage() {
                           minWidth: 80,
                         }}
                       >
-                        恢复
+                        {t('chapterEditor.history.restore')}
                       </Button>
                     }
                   >
@@ -758,7 +734,7 @@ export default function EditorPage() {
                       primary={
                         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
                           <Typography variant="body1" fontWeight={500}>
-                            {revision.revision_note || '自动保存'}
+                            {revision.revision_note || t('chapterEditor.history.autoSaveNote')}
                           </Typography>
                           <Box
                             sx={{
@@ -770,20 +746,13 @@ export default function EditorPage() {
                               fontSize: '0.75rem'
                             }}
                           >
-                            {revision.word_count} 字
+                            {t('chapterEditor.history.words', { count: revision.word_count })}
                           </Box>
                         </Box>
                       }
                       secondary={
                         <Typography variant="caption" color="text.secondary">
-                          🕒 {new Date(revision.created_at).toLocaleString('zh-CN', {
-                            year: 'numeric',
-                            month: '2-digit',
-                            day: '2-digit',
-                            hour: '2-digit',
-                            minute: '2-digit',
-                            second: '2-digit'
-                          })}
+                          🕒 {formatDateTimeWithSeconds(revision.created_at)}
                         </Typography>
                       }
                     />
@@ -797,7 +766,7 @@ export default function EditorPage() {
         </DialogContent>
         <DialogActions sx={{ borderTop: 1, borderColor: 'divider', pt: 2 }}>
           <Button onClick={() => setHistoryDialogOpen(false)} variant="outlined">
-            关闭
+            {t('common.close')}
           </Button>
         </DialogActions>
       </Dialog>
@@ -811,13 +780,13 @@ export default function EditorPage() {
       >
         <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
           <WarningIcon color={logicCheckResult?.has_issues ? 'warning' : 'success'} />
-          章节逻辑检查结果
+          {t('chapterEditor.logicCheck.title')}
         </DialogTitle>
         <DialogContent dividers>
           {!logicCheckResult && (
             <Box sx={{ py: 3 }}>
               <Typography variant="body2" color="text.secondary">
-                暂无检查结果，请先点击顶部的「逻辑检查」按钮。
+                {t('chapterEditor.logicCheck.emptyHint')}
               </Typography>
             </Box>
           )}
@@ -826,17 +795,17 @@ export default function EditorPage() {
             <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
               <Box sx={{ p: 2, bgcolor: 'action.hover', borderRadius: 1 }}>
                 <Typography variant="subtitle1" gutterBottom>
-                  总体评估
+                  {t('chapterEditor.logicCheck.overall')}
                 </Typography>
                 <Typography variant="body2" color="text.secondary">
-                  {logicCheckResult.summary || (logicCheckResult.has_issues ? '发现了一些逻辑问题，请参考下方列表。' : '未发现明显逻辑问题。')}
+                  {logicCheckResult.summary || (logicCheckResult.has_issues ? t('chapterEditor.logicCheck.summaryIssues') : t('chapterEditor.logicCheck.summaryClean'))}
                 </Typography>
               </Box>
 
               {!logicCheckResult.has_issues && (
                 <Box sx={{ p: 2, bgcolor: 'success.light', borderRadius: 1 }}>
                   <Typography variant="body2" color="success.contrastText">
-                    ✅ 未发现角色功法使用或境界相关的逻辑问题。
+                    {t('chapterEditor.logicCheck.cleanBanner')}
                   </Typography>
                 </Box>
               )}
@@ -844,7 +813,7 @@ export default function EditorPage() {
               {logicCheckResult.has_issues && Array.isArray(logicCheckResult.issues) && logicCheckResult.issues.length > 0 && (
                 <Box>
                   <Typography variant="subtitle1" gutterBottom>
-                    发现的问题（共 {logicCheckResult.issues.length} 条）
+                    {t('chapterEditor.logicCheck.issuesHead', { count: logicCheckResult.issues.length })}
                   </Typography>
                   <List sx={{ maxHeight: 360, overflow: 'auto' }}>
                     {logicCheckResult.issues.map((issue: any, index: number) => (
@@ -854,7 +823,7 @@ export default function EditorPage() {
                             primary={
                               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                                 <Typography variant="body1" fontWeight={500}>
-                                  {issue.character_name || '未知角色'} 使用 {issue.technique_name || '未知功法'}
+                                  {issue.character_name || t('chapterEditor.logicCheck.unknownCharacter')} {t('chapterEditor.logicCheck.uses')} {issue.technique_name || t('chapterEditor.logicCheck.unknownTechnique')}
                                 </Typography>
                                 <Typography
                                   variant="caption"
@@ -866,7 +835,7 @@ export default function EditorPage() {
                                     color: 'text.primary',
                                   }}
                                 >
-                                  {issue.issue_type || '逻辑问题'}
+                                  {issue.issue_type || t('chapterEditor.logicCheck.issueFallback')}
                                 </Typography>
                               </Box>
                             }
@@ -877,7 +846,7 @@ export default function EditorPage() {
                                 </Typography>
                                 {issue.suggestion && (
                                   <Typography variant="body2" color="primary.main" sx={{ mt: 0.5 }}>
-                                    建议：{issue.suggestion}
+                                    {t('chapterEditor.logicCheck.suggestionPrefix')}{issue.suggestion}
                                   </Typography>
                                 )}
                               </Box>
@@ -894,7 +863,7 @@ export default function EditorPage() {
           )}
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setLogicCheckDialogOpen(false)}>关闭</Button>
+          <Button onClick={() => setLogicCheckDialogOpen(false)}>{t('common.close')}</Button>
         </DialogActions>
       </Dialog>
 
@@ -913,11 +882,11 @@ export default function EditorPage() {
       >
         <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
           <WarningIcon color="warning" />
-          确认恢复版本
+          {t('chapterEditor.restore.title')}
         </DialogTitle>
         <DialogContent>
           <Typography variant="body1" gutterBottom>
-            确定要恢夏到这个版本吗？
+            {t('chapterEditor.restore.confirmQuestion')}
           </Typography>
           {selectedRevision && (
             <Box sx={{
@@ -929,21 +898,21 @@ export default function EditorPage() {
               borderColor: 'primary.main'
             }}>
               <Typography variant="body2" color="text.secondary" gutterBottom>
-                <strong>版本信息：</strong>
+                <strong>{t('chapterEditor.restore.versionInfo')}</strong>
               </Typography>
               <Typography variant="body2">
-                • 备注：{selectedRevision.revision_note || '自动保存'}
+                {t('chapterEditor.restore.notePrefix')}{selectedRevision.revision_note || t('chapterEditor.restore.noteFallback')}
               </Typography>
               <Typography variant="body2">
-                • 字数：{selectedRevision.word_count} 字
+                {t('chapterEditor.restore.wordCountPrefix')}{selectedRevision.word_count}{t('chapterEditor.restore.wordCountSuffix')}
               </Typography>
               <Typography variant="body2">
-                • 时间：{new Date(selectedRevision.created_at).toLocaleString('zh-CN')}
+                {t('chapterEditor.restore.timePrefix')}{formatDateTimeWithSeconds(selectedRevision.created_at)}
               </Typography>
             </Box>
           )}
           <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>
-            ⚠️ 当前的内容将被自动备份为新版本，不会丢失。
+            {t('chapterEditor.restore.backupWarning')}
           </Typography>
         </DialogContent>
         <DialogActions>
@@ -951,7 +920,7 @@ export default function EditorPage() {
             onClick={() => setConfirmDialogOpen(false)}
             disabled={restoringRevision}
           >
-            取消
+            {t('common.cancel')}
           </Button>
           <Button
             onClick={handleConfirmRestore}
@@ -960,7 +929,7 @@ export default function EditorPage() {
             disabled={restoringRevision}
             startIcon={restoringRevision ? <CircularProgress size={16} /> : <RestoreIcon />}
           >
-            {restoringRevision ? '恢复中...' : '确认恢复'}
+            {restoringRevision ? t('chapterEditor.restore.restoring') : t('chapterEditor.restore.confirm')}
           </Button>
         </DialogActions>
       </Dialog>
@@ -978,11 +947,11 @@ export default function EditorPage() {
         }}
       >
         <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-          ✨ 再次优化章节
+          {t('chapterEditor.optimize.title')}
         </DialogTitle>
         <DialogContent>
           <Typography variant="body2" color="text.secondary" gutterBottom>
-            AI 将自动分析当前章节并提出优化建议。您可以补充额外的优化意见，或者直接点击「开始优化」依赖系统自动评审。
+            {t('chapterEditor.optimize.desc')}
           </Typography>
 
           <TextField
@@ -991,12 +960,7 @@ export default function EditorPage() {
             rows={6}
             value={userFeedback}
             onChange={(e) => setUserFeedback(e.target.value)}
-            placeholder={`请输入您的优化意见（可选）
-
-例如：
-- 增加更多情感描写
-- 加强动作场面的紧张感
-- 修改某个人物的对话语气...`}
+            placeholder={t('chapterEditor.optimize.placeholder')}
             variant="outlined"
             sx={{
               mt: 2,
@@ -1012,7 +976,7 @@ export default function EditorPage() {
             onClick={() => setOptimizeDialogOpen(false)}
             disabled={optimizing}
           >
-            取消
+            {t('common.cancel')}
           </Button>
           <Button
             onClick={handleConfirmOptimize}
@@ -1021,7 +985,7 @@ export default function EditorPage() {
             disabled={optimizing}
             startIcon={optimizing ? <CircularProgress size={16} /> : undefined}
           >
-            {optimizing ? '优化中...' : '开始优化'}
+            {optimizing ? t('chapterEditor.optimize.running') : t('chapterEditor.optimize.start')}
           </Button>
         </DialogActions>
       </Dialog>
@@ -1040,17 +1004,17 @@ export default function EditorPage() {
       >
         <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
           <WarningIcon color="error" />
-          重新生成章节
+          {t('chapterEditor.regenerate.title')}
         </DialogTitle>
         <DialogContent>
           <Box sx={{ mb: 2, p: 2, bgcolor: 'error.light', borderRadius: 1 }}>
             <Typography variant="body2" color="error.contrastText">
-              ⚠️ 警告：重新生成将完全重写当前章节内容，原有内容将被覆盖！
+              {t('chapterEditor.regenerate.warning')}
             </Typography>
           </Box>
 
           <Typography variant="body2" color="text.secondary" gutterBottom>
-            AI 将根据项目设定和章节大纲，完全重新创作本章节内容。请说明重新生成的理由，帮助AI更好地理解您的需求。
+            {t('chapterEditor.regenerate.desc')}
           </Typography>
 
           <TextField
@@ -1059,12 +1023,7 @@ export default function EditorPage() {
             rows={6}
             value={regenerateReason}
             onChange={(e) => setRegenerateReason(e.target.value)}
-            placeholder={`请输入重新生成的理由（可选）
-
-例如：
-- 当前章节质量不理想，希望完全重写
-- 想要改变章节的叙事风格
-- 需要调整情节走向...`}
+            placeholder={t('chapterEditor.regenerate.placeholder')}
             variant="outlined"
             sx={{
               mt: 2,
@@ -1076,7 +1035,7 @@ export default function EditorPage() {
           />
 
           <Typography variant="caption" color="text.secondary" sx={{ mt: 2, display: 'block' }}>
-            💡 提示：当前内容将被自动备份为版本历史，您可以通过「版本历史」功能恢复。
+            {t('chapterEditor.regenerate.backupHint')}
           </Typography>
         </DialogContent>
         <DialogActions>
@@ -1084,7 +1043,7 @@ export default function EditorPage() {
             onClick={() => setRegenerateDialogOpen(false)}
             disabled={regenerating}
           >
-            取消
+            {t('common.cancel')}
           </Button>
           <Button
             onClick={handleConfirmRegenerate}
@@ -1093,7 +1052,7 @@ export default function EditorPage() {
             disabled={regenerating}
             startIcon={regenerating ? <CircularProgress size={16} /> : undefined}
           >
-            {regenerating ? '生成中...' : '确认重新生成'}
+            {regenerating ? t('chapterEditor.regenerate.generating') : t('chapterEditor.regenerate.confirm')}
           </Button>
         </DialogActions>
       </Dialog>

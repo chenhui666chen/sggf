@@ -18,6 +18,8 @@ import {
 import CloseIcon from '@mui/icons-material/Close'
 import DeleteIcon from '@mui/icons-material/Delete'
 import HistoryIcon from '@mui/icons-material/History'
+import { useFormats } from '@/i18n'
+import { useTranslation } from 'react-i18next'
 import type { DreamweaverRunSummary } from '@/types/dreamweaver'
 import { getStageDisplayName } from '@/utils/timeEstimate'
 
@@ -35,18 +37,6 @@ interface HistoryPanelProps {
   onLoadRun: (runId: string) => void
   bulkDeleting: boolean
   bulkDeleteProgress: { current: number; total: number } | null
-}
-
-function formatDateTime(value: string | null | undefined): string {
-  if (!value) return '-'
-  const dt = new Date(value)
-  if (!Number.isFinite(dt.getTime())) return value
-  return dt.toLocaleString('zh-CN', {
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-  })
 }
 
 function getStatusColor(status: string): 'success' | 'error' | 'warning' | 'default' {
@@ -80,6 +70,8 @@ export function HistoryPanel({
   bulkDeleting,
   bulkDeleteProgress,
 }: HistoryPanelProps) {
+  const { formatMonthDayTime } = useFormats()
+  const { t } = useTranslation()
   const allSelected = runs.length > 0 && selectedIds.length === runs.length
 
   const sortedRuns = useMemo(() => {
@@ -89,6 +81,13 @@ export function HistoryPanel({
       return timeB - timeA
     })
   }, [runs])
+
+  // 原本在模块级，依赖当前语言之后只能待进组件内。两条兜底刻意保留：空值给 '-'，
+  // 解析不出来就把后端原串显示出来——那串东西至少能让人看出后端返回了什么。
+  const formatRunTime = (value: string | null | undefined): string => {
+    if (!value) return '-'
+    return formatMonthDayTime(value) || value
+  }
 
   return (
     <Drawer anchor="right" open={open} onClose={onClose}>
@@ -101,7 +100,7 @@ export function HistoryPanel({
         >
           <Stack direction="row" alignItems="center" spacing={1}>
             <HistoryIcon />
-            <Typography variant="h6">历史记录</Typography>
+            <Typography variant="h6">{t('dreamweaverHistory.title')}</Typography>
             <Chip size="small" label={runs.length} />
           </Stack>
           <IconButton onClick={onClose}>
@@ -119,7 +118,7 @@ export function HistoryPanel({
                   onChange={allSelected ? onClearSelection : onSelectAll}
                   size="small"
                 />
-                <Typography variant="body2">已选 {selectedIds.length} 项</Typography>
+                <Typography variant="body2">{t('dreamweaverHistory.selectedCount', { count: selectedIds.length })}</Typography>
               </Stack>
               <Button
                 size="small"
@@ -128,7 +127,7 @@ export function HistoryPanel({
                 onClick={onDeleteSelected}
                 disabled={bulkDeleting}
               >
-                {bulkDeleting ? '删除中...' : '删除'}
+                {bulkDeleting ? t('dreamweaverDelete.deleting') : t('common.delete')}
               </Button>
             </Stack>
             {bulkDeleting && bulkDeleteProgress && (
@@ -138,7 +137,7 @@ export function HistoryPanel({
                   value={(bulkDeleteProgress.current / bulkDeleteProgress.total) * 100}
                 />
                 <Typography variant="caption" color="text.secondary">
-                  正在删除 {bulkDeleteProgress.current} / {bulkDeleteProgress.total}
+                  {t('dreamweaverHistory.deletingProgress', { current: bulkDeleteProgress.current, total: bulkDeleteProgress.total })}
                 </Typography>
               </Box>
             )}
@@ -154,11 +153,11 @@ export function HistoryPanel({
         <Box sx={{ flex: 1, overflow: 'auto' }}>
           {loading ? (
             <Box sx={{ p: 2, textAlign: 'center' }}>
-              <Typography color="text.secondary">加载中...</Typography>
+              <Typography color="text.secondary">{t('dreamweaverHistory.loading')}</Typography>
             </Box>
           ) : sortedRuns.length === 0 ? (
             <Box sx={{ p: 2, textAlign: 'center' }}>
-              <Typography color="text.secondary">暂无历史记录</Typography>
+              <Typography color="text.secondary">{t('dreamweaverHistory.empty')}</Typography>
             </Box>
           ) : (
             <List dense>
@@ -191,18 +190,18 @@ export function HistoryPanel({
                       secondary={
                         <Stack direction="row" spacing={1} alignItems="center" sx={{ mt: 0.5 }}>
                           <Typography variant="caption" color="text.secondary">
-                            {formatDateTime(run.updated_at)}
+                            {formatRunTime(run.updated_at)}
                           </Typography>
                           {run.stage && (
                             <Chip
                               size="small"
-                              label={getStageDisplayName(run.stage)}
+                              label={getStageDisplayName(run.stage, t)}
                               variant="outlined"
                             />
                           )}
                           {run.camera_count != null && (
                             <Typography variant="caption" color="text.secondary">
-                              {run.camera_count} 镜头
+                              {run.camera_count} {t('dreamweaverHistory.cameraCount')}
                             </Typography>
                           )}
                         </Stack>

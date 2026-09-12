@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import {
   Alert,
   Box,
@@ -76,6 +77,7 @@ export default function ChapterDrawer({
   onRequestDeleteAudiobook: (project: Project, audiobookProject: AudiobookProjectSummary) => void
   onRequestDeleteChapterAudio: (candidate: ChapterAudioDeleteCandidate) => void
 }) {
+  const { t } = useTranslation()
   const sortedChapters = useMemo(() => {
     const next = [...chapters]
     next.sort((a, b) => {
@@ -138,7 +140,7 @@ export default function ChapterDrawer({
           <Box sx={{ px: 2, py: 1.5, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <Box sx={{ minWidth: 0 }}>
               <Typography variant="subtitle1" sx={{ fontWeight: 800 }}>
-                章节目录
+                {t('audiobook.chapterDrawer.title')}
               </Typography>
               <Typography
                 variant="body2"
@@ -153,11 +155,11 @@ export default function ChapterDrawer({
                 {project?.title || ''}
               </Typography>
               <Typography variant="caption" sx={{ mt: 1, display: 'block', color: 'text.secondary' }}>
-                音频来源：跨生成记录合并（按章节编号取最新音频）
+                {t('audiobook.chapterDrawer.audioSourceHint')}
               </Typography>
             </Box>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-              <Tooltip title={chapterSortOrder === 'asc' ? '切换为倒序' : '切换为正序'}>
+              <Tooltip title={chapterSortOrder === 'asc' ? t('audiobook.chapterDrawer.sortToggleAsc') : t('audiobook.chapterDrawer.sortToggleDesc')}>
                 <IconButton size="small" onClick={onToggleSortOrder}>
                   <SwapVertIcon fontSize="small" />
                 </IconButton>
@@ -195,7 +197,7 @@ export default function ChapterDrawer({
                       disablePadding
                       secondaryAction={
                         <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                          <Tooltip title={canPlay ? (isPlaying ? '暂停' : '播放') : '未生成音频'}>
+                          <Tooltip title={canPlay ? (isPlaying ? t('audiobook.chapterDrawer.pause') : t('audiobook.chapterDrawer.play')) : t('audiobook.chapterDrawer.noAudio')}>
                             <span>
                               <IconButton
                                 size="small"
@@ -206,7 +208,7 @@ export default function ChapterDrawer({
                               </IconButton>
                             </span>
                           </Tooltip>
-                          <Tooltip title="章节操作">
+                          <Tooltip title={t('audiobook.chapterDrawer.chapterActions')}>
                             <span>
                               <IconButton
                                 size="small"
@@ -236,7 +238,7 @@ export default function ChapterDrawer({
                                 variant="body2"
                                 sx={{ fontWeight: 800, color: isActive ? audiobookColors.brand : 'text.primary', flexShrink: 0 }}
                               >
-                                第{chapter.chapter_number}章
+                                {t('audiobook.chapterNumber', { number: chapter.chapter_number })}
                               </Typography>
                               <Typography
                                 variant="body2"
@@ -305,7 +307,7 @@ export default function ChapterDrawer({
       >
         <MenuItem onClick={handleRequestDeleteAudiobook} sx={{ color: audiobookColorRoles.destructiveAction.main }}>
           <DeleteIcon sx={{ mr: 1 }} />
-          删除整本有声书
+          {t('audiobook.chapterDrawer.deleteAudiobook')}
         </MenuItem>
       </Menu>
 
@@ -318,7 +320,7 @@ export default function ChapterDrawer({
       >
         <MenuItem onClick={handleRequestDeleteChapterAudio} sx={{ color: audiobookColorRoles.destructiveAction.main }}>
           <DeleteIcon sx={{ mr: 1 }} />
-          删除本章音频
+          {t('audiobook.chapterDrawer.deleteChapterAudio')}
         </MenuItem>
       </Menu>
     </>

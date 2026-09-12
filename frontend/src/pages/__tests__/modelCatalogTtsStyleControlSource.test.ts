@@ -12,10 +12,10 @@ describe('ModelCatalogPage TTS style-control source guards', () => {
     const pageSource = readSource('../ModelCatalogPage.tsx')
 
     expect(pageSource).toContain('style_control?:')
-    expect(pageSource).toContain('风格控制模式')
+    expect(pageSource).toContain("t('modelCatalog.page.styleControlMode')")
     expect(pageSource).toContain('control_message_roles')
-    expect(pageSource).toContain('消息位置')
-    expect(pageSource).toContain('高级控制')
+    expect(pageSource).toContain("t('modelCatalog.page.styleControlRole'")
+    expect(pageSource).toContain("t('modelCatalog.page.styleControlAdvanced'")
     expect(pageSource).toContain('supports_audio_tags')
   })
 

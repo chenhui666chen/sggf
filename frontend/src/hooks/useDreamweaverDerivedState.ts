@@ -1,4 +1,5 @@
 import { useMemo } from 'react'
+import { useTranslation } from 'react-i18next'
 import type { LibraryPayload, DreamweaverRunSnapshot, DreamweaverAssetPlanItem, DreamweaverLibraryPlanItem, RunResult, DreamweaverTaskArtifacts } from '@/types/dreamweaver'
 import {
   resolveScriptGenerationLabel,
@@ -80,9 +81,11 @@ export function useDreamweaverDerivedState(options: UseDreamweaverDerivedStateOp
     taskProgress,
   } = options
 
+  const { t } = useTranslation()
+
   const scriptGenerationLabel = useMemo(
-    () => resolveScriptGenerationLabel(scriptGeneration),
-    [scriptGeneration?.mode, scriptGeneration?.model],
+    () => resolveScriptGenerationLabel(scriptGeneration, t),
+    [scriptGeneration?.mode, scriptGeneration?.model, t],
   )
 
   const streamSnapshots = useMemo(() => buildStreamSnapshots(streamTextByKey), [streamTextByKey])
@@ -107,7 +110,7 @@ export function useDreamweaverDerivedState(options: UseDreamweaverDerivedStateOp
     snapshotAssetSummary: extractSnapshotAssetSummary(snapshotShots),
   }), [snapshotShots])
 
-  const libraryPromptReviewMessage = resolveLibraryPromptReviewMessage(libraryApproved, promptReviewReady, promptReviewRequiredSnapshot)
+  const libraryPromptReviewMessage = resolveLibraryPromptReviewMessage(libraryApproved, promptReviewReady, promptReviewRequiredSnapshot, t)
 
   const { assetPlanSummary, mergedVideoPlan } = useMemo(() => ({
     assetPlanSummary: computeAssetPlanSummary(assetPlanItems),
@@ -124,14 +127,14 @@ export function useDreamweaverDerivedState(options: UseDreamweaverDerivedStateOp
   )
 
   const libraryDisplayItems = useMemo(
-    () => computeLibraryDisplayItems({ library, libraryPlanItems, libraryPreviews: libraryPreviewsStringKeys, libraryPreviewAspectRatio, missingRoleSet }),
-    [library?.assets, library?.spec, libraryPlanItems, libraryPreviewsStringKeys, libraryPreviewAspectRatio, missingRoleSet],
+    () => computeLibraryDisplayItems({ library, libraryPlanItems, libraryPreviews: libraryPreviewsStringKeys, libraryPreviewAspectRatio, missingRoleSet }, t),
+    [library?.assets, library?.spec, libraryPlanItems, libraryPreviewsStringKeys, libraryPreviewAspectRatio, missingRoleSet, t],
   )
 
   const { librarySummary, libraryGroups } = useMemo(() => ({
     librarySummary: computeLibrarySummary(libraryDisplayItems),
-    libraryGroups: computeLibraryGroups(libraryDisplayItems),
-  }), [libraryDisplayItems])
+    libraryGroups: computeLibraryGroups(libraryDisplayItems, t),
+  }), [libraryDisplayItems, t])
 
   const hasLibraryItems = libraryDisplayItems.length > 0
 
@@ -155,9 +158,9 @@ export function useDreamweaverDerivedState(options: UseDreamweaverDerivedStateOp
   }), [result?.run_id, result?.stage, result?.state, taskRunId, taskStage, taskState])
 
   const { taskStatusLabel, taskStatusColor } = useMemo(() => ({
-    taskStatusLabel: resolveTaskStatusLabel(taskStatus),
+    taskStatusLabel: resolveTaskStatusLabel(taskStatus, t),
     taskStatusColor: resolveTaskStatusColor(taskStatus),
-  }), [taskStatus])
+  }), [taskStatus, t])
 
   const { chips: artifactChips, lines: artifactLines } = useMemo(
     () => buildArtifactDerivedState(taskArtifacts),

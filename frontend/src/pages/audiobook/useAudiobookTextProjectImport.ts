@@ -1,4 +1,7 @@
+import type { TranslateFn } from './audioLibraryDisplay'
 import { useCallback, useState, type Dispatch, type SetStateAction } from 'react'
+
+import { useTranslation } from 'react-i18next'
 
 import { apiClient, extractApiErrorMessage } from '../../services/api'
 import * as bookParserApi from '../../services/bookParserApi'
@@ -18,14 +21,14 @@ interface UseAudiobookTextProjectImportParams {
   setSnackbar: SetSnackbar
 }
 
-const waitForBookParserStatus = async (bookId: number, targetStatuses: string[]) => {
+const waitForBookParserStatus = async (bookId: number, targetStatuses: string[], t?: TranslateFn) => {
   while (true) {
     const status = await bookParserApi.getParseStatus(bookId)
     if (targetStatuses.includes(status.status)) {
       return status
     }
     if (status.status === 'failed') {
-      throw new Error(status.error || '拆书任务失败')
+      throw new Error(status.error || (t ? t('audiobook.useAudiobookTextProjectImport.parseTaskFailed') : '拆书任务失败'))
     }
     await new Promise((resolve) => setTimeout(resolve, 2000))
   }
@@ -36,6 +39,7 @@ export const useAudiobookTextProjectImport = ({
   setActiveStep,
   setSnackbar,
 }: UseAudiobookTextProjectImportParams) => {
+  const { t } = useTranslation()
   const [newProjectDialogOpen, setNewProjectDialogOpen] = useState(false)
   const [newProjectTitle, setNewProjectTitle] = useState('')
   const [newProjectText, setNewProjectText] = useState('')
@@ -52,11 +56,11 @@ export const useAudiobookTextProjectImport = ({
   const handleCreateProjectFromText = useCallback(async () => {
     const rawText = newProjectText.trim()
     if (!rawText) {
-      setSnackbar({ open: true, message: '请先粘贴文本内容', severity: 'error' })
+      setSnackbar({ open: true, message: t('audiobook.useAudiobookTextProjectImport.pasteTextFirst'), severity: 'error' })
       return
     }
 
-    const title = newProjectTitle.trim() || '从整本书导入的项目'
+    const title = newProjectTitle.trim() || t('audiobook.useAudiobookTextProjectImport.defaultProjectTitle')
 
     setCreatingFromBook(true)
     try {
@@ -68,10 +72,10 @@ export const useAudiobookTextProjectImport = ({
       const bookId = book.id
 
       await bookParserApi.parseBook(bookId)
-      await waitForBookParserStatus(bookId, ['chapters_done'])
+      await waitForBookParserStatus(bookId, ['chapters_done'], t)
 
       await bookParserApi.analyzeBook(bookId)
-      await waitForBookParserStatus(bookId, ['completed'])
+      await waitForBookParserStatus(bookId, ['completed'], t)
 
       const importResult = await bookParserApi.importToProject(bookId, {
         project_title: title,
@@ -101,11 +105,11 @@ export const useAudiobookTextProjectImport = ({
 
       setSnackbar({
         open: true,
-        message: '已从文本创建项目，请配置音色后生成有声书',
+        message: t('audiobook.useAudiobookTextProjectImport.projectCreated'),
         severity: 'success',
       })
     } catch (error: unknown) {
-      const message = await extractApiErrorMessage(error, '从文本创建项目失败，请稍后重试')
+      const message = await extractApiErrorMessage(error, t('audiobook.useAudiobookTextProjectImport.createProjectFailed'))
       setSnackbar({
         open: true,
         message,
@@ -114,7 +118,7 @@ export const useAudiobookTextProjectImport = ({
     } finally {
       setCreatingFromBook(false)
     }
-  }, [handleSelectProject, newProjectText, newProjectTitle, setActiveStep, setSnackbar])
+  }, [handleSelectProject, newProjectText, newProjectTitle, setActiveStep, setSnackbar, t])
 
   return {
     newProjectDialogOpen,

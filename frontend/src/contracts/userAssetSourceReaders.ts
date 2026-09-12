@@ -1,3 +1,5 @@
+import type { TFunction } from 'i18next'
+
 import type { UserAssetRecord } from '@/services/api'
 
 import {
@@ -8,6 +10,8 @@ import {
   extractDreamweaverMergedRunId,
   extractUserAssetProjectId,
 } from './userAssetSourcePayloadSelectors'
+
+const DEFAULT_TRANSLATE: TFunction = ((key: string) => key) as TFunction
 
 type UserAssetSourceReadable = Pick<
   UserAssetRecord,
@@ -50,17 +54,20 @@ function appendQueryParams(
 function getUserAssetProjectLabel(
   asset: UserAssetSourceReadable,
   projectTitleMap?: UserAssetProjectTitleMap,
+  t?: TFunction,
 ): string | null {
+  const translate = t ?? DEFAULT_TRANSLATE
   const projectId = extractUserAssetProjectId(asset)
-  return projectId ? projectTitleMap?.get(projectId) || `项目 #${projectId}` : null
+  return projectId ? projectTitleMap?.get(projectId) || translate('userAsset.projectFallback', { id: projectId }) : null
 }
 
-function getDreamweaverEntityTypeLabel(entityType: string | null | undefined): string {
+function getDreamweaverEntityTypeLabel(entityType: string | null | undefined, t?: TFunction): string {
+  const translate = t ?? DEFAULT_TRANSLATE
   const normalized = String(entityType || '').trim().toLowerCase()
-  if (normalized === 'character') return '角色'
-  if (normalized === 'scene') return '场景'
-  if (normalized === 'prop') return '道具'
-  return '素材'
+  if (normalized === 'character') return translate('userAsset.source.entityCharacter')
+  if (normalized === 'scene') return translate('userAsset.source.entityScene')
+  if (normalized === 'prop') return translate('userAsset.source.entityProp')
+  return translate('userAsset.source.entityMaterial')
 }
 
 export function getUserAssetSourceModule(asset: Pick<UserAssetRecord, 'source_module'>): string {
@@ -86,44 +93,54 @@ export function isProtectedUserAsset(asset: UserAssetSourceReadable): boolean {
   return getProtectedUserAssetRef(asset) !== null
 }
 
-export function formatDreamweaverViewLabel(view: string | null | undefined): string | null {
+export function formatDreamweaverViewLabel(
+  view: string | null | undefined,
+  t?: TFunction,
+): string | null {
+  const translate = t ?? DEFAULT_TRANSLATE
   const normalized = String(view || '').trim().toLowerCase()
   if (!normalized) return null
-  if (normalized === 'front') return '正面'
-  if (normalized === 'side') return '侧面'
-  if (normalized === 'back') return '背面'
-  if (normalized === 'bust_front') return '半身正面'
-  if (normalized === 'bust_three_quarter') return '半身四分之三侧'
-  if (normalized === 'bust_side') return '半身侧面'
+  if (normalized === 'front') return translate('userAsset.source.viewFront')
+  if (normalized === 'side') return translate('userAsset.source.viewSide')
+  if (normalized === 'back') return translate('userAsset.source.viewBack')
+  if (normalized === 'bust_front') return translate('userAsset.source.viewBustFront')
+  if (normalized === 'bust_three_quarter') return translate('userAsset.source.viewBustThreeQuarter')
+  if (normalized === 'bust_side') return translate('userAsset.source.viewBustSide')
   return normalized
 }
 
 export function getUserAssetSourceInfo(
   asset: UserAssetSourceReadable,
   projectTitleMap?: UserAssetProjectTitleMap,
+  t?: TFunction,
 ): UserAssetSourceInfo {
+  const translate = t ?? DEFAULT_TRANSLATE
   const sourceModule = getUserAssetSourceModule(asset)
   const projectId = extractUserAssetProjectId(asset)
-  const projectLabel = getUserAssetProjectLabel(asset, projectTitleMap)
+  const projectLabel = getUserAssetProjectLabel(asset, projectTitleMap, t)
 
   if (sourceModule === 'asset_studio') {
     return {
-      label: '资产工坊',
-      summary: projectLabel ? `来自资产工坊，关联项目：${projectLabel}。` : '来自资产工坊。',
+      label: translate('userAsset.source.assetStudio'),
+      summary: projectLabel
+        ? translate('userAsset.source.fromAssetStudioWithProject', { project: projectLabel })
+        : translate('userAsset.source.fromAssetStudio'),
       projectLabel,
       backPath: '/asset-studio',
-      backLabel: '前往资产工坊',
+      backLabel: translate('userAsset.source.goAssetStudio'),
     }
   }
 
   if (sourceModule === 'dreamweaver_library') {
     const traceInfo = extractDreamweaverLibraryTraceInfo(asset)
     const libraryAssetId = extractDreamweaverLibraryAssetId(asset)
-    const entityTypeLabel = getDreamweaverEntityTypeLabel(traceInfo.entityType)
-    const viewLabel = formatDreamweaverViewLabel(traceInfo.view)
+    const entityTypeLabel = getDreamweaverEntityTypeLabel(traceInfo.entityType, t)
+    const viewLabel = formatDreamweaverViewLabel(traceInfo.view, t)
     return {
-      label: '短剧素材库',
-      summary: projectLabel ? `来自短剧素材库，沉淀于项目 ${projectLabel}。` : '来自短剧素材库。',
+      label: translate('userAsset.source.dreamweaverLibrary'),
+      summary: projectLabel
+        ? translate('userAsset.source.fromDreamweaverLibraryWithProject', { project: projectLabel })
+        : translate('userAsset.source.fromDreamweaverLibrary'),
       traceLabel: viewLabel ? `${entityTypeLabel} · ${viewLabel}` : entityTypeLabel,
       projectLabel,
       backPath: projectId
@@ -131,23 +148,25 @@ export function getUserAssetSourceInfo(
             assetId: libraryAssetId,
           })
         : '/drama',
-      backLabel: projectId ? '前往素材库' : '前往短剧模块',
+      backLabel: projectId ? translate('userAsset.source.goLibrary') : translate('userAsset.source.goDramaModule'),
     }
   }
 
   if (sourceModule === 'dreamweaver_run') {
     const runId = extractDreamweaverMergedRunId(asset)
     return {
-      label: '短剧成片',
-      summary: projectLabel ? `来自短剧运行结果，关联项目：${projectLabel}。` : '来自短剧运行结果。',
-      traceLabel: runId ? `run_id ${runId}` : '运行结果',
+      label: translate('userAsset.source.dreamweaverRun'),
+      summary: projectLabel
+        ? translate('userAsset.source.fromDreamweaverRunWithProject', { project: projectLabel })
+        : translate('userAsset.source.fromDreamweaverRun'),
+      traceLabel: runId ? `run_id ${runId}` : translate('userAsset.source.runResult'),
       projectLabel,
       backPath: projectId
         ? appendQueryParams(`/drama/${projectId}`, {
             runId,
           })
         : '/drama',
-      backLabel: projectId ? '回到短剧项目' : '前往短剧模块',
+      backLabel: projectId ? translate('userAsset.source.backDramaProject') : translate('userAsset.source.goDramaModule'),
     }
   }
 
@@ -159,12 +178,16 @@ export function getUserAssetSourceInfo(
     const chapterTitle = chapterTraceInfo.chapterTitle || ''
     const safeChapterId = typeof chapterId === 'number' && chapterId > 0 ? chapterId : null
     const traceLabel = chapterNumber
-      ? `第${chapterNumber}章${chapterTitle ? ` · ${chapterTitle}` : ''}`
-      : chapterTitle || (safeChapterId ? `章节 #${safeChapterId}` : '章节音频')
+      ? chapterTitle
+        ? translate('userAsset.source.chapterTraceWithTitle', { number: chapterNumber, title: chapterTitle })
+        : translate('userAsset.source.chapterTracePlain', { number: chapterNumber })
+      : chapterTitle || (safeChapterId ? translate('userAsset.source.chapterFallback', { id: safeChapterId }) : translate('userAsset.source.chapterAudio'))
 
     return {
-      label: '有声书音频',
-      summary: projectLabel ? `来自有声书章节成品，关联项目：${projectLabel}。` : '来自有声书章节成品。',
+      label: translate('userAsset.source.audiobook'),
+      summary: projectLabel
+        ? translate('userAsset.source.fromAudiobookWithProject', { project: projectLabel })
+        : translate('userAsset.source.fromAudiobook'),
       traceLabel,
       projectLabel,
       backPath: projectId
@@ -174,13 +197,13 @@ export function getUserAssetSourceInfo(
             focus: safeChapterId ? 'script-editor' : null,
           })
         : '/audiobook-dashboard',
-      backLabel: projectId ? '回到有声书项目' : '前往有声书模块',
+      backLabel: projectId ? translate('userAsset.source.backAudiobookProject') : translate('userAsset.source.goAudiobookModule'),
     }
   }
 
   return {
-    label: String(asset.source_module || '').trim() || '未分类来源',
-    summary: '该资产已进入用户中心统一治理，具体生产仍建议回到原模块处理。',
+    label: String(asset.source_module || '').trim() || translate('userAsset.source.unclassified'),
+    summary: translate('userAsset.source.unknownModuleSummary'),
     projectLabel,
   }
 }

@@ -1,3 +1,5 @@
+import type { TFunction } from 'i18next'
+
 import {
   getUserAssetSourceInfo,
   getUserAssetSourceModule,
@@ -7,6 +9,8 @@ import type {
   UserAssetRecord,
   UserAssetRecordUpdatePayload,
 } from '@/services/api'
+
+const DEFAULT_TRANSLATE: TFunction = ((key: string) => key) as TFunction
 
 export type UserAssetListViewFilter = 'all' | 'favorites' | 'deliverable' | 'reusable'
 export type UserAssetListArchiveFilter = 'active' | 'archived' | 'all'
@@ -99,6 +103,7 @@ export function buildUserAssetTagOptions(assets: UserAssetRecord[]): string[] {
 
 export function buildUserAssetSourceOptionsFromSourceModules(
   sourceModules: string[],
+  t?: TFunction,
 ): UserAssetSourceOption[] {
   return Array.from(
     new Map(
@@ -112,7 +117,7 @@ export function buildUserAssetSourceOptionsFromSourceModules(
             project_id: null,
             source_payload_json: {},
             metadata_json: {},
-          }).label,
+          }, undefined, t).label,
         ] as const)),
     ).entries(),
   )
@@ -123,14 +128,15 @@ export function buildUserAssetSourceOptionsFromSourceModules(
 export function buildUserAssetSourceOptions(
   assets: UserAssetRecord[],
   projectTitleMap?: UserAssetProjectTitleMap,
+  t?: TFunction,
 ): UserAssetSourceOption[] {
   const preferredSourceLabels = new Map(
     assets
-      .map((asset) => [getUserAssetSourceModule(asset), getUserAssetSourceInfo(asset, projectTitleMap).label] as const)
+      .map((asset) => [getUserAssetSourceModule(asset), getUserAssetSourceInfo(asset, projectTitleMap, t).label] as const)
       .filter(([value]) => Boolean(value)),
   )
 
-  return buildUserAssetSourceOptionsFromSourceModules(Array.from(preferredSourceLabels.keys())).map((option) => ({
+  return buildUserAssetSourceOptionsFromSourceModules(Array.from(preferredSourceLabels.keys()), t).map((option) => ({
     value: option.value,
     label: preferredSourceLabels.get(option.value) || option.label,
   }))
@@ -206,63 +212,72 @@ export function toggleSelectAllUserAssets(
 
 export function buildToggleFavoriteUserAssetCommand(
   asset: Pick<UserAssetRecord, 'id' | 'is_favorite'>,
+  t?: TFunction,
 ): UserAssetActionCommand {
+  const translate = t ?? DEFAULT_TRANSLATE
   return {
     actionKey: getUserAssetActionKey(asset.id),
     payload: { is_favorite: !asset.is_favorite },
-    successText: asset.is_favorite ? '已取消重点资产' : '已设为重点资产',
+    successText: asset.is_favorite ? translate('userAsset.command.unFavoriteSuccess') : translate('userAsset.command.favoriteSuccess'),
   }
 }
 
 export function buildToggleArchivedUserAssetCommand(
   asset: Pick<UserAssetRecord, 'id' | 'archived_at'>,
+  t?: TFunction,
 ): UserAssetActionCommand {
+  const translate = t ?? DEFAULT_TRANSLATE
   return {
     actionKey: getUserAssetActionKey(asset.id),
     payload: { archived: !asset.archived_at },
-    successText: asset.archived_at ? '已恢复为活跃资产' : '已归档资产',
+    successText: asset.archived_at ? translate('userAsset.command.activateSuccess') : translate('userAsset.command.archiveSuccess'),
   }
 }
 
-export function buildFavoriteBatchUserAssetCommand(): UserAssetRemoteBatchActionCommand {
+export function buildFavoriteBatchUserAssetCommand(t?: TFunction): UserAssetRemoteBatchActionCommand {
+  const translate = t ?? DEFAULT_TRANSLATE
   return {
     kind: 'remote_update',
-    label: '设为重点',
+    label: translate('userAsset.command.favorite'),
     payload: { is_favorite: true },
-    successText: '已批量设为重点',
+    successText: translate('userAsset.command.favoriteBatchSuccess'),
   }
 }
 
-export function buildArchiveBatchUserAssetCommand(): UserAssetRemoteBatchActionCommand {
+export function buildArchiveBatchUserAssetCommand(t?: TFunction): UserAssetRemoteBatchActionCommand {
+  const translate = t ?? DEFAULT_TRANSLATE
   return {
     kind: 'remote_update',
-    label: '归档',
+    label: translate('userAsset.command.archive'),
     payload: { archived: true },
-    successText: '已批量归档',
+    successText: translate('userAsset.command.archiveBatchSuccess'),
   }
 }
 
-export function buildActivateBatchUserAssetCommand(): UserAssetRemoteBatchActionCommand {
+export function buildActivateBatchUserAssetCommand(t?: TFunction): UserAssetRemoteBatchActionCommand {
+  const translate = t ?? DEFAULT_TRANSLATE
   return {
     kind: 'remote_update',
-    label: '恢复活跃',
+    label: translate('userAsset.command.activate'),
     payload: { archived: false },
-    successText: '已批量恢复为活跃',
+    successText: translate('userAsset.command.activateBatchSuccess'),
   }
 }
 
-export function buildClearLocalCopyBatchUserAssetCommand(): UserAssetLocalBatchActionCommand {
+export function buildClearLocalCopyBatchUserAssetCommand(t?: TFunction): UserAssetLocalBatchActionCommand {
+  const translate = t ?? DEFAULT_TRANSLATE
   return {
     kind: 'clear_local_copy',
-    label: '清理本地副本',
-    successText: '已批量清理本地副本',
+    label: translate('userAsset.command.clearLocalCopy'),
+    successText: translate('userAsset.command.clearLocalCopyBatchSuccess'),
   }
 }
 
-export function buildRestoreLocalCopyBatchUserAssetCommand(): UserAssetRestoreLocalBatchActionCommand {
+export function buildRestoreLocalCopyBatchUserAssetCommand(t?: TFunction): UserAssetRestoreLocalBatchActionCommand {
+  const translate = t ?? DEFAULT_TRANSLATE
   return {
     kind: 'restore_local_copy',
-    label: '重新收录到本地',
-    successText: '已批量重新收录到本地',
+    label: translate('userAsset.command.restoreLocalCopy'),
+    successText: translate('userAsset.command.restoreLocalCopyBatchSuccess'),
   }
 }

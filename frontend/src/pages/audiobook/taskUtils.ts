@@ -1,3 +1,4 @@
+import type { TranslateFn } from './audioLibraryDisplay'
 import type {
   AudiobookProjectHistoryItem,
   Chapter,
@@ -226,13 +227,17 @@ export const shouldAutoDownloadCompletedTask = (
 
 export const getCompletedTaskSnackbarMessage = (
   task: Pick<TaskStatus, 'task_type'>,
+  t?: TranslateFn,
 ): string | null =>
-  isProjectExportTask(task) ? null : '生成完成！'
+  isProjectExportTask(task) ? null : (t ? t('audiobook.taskUtils.doneSnackbar') : '生成完成！')
 
 export const getFailedTaskSnackbarMessage = (
   task: Pick<TaskStatus, 'task_type'>,
+  t?: TranslateFn,
 ): string =>
-  isProjectExportTask(task) ? '导出失败，请重试' : '生成失败，请重试'
+  isProjectExportTask(task)
+    ? (t ? t('audiobook.taskUtils.exportFailedSnackbar') : '导出失败，请重试')
+    : (t ? t('audiobook.taskUtils.generationFailedSnackbar') : '生成失败，请重试')
 
 export const shouldAutofocusActiveTask = ({
   currentTaskId,
@@ -267,29 +272,42 @@ export const getTaskPollDelayMs = ({
 export const formatAudiobookTaskLabel = (
   task: TaskStatus,
   chapters: readonly Pick<Chapter, 'id' | 'chapter_number'>[],
+  t?: TranslateFn,
 ): string => {
   const chapter = task.chapter_id
     ? chapters.find((item) => item.id === task.chapter_id)
     : null
   const chapterLabel = chapter
-    ? `第${chapter.chapter_number}章`
+    ? (t
+        ? t('audiobook.taskUtils.chapterLabel', { number: chapter.chapter_number })
+        : `第${chapter.chapter_number}章`)
     : task.chapter_id
-      ? `章节${task.chapter_id}`
-      : '批量任务'
+      ? (t
+          ? t('audiobook.taskUtils.fallbackChapterLabel', { id: task.chapter_id })
+          : `章节${task.chapter_id}`)
+      : (t ? t('audiobook.taskUtils.batchTaskLabel') : '批量任务')
 
   switch (task.task_type) {
     case 'script_only':
-      return `${chapterLabel} 剧本`
+      return t
+        ? t('audiobook.taskUtils.scriptSuffix', { label: chapterLabel })
+        : `${chapterLabel} 剧本`
     case 'audio_from_scripts':
-      return `${chapterLabel} 音频`
+      return t
+        ? t('audiobook.taskUtils.audioSuffix', { label: chapterLabel })
+        : `${chapterLabel} 音频`
     case 'prompt_audio_asr_transcript':
-      return `${chapterLabel} ASR 转写`
+      return t
+        ? t('audiobook.taskUtils.asrSuffix', { label: chapterLabel })
+        : `${chapterLabel} ASR 转写`
     case 'export_m4b':
-      return '整本 M4B 导出'
+      return t ? t('audiobook.taskUtils.m4bExportLabel') : '整本 M4B 导出'
     case 'export_audacity':
-      return 'Audacity ZIP 导出'
+      return t ? t('audiobook.taskUtils.audacityExportLabel') : 'Audacity ZIP 导出'
     case 'full':
-      return `${chapterLabel} 全流程`
+      return t
+        ? t('audiobook.taskUtils.fullSuffix', { label: chapterLabel })
+        : `${chapterLabel} 全流程`
     default:
       return chapterLabel
   }

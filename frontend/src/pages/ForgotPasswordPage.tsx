@@ -1,27 +1,26 @@
 import { useEffect, useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link as RouterLink, useNavigate } from 'react-router-dom'
 import {
   Alert,
   Box,
   Button,
-  Container,
-  Fade,
   IconButton,
   InputAdornment,
-  Paper,
+  Link,
   TextField,
   Typography,
-  Zoom,
 } from '@mui/material'
 import Badge from '@mui/icons-material/Badge'
 import LockReset from '@mui/icons-material/LockReset'
 import MarkEmailUnread from '@mui/icons-material/MarkEmailUnread'
 import Password from '@mui/icons-material/Password'
-import RocketLaunch from '@mui/icons-material/RocketLaunch'
 import Visibility from '@mui/icons-material/Visibility'
 import VisibilityOff from '@mui/icons-material/VisibilityOff'
 
+import AuthScreen from '@/components/layout/AuthScreen'
+import { checkPasswordStrength } from '@/utils/passwordPolicy'
 import { apiClient, extractApiErrorMessage } from '@/services/api'
+import { useTranslation } from 'react-i18next'
 
 const EMAIL_PATTERN = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/
 const PHONE_PATTERN = /^1[3-9]\d{9}$/
@@ -36,6 +35,7 @@ function isValidIdentity(value: string) {
 }
 
 export default function ForgotPasswordPage() {
+  const { t } = useTranslation()
   const navigate = useNavigate()
   const [showPassword, setShowPassword] = useState(false)
   const [showConfirmPassword, setShowConfirmPassword] = useState(false)
@@ -52,6 +52,9 @@ export default function ForgotPasswordPage() {
     newPassword: '',
     confirmPassword: '',
   })
+
+  // 双重找回：输入手机号走短信通道，用户名/邮箱走邮件通道（文案随通道切换）
+  const accountIsPhone = PHONE_PATTERN.test(formData.account.trim())
 
   useEffect(() => {
     if (countdown <= 0) {
@@ -91,24 +94,31 @@ export default function ForgotPasswordPage() {
   const handleRequestCode = async () => {
     const account = formData.account.trim()
     if (!isValidIdentity(account)) {
-      setError('请输入有效的账号信息，支持用户名、邮箱或手机号')
+      setError(t('forgot.errorInvalidAccount'))
       return
     }
 
     setSendingCode(true)
     try {
       const response = await apiClient.requestPasswordResetCode({ account })
-      const message = response.data?.message || '如果账号存在且已绑定本地密码，验证码将发送到注册邮箱'
+      const fallbackMessage = accountIsPhone
+        ? t('forgot.fallbackPhoneSent')
+        : t('forgot.fallbackEmailSent')
+      const message = response.data?.message || fallbackMessage
       const devCode = response.data?.dev_code
       const expiresIn = Number(response.data?.expires_in || 600)
       const resendIn = Number(response.data?.resend_in || 60)
       const expiresMinutes = Math.max(1, Math.ceil(expiresIn / 60))
       setCodeExpiresIn(expiresIn)
-      setSuccess(devCode ? `${message} 验证码 ${expiresMinutes} 分钟内有效。开发模式验证码：${devCode}` : `${message} 验证码 ${expiresMinutes} 分钟内有效。`)
+      // 后端返回的 message 是服务端文案，暂透传（与登录页同口径）；
+      // 彻底解法归 P3：后端 detail → i18n key 映射表建起来后一起改
+      setSuccess(devCode
+        ? t('forgot.sentDevHint', { message, minutes: expiresMinutes, code: devCode })
+        : t('forgot.sentHint', { message, minutes: expiresMinutes }))
       setCodeRequested(true)
       setCountdown(resendIn)
     } catch (requestError) {
-      setError(await extractApiErrorMessage(requestError, '验证码发送失败'))
+      setError(await extractApiErrorMessage(requestError, t('forgot.errorSendFailed')))
     } finally {
       setSendingCode(false)
     }
@@ -121,27 +131,30 @@ export default function ForgotPasswordPage() {
     const code = formData.code.trim()
 
     if (!isValidIdentity(account)) {
-      setError('请输入有效的账号信息，支持用户名、邮箱或手机号')
+      setError(t('forgot.errorInvalidAccount'))
       return
     }
 
     if (!code) {
-      setError('请输入验证码')
+      setError(t('forgot.errorCodeRequired'))
       return
     }
 
     if (!/^\d{6}$/.test(code)) {
-      setError('请输入 6 位数字验证码')
+      setError(t('forgot.errorCodeFormat'))
       return
     }
 
-    if (formData.newPassword.length < 6 || formData.newPassword.length > 50) {
-      setError('新密码长度必须在 6-50 个字符之间')
+    // P2-4.6：与后端策略同源（utils/passwordPolicy.ts 与 app/core/password_policy.py 同规则）；
+    // 密码强度错误文案走 i18n passwordPolicy.message
+    const policyError = checkPasswordStrength(formData.newPassword)
+    if (policyError) {
+      setError(t('passwordPolicy.message'))
       return
     }
 
     if (formData.newPassword !== formData.confirmPassword) {
-      setError('两次输入的新密码不一致')
+      setError(t('forgot.errorMismatch'))
       return
     }
 
@@ -152,237 +165,174 @@ export default function ForgotPasswordPage() {
         code,
         new_password: formData.newPassword,
       })
-      setSuccess(response.data?.message || '密码重置成功，请返回登录页继续')
+      setSuccess(response.data?.message || t('forgot.successReset'))
       setTimeout(() => {
         navigate('/login')
       }, 1200)
     } catch (requestError) {
-      setError(await extractApiErrorMessage(requestError, '密码重置失败'))
+      setError(await extractApiErrorMessage(requestError, t('forgot.errorResetFailed')))
     } finally {
       setSubmitting(false)
     }
   }
 
   return (
-    <Box
-      sx={{
-        minHeight: '100dvh',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-        position: 'relative',
-        overflow: 'hidden',
-        padding: { xs: 2, sm: 3, md: 4 },
-      }}
+    <AuthScreen
+      title={t('forgot.title')}
+      subtitle={t('forgot.subtitle')}
+      maxWidth="sm"
     >
-      <Zoom in timeout={900}>
-        <Container maxWidth="sm" sx={{ position: 'relative', zIndex: 1 }}>
-          <Fade in timeout={1200}>
-            <Paper
-              elevation={24}
-              sx={{
-                p: { xs: 3, sm: 4, md: 5 },
-                borderRadius: 4,
-                backdropFilter: 'blur(10px)',
-                backgroundColor: 'rgba(255, 255, 255, 0.95)',
-              }}
-            >
-              <Box sx={{ textAlign: 'center', mb: 4 }}>
-                <Box
-                  sx={{
-                    width: 76,
-                    height: 76,
-                    mx: 'auto',
-                    mb: 2,
-                    borderRadius: 3,
-                    background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    boxShadow: '0 8px 24px rgba(102, 126, 234, 0.4)',
-                  }}
-                >
-                  <RocketLaunch sx={{ fontSize: 38, color: '#fff' }} />
-                </Box>
-                <Typography
-                  variant="h4"
-                  component="h1"
-                  fontWeight="bold"
-                  sx={{
-                    background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-                    backgroundClip: 'text',
-                    WebkitBackgroundClip: 'text',
-                    WebkitTextFillColor: 'transparent',
-                    mb: 1,
-                  }}
-                >
-                  找回密码
-                </Typography>
-                <Typography variant="body2" color="text.secondary">
-                  先发送验证码到绑定邮箱，再输入验证码重置本地密码
-                </Typography>
-              </Box>
+      {error ? (
+        <Alert severity="error" sx={{ mb: 3 }}>
+          {error}
+        </Alert>
+      ) : null}
+      {success ? (
+        <Alert severity="success" sx={{ mb: 3 }}>
+          {success}
+        </Alert>
+      ) : null}
 
-              <Fade in={!!error || !!success}>
-                <Box>
-                  {error ? (
-                    <Alert severity="error" sx={{ mb: 3 }}>
-                      {error}
-                    </Alert>
-                  ) : null}
-                  {success ? (
-                    <Alert severity="success" sx={{ mb: 3 }}>
-                      {success}
-                    </Alert>
-                  ) : null}
-                </Box>
-              </Fade>
+      <Box component="form" onSubmit={handleSubmit} noValidate>
+        <TextField
+          fullWidth
+          label={t('forgot.accountLabel')}
+          name="account"
+          value={formData.account}
+          onChange={handleChange}
+          placeholder={t('forgot.accountPlaceholder')}
+          helperText={accountIsPhone ? t('forgot.helperPhoneCode') : t('forgot.helperEmailCode')}
+          InputProps={{
+            startAdornment: (
+              <InputAdornment position="start">
+                <Badge sx={{ color: 'text.secondary' }} />
+              </InputAdornment>
+            ),
+          }}
+          sx={{ mb: 2 }}
+        />
 
-              <Box component="form" onSubmit={handleSubmit} noValidate>
-                <TextField
-                  fullWidth
-                  label="账号"
-                  name="account"
-                  value={formData.account}
-                  onChange={handleChange}
-                  placeholder="用户名、邮箱或手机号"
-                  helperText="验证码会发送到该账号绑定的邮箱"
-                  InputProps={{
-                    startAdornment: (
-                      <InputAdornment position="start">
-                        <Badge sx={{ color: '#667eea' }} />
-                      </InputAdornment>
-                    ),
-                  }}
-                  sx={{ mb: 2 }}
-                />
+        <Button
+          fullWidth
+          variant="outlined"
+          onClick={() => void handleRequestCode()}
+          disabled={sendingCode || countdown > 0}
+          startIcon={<MarkEmailUnread />}
+          sx={{
+            mb: 2,
+            py: 1.4,
+            borderRadius: 2,
+            borderColor: 'primary.main',
+            color: 'primary.main',
+          }}
+        >
+          {sendingCode
+            ? t('forgot.sendingCode')
+            : countdown > 0
+              ? t('forgot.resendCountdown', { seconds: countdown })
+              : codeRequested
+                ? t('forgot.resendCode')
+                : t('forgot.sendCode')}
+        </Button>
 
-                <Button
-                  fullWidth
-                  variant="outlined"
-                  onClick={() => void handleRequestCode()}
-                  disabled={sendingCode || countdown > 0}
-                  startIcon={<MarkEmailUnread />}
-                  sx={{
-                    mb: 2,
-                    py: 1.4,
-                    borderRadius: 2,
-                    borderColor: '#667eea',
-                    color: '#667eea',
-                  }}
-                >
-                  {sendingCode
-                    ? '发送中...'
-                    : countdown > 0
-                      ? `${countdown}s 后可重新发送`
-                      : codeRequested
-                        ? '重新发送验证码'
-                        : '发送验证码'}
-                </Button>
+        <TextField
+          fullWidth
+          label={accountIsPhone ? t('forgot.smsCodeLabel') : t('forgot.emailCodeLabel')}
+          name="code"
+          value={formData.code}
+          onChange={handleChange}
+          placeholder={t('forgot.codePlaceholder')}
+          helperText={t('forgot.codeExpiresHint', { minutes: Math.max(1, Math.ceil(codeExpiresIn / 60)) })}
+          InputProps={{
+            startAdornment: (
+              <InputAdornment position="start">
+                <LockReset sx={{ color: 'text.secondary' }} />
+              </InputAdornment>
+            ),
+          }}
+          sx={{ mb: 2 }}
+        />
 
-                <TextField
-                  fullWidth
-                  label="邮箱验证码"
-                  name="code"
-                  value={formData.code}
-                  onChange={handleChange}
-                  placeholder="请输入 6 位数字验证码"
-                  helperText={`验证码有效期 ${Math.max(1, Math.ceil(codeExpiresIn / 60))} 分钟`}
-                  InputProps={{
-                    startAdornment: (
-                      <InputAdornment position="start">
-                        <LockReset sx={{ color: '#667eea' }} />
-                      </InputAdornment>
-                    ),
-                  }}
-                  sx={{ mb: 2 }}
-                />
+        <TextField
+          fullWidth
+          label={t('forgot.newPasswordLabel')}
+          name="newPassword"
+          type={showPassword ? 'text' : 'password'}
+          value={formData.newPassword}
+          onChange={handleChange}
+          helperText={t('forgot.newPasswordHelper')}
+          InputProps={{
+            startAdornment: (
+              <InputAdornment position="start">
+                <Password sx={{ color: 'text.secondary' }} />
+              </InputAdornment>
+            ),
+            endAdornment: (
+              <InputAdornment position="end">
+                <IconButton onClick={() => setShowPassword((prev) => !prev)} edge="end">
+                  {showPassword ? <VisibilityOff /> : <Visibility />}
+                </IconButton>
+              </InputAdornment>
+            ),
+          }}
+          sx={{ mb: 2 }}
+        />
 
-                <TextField
-                  fullWidth
-                  label="新密码"
-                  name="newPassword"
-                  type={showPassword ? 'text' : 'password'}
-                  value={formData.newPassword}
-                  onChange={handleChange}
-                  helperText="长度必须在 6-50 个字符之间"
-                  InputProps={{
-                    startAdornment: (
-                      <InputAdornment position="start">
-                        <Password sx={{ color: '#667eea' }} />
-                      </InputAdornment>
-                    ),
-                    endAdornment: (
-                      <InputAdornment position="end">
-                        <IconButton onClick={() => setShowPassword((prev) => !prev)} edge="end">
-                          {showPassword ? <VisibilityOff /> : <Visibility />}
-                        </IconButton>
-                      </InputAdornment>
-                    ),
-                  }}
-                  sx={{ mb: 2 }}
-                />
+        <TextField
+          fullWidth
+          label={t('forgot.confirmPasswordLabel')}
+          name="confirmPassword"
+          type={showConfirmPassword ? 'text' : 'password'}
+          value={formData.confirmPassword}
+          onChange={handleChange}
+          InputProps={{
+            startAdornment: (
+              <InputAdornment position="start">
+                <Password sx={{ color: 'text.secondary' }} />
+              </InputAdornment>
+            ),
+            endAdornment: (
+              <InputAdornment position="end">
+                <IconButton onClick={() => setShowConfirmPassword((prev) => !prev)} edge="end">
+                  {showConfirmPassword ? <VisibilityOff /> : <Visibility />}
+                </IconButton>
+              </InputAdornment>
+            ),
+          }}
+          sx={{ mb: 3 }}
+        />
 
-                <TextField
-                  fullWidth
-                  label="确认新密码"
-                  name="confirmPassword"
-                  type={showConfirmPassword ? 'text' : 'password'}
-                  value={formData.confirmPassword}
-                  onChange={handleChange}
-                  InputProps={{
-                    startAdornment: (
-                      <InputAdornment position="start">
-                        <Password sx={{ color: '#667eea' }} />
-                      </InputAdornment>
-                    ),
-                    endAdornment: (
-                      <InputAdornment position="end">
-                        <IconButton onClick={() => setShowConfirmPassword((prev) => !prev)} edge="end">
-                          {showConfirmPassword ? <VisibilityOff /> : <Visibility />}
-                        </IconButton>
-                      </InputAdornment>
-                    ),
-                  }}
-                  sx={{ mb: 3 }}
-                />
+        <Button
+          fullWidth
+          variant="contained"
+          type="submit"
+          disabled={submitting}
+          sx={{
+            py: 1.6,
+            borderRadius: 2,
+            fontWeight: 'bold',
+          }}
+        >
+          {submitting ? t('forgot.resetting') : t('forgot.reset')}
+        </Button>
+      </Box>
 
-                <Button
-                  fullWidth
-                  variant="contained"
-                  type="submit"
-                  disabled={submitting}
-                  sx={{
-                    py: 1.6,
-                    borderRadius: 2,
-                    fontWeight: 'bold',
-                    background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-                  }}
-                >
-                  {submitting ? '重置中...' : '重置密码'}
-                </Button>
-              </Box>
-
-              <Box sx={{ textAlign: 'center', mt: 3 }}>
-                <Typography variant="body2" color="text.secondary">
-                  想起密码了？{' '}
-                  <Link
-                    to="/login"
-                    style={{
-                      color: '#667eea',
-                      textDecoration: 'none',
-                      fontWeight: 'bold',
-                    }}
-                  >
-                    返回登录
-                  </Link>
-                </Typography>
-              </Box>
-            </Paper>
-          </Fade>
-        </Container>
-      </Zoom>
-    </Box>
+      <Box sx={{ textAlign: 'center', mt: 3 }}>
+        <Typography variant="body2" color="text.secondary">
+          {t('forgot.rememberPassword')}{' '}
+          <Link
+            component={RouterLink}
+            to="/login"
+            sx={{
+              color: 'primary.main',
+              textDecoration: 'none',
+              fontWeight: 'bold',
+            }}
+          >
+            {t('forgot.backToLogin')}
+          </Link>
+        </Typography>
+      </Box>
+    </AuthScreen>
   )
 }

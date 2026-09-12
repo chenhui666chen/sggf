@@ -21,35 +21,40 @@ import {
   TextField,
   Typography,
 } from '@mui/material'
+import { useTranslation } from 'react-i18next'
+import type { TFunction } from 'i18next'
+import { useFormats } from '@/i18n'
 
 import { audiobookButtonSx, audiobookColorRoles, audiobookColors } from './audiobookTheme'
 import type { AudiobookProjectHistoryItem, HistoryDialogProps } from './types'
 
-const getEngineModeLabel = (engineMode: AudiobookProjectHistoryItem['engine_mode']) => (
-  engineMode === 'seed_scene' ? '场景生成' : '分轨合成'
+const getEngineModeLabel = (engineMode: AudiobookProjectHistoryItem['engine_mode'], t: TFunction) => (
+  engineMode === 'seed_scene'
+    ? t('audiobook.audiobookSetupStep.seedSceneLabel')
+    : t('audiobook.audiobookSetupStep.legacyStemsLabel')
 )
 
 // 完成阶段标签：剧本-only 批次 status 也是 completed，
 // 须按音频落盘章节数区分，避免被误读为整体完成
-const getHistoryStatusChip = (project: AudiobookProjectHistoryItem) => {
+const getHistoryStatusChip = (project: AudiobookProjectHistoryItem, t: TFunction) => {
   if (project.status === 'processing') {
-    return { label: '生成中', chipBg: audiobookColorRoles.taskStatus.running.chipBg }
+    return { label: t('audiobook.historyDialog.processingLabel'), chipBg: audiobookColorRoles.taskStatus.running.chipBg }
   }
   if (project.status === 'failed') {
-    return { label: '失败', chipBg: audiobookColorRoles.taskStatus.failed.chipBg }
+    return { label: t('audiobook.historyDialog.failedLabel'), chipBg: audiobookColorRoles.taskStatus.failed.chipBg }
   }
   if (project.status === 'completed') {
     const totalChapters = project.total_chapters || 0
     const audioCompleted = project.audio_completed_chapters || 0
     if (totalChapters > 0 && audioCompleted >= totalChapters) {
-      return { label: '全部完成', chipBg: audiobookColorRoles.taskStatus.completed.chipBg }
+      return { label: t('audiobook.historyDialog.allCompleted'), chipBg: audiobookColorRoles.taskStatus.completed.chipBg }
     }
     if (audioCompleted > 0) {
-      return { label: '部分完成', chipBg: audiobookColors.warningMain }
+      return { label: t('audiobook.historyDialog.partialCompleted'), chipBg: audiobookColors.warningMain }
     }
-    return { label: '剧本完成·音频未生成', chipBg: audiobookColorRoles.notice.warning.text }
+    return { label: t('audiobook.historyDialog.scriptOnlyCompleted'), chipBg: audiobookColorRoles.notice.warning.text }
   }
-  return { label: '等待中', chipBg: audiobookColorRoles.taskStatus.pending.chipBg }
+  return { label: t('audiobook.historyDialog.pendingLabel'), chipBg: audiobookColorRoles.taskStatus.pending.chipBg }
 }
 
 const HistoryDialog = ({
@@ -61,6 +66,8 @@ const HistoryDialog = ({
   onViewHistory,
   onDeleteHistory,
 }: HistoryDialogProps) => {
+  const { formatDateTime } = useFormats()
+  const { t } = useTranslation()
   const [deleteProjectId, setDeleteProjectId] = useState<number | null>(null)
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
   const [deleteReason, setDeleteReason] = useState('')
@@ -94,21 +101,15 @@ const HistoryDialog = ({
 
   const formatProjectCreatedAt = (value: string | null | undefined) => {
     if (!value) {
-      return '时间未知'
+      return t('audiobook.historyDialog.unknownTime')
     }
 
     const timestamp = Date.parse(value)
     if (!Number.isFinite(timestamp)) {
-      return '时间未知'
+      return t('audiobook.historyDialog.unknownTime')
     }
 
-    return new Date(timestamp).toLocaleString('zh-CN', {
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-    })
+    return formatDateTime(timestamp)
   }
 
   return (
@@ -118,7 +119,7 @@ const HistoryDialog = ({
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
             <HistoryIcon sx={{ color: audiobookColors.brand }} />
             <Typography variant="h6">
-              {selectedProject?.title} - 历史生成记录
+              {t('audiobook.historyDialog.historyTitle', { title: selectedProject?.title || '' })}
             </Typography>
           </Box>
         </DialogTitle>
@@ -130,13 +131,13 @@ const HistoryDialog = ({
           ) : historyProjects.length === 0 ? (
             <Box sx={{ textAlign: 'center', py: 4 }}>
               <Typography variant="body2" color="text.secondary">
-                还没有生成过有声书
+                {t('audiobook.historyDialog.emptyHistory')}
               </Typography>
             </Box>
           ) : (
             <List>
               {historyProjects.map((project) => {
-                const statusChip = getHistoryStatusChip(project)
+                const statusChip = getHistoryStatusChip(project, t)
                 const audioCompleted = project.audio_completed_chapters || 0
                 return (
                 <ListItem
@@ -163,7 +164,7 @@ const HistoryDialog = ({
                         }}
                       />
                       <Chip
-                        label={getEngineModeLabel(project.engine_mode)}
+                        label={getEngineModeLabel(project.engine_mode, t)}
                         size="small"
                         variant="outlined"
                         sx={{ color: audiobookColors.brand, borderColor: audiobookColors.brand }}
@@ -174,18 +175,26 @@ const HistoryDialog = ({
                     </Box>
                     <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
                       <Typography variant="body2">
-                        剧本：{project.completed_chapters}/{project.total_chapters}
+                        {t('audiobook.historyDialog.scriptCount', {
+                          done: project.completed_chapters,
+                          total: project.total_chapters,
+                        })}
                       </Typography>
                       <Typography
                         variant="body2"
                         color={audioCompleted > 0 ? 'text.primary' : undefined}
                         sx={audioCompleted > 0 ? undefined : { color: audiobookColorRoles.notice.warning.text }}
                       >
-                        音频：{audioCompleted}/{project.total_chapters}
+                        {t('audiobook.historyDialog.audioCount', {
+                          done: audioCompleted,
+                          total: project.total_chapters,
+                        })}
                       </Typography>
                       {audioCompleted > 0 && (
                         <Typography variant="body2" color="text.secondary">
-                          时长：{((project.total_duration || 0) / 60).toFixed(1)}分钟
+                          {t('audiobook.historyDialog.durationLabel', {
+                            minutes: ((project.total_duration || 0) / 60).toFixed(1),
+                          })}
                         </Typography>
                       )}
                     </Box>
@@ -219,7 +228,7 @@ const HistoryDialog = ({
           )}
         </DialogContent>
         <DialogActions>
-          <Button onClick={onCloseHistory}>关闭</Button>
+          <Button onClick={onCloseHistory}>{t('action.close')}</Button>
         </DialogActions>
       </Dialog>
 
@@ -227,22 +236,22 @@ const HistoryDialog = ({
         <DialogTitle>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
             <WarningIcon sx={{ color: audiobookColorRoles.destructiveAction.main }} />
-            <Typography variant="h6">确认删除</Typography>
+            <Typography variant="h6">{t('audiobook.historyDialog.deleteConfirmTitle')}</Typography>
           </Box>
         </DialogTitle>
         <DialogContent>
           <Alert severity="warning" sx={{ mb: 2 }}>
-            此操作将删除该有声书项目的产出，原始章节内容不受影响。
+            {t('audiobook.historyDialog.deleteWarning')}
           </Alert>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-            项目ID: {deleteProjectId}
+            {t('audiobook.historyDialog.projectIdLabel', { id: deleteProjectId })}
           </Typography>
           <TextField
             fullWidth
             multiline
             rows={3}
-            label="删除原因（可选）"
-            placeholder="请说明删除原因..."
+            label={t('audiobook.historyDialog.deleteReasonLabel')}
+            placeholder={t('audiobook.historyDialog.deleteReasonPlaceholder')}
             value={deleteReason}
             onChange={(event) => setDeleteReason(event.target.value)}
             sx={{ mb: 2 }}
@@ -260,11 +269,11 @@ const HistoryDialog = ({
                 }}
               />
             }
-            label="同时删除音频文件（不可恢复）"
+            label={t('audiobook.historyDialog.deleteFilesLabel')}
           />
         </DialogContent>
         <DialogActions>
-          <Button onClick={handleCloseDeleteDialog} disabled={deleting}>取消</Button>
+          <Button onClick={handleCloseDeleteDialog} disabled={deleting}>{t('action.cancel')}</Button>
           <Button
             onClick={handleConfirmDelete}
             disabled={deleting}
@@ -272,7 +281,7 @@ const HistoryDialog = ({
             startIcon={deleting ? <CircularProgress size={18} color="inherit" /> : undefined}
             sx={audiobookButtonSx.dangerContained}
           >
-            {deleting ? '删除中...' : '确认删除'}
+            {deleting ? t('audiobook.historyDialog.deletingText') : t('audiobook.historyDialog.deleteConfirmAction')}
           </Button>
         </DialogActions>
       </Dialog>

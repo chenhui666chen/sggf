@@ -6,6 +6,7 @@ import {
   ListItemText,
   Typography,
 } from '@mui/material'
+import { useTranslation } from 'react-i18next'
 
 import type { ScriptReviewDetail } from './types'
 import {
@@ -23,89 +24,97 @@ const ScriptReviewMetricSections = ({
   scriptQuality,
   audioBalance,
   pacing,
-}: ScriptReviewMetricSectionsProps) => (
+}: ScriptReviewMetricSectionsProps) => {
+  const { t } = useTranslation()
+  return (
   <>
-    <Divider textAlign="left">剧本质量</Divider>
+    <Divider textAlign="left">{t('audiobook.scriptReviewMetricSections.scriptQualityTitle')}</Divider>
     <Grid container spacing={1}>
       <Grid item xs={4}>
         <Typography variant="caption" color="text.secondary">
-          自然流畅度
+          {t('audiobook.scriptReviewMetricSections.naturalnessLabel')}
         </Typography>
         <Typography variant="subtitle2">{formatTenScale(scriptQuality.naturalness_score)}/10</Typography>
       </Grid>
       <Grid item xs={4}>
         <Typography variant="caption" color="text.secondary">
-          信息清晰度
+          {t('audiobook.scriptReviewMetricSections.clarityLabel')}
         </Typography>
         <Typography variant="subtitle2">{formatTenScale(scriptQuality.clarity_score)}/10</Typography>
       </Grid>
       <Grid item xs={4}>
         <Typography variant="caption" color="text.secondary">
-          听觉张力
+          {t('audiobook.scriptReviewMetricSections.engagementLabel')}
         </Typography>
         <Typography variant="subtitle2">{formatTenScale(scriptQuality.engagement_score)}/10</Typography>
       </Grid>
     </Grid>
     <Typography variant="caption" color="text.secondary">
-      片段数：{scriptQuality.total_segments ?? '—'} · 平均片段长度：
+      {t('audiobook.scriptReviewMetricSections.segmentSummary', { total: scriptQuality.total_segments ?? '—' })}
       {typeof scriptQuality.average_segment_length === 'number'
-        ? `${formatOneDecimal(scriptQuality.average_segment_length)} 字`
+        ? t('audiobook.scriptReviewMetricSections.charUnit', { count: formatOneDecimal(scriptQuality.average_segment_length) })
         : '—'}
     </Typography>
 
-    <Divider textAlign="left">音频平衡</Divider>
+    <Divider textAlign="left">{t('audiobook.scriptReviewMetricSections.audioBalanceTitle')}</Divider>
     <List dense>
       <ListItem disableGutters>
         <ListItemText
-          primary="音效密度"
+          primary={t('audiobook.scriptReviewMetricSections.effectsDensityLabel')}
           secondary={
             audioBalance.sound_effects
-              ? `${audioBalance.sound_effects}（≈ ${formatOneDecimal(audioBalance.effects_per_minute)} / 分钟）`
+              ? t('audiobook.scriptReviewMetricSections.effectsDensityValue', {
+                  value: audioBalance.sound_effects,
+                  rate: formatOneDecimal(audioBalance.effects_per_minute),
+                })
               : '—'
           }
         />
       </ListItem>
       <ListItem disableGutters>
         <ListItemText
-          primary="配乐覆盖"
+          primary={t('audiobook.scriptReviewMetricSections.musicCoverageLabel')}
           secondary={
             audioBalance.music
-              ? `${audioBalance.music}（共 ${audioBalance.total_music_cues ?? 0} 个提示）`
+              ? t('audiobook.scriptReviewMetricSections.musicCoverageValue', {
+                  value: audioBalance.music,
+                  total: audioBalance.total_music_cues ?? 0,
+                })
               : '—'
           }
         />
       </ListItem>
       <ListItem disableGutters>
         <ListItemText
-          primary="角色音色区分"
+          primary={t('audiobook.scriptReviewMetricSections.voiceDiffLabel')}
           secondary={audioBalance.voice_differentiation || '—'}
         />
       </ListItem>
       {(audioBalance.unresolved_effect_count ?? 0) > 0 && (
         <ListItem disableGutters>
           <ListItemText
-            primary="未解析音效"
-            secondary={
-              `共 ${audioBalance.unresolved_effect_count} 个，` +
-              `占位 ${audioBalance.placeholder_effect_count ?? 0} 个，` +
-              `缺失文件 ${audioBalance.missing_effect_file_count ?? 0} 个`
-            }
+            primary={t('audiobook.scriptReviewMetricSections.unresolvedEffectsLabel')}
+            secondary={t('audiobook.scriptReviewMetricSections.unresolvedEffectsValue', {
+              total: audioBalance.unresolved_effect_count,
+              placeholder: audioBalance.placeholder_effect_count ?? 0,
+              missing: audioBalance.missing_effect_file_count ?? 0,
+            })}
           />
         </ListItem>
       )}
     </List>
 
-    <Divider textAlign="left">节奏评估</Divider>
+    <Divider textAlign="left">{t('audiobook.scriptReviewMetricSections.pacingTitle')}</Divider>
     <List dense>
       <ListItem disableGutters>
         <ListItemText
-          primary="预计成品时长"
+          primary={t('audiobook.scriptReviewMetricSections.estimatedDurationLabel')}
           secondary={pacing.estimated_duration || '—'}
         />
       </ListItem>
       <ListItem disableGutters>
         <ListItemText
-          primary="平均片段朗读时长"
+          primary={t('audiobook.scriptReviewMetricSections.avgSegmentDurationLabel')}
           secondary={pacing.average_segment_duration || '—'}
         />
       </ListItem>
@@ -114,18 +123,19 @@ const ScriptReviewMetricSections = ({
           <ListItem key={idx} disableGutters>
             <ListItemText
               primaryTypographyProps={{ variant: 'body2' }}
-              primary={`节奏提示 ${idx + 1}`}
+              primary={t('audiobook.scriptReviewMetricSections.pacingIssueLabel', { index: idx + 1 })}
               secondary={issue}
             />
           </ListItem>
         ))
       ) : (
         <ListItem disableGutters>
-          <ListItemText secondary="节奏稳定，未发现明显问题" />
+          <ListItemText secondary={t('audiobook.scriptReviewMetricSections.pacingStable')} />
         </ListItem>
       )}
     </List>
   </>
-)
+  )
+}
 
 export default ScriptReviewMetricSections

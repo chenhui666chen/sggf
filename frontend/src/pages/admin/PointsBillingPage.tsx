@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import type { TFunction } from 'i18next'
+import { useTranslation } from 'react-i18next'
 import {
   Alert,
   Box,
@@ -36,6 +38,7 @@ import {
   apiClient,
   extractApiErrorMessage,
 } from '@/services/api'
+import { useFormats } from '@/i18n'
 
 type FilterState = {
   userId: string
@@ -45,25 +48,31 @@ type FilterState = {
   keyword: string
 }
 
-const MODULE_OPTIONS = [
-  { value: '', label: '全部模块' },
-  { value: 'audiobook', label: '有声书' },
-  { value: 'dreamweaver', label: '短剧' },
-]
+function buildModuleOptions(t: TFunction): Array<{ value: string; label: string }> {
+  return [
+    { value: '', label: t('admin.pointsBilling.filters.allModules') },
+    { value: 'audiobook', label: t('admin.pointsBilling.filters.audiobook') },
+    { value: 'dreamweaver', label: t('admin.pointsBilling.filters.dreamweaver') },
+  ]
+}
 
-const EVENT_OPTIONS = [
-  { value: '', label: '全部事件' },
-  { value: 'freeze', label: '冻结' },
-  { value: 'settle', label: '结算' },
-  { value: 'release', label: '释放' },
-]
+function buildEventOptions(t: TFunction): Array<{ value: string; label: string }> {
+  return [
+    { value: '', label: t('admin.pointsBilling.filters.allEvents') },
+    { value: 'freeze', label: t('admin.pointsBilling.filters.freeze') },
+    { value: 'settle', label: t('admin.pointsBilling.filters.settle') },
+    { value: 'release', label: t('admin.pointsBilling.filters.release') },
+  ]
+}
 
-const MARGIN_OPTIONS = [
-  { value: '', label: '全部毛利状态' },
-  { value: 'healthy', label: '毛利健康' },
-  { value: 'warning', label: '低毛利预警' },
-  { value: 'negative', label: '负毛利' },
-]
+function buildMarginOptions(t: TFunction): Array<{ value: string; label: string }> {
+  return [
+    { value: '', label: t('admin.pointsBilling.filters.allMarginStatus') },
+    { value: 'healthy', label: t('admin.pointsBilling.filters.marginHealthy') },
+    { value: 'warning', label: t('admin.pointsBilling.filters.marginWarning') },
+    { value: 'negative', label: t('admin.pointsBilling.filters.marginNegative') },
+  ]
+}
 
 const EMPTY_FILTERS: FilterState = {
   userId: '',
@@ -98,16 +107,16 @@ function formatPercent(value?: number | null) {
   return `${(value * 100).toFixed(value === 1 ? 0 : 2)}%`
 }
 
-function formatPricingStatus(status?: string | null) {
-  if (status === 'actual') return '实际计费'
-  if (status === 'estimated') return '预估计费'
-  if (status === 'pending') return '待计费'
+function formatPricingStatus(status?: string | null, t?: TFunction) {
+  if (status === 'actual') return t ? t('admin.pointsBilling.status.actual') : '实际计费'
+  if (status === 'estimated') return t ? t('admin.pointsBilling.status.estimated') : '预估计费'
+  if (status === 'pending') return t ? t('admin.pointsBilling.status.pending') : '待计费'
   return status || '-'
 }
 
-function formatTaskStatus(status?: string | null) {
-  if (status === 'running') return '运行中'
-  if (status === 'completed') return '已完成'
+function formatTaskStatus(status?: string | null, t?: TFunction) {
+  if (status === 'running') return t ? t('admin.pointsBilling.status.running') : '运行中'
+  if (status === 'completed') return t ? t('admin.pointsBilling.status.completed') : '已完成'
   return status || '-'
 }
 
@@ -124,10 +133,10 @@ function getMarginColor(status?: string | null): 'default' | 'success' | 'warnin
   return 'default'
 }
 
-function formatMarginStatus(status?: string | null) {
-  if (status === 'negative') return '负毛利'
-  if (status === 'warning') return '低毛利预警'
-  if (status === 'healthy') return '毛利健康'
+function formatMarginStatus(status?: string | null, t?: TFunction) {
+  if (status === 'negative') return t ? t('admin.pointsBilling.status.negative') : '负毛利'
+  if (status === 'warning') return t ? t('admin.pointsBilling.status.warning') : '低毛利预警'
+  if (status === 'healthy') return t ? t('admin.pointsBilling.status.healthy') : '毛利健康'
   return '-'
 }
 
@@ -137,14 +146,14 @@ function getSummaryAlertSeverity(summary: AdminPointsBillingSummary): 'success' 
   return 'success'
 }
 
-function getSummaryAlertMessage(summary: AdminPointsBillingSummary) {
+function getSummaryAlertMessage(summary: AdminPointsBillingSummary, t?: TFunction) {
   if (summary.negative_event_count > 0) {
-    return `当前范围存在 ${summary.negative_event_count} 条负毛利结算，建议优先复核供应商折扣与用户计价策略。`
+    return t ? t('admin.pointsBilling.summaryAlert.negative', { count: summary.negative_event_count }) : `当前范围存在 ${summary.negative_event_count} 条负毛利结算，建议优先复核供应商折扣与用户计价策略。`
   }
   if (summary.warning_event_count > 0) {
-    return `当前范围存在 ${summary.warning_event_count} 条低毛利结算，建议优先关注模块毛利分布和让利策略。`
+    return t ? t('admin.pointsBilling.summaryAlert.warning', { count: summary.warning_event_count }) : `当前范围存在 ${summary.warning_event_count} 条低毛利结算，建议优先关注模块毛利分布和让利策略。`
   }
-  return '当前范围的结算毛利健康，暂未发现低毛利或负毛利结算。'
+  return t ? t('admin.pointsBilling.summaryAlert.healthy') : '当前范围的结算毛利健康，暂未发现低毛利或负毛利结算。'
 }
 
 function isQuickFilterActive(filters: FilterState, marginStatus: 'warning' | 'negative') {
@@ -163,28 +172,48 @@ function getPricingStatusColor(status?: string | null): 'default' | 'primary' | 
   return 'default'
 }
 
-function formatStageLabel(stage?: string | null) {
+const STAGE_LABELS: Record<string, string> = {
+  init: '初始化',
+  strategy: '策略',
+  storyboard: '分镜',
+  delivery: '交付',
+  design: '设计',
+  script_adaptation: '脚本改编',
+  quality_review: '质量复核',
+  audio_prompt_review: '提示词复核',
+  tts_synthesis: '语音合成',
+  audio_mixing: '音频混音',
+  final_audio_review: '成品复核',
+  waiting_script_approval: '待脚本确认',
+  waiting_approval: '待确认',
+  waiting_video_confirmation: '待视频确认',
+}
+
+const STAGE_LABEL_KEYS: Record<string, string> = {
+  init: 'admin.pointsBilling.stages.init',
+  strategy: 'admin.pointsBilling.stages.strategy',
+  storyboard: 'admin.pointsBilling.stages.storyboard',
+  delivery: 'admin.pointsBilling.stages.delivery',
+  design: 'admin.pointsBilling.stages.design',
+  script_adaptation: 'admin.pointsBilling.stages.scriptAdaptation',
+  quality_review: 'admin.pointsBilling.stages.qualityReview',
+  audio_prompt_review: 'admin.pointsBilling.stages.audioPromptReview',
+  tts_synthesis: 'admin.pointsBilling.stages.ttsSynthesis',
+  audio_mixing: 'admin.pointsBilling.stages.audioMixing',
+  final_audio_review: 'admin.pointsBilling.stages.finalAudioReview',
+  waiting_script_approval: 'admin.pointsBilling.stages.waitingScriptApproval',
+  waiting_approval: 'admin.pointsBilling.stages.waitingApproval',
+  waiting_video_confirmation: 'admin.pointsBilling.stages.waitingVideoConfirmation',
+}
+
+function formatStageLabel(stage?: string | null, t?: TFunction) {
   const normalized = String(stage || '').trim().toLowerCase()
   if (!normalized) return '-'
-
-  const labels: Record<string, string> = {
-    init: '初始化',
-    strategy: '策略',
-    storyboard: '分镜',
-    delivery: '交付',
-    design: '设计',
-    script_adaptation: '脚本改编',
-    quality_review: '质量复核',
-    audio_prompt_review: '提示词复核',
-    tts_synthesis: '语音合成',
-    audio_mixing: '音频混音',
-    final_audio_review: '成品复核',
-    waiting_script_approval: '待脚本确认',
-    waiting_approval: '待确认',
-    waiting_video_confirmation: '待视频确认',
+  if (t) {
+    const key = STAGE_LABEL_KEYS[normalized]
+    if (key) return t(key)
   }
-
-  return labels[normalized] || stage || '-'
+  return STAGE_LABELS[normalized] || stage || '-'
 }
 
 function normalizeActionPath(actionPath?: string | null) {
@@ -194,20 +223,24 @@ function normalizeActionPath(actionPath?: string | null) {
   return raw.startsWith('/') ? raw : `/${raw.replace(/^\/+/, '')}`
 }
 
-function buildPolicyAlignmentMessage(gap?: number | null) {
+function buildPolicyAlignmentMessage(gap?: number | null, t?: TFunction) {
   if (typeof gap !== 'number' || Number.isNaN(gap)) {
-    return '当前没有可用的策略对齐差数据。'
+    return t ? t('admin.pointsBilling.policyGap.noData') : '当前没有可用的策略对齐差数据。'
   }
 
   if (Math.abs(gap) < 0.01) {
-    return '当前用户计费与策略目标基本一致。'
+    return t ? t('admin.pointsBilling.policyGap.aligned') : '当前用户计费与策略目标基本一致。'
   }
 
   if (gap > 0) {
-    return `当前用户实付高于策略目标 ${formatCurrency(gap)}，可能存在历史计价偏高或补差结算。`
+    return t
+      ? t('admin.pointsBilling.policyGap.above', { amount: formatCurrency(gap) })
+      : `当前用户实付高于策略目标 ${formatCurrency(gap)}，可能存在历史计价偏高或补差结算。`
   }
 
-  return `当前用户实付低于策略目标 ${formatCurrency(Math.abs(gap))}，说明本次结算存在额外让利。`
+  return t
+    ? t('admin.pointsBilling.policyGap.below', { amount: formatCurrency(Math.abs(gap)) })
+    : `当前用户实付低于策略目标 ${formatCurrency(Math.abs(gap))}，说明本次结算存在额外让利。`
 }
 
 function DetailMetricCard(props: {
@@ -236,7 +269,15 @@ function DetailMetricCard(props: {
 }
 
 export default function PointsBillingPage() {
+  // 只解构 formatDateTimeWithSeconds：本文件已有 formatCurrency / formatPercent 等本地
+  // helper，它们的展示约定与 useFormats 的同名函数不同，不能被遮蔽。
+  // 计费事件保留到秒：对账时同一分钟内的多笔扣费要排得出先后。
+  const { t } = useTranslation()
+  const { formatDateTimeWithSeconds } = useFormats()
   const navigate = useNavigate()
+  const moduleOptions = buildModuleOptions(t)
+  const eventOptions = buildEventOptions(t)
+  const marginOptions = buildMarginOptions(t)
   const [items, setItems] = useState<AdminPointsBillingEvent[]>([])
   const [summary, setSummary] = useState<AdminPointsBillingSummary>(EMPTY_SUMMARY)
   const [loading, setLoading] = useState(true)
@@ -276,7 +317,7 @@ export default function PointsBillingPage() {
       setSummary(response.data.summary ?? EMPTY_SUMMARY)
       setError(null)
     } catch (err) {
-      setError(await extractApiErrorMessage(err, '获取计费事件失败'))
+      setError(await extractApiErrorMessage(err, t('admin.pointsBilling.fetchFailed')))
       setItems([])
       setTotal(0)
       setSummary(EMPTY_SUMMARY)
@@ -356,9 +397,9 @@ export default function PointsBillingPage() {
         sx={{ mb: 3 }}
       >
         <Box>
-          <Typography variant="h4">计费事件</Typography>
+          <Typography variant="h4">{t('admin.pointsBilling.title')}</Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mt: 0.75 }}>
-            统一查看正式积分冻结、结算、释放事件，并按毛利状态筛选经营风险。
+            {t('admin.pointsBilling.subtitle')}
           </Typography>
         </Box>
         <Button
@@ -367,7 +408,7 @@ export default function PointsBillingPage() {
           onClick={() => void fetchEvents(true)}
           disabled={refreshing}
         >
-          刷新
+          {t('admin.common.refresh')}
         </Button>
       </Stack>
 
@@ -380,9 +421,9 @@ export default function PointsBillingPage() {
       <Card sx={{ mb: 3 }}>
         <CardContent>
           <Box sx={{ mb: 2.5 }}>
-            <Typography variant="h6">经营概览</Typography>
+            <Typography variant="h6">{t('admin.pointsBilling.overview.title')}</Typography>
             <Typography variant="body2" color="text.secondary" sx={{ mt: 0.75 }}>
-              基于当前用户、模块、关键词范围内的结算事件汇总，不受下方事件类型与毛利筛选影响。
+              {t('admin.pointsBilling.overview.subtitle')}
             </Typography>
           </Box>
 
@@ -395,71 +436,74 @@ export default function PointsBillingPage() {
           >
             <Paper variant="outlined" sx={{ p: 2 }}>
               <Typography variant="overline" color="text.secondary">
-                近 7 天结算事件
+                {t('admin.pointsBilling.overview.recent7dTitle')}
               </Typography>
               <Typography variant="h4" sx={{ mt: 0.75 }}>
                 {summary.recent_7d_settle_count}
               </Typography>
               <Typography variant="body2" color="text.secondary" sx={{ mt: 0.75 }}>
-                用于判断近期消耗与结算活跃度
+                {t('admin.pointsBilling.overview.recent7dCaption')}
               </Typography>
             </Paper>
 
             <Paper variant="outlined" sx={{ p: 2 }}>
               <Typography variant="overline" color="text.secondary">
-                当前范围低毛利事件
+                {t('admin.pointsBilling.overview.warningTitle')}
               </Typography>
               <Typography variant="h4" color={summary.warning_event_count > 0 ? 'warning.main' : 'text.primary'} sx={{ mt: 0.75 }}>
                 {summary.warning_event_count}
               </Typography>
               <Typography variant="body2" color="text.secondary" sx={{ mt: 0.75 }}>
-                需要关注折扣捕获与让利是否过多
+                {t('admin.pointsBilling.overview.warningCaption')}
               </Typography>
             </Paper>
 
             <Paper variant="outlined" sx={{ p: 2 }}>
               <Typography variant="overline" color="text.secondary">
-                当前范围负毛利事件
+                {t('admin.pointsBilling.overview.negativeTitle')}
               </Typography>
               <Typography variant="h4" color={summary.negative_event_count > 0 ? 'error.main' : 'text.primary'} sx={{ mt: 0.75 }}>
                 {summary.negative_event_count}
               </Typography>
               <Typography variant="body2" color="text.secondary" sx={{ mt: 0.75 }}>
-                建议优先复核供应商成本与策略对齐差
+                {t('admin.pointsBilling.overview.negativeCaption')}
               </Typography>
             </Paper>
 
             <Paper variant="outlined" sx={{ p: 2 }}>
               <Typography variant="overline" color="text.secondary">
-                当前范围综合毛利率
+                {t('admin.pointsBilling.overview.marginTitle')}
               </Typography>
               <Typography variant="h4" sx={{ mt: 0.75 }}>
                 {formatPercent(summary.blended_margin_rate)}
               </Typography>
               <Typography variant="body2" color="text.secondary" sx={{ mt: 0.75 }}>
-                用户计费 {formatCurrency(summary.total_user_billed_yuan)} / 平台毛利 {formatCurrency(summary.total_platform_gross_profit_yuan)}
+                {t('admin.pointsBilling.overview.marginCaption', {
+                  billed: formatCurrency(summary.total_user_billed_yuan),
+                  profit: formatCurrency(summary.total_platform_gross_profit_yuan),
+                })}
               </Typography>
             </Paper>
           </Box>
 
           <Alert severity={getSummaryAlertSeverity(summary)} sx={{ mt: 2 }}>
-            {getSummaryAlertMessage(summary)}
+            {getSummaryAlertMessage(summary, t)}
           </Alert>
 
           <Box sx={{ mt: 3 }}>
             <Typography variant="subtitle1" sx={{ fontWeight: 700, mb: 1.5 }}>
-              按模块毛利分布
+              {t('admin.pointsBilling.moduleDist.title')}
             </Typography>
             <TableContainer component={Paper} variant="outlined">
               <Table size="small">
                 <TableHead>
                   <TableRow>
-                    <TableCell>模块</TableCell>
-                    <TableCell>结算事件</TableCell>
-                    <TableCell>风险事件</TableCell>
-                    <TableCell>用户计费</TableCell>
-                    <TableCell>平台毛利</TableCell>
-                    <TableCell>综合毛利率</TableCell>
+                    <TableCell>{t('admin.pointsBilling.moduleDist.colModule')}</TableCell>
+                    <TableCell>{t('admin.pointsBilling.moduleDist.colSettleEvents')}</TableCell>
+                    <TableCell>{t('admin.pointsBilling.moduleDist.colRiskEvents')}</TableCell>
+                    <TableCell>{t('admin.pointsBilling.moduleDist.colUserBilled')}</TableCell>
+                    <TableCell>{t('admin.pointsBilling.moduleDist.colPlatformProfit')}</TableCell>
+                    <TableCell>{t('admin.pointsBilling.moduleDist.colMarginRate')}</TableCell>
                   </TableRow>
                 </TableHead>
                 <TableBody>
@@ -476,8 +520,18 @@ export default function PointsBillingPage() {
                       <TableCell>{item.settle_event_count}</TableCell>
                       <TableCell>
                         <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-                          <Chip size="small" color="warning" variant="outlined" label={`低毛利 ${item.warning_event_count}`} />
-                          <Chip size="small" color="error" variant="outlined" label={`负毛利 ${item.negative_event_count}`} />
+                          <Chip
+                            size="small"
+                            color="warning"
+                            variant="outlined"
+                            label={t('admin.pointsBilling.moduleDist.lowMargin', { count: item.warning_event_count })}
+                          />
+                          <Chip
+                            size="small"
+                            color="error"
+                            variant="outlined"
+                            label={t('admin.pointsBilling.moduleDist.negativeMargin', { count: item.negative_event_count })}
+                          />
                         </Stack>
                       </TableCell>
                       <TableCell>{formatCurrency(item.total_user_billed_yuan)}</TableCell>
@@ -488,7 +542,7 @@ export default function PointsBillingPage() {
                   {summary.module_summaries.length === 0 ? (
                     <TableRow>
                       <TableCell colSpan={6}>
-                        <Alert severity="info">当前范围内暂无可汇总的结算事件。</Alert>
+                        <Alert severity="info">{t('admin.pointsBilling.moduleDist.empty')}</Alert>
                       </TableCell>
                     </TableRow>
                   ) : null}
@@ -509,20 +563,20 @@ export default function PointsBillingPage() {
             }}
           >
             <TextField
-              label="用户 ID"
+              label={t('admin.pointsBilling.filters.userIdLabel')}
               size="small"
               value={filters.userId}
               onChange={(event) => handleFilterChange('userId', event.target.value)}
-              placeholder="例如 12"
+              placeholder={t('admin.pointsBilling.filters.userIdPlaceholder')}
             />
             <FormControl size="small">
-              <InputLabel>模块</InputLabel>
+              <InputLabel>{t('admin.pointsBilling.filters.module')}</InputLabel>
               <Select
                 value={filters.moduleKey}
-                label="模块"
+                label={t('admin.pointsBilling.filters.module')}
                 onChange={(event) => handleFilterChange('moduleKey', event.target.value)}
               >
-                {MODULE_OPTIONS.map((option) => (
+                {moduleOptions.map((option) => (
                   <MenuItem key={option.value} value={option.value}>
                     {option.label}
                   </MenuItem>
@@ -530,13 +584,13 @@ export default function PointsBillingPage() {
               </Select>
             </FormControl>
             <FormControl size="small">
-              <InputLabel>事件类型</InputLabel>
+              <InputLabel>{t('admin.pointsBilling.filters.eventKind')}</InputLabel>
               <Select
                 value={filters.eventKind}
-                label="事件类型"
+                label={t('admin.pointsBilling.filters.eventKind')}
                 onChange={(event) => handleFilterChange('eventKind', event.target.value)}
               >
-                {EVENT_OPTIONS.map((option) => (
+                {eventOptions.map((option) => (
                   <MenuItem key={option.value} value={option.value}>
                     {option.label}
                   </MenuItem>
@@ -544,13 +598,13 @@ export default function PointsBillingPage() {
               </Select>
             </FormControl>
             <FormControl size="small">
-              <InputLabel>毛利状态</InputLabel>
+              <InputLabel>{t('admin.pointsBilling.filters.marginStatus')}</InputLabel>
               <Select
                 value={filters.marginStatus}
-                label="毛利状态"
+                label={t('admin.pointsBilling.filters.marginStatus')}
                 onChange={(event) => handleFilterChange('marginStatus', event.target.value)}
               >
-                {MARGIN_OPTIONS.map((option) => (
+                {marginOptions.map((option) => (
                   <MenuItem key={option.value} value={option.value}>
                     {option.label}
                   </MenuItem>
@@ -558,44 +612,44 @@ export default function PointsBillingPage() {
               </Select>
             </FormControl>
             <TextField
-              label="关键词"
+              label={t('admin.pointsBilling.filters.keywordLabel')}
               size="small"
               value={filters.keyword}
               onChange={(event) => handleFilterChange('keyword', event.target.value)}
-              placeholder="用户名、计费键、标题、运行 ID"
+              placeholder={t('admin.pointsBilling.filters.keywordPlaceholder')}
             />
           </Box>
 
           <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} sx={{ mt: 2 }}>
             <Button variant="outlined" onClick={handleResetFilters}>
-              重置筛选
+              {t('admin.pointsBilling.filters.reset')}
             </Button>
             <Button
               variant={!filters.eventKind && !filters.marginStatus ? 'contained' : 'outlined'}
               onClick={() => handleApplyQuickFilter('')}
             >
-              全部事件
+              {t('admin.pointsBilling.filters.allEvents')}
             </Button>
             <Button
               color="warning"
               variant={isQuickFilterActive(filters, 'warning') ? 'contained' : 'outlined'}
               onClick={() => handleApplyQuickFilter('warning')}
             >
-              低毛利结算
+              {t('admin.pointsBilling.filters.lowMarginSettle')}
             </Button>
             <Button
               color="error"
               variant={isQuickFilterActive(filters, 'negative') ? 'contained' : 'outlined'}
               onClick={() => handleApplyQuickFilter('negative')}
             >
-              负毛利结算
+              {t('admin.pointsBilling.filters.negativeMarginSettle')}
             </Button>
             <Typography variant="body2" color="text.secondary" sx={{ alignSelf: 'center' }}>
-              当前共 {total} 条正式计费事件
+              {t('admin.pointsBilling.filters.totalLabel', { count: total })}
             </Typography>
           </Stack>
           <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1.5 }}>
-            快捷筛选会自动切换到结算事件，便于直接排查低毛利与负毛利风险。
+            {t('admin.pointsBilling.filters.hint')}
           </Typography>
         </CardContent>
       </Card>
@@ -606,24 +660,24 @@ export default function PointsBillingPage() {
             <Table>
               <TableHead>
                 <TableRow>
-                  <TableCell>时间</TableCell>
-                  <TableCell>用户</TableCell>
-                  <TableCell>模块 / 事件</TableCell>
-                  <TableCell>标题</TableCell>
-                  <TableCell>积分 / 金额</TableCell>
-                  <TableCell>任务状态</TableCell>
-                  <TableCell>毛利状态</TableCell>
-                  <TableCell align="right">操作</TableCell>
+                  <TableCell>{t('admin.pointsBilling.table.colTime')}</TableCell>
+                  <TableCell>{t('admin.pointsBilling.table.colUser')}</TableCell>
+                  <TableCell>{t('admin.pointsBilling.table.colModuleEvent')}</TableCell>
+                  <TableCell>{t('admin.pointsBilling.table.colTitle')}</TableCell>
+                  <TableCell>{t('admin.pointsBilling.table.colPointsAmount')}</TableCell>
+                  <TableCell>{t('admin.pointsBilling.table.colTaskStatus')}</TableCell>
+                  <TableCell>{t('admin.pointsBilling.table.colMarginStatus')}</TableCell>
+                  <TableCell align="right">{t('admin.pointsBilling.table.colActions')}</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
                 {items.map((item) => (
                   <TableRow key={item.id} hover>
-                    <TableCell>{new Date(item.created_at).toLocaleString('zh-CN')}</TableCell>
+                    <TableCell>{formatDateTimeWithSeconds(item.created_at)}</TableCell>
                     <TableCell>
                       <Typography variant="body2">{item.operator_username}</Typography>
                       <Typography variant="caption" color="text.secondary">
-                        用户 ID {item.target_user_id}
+                        {t('admin.pointsBilling.table.userIdSuffix', { id: item.target_user_id })}
                       </Typography>
                     </TableCell>
                     <TableCell>
@@ -645,27 +699,27 @@ export default function PointsBillingPage() {
                       </Typography>
                     </TableCell>
                     <TableCell>
-                      <Typography variant="body2">{item.amount_points.toFixed(2)} 积分</Typography>
+                      <Typography variant="body2">{t('admin.pointsBilling.table.pointsSuffix', { points: item.amount_points.toFixed(2) })}</Typography>
                       <Typography variant="caption" color="text.secondary">
                         {formatCurrency(item.amount_yuan)}
                       </Typography>
                     </TableCell>
                     <TableCell>
-                      <Typography variant="body2">{formatTaskStatus(item.task_status)}</Typography>
+                      <Typography variant="body2">{formatTaskStatus(item.task_status, t)}</Typography>
                       <Typography variant="caption" color="text.secondary">
-                        {formatPricingStatus(item.pricing_status)}
+                        {formatPricingStatus(item.pricing_status, t)}
                       </Typography>
                     </TableCell>
                     <TableCell>
                       <Chip
                         size="small"
                         color={getMarginColor(item.operating_snapshot?.margin_status)}
-                        label={formatMarginStatus(item.operating_snapshot?.margin_status)}
+                        label={formatMarginStatus(item.operating_snapshot?.margin_status, t)}
                       />
                     </TableCell>
                     <TableCell align="right">
                       <Button size="small" onClick={() => setSelectedEvent(item)}>
-                        查看详情
+                        {t('admin.common.viewDetail')}
                       </Button>
                     </TableCell>
                   </TableRow>
@@ -673,7 +727,7 @@ export default function PointsBillingPage() {
                 {!loading && items.length === 0 ? (
                   <TableRow>
                     <TableCell colSpan={8}>
-                      <Alert severity="info">当前筛选条件下暂无计费事件。</Alert>
+                      <Alert severity="info">{t('admin.pointsBilling.table.empty')}</Alert>
                     </TableCell>
                   </TableRow>
                 ) : null}
@@ -691,14 +745,16 @@ export default function PointsBillingPage() {
               setRowsPerPage(parseInt(event.target.value, 10))
               setPage(0)
             }}
-            labelRowsPerPage="每页行数"
-            labelDisplayedRows={({ from, to, count }) => `${from}-${to} / 共 ${count}`}
+            labelRowsPerPage={t('admin.pointsBilling.table.rowsPerPage')}
+            labelDisplayedRows={({ from, to, count }) =>
+              t('admin.pointsBilling.table.displayedRows', { from, to, count })
+            }
           />
         </CardContent>
       </Card>
 
       <Dialog open={Boolean(selectedEvent)} onClose={() => setSelectedEvent(null)} fullWidth maxWidth="md">
-        <DialogTitle>计费事件详情</DialogTitle>
+        <DialogTitle>{t('admin.pointsBilling.detail.title')}</DialogTitle>
         <DialogContent dividers>
           {selectedEvent ? (
             <Stack spacing={2}>
@@ -706,17 +762,17 @@ export default function PointsBillingPage() {
                 <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
                   <Chip size="small" variant="outlined" label={selectedEvent.module_label} />
                   <Chip size="small" color={getEventColor(selectedEvent.event_kind)} label={selectedEvent.event_label} />
-                  <Chip size="small" color={getTaskStatusColor(selectedEvent.task_status)} label={formatTaskStatus(selectedEvent.task_status)} />
+                  <Chip size="small" color={getTaskStatusColor(selectedEvent.task_status)} label={formatTaskStatus(selectedEvent.task_status, t)} />
                   <Chip
                     size="small"
                     color={getPricingStatusColor(selectedEvent.pricing_status)}
-                    label={formatPricingStatus(selectedEvent.pricing_status)}
+                    label={formatPricingStatus(selectedEvent.pricing_status, t)}
                   />
-                  <Chip size="small" variant="outlined" label={`阶段：${formatStageLabel(selectedEvent.stage)}`} />
+                  <Chip size="small" variant="outlined" label={t('admin.pointsBilling.detail.stagePrefix', { stage: formatStageLabel(selectedEvent.stage, t) })} />
                   <Chip
                     size="small"
                     color={getMarginColor(selectedEvent.operating_snapshot?.margin_status)}
-                    label={formatMarginStatus(selectedEvent.operating_snapshot?.margin_status)}
+                    label={formatMarginStatus(selectedEvent.operating_snapshot?.margin_status, t)}
                   />
                 </Stack>
                 <Typography variant="h6" sx={{ mt: 1.5 }}>
@@ -729,20 +785,20 @@ export default function PointsBillingPage() {
                 <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5} sx={{ mt: 2 }}>
                   {normalizeActionPath(selectedEvent.action_path) ? (
                     <Button variant="contained" onClick={() => handleOpenEventAction(selectedEvent)}>
-                      {selectedEvent.action_label || '跳转到业务页面'}
+                      {selectedEvent.action_label || t('admin.pointsBilling.detail.actionFallback')}
                     </Button>
                   ) : null}
                   <Button
                     variant="outlined"
                     onClick={() => handleApplyDialogFilters({ userId: String(selectedEvent.target_user_id) })}
                   >
-                    仅看该用户
+                     {t('admin.pointsBilling.detail.onlyUser')}
                   </Button>
                   <Button
                     variant="outlined"
                     onClick={() => handleApplyDialogFilters({ moduleKey: selectedEvent.module_key })}
                   >
-                    仅看该模块
+                     {t('admin.pointsBilling.detail.onlyModule')}
                   </Button>
                   <Button
                     variant="outlined"
@@ -754,7 +810,7 @@ export default function PointsBillingPage() {
                       })
                     }
                   >
-                    查看同计费键链路
+                     {t('admin.pointsBilling.detail.sameBillingKey')}
                   </Button>
                 </Stack>
               </Box>
@@ -762,35 +818,35 @@ export default function PointsBillingPage() {
               <Stack spacing={1.5}>
                 {selectedEvent.operating_snapshot?.margin_status === 'negative' ? (
                   <Alert severity="error">
-                    本次结算为负毛利，建议优先复核供应商真实成本、折扣来源以及用户计价策略。
+                    {t('admin.pointsBilling.detail.alertNegative')}
                   </Alert>
                 ) : null}
                 {selectedEvent.operating_snapshot?.margin_status === 'warning' ? (
                   <Alert severity="warning">
-                    本次结算已进入低毛利预警区间，建议关注折扣捕获率、让利比例和模块近期毛利分布。
+                    {t('admin.pointsBilling.detail.alertWarning')}
                   </Alert>
                 ) : null}
                 {selectedEvent.task_status === 'running' ? (
-                  <Alert severity="info">任务仍在运行中，当前金额可能继续变化，适合结合冻结事件和后续结算事件一起追踪。</Alert>
+                  <Alert severity="info">{t('admin.pointsBilling.detail.alertTaskRunning')}</Alert>
                 ) : null}
                 {selectedEvent.pricing_status === 'estimated' ? (
-                  <Alert severity="info">当前仍是预估计费口径，适合在任务完成后回看正式结算是否与冻结金额匹配。</Alert>
+                  <Alert severity="info">{t('admin.pointsBilling.detail.alertEstimated')}</Alert>
                 ) : null}
                 {selectedEvent.operating_snapshot && Math.abs(selectedEvent.operating_snapshot.policy_alignment_gap_yuan) >= 0.01 ? (
                   <Alert
                     severity={selectedEvent.operating_snapshot.policy_alignment_gap_yuan < 0 ? 'warning' : 'info'}
                   >
-                    {buildPolicyAlignmentMessage(selectedEvent.operating_snapshot.policy_alignment_gap_yuan)}
+                    {buildPolicyAlignmentMessage(selectedEvent.operating_snapshot.policy_alignment_gap_yuan, t)}
                   </Alert>
                 ) : null}
                 {selectedEvent.operating_snapshot?.negative_margin_blocked ? (
-                  <Alert severity="warning">负毛利拦截已触发，说明策略层已经识别到本次结算存在负毛利风险。</Alert>
+                  <Alert severity="warning">{t('admin.pointsBilling.detail.alertBlocked')}</Alert>
                 ) : null}
               </Stack>
 
               <Paper variant="outlined" sx={{ p: 2 }}>
                 <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
-                  事件上下文
+                  {t('admin.pointsBilling.detail.contextTitle')}
                 </Typography>
                 <Box
                   sx={{
@@ -801,43 +857,53 @@ export default function PointsBillingPage() {
                   }}
                 >
                   <DetailMetricCard
-                    label="计费键"
+                    label={t('admin.pointsBilling.detail.context.billingKey')}
                     value={selectedEvent.billing_key || '-'}
-                    caption="用于串联冻结、结算、释放三类事件"
+                    caption={t('admin.pointsBilling.detail.context.billingKeyCaption')}
                   />
                   <DetailMetricCard
-                    label="用户 / 操作人"
-                    value={`用户 ${selectedEvent.target_user_id}`}
-                    caption={`操作人：${selectedEvent.operator_username}`}
+                    label={t('admin.pointsBilling.detail.context.userOperator')}
+                    value={t('admin.pointsBilling.detail.context.userValue', { id: selectedEvent.target_user_id })}
+                    caption={t('admin.pointsBilling.detail.context.operatorCaption', { name: selectedEvent.operator_username })}
                   />
                   <DetailMetricCard
-                    label="积分 / 金额"
-                    value={`${selectedEvent.amount_points.toFixed(2)} 积分`}
-                    caption={`金额：${formatCurrency(selectedEvent.amount_yuan)}`}
+                    label={t('admin.pointsBilling.detail.context.pointsAmount')}
+                    value={t('admin.pointsBilling.detail.context.pointsValue', { points: selectedEvent.amount_points.toFixed(2) })}
+                    caption={t('admin.pointsBilling.detail.context.amountCaption', { amount: formatCurrency(selectedEvent.amount_yuan) })}
                   />
                   <DetailMetricCard
-                    label="任务 / 计费状态"
-                    value={formatTaskStatus(selectedEvent.task_status)}
-                    caption={`计费状态：${formatPricingStatus(selectedEvent.pricing_status)}`}
+                    label={t('admin.pointsBilling.detail.context.taskPricing')}
+                    value={formatTaskStatus(selectedEvent.task_status, t)}
+                    caption={t('admin.pointsBilling.detail.context.pricingCaption', {
+                      status: formatPricingStatus(selectedEvent.pricing_status, t),
+                    })}
                   />
                   <DetailMetricCard
-                    label="项目定位"
-                    value={selectedEvent.project_id ? `项目 ${selectedEvent.project_id}` : '-'}
-                    caption={`有声书项目：${selectedEvent.audiobook_project_id || '-'}`}
+                    label={t('admin.pointsBilling.detail.context.projectLoc')}
+                    value={
+                      selectedEvent.project_id
+                        ? t('admin.pointsBilling.detail.context.projectValue', { id: selectedEvent.project_id })
+                        : '-'
+                    }
+                    caption={t('admin.pointsBilling.detail.context.audiobookCaption', {
+                      id: selectedEvent.audiobook_project_id || '-',
+                    })}
                   />
                   <DetailMetricCard
-                    label="运行定位"
+                    label={t('admin.pointsBilling.detail.context.runLoc')}
                     value={selectedEvent.run_id || '-'}
-                    caption={`阶段：${formatStageLabel(selectedEvent.stage)}`}
+                    caption={t('admin.pointsBilling.detail.context.stageCaption', {
+                      stage: formatStageLabel(selectedEvent.stage, t),
+                    })}
                   />
                   <DetailMetricCard
-                    label="创建时间"
-                    value={new Date(selectedEvent.created_at).toLocaleString('zh-CN')}
+                    label={t('admin.pointsBilling.detail.context.createdAt')}
+                    value={formatDateTimeWithSeconds(selectedEvent.created_at)}
                   />
                   <DetailMetricCard
-                    label="跳转入口"
-                    value={selectedEvent.action_label || '暂无跳转入口'}
-                    caption={selectedEvent.action_path || '未提供路径'}
+                    label={t('admin.pointsBilling.detail.context.actionEntry')}
+                    value={selectedEvent.action_label || t('admin.pointsBilling.detail.context.actionValue')}
+                    caption={selectedEvent.action_path || t('admin.pointsBilling.detail.context.pathFallback')}
                   />
                 </Box>
               </Paper>
@@ -845,7 +911,7 @@ export default function PointsBillingPage() {
               {selectedEvent.operating_snapshot ? (
                 <Paper variant="outlined" sx={{ p: 2 }}>
                   <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
-                    经营快照
+                    {t('admin.pointsBilling.detail.snapshotTitle')}
                   </Typography>
                   <Box
                     sx={{
@@ -856,27 +922,33 @@ export default function PointsBillingPage() {
                     }}
                   >
                     <DetailMetricCard
-                      label="用户计费"
+                      label={t('admin.pointsBilling.detail.snapshot.userBilled')}
                       value={formatCurrency(selectedEvent.operating_snapshot.user_billed_yuan)}
-                      caption={`策略目标：${formatCurrency(selectedEvent.operating_snapshot.policy_target_user_billed_yuan)}`}
+                      caption={t('admin.pointsBilling.detail.snapshot.policyTargetCaption', {
+                        amount: formatCurrency(selectedEvent.operating_snapshot.policy_target_user_billed_yuan),
+                      })}
                     />
                     <DetailMetricCard
-                      label="供应商折后成本"
+                      label={t('admin.pointsBilling.detail.snapshot.supplierCost')}
                       value={formatCurrency(selectedEvent.operating_snapshot.supplier_discounted_cost_yuan)}
-                      caption={`供应商公开价：${formatCurrency(selectedEvent.operating_snapshot.supplier_list_price_yuan)}`}
+                      caption={t('admin.pointsBilling.detail.snapshot.supplierListCaption', {
+                        amount: formatCurrency(selectedEvent.operating_snapshot.supplier_list_price_yuan),
+                      })}
                     />
                     <DetailMetricCard
-                      label="平台毛利"
+                      label={t('admin.pointsBilling.detail.snapshot.platformProfit')}
                       value={formatCurrency(selectedEvent.operating_snapshot.platform_gross_profit_yuan)}
-                      caption="用户计费减去供应商折后成本"
+                      caption={t('admin.pointsBilling.detail.snapshot.profitCaption')}
                       valueColor={
                         selectedEvent.operating_snapshot.platform_gross_profit_yuan < 0 ? 'error.main' : 'success.main'
                       }
                     />
                     <DetailMetricCard
-                      label="综合毛利率"
+                      label={t('admin.pointsBilling.detail.snapshot.marginRate')}
                       value={formatPercent(selectedEvent.operating_snapshot.platform_margin_rate)}
-                      caption={`毛利状态：${formatMarginStatus(selectedEvent.operating_snapshot.margin_status)}`}
+                      caption={t('admin.pointsBilling.detail.snapshot.marginStatusCaption', {
+                        status: formatMarginStatus(selectedEvent.operating_snapshot.margin_status, t),
+                      })}
                       valueColor={
                         selectedEvent.operating_snapshot.margin_status === 'negative'
                           ? 'error.main'
@@ -886,9 +958,9 @@ export default function PointsBillingPage() {
                       }
                     />
                     <DetailMetricCard
-                      label="策略对齐差"
+                      label={t('admin.pointsBilling.detail.snapshot.alignmentGap')}
                       value={formatCurrency(selectedEvent.operating_snapshot.policy_alignment_gap_yuan)}
-                      caption={buildPolicyAlignmentMessage(selectedEvent.operating_snapshot.policy_alignment_gap_yuan)}
+                      caption={buildPolicyAlignmentMessage(selectedEvent.operating_snapshot.policy_alignment_gap_yuan, t)}
                       valueColor={
                         selectedEvent.operating_snapshot.policy_alignment_gap_yuan < 0
                           ? 'warning.main'
@@ -898,7 +970,7 @@ export default function PointsBillingPage() {
                       }
                     />
                     <DetailMetricCard
-                      label="供应商折扣率"
+                      label={t('admin.pointsBilling.detail.snapshot.discountRate')}
                       value={formatPercent(selectedEvent.operating_snapshot.supplier_discount_rate)}
                       caption={selectedEvent.operating_snapshot.supplier_discount_rate_source}
                     />
@@ -906,26 +978,34 @@ export default function PointsBillingPage() {
 
                   <Stack spacing={1} sx={{ mt: 2 }}>
                     <Typography variant="body2" color="text.secondary">
-                      平台保留折扣：{formatCurrency(selectedEvent.operating_snapshot.captured_discount_yuan)} · 让利用户：
-                      {formatCurrency(selectedEvent.operating_snapshot.shared_discount_yuan)}
+                      {t('admin.pointsBilling.detail.snapshot.capturedShared', {
+                        captured: formatCurrency(selectedEvent.operating_snapshot.captured_discount_yuan),
+                        shared: formatCurrency(selectedEvent.operating_snapshot.shared_discount_yuan),
+                      })}
                     </Typography>
                     <Typography variant="body2" color="text.secondary">
-                      供应商优惠额：{formatCurrency(selectedEvent.operating_snapshot.supplier_discount_yuan)} · 用户计价基准：
-                      {formatCurrency(selectedEvent.operating_snapshot.user_basis_yuan)}
+                      {t('admin.pointsBilling.detail.snapshot.supplierDiscount', {
+                        supplier: formatCurrency(selectedEvent.operating_snapshot.supplier_discount_yuan),
+                        basis: formatCurrency(selectedEvent.operating_snapshot.user_basis_yuan),
+                      })}
                     </Typography>
                     <Typography variant="body2" color="text.secondary">
-                      负毛利拦截：{selectedEvent.operating_snapshot.negative_margin_blocked ? '已触发' : '未触发'}
+                      {t('admin.pointsBilling.detail.snapshot.blockStatus', {
+                        status: selectedEvent.operating_snapshot.negative_margin_blocked
+                          ? t('admin.pointsBilling.detail.snapshot.blocked')
+                          : t('admin.pointsBilling.detail.snapshot.notBlocked'),
+                      })}
                     </Typography>
                   </Stack>
                 </Paper>
               ) : (
-                <Alert severity="info">该事件暂无经营快照，通常冻结或释放事件不会附带完整结算快照。</Alert>
+                <Alert severity="info">{t('admin.pointsBilling.detail.noSnapshot')}</Alert>
               )}
             </Stack>
           ) : null}
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setSelectedEvent(null)}>关闭</Button>
+          <Button onClick={() => setSelectedEvent(null)}>{t('action.close')}</Button>
         </DialogActions>
       </Dialog>
     </Box>

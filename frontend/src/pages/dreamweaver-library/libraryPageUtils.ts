@@ -8,7 +8,6 @@ import {
 import {
   STYLE_PRESETS,
   IMAGE_RATIOS,
-  STYLE_PRESET_LABELS,
 } from '@/constants/dreamweaver'
 
 export type StylePresetValue = typeof STYLE_PRESETS[keyof typeof STYLE_PRESETS]
@@ -51,11 +50,11 @@ export type AssetCard = { kind: 'asset'; asset: LibraryAsset }
 export type LibraryCard = CharacterCard | AssetCard
 export type LibraryCardGroupKey = 'character' | 'scene' | 'prop' | 'other'
 
-export const LIBRARY_CARD_GROUP_ORDER: ReadonlyArray<{ key: LibraryCardGroupKey; label: string }> = [
-  { key: 'character', label: '人物' },
-  { key: 'scene', label: '场景' },
-  { key: 'prop', label: '道具' },
-  { key: 'other', label: '其他' },
+export const LIBRARY_CARD_GROUP_ORDER: ReadonlyArray<{ key: LibraryCardGroupKey; label: string; labelKey: string }> = [
+  { key: 'character', label: '人物', labelKey: 'dreamweaverRun.libraryGroupCharacters' },
+  { key: 'scene', label: '场景', labelKey: 'dreamweaverRun.libraryGroupScenes' },
+  { key: 'prop', label: '道具', labelKey: 'dreamweaverRun.libraryGroupProps' },
+  { key: 'other', label: '其他', labelKey: 'dreamweaverRun.libraryGroupOther' },
 ]
 
 export function buildProtectedLibraryAssetUrl(assetId: number): string {
@@ -66,10 +65,10 @@ export function normalizeStylePresetValue(raw: any): StylePresetValue {
   const text = String(raw || '').trim()
   const allowed = new Set<string>(Object.values(STYLE_PRESETS))
   if (allowed.has(text)) return text as StylePresetValue
-  if (text === STYLE_PRESET_LABELS[STYLE_PRESETS.CINEMATIC_REALISTIC]) return STYLE_PRESETS.CINEMATIC_REALISTIC
-  if (text === STYLE_PRESET_LABELS[STYLE_PRESETS.ANIME]) return STYLE_PRESETS.ANIME
-  if (text === STYLE_PRESET_LABELS[STYLE_PRESETS.INK_WASH]) return STYLE_PRESETS.INK_WASH
-  if (text === STYLE_PRESET_LABELS[STYLE_PRESETS.CYBERPUNK]) return STYLE_PRESETS.CYBERPUNK
+  if (text === '电影写实') return STYLE_PRESETS.CINEMATIC_REALISTIC
+  if (text === '二次元动画') return STYLE_PRESETS.ANIME
+  if (text === '国风水墨') return STYLE_PRESETS.INK_WASH
+  if (text === '赛博朋克') return STYLE_PRESETS.CYBERPUNK
   return STYLE_PRESETS.CINEMATIC_REALISTIC
 }
 

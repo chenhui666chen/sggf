@@ -45,6 +45,7 @@ import {
   parseCharacterRelations,
 } from '@/utils/characterRelations'
 import { apiClient, extractApiErrorMessage } from '@/services/api'
+import { useTranslation } from 'react-i18next'
 
 interface CharacterCardManagerProps {
   projectId: number
@@ -59,10 +60,24 @@ const EMPTY_CHARACTER_FORM = {
   importance_level: '',
 }
 
-const STORY_STANCE_OPTIONS = ['主角方', '反派方', '中立方', '亦正亦邪']
-const IMPORTANCE_OPTIONS = ['主角', '核心角色', '重要角色', '次要角色', '边缘角色', '群众角色']
+// value 为表单提交值（发后端，不可翻译），labelKey 驱动 UI 显示
+const STORY_STANCE_OPTIONS: { value: string; label: string; labelKey: string }[] = [
+  { value: '主角方', label: '主角方', labelKey: 'characterCard.stanceProtagonist' },
+  { value: '反派方', label: '反派方', labelKey: 'characterCard.stanceAntagonist' },
+  { value: '中立方', label: '中立方', labelKey: 'characterCard.stanceNeutral' },
+  { value: '亦正亦邪', label: '亦正亦邪', labelKey: 'characterCard.stanceGray' },
+]
+const IMPORTANCE_OPTIONS: { value: string; label: string; labelKey: string }[] = [
+  { value: '主角', label: '主角', labelKey: 'characterCard.importanceLead' },
+  { value: '核心角色', label: '核心角色', labelKey: 'characterCard.importanceCore' },
+  { value: '重要角色', label: '重要角色', labelKey: 'characterCard.importanceImportant' },
+  { value: '次要角色', label: '次要角色', labelKey: 'characterCard.importanceMinor' },
+  { value: '边缘角色', label: '边缘角色', labelKey: 'characterCard.importanceEdge' },
+  { value: '群众角色', label: '群众角色', labelKey: 'characterCard.importanceExtra' },
+]
 
 export default function CharacterCardManager({ projectId, onCharacterUpdate }: CharacterCardManagerProps) {
+  const { t } = useTranslation()
   const [characters, setCharacters] = useState<any[]>([])
   const [loading, setLoading] = useState(false)
   const [editDialogOpen, setEditDialogOpen] = useState(false)
@@ -222,7 +237,7 @@ export default function CharacterCardManager({ projectId, onCharacterUpdate }: C
       setNewRelationType('')
       setEditDialogOpen(true)
     } catch {
-      setSnackbar({ open: true, message: '打开编辑对话框失败', severity: 'error' })
+      setSnackbar({ open: true, message: t('characterCard.page.openEditFailed'), severity: 'error' })
     }
   }
 
@@ -244,7 +259,7 @@ export default function CharacterCardManager({ projectId, onCharacterUpdate }: C
     if (!newRelationTarget || !newRelationType) return
     // 检查是否已存在
     if (characterRelations.some((r: any) => r.target === newRelationTarget && r.type === newRelationType)) {
-      setSnackbar({ open: true, message: '该关系已存在', severity: 'error' })
+      setSnackbar({ open: true, message: t('characterCard.page.relationExists'), severity: 'error' })
       return
     }
     setCharacterRelations((prev) => [
@@ -332,9 +347,9 @@ export default function CharacterCardManager({ projectId, onCharacterUpdate }: C
       await loadCharacters()
       handleCloseEditDialog()
       onCharacterUpdate?.()
-      setSnackbar({ open: true, message: '保存成功', severity: 'success' })
+      setSnackbar({ open: true, message: t('characterCard.page.saveSuccess'), severity: 'success' })
     } catch {
-      setSnackbar({ open: true, message: '保存失败，请重试', severity: 'error' })
+      setSnackbar({ open: true, message: t('characterCard.page.saveFailed'), severity: 'error' })
     } finally {
       setSaving(false)
     }
@@ -342,7 +357,7 @@ export default function CharacterCardManager({ projectId, onCharacterUpdate }: C
 
   // 删除角色
   const handleDeleteCharacter = async (characterId: number) => {
-    if (!confirm('确定要删除此角色吗？')) return
+    if (!confirm(t('characterCard.page.deleteConfirm'))) return
 
     try {
       await apiClient.deleteCharacter(characterId)
@@ -398,7 +413,7 @@ export default function CharacterCardManager({ projectId, onCharacterUpdate }: C
     } catch (error) {
       setSnackbar({
         open: true,
-        message: await extractApiErrorMessage(error, '同步失败，请重试'),
+        message: await extractApiErrorMessage(error, t('characterCard.page.syncFailed')),
         severity: 'error',
       })
     } finally {
@@ -503,7 +518,7 @@ export default function CharacterCardManager({ projectId, onCharacterUpdate }: C
                   {node.importance}
                 </Typography>
                 <Typography variant="caption" sx={{ display: 'block', color: 'primary.main', fontSize: 10 }}>
-                  ↗ 点击过滤关系
+                  {t('characterCard.graph.filterHint')}
                 </Typography>
               </Box>
             ),
@@ -511,8 +526,8 @@ export default function CharacterCardManager({ projectId, onCharacterUpdate }: C
             characterName: node.name,
           },
           style: {
-            background: node.color || '#fff',
-            border: `2px solid ${node.borderColor || '#333'}`,
+            background: node.color || 'var(--sg-bg-paper)',
+            border: `2px solid ${node.borderColor || 'var(--sg-border-strong)'}`,
             borderRadius: 8,
             padding: 8,
             minWidth: 80,
@@ -528,8 +543,8 @@ export default function CharacterCardManager({ projectId, onCharacterUpdate }: C
         label: edge.label,
         type: 'smoothstep',
         animated: false,
-        style: { stroke: '#888' },
-        labelStyle: { fontSize: 10, fill: '#666' },
+        style: { stroke: 'var(--sg-text-disabled)' },
+        labelStyle: { fontSize: 10, fill: 'var(--sg-text-secondary)' },
       }))
       
       setNodes(flowNodes)
@@ -554,7 +569,7 @@ export default function CharacterCardManager({ projectId, onCharacterUpdate }: C
       setEdges(allEdges.map(edge => ({
         ...edge,
         animated: false,
-        style: { stroke: '#888' },
+        style: { stroke: 'var(--sg-text-disabled)' },
       })))
       // 恢复所有节点样式
       setNodes(prevNodes => prevNodes.map(n => ({
@@ -575,7 +590,7 @@ export default function CharacterCardManager({ projectId, onCharacterUpdate }: C
           ...edge,
           animated: isRelated,
           style: {
-            stroke: isRelated ? '#1976d2' : '#ddd',
+            stroke: isRelated ? 'var(--sg-accent)' : 'var(--sg-divider)',
             strokeWidth: isRelated ? 2 : 1,
           },
         }
@@ -603,9 +618,9 @@ export default function CharacterCardManager({ projectId, onCharacterUpdate }: C
     <Box>
       {/* 顶部操作栏 */}
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-        <Typography variant="h6">🎴 人物卡管理</Typography>
+        <Typography variant="h6">{t('characterCard.page.title')}</Typography>
         <Box sx={{ display: 'flex', gap: 1 }}>
-          <Tooltip title="查看人物关系网络图">
+          <Tooltip title={t('characterCard.page.graphTooltip')}>
             <span>
               <Button
                 variant="outlined"
@@ -614,11 +629,11 @@ export default function CharacterCardManager({ projectId, onCharacterUpdate }: C
                 onClick={handleOpenGraphDialog}
                 disabled={characters.length === 0}
               >
-                关系图
+                {t('characterCard.page.graphBtn')}
               </Button>
             </span>
           </Tooltip>
-          <Tooltip title="将结构化人物卡同步到工作流的人物设定字段">
+          <Tooltip title={t('characterCard.page.syncTooltip')}>
             <span>
               <Button
                 variant="outlined"
@@ -627,7 +642,7 @@ export default function CharacterCardManager({ projectId, onCharacterUpdate }: C
                 onClick={handleOpenSyncDialog}
                 disabled={characters.length === 0 || syncing}
               >
-                同步到工作流
+                {t('characterCard.page.syncToWorkflow')}
               </Button>
             </span>
           </Tooltip>
@@ -636,14 +651,14 @@ export default function CharacterCardManager({ projectId, onCharacterUpdate }: C
             startIcon={<AddIcon />}
             onClick={() => handleOpenEditDialog()}
           >
-            新建角色
+            {t('characterCard.page.newCharacter')}
           </Button>
         </Box>
       </Box>
 
       {/* 使用说明 */}
       <Alert severity="info" sx={{ mb: 2 }}>
-        这里可以结构化管理角色信息（阵营、境界、出场状态等），保存后会参与章节逻辑检查。
+        {t('characterCard.page.usageHint')}
       </Alert>
 
       {/* 角色列表 */}
@@ -652,10 +667,10 @@ export default function CharacterCardManager({ projectId, onCharacterUpdate }: C
           <CircularProgress />
         </Box>
       ) : (
-        <List sx={{ border: '1px solid #eee', borderRadius: 1, maxHeight: 500, overflowY: 'auto' }}>
+        <List sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 1, maxHeight: 500, overflowY: 'auto' }}>
           {characters.length === 0 ? (
             <Box sx={{ p: 4, textAlign: 'center', color: 'text.secondary' }}>
-              还没有创建任何角色，点击"新建角色"开始
+              {t('characterCard.page.emptyHint')}
             </Box>
           ) : (
             characters.map((character) => (
@@ -663,24 +678,24 @@ export default function CharacterCardManager({ projectId, onCharacterUpdate }: C
                 key={character.id}
                 secondaryAction={
                   <Box sx={{ display: 'flex', gap: 1 }}>
-                    <Tooltip title="出场历程">
+                    <Tooltip title={t('characterCard.page.timelineTooltip')}>
                       <IconButton size="small" onClick={() => handleLoadTimeline(character)}>
                         <HistoryIcon fontSize="small" />
                       </IconButton>
                     </Tooltip>
-                    <Tooltip title="编辑">
+                    <Tooltip title={t('characterCard.page.editTooltip')}>
                       <IconButton size="small" onClick={() => handleOpenEditDialog(character)}>
                         <EditIcon fontSize="small" />
                       </IconButton>
                     </Tooltip>
-                    <Tooltip title="删除">
+                    <Tooltip title={t('common.delete')}>
                       <IconButton size="small" onClick={() => handleDeleteCharacter(character.id)}>
                         <DeleteIcon fontSize="small" />
                       </IconButton>
                     </Tooltip>
                   </Box>
                 }
-                sx={{ borderBottom: '1px solid #eee', py: 2 }}
+                sx={{ borderBottom: '1px solid', borderBottomColor: 'divider', py: 2 }}
               >
                 <Box sx={{ display: 'flex', flexDirection: 'column', flex: 1, gap: 1 }}>
                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
@@ -691,7 +706,7 @@ export default function CharacterCardManager({ projectId, onCharacterUpdate }: C
                       <Chip size="small" label={character.gender} variant="outlined" />
                     )}
                     {character.age && (
-                      <Chip size="small" label={`${character.age}岁`} variant="outlined" />
+                      <Chip size="small" label={t('characterCard.page.ageChip', { count: character.age })} variant="outlined" />
                     )}
                   </Box>
                   
@@ -710,7 +725,7 @@ export default function CharacterCardManager({ projectId, onCharacterUpdate }: C
                         color="warning"
                         label={
                           availableRealms.find((r: any) => r.id === character.current_realm_item_id)?.name ||
-                          '境界'
+                          t('characterCard.page.realmFallback')
                         }
                       />
                     )}
@@ -741,7 +756,7 @@ export default function CharacterCardManager({ projectId, onCharacterUpdate }: C
 
       {/* 编辑对话框 */}
       <Dialog open={editDialogOpen} onClose={handleCloseEditDialog} maxWidth="md" fullWidth>
-        <DialogTitle>{editingCharacter ? '编辑角色' : '新建角色'}</DialogTitle>
+        <DialogTitle>{editingCharacter ? t('characterCard.page.editCharacter') : t('characterCard.page.newCharacter')}</DialogTitle>
         <DialogContent>
           <Grid container spacing={2}>
             {/* 第一行：姓名 + 故事立场 + 角色定位 */}
@@ -749,7 +764,7 @@ export default function CharacterCardManager({ projectId, onCharacterUpdate }: C
               <TextField
                 autoFocus
                 margin="dense"
-                label="姓名 *"
+                label={t('characterCard.form.name')}
                 fullWidth
                 value={formData.name || ''}
                 onChange={(e) => setFormData((prev: any) => ({ ...prev, name: e.target.value }))}
@@ -759,15 +774,15 @@ export default function CharacterCardManager({ projectId, onCharacterUpdate }: C
               <TextField
                 select
                 margin="dense"
-                label="故事立场"
+                label={t('characterCard.form.stance')}
                 fullWidth
                 value={formData.role || ''}
                 onChange={(e) => setFormData((prev: any) => ({ ...prev, role: e.target.value }))}
               >
-                <MenuItem value="">未设置</MenuItem>
+                <MenuItem value="">{t('characterCard.form.unset')}</MenuItem>
                 {STORY_STANCE_OPTIONS.map((option) => (
-                  <MenuItem key={option} value={option}>
-                    {option}
+                  <MenuItem key={option.value} value={option.value}>
+                    {option.labelKey ? t(option.labelKey) : option.label}
                   </MenuItem>
                 ))}
               </TextField>
@@ -775,9 +790,9 @@ export default function CharacterCardManager({ projectId, onCharacterUpdate }: C
             <Grid item xs={4}>
               <TextField
                 margin="dense"
-                label="角色定位"
+                label={t('characterCard.form.rolePosition')}
                 fullWidth
-                placeholder="如：主角 / 盟友 / 导师 / 对手 / 情报角色"
+                placeholder={t('characterCard.form.rolePositionPlaceholder')}
                 value={formData.role_position || ''}
                 onChange={(e) => setFormData((prev: any) => ({ ...prev, role_position: e.target.value }))}
               />
@@ -787,7 +802,7 @@ export default function CharacterCardManager({ projectId, onCharacterUpdate }: C
             <Grid item xs={3}>
               <TextField
                 margin="dense"
-                label="性别"
+                label={t('characterCard.form.gender')}
                 fullWidth
                 value={formData.gender || ''}
                 onChange={(e) => setFormData((prev: any) => ({ ...prev, gender: e.target.value }))}
@@ -796,7 +811,7 @@ export default function CharacterCardManager({ projectId, onCharacterUpdate }: C
             <Grid item xs={3}>
               <TextField
                 margin="dense"
-                label="年龄"
+                label={t('characterCard.form.age')}
                 type="number"
                 fullWidth
                 value={formData.age || ''}
@@ -806,7 +821,7 @@ export default function CharacterCardManager({ projectId, onCharacterUpdate }: C
             <Grid item xs={3}>
               <TextField
                 margin="dense"
-                label="所属势力"
+                label={t('characterCard.form.faction')}
                 fullWidth
                 value={formData.faction || ''}
                 onChange={(e) => setFormData((prev: any) => ({ ...prev, faction: e.target.value }))}
@@ -816,15 +831,15 @@ export default function CharacterCardManager({ projectId, onCharacterUpdate }: C
               <TextField
                 select
                 margin="dense"
-                label="重要性"
+                label={t('characterCard.form.importance')}
                 fullWidth
                 value={formData.importance_level || ''}
                 onChange={(e) => setFormData((prev: any) => ({ ...prev, importance_level: e.target.value }))}
               >
-                <MenuItem value="">未设置</MenuItem>
+                <MenuItem value="">{t('characterCard.form.unset')}</MenuItem>
                 {IMPORTANCE_OPTIONS.map((option) => (
-                  <MenuItem key={option} value={option}>
-                    {option}
+                  <MenuItem key={option.value} value={option.value}>
+                    {option.labelKey ? t(option.labelKey) : option.label}
                   </MenuItem>
                 ))}
               </TextField>
@@ -835,43 +850,43 @@ export default function CharacterCardManager({ projectId, onCharacterUpdate }: C
               <TextField
                 select
                 margin="dense"
-                label="出场状态"
+                label={t('characterCard.form.appearance')}
                 fullWidth
                 value={formData.appearance_status || ''}
                 onChange={(e) => setFormData((prev: any) => ({ ...prev, appearance_status: e.target.value }))}
               >
-                <MenuItem value="">未设置</MenuItem>
-                <MenuItem value="未出场">未出场</MenuItem>
-                <MenuItem value="已出场">已出场</MenuItem>
-                <MenuItem value="已退场">已退场</MenuItem>
+                <MenuItem value="">{t('characterCard.form.unset')}</MenuItem>
+                <MenuItem value="未出场">{t('characterCard.appearanceNotAppeared')}</MenuItem>
+                <MenuItem value="已出场">{t('characterCard.appearanceAppeared')}</MenuItem>
+                <MenuItem value="已退场">{t('characterCard.appearanceExited')}</MenuItem>
               </TextField>
             </Grid>
             <Grid item xs={4}>
               <TextField
                 select
                 margin="dense"
-                label="生死状态"
+                label={t('characterCard.form.lifeStatus')}
                 fullWidth
                 value={formData.life_status || ''}
                 onChange={(e) => setFormData((prev: any) => ({ ...prev, life_status: e.target.value }))}
               >
-                <MenuItem value="">未设置</MenuItem>
-                <MenuItem value="存活">存活</MenuItem>
-                <MenuItem value="死亡">死亡</MenuItem>
-                <MenuItem value="失踪">失踪</MenuItem>
-                <MenuItem value="未知">未知</MenuItem>
+                <MenuItem value="">{t('characterCard.form.unset')}</MenuItem>
+                <MenuItem value="存活">{t('characterCard.lifeAlive')}</MenuItem>
+                <MenuItem value="死亡">{t('characterCard.lifeDead')}</MenuItem>
+                <MenuItem value="失踪">{t('characterCard.lifeMissing')}</MenuItem>
+                <MenuItem value="未知">{t('characterCard.lifeUnknown')}</MenuItem>
               </TextField>
             </Grid>
             <Grid item xs={4}>
               <TextField
                 select
                 margin="dense"
-                label="当前境界"
+                label={t('characterCard.form.currentRealm')}
                 fullWidth
                 value={formData.current_realm_item_id || ''}
                 onChange={(e) => setFormData((prev: any) => ({ ...prev, current_realm_item_id: e.target.value }))}
               >
-                <MenuItem value="">未设置</MenuItem>
+                <MenuItem value="">{t('characterCard.form.unset')}</MenuItem>
                 {availableRealms.map((realm: any) => (
                   <MenuItem key={realm.id} value={realm.id}>
                     {realm.name}
@@ -884,7 +899,7 @@ export default function CharacterCardManager({ projectId, onCharacterUpdate }: C
             <Grid item xs={12}>
               <TextField
                 margin="dense"
-                label="人物简介（1-3句话）"
+                label={t('characterCard.form.summary')}
                 fullWidth
                 multiline
                 rows={2}
@@ -897,13 +912,13 @@ export default function CharacterCardManager({ projectId, onCharacterUpdate }: C
             <Grid item xs={12}>
               <TextField
                 margin="dense"
-                label="完整人物档案"
+                label={t('characterCard.form.profile')}
                 fullWidth
                 multiline
                 rows={6}
                 value={formData.profile || ''}
                 onChange={(e) => setFormData((prev: any) => ({ ...prev, profile: e.target.value }))}
-                placeholder="可包含外貌特征、性格特点、背景故事等详细信息"
+                placeholder={t('characterCard.form.profilePlaceholder')}
               />
             </Grid>
 
@@ -911,13 +926,13 @@ export default function CharacterCardManager({ projectId, onCharacterUpdate }: C
             <Grid item xs={12}>
               <Box sx={{ mt: 1, p: 2, bgcolor: 'grey.50', borderRadius: 1, border: '1px solid', borderColor: 'grey.200' }}>
                 <Typography variant="subtitle2" sx={{ mb: 1.5 }}>
-                  📚 已掌握功法
+                  {t('characterCard.techniques.title')}
                 </Typography>
 
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 2 }}>
                   <TextField
                     select
-                    label="选择功法添加"
+                    label={t('characterCard.techniques.selectToAdd')}
                     size="small"
                     sx={{ minWidth: 220 }}
                     value={selectedTechniqueId}
@@ -926,7 +941,7 @@ export default function CharacterCardManager({ projectId, onCharacterUpdate }: C
                       setSelectedTechniqueId(value === '' ? '' : Number(value))
                     }}
                   >
-                    <MenuItem value=""><em>请选择功法</em></MenuItem>
+                    <MenuItem value=""><em>{t('characterCard.techniques.selectPlaceholder')}</em></MenuItem>
                     {availableTechniques.map((t: any) => (
                       <MenuItem key={t.technique_item_id || t.id} value={t.technique_item_id || t.id}>
                         {t.technique_name || t.name}{t.technique_code ? `（${t.technique_code}）` : ''}
@@ -939,14 +954,14 @@ export default function CharacterCardManager({ projectId, onCharacterUpdate }: C
                     onClick={handleAddTechnique}
                     disabled={!selectedTechniqueId}
                   >
-                    添加
+                    {t('characterCard.shared.add')}
                   </Button>
                 </Box>
 
                 <Box sx={{ maxHeight: 200, overflowY: 'auto' }}>
                   {characterTechniques.length === 0 ? (
                     <Typography variant="body2" color="text.secondary">
-                      尚未为该角色添加任何功法
+                      {t('characterCard.techniques.empty')}
                     </Typography>
                   ) : (
                     characterTechniques.map((t: any, index: number) => (
@@ -957,18 +972,18 @@ export default function CharacterCardManager({ projectId, onCharacterUpdate }: C
                         <Typography variant="body2" sx={{ minWidth: 100, fontWeight: 500 }}>
                           {t.technique_name || availableTechniques.find((m: any) => 
                             (m.technique_item_id || m.id) === t.technique_item_id
-                          )?.technique_name || '未知功法'}
+                          )?.technique_name || t('characterCard.techniques.unknown')}
                         </Typography>
                         <TextField
                           size="small"
-                          label="熟练度"
+                          label={t('characterCard.techniques.proficiency')}
                           value={t.proficiency || ''}
                           onChange={(e) => handleUpdateTechniqueField(index, 'proficiency', e.target.value)}
                           sx={{ width: 100 }}
                         />
                         <TextField
                           size="small"
-                          label="学会章节"
+                          label={t('characterCard.techniques.learnedAtChapter')}
                           type="number"
                           value={t.learned_at_chapter ?? ''}
                           onChange={(e) => handleUpdateTechniqueField(index, 'learned_at_chapter', 
@@ -977,7 +992,7 @@ export default function CharacterCardManager({ projectId, onCharacterUpdate }: C
                         />
                         <TextField
                           size="small"
-                          label="备注"
+                          label={t('characterCard.techniques.notes')}
                           value={t.notes || ''}
                           onChange={(e) => handleUpdateTechniqueField(index, 'notes', e.target.value)}
                           sx={{ flex: 1 }}
@@ -996,19 +1011,19 @@ export default function CharacterCardManager({ projectId, onCharacterUpdate }: C
             <Grid item xs={12}>
               <Box sx={{ mt: 1, p: 2, bgcolor: 'grey.50', borderRadius: 1, border: '1px solid', borderColor: 'grey.200' }}>
                 <Typography variant="subtitle2" sx={{ mb: 1.5 }}>
-                  🔗 人物关系
+                  {t('characterCard.relations.title')}
                 </Typography>
 
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 2 }}>
                   <TextField
                     select
-                    label="目标人物"
+                    label={t('characterCard.relations.target')}
                     size="small"
                     sx={{ minWidth: 160 }}
                     value={newRelationTarget}
                     onChange={(e) => setNewRelationTarget(e.target.value)}
                   >
-                    <MenuItem value=""><em>请选择人物</em></MenuItem>
+                    <MenuItem value=""><em>{t('characterCard.relations.targetPlaceholder')}</em></MenuItem>
                     {characters
                       .filter((c: any) => c.id !== editingCharacter?.id)
                       .map((c: any) => (
@@ -1019,29 +1034,29 @@ export default function CharacterCardManager({ projectId, onCharacterUpdate }: C
                   </TextField>
                   <TextField
                     select
-                    label="关系类型"
+                    label={t('characterCard.relations.type')}
                     size="small"
                     sx={{ minWidth: 140 }}
                     value={newRelationType}
                     onChange={(e) => setNewRelationType(e.target.value)}
                   >
-                    <MenuItem value=""><em>请选择</em></MenuItem>
-                    <MenuItem value="父子">父子</MenuItem>
-                    <MenuItem value="母子">母子</MenuItem>
-                    <MenuItem value="兄弟">兄弟</MenuItem>
-                    <MenuItem value="姐妹">姐妹</MenuItem>
-                    <MenuItem value="师徒">师徒</MenuItem>
-                    <MenuItem value="同门">同门</MenuItem>
-                    <MenuItem value="恋人">恋人</MenuItem>
-                    <MenuItem value="夫妻">夫妻</MenuItem>
-                    <MenuItem value="战友">战友</MenuItem>
-                    <MenuItem value="朋友">朋友</MenuItem>
-                    <MenuItem value="仇敌">仇敌</MenuItem>
-                    <MenuItem value="竞争者">竞争者</MenuItem>
-                    <MenuItem value="下属">下属</MenuItem>
-                    <MenuItem value="上级">上级</MenuItem>
-                    <MenuItem value="盟友">盟友</MenuItem>
-                    <MenuItem value="其他">其他</MenuItem>
+                    <MenuItem value=""><em>{t('characterCard.relations.typePlaceholder')}</em></MenuItem>
+                    <MenuItem value="父子">{t('characterCard.relationFatherSon')}</MenuItem>
+                    <MenuItem value="母子">{t('characterCard.relationMotherSon')}</MenuItem>
+                    <MenuItem value="兄弟">{t('characterCard.relationBrothers')}</MenuItem>
+                    <MenuItem value="姐妹">{t('characterCard.relationSisters')}</MenuItem>
+                    <MenuItem value="师徒">{t('characterCard.relationMasterDisciple')}</MenuItem>
+                    <MenuItem value="同门">{t('characterCard.relationSameSchool')}</MenuItem>
+                    <MenuItem value="恋人">{t('characterCard.relationLovers')}</MenuItem>
+                    <MenuItem value="夫妻">{t('characterCard.relationSpouses')}</MenuItem>
+                    <MenuItem value="战友">{t('characterCard.relationComrades')}</MenuItem>
+                    <MenuItem value="朋友">{t('characterCard.relationFriends')}</MenuItem>
+                    <MenuItem value="仇敌">{t('characterCard.relationEnemies')}</MenuItem>
+                    <MenuItem value="竞争者">{t('characterCard.relationCompetitors')}</MenuItem>
+                    <MenuItem value="下属">{t('characterCard.relationSubordinates')}</MenuItem>
+                    <MenuItem value="上级">{t('characterCard.relationSuperiors')}</MenuItem>
+                    <MenuItem value="盟友">{t('characterCard.relationAllies')}</MenuItem>
+                    <MenuItem value="其他">{t('characterCard.relationOthers')}</MenuItem>
                   </TextField>
                   <Button
                     variant="outlined"
@@ -1049,21 +1064,21 @@ export default function CharacterCardManager({ projectId, onCharacterUpdate }: C
                     onClick={handleAddRelation}
                     disabled={!newRelationTarget || !newRelationType}
                   >
-                    添加
+                    {t('characterCard.shared.add')}
                   </Button>
                 </Box>
 
                 <Box sx={{ maxHeight: 150, overflowY: 'auto' }}>
                   {characterRelations.length === 0 ? (
                     <Typography variant="body2" color="text.secondary">
-                      尚未添加人物关系
+                      {t('characterCard.relations.empty')}
                     </Typography>
                   ) : (
                     <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap' }}>
                       {characterRelations.map((r: any, index: number) => (
                         <Chip
                           key={`${r.target}-${r.type}-${index}`}
-                          label={`${r.target}（${r.type}）`}
+                          label={t('characterCard.relations.chip', { target: r.target, type: r.type })}
                           onDelete={() => handleRemoveRelation(index)}
                           size="small"
                           color="secondary"
@@ -1081,7 +1096,7 @@ export default function CharacterCardManager({ projectId, onCharacterUpdate }: C
               <Grid item xs={12}>
                 <Box sx={{ mt: 2, p: 2, bgcolor: 'grey.50', borderRadius: 1, border: '1px solid', borderColor: 'grey.200' }}>
                   <Typography variant="subtitle2" sx={{ mb: 1.5, display: 'flex', alignItems: 'center', gap: 1 }}>
-                    🤖 自动追踪关联（基于章节内容）
+                    {t('characterCard.autoTracked.title')}
                   </Typography>
                   
                   {autoTrackedLoading ? (
@@ -1093,7 +1108,7 @@ export default function CharacterCardManager({ projectId, onCharacterUpdate }: C
                       {/* 掌握功法 */}
                       <Box>
                         <Typography variant="body2" color="text.secondary" sx={{ mb: 0.5 }}>
-                          📜 掌握功法
+                          {t('characterCard.autoTracked.techniques')}
                         </Typography>
                         {autoTrackedData.techniques?.length > 0 ? (
                           <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap' }}>
@@ -1103,13 +1118,13 @@ export default function CharacterCardManager({ projectId, onCharacterUpdate }: C
                                 size="small"
                                 variant="outlined"
                                 color="primary"
-                                label={`${t.name}（第${t.chapters?.join(',') || '?'}章）`}
+                                label={t('characterCard.autoTracked.chapterChip', { name: t.name, chapters: t.chapters?.join(',') || '?' })}
                               />
                             ))}
                           </Box>
                         ) : (
                           <Typography variant="body2" color="text.disabled">
-                            尚未在章节中识别到该角色使用功法
+                          {t('characterCard.autoTracked.noTechniques')}
                           </Typography>
                         )}
                       </Box>
@@ -1117,7 +1132,7 @@ export default function CharacterCardManager({ projectId, onCharacterUpdate }: C
                       {/* 持有法宝 */}
                       <Box>
                         <Typography variant="body2" color="text.secondary" sx={{ mb: 0.5 }}>
-                          ⚔️ 持有法宝
+                          {t('characterCard.autoTracked.artifacts')}
                         </Typography>
                         {autoTrackedData.artifacts?.length > 0 ? (
                           <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap' }}>
@@ -1127,13 +1142,13 @@ export default function CharacterCardManager({ projectId, onCharacterUpdate }: C
                                 size="small"
                                 variant="outlined"
                                 color="warning"
-                                label={`${a.name}（第${a.chapters?.join(',') || '?'}章）`}
+                                label={t('characterCard.autoTracked.chapterChip', { name: a.name, chapters: a.chapters?.join(',') || '?' })}
                               />
                             ))}
                           </Box>
                         ) : (
                           <Typography variant="body2" color="text.disabled">
-                            尚未在章节中识别到该角色持有法宝
+                          {t('characterCard.autoTracked.noArtifacts')}
                           </Typography>
                         )}
                       </Box>
@@ -1141,7 +1156,7 @@ export default function CharacterCardManager({ projectId, onCharacterUpdate }: C
                       {/* 关联地点 */}
                       <Box>
                         <Typography variant="body2" color="text.secondary" sx={{ mb: 0.5 }}>
-                          📍 关联地点
+                          {t('characterCard.autoTracked.locations')}
                         </Typography>
                         {autoTrackedData.locations?.length > 0 ? (
                           <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap' }}>
@@ -1151,20 +1166,20 @@ export default function CharacterCardManager({ projectId, onCharacterUpdate }: C
                                 size="small"
                                 variant="outlined"
                                 color="success"
-                                label={`${l.name}（第${l.chapters?.join(',') || '?'}章）`}
+                                label={t('characterCard.autoTracked.chapterChip', { name: l.name, chapters: l.chapters?.join(',') || '?' })}
                               />
                             ))}
                           </Box>
                         ) : (
                           <Typography variant="body2" color="text.disabled">
-                            尚未在章节中识别到该角色关联地点
+                          {t('characterCard.autoTracked.noLocations')}
                           </Typography>
                         )}
                       </Box>
                     </Box>
                   ) : (
                     <Typography variant="body2" color="text.disabled">
-                      暂无自动追踪数据
+                      {t('characterCard.autoTracked.empty')}
                     </Typography>
                   )}
                 </Box>
@@ -1173,13 +1188,13 @@ export default function CharacterCardManager({ projectId, onCharacterUpdate }: C
           </Grid>
         </DialogContent>
         <DialogActions>
-          <Button onClick={handleCloseEditDialog} disabled={saving}>取消</Button>
+          <Button onClick={handleCloseEditDialog} disabled={saving}>{t('common.cancel')}</Button>
           <Button 
             variant="contained" 
             onClick={handleSaveCharacter} 
             disabled={!formData.name || saving}
           >
-            {saving ? '保存中...' : '保存'}
+            {saving ? t('state.saving') : t('common.save')}
           </Button>
         </DialogActions>
       </Dialog>
@@ -1194,7 +1209,7 @@ export default function CharacterCardManager({ projectId, onCharacterUpdate }: C
         <DialogTitle sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
             <HistoryIcon />
-            📖 {timelineData?.character_name || ''} 的出场历程
+            {t('characterCard.timeline.title', { name: timelineData?.character_name || '' })}
           </Box>
           <IconButton onClick={() => setTimelineDialogOpen(false)} size="small">
             <CloseIcon />
@@ -1210,12 +1225,12 @@ export default function CharacterCardManager({ projectId, onCharacterUpdate }: C
               {/* 统计信息 */}
               <Box sx={{ mb: 3, p: 2, bgcolor: 'grey.50', borderRadius: 1 }}>
                 <Typography variant="body2" color="text.secondary">
-                  共出场 <strong>{timelineData.total_appearances}</strong> 章
+                  {t('characterCard.timeline.totalHead')}<strong>{timelineData.total_appearances}</strong>{t('characterCard.timeline.totalTail')}
                   {timelineData.first_appearance && (
-                    <> · 首次出场第 <strong>{timelineData.first_appearance}</strong> 章</>
+                    <> {t('characterCard.timeline.firstHead')}<strong>{timelineData.first_appearance}</strong>{t('characterCard.timeline.firstTail')}</>
                   )}
                   {timelineData.last_appearance && (
-                    <> · 最后出场第 <strong>{timelineData.last_appearance}</strong> 章</>
+                    <> {t('characterCard.timeline.lastHead')}<strong>{timelineData.last_appearance}</strong>{t('characterCard.timeline.lastTail')}</>
                   )}
                 </Typography>
               </Box>
@@ -1223,7 +1238,7 @@ export default function CharacterCardManager({ projectId, onCharacterUpdate }: C
               {/* 时间线列表 */}
               {timelineData.timeline.length === 0 ? (
                 <Box sx={{ textAlign: 'center', py: 4, color: 'text.secondary' }}>
-                  该角色暂无出场记录
+                  {t('characterCard.timeline.noRecord')}
                 </Box>
               ) : (
                 <Box sx={{ position: 'relative', pl: 3 }}>
@@ -1276,11 +1291,11 @@ export default function CharacterCardManager({ projectId, onCharacterUpdate }: C
                       >
                         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
                           <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
-                            第{item.chapter_number}章：{item.chapter_title}
+                            {t('characterCard.timeline.chapterLine', { number: item.chapter_number, title: item.chapter_title })}
                           </Typography>
                           <Chip 
                             size="small" 
-                            label={`${item.word_count}字`} 
+                            label={t('characterCard.timeline.wordCount', { count: item.word_count })} 
                             variant="outlined"
                           />
                         </Box>
@@ -1323,7 +1338,7 @@ export default function CharacterCardManager({ projectId, onCharacterUpdate }: C
             </Box>
           ) : (
             <Box sx={{ textAlign: 'center', py: 4, color: 'text.secondary' }}>
-              加载失败
+              {t('characterCard.timeline.loadFailed')}
             </Box>
           )}
         </DialogContent>
@@ -1339,7 +1354,7 @@ export default function CharacterCardManager({ projectId, onCharacterUpdate }: C
         <DialogTitle sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
             <SyncIcon color="primary" />
-            同步人物卡到工作流
+            {t('characterCard.sync.title')}
           </Box>
           <IconButton onClick={() => setSyncDialogOpen(false)} disabled={syncing} size="small">
             <CloseIcon />
@@ -1355,18 +1370,17 @@ export default function CharacterCardManager({ projectId, onCharacterUpdate }: C
               {/* 统计信息 */}
               <Box sx={{ mb: 3, p: 2, bgcolor: 'primary.50', borderRadius: 1, border: '1px solid', borderColor: 'primary.200' }}>
                 <Typography variant="body2">
-                  将同步 <strong>{syncPreview.character_count}</strong> 个人物到工作流
-                  ，生成文本长度: <strong>{syncPreview.text_length}</strong> 字符
+                  {t('characterCard.sync.previewHead')}<strong>{syncPreview.character_count}</strong>{t('characterCard.sync.previewMid')}<strong>{syncPreview.text_length}</strong>{t('characterCard.sync.previewTail')}
                 </Typography>
                 {syncPreview.stats && (
                   <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
-                    按重要程度: {Object.entries(syncPreview.stats.by_importance || {}).map(([k, v]) => `${k}: ${v}`).join(', ')}
+                    {t('characterCard.sync.byImportance')}{Object.entries(syncPreview.stats.by_importance || {}).map(([k, v]) => `${k}: ${v}`).join(', ')}
                   </Typography>
                 )}
               </Box>
 
               {/* 预览内容 */}
-              <Typography variant="subtitle2" sx={{ mb: 1 }}>文本预览</Typography>
+              <Typography variant="subtitle2" sx={{ mb: 1 }}>{t('characterCard.sync.textPreview')}</Typography>
               <Box
                 sx={{
                   p: 2,
@@ -1382,22 +1396,22 @@ export default function CharacterCardManager({ projectId, onCharacterUpdate }: C
                 }}
               >
                 {syncPreview.text?.substring(0, 2000)}
-                {syncPreview.text?.length > 2000 && '\n\n... (更多内容已省略)'}
+                {syncPreview.text?.length > 2000 && `\n\n${t('characterCard.sync.moreOmitted')}`}
               </Box>
 
               <Alert severity="warning" sx={{ mt: 2 }}>
-                同步将覆盖工作流中的“人物设定”字段，请确认是否继续。
+                {t('characterCard.sync.warningBody')}
               </Alert>
             </Box>
           ) : (
             <Box sx={{ textAlign: 'center', py: 4, color: 'text.secondary' }}>
-              加载预览失败
+              {t('characterCard.sync.loadPreviewFailed')}
             </Box>
           )}
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setSyncDialogOpen(false)} disabled={syncing}>
-            取消
+            {t('common.cancel')}
           </Button>
           <Button
             variant="contained"
@@ -1406,7 +1420,7 @@ export default function CharacterCardManager({ projectId, onCharacterUpdate }: C
             disabled={syncing || !syncPreview}
             startIcon={syncing ? <CircularProgress size={20} /> : <SyncIcon />}
           >
-            {syncing ? '同步中...' : '确认同步'}
+            {syncing ? t('characterCard.sync.syncing') : t('characterCard.sync.confirmSync')}
           </Button>
         </DialogActions>
       </Dialog>
@@ -1437,11 +1451,11 @@ export default function CharacterCardManager({ projectId, onCharacterUpdate }: C
         <DialogTitle sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
             <AccountTreeIcon color="secondary" />
-            人物关系网络图
+            {t('characterCard.graph.title')}
           </Box>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
             <Typography variant="body2" color="text.secondary">
-              {graphStats.total_nodes} 个人物 · {graphStats.total_edges} 条关系
+              {t('characterCard.graph.stats', { nodes: graphStats.total_nodes, edges: graphStats.total_edges })}
             </Typography>
             {selectedNodeId && (
               <Button 
@@ -1449,7 +1463,7 @@ export default function CharacterCardManager({ projectId, onCharacterUpdate }: C
                 variant="outlined" 
                 onClick={() => handleNodeClick({} as React.MouseEvent, { id: selectedNodeId } as Node)}
               >
-                重置过滤
+                {t('characterCard.graph.resetFilter')}
               </Button>
             )}
             <IconButton onClick={() => setGraphDialogOpen(false)} size="small">
@@ -1464,7 +1478,7 @@ export default function CharacterCardManager({ projectId, onCharacterUpdate }: C
             </Box>
           ) : nodes.length === 0 ? (
             <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%', color: 'text.secondary' }}>
-              暂无关系数据，请先在人物卡中添加关系信息
+              {t('characterCard.graph.noData')}
             </Box>
           ) : (
             <ReactFlow
@@ -1476,14 +1490,14 @@ export default function CharacterCardManager({ projectId, onCharacterUpdate }: C
               fitView
               attributionPosition="bottom-left"
             >
-              <Background color="#eee" gap={16} />
+              <Background color="var(--sg-divider)" gap={16} />
               <Controls />
-              <MiniMap nodeColor={(node) => node.style?.background as string || '#eee'} />
+              <MiniMap nodeColor={(node) => node.style?.background as string || 'var(--sg-divider)'} />
             </ReactFlow>
           )}
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setGraphDialogOpen(false)}>关闭</Button>
+          <Button onClick={() => setGraphDialogOpen(false)}>{t('common.close')}</Button>
         </DialogActions>
       </Dialog>
     </Box>

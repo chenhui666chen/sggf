@@ -4,6 +4,8 @@ import {
   Typography,
 } from '@mui/material'
 
+import { useTranslation } from 'react-i18next'
+
 import type { CharacterVoiceSetting } from './types'
 
 interface TuningSliderProps {
@@ -50,12 +52,13 @@ const CharacterVoiceTuningControls = ({
   onVolumeChange,
   onSpeedChange,
 }: CharacterVoiceTuningControlsProps) => {
+  const { t } = useTranslation()
   const characterId = characterVoice.characterId
 
   return (
     <>
       <TuningSlider
-        label="音量"
+        label={t('audiobook.characterVoiceTuningControls.volume')}
         value={characterVoice.volume}
         min={0}
         max={100}
@@ -63,7 +66,7 @@ const CharacterVoiceTuningControls = ({
         onChange={(value) => onVolumeChange(characterId, value)}
       />
       <TuningSlider
-        label="语速"
+        label={t('audiobook.characterVoiceTuningControls.speed')}
         value={characterVoice.speed ?? 1.0}
         min={0.5}
         max={2.0}

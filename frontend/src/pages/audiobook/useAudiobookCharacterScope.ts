@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 
 import {
   apiClient,
@@ -14,6 +15,7 @@ export const useAudiobookCharacterScope = ({
   projectId: number | null
   selectedChapterIds: number[]
 }) => {
+  const { t } = useTranslation()
   const normalizedChapterIds = useMemo(
     () => [...new Set(selectedChapterIds)].sort((left, right) => left - right),
     [selectedChapterIds],
@@ -46,7 +48,7 @@ export const useAudiobookCharacterScope = ({
           setScope(response.data)
         }
       } catch (requestError: unknown) {
-        const message = await extractApiErrorMessage(requestError, '章节人物识别失败')
+        const message = await extractApiErrorMessage(requestError, t('audiobook.useAudiobookCharacterScope.recognitionFailed'))
         if (!cancelled) {
           setError(message)
         }
@@ -61,7 +63,7 @@ export const useAudiobookCharacterScope = ({
     return () => {
       cancelled = true
     }
-  }, [chapterKey, normalizedChapterIds, projectId])
+  }, [chapterKey, normalizedChapterIds, projectId, t])
 
   return {
     characterScope: scope,

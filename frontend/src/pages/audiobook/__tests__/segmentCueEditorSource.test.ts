@@ -28,7 +28,7 @@ describe('single-segment cue editor', () => {
 
   it('supports user reading analysis and model-aware assist with static reading text', () => {
     for (const marker of [
-      '要朗读的文本',
+      'audiobook.segmentCueEditor.readingTextLabel',
       'MediaRecorder',
       'getUserMedia',
       'analyzeSegmentDirectionReading',
@@ -36,8 +36,8 @@ describe('single-segment cue editor', () => {
       'assistSegmentDirection',
       'model_capabilities',
       'warnings',
-      '智能整理',
-      '应用到片段',
+      'audiobook.segmentCueEditor.smartAssist',
+      'audiobook.segmentCueEditor.applyToSegment',
       'AudioPicker',
       "formData.append('file'",
     ]) {

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import {
   Alert,
   Box,
@@ -75,6 +76,7 @@ const reviewKey = (candidate: Pick<SfxCandidate, 'source' | 'source_id'>) =>
   `${candidate.source}:${candidate.source_id}`
 
 const SfxCandidateReviewDialog = ({ open, onClose }: SfxCandidateReviewDialogProps) => {
+  const { t } = useTranslation()
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
   const [candidates, setCandidates] = useState<SfxCandidate[]>([])
@@ -103,7 +105,7 @@ const SfxCandidateReviewDialog = ({ open, onClose }: SfxCandidateReviewDialogPro
         return next
       })
     } catch {
-      setError('候选清单读取失败')
+      setError(t('audiobook.sfxCandidateReview.loadFailed'))
     } finally {
       setLoading(false)
     }
@@ -146,9 +148,11 @@ const SfxCandidateReviewDialog = ({ open, onClose }: SfxCandidateReviewDialogPro
         source_dir: sourceDir || undefined,
         items,
       })
-      setMessage(`manifest 草稿已生成：${res.data.manifest_path}`)
+      setMessage(t('audiobook.sfxCandidateReview.manifestGenerated', {
+        path: res.data.manifest_path,
+      }))
     } catch {
-      setError('生成 manifest 草稿失败，请确认已批准项填写了本地文件并完成许可核验')
+      setError(t('audiobook.sfxCandidateReview.buildFailed'))
     } finally {
       setSaving(false)
     }
@@ -163,21 +167,21 @@ const SfxCandidateReviewDialog = ({ open, onClose }: SfxCandidateReviewDialogPro
   return (
     <Dialog open={open} onClose={handleClose} maxWidth="md" fullWidth>
       <DialogTitle sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        候选清单审核
+        {t('audiobook.sfxCandidateReview.title')}
         <IconButton onClick={handleClose} size="small">
           <CloseIcon />
         </IconButton>
       </DialogTitle>
       <DialogContent dividers>
         <Alert severity="info" sx={{ mb: 2 }}>
-          这里只生成本地导入 manifest 草稿，不下载公开平台文件，也不写入音效索引。
+          {t('audiobook.sfxCandidateReview.infoHint')}
         </Alert>
 
         <Box sx={{ display: 'flex', gap: 1, mb: 2 }}>
           <TextField
             size="small"
-            label="本地素材目录"
-            placeholder="留空则使用音效库下的 approved_sfx"
+            label={t('audiobook.sfxCandidateReview.sourceDirLabel')}
+            placeholder={t('audiobook.sfxCandidateReview.sourceDirPlaceholder')}
             value={sourceDir}
             onChange={(event) => setSourceDir(event.target.value)}
             sx={{ flex: 1 }}
@@ -188,7 +192,7 @@ const SfxCandidateReviewDialog = ({ open, onClose }: SfxCandidateReviewDialogPro
             onClick={loadCandidates}
             disabled={loading}
           >
-            刷新
+            {t('audiobook.sfxCandidateReview.refresh')}
           </Button>
         </Box>
 
@@ -201,7 +205,7 @@ const SfxCandidateReviewDialog = ({ open, onClose }: SfxCandidateReviewDialogPro
           </Box>
         ) : candidates.length === 0 ? (
           <Typography variant="body2" color="text.secondary" sx={{ py: 4, textAlign: 'center' }}>
-            暂无候选素材
+            {t('audiobook.sfxCandidateReview.noCandidates')}
           </Typography>
         ) : (
           <List dense disablePadding sx={{ maxHeight: 520, overflow: 'auto' }}>
@@ -219,17 +223,17 @@ const SfxCandidateReviewDialog = ({ open, onClose }: SfxCandidateReviewDialogPro
                         <Typography variant="subtitle2">{candidate.name}</Typography>
                         <Chip label={candidate.source} size="small" variant="outlined" />
                         <Chip
-                          label={candidate.license || '未知许可'}
+                          label={candidate.license || t('audiobook.sfxCandidateReview.unknownLicense')}
                           size="small"
                           color={candidate.license_commercial ? 'success' : 'warning'}
                         />
-                        {candidate.attribution_required && <Chip label="需署名" size="small" />}
+                        {candidate.attribution_required && <Chip label={t('audiobook.sfxCandidateReview.attributionChip')} size="small" />}
                       </Box>
                     }
                     secondary={
                       <Box sx={{ mt: 1 }}>
                         <Typography variant="caption" color="text.secondary">
-                          {candidate.description || candidate.source_url || '无描述'}
+                          {candidate.description || candidate.source_url || t('audiobook.sfxCandidateReview.noDescription')}
                         </Typography>
                         <Box sx={{ display: 'flex', gap: 0.5, mt: 1, flexWrap: 'wrap' }}>
                           {candidate.tags.slice(0, 4).map((tag) => (
@@ -240,46 +244,46 @@ const SfxCandidateReviewDialog = ({ open, onClose }: SfxCandidateReviewDialogPro
                         </Box>
                         <Box sx={{ display: 'grid', gridTemplateColumns: '150px 1fr 130px 130px', gap: 1, mt: 1.5 }}>
                           <FormControl size="small">
-                            <InputLabel>审核</InputLabel>
+                            <InputLabel>{t('audiobook.sfxCandidateReview.reviewLabel')}</InputLabel>
                             <Select
-                              label="审核"
+                              label={t('audiobook.sfxCandidateReview.reviewLabel')}
                               value={draft.review_status}
                               onChange={(event) => updateReview(candidate, { review_status: event.target.value as ReviewStatus })}
                             >
-                              <MenuItem value="needs_info">待补充</MenuItem>
-                              <MenuItem value="approved">通过</MenuItem>
-                              <MenuItem value="rejected">拒绝</MenuItem>
+                              <MenuItem value="needs_info">{t('audiobook.sfxCandidateReview.needsInfo')}</MenuItem>
+                              <MenuItem value="approved">{t('audiobook.promptAudioManualReview.passed')}</MenuItem>
+                              <MenuItem value="rejected">{t('audiobook.sfxCandidateReview.rejected')}</MenuItem>
                             </Select>
                           </FormControl>
                           <TextField
                             size="small"
-                            label="本地文件"
-                            placeholder="相对本地素材目录，例如 rain.wav"
+                            label={t('audiobook.sfxCandidateReview.localFileLabel')}
+                            placeholder={t('audiobook.sfxCandidateReview.localFilePlaceholder')}
                             value={draft.local_file}
                             onChange={(event) => updateReview(candidate, { local_file: event.target.value })}
                             disabled={draft.review_status !== 'approved'}
                           />
                           <FormControl size="small" disabled={draft.review_status !== 'approved'}>
-                            <InputLabel>分类</InputLabel>
+                            <InputLabel>{t('audiobook.sfxCandidateReview.categoryLabel')}</InputLabel>
                             <Select
-                              label="分类"
+                              label={t('audiobook.sfxCandidateReview.categoryLabel')}
                               value={draft.category}
                               onChange={(event) => updateReview(candidate, { category: event.target.value })}
                             >
-                              <MenuItem value="">自动</MenuItem>
+                              <MenuItem value="">{t('audiobook.sfxCandidateReview.auto')}</MenuItem>
                               {SFX_CATEGORIES.map((item) => (
                                 <MenuItem key={item} value={item}>{item}</MenuItem>
                               ))}
                             </Select>
                           </FormControl>
                           <FormControl size="small" disabled={draft.review_status !== 'approved'}>
-                            <InputLabel>风格</InputLabel>
+                            <InputLabel>{t('audiobook.sfxCandidateReview.styleLabel')}</InputLabel>
                             <Select
-                              label="风格"
+                              label={t('audiobook.sfxCandidateReview.styleLabel')}
                               value={draft.style}
                               onChange={(event) => updateReview(candidate, { style: event.target.value })}
                             >
-                              <MenuItem value="">自动</MenuItem>
+                              <MenuItem value="">{t('audiobook.sfxCandidateReview.auto')}</MenuItem>
                               {SFX_STYLES.map((item) => (
                                 <MenuItem key={item} value={item}>{item}</MenuItem>
                               ))}
@@ -296,7 +300,7 @@ const SfxCandidateReviewDialog = ({ open, onClose }: SfxCandidateReviewDialogPro
                               disabled={draft.review_status !== 'approved'}
                             />
                           }
-                          label="已人工核验来源页、许可和本地文件授权"
+                          label={t('audiobook.sfxCandidateReview.licenseVerifiedLabel')}
                         />
                       </Box>
                     }
@@ -308,19 +312,21 @@ const SfxCandidateReviewDialog = ({ open, onClose }: SfxCandidateReviewDialogPro
         )}
       </DialogContent>
       <DialogActions>
-        <Button onClick={handleClose}>关闭</Button>
+        <Button onClick={handleClose}>{t('action.close')}</Button>
         <Button
           variant="contained"
           startIcon={saving ? <CircularProgress size={16} color="inherit" /> : <PlaylistAddCheckIcon />}
           onClick={handleBuildManifest}
           disabled={saving || loading || candidates.length === 0 || approvedCount === 0}
         >
-          生成 manifest 草稿
+          {t('audiobook.sfxCandidateReview.buildManifest')}
         </Button>
         {approvedCount > 0 && (
           <Chip
             icon={<CheckCircleIcon />}
-            label={`已批准 ${approvedCount}`}
+            label={t('audiobook.sfxCandidateReview.approvedCountLabel', {
+              total: approvedCount,
+            })}
             color="success"
             size="small"
           />

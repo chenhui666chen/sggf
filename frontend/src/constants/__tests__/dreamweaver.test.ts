@@ -46,10 +46,10 @@ describe('dreamweaver constants', () => {
 
   describe('STYLE_PRESET_LABELS', () => {
     it('应正确映射风格预设标签', () => {
-      expect(STYLE_PRESET_LABELS[STYLE_PRESETS.CINEMATIC_REALISTIC]).toBe('电影写实')
-      expect(STYLE_PRESET_LABELS[STYLE_PRESETS.ANIME]).toBe('二次元动画')
-      expect(STYLE_PRESET_LABELS[STYLE_PRESETS.INK_WASH]).toBe('国风水墨')
-      expect(STYLE_PRESET_LABELS[STYLE_PRESETS.CYBERPUNK]).toBe('赛博朋克')
+      expect(STYLE_PRESET_LABELS[STYLE_PRESETS.CINEMATIC_REALISTIC]).toBe('dreamweaverRun.stylePresetCinematicRealistic')
+      expect(STYLE_PRESET_LABELS[STYLE_PRESETS.ANIME]).toBe('dreamweaverRun.stylePresetAnime')
+      expect(STYLE_PRESET_LABELS[STYLE_PRESETS.INK_WASH]).toBe('dreamweaverRun.stylePresetInkWash')
+      expect(STYLE_PRESET_LABELS[STYLE_PRESETS.CYBERPUNK]).toBe('dreamweaverRun.stylePresetCyberpunk')
     })
   })
 
@@ -74,12 +74,12 @@ describe('dreamweaver constants', () => {
 
   describe('CHARACTER_VIEW_LABELS', () => {
     it('应正确映射角色视角标签', () => {
-      expect(CHARACTER_VIEW_LABELS[CHARACTER_VIEWS.FRONT]).toBe('正面')
-      expect(CHARACTER_VIEW_LABELS[CHARACTER_VIEWS.SIDE]).toBe('侧面')
-      expect(CHARACTER_VIEW_LABELS[CHARACTER_VIEWS.BACK]).toBe('背面')
-      expect(CHARACTER_VIEW_LABELS[CHARACTER_VIEWS.HALF_FRONT]).toBe('半身正面')
-      expect(CHARACTER_VIEW_LABELS[CHARACTER_VIEWS.HALF_3_4]).toBe('半身3-4')
-      expect(CHARACTER_VIEW_LABELS[CHARACTER_VIEWS.HALF_SIDE]).toBe('半身侧面')
+      expect(CHARACTER_VIEW_LABELS[CHARACTER_VIEWS.FRONT]).toBe('dreamweaverRun.characterViewFront')
+      expect(CHARACTER_VIEW_LABELS[CHARACTER_VIEWS.SIDE]).toBe('dreamweaverRun.characterViewSide')
+      expect(CHARACTER_VIEW_LABELS[CHARACTER_VIEWS.BACK]).toBe('dreamweaverRun.characterViewBack')
+      expect(CHARACTER_VIEW_LABELS[CHARACTER_VIEWS.HALF_FRONT]).toBe('dreamweaverRun.characterViewHalfFront')
+      expect(CHARACTER_VIEW_LABELS[CHARACTER_VIEWS.HALF_3_4]).toBe('dreamweaverRun.characterViewHalf3To4')
+      expect(CHARACTER_VIEW_LABELS[CHARACTER_VIEWS.HALF_SIDE]).toBe('dreamweaverRun.characterViewHalfSide')
     })
   })
 })

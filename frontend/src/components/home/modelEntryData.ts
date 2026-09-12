@@ -11,8 +11,11 @@ export type AssetStudioTabId = 'image' | 'video' | 'motion' | 'audio' | 'vision-
 export interface ModelUseEntry {
   id: AssetStudioTabId
   title: string
+  titleKey: string
   subtitle: string
+  subtitleKey: string
   description: string
+  descriptionKey: string
   color: string
   icon: ElementType<SvgIconProps>
   status: 'ready' | 'planned'
@@ -22,8 +25,11 @@ export const modelUseEntries: ModelUseEntry[] = [
   {
     id: 'image',
     title: '图片生成',
+    titleKey: 'assetStudio.entries.image.title',
     subtitle: '文生图 / 参考图生成',
+    subtitleKey: 'assetStudio.entries.image.subtitle',
     description: '直接填写提示词，或上传参考图后走图像编辑链路生成资产。',
+    descriptionKey: 'assetStudio.entries.image.description',
     color: '#ff7b54',
     icon: ImageOutlinedIcon,
     status: 'ready',
@@ -31,8 +37,11 @@ export const modelUseEntries: ModelUseEntry[] = [
   {
     id: 'video',
     title: '视频生成',
+    titleKey: 'assetStudio.entries.video.title',
     subtitle: '文生视频 / 图生视频',
+    subtitleKey: 'assetStudio.entries.video.subtitle',
     description: '支持纯提示词生成，也支持带首帧参考图的视频资产生成。',
+    descriptionKey: 'assetStudio.entries.video.description',
     color: '#35b8a3',
     icon: MovieCreationOutlinedIcon,
     status: 'ready',
@@ -40,8 +49,11 @@ export const modelUseEntries: ModelUseEntry[] = [
   {
     id: 'motion',
     title: '动作控制',
+    titleKey: 'assetStudio.entries.motion.title',
     subtitle: '带参考图生成运动画面',
+    subtitleKey: 'assetStudio.entries.motion.subtitle',
     description: '基于参考图和动作描述生成更偏控制型的视频资产。',
+    descriptionKey: 'assetStudio.entries.motion.description',
     color: '#4f8dfd',
     icon: CenterFocusStrongOutlinedIcon,
     status: 'ready',
@@ -49,8 +61,11 @@ export const modelUseEntries: ModelUseEntry[] = [
   {
     id: 'audio',
     title: '音乐音效',
+    titleKey: 'assetStudio.entries.audio.title',
     subtitle: '配乐 / 音效 / 语音合成',
+    subtitleKey: 'assetStudio.entries.audio.subtitle',
     description: '统一走资产工作台音频入口，支持配乐、音效和语音合成，不再混入模型中心导航。',
+    descriptionKey: 'assetStudio.entries.audio.description',
     color: '#ff9d2e',
     icon: GraphicEqOutlinedIcon,
     status: 'ready',
@@ -58,8 +73,11 @@ export const modelUseEntries: ModelUseEntry[] = [
   {
     id: 'vision-review',
     title: '视觉识别',
+    titleKey: 'assetStudio.entries.visionReview.title',
     subtitle: '图片 / 视频评价与改词',
+    subtitleKey: 'assetStudio.entries.visionReview.subtitle',
     description: '调用具备视觉理解能力的模型识别素材质量，并给出评价和修改后的提示词。',
+    descriptionKey: 'assetStudio.entries.visionReview.description',
     color: '#f1b74a',
     icon: VisibilityOutlinedIcon,
     status: 'ready',

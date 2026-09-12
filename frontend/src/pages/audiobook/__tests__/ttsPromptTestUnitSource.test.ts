@@ -21,7 +21,7 @@ describe('independent TTS prompt test unit source contract', () => {
     expect(appSource).toContain("const TtsPromptTestPage = lazy(() => import('@/pages/TtsPromptTestPage'))")
     expect(appSource).toContain('path="/audiobook-tts-test"')
     expect(dashboardSource).toContain("navigate('/audiobook-tts-test')")
-    expect(dashboardSource).toContain('TTS 测试')
+    expect(dashboardSource).toContain('audiobook.audiobookDashboard.ttsTest')
   })
 
   it('loads model-specific cases and previews through independent APIs', () => {
@@ -47,7 +47,7 @@ describe('independent TTS prompt test unit source contract', () => {
     expect(pageSource).toContain('latestTtsPreview')
     expect(scenePanelSource).toContain('apiClient.getSeedSceneTestCases')
     expect(scenePanelSource).toContain('apiClient.previewSeedSceneTestCase')
-    expect(scenePanelSource).toContain('使用当前试听')
+    expect(scenePanelSource).toContain("t('audiobook.seedSceneTest.useCurrentPreview')")
     expect(scenePanelSource).toContain('force_regenerate')
     expect(scenePanelSource).not.toContain('audiobookProjectId')
     expect(scenePanelSource).not.toContain('chapterId')
@@ -66,7 +66,7 @@ describe('independent TTS prompt test unit source contract', () => {
     expect(scenePanelSource).toContain('modelUsesBasicNumericSpeedControl(selectedModel)')
     expect(scenePanelSource).not.toContain('speed: selectedVoice?.default_params?.speed ?? 1,')
     expect(scenePanelSource).toContain('buildSeedSceneReferencePayload')
-    expect(scenePanelSource).toContain('原生 speaker')
+    expect(scenePanelSource).toContain("t('audiobook.seedSceneTest.boundNativeSuffix')")
     expect(scenePanelSource).toContain('audioUrl: result.audioUrl')
     expect(scenePanelSource).toContain('audioDataBase64: await blobToBase64(result.blob)')
     expect(scenePanelSource).not.toContain('disabled={!latestTtsPreview}')

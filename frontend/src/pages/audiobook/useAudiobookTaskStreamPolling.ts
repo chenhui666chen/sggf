@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, type Dispatch, type MutableRefObject, type SetStateAction } from 'react'
 
+import { useTranslation } from 'react-i18next'
+
 import { apiClient, extractApiErrorMessage } from '../../services/api'
 import type { SetSnackbar } from './hookTypes'
 import type { AudiobookProjectDetail, TaskStatus } from './types'
@@ -74,6 +76,7 @@ export const useAudiobookTaskStreamPolling = ({
   refreshAudiobookProjectDetail,
   downloadCompletedProjectExport,
 }: UseAudiobookTaskStreamPollingParams) => {
+  const { t } = useTranslation()
   const streamStatusRef = useRef<TaskProgressStreamConnectionStatus>('idle')
   const setStreamStatus = useCallback((
     status: TaskProgressStreamConnectionStatus,
@@ -183,7 +186,7 @@ export const useAudiobookTaskStreamPolling = ({
           } catch (error) {
             setSnackbar({
               open: true,
-              message: await extractApiErrorMessage(error, '导出完成，但自动下载失败，请手动重试下载'),
+              message: await extractApiErrorMessage(error, t('audiobook.useAudiobookTaskStreamPolling.exportDownloadFailed')),
               severity: 'error',
             })
           }
@@ -204,7 +207,7 @@ export const useAudiobookTaskStreamPolling = ({
             // 刷新有声书项目详情失败
           }
         }
-        const completedMessage = getCompletedTaskSnackbarMessage(normalized)
+        const completedMessage = getCompletedTaskSnackbarMessage(normalized, t)
         if (completedMessage) {
           setSnackbar({ open: true, message: completedMessage, severity: 'success' })
         }
@@ -235,7 +238,7 @@ export const useAudiobookTaskStreamPolling = ({
         }
         setSnackbar({
           open: true,
-          message: getFailedTaskSnackbarMessage(normalized),
+          message: getFailedTaskSnackbarMessage(normalized, t),
           severity: 'error',
         })
         setCurrentTaskId(null)

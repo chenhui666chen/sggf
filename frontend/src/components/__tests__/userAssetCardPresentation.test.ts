@@ -1,5 +1,7 @@
-import { describe, expect, it } from 'vitest'
+import { beforeAll, describe, expect, it } from 'vitest'
+import type { TFunction } from 'i18next'
 
+import { bootstrapI18n } from '@/i18n'
 import type { UserAssetSourceInfo } from '@/contracts/userAssetSourceReaders'
 import type { UserAssetRecord } from '@/services/api'
 
@@ -35,6 +37,13 @@ function createSourceInfo(overrides: Partial<UserAssetSourceInfo> = {}): UserAss
   }
 }
 
+let t: TFunction
+
+beforeAll(async () => {
+  const instance = await bootstrapI18n('zh-CN')
+  t = instance.t.bind(instance)
+})
+
 describe('userAssetCardPresentation', () => {
   it('builds header chips, description and action labels', () => {
     const presentation = buildUserAssetCardPresentation(
@@ -52,6 +61,7 @@ describe('userAssetCardPresentation', () => {
       {
         createdAtLabel: '2026/04/23 10:00:00',
       },
+      t,
     )
 
     expect(presentation.headerChips).toEqual([
@@ -84,6 +94,7 @@ describe('userAssetCardPresentation', () => {
         createdAtLabel: '2026/04/23 10:00:00',
         hasLocalObjectUrl: true,
       },
+      t,
     )
 
     expect(presentation.detailChips).toEqual([
@@ -110,6 +121,7 @@ describe('userAssetCardPresentation', () => {
       {
         createdAtLabel: '2026/04/23 10:00:00',
       },
+      t,
     )
 
     expect(presentation.description).toBe('当前资产尚未补充说明，可以在用户中心内完善标题、描述和标签。')
@@ -131,6 +143,7 @@ describe('userAssetCardPresentation', () => {
         createdAtLabel: '2026/04/23 10:00:00',
         hasLocalObjectUrl: false,
       },
+      t,
     )
 
     expect(presentation.restoreLocalAction).toEqual({ label: '重新收录到本地' })
@@ -156,6 +169,7 @@ describe('userAssetCardPresentation', () => {
         createdAtLabel: '2026/04/23 10:00:00',
         hasLocalObjectUrl: true,
       },
+      t,
     )
 
     expect(presentation.restoreLocalAction).toBeNull()

@@ -31,6 +31,6 @@ describe('prompt audio manual review source contract', () => {
     expect(promptAudioReviewPanelSource).toContain('asr_transcript: asrTranscript || null')
     expect(promptAudioReviewPanelSource).toContain('asrAssist')
     expect(promptAudioReviewPanelSource).toContain('suggestedTextContamination')
-    expect(promptAudioReviewPanelSource).toContain('排队转写')
+    expect(promptAudioReviewPanelSource).toContain('audiobook.promptAudioManualReview.queueTranscript')
   })
 })

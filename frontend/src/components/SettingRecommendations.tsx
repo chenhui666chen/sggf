@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import {
   Box,
   Card,
@@ -43,41 +44,42 @@ interface SettingRecommendationsProps {
   title?: string
 }
 
+// value 为后端 category 代码（提交值不可翻译），label 值为 i18n key，渲染处 t(labelKey)
 const CATEGORY_LABELS: Record<string, string> = {
-  all: '全部',
-  map_system: '地图体系',
-  cultivation_realm_system: '修仙境界体系',
-  martial_realm_system: '武道境界体系',
-  technique_system: '功法体系',
-  pill_system: '丹药体系',
-  formation_system: '阵法体系',
-  talisman_system: '符箓体系',
-  weapon_system: '法宝体系',
-  resource_system: '资源体系',
-  organization_force_system: '势力体系',
-  ability_system: '异能体系',
-  ability_realm_system: '异能境界体系',
-  network_social_relationship_system: '人脉关系体系',
-  special_artifact_relic_system: '道具遗物体系',
-  wealth_business_empire_system: '财富商业体系',
-  magic_realm_system: '魔法境界体系',
-  magic_system: '魔法体系',
-  race_bloodline_system: '种族血脉体系',
-  profession_class_system: '职业体系',
-  interstellar_travel_exploration_system: '星际航行体系',
-  ai_robot_system: 'AI机器人体系',
-  survivor_settlement_order_system: '聚落秩序体系',
-  mutation_infection_aberration_system: '变异感染体系',
-  skill_talent_system: '技能天赋体系',
-  character_system: '角色体系',
-  power_official_system: '权力官制体系',
-  military_warfare_system: '军事战争体系',
-  economy_taxation_system: '经济财税体系',
-  culture_etiquette_examination_system: '文化礼制体系',
-  legal_criminal_system: '律法刑罚体系',
-  communication_intelligence_system: '通讯情报体系',
-  historical_event_legend_system: '历史传说体系',
-  lifestyle_custom_system: '民生风俗体系',
+  all: 'settingRecommendations.categoryAll',
+  map_system: 'settingRecommendations.categoryMapSystem',
+  cultivation_realm_system: 'settingRecommendations.categoryCultivationRealmSystem',
+  martial_realm_system: 'settingRecommendations.categoryMartialRealmSystem',
+  technique_system: 'settingRecommendations.categoryTechniqueSystem',
+  pill_system: 'settingRecommendations.categoryPillSystem',
+  formation_system: 'settingRecommendations.categoryFormationSystem',
+  talisman_system: 'settingRecommendations.categoryTalismanSystem',
+  weapon_system: 'settingRecommendations.categoryWeaponSystem',
+  resource_system: 'settingRecommendations.categoryResourceSystem',
+  organization_force_system: 'settingRecommendations.categoryOrganizationForceSystem',
+  ability_system: 'settingRecommendations.categoryAbilitySystem',
+  ability_realm_system: 'settingRecommendations.categoryAbilityRealmSystem',
+  network_social_relationship_system: 'settingRecommendations.categoryNetworkSocialRelationshipSystem',
+  special_artifact_relic_system: 'settingRecommendations.categorySpecialArtifactRelicSystem',
+  wealth_business_empire_system: 'settingRecommendations.categoryWealthBusinessEmpireSystem',
+  magic_realm_system: 'settingRecommendations.categoryMagicRealmSystem',
+  magic_system: 'settingRecommendations.categoryMagicSystem',
+  race_bloodline_system: 'settingRecommendations.categoryRaceBloodlineSystem',
+  profession_class_system: 'settingRecommendations.categoryProfessionClassSystem',
+  interstellar_travel_exploration_system: 'settingRecommendations.categoryInterstellarTravelExplorationSystem',
+  ai_robot_system: 'settingRecommendations.categoryAiRobotSystem',
+  survivor_settlement_order_system: 'settingRecommendations.categorySurvivorSettlementOrderSystem',
+  mutation_infection_aberration_system: 'settingRecommendations.categoryMutationInfectionAberrationSystem',
+  skill_talent_system: 'settingRecommendations.categorySkillTalentSystem',
+  character_system: 'settingRecommendations.categoryCharacterSystem',
+  power_official_system: 'settingRecommendations.categoryPowerOfficialSystem',
+  military_warfare_system: 'settingRecommendations.categoryMilitaryWarfareSystem',
+  economy_taxation_system: 'settingRecommendations.categoryEconomyTaxationSystem',
+  culture_etiquette_examination_system: 'settingRecommendations.categoryCultureEtiquetteExaminationSystem',
+  legal_criminal_system: 'settingRecommendations.categoryLegalCriminalSystem',
+  communication_intelligence_system: 'settingRecommendations.categoryCommunicationIntelligenceSystem',
+  historical_event_legend_system: 'settingRecommendations.categoryHistoricalEventLegendSystem',
+  lifestyle_custom_system: 'settingRecommendations.categoryLifestyleCustomSystem',
 }
 
 export default function SettingRecommendations(props: SettingRecommendationsProps) {
@@ -88,8 +90,10 @@ export default function SettingRecommendations(props: SettingRecommendationsProp
     showInsertButton = true,
     limit = 10,
     defaultCategory,
-    title = '推荐设定',
+    title: titleProp,
   } = props
+  const { t } = useTranslation()
+  const title = titleProp ?? t('settingRecommendations.title')
 
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -115,7 +119,7 @@ export default function SettingRecommendations(props: SettingRecommendationsProp
       setRecommendations(data.recommendations || [])
       setTotalItems(data.total_items || 0)
     } catch (err: any) {
-      setError(await extractApiErrorMessage(err, '加载失败'))
+      setError(await extractApiErrorMessage(err, t('settingRecommendations.loadFailed')))
     } finally {
       setLoading(false)
     }
@@ -138,18 +142,18 @@ export default function SettingRecommendations(props: SettingRecommendationsProp
   }
 
   const formatLastUsed = (timestamp: string | null) => {
-    if (!timestamp) return '未使用'
+    if (!timestamp) return t('settingRecommendations.neverUsed')
 
     const date = new Date(timestamp)
     const now = new Date()
     const diffMs = now.getTime() - date.getTime()
     const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24))
 
-    if (diffDays === 0) return '今天'
-    if (diffDays === 1) return '1天前'
-    if (diffDays < 30) return `${diffDays}天前`
-    if (diffDays < 365) return `${Math.floor(diffDays / 30)}个月前`
-    return `${Math.floor(diffDays / 365)}年前`
+    if (diffDays === 0) return t('settingRecommendations.today')
+    if (diffDays === 1) return t('settingRecommendations.daysAgoOne')
+    if (diffDays < 30) return t('settingRecommendations.daysAgoMany', { count: diffDays })
+    if (diffDays < 365) return t('settingRecommendations.monthsAgoMany', { count: Math.floor(diffDays / 30) })
+    return t('settingRecommendations.yearsAgoMany', { count: Math.floor(diffDays / 365) })
   }
 
   const getScoreColor = (score: number) => {
@@ -168,7 +172,7 @@ export default function SettingRecommendations(props: SettingRecommendationsProp
               {title}
             </Typography>
             {totalItems > 0 && (
-              <Chip label={`共${totalItems}项`} size="small" variant="outlined" />
+              <Chip label={t('settingRecommendations.totalItems', { count: totalItems })} size="small" variant="outlined" />
             )}
           </Box>
           <IconButton size="small" onClick={loadRecommendations} disabled={loading}>
@@ -178,15 +182,15 @@ export default function SettingRecommendations(props: SettingRecommendationsProp
 
         <Box mb={2}>
           <FormControl fullWidth size="small">
-            <InputLabel>类型筛选</InputLabel>
+            <InputLabel>{t('settingRecommendations.categoryFilter')}</InputLabel>
             <Select
               value={category}
               onChange={(e) => setCategory(e.target.value)}
-              label="类型筛选"
+              label={t('settingRecommendations.categoryFilter')}
             >
               {categoryOptions.map((option) => (
                 <MenuItem key={option.value} value={option.value}>
-                  {option.label}
+                  {t(option.label)}
                 </MenuItem>
               ))}
             </Select>
@@ -210,10 +214,10 @@ export default function SettingRecommendations(props: SettingRecommendationsProp
         {!loading && !error && recommendations.length === 0 && (
           <Box py={2}>
             <Typography variant="body2" color="text.secondary" textAlign="center">
-              暂无推荐设定
+              {t('settingRecommendations.emptyTitle')}
             </Typography>
             <Typography variant="caption" color="text.secondary" textAlign="center" display="block" mt={1}>
-              开始创作章节后，系统会自动推荐常用设定
+              {t('settingRecommendations.emptyHint')}
             </Typography>
           </Box>
         )}
@@ -242,7 +246,7 @@ export default function SettingRecommendations(props: SettingRecommendationsProp
                         {index + 1}. {item.name}
                       </Typography>
                       <Chip
-                        label={`分数: ${item.score}`}
+                        label={t('settingRecommendations.scoreLabel', { score: item.score })}
                         size="small"
                         color={getScoreColor(item.score)}
                         sx={{ height: 20 }}
@@ -251,13 +255,13 @@ export default function SettingRecommendations(props: SettingRecommendationsProp
 
                     <Box display="flex" alignItems="center" gap={1} mb={0.5}>
                       <Chip
-                        label={CATEGORY_LABELS[item.category] || item.collection_name}
+                        label={CATEGORY_LABELS[item.category] ? t(CATEGORY_LABELS[item.category]) : item.collection_name}
                         size="small"
                         variant="outlined"
                         sx={{ height: 20, fontSize: '0.7rem' }}
                       />
                       <Typography variant="caption" color="text.secondary">
-                        使用 {item.usage_count} 次
+                        {t('settingRecommendations.usageCount', { count: item.usage_count })}
                       </Typography>
                       <Typography variant="caption" color="text.secondary">
                         · {formatLastUsed(item.last_referenced_at)}
@@ -283,7 +287,7 @@ export default function SettingRecommendations(props: SettingRecommendationsProp
                   </Box>
 
                   <Stack direction="row" spacing={0.5} ml={1}>
-                    <Tooltip title="查看详情">
+                    <Tooltip title={t('settingRecommendations.viewDetail')}>
                       <IconButton
                         size="small"
                         onClick={() => handleView(item)}
@@ -293,7 +297,7 @@ export default function SettingRecommendations(props: SettingRecommendationsProp
                       </IconButton>
                     </Tooltip>
                     {showInsertButton && onInsertItem && (
-                      <Tooltip title="插入到编辑器">
+                      <Tooltip title={t('settingRecommendations.insertToEditor')}>
                         <IconButton
                           size="small"
                           color="primary"

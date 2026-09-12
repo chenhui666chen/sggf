@@ -13,7 +13,7 @@ describe('ScriptSegmentCard selection affordance', () => {
       'onSelect?: (index: number) => void',
       'onFocusCapture={() => onSelect?.(index)}',
       'onClickCapture={() => onSelect?.(index)}',
-      "borderColor: selected ? 'primary.main' : 'transparent'",
+      "borderColor: selected ? audiobookColors.primary : 'transparent'",
       "contentVisibility: 'auto'",
       "containIntrinsicSize: '220px'",
     ]) {

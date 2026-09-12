@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import Vditor from 'vditor'
 import 'vditor/dist/index.css'
 import { Box } from '@mui/material'
+import { useTranslation } from 'react-i18next'
 
 interface VditorEditorProps {
   value: string
@@ -13,9 +14,11 @@ interface VditorEditorProps {
 export default function VditorEditor({
   value,
   onChange,
-  placeholder = '请输入内容...',
+  placeholder,
   height = 500,
 }: VditorEditorProps) {
+  const { t } = useTranslation()
+  const resolvedPlaceholder = placeholder ?? t('vditorEditor.placeholder')
   const vditorRef = useRef<Vditor | null>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const [isReady, setIsReady] = useState(false)
@@ -29,7 +32,7 @@ export default function VditorEditor({
     vditor = new Vditor(containerRef.current, {
       height,
       mode: 'ir', // 即时渲染模式 - 所见即所得
-      placeholder,
+      placeholder: resolvedPlaceholder,
       value,
       // 使用本地资源，确保部署后不依赖外部 CDN
       cdn: '/vditor',

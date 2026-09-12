@@ -1,5 +1,8 @@
-import { describe, expect, it } from 'vitest'
+import { beforeAll, describe, expect, it } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
+import type { TFunction } from 'i18next'
+
+import { bootstrapI18n } from '@/i18n'
 
 import { buildUserCenterAssetConnectedOverviewRowsViewModel } from '../user-assets/userCenterAssetConnectedOverviewRowsViewModelHelper'
 
@@ -13,6 +16,13 @@ function extractVisibleText(markup: string): string {
     .replace(/\s+/g, ' ')
     .trim()
 }
+
+let t: TFunction
+
+beforeAll(async () => {
+  const instance = await bootstrapI18n('zh-CN')
+  t = instance.t.bind(instance)
+})
 
 describe('userCenterAssetConnectedOverviewRowsViewModelHelper', () => {
   it('composes shared row slot options for strategy and points rules', () => {
@@ -38,7 +48,7 @@ describe('userCenterAssetConnectedOverviewRowsViewModelHelper', () => {
           emptyText: '暂无规则',
         },
       },
-    })
+    }, t)
 
     expect(viewModel.strategyRowSlotOptions).toEqual({
       overviewBridge: {

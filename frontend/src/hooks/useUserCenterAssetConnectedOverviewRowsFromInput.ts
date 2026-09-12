@@ -30,6 +30,7 @@ export function useUserCenterAssetConnectedOverviewRowsFromInput(
       options.formatPointsValueLabel,
       options.formatUpdatedAtLabel,
       options.getSourceLabel,
+      options.t,
     ],
   )
 

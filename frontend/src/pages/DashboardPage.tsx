@@ -29,6 +29,7 @@ import {
   Menu,
   Snackbar,
   Alert,
+  alpha,
 } from '@mui/material'
 import AddIcon from '@mui/icons-material/Add'
 import DeleteIcon from '@mui/icons-material/Delete'
@@ -45,7 +46,7 @@ import {
   deleteProject,
   updateProject,
 } from '@/store/slices/projectSlice'
-import { logout } from '@/store/slices/authSlice'
+import { performLogout } from '@/store/slices/authSlice'
 import { startGenerateNextChapter } from '@/store/slices/workflowSlice'
 import { generationService, GenerationTask } from '@/services/generation'
 import { apiClient } from '@/services/api'
@@ -56,7 +57,10 @@ import {
   getStoryExpansionResultFromTaskComplete,
   isStoryExpansionTaskId,
 } from '@/utils/storyExpansionEvents'
+import { useFormats } from '@/i18n'
+import { useTranslation } from 'react-i18next'
 import { readStoredWorkflowGenerationModel } from '@/utils/workflowGenerationModelPreference'
+import { GENRE_COLORS, getBookVizPalette } from '@/pages/dashboard/bookVizData'
 
 function extractFilenameFromContentDisposition(contentDisposition?: string | null, fallback: string = 'download.bin') {
   const header = String(contentDisposition || '').trim()
@@ -87,6 +91,8 @@ function triggerBlobDownload(blob: Blob, filename: string) {
 }
 
 export default function DashboardPage() {
+  const { t } = useTranslation()
+  const { formatNumber } = useFormats()
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
   const dispatch = useDispatch<AppDispatch>()
@@ -158,44 +164,31 @@ export default function DashboardPage() {
   const [exportAllAnchorEl, setExportAllAnchorEl] = useState<null | HTMLElement>(null)
   const [exportingAll, setExportingAll] = useState(false)
 
-  // 🆕 类型映射函数（英文/中文 → 显示标签）
+  // 🆕 类型映射函数（英文/中文 → 显示标签）；展示值走 i18n，数据值保持后端契约不变
   const getGenreLabel = (genre: string | null | undefined): string => {
-    const genreMap: Record<string, string> = {
+    const genreKeyMap: Record<string, string> = {
       // 英文键
-      'Fantasy': '奇幻',
-      'Science Fiction': '科幻',
-      'Romance': '浪漫',
-      'Mystery': '悬疑',
-      'Thriller': '惊悚',
-      'Other': '其他',
+      'Fantasy': 'fantasy',
+      'Science Fiction': 'sciFi',
+      'Romance': 'romance',
+      'Mystery': 'mystery',
+      'Thriller': 'thriller',
+      'Other': 'other',
       // 中文键（网文题材）
-      '修仙': '修仙',
-      '玄幻': '玄幻',
-      '奇幻': '奇幻',
-      '都市': '都市',
-      '悬疑': '悬疑',
-      '言情': '言情',
-      '耽美': '耽美',
-      '科幻': '科幻',
-      '纯文学': '纯文学',
+      '修仙': 'xiuxian',
+      '玄幻': 'xuanhuan',
+      '奇幻': 'fantasy',
+      '都市': 'urban',
+      '悬疑': 'suspense',
+      '言情': 'romance',
+      '耽美': 'danmei',
+      // 历史笔误键：GENRE_COLORS/编辑选项沿用 '耐美'（bookVizData 同源），数据值不动，展示统一映射为耽美
+      '耐美': 'danmei',
+      '科幻': 'sciFi',
+      '纯文学': 'literary',
     }
-    return genreMap[genre || ''] || genre || '未设置'
-  }
-
-  // 风格对应颜色映射
-  const GENRE_COLORS: Record<string, string> = {
-    '修仙': '#e8c46a',
-    '玄幻': '#d4a0ff',
-    '奇幻': '#72e2a0',
-    '都市': '#e8a87c',
-    '言情': '#ffb5c8',
-    '耐美': '#f9a8d4',
-    '悬疑': '#f87171',
-    '科幻': '#38bdf8',
-    '纯文学': '#c8b99a',
-    '浪漫': '#fda4af',
-    '惊悚': '#fb923c',
-    '其他': '#94a3b8',
+    const key = genreKeyMap[genre || '']
+    return key ? t(`dashboard.genre.${key}`) : genre || t('dashboard.genre.unset')
   }
 
   useEffect(() => {
@@ -350,9 +343,9 @@ export default function DashboardPage() {
 
           const baseMessage = typeof result.message === 'string' && result.message.trim()
             ? result.message.trim()
-            : '协同拓展完成'
+            : t('dashboard.collabExpansionDone')
 
-          setSnackbarMessage(buildStoryExpansionCompletionMessage(baseMessage, result))
+          setSnackbarMessage(buildStoryExpansionCompletionMessage(baseMessage, result, t))
           setSnackbarSeverity('success')
           setSnackbarOpen(true)
         }
@@ -387,36 +380,6 @@ export default function DashboardPage() {
         logger.error('Failed to create project:', error)
         alert('Failed to create project. Please try again.')
       }
-    }
-  }
-
-  // 处理"开始创作"按钮点击 - 直接跳转到工作流程页面
-  const handleStartCreation = async () => {
-    try {
-      logger.log('🔍 [DEBUG] handleStartCreation 开始执行')
-
-      // 创建一个临时项目用于工作流程
-      const tempProjectData = {
-        title: '未命名项目',
-        description: '新建创作项目',
-        genre: 'Fantasy',
-      }
-
-      logger.log('🔍 [DEBUG] 准备创建项目，数据:', tempProjectData)
-
-      const newProject = await dispatch(createProject(tempProjectData)).unwrap()
-
-      logger.log('🔍 [DEBUG] 项目创建成功:', newProject)
-      logger.log('🔍 [DEBUG] 准备跳转到 /workflow/' + newProject.id)
-
-      // 直接跳转到工作流程页面，带上 autoStart 参数自动打开开始创作对话框
-      navigate(`/workflow/${newProject.id}?autoStart=true`)
-
-      logger.log('🔍 [DEBUG] 跳转完成')
-    } catch (error) {
-      logger.error('❌ [ERROR] 捕获到异常:', error)
-      logger.error('Failed to create temporary project:', error)
-      alert('Failed to start creation. Please try again.')
     }
   }
 
@@ -471,7 +434,7 @@ export default function DashboardPage() {
   }
 
   const handleLogout = () => {
-    dispatch(logout())
+    dispatch(performLogout())
     navigate('/login')
   }
 
@@ -556,7 +519,7 @@ export default function DashboardPage() {
       logger.log('✅ 章节删除成功')
       
       // 显示成功提示
-      setSnackbarMessage('章节删除成功')
+      setSnackbarMessage(t('dashboard.chapterDeleted'))
       setSnackbarSeverity('success')
       setSnackbarOpen(true)
       
@@ -568,7 +531,7 @@ export default function DashboardPage() {
     } catch (err) {
       logger.error('❌ 删除章节失败:', err)
       // 使用 Snackbar 显示错误提示（取代 alert）
-      setSnackbarMessage('删除章节失败，请重试')
+      setSnackbarMessage(t('dashboard.chapterDeleteFailed'))
       setSnackbarSeverity('error')
       setSnackbarOpen(true)
     } finally {
@@ -618,11 +581,11 @@ export default function DashboardPage() {
     try {
       await dispatch(updateProject({ projectId, data: { genre } }))
       dispatch(fetchProjects())
-      setSnackbarMessage(`✅ 类型已更新为：${getGenreLabel(genre)}`)
+      setSnackbarMessage(t('dashboard.genreUpdated', { genre: getGenreLabel(genre) }))
       setSnackbarSeverity('success')
       setSnackbarOpen(true)
     } catch {
-      setSnackbarMessage('更新类型失败，请重试')
+      setSnackbarMessage(t('dashboard.genreUpdateFailed'))
       setSnackbarSeverity('error')
       setSnackbarOpen(true)
     }
@@ -651,7 +614,7 @@ export default function DashboardPage() {
         dispatch(startGenerateNextChapter({ taskId: task_id, chapterNumber: next_chapter_number }))
 
         // 显示提示
-        setSnackbarMessage(`🚀 正在生成第${next_chapter_number}章，跳转到工作流页面查看进度...`)
+        setSnackbarMessage(t('dashboard.generateNextChapter', { number: next_chapter_number }))
         setSnackbarSeverity('info')
         setSnackbarOpen(true)
 
@@ -667,7 +630,7 @@ export default function DashboardPage() {
         // 🆕 detail 可能是字符串（404/409/503）或对象（429 免费额度）
         const detail = errorData?.detail
         const detailMessage = typeof detail === 'string' ? detail : detail?.message
-        setSnackbarMessage(detailMessage || errorData?.error || '创建生成任务失败，请重试')
+        setSnackbarMessage(detailMessage || errorData?.error || t('dashboard.createTaskFailed'))
         setSnackbarSeverity('error')
         setSnackbarOpen(true)
         // 🔧 只在失败时重置状态
@@ -676,7 +639,7 @@ export default function DashboardPage() {
     } catch (error) {
       logger.error('❌ 生成下一章异常:', error)
 
-      setSnackbarMessage('创建生成任务失败，请重试')
+      setSnackbarMessage(t('dashboard.createTaskFailed'))
       setSnackbarSeverity('error')
       setSnackbarOpen(true)
       // 🔧 只在异常时重置状态
@@ -703,14 +666,14 @@ export default function DashboardPage() {
         genre: project?.genre || null,
       }))
       
-      setSnackbarMessage('✨ 章节内容已准备，正在跳转到织文无迹...')
+      setSnackbarMessage(t('dashboard.exportPrepared'))
       setSnackbarSeverity('info')
       setSnackbarOpen(true)
       // 跳转到织文无迹模块
       setTimeout(() => navigate('/ai-trace'), 500)
     } catch (error) {
       logger.error('❌ 导出到织文无迹失败:', error)
-      setSnackbarMessage('导出失败，请重试')
+      setSnackbarMessage(t('dashboard.exportFailed'))
       setSnackbarSeverity('error')
       setSnackbarOpen(true)
     } finally {
@@ -731,15 +694,15 @@ export default function DashboardPage() {
       const blob = response.data as Blob
       const filename = extractFilenameFromContentDisposition(
         response.headers?.['content-disposition'],
-        '小说全文.txt',
+        t('dashboard.novelTxtFilename'),
       )
       triggerBlobDownload(blob, filename)
-      setSnackbarMessage('📄 TXT文件导出成功')
+      setSnackbarMessage(t('dashboard.exportTxtSuccess'))
       setSnackbarSeverity('success')
       setSnackbarOpen(true)
     } catch (error) {
       logger.error('❗ 导出 TXT 失败:', error)
-      setSnackbarMessage('导出失败，请重试')
+      setSnackbarMessage(t('dashboard.exportFailed'))
       setSnackbarSeverity('error')
       setSnackbarOpen(true)
     } finally {
@@ -760,15 +723,15 @@ export default function DashboardPage() {
       const blob = response.data as Blob
       const filename = extractFilenameFromContentDisposition(
         response.headers?.['content-disposition'],
-        '小说全文.docx',
+        'novelDocxFilename',
       )
       triggerBlobDownload(blob, filename)
-      setSnackbarMessage('📝 DOCX文件导出成功')
+      setSnackbarMessage(t('dashboard.exportDocxSuccess'))
       setSnackbarSeverity('success')
       setSnackbarOpen(true)
     } catch (error) {
       logger.error('❗ 导出 DOCX 失败:', error)
-      setSnackbarMessage('导出失败，请重试')
+      setSnackbarMessage(t('dashboard.exportFailed'))
       setSnackbarSeverity('error')
       setSnackbarOpen(true)
     } finally {
@@ -779,17 +742,19 @@ export default function DashboardPage() {
   return (
     <Box sx={{ 
       minHeight: '100vh', 
-      background: 'linear-gradient(135deg, #6b7280 0%, #4b5563 50%, #374151 100%)',
+      // 页面画布走 background.default：浅色暖白、深色墨底，随主题反相（原为写死的 slate 灰渐变）。
+      bgcolor: 'background.default',
       position: 'relative',
     }}>
       {/* 顶部标题栏 */}
       <Box
-        sx={{
-          background: 'linear-gradient(135deg, #1976d2 0%, #1565c0 100%)',
+        sx={(theme) => ({
+          // hero 渐变走 primary token：浅色深黄铜、深色亮黄铜，两端由 token 反相。
+          background: `linear-gradient(135deg, ${theme.palette.primary.main} 0%, ${theme.palette.primary.dark} 100%)`,
           py: { xs: 2, sm: 2.5, md: 3 },
           px: { xs: 2, sm: 3 },
-          boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
-        }}
+          boxShadow: theme.shadows[4],
+        })}
       >
         <Container maxWidth="lg">
           <Box sx={{ 
@@ -803,40 +768,45 @@ export default function DashboardPage() {
             <Box sx={{ display: 'flex', alignItems: 'center', gap: { xs: 1.5, sm: 2 } }}>
               <IconButton
                 onClick={() => navigate('/home')}
-                sx={{
-                  color: 'white',
-                  backgroundColor: 'rgba(255,255,255,0.1)',
-                  '&:hover': {
-                    backgroundColor: 'rgba(255,255,255,0.2)',
-                  },
+                sx={(theme) => {
+                  // hero 上的前景一律用 primary.contrastText：浅色近白、深色近墨，叠色由它派生。
+                  const onHero = theme.palette.primary.contrastText
+                  return {
+                    color: onHero,
+                    backgroundColor: alpha(onHero, 0.1),
+                    '&:hover': {
+                      backgroundColor: alpha(onHero, 0.2),
+                    },
+                  }
                 }}
-                title="返回创作工坊"
+                title={t('dashboard.backToStudio')}
               >
                 <ArrowBackIcon />
               </IconButton>
               <Box sx={{ display: 'flex', alignItems: 'center', gap: { xs: 1, sm: 1.5 } }}>
-                <AutoStoriesIcon sx={{ fontSize: { xs: 24, sm: 28, md: 32 }, color: 'white' }} />
+                <AutoStoriesIcon sx={{ fontSize: { xs: 24, sm: 28, md: 32 }, color: 'primary.contrastText' }} />
                 <Box>
                   <Typography
                     variant="h5"
                     sx={{
-                      color: 'white',
+                      color: 'primary.contrastText',
                       fontWeight: 700,
                       letterSpacing: '0.5px',
                       fontSize: { xs: '1.25rem', sm: '1.5rem', md: '1.5rem' }
                     }}
                   >
-                    灵感方舟
+                    {t('dashboard.title')}
                   </Typography>
                   <Typography
                     variant="body2"
-                    sx={{ 
-                      color: 'rgba(255,255,255,0.8)', 
+                    sx={{
+                      color: 'primary.contrastText',
+                      opacity: 0.8,
                       fontSize: { xs: '0.75rem', sm: '0.85rem' },
                       display: { xs: 'none', sm: 'block' }
                     }}
                   >
-                    小说创作 · 管理您的创作项目
+                    {t('dashboard.subtitle')}
                   </Typography>
                 </Box>
               </Box>
@@ -853,34 +823,40 @@ export default function DashboardPage() {
                 variant="outlined"
                 onClick={() => navigate('/model-catalog')}
                 startIcon={<HubIcon />}
-                sx={{
-                  color: 'white',
-                  borderColor: 'rgba(255,255,255,0.5)',
-                  fontSize: { xs: '0.8125rem', sm: '0.875rem' },
-                  minHeight: { xs: 36, sm: 40 },
-                  '&:hover': {
-                    borderColor: 'white',
-                    backgroundColor: 'rgba(255,255,255,0.1)',
-                  },
+                sx={(theme) => {
+                  const onHero = theme.palette.primary.contrastText
+                  return {
+                    color: onHero,
+                    borderColor: alpha(onHero, 0.5),
+                    fontSize: { xs: '0.8125rem', sm: '0.875rem' },
+                    minHeight: { xs: 36, sm: 40 },
+                    '&:hover': {
+                      borderColor: onHero,
+                      backgroundColor: alpha(onHero, 0.1),
+                    },
+                  }
                 }}
               >
-                模型档案
+                {t('dashboard.modelCatalog')}
               </Button>
               <Button
                 variant="outlined"
                 onClick={handleLogout}
-                sx={{
-                  color: 'white',
-                  borderColor: 'rgba(255,255,255,0.5)',
-                  fontSize: { xs: '0.8125rem', sm: '0.875rem' },
-                  minHeight: { xs: 36, sm: 40 },
-                  '&:hover': {
-                    borderColor: 'white',
-                    backgroundColor: 'rgba(255,255,255,0.1)',
-                  },
+                sx={(theme) => {
+                  const onHero = theme.palette.primary.contrastText
+                  return {
+                    color: onHero,
+                    borderColor: alpha(onHero, 0.5),
+                    fontSize: { xs: '0.8125rem', sm: '0.875rem' },
+                    minHeight: { xs: 36, sm: 40 },
+                    '&:hover': {
+                      borderColor: onHero,
+                      backgroundColor: alpha(onHero, 0.1),
+                    },
+                  }
                 }}
               >
-                退出登录
+                {t('dashboard.logout')}
               </Button>
             </Box>
           </Box>
@@ -892,95 +868,13 @@ export default function DashboardPage() {
 
       <Grid container spacing={{ xs: 1.5, sm: 2, md: 3 }}>
         {projects.map((project) => {
-          // 根据题材选择现代化配色方案
-          const getBookColors = (genre: string | undefined) => {
-            const colors: Record<string, { primary: string; secondary: string; accent: string; text: string; gradient: string }> = {
-              '修仙': {
-                primary: '#0c1e4a',
-                secondary: '#1a3a7a',
-                accent: '#e8c46a',
-                text: '#fef0c7',
-                gradient: 'linear-gradient(160deg, #0c1e4a 0%, #162e68 45%, #1d3d82 75%, #243a6e 100%)',
-              },
-              '玄幻': {
-                primary: '#2d0a4e',
-                secondary: '#4a1272',
-                accent: '#d4a0ff',
-                text: '#f3e4ff',
-                gradient: 'linear-gradient(160deg, #1e0535 0%, #2d0a4e 40%, #3f1168 70%, #4a1272 100%)',
-              },
-              '奇幻': {
-                primary: '#0a2e14',
-                secondary: '#133d1e',
-                accent: '#72e2a0',
-                text: '#d4f7e4',
-                gradient: 'linear-gradient(160deg, #051a0b 0%, #0a2e14 40%, #0f3d1a 70%, #165226 100%)',
-              },
-              '都市': {
-                primary: '#1a1a2e',
-                secondary: '#16213e',
-                accent: '#e8a87c',
-                text: '#ffeedd',
-                gradient: 'linear-gradient(160deg, #12121f 0%, #1a1a2e 40%, #1e2545 70%, #0f3460 100%)',
-              },
-              '言情': {
-                primary: '#3d0b20',
-                secondary: '#6b1535',
-                accent: '#ffb5c8',
-                text: '#ffe4ed',
-                gradient: 'linear-gradient(160deg, #2a0716 0%, #3d0b20 40%, #5a1030 70%, #6b1535 100%)',
-              },
-              '耽美': {
-                primary: '#1a0a2e',
-                secondary: '#2d1052',
-                accent: '#f9a8d4',
-                text: '#fce7f3',
-                gradient: 'linear-gradient(160deg, #130820 0%, #1a0a2e 40%, #260d42 70%, #2d1052 100%)',
-              },
-              '悬疑': {
-                primary: '#080c14',
-                secondary: '#0f172a',
-                accent: '#dc2626',
-                text: '#fecaca',
-                gradient: 'linear-gradient(160deg, #030508 0%, #080c14 40%, #0f172a 70%, #1e2438 100%)',
-              },
-              '科幻': {
-                primary: '#020c1b',
-                secondary: '#0a2240',
-                accent: '#38bdf8',
-                text: '#e0f2fe',
-                gradient: 'linear-gradient(160deg, #010810 0%, #020c1b 40%, #0a2240 70%, #0c3060 100%)',
-              },
-              '纯文学': {
-                primary: '#2c2218',
-                secondary: '#3d2e20',
-                accent: '#c8b99a',
-                text: '#f5ede0',
-                gradient: 'linear-gradient(160deg, #1c1410 0%, #2c2218 40%, #3d2e20 70%, #4a3828 100%)',
-              },
-              'Fantasy': {
-                primary: '#0a2e14',
-                secondary: '#133d1e',
-                accent: '#72e2a0',
-                text: '#d4f7e4',
-                gradient: 'linear-gradient(160deg, #051a0b 0%, #0a2e14 40%, #0f3d1a 70%, #165226 100%)',
-              },
-            }
-                        return colors[genre || ''] || {
-              primary: '#1c1a2e',
-              secondary: '#2d2a4a',
-              accent: '#c4a882',
-              text: '#f0e6d3',
-              gradient: 'linear-gradient(160deg, #12101e 0%, #1c1a2e 40%, #2d2a4a 70%, #3a3560 100%)',
-            }
-          }
-          const bookColors = getBookColors(project.genre)
+          const bookColors = getBookVizPalette(project.genre)
           const isDisabled = generatingProjectId === project.id || generatingNextChapter[project.id]
 
           return (
           <Grid item xs={6} sm={4} md={3} lg={2.4} key={project.id}>
             {/* 现代化书本卡片 - 3D 效果 */}
-            <Tooltip title={isDisabled ? '正在处理中...' : projectConceptStatus[project.id] === false ? '点击开始创作' : '点击进入工作流'} arrow placement="top">
+            <Tooltip title={isDisabled ? t('dashboard.processing') : projectConceptStatus[project.id] === false ? t('dashboard.clickToStart') : t('dashboard.clickToEnter')} arrow placement="top">
             <Box
               sx={{
                 position: 'relative',
@@ -1015,10 +909,10 @@ export default function DashboardPage() {
                     '&:hover': {
                       transform: 'translateY(-10px) rotateY(-5deg)',
                       '& .book-cover': {
-                        boxShadow: '8px 20px 48px rgba(0,0,0,0.65), 1px 1px 0 rgba(255,255,255,0.08) inset',
+                        boxShadow: '8px 20px 48px rgba(0,0,0,0.65), 1px 1px 0 rgba(255,255,255,0.08) inset', // sg-color-fixed: 封面浮起投影（媒体封面美术层）
                       },
                       '& .book-spine': {
-                        boxShadow: '-4px 0 16px rgba(0,0,0,0.5)',
+                        boxShadow: '-4px 0 16px rgba(0,0,0,0.5)', // sg-color-fixed: 书脊投影（媒体封面美术层）
                       },
                       '& .book-pages': {
                         transform: 'translateX(-3px)',
@@ -1038,7 +932,7 @@ export default function DashboardPage() {
                     width: { xs: '14px', sm: '18px', md: '20px' },
                     background: `linear-gradient(to right, ${bookColors.primary}ff 0%, ${bookColors.secondary}aa 100%)`,
                     borderRadius: '3px 0 0 3px',
-                    boxShadow: '-3px 0 12px rgba(0,0,0,0.45)',
+                    boxShadow: '-3px 0 12px rgba(0,0,0,0.45)', // sg-color-fixed: 书脊投影（媒体封面美术层）
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
@@ -1066,7 +960,7 @@ export default function DashboardPage() {
                       fontSize: { xs: '0.4rem', sm: '0.45rem', md: '0.5rem' },
                       fontWeight: 700,
                       letterSpacing: { xs: '1px', sm: '2px' },
-                      textShadow: '0 1px 3px rgba(0,0,0,0.6)',
+                      textShadow: '0 1px 3px rgba(0,0,0,0.6)', // sg-color-fixed: 封面文字投影（媒体封面美术层）
                       overflow: 'hidden',
                       textOverflow: 'ellipsis',
                       maxHeight: '85%',
@@ -1088,7 +982,7 @@ export default function DashboardPage() {
                     bottom: 0,
                     background: bookColors.gradient,
                     borderRadius: '2px 6px 6px 2px',
-                    boxShadow: '3px 6px 28px rgba(0,0,0,0.55), 1px 1px 0 rgba(255,255,255,0.06) inset',
+                    boxShadow: '3px 6px 28px rgba(0,0,0,0.55), 1px 1px 0 rgba(255,255,255,0.06) inset', // sg-color-fixed: 封面投影与顶光（媒体封面美术层）
                     display: 'flex',
                     flexDirection: 'column',
                     overflow: 'visible',
@@ -1101,17 +995,8 @@ export default function DashboardPage() {
                       left: 0,
                       right: 0,
                       bottom: 0,
-                      background: `
-                        repeating-linear-gradient(
-                          0deg,
-                          transparent,
-                          transparent 3px,
-                          rgba(255,255,255,0.012) 3px,
-                          rgba(255,255,255,0.012) 4px
-                        ),
-                        radial-gradient(ellipse at 30% 15%, rgba(255,255,255,0.2) 0%, transparent 55%),
-                        linear-gradient(170deg, rgba(255,255,255,0.08) 0%, transparent 40%, rgba(0,0,0,0.25) 100%)
-                      `,
+                      background:
+                        'repeating-linear-gradient(0deg, transparent, transparent 3px, rgba(255,255,255,0.012) 3px, rgba(255,255,255,0.012) 4px), radial-gradient(ellipse at 30% 15%, rgba(255,255,255,0.2) 0%, transparent 55%), linear-gradient(170deg, rgba(255,255,255,0.08) 0%, transparent 40%, rgba(0,0,0,0.25) 100%)', // sg-color-fixed: 封面纸纹/光泽叠加（媒体封面美术层）
                       pointerEvents: 'none',
                       zIndex: 1,
                     },
@@ -1173,7 +1058,7 @@ export default function DashboardPage() {
                               letterSpacing: { xs: '2px', sm: '3px', md: '4px' },
                             },
                             '& .MuiOutlinedInput-root': {
-                              backgroundColor: 'rgba(255,255,255,0.1)',
+                              backgroundColor: 'rgba(255,255,255,0.1)', // sg-color-fixed: 封面内输入底（媒体封面美术层）
                             },
                           }}
                           onKeyPress={(e) => {
@@ -1192,18 +1077,18 @@ export default function DashboardPage() {
                               letterSpacing: '1px',
                             }}
                           >
-                            保存
+                            {t('common.save')}
                           </Typography>
                           <Typography
                             onClick={() => { setEditingTitleProjectId(null); setEditedTitle('') }}
                             sx={{
                               fontSize: { xs: '0.4rem', sm: '0.45rem', md: '0.5rem' },
-                              color: 'rgba(255,255,255,0.3)',
+                              color: 'rgba(255,255,255,0.3)', // sg-color-fixed: 封面弱化字（媒体封面美术层）
                               cursor: 'pointer',
                               letterSpacing: '1px',
                             }}
                           >
-                            取消
+                            {t('common.cancel')}
                           </Typography>
                         </Box>
                       </Box>
@@ -1217,7 +1102,7 @@ export default function DashboardPage() {
                           color: bookColors.text,
                           lineHeight: 1.7,
                           letterSpacing: { xs: '2px', sm: '3px', md: '4px' },
-                          textShadow: '0 2px 10px rgba(0,0,0,0.55)',
+                          textShadow: '0 2px 10px rgba(0,0,0,0.55)', // sg-color-fixed: 封面标题投影（媒体封面美术层）
                           mb: { xs: 0.8, sm: 1.2, md: 1.5 },
                           display: '-webkit-box',
                           WebkitLineClamp: 3,
@@ -1231,7 +1116,7 @@ export default function DashboardPage() {
                           py: 0.5,
                           '&:hover': { 
                             transform: 'translateY(-2px)',
-                            boxShadow: '0 12px 28px rgba(0,0,0,0.6), 0 0 0 2px rgba(255,255,255,0.1)',
+                            boxShadow: '0 12px 28px rgba(0,0,0,0.6), 0 0 0 2px rgba(255,255,255,0.1)', // sg-color-fixed: 封面浮起投影（媒体封面美术层）
                             backgroundColor: `${bookColors.accent}15`,
                             borderRadius: '4px',
                           },
@@ -1267,21 +1152,21 @@ export default function DashboardPage() {
                                 '&:hover': { 
                                   color: GENRE_COLORS[g] || bookColors.accent, 
                                   transform: 'translateY(-2px)',
-                                  boxShadow: '0 12px 28px rgba(0,0,0,0.6), 0 0 0 2px rgba(255,255,255,0.1)',
+                                  boxShadow: '0 12px 28px rgba(0,0,0,0.6), 0 0 0 2px rgba(255,255,255,0.1)', // sg-color-fixed: 封面浮起投影（媒体封面美术层）
                                   backgroundColor: `${GENRE_COLORS[g] || bookColors.accent}15`,
                                   borderRadius: '4px',
                                 },
                               }}
                             >
-                              {g}
+                              {getGenreLabel(g)}
                             </Typography>
                           ))}
                         </Box>
                         <Typography
                           onClick={() => { setEditingGenreProjectId(null); setEditedGenre('') }}
-                          sx={{ fontSize: { xs: '0.4rem', sm: '0.45rem', md: '0.5rem' }, color: 'rgba(255,255,255,0.3)', cursor: 'pointer', letterSpacing: '1px' }}
+                          sx={{ fontSize: { xs: '0.4rem', sm: '0.45rem', md: '0.5rem' }, color: 'rgba(255,255,255,0.3)', cursor: 'pointer', letterSpacing: '1px' }} // sg-color-fixed: 封面弱化字（媒体封面美术层）
                         >
-                          取消
+                          {t('common.cancel')}
                         </Typography>
                       </Box>
                     ) : (
@@ -1293,7 +1178,7 @@ export default function DashboardPage() {
                           color: GENRE_COLORS[getGenreLabel(project.genre)] || bookColors.accent,
                           letterSpacing: { xs: '2px', sm: '2.5px', md: '3px' },
                           fontWeight: 600,
-                          textShadow: `0 1px 6px rgba(0,0,0,0.5)`,
+                          textShadow: `0 1px 6px rgba(0,0,0,0.5)`, // sg-color-fixed: 封面题材文字投影（媒体封面美术层）
                           cursor: 'pointer',
                           mx: 'auto',
                           display: 'block',
@@ -1304,7 +1189,7 @@ export default function DashboardPage() {
                             opacity: 0.75, 
                             letterSpacing: '4px',
                             transform: 'translateY(-2px)',
-                            boxShadow: '0 12px 28px rgba(0,0,0,0.6), 0 0 0 2px rgba(255,255,255,0.1)',
+                            boxShadow: '0 12px 28px rgba(0,0,0,0.6), 0 0 0 2px rgba(255,255,255,0.1)', // sg-color-fixed: 封面浮起投影（媒体封面美术层）
                             backgroundColor: `${GENRE_COLORS[getGenreLabel(project.genre)] || bookColors.accent}15`,
                             borderRadius: '4px',
                           },
@@ -1325,7 +1210,7 @@ export default function DashboardPage() {
                         mt: { xs: 0.8, sm: 1, md: 1.2 },
                       }}
                     >
-                      {(chapterWordCounts[project.id] || 0).toLocaleString()} 字
+                      {t('dashboard.wordsCount', { count: formatNumber(chapterWordCounts[project.id] || 0) })}
                     </Typography>
                   </Box>
 
@@ -1346,7 +1231,7 @@ export default function DashboardPage() {
                     onClick={(e) => e.stopPropagation()}
                   >
                     {/* 第一行：典籍 | 目录 */}
-                    <Tooltip title="进入知识库" arrow>
+                    <Tooltip title={t('dashboard.enterKnowledgeBase')} arrow>
                       <Box
                         onClick={() => !isDisabled && navigate(`/knowledge-base/${project.id}`)}
                         sx={{ 
@@ -1359,16 +1244,16 @@ export default function DashboardPage() {
                           py: { xs: 0.6, sm: 0.7 },
                           '&:hover': isDisabled ? {} : { 
                             transform: 'translateY(-4px)',
-                            boxShadow: '0 12px 28px rgba(0,0,0,0.6), 0 0 0 2px rgba(255,255,255,0.1)',
+                            boxShadow: '0 12px 28px rgba(0,0,0,0.6), 0 0 0 2px rgba(255,255,255,0.1)', // sg-color-fixed: 封面浮起投影（媒体封面美术层）
                             backgroundColor: `${bookColors.accent}15`,
                             borderRadius: '4px',
                           },
                         }}
                       >
-                        <Typography sx={{ fontFamily: '楷体，KaiTi, serif', fontSize: { xs: '0.65rem', sm: '0.7rem', md: '0.75rem' }, color: bookColors.accent, letterSpacing: { xs: '1px', sm: '1.5px', md: '2px' }, fontWeight: 600 }}>典籍</Typography>
+                        <Typography sx={{ fontFamily: '楷体，KaiTi, serif', fontSize: { xs: '0.65rem', sm: '0.7rem', md: '0.75rem' }, color: bookColors.accent, letterSpacing: { xs: '1px', sm: '1.5px', md: '2px' }, fontWeight: 600 }}>{t('dashboard.classics')}</Typography>
                       </Box>
                     </Tooltip>
-                    <Tooltip title="查看章节列表" arrow>
+                    <Tooltip title={t('dashboard.viewChapterList')} arrow>
                       <Box
                         onClick={() => !isDisabled && handleOpenChaptersDrawer(project.id)}
                         sx={{ 
@@ -1381,17 +1266,17 @@ export default function DashboardPage() {
                           py: { xs: 0.6, sm: 0.7 },
                           '&:hover': isDisabled ? {} : { 
                             transform: 'translateY(-4px)',
-                            boxShadow: '0 12px 28px rgba(0,0,0,0.6), 0 0 0 2px rgba(255,255,255,0.1)',
+                            boxShadow: '0 12px 28px rgba(0,0,0,0.6), 0 0 0 2px rgba(255,255,255,0.1)', // sg-color-fixed: 封面浮起投影（媒体封面美术层）
                             backgroundColor: `${bookColors.accent}15`,
                             borderRadius: '4px',
                           },
                         }}
                       >
-                        <Typography sx={{ fontFamily: '楷体，KaiTi, serif', fontSize: { xs: '0.65rem', sm: '0.7rem', md: '0.75rem' }, color: bookColors.accent, letterSpacing: { xs: '1px', sm: '1.5px', md: '2px' }, fontWeight: 600 }}>目录</Typography>
+                        <Typography sx={{ fontFamily: '楷体，KaiTi, serif', fontSize: { xs: '0.65rem', sm: '0.7rem', md: '0.75rem' }, color: bookColors.accent, letterSpacing: { xs: '1px', sm: '1.5px', md: '2px' }, fontWeight: 600 }}>{t('dashboard.contents')}</Typography>
                       </Box>
                     </Tooltip>
                     {/* 第二行：焚毁 | 续写 */}
-                    <Tooltip title="删除项目" arrow>
+                    <Tooltip title={t('dashboard.deleteProjectTooltip')} arrow>
                       <Box
                         onClick={() => !isDisabled && handleDeleteProject(project.id)}
                         sx={{ 
@@ -1404,16 +1289,27 @@ export default function DashboardPage() {
                           py: { xs: 0.6, sm: 0.7 },
                           '&:hover': isDisabled ? {} : { 
                             transform: 'translateY(-4px)',
-                            boxShadow: '0 12px 28px rgba(0,0,0,0.6), 0 0 0 2px rgba(255,255,255,0.1)',
-                            backgroundColor: 'rgba(239,83,80,0.15)',
+                            boxShadow: '0 12px 28px rgba(0,0,0,0.6), 0 0 0 2px rgba(255,255,255,0.1)', // sg-color-fixed: 封面浮起投影（媒体封面美术层）
+                            backgroundColor: 'rgba(239,83,80,0.15)', // sg-color-fixed: 焚毁警示底（媒体封面美术层）
                             borderRadius: '4px',
                           },
                         }}
                       >
-                        <Typography sx={{ fontFamily: '楷体，KaiTi, serif', fontSize: { xs: '0.65rem', sm: '0.7rem', md: '0.75rem' }, color: '#f87171', letterSpacing: { xs: '1px', sm: '1.5px', md: '2px' }, fontWeight: 600, textShadow: '0 1px 3px rgba(239,83,80,0.3)' }}>焚毁</Typography>
+                        <Typography
+                          sx={{
+                            fontFamily: '楷体，KaiTi, serif',
+                            fontSize: { xs: '0.65rem', sm: '0.7rem', md: '0.75rem' },
+                            color: '#f87171', // sg-color-fixed: 焚毁警示字（媒体封面美术层）
+                            letterSpacing: { xs: '1px', sm: '1.5px', md: '2px' },
+                            fontWeight: 600,
+                            textShadow: '0 1px 3px rgba(239,83,80,0.3)', // sg-color-fixed: 焚毁警示投影（媒体封面美术层）
+                          }}
+                        >
+                          {t('dashboard.burn')}
+                        </Typography>
                       </Box>
                     </Tooltip>
-                    <Tooltip title="续写下一章" arrow>
+                    <Tooltip title={t('dashboard.continueWriteTooltip')} arrow>
                       <Box
                         onClick={() => !isDisabled && handleGenerateNextChapter(project.id)}
                         sx={{ 
@@ -1426,7 +1322,7 @@ export default function DashboardPage() {
                           py: { xs: 0.6, sm: 0.7 },
                           '&:hover': isDisabled ? {} : { 
                             transform: 'translateY(-4px)',
-                            boxShadow: '0 12px 28px rgba(0,0,0,0.6), 0 0 0 2px rgba(255,255,255,0.1)',
+                            boxShadow: '0 12px 28px rgba(0,0,0,0.6), 0 0 0 2px rgba(255,255,255,0.1)', // sg-color-fixed: 封面浮起投影（媒体封面美术层）
                             backgroundColor: `${bookColors.accent}15`,
                             borderRadius: '4px',
                           },
@@ -1434,8 +1330,8 @@ export default function DashboardPage() {
                       >
                         <Typography sx={{ fontFamily: '楷体，KaiTi, serif', fontSize: { xs: '0.65rem', sm: '0.7rem', md: '0.75rem' }, color: bookColors.accent, letterSpacing: { xs: '1px', sm: '1.5px', md: '2px' }, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 0.4 }}>
                           {generatingNextChapter[project.id]
-                            ? <><CircularProgress size={10} sx={{ color: 'inherit' }} />续写</>
-                            : '续写'
+                            ? <><CircularProgress size={10} sx={{ color: 'inherit' }} />{t('dashboard.continueWrite')}</>
+                            : t('dashboard.continueWrite')
                           }
                         </Typography>
                       </Box>
@@ -1476,7 +1372,7 @@ export default function DashboardPage() {
                     top: '8px',
                     bottom: '8px',
                     width: '9px',
-                    background: 'linear-gradient(to right, #ede0c8 0%, #ddd0b0 50%, #ccc090 100%)',
+                    background: 'linear-gradient(to right, #ede0c8 0%, #ddd0b0 50%, #ccc090 100%)', // sg-color-fixed: 古籍书页纸色（媒体封面美术层）
                     borderRadius: '0 2px 2px 0',
                     transition: 'all 0.4s ease',
                     zIndex: 1,
@@ -1487,7 +1383,7 @@ export default function DashboardPage() {
                       bottom: 0,
                       left: 0,
                       width: '100%',
-                      background: 'repeating-linear-gradient(to bottom, transparent 0px, transparent 2px, rgba(0,0,0,0.04) 2px, rgba(0,0,0,0.04) 3px)',
+                      background: 'repeating-linear-gradient(to bottom, transparent 0px, transparent 2px, rgba(0,0,0,0.04) 2px, rgba(0,0,0,0.04) 3px)', // sg-color-fixed: 古籍纸纹（媒体封面美术层）
                       opacity: 0.6,
                     },
                   }}
@@ -1502,7 +1398,7 @@ export default function DashboardPage() {
       {/* 新建项目空白卡片 - 放在项目列表末尾 */}
       <Grid item xs={6} sm={4} md={3} lg={2.4}>
         <Box
-          onClick={handleStartCreation}
+          onClick={() => setOpenDialog(true)}
           sx={{
             position: 'relative',
             height: { xs: '220px', sm: '260px', md: '300px' },
@@ -1513,15 +1409,15 @@ export default function DashboardPage() {
             '&:hover': {
               transform: 'translateY(-10px)',
               '& .new-card-inner': {
-                boxShadow: '8px 20px 48px rgba(0,0,0,0.65)',
+                boxShadow: '8px 20px 48px rgba(0,0,0,0.65)', // sg-color-fixed: 古籍封面投影（媒体封面美术层）
               },
               '& .plus-icon': {
                 transform: 'scale(1.1) rotate(90deg)',
-                borderColor: 'rgba(180,160,120,0.6)',
-                background: 'rgba(180,160,120,0.12)',
+                borderColor: 'rgba(180,160,120,0.6)', // sg-color-fixed: 古籍金边（媒体封面美术层）
+                background: 'rgba(180,160,120,0.12)', // sg-color-fixed: 古籍金底（媒体封面美术层）
               },
               '& .add-text': {
-                color: '#e8d5b0',
+                color: '#e8d5b0', // sg-color-fixed: 古籍金字（媒体封面美术层）
                 letterSpacing: '5px',
               },
             },
@@ -1534,9 +1430,9 @@ export default function DashboardPage() {
             top: { xs: '2px', sm: '3px' },
             bottom: { xs: '2px', sm: '3px' },
             width: { xs: '14px', sm: '18px', md: '20px' },
-            background: 'linear-gradient(to right, #1a1812 0%, #2a2618 100%)',
+            background: 'linear-gradient(to right, #1a1812 0%, #2a2618 100%)', // sg-color-fixed: 古籍书脊墨色（媒体封面美术层）
             borderRadius: '3px 0 0 3px',
-            boxShadow: '-3px 0 12px rgba(0,0,0,0.45)',
+            boxShadow: '-3px 0 12px rgba(0,0,0,0.45)', // sg-color-fixed: 书脊投影（媒体封面美术层）
             zIndex: 2,
             '&::after': {
               content: '""',
@@ -1545,7 +1441,7 @@ export default function DashboardPage() {
               left: '50%',
               width: '1px',
               height: '100%',
-              background: 'linear-gradient(to bottom, transparent 5%, rgba(200,180,120,0.25) 50%, transparent 95%)',
+              background: 'linear-gradient(to bottom, transparent 5%, rgba(200,180,120,0.25) 50%, transparent 95%)', // sg-color-fixed: 古籍鎏金带（媒体封面美术层）
               transform: 'translateX(-50%)',
             },
           }} />
@@ -1559,9 +1455,9 @@ export default function DashboardPage() {
               right: { xs: '6px', sm: '7px', md: '8px' },
               top: 0,
               bottom: 0,
-              background: 'linear-gradient(160deg, #18160e 0%, #221e12 40%, #2c2818 70%, #242010 100%)',
+              background: 'linear-gradient(160deg, #18160e 0%, #221e12 40%, #2c2818 70%, #242010 100%)', // sg-color-fixed: 古籍封面墨色（媒体封面美术层）
               borderRadius: '2px 6px 6px 2px',
-              boxShadow: '3px 6px 28px rgba(0,0,0,0.5)',
+              boxShadow: '3px 6px 28px rgba(0,0,0,0.5)', // sg-color-fixed: 古籍封面投影（媒体封面美术层）
               display: 'flex',
               flexDirection: 'column',
               alignItems: 'center',
@@ -1570,7 +1466,7 @@ export default function DashboardPage() {
               overflow: 'hidden',
               transition: 'all 0.4s ease',
               zIndex: 3,
-              border: '1px solid rgba(180,160,80,0.12)',
+              border: '1px solid rgba(180,160,80,0.12)', // sg-color-fixed: 古籍描金边（媒体封面美术层）
               '&::after': {
                 content: '""',
                 position: 'absolute',
@@ -1578,7 +1474,7 @@ export default function DashboardPage() {
                 left: { xs: '8px', sm: '10px', md: '12px' },
                 right: { xs: '8px', sm: '10px', md: '12px' },
                 bottom: { xs: '8px', sm: '10px', md: '12px' },
-                border: '1px solid rgba(180,160,80,0.18)',
+                border: '1px solid rgba(180,160,80,0.18)', // sg-color-fixed: 古籍描金边（媒体封面美术层）
                 borderRadius: '1px',
                 pointerEvents: 'none',
               },
@@ -1591,8 +1487,8 @@ export default function DashboardPage() {
                 width: { xs: 40, sm: 48, md: 56 },
                 height: { xs: 40, sm: 48, md: 56 },
                 borderRadius: '50%',
-                border: '1px solid rgba(180,160,100,0.35)',
-                background: 'rgba(180,160,100,0.07)',
+                border: '1px solid rgba(180,160,100,0.35)', // sg-color-fixed: 古籍描金边（媒体封面美术层）
+                background: 'rgba(180,160,100,0.07)', // sg-color-fixed: 古籍金纹底（媒体封面美术层）
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
@@ -1600,7 +1496,13 @@ export default function DashboardPage() {
                 zIndex: 1,
               }}
             >
-              <AddIcon sx={{ fontSize: { xs: 24, sm: 28, md: 32 }, color: 'rgba(200,180,110,0.75)', transition: 'all 0.3s ease' }} />
+              <AddIcon
+                sx={{
+                  fontSize: { xs: 24, sm: 28, md: 32 },
+                  color: 'rgba(200,180,110,0.75)', // sg-color-fixed: 古籍建卡金钮（媒体封面美术层）
+                  transition: 'all 0.3s ease',
+                }}
+              />
             </Box>
 
             {/* 文字说明 */}
@@ -1610,25 +1512,25 @@ export default function DashboardPage() {
                 sx={{
                   fontFamily: '"Noto Serif SC", "宋体", serif',
                   fontSize: { xs: '0.75rem', sm: '0.85rem', md: '0.95rem' },
-                  color: 'rgba(200,180,120,0.7)',
+                  color: 'rgba(200,180,120,0.7)', // sg-color-fixed: 古籍金字（媒体封面美术层）
                   fontWeight: 600,
                   letterSpacing: { xs: '2px', sm: '3px', md: '4px' },
                   mb: { xs: 0.5, sm: 0.8, md: 1 },
                   transition: 'all 0.3s ease',
                 }}
               >
-                新建项目
+                {t('dashboard.newProject')}
               </Typography>
 
               <Typography
                 sx={{
                   fontFamily: '"STKaiti", "楷体", serif',
                   fontSize: '0.65rem',
-                  color: 'rgba(160,140,100,0.55)',
+                  color: 'rgba(160,140,100,0.55)', // sg-color-fixed: 古籍金弱化字（媒体封面美术层）
                   letterSpacing: '2px',
                 }}
               >
-                开始创作你的小说
+                {t('dashboard.startCreating')}
               </Typography>
             </Box>
 
@@ -1648,10 +1550,10 @@ export default function DashboardPage() {
                 width: '10px',
                 height: '10px',
                 zIndex: 4,
-                borderTop: pos.bt ? '1px solid rgba(180,160,80,0.3)' : 'none',
-                borderLeft: pos.bl ? '1px solid rgba(180,160,80,0.3)' : 'none',
-                borderRight: pos.br ? '1px solid rgba(180,160,80,0.3)' : 'none',
-                borderBottom: pos.bb ? '1px solid rgba(180,160,80,0.3)' : 'none',
+                borderTop: pos.bt ? '1px solid rgba(180,160,80,0.3)' : 'none', // sg-color-fixed: 古籍描金边（媒体封面美术层）
+                borderLeft: pos.bl ? '1px solid rgba(180,160,80,0.3)' : 'none', // sg-color-fixed: 古籍描金边（媒体封面美术层）
+                borderRight: pos.br ? '1px solid rgba(180,160,80,0.3)' : 'none', // sg-color-fixed: 古籍描金边（媒体封面美术层）
+                borderBottom: pos.bb ? '1px solid rgba(180,160,80,0.3)' : 'none', // sg-color-fixed: 古籍描金边（媒体封面美术层）
               }} />
             ))}
           </Box>
@@ -1663,14 +1565,14 @@ export default function DashboardPage() {
             top: '8px',
             bottom: '8px',
             width: '9px',
-            background: 'linear-gradient(to right, #e8dcc8 0%, #d4c8a8 60%, #c4b890 100%)',
+            background: 'linear-gradient(to right, #e8dcc8 0%, #d4c8a8 60%, #c4b890 100%)', // sg-color-fixed: 古籍册页纸色（媒体封面美术层）
             borderRadius: '0 2px 2px 0',
             zIndex: 1,
             '&::before': {
               content: '""',
               position: 'absolute',
               top: 0, bottom: 0, left: 0, width: '100%',
-              background: 'repeating-linear-gradient(to bottom, transparent 0px, transparent 2px, rgba(0,0,0,0.06) 2px, rgba(0,0,0,0.06) 3px)',
+              background: 'repeating-linear-gradient(to bottom, transparent 0px, transparent 2px, rgba(0,0,0,0.06) 2px, rgba(0,0,0,0.06) 3px)', // sg-color-fixed: 古籍册页纸纹（媒体封面美术层）
             },
           }} />
         </Box>
@@ -1680,11 +1582,11 @@ export default function DashboardPage() {
       <Dialog open={openDialog} onClose={() => setOpenDialog(false)} maxWidth="sm" fullWidth>
         <Box sx={{ p: 3 }}>
           <Typography variant="h6" gutterBottom>
-            创建新项目
+            {t('dashboard.createProjectTitle')}
           </Typography>
           <TextField
             fullWidth
-            label="项目标题"
+            label={t('dashboard.projectTitleLabel')}
             value={formData.title}
             onChange={(e) => setFormData({ ...formData, title: e.target.value })}
             margin="normal"
@@ -1692,7 +1594,7 @@ export default function DashboardPage() {
           />
           <TextField
             fullWidth
-            label="项目描述"
+            label={t('dashboard.projectDescLabel')}
             value={formData.description}
             onChange={(e) => setFormData({ ...formData, description: e.target.value })}
             margin="normal"
@@ -1700,23 +1602,23 @@ export default function DashboardPage() {
             rows={3}
           />
           <FormControl fullWidth margin="normal">
-            <InputLabel>类型</InputLabel>
+            <InputLabel>{t('dashboard.genreLabel')}</InputLabel>
             <Select
               value={formData.genre}
               onChange={(e) => setFormData({ ...formData, genre: e.target.value })}
-              label="类型"
+              label={t('dashboard.genreLabel')}
             >
-              <MenuItem value="修仙">修仙</MenuItem>
-              <MenuItem value="玄幻">玄幻</MenuItem>
-              <MenuItem value="奇幻">奇幻</MenuItem>
-              <MenuItem value="都市">都市</MenuItem>
-              <MenuItem value="言情">言情</MenuItem>
-              <MenuItem value="耽美">耽美</MenuItem>
-              <MenuItem value="悬疑">悬疑</MenuItem>
-              <MenuItem value="科幻">科幻</MenuItem>
-              <MenuItem value="纯文学">纯文学</MenuItem>
-              <MenuItem value="Fantasy">奇幻（英）</MenuItem>
-              <MenuItem value="Other">其他</MenuItem>
+              <MenuItem value="修仙">{t('dashboard.genre.xiuxian')}</MenuItem>
+              <MenuItem value="玄幻">{t('dashboard.genre.xuanhuan')}</MenuItem>
+              <MenuItem value="奇幻">{t('dashboard.genre.fantasy')}</MenuItem>
+              <MenuItem value="都市">{t('dashboard.genre.urban')}</MenuItem>
+              <MenuItem value="言情">{t('dashboard.genre.romanceCn')}</MenuItem>
+              <MenuItem value="耽美">{t('dashboard.genre.danmei')}</MenuItem>
+              <MenuItem value="悬疑">{t('dashboard.genre.suspense')}</MenuItem>
+              <MenuItem value="科幻">{t('dashboard.genre.sciFi')}</MenuItem>
+              <MenuItem value="纯文学">{t('dashboard.genre.literary')}</MenuItem>
+              <MenuItem value="Fantasy">{t('dashboard.genre.fantasyEn')}</MenuItem>
+              <MenuItem value="Other">{t('dashboard.genre.other')}</MenuItem>
             </Select>
           </FormControl>
           <Box sx={{ mt: 3, display: 'flex', gap: 2 }}>
@@ -1726,14 +1628,14 @@ export default function DashboardPage() {
               fullWidth
               onClick={handleCreateProject}
             >
-              创建
+              {t('dashboard.create')}
             </Button>
             <Button
               variant="outlined"
               fullWidth
               onClick={() => setOpenDialog(false)}
             >
-              取消
+              {t('common.cancel')}
             </Button>
           </Box>
         </Box>
@@ -1743,24 +1645,24 @@ export default function DashboardPage() {
       <Dialog open={deleteConfirmOpen} onClose={handleCancelDelete} maxWidth="sm" fullWidth>
         <Box sx={{ p: 3 }}>
           <Typography variant="h6" gutterBottom>
-            删除项目
+            {t('dashboard.deleteProjectTitle')}
           </Typography>
           <Typography variant="body2" color="textSecondary" sx={{ mb: 3 }}>
-            您确定要删除该项目吗？此操作无法撤销。
+            {t('dashboard.deleteProjectConfirm')}
           </Typography>
           <Box sx={{ display: 'flex', gap: 2, justifyContent: 'flex-end' }}>
             <Button
               variant="outlined"
               onClick={handleCancelDelete}
             >
-              取消
+              {t('common.cancel')}
             </Button>
             <Button
               variant="contained"
               color="error"
               onClick={handleConfirmDelete}
             >
-              删除
+              {t('common.delete')}
             </Button>
           </Box>
         </Box>
@@ -1808,8 +1710,8 @@ export default function DashboardPage() {
         <Box sx={{ p: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           {/* 左侧：标题 + 排序按钮紧邻 */}
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-            <Typography variant="h6">📚 章节列表</Typography>
-            <Tooltip title={chapterSortOrder === 'asc' ? '当前：正序，点击倒序' : '当前：倒序，点击正序'} placement="top">
+            <Typography variant="h6">{t('dashboard.chapterList')}</Typography>
+            <Tooltip title={chapterSortOrder === 'asc' ? t('dashboard.sortAscTooltip') : t('dashboard.sortDescTooltip')} placement="top">
               <IconButton
                 size="small"
                 onClick={() => {
@@ -1854,7 +1756,7 @@ export default function DashboardPage() {
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
             {/* 一键导出全文按钮 */}
             {chapters.length > 0 && (
-              <Tooltip title="一键导出全文" placement="top">
+              <Tooltip title={t('dashboard.exportAllTooltip')} placement="top">
                 <span>
                   <IconButton
                     size="small"
@@ -1885,7 +1787,7 @@ export default function DashboardPage() {
               onClick={handleCloseChaptersDrawer}
               startIcon={<CloseIcon />}
             >
-              关闭
+              {t('common.close')}
             </Button>
           </Box>
         </Box>
@@ -1898,10 +1800,10 @@ export default function DashboardPage() {
           onClose={() => setExportAllAnchorEl(null)}
         >
           <MenuItem onClick={handleExportAllTxt}>
-            📄 导出为 TXT
+            {t('dashboard.exportTxt')}
           </MenuItem>
           <MenuItem onClick={handleExportAllDocx}>
-            📝 导出为 DOCX
+            {t('dashboard.exportDocx')}
           </MenuItem>
         </Menu>
 
@@ -1912,7 +1814,7 @@ export default function DashboardPage() {
         ) : chapters.length === 0 ? (
           <Box sx={{ p: 2, textAlign: 'center' }}>
             <Typography variant="body2" color="textSecondary">
-              暂无章节
+              {t('dashboard.emptyChapters')}
             </Typography>
           </Box>
         ) : (
@@ -1930,11 +1832,11 @@ export default function DashboardPage() {
                       size="small"
                       color="success"
                       onClick={(e) => handleExportToZhiwen(chapter, e)}
-                      title="导入织文无迹模块"
+                      title={t('dashboard.importZhiwen')}
                       disabled={exportingChapter === chapter.id}
                       sx={{
                         '&:hover': {
-                          backgroundColor: '#e8f5e9'
+                          backgroundColor: 'success.light'
                         }
                       }}
                     >
@@ -1947,10 +1849,10 @@ export default function DashboardPage() {
                       size="small"
                       onClick={(e) => handleDeleteChapterClick(chapter, e)}
                       sx={{
-                        color: '#b71c1c',
+                        color: 'error.main',
                         '&:hover': {
-                          backgroundColor: '#ffcdd2',
-                          color: '#c62828',
+                          backgroundColor: 'error.light',
+                          color: 'error.dark',
                         }
                       }}
                     >
@@ -1973,7 +1875,7 @@ export default function DashboardPage() {
                       <span>{chapter.title}</span>
                       {postSaveProcessing.has(chapter.id) && (
                         <Chip
-                          label="处理中..."
+                          label={t('common.processing')}
                           size="small"
                           color="primary"
                           sx={{ height: 20, fontSize: '0.7rem' }}
@@ -1981,7 +1883,7 @@ export default function DashboardPage() {
                       )}
                     </Box>
                   )}
-                  secondary={`📝 ${chapter.word_count || 0} 字`}
+                  secondary={`📝 ${t('dashboard.wordsCount', { count: chapter.word_count || 0 })}`}
                 />
               </ListItem>
             ))}
@@ -1997,19 +1899,19 @@ export default function DashboardPage() {
         aria-describedby="delete-chapter-dialog-description"
       >
         <DialogTitle id="delete-chapter-dialog-title">
-          确认删除章节
+          {t('dashboard.deleteChapterTitle')}
         </DialogTitle>
         <DialogContent>
           <DialogContentText id="delete-chapter-dialog-description">
-            你确定要删除章节 <strong>"{chapterToDelete?.title}"</strong> 吗？
+            {t('dashboard.deleteChapterHead')} <strong>"{chapterToDelete?.title}"</strong> {t('dashboard.deleteChapterTail')}
             <br />
             <br />
-            此操作不可恢复,章节内容将被永久删除。
+            {t('dashboard.deleteChapterWarning')}
           </DialogContentText>
         </DialogContent>
         <DialogActions>
           <Button onClick={handleCloseDeleteChapterDialog} disabled={deletingChapter}>
-            取消
+            {t('common.cancel')}
           </Button>
           <Button 
             onClick={handleConfirmDeleteChapter} 
@@ -2017,18 +1919,18 @@ export default function DashboardPage() {
             disabled={deletingChapter}
             startIcon={deletingChapter ? <CircularProgress size={16} /> : <DeleteIcon />}
             sx={{
-              backgroundColor: '#b71c1c',
-              color: '#ffffff',
+              backgroundColor: 'error.main',
+              color: 'error.contrastText',
               '&:hover': {
-                backgroundColor: '#c62828',
+                backgroundColor: 'error.dark',
               },
               '&:disabled': {
-                backgroundColor: '#e0e0e0',
-                color: '#9e9e9e',
+                backgroundColor: 'action.disabledBackground',
+                color: 'action.disabled',
               }
             }}
           >
-            {deletingChapter ? '删除中...' : '确认删除'}
+            {deletingChapter ? t('dashboard.deleting') : t('dashboard.confirmDelete')}
           </Button>
         </DialogActions>
       </Dialog>

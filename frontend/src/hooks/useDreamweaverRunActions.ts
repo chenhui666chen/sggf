@@ -1,4 +1,5 @@
 import { useCallback } from 'react'
+import { useTranslation } from 'react-i18next'
 import {
   apiClient,
   extractApiErrorMessage,
@@ -116,8 +117,10 @@ export function useDreamweaverRunActions(deps: UseDreamweaverRunActionsDeps) {
     hydrateFromPersistedRun,
   } = deps
 
+  const { t } = useTranslation()
+
   const loadLibrary = useCallback(async (): Promise<string | null> => {
-    if (!selectedProjectId) return '未选择项目'
+    if (!selectedProjectId) return t('dreamweaverRun.errorProjectNotSelected')
     setLibraryLoading(true)
     setLibraryError(null)
     setLibrary(null)
@@ -127,8 +130,8 @@ export function useDreamweaverRunActions(deps: UseDreamweaverRunActionsDeps) {
       const res = await apiClient.getDreamweaverLibrary(selectedProjectId, scopedRunId ? { run_id: scopedRunId } : undefined)
       const data = toLibraryPayload(res.data)
       if (!data) {
-        setLibraryError('素材库响应格式无效')
-        return '素材库响应格式无效'
+        setLibraryError(t('dreamweaverRun.errorLibraryFormatInvalid'))
+        return t('dreamweaverRun.errorLibraryFormatInvalid')
       }
       setLibrary(data)
       setLibraryPlanItems(buildLibraryPlanItemsFromPayload(data))
@@ -144,7 +147,7 @@ export function useDreamweaverRunActions(deps: UseDreamweaverRunActionsDeps) {
             const url = URL.createObjectURL(fileRes.data)
             return { id: asset.id, url, error: '' }
           } catch (e: unknown) {
-            const message = await extractApiErrorMessage(e, '加载预览失败')
+            const message = await extractApiErrorMessage(e, t('dreamweaverRun.errorLoadPreviewFailed'))
             return { id: asset.id, url: '', error: message }
           }
           }),
@@ -154,13 +157,13 @@ export function useDreamweaverRunActions(deps: UseDreamweaverRunActionsDeps) {
       setLibraryPreviewErrors(previewErrorMap)
       return null
     } catch (e: unknown) {
-      const message = await extractApiErrorMessage(e, '加载素材库失败')
+      const message = await extractApiErrorMessage(e, t('dreamweaverRun.errorLoadLibraryFailed'))
       setLibraryError(message)
       return message
     } finally {
       setLibraryLoading(false)
     }
-  }, [selectedProjectId, currentRunId, setLibraryLoading, setLibraryError, setLibrary, clearLibraryPreviews, setLibraryPlanItems, setLibraryPreviews, setLibraryPreviewErrors])
+  }, [selectedProjectId, currentRunId, t, setLibraryLoading, setLibraryError, setLibrary, clearLibraryPreviews, setLibraryPlanItems, setLibraryPreviews, setLibraryPreviewErrors])
 
   const approveLibrary = useCallback(async (payload: { approve_all?: boolean; roles?: string[]; approved?: boolean }) => {
     if (!selectedProjectId) return
@@ -170,11 +173,11 @@ export function useDreamweaverRunActions(deps: UseDreamweaverRunActionsDeps) {
       await apiClient.approveDreamweaverLibrary(selectedProjectId, payload)
       await loadLibrary()
     } catch (e: unknown) {
-      setLibraryError(await extractApiErrorMessage(e, '更新审核状态失败'))
+      setLibraryError(await extractApiErrorMessage(e, t('dreamweaverRun.errorUpdateApprovalFailed')))
     } finally {
       setLibraryLoading(false)
     }
-  }, [selectedProjectId, loadLibrary, setLibraryLoading, setLibraryError])
+  }, [selectedProjectId, t, loadLibrary, setLibraryLoading, setLibraryError])
 
   const regenerateLibraryAssetFn = useCallback(async (options: Record<string, unknown>): Promise<string | null> => {
     const role = String(options.role || '').trim()
@@ -202,7 +205,7 @@ export function useDreamweaverRunActions(deps: UseDreamweaverRunActionsDeps) {
 
   const resumeGeneration = useCallback(async () => {
     if (!currentRunId) {
-      setError('缺少 run_id，无法继续生成（请复制调试信息排查）')
+      setError(t('dreamweaverRun.errorMissingRunIdResume'))
       return
     }
     setError(null)
@@ -216,30 +219,30 @@ export function useDreamweaverRunActions(deps: UseDreamweaverRunActionsDeps) {
       const res = await apiClient.resumeDreamweaverAsync(currentRunId)
       const data = toDreamweaverQueuedTaskResponse(res.data)
       if (!data) {
-        throw new Error('继续生成响应格式无效')
+        throw new Error(t('dreamweaverRun.errorResumeFormatInvalid'))
       }
       setTaskId(data.task_id)
       setTaskRunId(data.run_id)
       setTaskStatus(data.status || 'queued')
     } catch (e: unknown) {
-      setError(await extractApiErrorMessage(e, '继续生成失败'))
+      setError(await extractApiErrorMessage(e, t('dreamweaverRun.errorResumeFailed')))
       setRunning(false)
       setWaitingApproval(true)
       setTaskStatus('waiting')
     } finally {
       setResumeLoading(false)
     }
-  }, [currentRunId, setError, setLibraryError, setResumeLoading, setTaskQueue, setRunning, setWaitingApproval, setTaskStatus, setTaskId, setTaskRunId])
+  }, [currentRunId, t, setError, setLibraryError, setResumeLoading, setTaskQueue, setRunning, setWaitingApproval, setTaskStatus, setTaskId, setTaskRunId])
 
   const confirmVideoJob = useCallback(async (shotId: string) => {
     const sid = String(shotId || '').trim()
     if (!sid) return
     if (!currentRunId) {
-      setVideoJobActionError('缺少 run_id，无法确认视频片段生成')
+      setVideoJobActionError(t('dreamweaverRun.errorMissingRunIdConfirmVideo'))
       return
     }
     if (running) {
-      setVideoJobActionError('当前 run 正在运行中，请等待结束后再确认')
+      setVideoJobActionError(t('dreamweaverRun.errorRunRunningConfirmVideo'))
       return
     }
     setVideoJobActionError(null)
@@ -272,36 +275,36 @@ export function useDreamweaverRunActions(deps: UseDreamweaverRunActionsDeps) {
       if (message) setVideoJobActionError(message)
       if (!jobs) await loadRunSnapshot()
     } catch (e: unknown) {
-      setVideoJobActionError(await extractApiErrorMessage(e, '确认视频片段生成失败'))
+      setVideoJobActionError(await extractApiErrorMessage(e, t('dreamweaverRun.errorConfirmVideoFailed')))
     } finally {
       setVideoJobConfirmingShotId(null)
     }
-  }, [currentRunId, running, setVideoJobActionError, setVideoJobConfirmingShotId, setTaskQueue, setRunSnapshot, setRunning, setWaitingApproval, setTaskId, setTaskRunId, setTaskStatus, setTaskState, setTaskStage, setTaskProgress, setError, loadRunSnapshot])
+  }, [currentRunId, running, t, setVideoJobActionError, setVideoJobConfirmingShotId, setTaskQueue, setRunSnapshot, setRunning, setWaitingApproval, setTaskId, setTaskRunId, setTaskStatus, setTaskState, setTaskStage, setTaskProgress, setError, loadRunSnapshot])
 
   const restartGeneration = useCallback(async (startState: string, shotIds?: string[], camIdxs?: number[]) => {
     const startStateRaw = String(startState || '').trim().toUpperCase()
     if (!startStateRaw) return
     if (!currentRunId) {
-      setError('缺少 run_id，无法重跑（请复制调试信息排查）')
+      setError(t('dreamweaverRun.errorMissingRunIdRestart'))
       return
     }
     if (running) {
-      setError('当前 run 正在运行中，无法重跑')
+      setError(t('dreamweaverRun.errorRunRunningRestart'))
       return
     }
 
     const normalizedShotIds = normalizeShotIds(shotIds)
     const normalizedCamIdxs = normalizeCameraIndices(camIdxs)
 
-    const validation = validateRestartParams(startStateRaw, normalizedShotIds, normalizedCamIdxs)
+    const validation = validateRestartParams(startStateRaw, normalizedShotIds, normalizedCamIdxs, t)
     if (!validation.valid) {
-      setError(validation.error || '参数验证失败')
+      setError(validation.error || t('dreamweaverRun.errorParameterValidationFailed'))
       return
     }
 
-    const partialHint = buildRestartPartialHint(normalizedShotIds, normalizedCamIdxs)
+    const partialHint = buildRestartPartialHint(normalizedShotIds, normalizedCamIdxs, t)
     const ok = window.confirm(
-      `将从 ${startStateRaw} 开始重跑，并清理该阶段及其下游产物（覆盖式重跑，可能产生额外调用/成本）。${partialHint}\n\n确认继续？`,
+      t('dreamweaverRun.restartConfirmTemplate', { startState: startStateRaw, partialHint }),
     )
     if (!ok) return
 
@@ -335,31 +338,31 @@ export function useDreamweaverRunActions(deps: UseDreamweaverRunActionsDeps) {
       })
       const data = toDreamweaverQueuedTaskResponse(res.data)
       if (!data) {
-        throw new Error('重跑响应格式无效')
+        throw new Error(t('dreamweaverRun.errorRestartFormatInvalid'))
       }
       setTaskId(data.task_id)
       setTaskRunId(data.run_id || currentRunId)
       setTaskStatus(data.status || 'queued')
     } catch (e: unknown) {
-      setError(await extractApiErrorMessage(e, '重跑失败'))
+      setError(await extractApiErrorMessage(e, t('dreamweaverRun.errorRestartFailed')))
       applyTerminalStatus({ run_id: currentRunId })
     } finally {
       setRestartLoading(false)
     }
-  }, [currentRunId, running, qcAllowFail, smartTuning, library, setError, resetForNewRun, setRestartLoading, setRestartAnchorEl, setRunning, setWaitingApproval, setTaskStatus, setTaskProgress, setTaskState, setTaskStage, setTaskArtifacts, setLibraryPlanItems, setTaskId, setTaskRunId, applyTerminalStatus])
+  }, [t, currentRunId, running, qcAllowFail, smartTuning, library, setError, resetForNewRun, setRestartLoading, setRestartAnchorEl, setRunning, setWaitingApproval, setTaskStatus, setTaskProgress, setTaskState, setTaskStage, setTaskArtifacts, setLibraryPlanItems, setTaskId, setTaskRunId, applyTerminalStatus])
 
   const uploadShotAsset = useCallback(async (shotId: string, role: 'head_frame' | 'tail_frame' | 'mid_frame' | 'video_clip', file: File) => {
     const safeShotId = String(shotId || '').trim()
     if (!currentRunId) {
-      setDiagnosticActionError('缺少 run_id，无法上传')
+      setDiagnosticActionError(t('dreamweaverRun.errorMissingRunIdUpload'))
       return
     }
     if (!safeShotId) {
-      setDiagnosticActionError('缺少 shot_id，无法上传')
+      setDiagnosticActionError(t('dreamweaverRun.errorMissingShotIdUpload'))
       return
     }
     if (running) {
-      setDiagnosticActionError('run 正在运行中，无法上传')
+      setDiagnosticActionError(t('dreamweaverRun.errorRunRunningUpload'))
       return
     }
     if (!file) return
@@ -367,16 +370,16 @@ export function useDreamweaverRunActions(deps: UseDreamweaverRunActionsDeps) {
     const isVideo = role === 'video_clip'
     const filename = String(file.name || '').toLowerCase()
     if (!isVideo && !filename.endsWith('.png')) {
-      setDiagnosticActionError('仅支持 PNG 替换 head/tail/mid')
+      setDiagnosticActionError(t('dreamweaverRun.errorOnlyPngUpload'))
       return
     }
     if (isVideo && !filename.endsWith('.mp4')) {
-      setDiagnosticActionError('仅支持 MP4 替换 video_clip')
+      setDiagnosticActionError(t('dreamweaverRun.errorOnlyMp4Upload'))
       return
     }
     const maxMb = isVideo ? 200 : 10
     if (typeof file.size === 'number' && file.size > maxMb * 1024 * 1024) {
-      setDiagnosticActionError(`文件过大（>${maxMb}MB），请压缩后再上传`)
+      setDiagnosticActionError(t('dreamweaverRun.errorFileTooLarge', { maxMb }))
       return
     }
 
@@ -386,37 +389,38 @@ export function useDreamweaverRunActions(deps: UseDreamweaverRunActionsDeps) {
       await apiClient.uploadDreamweaverRunShotAssetFile(currentRunId, safeShotId, role, file)
       await loadRunSnapshot()
     } catch (e: unknown) {
-      setDiagnosticActionError(await extractApiErrorMessage(e, '上传失败'))
+      setDiagnosticActionError(await extractApiErrorMessage(e, t('dreamweaverRun.errorUploadFailed')))
     } finally {
       setDiagnosticActionLoading(false)
     }
-  }, [currentRunId, running, setDiagnosticActionError, setDiagnosticActionLoading, loadRunSnapshot])
+  }, [currentRunId, running, t, setDiagnosticActionError, setDiagnosticActionLoading, loadRunSnapshot])
 
   const promptAndRegenerateKeyframe = useCallback(async (shotId: string, frame: 'head' | 'tail', defaultPrompt: string) => {
     const safeShotId = String(shotId || '').trim()
     if (!currentRunId) {
-      setDiagnosticActionError('缺少 run_id，无法重生成')
+      setDiagnosticActionError(t('dreamweaverRun.errorMissingRunIdRegenerate'))
       return
     }
     if (!safeShotId) {
-      setDiagnosticActionError('缺少 shot_id，无法重生成')
+      setDiagnosticActionError(t('dreamweaverRun.errorMissingShotIdRegenerate'))
       return
     }
     if (running) {
-      setDiagnosticActionError('run 正在运行中，无法重生成')
+      setDiagnosticActionError(t('dreamweaverRun.errorRunRunningRegenerate'))
       return
     }
 
     const initial = String(defaultPrompt || '').trim()
-    const nextPrompt = window.prompt(`请输入要用于 ${safeShotId} 的 ${frame === 'head' ? '首帧' : '尾帧'} 提示词（将写入契约并用于 KEYFRAMES 重跑）`, initial)
+    const frameLabel = frame === 'head' ? t('dreamweaverRun.promptFrameHead') : t('dreamweaverRun.promptFrameTail')
+    const nextPrompt = window.prompt(t('dreamweaverRun.promptForFramePrompt', { shotId: safeShotId, frame: frameLabel }), initial)
     if (nextPrompt == null) return
     const value = String(nextPrompt || '').trim()
     if (!value) {
-      setDiagnosticActionError('提示词不能为空')
+      setDiagnosticActionError(t('dreamweaverRun.errorPromptEmpty'))
       return
     }
     if (value.length > 2000) {
-      setDiagnosticActionError('提示词过长（>2000）')
+      setDiagnosticActionError(t('dreamweaverRun.errorPromptTooLong'))
       return
     }
 
@@ -426,14 +430,14 @@ export function useDreamweaverRunActions(deps: UseDreamweaverRunActionsDeps) {
       await apiClient.updateDreamweaverRunShotFramePrompt(currentRunId, safeShotId, frame, value)
       await loadRunSnapshot()
     } catch (e: unknown) {
-      setDiagnosticActionError(await extractApiErrorMessage(e, '更新提示词失败'))
+      setDiagnosticActionError(await extractApiErrorMessage(e, t('dreamweaverRun.errorUpdatePromptFailed')))
       return
     } finally {
       setDiagnosticActionLoading(false)
     }
 
     await restartGeneration('KEYFRAMES', [safeShotId])
-  }, [currentRunId, running, setDiagnosticActionError, setDiagnosticActionLoading, loadRunSnapshot, restartGeneration])
+  }, [currentRunId, running, t, setDiagnosticActionError, setDiagnosticActionLoading, loadRunSnapshot, restartGeneration])
 
   const approvePromptReview = useCallback(async (approved: boolean) => {
     if (!currentRunId) return
@@ -443,11 +447,11 @@ export function useDreamweaverRunActions(deps: UseDreamweaverRunActionsDeps) {
       await apiClient.approveDreamweaverPromptReview(currentRunId, { approved })
       await loadRunSnapshot()
     } catch (e: unknown) {
-      setPromptReviewError(await extractApiErrorMessage(e, '更新提示词审核状态失败'))
+      setPromptReviewError(await extractApiErrorMessage(e, t('dreamweaverRun.errorUpdatePromptReviewFailed')))
     } finally {
       setPromptReviewLoading(false)
     }
-  }, [currentRunId, setPromptReviewLoading, setPromptReviewError, loadRunSnapshot])
+  }, [currentRunId, t, setPromptReviewLoading, setPromptReviewError, loadRunSnapshot])
 
   const approveSafetyAudit = useCallback(async () => {
     if (!currentRunId || !selectedProjectId) return
@@ -459,11 +463,11 @@ export function useDreamweaverRunActions(deps: UseDreamweaverRunActionsDeps) {
       applyTerminalStatus({ run_id: currentRunId })
       await hydrateFromPersistedRun(selectedProjectId, currentRunId, null, 'completed')
     } catch (e: unknown) {
-      setSafetyAuditApproveError(await extractApiErrorMessage(e, '人工放行安全审核失败'))
+      setSafetyAuditApproveError(await extractApiErrorMessage(e, t('dreamweaverRun.errorApproveSafetyAuditFailed')))
     } finally {
       setSafetyAuditApproveLoading(false)
     }
-  }, [currentRunId, selectedProjectId, setSafetyAuditApproveLoading, setSafetyAuditApproveError, setError, applyTerminalStatus, hydrateFromPersistedRun])
+  }, [currentRunId, selectedProjectId, t, setSafetyAuditApproveLoading, setSafetyAuditApproveError, setError, applyTerminalStatus, hydrateFromPersistedRun])
 
   return {
     loadLibrary,

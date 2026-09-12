@@ -2,6 +2,7 @@ import { Box, Chip, Stack, Typography } from '@mui/material'
 import { getStageDisplayName } from '@/utils/timeEstimate'
 import { estimateRemainingTime, formatEstimatedTime } from '@/utils/timeEstimate'
 import { isTerminalStage, isWaitingStage } from '@/constants/dreamweaver'
+import { useTranslation } from 'react-i18next'
 
 interface TaskHeaderProps {
   runId: string | null
@@ -20,8 +21,9 @@ export function TaskHeader({
   taskStatus,
   waitingApproval,
 }: TaskHeaderProps) {
+  const { t } = useTranslation()
   const estimate = estimateRemainingTime(taskStage, taskProgress)
-  const stageDisplay = getStageDisplayName(taskStage || '')
+  const stageDisplay = getStageDisplayName(taskStage || '', t)
   const isTerminal = isTerminalStage(taskStage)
   const isWaiting = isWaitingStage(taskStage)
 
@@ -33,14 +35,14 @@ export function TaskHeader({
         {runId && (
           <Chip
             size="small"
-            label={`运行ID: ${runId.slice(0, 8)}...`}
+            label={`${t('dreamweaverTaskHeader.runIdLabel')}: ${runId.slice(0, 8)}...`}
             variant="outlined"
           />
         )}
 
         <Chip
           size="small"
-          label={`阶段: ${stageDisplay}`}
+          label={`${t('dreamweaverTaskHeader.stageLabel')}: ${stageDisplay}`}
           variant="outlined"
           color={isTerminal ? 'success' : isWaiting ? 'warning' : 'primary'}
         />
@@ -48,7 +50,7 @@ export function TaskHeader({
         {taskState && (
           <Chip
             size="small"
-            label={`状态: ${taskState}`}
+            label={`${t('dreamweaverTaskHeader.stateLabel')}: ${taskState}`}
             variant="outlined"
           />
         )}
@@ -56,7 +58,7 @@ export function TaskHeader({
         {progressPercent !== null && progressPercent > 0 && (
           <Chip
             size="small"
-            label={`进度: ${progressPercent}%`}
+            label={`${t('dreamweaverTaskHeader.progressLabel')}: ${progressPercent}%`}
             variant="outlined"
           />
         )}
@@ -64,7 +66,7 @@ export function TaskHeader({
         {estimate && estimate.estimatedMinutes > 0 && !isTerminal && (
           <Chip
             size="small"
-            label={`预估剩余: ${formatEstimatedTime(estimate.estimatedMinutes)}`}
+            label={`${t('dreamweaverTaskHeader.estimatedRemainingLabel')}: ${formatEstimatedTime(estimate.estimatedMinutes, t)}`}
             variant="outlined"
             color={estimate.confidence === 'high' ? 'success' : estimate.confidence === 'low' ? 'warning' : 'default'}
           />
@@ -73,14 +75,14 @@ export function TaskHeader({
         {waitingApproval && (
           <Chip
             size="small"
-            label="等待审核"
+            label={t('dreamweaverTaskHeader.waitingApproval')}
             color="warning"
           />
         )}
 
         {taskStatus && (
           <Typography variant="caption" color="text.secondary">
-            任务状态: {taskStatus}
+            {t('dreamweaverTaskHeader.taskStatusLabel')}: {taskStatus}
           </Typography>
         )}
       </Stack>

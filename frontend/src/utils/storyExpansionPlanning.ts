@@ -1,3 +1,5 @@
+import type { TFunction } from 'i18next'
+
 import type {
   StoryExpansionFrameworkMetadata,
   StoryExpansionMode,
@@ -148,16 +150,17 @@ export function shouldConfirmStoryExpansionVolumeOverwrite(
 
 export function getStoryExpansionValidationError(
   input: StoryExpansionValidationInput,
+  t?: TFunction,
 ): string | null {
   const plan = buildStoryExpansionRequestPlan(input)
 
   if (!input.hasStoryContext) {
-    return '请先准备好世界观和情节大纲，再执行协同扩展'
+    return t ? t('storyExpansion.planning.needStoryContext') : '请先准备好世界观和情节大纲，再执行协同扩展'
   }
 
   if (input.expansionMode === 'epic_framework') {
     if (!isConfiguredNumber(input.totalVolumes) || input.totalVolumes < 3 || input.totalVolumes > 50) {
-      return '长篇框架协同需要有效的总卷数（3-50）'
+      return t ? t('storyExpansion.planning.invalidEpicVolumes') : '长篇框架协同需要有效的总卷数（3-50）'
     }
     if (
       !isConfiguredNumber(input.totalChaptersMin)
@@ -166,13 +169,18 @@ export function getStoryExpansionValidationError(
       || input.totalChaptersMax > EPIC_FRAMEWORK_MAX_TOTAL_CHAPTERS
       || input.totalChaptersMin > input.totalChaptersMax
     ) {
-      return `长篇框架协同需要有效的总章节范围（${EPIC_FRAMEWORK_MIN_TOTAL_CHAPTERS}-${EPIC_FRAMEWORK_MAX_TOTAL_CHAPTERS}）`
+      return t
+        ? t('storyExpansion.planning.invalidEpicRange', {
+          min: EPIC_FRAMEWORK_MIN_TOTAL_CHAPTERS,
+          max: EPIC_FRAMEWORK_MAX_TOTAL_CHAPTERS,
+        })
+        : `长篇框架协同需要有效的总章节范围（${EPIC_FRAMEWORK_MIN_TOTAL_CHAPTERS}-${EPIC_FRAMEWORK_MAX_TOTAL_CHAPTERS}）`
     }
   }
 
   if (plan.isVolumeDetailMode) {
     if (!input.frameworkMetadata?.has_framework) {
-      return '单卷细化协同需要先生成长篇框架'
+      return t ? t('storyExpansion.planning.needEpicFrameworkFirst') : '单卷细化协同需要先生成长篇框架'
     }
 
     const totalVolumes = input.frameworkMetadata.metadata?.total_volumes || 50
@@ -180,7 +188,9 @@ export function getStoryExpansionValidationError(
       !isPositiveConfiguredNumber(input.targetVolumeIndex)
       || input.targetVolumeIndex > totalVolumes
     ) {
-      return `请输入有效的卷编号（1-${totalVolumes}）`
+      return t
+        ? t('storyExpansion.planning.invalidVolumeIndex', { max: totalVolumes })
+        : `请输入有效的卷编号（1-${totalVolumes}）`
     }
 
     if (
@@ -190,12 +200,17 @@ export function getStoryExpansionValidationError(
       || input.volumeChaptersMax > VOLUME_DETAIL_MAX_CHAPTERS
       || input.volumeChaptersMin > input.volumeChaptersMax
     ) {
-      return `请输入有效的本卷细化章节范围（${VOLUME_DETAIL_MIN_CHAPTERS}-${VOLUME_DETAIL_MAX_CHAPTERS}）`
+      return t
+        ? t('storyExpansion.planning.invalidVolumeRange', {
+          min: VOLUME_DETAIL_MIN_CHAPTERS,
+          max: VOLUME_DETAIL_MAX_CHAPTERS,
+        })
+        : `请输入有效的本卷细化章节范围（${VOLUME_DETAIL_MIN_CHAPTERS}-${VOLUME_DETAIL_MAX_CHAPTERS}）`
     }
   }
 
   if (!plan.isVolumeDetailMode && !plan.hasDelta) {
-    return '目标细化章节数或目标人物数至少要有一项高于当前值'
+    return t ? t('storyExpansion.planning.needDeltaAboveCurrent') : '目标细化章节数或目标人物数至少要有一项高于当前值'
   }
 
   if (
@@ -205,18 +220,18 @@ export function getStoryExpansionValidationError(
       plan.requestedTargetChapterCount ?? input.currentChapterCount,
     ) > getConventionalCollaborationMaxTargetChapterCount()
   ) {
-    return buildConventionalCollaborationLimitMessage()
+    return buildConventionalCollaborationLimitMessage(t)
   }
 
   if (
     input.expansionMode === 'epic_framework'
     && (plan.requestedTargetChapterCount ?? 0) > Math.max(EPIC_FRAMEWORK_MAX_TOTAL_CHAPTERS, input.currentChapterCount)
   ) {
-    return '长篇框架协同当前目标超出章节规划上限，请缩小目标范围'
+    return t ? t('storyExpansion.planning.epicTargetExceeded') : '长篇框架协同当前目标超出章节规划上限，请缩小目标范围'
   }
 
   if ((plan.requestedTargetCharacterCount ?? 0) > Math.max(200, input.currentCharacterCount)) {
-    return '协同扩展当前目标超出人物规划上限，请缩小目标范围'
+    return t ? t('storyExpansion.planning.characterTargetExceeded') : '协同扩展当前目标超出人物规划上限，请缩小目标范围'
   }
 
   return null

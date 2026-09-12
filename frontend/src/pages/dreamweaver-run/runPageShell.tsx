@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import { useTranslation } from 'react-i18next'
 
 import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import { Box, Button, Container, Typography } from '@mui/material'
@@ -16,8 +17,10 @@ export function DreamweaverRunPageHero({
   onBack,
   title,
   description,
-  backLabel = '返回项目列表',
+  backLabel,
 }: DreamweaverRunPageHeroProps) {
+  const { t } = useTranslation()
+  const resolvedBackLabel = backLabel ?? t('dreamweaverRun.libraryBackToProjects')
   return (
     <>
       <Button
@@ -26,7 +29,7 @@ export function DreamweaverRunPageHero({
         sx={{ color: 'white', mb: 2 }}
         onClick={onBack}
       >
-        {backLabel}
+        {resolvedBackLabel}
       </Button>
 
       <Typography variant="h4" sx={{ color: 'white', fontWeight: 700, mb: 0.5 }}>

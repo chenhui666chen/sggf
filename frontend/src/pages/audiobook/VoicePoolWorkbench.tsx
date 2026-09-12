@@ -1,5 +1,8 @@
 import { useMemo, useState } from 'react'
 
+import { useTranslation } from 'react-i18next'
+import type { TFunction } from 'i18next'
+
 import {
   Alert,
   Box,
@@ -48,19 +51,19 @@ interface VoicePoolWorkbenchProps {
   onRefresh: () => Promise<void>
 }
 
-const OPTION_LABELS: Record<string, string> = {
-  female: '女性感', male: '男性感', neutral: '中性', child: '儿童', teen: '少年',
-  young_adult: '青年', adult: '成年', mature: '中年', elder: '老年', natural: '自然',
-  gentle: '温柔', sweet: '甜美', bright: '明亮', restrained: '克制', intellectual: '知性',
-  powerful: '有力', cold: '冷峻', narration: '旁白', roleplay: '角色演绎', clear: '清晰',
-  warm: '温暖', deep: '低沉', magnetic: '磁性', soft: '柔和', slightly_husky: '轻微沙哑',
-  husky: '沙哑', airy: '气声', audiobook: '有声书', dialogue: '对白', suspense: '悬疑',
-  romance: '情感', historical: '古装', fantasy: '奇幻', children: '儿童故事', documentary: '纪录片',
-  commercial: '商业配音', self_voice: '本人声音', licensed_voice: '已获授权声音',
-  synthetic_source: '合成来源', synthetic_design: '合成设计',
+const OPTION_LABEL_KEYS: Record<string, string> = {
+  female: 'audiobook.voicePoolWorkbench.options.female', male: 'audiobook.voicePoolWorkbench.options.male', neutral: 'audiobook.voicePoolWorkbench.options.neutral', child: 'audiobook.voicePoolWorkbench.options.child', teen: 'audiobook.voicePoolWorkbench.options.teen',
+  young_adult: 'audiobook.voicePoolWorkbench.options.young_adult', adult: 'audiobook.voicePoolWorkbench.options.adult', mature: 'audiobook.voicePoolWorkbench.options.mature', elder: 'audiobook.voicePoolWorkbench.options.elder', natural: 'audiobook.voicePoolWorkbench.options.natural',
+  gentle: 'audiobook.voicePoolWorkbench.options.gentle', sweet: 'audiobook.voicePoolWorkbench.options.sweet', bright: 'audiobook.voicePoolWorkbench.options.bright', restrained: 'audiobook.voicePoolWorkbench.options.restrained', intellectual: 'audiobook.voicePoolWorkbench.options.intellectual',
+  powerful: 'audiobook.voicePoolWorkbench.options.powerful', cold: 'audiobook.voicePoolWorkbench.options.cold', narration: 'audiobook.voicePoolWorkbench.options.narration', roleplay: 'audiobook.voicePoolWorkbench.options.roleplay', clear: 'audiobook.voicePoolWorkbench.options.clear',
+  warm: 'audiobook.voicePoolWorkbench.options.warm', deep: 'audiobook.voicePoolWorkbench.options.deep', magnetic: 'audiobook.voicePoolWorkbench.options.magnetic', soft: 'audiobook.voicePoolWorkbench.options.soft', slightly_husky: 'audiobook.voicePoolWorkbench.options.slightly_husky',
+  husky: 'audiobook.voicePoolWorkbench.options.husky', airy: 'audiobook.voicePoolWorkbench.options.airy', audiobook: 'audiobook.voicePoolWorkbench.options.audiobook', dialogue: 'audiobook.voicePoolWorkbench.options.dialogue', suspense: 'audiobook.voicePoolWorkbench.options.suspense',
+  romance: 'audiobook.voicePoolWorkbench.options.romance', historical: 'audiobook.voicePoolWorkbench.options.historical', fantasy: 'audiobook.voicePoolWorkbench.options.fantasy', children: 'audiobook.voicePoolWorkbench.options.children', documentary: 'audiobook.voicePoolWorkbench.options.documentary',
+  commercial: 'audiobook.voicePoolWorkbench.options.commercial', self_voice: 'audiobook.voicePoolWorkbench.options.self_voice', licensed_voice: 'audiobook.voicePoolWorkbench.options.licensed_voice',
+  synthetic_source: 'audiobook.voicePoolWorkbench.options.synthetic_source', synthetic_design: 'audiobook.voicePoolWorkbench.options.synthetic_design',
 }
 
-const optionLabel = (value: string) => OPTION_LABELS[value] || value
+const optionLabel = (value: string, t: TFunction) => (OPTION_LABEL_KEYS[value] ? t(OPTION_LABEL_KEYS[value]) : value)
 
 const optionList = (taxonomy: Record<string, string[] | string>, key: string) => {
   const value = taxonomy[key]
@@ -80,6 +83,7 @@ const VoicePoolWorkbench = ({
   error,
   onRefresh,
 }: VoicePoolWorkbenchProps) => {
+  const { t } = useTranslation()
   const [tab, setTab] = useState(0)
   const [busyAssetId, setBusyAssetId] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
@@ -110,10 +114,10 @@ const VoicePoolWorkbench = ({
         return
       }
       setCostConfirmation(null)
-      setNotice(response.data.cache_hit ? '已复用标准参考试听。' : '标准参考试听已生成并缓存。')
+      setNotice(response.data.cache_hit ? t('audiobook.voicePoolWorkbench.materializeNoticeReused') : t('audiobook.voicePoolWorkbench.materializeNoticeGenerated'))
       await onRefresh()
     } catch (requestError: unknown) {
-      setActionError(await extractApiErrorMessage(requestError, '生成标准参考试听失败'))
+      setActionError(await extractApiErrorMessage(requestError, t('audiobook.voicePoolWorkbench.materializeFailed')))
     } finally {
       setBusyAssetId(null)
     }
@@ -137,15 +141,15 @@ const VoicePoolWorkbench = ({
     if (!publishAsset) return
     const uri = playableUri(publishAsset)
     if (!uri) {
-      setActionError('请先生成并上传标准参考试听。')
+      setActionError(t('audiobook.voicePoolWorkbench.previewRequired'))
       return
     }
     if (!publishName.trim() || timbreTags.length === 0 || scenarioTags.length === 0) {
-      setActionError('公开名称、音色质感和适用场景为必填项。')
+      setActionError(t('audiobook.voicePoolWorkbench.publishFieldsRequired'))
       return
     }
     if (!['self_voice', 'licensed_voice', 'synthetic_source', 'synthetic_design'].includes(rightsBasis)) {
-      setActionError('当前音色缺少可公开的权利依据。')
+      setActionError(t('audiobook.voicePoolWorkbench.rightsBasisMissing'))
       return
     }
     setBusyAssetId(publishAsset.asset_id)
@@ -166,10 +170,10 @@ const VoicePoolWorkbench = ({
       }
       await apiClient.publishVoiceToPool(publishAsset.asset_id, payload)
       setPublishAsset(null)
-      setNotice('发布申请已提交，审核通过后才会进入公共音色池。')
+      setNotice(t('audiobook.voicePoolWorkbench.publishSubmitted'))
       await onRefresh()
     } catch (requestError: unknown) {
-      setActionError(await extractApiErrorMessage(requestError, '提交公共音色失败'))
+      setActionError(await extractApiErrorMessage(requestError, t('audiobook.voicePoolWorkbench.publishFailed')))
     } finally {
       setBusyAssetId(null)
     }
@@ -178,10 +182,10 @@ const VoicePoolWorkbench = ({
   const rateVoice = async (voice: VoicePoolVoiceRecord, score: number) => {
     try {
       await apiClient.ratePublicVoice(voice.publication_id, score)
-      setNotice('评分已更新。')
+      setNotice(t('audiobook.voicePoolWorkbench.ratingUpdated'))
       await onRefresh()
     } catch (requestError: unknown) {
-      setActionError(await extractApiErrorMessage(requestError, '评分失败'))
+      setActionError(await extractApiErrorMessage(requestError, t('audiobook.voicePoolWorkbench.ratingFailed')))
     }
   }
 
@@ -189,10 +193,10 @@ const VoicePoolWorkbench = ({
     <Box sx={{ mt: 2 }}>
       <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1 }}>
         <Tabs value={tab} onChange={(_event, value) => setTab(value)}>
-          <Tab label={`我的参考音色 ${privateAssets.length}`} />
-          <Tab label={`公共音色池 ${publicVoices.length}`} />
+          <Tab label={t('audiobook.voicePoolWorkbench.myVoicesTab', { count: privateAssets.length })} />
+          <Tab label={t('audiobook.voicePoolWorkbench.publicPoolTab', { count: publicVoices.length })} />
         </Tabs>
-        <Tooltip title="刷新音色池">
+        <Tooltip title={t('audiobook.voicePoolWorkbench.refreshPool')}>
           <span>
             <IconButton onClick={() => void onRefresh()} disabled={loading} size="small">
               {loading ? <CircularProgress size={18} /> : <SyncIcon fontSize="small" />}
@@ -216,11 +220,11 @@ const VoicePoolWorkbench = ({
                     {asset.source_voice_id || asset.asset_id}
                   </Typography>
                   <Typography variant="caption" color="text.secondary">
-                    {asset.source_model || '未知模型'} · {asset.authorization_basis === 'synthetic_design' ? '设计音色' : '复刻音色'}
+                    {asset.source_model || t('audiobook.voicePoolWorkbench.unknownModel')} · {asset.authorization_basis === 'synthetic_design' ? t('audiobook.voicePoolWorkbench.syntheticDesign') : t('audiobook.voicePoolWorkbench.replicaVoice')}
                   </Typography>
                 </Box>
                 {uri && (
-                  <Tooltip title="试听标准参考音频">
+                  <Tooltip title={t('audiobook.voicePoolWorkbench.previewStandardAudio')}>
                     <IconButton component="a" href={uri} target="_blank" rel="noreferrer" size="small">
                       <PlayArrowIcon fontSize="small" />
                     </IconButton>
@@ -232,7 +236,7 @@ const VoicePoolWorkbench = ({
                   disabled={isBusy}
                   onClick={() => void materialize(asset, false)}
                 >
-                  {isBusy ? '处理中' : uri ? '检查缓存' : '生成参考试听'}
+                  {isBusy ? t('audiobook.voicePoolWorkbench.processing') : uri ? t('audiobook.voicePoolWorkbench.checkCache') : t('audiobook.voicePoolWorkbench.generatePreview')}
                 </Button>
                 <Button
                   size="small"
@@ -241,13 +245,13 @@ const VoicePoolWorkbench = ({
                   disabled={!uri || isBusy}
                   onClick={() => openPublish(asset)}
                 >
-                  发布
+                  {t('audiobook.voicePoolWorkbench.publish')}
                 </Button>
               </ListItem>
             )
           })}
           {!loading && privateAssets.length === 0 && (
-            <ListItem><Typography variant="body2" color="text.secondary">暂无可发布的私有音色。</Typography></ListItem>
+            <ListItem><Typography variant="body2" color="text.secondary">{t('audiobook.voicePoolWorkbench.noPrivateVoices')}</Typography></ListItem>
           )}
         </List>
       )}
@@ -263,18 +267,18 @@ const VoicePoolWorkbench = ({
                 </Typography>
                 <Stack direction="row" spacing={0.5} sx={{ mt: 0.5, flexWrap: 'wrap' }}>
                   {[...voice.timbre_tags, ...voice.scenario_tags].slice(0, 5).map((tag) => (
-                    <Chip key={tag} label={optionLabel(tag)} size="small" sx={{ height: 20 }} />
+                    <Chip key={tag} label={optionLabel(tag, t)} size="small" sx={{ height: 20 }} />
                   ))}
                 </Stack>
               </Box>
-              <Tooltip title="试听">
+              <Tooltip title={t('audiobook.voicePoolWorkbench.preview')}>
                 <IconButton component="a" href={voice.public_preview_uri} target="_blank" rel="noreferrer" size="small">
                   <PlayArrowIcon fontSize="small" />
                 </IconButton>
               </Tooltip>
               <Box sx={{ display: 'flex', alignItems: 'center' }}>
                 {[1, 2, 3, 4, 5].map((score) => (
-                  <Tooltip key={score} title={`${score} 分`}>
+                  <Tooltip key={score} title={t('audiobook.voicePoolWorkbench.scorePoint', { score })}>
                     <IconButton size="small" onClick={() => void rateVoice(voice, score)}>
                       <StarIcon fontSize="small" color={score <= Math.round(voice.average_score) ? 'warning' : 'disabled'} />
                     </IconButton>
@@ -284,13 +288,13 @@ const VoicePoolWorkbench = ({
             </ListItem>
           ))}
           {!loading && publicVoices.length === 0 && (
-            <ListItem><Typography variant="body2" color="text.secondary">暂无已审核公共音色。</Typography></ListItem>
+            <ListItem><Typography variant="body2" color="text.secondary">{t('audiobook.voicePoolWorkbench.noPublicVoices')}</Typography></ListItem>
           )}
         </List>
       )}
 
       <Dialog open={Boolean(costConfirmation)} onClose={() => setCostConfirmation(null)} maxWidth="sm" fullWidth>
-        <DialogTitle>确认生成标准参考试听</DialogTitle>
+        <DialogTitle>{t('audiobook.voicePoolWorkbench.confirmMaterializeTitle')}</DialogTitle>
         <DialogContent dividers>
           <Typography variant="body2">{costConfirmation?.cost_quote?.billing_notice}</Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mt: 1.5 }}>
@@ -298,34 +302,34 @@ const VoicePoolWorkbench = ({
           </Typography>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setCostConfirmation(null)}>取消</Button>
+          <Button onClick={() => setCostConfirmation(null)}>{t('action.cancel')}</Button>
           <Button
             variant="contained"
             disabled={!pendingAsset || busyAssetId === pendingAsset.asset_id}
             onClick={() => pendingAsset && void materialize(pendingAsset, true)}
           >
-            确认生成
+            {t('audiobook.voicePoolWorkbench.confirmGenerate')}
           </Button>
         </DialogActions>
       </Dialog>
 
       <Dialog open={Boolean(publishAsset)} onClose={() => setPublishAsset(null)} maxWidth="sm" fullWidth>
-        <DialogTitle>发布到公共音色池</DialogTitle>
+        <DialogTitle>{t('audiobook.voicePoolWorkbench.publishDialogTitle')}</DialogTitle>
         <DialogContent dividers>
           <Stack spacing={2}>
-            <TextField label="公开名称" value={publishName} onChange={(event) => setPublishName(event.target.value)} required />
-            <TextField label="描述" value={publishDescription} onChange={(event) => setPublishDescription(event.target.value)} multiline minRows={2} />
+            <TextField label={t('audiobook.voicePoolWorkbench.publishNameLabel')} value={publishName} onChange={(event) => setPublishName(event.target.value)} required />
+            <TextField label={t('audiobook.voicePoolWorkbench.descriptionLabel')} value={publishDescription} onChange={(event) => setPublishDescription(event.target.value)} multiline minRows={2} />
             <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5}>
-              <FormControl fullWidth><InputLabel>声音性别感</InputLabel><Select label="声音性别感" value={gender} onChange={(event) => setGender(event.target.value as typeof gender)}>{optionList(taxonomy, 'gender_presentation').map((value) => <MenuItem key={value} value={value}>{optionLabel(value)}</MenuItem>)}</Select></FormControl>
-              <FormControl fullWidth><InputLabel>年龄感</InputLabel><Select label="年龄感" value={age} onChange={(event) => setAge(event.target.value as typeof age)}>{optionList(taxonomy, 'age_impression').map((value) => <MenuItem key={value} value={value}>{optionLabel(value)}</MenuItem>)}</Select></FormControl>
+              <FormControl fullWidth><InputLabel>{t('audiobook.voicePoolWorkbench.genderPresentationLabel')}</InputLabel><Select label={t('audiobook.voicePoolWorkbench.genderPresentationLabel')} value={gender} onChange={(event) => setGender(event.target.value as typeof gender)}>{optionList(taxonomy, 'gender_presentation').map((value) => <MenuItem key={value} value={value}>{optionLabel(value, t)}</MenuItem>)}</Select></FormControl>
+              <FormControl fullWidth><InputLabel>{t('audiobook.voicePoolWorkbench.ageImpressionLabel')}</InputLabel><Select label={t('audiobook.voicePoolWorkbench.ageImpressionLabel')} value={age} onChange={(event) => setAge(event.target.value as typeof age)}>{optionList(taxonomy, 'age_impression').map((value) => <MenuItem key={value} value={value}>{optionLabel(value, t)}</MenuItem>)}</Select></FormControl>
             </Stack>
-            <FormControl fullWidth><InputLabel>主要风格</InputLabel><Select label="主要风格" value={style} onChange={(event) => setStyle(event.target.value)}>{optionList(taxonomy, 'primary_style').map((value) => <MenuItem key={value} value={value}>{optionLabel(value)}</MenuItem>)}</Select></FormControl>
-            <FormControl fullWidth><InputLabel>音色质感</InputLabel><Select multiple label="音色质感" value={timbreTags} onChange={(event) => setTimbreTags(event.target.value as string[])}>{optionList(taxonomy, 'timbre_tags').map((value) => <MenuItem key={value} value={value}>{optionLabel(value)}</MenuItem>)}</Select></FormControl>
-            <FormControl fullWidth><InputLabel>适用场景</InputLabel><Select multiple label="适用场景" value={scenarioTags} onChange={(event) => setScenarioTags(event.target.value as string[])}>{optionList(taxonomy, 'scenario_tags').map((value) => <MenuItem key={value} value={value}>{optionLabel(value)}</MenuItem>)}</Select></FormControl>
+            <FormControl fullWidth><InputLabel>{t('audiobook.voicePoolWorkbench.primaryStyleLabel')}</InputLabel><Select label={t('audiobook.voicePoolWorkbench.primaryStyleLabel')} value={style} onChange={(event) => setStyle(event.target.value)}>{optionList(taxonomy, 'primary_style').map((value) => <MenuItem key={value} value={value}>{optionLabel(value, t)}</MenuItem>)}</Select></FormControl>
+            <FormControl fullWidth><InputLabel>{t('audiobook.voicePoolWorkbench.timbreTagsLabel')}</InputLabel><Select multiple label={t('audiobook.voicePoolWorkbench.timbreTagsLabel')} value={timbreTags} onChange={(event) => setTimbreTags(event.target.value as string[])}>{optionList(taxonomy, 'timbre_tags').map((value) => <MenuItem key={value} value={value}>{optionLabel(value, t)}</MenuItem>)}</Select></FormControl>
+            <FormControl fullWidth><InputLabel>{t('audiobook.voicePoolWorkbench.scenarioTagsLabel')}</InputLabel><Select multiple label={t('audiobook.voicePoolWorkbench.scenarioTagsLabel')} value={scenarioTags} onChange={(event) => setScenarioTags(event.target.value as string[])}>{optionList(taxonomy, 'scenario_tags').map((value) => <MenuItem key={value} value={value}>{optionLabel(value, t)}</MenuItem>)}</Select></FormControl>
             <FormControl fullWidth>
-              <InputLabel>权利依据</InputLabel>
+              <InputLabel>{t('audiobook.voicePoolWorkbench.rightsBasisLabel')}</InputLabel>
               <Select
-                label="权利依据"
+                label={t('audiobook.voicePoolWorkbench.rightsBasisLabel')}
                 value={rightsBasis}
                 disabled={publishAsset?.authorization_basis === 'synthetic_design'}
                 onChange={(event) => setRightsBasis(event.target.value as VoicePoolPublicationPayload['rights_basis'])}
@@ -333,15 +337,15 @@ const VoicePoolWorkbench = ({
                 {(publishAsset?.authorization_basis === 'synthetic_design'
                   ? ['synthetic_design']
                   : ['self_voice', 'licensed_voice', 'synthetic_source']
-                ).map((value) => <MenuItem key={value} value={value}>{optionLabel(value)}</MenuItem>)}
+                ).map((value) => <MenuItem key={value} value={value}>{optionLabel(value, t)}</MenuItem>)}
               </Select>
             </FormControl>
-            <Alert severity="warning">提交即确认你有权公开该衍生音色；原始复刻录音不会进入公共池。</Alert>
+            <Alert severity="warning">{t('audiobook.voicePoolWorkbench.publishConsentWarning')}</Alert>
           </Stack>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setPublishAsset(null)}>取消</Button>
-          <Button variant="contained" onClick={() => void submitPublication()} disabled={Boolean(publishAsset && busyAssetId === publishAsset.asset_id)}>提交审核</Button>
+          <Button onClick={() => setPublishAsset(null)}>{t('action.cancel')}</Button>
+          <Button variant="contained" onClick={() => void submitPublication()} disabled={Boolean(publishAsset && busyAssetId === publishAsset.asset_id)}>{t('audiobook.voicePoolWorkbench.submitReview')}</Button>
         </DialogActions>
       </Dialog>
     </Box>

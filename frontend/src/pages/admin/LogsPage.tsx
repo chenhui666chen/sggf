@@ -25,6 +25,9 @@ import {
 } from '@mui/material'
 import HistoryIcon from '@mui/icons-material/History'
 import LoginIcon from '@mui/icons-material/Login'
+import { useFormats } from '@/i18n'
+import { useTranslation } from 'react-i18next'
+import type { TFunction } from 'i18next'
 import { apiClient } from '@/services/api'
 
 interface OperationLog {
@@ -60,31 +63,38 @@ interface LogListResponse {
   items: OperationLog[] | LoginLog[]
 }
 
-const operationTypes = [
-  { value: '', label: '全部操作' },
-  { value: 'create', label: '创建' },
-  { value: 'update', label: '更新' },
-  { value: 'delete', label: '删除' },
-  { value: 'login', label: '登录' },
-  { value: 'logout', label: '登出' },
+const buildOperationTypes = (t: TFunction) => [
+  { value: '', label: t('admin.logs.operations.all') },
+  { value: 'create', label: t('admin.logs.operations.create') },
+  { value: 'update', label: t('admin.logs.operations.update') },
+  { value: 'delete', label: t('admin.logs.operations.delete') },
+  { value: 'login', label: t('admin.logs.operations.login') },
+  { value: 'logout', label: t('admin.logs.operations.logout') },
 ]
 
-const resourceTypes = [
-  { value: '', label: '全部资源' },
-  { value: 'user', label: '用户' },
-  { value: 'role', label: '角色' },
-  { value: 'project', label: '项目' },
-  { value: 'chapter', label: '章节' },
-  { value: 'audiobook', label: '有声书' },
+const buildResourceTypes = (t: TFunction) => [
+  { value: '', label: t('admin.logs.resources.all') },
+  { value: 'user', label: t('admin.logs.resources.user') },
+  { value: 'role', label: t('admin.logs.resources.role') },
+  { value: 'project', label: t('admin.logs.resources.project') },
+  { value: 'chapter', label: t('admin.logs.resources.chapter') },
+  { value: 'audiobook', label: t('admin.logs.resources.audiobook') },
 ]
 
-const loginStatuses = [
-  { value: '', label: '全部状态' },
-  { value: 'success', label: '成功' },
-  { value: 'failed', label: '失败' },
+const buildLoginStatuses = (t: TFunction) => [
+  { value: '', label: t('admin.logs.statuses.all') },
+  { value: 'success', label: t('admin.logs.statuses.success') },
+  { value: 'failed', label: t('admin.logs.statuses.failed') },
 ]
 
 export default function LogsPage() {
+  // 审计日志与登录日志都要保留到秒：同一分钟内的连续操作、暴力登录尝试，
+  // 少了秒就没法排序也没法定位。
+  const { t } = useTranslation()
+  const { formatDateTimeWithSeconds } = useFormats()
+  const operationTypeOptions = buildOperationTypes(t)
+  const resourceTypeOptions = buildResourceTypes(t)
+  const loginStatusOptions = buildLoginStatuses(t)
   const [tabValue, setTabValue] = useState(0)
   
   const [operationLogs, setOperationLogs] = useState<OperationLog[]>([])
@@ -134,7 +144,7 @@ export default function LogsPage() {
       setOperationLogs(data.items as OperationLog[])
       setTotal(data.total)
     } catch (err: any) {
-      setError(err.response?.data?.detail || '获取操作日志失败')
+      setError(err.response?.data?.detail || t('admin.logs.messages.fetchOperationFailed'))
     } finally {
       setLoading(false)
     }
@@ -156,7 +166,7 @@ export default function LogsPage() {
       setLoginLogs(data.items as LoginLog[])
       setTotal(data.total)
     } catch (err: any) {
-      setError(err.response?.data?.detail || '获取登录日志失败')
+      setError(err.response?.data?.detail || t('admin.logs.messages.fetchLoginFailed'))
     } finally {
       setLoading(false)
     }
@@ -194,7 +204,7 @@ export default function LogsPage() {
   return (
     <Box>
       <Typography variant="h4" gutterBottom sx={{ mb: 3 }}>
-        操作日志
+        {t('admin.logs.title')}
       </Typography>
 
       {error && (
@@ -205,8 +215,8 @@ export default function LogsPage() {
 
       <Card>
         <Tabs value={tabValue} onChange={handleTabChange} sx={{ borderBottom: 1, borderColor: 'divider' }}>
-          <Tab icon={<HistoryIcon />} label="操作日志" iconPosition="start" />
-          <Tab icon={<LoginIcon />} label="登录日志" iconPosition="start" />
+          <Tab icon={<HistoryIcon />} label={t('admin.logs.tabs.operation')} iconPosition="start" />
+          <Tab icon={<LoginIcon />} label={t('admin.logs.tabs.login')} iconPosition="start" />
         </Tabs>
 
         <CardContent>
@@ -214,31 +224,31 @@ export default function LogsPage() {
             <>
               <Box sx={{ display: 'flex', gap: 2, mb: 3, flexWrap: 'wrap' }}>
                 <FormControl size="small" sx={{ width: 150 }}>
-                  <InputLabel>操作类型</InputLabel>
+                  <InputLabel>{t('admin.logs.filters.operationType')}</InputLabel>
                   <Select
                     value={opFilters.operation_type}
-                    label="操作类型"
+                    label={t('admin.logs.filters.operationType')}
                     onChange={(e) => setOpFilters({ ...opFilters, operation_type: e.target.value })}
                   >
-                    {operationTypes.map((type) => (
+                    {operationTypeOptions.map((type) => (
                       <MenuItem key={type.value} value={type.value}>{type.label}</MenuItem>
                     ))}
                   </Select>
                 </FormControl>
                 <FormControl size="small" sx={{ width: 150 }}>
-                  <InputLabel>资源类型</InputLabel>
+                  <InputLabel>{t('admin.logs.filters.resourceType')}</InputLabel>
                   <Select
                     value={opFilters.resource_type}
-                    label="资源类型"
+                    label={t('admin.logs.filters.resourceType')}
                     onChange={(e) => setOpFilters({ ...opFilters, resource_type: e.target.value })}
                   >
-                    {resourceTypes.map((type) => (
+                    {resourceTypeOptions.map((type) => (
                       <MenuItem key={type.value} value={type.value}>{type.label}</MenuItem>
                     ))}
                   </Select>
                 </FormControl>
                 <TextField
-                  label="开始日期"
+                  label={t('admin.logs.filters.startDate')}
                   type="date"
                   size="small"
                   value={opFilters.start_date}
@@ -246,7 +256,7 @@ export default function LogsPage() {
                   InputLabelProps={{ shrink: true }}
                 />
                 <TextField
-                  label="结束日期"
+                  label={t('admin.logs.filters.endDate')}
                   type="date"
                   size="small"
                   value={opFilters.end_date}
@@ -260,13 +270,13 @@ export default function LogsPage() {
                   <TableHead>
                     <TableRow>
                       <TableCell>ID</TableCell>
-                      <TableCell>操作用户</TableCell>
-                      <TableCell>操作类型</TableCell>
-                      <TableCell>资源类型</TableCell>
-                      <TableCell>资源ID</TableCell>
-                      <TableCell>详情</TableCell>
-                      <TableCell>IP地址</TableCell>
-                      <TableCell>时间</TableCell>
+                      <TableCell>{t('admin.logs.columns.operator')}</TableCell>
+                      <TableCell>{t('admin.logs.columns.operationType')}</TableCell>
+                      <TableCell>{t('admin.logs.columns.resourceType')}</TableCell>
+                      <TableCell>{t('admin.logs.columns.resourceId')}</TableCell>
+                      <TableCell>{t('admin.logs.columns.detail')}</TableCell>
+                      <TableCell>{t('admin.logs.columns.ipAddress')}</TableCell>
+                      <TableCell>{t('admin.logs.columns.time')}</TableCell>
                     </TableRow>
                   </TableHead>
                   <TableBody>
@@ -290,7 +300,7 @@ export default function LogsPage() {
                         </TableCell>
                         <TableCell>{log.ip_address || '-'}</TableCell>
                         <TableCell>
-                          {new Date(log.created_at).toLocaleString('zh-CN')}
+                          {formatDateTimeWithSeconds(log.created_at)}
                         </TableCell>
                       </TableRow>
                     ))}
@@ -304,19 +314,19 @@ export default function LogsPage() {
             <>
               <Box sx={{ display: 'flex', gap: 2, mb: 3, flexWrap: 'wrap' }}>
                 <FormControl size="small" sx={{ width: 150 }}>
-                  <InputLabel>登录状态</InputLabel>
+                  <InputLabel>{t('admin.logs.filters.loginStatus')}</InputLabel>
                   <Select
                     value={loginFilters.login_status}
-                    label="登录状态"
+                    label={t('admin.logs.filters.loginStatus')}
                     onChange={(e) => setLoginFilters({ ...loginFilters, login_status: e.target.value })}
                   >
-                    {loginStatuses.map((status) => (
+                    {loginStatusOptions.map((status) => (
                       <MenuItem key={status.value} value={status.value}>{status.label}</MenuItem>
                     ))}
                   </Select>
                 </FormControl>
                 <TextField
-                  label="开始日期"
+                  label={t('admin.logs.filters.startDate')}
                   type="date"
                   size="small"
                   value={loginFilters.start_date}
@@ -324,7 +334,7 @@ export default function LogsPage() {
                   InputLabelProps={{ shrink: true }}
                 />
                 <TextField
-                  label="结束日期"
+                  label={t('admin.logs.filters.endDate')}
                   type="date"
                   size="small"
                   value={loginFilters.end_date}
@@ -338,12 +348,12 @@ export default function LogsPage() {
                   <TableHead>
                     <TableRow>
                       <TableCell>ID</TableCell>
-                      <TableCell>用户</TableCell>
-                      <TableCell>登录方式</TableCell>
-                      <TableCell>状态</TableCell>
-                      <TableCell>IP地址</TableCell>
-                      <TableCell>失败原因</TableCell>
-                      <TableCell>时间</TableCell>
+                      <TableCell>{t('admin.logs.columns.user')}</TableCell>
+                      <TableCell>{t('admin.logs.columns.loginType')}</TableCell>
+                      <TableCell>{t('admin.logs.columns.status')}</TableCell>
+                      <TableCell>{t('admin.logs.columns.ipAddress')}</TableCell>
+                      <TableCell>{t('admin.logs.columns.failureReason')}</TableCell>
+                      <TableCell>{t('admin.logs.columns.time')}</TableCell>
                     </TableRow>
                   </TableHead>
                   <TableBody>
@@ -354,7 +364,7 @@ export default function LogsPage() {
                         <TableCell>{log.login_type}</TableCell>
                         <TableCell>
                           <Chip
-                            label={log.login_status === 'success' ? '成功' : '失败'}
+                            label={log.login_status === 'success' ? t('admin.logs.statuses.success') : t('admin.logs.statuses.failed')}
                             size="small"
                             color={getLoginStatusColor(log.login_status)}
                           />
@@ -366,7 +376,7 @@ export default function LogsPage() {
                           </Typography>
                         </TableCell>
                         <TableCell>
-                          {new Date(log.created_at).toLocaleString('zh-CN')}
+                          {formatDateTimeWithSeconds(log.created_at)}
                         </TableCell>
                       </TableRow>
                     ))}
@@ -386,8 +396,8 @@ export default function LogsPage() {
               setRowsPerPage(parseInt(e.target.value, 10))
               setPage(0)
             }}
-            labelRowsPerPage="每页行数："
-            labelDisplayedRows={({ from, to, count }) => `${from}-${to} 共 ${count} 条`}
+            labelRowsPerPage={t('admin.logs.pagination.rowsPerPage')}
+            labelDisplayedRows={({ from, to, count }) => t('admin.logs.pagination.displayedRows', { from, to, count })}
           />
         </CardContent>
       </Card>

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef } from 'react'
+import { useTranslation } from 'react-i18next'
 import { apiClient, extractApiErrorMessage, extractTaskPointsPrecheckErrorDetail, describeTaskPointsPrecheckErrorDetail, type TaskPointsPrecheckErrorDetail } from '@/services/api'
 import type { Chapter, DreamweaverRunPreflight as DreamweaverRunPreflightData } from '@/types/dreamweaver'
 import {
@@ -83,6 +84,7 @@ export function useRunPageProjectActions(deps: UseRunPageProjectActionsDeps) {
     resetDreamweaverEvents,
     handleViewHistoryRun,
   } = deps
+  const { t } = useTranslation()
 
   const autoOpenedConfigDialogRef = useRef(false)
   const handledSourceRunKeyRef = useRef<string | null>(null)
@@ -99,13 +101,13 @@ export function useRunPageProjectActions(deps: UseRunPageProjectActionsDeps) {
       setChapters(data)
       setSelectedChapterIds(data.map((c: { id: number }) => c.id))
     } catch (e: unknown) {
-      setError(getThrownErrorMessage(e) || '加载章节失败')
+      setError(getThrownErrorMessage(e) || t('dreamweaverRun.loadChaptersFailed'))
       setChapters([])
       setSelectedChapterIds([])
     } finally {
       setLoadingChapters(false)
     }
-  }, [clearRunAssetPreviews, refreshLockedGenerationConfig, resetDreamweaverEvents])
+  }, [clearRunAssetPreviews, refreshLockedGenerationConfig, resetDreamweaverEvents, t])
 
   useEffect(() => {
     if (!lockedProjectId) return
@@ -153,7 +155,7 @@ export function useRunPageProjectActions(deps: UseRunPageProjectActionsDeps) {
 
   const handleRun = async (): Promise<boolean> => {
     if (!selectedProjectId || selectedChapterIds.length === 0) {
-      setError('请选择项目与至少一个章节后再开始体验')
+      setError(t('dreamweaverRun.projectOrChapterRequired'))
       return false
     }
     resetForNewRun({ resetPreview: true, resetApprovalState: true, resetRunSpecificState: true })
@@ -168,7 +170,7 @@ export function useRunPageProjectActions(deps: UseRunPageProjectActionsDeps) {
       })
       const res = await apiClient.runDreamweaverAsync(selectedProjectId, selectedChapterIds, config)
       const data = toDreamweaverRunAsyncResponse(res.data)
-      if (!data) { setError('启动响应格式无效'); return false }
+      if (!data) { setError(t('dreamweaverRun.startResponseInvalid')); return false }
       setTaskId(data.task_id)
       setTaskRunId(data.run_id)
       setTaskStatus(data.status || 'queued')
@@ -181,7 +183,7 @@ export function useRunPageProjectActions(deps: UseRunPageProjectActionsDeps) {
       setError(
         precheckDetail
           ? describeTaskPointsPrecheckErrorDetail(precheckDetail)
-          : ((await extractApiErrorMessage(e, '任务提交失败')) || '任务提交失败')
+          : ((await extractApiErrorMessage(e, t('dreamweaverRun.submitTaskFailed'))) || t('dreamweaverRun.submitTaskFailed'))
       )
       setRunning(false)
       return false

@@ -29,6 +29,7 @@ import {
   FormControl,
   InputLabel,
   Tooltip,
+  alpha,
 } from '@mui/material'
 import EditIcon from '@mui/icons-material/Edit'
 import SaveIcon from '@mui/icons-material/Save'
@@ -40,6 +41,7 @@ import FolderIcon from '@mui/icons-material/Folder'
 import ArticleIcon from '@mui/icons-material/Article'
 import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh'
 import SyncIcon from '@mui/icons-material/Sync'
+import { useTranslation } from 'react-i18next'
 import { logger } from '@/utils/logger'
 import {
   estimateChapterCount,
@@ -59,6 +61,7 @@ import type {
   SettingSmartExtractRelatedContent,
   SettingTreeActionItem,
 } from '@/types/settings'
+import { useFormats } from '@/i18n'
 
 const loadMarkdownRenderer = () => import('@/components/MarkdownRenderer')
 const loadVditorEditor = () => import('@/components/VditorEditor')
@@ -179,6 +182,8 @@ const CATEGORY_NAME_MAP: Record<string, string> = {
 // ==================== 主组件 ====================
 
 export default function KnowledgeBasePage() {
+  const { t } = useTranslation()
+  const { formatDateTime } = useFormats()
   const { projectId } = useParams<{ projectId: string }>()
   const navigate = useNavigate()
 
@@ -502,13 +507,13 @@ export default function KnowledgeBasePage() {
         }
 
         setIsEditing(false)
-        showSnackbar('保存成功', 'success')
+        showSnackbar(t('kb.snack.saveSuccess'), 'success')
       } else {
-        showSnackbar(String(response.data?.detail || response.data?.error || '保存失败'), 'error')
+        showSnackbar(String(response.data?.detail || response.data?.error || t('kb.snack.saveFailedShort')), 'error')
       }
     } catch (err) {
       logger.error('保存失败:', err)
-      showSnackbar('保存失败，请重试', 'error')
+      showSnackbar(t('kb.snack.saveFailed'), 'error')
     } finally {
       setSaving(false)
     }
@@ -516,9 +521,9 @@ export default function KnowledgeBasePage() {
 
   const getTabTitle = (): string => {
     switch (mainTabValue) {
-      case 0: return '世界观设定'
-      case 1: return '人物设定'
-      case 2: return '大纲设定'
+      case 0: return t('kb.tabs.world')
+      case 1: return t('kb.tabs.characters')
+      case 2: return t('kb.tabs.outline')
       default: return ''
     }
   }
@@ -540,7 +545,7 @@ export default function KnowledgeBasePage() {
       return nextCollections
     } catch (err) {
       logger.error('加载设定集合失败:', err)
-      showSnackbar('加载设定集合失败', 'error')
+      showSnackbar(t('kb.snack.loadCollectionsFailed'), 'error')
       return []
     } finally {
       setLoadingCollections(false)
@@ -560,7 +565,7 @@ export default function KnowledgeBasePage() {
       return items
     } catch (err) {
       logger.error('加载设定项失败:', err)
-      showSnackbar('加载设定项失败', 'error')
+      showSnackbar(t('kb.snack.loadItemsFailed'), 'error')
       return []
     }
   }
@@ -577,7 +582,7 @@ export default function KnowledgeBasePage() {
       }
 
       if (!targetCollection) {
-        showSnackbar('未找到所属设定集合', 'error')
+        showSnackbar(t('kb.snack.noCollectionFound'), 'error')
         return null
       }
 
@@ -590,14 +595,14 @@ export default function KnowledgeBasePage() {
       return fullItem
     } catch (err) {
       logger.error('加载设定详情失败:', err)
-      showSnackbar('加载设定详情失败', 'error')
+      showSnackbar(t('kb.snack.loadItemDetailFailed'), 'error')
       return null
     }
   }
 
   const handleCreateCollection = async () => {
     if (!projectId || !newCollectionName || !newCollectionCategory) {
-      showSnackbar('请填写必填项', 'error')
+      showSnackbar(t('kb.snack.requiredFields'), 'error')
       return
     }
 
@@ -613,10 +618,10 @@ export default function KnowledgeBasePage() {
       setSelectedCollection(response.data)
       setCreateCollectionDialog(false)
       resetCollectionForm()
-      showSnackbar('创建成功', 'success')
+      showSnackbar(t('kb.snack.createSuccess'), 'success')
     } catch (err) {
       logger.error('创建集合失败:', err)
-      showSnackbar('创建失败', 'error')
+      showSnackbar(t('kb.snack.createFailed'), 'error')
     }
   }
 
@@ -627,7 +632,7 @@ export default function KnowledgeBasePage() {
       setSettingTemplates(response.data || [])
     } catch (error) {
       logger.error('获取设定模板列表失败:', error)
-      showSnackbar('获取设定模板列表失败', 'error')
+      showSnackbar(t('kb.snack.loadTemplatesFailed'), 'error')
     } finally {
       setSettingTemplatesLoading(false)
     }
@@ -635,7 +640,7 @@ export default function KnowledgeBasePage() {
 
   const handleOpenTemplateDialog = () => {
     if (!projectId) {
-      showSnackbar('请先选择一个项目', 'error')
+      showSnackbar(t('kb.snack.selectProjectFirst'), 'error')
       return
     }
 
@@ -647,7 +652,7 @@ export default function KnowledgeBasePage() {
 
   const handleApplyTemplate = async () => {
     if (!projectId || !selectedTemplateKey) {
-      showSnackbar('请选择模板', 'error')
+      showSnackbar(t('kb.snack.selectTemplate'), 'error')
       return
     }
 
@@ -663,17 +668,17 @@ export default function KnowledgeBasePage() {
 
       await loadSettingCollections()
       setTemplateDialog(false)
-      showSnackbar('模板应用成功', 'success')
+      showSnackbar(t('kb.snack.templateApplied'), 'success')
     } catch (err) {
       logger.error('应用模板失败:', err)
-      showSnackbar('应用模板失败', 'error')
+      showSnackbar(t('kb.snack.templateApplyFailed'), 'error')
     } finally {
       setApplyingTemplate(false)
     }
   }
 
   const handleDeleteCollection = async (collectionId: number) => {
-    if (!confirm('确定要删除这个设定集合吗？')) return
+    if (!confirm(t('kb.snack.deleteCollectionConfirm'))) return
 
     try {
       await apiClient.deleteSettingCollection(collectionId)
@@ -682,16 +687,16 @@ export default function KnowledgeBasePage() {
       if (selectedCollection?.id === collectionId) {
         setSelectedCollection(newCollections[0] || null)
       }
-      showSnackbar('删除成功', 'success')
+      showSnackbar(t('kb.snack.deleteSuccess'), 'success')
     } catch (err) {
       logger.error('删除集合失败:', err)
-      showSnackbar('删除失败', 'error')
+      showSnackbar(t('kb.snack.deleteFailed'), 'error')
     }
   }
 
   const handleCreateItem = async () => {
     if (!selectedCollection || !newItemName) {
-      showSnackbar('请填写设定项名称', 'error')
+      showSnackbar(t('kb.snack.fillItemName'), 'error')
       return
     }
 
@@ -709,10 +714,10 @@ export default function KnowledgeBasePage() {
       await loadSettingItems(selectedCollection.id)
       setCreateItemDialog(false)
       resetItemForm()
-      showSnackbar('创建成功', 'success')
+      showSnackbar(t('kb.snack.createSuccess'), 'success')
     } catch (err) {
       logger.error('创建设定项失败:', err)
-      showSnackbar('创建失败', 'error')
+      showSnackbar(t('kb.snack.createFailed'), 'error')
     }
   }
 
@@ -744,15 +749,15 @@ export default function KnowledgeBasePage() {
       await loadSettingItems(selectedItem.collection_id)
       setEditItemDialog(false)
       resetItemForm()
-      showSnackbar('保存成功', 'success')
+      showSnackbar(t('kb.snack.saveSuccess'), 'success')
     } catch (err) {
       logger.error('保存设定项失败:', err)
-      showSnackbar('保存失败', 'error')
+      showSnackbar(t('kb.snack.saveFailedShort'), 'error')
     }
   }
 
   const handleDeleteItem = async (itemId: number) => {
-    if (!confirm('确定要删除这个设定项吗？')) return
+    if (!confirm(t('kb.snack.deleteItemConfirm'))) return
 
     try {
       await apiClient.deleteSettingItem(itemId)
@@ -760,10 +765,10 @@ export default function KnowledgeBasePage() {
       if (selectedItem?.id === itemId) {
         setSelectedItem(null)
       }
-      showSnackbar('删除成功', 'success')
+      showSnackbar(t('kb.snack.deleteSuccess'), 'success')
     } catch (err) {
       logger.error('删除设定项失败:', err)
-      showSnackbar('删除失败', 'error')
+      showSnackbar(t('kb.snack.deleteFailed'), 'error')
     }
   }
 
@@ -772,7 +777,7 @@ export default function KnowledgeBasePage() {
 
     try {
       await apiClient.createSettingItem(selectedCollection.id, {
-        name: `${item.name} (副本)`,
+        name: `${item.name} ${t('kb.snack.copySuffix')}`,
         code: item.code,
         level: item.level,
         content: item.content,
@@ -782,10 +787,10 @@ export default function KnowledgeBasePage() {
       })
 
       await loadSettingItems(selectedCollection.id)
-      showSnackbar('复制成功', 'success')
+      showSnackbar(t('kb.snack.duplicateSuccess'), 'success')
     } catch (err) {
       logger.error('复制设定项失败:', err)
-      showSnackbar('复制失败', 'error')
+      showSnackbar(t('kb.snack.duplicateFailed'), 'error')
     }
   }
 
@@ -821,12 +826,12 @@ export default function KnowledgeBasePage() {
 
     if (isLeaf) {
       if (typeof item.id !== 'number') {
-        showSnackbar('删除失败：当前节点缺少有效 ID', 'error')
+        showSnackbar(t('kb.snack.deleteNoId'), 'error')
         return
       }
 
       // 鍒犻櫎鍗曚釜鍙跺瓙鑺傜偣
-      if (!confirm(`确定要删除「${itemName}」吗？`)) return
+      if (!confirm(t('kb.snack.deleteNodeConfirm', { name: itemName }))) return
 
       try {
         await apiClient.deleteSettingItem(item.id)
@@ -836,10 +841,10 @@ export default function KnowledgeBasePage() {
           setSelectedItem(null)
         }
         setSelectedCategoryItem(null)
-        showSnackbar('删除成功', 'success')
+        showSnackbar(t('kb.snack.deleteSuccess'), 'success')
       } catch (err) {
         logger.error('删除设定项失败:', err)
-        showSnackbar('删除失败', 'error')
+        showSnackbar(t('kb.snack.deleteFailed'), 'error')
       }
     } else {
       const itemsToDelete = settingItems.filter(it => 
@@ -847,11 +852,11 @@ export default function KnowledgeBasePage() {
       )
       
       if (itemsToDelete.length === 0) {
-        showSnackbar('未找到需要删除的设定项', 'error')
+        showSnackbar(t('kb.snack.noItemsToDelete'), 'error')
         return
       }
 
-      if (!confirm(`确定要删除「${itemName}」及其下的 ${itemsToDelete.length} 个项吗？\n\n此操作不可撤销！`)) return
+      if (!confirm(t('kb.snack.deleteNodeWithChildrenConfirm', { name: itemName, count: itemsToDelete.length }))) return
 
       try {
         if (typeof item.id === 'number') {
@@ -866,10 +871,10 @@ export default function KnowledgeBasePage() {
         setSelectedItem(null)
         setSelectedCategoryPath(null)
         setSelectedCategoryItem(null)
-        showSnackbar(`已删除 ${itemsToDelete.length} 个项`, 'success')
+        showSnackbar(t('kb.snack.deletedCount', { count: itemsToDelete.length }), 'success')
       } catch (err) {
         logger.error('批量删除失败:', err)
-        showSnackbar('删除失败', 'error')
+        showSnackbar(t('kb.snack.deleteFailed'), 'error')
       }
     }
   }
@@ -877,7 +882,7 @@ export default function KnowledgeBasePage() {
   // 创建子分类或设定项
   const handleCreateChildItem = async () => {
     if (!selectedCollection || !newItemName) {
-      showSnackbar('请填写设定项名称', 'error')
+      showSnackbar(t('kb.snack.fillItemName'), 'error')
       return
     }
 
@@ -900,17 +905,17 @@ export default function KnowledgeBasePage() {
       setTreeRefreshTrigger(prev => prev + 1)
       setCreateChildItemDialog(false)
       resetItemForm()
-      showSnackbar(`${newItemIsLeaf ? '设定项' : '分类'}创建成功`, 'success')
+      showSnackbar(t('kb.snack.childCreated', { type: t(newItemIsLeaf ? 'kb.itemTypeItem' : 'kb.categoryBadge') }), 'success')
     } catch (err) {
       logger.error('创建设定项失败:', err)
-      showSnackbar('创建失败', 'error')
+      showSnackbar(t('kb.snack.createFailed'), 'error')
     }
   }
 
   // 移动节点到新的父节点下
   const handleMoveItem = async () => {
     if (!selectedItem || !selectedCollection) {
-      showSnackbar('请选择需要移动的设定项', 'error')
+      showSnackbar(t('kb.snack.selectItemToMove'), 'error')
       return
     }
 
@@ -921,10 +926,10 @@ export default function KnowledgeBasePage() {
       setTreeRefreshTrigger(prev => prev + 1)
       setMoveItemDialog(false)
       setMoveTargetPath('')
-      showSnackbar('移动成功', 'success')
+      showSnackbar(t('kb.snack.moveSuccess'), 'success')
     } catch (err) {
       logger.error('移动失败:', err)
-      showSnackbar('移动失败', 'error')
+      showSnackbar(t('kb.snack.moveFailed'), 'error')
     }
   }
 
@@ -933,7 +938,7 @@ export default function KnowledgeBasePage() {
     if (!selectedItem || !selectedCollection) return []
     
     const targets: { path: string; label: string; depth: number }[] = [
-      { path: '', label: `${selectedCollection.name}（根目录）`, depth: 0 }
+      { path: '', label: t('kb.snack.rootSuffix', { name: selectedCollection.name }), depth: 0 }
     ]
     
     // 添加所有分类节点
@@ -963,10 +968,10 @@ export default function KnowledgeBasePage() {
     try {
       const response = await apiClient.getSettingItemSmartExtract(selectedItem.id)
       setSmartExtractData(response.data)
-      showSnackbar('智能提取完成', 'success')
+      showSnackbar(t('kb.snack.extractDone'), 'success')
     } catch (error) {
       logger.error('智能提取失败:', error)
-      showSnackbar('提取失败', 'error')
+      showSnackbar(t('kb.snack.extractFailed'), 'error')
     } finally {
       setSmartExtractLoading(false)
     }
@@ -977,7 +982,7 @@ export default function KnowledgeBasePage() {
     const currentTags = newItemTags ? newItemTags.split(',').map(t => t.trim()) : []
     const mergedTags = [...new Set([...currentTags, ...tags])]
     setNewItemTags(mergedTags.join(', '))
-    showSnackbar(`已添加 ${tags.length} 个标签`, 'success')
+    showSnackbar(t('kb.snack.tagsAdded', { count: tags.length }), 'success')
   }
 
   // 应用提取的内容
@@ -987,7 +992,7 @@ export default function KnowledgeBasePage() {
     } else {
       setNewItemContent(excerpt)
     }
-    showSnackbar('内容已追加', 'success')
+    showSnackbar(t('kb.snack.contentAppended'), 'success')
   }
 
   // ==================== 澶х翰鎵╁睍鐩稿叧鍑芥暟 ====================
@@ -1024,11 +1029,11 @@ export default function KnowledgeBasePage() {
 
       setCollections([...collections, response.data])
       setSelectedCollection(response.data)
-      showSnackbar(`已添加「${collectionName}」`, 'success')
+      showSnackbar(t('kb.snack.quickAddDone', { name: collectionName }), 'success')
       setSelectedCategoryToAdd('')
     } catch (err) {
       logger.error('快速添加体系失败:', err)
-      showSnackbar('添加体系失败', 'error')
+      showSnackbar(t('kb.snack.quickAddFailed'), 'error')
     }
   }
 
@@ -1043,7 +1048,7 @@ export default function KnowledgeBasePage() {
       loadWorkflowData()
     } catch (err) {
       logger.error('同步设定到工作流失败:', err)
-      showSnackbar('校验失败，请重试', 'error')
+      showSnackbar(t('kb.snack.syncFailed'), 'error')
     } finally {
       setSyncingSettings(false)
     }
@@ -1060,8 +1065,8 @@ export default function KnowledgeBasePage() {
       const skipped = response.data?.skipped_count ?? 0
       showSnackbar(
         merged > 0
-          ? `已合并 ${merged} 项高置信候选设定（跳过 ${skipped} 项）`
-          : `暂无可合并的高置信候选（候选池中 ${skipped} 项置信度不足）`,
+          ? t('kb.snack.mergedCount', { count: merged, skipped })
+          : t('kb.snack.noMergeCandidates', { skipped }),
         'success',
       )
       if (merged > 0) {
@@ -1072,7 +1077,7 @@ export default function KnowledgeBasePage() {
       }
     } catch (err) {
       logger.error('合并候选设定失败:', err)
-      showSnackbar('合并候选设定失败', 'error')
+      showSnackbar(t('kb.snack.mergeFailed'), 'error')
     } finally {
       setMergingCandidates(false)
     }
@@ -1097,10 +1102,10 @@ export default function KnowledgeBasePage() {
           onClick={() => navigate('/dashboard')}
           sx={{ fontWeight: 500 }}
         >
-          返回
+          {t('action.back')}
         </Button>
         <Alert severity="info" sx={{ flex: 1, mx: 3, py: 0.5 }} icon={false}>
-          本页维护设定中心的结构化内容；工作流会实时读取这些设定，无需再覆盖世界观字段。
+          {t('kb.pageHint')}
         </Alert>
         <Typography variant="h5" sx={{
           fontWeight: 600,
@@ -1108,7 +1113,7 @@ export default function KnowledgeBasePage() {
           alignItems: 'center',
           gap: 1
         }}>
-          知识库
+          {t('kb.title')}
         </Typography>
       </Box>
 
@@ -1125,11 +1130,11 @@ export default function KnowledgeBasePage() {
             }
           }}
         >
-          <Tab label="世界观设定" onMouseEnter={() => preloadMainTabResources(0)} onFocus={() => preloadMainTabResources(0)} />
-          <Tab label="人物设定" onMouseEnter={() => preloadMainTabResources(1)} onFocus={() => preloadMainTabResources(1)} />
-          <Tab label="大纲设定" onMouseEnter={() => preloadMainTabResources(2)} onFocus={() => preloadMainTabResources(2)} />
-          <Tab label="设定中心" onMouseEnter={() => preloadMainTabResources(3)} onFocus={() => preloadMainTabResources(3)} />
-          <Tab label="冲突检测" onMouseEnter={() => preloadMainTabResources(4)} onFocus={() => preloadMainTabResources(4)} />
+          <Tab label={t('kb.tabs.world')} onMouseEnter={() => preloadMainTabResources(0)} onFocus={() => preloadMainTabResources(0)} />
+          <Tab label={t('kb.tabs.characters')} onMouseEnter={() => preloadMainTabResources(1)} onFocus={() => preloadMainTabResources(1)} />
+          <Tab label={t('kb.tabs.outline')} onMouseEnter={() => preloadMainTabResources(2)} onFocus={() => preloadMainTabResources(2)} />
+          <Tab label={t('kb.tabs.settings')} onMouseEnter={() => preloadMainTabResources(3)} onFocus={() => preloadMainTabResources(3)} />
+          <Tab label={t('kb.tabs.conflicts')} onMouseEnter={() => preloadMainTabResources(4)} onFocus={() => preloadMainTabResources(4)} />
         </Tabs>
       </Box>
 
@@ -1143,8 +1148,8 @@ export default function KnowledgeBasePage() {
                 value={characterSubTabValue}
                 onChange={(_, newValue) => { preloadCharacterTabResources(newValue); setCharacterSubTabValue(newValue) }}
               >
-                <Tab label="人物文本" onMouseEnter={() => preloadCharacterTabResources(0)} onFocus={() => preloadCharacterTabResources(0)} />
-                <Tab label="人物卡管理" onMouseEnter={() => preloadCharacterTabResources(1)} onFocus={() => preloadCharacterTabResources(1)} />
+                <Tab label={t('kb.tabs.characterText')} onMouseEnter={() => preloadCharacterTabResources(0)} onFocus={() => preloadCharacterTabResources(0)} />
+                <Tab label={t('kb.tabs.characterCards')} onMouseEnter={() => preloadCharacterTabResources(1)} onFocus={() => preloadCharacterTabResources(1)} />
               </Tabs>
             </Box>
           )}
@@ -1159,7 +1164,7 @@ export default function KnowledgeBasePage() {
             <Alert severity="error" sx={{ mb: 3 }}>
               {error}
               <Button size="small" onClick={loadWorkflowData} sx={{ ml: 2 }}>
-                重试
+                {t('action.retry')}
               </Button>
             </Alert>
           )}
@@ -1181,12 +1186,12 @@ export default function KnowledgeBasePage() {
                       disabled={!getCurrentContent() || expandingStory}
                       sx={{ borderRadius: 2 }}
                     >
-                      编辑{getTabTitle()}
+                      {t('kb.editTab', { tab: getTabTitle() })}
                     </Button>
                     {(mainTabValue === 2 || (mainTabValue === 1 && characterSubTabValue === 0)) && (
                       <>
                         <Tooltip
-                          title={recommendationReason || '协同拓展会同时分析章节缺口和人物缺口，只补新增内容，不会整本重写'}
+                          title={recommendationReason || t('kb.collab.expandTooltip')}
                           placement="top"
                           arrow
                         >
@@ -1203,13 +1208,15 @@ export default function KnowledgeBasePage() {
                               disabled={expandingStory || !worldSetting || (!plotOutline && !characters)}
                               sx={{
                                 borderRadius: 2,
-                                bgcolor: '#0f766e',
+                                // 协同拓展（teal 品牌 accent）走 info token：浅色深青、暗色雾青，文字钉 contrastText 随反相。
+                                bgcolor: 'info.main',
+                                color: 'info.contrastText',
                                 '&:hover': {
-                                  bgcolor: '#115e59',
+                                  bgcolor: 'info.dark',
                                 },
                               }}
                             >
-                              {expandingStory ? '协同拓展中...' : '协同拓展'}
+                              {expandingStory ? t('kb.collab.expanding') : t('kb.collab.expand')}
                             </Button>
                           </span>
                         </Tooltip>
@@ -1221,7 +1228,7 @@ export default function KnowledgeBasePage() {
                             onFocus={() => warmImport(loadStoryExpansionResultDialog)}
                             sx={{ borderRadius: 2 }}
                           >
-                            查看协同结果
+                            {t('kb.collab.viewResult')}
                           </Button>
                         )}
                       </>
@@ -1237,7 +1244,7 @@ export default function KnowledgeBasePage() {
                       disabled={saving}
                       sx={{ borderRadius: 2 }}
                     >
-                      {saving ? '保存中...' : '保存'}
+                      {saving ? t('kb.saving') : t('action.save')}
                     </Button>
                     <Button
                       variant="outlined"
@@ -1245,7 +1252,7 @@ export default function KnowledgeBasePage() {
                       disabled={saving}
                       sx={{ borderRadius: 2 }}
                     >
-                      取消
+                      {t('action.cancel')}
                     </Button>
                   </>
                 )}
@@ -1271,14 +1278,15 @@ export default function KnowledgeBasePage() {
                     <>
                       <Paper
                         elevation={0}
-                        sx={{
+                        sx={(theme) => ({
                           mb: 3,
                           p: 2.5,
                           borderRadius: 2,
                           border: '1px solid',
                           borderColor: 'primary.light',
-                          background: 'linear-gradient(135deg, rgba(15,118,110,0.08) 0%, rgba(255,255,255,0.96) 100%)',
-                        }}
+                          // 人物总览卡：teal 渐变底走 info token 反相（与协同拓展按钮同源）。
+                          background: `linear-gradient(135deg, ${alpha(theme.palette.info.main, 0.08)} 0%, ${theme.palette.background.paper} 100%)`,
+                        })}
                       >
                         <Box
                           sx={{
@@ -1291,19 +1299,19 @@ export default function KnowledgeBasePage() {
                         >
                           <Box>
                             <Typography variant="overline" sx={{ color: 'primary.dark', fontWeight: 700 }}>
-                              人物信息总览
+                              {t('kb.characterOverview')}
                             </Typography>
                             <Typography variant="h5" sx={{ fontWeight: 700, mb: 0.5 }}>
-                              当前共识别 {currentCharacterCount} 位人物
+                              {t('kb.characterCount', { count: currentCharacterCount })}
                             </Typography>
                             <Typography variant="body2" color="text.secondary">
-                              基于当前人物文本自动统计，方便快速判断是否还需要继续补人物、关系线或配套承接角色。
+                              {t('kb.characterCountHint')}
                             </Typography>
                           </Box>
                           <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
-                            <Chip label={`人物总数 ${currentCharacterCount}`} color="primary" variant="outlined" />
+                            <Chip label={t('kb.characterTotal', { count: currentCharacterCount })} color="primary" variant="outlined" />
                             <Chip
-                              label={hasCharacterText ? '人物文本已录入' : '人物文本待补充'}
+                              label={hasCharacterText ? t('kb.characterEntered') : t('kb.characterPending')}
                               color={hasCharacterText ? 'success' : 'default'}
                               variant="outlined"
                             />
@@ -1315,7 +1323,7 @@ export default function KnowledgeBasePage() {
                           <LazyVditorEditor
                           value={editedContent}
                           onChange={(val) => setEditedContent(val)}
-                          placeholder={`${getTabTitle()}内容（支持 Markdown 格式）...`}
+                          placeholder={t('kb.editorPlaceholder', { tab: getTabTitle() })}
                           height={500}
                           />
                         </Suspense>
@@ -1337,7 +1345,7 @@ export default function KnowledgeBasePage() {
                             </Suspense>
                           ) : (
                             <Typography color="text.secondary" sx={{ textAlign: 'center', py: 8 }}>
-                              暂无{getTabTitle()}，请先在工作流中生成
+                              {t('kb.emptyContent', { tab: getTabTitle() })}
                             </Typography>
                           )}
                         </Paper>
@@ -1364,7 +1372,7 @@ export default function KnowledgeBasePage() {
                   <LazyVditorEditor
                   value={editedContent}
                   onChange={(val) => setEditedContent(val)}
-                  placeholder={`${getTabTitle()}内容（支持 Markdown 格式）...`}
+                  placeholder={t('kb.editorPlaceholder', { tab: getTabTitle() })}
                   height={500}
                   />
                 </Suspense>
@@ -1386,7 +1394,7 @@ export default function KnowledgeBasePage() {
                     </Suspense>
                   ) : (
                     <Typography color="text.secondary" sx={{ textAlign: 'center', py: 8 }}>
-                      暂无{getTabTitle()}，请先在工作流中生成
+                      {t('kb.emptyContent', { tab: getTabTitle() })}
                     </Typography>
                   )}
                 </Paper>
@@ -1406,9 +1414,9 @@ export default function KnowledgeBasePage() {
             value={settingSubTabValue}
             onChange={(_, newValue) => { preloadSettingTabResources(newValue); setSettingSubTabValue(newValue) }}
           >
-            <Tab label={'\u8bbe\u5b9a\u7ba1\u7406'} onMouseEnter={() => preloadSettingTabResources(0)} onFocus={() => preloadSettingTabResources(0)} />
-            <Tab label={'\u70ed\u95e8\u8bbe\u5b9a'} onMouseEnter={() => preloadSettingTabResources(1)} onFocus={() => preloadSettingTabResources(1)} />
-            <Tab label={'\u5173\u7cfb\u7f51\u7edc'} onMouseEnter={() => preloadSettingTabResources(2)} onFocus={() => preloadSettingTabResources(2)} />
+            <Tab label={t('kb.tabs.settingsManage')} onMouseEnter={() => preloadSettingTabResources(0)} onFocus={() => preloadSettingTabResources(0)} />
+            <Tab label={t('kb.tabs.popularSettings')} onMouseEnter={() => preloadSettingTabResources(1)} onFocus={() => preloadSettingTabResources(1)} />
+            <Tab label={t('kb.tabs.relationGraph')} onMouseEnter={() => preloadSettingTabResources(2)} onFocus={() => preloadSettingTabResources(2)} />
           </Tabs>
         </Box>
 
@@ -1427,7 +1435,7 @@ export default function KnowledgeBasePage() {
                   onClick={handleOpenTemplateDialog}
                   fullWidth
                 >
-                  从模板创建
+                  {t('kb.createFromTemplate')}
                 </Button>
                 <Button
                   variant="contained"
@@ -1436,17 +1444,17 @@ export default function KnowledgeBasePage() {
                   onClick={() => setCreateCollectionDialog(true)}
                   fullWidth
                 >
-                  新建
+                  {t('kb.createNew')}
                 </Button>
               </Box>
 
               {/* 快速添加常用分类 */}
               {getAvailableCategoriesToAdd().length > 0 && (
                 <FormControl size="small" fullWidth sx={{ mb: 2 }}>
-                  <InputLabel>快速添加体系</InputLabel>
+                  <InputLabel>{t('kb.quickAddSystem')}</InputLabel>
                   <Select
                     value={selectedCategoryToAdd}
-                    label="快速添加体系"
+                    label={t('kb.quickAddSystem')}
                     onChange={(e) => {
                       const category = e.target.value
                       setSelectedCategoryToAdd(category)
@@ -1455,7 +1463,7 @@ export default function KnowledgeBasePage() {
                       }
                     }}
                   >
-                    <MenuItem value="">请选择要添加的体系...</MenuItem>
+                    <MenuItem value="">{t('kb.quickAddPlaceholder')}</MenuItem>
                     {getAvailableCategoriesToAdd().map(cat => (
                       <MenuItem key={cat} value={cat}>
                         {getCategoryDisplayName(cat)}
@@ -1474,7 +1482,7 @@ export default function KnowledgeBasePage() {
                 </Box>
               ) : collections.length === 0 ? (
                 <Typography color="text.secondary" sx={{ textAlign: 'center', py: 4 }}>
-                  暂无设定集合
+                  {t('kb.noCollections')}
                 </Typography>
               ) : (
                 <>
@@ -1507,7 +1515,7 @@ export default function KnowledgeBasePage() {
                   
                   {/* 同步设定到工作流按钮 */}
                   <Tooltip
-                    title="生成当前设定摘要预览，仅用于校验工作流读取效果，不会覆盖世界观字段。"
+                    title={t('kb.syncTooltip')}
                     placement="top"
                     arrow
                   >
@@ -1521,14 +1529,14 @@ export default function KnowledgeBasePage() {
                         onClick={handleSyncSettingsToWorkflow}
                         disabled={syncingSettings || collections.length === 0}
                       >
-                        {syncingSettings ? '校验中...' : '校验工作流摘要'}
+                        {syncingSettings ? t('kb.validating') : t('kb.validateWorkflow')}
                       </Button>
                     </span>
                   </Tooltip>
 
                   {/* 合并高置信候选设定按钮（修复 P3-3：候选确认闭环） */}
                   <Tooltip
-                    title="将候选集合中高置信度的设定项自动合并到对应正式体系；置信度不足的保留待人工确认。"
+                    title={t('kb.mergeTooltip')}
                     placement="top"
                     arrow
                   >
@@ -1543,7 +1551,7 @@ export default function KnowledgeBasePage() {
                         onClick={handleMergeCandidates}
                         disabled={mergingCandidates}
                       >
-                        {mergingCandidates ? '合并中...' : '合并候选设定'}
+                        {mergingCandidates ? t('kb.merging') : t('kb.mergeCandidates')}
                       </Button>
                     </span>
                   </Tooltip>
@@ -1561,10 +1569,10 @@ export default function KnowledgeBasePage() {
                   <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
                     <Box>
                       <Typography variant="h6" sx={{ fontWeight: 600 }}>
-                        设定项
+                        {t('kb.settingItems')}
                       </Typography>
                       <Typography variant="caption" color="text.secondary">
-                        {getCategoryDisplayName(selectedCollection.category || '')} · 共 {settingItems.length} 项
+                        {t('kb.categoryCount', { category: getCategoryDisplayName(selectedCollection.category || ''), count: settingItems.length })}
                       </Typography>
                     </Box>
                     <Button
@@ -1573,7 +1581,7 @@ export default function KnowledgeBasePage() {
                       startIcon={<AddIcon />}
                       onClick={() => setCreateItemDialog(true)}
                     >
-                      新建设定项
+                      {t('kb.createItem')}
                     </Button>
                   </Box>
 
@@ -1599,7 +1607,7 @@ export default function KnowledgeBasePage() {
                         }}
                         onAddItem={handleTreeAddItem}
                         onDeleteItem={handleTreeDeleteItem}
-                        title="层级视图"
+                        title={t('kb.treeViewTitle')}
                         />
                       </Suspense>
                     </Box>
@@ -1615,14 +1623,14 @@ export default function KnowledgeBasePage() {
                               <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
                                 {selectedCategoryItem.name}
                               </Typography>
-                              <Chip label="分类" size="small" color="primary" variant="outlined" />
+                              <Chip label={t('kb.categoryBadge')} size="small" color="primary" variant="outlined" />
                             </Box>
                             <Box sx={{ display: 'flex', gap: 0.5 }}>
-                              <Tooltip title="编辑分类描述">
+                              <Tooltip title={t('kb.editCategoryDesc')}>
                                 <Button size="small" startIcon={<EditIcon />} onClick={() => {
                                   handleEditItem(selectedCategoryItem)
                                 }}>
-                                  编辑
+                                  {t('kb.edit')}
                                 </Button>
                               </Tooltip>
                             </Box>
@@ -1633,11 +1641,11 @@ export default function KnowledgeBasePage() {
                             </Typography>
                           ) : (
                             <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic', mb: 1 }}>
-                              点击“编辑”添加分类描述...
+                              {t('kb.addCategoryDescHint')}
                             </Typography>
                           )}
                           <Typography variant="caption" color="text.secondary">
-                            路径: {selectedCategoryPath}
+                            {t('kb.pathPrefix', { path: selectedCategoryPath })}
                           </Typography>
                         </Box>
                       )}
@@ -1712,23 +1720,23 @@ export default function KnowledgeBasePage() {
                                 {selectedItem.name}
                               </Typography>
                               {!selectedItem.is_leaf && (
-                                <Chip label="分类" size="small" color="primary" variant="outlined" />
+                                <Chip label={t('kb.categoryBadge')} size="small" color="primary" variant="outlined" />
                               )}
                             </Box>
                             <Box sx={{ display: 'flex', gap: 0.5 }}>
-                              <Tooltip title="移动到其他分类">
+                              <Tooltip title={t('kb.moveToOther')}>
                                 <Button size="small" onClick={() => setMoveItemDialog(true)}>
-                                  移动到
+                                  {t('kb.moveTo')}
                                 </Button>
                               </Tooltip>
                               <Button size="small" startIcon={<EditIcon />} onClick={() => handleEditItem()}>
-                                编辑
+                                {t('kb.edit')}
                               </Button>
                             </Box>
                           </Box>
                           {selectedItem.path && (
                             <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
-                              路径: {selectedItem.path}
+                              {t('kb.pathPrefix', { path: selectedItem.path })}
                             </Typography>
                           )}
                           {selectedItem.content ? (
@@ -1738,7 +1746,7 @@ export default function KnowledgeBasePage() {
                             />
                           ) : (
                             <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic' }}>
-                              点击“编辑”添加内容描述...
+                              {t('kb.addContentHint')}
                             </Typography>
                           )}
                           {selectedItem.tags && selectedItem.tags.length > 0 && (
@@ -1754,7 +1762,7 @@ export default function KnowledgeBasePage() {
                       {/* 空态提示 */}
                       {!selectedItem && !selectedCategoryPath && (
                         <Typography color="text.secondary" sx={{ textAlign: 'center', py: 4 }}>
-                          请选择左侧树中的分类或设定项
+                          {t('kb.selectTreeItemHint')}
                         </Typography>
                       )}
                     </Box>
@@ -1762,7 +1770,7 @@ export default function KnowledgeBasePage() {
                 </>
               ) : (
                 <Typography color="text.secondary" sx={{ textAlign: 'center', py: 4 }}>
-                  请选择一个设定集合
+                  {t('kb.selectCollectionHint')}
                 </Typography>
               )}
             </Paper>
@@ -1782,7 +1790,7 @@ export default function KnowledgeBasePage() {
                 setSettingSubTabValue(0)
                 void focusSettingItem(item.id)
               }}
-              title="热门设定"
+              title={t('kb.popularSettingsTitle')}
               />
             </Suspense>
           </Box>
@@ -1804,7 +1812,7 @@ export default function KnowledgeBasePage() {
               </Suspense>
             ) : (
               <Alert severity="info" sx={{ mt: 2 }}>
-                请选择一个设定项后查看关系网络。
+                {t('kb.relationGraphHint')}
               </Alert>
             )}
           </Box>
@@ -1821,7 +1829,7 @@ export default function KnowledgeBasePage() {
             setSettingSubTabValue(0)  // 切回分类浏览 Tab
             void focusSettingItem(itemId)
           }}
-          title="设定冲突检测"
+          title={t('kb.conflictDetectTitle')}
           />
         </Suspense>
       </TabPanel>
@@ -1830,21 +1838,21 @@ export default function KnowledgeBasePage() {
 
       {/* 创建设定集合对话框 */}
       <Dialog open={createCollectionDialog} onClose={() => setCreateCollectionDialog(false)} maxWidth="sm" fullWidth>
-        <DialogTitle>新建设定集合</DialogTitle>
+        <DialogTitle>{t('kb.createCollectionTitle')}</DialogTitle>
         <DialogContent>
           <TextField
             autoFocus
             margin="dense"
-            label="集合名称 *"
+            label={t('kb.collectionNameLabel')}
             fullWidth
             value={newCollectionName}
             onChange={(e) => setNewCollectionName(e.target.value)}
           />
           <FormControl fullWidth margin="dense">
-            <InputLabel>分类 *</InputLabel>
+            <InputLabel>{t('kb.categoryLabel')}</InputLabel>
             <Select
               value={newCollectionCategory}
-              label="分类 *"
+              label={t('kb.categoryLabel')}
               onChange={(e) => setNewCollectionCategory(e.target.value)}
             >
               {Object.entries(CATEGORY_NAME_MAP).map(([key, name]) => (
@@ -1854,7 +1862,7 @@ export default function KnowledgeBasePage() {
           </FormControl>
           <TextField
             margin="dense"
-            label="描述"
+            label={t('kb.descriptionLabel')}
             fullWidth
             multiline
             rows={3}
@@ -1863,8 +1871,8 @@ export default function KnowledgeBasePage() {
           />
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => { setCreateCollectionDialog(false); resetCollectionForm() }}>取消</Button>
-          <Button onClick={handleCreateCollection} variant="contained">创建</Button>
+          <Button onClick={() => { setCreateCollectionDialog(false); resetCollectionForm() }}>{t('action.cancel')}</Button>
+          <Button onClick={handleCreateCollection} variant="contained">{t('kb.create')}</Button>
         </DialogActions>
       </Dialog>
 
@@ -1875,7 +1883,7 @@ export default function KnowledgeBasePage() {
         maxWidth="sm"
         fullWidth
       >
-        <DialogTitle>选择设定模板</DialogTitle>
+        <DialogTitle>{t('kb.selectTemplateTitle')}</DialogTitle>
         <DialogContent dividers>
           {settingTemplatesLoading ? (
             <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
@@ -1886,7 +1894,7 @@ export default function KnowledgeBasePage() {
               {settingTemplates.length === 0 ? (
                 <ListItem>
                   <Typography variant="body2" color="text.secondary">
-                    暂无可用模板。
+                    {t('kb.noTemplates')}
                   </Typography>
                 </ListItem>
               ) : (
@@ -1919,7 +1927,7 @@ export default function KnowledgeBasePage() {
                   style={{ width: 18, height: 18, cursor: 'pointer' }}
                 />
                 <Typography variant="body2" color="text.secondary">
-                  清空当前项目下已有的设定集合（谨慎操作）
+                  {t('kb.clearExistingWarning')}
                 </Typography>
               </Box>
             </FormControl>
@@ -1927,7 +1935,7 @@ export default function KnowledgeBasePage() {
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setTemplateDialog(false)} disabled={applyingTemplate}>
-            取消
+            {t('action.cancel')}
           </Button>
           <Button
             onClick={handleApplyTemplate}
@@ -1935,21 +1943,21 @@ export default function KnowledgeBasePage() {
             disabled={!selectedTemplateKey || applyingTemplate}
             startIcon={applyingTemplate ? <CircularProgress size={20} /> : undefined}
           >
-            {applyingTemplate ? '应用中...' : '应用模板'}
+            {applyingTemplate ? t('kb.applying') : t('kb.applyTemplate')}
           </Button>
         </DialogActions>
       </Dialog>
 
       {/* 创建设定项弹窗 */}
       <Dialog open={createItemDialog} onClose={() => setCreateItemDialog(false)} maxWidth="md" fullWidth>
-        <DialogTitle>创建设定项</DialogTitle>
+        <DialogTitle>{t('kb.createItemTitle')}</DialogTitle>
         <DialogContent>
           <Grid container spacing={2}>
             <Grid item xs={8}>
               <TextField
                 autoFocus
                 margin="dense"
-                label="设定项名称 *"
+                label={t('kb.itemNameLabel')}
                 fullWidth
                 value={newItemName}
                 onChange={(e) => setNewItemName(e.target.value)}
@@ -1958,7 +1966,7 @@ export default function KnowledgeBasePage() {
             <Grid item xs={4}>
               <TextField
                 margin="dense"
-                label="代码"
+                label={t('kb.codeLabel')}
                 fullWidth
                 value={newItemCode}
                 onChange={(e) => setNewItemCode(e.target.value)}
@@ -1968,7 +1976,7 @@ export default function KnowledgeBasePage() {
             <Grid item xs={12}>
               <TextField
                 margin="dense"
-                label="等级"
+                label={t('kb.levelLabel')}
                 type="number"
                 fullWidth
                 value={newItemLevel}
@@ -1979,17 +1987,17 @@ export default function KnowledgeBasePage() {
             <Grid item xs={12}>
               <TextField
                 margin="dense"
-                label="标签（逗号分隔）"
+                label={t('kb.tagsLabel')}
                 fullWidth
                 value={newItemTags}
                 onChange={(e) => setNewItemTags(e.target.value)}
-                placeholder="例如：修炼境界，初期"
+                placeholder={t('kb.tagsPlaceholder')}
               />
             </Grid>
             <Grid item xs={12}>
               <TextField
                 margin="dense"
-                label="内容"
+                label={t('kb.contentLabel')}
                 fullWidth
                 multiline
                 rows={6}
@@ -2000,18 +2008,18 @@ export default function KnowledgeBasePage() {
           </Grid>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => { setCreateItemDialog(false); resetItemForm() }}>取消</Button>
-          <Button onClick={handleCreateItem} variant="contained">创建</Button>
+          <Button onClick={() => { setCreateItemDialog(false); resetItemForm() }}>{t('action.cancel')}</Button>
+          <Button onClick={handleCreateItem} variant="contained">{t('kb.create')}</Button>
         </DialogActions>
       </Dialog>
 
       {/* 层级视图创建子项对话框 */}
       <Dialog open={createChildItemDialog} onClose={() => setCreateChildItemDialog(false)} maxWidth="md" fullWidth>
         <DialogTitle>
-          创建{newItemIsLeaf ? '设定项' : '分类'}
+          {t('kb.createChildTitle', { type: t(newItemIsLeaf ? 'kb.itemTypeItem' : 'kb.categoryBadge') })}
           {parentItemPath && (
             <Typography variant="caption" color="text.secondary" sx={{ ml: 1 }}>
-              路径: {parentItemPath}
+              {t('kb.pathPrefix', { path: parentItemPath })}
             </Typography>
           )}
         </DialogTitle>
@@ -2021,14 +2029,14 @@ export default function KnowledgeBasePage() {
             <Grid item xs={12}>
               <Box sx={{ display: 'flex', gap: 1, mb: 1 }}>
                 <Chip
-                  label="设定项"
+                  label={t('kb.itemTypeItem')}
                   color={newItemIsLeaf ? 'primary' : 'default'}
                   variant={newItemIsLeaf ? 'filled' : 'outlined'}
                   onClick={() => setNewItemIsLeaf(true)}
                   sx={{ cursor: 'pointer' }}
                 />
                 <Chip
-                  label="分类（文件夹）"
+                  label={t('kb.itemTypeCategory')}
                   color={!newItemIsLeaf ? 'primary' : 'default'}
                   variant={!newItemIsLeaf ? 'filled' : 'outlined'}
                   onClick={() => setNewItemIsLeaf(false)}
@@ -2036,81 +2044,81 @@ export default function KnowledgeBasePage() {
                 />
               </Box>
               <Typography variant="caption" color="text.secondary">
-                {newItemIsLeaf ? '设定项是叶子节点，包含具体的设定内容' : '分类是文件夹节点，用于组织其他设定项'}
+                {newItemIsLeaf ? t('kb.itemTypeHintItem') : t('kb.itemTypeHintCategory')}
               </Typography>
             </Grid>
             <Grid item xs={8}>
               <TextField
                 autoFocus
                 margin="dense"
-                label={newItemIsLeaf ? '设定项名称 *' : '分类名称 *'}
+                label={newItemIsLeaf ? t('kb.itemNameLabel') : t('kb.categoryNameLabel')}
                 fullWidth
                 value={newItemName}
                 onChange={(e) => setNewItemName(e.target.value)}
-                placeholder={newItemIsLeaf ? '例如：灶气期、绍沙城、砚红仙草' : '例如：修炼境界、地点分类'}
+                placeholder={newItemIsLeaf ? t('kb.itemNamePlaceholder') : t('kb.categoryNamePlaceholder')}
               />
             </Grid>
             <Grid item xs={4}>
               <TextField
                 margin="dense"
-                label="代码"
+                label={t('kb.codeLabel')}
                 fullWidth
                 value={newItemCode}
                 onChange={(e) => setNewItemCode(e.target.value)}
-                placeholder="可选"
+                placeholder={t('kb.optionalPlaceholder')}
               />
             </Grid>
             {newItemIsLeaf && (
               <Grid item xs={12}>
                 <TextField
                   margin="dense"
-                  label="标签（逗号分隔）"
+                  label={t('kb.tagsLabel')}
                   fullWidth
                   value={newItemTags}
                   onChange={(e) => setNewItemTags(e.target.value)}
-                  placeholder="例如：修炼境界，初期"
+                  placeholder={t('kb.tagsPlaceholder')}
                 />
               </Grid>
             )}
             <Grid item xs={12}>
               <TextField
                 margin="dense"
-                label={newItemIsLeaf ? '内容描述' : '分类描述（可选）'}
+                label={newItemIsLeaf ? t('kb.contentDescLabel') : t('kb.categoryDescLabel')}
                 fullWidth
                 multiline
                 rows={newItemIsLeaf ? 6 : 3}
                 value={newItemContent}
                 onChange={(e) => setNewItemContent(e.target.value)}
-                placeholder={newItemIsLeaf ? '详细描述该设定项的内容...' : '可以为这个分类添加说明文字...'}
+                placeholder={newItemIsLeaf ? t('kb.contentDescPlaceholder') : t('kb.categoryDescPlaceholder')}
               />
             </Grid>
           </Grid>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => { setCreateChildItemDialog(false); resetItemForm() }}>取消</Button>
-          <Button onClick={handleCreateChildItem} variant="contained">创建{newItemIsLeaf ? '设定项' : '分类'}</Button>
+          <Button onClick={() => { setCreateChildItemDialog(false); resetItemForm() }}>{t('action.cancel')}</Button>
+          <Button onClick={handleCreateChildItem} variant="contained">{t('kb.createWithType', { type: t(newItemIsLeaf ? 'kb.itemTypeItem' : 'kb.categoryBadge') })}</Button>
         </DialogActions>
       </Dialog>
 
       {/* 移动分类弹窗 */}
       <Dialog open={moveItemDialog} onClose={() => setMoveItemDialog(false)} maxWidth="sm" fullWidth>
         <DialogTitle>
-          移动到其他分类
+          {t('kb.moveTitle')}
           {selectedItem && (
             <Typography variant="caption" color="text.secondary" sx={{ ml: 1 }}>
-              移动：{selectedItem.name}
+              {t('kb.moveCurrent', { name: selectedItem.name })}
             </Typography>
           )}
         </DialogTitle>
         <DialogContent>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-            选择目标分类，该项将被移动到指定分类下。这对于调整层级关系很有用。
+            {t('kb.moveHint')}
           </Typography>
           <FormControl fullWidth margin="dense">
-            <InputLabel>目标分类</InputLabel>
+            <InputLabel>{t('kb.moveTargetLabel')}</InputLabel>
             <Select
               value={moveTargetPath}
-              label="目标分类"
+              label={t('kb.moveTargetLabel')}
               onChange={(e) => setMoveTargetPath(e.target.value)}
             >
               {getAvailableMoveTargets().map((target) => (
@@ -2122,25 +2130,25 @@ export default function KnowledgeBasePage() {
           </FormControl>
           {selectedItem && moveTargetPath !== '' && (
             <Alert severity="info" sx={{ mt: 2 }}>
-              新路径将为：{moveTargetPath}/{selectedItem.name}
+              {t('kb.moveNewPath', { path: `${moveTargetPath}/${selectedItem.name}` })}
             </Alert>
           )}
           {selectedItem && moveTargetPath === '' && selectedCollection && (
             <Alert severity="info" sx={{ mt: 2 }}>
-              新路径将为：{selectedCollection.name}/{selectedItem.name}
+              {t('kb.moveNewPath', { path: `${selectedCollection.name}/${selectedItem.name}` })}
             </Alert>
           )}
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => { setMoveItemDialog(false); setMoveTargetPath('') }}>取消</Button>
-          <Button onClick={handleMoveItem} variant="contained">移动</Button>
+          <Button onClick={() => { setMoveItemDialog(false); setMoveTargetPath('') }}>{t('action.cancel')}</Button>
+          <Button onClick={handleMoveItem} variant="contained">{t('kb.move')}</Button>
         </DialogActions>
       </Dialog>
 
       {/* 编辑设定项弹窗，支持智能提取 */}
       <Dialog open={editItemDialog} onClose={() => setEditItemDialog(false)} maxWidth="lg" fullWidth>
         <DialogTitle sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          编辑设定项
+          {t('kb.editItemTitle')}
           <Button
             variant="outlined"
             size="small"
@@ -2148,7 +2156,7 @@ export default function KnowledgeBasePage() {
             onClick={handleSmartExtract}
             disabled={smartExtractLoading}
           >
-            {smartExtractLoading ? '提取中...' : '智能提取'}
+            {smartExtractLoading ? t('kb.extracting') : t('kb.smartExtract')}
           </Button>
         </DialogTitle>
         <DialogContent>
@@ -2160,7 +2168,7 @@ export default function KnowledgeBasePage() {
                   <TextField
                     autoFocus
                     margin="dense"
-                    label="设定项名称 *"
+                    label={t('kb.itemNameLabel')}
                     fullWidth
                     value={newItemName}
                     onChange={(e) => setNewItemName(e.target.value)}
@@ -2169,7 +2177,7 @@ export default function KnowledgeBasePage() {
                 <Grid item xs={4}>
                   <TextField
                     margin="dense"
-                    label="代码"
+                    label={t('kb.codeLabel')}
                     fullWidth
                     value={newItemCode}
                     onChange={(e) => setNewItemCode(e.target.value)}
@@ -2178,7 +2186,7 @@ export default function KnowledgeBasePage() {
                 <Grid item xs={12}>
                   <TextField
                     margin="dense"
-                    label="等级"
+                    label={t('kb.levelLabel')}
                     type="number"
                     fullWidth
                     value={newItemLevel}
@@ -2189,7 +2197,7 @@ export default function KnowledgeBasePage() {
                 <Grid item xs={12}>
                   <TextField
                     margin="dense"
-                    label="标签（逗号分隔）"
+                    label={t('kb.tagsLabel')}
                     fullWidth
                     value={newItemTags}
                     onChange={(e) => setNewItemTags(e.target.value)}
@@ -2198,7 +2206,7 @@ export default function KnowledgeBasePage() {
                 <Grid item xs={12}>
                   <TextField
                     margin="dense"
-                    label="内容"
+                    label={t('kb.contentLabel')}
                     fullWidth
                     multiline
                     rows={smartExtractData ? 10 : 6}
@@ -2214,13 +2222,13 @@ export default function KnowledgeBasePage() {
               <Grid item xs={6}>
                 <Paper elevation={1} sx={{ p: 2, height: '100%', bgcolor: 'grey.50' }}>
                   <Typography variant="subtitle2" sx={{ mb: 2, fontWeight: 'bold', color: 'primary.main' }}>
-                    AI 智能提取结果
+                    {t('kb.aiExtractResult')}
                   </Typography>
 
                   {/* 推荐标签 */}
                   {smartExtractData.suggested_tags?.length > 0 && (
                     <Box sx={{ mb: 2 }}>
-                      <Typography variant="caption" color="text.secondary">推荐标签</Typography>
+                      <Typography variant="caption" color="text.secondary">{t('kb.suggestedTags')}</Typography>
                       <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, mt: 0.5 }}>
                         {smartExtractData.suggested_tags.map((tag: string, idx: number) => (
                           <Chip
@@ -2235,7 +2243,7 @@ export default function KnowledgeBasePage() {
                         ))}
                         {smartExtractData.suggested_tags.length > 1 && (
                           <Chip
-                            label="全部添加"
+                            label={t('kb.addAllTags')}
                             size="small"
                             color="success"
                             onClick={() => handleApplySuggestedTags(smartExtractData.suggested_tags)}
@@ -2248,7 +2256,7 @@ export default function KnowledgeBasePage() {
 
                   {/* 相关内容 */}
                   <Typography variant="caption" color="text.secondary">
-                    从章节中提取的相关内容（{smartExtractData.related_contents?.length || 0}条）
+                    {t('kb.relatedContentHint', { count: smartExtractData.related_contents?.length || 0 })}
                   </Typography>
                   <Box sx={{ mt: 1, maxHeight: 300, overflow: 'auto' }}>
                     {smartExtractData.related_contents?.length > 0 ? (
@@ -2267,16 +2275,16 @@ export default function KnowledgeBasePage() {
                         >
                           <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 0.5 }}>
                             <Typography variant="caption" color="text.secondary">
-                              第{content.chapter_number}章 《{content.chapter_title}》
+                              {t('kb.chapterRef', { number: content.chapter_number, title: content.chapter_title })}
                               {content.ai_validated && (
-                                <Chip label="AI验证" size="small" color="success" sx={{ ml: 1, height: 18 }} />
+                                <Chip label={t('kb.aiValidated')} size="small" color="success" sx={{ ml: 1, height: 18 }} />
                               )}
                             </Typography>
                             <Button
                               size="small"
                               onClick={() => handleApplyExtractedContent(content.excerpt)}
                             >
-                              追加
+                              {t('kb.append')}
                             </Button>
                           </Box>
                           <Typography variant="body2" sx={{ fontSize: '0.85rem', color: 'text.primary' }}>
@@ -2286,7 +2294,7 @@ export default function KnowledgeBasePage() {
                       ))
                     ) : (
                       <Typography variant="body2" color="text.secondary" sx={{ textAlign: 'center', py: 2 }}>
-                        未找到相关内容
+                        {t('kb.noRelatedContent')}
                       </Typography>
                     )}
                   </Box>
@@ -2296,8 +2304,8 @@ export default function KnowledgeBasePage() {
           </Grid>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => { setEditItemDialog(false); resetItemForm() }}>取消</Button>
-          <Button onClick={handleSaveItemEdit} variant="contained">保存</Button>
+          <Button onClick={() => { setEditItemDialog(false); resetItemForm() }}>{t('action.cancel')}</Button>
+          <Button onClick={handleSaveItemEdit} variant="contained">{t('action.save')}</Button>
         </DialogActions>
       </Dialog>
 
@@ -2308,18 +2316,18 @@ export default function KnowledgeBasePage() {
         maxWidth="md" 
         fullWidth
       >
-        <DialogTitle>历史版本</DialogTitle>
+        <DialogTitle>{t('kb.historyTitle')}</DialogTitle>
         <DialogContent dividers>
           {outlineHistory.length === 0 ? (
             <Typography color="text.secondary" sx={{ textAlign: 'center', py: 4 }}>
-              暂无历史记录
+              {t('kb.noHistory')}
             </Typography>
           ) : (
             <List>
               {outlineHistory.slice().reverse().map((record, index) => (
                 <ListItem key={index} sx={{ flexDirection: 'column', alignItems: 'flex-start' }}>
                   <Typography variant="caption" color="text.secondary">
-                    {new Date(record.timestamp).toLocaleString()} - {record.chapterCount}章
+                    {t('kb.historyItem', { time: formatDateTime(record.timestamp), count: record.chapterCount })}
                   </Typography>
                   <Typography variant="body2" sx={{ mt: 1, whiteSpace: 'pre-wrap' }}>
                     {(record.content || '').substring(0, 200)}...
@@ -2330,7 +2338,7 @@ export default function KnowledgeBasePage() {
           )}
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setShowHistoryDialog(false)}>关闭</Button>
+          <Button onClick={() => setShowHistoryDialog(false)}>{t('kb.close')}</Button>
         </DialogActions>
       </Dialog>
 

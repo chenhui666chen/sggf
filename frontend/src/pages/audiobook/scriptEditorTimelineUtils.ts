@@ -1,4 +1,5 @@
 import type { ScriptSegment, TimelineClipEdit, TimelineClipEditMap } from './types'
+import type { TranslateFn } from './audioLibraryDisplay'
 import {
   getMusicCueInputValue,
   getSoundEffectsInputValue,
@@ -116,6 +117,7 @@ const createScriptVoiceClip = (
   segmentIndex: number,
   startUnit: number,
   durationUnits: number,
+  t?: TranslateFn,
 ): TimelineClip => {
   const text = getSegmentText(segment)
   const preview = text.length > 50 ? `${text.slice(0, 50)}...` : text
@@ -125,14 +127,14 @@ const createScriptVoiceClip = (
     || segment.speaker_name
     || segment.character_name
     || segment.role_name
-    || '旁白',
+    || (t ? t('audiobook.editorSession.speakerFallback') : '旁白'),
   ).trim()
   const emotion = String(segment.emotion || segment.voice_params?.emotion || '').trim()
   const performanceNote = String(segment.performance_notes || '').trim()
   const voicePreview = [
-    preview || '空片段',
-    emotion ? `情绪: ${emotion}` : '',
-    performanceNote ? `表演: ${performanceNote}` : '',
+    preview || (t ? t('audiobook.segmentLabel.emptySegment') : '空片段'),
+    emotion ? (t ? t('audiobook.segmentLabel.emotion', { emotion }) : `情绪: ${emotion}`) : '',
+    performanceNote ? (t ? t('audiobook.segmentLabel.performance', { performance: performanceNote }) : `表演: ${performanceNote}`) : '',
   ].filter(Boolean).join('\n')
 
   return {
@@ -140,13 +142,13 @@ const createScriptVoiceClip = (
     track: 'scriptVoice',
     segmentIndex,
     endSegmentIndex: segmentIndex,
-    label: `#${segmentIndex + 1} ${speaker || '旁白'}`,
+    label: `#${segmentIndex + 1} ${speaker || (t ? t('audiobook.editorSession.speakerFallback') : '旁白')}`,
     startUnit,
     durationUnits,
     textPreview: voicePreview,
     enabled: text.length > 0,
-    speakerLabel: speaker || '旁白',
-    emotionLabel: emotion || '未标注',
+    speakerLabel: speaker || (t ? t('audiobook.editorSession.speakerFallback') : '旁白'),
+    emotionLabel: emotion || (t ? t('audiobook.scriptEditor.emotionUnmarked') : '未标注'),
   }
 }
 
@@ -182,6 +184,7 @@ const buildMusicClips = (
   segments: ScriptSegment[],
   segmentOffsets: number[],
   segmentWidths: number[],
+  t?: TranslateFn,
 ): TimelineClip[] => {
   const clips: TimelineClip[] = []
   let pendingCue = ''
@@ -204,8 +207,8 @@ const buildMusicClips = (
       startUnit,
       durationUnits: Math.max(1, endUnit - startUnit),
       textPreview: pendingStartIndex === endSegmentIndex
-        ? `片段 #${pendingStartIndex + 1}`
-        : `片段 #${pendingStartIndex + 1}-#${endSegmentIndex + 1}`,
+        ? (t ? t('audiobook.segmentLabel.clip', { index: pendingStartIndex + 1 }) : `片段 #${pendingStartIndex + 1}`)
+        : (t ? t('audiobook.segmentLabel.clipRange', { start: pendingStartIndex + 1, end: endSegmentIndex + 1 }) : `片段 #${pendingStartIndex + 1}-#${endSegmentIndex + 1}`),
       enabled: true,
     })
   }
@@ -236,7 +239,7 @@ const buildMusicClips = (
   return clips
 }
 
-export const buildTimelineModel = (segments: ScriptSegment[]): TimelineModel => {
+export const buildTimelineModel = (segments: ScriptSegment[], t?: TranslateFn): TimelineModel => {
   const { segmentOffsets, segmentWidths, totalUnits } = buildSegmentLayout(segments)
   const clipsByTrack: Record<TimelineTrackKey, TimelineClip[]> = {
     scriptVoice: [],
@@ -248,10 +251,10 @@ export const buildTimelineModel = (segments: ScriptSegment[]): TimelineModel => 
     const startUnit = segmentOffsets[segmentIndex] ?? 0
     const durationUnits = segmentWidths[segmentIndex] ?? EMPTY_SEGMENT_WIDTH
 
-    clipsByTrack.scriptVoice.push(createScriptVoiceClip(segment, segmentIndex, startUnit, durationUnits))
+    clipsByTrack.scriptVoice.push(createScriptVoiceClip(segment, segmentIndex, startUnit, durationUnits, t))
     clipsByTrack.sfx.push(...buildSoundEffectClips(segment, segmentIndex, startUnit, durationUnits))
   })
-  clipsByTrack.music = buildMusicClips(segments, segmentOffsets, segmentWidths)
+  clipsByTrack.music = buildMusicClips(segments, segmentOffsets, segmentWidths, t)
 
   return {
     clipsByTrack,

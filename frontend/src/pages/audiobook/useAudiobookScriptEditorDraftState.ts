@@ -1,5 +1,7 @@
 import { useCallback, useEffect, type Dispatch, type MutableRefObject, type SetStateAction } from 'react'
 
+import { useTranslation } from 'react-i18next'
+
 import type {
   AudiobookEditorSessionState,
   Chapter,
@@ -60,6 +62,7 @@ export const useAudiobookScriptEditorDraftState = ({
   setEditorCrossTabConflict,
   setSnackbar,
 }: UseAudiobookScriptEditorDraftStateParams) => {
+  const { t } = useTranslation()
   useEffect(() => {
     if (
       typeof window === 'undefined'
@@ -95,7 +98,7 @@ export const useAudiobookScriptEditorDraftState = ({
       return
     }
 
-    setScriptEditorChapter(buildScriptEditorChapterRef(savedEditorSession.chapterId, chapters))
+    setScriptEditorChapter(buildScriptEditorChapterRef(savedEditorSession.chapterId, chapters, t))
     setScriptEditorData(savedEditorSession.data)
     setReviewMode(Boolean(savedEditorSession.reviewMode))
     setSegmentReviews(savedEditorSession.segmentReviews || {})
@@ -139,7 +142,7 @@ export const useAudiobookScriptEditorDraftState = ({
     setEditorCrossTabConflict(null)
     setSnackbar({
       open: true,
-      message: '已载入另一标签页的最新草稿',
+      message: t('audiobook.useAudiobookScriptEditorDraftState.loadedLatestDraft'),
       severity: 'info',
     })
   }, [
@@ -152,6 +155,7 @@ export const useAudiobookScriptEditorDraftState = ({
     setSegmentReviews,
     setTimelineEdits,
     setSnackbar,
+    t,
   ])
 
   const handleKeepLocalEditorDraft = useCallback(() => {
@@ -162,7 +166,7 @@ export const useAudiobookScriptEditorDraftState = ({
     setEditorCrossTabConflict(null)
     setSnackbar({
       open: true,
-      message: '已保留当前标签页草稿；如另一标签页继续修改，会再次提醒',
+      message: t('audiobook.useAudiobookScriptEditorDraftState.keptCurrentDraft'),
       severity: 'warning',
     })
   }, [
@@ -170,6 +174,7 @@ export const useAudiobookScriptEditorDraftState = ({
     editorCrossTabConflict,
     setEditorCrossTabConflict,
     setSnackbar,
+    t,
   ])
 
   return {

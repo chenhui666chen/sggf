@@ -1,5 +1,7 @@
 import { useMemo } from 'react'
 
+import type { TFunction } from 'i18next'
+
 import {
   buildUserCenterOverviewTabMetrics,
   type BuildUserCenterOverviewTabMetricsOptions,
@@ -23,6 +25,10 @@ export type UserCenterOverviewTabMetricsFacade = Pick<
 export type UseUserCenterOverviewTabMetricsOptions =
   BuildUserCenterOverviewTabMetricsInputOptions
   & Omit<BuildUserCenterOverviewTabMetricsOptions, 'pointsAccountStatus' | 'pricingPolicy'>
+  & {
+    /** 可选翻译函数：缺省时原样返回 key（便于测试与纯计算场景）。 */
+    t?: TFunction
+  }
 
 export function buildUserCenterOverviewTabMetricsFacade(options: {
   input: UserCenterOverviewTabMetricsInput
@@ -61,6 +67,7 @@ export function useUserCenterOverviewTabMetrics(
       getPricingBasisLabel: options.getPricingBasisLabel,
       formatPercentRate: options.formatPercentRate,
       formatUpdatedAtLabel: options.formatUpdatedAtLabel,
+      t: options.t,
     }),
     [
       input.pointsAccountStatus,
@@ -68,6 +75,7 @@ export function useUserCenterOverviewTabMetrics(
       options.getPricingBasisLabel,
       options.formatPercentRate,
       options.formatUpdatedAtLabel,
+      options.t,
     ],
   )
 

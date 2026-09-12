@@ -1,5 +1,7 @@
 import { useCallback, useState, type Dispatch, type SetStateAction } from 'react'
 
+import { useTranslation } from 'react-i18next'
+
 import { apiClient, extractApiErrorMessage } from '../../services/api'
 import type { SetSnackbar } from './hookTypes'
 import type { CharacterVoiceSetting, TtsModel } from './types'
@@ -22,11 +24,12 @@ export const useAudiobookCharacterVoicePreview = ({
   playExternalUrl,
   setSnackbar,
 }: UseAudiobookCharacterVoicePreviewParams) => {
+  const { t } = useTranslation()
   const [previewingCharacterId, setPreviewingCharacterId] = useState<number | null>(null)
 
   const handlePreviewCharacterVoice = useCallback(async (cv: CharacterVoiceSetting) => {
     if (!cv.voiceId.trim()) {
-      setSnackbar({ open: true, message: '请先为该角色选择音色再试听', severity: 'error' })
+      setSnackbar({ open: true, message: t('audiobook.useAudiobookCharacterVoicePreview.selectVoiceFirst'), severity: 'error' })
       return
     }
 
@@ -50,13 +53,13 @@ export const useAudiobookCharacterVoicePreview = ({
     } catch (error: unknown) {
       setSnackbar({
         open: true,
-        message: await extractApiErrorMessage(error, '角色音试听失败，请稍后重试'),
+        message: await extractApiErrorMessage(error, t('audiobook.useAudiobookCharacterVoicePreview.previewFailed')),
         severity: 'error',
       })
     } finally {
       setPreviewingCharacterId(null)
     }
-  }, [playManagedBlob, playExternalUrl, playingChapter, setPlayingChapter, setSnackbar, ttsModel])
+  }, [playManagedBlob, playExternalUrl, playingChapter, setPlayingChapter, setSnackbar, ttsModel, t])
 
   return {
     previewingCharacterId,

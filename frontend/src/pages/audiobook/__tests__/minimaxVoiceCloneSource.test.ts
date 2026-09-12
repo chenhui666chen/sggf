@@ -16,11 +16,10 @@ describe('MiniMax voice clone workbench source guards', () => {
   })
 
   it('confirms supplier charges before creating a clone', () => {
-    expect(workbenchSource).toContain('收费确认')
-    expect(workbenchSource).toContain('3.5 元/万字符')
-    expect(workbenchSource).toContain('首次用于正式语音合成')
-    expect(workbenchSource).toContain('9.9 元')
-    expect(workbenchSource).toContain('确认收费并创建')
+    expect(workbenchSource).toContain('audiobook.minimaxVoiceClone.billingConfirmTitle')
+    expect(workbenchSource).toContain('audiobook.minimaxVoiceClone.previewPriceHd')
+    expect(workbenchSource).toContain('audiobook.minimaxVoiceClone.billingConfirmUnlock')
+    expect(workbenchSource).toContain('audiobook.minimaxVoiceClone.confirmBillingCreate')
   })
 
   it('uses the MiniMax upload API and can play the returned preview', () => {

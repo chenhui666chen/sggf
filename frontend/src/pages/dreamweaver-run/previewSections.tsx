@@ -15,6 +15,8 @@ import {
   Typography,
 } from '@mui/material'
 
+import { useTranslation } from 'react-i18next'
+
 import FormattedContent from '@/components/common/FormattedContent'
 import type { DreamweaverAssetPlanItem, DreamweaverLibraryPlanItem } from '@/types/dreamweaver'
 
@@ -38,11 +40,13 @@ function DreamweaverRunAssetPreviewCardMedia({
   previewUrl: string
   kind: 'image' | 'video'
 }) {
+  const { t } = useTranslation()
+
   if (!previewUrl) {
     return (
-      <Box sx={{ mt: 0.75, bgcolor: '#fafafa', border: '1px dashed #ddd', borderRadius: 1, p: 1, textAlign: 'center' }}>
+      <Box sx={{ mt: 0.75, bgcolor: 'grey.100', border: '1px dashed', borderColor: 'divider', borderRadius: 1, p: 1, textAlign: 'center' }}>
         <Typography variant="caption" color="text.secondary">
-          未加载预览
+          {t('previewSections.notLoaded')}
         </Typography>
       </Box>
     )
@@ -53,7 +57,7 @@ function DreamweaverRunAssetPreviewCardMedia({
       <Box
         sx={{
           mt: 0.75,
-          bgcolor: '#000',
+          bgcolor: '#000', // sg-color-fixed: 媒体预览画布黑底（媒体数据色，双模恒黑）
           borderRadius: 1,
           overflow: 'hidden',
           display: 'flex',
@@ -68,7 +72,7 @@ function DreamweaverRunAssetPreviewCardMedia({
   }
 
   return (
-    <Box sx={{ mt: 0.75, bgcolor: '#000', borderRadius: 1, overflow: 'hidden' }}>
+    <Box sx={{ mt: 0.75, bgcolor: '#000', borderRadius: 1, overflow: 'hidden' }}>{/* sg-color-fixed: 媒体预览画布黑底（同 image 版） */}
       <Box component="video" src={previewUrl} controls sx={{ width: '100%', maxHeight: 240, display: 'block' }} />
     </Box>
   )
@@ -97,6 +101,7 @@ function DreamweaverRunAssetPreviewCard({
   onDownload: () => void
   formatPath: (value: unknown) => string | null
 }) {
+  const { t } = useTranslation()
   const filename = uri.split(/[\\/]+/).pop() || uri
   const pathLabel = formatPath(uri)
 
@@ -110,10 +115,10 @@ function DreamweaverRunAssetPreviewCard({
           <DreamweaverRunAssetPreviewCardMedia previewUrl={previewUrl} kind={kind} />
           <Box sx={{ mt: 1, display: 'flex', gap: 1, flexWrap: 'wrap', alignItems: 'center' }}>
             <Button size="small" variant="outlined" onClick={onLoadPreview} disabled={!canInteract || loading}>
-              {loading ? '加载中…' : previewUrl ? '重新加载' : '加载预览'}
+              {loading ? t('previewSections.loadingEllipsis') : previewUrl ? t('previewSections.reload') : t('previewSections.loadPreview')}
             </Button>
             <Button size="small" variant="text" onClick={onDownload} disabled={!canInteract || loading}>
-              下载
+              {t('previewSections.download')}
             </Button>
             {pathLabel && <Chip size="small" label={pathLabel} variant="outlined" />}
           </Box>
@@ -192,6 +197,7 @@ export function DreamweaverAssetPlanGrid({
   onDownload,
   formatPath,
 }: DreamweaverAssetPlanGridProps) {
+  const { t } = useTranslation()
   const list = Array.isArray(items) ? items : []
   if (!list.length) return null
 
@@ -207,7 +213,12 @@ export function DreamweaverAssetPlanGrid({
           const loading = uri ? Boolean(loadingByUri[uri]) : false
           const error = uri ? errorsByUri[uri] || null : null
           const status = item.status === 'done' || uri ? 'done' : item.status === 'processing' ? 'processing' : 'planned'
-          const statusLabel = status === 'done' ? '已生成' : status === 'processing' ? '生成中' : '待生成'
+          const statusLabel =
+            status === 'done'
+              ? t('dreamweaverScriptReview.statusDone')
+              : status === 'processing'
+                ? t('dreamweaverScriptReview.statusProcessing')
+                : t('dreamweaverScriptReview.statusPending')
           const statusColor: 'default' | 'success' | 'info' = status === 'done' ? 'success' : status === 'processing' ? 'info' : 'default'
           const label = String(item.label || item.id || '').trim() || item.id
           const kind = item.kind === 'video' ? 'video' : 'image'
@@ -221,15 +232,15 @@ export function DreamweaverAssetPlanGrid({
                       {label}
                     </Typography>
                     <Chip size="small" label={statusLabel} color={statusColor} />
-                    {item.optional && <Chip size="small" label="可选" variant="outlined" />}
+                    {item.optional && <Chip size="small" label={t('previewSections.optional')} variant="outlined" />}
                   </Box>
 
                   {previewUrl ? (
                     <DreamweaverRunAssetPreviewCardMedia previewUrl={previewUrl} kind={kind} />
                   ) : (
-                    <Box sx={{ mt: 0.75, bgcolor: '#fafafa', border: '1px dashed #ddd', borderRadius: 1, p: 1, textAlign: 'center' }}>
+                    <Box sx={{ mt: 0.75, bgcolor: 'grey.100', border: '1px dashed', borderColor: 'divider', borderRadius: 1, p: 1, textAlign: 'center' }}>
                       <Typography variant="caption" color="text.secondary">
-                        {uri ? '已生成，待加载预览' : '生成中，等待素材'}
+                        {uri ? t('previewSections.generatedAwaitPreview') : t('previewSections.generatingWaitAsset')}
                       </Typography>
                     </Box>
                   )}
@@ -237,10 +248,10 @@ export function DreamweaverAssetPlanGrid({
                   {uri && (
                     <Box sx={{ mt: 1, display: 'flex', gap: 1, flexWrap: 'wrap', alignItems: 'center' }}>
                       <Button size="small" variant="outlined" onClick={() => onLoadPreview(uri)} disabled={!canInteract || loading}>
-                        {loading ? '加载中…' : previewUrl ? '重新加载' : '加载预览'}
+                        {loading ? t('previewSections.loadingEllipsis') : previewUrl ? t('previewSections.reload') : t('previewSections.loadPreview')}
                       </Button>
                       <Button size="small" variant="text" onClick={() => onDownload(uri)} disabled={!canInteract || loading}>
-                        下载
+                        {t('previewSections.download')}
                       </Button>
                       {formatPath(uri) && <Chip size="small" label={formatPath(uri)!} variant="outlined" />}
                     </Box>
@@ -325,7 +336,7 @@ function DreamweaverStreamingTextBlock({
           }}
         />
       </Typography>
-      <Box sx={{ maxHeight, overflow: 'auto', bgcolor: '#fafafa', border: '1px solid #eee', borderRadius: 1, p: 1.5 }}>
+      <Box sx={{ maxHeight, overflow: 'auto', bgcolor: 'grey.100', border: '1px solid', borderColor: 'divider', borderRadius: 1, p: 1.5 }}>
         {monospace ? (
           <Typography
             variant="body2"
@@ -361,12 +372,13 @@ function DreamweaverStreamingPreviewHeader({
 }: {
   activeStreamKeys: string[]
 }) {
+  const { t } = useTranslation()
   return (
     <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', flexWrap: 'wrap', mb: 0.5 }}>
       <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
-        流式预览
+        {t('previewSections.streamingPreview')}
       </Typography>
-      {activeStreamKeys.length > 0 && <Chip size="small" label={`实时输出: ${activeStreamKeys.join(', ')}`} />}
+      {activeStreamKeys.length > 0 && <Chip size="small" label={t('previewSections.realtimeOutput', { keys: activeStreamKeys.join(', ') })} />}
     </Box>
   )
 }
@@ -376,7 +388,13 @@ function DreamweaverStreamingLibraryPlanCard({
 }: {
   item: DreamweaverLibraryPlanItem
 }) {
-  const statusLabel = item.status === 'done' ? '已生成' : item.status === 'processing' ? '生成中...' : '待生成'
+  const { t } = useTranslation()
+  const statusLabel =
+    item.status === 'done'
+      ? t('dreamweaverScriptReview.statusDone')
+      : item.status === 'processing'
+        ? t('dreamweaverScriptReview.statusProcessing')
+        : t('dreamweaverScriptReview.statusPending')
   const label = item.label || item.entity_name || item.role
 
   return (
@@ -452,7 +470,7 @@ function DreamweaverStreamingLibraryPlanCard({
                 borderRadius: 0.5,
               }}
             >
-              {item.status === 'processing' ? '生成中' : '完成'}
+              {item.status === 'processing' ? t('dreamweaverScriptReview.statusProcessing') : t('previewSections.done')}
             </Box>
           )}
         </Box>
@@ -485,15 +503,16 @@ export function DreamweaverStreamingPreview({
   assetPlanGrid,
   mergedVideoPlanGrid,
 }: DreamweaverStreamingPreviewProps) {
+  const { t } = useTranslation()
   if (step === 0) {
     if (!planText && !scriptText && !profileText && !audioText) return null
     return (
       <Box sx={{ mb: 1 }}>
         <DreamweaverStreamingPreviewHeader activeStreamKeys={activeStreamKeys} />
-        <DreamweaverStreamingTextBlock title="计划/脚本提要（流式）" text={planText} maxHeight={200} />
-        <DreamweaverStreamingTextBlock title="剧本（流式）" text={scriptText} maxHeight={400} />
-        <DreamweaverStreamingTextBlock title="角色小传（流式）" text={profileText} maxHeight={200} />
-        <DreamweaverStreamingTextBlock title="音频标记（流式）" text={audioText} maxHeight={200} monospace />
+        <DreamweaverStreamingTextBlock title={t('previewSections.streamPlanScript')} text={planText} maxHeight={200} />
+        <DreamweaverStreamingTextBlock title={t('previewSections.streamScript')} text={scriptText} maxHeight={400} />
+        <DreamweaverStreamingTextBlock title={t('previewSections.streamProfile')} text={profileText} maxHeight={200} />
+        <DreamweaverStreamingTextBlock title={t('previewSections.streamAudio')} text={audioText} maxHeight={200} monospace />
       </Box>
     )
   }
@@ -503,8 +522,8 @@ export function DreamweaverStreamingPreview({
     return (
       <Box sx={{ mb: 1 }}>
         <DreamweaverStreamingPreviewHeader activeStreamKeys={activeStreamKeys} />
-        <DreamweaverStreamingTextBlock title="分镜（流式）" text={storyboardText} maxHeight={400} />
-        <DreamweaverStreamingTextBlock title="镜头树（流式）" text={cameraTreeText} maxHeight={260} />
+        <DreamweaverStreamingTextBlock title={t('previewSections.streamStoryboard')} text={storyboardText} maxHeight={400} />
+        <DreamweaverStreamingTextBlock title={t('previewSections.streamCameraTree')} text={cameraTreeText} maxHeight={260} />
       </Box>
     )
   }
@@ -519,12 +538,12 @@ export function DreamweaverStreamingPreview({
       <Box sx={{ mb: 1 }}>
         <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', flexWrap: 'wrap', mb: 0.5 }}>
           <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
-            素材库生成
+            {t('previewSections.libraryGeneration')}
           </Typography>
-          <Chip size="small" label={`总计: ${libraryPlanItems.length}`} />
-          <Chip size="small" label={`已生成: ${doneCount}`} color={doneCount > 0 ? 'success' : 'default'} />
-          <Chip size="small" label={`生成中: ${processingCount}`} color={processingCount > 0 ? 'warning' : 'default'} />
-          <Chip size="small" label={`待生成: ${plannedCount}`} />
+          <Chip size="small" label={t('previewSections.summaryTotal', { count: libraryPlanItems.length })} />
+          <Chip size="small" label={t('previewSections.summaryDone', { count: doneCount })} color={doneCount > 0 ? 'success' : 'default'} />
+          <Chip size="small" label={t('previewSections.summaryProcessing', { count: processingCount })} color={processingCount > 0 ? 'warning' : 'default'} />
+          <Chip size="small" label={t('previewSections.summaryPending', { count: plannedCount })} />
         </Box>
         <Grid container spacing={1.5}>
           {libraryPlanItems.slice(0, 12).map((item) => (
@@ -533,7 +552,7 @@ export function DreamweaverStreamingPreview({
           {libraryPlanItems.length > 12 && (
             <Grid item xs={12}>
               <Typography variant="caption" color="text.secondary">
-                还有 {libraryPlanItems.length - 12} 个素材...
+                {t('previewSections.moreAssets', { count: libraryPlanItems.length - 12 })}
               </Typography>
             </Grid>
           )}
@@ -549,11 +568,11 @@ export function DreamweaverStreamingPreview({
     return (
       <Box sx={{ mb: 1 }}>
         <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', mb: 0.5 }}>
-          <Chip size="small" label={`占位: ${assetPlanSummary.total}`} />
-          <Chip size="small" label={`已生成: ${assetPlanSummary.done}`} color={assetPlanSummary.done > 0 ? 'success' : 'default'} />
-          <Chip size="small" label={`待生成: ${assetPlanSummary.planned}`} />
-          <Chip size="small" label={`图像: ${assetPlanSummary.images}`} />
-          <Chip size="small" label={`视频: ${assetPlanSummary.videos}`} />
+          <Chip size="small" label={t('previewSections.summaryPlaceholder', { count: assetPlanSummary.total })} />
+          <Chip size="small" label={t('previewSections.summaryDone', { count: assetPlanSummary.done })} color={assetPlanSummary.done > 0 ? 'success' : 'default'} />
+          <Chip size="small" label={t('previewSections.summaryPending', { count: assetPlanSummary.planned })} />
+          <Chip size="small" label={t('previewSections.summaryImages', { count: assetPlanSummary.images })} />
+          <Chip size="small" label={t('previewSections.summaryVideos', { count: assetPlanSummary.videos })} />
         </Box>
         {assetPlanGrid ?? null}
       </Box>
@@ -567,9 +586,13 @@ export function DreamweaverStreamingPreview({
       <Box sx={{ mb: 1 }}>
         <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', flexWrap: 'wrap', mb: 0.5 }}>
           <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
-            流式预览
+            {t('previewSections.streamingPreview')}
           </Typography>
-          <Chip size="small" label={mergedVideoPlan.uri ? '已生成' : '待生成'} color={mergedVideoPlan.uri ? 'success' : 'default'} />
+          <Chip
+            size="small"
+            label={mergedVideoPlan.uri ? t('dreamweaverScriptReview.statusDone') : t('dreamweaverScriptReview.statusPending')}
+            color={mergedVideoPlan.uri ? 'success' : 'default'}
+          />
         </Box>
         {mergedVideoPlanGrid ?? null}
       </Box>
@@ -600,6 +623,7 @@ export function DreamweaverScriptStageSnapshotView({
   scriptGeneration,
   entitySummary,
 }: DreamweaverScriptStageSnapshotViewProps) {
+  const { t } = useTranslation()
   const profilesCount = characterProfiles.length
   const markersCount = audioMarkers.length
   const hasGeneration = Boolean(scriptGeneration && typeof scriptGeneration === 'object' && Object.keys(scriptGeneration as object).length > 0)
@@ -610,8 +634,9 @@ export function DreamweaverScriptStageSnapshotView({
         whiteSpace: 'pre-wrap',
         fontFamily: 'monospace',
         fontSize: 12,
-        bgcolor: '#fafafa',
-        border: '1px solid #eee',
+        bgcolor: 'grey.100',
+        border: '1px solid',
+        borderColor: 'divider',
         borderRadius: 2,
         p: 1.5,
         maxHeight,
@@ -678,19 +703,19 @@ export function DreamweaverScriptStageSnapshotView({
   return (
     <Box sx={{ mb: 1 }}>
       {renderTextAccordion({
-        title: '计划 / 剧本提要（快照）',
+        title: t('previewSections.snapshotPlanScript'),
         text: planText,
-        emptyText: '暂无计划/提要快照（可能仍在生成或尚未落库）。',
+        emptyText: t('previewSections.snapshotPlanEmpty'),
         defaultExpanded: true,
       })}
 
       <Accordion defaultExpanded>
         <AccordionSummary expandIcon={<ExpandMoreIcon />}>
           {renderHeader(
-            '剧本（快照）',
+            t('previewSections.snapshotScript'),
             <>
-              <Chip size="small" label={scriptApproved ? '已通过' : '未通过'} color={scriptApproved ? 'success' : 'default'} />
-              <Chip size="small" label={`长度: ${scriptText.length}`} />
+              <Chip size="small" label={scriptApproved ? t('dreamweaverScriptReview.approved') : t('previewSections.notApproved')} color={scriptApproved ? 'success' : 'default'} />
+              <Chip size="small" label={t('previewSections.snapshotLength', { count: scriptText.length })} />
             </>,
           )}
         </AccordionSummary>
@@ -699,38 +724,38 @@ export function DreamweaverScriptStageSnapshotView({
             renderSnapshotMonospaceBox(scriptText.length > 6000 ? `${scriptText.slice(0, 6000)}\n…` : scriptText, 320)
           ) : (
             <Typography variant="body2" color="text.secondary">
-              尚无可用剧本快照（可能仍在生成或尚未落库）。
+              {t('previewSections.snapshotScriptEmpty')}
             </Typography>
           )}
         </AccordionDetails>
       </Accordion>
 
       {renderJsonAccordion(
-        '角色小传（快照）',
+        t('previewSections.snapshotProfiles'),
         characterProfiles,
-        '暂无角色小传（可能尚未生成或未落库）。',
-        profilesCount > 0 ? <Chip size="small" label={`${profilesCount} 条`} /> : null,
+        t('previewSections.snapshotProfilesEmpty'),
+        profilesCount > 0 ? <Chip size="small" label={t('previewSections.snapshotCount', { count: profilesCount })} /> : null,
       )}
 
       {renderJsonAccordion(
-        '音频标记（快照）',
+        t('previewSections.snapshotAudio'),
         audioMarkers,
-        '暂无音频标记（可能尚未生成或未落库）。',
-        markersCount > 0 ? <Chip size="small" label={`${markersCount} 条`} /> : null,
+        t('previewSections.snapshotAudioEmpty'),
+        markersCount > 0 ? <Chip size="small" label={t('previewSections.snapshotCount', { count: markersCount })} /> : null,
       )}
 
       {renderJsonAccordion(
-        '实体抽取（快照）',
+        t('previewSections.snapshotEntities'),
         scriptEntities,
-        '暂无实体抽取数据（可能尚未生成或未落库）。',
+        t('previewSections.snapshotEntitiesEmpty'),
         entitySummary ? <Chip size="small" label={entitySummary} /> : null,
       )}
 
       {renderJsonAccordion(
-        '剧本生成信息（快照）',
+        t('previewSections.snapshotGeneration'),
         scriptGeneration,
-        '暂无剧本生成信息（可能尚未生成或未落库）。',
-        hasGeneration ? <Chip size="small" label="已记录" /> : null,
+        t('dreamweaverScriptReview.noScriptInfo'),
+        hasGeneration ? <Chip size="small" label={t('previewSections.recorded')} /> : null,
       )}
     </Box>
   )

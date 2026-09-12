@@ -8,6 +8,8 @@ import {
   Typography,
 } from '@mui/material'
 
+import { useTranslation } from 'react-i18next'
+
 import {
   CharacterVoiceModelSelect,
   CharacterVoicePresetSelect,
@@ -51,6 +53,7 @@ const CharacterVoiceCard = ({
   onPreviewCharacterVoice,
   onOpenVoiceManagement,
 }: CharacterVoiceCardProps) => {
+  const { t } = useTranslation()
   const effectiveTtsModel = characterVoice.ttsModel || defaultTtsModel
   const effectiveVoicePresets = voicePresetsByModel[effectiveTtsModel] || currentVoicePresets
   const effectiveModelRequiresCustomVoice = modelRequiresCustomVoice(effectiveTtsModel, ttsModelOptions)
@@ -112,14 +115,14 @@ const CharacterVoiceCard = ({
                   whiteSpace: 'nowrap',
                 }}
               >
-                {characterVoice.role || '角色'} · {characterVoice.gender || '性别未设定'}
+                {characterVoice.role || t('audiobook.characterVoiceCard.defaultRole')} · {characterVoice.gender || t('audiobook.characterVoiceCard.genderUnset')}
               </Typography>
             )}
           </Box>
           <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
             {characterVoice.voiceId && (
               <Chip
-                label={voiceIncompatible ? '已配置（场景生成不兼容）' : '已配置'}
+                label={voiceIncompatible ? t('audiobook.characterVoiceCard.configuredIncompatible') : t('audiobook.characterVoiceCard.configured')}
                 size="small"
                 color={voiceIncompatible ? 'warning' : 'success'}
                 sx={{ height: 18 }}
@@ -146,16 +149,16 @@ const CharacterVoiceCard = ({
         </Box>
 
         <Box sx={{ mt: 1, display: 'flex', justifyContent: 'flex-end', gap: 1, flexWrap: 'wrap' }}>
-          <Tooltip title="创建、试听和管理克隆/设计音色">
+          <Tooltip title={t('audiobook.characterVoiceCard.manageTooltip')}>
             <Button
               size="small"
               variant="outlined"
               onClick={() => onOpenVoiceManagement(effectiveTtsModel)}
             >
-              音色管理
+              {t('audiobook.characterVoiceCard.manage')}
             </Button>
           </Tooltip>
-          <Tooltip title="云端精确试听效果，请稍作等待...">
+          <Tooltip title={t('audiobook.characterVoiceCard.previewTooltip')}>
             <span>
               <Button
                 size="small"
@@ -164,7 +167,7 @@ const CharacterVoiceCard = ({
                 disabled={!canPreview || isPreviewing}
                 startIcon={isPreviewing ? <CircularProgress size={16} color="inherit" /> : undefined}
               >
-                {isPreviewing ? '试听中...' : '试听'}
+                {isPreviewing ? t('audiobook.characterVoiceCard.previewing') : t('audiobook.characterVoiceCard.preview')}
               </Button>
             </span>
           </Tooltip>

@@ -3,6 +3,7 @@ import type {
   StoryExpansionFrameworkMetadata,
   StoryExpansionMode,
 } from '@/types/storyExpansion'
+import type { TFunction } from 'i18next'
 import { buildStoryExpansionRequestPlan } from './storyExpansionPlanning'
 import {
   buildConventionalCollaborationLimitMessage,
@@ -17,10 +18,10 @@ import {
 import { formatStoryExpansionDurationRange } from './storyExpansionTiming'
 import {
   getStoryExpansionExecutionModeLabel,
-  STORY_EXPANSION_INTENT_LABELS,
-  STORY_EXPANSION_MODE_LABELS,
-  STORY_EXPANSION_STRATEGY_LABELS,
-  STORY_PRESERVE_WRITTEN_MODE_LABELS,
+  getStoryExpansionIntentLabel,
+  getStoryExpansionModeLabel,
+  getStoryExpansionPreserveWrittenModeLabel,
+  getStoryExpansionStrategyLabel,
 } from './storyExpansionLabels'
 
 export type StoryExpansionDialogChipColor =
@@ -210,14 +211,14 @@ function trimText(value: string | null | undefined): string {
   return typeof value === 'string' ? value.trim() : ''
 }
 
-function getDurationEstimateSourceLabel(source: string): string {
+function getDurationEstimateSourceLabel(source: string, t?: TFunction): string {
   if (source === 'history_calibrated') {
-    return '历史校准'
+    return t ? t('storyExpansion.dialogView.durationSourceHistory') : '历史校准'
   }
   if (source === 'static') {
-    return '任务规模预估'
+    return t ? t('storyExpansion.dialogView.durationSourceStatic') : '任务规模预估'
   }
-  return source || '任务规模预估'
+  return source || (t ? t('storyExpansion.dialogView.durationSourceStatic') : '任务规模预估')
 }
 
 function getDurationEstimateChipColor(source: string, confidence: string): StoryExpansionDialogChipColor {
@@ -253,15 +254,15 @@ function formatPositiveIntRange(minValue: number | null, maxValue: number | null
   return `${start}-${end}`
 }
 
-function toDetailedChapterCountLabel(value: number): string {
-  return `${value}个细化章节`
+function toDetailedChapterCountLabel(value: number, t?: TFunction): string {
+  return t ? t('storyExpansion.dialogView.detailedChapterCount', { count: value }) : `${value}个细化章节`
 }
 
 function getConventionalCollaborationMaxTargetChapterCount(): number {
   return CONVENTIONAL_COLLABORATION_MAX_TOTAL_CHAPTERS
 }
 
-function normalizeDetailedChapterRangeText(rangeText?: string | null): string {
+function normalizeDetailedChapterRangeText(rangeText?: string | null, t?: TFunction): string {
   const value = trimText(rangeText)
   if (!value) {
     return ''
@@ -269,12 +270,12 @@ function normalizeDetailedChapterRangeText(rangeText?: string | null): string {
 
   const explicitRangeMatch = value.match(/^(\d+)\s*-\s*(\d+)\s*章$/)
   if (explicitRangeMatch) {
-    return `${explicitRangeMatch[1]}-${explicitRangeMatch[2]}个细化章节`
+    return t ? t('storyExpansion.dialogView.detailedChapterRange', { from: explicitRangeMatch[1], to: explicitRangeMatch[2] }) : `${explicitRangeMatch[1]}-${explicitRangeMatch[2]}个细化章节`
   }
 
   const singleValueMatch = value.match(/^(\d+)\s*章$/)
   if (singleValueMatch) {
-    return toDetailedChapterCountLabel(Number.parseInt(singleValueMatch[1], 10))
+    return toDetailedChapterCountLabel(Number.parseInt(singleValueMatch[1], 10), t)
   }
 
   return value
@@ -316,25 +317,25 @@ function buildEpicFrameworkCharacterPolicyText(input: {
   stageTargetCharacterCount: number | null
   effectiveAnalysisTargetCharacterCount: number | null
   followUpPhaseText: string
-}): string {
+}, t?: TFunction): string {
   const parts: string[] = []
 
   if (input.recommendedRangeText) {
-    parts.push(`全书建议规模约 ${input.recommendedRangeText} 人`)
+    parts.push(t ? t('storyExpansion.dialogView.epicPolicyScale', { range: input.recommendedRangeText }) : `全书建议规模约 ${input.recommendedRangeText} 人`)
   }
 
   if (input.stageTargetCharacterCount != null) {
-    parts.push(`框架阶段先补到 ${input.stageTargetCharacterCount} 人`)
+    parts.push(t ? t('storyExpansion.dialogView.epicPolicyStageTarget', { count: input.stageTargetCharacterCount }) : `框架阶段先补到 ${input.stageTargetCharacterCount} 人`)
   } else if (input.effectiveAnalysisTargetCharacterCount != null) {
-    parts.push(`框架阶段预计补到 ${input.effectiveAnalysisTargetCharacterCount} 人`)
+    parts.push(t ? t('storyExpansion.dialogView.epicPolicyStageEstimate', { count: input.effectiveAnalysisTargetCharacterCount }) : `框架阶段预计补到 ${input.effectiveAnalysisTargetCharacterCount} 人`)
   }
 
   if (input.followUpPhaseText) {
-    parts.push(`其余人物会在${input.followUpPhaseText}继续补齐`)
+    parts.push(t ? t('storyExpansion.dialogView.epicPolicyFollowUp', { phase: input.followUpPhaseText }) : `其余人物会在${input.followUpPhaseText}继续补齐`)
   }
 
   if (!parts.length) {
-    return '长篇框架阶段只建立核心人物骨架，不在此处直接手填全书目标人物数；卷内功能角色与细分人物会在后续单卷细化中逐步补齐。'
+    return t ? t('storyExpansion.dialogView.epicPolicyEmpty') : '长篇框架阶段只建立核心人物骨架，不在此处直接手填全书目标人物数；卷内功能角色与细分人物会在后续单卷细化中逐步补齐。'
   }
 
   return `${parts.join('；')}。`
@@ -342,6 +343,7 @@ function buildEpicFrameworkCharacterPolicyText(input: {
 
 export function createStoryExpansionDialogView(
   input: StoryExpansionDialogViewInput,
+  t?: TFunction,
 ): StoryExpansionDialogViewModel {
   const analysis = input.analysis
   const autoCharacterPlan = analysis?.auto_supplement?.character_plan
@@ -404,7 +406,7 @@ export function createStoryExpansionDialogView(
     ? (
       isConfiguredNumber(input.volumeChaptersMin) && isConfiguredNumber(input.volumeChaptersMax)
         ? `${input.volumeChaptersMin}-${input.volumeChaptersMax}`
-        : '待设定'
+        : (t ? t('storyExpansion.dialogView.pending') : '待设定')
     )
     : (
       isEpicFrameworkMode
@@ -414,18 +416,20 @@ export function createStoryExpansionDialogView(
             : (
               effectiveAnalysisTargetChapterCount != null
                 ? `${effectiveAnalysisTargetChapterCount}`
-                : '待设定'
+                : (t ? t('storyExpansion.dialogView.pending') : '待设定')
             )
         )
         : (
           effectiveTargetChapterCount == null && effectiveAnalysisTargetChapterCount != null
-            ? `系统估算 ${chapterDelta}`
+            ? (t ? t('storyExpansion.dialogView.systemEstimate', { count: chapterDelta }) : `系统估算 ${chapterDelta}`)
             : `${chapterDelta}`
         )
     )
   const chapterDeltaChipLabel = isVolumeDetailMode
-    ? '本卷细化章节'
-    : (isEpicFrameworkMode ? '规划总章' : '本轮新增细化章节')
+    ? (t ? t('storyExpansion.dialogView.volumeDetailChapters') : '本卷细化章节')
+    : (isEpicFrameworkMode
+      ? (t ? t('storyExpansion.dialogView.epicPlannedChapters') : '规划总章')
+      : (t ? t('storyExpansion.dialogView.roundNewChapters') : '本轮新增细化章节'))
 
   const displayedTargetCharacterCount = isVolumeDetailMode
     ? (analysis?.volume_detail?.target_character_count ?? input.targetCharacterCount ?? input.currentCharacterCount)
@@ -440,10 +444,10 @@ export function createStoryExpansionDialogView(
   const characterDeltaLabel = isVolumeDetailMode
     ? (
       input.volumeCharacterIncrement == null && effectiveAnalysisVolumeCharacterIncrement != null
-        ? `系统估算 ${effectiveAnalysisVolumeCharacterIncrement}`
+        ? (t ? t('storyExpansion.dialogView.systemEstimate', { count: effectiveAnalysisVolumeCharacterIncrement }) : `系统估算 ${effectiveAnalysisVolumeCharacterIncrement}`)
         : (
           input.volumeCharacterIncrement == null
-            ? '自动估算'
+            ? (t ? t('storyExpansion.dialogView.autoEstimate') : '自动估算')
             : `${characterDelta}`
         )
     )
@@ -451,47 +455,50 @@ export function createStoryExpansionDialogView(
       isEpicFrameworkMode
         ? (
           effectiveAnalysisTargetCharacterCount != null
-            ? `系统估算 ${characterDelta}`
-            : '自动估算'
+            ? (t ? t('storyExpansion.dialogView.systemEstimate', { count: characterDelta }) : `系统估算 ${characterDelta}`)
+            : (t ? t('storyExpansion.dialogView.autoEstimate') : '自动估算')
         )
         : (
           input.targetCharacterCount == null && effectiveAnalysisTargetCharacterCount != null
-            ? `系统估算 ${characterDelta}`
+            ? (t ? t('storyExpansion.dialogView.systemEstimate', { count: characterDelta }) : `系统估算 ${characterDelta}`)
             : `${characterDelta}`
         )
     )
   const characterDeltaChipLabel = isVolumeDetailMode
-    ? '计划补足人物'
-    : (isEpicFrameworkMode ? '计划补足人物' : '本轮新增人物')
+    ? (t ? t('storyExpansion.dialogView.planSupplementCharacters') : '计划补足人物')
+    : (isEpicFrameworkMode
+      ? (t ? t('storyExpansion.dialogView.planSupplementCharacters') : '计划补足人物')
+      : (t ? t('storyExpansion.dialogView.roundNewCharacters') : '本轮新增人物'))
 
   const autoEstimateHints: string[] = []
   if (!isVolumeDetailMode && input.targetChapterCount == null && effectiveAnalysisTargetChapterCount != null) {
-    autoEstimateHints.push(`目标细化章节数留空时，系统预估为 ${toDetailedChapterCountLabel(effectiveAnalysisTargetChapterCount)}`)
+    const chapterLabel = toDetailedChapterCountLabel(effectiveAnalysisTargetChapterCount, t)
+    autoEstimateHints.push(t ? t('storyExpansion.dialogView.estimateChapterEmpty', { label: chapterLabel }) : `目标细化章节数留空时，系统预估为 ${chapterLabel}`)
   }
   if (isVolumeDetailMode) {
     if (input.volumeCharacterIncrement == null && effectiveAnalysisVolumeCharacterIncrement != null) {
-      autoEstimateHints.push(`本卷新增人物上限留空时，系统预估为 ${effectiveAnalysisVolumeCharacterIncrement} 人`)
+      autoEstimateHints.push(t ? t('storyExpansion.dialogView.estimateVolumeCharactersEmpty', { count: effectiveAnalysisVolumeCharacterIncrement }) : `本卷新增人物上限留空时，系统预估为 ${effectiveAnalysisVolumeCharacterIncrement} 人`)
     }
   } else if (input.targetCharacterCount == null && effectiveAnalysisTargetCharacterCount != null) {
-    const stageLabel = trimText(autoCharacterPlan?.stage_label) || ((analysis?.auto_supplement?.character_delta || 0) > 0 ? '首轮' : '')
+    const stageLabel = trimText(autoCharacterPlan?.stage_label)
+      || ((analysis?.auto_supplement?.character_delta || 0) > 0 ? (t ? t('storyExpansion.dialogView.firstRound') : '首轮') : '')
     const recommendedRangeText = recommendedCharacterRangeText
     const followUpPhase = followUpPhaseText
+    const stageEstimateText = stageLabel || (t ? t('storyExpansion.dialogView.currentRound') : '本轮')
     if (recommendedCharacterAdditionalRangeText) {
-      autoEstimateHints.push(`建议补充人物：约 ${recommendedCharacterAdditionalRangeText} 人`)
+      autoEstimateHints.push(t ? t('storyExpansion.dialogView.suggestCharacters', { range: recommendedCharacterAdditionalRangeText }) : `建议补充人物：约 ${recommendedCharacterAdditionalRangeText} 人`)
     }
     if (
       taskTargetCharacterCount != null
       && stageTargetCharacterCount != null
       && taskTargetCharacterCount > stageTargetCharacterCount
     ) {
-      autoEstimateHints.push(
-        `点击一次开始后，系统会自动分轮推进；首轮先补到 ${effectiveAnalysisTargetCharacterCount} 人，不是只补 ${(analysis?.auto_supplement?.character_delta || 0)} 人就结束。`,
-      )
+      autoEstimateHints.push(t ? t('storyExpansion.dialogView.autoMultiRoundTip', { target: effectiveAnalysisTargetCharacterCount, delta: analysis?.auto_supplement?.character_delta || 0 }) : `点击一次开始后，系统会自动分轮推进；首轮先补到 ${effectiveAnalysisTargetCharacterCount} 人，不是只补 ${analysis?.auto_supplement?.character_delta || 0} 人就结束。`)
     }
     autoEstimateHints.push(
       (analysis?.auto_supplement?.character_delta || 0) > 0
-        ? `目标人物数留空时，系统${stageLabel || '本轮'}先补到 ${effectiveAnalysisTargetCharacterCount} 人`
-        : `目标人物数留空时，系统预估为 ${effectiveAnalysisTargetCharacterCount} 人`,
+        ? (t ? t('storyExpansion.dialogView.estimateCharactersWithStage', { stage: stageEstimateText, target: effectiveAnalysisTargetCharacterCount }) : `目标人物数留空时，系统${stageEstimateText}先补到 ${effectiveAnalysisTargetCharacterCount} 人`)
+        : (t ? t('storyExpansion.dialogView.estimateCharacters', { target: effectiveAnalysisTargetCharacterCount }) : `目标人物数留空时，系统预估为 ${effectiveAnalysisTargetCharacterCount} 人`),
     )
     if (
       taskTargetCharacterCount != null
@@ -500,15 +507,15 @@ export function createStoryExpansionDialogView(
     ) {
       autoEstimateHints.push(
         taskTargetCharacterIncrement != null
-          ? `本次自动协同预计补到 ${taskTargetCharacterCount} 人（约新增 ${taskTargetCharacterIncrement} 人）`
-          : `本次自动协同预计补到 ${taskTargetCharacterCount} 人`,
+          ? (t ? t('storyExpansion.dialogView.autoMultiEstimated', { target: taskTargetCharacterCount, increment: taskTargetCharacterIncrement }) : `本次自动协同预计补到 ${taskTargetCharacterCount} 人（约新增 ${taskTargetCharacterIncrement} 人）`)
+          : (t ? t('storyExpansion.dialogView.autoMultiEstimatedSimple', { target: taskTargetCharacterCount }) : `本次自动协同预计补到 ${taskTargetCharacterCount} 人`),
       )
     }
     if (recommendedRangeText) {
       autoEstimateHints.push(
         followUpPhase
-          ? `全书结构化人物建议规模约为 ${recommendedRangeText} 人；剩余角色会在${followUpPhase}继续补齐`
-          : `全书结构化人物建议规模约为 ${recommendedRangeText} 人`,
+          ? (t ? t('storyExpansion.dialogView.fullBookStructuredScaleWithPhase', { range: recommendedRangeText, phase: followUpPhase }) : `全书结构化人物建议规模约为 ${recommendedRangeText} 人；剩余角色会在${followUpPhase}继续补齐`)
+          : (t ? t('storyExpansion.dialogView.fullBookStructuredScale', { range: recommendedRangeText }) : `全书结构化人物建议规模约为 ${recommendedRangeText} 人`),
       )
     }
   }
@@ -529,50 +536,50 @@ export function createStoryExpansionDialogView(
     ? [
       {
         key: 'intent',
-        label: `系统主导 ${STORY_EXPANSION_INTENT_LABELS[effectiveIntent] || effectiveIntent || '未提供'}`,
+        label: t ? t('storyExpansion.dialogView.systemLeadIntent', { label: getStoryExpansionIntentLabel(effectiveIntent, 'storyExpansion.dialogView.notProvided', t) }) : `系统主导 ${getStoryExpansionIntentLabel(effectiveIntent, 'storyExpansion.dialogView.notProvided', t)}`,
         color: 'primary',
       },
       {
         key: 'strategy',
-        label: `执行顺序 ${STORY_EXPANSION_STRATEGY_LABELS[effectiveStrategy] || effectiveStrategy || '未提供'}`,
+        label: t ? t('storyExpansion.dialogView.executionOrderStrategy', { label: getStoryExpansionStrategyLabel(effectiveStrategy, 'storyExpansion.dialogView.notProvided', t) }) : `执行顺序 ${getStoryExpansionStrategyLabel(effectiveStrategy, 'storyExpansion.dialogView.notProvided', t)}`,
         color: 'success',
       },
       {
         key: 'execution-mode',
-        label: `执行模式 ${getStoryExpansionExecutionModeLabel(analysis.execution_mode, '未提供')}`,
+        label: t ? t('storyExpansion.dialogView.executionModeLabel', { label: getStoryExpansionExecutionModeLabel(analysis.execution_mode, 'storyExpansion.dialogView.notProvided', t) }) : `执行模式 ${getStoryExpansionExecutionModeLabel(analysis.execution_mode, 'storyExpansion.dialogView.notProvided', t)}`,
         color: 'secondary',
       },
       {
         key: 'expansion-mode',
-        label: `扩展形态 ${STORY_EXPANSION_MODE_LABELS[effectiveExpansionMode] || effectiveExpansionMode || '常规协同'}`,
+        label: t ? t('storyExpansion.dialogView.expansionShape', { label: getStoryExpansionModeLabel(effectiveExpansionMode, 'storyExpansion.mode.total', t) }) : `扩展形态 ${getStoryExpansionModeLabel(effectiveExpansionMode, 'storyExpansion.mode.total', t)}`,
         color: 'info',
       },
       ...(recommendedCharacterAdditionalRangeText
         ? [{
           key: 'character-suggestion',
-          label: `建议补人 ${recommendedCharacterAdditionalRangeText} 人`,
+          label: t ? t('storyExpansion.dialogView.suggestCharactersChip', { range: recommendedCharacterAdditionalRangeText }) : `建议补人 ${recommendedCharacterAdditionalRangeText} 人`,
           color: 'warning' as const,
         }]
         : []),
       ...(taskTargetCharacterCount != null && taskTargetCharacterCount > input.currentCharacterCount
         ? [{
           key: 'character-task-target',
-          label: `本次预计补到 ${taskTargetCharacterCount} 人`,
+          label: t ? t('storyExpansion.dialogView.estimatedReachCharacters', { count: taskTargetCharacterCount }) : `本次预计补到 ${taskTargetCharacterCount} 人`,
           color: 'secondary' as const,
         }, {
           key: 'character-auto-rounds',
-          label: '点击一次后自动分轮',
+          label: t ? t('storyExpansion.dialogView.autoRolling') : '点击一次后自动分轮',
           color: 'info' as const,
         }]
         : []),
       {
         key: 'estimated-rounds',
-        label: `预计轮次 ${estimatedRounds}`,
+        label: t ? t('storyExpansion.dialogView.estimatedRounds', { count: estimatedRounds }) : `预计轮次 ${estimatedRounds}`,
         color: 'default',
       },
       {
         key: 'score',
-        label: `协同评分 ${analysis.validation?.score ?? 0}`,
+        label: t ? t('storyExpansion.dialogView.collaborationScore', { score: analysis.validation?.score ?? 0 }) : `协同评分 ${analysis.validation?.score ?? 0}`,
         color: 'warning',
       },
     ]
@@ -580,40 +587,41 @@ export function createStoryExpansionDialogView(
   if (estimatedDurationText && precheckChips.length > 0) {
     precheckChips.splice(Math.max(0, precheckChips.length - 1), 0, {
       key: 'estimated-duration',
-      label: `预计耗时 ${estimatedDurationText}`,
+      label: t ? t('storyExpansion.dialogView.estimatedDuration', { duration: estimatedDurationText }) : `预计耗时 ${estimatedDurationText}`,
       color: 'default',
     })
   }
   if (durationEstimateSource && precheckChips.length > 0) {
-    const sourceLabel = getDurationEstimateSourceLabel(durationEstimateSource)
+    const sourceLabel = getDurationEstimateSourceLabel(durationEstimateSource, t)
     precheckChips.splice(Math.max(0, precheckChips.length - 1), 0, {
       key: 'duration-estimate-source',
       label: durationEstimateSampleCount != null
-        ? `估时 ${sourceLabel} · ${durationEstimateSampleCount} 样本`
-        : `估时 ${sourceLabel}`,
+        ? (t ? t('storyExpansion.dialogView.estimateDurationWithSamples', { source: sourceLabel, count: durationEstimateSampleCount }) : `估时 ${sourceLabel} · ${durationEstimateSampleCount} 样本`)
+        : (t ? t('storyExpansion.dialogView.estimateDurationSimple', { source: sourceLabel }) : `估时 ${sourceLabel}`),
       color: getDurationEstimateChipColor(durationEstimateSource, durationEstimateConfidence),
     })
   }
 
+  const requestBandLabel = trimText(analysis?.mode_suitability?.request_band_label) || (t ? t('storyExpansion.dialogView.notEvaluated') : '未评估')
   const modeSuitabilityView = analysis?.mode_suitability?.mode === 'total'
     ? {
       chips: [
         {
           key: 'request-band',
-          label: `适用结论 ${analysis.mode_suitability.request_band_label || '未评估'}`,
+          label: t ? t('storyExpansion.dialogView.suitabilityConclusion', { label: requestBandLabel }) : `适用结论 ${requestBandLabel}`,
           color: getSuitabilityChipColor(analysis.mode_suitability.request_band),
         },
         ...(analysis.mode_suitability.preferred_iterative_step
           ? [{
             key: 'preferred-step',
-            label: `建议步长 ${toDetailedChapterCountLabel(analysis.mode_suitability.preferred_iterative_step)}`,
+            label: t ? t('storyExpansion.dialogView.suggestedStep', { label: toDetailedChapterCountLabel(analysis.mode_suitability.preferred_iterative_step, t) }) : `建议步长 ${toDetailedChapterCountLabel(analysis.mode_suitability.preferred_iterative_step, t)}`,
             color: 'default' as const,
           }]
           : []),
         ...(analysis.mode_suitability.single_round_delta_limit
           ? [{
             key: 'single-round-limit',
-            label: `单轮上限 ${toDetailedChapterCountLabel(analysis.mode_suitability.single_round_delta_limit)}`,
+            label: t ? t('storyExpansion.dialogView.singleRoundLimit', { label: toDetailedChapterCountLabel(analysis.mode_suitability.single_round_delta_limit, t) }) : `单轮上限 ${toDetailedChapterCountLabel(analysis.mode_suitability.single_round_delta_limit, t)}`,
             color: 'default' as const,
           }]
           : []),
@@ -625,21 +633,22 @@ export function createStoryExpansionDialogView(
         analysis.mode_suitability.bands,
       ).map((item, index) => ({
           key: `${item.key || item.label || 'band'}-${index}`,
-          label: trimText(item.label) || '区间',
-          rangeText: normalizeDetailedChapterRangeText(item.range_text),
+          label: trimText(item.label) || (t ? t('storyExpansion.dialogView.range') : '区间'),
+          rangeText: normalizeDetailedChapterRangeText(item.range_text, t),
           detail: trimText(item.detail),
         })),
     }
     : null
 
   const writtenContextText = analysis?.written_chapter_context?.applied
-    ? (
-      `已检测到 ${analysis.written_chapter_context.written_chapter_count || 0} 章正文，当前按“${
-        STORY_PRESERVE_WRITTEN_MODE_LABELS[analysis.written_chapter_context.preserve_written_mode || '']
-        || analysis.written_chapter_context.preserve_written_mode
-        || '未知模式'
-      }”参与协同。`
-    )
+    ? (() => {
+      const preserveModeLabel = getStoryExpansionPreserveWrittenModeLabel(
+        analysis.written_chapter_context.preserve_written_mode,
+        'storyExpansion.dialogView.unknownMode',
+        t,
+      )
+      return t ? t('storyExpansion.dialogView.writtenContextDetected', { count: analysis.written_chapter_context.written_chapter_count || 0, mode: preserveModeLabel }) : `已检测到 ${analysis.written_chapter_context.written_chapter_count || 0} 章正文，当前按“${preserveModeLabel}”参与协同。`
+    })()
     : ''
 
   const autoSupplementText = (
@@ -652,18 +661,18 @@ export function createStoryExpansionDialogView(
         && stageTargetCharacterCount != null
         && taskTargetCharacterCount > stageTargetCharacterCount
       )
-        ? `点击一次开始后，系统会自动连续执行多轮；首轮补足 ${(analysis?.auto_supplement?.character_delta || 0)} 个配套人物只是起点，不是整次任务上限。`
+        ? (t ? t('storyExpansion.dialogView.autoMultiRoundFullTip', { count: analysis?.auto_supplement?.character_delta || 0 }) : `点击一次开始后，系统会自动连续执行多轮；首轮补足 ${(analysis?.auto_supplement?.character_delta || 0)} 个配套人物只是起点，不是整次任务上限。`)
         : '',
       (analysis?.auto_supplement?.chapter_delta || 0) > 0
-        ? `系统会自动补足 ${analysis?.auto_supplement?.chapter_delta} 个承接章节。`
+        ? (t ? t('storyExpansion.dialogView.autoSupplementChapters', { count: analysis?.auto_supplement?.chapter_delta }) : `系统会自动补足 ${analysis?.auto_supplement?.chapter_delta} 个承接章节。`)
         : '',
       (analysis?.auto_supplement?.character_delta || 0) > 0
         ? (
           taskTargetCharacterCount != null
           && stageTargetCharacterCount != null
           && taskTargetCharacterCount > stageTargetCharacterCount
-            ? `首轮会自动补足 ${analysis?.auto_supplement?.character_delta} 个配套人物。`
-            : `系统会自动补足 ${analysis?.auto_supplement?.character_delta} 个配套人物。`
+            ? (t ? t('storyExpansion.dialogView.autoSupplementCharactersWithRound', { count: analysis?.auto_supplement?.character_delta }) : `首轮会自动补足 ${analysis?.auto_supplement?.character_delta} 个配套人物。`)
+            : (t ? t('storyExpansion.dialogView.autoSupplementSupportingCharacters', { count: analysis?.auto_supplement?.character_delta }) : `系统会自动补足 ${analysis?.auto_supplement?.character_delta} 个配套人物。`)
         )
         : '',
       (() => {
@@ -680,35 +689,41 @@ export function createStoryExpansionDialogView(
         const taskTargetText = taskTarget != null && taskTarget > stageTarget
           ? (
             taskIncrement != null
-              ? `本次自动协同预计补到 ${taskTarget} 人（约新增 ${taskIncrement} 人）。`
-              : `本次自动协同预计补到 ${taskTarget} 人。`
+              ? (t ? t('storyExpansion.dialogView.charPlanTaskIncrement', { target: taskTarget, increment: taskIncrement }) : `本次自动协同预计补到 ${taskTarget} 人（约新增 ${taskIncrement} 人）。`)
+              : (t ? t('storyExpansion.dialogView.charPlanTaskSimple', { target: taskTarget }) : `本次自动协同预计补到 ${taskTarget} 人。`)
           )
           : ''
         const remainingText = remaining != null && followUpPhase
-          ? `距离建议下限还差约 ${remaining} 人，会在${followUpPhase}继续补齐。`
+          ? (t ? t('storyExpansion.dialogView.charPlanRemaining', { count: remaining, phase: followUpPhase }) : `距离建议下限还差约 ${remaining} 人，会在${followUpPhase}继续补齐。`)
           : ''
-        return `人物计划：全书建议规模约为 ${recommendedRangeText} 人，${stageLabel}先补到 ${stageTarget} 人。${taskTargetText}${remainingText}`.trim()
+        const planSummary = t ? t('storyExpansion.dialogView.charPlanScale', { range: recommendedRangeText, stage: stageLabel, target: stageTarget }) : `人物计划：全书建议规模约为 ${recommendedRangeText} 人，${stageLabel}先补到 ${stageTarget} 人。`
+        return `${planSummary}${taskTargetText}${remainingText}`.trim()
       })(),
     ].filter(Boolean).join(' ')
     : ''
 
+  const epicVolumesText = analysis?.epic_config?.total_volumes || (t ? t('storyExpansion.dialogView.undecided') : '未定')
   const epicConfigText = analysis?.epic_config?.chapter_range?.length
-    ? `长篇框架规模：${analysis.epic_config.total_volumes || '未定'} 卷 / ${analysis.epic_config.chapter_range[0]}-${analysis.epic_config.chapter_range[1]} 章`
+    ? (t ? t('storyExpansion.dialogView.epicConfigScale', { volumes: epicVolumesText, from: analysis.epic_config.chapter_range[0], to: analysis.epic_config.chapter_range[1] }) : `长篇框架规模：${epicVolumesText} 卷 / ${analysis.epic_config.chapter_range[0]}-${analysis.epic_config.chapter_range[1]} 章`)
     : ''
 
+  const volumeIndexText = analysis?.volume_detail?.target_volume_index || (t ? t('storyExpansion.dialogView.undecided') : '未定')
+  const overwriteSuffixText = analysis?.volume_detail?.existing_detail
+    ? (t ? t('storyExpansion.dialogView.willOverwriteDetail') : '（将覆盖原有细纲）')
+    : ''
   const volumeDetailText = analysis?.volume_detail?.chapter_range?.length
-    ? `单卷细化目标：第${analysis.volume_detail.target_volume_index || '未定'}卷 / 第${analysis.volume_detail.chapter_range[0]}-${analysis.volume_detail.chapter_range[1]}章${analysis.volume_detail.existing_detail ? '（将覆盖原有细纲）' : ''}`
+    ? (t ? t('storyExpansion.dialogView.volumeDetailTarget', { volume: volumeIndexText, from: analysis.volume_detail.chapter_range[0], to: analysis.volume_detail.chapter_range[1], suffix: overwriteSuffixText }) : `单卷细化目标：第${volumeIndexText}卷 / 第${analysis.volume_detail.chapter_range[0]}-${analysis.volume_detail.chapter_range[1]}章${overwriteSuffixText}`)
     : ''
 
   const volumeCharacterPlanText = typeof analysis?.volume_detail?.character_increment === 'number'
-    ? `本卷人物计划：新增不超过 ${analysis.volume_detail.character_increment} 人，对齐后的全书人物目标为 ${analysis.volume_detail.target_character_count || input.currentCharacterCount} 人。`
+    ? (t ? t('storyExpansion.dialogView.volumeCharPlan', { count: analysis.volume_detail.character_increment, target: analysis.volume_detail.target_character_count || input.currentCharacterCount }) : `本卷人物计划：新增不超过 ${analysis.volume_detail.character_increment} 人，对齐后的全书人物目标为 ${analysis.volume_detail.target_character_count || input.currentCharacterCount} 人。`)
     : ''
 
   const compactAnalysisSummaryText = buildCompactAnalysisSummary(analysis?.analysis_summary || '')
   const compactAutoEstimateHints = (() => {
     if (isVolumeDetailMode) {
       if (input.volumeCharacterIncrement == null && effectiveAnalysisVolumeCharacterIncrement != null) {
-        return [`本卷人物留空时，系统预计新增 ${effectiveAnalysisVolumeCharacterIncrement} 人。`]
+        return [t ? t('storyExpansion.dialogView.volumeCharEmptyEstimate', { count: effectiveAnalysisVolumeCharacterIncrement }) : `本卷人物留空时，系统预计新增 ${effectiveAnalysisVolumeCharacterIncrement} 人。`]
       }
       return []
     }
@@ -719,23 +734,23 @@ export function createStoryExpansionDialogView(
         stageTargetCharacterCount,
         effectiveAnalysisTargetCharacterCount,
         followUpPhaseText,
-      })]
+      }, t)]
     }
 
     if (input.targetCharacterCount == null && effectiveAnalysisTargetCharacterCount != null) {
       const parts: string[] = []
       if (recommendedCharacterAdditionalRangeText) {
-        parts.push(`建议补人约 ${recommendedCharacterAdditionalRangeText} 人`)
+        parts.push(t ? t('storyExpansion.dialogView.suggestCharactersAbout', { range: recommendedCharacterAdditionalRangeText }) : `建议补人约 ${recommendedCharacterAdditionalRangeText} 人`)
       }
       if (
         taskTargetCharacterCount != null
         && stageTargetCharacterCount != null
         && taskTargetCharacterCount > stageTargetCharacterCount
       ) {
-        parts.push(`首轮先补到 ${effectiveAnalysisTargetCharacterCount} 人`)
-        parts.push(`本次任务预计补到 ${taskTargetCharacterCount} 人`)
+        parts.push(t ? t('storyExpansion.dialogView.firstRoundReachCharacters', { count: effectiveAnalysisTargetCharacterCount }) : `首轮先补到 ${effectiveAnalysisTargetCharacterCount} 人`)
+        parts.push(t ? t('storyExpansion.dialogView.taskEstimatedReachCharacters', { count: taskTargetCharacterCount }) : `本次任务预计补到 ${taskTargetCharacterCount} 人`)
       } else {
-        parts.push(`人物留空时系统预计补到 ${effectiveAnalysisTargetCharacterCount} 人`)
+        parts.push(t ? t('storyExpansion.dialogView.charEmptySystemEstimate', { count: effectiveAnalysisTargetCharacterCount }) : `人物留空时系统预计补到 ${effectiveAnalysisTargetCharacterCount} 人`)
       }
       return parts.length > 0 ? [`${parts.join('；')}。`] : []
     }
@@ -744,8 +759,8 @@ export function createStoryExpansionDialogView(
       const estimatedChapterDelta = Math.max(0, effectiveAnalysisTargetChapterCount - input.currentChapterCount)
       return [
         estimatedChapterDelta > 0
-          ? `章节留空时，系统预计先补到 ${effectiveAnalysisTargetChapterCount} 章（较当前新增 ${estimatedChapterDelta} 章）。`
-          : `章节留空时，系统预计补到 ${effectiveAnalysisTargetChapterCount} 章。`,
+          ? (t ? t('storyExpansion.dialogView.chapterEmptySystemEstimateWithDelta', { count: effectiveAnalysisTargetChapterCount, delta: estimatedChapterDelta }) : `章节留空时，系统预计先补到 ${effectiveAnalysisTargetChapterCount} 章（较当前新增 ${estimatedChapterDelta} 章）。`)
+          : (t ? t('storyExpansion.dialogView.chapterEmptySystemEstimate', { count: effectiveAnalysisTargetChapterCount }) : `章节留空时，系统预计补到 ${effectiveAnalysisTargetChapterCount} 章。`),
       ]
     }
 
@@ -776,7 +791,7 @@ export function createStoryExpansionDialogView(
       alert: {
         key: 'epic-framework-info',
         severity: 'info',
-        text: '长篇框架协同会先规划故事总纲、阶段路线图、分卷框架和滚动细化策略，不会一次性直接铺满上千章细纲。',
+        text: t ? t('storyExpansion.dialogView.epicFrameworkInfo') : '长篇框架协同会先规划故事总纲、阶段路线图、分卷框架和滚动细化策略，不会一次性直接铺满上千章细纲。',
       },
     })
     if (hasFramework) {
@@ -787,7 +802,7 @@ export function createStoryExpansionDialogView(
           key: 'epic-framework-regenerate-warning',
           severity: 'warning',
           variant: 'outlined',
-          text: '当前项目已存在长篇框架。重新生成成功后会覆盖现有框架，并清空已展开卷的细纲，后续需要按新框架重新做单卷细化。',
+          text: t ? t('storyExpansion.dialogView.epicRegenerateWarning') : '当前项目已存在长篇框架。重新生成成功后会覆盖现有框架，并清空已展开卷的细纲，后续需要按新框架重新做单卷细化。',
         },
       })
     }
@@ -795,17 +810,17 @@ export function createStoryExpansionDialogView(
       kind: 'fields',
       key: 'epic-framework-fields',
       fields: [
-        createField('totalVolumes', '总卷数', '建议 3-50 卷', {
+        createField('totalVolumes', t ? t('storyExpansion.dialogView.totalVolumesLabel') : '总卷数', t ? t('storyExpansion.dialogView.totalVolumesHelper') : '建议 3-50 卷', {
           min: 3,
           max: 50,
           flex: '1 1 160px',
         }),
-        createField('totalChaptersMin', '总章范围最小值', '建议 300-5000 章', {
+        createField('totalChaptersMin', t ? t('storyExpansion.dialogView.totalChaptersMinLabel') : '总章范围最小值', t ? t('storyExpansion.dialogView.totalChaptersMinHelper') : '建议 300-5000 章', {
           min: EPIC_FRAMEWORK_MIN_TOTAL_CHAPTERS,
           max: EPIC_FRAMEWORK_MAX_TOTAL_CHAPTERS,
           flex: '1 1 180px',
         }),
-        createField('totalChaptersMax', '总章范围最大值', '会作为框架规模上限', {
+        createField('totalChaptersMax', t ? t('storyExpansion.dialogView.totalChaptersMaxLabel') : '总章范围最大值', t ? t('storyExpansion.dialogView.totalChaptersMaxHelper') : '会作为框架规模上限', {
           min: EPIC_FRAMEWORK_MIN_TOTAL_CHAPTERS,
           max: EPIC_FRAMEWORK_MAX_TOTAL_CHAPTERS,
           flex: '1 1 180px',
@@ -824,10 +839,14 @@ export function createStoryExpansionDialogView(
           stageTargetCharacterCount,
           effectiveAnalysisTargetCharacterCount,
           followUpPhaseText,
-        }),
+        }, t),
       },
     })
   } else if (isVolumeDetailMode) {
+    const frameworkVolumeCountText = input.frameworkMetadata?.metadata?.total_volumes || (t ? t('storyExpansion.dialogView.unrecognized') : '未识别')
+    const expandedVolumesText = input.frameworkMetadata?.metadata?.expanded_volumes?.length
+      ? input.frameworkMetadata.metadata.expanded_volumes.join('、')
+      : (t ? t('storyExpansion.dialogView.noExpandedVolumes') : '暂无')
     configBlocks.push({
       kind: 'alert',
       key: 'volume-framework-status',
@@ -835,25 +854,25 @@ export function createStoryExpansionDialogView(
         key: 'volume-framework-status',
         severity: hasFramework ? 'info' : 'warning',
         text: hasFramework
-          ? `已检测到长篇框架，可直接细化单卷。当前框架共 ${input.frameworkMetadata?.metadata?.total_volumes || '未识别'} 卷，已展开卷：${input.frameworkMetadata?.metadata?.expanded_volumes?.length ? input.frameworkMetadata.metadata.expanded_volumes.join('、') : '暂无'}。`
-          : '单卷细化协同需要先存在长篇框架。若当前项目还没有框架，请先使用"长篇框架协同"生成总卷框架。',
+          ? (t ? t('storyExpansion.dialogView.volumeFrameworkStatus', { volumes: frameworkVolumeCountText, expanded: expandedVolumesText }) : `已检测到长篇框架，可直接细化单卷。当前框架共 ${frameworkVolumeCountText} 卷，已展开卷：${expandedVolumesText}。`)
+          : (t ? t('storyExpansion.dialogView.volumeNeedFramework') : '单卷细化协同需要先存在长篇框架。若当前项目还没有框架，请先使用"长篇框架协同"生成总卷框架。'),
       },
     })
     configBlocks.push({
       kind: 'fields',
       key: 'volume-detail-fields',
       fields: [
-        createField('targetVolumeIndex', '目标卷编号', `范围 1-${input.frameworkMetadata?.metadata?.total_volumes || 50}`, {
+        createField('targetVolumeIndex', t ? t('storyExpansion.dialogView.targetVolumeIndexLabel') : '目标卷编号', t ? t('storyExpansion.dialogView.targetVolumeIndexHelper', { max: input.frameworkMetadata?.metadata?.total_volumes || 50 }) : `范围 1-${input.frameworkMetadata?.metadata?.total_volumes || 50}`, {
           min: 1,
           max: Math.max(1, input.frameworkMetadata?.metadata?.total_volumes || 50),
           flex: '1 1 160px',
         }),
-        createField('volumeChaptersMin', '本卷最少章节', '建议 60-100 章', {
+        createField('volumeChaptersMin', t ? t('storyExpansion.dialogView.volumeChaptersMinLabel') : '本卷最少章节', t ? t('storyExpansion.dialogView.volumeChaptersMinHelper') : '建议 60-100 章', {
           min: 20,
           max: VOLUME_DETAIL_INPUT_MAX_CHAPTERS,
           flex: '1 1 180px',
         }),
-        createField('volumeChaptersMax', '本卷最多章节', '建议尽量控制在 100 章内；必要时可放宽到 120 章', {
+        createField('volumeChaptersMax', t ? t('storyExpansion.dialogView.volumeChaptersMaxLabel') : '本卷最多章节', t ? t('storyExpansion.dialogView.volumeChaptersMaxHelper') : '建议尽量控制在 100 章内；必要时可放宽到 120 章', {
           min: 20,
           max: VOLUME_DETAIL_INPUT_MAX_CHAPTERS,
           flex: '1 1 180px',
@@ -867,25 +886,25 @@ export function createStoryExpansionDialogView(
         key: 'volume-character-info',
         severity: 'info',
         variant: 'outlined',
-        text: '下方只读人物字段仅作全书角色规模参考；系统会优先补齐与当前卷剧情承接相关的人物。若本轮人物留空，请将“本卷新增人物上限”留空，由系统自动估算。',
+        text: t ? t('storyExpansion.dialogView.volumeCharacterInfo') : '下方只读人物字段仅作全书角色规模参考；系统会优先补齐与当前卷剧情承接相关的人物。若本轮人物留空，请将“本卷新增人物上限”留空，由系统自动估算。',
       },
     })
     configBlocks.push({
       kind: 'fields',
       key: 'volume-character-fields',
       fields: [
-        createField('displayedTargetCharacterCount', '全书目标人物数（只读）', '仅作全书角色规模参考，单卷细化模式下不直接编辑。', {
+        createField('displayedTargetCharacterCount', t ? t('storyExpansion.dialogView.fullBookTargetReadonlyLabel') : '全书目标人物数（只读）', t ? t('storyExpansion.dialogView.fullBookTargetReadonlyHelper') : '仅作全书角色规模参考，单卷细化模式下不直接编辑。', {
           readOnly: true,
           flex: '1 1 220px',
         }),
         createField(
           'volumeCharacterIncrement',
-          '本卷新增人物上限',
+          t ? t('storyExpansion.dialogView.volumeCharacterIncrementLabel') : '本卷新增人物上限',
           input.volumeCharacterIncrement == null
-            ? '留空则由系统结合本卷剧情承接自动估算。'
-            : '输入 0 表示本轮不新增人物，建议单轮 0-6。',
+            ? (t ? t('storyExpansion.dialogView.volumeCharacterIncrementHelperBlank') : '留空则由系统结合本卷剧情承接自动估算。')
+            : (t ? t('storyExpansion.dialogView.volumeCharacterIncrementHelperFilled') : '输入 0 表示本轮不新增人物，建议单轮 0-6。'),
           {
-            placeholder: '留空则由系统自动估算',
+            placeholder: t ? t('storyExpansion.dialogView.leaveBlankAutoEstimate') : '留空则由系统自动估算',
             min: 0,
             max: 30,
             flex: '1 1 220px',
@@ -901,7 +920,7 @@ export function createStoryExpansionDialogView(
         alert: {
           key: 'total-epic-recommendation-alert',
           severity: 'warning',
-          text: `当前项目按篇幅规划更适合“长篇框架协同”。若本轮只是补少量细化章节或人物，且总规模仍不超过${CONVENTIONAL_COLLABORATION_RECOMMENDED_MAX_CHAPTERS}章，可以继续常规协同；若准备推进 ${FRAMEWORK_PREFERRED_TOTAL_FROM} 章及以上主线，请优先切换到长篇框架协同。`,
+          text: t ? t('storyExpansion.dialogView.totalEpicRecommendation', { recommended: CONVENTIONAL_COLLABORATION_RECOMMENDED_MAX_CHAPTERS, from: FRAMEWORK_PREFERRED_TOTAL_FROM }) : `当前项目按篇幅规划更适合“长篇框架协同”。若本轮只是补少量细化章节或人物，且总规模仍不超过${CONVENTIONAL_COLLABORATION_RECOMMENDED_MAX_CHAPTERS}章，可以继续常规协同；若准备推进 ${FRAMEWORK_PREFERRED_TOTAL_FROM} 章及以上主线，请优先切换到长篇框架协同。`
         },
       })
     }
@@ -935,7 +954,7 @@ export function createStoryExpansionDialogView(
         alert: {
           key: 'total-conventional-range-alert',
           severity: 'warning',
-          text: `当前总规模已超过常规协同上限 ${toDetailedChapterCountLabel(CONVENTIONAL_COLLABORATION_MAX_TOTAL_CHAPTERS)}。请改选“长篇框架协同”。`,
+          text: t ? t('storyExpansion.dialogView.totalConventionalRangeAlert', { limit: toDetailedChapterCountLabel(CONVENTIONAL_COLLABORATION_MAX_TOTAL_CHAPTERS, t) }) : `当前总规模已超过常规协同上限 ${toDetailedChapterCountLabel(CONVENTIONAL_COLLABORATION_MAX_TOTAL_CHAPTERS, t)}。请改选“长篇框架协同”。`
         },
       })
     }
@@ -946,20 +965,20 @@ export function createStoryExpansionDialogView(
       fields: [
         createField(
           'targetChapterCount',
-          '目标细化章节数',
+          t ? t('storyExpansion.dialogView.targetChapterCountLabel') : '目标细化章节数',
           isConventionalCollaborationForbidden
-            ? buildConventionalCollaborationLimitMessage()
+            ? buildConventionalCollaborationLimitMessage(t)
             : (
               isConventionalCollaborationCaution
-                ? buildConventionalCollaborationRecommendationMessage()
+                ? buildConventionalCollaborationRecommendationMessage(t)
                 : (
                   input.targetChapterCount == null
-                    ? `请至少填写目标细化章节数或目标人物数其中一项，另一项可留空自动估算。${buildConventionalCollaborationRecommendationMessage()}`
-                    : buildConventionalCollaborationRecommendationMessage()
+                    ? (t ? t('storyExpansion.dialogView.targetChapterCountHelperNeedBoth', { recommend: buildConventionalCollaborationRecommendationMessage(t) }) : `请至少填写目标细化章节数或目标人物数其中一项，另一项可留空自动估算。${buildConventionalCollaborationRecommendationMessage(t)}`)
+                    : buildConventionalCollaborationRecommendationMessage(t)
                 )
             ),
           {
-            placeholder: '留空则由系统自动估算',
+            placeholder: t ? t('storyExpansion.dialogView.leaveBlankAutoEstimate') : '留空则由系统自动估算',
             min: input.currentChapterCount > CONVENTIONAL_COLLABORATION_MAX_TOTAL_CHAPTERS
               ? 1
               : Math.max(1, input.currentChapterCount),
@@ -975,12 +994,12 @@ export function createStoryExpansionDialogView(
       fields: [
         createField(
           'targetCharacterCount',
-          '目标人物数',
+          t ? t('storyExpansion.dialogView.targetCharacterCountLabel') : '目标人物数',
           input.targetCharacterCount == null
-            ? '留空后系统会结合章节需求分阶段自动估算角色补足量。'
-            : '少量角色会直接补齐；较大规模角色扩展会自动改走多轮协同。',
+            ? (t ? t('storyExpansion.dialogView.targetCharacterCountHelperBlank') : '留空后系统会结合章节需求分阶段自动估算角色补足量。')
+            : (t ? t('storyExpansion.dialogView.targetCharacterCountHelperFilled') : '少量角色会直接补齐；较大规模角色扩展会自动改走多轮协同。'),
           {
-            placeholder: '留空则由系统自动估算',
+            placeholder: t ? t('storyExpansion.dialogView.leaveBlankAutoEstimate') : '留空则由系统自动估算',
             min: Math.max(1, input.currentCharacterCount),
             max: Math.max(200, input.currentCharacterCount),
             fullWidth: true,
@@ -994,21 +1013,21 @@ export function createStoryExpansionDialogView(
     ? ''
     : (
       input.expansionMode === 'volume_detail'
-        ? '单卷细化协同需要先选择有效卷编号，并填写完整的本卷细化章节范围。'
+        ? (t ? t('storyExpansion.dialogView.validationVolumeDetail') : '单卷细化协同需要先选择有效卷编号，并填写完整的本卷细化章节范围。')
         : (
           input.expansionMode === 'epic_framework'
-            ? '长篇框架协同需要有效的总卷数和总章节范围。'
+            ? (t ? t('storyExpansion.dialogView.validationEpicFramework') : '长篇框架协同需要有效的总卷数和总章节范围。')
             : (
               input.targetChapterCount == null && input.targetCharacterCount == null
-                ? '请至少填写目标细化章节数或目标人物数其中一项，留空的另一项将由系统自动估算。'
-                : '目标细化章节数或目标人物数至少要有一项大于当前值，协同扩展才会执行。'
+                ? (t ? t('storyExpansion.dialogView.validationNeedOneField') : '请至少填写目标细化章节数或目标人物数其中一项，留空的另一项将由系统自动估算。')
+                : (t ? t('storyExpansion.dialogView.validationNeedDelta') : '目标细化章节数或目标人物数至少要有一项大于当前值，协同扩展才会执行。')
             )
         )
     )
 
-  const currentChapterChipLabel = `当前已细化章节 ${input.currentChapterCount}`
-  const currentCharacterChipLabel = `当前已识别人物 ${input.currentCharacterCount}`
-  const currentCountHelperText = '当前数量按结构化内容统计：仅计算明确章节标题与已识别人物名，阶段规划、范围引用和人物关系段不计入。'
+  const currentChapterChipLabel = t ? t('storyExpansion.dialogView.currentChapterChip', { count: input.currentChapterCount }) : `当前已细化章节 ${input.currentChapterCount}`
+  const currentCharacterChipLabel = t ? t('storyExpansion.dialogView.currentCharacterChip', { count: input.currentCharacterCount }) : `当前已识别人物 ${input.currentCharacterCount}`
+  const currentCountHelperText = t ? t('storyExpansion.dialogView.currentCountHelper') : '当前数量按结构化内容统计：仅计算明确章节标题与已识别人物名，阶段规划、范围引用和人物关系段不计入。'
 
   return {
     isVolumeDetailMode,
@@ -1037,12 +1056,16 @@ export function createStoryExpansionDialogView(
     volumeCharacterPlanText,
     modelPlanLines: [],
     validationMessage,
-    expansionModeHelperText: hasFramework ? '当前项目已有长篇框架，可继续单卷细化，也可以切回长篇框架协同重新生成。' : '',
+    expansionModeHelperText: hasFramework
+      ? (t ? t('storyExpansion.dialogView.expansionModeHelperHasFramework') : '当前项目已有长篇框架，可继续单卷细化，也可以切回长篇框架协同重新生成。')
+      : '',
     lockedModeAlertText: '',
     writtenModeInfoAlertText: isVolumeDetailMode
-      ? '单卷细化协同会直接继承现有长篇框架和正文上下文，本轮不再单独配置"已写章节处理"模式。'
+      ? (t ? t('storyExpansion.dialogView.writtenModeInfoVolumeDetail') : '单卷细化协同会直接继承现有长篇框架和正文上下文，本轮不再单独配置"已写章节处理"模式。')
       : '',
-    autoSupplementLabel: isVolumeDetailMode ? '允许系统自动补足本卷承接人物或桥接章节' : '允许系统自动补足配套人物或承接章节',
+    autoSupplementLabel: isVolumeDetailMode
+      ? (t ? t('storyExpansion.dialogView.autoSupplementLabelVolumeDetail') : '允许系统自动补足本卷承接人物或桥接章节')
+      : (t ? t('storyExpansion.dialogView.autoSupplementLabelDefault') : '允许系统自动补足配套人物或承接章节'),
     configBlocks,
   }
 }

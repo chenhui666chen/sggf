@@ -2,6 +2,7 @@ import {
   useCallback,
   useMemo,
 } from 'react'
+import { useTranslation } from 'react-i18next'
 
 import type { UserAssetCardsGridProps } from '@/components/user-assets/UserAssetCardsGrid'
 import type { UserAssetWorkspaceContentProps } from '@/components/user-assets/UserAssetWorkspaceContent'
@@ -149,13 +150,15 @@ export function useUserAssetWorkspaceViewModel(
     fallbackPath = '/user-center',
     enabled = true,
   } = options
+  const { t } = useTranslation()
 
   const workspaceInput = useMemo(
     () => buildUserCenterAssetWorkspaceInput({
       projects,
       pointsOverview,
+      t,
     }),
-    [pointsOverview, projects],
+    [pointsOverview, projects, t],
   )
 
   const controller = useUserAssetWorkspaceController({

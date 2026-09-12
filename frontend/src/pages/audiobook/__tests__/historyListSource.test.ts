@@ -18,13 +18,13 @@ describe('history record mode and completion stage guards', () => {
   })
 
   it('labels each record with its engine mode', () => {
-    expect(historyDialogSource).toContain('场景生成')
-    expect(historyDialogSource).toContain('分轨合成')
+    expect(historyDialogSource).toContain("t('audiobook.audiobookSetupStep.seedSceneLabel')")
+    expect(historyDialogSource).toContain("t('audiobook.audiobookSetupStep.legacyStemsLabel')")
   })
 
   it('separates script-only completion from full audio completion', () => {
-    expect(historyDialogSource).toContain('剧本完成·音频未生成')
-    expect(historyDialogSource).toContain('全部完成')
+    expect(historyDialogSource).toContain("t('audiobook.historyDialog.scriptOnlyCompleted')")
+    expect(historyDialogSource).toContain("t('audiobook.historyDialog.allCompleted')")
     // 剧本-only 阶段提示使用橙色警示色而非绿色完成色
     expect(historyDialogSource).toContain('notice.warning')
   })

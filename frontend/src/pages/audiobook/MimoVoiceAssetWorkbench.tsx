@@ -1,4 +1,5 @@
 import { useMemo, useState, type ChangeEvent } from 'react'
+import { useTranslation } from 'react-i18next'
 
 import {
   Alert,
@@ -49,6 +50,7 @@ const MimoVoiceAssetWorkbench = ({
   onPreviewCustomVoice,
   onChanged,
 }: MimoVoiceAssetWorkbenchProps) => {
+  const { t } = useTranslation()
   const isCloneModel = ttsModel === 'mimo-v2.5-tts-voiceclone'
   const [name, setName] = useState('')
   const [content, setContent] = useState('')
@@ -88,12 +90,12 @@ const MimoVoiceAssetWorkbench = ({
     setMessage(null)
     try {
       if (!isMimoCloneSupportedAudioFile(file)) {
-        throw new Error('MiMo Voice Clone 仅支持 mp3 或 wav 音频，请转换格式后上传。')
+        throw new Error(t('audiobook.mimoVoiceAssetWorkbench.unsupportedFormatError'))
       }
       setCloneSampleFile(file)
-      setMessage('已选择音频样本，可保存为 MiMo 复刻音色。')
+      setMessage(t('audiobook.mimoVoiceAssetWorkbench.sampleSelectedNotice'))
     } catch (err: unknown) {
-      setError(await extractApiErrorMessage(err, '选择 MiMo 复刻音频样本失败'))
+      setError(await extractApiErrorMessage(err, t('audiobook.mimoVoiceAssetWorkbench.sampleSelectFailed')))
     } finally {
       setUploading(false)
     }
@@ -107,9 +109,9 @@ const MimoVoiceAssetWorkbench = ({
     try {
       const file = await convertRecordedAudioBlobToWavFile(blob)
       setCloneSampleFile(file)
-      setMessage('录音已转换为 WAV 样本，可保存为 MiMo 复刻音色。')
+      setMessage(t('audiobook.mimoVoiceAssetWorkbench.wavConvertedNotice'))
     } catch (err: unknown) {
-      setError(await extractApiErrorMessage(err, '录音转换为 WAV 失败，请改用上传 mp3 或 wav 文件'))
+      setError(await extractApiErrorMessage(err, t('audiobook.mimoVoiceAssetWorkbench.wavConvertFailed')))
     } finally {
       setUploading(false)
     }
@@ -138,7 +140,7 @@ const MimoVoiceAssetWorkbench = ({
     try {
       if (isCloneModel) {
         if (!cloneSampleFile) {
-          throw new Error('请先录音或上传音频样本')
+          throw new Error(t('audiobook.mimoVoiceAssetWorkbench.sampleRequiredError'))
         }
         await apiClient.createMimoVoiceCloneAssetFromFile({
           name,
@@ -153,10 +155,10 @@ const MimoVoiceAssetWorkbench = ({
       setName('')
       setContent('')
       setCloneSampleFile(null)
-      setMessage('已保存 MiMo 本地音色，可在角色音色下拉中直接选择。')
+      setMessage(t('audiobook.mimoVoiceAssetWorkbench.cloneCreatedNotice'))
       onChanged()
     } catch (err: unknown) {
-      setError(await extractApiErrorMessage(err, '保存 MiMo 音色失败'))
+      setError(await extractApiErrorMessage(err, t('audiobook.mimoVoiceAssetWorkbench.cloneCreateFailed')))
     } finally {
       setLoading(false)
     }
@@ -169,10 +171,10 @@ const MimoVoiceAssetWorkbench = ({
     setMessage(null)
     try {
       await apiClient.deleteMimoVoiceAsset(assetId)
-      setMessage('已删除 MiMo 本地音色。')
+      setMessage(t('audiobook.mimoVoiceAssetWorkbench.cloneRemovedNotice'))
       onChanged()
     } catch (err: unknown) {
-      setError(await extractApiErrorMessage(err, '删除 MiMo 音色失败'))
+      setError(await extractApiErrorMessage(err, t('audiobook.mimoVoiceAssetWorkbench.cloneRemoveFailed')))
     } finally {
       setDeletingId(null)
     }
@@ -181,10 +183,12 @@ const MimoVoiceAssetWorkbench = ({
   return (
     <Paper variant="outlined" sx={{ mb: 1, p: 1.5 }}>
       <Typography variant="subtitle2" sx={{ mb: 0.5 }}>
-        自定义音色管理（{isCloneModel ? 'MiMo Voice Clone' : 'MiMo Voice Design'}）
+        {t('audiobook.mimoVoiceAssetWorkbench.title', {
+          model: isCloneModel ? 'MiMo Voice Clone' : 'MiMo Voice Design',
+        })}
       </Typography>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
-        先保存可复用音色，再到角色音色下拉中选用；生成时后端会自动展开为 MiMo 所需参数。
+        {t('audiobook.mimoVoiceAssetWorkbench.intro')}
       </Typography>
 
       <Paper
@@ -198,12 +202,14 @@ const MimoVoiceAssetWorkbench = ({
       >
         <Box sx={{ minWidth: 0, maxWidth: 720 }}>
           <Typography variant="subtitle1" sx={{ fontWeight: 800, lineHeight: 1.25 }}>
-            {isCloneModel ? '声音复刻' : '声音设计'}
+            {isCloneModel
+              ? t('audiobook.mimoVoiceAssetWorkbench.cloneTitle')
+              : t('audiobook.mimoVoiceAssetWorkbench.designTitle')}
           </Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5, lineHeight: 1.75 }}>
             {isCloneModel
-              ? '上传 mp3/wav 或录制真实样本，录音会自动转换为 WAV 后保存为 MiMo 可复用复刻音色。'
-              : '用文字描述声线、年龄感和情绪底色，保存为 MiMo 可复用设计音色。'}
+              ? t('audiobook.mimoVoiceAssetWorkbench.cloneDescription')
+              : t('audiobook.mimoVoiceAssetWorkbench.designDescription')}
           </Typography>
         </Box>
 
@@ -218,7 +224,7 @@ const MimoVoiceAssetWorkbench = ({
           }}
         >
           <TextField
-            label="音色名称"
+            label={t('audiobook.minimaxVoiceClone.nameLabel')}
             value={name}
             onChange={(event) => setName(event.target.value)}
             size="small"
@@ -234,7 +240,7 @@ const MimoVoiceAssetWorkbench = ({
             startIcon={loading ? <CircularProgress size={18} color="inherit" /> : undefined}
             sx={{ ...audiobookButtonSx.brandContained, minHeight: 40 }}
           >
-            {loading ? '保存中...' : '保存音色'}
+            {loading ? t('audiobook.mimoVoiceAssetWorkbench.savingText') : t('audiobook.mimoVoiceAssetWorkbench.saveVoice')}
           </Button>
           {isCloneModel ? (
             <Box
@@ -255,9 +261,11 @@ const MimoVoiceAssetWorkbench = ({
             >
               <Box sx={{ minWidth: 0, flex: 1 }}>
                 <Typography variant="caption" color="text.secondary" sx={{ display: 'block', lineHeight: 1.2 }}>
-                  {cloneSampleFile ? '已选择音频样本' : '音频样本'}
+                  {cloneSampleFile
+                    ? t('audiobook.mimoVoiceAssetWorkbench.sampleSelected')
+                    : t('audiobook.mimoVoiceAssetWorkbench.sampleLabel')}
                 </Typography>
-                <Tooltip title={cloneSampleSummary || '请录音或上传音频样本'}>
+                <Tooltip title={cloneSampleSummary || t('audiobook.mimoVoiceAssetWorkbench.sampleHint')}>
                   <Typography
                     variant="body2"
                     sx={{
@@ -266,7 +274,7 @@ const MimoVoiceAssetWorkbench = ({
                       whiteSpace: 'nowrap',
                     }}
                   >
-                    {cloneSampleSummary || '尚未选择样本'}
+                    {cloneSampleSummary || t('audiobook.mimoVoiceAssetWorkbench.noSampleYet')}
                   </Typography>
                 </Tooltip>
               </Box>
@@ -281,16 +289,16 @@ const MimoVoiceAssetWorkbench = ({
                   }}
                   sx={{ minWidth: 64 }}
                 >
-                  清除样本
+                  {t('audiobook.mimoVoiceAssetWorkbench.clearSample')}
                 </Button>
               )}
             </Box>
           ) : (
             <TextField
-              label="声音描述"
+              label={t('audiobook.mimoVoiceAssetWorkbench.descriptionLabel')}
               value={content}
               onChange={(event) => setContent(event.target.value)}
-              placeholder="青年女性，中音，语速中等，温柔但疲惫，适合有声书对白"
+              placeholder={t('audiobook.mimoVoiceAssetWorkbench.descriptionPlaceholder')}
               size="small"
               fullWidth
               multiline
@@ -310,7 +318,7 @@ const MimoVoiceAssetWorkbench = ({
               onClick={() => setRecordDialogOpen(true)}
               sx={audiobookButtonSx.neutralOutlined}
             >
-              录音
+              {t('audiobook.minimaxVoiceClone.record')}
             </Button>
             <Button
               variant="outlined"
@@ -319,7 +327,9 @@ const MimoVoiceAssetWorkbench = ({
               startIcon={uploading ? <CircularProgress size={16} color="inherit" /> : undefined}
               sx={audiobookButtonSx.brandOutlined}
             >
-              {uploading ? '上传中...' : '上传音频'}
+              {uploading
+                ? t('audiobook.mimoVoiceAssetWorkbench.uploadingText')
+                : t('audiobook.minimaxVoiceClone.uploadAudio')}
               <input
                 type="file"
                 hidden
@@ -328,7 +338,7 @@ const MimoVoiceAssetWorkbench = ({
               />
             </Button>
             <Typography variant="caption" color="text.secondary" sx={{ minWidth: 220, flex: '1 1 260px' }}>
-              MiMo Voice Clone 仅支持 mp3/wav；录音会自动转换为 wav，不会在页面展示大段编码内容。
+              {t('audiobook.mimoVoiceAssetWorkbench.fileSupportHint')}
             </Typography>
           </Box>
         )}
@@ -391,26 +401,30 @@ const MimoVoiceAssetWorkbench = ({
                       size="small"
                       color={preset.customType === 'clone' ? 'success' : 'warning'}
                     />
-                    <Tooltip title="试听">
+                    <Tooltip title={t('audiobook.minimaxVoiceClone.preview')}>
                       <span>
                         <IconButton
                           size="small"
                           disabled={Boolean(previewingVoiceId) || isDeleting}
                           onClick={() => onPreviewCustomVoice(preset, ttsModel)}
-                          aria-label={`试听 ${preset.label || preset.id}`}
+                          aria-label={t('audiobook.minimaxVoiceClone.previewAria', {
+                            name: preset.label || preset.id,
+                          })}
                         >
                           {isPreviewing ? <CircularProgress size={18} /> : <PlayArrowIcon fontSize="small" />}
                         </IconButton>
                       </span>
                     </Tooltip>
-                    <Tooltip title={isDeleting ? '删除中' : '删除'}>
+                    <Tooltip title={isDeleting ? t('audiobook.mimoVoiceAssetWorkbench.deletingText') : t('audiobook.mimoVoiceAssetWorkbench.delete')}>
                       <span>
                         <IconButton
                           size="small"
                           color="error"
                           disabled={isDeleting}
                           onClick={() => handleDelete(preset.id)}
-                          aria-label={`删除 ${preset.label || preset.id}`}
+                          aria-label={t('audiobook.mimoVoiceAssetWorkbench.deleteAria', {
+                            name: preset.label || preset.id,
+                          })}
                         >
                           {isDeleting ? <CircularProgress size={18} /> : <DeleteOutlineIcon fontSize="small" />}
                         </IconButton>
@@ -428,7 +442,9 @@ const MimoVoiceAssetWorkbench = ({
                 onClick={() => setShowAllPresets((current) => !current)}
                 sx={{ justifySelf: 'start', fontSize: '0.75rem', minWidth: 0 }}
               >
-                {showAllPresets ? '收起' : `展开 ${hiddenPresetCount} 个`}
+                {showAllPresets
+                  ? t('audiobook.mimoVoiceAssetWorkbench.collapse')
+                  : t('audiobook.mimoVoiceAssetWorkbench.expand', { total: hiddenPresetCount })}
               </Button>
             )}
           </Box>

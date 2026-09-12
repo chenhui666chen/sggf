@@ -1,9 +1,13 @@
+import type { TFunction } from 'i18next'
+
 import type {
   UserAssetListArchiveFilter,
   UserAssetListFilters,
   UserAssetListViewFilter,
   UserAssetSourceOption,
 } from './userAssetListPresentation'
+
+const DEFAULT_TRANSLATE: TFunction = ((key: string) => key) as TFunction
 
 export type UserAssetFilterToolbarFieldKey =
   | 'viewFilter'
@@ -43,20 +47,22 @@ type BuildUserAssetFilterToolbarPresentationOptions = {
   loading?: boolean
 }
 
-function buildViewFilterOptions(): UserAssetFilterToolbarOption[] {
+function buildViewFilterOptions(t?: TFunction): UserAssetFilterToolbarOption[] {
+  const translate = t ?? DEFAULT_TRANSLATE
   return [
-    { value: 'all', label: '全部资产' },
-    { value: 'favorites', label: '仅看重点' },
-    { value: 'deliverable', label: '仅看成品' },
-    { value: 'reusable', label: '仅看可复用' },
+    { value: 'all', label: translate('userAsset.filter.allAssets') },
+    { value: 'favorites', label: translate('userAsset.filter.favoritesOnly') },
+    { value: 'deliverable', label: translate('userAsset.filter.deliverableOnly') },
+    { value: 'reusable', label: translate('userAsset.filter.reusableOnly') },
   ]
 }
 
-function buildArchiveFilterOptions(): UserAssetFilterToolbarOption[] {
+function buildArchiveFilterOptions(t?: TFunction): UserAssetFilterToolbarOption[] {
+  const translate = t ?? DEFAULT_TRANSLATE
   return [
-    { value: 'active', label: '活跃资产' },
-    { value: 'archived', label: '已归档' },
-    { value: 'all', label: '全部' },
+    { value: 'active', label: translate('userAsset.filter.activeAssets') },
+    { value: 'archived', label: translate('userAsset.filter.archivedAssets') },
+    { value: 'all', label: translate('userAsset.filter.all') },
   ]
 }
 
@@ -72,9 +78,11 @@ function buildValueOptions(
 
 function buildSourceFilterOptions(
   sourceOptions: UserAssetSourceOption[],
+  t?: TFunction,
 ): UserAssetFilterToolbarOption[] {
+  const translate = t ?? DEFAULT_TRANSLATE
   return [
-    { value: 'all', label: '全部来源' },
+    { value: 'all', label: translate('userAsset.filter.allSources') },
     ...sourceOptions.map((option) => ({
       value: option.value,
       label: option.label,
@@ -84,7 +92,9 @@ function buildSourceFilterOptions(
 
 export function buildUserAssetFilterToolbarPresentation(
   options: BuildUserAssetFilterToolbarPresentationOptions,
+  t?: TFunction,
 ): UserAssetFilterToolbarPresentation {
+  const translate = t ?? DEFAULT_TRANSLATE
   const {
     filters,
     kindOptions,
@@ -98,37 +108,37 @@ export function buildUserAssetFilterToolbarPresentation(
     fields: [
       {
         key: 'viewFilter',
-        label: '资产视角',
+        label: translate('userAsset.filter.viewLabel'),
         value: filters.viewFilter,
-        options: buildViewFilterOptions(),
+        options: buildViewFilterOptions(t),
       },
       {
         key: 'kindFilter',
-        label: '资产类型',
+        label: translate('userAsset.filter.kindLabel'),
         value: filters.kindFilter,
-        options: buildValueOptions('全部类型', kindOptions),
+        options: buildValueOptions(translate('userAsset.filter.allKinds'), kindOptions),
       },
       {
         key: 'sourceFilter',
-        label: '来源模块',
+        label: translate('userAsset.filter.sourceLabel'),
         value: filters.sourceFilter,
-        options: buildSourceFilterOptions(sourceOptions),
+        options: buildSourceFilterOptions(sourceOptions, t),
       },
       {
         key: 'archiveFilter',
-        label: '归档范围',
+        label: translate('userAsset.filter.archiveLabel'),
         value: filters.archiveFilter,
-        options: buildArchiveFilterOptions(),
+        options: buildArchiveFilterOptions(t),
       },
       {
         key: 'tagFilter',
-        label: '标签',
+        label: translate('userAsset.filter.tagLabel'),
         value: filters.tagFilter,
-        options: buildValueOptions('全部标签', tagOptions),
+        options: buildValueOptions(translate('userAsset.filter.allTags'), tagOptions),
       },
     ],
-    resultLabel: `当前结果 ${filteredCount}`,
-    refreshLabel: '刷新资产',
+    resultLabel: translate('userAsset.filter.resultCount', { count: filteredCount }),
+    refreshLabel: translate('userAsset.filter.refresh'),
     refreshDisabled: loading,
   }
 }

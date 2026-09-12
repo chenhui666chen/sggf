@@ -23,6 +23,7 @@ import PlayArrowIcon from '@mui/icons-material/PlayArrow'
 import ReplayIcon from '@mui/icons-material/Replay'
 import StopCircleIcon from '@mui/icons-material/StopCircle'
 import SurroundSoundIcon from '@mui/icons-material/SurroundSound'
+import { useTranslation } from 'react-i18next'
 
 import type {
   PendingSegmentRegeneration,
@@ -34,26 +35,29 @@ import type {
 const previewOptions: Array<{
   type: PreviewType
   label: string
+  labelKey?: string
   icon: JSX.Element
 }> = [
-  { type: 'voice', label: '人声', icon: <PlayArrowIcon fontSize="small" /> },
-  { type: 'sfx', label: '音效', icon: <GraphicEqIcon fontSize="small" /> },
-  { type: 'bgm', label: '配乐', icon: <LibraryMusicIcon fontSize="small" /> },
-  { type: 'mix', label: '融合', icon: <SurroundSoundIcon fontSize="small" /> },
+  { type: 'voice', label: '人声', labelKey: 'audiobook.scriptSegmentActions.voiceLabel', icon: <PlayArrowIcon fontSize="small" /> },
+  { type: 'sfx', label: '音效', labelKey: 'audiobook.scriptSegmentActions.sfxLabel', icon: <GraphicEqIcon fontSize="small" /> },
+  { type: 'bgm', label: '配乐', labelKey: 'audiobook.scriptSegmentActions.bgmLabel', icon: <LibraryMusicIcon fontSize="small" /> },
+  { type: 'mix', label: '融合', labelKey: 'audiobook.scriptSegmentActions.mixLabel', icon: <SurroundSoundIcon fontSize="small" /> },
 ]
 
 const regenerateOptions: Array<{
   key: string
   type: PreviewType
   label: string
+  labelKey?: string
   icon: JSX.Element
   sourceMode?: SegmentSourceMode
 }> = [
-  { key: 'voice', type: 'voice', label: '人声', icon: <MicIcon fontSize="small" /> },
+  { key: 'voice', type: 'voice', label: '人声', labelKey: 'audiobook.scriptSegmentActions.voiceLabel', icon: <MicIcon fontSize="small" /> },
   {
     key: 'sfx-library',
     type: 'sfx',
     label: '音效重新生成（从库匹配）',
+    labelKey: 'audiobook.scriptSegmentActions.sfxLibraryRegenerate',
     icon: <GraphicEqIcon fontSize="small" />,
     sourceMode: 'library',
   },
@@ -61,6 +65,7 @@ const regenerateOptions: Array<{
     key: 'sfx-ai',
     type: 'sfx',
     label: '音效 AI 重新生成',
+    labelKey: 'audiobook.scriptSegmentActions.sfxAiRegenerate',
     icon: <AutoAwesomeIcon fontSize="small" />,
     sourceMode: 'ai_generate',
   },
@@ -68,6 +73,7 @@ const regenerateOptions: Array<{
     key: 'bgm-library',
     type: 'bgm',
     label: '配乐重新生成（从库匹配）',
+    labelKey: 'audiobook.scriptSegmentActions.bgmLibraryRegenerate',
     icon: <LibraryMusicIcon fontSize="small" />,
     sourceMode: 'library',
   },
@@ -75,10 +81,11 @@ const regenerateOptions: Array<{
     key: 'bgm-ai',
     type: 'bgm',
     label: '配乐 AI 重新生成',
+    labelKey: 'audiobook.scriptSegmentActions.bgmAiRegenerate',
     icon: <AutoAwesomeIcon fontSize="small" />,
     sourceMode: 'ai_generate',
   },
-  { key: 'mix', type: 'mix', label: '融合', icon: <SurroundSoundIcon fontSize="small" /> },
+  { key: 'mix', type: 'mix', label: '融合', labelKey: 'audiobook.scriptSegmentActions.mixLabel', icon: <SurroundSoundIcon fontSize="small" /> },
 ]
 
 interface ScriptSegmentActionsProps {
@@ -140,6 +147,7 @@ const ScriptSegmentActions = ({
   menuPaperSx,
   mutedTextColor,
 }: ScriptSegmentActionsProps) => {
+  const { t } = useTranslation()
   const [previewMenuAnchor, setPreviewMenuAnchor] = useState<HTMLElement | null>(null)
   const [regenerateMenuAnchor, setRegenerateMenuAnchor] = useState<HTMLElement | null>(null)
   const isBusy = previewingType !== null
@@ -187,10 +195,12 @@ const ScriptSegmentActions = ({
         variant="text"
         onClick={() => onToggleDetails(index)}
       >
-        {detailsOpen ? '收起详情' : '查看详情'}
+        {detailsOpen
+          ? t('audiobook.scriptSegmentActions.toggleDetailsOpen')
+          : t('audiobook.scriptSegmentActions.toggleDetailsClosed')}
       </Button>
 
-      <Tooltip title="选择单轨或融合试听">
+      <Tooltip title={t('audiobook.scriptSegmentActions.previewTooltip')}>
         <span>
           <Button
             size="small"
@@ -200,7 +210,9 @@ const ScriptSegmentActions = ({
             startIcon={isBusy ? <CircularProgress size={14} /> : <PlayArrowIcon fontSize="small" />}
             endIcon={<KeyboardArrowDownIcon fontSize="small" />}
           >
-            {isBusy ? '播放中...' : '试听'}
+            {isBusy
+              ? t('audiobook.scriptSegmentActions.playingText')
+              : t('audiobook.scriptSegmentActions.previewLabel')}
           </Button>
         </span>
       </Tooltip>
@@ -223,13 +235,13 @@ const ScriptSegmentActions = ({
               <ListItemIcon>
                 {previewingType === option.type ? <CircularProgress size={18} /> : option.icon}
               </ListItemIcon>
-              <ListItemText>{option.label}</ListItemText>
+              <ListItemText>{option.labelKey ? t(option.labelKey) : option.label}</ListItemText>
             </MenuItem>
           )
         })}
       </Menu>
 
-      <Tooltip title="选择单轨或融合重新生成">
+      <Tooltip title={t('audiobook.scriptSegmentActions.regenerateTooltip')}>
         <span>
           <Button
             size="small"
@@ -240,7 +252,9 @@ const ScriptSegmentActions = ({
             startIcon={regenerating ? <CircularProgress size={14} /> : <ReplayIcon fontSize="small" />}
             endIcon={<KeyboardArrowDownIcon fontSize="small" />}
           >
-            {regenerating ? '重新生成中...' : '重新生成'}
+            {regenerating
+              ? t('audiobook.scriptSegmentActions.regeneratingText')
+              : t('audiobook.scriptSegmentActions.regenerateLabel')}
           </Button>
         </span>
       </Tooltip>
@@ -257,12 +271,14 @@ const ScriptSegmentActions = ({
             disabled={regenerating || !hasText}
           >
             <ListItemIcon>{option.icon}</ListItemIcon>
-            <ListItemText>{option.label}</ListItemText>
+            <ListItemText>{option.labelKey ? t(option.labelKey) : option.label}</ListItemText>
           </MenuItem>
         ))}
       </Menu>
 
-      <Tooltip title={voiceRecording ? '结束真人配音录制并上传候选' : '真人直接配音，录完后生成候选版本'}>
+      <Tooltip title={voiceRecording
+        ? t('audiobook.scriptSegmentActions.voiceRecordingTooltipStop')
+        : t('audiobook.scriptSegmentActions.voiceRecordingTooltipStart')}>
         <span>
           <Button
             size="small"
@@ -272,7 +288,9 @@ const ScriptSegmentActions = ({
             disabled={!voiceRecording && (voiceRecordingDisabled || regenerating)}
             startIcon={voiceRecording ? <StopCircleIcon fontSize="small" /> : <MicIcon fontSize="small" />}
           >
-            {voiceRecording ? '结束配音' : '配音'}
+            {voiceRecording
+              ? t('audiobook.scriptSegmentActions.stopVoiceRecording')
+              : t('audiobook.scriptSegmentActions.voiceRecordingLabel')}
           </Button>
         </span>
       </Tooltip>
@@ -290,7 +308,9 @@ const ScriptSegmentActions = ({
               disabled={regenerating}
               startIcon={<CheckCircleIcon fontSize="small" />}
             >
-              保存{option.label}
+              {t('audiobook.scriptSegmentActions.saveWithLabel', {
+                label: option.labelKey ? t(option.labelKey) : option.label,
+              })}
             </Button>
             <Button
               size="small"
@@ -299,7 +319,9 @@ const ScriptSegmentActions = ({
               disabled={regenerating}
               startIcon={<CancelIcon fontSize="small" />}
             >
-              取消{option.label}
+              {t('audiobook.scriptSegmentActions.discardWithLabel', {
+                label: option.labelKey ? t(option.labelKey) : option.label,
+              })}
             </Button>
           </Box>
         )
@@ -308,7 +330,7 @@ const ScriptSegmentActions = ({
       {reviewMode && (
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, ml: 1 }}>
           <Typography variant="caption" sx={{ color: mutedTextColor || 'text.secondary' }}>
-            评分：
+            {t('audiobook.scriptSegmentActions.reviewRatingLabel')}
           </Typography>
           <Rating
             size="small"

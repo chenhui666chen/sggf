@@ -25,12 +25,12 @@ describe('Audiobook disabled tooltip source guards', () => {
 
     expect(pageSource).toContain('const setupGenerateDisabledReason = generating')
     expect(setupSource).toContain('generateDisabledReason: string')
-    expect(setupSource).toContain("Tooltip title={generateDisabled ? generateDisabledReason : '生成本章场景剧本'}")
+    expect(setupSource).toContain("Tooltip title={generateDisabled ? generateDisabledReason : t('audiobook.audiobookSetupStep.generateScriptLabel')}")
     expect(setupSource).toContain('disabled={generateDisabled}')
 
-    expect(browserControlsSource).toContain("Tooltip title={previousDisabled ? '当前已经是第一章' : '上一章'}")
+    expect(browserControlsSource).toContain("Tooltip title={previousDisabled ? t('audiobook.browserPlayer.firstChapter') : t('audiobook.browserPlayer.previous')}")
     expect(browserControlsSource).toContain('disabled={previousDisabled}')
-    expect(browserControlsSource).toContain("Tooltip title={nextDisabled ? '当前已经是最后一章' : '下一章'}")
+    expect(browserControlsSource).toContain("Tooltip title={nextDisabled ? t('audiobook.browserPlayer.lastChapter') : t('audiobook.browserPlayer.next')}")
     expect(browserControlsSource).toContain('disabled={nextDisabled}')
   })
 })

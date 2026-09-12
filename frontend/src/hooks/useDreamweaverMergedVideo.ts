@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 
+import { useTranslation } from 'react-i18next'
+
 import {
   apiClient,
   extractApiErrorMessage,
@@ -40,6 +42,7 @@ export function useDreamweaverMergedVideo(
   params: UseDreamweaverMergedVideoParams,
 ): UseDreamweaverMergedVideoReturn {
   const { getCurrentRunId, getMergedVideoPath, getRunSnapshot, getProjectId, getProjectTitle } = params
+  const { t } = useTranslation()
 
   const [mergedVideoLoading, setMergedVideoLoading] = useState(false)
   const [mergedVideoError, setMergedVideoError] = useState<string | null>(null)
@@ -61,7 +64,7 @@ export function useDreamweaverMergedVideo(
   const loadMergedVideoPreview = useCallback(async () => {
     const runId = getCurrentRunId()
     if (!runId) {
-      setMergedVideoError('缺少 run_id，无法加载合成视频')
+      setMergedVideoError(t('dreamweaverRun.errorMissingRunIdLoadMergedVideo'))
       return
     }
     setMergedVideoLoading(true)
@@ -71,16 +74,16 @@ export function useDreamweaverMergedVideo(
       const url = URL.createObjectURL(res.data)
       setMergedVideoPreviewUrl(url)
     } catch (e: unknown) {
-      setMergedVideoError(await extractApiErrorMessage(e, '加载合成视频失败'))
+      setMergedVideoError(await extractApiErrorMessage(e, t('dreamweaverRun.loadMergedVideoFailed')))
     } finally {
       setMergedVideoLoading(false)
     }
-  }, [getCurrentRunId])
+  }, [getCurrentRunId, t])
 
   const downloadMergedVideo = useCallback(async () => {
     const runId = getCurrentRunId()
     if (!runId) {
-      setMergedVideoError('缺少 run_id，无法下载合成视频')
+      setMergedVideoError(t('dreamweaverRun.errorMissingRunIdDownloadMergedVideo'))
       return
     }
     setMergedVideoLoading(true)
@@ -106,16 +109,16 @@ export function useDreamweaverMergedVideo(
         }
       }, 0)
     } catch (e: unknown) {
-      setMergedVideoError(await extractApiErrorMessage(e, '下载合成视频失败'))
+      setMergedVideoError(await extractApiErrorMessage(e, t('dreamweaverRun.downloadMergedVideoFailed')))
     } finally {
       setMergedVideoLoading(false)
     }
-  }, [getCurrentRunId, getMergedVideoPath])
+  }, [getCurrentRunId, getMergedVideoPath, t])
 
   const collectMergedVideo = useCallback(async () => {
     const runId = getCurrentRunId()
     if (!runId) {
-      setMergedVideoCollectFeedback({ type: 'error', text: '缺少 run_id，无法归档合成视频' })
+      setMergedVideoCollectFeedback({ type: 'error', text: t('dreamweaverRun.errorMissingRunIdArchiveMergedVideo') })
       return
     }
 
@@ -159,16 +162,16 @@ export function useDreamweaverMergedVideo(
           path: mergedPath,
         }),
       })
-      setMergedVideoCollectFeedback({ type: 'success', text: '合成视频已归档到用户中心' })
+      setMergedVideoCollectFeedback({ type: 'success', text: t('dreamweaverRun.mergedVideoArchived') })
     } catch (collectError) {
       setMergedVideoCollectFeedback({
         type: 'error',
-        text: await extractApiErrorMessage(collectError, '归档合成视频失败'),
+        text: await extractApiErrorMessage(collectError, t('dreamweaverRun.archiveMergedVideoFailed')),
       })
     } finally {
       setMergedVideoCollecting(false)
     }
-  }, [getCurrentRunId, getMergedVideoPath, getRunSnapshot, getProjectId, getProjectTitle])
+  }, [getCurrentRunId, getMergedVideoPath, getRunSnapshot, getProjectId, getProjectTitle, t])
 
   const resetMergedVideoState = useCallback(() => {
     setMergedVideoLoading(false)

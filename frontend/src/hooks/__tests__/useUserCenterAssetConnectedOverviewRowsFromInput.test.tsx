@@ -1,5 +1,8 @@
-import { describe, expect, it } from 'vitest'
+import { beforeAll, describe, expect, it } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
+import type { TFunction } from 'i18next'
+
+import { bootstrapI18n } from '@/i18n'
 
 import UserCenterAssetConnectedOverviewRow from '@/components/user-assets/UserCenterAssetConnectedOverviewRow'
 
@@ -7,6 +10,13 @@ import {
   useUserCenterAssetConnectedOverviewRowsFromInput,
   type UserCenterAssetConnectedOverviewRowsFromInputFacade,
 } from '../useUserCenterAssetConnectedOverviewRowsFromInput'
+
+let t: TFunction
+
+beforeAll(async () => {
+  const instance = await bootstrapI18n('zh-CN')
+  t = instance.t.bind(instance)
+})
 
 describe('useUserCenterAssetConnectedOverviewRowsFromInput', () => {
   it('adapts page-facing input into reusable strategy and points rules row slots', () => {
@@ -48,6 +58,7 @@ describe('useUserCenterAssetConnectedOverviewRowsFromInput', () => {
         formatPointsValueLabel: (value) => `P${value.toFixed(1)}`,
         formatUpdatedAtLabel: (value) => `FMT(${value})`,
         getSourceLabel: () => '后台规则快照',
+        t,
       })
 
       return null
@@ -85,6 +96,7 @@ describe('useUserCenterAssetConnectedOverviewRowsFromInput', () => {
         formatPointsValueLabel: (value) => `${value}`,
         formatUpdatedAtLabel: (value) => value,
         getSourceLabel: () => '默认规则',
+        t,
       })
 
       return null

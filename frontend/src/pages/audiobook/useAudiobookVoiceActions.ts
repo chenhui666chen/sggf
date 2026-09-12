@@ -1,5 +1,7 @@
 import { useCallback, useState, type ChangeEvent, type SetStateAction } from 'react'
 
+import { useTranslation } from 'react-i18next'
+
 import { apiClient, extractApiErrorMessage } from '../../services/api'
 import type {
   CharacterVoiceSetting,
@@ -66,6 +68,7 @@ export const useAudiobookVoiceActions = ({
   playManagedBlob,
   setSnackbar,
 }: UseAudiobookVoiceActionsParams) => {
+  const { t } = useTranslation()
   const [cloneName, setCloneName] = useState('')
   const [cloneUrl, setCloneUrl] = useState('')
   const [cloneLoading, setCloneLoading] = useState(false)
@@ -124,17 +127,17 @@ export const useAudiobookVoiceActions = ({
       const url = cloneUrl.trim()
       const res = await apiClient.createCosyVoiceV3PlusClone({ name, url })
       const voiceId = (res.data?.voice_id as string) || ''
-      setCloneSuccess(voiceId ? `已提交复刻任务：${voiceId}` : '已提交复刻任务')
+      setCloneSuccess(voiceId ? t('audiobook.useAudiobookVoiceActions.cloneSubmittedWithId', { voiceId }) : t('audiobook.useAudiobookVoiceActions.cloneSubmitted'))
       setCloneName('')
       setCloneUrl('')
       await refreshVoiceCatalog('cosyvoice-v3.5-plus')
     } catch (error: unknown) {
-      const message = await extractApiErrorMessage(error, '创建复刻音色失败')
+      const message = await extractApiErrorMessage(error, t('audiobook.useAudiobookVoiceActions.createCloneFailed'))
       setCloneError(message)
     } finally {
       setCloneLoading(false)
     }
-  }, [clearVoiceCreationMessages, cloneName, cloneUrl, refreshVoiceCatalog])
+  }, [clearVoiceCreationMessages, cloneName, cloneUrl, refreshVoiceCatalog, t])
 
   const handleCreateDesignVoice = useCallback(async () => {
     setDesignLoading(true)
@@ -154,17 +157,17 @@ export const useAudiobookVoiceActions = ({
       setDesignPreviewAudioUrl(previewAudio)
       setDesignSuccess(
         previewAudio || voiceId
-          ? (voiceId ? `已提交声音设计任务：${voiceId}，可直接试听。` : '已提交声音设计任务，可直接试听。')
-          : (voiceId ? `已提交声音设计任务：${voiceId}` : '已提交声音设计任务'),
+          ? (voiceId ? t('audiobook.useAudiobookVoiceActions.designSubmittedWithIdPlayable', { voiceId }) : t('audiobook.useAudiobookVoiceActions.designSubmittedPlayable'))
+          : (voiceId ? t('audiobook.useAudiobookVoiceActions.designSubmittedWithId', { voiceId }) : t('audiobook.useAudiobookVoiceActions.designSubmitted')),
       )
       await refreshVoiceCatalog('cosyvoice-v3.5-plus')
     } catch (error: unknown) {
-      const message = await extractApiErrorMessage(error, '创建设计音色失败')
+      const message = await extractApiErrorMessage(error, t('audiobook.useAudiobookVoiceActions.createDesignFailed'))
       setDesignError(message)
     } finally {
       setDesignLoading(false)
     }
-  }, [clearVoiceCreationMessages, designName, designPreviewText, designPrompt, refreshVoiceCatalog])
+  }, [clearVoiceCreationMessages, designName, designPreviewText, designPrompt, refreshVoiceCatalog, t])
 
   const handlePreviewDesignVoice = useCallback(async () => {
     const previewAudio = designPreviewAudioUrl.trim()
@@ -187,9 +190,9 @@ export const useAudiobookVoiceActions = ({
         await playManagedBlob(response.blob)
       }
     } catch (error: unknown) {
-      setDesignError(await extractApiErrorMessage(error, '试听设计音色失败'))
+      setDesignError(await extractApiErrorMessage(error, t('audiobook.useAudiobookVoiceActions.previewDesignFailed')))
     }
-  }, [designPreviewAudioUrl, designPreviewVoiceId, playExternalUrl, playManagedBlob])
+  }, [designPreviewAudioUrl, designPreviewVoiceId, playExternalUrl, playManagedBlob, t])
 
   const handlePreviewCustomVoice = useCallback(async (
     voice: VoicePreset,
@@ -216,13 +219,13 @@ export const useAudiobookVoiceActions = ({
     } catch (error: unknown) {
       setSnackbar({
         open: true,
-        message: await extractApiErrorMessage(error, '自定义音色试听失败，请稍后重试'),
+        message: await extractApiErrorMessage(error, t('audiobook.useAudiobookVoiceActions.previewCustomVoiceFailed')),
         severity: 'error',
       })
     } finally {
       setCustomVoicePreviewingId(null)
     }
-  }, [playExternalUrl, playManagedBlob, setSnackbar])
+  }, [playExternalUrl, playManagedBlob, setSnackbar, t])
 
   const handleDeleteCustomVoice = useCallback(async (voiceId: string, label?: string) => {
     if (!voiceId || cloneDeletingId) return
@@ -234,10 +237,10 @@ export const useAudiobookVoiceActions = ({
       updateCharacterVoicesForCurrentModel((prev) =>
         prev.map((item) => (item.voiceId === voiceId ? { ...item, voiceId: '' } : item)),
       )
-      setCloneSuccess(`已删除自定义音色：${displayName}`)
+      setCloneSuccess(t('audiobook.useAudiobookVoiceActions.cloneDeleted', { name: displayName }))
       await refreshVoiceCatalog('cosyvoice-v3.5-plus')
     } catch (error: unknown) {
-      const message = await extractApiErrorMessage(error, '删除自定义音色失败')
+      const message = await extractApiErrorMessage(error, t('audiobook.useAudiobookVoiceActions.deleteCloneFailed'))
       setCloneError(message)
     } finally {
       setCloneDeletingId(null)
@@ -246,6 +249,7 @@ export const useAudiobookVoiceActions = ({
     clearVoiceCreationMessages,
     cloneDeletingId,
     refreshVoiceCatalog,
+    t,
     updateCharacterVoicesForCurrentModel,
   ])
 
@@ -258,14 +262,14 @@ export const useAudiobookVoiceActions = ({
     try {
       const url = await uploadCosyVoiceCloneSampleFile(file)
       setCloneUrl(url)
-      setCloneSuccess('已上传音频并生成临时URL（48小时有效）')
+      setCloneSuccess(t('audiobook.useAudiobookVoiceActions.sampleUploaded'))
     } catch (error: unknown) {
-      const message = await extractApiErrorMessage(error, '上传音频失败')
+      const message = await extractApiErrorMessage(error, t('audiobook.useAudiobookVoiceActions.uploadAudioFailed'))
       setCloneError(message)
     } finally {
       setCloneUploading(false)
     }
-  }, [clearCloneMessages])
+  }, [clearCloneMessages, t])
 
   const uploadRecordedCloneAudio = useCallback(async (blob: Blob) => {
     setCloneRecordDialogOpen(false)
@@ -275,14 +279,14 @@ export const useAudiobookVoiceActions = ({
       const file = createRecordedCloneAudioFile(blob)
       const url = await uploadCosyVoiceCloneSampleFile(file)
       setCloneUrl(url)
-      setCloneSuccess('录音已上传并生成临时URL（48小时有效）')
+      setCloneSuccess(t('audiobook.useAudiobookVoiceActions.recordingUploaded'))
     } catch (error: unknown) {
-      const message = await extractApiErrorMessage(error, '上传录音失败')
+      const message = await extractApiErrorMessage(error, t('audiobook.useAudiobookVoiceActions.uploadRecordingFailed'))
       setCloneError(message)
     } finally {
       setCloneUploading(false)
     }
-  }, [clearCloneMessages])
+  }, [clearCloneMessages, t])
 
   const {
     handleStartCloneRecording,
@@ -311,7 +315,7 @@ export const useAudiobookVoiceActions = ({
     if (!targetProjectId) {
       setSnackbar({
         open: true,
-        message: '请先选择项目后再进行智能推荐声线。',
+        message: t('audiobook.useAudiobookVoiceActions.selectProjectFirst'),
         severity: 'warning',
       })
       return
@@ -336,20 +340,20 @@ export const useAudiobookVoiceActions = ({
       if (assignmentResult.assignedCount > 0) {
         setSnackbar({
           open: true,
-          message: `已为 ${assignmentResult.assignedCount} 个角色智能推荐声线，请检查推荐结果，如需调整可手动修改。`,
+          message: t('audiobook.useAudiobookVoiceActions.autoAssignedCount', { total: assignmentResult.assignedCount }),
           severity: 'success',
         })
       } else {
         setSnackbar({
           open: true,
-          message: '当前项目还没有角色档案，请先在「项目详情 → 人物设定」中创建角色。',
+          message: t('audiobook.useAudiobookVoiceActions.noCharacterProfiles'),
           severity: 'warning',
         })
       }
     } catch (error) {
       setSnackbar({
         open: true,
-        message: await extractApiErrorMessage(error, '自动推荐声线失败，请稍后重试'),
+        message: await extractApiErrorMessage(error, t('audiobook.useAudiobookVoiceActions.autoAssignFailed')),
         severity: 'error',
       })
     } finally {
@@ -362,6 +366,7 @@ export const useAudiobookVoiceActions = ({
     selectedProjectId,
     setCharacterVoicesForCurrentModel,
     setSnackbar,
+    t,
     ttsModel,
   ])
 

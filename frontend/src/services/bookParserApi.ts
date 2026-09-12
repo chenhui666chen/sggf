@@ -18,11 +18,34 @@ const bookParserClient = axios.create({
   },
 })
 
-// 请求拦截器
+// P2-4.5 收尾：csrf cookie 非 httpOnly（JS 可读），unsafe 方法需携带 X-CSRF-Token 头（真双重提交）
+function getCsrfToken(): string | null {
+  if (typeof document === 'undefined') return null
+  for (const part of document.cookie.split(';')) {
+    const trimmed = part.trim()
+    const eq = trimmed.indexOf('=')
+    if (eq <= 0) continue
+    const name = trimmed.slice(0, eq).trim()
+    // 精确匹配：`csrf` 或 `{prefix-}csrf`（如 __Host-csrf），避免被其它 *csrf cookie 抢到
+    if (name === 'csrf' || name.endsWith('-csrf')) {
+      try {
+        return decodeURIComponent(trimmed.slice(eq + 1))
+      } catch {
+        return trimmed.slice(eq + 1)
+      }
+    }
+  }
+  return null
+}
+
+// 请求拦截器：认证走 httpOnly cookie（同源 /api 代理），无需 Authorization 头；unsafe 方法带 CSRF 头
 bookParserClient.interceptors.request.use((config) => {
-  const token = localStorage.getItem('access_token')
-  if (token) {
-    config.headers['Authorization'] = `Bearer ${token}`
+  const method = (config.method ?? 'get').toUpperCase()
+  if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) {
+    const csrfToken = getCsrfToken()
+    if (csrfToken && config.headers) {
+      config.headers['X-CSRF-Token'] = csrfToken
+    }
   }
   return config
 })

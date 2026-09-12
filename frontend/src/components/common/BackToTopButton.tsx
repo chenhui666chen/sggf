@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import KeyboardArrowUpIcon from '@mui/icons-material/KeyboardArrowUp'
 import {
   Fade,
@@ -18,12 +19,14 @@ export interface BackToTopButtonProps {
 
 export default function BackToTopButton({
   threshold = 360,
-  label = '回到顶部',
+  label,
   bottom = 32,
   right = 24,
   color = 'primary',
   size = 'medium',
 }: BackToTopButtonProps) {
+  const { t } = useTranslation()
+  const resolvedLabel = label ?? t('backToTop.label')
   const [visible, setVisible] = useState(false)
 
   useEffect(() => {
@@ -53,9 +56,9 @@ export default function BackToTopButton({
 
   return (
     <Fade in={visible}>
-      <Tooltip title={label}>
+      <Tooltip title={resolvedLabel}>
         <Fab
-          aria-label={label}
+          aria-label={resolvedLabel}
           color={color}
           size={size}
           onClick={handleBackToTop}
@@ -64,7 +67,7 @@ export default function BackToTopButton({
             right,
             bottom,
             zIndex: 1300,
-            boxShadow: '0 16px 36px rgba(15, 23, 42, 0.16)',
+            boxShadow: 16, // 16-24 档 = shadow4（theme.shadows 表）
           }}
         >
           <KeyboardArrowUpIcon />

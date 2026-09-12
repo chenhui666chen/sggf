@@ -10,6 +10,7 @@ import {
 } from '@mui/material'
 import DownloadIcon from '@mui/icons-material/Download'
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown'
+import { useTranslation } from 'react-i18next'
 
 import { audiobookButtonSx } from './audiobookTheme'
 
@@ -34,6 +35,7 @@ const ProjectExportActions = ({
   onExportProjectM4b,
   onExportProjectAudacity,
 }: ProjectExportActionsProps) => {
+  const { t } = useTranslation()
   const [menuAnchor, setMenuAnchor] = useState<HTMLElement | null>(null)
 
   if (!hasChapterAudios) {
@@ -46,10 +48,10 @@ const ProjectExportActions = ({
   const hasPendingExport = isM4bPending || isAudacityPending
   const menuOpen = Boolean(menuAnchor)
   const exportTooltipTitle = !canExport
-    ? '暂无已完成章节，无法导出'
+    ? t('audiobook.projectExportActions.noCompletedChapters')
     : hasPendingExport
-      ? '已有导出任务排队中'
-      : '导出整本有声书'
+      ? t('audiobook.projectExportActions.exportTaskQueued')
+      : t('audiobook.projectExportActions.exportWholeBook')
 
   const closeMenu = () => {
     setMenuAnchor(null)
@@ -85,7 +87,9 @@ const ProjectExportActions = ({
             aria-expanded={menuOpen ? 'true' : undefined}
             sx={audiobookButtonSx.brandContained}
           >
-            {hasPendingExport ? '导出排队中...' : '导出'}
+            {hasPendingExport
+              ? t('audiobook.projectExportActions.exportQueueing')
+              : t('audiobook.projectExportActions.export')}
           </Button>
         </span>
       </Tooltip>
@@ -103,8 +107,12 @@ const ProjectExportActions = ({
             {isM4bPending ? <CircularProgress size={18} /> : <DownloadIcon fontSize="small" />}
           </ListItemIcon>
           <ListItemText
-            primary="整本 M4B"
-            secondary={isM4bPending ? '导出排队中' : '适合整本收听和归档'}
+            primary={t('audiobook.projectExportActions.m4bItem')}
+            secondary={
+              isM4bPending
+                ? t('audiobook.projectExportActions.exportQueueing')
+                : t('audiobook.projectExportActions.m4bItemHint')
+            }
           />
         </MenuItem>
 
@@ -113,8 +121,12 @@ const ProjectExportActions = ({
             {isAudacityPending ? <CircularProgress size={18} /> : <DownloadIcon fontSize="small" />}
           </ListItemIcon>
           <ListItemText
-            primary="Audacity ZIP"
-            secondary={isAudacityPending ? '导出排队中' : '适合后期工程编辑'}
+            primary={t('audiobook.projectExportActions.audacityItem')}
+            secondary={
+              isAudacityPending
+                ? t('audiobook.projectExportActions.exportQueueing')
+                : t('audiobook.projectExportActions.audacityItemHint')
+            }
           />
         </MenuItem>
       </Menu>

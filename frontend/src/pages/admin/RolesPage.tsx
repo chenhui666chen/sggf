@@ -29,7 +29,9 @@ import DeleteIcon from '@mui/icons-material/Delete'
 import EditIcon from '@mui/icons-material/Edit'
 import SecurityIcon from '@mui/icons-material/Security'
 import { useSelector } from 'react-redux'
+import { useTranslation } from 'react-i18next'
 import { apiClient } from '@/services/api'
+import { useFormats } from '@/i18n'
 import { RootState } from '@/store/store'
 
 interface Permission {
@@ -58,6 +60,8 @@ interface RoleListResponse {
 }
 
 export default function RolesPage() {
+  const { t } = useTranslation()
+  const { formatDate } = useFormats()
   const { user } = useSelector((state: RootState) => state.auth)
   const isSuperAdmin = (user as any)?.roles?.some((r: any) => r.code === 'super_admin')
   
@@ -90,7 +94,7 @@ export default function RolesPage() {
       const data: RoleListResponse = response.data
       setRoles(data.items)
     } catch (err: any) {
-      setError(err.response?.data?.detail || '获取角色列表失败')
+      setError(err.response?.data?.detail || t('admin.roles.messages.fetchFailed'))
     } finally {
       setLoading(false)
     }
@@ -115,7 +119,7 @@ export default function RolesPage() {
       resetForm()
       fetchRoles()
     } catch (err: any) {
-      setError(err.response?.data?.detail || '创建角色失败')
+      setError(err.response?.data?.detail || t('admin.roles.messages.createFailed'))
     }
   }
 
@@ -130,7 +134,7 @@ export default function RolesPage() {
       resetForm()
       fetchRoles()
     } catch (err: any) {
-      setError(err.response?.data?.detail || '更新角色失败')
+      setError(err.response?.data?.detail || t('admin.roles.messages.updateFailed'))
     }
   }
 
@@ -142,7 +146,7 @@ export default function RolesPage() {
       setSelectedRole(null)
       fetchRoles()
     } catch (err: any) {
-      setError(err.response?.data?.detail || '删除角色失败')
+      setError(err.response?.data?.detail || t('admin.roles.messages.deleteFailed'))
     }
   }
 
@@ -188,7 +192,7 @@ export default function RolesPage() {
     <Box>
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
         <Typography variant="h4">
-          角色权限管理
+          {t('admin.roles.title')}
         </Typography>
         {isSuperAdmin && (
           <Button
@@ -199,7 +203,7 @@ export default function RolesPage() {
               setCreateDialogOpen(true)
             }}
           >
-            新建角色
+            {t('admin.roles.createRole')}
           </Button>
         )}
       </Box>
@@ -216,13 +220,13 @@ export default function RolesPage() {
             <Table>
               <TableHead>
                 <TableRow>
-                  <TableCell>角色名称</TableCell>
-                  <TableCell>角色代码</TableCell>
-                  <TableCell>描述</TableCell>
-                  <TableCell>权限数量</TableCell>
-                  <TableCell>类型</TableCell>
-                  <TableCell>创建时间</TableCell>
-                  <TableCell>操作</TableCell>
+                  <TableCell>{t('admin.roles.table.name')}</TableCell>
+                  <TableCell>{t('admin.roles.table.code')}</TableCell>
+                  <TableCell>{t('admin.roles.table.description')}</TableCell>
+                  <TableCell>{t('admin.roles.table.permissionCount')}</TableCell>
+                  <TableCell>{t('admin.roles.table.type')}</TableCell>
+                  <TableCell>{t('admin.roles.table.createdAt')}</TableCell>
+                  <TableCell>{t('admin.common.actions')}</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
@@ -243,28 +247,28 @@ export default function RolesPage() {
                     </TableCell>
                     <TableCell>
                       {role.is_system ? (
-                        <Chip label="系统角色" size="small" color="secondary" />
+                        <Chip label={t('admin.roles.roleType.system')} size="small" color="secondary" />
                       ) : (
-                        <Chip label="自定义" size="small" />
+                        <Chip label={t('admin.roles.roleType.custom')} size="small" />
                       )}
                     </TableCell>
                     <TableCell>
-                      {new Date(role.created_at).toLocaleDateString('zh-CN')}
+                      {formatDate(role.created_at)}
                     </TableCell>
                     <TableCell>
                       {isSuperAdmin && !role.is_system && (
                         <>
-                          <IconButton size="small" onClick={() => openEditDialog(role)} title="编辑">
+                          <IconButton size="small" onClick={() => openEditDialog(role)} title={t('admin.roles.editRole')}>
                             <EditIcon />
                           </IconButton>
-                          <IconButton size="small" onClick={() => openDeleteDialog(role)} title="删除" color="error">
+                          <IconButton size="small" onClick={() => openDeleteDialog(role)} title={t('admin.common.delete')} color="error">
                             <DeleteIcon />
                           </IconButton>
                         </>
                       )}
                       {role.is_system && (
                         <Typography variant="body2" color="text.secondary">
-                          不可修改
+                          {t('admin.roles.cannotModify')}
                         </Typography>
                       )}
                     </TableCell>
@@ -278,26 +282,26 @@ export default function RolesPage() {
 
       {/* 创建角色对话框 */}
       <Dialog open={createDialogOpen} onClose={() => setCreateDialogOpen(false)} maxWidth="md" fullWidth>
-        <DialogTitle>新建角色</DialogTitle>
+        <DialogTitle>{t('admin.roles.createRole')}</DialogTitle>
         <DialogContent>
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, mt: 1 }}>
             <TextField
-              label="角色名称"
+              label={t('admin.roles.fields.name')}
               value={formData.name}
               onChange={(e) => setFormData({ ...formData, name: e.target.value })}
               fullWidth
               required
             />
             <TextField
-              label="角色代码"
+              label={t('admin.roles.fields.code')}
               value={formData.code}
               onChange={(e) => setFormData({ ...formData, code: e.target.value })}
               fullWidth
               required
-              helperText="英文标识，如：content_manager"
+              helperText={t('admin.roles.fields.codeHelp')}
             />
             <TextField
-              label="描述"
+              label={t('admin.roles.fields.description')}
               value={formData.description}
               onChange={(e) => setFormData({ ...formData, description: e.target.value })}
               fullWidth
@@ -306,7 +310,7 @@ export default function RolesPage() {
             />
             
             <Typography variant="subtitle1" sx={{ mt: 2 }}>
-              权限配置
+              {t('admin.roles.fields.permissions')}
             </Typography>
             <Paper variant="outlined" sx={{ p: 2, maxHeight: 300, overflow: 'auto' }}>
               {permissions.map((permission) => (
@@ -356,34 +360,34 @@ export default function RolesPage() {
           </Box>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setCreateDialogOpen(false)}>取消</Button>
+          <Button onClick={() => setCreateDialogOpen(false)}>{t('action.cancel')}</Button>
           <Button onClick={handleCreate} variant="contained" disabled={!formData.name || !formData.code}>
-            创建
+            {t('admin.roles.create')}
           </Button>
         </DialogActions>
       </Dialog>
 
       {/* 编辑角色对话框 */}
       <Dialog open={editDialogOpen} onClose={() => setEditDialogOpen(false)} maxWidth="md" fullWidth>
-        <DialogTitle>编辑角色</DialogTitle>
+        <DialogTitle>{t('admin.roles.editRole')}</DialogTitle>
         <DialogContent>
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, mt: 1 }}>
             <TextField
-              label="角色名称"
+              label={t('admin.roles.fields.name')}
               value={formData.name}
               onChange={(e) => setFormData({ ...formData, name: e.target.value })}
               fullWidth
               required
             />
             <TextField
-              label="角色代码"
+              label={t('admin.roles.fields.code')}
               value={formData.code}
               disabled
               fullWidth
-              helperText="角色代码不可修改"
+              helperText={t('admin.roles.fields.codeLocked')}
             />
             <TextField
-              label="描述"
+              label={t('admin.roles.fields.description')}
               value={formData.description}
               onChange={(e) => setFormData({ ...formData, description: e.target.value })}
               fullWidth
@@ -392,7 +396,7 @@ export default function RolesPage() {
             />
             
             <Typography variant="subtitle1" sx={{ mt: 2 }}>
-              权限配置
+              {t('admin.roles.fields.permissions')}
             </Typography>
             <Paper variant="outlined" sx={{ p: 2, maxHeight: 300, overflow: 'auto' }}>
               {permissions.map((permission) => (
@@ -442,24 +446,24 @@ export default function RolesPage() {
           </Box>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setEditDialogOpen(false)}>取消</Button>
+          <Button onClick={() => setEditDialogOpen(false)}>{t('action.cancel')}</Button>
           <Button onClick={handleUpdate} variant="contained" disabled={!formData.name}>
-            保存
+            {t('action.save')}
           </Button>
         </DialogActions>
       </Dialog>
 
       {/* 删除确认对话框 */}
       <Dialog open={deleteDialogOpen} onClose={() => setDeleteDialogOpen(false)}>
-        <DialogTitle>确认删除</DialogTitle>
+        <DialogTitle>{t('admin.roles.confirmDeleteTitle')}</DialogTitle>
         <DialogContent>
           <Typography>
-            确定要删除角色 "{selectedRole?.name}" 吗？此操作不可恢复。
+            {t('admin.roles.deleteConfirmBody', { name: selectedRole?.name })}
           </Typography>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setDeleteDialogOpen(false)}>取消</Button>
-          <Button onClick={handleDelete} variant="contained" color="error">删除</Button>
+          <Button onClick={() => setDeleteDialogOpen(false)}>{t('action.cancel')}</Button>
+          <Button onClick={handleDelete} variant="contained" color="error">{t('admin.common.delete')}</Button>
         </DialogActions>
       </Dialog>
     </Box>

@@ -1,4 +1,6 @@
 import type { LibraryPayload } from '@/types/dreamweaver'
+import type { TFunction } from 'i18next'
+
 import {
   STYLE_PRESETS,
   STYLE_PRESET_LABELS,
@@ -13,18 +15,19 @@ import { arrayLength } from './runPageDiagnosticHelpers'
 export interface RestartMenuItemDef {
   key: string
   label: string
+  labelKey?: string
   stage: string
   isCustom?: boolean
 }
 
 export const RESTART_MENU_DEFS: RestartMenuItemDef[] = [
-  { key: 'edit', label: '重新合成（EDIT）', stage: 'EDIT' },
-  { key: 'video', label: '从镜头视频（VIDEO）重跑', stage: 'VIDEO' },
-  { key: 'video-shots', label: '重跑指定镜头视频（VIDEO）…', stage: 'VIDEO', isCustom: true },
-  { key: 'keyframes', label: '从关键帧（KEYFRAMES）重跑', stage: 'KEYFRAMES' },
-  { key: 'keyframe-cameras', label: '重跑指定相机关键帧（KEYFRAMES）…', stage: 'KEYFRAMES', isCustom: true },
-  { key: 'storyboard', label: '从分镜（STORYBOARD）重跑', stage: 'STORYBOARD' },
-  { key: 'script', label: '从剧本（SCRIPT）重跑', stage: 'SCRIPT' },
+  { key: 'edit', label: '重新合成（EDIT）', labelKey: 'dreamweaverRun.restartFromEdit', stage: 'EDIT' },
+  { key: 'video', label: '从镜头视频（VIDEO）重跑', labelKey: 'dreamweaverRun.restartFromVideo', stage: 'VIDEO' },
+  { key: 'video-shots', label: '重跑指定镜头视频（VIDEO）…', labelKey: 'dreamweaverRun.restartShotsVideo', stage: 'VIDEO', isCustom: true },
+  { key: 'keyframes', label: '从关键帧（KEYFRAMES）重跑', labelKey: 'dreamweaverRun.restartFromKeyframes', stage: 'KEYFRAMES' },
+  { key: 'keyframe-cameras', label: '重跑指定相机关键帧（KEYFRAMES）…', labelKey: 'dreamweaverRun.restartCamerasKeyframes', stage: 'KEYFRAMES', isCustom: true },
+  { key: 'storyboard', label: '从分镜（STORYBOARD）重跑', labelKey: 'dreamweaverRun.restartFromStoryboard', stage: 'STORYBOARD' },
+  { key: 'script', label: '从剧本（SCRIPT）重跑', labelKey: 'dreamweaverRun.restartFromScript', stage: 'SCRIPT' },
 ]
 
 export interface RestartMenuItem {
@@ -41,11 +44,11 @@ export function buildRestartMenuItems(params: {
   requestRestartVideoShots: () => void
   requestRestartKeyframeCameras: () => void
   triggerRestartFromStage: (stage: string) => void
-}): RestartMenuItem[] {
+}, t?: TFunction): RestartMenuItem[] {
   const disabled = !params.currentRunId || params.running || params.restartLoading
   return RESTART_MENU_DEFS.map((def) => ({
     key: def.key,
-    label: def.label,
+    label: def.labelKey && t ? t(def.labelKey) : def.label,
     onClick: def.isCustom
       ? (def.key === 'video-shots' ? params.requestRestartVideoShots : params.requestRestartKeyframeCameras)
       : () => params.triggerRestartFromStage(def.stage),
@@ -191,12 +194,14 @@ export function normalizeCameraIndices(camIdxs: unknown): number[] {
     .slice(0, 200)
 }
 
-export function buildRestartPartialHint(normalizedShotIds: string[], normalizedCamIdxs: number[]): string {
+export function buildRestartPartialHint(normalizedShotIds: string[], normalizedCamIdxs: number[], t?: TFunction): string {
   if (normalizedShotIds.length > 0) {
-    return `\n\n镜头：${normalizedShotIds.slice(0, 6).join(', ')}${normalizedShotIds.length > 6 ? '…' : ''}\n（仅重跑这些镜头，其余镜头将复用历史产物；仍会重新合成下游成片）`
+    const shotsPart = normalizedShotIds.slice(0, 6).join(', ') + (normalizedShotIds.length > 6 ? '…' : '')
+    return t ? t('dreamweaverRun.restartPartialShotHint', { shots: shotsPart }) : `\n\n镜头：${shotsPart}\n（仅重跑这些镜头，其余镜头将复用历史产物；仍会重新合成下游成片）`
   }
   if (normalizedCamIdxs.length > 0) {
-    return `\n\n相机：${normalizedCamIdxs.join(', ')}\n（仅重跑这些相机的镜头，其余镜头将复用历史产物；仍会重新合成下游成片）`
+    const camsPart = normalizedCamIdxs.join(', ')
+    return t ? t('dreamweaverRun.restartPartialCamHint', { cams: camsPart }) : `\n\n相机：${camsPart}\n（仅重跑这些相机的镜头，其余镜头将复用历史产物；仍会重新合成下游成片）`
   }
   return ''
 }
@@ -205,16 +210,17 @@ export function validateRestartParams(
   startStateRaw: string,
   normalizedShotIds: string[],
   normalizedCamIdxs: number[],
+  t?: TFunction,
 ): { valid: boolean; error?: string } {
   if (normalizedShotIds.length > 0 && normalizedCamIdxs.length > 0) {
-    return { valid: false, error: 'shot_id 与 cam_idx 不能同时使用' }
+    return { valid: false, error: t ? t('dreamweaverRun.restartErrorBoth') : 'shot_id 与 cam_idx 不能同时使用' }
   }
 
   if (
     (normalizedShotIds.length > 0 || normalizedCamIdxs.length > 0) &&
     !['KEYFRAMES', 'MIDFRAMES', 'VIDEO'].includes(startStateRaw)
   ) {
-    return { valid: false, error: '镜头/相机级局部重跑仅支持 KEYFRAMES/MIDFRAMES/VIDEO 阶段' }
+    return { valid: false, error: t ? t('dreamweaverRun.restartErrorStage') : '镜头/相机级局部重跑仅支持 KEYFRAMES/MIDFRAMES/VIDEO 阶段' }
   }
 
   return { valid: true }
@@ -258,9 +264,10 @@ export function buildConfigDialogSubtitle(
   projectId: number | null,
   selectedChapterCount: number,
   totalChapterCount: number,
+  t?: TFunction,
 ): string {
-  const title = projectTitle || (projectId ? `项目 #${projectId}` : '请选择项目')
-  const chapterSuffix = totalChapterCount > 0 ? ` · 已选 ${selectedChapterCount}/${totalChapterCount} 章` : ''
+  const title = projectTitle || (projectId ? (t ? t('dreamweaverRun.configProjectId', { id: projectId }) : `项目 #${projectId}`) : (t ? t('dreamweaverRun.configProjectFallback') : '请选择项目'))
+  const chapterSuffix = totalChapterCount > 0 ? (t ? t('dreamweaverRun.configChapterSuffix', { selected: selectedChapterCount, total: totalChapterCount }) : ` · 已选 ${selectedChapterCount}/${totalChapterCount} 章`) : ''
   return title + chapterSuffix
 }
 
@@ -295,14 +302,15 @@ export function resolveLibraryPromptReviewMessage(
   libraryApproved: boolean,
   promptReviewReady: boolean,
   promptReviewRequiredSnapshot: boolean,
+  t?: TFunction,
 ): string {
   return libraryApproved
     ? promptReviewReady
-      ? '素材库已通过，提示词已确认：可继续生成进入镜头阶段。'
-      : '素材库已通过，但提示词待确认：请先完成提示词审核。'
+      ? (t ? t('dreamweaverRun.libraryReviewReady') : '素材库已通过，提示词已确认：可继续生成进入镜头阶段。')
+      : (t ? t('dreamweaverRun.libraryReviewPromptPending') : '素材库已通过，但提示词待确认：请先完成提示词审核。')
     : promptReviewRequiredSnapshot
-      ? '素材库待审核：通过后还需确认提示词，才能继续生成。'
-      : '素材库待审核：通过后可继续生成。'
+      ? (t ? t('dreamweaverRun.libraryReviewPendingBoth') : '素材库待审核：通过后还需确认提示词，才能继续生成。')
+      : (t ? t('dreamweaverRun.libraryReviewPendingOnly') : '素材库待审核：通过后可继续生成。')
 }
 
 export type PendingLibraryControlsProps = {

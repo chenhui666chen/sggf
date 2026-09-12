@@ -1,6 +1,9 @@
 import {
   type UserAssetProjectTitleMap,
 } from '@/contracts/userAssetSourceReaders'
+import { useTranslation } from 'react-i18next'
+
+import { useAppLanguage } from '@/i18n'
 import type {
   UserAssetRecord,
   UserAssetRecordUpdatePayload,
@@ -49,13 +52,18 @@ export default function UserAssetCardsGrid(props: UserAssetCardsGridProps) {
     onUpdateAsset,
   } = props
 
+  // 卡片时间是纯函数算出来的，拿不到 hook，因此把当前语言穿进去。
+  const { language } = useAppLanguage()
+  const { t } = useTranslation()
+
   return (
     <>
       {assets.map((asset) => {
         const controller = buildUserAssetCardController(asset, {
           assetActionKey,
           selectedAssetIdSet: assetSelectionState.selectedAssetIdSet,
-        })
+          locale: language,
+        }, t)
         const previewBridge = buildUserAssetCardPreviewBridge(asset, previewObjectUrls)
 
         return (

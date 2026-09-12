@@ -26,39 +26,42 @@ import {
   extractApiErrorMessage,
 } from '@/services/api'
 import PointsPricingPolicyCard from '@/components/admin/PointsPricingPolicyCard'
+import type { TFunction } from 'i18next'
+import { useTranslation } from 'react-i18next'
+import { useFormats } from '@/i18n'
 import { RootState } from '@/store/store'
 
 type PointsRuleFormState = Record<keyof AdminPointsRuleUpdatePayload, string>
 type PointsRuleFieldDescriptor = {
   key: keyof AdminPointsRuleUpdatePayload
-  label: string
-  helperText: string
+  labelKey: string
+  helperKey: string
   step: string
 }
 
 const REWARD_FIELDS: PointsRuleFieldDescriptor[] = [
   {
     key: 'reusable_asset_reward',
-    label: '复用资产奖励',
-    helperText: '用户沉淀可复用资产时发放的积分。',
+    labelKey: 'admin.system.fields.reusableAssetReward',
+    helperKey: 'admin.system.fieldHelp.reusableAssetReward',
     step: '0.1',
   },
   {
     key: 'deliverable_asset_reward',
-    label: '交付资产奖励',
-    helperText: '交付型资产的更高奖励值。',
+    labelKey: 'admin.system.fields.deliverableAssetReward',
+    helperKey: 'admin.system.fieldHelp.deliverableAssetReward',
     step: '0.1',
   },
   {
     key: 'audiobook_completion_reward',
-    label: '有声书完成奖励',
-    helperText: '有声书项目完成后发放的积分。',
+    labelKey: 'admin.system.fields.audiobookCompletionReward',
+    helperKey: 'admin.system.fieldHelp.audiobookCompletionReward',
     step: '0.1',
   },
   {
     key: 'dreamweaver_completion_reward',
-    label: '短剧完成奖励',
-    helperText: '短剧生成完成后发放的积分。',
+    labelKey: 'admin.system.fields.dreamweaverCompletionReward',
+    helperKey: 'admin.system.fieldHelp.dreamweaverCompletionReward',
     step: '0.1',
   },
 ]
@@ -66,14 +69,14 @@ const REWARD_FIELDS: PointsRuleFieldDescriptor[] = [
 const FREEZE_FIELDS: PointsRuleFieldDescriptor[] = [
   {
     key: 'running_audiobook_frozen',
-    label: '有声书运行冻结',
-    helperText: '有声书运行中预留的冻结积分。',
+    labelKey: 'admin.system.fields.runningAudiobookFrozen',
+    helperKey: 'admin.system.fieldHelp.runningAudiobookFrozen',
     step: '0.1',
   },
   {
     key: 'running_dreamweaver_frozen',
-    label: '短剧运行冻结',
-    helperText: '短剧运行中预留的冻结积分。',
+    labelKey: 'admin.system.fields.runningDreamweaverFrozen',
+    helperKey: 'admin.system.fieldHelp.runningDreamweaverFrozen',
     step: '0.1',
   },
 ]
@@ -81,17 +84,24 @@ const FREEZE_FIELDS: PointsRuleFieldDescriptor[] = [
 const LIFECYCLE_FIELDS: PointsRuleFieldDescriptor[] = [
   {
     key: 'reward_ttl_days',
-    label: '奖励有效期（天）',
-    helperText: '正向奖励积分的默认有效期。',
+    labelKey: 'admin.system.fields.rewardTtlDays',
+    helperKey: 'admin.system.fieldHelp.rewardTtlDays',
     step: '1',
   },
   {
     key: 'expiring_notice_days',
-    label: '到期提醒窗口（天）',
-    helperText: '用户中心展示“即将过期积分”的提前天数。',
+    labelKey: 'admin.system.fields.expiringNoticeDays',
+    helperKey: 'admin.system.fieldHelp.expiringNoticeDays',
     step: '1',
   },
 ]
+
+const ALL_FIELDS: PointsRuleFieldDescriptor[] = [...REWARD_FIELDS, ...FREEZE_FIELDS, ...LIFECYCLE_FIELDS]
+
+function getFieldLabel(t: TFunction, key: keyof AdminPointsRuleUpdatePayload) {
+  const descriptor = ALL_FIELDS.find((field) => field.key === key)
+  return descriptor ? t(descriptor.labelKey) : key
+}
 
 const EMPTY_FORM: PointsRuleFormState = {
   reusable_asset_reward: '',
@@ -117,38 +127,38 @@ function buildFormState(config: AdminPointsRuleConfig | AdminPointsRuleUpdatePay
   }
 }
 
-function parsePointsRuleForm(form: PointsRuleFormState): { payload?: AdminPointsRuleUpdatePayload; error?: string } {
-  const parseFloatField = (field: keyof AdminPointsRuleUpdatePayload, label: string) => {
+function parsePointsRuleForm(form: PointsRuleFormState, t: TFunction): { payload?: AdminPointsRuleUpdatePayload; error?: string } {
+  const parseFloatField = (field: keyof AdminPointsRuleUpdatePayload) => {
     const value = Number(form[field])
     if (!Number.isFinite(value) || value < 0) {
-      return { error: `${label}必须是大于等于 0 的数字` }
+      return { error: t('admin.system.validation.notNegative', { label: getFieldLabel(t, field) }) }
     }
     return { value: Number(value.toFixed(2)) }
   }
 
-  const parseIntField = (field: keyof AdminPointsRuleUpdatePayload, label: string, minimum: number) => {
+  const parseIntField = (field: keyof AdminPointsRuleUpdatePayload, minimum: number) => {
     const value = Number(form[field])
     if (!Number.isInteger(value) || value < minimum) {
-      return { error: `${label}必须是大于等于 ${minimum} 的整数` }
+      return { error: t('admin.system.validation.integerMin', { label: getFieldLabel(t, field), minimum }) }
     }
     return { value }
   }
 
-  const reusableAssetReward = parseFloatField('reusable_asset_reward', '复用资产奖励')
+  const reusableAssetReward = parseFloatField('reusable_asset_reward')
   if (reusableAssetReward.error) return reusableAssetReward
-  const deliverableAssetReward = parseFloatField('deliverable_asset_reward', '交付资产奖励')
+  const deliverableAssetReward = parseFloatField('deliverable_asset_reward')
   if (deliverableAssetReward.error) return deliverableAssetReward
-  const audiobookCompletionReward = parseFloatField('audiobook_completion_reward', '有声书完成奖励')
+  const audiobookCompletionReward = parseFloatField('audiobook_completion_reward')
   if (audiobookCompletionReward.error) return audiobookCompletionReward
-  const dreamweaverCompletionReward = parseFloatField('dreamweaver_completion_reward', '短剧完成奖励')
+  const dreamweaverCompletionReward = parseFloatField('dreamweaver_completion_reward')
   if (dreamweaverCompletionReward.error) return dreamweaverCompletionReward
-  const runningAudiobookFrozen = parseFloatField('running_audiobook_frozen', '有声书运行冻结')
+  const runningAudiobookFrozen = parseFloatField('running_audiobook_frozen')
   if (runningAudiobookFrozen.error) return runningAudiobookFrozen
-  const runningDreamweaverFrozen = parseFloatField('running_dreamweaver_frozen', '短剧运行冻结')
+  const runningDreamweaverFrozen = parseFloatField('running_dreamweaver_frozen')
   if (runningDreamweaverFrozen.error) return runningDreamweaverFrozen
-  const rewardTtlDays = parseIntField('reward_ttl_days', '奖励有效期', 1)
+  const rewardTtlDays = parseIntField('reward_ttl_days', 1)
   if (rewardTtlDays.error) return rewardTtlDays
-  const expiringNoticeDays = parseIntField('expiring_notice_days', '到期提醒窗口', 0)
+  const expiringNoticeDays = parseIntField('expiring_notice_days', 0)
   if (expiringNoticeDays.error) return expiringNoticeDays
 
   return {
@@ -166,6 +176,8 @@ function parsePointsRuleForm(form: PointsRuleFormState): { payload?: AdminPoints
 }
 
 export default function SystemPage() {
+  const { t } = useTranslation()
+  const { formatDateTime } = useFormats()
   const { user } = useSelector((state: RootState) => state.auth)
   const isSuperAdmin = (user as any)?.roles?.some((role: any) => role.code === 'super_admin')
 
@@ -207,7 +219,7 @@ export default function SystemPage() {
       setForm(buildFormState(rulesResponse.data))
       setError(null)
     } catch (err) {
-      setError(await extractApiErrorMessage(err, '获取系统配置失败'))
+      setError(await extractApiErrorMessage(err, t('admin.system.messages.fetchFailed')))
     } finally {
       setLoading(false)
       setRefreshing(false)
@@ -225,14 +237,14 @@ export default function SystemPage() {
   const handleReset = () => {
     if (!rules) return
     setForm(buildFormState(rules))
-    setSuccessMessage('已恢复为当前线上规则快照。')
+    setSuccessMessage(t('admin.system.messages.resetDone'))
     setError(null)
   }
 
   const handleSave = async () => {
-    const parsed = parsePointsRuleForm(form)
+    const parsed = parsePointsRuleForm(form, t)
     if (!parsed.payload) {
-      setError(parsed.error || '积分规则校验失败')
+      setError(parsed.error || t('admin.system.messages.validationFailed'))
       return
     }
 
@@ -241,10 +253,10 @@ export default function SystemPage() {
       const response = await apiClient.updateAdminPointsRules(parsed.payload)
       setRules(response.data)
       setForm(buildFormState(response.data))
-      setSuccessMessage('积分规则已保存，用户中心新的积分汇总会立即按新规则计算。')
+      setSuccessMessage(t('admin.system.messages.saved'))
       setError(null)
     } catch (err) {
-      setError(await extractApiErrorMessage(err, '保存积分规则失败'))
+      setError(await extractApiErrorMessage(err, t('admin.system.messages.saveFailed')))
     } finally {
       setSaving(false)
     }
@@ -259,10 +271,10 @@ export default function SystemPage() {
         {fields.map((field) => (
           <TextField
             key={field.key}
-            label={field.label}
+            label={t(field.labelKey)}
             value={form[field.key]}
             onChange={handleFieldChange(field.key)}
-            helperText={field.helperText}
+            helperText={t(field.helperKey)}
             type="number"
             fullWidth
             inputProps={{
@@ -279,9 +291,9 @@ export default function SystemPage() {
     return (
       <Box>
         <Typography variant="h4" gutterBottom sx={{ mb: 3 }}>
-          系统配置
+          {t('admin.system.title')}
         </Typography>
-        <Alert severity="warning">当前页面仅对超级管理员开放。</Alert>
+        <Alert severity="warning">{t('admin.system.forbidden')}</Alert>
       </Box>
     )
   }
@@ -306,9 +318,9 @@ export default function SystemPage() {
         sx={{ mb: 3 }}
       >
         <Box>
-          <Typography variant="h4">系统配置</Typography>
+          <Typography variant="h4">{t('admin.system.title')}</Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-            当前阶段先将积分规则配置化，保持读模型闭环，不引入新的积分表和迁移。
+            {t('admin.system.subtitle')}
           </Typography>
         </Box>
         <Button
@@ -317,7 +329,7 @@ export default function SystemPage() {
           onClick={() => void fetchPageData(true)}
           disabled={refreshing || saving}
         >
-          刷新
+          {t('admin.common.refresh')}
         </Button>
       </Stack>
 
@@ -340,20 +352,28 @@ export default function SystemPage() {
               <Box>
                 <Typography variant="h6" sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                   <TuneIcon fontSize="small" />
-                  积分规则
+                  {t('admin.system.pointsRules.title')}
                 </Typography>
                 <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-                  这里配置用户中心积分账户的奖励、冻结和有效期规则。保存后，新的积分汇总会立即使用最新快照。
+                  {t('admin.system.pointsRules.subtitle')}
                 </Typography>
               </Box>
               <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
                 <Chip
                   color={rules?.source === 'admin_log' ? 'primary' : 'default'}
-                  label={rules?.source === 'admin_log' ? '管理员已覆盖' : '环境默认值'}
+                  label={
+                    rules?.source === 'admin_log'
+                      ? t('admin.system.pointsRules.overriddenByAdmin')
+                      : t('admin.system.pointsRules.envDefault')
+                  }
                 />
                 <Chip
                   variant="outlined"
-                  label={rules?.updated_at ? `最近更新：${new Date(rules.updated_at).toLocaleString('zh-CN')}` : '尚未人工更新'}
+                  label={
+                    rules?.updated_at
+                      ? t('admin.system.pointsRules.recentUpdate', { time: formatDateTime(rules.updated_at) })
+                      : t('admin.system.pointsRules.notManuallyUpdated')
+                  }
                 />
               </Stack>
             </Stack>
@@ -361,21 +381,21 @@ export default function SystemPage() {
             <Divider sx={{ my: 3 }} />
 
             <Stack spacing={3}>
-              {renderFieldGroup('奖励规则', REWARD_FIELDS)}
-              {renderFieldGroup('冻结规则', FREEZE_FIELDS)}
-              {renderFieldGroup('有效期规则', LIFECYCLE_FIELDS)}
+              {renderFieldGroup(t('admin.system.groups.reward'), REWARD_FIELDS)}
+              {renderFieldGroup(t('admin.system.groups.freeze'), FREEZE_FIELDS)}
+              {renderFieldGroup(t('admin.system.groups.lifecycle'), LIFECYCLE_FIELDS)}
             </Stack>
 
             <Alert severity="info" sx={{ mt: 3 }}>
-              当前规则只作用于用户中心积分读模型。历史人工补发记录仍然生效，但不会替代未来正式积分账本。
+              {t('admin.system.pointsRules.readModelHint')}
             </Alert>
 
             <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} sx={{ mt: 3 }}>
               <Button variant="outlined" onClick={handleReset} disabled={!rules || saving || !isDirty}>
-                恢复当前配置
+                {t('admin.system.actions.reset')}
               </Button>
               <Button variant="contained" onClick={() => void handleSave()} disabled={saving || !isDirty}>
-                {saving ? '保存中...' : '保存规则'}
+                {saving ? t('admin.system.actions.saving') : t('admin.system.actions.saveRules')}
               </Button>
             </Stack>
           </CardContent>
@@ -386,7 +406,7 @@ export default function SystemPage() {
             <CardContent>
               <Typography variant="h6" sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                 <SettingsSuggestIcon fontSize="small" />
-                系统健康
+                {t('admin.system.health.title')}
               </Typography>
               <Stack spacing={2} sx={{ mt: 2 }}>
                 <Box
@@ -402,15 +422,17 @@ export default function SystemPage() {
                   }}
                 >
                   <Box>
-                    <Typography variant="subtitle2">数据库连接</Typography>
+                    <Typography variant="subtitle2">{t('admin.system.health.database')}</Typography>
                     <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-                      {health?.timestamp ? `最近检查：${new Date(health.timestamp).toLocaleString('zh-CN')}` : '暂无检查时间'}
+                      {health?.timestamp
+                        ? t('admin.system.health.lastCheck', { time: formatDateTime(health.timestamp) })
+                        : t('admin.system.health.noCheck')}
                     </Typography>
                   </Box>
                   <Chip
                     color={healthIsOk ? 'success' : 'error'}
                     icon={healthIsOk ? <CheckCircleIcon /> : <ErrorOutlineIcon />}
-                    label={healthIsOk ? '正常' : '异常'}
+                    label={healthIsOk ? t('admin.system.health.ok') : t('admin.system.health.error')}
                   />
                 </Box>
               </Stack>
@@ -421,16 +443,16 @@ export default function SystemPage() {
 
           <Card>
             <CardContent>
-              <Typography variant="h6">规则说明</Typography>
+              <Typography variant="h6">{t('admin.system.notes.title')}</Typography>
               <Stack spacing={1.5} sx={{ mt: 2 }}>
                 <Typography variant="body2" color="text.secondary">
-                  资产奖励建议继续放在用户中心统一汇总，因为它代表跨模块沉淀后的可复用价值。
+                  {t('admin.system.notes.note1')}
                 </Typography>
                 <Typography variant="body2" color="text.secondary">
-                  运行冻结建议只在用户中心集中展示，避免用户在各生成模块看到多套冻结口径。
+                  {t('admin.system.notes.note2')}
                 </Typography>
                 <Typography variant="body2" color="text.secondary">
-                  未来若引入充值订单、会员等级或正式积分流水，可以继续复用这套规则快照作为后台运营入口。
+                  {t('admin.system.notes.note3')}
                 </Typography>
               </Stack>
             </CardContent>
@@ -438,16 +460,21 @@ export default function SystemPage() {
 
           <Card>
             <CardContent>
-              <Typography variant="h6">最近操作</Typography>
+              <Typography variant="h6">{t('admin.system.recent.title')}</Typography>
               <Stack spacing={1} sx={{ mt: 2 }}>
                 <Typography variant="body2" color="text.secondary">
-                  更新来源：{rules?.source === 'admin_log' ? '管理员规则快照' : '环境默认配置'}
+                  {t('admin.system.recent.source', {
+                    source:
+                      rules?.source === 'admin_log' ? t('admin.system.recent.adminSnapshot') : t('admin.system.recent.envDefault'),
+                  })}
                 </Typography>
                 <Typography variant="body2" color="text.secondary">
-                  操作人：{rules?.updated_by_username || '系统默认'}
+                  {t('admin.system.recent.operator', {
+                    name: rules?.updated_by_username || t('admin.system.recent.systemDefault'),
+                  })}
                 </Typography>
                 <Typography variant="body2" color="text.secondary">
-                  生效方式：读取最新成功快照，不做数据库迁移。
+                  {t('admin.system.recent.effective')}
                 </Typography>
               </Stack>
             </CardContent>

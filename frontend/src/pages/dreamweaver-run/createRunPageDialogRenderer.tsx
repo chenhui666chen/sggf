@@ -1,4 +1,6 @@
 import React from 'react'
+import type { TFunction } from 'i18next'
+import type { AppLanguage } from '@/i18n'
 import type { DreamweaverShotSnapshot, BulkDeleteProgress, BulkDeleteResult } from '@/types/dreamweaver'
 import type { DreamweaverHistoryRunListItem } from './historyDialog'
 import type { HistoryRunItem } from './runPageHistoryHelpers'
@@ -38,6 +40,8 @@ interface ChapterLike {
 }
 
 export interface CreateRunPageDialogRendererDeps {
+  /** 当前界面语言。本文件不是组件也不是 hook，只能由调用方把它递进来。 */
+  language: AppLanguage
   promptEditOpen: boolean
   closePromptEditDialog: () => void
   promptEditShot: DreamweaverShotSnapshot | null
@@ -188,10 +192,12 @@ export interface CreateRunPageDialogRendererDeps {
     warnings: { length: number }
     errors: { length: number }
   } | null
+  t: TFunction
 }
 
 export function createRunPageDialogRenderer(deps: CreateRunPageDialogRendererDeps) {
   const {
+    language,
     promptEditOpen,
     closePromptEditDialog,
     promptEditShot,
@@ -333,11 +339,12 @@ export function createRunPageDialogRenderer(deps: CreateRunPageDialogRendererDep
     error,
     hasQcWarning,
     diagnosticPreflight,
+    t,
   } = deps
 
-  const promptEditShotTitle = getShotId(promptEditShot) || '未选中'
+  const promptEditShotTitle = getShotId(promptEditShot) || t('dreamweaverRun.notSelected')
   const promptEditShotDesc = promptEditShot ? getShotDesc(promptEditShot) : null
-  const promptEditGeneratedText = promptEditGenerated || '暂无自动提示词（可能尚未生成或未落库）'
+  const promptEditGeneratedText = promptEditGenerated || t('dreamweaverRun.noAutoPrompt')
 
   const renderPromptEditDialog = () => (
     <DreamweaverPromptEditDialog
@@ -373,13 +380,13 @@ export function createRunPageDialogRenderer(deps: CreateRunPageDialogRendererDep
       imageEditActive: regenImageEditActive,
       imageEditAutoCleared: regenImageEditAutoCleared,
       submitting: regenSubmitting,
-    })
+    }, t)
 
     return (
       <DreamweaverRegenerateDialog
         open={regenOpen}
         onClose={closeRegenDialog}
-        title={`重生成素材：${regenDialogTitle}`}
+        title={t('dreamweaverRun.regenerateAsset', { title: regenDialogTitle })}
         modeHint={labels.modeHint}
         suggesting={regenSuggesting}
         submitting={regenSubmitting}
@@ -413,7 +420,7 @@ export function createRunPageDialogRenderer(deps: CreateRunPageDialogRendererDep
     )
   }
 
-  const historyRunItems = mapHistoryRunsToItems(filteredHistoryRuns).map((item) => ({
+  const historyRunItems = mapHistoryRunsToItems(filteredHistoryRuns, language, t).map((item) => ({
     ...item,
     onView: () => handleViewHistoryRun(item.runId),
     onDelete: () => openDeleteRunDialog(item.runId),
@@ -432,12 +439,12 @@ export function createRunPageDialogRenderer(deps: CreateRunPageDialogRendererDep
         statusCounts: historyStatusCounts,
         onClearFilters: clearHistoryStatusFilters,
         onToggleFilter: toggleHistoryStatusFilter,
-      })}
+      }, t)}
       onRefresh={refreshHistory}
       refreshDisabled={historyRefreshDisabled}
       onBulkDelete={openBulkDeleteDialog}
       bulkDeleteDisabled={historyBulkDeleteDisabled}
-      bulkDeleteLabel={`批量删除筛选结果 (${bulkDeleteTargetCount})`}
+      bulkDeleteLabel={t('dreamweaverRun.bulkDeleteFiltered', { count: bulkDeleteTargetCount })}
       runs={historyRunItems}
       showEmptyHistory={historyEmpty}
       showEmptyFilter={historyFilterEmpty}
@@ -498,7 +505,7 @@ export function createRunPageDialogRenderer(deps: CreateRunPageDialogRendererDep
         setPromptReviewRequired,
         qcAllowFail,
         setQcAllowFail,
-      })}
+      }, t)}
       abVariant={abVariant}
       onChangeAbVariant={setAbVariant}
       lockedGenerationConfigError={lockedGenerationConfigError}

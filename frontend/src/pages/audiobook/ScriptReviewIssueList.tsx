@@ -7,6 +7,7 @@ import {
   ListItemText,
   Typography,
 } from '@mui/material'
+import { useTranslation } from 'react-i18next'
 
 import type { ScriptReviewIssue } from './types'
 import { ISSUE_DISPLAY_LIMIT } from './utils'
@@ -24,13 +25,15 @@ const ScriptReviewIssueList = ({
   extraIssues,
   selectedIssueIndex = null,
   onSelectIssue,
-}: ScriptReviewIssueListProps) => (
+}: ScriptReviewIssueListProps) => {
+  const { t } = useTranslation()
+  return (
   <>
-    <Divider textAlign="left">问题清单</Divider>
+    <Divider textAlign="left">{t('audiobook.scriptReviewIssueList.title')}</Divider>
     {issues.length > 0 ? (
       <List dense>
         {issues.slice(0, ISSUE_DISPLAY_LIMIT).map((issue, idx) => {
-          const display = getReviewIssueDisplay(issue)
+          const display = getReviewIssueDisplay(issue, t)
           return (
             <ListItemButton
               key={`${issue.location || idx}-${idx}`}
@@ -55,7 +58,7 @@ const ScriptReviewIssueList = ({
                 secondary={
                   display.suggestion ? (
                     <Typography variant="body2" color="text.secondary">
-                      建议：{display.suggestion}
+                      {t('audiobook.scriptReviewIssueList.suggestionPrefix', { value: display.suggestion })}
                     </Typography>
                   ) : undefined
                 }
@@ -66,15 +69,16 @@ const ScriptReviewIssueList = ({
       </List>
     ) : (
       <Typography variant="body2" color="text.secondary">
-        未找到具体问题，整体表现稳定。
+        {t('audiobook.scriptReviewIssueList.noIssues')}
       </Typography>
     )}
     {extraIssues > 0 && (
       <Typography variant="caption" color="text.secondary">
-        另有 {extraIssues} 条问题记录，可在导出报告或后台数据库中查看全部明细。
+        {t('audiobook.scriptReviewIssueList.extraIssuesHint', { total: extraIssues })}
       </Typography>
     )}
   </>
-)
+  )
+}
 
 export default ScriptReviewIssueList

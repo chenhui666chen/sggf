@@ -1,4 +1,5 @@
 import { useState, useMemo, useCallback, useRef, useEffect } from 'react'
+import { useTranslation } from 'react-i18next'
 import type { DreamweaverShotSnapshot } from '@/types/dreamweaver'
 import { apiClient, extractApiErrorMessage } from '@/services/api'
 import { getShotFramePrompt, getShotId, getShotVideoPromptGenerated, getShotVideoPromptOverride } from '@/pages/dreamweaver-run/runPageHelpers'
@@ -29,6 +30,7 @@ export type UseDreamweaverPromptEditDialogReturn = {
 export function useDreamweaverPromptEditDialog(
   options: UseDreamweaverPromptEditDialogOptions,
 ): UseDreamweaverPromptEditDialogReturn {
+  const { t } = useTranslation()
   const currentRunIdRef = useRef(options.currentRunId)
   const loadRunSnapshotRef = useRef(options.loadRunSnapshot)
 
@@ -82,13 +84,13 @@ export function useDreamweaverPromptEditDialog(
     if (!currentRunId || !promptEditShot) return
     const shotId = getShotId(promptEditShot)
     if (!shotId) {
-      setPromptEditError('缺少 shot_id，无法保存')
+      setPromptEditError(t('dreamweaverRun.errorMissingShotIdSave'))
       return
     }
     const head = promptEditHead.trim()
     const tail = promptEditTail.trim()
     if (!head || !tail) {
-      setPromptEditError('首帧/尾帧提示词不能为空')
+      setPromptEditError(t('dreamweaverRun.errorFramePromptEmpty'))
       return
     }
 
@@ -119,11 +121,11 @@ export function useDreamweaverPromptEditDialog(
       await loadRunSnapshot()
       setPromptEditOpen(false)
     } catch (e: unknown) {
-      setPromptEditError(await extractApiErrorMessage(e, '提示词保存失败'))
+      setPromptEditError(await extractApiErrorMessage(e, t('dreamweaverRun.errorSavePromptFailed')))
     } finally {
       setPromptEditSaving(false)
     }
-  }, [promptEditHead, promptEditShot, promptEditTail, promptEditVideo])
+  }, [promptEditHead, promptEditShot, promptEditTail, promptEditVideo, t])
 
   return {
     promptEditOpen,

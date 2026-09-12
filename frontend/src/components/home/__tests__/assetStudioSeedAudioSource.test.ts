@@ -9,8 +9,8 @@ describe('Asset Studio Seed Audio controls', () => {
     expect(source).toContain("'scene-audio'")
     expect(source).toContain('seed-audio-1.0')
     expect(source).toContain("formData.append('speaker_ids'")
-    expect(source).toContain('场景音频提示词')
-    expect(source).toContain('参考说话人 ID')
+    expect(source).toContain("t('assetStudio.workbench.label.sceneAudioPrompt')")
+    expect(source).toContain("t('assetStudio.workbench.label.speakerId')")
   })
 
   it('does not expose or submit pitch for fixed-voice speech generation', () => {

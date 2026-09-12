@@ -4,6 +4,8 @@ import type { BuildUserCenterAssetConnectedOverviewRowsViewModelOptions } from '
 import {
   buildUserCenterAssetConnectedOverviewRowsViewModel,
 } from './userCenterAssetConnectedOverviewRowsViewModelHelper'
+import type { TFunction } from 'i18next'
+
 import { buildUserCenterAssetConnectedOverviewRowSlot } from './UserCenterAssetConnectedOverviewRow'
 
 export type UserCenterAssetConnectedOverviewRows = {
@@ -13,8 +15,9 @@ export type UserCenterAssetConnectedOverviewRows = {
 
 export function buildUserCenterAssetConnectedOverviewRows(
   options: BuildUserCenterAssetConnectedOverviewRowsViewModelOptions,
+  t?: TFunction,
 ): UserCenterAssetConnectedOverviewRows {
-  const viewModel = buildUserCenterAssetConnectedOverviewRowsViewModel(options)
+  const viewModel = buildUserCenterAssetConnectedOverviewRowsViewModel(options, t)
 
   return {
     strategyRowSlot: buildUserCenterAssetConnectedOverviewRowSlot(viewModel.strategyRowSlotOptions),

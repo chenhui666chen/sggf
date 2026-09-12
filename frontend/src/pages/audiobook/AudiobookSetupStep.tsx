@@ -20,6 +20,7 @@ import GraphicEqIcon from '@mui/icons-material/GraphicEq'
 import LibraryMusicIcon from '@mui/icons-material/LibraryMusic'
 import PlaylistAddCheckIcon from '@mui/icons-material/PlaylistAddCheck'
 import VoiceIcon from '@mui/icons-material/RecordVoiceOver'
+import { useTranslation } from 'react-i18next'
 
 import CharacterVoiceConfigPanel from './CharacterVoiceConfigPanel'
 import ChapterSelectionPanel from './ChapterSelectionPanel'
@@ -198,6 +199,7 @@ const AudiobookSetupStep = ({
   onAutoAssignVoices,
   onGenerate,
 }: AudiobookSetupStepProps) => {
+  const { t } = useTranslation()
   const [voiceManagementOpen, setVoiceManagementOpen] = useState(false)
   const [voiceManagementModel, setVoiceManagementModel] = useState<TtsModel>(ttsModel)
   const sceneVoicePool = useAudiobookSceneVoicePool()
@@ -220,11 +222,20 @@ const AudiobookSetupStep = ({
     const modelLabel = voiceManagementOption?.name || getTtsModelLabel(voiceManagementModel)
     const updatedAt = voiceManagementMeta.updated_at || '—'
     if (voiceManagementRequiresCustomVoice) {
-      return `${modelLabel}：当前展示 ${voiceManagementPresets.length} 个可用自定义音色，最近同步 ${updatedAt}。`
+      return t('audiobook.audiobookSetupStep.customVoiceSummary', {
+        model: modelLabel,
+        total: voiceManagementPresets.length,
+        updatedAt,
+      })
     }
     const voiceCount = voiceManagementMeta.voice_count ?? voiceManagementPresets.length
-    return `${modelLabel}：官方 ${voiceCount} 种音色，最近更新 ${updatedAt}。`
+    return t('audiobook.audiobookSetupStep.officialVoiceSummary', {
+      model: modelLabel,
+      total: voiceCount,
+      updatedAt,
+    })
   }, [
+    t,
     voiceManagementMeta,
     voiceManagementModel,
     voiceManagementOption?.name,
@@ -233,21 +244,23 @@ const AudiobookSetupStep = ({
   ])
   const voiceManagementNotice = useMemo(() => {
     const modelLabel = voiceManagementOption?.name || getTtsModelLabel(voiceManagementModel)
+    const withModelPrefix = (note: string) =>
+      t('audiobook.audiobookSetupStep.notePrefix', { model: modelLabel, note })
     if (voiceManagementOption?.catalogStatus === 'unavailable') {
-      return `${modelLabel}：${voiceManagementOption.catalogError || '音色目录不可用，请检查后端 voice catalog 配置。'}`
+      return withModelPrefix(voiceManagementOption.catalogError || t('audiobook.audiobookSetupStep.catalogUnavailable'))
     }
     if (voiceManagementOption?.runtimeStatus === 'unavailable') {
-      return `${modelLabel}：${voiceManagementOption.runtimeError || 'TTS 运行时模型不可用，请检查后端 adapter 注册。'}`
+      return withModelPrefix(voiceManagementOption.runtimeError || t('audiobook.audiobookSetupStep.runtimeUnavailable'))
     }
     if (voiceManagementOption?.source === 'fallback') {
       return voiceLoading
-        ? `${modelLabel}：正在同步后端模型目录与音色目录。`
-        : `${modelLabel}：暂时使用前端内置模型配置，后端模型目录未返回该模型。`
+        ? withModelPrefix(t('audiobook.audiobookSetupStep.syncingCatalog'))
+        : withModelPrefix(t('audiobook.audiobookSetupStep.fallbackCatalog'))
     }
     return voiceManagementOption?.catalogNote
-      ? `${modelLabel}：${voiceManagementOption.catalogNote}`
-      : `${modelLabel}：使用后端模型目录与音色目录配置。`
-  }, [voiceLoading, voiceManagementModel, voiceManagementOption])
+      ? withModelPrefix(voiceManagementOption.catalogNote)
+      : withModelPrefix(t('audiobook.audiobookSetupStep.usingServerCatalog'))
+  }, [t, voiceLoading, voiceManagementModel, voiceManagementOption])
   const voiceManagementNoticeSeverity = voiceManagementOption?.catalogStatus === 'unavailable'
     || voiceManagementOption?.runtimeStatus === 'unavailable'
     ? 'warning'
@@ -290,8 +303,8 @@ const AudiobookSetupStep = ({
       <Stack spacing={2.5} sx={{ minWidth: 0 }}>
         <SetupPanel
           icon={<PlaylistAddCheckIcon fontSize="small" />}
-          title="章节队列"
-          subtitle="选择一个未生成章节"
+          title={t('audiobook.audiobookSetupStep.chapterQueueTitle')}
+          subtitle={t('audiobook.audiobookSetupStep.chapterQueueSubtitle')}
         >
           <Box
             sx={{
@@ -304,13 +317,13 @@ const AudiobookSetupStep = ({
             }}
           >
             <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.75 }}>
-              生成引擎
+              {t('audiobook.audiobookSetupStep.engineModeLabel')}
             </Typography>
             <ToggleButtonGroup
               exclusive
               size="small"
               fullWidth
-              aria-label="生成引擎"
+              aria-label={t('audiobook.audiobookSetupStep.engineModeLabel')}
               value={audioEngineMode}
               onChange={(_, value: AudioEngineMode | null) => {
                 if (value) onAudioEngineModeChange(value)
@@ -325,13 +338,13 @@ const AudiobookSetupStep = ({
                 },
               }}
             >
-              <ToggleButton value="legacy_stems" aria-label="分轨合成">
+              <ToggleButton value="legacy_stems" aria-label={t('audiobook.audiobookSetupStep.legacyStemsLabel')}>
                 <GraphicEqIcon fontSize="small" />
-                分轨合成
+                {t('audiobook.audiobookSetupStep.legacyStemsLabel')}
               </ToggleButton>
-              <ToggleButton value="seed_scene" aria-label="场景生成">
+              <ToggleButton value="seed_scene" aria-label={t('audiobook.audiobookSetupStep.seedSceneLabel')}>
                 <AutoAwesomeIcon fontSize="small" />
-                场景生成
+                {t('audiobook.audiobookSetupStep.seedSceneLabel')}
               </ToggleButton>
             </ToggleButtonGroup>
           </Box>
@@ -347,8 +360,8 @@ const AudiobookSetupStep = ({
         </SetupPanel>
         <SetupPanel
           icon={<LibraryMusicIcon fontSize="small" />}
-          title="叙事与音频"
-          subtitle="输出格式、音效与配乐"
+          title={t('audiobook.audiobookSetupStep.narrationTitle')}
+          subtitle={t('audiobook.audiobookSetupStep.narrationSubtitle')}
         >
           <NarrationAudioConfigPanel
             outputFormat={outputFormat}
@@ -362,8 +375,8 @@ const AudiobookSetupStep = ({
 
       <SetupPanel
         icon={<VoiceIcon fontSize="small" />}
-        title="角色声音"
-        subtitle="旁白和当前章节角色的 TTS 与音色"
+        title={t('audiobook.audiobookSetupStep.voicesTitle')}
+        subtitle={t('audiobook.audiobookSetupStep.voicesSubtitle')}
         sx={{
           minWidth: 0,
           height: { lg: '100%' },
@@ -372,7 +385,9 @@ const AudiobookSetupStep = ({
         }}
       >
         <Alert severity="info" sx={{ mb: 2 }}>
-          {selectedChapterCount > 0 ? '当前章节' : '尚未选择章节'}，未配置角色将由 AI 自动分配音色。
+          {selectedChapterCount > 0
+            ? t('audiobook.audiobookSetupStep.chapterSelectedNotice')
+            : t('audiobook.audiobookSetupStep.chapterNotSelectedNotice')}
         </Alert>
         <Box sx={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
           <CharacterVoiceConfigPanel
@@ -400,7 +415,7 @@ const AudiobookSetupStep = ({
     </Box>
 
     <Box sx={audiobookButtonRowSx.singlePrimary}>
-      <Tooltip title={generateDisabled ? generateDisabledReason : '生成本章场景剧本'}>
+      <Tooltip title={generateDisabled ? generateDisabledReason : t('audiobook.audiobookSetupStep.generateScriptLabel')}>
         <span>
           <Button
             variant="contained"
@@ -408,7 +423,9 @@ const AudiobookSetupStep = ({
             disabled={generateDisabled}
             color="primary"
           >
-            {selectedChapterCount > 0 ? '生成本章场景剧本' : '请选择章节'}
+            {selectedChapterCount > 0
+              ? t('audiobook.audiobookSetupStep.generateScriptLabel')
+              : t('audiobook.audiobookSetupStep.selectChapterLabel')}
           </Button>
         </span>
       </Tooltip>
@@ -420,10 +437,10 @@ const AudiobookSetupStep = ({
       fullWidth
       maxWidth="md"
     >
-      <DialogTitle>音色管理</DialogTitle>
+      <DialogTitle>{t('audiobook.audiobookSetupStep.voiceManagementTitle')}</DialogTitle>
       <DialogContent dividers>
         <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-          在这里创建和管理克隆/设计音色；保存后回到角色卡片，为旁白或角色选择对应音色。
+          {t('audiobook.audiobookSetupStep.voiceManagementHint')}
         </Typography>
         {audioEngineMode === 'seed_scene' ? (
           <VoicePoolWorkbench
@@ -454,7 +471,7 @@ const AudiobookSetupStep = ({
       </DialogContent>
       <DialogActions>
         <Button onClick={() => setVoiceManagementOpen(false)}>
-          关闭
+          {t('action.close')}
         </Button>
       </DialogActions>
     </Dialog>

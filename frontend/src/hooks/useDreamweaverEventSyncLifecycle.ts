@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react'
+import { useTranslation } from 'react-i18next'
 import type { DreamweaverEventRecord } from '@/types/dreamweaver'
 import { workflowWebSocket } from '@/services/websocket'
 
@@ -22,6 +23,8 @@ export function useDreamweaverEventSyncLifecycle(options: UseDreamweaverEventSyn
     applyDreamweaverEvent,
     setWsError,
   } = options
+
+  const { t } = useTranslation()
 
   const activeRunIdRef = useRef<string | null>(null)
   const eventSyncingRef = useRef(false)
@@ -69,7 +72,7 @@ export function useDreamweaverEventSyncLifecycle(options: UseDreamweaverEventSyn
       if (!active) return
       workflowWebSocket.joinProject(selectedProjectId)
     }).catch((error) => {
-      setWsError(`WebSocket 连接失败: ${error instanceof Error ? error.message : String(error)}`)
+      setWsError(t('dreamweaverRun.wsConnectFailed', { error: error instanceof Error ? error.message : String(error) }))
     })
 
     workflowWebSocket.onDreamweaverEvent((data) => {
@@ -81,5 +84,5 @@ export function useDreamweaverEventSyncLifecycle(options: UseDreamweaverEventSyn
       workflowWebSocket.setOnRoomJoined(() => {})
       workflowWebSocket.removeEventListeners()
     }
-  }, [applyDreamweaverEvent, selectedProjectId, syncDreamweaverEvents])
+  }, [applyDreamweaverEvent, selectedProjectId, syncDreamweaverEvents, t])
 }

@@ -1,5 +1,9 @@
-import { describe, expect, it } from 'vitest'
+import { beforeAll, describe, expect, it } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
+import type { ReactElement } from 'react'
+import type { i18n as I18nInstance } from 'i18next'
+
+import { bootstrapI18n, I18nProvider } from '@/i18n'
 
 import UserCenterAssetConnectedOverviewRow, {
   buildUserCenterAssetConnectedOverviewRowSlot,
@@ -14,6 +18,16 @@ function extractVisibleText(markup: string): string {
     .replace(/&nbsp;/g, ' ')
     .replace(/\s+/g, ' ')
     .trim()
+}
+
+let i18nInstance: I18nInstance
+
+beforeAll(async () => {
+  i18nInstance = await bootstrapI18n('zh-CN')
+})
+
+function renderWithI18n(node: ReactElement): string {
+  return renderToStaticMarkup(<I18nProvider instance={i18nInstance}>{node}</I18nProvider>)
 }
 
 describe('UserCenterAssetConnectedOverviewRow', () => {
@@ -41,7 +55,7 @@ describe('UserCenterAssetConnectedOverviewRow', () => {
   })
 
   it('renders overview section and companion card through the shared row layout', () => {
-    const text = extractVisibleText(renderToStaticMarkup(
+    const text = extractVisibleText(renderWithI18n(
       <UserCenterAssetConnectedOverviewRow
         overviewBridge={{
           sectionProps: {

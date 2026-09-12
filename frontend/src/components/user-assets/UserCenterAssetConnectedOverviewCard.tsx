@@ -5,12 +5,14 @@ import {
   Stack,
   Typography,
 } from '@mui/material'
+import { useTranslation } from 'react-i18next'
 
 import type { UserCenterAssetConnectedOverviewCardProps } from './userCenterAssetConnectedOverviewPresentation'
 
 export default function UserCenterAssetConnectedOverviewCard(
   props: UserCenterAssetConnectedOverviewCardProps,
 ) {
+  const { t } = useTranslation()
   const { items } = props
 
   return (
@@ -19,13 +21,13 @@ export default function UserCenterAssetConnectedOverviewCard(
         <Stack direction="row" spacing={1} alignItems="center">
           <StarsOutlinedIcon color="primary" />
           <Typography variant="h6" sx={{ fontWeight: 700 }}>
-            已接入概览
+            {t('userAsset.connected.overviewTitle')}
           </Typography>
         </Stack>
         <Stack spacing={1.25} sx={{ mt: 2 }}>
           {items.map((item) => (
             <Typography key={item.key} variant="body2" color="text.secondary">
-              {item.label}：{item.value}
+              {t('userAsset.connected.itemLine', { label: item.label, value: item.value })}
             </Typography>
           ))}
         </Stack>

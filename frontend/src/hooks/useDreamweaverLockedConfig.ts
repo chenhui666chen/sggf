@@ -1,5 +1,7 @@
 import { useCallback, useRef, useState } from 'react'
 
+import { useTranslation } from 'react-i18next'
+
 import {
   apiClient,
   extractApiErrorMessage,
@@ -16,6 +18,7 @@ export interface UseDreamweaverLockedConfigReturn {
 }
 
 export function useDreamweaverLockedConfig(): UseDreamweaverLockedConfigReturn {
+  const { t } = useTranslation()
   const [lockedGenerationConfig, setLockedGenerationConfig] = useState<DreamweaverProjectLockedGenerationConfig | null>(null)
   const [lockedGenerationConfigLoading, setLockedGenerationConfigLoading] = useState(false)
   const [lockedGenerationConfigError, setLockedGenerationConfigError] = useState<string | null>(null)
@@ -33,12 +36,12 @@ export function useDreamweaverLockedConfig(): UseDreamweaverLockedConfigReturn {
     } catch (e: unknown) {
       if (reqIdRef.current !== reqId) return
       setLockedGenerationConfig(null)
-      setLockedGenerationConfigError(await extractApiErrorMessage(e, '加载项目锁定配置失败'))
+      setLockedGenerationConfigError(await extractApiErrorMessage(e, t('dreamweaverRun.loadLockedConfigFailed')))
     } finally {
       if (reqIdRef.current !== reqId) return
       setLockedGenerationConfigLoading(false)
     }
-  }, [])
+  }, [t])
 
   const resetLockedConfig = useCallback(() => {
     setLockedGenerationConfig(null)

@@ -9,6 +9,7 @@
  * 5. 音频播放与下载
  */
 import { useCallback, useMemo, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import BrowserPlayer from '../components/audiobook/BrowserPlayer'
 import AudiobookCompletionStep from './audiobook/AudiobookCompletionStep'
@@ -99,6 +100,7 @@ const AUDIOBOOK_EDITOR_SYNC_STORAGE_KEY = 'audiobook_editor_sync_v1'
 const AUDIOBOOK_PAGE_SESSION_STORAGE_KEY = 'audiobook_page_session_v1'
 
 const AudiobookPage = () => {
+  const { t } = useTranslation()
   const navigate = useNavigate()
   const { projectId } = useParams<{ projectId: string }>()
   const [searchParams] = useSearchParams()
@@ -1117,15 +1119,20 @@ const AudiobookPage = () => {
     || generating
     || !(selectedProject?.id ?? routeProjectId)
   const setupGenerateDisabledReason = generating
-    ? '当前有声书任务正在生成中'
+    ? t('audiobook.audiobookPage.generateDisabledInProgress')
     : !(selectedProject?.id ?? routeProjectId)
-      ? '请先选择项目'
+      ? t('audiobook.audiobookPage.generateDisabledNoProject')
       : selectedChapters.length === 0
-        ? '请先选择至少一个章节'
+        ? t('audiobook.audiobookPage.generateDisabledNoChapters')
         : ''
 
   return (
-    <Box sx={{ minHeight: '100vh', background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)' }}>
+    <Box
+        sx={{
+          minHeight: '100vh',
+          background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)', // sg-color-fixed: 有声书紫渐变画布（同 DreamWeaver 家族，不随主题反相）
+        }}
+      >
       <AudiobookPageHeader
         hasSelectedProject={Boolean(selectedProject)}
         onBack={() => navigate('/home')}

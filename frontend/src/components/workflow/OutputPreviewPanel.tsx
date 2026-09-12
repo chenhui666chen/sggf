@@ -11,6 +11,7 @@ import {
 import { StageType } from '@/store/slices/workflowSlice'
 import FormattedContent from '../common/FormattedContent'
 import { useNavigate } from 'react-router-dom'
+import { useTranslation } from 'react-i18next'
 import {
   getWorkflowPreviewEmptyMessage,
   getWorkflowPreviewLoadingLabel,
@@ -42,12 +43,12 @@ interface OutputPreviewPanelProps {
   reviewMeta?: ReviewMeta | null
 }
 
-const stageTitles: Record<StageType, string> = {
-  concept: '概念开发',
-  structure: '结构设计',
-  content: '章节初稿',
-  review: '质量评审',
-  iteration: '迭代优化',
+const stageTitleKeys: Record<StageType, string> = {
+  concept: 'workflow.outputPreview.stageConcept',
+  structure: 'workflow.outputPreview.stageStructure',
+  content: 'workflow.outputPreview.stageContent',
+  review: 'workflow.outputPreview.stageReview',
+  iteration: 'workflow.outputPreview.stageIteration',
 }
 
 export default function OutputPreviewPanel({
@@ -68,6 +69,7 @@ export default function OutputPreviewPanel({
   projectId = '',  // 🆕 新增默认值
   reviewMeta = null,
 }: OutputPreviewPanelProps) {
+  const { t } = useTranslation()
   const navigate = useNavigate()
   // 🆕 根据当前阶段和选择获取对应的内容
   const getContent = (): string => {
@@ -104,14 +106,14 @@ export default function OutputPreviewPanel({
   // 🆕 获取动态标题
   const getTitle = (): string => {
     if (stage === 'concept') {
-      const titles = {
-        concept: '故事概念预览',
-        world: '世界观预览',
-        character: '人物设定预览'
+      const titles: Record<string, string> = {
+        concept: t('workflow.outputPreview.conceptViewTitle'),
+        world: t('workflow.outputPreview.worldViewTitle'),
+        character: t('workflow.outputPreview.characterViewTitle'),
       }
       return titles[selectedConceptView]
     }
-    return `${stageTitles[stage]} - 输出预览`
+    return t('workflow.outputPreview.titleWithSuffix', { title: t(stageTitleKeys[stage]) })
   }
 
   const content = getContent()
@@ -144,7 +146,7 @@ export default function OutputPreviewPanel({
                   height: 28,
                 }}
               >
-                前往知识库编辑
+                {t('workflow.outputPreview.gotoKnowledgeBase')}
               </Button>
             )}
             
@@ -152,7 +154,7 @@ export default function OutputPreviewPanel({
             {isCurrentStageStreaming && (
               <Chip
                 icon={<CircularProgress size={12} color="inherit" />}
-                label={getWorkflowPreviewLoadingLabel(stage, isGeneratingNextChapter)}
+                label={getWorkflowPreviewLoadingLabel(stage, isGeneratingNextChapter, t)}
                 color="primary"
                 size="small"
                 variant="outlined"
@@ -199,8 +201,8 @@ export default function OutputPreviewPanel({
             >
               <Typography variant="body2">
                 {isCurrentStageStreaming
-                  ? getWorkflowPreviewEmptyMessage(stage, progressMessage, isGeneratingNextChapter)
-                  : '暂无内容，请执行当前阶段生成内容'}
+                  ? getWorkflowPreviewEmptyMessage(stage, progressMessage, isGeneratingNextChapter, t)
+                  : t('workflow.outputPreview.emptyHint')}
               </Typography>
             </Box>
           )}

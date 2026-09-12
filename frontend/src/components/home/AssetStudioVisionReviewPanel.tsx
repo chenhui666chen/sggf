@@ -31,6 +31,7 @@ import type {
   AssetStudioVisionReviewResponse,
 } from '@/services/api'
 import type { SxProps, Theme } from '@mui/material'
+import { useTranslation } from 'react-i18next'
 
 // 视觉理解模型列表
 const VISION_MODELS = [
@@ -165,6 +166,7 @@ function UploadPanel({
   file: File | null
   onChange: (file: File | null) => void
 }) {
+  const { t } = useTranslation()
   return (
     <Box
       component="label"
@@ -189,14 +191,14 @@ function UploadPanel({
     >
       <AddPhotoAlternateOutlinedIcon sx={{ color: 'rgba(255,255,255,0.82)', fontSize: 28, mb: 1 }} />
       <Typography sx={{ color: 'white', fontSize: '0.95rem', fontWeight: 700 }}>
-        上传待识别素材
+        {t('assetStudio.vision.upload.title')}
       </Typography>
       <Typography sx={{ color: 'rgba(255,255,255,0.62)', fontSize: '0.82rem', mt: 0.6, maxWidth: 360 }}>
-        支持图片或视频。系统会根据素材类型自动切换到图像识别或视频检查链路。
+        {t('assetStudio.vision.upload.hint')}
       </Typography>
       <Chip
         size="small"
-        label={file ? file.name : '点击上传图片 / 视频'}
+        label={file ? file.name : t('assetStudio.vision.upload.clickLabel')}
         sx={{
           mt: 1.35,
           color: 'white',
@@ -225,6 +227,7 @@ function PreviewCard({
   previewUrl: string | null
   assetType: 'image' | 'video' | null
 }) {
+  const { t } = useTranslation()
   return (
     <Box
       sx={{
@@ -236,7 +239,7 @@ function PreviewCard({
       }}
     >
       <Typography sx={{ color: 'white', fontSize: '0.92rem', fontWeight: 700, mb: 1.2 }}>
-        素材预览
+        {t('assetStudio.vision.preview.title')}
       </Typography>
 
       {previewUrl && assetType ? (
@@ -260,7 +263,7 @@ function PreviewCard({
               <Box
                 component="img"
                 src={previewUrl}
-                alt={file?.name || 'vision review preview'}
+                alt={file?.name || t('assetStudio.vision.preview.alt')}
                 sx={{ width: '100%', display: 'block', maxHeight: 340, objectFit: 'contain', backgroundColor: 'black' }}
               />
             )}
@@ -269,7 +272,7 @@ function PreviewCard({
             <Chip
               size="small"
               icon={assetType === 'video' ? <MovieFilterOutlinedIcon /> : <VisibilityOutlinedIcon />}
-              label={assetType === 'video' ? '视频识别' : '图片识别'}
+              label={assetType === 'video' ? t('assetStudio.vision.preview.videoBadge') : t('assetStudio.vision.preview.imageBadge')}
               variant="outlined"
               sx={{ color: 'white' }}
             />
@@ -281,7 +284,7 @@ function PreviewCard({
       ) : (
         <Stack spacing={1} justifyContent="center" sx={{ minHeight: 180 }}>
           <Typography sx={{ color: 'rgba(255,255,255,0.54)', fontSize: '0.9rem', lineHeight: 1.8 }}>
-            这里会展示待识别素材的本地预览，方便在拿到评价时快速对照问题位置。
+            {t('assetStudio.vision.preview.emptyHint')}
           </Typography>
         </Stack>
       )}
@@ -385,6 +388,7 @@ function ResultPanel({
   sourceAssetFile: File | null
   sourceAssetType: 'image' | 'video' | null
 }) {
+  const { t } = useTranslation()
   const scoreTone = getScoreTone(result?.overall_score)
   const canReuseImageAsReference = Boolean(
     result?.asset_type === 'image' && sourceAssetType === 'image' && sourceAssetFile
@@ -401,14 +405,14 @@ function ResultPanel({
       }}
     >
       <Typography sx={{ color: 'white', fontSize: '0.92rem', fontWeight: 700, mb: 1.2 }}>
-        识别结果
+        {t('assetStudio.vision.result.title')}
       </Typography>
 
       {loading ? (
         <Stack spacing={1.2} alignItems="center" justifyContent="center" sx={{ minHeight: 260 }}>
           <CircularProgress size={28} sx={{ color: '#f1b74a' }} />
           <Typography sx={{ color: 'rgba(255,255,255,0.74)', fontSize: '0.9rem' }}>
-            正在调用视觉模型进行识别与评价...
+            {t('assetStudio.vision.result.loading')}
           </Typography>
         </Stack>
       ) : error ? (
@@ -420,7 +424,7 @@ function ResultPanel({
           <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} flexWrap="wrap" useFlexGap>
             <Chip
               size="small"
-              label={result.asset_type === 'video' ? '视频素材' : '图片素材'}
+              label={result.asset_type === 'video' ? t('assetStudio.vision.result.videoAsset') : t('assetStudio.vision.result.imageAsset')}
               variant="outlined"
               sx={{ color: 'white' }}
             />
@@ -429,8 +433,8 @@ function ResultPanel({
               size="small"
               label={
                 typeof result.overall_score === 'number'
-                  ? `综合评分 ${result.overall_score.toFixed(1)} / 10`
-                  : '综合评分待补充'
+                  ? t('assetStudio.vision.result.scoreValue', { score: result.overall_score.toFixed(1) })
+                  : t('assetStudio.vision.result.scorePending')
               }
               sx={{
                 color: scoreTone.color,
@@ -470,21 +474,21 @@ function ResultPanel({
           ) : null}
 
           <SectionList
-            title="优点"
+            title={t('assetStudio.vision.result.strengthsTitle')}
             items={result.strengths}
-            emptyText="模型未返回明显优势项，可以直接参考下方问题和改词建议继续优化。"
+            emptyText={t('assetStudio.vision.result.strengthsEmpty')}
             icon={<VisibilityOutlinedIcon fontSize="small" />}
           />
           <SectionList
-            title="问题"
+            title={t('assetStudio.vision.result.issuesTitle')}
             items={result.issues}
-            emptyText="当前没有识别到显著问题，但仍建议结合综合评分再做一轮微调。"
+            emptyText={t('assetStudio.vision.result.issuesEmpty')}
             icon={<AutoFixHighOutlinedIcon fontSize="small" />}
           />
           <SectionList
-            title="改词建议"
+            title={t('assetStudio.vision.result.suggestionsTitle')}
             items={result.prompt_suggestions}
-            emptyText="模型未返回明确改词建议，系统已经在末尾自动整理了修改后的提示词。"
+            emptyText={t('assetStudio.vision.result.suggestionsEmpty')}
             icon={<TipsAndUpdatesOutlinedIcon fontSize="small" />}
           />
 
@@ -504,7 +508,7 @@ function ResultPanel({
               sx={{ mb: 1 }}
             >
               <Typography sx={{ color: 'white', fontSize: '0.9rem', fontWeight: 700 }}>
-                修改后的提示词
+                {t('assetStudio.vision.result.revisedPromptTitle')}
               </Typography>
               <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
                 <Button
@@ -514,7 +518,7 @@ function ResultPanel({
                   onClick={() => onCopyPrompt(result.revised_prompt)}
                   sx={{ color: 'white', borderColor: 'rgba(255,255,255,0.2)' }}
                 >
-                  {copyFeedback || '复制提示词'}
+                  {copyFeedback || t('assetStudio.vision.result.copyPrompt')}
                 </Button>
                 <Button
                   variant="outlined"
@@ -529,7 +533,7 @@ function ResultPanel({
                   disabled={!onUseResult}
                   sx={{ color: 'white', borderColor: 'rgba(255,255,255,0.2)' }}
                 >
-                  仅带提示词到图片生成
+                  {t('assetStudio.vision.result.useImagePrompt')}
                 </Button>
                 <Button
                   variant="outlined"
@@ -544,7 +548,7 @@ function ResultPanel({
                   disabled={!onUseResult}
                   sx={{ color: 'white', borderColor: 'rgba(255,255,255,0.2)' }}
                 >
-                  仅带提示词到视频生成
+                  {t('assetStudio.vision.result.useVideoPrompt')}
                 </Button>
                 {canReuseImageAsReference ? (
                   <Button
@@ -561,7 +565,7 @@ function ResultPanel({
                     disabled={!onUseResult}
                     sx={{ color: 'white', borderColor: 'rgba(255,255,255,0.2)' }}
                   >
-                    带入参考生图
+                    {t('assetStudio.vision.result.referenceImage')}
                   </Button>
                 ) : null}
                 {canReuseImageAsReference ? (
@@ -579,14 +583,14 @@ function ResultPanel({
                     disabled={!onUseResult}
                     sx={{ color: 'white', borderColor: 'rgba(255,255,255,0.2)' }}
                   >
-                    带入图生视频
+                    {t('assetStudio.vision.result.referenceVideo')}
                   </Button>
                 ) : null}
               </Stack>
             </Stack>
             {result.asset_type === 'video' ? (
               <Typography sx={{ mb: 1, color: 'rgba(255,255,255,0.58)', fontSize: '0.8rem', lineHeight: 1.7 }}>
-                当前工作台暂无视频参考生成入口，所以视频识别结果只能复用修改后的提示词，不能直接把视频素材带入生成链路。
+                {t('assetStudio.vision.result.videoNoReferenceHint')}
               </Typography>
             ) : null}
             <TextField
@@ -607,7 +611,7 @@ function ResultPanel({
       ) : (
         <Stack spacing={1} justifyContent="center" sx={{ minHeight: 260 }}>
           <Typography sx={{ color: 'rgba(255,255,255,0.52)', fontSize: '0.9rem', lineHeight: 1.8 }}>
-            上传图片或视频后，这里会返回视觉模型给出的评价、问题清单、改词建议，以及可直接继续生成的修改后提示词。
+            {t('assetStudio.vision.result.emptyHint')}
           </Typography>
         </Stack>
       )}
@@ -618,6 +622,7 @@ function ResultPanel({
 export default function AssetStudioVisionReviewPanel({
   onUseResult,
 }: AssetStudioVisionReviewPanelProps) {
+  const { t } = useTranslation()
   const [assetFile, setAssetFile] = useState<File | null>(null)
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const [originalPrompt, setOriginalPrompt] = useState('')
@@ -655,17 +660,17 @@ export default function AssetStudioVisionReviewPanel({
     }
     try {
       await navigator.clipboard.writeText(prompt)
-      setCopyFeedback('已复制')
+      setCopyFeedback(t('assetStudio.vision.result.copyDone'))
       window.setTimeout(() => setCopyFeedback(null), 1800)
     } catch {
-      setCopyFeedback('复制失败')
+      setCopyFeedback(t('assetStudio.vision.result.copyFailed'))
       window.setTimeout(() => setCopyFeedback(null), 1800)
     }
   }
 
   const handleReview = async () => {
     if (!assetFile) {
-      setError('请先上传需要识别的图片或视频。')
+      setError(t('assetStudio.vision.panel.uploadFirstError'))
       return
     }
 
@@ -683,7 +688,7 @@ export default function AssetStudioVisionReviewPanel({
       const response = await apiClient.reviewAssetStudioVision(formData)
       setResult(response.data as AssetStudioVisionReviewResponse)
     } catch (requestError) {
-      setError(await extractApiErrorMessage(requestError, '视觉识别失败'))
+      setError(await extractApiErrorMessage(requestError, t('assetStudio.vision.panel.reviewFailed')))
     } finally {
       setLoading(false)
     }
@@ -702,22 +707,22 @@ export default function AssetStudioVisionReviewPanel({
             }}
           >
             <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} flexWrap="wrap" useFlexGap>
-              <Chip size="small" label="图片识别 / 视频检查" sx={{ color: 'white' }} variant="outlined" />
-              <Chip size="small" label="仅分析不生成" sx={{ color: 'white' }} variant="outlined" />
-              <Chip size="small" label="评价 + 改词 + 修改后提示词" sx={{ color: 'white' }} variant="outlined" />
+              <Chip size="small" label={t('assetStudio.vision.panel.badgeType')} sx={{ color: 'white' }} variant="outlined" />
+              <Chip size="small" label={t('assetStudio.vision.panel.badgeAnalyze')} sx={{ color: 'white' }} variant="outlined" />
+              <Chip size="small" label={t('assetStudio.vision.panel.badgeOutput')} sx={{ color: 'white' }} variant="outlined" />
             </Stack>
             <Typography sx={{ mt: 1.25, color: 'rgba(255,255,255,0.68)', fontSize: '0.84rem', lineHeight: 1.8 }}>
-              可选择使用不同的大模型进行视觉识别，每个模型在理解能力和识别效果上可能有所不同。
+              {t('assetStudio.vision.panel.modelHint')}
             </Typography>
             
             <FormControl fullWidth sx={{ mt: 1.5 }}>
               <InputLabel id="vision-model-select-label" sx={{ color: 'rgba(255,255,255,0.62)' }}>
-                视觉识别模型
+                {t('assetStudio.vision.panel.modelLabel')}
               </InputLabel>
               <Select
                 labelId="vision-model-select-label"
                 value={selectedModel}
-                label="视觉识别模型"
+                label={t('assetStudio.vision.panel.modelLabel')}
                 onChange={(event) => setSelectedModel(event.target.value)}
                 sx={VISION_SELECT_SX}
                 MenuProps={VISION_MENU_PROPS}
@@ -743,16 +748,16 @@ export default function AssetStudioVisionReviewPanel({
           <TextField
             multiline
             minRows={6}
-            label="原始提示词（可选）"
+            label={t('assetStudio.vision.panel.originalPromptLabel')}
             value={originalPrompt}
             onChange={(event) => setOriginalPrompt(event.target.value)}
-            placeholder="如果这张图或这段视频是根据某个提示词生成的，可以贴在这里。识别结果会在末尾给出更贴近原意的修改后提示词。"
+            placeholder={t('assetStudio.vision.panel.originalPromptPlaceholder')}
             InputLabelProps={{ sx: { color: 'rgba(255,255,255,0.62)' } }}
             sx={{ '& .MuiOutlinedInput-root': { color: 'white', backgroundColor: 'rgba(255,255,255,0.03)' } }}
           />
 
           <Alert severity="info" sx={{ borderRadius: 2.5 }}>
-            不填原始提示词也能识别，但填写后，系统整理出的“修改后的提示词”会更适合直接重新生成。
+            {t('assetStudio.vision.panel.originalPromptHint')}
           </Alert>
         </Stack>
 
@@ -779,7 +784,7 @@ export default function AssetStudioVisionReviewPanel({
         sx={{ mt: 2 }}
       >
         <Typography sx={{ color: 'rgba(255,255,255,0.58)', fontSize: '0.84rem', lineHeight: 1.7 }}>
-          识别结果会优先展示综合评价，并在最下方附带可继续调用生成接口的修改后提示词。
+          {t('assetStudio.vision.panel.footerHint')}
         </Typography>
         <Button
           variant="contained"
@@ -800,7 +805,7 @@ export default function AssetStudioVisionReviewPanel({
             },
           }}
         >
-          {loading ? '识别中...' : '开始识别'}
+          {loading ? t('assetStudio.vision.panel.reviewing') : t('assetStudio.vision.panel.review')}
         </Button>
       </Stack>
     </Box>

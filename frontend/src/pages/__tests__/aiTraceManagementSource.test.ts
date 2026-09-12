@@ -26,21 +26,21 @@ describe('AI trace management wiring', () => {
     const source = readSource('../admin/PromptEvolutionPage.tsx')
     expect(source).toContain('/api/v1/ai-trace/background-status')
     expect(source).toContain('budget_remaining')
-    expect(source).toContain('数据不足')
-    expect(source).toContain('样本不足')
-    expect(source).toContain('保真不合格')
-    expect(source).toContain('策略已过期')
-    expect(source).toContain('可参与路由')
-    expect(source).toContain('当前生产使用')
+    expect(source).toContain('admin.promptEvolution.combo.qualNoData')
+    expect(source).toContain('admin.promptEvolution.combo.qualNoSample')
+    expect(source).toContain('admin.promptEvolution.combo.qualFidelityFail')
+    expect(source).toContain('admin.promptEvolution.combo.qualExpired')
+    expect(source).toContain('admin.promptEvolution.combo.qualEligible')
+    expect(source).toContain('admin.promptEvolution.combo.qualCurrent')
   })
 
   it('shows semantic and local quality dimensions in prompt results', () => {
     const source = readSource('../admin/PromptEvolutionPage.tsx')
-    expect(source).toContain('语义保真')
-    expect(source).toContain('事实一致')
-    expect(source).toContain('信息完整')
-    expect(source).toContain('文笔自然')
-    expect(source).toContain('本地规则')
+    expect(source).toContain('admin.promptEvolution.review.dimSemantic')
+    expect(source).toContain('admin.promptEvolution.review.dimFact')
+    expect(source).toContain('admin.promptEvolution.review.dimComplete')
+    expect(source).toContain('admin.promptEvolution.review.dimNatural')
+    expect(source).toContain('admin.promptEvolution.review.localRuleTitle')
     expect(source).toContain('llm_review')
     expect(source).toContain('rewritten_multi_score')
   })
@@ -48,7 +48,7 @@ describe('AI trace management wiring', () => {
   it('supports sequential all-genre evolution with recommended defaults', () => {
     const source = readSource('../admin/PromptEvolutionPage.tsx')
     expect(source).toContain('run_all_genres')
-    expect(source).toContain('全部题材')
+    expect(source).toContain('admin.promptEvolution.config.allGenres')
     expect(source).toContain('queue_current')
     expect(source).toContain('queue_total')
     expect(source).toContain('current_genre')
@@ -60,9 +60,9 @@ describe('AI trace management wiring', () => {
 
   it('allows base prompt evolution when only the multi-model budget is exhausted', () => {
     const source = readSource('../admin/PromptEvolutionPage.tsx')
-    expect(source).toContain('disabled={backgroundStatus?.is_running}\n                >启动进化优化')
+    expect(source).toContain('disabled={backgroundStatus?.is_running}\n                >{t(\'admin.promptEvolution.startBtn\')}')
     expect(source).not.toContain(
-      'disabled={backgroundStatus?.is_running || backgroundStatus?.budget_remaining === 0}\n                >启动进化优化',
+      'disabled={backgroundStatus?.is_running || backgroundStatus?.budget_remaining === 0}\n                >{t(\'admin.promptEvolution.startBtn\')}',
     )
   })
 })

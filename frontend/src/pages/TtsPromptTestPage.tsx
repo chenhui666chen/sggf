@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import {
   Alert, Box, Button, Chip, CircularProgress, Divider, FormControl, IconButton,
@@ -38,12 +39,12 @@ const EMPTY_FLAGS: TtsPromptTestReviewFlags = {
   usable: null,
 }
 
-const REVIEW_ITEMS: Array<{ key: keyof TtsPromptTestReviewFlags; label: string }> = [
-  { key: 'emotionChanged', label: '情绪变化' },
-  { key: 'pauseHandled', label: '停顿处理' },
-  { key: 'stressHandled', label: '重读处理' },
-  { key: 'noTagLeak', label: '无标签泄漏' },
-  { key: 'usable', label: '可用于生产' },
+const REVIEW_ITEMS: Array<{ key: keyof TtsPromptTestReviewFlags; label: string; labelKey: string }> = [
+  { key: 'emotionChanged', label: '情绪变化', labelKey: 'audiobook.ttsPromptTest.reviewItem.emotionChanged' },
+  { key: 'pauseHandled', label: '停顿处理', labelKey: 'audiobook.ttsPromptTest.reviewItem.pauseHandled' },
+  { key: 'stressHandled', label: '重读处理', labelKey: 'audiobook.ttsPromptTest.reviewItem.stressHandled' },
+  { key: 'noTagLeak', label: '无标签泄漏', labelKey: 'audiobook.ttsPromptTest.reviewItem.noTagLeak' },
+  { key: 'usable', label: '可用于生产', labelKey: 'audiobook.ttsPromptTest.reviewItem.usable' },
 ]
 
 const createAudioUrl = (base64: string, mimeType: string) => {
@@ -61,7 +62,7 @@ const PromptBlock = ({ title, value }: { title: string; value: unknown }) => {
       <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>{title}</Typography>
       <Box component="pre" sx={{
         m: 0, p: 1.25, maxHeight: 220, overflow: 'auto', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere',
-        bgcolor: '#f6f7f9', border: '1px solid #e2e5e9', borderRadius: 1,
+        bgcolor: 'grey.100', border: '1px solid', borderColor: 'divider', borderRadius: 1,
         fontFamily: 'Consolas, monospace', fontSize: 12, lineHeight: 1.55,
       }}>
         {text}
@@ -70,26 +71,29 @@ const PromptBlock = ({ title, value }: { title: string; value: unknown }) => {
   )
 }
 
-const PromptInspector = ({ snapshot }: { snapshot: TtsPromptTestProviderPromptSnapshot | null }) => (
-  <Stack spacing={1.5}>
-    <Stack direction="row" alignItems="center" justifyContent="space-between">
-      <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>最终供应商提示词</Typography>
-      {snapshot && <Chip size="small" label={snapshot.mode} />}
+const PromptInspector = ({ snapshot }: { snapshot: TtsPromptTestProviderPromptSnapshot | null }) => {
+  const { t } = useTranslation()
+  return (
+    <Stack spacing={1.5}>
+      <Stack direction="row" alignItems="center" justifyContent="space-between">
+        <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>{t('audiobook.ttsPromptTest.finalProviderPrompt')}</Typography>
+        {snapshot && <Chip size="small" label={snapshot.mode} />}
+      </Stack>
+      {snapshot ? (
+        <>
+          <PromptBlock title="instructions" value={snapshot.provider_prompt.instructions} />
+          <PromptBlock title="messages" value={snapshot.provider_prompt.messages} />
+          <PromptBlock title="text_prefix" value={snapshot.provider_prompt.text_prefix} />
+          <PromptBlock title="context_texts" value={snapshot.provider_prompt.context_texts} />
+          <PromptBlock title="inline_tag_strategy" value={snapshot.provider_prompt.inline_tag_strategy ?? {}} />
+          <PromptBlock title="delivery_plan" value={snapshot.delivery_plan} />
+          <PromptBlock title="budget" value={snapshot.budget} />
+          {snapshot.warnings?.map((warning) => <Alert key={warning} severity="warning">{warning}</Alert>)}
+        </>
+      ) : <Typography variant="body2" color="text.secondary">{t('audiobook.ttsPromptTest.noSnapshot')}</Typography>}
     </Stack>
-    {snapshot ? (
-      <>
-        <PromptBlock title="instructions" value={snapshot.provider_prompt.instructions} />
-        <PromptBlock title="messages" value={snapshot.provider_prompt.messages} />
-        <PromptBlock title="text_prefix" value={snapshot.provider_prompt.text_prefix} />
-        <PromptBlock title="context_texts" value={snapshot.provider_prompt.context_texts} />
-        <PromptBlock title="inline_tag_strategy" value={snapshot.provider_prompt.inline_tag_strategy ?? {}} />
-        <PromptBlock title="delivery_plan" value={snapshot.delivery_plan} />
-        <PromptBlock title="budget" value={snapshot.budget} />
-        {snapshot.warnings?.map((warning) => <Alert key={warning} severity="warning">{warning}</Alert>)}
-      </>
-    ) : <Typography variant="body2" color="text.secondary">暂无提示词快照。</Typography>}
-  </Stack>
-)
+  )
+}
 
 interface ReviewEditorProps {
   score: number | null
@@ -104,38 +108,42 @@ interface ReviewEditorProps {
 
 const ReviewEditor = ({
   score, flags, notes, saved, onScoreChange, onFlagChange, onNotesChange, onSave,
-}: ReviewEditorProps) => (
-  <Stack spacing={1.5}>
-    <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>试听评审</Typography>
-    <Stack direction="row" alignItems="center" justifyContent="space-between">
-      <Typography variant="body2">综合评分</Typography>
-      <Rating value={score} onChange={(_, value) => onScoreChange(value)} />
-    </Stack>
-    {REVIEW_ITEMS.map((item) => (
-      <Stack key={item.key} direction="row" alignItems="center" justifyContent="space-between" spacing={1}>
-        <Typography variant="body2">{item.label}</Typography>
-        <ToggleButtonGroup
-          exclusive size="small"
-          value={flags[item.key] === null ? 'pending' : flags[item.key] ? 'pass' : 'fail'}
-          onChange={(_, value: 'pending' | 'pass' | 'fail' | null) => {
-            if (value) onFlagChange(item.key, value === 'pending' ? null : value === 'pass')
-          }}
-          sx={{ '& .MuiToggleButton-root': { px: 1.25, py: 0.5 } }}
-        >
-          <ToggleButton value="pending">待评</ToggleButton>
-          <ToggleButton value="pass" color="success">通过</ToggleButton>
-          <ToggleButton value="fail" color="error">未通过</ToggleButton>
-        </ToggleButtonGroup>
+}: ReviewEditorProps) => {
+  const { t } = useTranslation()
+  return (
+    <Stack spacing={1.5}>
+      <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>{t('audiobook.seedSceneTest.reviewTitle')}</Typography>
+      <Stack direction="row" alignItems="center" justifyContent="space-between">
+        <Typography variant="body2">{t('audiobook.seedSceneTest.overallScore')}</Typography>
+        <Rating value={score} onChange={(_, value) => onScoreChange(value)} />
       </Stack>
-    ))}
-    <TextField label="评审备注" value={notes} onChange={(event) => onNotesChange(event.target.value)} multiline minRows={3} fullWidth />
-    <Button variant="contained" startIcon={<SaveIcon />} onClick={onSave} color={saved ? 'success' : 'primary'}>
-      {saved ? '已保存' : '保存评审'}
-    </Button>
-  </Stack>
-)
+      {REVIEW_ITEMS.map((item) => (
+        <Stack key={item.key} direction="row" alignItems="center" justifyContent="space-between" spacing={1}>
+          <Typography variant="body2">{item.labelKey ? t(item.labelKey) : item.label}</Typography>
+          <ToggleButtonGroup
+            exclusive size="small"
+            value={flags[item.key] === null ? 'pending' : flags[item.key] ? 'pass' : 'fail'}
+            onChange={(_, value: 'pending' | 'pass' | 'fail' | null) => {
+              if (value) onFlagChange(item.key, value === 'pending' ? null : value === 'pass')
+            }}
+            sx={{ '& .MuiToggleButton-root': { px: 1.25, py: 0.5 } }}
+          >
+            <ToggleButton value="pending">{t('audiobook.seedSceneTest.flagPending')}</ToggleButton>
+            <ToggleButton value="pass" color="success">{t('audiobook.seedSceneTest.flagPass')}</ToggleButton>
+            <ToggleButton value="fail" color="error">{t('audiobook.seedSceneTest.flagFail')}</ToggleButton>
+          </ToggleButtonGroup>
+        </Stack>
+      ))}
+      <TextField label={t('audiobook.seedSceneTest.reviewNotes')} value={notes} onChange={(event) => onNotesChange(event.target.value)} multiline minRows={3} fullWidth />
+      <Button variant="contained" startIcon={<SaveIcon />} onClick={onSave} color={saved ? 'success' : 'primary'}>
+        {saved ? t('audiobook.seedSceneTest.savedLabel') : t('audiobook.seedSceneTest.saveReview')}
+      </Button>
+    </Stack>
+  )
+}
 
 const TtsPromptTestPage = () => {
+  const { t } = useTranslation()
   const [searchParams] = useSearchParams()
   const blindBatchId = searchParams.get('blind_batch_id')?.trim() || ''
   const navigate = useNavigate()
@@ -194,7 +202,7 @@ const TtsPromptTestPage = () => {
         setSelectedModelId(nextModels[0]?.model ?? '')
         setSelectedCaseId(nextModels[0]?.cases[0]?.id ?? '')
       } catch (requestError) {
-        if (active) setError(await extractApiErrorMessage(requestError, '加载 TTS 测试用例失败'))
+        if (active) setError(await extractApiErrorMessage(requestError, t('audiobook.ttsPromptTest.loadCasesFailed')))
       } finally {
         if (active) setLoading(false)
       }
@@ -219,7 +227,7 @@ const TtsPromptTestPage = () => {
       } catch (requestError) {
         if (!active) return
         setVoices([])
-        setVoiceError(await extractApiErrorMessage(requestError, '加载模型音色失败'))
+        setVoiceError(await extractApiErrorMessage(requestError, t('audiobook.ttsPromptTest.loadVoicesFailed')))
       } finally {
         if (active) setVoiceLoading(false)
       }
@@ -267,7 +275,7 @@ const TtsPromptTestPage = () => {
       setPreviewSnapshot(data.provider_prompt_snapshot)
       setPreviewMeta([data.provider, data.provider_model, data.transport, `${Math.max(1, Math.round(data.audio_size_bytes / 1024))} KB`].filter(Boolean).join(' · '))
     } catch (requestError) {
-      setPreviewError(await extractApiErrorMessage(requestError, '生成试听失败'))
+      setPreviewError(await extractApiErrorMessage(requestError, t('audiobook.ttsPromptTest.generatePreviewFailed')))
     } finally {
       setPreviewLoading(false)
     }
@@ -300,15 +308,15 @@ const TtsPromptTestPage = () => {
   }
 
   return (
-    <Box sx={{ minHeight: '100vh', bgcolor: '#f3f5f7', color: '#1f2933' }}>
-      <Box component="header" sx={{ bgcolor: '#263238', color: 'white', borderBottom: '3px solid #00a389' }}>
+    <Box sx={{ minHeight: '100vh', bgcolor: 'background.default', color: 'text.primary' }}>
+      <Box component="header" sx={{ bgcolor: '#263238', color: 'white', borderBottom: '3px solid #00a389' }}> {/* sg-color-fixed: TTS 测试台品牌深青 header（自包含品牌带，不随主题反相） */}
         <Box sx={{ minHeight: 64, px: { xs: 2, md: 3 }, py: { xs: 1, sm: 0 }, display: 'flex', flexWrap: { xs: 'wrap', sm: 'nowrap' }, alignItems: 'center', gap: 1.5 }}>
-          <Tooltip title="返回有声书项目"><IconButton color="inherit" onClick={() => navigate('/audiobook-dashboard')}><ArrowBackIcon /></IconButton></Tooltip>
-          <ScienceIcon sx={{ color: '#52d6c2' }} />
+          <Tooltip title={t('audiobook.ttsPromptTest.backToAudiobook')}><IconButton color="inherit" onClick={() => navigate('/audiobook-dashboard')}><ArrowBackIcon /></IconButton></Tooltip>
+          <ScienceIcon sx={{ color: '#52d6c2' }} /> {/* sg-color-fixed: TTS 品牌青（渲在品牌 header 上） */}
           <Box sx={{ minWidth: 0, flex: 1 }}>
-            <Typography variant="h6" sx={{ fontWeight: 700 }}>音频模型测试</Typography>
-            <Typography variant="caption" sx={{ color: 'rgba(255,255,255,0.72)' }}>
-              {testMode === 'tts' ? `${progress.reviewed}/${progress.total} 已评审` : 'Seed Audio 场景 A/B'}
+            <Typography variant="h6" sx={{ fontWeight: 700 }}>{t('audiobook.ttsPromptTest.pageTitle')}</Typography>
+            <Typography variant="caption" sx={{ color: 'rgba(255,255,255,0.72)' }}> {/* sg-color-fixed: 品牌 header 白叠字 */}
+              {testMode === 'tts' ? t('audiobook.ttsPromptTest.reviewedProgress', { reviewed: progress.reviewed, total: progress.total }) : t('audiobook.ttsPromptTest.seedAudioSceneAb')}
             </Typography>
           </Box>
           <ToggleButtonGroup
@@ -319,15 +327,15 @@ const TtsPromptTestPage = () => {
             sx={{
               width: { xs: '100%', sm: 'auto' },
               order: { xs: 3, sm: 0 },
-              bgcolor: 'rgba(255,255,255,0.1)',
-              '& .MuiToggleButton-root': { color: 'rgba(255,255,255,0.78)', borderColor: 'rgba(255,255,255,0.25)', px: 1.25 },
+              bgcolor: 'rgba(255,255,255,0.1)', // sg-color-fixed: 品牌 header 白叠底
+              '& .MuiToggleButton-root': { color: 'rgba(255,255,255,0.78)', borderColor: 'rgba(255,255,255,0.25)', px: 1.25 }, // sg-color-fixed: 品牌 header 白叠字/边
               '& .MuiToggleButton-root:first-of-type': { flex: { xs: 1, sm: 'initial' } },
               '& .MuiToggleButton-root:last-of-type': { flex: { xs: 1, sm: 'initial' } },
-              '& .Mui-selected': { color: '#102a27 !important', bgcolor: '#52d6c2 !important' },
+              '& .Mui-selected': { color: '#102a27 !important', bgcolor: '#52d6c2 !important' }, // sg-color-fixed: TTS 品牌青选中态（渲在品牌 header 上）
             }}
           >
-            <ToggleButton value="tts">TTS 朗读</ToggleButton>
-            <ToggleButton value="seed_scene">Seed 场景</ToggleButton>
+            <ToggleButton value="tts">{t('audiobook.ttsPromptTest.ttsReadMode')}</ToggleButton>
+            <ToggleButton value="seed_scene">{t('audiobook.ttsPromptTest.seedSceneMode')}</ToggleButton>
           </ToggleButtonGroup>
           {testMode === 'tts' && (
             <Box sx={{ display: { xs: 'none', sm: 'block' }, width: 150 }}>
@@ -348,8 +356,16 @@ const TtsPromptTestPage = () => {
             gridTemplateColumns: { xs: '1fr', md: '260px minmax(380px, 1fr)', xl: '260px minmax(440px, 1fr) 390px' },
             minHeight: 'calc(100vh - 67px)',
           }}>
-          <Box component="nav" sx={{ bgcolor: 'white', borderRight: { md: '1px solid #dce1e5' }, p: 2 }}>
-            <Typography variant="overline" color="text.secondary">模型</Typography>
+          <Box
+                      component="nav"
+                      sx={{
+                        bgcolor: 'background.paper',
+                        borderRight: { md: '1px solid' },
+                        borderRightColor: { md: 'divider' },
+                        p: 2,
+                      }}
+                    >
+            <Typography variant="overline" color="text.secondary">{t('audiobook.seedSceneTest.modelLabel')}</Typography>
             <Stack spacing={0.75} sx={{ mt: 1 }}>
               {models.map((model) => {
                 const reviewed = model.cases.filter((testCase) => reviews.some((item) => item.id === buildTtsPromptTestReviewId(model.model, testCase.id))).length
@@ -363,20 +379,20 @@ const TtsPromptTestPage = () => {
             </Stack>
           </Box>
 
-          <Box component="main" sx={{ p: { xs: 2, lg: 3 }, minWidth: 0, borderRight: { xl: '1px solid #dce1e5' } }}>
+          <Box component="main" sx={{ p: { xs: 2, lg: 3 }, minWidth: 0, borderRight: { xl: '1px solid' }, borderRightColor: { xl: 'divider' } }}>
             {selectedModel && selectedCase ? (
               <Stack spacing={2.5}>
                 <Box>
                   <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
                     <Typography variant="h5" sx={{ fontWeight: 700 }}>{selectedModel.name}</Typography>
                     <Chip size="small" label={selectedCase.style_control_mode} />
-                    {selectedCase.requires_custom_voice && <Chip size="small" color="warning" label="自定义音色" />}
+                    {selectedCase.requires_custom_voice && <Chip size="small" color="warning" label={t('audiobook.ttsPromptTest.customVoice')} />}
                   </Stack>
                   <Typography variant="body2" color="text.secondary" sx={{ mt: 0.75 }}>{selectedModel.description}</Typography>
                 </Box>
                 <FormControl size="small" fullWidth>
-                  <InputLabel id="test-case-label">测试项</InputLabel>
-                  <Select labelId="test-case-label" label="测试项" value={selectedCaseId} onChange={(event) => setSelectedCaseId(event.target.value)}>
+                  <InputLabel id="test-case-label">{t('audiobook.ttsPromptTest.testCaseLabel')}</InputLabel>
+                  <Select labelId="test-case-label" label={t('audiobook.ttsPromptTest.testCaseLabel')} value={selectedCaseId} onChange={(event) => setSelectedCaseId(event.target.value)}>
                     {selectedModel.cases.map((item) => <MenuItem key={item.id} value={item.id}>{item.name}</MenuItem>)}
                   </Select>
                 </FormControl>
@@ -385,22 +401,22 @@ const TtsPromptTestPage = () => {
                   <Typography variant="body2" color="text.secondary">{selectedCase.purpose}</Typography>
                 </Box>
                 <Paper variant="outlined" sx={{ p: 2, borderRadius: 1 }}>
-                  <Typography variant="caption" color="text.secondary">测试文本</Typography>
+                  <Typography variant="caption" color="text.secondary">{t('audiobook.ttsPromptTest.testTextLabel')}</Typography>
                   <Typography sx={{ mt: 0.75, lineHeight: 1.9 }}>{selectedCase.text}</Typography>
                 </Paper>
                 <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5} alignItems={{ sm: 'flex-start' }}>
                   <FormControl size="small" fullWidth error={Boolean(voiceError)}>
-                    <InputLabel id="voice-label">测试音色</InputLabel>
-                    <Select labelId="voice-label" label="测试音色" value={selectedVoiceId} disabled={voiceLoading} onChange={(event) => setSelectedVoiceId(event.target.value)}>
+                    <InputLabel id="voice-label">{t('audiobook.ttsPromptTest.testVoiceLabel')}</InputLabel>
+                    <Select labelId="voice-label" label={t('audiobook.ttsPromptTest.testVoiceLabel')} value={selectedVoiceId} disabled={voiceLoading} onChange={(event) => setSelectedVoiceId(event.target.value)}>
                       {voices.map((voice) => <MenuItem key={voice.id} value={voice.id}>{voice.label}</MenuItem>)}
                     </Select>
                   </FormControl>
                   <Button variant="contained" startIcon={previewLoading ? <CircularProgress size={17} color="inherit" /> : <PlayArrowIcon />} disabled={previewLoading || !selectedVoiceId} onClick={handlePreview} sx={{ minWidth: 126, minHeight: 40, whiteSpace: 'nowrap' }}>
-                    生成试听
+                    {t('audiobook.ttsPromptTest.generatePreview')}
                   </Button>
                 </Stack>
                 {voiceError && <Alert severity="warning">{voiceError}</Alert>}
-                {!voiceLoading && voices.length === 0 && <Alert severity={selectedCase.requires_custom_voice ? 'warning' : 'info'}>当前模型没有可用音色{selectedCase.requires_custom_voice ? '，请先在有声书音色配置中创建对应自定义音色。' : '。'}</Alert>}
+                {!voiceLoading && voices.length === 0 && <Alert severity={selectedCase.requires_custom_voice ? 'warning' : 'info'}>{selectedCase.requires_custom_voice ? t('audiobook.ttsPromptTest.noVoicesCustomHint') : t('audiobook.ttsPromptTest.noVoicesHint')}</Alert>}
                 {previewError && <Alert severity="error">{previewError}</Alert>}
                 {audioUrl && (
                   <Paper variant="outlined" sx={{ p: 2, borderRadius: 1 }}>
@@ -414,10 +430,10 @@ const TtsPromptTestPage = () => {
                   <ReviewEditor {...reviewEditorProps} />
                 </Box>
               </Stack>
-            ) : <Alert severity="info">没有可用测试项。</Alert>}
+            ) : <Alert severity="info">{t('audiobook.seedSceneTest.emptyCases')}</Alert>}
           </Box>
 
-          <Box component="aside" sx={{ display: { xs: 'none', xl: 'block' }, bgcolor: 'white', p: 2.5, minWidth: 0 }}>
+          <Box component="aside" sx={{ display: { xs: 'none', xl: 'block' }, bgcolor: 'background.paper', p: 2.5, minWidth: 0 }}>
             <PromptInspector snapshot={displayedSnapshot} />
             <Divider sx={{ my: 2.5 }} />
             <ReviewEditor {...reviewEditorProps} />

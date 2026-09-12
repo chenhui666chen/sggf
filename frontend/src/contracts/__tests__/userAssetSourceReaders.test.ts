@@ -1,4 +1,7 @@
-import { describe, expect, it } from 'vitest'
+import { beforeAll, describe, expect, it } from 'vitest'
+import type { TFunction } from 'i18next'
+
+import { bootstrapI18n } from '@/i18n'
 
 import type { UserAssetRecord } from '@/services/api'
 
@@ -28,13 +31,20 @@ function createUserAssetRecord(overrides: Partial<UserAssetRecord> = {}): UserAs
   }
 }
 
+let t: TFunction
+
+beforeAll(async () => {
+  const instance = await bootstrapI18n('zh-CN')
+  t = instance.t.bind(instance)
+})
+
 describe('userAssetSourceReaders', () => {
   it('normalizes source module and dreamweaver view labels', () => {
     expect(getUserAssetSourceModule(createUserAssetRecord({ source_module: ' DreamWeaver_Library ' }))).toBe(
       'dreamweaver_library',
     )
-    expect(formatDreamweaverViewLabel(' bust_three_quarter ')).toBe('半身四分之三侧')
-    expect(formatDreamweaverViewLabel('')).toBeNull()
+    expect(formatDreamweaverViewLabel(' bust_three_quarter ', t)).toBe('半身四分之三侧')
+    expect(formatDreamweaverViewLabel('', t)).toBeNull()
   })
 
   it('extracts protected asset refs only for supported protected source modules', () => {
@@ -97,6 +107,7 @@ describe('userAssetSourceReaders', () => {
           project_id: 8,
         }),
         projectTitleMap,
+        t,
       ),
     ).toEqual({
       label: '资产工坊',
@@ -113,6 +124,7 @@ describe('userAssetSourceReaders', () => {
           project_id: 9,
         }),
         projectTitleMap,
+        t,
       ),
     ).toEqual({
       label: 'custom_pipeline',
@@ -138,6 +150,7 @@ describe('userAssetSourceReaders', () => {
           },
         }),
         projectTitleMap,
+        t,
       ),
     ).toEqual({
       label: '短剧素材库',
@@ -158,6 +171,7 @@ describe('userAssetSourceReaders', () => {
           },
         }),
         projectTitleMap,
+        t,
       ),
     ).toEqual({
       label: '短剧成片',
@@ -183,6 +197,8 @@ describe('userAssetSourceReaders', () => {
             chapter_title: '海上来信',
           },
         }),
+        undefined,
+        t,
       ),
     ).toEqual({
       label: '有声书音频',
@@ -208,6 +224,8 @@ describe('userAssetSourceReaders', () => {
           chapter_title: '海上来信',
         },
       }),
+      undefined,
+      t,
     )
 
     expect(info.projectLabel).toContain('#5')

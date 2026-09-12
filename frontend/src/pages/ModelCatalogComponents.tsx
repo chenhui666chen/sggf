@@ -25,7 +25,7 @@ export function CodeSnippetSectionWithCopy({ title, language, code, onCopy, isCo
         sx={{
           p: 1.5,
           borderRadius: 2,
-          backgroundColor: 'rgba(15,76,129,0.04)',
+          backgroundColor: 'grey.100', // 代码块底走 bgSubtle 反相（原为写死的蓝灰）
           fontFamily: 'monospace',
           fontSize: '0.85rem',
           whiteSpace: 'pre-wrap',

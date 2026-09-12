@@ -1,5 +1,7 @@
 import { useCallback, useRef, useState, type Dispatch, type SetStateAction } from 'react'
 
+import { useTranslation } from 'react-i18next'
+
 import { buildAudiobookChapterAudioAssetMetadataContract } from '../../contracts/userAssetMetadataBuilders'
 import { buildAudiobookChapterAudioSourcePayload } from '../../contracts/userAssetSourcePayloadBuilders'
 import { apiClient, extractApiErrorMessage } from '../../services/api'
@@ -50,6 +52,7 @@ export const useAudiobookChapterAudioActions = ({
   stopManagedPlayback,
   setSnackbar,
 }: UseAudiobookChapterAudioActionsParams) => {
+  const { t } = useTranslation()
   const [collectingChapterIds, setCollectingChapterIds] = useState<Set<number>>(() => new Set())
   const collectingChapterIdsRef = useRef<Set<number>>(new Set())
 
@@ -61,7 +64,7 @@ export const useAudiobookChapterAudioActions = ({
   const fetchChapterAudioFile = useCallback(
     async (chapterId: number) => {
       if (!audiobookProject) {
-        throw new Error('缺少有声书项目')
+        throw new Error(t('audiobook.useAudiobookChapterAudioActions.missingProject'))
       }
 
       const response = await apiClient.getAudiobookChapterAudioFile(audiobookProject.id, chapterId)
@@ -76,7 +79,7 @@ export const useAudiobookChapterAudioActions = ({
         downloadUrl: buildAudiobookChapterDownloadUrl(audiobookProject.id, chapterId),
       }
     },
-    [audiobookProject, outputFormat],
+    [audiobookProject, outputFormat, t],
   )
 
   const handleDownloadAudio = useCallback(async (chapterId: number) => {
@@ -85,15 +88,15 @@ export const useAudiobookChapterAudioActions = ({
     try {
       const { blob, filename } = await fetchChapterAudioFile(chapterId)
       triggerBlobDownload(blob, filename)
-      setSnackbar({ open: true, message: '音频下载成功', severity: 'success' })
+      setSnackbar({ open: true, message: t('audiobook.useAudiobookChapterAudioActions.audioDownloaded'), severity: 'success' })
     } catch (error: unknown) {
       setSnackbar({
         open: true,
-        message: await extractApiErrorMessage(error, '下载失败，请重试'),
+        message: await extractApiErrorMessage(error, t('audiobook.useAudiobookChapterAudioActions.downloadFailed')),
         severity: 'error',
       })
     }
-  }, [audiobookProject, fetchChapterAudioFile, setSnackbar])
+  }, [audiobookProject, fetchChapterAudioFile, setSnackbar, t])
 
   const handleCollectChapterAudio = useCallback(async (chapterAudio: ChapterAudio) => {
     if (!audiobookProject) return
@@ -158,14 +161,14 @@ export const useAudiobookChapterAudioActions = ({
       setSnackbar({
         open: true,
         message: didFallbackToBrowserStorage
-          ? '章节音频已收录到用户资产，但用户目录当前不可用，文件已回退保存到浏览器本地存储'
-          : '章节音频已收录到用户资产',
+          ? t('audiobook.useAudiobookChapterAudioActions.collectedToAssetsFallback')
+          : t('audiobook.useAudiobookChapterAudioActions.collectedToAssets'),
         severity: 'success',
       })
     } catch (error: unknown) {
       setSnackbar({
         open: true,
-        message: await extractApiErrorMessage(error, '收录章节音频失败，请稍后重试'),
+        message: await extractApiErrorMessage(error, t('audiobook.useAudiobookChapterAudioActions.collectFailed')),
         severity: 'error',
       })
     } finally {
@@ -178,6 +181,7 @@ export const useAudiobookChapterAudioActions = ({
     routeProjectId,
     selectedProject,
     setSnackbar,
+    t,
     updateCollectingChapterIds,
   ])
 
@@ -207,11 +211,11 @@ export const useAudiobookChapterAudioActions = ({
       })
       setPlayingChapter(chapterId)
 
-      setSnackbar({ open: true, message: '开始播放', severity: 'success' })
+      setSnackbar({ open: true, message: t('audiobook.useAudiobookChapterAudioActions.playbackStarted'), severity: 'success' })
     } catch {
       stopManagedPlayback()
       setPlayingChapter(null)
-      setSnackbar({ open: true, message: '播放失败，请重试', severity: 'error' })
+      setSnackbar({ open: true, message: t('audiobook.useAudiobookChapterAudioActions.playbackFailed'), severity: 'error' })
     }
   }, [
     audiobookProject,
@@ -221,6 +225,7 @@ export const useAudiobookChapterAudioActions = ({
     setPlayingChapter,
     setSnackbar,
     stopManagedPlayback,
+    t,
   ])
 
   return {

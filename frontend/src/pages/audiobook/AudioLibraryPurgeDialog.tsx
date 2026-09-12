@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import {
   Alert,
   Box,
@@ -71,6 +72,7 @@ const AudioLibraryPurgeDialog = ({
   onClose,
   onPurged,
 }: AudioLibraryPurgeDialogProps) => {
+  const { t } = useTranslation()
   const [libraryType, setLibraryType] = useState<LibraryType>(initialLibraryType)
   const [removeMissing, setRemoveMissing] = useState(true)
   const [removeOrphaned, setRemoveOrphaned] = useState(true)
@@ -114,7 +116,7 @@ const AudioLibraryPurgeDialog = ({
 
   const runCleanup = async (dryRun: boolean) => {
     if (!dryRun && (!previewIsCurrent || !confirmed)) {
-      setError('清理条件已变化，请重新执行 dry_run 预览')
+      setError(t('audiobook.audioLibraryPurge.staleConditionError'))
       return
     }
     if (dryRun) setChecking(true)
@@ -140,16 +142,20 @@ const AudioLibraryPurgeDialog = ({
         setPreviewRequestKey(currentRequestKey)
         setPreviewPlanToken(res.data.plan_token)
         setConfirmed(false)
-        setMessage(`dry_run 完成：发现 ${affected} 项可清理。`)
+        setMessage(t('audiobook.audioLibraryPurge.dryRunDone', {
+          total: affected,
+        }))
       } else {
         setPreviewRequestKey(null)
         setPreviewPlanToken('')
         setConfirmed(false)
-        setMessage('素材清理完成')
+        setMessage(t('audiobook.audioLibraryPurge.purgeDone'))
         onPurged?.()
       }
     } catch {
-      setError(dryRun ? '清理预览失败' : '执行清理失败，请先 dry_run 并勾选确认')
+      setError(dryRun
+        ? t('audiobook.audioLibraryPurge.previewFailed')
+        : t('audiobook.audioLibraryPurge.purgeFailed'))
     } finally {
       setChecking(false)
       setPurging(false)
@@ -192,67 +198,75 @@ const AudioLibraryPurgeDialog = ({
   return (
     <Dialog open={open} onClose={handleClose} maxWidth="md" fullWidth>
       <DialogTitle sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        素材清理
+        {t('audiobook.audioLibraryPurge.title')}
         <IconButton onClick={handleClose} size="small">
           <CloseIcon />
         </IconButton>
       </DialogTitle>
       <DialogContent dividers>
         <Alert severity="warning" sx={{ mb: 2 }}>
-          清理必须先 dry_run 预览。实际执行会改写索引，并删除素材库目录内的孤立或低质文件。
+          {t('audiobook.audioLibraryPurge.warningHint')}
         </Alert>
 
         <Box sx={{ display: 'grid', gridTemplateColumns: '160px 1fr', gap: 1.5, alignItems: 'center' }}>
           <FormControl size="small" disabled={checking || purging}>
-            <InputLabel>库类型</InputLabel>
+            <InputLabel>{t('audiobook.audioLibraryPurge.libraryTypeLabel')}</InputLabel>
             <Select
-              label="库类型"
+              label={t('audiobook.audioLibraryPurge.libraryTypeLabel')}
               value={libraryType}
               onChange={(event) => setLibraryType(event.target.value as LibraryType)}
             >
-              <MenuItem value="sfx">音效库</MenuItem>
-              <MenuItem value="music">音乐库</MenuItem>
-              <MenuItem value="both">全部</MenuItem>
+              <MenuItem value="sfx">{t('audiobook.audioLibraryPurge.sfxLibrary')}</MenuItem>
+              <MenuItem value="music">{t('audiobook.audioLibraryPurge.musicLibrary')}</MenuItem>
+              <MenuItem value="both">{t('audiobook.audioLibraryPurge.bothLibraries')}</MenuItem>
             </Select>
           </FormControl>
           <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
             <FormControlLabel
               control={<Checkbox checked={removeMissing} onChange={(event) => setRemoveMissing(event.target.checked)} disabled={checking || purging} />}
-              label="缺失索引"
+              label={t('audiobook.audioLibraryPurge.missingLabel')}
             />
             <FormControlLabel
               control={<Checkbox checked={removeOrphaned} onChange={(event) => setRemoveOrphaned(event.target.checked)} disabled={checking || purging} />}
-              label="孤立文件"
+              label={t('audiobook.audioLibraryPurge.orphanedLabel')}
             />
             <FormControlLabel
               control={<Checkbox checked={removeLowQuality} onChange={(event) => setRemoveLowQuality(event.target.checked)} disabled={checking || purging} />}
-              label="低质素材"
+              label={t('audiobook.audioLibraryPurge.lowQualityLabel')}
             />
           </Box>
           <TextField
             size="small"
-            label="最低质量分"
+            label={t('audiobook.audioLibraryPurge.minQualityLabel')}
             type="number"
             value={minQualityScore}
             onChange={(event) => setMinQualityScore(Number(event.target.value) || 0)}
             disabled={!removeLowQuality || checking || purging}
           />
           <Typography variant="caption" color="text.secondary">
-            低于该分数或 `quality_status=rejected` 的素材会进入低质清理预览。
+            {t('audiobook.audioLibraryPurge.minQualityHint')}
           </Typography>
         </Box>
 
         {result && (
           <Box sx={{ mt: 2 }}>
             <Box sx={{ display: 'flex', gap: 0.75, flexWrap: 'wrap' }}>
-              <Chip label={`缺失索引 ${result.stats.removed_missing}`} size="small" />
-              <Chip label={`孤立文件 ${result.stats.removed_orphaned}`} size="small" />
-              <Chip label={`低质素材 ${result.stats.removed_low_quality}`} size="small" />
-              <Chip label={`可释放 ${formatBytes(result.stats.freed_bytes)}`} size="small" />
+              <Chip label={t('audiobook.audioLibraryPurge.missingCount', {
+                total: result.stats.removed_missing,
+              })} size="small" />
+              <Chip label={t('audiobook.audioLibraryPurge.orphanedCount', {
+                total: result.stats.removed_orphaned,
+              })} size="small" />
+              <Chip label={t('audiobook.audioLibraryPurge.lowQualityCount', {
+                total: result.stats.removed_low_quality,
+              })} size="small" />
+              <Chip label={t('audiobook.audioLibraryPurge.freedBytes', {
+                size: formatBytes(result.stats.freed_bytes),
+              })} size="small" />
             </Box>
-            {renderDetails('缺失索引', result.details.missing_entries)}
-            {renderDetails('低质素材', result.details.low_quality_entries)}
-            {renderDetails('孤立文件', result.details.orphaned_files)}
+            {renderDetails(t('audiobook.audioLibraryPurge.missingLabel'), result.details.missing_entries)}
+            {renderDetails(t('audiobook.audioLibraryPurge.lowQualityLabel'), result.details.low_quality_entries)}
+            {renderDetails(t('audiobook.audioLibraryPurge.orphanedLabel'), result.details.orphaned_files)}
           </Box>
         )}
 
@@ -268,17 +282,19 @@ const AudioLibraryPurgeDialog = ({
               disabled={!previewIsCurrent || totalAffected === 0 || checking || purging}
             />
           }
-          label="我确认执行上述清理并允许写入索引"
+          label={t('audiobook.audioLibraryPurge.confirmLabel')}
         />
       </DialogContent>
       <DialogActions>
-        <Button onClick={handleClose}>关闭</Button>
+        <Button onClick={handleClose}>{t('action.close')}</Button>
         <Button
           variant="outlined"
           onClick={() => runCleanup(true)}
           disabled={checking || purging}
         >
-          {checking ? '预览中...' : 'dry_run 预览'}
+          {checking
+            ? t('audiobook.audioLibraryPurge.previewingText')
+            : t('audiobook.audioLibraryPurge.dryRunPreview')}
         </Button>
         <Button
           variant="contained"
@@ -287,7 +303,7 @@ const AudioLibraryPurgeDialog = ({
           onClick={() => runCleanup(false)}
           disabled={checking || purging || !confirmed || totalAffected === 0}
         >
-          执行清理
+          {t('audiobook.audioLibraryPurge.executePurge')}
         </Button>
       </DialogActions>
     </Dialog>

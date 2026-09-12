@@ -16,6 +16,7 @@ import ContentCopyIcon from '@mui/icons-material/ContentCopy'
 import { getStageDisplayName } from '@/utils/timeEstimate'
 import { PREVIEW_STEPS_LABELS, stageToPreviewStep } from '@/constants/dreamweaver'
 import type { RunResult, DreamweaverAssetPlanItem } from '@/types/dreamweaver'
+import { useTranslation } from 'react-i18next'
 
 interface ScriptReviewSectionProps {
   result: RunResult | null
@@ -86,6 +87,7 @@ export function ScriptReviewSection({
   onSavePromptEdit: _onSavePromptEdit,
   onToggleShowAll,
 }: ScriptReviewSectionProps) {
+  const { t } = useTranslation()
   const scriptDirty = useMemo(() => scriptText !== scriptSavedText, [scriptText, scriptSavedText])
 
   const previewStep = useMemo(() => stageToPreviewStep(result?.stage), [result?.stage])
@@ -96,7 +98,7 @@ export function ScriptReviewSection({
         <Box sx={{ p: 2 }}>
           <LinearProgress />
           <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-            正在加载剧本...
+            {t('dreamweaverScriptReview.loadingScript')}
           </Typography>
         </Box>
       )
@@ -113,7 +115,7 @@ export function ScriptReviewSection({
     if (!scriptText) {
       return (
         <Typography variant="body2" color="text.secondary">
-          暂无剧本生成信息（可能尚未生成或未落库）。
+          {t('dreamweaverScriptReview.noScriptInfo')}
         </Typography>
       )
     }
@@ -121,9 +123,9 @@ export function ScriptReviewSection({
     return (
       <Box>
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
-          <Typography variant="subtitle2">剧本内容</Typography>
+          <Typography variant="subtitle2">{t('dreamweaverScriptReview.scriptContentTitle')}</Typography>
           <Stack direction="row" spacing={1}>
-            <Tooltip title="复制剧本">
+            <Tooltip title={t('dreamweaverScriptReview.copyScript')}>
               <IconButton size="small" onClick={() => navigator.clipboard.writeText(scriptText)}>
                 <ContentCopyIcon fontSize="small" />
               </IconButton>
@@ -154,7 +156,7 @@ export function ScriptReviewSection({
                 </Typography>
                 <Chip
                   size="small"
-                  label={item.status === 'done' ? '已生成' : item.status === 'processing' ? '生成中' : '待生成'}
+                  label={item.status === 'done' ? t('dreamweaverScriptReview.statusDone') : item.status === 'processing' ? t('dreamweaverScriptReview.statusProcessing') : t('dreamweaverScriptReview.statusPending')}
                   color={item.status === 'done' ? 'success' : 'default'}
                   sx={{ ml: 1 }}
                 />
@@ -165,7 +167,7 @@ export function ScriptReviewSection({
         {items.length > 6 && !promptReviewShowAll && (
           <Chip
             size="small"
-            label={`显示全部 ${items.length} 个`}
+            label={t('dreamweaverScriptReview.showAll', { count: items.length })}
             onClick={onToggleShowAll}
             sx={{ mt: 1, cursor: 'pointer' }}
           />
@@ -178,9 +180,9 @@ export function ScriptReviewSection({
     <Box>
       <Paper sx={{ p: 2, mb: 2 }}>
         <Stack direction="row" spacing={2} alignItems="center" mb={2}>
-          <Typography variant="h6">剧本审核</Typography>
-          {scriptApproved && <Chip size="small" label="已通过" color="success" />}
-          {scriptDirty && <Chip size="small" label="未保存" color="warning" />}
+          <Typography variant="h6">{t('dreamweaverScriptReview.scriptReviewTitle')}</Typography>
+          {scriptApproved && <Chip size="small" label={t('dreamweaverScriptReview.approved')} color="success" />}
+          {scriptDirty && <Chip size="small" label={t('dreamweaverPending.unsaved')} color="warning" />}
         </Stack>
 
         {renderScriptBlock()}
@@ -190,20 +192,20 @@ export function ScriptReviewSection({
         <Stack direction="row" spacing={1}>
           <Chip
             size="small"
-            label={`阶段: ${getStageDisplayName(result?.stage || '')}`}
+            label={`${t('dreamweaverScriptReview.stageLabel')}: ${getStageDisplayName(result?.stage || '', t)}`}
             variant="outlined"
           />
           <Chip
             size="small"
-            label={`预览步骤: ${PREVIEW_STEPS_LABELS[previewStep]}`}
+            label={`${t('dreamweaverScriptReview.previewStepLabel')}: ${t(PREVIEW_STEPS_LABELS[previewStep])}`}
             variant="outlined"
           />
         </Stack>
       </Paper>
 
-      {renderAssetPlanGrid('角色立绘', characterAssetPlanItems)}
-      {renderAssetPlanGrid('场景卡', sceneAssetPlanItems)}
-      {renderAssetPlanGrid('道具卡', propAssetPlanItems)}
+      {renderAssetPlanGrid(t('dreamweaverScriptReview.rolePortrait'), characterAssetPlanItems)}
+      {renderAssetPlanGrid(t('dreamweaverScriptReview.sceneCard'), sceneAssetPlanItems)}
+      {renderAssetPlanGrid(t('dreamweaverScriptReview.propCard'), propAssetPlanItems)}
     </Box>
   )
 }

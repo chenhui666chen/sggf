@@ -26,6 +26,7 @@ import PlayIcon from '@mui/icons-material/PlayArrow'
 import ReplayIcon from '@mui/icons-material/Replay'
 import StarIcon from '@mui/icons-material/Star'
 import SummarizeIcon from '@mui/icons-material/Summarize'
+import { useTranslation } from 'react-i18next'
 
 import { apiClient, extractApiErrorMessage } from '../../services/api'
 import {
@@ -84,6 +85,7 @@ const ChapterAudioResultItem = ({
   onResumeChapterGeneration,
   onOpenScriptReview,
 }: ChapterAudioResultItemProps) => {
+  const { t } = useTranslation()
   const [menuAnchorEl, setMenuAnchorEl] = useState<HTMLElement | null>(null)
   const [showRating, setShowRating] = useState(false)
   const [ratingValue, setRatingValue] = useState<number | null>(null)
@@ -93,15 +95,15 @@ const ChapterAudioResultItem = ({
   const [ratingError, setRatingError] = useState<string | null>(null)
   const [showPromptAudioReview, setShowPromptAudioReview] = useState(false)
   const canResume = Boolean(resumeCheckpoint?.can_resume)
-  const scriptChip = resolveScriptStatusChip(chapterAudio)
-  const audioChip = resolveAudioStatusChip(chapterAudio)
+  const scriptChip = resolveScriptStatusChip(chapterAudio, t)
+  const audioChip = resolveAudioStatusChip(chapterAudio, t)
   const menuOpen = Boolean(menuAnchorEl)
   const hasPromptAudioReviewModels = Boolean(chapterAudio.prompt_audio_quality)
   const collectTooltipTitle = isCollecting
-    ? '正在收录到用户资产'
+    ? t('audiobook.chapterAudioResultItem.collectingTooltip')
     : collectDisabled
-      ? '该章节音频已收录或暂不可收录'
-      : '收录到用户资产'
+      ? t('audiobook.chapterAudioResultItem.collectedOrUnavailableTooltip')
+      : t('audiobook.chapterAudioResultItem.collectTooltip')
 
   const handleOpenMenu = (event: MouseEvent<HTMLButtonElement>) => {
     setMenuAnchorEl(event.currentTarget)
@@ -135,7 +137,7 @@ const ChapterAudioResultItem = ({
       }}
     >
       <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', alignItems: 'center' }}>
-        <Tooltip title={isPlaying ? '暂停播放' : '在线播放'}>
+        <Tooltip title={isPlaying ? t('audiobook.chapterAudioResultItem.pausePlay') : t('audiobook.chapterAudioResultItem.onlinePlay')}>
           <Button
             variant="outlined"
             size="small"
@@ -143,11 +145,11 @@ const ChapterAudioResultItem = ({
             onClick={() => onPlayAudio(chapterAudio.chapter_id)}
             sx={isPlaying ? audiobookButtonSx.dangerOutlined : audiobookButtonSx.brandOutlined}
           >
-            {formatChapterAudioButtonLabel(chapterAudio, chapter)}
+            {formatChapterAudioButtonLabel(chapterAudio, chapter, t)}
           </Button>
         </Tooltip>
 
-        <Tooltip title="下载音频">
+        <Tooltip title={t('audiobook.chapterAudioResultItem.downloadTooltip')}>
           <IconButton
             size="small"
             onClick={() => onDownloadAudio(chapterAudio.chapter_id)}
@@ -170,11 +172,11 @@ const ChapterAudioResultItem = ({
           </span>
         </Tooltip>
 
-        <Tooltip title="更多操作">
+        <Tooltip title={t('audiobook.chapterAudioResultItem.moreActionsTooltip')}>
           <IconButton
             size="small"
             onClick={handleOpenMenu}
-            aria-label="更多章节操作"
+            aria-label={t('audiobook.chapterAudioResultItem.moreChapterActionsAria')}
             aria-controls={menuOpen ? `chapter-audio-menu-${chapterAudio.id}` : undefined}
             aria-haspopup="menu"
             aria-expanded={menuOpen ? 'true' : undefined}
@@ -195,7 +197,7 @@ const ChapterAudioResultItem = ({
             <ListItemIcon>
               <EditIcon fontSize="small" />
             </ListItemIcon>
-            <ListItemText primary="编辑剧本/提示词" />
+            <ListItemText primary={t('audiobook.chapterAudioResultItem.editScriptLabel')} />
           </MenuItem>
           <MenuItem
             onClick={() => {
@@ -209,13 +211,13 @@ const ChapterAudioResultItem = ({
             <ListItemIcon>
               <SummarizeIcon fontSize="small" />
             </ListItemIcon>
-            <ListItemText primary="查看审核报告" />
+            <ListItemText primary={t('audiobook.chapterAudioResultItem.viewReviewReportLabel')} />
           </MenuItem>
           <MenuItem onClick={() => { handleCloseMenu(); setShowRating(true) }}>
             <ListItemIcon>
               <StarIcon fontSize="small" />
             </ListItemIcon>
-            <ListItemText primary="评价生成质量" />
+            <ListItemText primary={t('audiobook.chapterAudioResultItem.rateQualityLabel')} />
           </MenuItem>
           <MenuItem
             onClick={() => {
@@ -228,8 +230,8 @@ const ChapterAudioResultItem = ({
               <FactCheckIcon fontSize="small" />
             </ListItemIcon>
             <ListItemText
-              primary="Prompt/Audio 验收"
-              secondary={hasPromptAudioReviewModels ? undefined : '暂无质量回写'}
+              primary={t('audiobook.chapterAudioResultItem.promptAudioReviewLabel')}
+              secondary={hasPromptAudioReviewModels ? undefined : t('audiobook.chapterAudioResultItem.noQualityFeedback')}
             />
           </MenuItem>
           {canResume && (
@@ -243,8 +245,8 @@ const ChapterAudioResultItem = ({
                   : <ReplayIcon fontSize="small" />}
               </ListItemIcon>
               <ListItemText
-                primary="继续生成"
-                secondary={resumingChapterId === chapterAudio.chapter_id ? '提交中...' : undefined}
+                primary={t('audiobook.chapterAudioResultItem.resumeLabel')}
+                secondary={resumingChapterId === chapterAudio.chapter_id ? t('audiobook.chapterAudioResultItem.submittingText') : undefined}
               />
             </MenuItem>
           )}
@@ -255,7 +257,7 @@ const ChapterAudioResultItem = ({
         <Chip label={scriptChip.label} size="small" sx={chipSx(scriptChip)} />
         {canResume && (
           <Chip
-            label={formatResumeCheckpointChipLabel(resumeCheckpoint)}
+            label={formatResumeCheckpointChipLabel(resumeCheckpoint, t)}
             size="small"
             sx={{
               backgroundColor: audiobookColorRoles.notice.warning.bg,
@@ -290,13 +292,13 @@ const ChapterAudioResultItem = ({
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
               <StarIcon sx={{ color: 'gold', fontSize: 18 }} />
               <Typography variant="caption" color="text.secondary">
-                已评分 {ratingValue} 星，感谢反馈！
+                {t('audiobook.chapterAudioResultItem.ratedThanks', { stars: ratingValue })}
               </Typography>
             </Box>
           ) : (
             <>
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                <Typography variant="caption" color="text.secondary">评分：</Typography>
+                <Typography variant="caption" color="text.secondary">{t('audiobook.chapterAudioResultItem.ratingLabel')}</Typography>
                 <Rating
                   size="small"
                   value={ratingValue}
@@ -320,16 +322,16 @@ const ChapterAudioResultItem = ({
                       })
                       setRatingSubmitted(true)
                     } catch (err: unknown) {
-                      setRatingError(await extractApiErrorMessage(err, '提交评分失败'))
+                      setRatingError(await extractApiErrorMessage(err, t('audiobook.chapterAudioResultItem.ratingSubmitFailed')))
                     } finally {
                       setRatingSubmitting(false)
                     }
                   }}
                 >
-                  {ratingSubmitting ? '提交中...' : '提交'}
+                  {ratingSubmitting ? t('audiobook.chapterAudioResultItem.submittingText') : t('audiobook.chapterAudioResultItem.submitLabel')}
                 </Button>
                 <Button size="small" variant="text" onClick={() => setShowRating(false)}>
-                  取消
+                  {t('action.cancel')}
                 </Button>
               </Box>
               <TextField
@@ -338,7 +340,7 @@ const ChapterAudioResultItem = ({
                 multiline
                 minRows={1}
                 maxRows={2}
-                placeholder="可选：写下你的反馈..."
+                placeholder={t('audiobook.chapterAudioResultItem.feedbackPlaceholder')}
                 value={ratingComment}
                 onChange={(e) => setRatingComment(e.target.value)}
                 sx={{ mt: 0.5 }}

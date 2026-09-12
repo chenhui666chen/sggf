@@ -13,53 +13,54 @@ import ErrorIcon from '@mui/icons-material/Error'
 import HourglassEmptyIcon from '@mui/icons-material/HourglassEmpty'
 import RadioButtonUncheckedIcon from '@mui/icons-material/RadioButtonUnchecked'
 import { useSelector } from 'react-redux'
+import { useTranslation } from 'react-i18next'
 import { RootState } from '@/store/store'
 import { StageType } from '@/store/slices/workflowSlice'
 
-const stageInfo = {
+const stageInfo: Record<StageType, { titleKey: string; descriptionKey: string; stepKeys: string[] }> = {
   concept: {
-    title: '概念开发阶段',
-    description: '生成故事概念、世界观和人物设定',
-    steps: [
-      '创意总监分析创作需求',
-      '世界观架构师和人物设计师协作',
-      '输出完整的故事概念文档',
+    titleKey: 'workflow.stageInfo.conceptTitle',
+    descriptionKey: 'workflow.stageInfo.conceptDescription',
+    stepKeys: [
+      'workflow.stageInfo.conceptStep1',
+      'workflow.stageInfo.conceptStep2',
+      'workflow.stageInfo.conceptStep3',
     ],
   },
   structure: {
-    title: '结构设计阶段',
-    description: '生成事件序列和情节大纲',
-    steps: [
-      '情节架构师生成事件序列',
-      '事件验证官进行质量验证',
-      '输出完整情节大纲',
+    titleKey: 'workflow.stageInfo.structureTitle',
+    descriptionKey: 'workflow.stageInfo.structureDescription',
+    stepKeys: [
+      'workflow.stageInfo.structureStep1',
+      'workflow.stageInfo.structureStep2',
+      'workflow.stageInfo.structureStep3',
     ],
   },
   content: {
-    title: '内容创作阶段',
-    description: '按章节进行具体内容创作',
-    steps: [
-      '内容创作师按章节创作',
-      '文风优化确保语言统一',
-      '输出章节初稿',
+    titleKey: 'workflow.stageInfo.contentTitle',
+    descriptionKey: 'workflow.stageInfo.contentDescription',
+    stepKeys: [
+      'workflow.stageInfo.contentStep1',
+      'workflow.stageInfo.contentStep2',
+      'workflow.stageInfo.contentStep3',
     ],
   },
   review: {
-    title: '质量评审阶段',
-    description: '对初稿进行全面评审',
-    steps: [
-      '质量评审官全面评审',
-      '根据问题严重程度决定处理路径',
-      '输出评审报告',
+    titleKey: 'workflow.stageInfo.reviewTitle',
+    descriptionKey: 'workflow.stageInfo.reviewDescription',
+    stepKeys: [
+      'workflow.stageInfo.reviewStep1',
+      'workflow.stageInfo.reviewStep2',
+      'workflow.stageInfo.reviewStep3',
     ],
   },
   iteration: {
-    title: '迭代优化阶段',
-    description: '根据评审反馈进行内容优化和最终审核',
-    steps: [
-      '迭代协调官分析评审反馈，制定改进计划',
-      '内容修订师执行修改，优化章节内容',
-      '最终审核官审核确认，输出最终成品',
+    titleKey: 'workflow.stageInfo.iterationTitle',
+    descriptionKey: 'workflow.stageInfo.iterationDescription',
+    stepKeys: [
+      'workflow.stageInfo.iterationStep1',
+      'workflow.stageInfo.iterationStep2',
+      'workflow.stageInfo.iterationStep3',
     ],
   },
 }
@@ -69,6 +70,7 @@ interface StageInfoPanelProps {
 }
 
 export default function StageInfoPanel({ stage }: StageInfoPanelProps) {
+  const { t } = useTranslation()
   const workflow = useSelector((state: RootState) => state.workflow)
   const stageData = workflow.stages[stage]
   const info = stageInfo[stage]
@@ -88,10 +90,10 @@ export default function StageInfoPanel({ stage }: StageInfoPanelProps) {
 
   const getStatusLabel = () => {
     switch (stageData.status) {
-      case 'completed': return '已完成'
-      case 'error': return '错误'
-      case 'active': return '进行中'
-      default: return '待处理'
+      case 'completed': return t('workflow.stage.statusCompleted')
+      case 'error': return t('workflow.stage.statusError')
+      case 'active': return t('workflow.stage.statusActive')
+      default: return t('workflow.stage.statusPending')
     }
   }
 
@@ -112,7 +114,7 @@ export default function StageInfoPanel({ stage }: StageInfoPanelProps) {
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
             {getStatusIcon()}
             <Typography variant="subtitle2" sx={{ fontWeight: 600, fontSize: '0.85rem' }}>
-              {info.title}
+              {t(info.titleKey)}
             </Typography>
           </Box>
           <Chip
@@ -125,18 +127,18 @@ export default function StageInfoPanel({ stage }: StageInfoPanelProps) {
         </Box>
 
         <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5, lineHeight: 1.5, fontSize: '0.8rem' }}>
-          {info.description}
+          {t(info.descriptionKey)}
         </Typography>
 
         {/* 步骤列表 */}
         <Typography variant="caption" sx={{ fontWeight: 600, color: 'text.secondary', display: 'block', mb: 0.5, fontSize: '0.75rem' }}>
-          📋 工作步骤
+          📋 {t('workflow.stageInfo.workSteps')}
         </Typography>
         <List dense disablePadding>
-          {info.steps.map((step, index) => (
+          {info.stepKeys.map((stepKey, index) => (
             <ListItem key={index} sx={{ py: 0.25, px: 0 }}>
               <ListItemText
-                primary={`${index + 1}. ${step}`}
+                primary={`${index + 1}. ${t(stepKey)}`}
                 primaryTypographyProps={{ variant: 'body2', fontSize: '0.8rem', lineHeight: 1.4 }}
               />
             </ListItem>

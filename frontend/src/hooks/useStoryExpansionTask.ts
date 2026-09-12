@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { Dispatch, SetStateAction } from 'react'
 
+import { useTranslation } from 'react-i18next'
+
 import { apiClient } from '@/services/api'
 import { workflowWebSocket } from '@/services/websocket'
 import type {
@@ -53,7 +55,6 @@ interface StoryTaskStatusResponse {
   error?: unknown
 }
 
-const STORY_EXPANSION_RECOVERY_MISSING_TASK_ID_MESSAGE = '协同扩展任务无法恢复，请重新发起'
 const STORY_EXPANSION_STATUS_POLL_INTERVAL_MS = 30_000
 
 export function useStoryExpansionTask({
@@ -62,6 +63,7 @@ export function useStoryExpansionTask({
   refreshFramework,
   showSnackbar,
 }: UseStoryExpansionTaskOptions): UseStoryExpansionTaskReturn {
+  const { t } = useTranslation()
   const [expandingStory, setExpandingStory] = useState(false)
   const [showStoryExpansionResultDialog, setShowStoryExpansionResultDialog] = useState(false)
   const [storyExpansionResult, setStoryExpansionResult] = useState<StoryExpansionResult | null>(null)
@@ -137,7 +139,7 @@ export function useStoryExpansionTask({
 
   const handleStoryExpansionTaskSuccess = useCallback((
     resultData: StoryExpansionResult,
-    fallbackMessage = '协同扩展已完成',
+    fallbackMessage = t('storyExpansion.done'),
   ) => {
     resetStoryExpansionTaskTracking()
     setStoryExpansionResult(resultData)
@@ -155,11 +157,11 @@ export function useStoryExpansionTask({
     const baseMessage = typeof resultData.message === 'string' && resultData.message.trim()
       ? resultData.message.trim()
       : fallbackMessage
-    showSnackbarRef.current(buildStoryExpansionCompletionMessage(baseMessage, resultData), 'success')
-  }, [projectId, resetStoryExpansionTaskTracking, triggerRefreshSafely])
+    showSnackbarRef.current(buildStoryExpansionCompletionMessage(baseMessage, resultData, t), 'success')
+  }, [projectId, resetStoryExpansionTaskTracking, t, triggerRefreshSafely])
 
   const handleStoryExpansionTaskResultParseFailure = useCallback((
-    message = '协同扩展已完成，但结果解析失败，已刷新最新数据',
+    message = t('storyExpansion.parseFailed'),
   ) => {
     resetStoryExpansionTaskTracking()
     setExpandingStory(false)
@@ -171,7 +173,7 @@ export function useStoryExpansionTask({
     triggerRefreshSafely(() => refreshWorkflowDataRef.current())
     triggerRefreshSafely(() => refreshFrameworkRef.current())
     showSnackbarRef.current(message, 'error')
-  }, [projectId, resetStoryExpansionTaskTracking, triggerRefreshSafely])
+  }, [projectId, resetStoryExpansionTaskTracking, t, triggerRefreshSafely])
 
   const handleStoryExpansionTaskFailure = useCallback((message: string) => {
     resetStoryExpansionTaskTracking()
@@ -257,17 +259,17 @@ export function useStoryExpansionTask({
     if (statusRaw === 'completed') {
       const resultData = resolveStoryExpansionResult(statusData.result)
       if (resultData) {
-        handleStoryExpansionTaskSuccess(resultData, options?.successMessage ?? '协同扩展完成')
+        handleStoryExpansionTaskSuccess(resultData, options?.successMessage ?? t('storyExpansion.done'))
       } else {
         handleStoryExpansionTaskResultParseFailure(
-          options?.parseFailureMessage ?? '协同扩展已完成，但结果解析失败，已刷新最新数据',
+          options?.parseFailureMessage ?? t('storyExpansion.parseFailed'),
         )
       }
       return true
     }
 
     if (statusRaw === 'failed' || statusRaw === 'timeout') {
-      handleStoryExpansionTaskFailure(`协同扩展失败: ${String(statusData.error || '任务失败')}`)
+      handleStoryExpansionTaskFailure(t('storyExpansion.failedPrefix', { error: String(statusData.error || t('storyExpansion.failTask')) }))
       return true
     }
 
@@ -277,6 +279,7 @@ export function useStoryExpansionTask({
     handleStoryExpansionTaskResultParseFailure,
     handleStoryExpansionTaskSuccess,
     resolveStoryExpansionResult,
+    t,
   ])
 
   useEffect(() => {
@@ -301,8 +304,8 @@ export function useStoryExpansionTask({
         }
 
         applyRecoveredTaskStatus(statusData, {
-          successMessage: '协同扩展完成',
-          parseFailureMessage: '协同扩展已完成，但结果解析失败，已刷新最新数据',
+          successMessage: t('storyExpansion.done'),
+          parseFailureMessage: t('storyExpansion.parseFailed'),
         })
       } finally {
         polling = false
@@ -354,7 +357,7 @@ export function useStoryExpansionTask({
       } else {
         clearStoryExpansionTaskPersistence(projectId)
         resetStoryExpansionTaskTracking()
-        showSnackbarRef.current(STORY_EXPANSION_RECOVERY_MISSING_TASK_ID_MESSAGE, 'error')
+        showSnackbarRef.current(t('storyExpansion.recoveryMissing'), 'error')
       }
     }
 
@@ -381,8 +384,8 @@ export function useStoryExpansionTask({
       }
 
       const resolved = applyRecoveredTaskStatus(statusData, {
-        successMessage: '协同扩展完成',
-        parseFailureMessage: '协同扩展已完成，但结果解析失败，已刷新最新数据',
+        successMessage: t('storyExpansion.done'),
+        parseFailureMessage: t('storyExpansion.parseFailed'),
       })
 
       if (!resolved && !cancelled) {
@@ -395,7 +398,7 @@ export function useStoryExpansionTask({
     return () => {
       cancelled = true
     }
-  }, [applyRecoveredTaskStatus, fetchTaskStatus, projectId, resetStoryExpansionTaskTracking])
+  }, [applyRecoveredTaskStatus, fetchTaskStatus, projectId, resetStoryExpansionTaskTracking, t])
 
   useEffect(() => {
     if (!projectId) {
@@ -418,7 +421,7 @@ export function useStoryExpansionTask({
 
       const resultData = getStoryExpansionResultFromTaskComplete(data)
       if (resultData) {
-        handleStoryExpansionTaskSuccess(resultData, '协同扩展完成')
+        handleStoryExpansionTaskSuccess(resultData, t('storyExpansion.done'))
         return
       }
 
@@ -431,8 +434,8 @@ export function useStoryExpansionTask({
         return
       }
 
-      const error = data.error || '任务失败'
-      handleStoryExpansionTaskFailure(`协同扩展失败: ${error}`)
+      const error = data.error || t('storyExpansion.failTask')
+      handleStoryExpansionTaskFailure(t('storyExpansion.failedPrefix', { error }))
     })
 
     const unsubscribeDisconnect = workflowWebSocket.onDisconnect(() => {
@@ -448,8 +451,8 @@ export function useStoryExpansionTask({
           }
 
           applyRecoveredTaskStatus(statusData, {
-            successMessage: '协同扩展完成',
-            parseFailureMessage: '协同扩展已完成，但结果解析失败，已刷新最新数据',
+            successMessage: t('storyExpansion.done'),
+            parseFailureMessage: t('storyExpansion.parseFailed'),
           })
         })
         .catch(() => undefined)
@@ -467,7 +470,7 @@ export function useStoryExpansionTask({
           return
         }
 
-        showSnackbarRef.current('协同扩展任务连接失败，页面将继续尝试恢复结果', 'error')
+        showSnackbarRef.current(t('storyExpansion.connFailed'), 'error')
       })
 
     return () => {
@@ -483,6 +486,7 @@ export function useStoryExpansionTask({
     handleStoryExpansionTaskResultParseFailure,
     handleStoryExpansionTaskSuccess,
     projectId,
+    t,
   ])
 
   return {

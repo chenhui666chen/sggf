@@ -1,4 +1,5 @@
 import { Box, Typography } from '@mui/material'
+import { useTranslation } from 'react-i18next'
 
 import type { UserAssetRecord } from '@/services/api'
 
@@ -12,10 +13,11 @@ type UserAssetPreviewMediaProps = {
 
 export default function UserAssetPreviewMedia(props: UserAssetPreviewMediaProps) {
   const { asset, previewUrl, isProtectedAssetPending = false } = props
+  const { t } = useTranslation()
   const presentation = buildUserAssetPreviewPresentation(asset, {
     previewUrl,
     isProtectedAssetPending,
-  })
+  }, t)
 
   if (presentation.kind === 'placeholder') {
     return (
@@ -23,7 +25,7 @@ export default function UserAssetPreviewMedia(props: UserAssetPreviewMediaProps)
         sx={{
           height: 180,
           borderRadius: 2.5,
-          bgcolor: 'rgba(15, 23, 42, 0.04)',
+          bgcolor: 'grey.100',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
@@ -53,7 +55,7 @@ export default function UserAssetPreviewMedia(props: UserAssetPreviewMediaProps)
         sx={{
           height: 180,
           borderRadius: 2.5,
-          bgcolor: 'rgba(15, 23, 42, 0.04)',
+          bgcolor: 'grey.100',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',

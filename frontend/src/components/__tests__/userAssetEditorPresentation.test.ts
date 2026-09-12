@@ -1,4 +1,7 @@
-import { describe, expect, it } from 'vitest'
+import { beforeAll, describe, expect, it } from 'vitest'
+import type { TFunction } from 'i18next'
+
+import { bootstrapI18n } from '@/i18n'
 
 import {
   buildUserAssetEditorDialogPresentation,
@@ -7,6 +10,13 @@ import {
   normalizeUserAssetEditorPayload,
   parseUserAssetEditorTagsInput,
 } from '../user-assets/userAssetEditorPresentation'
+
+let t: TFunction
+
+beforeAll(async () => {
+  const instance = await bootstrapI18n('zh-CN')
+  t = instance.t.bind(instance)
+})
 
 describe('userAssetEditorPresentation', () => {
   it('builds and resets editor form data', () => {
@@ -30,11 +40,14 @@ describe('userAssetEditorPresentation', () => {
 
   it('normalizes payload and validates title', () => {
     expect(
-      normalizeUserAssetEditorPayload({
-        title: '  资产标题  ',
-        description: '  描述  ',
-        tagsText: '角色, 角色, 成片',
-      }),
+      normalizeUserAssetEditorPayload(
+        {
+          title: '  资产标题  ',
+          description: '  描述  ',
+          tagsText: '角色, 角色, 成片',
+        },
+        t,
+      ),
     ).toEqual({
       payload: {
         title: '资产标题',
@@ -43,11 +56,14 @@ describe('userAssetEditorPresentation', () => {
       },
     })
     expect(
-      normalizeUserAssetEditorPayload({
-        title: '   ',
-        description: '',
-        tagsText: '',
-      }),
+      normalizeUserAssetEditorPayload(
+        {
+          title: '   ',
+          description: '',
+          tagsText: '',
+        },
+        t,
+      ),
     ).toEqual({
       validationError: '资产标题不能为空',
     })
@@ -60,10 +76,13 @@ describe('userAssetEditorPresentation', () => {
       '高精',
     ])
     expect(
-      buildUserAssetEditorDialogPresentation({
-        submitting: true,
-        hasAsset: false,
-      }),
+      buildUserAssetEditorDialogPresentation(
+        {
+          submitting: true,
+          hasAsset: false,
+        },
+        t,
+      ),
     ).toMatchObject({
       dialogTitle: '编辑资产信息',
       titleLabel: '资产标题',

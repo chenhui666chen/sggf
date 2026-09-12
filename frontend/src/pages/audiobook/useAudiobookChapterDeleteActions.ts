@@ -1,5 +1,7 @@
 import { useCallback, useState, type Dispatch, type MouseEvent, type MutableRefObject, type SetStateAction } from 'react'
 
+import { useTranslation } from 'react-i18next'
+
 import { apiClient, extractApiErrorMessage } from '../../services/api'
 import { resolveAudiobookProjectIdForChapter } from './chapterSelectionUtils'
 import type { SetSnackbar } from './hookTypes'
@@ -21,6 +23,7 @@ export const useAudiobookChapterDeleteActions = ({
   audiobookProjectId,
   onDeletedRef,
 }: UseAudiobookChapterDeleteActionsParams) => {
+  const { t } = useTranslation()
   const [chapterMenuAnchor, setChapterMenuAnchor] = useState<null | HTMLElement>(null)
   const [selectedChapterForMenu, setSelectedChapterForMenu] = useState<Chapter | null>(null)
   const [deleteChapterDialogOpen, setDeleteChapterDialogOpen] = useState(false)
@@ -84,7 +87,7 @@ export const useAudiobookChapterDeleteActions = ({
     if (!targetAudiobookProjectId) {
       setSnackbar({
         open: true,
-        message: '未找到该章节所属的有声书项目，请刷新页面后重试',
+        message: t('audiobook.useAudiobookChapterDeleteActions.missingProject'),
         severity: 'error',
       })
       return
@@ -102,13 +105,13 @@ export const useAudiobookChapterDeleteActions = ({
 
       setSnackbar({
         open: true,
-        message: '章节有声书产出已删除',
+        message: t('audiobook.useAudiobookChapterDeleteActions.deleted'),
         severity: 'success',
       })
       onDeletedRef?.current?.()
       handleCloseDeleteChapterDialog()
     } catch (error: unknown) {
-      const message = await extractApiErrorMessage(error, '删除有声书产出失败')
+      const message = await extractApiErrorMessage(error, t('audiobook.useAudiobookChapterDeleteActions.deleteFailed'))
       setSnackbar({
         open: true,
         message,
@@ -127,6 +130,7 @@ export const useAudiobookChapterDeleteActions = ({
     selectedChapterForMenu,
     setSelectedChapters,
     setSnackbar,
+    t,
   ])
 
   return {

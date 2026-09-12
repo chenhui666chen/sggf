@@ -11,6 +11,8 @@ import {
   Typography,
 } from '@mui/material'
 
+import { useTranslation } from 'react-i18next'
+
 import CharacterVoiceCard from './CharacterVoiceCard'
 import { audiobookButtonSx, audiobookColors } from './audiobookTheme'
 import { selectVisibleCharacterVoices } from './characterScopeUtils'
@@ -62,6 +64,7 @@ const CharacterVoiceConfigPanel = ({
   onOpenVoiceManagement,
   onAutoAssignVoices,
 }: CharacterVoiceConfigPanelProps) => {
+  const { t } = useTranslation()
   const [showAllCharacters, setShowAllCharacters] = useState(false)
   const effectiveShowAll = showAllCharacters || Boolean(characterScopeError)
   const visibleCharacterVoices = useMemo(
@@ -77,7 +80,7 @@ const CharacterVoiceConfigPanel = ({
 
   return <Box sx={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
     <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-      不修改时使用 AI 默认音色；为角色选择音色后，本次有声书生成将优先使用你的配置。
+      {t('audiobook.characterVoiceConfigPanel.hint')}
     </Typography>
 
     {!loadingCharacters && (
@@ -93,8 +96,8 @@ const CharacterVoiceConfigPanel = ({
       >
         <Typography variant="body2" sx={{ fontWeight: 700 }}>
           {characterScopeLoading
-            ? '正在识别所选章节人物...'
-            : `本次人物 ${scopedCharacterCount} 位，项目共 ${projectCharacterCount} 位`}
+            ? t('audiobook.characterVoiceConfigPanel.detectingCharacters')
+            : t('audiobook.characterVoiceConfigPanel.scopeCount', { scoped: scopedCharacterCount, total: projectCharacterCount })}
         </Typography>
         {projectCharacterCount > scopedCharacterCount && !characterScopeError && (
           <FormControlLabel
@@ -106,7 +109,7 @@ const CharacterVoiceConfigPanel = ({
                 onChange={(event) => setShowAllCharacters(event.target.checked)}
               />
             )}
-            label="显示全部人物"
+            label={t('audiobook.characterVoiceConfigPanel.showAll')}
           />
         )}
       </Box>
@@ -114,13 +117,13 @@ const CharacterVoiceConfigPanel = ({
 
     {characterScopeError && (
       <Alert severity="warning" sx={{ mb: 1.25 }}>
-        {characterScopeError}，已回退显示全部人物。
+        {t('audiobook.characterVoiceConfigPanel.fallbackWarning', { reason: characterScopeError })}
       </Alert>
     )}
 
     {!characterScopeError && unresolvedCharacterNames.length > 0 && (
       <Alert severity="warning" sx={{ mb: 1.25 }}>
-        未关联人物卡：{unresolvedCharacterNames.join('、')}
+        {t('audiobook.characterVoiceConfigPanel.unresolvedCharacters', { names: unresolvedCharacterNames.join('、') })}
       </Alert>
     )}
 
@@ -133,7 +136,7 @@ const CharacterVoiceConfigPanel = ({
     {!loadingCharacters && !characterScopeLoading && characterVoices.length === 0 && (
       <Box sx={{ py: 2 }}>
         <Typography variant="body2" color="text.secondary">
-          当前项目还没有结构化角色档案，可在项目详情的角色管理中添加角色后再配置音色。
+          {t('audiobook.characterVoiceConfigPanel.noCharacters')}
         </Typography>
       </Box>
     )}
@@ -147,7 +150,7 @@ const CharacterVoiceConfigPanel = ({
           overflow: 'auto',
           borderRadius: 1.5,
           border: `1px solid ${audiobookColors.surfaceBorder}`,
-          backgroundColor: 'rgba(255,255,255,0.72)',
+          backgroundColor: audiobookColors.surfaceRaised,
         }}
       >
         <List disablePadding>
@@ -181,7 +184,7 @@ const CharacterVoiceConfigPanel = ({
           startIcon={autoAssigningVoices ? <CircularProgress size={16} color="inherit" /> : undefined}
           sx={audiobookButtonSx.brandOutlined}
         >
-          {autoAssigningVoices ? '智能推荐中...' : '基于人物卡自动推荐声线'}
+          {autoAssigningVoices ? t('audiobook.characterVoiceConfigPanel.autoAssigning') : t('audiobook.characterVoiceConfigPanel.autoAssign')}
         </Button>
       </Box>
     )}

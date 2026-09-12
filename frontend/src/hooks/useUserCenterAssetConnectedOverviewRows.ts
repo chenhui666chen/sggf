@@ -34,12 +34,14 @@ export function useUserCenterAssetConnectedOverviewRows(
       formatPointsValueLabel: options.formatPointsValueLabel,
       formatUpdatedAtLabel: options.formatUpdatedAtLabel,
       getSourceLabel: options.getSourceLabel,
+      t: options.t,
     }),
     [
       options.pointsOverview?.points_rules,
       options.formatPointsValueLabel,
       options.formatUpdatedAtLabel,
       options.getSourceLabel,
+      options.t,
     ],
   )
 
@@ -47,8 +49,8 @@ export function useUserCenterAssetConnectedOverviewRows(
     () => buildUserCenterAssetConnectedOverviewRows({
       overviewBridge,
       companionViewModel,
-    }),
-    [companionViewModel, overviewBridge],
+    }, options.t),
+    [companionViewModel, overviewBridge, options.t],
   )
 
   return useMemo(

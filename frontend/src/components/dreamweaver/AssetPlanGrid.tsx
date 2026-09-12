@@ -200,7 +200,7 @@ export function AssetPlanGrid({
                       position: 'absolute',
                       bottom: 4,
                       left: 4,
-                      bgcolor: 'rgba(0,0,0,0.6)',
+                      bgcolor: 'rgba(0,0,0,0.6)', // sg-color-fixed: 视频徽标黑叠（渲在媒体图上）
                       color: 'white',
                       fontSize: '0.6rem',
                       px: 0.5,

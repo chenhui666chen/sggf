@@ -20,7 +20,7 @@ export function buildUserCenterAssetConnectedOverviewCompanionViewModel(
   options: BuildUserCenterAssetConnectedOverviewCompanionViewModelOptions,
 ): UserCenterAssetConnectedOverviewCompanionViewModel {
   return {
-    strategyCompanionContentOptions: buildUserCenterAssetConnectedOverviewStrategyCompanionContentOptionsFromInput(),
+    strategyCompanionContentOptions: buildUserCenterAssetConnectedOverviewStrategyCompanionContentOptionsFromInput(options.t),
     pointsRulesCompanionContentOptions: buildUserCenterAssetConnectedOverviewPointsRulesCompanionContentOptionsFromInput(options),
   }
 }

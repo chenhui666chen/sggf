@@ -1,3 +1,6 @@
+import type { TFunction } from 'i18next'
+import type { AppLanguage } from '@/i18n'
+import { formatDateTimeWithSeconds } from '@/i18n/format'
 import type { LocalAssetExternalDirectoryStatus } from '@/utils/localAssetExternalDirectory'
 import type { LocalAssetVaultInventoryRecord } from '@/utils/localAssetVault'
 import type { UserAssetRecord } from '@/services/api'
@@ -9,6 +12,8 @@ import type {
   UserAssetExternalDirectoryAssetHealthItem,
   UserAssetExternalDirectoryAssetHealthSummary,
 } from './userAssetLocalDiagnosticsPresentation'
+
+const DEFAULT_TRANSLATE: TFunction = ((key: string) => key) as TFunction
 
 export type LocalStoragePanelCopy = {
   severity: 'info' | 'warning' | 'success'
@@ -56,49 +61,58 @@ export type UserAssetLocalStorageActionReport = {
   issueItems: UserAssetLocalStorageActionIssueItem[]
 }
 
-function buildDirectoryLabel(directoryName: string | null | undefined): string {
+function buildDirectoryLabel(directoryName: string | null | undefined, t?: TFunction): string {
+  const translate = t ?? DEFAULT_TRANSLATE
   const normalized = String(directoryName || '').trim()
-  return normalized || '未命名目录'
+  return normalized || translate('userAsset.localStorage.unnamedDirectory')
 }
 
 export function buildUserAssetLocalStorageSupportLabel(
   status: LocalAssetExternalDirectoryStatus | null,
   loading: boolean,
+  t?: TFunction,
 ): string {
+  const translate = t ?? DEFAULT_TRANSLATE
   if (loading) {
-    return '检查中'
+    return translate('userAsset.localStorage.checking')
   }
 
-  return status?.supported ? '支持 File System Access API' : '不支持 File System Access API'
+  return status?.supported
+    ? translate('userAsset.localStorage.supportSupported')
+    : translate('userAsset.localStorage.supportUnsupported')
 }
 
 export function buildUserAssetRecordedDirectoryLabel(
   status: LocalAssetExternalDirectoryStatus | null,
   loading: boolean,
+  t?: TFunction,
 ): string {
+  const translate = t ?? DEFAULT_TRANSLATE
   if (loading) {
-    return '读取中'
+    return translate('userAsset.localStorage.reading')
   }
 
   if (!status?.configured) {
-    return '未配置'
+    return translate('userAsset.localStorage.unconfigured')
   }
 
-  return buildDirectoryLabel(status.directoryName)
+  return buildDirectoryLabel(status.directoryName, t)
 }
 
 export function buildUserAssetLocalStoragePanelCopy(
   status: LocalAssetExternalDirectoryStatus | null,
   loading: boolean,
+  t?: TFunction,
 ): LocalStoragePanelCopy {
+  const translate = t ?? DEFAULT_TRANSLATE
   if (loading) {
     return {
       severity: 'info',
-      summary: '正在检查用户目录状态。',
-      pickLabel: '选择目录',
+      summary: translate('userAsset.localStorage.checkingSummary'),
+      pickLabel: translate('userAsset.localStorage.checkingPick'),
       showRecoverAccess: false,
       clearEnabled: false,
-      statusLabel: '检查中',
+      statusLabel: translate('userAsset.localStorage.checking'),
       statusTone: 'info',
       guidance: null,
       backupHint: null,
@@ -108,13 +122,13 @@ export function buildUserAssetLocalStoragePanelCopy(
   if (!status?.supported) {
     return {
       severity: 'warning',
-      summary: '当前浏览器不支持 File System Access API，无法把新收录资产直接写入用户目录。',
-      pickLabel: '当前不可用',
+      summary: translate('userAsset.localStorage.unsupportedSummary'),
+      pickLabel: translate('userAsset.localStorage.unsupportedPick'),
       showRecoverAccess: false,
       clearEnabled: Boolean(status?.configured),
-      statusLabel: '浏览器不支持',
+      statusLabel: translate('userAsset.localStorage.unsupportedStatus'),
       statusTone: 'default',
-      guidance: '当前只能继续使用浏览器本地存储，无法直接写入用户目录。',
+      guidance: translate('userAsset.localStorage.unsupportedGuidance'),
       backupHint: null,
     }
   }
@@ -122,75 +136,75 @@ export function buildUserAssetLocalStoragePanelCopy(
   if (!status.configured) {
     return {
       severity: 'info',
-      summary: '尚未配置用户目录。配置后，手动收录的新资产会优先写入你选择的本地目录。',
-      pickLabel: '选择目录',
+      summary: translate('userAsset.localStorage.unconfiguredSummary'),
+      pickLabel: translate('userAsset.localStorage.pickDirectory'),
       showRecoverAccess: false,
       clearEnabled: false,
-      statusLabel: '未配置',
+      statusLabel: translate('userAsset.localStorage.unconfigured'),
       statusTone: 'info',
-      guidance: '完成配置后，新的显式收录会优先写入所选目录。',
+      guidance: translate('userAsset.localStorage.unconfiguredGuidance'),
       backupHint: null,
     }
   }
 
-  const directoryLabel = buildDirectoryLabel(status.directoryName)
+  const directoryLabel = buildDirectoryLabel(status.directoryName, t)
   if (status.permission === 'granted') {
     return {
       severity: 'success',
-      summary: `已连接用户目录：${directoryLabel}。新的手动收录资产会优先写入该目录。`,
-      pickLabel: '更换目录',
+      summary: translate('userAsset.localStorage.grantedSummary', { directory: directoryLabel }),
+      pickLabel: translate('userAsset.localStorage.changeDirectory'),
       showRecoverAccess: false,
       clearEnabled: true,
-      statusLabel: '已连接',
+      statusLabel: translate('userAsset.localStorage.grantedStatus'),
       statusTone: 'success',
       guidance: null,
-      backupHint: '该目录已经是真实系统目录，可直接纳入你自己的常规文件备份或同步流程。',
+      backupHint: translate('userAsset.localStorage.grantedBackupHint'),
     }
   }
 
   if (status.permission === 'prompt') {
     return {
       severity: 'warning',
-      summary: `已记录用户目录：${directoryLabel}，但浏览器需要重新授权后才能继续使用。`,
-      pickLabel: '重新选择目录',
+      summary: translate('userAsset.localStorage.promptSummary', { directory: directoryLabel }),
+      pickLabel: translate('userAsset.localStorage.repickDirectory'),
       showRecoverAccess: true,
       clearEnabled: true,
-      statusLabel: '待恢复授权',
+      statusLabel: translate('userAsset.localStorage.promptStatus'),
       statusTone: 'warning',
-      guidance: '先尝试“恢复访问”，如果浏览器仍要求重新授权，再重新选择目录。',
-      backupHint: '恢复访问后，建议再确认该目录中的资产文件是否已纳入你的常规备份流程。',
+      guidance: translate('userAsset.localStorage.promptGuidance'),
+      backupHint: translate('userAsset.localStorage.promptBackupHint'),
     }
   }
 
   if (status.permission === 'denied') {
     return {
       severity: 'warning',
-      summary: `已记录用户目录：${directoryLabel}，但当前权限已失效，请重新选择目录。`,
-      pickLabel: '重新选择目录',
+      summary: translate('userAsset.localStorage.deniedSummary', { directory: directoryLabel }),
+      pickLabel: translate('userAsset.localStorage.repickDirectory'),
       showRecoverAccess: true,
       clearEnabled: true,
-      statusLabel: '权限失效',
+      statusLabel: translate('userAsset.localStorage.deniedStatus'),
       statusTone: 'warning',
-      guidance: '先尝试“恢复访问”，如果浏览器仍拒绝，再重新选择目录。',
-      backupHint: '恢复访问后，建议再确认该目录中的资产文件是否已纳入你的常规备份流程。',
+      guidance: translate('userAsset.localStorage.deniedGuidance'),
+      backupHint: translate('userAsset.localStorage.deniedBackupHint'),
     }
   }
 
   return {
     severity: 'info',
-    summary: `已记录用户目录：${directoryLabel}，当前无法确认权限状态，建议刷新或重新选择目录。`,
-    pickLabel: '重新选择目录',
+    summary: translate('userAsset.localStorage.unknownSummary', { directory: directoryLabel }),
+    pickLabel: translate('userAsset.localStorage.repickDirectory'),
     showRecoverAccess: true,
     clearEnabled: true,
-    statusLabel: '状态未知',
+    statusLabel: translate('userAsset.localStorage.unknownStatus'),
     statusTone: 'info',
-    guidance: '建议先刷新状态；若仍无法确认，再重新选择目录。',
-    backupHint: '确认目录可用后，可把该目录纳入你自己的常规文件备份或同步流程。',
+    guidance: translate('userAsset.localStorage.unknownGuidance'),
+    backupHint: translate('userAsset.localStorage.unknownBackupHint'),
   }
 }
 
-function formatBackupGuideTimestamp(value: Date): string {
-  return value.toLocaleString('zh-CN', { hour12: false })
+function formatBackupGuideTimestamp(value: Date, locale?: AppLanguage): string {
+  return formatDateTimeWithSeconds(value, { locale })
 }
 
 function padDateSegment(value: number): string {
@@ -242,12 +256,14 @@ export function countUserAssetLocalStorageRebuildCandidates(
 
 export function buildUserAssetLocalStorageActionIssueTypeLabel(
   issueType: UserAssetLocalStorageActionIssueType,
+  t?: TFunction,
 ): string {
+  const translate = t ?? DEFAULT_TRANSLATE
   if (issueType === 'directory_inaccessible') {
-    return '目录异常'
+    return translate('userAsset.localStorage.issueTypeDirectory')
   }
 
-  return '缺失副本'
+  return translate('userAsset.localStorage.issueTypeMissing')
 }
 
 function buildUserAssetLocalStorageActionReportSeverity(input: {
@@ -292,82 +308,90 @@ export function buildUserAssetLocalStorageActionReport(input: {
   issueAssets?: UserAssetRecord[]
   projectTitleMap?: UserAssetProjectTitleMap
   completedAt?: Date
+  /** 时间文案的显示语言，由调用方从 useAppLanguage 取。 */
+  locale?: AppLanguage
+  t?: TFunction
 }): UserAssetLocalStorageActionReport {
+  const translate = input.t ?? DEFAULT_TRANSLATE
   const completedAt = input.completedAt ?? new Date()
   const mode = input.mode ?? 'restore'
-  const scopeLabel = input.scope === 'current_page' ? '当前页' : '当前筛选'
+  const scopeLabel = input.scope === 'current_page'
+    ? translate('userAsset.localStorage.scopeCurrentPage')
+    : translate('userAsset.localStorage.scopeFiltered')
   const isPreview = mode === 'preview'
 
   let summary = ''
   if (input.scannedAssetCount <= 0) {
-    summary = `${scopeLabel}内没有可扫描的资产。`
+    summary = translate('userAsset.localStorage.reportNoAssets', { scope: scopeLabel })
   } else if (input.trackedAssetCount <= 0) {
-    summary = `已扫描${scopeLabel} ${input.scannedAssetCount} 项资产，未发现登记为用户目录副本的资产。`
+    summary = translate('userAsset.localStorage.reportNoTracked', { scope: scopeLabel, count: input.scannedAssetCount })
   } else if (input.missingLocalCopyCount <= 0 && input.inaccessibleAssetCount > 0) {
-    summary = `已扫描${scopeLabel} ${input.scannedAssetCount} 项资产，发现 ${input.inaccessibleAssetCount} 项登记为用户目录副本的资产因目录不可访问，暂时无法直接重建。`
+    summary = translate('userAsset.localStorage.reportInaccessible', { scope: scopeLabel, count: input.scannedAssetCount, inaccessible: input.inaccessibleAssetCount })
   } else if (input.missingLocalCopyCount <= 0) {
-    summary = `已扫描${scopeLabel} ${input.scannedAssetCount} 项资产，${input.trackedAssetCount} 项登记为用户目录副本，当前未发现缺失副本。`
+    summary = translate('userAsset.localStorage.reportUpToDate', { scope: scopeLabel, count: input.scannedAssetCount, tracked: input.trackedAssetCount })
   } else if (isPreview) {
-    summary = `已扫描${scopeLabel} ${input.scannedAssetCount} 项资产，${input.trackedAssetCount} 项登记为用户目录副本，其中 ${input.missingLocalCopyCount} 项缺失副本可执行重建。`
+    summary = translate('userAsset.localStorage.reportPreviewMissing', { scope: scopeLabel, count: input.scannedAssetCount, tracked: input.trackedAssetCount, missing: input.missingLocalCopyCount })
   } else {
-    summary = `已扫描${scopeLabel} ${input.scannedAssetCount} 项资产，${input.trackedAssetCount} 项登记为用户目录副本，其中 ${input.missingLocalCopyCount} 项缺失副本已进入重建流程。`
+    summary = translate('userAsset.localStorage.reportRestoredMissing', { scope: scopeLabel, count: input.scannedAssetCount, tracked: input.trackedAssetCount, missing: input.missingLocalCopyCount })
   }
 
   return {
     mode,
     scope: input.scope,
     severity: buildUserAssetLocalStorageActionReportSeverity(input),
-    title: `${scopeLabel}${isPreview ? '扫描结果' : '重建结果'}`,
+    title: isPreview
+      ? translate('userAsset.localStorage.reportPreviewTitle', { scope: scopeLabel })
+      : translate('userAsset.localStorage.reportRestoreTitle', { scope: scopeLabel }),
     summary,
-    completedAtLabel: formatBackupGuideTimestamp(completedAt),
+    completedAtLabel: formatBackupGuideTimestamp(completedAt, input.locale),
     metrics: [
       {
         key: 'scanned-assets',
-        label: '已扫描',
+        label: translate('userAsset.localStorage.metricScanned'),
         value: Math.max(0, input.scannedAssetCount),
       },
       {
         key: 'tracked-assets',
-        label: '目录副本',
+        label: translate('userAsset.localStorage.metricTracked'),
         value: Math.max(0, input.trackedAssetCount),
       },
       {
         key: 'missing-assets',
-        label: '缺失副本',
+        label: translate('userAsset.localStorage.metricMissing'),
         value: Math.max(0, input.missingLocalCopyCount),
       },
       ...(input.restoredCount > 0
         ? [{
             key: 'restored-assets',
-            label: '已恢复',
+            label: translate('userAsset.localStorage.metricRestored'),
             value: Math.max(0, input.restoredCount),
           }]
         : []),
       ...(input.existingCount > 0
         ? [{
             key: 'existing-assets',
-            label: '已存在',
+            label: translate('userAsset.localStorage.metricExisting'),
             value: Math.max(0, input.existingCount),
           }]
         : []),
       ...(input.inaccessibleAssetCount > 0
         ? [{
             key: 'inaccessible-assets',
-            label: '目录异常',
+            label: translate('userAsset.localStorage.metricInaccessible'),
             value: Math.max(0, input.inaccessibleAssetCount),
           }]
         : []),
       ...(input.blockedCount > 0
         ? [{
             key: 'blocked-assets',
-            label: '受阻',
+            label: translate('userAsset.localStorage.metricBlocked'),
             value: Math.max(0, input.blockedCount),
           }]
         : []),
       ...(input.failedCount > 0
         ? [{
             key: 'failed-assets',
-            label: '失败',
+            label: translate('userAsset.localStorage.metricFailed'),
             value: Math.max(0, input.failedCount),
           }]
         : []),
@@ -376,18 +400,21 @@ export function buildUserAssetLocalStorageActionReport(input: {
       input.healthSummary,
       input.issueAssets,
       input.projectTitleMap,
+      input.t,
     ),
   }
 }
 
 function buildUserAssetLocalStorageRebuildActionHint(
   issueType: UserAssetLocalStorageActionIssueType,
+  t?: TFunction,
 ): string {
+  const translate = t ?? DEFAULT_TRANSLATE
   if (issueType === 'directory_inaccessible') {
-    return '先恢复用户目录访问，再重新验证目录副本；若目录已迁移，请重新选择目录并按来源页重新收录。'
+    return translate('userAsset.localStorage.hintDirectoryInaccessible')
   }
 
-  return '从来源页重新收录该资产，补回用户目录中的长期副本。'
+  return translate('userAsset.localStorage.hintMissingLocalCopy')
 }
 
 function buildUserAssetLocalStorageActionIssueItem(
@@ -395,8 +422,9 @@ function buildUserAssetLocalStorageActionIssueItem(
   issueType: UserAssetLocalStorageActionIssueType,
   restorableAsset: UserAssetRecord | null,
   projectTitleMap?: UserAssetProjectTitleMap,
+  t?: TFunction,
 ): UserAssetLocalStorageActionIssueItem {
-  const sourceInfo = restorableAsset ? getUserAssetSourceInfo(restorableAsset, projectTitleMap) : null
+  const sourceInfo = restorableAsset ? getUserAssetSourceInfo(restorableAsset, projectTitleMap, t) : null
 
   return {
     key: `${issueType}:${asset.assetId}:${asset.assetUuid}`,
@@ -407,7 +435,7 @@ function buildUserAssetLocalStorageActionIssueItem(
     sourceModule: asset.sourceModule,
     localStoragePath: asset.localStoragePath,
     externalRelativePath: asset.externalRelativePath,
-    actionHint: buildUserAssetLocalStorageRebuildActionHint(issueType),
+    actionHint: buildUserAssetLocalStorageRebuildActionHint(issueType, t),
     restorableAsset,
     sourceActionPath: sourceInfo?.backPath || null,
     sourceActionLabel: sourceInfo?.backLabel || null,
@@ -418,6 +446,7 @@ function buildUserAssetLocalStorageActionIssueItems(
   summary: UserAssetExternalDirectoryAssetHealthSummary | null | undefined,
   issueAssets: UserAssetRecord[] | null | undefined,
   projectTitleMap?: UserAssetProjectTitleMap,
+  t?: TFunction,
 ): UserAssetLocalStorageActionIssueItem[] {
   if (!summary) {
     return []
@@ -432,6 +461,7 @@ function buildUserAssetLocalStorageActionIssueItems(
         'missing_local_copy',
         issueAssetMap.get(asset.assetId) || null,
         projectTitleMap,
+        t,
       )),
     ...(summary.inaccessibleAssets || []).map((asset) =>
       buildUserAssetLocalStorageActionIssueItem(
@@ -439,6 +469,7 @@ function buildUserAssetLocalStorageActionIssueItems(
         'directory_inaccessible',
         issueAssetMap.get(asset.assetId) || null,
         projectTitleMap,
+        t,
       )),
   ]
 }
@@ -446,10 +477,11 @@ function buildUserAssetLocalStorageActionIssueItems(
 function buildUserAssetLocalStorageRebuildListItem(
   asset: UserAssetExternalDirectoryAssetHealthItem,
   issueType: UserAssetLocalStorageActionIssueType,
+  t?: TFunction,
 ) {
   return {
     issue_type: issueType,
-    action_hint: buildUserAssetLocalStorageRebuildActionHint(issueType),
+    action_hint: buildUserAssetLocalStorageRebuildActionHint(issueType, t),
     asset_id: asset.assetId,
     asset_uuid: asset.assetUuid,
     title: asset.title,
@@ -467,36 +499,41 @@ export function buildUserAssetLocalStorageBackupGuide(options: {
   status: LocalAssetExternalDirectoryStatus | null
   loading: boolean
   generatedAt?: Date
+  /** 导出文档里时间文案的显示语言。 */
+  locale?: AppLanguage
+  t?: TFunction
 }): string {
   const {
     status,
     loading,
     generatedAt = new Date(),
+    locale,
   } = options
+  const translate = options.t ?? DEFAULT_TRANSLATE
 
-  const panelCopy = buildUserAssetLocalStoragePanelCopy(status, loading)
-  const supportLabel = buildUserAssetLocalStorageSupportLabel(status, loading)
-  const recordedDirectoryLabel = buildUserAssetRecordedDirectoryLabel(status, loading)
+  const panelCopy = buildUserAssetLocalStoragePanelCopy(status, loading, options.t)
+  const supportLabel = buildUserAssetLocalStorageSupportLabel(status, loading, options.t)
+  const recordedDirectoryLabel = buildUserAssetRecordedDirectoryLabel(status, loading, options.t)
 
   const lines = [
-    '# 用户资产本地目录备份说明',
+    translate('userAsset.localStorage.guideTitle'),
     '',
-    `生成时间：${formatBackupGuideTimestamp(generatedAt)}`,
-    `当前状态：${panelCopy.statusLabel}`,
-    `浏览器支持：${supportLabel}`,
-    `已记录目录：${recordedDirectoryLabel}`,
+    translate('userAsset.localStorage.guideGeneratedAt', { time: formatBackupGuideTimestamp(generatedAt, locale) }),
+    translate('userAsset.localStorage.guideStatus', { status: panelCopy.statusLabel }),
+    translate('userAsset.localStorage.guideBrowserSupport', { support: supportLabel }),
+    translate('userAsset.localStorage.guideRecordedDirectory', { directory: recordedDirectoryLabel }),
     '',
-    '## 当前说明',
+    translate('userAsset.localStorage.guideCurrentSummaryTitle'),
     panelCopy.summary,
     '',
-    '## 当前优先入口',
-    '- Asset Studio 显式收录',
-    '- Audiobook 手动收录',
+    translate('userAsset.localStorage.guidePriorityEntryTitle'),
+    translate('userAsset.localStorage.guidePriorityEntryAssetStudio'),
+    translate('userAsset.localStorage.guidePriorityEntryAudiobook'),
     '',
-    '## 当前仍保留在浏览器本地存储中的内容',
-    '- 播放器试听缓存等自动本地缓存仍保留在浏览器管理的本地存储中',
+    translate('userAsset.localStorage.guideBrowserStorageTitle'),
+    translate('userAsset.localStorage.guideBrowserStorageLine'),
     '',
-    '## 恢复与备份建议',
+    translate('userAsset.localStorage.guideBackupAdviceTitle'),
   ]
 
   if (panelCopy.guidance) {
@@ -506,15 +543,15 @@ export function buildUserAssetLocalStorageBackupGuide(options: {
     lines.push(`- ${panelCopy.backupHint}`)
   }
   if (!panelCopy.guidance && !panelCopy.backupHint) {
-    lines.push('- 当前没有额外恢复或备份提示，可继续按既有目录流程使用。')
+    lines.push(translate('userAsset.localStorage.guideNoBackupAdvice'))
   }
 
   lines.push(
     '',
-    '## 使用边界',
-    '- 用户目录中的文件属于真实系统文件，可纳入你自己的备份或同步工具。',
-    '- 浏览器站点存储中的自动缓存仍可能受到浏览器清理策略影响。',
-    '- 如果用户目录权限失效，需要在用户中心重新恢复访问或重新选择目录。',
+    translate('userAsset.localStorage.guideBoundaryTitle'),
+    translate('userAsset.localStorage.guideBoundarySystemFiles'),
+    translate('userAsset.localStorage.guideBoundaryBrowserStorage'),
+    translate('userAsset.localStorage.guideBoundaryPermission'),
   )
 
   return lines.join('\n')
@@ -525,6 +562,7 @@ export function buildUserAssetLocalStorageInventoryExport(options: {
   loading: boolean
   inventory: LocalAssetVaultInventoryRecord[]
   generatedAt?: Date
+  t?: TFunction
 }): string {
   const {
     status,
@@ -533,9 +571,9 @@ export function buildUserAssetLocalStorageInventoryExport(options: {
     generatedAt = new Date(),
   } = options
 
-  const panelCopy = buildUserAssetLocalStoragePanelCopy(status, loading)
-  const supportLabel = buildUserAssetLocalStorageSupportLabel(status, loading)
-  const recordedDirectoryLabel = buildUserAssetRecordedDirectoryLabel(status, loading)
+  const panelCopy = buildUserAssetLocalStoragePanelCopy(status, loading, options.t)
+  const supportLabel = buildUserAssetLocalStorageSupportLabel(status, loading, options.t)
+  const recordedDirectoryLabel = buildUserAssetRecordedDirectoryLabel(status, loading, options.t)
   const storageDriverSummary = inventory.reduce<Record<string, number>>((acc, item) => {
     const key = item.storageDriver || 'unknown'
     acc[key] = (acc[key] || 0) + 1
@@ -588,6 +626,7 @@ export function buildUserAssetLocalStorageRebuildListExport(options: {
   loading: boolean
   healthSummary: UserAssetExternalDirectoryAssetHealthSummary | null | undefined
   generatedAt?: Date
+  t?: TFunction
 }): string {
   const {
     status,
@@ -596,9 +635,9 @@ export function buildUserAssetLocalStorageRebuildListExport(options: {
     generatedAt = new Date(),
   } = options
 
-  const panelCopy = buildUserAssetLocalStoragePanelCopy(status, loading)
-  const supportLabel = buildUserAssetLocalStorageSupportLabel(status, loading)
-  const recordedDirectoryLabel = buildUserAssetRecordedDirectoryLabel(status, loading)
+  const panelCopy = buildUserAssetLocalStoragePanelCopy(status, loading, options.t)
+  const supportLabel = buildUserAssetLocalStorageSupportLabel(status, loading, options.t)
+  const recordedDirectoryLabel = buildUserAssetRecordedDirectoryLabel(status, loading, options.t)
   const rebuildCandidateCount = countUserAssetLocalStorageRebuildCandidates(healthSummary)
   const inaccessibleAssets = healthSummary?.inaccessibleAssets ?? []
   const missingLocalCopyAssets = healthSummary?.missingLocalCopyAssets ?? []
@@ -623,8 +662,8 @@ export function buildUserAssetLocalStorageRebuildListExport(options: {
       rebuild_candidate_count: rebuildCandidateCount,
     },
     items: [
-      ...inaccessibleAssets.map((asset) => buildUserAssetLocalStorageRebuildListItem(asset, 'directory_inaccessible')),
-      ...missingLocalCopyAssets.map((asset) => buildUserAssetLocalStorageRebuildListItem(asset, 'missing_local_copy')),
+      ...inaccessibleAssets.map((asset) => buildUserAssetLocalStorageRebuildListItem(asset, 'directory_inaccessible', options.t)),
+      ...missingLocalCopyAssets.map((asset) => buildUserAssetLocalStorageRebuildListItem(asset, 'missing_local_copy', options.t)),
     ],
   }, null, 2)
 }

@@ -1,6 +1,9 @@
-import { describe, expect, it, vi } from 'vitest'
+import { beforeAll, describe, expect, it, vi } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
+import type { ReactElement } from 'react'
+import type { i18n as I18nInstance } from 'i18next'
 
+import { I18nProvider, bootstrapI18n } from '@/i18n'
 import type { UserAssetRecord } from '@/services/api'
 
 import UserAssetLocalStoragePanel from '../user-assets/UserAssetLocalStoragePanel'
@@ -20,6 +23,20 @@ function extractVisibleText(markup: string): string {
     .replace(/&nbsp;/g, ' ')
     .replace(/\s+/g, ' ')
     .trim()
+}
+
+/**
+ * 面板会读当前界面语言（导出的备份说明里时间要跟着语言走），因此渲染必须
+ * 包一层 I18nProvider，与 main.tsx 的层级一致。
+ */
+let i18nInstance: I18nInstance
+
+beforeAll(async () => {
+  i18nInstance = await bootstrapI18n('zh-CN')
+})
+
+function renderWithI18n(node: ReactElement): string {
+  return renderToStaticMarkup(<I18nProvider instance={i18nInstance}>{node}</I18nProvider>)
 }
 
 function createUserAssetRecord(overrides: Partial<UserAssetRecord> = {}): UserAssetRecord {
@@ -42,7 +59,7 @@ function createUserAssetRecord(overrides: Partial<UserAssetRecord> = {}): UserAs
 
 describe('UserAssetLocalStoragePanel', () => {
   it('在未配置目录时展示选择入口与说明', () => {
-    const text = extractVisibleText(renderToStaticMarkup(
+    const text = extractVisibleText(renderWithI18n(
       <UserAssetLocalStoragePanel
         status={{
           supported: true,
@@ -84,7 +101,7 @@ describe('UserAssetLocalStoragePanel', () => {
   })
 
   it('在目录可用时展示已连接状态、导出入口与备份建议', () => {
-    const text = extractVisibleText(renderToStaticMarkup(
+    const text = extractVisibleText(renderWithI18n(
       <UserAssetLocalStoragePanel
         status={{
           supported: true,
@@ -126,7 +143,7 @@ describe('UserAssetLocalStoragePanel', () => {
   })
 
   it('在权限失效时展示恢复访问入口', () => {
-    const text = extractVisibleText(renderToStaticMarkup(
+    const text = extractVisibleText(renderWithI18n(
       <UserAssetLocalStoragePanel
         status={{
           supported: true,
@@ -195,7 +212,7 @@ describe('UserAssetLocalStoragePanel', () => {
       ],
     }
 
-    const text = extractVisibleText(renderToStaticMarkup(
+    const text = extractVisibleText(renderWithI18n(
       <UserAssetLocalStoragePanel
         status={{
           supported: true,
@@ -217,6 +234,7 @@ describe('UserAssetLocalStoragePanel', () => {
           blockedCount: 0,
           failedCount: 0,
           healthSummary,
+          t: i18nInstance.t.bind(i18nInstance),
           issueAssets: [
             createUserAssetRecord({
               id: 11,
@@ -350,6 +368,7 @@ describe('UserAssetLocalStoragePanel', () => {
       blockedCount: 0,
       failedCount: 0,
       healthSummary,
+      t: i18nInstance.t.bind(i18nInstance),
       issueAssets: [
         createUserAssetRecord({
           id: 31,
@@ -445,6 +464,7 @@ describe('UserAssetLocalStoragePanel', () => {
       blockedCount: 0,
       failedCount: 0,
       completedAt: new Date('2026-04-25T00:30:00Z'),
+      t: i18nInstance.t.bind(i18nInstance),
     })
 
     expect(report).toMatchObject({
@@ -464,6 +484,7 @@ describe('UserAssetLocalStoragePanel', () => {
       },
       loading: false,
       generatedAt: new Date('2026-04-24T12:34:56Z'),
+      t: i18nInstance.t.bind(i18nInstance),
     })
 
     expect(guide).toContain('# 用户资产本地目录备份说明')
@@ -509,6 +530,7 @@ describe('UserAssetLocalStoragePanel', () => {
         },
       ],
       generatedAt: new Date('2026-04-24T12:34:56Z'),
+      t: i18nInstance.t.bind(i18nInstance),
     }))
 
     expect(inventory.directory_status.status_label).toBe('已连接')
@@ -565,6 +587,7 @@ describe('UserAssetLocalStoragePanel', () => {
         ],
       },
       generatedAt: new Date('2026-04-24T12:34:56Z'),
+      t: i18nInstance.t.bind(i18nInstance),
     }))
 
     expect(rebuildList.directory_status.status_label).toBe('待恢复授权')

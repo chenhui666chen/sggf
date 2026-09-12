@@ -13,7 +13,7 @@ const utilsSource = readFileSync(
 
 describe('Script review report source guards', () => {
   it('keeps unresolved sound effect asset warnings visible in the report', () => {
-    expect(metricSectionsSource).toContain('未解析音效')
+    expect(metricSectionsSource).toContain("t('audiobook.scriptReviewMetricSections.unresolvedEffectsLabel')")
     expect(metricSectionsSource).toContain('unresolved_effect_count')
     expect(metricSectionsSource).toContain('placeholder_effect_count')
     expect(metricSectionsSource).toContain('missing_effect_file_count')

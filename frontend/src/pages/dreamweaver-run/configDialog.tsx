@@ -29,6 +29,7 @@ import {
   TextField,
   Typography,
 } from '@mui/material'
+import { useTranslation } from 'react-i18next'
 
 type DreamweaverConfigDialogTitleProps = {
   title: string
@@ -41,6 +42,7 @@ export function DreamweaverConfigDialogTitle({
   subtitle,
   onClose,
 }: DreamweaverConfigDialogTitleProps) {
+  const { t } = useTranslation()
   return (
     <DialogTitle sx={{ pb: 1 }}>
       <Stack direction="row" alignItems="center" justifyContent="space-between" spacing={1}>
@@ -52,7 +54,7 @@ export function DreamweaverConfigDialogTitle({
             {subtitle}
           </Typography>
         </Box>
-        <IconButton onClick={onClose} size="small" aria-label="关闭">
+        <IconButton onClick={onClose} size="small" aria-label={t('common.close')}>
           <CloseIcon fontSize="small" />
         </IconButton>
       </Stack>
@@ -71,21 +73,23 @@ export function DreamweaverConfigDialogProjectSection({
   projectTitle,
   action,
 }: DreamweaverConfigDialogProjectSectionProps) {
+  const { t } = useTranslation()
   if (lockedProjectId) {
     return (
       <Box
         sx={{
           p: 1.5,
           borderRadius: 2,
-          border: '1px solid rgba(0,0,0,0.08)',
-          bgcolor: 'rgba(0,0,0,0.04)',
+          border: '1px solid',
+          borderColor: 'divider',
+          bgcolor: 'grey.100',
         }}
       >
         <Typography variant="caption" color="text.secondary" display="block">
-          当前项目
+          {t('dreamweaverRun.configCurrentProject')}
         </Typography>
         <Typography variant="subtitle1" sx={{ fontWeight: 800 }}>
-          {projectTitle || `项目 #${lockedProjectId}`}
+          {projectTitle || t('dreamweaverRun.configProjectId', { id: lockedProjectId })}
         </Typography>
       </Box>
     )
@@ -93,7 +97,7 @@ export function DreamweaverConfigDialogProjectSection({
 
   return (
     <Alert severity="info" action={action ?? undefined}>
-      请先在项目列表选择一个项目，再进入生成配置。
+      {t('dreamweaverRun.configSelectProjectFirst')}
     </Alert>
   )
 }
@@ -105,9 +109,10 @@ type DreamweaverConfigDialogProjectAlertActionProps = {
 export function DreamweaverConfigDialogProjectAlertAction({
   onClick,
 }: DreamweaverConfigDialogProjectAlertActionProps) {
+  const { t } = useTranslation()
   return (
     <Button size="small" variant="outlined" onClick={onClick}>
-      去项目列表
+      {t('dreamweaverRun.configGotoProjectList')}
     </Button>
   )
 }
@@ -147,8 +152,9 @@ export function DreamweaverConfigDialogChapterSelectionCard({
   helperText,
   maxHeight,
 }: DreamweaverConfigDialogChapterSelectionCardProps) {
+  const { t } = useTranslation()
   return (
-    <DreamweaverConfigDialogCard title="章节选择" footer={<Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>{helperText}</Typography>}>
+    <DreamweaverConfigDialogCard title={t('dreamweaverRun.configChapterSection')} footer={<Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>{helperText}</Typography>}>
       <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 1 }}>
         <Box />
         <Stack direction="row" spacing={1} alignItems="center" useFlexGap flexWrap="wrap">
@@ -160,7 +166,8 @@ export function DreamweaverConfigDialogChapterSelectionCard({
         sx={{
           maxHeight,
           overflow: 'auto',
-          border: '1px solid rgba(0,0,0,0.08)',
+          border: '1px solid',
+          borderColor: 'divider',
           borderRadius: 2,
         }}
       >
@@ -187,13 +194,14 @@ export function DreamweaverConfigDialogChapterToolbar({
   refreshDisabled,
   refreshStartIcon,
 }: DreamweaverConfigDialogChapterToolbarProps) {
+  const { t } = useTranslation()
   return (
     <>
       <Button size="small" onClick={onToggleAll} disabled={toggleAllDisabled}>
         {toggleAllLabel}
       </Button>
       <Button size="small" startIcon={refreshStartIcon ?? undefined} onClick={onRefresh} disabled={refreshDisabled}>
-        刷新
+        {t('dreamweaverRun.libraryRefresh')}
       </Button>
     </>
   )
@@ -264,17 +272,18 @@ export function DreamweaverConfigDialogChapterListItems({
   disabled,
   onToggle,
 }: DreamweaverConfigDialogChapterListItemsProps) {
+  const { t } = useTranslation()
   return (
     <>
       {chapters.map((chapter) => {
         const raw = String(chapter.content || '').replace(/\s+/g, ' ').trim()
-        const snippet = raw ? (raw.length > 64 ? raw.slice(0, 64) + '…' : raw) : '（无正文）'
+        const snippet = raw ? (raw.length > 64 ? raw.slice(0, 64) + '…' : raw) : t('dreamweaverRun.configSnippetEmpty')
 
         return (
           <DreamweaverConfigDialogChapterItem
             key={chapter.id}
             chapterId={chapter.id}
-            title={`${chapter.chapter_number}. ${chapter.title || '未命名章节'}`}
+            title={`${chapter.chapter_number}. ${chapter.title || t('dreamweaverRun.configUntitledChapter')}`}
             snippet={snippet}
             checked={selectedChapterIds.includes(chapter.id)}
             disabled={disabled}
@@ -295,9 +304,10 @@ export function DreamweaverConfigDialogStrategyCard({
   content,
   helperText,
 }: DreamweaverConfigDialogStrategyCardProps) {
+  const { t } = useTranslation()
   return (
     <DreamweaverConfigDialogCard
-      title="生成策略"
+      title={t('dreamweaverRun.configStrategySection')}
       footer={
         <Typography variant="caption" color="text.secondary" display="block" sx={{ mt: 1 }}>
           {helperText}
@@ -398,10 +408,11 @@ export function DreamweaverConfigDialogExperimentField({
   onChange,
   disabled = false,
 }: DreamweaverConfigDialogExperimentFieldProps) {
+  const { t } = useTranslation()
   return (
     <Stack spacing={0.5}>
       <Typography variant="body2" sx={{ fontWeight: 700 }}>
-        实验标签（可选）
+        {t('dreamweaverRun.configExperimentLabel')}
       </Typography>
       <TextField
         size="small"
@@ -409,11 +420,11 @@ export function DreamweaverConfigDialogExperimentField({
         value={value}
         onChange={(e) => onChange(e.target.value)}
         disabled={disabled}
-        placeholder="例如 A / B / control / treatment"
+        placeholder={t('dreamweaverRun.configExperimentPlaceholder')}
         inputProps={{ maxLength: 32 }}
       />
       <Typography variant="caption" color="text.secondary">
-        仅用于标记并对比不同策略效果，不会自动改变生成逻辑。
+        {t('dreamweaverRun.configExperimentHint')}
       </Typography>
     </Stack>
   )
@@ -436,13 +447,14 @@ export function DreamweaverConfigDialogSelectField({
   options,
   disabled = false,
 }: DreamweaverConfigDialogSelectFieldProps) {
+  const { t } = useTranslation()
   return (
     <FormControl fullWidth size="small" disabled={disabled}>
       <InputLabel id={labelId}>{label}</InputLabel>
       <Select labelId={labelId} value={value} label={label} onChange={(e) => onChange(String(e.target.value))}>
         {options.map((option) => (
           <MenuItem key={option.value} value={option.value}>
-            {option.label}
+            {t(option.label)}
           </MenuItem>
         ))}
       </Select>
@@ -461,9 +473,10 @@ export function DreamweaverConfigDialogVisualSettingsCard({
   fields,
   helperText,
 }: DreamweaverConfigDialogVisualSettingsCardProps) {
+  const { t } = useTranslation()
   return (
     <DreamweaverConfigDialogCard
-      title="画面设置"
+      title={t('dreamweaverRun.configVisualSection')}
       footer={
         <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
           {helperText}
@@ -501,12 +514,13 @@ export function DreamweaverConfigDialogVisualFieldGrid({
   imageResolutionOptions,
   disabled = false,
 }: DreamweaverConfigDialogVisualFieldGridProps) {
+  const { t } = useTranslation()
   return (
     <Grid container spacing={1.5}>
       <Grid item xs={12}>
         <DreamweaverConfigDialogSelectField
           labelId="style-preset-label"
-          label="风格预设"
+          label={t('dreamweaverRun.regenStylePresetLabel')}
           value={stylePresetValue}
           onChange={onStylePresetChange}
           disabled={disabled}
@@ -516,7 +530,7 @@ export function DreamweaverConfigDialogVisualFieldGrid({
       <Grid item xs={12} sm={6}>
         <DreamweaverConfigDialogSelectField
           labelId="image-ratio-label"
-          label="画面比例"
+          label={t('dreamweaverRun.regenImageRatioLabel')}
           value={imageRatioValue}
           onChange={onImageRatioChange}
           disabled={disabled}
@@ -526,7 +540,7 @@ export function DreamweaverConfigDialogVisualFieldGrid({
       <Grid item xs={12} sm={6}>
         <DreamweaverConfigDialogSelectField
           labelId="image-resolution-label"
-          label="分辨率"
+          label={t('dreamweaverRun.configImageResolution')}
           value={imageResolutionValue}
           onChange={onImageResolutionChange}
           disabled={disabled}
@@ -586,12 +600,13 @@ export function DreamweaverConfigDialogModelFieldGrid({
   safetyFailPolicyOptions,
   disabled = false,
 }: DreamweaverConfigDialogModelFieldGridProps) {
+  const { t } = useTranslation()
   return (
     <Grid container spacing={1.5}>
       <Grid item xs={12} sm={6}>
         <DreamweaverConfigDialogSelectField
           labelId="image-model-label"
-          label="图像生成模型"
+          label={t('dreamweaverRun.configImageGenModelLabel')}
           value={imageModelValue}
           onChange={onImageModelChange}
           disabled={disabled}
@@ -601,28 +616,34 @@ export function DreamweaverConfigDialogModelFieldGrid({
       <Grid item xs={12} sm={6}>
         <DreamweaverConfigDialogSelectField
           labelId="video-model-label"
-          label="视频生成模型"
+          label={t('dreamweaverRun.configVideoGenModelLabel')}
           value={videoModelValue}
           onChange={onVideoModelChange}
           disabled={disabled}
           options={videoModelOptions}
         />
       </Grid>
+      {/* 合规修订：第三方生成引擎服务方提示（生成内容/提示词/素材由所选服务商处理） */}
+      <Grid item xs={12}>
+        <Typography variant="caption" color="text.secondary" display="block" sx={{ lineHeight: 1.8 }}>
+          {t('dreamweaverRun.configModelProviderHint')}
+        </Typography>
+      </Grid>
       <Grid item xs={12}>
         <DreamweaverConfigDialogStrategyToggleField
-          title="视频编辑功能"
+          title={t('dreamweaverRun.configVideoEditTitle')}
           checked={enableVideoEdit}
           onChange={onEnableVideoEditChange}
-          enabledLabel="已启用"
-          disabledLabel="未启用"
-          description="启用后可使用视频编辑模型进行分镜精剪、风格迁移和多片段融合。"
+          enabledLabel={t('dreamweaverRun.configSwitchEnabled')}
+          disabledLabel={t('dreamweaverRun.configSwitchDisabled')}
+          description={t('dreamweaverRun.configVideoEditDesc')}
         />
       </Grid>
       {enableVideoEdit && (
         <Grid item xs={12} sm={6}>
           <DreamweaverConfigDialogSelectField
             labelId="video-edit-model-label"
-            label="视频编辑模型"
+            label={t('dreamweaverRun.configVideoEditModel')}
             value={videoEditModelValue}
             onChange={onVideoEditModelChange}
             disabled={disabled}
@@ -632,29 +653,29 @@ export function DreamweaverConfigDialogModelFieldGrid({
       )}
       <Grid item xs={12}>
         <DreamweaverConfigDialogStrategyToggleField
-          title="视觉理解审查"
+          title={t('dreamweaverRun.configVisionReviewTitle')}
           checked={enableVisionReview}
           onChange={onEnableVisionReviewChange}
-          enabledLabel="已启用"
-          disabledLabel="未启用"
-          description="启用后在生成过程中自动使用视觉模型评估图像/视频质量，并给出改进建议。"
+          enabledLabel={t('dreamweaverRun.configSwitchEnabled')}
+          disabledLabel={t('dreamweaverRun.configSwitchDisabled')}
+          description={t('dreamweaverRun.configVisionReviewDesc')}
         />
       </Grid>
       <Grid item xs={12}>
         <DreamweaverConfigDialogStrategyToggleField
-          title="成片安全审核"
+          title={t('dreamweaverRun.configSafetyAuditTitle')}
           checked={enableSafetyAudit}
           onChange={onEnableSafetyAuditChange}
-          enabledLabel="已启用"
-          disabledLabel="未启用"
-          description="在 REVIEW 阶段对合成视频做独立视觉安全审核，用于识别暴力、色情、仇恨等高风险内容；它与 AutoQC 画质返工分开决策。"
+          enabledLabel={t('dreamweaverRun.configSwitchEnabled')}
+          disabledLabel={t('dreamweaverRun.configSwitchDisabled')}
+          description={t('dreamweaverRun.configSafetyAuditDesc')}
         />
       </Grid>
       {(enableVisionReview || enableSafetyAudit) && (
         <Grid item xs={12} sm={6}>
           <DreamweaverConfigDialogSelectField
             labelId="vision-model-label"
-            label={enableVisionReview && enableSafetyAudit ? '视觉审核模型' : enableSafetyAudit ? '安全审核模型' : '视觉理解模型'}
+            label={enableVisionReview && enableSafetyAudit ? t('dreamweaverRun.configVisionModeVision') : enableSafetyAudit ? t('dreamweaverRun.configVisionModeSafety') : t('dreamweaverRun.configVisionModel')}
             value={visionModelValue}
             onChange={onVisionModelChange}
             disabled={disabled}
@@ -666,7 +687,7 @@ export function DreamweaverConfigDialogModelFieldGrid({
         <Grid item xs={12} sm={6}>
           <DreamweaverConfigDialogSelectField
             labelId="safety-fail-policy-label"
-            label="安全审核处置"
+            label={t('dreamweaverRun.configSafetyFailPolicy')}
             value={safetyFailPolicyValue}
             onChange={onSafetyFailPolicyChange}
             disabled={disabled}
@@ -733,11 +754,12 @@ export function DreamweaverConfigDialogActions({
   onRun,
   runDisabled,
 }: DreamweaverConfigDialogActionsProps) {
+  const { t } = useTranslation()
   return (
     <DialogActions>
-      <Button onClick={onClose}>关闭</Button>
+      <Button onClick={onClose}>{t('common.close')}</Button>
       <Button variant="contained" onClick={onRun} disabled={runDisabled}>
-        开始生成
+        {t('dreamweaverRun.configStartGenerating')}
       </Button>
     </DialogActions>
   )
@@ -987,12 +1009,13 @@ export function DreamweaverRunConfigDialog({
   onRun,
   runDisabled,
 }: DreamweaverRunConfigDialogProps) {
+  const { t } = useTranslation()
   return (
     <DreamweaverConfigDialog
       open={open}
       onClose={onClose}
       fullScreen={fullScreen}
-      title="生成配置"
+      title={t('dreamweaverRun.configTitle')}
       subtitle={subtitle}
       errorNotice={errorNotice}
       lockedProjectId={lockedProjectId}
@@ -1000,7 +1023,7 @@ export function DreamweaverRunConfigDialog({
       onOpenProjectList={onOpenProjectList}
       chapterToolbar={
         <DreamweaverConfigDialogChapterToolbar
-          toggleAllLabel={selectedChapterIds.length === chapters.length ? '清空' : '全选'}
+          toggleAllLabel={t(selectedChapterIds.length === chapters.length ? 'dreamweaverRun.configClearAll' : 'dreamweaverRun.configSelectAll')}
           onToggleAll={onToggleAll}
           toggleAllDisabled={loadingChapters || !chapters.length || running}
           refreshStartIcon={<RefreshIcon fontSize="small" />}
@@ -1018,7 +1041,7 @@ export function DreamweaverRunConfigDialog({
           />
         </DreamweaverConfigDialogChapterList>
       }
-      chapterHelperText="至少选择 1 个章节；默认全选可直接开始生成。"
+      chapterHelperText={t('dreamweaverRun.configChapterHelper')}
       chapterMaxHeight={fullScreen ? '55vh' : 360}
       strategyContent={
         <DreamweaverConfigDialogStrategyFields
@@ -1028,7 +1051,7 @@ export function DreamweaverRunConfigDialog({
           disabled={running}
         />
       }
-      strategyHelperText="性能提示：关键帧镜头级并发由后端环境变量 `DREAMWEAVER_KEYFRAMES_PARALLELISM` 控制，建议先从 `2` 开始，避免把上游 QPS 打满。"
+      strategyHelperText={t('dreamweaverRun.configStrategyHelper')}
       visualNotices={
         <>
           {lockedGenerationConfigError && (
@@ -1038,8 +1061,8 @@ export function DreamweaverRunConfigDialog({
           )}
           {generationConfigLocked && (
             <Alert severity="info" sx={{ mb: 1 }}>
-              当前项目的生成配置已锁定，包含风格、画幅以及模型选择；生成过程中不允许切换，如需变更请新建项目或先清理该项目的 DreamWeaver runs。
-              {lockedGenerationConfigSourceRunId ? `（锁定来源：${lockedGenerationConfigSourceRunId}）` : ''}
+              {t('dreamweaverRun.configLockedLongNotice')}
+              {lockedGenerationConfigSourceRunId ? t('dreamweaverRun.configLockedSource', { runId: lockedGenerationConfigSourceRunId }) : ''}
             </Alert>
           )}
         </>
@@ -1085,7 +1108,7 @@ export function DreamweaverRunConfigDialog({
           />
         </>
       }
-      visualHelperText="比例决定横/竖屏；分辨率影响素材库、关键帧与合成视频输出尺寸。视觉质检负责画质返工，安全审核负责合规拦截，两者现在已拆分。"
+      visualHelperText={t('dreamweaverRun.configVisualHelper')}
       onRun={onRun}
       runDisabled={runDisabled}
     />

@@ -1,8 +1,15 @@
 import { useMemo } from 'react'
+import { useTranslation } from 'react-i18next'
 import { Box, Step, StepLabel, Stepper, Typography, Paper, Chip, Stack } from '@mui/material'
 import { stageToPreviewStep } from '@/constants/dreamweaver'
 
-const PREVIEW_STEPS = ['剧本', '分镜', '素材', '镜头', '合成'] as const
+const PREVIEW_STEP_KEYS = [
+  'dreamweaverRun.previewStepScript',
+  'dreamweaverRun.previewStepStoryboard',
+  'dreamweaverRun.previewStepAssets',
+  'dreamweaverRun.previewStepShots',
+  'dreamweaverRun.previewStepMerged',
+] as const
 
 interface PreviewStepperProps {
   currentStep: number
@@ -19,6 +26,7 @@ export function PreviewStepper({
   onStepClick,
   interactive = false,
 }: PreviewStepperProps) {
+  const { t } = useTranslation()
   const stepFromStage = useMemo(() => stageToPreviewStep(stage), [stage])
   const activeStep = currentStep >= 0 ? currentStep : stepFromStage
 
@@ -32,7 +40,7 @@ export function PreviewStepper({
     <Paper variant="outlined" sx={{ p: 2, mb: 2 }}>
       <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 1.5 }}>
         <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
-          生成进度
+          {t('dreamweaverRun.previewProgressTitle')}
         </Typography>
         {stage && (
           <Chip
@@ -44,11 +52,11 @@ export function PreviewStepper({
         )}
       </Stack>
       <Stepper activeStep={activeStep} alternativeLabel>
-        {PREVIEW_STEPS.map((label, index) => {
+        {PREVIEW_STEP_KEYS.map((labelKey, index) => {
           const status = getStepStatus(index)
           return (
             <Step
-              key={label}
+              key={labelKey}
               completed={status === 'completed'}
               active={status === 'active'}
               onClick={() => interactive && onStepClick?.(index)}
@@ -76,7 +84,7 @@ export function PreviewStepper({
                     color: status === 'active' ? 'primary.main' : 'text.secondary',
                   }}
                 >
-                  {label}
+                  {t(labelKey)}
                 </Typography>
               </StepLabel>
             </Step>
@@ -103,7 +111,7 @@ export function PreviewStepper({
             />
           </Box>
           <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: 'block', textAlign: 'center' }}>
-            {Math.round(progress)}% 完成
+            {t('dreamweaverRun.previewPercentComplete', { percent: Math.round(progress) })}
           </Typography>
         </Box>
       )}

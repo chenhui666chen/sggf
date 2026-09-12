@@ -16,7 +16,7 @@ export type UserCenterAssetConnectedOverviewViewModel = {
 
 export type BuildUserCenterAssetConnectedOverviewViewModelOptions =
   BuildUserCenterAssetConnectedOverviewSourceOptions
-  & Pick<BuildUserCenterAssetConnectedOverviewSectionPropsFromInputOptions, 'userAssetCount'>
+  & Pick<BuildUserCenterAssetConnectedOverviewSectionPropsFromInputOptions, 'userAssetCount' | 't'>
   & {
     formatCurrencyLabel: (value: number) => string
   }
@@ -32,6 +32,7 @@ export function buildUserCenterAssetConnectedOverviewViewModel(
       connectedOverviewSource: source,
       userAssetCount: options.userAssetCount,
       totalAudiobookCostLabel: options.formatCurrencyLabel(source.audiobookTotalCost),
+      t: options.t,
     }),
   }
 }

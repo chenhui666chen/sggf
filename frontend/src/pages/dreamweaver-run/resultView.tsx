@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import { useTranslation } from 'react-i18next'
 
 import { Alert, Box, Button, Chip, Stack, Typography } from '@mui/material'
 
@@ -54,18 +55,19 @@ export function DreamweaverResultVideoSummarySection({
   fallbackCount,
   clipCount,
 }: DreamweaverResultVideoSummarySectionProps) {
+  const { t } = useTranslation()
   return (
     <>
       <Typography variant="subtitle2" sx={{ fontWeight: 600, mt: 1, mb: 0.5 }}>
-        视频产物
+        {t('dreamweaverRun.videoProducts')}
       </Typography>
       <Typography variant="body2" color="text.secondary">
-        {mergedVideo ? `合成视频：${mergedVideo}` : '无合成视频记录'}
+        {mergedVideo ? t('dreamweaverRun.mergedVideoWithPath', { path: mergedVideo }) : t('dreamweaverRun.noMergedVideoRecord')}
       </Typography>
       {viaSummary && (
         <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-          生成方式：{viaSummary}
-          {fallbackCount > 0 ? `（降级: ${fallbackCount}/${clipCount}）` : ''}
+          {t('dreamweaverRun.generatedVia', { via: viaSummary })}
+          {fallbackCount > 0 ? t('dreamweaverRun.fallbackRatio', { count: fallbackCount, total: clipCount }) : ''}
         </Typography>
       )}
     </>
@@ -73,9 +75,10 @@ export function DreamweaverResultVideoSummarySection({
 }
 
 export function DreamweaverResultVideoFallbackAlert() {
+  const { t } = useTranslation()
   return (
     <Alert severity="warning" sx={{ mt: 1 }}>
-      检测到镜头视频生成失败并降级为幻灯片合成，建议检查 WAN_I2V_* 配置/网络，并适当增大 WAN_I2V_TIMEOUT。
+      {t('dreamweaverRun.videoFallbackAlert')}
     </Alert>
   )
 }
@@ -137,12 +140,13 @@ export function DreamweaverResultStoryboardStageView({
   storyboardSummary,
   snapshotSection,
 }: DreamweaverResultStoryboardStageViewProps) {
+  const { t } = useTranslation()
   return (
     <>
       <DreamweaverResultTextStageSection
-        title="分镜（storyboard）"
+        title={t('dreamweaverRun.storyboardTitle')}
         text={storyboardSummary}
-        emptyText="暂无"
+        emptyText={t('dreamweaverRun.none')}
         marginBottom={0}
       />
       {snapshotSection ?? null}
@@ -163,14 +167,15 @@ export function DreamweaverResultSummaryChips({
   midframeCount,
   videoClipCount,
 }: DreamweaverResultSummaryChipsProps) {
+  const { t } = useTranslation()
   return (
     <DreamweaverResultSummaryChipsRow
       chips={
         <>
-          <Chip label={`章节: ${chapterCount}`} size="small" />
-          {keyframeCount > 0 && <Chip label={`关键帧: ${keyframeCount}`} size="small" />}
-          {midframeCount > 0 && <Chip label={`中间帧: ${midframeCount}`} size="small" />}
-          {typeof videoClipCount === 'number' && <Chip label={`片段: ${videoClipCount}`} size="small" color="primary" />}
+          <Chip label={t('dreamweaverRun.chapterChip', { count: chapterCount })} size="small" />
+          {keyframeCount > 0 && <Chip label={t('dreamweaverRun.keyframeChip', { count: keyframeCount })} size="small" />}
+          {midframeCount > 0 && <Chip label={t('dreamweaverRun.midframeChip', { count: midframeCount })} size="small" />}
+          {typeof videoClipCount === 'number' && <Chip label={t('dreamweaverRun.clipChip', { count: videoClipCount })} size="small" color="primary" />}
         </>
       }
     />
@@ -194,14 +199,15 @@ export function DreamweaverResultSyncActionsBar({
   loadedChip,
   eventCursor,
 }: DreamweaverResultSyncActionsBarProps) {
+  const { t } = useTranslation()
   return (
     <Stack direction="row" spacing={1} flexWrap="wrap" alignItems="center" sx={{ mb: 1 }}>
       {refreshButton ?? null}
       <Button size="small" variant="outlined" onClick={onSync ?? undefined} disabled={syncDisabled}>
-        {syncInProgress ? '同步中…' : '同步事件'}
+        {syncInProgress ? t('dreamweaverRun.syncing') : t('dreamweaverRun.syncEvents')}
       </Button>
       {loadedChip ?? null}
-      {eventCursor > 0 && <Chip size="small" label={`事件#${eventCursor}`} variant="outlined" />}
+      {eventCursor > 0 && <Chip size="small" label={t('dreamweaverRun.eventCursorChip', { cursor: eventCursor })} variant="outlined" />}
     </Stack>
   )
 }

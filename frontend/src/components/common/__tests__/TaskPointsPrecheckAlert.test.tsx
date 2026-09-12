@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 
 import TaskPointsPrecheckAlert from '../TaskPointsPrecheckAlert'
 import { extractTaskPointsPrecheckErrorDetail } from '@/services/api'
+import { I18nProvider } from '@/i18n'
 
 function buildAxiosLikeError(detail: Record<string, unknown>) {
   return {
@@ -46,8 +47,11 @@ describe('TaskPointsPrecheckAlert', () => {
 
     expect(detail).not.toBeNull()
 
-    const text = extractVisibleText(renderToStaticMarkup(<TaskPointsPrecheckAlert detail={detail!} />))
-
+    const text = extractVisibleText(renderToStaticMarkup(
+      <I18nProvider>
+        <TaskPointsPrecheckAlert detail={detail!} />
+      </I18nProvider>,
+    ))
     expect(text).toContain('有声书积分不足')
     expect(text).toContain('还差 7.00 积分')
     expect(text).toContain('可用（含回收）：15.00 积分')
@@ -74,7 +78,11 @@ describe('TaskPointsPrecheckAlert', () => {
 
     expect(detail).not.toBeNull()
 
-    const text = extractVisibleText(renderToStaticMarkup(<TaskPointsPrecheckAlert detail={detail!} />))
+    const text = extractVisibleText(renderToStaticMarkup(
+      <I18nProvider>
+        <TaskPointsPrecheckAlert detail={detail!} />
+      </I18nProvider>,
+    ))
 
     expect(text).toContain('短剧被定价策略拦截')
     expect(text).toContain('短剧当前任务不满足定价策略')

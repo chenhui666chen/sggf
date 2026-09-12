@@ -7,6 +7,7 @@ import {
   ListItem,
   Typography,
 } from '@mui/material'
+import { useTranslation } from 'react-i18next'
 
 import type { SmartChunkPreviewResult } from './types'
 
@@ -24,10 +25,14 @@ const SmartChunkPreviewPanel = ({
   mutedTextColor,
   dangerTextColor,
 }: SmartChunkPreviewPanelProps) => {
+  const { t } = useTranslation()
   const changedSeverity = preview.changed ? 'warning' : 'success'
   const changedMessage = preview.changed
-    ? `将从 ${preview.originalSegments} 段调整为 ${preview.chunkedSegments} 个合成块`
-    : '当前片段长度处于安全范围'
+    ? t('audiobook.smartChunkPreviewPanel.changedMessage', {
+        before: preview.originalSegments,
+        after: preview.chunkedSegments,
+      })
+    : t('audiobook.smartChunkPreviewPanel.safeMessage')
   const visibleChunks = preview.chunks.slice(0, 5)
   const mutedColor = mutedTextColor || 'text.secondary'
   const dangerColor = dangerTextColor || 'error.main'
@@ -36,14 +41,16 @@ const SmartChunkPreviewPanel = ({
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
       <Alert severity={preview.oversizedChunkCount > 0 ? 'error' : changedSeverity}>
         {changedMessage}
-        {preview.oversizedChunkCount > 0 ? `，仍有 ${preview.oversizedChunkCount} 个块超过上限` : ''}
+        {preview.oversizedChunkCount > 0
+          ? t('audiobook.smartChunkPreviewPanel.oversizedSuffix', { total: preview.oversizedChunkCount })
+          : ''}
       </Alert>
 
       <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
-        <Chip size="small" label={`总 token ${formatNumber(preview.totalTokens)}`} />
-        <Chip size="small" label={`平均 ${formatNumber(preview.stats.avg_tokens_per_chunk)}`} />
-        <Chip size="small" label={`最大 ${formatNumber(preview.stats.max_tokens_in_chunk)}`} />
-        <Chip size="small" label={`最小 ${formatNumber(preview.stats.min_tokens_in_chunk)}`} />
+        <Chip size="small" label={t('audiobook.smartChunkPreviewPanel.totalTokensChip', { value: formatNumber(preview.totalTokens) })} />
+        <Chip size="small" label={t('audiobook.smartChunkPreviewPanel.avgTokensChip', { value: formatNumber(preview.stats.avg_tokens_per_chunk) })} />
+        <Chip size="small" label={t('audiobook.smartChunkPreviewPanel.maxTokensChip', { value: formatNumber(preview.stats.max_tokens_in_chunk) })} />
+        <Chip size="small" label={t('audiobook.smartChunkPreviewPanel.minTokensChip', { value: formatNumber(preview.stats.min_tokens_in_chunk) })} />
       </Box>
 
       {visibleChunks.length > 0 && (
@@ -63,7 +70,7 @@ const SmartChunkPreviewPanel = ({
                 >
                   <Box sx={{ display: 'flex', justifyContent: 'space-between', gap: 1, mb: 0.25 }}>
                     <Typography variant="caption" sx={{ color: mutedColor }}>
-                      块 {index + 1}
+                      {t('audiobook.smartChunkPreviewPanel.chunkIndexLabel', { index: index + 1 })}
                     </Typography>
                     <Typography variant="caption" sx={{ color: estimatedTokens > 1800 ? dangerColor : mutedColor }}>
                       {formatNumber(estimatedTokens)} token
@@ -79,7 +86,7 @@ const SmartChunkPreviewPanel = ({
                       overflow: 'hidden',
                     }}
                   >
-                    {chunkText || '空片段'}
+                    {chunkText || t('audiobook.smartChunkPreviewPanel.emptyChunkText')}
                   </Typography>
                 </ListItem>
               )
@@ -87,7 +94,7 @@ const SmartChunkPreviewPanel = ({
           </List>
           {preview.chunks.length > visibleChunks.length && (
             <Typography variant="caption" sx={{ color: mutedColor }}>
-              另有 {preview.chunks.length - visibleChunks.length} 个合成块
+              {t('audiobook.smartChunkPreviewPanel.moreChunksHint', { total: preview.chunks.length - visibleChunks.length })}
             </Typography>
           )}
         </>

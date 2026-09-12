@@ -1,4 +1,5 @@
 import React, { useState, useCallback, useMemo } from 'react'
+import { useTranslation } from 'react-i18next'
 import { apiClient, extractApiErrorMessage } from '../services/api'
 import { toDreamweaverRunSummaries } from '../pages/dreamweaver-run/runPageHelpers'
 import type { DreamweaverRunSummary } from '../types/dreamweaver'
@@ -19,6 +20,7 @@ export interface UseDreamweaverRunHistoryReturn {
 }
 
 export function useDreamweaverRunHistory(): UseDreamweaverRunHistoryReturn {
+  const { t } = useTranslation()
   const [historyOpen, setHistoryOpen] = useState(false)
   const [historyLoading, setHistoryLoading] = useState(false)
   const [historyError, setHistoryError] = useState<string | null>(null)
@@ -33,11 +35,11 @@ export function useDreamweaverRunHistory(): UseDreamweaverRunHistoryReturn {
       const runs = toDreamweaverRunSummaries(res.data)
       setHistoryRuns(runs)
     } catch (e: any) {
-      setHistoryError(await extractApiErrorMessage(e, '加载历史任务失败'))
+      setHistoryError(await extractApiErrorMessage(e, t('dreamweaverRun.loadHistoryFailed')))
     } finally {
       setHistoryLoading(false)
     }
-  }, [])
+  }, [t])
 
   const historyStatusCounts = useMemo(() => {
     const counts: Record<string, number> = {}

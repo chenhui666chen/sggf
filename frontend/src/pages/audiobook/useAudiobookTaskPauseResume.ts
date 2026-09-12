@@ -1,5 +1,7 @@
 import { useCallback, useState, type Dispatch, type SetStateAction } from 'react'
 
+import { useTranslation } from 'react-i18next'
+
 import { apiClient, extractApiErrorMessage } from '../../services/api'
 import type { ActivateQueuedAudiobookTask, SetSnackbar } from './hookTypes'
 import { isSuccessfulTaskPollStatus } from './taskUtils'
@@ -26,6 +28,7 @@ export const useAudiobookTaskPauseResume = ({
   activateQueuedAudiobookTask,
   setProgressViewDismissed,
 }: UseAudiobookTaskPauseResumeParams) => {
+  const { t } = useTranslation()
   const [pauseResuming, setPauseResuming] = useState(false)
 
   const handlePauseTask = useCallback(async (taskId?: string) => {
@@ -46,24 +49,24 @@ export const useAudiobookTaskPauseResume = ({
         ))
         setSnackbar({
           open: true,
-          message: '已请求暂停，将在当前章节完成后生效',
+          message: t('audiobook.useAudiobookTaskPauseResume.pauseRequested'),
           severity: 'info',
         })
         return
       }
       setSnackbar({
         open: true,
-        message: response.data?.detail || '暂停失败，请重试',
+        message: response.data?.detail || t('audiobook.useAudiobookTaskPauseResume.pauseFailed'),
         severity: 'error',
       })
     } catch (error) {
       setSnackbar({
         open: true,
-        message: await extractApiErrorMessage(error, '暂停失败，请重试'),
+        message: await extractApiErrorMessage(error, t('audiobook.useAudiobookTaskPauseResume.pauseFailed')),
         severity: 'error',
       })
     }
-  }, [currentTaskId, setSnackbar, setTaskStatuses])
+  }, [currentTaskId, setSnackbar, setTaskStatuses, t])
 
   const handleResumeTask = useCallback(async (taskId?: string) => {
     const targetTaskId = taskId || currentTaskId
@@ -84,7 +87,7 @@ export const useAudiobookTaskPauseResume = ({
         ))
         setSnackbar({
           open: true,
-          message: response.data.message || '已继续当前生成任务',
+          message: response.data.message || t('audiobook.useAudiobookTaskPauseResume.resumeContinued'),
           severity: 'success',
         })
         return
@@ -96,25 +99,25 @@ export const useAudiobookTaskPauseResume = ({
         setProgressViewDismissed(false)
         await activateQueuedAudiobookTask(audiobookProjectId, jobId, {
           taskType,
-          successMessage: '任务已恢复，继续生成剩余章节',
+          successMessage: t('audiobook.useAudiobookTaskPauseResume.resumeQueued'),
         })
         return
       }
       setSnackbar({
         open: true,
-        message: response.data?.detail || '恢复失败，请重试',
+        message: response.data?.detail || t('audiobook.useAudiobookTaskPauseResume.resumeFailed'),
         severity: 'error',
       })
     } catch (error) {
       setSnackbar({
         open: true,
-        message: await extractApiErrorMessage(error, '恢复失败，请重试'),
+        message: await extractApiErrorMessage(error, t('audiobook.useAudiobookTaskPauseResume.resumeFailed')),
         severity: 'error',
       })
     } finally {
       setPauseResuming(false)
     }
-  }, [activateQueuedAudiobookTask, currentTaskId, setProgressViewDismissed, setSnackbar])
+  }, [activateQueuedAudiobookTask, currentTaskId, setProgressViewDismissed, setSnackbar, t])
 
   return {
     pauseResuming,

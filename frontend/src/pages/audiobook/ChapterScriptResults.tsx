@@ -6,9 +6,11 @@ import {
 } from '@mui/material'
 import EditNoteIcon from '@mui/icons-material/EditNote'
 import FactCheckIcon from '@mui/icons-material/FactCheck'
+import { useTranslation } from 'react-i18next'
 
 import { resolveScriptStatusPresentation } from './completionViewUtils'
 import { audiobookButtonSx, audiobookColors } from './audiobookTheme'
+import type { TranslateFn } from './audioLibraryDisplay'
 import type { AudioEngineMode, Chapter, ChapterAudio } from './types'
 
 interface ChapterScriptResultsProps {
@@ -47,22 +49,26 @@ export const buildChapterScriptMetadata = (counts: {
   dialogue_count?: number | null
   narration_count?: number | null
   character_count?: number | null
-}): string[] => {
+}, t?: TranslateFn): string[] => {
   const segmentCount = Math.max(0, Number(counts.segment_count) || 0)
   const dialogueCount = Math.max(0, Number(counts.dialogue_count) || 0)
   const narrationCount = Math.max(0, Number(counts.narration_count) || 0)
   const monologueCount = Math.max(0, segmentCount - dialogueCount - narrationCount)
+  const characterCount = Math.max(0, Number(counts.character_count) || 0)
 
+  const countLabel = (key: string, value: number, fallback: string) => (
+    t ? t(key, { total: value }) : fallback
+  )
   const metadata = [
-    `${segmentCount} 个片段`,
-    `${dialogueCount} 段对白`,
-    `${narrationCount} 段旁白`,
+    countLabel('audiobook.chapterScriptResults.segmentItem', segmentCount, `${segmentCount} 个片段`),
+    countLabel('audiobook.chapterScriptResults.dialogueItem', dialogueCount, `${dialogueCount} 段对白`),
+    countLabel('audiobook.chapterScriptResults.narrationItem', narrationCount, `${narrationCount} 段旁白`),
   ]
   if (monologueCount > 0) {
-    metadata.push(`${monologueCount} 段独白`)
+    metadata.push(countLabel('audiobook.chapterScriptResults.monologueItem', monologueCount, `${monologueCount} 段独白`))
   }
   if (counts.character_count) {
-    metadata.push(`${Math.max(0, Number(counts.character_count) || 0)} 个角色`)
+    metadata.push(countLabel('audiobook.chapterScriptResults.characterItem', characterCount, `${characterCount} 个角色`))
   }
   return metadata
 }
@@ -76,15 +82,16 @@ const ChapterScriptResults = ({
   onOpenSceneEditor,
   onOpenScriptReview,
 }: ChapterScriptResultsProps) => {
+  const { t } = useTranslation()
   const scriptChapters = chapterAudios.filter((item) => Boolean(item.has_script))
 
   return (
     <Box component="section" sx={{ mt: 3 }}>
       <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 2, mb: 1.5 }}>
         <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
-          章节剧本
+          {t('audiobook.chapterScriptResults.sectionTitle')}
         </Typography>
-        <Chip size="small" label={`${scriptChapters.length} 章`} variant="outlined" />
+        <Chip size="small" label={t('audiobook.chapterScriptResults.chapterCount', { total: scriptChapters.length })} variant="outlined" />
       </Box>
 
       {scriptChapters.length === 0 ? (
@@ -99,7 +106,7 @@ const ChapterScriptResults = ({
           }}
         >
           <Typography variant="body2" color="text.secondary">
-            暂无可审阅的章节剧本
+            {t('audiobook.chapterScriptResults.emptyText')}
           </Typography>
         </Box>
       ) : (
@@ -107,12 +114,14 @@ const ChapterScriptResults = ({
           {scriptChapters.map((chapterAudio) => {
             const chapter = chapters.find((item) => item.id === chapterAudio.chapter_id)
             const chapterNumber = chapter?.chapter_number ?? chapterAudio.chapter_number
-            const chapterTitle = chapter?.title || `章节 ${chapterNumber || chapterAudio.chapter_id}`
-            const status = resolveScriptStatusPresentation(chapterAudio.script_status)
+            const chapterTitle = chapter?.title || t('audiobook.chapterScriptResults.fallbackChapterTitle', {
+              id: chapterNumber || chapterAudio.chapter_id,
+            })
+            const status = resolveScriptStatusPresentation(chapterAudio.script_status, t)
             const canOpenReview = Boolean(
               chapterAudio.has_review && audiobookProjectId && onOpenScriptReview,
             )
-            const metadata = buildChapterScriptMetadata(chapterAudio)
+            const metadata = buildChapterScriptMetadata(chapterAudio, t)
 
             return (
               <Box
@@ -132,7 +141,9 @@ const ChapterScriptResults = ({
                 <Box sx={{ minWidth: 0 }}>
                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap', mb: 0.75 }}>
                     <Typography variant="body1" sx={{ fontWeight: 700, overflowWrap: 'anywhere' }}>
-                      {chapterNumber ? `第 ${chapterNumber} 章 · ${chapterTitle}` : chapterTitle}
+                      {chapterNumber
+                        ? t('audiobook.chapterScriptResults.chapterTitle', { number: chapterNumber, title: chapterTitle })
+                        : chapterTitle}
                     </Typography>
                     <Chip
                       size="small"
@@ -141,7 +152,7 @@ const ChapterScriptResults = ({
                       sx={{ ...statusToneSx[status.tone], height: 24 }}
                     />
                     {chapterAudio.has_review && (
-                      <Chip size="small" variant="outlined" label="自动评审已完成" sx={{ height: 24 }} />
+                      <Chip size="small" variant="outlined" label={t('audiobook.chapterScriptResults.reviewDoneChip')} sx={{ height: 24 }} />
                     )}
                   </Box>
                   <Typography variant="caption" color="text.secondary">
@@ -160,7 +171,7 @@ const ChapterScriptResults = ({
                         chapterAudio.chapter_id,
                       )}
                     >
-                      查看评审
+                      {t('audiobook.chapterScriptResults.viewReview')}
                     </Button>
                   )}
                   <Button
@@ -177,7 +188,9 @@ const ChapterScriptResults = ({
                     }}
                     sx={audiobookButtonSx.brandOutlined}
                   >
-                    {status.tone === 'success' ? '查看剧本' : '审阅并批准'}
+                    {status.tone === 'success'
+                      ? t('audiobook.chapterScriptResults.viewScript')
+                      : t('audiobook.chapterScriptResults.reviewAndApprove')}
                   </Button>
                 </Box>
               </Box>

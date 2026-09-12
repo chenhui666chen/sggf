@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next'
 import {
   Divider,
   List,
@@ -12,17 +13,18 @@ interface ScriptReviewSuggestionsProps {
 const ScriptReviewSuggestions = ({
   suggestions,
 }: ScriptReviewSuggestionsProps) => {
+  const { t } = useTranslation()
   if (suggestions.length <= 1) {
     return null
   }
 
   return (
     <>
-      <Divider textAlign="left">修订建议</Divider>
+      <Divider textAlign="left">{t('audiobook.scriptReviewSuggestions.title')}</Divider>
       <List dense>
         {suggestions.map((suggestion, idx) => (
           <ListItem key={idx} disableGutters>
-            <ListItemText primary={`建议 ${idx + 1}`} secondary={suggestion} />
+            <ListItemText primary={t('audiobook.scriptReviewSuggestions.itemLabel', { index: idx + 1 })} secondary={suggestion} />
           </ListItem>
         ))}
       </List>

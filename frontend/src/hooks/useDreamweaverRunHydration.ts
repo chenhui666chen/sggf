@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef } from 'react'
+import { useTranslation } from 'react-i18next'
 import { apiClient, extractApiErrorMessage } from '@/services/api'
 import {
   asObject,
@@ -62,6 +63,7 @@ export function useDreamweaverRunHydration(options: UseDreamweaverRunHydrationOp
     applyGenerationConfig,
   } = options
 
+  const { t } = useTranslation()
   const restoredProjectIdRef = useRef<number | null>(null)
 
   const hydrateFromPersistedRun = useCallback(async (
@@ -113,7 +115,7 @@ export function useDreamweaverRunHydration(options: UseDreamweaverRunHydrationOp
       const recovery = resolveNotFoundRecovery(e, persistedTaskId, persistedStatus, {
         isNotFoundError,
         shouldTreatRunNotFoundAsPending,
-        pendingMessage: '运行数据尚未落库，稍后自动重试',
+        pendingMessage: t('dreamweaverRun.runDataNotPersisted'),
       })
       if (recovery.handled) {
         if (recovery.pendingMessage) {
@@ -123,7 +125,7 @@ export function useDreamweaverRunHydration(options: UseDreamweaverRunHydrationOp
         resetMissingRunState(projectId)
         return
       }
-      setRunSnapshotError(await extractApiErrorMessage(e, '恢复运行状态失败'))
+      setRunSnapshotError(await extractApiErrorMessage(e, t('dreamweaverRun.restoreRunStateFailed')))
     }
   }, [
     isNotFoundError,
@@ -140,6 +142,7 @@ export function useDreamweaverRunHydration(options: UseDreamweaverRunHydrationOp
     setWaitingApproval,
     setResult,
     setRunPreflight,
+    t,
   ])
 
   useEffect(() => {
@@ -148,12 +151,12 @@ export function useDreamweaverRunHydration(options: UseDreamweaverRunHydrationOp
         const res = await apiClient.getProjects()
         setProjects(res.data || [])
       } catch (e: unknown) {
-        const msg = (e instanceof Error ? e.message : String(e)) || '获取项目列表失败'
+        const msg = (e instanceof Error ? e.message : String(e)) || t('dreamweaverRun.loadProjectsFailed')
         setError(msg)
       }
     }
     loadProjects()
-  }, [setProjects, setError])
+  }, [setProjects, setError, t])
 
   useEffect(() => {
     if (!selectedProjectId) return

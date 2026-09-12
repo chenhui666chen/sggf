@@ -1,3 +1,5 @@
+import { useTranslation } from 'react-i18next'
+
 import {
   Alert,
   AlertTitle,
@@ -42,6 +44,7 @@ export default function StoryExpansionDialog({
   onConfirmDialogClose,
   onConfirmDialogConfirm,
 }: StoryExpansionDialogProps) {
+  const { t } = useTranslation()
   const {
     analysis,
     analysisLoading,
@@ -79,7 +82,7 @@ export default function StoryExpansionDialog({
     volumeChaptersMax,
     volumeCharacterIncrement,
     analysis,
-  })
+  }, t)
   const {
     hasDelta,
   } = dialogView
@@ -88,7 +91,7 @@ export default function StoryExpansionDialog({
   return (
     <>
       <Dialog open={open} onClose={dialogLocked ? undefined : handlers.onClose} maxWidth="sm" fullWidth>
-        <DialogTitle>协同扩展</DialogTitle>
+        <DialogTitle>{t('storyExpansion.dialog.title')}</DialogTitle>
         <DialogContent dividers>
           <StoryExpansionConfigSection
             form={form}
@@ -112,10 +115,10 @@ export default function StoryExpansionDialog({
         </DialogContent>
         <DialogActions>
           <Button onClick={handlers.onClose} disabled={dialogLocked}>
-            取消
+            {t('action.cancel')}
           </Button>
           <Button onClick={handlers.onConfirm} variant="contained" disabled={!hasDelta || dialogLocked}>
-            {loading ? '协同扩展中...' : '开始协同扩展'}
+            {loading ? t('storyExpansion.dialog.running') : t('storyExpansion.dialog.start')}
           </Button>
         </DialogActions>
       </Dialog>
@@ -127,16 +130,16 @@ export default function StoryExpansionDialog({
             {confirmDialog?.description}
           </Typography>
           <Alert severity="warning" variant="outlined" sx={{ mt: 2 }}>
-            <AlertTitle>影响范围</AlertTitle>
+            <AlertTitle>{t('storyExpansion.dialog.impactTitle')}</AlertTitle>
             {confirmDialog?.detail}
           </Alert>
         </DialogContent>
         <DialogActions>
           <Button onClick={onConfirmDialogClose}>
-            {confirmDialog?.cancelLabel ?? '取消'}
+            {confirmDialog?.cancelLabel ?? t('action.cancel')}
           </Button>
           <Button onClick={onConfirmDialogConfirm} variant="contained" color="warning" autoFocus>
-            {confirmDialog?.confirmLabel ?? '继续'}
+            {confirmDialog?.confirmLabel ?? t('storyExpansion.dialog.confirmContinue')}
           </Button>
         </DialogActions>
       </Dialog>

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import {
   Alert, Box, Button, Chip, CircularProgress, Paper, Rating, Stack, TextField,
   ToggleButton, ToggleButtonGroup, Typography,
@@ -14,15 +15,15 @@ import {
 } from '@/services/api'
 
 const REVIEW_ITEMS = [
-  ['dialogueComplete', '台词完整'],
-  ['plotUnderstandable', '剧情可懂'],
-  ['voicesDistinct', '角色可区分'],
-  ['voiceConsistent', '音色一致'],
-  ['emotionNatural', '情绪自然'],
-  ['effectsTimed', '音效时序'],
-  ['musicAppropriate', '配乐合适'],
-  ['mixClear', '混音清晰'],
-  ['usable', '可以使用'],
+  ['dialogueComplete', 'audiobook.seedSceneTest.reviewDialogueComplete'],
+  ['plotUnderstandable', 'audiobook.seedSceneTest.reviewPlotUnderstandable'],
+  ['voicesDistinct', 'audiobook.seedSceneTest.reviewVoicesDistinct'],
+  ['voiceConsistent', 'audiobook.seedSceneTest.reviewVoiceConsistent'],
+  ['emotionNatural', 'audiobook.seedSceneTest.reviewEmotionNatural'],
+  ['effectsTimed', 'audiobook.seedSceneTest.reviewEffectsTimed'],
+  ['musicAppropriate', 'audiobook.seedSceneTest.reviewMusicAppropriate'],
+  ['mixClear', 'audiobook.seedSceneTest.reviewMixClear'],
+  ['usable', 'audiobook.seedSceneTest.reviewUsable'],
 ] as const
 
 type ReviewKey = typeof REVIEW_ITEMS[number][0]
@@ -40,6 +41,7 @@ interface SeedSceneBlindReviewPanelProps {
 }
 
 const SeedSceneBlindReviewPanel = ({ batchId }: SeedSceneBlindReviewPanelProps) => {
+  const { t } = useTranslation()
   const [batch, setBatch] = useState<SeedSceneBlindBatchResponse | null>(null)
   const [selectedIndex, setSelectedIndex] = useState(0)
   const [audio, setAudio] = useState<SeedSceneBlindAudioResponse | null>(null)
@@ -62,7 +64,7 @@ const SeedSceneBlindReviewPanel = ({ batchId }: SeedSceneBlindReviewPanelProps) 
         if (active) setBatch(response.data)
       })
       .catch(async (requestError) => {
-        if (active) setError(await extractApiErrorMessage(requestError, '加载盲评批次失败'))
+        if (active) setError(await extractApiErrorMessage(requestError, t('audiobook.seedSceneTest.loadBatchFailed')))
       })
       .finally(() => {
         if (active) setLoading(false)
@@ -100,7 +102,7 @@ const SeedSceneBlindReviewPanel = ({ batchId }: SeedSceneBlindReviewPanelProps) 
         }
       })
       .catch(async (requestError) => {
-        if (active) setError(await extractApiErrorMessage(requestError, '加载盲评样本失败'))
+        if (active) setError(await extractApiErrorMessage(requestError, t('audiobook.seedSceneTest.loadSampleFailed')))
       })
       .finally(() => {
         if (active) setLoading(false)
@@ -126,7 +128,7 @@ const SeedSceneBlindReviewPanel = ({ batchId }: SeedSceneBlindReviewPanelProps) 
       )
       setRecord(response.data)
     } catch (requestError) {
-      setError(await extractApiErrorMessage(requestError, '提交盲评失败'))
+      setError(await extractApiErrorMessage(requestError, t('audiobook.seedSceneTest.submitFailed')))
     } finally {
       setSaving(false)
     }
@@ -135,16 +137,16 @@ const SeedSceneBlindReviewPanel = ({ batchId }: SeedSceneBlindReviewPanelProps) 
   if (loading && !batch) {
     return <Box sx={{ minHeight: 420, display: 'grid', placeItems: 'center' }}><CircularProgress /></Box>
   }
-  if (!batch) return <Box sx={{ p: 3 }}><Alert severity="error">{error || '盲评批次不可用'}</Alert></Box>
+  if (!batch) return <Box sx={{ p: 3 }}><Alert severity="error">{error || t('audiobook.seedSceneTest.blindBatchUnavailable')}</Alert></Box>
 
   return (
     <Box sx={{ maxWidth: 920, mx: 'auto', p: { xs: 2, md: 3 } }}>
       <Stack spacing={2}>
         <Stack direction="row" alignItems="center" justifyContent="space-between">
-          <Typography variant="h5" sx={{ fontWeight: 700 }}>场景盲评</Typography>
+          <Typography variant="h5" sx={{ fontWeight: 700 }}>{t('audiobook.seedSceneTest.blindTitle')}</Typography>
           <Stack direction="row" spacing={1}>
             <Chip size="small" label={`${selectedIndex + 1}/${batch.samples.length}`} />
-            {locked && <Chip size="small" color="success" label="已提交" />}
+            {locked && <Chip size="small" color="success" label={t('audiobook.seedSceneTest.blindSubmitted')} />}
           </Stack>
         </Stack>
         <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap>
@@ -169,7 +171,7 @@ const SeedSceneBlindReviewPanel = ({ batchId }: SeedSceneBlindReviewPanelProps) 
         <Paper variant="outlined" sx={{ p: 2, borderRadius: 1 }}>
           <Stack spacing={1.5}>
             <Stack direction="row" alignItems="center" spacing={2}>
-              <Typography variant="body2" sx={{ width: 96 }}>综合评分</Typography>
+              <Typography variant="body2" sx={{ width: 96 }}>{t('audiobook.seedSceneTest.overallScore')}</Typography>
               <Rating
                 precision={0.5}
                 value={score}
@@ -177,9 +179,9 @@ const SeedSceneBlindReviewPanel = ({ batchId }: SeedSceneBlindReviewPanelProps) 
                 onChange={(_event, value) => setScore(value)}
               />
             </Stack>
-            {REVIEW_ITEMS.map(([key, label]) => (
+            {REVIEW_ITEMS.map(([key, labelKey]) => (
               <Stack key={key} direction="row" alignItems="center" justifyContent="space-between">
-                <Typography variant="body2">{label}</Typography>
+                <Typography variant="body2">{t(labelKey)}</Typography>
                 <ToggleButtonGroup
                   exclusive
                   size="small"
@@ -190,13 +192,13 @@ const SeedSceneBlindReviewPanel = ({ batchId }: SeedSceneBlindReviewPanelProps) 
                     setFlags((current) => ({ ...current, [key]: value === 'pass' }))
                   }}
                 >
-                  <ToggleButton value="pass" color="success">通过</ToggleButton>
-                  <ToggleButton value="fail" color="error">未通过</ToggleButton>
+                  <ToggleButton value="pass" color="success">{t('audiobook.seedSceneTest.flagPass')}</ToggleButton>
+                  <ToggleButton value="fail" color="error">{t('audiobook.seedSceneTest.flagFail')}</ToggleButton>
                 </ToggleButtonGroup>
               </Stack>
             ))}
             <TextField
-              label="评审备注"
+              label={t('audiobook.seedSceneTest.reviewNotes')}
               multiline
               minRows={3}
               value={notes}
@@ -209,7 +211,7 @@ const SeedSceneBlindReviewPanel = ({ batchId }: SeedSceneBlindReviewPanelProps) 
               disabled={!complete || locked || saving || !audio}
               onClick={() => void submit()}
             >
-              {locked ? '已锁定' : '提交评审'}
+              {locked ? t('audiobook.seedSceneTest.blindLocked') : t('audiobook.seedSceneTest.submitReview')}
             </Button>
           </Stack>
         </Paper>

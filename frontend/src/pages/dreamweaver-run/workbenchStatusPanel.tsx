@@ -2,6 +2,8 @@ import type { MouseEventHandler, ReactNode } from 'react'
 
 import { Button, Card, CardContent, Chip, Grid, LinearProgress, Menu, MenuItem, Paper, Stack, Step, StepLabel, Stepper, Typography } from '@mui/material'
 
+import { useTranslation } from 'react-i18next'
+
 type DreamweaverWorkbenchStatusActionButtonProps = {
   label: string
   onClick: () => void
@@ -69,15 +71,16 @@ export function DreamweaverWorkbenchStatusChipRow({
   taskQueue,
   taskStatusColor = 'default',
 }: DreamweaverWorkbenchStatusChipRowProps) {
+  const { t } = useTranslation()
   return (
     <>
       {runId && <Chip label={`RunID: ${runId}`} size="small" />}
-      <Chip label={`进度: ${progressLabel}%`} size="small" color="primary" />
-      {stateLabel && <Chip label={`状态: ${stateLabel}`} size="small" />}
-      {stageLabel && <Chip label={`阶段: ${stageLabel}`} size="small" />}
+      <Chip label={t('dreamweaverRun.chipProgress', { value: progressLabel })} size="small" color="primary" />
+      {stateLabel && <Chip label={t('dreamweaverRun.chipStatus', { state: stateLabel })} size="small" />}
+      {stageLabel && <Chip label={t('dreamweaverRun.chipStage', { stage: stageLabel })} size="small" />}
       {taskStatusLabel && (
         <Chip
-          label={`任务: ${taskStatusLabel}${taskQueue ? `（${taskQueue}）` : ''}`}
+          label={taskQueue ? t('dreamweaverRun.chipTaskWithQueue', { status: taskStatusLabel, queue: taskQueue }) : t('dreamweaverRun.chipTask', { status: taskStatusLabel })}
           size="small"
           color={taskStatusColor}
         />
@@ -164,11 +167,12 @@ export function DreamweaverWorkbenchStatusRightActions({
   followVisible,
   onFollow,
 }: DreamweaverWorkbenchStatusRightActionsProps) {
+  const { t } = useTranslation()
   return (
     <Stack direction="row" spacing={1} flexWrap="wrap" alignItems="center" justifyContent="flex-end">
       {followVisible && (
         <Button size="small" variant="text" onClick={onFollow}>
-          跟随进度
+          {t('dreamweaverRun.wbFollowProgress')}
         </Button>
       )}
     </Stack>
@@ -230,7 +234,7 @@ export function DreamweaverWorkbenchStatusPanel({
   stepper,
 }: DreamweaverWorkbenchStatusPanelProps) {
   return (
-    <Paper sx={{ p: 2, borderRadius: 2, bgcolor: 'rgba(255,255,255,0.95)', mb: 2 }}>
+    <Paper sx={{ p: 2, borderRadius: 2, bgcolor: 'background.paper', mb: 2 }}>
       <Stack direction="row" spacing={1} flexWrap="wrap" alignItems="center" justifyContent="space-between" mb={1}>
         {primarySection}
         {rightActions}
@@ -272,10 +276,11 @@ export function DreamweaverWorkbenchCardHeader({
   running,
   taskProgress,
 }: DreamweaverWorkbenchCardHeaderProps) {
+  const { t } = useTranslation()
   return (
     <Stack direction="row" spacing={1} alignItems="center" mb={1}>
       <Typography variant="h6" sx={{ fontWeight: 700 }}>
-        短剧工作台
+        {t('dreamweaverRun.wbCardTitle')}
       </Typography>
       {running && <LinearProgress variant="determinate" value={Math.max(0, Math.min(100, taskProgress))} sx={{ flex: 1 }} />}
     </Stack>

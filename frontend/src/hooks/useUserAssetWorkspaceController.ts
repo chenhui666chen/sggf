@@ -5,6 +5,10 @@ import {
   useState,
 } from 'react'
 
+import { useTranslation } from 'react-i18next'
+
+import { useAppLanguage } from '@/i18n'
+import type { AppLanguage } from '@/i18n'
 import type { UserAssetProjectTitleMap } from '@/contracts/userAssetSourceReaders'
 import { getUserAssetMetadataPayload } from '@/contracts/userAssetSourcePayloadSelectors'
 import type { UserAssetWorkspaceSectionProps } from '@/components/user-assets/UserAssetWorkspaceSection'
@@ -95,6 +99,8 @@ import {
   type UserAssetLocalStorageActionReport,
 } from '@/components/user-assets/userAssetLocalStoragePanelPresentation'
 
+import type { TFunction } from 'i18next'
+
 import {
   executeUserAssetLocalClearAction,
   executeUserAssetLocalClearBatch,
@@ -102,6 +108,8 @@ import {
   executeUserAssetLocalRestoreBatch,
   type UserAssetLocalRestoreActionResult,
 } from './userAssetWorkspaceLocalActions'
+
+const DEFAULT_TRANSLATE: TFunction = ((key: string) => key) as TFunction
 
 export type UserAssetWorkspaceFeedback = {
   type: 'success' | 'error'
@@ -180,11 +188,16 @@ function buildUpdatedUserAssetLocalStorageIssueActionReport(options: {
   report: UserAssetLocalStorageActionReport
   issueItem: UserAssetLocalStorageActionIssueItem
   result: UserAssetLocalRestoreActionResult
+  /** 时间文案的显示语言。本函数在模块级，只能由调用方递进来。 */
+  locale?: AppLanguage
+  t?: TFunction
 }): UserAssetLocalStorageActionReport {
   const {
     report,
     issueItem,
     result,
+    locale,
+    t,
   } = options
   const nextIssueItems =
     result.status === 'restored' || result.status === 'already_present'
@@ -206,6 +219,8 @@ function buildUpdatedUserAssetLocalStorageIssueActionReport(options: {
     blockedCount: readUserAssetLocalStorageActionMetricValue(report, 'blocked-assets'),
     failedCount: readUserAssetLocalStorageActionMetricValue(report, 'failed-assets'),
     completedAt: new Date(),
+    locale,
+    t,
   })
 
   return {
@@ -327,13 +342,15 @@ function buildExternalDirectoryAssetHealthItem(
     UserAssetRecord,
     'id' | 'asset_uuid' | 'title' | 'source_module' | 'metadata_json' | 'source_uri' | 'preview_uri' | 'download_uri'
   >,
+  t?: TFunction,
 ): UserAssetExternalDirectoryAssetHealthItem {
+  const translate = t ?? DEFAULT_TRANSLATE
   const metadata = getUserAssetMetadataPayload(asset)
 
   return {
     assetId: asset.id,
     assetUuid: String(asset.asset_uuid || '').trim(),
-    title: String(asset.title || '').trim() || `资产 #${asset.id}`,
+    title: String(asset.title || '').trim() || translate('userAsset.workspace.assetIdFallback', { id: asset.id }),
     sourceModule: String(asset.source_module || '').trim() || 'unknown',
     localStorageDriver: metadata.local_storage_driver ?? null,
     localStoragePath: metadata.local_storage_path ?? null,
@@ -409,6 +426,7 @@ export async function probeUserAssetExternalDirectoryAssetHealthSummary(
   dependencies: {
     getLocalAssetBlobByUuid?: GetLocalAssetBlobDependency
   } = {},
+  t?: TFunction,
 ): Promise<UserAssetExternalDirectoryAssetHealthSummary | null> {
   const trackedAssets = assets.filter(isExternalDirectoryBackedLocalMirrorAsset)
   if (!trackedAssets.length || externalDirectoryStatus === null) {
@@ -424,7 +442,7 @@ export async function probeUserAssetExternalDirectoryAssetHealthSummary(
       trackedAssetCount: trackedAssets.length,
       inaccessibleAssetCount: trackedAssets.length,
       missingLocalCopyCount: 0,
-      inaccessibleAssets: trackedAssets.map((asset) => buildExternalDirectoryAssetHealthItem(asset)),
+      inaccessibleAssets: trackedAssets.map((asset) => buildExternalDirectoryAssetHealthItem(asset, t)),
       missingLocalCopyAssets: [],
     }
   }
@@ -448,7 +466,7 @@ export async function probeUserAssetExternalDirectoryAssetHealthSummary(
 
   const missingLocalCopyAssets = results
     .filter((result) => !result.exists)
-    .map((result) => buildExternalDirectoryAssetHealthItem(result.asset))
+    .map((result) => buildExternalDirectoryAssetHealthItem(result.asset, t))
   const missingLocalCopyCount = missingLocalCopyAssets.length
 
   return missingLocalCopyCount > 0
@@ -485,6 +503,11 @@ export function useUserAssetWorkspaceController(
     publishFeedback,
     enabled = true,
   } = options
+
+  // 本地目录动作报告里的时间文案跟着当前界面语言走。报告是在动作发生时定形并
+  // 存进 state 的，所以这里取的是那一刻的语言。
+  const { language } = useAppLanguage()
+  const { t } = useTranslation()
 
   const [assetListError, setAssetListError] = useState<string | null>(null)
   const [assetListLoading, setAssetListLoading] = useState(false)
@@ -551,7 +574,7 @@ export function useUserAssetWorkspaceController(
       setUserAssetFilterOptions(payload?.filter_options || buildEmptyUserAssetListFilterOptions())
       setAssetListError(null)
     } catch (loadError) {
-      setAssetListError(await extractApiErrorMessage(loadError, '加载用户资产失败'))
+      setAssetListError(await extractApiErrorMessage(loadError, t('userAsset.workspace.loadUserAssetsFailed')))
     } finally {
       setHasLoadedUserAssetsOnce(true)
       if (!silent) setAssetListLoading(false)
@@ -570,7 +593,7 @@ export function useUserAssetWorkspaceController(
       if (!options?.silent) {
         publishFeedback?.({
           type: 'error',
-          text: extractLocalDirectoryErrorMessage(error, '读取用户目录状态失败'),
+          text: extractLocalDirectoryErrorMessage(error, t('userAsset.workspace.readDirectoryStatusFailed')),
         })
       }
     } finally {
@@ -622,7 +645,7 @@ export function useUserAssetWorkspaceController(
     }
 
     const probeExternalDirectoryAssets = async () => {
-      const summary = await probeUserAssetExternalDirectoryAssetHealthSummary(userAssets, externalDirectoryStatus)
+      const summary = await probeUserAssetExternalDirectoryAssetHealthSummary(userAssets, externalDirectoryStatus, {}, t)
       if (cancelled) {
         return
       }
@@ -634,7 +657,7 @@ export function useUserAssetWorkspaceController(
     return () => {
       cancelled = true
     }
-  }, [enabled, externalDirectoryLoading, externalDirectoryStatus, userAssets])
+  }, [enabled, externalDirectoryLoading, externalDirectoryStatus, userAssets, t])
 
   const assetKindOptions = useMemo(
     () => buildUserAssetKindOptionsFromValues(userAssetFilterOptions.asset_kinds || []),
@@ -645,8 +668,8 @@ export function useUserAssetWorkspaceController(
     [userAssetFilterOptions.tags],
   )
   const assetSourceOptions = useMemo(
-    () => buildUserAssetSourceOptionsFromSourceModules(userAssetFilterOptions.source_modules || []),
-    [userAssetFilterOptions.source_modules],
+    () => buildUserAssetSourceOptionsFromSourceModules(userAssetFilterOptions.source_modules || [], t),
+    [t, userAssetFilterOptions.source_modules],
   )
   const assetFilters = useMemo<UserAssetListFilters>(
     () => ({
@@ -659,11 +682,11 @@ export function useUserAssetWorkspaceController(
     [assetArchiveFilter, assetKindFilter, assetSourceFilter, assetTagFilter, assetViewFilter],
   )
   const filteredUserAssets = useMemo(() => userAssets, [userAssets])
-  const favoriteBatchCommand = buildFavoriteBatchUserAssetCommand()
-  const archiveBatchCommand = buildArchiveBatchUserAssetCommand()
-  const activateBatchCommand = buildActivateBatchUserAssetCommand()
-  const clearLocalCopyBatchCommand = buildClearLocalCopyBatchUserAssetCommand()
-  const restoreLocalCopyBatchCommand = buildRestoreLocalCopyBatchUserAssetCommand()
+  const favoriteBatchCommand = buildFavoriteBatchUserAssetCommand(t)
+  const archiveBatchCommand = buildArchiveBatchUserAssetCommand(t)
+  const activateBatchCommand = buildActivateBatchUserAssetCommand(t)
+  const clearLocalCopyBatchCommand = buildClearLocalCopyBatchUserAssetCommand(t)
+  const restoreLocalCopyBatchCommand = buildRestoreLocalCopyBatchUserAssetCommand(t)
   const assetOverviewMetrics = useMemo(
     () =>
       buildUserAssetOverviewMetricSpecs({
@@ -672,16 +695,17 @@ export function useUserAssetWorkspaceController(
         deliverableAssetCount: userAssetSummary.deliverable_asset_count,
         favoriteAssetCount: userAssetSummary.favorite_asset_count,
         archivedAssetCount: userAssetSummary.archived_asset_count,
-      }),
+      }, t),
     [
       userAssetSummary.active_asset_count,
       userAssetSummary.archived_asset_count,
       userAssetSummary.deliverable_asset_count,
       userAssetSummary.favorite_asset_count,
       userAssetSummary.reusable_asset_count,
+      t,
     ],
   )
-  const assetListFeedbackCopy = buildUserAssetListFeedbackCopy()
+  const assetListFeedbackCopy = buildUserAssetListFeedbackCopy(t)
   const handleAssetViewFilterChange = useCallback((value: UserAssetListViewFilter) => {
     setAssetViewFilter(value)
     setUserAssetPage(1)
@@ -730,8 +754,9 @@ export function useUserAssetWorkspaceController(
       migrationStatus: legacyLocalAssetMigrationStatus,
       externalDirectoryStatus,
       externalDirectoryAssetHealthSummary,
+      t,
     }),
-    [externalDirectoryAssetHealthSummary, externalDirectoryStatus, legacyLocalAssetMigrationStatus],
+    [externalDirectoryAssetHealthSummary, externalDirectoryStatus, legacyLocalAssetMigrationStatus, t],
   )
   const resolvedAssetListLoading = resolveUserAssetWorkspaceAssetListLoadingState({
     enabled,
@@ -749,25 +774,22 @@ export function useUserAssetWorkspaceController(
   const handleUpdateUserAsset = useCallback(async (
     assetId: number,
     payload: UserAssetRecordUpdatePayload,
-    successText = '资产信息已更新',
+    successText?: string,
   ) => {
     setAssetActionKey(getUserAssetActionKey(assetId))
     try {
       await apiClient.updateUserAsset(assetId, payload)
       await loadUserAssets(true)
-      publishFeedback?.({
-        type: 'success',
-        text: buildUserAssetUpdateSuccessMessage(successText),
-      })
+      publishFeedback?.({type: 'success', text: buildUserAssetUpdateSuccessMessage(successText, t)})
     } catch (updateError) {
       publishFeedback?.({
         type: 'error',
-        text: await extractApiErrorMessage(updateError, buildUserAssetUpdateErrorFallback()),
+        text: await extractApiErrorMessage(updateError, buildUserAssetUpdateErrorFallback(t)),
       })
     } finally {
       setAssetActionKey(null)
     }
-  }, [loadUserAssets, publishFeedback])
+  }, [loadUserAssets, publishFeedback, t])
 
   const handleToggleAssetSelection = useCallback((assetId: number) => {
     setSelectedAssetIds((prev) => toggleUserAssetSelection(prev, assetId))
@@ -817,17 +839,17 @@ export function useUserAssetWorkspaceController(
     if (summary.blockedCount > 0 || summary.failedCount > 0) {
       publishFeedback?.({
         type: 'error',
-        text: buildUserAssetLocalCopyBatchRestoreErrorMessage(summary),
+        text: buildUserAssetLocalCopyBatchRestoreErrorMessage(summary, t),
       })
       return summary
     }
 
     publishFeedback?.({
       type: 'success',
-      text: buildUserAssetLocalCopyBatchRestoreSuccessMessage(summary),
+      text: buildUserAssetLocalCopyBatchRestoreSuccessMessage(summary, t),
     })
     return summary
-  }, [loadUserAssets, publishFeedback])
+  }, [loadUserAssets, publishFeedback, t])
 
   const updateLastLocalStorageActionReport = useCallback((report: UserAssetLocalStorageActionReport) => {
     setLastLocalStorageActionReport(report)
@@ -870,24 +892,25 @@ export function useUserAssetWorkspaceController(
           loading: externalDirectoryLoading,
           inventory,
           generatedAt,
+          t,
         }),
         filename: buildUserAssetLocalStorageInventoryFilename(generatedAt),
         mimeType: 'application/json',
       })
       publishFeedback?.({
         type: 'success',
-        text: `已导出本地资产清单，共 ${inventory.length} 条记录。`,
+        text: t('userAsset.workspace.exportInventorySuccess', { count: inventory.length }),
       })
     } catch (error) {
       publishFeedback?.({
         type: 'error',
-        text: extractLocalDirectoryErrorMessage(error, '导出本地资产清单失败'),
+        text: extractLocalDirectoryErrorMessage(error, t('userAsset.workspace.exportInventoryFailed')),
       })
     } finally {
       setExternalDirectorySubmitting(false)
       setExternalDirectorySubmittingLabel(null)
     }
-  }, [externalDirectoryLoading, externalDirectoryStatus, publishFeedback])
+  }, [externalDirectoryLoading, externalDirectoryStatus, publishFeedback, t])
 
   const handleExportLocalAssetRebuildList = useCallback(async () => {
     setExternalDirectorySubmitting(true)
@@ -898,7 +921,7 @@ export function useUserAssetWorkspaceController(
       if (issueCount <= 0) {
         publishFeedback?.({
           type: 'success',
-          text: '当前列表没有需要导出的重建项。',
+          text: t('userAsset.workspace.exportRebuildListEmpty'),
         })
         return
       }
@@ -910,18 +933,19 @@ export function useUserAssetWorkspaceController(
           loading: externalDirectoryLoading,
           healthSummary: externalDirectoryAssetHealthSummary,
           generatedAt,
+          t,
         }),
         filename: buildUserAssetLocalStorageRebuildListFilename(generatedAt),
         mimeType: 'application/json',
       })
       publishFeedback?.({
         type: 'success',
-        text: `已导出重建清单，共 ${issueCount} 项待处理记录。`,
+        text: t('userAsset.workspace.exportRebuildListSuccess', { count: issueCount }),
       })
     } catch (error) {
       publishFeedback?.({
         type: 'error',
-        text: extractLocalDirectoryErrorMessage(error, '导出重建清单失败'),
+        text: extractLocalDirectoryErrorMessage(error, t('userAsset.workspace.exportRebuildListFailed')),
       })
     } finally {
       setExternalDirectorySubmitting(false)
@@ -932,17 +956,18 @@ export function useUserAssetWorkspaceController(
     externalDirectoryLoading,
     externalDirectoryStatus,
     publishFeedback,
+    t,
   ])
 
   const handleRestoreMissingLocalCopies = useCallback(async () => {
     setExternalDirectorySubmitting(true)
-    setExternalDirectorySubmittingLabel('正在重建当前页缺失副本...')
+    setExternalDirectorySubmittingLabel(t('userAsset.workspace.restoringCurrentPage'))
     try {
       const missingAssets = resolveExternalDirectoryMissingLocalCopyAssets(filteredUserAssets, externalDirectoryAssetHealthSummary)
       const summary = await runUserAssetLocalRestoreBatch(
         missingAssets,
         {
-          emptyFeedbackText: '当前页没有可直接重建的缺失副本。',
+          emptyFeedbackText: t('userAsset.workspace.currentPageNoRebuildable'),
           skipFeedback: true,
         },
       )
@@ -961,19 +986,21 @@ export function useUserAssetWorkspaceController(
         issueAssets: filteredUserAssets,
         projectTitleMap,
         completedAt: new Date(),
+        locale: language,
+        t,
       })
       updateLastLocalStorageActionReport(report)
       if (summary.targetAssetCount <= 0) {
         publishFeedback?.({
           type: 'success',
-          text: '当前页没有可直接重建的缺失副本。',
+          text: t('userAsset.workspace.currentPageNoRebuildable'),
         })
         return
       }
 
       const feedbackText = summary.blockedCount > 0 || summary.failedCount > 0
-        ? buildUserAssetLocalCopyBatchRestoreErrorMessage(summary)
-        : buildUserAssetLocalCopyBatchRestoreSuccessMessage(summary)
+        ? buildUserAssetLocalCopyBatchRestoreErrorMessage(summary, t)
+        : buildUserAssetLocalCopyBatchRestoreSuccessMessage(summary, t)
       publishFeedback?.({
         type: summary.blockedCount > 0 || summary.failedCount > 0 ? 'error' : 'success',
         text: feedbackText,
@@ -981,7 +1008,7 @@ export function useUserAssetWorkspaceController(
     } catch (error) {
       publishFeedback?.({
         type: 'error',
-        text: extractLocalDirectoryErrorMessage(error, '重建当前页缺失副本失败'),
+        text: extractLocalDirectoryErrorMessage(error, t('userAsset.workspace.restoreCurrentPageFailed')),
       })
     } finally {
       setExternalDirectorySubmitting(false)
@@ -990,29 +1017,31 @@ export function useUserAssetWorkspaceController(
   }, [
     externalDirectoryAssetHealthSummary,
     filteredUserAssets,
+    language,
     projectTitleMap,
     publishFeedback,
     runUserAssetLocalRestoreBatch,
     updateLastLocalStorageActionReport,
+    t,
   ])
 
   const handleRestoreLocalStorageIssueItem = useCallback(async (item: UserAssetLocalStorageActionIssueItem) => {
     if (item.issueType !== 'missing_local_copy' || !item.restorableAsset) {
       publishFeedback?.({
         type: 'error',
-        text: '当前明细项暂不支持直接重新收录到本地。',
+        text: t('userAsset.workspace.issueItemNotRestorable'),
       })
       return
     }
 
     setExternalDirectorySubmitting(true)
-    setExternalDirectorySubmittingLabel(`正在重新收录“${item.title}”到本地...`)
+    setExternalDirectorySubmittingLabel(t('userAsset.workspace.restoringIssueItem', { title: item.title }))
     try {
       const result = await executeUserAssetLocalRestoreAction(item.restorableAsset)
       if (result.status === 'skipped') {
         publishFeedback?.({
           type: 'error',
-          text: '当前资产不支持重新收录到本地。',
+          text: t('userAsset.workspace.assetNotRestorable'),
         })
         return
       }
@@ -1030,35 +1059,37 @@ export function useUserAssetWorkspaceController(
           report: prev,
           issueItem: item,
           result,
+          locale: language,
+          t,
         })
       })
 
       if (result.status === 'blocked') {
         publishFeedback?.({
           type: 'error',
-          text: result.message || buildUserAssetLocalCopyRestoreErrorFallback(),
+          text: result.message || buildUserAssetLocalCopyRestoreErrorFallback(t),
         })
         return
       }
 
       publishFeedback?.({
         type: 'success',
-        text: buildUserAssetLocalCopyRestoreSuccessMessage(result.status === 'restored'),
+        text: buildUserAssetLocalCopyRestoreSuccessMessage(result.status === 'restored', t),
       })
     } catch (error) {
       publishFeedback?.({
         type: 'error',
-        text: await extractApiErrorMessage(error, buildUserAssetLocalCopyRestoreErrorFallback()),
+        text: await extractApiErrorMessage(error, buildUserAssetLocalCopyRestoreErrorFallback(t)),
       })
     } finally {
       setExternalDirectorySubmitting(false)
       setExternalDirectorySubmittingLabel(null)
     }
-  }, [loadUserAssets, publishFeedback])
+  }, [language, loadUserAssets, publishFeedback, t])
 
   const handlePreviewFilteredMissingLocalCopies = useCallback(async () => {
     setExternalDirectorySubmitting(true)
-    setExternalDirectorySubmittingLabel('正在扫描当前筛选并校验目录副本...')
+    setExternalDirectorySubmittingLabel(t('userAsset.workspace.scanningFiltered'))
     try {
       const {
         allFilteredAssets,
@@ -1082,12 +1113,14 @@ export function useUserAssetWorkspaceController(
         issueAssets: allFilteredAssets,
         projectTitleMap,
         completedAt: new Date(),
+        locale: language,
+        t,
       }))
 
       if (!allFilteredAssets.length) {
         publishFeedback?.({
           type: 'success',
-          text: '当前筛选内没有可扫描的资产。',
+          text: t('userAsset.workspace.filteredNoAssets'),
         })
         return
       }
@@ -1095,7 +1128,7 @@ export function useUserAssetWorkspaceController(
       if (!healthSummary || healthSummary.trackedAssetCount <= 0) {
         publishFeedback?.({
           type: 'success',
-          text: '已完成当前筛选扫描，未发现登记为用户目录副本的资产。',
+          text: t('userAsset.workspace.scanNoTracked'),
         })
         return
       }
@@ -1103,7 +1136,7 @@ export function useUserAssetWorkspaceController(
       if (!missingAssets.length && inaccessibleAssetCount <= 0) {
         publishFeedback?.({
           type: 'success',
-          text: '已完成当前筛选扫描，当前没有需要重建的缺失副本。',
+          text: t('userAsset.workspace.scanNoMissing'),
         })
         return
       }
@@ -1111,28 +1144,33 @@ export function useUserAssetWorkspaceController(
       publishFeedback?.({
         type: inaccessibleAssetCount > 0 ? 'error' : 'success',
         text: inaccessibleAssetCount > 0
-          ? `已完成当前筛选扫描：发现 ${missingAssets.length} 项缺失副本可重建，另有 ${inaccessibleAssetCount} 项因目录不可访问暂时无法处理。`
-          : `已完成当前筛选扫描：发现 ${missingAssets.length} 项缺失副本可执行重建。`,
+          ? t('userAsset.workspace.scanPartialInaccessible', {
+              missing: missingAssets.length,
+              inaccessible: inaccessibleAssetCount,
+            })
+          : t('userAsset.workspace.scanPartial', { count: missingAssets.length }),
       })
     } catch (error) {
       publishFeedback?.({
         type: 'error',
-        text: extractLocalDirectoryErrorMessage(error, '扫描当前筛选失败'),
+        text: extractLocalDirectoryErrorMessage(error, t('userAsset.workspace.scanFilteredFailed')),
       })
     } finally {
       setExternalDirectorySubmitting(false)
       setExternalDirectorySubmittingLabel(null)
     }
   }, [
+    language,
     projectTitleMap,
     publishFeedback,
     scanFilteredExternalDirectoryAssets,
     updateLastLocalStorageActionReport,
+    t,
   ])
 
   const handleRestoreFilteredMissingLocalCopies = useCallback(async () => {
     setExternalDirectorySubmitting(true)
-    setExternalDirectorySubmittingLabel('正在扫描当前筛选并校验目录副本...')
+    setExternalDirectorySubmittingLabel(t('userAsset.workspace.scanningFiltered'))
     try {
       const {
         allFilteredAssets,
@@ -1144,13 +1182,13 @@ export function useUserAssetWorkspaceController(
       if (!allFilteredAssets.length) {
         publishFeedback?.({
           type: 'success',
-          text: '当前筛选内没有可扫描的资产。',
+          text: t('userAsset.workspace.filteredNoAssets'),
         })
         return
       }
 
       const inaccessibleSuffix = inaccessibleAssetCount > 0
-        ? `；另有 ${inaccessibleAssetCount} 项因目录不可访问未纳入本次重建`
+        ? t('userAsset.workspace.restoreInaccessibleSuffix', { count: inaccessibleAssetCount })
         : ''
 
       if (!healthSummary || healthSummary.trackedAssetCount <= 0) {
@@ -1169,10 +1207,12 @@ export function useUserAssetWorkspaceController(
           issueAssets: allFilteredAssets,
           projectTitleMap,
           completedAt: new Date(),
+          locale: language,
+          t,
         }))
         publishFeedback?.({
           type: 'success',
-          text: '当前筛选内没有登记为用户目录副本的资产。',
+          text: t('userAsset.workspace.filteredNoTracked'),
         })
         return
       }
@@ -1193,17 +1233,19 @@ export function useUserAssetWorkspaceController(
           issueAssets: allFilteredAssets,
           projectTitleMap,
           completedAt: new Date(),
+          locale: language,
+          t,
         }))
         publishFeedback?.({
           type: inaccessibleAssetCount > 0 ? 'error' : 'success',
           text: inaccessibleAssetCount > 0
-            ? `已扫描当前筛选，发现 ${inaccessibleAssetCount} 项登记为用户目录副本的资产因目录不可访问，暂时无法直接重建，请先恢复访问后再重试。`
-            : '当前筛选内没有需要重建的缺失副本。',
+            ? t('userAsset.workspace.scannedInaccessibleOnly', { count: inaccessibleAssetCount })
+            : t('userAsset.workspace.filteredNoMissing'),
         })
         return
       }
 
-      setExternalDirectorySubmittingLabel('正在重建当前筛选中缺失的本地副本...')
+      setExternalDirectorySubmittingLabel(t('userAsset.workspace.restoringFiltered'))
       const summary = await runUserAssetLocalRestoreBatch(missingAssets, { skipFeedback: true })
       updateLastLocalStorageActionReport(buildUserAssetLocalStorageActionReport({
         mode: 'restore',
@@ -1220,29 +1262,33 @@ export function useUserAssetWorkspaceController(
         issueAssets: allFilteredAssets,
         projectTitleMap,
         completedAt: new Date(),
+        locale: language,
+        t,
       }))
       const baseText = summary.blockedCount > 0 || summary.failedCount > 0
-        ? buildUserAssetLocalCopyBatchRestoreErrorMessage(summary)
-        : buildUserAssetLocalCopyBatchRestoreSuccessMessage(summary)
+        ? buildUserAssetLocalCopyBatchRestoreErrorMessage(summary, t)
+        : buildUserAssetLocalCopyBatchRestoreSuccessMessage(summary, t)
       publishFeedback?.({
         type: summary.blockedCount > 0 || summary.failedCount > 0 ? 'error' : 'success',
-        text: `已扫描当前筛选，${baseText}${inaccessibleSuffix}`,
+        text: t('userAsset.workspace.scannedRestoreSummary', { result: baseText, suffix: inaccessibleSuffix }),
       })
     } catch (error) {
       publishFeedback?.({
         type: 'error',
-        text: extractLocalDirectoryErrorMessage(error, '扫描当前筛选并重建缺失副本失败'),
+        text: extractLocalDirectoryErrorMessage(error, t('userAsset.workspace.scanAndRestoreFailed')),
       })
     } finally {
       setExternalDirectorySubmitting(false)
       setExternalDirectorySubmittingLabel(null)
     }
   }, [
+    language,
     projectTitleMap,
     publishFeedback,
     runUserAssetLocalRestoreBatch,
     scanFilteredExternalDirectoryAssets,
     updateLastLocalStorageActionReport,
+    t,
   ])
 
   const handlePickExternalDirectory = useCallback(async () => {
@@ -1253,18 +1299,20 @@ export function useUserAssetWorkspaceController(
       setExternalDirectoryStatus(status)
       publishFeedback?.({
         type: 'success',
-        text: `已连接用户目录：${status.directoryName || '未命名目录'}。后续手动收录的新资产会优先写入该目录。`,
+        text: t('userAsset.workspace.pickDirectorySuccess', {
+          directory: status.directoryName || t('userAsset.common.unnamedDirectory'),
+        }),
       })
     } catch (error) {
       publishFeedback?.({
         type: 'error',
-        text: extractLocalDirectoryErrorMessage(error, '选择用户目录失败'),
+        text: extractLocalDirectoryErrorMessage(error, t('userAsset.workspace.pickDirectoryFailed')),
       })
     } finally {
       setExternalDirectorySubmitting(false)
       setExternalDirectorySubmittingLabel(null)
     }
-  }, [publishFeedback])
+  }, [publishFeedback, t])
 
   const handleRecoverExternalDirectoryAccess = useCallback(async () => {
     setExternalDirectorySubmitting(true)
@@ -1276,7 +1324,9 @@ export function useUserAssetWorkspaceController(
       if (status.permission === 'granted') {
         publishFeedback?.({
           type: 'success',
-          text: `已恢复用户目录访问：${status.directoryName || '未命名目录'}。后续手动收录会继续优先写入该目录。`,
+          text: t('userAsset.workspace.recoverAccessSuccess', {
+            directory: status.directoryName || t('userAsset.common.unnamedDirectory'),
+          }),
         })
         return
       }
@@ -1284,19 +1334,19 @@ export function useUserAssetWorkspaceController(
       publishFeedback?.({
         type: 'error',
         text: status.permission === 'denied'
-          ? '浏览器仍未授予该目录访问权限，请重新选择目录或检查浏览器权限设置。'
-          : '未能恢复用户目录访问，请重试或重新选择目录。',
+          ? t('userAsset.workspace.recoverAccessDenied')
+          : t('userAsset.workspace.recoverAccessUnknown'),
       })
     } catch (error) {
       publishFeedback?.({
         type: 'error',
-        text: extractLocalDirectoryErrorMessage(error, '恢复用户目录访问失败'),
+        text: extractLocalDirectoryErrorMessage(error, t('userAsset.workspace.recoverAccessFailed')),
       })
     } finally {
       setExternalDirectorySubmitting(false)
       setExternalDirectorySubmittingLabel(null)
     }
-  }, [publishFeedback])
+  }, [publishFeedback, t])
 
   const handleClearExternalDirectory = useCallback(async () => {
     setExternalDirectorySubmitting(true)
@@ -1306,18 +1356,18 @@ export function useUserAssetWorkspaceController(
       await loadExternalDirectoryStatus({ silent: true })
       publishFeedback?.({
         type: 'success',
-        text: '已清除用户目录配置。后续手动收录的新资产将回退到浏览器本地存储。',
+        text: t('userAsset.workspace.clearDirectorySuccess'),
       })
     } catch (error) {
       publishFeedback?.({
         type: 'error',
-        text: extractLocalDirectoryErrorMessage(error, '清除用户目录配置失败'),
+        text: extractLocalDirectoryErrorMessage(error, t('userAsset.workspace.clearDirectoryFailed')),
       })
     } finally {
       setExternalDirectorySubmitting(false)
       setExternalDirectorySubmittingLabel(null)
     }
-  }, [loadExternalDirectoryStatus, publishFeedback])
+  }, [loadExternalDirectoryStatus, publishFeedback, t])
 
   const handleBatchUpdateUserAssets = useCallback(async (command: UserAssetBatchActionCommand) => {
     if (!assetSelectionState.selectedAssets.length) return
@@ -1343,14 +1393,14 @@ export function useUserAssetWorkspaceController(
         if (summary.failedCount > 0) {
           publishFeedback?.({
             type: 'error',
-            text: buildUserAssetLocalCopyBatchClearErrorMessage(summary),
+            text: buildUserAssetLocalCopyBatchClearErrorMessage(summary, t),
           })
           return
         }
 
         publishFeedback?.({
           type: 'success',
-          text: buildUserAssetLocalCopyBatchClearSuccessMessage(summary),
+          text: buildUserAssetLocalCopyBatchClearSuccessMessage(summary, t),
         })
         return
       }
@@ -1371,17 +1421,17 @@ export function useUserAssetWorkspaceController(
       setSelectedAssetIds((prev) => prev.filter((assetId) => !updatedIds.includes(assetId)))
       publishFeedback?.({
         type: 'success',
-        text: buildUserAssetBatchSuccessMessage(command, updatedCount),
+        text: buildUserAssetBatchSuccessMessage(command, updatedCount, t),
       })
     } catch (batchError) {
       publishFeedback?.({
         type: 'error',
-        text: await extractApiErrorMessage(batchError, buildUserAssetBatchErrorFallback(command)),
+        text: await extractApiErrorMessage(batchError, buildUserAssetBatchErrorFallback(command, t)),
       })
     } finally {
       setAssetBatchSubmitting(false)
     }
-  }, [assetSelectionState.selectedAssets, loadUserAssets, publishFeedback, runUserAssetLocalRestoreBatch])
+  }, [assetSelectionState.selectedAssets, loadUserAssets, publishFeedback, runUserAssetLocalRestoreBatch, t])
 
   const handleOpenAssetEditor = useCallback((asset: UserAssetRecord) => {
     setEditingAsset(asset)
@@ -1402,24 +1452,24 @@ export function useUserAssetWorkspaceController(
       if (result.status === 'blocked') {
         publishFeedback?.({
           type: 'error',
-          text: result.message || buildUserAssetLocalCopyRestoreErrorFallback(),
+          text: result.message || buildUserAssetLocalCopyRestoreErrorFallback(t),
         })
         return
       }
 
       publishFeedback?.({
         type: 'success',
-        text: buildUserAssetLocalCopyRestoreSuccessMessage(result.status === 'restored'),
+        text: buildUserAssetLocalCopyRestoreSuccessMessage(result.status === 'restored', t),
       })
     } catch (restoreError) {
       publishFeedback?.({
         type: 'error',
-        text: await extractApiErrorMessage(restoreError, buildUserAssetLocalCopyRestoreErrorFallback()),
+        text: await extractApiErrorMessage(restoreError, buildUserAssetLocalCopyRestoreErrorFallback(t)),
       })
     } finally {
       setAssetActionKey(null)
     }
-  }, [loadUserAssets, publishFeedback])
+  }, [loadUserAssets, publishFeedback, t])
 
   const handleClearLocalAssetCopy = useCallback(async (
     asset: Pick<UserAssetRecord, 'id' | 'asset_uuid' | 'storage_mode'>,
@@ -1434,17 +1484,17 @@ export function useUserAssetWorkspaceController(
       await loadUserAssets(true)
       publishFeedback?.({
         type: 'success',
-        text: buildUserAssetLocalCopyClearSuccessMessage(result.cleared),
+        text: buildUserAssetLocalCopyClearSuccessMessage(result.cleared, t),
       })
     } catch (clearError) {
       publishFeedback?.({
         type: 'error',
-        text: await extractApiErrorMessage(clearError, buildUserAssetLocalCopyClearErrorFallback()),
+        text: await extractApiErrorMessage(clearError, buildUserAssetLocalCopyClearErrorFallback(t)),
       })
     } finally {
       setAssetActionKey(null)
     }
-  }, [loadUserAssets, publishFeedback])
+  }, [loadUserAssets, publishFeedback, t])
 
   const handleCloseAssetEditor = useCallback(() => {
     if (assetEditorSubmitting) return
@@ -1455,11 +1505,11 @@ export function useUserAssetWorkspaceController(
 
   const handleSaveAssetEditor = useCallback(async () => {
     if (!editingAsset) return
-    const normalized = normalizeUserAssetEditorPayload(assetEditorData)
+    const normalized = normalizeUserAssetEditorPayload(assetEditorData, t)
     if (normalized.validationError || !normalized.payload) {
       publishFeedback?.({
         type: 'error',
-        text: normalized.validationError || buildUserAssetEditorSaveErrorFallback(),
+        text: normalized.validationError || buildUserAssetEditorSaveErrorFallback(t),
       })
       return
     }
@@ -1470,7 +1520,7 @@ export function useUserAssetWorkspaceController(
       await loadUserAssets(true)
       publishFeedback?.({
         type: 'success',
-        text: buildUserAssetEditorSaveSuccessMessage(),
+        text: buildUserAssetEditorSaveSuccessMessage(t),
       })
       setAssetEditorOpen(false)
       setEditingAsset(null)
@@ -1478,12 +1528,12 @@ export function useUserAssetWorkspaceController(
     } catch (saveError) {
       publishFeedback?.({
         type: 'error',
-        text: await extractApiErrorMessage(saveError, buildUserAssetEditorSaveErrorFallback()),
+        text: await extractApiErrorMessage(saveError, buildUserAssetEditorSaveErrorFallback(t)),
       })
     } finally {
       setAssetEditorSubmitting(false)
     }
-  }, [assetEditorData, editingAsset, loadUserAssets, publishFeedback])
+  }, [assetEditorData, editingAsset, loadUserAssets, publishFeedback, t])
 
   const workspaceSectionProps = useMemo<Omit<UserAssetWorkspaceSectionProps, 'children'>>(
     () => ({

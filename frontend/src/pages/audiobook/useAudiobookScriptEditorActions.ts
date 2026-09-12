@@ -1,5 +1,7 @@
 import { useCallback, type Dispatch, type SetStateAction } from 'react'
 
+import { useTranslation } from 'react-i18next'
+
 import {
   apiClient,
   extractApiErrorMessage,
@@ -68,6 +70,7 @@ export const useAudiobookScriptEditorActions = ({
   setTimelineEdits,
   setSnackbar,
 }: UseAudiobookScriptEditorActionsParams) => {
+  const { t } = useTranslation()
   const handleOpenScriptEditor = useCallback(async (
     chapterId: number,
     initialSegmentIndex?: number | null,
@@ -103,12 +106,12 @@ export const useAudiobookScriptEditorActions = ({
       }
     }
     if (!targetProject) {
-      setSnackbar({ open: true, message: '请先创建有声书项目', severity: 'error' })
+      setSnackbar({ open: true, message: t('audiobook.useAudiobookScriptEditorActions.createProjectFirst'), severity: 'error' })
       return
     }
 
     setScriptEditorInitialSegmentIndex(initialSegmentIndex ?? null)
-    setScriptEditorChapter(buildScriptEditorChapterRef(chapterId, chapters))
+    setScriptEditorChapter(buildScriptEditorChapterRef(chapterId, chapters, t))
 
     try {
       resetScriptEditorTransientState()
@@ -124,7 +127,7 @@ export const useAudiobookScriptEditorActions = ({
       setScriptEditorInitialSegmentIndex(null)
       setSnackbar({
         open: true,
-        message: await extractApiErrorMessage(err, '获取章节剧本失败'),
+        message: await extractApiErrorMessage(err, t('audiobook.useAudiobookScriptEditorActions.fetchScriptFailed')),
         severity: 'error',
       })
     } finally {
@@ -146,6 +149,7 @@ export const useAudiobookScriptEditorActions = ({
     setSmartChunkPreviewLoading,
     setTimelineEdits,
     setSnackbar,
+    t,
   ])
 
   const handleReloadScriptEditor = useCallback(async () => {
@@ -162,7 +166,7 @@ export const useAudiobookScriptEditorActions = ({
     } catch (err: unknown) {
       setSnackbar({
         open: true,
-        message: await extractApiErrorMessage(err, '刷新章节剧本失败，请重新打开工作台'),
+        message: await extractApiErrorMessage(err, t('audiobook.useAudiobookScriptEditorActions.refreshScriptFailed')),
         severity: 'warning',
       })
     }
@@ -175,6 +179,7 @@ export const useAudiobookScriptEditorActions = ({
     setSmartChunkPreviewLoading,
     setTimelineEdits,
     setSnackbar,
+    t,
   ])
 
   const handleCloseScriptEditorDialog = useCallback(() => {
@@ -246,7 +251,7 @@ export const useAudiobookScriptEditorActions = ({
       } catch {
         setSnackbar({
           open: true,
-          message: '剧本已保存，但项目状态刷新失败，请重新打开项目',
+          message: t('audiobook.useAudiobookScriptEditorActions.savedButRefreshFailed'),
           severity: 'warning',
         })
         // 保存/审批已落库，后续动作（如生成音频）仍可基于服务端状态继续
@@ -254,14 +259,14 @@ export const useAudiobookScriptEditorActions = ({
       }
       setSnackbar({
         open: true,
-        message: options.nextStatus === 'approved' ? '剧本已批准' : '剧本已保存',
+        message: options.nextStatus === 'approved' ? t('audiobook.useAudiobookScriptEditorActions.scriptApproved') : t('audiobook.useAudiobookScriptEditorActions.scriptSaved'),
         severity: 'success',
       })
       return true
     } catch (err: unknown) {
       setSnackbar({
         open: true,
-        message: await extractApiErrorMessage(err, '保存失败，请稍后重试'),
+        message: await extractApiErrorMessage(err, t('audiobook.useAudiobookScriptEditorActions.saveFailed')),
         severity: 'error',
       })
       return false
@@ -277,11 +282,12 @@ export const useAudiobookScriptEditorActions = ({
     setScriptEditorData,
     setScriptEditorLoading,
     setSnackbar,
+    t,
   ])
 
   const handlePreviewSmartChunking = useCallback(async () => {
     if (!scriptEditorData?.scriptSegments.length) {
-      setSnackbar({ open: true, message: '当前章节没有可诊断的剧本片段', severity: 'warning' })
+      setSnackbar({ open: true, message: t('audiobook.useAudiobookScriptEditorActions.noDiagnosableSegments'), severity: 'warning' })
       return
     }
 
@@ -292,7 +298,7 @@ export const useAudiobookScriptEditorActions = ({
     } catch (error) {
       setSnackbar({
         open: true,
-        message: await extractApiErrorMessage(error, '分块诊断失败'),
+        message: await extractApiErrorMessage(error, t('audiobook.useAudiobookScriptEditorActions.chunkDiagnoseFailed')),
         severity: 'error',
       })
     } finally {
@@ -303,6 +309,7 @@ export const useAudiobookScriptEditorActions = ({
     setSmartChunkPreview,
     setSmartChunkPreviewLoading,
     setSnackbar,
+    t,
   ])
 
   return {

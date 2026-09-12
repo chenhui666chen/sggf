@@ -1,5 +1,9 @@
-import { describe, expect, it, vi } from 'vitest'
+import { beforeAll, describe, expect, it, vi } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
+import type { ReactElement } from 'react'
+import type { i18n as I18nInstance } from 'i18next'
+
+import { I18nProvider, bootstrapI18n } from '@/i18n'
 
 import UserAssetListSection from '../user-assets/UserAssetListSection'
 
@@ -12,6 +16,16 @@ function extractVisibleText(markup: string): string {
     .replace(/&nbsp;/g, ' ')
     .replace(/\s+/g, ' ')
     .trim()
+}
+
+let i18nInstance: I18nInstance
+
+beforeAll(async () => {
+  i18nInstance = await bootstrapI18n('zh-CN')
+})
+
+function renderWithI18n(node: ReactElement): string {
+  return renderToStaticMarkup(<I18nProvider instance={i18nInstance}>{node}</I18nProvider>)
 }
 
 function createFilterToolbarProps() {
@@ -39,7 +53,7 @@ function createFilterToolbarProps() {
 
 describe('UserAssetListSection', () => {
   it('renders the pagination summary and navigation when paginated assets are visible', () => {
-    const markup = renderToStaticMarkup(
+    const markup = renderWithI18n(
       <UserAssetListSection
         filterToolbar={createFilterToolbarProps()}
         warningMessage={null}
@@ -68,7 +82,7 @@ describe('UserAssetListSection', () => {
   })
 
   it('does not render pagination when the collection is empty', () => {
-    const markup = renderToStaticMarkup(
+    const markup = renderWithI18n(
       <UserAssetListSection
         filterToolbar={createFilterToolbarProps()}
         warningMessage={null}

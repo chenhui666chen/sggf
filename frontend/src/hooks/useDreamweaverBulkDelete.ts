@@ -1,5 +1,7 @@
 import { useCallback, useState } from 'react'
 
+import { useTranslation } from 'react-i18next'
+
 import { apiClient, extractApiErrorMessage } from '@/services/api'
 import type { BulkDeleteProgress, BulkDeleteResult, DreamweaverRunSummary } from '@/types/dreamweaver'
 
@@ -38,6 +40,8 @@ export function useDreamweaverBulkDelete(
     onFetchRunHistory,
     onRefreshLockedGenerationConfig,
   } = params
+
+  const { t } = useTranslation()
 
   const [bulkDeleteDialogOpen, setBulkDeleteDialogOpen] = useState(false)
   const [bulkDeleteSubmitting, setBulkDeleteSubmitting] = useState(false)
@@ -92,7 +96,7 @@ export function useDreamweaverBulkDelete(
           onResetCurrentRunState()
         }
       } catch (e: unknown) {
-        const msg = await extractApiErrorMessage(e, '删除失败')
+        const msg = await extractApiErrorMessage(e, t('dreamweaverRun.errorDeleteFailed'))
         errors.push(`${runId}: ${msg}`)
       } finally {
         setBulkDeleteProgress({ current: i + 1, total: targets.length })
@@ -126,6 +130,7 @@ export function useDreamweaverBulkDelete(
     onClearPersistedRunIfMatch,
     onFetchRunHistory,
     onRefreshLockedGenerationConfig,
+    t,
   ])
 
   return {

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import {
   Autocomplete,
   Box,
@@ -61,6 +62,7 @@ const AudioPicker = ({
   paperSx,
   textFieldSx,
 }: AudioPickerProps) => {
+  const { t } = useTranslation()
   const [options, setOptions] = useState<AudioOption[]>([])
   const [open, setOpen] = useState(false)
   const [search, setSearch] = useState('')
@@ -112,9 +114,9 @@ const AudioPicker = ({
 
   const resolveOptionLabel = (option: string | AudioOption): string => {
     if (typeof option === 'string') return option
-    if (type === 'sfx') return formatAudioAssetNameLabel((option as SfxOption).name)
+    if (type === 'sfx') return formatAudioAssetNameLabel((option as SfxOption).name, t)
     const music = option as MusicOption
-    return `${formatAudioKeywordLabel(music.style)} - ${formatAudioKeywordLabel(music.mood)}`
+    return `${formatAudioKeywordLabel(music.style, t)} - ${formatAudioKeywordLabel(music.mood, t)}`
   }
 
   return (
@@ -143,8 +145,8 @@ const AudioPicker = ({
                   id: newValue.id,
                   type: 'music' as const,
                   label: resolveOptionLabel(newValue),
-                  style: formatAudioKeywordLabel((newValue as MusicOption).style),
-                  mood: formatAudioKeywordLabel((newValue as MusicOption).mood),
+                  style: formatAudioKeywordLabel((newValue as MusicOption).style, t),
+                  mood: formatAudioKeywordLabel((newValue as MusicOption).mood, t),
                 }
             if (onSelectAsset) {
               onSelectAsset?.(selection)
@@ -172,16 +174,16 @@ const AudioPicker = ({
                 </Typography>
                 {type === 'sfx' && (
                   <>
-                    <Chip label={formatSfxCategoryLabel((option as SfxOption).category)} size="small" variant="outlined" />
+                    <Chip label={formatSfxCategoryLabel((option as SfxOption).category, t)} size="small" variant="outlined" />
                     {((option as SfxOption).scenes || []).slice(0, 2).map((scene) => (
-                      <Chip key={scene} label={formatAudioKeywordLabel(scene)} size="small" variant="outlined" />
+                      <Chip key={scene} label={formatAudioKeywordLabel(scene, t)} size="small" variant="outlined" />
                     ))}
                   </>
                 )}
                 {type === 'music' && (
                   <>
-                    <Chip label={formatAudioKeywordLabel((option as MusicOption).mood)} size="small" />
-                    <Chip label={formatMusicDurationLabel((option as MusicOption).duration)} size="small" />
+                    <Chip label={formatAudioKeywordLabel((option as MusicOption).mood, t)} size="small" />
+                    <Chip label={formatMusicDurationLabel((option as MusicOption).duration, t)} size="small" />
                   </>
                 )}
               </Box>
@@ -192,7 +194,7 @@ const AudioPicker = ({
           <TextField
             {...params}
             label={label}
-            placeholder="搜索素材库或手动输入..."
+            placeholder={t('audiobook.audioPicker.searchPlaceholder')}
             sx={textFieldSx}
           />
         )}

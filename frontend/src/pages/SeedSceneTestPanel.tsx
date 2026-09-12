@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import {
   Alert,
   Box,
@@ -84,16 +85,16 @@ const EMPTY_FLAGS: SeedSceneTestReviewFlags = {
   usable: null,
 }
 
-const REVIEW_ITEMS: Array<{ key: keyof SeedSceneTestReviewFlags; label: string }> = [
-  { key: 'dialogueComplete', label: '台词完整' },
-  { key: 'plotUnderstandable', label: '剧情可懂' },
-  { key: 'voicesDistinct', label: '角色可区分' },
-  { key: 'voiceConsistent', label: '音色一致' },
-  { key: 'emotionNatural', label: '情绪表演' },
-  { key: 'effectsTimed', label: '音效时序' },
-  { key: 'musicAppropriate', label: '配乐适配' },
-  { key: 'mixClear', label: '混音清晰' },
-  { key: 'usable', label: '可用于生产' },
+const REVIEW_ITEMS: Array<{ key: keyof SeedSceneTestReviewFlags; label: string; labelKey: string }> = [
+  { key: 'dialogueComplete', label: '台词完整', labelKey: 'audiobook.seedSceneTest.reviewDialogueComplete' },
+  { key: 'plotUnderstandable', label: '剧情可懂', labelKey: 'audiobook.seedSceneTest.reviewPlotUnderstandable' },
+  { key: 'voicesDistinct', label: '角色可区分', labelKey: 'audiobook.seedSceneTest.reviewVoicesDistinct' },
+  { key: 'voiceConsistent', label: '音色一致', labelKey: 'audiobook.seedSceneTest.reviewVoiceConsistent' },
+  { key: 'emotionNatural', label: '情绪自然', labelKey: 'audiobook.seedSceneTest.reviewEmotionNatural' },
+  { key: 'effectsTimed', label: '音效时序', labelKey: 'audiobook.seedSceneTest.reviewEffectsTimed' },
+  { key: 'musicAppropriate', label: '配乐合适', labelKey: 'audiobook.seedSceneTest.reviewMusicAppropriate' },
+  { key: 'mixClear', label: '混音清晰', labelKey: 'audiobook.seedSceneTest.reviewMixClear' },
+  { key: 'usable', label: '可用于生产', labelKey: 'audiobook.seedSceneTest.reviewUsable' },
 ]
 
 const resetReviewEditor = (
@@ -140,6 +141,7 @@ const ReferenceSlotRow = ({
   onAssign: (reference: SeedSceneTestReferencePayload) => void
   onClear: () => void
 }) => {
+  const { t } = useTranslation()
   const objectAudioUrlRef = useRef<string | null>(null)
   const [selectedModel, setSelectedModel] = useState<TtsModel>(
     assigned?.source_model || modelOptions[0]?.id || '',
@@ -193,7 +195,7 @@ const ReferenceSlotRow = ({
         if (!active) return
         setVoices([])
         setSelectedVoiceId('')
-        setSlotError(await extractApiErrorMessage(requestError, '加载音色失败'))
+        setSlotError(await extractApiErrorMessage(requestError, t('audiobook.seedSceneTest.loadVoicesFailed')))
       } finally {
         if (active) setVoiceLoading(false)
       }
@@ -249,10 +251,10 @@ const ReferenceSlotRow = ({
         }))
         replacePreviewAudioUrl(URL.createObjectURL(result.blob), true)
       } else {
-        throw new Error('试听接口没有返回可用音频')
+        throw new Error(t('audiobook.seedSceneTest.previewEmptyError'))
       }
     } catch (requestError) {
-      setSlotError(await extractApiErrorMessage(requestError, '生成或加载试听失败'))
+      setSlotError(await extractApiErrorMessage(requestError, t('audiobook.seedSceneTest.loadPreviewFailed')))
     } finally {
       setPreviewLoading(false)
     }
@@ -282,7 +284,7 @@ const ReferenceSlotRow = ({
             <Typography variant="caption" color="text.secondary">{slot.description}</Typography>
           </Box>
           {assigned && (
-            <Tooltip title="清除 reference">
+            <Tooltip title={t('audiobook.seedSceneTest.clearReference')}>
               <IconButton size="small" onClick={onClear}><DeleteOutlineIcon fontSize="small" /></IconButton>
             </Tooltip>
           )}
@@ -290,10 +292,10 @@ const ReferenceSlotRow = ({
 
         <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} alignItems={{ sm: 'center' }}>
           <FormControl size="small" sx={{ minWidth: { sm: 190 } }}>
-            <InputLabel id={`${slot.id}-model-label`}>模型</InputLabel>
+            <InputLabel id={`${slot.id}-model-label`}>{t('audiobook.seedSceneTest.modelLabel')}</InputLabel>
             <Select
               labelId={`${slot.id}-model-label`}
-              label="模型"
+              label={t('audiobook.seedSceneTest.modelLabel')}
               value={selectedModel}
               onChange={(event) => handleModelChange(event.target.value)}
             >
@@ -303,10 +305,10 @@ const ReferenceSlotRow = ({
             </Select>
           </FormControl>
           <FormControl size="small" sx={{ minWidth: 0, flex: 1 }} disabled={voiceLoading || !selectedModel}>
-            <InputLabel id={`${slot.id}-voice-label`}>{voiceLoading ? '加载中...' : '音色'}</InputLabel>
+            <InputLabel id={`${slot.id}-voice-label`}>{voiceLoading ? t('audiobook.seedSceneTest.voiceLoading') : t('audiobook.seedSceneTest.voiceLabel')}</InputLabel>
             <Select
               labelId={`${slot.id}-voice-label`}
-              label={voiceLoading ? '加载中...' : '音色'}
+              label={voiceLoading ? t('audiobook.seedSceneTest.voiceLoading') : t('audiobook.seedSceneTest.voiceLabel')}
               value={selectedVoiceId}
               onChange={(event) => handleVoiceChange(event.target.value)}
             >
@@ -315,13 +317,13 @@ const ReferenceSlotRow = ({
               ))}
             </Select>
           </FormControl>
-          <Tooltip title={usesNativeSpeaker ? '试听并绑定为原生 speaker' : '试听并绑定为音频 reference'}>
+          <Tooltip title={usesNativeSpeaker ? t('audiobook.seedSceneTest.bindNativeSpeaker') : t('audiobook.seedSceneTest.bindAudioReference')}>
             <span>
               <IconButton
                 color="primary"
                 disabled={previewLoading || voiceLoading || !selectedVoiceId}
                 onClick={() => void handlePreviewAndAssign()}
-                aria-label={`试听并绑定${slot.speaker}音色`}
+                aria-label={t('audiobook.seedSceneTest.bindAria', { speaker: slot.speaker })}
               >
                 {previewLoading ? <CircularProgress size={20} /> : <PlayArrowIcon />}
               </IconButton>
@@ -334,7 +336,7 @@ const ReferenceSlotRow = ({
             onClick={handleAssignLatestPreview}
             sx={{ whiteSpace: 'nowrap' }}
           >
-            使用当前试听
+            {t('audiobook.seedSceneTest.useCurrentPreview')}
           </Button>
         </Stack>
 
@@ -343,7 +345,7 @@ const ReferenceSlotRow = ({
             size="small"
             color="success"
             variant="outlined"
-            label={`已绑定：${assigned.source_model} · ${assigned.source_voice_id}${isNativeSeedSpeakerModel(assigned.source_model) ? ' · 原生 speaker' : ' · 音频 reference'}`}
+            label={t('audiobook.seedSceneTest.boundLabel', { model: assigned.source_model, voice: assigned.source_voice_id }) + (isNativeSeedSpeakerModel(assigned.source_model) ? t('audiobook.seedSceneTest.boundNativeSuffix') : t('audiobook.seedSceneTest.boundReferenceSuffix'))}
             sx={{ alignSelf: 'flex-start', maxWidth: '100%' }}
           />
         )}
@@ -376,16 +378,18 @@ const SceneReviewEditor = ({
   onFlagChange,
   onNotesChange,
   onSave,
-}: SceneReviewEditorProps) => (
+}: SceneReviewEditorProps) => {
+  const { t } = useTranslation()
+  return (
   <Stack spacing={1.5}>
-    <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>试听评审</Typography>
+    <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>{t('audiobook.seedSceneTest.reviewTitle')}</Typography>
     <Stack direction="row" alignItems="center" justifyContent="space-between">
-      <Typography variant="body2">综合评分</Typography>
+      <Typography variant="body2">{t('audiobook.seedSceneTest.overallScore')}</Typography>
       <Rating value={score} precision={0.5} onChange={(_, value) => onScoreChange(value)} />
     </Stack>
     {REVIEW_ITEMS.map((item) => (
       <Stack key={item.key} direction="row" alignItems="center" justifyContent="space-between" spacing={1}>
-        <Typography variant="body2">{item.label}</Typography>
+        <Typography variant="body2">{t(item.labelKey)}</Typography>
         <ToggleButtonGroup
           exclusive
           size="small"
@@ -395,13 +399,13 @@ const SceneReviewEditor = ({
           }}
           sx={{ '& .MuiToggleButton-root': { px: 1, py: 0.4 } }}
         >
-          <ToggleButton value="pending">待评</ToggleButton>
-          <ToggleButton value="pass" color="success">通过</ToggleButton>
-          <ToggleButton value="fail" color="error">未通过</ToggleButton>
+          <ToggleButton value="pending">{t('audiobook.seedSceneTest.flagPending')}</ToggleButton>
+          <ToggleButton value="pass" color="success">{t('audiobook.seedSceneTest.flagPass')}</ToggleButton>
+          <ToggleButton value="fail" color="error">{t('audiobook.seedSceneTest.flagFail')}</ToggleButton>
         </ToggleButtonGroup>
       </Stack>
     ))}
-    <TextField label="评审备注" multiline minRows={3} value={notes} onChange={(event) => onNotesChange(event.target.value)} />
+    <TextField label={t('audiobook.seedSceneTest.reviewNotes')} multiline minRows={3} value={notes} onChange={(event) => onNotesChange(event.target.value)} />
     <Button
       variant="contained"
       startIcon={<SaveIcon />}
@@ -409,12 +413,14 @@ const SceneReviewEditor = ({
       color={saved ? 'success' : 'primary'}
       disabled={!canSave}
     >
-      {saved ? '已保存' : '保存评审'}
+      {saved ? t('audiobook.seedSceneTest.savedLabel') : t('audiobook.seedSceneTest.saveReview')}
     </Button>
   </Stack>
-)
+  )
+}
 
 const SeedSceneTestPanel = ({ latestTtsPreview }: SeedSceneTestPanelProps) => {
+  const { t } = useTranslation()
   const audioUrlRef = useRef<string | null>(null)
   const [cases, setCases] = useState<SeedSceneTestCase[]>([])
   const [selectedCaseId, setSelectedCaseId] = useState('')
@@ -479,7 +485,7 @@ const SeedSceneTestPanel = ({ latestTtsPreview }: SeedSceneTestPanelProps) => {
         setCases(nextCases)
         setSelectedCaseId(nextCases[0]?.id ?? '')
       } catch (requestError) {
-        if (active) setError(await extractApiErrorMessage(requestError, '加载场景测试用例失败'))
+        if (active) setError(await extractApiErrorMessage(requestError, t('audiobook.seedSceneTest.loadCasesFailed')))
       } finally {
         if (active) setLoading(false)
       }
@@ -585,7 +591,8 @@ const SeedSceneTestPanel = ({ latestTtsPreview }: SeedSceneTestPanelProps) => {
       ))
     } catch (requestError) {
       setPreviewError(formatSeedSceneTestError(
-        await extractApiErrorMessage(requestError, '生成场景样本失败'),
+        await extractApiErrorMessage(requestError, t('audiobook.seedSceneTest.generateSampleFailed')),
+        t,
       ))
     } finally {
       setGenerating(false)
@@ -660,18 +667,26 @@ const SeedSceneTestPanel = ({ latestTtsPreview }: SeedSceneTestPanelProps) => {
       gridTemplateColumns: { xs: '1fr', md: '260px minmax(380px, 1fr)', xl: '260px minmax(440px, 1fr) 390px' },
       minHeight: 'calc(100vh - 67px)',
     }}>
-      <Box component="nav" sx={{ bgcolor: 'white', borderRight: { md: '1px solid #dce1e5' }, p: 2 }}>
+      <Box
+              component="nav"
+              sx={{
+                bgcolor: 'background.paper',
+                borderRight: { md: '1px solid' },
+                borderRightColor: { md: 'divider' },
+                p: 2,
+              }}
+            >
         <Stack direction="row" justifyContent="space-between" alignItems="center">
-          <Typography variant="overline" color="text.secondary">场景</Typography>
+          <Typography variant="overline" color="text.secondary">{t('audiobook.seedSceneTest.sceneNav')}</Typography>
           <Stack direction="row" spacing={0.5} alignItems="center">
             <Chip size="small" label={`${progress.reviewed}/${progress.total}`} />
-            <Tooltip title="导出评审数据">
+            <Tooltip title={t('audiobook.seedSceneTest.exportReviewData')}>
               <span>
                 <IconButton
                   size="small"
                   disabled={reviews.length === 0}
                   onClick={handleExportReviews}
-                  aria-label="导出评审数据"
+                  aria-label={t('audiobook.seedSceneTest.exportReviewData')}
                 >
                   <DownloadIcon fontSize="small" />
                 </IconButton>
@@ -698,14 +713,14 @@ const SeedSceneTestPanel = ({ latestTtsPreview }: SeedSceneTestPanelProps) => {
         </Stack>
       </Box>
 
-      <Box component="main" sx={{ p: { xs: 2, lg: 3 }, minWidth: 0, borderRight: { xl: '1px solid #dce1e5' } }}>
+      <Box component="main" sx={{ p: { xs: 2, lg: 3 }, minWidth: 0, borderRight: { xl: '1px solid' }, borderRightColor: { xl: 'divider' } }}>
         {selectedCase && selectedVariant ? (
           <Stack spacing={2.25}>
             <Box>
               <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
                 <Typography variant="h5" sx={{ fontWeight: 700 }}>{selectedCase.name}</Typography>
                 <Chip size="small" label={selectedCase.model} />
-                <Chip size="small" variant="outlined" label={`约 ${selectedCase.expected_duration_s} 秒`} />
+                <Chip size="small" variant="outlined" label={t('audiobook.seedSceneTest.expectedDuration', { seconds: selectedCase.expected_duration_s })} />
               </Stack>
               <Typography variant="body2" color="text.secondary" sx={{ mt: 0.75 }}>{selectedCase.purpose}</Typography>
             </Box>
@@ -726,10 +741,10 @@ const SeedSceneTestPanel = ({ latestTtsPreview }: SeedSceneTestPanelProps) => {
               size="small"
               value={sampleIndex}
               onChange={(_, value: number | null) => { if (value) setSampleIndex(value) }}
-              aria-label="复测序号"
+              aria-label={t('audiobook.seedSceneTest.retestAria')}
             >
               {Array.from({ length: selectedCase.repeat_count || 3 }, (_, index) => index + 1).map((value) => (
-                <ToggleButton key={value} value={value}>第 {value} 次</ToggleButton>
+                <ToggleButton key={value} value={value}>{t('audiobook.seedSceneTest.sampleIndex', { count: value })}</ToggleButton>
               ))}
             </ToggleButtonGroup>
 
@@ -750,14 +765,14 @@ const SeedSceneTestPanel = ({ latestTtsPreview }: SeedSceneTestPanelProps) => {
             )}
 
             <Paper variant="outlined" sx={{ p: 2, borderRadius: 1 }}>
-              <Typography variant="caption" color="text.secondary">最终场景 Prompt</Typography>
+              <Typography variant="caption" color="text.secondary">{t('audiobook.seedSceneTest.finalPrompt')}</Typography>
               <Box component="pre" sx={{ m: 0, mt: 1, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', fontFamily: 'Consolas, monospace', fontSize: 12, lineHeight: 1.65 }}>
                 {selectedVariant.prompt}
               </Box>
             </Paper>
 
             {missingReferenceSlots.length > 0 && (
-              <Alert severity="warning">缺少 reference：{missingReferenceSlots.map((slot) => slot.speaker).join('、')}</Alert>
+              <Alert severity="warning">{t('audiobook.seedSceneTest.missingReference', { speakers: missingReferenceSlots.map((slot) => slot.speaker).join('、') })}</Alert>
             )}
             {previewError && <Alert severity="error">{previewError}</Alert>}
 
@@ -768,32 +783,32 @@ const SeedSceneTestPanel = ({ latestTtsPreview }: SeedSceneTestPanelProps) => {
                 disabled={generating || missingReferenceSlots.length > 0}
                 onClick={() => void handlePreview(false)}
               >
-                {generating ? '生成中...' : '生成样本'}
+                {generating ? t('audiobook.seedSceneTest.generating') : t('audiobook.seedSceneTest.generateSample')}
               </Button>
-              <Tooltip title="忽略当前复测缓存并重新生成，会产生新的供应商费用">
+              <Tooltip title={t('audiobook.seedSceneTest.regenerateHint')}>
                 <span>
                   <IconButton disabled={generating || missingReferenceSlots.length > 0} onClick={() => void handlePreview(true)}>
                     <RefreshIcon />
                   </IconButton>
                 </span>
               </Tooltip>
-              {preview?.cached && <Chip size="small" color="success" label="已复用缓存" />}
+              {preview?.cached && <Chip size="small" color="success" label={t('audiobook.seedSceneTest.reusedCache')} />}
             </Stack>
 
             {audioUrl && preview && (
               <Paper variant="outlined" sx={{ p: 2, borderRadius: 1 }}>
                 <Box component="audio" src={audioUrl} controls autoPlay sx={{ width: '100%', display: 'block' }} />
                 <Stack direction="row" spacing={1} sx={{ mt: 1 }} flexWrap="wrap" useFlexGap>
-                  <Chip size="small" label={`${preview.duration?.toFixed(1) ?? '--'} 秒`} />
-                  <Chip size="small" label={`第 ${preview.sample_index} 次`} />
+                  <Chip size="small" label={t('audiobook.seedSceneTest.durationLabel', { seconds: preview.duration?.toFixed(1) ?? '--' })} />
+                  <Chip size="small" label={t('audiobook.seedSceneTest.sampleIndex', { count: preview.sample_index })} />
                   {preview.generation_latency_s !== null && preview.generation_latency_s !== undefined && (
-                    <Chip size="small" label={`生成 ${preview.generation_latency_s.toFixed(1)} 秒`} />
+                    <Chip size="small" label={t('audiobook.seedSceneTest.latencyLabel', { seconds: preview.generation_latency_s.toFixed(1) })} />
                   )}
                   {preview.billing.actual_cost_yuan !== null && preview.billing.actual_cost_yuan !== undefined && (
-                    <Chip size="small" label={`公开价 ¥${preview.billing.actual_cost_yuan.toFixed(4)}`} />
+                    <Chip size="small" label={t('audiobook.seedSceneTest.publicPrice', { cost: preview.billing.actual_cost_yuan.toFixed(4) })} />
                   )}
                   <Chip size="small" label={`${Math.max(1, Math.round(preview.audio_size_bytes / 1024))} KB`} />
-                  <Chip size="small" color={preview.quality_report.passed === true ? 'success' : 'warning'} label={preview.quality_report.passed === true ? '自动检查通过' : '需要人工复核'} />
+                  <Chip size="small" color={preview.quality_report.passed === true ? 'success' : 'warning'} label={preview.quality_report.passed === true ? t('audiobook.seedSceneTest.qualityPassed') : t('audiobook.seedSceneTest.qualityNeedReview')} />
                 </Stack>
                 {preview.fallback_reason && <Alert severity="warning" sx={{ mt: 1 }}>{preview.fallback_reason}</Alert>}
               </Paper>
@@ -804,10 +819,10 @@ const SeedSceneTestPanel = ({ latestTtsPreview }: SeedSceneTestPanelProps) => {
               <SceneReviewEditor {...reviewEditorProps} />
             </Box>
           </Stack>
-        ) : <Alert severity="info">没有可用场景测试项。</Alert>}
+        ) : <Alert severity="info">{t('audiobook.seedSceneTest.emptyCases')}</Alert>}
       </Box>
 
-      <Box component="aside" sx={{ display: { xs: 'none', xl: 'block' }, bgcolor: 'white', p: 2.5, minWidth: 0 }}>
+      <Box component="aside" sx={{ display: { xs: 'none', xl: 'block' }, bgcolor: 'background.paper', p: 2.5, minWidth: 0 }}>
         <SceneReviewEditor {...reviewEditorProps} />
       </Box>
     </Box>

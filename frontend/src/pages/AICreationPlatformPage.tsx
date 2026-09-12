@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { useTranslation } from 'react-i18next'
 import {
   Box,
   Container,
@@ -21,102 +22,35 @@ import PsychologyIcon from '@mui/icons-material/Psychology'
 import RocketLaunchIcon from '@mui/icons-material/RocketLaunch'
 import PlayArrowIcon from '@mui/icons-material/PlayArrow'
 
-// 示例作品数据
-const showcaseWorks = [
-  {
-    id: 1,
-    title: '星际迷航',
-    description: '科幻题材动态漫',
-    coverImage: 'https://picsum.photos/seed/scifi1/800/600',
-    tags: ['科幻', '冒险', '动态漫'],
-    views: '12.5 万',
-  },
-  {
-    id: 2,
-    title: '古代传奇',
-    description: '历史题材动态漫',
-    coverImage: 'https://picsum.photos/seed/historical2/800/600',
-    tags: ['历史', '剧情', '动态漫'],
-    views: '8.3 万',
-  },
-  {
-    id: 3,
-    title: '都市奇幻',
-    description: '现代奇幻动态漫',
-    coverImage: 'https://picsum.photos/seed/fantasy3/800/600',
-    tags: ['奇幻', '都市', '动态漫'],
-    views: '15.2 万',
-  },
-  {
-    id: 4,
-    title: '武侠世界',
-    description: '传统武侠动态漫',
-    coverImage: 'https://picsum.photos/seed/wuxia4/800/600',
-    tags: ['武侠', '动作', '动态漫'],
-    views: '10.8 万',
-  },
-]
-
-// 功能特性
-const features = [
-  {
-    icon: PsychologyIcon,
-    title: '智能剧本创作',
-    description: 'AI 辅助构思剧情、人物设定、世界观构建',
-    color: '#6366f1',
-  },
-  {
-    icon: PaletteIcon,
-    title: 'AI 图片生成',
-    description: '自动生成角色立绘、场景背景、道具素材',
-    color: '#ec4899',
-  },
-  {
-    icon: MovieCreationIcon,
-    title: '动态漫制作',
-    description: '一键生成分镜、镜头运动、特效合成',
-    color: '#8b5cf6',
-  },
-  {
-    icon: AutoFixHighIcon,
-    title: '智能优化',
-    description: '自动检测冲突、优化节奏、提升质量',
-    color: '#14b8a6',
-  },
-]
-
-// 创作步骤
-const creationSteps = [
-  {
-    step: 1,
-    title: '构思故事',
-    description: '输入故事大纲或选择模板',
-  },
-  {
-    step: 2,
-    title: '生成角色',
-    description: 'AI 生成角色形象和性格设定',
-  },
-  {
-    step: 3,
-    title: '创建场景',
-    description: '自动生成场景图片和氛围描述',
-  },
-  {
-    step: 4,
-    title: '制作分镜',
-    description: '智能分镜和镜头设计',
-  },
-  {
-    step: 5,
-    title: '合成输出',
-    description: '渲染成动态漫视频',
-  },
-]
-
 export default function AICreationPlatformPage() {
+  const { t } = useTranslation()
   const navigate = useNavigate()
   const [showcaseTab, setShowcaseTab] = useState(0)
+
+  // 示例作品数据（组件内构造以支持 i18n）
+  const showcaseWorks = [
+    { id: 1, title: t('aiPlatform.work1.title'), description: t('aiPlatform.work1.description'), coverImage: 'https://picsum.photos/seed/scifi1/800/600', tags: [t('aiPlatform.tabScifi'), t('aiPlatform.tagAdventure'), t('aiPlatform.tagDynamicComic')], views: t('aiPlatform.work1.views') },
+    { id: 2, title: t('aiPlatform.work2.title'), description: t('aiPlatform.work2.description'), coverImage: 'https://picsum.photos/seed/historical2/800/600', tags: [t('aiPlatform.tabHistory'), t('aiPlatform.tagDrama'), t('aiPlatform.tagDynamicComic')], views: t('aiPlatform.work2.views') },
+    { id: 3, title: t('aiPlatform.work3.title'), description: t('aiPlatform.work3.description'), coverImage: 'https://picsum.photos/seed/fantasy3/800/600', tags: [t('aiPlatform.tabFantasy'), t('aiPlatform.tagUrban'), t('aiPlatform.tagDynamicComic')], views: t('aiPlatform.work3.views') },
+    { id: 4, title: t('aiPlatform.work4.title'), description: t('aiPlatform.work4.description'), coverImage: 'https://picsum.photos/seed/wuxia4/800/600', tags: [t('aiPlatform.tabWuxia'), t('aiPlatform.tagAction'), t('aiPlatform.tagDynamicComic')], views: t('aiPlatform.work4.views') },
+  ]
+
+  // 功能特性（组件内构造以支持 i18n）
+  const features = [
+    { icon: PsychologyIcon, title: t('aiPlatform.featureScript.title'), description: t('aiPlatform.featureScript.description'), color: '#6366f1' },
+    { icon: PaletteIcon, title: t('aiPlatform.featureImage.title'), description: t('aiPlatform.featureImage.description'), color: '#ec4899' },
+    { icon: MovieCreationIcon, title: t('aiPlatform.featureComic.title'), description: t('aiPlatform.featureComic.description'), color: '#8b5cf6' },
+    { icon: AutoFixHighIcon, title: t('aiPlatform.featureOptimize.title'), description: t('aiPlatform.featureOptimize.description'), color: '#14b8a6' },
+  ]
+
+  // 创作步骤（组件内构造以支持 i18n）
+  const creationSteps = [
+    { step: 1, title: t('aiPlatform.step1.title'), description: t('aiPlatform.step1.description') },
+    { step: 2, title: t('aiPlatform.step2.title'), description: t('aiPlatform.step2.description') },
+    { step: 3, title: t('aiPlatform.step3.title'), description: t('aiPlatform.step3.description') },
+    { step: 4, title: t('aiPlatform.step4.title'), description: t('aiPlatform.step4.description') },
+    { step: 5, title: t('aiPlatform.step5.title'), description: t('aiPlatform.step5.description') },
+  ]
 
   const handleStartCreation = () => {
     navigate('/drama')
@@ -143,15 +77,16 @@ export default function AICreationPlatformPage() {
               WandAIGC
             </Typography>
             <Box sx={{ display: 'flex', gap: 2 }}>
-              <Button color="inherit" onClick={() => navigate('/home')}>
-                返回创作模块
+              {/* 常暗着陆页：返回按钮钉白叠色，避免浅色模式继承 text.primary 深字压墨底不可见（方案 A）。 */}
+              <Button color="inherit" onClick={() => navigate('/home')} sx={{ color: 'rgba(255,255,255,0.85)' }}>
+                {t('aiPlatform.backToModules')}
               </Button>
               <Button
                 variant="contained"
                 startIcon={<RocketLaunchIcon />}
                 onClick={handleStartCreation}
               >
-                开始创作
+                {t('aiPlatform.startCreation')}
               </Button>
             </Box>
           </Box>
@@ -187,7 +122,7 @@ export default function AICreationPlatformPage() {
               <Fade in timeout={1000}>
                 <Box>
                   <Chip
-                    label="🎉 全球首个全集 AI 动态漫制作平台"
+                    label={t('aiPlatform.heroBadge')}
                     sx={{
                       mb: 2,
                       bgcolor: 'rgba(255,255,255,0.2)',
@@ -204,9 +139,9 @@ export default function AICreationPlatformPage() {
                       fontSize: { xs: '2rem', md: '3.5rem' },
                     }}
                   >
-                    从剧本创作
+                    {t('aiPlatform.heroTitle1')}
                     <br />
-                    到视频制作
+                    {t('aiPlatform.heroTitle2')}
                   </Typography>
                   <Typography
                     variant="h5"
@@ -216,7 +151,7 @@ export default function AICreationPlatformPage() {
                       lineHeight: 1.6,
                     }}
                   >
-                    一站式 AI 创作工具，让每个人都能成为优秀的创作者
+                    {t('aiPlatform.heroSubtitle')}
                   </Typography>
                   <Box sx={{ display: 'flex', gap: 2 }}>
                     <Button
@@ -236,7 +171,7 @@ export default function AICreationPlatformPage() {
                         },
                       }}
                     >
-                      立即开始
+                      {t('aiPlatform.startNow')}
                     </Button>
                     <Button
                       variant="outlined"
@@ -254,7 +189,7 @@ export default function AICreationPlatformPage() {
                         },
                       }}
                     >
-                      观看演示
+                      {t('aiPlatform.watchDemo')}
                     </Button>
                   </Box>
                 </Box>
@@ -326,10 +261,10 @@ export default function AICreationPlatformPage() {
       {/* 功能特性 */}
       <Container maxWidth="lg" sx={{ py: 8 }}>
         <Typography variant="h3" align="center" sx={{ color: '#fff', mb: 2, fontWeight: 'bold' }}>
-          强大的创作功能
+          {t('aiPlatform.featuresTitle')}
         </Typography>
         <Typography variant="h6" align="center" sx={{ color: 'rgba(255,255,255,0.7)', mb: 6 }}>
-          从构思到成品，全流程 AI 辅助
+          {t('aiPlatform.featuresSubtitle')}
         </Typography>
 
         <Grid container spacing={4}>
@@ -383,10 +318,10 @@ export default function AICreationPlatformPage() {
       <Box sx={{ bgcolor: 'rgba(255,255,255,0.02)', py: 8 }}>
         <Container maxWidth="lg">
           <Typography variant="h3" align="center" sx={{ color: '#fff', mb: 2, fontWeight: 'bold' }}>
-            简单的创作流程
+            {t('aiPlatform.stepsTitle')}
           </Typography>
           <Typography variant="h6" align="center" sx={{ color: 'rgba(255,255,255,0.7)', mb: 6 }}>
-            5 步完成你的动态漫作品
+            {t('aiPlatform.stepsSubtitle')}
           </Typography>
 
           <Box sx={{ display: 'flex', justifyContent: 'space-between', position: 'relative' }}>
@@ -450,10 +385,10 @@ export default function AICreationPlatformPage() {
       {/* 作品展示 */}
       <Container maxWidth="lg" sx={{ py: 8 }}>
         <Typography variant="h3" align="center" sx={{ color: '#fff', mb: 2, fontWeight: 'bold' }}>
-          精彩作品展示
+          {t('aiPlatform.worksTitle')}
         </Typography>
         <Typography variant="h6" align="center" sx={{ color: 'rgba(255,255,255,0.7)', mb: 4 }}>
-          看看其他创作者的作品
+          {t('aiPlatform.worksSubtitle')}
         </Typography>
 
         <Tabs
@@ -473,11 +408,11 @@ export default function AICreationPlatformPage() {
             },
           }}
         >
-          <Tab label="全部" />
-          <Tab label="科幻" />
-          <Tab label="奇幻" />
-          <Tab label="历史" />
-          <Tab label="武侠" />
+          <Tab label={t('aiPlatform.tabAll')} />
+          <Tab label={t('aiPlatform.tabScifi')} />
+          <Tab label={t('aiPlatform.tabFantasy')} />
+          <Tab label={t('aiPlatform.tabHistory')} />
+          <Tab label={t('aiPlatform.tabWuxia')} />
         </Tabs>
 
         <Grid container spacing={3}>
@@ -555,10 +490,10 @@ export default function AICreationPlatformPage() {
       >
         <Container maxWidth="md">
           <Typography variant="h3" sx={{ color: '#fff', mb: 2, fontWeight: 'bold' }}>
-            准备好开始创作了吗？
+            {t('aiPlatform.ctaTitle')}
           </Typography>
           <Typography variant="h6" sx={{ color: 'rgba(255,255,255,0.9)', mb: 4 }}>
-            立即加入，开启你的 AI 创作之旅
+            {t('aiPlatform.ctaSubtitle')}
           </Typography>
           <Button
             variant="contained"
@@ -577,7 +512,7 @@ export default function AICreationPlatformPage() {
               },
             }}
           >
-            免费开始创作
+            {t('aiPlatform.ctaStart')}
           </Button>
         </Container>
       </Box>
@@ -590,9 +525,9 @@ export default function AICreationPlatformPage() {
               © 2024 WandAIGC. All rights reserved.
             </Typography>
             <Box sx={{ display: 'flex', gap: 2 }}>
-              <Button sx={{ color: 'rgba(255,255,255,0.7)' }}>使用条款</Button>
-              <Button sx={{ color: 'rgba(255,255,255,0.7)' }}>隐私政策</Button>
-              <Button sx={{ color: 'rgba(255,255,255,0.7)' }}>联系我们</Button>
+              <Button sx={{ color: 'rgba(255,255,255,0.7)' }}>{t('aiPlatform.footerTerms')}</Button>
+              <Button sx={{ color: 'rgba(255,255,255,0.7)' }}>{t('aiPlatform.footerPrivacy')}</Button>
+              <Button sx={{ color: 'rgba(255,255,255,0.7)' }}>{t('aiPlatform.footerContact')}</Button>
             </Box>
           </Box>
         </Container>

@@ -1,3 +1,6 @@
+/** i18next 翻译函数轻量接口：TFunction 带品牌属性，测试 mock 与真实 t 均兼容 */
+export type TranslateFn = (key: string, options?: Record<string, unknown>) => string
+
 export interface AudioLibraryDetailSource {
   source?: string
   source_id?: string
@@ -29,128 +32,128 @@ export interface AudioAssetDescriptionSource {
   tags?: string[]
 }
 
-const AUDIO_KEYWORD_LABELS: Record<string, string> = {
-  action: '动作',
-  alchemy: '炼金',
-  ambient: '氛围',
-  ambience: '氛围',
-  arcane: '奥术',
-  arrow: '箭矢',
-  battle: '战斗',
-  book: '书页',
-  bottle: '瓶子',
-  cork: '软木塞',
-  calm: '平静',
-  city: '城市',
-  clinic: '诊所',
-  close: '合上',
-  detail: '细节',
-  dice: '骰子',
-  die: '骰子',
-  door: '门',
-  emotion: '情绪',
-  environment: '环境',
-  epic: '史诗',
-  fantasy: '奇幻',
-  fast: '快节奏',
-  feathers: '羽毛',
-  fire: '火焰',
-  footstep: '脚步',
-  footsteps: '脚步',
-  general: '通用',
-  glass: '玻璃',
-  gambling: '赌博',
-  heartbeat: '心跳',
-  horn: '鸣笛',
-  hit: '撞击',
-  horror: '惊悚',
-  impact: '撞击',
-  indoor: '室内',
-  intense: '强烈',
-  joyful: '欢快',
-  jump: '跳跃',
-  long: '长版',
-  machine: '机器',
-  custom: '自定义',
-  alarm: '警报',
-  medium: '中速',
-  medicine: '医药',
-  metal: '金属',
-  mysterious: '神秘',
-  mystery: '悬疑',
-  odd: '诡异',
-  outdoor: '室外',
-  page: '书页',
-  paper: '纸张',
-  phase: '相位',
-  pill: '药片',
-  peaceful: '平静',
-  people: '人群',
-  passenger: '乘客',
-  passengers: '乘客',
-  platform: '站台',
-  public_transport: '公共交通',
-  rain: '雨声',
-  reading: '阅读',
-  realistic: '写实',
-  romantic: '浪漫',
-  romance: '浪漫',
-  room: '房间',
-  rustle: '摩擦',
-  ritual: '仪式',
-  roll: '滚动',
-  sad: '悲伤',
-  scifi: '科幻',
-  sci_fi: '科幻',
-  shake: '摇晃',
-  slow: '慢速',
-  sting: '刺点',
-  single: '单个',
-  storm: '暴风雨',
-  tense: '紧张',
-  thud: '闷响',
-  thunder: '雷声',
-  transition: '转场',
-  train: '火车',
-  railway: '铁路',
-  locomotive: '火车机车',
-  station: '车站',
-  travel: '旅行',
-  table: '桌面',
-  talk: '交谈',
-  talking: '交谈',
-  tavern: '酒馆',
-  twist: '旋拧',
-  two: '两个',
-  uncork: '拔塞',
-  water: '水声',
-  weird: '诡异',
-  wood: '木头',
+const AUDIO_KEYWORD_KEYS: Record<string, string> = {
+  action: 'audiobook.audioLibraryDisplay.keywords.action',
+  alchemy: 'audiobook.audioLibraryDisplay.keywords.alchemy',
+  ambient: 'audiobook.audioLibraryDisplay.keywords.ambient',
+  ambience: 'audiobook.audioLibraryDisplay.keywords.ambience',
+  arcane: 'audiobook.audioLibraryDisplay.keywords.arcane',
+  arrow: 'audiobook.audioLibraryDisplay.keywords.arrow',
+  battle: 'audiobook.audioLibraryDisplay.keywords.battle',
+  book: 'audiobook.audioLibraryDisplay.keywords.book',
+  bottle: 'audiobook.audioLibraryDisplay.keywords.bottle',
+  cork: 'audiobook.audioLibraryDisplay.keywords.cork',
+  calm: 'audiobook.audioLibraryDisplay.keywords.calm',
+  city: 'audiobook.audioLibraryDisplay.keywords.city',
+  clinic: 'audiobook.audioLibraryDisplay.keywords.clinic',
+  close: 'audiobook.audioLibraryDisplay.keywords.close',
+  detail: 'audiobook.audioLibraryDisplay.keywords.detail',
+  dice: 'audiobook.audioLibraryDisplay.keywords.dice',
+  die: 'audiobook.audioLibraryDisplay.keywords.die',
+  door: 'audiobook.audioLibraryDisplay.keywords.door',
+  emotion: 'audiobook.audioLibraryDisplay.keywords.emotion',
+  environment: 'audiobook.audioLibraryDisplay.keywords.environment',
+  epic: 'audiobook.audioLibraryDisplay.keywords.epic',
+  fantasy: 'audiobook.audioLibraryDisplay.keywords.fantasy',
+  fast: 'audiobook.audioLibraryDisplay.keywords.fast',
+  feathers: 'audiobook.audioLibraryDisplay.keywords.feathers',
+  fire: 'audiobook.audioLibraryDisplay.keywords.fire',
+  footstep: 'audiobook.audioLibraryDisplay.keywords.footstep',
+  footsteps: 'audiobook.audioLibraryDisplay.keywords.footsteps',
+  general: 'audiobook.audioLibraryDisplay.keywords.general',
+  glass: 'audiobook.audioLibraryDisplay.keywords.glass',
+  gambling: 'audiobook.audioLibraryDisplay.keywords.gambling',
+  heartbeat: 'audiobook.audioLibraryDisplay.keywords.heartbeat',
+  horn: 'audiobook.audioLibraryDisplay.keywords.horn',
+  hit: 'audiobook.audioLibraryDisplay.keywords.hit',
+  horror: 'audiobook.audioLibraryDisplay.keywords.horror',
+  impact: 'audiobook.audioLibraryDisplay.keywords.impact',
+  indoor: 'audiobook.audioLibraryDisplay.keywords.indoor',
+  intense: 'audiobook.audioLibraryDisplay.keywords.intense',
+  joyful: 'audiobook.audioLibraryDisplay.keywords.joyful',
+  jump: 'audiobook.audioLibraryDisplay.keywords.jump',
+  long: 'audiobook.audioLibraryDisplay.keywords.long',
+  machine: 'audiobook.audioLibraryDisplay.keywords.machine',
+  custom: 'audiobook.audioLibraryDisplay.keywords.custom',
+  alarm: 'audiobook.audioLibraryDisplay.keywords.alarm',
+  medium: 'audiobook.audioLibraryDisplay.keywords.medium',
+  medicine: 'audiobook.audioLibraryDisplay.keywords.medicine',
+  metal: 'audiobook.audioLibraryDisplay.keywords.metal',
+  mysterious: 'audiobook.audioLibraryDisplay.keywords.mysterious',
+  mystery: 'audiobook.audioLibraryDisplay.keywords.mystery',
+  odd: 'audiobook.audioLibraryDisplay.keywords.odd',
+  outdoor: 'audiobook.audioLibraryDisplay.keywords.outdoor',
+  page: 'audiobook.audioLibraryDisplay.keywords.page',
+  paper: 'audiobook.audioLibraryDisplay.keywords.paper',
+  phase: 'audiobook.audioLibraryDisplay.keywords.phase',
+  pill: 'audiobook.audioLibraryDisplay.keywords.pill',
+  peaceful: 'audiobook.audioLibraryDisplay.keywords.peaceful',
+  people: 'audiobook.audioLibraryDisplay.keywords.people',
+  passenger: 'audiobook.audioLibraryDisplay.keywords.passenger',
+  passengers: 'audiobook.audioLibraryDisplay.keywords.passengers',
+  platform: 'audiobook.audioLibraryDisplay.keywords.platform',
+  public_transport: 'audiobook.audioLibraryDisplay.keywords.public_transport',
+  rain: 'audiobook.audioLibraryDisplay.keywords.rain',
+  reading: 'audiobook.audioLibraryDisplay.keywords.reading',
+  realistic: 'audiobook.audioLibraryDisplay.keywords.realistic',
+  romantic: 'audiobook.audioLibraryDisplay.keywords.romantic',
+  romance: 'audiobook.audioLibraryDisplay.keywords.romance',
+  room: 'audiobook.audioLibraryDisplay.keywords.room',
+  rustle: 'audiobook.audioLibraryDisplay.keywords.rustle',
+  ritual: 'audiobook.audioLibraryDisplay.keywords.ritual',
+  roll: 'audiobook.audioLibraryDisplay.keywords.roll',
+  sad: 'audiobook.audioLibraryDisplay.keywords.sad',
+  scifi: 'audiobook.audioLibraryDisplay.keywords.scifi',
+  sci_fi: 'audiobook.audioLibraryDisplay.keywords.sci_fi',
+  shake: 'audiobook.audioLibraryDisplay.keywords.shake',
+  slow: 'audiobook.audioLibraryDisplay.keywords.slow',
+  sting: 'audiobook.audioLibraryDisplay.keywords.sting',
+  single: 'audiobook.audioLibraryDisplay.keywords.single',
+  storm: 'audiobook.audioLibraryDisplay.keywords.storm',
+  tense: 'audiobook.audioLibraryDisplay.keywords.tense',
+  thud: 'audiobook.audioLibraryDisplay.keywords.thud',
+  thunder: 'audiobook.audioLibraryDisplay.keywords.thunder',
+  transition: 'audiobook.audioLibraryDisplay.keywords.transition',
+  train: 'audiobook.audioLibraryDisplay.keywords.train',
+  railway: 'audiobook.audioLibraryDisplay.keywords.railway',
+  locomotive: 'audiobook.audioLibraryDisplay.keywords.locomotive',
+  station: 'audiobook.audioLibraryDisplay.keywords.station',
+  travel: 'audiobook.audioLibraryDisplay.keywords.travel',
+  table: 'audiobook.audioLibraryDisplay.keywords.table',
+  talk: 'audiobook.audioLibraryDisplay.keywords.talk',
+  talking: 'audiobook.audioLibraryDisplay.keywords.talking',
+  tavern: 'audiobook.audioLibraryDisplay.keywords.tavern',
+  twist: 'audiobook.audioLibraryDisplay.keywords.twist',
+  two: 'audiobook.audioLibraryDisplay.keywords.two',
+  uncork: 'audiobook.audioLibraryDisplay.keywords.uncork',
+  water: 'audiobook.audioLibraryDisplay.keywords.water',
+  weird: 'audiobook.audioLibraryDisplay.keywords.weird',
+  wood: 'audiobook.audioLibraryDisplay.keywords.wood',
 }
 
-const AUDIO_ASSET_NAME_PHRASES: Record<string, string> = {
-  book_page: '书页',
-  glass_瓶子_cork_twist: '玻璃瓶软木塞旋拧声',
-  glass_瓶子_uncork: '玻璃瓶拔塞声',
-  medicine_pill: '药片',
-  single_die_roll_table: '桌面掷单枚骰子声',
-  train_horn_airchime_k5la: '火车站火车鸣笛与人群交谈声',
-  two_dice_roll_table: '桌面掷两枚骰子声',
+const AUDIO_ASSET_NAME_PHRASE_KEYS: Record<string, string> = {
+  book_page: 'audiobook.audioLibraryDisplay.phrases.book_page',
+  glass_瓶子_cork_twist: 'audiobook.audioLibraryDisplay.phrases.glass_bottle_cork_twist',
+  glass_瓶子_uncork: 'audiobook.audioLibraryDisplay.phrases.glass_bottle_uncork',
+  medicine_pill: 'audiobook.audioLibraryDisplay.phrases.medicine_pill',
+  single_die_roll_table: 'audiobook.audioLibraryDisplay.phrases.single_die_roll_table',
+  train_horn_airchime_k5la: 'audiobook.audioLibraryDisplay.phrases.train_horn_airchime_k5la',
+  two_dice_roll_table: 'audiobook.audioLibraryDisplay.phrases.two_dice_roll_table',
 }
 
-const SOURCE_LABELS: Record<string, string> = {
-  aliyun_oss: '阿里云 OSS',
-  dashscope_oss: 'DashScope OSS',
-  local_authorized: '本地授权素材',
-  local_cache: '本地缓存',
-  mureka: 'Mureka 生成',
-  vidu: 'Vidu 生成',
+const SOURCE_KEYS: Record<string, string> = {
+  aliyun_oss: 'audiobook.audioLibraryDisplay.sources.aliyun_oss',
+  dashscope_oss: 'audiobook.audioLibraryDisplay.sources.dashscope_oss',
+  local_authorized: 'audiobook.audioLibraryDisplay.sources.local_authorized',
+  local_cache: 'audiobook.audioLibraryDisplay.sources.local_cache',
+  mureka: 'audiobook.audioLibraryDisplay.sources.mureka',
+  vidu: 'audiobook.audioLibraryDisplay.sources.vidu',
 }
 
-const QUALITY_STATUS_LABELS: Record<string, string> = {
-  accepted: '已通过',
-  rejected: '未通过',
-  tolerated: '可用',
+const QUALITY_STATUS_KEYS: Record<string, string> = {
+  accepted: 'audiobook.audioLibraryDisplay.qualityStatuses.accepted',
+  rejected: 'audiobook.audioLibraryDisplay.qualityStatuses.rejected',
+  tolerated: 'audiobook.audioLibraryDisplay.qualityStatuses.tolerated',
 }
 
 const COMPLIANCE_TAG_KEYS = new Set([
@@ -177,38 +180,39 @@ const hasChinese = (value: string) => /[\u4e00-\u9fff]/.test(value)
 const splitAudioTokens = (value: string) =>
   value.trim().split(/[._\s-]+/).filter(Boolean)
 
-const translateAudioTokens = (value: string) => {
+const translateAudioTokens = (value: string, t: TranslateFn) => {
   const labels = splitAudioTokens(value)
     .map((token) => {
       if (hasChinese(token) && !/[A-Za-z]/.test(token)) return token
-      return AUDIO_KEYWORD_LABELS[normalizeKeyword(token)] || ''
+      const key = AUDIO_KEYWORD_KEYS[normalizeKeyword(token)]
+      return key ? t(key) : ''
     })
     .filter(Boolean)
   return labels.filter((label, index) => label !== labels[index - 1])
 }
 
-export const formatAudioKeywordLabel = (value?: string | null) => {
+export const formatAudioKeywordLabel = (value: string | null | undefined, t: TranslateFn) => {
   const raw = String(value || '').trim()
-  if (!raw) return '未分类'
+  if (!raw) return t('audiobook.audioLibraryDisplay.uncategorized')
   if (hasChinese(raw) && !/[A-Za-z]/.test(raw)) return raw
-  const exactLabel = AUDIO_KEYWORD_LABELS[normalizeKeyword(raw)]
-  if (exactLabel) return exactLabel
-  const labels = translateAudioTokens(raw)
-  return labels.length > 0 ? labels.join('') : '其他'
+  const exactKey = AUDIO_KEYWORD_KEYS[normalizeKeyword(raw)]
+  if (exactKey) return t(exactKey)
+  const labels = translateAudioTokens(raw, t)
+  return labels.length > 0 ? labels.join('') : t('audiobook.audioLibraryDisplay.other')
 }
 
-export const formatAudioAssetNameLabel = (name?: string | null) => {
+export const formatAudioAssetNameLabel = (name: string | null | undefined, t: TranslateFn) => {
   const raw = String(name || '').trim()
-  if (!raw) return '未命名素材'
-  const exactPhrase = AUDIO_ASSET_NAME_PHRASES[normalizeKeyword(raw)]
-  if (exactPhrase) return exactPhrase
+  if (!raw) return t('audiobook.audioLibraryDisplay.unnamedAsset')
+  const exactPhraseKey = AUDIO_ASSET_NAME_PHRASE_KEYS[normalizeKeyword(raw)]
+  if (exactPhraseKey) return t(exactPhraseKey)
   const parts = splitAudioTokens(raw)
   const labels: string[] = []
 
   for (let index = 0; index < parts.length; index += 1) {
     const phraseKey = normalizeKeyword(parts.slice(index, index + 2).join('_'))
-    if (AUDIO_ASSET_NAME_PHRASES[phraseKey]) {
-      labels.push(AUDIO_ASSET_NAME_PHRASES[phraseKey])
+    if (AUDIO_ASSET_NAME_PHRASE_KEYS[phraseKey]) {
+      labels.push(t(AUDIO_ASSET_NAME_PHRASE_KEYS[phraseKey]))
       index += 1
       continue
     }
@@ -230,21 +234,21 @@ export const formatAudioAssetNameLabel = (name?: string | null) => {
         continue
       }
     }
-    const translated = AUDIO_KEYWORD_LABELS[normalizeKeyword(part)]
-    if (translated) labels.push(translated)
+    const key = AUDIO_KEYWORD_KEYS[normalizeKeyword(part)]
+    if (key) labels.push(t(key))
   }
 
   const localized = labels
     .filter((label, index) => label !== labels[index - 1])
     .join(' ')
-  return localized || '其他音效'
+  return localized || t('audiobook.audioLibraryDisplay.otherSfx')
 }
 
 export const formatAudioAssetDescriptionLabel = ({
   name,
   description,
   tags = [],
-}: AudioAssetDescriptionSource) => {
+}: AudioAssetDescriptionSource, t: TranslateFn) => {
   const rawDescription = String(description || '').trim()
   if (hasChinese(rawDescription) && !/[A-Za-z]/.test(rawDescription)) return rawDescription
 
@@ -253,29 +257,29 @@ export const formatAudioAssetDescriptionLabel = ({
   const hasHorn = /\b(horn|airchime)\b/.test(semanticText)
   const hasPeople = /\b(people|passengers?|talk|talking|crowd|announcement)\b/.test(semanticText)
   if (hasTrain && hasHorn && hasPeople) {
-    return '火车站环境声，包含火车鸣笛、列车运行声和背景人群交谈。'
+    return t('audiobook.audioLibraryDisplay.trainStationDescription')
   }
-  if (hasTrain && hasHorn) return '火车鸣笛声，适合车站、铁路和列车到达场景。'
+  if (hasTrain && hasHorn) return t('audiobook.audioLibraryDisplay.trainHornDescription')
   if (/\bmetal\b/.test(semanticText) && /\b(hit|impact|strike)\b/.test(semanticText)) {
-    return '金属撞击声，适合机械、锻造或物体碰撞场景。'
+    return t('audiobook.audioLibraryDisplay.metalHitDescription')
   }
   if (/\bwood\b/.test(semanticText) && /\b(hit|impact|strike)\b/.test(semanticText)) {
-    return '木质物体撞击声，适合门、木箱或家具碰撞场景。'
+    return t('audiobook.audioLibraryDisplay.woodHitDescription')
   }
 
-  const nameLabel = formatAudioAssetNameLabel(name)
-  return nameLabel === '其他音效' || nameLabel === '未命名素材' ? '' : `${nameLabel}。`
+  const nameLabel = formatAudioAssetNameLabel(name, t)
+  return nameLabel === t('audiobook.audioLibraryDisplay.otherSfx') || nameLabel === t('audiobook.audioLibraryDisplay.unnamedAsset') ? '' : `${nameLabel}。`
 }
 
-export const formatSfxCategoryLabel = (category?: string | null) => {
+export const formatSfxCategoryLabel = (category: string | null | undefined, t: TranslateFn) => {
   const raw = String(category || '').trim()
-  if (!raw) return '未分类'
-  return raw.split('/').map(formatAudioKeywordLabel).join(' / ')
+  if (!raw) return t('audiobook.audioLibraryDisplay.uncategorized')
+  return raw.split('/').map((segment) => formatAudioKeywordLabel(segment, t)).join(' / ')
 }
 
-export const formatMusicDurationLabel = (duration?: number | null) => {
-  if (typeof duration !== 'number' || !Number.isFinite(duration)) return '时长未知'
-  return `${Math.round(duration)} 秒`
+export const formatMusicDurationLabel = (duration: number | null | undefined, t: TranslateFn) => {
+  if (typeof duration !== 'number' || !Number.isFinite(duration)) return t('audiobook.audioLibraryDisplay.durationUnknown')
+  return t('audiobook.audioLibraryDisplay.durationSeconds', { count: Math.round(duration) })
 }
 
 export const getVisibleSfxTags = (tags: string[] = []) =>
@@ -290,36 +294,38 @@ export const getVisibleSfxScenes = (scenes: string[] = []) =>
     return Boolean(raw) && !GENERATED_SCENE_PATTERN.test(raw)
   })
 
-export const formatSourceLabel = (source?: string | null) => {
+export const formatSourceLabel = (source: string | null | undefined, t: TranslateFn) => {
   const raw = String(source || '').trim()
-  if (!raw) return '本地'
-  return SOURCE_LABELS[normalizeKeyword(raw)] || '其他来源'
+  if (!raw) return t('audiobook.audioLibraryDisplay.local')
+  const key = SOURCE_KEYS[normalizeKeyword(raw)]
+  return key ? t(key) : t('audiobook.audioLibraryDisplay.otherSource')
 }
 
-const formatQualityStatusLabel = (status?: string) => {
+const formatQualityStatusLabel = (status: string | undefined, t: TranslateFn) => {
   if (!status) return ''
-  return QUALITY_STATUS_LABELS[normalizeKeyword(status)] || formatAudioKeywordLabel(status)
+  const key = QUALITY_STATUS_KEYS[normalizeKeyword(status)]
+  return key ? t(key) : formatAudioKeywordLabel(status, t)
 }
 
-const formatQualityDetailValue = (entry: AudioLibraryDetailSource) => {
+const formatQualityDetailValue = (entry: AudioLibraryDetailSource, t: TranslateFn) => {
   const score = typeof entry.quality_score === 'number' && Number.isFinite(entry.quality_score)
     ? entry.quality_score.toFixed(1)
-    : '未评分'
+    : t('audiobook.audioLibraryDisplay.unscored')
   const grade = entry.quality_grade ? ` / ${entry.quality_grade}` : ''
-  const status = entry.quality_status ? ` ${formatQualityStatusLabel(entry.quality_status)}` : ''
+  const status = entry.quality_status ? ` ${formatQualityStatusLabel(entry.quality_status, t)}` : ''
   return `${score}${grade}${status}`
 }
 
-export const formatCommercialLabel = (entry: AudioLibraryDetailSource) => {
-  if (entry.license_commercial === true) return '允许商用'
-  if (entry.license_commercial === false) return '非商用'
-  return '商用未知'
+export const formatCommercialLabel = (entry: AudioLibraryDetailSource, t: TranslateFn) => {
+  if (entry.license_commercial === true) return t('audiobook.audioLibraryDisplay.commercialAllowed')
+  if (entry.license_commercial === false) return t('audiobook.audioLibraryDisplay.commercialNotAllowed')
+  return t('audiobook.audioLibraryDisplay.commercialUnknown')
 }
 
-export const formatAttributionLabel = (entry: AudioLibraryDetailSource) => {
-  if (entry.attribution_required === true) return '需署名'
-  if (entry.attribution_required === false) return '免署名'
-  return '署名未知'
+export const formatAttributionLabel = (entry: AudioLibraryDetailSource, t: TranslateFn) => {
+  if (entry.attribution_required === true) return t('audiobook.audioLibraryDisplay.attributionRequired')
+  if (entry.attribution_required === false) return t('audiobook.audioLibraryDisplay.attributionFree')
+  return t('audiobook.audioLibraryDisplay.attributionUnknown')
 }
 
 export const formatDateLabel = (value?: string) => {
@@ -327,7 +333,7 @@ export const formatDateLabel = (value?: string) => {
   return value.slice(0, 10)
 }
 
-export const buildAudioLibraryDetailItems = (entry: AudioLibraryDetailSource) => {
+export const buildAudioLibraryDetailItems = (entry: AudioLibraryDetailSource, t: TranslateFn) => {
   const items: AudioLibraryDetailItem[] = []
 
   if (
@@ -335,30 +341,30 @@ export const buildAudioLibraryDetailItems = (entry: AudioLibraryDetailSource) =>
     || Boolean(entry.quality_grade)
     || Boolean(entry.quality_status)
   ) {
-    items.push({ key: 'quality', label: '质量', value: formatQualityDetailValue(entry) })
+    items.push({ key: 'quality', label: t('audiobook.audioLibraryDisplay.labelQuality'), value: formatQualityDetailValue(entry, t) })
   }
 
   if (entry.license || entry.license_url) {
     items.push({
       key: 'license',
-      label: '授权',
-      value: entry.license || '未记录',
+      label: t('audiobook.audioLibraryDisplay.labelLicense'),
+      value: entry.license || t('audiobook.audioLibraryDisplay.notRecorded'),
       title: entry.license_url || undefined,
     })
   }
 
   if (entry.license_commercial !== undefined) {
-    items.push({ key: 'commercial', label: '商用', value: formatCommercialLabel(entry) })
+    items.push({ key: 'commercial', label: t('audiobook.audioLibraryDisplay.labelCommercial'), value: formatCommercialLabel(entry, t) })
   }
 
   if (entry.attribution_required !== undefined) {
-    items.push({ key: 'attribution', label: '署名', value: formatAttributionLabel(entry) })
+    items.push({ key: 'attribution', label: t('audiobook.audioLibraryDisplay.labelAttribution'), value: formatAttributionLabel(entry, t) })
   }
 
   if (entry.author) {
     items.push({
       key: 'author',
-      label: '作者',
+      label: t('audiobook.audioLibraryDisplay.labelAuthor'),
       value: entry.author,
       title: entry.author_url || undefined,
     })
@@ -367,26 +373,26 @@ export const buildAudioLibraryDetailItems = (entry: AudioLibraryDetailSource) =>
   if (entry.source || entry.source_url || entry.source_id) {
     items.push({
       key: 'source',
-      label: '来源',
-      value: formatSourceLabel(entry.source),
+      label: t('audiobook.audioLibraryDisplay.labelSource'),
+      value: formatSourceLabel(entry.source, t),
       title: entry.source_url || entry.source_id || undefined,
     })
   }
 
   if (entry.retrieved_at) {
-    items.push({ key: 'retrieved_at', label: '入库', value: formatDateLabel(entry.retrieved_at) })
+    items.push({ key: 'retrieved_at', label: t('audiobook.audioLibraryDisplay.labelRetrievedAt'), value: formatDateLabel(entry.retrieved_at) })
   }
 
   if (entry.license_checked_at) {
     items.push({
       key: 'license_checked_at',
-      label: '授权检查',
+      label: t('audiobook.audioLibraryDisplay.labelLicenseCheckedAt'),
       value: formatDateLabel(entry.license_checked_at),
     })
   }
 
   if (entry.attribution_text) {
-    items.push({ key: 'attribution_text', label: '授权说明', value: entry.attribution_text })
+    items.push({ key: 'attribution_text', label: t('audiobook.audioLibraryDisplay.labelAttributionText'), value: entry.attribution_text })
   }
 
   return items

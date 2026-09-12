@@ -1,7 +1,10 @@
+import type { TFunction } from 'i18next'
 import type {
   UserAssetRecord,
   UserAssetRecordUpdatePayload,
 } from '@/services/api'
+
+const DEFAULT_TRANSLATE: TFunction = ((key: string) => key) as TFunction
 
 export type UserAssetEditorFormData = {
   title: string
@@ -64,10 +67,12 @@ export function parseUserAssetEditorTagsInput(value: string): string[] {
 
 export function normalizeUserAssetEditorPayload(
   formData: UserAssetEditorFormData,
+  t?: TFunction,
 ): { payload?: UserAssetRecordUpdatePayload; validationError?: string } {
+  const translate = t ?? DEFAULT_TRANSLATE
   const normalizedTitle = formData.title.trim()
   if (!normalizedTitle) {
-    return { validationError: '资产标题不能为空' }
+    return { validationError: translate('userAsset.editor.titleRequired') }
   }
 
   return {
@@ -86,19 +91,21 @@ type BuildUserAssetEditorDialogPresentationOptions = {
 
 export function buildUserAssetEditorDialogPresentation(
   options: BuildUserAssetEditorDialogPresentationOptions,
+  t?: TFunction,
 ): UserAssetEditorDialogPresentation {
+  const translate = t ?? DEFAULT_TRANSLATE
   const { submitting = false, hasAsset } = options
 
   return {
-    dialogTitle: '编辑资产信息',
-    titleLabel: '资产标题',
-    descriptionLabel: '补充说明',
-    tagsLabel: '标签',
-    tagsPlaceholder: '可使用逗号、中文逗号、顿号或换行分隔',
-    tagsHelperText: '最多保留 12 个标签，每个标签最多 30 个字符。',
-    cancelLabel: '取消',
-    saveLabel: '保存',
-    savingLabel: '保存中...',
+    dialogTitle: translate('userAsset.editor.dialogTitle'),
+    titleLabel: translate('userAsset.editor.titleLabel'),
+    descriptionLabel: translate('userAsset.editor.descriptionLabel'),
+    tagsLabel: translate('userAsset.editor.tagsLabel'),
+    tagsPlaceholder: translate('userAsset.editor.tagsPlaceholder'),
+    tagsHelperText: translate('userAsset.editor.tagsHelperText'),
+    cancelLabel: translate('userAsset.editor.cancel'),
+    saveLabel: translate('userAsset.editor.save'),
+    savingLabel: translate('userAsset.editor.saving'),
     saveDisabled: submitting || !hasAsset,
   }
 }

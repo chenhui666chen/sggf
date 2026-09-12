@@ -34,6 +34,9 @@ import DeleteIcon from '@mui/icons-material/Delete'
 import EditIcon from '@mui/icons-material/Edit'
 import SearchIcon from '@mui/icons-material/Search'
 import StarsOutlinedIcon from '@mui/icons-material/StarsOutlined'
+import type { TFunction } from 'i18next'
+import { useTranslation } from 'react-i18next'
+import { useFormats } from '@/i18n'
 import { apiClient } from '@/services/api'
 
 interface User {
@@ -155,31 +158,34 @@ interface UserPointsBillingEventListResponse {
   items: UserPointsBillingEvent[]
 }
 
-function formatAdjustmentType(type: string) {
-  if (type === 'manual_grant') return '手工补发'
-  if (type === 'recharge') return '充值入账'
-  if (type === 'manual_deduction') return '人工扣减'
-  if (type === 'compensation') return '补偿调整'
+function formatAdjustmentType(type: string, t?: TFunction) {
+  if (type === 'manual_grant') return t ? t('admin.users.adjustmentType.manualGrant') : '手工补发'
+  if (type === 'recharge') return t ? t('admin.users.adjustmentType.recharge') : '充值入账'
+  if (type === 'manual_deduction') return t ? t('admin.users.adjustmentType.manualDeduction') : '人工扣减'
+  if (type === 'compensation') return t ? t('admin.users.adjustmentType.compensation') : '补偿调整'
+  if (t) return type || t('admin.users.adjustmentType.unknown')
   return type || '未分类'
 }
 
-function formatBillingEventKind(kind: UserPointsBillingEvent['event_kind']) {
-  if (kind === 'freeze') return '正式冻结'
-  if (kind === 'settle') return '正式结算'
-  if (kind === 'release') return '冻结释放'
+function formatBillingEventKind(kind: UserPointsBillingEvent['event_kind'], t?: TFunction) {
+  if (kind === 'freeze') return t ? t('admin.users.eventKind.freeze') : '正式冻结'
+  if (kind === 'settle') return t ? t('admin.users.eventKind.settle') : '正式结算'
+  if (kind === 'release') return t ? t('admin.users.eventKind.release') : '冻结释放'
   return kind
 }
 
-function formatPricingStatus(status?: string | null) {
-  if (status === 'actual') return '实际计费'
-  if (status === 'estimated') return '预估计费'
-  if (status === 'pending') return '待计费'
+function formatPricingStatus(status?: string | null, t?: TFunction) {
+  if (status === 'actual') return t ? t('admin.pointsBilling.status.actual') : '实际计费'
+  if (status === 'estimated') return t ? t('admin.pointsBilling.status.estimated') : '预估计费'
+  if (status === 'pending') return t ? t('admin.pointsBilling.status.pending') : '待计费'
+  if (t) return status || t('admin.users.statusNotMarked')
   return status || '未标记'
 }
 
-function formatTaskStatus(status?: string | null) {
-  if (status === 'running') return '运行中'
-  if (status === 'completed') return '已完成'
+function formatTaskStatus(status?: string | null, t?: TFunction) {
+  if (status === 'running') return t ? t('admin.pointsBilling.status.running') : '运行中'
+  if (status === 'completed') return t ? t('admin.pointsBilling.status.completed') : '已完成'
+  if (t) return status || t('admin.users.statusNotMarked')
   return status || '未标记'
 }
 
@@ -195,10 +201,10 @@ function getMarginStatusColor(status: UserPointsBillingOperatingSnapshot['margin
   return 'success'
 }
 
-function formatMarginStatus(status: UserPointsBillingOperatingSnapshot['margin_status']) {
-  if (status === 'negative') return '负毛利'
-  if (status === 'warning') return '低毛利预警'
-  return '毛利健康'
+function formatMarginStatus(status: UserPointsBillingOperatingSnapshot['margin_status'], t?: TFunction) {
+  if (status === 'negative') return t ? t('admin.pointsBilling.status.negative') : '负毛利'
+  if (status === 'warning') return t ? t('admin.pointsBilling.status.warning') : '低毛利预警'
+  return t ? t('admin.pointsBilling.status.healthy') : '毛利健康'
 }
 
 function formatCurrency(value?: number | null) {
@@ -215,10 +221,10 @@ function formatPoints(value?: number | null) {
   return value.toFixed(2)
 }
 
-function formatPointsEntryStatus(status: UserPointsAccountEntry['status']) {
-  if (status === 'expired') return '已过期'
-  if (status === 'frozen') return '冻结中'
-  return '有效'
+function formatPointsEntryStatus(status: UserPointsAccountEntry['status'], t?: TFunction) {
+  if (status === 'expired') return t ? t('admin.users.entryStatus.expired') : '已过期'
+  if (status === 'frozen') return t ? t('admin.users.entryStatus.frozen') : '冻结中'
+  return t ? t('admin.users.entryStatus.active') : '有效'
 }
 
 function getPointsEntryColor(direction: UserPointsAccountEntry['direction']): 'success' | 'warning' | 'primary' {
@@ -235,6 +241,11 @@ function formatPercent(value?: number | null) {
 }
 
 export default function AdminUsersPage() {
+  const { t } = useTranslation()
+  // 只解构用得上的两个：本文件另有 formatCurrency / formatPercent 等本地 helper，
+  // 它们的展示约定（"CNY 12.34"）与 useFormats 的同名函数不同，不能被遮蔽。
+  // 积分调整与计费事件属账务流水，保留到秒才排得出同一分钟内的先后。
+  const { formatDate, formatDateTimeWithSeconds } = useFormats()
   const [users, setUsers] = useState<User[]>([])
   const [roles, setRoles] = useState<Role[]>([])
   const [loading, setLoading] = useState(true)
@@ -287,7 +298,7 @@ export default function AdminUsersPage() {
       setTotal(Number(data.total) || 0)
       setError(null)
     } catch (err: any) {
-      setError(err.response?.data?.detail || '获取用户列表失败')
+      setError(err.response?.data?.detail || t('admin.users.messages.fetchUsersFailed'))
     } finally {
       setLoading(false)
     }
@@ -319,7 +330,7 @@ export default function AdminUsersPage() {
         setPointsAccount(data && typeof data === 'object' ? data : null)
       } else {
         setPointsAccount(null)
-        nextError = '获取积分账户余额失败'
+        nextError = t('admin.users.messages.fetchBalanceFailed')
       }
 
       if (adjustmentsResult.status === 'fulfilled') {
@@ -327,7 +338,7 @@ export default function AdminUsersPage() {
         setPointsAdjustments(Array.isArray(data.items) ? data.items : [])
       } else {
         setPointsAdjustments([])
-        nextError = '获取人工积分调整记录失败'
+        nextError = t('admin.users.messages.fetchAdjustmentsFailed')
       }
 
       if (billingEventsResult.status === 'fulfilled') {
@@ -335,7 +346,7 @@ export default function AdminUsersPage() {
         setPointsBillingEvents(Array.isArray(data.items) ? data.items : [])
       } else {
         setPointsBillingEvents([])
-        nextError = nextError || '获取正式计费事件失败'
+        nextError = nextError || t('admin.users.messages.fetchBillingFailed')
       }
 
       if (nextError) {
@@ -353,10 +364,14 @@ export default function AdminUsersPage() {
       await apiClient.patch(`/api/v1/admin/users/${user.id}/status`, {
         is_active: !user.is_active,
       })
-      setSuccessMessage(user.is_active ? `已禁用用户 ${user.username}` : `已启用用户 ${user.username}`)
+      setSuccessMessage(
+        user.is_active
+          ? t('admin.users.messages.userDisabled', { name: user.username })
+          : t('admin.users.messages.userEnabled', { name: user.username }),
+      )
       await fetchUsers()
     } catch (err: any) {
-      setError(err.response?.data?.detail || '更新用户状态失败')
+      setError(err.response?.data?.detail || t('admin.users.messages.updateStatusFailed'))
     }
   }
 
@@ -365,11 +380,11 @@ export default function AdminUsersPage() {
     try {
       await apiClient.delete(`/api/v1/admin/users/${selectedUser.id}`)
       setDeleteDialogOpen(false)
-      setSuccessMessage(`已删除用户 ${selectedUser.username}`)
+      setSuccessMessage(t('admin.users.messages.userDeleted', { name: selectedUser.username }))
       setSelectedUser(null)
       await fetchUsers()
     } catch (err: any) {
-      setError(err.response?.data?.detail || '删除用户失败')
+      setError(err.response?.data?.detail || t('admin.users.messages.deleteFailed'))
     }
   }
 
@@ -380,12 +395,12 @@ export default function AdminUsersPage() {
         role_ids: selectedRoleIds,
       })
       setEditDialogOpen(false)
-      setSuccessMessage(`已更新用户 ${selectedUser.username} 的角色`)
+      setSuccessMessage(t('admin.users.messages.rolesUpdated', { name: selectedUser.username }))
       setSelectedUser(null)
       setSelectedRoleIds([])
       await fetchUsers()
     } catch (err: any) {
-      setError(err.response?.data?.detail || '分配角色失败')
+      setError(err.response?.data?.detail || t('admin.users.messages.assignRolesFailed'))
     }
   }
 
@@ -394,11 +409,11 @@ export default function AdminUsersPage() {
 
     const delta = Number(pointsForm.delta)
     if (!Number.isFinite(delta) || delta === 0) {
-      setError('积分调整值不能为 0')
+      setError(t('admin.users.messages.zeroDelta'))
       return
     }
     if (!pointsForm.reason.trim()) {
-      setError('请填写积分调整原因')
+      setError(t('admin.users.messages.missingReason'))
       return
     }
 
@@ -410,7 +425,7 @@ export default function AdminUsersPage() {
         adjustment_type: pointsForm.adjustmentType,
         expires_at: pointsForm.expiresAt ? new Date(pointsForm.expiresAt).toISOString() : null,
       })
-      setSuccessMessage(`已为用户 ${selectedUser.username} 提交积分调整`)
+      setSuccessMessage(t('admin.users.messages.adjustmentSubmitted', { name: selectedUser.username }))
       setPointsForm({
         delta: '',
         reason: '',
@@ -419,7 +434,7 @@ export default function AdminUsersPage() {
       })
       await fetchUserPointsDialogData(selectedUser.id)
     } catch (err: any) {
-      setError(err.response?.data?.detail || '提交积分调整失败')
+      setError(err.response?.data?.detail || t('admin.users.messages.submitFailed'))
     } finally {
       setPointsSubmitting(false)
     }
@@ -462,7 +477,7 @@ export default function AdminUsersPage() {
   return (
     <Box>
       <Typography variant="h4" gutterBottom sx={{ mb: 3 }}>
-        用户管理
+        {t('admin.users.title')}
       </Typography>
 
       {error ? (
@@ -481,7 +496,7 @@ export default function AdminUsersPage() {
         <CardContent>
           <Box sx={{ display: 'flex', gap: 2, mb: 3, flexWrap: 'wrap' }}>
             <TextField
-              placeholder="搜索用户名、邮箱、手机号"
+              placeholder={t('admin.users.searchPlaceholder')}
               value={search}
               onChange={(event) => setSearch(event.target.value)}
               size="small"
@@ -495,11 +510,11 @@ export default function AdminUsersPage() {
               sx={{ width: { xs: '100%', sm: 320 } }}
             />
             <FormControl size="small" sx={{ width: 160 }}>
-              <InputLabel>状态</InputLabel>
-              <Select value={statusFilter} label="状态" onChange={(event) => setStatusFilter(event.target.value)}>
-                <MenuItem value="">全部</MenuItem>
-                <MenuItem value="true">已启用</MenuItem>
-                <MenuItem value="false">已禁用</MenuItem>
+              <InputLabel>{t('admin.users.status')}</InputLabel>
+              <Select value={statusFilter} label={t('admin.users.status')} onChange={(event) => setStatusFilter(event.target.value)}>
+                <MenuItem value="">{t('admin.users.all')}</MenuItem>
+                <MenuItem value="true">{t('admin.users.enabled')}</MenuItem>
+                <MenuItem value="false">{t('admin.users.disabled')}</MenuItem>
               </Select>
             </FormControl>
           </Box>
@@ -508,14 +523,14 @@ export default function AdminUsersPage() {
             <Table>
               <TableHead>
                 <TableRow>
-                  <TableCell>ID</TableCell>
-                  <TableCell>用户名</TableCell>
-                  <TableCell>邮箱</TableCell>
-                  <TableCell>手机号</TableCell>
-                  <TableCell>角色</TableCell>
-                  <TableCell>状态</TableCell>
-                  <TableCell>注册时间</TableCell>
-                  <TableCell>操作</TableCell>
+                  <TableCell>{t('admin.users.colId')}</TableCell>
+                  <TableCell>{t('admin.users.colUsername')}</TableCell>
+                  <TableCell>{t('admin.users.colEmail')}</TableCell>
+                  <TableCell>{t('admin.users.colPhone')}</TableCell>
+                  <TableCell>{t('admin.users.colRoles')}</TableCell>
+                  <TableCell>{t('admin.users.colStatus')}</TableCell>
+                  <TableCell>{t('admin.users.colRegisteredAt')}</TableCell>
+                  <TableCell>{t('admin.users.colActions')}</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
@@ -538,27 +553,27 @@ export default function AdminUsersPage() {
                     </TableCell>
                     <TableCell>
                       <Chip
-                        label={user.is_active ? '已启用' : '已禁用'}
+                        label={user.is_active ? t('admin.users.enabled') : t('admin.users.disabled')}
                         size="small"
                         color={user.is_active ? 'success' : 'error'}
                       />
                     </TableCell>
-                    <TableCell>{new Date(user.created_at).toLocaleDateString('zh-CN')}</TableCell>
+                    <TableCell>{formatDate(user.created_at)}</TableCell>
                     <TableCell>
-                      <IconButton size="small" onClick={() => openEditDialog(user)} title="编辑角色">
+                      <IconButton size="small" onClick={() => openEditDialog(user)} title={t('admin.users.editRolesTitle')}>
                         <EditIcon />
                       </IconButton>
-                      <IconButton size="small" onClick={() => openPointsDialog(user)} title="调整积分">
+                      <IconButton size="small" onClick={() => openPointsDialog(user)} title={t('admin.users.adjustPointsTitle')}>
                         <StarsOutlinedIcon />
                       </IconButton>
                       <IconButton
                         size="small"
                         onClick={() => handleToggleStatus(user)}
-                        title={user.is_active ? '禁用用户' : '启用用户'}
+                        title={user.is_active ? t('admin.users.disableUser') : t('admin.users.enableUser')}
                       >
                         {user.is_active ? <BlockIcon /> : <CheckCircleIcon />}
                       </IconButton>
-                      <IconButton size="small" onClick={() => openDeleteDialog(user)} title="删除用户">
+                      <IconButton size="small" onClick={() => openDeleteDialog(user)} title={t('admin.users.deleteUserTitle')}>
                         <DeleteIcon />
                       </IconButton>
                     </TableCell>
@@ -578,23 +593,25 @@ export default function AdminUsersPage() {
               setRowsPerPage(parseInt(event.target.value, 10))
               setPage(0)
             }}
-            labelRowsPerPage="每页行数"
-            labelDisplayedRows={({ from, to, count }) => `${from}-${to} / 共 ${count} 条`}
+            labelRowsPerPage={t('admin.users.rowsPerPage')}
+            labelDisplayedRows={({ from, to, count }) =>
+              t('admin.users.displayedRows', { from, to, count })
+            }
           />
         </CardContent>
       </Card>
 
       <Dialog open={editDialogOpen} onClose={() => setEditDialogOpen(false)} fullWidth maxWidth="sm">
-        <DialogTitle>编辑用户角色</DialogTitle>
+        <DialogTitle>{t('admin.users.editDialogTitle')}</DialogTitle>
         <DialogContent>
-          <Typography sx={{ mb: 2 }}>用户：{selectedUser?.username}</Typography>
+          <Typography sx={{ mb: 2 }}>{t('admin.users.userPrefix', { name: selectedUser?.username })}</Typography>
           <FormControl fullWidth>
-            <InputLabel>角色</InputLabel>
+            <InputLabel>{t('admin.users.role')}</InputLabel>
             <Select
               multiple
               value={selectedRoleIds}
               onChange={(event) => setSelectedRoleIds(event.target.value as number[])}
-              label="角色"
+              label={t('admin.users.role')}
             >
               {roles.map((role) => (
                 <MenuItem key={role.id} value={role.id}>
@@ -605,46 +622,46 @@ export default function AdminUsersPage() {
           </FormControl>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setEditDialogOpen(false)}>取消</Button>
+          <Button onClick={() => setEditDialogOpen(false)}>{t('action.cancel')}</Button>
           <Button onClick={handleEditRoles} variant="contained">
-            保存
+            {t('action.save')}
           </Button>
         </DialogActions>
       </Dialog>
 
       <Dialog open={pointsDialogOpen} onClose={() => setPointsDialogOpen(false)} fullWidth maxWidth="md">
-        <DialogTitle>积分账户</DialogTitle>
+        <DialogTitle>{t('admin.users.pointsDialogTitle')}</DialogTitle>
         <DialogContent dividers>
           <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
-            目标用户：{selectedUser?.username}
+            {t('admin.users.targetUser', { name: selectedUser?.username })}
           </Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-            正数表示补发或充值，负数表示扣减。提交后会直接反映到用户中心积分账户。
+            {t('admin.users.pointsHint')}
           </Typography>
 
           <Paper variant="outlined" sx={{ mt: 2, p: 2 }}>
             <Box sx={{ display: 'grid', gap: 1.5, gridTemplateColumns: { xs: '1fr 1fr', sm: 'repeat(4, 1fr)' } }}>
               <Box>
                 <Typography variant="caption" color="text.secondary">
-                  账户余额
+                  {t('admin.users.balance')}
                 </Typography>
                 <Typography variant="h6">{formatPoints(pointsAccount?.balance)}</Typography>
               </Box>
               <Box>
                 <Typography variant="caption" color="text.secondary">
-                  冻结积分
+                  {t('admin.users.frozen')}
                 </Typography>
                 <Typography variant="h6">{formatPoints(pointsAccount?.frozen)}</Typography>
               </Box>
               <Box>
                 <Typography variant="caption" color="text.secondary">
-                  可用积分
+                  {t('admin.users.available')}
                 </Typography>
                 <Typography variant="h6">{formatPoints(pointsAccount?.available)}</Typography>
               </Box>
               <Box>
                 <Typography variant="caption" color="text.secondary">
-                  即将过期
+                  {t('admin.users.expiringSoon')}
                 </Typography>
                 <Typography variant="h6">{formatPoints(pointsAccount?.expiring_soon)}</Typography>
               </Box>
@@ -653,12 +670,14 @@ export default function AdminUsersPage() {
               <Chip
                 size="small"
                 color={pointsAccount?.status === 'partial' ? 'success' : 'default'}
-                label={pointsAccount?.status === 'partial' ? '已接入积分读模型' : '暂无积分来源'}
+                label={
+                  pointsAccount?.status === 'partial' ? t('admin.users.statusPartial') : t('admin.users.statusNoSource')
+                }
               />
               <Chip
                 size="small"
                 variant="outlined"
-                label={`来源 ${pointsAccount?.connected_source_count ?? 0} 类`}
+                label={t('admin.users.sourceCount', { count: pointsAccount?.connected_source_count ?? 0 })}
               />
             </Box>
             {pointsAccount?.entries?.length ? (
@@ -679,7 +698,7 @@ export default function AdminUsersPage() {
                         {entry.title}
                       </Typography>
                       <Typography variant="caption" color="text.secondary">
-                        {entry.source_label} · {formatPointsEntryStatus(entry.status)}
+                        {entry.source_label} · {formatPointsEntryStatus(entry.status, t)}
                       </Typography>
                     </Box>
                     <Chip
@@ -695,27 +714,27 @@ export default function AdminUsersPage() {
 
           <Box sx={{ display: 'grid', gap: 2, mt: 2, gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' } }}>
             <TextField
-              label="积分调整值"
+              label={t('admin.users.adjustValue')}
               value={pointsForm.delta}
               onChange={(event) => setPointsForm((prev) => ({ ...prev, delta: event.target.value }))}
-              placeholder="例如 20 或 -5"
+              placeholder={t('admin.users.adjustValuePlaceholder')}
               fullWidth
             />
             <FormControl fullWidth>
-              <InputLabel>调整类型</InputLabel>
+              <InputLabel>{t('admin.users.adjustType')}</InputLabel>
               <Select
                 value={pointsForm.adjustmentType}
-                label="调整类型"
+                label={t('admin.users.adjustType')}
                 onChange={(event) => setPointsForm((prev) => ({ ...prev, adjustmentType: event.target.value }))}
               >
-                <MenuItem value="manual_grant">手工补发</MenuItem>
-                <MenuItem value="recharge">充值入账</MenuItem>
-                <MenuItem value="manual_deduction">人工扣减</MenuItem>
-                <MenuItem value="compensation">补偿调整</MenuItem>
+                <MenuItem value="manual_grant">{t('admin.users.adjustmentType.manualGrant')}</MenuItem>
+                <MenuItem value="recharge">{t('admin.users.adjustmentType.recharge')}</MenuItem>
+                <MenuItem value="manual_deduction">{t('admin.users.adjustmentType.manualDeduction')}</MenuItem>
+                <MenuItem value="compensation">{t('admin.users.adjustmentType.compensation')}</MenuItem>
               </Select>
             </FormControl>
             <TextField
-              label="过期时间"
+              label={t('admin.users.expiresAt')}
               type="datetime-local"
               value={pointsForm.expiresAt}
               onChange={(event) => setPointsForm((prev) => ({ ...prev, expiresAt: event.target.value }))}
@@ -726,10 +745,10 @@ export default function AdminUsersPage() {
           </Box>
 
           <TextField
-            label="调整原因"
+            label={t('admin.users.adjustReason')}
             value={pointsForm.reason}
             onChange={(event) => setPointsForm((prev) => ({ ...prev, reason: event.target.value }))}
-            placeholder="例如：补发活动积分、纠正重复奖励、充值入账"
+            placeholder={t('admin.users.adjustReasonPlaceholder')}
             fullWidth
             multiline
             minRows={2}
@@ -737,7 +756,7 @@ export default function AdminUsersPage() {
           />
 
           <Typography variant="subtitle2" sx={{ mt: 3, fontWeight: 700 }}>
-            最近调整记录
+            {t('admin.users.recentAdjustments')}
           </Typography>
 
           {pointsLoading ? (
@@ -746,7 +765,7 @@ export default function AdminUsersPage() {
             </Box>
           ) : pointsAdjustments.length === 0 ? (
             <Alert severity="info" sx={{ mt: 2 }}>
-              暂无人工积分调整记录。
+              {t('admin.users.noAdjustments')}
             </Alert>
           ) : (
             <Box sx={{ mt: 2, display: 'grid', gap: 1.5 }}>
@@ -760,15 +779,18 @@ export default function AdminUsersPage() {
                           color={item.delta >= 0 ? 'success' : 'warning'}
                           label={`${item.delta >= 0 ? '+' : ''}${item.delta}`}
                         />
-                        <Chip size="small" variant="outlined" label={formatAdjustmentType(item.adjustment_type)} />
+                        <Chip size="small" variant="outlined" label={formatAdjustmentType(item.adjustment_type, t)} />
                       </Box>
                       <Typography sx={{ mt: 1 }}>{item.reason}</Typography>
                       <Typography variant="caption" color="text.secondary" display="block" sx={{ mt: 0.5 }}>
-                        操作人：{item.operator_username} · 创建时间：{new Date(item.created_at).toLocaleString('zh-CN')}
+                        {t('admin.users.operatorCreatedAt', {
+                          name: item.operator_username,
+                          time: formatDateTimeWithSeconds(item.created_at),
+                        })}
                       </Typography>
                       {item.expires_at ? (
                         <Typography variant="caption" color="text.secondary" display="block" sx={{ mt: 0.25 }}>
-                          过期时间：{new Date(item.expires_at).toLocaleString('zh-CN')}
+                          {t('admin.users.expiresTime', { time: formatDateTimeWithSeconds(item.expires_at) })}
                         </Typography>
                       ) : null}
                     </Box>
@@ -779,16 +801,16 @@ export default function AdminUsersPage() {
           )}
 
           <Typography variant="subtitle2" sx={{ mt: 3, fontWeight: 700 }}>
-            正式计费事件
+            {t('admin.users.billingEvents')}
           </Typography>
 
           <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-            这里展示系统正式记账的冻结、结算、释放事件，以及对应的经营结算快照。
+            {t('admin.users.billingEventsHint')}
           </Typography>
 
           {pointsLoading ? null : pointsBillingEvents.length === 0 ? (
             <Alert severity="info" sx={{ mt: 2 }}>
-              暂无正式计费事件记录。
+              {t('admin.users.noBillingEvents')}
             </Alert>
           ) : (
             <Box sx={{ mt: 2, display: 'grid', gap: 1.5 }}>
@@ -798,16 +820,16 @@ export default function AdminUsersPage() {
                     <Box sx={{ minWidth: 0, flex: 1 }}>
                       <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
                         <Chip size="small" variant="outlined" label={item.module_label} />
-                        <Chip size="small" color={getBillingEventColor(item.event_kind)} label={formatBillingEventKind(item.event_kind)} />
-                        <Chip size="small" variant="outlined" label={`${item.amount_points.toFixed(2)} 积分`} />
+                        <Chip size="small" color={getBillingEventColor(item.event_kind)} label={formatBillingEventKind(item.event_kind, t)} />
+                        <Chip size="small" variant="outlined" label={t('admin.users.pointsSuffix', { points: item.amount_points.toFixed(2) })} />
                         {item.amount_yuan != null ? (
                           <Chip size="small" variant="outlined" label={formatCurrency(item.amount_yuan)} />
                         ) : null}
                         {item.pricing_status ? (
-                          <Chip size="small" variant="outlined" label={formatPricingStatus(item.pricing_status)} />
+                          <Chip size="small" variant="outlined" label={formatPricingStatus(item.pricing_status, t)} />
                         ) : null}
                         {item.task_status ? (
-                          <Chip size="small" variant="outlined" label={formatTaskStatus(item.task_status)} />
+                          <Chip size="small" variant="outlined" label={formatTaskStatus(item.task_status, t)} />
                         ) : null}
                       </Box>
 
@@ -816,21 +838,28 @@ export default function AdminUsersPage() {
                         {item.summary}
                       </Typography>
                       <Typography variant="caption" color="text.secondary" display="block" sx={{ mt: 0.75 }}>
-                        计费键：{item.billing_key} · 操作人：{item.operator_username} · 创建时间：{new Date(item.created_at).toLocaleString('zh-CN')}
+                        {t('admin.users.billingKeyLine', {
+                          key: item.billing_key,
+                          name: item.operator_username,
+                          time: formatDateTimeWithSeconds(item.created_at),
+                        })}
                       </Typography>
 
                       {item.project_id || item.audiobook_project_id || item.run_id ? (
                         <Typography variant="caption" color="text.secondary" display="block" sx={{ mt: 0.25 }}>
-                          {item.project_id ? `项目 ID：${item.project_id}` : '项目 ID：-'}
-                          {item.audiobook_project_id ? ` · 有声书项目：${item.audiobook_project_id}` : ''}
-                          {item.run_id ? ` · 运行 ID：${item.run_id}` : ''}
-                          {item.stage ? ` · 阶段：${item.stage}` : ''}
+                          {t('admin.users.projectId', { id: item.project_id ?? '-' })}
+                          {item.audiobook_project_id ? t('admin.users.audiobookProject', { id: item.audiobook_project_id }) : ''}
+                          {item.run_id ? t('admin.users.runId', { id: item.run_id }) : ''}
+                          {item.stage ? t('admin.users.stagePrefix', { stage: item.stage }) : ''}
                         </Typography>
                       ) : null}
 
                       {item.action_path ? (
                         <Typography variant="caption" color="text.secondary" display="block" sx={{ mt: 0.25 }}>
-                          跳转入口：{item.action_label || item.action_path} · {item.action_path}
+                          {t('admin.users.actionEntry', {
+                            label: item.action_label || item.action_path,
+                            path: item.action_path,
+                          })}
                         </Typography>
                       ) : null}
 
@@ -846,28 +875,44 @@ export default function AdminUsersPage() {
                           }}
                         >
                           <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', alignItems: 'center' }}>
-                            <Typography variant="subtitle2">经营快照</Typography>
+                            <Typography variant="subtitle2">{t('admin.users.snapshotTitle')}</Typography>
                             <Chip
                               size="small"
                               color={getMarginStatusColor(item.operating_snapshot.margin_status)}
-                              label={formatMarginStatus(item.operating_snapshot.margin_status)}
+                              label={formatMarginStatus(item.operating_snapshot.margin_status, t)}
                             />
                           </Box>
                           <Box sx={{ mt: 1, display: 'grid', gap: 0.5 }}>
                             <Typography variant="body2" color="text.secondary">
-                              用户计费：{formatCurrency(item.operating_snapshot.user_billed_yuan)} · 供应商折后成本：{formatCurrency(item.operating_snapshot.supplier_discounted_cost_yuan)}
+                              {t('admin.users.userBilledCost', {
+                                billed: formatCurrency(item.operating_snapshot.user_billed_yuan),
+                                cost: formatCurrency(item.operating_snapshot.supplier_discounted_cost_yuan),
+                              })}
                             </Typography>
                             <Typography variant="body2" color="text.secondary">
-                              平台毛利：{formatCurrency(item.operating_snapshot.platform_gross_profit_yuan)} · 毛利率：{formatPercent(item.operating_snapshot.platform_margin_rate)}
+                              {t('admin.users.profitRate', {
+                                profit: formatCurrency(item.operating_snapshot.platform_gross_profit_yuan),
+                                rate: formatPercent(item.operating_snapshot.platform_margin_rate),
+                              })}
                             </Typography>
                             <Typography variant="body2" color="text.secondary">
-                              供应商折扣：{formatPercent(item.operating_snapshot.supplier_discount_rate)} · 折扣来源：{item.operating_snapshot.supplier_discount_rate_source}
+                              {t('admin.users.discountSource', {
+                                rate: formatPercent(item.operating_snapshot.supplier_discount_rate),
+                                source: item.operating_snapshot.supplier_discount_rate_source,
+                              })}
                             </Typography>
                             <Typography variant="body2" color="text.secondary">
-                              折扣分配：平台保留 {formatCurrency(item.operating_snapshot.captured_discount_yuan)} · 让利用户 {formatCurrency(item.operating_snapshot.shared_discount_yuan)}
+                              {t('admin.users.discountAlloc', {
+                                captured: formatCurrency(item.operating_snapshot.captured_discount_yuan),
+                                shared: formatCurrency(item.operating_snapshot.shared_discount_yuan),
+                              })}
                             </Typography>
                             <Typography variant="body2" color="text.secondary">
-                              负毛利拦截：{item.operating_snapshot.negative_margin_blocked ? '已触发' : '未触发'}
+                              {t('admin.users.blockStatus', {
+                                status: item.operating_snapshot.negative_margin_blocked
+                                  ? t('admin.users.blocked')
+                                  : t('admin.users.notBlocked'),
+                              })}
                             </Typography>
                           </Box>
                         </Box>
@@ -880,22 +925,22 @@ export default function AdminUsersPage() {
           )}
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setPointsDialogOpen(false)}>关闭</Button>
+          <Button onClick={() => setPointsDialogOpen(false)}>{t('action.close')}</Button>
           <Button variant="contained" onClick={() => void handleSubmitPointsAdjustment()} disabled={pointsSubmitting}>
-            {pointsSubmitting ? '提交中...' : '提交调整'}
+            {pointsSubmitting ? t('admin.users.submitting') : t('admin.users.submitAdjustment')}
           </Button>
         </DialogActions>
       </Dialog>
 
       <Dialog open={deleteDialogOpen} onClose={() => setDeleteDialogOpen(false)} fullWidth maxWidth="xs">
-        <DialogTitle>确认删除</DialogTitle>
+        <DialogTitle>{t('admin.users.confirmDeleteTitle')}</DialogTitle>
         <DialogContent>
-          <Typography>确定要删除用户 “{selectedUser?.username}” 吗？此操作不可恢复。</Typography>
+          <Typography>{t('admin.users.confirmDeleteBody', { name: selectedUser?.username })}</Typography>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setDeleteDialogOpen(false)}>取消</Button>
+          <Button onClick={() => setDeleteDialogOpen(false)}>{t('action.cancel')}</Button>
           <Button onClick={handleDelete} variant="contained" color="error">
-            删除
+            {t('admin.common.delete')}
           </Button>
         </DialogActions>
       </Dialog>

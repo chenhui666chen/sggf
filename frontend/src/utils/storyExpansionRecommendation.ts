@@ -1,3 +1,5 @@
+import type { TFunction } from 'i18next'
+
 import type { Project } from '@/types/project'
 import {
   CONVENTIONAL_COLLABORATION_RECOMMENDED_MAX_CHAPTERS,
@@ -38,7 +40,7 @@ function buildRecommendationReason(lines: string[]): string {
   return lines.join('\n')
 }
 
-function resolveLongStoryGenreConfig(projectGenre: string, maxChapters: number): {
+function resolveLongStoryGenreConfig(projectGenre: string, maxChapters: number, t?: TFunction): {
   estimatedVolumes: number
   chaptersPerVolumeMin: number
   chaptersPerVolumeMax: number
@@ -51,9 +53,11 @@ function resolveLongStoryGenreConfig(projectGenre: string, maxChapters: number):
       estimatedVolumes: clampRecommendationVolumeCount(Math.ceil(maxChapters / 50), 18, 4),
       chaptersPerVolumeMin: 40,
       chaptersPerVolumeMax: 60,
-      genreLabel: `${projectGenre}（境界体系）`,
-      scenarioLabel: '长篇',
-      usageHint: '适用：先锁定境界大阶段，再按卷滚动细化每个故事台阶',
+      genreLabel: t
+        ? t('storyExpansion.recommendation.genreCultivation', { genre: projectGenre })
+        : `${projectGenre}（境界体系）`,
+      scenarioLabel: t ? t('storyExpansion.recommendation.scenarioLong') : '长篇',
+      usageHint: t ? t('storyExpansion.recommendation.usageCultivation') : '适用：先锁定境界大阶段，再按卷滚动细化每个故事台阶',
     }
   }
 
@@ -62,9 +66,9 @@ function resolveLongStoryGenreConfig(projectGenre: string, maxChapters: number):
       estimatedVolumes: clampRecommendationVolumeCount(Math.ceil(maxChapters / 35), 14, 4),
       chaptersPerVolumeMin: 25,
       chaptersPerVolumeMax: 45,
-      genreLabel: '都市（事业发展）',
-      scenarioLabel: '长篇',
-      usageHint: '适用：事业线、关系线、资源线交替推进',
+      genreLabel: t ? t('storyExpansion.recommendation.genreUrban') : '都市（事业发展）',
+      scenarioLabel: t ? t('storyExpansion.recommendation.scenarioLong') : '长篇',
+      usageHint: t ? t('storyExpansion.recommendation.usageUrban') : '适用：事业线、关系线、资源线交替推进',
     }
   }
 
@@ -73,9 +77,9 @@ function resolveLongStoryGenreConfig(projectGenre: string, maxChapters: number):
       estimatedVolumes: clampRecommendationVolumeCount(Math.ceil(maxChapters / 28), 12, 4),
       chaptersPerVolumeMin: 20,
       chaptersPerVolumeMax: 35,
-      genreLabel: '悬疑（线索布局）',
-      scenarioLabel: '长篇',
-      usageHint: '适用：每卷完成一轮线索推进与阶段性反转',
+      genreLabel: t ? t('storyExpansion.recommendation.genreSuspense') : '悬疑（线索布局）',
+      scenarioLabel: t ? t('storyExpansion.recommendation.scenarioLong') : '长篇',
+      usageHint: t ? t('storyExpansion.recommendation.usageSuspense') : '适用：每卷完成一轮线索推进与阶段性反转',
     }
   }
 
@@ -84,9 +88,11 @@ function resolveLongStoryGenreConfig(projectGenre: string, maxChapters: number):
       estimatedVolumes: clampRecommendationVolumeCount(Math.ceil(maxChapters / 30), 12, 4),
       chaptersPerVolumeMin: 20,
       chaptersPerVolumeMax: 40,
-      genreLabel: `${projectGenre}（感情递进）`,
-      scenarioLabel: '长篇',
-      usageHint: '适用：关系推进、情感反转与阶段性抉择并行',
+      genreLabel: t
+        ? t('storyExpansion.recommendation.genreRomance', { genre: projectGenre })
+        : `${projectGenre}（感情递进）`,
+      scenarioLabel: t ? t('storyExpansion.recommendation.scenarioLong') : '长篇',
+      usageHint: t ? t('storyExpansion.recommendation.usageRomance') : '适用：关系推进、情感反转与阶段性抉择并行',
     }
   }
 
@@ -95,9 +101,9 @@ function resolveLongStoryGenreConfig(projectGenre: string, maxChapters: number):
       estimatedVolumes: clampRecommendationVolumeCount(Math.ceil(maxChapters / 45), 14, 4),
       chaptersPerVolumeMin: 30,
       chaptersPerVolumeMax: 55,
-      genreLabel: '科幻（探索升级）',
-      scenarioLabel: '长篇',
-      usageHint: '适用：世界规则、探索层级与科技突破同步升级',
+      genreLabel: t ? t('storyExpansion.recommendation.genreSciFi') : '科幻（探索升级）',
+      scenarioLabel: t ? t('storyExpansion.recommendation.scenarioLong') : '长篇',
+      usageHint: t ? t('storyExpansion.recommendation.usageSciFi') : '适用：世界规则、探索层级与科技突破同步升级',
     }
   }
 
@@ -105,14 +111,15 @@ function resolveLongStoryGenreConfig(projectGenre: string, maxChapters: number):
     estimatedVolumes: clampRecommendationVolumeCount(Math.ceil(maxChapters / 35), 12, 4),
     chaptersPerVolumeMin: 25,
     chaptersPerVolumeMax: 45,
-    genreLabel: projectGenre || '通用',
-    scenarioLabel: '长篇',
+    genreLabel: projectGenre || (t ? t('storyExpansion.recommendation.genreGeneric') : '通用'),
+    scenarioLabel: t ? t('storyExpansion.recommendation.scenarioLong') : '长篇',
     usageHint: '',
   }
 }
 
 export function resolveStoryExpansionRecommendation(
   projectInfo: StoryExpansionRecommendationProject | null | undefined,
+  t?: TFunction,
 ): StoryExpansionRecommendation {
   if (!projectInfo) {
     return DEFAULT_STORY_EXPANSION_RECOMMENDATION
@@ -121,18 +128,23 @@ export function resolveStoryExpansionRecommendation(
   const projectGenre = projectInfo.genre?.trim() || ''
   const lengthType = projectInfo.planned_length_type?.trim() || ''
   const maxChapters = Math.max(0, Number(projectInfo.planned_chapters_max || 0))
+  const fallbackGenre = t ? t('storyExpansion.recommendation.genreGeneric') : '通用'
 
   if (lengthType === 'short' || maxChapters < 50) {
     return {
       ...DEFAULT_STORY_EXPANSION_RECOMMENDATION,
       recommendedMode: 'total',
       recommendationReason: buildRecommendationReason([
-        '推荐「按总章数扩展」：',
+        t ? t('storyExpansion.recommendation.recommendTotalTitle') : '推荐「按总章数扩展」：',
         '',
-        `• 题材：${projectGenre || '通用'}`,
-        `• 篇幅：短篇（${maxChapters}章）`,
-        '• 优势：快速规划，2分钟内完成',
-        '• 适用：快速验证创意，无需复杂配置',
+        t
+          ? t('storyExpansion.recommendation.genreLine', { genre: projectGenre || fallbackGenre })
+          : `• 题材：${projectGenre || fallbackGenre}`,
+        t
+          ? t('storyExpansion.recommendation.shortLengthLine', { count: maxChapters })
+          : `• 篇幅：短篇（${maxChapters}章）`,
+        t ? t('storyExpansion.recommendation.quickAdvantage') : '• 优势：快速规划，2分钟内完成',
+        t ? t('storyExpansion.recommendation.quickUseCase') : '• 适用：快速验证创意，无需复杂配置',
       ]),
     }
   }
@@ -145,13 +157,19 @@ export function resolveStoryExpansionRecommendation(
       recommendedChaptersPerVolumeMin: 45,
       recommendedChaptersPerVolumeMax: 70,
       recommendationReason: buildRecommendationReason([
-        '推荐「史诗框架」：',
+        t ? t('storyExpansion.recommendation.recommendEpicTitle') : '推荐「史诗框架」：',
         '',
-        `• 题材：${projectGenre || '通用'}`,
-        `• 篇幅：超长篇（${maxChapters}章）`,
-        `• 推荐卷数：${estimatedVolumes}卷`,
-        '• 单卷细化默认预填：60-100章',
-        '• 扩展方式：先生成总纲、阶段路线图和分卷框架，再按卷滚动细化',
+        t
+          ? t('storyExpansion.recommendation.genreLine', { genre: projectGenre || fallbackGenre })
+          : `• 题材：${projectGenre || fallbackGenre}`,
+        t
+          ? t('storyExpansion.recommendation.epicLengthLine', { count: maxChapters })
+          : `• 篇幅：超长篇（${maxChapters}章）`,
+        t
+          ? t('storyExpansion.recommendation.recommendedVolumesLine', { count: estimatedVolumes })
+          : `• 推荐卷数：${estimatedVolumes}卷`,
+        t ? t('storyExpansion.recommendation.volumeDefaultFill') : '• 单卷细化默认预填：60-100章',
+        t ? t('storyExpansion.recommendation.epicExtensionWay') : '• 扩展方式：先生成总纲、阶段路线图和分卷框架，再按卷滚动细化',
       ]),
     }
   }
@@ -164,19 +182,27 @@ export function resolveStoryExpansionRecommendation(
       genreLabel,
       scenarioLabel,
       usageHint,
-    } = resolveLongStoryGenreConfig(projectGenre, maxChapters)
+    } = resolveLongStoryGenreConfig(projectGenre, maxChapters, t)
     const reasonLines = [
-      '推荐「史诗框架」：',
+      t ? t('storyExpansion.recommendation.recommendEpicTitle') : '推荐「史诗框架」：',
       '',
-      `• 题材：${genreLabel}`,
-      `• 篇幅：${scenarioLabel}（${maxChapters}章）`,
-      `• 推荐卷数：${estimatedVolumes}卷`,
-      '• 单卷细化默认预填：60-100章',
-      '• 扩展方式：先生成总纲、阶段路线图和分卷框架，再按卷滚动细化',
+      t
+        ? t('storyExpansion.recommendation.genreLine', { genre: genreLabel })
+        : `• 题材：${genreLabel}`,
+      t
+        ? t('storyExpansion.recommendation.longLengthLine', { scenario: scenarioLabel, count: maxChapters })
+        : `• 篇幅：${scenarioLabel}（${maxChapters}章）`,
+      t
+        ? t('storyExpansion.recommendation.recommendedVolumesLine', { count: estimatedVolumes })
+        : `• 推荐卷数：${estimatedVolumes}卷`,
+      t ? t('storyExpansion.recommendation.volumeDefaultFill') : '• 单卷细化默认预填：60-100章',
+      t ? t('storyExpansion.recommendation.epicExtensionWay') : '• 扩展方式：先生成总纲、阶段路线图和分卷框架，再按卷滚动细化',
     ]
 
     if (usageHint) {
-      reasonLines.push(`• ${usageHint}`)
+      reasonLines.push(t
+        ? t('storyExpansion.recommendation.usageHintLine', { hint: usageHint })
+        : `• ${usageHint}`)
     }
 
     return {
@@ -192,13 +218,17 @@ export function resolveStoryExpansionRecommendation(
     ...DEFAULT_STORY_EXPANSION_RECOMMENDATION,
     recommendedMode: 'total',
     recommendationReason: buildRecommendationReason([
-      '推荐「渐进式扩展」：',
+      t ? t('storyExpansion.recommendation.recommendProgressiveTitle') : '推荐「渐进式扩展」：',
       '',
-      `• 题材：${projectGenre || '通用'}`,
-      `• 篇幅：中篇（${maxChapters}章）`,
-      '• 优势：精细控制，随时调整',
-      '• 适用：探索性写作，多线并进',
-      '• 建议步长：每轮新增20-60个细化章节左右，质量与效率更均衡',
+      t
+        ? t('storyExpansion.recommendation.genreLine', { genre: projectGenre || fallbackGenre })
+        : `• 题材：${projectGenre || fallbackGenre}`,
+      t
+        ? t('storyExpansion.recommendation.midLengthLine', { count: maxChapters })
+        : `• 篇幅：中篇（${maxChapters}章）`,
+      t ? t('storyExpansion.recommendation.controlAdvantage') : '• 优势：精细控制，随时调整',
+      t ? t('storyExpansion.recommendation.exploreUseCase') : '• 适用：探索性写作，多线并进',
+      t ? t('storyExpansion.recommendation.stepAdvice') : '• 建议步长：每轮新增20-60个细化章节左右，质量与效率更均衡',
     ]),
   }
 }

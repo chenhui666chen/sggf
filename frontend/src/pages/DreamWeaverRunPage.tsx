@@ -1,4 +1,6 @@
 ﻿﻿import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
+import { useAppLanguage } from '@/i18n'
 import { useDreamweaverTaskPolling } from '@/hooks/useDreamweaverTaskPolling'
 import { useDreamweaverEventSyncLifecycle } from '@/hooks/useDreamweaverEventSyncLifecycle'
 import { useDreamweaverRunHydration } from '@/hooks/useDreamweaverRunHydration'
@@ -99,9 +101,13 @@ import {
   DreamweaverRunPageScaffold,
 } from './dreamweaver-run/runPageShell'
 import { DebugAccordion } from './dreamweaver-run/diagnosticSections'
-const DREAMWEAVER_PREVIEW_STEPS = ['剧本', '分镜', '素材', '镜头', '合成'] as const
+const DREAMWEAVER_PREVIEW_STEPS = ['dreamweaverRun.previewStepScript', 'dreamweaverRun.previewStepStoryboard', 'dreamweaverRun.previewStepAssets', 'dreamweaverRun.previewStepShots', 'dreamweaverRun.previewStepMerged'] as const
 
 export default function DreamWeaverRunPage() {
+  // 历史弹窗的时间文案由 createRunPageDialogRenderer 里的一串纯函数算出来，
+  // 那里拿不到 hook，因此把当前语言当 deps 递下去。
+  const { t } = useTranslation()
+  const { language } = useAppLanguage()
   const navigate = useNavigate()
   const { projectId: projectIdParam } = useParams()
   const [searchParams] = useSearchParams()
@@ -511,7 +517,7 @@ export default function DreamWeaverRunPage() {
       video_provider_trace: diagnosticProviderTrace,
       result,
     })
-    await copyText(safeJsonStringify({ page: 'DreamWeaverRunPage', ...payload }))
+    await copyText(safeJsonStringify({ page: 'DreamWeaverRunPage', ...payload }), t)
   }
 
   fetchRunHistoryRef.current = fetchRunHistory
@@ -790,8 +796,8 @@ export default function DreamWeaverRunPage() {
   }, [currentRunId])
   const promptReviewReady = !promptReviewRequiredSnapshot || promptReviewApproved
   const safetyAuditAlertState = useMemo(
-    () => computeSafetyAuditAlertState({ result, snapshotRuntimeConfig, runSnapshot, taskStatus, error, currentRunId, running }),
-    [currentRunId, error, result, runSnapshot, running, snapshotRuntimeConfig, taskStatus],
+    () => computeSafetyAuditAlertState({ result, snapshotRuntimeConfig, runSnapshot, taskStatus, error, currentRunId, running }, t),
+    [currentRunId, error, result, runSnapshot, running, snapshotRuntimeConfig, taskStatus, t],
   )
   const canResumeFromScript = resolveCanResumeFromScript({
     currentRunId,
@@ -1052,6 +1058,7 @@ export default function DreamWeaverRunPage() {
     snapshotScriptGeneration,
     safetyBlockedShots,
     openSafetyBlockedShot,
+    t,
   })
   const renderRunAssetPreviewGrid = previewRenderers.renderRunAssetPreviewGrid
   const renderLibraryDisplayCard = previewRenderers.renderLibraryDisplayCard
@@ -1099,6 +1106,7 @@ export default function DreamWeaverRunPage() {
     renderStreamingPreview,
     loadRunSnapshot,
     setWsError,
+    t,
   })
 
   const renderRunSnapshotPreviewPane = snapshotRenderer.renderRunSnapshotPreviewPane
@@ -1124,7 +1132,7 @@ export default function DreamWeaverRunPage() {
   )
 
   const renderArtifactsDebugPanel = () =>
-    renderDebugAccordion({ title: '调试面板（Artifacts）', value: taskArtifacts, marginTop: 1 })
+    renderDebugAccordion({ title: t('dreamweaverRun.debugPanelArtifacts'), value: taskArtifacts, marginTop: 1 })
 
   const libraryRenderer = createRunPageLibraryRenderer({
     libraryLoading,
@@ -1148,13 +1156,14 @@ export default function DreamWeaverRunPage() {
     renderArtifactsDebugPanel,
     renderRunSnapshotPreviewPane,
     renderLibraryDisplayCard,
+    t,
   })
 
   const pendingRenderer = createRunPagePendingRenderer({
     taskStatus,
     taskQueue,
     previewStep,
-    previewStepLabel: DREAMWEAVER_PREVIEW_STEPS[previewStep],
+    previewStepLabel: t(DREAMWEAVER_PREVIEW_STEPS[previewStep]),
     running,
     currentRunId,
     persistedRunId,
@@ -1205,6 +1214,7 @@ export default function DreamWeaverRunPage() {
     openDiagnosticDialog,
     renderPendingLibraryReviewView: libraryRenderer.renderPendingLibraryReviewView,
     renderPendingLibraryReadyView: libraryRenderer.renderPendingLibraryReadyView,
+    t,
   })
 
   const renderPendingView = pendingRenderer.renderPendingView
@@ -1243,13 +1253,14 @@ export default function DreamWeaverRunPage() {
     previewStep,
     snapshotRefreshDisabled,
     runSnapshotLoaded,
+    t,
   })
 
   const renderResultView = resultRenderer.renderResultView
 
   const diagnosticRenderer = createRunPageDiagnosticRenderer({
     safeJsonStringify,
-    copyText,
+    copyText: (text: string) => copyText(text, t),
     renderRunAssetPreviewGrid,
     currentRunId,
     diagnosticOpen,
@@ -1285,11 +1296,13 @@ export default function DreamWeaverRunPage() {
     taskStage,
     hasDiagnosticShots: diagnosticShots.length > 0,
     telemetryAbVariant: typeof snapshotRuntimeConfig?.ab_variant === 'string' ? snapshotRuntimeConfig.ab_variant : undefined,
+    t,
   })
 
   const renderDiagnosticDialog = diagnosticRenderer.renderDiagnosticDialog
 
   const dialogRenderer = createRunPageDialogRenderer({
+    language,
     promptEditOpen, closePromptEditDialog,
     promptEditShot, promptEditGenerated,
     promptEditHead, promptEditTail,
@@ -1339,7 +1352,7 @@ export default function DreamWeaverRunPage() {
     configDialogOpen,
     closeConfigDialog: () => setConfigDialogOpen(false),
     configDialogFullScreen,
-    configSubtitle: buildConfigDialogSubtitle(selectedProject?.title, selectedProjectId, selectedChapterIds.length, chapters.length),
+    configSubtitle: buildConfigDialogSubtitle(selectedProject?.title, selectedProjectId, selectedChapterIds.length, chapters.length, t),
     configDialogErrorNotice: taskPointsPrecheckError
       ? <TaskPointsPrecheckAlert detail={taskPointsPrecheckError} onClose={() => { setTaskPointsPrecheckError(null); setError(null) }} sx={{ mb: 2 }} />
       : error ? <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert> : null,
@@ -1387,6 +1400,7 @@ export default function DreamWeaverRunPage() {
     error,
     hasQcWarning: Boolean(result?.qc_warning),
     diagnosticPreflight,
+    t,
   })
 
   const renderConfigDialog = dialogRenderer.renderConfigDialog
@@ -1427,7 +1441,8 @@ export default function DreamWeaverRunPage() {
     renderPendingView,
     renderResultView,
     renderWorkbenchDialogs,
-    stepLabels: DREAMWEAVER_PREVIEW_STEPS,
+    stepLabels: DREAMWEAVER_PREVIEW_STEPS.map((stepKey) => t(stepKey)),
+    t,
   })
   const renderWorkbenchCard = workbenchRenderer.renderWorkbenchCard
 
@@ -1436,8 +1451,8 @@ export default function DreamWeaverRunPage() {
   return (
     <DreamweaverRunPageScaffold
       onBack={navigateBack}
-      heroTitle="织梦映心 · 生成流程"
-      heroDescription="读取项目章节内容，生成分镜、首尾帧、分镜片段并合成成片；支持进度轮询与产物预览。"
+      heroTitle={t('dreamweaverRun.heroTitle')}
+      heroDescription={t('dreamweaverRun.heroDescription')}
       configDialog={renderConfigDialog()}
       alerts={renderRunPageAlerts()}
       workbenchCard={renderWorkbenchCard()}

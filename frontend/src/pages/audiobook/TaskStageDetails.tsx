@@ -5,6 +5,7 @@ import {
   Paper,
   Typography,
 } from '@mui/material'
+import { useTranslation } from 'react-i18next'
 
 import type {
   AudioEngineMode,
@@ -14,6 +15,7 @@ import type {
   TaskStatus,
 } from './types'
 import { audiobookColorRoles, audiobookColors } from './audiobookTheme'
+import type { TranslateFn } from './audioLibraryDisplay'
 import { getStageConfigForTask } from './utils'
 
 interface TaskStageDetailsProps {
@@ -40,20 +42,22 @@ const DEFAULT_PENDING_STAGE_INFO: StageInfo = {
 
 // 导出供单测：running 阶段无中间进度时隐藏误导性的 0%
 // （如 quality_review 的 LLM 评审调用全程阻塞）
-export const formatStageStatusText = (stageInfo: StageInfo): string => {
+export const formatStageStatusText = (stageInfo: StageInfo, t?: TranslateFn): string => {
   if (stageInfo.status === 'running') {
     if (stageInfo.progress <= 0) {
-      return '进行中'
+      return t ? t('audiobook.taskStageDetails.runningText') : '进行中'
     }
-    return `进行中 ${Math.round(stageInfo.progress * 100)}%`
+    return t
+      ? t('audiobook.taskStageDetails.runningWithProgress', { percent: Math.round(stageInfo.progress * 100) })
+      : `进行中 ${Math.round(stageInfo.progress * 100)}%`
   }
   if (stageInfo.status === 'completed') {
-    return '已完成'
+    return t ? t('audiobook.taskStageDetails.completedText') : '已完成'
   }
   if (stageInfo.status === 'failed') {
-    return '失败'
+    return t ? t('audiobook.taskStageDetails.failedText') : '失败'
   }
-  return '等待中'
+  return t ? t('audiobook.taskStageDetails.pendingText') : '等待中'
 }
 
 const formatMetricPreviewValue = (value: unknown): string => {
@@ -64,6 +68,7 @@ const formatMetricPreviewValue = (value: unknown): string => {
 }
 
 const TaskStageDetails = ({ taskStatus, engineMode = null, onOpenStageMetrics }: TaskStageDetailsProps) => {
+  const { t } = useTranslation()
   const stageConfig = getStageConfigForTask(taskStatus, engineMode)
   const stageValues = Object.values(taskStatus.stages || {})
   const hasLiveProgress = stageValues.some((stage) => stage?.status && stage.status !== 'pending')
@@ -72,7 +77,7 @@ const TaskStageDetails = ({ taskStatus, engineMode = null, onOpenStageMetrics }:
     <Box>
       {!hasLiveProgress && (
         <Alert severity="info" sx={{ mb: 2 }}>
-          正在等待后台任务启动，阶段详情准备就绪后会自动更新。如需查看以往结果，可打开右上角「历史记录」。
+          {t('audiobook.taskStageDetails.waitingAlert')}
         </Alert>
       )}
       <Box
@@ -185,7 +190,7 @@ const TaskStageDetails = ({ taskStatus, engineMode = null, onOpenStageMetrics }:
                   fontSize: '0.7rem',
                 }}
               >
-                {formatStageStatusText(stageInfo)}
+                {formatStageStatusText(stageInfo, t)}
               </Typography>
 
               {metricsEntries.length > 0 && (

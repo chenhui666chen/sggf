@@ -1,7 +1,11 @@
-import { describe, expect, it } from 'vitest'
+import { beforeAll, describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { renderToStaticMarkup } from 'react-dom/server'
+import type { ReactElement } from 'react'
+import type { i18n as I18nInstance } from 'i18next'
+
+import { I18nProvider, bootstrapI18n } from '@/i18n'
 
 import SceneChapterEditor, {
   EDIT_TYPE_LABELS,
@@ -26,9 +30,20 @@ function visibleText(markup: string): string {
     .trim()
 }
 
+/** 渲染需要界面语言（标题/选项卡/按钮都走 t），包 I18nProvider 与 main.tsx 层级一致。 */
+let i18nInstance: I18nInstance
+
+beforeAll(async () => {
+  i18nInstance = await bootstrapI18n('zh-CN')
+})
+
+function renderWithI18n(node: ReactElement): string {
+  return renderToStaticMarkup(<I18nProvider instance={i18nInstance}>{node}</I18nProvider>)
+}
+
 describe('SceneChapterEditor', () => {
   it('renders the editor dialog title with chapter and batch context', () => {
-    const markup = renderToStaticMarkup(
+    const markup = renderWithI18n(
       <SceneChapterEditor
         open
         chapterId={3}
@@ -51,7 +66,7 @@ describe('SceneChapterEditor', () => {
   })
 
   it('prefers chapterNumber over chapterId in the dialog title', () => {
-    const markup = renderToStaticMarkup(
+    const markup = renderWithI18n(
       <SceneChapterEditor
         open
         chapterId={58}
@@ -68,21 +83,21 @@ describe('SceneChapterEditor', () => {
     expect(text).not.toContain('第 58 章')
   })
 
-  it('maps scene render statuses to labels and colors', () => {
-    expect(SCENE_STATUS_LABELS.passed.label).toBe('已通过')
+  it('maps scene render statuses to i18n keys and colors', () => {
+    expect(SCENE_STATUS_LABELS.passed.labelKey).toBe('audiobook.sceneChapterEditor.statusLabels.passed')
     expect(SCENE_STATUS_LABELS.passed.color).toBe('success')
-    expect(SCENE_STATUS_LABELS.manual_review.label).toBe('人工评审')
+    expect(SCENE_STATUS_LABELS.manual_review.labelKey).toBe('audiobook.sceneChapterEditor.statusLabels.manualReview')
     expect(SCENE_STATUS_LABELS.manual_review.color).toBe('warning')
-    expect(SCENE_STATUS_LABELS.legacy_stems.label).toBe('回退素材')
-    expect(SCENE_STATUS_LABELS.stale.label).toBe('已过期')
+    expect(SCENE_STATUS_LABELS.legacy_stems.labelKey).toBe('audiobook.sceneChapterEditor.statusLabels.legacyStems')
+    expect(SCENE_STATUS_LABELS.stale.labelKey).toBe('audiobook.sceneChapterEditor.statusLabels.stale')
     expect(SCENE_STATUS_LABELS.failed.color).toBe('error')
   })
 
-  it('covers the three edit types with Chinese labels', () => {
+  it('covers the three edit types with i18n label keys', () => {
     expect(EDIT_TYPE_LABELS).toEqual({
-      dialogue: '台词编辑',
-      director_override: '导演覆盖',
-      voice_binding: '音色编辑',
+      dialogue: 'audiobook.sceneChapterEditor.editTypeTabs.dialogue',
+      director_override: 'audiobook.sceneChapterEditor.editTypeTabs.directorOverride',
+      voice_binding: 'audiobook.sceneChapterEditor.editTypeTabs.voiceBinding',
     })
   })
 
@@ -90,13 +105,13 @@ describe('SceneChapterEditor', () => {
     // §3.5：保存携带 base_revision_hash（来自 last_revisions[?edit_type]）；
     // 409 Conflict 提示“文档已被他人修改，请刷新后重试”
     expect(componentSource).toContain('base_revision_hash: baseRevisionHash(')
-    expect(componentSource).toContain('文档已被他人修改，请刷新后重试')
+    expect(componentSource).toContain('audiobook.sceneChapterEditor.conflictMessage')
     expect(componentSource).toContain('updateSceneEditorDocument(')
     expect(componentSource).toContain("'dialogue'")
     expect(componentSource).toContain("'director_override'")
     expect(componentSource).toContain("'voice_binding'")
     // 台词编辑走 script_json（不删除 checkpoint）；导演覆盖不修改原文
-    expect(componentSource).toContain('指令内容（不修改原文）')
+    expect(componentSource).toContain('audiobook.sceneChapterEditor.overrideContentLabel')
   })
 
   it('offers in-editor script approval via dialogue-review before rerender', () => {
@@ -104,31 +119,31 @@ describe('SceneChapterEditor', () => {
     // 避免走旧 PUT /script 接口被 409 拒绝
     expect(componentSource).toContain('reviewSceneDialogue(')
     expect(componentSource).toContain("verdict: 'approved'")
-    expect(componentSource).toContain('批准剧本')
+    expect(componentSource).toContain('audiobook.sceneChapterEditor.approve')
   })
 
   it('surfaces the scene prompt and per-segment sound design form (P1 透明化)', () => {
     // P1：渲染提示词对用户可见可对照；台词编辑升级为细编表单
     // （环境/表演/音效/配乐），保存后由后端转译进渲染提示词
-    expect(componentSource).toContain('渲染提示词')
-    expect(componentSource).toContain('重新编译')
+    expect(componentSource).toContain('audiobook.sceneChapterEditor.showPrompt')
+    expect(componentSource).toContain('audiobook.sceneChapterEditor.promptExplain')
     expect(componentSource).toContain('applySegmentDetailDraft')
     expect(componentSource).toContain('segmentSoundEffectsDraftValue')
     expect(componentSource).toContain('segmentMusicCueDraftValue')
-    expect(componentSource).toContain('场景环境')
-    expect(componentSource).toContain('表演指导')
-    expect(componentSource).toContain('伴随音效')
-    expect(componentSource).toContain('配乐')
+    expect(componentSource).toContain('audiobook.sceneChapterEditor.sceneEnvLabel')
+    expect(componentSource).toContain('audiobook.sceneChapterEditor.performanceLabel')
+    expect(componentSource).toContain('audiobook.sceneChapterEditor.sfxLabel')
+    expect(componentSource).toContain('audiobook.sceneChapterEditor.musicLabel')
   })
 
   it('explains director override types in Chinese and form-izes voice binding (P2)', () => {
     // P2：覆盖类型中文说明、已生效覆盖回显；音色 JSON 手写改角色表单
     expect(componentSource).toContain('DIRECTION_TYPE_LABELS')
     expect(componentSource).toContain('DIRECTION_TYPE_HINTS')
-    expect(componentSource).toContain('声学环境')
+    expect(componentSource).toContain('audiobook.sceneChapterEditor.directionTypeLabels.acoustic')
     expect(componentSource).toContain('serializeVoiceCharacters')
-    expect(componentSource).toContain('角色名')
-    expect(componentSource).toContain('音色 ID')
+    expect(componentSource).toContain('audiobook.sceneChapterEditor.characterNameLabel')
+    expect(componentSource).toContain('audiobook.sceneChapterEditor.voicePlaceholder')
     expect(componentSource).not.toContain('characters（JSON 数组）')
   })
 
@@ -150,7 +165,7 @@ describe('SceneChapterEditor', () => {
     expect(componentSource).toContain('scene.scene_audio_url')
     expect(componentSource).toContain('playExternalUrl')
     expect(componentSource).toContain('ToggleButtonGroup')
-    expect(componentSource).toContain('批次切换')
-    expect(componentSource).toContain('试听整章')
+    expect(componentSource).toContain('audiobook.sceneChapterEditor.batchSwitcher')
+    expect(componentSource).toContain('audiobook.sceneChapterEditor.previewChapter')
   })
 })

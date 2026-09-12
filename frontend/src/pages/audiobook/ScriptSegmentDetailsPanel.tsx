@@ -8,6 +8,7 @@ import {
   Typography,
 } from '@mui/material'
 import type { SxProps, Theme } from '@mui/material/styles'
+import { useTranslation } from 'react-i18next'
 
 import type {
   ScriptSegment,
@@ -35,6 +36,7 @@ const ScriptSegmentDetailsPanel = ({
   sx,
   mutedTextColor,
 }: ScriptSegmentDetailsPanelProps) => {
+  const { t } = useTranslation()
   const voiceParams = getScriptSegmentVoiceParams(segment)
   const inlineTagStrategy = getInlineTagStrategySummary(segment)
   const segmentTtsModel = voiceParams.resolved_tts_model || voiceParams.tts_model
@@ -62,37 +64,47 @@ const ScriptSegmentDetailsPanel = ({
       ]}
     >
       <Typography variant="caption" sx={mutedCaptionSx}>
-        详细信息
+        {t('audiobook.scriptSegmentDetailsPanel.detailsTitle')}
       </Typography>
       <Typography variant="caption" sx={{ display: 'block' }}>
-        表演提示：{segment.performance_notes || '—'}
+        {t('audiobook.scriptSegmentDetailsPanel.performanceNotes', { value: segment.performance_notes || '—' })}
       </Typography>
       <Typography variant="caption" sx={{ display: 'block' }}>
-        原文：{segment.original_text || '—'}
+        {t('audiobook.scriptSegmentDetailsPanel.originalText', { value: segment.original_text || '—' })}
       </Typography>
       <Typography variant="caption" sx={{ display: 'block' }}>
-        改编原因：{segment.adaptation_reason || '—'}
+        {t('audiobook.scriptSegmentDetailsPanel.adaptationReason', { value: segment.adaptation_reason || '—' })}
       </Typography>
       <Typography variant="caption" sx={{ display: 'block' }}>
-        停顿：前 {segment.pause_before ?? '—'}s / 后 {segment.pause_after ?? '—'}s
+        {t('audiobook.scriptSegmentDetailsPanel.pauseLabel', {
+          before: segment.pause_before ?? '—',
+          after: segment.pause_after ?? '—',
+        })}
       </Typography>
       <Typography variant="caption" sx={{ display: 'block' }}>
-        Instruct：{segment.instruct_emotion || '—'} / {segment.instruct_scene || '—'} / {segment.instruct_role || '—'} / {segment.instruct_identity || '—'}
+        {t('audiobook.scriptSegmentDetailsPanel.instructLabel', {
+          emotion: segment.instruct_emotion || '—',
+          scene: segment.instruct_scene || '—',
+          role: segment.instruct_role || '—',
+          identity: segment.instruct_identity || '—',
+        })}
       </Typography>
       <Typography variant="caption" sx={{ display: 'block' }}>
-        音色参数：{Object.keys(voiceParams).length > 0 ? JSON.stringify(voiceParams) : '—'}
+        {t('audiobook.scriptSegmentDetailsPanel.voiceParamsLabel', {
+          value: Object.keys(voiceParams).length > 0 ? JSON.stringify(voiceParams) : '—',
+        })}
       </Typography>
       {inlineTagStrategy && (
         <Box sx={{ mt: 0.75 }}>
           <Typography variant="caption" sx={mutedCaptionSx}>
-            标签注入策略
+            {t('audiobook.scriptSegmentDetailsPanel.tagStrategyTitle')}
           </Typography>
           <Stack direction="row" spacing={0.75} useFlexGap flexWrap="wrap">
             {inlineTagStrategy.modelFamily && (
-              <Chip size="small" label={`模型：${inlineTagStrategy.modelFamily}`} />
+              <Chip size="small" label={t('audiobook.scriptSegmentDetailsPanel.modelChip', { value: inlineTagStrategy.modelFamily })} />
             )}
             {inlineTagStrategy.placement && (
-              <Chip size="small" label={`位置：${inlineTagStrategy.placement}`} />
+              <Chip size="small" label={t('audiobook.scriptSegmentDetailsPanel.placementChip', { value: inlineTagStrategy.placement })} />
             )}
             {inlineTagStrategy.useTagParser && (
               <Chip size="small" label="Tag Parser" color="primary" variant="outlined" />
@@ -104,19 +116,27 @@ const ScriptSegmentDetailsPanel = ({
         </Box>
       )}
       <Typography variant="caption" sx={{ display: 'block' }}>
-        音效：{segment.sound_effects ? JSON.stringify(segment.sound_effects) : (segment.sound_effects_simple ? JSON.stringify(segment.sound_effects_simple) : '—')}
+        {t('audiobook.scriptSegmentDetailsPanel.sfxLabel', {
+          value: segment.sound_effects
+            ? JSON.stringify(segment.sound_effects)
+            : (segment.sound_effects_simple ? JSON.stringify(segment.sound_effects_simple) : '—'),
+        })}
       </Typography>
       <Typography variant="caption" sx={{ display: 'block' }}>
-        配乐：{segment.music_cue ? JSON.stringify(segment.music_cue) : (segment.music_cue_simple || '—')}
+        {t('audiobook.scriptSegmentDetailsPanel.bgmLabel', {
+          value: segment.music_cue
+            ? JSON.stringify(segment.music_cue)
+            : (segment.music_cue_simple || '—'),
+        })}
       </Typography>
       <Divider sx={{ my: 1 }} />
       <Typography variant="caption" sx={mutedCaptionSx}>
-        音频提示词（可编辑）
+        {t('audiobook.scriptSegmentDetailsPanel.audioPromptTitle')}
       </Typography>
       <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, minmax(0, 1fr))' }, gap: 1 }}>
         <TextField
           size="small"
-          label="停顿-前(s)"
+          label={t('audiobook.scriptSegmentDetailsPanel.pauseBeforeLabel')}
           type="number"
           value={segment.pause_before ?? ''}
           onChange={(event) =>
@@ -125,7 +145,7 @@ const ScriptSegmentDetailsPanel = ({
         />
         <TextField
           size="small"
-          label="停顿-后(s)"
+          label={t('audiobook.scriptSegmentDetailsPanel.pauseAfterLabel')}
           type="number"
           value={segment.pause_after ?? ''}
           onChange={(event) =>
@@ -134,7 +154,7 @@ const ScriptSegmentDetailsPanel = ({
         />
         <TextField
           size="small"
-          label="Instruct 情感"
+          label={t('audiobook.scriptSegmentDetailsPanel.instructEmotionLabel')}
           value={segment.instruct_emotion || ''}
           onChange={(event) =>
             onUpdateSegment(index, { instruct_emotion: event.target.value })
@@ -142,7 +162,7 @@ const ScriptSegmentDetailsPanel = ({
         />
         <TextField
           size="small"
-          label="Instruct 场景"
+          label={t('audiobook.scriptSegmentDetailsPanel.instructSceneLabel')}
           value={segment.instruct_scene || ''}
           onChange={(event) =>
             onUpdateSegment(index, { instruct_scene: event.target.value })
@@ -150,7 +170,7 @@ const ScriptSegmentDetailsPanel = ({
         />
         <TextField
           size="small"
-          label="Instruct 角色"
+          label={t('audiobook.scriptSegmentDetailsPanel.instructRoleLabel')}
           value={segment.instruct_role || ''}
           onChange={(event) =>
             onUpdateSegment(index, { instruct_role: event.target.value })
@@ -158,7 +178,7 @@ const ScriptSegmentDetailsPanel = ({
         />
         <TextField
           size="small"
-          label="Instruct 身份"
+          label={t('audiobook.scriptSegmentDetailsPanel.instructIdentityLabel')}
           value={segment.instruct_identity || ''}
           onChange={(event) =>
             onUpdateSegment(index, { instruct_identity: event.target.value })
@@ -169,7 +189,7 @@ const ScriptSegmentDetailsPanel = ({
         {showNumericSpeedControl && (
           <TextField
             size="small"
-            label="语速 rate"
+            label={t('audiobook.scriptSegmentDetailsPanel.rateLabel')}
             type="number"
             value={voiceParams.rate ?? voiceParams.speed ?? ''}
             onChange={(event) => updateVoiceParams({ rate: parseOptionalNumberInput(event.target.value) })}
@@ -177,7 +197,7 @@ const ScriptSegmentDetailsPanel = ({
         )}
         <TextField
           size="small"
-          label="音量 volume"
+          label={t('audiobook.scriptSegmentDetailsPanel.volumeLabel')}
           type="number"
           value={voiceParams.volume ?? ''}
           onChange={(event) => updateVoiceParams({ volume: parseOptionalNumberInput(event.target.value) })}

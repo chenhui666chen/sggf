@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type Dispatch, type SetStateAction } from 'react'
 
+import { useTranslation } from 'react-i18next'
+
 import { apiClient, extractApiErrorMessage } from '../../services/api'
 import type { PlayAudioOptions, SetSnackbar } from './hookTypes'
 import type {
@@ -24,11 +26,11 @@ interface UseAudiobookSegmentPreviewParams {
   setSnackbar: SetSnackbar
 }
 
-const PREVIEW_TYPE_LABELS: Record<PreviewType, string> = {
-  voice: '人声',
-  sfx: '音效',
-  bgm: '配乐',
-  mix: '融合',
+const PREVIEW_TYPE_LABEL_KEYS: Record<PreviewType, string> = {
+  voice: 'audiobook.useAudiobookSegmentPreview.previewVoice',
+  sfx: 'audiobook.useAudiobookSegmentPreview.previewSfx',
+  bgm: 'audiobook.useAudiobookSegmentPreview.previewBgm',
+  mix: 'audiobook.useAudiobookSegmentPreview.previewMix',
 }
 
 const resolveSegmentAudioPath = (segment: ScriptSegment, previewType: PreviewType) => {
@@ -83,6 +85,8 @@ export const useAudiobookSegmentPreview = ({
   onResetSegmentDetails,
   setSnackbar,
 }: UseAudiobookSegmentPreviewParams) => {
+  const { t } = useTranslation()
+  const previewTypeLabel = useCallback((type: PreviewType): string => t(PREVIEW_TYPE_LABEL_KEYS[type]), [t])
   const [segmentPreviewingIndex, setSegmentPreviewingIndex] = useState<number | null>(null)
   const [segmentPreviewingType, setSegmentPreviewingType] = useState<PreviewType | null>(null)
   const [segmentAudioUrls, setSegmentAudioUrls] = useState<Record<number, string>>({})
@@ -135,7 +139,7 @@ export const useAudiobookSegmentPreview = ({
     if (!candidateId && !savedAudioPath && !shouldUseChapterAudio && !canPreviewPipelineTimeline) {
       setSnackbar({
         open: true,
-        message: `暂无可试听${PREVIEW_TYPE_LABELS[previewType]}音频，请先重新生成候选版本`,
+        message: t('audiobook.useAudiobookSegmentPreview.noPreviewAudio', { type: previewTypeLabel(previewType) }),
         severity: 'warning',
       })
       return
@@ -143,7 +147,7 @@ export const useAudiobookSegmentPreview = ({
     if (shouldUseChapterAudio && chapterStartTime === null) {
       setSnackbar({
         open: true,
-        message: '暂无该片段的整章时间轴，请重新生成章节音频后再试',
+        message: t('audiobook.useAudiobookSegmentPreview.noChapterTimeline'),
         severity: 'warning',
       })
       return
@@ -179,7 +183,7 @@ export const useAudiobookSegmentPreview = ({
           },
         })
         if (isCurrentPreviewRequest()) {
-          setSnackbar({ open: true, message: '整章融合音频已从该片段位置播放', severity: 'success' })
+          setSnackbar({ open: true, message: t('audiobook.useAudiobookSegmentPreview.chapterMixPlaying'), severity: 'success' })
         }
         return
       }
@@ -217,14 +221,14 @@ export const useAudiobookSegmentPreview = ({
         },
       })
       if (isCurrentPreviewRequest()) {
-        const versionLabel = candidateId ? '候选' : '片段'
-        setSnackbar({ open: true, message: `${versionLabel}${PREVIEW_TYPE_LABELS[previewType]}音频已开始播放`, severity: 'success' })
+        const versionLabel = candidateId ? t('audiobook.useAudiobookSegmentPreview.candidateVersion') : t('audiobook.useAudiobookSegmentPreview.segmentVersion')
+        setSnackbar({ open: true, message: t('audiobook.useAudiobookSegmentPreview.versionAudioPlaying', { version: versionLabel, type: previewTypeLabel(previewType) }), severity: 'success' })
       }
     } catch (error) {
       if (isCurrentPreviewRequest()) {
         setSnackbar({
           open: true,
-          message: await extractApiErrorMessage(error) || `播放${PREVIEW_TYPE_LABELS[previewType]}音频失败，请重新生成后再试`,
+          message: await extractApiErrorMessage(error) || t('audiobook.useAudiobookSegmentPreview.playbackFailed', { type: previewTypeLabel(previewType) }),
           severity: 'error',
         })
       }
@@ -243,6 +247,7 @@ export const useAudiobookSegmentPreview = ({
     playingChapter,
     setPlayingChapter,
     setSnackbar,
+    t,
     segmentTimings,
     stopManagedPlayback,
   ])

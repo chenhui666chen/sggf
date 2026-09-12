@@ -1,3 +1,5 @@
+import { useTranslation } from 'react-i18next'
+
 import {
   Alert,
   Box,
@@ -24,7 +26,7 @@ import type {
   StoryExpansionDialogFieldView,
   StoryExpansionDialogViewModel,
 } from '@/utils/storyExpansionDialogView'
-import { STORY_PRESERVE_WRITTEN_MODE_LABELS } from '@/utils/storyExpansionLabels'
+import { STORY_PRESERVE_WRITTEN_MODE_LABEL_KEYS } from '@/utils/storyExpansionLabels'
 import {
   CONVENTIONAL_COLLABORATION_MAX_TOTAL_CHAPTERS,
   CONVENTIONAL_COLLABORATION_RECOMMENDED_MAX_CHAPTERS,
@@ -32,50 +34,50 @@ import {
 
 const EXPANSION_MODE_OPTIONS: Array<{
   value: StoryExpansionMode
-  label: string
-  description: string
+  labelKey: string
+  descriptionKey: string
 }> = [
   {
     value: 'total',
-    label: '常规协同',
-    description: `按目标细化章节数和人物数扩展，推荐总规模不超过${CONVENTIONAL_COLLABORATION_RECOMMENDED_MAX_CHAPTERS}章；超过后建议切换长篇框架，${CONVENTIONAL_COLLABORATION_MAX_TOTAL_CHAPTERS}章后必须切换。`,
+    labelKey: 'storyExpansion.mode.total',
+    descriptionKey: 'storyExpansion.dialog.section.modeTotalDesc',
   },
-  { value: 'epic_framework', label: '长篇框架协同', description: '优先生成总卷框架，再让人物体系与长篇结构对齐。' },
-  { value: 'volume_detail', label: '单卷细化协同', description: '基于已有长篇框架细化某一卷，并同步补齐该卷相关人物。' },
+  { value: 'epic_framework', labelKey: 'storyExpansion.mode.epicFramework', descriptionKey: 'storyExpansion.dialog.section.modeEpicDesc' },
+  { value: 'volume_detail', labelKey: 'storyExpansion.mode.volumeDetail', descriptionKey: 'storyExpansion.dialog.section.modeVolumeDesc' },
 ]
 
 const PRESERVE_WRITTEN_MODE_OPTIONS: Array<{
   value: StoryPreserveWrittenMode
-  label: string
-  description: string
+  labelKey: string
+  descriptionKey: string
 }> = [
   {
     value: 'extract_extend',
-    label: STORY_PRESERVE_WRITTEN_MODE_LABELS.extract_extend,
-    description: '先从已写正文提取细纲，再基于提取结果协同扩展，质量最佳。',
+    labelKey: STORY_PRESERVE_WRITTEN_MODE_LABEL_KEYS.extract_extend,
+    descriptionKey: 'storyExpansion.dialog.section.preserveExtractDesc',
   },
   {
     value: 'preserve_written',
-    label: STORY_PRESERVE_WRITTEN_MODE_LABELS.preserve_written,
-    description: '按已写章节摘要保护正文，不额外做细纲提取，速度更快。',
+    labelKey: STORY_PRESERVE_WRITTEN_MODE_LABEL_KEYS.preserve_written,
+    descriptionKey: 'storyExpansion.dialog.section.preserveWrittenDesc',
   },
   {
     value: 'regenerate_all',
-    label: STORY_PRESERVE_WRITTEN_MODE_LABELS.regenerate_all,
-    description: '不参考数据库中的已写章节，适合准备整体重构。',
+    labelKey: STORY_PRESERVE_WRITTEN_MODE_LABEL_KEYS.regenerate_all,
+    descriptionKey: 'storyExpansion.dialog.section.preserveRegenerateDesc',
   },
 ]
 
 const EXPANSION_MODE_TOOLTIP_LINES = [
-  `常规协同：推荐总规模不超过${CONVENTIONAL_COLLABORATION_RECOMMENDED_MAX_CHAPTERS}章，${CONVENTIONAL_COLLABORATION_MAX_TOTAL_CHAPTERS}章后必须切换`,
-  '长篇框架协同：先规划总卷结构',
-  '单卷细化协同：基于已有框架细化',
+  'storyExpansion.dialog.section.modeTooltipTotal',
+  'storyExpansion.dialog.section.modeTooltipEpic',
+  'storyExpansion.dialog.section.modeTooltipVolume',
 ]
 
 const PRESERVE_WRITTEN_TOOLTIP_LINES = [
-  '提取后扩展：质量最佳，先提取细纲',
-  '仅保护正文：速度更快，不提取细纲',
-  '忽略已写正文：适合整体重构',
+  'storyExpansion.dialog.section.preserveTooltipExtract',
+  'storyExpansion.dialog.section.preserveTooltipWritten',
+  'storyExpansion.dialog.section.preserveTooltipRegenerate',
 ]
 
 function parseNullableInteger(value: string): number | null {
@@ -191,6 +193,25 @@ export function StoryExpansionConfigSection({
   handlers,
   view,
 }: StoryExpansionConfigSectionProps) {
+  const { t } = useTranslation()
+  const expansionModeOptions = EXPANSION_MODE_OPTIONS.map((option) => ({
+    value: option.value,
+    label: t(option.labelKey),
+    description: t(option.descriptionKey, {
+      recommended: CONVENTIONAL_COLLABORATION_RECOMMENDED_MAX_CHAPTERS,
+      max: CONVENTIONAL_COLLABORATION_MAX_TOTAL_CHAPTERS,
+    }),
+  }))
+  const preserveWrittenModeOptions = PRESERVE_WRITTEN_MODE_OPTIONS.map((option) => ({
+    value: option.value,
+    label: t(option.labelKey),
+    description: t(option.descriptionKey),
+  }))
+  const expansionModeTooltipLines = EXPANSION_MODE_TOOLTIP_LINES.map((key) => t(key, {
+    recommended: CONVENTIONAL_COLLABORATION_RECOMMENDED_MAX_CHAPTERS,
+    max: CONVENTIONAL_COLLABORATION_MAX_TOTAL_CHAPTERS,
+  }))
+  const preserveWrittenTooltipLines = PRESERVE_WRITTEN_TOOLTIP_LINES.map((key) => t(key))
   const {
     targetChapterCount,
     targetCharacterCount,
@@ -297,12 +318,12 @@ export function StoryExpansionConfigSection({
       </Typography>
 
       <TooltipSelectField
-        tooltipTitle="扩展模式说明"
-        tooltipLines={EXPANSION_MODE_TOOLTIP_LINES}
-        label="扩展模式"
+        tooltipTitle={t('storyExpansion.dialog.section.modeInfoTitle')}
+        tooltipLines={expansionModeTooltipLines}
+        label={t('storyExpansion.dialog.section.modeLabel')}
         value={expansionMode}
         onChange={handlers.onExpansionModeChange}
-        options={EXPANSION_MODE_OPTIONS}
+        options={expansionModeOptions}
         disabled={view.isLockedToVolumeDetail}
         helperText={view.expansionModeHelperText || undefined}
         showOptionDescription
@@ -320,12 +341,12 @@ export function StoryExpansionConfigSection({
         </Alert>
       ) : (
         <TooltipSelectField
-          tooltipTitle="已写章节处理说明"
-          tooltipLines={PRESERVE_WRITTEN_TOOLTIP_LINES}
-          label="已写章节处理"
+          tooltipTitle={t('storyExpansion.dialog.section.writtenInfoTitle')}
+          tooltipLines={preserveWrittenTooltipLines}
+          label={t('storyExpansion.dialog.section.writtenLabel')}
           value={preserveWrittenMode}
           onChange={handlers.onPreserveWrittenModeChange}
-          options={PRESERVE_WRITTEN_MODE_OPTIONS}
+          options={preserveWrittenModeOptions}
         />
       )}
 
@@ -355,14 +376,15 @@ export function StoryExpansionPrecheckSection({
   autoSupplementEnabled,
   view,
 }: StoryExpansionPrecheckSectionProps) {
+  const { t } = useTranslation()
   return (
     <Box>
       <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1 }}>
-        系统预检
+        {t('storyExpansion.dialog.section.precheckTitle')}
       </Typography>
       {analysisLoading ? (
         <Typography variant="body2" color="text.secondary">
-          正在分析最佳执行方向与模型适配...
+          {t('storyExpansion.dialog.section.precheckAnalyzing')}
         </Typography>
       ) : view.hasAnalysis ? (
         <Stack spacing={1.5}>
@@ -396,7 +418,7 @@ export function StoryExpansionPrecheckSection({
                 borderRadius: 2,
                 border: '1px solid',
                 borderColor: 'divider',
-                bgcolor: 'rgba(15, 23, 42, 0.02)',
+                bgcolor: 'grey.100',
               }}
             >
               <Stack spacing={1.2}>
@@ -431,7 +453,7 @@ export function StoryExpansionPrecheckSection({
                         sx={{
                           p: 1,
                           borderRadius: 1.5,
-                          bgcolor: '#fff',
+                          bgcolor: 'background.paper',
                           border: '1px solid',
                           borderColor: 'divider',
                         }}
@@ -504,7 +526,7 @@ export function StoryExpansionPrecheckSection({
           {!!view.modelPlanLines.length && (
             <Box>
               <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                模型计划
+                {t('storyExpansion.dialog.section.modelPlanTitle')}
               </Typography>
               {view.modelPlanLines.map((line, index) => (
                 <Typography key={`${line}-${index}`} variant="body2" color="text.secondary">
@@ -516,7 +538,7 @@ export function StoryExpansionPrecheckSection({
         </Stack>
       ) : (
         <Typography variant="body2" color="text.secondary">
-          调整目标后将自动给出推荐方向。
+          {t('storyExpansion.dialog.section.precheckEmpty')}
         </Typography>
       )}
     </Box>

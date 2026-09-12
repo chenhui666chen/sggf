@@ -1,4 +1,5 @@
 import { useRef, useEffect } from 'react'
+import { useTranslation } from 'react-i18next'
 import { Box, Paper, Typography, Chip, Stack } from '@mui/material'
 import FormattedContent from '@/components/common/FormattedContent'
 
@@ -17,6 +18,7 @@ export function StreamingTextBlock({
   maxHeight = 300,
   showLength = true,
 }: StreamingTextBlockProps) {
+  const { t } = useTranslation()
   const containerRef = useRef<HTMLDivElement>(null)
   const prevLengthRef = useRef(0)
 
@@ -41,10 +43,10 @@ export function StreamingTextBlock({
           {title}
         </Typography>
         <Stack direction="row" spacing={1} alignItems="center">
-          {showLength && <Chip size="small" label={`${text.length} 字符`} />}
+          {showLength && <Chip size="small" label={t('dreamweaverRun.streamCharCount', { count: text.length })} />}
           <Chip
             size="small"
-            label={done ? '完成' : '生成中'}
+            label={done ? t('dreamweaverRun.streamDone') : t('dreamweaverRun.streamGenerating')}
             color={done ? 'success' : 'warning'}
           />
         </Stack>
@@ -81,7 +83,7 @@ export function StreamingTextBlock({
           </Box>
         ) : (
           <Typography variant="body2" color="text.secondary">
-            等待生成...
+            {t('dreamweaverRun.streamWaiting')}
           </Typography>
         )}
       </Box>

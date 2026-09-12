@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import { Alert, AlertTitle, Box, Button, Collapse, IconButton } from '@mui/material'
 import CloseIcon from '@mui/icons-material/Close'
+import { useTranslation } from 'react-i18next'
 import {
   getLocalAssetExternalDirectoryStatus,
   isLocalAssetExternalDirectorySupported,
@@ -48,6 +49,7 @@ function resolveBannerKind(status: LocalAssetExternalDirectoryStatus | null): Ba
 }
 
 export default function LocalAssetHealthBanner() {
+  const { t } = useTranslation()
   const [status, setStatus] = useState<LocalAssetExternalDirectoryStatus | null>(null)
   const [dismissedKind, setDismissedKind] = useState<BannerKind>(null)
   const [busy, setBusy] = useState(false)
@@ -104,18 +106,18 @@ export default function LocalAssetHealthBanner() {
 
   if (kind === 'unsupported') {
     severity = 'warning'
-    title = '当前浏览器不支持外部目录访问'
-    description = '本地副本将回退到浏览器内置存储（OPFS / legacy）。建议使用最新版 Chrome / Edge 以获得完整本地优先体验。'
+    title = t('userAsset.banner.unsupportedTitle')
+    description = t('userAsset.banner.unsupportedDescription')
   } else if (kind === 'permission_prompt') {
     severity = 'info'
-    title = '需要重新授权外部本地目录'
-    description = '你已配置外部目录，但本次会话尚未获得读写授权。授权后本地资产才能写入该目录。'
-    actionLabel = '立即授权'
+    title = t('userAsset.banner.promptTitle')
+    description = t('userAsset.banner.promptDescription')
+    actionLabel = t('userAsset.banner.grantNow')
   } else if (kind === 'permission_denied') {
     severity = 'error'
-    title = '外部本地目录授权被拒绝'
-    description = '本地资产当前无法写入外部目录，将回退到 OPFS 兜底。可重新授权或在"用户中心 → 本地存储"里更换目录。'
-    actionLabel = '重新授权'
+    title = t('userAsset.banner.deniedTitle')
+    description = t('userAsset.banner.deniedDescription')
+    actionLabel = t('userAsset.banner.grantAgain')
   }
 
   return (
@@ -135,7 +137,7 @@ export default function LocalAssetHealthBanner() {
                     onClick={handleGrant}
                     disabled={busy}
                   >
-                    {busy ? '处理中…' : actionLabel}
+                    {busy ? t('userAsset.common.processing') : actionLabel}
                   </Button>
                 ) : null}
                 <IconButton

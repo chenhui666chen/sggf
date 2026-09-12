@@ -11,6 +11,7 @@ import {
   Stack,
   Typography,
 } from '@mui/material'
+import { useTranslation } from 'react-i18next'
 
 import { STAGE_STATUS_LABELS } from './constants'
 import { audiobookColors } from './audiobookTheme'
@@ -36,6 +37,7 @@ const PromptAudioQualitySummaryPanel = ({
 }: {
   metrics: Record<string, unknown> | undefined
 }) => {
+  const { t } = useTranslation()
   const promptAudioQuality = getPromptAudioQualitySummary(metrics)
   if (!promptAudioQuality) {
     return null
@@ -47,22 +49,22 @@ const PromptAudioQualitySummaryPanel = ({
       sx={{ p: 1.25, backgroundColor: audiobookColors.surfaceSubtle }}
     >
       <Typography variant="subtitle2" sx={{ mb: 1 }}>
-        Prompt→Audio 质量回写
+        {t('audiobook.stageMetricsDialog.qualityWritebackTitle')}
       </Typography>
       <Stack direction="row" spacing={0.75} useFlexGap flexWrap="wrap" sx={{ mb: 1 }}>
-        <Chip size="small" label={`片段 ${promptAudioQuality.coverage.segmentsCount}`} />
-        <Chip size="small" label={`已产音频 ${promptAudioQuality.coverage.audioSegmentsCount}`} />
+        <Chip size="small" label={t('audiobook.stageMetricsDialog.segmentsChip', { total: promptAudioQuality.coverage.segmentsCount })} />
+        <Chip size="small" label={t('audiobook.stageMetricsDialog.audioSegmentsChip', { total: promptAudioQuality.coverage.audioSegmentsCount })} />
         <Chip
           size="small"
-          label={`缺失音频 ${promptAudioQuality.coverage.missingAudioCount}`}
+          label={t('audiobook.stageMetricsDialog.missingAudioChip', { total: promptAudioQuality.coverage.missingAudioCount })}
           color={promptAudioQuality.coverage.missingAudioCount > 0 ? 'warning' : 'default'}
           variant={promptAudioQuality.coverage.missingAudioCount > 0 ? 'outlined' : 'filled'}
         />
-        <Chip size="small" label={`Prompt 快照 ${promptAudioQuality.coverage.providerPromptSnapshotCount}`} />
-        <Chip size="small" label={`标签策略 ${promptAudioQuality.coverage.inlineTagStrategyCount}`} />
+        <Chip size="small" label={t('audiobook.stageMetricsDialog.promptSnapshotChip', { total: promptAudioQuality.coverage.providerPromptSnapshotCount })} />
+        <Chip size="small" label={t('audiobook.stageMetricsDialog.tagStrategyChip', { total: promptAudioQuality.coverage.inlineTagStrategyCount })} />
         <Chip
           size="small"
-          label={`待人工验收 ${promptAudioQuality.coverage.manualReviewPendingCount}`}
+          label={t('audiobook.stageMetricsDialog.manualReviewPendingChip', { total: promptAudioQuality.coverage.manualReviewPendingCount })}
           color={promptAudioQuality.coverage.manualReviewPendingCount > 0 ? 'primary' : 'default'}
           variant="outlined"
         />
@@ -83,21 +85,23 @@ const PromptAudioQualitySummaryPanel = ({
             </Typography>
             <Stack direction="row" spacing={0.5} useFlexGap flexWrap="wrap">
               {model.modelFamily && <Chip size="small" label={model.modelFamily} />}
-              <Chip size="small" label={`片段 ${model.segmentsCount}`} variant="outlined" />
-              <Chip size="small" label={`音频 ${model.audioSegmentsCount}`} variant="outlined" />
+              <Chip size="small" label={t('audiobook.stageMetricsDialog.segmentsChip', { total: model.segmentsCount })} variant="outlined" />
+              <Chip size="small" label={t('audiobook.stageMetricsDialog.audioChip', { total: model.audioSegmentsCount })} variant="outlined" />
               {model.missingAudioCount > 0 && (
-                <Chip size="small" label={`缺失 ${model.missingAudioCount}`} color="warning" variant="outlined" />
+                <Chip size="small" label={t('audiobook.stageMetricsDialog.missingChip', { total: model.missingAudioCount })} color="warning" variant="outlined" />
               )}
-              <Chip size="small" label={`快照 ${model.providerPromptSnapshotCount}`} variant="outlined" />
-              <Chip size="small" label={`标签 ${model.inlineTagStrategyCount}`} variant="outlined" />
+              <Chip size="small" label={t('audiobook.stageMetricsDialog.snapshotChip', { total: model.providerPromptSnapshotCount })} variant="outlined" />
+              <Chip size="small" label={t('audiobook.stageMetricsDialog.tagChip', { total: model.inlineTagStrategyCount })} variant="outlined" />
               {model.useTagParserCount > 0 && (
-                <Chip size="small" label={`Parser ${model.useTagParserCount}`} color="primary" variant="outlined" />
+                <Chip size="small" label={t('audiobook.stageMetricsDialog.parserChip', { total: model.useTagParserCount })} color="primary" variant="outlined" />
               )}
-              {model.tagCount > 0 && <Chip size="small" label={`Tag ${model.tagCount}`} variant="outlined" />}
+              {model.tagCount > 0 && <Chip size="small" label={t('audiobook.stageMetricsDialog.tagCountChip', { total: model.tagCount })} variant="outlined" />}
               {model.manualReviewSegmentIndices.length > 0 && (
                 <Chip
                   size="small"
-                  label={`验收 #${model.manualReviewSegmentIndices.map((item) => item + 1).join(', #')}`}
+                  label={t('audiobook.stageMetricsDialog.reviewChip', {
+                    indices: model.manualReviewSegmentIndices.map((item) => item + 1).join(', #'),
+                  })}
                   color="primary"
                   variant="outlined"
                 />
@@ -114,7 +118,9 @@ const StageMetricsDialog = ({
   open,
   data,
   onClose,
-}: StageMetricsDialogProps) => (
+}: StageMetricsDialogProps) => {
+  const { t } = useTranslation()
+  return (
   <Dialog
     open={open}
     onClose={onClose}
@@ -122,29 +128,31 @@ const StageMetricsDialog = ({
     fullWidth
   >
     <DialogTitle>
-      {data ? `阶段结果：${data.stage.name}` : '阶段结果'}
+      {data
+        ? t('audiobook.stageMetricsDialog.stageResultTitle', { name: data.stage.name })
+        : t('audiobook.stageMetricsDialog.stageResult')}
     </DialogTitle>
     <DialogContent dividers>
       {!data ? (
         <Typography variant="body2" color="text.secondary">
-          暂无阶段数据
+          {t('audiobook.stageMetricsDialog.noStageData')}
         </Typography>
       ) : (
         <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
           <Typography variant="body2" color="text.secondary">
-            状态：{STAGE_STATUS_LABELS[data.info.status]}
+            {t('audiobook.stageMetricsDialog.statusLabel', { status: t(STAGE_STATUS_LABELS[data.info.status]) })}
           </Typography>
           {data.info.message && (
-            <Typography variant="body2">提示：{data.info.message}</Typography>
+            <Typography variant="body2">{t('audiobook.stageMetricsDialog.messageLabel', { message: data.info.message })}</Typography>
           )}
           {data.info.start_time && (
             <Typography variant="body2" color="text.secondary">
-              开始时间：{data.info.start_time}
+              {t('audiobook.stageMetricsDialog.startTimeLabel', { time: data.info.start_time })}
             </Typography>
           )}
           {data.info.end_time && (
             <Typography variant="body2" color="text.secondary">
-              结束时间：{data.info.end_time}
+              {t('audiobook.stageMetricsDialog.endTimeLabel', { time: data.info.end_time })}
             </Typography>
           )}
           {data.info.error_message && (
@@ -166,9 +174,10 @@ const StageMetricsDialog = ({
       )}
     </DialogContent>
     <DialogActions>
-      <Button onClick={onClose}>关闭</Button>
+      <Button onClick={onClose}>{t('action.close')}</Button>
     </DialogActions>
   </Dialog>
-)
+  )
+}
 
 export default StageMetricsDialog

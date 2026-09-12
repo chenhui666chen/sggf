@@ -10,6 +10,9 @@ import {
   Typography,
 } from '@mui/material'
 
+import { useTranslation } from 'react-i18next'
+
+import { useFormats } from '@/i18n'
 import { audiobookButtonSx } from './audiobookTheme'
 
 interface TextProjectImportDialogProps {
@@ -32,58 +35,64 @@ const TextProjectImportDialog = ({
   onTitleChange,
   onTextChange,
   onCreate,
-}: TextProjectImportDialogProps) => (
-  <Dialog
-    open={open}
-    onClose={() => {
-      if (!creating) {
-        onClose()
-      }
-    }}
-    maxWidth="md"
-    fullWidth
-  >
-    <DialogTitle>从文本创建新项目</DialogTitle>
-    <DialogContent>
-      <Alert severity="info" sx={{ mb: 2 }}>
-        粘贴整本书或长篇文本，系统会自动拆分章节并创建项目，随后可以在本页生成有声书。
-      </Alert>
-      <TextField
-        fullWidth
-        label="项目名称"
-        value={title}
-        onChange={(event) => onTitleChange(event.target.value)}
-        placeholder="例如：某某小说 有声化项目"
-        sx={{ mb: 2 }}
-      />
-      <TextField
-        fullWidth
-        multiline
-        rows={12}
-        label="书籍全文或长篇文本"
-        placeholder="将整本书的文本粘贴到这里..."
-        value={text}
-        onChange={(event) => onTextChange(event.target.value)}
-      />
-      <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
-        当前长度：{text.trim().length.toLocaleString()} 字；系统会自动拆分章节并创建项目。
-      </Typography>
-    </DialogContent>
-    <DialogActions>
-      <Button onClick={onClose} disabled={creating}>
-        取消
-      </Button>
-      <Button
-        variant="contained"
-        onClick={onCreate}
-        disabled={creating}
-        startIcon={creating ? <CircularProgress size={18} color="inherit" /> : undefined}
-        sx={audiobookButtonSx.brandContained}
-      >
-        {creating ? '创建中...' : '创建并开始配置音色'}
-      </Button>
-    </DialogActions>
-  </Dialog>
-)
+}: TextProjectImportDialogProps) => {
+  // 原本是无函数体的箭头组件，为了拿到绑定语言的格式化函数才补上函数体。
+  const { t } = useTranslation()
+  const { formatNumber } = useFormats()
+
+  return (
+    <Dialog
+      open={open}
+      onClose={() => {
+        if (!creating) {
+          onClose()
+        }
+      }}
+      maxWidth="md"
+      fullWidth
+    >
+      <DialogTitle>{t('audiobook.textProjectImportDialog.title')}</DialogTitle>
+      <DialogContent>
+        <Alert severity="info" sx={{ mb: 2 }}>
+          {t('audiobook.textProjectImportDialog.alertHint')}
+        </Alert>
+        <TextField
+          fullWidth
+          label={t('audiobook.textProjectImportDialog.projectNameLabel')}
+          value={title}
+          onChange={(event) => onTitleChange(event.target.value)}
+          placeholder={t('audiobook.textProjectImportDialog.projectNamePlaceholder')}
+          sx={{ mb: 2 }}
+        />
+        <TextField
+          fullWidth
+          multiline
+          rows={12}
+          label={t('audiobook.textProjectImportDialog.bookContentLabel')}
+          placeholder={t('audiobook.textProjectImportDialog.bookContentPlaceholder')}
+          value={text}
+          onChange={(event) => onTextChange(event.target.value)}
+        />
+        <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
+          {t('audiobook.textProjectImportDialog.currentLength', { count: formatNumber(text.trim().length) })}
+        </Typography>
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={onClose} disabled={creating}>
+          {t('action.cancel')}
+        </Button>
+        <Button
+          variant="contained"
+          onClick={onCreate}
+          disabled={creating}
+          startIcon={creating ? <CircularProgress size={18} color="inherit" /> : undefined}
+          sx={audiobookButtonSx.brandContained}
+        >
+          {creating ? t('audiobook.textProjectImportDialog.creating') : t('audiobook.textProjectImportDialog.submit')}
+        </Button>
+      </DialogActions>
+    </Dialog>
+  )
+}
 
 export default TextProjectImportDialog

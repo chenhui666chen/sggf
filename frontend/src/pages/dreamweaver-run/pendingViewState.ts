@@ -1,22 +1,27 @@
+import type { TFunction } from 'i18next'
+
 export type PendingRunningState = {
   queuedMessage: string | null
   snapshotShotEmptyText: string
   completionMessage: string
 }
 
-export function resolvePendingRunningState(input: {
-  taskStatus: string | null | undefined
-  taskQueue: string | null | undefined
-}): PendingRunningState {
+export function resolvePendingRunningState(
+  input: {
+    taskStatus: string | null | undefined
+    taskQueue: string | null | undefined
+  },
+  t?: TFunction,
+): PendingRunningState {
   const { taskStatus, taskQueue } = input
 
   return {
     queuedMessage:
       taskStatus === 'queued'
-        ? `任务已入队排队中${taskQueue ? `（队列：${taskQueue}）` : ''}。若长期无进度，请确认 Celery worker 正在运行并监听该队列。`
+        ? (t ? (taskQueue ? t('dreamweaverRun.pvQueuedMessageWithQueue', { queue: taskQueue }) : t('dreamweaverRun.pvQueuedMessage')) : '任务已入队排队中' + (taskQueue ? '（队列：' + taskQueue + '）' : '') + '。若长期无进度，请确认 Celery worker 正在运行并监听该队列。')
         : null,
-    snapshotShotEmptyText: '尚无可用分镜快照（可能仍在生成，或尚未落库）。',
-    completionMessage: '任务执行中，完成后将自动展示分镜/首尾帧/视频产物。',
+    snapshotShotEmptyText: t ? t('dreamweaverRun.pvSnapshotShotEmptyText') : '尚无可用分镜快照（可能仍在生成，或尚未落库）。',
+    completionMessage: t ? t('dreamweaverRun.pvCompletionMessage') : '任务执行中，完成后将自动展示分镜/首尾帧/视频产物。',
   }
 }
 
@@ -38,7 +43,8 @@ export type PendingScriptApprovalState = {
   summaryText: string
 }
 
-export function resolvePendingScriptApprovalState(input: {
+export function resolvePendingScriptApprovalState(
+  input: {
   scriptText: string
   scriptGenerationLabel: string
   scriptGenerationMode: string | null | undefined
@@ -51,8 +57,10 @@ export function resolvePendingScriptApprovalState(input: {
   canResumeFromScript: boolean
   resumeLoading: boolean
   scriptError: string | null | undefined
-  entitySummary: string
-}): PendingScriptApprovalState {
+    entitySummary: string
+  },
+  t?: TFunction,
+): PendingScriptApprovalState {
   const {
     scriptText,
     scriptGenerationLabel,
@@ -78,9 +86,9 @@ export function resolvePendingScriptApprovalState(input: {
     : 'info'
   const primaryAlertMessage = scriptRequiresReview
     ? scriptApproved
-      ? '剧本已通过：现在可以点击“继续生成”进入分镜与素材库阶段。'
-      : '剧本待审核：请先加载/编辑剧本并点击“通过”，通过后再继续生成分镜与素材库。'
-    : '当前配置无需剧本审核：可直接点击“继续生成”进入分镜与素材库阶段。'
+      ? (t ? t('dreamweaverRun.pvScriptApprovedContinue') : '剧本已通过：现在可以点击“继续生成”进入分镜与素材库阶段。')
+      : (t ? t('dreamweaverRun.pvScriptPendingReview') : '剧本待审核：请先加载/编辑剧本并点击“通过”，通过后再继续生成分镜与素材库。')
+    : (t ? t('dreamweaverRun.pvScriptNoReviewNeeded') : '当前配置无需剧本审核：可直接点击“继续生成”进入分镜与素材库阶段。')
 
   return {
     generationLabel,
@@ -94,12 +102,10 @@ export function resolvePendingScriptApprovalState(input: {
     canApproveScript: Boolean(currentRunId) && !scriptLoading && !scriptDirty && hasScriptText,
     canRevokeScript: Boolean(currentRunId) && !scriptLoading && scriptApproved,
     canResume: canResumeFromScript,
-    resumeButtonLabel: resumeLoading ? '继续生成中…' : '继续生成',
+    resumeButtonLabel: resumeLoading ? (t ? t('dreamweaverRun.pvResumeGenerating') : '继续生成中…') : (t ? t('dreamweaverRun.pvResume') : '继续生成'),
     runtimeError: scriptError || null,
     loading: scriptLoading,
-    summaryText: `审核状态：${scriptRequiresReview ? (scriptApproved ? '已通过' : '待审核') : '无需审核'}${
-      generationLabel ? `  生成：${generationLabel}` : ''
-    }${entitySummary ? `  实体：${entitySummary}` : ''}`,
+    summaryText: (t ? t('dreamweaverRun.pvSummaryStatusPrefix') : '审核状态：') + (scriptRequiresReview ? (scriptApproved ? (t ? t('dreamweaverRun.libraryStatusApproved') : '已通过') : (t ? t('dreamweaverRun.libraryStatusPendingReview') : '待审核')) : (t ? t('dreamweaverRun.pvStatusNoReview') : '无需审核')) + (generationLabel ? (t ? t('dreamweaverRun.pvSummaryGenerationPart', { label: generationLabel }) : '  生成：' + generationLabel) : '') + (entitySummary ? (t ? t('dreamweaverRun.pvSummaryEntityPart', { label: entitySummary }) : '  实体：' + entitySummary) : ''),
   }
 }
 
@@ -128,7 +134,8 @@ export type PendingVideoConfirmationJobState = {
   promptActionDisabled: boolean
 }
 
-export function resolvePendingVideoConfirmationJobState(input: {
+export function resolvePendingVideoConfirmationJobState(
+  input: {
   job: {
     shot_id?: string | null
     desc?: string | null
@@ -146,7 +153,9 @@ export function resolvePendingVideoConfirmationJobState(input: {
   getShotFramePrompt: (frame: unknown) => string
   getShotVideoPromptOverride: (shot: unknown) => string
   snapshotShotById: Map<string, unknown>
-}): PendingVideoConfirmationJobState {
+  },
+  t?: TFunction,
+): PendingVideoConfirmationJobState {
   const sid = String(input.job.shot_id || '').trim()
   const desc = String(input.job.desc || '').trim()
   const dep = String(input.job.depends_on_shot_id || '').trim()
@@ -168,10 +177,11 @@ export function resolvePendingVideoConfirmationJobState(input: {
     running: input.running,
     videoJobConfirmingShotId: input.videoJobConfirmingShotId,
     hasShot: Boolean(input.shot),
-  })
+  }, t)
 }
 
-function resolvePendingVideoConfirmationJobStateFromFields(input: {
+function resolvePendingVideoConfirmationJobStateFromFields(
+  input: {
   shotId: string
   desc: string
   status: string
@@ -185,7 +195,9 @@ function resolvePendingVideoConfirmationJobStateFromFields(input: {
   running: boolean
   videoJobConfirmingShotId: string | null | undefined
   hasShot: boolean
-}): PendingVideoConfirmationJobState {
+  },
+  t?: TFunction,
+): PendingVideoConfirmationJobState {
   const {
     shotId,
     desc,
@@ -210,7 +222,13 @@ function resolvePendingVideoConfirmationJobStateFromFields(input: {
     desc,
     status: normalizedStatus,
     statusLabel:
-      normalizedStatus === 'done' ? '已生成' : normalizedStatus === 'blocked' ? '依赖未就绪' : normalizedStatus === 'confirmed' ? '已确认' : '待确认',
+      normalizedStatus === 'done'
+        ? (t ? t('dreamweaverRun.libraryStatusGenerated') : '已生成')
+        : normalizedStatus === 'blocked'
+          ? (t ? t('dreamweaverRun.pvStatusBlocked') : '依赖未就绪')
+          : normalizedStatus === 'confirmed'
+            ? (t ? t('dreamweaverRun.pendingConfirmed') : '已确认')
+            : (t ? t('dreamweaverRun.pvStatusPendingConfirm') : '待确认'),
     statusColor: normalizedStatus === 'done' ? 'success' : normalizedStatus === 'blocked' ? 'warning' : 'default',
     confirmed,
     showConfirmedChip: confirmed && normalizedStatus !== 'done',
@@ -224,14 +242,14 @@ function resolvePendingVideoConfirmationJobStateFromFields(input: {
     actionDisabled: !shotId || running || confirming || normalizedStatus === 'done',
     actionLabel:
       normalizedStatus === 'done'
-        ? '已生成'
+        ? (t ? t('dreamweaverRun.libraryStatusGenerated') : '已生成')
         : confirming
-          ? '处理中…'
+          ? (t ? t('common.processing') : '处理中…')
           : confirmed
-            ? '开始生成'
+            ? (t ? t('dreamweaverRun.configStartGenerating') : '开始生成')
             : requiresBridge
-              ? '确认（桥接）'
-              : '确认生成',
+              ? (t ? t('dreamweaverRun.pvConfirmBridge') : '确认（桥接）')
+              : (t ? t('dreamweaverRun.pvConfirmGenerate') : '确认生成'),
     promptActionDisabled: !hasShot,
   }
 }
@@ -276,22 +294,25 @@ export type PendingVideoConfirmationState = {
   emptyMessage: string
 }
 
-export function resolvePendingVideoConfirmationState(input: {
-  videoJobActionError: string | null | undefined
-  persistedRunId: string | null | undefined
-  runSnapshotLoading: boolean
-  videoClipJobCount: number
-}): PendingVideoConfirmationState {
+export function resolvePendingVideoConfirmationState(
+  input: {
+    videoJobActionError: string | null | undefined
+    persistedRunId: string | null | undefined
+    runSnapshotLoading: boolean
+    videoClipJobCount: number
+  },
+  t?: TFunction,
+): PendingVideoConfirmationState {
   const { videoJobActionError, persistedRunId, runSnapshotLoading, videoClipJobCount } = input
 
   return {
     introMessage:
-      '当前阶段启用“逐镜头确认生成”：点击卡片右侧按钮确认/触发生成；若镜头需要“上一镜头尾帧→本镜头首帧”桥接，依赖未就绪时会保持阻塞。',
+      t ? t('dreamweaverRun.pvIntroMessage') : '当前阶段启用“逐镜头确认生成”：点击卡片右侧按钮确认/触发生成；若镜头需要“上一镜头尾帧→本镜头首帧”桥接，依赖未就绪时会保持阻塞。',
     runtimeError: videoJobActionError || null,
     canRefresh: Boolean(persistedRunId) && !runSnapshotLoading,
-    refreshLabel: runSnapshotLoading ? '刷新中…' : '刷新任务卡',
+    refreshLabel: runSnapshotLoading ? (t ? t('dreamweaverRun.pvRefreshLoading') : '刷新中…') : (t ? t('dreamweaverRun.pvRefreshTaskCards') : '刷新任务卡'),
     hasJobs: videoClipJobCount > 0,
-    emptyMessage: '未找到视频任务卡（video_clip_jobs）。可点击“刷新任务卡”或重试生成到 VIDEO 阶段。',
+    emptyMessage: t ? t('dreamweaverRun.pvEmptyVideoJobs') : '未找到视频任务卡（video_clip_jobs）。可点击“刷新任务卡”或重试生成到 VIDEO 阶段。',
   }
 }
 
@@ -312,7 +333,8 @@ export type PendingPromptReviewState = {
   listToggleLabel: string
 }
 
-export function resolvePendingPromptReviewState(input: {
+export function resolvePendingPromptReviewState(
+  input: {
   promptReviewApproved: boolean
   libraryApproved: boolean
   persistedRunId: string | null | undefined
@@ -325,7 +347,9 @@ export function resolvePendingPromptReviewState(input: {
   promptReviewShotCount: number
   snapshotShotCount: number
   promptReviewShowAll: boolean
-}): PendingPromptReviewState {
+  },
+  t?: TFunction,
+): PendingPromptReviewState {
   const {
     promptReviewApproved,
     libraryApproved,
@@ -345,21 +369,21 @@ export function resolvePendingPromptReviewState(input: {
     alertSeverity: promptReviewApproved ? 'success' : 'warning',
     alertMessage: promptReviewApproved
       ? libraryApproved
-        ? '提示词已确认、素材库已通过：可继续生成进入镜头阶段。'
-        : '提示词已确认，但素材库仍待审核。'
-      : '提示词待确认：请逐镜检查并修改，确认后再继续生成。',
+        ? (t ? t('dreamweaverRun.pvAlertApprovedLibraryApproved') : '提示词已确认、素材库已通过：可继续生成进入镜头阶段。')
+        : (t ? t('dreamweaverRun.pvAlertApprovedLibraryPending') : '提示词已确认，但素材库仍待审核。')
+      : (t ? t('dreamweaverRun.pvAlertPromptPending') : '提示词待确认：请逐镜检查并修改，确认后再继续生成。'),
     canRefresh: Boolean(persistedRunId) && !runSnapshotLoading,
-    refreshLabel: runSnapshotLoading ? '刷新中…' : '刷新快照',
+    refreshLabel: runSnapshotLoading ? (t ? t('dreamweaverRun.pvRefreshLoading') : '刷新中…') : (t ? t('dreamweaverRun.pvRefreshSnapshot') : '刷新快照'),
     canApprove: Boolean(currentRunId) && !promptReviewLoading,
-    approveLabel: promptReviewLoading ? '确认中…' : '确认提示词',
+    approveLabel: promptReviewLoading ? (t ? t('dreamweaverRun.pvApproveLoading') : '确认中…') : (t ? t('dreamweaverRun.pvApprovePrompts') : '确认提示词'),
     canRevoke: Boolean(currentRunId) && !promptReviewLoading && promptReviewApproved,
     canResume: canResumeFromLibrary,
-    resumeLabel: resumeLoading ? '继续生成中…' : '继续生成',
+    resumeLabel: resumeLoading ? (t ? t('dreamweaverRun.pvResumeGenerating') : '继续生成中…') : (t ? t('dreamweaverRun.pvResume') : '继续生成'),
     runtimeError: promptReviewError || null,
     hasShots: promptReviewShotCount > 0,
-    emptyText: '暂无可用镜头提示词快照（可能仍在生成或尚未落库）。',
+    emptyText: t ? t('dreamweaverRun.pvEmptyPromptShots') : '暂无可用镜头提示词快照（可能仍在生成或尚未落库）。',
     showListToggle: snapshotShotCount > 12,
-    listToggleLabel: promptReviewShowAll ? '收起列表' : `显示全部(${snapshotShotCount})`,
+    listToggleLabel: promptReviewShowAll ? (t ? t('dreamweaverRun.pvCollapseList') : '收起列表') : (t ? t('dreamweaverRun.pvShowAllCount', { count: snapshotShotCount }) : '显示全部(' + snapshotShotCount + ')'),
   }
 }
 

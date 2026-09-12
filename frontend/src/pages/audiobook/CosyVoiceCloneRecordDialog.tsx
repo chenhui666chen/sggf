@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 
 import {
   Box,
@@ -44,6 +45,7 @@ const CosyVoiceCloneRecordDialog = ({
   onStartCloneRecording,
   onStopCloneRecording,
 }: CosyVoiceCloneRecordDialogProps) => {
+  const { t } = useTranslation()
   const [recordElapsedSeconds, setRecordElapsedSeconds] = useState(0)
   const recordProgress = useMemo(
     () => Math.min(100, Math.round((recordElapsedSeconds / RECORD_TARGET_SECONDS) * 100)),
@@ -72,17 +74,17 @@ const CosyVoiceCloneRecordDialog = ({
       maxWidth="sm"
       disableEscapeKeyDown={cloneRecording}
     >
-      <DialogTitle>录音朗读提示</DialogTitle>
+      <DialogTitle>{t('audiobook.cosyVoiceCloneRecordDialog.title')}</DialogTitle>
       <DialogContent dividers>
         <Typography variant="body2" sx={{ mb: 1 }}>
           {strictTranscriptMode
-            ? `必须逐字朗读下方内容：“${transcriptText}”`
-            : '朗读示例（约10秒）：“时间会缓和所有的悲伤，当你的悲伤被安抚以后，你就会因为认识过我而感到满足。”'}
+            ? t('audiobook.cosyVoiceCloneRecordDialog.strictPrompt', { text: transcriptText })
+            : t('audiobook.cosyVoiceCloneRecordDialog.samplePrompt')}
         </Typography>
         <Typography variant="caption" color="text.secondary">
           {strictTranscriptMode
-            ? '不要随机朗读其他内容，StepAudio 会用 ASR 校验录音与参考音频逐字内容是否一致。'
-            : '也可以随机读其他内容。'}
+            ? t('audiobook.cosyVoiceCloneRecordDialog.strictHint')
+            : t('audiobook.cosyVoiceCloneRecordDialog.freeHint')}
         </Typography>
 
         {cloneRecording && (
@@ -97,7 +99,7 @@ const CosyVoiceCloneRecordDialog = ({
             }}
           >
             <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1 }}>
-              录音统计
+              {t('audiobook.cosyVoiceCloneRecordDialog.statsTitle')}
             </Typography>
             <Stack
               direction={{ xs: 'column', sm: 'row' }}
@@ -106,7 +108,7 @@ const CosyVoiceCloneRecordDialog = ({
             >
               <Box sx={{ minWidth: 0, flex: 1 }}>
                 <Typography variant="caption" color="text.secondary">
-                  已录时长
+                  {t('audiobook.cosyVoiceCloneRecordDialog.recordedDuration')}
                 </Typography>
                 <Typography variant="body2" sx={{ fontWeight: 700 }}>
                   {formatRecordDuration(recordElapsedSeconds)}
@@ -114,15 +116,15 @@ const CosyVoiceCloneRecordDialog = ({
               </Box>
               <Box sx={{ minWidth: 0, flex: 1 }}>
                 <Typography variant="caption" color="text.secondary">
-                  建议时长
+                  {t('audiobook.cosyVoiceCloneRecordDialog.suggestedDuration')}
                 </Typography>
                 <Typography variant="body2" sx={{ fontWeight: 700 }}>
-                  {RECORD_TARGET_SECONDS} 秒
+                  {t('audiobook.cosyVoiceCloneRecordDialog.targetSeconds', { total: RECORD_TARGET_SECONDS })}
                 </Typography>
               </Box>
               <Box sx={{ minWidth: 0, flex: 1 }}>
                 <Typography variant="caption" color="text.secondary">
-                  完成度
+                  {t('audiobook.cosyVoiceCloneRecordDialog.progress')}
                 </Typography>
                 <Typography variant="body2" sx={{ fontWeight: 700 }}>
                   {recordProgress}%
@@ -139,7 +141,7 @@ const CosyVoiceCloneRecordDialog = ({
       </DialogContent>
       <DialogActions>
         <Button onClick={onClose} disabled={cloneRecording}>
-          关闭
+          {t('action.close')}
         </Button>
         <Button
           variant="contained"
@@ -147,7 +149,9 @@ const CosyVoiceCloneRecordDialog = ({
           onClick={cloneRecording ? onStopCloneRecording : onStartCloneRecording}
           disabled={cloneLoading || cloneUploading}
         >
-          {cloneRecording ? '结束录音并上传' : '开始录音'}
+          {cloneRecording
+            ? t('audiobook.cosyVoiceCloneRecordDialog.stopAndUpload')
+            : t('audiobook.cosyVoiceCloneRecordDialog.startRecording')}
         </Button>
       </DialogActions>
     </Dialog>

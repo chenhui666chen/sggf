@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react'
 
+import { useTranslation } from 'react-i18next'
+
 import {
   apiClient,
   extractApiErrorMessage,
@@ -7,6 +9,7 @@ import {
 } from '@/services/api'
 
 export function useAssetStudioModelCatalog() {
+  const { t } = useTranslation()
   const [catalog, setCatalog] = useState<AssetStudioModelCatalogResponse | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -28,7 +31,7 @@ export function useAssetStudioModelCatalog() {
           return
         }
         setCatalog(null)
-        setError(await extractApiErrorMessage(err, '加载统一模型清单失败'))
+        setError(await extractApiErrorMessage(err, t('modelCatalog.hook.loadCatalogFailed')))
       } finally {
         if (!cancelled) {
           setLoading(false)

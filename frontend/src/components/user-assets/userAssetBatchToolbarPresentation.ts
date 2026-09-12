@@ -2,11 +2,14 @@ import type {
   ButtonProps,
   ChipProps,
 } from '@mui/material'
+import type { TFunction } from 'i18next'
 
 import type {
   UserAssetBatchActionCommand,
   UserAssetListSelectionState,
 } from './userAssetListPresentation'
+
+const DEFAULT_TRANSLATE: TFunction = ((key: string) => key) as TFunction
 
 export type UserAssetBatchToolbarChipSpec = {
   key: string
@@ -61,7 +64,9 @@ function isBatchActionDisabled(
 
 export function buildUserAssetBatchToolbarPresentation(
   options: BuildUserAssetBatchToolbarPresentationOptions,
+  t?: TFunction,
 ): UserAssetBatchToolbarPresentation {
+  const translate = t ?? DEFAULT_TRANSLATE
   const {
     selection,
     batchSubmitting = false,
@@ -74,23 +79,27 @@ export function buildUserAssetBatchToolbarPresentation(
         key: 'asset-selected-count',
         color: selection.hasSelection ? 'primary' : 'default',
         variant: selection.hasSelection ? 'filled' : 'outlined',
-        label: `已选 ${selection.selectedCount}`,
+        label: translate('userAsset.batch.selectedCount', { count: selection.selectedCount }),
       },
       {
         key: 'asset-visible-count',
         variant: 'outlined',
-        label: selection.allVisibleSelected ? '当前结果已全选' : `可选 ${selection.visibleCount} 项`,
+        label: selection.allVisibleSelected
+          ? translate('userAsset.batch.allVisibleSelected')
+          : translate('userAsset.batch.visibleCount', { count: selection.visibleCount }),
       },
     ],
     selectAllAction: {
       key: 'toggle-select-all-assets',
-      label: selection.allVisibleSelected ? '取消全选' : '全选当前结果',
+      label: selection.allVisibleSelected
+        ? translate('userAsset.batch.unselectAll')
+        : translate('userAsset.batch.selectAll'),
       disabled: batchSubmitting,
       variant: 'outlined',
     },
     clearSelectionAction: {
       key: 'clear-selected-assets',
-      label: '清空选择',
+      label: translate('userAsset.batch.clearSelection'),
       disabled: batchSubmitting || !selection.hasSelection,
       variant: 'outlined',
     },

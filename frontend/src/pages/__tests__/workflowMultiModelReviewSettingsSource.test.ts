@@ -36,11 +36,11 @@ describe('Workflow multi-model review settings source guards', () => {
   it('keeps review settings focused on automatic chapter-position strategy', () => {
     const dialogSource = readSource('../../components/project/MultiModelReviewSettingsDialog.tsx')
 
-    expect(dialogSource).toContain('自动多模型评审策略')
-    expect(dialogSource).toContain('普通章节')
-    expect(dialogSource).toContain('开篇章节')
-    expect(dialogSource).toContain('重点章节')
-    expect(dialogSource).toContain('完结章节')
+    expect(dialogSource).toContain('project.multiModelReview.strategyTitle')
+    expect(dialogSource).toContain('project.multiModelReview.strategyRegular')
+    expect(dialogSource).toContain('project.multiModelReview.strategyOpening')
+    expect(dialogSource).toContain('project.multiModelReview.strategyKey')
+    expect(dialogSource).toContain('project.multiModelReview.strategyFinale')
 
     expect(dialogSource).not.toContain('默认评审深度')
     expect(dialogSource).not.toContain('手动触发深度')
@@ -51,7 +51,7 @@ describe('Workflow multi-model review settings source guards', () => {
   it('warns users that multi-model review increases latency and cost', () => {
     const dialogSource = readSource('../../components/project/MultiModelReviewSettingsDialog.tsx')
 
-    expect(dialogSource).toContain('会增加评审耗时与模型调用成本')
+    expect(dialogSource).toContain('project.multiModelReview.costWarning')
     expect(dialogSource).toContain('severity="warning"')
   })
 })

@@ -16,6 +16,7 @@ import {
   Alert,
   Divider,
   Grid,
+  alpha,
 } from '@mui/material'
 import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import ContentPasteIcon from '@mui/icons-material/ContentPaste'
@@ -26,17 +27,25 @@ import DeleteIcon from '@mui/icons-material/Delete'
 import CheckCircleIcon from '@mui/icons-material/CheckCircle'
 import WarningIcon from '@mui/icons-material/Warning'
 import ErrorIcon from '@mui/icons-material/Error'
+import { useTranslation } from 'react-i18next'
 import { apiClient } from '@/services/api'
-import { AI_TRACE_GENRES, normalizeAITraceGenre } from './aiTraceGenre'
+import { AI_TRACE_GENRES, AI_TRACE_GENRE_LABEL_KEYS, normalizeAITraceGenre } from './aiTraceGenre'
 
-// AI分数等级配置
-const getScoreLevel = (score: number) => {
-  if (score <= 30) return { label: '低AI痕迹', color: '#4caf50', icon: CheckCircleIcon }
-  if (score <= 60) return { label: '中等AI痕迹', color: '#ff9800', icon: WarningIcon }
-  return { label: '高AI痕迹', color: '#f44336', icon: ErrorIcon }
+// AI分数等级配置：tone 走语义 token（success/warning/error），随主题反相；labelKey 供显示层取翻译。
+interface ScoreLevelInfo {
+  label: string
+  labelKey: string
+  tone: 'success' | 'warning' | 'error'
+  icon: typeof CheckCircleIcon
+}
+const getScoreLevel = (score: number): ScoreLevelInfo => {
+  if (score <= 30) return { label: '低AI痕迹', labelKey: 'aiTrace.scoreLow', tone: 'success', icon: CheckCircleIcon }
+  if (score <= 60) return { label: '中等AI痕迹', labelKey: 'aiTrace.scoreMedium', tone: 'warning', icon: WarningIcon }
+  return { label: '高AI痕迹', labelKey: 'aiTrace.scoreHigh', tone: 'error', icon: ErrorIcon }
 }
 
 export default function AITracePage() {
+  const { t } = useTranslation()
   const navigate = useNavigate()
   const [inputText, setInputText] = useState('')
   const [outputText, setOutputText] = useState('')
@@ -85,7 +94,7 @@ export default function AITracePage() {
       setReducedResult(null)
       setOutputText('')
     } catch {
-      setError('无法读取剪贴板，请手动粘贴')
+      setError(t('aiTrace.pasteFailed'))
     }
   }, [])
 
@@ -109,7 +118,7 @@ export default function AITracePage() {
   // 检测AI浓度
   const handleDetect = useCallback(async () => {
     if (!inputText.trim()) {
-      setError('请先输入或粘贴要检测的文本')
+      setError(t('aiTrace.detectInputRequired'))
       return
     }
     setDetecting(true)
@@ -125,10 +134,10 @@ export default function AITracePage() {
           text: detectedText,
         })
       } else {
-        setError(response.data.error || '检测失败')
+        setError(response.data.error || t('aiTrace.detectFailed'))
       }
     } catch (err: unknown) {
-      const errorMessage = err instanceof Error ? err.message : '检测请求失败'
+      const errorMessage = err instanceof Error ? err.message : t('aiTrace.detectRequestFailed')
       setError(errorMessage)
     } finally {
       setDetecting(false)
@@ -138,7 +147,7 @@ export default function AITracePage() {
   // 降低AI浓度（使用活跃模型）
   const handleReduce = useCallback(async () => {
     if (!inputText.trim()) {
-      setError('请先输入或粘贴要处理的文本')
+      setError(t('aiTrace.reduceInputRequired'))
       return
     }
     setReducing(true)
@@ -185,10 +194,10 @@ export default function AITracePage() {
           })
         }
       } else {
-        setError(response.data.error || '降低AI浓度失败')
+        setError(response.data.error || t('aiTrace.reduceFailed'))
       }
     } catch (err: unknown) {
-      const errorMessage = err instanceof Error ? err.message : '处理请求失败'
+      const errorMessage = err instanceof Error ? err.message : t('aiTrace.reduceRequestFailed')
       setError(errorMessage)
     } finally {
       setReducing(false)
@@ -210,17 +219,17 @@ export default function AITracePage() {
   const reducedLevel = reducedResult ? getScoreLevel(reducedResult.score) : null
 
   return (
-    <Box sx={{ minHeight: '100vh', background: 'linear-gradient(135deg, #1a237e 0%, #0d47a1 50%, #01579b 100%)' }}>
+    <Box sx={(theme) => ({ minHeight: '100vh', background: `linear-gradient(135deg, ${theme.palette.primary.main} 0%, ${theme.palette.primary.dark} 100%)` })}>
       {/* 顶部导航 */}
       <Box sx={{ py: 2, px: 3, display: 'flex', alignItems: 'center', gap: 2 }}>
-        <IconButton onClick={() => navigate('/home')} sx={{ color: 'white' }}>
+        <IconButton onClick={() => navigate('/home')} sx={{ color: 'primary.contrastText' }}>
           <ArrowBackIcon />
         </IconButton>
-        <Typography variant="h5" sx={{ color: 'white', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 1 }}>
-          <AutoFixHighIcon /> 织文无迹
+        <Typography variant="h5" sx={{ color: 'primary.contrastText', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 1 }}>
+          <AutoFixHighIcon /> {t('aiTrace.pageTitle')}
         </Typography>
-        <Typography variant="body2" sx={{ color: 'rgba(255,255,255,0.7)', ml: 1 }}>
-          智能检测与降低AI写作痕迹
+        <Typography variant="body2" sx={(theme) => ({ color: alpha(theme.palette.primary.contrastText, 0.7), ml: 1 })}>
+          {t('aiTrace.subtitle')}
         </Typography>
       </Box>
 
@@ -232,19 +241,19 @@ export default function AITracePage() {
           <Grid item xs={12} md={6}>
             <Paper sx={{ p: 3, borderRadius: 3, height: 'calc(100vh - 140px)', display: 'flex', flexDirection: 'column' }}>
               <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-                <Typography variant="h6" sx={{ fontWeight: 600, color: '#1a237e' }}>
-                  输入文本
+                <Typography variant="h6" sx={{ fontWeight: 600, color: 'primary.main' }}>
+                  {t('aiTrace.inputTitle')}
                 </Typography>
                 <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
                   <Typography variant="body2" color="text.secondary" sx={{ mr: 1 }}>
-                    字数：{charCount} / 10000
+                    {t('aiTrace.charCount', { count: charCount })}
                   </Typography>
-                  <Tooltip title="从剪贴板粘贴">
+                  <Tooltip title={t('aiTrace.pasteTooltip')}>
                     <IconButton size="small" onClick={handlePaste} color="primary">
                       <ContentPasteIcon />
                     </IconButton>
                   </Tooltip>
-                  <Tooltip title="清空">
+                  <Tooltip title={t('aiTrace.clearTooltip')}>
                     <IconButton size="small" onClick={handleClear} color="error">
                       <DeleteIcon />
                     </IconButton>
@@ -255,7 +264,7 @@ export default function AITracePage() {
               <TextField
                 multiline
                 fullWidth
-                placeholder={'在此粘贴或输入要检测的文本内容...\n\n支持小说、文章、论文等各类文本\n建议文本长度：100-10000字'}
+                placeholder={t('aiTrace.inputPlaceholder')}
                 value={inputText}
                 onChange={handleInputChange}
                 sx={{ flex: 1, '& .MuiOutlinedInput-root': { height: '100%', alignItems: 'flex-start' },
@@ -267,12 +276,12 @@ export default function AITracePage() {
                 <Box sx={{ display: 'flex', gap: 2, alignItems: 'center', flexWrap: 'wrap' }}>
                   <Button variant="outlined" startIcon={detecting ? <CircularProgress size={18} /> : <SearchIcon />}
                     onClick={handleDetect} disabled={detecting || !inputText.trim()}>
-                    {detecting ? '检测中...' : '检测AI浓度'}
+                    {detecting ? t('aiTrace.detecting') : t('aiTrace.detectLabel')}
                   </Button>
 
                   <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap', alignItems: 'center' }}>
                     <Chip
-                      label="自动"
+                      label={t('aiTrace.autoGenre')}
                       size="small"
                       color={genre === 'auto' ? 'primary' : 'default'}
                       variant={genre === 'auto' ? 'filled' : 'outlined'}
@@ -281,7 +290,7 @@ export default function AITracePage() {
                     {AI_TRACE_GENRES.map((option) => (
                       <Chip
                         key={option}
-                        label={option}
+                        label={AI_TRACE_GENRE_LABEL_KEYS[option] ? t(AI_TRACE_GENRE_LABEL_KEYS[option]) : option}
                         size="small"
                         color={genre === option ? 'primary' : 'default'}
                         variant={genre === option ? 'filled' : 'outlined'}
@@ -295,18 +304,19 @@ export default function AITracePage() {
                     startIcon={reducing ? <CircularProgress size={18} color="inherit" /> : <AutoFixHighIcon />}
                     onClick={handleReduce}
                     disabled={reducing || !inputText.trim()}
-                    sx={{
-                      background: 'linear-gradient(45deg, #1a237e 30%, #0d47a1 90%)',
+                    sx={(theme) => ({
+                      // 主操作按钮渐变走 primary token 反相，禁用态扁平化走 action token。
+                      background: `linear-gradient(45deg, ${theme.palette.primary.main} 30%, ${theme.palette.primary.dark} 90%)`,
                       '&:hover': {
-                        background: 'linear-gradient(45deg, #0d47a1 30%, #01579b 90%)',
+                        background: `linear-gradient(45deg, ${theme.palette.primary.dark} 30%, ${theme.palette.primary.dark} 90%)`,
                       },
                       '&.Mui-disabled': {
-                        background: 'linear-gradient(45deg, #7986cb 30%, #90caf9 90%)',
-                        color: 'rgba(255, 255, 255, 0.7)',
+                        background: theme.palette.action.disabledBackground,
+                        color: theme.palette.text.disabled,
                       }
-                    }}
+                    })}
                   >
-                    {reducing ? '处理中...' : '一键降低AI浓度'}
+                    {reducing ? t('aiTrace.reducing') : t('aiTrace.reduceLabel')}
                   </Button>
                 </Box>
               </Box>
@@ -314,22 +324,22 @@ export default function AITracePage() {
               {/* 检测结果展示 */}
               {currentDetectResult && scoreLevel && (
                 <Fade in>
-                  <Box sx={{ mt: 2, p: 2, borderRadius: 2, backgroundColor: `${scoreLevel.color}15`, border: `1px solid ${scoreLevel.color}40` }}>
+                  <Box sx={(theme) => ({ mt: 2, p: 2, borderRadius: 2, backgroundColor: alpha(theme.palette[scoreLevel.tone].main, 0.08), border: `1px solid ${alpha(theme.palette[scoreLevel.tone].main, 0.25)}` })}>
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
                       <Box sx={{ position: 'relative', display: 'inline-flex' }}>
                         <CircularProgress variant="determinate" value={currentDetectResult.score} size={60}
-                          sx={{ color: scoreLevel.color }} />
+                          sx={(theme) => ({ color: theme.palette[scoreLevel.tone].main })} />
                         <Box sx={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                          <Typography variant="body2" sx={{ fontWeight: 700, color: scoreLevel.color }}>
+                          <Typography variant="body2" sx={(theme) => ({ fontWeight: 700, color: theme.palette[scoreLevel.tone].main })}>
                             {currentDetectResult.score}
                           </Typography>
                         </Box>
                       </Box>
                       <Box>
-                        <Chip icon={<scoreLevel.icon />} label={scoreLevel.label} size="small"
-                          sx={{ backgroundColor: scoreLevel.color, color: 'white', fontWeight: 600 }} />
+                        <Chip icon={<scoreLevel.icon />} label={scoreLevel.labelKey ? t(scoreLevel.labelKey) : scoreLevel.label} size="small"
+                          sx={(theme) => ({ backgroundColor: theme.palette[scoreLevel.tone].main, color: theme.palette[scoreLevel.tone].contrastText, fontWeight: 600 })} />
                         <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-                          {currentDetectResult.suggestion === 'Pass' ? '内容可直接使用' : '建议进行优化处理'}
+                          {currentDetectResult.suggestion === 'Pass' ? t('aiTrace.suggestionPass') : t('aiTrace.suggestionOptimize')}
                         </Typography>
                       </Box>
                     </Box>
@@ -343,11 +353,11 @@ export default function AITracePage() {
           <Grid item xs={12} md={6}>
             <Paper sx={{ p: 3, borderRadius: 3, height: 'calc(100vh - 140px)', display: 'flex', flexDirection: 'column' }}>
               <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-                <Typography variant="h6" sx={{ fontWeight: 600, color: '#2e7d32' }}>
-                  优化结果
+                <Typography variant="h6" sx={{ fontWeight: 600, color: 'success.main' }}>
+                  {t('aiTrace.outputTitle')}
                 </Typography>
                 {outputText && (
-                  <Tooltip title={copySuccess ? '已复制!' : '复制结果'}>
+                  <Tooltip title={copySuccess ? t('aiTrace.copied') : t('aiTrace.copyResult')}>
                     <IconButton size="small" onClick={handleCopy} color={copySuccess ? 'success' : 'primary'}>
                       {copySuccess ? <CheckCircleIcon /> : <ContentCopyIcon />}
                     </IconButton>
@@ -359,13 +369,13 @@ export default function AITracePage() {
                 <Box sx={{ mb: 2 }}>
                   <LinearProgress sx={{ borderRadius: 1 }} />
                   <Typography variant="body2" color="text.secondary" sx={{ mt: 1, textAlign: 'center' }}>
-                    正在使用AI降痕技术处理文本，请稍候...
+                    {t('aiTrace.reducingHint')}
                   </Typography>
                 </Box>
               )}
 
-              <TextField multiline fullWidth placeholder="优化后的文本将显示在这里..." value={outputText}
-                InputProps={{ readOnly: true, sx: { height: '100%', fontSize: '0.95rem', lineHeight: 1.8, backgroundColor: outputText ? '#f8fff8' : 'transparent' } }}
+              <TextField multiline fullWidth placeholder={t('aiTrace.outputPlaceholder')} value={outputText}
+                InputProps={{ readOnly: true, sx: { height: '100%', fontSize: '0.95rem', lineHeight: 1.8, backgroundColor: outputText ? 'success.light' : 'transparent' } }}
                 sx={{ flex: 1, '& .MuiOutlinedInput-root': { height: '100%', alignItems: 'flex-start' },
                   '& .MuiInputBase-input': { height: '100% !important', overflow: 'auto !important' } }}
               />
@@ -377,26 +387,29 @@ export default function AITracePage() {
                     <Divider sx={{ mb: 2 }} />
                     <Box sx={{ display: 'flex', justifyContent: 'space-around', alignItems: 'center' }}>
                       <Box sx={{ textAlign: 'center' }}>
-                        <Typography variant="caption" color="text.secondary">处理前</Typography>
-                        <Typography variant="h5" sx={{ color: getScoreLevel(currentDetectResult.score).color, fontWeight: 700 }}>
-                          {currentDetectResult.score}分
+                        <Typography variant="caption" color="text.secondary">{t('aiTrace.beforeLabel')}</Typography>
+                        <Typography variant="h5" sx={(theme) => ({ color: theme.palette[getScoreLevel(currentDetectResult.score).tone].main, fontWeight: 700 })}>
+                          {t('aiTrace.scorePoint', { score: currentDetectResult.score })}
                         </Typography>
                       </Box>
                       <Box sx={{ fontSize: 24 }}>&rarr;</Box>
                       <Box sx={{ textAlign: 'center' }}>
-                        <Typography variant="caption" color="text.secondary">处理后</Typography>
-                        <Typography variant="h5" sx={{ color: reducedLevel.color, fontWeight: 700 }}>
-                          {reducedResult.score}分
+                        <Typography variant="caption" color="text.secondary">{t('aiTrace.afterLabel')}</Typography>
+                        <Typography variant="h5" sx={(theme) => ({ color: theme.palette[reducedLevel.tone].main, fontWeight: 700 })}>
+                          {t('aiTrace.scorePoint', { score: reducedResult.score })}
                         </Typography>
                       </Box>
-                      <Chip label={`降低 ${currentDetectResult.score - reducedResult.score} 分`} color="success" sx={{ fontWeight: 600 }} />
+                      <Chip label={t('aiTrace.scoreReduced', { delta: currentDetectResult.score - reducedResult.score })} color="success" sx={{ fontWeight: 600 }} />
                     </Box>
                   </Box>
                 </Fade>
               )}
               {reducedResult && (
                 <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1.5, textAlign: 'center' }}>
-                  使用模型：{reducedResult.modelUsed || '默认路由'} | 题材：{reducedResult.genreDetected || '通用'}
+                  {t('aiTrace.usageMeta', {
+                    model: reducedResult.modelUsed || t('aiTrace.defaultRoute'),
+                    genre: reducedResult.genreDetected || t('aiTrace.genericGenre'),
+                  })}
                 </Typography>
               )}
             </Paper>

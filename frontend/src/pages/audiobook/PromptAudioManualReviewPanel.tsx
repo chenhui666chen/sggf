@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 
 import {
   Alert,
@@ -46,6 +47,7 @@ const PromptAudioManualReviewPanel = ({
   chapterAudio,
   onCollapse,
 }: PromptAudioManualReviewPanelProps) => {
+  const { t } = useTranslation()
   const [localPromptAudioQuality, setLocalPromptAudioQuality] = useState<Record<string, unknown> | null>(null)
   const [selectedModel, setSelectedModel] = useState('')
   const [tagParseSuccess, setTagParseSuccess] = useState<ReviewBooleanValue>('unknown')
@@ -115,9 +117,9 @@ const PromptAudioManualReviewPanel = ({
       if (isRecord(response.data.prompt_audio_quality)) {
         setLocalPromptAudioQuality(response.data.prompt_audio_quality)
       }
-      setSavedMessage('Prompt/Audio 验收已保存')
+      setSavedMessage(t('audiobook.promptAudioManualReview.savedNotice'))
     } catch (err: unknown) {
-      setError(await extractApiErrorMessage(err, '保存 Prompt/Audio 验收失败'))
+      setError(await extractApiErrorMessage(err, t('audiobook.promptAudioManualReview.saveFailed')))
     } finally {
       setSubmitting(false)
     }
@@ -138,11 +140,11 @@ const PromptAudioManualReviewPanel = ({
       const jobId = response.data.job_id || response.data.task_id
       setSavedMessage(
         jobId
-          ? `ASR 转写任务已进入队列：${jobId}`
-          : 'ASR 转写任务已进入队列',
+          ? t('audiobook.promptAudioManualReview.asrQueuedWithJob', { jobId })
+          : t('audiobook.promptAudioManualReview.asrQueued'),
       )
     } catch (err: unknown) {
-      setError(await extractApiErrorMessage(err, '排队 ASR 转写失败'))
+      setError(await extractApiErrorMessage(err, t('audiobook.promptAudioManualReview.asrQueueFailed')))
     } finally {
       setQueueingTranscript(false)
     }
@@ -151,7 +153,7 @@ const PromptAudioManualReviewPanel = ({
   if (promptAudioReviewModels.length === 0) {
     return (
       <Alert severity="info">
-        暂无 Prompt/Audio 质量回写
+        {t('audiobook.promptAudioManualReview.noFeedback')}
       </Alert>
     )
   }
@@ -172,12 +174,12 @@ const PromptAudioManualReviewPanel = ({
     >
       <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} alignItems={{ xs: 'stretch', sm: 'center' }}>
         <Typography variant="caption" sx={{ fontWeight: 700, minWidth: 130 }}>
-          Prompt/Audio 验收
+          {t('audiobook.promptAudioManualReview.title')}
         </Typography>
         <TextField
           select
           size="small"
-          label="模型"
+          label={t('audiobook.promptAudioManualReview.modelLabel')}
           value={selectedModel}
           onChange={(event) => {
             setSelectedModel(event.target.value)
@@ -198,7 +200,9 @@ const PromptAudioManualReviewPanel = ({
           <Chip
             size="small"
             variant="outlined"
-            label={`片段 ${currentModel.manualReviewSegmentIndices.map((item) => item + 1).join(', ')}`}
+            label={`${t('audiobook.promptAudioManualReview.segmentList', {
+              indices: currentModel.manualReviewSegmentIndices.map((item) => item + 1).join(', '),
+            })}`}
           />
         )}
       </Stack>
@@ -207,30 +211,30 @@ const PromptAudioManualReviewPanel = ({
         <TextField
           select
           size="small"
-          label="标签解析"
+          label={t('audiobook.promptAudioManualReview.tagParseLabel')}
           value={tagParseSuccess}
           onChange={(event) => setTagParseSuccess(event.target.value as ReviewBooleanValue)}
           sx={{ minWidth: { xs: '100%', sm: 130 } }}
         >
-          <MenuItem value="unknown">未评</MenuItem>
-          <MenuItem value="true">通过</MenuItem>
-          <MenuItem value="false">失败</MenuItem>
+          <MenuItem value="unknown">{t('audiobook.promptAudioManualReview.unrated')}</MenuItem>
+          <MenuItem value="true">{t('audiobook.promptAudioManualReview.passed')}</MenuItem>
+          <MenuItem value="false">{t('audiobook.promptAudioManualReview.failed')}</MenuItem>
         </TextField>
         <TextField
           select
           size="small"
-          label="正文污染"
+          label={t('audiobook.promptAudioManualReview.contaminationLabel')}
           value={textContamination}
           onChange={(event) => setTextContamination(event.target.value as ReviewBooleanValue)}
           sx={{ minWidth: { xs: '100%', sm: 130 } }}
         >
-          <MenuItem value="unknown">未评</MenuItem>
-          <MenuItem value="false">无污染</MenuItem>
-          <MenuItem value="true">有污染</MenuItem>
+          <MenuItem value="unknown">{t('audiobook.promptAudioManualReview.unrated')}</MenuItem>
+          <MenuItem value="false">{t('audiobook.promptAudioManualReview.noContamination')}</MenuItem>
+          <MenuItem value="true">{t('audiobook.promptAudioManualReview.contaminated')}</MenuItem>
         </TextField>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, minHeight: 40 }}>
           <Typography variant="caption" color="text.secondary">
-            人工评分
+            {t('audiobook.promptAudioManualReview.manualScoreLabel')}
           </Typography>
           <Rating
             size="small"
@@ -247,19 +251,32 @@ const PromptAudioManualReviewPanel = ({
         multiline
         minRows={1}
         maxRows={2}
-        label="ASR 转写文本"
+        label={t('audiobook.promptAudioManualReview.asrTranscriptLabel')}
         value={asrTranscript}
         onChange={(event) => setAsrTranscript(event.target.value)}
       />
 
       {asrAssist?.available && (
         <Alert severity={asrAssist.detectedTagResidue ? 'warning' : 'success'}>
-          ASR 辅助：
-          相似度 {asrAssist.similarityScore !== null ? (asrAssist.similarityScore * 100).toFixed(1) : '未知'}%，
-          WER {asrAssist.wordErrorRate !== null ? (asrAssist.wordErrorRate * 100).toFixed(1) : '未知'}%。
-          {asrAssist.suggestedTextContamination === true ? ' 建议标记正文污染。' : ' 未发现明显标签残留。'}
-          {asrAssist.suggestedTagParseSuccess === false ? ' 建议复核标签解析失败。' : ''}
-          {asrAssist.matchedTags.length > 0 ? ` 命中标签：${asrAssist.matchedTags.join(', ')}` : ''}
+          {t('audiobook.promptAudioManualReview.asrAssistSummary', {
+            similarity: asrAssist.similarityScore !== null
+              ? (asrAssist.similarityScore * 100).toFixed(1)
+              : t('audiobook.promptAudioManualReview.unknownValue'),
+            wer: asrAssist.wordErrorRate !== null
+              ? (asrAssist.wordErrorRate * 100).toFixed(1)
+              : t('audiobook.promptAudioManualReview.unknownValue'),
+          })}
+          {asrAssist.suggestedTextContamination === true
+            ? t('audiobook.promptAudioManualReview.suggestContamination')
+            : t('audiobook.promptAudioManualReview.noTagResidue')}
+          {asrAssist.suggestedTagParseSuccess === false
+            ? t('audiobook.promptAudioManualReview.suggestRecheckParse')
+            : ''}
+          {asrAssist.matchedTags.length > 0
+            ? t('audiobook.promptAudioManualReview.matchedTags', {
+                tags: asrAssist.matchedTags.join(', '),
+              })
+            : ''}
         </Alert>
       )}
 
@@ -269,16 +286,20 @@ const PromptAudioManualReviewPanel = ({
         multiline
         minRows={1}
         maxRows={2}
-        label="备注"
+        label={t('audiobook.promptAudioManualReview.notesLabel')}
         value={notes}
         onChange={(event) => setNotes(event.target.value)}
       />
 
       {currentModel?.manualReviewFields.reviewedAt && (
         <Typography variant="caption" color="text.secondary">
-          最近验收：{currentModel.manualReviewFields.reviewedAt}
+          {t('audiobook.promptAudioManualReview.reviewedAtLabel', {
+            datetime: currentModel.manualReviewFields.reviewedAt,
+          })}
           {currentModel.manualReviewFields.reviewedBy !== null
-            ? ` · 用户 ${currentModel.manualReviewFields.reviewedBy}`
+            ? t('audiobook.promptAudioManualReview.reviewedBy', {
+                user: currentModel.manualReviewFields.reviewedBy,
+              })
             : ''}
         </Typography>
       )}
@@ -295,7 +316,9 @@ const PromptAudioManualReviewPanel = ({
           onClick={handleQueueTranscript}
           sx={audiobookButtonSx.brandOutlined}
         >
-          {queueingTranscript ? '排队中...' : '排队转写'}
+          {queueingTranscript
+            ? t('audiobook.promptAudioManualReview.queueingText')
+            : t('audiobook.promptAudioManualReview.queueTranscript')}
         </Button>
         <Button
           size="small"
@@ -305,10 +328,12 @@ const PromptAudioManualReviewPanel = ({
           onClick={handleSave}
           sx={audiobookButtonSx.brandContained}
         >
-          {submitting ? '保存中...' : '保存验收'}
+          {submitting
+            ? t('audiobook.mimoVoiceAssetWorkbench.savingText')
+            : t('audiobook.promptAudioManualReview.saveReview')}
         </Button>
         <Button size="small" variant="text" onClick={onCollapse}>
-          收起
+          {t('audiobook.mimoVoiceAssetWorkbench.collapse')}
         </Button>
       </Stack>
     </Box>

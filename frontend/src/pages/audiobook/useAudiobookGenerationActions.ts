@@ -1,5 +1,7 @@
 import { useCallback, type Dispatch, type SetStateAction } from 'react'
 
+import { useTranslation } from 'react-i18next'
+
 import {
   apiClient,
   describeTaskPointsPrecheckErrorDetail,
@@ -87,6 +89,7 @@ export const useAudiobookGenerationActions = ({
   setResumingChapterId,
   setSnackbar,
 }: UseAudiobookGenerationActionsParams) => {
+  const { t } = useTranslation()
   const showGenerationError = useCallback(async (error: unknown, fallbackMessage: string) => {
     const precheckDetail = await extractTaskPointsPrecheckErrorDetail(error)
     setTaskPointsPrecheckError(precheckDetail)
@@ -102,11 +105,11 @@ export const useAudiobookGenerationActions = ({
 
   const handleGenerateAudioForApprovedChapters = useCallback(async () => {
     if (!audiobookProject) {
-      setSnackbar({ open: true, message: '请先完成剧本生成', severity: 'error' })
+      setSnackbar({ open: true, message: t('audiobook.useAudiobookGenerationActions.completeScriptFirst'), severity: 'error' })
       return
     }
     if (generating) {
-      setSnackbar({ open: true, message: '当前已有任务在执行，请稍候', severity: 'warning' })
+      setSnackbar({ open: true, message: t('audiobook.useAudiobookGenerationActions.taskInProgress'), severity: 'warning' })
       return
     }
     if (!ensureCurrentTtsModelReady()) return
@@ -125,15 +128,15 @@ export const useAudiobookGenerationActions = ({
 
       const jobId = extractQueuedAudiobookJobId(response.data)
       if (!jobId) {
-        throw new Error('触发音频生成失败')
+        throw new Error(t('audiobook.useAudiobookGenerationActions.triggerAudioGenerationFailed'))
       }
 
       await activateQueuedAudiobookTask(audiobookProject.id, jobId, {
         generationMode: 'full',
-        successMessage: '已将已审批章节加入音频生成队列',
+        successMessage: t('audiobook.useAudiobookGenerationActions.approvedChaptersQueued'),
       })
     } catch (error: unknown) {
-      await showGenerationError(error, '批量生成音频失败，请稍后重试')
+      await showGenerationError(error, t('audiobook.useAudiobookGenerationActions.batchGenerationFailed'))
     }
   }, [
     activateQueuedAudiobookTask,
@@ -154,7 +157,7 @@ export const useAudiobookGenerationActions = ({
     if (!ensureCurrentTtsModelReady()) return
 
     if (chapterIds.length === 0) {
-      setSnackbar({ open: true, message: '请选择一个可生成章节', severity: 'error' })
+      setSnackbar({ open: true, message: t('audiobook.useAudiobookGenerationActions.selectGeneratableChapter'), severity: 'error' })
       return
     }
 
@@ -164,7 +167,7 @@ export const useAudiobookGenerationActions = ({
       routeProjectId,
     })
     if (!projectIdForRequest) {
-      setSnackbar({ open: true, message: '项目尚未加载完成，请稍后重试', severity: 'error' })
+      setSnackbar({ open: true, message: t('audiobook.useAudiobookGenerationActions.projectNotLoaded'), severity: 'error' })
       return
     }
 
@@ -188,9 +191,9 @@ export const useAudiobookGenerationActions = ({
       } catch (configError: unknown) {
         const configErrorMessage = await extractApiErrorMessage(
           configError,
-          '项目音效/BGM 配置保存失败，本次生成可能不会应用最新音频配置。',
+          t('audiobook.useAudiobookGenerationActions.audioConfigSaveWarning'),
         )
-        audioConfigWarning = configErrorMessage || '项目音效/BGM 配置保存失败，本次生成可能不会应用最新音频配置。'
+        audioConfigWarning = configErrorMessage || t('audiobook.useAudiobookGenerationActions.audioConfigSaveWarning')
       }
 
       const voiceConfigPayload = buildAudiobookVoiceConfigPayload({
@@ -215,7 +218,7 @@ export const useAudiobookGenerationActions = ({
       const data = response.data || {}
       const { audiobookProjectId, jobId } = extractQueuedAudiobookProjectTask(data)
       if (!audiobookProjectId || !jobId) {
-        throw new Error('创建有声书任务失败')
+        throw new Error(t('audiobook.useAudiobookGenerationActions.createAudiobookTaskFailed'))
       }
 
       await activateQueuedAudiobookTask(audiobookProjectId, jobId, {
@@ -224,12 +227,12 @@ export const useAudiobookGenerationActions = ({
       if (audioConfigWarning) {
         setSnackbar({
           open: true,
-          message: `任务已入队，但${audioConfigWarning}`,
+          message: t('audiobook.useAudiobookGenerationActions.taskQueuedWithWarning', { warning: audioConfigWarning }),
           severity: 'warning',
         })
       }
     } catch (error: unknown) {
-      await showGenerationError(error, '生成失败，请重试')
+      await showGenerationError(error, t('audiobook.useAudiobookGenerationActions.generationFailed'))
       setGenerating(false)
       setActiveStep(0)
     }
@@ -271,7 +274,7 @@ export const useAudiobookGenerationActions = ({
       return
     }
     if (generating) {
-      setSnackbar({ open: true, message: '当前已有任务在执行，请稍候', severity: 'warning' })
+      setSnackbar({ open: true, message: t('audiobook.useAudiobookGenerationActions.taskInProgress'), severity: 'warning' })
       return
     }
 
@@ -283,7 +286,7 @@ export const useAudiobookGenerationActions = ({
       const data = response.data || {}
       const jobId = extractQueuedAudiobookJobId(data)
       if (!jobId) {
-        throw new Error('恢复任务未返回 job_id')
+        throw new Error(t('audiobook.useAudiobookGenerationActions.resumeJobIdMissing'))
       }
 
       setResumeCheckpoints((prev) =>
@@ -296,10 +299,10 @@ export const useAudiobookGenerationActions = ({
 
       await activateQueuedAudiobookTask(audiobookProject.id, jobId, {
         generationMode: resolveResumeGenerationMode(data),
-        successMessage: '继续生成任务已进入队列',
+        successMessage: t('audiobook.useAudiobookGenerationActions.resumeQueued'),
       })
     } catch (error: unknown) {
-      await showGenerationError(error, '继续生成失败，请稍后重试')
+      await showGenerationError(error, t('audiobook.useAudiobookGenerationActions.resumeGenerationFailed'))
     } finally {
       setResumingChapterId(null)
     }

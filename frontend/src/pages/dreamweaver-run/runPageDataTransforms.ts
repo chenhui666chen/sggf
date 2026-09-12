@@ -12,6 +12,7 @@ import type {
   LibraryPayload,
   TaskStatus,
 } from '@/types/dreamweaver'
+import type { TranslateFn } from '@/pages/audiobook/audioLibraryDisplay'
 
 export function asObject(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null
@@ -35,9 +36,15 @@ export function toDreamweaverScriptEntities(value: unknown): DreamweaverScriptEn
   }
 }
 
-export function summarizeScriptEntities(entities: DreamweaverScriptEntities | null): string {
+export function summarizeScriptEntities(entities: DreamweaverScriptEntities | null, t?: TranslateFn): string {
   if (!entities) return ''
-  return `角色 ${entities.characters.length}，场景 ${entities.scenes.length}，道具 ${entities.props.length}`
+  return t
+    ? t('dreamweaverRun.scriptEntitiesSummary', {
+      characters: entities.characters.length,
+      scenes: entities.scenes.length,
+      props: entities.props.length,
+    })
+    : `角色 ${entities.characters.length}，场景 ${entities.scenes.length}，道具 ${entities.props.length}`
 }
 
 export function toDreamweaverShotSnapshots(value: unknown): DreamweaverShotSnapshot[] {

@@ -405,15 +405,12 @@ body {
   }
 }
 
-/* 响应式滚动条 */
+/* 响应式滚动条：移动端只需要更窄，颜色由 src/theme/globalStyles.ts 跟随深浅色。
+   这里写死颜色会盖掉主题（本文件在 Emotion 之后入栈），深色下直接隐形。 */
 @media (max-width: 767px) {
   ::-webkit-scrollbar {
     width: 4px;
     height: 4px;
-  }
-  
-  ::-webkit-scrollbar-thumb {
-    background: rgba(0, 0, 0, 0.2);
   }
 }
 

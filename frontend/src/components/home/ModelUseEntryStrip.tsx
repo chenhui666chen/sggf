@@ -1,4 +1,5 @@
 import { alpha, Box, ButtonBase, Typography } from '@mui/material'
+import { useTranslation } from 'react-i18next'
 
 import type { AssetStudioTabId, ModelUseEntry } from './modelEntryData'
 
@@ -13,6 +14,7 @@ export default function ModelUseEntryStrip({
   entries,
   onSelect,
 }: ModelUseEntryStripProps) {
+  const { t } = useTranslation()
   return (
     <Box
       sx={{
@@ -87,7 +89,7 @@ export default function ModelUseEntryStrip({
                       lineHeight: 1.2,
                     }}
                   >
-                    {entry.title}
+                    {t(entry.titleKey)}
                   </Typography>
                   <Typography
                     sx={{
@@ -97,7 +99,7 @@ export default function ModelUseEntryStrip({
                       mt: 0.25,
                     }}
                   >
-                    {entry.subtitle}
+                    {t(entry.subtitleKey)}
                   </Typography>
                 </Box>
               </Box>

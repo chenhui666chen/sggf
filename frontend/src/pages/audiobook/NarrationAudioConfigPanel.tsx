@@ -7,6 +7,8 @@ import {
   Stack,
 } from '@mui/material'
 
+import { useTranslation } from 'react-i18next'
+
 import AudioFxConfigPanel from './AudioFxConfigPanel'
 import type { AudioEngineMode, AudioFxConfig, AudioOutputFormat } from './types'
 
@@ -24,7 +26,9 @@ const NarrationAudioConfigPanel = ({
   audioEngineMode,
   onOutputFormatChange,
   onAudioFxConfigChange,
-}: NarrationAudioConfigPanelProps) => (
+}: NarrationAudioConfigPanelProps) => {
+  const { t } = useTranslation()
+  return (
     <Stack spacing={2}>
       <Box
         sx={{
@@ -37,9 +41,9 @@ const NarrationAudioConfigPanel = ({
       >
         <Box sx={{ display: 'flex', gap: 1.5, flexWrap: 'wrap', alignItems: 'center' }}>
           <FormControl size="small" sx={{ minWidth: { xs: '100%', sm: 140 } }}>
-            <InputLabel>输出格式</InputLabel>
+            <InputLabel>{t('audiobook.narrationAudioConfigPanel.outputFormat')}</InputLabel>
             <Select
-              label="输出格式"
+              label={t('audiobook.narrationAudioConfigPanel.outputFormat')}
               value={outputFormat}
               onChange={(event) => onOutputFormatChange(event.target.value as AudioOutputFormat)}
             >
@@ -59,5 +63,6 @@ const NarrationAudioConfigPanel = ({
       )}
     </Stack>
   )
+}
 
 export default NarrationAudioConfigPanel

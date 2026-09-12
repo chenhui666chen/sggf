@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useState, type Dispatch, type SetStateAction } from 'react'
 
+import { useTranslation } from 'react-i18next'
+
 import { apiClient, extractApiErrorMessage } from '../../services/api'
 import type { SetSnackbar } from './hookTypes'
 import { removeStoredTaskSessionForAudiobookProject } from './routeProjectSessionUtils'
@@ -37,6 +39,7 @@ export const useAudiobookHistoryActions = ({
   setActiveStep,
   setSnackbar,
 }: UseAudiobookHistoryActionsParams) => {
+  const { t } = useTranslation()
   const [loadingHistory, setLoadingHistory] = useState(false)
   const [historyProjects, setHistoryProjects] = useState<AudiobookProjectHistoryItem[]>([])
   const [showHistory, setShowHistory] = useState(false)
@@ -99,7 +102,7 @@ export const useAudiobookHistoryActions = ({
       setActiveStep(2)
       setShowHistory(false)
     } catch {
-      setSnackbar({ open: true, message: '加载失败', severity: 'error' })
+      setSnackbar({ open: true, message: t('audiobook.useAudiobookHistoryActions.loadFailed'), severity: 'error' })
     }
   }, [
     clearActiveGenerationState,
@@ -108,6 +111,7 @@ export const useAudiobookHistoryActions = ({
     setAudiobookProject,
     setCurrentAudiobookProjectId,
     setSnackbar,
+    t,
   ])
 
   const handleDeleteHistory = useCallback(async (audiobookProjectId: number, options?: { delete_reason?: string; delete_files?: boolean }) => {
@@ -128,12 +132,12 @@ export const useAudiobookHistoryActions = ({
         }
         setActiveStep(0)
       }
-      setSnackbar({ open: true, message: '项目已删除', severity: 'success' })
+      setSnackbar({ open: true, message: t('audiobook.useAudiobookHistoryActions.projectDeleted'), severity: 'success' })
       await fetchHistory({ showLoading: false })
     } catch (error: unknown) {
       const errorMessage = getHttpStatusFromError(error) === 404
-        ? '项目不存在或已被删除'
-        : await extractApiErrorMessage(error, '删除失败，请重试')
+        ? t('audiobook.useAudiobookHistoryActions.projectNotFound')
+        : await extractApiErrorMessage(error, t('audiobook.useAudiobookHistoryActions.deleteFailed'))
       setSnackbar({ open: true, message: errorMessage, severity: 'error' })
     }
   }, [
@@ -145,6 +149,7 @@ export const useAudiobookHistoryActions = ({
     resetBrowserPlayer,
     setAudiobookProject,
     setActiveStep,
+    t,
   ])
 
   return {

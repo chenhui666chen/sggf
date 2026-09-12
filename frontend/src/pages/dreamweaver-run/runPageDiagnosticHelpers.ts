@@ -7,6 +7,7 @@ import type {
   DreamweaverVideoProviderTrace,
   RunResult,
 } from '@/types/dreamweaver'
+import type { TranslateFn } from '@/pages/audiobook/audioLibraryDisplay'
 import { asObject, toStringArray } from './runPageDataTransforms'
 import { getResultVideoClipMeta } from './runPageAccessors'
 
@@ -585,7 +586,7 @@ export type SafetyAuditAlertState = {
   categories: string[]
 }
 
-export function computeSafetyAuditAlertState(params: ComputeSafetyAuditAlertStateParams): SafetyAuditAlertState {
+export function computeSafetyAuditAlertState(params: ComputeSafetyAuditAlertStateParams, t?: TranslateFn): SafetyAuditAlertState {
   const { result, snapshotRuntimeConfig, runSnapshot: runSnapshotRaw, taskStatus, error, currentRunId, running } = params
   const runSnapshot = asObject(runSnapshotRaw)
   const resultAudit = asObject((result as Record<string, unknown>)?.audit)
@@ -609,7 +610,7 @@ export function computeSafetyAuditAlertState(params: ComputeSafetyAuditAlertStat
     String(safetyAudit?.summary || '').trim() ||
     String(runSnapshot?.error_message || '').trim() ||
     String(error || '').trim() ||
-    '成片命中安全审核阻断，当前 run 已停止。'
+    (t ? t('dreamweaverRun.safetyAuditBlockedFallbackSummary') : '成片命中安全审核阻断，当前 run 已停止。')
   const categories = toStringArray(safetyAudit?.categories)
   return {
     show: safetyBlocked,
@@ -647,7 +648,7 @@ export function buildDiagnosticDialogProps(params: {
   diagnosticPreflight: DreamweaverRunPreflight | null
   diagnosticProviderTrace: DreamweaverVideoProviderTrace | null
   diagnosticSmartDispatchTrace: DreamweaverSmartDispatchTrace | null
-}): DiagnosticDialogProps {
+}, t?: TranslateFn): DiagnosticDialogProps {
   const { diagnosticResult } = params
   return {
     runId: params.currentRunId,
@@ -661,7 +662,7 @@ export function buildDiagnosticDialogProps(params: {
     keyframeCount: arrayLength(diagnosticResult?.keyframes),
     midframeCount: arrayLength(diagnosticResult?.midframes),
     videoClipCount: arrayLength(diagnosticResult?.video_clips),
-    refreshLabel: params.runSnapshotLoading ? '刷新中...' : '刷新运行快照',
+    refreshLabel: params.runSnapshotLoading ? (t ? t('dreamweaverRun.diagnosticRefreshing') : '刷新中...') : (t ? t('dreamweaverRun.refreshRunSnapshot') : '刷新运行快照'),
     refreshDisabled: isSnapshotRefreshDisabled(params.persistedRunId, params.runSnapshotLoading),
     copyDisabled: !hasDiagnosticCopyData({
       diagnosticResult,

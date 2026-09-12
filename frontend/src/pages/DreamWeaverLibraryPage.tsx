@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
+import { useTranslation } from 'react-i18next'
 import {
   Alert,
   Box,
@@ -58,6 +59,7 @@ export default function DreamWeaverLibraryPage() {
   const params = useParams()
   const [searchParams] = useSearchParams()
   const theme = useTheme()
+  const { t } = useTranslation()
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'))
   const isTablet = useMediaQuery(theme.breakpoints.down('md'))
   const cardCols = isMobile ? 1 : isTablet ? 2 : 3
@@ -200,7 +202,7 @@ export default function DreamWeaverLibraryPage() {
         await loadLibrary()
       } catch (e: any) {
         const { extractApiErrorMessage } = await import('@/services/api')
-        setError(await extractApiErrorMessage(e, '批量审核失败'))
+        setError(await extractApiErrorMessage(e, t('dreamweaverRun.libraryBatchApproveFailed')))
       } finally {
         setBatchApproving(false)
       }
@@ -300,12 +302,12 @@ export default function DreamWeaverLibraryPage() {
                 onClick={() => navigate('/drama')}
                 sx={{ color: 'white', borderColor: 'rgba(255,255,255,0.5)', '&:hover': { borderColor: 'white', backgroundColor: 'rgba(255,255,255,0.1)' } }}
               >
-                返回项目列表
+                {t('dreamweaverRun.libraryBackToProjects')}
               </Button>
               <Stack direction="row" spacing={1} alignItems="center">
                 <MovieIcon sx={{ fontSize: 26, color: 'white' }} />
                 <Typography variant="h6" sx={{ color: 'white', fontWeight: 700 }}>
-                  项目素材库
+                  {t('dreamweaverRun.libraryPageTitle')}
                 </Typography>
               </Stack>
             </Stack>
@@ -318,7 +320,7 @@ export default function DreamWeaverLibraryPage() {
                 disabled={!projectId || loading}
                 sx={{ color: 'white', borderColor: 'rgba(255,255,255,0.5)', '&:hover': { borderColor: 'white', backgroundColor: 'rgba(255,255,255,0.1)' } }}
               >
-                刷新
+                {t('dreamweaverRun.libraryRefresh')}
               </Button>
               <Button
                 variant="contained"
@@ -326,7 +328,7 @@ export default function DreamWeaverLibraryPage() {
                 onClick={() => projectId && navigate(`/drama/${projectId}`)}
                 disabled={!projectId}
               >
-                进入生成流程
+                {t('dreamweaverRun.libraryGoToGeneration')}
               </Button>
             </Stack>
           </Box>
@@ -334,7 +336,7 @@ export default function DreamWeaverLibraryPage() {
       </Box>
 
       <Container maxWidth="lg" sx={{ py: 3 }}>
-        {!projectId && <Alert severity="error">projectId 无效</Alert>}
+        {!projectId && <Alert severity="error">{t('dreamweaverRun.libraryInvalidProjectId')}</Alert>}
         {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
         {loading && (
           <Box sx={{ mb: 2 }}>
@@ -342,11 +344,19 @@ export default function DreamWeaverLibraryPage() {
           </Box>
         )}
 
+        {/* 合规修订：第三方生成/素材同步服务方提示（素材外观/提示词由所选服务商处理） */}
+        <Typography
+          variant="caption"
+          sx={{ display: 'block', mb: 1.5, color: 'rgba(255,255,255,0.62)', lineHeight: 1.7 }}
+        >
+          {t('dreamweaverRun.libraryPrivacyNotice')}
+        </Typography>
+
         <Stack direction="row" spacing={1} flexWrap="wrap" sx={{ mb: 2 }}>
-          <Chip label={`卡片：${cards.length}`} sx={{ color: 'rgba(255,255,255,0.9)', backgroundColor: 'rgba(255,255,255,0.12)' }} />
-          <Chip label={`已通过：${approvedCount}`} color="success" variant="outlined" />
-          <Chip label={`缺失：${missingCount}`} color={missingCount ? 'warning' : 'default'} variant="outlined" />
-          <Chip label={`待审核：${unapprovedCount}`} color={unapprovedCount ? 'warning' : 'default'} variant="outlined" />
+          <Chip label={t('dreamweaverRun.libraryCardsChip', { count: cards.length })} sx={{ color: 'rgba(255,255,255,0.9)', backgroundColor: 'rgba(255,255,255,0.12)' }} />
+          <Chip label={t('dreamweaverRun.libraryApprovedChip', { count: approvedCount })} color="success" variant="outlined" />
+          <Chip label={t('dreamweaverRun.libraryMissingChip', { count: missingCount })} color={missingCount ? 'warning' : 'default'} variant="outlined" />
+          <Chip label={t('dreamweaverRun.libraryPendingChip', { count: unapprovedCount })} color={unapprovedCount ? 'warning' : 'default'} variant="outlined" />
           {missingCount > 0 && (
             <Button
               size="small"
@@ -356,7 +366,7 @@ export default function DreamWeaverLibraryPage() {
               disabled={loading || batchRegenSubmitting}
               sx={{ color: 'rgba(255,255,255,0.9)', borderColor: 'rgba(255,255,255,0.4)', '&:hover': { borderColor: 'rgba(255,255,255,0.8)', backgroundColor: 'rgba(255,255,255,0.08)' } }}
             >
-              批量重生成缺失素材
+              {t('dreamweaverRun.libraryBatchRegenMissing')}
             </Button>
           )}
         </Stack>
@@ -375,7 +385,7 @@ export default function DreamWeaverLibraryPage() {
             <Stack direction="row" spacing={1.5} alignItems="center" flexWrap="wrap">
               <Chip
                 size="small"
-                label={`已选择 ${selectedRolesCount} 个素材`}
+                label={t('dreamweaverRun.librarySelectedCount', { count: selectedRolesCount })}
                 color="primary"
                 onDelete={clearSelection}
               />
@@ -386,7 +396,7 @@ export default function DreamWeaverLibraryPage() {
                 disabled={batchApproving || loading}
                 onClick={() => void batchApproveLibraryRoles(true)}
               >
-                批量通过
+                {t('dreamweaverRun.libraryBatchApprove')}
               </Button>
               <Button
                 size="small"
@@ -395,10 +405,10 @@ export default function DreamWeaverLibraryPage() {
                 disabled={batchApproving || loading}
                 onClick={() => void batchApproveLibraryRoles(false)}
               >
-                批量撤销
+                {t('dreamweaverRun.libraryBatchRevoke')}
               </Button>
               <Button size="small" variant="text" onClick={clearSelection}>
-                取消选择
+                {t('dreamweaverRun.libraryClearSelection')}
               </Button>
             </Stack>
           </Paper>
@@ -442,7 +452,7 @@ export default function DreamWeaverLibraryPage() {
         ) : (
           !loading && (
             <Typography sx={{ color: 'rgba(255,255,255,0.75)' }}>
-              当前项目暂无素材库资产（或尚未生成）。进入生成流程后可在"素材"阶段加载/生成素材库。
+              {t('dreamweaverRun.libraryEmptyState')}
             </Typography>
           )
         )}
@@ -491,14 +501,14 @@ export default function DreamWeaverLibraryPage() {
         imageEditActive={regenPreferImageEdit}
         forceImageEdit={false}
         hasImageBase={regenHasCurrentImage}
-        imageBaseLabel="当前图"
+        imageBaseLabel={t('dreamweaverRun.regenImageBaseLabel')}
         readyReferenceLabel=""
         readyReferenceCount={0}
         missingReferenceLabel=""
         imageEditAutoCleared={false}
-        promptInputLabel="提示词（可选）"
+        promptInputLabel={t('dreamweaverRun.regenPromptInputLabel')}
         promptValue={regenPrompt}
-        promptPlaceholder={regenPreferImageEdit ? '可以输入要求对原图进行编辑~' : undefined}
+        promptPlaceholder={regenPreferImageEdit ? t('dreamweaverRun.regenImageEditPlaceholder') : undefined}
         suggestError={regenSuggestError}
         error={regenError}
         submitDisabled={regenSubmitting || regenSuggesting || !regenRole || (regenPreferImageEdit && !regenHasCurrentImage)}
@@ -516,38 +526,38 @@ export default function DreamWeaverLibraryPage() {
         onPromptChange={(value) => setRegenPrompt(value)}
         onSubmit={submitRegenerateDialog}
         showDerivedViewHint={regenIsDerivedCharacterView}
-        derivedViewHintText="说明：当前为非正面角色素材。智能生成提示词会按视角链路重建，不沿用当前图提示词。"
-        lockedInfoText={lockedConfig?.locked ? '当前项目的风格、比例已锁定，素材库会强制使用锁定配置。' : undefined}
+        derivedViewHintText={t('dreamweaverRun.regenDerivedViewHint')}
+        lockedInfoText={lockedConfig?.locked ? t('dreamweaverRun.regenLockedInfo') : undefined}
         extraSettings={
           <>
             <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1 }}>
-              限制：将覆盖重生成并把该素材标记为"待审核"；上传替换仅支持 PNG。
+              {t('dreamweaverRun.regenLimitNote')}
             </Typography>
             <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ mb: 1 }}>
               <FormControl fullWidth size="small" disabled={regenSubmitting || regenSuggesting || Boolean(lockedConfig?.locked)}>
-                <InputLabel id="library-style-preset-label">风格预设</InputLabel>
+                <InputLabel id="library-style-preset-label">{t('dreamweaverRun.regenStylePresetLabel')}</InputLabel>
                 <Select
                   labelId="library-style-preset-label"
                   value={regenStylePreset}
-                  label="风格预设"
+                  label={t('dreamweaverRun.regenStylePresetLabel')}
                   onChange={(e) => setRegenStylePreset(normalizeStylePresetValue(e.target.value))}
                 >
-                  <MenuItem value="cinematic_realistic">电影写实</MenuItem>
-                  <MenuItem value="anime">二次元动画</MenuItem>
-                  <MenuItem value="ink_wash">国风水墨</MenuItem>
-                  <MenuItem value="cyberpunk">赛博朋克</MenuItem>
+                  <MenuItem value="cinematic_realistic">{t('dreamweaverRun.stylePresetCinematicRealistic')}</MenuItem>
+                  <MenuItem value="anime">{t('dreamweaverRun.stylePresetAnime')}</MenuItem>
+                  <MenuItem value="ink_wash">{t('dreamweaverRun.stylePresetInkWash')}</MenuItem>
+                  <MenuItem value="cyberpunk">{t('dreamweaverRun.stylePresetCyberpunk')}</MenuItem>
                 </Select>
               </FormControl>
               <FormControl fullWidth size="small" disabled={regenSubmitting || regenSuggesting || Boolean(lockedConfig?.locked)}>
-                <InputLabel id="library-image-ratio-label">画幅</InputLabel>
+                <InputLabel id="library-image-ratio-label">{t('dreamweaverRun.regenImageRatioLabel')}</InputLabel>
                 <Select
                   labelId="library-image-ratio-label"
                   value={regenImageRatio}
-                  label="画幅"
+                  label={t('dreamweaverRun.regenImageRatioLabel')}
                   onChange={(e) => setRegenImageRatio(normalizeImageRatioValue(e.target.value))}
                 >
-                  <MenuItem value="16:9">横屏 16:9</MenuItem>
-                  <MenuItem value="9:16">竖屏 9:16</MenuItem>
+                  <MenuItem value="16:9">{t('dreamweaverRun.regenRatioLandscape')}</MenuItem>
+                  <MenuItem value="9:16">{t('dreamweaverRun.regenRatioPortrait')}</MenuItem>
                 </Select>
               </FormControl>
             </Stack>
@@ -556,10 +566,10 @@ export default function DreamWeaverLibraryPage() {
       />
 
       <Dialog open={batchRegenConfirmOpen} onClose={() => { if (!batchRegenSubmitting) cancelBatchRegenerate() }} maxWidth="sm" fullWidth>
-        <DialogTitle>批量重生成缺失素材</DialogTitle>
+        <DialogTitle>{t('dreamweaverRun.libraryBatchRegenMissing')}</DialogTitle>
         <DialogContent>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-            以下 {batchRegenRoles.length} 个缺失素材角色将被提交重生成：
+            {t('dreamweaverRun.libraryBatchRegenConfirmNote', { count: batchRegenRoles.length })}
           </Typography>
           <Box sx={{ maxHeight: 300, overflow: 'auto', mb: 2 }}>
             {batchRegenRoles.map((role: string) => (
@@ -570,7 +580,7 @@ export default function DreamWeaverLibraryPage() {
             <Box sx={{ mb: 1 }}>
               <LinearProgress variant="determinate" value={(batchRegenProgress.done / batchRegenProgress.total) * 100} />
               <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: 'block' }}>
-                进度：{batchRegenProgress.done} / {batchRegenProgress.total}
+                {t('dreamweaverRun.libraryBatchRegenProgress', { done: batchRegenProgress.done, total: batchRegenProgress.total })}
               </Typography>
             </Box>
           )}
@@ -582,7 +592,7 @@ export default function DreamWeaverLibraryPage() {
         </DialogContent>
         <DialogActions>
           <Button onClick={cancelBatchRegenerate} disabled={batchRegenSubmitting}>
-            取消
+            {t('common.cancel')}
           </Button>
           <Button
             variant="contained"
@@ -590,7 +600,7 @@ export default function DreamWeaverLibraryPage() {
             onClick={() => void executeBatchRegenerate()}
             disabled={batchRegenSubmitting || !batchRegenRoles.length}
           >
-            {batchRegenSubmitting ? '重生成中...' : `确认重生成 (${batchRegenRoles.length})`}
+            {batchRegenSubmitting ? t('dreamweaverRun.libraryBatchRegenSubmitting') : t('dreamweaverRun.libraryBatchRegenConfirmAction', { count: batchRegenRoles.length })}
           </Button>
         </DialogActions>
       </Dialog>

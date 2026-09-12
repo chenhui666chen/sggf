@@ -1,4 +1,5 @@
 import React from 'react'
+import type { TFunction } from 'i18next'
 import { Box, Divider } from '@mui/material'
 import type { DreamweaverShotSnapshot, RunResult } from '@/types/dreamweaver'
 import { DebugAccordion } from './diagnosticSections'
@@ -44,6 +45,7 @@ interface CreateRunPageResultRendererDeps {
   previewStep: number
   snapshotRefreshDisabled: boolean
   runSnapshotLoaded: boolean
+  t: TFunction
 }
 
 export function createRunPageResultRenderer(deps: CreateRunPageResultRendererDeps) {
@@ -81,6 +83,7 @@ export function createRunPageResultRenderer(deps: CreateRunPageResultRendererDep
     previewStep,
     snapshotRefreshDisabled,
     runSnapshotLoaded,
+    t,
   } = deps
 
   const isVideoPreviewStep = previewStep === 3
@@ -101,17 +104,17 @@ export function createRunPageResultRenderer(deps: CreateRunPageResultRendererDep
   )
 
   const renderArtifactsDebugPanel = () =>
-    renderDebugAccordion({ title: '调试面板（Artifacts）', value: taskArtifacts, marginTop: 1 })
+    renderDebugAccordion({ title: t('dreamweaverRun.debugPanelArtifacts'), value: taskArtifacts, marginTop: 1 })
 
   const hasCandidateFrames = candidateFrameUris.length > 0
 
   const renderResultVideoAssetPreviewSections = () => (
     <>
-      {renderRunAssetPreviewGrid('关键帧', resultKeyframePaths.slice(-6), 'image')}
-      {renderRunAssetPreviewGrid('中间帧', resultMidframePaths.slice(-6), 'image')}
+      {renderRunAssetPreviewGrid(t('dreamweaverRun.keyframes'), resultKeyframePaths.slice(-6), 'image')}
+      {renderRunAssetPreviewGrid(t('dreamweaverRun.midframes'), resultMidframePaths.slice(-6), 'image')}
       {hasCandidateFrames &&
-        renderRunAssetPreviewGrid('候选帧（keep_candidates）', candidateFrameUris.slice(-12), 'image')}
-      {renderRunAssetPreviewGrid('镜头片段', resultVideoClipPaths.slice(-3), 'video')}
+        renderRunAssetPreviewGrid(t('dreamweaverRun.candidateFrames'), candidateFrameUris.slice(-12), 'image')}
+      {renderRunAssetPreviewGrid(t('dreamweaverRun.videoClips'), resultVideoClipPaths.slice(-3), 'video')}
     </>
   )
 
@@ -160,13 +163,13 @@ export function createRunPageResultRenderer(deps: CreateRunPageResultRendererDep
 
   const renderResultPlanStageView = () => (
     <DreamweaverResultTextStageSection
-      title="计划 / 剧本提要"
+      title={t('dreamweaverRun.planScriptSummary')}
       text={resultPlanText}
-      emptyText="未返回文本"
+      emptyText={t('dreamweaverRun.noReturnedText')}
     />
   )
 
-  const storyboardSummaryText = result?.storyboard ? `${result.storyboard.length} 个镜头` : '暂无'
+  const storyboardSummaryText = result?.storyboard ? t('dreamweaverRun.shotCount', { count: result.storyboard.length }) : t('dreamweaverRun.none')
 
   const renderResultStoryboardStageView = () => (
     <DreamweaverResultStoryboardStageView
@@ -176,16 +179,16 @@ export function createRunPageResultRenderer(deps: CreateRunPageResultRendererDep
   )
 
   const renderResultLibraryHintView = () => (
-    <DreamweaverResultLibraryHint message={'素材库为项目维度产物，可切换到\u201c素材\u201d并点击\u201c加载素材库\u201d查看/审核。'} />
+    <DreamweaverResultLibraryHint message={t('dreamweaverRun.libraryHintMessage')} />
   )
 
   const auditText = result?.audit ? JSON.stringify(result.audit) : ''
 
   const renderResultAuditStageView = () => (
     <DreamweaverResultTextStageSection
-      title="质检"
+      title={t('dreamweaverRun.qualityCheck')}
       text={auditText}
-      emptyText="未返回审核信息"
+      emptyText={t('dreamweaverRun.noAuditInfo')}
       marginTop={1}
       marginBottom={0}
     />
@@ -199,7 +202,7 @@ export function createRunPageResultRenderer(deps: CreateRunPageResultRendererDep
     <DreamweaverResultSyncActionsBar
       refreshButton={
         <RunSnapshotRefreshButton
-          label="刷新运行快照"
+          label={t('dreamweaverRun.refreshRunSnapshot')}
           onClick={loadRunSnapshot}
           disabled={snapshotRefreshDisabled}
           loading={runSnapshotLoading}
@@ -227,7 +230,7 @@ export function createRunPageResultRenderer(deps: CreateRunPageResultRendererDep
   const renderResultDebugPanel = () => (
     <>
       {renderDebugAccordion({
-        title: '调试面板（Result）',
+        title: t('dreamweaverRun.debugPanelResult'),
         value: result,
         marginBottom: 1.5,
       })}

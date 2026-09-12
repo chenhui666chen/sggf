@@ -5,6 +5,8 @@ import {
   Typography,
 } from '@mui/material'
 
+import { useTranslation } from 'react-i18next'
+
 import CosyVoiceCloneRecordDialog from './CosyVoiceCloneRecordDialog'
 import CosyVoiceCloneVoicePanel from './CosyVoiceCloneVoicePanel'
 import CosyVoiceCustomVoiceList from './CosyVoiceCustomVoiceList'
@@ -81,6 +83,7 @@ const CosyVoiceVoiceWorkbench = ({
   onStartCloneRecording,
   onStopCloneRecording,
 }: CosyVoiceWorkbench) => {
+  const { t } = useTranslation()
   const voiceCreationBusy = cloneLoading || cloneUploading || cloneRecording || designLoading
   const deleteDisabled = cloneLoading || cloneUploading || designLoading
   const [pendingDeleteVoice, setPendingDeleteVoice] = useState<PendingDeleteVoice | null>(null)
@@ -107,10 +110,10 @@ const CosyVoiceVoiceWorkbench = ({
     <>
       <Paper variant="outlined" sx={{ mb: 1, p: 1.5 }}>
         <Typography variant="subtitle2" sx={{ mb: 0.5 }}>
-          自定义音色管理（CosyVoice v3.5-plus）
+          {t('audiobook.cosyVoiceVoiceWorkbench.title')}
         </Typography>
         <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
-          CosyVoice v3.5-plus 不提供系统音色。你可以通过“声音复刻”导入真实样本，也可以通过“声音设计”用文字描述生成新声线；创建完成后会出现在下方音色列表中。
+          {t('audiobook.cosyVoiceVoiceWorkbench.description')}
         </Typography>
         <Box sx={{ display: 'grid', gap: 1.25 }}>
           <CosyVoiceCloneVoicePanel

@@ -1,4 +1,7 @@
-import { describe, expect, it } from 'vitest'
+import { beforeAll, describe, expect, it } from 'vitest'
+import type { TFunction } from 'i18next'
+
+import { bootstrapI18n } from '@/i18n'
 
 import type { UserAssetRecord } from '@/services/api'
 
@@ -22,22 +25,37 @@ function createUserAssetRecord(overrides: Partial<UserAssetRecord> = {}): UserAs
   }
 }
 
+let t: TFunction
+
+beforeAll(async () => {
+  const instance = await bootstrapI18n('zh-CN')
+  t = instance.t.bind(instance)
+})
+
 describe('userAssetPreviewPresentation', () => {
   it('returns placeholder when preview url is missing', () => {
     expect(
-      buildUserAssetPreviewPresentation(createUserAssetRecord(), {
-        previewUrl: '',
-      }),
+      buildUserAssetPreviewPresentation(
+        createUserAssetRecord(),
+        {
+          previewUrl: '',
+        },
+        t,
+      ),
     ).toEqual({
       kind: 'placeholder',
       message: '暂无预览',
     })
 
     expect(
-      buildUserAssetPreviewPresentation(createUserAssetRecord(), {
-        previewUrl: '',
-        isProtectedAssetPending: true,
-      }),
+      buildUserAssetPreviewPresentation(
+        createUserAssetRecord(),
+        {
+          previewUrl: '',
+          isProtectedAssetPending: true,
+        },
+        t,
+      ),
     ).toEqual({
       kind: 'placeholder',
       message: '受保护资源加载中...',
@@ -53,6 +71,7 @@ describe('userAssetPreviewPresentation', () => {
         {
           previewUrl: 'blob:video-preview',
         },
+        t,
       ),
     ).toEqual({
       kind: 'video',
@@ -67,6 +86,7 @@ describe('userAssetPreviewPresentation', () => {
         {
           previewUrl: 'blob:audio-preview',
         },
+        t,
       ),
     ).toEqual({
       kind: 'audio',
@@ -84,6 +104,7 @@ describe('userAssetPreviewPresentation', () => {
         {
           previewUrl: 'blob:image-preview',
         },
+        t,
       ),
     ).toEqual({
       kind: 'image',
@@ -100,6 +121,7 @@ describe('userAssetPreviewPresentation', () => {
         {
           previewUrl: 'blob:image-preview',
         },
+        t,
       ),
     ).toEqual({
       kind: 'image',

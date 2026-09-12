@@ -5,6 +5,7 @@ import {
   LinearProgress,
   Typography,
 } from '@mui/material'
+import { useTranslation } from 'react-i18next'
 
 import type { LLMDimensionScore } from './types'
 import {
@@ -17,13 +18,14 @@ interface ScriptReviewDimensionsProps {
 }
 
 const ScriptReviewDimensions = ({ llmDimensions }: ScriptReviewDimensionsProps) => {
+  const { t } = useTranslation()
   if (!llmDimensions || Object.keys(llmDimensions).length === 0) return null
 
-  const groups = groupDimensionsByCategory(llmDimensions)
+  const groups = groupDimensionsByCategory(llmDimensions, t)
 
   return (
     <>
-      <Divider textAlign="left">LLM 维度评审</Divider>
+      <Divider textAlign="left">{t('audiobook.scriptReviewDimensions.title')}</Divider>
       <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
         {groups.map((group) => (
           <Box key={group.category}>

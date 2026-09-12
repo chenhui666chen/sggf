@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
+import { useTranslation } from 'react-i18next'
+
 import type { StoryExpansionDialogProps } from '@/components/workflow/StoryExpansionDialog'
 import type {
   StoryExpansionResultDialogProps,
@@ -58,6 +60,7 @@ export function useStoryExpansionController({
   refreshWorkflowData,
   showSnackbar,
 }: UseStoryExpansionControllerOptions): UseStoryExpansionControllerReturn {
+  const { t } = useTranslation()
   const [storyExpansionConfirmDialog, setStoryExpansionConfirmDialog] =
     useState<StoryExpansionConfirmDialogConfig | null>(null)
   const storyExpansionConfirmResolverRef = useRef<((confirmed: boolean) => void) | null>(null)
@@ -155,13 +158,13 @@ export function useStoryExpansionController({
   })
 
   const summary = useMemo<StoryExpansionSummary | null>(
-    () => getStoryExpansionSummary(storyExpansionResult),
-    [storyExpansionResult],
+    () => getStoryExpansionSummary(storyExpansionResult, t),
+    [storyExpansionResult, t],
   )
 
   const resultLabels = useMemo(
-    () => getStoryExpansionResultLabels(storyExpansionResult),
-    [storyExpansionResult],
+    () => getStoryExpansionResultLabels(storyExpansionResult, t),
+    [storyExpansionResult, t],
   )
 
   const openStoryExpansionResultDialog = useCallback(() => {
@@ -187,16 +190,16 @@ export function useStoryExpansionController({
         response.data?.result,
       )
       if (!repairedResult) {
-        showSnackbar('自动改进已完成，但未返回可展示结果', 'error')
+        showSnackbar(t('storyExpansion.noResult'), 'error')
         return
       }
 
       replaceStoryExpansionResult(repairedResult)
       applyStoryExpansionRepairResult(repairedResult)
       refreshRepairContext()
-      showSnackbar(response.data?.message?.trim() || repairedResult.message || '协同问题已自动改进', 'success')
+      showSnackbar(response.data?.message?.trim() || repairedResult.message || t('storyExpansion.autoImproved'), 'success')
     } catch (error) {
-      const errorMessage = await extractApiErrorMessage(error, '协同自动改进失败')
+      const errorMessage = await extractApiErrorMessage(error, t('storyExpansion.autoImproveFailed'))
       showSnackbar(errorMessage, 'error')
     } finally {
       setAutoImprovingStoryIssues(false)
@@ -209,6 +212,7 @@ export function useStoryExpansionController({
     replaceStoryExpansionResult,
     showSnackbar,
     storyExpansionResult,
+    t,
   ])
 
   const storyExpansionWaitInfo = useMemo(() => {
@@ -229,13 +233,13 @@ export function useStoryExpansionController({
 
     return {
       summary: durationText
-        ? `协同扩展正在执行，预计耗时 ${durationText}`
-        : '协同扩展正在执行，长任务属于正常现象',
+        ? t('storyExpansion.runningWithDuration', { duration: durationText })
+        : t('storyExpansion.runningLong'),
       detail: [
-        elapsedText ? `已等待 ${elapsedText}` : '',
-        durationText ? `预估区间 ${durationText}` : '',
+        elapsedText ? t('storyExpansion.waitElapsed', { elapsed: elapsedText }) : '',
+        durationText ? t('storyExpansion.waitEstimate', { duration: durationText }) : '',
         waitHint,
-        '页面会定期自动复查任务状态，刷新后也会继续尝试恢复任务状态',
+        t('storyExpansion.autoResume'),
       ].filter(Boolean).join('，'),
     }
   }, [
@@ -244,6 +248,7 @@ export function useStoryExpansionController({
     storyExpansionTaskEstimate?.estimated_duration_minutes_max,
     storyExpansionTaskEstimate?.estimated_duration_minutes_min,
     storyExpansionTaskEstimate?.wait_hint,
+    t,
   ])
 
   const storyExpansionDialogHandlers = useMemo<StoryExpansionDialogHandlers>(() => ({

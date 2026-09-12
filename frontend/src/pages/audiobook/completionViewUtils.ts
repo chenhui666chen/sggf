@@ -1,4 +1,5 @@
 import type { ChapterAudio } from './types'
+import type { TranslateFn } from './audioLibraryDisplay'
 
 export type AudiobookCompletionMode = 'full' | 'script_only'
 export type ScriptStatusTone = 'success' | 'warning' | 'neutral'
@@ -66,13 +67,14 @@ export const resolveScriptReviewTargetChapterId = (
 
 export const resolveScriptStatusPresentation = (
   status: string | null | undefined,
+  t?: TranslateFn,
 ): { label: string; tone: ScriptStatusTone } => {
   const normalizedStatus = String(status || '').trim().toLowerCase()
   if (normalizedStatus === 'approved') {
-    return { label: '已批准', tone: 'success' }
+    return { label: t ? t('audiobook.scriptStatus.approved') : '已批准', tone: 'success' }
   }
   if (normalizedStatus === 'reviewed') {
-    return { label: '待确认批准', tone: 'warning' }
+    return { label: t ? t('audiobook.scriptStatus.pendingApproval') : '待确认批准', tone: 'warning' }
   }
-  return { label: '待审阅', tone: 'neutral' }
+  return { label: t ? t('audiobook.scriptStatus.pendingReview') : '待审阅', tone: 'neutral' }
 }

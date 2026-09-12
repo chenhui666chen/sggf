@@ -1,5 +1,7 @@
 import type { ReactNode } from 'react'
 
+import { useTranslation } from 'react-i18next'
+
 import BugReportIcon from '@mui/icons-material/BugReport'
 import CloseIcon from '@mui/icons-material/Close'
 import ContentCopyIcon from '@mui/icons-material/ContentCopy'
@@ -32,12 +34,13 @@ export function DreamweaverDiagnosticDialogHeader({
   stage,
   onClose,
 }: DreamweaverDiagnosticDialogHeaderProps) {
+  const { t } = useTranslation()
   return (
     <DialogTitle>
       <Stack direction="row" spacing={1} alignItems="center" justifyContent="space-between">
         <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
           <BugReportIcon color="primary" />
-          <Typography variant="h6">诊断面板</Typography>
+          <Typography variant="h6">{t('dreamweaverRun.workbenchDiagnostics')}</Typography>
           {runId && (
             <Typography variant="body2" sx={{ fontFamily: 'monospace' }}>
               {runId}
@@ -67,16 +70,17 @@ export function DreamweaverDiagnosticDialogStatusSection({
   error,
   loading,
 }: DreamweaverDiagnosticDialogStatusSectionProps) {
+  const { t } = useTranslation()
   return (
     <>
       {!hasRunId && (
         <Alert severity="info" sx={{ mb: 1 }}>
-          暂无 run_id，无法加载产物预览与诊断信息。
+          {t('dreamweaverRun.diagnosticNoRunId')}
         </Alert>
       )}
       {hasRunId && !hasDiagnosticResult && (
         <Alert severity="info" sx={{ mb: 1 }}>
-          暂无可用的套路快照/镜头信息。可尝试点击“刷新运行快照”，或等待任务落库后再查看。
+          {t('dreamweaverRun.diagnosticNoSnapshot')}
         </Alert>
       )}
       {error && (
@@ -112,9 +116,10 @@ export function DreamweaverDiagnosticDialogToolbar({
   onRefresh,
   onCopy,
 }: DreamweaverDiagnosticDialogToolbarProps) {
+  const { t } = useTranslation()
   return (
     <Stack direction="row" spacing={1} flexWrap="wrap" alignItems="center" sx={{ mb: 1 }}>
-      <Chip size="small" label={`镜头: ${shotCount}`} />
+      <Chip size="small" label={t('dreamweaverRun.snapshotShotsChip', { count: shotCount })} />
       {typeof keyframeCount === 'number' && <Chip size="small" label={`KF: ${keyframeCount}`} />}
       {typeof midframeCount === 'number' && <Chip size="small" label={`MF: ${midframeCount}`} />}
       {typeof videoClipCount === 'number' && <Chip size="small" label={`VC: ${videoClipCount}`} />}
@@ -122,7 +127,7 @@ export function DreamweaverDiagnosticDialogToolbar({
         {refreshLabel}
       </Button>
       <Button size="small" variant="outlined" startIcon={<ContentCopyIcon fontSize="small" />} onClick={onCopy} disabled={copyDisabled}>
-        复制 Run 诊断
+        {t('dreamweaverRun.diagnosticCopyRun')}
       </Button>
     </Stack>
   )
@@ -137,17 +142,18 @@ export function DreamweaverDiagnosticDialogEmptyState({
   hasDiagnosticResult,
   shotCount,
 }: DreamweaverDiagnosticDialogEmptyStateProps) {
+  const { t } = useTranslation()
   return (
     <>
       {!hasDiagnosticResult && (
         <Typography variant="body2" color="text.secondary">
-          无可展示内容
+          {t('dreamweaverRun.diagnosticEmpty')}
         </Typography>
       )}
 
       {hasDiagnosticResult && shotCount === 0 && (
         <Typography variant="body2" color="text.secondary">
-          暂无镜头数据（storyboard 未落库或尚未生成）。
+          {t('dreamweaverRun.diagnosticNoShots')}
         </Typography>
       )}
     </>
@@ -175,6 +181,7 @@ export function DreamweaverDiagnosticDialogShell({
   emptyState,
   shotAccordions,
 }: DreamweaverDiagnosticDialogShellProps) {
+  const { t } = useTranslation()
   return (
     <Dialog open={open} onClose={onClose} maxWidth="lg" fullWidth>
       {header}
@@ -189,7 +196,7 @@ export function DreamweaverDiagnosticDialogShell({
         {shotAccordions ?? null}
       </DialogContent>
       <DialogActions>
-        <Button onClick={onClose}>关闭</Button>
+        <Button onClick={onClose}>{t('action.close')}</Button>
       </DialogActions>
     </Dialog>
   )

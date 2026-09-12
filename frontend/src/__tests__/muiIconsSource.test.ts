@@ -26,6 +26,17 @@ const collectSourceFiles = (directory: string): string[] => {
   })
 }
 
+/**
+ * 允许运行时深导入的 @mui/material 子路径。
+ *
+ * - styles：createTheme / useTheme 的出处，主题工厂与测试都得用。
+ * - locale：MUI 内置文案的语言数据（zhCN / enUS）。MUI 5.18 已经删掉了
+ *   LocalizationProvider，这批数据只能从这里取，再交给 createTheme 做
+ *   deep-merge。它是纯数据模块、不导出任何组件，因此不在这条契约要管的
+ *   “组件绕过 barrel”范围内。
+ */
+const DEEP_IMPORT_ALLOWLIST = ['@mui/material/styles', '@mui/material/locale']
+
 const hasRuntimeMUIComponentDeepImport = (filePath: string): boolean => {
   const source = readFileSync(filePath, 'utf8')
   const sourceFile = ts.createSourceFile(filePath, source, ts.ScriptTarget.Latest, true)
@@ -36,7 +47,10 @@ const hasRuntimeMUIComponentDeepImport = (filePath: string): boolean => {
     }
 
     const moduleName = statement.moduleSpecifier.text
-    if (!moduleName.startsWith('@mui/material/') || moduleName.startsWith('@mui/material/styles')) {
+    if (
+      !moduleName.startsWith('@mui/material/') ||
+      DEEP_IMPORT_ALLOWLIST.some((prefix) => moduleName.startsWith(prefix))
+    ) {
       return false
     }
 

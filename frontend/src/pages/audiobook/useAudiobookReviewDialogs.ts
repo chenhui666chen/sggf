@@ -1,5 +1,7 @@
 import { useCallback, useState } from 'react'
 
+import { useTranslation } from 'react-i18next'
+
 import { apiClient, extractApiErrorMessage } from '../../services/api'
 import type { SetSnackbar } from './hookTypes'
 import type {
@@ -21,6 +23,7 @@ export const useAudiobookReviewDialogs = ({
   activeTaskStatus,
   setSnackbar,
 }: UseAudiobookReviewDialogsParams) => {
+  const { t } = useTranslation()
   const [scriptReviewDialogOpen, setScriptReviewDialogOpen] = useState(false)
   const [scriptReviewData, setScriptReviewData] = useState<ScriptReviewDialogData | null>(null)
   const [scriptReviewSelectedIssueIndex, setScriptReviewSelectedIssueIndex] = useState<number | null>(null)
@@ -34,13 +37,13 @@ export const useAudiobookReviewDialogs = ({
   const handleOpenScriptReviewDialog = useCallback(() => {
     const taskStatus = activeTaskStatus
     if (!taskStatus) {
-      setSnackbar({ open: true, message: '暂未获取到任务状态', severity: 'error' })
+      setSnackbar({ open: true, message: t('audiobook.useAudiobookReviewDialogs.noTaskStatus'), severity: 'error' })
       return
     }
 
     const stage = taskStatus.stages.quality_review
     if (!stage || !stage.metrics) {
-      setSnackbar({ open: true, message: '暂未获取到剧本评审结果', severity: 'error' })
+      setSnackbar({ open: true, message: t('audiobook.useAudiobookReviewDialogs.noReviewResult'), severity: 'error' })
       return
     }
 
@@ -56,7 +59,7 @@ export const useAudiobookReviewDialogs = ({
       issues: metrics.issues,
     })
     if (!report) {
-      setSnackbar({ open: true, message: '暂未获取到完整的评审详情', severity: 'error' })
+      setSnackbar({ open: true, message: t('audiobook.useAudiobookReviewDialogs.noReviewDetails'), severity: 'error' })
       return
     }
 
@@ -71,7 +74,7 @@ export const useAudiobookReviewDialogs = ({
     setScriptReviewSelectedIssueIndex(null)
     setScriptReviewSelectedSegmentIndex(null)
     setScriptReviewDialogOpen(true)
-  }, [activeTaskStatus, setSnackbar])
+  }, [activeTaskStatus, setSnackbar, t])
 
   const handleOpenScriptReviewFromApi = useCallback(async (
     audiobookProjectId: number,
@@ -82,7 +85,7 @@ export const useAudiobookReviewDialogs = ({
       const { quality_report } = res.data
       const report = normalizeScriptReview(quality_report)
       if (!report) {
-        setSnackbar({ open: true, message: '审核报告数据格式异常', severity: 'error' })
+        setSnackbar({ open: true, message: t('audiobook.useAudiobookReviewDialogs.malformedReviewData'), severity: 'error' })
         return
       }
       setScriptReviewData({
@@ -94,10 +97,10 @@ export const useAudiobookReviewDialogs = ({
       setScriptReviewSelectedSegmentIndex(null)
       setScriptReviewDialogOpen(true)
     } catch (err: unknown) {
-      const msg = await extractApiErrorMessage(err, '获取审核报告失败')
+      const msg = await extractApiErrorMessage(err, t('audiobook.useAudiobookReviewDialogs.fetchReviewFailed'))
       setSnackbar({ open: true, message: msg, severity: 'error' })
     }
-  }, [setSnackbar])
+  }, [setSnackbar, t])
 
   const handleCloseScriptReviewDialog = useCallback(() => {
     setScriptReviewDialogOpen(false)
@@ -109,12 +112,12 @@ export const useAudiobookReviewDialogs = ({
   const handleOpenStageMetricsDialog = useCallback((stage: StageConfig, stageInfo: StageInfo) => {
     const metrics = stageInfo.metrics
     if (!metrics || Object.keys(metrics).length === 0) {
-      setSnackbar({ open: true, message: '该阶段暂无可查看的结果数据', severity: 'info' })
+      setSnackbar({ open: true, message: t('audiobook.useAudiobookReviewDialogs.noStageMetrics'), severity: 'info' })
       return
     }
     setStageMetricsData({ stage, info: stageInfo })
     setStageMetricsDialogOpen(true)
-  }, [setSnackbar])
+  }, [setSnackbar, t])
 
   const handleCloseStageMetricsDialog = useCallback(() => {
     setStageMetricsDialogOpen(false)

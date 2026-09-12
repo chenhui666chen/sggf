@@ -41,7 +41,7 @@ const uploadDialogSource = existsSync(uploadDialogUrl) ? readFileSync(uploadDial
 
 describe('AudioLibraryBrowser source guards', () => {
   it('keeps the library browser read-only for public third-party assets', () => {
-    expect(browserSource).toContain('音频素材库')
+    expect(browserSource).toContain('audiobook.audioLibraryBrowser.title')
     expect(browserSource).toContain('getAudioLibraryStats')
     expect(browserSource).toContain('browseSoundEffects')
     expect(browserSource).toContain('browseMusic')
@@ -97,8 +97,8 @@ describe('AudioLibraryBrowser source guards', () => {
     expect(segmentDetailsSource).toContain('modelUsesBasicNumericSpeedControl')
     expect(segmentDetailsSource).not.toContain('!modelSupportsInstructStyleControl')
     expect(segmentDetailsSource).toContain('showNumericSpeedControl &&')
-    expect(segmentDetailsSource).toContain('语速 rate')
-    expect(segmentDetailsSource).toContain('音量 volume')
+    expect(segmentDetailsSource).toContain("t('audiobook.scriptSegmentDetailsPanel.rateLabel')")
+    expect(segmentDetailsSource).toContain("t('audiobook.scriptSegmentDetailsPanel.volumeLabel')")
   })
 
   it('keeps library browsing interactions responsive on large result sets', () => {
@@ -123,11 +123,11 @@ describe('AudioLibraryBrowser source guards', () => {
   })
 
   it('keeps cleanup as dry-run plus explicit confirm workflow', () => {
-    expect(purgeSource).toContain('素材清理')
+    expect(purgeSource).toContain('audiobook.audioLibraryPurge.title')
     expect(purgeSource).toContain('cleanupAudioLibrary')
     expect(purgeSource).toContain('dry_run')
     expect(purgeSource).toContain('confirm')
-    expect(purgeSource).toContain('我确认')
+    expect(purgeSource).toContain('audiobook.audioLibraryPurge.confirmLabel')
     expect(purgeSource).toContain('missing_entries')
     expect(purgeSource).toContain('low_quality_entries')
     expect(purgeSource).toContain('orphaned_files')
@@ -154,15 +154,15 @@ describe('AudioLibraryBrowser source guards', () => {
   })
 
   it('keeps quality, license, source, and attribution metadata behind details', () => {
-    expect(browserSource).toContain('详细信息')
+    expect(browserSource).toContain('audiobook.audioLibraryBrowser.details')
     expect(browserSource).toContain('buildAudioLibraryDetailItems')
     expect(browserSource).toContain('Collapse')
-    expect(displaySource).toContain('质量')
-    expect(displaySource).toContain('授权')
-    expect(displaySource).toContain('允许商用')
-    expect(displaySource).toContain('需署名')
-    expect(displaySource).toContain('作者')
-    expect(displaySource).toContain('来源')
+    expect(displaySource).toContain('audiobook.audioLibraryDisplay.labelQuality')
+    expect(displaySource).toContain('audiobook.audioLibraryDisplay.labelLicense')
+    expect(displaySource).toContain('audiobook.audioLibraryDisplay.commercialAllowed')
+    expect(displaySource).toContain('audiobook.audioLibraryDisplay.attributionRequired')
+    expect(displaySource).toContain('audiobook.audioLibraryDisplay.labelAuthor')
+    expect(displaySource).toContain('audiobook.audioLibraryDisplay.labelSource')
     expect(browserSource).toContain('quality_score')
     expect(browserSource).toContain('license_commercial')
     expect(browserSource).toContain('attribution_required')
@@ -176,17 +176,17 @@ describe('AudioLibraryBrowser source guards', () => {
 
   it('formats sound effect asset names into user-facing Chinese labels', () => {
     expect(browserSource).toContain('formatAudioAssetNameLabel')
-    expect(browserSource).toContain('formatAudioAssetNameLabel(sfxEntry?.name)')
-    expect(browserSource).toContain('formatAudioAssetDescriptionLabel(sfxEntry)')
+    expect(browserSource).toContain('formatAudioAssetNameLabel(sfxEntry?.name, t)')
+    expect(browserSource).toContain('formatAudioAssetDescriptionLabel(sfxEntry, t)')
     expect(pickerSource).toContain('formatAudioAssetNameLabel')
     expect(pickerSource).toContain('formatAudioKeywordLabel')
   })
 
   it('allows authenticated users to upload licensed shared audio assets', () => {
     expect(browserSource).toContain('AudioLibraryUploadDialog')
-    expect(browserSource).toContain('上传素材')
+    expect(browserSource).toContain('audiobook.audioLibraryBrowser.uploadAsset')
     expect(uploadDialogSource).toContain('rightsConfirmed')
-    expect(uploadDialogSource).toContain('我确认拥有该音频的共享和使用授权')
+    expect(uploadDialogSource).toContain('audiobook.audioLibraryUpload.rightsLabel')
     expect(uploadDialogSource).toContain('uploadAudioLibraryAsset')
     expect(apiSource).toContain('/api/v1/audiobook/audio-library/assets/upload')
   })
@@ -203,7 +203,7 @@ describe('AudioLibraryBrowser source guards', () => {
   })
 
   it('shows uploaded Chinese music names before style and mood metadata', () => {
-    expect(browserSource).toContain('formatAudioAssetNameLabel(musicEntry?.name)')
+    expect(browserSource).toContain('formatAudioAssetNameLabel(musicEntry?.name, t)')
     expect(apiSource).toContain('name: string')
     expect(apiSource).toContain('description: string')
     expect(apiSource).toContain('tags: string[]')

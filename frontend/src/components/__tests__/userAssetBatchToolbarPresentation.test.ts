@@ -1,4 +1,7 @@
-import { describe, expect, it } from 'vitest'
+import { beforeAll, describe, expect, it } from 'vitest'
+import type { TFunction } from 'i18next'
+
+import { bootstrapI18n } from '@/i18n'
 
 import {
   buildActivateBatchUserAssetCommand,
@@ -8,6 +11,13 @@ import {
   buildRestoreLocalCopyBatchUserAssetCommand,
 } from '../user-assets/userAssetListPresentation'
 import { buildUserAssetBatchToolbarPresentation } from '../user-assets/userAssetBatchToolbarPresentation'
+
+let t: TFunction
+
+beforeAll(async () => {
+  const instance = await bootstrapI18n('zh-CN')
+  t = instance.t.bind(instance)
+})
 
 describe('userAssetBatchToolbarPresentation', () => {
   it('builds summary chips and actions for active selection', () => {
@@ -20,19 +30,19 @@ describe('userAssetBatchToolbarPresentation', () => {
         allVisibleSelected: false,
       },
       batchCommands: [
-        buildFavoriteBatchUserAssetCommand(),
-        buildArchiveBatchUserAssetCommand(),
-        buildRestoreLocalCopyBatchUserAssetCommand(),
-        buildClearLocalCopyBatchUserAssetCommand(),
+        buildFavoriteBatchUserAssetCommand(t),
+        buildArchiveBatchUserAssetCommand(t),
+        buildRestoreLocalCopyBatchUserAssetCommand(t),
+        buildClearLocalCopyBatchUserAssetCommand(t),
       ],
-    })
+    }, t)
 
     expect(presentation.summaryChips).toEqual([
       {
         key: 'asset-selected-count',
         color: 'primary',
         variant: 'filled',
-        label: '已选 2',
+        label: '已选 2 项',
       },
       {
         key: 'asset-visible-count',
@@ -71,10 +81,10 @@ describe('userAssetBatchToolbarPresentation', () => {
         allVisibleSelected: true,
       },
       batchCommands: [
-        buildRestoreLocalCopyBatchUserAssetCommand(),
-        buildClearLocalCopyBatchUserAssetCommand(),
+        buildRestoreLocalCopyBatchUserAssetCommand(t),
+        buildClearLocalCopyBatchUserAssetCommand(t),
       ],
-    })
+    }, t)
 
     expect(presentation.batchActions[0]).toMatchObject({
       label: '重新收录到本地',
@@ -96,14 +106,14 @@ describe('userAssetBatchToolbarPresentation', () => {
         allVisibleSelected: true,
       },
       batchSubmitting: true,
-      batchCommands: [buildActivateBatchUserAssetCommand()],
-    })
+      batchCommands: [buildActivateBatchUserAssetCommand(t)],
+    }, t)
 
     expect(presentation.summaryChips[0]).toEqual({
       key: 'asset-selected-count',
       color: 'default',
       variant: 'outlined',
-      label: '已选 0',
+      label: '已选 0 项',
     })
     expect(presentation.summaryChips[1]).toEqual({
       key: 'asset-visible-count',

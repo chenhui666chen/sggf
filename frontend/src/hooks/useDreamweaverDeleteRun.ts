@@ -1,5 +1,7 @@
 import { useCallback, useState } from 'react'
 
+import { useTranslation } from 'react-i18next'
+
 import { apiClient, extractApiErrorMessage } from '@/services/api'
 
 export interface UseDreamweaverDeleteRunParams {
@@ -34,6 +36,8 @@ export function useDreamweaverDeleteRun(
     onResetMissingRunState,
     isNotFoundError,
   } = params
+
+  const { t } = useTranslation()
 
   const [deleteRunId, setDeleteRunId] = useState<string | null>(null)
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
@@ -77,7 +81,7 @@ export function useDreamweaverDeleteRun(
       if (isNotFoundError(e)) {
         onResetMissingRunState(projectId)
       }
-      setDeleteDialogError(await extractApiErrorMessage(e, '删除失败'))
+      setDeleteDialogError(await extractApiErrorMessage(e, t('dreamweaverRun.errorDeleteFailed')))
     } finally {
       setDeleteSubmitting(false)
     }
@@ -90,6 +94,7 @@ export function useDreamweaverDeleteRun(
     onRefreshLockedGenerationConfig,
     onResetMissingRunState,
     isNotFoundError,
+    t,
   ])
 
   return {

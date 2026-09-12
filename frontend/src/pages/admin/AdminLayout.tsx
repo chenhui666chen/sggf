@@ -23,27 +23,31 @@ import ScienceIcon from '@mui/icons-material/Science'
 import SecurityIcon from '@mui/icons-material/Security'
 import SettingsIcon from '@mui/icons-material/Settings'
 import StorageIcon from '@mui/icons-material/Storage'
+import { useTranslation } from 'react-i18next'
+import type { TFunction } from 'i18next'
 import { RootState } from '@/store/store'
 
 const drawerWidth = 240
 
-const menuItems = [
-  { text: '数据仪表盘', icon: <DashboardIcon />, path: '/admin/dashboard' },
-  { text: '用户管理', icon: <PeopleIcon />, path: '/admin/users' },
-  { text: '计费事件', icon: <ReceiptLongIcon />, path: '/admin/billing' },
-  { text: '角色权限', icon: <SecurityIcon />, path: '/admin/roles' },
-  { text: '数据库查询', icon: <StorageIcon />, path: '/admin/query' },
-  { text: '提示词优化', icon: <ScienceIcon />, path: '/admin/prompt-evolution' },
-  { text: '操作日志', icon: <HistoryIcon />, path: '/admin/logs' },
-  { text: '系统配置', icon: <SettingsIcon />, path: '/admin/system', superAdminOnly: true },
+const buildMenuItems = (t: TFunction) => [
+  { text: t('admin.layout.menu.dashboard'), icon: <DashboardIcon />, path: '/admin/dashboard' },
+  { text: t('admin.layout.menu.users'), icon: <PeopleIcon />, path: '/admin/users' },
+  { text: t('admin.layout.menu.billing'), icon: <ReceiptLongIcon />, path: '/admin/billing' },
+  { text: t('admin.layout.menu.roles'), icon: <SecurityIcon />, path: '/admin/roles' },
+  { text: t('admin.layout.menu.query'), icon: <StorageIcon />, path: '/admin/query' },
+  { text: t('admin.layout.menu.promptEvolution'), icon: <ScienceIcon />, path: '/admin/prompt-evolution' },
+  { text: t('admin.layout.menu.logs'), icon: <HistoryIcon />, path: '/admin/logs' },
+  { text: t('admin.layout.menu.system'), icon: <SettingsIcon />, path: '/admin/system', superAdminOnly: true },
 ]
 
 export default function AdminLayout() {
+  const { t } = useTranslation()
   const navigate = useNavigate()
   const location = useLocation()
   const { user } = useSelector((state: RootState) => state.auth)
   
   const isSuperAdmin = (user as any)?.roles?.some((r: any) => r.code === 'super_admin')
+  const menuItems = buildMenuItems(t)
 
   return (
     <Box sx={{ display: 'flex' }}>
@@ -57,7 +61,7 @@ export default function AdminLayout() {
       >
         <Toolbar>
           <Typography variant="h6" noWrap component="div" sx={{ flexGrow: 1 }}>
-            管理控制台
+            {t('admin.layout.title')}
           </Typography>
           <IconButton color="inherit" onClick={() => navigate('/')}>
             <HomeIcon />
@@ -79,7 +83,7 @@ export default function AdminLayout() {
       >
         <Toolbar>
           <Typography variant="h6" noWrap sx={{ color: 'primary.main', fontWeight: 'bold' }}>
-            拾光工坊
+            {t('app.name')}
           </Typography>
         </Toolbar>
         <Divider />

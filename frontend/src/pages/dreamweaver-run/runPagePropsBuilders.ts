@@ -1,3 +1,5 @@
+import type { TFunction } from 'i18next'
+
 import { asObject } from './runPageDataTransforms'
 import { formatPath, formatPaths } from './runPageFormatUtils'
 import {
@@ -324,52 +326,54 @@ export function buildToggleFieldProps(params: {
   }
 }
 
-export function buildStrategyFields(params: StrategyFieldsParams): StrategyFieldItem[] {
+export function buildStrategyFields(params: StrategyFieldsParams, t?: TFunction): StrategyFieldItem[] {
   return [
     {
       key: 'quality-mode',
-      title: '成本 / 质量',
+      title: t ? t('dreamweaverRun.strategyTitleQuality') : '成本 / 质量',
       checked: params.highQuality,
       onChange: params.setHighQuality,
-      enabledLabel: '最高质量',
-      disabledLabel: '低成本',
-      description: params.highQuality ? '多候选 + 语义评选 + 图片编辑 + 语义质检' : '单候选 + 关闭编辑/语义质检',
+      enabledLabel: t ? t('dreamweaverRun.strategyEnabledHighQuality') : '最高质量',
+      disabledLabel: t ? t('dreamweaverRun.strategyDisabledLowCost') : '低成本',
+      description: params.highQuality
+        ? (t ? t('dreamweaverRun.strategyDescQuality') : '多候选 + 语义评选 + 图片编辑 + 语义质检')
+        : (t ? t('dreamweaverRun.strategyDescCost') : '单候选 + 关闭编辑/语义质检'),
     },
     {
       key: 'smart-tuning',
-      title: '智能调参',
+      title: t ? t('dreamweaverRun.strategyTitleSmartTuning') : '智能调参',
       checked: params.smartTuning,
       onChange: params.setSmartTuning,
-      enabledLabel: '智能调参',
-      disabledLabel: '手动调参',
-      description: '质量优先：按镜头规模自动调候选数与语义质检预算。',
+      enabledLabel: t ? t('dreamweaverRun.strategyTitleSmartTuning') : '智能调参',
+      disabledLabel: t ? t('dreamweaverRun.strategyDisabledManualTuning') : '手动调参',
+      description: t ? t('dreamweaverRun.strategyDescSmartTuning') : '质量优先：按镜头规模自动调候选数与语义质检预算。',
     },
     {
       key: 'video-confirmation',
-      title: '视频逐段确认',
+      title: t ? t('dreamweaverRun.strategyTitleVideoConfirmation') : '视频逐段确认',
       checked: params.videoRequireConfirmation,
       onChange: params.setVideoRequireConfirmation,
-      enabledLabel: '逐段确认',
-      disabledLabel: '自动生成',
-      description: 'VIDEO 阶段先生成任务卡，确认后按镜头生成视频；桥接依赖会自动阻塞提示。',
+      enabledLabel: t ? t('dreamweaverRun.strategyEnabledConfirmPerShot') : '逐段确认',
+      disabledLabel: t ? t('dreamweaverRun.strategyDisabledAuto') : '自动生成',
+      description: t ? t('dreamweaverRun.strategyDescVideoConfirmation') : 'VIDEO 阶段先生成任务卡，确认后按镜头生成视频；桥接依赖会自动阻塞提示。',
     },
     {
       key: 'prompt-review',
-      title: '提示词审核',
+      title: t ? t('dreamweaverRun.strategyTitlePromptReview') : '提示词审核',
       checked: params.promptReviewRequired,
       onChange: params.setPromptReviewRequired,
-      enabledLabel: '先审提示词',
-      disabledLabel: '直接生成',
-      description: '生成关键帧/视频前先停在提示词审核，可修改后再提交生成任务。',
+      enabledLabel: t ? t('dreamweaverRun.strategyEnabledReviewFirst') : '先审提示词',
+      disabledLabel: t ? t('dreamweaverRun.strategyDisabledDirectGenerate') : '直接生成',
+      description: t ? t('dreamweaverRun.strategyDescPromptReview') : '生成关键帧/视频前先停在提示词审核，可修改后再提交生成任务。',
     },
     {
       key: 'qc-allow-fail',
-      title: '质检失败处理',
+      title: t ? t('dreamweaverRun.strategyTitleQcFail') : '质检失败处理',
       checked: params.qcAllowFail,
       onChange: params.setQcAllowFail,
-      enabledLabel: '仅警告',
-      disabledLabel: '严格拦截',
-      description: 'AutoQC 失败可仅警告放行；文件校验（audit）仍会拦截。',
+      enabledLabel: t ? t('dreamweaverRun.strategyEnabledWarnOnly') : '仅警告',
+      disabledLabel: t ? t('dreamweaverRun.strategyDisabledStrictBlock') : '严格拦截',
+      description: t ? t('dreamweaverRun.strategyDescQcFail') : 'AutoQC 失败可仅警告放行；文件校验（audit）仍会拦截。',
     },
   ]
 }
@@ -487,31 +491,31 @@ export function buildWorkbenchActionItems(params: {
   copyDebugIcon: React.ReactNode
   diagnosticsIcon: React.ReactNode
   historyIcon: React.ReactNode
-}): WorkbenchActionItem[] {
+}, t?: TFunction): WorkbenchActionItem[] {
   return [
     {
       key: 'copy-debug',
-      label: '复制调试信息',
+      label: t ? t('dreamweaverRun.workbenchCopyDebug') : '复制调试信息',
       onClick: params.copyDebugInfo,
       startIcon: params.copyDebugIcon,
     },
     {
       key: 'diagnostics',
-      label: '诊断面板',
+      label: t ? t('dreamweaverRun.workbenchDiagnostics') : '诊断面板',
       onClick: params.openDiagnosticDialog,
       disabled: !params.currentRunId,
       startIcon: params.diagnosticsIcon,
     },
     {
       key: 'history',
-      label: '历史记录',
+      label: t ? t('dreamweaverRun.workbenchHistory') : '历史记录',
       onClick: () => { if (params.selectedProjectId) params.openHistoryDialog(params.selectedProjectId) },
       disabled: !params.selectedProjectId,
       startIcon: params.historyIcon,
     },
     {
       key: 'config',
-      label: '配置',
+      label: t ? t('dreamweaverRun.workbenchConfig') : '配置',
       onClick: params.openConfigDialog,
     },
   ]
@@ -521,23 +525,23 @@ export function resolveRegenerateDialogLabels(params: {
   imageEditActive: boolean
   imageEditAutoCleared: boolean
   submitting: boolean
-}): {
+}, t?: TFunction): {
   modeHint: string
   promptPlaceholder: string | undefined
   submitLabel: string
 } {
   return {
     modeHint: params.imageEditActive
-      ? '图像编辑模式：将基于参考图生成，提交后状态变为"待审核"。'
-      : '可在下方编辑提示词并重生成素材，生成后将变为待审核状态。',
+      ? (t ? t('dreamweaverRun.regenModeHintImageEdit') : '图像编辑模式：将基于参考图生成，提交后状态变为"待审核"。')
+      : (t ? t('dreamweaverRun.regenModeHintTextEdit') : '可在下方编辑提示词并重生成素材，生成后将变为待审核状态。'),
     promptPlaceholder: params.imageEditActive && params.imageEditAutoCleared
-      ? '示例：保持角色身份锚点不变，改为侧面全身，左肩数据接口更亮，背景保持纯灰色。'
+      ? (t ? t('dreamweaverRun.regenPlaceholderExample') : '示例：保持角色身份锚点不变，改为侧面全身，左肩数据接口更亮，背景保持纯灰色。')
       : undefined,
     submitLabel: params.submitting
-      ? '生成中...'
+      ? (t ? t('dreamweaverRun.regenSubmitGenerating') : '生成中...')
       : params.imageEditActive
-        ? '开始生成（图像编辑）'
-        : '开始生成（提示词）',
+        ? (t ? t('dreamweaverRun.regenSubmitImageEdit') : '开始生成（图像编辑）')
+        : (t ? t('dreamweaverRun.regenSubmitPrompt') : '开始生成（提示词）'),
   }
 }
 
@@ -571,9 +575,9 @@ export function buildSnapshotStatusProps(params: {
   snapshotAssetCount: number
   loadRunSnapshot: () => void
   includeChips: boolean
-}): SnapshotStatusProps {
+}, t?: TFunction): SnapshotStatusProps {
   return {
-    label: '加载运行快照',
+    label: t ? t('dreamweaverRun.snapshotLoad') : '加载运行快照',
     onRefresh: params.loadRunSnapshot,
     refreshDisabled: !params.persistedRunId || params.runSnapshotLoading,
     refreshLoading: params.runSnapshotLoading,
@@ -583,8 +587,8 @@ export function buildSnapshotStatusProps(params: {
     ...(params.includeChips
       ? {
           chips: [
-            ...(params.snapshotShots.length > 0 ? [{ key: 'shots', label: `镜头: ${params.snapshotShots.length}` }] : []),
-            ...(params.snapshotAssetCount > 0 ? [{ key: 'assets', label: `资产: ${params.snapshotAssetCount}` }] : []),
+            ...(params.snapshotShots.length > 0 ? [{ key: 'shots', label: t ? t('dreamweaverRun.snapshotShotsChip', { count: params.snapshotShots.length }) : `镜头: ${params.snapshotShots.length}` }] : []),
+            ...(params.snapshotAssetCount > 0 ? [{ key: 'assets', label: t ? t('dreamweaverRun.snapshotAssetsChip', { count: params.snapshotAssetCount }) : `资产: ${params.snapshotAssetCount}` }] : []),
           ],
         }
       : {}),
@@ -601,7 +605,7 @@ export function buildSnapshotAssetPreviewSectionProps(params: {
     midframes: string[]
     videoClips: Array<{ path: string; meta: Record<string, unknown> }>
   }
-}): {
+}, t?: TFunction): {
   visible: boolean
   shotCount: number
   assetCount: number
@@ -622,7 +626,7 @@ export function buildSnapshotAssetPreviewSectionProps(params: {
     midframeCount: params.snapshotAssetSummary.midframes.length,
     videoClipCount: params.snapshotAssetSummary.videoClips.length,
     tailVideoClipPaths,
-    pathSummary: buildSnapshotAssetPreviewPathSummary(formatPaths(keyframePaths), formatPaths(midframePaths), formatPaths(tailVideoClipPaths)),
+    pathSummary: buildSnapshotAssetPreviewPathSummary(formatPaths(keyframePaths), formatPaths(midframePaths), formatPaths(tailVideoClipPaths), t),
   }
 }
 
@@ -630,9 +634,13 @@ export function buildSnapshotAssetPreviewPathSummary(
   keyframePaths: string | null,
   midframePaths: string | null,
   videoClipPaths: string | null,
+  t?: TFunction,
 ): string | null {
   if (!keyframePaths && !midframePaths && !videoClipPaths) return null
-  return `快照路径：${keyframePaths ? `KF ${keyframePaths}` : ''}${midframePaths ? `  MF ${midframePaths}` : ''}${
-    videoClipPaths ? `  VC ${videoClipPaths}` : ''
-  }`
+  const parts = [
+    keyframePaths ? `KF ${keyframePaths}` : '',
+    midframePaths ? `MF ${midframePaths}` : '',
+    videoClipPaths ? `VC ${videoClipPaths}` : '',
+  ].filter(Boolean).join('  ')
+  return t ? t('dreamweaverRun.snapshotPathSummary', { parts }) : `快照路径：${parts}`
 }

@@ -1,5 +1,7 @@
 import { Alert, Box, Button, Stack } from '@mui/material'
 
+import { useTranslation } from 'react-i18next'
+
 export interface MergedVideoPanelProps {
   currentRunId: string | null
   mergedVideoLoading: boolean
@@ -27,6 +29,7 @@ export function MergedVideoPanel({
   onCollect,
   centeredPreview,
 }: MergedVideoPanelProps) {
+  const { t } = useTranslation()
   return (
     <>
       <Stack direction="row" spacing={1} flexWrap="wrap" alignItems="center" sx={{ mt: 1 }}>
@@ -36,7 +39,7 @@ export function MergedVideoPanel({
           onClick={onLoadPreview}
           disabled={!currentRunId || mergedVideoLoading}
         >
-          {mergedVideoLoading ? '加载中…' : mergedVideoPreviewUrl ? '重新加载合成视频' : '加载合成视频预览'}
+          {mergedVideoLoading ? t('dreamweaverRun.libraryLoadingText') : mergedVideoPreviewUrl ? t('dreamweaverRun.mvReload') : t('dreamweaverRun.mvLoadPreview')}
         </Button>
         <Button
           size="small"
@@ -44,7 +47,7 @@ export function MergedVideoPanel({
           onClick={onDownload}
           disabled={!currentRunId || mergedVideoLoading}
         >
-          下载合成视频
+          {t('dreamweaverRun.mvDownload')}
         </Button>
         <Button
           size="small"
@@ -52,7 +55,7 @@ export function MergedVideoPanel({
           onClick={onCollect}
           disabled={!currentRunId || mergedVideoCollecting}
         >
-          {mergedVideoCollecting ? '归档中…' : '归档到用户中心'}
+          {mergedVideoCollecting ? t('dreamweaverRun.mvArchiving') : t('dreamweaverRun.mvArchive')}
         </Button>
       </Stack>
       {mergedVideoCollectFeedback && (
@@ -69,7 +72,7 @@ export function MergedVideoPanel({
         <Box
           sx={{
             mt: 1,
-            bgcolor: '#000',
+            bgcolor: '#000', // sg-color-fixed: 视频播放器画布黑底（媒体数据色，双模恒黑）
             borderRadius: 2,
             overflow: 'hidden',
             ...(centeredPreview

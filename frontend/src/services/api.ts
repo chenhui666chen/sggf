@@ -1,4 +1,5 @@
-import axios, { AxiosInstance, AxiosError } from 'axios'
+import axios, { AxiosError, AxiosInstance, type InternalAxiosRequestConfig } from 'axios'
+import type { ConsentAcceptance } from '@/constants/consent'
 import type {
   AudiobookTtsModel,
   DeletedChapterAudio,
@@ -1455,6 +1456,8 @@ interface DreamweaverRunDeleteResponse {
 interface OAuthAuthUrlRequest {
   redirect_uri: string
   state?: string
+  // P2-4.2：login=普通登录/首次建号；bind=已登录用户绑定第三方登录（需登录态）
+  intent?: 'login' | 'bind'
 }
 
 interface PasswordResetCodeRequest {
@@ -1465,6 +1468,54 @@ interface PasswordResetRequest {
   account: string
   code: string
   new_password: string
+}
+
+// P1-3.8：两步注册 / 登录态邮箱验证的发码响应
+export interface VerificationCodeResponse {
+  message: string
+  expires_in: number
+  resend_in: number
+}
+
+export interface RegisterConfirmRequest {
+  username: string
+  email: string
+  password: string
+  phone?: string
+  full_name?: string
+  code: string
+  // 短信抢占：手机号已被其他账号绑定时，携带短信验证码主张号码所有权
+  phone_code?: string
+  // P2-5.2：用户勾选的同意项（未勾选的项不传，后端只记录真实存在的同意）
+  consent?: ConsentAcceptance
+}
+
+// 手机号占用查询（注册/绑定前先查，未占用直绑不发短信）
+export interface PhoneStatusResponse {
+  occupied: boolean
+}
+
+export interface PhoneSendCodeRequest {
+  phone: string
+  purpose: 'takeover' | 'bind'
+}
+
+// P1-3.2 + P2-4.2：OAuth 回调联合响应——
+//   ok=老用户直接返回 token；new_user=新用户返回注册票据（不自动建号）；
+//   bind_pending=绑定意图返回绑定票据（由登录态 /auth/bind/confirm 消费）
+export interface OAuthCallbackResponse {
+  status: 'ok' | 'new_user' | 'bind_pending'
+  registration_ticket?: string | null
+  bind_ticket?: string | null
+  // P2-4.5 收尾：status==='ok' 时返回 user（token 仅入 httpOnly cookie）；类型由 authSlice 承接
+  user?: Record<string, unknown> | null
+}
+
+export interface OAuthConfirmRequest {
+  ticket: string
+  action: 'confirm' | 'cancel'
+  // P2-5.2：建号需勾选隐私政策与第三方资料同步同意
+  consent?: ConsentAcceptance
 }
 
 export interface TaskPointsPrecheckOperatingSnapshot {
@@ -1495,7 +1546,10 @@ export interface TaskPointsPrecheckErrorDetail {
 
 const AUTH_PUBLIC_ENDPOINTS = new Set([
   '/api/v1/auth/login',
-  '/api/v1/auth/register',
+  '/api/v1/auth/register/send-code',
+  '/api/v1/auth/register/confirm',
+  '/api/v1/auth/oauth/confirm',
+  '/api/v1/auth/refresh',
   '/api/v1/auth/reset-password/request-code',
   '/api/v1/auth/reset-password',
   '/api/v1/auth/alipay/callback',
@@ -1527,14 +1581,140 @@ function shouldRedirectToLogin(error: AxiosError): boolean {
   }
 
   const currentPath = typeof window !== 'undefined' ? window.location.pathname : ''
-  return currentPath !== '/login' && currentPath !== '/register'
+  // P2-4.5：启动时 getCurrentUser 在匿名公共页也会 401，不能因此跳登录。
+  // 排除：/login（含 /login/callback 的 OAuth 回跳）、/register、/forgot-password
+  if (
+    currentPath.startsWith('/login') ||
+    currentPath === '/register' ||
+    currentPath === '/forgot-password'
+  ) {
+    return false
+  }
+  return true
 }
 
-function getStoredAccessToken(): string | null {
+function clearStoredAuth(): void {
   if (typeof localStorage === 'undefined') {
+    return
+  }
+  localStorage.removeItem('access_token')
+  localStorage.removeItem('refresh_token')
+  localStorage.removeItem('user')
+}
+
+// P2-4.5：csrf cookie 非 httpOnly（JS 可读），unsafe 方法需携带其值作 X-CSRF-Token 头。
+// cookie 名为 {COOKIE_PREFIX}csrf（__Host-csrf / csrf），按后缀匹配以兼容前缀配置。
+export function getCsrfToken(): string | null {
+  if (typeof document === 'undefined') {
     return null
   }
-  return localStorage.getItem('access_token')
+  for (const part of document.cookie.split(';')) {
+    const trimmed = part.trim()
+    const eq = trimmed.indexOf('=')
+    if (eq <= 0) continue
+    const name = trimmed.slice(0, eq).trim()
+    // 精确匹配 csrf cookie 名：`csrf`（前缀为空）或 `{prefix-}csrf`（如 __Host-csrf）；
+    // 仅用 endsWith('csrf') 会被其它 *csrf cookie 抢到
+    if (name === 'csrf' || name.endsWith('-csrf')) {
+      try {
+        return decodeURIComponent(trimmed.slice(eq + 1))
+      } catch {
+        return trimmed.slice(eq + 1)
+      }
+    }
+  }
+  return null
+}
+
+const UNSAFE_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE'])
+
+function resolveApiBaseURL(): string {
+  // API_URL 为 '/api' 时置空：项目内 API 路径已包含 /api 前缀（与 ApiClient 构造器同规则）
+  return API_URL === '/api' ? '' : API_URL
+}
+
+// P2-4.5 收尾：token 全部由 httpOnly cookie 承载，前端不再持有/同步 token——
+// 刷新成功后新令牌由后端 Set-Cookie 下发，无需任何 store 同步或跨标签 token 同步。
+// （原先的 setTokenRefreshListener / setTokenLogoutListener / cross-tab storage 同步均删除）
+
+// P1-3.6（批次 2 边角 1）：后端并发刷新锁为 5 秒，重试等待必须到锁 TTL 量级，
+// 否则第二次尝试几乎必然撞锁/撞已消费的旧 token；额外加随机抖动避免多标签同步重试
+export const REFRESH_RETRY_DELAY_MS = 5000
+export const REFRESH_RETRY_JITTER_MS = 500
+
+// P1-3.7：401 自动刷新的 single-flight。并发请求同时 401 时只发起一次 refresh，
+// 其余请求等待同一 Promise，避免旧 refresh token 被并发消费后其余刷新全部失败。
+let refreshTokenInFlight: Promise<boolean> | null = null
+
+export function refreshAccessToken(): Promise<boolean> {
+  if (refreshTokenInFlight) {
+    return refreshTokenInFlight
+  }
+
+  // P2-4.5：refresh token 由 httpOnly cookie 携带，请求体为空；后端读 cookie 轮换
+  refreshTokenInFlight = attemptRefresh(0).finally(() => {
+    refreshTokenInFlight = null
+  })
+  return refreshTokenInFlight
+}
+
+async function attemptRefresh(attempt: number): Promise<boolean> {
+  // 用独立 axios 实例请求，避免经过 this.client 的拦截器造成递归刷新
+  try {
+    const csrfToken = getCsrfToken()
+    const response = await axios.post(
+      buildApiUrl(resolveApiBaseURL(), '/api/v1/auth/refresh'),
+      {},
+      { timeout: 15000, headers: csrfToken ? { 'X-CSRF-Token': csrfToken } : undefined },
+    )
+    // P2-4.5 收尾：refresh 成功（200）即新令牌已由后端 Set-Cookie 下发，body 不再返回 token
+    return response.status === 200
+  } catch (error) {
+    // 429 = 后端并发刷新短锁拦截（多标签页/多设备共用同一 refresh 场景）：
+    // 等待锁释放后重试一次；仍失败按刷新失败处理。
+    // P2-4.5 不再从 storage 接管 token（cookie 由浏览器共享，多标签天然一致）
+    if (attempt === 0 && axios.isAxiosError(error) && error.response?.status === 429) {
+      const jitter = Math.floor(Math.random() * REFRESH_RETRY_JITTER_MS)
+      await new Promise((resolve) => setTimeout(resolve, REFRESH_RETRY_DELAY_MS + jitter))
+      return attemptRefresh(1)
+    }
+    return false
+  }
+}
+
+export function __resetRefreshInFlightForTest(): void {
+  refreshTokenInFlight = null
+}
+
+interface RetryableRequestConfig extends InternalAxiosRequestConfig {
+  _retriedAfterRefresh?: boolean
+}
+
+async function tryRefreshAndRetry(error: AxiosError): Promise<RetryableRequestConfig | null> {
+  // 短 access token（P1-3.7）过期后先用 refresh token 轮换并重放原请求；
+  // 刷新失败（无 refresh token / refresh 失效 / 已重试过）返回 null 交回原有 401 处理
+  if (error.response?.status !== 401) {
+    return null
+  }
+
+  const original = error.config as RetryableRequestConfig | undefined
+  if (!original || original._retriedAfterRefresh) {
+    return null
+  }
+
+  const requestPath = normalizeRequestPath(original.url)
+  if (AUTH_PUBLIC_ENDPOINTS.has(requestPath)) {
+    return null
+  }
+
+  const refreshed = await refreshAccessToken()
+  if (!refreshed) {
+    return null
+  }
+
+  // P2-4.5：新令牌由 cookie 自动携带，重放原请求无需手动附加 Authorization 头
+  original._retriedAfterRefresh = true
+  return original
 }
 
 function buildApiUrl(baseURL: string | undefined, path: string): string {
@@ -1543,9 +1723,19 @@ function buildApiUrl(baseURL: string | undefined, path: string): string {
   return normalizedBase ? `${normalizedBase}${normalizedPath}` : normalizedPath
 }
 
+// FastAPI 默认鉴权 detail 为英文，直出会污染 UI（登录页首屏红框显示 "Not authenticated"）。
+// 仅登记实际遇到过的枚举，未命中的英文原文保持原样，不做猜测翻译。
+const DETAIL_MESSAGE_LOCALIZATIONS: Record<string, string> = {
+  'Not authenticated': '登录状态已失效，请重新登录',
+  'Could not validate credentials': '登录凭证校验失败，请重新登录',
+}
+
 function extractDetailMessage(detail: any): string | null {
   if (!detail) return null
-  if (typeof detail === 'string') return detail.trim() || null
+  if (typeof detail === 'string') {
+    const trimmed = detail.trim()
+    return (DETAIL_MESSAGE_LOCALIZATIONS[trimmed] ?? trimmed) || null
+  }
   if (Array.isArray(detail) && detail.length > 0) {
     const first = detail[0] as any
     if (first && typeof first === 'object') {
@@ -1813,26 +2003,31 @@ class ApiClient {
     })
 
     // 请求拦截器
+    // P2-4.5 收尾：认证走 httpOnly cookie（浏览器自动携带，不再附加 Authorization 头）；
+    // unsafe 方法携带 X-CSRF-Token 头（真双重提交，csrf cookie 非 httpOnly 供 JS 读取）
     this.client.interceptors.request.use((config) => {
-      const token = getStoredAccessToken()
-      if (token) {
-        // 确保headers对象存在
-        if (!config.headers) {
-          config.headers = {} as any
+      const method = (config.method ?? 'get').toUpperCase()
+      if (UNSAFE_METHODS.has(method)) {
+        const csrfToken = getCsrfToken()
+        if (csrfToken && config.headers) {
+          config.headers['X-CSRF-Token'] = csrfToken
         }
-        // 设置Authorization头
-        config.headers['Authorization'] = `Bearer ${token}`
       }
       return config
     })
 
     // 响应拦截器
+    // P1-3.7：受保护接口 401 时先尝试 refresh token 轮换并重放原请求（短 access token）；
+    // 刷新失败才清理本地凭证并跳转登录（原行为）
     this.client.interceptors.response.use(
       (response) => response,
-      (error: AxiosError) => {
+      async (error: AxiosError) => {
+        const retryConfig = await tryRefreshAndRetry(error)
+        if (retryConfig) {
+          return this.client.request(retryConfig)
+        }
         if (shouldRedirectToLogin(error)) {
-          localStorage.removeItem('access_token')
-          localStorage.removeItem('user')
+          clearStoredAuth()
           window.location.href = '/login'
         }
         return Promise.reject(error)
@@ -1841,16 +2036,53 @@ class ApiClient {
   }
 
   // 认证API
-  register(data: { username: string; email: string; password: string; phone?: string; full_name?: string }) {
-    return this.client.post('/api/v1/auth/register', data)
+  // P1-3.8：两步注册——先发验证码到邮箱，验码通过后才建号（建号即邮箱已验证）
+  registerSendCode(email: string) {
+    return this.client.post<VerificationCodeResponse>('/api/v1/auth/register/send-code', { email })
+  }
+
+  registerConfirm(data: RegisterConfirmRequest) {
+    return this.client.post('/api/v1/auth/register/confirm', data)
+  }
+
+  // 手机号短信验证：先查占用 → 已占用才发码 → 验码绑定/抢占（未占用直绑不消耗短信）
+  phoneCheckStatus(phone: string) {
+    return this.client.post<PhoneStatusResponse>('/api/v1/auth/phone/check-status', { phone })
+  }
+
+  phoneSendCode(data: PhoneSendCodeRequest) {
+    return this.client.post<VerificationCodeResponse>('/api/v1/auth/phone/send-code', data)
+  }
+
+  phoneBindConfirm(data: { phone: string; code?: string; consent?: ConsentAcceptance }) {
+    return this.client.post('/api/v1/auth/phone/bind-confirm', data)
+  }
+
+  // P1-3.2：OAuth 首次建号需用户确认，票据一次性消费（过期需重新发起登录）
+  oauthConfirmRegistration(data: OAuthConfirmRequest) {
+    return this.client.post('/api/v1/auth/oauth/confirm', data)
+  }
+
+  // P1-3.8：登录态邮箱验证（发码 / 验码确认）
+  verifyEmailSendCode(email: string) {
+    return this.client.post<VerificationCodeResponse>('/api/v1/auth/verify-email/request-code', { email })
+  }
+
+  verifyEmailConfirm(data: { email: string; code: string }) {
+    return this.client.post('/api/v1/auth/verify-email/confirm', data)
   }
 
   login(data: { username: string; password: string }) {
     return this.client.post('/api/v1/auth/login', data)
   }
 
-  logout() {
-    return this.client.post('/api/v1/auth/logout')
+  logout(data?: { access_token?: string; refresh_token?: string }) {
+    // P1-3.7：登出吊销请求（jti + refresh token）走 body；validateStatus 全放行（best-effort，
+    // 401/503 等失败不阻塞调用方，本地清理由 authSlice.performLogout 兜底完成）
+    return this.client.post('/api/v1/auth/logout', data ?? {}, {
+      timeout: 10000,
+      validateStatus: () => true,
+    })
   }
 
   getCurrentUser() {
@@ -1869,20 +2101,35 @@ class ApiClient {
     return this.client.post('/api/v1/auth/reset-password', data)
   }
 
+  // P2-4.2：OAuth 用户首次设置本地密码（不要求旧密码；已有密码请走 changePassword）
+  setPassword(new_password: string) {
+    return this.client.post('/api/v1/auth/set-password', { new_password })
+  }
+
+  // P2-4.2：登录态消费绑定票据，把第三方 openid 写入当前用户
+  bindConfirm(bind_ticket: string, consent?: ConsentAcceptance) {
+    return this.client.post('/api/v1/auth/bind/confirm', { bind_ticket, consent })
+  }
+
+  // P2-4.2：解绑第三方登录（至少保留一种登录方式）
+  unbindProvider(provider: 'alipay' | 'wechat') {
+    return this.client.post(`/api/v1/auth/unbind/${provider}`)
+  }
+
   getAlipayAuthUrl(data: OAuthAuthUrlRequest) {
     return this.client.post('/api/v1/auth/alipay/auth-url', data)
   }
 
-  alipayCallback(code: string) {
-    return this.client.post('/api/v1/auth/alipay/callback', { code })
+  alipayCallback(code: string, state: string) {
+    return this.client.post<OAuthCallbackResponse>('/api/v1/auth/alipay/callback', { code, state })
   }
 
   getWechatAuthUrl(data: OAuthAuthUrlRequest) {
     return this.client.post('/api/v1/auth/wechat/auth-url', data)
   }
 
-  wechatCallback(code: string) {
-    return this.client.post('/api/v1/auth/wechat/callback', { code })
+  wechatCallback(code: string, state: string) {
+    return this.client.post<OAuthCallbackResponse>('/api/v1/auth/wechat/callback', { code, state })
   }
 
   // 项目API
@@ -2171,14 +2418,14 @@ class ApiClient {
 
   async previewTTSCached(payload: PreviewTtsPayload): Promise<{ audioUrl: string | null; blob: Blob | null }> {
     const url = buildApiUrl(this.client.defaults.baseURL, '/api/v1/audiobook/tts/preview-cached')
-    const token = getStoredAccessToken()
+    // P2-4.5 收尾：同源 fetch 由 httpOnly cookie 自动认证，无需 Authorization 头；
+    // unsafe 方法携带 X-CSRF-Token 头（真双重提交）
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       Accept: 'application/json',
     }
-    if (token) {
-      headers['Authorization'] = `Bearer ${token}`
-    }
+    const csrfToken = getCsrfToken()
+    if (csrfToken) headers['X-CSRF-Token'] = csrfToken
     const res = await fetch(url, {
       method: 'POST',
       headers,
@@ -3050,8 +3297,8 @@ class ApiClient {
   }
 
   getSSEStreamHeaders(): HeadersInit {
-    const token = getStoredAccessToken()
-    return token ? { Authorization: `Bearer ${token}` } : {}
+    // P2-4.5 收尾：SSE 同源请求由 httpOnly cookie 自动认证，无需手动附加 Authorization 头
+    return {}
   }
 
   // 章节逻辑检查API

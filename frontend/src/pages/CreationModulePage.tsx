@@ -1,7 +1,7 @@
-import { useState, type MouseEvent } from 'react'
+import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { useTranslation } from 'react-i18next'
 import {
-  Avatar,
   Box,
   Button,
   Card,
@@ -9,13 +9,8 @@ import {
   CardContent,
   Chip,
   Container,
-  Divider,
   Grid,
   IconButton,
-  ListItemIcon,
-  ListItemText,
-  Menu,
-  MenuItem,
   Snackbar,
   Tooltip,
   Typography,
@@ -26,25 +21,20 @@ import AutoStoriesIcon from '@mui/icons-material/AutoStories'
 import HeadphonesIcon from '@mui/icons-material/Headphones'
 import MovieIcon from '@mui/icons-material/Movie'
 import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh'
-import LogoutIcon from '@mui/icons-material/Logout'
-import ManageAccountsOutlinedIcon from '@mui/icons-material/ManageAccountsOutlined'
-import StarsOutlinedIcon from '@mui/icons-material/StarsOutlined'
-import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import HubIcon from '@mui/icons-material/Hub'
-import { useDispatch, useSelector } from 'react-redux'
-import { logout } from '@/store/slices/authSlice'
-import { AppDispatch, RootState } from '@/store/store'
+import { useSelector } from 'react-redux'
+import { RootState } from '@/store/store'
 import BookParserUploadDialog from '@/components/BookParserUploadDialog'
 import type { BookSource } from '@/services/bookParserApi'
 
 const headerActionButtonSx = {
-  color: 'white',
-  borderColor: 'rgba(255,255,255,0.5)',
+  color: 'text.primary',
+  borderColor: 'divider',
   minHeight: { xs: 44, sm: 36 },
   fontSize: { xs: '0.875rem', sm: '0.875rem' },
   '&:hover': {
-    borderColor: 'white',
-    backgroundColor: 'rgba(255,255,255,0.1)',
+    borderColor: 'primary.main',
+    backgroundColor: 'action.hover',
   },
 }
 
@@ -81,66 +71,62 @@ type CreationModule = {
   badge?: string
 }
 
-const modules: CreationModule[] = [
-  {
-    id: 'novel',
-    title: '灵感方舟',
-    subtitle: '小说创作',
-    description: '智能小说创作工作流，从构思到成稿一站式完成',
-    icon: AutoStoriesIcon,
-    color: '#1976d2',
-    available: true,
-    path: '/dashboard',
-  },
-  {
-    id: 'audiobook',
-    title: '耳畔星河',
-    subtitle: '有声小说创作',
-    description: '将文字作品转化为有声读物，支持多种音色选择',
-    icon: HeadphonesIcon,
-    color: '#9c27b0',
-    available: true,
-    path: '/audiobook-dashboard',
-  },
-  {
-    id: 'drama',
-    title: '织梦映心',
-    subtitle: '短剧创作',
-    description: '短视频剧本创作，快速生成短剧内容（当前为模拟线路）',
-    icon: MovieIcon,
-    color: '#f57c00',
-    available: true,
-    adminOnly: true,
-    path: '/drama',
-    badge: '内测',
-  },
-  {
-    id: 'ai-detect',
-    title: '织文无迹',
-    subtitle: 'AI 痕迹降低',
-    description: '检测与降低 AI 痕迹，让创作更自然流畅',
-    icon: AutoFixHighIcon,
-    color: '#2e7d32',
-    available: true,
-    path: '/ai-trace',
-  },
-]
-
 export default function CreationModulePage() {
+  const { t } = useTranslation()
   const navigate = useNavigate()
-  const dispatch = useDispatch<AppDispatch>()
   const { user } = useSelector((state: RootState) => state.auth)
-  const [userMenuAnchorEl, setUserMenuAnchorEl] = useState<null | HTMLElement>(null)
   const [bookUploadDialogOpen, setBookUploadDialogOpen] = useState(false)
   const [snackbar, setSnackbar] = useState<{ open: boolean; message: string }>({ open: false, message: '' })
 
+  // 模块卡片（组件内构造以支持 i18n）
+  const modules: CreationModule[] = [
+    {
+      id: 'novel',
+      title: t('creationModule.novel.title'),
+      subtitle: t('creationModule.novel.subtitle'),
+      description: t('creationModule.novel.description'),
+      icon: AutoStoriesIcon,
+      color: '#1976d2', // sg-color-fixed: 灵感方舟模块签名色（模块身份色，数据非主题 chrome）
+      available: true,
+      path: '/dashboard',
+    },
+    {
+      id: 'audiobook',
+      title: t('creationModule.audiobook.title'),
+      subtitle: t('creationModule.audiobook.subtitle'),
+      description: t('creationModule.audiobook.description'),
+      icon: HeadphonesIcon,
+      color: '#9c27b0', // sg-color-fixed: 耳畔星河模块签名色
+      available: true,
+      path: '/audiobook-dashboard',
+    },
+    {
+      id: 'drama',
+      title: t('creationModule.drama.title'),
+      subtitle: t('creationModule.drama.subtitle'),
+      description: t('creationModule.drama.description'),
+      icon: MovieIcon,
+      color: '#f57c00', // sg-color-fixed: 织梦映心模块签名色
+      available: true,
+      adminOnly: true,
+      path: '/drama',
+      badge: t('creationModule.drama.badge'),
+    },
+    {
+      id: 'ai-detect',
+      title: t('creationModule.aiTrace.title'),
+      subtitle: t('creationModule.aiTrace.subtitle'),
+      description: t('creationModule.aiTrace.description'),
+      icon: AutoFixHighIcon,
+      color: '#2e7d32', // sg-color-fixed: 织文无迹模块签名色
+      available: true,
+      path: '/ai-trace',
+    },
+  ]
+
+  // 仅保留模块卡片的 adminOnly 门控（如「织梦映心」）所需；用户身份/账户菜单已上移到
+  // AppShell 的 UserAccountMenu，此处不再重复。
   const hasAdminRole = user?.roles?.some((role) => role.code === 'admin' || role.code === 'super_admin') ?? false
-  const userDisplayName = user?.full_name?.trim() || user?.username || '创作者'
-  const userIdentity = user?.email || user?.username || '欢迎回来'
-  const userAvatarFallback = userDisplayName.slice(0, 1).toUpperCase()
-  const userCenterSubtitle = hasAdminRole ? '管理员 · 用户中心' : '用户中心'
-  const userMenuId = 'creation-module-user-center-menu'
-  const userMenuOpen = Boolean(userMenuAnchorEl)
 
   const handleModuleClick = (module: CreationModule) => {
     const isAdminOnly = module.adminOnly && !hasAdminRole
@@ -151,47 +137,26 @@ export default function CreationModulePage() {
     }
   }
 
-  const handleOpenUserMenu = (event: MouseEvent<HTMLElement>) => {
-    setUserMenuAnchorEl(event.currentTarget)
-  }
-
-  const handleCloseUserMenu = () => {
-    setUserMenuAnchorEl(null)
-  }
-
-  const handleOpenSettings = () => {
-    handleCloseUserMenu()
-    navigate('/user-center')
-  }
-
-  const handleOpenPointsCenter = () => {
-    handleCloseUserMenu()
-    navigate('/user-center?tab=points')
-  }
-
-  const handleLogout = () => {
-    handleCloseUserMenu()
-    dispatch(logout())
-    navigate('/login')
-  }
-
   const handleBookUploadSuccess = (book: BookSource) => {
     setSnackbar({
       open: true,
-      message: `书籍《${book.title}》已上传、完成拆书分析并自动导入灵感方舟，请在灵感方舟中查看`,
+      message: t('creationModule.bookUploaded', { title: book.title }),
     })
   }
 
   return (
     <Box
-      sx={{
-        minHeight: '100dvh',
-        background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+      sx={(theme) => ({
+        // 原写死紫色渐变（不随暗色反相）→「墨与光」token：画布底 + 黄铜/墨青极淡渐变，
+        // 双模式都由 token 反相；flex:1 填满 AppShell 的 <main>，不再自撑 100dvh 造成双滚动。
+        flex: 1,
+        backgroundColor: theme.palette.background.default,
+        backgroundImage: `linear-gradient(160deg, ${alpha(theme.palette.primary.main, 0.1)} 0%, ${alpha(theme.palette.secondary.main, 0.07)} 100%)`,
         py: { xs: 2, sm: 3, md: 4 },
         px: { xs: 1, sm: 2 },
         display: 'flex',
         flexDirection: 'column',
-      }}
+      })}
     >
       <Container
         maxWidth="lg"
@@ -216,22 +181,22 @@ export default function CreationModulePage() {
             <Typography
               variant="h4"
               sx={{
-                color: 'white',
+                color: 'text.primary',
                 fontWeight: 700,
                 mb: 0.5,
                 fontSize: { xs: '1.5rem', sm: '1.75rem', md: '2rem' },
               }}
             >
-              创作工坊
+              {t('creationModule.title')}
             </Typography>
             <Typography
               variant="body1"
               sx={{
-                color: 'rgba(255,255,255,0.8)',
+                color: 'text.secondary',
                 fontSize: { xs: '0.875rem', sm: '1rem' },
               }}
             >
-              选择你的创作模式，开启智能创作之旅
+              {t('creationModule.subtitle')}
             </Typography>
           </Box>
 
@@ -250,7 +215,7 @@ export default function CreationModulePage() {
               onClick={() => navigate('/asset-studio')}
               sx={headerActionButtonSx}
             >
-              资产生成
+              {t('creationModule.assetStudio')}
             </Button>
 
             <Button
@@ -260,191 +225,10 @@ export default function CreationModulePage() {
               onClick={() => navigate('/model-catalog')}
               sx={headerActionButtonSx}
             >
-              模型中心
-            </Button>
-
-            <Button
-              variant="outlined"
-              size="small"
-              onClick={handleOpenUserMenu}
-              aria-controls={userMenuOpen ? userMenuId : undefined}
-              aria-haspopup="true"
-              aria-expanded={userMenuOpen ? 'true' : undefined}
-              sx={{
-                ...headerActionButtonSx,
-                minHeight: { xs: 44, sm: 44 },
-                px: { xs: 1, sm: 1.2 },
-                textTransform: 'none',
-                gap: 1,
-              }}
-            >
-              <Avatar
-                src={user?.avatar_url || undefined}
-                sx={{
-                  width: 28,
-                  height: 28,
-                  fontSize: '0.875rem',
-                  fontWeight: 700,
-                  bgcolor: 'rgba(255,255,255,0.2)',
-                }}
-              >
-                {userAvatarFallback}
-              </Avatar>
-              <Box
-                sx={{
-                  display: 'flex',
-                  flexDirection: 'column',
-                  alignItems: 'flex-start',
-                  minWidth: 0,
-                  maxWidth: { xs: 120, sm: 156 },
-                }}
-              >
-                <Typography
-                  sx={{
-                    fontSize: '0.875rem',
-                    fontWeight: 700,
-                    lineHeight: 1.15,
-                    color: 'inherit',
-                    width: '100%',
-                    whiteSpace: 'nowrap',
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                  }}
-                >
-                  {userDisplayName}
-                </Typography>
-                <Typography
-                  sx={{
-                    fontSize: '0.72rem',
-                    lineHeight: 1.15,
-                    color: 'rgba(255,255,255,0.78)',
-                    width: '100%',
-                    whiteSpace: 'nowrap',
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                  }}
-                >
-                  {userCenterSubtitle}
-                </Typography>
-              </Box>
-              <ExpandMoreIcon sx={{ fontSize: 18, opacity: 0.82 }} />
+              {t('creationModule.modelCatalog')}
             </Button>
           </Box>
         </Box>
-
-        <Menu
-          id={userMenuId}
-          anchorEl={userMenuAnchorEl}
-          open={userMenuOpen}
-          onClose={handleCloseUserMenu}
-          anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
-          transformOrigin={{ vertical: 'top', horizontal: 'right' }}
-          PaperProps={{
-            sx: {
-              mt: 1,
-              minWidth: 300,
-              borderRadius: 3,
-              overflow: 'hidden',
-              boxShadow: '0 18px 40px rgba(16, 24, 40, 0.18)',
-            },
-          }}
-        >
-          <Box
-            sx={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 1.5,
-              px: 2,
-              py: 1.75,
-              background: 'linear-gradient(135deg, rgba(102, 126, 234, 0.12) 0%, rgba(118, 75, 162, 0.12) 100%)',
-            }}
-          >
-            <Avatar
-              src={user?.avatar_url || undefined}
-              sx={{
-                width: 44,
-                height: 44,
-                fontWeight: 700,
-                bgcolor: '#667eea',
-              }}
-            >
-              {userAvatarFallback}
-            </Avatar>
-            <Box sx={{ minWidth: 0, flex: 1 }}>
-              <Typography
-                sx={{
-                  fontSize: '0.95rem',
-                  fontWeight: 700,
-                  color: 'text.primary',
-                  whiteSpace: 'nowrap',
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                }}
-              >
-                {userDisplayName}
-              </Typography>
-              <Typography
-                sx={{
-                  mt: 0.2,
-                  fontSize: '0.78rem',
-                  color: 'text.secondary',
-                  whiteSpace: 'nowrap',
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                }}
-              >
-                {userIdentity}
-              </Typography>
-              <Box sx={{ display: 'flex', gap: 0.75, flexWrap: 'wrap', mt: 0.9 }}>
-                <Chip
-                  size="small"
-                  label={hasAdminRole ? '管理员账户' : '创作者账户'}
-                  sx={{
-                    height: 22,
-                    fontSize: '0.7rem',
-                    backgroundColor: 'rgba(102, 126, 234, 0.12)',
-                    color: '#5b64d6',
-                  }}
-                />
-                <Chip
-                  size="small"
-                  label="积分账本已接入"
-                  sx={{
-                    height: 22,
-                    fontSize: '0.7rem',
-                    backgroundColor: 'rgba(255, 193, 7, 0.14)',
-                    color: '#8a6700',
-                  }}
-                />
-              </Box>
-            </Box>
-          </Box>
-
-          <Divider />
-
-          <MenuItem onClick={handleOpenSettings}>
-            <ListItemIcon>
-              <ManageAccountsOutlinedIcon fontSize="small" />
-            </ListItemIcon>
-            <ListItemText primary="用户中心" secondary="查看创作概览、资产规划、账户与安全设置" />
-          </MenuItem>
-
-          <MenuItem onClick={handleOpenPointsCenter}>
-            <ListItemIcon>
-              <StarsOutlinedIcon fontSize="small" />
-            </ListItemIcon>
-            <ListItemText primary="积分中心" secondary="直达用户中心的积分与权益页" />
-          </MenuItem>
-
-          <Divider />
-
-          <MenuItem onClick={handleLogout} sx={{ color: '#d32f2f' }}>
-            <ListItemIcon sx={{ color: 'inherit' }}>
-              <LogoutIcon fontSize="small" />
-            </ListItemIcon>
-            <ListItemText primary="退出登录" secondary="从当前设备安全退出账户" />
-          </MenuItem>
-        </Menu>
 
         <Grid container spacing={{ xs: 1.5, sm: 2, md: 2.5 }} sx={{ flex: 1 }}>
           {modules.map((module) => {
@@ -463,35 +247,36 @@ export default function CreationModulePage() {
                     transition: 'all 0.3s ease',
                     opacity: isAvailable ? 1 : 0.6,
                     position: 'relative',
-                    boxShadow: '0 12px 28px rgba(19, 22, 52, 0.12)',
+                    boxShadow: 4,
                     '&:hover': {
                       transform: isAvailable ? 'translateY(-3px)' : 'none',
-                      boxShadow: isAvailable ? '0 18px 34px rgba(17, 24, 39, 0.18)' : '0 12px 28px rgba(19, 22, 52, 0.12)',
+                      boxShadow: isAvailable ? 8 : 4,
                     },
                   }}
                 >
                   {isNovel && (
-                    <Tooltip title="拆书工具 - 智能分析书籍结构" placement="top" arrow>
+                    <Tooltip title={t('creationModule.bookParserTooltip')} placement="top" arrow>
                       <IconButton
                         onClick={(event) => {
                           event.stopPropagation()
                           setBookUploadDialogOpen(true)
                         }}
-                        sx={{
+                        sx={(theme) => ({
                           position: 'absolute',
                           top: { xs: 6, sm: 8 },
                           right: { xs: 6, sm: 8 },
                           zIndex: 10,
                           width: { xs: 36, sm: 40 },
                           height: { xs: 36, sm: 40 },
-                          backgroundColor: 'rgba(0, 131, 143, 0.1)',
-                          color: '#00838f',
+                          // 拆书工具按钮走 info token：柔色底 + info 前景，hover 加深，随主题反相（原 teal 在暗底几乎不可见）。
+                          backgroundColor: alpha(theme.palette.info.main, 0.1),
+                          color: theme.palette.info.main,
                           transition: 'all 0.3s ease',
                           '&:hover': {
-                            backgroundColor: 'rgba(0, 131, 143, 0.2)',
+                            backgroundColor: alpha(theme.palette.info.main, 0.2),
                             transform: 'scale(1.1) rotate(-5deg)',
                           },
-                        }}
+                        })}
                       >
                         <BrokenBookIcon />
                       </IconButton>
@@ -568,11 +353,11 @@ export default function CreationModulePage() {
 
                           {!isAvailable && module.adminOnly ? (
                             <Chip
-                              label="管理员专属"
+                              label={t('creationModule.adminOnly')}
                               size="small"
                               sx={{
-                                backgroundColor: '#f5f5f5',
-                                color: '#757575',
+                                backgroundColor: 'action.disabledBackground',
+                                color: 'text.disabled',
                                 fontSize: { xs: '0.68rem', sm: '0.72rem' },
                                 height: { xs: 22, sm: 24 },
                               }}
@@ -581,10 +366,10 @@ export default function CreationModulePage() {
 
                           {!isAvailable && !module.adminOnly ? (
                             <Chip
-                              label="敬请期待"
+                              label={t('creationModule.comingSoon')}
                               size="small"
                               sx={{
-                                backgroundColor: '#f5f5f5',
+                                backgroundColor: 'action.disabledBackground',
                                 fontSize: { xs: '0.68rem', sm: '0.72rem' },
                                 height: { xs: 22, sm: 24 },
                               }}

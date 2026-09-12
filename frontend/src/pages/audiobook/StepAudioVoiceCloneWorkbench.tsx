@@ -23,7 +23,8 @@ import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import PlayArrowIcon from '@mui/icons-material/PlayArrow'
 
 import { apiClient, extractApiErrorMessage } from '../../services/api'
-import { audiobookButtonSx } from './audiobookTheme'
+import { useTranslation } from 'react-i18next'
+import { audiobookButtonSx, audiobookColors } from './audiobookTheme'
 import CosyVoiceCloneRecordDialog from './CosyVoiceCloneRecordDialog'
 import type { TtsModel, VoicePreset } from './types'
 import {
@@ -61,6 +62,7 @@ const StepAudioVoiceCloneWorkbench = ({
   onPreviewCustomVoice,
   onChanged,
 }: StepAudioVoiceCloneWorkbenchProps) => {
+  const { t } = useTranslation()
   const [name, setName] = useState('')
   const [sampleText, setSampleText] = useState('')
   const [fileId, setFileId] = useState('')
@@ -104,13 +106,13 @@ const StepAudioVoiceCloneWorkbench = ({
     setMessage(null)
     try {
       if (!isMimoCloneSupportedAudioFile(file)) {
-        throw new Error('StepAudio Voice Clone 参考样本仅支持 mp3 或 wav 音频')
+        throw new Error(t('audiobook.stepAudioWorkbench.sampleTypeError'))
       }
       setCloneSampleFile(file)
       clearPreviewResult()
-      setMessage('已选择参考样本，请先预试听，满意后再确认保存。')
+      setMessage(t('audiobook.stepAudioWorkbench.sampleSelectedMessage'))
     } catch (err: unknown) {
-      setError(await extractApiErrorMessage(err, '选择 StepAudio 参考样本失败'))
+      setError(await extractApiErrorMessage(err, t('audiobook.stepAudioWorkbench.selectSampleFailed')))
     } finally {
       setUploading(false)
     }
@@ -125,9 +127,9 @@ const StepAudioVoiceCloneWorkbench = ({
       const file = await convertRecordedAudioBlobToWavFile(blob)
       setCloneSampleFile(file)
       clearPreviewResult()
-      setMessage('录音已转换为 WAV 参考样本，请先预试听，满意后再确认保存。')
+      setMessage(t('audiobook.stepAudioWorkbench.recordingConvertedMessage'))
     } catch (err: unknown) {
-      setError(await extractApiErrorMessage(err, '录音转换为 WAV 失败，请改用上传 mp3 或 wav 文件'))
+      setError(await extractApiErrorMessage(err, t('audiobook.stepAudioWorkbench.recordingConvertFailed')))
     } finally {
       setUploading(false)
     }
@@ -153,7 +155,7 @@ const StepAudioVoiceCloneWorkbench = ({
     setError(null)
     setMessage(null)
     if (!sampleText.trim()) {
-      setError('请先填写参考音频逐字内容，再开始录音')
+      setError(t('audiobook.stepAudioWorkbench.transcriptRequiredForRecording'))
       return
     }
     setRecordDialogOpen(true)
@@ -166,10 +168,10 @@ const StepAudioVoiceCloneWorkbench = ({
     clearPreviewResult()
     try {
       if (!cloneSampleFile) {
-        throw new Error('请先录音或上传音频样本')
+        throw new Error(t('audiobook.stepAudioWorkbench.sampleRequired'))
       }
       if (!sampleText.trim()) {
-        throw new Error('请填写参考音频逐字内容')
+        throw new Error(t('audiobook.stepAudioWorkbench.transcriptRequired'))
       }
       const response = await apiClient.previewStepAudioVoiceCloneAssetFromFile({
         name: name.trim(),
@@ -191,9 +193,9 @@ const StepAudioVoiceCloneWorkbench = ({
         audioMimeType,
         audioSizeBytes: payload.audio_size_bytes || 0,
       })
-      setMessage('预试听已生成，请先听效果，满意后再确认保存。')
+      setMessage(t('audiobook.stepAudioWorkbench.previewGeneratedMessage'))
     } catch (err: unknown) {
-      setError(await extractApiErrorMessage(err, 'StepAudio 复刻预试听失败'))
+      setError(await extractApiErrorMessage(err, t('audiobook.stepAudioWorkbench.previewFailed')))
     } finally {
       setPreviewing(false)
     }
@@ -203,19 +205,19 @@ const StepAudioVoiceCloneWorkbench = ({
     setError(null)
     setMessage(null)
     if (!name.trim()) {
-      setError('请填写音色名称')
+      setError(t('audiobook.stepAudioWorkbench.nameRequired'))
       return
     }
     if (!cloneSampleFile) {
-      setError('请先录音或上传音频样本')
+      setError(t('audiobook.stepAudioWorkbench.sampleRequired'))
       return
     }
     if (!sampleText.trim()) {
-      setError('请填写参考音频逐字内容')
+      setError(t('audiobook.stepAudioWorkbench.transcriptRequired'))
       return
     }
     if (!previewResult) {
-      setError('请先完成预试听，满意后再确认保存')
+      setError(t('audiobook.stepAudioWorkbench.previewRequired'))
       return
     }
     setBillingConfirmOpen(true)
@@ -232,13 +234,13 @@ const StepAudioVoiceCloneWorkbench = ({
     setMessage(null)
     try {
       if (!cloneSampleFile) {
-        throw new Error('请先录音或上传音频样本')
+        throw new Error(t('audiobook.stepAudioWorkbench.sampleRequired'))
       }
       if (!sampleText.trim()) {
-        throw new Error('请填写参考音频逐字内容')
+        throw new Error(t('audiobook.stepAudioWorkbench.transcriptRequired'))
       }
       if (!previewResult) {
-        throw new Error('请先完成预试听，满意后再确认保存')
+        throw new Error(t('audiobook.stepAudioWorkbench.previewRequired'))
       }
       await apiClient.createStepAudioVoiceCloneAssetFromFile({
         name: name.trim(),
@@ -251,10 +253,10 @@ const StepAudioVoiceCloneWorkbench = ({
       setFileId('')
       setCloneSampleFile(null)
       clearPreviewResult()
-      setMessage('已保存 StepAudio 参考音色，可在角色音色下拉中选择。')
+      setMessage(t('audiobook.stepAudioWorkbench.savedMessage'))
       onChanged()
     } catch (err: unknown) {
-      setError(await extractApiErrorMessage(err, '保存 StepAudio 参考音色失败'))
+      setError(await extractApiErrorMessage(err, t('audiobook.stepAudioWorkbench.saveFailed')))
     } finally {
       setLoading(false)
     }
@@ -272,10 +274,10 @@ const StepAudioVoiceCloneWorkbench = ({
     setMessage(null)
     try {
       await apiClient.deleteStepAudioVoiceAsset(assetId)
-      setMessage('已删除 StepAudio 本地参考音色。')
+      setMessage(t('audiobook.stepAudioWorkbench.deletedMessage'))
       onChanged()
     } catch (err: unknown) {
-      setError(await extractApiErrorMessage(err, '删除 StepAudio 参考音色失败'))
+      setError(await extractApiErrorMessage(err, t('audiobook.stepAudioWorkbench.deleteFailed')))
     } finally {
       setDeletingId(null)
     }
@@ -284,10 +286,10 @@ const StepAudioVoiceCloneWorkbench = ({
   return (
     <Paper variant="outlined" sx={{ mb: 1, p: 1.5 }}>
       <Typography variant="subtitle2" sx={{ mb: 0.5 }}>
-        自定义音色管理（StepAudio Zero-shot 参考样本）
+        {t('audiobook.stepAudioWorkbench.title')}
       </Typography>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
-        StepAudio 与其他声音克隆不同，参考音频必须和“参考音频逐字内容”一致；先预试听，再确认保存，正式复刻/生成音色可能产生 9.9 元/音色费用。
+        {t('audiobook.stepAudioWorkbench.intro')}
       </Typography>
 
       <Paper
@@ -301,10 +303,10 @@ const StepAudioVoiceCloneWorkbench = ({
       >
         <Box sx={{ minWidth: 0, maxWidth: 760 }}>
           <Typography variant="subtitle1" sx={{ fontWeight: 800, lineHeight: 1.25 }}>
-            声音复刻参考
+            {t('audiobook.stepAudioWorkbench.referenceTitle')}
           </Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5, lineHeight: 1.75 }}>
-            上传 mp3/wav 或录制真实样本。预试听会生成并回填官方 file_id，确认保存后可在角色音色下拉中选择。
+            {t('audiobook.stepAudioWorkbench.referenceExplain')}
           </Typography>
         </Box>
 
@@ -319,7 +321,7 @@ const StepAudioVoiceCloneWorkbench = ({
           }}
         >
           <TextField
-            label="音色名称"
+            label={t('audiobook.stepAudioWorkbench.nameLabel')}
             value={name}
             onChange={(event) => setName(event.target.value)}
             size="small"
@@ -336,7 +338,7 @@ const StepAudioVoiceCloneWorkbench = ({
               startIcon={previewing ? <CircularProgress size={18} color="inherit" /> : undefined}
               sx={{ ...audiobookButtonSx.brandOutlined, minHeight: 40 }}
             >
-              {previewing ? '预试听中...' : '预试听'}
+              {previewing ? t('audiobook.stepAudioWorkbench.previewingText') : t('audiobook.stepAudioWorkbench.previewButton')}
             </Button>
             <Button
               fullWidth
@@ -346,11 +348,11 @@ const StepAudioVoiceCloneWorkbench = ({
               startIcon={loading ? <CircularProgress size={18} color="inherit" /> : undefined}
               sx={{ ...audiobookButtonSx.brandContained, minHeight: 40 }}
             >
-              {loading ? '保存中...' : '确认保存'}
+              {loading ? t('audiobook.stepAudioWorkbench.savingText') : t('audiobook.stepAudioWorkbench.confirmSave')}
             </Button>
           </Box>
           <TextField
-            label="参考音频逐字内容"
+            label={t('audiobook.stepAudioWorkbench.transcriptLabel')}
             value={sampleText}
             onChange={(event) => {
               setSampleText(event.target.value)
@@ -362,12 +364,12 @@ const StepAudioVoiceCloneWorkbench = ({
             minRows={3}
             maxRows={5}
             disabled={busy}
-            placeholder="逐字填写录音或上传音频里实际说出的内容"
-            helperText="官方会校验样本文本与音频 ASR；请填写参考音频里实际说出的完整内容，不要填写试听文本。"
+            placeholder={t('audiobook.stepAudioWorkbench.transcriptPlaceholder')}
+            helperText={t('audiobook.stepAudioWorkbench.transcriptHelper')}
             sx={{ gridColumn: '1 / -1', minWidth: 0 }}
           />
           <TextField
-            label="StepAudio file_id（可选，留空自动上传生成）"
+            label={t('audiobook.stepAudioWorkbench.fileIdLabel')}
             value={fileId}
             onChange={(event) => {
               setFileId(event.target.value)
@@ -377,7 +379,7 @@ const StepAudioVoiceCloneWorkbench = ({
             fullWidth
             disabled={busy}
             placeholder="file-Ckyl3cV09A"
-            helperText="留空时预试听会使用 STEP_API_KEY/STEPFUN_API_KEY 调用 StepFun 文件接口生成 file_id；确认保存会复用该 file_id。"
+            helperText={t('audiobook.stepAudioWorkbench.fileIdHelper')}
             sx={{ gridColumn: '1 / -1', minWidth: 0 }}
           />
           <Box
@@ -398,9 +400,9 @@ const StepAudioVoiceCloneWorkbench = ({
           >
             <Box sx={{ minWidth: 0, flex: 1 }}>
               <Typography variant="caption" color="text.secondary" sx={{ display: 'block', lineHeight: 1.2 }}>
-                {cloneSampleFile ? '已选择音频样本' : '音频样本'}
+                {cloneSampleFile ? t('audiobook.stepAudioWorkbench.sampleSelectedLabel') : t('audiobook.stepAudioWorkbench.sampleLabel')}
               </Typography>
-              <Tooltip title={cloneSampleSummary || '请录音或上传音频样本'}>
+              <Tooltip title={cloneSampleSummary || t('audiobook.stepAudioWorkbench.sampleRequired')}>
                 <Typography
                   variant="body2"
                   sx={{
@@ -409,7 +411,7 @@ const StepAudioVoiceCloneWorkbench = ({
                     whiteSpace: 'nowrap',
                   }}
                 >
-                  {cloneSampleSummary || '尚未选择样本'}
+                  {cloneSampleSummary || t('audiobook.stepAudioWorkbench.hasNoSample')}
                 </Typography>
               </Tooltip>
             </Box>
@@ -425,7 +427,7 @@ const StepAudioVoiceCloneWorkbench = ({
                 }}
                 sx={{ minWidth: 64 }}
               >
-                清除样本
+                {t('audiobook.stepAudioWorkbench.clearSample')}
               </Button>
             )}
           </Box>
@@ -438,11 +440,11 @@ const StepAudioVoiceCloneWorkbench = ({
                 border: '1px solid',
                 borderColor: 'success.main',
                 borderRadius: 1,
-                backgroundColor: 'rgba(46, 125, 50, 0.06)',
+                backgroundColor: audiobookColors.successSoft,
               }}
             >
               <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.75 }}>
-                预试听已生成，file_id：{previewResult.fileId || '未返回'}
+                {t('audiobook.stepAudioWorkbench.previewGeneratedWithFileId', { fileId: previewResult.fileId || t('audiobook.stepAudioWorkbench.notReturned') })}
               </Typography>
               <audio controls src={previewResult.previewAudioUrl} style={{ width: '100%', display: 'block' }} />
             </Box>
@@ -456,7 +458,7 @@ const StepAudioVoiceCloneWorkbench = ({
             onClick={handleOpenRecordDialog}
             sx={audiobookButtonSx.neutralOutlined}
           >
-            录音
+            {t('audiobook.stepAudioWorkbench.record')}
           </Button>
           <Button
             variant="outlined"
@@ -465,7 +467,7 @@ const StepAudioVoiceCloneWorkbench = ({
             startIcon={uploading ? <CircularProgress size={16} color="inherit" /> : undefined}
             sx={audiobookButtonSx.brandOutlined}
           >
-            {uploading ? '上传中...' : '上传音频'}
+            {uploading ? t('audiobook.stepAudioWorkbench.uploadingText') : t('audiobook.stepAudioWorkbench.uploadAudio')}
             <input
               type="file"
               hidden
@@ -474,7 +476,7 @@ const StepAudioVoiceCloneWorkbench = ({
             />
           </Button>
           <Typography variant="caption" color="text.secondary" sx={{ minWidth: 220, flex: '1 1 280px' }}>
-            StepAudio 参考样本当前限制 mp3/wav；录音会自动转换为 wav，本地索引不会保存大段编码内容。
+            {t('audiobook.stepAudioWorkbench.formatHint')}
           </Typography>
         </Box>
       </Paper>
@@ -491,8 +493,8 @@ const StepAudioVoiceCloneWorkbench = ({
               const isPreviewing = previewingVoiceId === preset.id
               const presetDisabled = Boolean(preset.disabled)
               const previewTooltip = presetDisabled
-                ? (preset.disabledReason || '当前音色暂不可试听')
-                : '试听'
+                ? (preset.disabledReason || t('audiobook.stepAudioWorkbench.previewDisabledTooltip'))
+                : t('audiobook.stepAudioWorkbench.listen')
               return (
                 <Box
                   key={preset.id}
@@ -556,20 +558,20 @@ const StepAudioVoiceCloneWorkbench = ({
                           size="small"
                           disabled={presetDisabled || Boolean(previewingVoiceId) || isDeleting}
                           onClick={() => onPreviewCustomVoice(preset, 'stepaudio-2.5-tts')}
-                          aria-label={`试听 ${preset.label || preset.id}`}
+                          aria-label={t('audiobook.stepAudioWorkbench.previewAria', { label: preset.label || preset.id })}
                         >
                           {isPreviewing ? <CircularProgress size={18} /> : <PlayArrowIcon fontSize="small" />}
                         </IconButton>
                       </span>
                     </Tooltip>
-                    <Tooltip title={isDeleting ? '删除中' : '删除'}>
+                    <Tooltip title={isDeleting ? t('audiobook.stepAudioWorkbench.deleting') : t('audiobook.stepAudioWorkbench.delete')}>
                       <span>
                         <IconButton
                           size="small"
                           color="error"
                           disabled={isDeleting}
                           onClick={() => handleDelete(preset.id)}
-                          aria-label={`删除 ${preset.label || preset.id}`}
+                          aria-label={t('audiobook.stepAudioWorkbench.deleteAria', { label: preset.label || preset.id })}
                         >
                           {isDeleting ? <CircularProgress size={18} /> : <DeleteOutlineIcon fontSize="small" />}
                         </IconButton>
@@ -587,7 +589,7 @@ const StepAudioVoiceCloneWorkbench = ({
                 onClick={() => setShowAllPresets((current) => !current)}
                 sx={{ justifySelf: 'start', fontSize: '0.75rem', minWidth: 0 }}
               >
-                {showAllPresets ? '收起' : `展开 ${hiddenPresetCount} 个`}
+                {showAllPresets ? t('audiobook.stepAudioWorkbench.collapse') : t('audiobook.stepAudioWorkbench.expandCount', { count: hiddenPresetCount })}
               </Button>
             )}
           </Box>
@@ -612,21 +614,21 @@ const StepAudioVoiceCloneWorkbench = ({
         fullWidth
         maxWidth="xs"
       >
-        <DialogTitle>收费确认</DialogTitle>
+        <DialogTitle>{t('audiobook.stepAudioWorkbench.billingTitle')}</DialogTitle>
         <DialogContent dividers>
           <Typography variant="body2" sx={{ mb: 1 }}>
-            本次确认保存可能产生 9.9 元/音色费用。
+            {t('audiobook.stepAudioWorkbench.billingBody1')}
           </Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-            请确认已经完成预试听，并且对参考音色效果满意。确认后会保存该 StepAudio 复刻音色，后续可在角色音色下拉中直接选择。
+            {t('audiobook.stepAudioWorkbench.billingBody2')}
           </Typography>
           <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
-            音色名称：{name.trim() || '未命名'}；file_id：{previewResult?.fileId || '未返回'}
+            {t('audiobook.stepAudioWorkbench.billingSummary', { name: name.trim() || t('audiobook.stepAudioWorkbench.unnamed'), fileId: previewResult?.fileId || t('audiobook.stepAudioWorkbench.notReturned') })}
           </Typography>
         </DialogContent>
         <DialogActions>
           <Button onClick={handleCloseBillingConfirm} disabled={loading}>
-            取消
+            {t('action.cancel')}
           </Button>
           <Button
             variant="contained"
@@ -635,7 +637,7 @@ const StepAudioVoiceCloneWorkbench = ({
             onClick={handleConfirmBillingSave}
             startIcon={loading ? <CircularProgress size={18} color="inherit" /> : undefined}
           >
-            {loading ? '保存中...' : '确认收费并保存'}
+            {loading ? t('audiobook.stepAudioWorkbench.savingText') : t('audiobook.stepAudioWorkbench.confirmBillingSave')}
           </Button>
         </DialogActions>
       </Dialog>

@@ -2,6 +2,7 @@ import {
   Box,
   Typography,
 } from '@mui/material'
+import { useTranslation } from 'react-i18next'
 
 import ChapterAudioResultItem from './ChapterAudioResultItem'
 import type { Chapter, ChapterAudio, GenerationCheckpoint, TtsModel } from './types'
@@ -43,6 +44,7 @@ const ChapterAudioResults = ({
   onResumeChapterGeneration,
   onOpenScriptReview,
 }: ChapterAudioResultsProps) => {
+  const { t } = useTranslation()
   if (chapterAudios.length === 0) {
     return null
   }
@@ -50,7 +52,7 @@ const ChapterAudioResults = ({
   return (
     <Box sx={{ width: '100%', mt: 2 }}>
       <Typography variant="subtitle1" sx={{ fontWeight: 700, mb: 1 }}>
-        章节结果
+        {t('audiobook.chapterAudioResults.sectionTitle')}
       </Typography>
       <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
         {chapterAudios.map((chapterAudio) => {

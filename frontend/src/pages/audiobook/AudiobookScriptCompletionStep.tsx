@@ -12,6 +12,7 @@ import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline'
 import EditNoteIcon from '@mui/icons-material/EditNote'
 import FactCheckIcon from '@mui/icons-material/FactCheck'
 import GraphicEqIcon from '@mui/icons-material/GraphicEq'
+import { useTranslation } from 'react-i18next'
 
 import ChapterScriptResults from './ChapterScriptResults'
 import {
@@ -55,20 +56,21 @@ const AudiobookScriptCompletionStep = ({
   onGenerateApprovedChapterAudio,
   onCreateNewProject,
 }: AudiobookScriptCompletionStepProps) => {
+  const { t } = useTranslation()
   const summary = buildScriptCompletionSummary(currentChapterAudios)
   const reviewTargetChapterId = resolveScriptReviewTargetChapterId(currentChapterAudios)
   const isSeedScene = audioEngineMode === 'seed_scene'
   const canGenerateAudio = summary.approvedChapterCount > 0 && !generating
   const generateTooltip = summary.approvedChapterCount === 0
-    ? '请先批准至少一个章节剧本'
+    ? t('audiobook.audiobookScriptCompletionStep.approveFirstTooltip')
     : generating
-      ? '当前已有生成任务正在执行'
+      ? t('audiobook.audiobookScriptCompletionStep.taskRunningTooltip')
       : ''
   const summaryItems = [
-    { label: '剧本章节', value: summary.scriptChapterCount },
-    { label: '剧本片段', value: summary.segmentCount },
-    { label: '自动评审', value: summary.reviewedChapterCount },
-    { label: '已批准', value: summary.approvedChapterCount },
+    { label: t('audiobook.audiobookScriptCompletionStep.scriptChapters'), value: summary.scriptChapterCount },
+    { label: t('audiobook.audiobookScriptCompletionStep.scriptSegments'), value: summary.segmentCount },
+    { label: t('audiobook.audiobookScriptCompletionStep.autoReviewed'), value: summary.reviewedChapterCount },
+    { label: t('audiobook.audiobookScriptCompletionStep.approved'), value: summary.approvedChapterCount },
   ]
 
   return (
@@ -107,17 +109,19 @@ const AudiobookScriptCompletionStep = ({
           </Box>
           <Box sx={{ minWidth: 0 }}>
             <Typography variant="h5" sx={{ fontWeight: 700, mb: 0.5 }}>
-              场景剧本已生成
+              {t('audiobook.audiobookScriptCompletionStep.title')}
             </Typography>
             <Typography variant="body2" color="text.secondary">
-              台词、角色表演与声场设计已就绪，等待审阅批准。
+              {t('audiobook.audiobookScriptCompletionStep.subtitle')}
             </Typography>
           </Box>
         </Box>
         <Chip
           size="small"
           icon={<GraphicEqIcon />}
-          label={isSeedScene ? 'Seed Audio 1.0 · 等待渲染' : '分轨音频引擎 · 等待生成'}
+          label={isSeedScene
+            ? t('audiobook.audiobookScriptCompletionStep.seedEngineChip')
+            : t('audiobook.audiobookScriptCompletionStep.trackEngineChip')}
           color={isSeedScene ? 'primary' : 'default'}
           variant="outlined"
           sx={{ flexShrink: 0 }}
@@ -169,7 +173,7 @@ const AudiobookScriptCompletionStep = ({
           }}
           sx={audiobookButtonSx.brandContained}
         >
-          审阅并批准
+          {t('audiobook.audiobookScriptCompletionStep.reviewAndApprove')}
         </Button>
 
         {hasScriptReview && (
@@ -179,7 +183,7 @@ const AudiobookScriptCompletionStep = ({
             onClick={onOpenScriptReview}
             sx={audiobookButtonSx.brandOutlined}
           >
-            查看自动评审
+            {t('audiobook.audiobookScriptCompletionStep.viewAutoReview')}
           </Button>
         )}
 
@@ -193,10 +197,10 @@ const AudiobookScriptCompletionStep = ({
               onClick={onGenerateApprovedChapterAudio}
             >
               {generating
-                ? '正在提交...'
+                ? t('audiobook.audiobookScriptCompletionStep.submitting')
                 : isSeedScene
-                  ? '生成场景音频'
-                  : '生成分轨音频'}
+                  ? t('audiobook.audiobookScriptCompletionStep.generateSceneAudio')
+                  : t('audiobook.audiobookScriptCompletionStep.generateTrackAudio')}
             </Button>
           </span>
         </Tooltip>
@@ -207,13 +211,13 @@ const AudiobookScriptCompletionStep = ({
           onClick={onCreateNewProject}
           sx={{ ml: { xs: 0, md: 'auto' } }}
         >
-          开始新项目
+          {t('audiobook.audiobookScriptCompletionStep.startNewProject')}
         </Button>
       </Box>
 
       {summary.pendingApprovalCount > 0 && (
         <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
-          还有 {summary.pendingApprovalCount} 个章节等待批准
+          {t('audiobook.audiobookScriptCompletionStep.pendingApprovalHint', { total: summary.pendingApprovalCount })}
         </Typography>
       )}
 

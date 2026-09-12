@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import {
   Alert,
   Box,
@@ -25,17 +26,17 @@ import type {
   ReviewStrategyPreset,
 } from '@/types/project'
 
-const PRESET_LABELS: Record<ReviewPreset, string> = {
-  balanced_3: '普通增强（3 评审）',
-  key_chapter_5: '重点章节（5 评审）',
-  deep_7: '深度人工（7 评审）',
+const PRESET_LABEL_KEYS: Record<ReviewPreset, string> = {
+  balanced_3: 'project.multiModelReview.presetBalanced3',
+  key_chapter_5: 'project.multiModelReview.presetKeyChapter5',
+  deep_7: 'project.multiModelReview.presetDeep7',
 }
 
-const AUTO_STRATEGY_LABELS: Record<keyof ReviewAutoStrategy, string> = {
-  regular: '普通章节',
-  opening: '开篇章节',
-  key: '重点章节',
-  finale: '完结章节',
+const AUTO_STRATEGY_LABEL_KEYS: Record<keyof ReviewAutoStrategy, string> = {
+  regular: 'project.multiModelReview.strategyRegular',
+  opening: 'project.multiModelReview.strategyOpening',
+  key: 'project.multiModelReview.strategyKey',
+  finale: 'project.multiModelReview.strategyFinale',
 }
 
 const DEFAULT_AUTO_STRATEGY: ReviewAutoStrategy = {
@@ -84,6 +85,7 @@ export default function MultiModelReviewSettingsDialog({
   onClose,
   onSaved,
 }: MultiModelReviewSettingsDialogProps) {
+  const { t } = useTranslation()
   const [config, setConfig] = useState<MultiModelReviewConfig>(DEFAULT_CONFIG)
   const [availablePresets, setAvailablePresets] = useState<ReviewPreset[]>(['balanced_3', 'key_chapter_5', 'deep_7'])
   const [loading, setLoading] = useState(false)
@@ -105,7 +107,7 @@ export default function MultiModelReviewSettingsDialog({
       .catch(async (err) => {
         if (!active) return
         setConfig(DEFAULT_CONFIG)
-        setError(await extractApiErrorMessage(err, '加载评审设置失败'))
+        setError(await extractApiErrorMessage(err, t('project.multiModelReview.loadFailed')))
       })
       .finally(() => {
         if (active) setLoading(false)
@@ -147,7 +149,7 @@ export default function MultiModelReviewSettingsDialog({
       onSaved?.()
       onClose()
     } catch (err) {
-      setError(await extractApiErrorMessage(err, '保存评审设置失败'))
+      setError(await extractApiErrorMessage(err, t('project.multiModelReview.saveFailed')))
     } finally {
       setSaving(false)
     }
@@ -157,7 +159,7 @@ export default function MultiModelReviewSettingsDialog({
 
   return (
     <Dialog open={open} onClose={saving ? undefined : onClose} maxWidth="sm" fullWidth>
-      <DialogTitle>多模型评审设置</DialogTitle>
+      <DialogTitle>{t('project.multiModelReview.title')}</DialogTitle>
       <DialogContent dividers>
         <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.25 }}>
           {projectTitle ? (
@@ -181,31 +183,31 @@ export default function MultiModelReviewSettingsDialog({
                     onChange={(event) => updateConfig({ enabled: event.target.checked })}
                   />
                 }
-                label="启用多模型质量评审"
+                label={t('project.multiModelReview.enableLabel')}
               />
               {config.enabled ? (
                 <Alert severity="warning">
-                  会增加评审耗时与模型调用成本。
+                  {t('project.multiModelReview.costWarning')}
                 </Alert>
               ) : null}
 
               <Box>
-                <Typography variant="subtitle2" sx={{ mb: 1 }}>自动多模型评审策略</Typography>
+                <Typography variant="subtitle2" sx={{ mb: 1 }}>{t('project.multiModelReview.strategyTitle')}</Typography>
                 <Box sx={{ display: 'grid', gap: 1.5 }}>
-                  {(Object.keys(AUTO_STRATEGY_LABELS) as Array<keyof ReviewAutoStrategy>).map((key) => (
+                  {(Object.keys(AUTO_STRATEGY_LABEL_KEYS) as Array<keyof ReviewAutoStrategy>).map((key) => (
                     <FormControl key={key} fullWidth size="small" disabled={disabled}>
-                      <InputLabel>{AUTO_STRATEGY_LABELS[key]}</InputLabel>
+                      <InputLabel>{t(AUTO_STRATEGY_LABEL_KEYS[key])}</InputLabel>
                       <Select
-                        label={AUTO_STRATEGY_LABELS[key]}
+                        label={t(AUTO_STRATEGY_LABEL_KEYS[key])}
                         value={config.auto_strategy[key] || ''}
                         onChange={(event) => updateAutoStrategy(
                           key,
                           event.target.value ? event.target.value as ReviewPreset : null,
                         )}
                       >
-                        <MenuItem value="">不增强（单模型）</MenuItem>
+                        <MenuItem value="">{t('project.multiModelReview.noBoost')}</MenuItem>
                         {availablePresets.map((preset) => (
-                          <MenuItem key={preset} value={preset}>{PRESET_LABELS[preset]}</MenuItem>
+                          <MenuItem key={preset} value={preset}>{t(PRESET_LABEL_KEYS[preset])}</MenuItem>
                         ))}
                       </Select>
                     </FormControl>
@@ -217,9 +219,9 @@ export default function MultiModelReviewSettingsDialog({
         </Box>
       </DialogContent>
       <DialogActions>
-        <Button onClick={onClose} disabled={saving}>取消</Button>
+        <Button onClick={onClose} disabled={saving}>{t('action.cancel')}</Button>
         <Button variant="contained" onClick={handleSave} disabled={loading || saving || !projectId}>
-          {saving ? '保存中...' : '保存'}
+          {saving ? t('project.multiModelReview.saving') : t('common.save')}
         </Button>
       </DialogActions>
     </Dialog>

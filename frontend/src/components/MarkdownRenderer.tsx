@@ -5,6 +5,8 @@ import type { Components } from 'react-markdown'
 import ReactMarkdown from 'react-markdown'
 import rehypeRaw from 'rehype-raw'
 import remarkGfm from 'remark-gfm'
+import { useTranslation } from 'react-i18next'
+import type { TFunction } from 'i18next'
 import { normalizeMarkdownContent } from '@/utils/normalizeMarkdownContent'
 
 interface MarkdownRendererProps {
@@ -355,7 +357,7 @@ function renderMarkdownBlock(content: string, key: string) {
   )
 }
 
-function renderMarkdownSegments(content: string, keyPrefix: string): ReactNode[] {
+function renderMarkdownSegments(content: string, keyPrefix: string, t?: TFunction): ReactNode[] {
   return splitMarkdownContentSegments(content)
     .map((segment, index) => {
       const key = `${keyPrefix}-${index}`
@@ -367,10 +369,10 @@ function renderMarkdownSegments(content: string, keyPrefix: string): ReactNode[]
       return (
         <Box component="details" key={key} open={segment.open} sx={detailsContainerSx}>
           <Box component="summary" sx={detailsSummarySx}>
-            {segment.summary || '展开详情'}
+            {segment.summary || (t ? t('markdownRenderer.expandDetails') : '展开详情')}
           </Box>
           <Box sx={{ mt: 1 }}>
-            {renderMarkdownSegments(segment.content, `${key}-content`)}
+            {renderMarkdownSegments(segment.content, `${key}-content`, t)}
           </Box>
         </Box>
       )
@@ -379,11 +381,12 @@ function renderMarkdownSegments(content: string, keyPrefix: string): ReactNode[]
 }
 
 export default function MarkdownRenderer({ content }: MarkdownRendererProps) {
+  const { t } = useTranslation()
   if (!content) {
     return null
   }
 
-  const segments = renderMarkdownSegments(content, 'markdown')
+  const segments = renderMarkdownSegments(content, 'markdown', t)
   if (segments.length === 0) {
     return null
   }

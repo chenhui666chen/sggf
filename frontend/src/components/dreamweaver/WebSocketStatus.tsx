@@ -2,6 +2,7 @@ import { Chip, Tooltip } from '@mui/material'
 import SyncIcon from '@mui/icons-material/Sync'
 import WifiIcon from '@mui/icons-material/Wifi'
 import WifiOffIcon from '@mui/icons-material/WifiOff'
+import { useTranslation } from 'react-i18next'
 
 interface WebSocketStatusProps {
   isConnected: boolean
@@ -14,28 +15,29 @@ export function WebSocketStatus({
   isReconnecting,
   reconnectAttempts,
 }: WebSocketStatusProps) {
+  const { t } = useTranslation()
   const getStatusDisplay = () => {
     if (isConnected) {
       return {
         icon: <WifiIcon sx={{ fontSize: 16 }} />,
-        label: '已连接',
+        label: t('dreamweaverWs.statusConnected'),
         color: 'success' as const,
-        tooltip: 'WebSocket 连接正常',
+        tooltip: t('dreamweaverWs.statusConnectedTooltip'),
       }
     }
     if (isReconnecting) {
       return {
         icon: <SyncIcon sx={{ fontSize: 16, animation: 'spin 1s linear infinite', '@keyframes spin': { '0%': { transform: 'rotate(0deg)' }, '100%': { transform: 'rotate(360deg)' } } }} />,
-        label: `重连中(${reconnectAttempts})`,
+        label: t('dreamweaverWs.statusReconnecting', { attempts: reconnectAttempts }),
         color: 'warning' as const,
-        tooltip: `正在尝试重新连接 (${reconnectAttempts}/5)`,
+        tooltip: t('dreamweaverWs.statusReconnectingTooltip', { attempts: reconnectAttempts }),
       }
     }
     return {
       icon: <WifiOffIcon sx={{ fontSize: 16 }} />,
-      label: '已断开',
+      label: t('dreamweaverWs.statusDisconnected'),
       color: 'error' as const,
-      tooltip: 'WebSocket 连接已断开',
+      tooltip: t('dreamweaverWs.statusDisconnectedTooltip'),
     }
   }
 

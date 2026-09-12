@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { apiClient } from '@/services/api'
 
 export interface UseLibraryPreviewsOptions {
@@ -18,6 +19,7 @@ export function useLibraryPreviews(options: UseLibraryPreviewsOptions): LibraryP
   clear: () => void
 } {
   const { assets, enabled = true } = options
+  const { t } = useTranslation()
   const [previews, setPreviews] = useState<Record<number, string>>({})
   const [aspectRatios, setAspectRatios] = useState<Record<number, string>>({})
   const [loading, setLoading] = useState(false)
@@ -77,10 +79,10 @@ export function useLibraryPreviews(options: UseLibraryPreviewsOptions): LibraryP
       })
       .catch((err) => {
         if (requestId !== requestIdRef.current) return
-        setError(err?.message || '加载预览失败')
+        setError(err?.message || t('dreamweaverRun.errorLoadPreviewFailed'))
         setLoading(false)
       })
-  }, [assets, enabled, clear])
+  }, [assets, enabled, clear, t])
 
   useEffect(() => {
     reload()

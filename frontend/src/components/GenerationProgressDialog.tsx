@@ -20,6 +20,8 @@ import {
 import CheckCircleIcon from '@mui/icons-material/CheckCircle'
 import ErrorIcon from '@mui/icons-material/Error'
 import HourglassEmptyIcon from '@mui/icons-material/HourglassEmpty'
+import { useTranslation } from 'react-i18next'
+import { useFormats } from '@/i18n'
 import { GenerationTask } from '@/services/generation'
 
 interface GenerationProgressDialogProps {
@@ -37,6 +39,8 @@ export default function GenerationProgressDialog({
   onClose,
   onRetry,
 }: GenerationProgressDialogProps) {
+  const { t } = useTranslation()
+  const { formatDateTime } = useFormats()
   const [displayResult, setDisplayResult] = useState('')
 
   useEffect(() => {
@@ -46,14 +50,14 @@ export default function GenerationProgressDialog({
   }, [task?.result])
 
   const getTaskTypeLabel = (type: string) => {
-    const labels: Record<string, string> = {
-      concept: '项目概念生成',
-      world: '世界观生成',
-      character: '人物生成',
-      plot: '情节生成',
-      chapter: '章节生成',
+    const labelKeys: Record<string, string> = {
+      concept: 'workflow.generationProgress.taskTypeConcept',
+      world: 'workflow.generationProgress.taskTypeWorld',
+      character: 'workflow.generationProgress.taskTypeCharacter',
+      plot: 'workflow.generationProgress.taskTypePlot',
+      chapter: 'workflow.generationProgress.taskTypeChapter',
     }
-    return labels[type] || type
+    return labelKeys[type] ? t(labelKeys[type]) : type
   }
 
   const getStatusIcon = () => {
@@ -77,13 +81,13 @@ export default function GenerationProgressDialog({
 
     switch (task.status) {
       case 'pending':
-        return '等待处理中...'
+        return t('workflow.generationProgress.statusPending')
       case 'running':
-        return '正在生成中...'
+        return t('workflow.generationProgress.statusRunning')
       case 'completed':
-        return '生成完成！'
+        return t('workflow.generationProgress.statusCompleted')
       case 'failed':
-        return '生成失败'
+        return t('workflow.generationProgress.statusFailed')
       default:
         return ''
     }
@@ -113,7 +117,7 @@ export default function GenerationProgressDialog({
           <Box sx={{ mb: 3 }}>
             <LinearProgress />
             <Typography variant="caption" color="textSecondary" sx={{ mt: 1, display: 'block' }}>
-              任务ID: {task?.task_id}
+              {t('workflow.generationProgress.taskIdPrefix', { id: task?.task_id })}
             </Typography>
           </Box>
         )}
@@ -122,7 +126,7 @@ export default function GenerationProgressDialog({
         {isFailed && task?.error && (
           <Alert severity="error" sx={{ mb: 2 }}>
             <Typography variant="subtitle2" sx={{ fontWeight: 'bold', mb: 1 }}>
-              生成失败
+              {t('workflow.generationProgress.statusFailed')}
             </Typography>
             <Typography variant="body2">{task.error}</Typography>
           </Alert>
@@ -132,12 +136,12 @@ export default function GenerationProgressDialog({
         {isCompleted && displayResult && (
           <Box>
             <Alert severity="success" sx={{ mb: 2 }}>
-              内容已成功生成！
+              {t('workflow.generationProgress.generatedSuccess')}
             </Alert>
             <Paper
               sx={{
                 p: 2,
-                backgroundColor: '#f5f5f5',
+                backgroundColor: 'grey.100',
                 maxHeight: 400,
                 overflow: 'auto',
                 whiteSpace: 'pre-wrap',
@@ -156,12 +160,12 @@ export default function GenerationProgressDialog({
           <Box sx={{ mt: 3 }}>
             <Divider sx={{ mb: 2 }} />
             <Typography variant="subtitle2" sx={{ fontWeight: 'bold', mb: 1 }}>
-              任务信息
+              {t('workflow.generationProgress.taskInfo')}
             </Typography>
             <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 2 }}>
               <Box>
                 <Typography variant="caption" color="textSecondary">
-                  任务ID
+                  {t('workflow.generationProgress.taskId')}
                 </Typography>
                 <Typography variant="body2" sx={{ wordBreak: 'break-all' }}>
                   {task.task_id}
@@ -169,25 +173,25 @@ export default function GenerationProgressDialog({
               </Box>
               <Box>
                 <Typography variant="caption" color="textSecondary">
-                  状态
+                  {t('workflow.generationProgress.statusLabel')}
                 </Typography>
                 <Typography variant="body2">{task.status}</Typography>
               </Box>
               <Box>
                 <Typography variant="caption" color="textSecondary">
-                  创建时间
+                  {t('workflow.generationProgress.createdAt')}
                 </Typography>
                 <Typography variant="body2">
-                  {new Date(task.created_at).toLocaleString()}
+                  {formatDateTime(task.created_at)}
                 </Typography>
               </Box>
               {task.completed_at && (
                 <Box>
                   <Typography variant="caption" color="textSecondary">
-                    完成时间
+                    {t('workflow.generationProgress.completedAt')}
                   </Typography>
                   <Typography variant="body2">
-                    {new Date(task.completed_at).toLocaleString()}
+                    {formatDateTime(task.completed_at)}
                   </Typography>
                 </Box>
               )}
@@ -199,7 +203,7 @@ export default function GenerationProgressDialog({
       <DialogActions sx={{ p: 2 }}>
         {isFailed && onRetry && (
           <Button variant="contained" color="primary" onClick={onRetry}>
-            重试
+            {t('workflow.generationProgress.retry')}
           </Button>
         )}
         {isCompleted && (
@@ -210,15 +214,15 @@ export default function GenerationProgressDialog({
               // 复制结果到剪贴板
               if (displayResult) {
                 navigator.clipboard.writeText(displayResult)
-                alert('已复制到剪贴板')
+                alert(t('workflow.generationProgress.copied'))
               }
             }}
           >
-            复制结果
+            {t('workflow.generationProgress.copyResult')}
           </Button>
         )}
         <Button variant="outlined" onClick={onClose}>
-          {isLoading ? '最小化' : '关闭'}
+          {isLoading ? t('workflow.generationProgress.minimize') : t('action.close')}
         </Button>
       </DialogActions>
     </Dialog>

@@ -1,6 +1,16 @@
-import { describe, expect, it, vi } from 'vitest'
+import { beforeAll, describe, expect, it, vi } from 'vitest'
+import type { TFunction } from 'i18next'
+
+import { bootstrapI18n } from '@/i18n'
 
 import { buildUserCenterAssetConnectedOverviewCompanionViewModel } from '../user-assets/userCenterAssetConnectedOverviewCompanionViewModelHelper'
+
+let t: TFunction
+
+beforeAll(async () => {
+  const instance = await bootstrapI18n('zh-CN')
+  t = instance.t.bind(instance)
+})
 
 describe('userCenterAssetConnectedOverviewCompanionViewModelHelper', () => {
   it('composes strategy and points rules companion content options together', () => {
@@ -26,6 +36,7 @@ describe('userCenterAssetConnectedOverviewCompanionViewModelHelper', () => {
       formatPointsValueLabel,
       formatUpdatedAtLabel,
       getSourceLabel,
+      t,
     })
 
     expect(viewModel.strategyCompanionContentOptions).toEqual({
@@ -51,6 +62,7 @@ describe('userCenterAssetConnectedOverviewCompanionViewModelHelper', () => {
       formatPointsValueLabel: (value) => `${value}`,
       formatUpdatedAtLabel: (value) => value,
       getSourceLabel: () => '默认规则',
+      t,
     })
 
     expect(viewModel.strategyCompanionContentOptions.items).toHaveLength(3)

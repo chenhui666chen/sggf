@@ -1,4 +1,5 @@
 import { useCallback, useState, type Dispatch, type SetStateAction } from 'react'
+import { useTranslation } from 'react-i18next'
 
 import type { TaskPointsPrecheckErrorDetail } from '../../services/api'
 import type { SetSnackbar } from './hookTypes'
@@ -56,6 +57,7 @@ export const useAudiobookProjectSelectionActions = ({
   setActiveStep,
   setSnackbar,
 }: UseAudiobookProjectSelectionActionsParams) => {
+  const { t } = useTranslation()
   const [loadingCharacters, setLoadingCharacters] = useState(false)
 
   const handleSelectProject = useCallback(async (project: Project, options?: AudiobookSelectProjectOptions) => {
@@ -90,7 +92,7 @@ export const useAudiobookProjectSelectionActions = ({
         setActiveStep(0)
       }
     } catch {
-      setSnackbar({ open: true, message: '网络错误，请重试', severity: 'error' })
+      setSnackbar({ open: true, message: t('audiobook.useAudiobookProjectSelectionActions.loadFailed'), severity: 'error' })
     } finally {
       setLoadingCharacters(false)
     }
@@ -110,6 +112,7 @@ export const useAudiobookProjectSelectionActions = ({
     setTaskPointsPrecheckError,
     ttsModel,
     voicePresetsByModel,
+    t,
   ])
 
   return {

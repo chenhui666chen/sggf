@@ -1,5 +1,7 @@
 import { useCallback, useState } from 'react'
 
+import { useTranslation } from 'react-i18next'
+
 import type { BrowserPlayerProjectData } from '../../components/audiobook/browserPlayerTypes'
 import { apiClient, extractApiErrorMessage } from '../../services/api'
 import type { SetSnackbar } from './hookTypes'
@@ -13,6 +15,7 @@ export const useAudiobookBrowserPlayer = ({
   audiobookProjectId,
   setSnackbar,
 }: UseAudiobookBrowserPlayerParams) => {
+  const { t } = useTranslation()
   const [browserPlayerOpen, setBrowserPlayerOpen] = useState(false)
   const [browserPlayerLoading, setBrowserPlayerLoading] = useState(false)
   const [browserPlayerData, setBrowserPlayerData] = useState<BrowserPlayerProjectData | null>(null)
@@ -24,7 +27,7 @@ export const useAudiobookBrowserPlayer = ({
 
   const handleOpenBrowserPlayer = useCallback(async () => {
     if (!audiobookProjectId) {
-      setSnackbar({ open: true, message: '请先生成或加载有声书项目', severity: 'warning' })
+      setSnackbar({ open: true, message: t('audiobook.useAudiobookBrowserPlayer.noProject'), severity: 'warning' })
       return
     }
 
@@ -38,7 +41,7 @@ export const useAudiobookBrowserPlayer = ({
       }
 
       if (!normalizedData?.chapters?.length) {
-        setSnackbar({ open: true, message: '当前项目暂无可播放章节', severity: 'warning' })
+        setSnackbar({ open: true, message: t('audiobook.useAudiobookBrowserPlayer.noPlayableChapter'), severity: 'warning' })
         return
       }
 
@@ -47,13 +50,13 @@ export const useAudiobookBrowserPlayer = ({
     } catch (error: unknown) {
       setSnackbar({
         open: true,
-        message: await extractApiErrorMessage(error, '加载浏览器播放器失败，请稍后重试'),
+        message: await extractApiErrorMessage(error, t('audiobook.useAudiobookBrowserPlayer.loadFailed')),
         severity: 'error',
       })
     } finally {
       setBrowserPlayerLoading(false)
     }
-  }, [audiobookProjectId, setSnackbar])
+  }, [audiobookProjectId, setSnackbar, t])
 
   const handleCloseBrowserPlayer = useCallback(() => {
     setBrowserPlayerOpen(false)

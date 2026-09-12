@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 
 import {
   Box,
@@ -17,37 +18,38 @@ import type { CharacterVoiceSetting } from './types'
 interface SelectOption {
   value: string
   label: string
+  labelKey?: string
 }
 
 const VOICE_TYPE_OPTIONS: readonly SelectOption[] = [
-  { value: 'majestic', label: '威严' },
-  { value: 'gentle', label: '温柔' },
-  { value: 'lively', label: '活泼' },
-  { value: 'weathered', label: '沧桑' },
-  { value: 'warm', label: '温暖' },
-  { value: 'mysterious', label: '神秘' },
-  { value: 'powerful', label: '力量' },
-  { value: 'scholarly', label: '书卷气' },
-  { value: 'playful', label: '俏皮' },
-  { value: 'cold', label: '清冷' },
+  { value: 'majestic', label: '威严', labelKey: 'audiobook.characterVoiceTraits.majestic' },
+  { value: 'gentle', label: '温柔', labelKey: 'audiobook.characterVoiceTraits.gentle' },
+  { value: 'lively', label: '活泼', labelKey: 'audiobook.characterVoiceTraits.lively' },
+  { value: 'weathered', label: '沧桑', labelKey: 'audiobook.characterVoiceTraits.weathered' },
+  { value: 'warm', label: '温暖', labelKey: 'audiobook.characterVoiceTraits.warm' },
+  { value: 'mysterious', label: '神秘', labelKey: 'audiobook.characterVoiceTraits.mysterious' },
+  { value: 'powerful', label: '力量', labelKey: 'audiobook.characterVoiceTraits.powerful' },
+  { value: 'scholarly', label: '书卷气', labelKey: 'audiobook.characterVoiceTraits.scholarly' },
+  { value: 'playful', label: '俏皮', labelKey: 'audiobook.characterVoiceTraits.playful' },
+  { value: 'cold', label: '清冷', labelKey: 'audiobook.characterVoiceTraits.cold' },
 ]
 
 const PERSONALITY_OPTIONS: readonly SelectOption[] = [
-  { value: 'introvert', label: '内向' },
-  { value: 'extrovert', label: '外向' },
-  { value: 'ambitious', label: '野心' },
-  { value: 'calm', label: '冷静' },
-  { value: 'emotional', label: '感性' },
-  { value: 'rational', label: '理性' },
-  { value: 'rebel', label: '叛逆' },
-  { value: 'loyal', label: '忠诚' },
+  { value: 'introvert', label: '内向', labelKey: 'audiobook.characterVoiceTraits.introvert' },
+  { value: 'extrovert', label: '外向', labelKey: 'audiobook.characterVoiceTraits.extrovert' },
+  { value: 'ambitious', label: '野心', labelKey: 'audiobook.characterVoiceTraits.ambitious' },
+  { value: 'calm', label: '冷静', labelKey: 'audiobook.characterVoiceTraits.calm' },
+  { value: 'emotional', label: '感性', labelKey: 'audiobook.characterVoiceTraits.emotional' },
+  { value: 'rational', label: '理性', labelKey: 'audiobook.characterVoiceTraits.rational' },
+  { value: 'rebel', label: '叛逆', labelKey: 'audiobook.characterVoiceTraits.rebel' },
+  { value: 'loyal', label: '忠诚', labelKey: 'audiobook.characterVoiceTraits.loyal' },
 ]
 
 const EMOTION_TENDENCY_OPTIONS: readonly SelectOption[] = [
-  { value: 'positive', label: '积极' },
-  { value: 'negative', label: '消极' },
-  { value: 'neutral', label: '中性' },
-  { value: 'variable', label: '多变' },
+  { value: 'positive', label: '积极', labelKey: 'audiobook.characterVoiceTraits.positive' },
+  { value: 'negative', label: '消极', labelKey: 'audiobook.characterVoiceTraits.negative' },
+  { value: 'neutral', label: '中性', labelKey: 'audiobook.characterVoiceTraits.neutral' },
+  { value: 'variable', label: '多变', labelKey: 'audiobook.characterVoiceTraits.variable' },
 ]
 
 let cachedVoiceTypeOptions: readonly SelectOption[] | null = null
@@ -104,25 +106,28 @@ const CharacterTraitSelect = ({
   value,
   options,
   onChange,
-}: CharacterTraitSelectProps) => (
-  <FormControl size="small" sx={{ minWidth: 100 }}>
-    <InputLabel>{label}</InputLabel>
-    <Select
-      label={label}
-      value={value}
-      onChange={(event) => onChange(event.target.value as string)}
-    >
-      <MenuItem value="">
-        <em>自动</em>
-      </MenuItem>
-      {options.map((option) => (
-        <MenuItem key={option.value} value={option.value}>
-          {option.label}
+}: CharacterTraitSelectProps) => {
+  const { t } = useTranslation()
+  return (
+    <FormControl size="small" sx={{ minWidth: 100 }}>
+      <InputLabel>{label}</InputLabel>
+      <Select
+        label={label}
+        value={value}
+        onChange={(event) => onChange(event.target.value as string)}
+      >
+        <MenuItem value="">
+          <em>{t('audiobook.characterVoiceTraits.auto')}</em>
         </MenuItem>
-      ))}
-    </Select>
-  </FormControl>
-)
+        {options.map((option) => (
+          <MenuItem key={option.value} value={option.value}>
+            {option.labelKey ? t(option.labelKey) : option.label}
+          </MenuItem>
+        ))}
+      </Select>
+    </FormControl>
+  )
+}
 
 interface CharacterVoiceTraitControlsProps {
   characterVoice: CharacterVoiceSetting
@@ -141,6 +146,7 @@ const CharacterVoiceTraitControls = ({
   onRecommendVoiceType,
   isRecommendingVoiceType,
 }: CharacterVoiceTraitControlsProps) => {
+  const { t } = useTranslation()
   const characterId = characterVoice.characterId
   const [voiceTypeOptions, setVoiceTypeOptions] = useState<readonly SelectOption[]>(
     cachedVoiceTypeOptions || VOICE_TYPE_OPTIONS,
@@ -161,19 +167,19 @@ const CharacterVoiceTraitControls = ({
   return (
     <Box sx={{ display: 'flex', gap: 1, mb: 1, flexWrap: 'wrap' }}>
       <CharacterTraitSelect
-        label="声音类型"
+        label={t('audiobook.characterVoiceTraits.voiceTypeLabel')}
         value={characterVoice.voiceType || ''}
         options={voiceTypeOptions}
         onChange={(value) => onVoiceTypeChange(characterId, value)}
       />
       <CharacterTraitSelect
-        label="性格"
+        label={t('audiobook.characterVoiceTraits.personalityLabel')}
         value={characterVoice.personality || ''}
         options={PERSONALITY_OPTIONS}
         onChange={(value) => onPersonalityChange(characterId, value)}
       />
       <CharacterTraitSelect
-        label="情感倾向"
+        label={t('audiobook.characterVoiceTraits.emotionTendencyLabel')}
         value={characterVoice.emotionTendency || ''}
         options={EMOTION_TENDENCY_OPTIONS}
         onChange={(value) => onEmotionTendencyChange(characterId, value)}
@@ -188,7 +194,9 @@ const CharacterVoiceTraitControls = ({
           : <AutoFixHighIcon fontSize="small" />}
         sx={{ minWidth: 88 }}
       >
-        {isRecommendingVoiceType ? '推荐中' : '推荐'}
+        {isRecommendingVoiceType
+          ? t('audiobook.characterVoiceTraits.recommending')
+          : t('audiobook.characterVoiceTraits.recommend')}
       </Button>
     </Box>
   )

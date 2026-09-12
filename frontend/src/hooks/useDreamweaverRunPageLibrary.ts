@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect, useMemo, useRef } from 'react'
+import { useTranslation } from 'react-i18next'
 import { apiClient, extractApiErrorMessage } from '@/services/api'
 import { hasRenderableLibraryImage } from '@/utils/dreamweaverLibraryAssetState'
 import { buildLibraryPlanItemsFromPayload } from '@/utils/dreamweaver'
@@ -24,6 +25,7 @@ interface UseDreamweaverRunPageLibraryDeps {
 
 export function useDreamweaverRunPageLibrary(deps: UseDreamweaverRunPageLibraryDeps) {
   const { selectedProjectId, currentRunId, libraryPlanItems, setLibraryPlanItems } = deps
+  const { t } = useTranslation()
 
   const [library, setLibrary] = useState<LibraryPayload | null>(null)
   const [libraryLoading, setLibraryLoading] = useState(false)
@@ -46,7 +48,7 @@ export function useDreamweaverRunPageLibrary(deps: UseDreamweaverRunPageLibraryD
   const libraryApproved = Boolean(library?.review?.approved)
 
   const loadLibrary = useCallback(async (): Promise<string | null> => {
-    if (!selectedProjectId) return '未选择项目'
+    if (!selectedProjectId) return t('dreamweaverRun.errorProjectNotSelected')
     setLibraryLoading(true)
     setLibraryError(null)
     setLibrary(null)
@@ -56,8 +58,8 @@ export function useDreamweaverRunPageLibrary(deps: UseDreamweaverRunPageLibraryD
       const res = await apiClient.getDreamweaverLibrary(selectedProjectId, scopedRunId ? { run_id: scopedRunId } : undefined)
       const data = toLibraryPayload(res.data)
       if (!data) {
-        setLibraryError('素材库响应格式无效')
-        return '素材库响应格式无效'
+        setLibraryError(t('dreamweaverRun.errorLibraryFormatInvalid'))
+        return t('dreamweaverRun.errorLibraryFormatInvalid')
       }
       setLibrary(data)
       setLibraryPlanItems(buildLibraryPlanItemsFromPayload(data))
@@ -73,7 +75,7 @@ export function useDreamweaverRunPageLibrary(deps: UseDreamweaverRunPageLibraryD
               const url = URL.createObjectURL(fileRes.data)
               return { id: asset.id, url, error: '' }
             } catch (e: unknown) {
-              const message = await extractApiErrorMessage(e, '加载预览失败')
+              const message = await extractApiErrorMessage(e, t('dreamweaverRun.errorLoadPreviewFailed'))
               return { id: asset.id, url: '', error: message }
             }
           }),
@@ -83,13 +85,13 @@ export function useDreamweaverRunPageLibrary(deps: UseDreamweaverRunPageLibraryD
       setLibraryPreviewErrors(previewErrorMap)
       return null
     } catch (e: unknown) {
-      const message = await extractApiErrorMessage(e, '加载素材库失败')
+      const message = await extractApiErrorMessage(e, t('dreamweaverRun.errorLoadLibraryFailed'))
       setLibraryError(message)
       return message
     } finally {
       setLibraryLoading(false)
     }
-  }, [selectedProjectId, currentRunId, clearLibraryPreviews, setLibraryPlanItems, setLibraryPreviews, setLibraryPreviewErrors])
+  }, [selectedProjectId, currentRunId, clearLibraryPreviews, setLibraryPlanItems, setLibraryPreviews, setLibraryPreviewErrors, t])
 
   useEffect(() => {
     if (!selectedProjectId) return
@@ -108,11 +110,11 @@ export function useDreamweaverRunPageLibrary(deps: UseDreamweaverRunPageLibraryD
       await apiClient.approveDreamweaverLibrary(selectedProjectId, payload)
       await loadLibrary()
     } catch (e: unknown) {
-      setLibraryError(await extractApiErrorMessage(e, '更新审核状态失败'))
+      setLibraryError(await extractApiErrorMessage(e, t('dreamweaverRun.errorUpdateApprovalFailed')))
     } finally {
       setLibraryLoading(false)
     }
-  }, [selectedProjectId, loadLibrary])
+  }, [selectedProjectId, loadLibrary, t])
 
   const regenerateLibraryAssetFn = useCallback(async (options: Record<string, unknown>): Promise<string | null> => {
     const role = String(options.role || '').trim()

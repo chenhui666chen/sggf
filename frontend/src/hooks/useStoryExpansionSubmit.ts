@@ -1,4 +1,5 @@
 import { useCallback } from 'react'
+import { useTranslation } from 'react-i18next'
 
 import { apiClient, extractApiErrorMessage } from '@/services/api'
 import type {
@@ -49,6 +50,7 @@ export function useStoryExpansionSubmit({
   confirmAction,
   lifecycle,
 }: UseStoryExpansionSubmitOptions): UseStoryExpansionSubmitReturn {
+  const { t } = useTranslation()
   const handleExpandStory = useCallback(async () => {
     const numericProjectId = Number.parseInt(projectId || '', 10)
     if (!Number.isFinite(numericProjectId)) {
@@ -63,7 +65,7 @@ export function useStoryExpansionSubmit({
         currentChapterCount: currentChapters,
         currentCharacterCount: currentCharacters,
         form,
-      })
+      }, t)
 
       if (preflight.validationError) {
         lifecycle.showSnackbar(preflight.validationError, 'error')
@@ -94,9 +96,9 @@ export function useStoryExpansionSubmit({
       const response = await apiClient.expandStory(payload)
       const data = response.data
       lifecycle.handleStoryExpansionTaskStarted(data?.task_id ? String(data.task_id) : null)
-      lifecycle.showSnackbar(data?.message?.trim() || '协同扩展任务已启动，正在后台执行', 'success')
+      lifecycle.showSnackbar(data?.message?.trim() || t('storyExpansion.submitStarted'), 'success')
     } catch (error) {
-      const errorMessage = await extractApiErrorMessage(error, '协同扩展失败')
+      const errorMessage = await extractApiErrorMessage(error, t('storyExpansion.submitFailed'))
       lifecycle.handleStoryExpansionTaskFailure(errorMessage)
     }
   }, [
@@ -112,6 +114,7 @@ export function useStoryExpansionSubmit({
     confirmAction,
     requestControls.intent,
     requestControls.strategy,
+    t,
   ])
 
   return {

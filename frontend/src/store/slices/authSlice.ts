@@ -1,5 +1,6 @@
 import { createAsyncThunk, createSlice } from '@reduxjs/toolkit'
-import { apiClient, extractApiErrorMessage } from '@/services/api'
+import type { ConsentAcceptance } from '@/constants/consent'
+import { apiClient, extractApiErrorMessage, type VerificationCodeResponse } from '@/services/api'
 
 interface Role {
   id: number
@@ -10,7 +11,9 @@ interface Role {
 interface User {
   id: number
   username: string
-  email: string
+  // P1-3.8：OAuth 用户可不绑定邮箱，email 允许为空；email_verified 由后端 /me 回传
+  email: string | null
+  email_verified?: boolean
   phone?: string | null
   full_name?: string | null
   avatar_url?: string | null
@@ -18,11 +21,14 @@ interface User {
   created_at: string
   updated_at: string
   roles?: Role[]
+  // P2-4.2/4.6：由后端 /me 派生回传（openid 永不下发）
+  has_password?: boolean
+  alipay_bound?: boolean
+  wechat_bound?: boolean
 }
 
 interface AuthSuccessPayload {
-  access_token: string
-  token_type: string
+  // P2-4.5 收尾：access/refresh 仅入 httpOnly cookie，body 不再返回 token
   user: User
 }
 
@@ -32,6 +38,12 @@ interface RegisterPayload {
   password: string
   phone?: string
   full_name?: string
+  // P1-3.8：两步注册第二步需携带邮箱验证码
+  code: string
+  // 短信抢占：手机号已被其他账号绑定时携带短信验证码（未占用不传）
+  phone_code?: string
+  // P2-5.2：用户勾选的同意项（未勾选的项不传）
+  consent?: ConsentAcceptance
 }
 
 interface LoginPayload {
@@ -41,48 +53,68 @@ interface LoginPayload {
 
 interface AuthState {
   user: User | null
-  token: string | null
   isLoading: boolean
   error: string | null
   isAuthenticated: boolean
+  // P1-3.2：OAuth 首次登录返回注册票据时暂存（不落持久存储），等待用户确认建号；不置登录态
+  pendingRegistrationTicket: string | null
+}
+
+// P1-3.6：收窄 localStorage 中的用户信息——email/phone 属 PII，不落持久存储；
+// 页面加载后由 App.tsx 的 getCurrentUser 从后端补全完整用户信息
+const persistUser = (user: User) => {
+  const persisted = {
+    id: user.id,
+    username: user.username,
+    full_name: user.full_name,
+    avatar_url: user.avatar_url,
+    is_active: user.is_active,
+    created_at: user.created_at,
+    updated_at: user.updated_at,
+    roles: user.roles,
+  }
+  localStorage.setItem('user', JSON.stringify(persisted))
 }
 
 const persistAuth = (payload: AuthSuccessPayload) => {
-  localStorage.setItem('access_token', payload.access_token)
-  localStorage.setItem('user', JSON.stringify(payload.user))
+  // P2-4.5：access/refresh 只经 httpOnly cookie 传输，前端不再持久化任何令牌；
+  // 顺带清理旧版本遗留的 localStorage token（登录成功即视为已迁移）
+  localStorage.removeItem('access_token')
+  localStorage.removeItem('refresh_token')
+  // 仅保留非 PII 的 user 快照用于首屏展示，完整信息由 /me 补全
+  persistUser(payload.user)
 }
 
 const clearPersistedAuth = () => {
   localStorage.removeItem('access_token')
+  localStorage.removeItem('refresh_token')
   localStorage.removeItem('user')
 }
 
 const getRejectedMessage = (payload: unknown, fallback: string) =>
   typeof payload === 'string' && payload.trim() ? payload : fallback
 
-const readPersistedAuth = (): Pick<AuthState, 'user' | 'token' | 'isAuthenticated'> => {
-  const token = localStorage.getItem('access_token')
+// P2-4.5：会话身份由 httpOnly cookie 决定，前端重启后 isAuthenticated 一律 false，
+// 由 App.tsx 启动时 getCurrentUser()（cookie 自动携带）恢复登录态
+const readPersistedAuth = (): Pick<AuthState, 'user' | 'isAuthenticated'> => {
   const rawUser = localStorage.getItem('user')
 
   if (!rawUser) {
     return {
       user: null,
-      token,
-      isAuthenticated: !!token,
+      isAuthenticated: false,
     }
   }
 
   try {
     return {
       user: JSON.parse(rawUser) as User | null,
-      token,
-      isAuthenticated: !!token,
+      isAuthenticated: false,
     }
   } catch {
     clearPersistedAuth()
     return {
       user: null,
-      token: null,
       isAuthenticated: false,
     }
   }
@@ -92,17 +124,29 @@ const persistedAuth = readPersistedAuth()
 
 const initialState: AuthState = {
   user: persistedAuth.user,
-  token: persistedAuth.token,
   isLoading: false,
   error: null,
   isAuthenticated: persistedAuth.isAuthenticated,
+  pendingRegistrationTicket: null,
 }
+
+export const sendRegisterCode = createAsyncThunk<VerificationCodeResponse, string, { rejectValue: string }>(
+  'auth/sendRegisterCode',
+  async (email, { rejectWithValue }) => {
+    try {
+      const response = await apiClient.registerSendCode(email)
+      return response.data
+    } catch (error) {
+      return rejectWithValue(await extractApiErrorMessage(error, '验证码发送失败'))
+    }
+  },
+)
 
 export const register = createAsyncThunk<AuthSuccessPayload, RegisterPayload, { rejectValue: string }>(
   'auth/register',
   async (data, { rejectWithValue }) => {
     try {
-      const response = await apiClient.register(data)
+      const response = await apiClient.registerConfirm(data)
       return response.data
     } catch (error) {
       return rejectWithValue(await extractApiErrorMessage(error, '注册失败'))
@@ -122,29 +166,73 @@ export const login = createAsyncThunk<AuthSuccessPayload, LoginPayload, { reject
   },
 )
 
-export const alipayLogin = createAsyncThunk<AuthSuccessPayload, string, { rejectValue: string }>(
+interface OAuthLoginPayload {
+  code: string
+  state: string
+}
+
+// P1-3.2 + P2-4.2：OAuth 回调联合响应的归一化结果——
+//   ok=带 token；new_user=带注册票据等待确认；bind_pending=带绑定票据（登录态 /auth/bind/confirm 消费）
+interface OAuthLoginResult {
+  status: 'ok' | 'new_user' | 'bind_pending'
+  // P2-4.5 收尾：ok 分支 user 由 body 返回，登录态由 httpOnly cookie 承载
+  user: User | null
+  registrationTicket: string | null
+  bindTicket: string | null
+}
+
+const normalizeOAuthCallbackResult = (
+  data: Awaited<ReturnType<typeof apiClient.alipayCallback>>['data'],
+): OAuthLoginResult => {
+  if (data.status === 'new_user') {
+    return { status: 'new_user', user: null, registrationTicket: data.registration_ticket ?? null, bindTicket: null }
+  }
+  if (data.status === 'bind_pending') {
+    return { status: 'bind_pending', user: null, registrationTicket: null, bindTicket: data.bind_ticket ?? null }
+  }
+  return { status: 'ok', user: (data.user ?? null) as User | null, registrationTicket: null, bindTicket: null }
+}
+
+export const alipayLogin = createAsyncThunk<OAuthLoginResult, OAuthLoginPayload, { rejectValue: string }>(
   'auth/alipayLogin',
-  async (code, { rejectWithValue }) => {
+  async ({ code, state }, { rejectWithValue }) => {
     try {
-      const response = await apiClient.alipayCallback(code)
-      return response.data
+      const response = await apiClient.alipayCallback(code, state)
+      return normalizeOAuthCallbackResult(response.data)
     } catch (error) {
       return rejectWithValue(await extractApiErrorMessage(error, '支付宝登录失败'))
     }
   },
 )
 
-export const wechatLogin = createAsyncThunk<AuthSuccessPayload, string, { rejectValue: string }>(
+export const wechatLogin = createAsyncThunk<OAuthLoginResult, OAuthLoginPayload, { rejectValue: string }>(
   'auth/wechatLogin',
-  async (code, { rejectWithValue }) => {
+  async ({ code, state }, { rejectWithValue }) => {
     try {
-      const response = await apiClient.wechatCallback(code)
-      return response.data
+      const response = await apiClient.wechatCallback(code, state)
+      return normalizeOAuthCallbackResult(response.data)
     } catch (error) {
       return rejectWithValue(await extractApiErrorMessage(error, '微信登录失败'))
     }
   },
 )
+
+// P1-3.2：用户确认/取消第三方首次建号；confirm 成功后置登录态，cancel 仅消费票据
+export const confirmOAuthRegistration = createAsyncThunk<
+  AuthSuccessPayload | null,
+  { ticket: string; action: 'confirm' | 'cancel'; consent?: ConsentAcceptance },
+  { rejectValue: string }
+>('auth/confirmOAuthRegistration', async ({ ticket, action, consent }, { rejectWithValue }) => {
+  try {
+    const response = await apiClient.oauthConfirmRegistration({ ticket, action, consent })
+    if (action === 'cancel') {
+      return null
+    }
+    return response.data as AuthSuccessPayload
+  } catch (error) {
+    return rejectWithValue(await extractApiErrorMessage(error, '注册确认失败'))
+  }
+})
 
 export const getCurrentUser = createAsyncThunk<User, void, { rejectValue: string }>(
   'auth/getCurrentUser',
@@ -158,13 +246,28 @@ export const getCurrentUser = createAsyncThunk<User, void, { rejectValue: string
   },
 )
 
+export const performLogout = createAsyncThunk<void, void>(
+  'auth/performLogout',
+  async (_, { dispatch }) => {
+    // P2-4.5：登出令牌由 httpOnly cookie 携带，后端吊销 jti + refresh 并清除 cookie；
+    // 前端不持有令牌，body 传空。网络失败不阻塞本地登出（best-effort），
+    // 本地清理在 finally 中必达。
+    try {
+      await apiClient.logout({})
+    } catch {
+      // 忽略：后端不可达时本地登出仍要完成
+    } finally {
+      dispatch(logout())
+    }
+  },
+)
+
 const authSlice = createSlice({
   name: 'auth',
   initialState,
   reducers: {
     logout: (state) => {
       state.user = null
-      state.token = null
       state.isAuthenticated = false
       state.error = null
       clearPersistedAuth()
@@ -175,6 +278,12 @@ const authSlice = createSlice({
   },
   extraReducers: (builder) => {
     builder
+      .addCase(sendRegisterCode.pending, (state) => {
+        state.error = null
+      })
+      .addCase(sendRegisterCode.rejected, (state, action) => {
+        state.error = getRejectedMessage(action.payload, '验证码发送失败')
+      })
       .addCase(register.pending, (state) => {
         state.isLoading = true
         state.error = null
@@ -182,8 +291,8 @@ const authSlice = createSlice({
       .addCase(register.fulfilled, (state, action) => {
         state.isLoading = false
         state.user = action.payload.user
-        state.token = action.payload.access_token
         state.isAuthenticated = true
+        state.pendingRegistrationTicket = null
         persistAuth(action.payload)
       })
       .addCase(register.rejected, (state, action) => {
@@ -197,7 +306,6 @@ const authSlice = createSlice({
       .addCase(login.fulfilled, (state, action) => {
         state.isLoading = false
         state.user = action.payload.user
-        state.token = action.payload.access_token
         state.isAuthenticated = true
         persistAuth(action.payload)
       })
@@ -213,14 +321,15 @@ const authSlice = createSlice({
         state.isLoading = false
         state.user = action.payload
         state.isAuthenticated = true
-        localStorage.setItem('user', JSON.stringify(action.payload))
+        persistUser(action.payload)
       })
-      .addCase(getCurrentUser.rejected, (state, action) => {
+      // 会话恢复是后台动作，其 401（匿名访问公共页的必然结果）不写入 error：
+      // 否则登录/注册等公共页首屏会误报红框（App.tsx 启动即 dispatch getCurrentUser）。
+      // 用户主动操作的失败提示由各自 rejected case（login/register/oauth）负责。
+      .addCase(getCurrentUser.rejected, (state) => {
         state.isLoading = false
         state.user = null
-        state.token = null
         state.isAuthenticated = false
-        state.error = getRejectedMessage(action.payload, '登录状态已失效')
         clearPersistedAuth()
       })
       .addCase(alipayLogin.pending, (state) => {
@@ -229,10 +338,15 @@ const authSlice = createSlice({
       })
       .addCase(alipayLogin.fulfilled, (state, action) => {
         state.isLoading = false
-        state.user = action.payload.user
-        state.token = action.payload.access_token
-        state.isAuthenticated = true
-        persistAuth(action.payload)
+        // P1-3.2：new_user 时不置登录态，仅暂存注册票据等待确认页消费
+        if (action.payload.status === 'ok' && action.payload.user) {
+          state.user = action.payload.user
+          state.isAuthenticated = true
+          state.pendingRegistrationTicket = null
+          persistAuth({ user: action.payload.user })
+        } else {
+          state.pendingRegistrationTicket = action.payload.registrationTicket
+        }
       })
       .addCase(alipayLogin.rejected, (state, action) => {
         state.isLoading = false
@@ -244,14 +358,35 @@ const authSlice = createSlice({
       })
       .addCase(wechatLogin.fulfilled, (state, action) => {
         state.isLoading = false
-        state.user = action.payload.user
-        state.token = action.payload.access_token
-        state.isAuthenticated = true
-        persistAuth(action.payload)
+        if (action.payload.status === 'ok' && action.payload.user) {
+          state.user = action.payload.user
+          state.isAuthenticated = true
+          state.pendingRegistrationTicket = null
+          persistAuth({ user: action.payload.user })
+        } else {
+          state.pendingRegistrationTicket = action.payload.registrationTicket
+        }
       })
       .addCase(wechatLogin.rejected, (state, action) => {
         state.isLoading = false
         state.error = getRejectedMessage(action.payload, '微信登录失败')
+      })
+      .addCase(confirmOAuthRegistration.pending, (state) => {
+        state.isLoading = true
+        state.error = null
+      })
+      .addCase(confirmOAuthRegistration.fulfilled, (state, action) => {
+        state.isLoading = false
+        state.pendingRegistrationTicket = null
+        if (action.payload) {
+          state.user = action.payload.user
+          state.isAuthenticated = true
+          persistAuth(action.payload)
+        }
+      })
+      .addCase(confirmOAuthRegistration.rejected, (state, action) => {
+        state.isLoading = false
+        state.error = getRejectedMessage(action.payload, '注册确认失败')
       })
   },
 })

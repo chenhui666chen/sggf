@@ -1,5 +1,7 @@
 import { useEffect, type Dispatch, type MutableRefObject, type SetStateAction } from 'react'
 
+import { useTranslation } from 'react-i18next'
+
 import { apiClient, extractApiErrorMessage } from '../../services/api'
 import type { SetSnackbar } from './hookTypes'
 import {
@@ -75,6 +77,7 @@ export const useAudiobookRouteProjectLoader = ({
   setGenerating,
   setSnackbar,
 }: UseAudiobookRouteProjectLoaderParams) => {
+  const { t } = useTranslation()
   useEffect(() => {
     let cancelled = false
 
@@ -86,7 +89,7 @@ export const useAudiobookRouteProjectLoader = ({
       lastSessionTimestampRef.current = 0
 
       if (!routeProjectId) {
-        setSnackbar({ open: true, message: '缺少项目ID参数', severity: 'error' })
+        setSnackbar({ open: true, message: t('audiobook.useAudiobookRouteProjectLoader.missingProjectId'), severity: 'error' })
         navigateTo('/audiobook-dashboard')
         return
       }
@@ -198,7 +201,7 @@ export const useAudiobookRouteProjectLoader = ({
           )
         }
       } catch (error: unknown) {
-        const msg = await extractApiErrorMessage(error, '加载项目失败')
+        const msg = await extractApiErrorMessage(error, t('audiobook.useAudiobookRouteProjectLoader.loadFailed'))
         if (!cancelled) {
           setSnackbar({ open: true, message: msg, severity: 'error' })
           navigateTo('/audiobook-dashboard')
@@ -236,5 +239,6 @@ export const useAudiobookRouteProjectLoader = ({
     setTaskStatuses,
     setTtsModel,
     ttsModelRef,
+    t,
   ])
 }

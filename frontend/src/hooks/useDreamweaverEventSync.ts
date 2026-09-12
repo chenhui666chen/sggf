@@ -1,4 +1,5 @@
 import { useState, useCallback, useRef } from 'react'
+import { useTranslation } from 'react-i18next'
 import { apiClient, extractApiErrorMessage } from '@/services/api'
 import type {
   DreamweaverAssetPlanItem,
@@ -41,6 +42,8 @@ export function useDreamweaverEventSync(options: UseDreamweaverEventSyncOptions)
     getTaskId,
     getTaskStatus,
   } = options
+
+  const { t } = useTranslation()
 
   const [eventCursor, setEventCursor] = useState(0)
   const [eventSyncing, setEventSyncing] = useState(false)
@@ -178,7 +181,7 @@ export function useDreamweaverEventSync(options: UseDreamweaverEventSyncOptions)
         const recovery = resolveNotFoundRecovery(e, getTaskId(), getTaskStatus(), {
           isNotFoundError,
           shouldTreatRunNotFoundAsPending: _shouldTreatRunNotFoundAsPending,
-          pendingMessage: '事件尚未落库，稍后再试',
+          pendingMessage: t('dreamweaverRun.eventsNotPersisted'),
         })
         if (recovery.handled) {
           if (recovery.pendingMessage) {
@@ -188,13 +191,13 @@ export function useDreamweaverEventSync(options: UseDreamweaverEventSyncOptions)
           onResetMissingRunState(getSelectedProjectId())
           return
         }
-        setEventSyncError(await extractApiErrorMessage(e, '同步事件失败'))
+        setEventSyncError(await extractApiErrorMessage(e, t('dreamweaverRun.syncEventsFailed')))
       } finally {
         eventSyncingRef.current = false
         setEventSyncing(false)
       }
     },
-    [applyDreamweaverEvent, getTaskId, getTaskStatus, getSelectedProjectId, onResetMissingRunState],
+    [applyDreamweaverEvent, getTaskId, getTaskStatus, getSelectedProjectId, onResetMissingRunState, t],
   )
 
   return {

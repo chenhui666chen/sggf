@@ -105,7 +105,7 @@ function UserCenterAssetConnectedOverviewCompanionSummaryGrid(
       {props.items.map((item) => (
         <Box
           key={item.label}
-          sx={{ p: 1.5, border: '1px solid rgba(15, 23, 42, 0.08)', borderRadius: 2 }}
+          sx={{ p: 1.5, border: '1px solid', borderColor: 'divider', borderRadius: 2 }}
         >
           <Typography variant="caption" color="text.secondary">
             {item.label}
