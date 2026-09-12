@@ -4,7 +4,7 @@
 import json
 from typing import Any
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from app.core.env_loader import load_project_env
 
@@ -27,7 +27,9 @@ class Settings(BaseSettings):
     # 应用基本配置
     APP_NAME: str = "拾光工坊"
     APP_VERSION: str = "1.0.0"
-    DEBUG: bool = True
+    # 运行环境：development | staging | production（生产/staging 启动时会强制安全校验）
+    APP_ENV: str = "development"
+    DEBUG: bool = False
 
     # 数据库配置（本地开发使用SQLite，生产环境使用PostgreSQL）
     DATABASE_URL: str = "postgresql://novel_user:NovelPostgres0t649OyRUaI@localhost:5432/novel_db"
@@ -41,9 +43,15 @@ class Settings(BaseSettings):
     DB_POOL_PRE_PING: bool = True
 
     # JWT配置
-    JWT_SECRET: str = "your-secret-key-change-in-production"
+    JWT_SECRET: str = Field(
+        default="your-secret-key-change-in-production",
+        min_length=32,
+        description="JWT 签名密钥，至少 32 字符。生产环境必须通过环境变量注入唯一值。",
+    )
     JWT_ALGORITHM: str = "HS256"
-    JWT_EXPIRATION_HOURS: int = 24
+    # P1-3.7 短 token 方案：access token 15-30 分钟 + refresh token 7 天
+    JWT_ACCESS_EXPIRATION_MINUTES: int = 30
+    JWT_REFRESH_EXPIRATION_DAYS: int = 7
 
     # Redis配置
     REDIS_URL: str = "redis://localhost:6379/0"
@@ -65,6 +73,78 @@ class Settings(BaseSettings):
     PASSWORD_RESET_MAX_ATTEMPTS: int = 5
     PASSWORD_RESET_CODE_LENGTH: int = 6
 
+    # 邮箱验证配置（P1-3.8：注册发码与登录态换绑邮箱）
+    EMAIL_VERIFY_CODE_TTL_SECONDS: int = 600
+    EMAIL_VERIFY_RESEND_INTERVAL_SECONDS: int = 60
+    EMAIL_VERIFY_MAX_ATTEMPTS: int = 5
+    EMAIL_VERIFY_CODE_LENGTH: int = 6
+
+    # 阿里云短信发送配置（手机号验证码：注册申诉/绑定/找回密码）
+    # 签名与模板全部配置化：测试模板审核通过后可直接切换正式签名/模板，零代码改动
+    SMS_ACCESS_KEY_ID: str = ""
+    SMS_ACCESS_KEY_SECRET: str = ""
+    SMS_SIGN_NAME: str = ""
+    SMS_TEMPLATE_CODE: str = ""
+    SMS_ENDPOINT: str = "dysmsapi.aliyuncs.com"
+    SMS_TIMEOUT_SECONDS: int = 10
+
+    # 短信验证码配置（镜像 EMAIL_VERIFY_*；TTL 与测试模板文案"5 分钟内有效"一致）
+    SMS_VERIFY_CODE_TTL_SECONDS: int = 300
+    SMS_VERIFY_RESEND_INTERVAL_SECONDS: int = 60
+    SMS_VERIFY_MAX_ATTEMPTS: int = 5
+    SMS_VERIFY_CODE_LENGTH: int = 6
+
+    # 短信防滥用（成本封顶）：号码维/日、IP 维/日、全局日预算熔断（≈500 元/月上限）
+    SMS_DAILY_LIMIT_PER_PHONE: int = 5
+    SMS_DAILY_LIMIT_PER_IP: int = 20
+    SMS_GLOBAL_DAILY_BUDGET: int = 300
+
+    # 认证端点限流（P1-3.1，每分钟次数）
+    AUTH_RATE_LIMIT_LOGIN_IP_PER_MINUTE: int = 20
+    AUTH_RATE_LIMIT_LOGIN_ACCOUNT_PER_MINUTE: int = 5
+    AUTH_RATE_LIMIT_REGISTER_PER_MINUTE: int = 3
+    AUTH_RATE_LIMIT_PASSWORD_RESET_PER_MINUTE: int = 1
+
+    # openid 加密存储（P2-4.1）：查找哈希与加密密文用两把独立密钥，必须分开存储
+    # - OPENID_LOOKUP_KEY：HMAC-SHA256 密钥，任意随机串即可（openssl rand -hex 32）
+    #   轮换代价极高（需离线重算全表哈希），设计为极低频轮换
+    # - OPENID_ENCRYPTION_KEY：Fernet 密钥（32 字节 urlsafe-base64），可按需轮换
+    OPENID_LOOKUP_KEY: str = ""
+    OPENID_ENCRYPTION_KEY: str = ""
+
+    # 密码策略与锁定（P2-4.6）
+    # 密码复杂度下限（架构文档 6.2：≥8，含大小写字母和数字；上限固定 50）
+    PASSWORD_MIN_LENGTH: int = 8
+    # 连续失败 ACCOUNT_LOCKOUT_ATTEMPTS 次后锁定 ACCOUNT_LOCKOUT_MINUTES 分钟（Redis 计数）
+    ACCOUNT_LOCKOUT_ATTEMPTS: int = 5
+    ACCOUNT_LOCKOUT_MINUTES: int = 15
+    # 密码历史独立 pepper：只用于 password_history 的 HMAC，禁止复用登录 password_hash（bcrypt）
+    # 与登录哈希、openid 密钥完全分离；任何环境不得为空，生产/staging 启动强校验
+    PASSWORD_HISTORY_PEPPER: str = "your-password-history-pepper-change-in-production"
+    # 密码历史保留条数（含当前密码；评审 #9）
+    PASSWORD_HISTORY_SIZE: int = 3
+
+    # 审计日志（P2-4.4）：IP / User-Agent 脱敏哈希用独立 pepper（禁止与登录/历史密码复用）；
+    # 任何环境不得为空，生产/staging 启动强校验
+    AUDIT_LOG_PEPPER: str = ""
+    # 审计日志保留天数（5.3：90 天），超期由清理任务/懒清理删除
+    AUDIT_LOG_RETENTION_DAYS: int = 90
+
+    # 账户注销（P2-4.3）：注销为软删除，冷静期后由匿名化脚本处理
+    # （5.3：用户基本信息/oauth 关联注销后保留 30 天再匿名化；同意记录与账单法定保留）
+    ACCOUNT_DELETE_COOLING_DAYS: int = 30
+
+    # Cookie 认证（P2-4.5）：access/refresh/csrf 均入 httpOnly cookie
+    # - COOKIE_SECURE：production/staging 必须 True；development（http://localhost）设 False
+    # - COOKIE_PREFIX：production/staging 用 __Host-（要求 Secure + Path=/ + 无 Domain）；
+    #   development 设为空字符串（http 下 __Host- 前缀不兼容）
+    COOKIE_SECURE: bool = True
+    COOKIE_PREFIX: str = "__Host-"
+
+    # 初始超管密码（P2-4.6：init_admin_data.py 去硬编码）
+    # production/staging 必填；development 未设置时随机生成并打印一次（仅 stdout，不入日志文件）
+    INITIAL_ADMIN_PASSWORD: str = ""
+
     # CORS配置
     CORS_ORIGINS: list[str] | str = Field(
         default_factory=lambda: [
@@ -75,8 +155,10 @@ class Settings(BaseSettings):
         ]
     )
     CORS_CREDENTIALS: bool = True
-    CORS_METHODS: list[str] = Field(default_factory=lambda: ["*"])
-    CORS_HEADERS: list[str] = Field(default_factory=lambda: ["*"])
+    CORS_METHODS: list[str] = Field(default_factory=lambda: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"])
+    CORS_HEADERS: list[str] = Field(
+        default_factory=lambda: ["Authorization", "Content-Type", "X-Requested-With", "Accept"]
+    )
 
     @field_validator("DEBUG", mode="before")
     @classmethod
@@ -193,25 +275,37 @@ class Settings(BaseSettings):
     CELERY_BROKER_URL: str = "redis://localhost:6379/0"
     CELERY_RESULT_BACKEND: str = "redis://localhost:6379/0"
 
-    # 腾讯云 API 配置（用于 AI 生成检测）
-    TENCENT_SECRET_ID: str = ""
-    TENCENT_SECRET_KEY: str = ""
-    TENCENT_REGION: str = "ap-guangzhou"
-    TENCENT_BIZTYPE: str = ""  # 可选，策略编号
-
     # 朱雀 AIGC 检测（EdgeOne AI 网关 zhuque-text）
     ZHUQUE_GATEWAY_URL: str = ""  # 创建网关后分配的域名，如 https://xxxx.edgeone.app
     ZHUQUE_API_KEY: str = ""  # 网关 API Key（Bearer 鉴权）
-    ZHUQUE_IS_MERGE: bool = True  # 是否合并段落输出整体置信度
+    ZHUQUE_IS_MERGE: bool = False  # 2026-08-28 冒烟定夺：非合并单次调用即得段级真值，全文分与合并模式一致
 
     # 支付宝OAuth配置
     ALIPAY_APP_ID: str = ""
     ALIPAY_PRIVATE_KEY: str = ""
-    ALIPAY_PUBLIC_KEY: str = ""
+    ALIPAY_PUBLIC_KEY: str = ""  # 支付宝公钥（用于验签，非应用公钥）
+    ALIPAY_SANDBOX: bool = False  # 沙箱环境开关，沙箱网关为 openapi.alipaydev.com
+    ALIPAY_SIGN_TYPE: str = "RSA2"
 
     # 微信OAuth配置
     WECHAT_APP_ID: str = ""
     WECHAT_APP_SECRET: str = ""
+
+    # OAuth 安全配置：回调地址精确白名单（按 APP_ENV 组装，生产/staging 仅 HTTPS）
+    OAUTH_REDIRECT_URI_WHITELIST: list[str] = Field(
+        default_factory=lambda: [
+            "https://your-domain.com/login/callback",
+        ]
+    )
+
+    @model_validator(mode="after")
+    def _assemble_oauth_whitelist(self) -> "Settings":
+        """开发环境默认追加本地 localhost 回调地址，避免本机 OAuth 直接 400。"""
+        if self.APP_ENV == "development":
+            local_callback = "http://localhost:5173/login/callback"
+            if local_callback not in self.OAUTH_REDIRECT_URI_WHITELIST:
+                self.OAUTH_REDIRECT_URI_WHITELIST = [*self.OAUTH_REDIRECT_URI_WHITELIST, local_callback]
+        return self
 
 
 settings = Settings()

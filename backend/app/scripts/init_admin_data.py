@@ -2,12 +2,43 @@
 初始化管理控制台数据
 创建预设角色和权限
 """
+import secrets
 from datetime import datetime
+
 from sqlalchemy.orm import Session
+
+from app.core.config import settings
+from app.core.password_policy import check_password_strength
+from app.core.security import hash_password
 from app.db.base import SessionLocal
 from app.models.role import Role, Permission
 from app.models.user import User
-from app.core.security import hash_password
+from app.services.password_history_service import password_history_service
+
+
+def resolve_initial_admin_password() -> str:
+    """初始超管密码（P2-4.6：去硬编码）。
+
+    - 优先 INITIAL_ADMIN_PASSWORD 环境变量，**必须符合密码策略**（评审 #4：必填 ≠ 必强）；
+    - production/staging 未配置必须报错（禁止再用可 grep 的固定默认密码建号）；
+    - development 未配置随机生成直至符合策略（base64url 可能缺数字/大小写，需重试），
+      仅 stdout 展示，不写日志文件。
+    """
+    configured = str(settings.INITIAL_ADMIN_PASSWORD or "").strip()
+    if configured:
+        message = check_password_strength(configured)
+        if message is not None:
+            raise RuntimeError(f"INITIAL_ADMIN_PASSWORD 不符合密码策略：{message}")
+        return configured
+    if settings.APP_ENV in ("production", "staging"):
+        raise RuntimeError(
+            "生产/预发布环境必须配置 INITIAL_ADMIN_PASSWORD（禁止使用可 grep 的固定默认密码）"
+        )
+    for _ in range(5):
+        candidate = secrets.token_urlsafe(12)
+        if check_password_strength(candidate) is None:
+            return candidate
+    raise RuntimeError("无法生成符合密码策略的随机初始密码")
 
 
 def init_permissions(db: Session):
@@ -107,7 +138,10 @@ def init_roles(db: Session, permissions: list):
 
 
 def create_super_admin(db: Session):
-    """创建超级管理员账号"""
+    """创建超级管理员账号（P2-4.6：密码来自环境变量/随机，不再硬编码）。
+
+    "已有超管不覆盖"语义保持：存在即补角色后 return，绝不重置现网超管密码。
+    """
     super_admin_role = db.query(Role).filter(Role.code == "super_admin").first()
     
     if not super_admin_role:
@@ -124,22 +158,27 @@ def create_super_admin(db: Session):
             print("✅ 已为现有管理员分配超级管理员角色")
         return
     
+    password = resolve_initial_admin_password()
     admin_user = User(
         username="admin",
         email="admin@sggf.net",
-        password_hash=hash_password("Admin@123456"),
+        password_hash=hash_password(password),
         full_name="超级管理员",
         is_active=True,
         roles=[super_admin_role]
     )
     
     db.add(admin_user)
+    db.flush()  # 取 id：初始密码与建号同事务登记入历史（评审收口，否则可改回初始密码）
+    password_history_service.record(db, admin_user.id, password)
     db.commit()
     
     print("✅ 创建超级管理员账号成功")
     print("   邮箱: admin@sggf.net")
-    print("   密码: Admin@123456")
     print("   ⚠️  请登录后立即修改密码！")
+    if settings.APP_ENV not in ("production", "staging"):
+        # 仅 development：临时密码只在本次 stdout 出现，不入日志文件
+        print(f"   临时密码: {password}（仅本次显示，请立即修改）")
 
 
 def init_admin_data():

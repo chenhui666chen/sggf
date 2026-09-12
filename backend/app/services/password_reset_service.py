@@ -11,20 +11,25 @@ import secrets
 from datetime import datetime, timedelta
 from typing import Any
 
+from fastapi import HTTPException, status
+
 from app.core.config import settings
+from app.core.redis_client import LoopBoundRedis
 from app.utils.datetime_utils import parse_datetime_utc, utc_now
 
 logger = logging.getLogger(__name__)
 
 
 class PasswordResetService:
-    """管理找回密码验证码的生成、存储与校验。"""
+    """管理找回密码验证码的生成、存储与校验（Redis 存储，fail-closed）。
+
+    Redis 不可用时直接返回 503，不回退进程内存：多实例部署下内存验证码不一致，
+    且静默降级会把"存储失败"误报为发送成功。
+    """
 
     def __init__(self, redis_url: str | None = None):
         self.redis_url = str(redis_url or settings.REDIS_URL).strip()
-        self._memory_store: dict[str, dict[str, Any]] = {}
-        self._redis_client: Any = None
-        self._redis_checked = False
+        self._redis = LoopBoundRedis(self.redis_url)
 
     def _now(self) -> datetime:
         return utc_now()
@@ -53,74 +58,64 @@ class PasswordResetService:
         return max(0, remaining)
 
     async def _get_redis_client(self):
-        if self._redis_checked:
-            return self._redis_client
-
-        self._redis_checked = True
         try:
-            import redis.asyncio as redis
-
-            client = redis.from_url(
-                self.redis_url,
-                encoding="utf-8",
-                decode_responses=True,
-            )
-            await client.ping()
-            self._redis_client = client
-            logger.info("找回密码验证码已启用 Redis 存储: %s", self.redis_url)
+            return await self._redis.get()
         except Exception as exc:  # noqa: BLE001
-            logger.warning("找回密码验证码 Redis 不可用，将回退到进程内存: %s", exc)
-            self._redis_client = None
-
-        return self._redis_client
+            self._redis.invalidate()
+            logger.error("找回密码验证码 Redis 不可用（fail-closed）: %s", exc)
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="认证服务暂时不可用",
+            ) from exc
 
     async def _read_record(self, user_id: int) -> dict[str, Any] | None:
         key = self._cache_key(user_id)
         client = await self._get_redis_client()
-        if client is not None:
-            try:
-                raw = await client.get(key)
-                if raw:
-                    record = json.loads(raw)
-                    if self._remaining_ttl(record) > 0:
-                        return record
-                    await client.delete(key)
-            except Exception as exc:  # noqa: BLE001
-                logger.warning("读取找回密码验证码 Redis 失败，改用内存: %s", exc)
+        try:
+            raw = await client.get(key)
+        except Exception as exc:  # noqa: BLE001
+            self._redis.invalidate()
+            logger.error("读取找回密码验证码 Redis 失败（fail-closed）: %s", exc)
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="认证服务暂时不可用",
+            ) from exc
 
-        record = self._memory_store.get(key)
-        if not record:
+        if not raw:
             return None
-        if self._remaining_ttl(record) <= 0:
-            self._memory_store.pop(key, None)
-            return None
-        return record
+
+        record = json.loads(raw)
+        if self._remaining_ttl(record) > 0:
+            return record
+
+        await self.delete_code(user_id)
+        return None
 
     async def _write_record(self, user_id: int, record: dict[str, Any], ttl: int) -> None:
         key = self._cache_key(user_id)
-        self._memory_store[key] = record
-
         client = await self._get_redis_client()
-        if client is None:
-            return
-
         try:
             await client.setex(key, ttl, json.dumps(record, ensure_ascii=False))
         except Exception as exc:  # noqa: BLE001
-            logger.warning("写入找回密码验证码 Redis 失败，已回退到内存: %s", exc)
+            self._redis.invalidate()
+            logger.error("写入找回密码验证码 Redis 失败（fail-closed）: %s", exc)
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="认证服务暂时不可用",
+            ) from exc
 
     async def delete_code(self, user_id: int) -> None:
         key = self._cache_key(user_id)
-        self._memory_store.pop(key, None)
-
         client = await self._get_redis_client()
-        if client is None:
-            return
-
         try:
             await client.delete(key)
         except Exception as exc:  # noqa: BLE001
-            logger.warning("删除找回密码验证码 Redis 失败: %s", exc)
+            self._redis.invalidate()
+            logger.error("删除找回密码验证码 Redis 失败（fail-closed）: %s", exc)
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="认证服务暂时不可用",
+            ) from exc
 
     async def issue_code(self, user_id: int) -> str | None:
         now = self._now()

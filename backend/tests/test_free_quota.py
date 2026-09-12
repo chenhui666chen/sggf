@@ -124,9 +124,24 @@ class FakeRedis:
                 yield key
 
 
+class _FakeRedisManager:
+    """替代 LoopBoundRedis 的测试桩：get() 恒返回注入的假客户端（同 test_auth_routes）。"""
+
+    def __init__(self, client):
+        self._client = client
+
+    async def get(self):
+        return self._client
+
+    def invalidate(self) -> None:
+        pass
+
+
 def make_service(user_limit=2, global_limit=500) -> FreeQuotaService:
     service = FreeQuotaService(redis_url="redis://fake:6379/0")
-    service._redis_client = FakeRedis()
+    fake = FakeRedis()
+    service._redis = _FakeRedisManager(fake)
+    service._fake_redis = fake  # 测试断言用（原 _redis_client 已改为按事件循环管理）
     service.user_daily_limit = user_limit
     service.global_daily_limit = global_limit
     return service
@@ -173,7 +188,7 @@ def test_denied_does_not_increment_counter():
         service = make_service(user_limit=1)
         first = await service.reserve(1, "t1")
         assert first.allowed
-        fake = service._redis_client
+        fake = service._fake_redis
         user_key = service._user_key(1, service._today())
         assert fake.store[user_key] == "1"
 
@@ -206,7 +221,7 @@ def test_quota_keys_have_ttl_and_reservation_pending():
         assert result.allowed and result.reason == "ok"
         assert result.reset_at  # 带重置时间
 
-        fake = service._redis_client
+        fake = service._fake_redis
         date = service._today()
         assert fake.ttls[service._user_key(7, date)] == QUOTA_KEY_TTL_SECONDS
         assert fake.ttls[service._total_key(date)] == QUOTA_KEY_TTL_SECONDS
@@ -222,7 +237,7 @@ def test_quota_keys_have_ttl_and_reservation_pending():
 def test_reserve_writes_reservation_inside_atomic_script():
     async def run():
         service = make_service()
-        fake = service._redis_client
+        fake = service._fake_redis
 
         async def fail_if_called(*args, **kwargs):
             raise AssertionError("reservation must not be written after the Lua script")
@@ -244,7 +259,7 @@ def test_duplicate_task_reservation_is_idempotent():
         second = await service.reserve(7, "same-task")
 
         assert first.allowed and second.allowed
-        fake = service._redis_client
+        fake = service._fake_redis
         user_key = service._user_key(7, service._today())
         assert fake.store[user_key] == "1"
 
@@ -276,7 +291,7 @@ def test_get_status_reports_remaining_without_consuming_quota():
         assert current.used == 1
         assert current.remaining == 1
 
-        fake = service._redis_client
+        fake = service._fake_redis
         user_key = service._user_key(3, service._today())
         assert fake.store[user_key] == "1"
 
@@ -294,7 +309,7 @@ def test_consumed_reservation_is_not_refunded():
         await service.reserve(1, "task-x")
         assert await service.mark_consumed("task-x") is True
 
-        fake = service._redis_client
+        fake = service._fake_redis
         user_key = service._user_key(1, service._today())
         assert fake.store[user_key] == "1"
 
@@ -311,7 +326,7 @@ def test_refund_pending_is_idempotent():
     async def run():
         service = make_service(user_limit=1)
         await service.reserve(1, "task-y")
-        fake = service._redis_client
+        fake = service._fake_redis
         user_key = service._user_key(1, service._today())
         assert fake.store[user_key] == "1"
 
@@ -345,7 +360,7 @@ def test_lazy_cleanup_recovers_quota_after_crash():
         assert not (await service.reserve(1, "blocked")).allowed  # 额度已满
 
         # 模拟崩溃残留：created_at 提前到 31 分钟前
-        fake = service._redis_client
+        fake = service._fake_redis
         key = f"{RESERVATION_KEY_PREFIX}dead-task"
         data = json.loads(fake.store[key])
         data["created_at"] = time.time() - 31 * 60
@@ -370,7 +385,7 @@ def test_lazy_cleanup_skips_fresh_and_consumed():
 
         await service.reserve(1, "trigger")  # 触发懒清理
 
-        fake = service._redis_client
+        fake = service._fake_redis
         assert f"{RESERVATION_KEY_PREFIX}fresh-task" in fake.store
         assert f"{RESERVATION_KEY_PREFIX}done-task" in fake.store
         user_key = service._user_key(1, service._today())

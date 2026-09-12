@@ -69,9 +69,24 @@ class FakeRedis:
         return 0
 
 
+class _FakeRedisManager:
+    """替代 LoopBoundRedis 的测试桩：get() 恒返回注入的假客户端（同 test_auth_routes）。"""
+
+    def __init__(self, client):
+        self._client = client
+
+    async def get(self):
+        return self._client
+
+    def invalidate(self) -> None:
+        pass
+
+
 def make_redis_service() -> ChapterGenerationLockService:
     service = ChapterGenerationLockService(redis_url="redis://fake:6379/0")
-    service._redis_client = FakeRedis()
+    fake = FakeRedis()
+    service._redis = _FakeRedisManager(fake)
+    service._fake_redis = fake
     return service
 
 
@@ -150,9 +165,9 @@ def test_cross_worker_mutual_exclusion():
     async def run():
         shared_redis = FakeRedis()
         worker_a = ChapterGenerationLockService(redis_url="redis://fake:6379/0")
-        worker_a._redis_client = shared_redis
+        worker_a._redis = _FakeRedisManager(shared_redis)
         worker_b = ChapterGenerationLockService(redis_url="redis://fake:6379/0")
-        worker_b._redis_client = shared_redis
+        worker_b._redis = _FakeRedisManager(shared_redis)
 
         # worker A 持锁期间，worker B 获取同项目锁被拒
         handle_a = await worker_a.acquire(9, allow_local_fallback=True)
@@ -191,7 +206,7 @@ def test_lock_key_has_ttl():
         service = make_redis_service()
         handle = await service.acquire(9, allow_local_fallback=True, ttl_seconds=1800)
         assert handle is not None
-        fake = service._redis_client
+        fake = service._fake_redis
         key = f"inspiration_ark:chapter_gen_lock:9"
         assert fake.ttls.get(key) == 1800
 
@@ -213,11 +228,11 @@ def test_renew_extends_only_matching_redis_lock():
         assert handle is not None
         assert await service.renew(handle, ttl_seconds=90) is True
         key = "inspiration_ark:chapter_gen_lock:12"
-        assert service._redis_client.ttls[key] == 90
+        assert service._fake_redis.ttls[key] == 90
 
         wrong = LockHandle(project_id=12, token="wrong", backend="redis")
         assert await service.renew(wrong, ttl_seconds=120) is False
-        assert service._redis_client.ttls[key] == 90
+        assert service._fake_redis.ttls[key] == 90
 
     asyncio.run(run())
 
@@ -292,7 +307,7 @@ def test_force_release_stale_recovers_stale_lock():
         handle = await service.acquire(21, allow_local_fallback=True, ttl_seconds=1800)
         assert handle is not None
         key = "inspiration_ark:chapter_gen_lock:21"
-        service._redis_client.ttls[key] = 900  # 模拟时间流逝后的剩余 TTL
+        service._fake_redis.ttls[key] = 900  # 模拟时间流逝后的剩余 TTL
 
         assert await service.force_release_stale(21) is True
         # 回收后新任务可获取
@@ -311,7 +326,7 @@ def test_force_release_stale_keeps_live_lock():
         assert handle is not None
         # 心跳刚续租过，剩余 TTL 仍接近满值
         key = "inspiration_ark:chapter_gen_lock:22"
-        service._redis_client.ttls[key] = 1700
+        service._fake_redis.ttls[key] = 1700
 
         assert await service.force_release_stale(22) is False
         # 锁仍被持有，新任务仍被拒
@@ -361,7 +376,7 @@ def test_force_release_clears_fresh_orphan_lock():
         handle = await service.acquire(25, allow_local_fallback=True, ttl_seconds=1800)
         assert handle is not None
         key = "inspiration_ark:chapter_gen_lock:25"
-        service._redis_client.ttls[key] = 1700
+        service._fake_redis.ttls[key] = 1700
 
         assert await service.force_release_stale(25) is False
         assert await service.force_release(25) is True

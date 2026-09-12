@@ -6,6 +6,7 @@ from typing import Dict, Set, Optional
 import logging
 from jose import JWTError, jwt
 from app.core.config import settings
+from app.core.security import access_cookie_name
 from app.db.base import get_db
 from app.models.project import Project
 from app.models.user import User
@@ -337,20 +338,40 @@ class WorkflowWebSocketManager:
         await sio.emit('audiobook_project_summary', data, room=room)
 
 
+# P2-4.5 收尾：握手时从 httpOnly access cookie 认证并绑定 sid（前端不再持有明文 token，
+# join_project/join_audiobook 从 sid_user 取用户，不再依赖 body token）
+sid_user: Dict[str, int] = {}
+
+
+def _extract_access_token_from_environ(environ) -> Optional[str]:
+    """从 socket.io 握手 environ（WSGI）解析 httpOnly access cookie。"""
+    raw = environ.get("HTTP_COOKIE") or ""
+    name = f"{access_cookie_name()}="
+    for part in raw.split(";"):
+        part = part.strip()
+        if part.startswith(name):
+            return part[len(name):]
+    return None
+
+
 # Socket.IO 事件处理器
 @sio.event
 async def connect(sid, environ):
-    """客户端连接"""
-    logger.debug(f"🔌 [WebSocket] 客户端连接: {sid}")  # 使用 print 确保输出
+    """客户端连接：从 httpOnly access cookie 解析并绑定登录用户（P2-4.5 收尾）。"""
     logger.info(f"🔌 客户端连接: {sid}")
+    token = _extract_access_token_from_environ(environ)
+    if token:
+        payload = verify_standard_websocket_token(token)
+        if payload and payload.get("sub"):
+            sid_user[sid] = int(payload["sub"])
     await sio.emit('connected', {'message': 'WebSocket 连接成功'}, room=sid)
 
 
 @sio.event
 async def disconnect(sid):
     """客户端断开"""
-    logger.debug(f"🔌 [WebSocket] 客户端断开: {sid}")  # 使用 print 确保输出
     logger.info(f"🔌 客户端断开: {sid}")
+    sid_user.pop(sid, None)
     # 从所有房间中移除
     for project_id, sessions in list(project_rooms.items()):
         if sid in sessions:
@@ -405,32 +426,22 @@ async def join_project(sid, data):
     logger.debug(f"📥 [WebSocket] 收到 join_project 请求: sid={sid}, data={data}")  # 调试日志
     try:
         project_id = data.get('project_id')
-        token = data.get('token')
 
         # 验证必要参数
         if not project_id:
             await sio.emit('error', {'message': '缺少 project_id'}, room=sid)
             return
 
-        if not token:
-            await sio.emit('error', {'message': '缺少认证令牌'}, room=sid)
-            return
-
-        # 验证 token
         try:
             project_id = int(project_id)
         except (TypeError, ValueError):
             await sio.emit('error', {'message': 'project_id 格式无效'}, room=sid)
             return
 
-        payload = verify_standard_websocket_token(token)
-        if not payload:
-            await sio.emit('error', {'message': '无效的认证令牌'}, room=sid)
-            return
-
-        user_id = payload.get("sub")
+        # P2-4.5 收尾：认证来自握手 httpOnly cookie（sid_user），前端不再传 body token
+        user_id = sid_user.get(sid)
         if not user_id:
-            await sio.emit('error', {'message': '令牌中缺少用户信息'}, room=sid)
+            await sio.emit('error', {'message': '未认证，请重新登录'}, room=sid)
             return
 
         # 验证项目所有权
@@ -519,26 +530,16 @@ async def join_audiobook(sid, data):
     logger.debug(f"📥 [WebSocket] 收到 join_audiobook 请求: sid={sid}, data={data}")
     try:
         audiobook_project_id = data.get('audiobook_project_id')
-        token = data.get('token')
 
         # 验证必要参数
         if not audiobook_project_id:
             await sio.emit('error', {'message': '缺少 audiobook_project_id'}, room=sid)
             return
 
-        if not token:
-            await sio.emit('error', {'message': '缺少认证令牌'}, room=sid)
-            return
-
-        # 验证 token
-        payload = verify_standard_websocket_token(token)
-        if not payload:
-            await sio.emit('error', {'message': '无效的认证令牌'}, room=sid)
-            return
-
-        user_id = payload.get("sub")
+        # P2-4.5 收尾：认证来自握手 httpOnly cookie（sid_user），前端不再传 body token
+        user_id = sid_user.get(sid)
         if not user_id:
-            await sio.emit('error', {'message': '令牌中缺少用户信息'}, room=sid)
+            await sio.emit('error', {'message': '未认证，请重新登录'}, room=sid)
             return
 
         # 验证有声书项目所有权

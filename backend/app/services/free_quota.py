@@ -22,6 +22,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from app.core.config import settings
+from app.core.redis_client import LoopBoundRedis
 
 logger = logging.getLogger("uvicorn.error")
 
@@ -138,23 +139,12 @@ class FreeQuotaService:
 
     def __init__(self, redis_url: Optional[str] = None):
         self.redis_url = redis_url or str(settings.REDIS_URL).strip()
-        self._redis_client = None
+        self._redis = LoopBoundRedis(self.redis_url)
         self.user_daily_limit = int(getattr(settings, "FREE_TIER_DAILY_CHAPTER_LIMIT", 2))
         self.global_daily_limit = int(getattr(settings, "FREE_TIER_GLOBAL_DAILY_LIMIT", 500))
 
     async def _get_redis_client(self):
-        if self._redis_client is not None:
-            return self._redis_client
-        import redis.asyncio as redis
-
-        client = redis.from_url(
-            self.redis_url,
-            encoding="utf-8",
-            decode_responses=True,
-        )
-        await client.ping()
-        self._redis_client = client
-        return client
+        return await self._redis.get()
 
     # ---------- 键与时间 ----------
 
@@ -204,7 +194,7 @@ class FreeQuotaService:
                 global_available=global_used < self.global_daily_limit,
             )
         except Exception as exc:
-            self._redis_client = None
+            self._redis.invalidate()
             raise QuotaServiceUnavailableError(str(exc)) from exc
 
     async def reserve(self, user_id: int, task_id: str) -> QuotaReservationResult:
@@ -248,7 +238,7 @@ class FreeQuotaService:
                 reason=reason,
             )
         except Exception as exc:
-            self._redis_client = None
+            self._redis.invalidate()
             logger.error(f"❌ 免费额度服务不可用（fail closed）: {exc}")
             raise QuotaServiceUnavailableError(str(exc)) from exc
 
@@ -267,7 +257,7 @@ class FreeQuotaService:
             )
             return int(result) == 1
         except Exception as exc:
-            self._redis_client = None
+            self._redis.invalidate()
             logger.warning(f"⚠️ 标记额度已消耗失败（任务 {task_id}）: {exc}")
             return False
 
@@ -299,7 +289,7 @@ class FreeQuotaService:
             logger.info(f"   💰 已退回免费额度（任务 {task_id}, 用户 {user_id}）")
             return True
         except Exception as exc:
-            self._redis_client = None
+            self._redis.invalidate()
             logger.warning(f"⚠️ 退回免费额度失败（任务 {task_id}）: {exc}")
             return False
 

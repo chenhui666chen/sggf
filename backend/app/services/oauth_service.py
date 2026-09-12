@@ -3,7 +3,6 @@
 """
 import base64
 import json
-import re
 from typing import Any, Dict, Optional
 
 import httpx
@@ -14,8 +13,36 @@ from fastapi import HTTPException, status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.core.security import create_access_token, make_unusable_password_hash
+from app.core.crypto import get_openid_crypto
+from app.core.security import make_unusable_password_hash
 from app.models.user import User
+
+
+def _find_by_openid(db: Session, field: str, openid: Optional[str]) -> Optional[User]:
+    """按 openid 的确定性查找哈希匹配用户（库内已无明文，只能比对哈希）。"""
+    if not openid:
+        return None
+    return (
+        db.query(User)
+        .filter(getattr(User, f"{field}_hash") == get_openid_crypto().lookup_hash(openid))
+        .first()
+    )
+
+
+def _sync_openid(user: User, field: str, openid: Optional[str]) -> bool:
+    """写入 openid 的查找哈希与密文，返回是否发生变更。
+
+    比对用哈希（无需解密即可判定变更），写入必须 hash 与 encrypted 成对更新。
+    """
+    if not openid:
+        return False
+    crypto = get_openid_crypto()
+    lookup_hash = crypto.lookup_hash(openid)
+    if getattr(user, f"{field}_hash") == lookup_hash:
+        return False
+    setattr(user, f"{field}_hash", lookup_hash)
+    setattr(user, f"{field}_encrypted", crypto.encrypt(openid))
+    return True
 
 
 def _normalize_key_material(material: str, label: str) -> bytes:
@@ -55,19 +82,57 @@ def build_sign_content(params: Dict[str, Any]) -> str:
     )
 
 
-def strip_sign_fields(raw_text: str) -> str:
-    """从响应原文中剔除 sign/sign_type 字段，得到待验签串。"""
-    stripped = re.sub(r'"sign"\s*:\s*"[^"]*"\s*,?', "", raw_text)
-    stripped = re.sub(r'"sign_type"\s*:\s*"[^"]*"\s*,?', "", stripped)
-    return re.sub(r",\s*}", "}", stripped)
+def extract_response_sign_content(raw_text: str) -> Optional[str]:
+    """从响应原文中提取待验签串：内层业务包裹体（xxx_response）的 JSON 子串。
+
+    真实网关约定（线上取证）：响应外层只有业务包裹体与末尾 sign 字段，
+    签名只覆盖内层包裹体本身。直接对原文切片而非解析后重序列化，
+    避免重序列化引入的转义/空格差异导致验签失败。
+    """
+    sign_idx = raw_text.rfind('"sign"')
+    if sign_idx <= 0:
+        return None
+    seg = raw_text[:sign_idx].rstrip()
+    if seg.endswith(","):
+        seg = seg[:-1].rstrip()
+    if not (seg.startswith("{") and seg.endswith("}")):
+        return None
+    colon_idx = seg.find(":")
+    if colon_idx < 0:
+        return None
+    inner = seg[colon_idx + 1 :].strip()
+    if not (inner.startswith("{") and inner.endswith("}")):
+        return None
+    return inner
+
+
+def extract_gateway_error(payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """识别支付宝网关错误包裹体并转为结构化错误。
+
+    错误响应包在 error_response 里（成功响应才是 alipay_xxx_response）；
+    且真实网关对错误响应的签名无法用支付宝公钥验证（实测 344 字符非 2048 位
+    RSA 签名长度），因此错误分支必须先于验签判定。
+    """
+    error_data = payload.get("error_response")
+    if not isinstance(error_data, dict):
+        return None
+    return {
+        "error": error_data.get("sub_code") or error_data.get("code") or "alipay_gateway_error",
+        "error_description": error_data.get("sub_msg") or error_data.get("msg") or "Alipay gateway error",
+    }
 
 
 class AlipayOAuthService:
     """支付宝 OAuth 服务（请求需 RSA2 签名，响应使用支付宝公钥验签）。"""
 
-    def __init__(self, app_id: str, private_key: str, public_key: str):
+    def __init__(self, app_id: str, private_key: str, public_key: str, sandbox: bool = False):
         self.app_id = app_id
-        self.auth_url = "https://openapi.alipay.com/gateway.do"
+        # 沙箱环境使用 openapi.alipaydev.com 网关，生产使用 openapi.alipay.com
+        self.auth_url = (
+            "https://openapi.alipaydev.com/gateway.do"
+            if sandbox
+            else "https://openapi.alipay.com/gateway.do"
+        )
         try:
             self._private_key = load_alipay_private_key(private_key)
             self._public_key = load_alipay_public_key(public_key)
@@ -86,13 +151,15 @@ class AlipayOAuthService:
         return base64.b64encode(signature).decode("ascii")
 
     def _verify_response(self, raw_text: str, payload: Dict[str, Any]) -> bool:
-        """使用支付宝公钥验证响应签名；未配置公钥时跳过验签。"""
+        """使用支付宝公钥验证响应签名：验签对象为内层包裹体（线上取证约定）。"""
         if self._public_key is None:
             return True
         sign = str(payload.get("sign") or "")
         if not sign:
             return False
-        content = strip_sign_fields(raw_text)
+        content = extract_response_sign_content(raw_text)
+        if content is None:
+            return False
         try:
             self._public_key.verify(
                 base64.b64decode(sign),
@@ -138,6 +205,10 @@ class AlipayOAuthService:
             response.raise_for_status()
             payload = json.loads(response.text)
 
+        gateway_error = extract_gateway_error(payload)
+        if gateway_error is not None:
+            return gateway_error
+
         if not self._verify_response(response.text, payload):
             return {
                 "error": "alipay_sign_verify_failed",
@@ -170,6 +241,10 @@ class AlipayOAuthService:
             response.raise_for_status()
             payload = json.loads(response.text)
 
+        gateway_error = extract_gateway_error(payload)
+        if gateway_error is not None:
+            return gateway_error
+
         if not self._verify_response(response.text, payload):
             return {
                 "error": "alipay_sign_verify_failed",
@@ -182,6 +257,10 @@ class AlipayOAuthService:
                 "error": user_info.get("sub_code") or user_info.get("code") or "alipay_user_info_failed",
                 "error_description": user_info.get("sub_msg") or user_info.get("msg") or "Failed to get user info from Alipay",
             }
+        # 线上取证：应用开启 openid 配置后网关只回 open_id；登录链路只认 user_id，
+        # 此处归一化（已有 user_id 时不覆盖，兼容旧约定）
+        if not user_info.get("user_id") and user_info.get("open_id"):
+            user_info["user_id"] = user_info["open_id"]
         return user_info
 
     def _get_timestamp(self) -> str:
@@ -247,22 +326,14 @@ class OAuthService:
     """第三方登录统一入口。"""
 
     @staticmethod
-    def _build_user_payload(user: User) -> Dict[str, Any]:
-        return {
-            "id": user.id,
-            "username": user.username,
-            "email": user.email,
-            "phone": user.phone,
-            "full_name": user.full_name,
-            "avatar_url": user.avatar_url,
-            "is_active": user.is_active,
-            "created_at": user.created_at.isoformat(),
-            "updated_at": user.updated_at.isoformat(),
-        }
+    def _allocate_username(db: Session, provider: str, raw_id: str) -> str:
+        """为 OAuth 用户分配唯一用户名（P1-3.2：不再分配假邮箱）。
 
-    @staticmethod
-    def _allocate_identity(db: Session, provider: str, raw_id: str) -> tuple[str, str]:
-        base = f"{provider}_{raw_id[-12:]}".lower()
+        P2-4.1：由 openid 的查找哈希派生，不再取明文后 12 位——username 随
+        UserResponse 下发前端，用明文片段等于把 openid 大部分泄露出去。
+        HMAC 片段不可反推，且同一 openid 仍稳定映射到同一 username。
+        """
+        base = f"{provider}_{get_openid_crypto().lookup_hash(raw_id)[:12]}".lower()
         candidate = base
         index = 1
 
@@ -270,7 +341,7 @@ class OAuthService:
             index += 1
             candidate = f"{base}_{index}"
 
-        return candidate, f"{candidate}@{provider}.temp"
+        return candidate
 
     @staticmethod
     def _ensure_active(user: User) -> User:
@@ -302,16 +373,13 @@ class OAuthService:
             user.avatar_url = avatar_url
             changed = True
 
-        if alipay_openid and user.alipay_openid != alipay_openid:
-            user.alipay_openid = alipay_openid
+        if _sync_openid(user, "alipay_openid", alipay_openid):
             changed = True
 
-        if wechat_openid and user.wechat_openid != wechat_openid:
-            user.wechat_openid = wechat_openid
+        if _sync_openid(user, "wechat_openid", wechat_openid):
             changed = True
 
-        if wechat_unionid and user.wechat_unionid != wechat_unionid:
-            user.wechat_unionid = wechat_unionid
+        if _sync_openid(user, "wechat_unionid", wechat_unionid):
             changed = True
 
         if changed:
@@ -322,7 +390,7 @@ class OAuthService:
         return user
 
     @staticmethod
-    def _create_external_user(
+    def create_confirmed_user(
         db: Session,
         provider: str,
         raw_id: str,
@@ -332,79 +400,82 @@ class OAuthService:
         wechat_openid: Optional[str] = None,
         wechat_unionid: Optional[str] = None,
     ) -> User:
-        username, email = OAuthService._allocate_identity(db, provider, raw_id)
+        """OAuth 建号确认入口（P1-3.2）：email=NULL，不分配假邮箱。
+
+        先按 openid 查已有用户（并发双确认/历史建号兼容），命中则同步返回，
+        避免唯一索引冲突或重复建号。
+        """
+        if alipay_openid:
+            existing = _find_by_openid(db, "alipay_openid", alipay_openid)
+            if existing:
+                return existing
+        if wechat_openid:
+            existing = _find_by_openid(db, "wechat_openid", wechat_openid)
+            if existing:
+                return existing
+
+        username = OAuthService._allocate_username(db, provider, raw_id)
         user = User(
             username=username,
-            email=email,
+            email=None,
             phone=None,
             password_hash=make_unusable_password_hash(),
             full_name=full_name,
             avatar_url=avatar_url,
-            alipay_openid=alipay_openid,
-            wechat_openid=wechat_openid,
-            wechat_unionid=wechat_unionid,
             is_active=True,
         )
+        _sync_openid(user, "alipay_openid", alipay_openid)
+        _sync_openid(user, "wechat_openid", wechat_openid)
+        _sync_openid(user, "wechat_unionid", wechat_unionid)
         db.add(user)
         try:
             db.commit()
         except IntegrityError:
             db.rollback()
+            # P2-4.3：已被注销（冷静期）用户占用 openid 时不得回落登录，按冲突报错
             if alipay_openid:
-                existing = db.query(User).filter(User.alipay_openid == alipay_openid).first()
-                if existing:
+                existing = _find_by_openid(db, "alipay_openid", alipay_openid)
+                if existing and existing.deleted_at is None:
                     return existing
             if wechat_openid:
-                existing = db.query(User).filter(User.wechat_openid == wechat_openid).first()
-                if existing:
+                existing = _find_by_openid(db, "wechat_openid", wechat_openid)
+                if existing and existing.deleted_at is None:
                     return existing
             raise
         db.refresh(user)
         return user
 
     @staticmethod
-    def handle_alipay_login(db: Session, user_info: Dict[str, Any]) -> Dict[str, Any]:
-        """处理支付宝登录。"""
+    async def handle_alipay_login(db: Session, user_info: Dict[str, Any]) -> Optional[User]:
+        """处理支付宝登录（P1-3.2：仅匹配已有用户，新用户返回 None 由路由发改号票据）。"""
         alipay_user_id = str(user_info.get("user_id") or "").strip()
         if not alipay_user_id:
             raise ValueError("Invalid Alipay user info")
 
         full_name = str(user_info.get("nick_name") or f"alipay_{alipay_user_id[-6:]}")
 
-        user = db.query(User).filter(User.alipay_openid == alipay_user_id).first()
-        if not user:
-            user = OAuthService._create_external_user(
-                db=db,
-                provider="alipay",
-                raw_id=alipay_user_id,
-                full_name=full_name,
-                alipay_openid=alipay_user_id,
-            )
-        else:
-            user = OAuthService._sync_external_user(
-                db,
-                user,
-                full_name=full_name,
-                alipay_openid=alipay_user_id,
-            )
+        user = _find_by_openid(db, "alipay_openid", alipay_user_id)
+        # P2-4.3：已注销（冷静期）账户不通过 OAuth 重新登录，按新用户走建号流程
+        if not user or user.deleted_at is not None:
+            return None
 
-        user = OAuthService._ensure_active(user)
+        user = OAuthService._sync_external_user(
+            db,
+            user,
+            full_name=full_name,
+            alipay_openid=alipay_user_id,
+        )
 
-        access_token = create_access_token(data={"sub": str(user.id)})
-        return {
-            "access_token": access_token,
-            "token_type": "bearer",
-            "user": OAuthService._build_user_payload(user),
-        }
+        return OAuthService._ensure_active(user)
 
     @staticmethod
-    def handle_wechat_login(
+    async def handle_wechat_login(
         db: Session,
         user_info: Dict[str, Any],
         openid: str,
         unionid: Optional[str] = None,
-    ) -> Dict[str, Any]:
-        """处理微信登录。"""
+    ) -> Optional[User]:
+        """处理微信登录（P1-3.2：unionid 优先匹配，命中后回写最新 openid）。"""
         openid = str(openid or "").strip()
         unionid = str(unionid or "").strip() or None
         if not openid:
@@ -413,35 +484,23 @@ class OAuthService:
         full_name = str(user_info.get("nickname") or f"wechat_{openid[-6:]}")
         avatar_url = user_info.get("headimgurl")
 
-        user = db.query(User).filter(User.wechat_openid == openid).first()
-        if not user and unionid:
-            user = db.query(User).filter(User.wechat_unionid == unionid).first()
-
+        user: Optional[User] = None
+        if unionid:
+            user = _find_by_openid(db, "wechat_unionid", unionid)
         if not user:
-            user = OAuthService._create_external_user(
-                db=db,
-                provider="wechat",
-                raw_id=openid,
-                full_name=full_name,
-                avatar_url=avatar_url,
-                wechat_openid=openid,
-                wechat_unionid=unionid,
-            )
-        else:
-            user = OAuthService._sync_external_user(
-                db,
-                user,
-                full_name=full_name,
-                avatar_url=avatar_url,
-                wechat_openid=openid,
-                wechat_unionid=unionid,
-            )
+            user = _find_by_openid(db, "wechat_openid", openid)
 
-        user = OAuthService._ensure_active(user)
+        # P2-4.3：已注销（冷静期）账户不通过 OAuth 重新登录
+        if not user or user.deleted_at is not None:
+            return None
 
-        access_token = create_access_token(data={"sub": str(user.id)})
-        return {
-            "access_token": access_token,
-            "token_type": "bearer",
-            "user": OAuthService._build_user_payload(user),
-        }
+        user = OAuthService._sync_external_user(
+            db,
+            user,
+            full_name=full_name,
+            avatar_url=avatar_url,
+            wechat_openid=openid,
+            wechat_unionid=unionid,
+        )
+
+        return OAuthService._ensure_active(user)

@@ -5,7 +5,9 @@ https://cloud.tencent.com/document/product/1552/135974
 与 TMS 的关键差异：
 - 鉴权为 Bearer API Key（无签名），网关域名与 Key 由控制台创建网关后分配
 - 响应提供段落级三分类标注（segment_labels：0=人工 1=AI 2=疑似AI），
-  是项目黄金对照实验的"正向真值"来源（TMS 已证伪，见 2026-08-23 实验）
+  是项目黄金对照实验的"正向真值"来源（TMS 已移除，见 2026-08-27 格式复验）
+- 2026-08-28 放通后冒烟实测：position 格式为 [start, length]（非 [start, end]）；
+  is_merge 只影响段切分粒度，全文分两模式完全一致，故默认非合并单次调用
 """
 import json
 import asyncio
@@ -34,11 +36,16 @@ class ZhuqueAIDetectService:
     def __init__(self):
         self.gateway_url = getattr(settings, "ZHUQUE_GATEWAY_URL", "")
         self.api_key = getattr(settings, "ZHUQUE_API_KEY", "")
-        self.is_merge = getattr(settings, "ZHUQUE_IS_MERGE", True)
+        self.is_merge = getattr(settings, "ZHUQUE_IS_MERGE", False)
 
     @property
     def classify_url(self) -> str:
         return f"{self.gateway_url.rstrip('/')}{self.CLASSIFY_PATH}"
+
+    @staticmethod
+    def prepare_text(text: str) -> str:
+        """与 TMS 客户端同构的预处理接口；朱雀支持长文本（按千字计费），恒等返回。"""
+        return text
 
     @property
     def detection_policy_version(self) -> str:
@@ -67,17 +74,19 @@ class ZhuqueAIDetectService:
                 "rate_limited": False,
             }
 
-        # 段落级三分类标注：0=人工 1=AI 2=疑似AI，position 为原文字符起止下标
+        # 段落级三分类标注：0=人工 1=AI 2=疑似AI；position 为 [起始下标, 段长]（放通后实测）
         segment_labels = []
         for seg in result.get("segment_labels") or []:
             position = seg.get("position") or [0, 0]
+            start = position[0] if len(position) > 0 else 0
+            length = position[1] if len(position) > 1 else 0
             segment_labels.append({
                 "text": seg.get("text", ""),
                 "label": seg.get("label", 0),
                 "conf": seg.get("conf", 0.0),
                 "order": seg.get("order", 0),
-                "start": position[0] if len(position) > 0 else 0,
-                "end": position[1] if len(position) > 1 else 0,
+                "start": start,
+                "end": start + length,
             })
 
         # ai_score 对齐项目 0-100 语义：整体疑似 AI 占比（ratio_confidence）× 100

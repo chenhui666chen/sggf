@@ -12,11 +12,11 @@ from sqlalchemy.orm import Session
 
 from app.db.base import get_db
 from app.models.user import User
-from app.core.permissions import require_admin
+from app.core.permissions import require_admin, require_super_admin
 from app.utils.sql_validator import SQLValidator, SQLSecurityError
 from app.models.admin_log import AdminOperationLog
 
-router = APIRouter(prefix="/query", tags=["admin-query"])
+router = APIRouter(tags=["admin-query"])
 logger = logging.getLogger(__name__)
 
 
@@ -25,7 +25,7 @@ async def execute_query(
     sql: str,
     description: Optional[str] = "",
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_admin)
+    current_user: User = Depends(require_super_admin)
 ):
     """
     执行只读 SQL 查询

@@ -11,7 +11,7 @@ from app.services.prompt_evolution.test_samples import (
     TestSampleManager as EvolutionTestSampleManager,
     generate_samples_via_llm,
 )
-from app.services.tencent_ai_detect import tencent_ai_detect_service
+from app.services.zhuque_ai_detect import zhuque_ai_detect_service
 
 # 有效样本目标长度：对齐用户端约3000字章节的真实使用场景
 VALID_SAMPLE_TEXT_LENGTH = 3000
@@ -143,7 +143,7 @@ async def test_sample_detection_is_invalidated_when_text_changes(tmp_path):
     sample = EvolutionTestSample(sample_id="changed", text="before" * 500, genre="通用")
     sample.store_ai_detection(
         {"success": True, "ai_score": 60, "label": "Normal", "suggestion": "Pass"},
-        tencent_ai_detect_service.detection_policy_version,
+        zhuque_ai_detect_service.detection_policy_version,
     )
     sample.text = "after" * 500
     manager = EvolutionTestSampleManager(samples=[sample], storage_dir=str(tmp_path))
@@ -208,7 +208,7 @@ async def test_evaluator_reuses_persisted_sample_baseline():
     sample = EvolutionTestSample(sample_id="cached", text="original" * 375, genre="通用")
     sample.store_ai_detection(
         {"success": True, "ai_score": 70, "label": "Normal", "suggestion": "Pass"},
-        tencent_ai_detect_service.detection_policy_version,
+        zhuque_ai_detect_service.detection_policy_version,
     )
 
     _, results = await evaluator.evaluate_prompt("prompt", [sample])

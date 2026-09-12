@@ -9,6 +9,8 @@ from typing import Any, Optional, Callable, Dict
 from datetime import datetime, timedelta
 import logging
 
+from app.core.redis_client import LoopBoundRedis
+
 logger = logging.getLogger(__name__)
 
 
@@ -98,23 +100,16 @@ class RedisCache(CacheLayer):
     
     def __init__(self, redis_url: Optional[str] = None):
         self.redis_url = redis_url or "redis://localhost:6379/0"
-        self.redis_client = None
+        self._redis = LoopBoundRedis(self.redis_url)
         self.enabled = False
         
     async def _ensure_connection(self):
-        """确保 Redis 连接"""
-        if self.redis_client is not None:
+        """确保 Redis 连接（按事件循环绑定，见 app/core/redis_client.py）"""
+        if self.enabled:
             return
         
         try:
-            import redis.asyncio as redis
-            self.redis_client = redis.from_url(
-                self.redis_url,
-                encoding="utf-8",
-                decode_responses=True
-            )
-            # 测试连接
-            await self.redis_client.ping()
+            await self._redis.get()
             self.enabled = True
             logger.info(f"✅ Redis 缓存已连接: {self.redis_url}")
         except Exception as e:
@@ -127,7 +122,8 @@ class RedisCache(CacheLayer):
             return None
         
         try:
-            value = await self.redis_client.get(key)
+            client = await self._redis.get()
+            value = await client.get(key)
             if value:
                 logger.debug(f"🔴 Redis 缓存命中: {key}")
                 return json.loads(value)
@@ -143,7 +139,8 @@ class RedisCache(CacheLayer):
         
         try:
             serialized = json.dumps(value, ensure_ascii=False)
-            await self.redis_client.setex(key, ttl, serialized)
+            client = await self._redis.get()
+            await client.setex(key, ttl, serialized)
             logger.debug(f"💾 Redis 缓存已设置: {key}, TTL={ttl}秒")
             return True
         except Exception as e:
@@ -156,7 +153,8 @@ class RedisCache(CacheLayer):
             return False
         
         try:
-            await self.redis_client.delete(key)
+            client = await self._redis.get()
+            await client.delete(key)
             return True
         except Exception as e:
             logger.error(f"❌ Redis 删除失败: {e}")
@@ -168,7 +166,8 @@ class RedisCache(CacheLayer):
             return False
         
         try:
-            await self.redis_client.flushdb()
+            client = await self._redis.get()
+            await client.flushdb()
             logger.info("🗑️ Redis 缓存已清空")
             return True
         except Exception as e:

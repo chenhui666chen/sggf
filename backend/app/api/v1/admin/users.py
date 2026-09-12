@@ -8,12 +8,13 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
 
-from app.core.permissions import require_admin
+from app.core.permissions import is_super_admin, require_admin
 from app.core.security import hash_password
 from app.db.base import get_db
 from app.models.admin_log import AdminOperationLog
 from app.models.user import User
 from app.models.role import Role
+from app.services.password_history_service import password_history_service
 from app.schemas.admin import (
     UserAdminResponse,
     UserListResponse,
@@ -37,6 +38,25 @@ from app.services.user_points_read_model import UserPointsReadModelSnapshot, bui
 from app.utils.datetime_utils import ensure_utc_datetime, utc_now
 
 router = APIRouter()
+
+
+def _resolve_assignable_roles(
+    db: Session, role_ids: list[int], current_user: User
+) -> list[Role]:
+    """解析并校验可分配角色（P1-3.9 提权防护）。
+
+    普通 admin 不得分配 super_admin 角色（含给自己/他人），否则可自提权；
+    super_admin 角色仅 super_admin 可分配。
+    """
+    roles = db.query(Role).filter(Role.id.in_(role_ids)).all()
+    if not is_super_admin(current_user) and any(
+        role.code == "super_admin" for role in roles
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="无权分配超级管理员角色",
+        )
+    return roles
 
 
 def _points_adjustment_log_to_response(log: AdminOperationLog) -> UserPointsAdjustmentResponse:
@@ -198,10 +218,11 @@ async def create_user(
     )
     
     if user_data.role_ids:
-        roles = db.query(Role).filter(Role.id.in_(user_data.role_ids)).all()
-        user.roles = roles
+        user.roles = _resolve_assignable_roles(db, user_data.role_ids, current_user)
     
     db.add(user)
+    db.flush()  # 先取 id：初始密码与建号同事务登记入历史（评审 #3）
+    password_history_service.record(db, user.id, user_data.password)
     db.commit()
     db.refresh(user)
     
@@ -229,8 +250,7 @@ async def update_user(
         setattr(user, field, value)
     
     if user_data.role_ids is not None:
-        roles = db.query(Role).filter(Role.id.in_(user_data.role_ids)).all()
-        user.roles = roles
+        user.roles = _resolve_assignable_roles(db, user_data.role_ids, current_user)
     
     db.commit()
     db.refresh(user)
@@ -260,6 +280,9 @@ async def update_user_status(
         )
     
     user.is_active = status_data.is_active
+    # 禁用账号必须递增 token_version，吊销其全部已签发 JWT（重新启用后旧 token 也不复活）
+    if not status_data.is_active:
+        user.token_version += 1
     db.commit()
     db.refresh(user)
     
@@ -281,7 +304,7 @@ async def assign_user_roles(
             detail="用户不存在"
         )
     
-    roles = db.query(Role).filter(Role.id.in_(role_data.role_ids)).all()
+    roles = _resolve_assignable_roles(db, role_data.role_ids, current_user)
     user.roles = roles
     
     db.commit()

@@ -238,18 +238,13 @@ async def auto_save_memory(
     1. Header Authorization: Bearer <token>（正常请求）
     2. Query Parameter: ?token=<token>（sendBeacon 请求）
     """
-    from app.core.security import verify_token
+    from app.core.security import resolve_user_from_token
 
-    # 🆕 如果使用 query parameter token，验证并获取用户
+    # query parameter token 走完整校验链路（签名/状态/tv/jti）：
+    # 登出（jti）或改密/禁用（tv）后，URL 中的旧 token 不得再写入记忆（P1-3.7 收口）
     user = current_user
     if user is None and token:
-        try:
-            payload = verify_token(token)
-            user_id = payload.get("sub")
-            if user_id:
-                user = db.query(User).filter(User.id == int(user_id)).first()
-        except Exception:
-            pass
+        user = await resolve_user_from_token(token, db)
 
     if user is None:
         raise HTTPException(

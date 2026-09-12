@@ -17,7 +17,7 @@ import uuid
 from app.db.base import get_db
 from app.core.security import get_current_user
 from app.models.user import User
-from app.services.tencent_ai_detect import tencent_ai_detect_service
+from app.services.zhuque_ai_detect import zhuque_ai_detect_service
 from app.services.prompt_evolution.evaluator import PromptEvaluator
 from app.services.prompt_evolution.meta_optimizer import MetaOptimizer
 from app.services.prompt_evolution.storage import EvolutionStorage
@@ -117,7 +117,7 @@ async def reduce_ai_trace(
             logger.info(f"  使用前端已检测分数: {original_score}")
         else:
             step1_start = time.time()
-            original_detect_result = await tencent_ai_detect_service.detect_ai_content(text)
+            original_detect_result = await zhuque_ai_detect_service.detect_ai_content(text)
             original_score = (
                 original_detect_result.get("ai_score", 50)
                 if original_detect_result.get("success")
@@ -200,7 +200,7 @@ async def reduce_ai_trace(
 
         # 4. 检测改写后AI分数
         step3_start = time.time()
-        new_result = await tencent_ai_detect_service.detect_ai_content(reduced_text)
+        new_result = await zhuque_ai_detect_service.detect_ai_content(reduced_text)
         new_score = (
             new_result.get("ai_score", original_score)
             if new_result.get("success")
@@ -271,7 +271,7 @@ async def reduce_ai_trace(
                     )
 
                 async def _returnable_detect(candidate_text):
-                    result = await tencent_ai_detect_service.detect_ai_content(candidate_text)
+                    result = await zhuque_ai_detect_service.detect_ai_content(candidate_text)
                     if not result.get("success"):
                         return None
                     return float(result.get("ai_score", 0.0))

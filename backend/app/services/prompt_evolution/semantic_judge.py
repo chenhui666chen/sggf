@@ -181,11 +181,11 @@ confidence必须是0-1数值。输出字段：semantic_fidelity、fact_consisten
 def calculate_hybrid_score(ai_score: float, local_score: float, review: Dict[str, Any]) -> float:
     """将朱雀、本地规则和语义评审归一为越低越好的成本分。
 
-    2026-08-23 黄金对照实验证伪 TMS：GPT人工化金标准(朱雀0%) TMS=97、
-    AI原文 TMS=0、用户手写 TMS=92、金庸 TMS=0——TMS 是文风分类器
-    (长句文学腔→0/短句网文腔→高)，与真实AI痕迹反向且与题材强相关，
-    任何正向权重都会把优化方向拉向"文学腔"，故权重清零（保留参数
-    兼容调用方，不再参与计分）。主信号：语义人感 writing_naturalness
+    2026-08-23 黄金对照实验后，2026-08-27 格式复验确认：当时的"证伪"
+    实为格式假象——TMS 对段落空格/开头空行敏感（真人文本加空行即判
+    97/Block），格式干净后真人与 AI 均得 0，无真阳性能力；TMS 已于
+    2026-08-27 全库移除，权重清零（保留参数兼容调用方，不再参与计分）。
+    主信号：语义人感 writing_naturalness
     (0.20)、genre_consistency(0.15)、over_rewrite_risk(0.10 加项)、
     事实/保真维度，控制"自然化不得以失真为代价"。
     """

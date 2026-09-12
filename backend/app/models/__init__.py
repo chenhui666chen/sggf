@@ -1,6 +1,9 @@
 """模型模块初始化文件"""
 
 from .user import User
+from .password_history import PasswordHistory
+from .audit_log import AuditLog
+from .consent_record import ConsentRecord
 from .project import Project
 from .memory import Memory
 from .setting import SettingCollection, SettingItem
@@ -45,6 +48,8 @@ from .prompt_experiment import (
 
 __all__ = [
     "User",
+    "AuditLog",
+    "ConsentRecord",
     "Project",
     "Memory",
     "SettingCollection",

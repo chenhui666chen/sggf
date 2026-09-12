@@ -22,15 +22,18 @@ os.environ.setdefault("DEBUG", "false")
 os.environ.setdefault("DATABASE_URL", "postgresql://test:test@127.0.0.1:5432/test_db")
 
 import app.core.security as security
+from app.api.v1 import auth as auth_api
 from app.api.v1.admin import router as admin_router
 from app.api.v1.user_center import router as user_center_router
 from app.core.security import create_access_token
 from app.db.base import Base, get_db
 from app.models.admin_log import AdminOperationLog
+from app.models.audit_log import AuditLog
 from app.models.audiobook import AudiobookProject
 from app.models.dreamweaver import DreamweaverProject
+from app.models.password_history import PasswordHistory
 from app.models.project import Chapter, Project
-from app.models.role import Role, user_roles
+from app.models.role import Permission, Role, role_permissions, user_roles
 from app.models.user import User
 from app.models.user_asset_record import UserAssetRecord
 
@@ -61,6 +64,9 @@ class CompatTestClient:
     def put(self, url: str, **kwargs) -> Response:
         return self.request("PUT", url, **kwargs)
 
+    def patch(self, url: str, **kwargs) -> Response:
+        return self.request("PATCH", url, **kwargs)
+
 
 def build_test_client() -> tuple[CompatTestClient, sessionmaker]:
     engine = create_engine(
@@ -78,8 +84,12 @@ def build_test_client() -> tuple[CompatTestClient, sessionmaker]:
         tables=[
             User.__table__,
             Role.__table__,
+            Permission.__table__,
             user_roles,
+            role_permissions,
             AdminOperationLog.__table__,
+            AuditLog.__table__,
+            PasswordHistory.__table__,
             Project.__table__,
             Chapter.__table__,
             UserAssetRecord.__table__,
@@ -91,6 +101,11 @@ def build_test_client() -> tuple[CompatTestClient, sessionmaker]:
     app = FastAPI()
     app.include_router(admin_router)
     app.include_router(user_center_router)
+    app.include_router(auth_api.router)
+
+    # 本文件走真实 get_current_user 链路（不 override），jti 吊销校验依赖 Redis，
+    # 测试环境必须替换为内存 fake（P1-3.5）
+    security.jti_revocation_service = _FakeJtiService()
 
     def override_get_db():
         db = testing_session_local()
@@ -102,6 +117,19 @@ def build_test_client() -> tuple[CompatTestClient, sessionmaker]:
     app.dependency_overrides[get_db] = override_get_db
     app.dependency_overrides[security.get_db] = override_get_db
     return CompatTestClient(app), testing_session_local
+
+
+class _FakeJtiService:
+    """测试用内存 jti 吊销服务，替代 Redis 实现（P1-3.5）。"""
+
+    def __init__(self):
+        self.revoked: set[str] = set()
+
+    async def revoke(self, jti: str, exp: int) -> None:
+        self.revoked.add(jti)
+
+    async def is_revoked(self, jti: str) -> bool:
+        return jti in self.revoked
 
 
 def build_auth_headers(user_id: int) -> dict[str, str]:
@@ -1022,3 +1050,272 @@ def test_admin_points_pricing_policy_requires_super_admin():
         headers=build_auth_headers(admin.id),
     )
     assert response.status_code == 403
+
+
+def test_admin_disable_user_increments_token_version():
+    """管理员禁用账号必须递增 token_version，使该用户全部已签发 JWT 立即失效。"""
+    from app.api.v1.admin.users import update_user_status
+    from app.schemas.admin import UserStatusUpdate
+
+    _, session_factory = build_test_client()
+    target = create_user(session_factory, username="disable_me", email="disable_me@example.com")
+    admin = create_user(session_factory, username="admin_tv", email="admin_tv@example.com")
+    assert target.token_version == 1
+
+    db = session_factory()
+    try:
+        asyncio.run(
+            update_user_status(
+                user_id=target.id,
+                status_data=UserStatusUpdate(is_active=False),
+                current_user=admin,
+                db=db,
+            )
+        )
+    finally:
+        db.close()
+
+    db = session_factory()
+    try:
+        u = db.query(User).filter(User.id == target.id).first()
+        assert u.is_active is False
+        assert u.token_version == 2  # 禁用必须吊销全部已签发 JWT
+    finally:
+        db.close()
+
+
+def test_disable_then_reenable_user_revokes_old_token_end_to_end():
+    """走 HTTP 层验证：禁用→重新启用后，禁用前签发的旧 JWT 调 /me 仍 401（tv 递增生效）。"""
+    client, session_factory = build_test_client()
+    target = create_user(session_factory, username="e2e_target", email="e2e_target@example.com")
+    admin = create_user(session_factory, username="e2e_admin", email="e2e_admin@example.com")
+    admin_role = create_role(session_factory, name="管理员", code="admin")
+    assign_role(session_factory, user_id=admin.id, role_id=admin_role.id)
+
+    # 禁用前签发的旧 token（tv=1）
+    old_target_token = create_access_token(data={"sub": str(target.id), "tv": 1})
+
+    disable_resp = client.patch(
+        f"/api/v1/admin/users/{target.id}/status",
+        json={"is_active": False},
+        headers=build_auth_headers(admin.id),
+    )
+    assert disable_resp.status_code == 200
+
+    enable_resp = client.patch(
+        f"/api/v1/admin/users/{target.id}/status",
+        json={"is_active": True},
+        headers=build_auth_headers(admin.id),
+    )
+    assert enable_resp.status_code == 200
+
+    # 旧 token（tv=1）应已被 tv 递增吊销：重新启用后仍 401（不复活）
+    me_resp = client.get(
+        "/api/v1/auth/me",
+        headers={"Authorization": f"Bearer {old_target_token}"},
+    )
+    assert me_resp.status_code == 401
+
+
+# ============================================================
+# P1-3.9 提权防护（2026-08-28 批次 4）
+# ============================================================
+
+def _make_admin_user(session_factory, *, username: str, email: str, role_code: str) -> User:
+    """创建带指定角色码的管理员（admin / super_admin）并返回。
+
+    测试环境无 seed 迁移，按需自建系统角色（生产环境由 3.9 seed 迁移预置）。
+    """
+    user = create_user(session_factory, username=username, email=email)
+    role = ensure_role(session_factory, code=role_code)
+    assign_role(session_factory, user_id=user.id, role_id=role.id)
+    return user
+
+
+def ensure_role(session_factory, *, code: str, name: str | None = None) -> Role:
+    """按 code 查找系统角色，不存在则创建（模拟 3.9 seed 迁移预置效果）。"""
+    db = session_factory()
+    try:
+        role = db.query(Role).filter(Role.code == code).first()
+    finally:
+        db.close()
+    if role is not None:
+        return role
+    return create_role(session_factory, name=name or code, code=code)
+
+
+def test_admin_cannot_assign_super_admin_role():
+    """提权防护：普通 admin 不得给任何人（含自己）分配 super_admin 角色。"""
+    client, session_factory = build_test_client()
+    admin = _make_admin_user(session_factory, username="ops_admin", email="ops@example.com", role_code="admin")
+    target = create_user(session_factory, username="target_user", email="target@example.com")
+    super_admin_role = ensure_role(session_factory, code="super_admin")
+
+    # admin 尝试给目标用户分配 super_admin -> 403
+    resp = client.post(
+        f"/api/v1/admin/users/{target.id}/roles",
+        json={"role_ids": [super_admin_role.id]},
+        headers=build_auth_headers(admin.id),
+    )
+    assert resp.status_code == 403
+
+    # admin 尝试通过创建用户接口分配 super_admin -> 403
+    create_resp = client.post(
+        "/api/v1/admin/users",
+        json={
+            "username": "new_user",
+            "email": "new@example.com",
+            "password": "Pass123456",
+            "role_ids": [super_admin_role.id],
+        },
+        headers=build_auth_headers(admin.id),
+    )
+    assert create_resp.status_code == 403
+
+
+def test_admin_can_assign_non_super_admin_roles():
+    """admin 仍可分配 user/admin 等非超管角色（日常管理能力保留）。"""
+    client, session_factory = build_test_client()
+    admin = _make_admin_user(session_factory, username="ops_admin2", email="ops2@example.com", role_code="admin")
+    target = create_user(session_factory, username="target_user2", email="target2@example.com")
+    admin_role = ensure_role(session_factory, code="admin")
+
+    resp = client.post(
+        f"/api/v1/admin/users/{target.id}/roles",
+        json={"role_ids": [admin_role.id]},
+        headers=build_auth_headers(admin.id),
+    )
+    assert resp.status_code == 200
+    assert resp.json()["roles"][0]["code"] == "admin"
+
+
+def test_super_admin_can_assign_super_admin_role():
+    """super_admin 仍可分配 super_admin 角色（超管治理能力保留）。"""
+    client, session_factory = build_test_client()
+    super_admin = _make_admin_user(
+        session_factory, username="root_admin", email="root@example.com", role_code="super_admin"
+    )
+    target = create_user(session_factory, username="target_user3", email="target3@example.com")
+    super_admin_role = ensure_role(session_factory, code="super_admin")
+
+    resp = client.post(
+        f"/api/v1/admin/users/{target.id}/roles",
+        json={"role_ids": [super_admin_role.id]},
+        headers=build_auth_headers(super_admin.id),
+    )
+    assert resp.status_code == 200
+    assert resp.json()["roles"][0]["code"] == "super_admin"
+
+
+def test_admin_cannot_edit_target_roles_to_super_admin():
+    """提权防护：update_user 走 role_ids 同样不得给目标赋 super_admin。"""
+    client, session_factory = build_test_client()
+    admin = _make_admin_user(session_factory, username="ops_admin3", email="ops3@example.com", role_code="admin")
+    target = create_user(session_factory, username="target_user4", email="target4@example.com")
+    super_admin_role = ensure_role(session_factory, code="super_admin")
+
+    resp = client.patch(
+        f"/api/v1/admin/users/{target.id}",
+        json={"role_ids": [super_admin_role.id]},
+        headers=build_auth_headers(admin.id),
+    )
+    assert resp.status_code == 403
+
+
+def test_sql_query_execute_requires_super_admin():
+    """任意 SQL 执行端点只能 super_admin 使用，普通 admin 403。"""
+    client, session_factory = build_test_client()
+    admin = _make_admin_user(session_factory, username="ops_admin4", email="ops4@example.com", role_code="admin")
+    super_admin = _make_admin_user(
+        session_factory, username="root_admin2", email="root2@example.com", role_code="super_admin"
+    )
+
+    # admin 不可执行
+    denied = client.post(
+        "/api/v1/admin/query/execute",
+        params={"sql": "SELECT 1"},
+        headers=build_auth_headers(admin.id),
+    )
+    assert denied.status_code == 403
+
+    # super_admin 权限放行：进入执行逻辑。
+    # 注：测试库为 sqlite，不支持 PG 的 SET statement_timeout，执行阶段会 500；
+    # 本测试只验证权限边界（admin 拒 / super_admin 放行），生产 PostgreSQL 下返回 200。
+    allowed = client.post(
+        "/api/v1/admin/query/execute",
+        params={"sql": "SELECT 1"},
+        headers=build_auth_headers(super_admin.id),
+    )
+    assert allowed.status_code not in (403, 401)
+
+
+def test_admin_create_user_records_password_history():
+    """管理员创建用户必须登记初始密码入历史（评审 #3）：否则该用户可改回初始密码。"""
+    from app.services.password_history_service import hash_password_for_history
+
+    client, session_factory = build_test_client()
+    admin = _make_admin_user(
+        session_factory, username="admin_hist", email="ah@example.com", role_code="admin"
+    )
+    response = client.post(
+        "/api/v1/admin/users",
+        json={
+            "username": "managed_user",
+            "email": "mu@example.com",
+            "password": "Managed1x",
+        },
+        headers=build_auth_headers(admin.id),
+    )
+    assert response.status_code == 201
+
+    db = session_factory()
+    try:
+        user = db.query(User).filter(User.username == "managed_user").first()
+        assert user is not None
+        rows = db.query(PasswordHistory).filter(PasswordHistory.user_id == user.id).all()
+        assert len(rows) == 1
+        assert rows[0].password_pepper_hash == hash_password_for_history("Managed1x")
+    finally:
+        db.close()
+
+
+def test_audit_logs_endpoint_admin_only_and_masked():
+    """审计日志查询（P2-4.4）：仅管理员可查；返回 IP/UA 为脱敏哈希。"""
+    from app.services.audit_log_service import record_audit
+
+    client, session_factory = build_test_client()
+    super_admin = _make_admin_user(
+        session_factory, username="audit_root", email="audit_root@example.com", role_code="super_admin"
+    )
+    regular = create_user(session_factory, username="audit_user", email="audit_user@example.com")
+
+    db = session_factory()
+    try:
+        record_audit(
+            db,
+            event_type="login",
+            user_id=regular.id,
+            ip="203.0.113.9",
+            user_agent="Mozilla/5.0 audit-agent",
+        )
+    finally:
+        db.close()
+
+    # 普通用户 403
+    denied = client.get(
+        "/api/v1/admin/audit/audit-logs", headers=build_auth_headers(regular.id)
+    )
+    assert denied.status_code == 403
+
+    # 超管可查，且无明文 IP/UA
+    ok = client.get(
+        "/api/v1/admin/audit/audit-logs", headers=build_auth_headers(super_admin.id)
+    )
+    assert ok.status_code == 200
+    body = ok.json()
+    assert body["total"] == 1
+    item = body["items"][0]
+    assert item["event_type"] == "login"
+    assert item["user_id"] == regular.id
+    assert item["ip_hash"] and "203.0.113.9" not in str(item["ip_hash"])
+    assert item["user_agent_hash"] and "Mozilla" not in str(item["user_agent_hash"])

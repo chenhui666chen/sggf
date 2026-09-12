@@ -12,7 +12,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import List, Tuple, Optional, Dict, Any
 
-from app.services.tencent_ai_detect import tencent_ai_detect_service
+from app.services.zhuque_ai_detect import zhuque_ai_detect_service
 from core.unified_llm_client import get_llm_client
 from core.model_resolution import TaskType, build_thinking_disabled_extra_body
 
@@ -62,7 +62,7 @@ class PromptEvaluator:
     # mimo 系存在 64/98 波动（无 step 的稳定 0 分能力），重试可将 98 拉低，
     # 收益虽低于 step 但成本可控，一并纳入（2026-08-23 实测扩展）
     HIGH_SCORE_RETRY_THRESHOLD = 70
-    HIGH_SCORE_RETRY_MAX = 0  # 2026-08-23 证伪 TMS 后停用（详见 _eval_one_sample 注释）
+    HIGH_SCORE_RETRY_MAX = 0  # TMS 移除后停用（详见 _eval_one_sample 注释）
     HIGH_SCORE_RETRY_MODEL_PREFIXES = ("step", "mimo")
     # 🔧 StepFun 阶梯限速：API 并发上限 5（429 实测），评估并发 8 全为
     # step 时（如武侠题材进化）会触发限流；模型级信号量压到 4 留 buffer
@@ -73,7 +73,7 @@ class PromptEvaluator:
 
     def __init__(self):
         self.llm_client = get_llm_client()
-        self.ai_detector = tencent_ai_detect_service
+        self.ai_detector = zhuque_ai_detect_service
         self.semantic_judge = SemanticJudge(self.llm_client)
         # 🆕 样本原文检测缓存：同一进化运行内，每个样本原文只检测一次
         # key = 文本哈希, value = 检测结果 dict
@@ -91,7 +91,7 @@ class PromptEvaluator:
 
     async def _detect_original_cached(self, text: str) -> Dict[str, Any]:
         """检测原始文本AI率（带样本级缓存，避免重复付费检测）"""
-        prepared_text = tencent_ai_detect_service.prepare_text(text)
+        prepared_text = zhuque_ai_detect_service.prepare_text(text)
         cache_key = hashlib.md5(prepared_text.encode("utf-8")).hexdigest()
         cached = self._original_detect_cache.get(cache_key)
         if cached is not None:
@@ -112,7 +112,7 @@ class PromptEvaluator:
 
     def get_cached_original_score(self, text: str) -> Optional[int]:
         """查询样本原文的缓存AI分数（无缓存时返回None）"""
-        prepared_text = tencent_ai_detect_service.prepare_text(text)
+        prepared_text = zhuque_ai_detect_service.prepare_text(text)
         cache_key = hashlib.md5(prepared_text.encode("utf-8")).hexdigest()
         cached = self._original_detect_cache.get(cache_key)
         if cached is not None:
@@ -219,10 +219,10 @@ class PromptEvaluator:
         try:
             # 1. 先检测原始文本（样本级缓存：首次进入本次进化时检测一次）
             logger.debug(f"   ⏳ 检测原始文本AI率...")
-            policy_version = tencent_ai_detect_service.detection_policy_version
+            policy_version = zhuque_ai_detect_service.detection_policy_version
             original_result = sample.get_ai_detection(policy_version)
             if original_result is not None:
-                prepared_text = tencent_ai_detect_service.prepare_text(sample.text)
+                prepared_text = zhuque_ai_detect_service.prepare_text(sample.text)
                 cache_key = hashlib.md5(prepared_text.encode("utf-8")).hexdigest()
                 self._original_detect_cache.setdefault(cache_key, original_result)
             else:
@@ -345,9 +345,9 @@ class PromptEvaluator:
                 logger.debug(f"   ⚠️ 改写文本检测失败: {rewritten_result.get('error', '未知错误')}")
             logger.debug(f"   📊 改写后AI得分: {rewritten_score}")
 
-            # 🔧 高方差模型高分重试（2026-08-23 黄金对照实验证伪 TMS 后停用）：
-            # TMS 为反向文风分类器（GPT人工化金标准(朱雀0%) TMS=97、AI文学腔
-            # 原文 TMS=0），"检测分高→重改取低分"实际是把人感文本改回文学腔。
+            # 🔧 高方差模型高分重试（TMS 移除后停用）：
+            # TMS 为格式触发的伪检测器（2026-08-27 格式复验：对段落空格/开头空行敏感，
+            # 格式干净后真人与 AI 均得 0），"检测分高→重改取低分"无意义。
             # HIGH_SCORE_RETRY_MAX 已置 0，保留代码结构备后续接入朱雀等正向
             # 检测器时重新启用。
             if (

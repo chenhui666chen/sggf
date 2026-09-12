@@ -28,17 +28,21 @@ celery_app = Celery(
         "app.services.audiobook.dispatch_service",
         "app.services.audiobook.billing_finalizer_service",
         "app.tasks.experiment_tasks",
+        "app.tasks.account_anonymization_tasks",
     ],
 )
 
-# 确保 worker 侧也具备最新表结构（开发环境 create_all 兜底；生产建议用 Alembic）
+# 确保 worker 侧也具备最新表结构：**仅开发环境** create_all 兜底；
+# 非开发环境强制走 Alembic，避免导入 celery 时自动建表与版本链脱节
+# （P2 批次 D 教训：audit_logs/consent_records 曾被自动先建出，迁移时 DuplicateTable）
 try:
     from app.db.base import Base, engine  # noqa: WPS433
     from app.db.schema_compat import ensure_runtime_schema_compatibility  # noqa: WPS433
     import app.models  # noqa: F401,WPS433
 
-    Base.metadata.create_all(bind=engine)
-    ensure_runtime_schema_compatibility()
+    if settings.APP_ENV == "development":
+        Base.metadata.create_all(bind=engine)
+        ensure_runtime_schema_compatibility()
 except Exception:
     # 避免 Celery 启动因建表失败而直接退出，错误可在后续任务中暴露
     pass
@@ -97,6 +101,11 @@ celery_app.conf.update(
         "prompt-experiment-run-sentinel-probe": {
             "task": "prompt_experiment.run_sentinel_probe",
             "schedule": crontab(hour="4,16", minute=10),
+        },
+        # P2-5.3：每日低频匿名化超过冷却期的已注销账号（幂等，落库非 dry-run）
+        "account-anonymize-expired-daily": {
+            "task": "account.anonymize_expired",
+            "schedule": crontab(hour=3, minute=30),
         },
     },
 )

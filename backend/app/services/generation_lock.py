@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from typing import Dict, Optional, Tuple
 
 from app.core.config import settings
+from app.core.redis_client import LoopBoundRedis
 
 logger = logging.getLogger("uvicorn.error")
 
@@ -76,25 +77,14 @@ class ChapterGenerationLockService:
 
     def __init__(self, redis_url: Optional[str] = None):
         self.redis_url = redis_url or str(settings.REDIS_URL).strip()
-        self._redis_client = None
+        self._redis = LoopBoundRedis(self.redis_url)
         # 进程内兜底锁存储：project_id -> (token, 过期时间戳)
         self._local_locks: Dict[int, Tuple[str, float]] = {}
         self._local_mutex = threading.Lock()
 
     async def _get_redis_client(self):
-        """惰性建立 Redis 连接；失败抛出异常由调用方分档处理。"""
-        if self._redis_client is not None:
-            return self._redis_client
-        import redis.asyncio as redis
-
-        client = redis.from_url(
-            self.redis_url,
-            encoding="utf-8",
-            decode_responses=True,
-        )
-        await client.ping()
-        self._redis_client = client
-        return client
+        """惰性建立 Redis 连接（按事件循环绑定）；失败抛出异常由调用方分档处理。"""
+        return await self._redis.get()
 
     @staticmethod
     def _lock_key(project_id: int) -> str:
@@ -149,7 +139,7 @@ class ChapterGenerationLockService:
             return None
         except Exception as exc:
             # Redis 故障：重置连接以便下次重建
-            self._redis_client = None
+            self._redis.invalidate()
             if not allow_local_fallback:
                 logger.error(f"❌ 项目生成锁 Redis 不可用（免费档拒绝生成）: {exc}")
                 raise LockServiceUnavailableError(str(exc)) from exc
@@ -170,7 +160,7 @@ class ChapterGenerationLockService:
             )
             return bool(released)
         except Exception as exc:
-            self._redis_client = None
+            self._redis.invalidate()
             logger.warning("release project lock failed for %s: %s", handle.project_id, exc)
             return False
 
@@ -202,7 +192,7 @@ class ChapterGenerationLockService:
             )
             return bool(renewed)
         except Exception as exc:
-            self._redis_client = None
+            self._redis.invalidate()
             logger.warning("续租项目 %s 生成锁失败: %s", handle.project_id, exc)
             return False
 
@@ -232,7 +222,7 @@ class ChapterGenerationLockService:
             )
             return bool(released)
         except Exception as exc:
-            self._redis_client = None
+            self._redis.invalidate()
             logger.warning("回收项目 %s 残留生成锁失败（Redis 故障，尝试本地兜底锁）: %s", project_id, exc)
         # Redis 故障时锁在进程内（acquire 的本地兜底路径），同语义回收
         now = time.monotonic()
@@ -260,7 +250,7 @@ class ChapterGenerationLockService:
             )
             released = bool(deleted)
         except Exception as exc:
-            self._redis_client = None
+            self._redis.invalidate()
             logger.warning("强制释放项目 %s 生成锁失败（Redis 故障，尝试本地兜底锁）: %s", project_id, exc)
         with self._local_mutex:
             if project_id in self._local_locks:

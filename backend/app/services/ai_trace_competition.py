@@ -25,7 +25,7 @@ from typing import List, Optional, Dict, Any
 
 from core.unified_llm_client import get_llm_client
 from core.model_resolution import build_thinking_disabled_extra_body
-from app.services.tencent_ai_detect import tencent_ai_detect_service
+from app.services.zhuque_ai_detect import zhuque_ai_detect_service
 from app.services.prompt_evolution.novel_rules import (
     _calculate_fidelity_score,
     preprocess_text,
@@ -1129,7 +1129,7 @@ class MultiModelEvaluationService:
         if original_ai_score is not None:
             orig_score = original_ai_score
         else:
-            detect_result = await tencent_ai_detect_service.detect_ai_content(text)
+            detect_result = await zhuque_ai_detect_service.detect_ai_content(text)
             orig_score = detect_result.get("ai_score", 50) if detect_result.get("success") else 50
 
         # 并发评估所有模型
@@ -1313,7 +1313,7 @@ class MultiModelEvaluationService:
 
             # 检测AI分数
             async with self._detect_semaphore:
-                detect_result = await tencent_ai_detect_service.detect_ai_content(
+                detect_result = await zhuque_ai_detect_service.detect_ai_content(
                     final_text
                 )
 
@@ -1431,7 +1431,7 @@ class MultiModelEvaluationService:
         if original_ai_score is not None:
             orig_score = original_ai_score
         else:
-            detect_result = await tencent_ai_detect_service.detect_ai_content(text)
+            detect_result = await zhuque_ai_detect_service.detect_ai_content(text)
             orig_score = detect_result.get("ai_score", 50) if detect_result.get("success") else 50
 
         # 常规轮次已经评估过活跃模型，挑战赛只产生挑战者的额外成本。

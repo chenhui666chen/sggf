@@ -3,8 +3,9 @@
 """
 from datetime import datetime
 from typing import Literal, Optional, List
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from app.core.password_policy import validate_password_strength
 from app.schemas.user_center import UserCenterPointsEntry
 
 
@@ -82,9 +83,17 @@ class UserCreateByAdmin(BaseModel):
     username: str = Field(..., min_length=1, max_length=255)
     email: str = Field(..., max_length=255)
     phone: Optional[str] = Field(None, max_length=20)
-    password: str = Field(..., min_length=6)
+    # P2-4.6：与管理端外四类入口共用同一密码策略（原仅 min_length=6，无复杂度与上限；
+    # 评审 #7：不再用 Field 约束长度，统一交给 validate_password_strength，保证超长也是同一句文案）
+    password: str = Field(...)
     full_name: Optional[str] = None
     role_ids: List[int] = Field(default_factory=list)
+
+    @field_validator("password")
+    @classmethod
+    def validate_password(cls, value: str) -> str:
+        validate_password_strength(value)
+        return value
 
 
 class UserUpdateByAdmin(BaseModel):
@@ -340,6 +349,26 @@ class OperationLogListResponse(PaginatedResponse):
 
 class LoginLogListResponse(PaginatedResponse):
     items: List[AdminLoginLogResponse]
+
+
+class AdminAuditLogResponse(BaseModel):
+    """审计日志（脱敏）条目：IP/UA 均为哈希，不含任何个人信息。"""
+
+    id: int
+    user_id: Optional[int] = None
+    event_type: str
+    provider: Optional[str] = None
+    ip_hash: Optional[str] = None
+    user_agent_hash: Optional[str] = None
+    success: bool
+    failure_reason: Optional[str] = None
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class AuditLogListResponse(PaginatedResponse):
+    items: List[AdminAuditLogResponse]
 
 
 RoleResponse.model_rebuild()

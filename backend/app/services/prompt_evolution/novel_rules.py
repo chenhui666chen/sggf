@@ -952,16 +952,16 @@ READABILITY_THRESHOLDS = {
 }
 
 # 🔧 AI率软性约束配置（非硬性门槛，作为额外加分/扣分项）
-# 2026-08-23 黄金对照实验彻底证伪 TMS：GPT人工化金标准(朱雀0%) TMS=97、
-# AI文学腔原文 TMS=0、用户手写网文 TMS=92、金庸 TMS=0——TMS 是文风分类器
-# (长句文学腔→低分/短句网文腔→高分)，与真实AI痕迹反向。低 TMS 分不再是
-# "真人基线"证据（AI原文即得 0 分），全部档位中性化，不再参与任何加减分。
+# 2026-08-27 格式复验确认：2026-08-23 对 TMS 的"证伪"实为格式假象——
+# TMS 对段落空格/开头空行敏感（真人文本加空行即判 97/Block），格式干净后
+# 真人与 AI 均得 0，无真阳性能力；低分不是"真人基线"证据。TMS 已于
+# 2026-08-27 全库移除，全部档位中性化，不再参与任何加减分。
 AI_RATE_SOFT_CONSTRAINT = {
     "excellent_threshold": 10,    # 保留键结构兼容，判定已无激励效果
     "good_threshold": 30,         # 保留键结构兼容
     "warning_threshold": 100,     # 已中性化
     "penalty_threshold": 100,     # 已中性化
-    "excellent_bonus": 0,         # 已中性化：TMS≤10% 实测恰是 AI 文学腔特征
+    "excellent_bonus": 0,         # 已中性化：低分只是格式干净的证据，非人工化证据
     "warning_penalty": 0,         # 已中性化
     "penalty_penalty": 0,         # 已中性化
     "severe_penalty": 0,          # 已中性化

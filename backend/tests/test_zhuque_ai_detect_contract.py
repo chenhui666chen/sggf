@@ -29,6 +29,7 @@ DOC_EXAMPLE_RESPONSE = {
 
 def test_build_payload_contains_text_and_default_merge():
     service = make_service()
+    service.is_merge = True  # 冒烟后默认改非合并，此处显式验证合并路径载荷
     payload = service._build_payload("一段待检测文本")
     assert payload["text"] == "一段待检测文本"
     assert payload["is_merge"] is True
@@ -104,6 +105,27 @@ def test_parse_response_maps_segment_labels_with_positions():
             "end": 11,
         }
     ]
+
+
+def test_parse_response_position_is_start_plus_length():
+    """放通后实测（2026-08-28）：position 格式为 [起始下标, 段长]，end = start + length。"""
+    service = make_service()
+    resp = {
+        "status": "success",
+        "softmax_confidence": 0.9,
+        "ratio_confidence": 1.0,
+        "labels_ratio": {"0": 0.0, "1": 1.0, "2": 0.0},
+        "segment_labels": [
+            {"text": "第一段", "label": 1, "conf": 0.99, "order": 1, "position": [0, 3]},
+            {"text": "第二段", "label": 1, "conf": 0.95, "order": 2, "position": [3, 3]},
+        ],
+        "msg": "",
+    }
+    result = service._parse_response(resp, "第一段第二段")
+    assert result["segment_labels"][0]["start"] == 0
+    assert result["segment_labels"][0]["end"] == 3
+    assert result["segment_labels"][1]["start"] == 3
+    assert result["segment_labels"][1]["end"] == 6
 
 
 def test_parse_response_segment_label_is_human_when_all_zero():

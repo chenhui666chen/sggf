@@ -70,9 +70,9 @@ class TestSample:
     ai_detected_at: str = ""
 
     def _detection_text_hash(self) -> str:
-        from app.services.tencent_ai_detect import tencent_ai_detect_service
+        from app.services.zhuque_ai_detect import zhuque_ai_detect_service
 
-        prepared = tencent_ai_detect_service.prepare_text(self.text)
+        prepared = zhuque_ai_detect_service.prepare_text(self.text)
         return hashlib.sha256(prepared.encode("utf-8")).hexdigest()
 
     def get_ai_detection(self, policy_version: str) -> Optional[Dict[str, Any]]:
@@ -255,9 +255,9 @@ class TestSampleManager:
         generator: Optional[Callable[..., Awaitable[List[TestSample]]]] = None,
     ) -> List[TestSample]:
         """复用持久基线，仅检测凑足本轮数量所需的未检测样本。"""
-        from app.services.tencent_ai_detect import tencent_ai_detect_service
+        from app.services.zhuque_ai_detect import zhuque_ai_detect_service
 
-        policy_version = tencent_ai_detect_service.detection_policy_version
+        policy_version = zhuque_ai_detect_service.detection_policy_version
         target_samples = self.get_samples_by_genre(genre) if genre else self.samples.copy()
         source_priority = {SampleSource.CUSTOM: 0, SampleSource.AUTO: 1, SampleSource.DEFAULT: 2}
         target_samples.sort(key=lambda sample: source_priority.get(sample.source, 3))

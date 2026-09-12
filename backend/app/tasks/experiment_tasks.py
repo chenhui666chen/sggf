@@ -70,7 +70,7 @@ def _build_deps():
     from app.services.prompt_evolution.evaluator import PromptEvaluator
     from app.services.prompt_evolution.shadow_dispatch import ShadowDispatchConfig
     from app.services.prompt_evolution.shadow_executor import ShadowExecutionDeps
-    from app.services.tencent_ai_detect import tencent_ai_detect_service
+    from app.services.zhuque_ai_detect import zhuque_ai_detect_service
 
     evaluator = PromptEvaluator()
     config = ShadowDispatchConfig.from_env()
@@ -81,7 +81,7 @@ def _build_deps():
         )
 
     def detect_fn(text: str) -> Optional[float]:
-        result = _run_async(tencent_ai_detect_service.detect_ai_content(text))
+        result = _run_async(zhuque_ai_detect_service.detect_ai_content(text))
         if not result.get("success"):
             return None
         return float(result.get("ai_score", 0.0))

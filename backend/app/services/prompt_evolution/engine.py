@@ -112,38 +112,39 @@ class PromptEvolutionEngine:
         if self.config.genre_weight_config:
             return self.config.genre_weight_config
 
-        # 预设题材权重（2026-08-23 黄金对照实验证伪 TMS：TMS 为反向文风分类器，
-        # GPT人工化金标准(朱雀0%)得 TMS=97、AI原文得 TMS=0，任何正向 ai_score
-        # 权重都会把进化方向拉向"文学腔"。全部题材 ai_score 清零，权重转移到
+        # 预设题材权重（TMS 已于 2026-08-27 全库移除；权重清零依据：
+        # 2026-08-27 格式复验确认 TMS 为格式触发的伪检测器——对段落空格/开头
+        # 空行敏感（真人文本加空行即判 97/Block），格式干净后真人与 AI 均得 0，
+        # 无真阳性能力。全部题材 ai_score 清零，权重转移到
         # readability/writing/fidelity）
         genre_weights = {
             "玄幻": {
-                "ai_score": 0.0,        # TMS 已证伪，不参与计分
+                "ai_score": 0.0,        # TMS 已移除（格式假象伪检测器），不参与计分
                 "readability": 0.35,   # 可读性权重
                 "writing": 0.35,       # 文笔权重
                 "fidelity": 0.30       # 保真度权重
             },
             "都市": {
-                "ai_score": 0.0,        # TMS 已证伪，不参与计分
+                "ai_score": 0.0,        # TMS 已移除（格式假象伪检测器），不参与计分
                 "readability": 0.40,   # 可读性重要
                 "writing": 0.30,       # 文笔要求适中
                 "fidelity": 0.30       # 保真度
             },
             "言情": {
-                "ai_score": 0.0,        # TMS 已证伪，不参与计分
+                "ai_score": 0.0,        # TMS 已移除（格式假象伪检测器），不参与计分
                 "readability": 0.30,   # 可读性重要
                 "writing": 0.40,       # 言情文最注重文笔
                 "fidelity": 0.30       # 保真度
             },
             "悬疑": {
-                "ai_score": 0.0,        # TMS 已证伪，不参与计分
+                "ai_score": 0.0,        # TMS 已移除（格式假象伪检测器），不参与计分
                 "readability": 0.35,   # 可读性很重要
                 "writing": 0.30,       # 文笔要求适中
                 "fidelity": 0.35       # 保真度重要（逻辑严密）
             },
             # 🆕 通用题材（默认权重，适用于多题材混合或未指定题材）
             "通用": {
-                "ai_score": 0.0,        # TMS 已证伪，不参与计分
+                "ai_score": 0.0,        # TMS 已移除（格式假象伪检测器），不参与计分
                 "readability": 0.35,   # 平衡可读性
                 "writing": 0.35,       # 平衡文笔
                 "fidelity": 0.30       # 平衡保真度
@@ -272,9 +273,8 @@ class PromptEvolutionEngine:
         """单个 AC option: 语义人感成本（越低越像人）。
 
         优先用 LLM 语义评审的人感信号；语义评审不可用时返回 None
-        （2026-08-23 黄金对照实验证伪 TMS：GPT人工化金标准(朱雀0%) TMS=97、
-        AI原文 TMS=0——TMS 与真实人感反向，不能作代理，宁缺毋滥从
-        中位数中排除该样本）。
+        （TMS 已于 2026-08-27 移除：格式复验确认其为格式触发的伪检测器，
+        无真阳性能力，不能作代理，宁缺毋滥从中位数中排除该样本）。
         """
         review = result.llm_review or {}
         if not review.get("available"):
@@ -381,9 +381,8 @@ class PromptEvolutionEngine:
             weights = self.genre_weights
         else:
             # 默认使用通用权重
-            # （2026-08-23 黄金对照实验证伪 TMS：GPT人工化金标准(朱雀0%) TMS=97、
-            #  AI原文 TMS=0——TMS 为反向文风分类器，权重清零，保留键以兼容
-            #  题材权重结构与调用方签名）
+            # （TMS 已于 2026-08-27 移除：格式复验确认其为格式触发的伪检测器，
+            #  权重清零，保留键以兼容题材权重结构与调用方签名）
             weights = {"ai_score": 0.0, "readability": 0.35, "writing": 0.35, "fidelity": 0.30}
 
         # 保真度需要反转（100 - fidelity，因为我们希望综合分越低越好）
@@ -590,9 +589,9 @@ class PromptEvolutionEngine:
             )
 
         # === 2. 成功停止（达到理想状态）===
-        # （2026-08-23 证伪 TMS：金标准(朱雀0%) TMS=97、AI文学腔原文 TMS=0，
-        # 低 TMS 分不代表人工化成功——早停的 AI 条件永久视为不满足，
-        # 由可读性/文笔/保真三维共同决定是否停机）
+        # （TMS 已移除（格式假象伪检测器）：低检测分不代表人工化成功——
+        # 早停的 AI 条件永久视为不满足，
+        # 由可读性/文笔/保真三维共同决定是否停机；朱雀校准后按改进清单 C1 恢复）
         ai_ok = False
         readability_ok = readability_score >= self.config.min_readability_score
         writing_ok = writing_score <= self.config.max_writing_score
@@ -1569,9 +1568,8 @@ class PromptEvolutionEngine:
 
     def _update_best_versions(self, version: PromptVersion) -> None:
         """更新最佳版本列表（保留前N个）"""
-        # 🔧 分数门槛（2026-08-23 黄金对照实验证伪 TMS 后移除）：TMS 为反向
-        # 文风分类器（GPT人工化金标准 TMS=97、AI文学腔原文 TMS=0），按
-        # avg_ai_score 设上限会把真正的人感版本挡在最佳列表外。降分有效性
+        # 🔧 分数门槛（TMS 移除后停用）：TMS 为格式触发的伪检测器（格式干净后
+        # 真人与 AI 均得 0），按 avg_ai_score 设上限会把真正的人感版本挡在最佳列表外。降分有效性
         # 改由 composite（语义人感）与保真/成功率门槛保障。
         # 🔧 保真门槛：含硬失败或语义保真<90样本的版本不得入选最佳列表，
         # 防止带毒提示词（授权增量/固定语境示例）凭高降分进入传承链
@@ -1707,7 +1705,7 @@ class PromptEvolutionEngine:
                     # 选择同题材中综合评分最低（效果最好）的
                     history_best = min(same_genre_prompts, key=lambda p: p.avg_composite_score)
                     logger.debug(f"🎭 同题材「{self.genre}」最佳: {history_best.version_id}, 综合评分: {history_best.avg_composite_score}, AI分数: {history_best.avg_ai_score}")
-                    # （2026-08-23 证伪 TMS：金标准(朱雀0%)得 TMS=97，按 avg_ai_score
+                    # （TMS 已移除（格式假象伪检测器），按 avg_ai_score
                     #  <80 设门槛会拒掉真正的人感版本，只看 composite）
                     if history_best.avg_composite_score < best_score:
                         best_score = history_best.avg_composite_score
@@ -1723,7 +1721,7 @@ class PromptEvolutionEngine:
                 # 🔧 选择综合评分最低（效果最好）的
                 history_best = min(best_prompts, key=lambda p: p.avg_composite_score)
                 logger.debug(f"📊 历史最佳: {history_best.version_id}, 综合评分: {history_best.avg_composite_score}, AI分数: {history_best.avg_ai_score}")
-                # （2026-08-23 证伪 TMS：同上，只看 composite，不再设 avg_ai_score 门槛）
+                # （TMS 已移除（格式假象伪检测器），同上，只看 composite，不再设 avg_ai_score 门槛）
                 if history_best.avg_composite_score < best_score:
                     best_score = history_best.avg_composite_score
                     best_ai_score = history_best.avg_ai_score

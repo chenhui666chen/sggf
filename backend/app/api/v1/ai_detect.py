@@ -1,6 +1,6 @@
 """
 AI 生成检测 API
-调用腾讯云文本内容安全 API 检测文本的 AI 生成率
+调用朱雀 AIGC 检测（EdgeOne AI 网关 zhuque-text）检测文本的 AI 生成率
 """
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -11,7 +11,7 @@ from app.db.base import get_db
 from app.core.security import get_current_user
 from app.models.user import User
 from app.models.project import Chapter
-from app.services.tencent_ai_detect import tencent_ai_detect_service
+from app.services.zhuque_ai_detect import zhuque_ai_detect_service
 
 import logging
 
@@ -61,18 +61,13 @@ async def detect_ai_content(
     
     if not text:
         raise HTTPException(status_code=400, detail="请提供待检测的文本内容或章节 ID")
-    
-    # 文本长度限制（腾讯云 API 限制 10000 个字符）
-    if len(text) > 10000:
-        logger.warning(f"文本过长 ({len(text)} 字符)，截取前 10000 字符进行检测")
-        text = text[:10000]
-    
+
     logger.info(f"开始 AI 检测，文本长度: {len(text)} 字符")
+
+    # 调用朱雀网关（支持长文本，按千字计费，不截断）
+    result = await zhuque_ai_detect_service.detect_ai_content(text)
     
-    # 调用腾讯云 API
-    result = await tencent_ai_detect_service.detect_ai_content(text)
-    
-    # 构建响应
+    # 构建响应（朱雀无 label/suggestion 字段，保留 schema 兼容，置 None）
     response = AIDetectResponse(
         success=result.get("success", False),
         ai_score=result.get("ai_score"),
@@ -93,17 +88,17 @@ async def get_config_status(
     current_user: User = Depends(get_current_user)
 ):
     """
-    检查腾讯云 API 配置状态
+    检查朱雀网关配置状态
     """
     from app.core.config import settings
-    
-    secret_id_configured = bool(getattr(settings, 'TENCENT_SECRET_ID', ''))
-    secret_key_configured = bool(getattr(settings, 'TENCENT_SECRET_KEY', ''))
-    
+
+    gateway_configured = bool(getattr(settings, 'ZHUQUE_GATEWAY_URL', ''))
+    api_key_configured = bool(getattr(settings, 'ZHUQUE_API_KEY', ''))
+
     return {
-        "configured": secret_id_configured and secret_key_configured,
-        "secret_id_set": secret_id_configured,
-        "secret_key_set": secret_key_configured,
-        "region": getattr(settings, 'TENCENT_REGION', 'ap-guangzhou'),
-        "biztype": getattr(settings, 'TENCENT_BIZTYPE', '') or "未设置（使用默认策略）"
+        "configured": gateway_configured and api_key_configured,
+        "secret_id_set": gateway_configured,
+        "secret_key_set": api_key_configured,
+        "region": "",
+        "biztype": f"provider=zhuque-text, is_merge={getattr(settings, 'ZHUQUE_IS_MERGE', False)}"
     }

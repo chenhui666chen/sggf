@@ -296,7 +296,7 @@ def _build_regenerate_user_prompt(*, chapter, user_feedback: str, context: Dict[
     names = ", ".join(context.get("focus_character_names") or []) or "characters from outline"
     parts = [
         "Rewrite this chapter body and replace the old draft. Do not continue into the next chapter.",
-        f"Chapter {chapter.chapter_number}: {chapter.title or ""}",
+        f"Chapter {chapter.chapter_number}: {chapter.title or ''}",
         "Genre: " + (context.get("genre") or "general"),
         "Chapter outline/plan:",
         _clip_context(context.get("chapter_outline") or "", 2400),

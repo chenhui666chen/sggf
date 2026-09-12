@@ -134,8 +134,8 @@ def _build_app_with_db():
         )
         conn.execute(
             text(
-                "INSERT INTO users (username, email, password_hash, is_active) "
-                "VALUES ('tester', 'tester@example.com', 'x', 1)"
+                "INSERT INTO users (username, email, password_hash, is_active, token_version) "
+                "VALUES ('tester', 'tester@example.com', 'x', 1, 1)"
             )
         )
         conn.execute(
