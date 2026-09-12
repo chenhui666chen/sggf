@@ -1,4 +1,4 @@
-# Novel Writing Agent - Improved Bidirectional Deployment Script
+# Shiguang Studio - Improved Bidirectional Deployment Script
 # Features:
 # - Config-driven file selection
 # - Bidirectional sync with remote deletion

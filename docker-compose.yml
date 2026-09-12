@@ -90,7 +90,7 @@ services:
       DB_POOL_RECYCLE: 3600
       DB_POOL_PRE_PING: "True"
       # CORS配置
-      CORS_ORIGINS: '["http://localhost:3000", "http://localhost:5173", "http://127.0.0.1:5173", "http://127.0.0.1:3000", "https://sggf.net", "https://www.sggf.net", "http://sggf.net", "http://www.sggf.net"]'
+      CORS_ORIGINS: ${CORS_ORIGINS:-["https://sggf.net", "https://www.sggf.net", "http://sggf.net", "http://www.sggf.net"]}
       # 有声书共享音频素材库云存储配置
       AUDIOBOOK_AUDIO_LIBRARY_STORAGE_DRIVER: aliyun_oss
       AUDIOBOOK_AUDIO_LIBRARY_OSS_PREFIX: shared/audio_library

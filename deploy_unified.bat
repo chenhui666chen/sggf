@@ -4,7 +4,7 @@ setlocal
 set "SCRIPT_DIR=%~dp0"
 
 echo ==========================================================
-echo   Novel Writing Agent - Unified Deployment Entry
+echo   Shiguang Studio - Unified Deployment Entry
 echo ==========================================================
 echo.
 echo This launcher delegates to deploy_sync_improved.ps1
