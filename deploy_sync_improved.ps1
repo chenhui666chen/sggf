@@ -961,10 +961,11 @@ if ($SkipDelete) {
 } elseif ($filesToDelete.Count -eq 0) {
     Write-Host "  Nothing to delete" -ForegroundColor Green
 } else {
-    $deleteCommands = $filesToDelete | ForEach-Object {
-        "rm -f " + (Quote-Posix ($RemotePath.TrimEnd("/") + "/" + $_))
+    $deleteCommands = [System.Collections.Generic.List[string]]::new()
+    foreach ($file in $filesToDelete) {
+        $deleteCommands.Add("rm -f " + (Quote-Posix ($RemotePath.TrimEnd("/") + "/" + $file)))
     }
-    $deleteCommands += "find " + (Quote-Posix $RemotePath) + " -type d -empty -delete"
+    $deleteCommands.Add("find " + (Quote-Posix $RemotePath) + " -type d -empty -delete")
     $deleteCommand = $deleteCommands -join "; "
 
     $deleteResult = Invoke-RemoteCommand -HostUser $ServerUser -HostIP $ServerIP -Command $deleteCommand -ConnectTimeout $TimeoutSeconds
