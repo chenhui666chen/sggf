@@ -121,6 +121,9 @@ venv.bak/
 .vscode/settings.json
 .vscode/launch.json
 .idea/
+.qoder/
+.trae/
+.agent/
 *.sublime-project
 *.sublime-workspace
 
@@ -162,6 +165,8 @@ data/prompt_evolution/
 .turbo/
 .vercel/
 .netlify/
+.tmp/
+NONEXISTENT_DIR/
 
 # Cleanup archives
 project_cleanup_archive_*/
@@ -173,6 +178,7 @@ backend/memory_data/
 
 # SSL certificates
 ssl/*.pem
+ssl/*.txt
 
 # Media assets (audio/video/zip) — keep out of git history, store locally only
 *.mp3

@@ -131,10 +131,10 @@ async def detect(service, text: str) -> dict:
 
 
 async def run(cases, baselines, verify_baseline):
-    from app.services.tencent_ai_detect import TencentAIDetectService
-    service = TencentAIDetectService()
-    if not service.secret_id or not service.secret_key:
-        print("错误：腾讯云密钥未配置（TENCENT_SECRET_ID / TENCENT_SECRET_KEY）", flush=True)
+    from app.services.zhuque_ai_detect import ZhuqueAIDetectService
+    service = ZhuqueAIDetectService()
+    if not service.gateway_url or not service.api_key:
+        print("错误：朱雀网关未配置（ZHUQUE_GATEWAY_URL / ZHUQUE_API_KEY）", flush=True)
         sys.exit(1)
 
     results = []

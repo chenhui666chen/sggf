@@ -1,4 +1,4 @@
-# 拾光工坊 / Novel Writing Agent
+# 拾光工坊 / Shiguang Studio
 
 这是一个围绕小说创作延展的全栈创作平台，而不是单一的“文本生成脚本”。当前代码主线由以下部分构成：
 
@@ -205,6 +205,6 @@ npm run lint
 ## 文档导航
 
 - [QUICK_START_GUIDE.md](QUICK_START_GUIDE.md)：按当前代码整理的快速开始
-- [docs/LOCAL_FIRST_ASSET_ARCHITECTURE_PLAN_20260419.md](docs/LOCAL_FIRST_ASSET_ARCHITECTURE_PLAN_20260419.md)：本地优先资产架构方案
+- [docs/LOCAL_FIRST_ASSET_ARCHITECTURE_PLAN_20260419.md](docs/LOCAL_FIRST_ASSET_ARCHITECTURE_PLAN_20260419.md)：本地优先资产架构说明
 - [docs/POSTGRESQL_DEPLOYMENT.md](docs/POSTGRESQL_DEPLOYMENT.md)：PostgreSQL 相关部署说明
 - [DEPLOY_GUIDE.md](DEPLOY_GUIDE.md)：部署流程说明

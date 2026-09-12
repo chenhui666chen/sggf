@@ -1,6 +1,6 @@
 @echo off
 echo ========================================
-echo Novel Writing Agent - 安装向导
+echo Shiguang Studio (拾光工坊) - 安装向导
 echo ========================================
 echo.
 

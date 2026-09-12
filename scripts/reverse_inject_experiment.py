@@ -67,12 +67,12 @@ async def rewrite(client, text: str, instruction: str) -> str:
 
 
 async def run(sample: dict, dims):
-    from app.services.tencent_ai_detect import TencentAIDetectService
+    from app.services.zhuque_ai_detect import ZhuqueAIDetectService
     from core.unified_llm_client import get_llm_client
 
-    service = TencentAIDetectService()
-    if not service.secret_id or not service.secret_key:
-        raise SystemExit("错误：腾讯云密钥未配置")
+    service = ZhuqueAIDetectService()
+    if not service.gateway_url or not service.api_key:
+        raise SystemExit("错误：朱雀网关未配置")
     client = get_llm_client()
     text = sample["text"]
     base_len = len(text)
