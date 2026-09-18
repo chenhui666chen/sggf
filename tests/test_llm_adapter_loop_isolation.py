@@ -21,7 +21,7 @@ from core.llm_adapters import OpenAICompatibleAdapter
 from schemas.unified_model_spec import APIConfig, ModelType, UnifiedModelSpec
 
 
-def _build_spec() -> UnifiedModelSpec:
+def _build_spec(default_timeout: int = 30) -> UnifiedModelSpec:
     return UnifiedModelSpec(
         id="loop-safe-model",
         name="Loop Safe Model",
@@ -30,7 +30,7 @@ def _build_spec() -> UnifiedModelSpec:
         api_config=APIConfig(
             api_key_env="TEST_API_KEY",
             base_url="https://api.test.com/v1",
-            default_timeout=30,
+            default_timeout=default_timeout,
         ),
     )
 
@@ -163,3 +163,24 @@ async def test_openai_adapter_closes_async_client_on_current_loop_when_reset() -
 
             assert len(created_clients) == 1
             assert close_loop_ids == [current_loop_id]
+
+
+def test_openai_adapter_client_timeout_caps_connect_phase() -> None:
+    """client 级 timeout 必须是带 connect 上限的结构化对象。
+
+    openai SDK 会把 client 级裸 float timeout 作为 per-request 参数覆盖
+    http_client 默认值，导致 TLS 握手挂起时按全量超时（如 300s）而非 30s 失败。
+    """
+    created_clients, fake_openai, fake_httpx = _install_fake_openai_runtime()
+
+    with patch.dict("os.environ", {"TEST_API_KEY": "test-key"}):
+        with patch.dict("sys.modules", {"openai": fake_openai, "httpx": fake_httpx}):
+            adapter = OpenAICompatibleAdapter(_build_spec(default_timeout=300))
+            client = adapter._get_client_for_current_context()
+
+            timeout = client.kwargs["timeout"]
+            assert isinstance(timeout, fake_httpx.Timeout)
+            assert timeout.args == (300.0,)
+            assert timeout.kwargs["connect"] == 30.0
+            # 与 http_client 使用同一个结构化配置，两层不再有分歧
+            assert timeout is client.kwargs["http_client"].kwargs["timeout"]

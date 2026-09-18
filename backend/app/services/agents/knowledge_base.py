@@ -6,7 +6,9 @@ from __future__ import annotations
 import logging
 import os
 import re
+import shutil
 import sqlite3
+import tempfile
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -79,7 +81,13 @@ def _create_text_splitter() -> Any:
         return _FallbackTextSplitter(chunk_size=1000, chunk_overlap=200)
 
 
-def _load_supported_migration_versions() -> Dict[str, int]:
+def _derive_supported_migration_versions_from_files() -> Dict[str, int]:
+    """Legacy fallback: guess the runtime's migration ceiling from packaged .sql files.
+
+    NOTE: this under-reports newer chromadb releases (e.g. 1.3.4 ships the 10th sysdb
+    migration outside migrations/sysdb, so file listing caps at 9 while a fresh
+    self-created store already records sysdb=10). Never trust it over a runtime probe.
+    """
     versions: Dict[str, int] = {}
     try:
         root = files("chromadb.migrations")
@@ -100,6 +108,54 @@ def _load_supported_migration_versions() -> Dict[str, int]:
         except Exception as exc:
             logger.debug("读取 chromadb migrations/%s 失败: %s", dir_name, exc)
     return versions
+
+
+def _probe_runtime_migration_versions() -> Optional[Dict[str, int]]:
+    """Ask the installed chromadb runtime which migration versions it applies itself.
+
+    Creates a throwaway PersistentClient in a temp dir and reads its migrations table.
+    Returns None when probing is unavailable (caller falls back to file derivation).
+    """
+    try:
+        import chromadb
+        from chromadb.config import Settings
+
+        probe_dir = tempfile.mkdtemp(prefix="chroma_version_probe_")
+        try:
+            chromadb.PersistentClient(
+                path=probe_dir,
+                settings=Settings(anonymized_telemetry=False),
+            )
+            versions = _read_db_migration_versions(Path(probe_dir) / "chroma.sqlite3")
+        finally:
+            try:
+                shutil.rmtree(probe_dir, ignore_errors=True)
+            except Exception:
+                pass
+        return versions or None
+    except Exception as exc:
+        logger.debug("chromadb 运行时迁移版本自导探测失败: %s", exc)
+        return None
+
+
+_RUNTIME_MIGRATION_VERSIONS: Optional[Dict[str, int]] = None
+
+
+def _load_supported_migration_versions(*, use_cache: bool = True) -> Dict[str, int]:
+    """Migration versions the current chromadb runtime actually supports (cached).
+
+    The runtime self-probe is authoritative: comparing a database against the
+    packaged .sql file list produced false "incompatible" verdicts on stores the
+    runtime itself had just created, trapping every startup in the fallback /
+    cleanroom loop.
+    """
+    global _RUNTIME_MIGRATION_VERSIONS
+    if not use_cache:
+        return _probe_runtime_migration_versions() or _derive_supported_migration_versions_from_files()
+    if _RUNTIME_MIGRATION_VERSIONS is None:
+        probed = _probe_runtime_migration_versions()
+        _RUNTIME_MIGRATION_VERSIONS = probed or _derive_supported_migration_versions_from_files()
+    return _RUNTIME_MIGRATION_VERSIONS
 
 
 def _read_db_migration_versions(chroma_sqlite_path: Path) -> Dict[str, int]:

@@ -101,6 +101,13 @@ logging.getLogger("app.services").setLevel(logging.INFO)
 logging.getLogger("app.websocket").setLevel(logging.INFO)
 logging.getLogger("app.services.prompt_evolution").setLevel(logging.INFO)
 
+# 🔧 uvicorn 给 uvicorn.* 挂了自带 handler 且 propagate=False，而生成链路大量关键日志
+# 直接借用 logging.getLogger("uvicorn.error") 打印，导致这些日志只上控制台、永不落盘。
+# 本模块在 uvicorn configure_logging 之后导入，此处摘掉自带 handler 并打开传播统一落盘。
+from app.core.logging_setup import attach_uvicorn_logs_to_root  # noqa: E402
+
+attach_uvicorn_logs_to_root()
+
 logging.info(f"📁 日志文件位置: {log_file}")
 
 # 🔧 导入所有模型（确保在 Alembic 迁移之前）

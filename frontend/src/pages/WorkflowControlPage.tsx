@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import { useDispatch, useSelector } from 'react-redux'
 import {
@@ -22,7 +22,6 @@ import {
   InputLabel,
   Select,
   MenuItem,
-  FormHelperText,
   Drawer,
   IconButton,
   Chip,
@@ -69,6 +68,7 @@ import { fetchChapters } from '@/store/slices/editorSlice'
 import StageInfoPanel from '@/components/workflow/StageInfoPanel'
 import OutputPreviewPanel from '@/components/workflow/OutputPreviewPanel'
 import AgentStatusIndicator from '@/components/workflow/AgentStatusIndicator'
+import IterationDegradedAlert from '@/components/workflow/IterationDegradedAlert'
 import MultiModelReviewSettingsDialog from '@/components/project/MultiModelReviewSettingsDialog'
 import { workflowWebSocket } from '@/services/websocket'
 import { apiClient, extractApiErrorMessage } from '@/services/api'  // ✅ 添加apiClient导入
@@ -89,6 +89,7 @@ import {
 import { buildStoryExpansionCompletionMessage } from '@/utils/storyExpansionFeedback'
 import { resolveRestoredRunningTask } from '@/utils/restoreRunningWorkflowTask'
 import { selectLatestChapterForOverwrite } from '@/utils/selectLatestChapterForOverwrite'
+import { extractCircuitBreakerPause, type CircuitBreakerPause } from '@/utils/workflowCircuitBreaker'
 import {
   getStoryExpansionResultFromTaskComplete,
   isStoryExpansionTaskId,
@@ -115,19 +116,6 @@ const stageNameKeys: Record<StageType, string> = {
   content: 'workflow.stageNames.content',
   review: 'workflow.stageNames.review',
   iteration: 'workflow.stageNames.iteration',
-}
-
-// 题材中文 value → i18n key（value 提交后端保持中文，仅展示标签走翻译）
-const genreLabelKeys: Record<string, string> = {
-  '修仙': 'workflow.genres.xiuxian',
-  '玄幻': 'workflow.genres.xuanhuan',
-  '奇幻': 'workflow.genres.fantasy',
-  '都市': 'workflow.genres.urban',
-  '言情': 'workflow.genres.romance',
-  '耽美': 'workflow.genres.danmei',
-  '悬疑': 'workflow.genres.suspense',
-  '科幻': 'workflow.genres.sciFi',
-  '纯文学': 'workflow.genres.literary',
 }
 
 const isStageType = (value: string | null | undefined): value is StageType => {
@@ -160,6 +148,8 @@ export default function WorkflowControlPage() {
   const currentProject = useSelector((state: RootState) => state.project.currentProject)
   const [openDialog, setOpenDialog] = useState(false)
   const [requirement, setRequirement] = useState('')
+  // 创作需求已在创建项目时填写（落在 project.description），此处只用于打开弹窗时预填一次
+  const requirementPrefilledRef = useRef(false)
   const [workflowGenerationModel, setWorkflowGenerationModel] = useState(
     () => readStoredWorkflowGenerationModel() || 'qwen3.7-plus'
   )
@@ -170,14 +160,6 @@ export default function WorkflowControlPage() {
   const [showSaveDialog, setShowSaveDialog] = useState(false)
   const [chapterTitle, setChapterTitle] = useState('')
   
-  // 🆕 题材与篇幅规划状态
-  const [genre, setGenre] = useState('')
-  const [subGenre] = useState('')
-  const [plannedLengthType, setPlannedLengthType] = useState('')
-  const [plannedChaptersMin, setPlannedChaptersMin] = useState<number | ''>('')
-  const [plannedChaptersMax, setPlannedChaptersMax] = useState<number | ''>('')
-  const [userOutlinePlan, setUserOutlinePlan] = useState('')
-
   // 🔥 页面加载时，恢复上次的项目位置
   useEffect(() => {
     const savedProjectId = localStorage.getItem('lastWorkflowProjectId')
@@ -254,11 +236,6 @@ export default function WorkflowControlPage() {
     })
 
     setRequirement('')
-    setGenre('')
-    setPlannedLengthType('')
-    setPlannedChaptersMin('')
-    setPlannedChaptersMax('')
-    setUserOutlinePlan('')
 
     setOpenDialog(false)
     setIsRunning(false)
@@ -370,6 +347,9 @@ export default function WorkflowControlPage() {
   const [finalVersionContent, setFinalVersionContent] = useState('')
   const [editedFinalVersionContent, setEditedFinalVersionContent] = useState('')
   const [finalVersionLoading, setFinalVersionLoading] = useState(false)
+  // 迭代终稿为「复评未达线但已交付」的降级版本时的提示信息
+  const [iterationDegraded, setIterationDegraded] = useState(false)
+  const [iterationBestScore, setIterationBestScore] = useState<number | null>(null)
 
   // 评审报告对话框状态
   const [showReviewDialog, setShowReviewDialog] = useState(false)
@@ -423,6 +403,11 @@ export default function WorkflowControlPage() {
 
   // 生成下一章状态
   const [generatingNextChapter, setGeneratingNextChapter] = useState(false)
+  // 熔断暂停：记住暂停信息与用户暂停前选的档位，确认后沿用语义恢复
+  const [breakerPause, setBreakerPause] = useState<{
+    pause: CircuitBreakerPause
+    tier: 'free' | 'standard'
+  } | null>(null)
 
   // 保存章节状态（最终版本对话框统一使用此状态）
   const [savingChapter, setSavingChapter] = useState(false)
@@ -509,54 +494,13 @@ export default function WorkflowControlPage() {
     }
   }, [projectId, dispatch])
 
-  // 🆕 题材映射表（Dashboard英文 → WorkflowControl中文）
-  const genreMapping: Record<string, string> = {
-    'Fantasy': '修仙',
-    'Science Fiction': '科幻',
-    'Romance': '言情',
-    'Mystery': '悬疑',
-    'Thriller': '悬疑',
-    'Other': '',
-    // 直接中文匹配
-    '修仙': '修仙',
-    '玄幻': '修仙',
-    '都市': '都市',
-    '悬疑': '悬疑',
-    '言情': '言情',
-    '耽美': '言情',
-    '科幻': '科幻',
-    '纯文学': '纯文学',
-  }
-
-  // 🆕 当项目数据加载后，自动填充题材和篇幅设置
+  // 方案A：开始创作弹窗预填项目创建时填写的创作需求，用户可再修改后再启动
   useEffect(() => {
-    if (!currentProject) return
-
-    // 自动填充题材
-    if (currentProject.genre && !genre) {
-      const mappedGenre = genreMapping[currentProject.genre] || currentProject.genre
-      if (mappedGenre) {
-        setGenre(mappedGenre)
-      }
-    }
-
-    // 自动填充篇幅设置
-    if (currentProject.planned_length_type && !plannedLengthType) {
-      setPlannedLengthType(currentProject.planned_length_type)
-    }
-
-    // 自动填充章节范围
-    if (currentProject.planned_chapters_min && !plannedChaptersMin) {
-      setPlannedChaptersMin(currentProject.planned_chapters_min)
-    }
-    if (currentProject.planned_chapters_max && !plannedChaptersMax) {
-      setPlannedChaptersMax(currentProject.planned_chapters_max)
-    }
-
-    // 自动填充自定义大纲规划
-    if (currentProject.user_outline_plan && !userOutlinePlan) {
-      setUserOutlinePlan(currentProject.user_outline_plan)
-    }
+    if (requirementPrefilledRef.current) return
+    const seed = currentProject?.description?.trim()
+    if (!seed) return
+    requirementPrefilledRef.current = true
+    setRequirement((prev) => (prev.trim() ? prev : seed))
   }, [currentProject])
 
   // 🆕 页面加载时恢复记忆快照
@@ -1909,23 +1853,7 @@ export default function WorkflowControlPage() {
 
     try {
       setIsStarting(true)  // 开始启动，显示加载状态
-      
-      // 🆕 先更新项目的题材与篇幅信息
-      if (genre || plannedLengthType || userOutlinePlan) {
-        try {
-          await apiClient.updateProject(parseInt(projectId), {
-            genre,
-            sub_genre: subGenre,
-            planned_length_type: plannedLengthType,
-            planned_chapters_min: plannedChaptersMin || undefined,
-            planned_chapters_max: plannedChaptersMax || undefined,
-            user_outline_plan: userOutlinePlan || undefined,
-          })
-        } catch {
-          // 更新项目信息失败
-        }
-      }
-      
+
       await dispatch(
         startWorkflow({
           projectId: parseInt(projectId),
@@ -2132,7 +2060,11 @@ export default function WorkflowControlPage() {
       return null
     }
 
-    return response.data as { content?: string }
+    return response.data as {
+      content?: string
+      degraded?: boolean
+      best_score?: number | null
+    }
   }
 
   const saveWorkflowStageContent = async (
@@ -2537,6 +2469,8 @@ export default function WorkflowControlPage() {
         const content = data.content || ''
         setFinalVersionContent(content)
         setEditedFinalVersionContent(content)
+        setIterationDegraded(Boolean(data.degraded))
+        setIterationBestScore(typeof data.best_score === 'number' ? data.best_score : null)
       } else {
         setSnackbarMessage(t('workflow.snack.fetchFinalFailed'))
         setSnackbarSeverity('error')
@@ -2553,7 +2487,10 @@ export default function WorkflowControlPage() {
 
   // 生成下一章（方案3：独立的章节生成工作流）
   // 🆕 tier='free' 时走免费档（服务端强制 qwen3.7-flash，每日限额）
-  const handleGenerateNextChapter = async (tier: 'free' | 'standard' = 'standard') => {
+  const handleGenerateNextChapter = async (
+    tier: 'free' | 'standard' = 'standard',
+    resumeAfterConfirmation = false,
+  ) => {
     if (!projectId) return
 
     setGeneratingNextChapter(true)
@@ -2562,8 +2499,8 @@ export default function WorkflowControlPage() {
       const response = await apiClient.generateNextWorkflowChapter(
         Number(projectId),
         tier === 'free'
-          ? { generationTier: 'free' }
-          : { workflowGenerationModel, generationTier: 'standard' }
+          ? { generationTier: 'free', resumeAfterConfirmation }
+          : { workflowGenerationModel, generationTier: 'standard', resumeAfterConfirmation }
       )
 
       if (response.status >= 200 && response.status < 300) {
@@ -2591,6 +2528,14 @@ export default function WorkflowControlPage() {
 
         // 注意：不再设置 setGeneratingNextChapter(false)，等待 WebSocket 完成事件
       } else {
+        // 熔断暂停与生成锁占用同为 409，前者必须转成可确认的弹窗而不是错误提示
+        const breakerPauseInfo = extractCircuitBreakerPause(response)
+        if (breakerPauseInfo) {
+          setBreakerPause({ pause: breakerPauseInfo, tier })
+          setGeneratingNextChapter(false)
+          return
+        }
+
         const errorData = response.data || {}
         // 🆕 detail 可能是字符串（404/409/503）或对象（429 带剩余额度与重置时间）
         const detail = errorData.detail
@@ -2857,7 +2802,7 @@ export default function WorkflowControlPage() {
           </Typography>
           {currentProject && (
             <Chip
-              label={`📝 ${currentProject.title}`}
+              label={`📝 ${currentProject.title || t('dashboard.unnamedProject')}`}
               color="primary"
               variant="outlined"
               size="small"
@@ -3486,101 +3431,6 @@ export default function WorkflowControlPage() {
             </Select>
           </FormControl>
 
-          {/* 🆕 题材选择 */}
-          <FormControl fullWidth sx={{ mb: 2 }}>
-            <InputLabel>{t('workflow.startDialog.genreType')}</InputLabel>
-            <Select
-              value={genre}
-              onChange={(e) => setGenre(e.target.value)}
-              disabled={isStarting}
-              label={t('workflow.startDialog.genreType')}
-            >
-              <MenuItem value="">{t('workflow.startDialog.pleaseSelect')}</MenuItem>
-              <MenuItem value="修仙">{t('workflow.genres.xiuxian')}</MenuItem>
-              <MenuItem value="玄幻">{t('workflow.genres.xuanhuan')}</MenuItem>
-              <MenuItem value="奇幻">{t('workflow.genres.fantasy')}</MenuItem>
-              <MenuItem value="都市">{t('workflow.genres.urban')}</MenuItem>
-              <MenuItem value="言情">{t('workflow.genres.romance')}</MenuItem>
-              <MenuItem value="耽美">{t('workflow.genres.danmei')}</MenuItem>
-              <MenuItem value="悬疑">{t('workflow.genres.suspense')}</MenuItem>
-              <MenuItem value="科幻">{t('workflow.genres.sciFi')}</MenuItem>
-              <MenuItem value="纯文学">{t('workflow.genres.literary')}</MenuItem>
-            </Select>
-            <FormHelperText>{t('workflow.startDialog.genreHelper')}</FormHelperText>
-          </FormControl>
-          
-          {/* 🆕 篇幅选择 */}
-          <FormControl fullWidth sx={{ mb: 2 }}>
-            <InputLabel>{t('workflow.startDialog.lengthPlan')}</InputLabel>
-            <Select
-              value={plannedLengthType}
-              onChange={(e) => {
-                const value = e.target.value
-                setPlannedLengthType(value)
-                // 根据篇幅自动设置推荐章节范围
-                if (value === 'short') {
-                  setPlannedChaptersMin(3)
-                  setPlannedChaptersMax(30)
-                } else if (value === 'mid') {
-                  setPlannedChaptersMin(31)
-                  setPlannedChaptersMax(300)
-                } else if (value === 'long') {
-                  setPlannedChaptersMin(301)
-                  setPlannedChaptersMax(799)
-                } else if (value === 'epic') {
-                  setPlannedChaptersMin(800)
-                  setPlannedChaptersMax(1000)
-                }
-              }}
-              disabled={isStarting}
-              label={t('workflow.startDialog.lengthPlan')}
-            >
-              <MenuItem value="">{t('workflow.startDialog.pleaseSelect')}</MenuItem>
-              <MenuItem value="short">{t('workflow.lengthTypes.short')}</MenuItem>
-              <MenuItem value="mid">{t('workflow.lengthTypes.mid')}</MenuItem>
-              <MenuItem value="long">{t('workflow.lengthTypes.long')}</MenuItem>
-              <MenuItem value="epic">{t('workflow.lengthTypes.epic')}</MenuItem>
-            </Select>
-            <FormHelperText>{t('workflow.startDialog.lengthHelper')}</FormHelperText>
-          </FormControl>
-
-          {/* 💡 智能推荐简化提示 */}
-          {genre && plannedLengthType && (
-            <Alert 
-              severity="info" 
-              sx={{ mb: 2, backgroundColor: 'info.light' }}
-            >
-              <Typography variant="body2">
-                {t('workflow.startDialog.genreLengthHint', {
-                  genre: t(genreLabelKeys[genre] ?? genre),
-                  length: t(plannedLengthType === 'short' ? 'workflow.startDialog.lengthShort' : plannedLengthType === 'mid' ? 'workflow.startDialog.lengthMid' : plannedLengthType === 'long' ? 'workflow.startDialog.lengthLong' : 'workflow.startDialog.lengthEpic'),
-                })}
-              </Typography>
-            </Alert>
-          )}
-          
-          {/* 🆕 章节范围 */}
-          <Box sx={{ display: 'flex', gap: 2, mb: 2 }}>
-            <TextField
-              label={t('workflow.startDialog.minChapters')}
-              type="number"
-              value={plannedChaptersMin}
-              onChange={(e) => setPlannedChaptersMin(e.target.value ? parseInt(e.target.value) : '')}
-              disabled={isStarting}
-              sx={{ flex: 1 }}
-              inputProps={{ min: 1 }}
-            />
-            <TextField
-              label={t('workflow.startDialog.maxChapters')}
-              type="number"
-              value={plannedChaptersMax}
-              onChange={(e) => setPlannedChaptersMax(e.target.value ? parseInt(e.target.value) : '')}
-              disabled={isStarting}
-              sx={{ flex: 1 }}
-              inputProps={{ min: 1 }}
-            />
-          </Box>
-
           <TextField
             fullWidth
             multiline
@@ -3589,37 +3439,6 @@ export default function WorkflowControlPage() {
             placeholder={t('workflow.startDialog.requirementPlaceholder')}
             value={requirement}
             onChange={(e) => setRequirement(e.target.value)}
-            sx={{ mb: 2 }}
-            disabled={isStarting}
-          />
-          
-          {/* 🆕 自定义大纲规划 */}
-          <TextField
-            fullWidth
-            multiline
-            rows={4}
-            label={t('workflow.startDialog.customOutline')}
-            placeholder={
-              genre && plannedLengthType ? (
-                `${t('workflow.startDialog.pacePrefix')}：${
-                  genre === '修仙' && plannedLengthType === 'long' ? t('workflow.startDialog.paceCultivationLong') :
-                  genre === '修仙' && plannedLengthType !== 'long' ? t('workflow.startDialog.paceCultivation') :
-                  genre === '玄幻' && plannedLengthType === 'long' ? t('workflow.startDialog.paceXuanhuanLong') :
-                  genre === '玄幻' && plannedLengthType !== 'long' ? t('workflow.startDialog.paceXuanhuan') :
-                  genre === '奇幻' && plannedLengthType === 'long' ? t('workflow.startDialog.paceFantasyLong') :
-                  genre === '奇幻' && plannedLengthType !== 'long' ? t('workflow.startDialog.paceFantasy') :
-                  genre === '悬疑' ? t('workflow.startDialog.paceSuspense') :
-                  genre === '都市' ? t('workflow.startDialog.paceUrban') :
-                  genre === '言情' ? t('workflow.startDialog.paceRomance') :
-                  genre === '耽美' ? t('workflow.startDialog.paceDanmei') :
-                  genre === '科幻' ? t('workflow.startDialog.paceSciFi') :
-                  genre === '纯文学' ? t('workflow.startDialog.paceLiterary') :
-                  t('workflow.startDialog.paceDefault')
-                }\n\n${t('workflow.startDialog.noCustomPlanSuffix')}`
-              ) : t('workflow.startDialog.customOutlinePlaceholder')
-            }
-            value={userOutlinePlan}
-            onChange={(e) => setUserOutlinePlan(e.target.value)}
             sx={{ mb: 2 }}
             disabled={isStarting}
           />
@@ -3876,6 +3695,8 @@ export default function WorkflowControlPage() {
             </Box>
           ) : (
             <>
+              <IterationDegradedAlert degraded={iterationDegraded} score={iterationBestScore} />
+
               <TextField
                 fullWidth
                 multiline
@@ -3918,6 +3739,57 @@ export default function WorkflowControlPage() {
               </Box>
             </>
           )}
+        </Box>
+      </Dialog>
+
+      {/* 熔断暂停确认弹窗：展示暂停原因，人工确认后携带恢复标记重试 */}
+      <Dialog open={Boolean(breakerPause)} onClose={() => setBreakerPause(null)} maxWidth="sm" fullWidth>
+        <Box sx={{ p: 3 }}>
+          <Typography variant="h6" sx={{ mb: 2 }}>
+            {t('workflow.breakerDialog.title')}
+          </Typography>
+          <Typography variant="body2" sx={{ mb: 2, color: 'text.secondary' }}>
+            {breakerPause?.pause.paused_at_chapter
+              ? t('workflow.breakerDialog.desc', { chapter: breakerPause.pause.paused_at_chapter })
+              : t('workflow.breakerDialog.descNoChapter')}
+          </Typography>
+          <Box
+            sx={{
+              p: 1.5,
+              mb: 1.5,
+              borderRadius: 1,
+              border: '1px solid',
+              borderColor: 'warning.main',
+              bgcolor: 'action.hover',
+            }}
+          >
+            <Typography variant="subtitle2" sx={{ mb: 0.5 }}>
+              {t('workflow.breakerDialog.reasonLabel')}
+            </Typography>
+            <Typography variant="body2">
+              {breakerPause?.pause.reason || t('workflow.breakerDialog.reasonUnknown')}
+            </Typography>
+          </Box>
+          <Typography variant="caption" sx={{ display: 'block', mb: 2, color: 'text.secondary' }}>
+            {t('workflow.breakerDialog.hint')}
+          </Typography>
+          <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 1.5 }}>
+            <Button
+              variant="contained"
+              color="primary"
+              disabled={!projectId || generatingNextChapter || !breakerPause}
+              onClick={() => {
+                if (!breakerPause) return
+                setBreakerPause(null)
+                handleGenerateNextChapter(breakerPause.tier, true)
+              }}
+            >
+              {t('workflow.breakerDialog.confirm')}
+            </Button>
+            <Button variant="outlined" onClick={() => setBreakerPause(null)}>
+              {t('workflow.breakerDialog.cancel')}
+            </Button>
+          </Box>
         </Box>
       </Dialog>
 

@@ -261,7 +261,9 @@
     "collabExpansionDone": "协同拓展完成",
     "createProjectTitle": "创建新项目",
     "projectTitleLabel": "项目标题",
-    "projectDescLabel": "项目描述",
+    "requirementLabel": "创作需求（初始想法）",
+    "requirementPlaceholder": "请输入创作需求，例如：创作一部关于时空旅行的科幻小说...",
+    "requirementHelper": "创建后会带入「开始创作」弹窗，可再修改；将作为各阶段生成的输入",
     "genreLabel": "类型",
     "create": "创建",
     "newProject": "新建项目",
@@ -274,6 +276,7 @@
     "genreUpdateFailed": "更新类型失败，请重试",
     "generateNextChapter": "🚀 正在生成第{{number}}章，跳转到工作流页面查看进度...",
     "createTaskFailed": "创建生成任务失败，请重试",
+    "breakerPaused": "该项目自动推进已暂停，请进入创作流程页确认暂停原因后继续生成",
     "exportPrepared": "✨ 章节内容已准备，正在跳转到织文无迹...",
     "exportFailed": "导出失败，请重试",
     "exportTxtSuccess": "📄 TXT文件导出成功",
@@ -319,6 +322,43 @@
       "literary": "纯文学",
       "fantasyEn": "奇幻（英）",
       "unset": "未设置"
+    },
+    "createDialog": {
+      "titleFallbackHint": "未填写时将根据生成的故事概念自动回写标题；填写则使用您填写的标题",
+      "genreHelper": "AI将根据题材自动调整创作风格和节奏",
+      "lengthPlan": "篇幅规划",
+      "lengthHelper": "系统将根据篇幅推荐适合的大纲扩展模式",
+      "genreLengthHint": "💡 系统将根据「{{genre}}」题材和「{{length}}」篇幅推荐适合的大纲扩展模式",
+      "pleaseSelect": "请选择",
+      "minChapters": "最少章节数",
+      "maxChapters": "最多章节数",
+      "customOutline": "自定义大纲规划（可选）",
+      "pacePrefix": "🎵 节奏建议",
+      "paceCultivationLong": "修仙长篇推荐境界逐层递进，每5-8章一个小爆点，每卷结束有境界突破大高潮",
+      "paceCultivation": "修仙题材注意境界体系设计，确保修炼节奏合理",
+      "paceXuanhuanLong": "玄幻长篇推荐天赋觉醒与实力突破交替，每5-8章一个小爆点",
+      "paceXuanhuan": "玄幻题材注意血脉天赋体系设计，确保等级压制清晰",
+      "paceFantasyLong": "奇幻长篇推荐奇妙世界规则逐渐展开，每5-8章一个世界观揭秘或冒险突破",
+      "paceFantasy": "奇幻题材注意奇幻种族、魔法体系设计，保持冒险与探索节奏",
+      "paceSuspense": "悬疑题材注意线索布局，每3-5章揭露一个小真相，每卷一个大反转",
+      "paceUrban": "都市题材建议多线穿插（商战+感情+亲情），每卷一个事业里程碑",
+      "paceRomance": "言情题材注意感情递进（相识→相知→相守），每5-10章一个甜蜜时刻",
+      "paceDanmei": "耽美题材注意昧昧张力与情感突破交替，每5-10章一个关系进展节点",
+      "paceSciFi": "科幻题材注意科技突破节奏，每卷一次探索升级（地球→星系→宇宙）",
+      "paceLiterary": "纯文学题材注重内心世界与外部环境的张力，节奏可适当放缓",
+      "paceDefault": "根据题材特点自动适配叙事节奏",
+      "noCustomPlanSuffix": "💡 未检测到自定义规划，将随机智能生成大纲",
+      "customOutlinePlaceholder": "可输入您的卷结构规划，例如：\n第一卷：引气境 (10章)\n第二卷：筑基境 (15章)\n...",
+      "lengthShort": "短篇",
+      "lengthMid": "中篇",
+      "lengthLong": "长篇",
+      "lengthEpic": "超长篇",
+      "lengthTypes": {
+        "short": "短篇 (3-30章)",
+        "mid": "中篇 (31-300章)",
+        "long": "长篇 (301-799章)",
+        "epic": "超长篇 (800+章)"
+      }
     }
   },
   "userCenter": {
@@ -440,7 +480,7 @@
     },
     "projects": {
       "empty": "当前还没有可展示的项目，先从创作模块开始建立项目即可。",
-      "noDescription": "暂无项目描述，可以在创作工作台内补充更多上下文。",
+      "noDescription": "暂无创作需求，可在创作工作台的「开始创作」弹窗中补充。",
       "unclassified": "未分类",
       "novelProject": "小说项目",
       "audiobookCount": "有声书 {{count}}",
@@ -936,23 +976,6 @@
       "iteration": "迭代优化"
     },
     "title": "灵感方舟",
-    "genres": {
-      "xiuxian": "修仙",
-      "xuanhuan": "玄幻",
-      "fantasy": "奇幻",
-      "urban": "都市",
-      "romance": "言情",
-      "danmei": "耽美",
-      "suspense": "悬疑",
-      "sciFi": "科幻",
-      "literary": "纯文学"
-    },
-    "lengthTypes": {
-      "short": "短篇 (3-30章)",
-      "mid": "中篇 (31-300章)",
-      "long": "长篇 (301-799章)",
-      "epic": "超长篇 (800+章)"
-    },
     "page": {
       "currentProject": "当前项目:",
       "executingStage": "正在执行 {{stage}}... ({{progress}}%)",
@@ -1056,6 +1079,16 @@
       "chapterNthSaved": "✅ 第{{number}}章已保存：{{title}} ({{words}}字)",
       "stageSwitched": "已切换到 {{stage}}"
     },
+    "breakerDialog": {
+      "title": "自动推进已暂停",
+      "desc": "第 {{chapter}} 章触发熔断，后续章节已暂停生成。请确认下面的原因，检查无误后继续。",
+      "descNoChapter": "生成流程触发熔断，后续章节已暂停生成。请确认下面的原因，检查无误后继续。",
+      "reasonLabel": "暂停原因",
+      "reasonUnknown": "未记录具体原因",
+      "hint": "建议先到知识库查看闸门与消化报告，确认内容无异常后再继续生成。",
+      "confirm": "确认并继续生成",
+      "cancel": "稍后再说"
+    },
     "warning": {
       "title": "⚠️ 警告：此项目已有内容",
       "hasChapters": "此项目已有 {{count}} 章内容",
@@ -1075,41 +1108,12 @@
       "restartOverwriteHint": "删除现有内容，从头开始创作"
     },
     "startDialog": {
-      "title": "开始创作 - 配置项目参数",
+      "title": "开始创作",
       "starting": "正在启动工作流，请稍候...",
-      "genreType": "题材类型",
-      "pleaseSelect": "请选择",
-      "genreHelper": "AI将根据题材自动调整创作风格和节奏",
-      "lengthPlan": "篇幅规划",
-      "lengthHelper": "系统将根据篇幅推荐适合的大纲扩展模式",
-      "genreLengthHint": "💡 系统将根据「{{genre}}」题材和「{{length}}」篇幅推荐适合的大纲扩展模式",
-      "minChapters": "最少章节数",
-      "maxChapters": "最多章节数",
       "requirement": "创作需求",
       "requirementPlaceholder": "请输入您的创作需求，例如：创作一部关于时空旅行的科幻小说...",
-      "customOutline": "自定义大纲规划（可选）",
-      "pacePrefix": "🎵 节奏建议",
-      "paceCultivationLong": "修仙长篇推荐境界逐层递进，每5-8章一个小爆点，每卷结束有境界突破大高潮",
-      "paceCultivation": "修仙题材注意境界体系设计，确保修炼节奏合理",
-      "paceXuanhuanLong": "玄幻长篇推荐天赋觉醒与实力突破交替，每5-8章一个小爆点",
-      "paceXuanhuan": "玄幻题材注意血脉天赋体系设计，确保等级压制清晰",
-      "paceFantasyLong": "奇幻长篇推荐奇妙世界规则逐渐展开，每5-8章一个世界观揭秘或冒险突破",
-      "paceFantasy": "奇幻题材注意奇幻种族、魔法体系设计，保持冒险与探索节奏",
-      "paceSuspense": "悬疑题材注意线索布局，每3-5章揭露一个小真相，每卷一个大反转",
-      "paceUrban": "都市题材建议多线穿插（商战+感情+亲情），每卷一个事业里程碑",
-      "paceRomance": "言情题材注意感情递进（相识→相知→相守），每5-10章一个甜蜜时刻",
-      "paceDanmei": "耽美题材注意昧昧张力与情感突破交替，每5-10章一个关系进展节点",
-      "paceSciFi": "科幻题材注意科技突破节奏，每卷一次探索升级（地球→星系→宇宙）",
-      "paceLiterary": "纯文学题材注重内心世界与外部环境的张力，节奏可适当放缓",
-      "paceDefault": "根据题材特点自动适配叙事节奏",
-      "noCustomPlanSuffix": "💡 未检测到自定义规划，将随机智能生成大纲",
-      "customOutlinePlaceholder": "可输入您的卷结构规划，例如：\n第一卷：引气境 (10章)\n第二卷：筑基境 (15章)\n...",
       "startingEllipsis": "启动中...",
-      "start": "开始",
-      "lengthShort": "短篇",
-      "lengthMid": "中篇",
-      "lengthLong": "长篇",
-      "lengthEpic": "超长篇"
+      "start": "开始"
     },
     "saveDialog": {
       "title": "🎉 工作流程已完成！",
@@ -1135,7 +1139,10 @@
     "finalDialog": {
       "title": "✨ 最终版本文档",
       "placeholder": "最终版本文本内容...",
-      "titleHelper": "如果不输入标题，系统会根据章节内容自动生成标题"
+      "titleHelper": "如果不输入标题，系统会根据章节内容自动生成标题",
+      "degradedTitle": "本轮迭代未达评分线",
+      "degradedDesc": "已交付当前最高评分版本，可继续编辑或再次迭代。",
+      "degradedDescWithScore": "已交付当前最高评分版本（{{score}} 分），可继续编辑或再次迭代。"
     },
     "decisionDialog": {
       "title": "概念阶段完成",
@@ -1399,28 +1406,6 @@
       "nodeCount": "节点总数: {{count}}",
       "edgeCount": "关系总数: {{count}}",
       "confidenceLegend": "蓝色边=高置信度(>0.8)"
-    },
-    "generationProgress": {
-      "taskTypeConcept": "项目概念生成",
-      "taskTypeWorld": "世界观生成",
-      "taskTypeCharacter": "人物生成",
-      "taskTypePlot": "情节生成",
-      "taskTypeChapter": "章节生成",
-      "statusPending": "等待处理中...",
-      "statusRunning": "正在生成中...",
-      "statusCompleted": "生成完成！",
-      "statusFailed": "生成失败",
-      "taskIdPrefix": "任务ID: {{id}}",
-      "taskId": "任务ID",
-      "generatedSuccess": "内容已成功生成！",
-      "taskInfo": "任务信息",
-      "statusLabel": "状态",
-      "createdAt": "创建时间",
-      "completedAt": "完成时间",
-      "retry": "重试",
-      "copied": "已复制到剪贴板",
-      "copyResult": "复制结果",
-      "minimize": "最小化"
     }
   },
   "kb": {

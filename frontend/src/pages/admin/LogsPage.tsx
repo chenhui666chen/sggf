@@ -392,6 +392,7 @@ export default function LogsPage() {
             page={page}
             onPageChange={(_, newPage) => setPage(newPage)}
             rowsPerPage={rowsPerPage}
+            rowsPerPageOptions={[10, 20, 25, 50, 100]}
             onRowsPerPageChange={(e) => {
               setRowsPerPage(parseInt(e.target.value, 10))
               setPage(0)

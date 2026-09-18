@@ -29,6 +29,17 @@ export default defineConfig({
     port: 5173,
     strictPort: true,
     middlewareMode: false,
+    // 强制 dev 响应不写入浏览器磁盘缓存。
+    // 背景：强杀 vite 时，某个懒加载 chunk 的响应体可能只写了半截，
+    // 但 ETag 已经落盘；之后浏览器发条件请求命中 304，就会复用那条
+    // 截断的 body，表现为登录后进入 /home 等懒加载页面白屏，
+    // 且 Ctrl+Shift+R 无法修复（硬刷新只是不断确认这条坏缓存）。
+    // 设为 no-store 后响应永不入缓存，从根上消除该故障模式。
+    headers: {
+      'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0',
+      Pragma: 'no-cache',
+      Expires: '0',
+    },
     hmr: {
       protocol: 'ws',
       host: 'localhost',

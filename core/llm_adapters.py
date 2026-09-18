@@ -266,18 +266,25 @@ class OpenAICompatibleAdapter(BaseLLMAdapter):
         from openai import AsyncOpenAI
         import httpx
 
+        # openai SDK 会把 client 级 timeout 作为 per-request 参数覆盖 http_client 默认值；
+        # 两层必须共用同一个结构化配置，否则连接阶段（含 TLS 握手）会被放大到全量超时，
+        # 与 _build_request_timeout 保持同样的阶段上限口径。
+        default_timeout = float(self.spec.api_config.default_timeout)
+        timeout_config = httpx.Timeout(
+            default_timeout,
+            connect=min(default_timeout, 30.0),
+            write=min(default_timeout, 60.0),
+            pool=min(default_timeout, 30.0),
+        )
         http_client = httpx.AsyncClient(
-            timeout=httpx.Timeout(
-                self.spec.api_config.default_timeout,
-                connect=30.0
-            ),
+            timeout=timeout_config,
             trust_env=_is_truthy_env("MODEL_HTTP_TRUST_ENV", default=False),
         )
 
         return AsyncOpenAI(
             api_key=api_key,
             base_url=self.spec.api_config.base_url,
-            timeout=self.spec.api_config.default_timeout,
+            timeout=timeout_config,
             max_retries=0,
             http_client=http_client,
         )
@@ -508,10 +515,19 @@ class OpenAICompatibleAdapter(BaseLLMAdapter):
 
             content = ""
             chunk_count = 0
+            finish_reason: Optional[str] = None
+            reasoning_chars = 0
 
             async for chunk in stream:
                 if chunk.choices and len(chunk.choices) > 0:
-                    delta = chunk.choices[0].delta
+                    choice = chunk.choices[0]
+                    if getattr(choice, "finish_reason", None):
+                        finish_reason = choice.finish_reason
+                    delta = choice.delta
+                    if delta is not None:
+                        reasoning_piece = getattr(delta, "reasoning_content", None)
+                        if reasoning_piece:
+                            reasoning_chars += len(reasoning_piece)
                     if delta and delta.content:
                         content_piece = delta.content
                         content += content_piece
@@ -526,6 +542,26 @@ class OpenAICompatibleAdapter(BaseLLMAdapter):
                                 logger.warning(f"⚠️ 流式回调失败: {e}")
 
             latency = time.time() - start_time
+
+            if not content.strip():
+                # 🔧 流式空响应按失败处理：HTTP 200 但流内无正文（模型瞬时故障/
+                #    思考耗尽输出预算）。此前返回 success=True + 空字符串会让
+                #    model_hub 降级与 streaming_service 重试全部空转，
+                #    一次瞬时空响应直接击穿上游熔断开人工确认。
+                logger.warning(
+                    "⚠️ 流式空响应诊断 | 模型: %s | finish_reason=%s | reasoning=%d字 | 块数: %d",
+                    self.spec.id,
+                    finish_reason,
+                    reasoning_chars,
+                    chunk_count,
+                )
+                return LLMResult(
+                    success=False,
+                    model_id=self.spec.id,
+                    error="模型返回空响应（HTTP 200 但流内无正文内容）",
+                    error_code="empty_response",
+                    latency=latency,
+                )
 
             logger.debug(
                 f"✅ LLM流式调用成功 | 模型: {self.spec.id} | "

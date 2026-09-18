@@ -91,6 +91,30 @@ describe('workflow API client', () => {
     )
   })
 
+  it('sends resume_after_confirmation only after explicit user confirmation', async () => {
+    const postMock = vi.spyOn((apiClient as any).client, 'post').mockResolvedValue({ status: 200, data: {} })
+
+    await apiClient.generateNextWorkflowChapter(7, {
+      generationTier: 'standard',
+      resumeAfterConfirmation: true,
+    })
+
+    expect(postMock).toHaveBeenCalledWith(
+      '/api/v1/workflow/7/generate-next-chapter',
+      { generation_tier: 'standard', resume_after_confirmation: true },
+      expect.any(Object),
+    )
+
+    // 未显式确认时不得静默携带恢复标记，否则会绕过熔断的人工确认语义
+    await apiClient.generateNextWorkflowChapter(7, { generationTier: 'standard' })
+
+    expect(postMock).toHaveBeenLastCalledWith(
+      '/api/v1/workflow/7/generate-next-chapter',
+      { generation_tier: 'standard' },
+      expect.any(Object),
+    )
+  })
+
   it('loads the authenticated user free generation quota', async () => {
     const getMock = vi.spyOn((apiClient as any).client, 'get').mockResolvedValue({ status: 200, data: {} })
 

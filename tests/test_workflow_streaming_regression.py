@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import json
+import importlib
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -16,7 +16,9 @@ for path in (PROJECT_ROOT, PROJECT_ROOT / "backend"):
         sys.path.insert(0, path_str)
 
 import app.db.base as db_base
-import backend.app.api.v1.workflow as workflow
+import app.api.v1.workflow.story_helpers as story_helpers
+
+workflow = importlib.import_module("app.api.v1.workflow.execute_streaming")
 
 
 class _FakeExecuteResult:
@@ -63,12 +65,12 @@ class _FakeDBSession:
         self.execute_calls.append((query_text, params))
 
         if "SELECT title, genre, sub_genre" in query_text:
-            return _FakeExecuteResult(("测试项目", "玄幻", "", "", 0, 50, ""))
+            return _FakeExecuteResult(("测试项目", "玄幻", "", "", 0, 50, "", ""))
 
         if "SELECT id FROM project_settings" in query_text:
             return _FakeExecuteResult((1,))
 
-        if "SELECT concept, world_setting, characters, plot_outline, chapter_draft, review_report" in query_text:
+        if "SELECT concept, world_setting, characters, plot_outline," in query_text:
             return _FakeExecuteResult(
                 (
                     '"测试概念"',
@@ -76,6 +78,9 @@ class _FakeDBSession:
                     '"测试人物"',
                     "",
                     "",
+                    "",
+                    "",
+                    "{}",
                     "",
                 )
             )
@@ -163,7 +168,14 @@ class _FakeWSManager:
 class _FakeCoordinator:
     def __init__(self) -> None:
         self._coordinator_initialized = True
-        self.real_coordinator = SimpleNamespace(project_context={})
+        self.real_coordinator = SimpleNamespace(
+            project_context={},
+            finalize_structure=lambda outline: {"plot_outline": outline, "event_validation": "结果：通过"},
+        )
+        self.recorded_statuses = []
+
+    def record_stage_result(self, stage, project_id, output, status):
+        self.recorded_statuses.append(status)
 
     async def initialize_agents(self) -> None:
         return None
@@ -192,6 +204,7 @@ async def test_execute_stage_with_streaming_structure_uses_single_specialized_st
     monkeypatch.setattr(workflow, "get_streaming_service", lambda: fake_streaming_service)
     monkeypatch.setattr(workflow, "ws_manager", fake_ws_manager)
     monkeypatch.setattr(workflow, "coordinator", fake_coordinator)
+    monkeypatch.setattr(story_helpers, "coordinator", fake_coordinator)
 
     await workflow.execute_stage_with_streaming(
         task_id="structure-streaming-regression",
@@ -206,6 +219,7 @@ async def test_execute_stage_with_streaming_structure_uses_single_specialized_st
     assert fake_ws_manager.task_error_calls == []
     assert fake_ws_manager.task_complete_calls[0]["result"]["output"].startswith("第1章：结构测试大纲")
     assert fake_db.closed is True
+    assert fake_coordinator.recorded_statuses == ["completed"]
 
     structure_save_calls = [
         params
@@ -213,4 +227,4 @@ async def test_execute_stage_with_streaming_structure_uses_single_specialized_st
         if "UPDATE project_settings" in query_text and isinstance(params, dict) and "plot_outline" in params
     ]
     assert structure_save_calls
-    assert "结构测试大纲" in json.loads(structure_save_calls[0]["plot_outline"])
+    assert "结构测试大纲" in structure_save_calls[0]["plot_outline"]

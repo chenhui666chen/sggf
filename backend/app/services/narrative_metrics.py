@@ -20,6 +20,15 @@ QUALITY_TREND_KEY = "quality_trend"
 STYLE_TREND_KEY = "style_trend"
 # 滚动保留的指标章节数
 TREND_WINDOW = 10
+# 文风漂移告警只在漂移发生后的 STYLE_DRIFT_ADVICE_TTL 章内注入，避免陈旧信号长期污染规划提示词
+STYLE_DRIFT_ADVICE_TTL = 2
+# 漂移指标的可读名称，供规划提示词告警渲染
+STYLE_FIELD_LABELS: Dict[str, str] = {
+    "avg_sentence_len": "平均句长",
+    "dialogue_ratio": "对话占比",
+    "cliches_per_1k": "套话密度（每千字）",
+    "exclamation_per_1k": "感叹号密度（每千字）",
+}
 
 # 张力阈值（低于即视为低谷）
 TENSION_LOW_THRESHOLD = 40
@@ -197,6 +206,7 @@ def detect_style_drift(
     sentence_deviation_threshold: float = 0.35,
     dialogue_deviation_threshold: float = 0.35,
     cliche_delta_threshold: float = 2.0,
+    exclamation_delta_threshold: float = 3.0,
 ) -> Dict[str, Any]:
     """将本章特征与项目基线（此前各章均值）对比，返回漂移判定。
 
@@ -241,17 +251,22 @@ def detect_style_drift(
                 }
             )
 
-    cliche_baseline = _baseline("cliches_per_1k")
-    cliche_delta = float(features.get("cliches_per_1k") or 0.0) - cliche_baseline
-    if cliche_delta > cliche_delta_threshold:
-        result["flags"].append(
-            {
-                "field": "cliches_per_1k",
-                "value": features.get("cliches_per_1k"),
-                "baseline": round(cliche_baseline, 2),
-                "deviation": round(cliche_delta, 2),
-            }
-        )
+    # 套话、感叹号这类“只嫌多不嫌少”的指标走增量判定：基线为 0 时相对偏差恒为 0，会漏报突增
+    for field, delta_threshold in (
+        ("cliches_per_1k", cliche_delta_threshold),
+        ("exclamation_per_1k", exclamation_delta_threshold),
+    ):
+        delta_baseline = _baseline(field)
+        delta = float(features.get(field) or 0.0) - delta_baseline
+        if delta > delta_threshold:
+            result["flags"].append(
+                {
+                    "field": field,
+                    "value": features.get(field),
+                    "baseline": round(delta_baseline, 2),
+                    "deviation": round(delta, 2),
+                }
+            )
 
     result["drift"] = bool(result["flags"])
     return result
@@ -298,3 +313,31 @@ def record_style_trend(
         logger.warning("文风漂移记录失败（不影响主流程）: %s", exc)
         return {"drift": False, "flags": []}
     return result
+
+
+def format_style_drift_advice(
+    review_meta: Optional[Dict[str, Any]],
+    next_chapter_number: int,
+) -> str:
+    """将最近一次文风漂移渲染为规划提示词告警；无漂移或信号过旧返回空串。"""
+    trend = ((review_meta or {}).get(STYLE_TREND_KEY) or {})
+    last_drift = trend.get("last_drift") or {}
+    flags = last_drift.get("flags") or []
+    drift_chapter = last_drift.get("chapter")
+    if not flags or not isinstance(drift_chapter, int):
+        return ""
+    # 只对漂移之后的章节生效：同一章重生成或若干章前的旧信号不应当前问题处理
+    gap = int(next_chapter_number) - drift_chapter
+    if gap <= 0 or gap > STYLE_DRIFT_ADVICE_TTL:
+        return ""
+    lines = [
+        f"【文风漂移告警】（第{drift_chapter}章量化指标偏离项目基线，"
+        "本章须主动回摆到项目既有文风，不得沿用上一章腔调）"
+    ]
+    for flag in flags[:3]:
+        field = str(flag.get("field") or "")
+        lines.append(
+            f"- {STYLE_FIELD_LABELS.get(field, field)}：当前 {flag.get('value')}，"
+            f"项目基线 {flag.get('baseline')}（偏离 {flag.get('deviation')}）"
+        )
+    return "\n".join(lines)

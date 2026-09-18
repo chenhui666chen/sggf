@@ -12,7 +12,8 @@ import uuid
 from sqlalchemy import inspect, text
 
 from app.db.base import get_db, SessionLocal
-from app.services.agent_coordinator import coordinator, StageType, AgentStatus
+from app.services.agent_coordinator import coordinator, StageType, AgentStatus, validate_stage_prerequisites
+from app.services.agents.agents import agent_stream_observer
 from app.services.agent_registry import get_stage_agents_map
 from app.core.security import get_current_user
 from app.models.project import Project, Chapter
@@ -27,8 +28,6 @@ from app.utils.datetime_utils import parse_datetime_utc, utc_now
 from core.model_resolution import normalize_model_id
 from core.model_runtime import ensure_model_hub_initialized, resolve_model_for_task
 from app.services.prompts.workflow_runtime import (
-    build_first_chapter_iteration_prompts,
-    build_first_chapter_review_prompts,
     build_streaming_concept_prompts,
     build_streaming_structure_prompts,
     build_streaming_world_prompts,
@@ -40,7 +39,11 @@ logger = logging.getLogger(__name__)
 
 from app.api.v1.workflow.lock_manager import _get_workflow_execution_lock
 from app.api.v1.workflow.helpers import *
-from app.api.v1.workflow.helpers import _sync_project_title_from_concept
+from app.api.v1.workflow.helpers import (
+    _sync_project_title_from_concept,
+    apply_iteration_result_to_latest_chapter,
+    resolve_current_chapter_number,
+)
 from app.api.v1.workflow.story_helpers import *
 from app.api.v1.workflow.story_helpers import (
     _build_project_world_setting_context,
@@ -77,6 +80,7 @@ async def execute_stage_with_streaming(
     # 🔧 关键修复：创建新的独立 db session（避免使用请求级别的 session）
     db = SessionLocal()
     workflow_context_builder = WorkflowContextBuilder(db)
+    observer_token = None
     
     try:
         logger.info(f"🌊 开始流式执行后台任务: {task_id}")
@@ -100,13 +104,31 @@ async def execute_stage_with_streaming(
                 workflow_context_builder,
                 project_profile,
             )
-            if manual_multi_model_review and stage_enum == StageType.REVIEW:
-                real_coord.project_context["manual_multi_model_review"] = True
-                if manual_multi_model_review_preset:
-                    real_coord.project_context["manual_multi_model_review_preset"] = manual_multi_model_review_preset
-                logger.info("   ✅ 已启用手动多模型评审标记")
+            if real_coord is None:
+                raise RuntimeError("真实协调器未初始化")
         except Exception as e:
-            logger.warning(f"⚠️ 项目基本信息注入失败：{e}")
+            raise RuntimeError("项目上下文初始化失败") from e
+
+        if not coordinator._coordinator_initialized:
+            raise RuntimeError("真实协调器未初始化")
+        stage_context = workflow_context_builder.load_stage_text_context(project_id)
+        real_coord.project_context.update({
+            "concept": stage_context.concept,
+            "world_setting": stage_context.world_setting,
+            "characters": stage_context.characters,
+            "plot_outline": stage_context.plot_outline,
+            "content": stage_context.chapter_draft,
+            "chapter_draft": stage_context.chapter_draft,
+            "review": stage_context.review_report,
+            "review_report": stage_context.review_report,
+            "chapter_number": resolve_current_chapter_number(db, project_id),
+            "workflow_generation_model": workflow_generation_model,
+            "manual_multi_model_review": manual_multi_model_review if stage_enum == StageType.REVIEW else False,
+            "manual_multi_model_review_preset": manual_multi_model_review_preset if stage_enum == StageType.REVIEW else None,
+            "regenerate": False,
+            "regenerate_targets": [],
+        })
+        validate_stage_prerequisites(stage_enum, real_coord.project_context)
 
         if stage_enum == StageType.CONCEPT:
             try:
@@ -185,11 +207,22 @@ async def execute_stage_with_streaming(
                 stage=stage_enum.value,
                 agent_id=agent['id'],
                 agent_name=agent['name'],
-                status='working',
+                status='idle',
                 progress=0,
-                message=f'{agent["name"]}正在工作中...'
+                message=f'{agent["name"]}等待前置步骤...' 
             )
         logger.info(f"   📡 已发送 {len(stage_agents)} 个 Agent 开始状态（流式模式）")
+
+        active_agent_id = ""
+
+        async def announce_agent(agent_id: str):
+            nonlocal active_agent_id
+            active_agent_id = agent_id
+            agent = next((item for item in stage_agents if item["id"] == agent_id), None)
+            if agent:
+                await ws_manager.send_agent_status(project_id=project_id, stage=stage_enum.value,
+                    agent_id=agent_id, agent_name=agent["name"], status="working", progress=0,
+                    message=f'{agent["name"]}正在执行...')
 
         # 🌊 创建流式输出回调
         chunk_index = [0]  # 使用列表以便在闭包中修改
@@ -210,6 +243,8 @@ async def execute_stage_with_streaming(
             if idx % 50 == 0:
                 estimated_progress = min(90, idx // 5)  # 估算进度
                 for agent in stage_agents:
+                    if agent["id"] != active_agent_id:
+                        continue
                     await ws_manager.send_agent_status(
                         project_id=project_id,
                         stage=stage_enum.value,
@@ -220,20 +255,49 @@ async def execute_stage_with_streaming(
                         message=f'已生成 {total_chars[0]} 字...'
                     )
 
-        # 🔥 尝试使用流式 LLM 调用
+        loop = asyncio.get_running_loop()
+        visible_agents = {"plot_architect", "content_creator", "style_optimizer", "content_reviser", "quality_reviewer"}
+        concept_targets = {"creative_director": "concept", "world_architect": "world", "character_designer": "character"}
+
+        async def forward_agent_chunk(agent_id: str, chunk: str):
+            target = concept_targets.get(agent_id) if stage_enum == StageType.CONCEPT else None
+            if not chunk:
+                await announce_agent(agent_id)
+                if agent_id in visible_agents or target:
+                    chunk_index[0] = 0
+                    total_chars[0] = 0
+                    await ws_manager.send_stream_start(project_id, stage_enum.value)
+            elif target:
+                chunk_index[0] += 1
+                await ws_manager.send_stream_chunk(
+                    project_id=project_id, stage=stage_enum.value, chunk=chunk,
+                    chunk_index=chunk_index[0], is_complete=False, extra={"target": target},
+                )
+            elif agent_id in visible_agents:
+                await on_stream_chunk(chunk, chunk_index[0] + 1)
+
+        def observe_agent(agent_id: str, chunk: str):
+            # Agent 在工作线程中执行，WebSocket 推送仍回到所属事件循环。
+            try:
+                asyncio.run_coroutine_threadsafe(forward_agent_chunk(agent_id, chunk), loop).result(timeout=15)
+            except Exception:
+                logger.warning("Agent 流式预览推送失败，不影响生成结果", exc_info=True)
+
+        observer_token = agent_stream_observer.set(observe_agent)
         result_str = ""
-        use_streaming_llm = STREAMING_AVAILABLE and get_streaming_service is not None
+        use_streaming_llm = (
+            STREAMING_AVAILABLE and get_streaming_service is not None
+            and stage_enum not in {StageType.REVIEW, StageType.ITERATION}
+        )
 
         if use_streaming_llm:
             try:
                 # 🌊 使用流式服务进行真正的流式 LLM 调用
                 streaming_service = get_streaming_service()
 
-                # 获取项目上下文（用于构建提示词）
-                stage_context = workflow_context_builder.load_stage_text_context(project_id)
-
                 # 构建流式调用的提示词
                 if stage_enum == StageType.CONTENT:
+                    await announce_agent("content_creator")
                     # 内容创作阶段
                     plot_outline = stage_context.plot_outline
                     world_setting = stage_context.world_setting
@@ -320,6 +384,7 @@ async def execute_stage_with_streaming(
                     logger.info(f"   🌊 概念开发阶段开始流式输出...")
                     
                     # 1. 故事概念生成
+                    await announce_agent("creative_director")
                     await ws_manager.send_stream_start(project_id, stage_enum.value, "正在生成故事概念...")
 
                     real_coord = coordinator.get_real_coordinator(project_id)
@@ -362,6 +427,7 @@ async def execute_stage_with_streaming(
                     )
                     
                     # 2. 世界观设定生成
+                    await announce_agent("world_architect")
                     await ws_manager.send_stream_start(project_id, stage_enum.value, "正在生成世界观设定...")
                     
                     world_system_prompt, world_user_prompt = build_streaming_world_prompts(
@@ -393,6 +459,7 @@ async def execute_stage_with_streaming(
                     )
                     
                     # 3. 人物设定生成
+                    await announce_agent("character_designer")
                     await ws_manager.send_stream_start(project_id, stage_enum.value, "正在生成人物设定...")
                     
                     character_system_prompt, character_user_prompt = _build_concept_stage_character_prompts(
@@ -438,6 +505,7 @@ async def execute_stage_with_streaming(
                     }
 
                 elif stage_enum == StageType.STRUCTURE:
+                    await announce_agent("plot_architect")
                     # 结构设计阶段 - 流式输出大纲
                     logger.info(f"   🌊 结构设计阶段开始流式输出...")
                     
@@ -491,23 +559,6 @@ async def execute_stage_with_streaming(
                         "plot_outline": structure_result
                     }
 
-                elif stage_enum == StageType.REVIEW:
-                    # 质量评审阶段
-                    chapter_draft = stage_context.chapter_draft
-
-                    system_prompt, user_prompt = build_first_chapter_review_prompts(
-                        chapter_draft=chapter_draft,
-                    )
-
-                elif stage_enum == StageType.ITERATION:
-                    # 迭代优化阶段
-                    chapter_draft = stage_context.chapter_draft
-                    review_report = stage_context.review_report
-
-                    system_prompt, user_prompt = build_first_chapter_iteration_prompts(
-                        chapter_draft=chapter_draft,
-                        review_report=review_report,
-                    )
                 else:
                     # 其他阶段不使用流式输出，回退到原有逻辑
                     raise ValueError(f"阶段 {stage_enum.value} 不支持流式输出")
@@ -540,7 +591,7 @@ async def execute_stage_with_streaming(
                 )
                 
                 # 对于非CONCEPT阶段，执行流式调用
-                if stage_enum in {StageType.CONTENT, StageType.REVIEW, StageType.ITERATION}:
+                if stage_enum == StageType.CONTENT:
                     result_str = await streaming_service.generate_chapter_streaming(
                         prompt=user_prompt,
                         system_prompt=system_prompt,
@@ -551,44 +602,21 @@ async def execute_stage_with_streaming(
                     )
                     logger.info(f"   ✅ 流式 LLM 调用完成，生成 {len(result_str)} 字符")
 
-                # 🆕 迭代优化阶段：清理输出内容 + 摘要压缩保护
-                if stage_enum == StageType.ITERATION and result_str:
-                    # 清理输出内容，移除额外的评审话语
-                    def clean_final_output(content: str) -> str:
-                        if not content:
-                            return content
-                        lines = content.split('\n')
-                        cleaned_lines = []
-                        skip_section = False
-                        for line in lines:
-                            line_lower = line.lower().strip()
-                            if any(keyword in line_lower for keyword in [
-                                '优化说明', '修改说明', '评审', '改进建议', '优化要点',
-                                '以下是优化后', '根据评审意见', '主要修改', '优化内容'
-                            ]):
-                                skip_section = True
-                                continue
-                            if skip_section and line.strip() == '':
-                                skip_section = False
-                                continue
-                            if not skip_section:
-                                cleaned_lines.append(line)
-                        return '\n'.join(cleaned_lines).strip()
-
-                    result_str = clean_final_output(result_str)
-
-                    # 安全保护：如果优化后字数远小于原稿，回退为原始内容
-                    original_len = len(chapter_draft or "")
-                    optimized_len = len(result_str or "")
-                    if original_len >= 500 and optimized_len > 0 and optimized_len < original_len * 0.6:
-                        logger.warning(
-                            f"   ⚠️ 优化后长度({optimized_len}) 远小于原稿({original_len})，保留原始内容"
-                        )
-                        result_str = chapter_draft
-
             except Exception as streaming_error:
                 logger.warning(f"   ⚠️  流式 LLM 调用失败，回退到原有逻辑: {streaming_error}")
                 use_streaming_llm = False
+
+        # 质量步骤位于传输降级边界之外，验证失败不得重新生成整个阶段。
+        if use_streaming_llm and result_str:
+            if stage_enum == StageType.STRUCTURE:
+                output_data = await asyncio.to_thread(real_coord.finalize_structure, result_str)
+                result_str = output_data["plot_outline"]
+            elif stage_enum == StageType.CONTENT:
+                output_data = await asyncio.to_thread(real_coord.finalize_content, result_str, chapter_plan=content_plan)
+                result_str = output_data["content"]
+            elif stage_enum == StageType.CONCEPT:
+                if not all(isinstance(output_data.get(key), str) and output_data[key].strip() for key in ("concept", "world_setting", "characters")):
+                    raise RuntimeError("概念开发未返回完整的概念、世界观和人物设定")
 
         # 如果流式调用失败或不可用，回退到原有逻辑
         if not use_streaming_llm or not result_str:
@@ -600,14 +628,17 @@ async def execute_stage_with_streaming(
                     "user_id": user_id,
                     "requirement": requirement,
                     "enable_streaming": False,
+                    "defer_completion": True,
                     "workflow_generation_model": workflow_generation_model,
+                    "manual_multi_model_review": manual_multi_model_review,
+                    "manual_multi_model_review_preset": manual_multi_model_review_preset,
                 },
             )
 
             # 提取结果内容
             output_data = stage_output.output if isinstance(stage_output.output, dict) else {}
             if stage_enum == StageType.ITERATION:
-                result_str = output_data.get("revised_content", "") or output_data.get("final_review", "")
+                result_str = output_data.get("revised_content", "")
             elif stage_enum == StageType.CONTENT:
                 result_str = output_data.get("content", "") or output_data.get("chapters", "")
             elif stage_enum == StageType.REVIEW:
@@ -621,6 +652,10 @@ async def execute_stage_with_streaming(
                 logger.info(f"   🔍 STRUCTURE 阶段提取结果: {len(result_str)} 字符")
             else:
                 result_str = str(stage_output.output) if stage_output.output else ""
+
+        # 模型执行已结束，持久化及同步规范化不得继续等待当前事件循环的预览回调。
+        agent_stream_observer.reset(observer_token)
+        observer_token = None
 
         # 🌊 发送流式输出结束通知
         await ws_manager.send_stream_end(
@@ -670,15 +705,8 @@ async def execute_stage_with_streaming(
             WHERE task_id = :task_id
         """)
 
-        db.execute(update_query, {
-            "status": "completed",
-            "result": result_str,
-            "completed_at": utc_now().isoformat(),
-            "task_id": task_id
-        })
-        db.commit()
-
-        logger.info(f"   ✅ 流式任务完成: {task_id}")
+        if not isinstance(result_str, str) or not result_str.strip():
+            raise RuntimeError("阶段未返回有效产物")
 
         # 保存阶段输出到 project_settings
         logger.debug(f"\n{'='*50}")
@@ -728,6 +756,7 @@ async def execute_stage_with_streaming(
                 workflow_context_builder.update_project_settings_fields(
                     project_id,
                     plot_outline=json.dumps(result_str, ensure_ascii=False),
+                    review_meta={"first_chapter_structure": {"event_validation": output_data.get("event_validation", "")}},
                     stage_two_status="completed",
                 )
                 logger.info(f"   💾 已保存结构大纲到 project_settings（流式模式）")
@@ -748,7 +777,20 @@ async def execute_stage_with_streaming(
                 workflow_context_builder.update_project_settings_fields(
                     project_id,
                     final_version=json.dumps(result_str, ensure_ascii=False),
+                    review_meta={"first_chapter_iteration": {
+                        "iteration_plan": output_data.get("iteration_plan", ""),
+                        "final_review": output_data.get("final_review", ""),
+                        "degraded": output_data.get("iteration_degraded", False),
+                        "best_score": output_data.get("best_score"),
+                    }},
                     stage_five_status="completed",
+                )
+                # 迭代终稿必须覆盖当前最新一章，否则用户看到的仍是上一版旧稿
+                apply_iteration_result_to_latest_chapter(
+                    db,
+                    project_id=project_id,
+                    content=result_str,
+                    revision_note="迭代终稿覆盖（阶段级迭代）",
                 )
         except Exception as save_error:
             logger.error(f"   ⚠️  保存到 project_settings 失败: {save_error}")
@@ -758,6 +800,14 @@ async def execute_stage_with_streaming(
             # 🆕 打印关键变量
             logger.error(f"   🔍 stage_enum={stage_enum}, project_id={project_id}, result_str_len={len(result_str) if result_str else 0}")
             logger.error(f"   🔍 output_data={type(output_data)}, output_data_keys={output_data.keys() if isinstance(output_data, dict) else 'not dict'}")
+            raise
+
+        db.execute(update_query, {
+            "status": "completed", "result": result_str,
+            "completed_at": utc_now().isoformat(), "task_id": task_id,
+        })
+        db.commit()
+        coordinator.record_stage_result(stage_enum, project_id, output_data, "completed")
 
         # 推送任务完成通知
         await ws_manager.send_task_complete(
@@ -773,9 +823,9 @@ async def execute_stage_with_streaming(
                 stage=stage_enum.value,
                 agent_id=agent['id'],
                 agent_name=agent['name'],
-                status='completed',
-                progress=100,
-                message=f'{agent["name"]}已完成'
+                status='idle' if agent['id'] in output_data.get('skipped_agents', []) else 'completed',
+                progress=0 if agent['id'] in output_data.get('skipped_agents', []) else 100,
+                message='本轮无需修订，已跳过' if agent['id'] in output_data.get('skipped_agents', []) else f'{agent["name"]}已完成'
             )
         logger.info(f"   📡 已发送 {len(stage_agents)} 个 Agent 完成状态（流式模式）")
 
@@ -852,13 +902,22 @@ async def execute_stage_with_streaming(
             WHERE task_id = :task_id
         """)
 
-        db.execute(update_query, {
-            "status": "failed",
-            "error": str(e),
-            "completed_at": utc_now().isoformat(),
-            "task_id": task_id
-        })
-        db.commit()
+        try:
+            db.execute(update_query, {
+                "status": "failed",
+                "error": str(e),
+                "completed_at": utc_now().isoformat(),
+                "task_id": task_id
+            })
+            db.commit()
+        except Exception:
+            logger.exception("任务失败状态无法写入数据库，仍继续通知客户端")
+
+        coordinator.record_stage_result(stage_enum, project_id, {}, "error")
+        for agent in get_stage_agents_map().get(stage_enum.value, []):
+            await ws_manager.send_agent_status(project_id=project_id, stage=stage_enum.value,
+                agent_id=agent["id"], agent_name=agent["name"], status="error", progress=0,
+                message="阶段未完成，请查看任务错误")
 
         # 推送任务失败通知
         await ws_manager.send_task_error(
@@ -875,6 +934,8 @@ async def execute_stage_with_streaming(
             progress=0
         )
     finally:
+        if observer_token is not None:
+            agent_stream_observer.reset(observer_token)
         # 🔧 关键修复：关闭独立创建的 db session
         db.close()
         logger.info(f"   📝 db session 已关闭")

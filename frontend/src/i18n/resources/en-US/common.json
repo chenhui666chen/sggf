@@ -261,7 +261,9 @@
     "collabExpansionDone": "Collaborative expansion done",
     "createProjectTitle": "New project",
     "projectTitleLabel": "Project title",
-    "projectDescLabel": "Project description",
+    "requirementLabel": "Creation requirement (initial idea)",
+    "requirementPlaceholder": "Enter your creation requirement, e.g. write a sci-fi novel about time travel...",
+    "requirementHelper": "It will be prefilled in the Start Creating dialog where you can edit it, and used as input for every stage",
     "genreLabel": "Genre",
     "create": "Create",
     "newProject": "New project",
@@ -274,6 +276,7 @@
     "genreUpdateFailed": "Failed to update the genre. Try again.",
     "generateNextChapter": "🚀 Generating chapter {{number}}… redirecting to the workflow page",
     "createTaskFailed": "Failed to create the generation task. Try again.",
+    "breakerPaused": "Auto-advance is paused for this project. Open the workflow page to review the reason and resume generation.",
     "exportPrepared": "✨ Chapter content ready, taking you to Zhiwen Markless…",
     "exportFailed": "Export failed. Try again.",
     "exportTxtSuccess": "📄 TXT export successful",
@@ -319,6 +322,43 @@
       "literary": "Literary",
       "fantasyEn": "Fantasy (EN)",
       "unset": "Unset"
+    },
+    "createDialog": {
+      "titleFallbackHint": "If left blank, the title will be written back automatically from the generated story concept; if filled in, your title will be used",
+      "genreHelper": "The AI will adjust writing style and pacing automatically based on the genre",
+      "lengthPlan": "Length Plan",
+      "lengthHelper": "The system will recommend a suitable outline expansion mode based on the length",
+      "genreLengthHint": "💡 Based on the «{{genre}}» genre and «{{length}}» length, the system will recommend a suitable outline expansion mode",
+      "pleaseSelect": "Please select",
+      "minChapters": "Min Chapters",
+      "maxChapters": "Max Chapters",
+      "customOutline": "Custom Outline Plan (optional)",
+      "pacePrefix": "🎵 Pacing suggestion",
+      "paceCultivationLong": "For a long xianxia novel, we recommend advancing realm by realm; a small climax every 5-8 chapters, and a realm-breaking climax at the end of each volume",
+      "paceCultivation": "For xianxia, pay attention to the realm system design to keep cultivation pacing reasonable",
+      "paceXuanhuanLong": "For a long xuanhuan novel, we recommend alternating talent awakening with power breakthroughs; a small climax every 5-8 chapters",
+      "paceXuanhuan": "For xuanhuan, pay attention to the bloodline/talent system design to keep power levels clear",
+      "paceFantasyLong": "For a long fantasy novel, we recommend gradually unfolding the wonder-world rules; a worldbuilding reveal or adventure breakthrough every 5-8 chapters",
+      "paceFantasy": "For fantasy, pay attention to fantasy races and magic system design while maintaining an adventure-and-exploration pace",
+      "paceSuspense": "For suspense, lay out clues carefully: reveal a small truth every 3-5 chapters and a big twist at the end of each volume",
+      "paceUrban": "For urban stories, we suggest interweaving multiple threads (business + romance + family); a career milestone at the end of each volume",
+      "paceRomance": "For romance, focus on emotional progression (meet → know → stay); a sweet moment every 5-10 chapters",
+      "paceDanmei": "For danmei, alternate ambiguous tension with emotional breakthroughs; a relationship milestone every 5-10 chapters",
+      "paceSciFi": "For sci-fi, plan technology breakthroughs; one exploration upgrade per volume (Earth → Galaxy → Universe)",
+      "paceLiterary": "For literary fiction, focus on the tension between the inner world and the external environment; the pace can slow down appropriately",
+      "paceDefault": "Automatically match narrative pacing to the genre",
+      "noCustomPlanSuffix": "💡 No custom plan detected; an outline will be generated intelligently at random",
+      "customOutlinePlaceholder": "You may enter your volume structure plan, e.g.:\nVolume 1: Qi Refining (10 ch.)\nVolume 2: Foundation Building (15 ch.)\n...",
+      "lengthShort": "Short",
+      "lengthMid": "Medium",
+      "lengthLong": "Long",
+      "lengthEpic": "Epic",
+      "lengthTypes": {
+        "short": "Short (3-30 ch.)",
+        "mid": "Medium (31-300 ch.)",
+        "long": "Long (301-799 ch.)",
+        "epic": "Epic (800+ ch.)"
+      }
     }
   },
   "userCenter": {
@@ -440,7 +480,7 @@
     },
     "projects": {
       "empty": "No projects to show yet. Start by creating one from the creation modules.",
-      "noDescription": "No description. Add more context in the creative workbench.",
+      "noDescription": "No creation requirement yet. You can add one from the Start Creating dialog in the creative workbench.",
       "unclassified": "Unclassified",
       "novelProject": "Novel project",
       "audiobookCount": "Audiobooks {{count}}",
@@ -936,23 +976,6 @@
       "iteration": "Iterative Refinement"
     },
     "title": "Inspiration Ark",
-    "genres": {
-      "xiuxian": "Xianxia",
-      "xuanhuan": "Xuanhuan",
-      "fantasy": "Fantasy",
-      "urban": "Urban",
-      "romance": "Romance",
-      "danmei": "Danmei",
-      "suspense": "Suspense",
-      "sciFi": "Sci-Fi",
-      "literary": "Literary"
-    },
-    "lengthTypes": {
-      "short": "Short (3-30 ch.)",
-      "mid": "Medium (31-300 ch.)",
-      "long": "Long (301-799 ch.)",
-      "epic": "Epic (800+ ch.)"
-    },
     "page": {
       "currentProject": "Current project:",
       "executingStage": "Executing {{stage}}... ({{progress}}%)",
@@ -1056,6 +1079,16 @@
       "chapterNthSaved": "✅ Chapter {{number}} saved: {{title}} ({{words}} words)",
       "stageSwitched": "Switched to {{stage}}"
     },
+    "breakerDialog": {
+      "title": "Auto-advance paused",
+      "desc": "Chapter {{chapter}} tripped the circuit breaker, so later chapters are paused. Review the reason below and continue once it looks fine.",
+      "descNoChapter": "The generation flow tripped the circuit breaker, so later chapters are paused. Review the reason below and continue once it looks fine.",
+      "reasonLabel": "Pause reason",
+      "reasonUnknown": "No reason recorded",
+      "hint": "Check the gate and digest reports in the knowledge base before continuing.",
+      "confirm": "Confirm and continue",
+      "cancel": "Later"
+    },
     "warning": {
       "title": "⚠️ Warning: This project already has content",
       "hasChapters": "This project already has {{count}} chapters",
@@ -1075,41 +1108,12 @@
       "restartOverwriteHint": "Delete existing content and start over from scratch"
     },
     "startDialog": {
-      "title": "Start Creating - Configure Project Parameters",
+      "title": "Start Creating",
       "starting": "Starting the workflow, please wait...",
-      "genreType": "Genre",
-      "pleaseSelect": "Please select",
-      "genreHelper": "The AI will adjust writing style and pacing automatically based on the genre",
-      "lengthPlan": "Length Plan",
-      "lengthHelper": "The system will recommend a suitable outline expansion mode based on the length",
-      "genreLengthHint": "💡 Based on the «{{genre}}» genre and «{{length}}» length, the system will recommend a suitable outline expansion mode",
-      "minChapters": "Min Chapters",
-      "maxChapters": "Max Chapters",
       "requirement": "Creation Requirement",
       "requirementPlaceholder": "Enter your creation requirement, e.g. write a sci-fi novel about time travel...",
-      "customOutline": "Custom Outline Plan (optional)",
-      "pacePrefix": "🎵 Pacing suggestion",
-      "paceCultivationLong": "For a long xianxia novel, we recommend advancing realm by realm; a small climax every 5-8 chapters, and a realm-breaking climax at the end of each volume",
-      "paceCultivation": "For xianxia, pay attention to the realm system design to keep cultivation pacing reasonable",
-      "paceXuanhuanLong": "For a long xuanhuan novel, we recommend alternating talent awakening with power breakthroughs; a small climax every 5-8 chapters",
-      "paceXuanhuan": "For xuanhuan, pay attention to the bloodline/talent system design to keep power levels clear",
-      "paceFantasyLong": "For a long fantasy novel, we recommend gradually unfolding the wonder-world rules; a worldbuilding reveal or adventure breakthrough every 5-8 chapters",
-      "paceFantasy": "For fantasy, pay attention to fantasy races and magic system design while maintaining an adventure-and-exploration pace",
-      "paceSuspense": "For suspense, lay out clues carefully: reveal a small truth every 3-5 chapters and a big twist at the end of each volume",
-      "paceUrban": "For urban stories, we suggest interweaving multiple threads (business + romance + family); a career milestone at the end of each volume",
-      "paceRomance": "For romance, focus on emotional progression (meet → know → stay); a sweet moment every 5-10 chapters",
-      "paceDanmei": "For danmei, alternate ambiguous tension with emotional breakthroughs; a relationship milestone every 5-10 chapters",
-      "paceSciFi": "For sci-fi, plan technology breakthroughs; one exploration upgrade per volume (Earth → Galaxy → Universe)",
-      "paceLiterary": "For literary fiction, focus on the tension between the inner world and the external environment; the pace can slow down appropriately",
-      "paceDefault": "Automatically match narrative pacing to the genre",
-      "noCustomPlanSuffix": "💡 No custom plan detected; an outline will be generated intelligently at random",
-      "customOutlinePlaceholder": "You may enter your volume structure plan, e.g.:\nVolume 1: Qi Refining (10 ch.)\nVolume 2: Foundation Building (15 ch.)\n...",
       "startingEllipsis": "Starting...",
-      "start": "Start",
-      "lengthShort": "Short",
-      "lengthMid": "Medium",
-      "lengthLong": "Long",
-      "lengthEpic": "Epic"
+      "start": "Start"
     },
     "saveDialog": {
       "title": "🎉 Workflow complete!",
@@ -1135,7 +1139,10 @@
     "finalDialog": {
       "title": "✨ Final Version Document",
       "placeholder": "Final version content...",
-      "titleHelper": "Leave the title blank and the system will auto-generate one from the chapter content"
+      "titleHelper": "Leave the title blank and the system will auto-generate one from the chapter content",
+      "degradedTitle": "This iteration did not reach the score threshold",
+      "degradedDesc": "The highest-scoring version so far has been delivered. You can keep editing or iterate again.",
+      "degradedDescWithScore": "The highest-scoring version so far has been delivered (score: {{score}}). You can keep editing or iterate again."
     },
     "decisionDialog": {
       "title": "Concept Stage Complete",
@@ -1399,28 +1406,6 @@
       "nodeCount": "Nodes: {{count}}",
       "edgeCount": "Edges: {{count}}",
       "confidenceLegend": "Blue edge = high confidence (>0.8)"
-    },
-    "generationProgress": {
-      "taskTypeConcept": "Project Concept Generation",
-      "taskTypeWorld": "Worldbuilding Generation",
-      "taskTypeCharacter": "Character Generation",
-      "taskTypePlot": "Plot Generation",
-      "taskTypeChapter": "Chapter Generation",
-      "statusPending": "Waiting to be processed...",
-      "statusRunning": "Generating...",
-      "statusCompleted": "Generation complete!",
-      "statusFailed": "Generation failed",
-      "taskIdPrefix": "Task ID: {{id}}",
-      "taskId": "Task ID",
-      "generatedSuccess": "Content generated successfully!",
-      "taskInfo": "Task Information",
-      "statusLabel": "Status",
-      "createdAt": "Created at",
-      "completedAt": "Completed at",
-      "retry": "Retry",
-      "copied": "Copied to clipboard",
-      "copyResult": "Copy Result",
-      "minimize": "Minimize"
     }
   },
   "kb": {

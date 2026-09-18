@@ -3499,15 +3499,27 @@ class ApiClient {
 
   generateNextWorkflowChapter(
     projectId: number,
-    options?: { workflowGenerationModel?: string; generationTier?: 'free' | 'standard' }
+    options?: {
+      workflowGenerationModel?: string
+      generationTier?: 'free' | 'standard'
+      // 熔断暂停后经用户确认恢复自动推进；普通生成请求不得携带
+      resumeAfterConfirmation?: boolean
+    }
   ) {
     // camelCase → snake_case 映射在此完成，后端收到的请求体始终是 snake_case
-    const payload: { workflow_generation_model?: string; generation_tier?: string } = {}
+    const payload: {
+      workflow_generation_model?: string
+      generation_tier?: string
+      resume_after_confirmation?: boolean
+    } = {}
     if (options?.workflowGenerationModel) {
       payload.workflow_generation_model = options.workflowGenerationModel
     }
     if (options?.generationTier) {
       payload.generation_tier = options.generationTier
+    }
+    if (options?.resumeAfterConfirmation) {
+      payload.resume_after_confirmation = true
     }
     return this.client.post(`/api/v1/workflow/${projectId}/generate-next-chapter`, payload, {
       timeout: 15000,

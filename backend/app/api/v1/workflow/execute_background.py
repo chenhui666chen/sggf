@@ -30,7 +30,11 @@ logger = logging.getLogger(__name__)
 
 from app.api.v1.workflow.lock_manager import _get_workflow_execution_lock
 from app.api.v1.workflow.helpers import *
-from app.api.v1.workflow.helpers import _sync_project_title_from_concept
+from app.api.v1.workflow.helpers import (
+    _sync_project_title_from_concept,
+    apply_iteration_result_to_latest_chapter,
+    resolve_current_chapter_number,
+)
 from app.api.v1.workflow.story_helpers import *
 from app.api.v1.workflow.story_helpers import (
     _inject_recent_project_novelty_context,
@@ -136,6 +140,10 @@ async def execute_stage_background(
             )
         except Exception as e:
             logger.warning(f"⚠️ 项目基本信息注入失败：{e}")
+
+        # 迭代/评审提示词里的章节号必须与实际写作章节一致，不能用写死的第 1 章
+        if real_coord is not None:
+            real_coord.project_context["chapter_number"] = resolve_current_chapter_number(db, project_id)
 
         if stage_enum == StageType.CONCEPT:
             try:
@@ -279,6 +287,8 @@ async def execute_stage_background(
                 selected_ids.append('creative_director')
             if 'world' in target_set:
                 selected_ids.append('world_architect')
+            if 'characters' in target_set:
+                selected_ids.append('character_designer')
             stage_agents = [a for a in stage_agents if a['id'] in selected_ids]
         for agent in stage_agents:
             await ws_manager.send_agent_status(
@@ -343,6 +353,7 @@ async def execute_stage_background(
                 "workflow_generation_model": workflow_generation_model,
                 "manual_multi_model_review": manual_multi_model_review,
                 "manual_multi_model_review_preset": manual_multi_model_review_preset,
+                "defer_completion": True,
             },
         )
         
@@ -357,7 +368,7 @@ async def execute_stage_background(
         output_data = stage_output.output if isinstance(stage_output.output, dict) else {}
         if stage_enum == StageType.ITERATION:
             # 迭代优化阶段：提取 revised_content
-            result_str = output_data.get("revised_content", "") or output_data.get("final_review", "")
+            result_str = output_data.get("revised_content", "")
             logger.info(f"   📝 迭代优化结果字数: {len(result_str) if result_str else 0}")
         elif stage_enum == StageType.CONTENT:
             # 内容创作阶段：提取 content 或 chapters
@@ -371,15 +382,8 @@ async def execute_stage_background(
             # 其他阶段：使用整个输出的字符串表示
             result_str = str(stage_output.output) if stage_output.output else ""
 
-        db.execute(update_query, {
-            "status": "completed",
-            "result": result_str,
-            "completed_at": utc_now().isoformat(),
-            "task_id": task_id
-        })
-        db.commit()
-
-        logger.info(f"   ✅ 任务完成: {task_id}")
+        if not isinstance(result_str, str) or not result_str.strip():
+            raise RuntimeError("阶段未返回有效产物")
         
         # 🆕 保存阶段输出到 project_settings（关键修复！）
         try:
@@ -397,8 +401,8 @@ async def execute_stage_background(
                 # 计算要保存的字段：非重生则全部覆盖；重生则按目标覆盖
                 concept_to_save = output_data.get("concept", "") if not is_regen or ("story" in targets_set) else existing_concept_val
                 world_to_save = output_data.get("worldview", output_data.get("world_setting", "")) if not is_regen or ("world" in targets_set) else existing_world_val
-                characters_to_save = output_data.get("characters", []) if not is_regen else existing_characters_val
-                if not is_regen:
+                characters_to_save = output_data.get("characters", []) if not is_regen or "characters" in targets_set else existing_characters_val
+                if not is_regen or "characters" in targets_set:
                     characters_to_save = _normalize_concept_stage_characters_for_storage(
                         project_id,
                         characters_to_save,
@@ -539,6 +543,7 @@ async def execute_stage_background(
                 workflow_context_builder.update_project_settings_fields(
                     project_id,
                     plot_outline=json.dumps(plot_outline_content, ensure_ascii=False),
+                    review_meta={"first_chapter_structure": {"event_validation": output_data.get("event_validation", "")}},
                     stage_two_status="completed",
                 )
                 logger.info(f"   💾 已保存结构设计结果到 project_settings")
@@ -600,13 +605,33 @@ async def execute_stage_background(
                 workflow_context_builder.update_project_settings_fields(
                     project_id,
                     final_version=json.dumps(final_version_content, ensure_ascii=False),
+                    review_meta={"first_chapter_iteration": {
+                        "iteration_plan": output_data.get("iteration_plan", ""),
+                        "final_review": output_data.get("final_review", ""),
+                        "degraded": output_data.get("iteration_degraded", False),
+                        "best_score": output_data.get("best_score"),
+                    }},
                     stage_five_status="completed",
                 )
                 logger.info(f"   💾 已保存迭代优化结果到 project_settings，内容字数: {len(final_version_content) if final_version_content else 0}")
+                # 迭代终稿必须覆盖当前最新一章，否则用户看到的仍是上一版旧稿
+                apply_iteration_result_to_latest_chapter(
+                    db,
+                    project_id=project_id,
+                    content=final_version_content,
+                    revision_note="迭代终稿覆盖（阶段级迭代）",
+                )
         
         except Exception as save_error:
             logger.error(f"   ⚠️  保存到 project_settings 失败: {save_error}")
-            # 不影响主流程，继续执行
+            raise
+
+        db.execute(update_query, {
+            "status": "completed", "result": result_str,
+            "completed_at": utc_now().isoformat(), "task_id": task_id,
+        })
+        db.commit()
+        coordinator.record_stage_result(stage_enum, project_id, output_data, "completed")
         
         # 🆕 推送任务完成通知（关键！前端依赖此事件停止轮询）
         await ws_manager.send_task_complete(
@@ -623,9 +648,9 @@ async def execute_stage_background(
                 stage=stage_enum.value,
                 agent_id=agent['id'],
                 agent_name=agent['name'],
-                status='completed',
-                progress=100,
-                message=f'{agent["name"]}已完成'
+                status='idle' if agent['id'] in output_data.get('skipped_agents', []) else 'completed',
+                progress=0 if agent['id'] in output_data.get('skipped_agents', []) else 100,
+                message='本轮无需修订，已跳过' if agent['id'] in output_data.get('skipped_agents', []) else f'{agent["name"]}已完成'
             )
         logger.info(f"   📡 已发送 {len(stage_agents)} 个 Agent 完成状态")
 
@@ -703,14 +728,23 @@ async def execute_stage_background(
             WHERE task_id = :task_id
         """)
         
-        db.execute(update_query, {
-            "status": "failed",
-            "error": str(e),
-            "completed_at": utc_now().isoformat(),
-            "task_id": task_id
-        })
-        db.commit()
+        try:
+            db.execute(update_query, {
+                "status": "failed",
+                "error": str(e),
+                "completed_at": utc_now().isoformat(),
+                "task_id": task_id
+            })
+            db.commit()
+        except Exception:
+            logger.exception("任务失败状态无法写入数据库，仍继续通知客户端")
         
+        coordinator.record_stage_result(stage_enum, project_id, {}, "error")
+        for agent in get_stage_agents_map().get(stage_enum.value, []):
+            await ws_manager.send_agent_status(project_id=project_id, stage=stage_enum.value,
+                agent_id=agent["id"], agent_name=agent["name"], status="error", progress=0,
+                message="阶段未完成，请查看任务错误")
+
         # 🆕 推送任务失败通知（关键！前端依赖此事件停止轮询）
         await ws_manager.send_task_error(
             project_id=project_id,

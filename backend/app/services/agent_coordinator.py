@@ -37,6 +37,19 @@ class StageType(str, Enum):
     ITERATION = "iteration"
 
 
+def validate_stage_prerequisites(stage: StageType, context: Dict[str, Any]) -> None:
+    """所有执行入口共用前置校验，禁止用大纲或占位信息冒充正文。"""
+    required = {
+        StageType.STRUCTURE: (("concept", "故事概念"), ("world_setting", "世界观"), ("characters", "人物设定")),
+        StageType.CONTENT: (("plot_outline", "结构大纲"),),
+        StageType.REVIEW: (("content", "章节正文"),),
+        StageType.ITERATION: (("content", "章节正文"), ("review", "评审报告")),
+    }
+    missing = [label for key, label in required.get(stage, ()) if not isinstance(context.get(key), str) or not context[key].strip()]
+    if missing:
+        raise ValueError(f"阶段 {stage.value} 缺少前置产物：{'、'.join(missing)}")
+
+
 class AgentStatus(str, Enum):
     """Agent状态"""
     IDLE = "idle"
@@ -315,24 +328,24 @@ class AgentCoordinator:
 
         # 🆕 必须使用真实的协调器执行（不再降级）
         real_coordinator = self.get_real_coordinator(project_id)
-        if not self._coordinator_initialized or not real_coordinator:
-            logger.debug(f"⚠️  真实协调器未初始化，使用模拟模式执行阶段 {stage.value}")
-            output = await self._simulate_stage_execution(stage, stage_agents, input_data)
-        else:
-            # 执行真实协调器
+        try:
+            if not self._coordinator_initialized or not real_coordinator:
+                raise RuntimeError("真实协调器未初始化，无法执行创作阶段")
+            validate_stage_prerequisites(stage, real_coordinator.project_context)
             output = await self._execute_with_real_coordinator(stage, input_data)
+        except Exception:
+            self.record_stage_result(stage, project_id, {}, "error")
+            raise
 
-        # 更新Agent状态
-        for agent_id in stage_agents:
-            agent_registry[agent_id]["status"] = AgentStatus.COMPLETED
-            agent_registry[agent_id]["progress"] = 100
+        final_status = "working" if input_data.get("defer_completion") else "completed"
+        self.record_stage_result(stage, project_id, output, final_status)
 
         # 保存阶段输出
         stage_output = StageOutput(
             stage=stage,
-            agents_involved=stage_agents,
+            agents_involved=[agent_id for agent_id in stage_agents if agent_id not in output.get("skipped_agents", [])],
             output=output,
-            status="completed",
+            status=final_status,
         )
         if project_id:
             project_stage_outputs = self._project_stage_outputs.setdefault(project_id, {})
@@ -343,17 +356,31 @@ class AgentCoordinator:
 
         return stage_output
     
+    def record_stage_result(self, stage: StageType, project_id: Optional[int], output: Dict[str, Any], status: str) -> None:
+        """持久化成功后才完成阶段；失败时同步轮询快照与 Agent 状态。"""
+        involved = []
+        for agent_id, agent in self.get_agents(project_id).items():
+            if agent["stage"] != stage:
+                continue
+            skipped = agent_id in output.get("skipped_agents", [])
+            agent["status"] = AgentStatus.IDLE if skipped else AgentStatus(status)
+            agent["progress"] = 100 if status == "completed" and not skipped else 0
+            if not skipped:
+                involved.append(agent_id)
+        outputs = self._get_project_stage_outputs(project_id) if project_id is not None else self.stage_outputs
+        outputs[stage] = StageOutput(stage=stage, agents_involved=involved, output=output, status=status)
+
     async def _load_project_context_from_db(self, project_id: int):
         """🔥 从数据库加载项目上下文（关键修复！）
         
         根据记忆知识：异步工作流上下文加载规范
         在触发异步工作流执行前，必须从数据库加载完整的项目上下文数据
         """
-        from app.db.base import get_db
+        from app.db.base import SessionLocal
         from app.services.workflow_context_builder import WorkflowContextBuilder
         
+        db = SessionLocal()
         try:
-            db = next(get_db())
             stage_context = WorkflowContextBuilder(db).load_stage_text_context(project_id)
             has_stage_context = any(
                 [
@@ -412,6 +439,9 @@ class AgentCoordinator:
             logger.debug(f"⚠️  加载项目上下文失败: {e}")
             import traceback
             traceback.print_exc()
+            raise RuntimeError("无法加载项目上下文，已停止执行以防使用旧数据") from e
+        finally:
+            db.close()
 
     async def _execute_with_real_coordinator(
         self, stage: StageType, input_data: Dict[str, Any]
@@ -444,6 +474,19 @@ class AgentCoordinator:
                 real_coordinator.project_context["workflow_generation_model"] = workflow_generation_model
                 logger.debug(f"✅ 已为真实协调器设置工作流创作模型: {workflow_generation_model}")
 
+            real_coordinator.project_context.update({
+                "manual_multi_model_review": bool(input_data.get("manual_multi_model_review")) if stage == StageType.REVIEW else False,
+                "manual_multi_model_review_preset": input_data.get("manual_multi_model_review_preset") if stage == StageType.REVIEW else None,
+            })
+            if stage in {StageType.REVIEW, StageType.ITERATION}:
+                # 调用方（工作流执行入口）已注入真实章号时不得覆盖，否则改稿/复评提示词
+                # 会永远按第 1 章处理，与项目实际写作章节不符。
+                if not real_coordinator.project_context.get("chapter_number"):
+                    real_coordinator.project_context["chapter_number"] = 1
+                real_coordinator.project_context["chapter_plan"] = real_coordinator._extract_first_chapter_plan(
+                    real_coordinator.project_context.get("plot_outline") or ""
+                )
+
             # 🆕 设置长篇创作配置（例如目标章节数）
             if target_chapter_count is not None and hasattr(real_coordinator, "set_longform_config"):
                 try:
@@ -455,17 +498,18 @@ class AgentCoordinator:
             # 调用真实的五阶段工作流程
             if stage == StageType.CONCEPT:
                 # 阶段1: 概念开发
-                result = real_coordinator._stage_one_concept_development(requirement)
+                result = await asyncio.to_thread(real_coordinator._stage_one_concept_development, requirement)
                 return {
                     "concept": result.get("concept", ""),
                     "worldview": result.get("world_setting", ""),
                     "characters": result.get("characters", ""),
+                    "skipped_agents": result.get("skipped_agents", []),
                 }
             
             elif stage == StageType.STRUCTURE:
                 # 阶段2: 结构设计
                 concept_result = real_coordinator.project_context
-                result = real_coordinator._stage_two_structure_design(concept_result)
+                result = await asyncio.to_thread(real_coordinator._stage_two_structure_design, concept_result)
                 return {
                     "plot_outline": result.get("plot_outline", ""),
                     "event_validation": result.get("event_validation", ""),
@@ -475,7 +519,7 @@ class AgentCoordinator:
             elif stage == StageType.CONTENT:
                 # 阶段3: 内容创作
                 structure_result = real_coordinator.project_context
-                result = real_coordinator._stage_three_content_creation(structure_result)
+                result = await asyncio.to_thread(real_coordinator._stage_three_content_creation, structure_result)
                 return {
                     "content": result.get("content", ""),
                     "draft_content": result.get("draft_content", ""),
@@ -484,19 +528,13 @@ class AgentCoordinator:
             
             elif stage == StageType.REVIEW:
                 # 阶段4: 质量评审
-                # 🔧 修复: 获取前一阶段的输出作为评审内容
-                # 优先从 project_context 中获取 chapters 或 content
-                content_to_review = (
-                    real_coordinator.project_context.get('chapters') or 
-                    real_coordinator.project_context.get('content') or 
-                    real_coordinator.project_context.get('plot_outline', '正在生成中...')
-                )
+                content_to_review = real_coordinator.project_context.get('content') or ''
                 
                 content_result = {
                     'content': content_to_review
                 }
                 
-                result = real_coordinator._stage_four_quality_review(content_result)
+                result = await asyncio.to_thread(real_coordinator._stage_four_quality_review, content_result)
                 return {
                     "review": result.get("review", ""),
                     "needs_revision": result.get("needs_revision", False),
@@ -506,49 +544,11 @@ class AgentCoordinator:
             
             elif stage == StageType.ITERATION:
                 # 阶段5: 迭代优化
-                # 🔥 关键修复：构造正确的 review_result 结构，确保 content 是嵌套字典
-                chapter_draft_content = (
-                    real_coordinator.project_context.get('content') or
-                    real_coordinator.project_context.get('chapter_draft') or
-                    real_coordinator.project_context.get('plot_outline', '')
+                review = real_coordinator.project_context.get('review') or ''
+                return await asyncio.to_thread(
+                    real_coordinator._stage_five_iteration_optimization,
+                    {'review': review, 'needs_revision': real_coordinator._review_needs_revision(review)},
                 )
-
-                # 📝 详细调试日志
-                logger.debug(f"📝 迭代优化阶段 - 章节初稿字数: {len(chapter_draft_content) if isinstance(chapter_draft_content, str) else 0}")
-                logger.debug(f"📝 project_context keys: {list(real_coordinator.project_context.keys())}")
-
-                review_result = {
-                    'review': (
-                        real_coordinator.project_context.get('review') or
-                        real_coordinator.project_context.get('review_report') or
-                        "质量评审结果待补充"
-                    ),
-                    # 🔥 关键修复：强制设置 needs_revision=True，确保进入优化逻辑
-                    'needs_revision': True,
-                    # 🔥 关键修复：将 content 包装为嵌套字典结构
-                    'content': {
-                        'content': chapter_draft_content  # ← 这里是关键！
-                    }
-                }
-
-                result = real_coordinator._stage_five_iteration_optimization(review_result)
-
-                # 📝 关键调试：输出返回结果的结构
-                logger.debug(f"📝 _stage_five_iteration_optimization 返回结果:")
-                logger.debug(f"   - result type: {type(result)}")
-                logger.debug(f"   - result keys: {result.keys() if isinstance(result, dict) else 'N/A'}")
-                revised = result.get("revised_content", "") if isinstance(result, dict) else ""
-                logger.debug(f"   - revised_content 字数: {len(revised) if revised else 0}")
-
-                # 🔥 关键修复：如果 revised_content 为空，使用原始章节内容
-                if not revised and chapter_draft_content:
-                    logger.debug(f"⚠️  revised_content 为空，使用原始章节内容作为最终版本")
-                    revised = chapter_draft_content
-
-                return {
-                    "revised_content": revised,
-                    "final_review": result.get("final_review", "") if isinstance(result, dict) else "",
-                }
             
             return {}
             

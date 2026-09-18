@@ -11,6 +11,7 @@ from app.models.project import Project, Chapter, ChapterRevision
 from app.schemas.project import ChapterUpdate, ChapterResponse, ChapterCreate, ChapterRevisionResponse
 from app.core.security import get_current_user
 from app.utils.datetime_utils import ensure_utc_datetime, utc_now
+from app.services.chapter_creation import create_project_chapter
 import re
 from io import BytesIO
 from datetime import datetime
@@ -38,133 +39,6 @@ def _serialize_deleted_chapter(chapter: Chapter, project_name: Optional[str] = N
     }
 
 
-def extract_title_from_content(content: str, chapter_number: int) -> str:
-    """
-    从章节内容中智能提取标题
-    
-    核心原则：
-    - 只提取纯标题文字，不包含任何章节编号
-    - 章节序号完全由数据库自动分配
-    - 只提取标题文字，不包含正文内容
-    
-    优先级:
-    1. Markdown加粗标题: **第一章：标题** → 提取"标题"
-    2. 普通标题: 第一章：标题 → 提取"标题"
-    3. 引号标题: "标题" → 提取"标题"
-    4. 第一行前20字作为标题预览
-    5. 兜底: "未命名章节"
-    
-    Args:
-        content: 章节内容
-        chapter_number: 数据库分配的章节编号
-        
-    Returns:
-        完整标题字符串（格式：第X章：标题）
-    """
-    if not content or not content.strip():
-        return f"第{chapter_number}章：未命名章节"
-    
-    # 提取第一行（去除前后空白）
-    first_line = content.split('\n')[0].strip()
-    
-    # 🔥 策略1: 匹配 Markdown 加粗标题 **第X章：标题** 或 **第X章 标题**
-    pattern_bold = r'\*\*第[一二三四五六七八九十\d]+章[\uff1a:\s]+(.+?)\*\*'
-    match_bold = re.match(pattern_bold, first_line)
-    if match_bold:
-        title_only = match_bold.group(1).strip()
-        # 递归去除所有嵌套的"第X章："前缀
-        title_only = _remove_chapter_prefix(title_only)
-        # 🆕 只保留标题文字，移除后面的正文内容
-        title_only = _extract_title_only(title_only)
-        return f"第{chapter_number}章：{title_only}"
-    
-    # 🔥 策略2: 匹配普通标题 第X章：标题 或 第X章 标题
-    clean_line = first_line.replace('*', '').strip()
-    pattern_normal = r'第[一二三四五六七八九十\d]+章[\uff1a:\s]+(.+)'
-    match_normal = re.match(pattern_normal, clean_line)
-    if match_normal:
-        title_only = match_normal.group(1).strip()
-        # 递归去除所有嵌套的"第X章："前缀
-        title_only = _remove_chapter_prefix(title_only)
-        # 🆕 只保留标题文字，移除后面的正文内容
-        title_only = _extract_title_only(title_only)
-        return f"第{chapter_number}章：{title_only}"
-    
-    # 🔥 策略3: 匹配引号包裹的标题 "标题" 或 "第X章：标题"
-    pattern_quoted = r'["\'](.+?)["\']'
-    match_quoted = re.match(pattern_quoted, clean_line)
-    if match_quoted:
-        title_only = match_quoted.group(1).strip()
-        # 去除可能的章节前缀
-        title_only = _remove_chapter_prefix(title_only)
-        # 🆕 只保留标题文字
-        title_only = _extract_title_only(title_only)
-        return f"第{chapter_number}章：{title_only}"
-    
-    # 策略4: 使用第一行前20个字符作为标题预览
-    clean_preview = clean_line[:20].strip()
-    if clean_preview:
-        # 确保预览内容也不包含章节前缀
-        clean_preview = _remove_chapter_prefix(clean_preview)
-        return f"第{chapter_number}章：{clean_preview}"
-    
-    # 兜底: 使用默认标题
-    return f"第{chapter_number}章：未命名章节"
-
-
-def _remove_chapter_prefix(text: str) -> str:
-    """
-    递归移除文本中的所有“第X章：”或“第X章 ”前缀
-    
-    示例:
-    - "第1章：深夜解密" → "深夜解密"
-    - "第1章 深夜解密" → "深夜解密"
-    - "第1章：第2章：标题" → "标题"
-    - "深夜解密" → "深夜觥密"
-    """
-    text = text.strip().strip('"\'')
-    # 🔧 修复：匹配冲号或空格分隔
-    pattern = r'^第[一二三四五六七八九十\d]+章[\uff1a:\s]+(.+)'
-    match = re.match(pattern, text)
-    if match:
-        # 递归处理，直到没有“第X章：”前缀
-        return _remove_chapter_prefix(match.group(1))
-    return text
-
-
-def _extract_title_only(text: str) -> str:
-    """
-    从文本中只提取标题部分，移除后面的正文内容
-    
-    示例:
-    - "深夜解密\n\nAlex的处理器" → "深夜解密"
-    - "深夜解密" → "深夜解密"
-    - "标题 正文开始" → "标题"
-    
-    策略：
-    1. 如果包含\n\n（两个换行），只取第一部分
-    2. 如果包含\n（单个换行），只取第一部分
-    3. 去除引号
-    4. 限制长度为50字符（超过50字可能包含正文）
-    """
-    text = text.strip().strip('"\'')
-    
-    # 🔧 修复：使用实际换行符而不是字面量字符串
-    # 移除\n\n后面的内容（正文开始）
-    if '\n\n' in text:
-        text = text.split('\n\n')[0].strip()
-    
-    # 移除单个\n后面的内容
-    if '\n' in text:
-        text = text.split('\n')[0].strip()
-    
-    # 限制最大长度（标题一般不会超过50字）
-    if len(text) > 50:
-        text = text[:50].strip()
-    
-    return text
-
-
 @router.post("/", response_model=ChapterResponse, status_code=status.HTTP_201_CREATED)
 async def create_chapter(
     chapter_data: ChapterCreate,
@@ -183,112 +57,14 @@ async def create_chapter(
             detail="Project not found"
         )
     
-    # 计算章节编号
-    if hasattr(chapter_data, 'chapter_number') and chapter_data.chapter_number:
-        chapter_number = chapter_data.chapter_number
-    else:
-        # 自动计算下一个章节号
-        max_chapter = db.query(Chapter).filter(
-            Chapter.project_id == chapter_data.project_id
-        ).order_by(Chapter.chapter_number.desc()).first()
-        chapter_number = (max_chapter.chapter_number + 1) if max_chapter else 1
-    
-    # 🆕 智能标题提取
-    if chapter_data.title:
-        # 用户手动指定标题，优先使用
-        final_title = chapter_data.title
-    else:
-        # 从内容中智能提取标题
-        final_title = extract_title_from_content(
-            chapter_data.content or "", 
-            chapter_number
-        )
-    
-    # 创建章节
-    chapter = Chapter(
-        project_id=chapter_data.project_id,
-        chapter_number=chapter_number,
-        title=final_title,
-        content=chapter_data.content or "",
-        # 🔧 修复：使用正确的中文字数统计
-        word_count=len(re.sub(r'\s', '', chapter_data.content)) if chapter_data.content else 0
+    # 与 POST /api/v1/projects/{id}/chapters 共用同一套创建逻辑
+    return create_project_chapter(
+        db,
+        chapter_data.project_id,
+        content=chapter_data.content,
+        chapter_number=chapter_data.chapter_number,
+        title=chapter_data.title,
     )
-    db.add(chapter)
-    db.commit()
-    db.refresh(chapter)
-    
-    # 🆕 Phase 2: 初始追踪 - 自动记录人物出场和设定引用
-    try:
-        from app.services.auto_tracking import AutoTrackingService
-        import logging
-        
-        logger = logging.getLogger("uvicorn.error")
-        logger.info(f"   🆕 执行章节初始追踪...")
-        
-        # 1. 人物出场初始追踪
-        char_result = AutoTrackingService.update_character_appearances_smart(
-            chapter_id=chapter.id,
-            old_content="",  # 🔑 初始创建，old_content为空
-            new_content=chapter_data.content or "",
-            project_id=chapter_data.project_id,
-            db=db
-        )
-        logger.info(f"   ✅ 人物追踪: 初始记录{char_result['added']}个")
-        
-        # 2. 设定项引用初始追踪
-        setting_result = AutoTrackingService.update_setting_references_smart(
-            chapter_id=chapter.id,
-            old_content="",  # 🔑 初始创建，old_content为空
-            new_content=chapter_data.content or "",
-            project_id=chapter_data.project_id,
-            db=db
-        )
-        logger.info(f"   ✅ 设定追踪: 初始记录{setting_result['added']}个")
-        
-        # 3. 🆕 高级关联追踪：人物-功法/法宝/地点
-        relation_result = AutoTrackingService.update_character_item_relations(
-            chapter_id=chapter.id,
-            chapter_content=chapter_data.content or "",
-            project_id=chapter_data.project_id,
-            db=db
-        )
-        logger.info(
-            f"   ✅ 高级关联: 功法{relation_result['techniques']}个, "
-            f"法宝{relation_result['artifacts']}个, "
-            f"地点{relation_result['locations']}个"
-        )
-        
-    except Exception as e:
-        import logging
-        logger = logging.getLogger("uvicorn.error")
-        logger.warning(f"⚠️ 初始追踪失败: {e}")
-        import traceback
-        logger.debug(traceback.format_exc())
-    
-    # 🚀 Phase 5: 启动后台任务（统一提取 + 摘要生成）
-    try:
-        from app.services.chapter_post_save import start_chapter_post_save_task
-        import logging
-        
-        logger = logging.getLogger("uvicorn.error")
-        logger.info(f"   🚀 启动后台任务：统一提取 + 摘要生成...")
-        
-        # 启动后台异步任务
-        start_chapter_post_save_task(
-            chapter_id=chapter.id,
-            chapter_title=final_title,
-            chapter_content=chapter_data.content or "",
-            chapter_number=chapter.chapter_number,
-            project_id=chapter_data.project_id,
-            generate_summary=True
-        )
-        
-    except Exception as e:
-        import logging
-        logger = logging.getLogger("uvicorn.error")
-        logger.warning(f"⚠️ 启动后台任务失败（不影响章节创建）: {e}")
-    
-    return chapter
 
 
 @router.get("/{chapter_id:int}", response_model=ChapterResponse)

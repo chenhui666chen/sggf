@@ -121,3 +121,35 @@ def test_chapter_prompt_builder_binds_content_creator_prompt():
     assert "【落地原则】" in system_prompt
     assert "【本章最低完成目标】" in user_prompt
     assert "第2章资产" in user_prompt
+
+
+def test_quality_handoff_prompts_require_evidence_ids_and_no_invented_facts():
+    system_prompt, user_prompt = build_first_chapter_review_prompts(
+        chapter_draft="第一章 正文", chapter_plan="夺回信物", world_setting="能力需付代价", characters="主角谨慎",
+    )
+    assert "夺回信物" in user_prompt
+    assert "能力需付代价" in user_prompt
+    assert "主角谨慎" in user_prompt
+    assert "R0-MUST-1" in user_prompt
+    assert "失败码" in user_prompt
+    assert "不得编造" in system_prompt
+
+
+def test_style_and_event_prompts_keep_artifact_contracts():
+    style = prompt_manager.get_user_prompt("style_optimizer_optimize", variables={"content": "正文"})
+    event = prompt_manager.get_user_prompt("event_validator_validate", variables={"events": "事件链"})
+    assert "不超过3条简短说明" not in style
+    assert "只输出完整章节标题与正文" in style
+    assert "EV-1" in event
+    assert "【必改】" in event
+    assert "二选一" in event
+
+
+def test_iteration_prompts_distinguish_local_edits_and_structural_rewrite():
+    from app.services.prompts.workflow_runtime import get_iteration_revision_system_prompt, build_iteration_loop_review_user_prompt
+    revision = get_iteration_revision_system_prompt()
+    review = build_iteration_loop_review_user_prompt(chapter_number=1, chapter_content="正文", review_text="R0-MUST-1 缺动机", iteration_plan="补动机")
+    assert "仅局部润色时" in revision
+    assert "结构性重写不受三句限制" in revision
+    assert "部分执行" in review
+    assert "不得判为通过" in review

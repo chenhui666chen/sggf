@@ -741,6 +741,7 @@ export default function PointsBillingPage() {
             page={page}
             onPageChange={(_, newPage) => setPage(newPage)}
             rowsPerPage={rowsPerPage}
+            rowsPerPageOptions={[10, 20, 25, 50, 100]}
             onRowsPerPageChange={(event) => {
               setRowsPerPage(parseInt(event.target.value, 10))
               setPage(0)

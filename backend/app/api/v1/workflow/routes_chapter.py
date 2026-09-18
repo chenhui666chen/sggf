@@ -40,6 +40,7 @@ from app.services.prompts.narrative_quality import (
     format_quality_memory,
     register_foreshadowing,
     resolve_revision_mode,
+    review_has_unsourced_new_fact,
     update_quality_memory,
 )
 from app.services.prompts.stages.content_creation import (
@@ -128,9 +129,14 @@ def _select_iteration_fallback_version(
 def _iteration_review_has_unresolved_required_items(review_text: str) -> bool:
     """检测复评中是否仍有必改项未执行。
 
-    核验表优先；若复评未输出表格，剩余关键问题里残留的【必改】/MUST 也视为未执行。
+    核验表优先，部分执行与未执行同样阻断（与首章验收原则对齐）；
+    若复评未输出表格，剩余关键问题里残留的【必改】/MUST 也视为未执行；
+    fallback 扫描跳过表格行，避免把核验表中已处理的 MUST ID 误判为残留；
+    HIGH 级无出处新增事实（编造圆场）同样不得判为已闭环。
     """
     text = str(review_text or "")
+    if review_has_unsourced_new_fact(text):
+        return True
     for raw_line in text.splitlines():
         line = raw_line.strip()
         if not line.startswith("|"):
@@ -141,7 +147,9 @@ def _iteration_review_has_unresolved_required_items(review_text: str) -> bool:
         source = cells[0].upper()
         status_text = cells[1]
         is_required_item = "MUST" in source or "必改" in cells[0]
-        if is_required_item and "未执行" in status_text:
+        if is_required_item and (
+            "未执行" in status_text or "部分执行" in status_text
+        ):
             return True
     remaining = ""
     marker = "## 剩余关键问题"
@@ -155,9 +163,34 @@ def _iteration_review_has_unresolved_required_items(review_text: str) -> bool:
         remaining = text
     for raw_line in remaining.splitlines():
         line = raw_line.strip()
+        if line.startswith("|"):
+            continue
         if "【必改】" in line or "MUST" in line.upper():
             return True
     return False
+
+
+def _describe_iteration_round_rejection(
+    *,
+    round_idx: int,
+    score: float,
+    previous_best_score: float,
+    has_unresolved_required_items: bool,
+) -> str:
+    """生成本轮改稿未被采纳为下一轮基底的原因日志。
+
+    区分两种情况：评分提升但被必改项阻断，与评分确实未提升；
+    避免阻断时输出“8.5 < 8.0”式与数字矛盾的错误比较文案。
+    """
+    if has_unresolved_required_items and score >= previous_best_score:
+        return (
+            f"↩️ 第{round_idx}轮评分提升（{score:.1f}/10 ≥ {previous_best_score:.1f}/10），"
+            "但仍有必改项未执行，本轮改稿不采用，下一轮继续基于当前最佳版本修订"
+        )
+    return (
+        f"↩️ 第{round_idx}轮评分未提升（{score:.1f}/10 < {previous_best_score:.1f}/10），"
+        "下一轮继续基于当前最佳版本修订"
+    )
 
 
 # 章节正文合法收尾字符（句末标点/引号/括号收口）；结尾不在此集合视为疑似截断
@@ -805,8 +838,8 @@ async def generate_next_chapter(
         # 🆕 P4：熔断检查——暂停状态阻断自动推进，仅人工确认（resume_after_confirmation）后恢复
         try:
             from app.services.narrative_circuit_breaker import (
+                build_pause_detail,
                 confirm_and_resume,
-                get_pause_info,
                 is_paused,
             )
 
@@ -820,16 +853,9 @@ async def generate_next_chapter(
                     )
                     logger.info("   🔁 熔断已由人工确认解除，恢复自动推进")
                 else:
-                    pause_info = get_pause_info(breaker_meta)
                     raise HTTPException(
                         status_code=status.HTTP_409_CONFLICT,
-                        detail={
-                            "message": (
-                                "项目自动推进已被熔断暂停，请查看闸门/消化报告，"
-                                "确认后携带 resume_after_confirmation 重试"
-                            ),
-                            "circuit_breaker": pause_info,
-                        },
+                        detail=build_pause_detail(breaker_meta),
                     )
         except HTTPException:
             raise
@@ -1528,15 +1554,21 @@ async def execute_generate_next_chapter_task(
             )
         except Exception as narrative_state_error:
             logger.warning(f"   ⚠️ 叙事状态增量加载失败，跳过注入: {narrative_state_error}")
-        # 🆕 P3：质量趋势告警作为证据注入（与失败码配合，不替代修订路由）
+        # 🆕 P3：质量趋势与文风漂移告警作为证据注入（与失败码配合，不替代修订路由）
         try:
-            from app.services.narrative_metrics import format_quality_trend_advice
+            from app.services.narrative_metrics import (
+                format_quality_trend_advice,
+                format_style_drift_advice,
+            )
 
-            quality_trend_advice = format_quality_trend_advice(project_review_meta)
-            if quality_trend_advice:
-                project_quality_memory_text = (
-                    f"{project_quality_memory_text}\n\n{quality_trend_advice}".strip()
-                )
+            for trend_advice in (
+                format_quality_trend_advice(project_review_meta),
+                format_style_drift_advice(project_review_meta, next_chapter_number),
+            ):
+                if trend_advice:
+                    project_quality_memory_text = (
+                        f"{project_quality_memory_text}\n\n{trend_advice}".strip()
+                    )
         except Exception as trend_error:
             logger.warning(f"   ⚠️ 质量趋势告警加载失败，跳过注入: {trend_error}")
         if foreshadow_ledger_text:
@@ -2157,8 +2189,8 @@ async def execute_generate_next_chapter_task(
             except Exception as breaker_signal_error:
                 logger.warning(f"   ⚠️ 熔断信号记录失败: {breaker_signal_error}")
             raise RuntimeError(
-                f"第{next_chapter_number}章{_invalid_output_detail}，已触发熔断暂停，"
-                "请人工确认后携带 resume_after_confirmation 重试"
+                f"第{next_chapter_number}章{_invalid_output_detail}，已暂停自动推进，"
+                "请在创作流程页确认暂停原因后继续生成"
             )
 
         # 🆕 免费档：首次正文产出成功，额度转为已消耗（此后失败不退额，防主动断连刷生成）
@@ -2410,7 +2442,7 @@ async def execute_generate_next_chapter_task(
         step4_agents = STEP_AGENTS['iteration']
         # 注意：settings 已在模块顶部导入；函数内禁止再就地 import（会遮蔽整个函数作用域）
         try:
-            pass_score_threshold = float(getattr(settings, 'ITERATION_PASS_SCORE', 9.0))
+            pass_score_threshold = float(getattr(settings, 'ITERATION_PASS_SCORE', 8.5))
             max_rounds = int(getattr(settings, 'ITERATION_MAX_ROUNDS', 2))
         except Exception:
             pass_score_threshold = 8.5
@@ -2490,6 +2522,8 @@ async def execute_generate_next_chapter_task(
         # 🆕 标记迭代循环是否正常执行完毕（跳过迭代/异常回退时保持 False）：
         # 仅正常执行后补跑"终稿编辑评审"（那两条路径终稿=初稿，初评已配套且为全量格式）
         iteration_loop_ran = False
+        # 🆕 迭代过程留痕：每轮修订稿与配套复评的汇总，章节保存后写入版本历史/评审表
+        iteration_round_records: List[Dict[str, Any]] = []
 
         # 🆕 使用迭代优化（max改稿 + R1打分循环,达到阈值后再输出）
         try:
@@ -2724,6 +2758,7 @@ async def execute_generate_next_chapter_task(
                     review_text=all_reviews_text,
                     iteration_plan=iteration_plan_text,
                     recent_chapter_assets_summary=recent_chapter_assets_summary,
+                    previous_version=current_version,
                 )
                 new_review_report = await streaming_service.generate_chapter_streaming(
                     prompt=review_user_prompt_loop,
@@ -2749,6 +2784,10 @@ async def execute_generate_next_chapter_task(
                         f"   🧭 第{round_idx}轮失败码路由刷新: 模式={revision_mode}, "
                         f"码数={len(round_failure_codes)}"
                     )
+                if review_has_unsourced_new_fact(new_review_report):
+                    logger.warning(
+                        f"   🕳️ 第{round_idx}轮修订靠无出处新事实应付必改（NEW_FACT_UNSOURCED|HIGH），判为未闭环"
+                    )
                 if has_unresolved_required_items:
                     logger.info("   🚧 第%s轮仍有必改项未执行，本轮不作为可采用版本", round_idx)
                 await ws_manager.send_task_progress(
@@ -2768,6 +2807,16 @@ async def execute_generate_next_chapter_task(
                     best_score = score
                     best_version = revised_version
                     best_review = new_review_report
+
+                # 🆕 本轮修订稿与配套复评进版本历史（评分、剩余失败码、是否被采用写进备注）
+                iteration_round_records.append({
+                    "round": round_idx,
+                    "content": revised_version,
+                    "review": new_review_report,
+                    "score": score,
+                    "failure_codes": [code.get("code") for code in round_failure_codes],
+                    "adopted": bool(score_improved),
+                })
 
                 # 判定是否达标（🆕 结构失败码残留为硬停止条件：改稿修不掉结构断裂，不允许判达标）
                 round_structural_codes = _extract_structural_failure_codes(new_review_report)
@@ -2791,8 +2840,13 @@ async def execute_generate_next_chapter_task(
                         current_version = revised_version
                     else:
                         logger.info(
-                            f"   ↩️ 第{round_idx}轮评分未提升（{score:.1f}/10 < {previous_best_score:.1f}/10），"
-                            "下一轮继续基于当前最佳版本修订"
+                            "   "
+                            + _describe_iteration_round_rejection(
+                                round_idx=round_idx,
+                                score=score,
+                                previous_best_score=previous_best_score,
+                                has_unresolved_required_items=has_unresolved_required_items,
+                            )
                         )
                         current_version = best_version
                     current_review = new_review_report
@@ -3082,6 +3136,25 @@ async def execute_generate_next_chapter_task(
         new_chapter_id = new_chapter.id
 
         logger.info(f"   ✅ 章节已保存: id={new_chapter_id}")
+
+        # 🆕 迭代过程落库：初稿与每轮修订稿进版本历史，初评/每轮复评/终稿评审进评审表
+        try:
+            from app.services.workflow_revision_store import record_iteration_history
+
+            record_iteration_history(
+                db,
+                chapter_id=new_chapter_id,
+                initial_content=chapter_draft,
+                initial_review=review_report,
+                initial_score=initial_review_score,
+                rounds=iteration_round_records,
+                final_review=final_review,
+                final_score=_extract_iteration_review_score(final_review),
+            )
+        except Exception as revision_store_error:
+            logger.warning(
+                f"   ⚠️ 迭代过程落库失败（不影响本章产出）: {revision_store_error}"
+            )
         
         # 🆕 内容进化器：记录生成数据（5%采样 + 隐式反馈收集）
         try:

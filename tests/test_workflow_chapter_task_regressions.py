@@ -35,10 +35,12 @@ class _FakeDB:
         self.execute_calls.append((query_text, params))
 
         if "SELECT title, genre, sub_genre" in query_text:
-            return _FakeExecuteResult(("测试项目", "玄幻", "", "", 0, 0, "用户大纲"))
+            # 与 get_project_profile 当前 8 列查询对齐，末位为 review_config
+            return _FakeExecuteResult(("测试项目", "玄幻", "", "", 0, 0, "用户大纲", ""))
 
         if "SELECT concept, world_setting, characters, plot_outline" in query_text:
-            return _FakeExecuteResult(("", "世界观设定", "人物设定", "结构大纲", "", "", ""))
+            # 与 load_stage_text_context 当前 9 列查询对齐，末两位为 review_meta、final_version
+            return _FakeExecuteResult(("", "世界观设定", "人物设定", "结构大纲", "", "", "", "", ""))
 
         return _FakeExecuteResult(self._fetchone_result)
 

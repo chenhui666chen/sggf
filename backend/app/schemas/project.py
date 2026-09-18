@@ -70,6 +70,13 @@ class ChapterCreate(BaseModel):
     content: Optional[str] = None
 
 
+class ChapterCreateInProject(BaseModel):
+    """项目内创建章节Schema - project_id 来自路径参数，不参与请求体"""
+    chapter_number: Optional[int] = None  # 可选，后端自动取当前最大章节号 + 1
+    title: Optional[str] = None  # 可选，后端从内容首行提取
+    content: Optional[str] = None
+
+
 class ChapterUpdate(BaseModel):
     """章节更新Schema"""
     title: Optional[str] = None

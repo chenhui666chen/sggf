@@ -35,7 +35,9 @@ NOVEL_FAILURE_CODES: Dict[str, Dict[str, str]] = {
     "DESC_ABSTRACT":    {"name": "描写空洞",     "class": "light", "hint": "将空洞形容词替换为具体动作/细节"},
     "DIALOG_STIFF":     {"name": "对话失真",     "class": "light", "hint": "按人设重写指定对话，去说明腔"},
     "AI_TRACE":         {"name": "AI痕迹",       "class": "light", "hint": "清除重复句式与机械排比"},
-    "EMOTION_FLAT":     {"name": "情绪平淡",     "class": "light", "hint": "补身体反应与细节动作强化情绪"},
+    "EMOTION_FLAT":       {"name": "情绪平淡",     "class": "light", "hint": "补身体反应与细节动作强化情绪"},
+    # 修订阶段专用：为应付必改项而新造前文不存在的事实（轻码：删改单点即可修复，阻断力来自严重度）
+    "NEW_FACT_UNSOURCED": {"name": "无出处新事实", "class": "light", "hint": "删去该新增事实或改按现有可溯源素材重写，不得用编造细节圆场"},
     # --- 重码：实质性重写（等价 R4） ---
     "STALL_NO_PROGRESS": {"name": "原地踏步",     "class": "heavy", "hint": "核心推进未发生，需重构本章事件"},
     "LOGIC_BREAK":       {"name": "逻辑硬伤",     "class": "heavy", "hint": "因果链断裂，需重排事件逻辑"},
@@ -47,7 +49,7 @@ NOVEL_FAILURE_CODES: Dict[str, Dict[str, str]] = {
 
 FAILURE_CODE_OUTPUT_SPEC = """### 失败码清单（结构化，供修订路由使用）
 逐条列出本章问题对应的失败码，格式严格为：`失败码|严重度|位置或证据`
-- 失败码从以下枚举中选择：HOOK_WEAK / PACING_DRAG / DESC_ABSTRACT / DIALOG_STIFF / AI_TRACE / EMOTION_FLAT / STALL_NO_PROGRESS / LOGIC_BREAK / OOC_MAJOR / CONTINUITY_BREAK / STRUCT_BROKEN / INFO_DUMP
+- 失败码从以下枚举中选择：""" + " / ".join(NOVEL_FAILURE_CODES.keys()) + """
 - 严重度：HIGH（必改）/ MED（建议）/ LOW（可选）
 - 无问题时输出：`无`
 示例：
@@ -56,6 +58,9 @@ FAILURE_CODE_OUTPUT_SPEC = """### 失败码清单（结构化，供修订路由�
 HOOK_WEAK|HIGH|结尾仅总结情绪，未留悬念
 DESC_ABSTRACT|MED|战斗段"剑光如虹"等空洞描写
 ```"""
+
+# 编造类失败码：修订靠新造事实让必改项“看起来已闭环”，本质上仍是未解决
+UNSOURCED_FACT_FAILURE_CODES = {"NEW_FACT_UNSOURCED"}
 
 # 失败码行格式：CODE|SEVERITY|desc 或 CODE[SEVERITY]
 _FAILURE_LINE_RE = re.compile(
@@ -90,6 +95,73 @@ def extract_failure_codes(review_text: str) -> List[Dict[str, str]]:
 _REVIEW_SCORE_LINE_RE = re.compile(
     r"(综合评分\**\s*[：:]\s*)([0-9]+(?:\.[0-9]+)?)\s*/\s*10\s*分?"
 )
+
+
+def review_has_unsourced_new_fact(review_text: str) -> bool:
+    """复评是否判定存在 HIGH 级无出处新增事实（编造圆场不得判为达标）。"""
+    return any(
+        str(fc.get("code") or "") in UNSOURCED_FACT_FAILURE_CODES
+        and str(fc.get("severity") or "").upper() == "HIGH"
+        for fc in extract_failure_codes(str(review_text or ""))
+    )
+
+
+def review_has_required_issues(review_text: str) -> bool:
+    """只消费本次评审的阻断证据，不把建议或已完成的核验项当作必改。"""
+    text = str(review_text or "")
+    if any(item["severity"] == "HIGH" for item in extract_failure_codes(text)):
+        return True
+    for line in text.splitlines():
+        cleaned = line.replace("**", "").strip()
+        if cleaned.startswith("|"):
+            cells = [cell.strip() for cell in cleaned.strip("|").split("|")]
+            if len(cells) >= 2 and re.search(r"MUST|必改", cells[0], re.I):
+                if cells[1] in {"未执行", "部分执行"}:
+                    return True
+            continue
+        match = re.search(r"【必改】\s*[:：]?\s*(.*)", cleaned)
+        if match and not re.fullmatch(r"(?:无|无必改项|无问题|已全部解决)[。.]?", match.group(1).strip()):
+            return True
+    return False
+
+
+def extract_review_score(review_text: str) -> Optional[float]:
+    """解析评审/复评报告的综合评分；无有效分数返回 None。"""
+    match = _REVIEW_SCORE_LINE_RE.search(str(review_text or "").replace("**", ""))
+    if not match:
+        return None
+    try:
+        return float(match.group(2))
+    except (TypeError, ValueError):
+        return None
+
+
+def review_needs_revision(review_text: str, *, pass_score: float) -> bool:
+    """综合分与结构化阻断项共同判定；缺少有效分数时不得视为达标。"""
+    text = str(review_text or "").replace("**", "")
+    if review_has_required_issues(text):
+        return True
+    if re.search(r"(?:结论|结果)\s*[:：]\s*(?:继续修改|需要修改|需要修订|风险较高|不通过)", text):
+        return True
+    score = extract_review_score(text)
+    return score is None or not pass_score <= score <= 10
+
+
+def review_verifies_required_ids(review_text: str, requirements: str) -> bool:
+    """有编号的必改项必须逐项核验，缺表或证据占位不得放行。"""
+    id_pattern = r"\b(?:R\d+-)?MUST-\d+\b"
+    required_ids = set(re.findall(id_pattern, requirements or "", re.I))
+    verified_ids = set()
+    for line in str(review_text or "").replace("**", "").splitlines():
+        if not line.strip().startswith("|"):
+            continue
+        cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
+        if len(cells) < 3 or cells[1] != "已执行":
+            continue
+        if not cells[2] or re.fullmatch(r"(?:无|待补充|待确认|待核验|未提供|不适用|\.\.\.|…+|[-—]+)[。.]?", cells[2]):
+            continue
+        verified_ids.update(re.findall(id_pattern, cells[0], re.I))
+    return {item.upper() for item in required_ids} <= {item.upper() for item in verified_ids}
 
 
 def calibrate_review_score_to_rubric(review_text: str) -> str:
@@ -175,25 +247,82 @@ def resolve_revision_mode(failure_codes: List[Dict[str, str]]) -> Tuple[Optional
 # 项目级问题记忆（P1-2）
 # ---------------------------------------------------------------------------
 _UNRESOLVED_SECTION_RE = re.compile(r"##\s*剩余关键问题\s*\n+(.*?)(?=\n##|\n结论[：:]|\Z)", re.DOTALL)
-_ISSUE_LINE_RE = re.compile(r"^\s*\d+[\.、)]\s*(.{6,120})", re.MULTILINE)
-_MUST_FIX_RE = re.compile(r"【必改】\s*(.{6,120})")
+_ISSUE_ITEM_RE = re.compile(r"^\s*\d+[\.、)]\s*(.*?)\s*$")
+_MUST_FIX_RE = re.compile(r"【必改】\s*(.{6,400})")
+# 记忆条目只留问题主干：评审报告常写成“问题：建议修改如下：……”，
+# 旧实现按硬截断取前 120 字，跨行续写还会被拆成碎片，沉淀到 review_meta 后读不通
+_ISSUE_HEAD_MIN_LEN = 4
+_ISSUE_MAX_LEN = 80
+_SENTENCE_BREAK_RE = re.compile(r"[。！？；]")
+_LEADING_TAG_RE = re.compile(r"^[【\[][^】\]]{1,6}[】\]]\s*")
+_INSTRUCTION_TAIL_RE = re.compile(r"[，、；;：:]*\s*(?:具体)?(?:修改|调整)?(?:建议|方案|示例)?如下[：:]?\s*$")
+_INSTRUCTION_ONLY = {
+    "建议", "修改建议", "操作建议", "如下", "建议如下", "修改如下", "建议修改如下",
+    "修改建议如下", "具体如下", "示例如下", "方案如下", "改法如下",
+}
+
+
+def _collect_numbered_lines(block: str) -> List[str]:
+    """提取编号条目，并把 markdown 滞后续行归回上一条（跨行书写的问题不得拆成两条）。"""
+    items: List[str] = []
+    for raw in str(block or "").splitlines():
+        stripped = raw.strip()
+        if not stripped:
+            continue
+        match = _ISSUE_ITEM_RE.match(raw)
+        if match:
+            items.append(match.group(1))
+            continue
+        if not items or stripped.startswith(("#", "|", "-", "*", ">")):
+            continue
+        items[-1] = f"{items[-1]}{stripped}"
+    return items
+
+
+def _truncate_issue(text: str) -> str:
+    """超长条目在标点处收口，不得在词中间腰斩。"""
+    if len(text) <= _ISSUE_MAX_LEN:
+        return text
+    window = text[:_ISSUE_MAX_LEN]
+    cut = max(window.rfind(mark) for mark in "。！？；，、")
+    if cut < _ISSUE_HEAD_MIN_LEN:
+        return text
+    return window[:cut + 1].rstrip("，、")
+
+
+def _normalize_issue_text(raw: str) -> str:
+    """把一条评审意见归一为可读的问题主干；纯执行引导语返回空串。"""
+    text = re.sub(r"\*+", "", str(raw or "")).strip()
+    text = _LEADING_TAG_RE.sub("", text)
+    text = _INSTRUCTION_TAIL_RE.sub("", text).strip()
+
+    parts = re.split(r"[：:]", text, maxsplit=1)
+    if len(parts) == 2 and len(parts[0].strip("，、 ")) >= _ISSUE_HEAD_MIN_LEN:
+        text = parts[0].strip("，、 ")
+    sentence = _SENTENCE_BREAK_RE.search(text)
+    if sentence and sentence.end() >= _ISSUE_HEAD_MIN_LEN:
+        text = text[:sentence.end()]
+    text = _INSTRUCTION_TAIL_RE.sub("", text).strip("，、；：。 ")
+    if not text or len(text) < _ISSUE_HEAD_MIN_LEN:
+        return ""
+    if text in _INSTRUCTION_ONLY or (text.endswith("如下") and len(text) <= 10):
+        return ""
+    return _truncate_issue(text)
 
 
 def extract_unresolved_issues(review_text: str, max_items: int = 3) -> List[str]:
     """从评审报告提取未解决关键问题（剩余关键问题 > 必改项）。"""
     text = str(review_text or "")
-    issues: List[str] = []
     section = _UNRESOLVED_SECTION_RE.search(text)
-    if section:
-        for m in _ISSUE_LINE_RE.finditer(section.group(1)):
-            issue = m.group(1).strip()
-            if issue and issue not in issues:
-                issues.append(issue)
-    if not issues:
-        for m in _MUST_FIX_RE.finditer(text):
-            issue = m.group(1).strip()
-            if issue and issue not in issues:
-                issues.append(issue)
+    candidates = _collect_numbered_lines(section.group(1)) if section else []
+    if not candidates:
+        candidates = _MUST_FIX_RE.findall(text)
+
+    issues: List[str] = []
+    for raw in candidates:
+        issue = _normalize_issue_text(raw)
+        if issue and issue not in issues:
+            issues.append(issue)
     return issues[:max_items]
 
 
@@ -251,24 +380,92 @@ def format_quality_memory(review_meta: Dict[str, Any], top_n: int = 3) -> str:
 # ---------------------------------------------------------------------------
 # 伏笔账本（P1-3）
 # ---------------------------------------------------------------------------
-# 标签与冒号之间允许 markdown 强调（**伏笔事项**：）与空白；
-# 旧正则匹配不到加粗格式导致规划伏笔解析为空 → 写前闸门 A2 误判"未声明回收"、账本漏登记
-_FORESHADOW_FIELD_RE = re.compile(r"(?:伏笔事项|伏笔)\s*\**\s*[：:]\s*([^\n]+)")
+# 规划字段行解析：允许加粗（**伏笔事项**：）、行内前缀（“补充伏笔事项：”）与缩进写法，
+# 标签按长度降序参与匹配，保证“伏笔事项”优先于“伏笔”、“回收伏笔”优先于“伏笔”
+_PLANT_FIELD_LABELS = ("伏笔事项", "新埋设伏笔", "伏笔")
+_RECOVERY_FIELD_LABELS = ("回收伏笔", "拟回收伏笔", "待回收伏笔")
+_FORESHADOW_LABEL_RE = re.compile(
+    "(" + "|".join(sorted(set(_RECOVERY_FIELD_LABELS + _PLANT_FIELD_LABELS), key=len, reverse=True)) + ")"
+    + r"(?:\*\*)?\s*[：:]\s*(.*)$"
+)
+# 内联回收声明：中文规划常把“回收第N章…”直接写在伏笔事项字段里，
+# 不能依赖章节定位字段判定（定位写成“关键转折”时旧实现会把回收声明当新埋设登记）
+_RECOVERY_CLAIM_RE = re.compile(r"回收|收回|兑现|呼应前文")
+_EMPTY_FIELD_VALUES = {"无", "（无）", "(无)", "暂无", "略", "none", "None", "-"}
+# 回收记录只保留最近 N 条，未回收条目全部保留，避免账本无上限膨胀
+_MAX_RECOVERED_HISTORY = 20
+
+
+def _match_foreshadow_label(line: str) -> Optional[Tuple[str, str]]:
+    """识别伏笔字段行，返回（标签, 同行取值）；非伏笔字段行返回 None。"""
+    match = _FORESHADOW_LABEL_RE.search(str(line or ""))
+    if not match:
+        return None
+    return match.group(1), match.group(2).strip()
+
+
+def _collect_field_values(lines: List[str], label_index: int, inline_value: str) -> List[str]:
+    """取字段取值：同行内容 + 紧随其后、缩进更深的子条目（字段值另起行的写法）。"""
+    values: List[str] = []
+    if inline_value:
+        values.append(inline_value)
+    label_indent = len(lines[label_index]) - len(lines[label_index].lstrip())
+    for offset in range(label_index + 1, len(lines)):
+        raw = lines[offset]
+        stripped = raw.strip()
+        if not stripped:
+            break
+        if len(raw) - len(raw.lstrip()) <= label_indent:
+            break
+        if _match_foreshadow_label(stripped):
+            # 子条目自己带了伏笔标签（如“  - 回收伏笔：xxx”），属于另一个字段
+            break
+        values.append(stripped.lstrip("-*· ").strip())
+    return values
+
+
+def _split_field_items(value: str) -> List[str]:
+    """切分字段取值为伏笔条目。
+
+    只按分号断条目：逗号、顿号属于句内连接，切开会产出“目前下落不明”
+    这类读不通的碎片，既污染注入提示词，又让写前闸门对碎片误报未推进。
+    """
+    items: List[str] = []
+    for part in re.split(r"[；;]+", str(value or "")):
+        item = part.strip().strip("*").strip().rstrip("。，、,，")
+        if not item or item in _EMPTY_FIELD_VALUES or len(item) < 4:
+            continue
+        if item not in items:
+            items.append(item)
+    return items
+
+
+def _parse_foreshadow_fields(chapter_plan: str) -> Tuple[List[str], List[str]]:
+    """解析章节规划中的伏笔字段，返回（新埋设条目, 回收声明）。"""
+    lines = str(chapter_plan or "").splitlines()
+    plants: List[str] = []
+    claims: List[str] = []
+    for index, raw in enumerate(lines):
+        hit = _match_foreshadow_label(raw)
+        if not hit:
+            continue
+        label, inline_value = hit
+        for value in _collect_field_values(lines, index, inline_value):
+            for item in _split_field_items(value):
+                is_claim = label in _RECOVERY_FIELD_LABELS or bool(_RECOVERY_CLAIM_RE.search(item))
+                target = claims if is_claim else plants
+                if item not in target:
+                    target.append(item)
+    return plants, claims
 
 
 def _parse_foreshadow_items(chapter_plan: str) -> List[str]:
-    """解析章节规划中的伏笔事项字段，返回非空伏笔条目。"""
-    items: List[str] = []
-    for m in _FORESHADOW_FIELD_RE.finditer(str(chapter_plan or "")):
-        value = m.group(1).strip()
-        if not value or value in {"无", "（无）", "暂无", "略"}:
-            continue
-        # 顿号/分号分隔多条
-        for part in re.split(r"[；;、，,]\s*", value):
-            part = part.strip().rstrip("。.")
-            if len(part) >= 4 and part not in items:
-                items.append(part)
-    return items
+    """解析章节规划中的伏笔事项字段，返回全部非空条目（含回收声明）。
+
+    写前闸门需要同时看到埋设与回收条目做一致性校验，故这里不区分语义。
+    """
+    plants, claims = _parse_foreshadow_fields(chapter_plan)
+    return plants + claims
 
 
 def _char_bigrams(text: str) -> set:
@@ -296,27 +493,27 @@ def register_foreshadowing(
 ) -> Dict[str, Any]:
     """登记本章伏笔埋设 / 标记回收（就地更新并返回 review_meta）。
 
-    - 普通章节：新伏笔条目登记为 open
-    - 定位为"伏笔回收"的章节：与账本条目相似的条目标记 recovered；
-      含"回收"字样的条目视为回收声明，不再登记为新埋设
+    - 埋设条目登记为 open，与已有条目相似的不再重复登记
+    - 回收声明（分标签写法或文本含“回收/兑现/呼应前文”）只用于匹配账本，
+      命中的 open 条目标记 recovered，绝不作为新埋设入账
+    - 定位为“伏笔回收”的章节：伏笔字段整体按回收声明处理（保留原行为）
     """
     ledger = review_meta.get(FORESHADOW_LEDGER_KEY) or {}
     entries: List[Dict[str, Any]] = list(ledger.get("entries") or [])
-    plan_items = _parse_foreshadow_items(chapter_plan)
-
+    plants, claims = _parse_foreshadow_fields(chapter_plan)
     if chapter_position == "伏笔回收":
-        # 回收章的"伏笔事项"字段语义为回收声明（含被逗号分割的碎片），
-        # 全部仅用于匹配回收，不再登记为新埋设，避免碎片污染账本
+        claims = claims + plants
+        plants = []
+
+    for claim in claims:
         for entry in entries:
             if entry.get("status") != "open":
                 continue
-            planted = str(entry.get("content") or "")
-            if any(_foreshadow_similar(planted, claim) for claim in plan_items):
+            if _foreshadow_similar(str(entry.get("content") or ""), claim):
                 entry["status"] = "recovered"
                 entry["recovered_chapter"] = chapter_number
-        plan_items = []
 
-    for item in plan_items:
+    for item in plants:
         already = any(
             _foreshadow_similar(str(e.get("content") or ""), item)
             for e in entries
@@ -327,6 +524,11 @@ def register_foreshadowing(
                 "planted_chapter": chapter_number,
                 "status": "open",
             })
+
+    recovered_indices = [i for i, e in enumerate(entries) if e.get("status") == "recovered"]
+    if len(recovered_indices) > _MAX_RECOVERED_HISTORY:
+        drop = set(recovered_indices[:-_MAX_RECOVERED_HISTORY])
+        entries = [e for i, e in enumerate(entries) if i not in drop]
 
     ledger["entries"] = entries
     review_meta[FORESHADOW_LEDGER_KEY] = ledger

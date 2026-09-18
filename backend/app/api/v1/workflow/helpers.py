@@ -14,7 +14,7 @@ from sqlalchemy import inspect, text
 from app.db.base import get_db, SessionLocal
 from app.services.agent_coordinator import coordinator, StageType, AgentStatus
 from app.core.security import get_current_user
-from app.models.project import Project, Chapter
+from app.models.project import Project, Chapter, ChapterRevision
 from app.models.setting import SettingCollection
 from app.websocket.manager import ws_manager
 from app.services.character_runtime_context import build_character_prompt_context_from_text
@@ -494,6 +494,7 @@ def _build_iteration_review_prompt(
     review_text: str = "",
     iteration_plan: str = "",
     recent_chapter_assets_summary: str = "",
+    previous_version: str = "",
 ) -> str:
     return build_iteration_loop_review_user_prompt(
         chapter_number=chapter_number,
@@ -502,7 +503,101 @@ def _build_iteration_review_prompt(
         review_text=review_text,
         iteration_plan=iteration_plan,
         recent_chapter_assets_summary=recent_chapter_assets_summary,
+        previous_content=previous_version,
     )
+
+
+def resolve_current_chapter_number(db: Session, project_id: int) -> int:
+    """当前正在写作的章节号：项目最新一章的编号，无章节时视为第 1 章。
+
+    阶段级迭代此前把章节号写死为 1，导致改稿/复评提示词里章节号与实际章节不符。
+    """
+    latest = (
+        db.query(Chapter)
+        .filter(Chapter.project_id == project_id, Chapter.deleted_at.is_(None))
+        .order_by(Chapter.chapter_number.desc())
+        .first()
+    )
+    if latest is None:
+        return 1
+    return int(latest.chapter_number) or 1
+
+
+def apply_iteration_result_to_latest_chapter(
+    db: Session,
+    *,
+    project_id: int,
+    content: str,
+    revision_note: str = "迭代终稿覆盖",
+) -> Optional[Dict[str, Any]]:
+    """把迭代终稿原地覆盖到当前最新一章。
+
+    阶段级迭代（评审报告「保存并继续」）此前只写 `project_settings.final_version`，
+    `chapters` 表里的正文始终停留在上一版，用户看到「改完了却没覆盖」。这里与内容
+    创作阶段「原地更新最后一章」的既有约定保持一致：覆盖最新一章，覆盖前把旧正文
+    留档到 `chapter_revisions` 以便回溯，并触发后处理刷新摘要/向量。
+    """
+    text = (content or "").strip()
+    if not text:
+        return None
+
+    chapter = (
+        db.query(Chapter)
+        .filter(Chapter.project_id == project_id, Chapter.deleted_at.is_(None))
+        .order_by(Chapter.chapter_number.desc())
+        .first()
+    )
+    if chapter is None:
+        logger.info("   ℹ️ 项目尚无章节，迭代终稿仅写入 final_version")
+        return None
+
+    previous_content = chapter.content or ""
+    if previous_content.strip() == text:
+        return {
+            "chapter_id": chapter.id,
+            "chapter_number": chapter.chapter_number,
+            "title": chapter.title,
+            "updated": False,
+        }
+
+    if previous_content.strip():
+        db.add(
+            ChapterRevision(
+                chapter_id=chapter.id,
+                content=previous_content,
+                word_count=len(previous_content),
+                revision_note=revision_note[:500],
+            )
+        )
+
+    chapter.content = text
+    chapter.word_count = len(text)
+    db.commit()
+    logger.info(
+        f"   ♻️ 迭代终稿已覆盖第{chapter.chapter_number}章"
+        f"（原 {len(previous_content)} 字 → 现 {len(text)} 字）"
+    )
+
+    try:
+        from app.services.chapter_post_save import start_chapter_post_save_task
+
+        start_chapter_post_save_task(
+            chapter_id=chapter.id,
+            chapter_title=chapter.title,
+            chapter_content=text,
+            chapter_number=chapter.chapter_number,
+            project_id=project_id,
+            generate_summary=True,
+        )
+    except Exception as post_save_error:
+        logger.warning(f"   ⚠️ 覆盖章节后的后处理启动失败: {post_save_error}")
+
+    return {
+        "chapter_id": chapter.id,
+        "chapter_number": chapter.chapter_number,
+        "title": chapter.title,
+        "updated": True,
+    }
 
 
 # 🆕 导入流式输出服务

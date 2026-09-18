@@ -3,7 +3,8 @@
 """
 import json
 import logging
-from typing import Dict, Any, List, Optional, Union
+from typing import Callable, Dict, Any, List, Optional, Union
+from contextvars import ContextVar
 from abc import ABC, abstractmethod
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage, BaseMessage
 from .config import Config
@@ -32,31 +33,30 @@ def _is_dashscope_llm(llm: Any) -> bool:
     return bool(base and "dashscope.aliyuncs.com" in str(base))
 
 
-def _collect_streaming_content(stream: Any) -> str:
+# 请求级观察器随 asyncio.to_thread 传播，不在共享 Agent 上保存连接状态。
+agent_stream_observer: ContextVar[Optional[Callable[[str, str], None]]] = ContextVar("agent_stream_observer", default=None)
+
+
+def _collect_streaming_content(stream: Any, on_chunk: Optional[Callable[[str], None]] = None) -> str:
     parts: List[str] = []
     for chunk in stream:
         if chunk is None:
             continue
-        if isinstance(chunk, str):
-            parts.append(chunk)
-            continue
-        content = getattr(chunk, "content", None)
+        content = chunk if isinstance(chunk, str) else (
+            getattr(chunk, "content", None)
+            or getattr(getattr(chunk, "message", None), "content", None)
+            or getattr(chunk, "text", None)
+        )
         if content:
             parts.append(content)
-            continue
-        message = getattr(chunk, "message", None)
-        if message is not None:
-            message_content = getattr(message, "content", None)
-            if message_content:
-                parts.append(message_content)
-                continue
-        text_value = getattr(chunk, "text", None)
-        if text_value:
-            parts.append(text_value)
+            if on_chunk is not None:
+                on_chunk(content)
     return "".join(parts)
 
 
-def _invoke_llm_with_optional_streaming(llm: Any, messages: List[BaseMessage]) -> str:
+def _invoke_llm_with_optional_streaming(llm: Any, messages: List[BaseMessage], *, on_chunk: Optional[Callable[[str], None]] = None) -> str:
+    if on_chunk is not None:
+        return _collect_streaming_content(llm.stream(messages), on_chunk)
     if _is_dashscope_llm(llm):
         try:
             return _collect_streaming_content(llm.stream(messages))
@@ -263,6 +263,12 @@ class BaseAgent(ABC):
 
         messages.append(HumanMessage(content=user_input))
         
+        observer = agent_stream_observer.get()
+        on_chunk = None
+        if observer is not None:
+            observer(self.role, "")
+            on_chunk = lambda chunk: observer(self.role, chunk)
+
         # 🔥 关键修复：支持动态设置 temperature
         if temperature is not None:
             # 创建一个临时的 LLM 实例，使用指定的 temperature
@@ -275,7 +281,7 @@ class BaseAgent(ABC):
             temp_llm = create_model_llm(model=model_name, temperature=temperature)
             logger.debug(f"🎲 使用自定义 temperature={temperature}")
             try:
-                response_content = _invoke_llm_with_optional_streaming(temp_llm, messages)
+                response_content = _invoke_llm_with_optional_streaming(temp_llm, messages, on_chunk=on_chunk)
             except Exception as e:
                 # 捕获并详细记录错误
                 import traceback
@@ -287,7 +293,7 @@ class BaseAgent(ABC):
                     logger.debug("⚠️ 检测到JSON解析错误,可能是API返回格式异常")
                 raise
         else:
-            response_content = _invoke_llm_with_optional_streaming(self.llm, messages)
+            response_content = _invoke_llm_with_optional_streaming(self.llm, messages, on_chunk=on_chunk)
 
         self.memory_manager.add_ai_message(response_content)
         self.conversation_history.append({"input": user_input, "output": response_content})

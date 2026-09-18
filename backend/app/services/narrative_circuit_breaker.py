@@ -187,6 +187,21 @@ def get_pause_info(review_meta: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         return fallback
 
 
+PAUSE_MESSAGE = "项目自动推进已暂停，请确认暂停原因后再继续生成"
+
+
+def build_pause_detail(review_meta: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """构造熔断 409 响应体。
+
+    message 只写用户可读下一步，不得出现 resume_after_confirmation 等接口参数名；
+    具体暂停原因与章节由 circuit_breaker 结构交给前端确认弹窗渲染。
+    """
+    return {
+        "message": PAUSE_MESSAGE,
+        "circuit_breaker": get_pause_info(review_meta),
+    }
+
+
 def confirm_and_resume(
     review_meta: Optional[Dict[str, Any]],
     *,

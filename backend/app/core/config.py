@@ -248,9 +248,17 @@ class Settings(BaseSettings):
     MULTI_MODEL_REVIEW_TIMEOUT_SECONDS: int = 120
     MULTI_MODEL_REVIEW_CHIEF_TIMEOUT_SECONDS: int = 120
     MULTI_MODEL_REVIEW_MAX_REVIEWERS: int = 7
+    # 主审模型是否可以同时占一个评审席位（默认允许，保持现有面板不变；
+    # 关闭后被主审占用的席位改由异厂商、同推理档位的模型接替，避免主审给自己的意见背书）
+    MULTI_MODEL_REVIEW_ALLOW_CHIEF_REUSE: bool = True
     MULTI_MODEL_REVIEW_DEFAULT_PROMPT_BUDGET: int = 80000
     MULTI_MODEL_REVIEW_CHAPTER_PLAN_PROMPT_BUDGET: int = 12000
     DOUBAO_REVIEW_PROMPT_BUDGET: int = 64000
+
+    # 迭代优化复评通过线（综合评分 >= 该值即视为达标，无需继续返修）
+    ITERATION_PASS_SCORE: float = 8.5
+    # 迭代优化最大返修轮次
+    ITERATION_MAX_ROUNDS: int = 2
 
     # 免费生成档位（灵感方舟）配置
     # 强制开关：开启后无标准档角色的用户一律落入免费档（默认关，行为与现状一致）

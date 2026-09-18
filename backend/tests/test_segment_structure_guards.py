@@ -272,13 +272,18 @@ def test_revision_system_prompt_contains_style_and_rewrite_discipline():
     # R2：重写类必改须整段重写
     assert "必须整段重写相关段落" in prompt
     assert "不得只插入单句证据应付" in prompt
-    # R1 高压独白镜像（O21）+ R4 补写防退化 + R5 情绪单点聚焦 + R6 补写净增量控制
+    # R1 高压独白镜像（O21）+ R4 补写防退化 + R5 情绪单点聚焦
     assert "逐条列举想说的话或分析要点" in prompt
     assert "不得扩写成条理化技术分析" in prompt
     assert "不得引入新的节奏拖沓" in prompt
     assert "单点聚焦" in prompt
     assert "不得在同一段叠加多重情绪" in prompt
-    assert "以删定补" in prompt
+    # R6 补写净增量控制：口径已从“以删定补、不得变长”改为“局部润色三句内 + 结构性重写不受限”，
+    # 防止为了控篇幅而削减本应整段重写兑现的因果/情绪过程
+    assert "每处补写以三句内为宜" in prompt
+    assert "控制净增量" in prompt
+    assert "结构性重写不受三句限制" in prompt
+    assert "不以堆砌细节替代推进" in prompt
     # R7：抉择拉锯/爽点过程类必改须整段重写
     assert "计算→动摇细节→落定带代价" in prompt
     assert "不得只补一句心理描写应付" in prompt

@@ -272,9 +272,21 @@ async def get_stage_content(
             stage,
             pretty_json=True,
         )
+        # 迭代终稿可能是「复评未达线但已交付」的降级版本，前端需要提示用户
+        degraded = False
+        best_score = None
+        if stage == "iteration":
+            review_meta = workflow_context_builder.load_review_meta(project_id) or {}
+            iteration_meta = review_meta.get("first_chapter_iteration") or {}
+            degraded = bool(iteration_meta.get("degraded", False))
+            raw_score = iteration_meta.get("best_score")
+            if raw_score is not None:
+                best_score = float(raw_score)
         return {
             "content": content,
-            "stage": stage
+            "stage": stage,
+            "degraded": degraded,
+            "best_score": best_score,
         }
 
         # 🔧 修复JSON解码错误：如果内容是JSON字符串，先解析

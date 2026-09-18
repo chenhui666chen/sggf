@@ -119,19 +119,22 @@ class MultiModelReviewService:
         custom_panel: Optional[list[dict[str, str]]] = None,
         concurrency: Optional[int] = None,
     ) -> None:
+        chief_model = chief_model or getattr(
+            settings,
+            "MULTI_MODEL_REVIEW_CHIEF_MODEL",
+            "deepseek-v4-pro",
+        )
         reviewers = custom_panel or REVIEWER_PANEL_PRESETS.get(preset)
         if not reviewers:
             raise ValueError(f"Unsupported multi-model review preset: {preset}")
+        if not getattr(settings, "MULTI_MODEL_REVIEW_ALLOW_CHIEF_REUSE", True):
+            reviewers = self._reserve_chief_seat(reviewers, chief_model=chief_model)
         if len(reviewers) not in {3, 5, 7}:
             raise ValueError("多模型评审官数量必须为 3、5 或 7")
         max_reviewers = getattr(settings, "MULTI_MODEL_REVIEW_MAX_REVIEWERS", 7)
         if len(reviewers) > max_reviewers:
             raise ValueError(f"多模型评审官数量不能超过 {max_reviewers}")
-        self.chief_model = chief_model or getattr(
-            settings,
-            "MULTI_MODEL_REVIEW_CHIEF_MODEL",
-            "deepseek-v4-pro",
-        )
+        self.chief_model = chief_model
         self._validate_reviewers(reviewers, preset=preset, chief_model=self.chief_model)
 
         self.reviewers = reviewers
@@ -142,6 +145,78 @@ class MultiModelReviewService:
         self.concurrency = concurrency or getattr(settings, "MULTI_MODEL_REVIEW_CONCURRENCY", 5)
         self.timeout = getattr(settings, "MULTI_MODEL_REVIEW_TIMEOUT_SECONDS", 120)
         self.chief_timeout = getattr(settings, "MULTI_MODEL_REVIEW_CHIEF_TIMEOUT_SECONDS", 120)
+
+    @staticmethod
+    def _pick_substitute_model(
+        *,
+        replace_model: str,
+        taken_models: set[str],
+        used_providers: set[Optional[str]],
+        chief_provider: Optional[str],
+    ) -> Optional[str]:
+        """为被主审占用的席位挑替身：不得是主审自己、不得与主审同厂商，
+        其次优先厂商不重复、与原席位同推理档位的模型。"""
+        preferred_reasoning = MODEL_REVIEW_GOVERNANCE.get(replace_model, {}).get("reasoning", False)
+        candidates = [
+            model
+            for model in MULTI_MODEL_REVIEW_ALLOWED_MODELS
+            if model not in taken_models and model in MODEL_REVIEW_GOVERNANCE
+            and MODEL_REVIEW_GOVERNANCE[model]["provider"] != chief_provider
+        ]
+        if not candidates:
+            return None
+
+        def _rank(model: str) -> tuple:
+            governance = MODEL_REVIEW_GOVERNANCE[model]
+            return (
+                governance["provider"] in used_providers,
+                governance["reasoning"] != preferred_reasoning,
+                model,
+            )
+
+        return min(candidates, key=_rank)
+
+    @classmethod
+    def _reserve_chief_seat(
+        cls,
+        reviewers: list[dict[str, str]],
+        *,
+        chief_model: str,
+    ) -> list[dict[str, str]]:
+        """主审模型不兼任评审官：被它占用的席位改由替身模型接替。
+
+        保持席位数量与 profile 覆盖不变，避免一关开关就退化成小规模评审。
+        """
+        chief_provider = MODEL_REVIEW_GOVERNANCE.get(chief_model, {}).get("provider")
+        taken_models = {reviewer.get("model") or "" for reviewer in reviewers}
+        used_providers = {
+            MODEL_REVIEW_GOVERNANCE.get(model, {}).get("provider") for model in taken_models
+        }
+        reserved: list[dict[str, str]] = []
+        for reviewer in reviewers:
+            if reviewer.get("model") != chief_model:
+                reserved.append(reviewer)
+                continue
+            substitute = cls._pick_substitute_model(
+                replace_model=chief_model,
+                taken_models=taken_models,
+                used_providers=used_providers,
+                chief_provider=chief_provider,
+            )
+            if not substitute:
+                raise ValueError(
+                    f"关闭主审兼任评审官后，{reviewer.get('profile')} 席位无可用替身模型"
+                )
+            logger.info(
+                "主审模型 %s 不兼任评审官：%s 席位改由 %s 接替",
+                chief_model,
+                reviewer.get("profile"),
+                substitute,
+            )
+            taken_models.add(substitute)
+            used_providers.add(MODEL_REVIEW_GOVERNANCE[substitute]["provider"])
+            reserved.append({**reviewer, "model": substitute})
+        return reserved
 
     async def review(
         self,
@@ -643,8 +718,9 @@ class MultiModelReviewService:
 
 执行原则：
 1. 一致意见（≥2 个不同 profile 都指出，且有文本证据）→ 采纳并标注可信度
-2. 多数/少数分歧 → 采纳多数派结论时必须备注少数派观点；强推理模型提出的结构硬伤即使是少数派也要重点复核
-3. 全部分歧 → 你必须给出裁决结论，禁止"请作者自行判断"
-4. 每条修改建议必须标注 source_models（来源模型）
-5. 全程结构化输出，禁止冗余寒暄
-6. 评审 1 轮即收尾，不做反驳辩论"""
+2. 一致意见中每条问题类意见必须逐条落入《最终修改建议》并给出优先级，不得静默丢弃；同类问题可合并表述，但合并项须保留全部 source_models
+3. 多数/少数分歧 → 采纳多数派结论时必须备注少数派观点；强推理模型提出的结构硬伤即使是少数派也要重点复核
+4. 全部分歧 → 你必须给出裁决结论，禁止"请作者自行判断"
+5. 每条修改建议必须标注 source_models（来源模型）
+6. 全程结构化输出，禁止冗余寒暄
+7. 评审 1 轮即收尾，不做反驳辩论"""

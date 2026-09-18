@@ -63,42 +63,31 @@ def test_workflow_generation_model_validation_lists_llm_models_without_removed_l
     assert "MiniMax/MiniMax-M3" in model_ids
     assert removed_model_id not in model_ids
 
-    qwen_model = next(item for item in models if item["id"] == "qwen3.7-plus")
-    minimax_model = next(item for item in models if item["id"] == "MiniMax/MiniMax-M3")
-    mimo_model = next(item for item in models if item["id"] == "mimo-v2.5")
-    mimo_pro_model = next(item for item in models if item["id"] == "mimo-v2.5-pro")
-    kimi_model = next(item for item in models if item["id"] == "kimi/kimi-k2.6")
-    glm_model = next(item for item in models if item["id"] == "glm-5.2")
-    step_model = next(item for item in models if item["id"] == "step-3.7-flash")
-    doubao_character_model = next(item for item in models if item["id"] == "doubao-seed-character")
-    doubao_evolving_model = next(item for item in models if item["id"] == "doubao-seed-evolving")
-    deepseek_flash_model = next(item for item in models if item["id"] == "deepseek-v4-flash")
-    deepseek_pro_model = next(item for item in models if item["id"] == "deepseek-v4-pro")
+    # 成本倍率以目录中最便宜模型为基准动态计算，不硬编码具体价格；
+    # 只验证计算逻辑与稳定的相对价位关系，避免目录调价时测试失效。
+    priced_models = [item for item in models if item["cost_multiplier"] is not None]
+    assert priced_models, "目录中应至少有一个可估价模型"
+    baseline_ids = {item["relative_cost_basis"] for item in priced_models}
+    assert len(baseline_ids) == 1
+    baseline_id = baseline_ids.pop()
+    baseline_model = next(item for item in models if item["id"] == baseline_id)
+    assert baseline_model["cost_multiplier"] == 1
+    assert baseline_model["cost_label"] == "1×"
 
-    assert mimo_model["cost_multiplier"] == 1
-    assert mimo_model["cost_label"] == "1×"
-    assert deepseek_flash_model["cost_multiplier"] == 1
-    assert deepseek_flash_model["cost_label"] == "1×"
-    assert doubao_character_model["cost_multiplier"] == 1.6
-    assert doubao_character_model["cost_label"] == "1.6×"
-    assert step_model["cost_multiplier"] == 2
-    assert step_model["cost_label"] == "2×"
-    assert qwen_model["cost_multiplier"] == 2.4
-    assert qwen_model["cost_label"] == "2.4×"
-    assert mimo_pro_model["cost_multiplier"] == 3
-    assert mimo_pro_model["cost_label"] == "3×"
-    assert deepseek_pro_model["cost_multiplier"] == 3
-    assert deepseek_pro_model["cost_label"] == "3×"
-    assert minimax_model["cost_multiplier"] == 5.1
-    assert minimax_model["cost_label"] == "5.1×"
-    assert kimi_model["cost_multiplier"] == 8.1
-    assert kimi_model["cost_label"] == "8.1×"
-    assert doubao_evolving_model["cost_multiplier"] == 8
-    assert doubao_evolving_model["cost_label"] == "8×"
-    assert glm_model["cost_multiplier"] == 9.3
-    assert glm_model["cost_label"] == "9.3×"
-    assert minimax_model["relative_cost_basis"] == "mimo-v2.5"
-    assert minimax_model["relative_cost_basis_label"] == "按 7:1 输入/输出比估算"
+    by_id = {item["id"]: item for item in priced_models}
+    for item in priced_models:
+        assert item["cost_multiplier"] >= 1
+        assert item["relative_cost_basis"] == baseline_id
+        assert item["relative_cost_basis_label"] == "按 7:1 输入/输出比估算"
+        assert item["cost_label"].endswith("×")
+
+    # 稳定的相对价位关系：pro 贵于同名 flash/轻量档，默认创作模型贵于基准
+    assert by_id["deepseek-v4-pro"]["cost_multiplier"] > by_id["deepseek-v4-flash"]["cost_multiplier"]
+    assert by_id["mimo-v2.5-pro"]["cost_multiplier"] > by_id["mimo-v2.5"]["cost_multiplier"]
+    assert by_id["qwen3.7-plus"]["cost_multiplier"] > by_id[baseline_id]["cost_multiplier"]
+    assert by_id["MiniMax/MiniMax-M3"]["cost_multiplier"] > 1
+    assert by_id["kimi/kimi-k2.6"]["cost_multiplier"] > 1
+    assert by_id["glm-5.2"]["cost_multiplier"] > 1
 
     assert resolve_workflow_generation_model("deepseek-v4-pro") == "deepseek-v4-pro"
     assert resolve_workflow_generation_model("MiniMax/MiniMax-M3") == "MiniMax/MiniMax-M3"
@@ -184,7 +173,7 @@ def test_iteration_review_detects_unresolved_required_items() -> None:
 | R0-MUST-1 | 未执行 | 无 | 仍未把冲突提前 |
 | R0-SUGGEST-1 | 已执行 | 第三段补足环境 |  |
 """
-    resolved_review = """
+    partially_resolved_review = """
 综合评分：8.8/10分
 
 ## 评审要求执行核验表
@@ -193,9 +182,21 @@ def test_iteration_review_detects_unresolved_required_items() -> None:
 | R0-MUST-1 | 已执行 | 开场第二段已经提前冲突 |  |
 | R1-MUST-2 | 部分执行 | 已补足动机，但冲突还可更强 |  |
 """
+    fully_resolved_review = """
+综合评分：9.2/10分
+
+## 评审要求执行核验表
+| 要求ID/来源 | 状态（已执行/部分执行/未执行） | 修改后证据 | 未完成原因 |
+|---|---|---|---|
+| R0-MUST-1 | 已执行 | 开场第二段已经提前冲突 |  |
+| R1-MUST-2 | 已执行 | 已补足动机并强化冲突 |  |
+"""
 
     assert routes_chapter._iteration_review_has_unresolved_required_items(unresolved_review) is True
-    assert routes_chapter._iteration_review_has_unresolved_required_items(resolved_review) is False
+    # 与首章验收原则对齐：必改项部分执行同样阻断通过
+    assert routes_chapter._iteration_review_has_unresolved_required_items(partially_resolved_review) is True
+    # 核验表全部已执行时，表格行不得被 fallback 扫描误判为残留必改
+    assert routes_chapter._iteration_review_has_unresolved_required_items(fully_resolved_review) is False
 
 
 def test_split_stream_text_preserves_final_iteration_content_order() -> None:

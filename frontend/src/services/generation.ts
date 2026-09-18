@@ -240,40 +240,6 @@ class GenerationService {
   }
 
   /**
-   * 初始化项目的五阶段工作流程
-   * 阶段一：概念开发
-   * 阶段二：结构设计
-   * 阶段三：内容创作
-   * 阶段四：质量评审
-   * 阶段五：迭代优化
-   */
-  async initializeWorkflow(
-    projectId: number,
-    onUpdate: (task: GenerationTask) => void
-  ): Promise<string> {
-    try {
-      const response = await apiClient.client.post('/api/v1/projects/initialize-workflow', {
-        project_id: projectId,
-      })
-
-      const { task_id } = response.data
-
-      return new Promise((resolve, reject) => {
-        this.startPolling(task_id, (task) => {
-          onUpdate(task)
-          if (task.status === 'completed') {
-            resolve(task.result || '')
-          } else if (task.status === 'failed') {
-            reject(new Error(task.error || 'Workflow initialization failed'))
-          }
-        })
-      })
-    } catch (error) {
-      throw error
-    }
-  }
-
-  /**
    * 获取项目的完整信息（包括所有五阶段的输出）
    */
   async getProjectDetails(projectId: number): Promise<any> {

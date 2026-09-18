@@ -369,7 +369,11 @@ def test_no_legacy_llm_imports_in_runtime_code() -> None:
         r"\bChatOpenAI\(",
     ]
     allowed_relative_llm_client_paths = {
+        # 两处误伤例外：它们相对导入的是 audiobook/llm_client.py——
+        # 接收注入式统一 llm_client.chat() 的合法封装（走 model_hub），
+        # 并非被禁的老直连模块 app.services.llm_client，正则只看导入形态无法区分
         project_root / "backend/app/services/audiobook/engine_pkg/_base.py",
+        project_root / "backend/app/services/audiobook/scene_direction/director.py",
     }
 
     offenders: list[str] = []

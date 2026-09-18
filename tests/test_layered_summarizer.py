@@ -217,7 +217,18 @@ def test_prepare_context_reuses_persisted_structured_memory_across_rounds(tmp_pa
 
 
 def test_estimate_selected_model_matches_current_capability_tiers():
-    assert LayeredSummarizer.REDUCE_SUMMARY_MODEL == "qwen3.7-plus"
+    # 摘要模型常量会随目录与成本策略调整（plus→flash），不再钉死具体型号；
+    # 真正的不变量是：必须指向统一注册中心里可用（已配置密钥）的模型
+    from core.model_runtime import ensure_model_hub_initialized
+
+    ensure_model_hub_initialized()
+    from core.model_hub import model_hub
+
+    for model_id in (LayeredSummarizer.CHUNK_SUMMARY_MODEL, LayeredSummarizer.REDUCE_SUMMARY_MODEL):
+        spec = model_hub.registry.get_spec(model_id)
+        assert spec is not None, f"{model_id} 未在统一模型注册中心"
+        assert spec.is_available(), f"{model_id} 当前不可用"
+
     assert LayeredSummarizer.estimate_selected_model("chapter_generation", 20) == "qwen3.7-plus"
     assert LayeredSummarizer.estimate_selected_model("chapter_generation", 120) == "qwen3.7-plus"
     assert LayeredSummarizer.estimate_selected_model("chapter_generation", 500) == "qwen3.7-plus"

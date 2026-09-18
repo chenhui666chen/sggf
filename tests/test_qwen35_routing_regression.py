@@ -54,6 +54,12 @@ def test_registry_re_register_cleans_stale_task_mapping() -> None:
     assert [spec.id for spec in registry.get_models_for_task("task_new")] == ["dup-model"]
 
 
+def _candidates_for_task(task_type: str) -> List[str]:
+    from core.model_hub import model_hub
+
+    return [spec.id for spec in model_hub.registry.get_models_for_task(task_type)]
+
+
 def test_current_qwen_plus_has_adapter_and_removed_book_synthesis_route() -> None:
     from core.model_runtime import resolve_model_for_task
     from core.model_hub import model_hub
@@ -66,9 +72,13 @@ def test_current_qwen_plus_has_adapter_and_removed_book_synthesis_route() -> Non
     assert adapter is not None
     assert type(adapter).__name__ == "Qwen37PlusAdapter"
 
-    assert resolve_model_for_task("outline_expand", None) == "mimo-v2.5"
+    # 任务挂载的模型会随目录演进增减：只断言期望模型仍在候选集、
+    # 解析结果是候选之一，不钉死选择器最终命中哪个，避免目录调价/新增时误报
+    for task_type, expected_model in (("outline_expand", "mimo-v2.5"), ("review", "deepseek-v4-pro")):
+        candidates = _candidates_for_task(task_type)
+        assert expected_model in candidates, f"{expected_model} 已从任务 {task_type} 下线"
+        assert resolve_model_for_task(task_type, None) in candidates
     assert resolve_model_for_task("book_synthesis", None) is None
-    assert resolve_model_for_task("review", None) == "deepseek-v4-pro"
 
 
 def test_current_qwen_plus_has_adapter_for_verification_workflow() -> None:
@@ -100,7 +110,10 @@ def test_story_expansion_routes_to_current_long_context_models() -> None:
     }
 
     for task_type, expected_model in expected_routes.items():
-        assert resolve_model_for_task(task_type, None) == expected_model
+        # 同上：期望模型保持挂载 + 解析结果在候选集内，不钉死单一模型
+        candidates = _candidates_for_task(task_type)
+        assert expected_model in candidates, f"{expected_model} 已从任务 {task_type} 下线"
+        assert resolve_model_for_task(task_type, None) in candidates
 
     mimo_spec = model_hub.registry.get_spec("mimo-v2.5")
     deepseek_v4_pro_spec = model_hub.registry.get_spec("deepseek-v4-pro")

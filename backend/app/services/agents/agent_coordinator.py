@@ -26,6 +26,13 @@ from core.model_runtime import run_async_compat
 from .intelligent_truncator import smart_truncate_for_context
 from . import review_feature_gate
 from .multi_model_review_service import MultiModelReviewService
+from app.core.config import settings
+from app.services.prompts.narrative_quality import (
+    extract_review_score,
+    review_has_required_issues,
+    review_needs_revision,
+    review_verifies_required_ids,
+)
 from app.services.character_runtime_context import (
     build_initial_character_contexts_from_text,
 )
@@ -727,6 +734,7 @@ class CreativeDirectorCoordinator:
         # 🔧 获取重生信息（在创意总监执行前就读取）
         regenerate_targets = self.project_context.get("regenerate_targets", [])
         is_regenerate = self.project_context.get("regenerate", False)
+        current_genre = self._get_review_genre()
         
         # 1. 创意总监生成故事概念（按 regenerate_targets 条件执行）
         should_generate_concept = not is_regenerate or "story" in regenerate_targets
@@ -907,7 +915,15 @@ class CreativeDirectorCoordinator:
         })
         
         logger.info("🎉 概念开发阶段完成！")
-        return {"concept": concept, "world_setting": world, "characters": chars}
+        result = {"concept": concept, "world_setting": world, "characters": chars}
+        skipped = [agent_id for agent_id, generated in (
+            ("creative_director", should_generate_concept),
+            ("world_architect", should_generate_world),
+            ("character_designer", should_generate_characters),
+        ) if not generated]
+        if skipped:
+            result["skipped_agents"] = skipped
+        return result
 
     def _stage_two_structure_design(self, concept_result: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -999,29 +1015,40 @@ class CreativeDirectorCoordinator:
                 self.plot_architect.llm = orig_llm
                 logger.info("🔄 [生效日志] 结构阶段结束，情节架构师恢复原模型配置")
         
-        outline = structure_result if isinstance(structure_result, str) else structure_result.get("output", "结构大纲")
+        outline = structure_result if isinstance(structure_result, str) else structure_result.get("output", "")
         logger.info(f"✅ 结构大纲生成完成，长度: {len(outline)}")
 
-        logger.info("🔎 事件验证官正在检查结构大纲的事件链...")
-        event_validation = self._run_event_validation(
-            outline,
-            concept=concept or "",
-            world_setting=world_setting or "",
-            characters=characters or "",
-            genre=current_genre or "",
-        )
-        if event_validation:
-            logger.info(f"✅ 事件验证完成，长度: {len(event_validation)}")
-        else:
-            logger.warning("⚠️ 事件验证未返回有效结果，保留原始结构大纲")
+        return self.finalize_structure(outline)
 
-        self.project_context.update(
-            {
-                "plot_outline": outline,
-                "event_validation": event_validation,
-            }
-        )
-        return {"plot_outline": outline, "event_validation": event_validation}
+    def finalize_structure(self, outline: str) -> Dict[str, Any]:
+        """流式与非流式共用：验证、定向返修、再验证，最多返修两轮。"""
+        if not isinstance(outline, str) or not outline.strip():
+            raise ValueError("结构大纲为空，无法验证")
+        context = {key: self.project_context.get(key) or "" for key in ("concept", "world_setting", "characters")}
+        context["genre"] = self._get_review_genre() or "通用"
+        for attempt in range(3):
+            report = self._run_event_validation(outline, **context)
+            conclusions = re.findall(
+                r"^[ \t#*-]*(?:结果|结论)[ \t]*[:：][ \t]*(通过|需要修改|不通过)[。.]?[ \t]*$",
+                report.replace("**", ""), re.M,
+            )
+            if conclusions and all(value == "通过" for value in conclusions) and not review_has_required_issues(report):
+                result = {"plot_outline": outline, "event_validation": report}
+                self.project_context.update(result)
+                return result
+            if not conclusions:
+                raise RuntimeError("事件验证未返回有效结论，请重试结构阶段")
+            if attempt == 2:
+                raise RuntimeError(f"事件验证未通过，已达到返修上限：{report}")
+            outline = self._call_stage_agent(
+                "plot_architect", "_process_with_system_prompt",
+                f"请按验证报告逐项修复大纲，保留无关部分和章节结构，仅输出完整修订大纲。\n\n【当前大纲】\n{outline}\n\n【验证报告】\n{report}",
+                system_prompt=self.plot_architect.get_system_prompt(),
+                context=context,
+            )
+            if not outline.strip():
+                raise RuntimeError("情节架构师返修结果为空，无法完成验证")
+        raise RuntimeError("事件验证未完成")
 
     def _extract_first_chapter_plan(self, plot_outline: str) -> str:
         """从完整大纲中提取第1章的规划内容
@@ -1141,7 +1168,7 @@ class CreativeDirectorCoordinator:
         optimizer = getattr(self, "style_optimizer", None)
         normalized_draft = str(draft_content or "").strip()
         if optimizer is None or not normalized_draft:
-            return normalized_draft
+            raise RuntimeError("文风优化师未初始化或章节正文为空")
 
         workflow_generation_model = self.project_context.get("workflow_generation_model")
         original_llm = getattr(optimizer, "llm", None)
@@ -1159,8 +1186,8 @@ class CreativeDirectorCoordinator:
                 },
             )
         except Exception:
-            logger.exception("文风优化失败，保留原始章节草稿")
-            return normalized_draft
+            logger.exception("文风优化失败，终止本阶段")
+            raise
         finally:
             if workflow_generation_model and original_llm is not None:
                 optimizer.llm = original_llm
@@ -1177,8 +1204,7 @@ class CreativeDirectorCoordinator:
             optimized_content = str(optimization_result or "").strip()
 
         if not optimized_content:
-            logger.warning("文风优化师返回空结果，回退原始章节草稿")
-            return normalized_draft
+            raise RuntimeError("文风优化师返回空结果")
         return optimized_content
 
     def _stage_three_content_creation(self, structure_result: Dict[str, Any]) -> Dict[str, Any]:
@@ -1244,17 +1270,18 @@ class CreativeDirectorCoordinator:
         finally:
             if workflow_generation_model and original_content_llm is not None:
                 self.content_creator.llm = original_content_llm
-        draft_content = content_result if isinstance(content_result, str) else content_result.get("output", "章节内容")
+        draft_content = content_result if isinstance(content_result, str) else content_result.get("output", "")
         logger.info(f"✅ 第1章草稿创作完成，长度: {len(draft_content)}")
 
-        logger.info("🎨 文风优化师正在统一章节文风...")
+        return self.finalize_content(draft_content, chapter_plan=chapter_plan)
+
+    def finalize_content(self, draft_content: str, *, chapter_plan: str = "") -> Dict[str, Any]:
+        """保留入口生成上下文，仅共享正文生成后的文风步骤。"""
+        if not isinstance(draft_content, str) or not draft_content.strip():
+            raise ValueError("章节正文为空")
+        context = {key: self.project_context.get(key) or "" for key in ("plot_outline", "concept", "world_setting", "characters")}
         styled_content = self._run_style_optimization(
-            draft_content,
-            plot_outline=plot_outline or "",
-            concept=concept or "",
-            world_setting=world_setting or "",
-            characters=characters or "",
-            genre=current_genre or "",
+            draft_content, **context, genre=self._get_review_genre(),
         )
         logger.info(f"✅ 文风优化完成，长度: {len(styled_content)}")
 
@@ -1273,7 +1300,7 @@ class CreativeDirectorCoordinator:
             "styled_content": styled_content,
         }
 
-    def _run_single_model_quality_review(self, truncated_content: str) -> str:
+    def _run_single_model_quality_review(self, content: str) -> str:
         workflow_generation_model = self.project_context.get("workflow_generation_model")
         original_reviewer_llm = getattr(self.quality_reviewer, "llm", None)
         try:
@@ -1283,7 +1310,10 @@ class CreativeDirectorCoordinator:
                     temperature=0.2,
                 )
             review_system_prompt, review_user_prompt = build_first_chapter_review_prompts(
-                chapter_draft=truncated_content,
+                chapter_draft=content,
+                chapter_plan=str(self.project_context.get("chapter_plan") or ""),
+                world_setting=str(self.project_context.get("world_setting") or ""),
+                characters=str(self.project_context.get("characters") or ""),
             )
             review_result = self.quality_reviewer._process_with_system_prompt(
                 review_user_prompt,
@@ -1292,11 +1322,13 @@ class CreativeDirectorCoordinator:
         finally:
             if workflow_generation_model and original_reviewer_llm is not None:
                 self.quality_reviewer.llm = original_reviewer_llm
-        return review_result if isinstance(review_result, str) else review_result.get("output", "评审报告")
+        if isinstance(review_result, dict):
+            review_result = review_result.get("output")
+        return review_result if isinstance(review_result, str) else ""
 
     @staticmethod
     def _review_needs_revision(review: str) -> bool:
-        return any(keyword in review for keyword in ["需要修订", "建议修改", "必须改进", "严重问题"])
+        return review_needs_revision(review, pass_score=float(getattr(settings, "ITERATION_PASS_SCORE", 8.5)))
 
     def _get_review_genre(self) -> str:
         return str(
@@ -1362,27 +1394,15 @@ class CreativeDirectorCoordinator:
         content = (
             content_result.get("content")
             or self.project_context.get("content")
-            or self.project_context.get("plot_outline")
             or ""
         )
         
-        if not content:
-            logger.warning("⚠️ 无内容可评审，返回占位符")
-            return {"review": "无可评审内容", "needs_revision": False}
+        if not isinstance(content, str) or not content.strip():
+            raise ValueError("缺少章节正文，请先完成内容创作")
         
         logger.info("🔍 质量评审官正在评审内容...")
         
-        # 🆕 使用智能截断替代手动截断
-        # qwen3.7-plus 限制: 1M tokens ≈ 1500000字符
-        # 评审模板约1500字 + content，需确保总输入不超限
-        truncated_content = smart_truncate_for_context(
-            content=content,
-            max_tokens=20000,  # 为评审模板预留10720 tokens空间
-            content_type="chapter",
-            preserve_ratio=0.8  # 章节内容优先保留完整情节
-        )
-        
-        logger.info(f"📏 内容长度: {len(content)} → {len(truncated_content)}字符")
+        logger.info(f"📏 评审完整正文长度: {len(content)}字符")
         
         review_meta: Optional[Dict[str, Any]] = None
         cfg = review_feature_gate.get_multi_model_review_config(self.project_context)
@@ -1416,152 +1436,138 @@ class CreativeDirectorCoordinator:
             except Exception:
                 logger.exception("多模型质量评审失败，回退单模型评审")
 
-        review = self._run_single_model_quality_review(truncated_content)
+        review = self._run_single_model_quality_review(content)
+        if not review.strip():
+            raise RuntimeError("质量评审返回空报告")
         logger.info(f"✅ 质量评审完成，长度: {len(review)}")
         
-        # 简单判断是否需要修订（基于关键词）
+        # 综合分、必改项和结构化失败码共同决定是否修订
         needs_revision = self._review_needs_revision(review)
         logger.info(f"📋 是否需要修订: {needs_revision}")
         
-        context_update = {"review": review}
-        result: Dict[str, Any] = {"review": review, "needs_revision": needs_revision}
-        if review_meta is not None:
-            review_meta["multi_model"] = False
-            context_update["review_meta"] = review_meta
-            result["multi_model"] = False
-            result["review_meta"] = review_meta
-        self.project_context.update(context_update)
+        review_meta = review_meta or self._build_review_meta({})
+        review_meta["multi_model"] = False
+        result: Dict[str, Any] = {
+            "review": review, "needs_revision": needs_revision,
+            "multi_model": False, "review_meta": review_meta,
+        }
+        self.project_context.update({"review": review, "review_meta": review_meta})
+        return result
+
+    def _call_stage_agent(self, agent_id: str, method: str, *args, temperature: float = 0.4, **kwargs) -> str:
+        """临时绑定本次模型并恢复；关键步骤失败不伪装为成功。"""
+        agent = getattr(self, agent_id, None)
+        if agent is None:
+            raise RuntimeError(f"Agent 未初始化：{agent_id}")
+        model = self.project_context.get("workflow_generation_model")
+        original_llm = getattr(agent, "llm", None)
+
+        def _normalize(value: Any) -> str:
+            if isinstance(value, dict):
+                value = value.get("iteration_plan") or value.get("output") or ""
+            return value.strip() if isinstance(value, str) else ""
+
+        try:
+            if model:
+                agent.llm = create_model_llm(model=model, temperature=temperature)
+            result = _normalize(getattr(agent, method)(*args, **kwargs))
+            if not result:
+                # 推理型模型偶发「只吐推理不吐正文」（流式 0 块），重试一次再判定，
+                # 否则整章迭代会因一次空响应直接失败，前面试出来的稿子全丢。
+                logger.warning(f"⚠️ Agent {agent_id} 首次返回空结果，重试一次")
+                result = _normalize(getattr(agent, method)(*args, **kwargs))
+        finally:
+            if model:
+                agent.llm = original_llm
+        if not result:
+            raise RuntimeError(f"Agent 返回空结果：{agent_id}")
         return result
 
     def _stage_five_iteration_optimization(self, review_result: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        阶段5：迭代优化 - 调用真实Agent生成
-        返回 keys：revised_content, final_review
-        """
-        logger.info(f"🎯 开始真实Agent迭代优化...")
-        
-        original_content = self.project_context.get("content") or ""
+        """有限返修闭环：只有实际正文通过复评才更新最终稿。"""
+        content = self.project_context.get("content") or ""
         review = review_result.get("review") or self.project_context.get("review") or ""
-        needs_revision = review_result.get("needs_revision", False)
-        
-        if not needs_revision:
-            logger.info("✅ 内容无需修订，直接通过")
-            return {
-                "revised_content": original_content,
-                "iteration_plan": "",
-                "final_review": "内容质量达标，无需修订",
-            }
-        
-        logger.info("✏️ 内容修订师正在根据评审意见优化内容...")
-        
-        # 🆕 使用智能截断替代手动截断
-        truncated_original = smart_truncate_for_context(
-            content=original_content,
-            max_tokens=13000,  # 为评审意见和提示词预留空间
-            content_type="chapter",
-            preserve_ratio=0.8
-        )
-        
-        truncated_review = smart_truncate_for_context(
-            content=review,
-            max_tokens=6000,  # 评审意见保留核心问题
-            content_type="review",
-            preserve_ratio=0.9  # 评审意见优先保留【必改】项
-        )
-        
-        logger.info(f"📏 原始内容: {len(original_content)} → {len(truncated_original)}字符")
-        logger.info(f"📏 评审意见: {len(review)} → {len(truncated_review)}字符")
-
-        logger.info("🧭 迭代协调官正在整理修订计划...")
-        iteration_plan = ""
-        iteration_coordinator = getattr(self, "iteration_coordinator", None)
-        workflow_generation_model = self.project_context.get("workflow_generation_model")
-        if iteration_coordinator is not None:
-            original_iteration_llm = getattr(iteration_coordinator, "llm", None)
-            try:
-                if workflow_generation_model:
-                    iteration_coordinator.llm = create_model_llm(
-                        model=workflow_generation_model,
-                        temperature=0.4,
-                    )
-                coordination_result = iteration_coordinator.coordinate_iteration(
-                    truncated_review,
-                    truncated_original,
-                    context={
-                        "chapter_number": 1,
-                        "recent_chapter_assets_summary": "",
-                        "include_history_hint": False,
-                    },
-                )
-                if isinstance(coordination_result, str):
-                    iteration_plan = coordination_result.strip()
-                elif isinstance(coordination_result, dict):
-                    iteration_plan = str(
-                        coordination_result.get("iteration_plan")
-                        or coordination_result.get("output")
-                        or ""
-                    ).strip()
-                else:
-                    iteration_plan = str(coordination_result or "").strip()
-            except Exception:
-                logger.exception("迭代协调失败，直接使用评审意见修订")
-        else:
-            logger.warning("⚠️ 迭代协调官未初始化，直接使用评审意见修订")
-
-        if (
-            workflow_generation_model
-            and iteration_coordinator is not None
-            and "original_iteration_llm" in locals()
-            and original_iteration_llm is not None
-        ):
-            iteration_coordinator.llm = original_iteration_llm
-
-        revision_context = {"iteration_plan": iteration_plan} if iteration_plan else None
-        if iteration_plan:
-            logger.info(f"✅ 迭代计划完成，长度: {len(iteration_plan)}")
-        
-        original_reviser_llm = getattr(self.content_reviser, "llm", None)
-        try:
-            if workflow_generation_model:
-                self.content_reviser.llm = create_model_llm(
-                    model=workflow_generation_model,
-                    temperature=0.7,
-                )
-            revision_result = self.content_reviser.revise_content(
-                truncated_original,
-                truncated_review,
-                context=revision_context,
-            )
-        finally:
-            if workflow_generation_model and original_reviser_llm is not None:
-                self.content_reviser.llm = original_reviser_llm
-        revised_content = revision_result if isinstance(revision_result, str) else revision_result.get("output", original_content)
-        logger.info(f"✅ 内容优化完成，长度: {len(revised_content)}")
-        
-        # 最终评审
-        logger.info("🔍 最终审核官进行最终评审...")
-        
-        # 🆕 使用智能截断
-        truncated_revised = smart_truncate_for_context(
-            content=revised_content,
-            max_tokens=13000,
-            content_type="chapter",
-            preserve_ratio=0.8
-        )
-        
-        logger.info(f"📏 优化后内容: {len(revised_content)} → {len(truncated_revised)}字符")
-        
-        final_review_result = self.final_reviewer.review_final_content(
-            truncated_revised,
-            context=None,
-        )
-        final_review = final_review_result if isinstance(final_review_result, str) else final_review_result.get("output", "最终评审完成")
-        logger.info(f"✅ 最终评审完成，长度: {len(final_review)}")
-        
-        self.project_context.update({"content": revised_content})
-        return {
-            "revised_content": revised_content,
-            "iteration_plan": iteration_plan,
-            "final_review": final_review,
+        if not isinstance(content, str) or not content.strip():
+            raise ValueError("缺少章节正文，请先完成内容创作")
+        if not isinstance(review, str) or not review.strip():
+            raise ValueError("缺少评审报告，请先完成质量评审")
+        review_history = [review]
+        chapter_plan = self.project_context.get("chapter_plan") or ""
+        coordination_context = {
+            "chapter_number": int(self.project_context.get("chapter_number") or 1),
+            "recent_chapter_assets_summary": "",
+            "include_history_hint": False,
         }
+        max_rounds = max(1, int(getattr(settings, "ITERATION_MAX_ROUNDS", 2)))
+        needs_revision = bool(review_result.get("needs_revision")) or self._review_needs_revision(review)
+        iteration_plan = ""
+        revisions = 0
+        # 返修轮次耗尽时不得整轮失败丢弃成果（用户点「保存并继续」就是为了拿到新版本），
+        # 因此全程跟踪最高分版本作为降级输出。
+        best_content = content
+        best_review = ""
+        best_score: Optional[float] = None
+        while True:
+            if needs_revision:
+                iteration_plan = self._call_stage_agent(
+                    "iteration_coordinator", "coordinate_iteration", review, content,
+                    context=coordination_context,
+                )
+            revision_context = {
+                **coordination_context,
+                "iteration_plan": iteration_plan,
+                "chapter_plan": chapter_plan,
+                "world_setting": self.project_context.get("world_setting") or "",
+                "characters": self.project_context.get("characters") or "",
+                "review_text": review,
+            }
+            if needs_revision:
+                content = self._call_stage_agent(
+                    "content_reviser", "revise_content", content, review,
+                    context=revision_context, temperature=0.7,
+                )
+                revisions += 1
+            # 不截断正文、不在复评后清洗或替换稿件，确保验收与保存同一版本。
+            final_review = self._call_stage_agent(
+                "final_reviewer", "review_final_content", content,
+                context=revision_context, temperature=0.2,
+            )
+            explicit_pass = re.search(r"结论\s*[:：]\s*通过\s*[。.]?\s*$", final_review.replace("**", ""), re.M)
+            verified = review_verifies_required_ids(final_review, review + "\n" + iteration_plan)
+            round_score = extract_review_score(final_review)
+            if best_score is None or (round_score is not None and round_score > best_score):
+                best_score = round_score
+                best_content = content
+                best_review = final_review
+            if explicit_pass and verified and not self._review_needs_revision(final_review):
+                result = {"revised_content": content, "iteration_plan": iteration_plan, "final_review": final_review}
+                if not revisions:
+                    result["skipped_agents"] = ["iteration_coordinator", "content_reviser"]
+                self.project_context.update(content=content, chapters=[content], final_review=final_review)
+                return result
+            if revisions >= max_rounds:
+                logger.warning(
+                    f"⚠️ 复评未通过，已达到 {max_rounds} 轮返修上限，降级输出最高评分版本"
+                    f"（评分: {best_score if best_score is not None else '未知'}）"
+                )
+                result = {
+                    "revised_content": best_content,
+                    "iteration_plan": iteration_plan,
+                    "final_review": best_review or final_review,
+                    "iteration_degraded": True,
+                    "degraded_reason": f"复评未通过，已达到 {max_rounds} 轮返修上限",
+                    "best_score": best_score,
+                }
+                self.project_context.update(
+                    content=best_content,
+                    chapters=[best_content],
+                    final_review=result["final_review"],
+                )
+                return result
+            if not verified:
+                final_review += "\n【核验格式问题】必改要求ID未全部提供已执行的正文证据，下轮必须完整核验。"
+            review_history.append(final_review)
+            review = "\n\n".join(f"【第{index}轮评审要求，持续核验不得遗漏】\n{item}" for index, item in enumerate(review_history))
+            coordination_context["include_history_hint"] = True
+            needs_revision = True
 

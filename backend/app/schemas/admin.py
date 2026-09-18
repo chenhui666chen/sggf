@@ -57,7 +57,8 @@ class PermissionResponse(PermissionBase):
 class UserAdminResponse(BaseModel):
     id: int
     username: str
-    email: str
+    # 邮箱可为空：OAuth 用户建号时不写邮箱（与 User.email nullable 对齐，P1-3.2）
+    email: Optional[str] = None
     phone: Optional[str] = None
     full_name: Optional[str] = None
     avatar_url: Optional[str] = None

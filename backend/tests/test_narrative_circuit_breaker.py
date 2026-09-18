@@ -11,6 +11,7 @@ from app.services.narrative_circuit_breaker import (
     CIRCUIT_BREAKER_KEY,
     DIGEST_FAILURE_THRESHOLD,
     GATE_BLOCKING_THRESHOLD,
+    build_pause_detail,
     confirm_and_resume,
     get_breaker_state,
     get_pause_info,
@@ -180,3 +181,30 @@ def test_detect_invalid_chapter_output_repeat_and_unique():
     unique = "沈砚把证物收回袖中，决定先不惊动任何人。" * 40
     assert detect_invalid_chapter_output(unique, previous) is None
     assert detect_invalid_chapter_output("短文本", previous) is None
+
+
+def test_build_pause_detail_returns_user_facing_message_and_structure():
+    """409 响应体：提示语必须是面向用户的话术，并同时携带结构化暂停信息供前端渲染确认弹窗。"""
+    meta = {}
+    record_generation_signal(meta, chapter_number=3, event="empty_output")
+
+    detail = build_pause_detail(meta)
+
+    assert isinstance(detail["message"], str) and detail["message"]
+    # 不得把内部参数名/实现细节抛给用户（此前文案直接写“携带 resume_after_confirmation 重试”）
+    assert "resume_after_confirmation" not in detail["message"]
+    breaker = detail["circuit_breaker"]
+    assert breaker["paused"] is True
+    assert breaker["paused_at_chapter"] == 3
+    assert breaker["reason"]
+
+
+def test_endpoint_pause_uses_shared_detail_builder():
+    """静态回归：endpoint 的熔断 409 必须复用 build_pause_detail，避免提示语与结构两处分叉。"""
+    routes_path = (
+        ROOT_DIR / "app" / "api" / "v1" / "workflow" / "routes_chapter.py"
+    )
+    source = routes_path.read_text(encoding="utf-8")
+    assert "build_pause_detail(breaker_meta)" in source
+    # 恢复分支同样要给用户可读的运行时异常描述
+    assert "resume_after_confirmation 重试" not in source

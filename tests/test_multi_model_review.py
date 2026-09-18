@@ -228,7 +228,8 @@ def test_agent_coordinator_skips_multi_model_review_when_auto_scenario_does_not_
         result = coordinator._stage_four_quality_review({"content": "chapter text"})
 
     assert result["review"] == "single model review"
-    assert "multi_model" not in result
+    assert result["multi_model"] is False
+    assert result["review_meta"]["multi_model"] is False
     review_mock.assert_not_awaited()
 
 
@@ -371,6 +372,9 @@ def test_agent_coordinator_wrapper_preserves_review_meta_from_real_coordinator()
     class FakeRealCoordinator:
         def __init__(self) -> None:
             self.project_context = {"content": "chapter text"}
+
+        def _extract_first_chapter_plan(self, plot_outline):
+            return ""
 
         def _stage_four_quality_review(self, content_result):
             return {
@@ -674,7 +678,7 @@ async def test_multi_model_review_service_balanced_3_success() -> None:
         service,
         "_review_with_reviewer",
         new=AsyncMock(side_effect=["report-a", "report-b", "report-c"]),
-    ), patch.object(service, "_summarize", new=AsyncMock(return_value="summary")):
+    ), patch.object(service, "_summarize", new=AsyncMock(return_value={"report": "summary", "cost": 0.0, "usage_metadata": {}})):
         result = await service.review("chapter text", genre="修仙")
 
     assert result["multi_model"] is True
@@ -822,7 +826,7 @@ async def test_multi_model_review_service_records_usage_metadata_attribute() -> 
 
 
 @pytest.mark.asyncio
-async def test_multi_model_review_service_records_token_cost_metric_from_reports() -> None:
+async def test_multi_model_review_service_records_monetary_cost_metric_from_reports() -> None:
     from app.services.monitoring import metrics_collector
     from app.services.agents.multi_model_review_service import MultiModelReviewService
 
@@ -864,13 +868,13 @@ async def test_multi_model_review_service_records_token_cost_metric_from_reports
     with patch.object(service, "_review_with_reviewer", new=AsyncMock(side_effect=reports)), patch.object(
         service,
         "_summarize",
-        new=AsyncMock(return_value="summary"),
+        new=AsyncMock(return_value={"report": "summary", "cost": 0.0, "usage_metadata": {}}),
     ):
         result = await service.review("chapter text", genre="修仙")
 
     assert result["per_model_reports"][0]["cost"] == 0.2
     assert result["per_model_reports"][1]["cost"] == 0.3
-    assert metrics_collector.get_counter("multi_model_review_token_cost_total", {"preset": "balanced_3"}) == 0.5
+    assert metrics_collector.get_counter("multi_model_review_cost_total", {"preset": "balanced_3"}) == 0.5
 
 
 def test_multi_model_review_service_rejects_custom_panel_model_outside_allowlist() -> None:
@@ -992,7 +996,7 @@ async def test_multi_model_review_service_clips_reviewer_input_by_model_budget()
         service,
         "_review_with_reviewer",
         new=AsyncMock(side_effect=fake_review_with_reviewer),
-    ), patch.object(service, "_summarize", new=AsyncMock(return_value="summary")):
+    ), patch.object(service, "_summarize", new=AsyncMock(return_value={"report": "summary", "cost": 0.0, "usage_metadata": {}})):
         result = await service.review("很长的章节内容" * 200, genre="修仙")
 
     doubao_report = next(

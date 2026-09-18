@@ -505,6 +505,120 @@ class TestLLMAdapters:
         assert captured_request_kwargs["model"] == "deepseek-v4-pro"
         assert "request_model" not in captured_request_kwargs.get("extra_body", {})
 
+    @staticmethod
+    def _build_stream_fake_runtime(chunks):
+        """构造流式调用的 fake openai/httpx 运行时，chunks 为预先准备的 SSE 块。"""
+        class FakeCompletions:
+            async def create(self, **kwargs):
+                async def gen():
+                    for piece in chunks:
+                        yield piece
+                return gen()
+
+        class FakeChat:
+            def __init__(self):
+                self.completions = FakeCompletions()
+
+        class FakeAsyncOpenAI:
+            def __init__(self, **kwargs):
+                self.chat = FakeChat()
+
+        class FakeTimeout:
+            def __init__(self, *args, **kwargs):
+                self.args = args
+                self.kwargs = kwargs
+
+        class FakeAsyncClient:
+            def __init__(self, **kwargs):
+                self.kwargs = kwargs
+
+        return (
+            types.SimpleNamespace(AsyncOpenAI=FakeAsyncOpenAI),
+            types.SimpleNamespace(AsyncClient=FakeAsyncClient, Timeout=FakeTimeout),
+        )
+
+    @staticmethod
+    def _make_stream_chunk(content=None, reasoning=None, finish_reason=None):
+        delta = types.SimpleNamespace(content=content, reasoning_content=reasoning)
+        return types.SimpleNamespace(
+            choices=[types.SimpleNamespace(delta=delta, finish_reason=finish_reason)]
+        )
+
+    @pytest.mark.asyncio
+    async def test_adapter_stream_empty_response_returns_failure_with_diagnostic(self, caplog):
+        """HTTP 200 但流内无正文 → 必须判为失败（empty_response）交给回退链路。
+
+        历史上此处返回 success=True + 空字符串，model_hub 降级与 streaming_service
+        重试全部不触发，一次瞬时空响应直接击穿上游熔断开人工确认。
+        """
+        from core.llm_adapters import OpenAICompatibleAdapter
+        from schemas.unified_model_spec import UnifiedModelSpec, ModelType, APIConfig
+
+        chunks = [self._make_stream_chunk(reasoning="思考文本" * 10, finish_reason="length")]
+        fake_openai, fake_httpx = self._build_stream_fake_runtime(chunks)
+
+        spec = UnifiedModelSpec(
+            id="test-stream-empty",
+            name="Test Stream Empty",
+            provider="test",
+            model_type=ModelType.LLM,
+            api_config=APIConfig(api_key_env="TEST_API_KEY", base_url="https://api.test.com/v1"),
+        )
+
+        with patch.dict('os.environ', {'TEST_API_KEY': 'test-key'}):
+            with patch.dict('sys.modules', {'openai': fake_openai, 'httpx': fake_httpx}):
+                adapter = OpenAICompatibleAdapter(spec)
+                with caplog.at_level("WARNING"):
+                    result = await adapter.generate_stream(
+                        messages=[{"role": "user", "content": "写一章"}],
+                        on_chunk=lambda piece: None,
+                    )
+
+        assert result.success is False
+        assert result.error_code == "empty_response"
+        # 诊断信息必须保留：区分思考耗尽预算 vs 纯空流
+        joined = "".join(caplog.messages)
+        assert "finish_reason=length" in joined
+        assert "reasoning=40字" in joined
+
+    @pytest.mark.asyncio
+    async def test_adapter_stream_with_content_still_succeeds(self):
+        """回归保护：正常流式输出不受空响应判定影响。"""
+        from core.llm_adapters import OpenAICompatibleAdapter
+        from schemas.unified_model_spec import UnifiedModelSpec, ModelType, APIConfig
+
+        chunks = [
+            self._make_stream_chunk(content="第一章"),
+            self._make_stream_chunk(content="开篇"),
+            self._make_stream_chunk(finish_reason="stop"),
+        ]
+        fake_openai, fake_httpx = self._build_stream_fake_runtime(chunks)
+
+        spec = UnifiedModelSpec(
+            id="test-stream-ok",
+            name="Test Stream Ok",
+            provider="test",
+            model_type=ModelType.LLM,
+            api_config=APIConfig(api_key_env="TEST_API_KEY", base_url="https://api.test.com/v1"),
+        )
+
+        received = []
+
+        async def collect(piece):
+            received.append(piece)
+
+        with patch.dict('os.environ', {'TEST_API_KEY': 'test-key'}):
+            with patch.dict('sys.modules', {'openai': fake_openai, 'httpx': fake_httpx}):
+                adapter = OpenAICompatibleAdapter(spec)
+                result = await adapter.generate_stream(
+                    messages=[{"role": "user", "content": "写一章"}],
+                    on_chunk=collect,
+                )
+
+        assert result.success is True
+        assert result.content == "第一章开篇"
+        assert received == ["第一章", "开篇"]
+
     @pytest.mark.asyncio
     async def test_adapter_passes_sdk_timeout_even_when_model_disables_timeout_param(self):
         from core.llm_adapters import OpenAICompatibleAdapter
@@ -1017,6 +1131,86 @@ class TestModelHub:
         assert result.model_id == "fallback-model"
         assert primary_adapter.generate.await_count == 1
         assert fallback_adapter.generate.await_count == 1
+
+    @pytest.mark.asyncio
+    async def test_model_hub_stream_empty_response_falls_back_to_alternate_model(self):
+        """流式链路：主模型返回 empty_response 失败时必须自动切换回退模型，
+        而不是把空字符串当成功返回给上层（否则一次瞬时空响应直接击穿熔断）。"""
+        from core.model_hub import model_hub
+        from core.unified_registry import UnifiedModelRegistry
+        from schemas.unified_model_spec import APIConfig, LLMResult, ModelType, RoutingConfig, UnifiedModelSpec
+
+        registry = UnifiedModelRegistry()
+        registry.clear()
+        model_hub.registry = registry
+
+        registry.register(UnifiedModelSpec(
+            id="primary-stream-empty",
+            name="Primary Stream Empty",
+            provider="test",
+            model_type=ModelType.LLM,
+            api_config=APIConfig(
+                api_key_env="TEST_API_KEY",
+                base_url="https://api.test.com/v1",
+                default_max_retries=1,
+            ),
+            routing=RoutingConfig(task_types=["stream_fallback_test"], fallback_models=["secondary-stream-ok"]),
+        ))
+        registry.register(UnifiedModelSpec(
+            id="secondary-stream-ok",
+            name="Secondary Stream Ok",
+            provider="test",
+            model_type=ModelType.LLM,
+            api_config=APIConfig(
+                api_key_env="TEST_API_KEY",
+                base_url="https://api.test.com/v1",
+            ),
+            routing=RoutingConfig(task_types=["stream_fallback_test"]),
+        ))
+
+        primary_adapter = Mock()
+        primary_adapter.generate_stream = AsyncMock(
+            return_value=LLMResult(
+                success=False,
+                model_id="primary-stream-empty",
+                error="模型返回空响应（HTTP 200 但流内无正文内容）",
+                error_code="empty_response",
+            )
+        )
+        fallback_adapter = Mock()
+        fallback_adapter.generate_stream = AsyncMock(
+            return_value=LLMResult(
+                success=True,
+                model_id="secondary-stream-ok",
+                content="正文内容",
+            )
+        )
+
+        def get_adapter(model_id: str):
+            if model_id == "primary-stream-empty":
+                return primary_adapter
+            if model_id == "secondary-stream-ok":
+                return fallback_adapter
+            return None
+
+        async def on_chunk(piece: str) -> None:
+            return None
+
+        with patch.object(registry, "get_adapter", side_effect=get_adapter):
+            result = await model_hub._execute_call(
+                model_id="primary-stream-empty",
+                messages=[{"role": "user", "content": "写一章"}],
+                temperature=0.7,
+                max_tokens=None,
+                stream=True,
+                on_chunk=on_chunk,
+            )
+
+        assert result.success is True
+        assert result.model_id == "secondary-stream-ok"
+        assert result.content == "正文内容"
+        assert primary_adapter.generate_stream.await_count == 1
+        assert fallback_adapter.generate_stream.await_count == 1
 
     @pytest.mark.asyncio
     async def test_model_hub_clamps_max_tokens_before_fallback_call(self):

@@ -21,6 +21,7 @@ from app.services.narrative_metrics import (
     detect_style_drift,
     evaluate_quality_trend_alerts,
     format_quality_trend_advice,
+    format_style_drift_advice,
     record_quality_metrics,
     record_style_trend,
     validate_quality_metrics,
@@ -143,3 +144,52 @@ def test_style_drift_stable_chapter_no_flag():
     result = record_style_trend(review_meta, 5, text)
     assert result["drift"] is False
     assert result["flags"] == []
+
+
+# 基线正文与“只多感叹号”正文：句式完全一致，只换句末标点，用于隔离感叹号单一变量
+_CALM_TEXT = "他停下。风很冷。他回头。没有人。" * 60
+_LOUD_TEXT = "他停下！风很冷！他回头！没有人！" * 60
+
+
+def test_style_drift_detects_exclamation_surge():
+    """感叹号密度必须纳入漂移判定：基线为 0 时相对偏差失效，需用增量规则。"""
+    review_meta: dict = {}
+    for chapter in range(1, 5):
+        record_style_trend(review_meta, chapter, _CALM_TEXT)
+    # 句式与长度完全一致，只把句号换成感叹号
+    result = record_style_trend(review_meta, 5, _LOUD_TEXT)
+
+    flags = {flag["field"]: flag for flag in result["flags"]}
+    assert "exclamation_per_1k" in flags
+    assert flags["exclamation_per_1k"]["baseline"] == 0.0
+    assert "avg_sentence_len" not in flags
+
+
+def test_style_drift_advice_reports_recent_drift_fields():
+    review_meta: dict = {}
+    for chapter in range(1, 5):
+        record_style_trend(review_meta, chapter, _CALM_TEXT)
+    record_style_trend(review_meta, 5, _LOUD_TEXT)
+
+    advice = format_style_drift_advice(review_meta, next_chapter_number=6)
+    assert "文风漂移告警" in advice
+    assert "感叹号密度" in advice
+    assert "第5章" in advice
+
+
+def test_style_drift_advice_empty_without_drift():
+    review_meta: dict = {}
+    for chapter in range(1, 5):
+        record_style_trend(review_meta, chapter, _CALM_TEXT)
+
+    assert format_style_drift_advice(review_meta, next_chapter_number=5) == ""
+
+
+def test_style_drift_advice_ignores_stale_drift():
+    """漂移告警只对紧接着的少数章节有效，陈旧信号不得持续污染规划提示词。"""
+    review_meta: dict = {}
+    for chapter in range(1, 5):
+        record_style_trend(review_meta, chapter, _CALM_TEXT)
+    record_style_trend(review_meta, 5, _LOUD_TEXT)
+
+    assert format_style_drift_advice(review_meta, next_chapter_number=12) == ""

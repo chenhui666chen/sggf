@@ -1319,3 +1319,35 @@ def test_audit_logs_endpoint_admin_only_and_masked():
     assert item["user_id"] == regular.id
     assert item["ip_hash"] and "203.0.113.9" not in str(item["ip_hash"])
     assert item["user_agent_hash"] and "Mozilla" not in str(item["user_agent_hash"])
+
+
+def test_admin_user_list_includes_oauth_user_without_email():
+    """回归：OAuth 用户 email 为 NULL 时用户列表仍应 200（曾因 UserAdminResponse.email 必填而整页 500）。"""
+    client, session_factory = build_test_client()
+    admin = _make_admin_user(
+        session_factory, username="list_admin", email="list_admin@example.com", role_code="admin"
+    )
+
+    # OAuth 建号路径（app/services/oauth_service.py）不写邮箱
+    db = session_factory()
+    try:
+        oauth_user = User(username="oauth_user", email=None, full_name="oauth_user", is_active=True)
+        db.add(oauth_user)
+        db.commit()
+        db.refresh(oauth_user)
+    finally:
+        db.close()
+
+    response = client.get(
+        "/api/v1/admin/users",
+        params={"page": 1, "page_size": 10},
+        headers=build_auth_headers(admin.id),
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["total"] >= 2
+    matched = [item for item in payload["items"] if item["id"] == oauth_user.id]
+    assert len(matched) == 1
+    assert matched[0]["username"] == "oauth_user"
+    assert matched[0]["email"] is None

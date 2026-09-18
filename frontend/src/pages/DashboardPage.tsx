@@ -12,6 +12,7 @@ import {
   Select,
   MenuItem,
   FormControl,
+  FormHelperText,
   InputLabel,
   CircularProgress,
   Drawer,
@@ -48,9 +49,7 @@ import {
 } from '@/store/slices/projectSlice'
 import { performLogout } from '@/store/slices/authSlice'
 import { startGenerateNextChapter } from '@/store/slices/workflowSlice'
-import { generationService, GenerationTask } from '@/services/generation'
 import { apiClient } from '@/services/api'
-import GenerationProgressDialog from '@/components/GenerationProgressDialog'
 import { logger } from '@/utils/logger'
 import { buildStoryExpansionCompletionMessage } from '@/utils/storyExpansionFeedback'
 import {
@@ -60,6 +59,7 @@ import {
 import { useFormats } from '@/i18n'
 import { useTranslation } from 'react-i18next'
 import { readStoredWorkflowGenerationModel } from '@/utils/workflowGenerationModelPreference'
+import { extractCircuitBreakerPause } from '@/utils/workflowCircuitBreaker'
 import { GENRE_COLORS, getBookVizPalette } from '@/pages/dashboard/bookVizData'
 
 function extractFilenameFromContentDisposition(contentDisposition?: string | null, fallback: string = 'download.bin') {
@@ -90,6 +90,38 @@ function triggerBlobDownload(blob: Blob, filename: string) {
   window.URL.revokeObjectURL(url)
 }
 
+// 自定义大纲占位提示：按「题材|篇幅」匹配节奏建议，长篇题材单独走长篇文案
+const PACE_HINT_KEYS: Record<string, string> = {
+  '修仙|long': 'dashboard.createDialog.paceCultivationLong',
+  '修仙': 'dashboard.createDialog.paceCultivation',
+  '玄幻|long': 'dashboard.createDialog.paceXuanhuanLong',
+  '玄幻': 'dashboard.createDialog.paceXuanhuan',
+  '奇幻|long': 'dashboard.createDialog.paceFantasyLong',
+  '奇幻': 'dashboard.createDialog.paceFantasy',
+  '悬疑': 'dashboard.createDialog.paceSuspense',
+  '都市': 'dashboard.createDialog.paceUrban',
+  '言情': 'dashboard.createDialog.paceRomance',
+  '耽美': 'dashboard.createDialog.paceDanmei',
+  '科幻': 'dashboard.createDialog.paceSciFi',
+  '纯文学': 'dashboard.createDialog.paceLiterary',
+}
+
+// 篇幅规划选项：value 保持后端契约，选项文案与推荐章节范围同源
+interface PlannedLengthOption {
+  value: string
+  optionKey: string
+  hintLabelKey: string
+  minChapters: number
+  maxChapters: number
+}
+
+const PLANNED_LENGTH_OPTIONS: PlannedLengthOption[] = [
+  { value: 'short', optionKey: 'dashboard.createDialog.lengthTypes.short', hintLabelKey: 'dashboard.createDialog.lengthShort', minChapters: 3, maxChapters: 30 },
+  { value: 'mid', optionKey: 'dashboard.createDialog.lengthTypes.mid', hintLabelKey: 'dashboard.createDialog.lengthMid', minChapters: 31, maxChapters: 300 },
+  { value: 'long', optionKey: 'dashboard.createDialog.lengthTypes.long', hintLabelKey: 'dashboard.createDialog.lengthLong', minChapters: 301, maxChapters: 799 },
+  { value: 'epic', optionKey: 'dashboard.createDialog.lengthTypes.epic', hintLabelKey: 'dashboard.createDialog.lengthEpic', minChapters: 800, maxChapters: 1000 },
+]
+
 export default function DashboardPage() {
   const { t } = useTranslation()
   const { formatNumber } = useFormats()
@@ -104,11 +136,11 @@ export default function DashboardPage() {
     genre: '',
   })
 
-  // 生成功能状态
-  const [generatingProjectId, setGeneratingProjectId] = useState<number | null>(null)
-  const [showGenerationDialog, setShowGenerationDialog] = useState(false)
-  const [currentTask, setCurrentTask] = useState<GenerationTask | null>(null)
-  const [generationTaskType, setGenerationTaskType] = useState('concept')
+  // 🆕 题材与篇幅规划状态（原本在“开始创作”对话框配置，现合并到创建项目时一次填写）
+  const [plannedLengthType, setPlannedLengthType] = useState('')
+  const [plannedChaptersMin, setPlannedChaptersMin] = useState<number | ''>('')
+  const [plannedChaptersMax, setPlannedChaptersMax] = useState<number | ''>('')
+  const [userOutlinePlan, setUserOutlinePlan] = useState('')
 
   // 删除确认对话框状态
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
@@ -149,7 +181,7 @@ export default function DashboardPage() {
   // 🆕 Snackbar 状态（用于显示成功/错误提示）
   const [snackbarOpen, setSnackbarOpen] = useState(false)
   const [snackbarMessage, setSnackbarMessage] = useState('')
-  const [snackbarSeverity, setSnackbarSeverity] = useState<'success' | 'error' | 'info'>('success')
+  const [snackbarSeverity, setSnackbarSeverity] = useState<'success' | 'error' | 'info' | 'warning'>('success')
 
   // 🆕 章节字数统计（每个项目的总字数）
   const [chapterWordCounts, setChapterWordCounts] = useState<Record<number, number>>({})
@@ -189,6 +221,27 @@ export default function DashboardPage() {
     }
     const key = genreKeyMap[genre || '']
     return key ? t(`dashboard.genre.${key}`) : genre || t('dashboard.genre.unset')
+  }
+
+  // 🆕 自定义大纲占位提示：仅在已选题材与篇幅时追加节奏建议
+  const buildCustomOutlinePlaceholder = (): string => {
+    if (!formData.genre || !plannedLengthType) {
+      return t('dashboard.createDialog.customOutlinePlaceholder')
+    }
+    const paceKey = PACE_HINT_KEYS[`${formData.genre}|${plannedLengthType}`]
+      ?? PACE_HINT_KEYS[formData.genre]
+      ?? 'dashboard.createDialog.paceDefault'
+    return `${t('dashboard.createDialog.pacePrefix')}：${t(paceKey)}\n\n${t('dashboard.createDialog.noCustomPlanSuffix')}`
+  }
+
+  // 切换篇幅时同步推荐章节范围
+  const handlePlannedLengthChange = (value: string) => {
+    setPlannedLengthType(value)
+    const option = PLANNED_LENGTH_OPTIONS.find((item) => item.value === value)
+    if (option) {
+      setPlannedChaptersMin(option.minChapters)
+      setPlannedChaptersMax(option.maxChapters)
+    }
   }
 
   useEffect(() => {
@@ -363,47 +416,33 @@ export default function DashboardPage() {
   }, [selectedProjectId])
 
   const handleCreateProject = async () => {
-    if (formData.title.trim()) {
-      try {
-        const newProject = await dispatch(createProject(formData)).unwrap()
-        const newProjectId = newProject.id
-        setFormData({ title: '', description: '', genre: '' })
-        setOpenDialog(false)
-        // 重新获取项目列表
-        dispatch(fetchProjects())
-
-        // 自动初始化五阶段工作流程
-        setTimeout(() => {
-          handleInitializeWorkflow(newProjectId, newProject)
-        }, 500)
-      } catch (error) {
-        logger.error('Failed to create project:', error)
-        alert('Failed to create project. Please try again.')
-      }
-    }
-  }
-
-  const handleInitializeWorkflow = async (projectId: number, _project: any) => {
-    setGeneratingProjectId(projectId)
-    setGenerationTaskType('workflow')
-    setShowGenerationDialog(true)
-
     try {
-      await generationService.initializeWorkflow(
-        projectId,
-        (task) => {
-          setCurrentTask(task)
-        }
-      )
+      const newProject = await dispatch(
+        createProject({
+          title: formData.title.trim(),
+          description: formData.description,
+          genre: formData.genre || undefined,
+          planned_length_type: plannedLengthType || undefined,
+          planned_chapters_min: plannedChaptersMin === '' ? undefined : plannedChaptersMin,
+          planned_chapters_max: plannedChaptersMax === '' ? undefined : plannedChaptersMax,
+          user_outline_plan: userOutlinePlan.trim() || undefined,
+        })
+      ).unwrap()
+
+      setFormData({ title: '', description: '', genre: '' })
+      setPlannedLengthType('')
+      setPlannedChaptersMin('')
+      setPlannedChaptersMax('')
+      setUserOutlinePlan('')
+      setOpenDialog(false)
+      // 重新获取项目列表
+      dispatch(fetchProjects())
+
+      // 进入工作流页并自动打开开始创作对话框，补充创作模型与创作需求
+      navigate(`/workflow/${newProject.id}?autoStart=true`)
     } catch (error) {
-      logger.error('Failed to initialize workflow:', error)
-      setCurrentTask({
-        task_id: '',
-        task_type: 'workflow',
-        status: 'failed',
-        error: error instanceof Error ? error.message : 'Unknown error',
-        created_at: new Date().toISOString(),
-      })
+      logger.error('Failed to create project:', error)
+      alert('Failed to create project. Please try again.')
     }
   }
 
@@ -626,6 +665,15 @@ export default function DashboardPage() {
       } else {
         const errorData = response.data
         logger.error('❌ 创建生成任务失败:', errorData)
+
+        // 熔断暂停要用户看过原因再确认，列表页不重复实现确认弹窗，只引导去创作流程页
+        if (extractCircuitBreakerPause(response)) {
+          setSnackbarMessage(t('dashboard.breakerPaused'))
+          setSnackbarSeverity('warning')
+          setSnackbarOpen(true)
+          setGeneratingNextChapter(prev => ({ ...prev, [projectId]: false }))
+          return
+        }
 
         // 🆕 detail 可能是字符串（404/409/503）或对象（429 免费额度）
         const detail = errorData?.detail
@@ -869,7 +917,7 @@ export default function DashboardPage() {
       <Grid container spacing={{ xs: 1.5, sm: 2, md: 3 }}>
         {projects.map((project) => {
           const bookColors = getBookVizPalette(project.genre)
-          const isDisabled = generatingProjectId === project.id || generatingNextChapter[project.id]
+          const isDisabled = Boolean(generatingNextChapter[project.id])
 
           return (
           <Grid item xs={6} sm={4} md={3} lg={2.4} key={project.id}>
@@ -967,7 +1015,7 @@ export default function DashboardPage() {
                       opacity: 0.9,
                     }}
                   >
-                    {project.title}
+                    {project.title || t('dashboard.unnamedProject')}
                   </Typography>
                 </Box>
 
@@ -1122,7 +1170,7 @@ export default function DashboardPage() {
                           },
                         }}
                       >
-                        {project.title}
+                        {project.title || t('dashboard.unnamedProject')}
                       </Typography>
                     )}
 
@@ -1580,7 +1628,7 @@ export default function DashboardPage() {
       </Grid>
 
       <Dialog open={openDialog} onClose={() => setOpenDialog(false)} maxWidth="sm" fullWidth>
-        <Box sx={{ p: 3 }}>
+        <Box sx={{ p: 3, maxHeight: '85vh', overflowY: 'auto' }}>
           <Typography variant="h6" gutterBottom>
             {t('dashboard.createProjectTitle')}
           </Typography>
@@ -1590,16 +1638,18 @@ export default function DashboardPage() {
             value={formData.title}
             onChange={(e) => setFormData({ ...formData, title: e.target.value })}
             margin="normal"
-            required
+            helperText={formData.title.trim() ? ' ' : t('dashboard.createDialog.titleFallbackHint')}
           />
           <TextField
             fullWidth
-            label={t('dashboard.projectDescLabel')}
+            label={t('dashboard.requirementLabel')}
+            placeholder={t('dashboard.requirementPlaceholder')}
             value={formData.description}
             onChange={(e) => setFormData({ ...formData, description: e.target.value })}
             margin="normal"
             multiline
             rows={3}
+            helperText={t('dashboard.requirementHelper')}
           />
           <FormControl fullWidth margin="normal">
             <InputLabel>{t('dashboard.genreLabel')}</InputLabel>
@@ -1620,7 +1670,72 @@ export default function DashboardPage() {
               <MenuItem value="Fantasy">{t('dashboard.genre.fantasyEn')}</MenuItem>
               <MenuItem value="Other">{t('dashboard.genre.other')}</MenuItem>
             </Select>
+            <FormHelperText>{t('dashboard.createDialog.genreHelper')}</FormHelperText>
           </FormControl>
+
+          {/* 篇幅规划（与题材同样在创建阶段一次配置） */}
+          <FormControl fullWidth margin="normal">
+            <InputLabel>{t('dashboard.createDialog.lengthPlan')}</InputLabel>
+            <Select
+              value={plannedLengthType}
+              onChange={(e) => handlePlannedLengthChange(e.target.value)}
+              label={t('dashboard.createDialog.lengthPlan')}
+            >
+              <MenuItem value="">{t('dashboard.createDialog.pleaseSelect')}</MenuItem>
+              {PLANNED_LENGTH_OPTIONS.map((option) => (
+                <MenuItem key={option.value} value={option.value}>
+                  {t(option.optionKey)}
+                </MenuItem>
+              ))}
+            </Select>
+            <FormHelperText>{t('dashboard.createDialog.lengthHelper')}</FormHelperText>
+          </FormControl>
+
+          {/* 题材与篇幅联动提示 */}
+          {formData.genre && plannedLengthType && (
+            <Alert severity="info" sx={{ mt: 2, backgroundColor: 'info.light' }}>
+              <Typography variant="body2">
+                {t('dashboard.createDialog.genreLengthHint', {
+                  genre: getGenreLabel(formData.genre),
+                  length: t(
+                    PLANNED_LENGTH_OPTIONS.find((option) => option.value === plannedLengthType)?.hintLabelKey
+                      ?? plannedLengthType
+                  ),
+                })}
+              </Typography>
+            </Alert>
+          )}
+
+          <Box sx={{ display: 'flex', gap: 2, mt: 2 }}>
+            <TextField
+              fullWidth
+              type="number"
+              label={t('dashboard.createDialog.minChapters')}
+              value={plannedChaptersMin}
+              onChange={(e) => setPlannedChaptersMin(e.target.value === '' ? '' : Number(e.target.value))}
+              inputProps={{ min: 1 }}
+            />
+            <TextField
+              fullWidth
+              type="number"
+              label={t('dashboard.createDialog.maxChapters')}
+              value={plannedChaptersMax}
+              onChange={(e) => setPlannedChaptersMax(e.target.value === '' ? '' : Number(e.target.value))}
+              inputProps={{ min: 1 }}
+            />
+          </Box>
+
+          <TextField
+            fullWidth
+            multiline
+            rows={4}
+            margin="normal"
+            label={t('dashboard.createDialog.customOutline')}
+            placeholder={buildCustomOutlinePlaceholder()}
+            value={userOutlinePlan}
+            onChange={(e) => setUserOutlinePlan(e.target.value)}
+          />
+
           <Box sx={{ mt: 3, display: 'flex', gap: 2 }}>
             <Button
               variant="contained"
@@ -1667,25 +1782,6 @@ export default function DashboardPage() {
           </Box>
         </Box>
       </Dialog>
-
-      {/* 生成进度对话框 */}
-      <GenerationProgressDialog
-        open={showGenerationDialog}
-        taskType={generationTaskType}
-        task={currentTask}
-        onClose={() => {
-          setShowGenerationDialog(false)
-          setGeneratingProjectId(null)
-          setCurrentTask(null)
-        }}
-        onRetry={() => {
-          // 重试逻辑可以根据需要实现
-          if (generatingProjectId) {
-            setShowGenerationDialog(false)
-            setCurrentTask(null)
-          }
-        }}
-      />
 
       {/* 章节列表侧边栏 */}
       <Drawer

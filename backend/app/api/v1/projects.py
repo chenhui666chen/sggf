@@ -15,7 +15,7 @@ from app.models.project import Project, Chapter
 from app.models.character import Character
 from app.schemas.project import (
     ProjectCreate, ProjectUpdate, ProjectResponse, ProjectDetailResponse,
-    ChapterCreate, ChapterUpdate, ChapterResponse
+    ChapterCreateInProject, ChapterUpdate, ChapterResponse
 )
 from app.schemas.review_config import (
     MultiModelReviewConfig,
@@ -24,6 +24,7 @@ from app.schemas.review_config import (
 )
 from app.core.security import get_current_user
 from app.services.workflow_context_builder import WorkflowContextBuilder
+from app.services.chapter_creation import create_project_chapter
 from app.services.audiobook.project_audio_config import (
     get_audio_engine_mode,
     get_audio_fx,
@@ -1067,11 +1068,11 @@ async def list_chapters(
 @router.post("/{project_id}/chapters", response_model=ChapterResponse)
 async def create_chapter(
     project_id: int,
-    chapter_data: ChapterCreate,
+    chapter_data: ChapterCreateInProject,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """创建新章节"""
+    """创建新章节（project_id 来自路径参数）"""
     project = db.query(Project).filter(
         (Project.id == project_id) & (Project.user_id == current_user.id)
     ).first()
@@ -1082,17 +1083,14 @@ async def create_chapter(
             detail="Project not found"
         )
     
-    chapter = Chapter(
-        project_id=project_id,
+    # 与 POST /api/v1/chapters/ 共用同一套创建逻辑（编号/标题/字数/追踪/摘要）
+    return create_project_chapter(
+        db,
+        project_id,
+        content=chapter_data.content,
         chapter_number=chapter_data.chapter_number,
         title=chapter_data.title,
-        content=chapter_data.content,
-        word_count=len(chapter_data.content.split()) if chapter_data.content else 0
     )
-    db.add(chapter)
-    db.commit()
-    db.refresh(chapter)
-    return chapter
 
 
 # ===========================

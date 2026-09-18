@@ -674,6 +674,9 @@ def test_generate_epic_framework_prefers_structured_json_payloads():
             """
         ]
     )
+    # epic 两段式已按设计切到 creative_director_pro（_base.py 中与 creative_director 同源），
+    # 测试脚手架用同一个注入 agent 别名即可
+    expander.creative_director_pro = expander.creative_director
 
     result = expander.generate_epic_framework(
         world_setting="修仙世界，旧案牵动宗门暗线。",
@@ -748,6 +751,7 @@ def test_generate_epic_framework_falls_back_when_json_has_no_volumes():
 - 主角：第1卷登场并持续成长"""
         ]
     )
+    expander.creative_director_pro = expander.creative_director
 
     result = expander.generate_epic_framework(
         world_setting="修仙世界，主角自陵墓逃生。",
@@ -837,6 +841,7 @@ def test_generate_epic_framework_falls_back_when_json_has_incomplete_volumes():
         ]
     )
     expander.creative_director = creative_director
+    expander.creative_director_pro = creative_director
 
     result = expander.generate_epic_framework(
         world_setting="修仙世界，主角自陵墓逃生。",

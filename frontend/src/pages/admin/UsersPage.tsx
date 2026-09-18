@@ -42,7 +42,7 @@ import { apiClient } from '@/services/api'
 interface User {
   id: number
   username: string
-  email: string
+  email: string | null
   phone: string | null
   full_name: string | null
   is_active: boolean
@@ -538,7 +538,7 @@ export default function AdminUsersPage() {
                   <TableRow key={user.id}>
                     <TableCell>{user.id}</TableCell>
                     <TableCell>{user.username}</TableCell>
-                    <TableCell>{user.email}</TableCell>
+                    <TableCell>{user.email || '-'}</TableCell>
                     <TableCell>{user.phone || '-'}</TableCell>
                     <TableCell>
                       {user.roles.map((role) => (

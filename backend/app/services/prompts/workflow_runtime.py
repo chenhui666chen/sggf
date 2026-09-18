@@ -284,7 +284,9 @@ def build_streaming_structure_prompts(
     return system_prompt, user_prompt
 
 
-def build_first_chapter_review_prompts(*, chapter_draft: str) -> Tuple[str, str]:
+def build_first_chapter_review_prompts(
+    *, chapter_draft: str, chapter_plan: str = "", world_setting: str = "", characters: str = "",
+) -> Tuple[str, str]:
     base_prompt = prompt_manager.get_agent_prompt("quality_reviewer").strip()
     system_prompt = _join_prompt_sections(
         base_prompt,
@@ -297,6 +299,15 @@ def build_first_chapter_review_prompts(*, chapter_draft: str) -> Tuple[str, str]
 - 反馈必须可执行，避免“增强张力”“优化文笔”这类空泛建议。""",
     )
     user_prompt = f"""请评审以下第一章内容：
+
+【本章规划】
+{chapter_plan or '（未提供，不得自行补造规划要求）'}
+
+【世界观约束】
+{world_setting or '（未提供，只检查正文内部一致性）'}
+
+【人物设定】
+{characters or '（未提供，不得假设前文人设）'}
 
 【章节内容】
 {chapter_draft}
@@ -343,6 +354,9 @@ def build_first_chapter_review_prompts(*, chapter_draft: str) -> Tuple[str, str]
 ### 亮点
 - ...
 
+{FAILURE_CODE_OUTPUT_SPEC}
+
+必改项按 R0-MUST-1、R0-MUST-2 编号，每项写明位置或短引文、影响、修复动作、验收条件；没有必改项时明确写“无”，不要复制示例占位符。
 请严格按上述结构输出，不要额外写总论或寒暄。"""
     return system_prompt, user_prompt
 
@@ -525,6 +539,7 @@ def get_iteration_revision_system_prompt() -> str:
 8. 如果提供了最近章节连续性资产，必须优先承接其中的场景目标、冲突推进、人物状态、结尾钩子与伏笔。
 9. 如果提供了协调计划，优先落实其中的“本轮必做项”和“禁止改动项”。
 10. 涉及情绪递进、境界差博弈、多方冲突、清算过程等必改项，必须整段重写相关段落来兑现——含逐拍递进（如“反击→被压制→再挣扎→崩溃”的层级）与同步情绪渲染；不得只插入单句证据应付。
+11. 评审报告《一致意见》（多模型交叉印证）点名的每条问题与【必改】同等执行，不得因未带【必改】标签而跳过；只有《最终修改建议》中标为【可选】的条目才允许权衡取舍。
 
 【修订文风与情感纪律】（与初稿同等约束；修订补写、重写的段落同样不得违反）
 - 禁止分点式推进：倒计时、清算、对峙、异变等序列段落必须写成带情绪起伏的连续叙述，不得“第一息…第二息…”式列条；高压情境下的内心独白不得逐条列举想说的话或分析要点，须碎片化、身体化；旁观者目睹冲击性场面需同步给出反应细节。
@@ -532,9 +547,10 @@ def get_iteration_revision_system_prompt() -> str:
 - “不是……而是……”对比句式全章最多 2 次；每段核心比喻不超过 1 个；禁用“她强迫自己冷静下来”“重新将注意力集中”一类模板化过渡句。
 - 人物在关键情感时刻（悲恸、决绝、崩溃、觉悟）必须有具体的身体反应、记忆闪回或习惯性小动作落地；情感状态切换不得直接跳切。
 - 修订新增或重写的文字必须与原文语域一致，不得比原稿更粗糙。
+- 不得新增前文与规划之外的事实来应付必改项（新造回忆、新人物台词、物品去向、时间点）；需要因果支撑时改按现有可溯源素材重写，宁可删去依赖该事实的表述，不得用编造细节圆场。
 - 补写关键动作、触碰或对峙场景时，须以感官冲击与动作细节呈现，不得扩写成条理化技术分析或过度理性的认知过程；补写内容不得引入新的节奏拖沓、重复或逻辑问题。
 - 补写情绪反应须单点聚焦：一种主导情绪配一笔身体反应即可，不得在同一段叠加多重情绪或层层修饰，避免情绪失焦。
-- 按评审建议补写内容时，每处补写不超过三句，并同步删减等量的旧内容控制净增量；对已被点名拖沓风险的段落，补写必须以删定补，不得使该段落变长。
+- 仅局部润色时，每处补写以三句内为宜，并删减冗余内容控制净增量；结构性重写不受三句限制，须按必改项完整兑现因果和情绪过程。对已被点名拖沓风险的段落，优先重写或删减，不以堆砌细节替代推进。
 - 评审指出关键抉择拉锯不足、爽点顺滑无力时，修订须整段重写兑现“计算→动摇细节→落定带代价”的抉择层次与“阻力/反复/代价”的爽点过程；不得只补一句心理描写应付。
 
 【输出格式要求】
@@ -560,11 +576,30 @@ def build_iteration_loop_review_user_prompt(
     review_text: str = "",
     iteration_plan: str = "",
     recent_chapter_assets_summary: str = "",
+    previous_content: str = "",
 ) -> str:
     continuity_block = (
         recent_chapter_assets_summary
         if recent_chapter_assets_summary
         else "（最近章节没有可用的结构化连续性资产）"
+    )
+    previous_block = (
+        f"""
+【修订前正文】（本轮改稿基线，仅用于核对修订稿新增了哪些事实，不参与评分）
+{previous_content}
+"""
+        if previous_content
+        else ""
+    )
+    # 溯源核验只在拿到改稿基线时生效，没有上一版正文就不得要求模型无据比对
+    traceability_rule = (
+        "\n7. 新增事实溯源（一票否决）：必须把修订稿新增的关键事实（人物此前采取的行动、"
+        "物品来源与去向、时间点、他人台词、现场细节）逐条与修订前正文、本章规划、"
+        "最近章节连续性资产比对；查无出处即判为编造，在核验表补一行「新增事实溯源 | 未执行 | "
+        "无出处事实原文 | 前文与规划均无出处」，并输出 `NEW_FACT_UNSOURCED|HIGH|<无出处事实原文>`；"
+        "靠该事实才成立的必改项不得判为“已执行”，结论不得为“通过”。"
+        if previous_content
+        else ""
     )
     chapter_plan_block = chapter_plan if chapter_plan else "（未提供章节规划，请根据当前正文自行判断达标度。）"
     review_block = review_text if review_text else "（未提供上一轮评审要求，仅按统一评分口径复评。）"
@@ -584,15 +619,17 @@ def build_iteration_loop_review_user_prompt(
 
 【本轮迭代协调计划】（用于逐条验收）
 {iteration_plan_block}
-
+{previous_block}
 【章节内容】
 {chapter_content}
 
 【复评要求】
 1. 必须先按统一6维度评分口径重新评分，综合评分不得因“是否执行修改”单独加减分。
-2. 必须逐条核验上一轮评审要求和本轮必做项是否已执行。
+2. 必须逐条核验上一轮评审要求和本轮必做项是否已执行；上一轮报告《一致意见》段点名的跨模型印证问题同样逐条验收，不得只看带【必改】标签的条目。
 3. 如果未达标，只保留最影响通过的3条剩余问题。
-4. 明确给出“通过 / 继续修改 / 风险较高”结论。
+4. 明确给出“通过 / 继续修改 / 风险较高”中的唯一结论；存在必改项部分执行、未执行或 HIGH 失败码时不得判为通过。
+5. 核验表沿用原要求ID，已执行必须引用当前正文证据，不得引用计划承诺；缺少证据时不得标为已执行。
+6. 失败码清单仅列当前稿仍存在的问题；已解决项留在核验表，无剩余问题写“无”，不要照抄历史失败码。{traceability_rule}
 
 {FAILURE_CODE_OUTPUT_SPEC}
 
