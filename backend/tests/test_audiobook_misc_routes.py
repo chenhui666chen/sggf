@@ -70,7 +70,7 @@ def test_legacy_preview_generate_route_is_removed():
         json={
             "text": "试听文本",
             "voice_id": "voice-1",
-            "tts_model": "qwen3-tts-instruct-flash",
+            "tts_model": "qwen-audio-3.1-tts-flash",
         },
     )
 

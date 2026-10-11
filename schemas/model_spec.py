@@ -15,11 +15,17 @@ from .common import SupportLevel, ModelStatus
 if TYPE_CHECKING:
     from .task_spec import TaskSpec
 
+# 上游用 -1 表示"由模型自行决定时长"（智能时长），不是本地可派生的值
+SMART_DURATION_VALUE = -1.0
+
 
 @dataclass
 class ConstraintSpec:
     """Model constraints specification."""
     duration: List[float] = field(default_factory=list)
+    duration_min: Optional[float] = None
+    duration_max: Optional[float] = None
+    duration_supports_auto: bool = False
     ratios: List[str] = field(default_factory=list)
     min_width: int = 256
     max_width: int = 4096
@@ -28,8 +34,31 @@ class ConstraintSpec:
     max_batch_size: int = 1
     requires_square_pixels: bool = False
     max_prompt_length: int = 1000
-    
+
+    def __post_init__(self) -> None:
+        # models.yaml 里 duration 有两种写法：档位列表（多数模型）和 {min,max,default}
+        # 区间（vidu-q3-pro-*、kling-v3-*、wan3.0-video）。不归一化的话下面的判定会拿 dict 的键去做
+        # 减法而抛 TypeError，而 core/router.py 的候选池不按 modality 收窄，一个脏条目
+        # 就能让所有带 duration 的路由请求全崩。
+        if isinstance(self.duration, dict):
+            raw = self.duration
+            if raw.get("min") is not None:
+                self.duration_min = float(raw["min"])
+            if raw.get("max") is not None:
+                self.duration_max = float(raw["max"])
+            self.duration_supports_auto = bool(raw.get("supports_auto", False))
+            default = raw.get("default")
+            self.duration = [float(default)] if default is not None else []
+
+    @property
+    def has_duration_range(self) -> bool:
+        return self.duration_min is not None and self.duration_max is not None
+
     def supports_duration(self, duration: float) -> bool:
+        if self.duration_supports_auto and duration == SMART_DURATION_VALUE:
+            return True
+        if self.has_duration_range:
+            return self.duration_min - 0.1 <= duration <= self.duration_max + 0.1
         if not self.duration:
             return True
         return duration in self.duration or any(
@@ -48,6 +77,10 @@ class ConstraintSpec:
         )
     
     def get_nearest_duration(self, target: float) -> Optional[float]:
+        if self.duration_supports_auto and target == SMART_DURATION_VALUE:
+            return target
+        if self.has_duration_range:
+            return min(max(target, self.duration_min), self.duration_max)
         if not self.duration:
             return target
         return min(self.duration, key=lambda x: abs(x - target))
@@ -55,6 +88,9 @@ class ConstraintSpec:
     def to_dict(self) -> Dict[str, Any]:
         return {
             "duration": self.duration,
+            "duration_min": self.duration_min,
+            "duration_max": self.duration_max,
+            "duration_supports_auto": self.duration_supports_auto,
             "ratios": self.ratios,
             "min_width": self.min_width,
             "max_width": self.max_width,

@@ -25,6 +25,12 @@ from app.core.config import settings
 from app.db.base import SessionLocal
 from app.services.audiobook.audio_asset_cloud_storage import upload_audio_library_asset
 from app.services.audiobook.audio_library_asset_repository import upsert_audio_library_asset
+from adapters._shared import (
+    MUREKA_FAILED_STATUSES,
+    MUREKA_INSTRUMENTAL_MODEL,
+    MUREKA_INSTRUMENTAL_N,
+    MUREKA_PENDING_STATUSES,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -225,10 +231,12 @@ class MurekaO1Client:
             
             combined_prompt = ", ".join(prompt_parts) if prompt_parts else request.prompt
 
+            # 上游 instrumental 没有 duration 入参（2026-10-11 实测：请求 30 秒返回 188.5 秒），
+            # 时长由模型决定；request.duration 只用于本地缓存索引与积分冻结，不下发。
             payload = {
                 "prompt": combined_prompt,  # 风格描述，如 "tense, suspense, slow, piano"
-                "model": "auto",           # 自动选择模型
-                "duration": request.duration,  # 时长（秒）
+                "model": MUREKA_INSTRUMENTAL_MODEL,  # 固定代际，避免 auto 随上游新版静默改变产出
+                "n": MUREKA_INSTRUMENTAL_N,  # 上游缺省 2 且按数量计费，不发 n 会出两首、扣双倍
             }
             headers = {
                 "Authorization": f"Bearer {self.api_key}",
@@ -278,9 +286,9 @@ class MurekaO1Client:
                 
                 logger.debug(f"🔍 任务 {task_id} 状态: {status} | 原始数据: {status_data}")
                 
-                # 兼容不同接口的状态字段：
-                # - instrumental 文档常见: pending / running / succeeded / failed
-                # - 早期文档: preparing / processing / completed
+                # 上游实测状态集合：preparing/queued/running/streaming/reviewing 为非终态，succeeded 为成功，
+                # failed/timeouted/cancelled 为终态失败；后两者必须走失败分支，
+                # 否则会落到未知状态分支白等到本地轮询超时并误报成 timeout。
                 if status in ["completed", "succeeded"]:
                     # 任务完成，获取音频 URL
                     # Mureka instrumental 接口返回格式：
@@ -310,10 +318,14 @@ class MurekaO1Client:
                     if not audio_url:
                         raise RuntimeError(f"任务完成但缺少 audio_url: {status_data}")
                     break
-                elif status in ["failed", "error"]:
-                    error_msg = status_data.get("error", {}).get("message", "未知错误")
-                    raise RuntimeError(f"任务失败: {error_msg}")
-                elif status in ["preparing", "processing", "queued", "pending", "running", "reviewing"]:
+                elif status in list(MUREKA_FAILED_STATUSES):
+                    error_msg = (
+                        status_data.get("failed_reason")
+                        or status_data.get("error", {}).get("message")
+                        or "未知错误"
+                    )
+                    raise RuntimeError(f"任务失败({status}): {error_msg}")
+                elif status in list(MUREKA_PENDING_STATUSES):
                     # 继续等待
                     await asyncio.sleep(poll_interval)
                 else:
@@ -329,7 +341,8 @@ class MurekaO1Client:
                 return r2.content
             
             audio_data = await loop.run_in_executor(None, _download)
-            cost = 0.0  # Mureka 计费需要根据实际情况调整
+            # 上游按生成数量扣额度单位（实测 n=1 扣 100），额度单位与人民币换算未经证实，不在本地折算。
+            cost = 0.0
 
             # 🆕 自动去除Mureka水印（使用配置的裁剪时长）
             if self.watermark_trim_seconds > 0:

@@ -35,7 +35,7 @@ class EpicFrameworkMixin:
                                total_volumes: int, total_chapters_range: tuple[int, int]) -> Dict[str, Any]:
         """生成史诗框架（超长网文总体规划）
         
-        为1000+章的超长网文生成宏观框架，充分利用 deepseek-v4-pro 的 384K 输出能力
+        为1000+章的超长网文生成宏观框架，充分利用 deepseek-pro 的 384K 输出能力
         每卷可生成 800-1500 字的饱满概要，包含场景列表
         
         Args:
@@ -67,7 +67,7 @@ class EpicFrameworkMixin:
 {characters[:8000] if characters else '待完善'}
 
 【输出要求】
-✅ 充分利用 deepseek-v4-pro 的 384K 超长输出能力，每卷概要 800-1500 字，信息密度要高
+✅ 充分利用 deepseek-pro 的 384K 超长输出能力，每卷概要 800-1500 字，信息密度要高
 
 ## 一、整体叙事节奏
 分为前中后三期，每期占多少卷，预计章节数：

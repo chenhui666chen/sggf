@@ -42,44 +42,49 @@ STYLE_TRAIT_HINTS = {
     "soothing": ("adult", "gentle"),
     "elder": ("elder", "calm"),
     "dialect": ("adult", "dialect"),
+    # qwen-audio-3.1-tts-flash 目录新增的 style 取值
+    "natural": ("adult", "gentle"),
+    "child": ("child", "energetic"),
+    "roleplay": ("young", "energetic"),
+    "american": ("adult", "calm"),
+    "british": ("adult", "calm"),
+    "accent": ("adult", "calm"),
 }
 
+# 3.1 目录自带 style/gender，画像默认由 _derive_traits 推导；
+# 这里只保留官方描述明确指向特殊声线的条目。
 VOICE_PROFILE_OVERRIDES: Dict[str, Dict[str, Any]] = {
-    "Cherry": {"age_group": "young"},
-    "Momo": {"age_group": "young"},
-    "Bunny": {"age_group": "young", "personality": "energetic"},
-    "Kai": {"personality": "energetic"},
-    "Vincent": {"personality": "calm"},
-    "Neil": {"personality": "calm"},
-    "Mia": {"personality": "energetic"},
-    "Eldric Sage": {"age_group": "elder", "personality": "serious"},
-    # 方言音色（官方 voice 参数）
+    "longanyuanfei_v3.1": {"personality": "cold"},  # 高傲妃子音
+    "longxiaoxia_v3.1": {"personality": "cold"},  # 沉稳权威女
+    "libai_v3.1": {"age_group": "elder", "personality": "calm"},  # 古代诗仙男
 }
 
+# 历史预设别名 → qwen-audio-3.1-tts-flash 音色 ID。
+# 老项目配置与旧默认值仍会引用这些别名，按性别/风格就近落到在架音色。
 LEGACY_PRESET_ALIASES = {
-    "male_young_energetic": "Ethan",
-    "male_young_gentle": "Vincent",
-    "male_adult_calm": "Neil",
-    "male_adult_energetic": "Ethan",
-    "male_elder_wise": "Eldric Sage",
-    "male_warm": "Vincent",
-    "male_customer_service": "Kai",
-    "male_refreshing": "Kai",
-    "male_monkey": "Nofish",
-    "male_narrator": "Neil",
-    "male_villain_sinister": "Vincent",
-    "female_villain_cold": "Bellona",
-    "female_villain_cunning": "Vivian",
-    "female_young_gentle": "Cherry",
-    "female_young_energetic": "Bunny",
-    "female_young_cute": "Momo",
-    "female_adult_elegant": "Bella",
-    "female_adult_intellectual": "Vivian",
-    "female_capable": "Bellona",
-    "female_elder": "Chelsie",
-    "female_intimate": "Mochi",
-    "female_lively": "Mia",
-    "female_child": "Momo",
+    "male_young_energetic": "longanyang_v3.1",
+    "male_young_gentle": "longhan_v3.1",
+    "male_adult_calm": "longanzhi_v3.1",
+    "male_adult_energetic": "longanyang_v3.1",
+    "male_elder_wise": "libai_v3.1",
+    "male_warm": "longhan_v3.1",
+    "male_customer_service": "longanlang_v3.1",
+    "male_refreshing": "anmingyuan_v3.1",
+    "male_monkey": "longhuohuo_v3.1",
+    "male_narrator": "longsanshu_v3.1",
+    "male_villain_sinister": "huozhuoshi_v3.1",
+    "female_villain_cold": "longanyuanfei_v3.1",
+    "female_villain_cunning": "longxiaoxia_v3.1",
+    "female_young_gentle": "yeqinghe_v3.1",
+    "female_young_energetic": "yuxiaoyun_v3.1",
+    "female_young_cute": "qiaoxiaojiao_v3.1",
+    "female_adult_elegant": "xiaoxingzhi_v3.1",
+    "female_adult_intellectual": "xuyuyuan_v3.1",
+    "female_capable": "loongstella_v3.1",
+    "female_elder": "wenhuaizhi_v3.1",
+    "female_intimate": "anruorou_v3.1",
+    "female_lively": "xuxiaoqiao_v3.1",
+    "female_child": "longling_v3.1",
 }
 
 _CATALOG = load_voice_catalog()
@@ -143,6 +148,15 @@ _CUSTOM_ASSET_VOICE_PREFIXES = (
 )
 
 
+class VoiceMappingResolutionError(ValueError):
+    """用户显式指定的角色音色在目标模型音色空间解析失败。
+
+    口径与 ``validate_project_voice_references`` 一致：配置错误继承 ValueError，
+    路由层可直接映射为 400，后台任务按失败收口。解析失败**不再**降级为
+    ``assign_voice()`` 自动分配 —— 那会让整本书少一条用户指定的声线而任务仍显示成功。
+    """
+
+
 
 @dataclass
 class VoiceProfile:
@@ -156,7 +170,7 @@ class VoiceProfile:
     personality: str  # "calm" | "energetic" | "gentle" | "cold" | "warm"
     
     # TTS参数
-    tts_model: str = "qwen3-tts-instruct-flash"  # 🆕 适用的TTS模型
+    tts_model: str = DEFAULT_AUDIOBOOK_TTS_MODEL  # 🆕 适用的TTS模型
     tts_speaker_id: str = ""  # TTS服务的音色ID
     pitch_base: int = 50  # 旧配置兼容元数据；固定音色合成请求不会发送该值
     speed_base: float = 1.0  # 基础语速 0.5-2.0
@@ -331,16 +345,16 @@ class VoiceManager:
         return None
     
     def _resolve_voice_config(self, voice_id: Optional[str]) -> Optional[Tuple[str, Dict[str, Any]]]:
-        """将 legacy voice_id（含 CosyVoice speaker）映射到 Qwen3 预设。"""
+        """将 legacy voice_id（含 CosyVoice speaker）映射到当前 Qwen 预设。"""
         if not voice_id:
             return None
         if voice_id in self.PRESET_VOICES:
             return voice_id, self.PRESET_VOICES[voice_id]
-        
+
         normalized = normalize_speaker_id(voice_id)
         preset_id = self.SPEAKER_TO_PRESET.get(normalized.lower())
         if preset_id:
-            logger.info(f"🔁 映射旧音色 '{voice_id}' → Qwen3 speaker '{normalized}' (preset {preset_id})")
+            logger.info(f"🔁 映射旧音色 '{voice_id}' → speaker '{normalized}' (preset {preset_id})")
             return preset_id, self.PRESET_VOICES[preset_id]
         return None
 
@@ -553,7 +567,7 @@ class VoiceManager:
         personality = str(character_info.get("personality", "calm")).lower()
         role_type = str(character_info.get("role_type", "")).lower()
         
-        # 🎭 反派角色检测：优先分配高张力的 Ethan/Bunny
+        # 🎭 反派角色检测：优先分配目录内高张力反派音色
         villain_keywords = ["反派", "恶人", "反角", "敌人", "boss", "villain", "enemy", "antagonist"]
         villain_personalities = ["cold", "evil", "sinister", "cruel", "ruthless", "domineering", "cunning"]
         
@@ -565,12 +579,13 @@ class VoiceManager:
         preferred_villain_voice_id = None
         if is_villain:
             logger.info(f"🎭 检测到反派角色，优先使用高张力音色 (role_type={role_type}, personality={personality})")
-            # 根据性别锁定 Ethan/Bunny，并由情感映射增强张力
-            # TTS引擎会自动为这些音色添加 angry/disgusted 情感
+            # 根据性别锁定 3.1 目录里的反派声线（与 LEGACY_PRESET_ALIASES 的反派定位一致）。
+            # 已退役模型里靠音色自带 angry/disgusted 张力的做法在 3.1 不成立：
+            # 张力由表演指令承担，这里只保证声线本身可用且落在反派档上。
             if gender == "male":
-                preferred_villain_voice_id = "Ethan"  # Ethan，支持angry/disgusted情感
+                preferred_villain_voice_id = "huozhuoshi_v3.1"  # 霍拙石：反派阴鸷男声
             elif gender == "female":
-                preferred_villain_voice_id = "Bunny"  # Sunny，支持angry/disgusted情感
+                preferred_villain_voice_id = "longanyuanfei_v3.1"  # 龙安元妃：反派冷艳女声
 
             if preferred_villain_voice_id and preferred_villain_voice_id not in self.used_voice_ids:
                 logger.info("🎭 为反派分配专用高张力音色: %s", preferred_villain_voice_id)
@@ -629,8 +644,9 @@ class VoiceManager:
                     continue
                 if voice_id not in self.used_voice_ids and voice_id != "male_narrator":
                     return voice_id
-            # 最后降级：返回默认音色
-            return "Ethan"
+            # 最后降级：返回旁白音色的预设键（历史默认名 "Ethan" 只存在于已退役模型的音色空间，
+            # 在 3.1 目录里取不到配置，会让 assign_voice 直接 KeyError）
+            return "male_narrator"
     
     def _infer_traits_from_name(self, character_name: str) -> Dict[str, Any]:
         """
@@ -1046,7 +1062,7 @@ class VoiceManager:
             gender=voice_config["gender"],
             age_group=voice_config["age_group"],
             personality=voice_config["personality"],
-            tts_model=tts_model or voice_config.get("tts_model", "qwen3-tts-instruct-flash"),
+            tts_model=tts_model or voice_config.get("tts_model", DEFAULT_AUDIOBOOK_TTS_MODEL),
             tts_speaker_id=voice_config["tts_speaker_id"],
             pitch_base=voice_config["pitch_base"],
             speed_base=voice_config["speed_base"],
@@ -1088,6 +1104,10 @@ class VoiceManager:
         Args:
             voice_mapping: 用户配置的音色映射
             character_profiles: 🆕 完整角色档案（用于增强音色profile信息和模型推荐）
+
+        Raises:
+            VoiceMappingResolutionError: 任一角色显式配置的音色解析失败。整批原子处理，
+                越界时不落任何角色配置，也不回落到自动分配。
         """
         if not voice_mapping:
             return
@@ -1104,6 +1124,11 @@ class VoiceManager:
         except ImportError:
             suggest_model_for_character = None
 
+        # 先整批解析、全部命中才写入：解析失败既不给下游留半套配置继续合成，
+        # 也不让越界角色回落到 assign_voice() 的自动分配（人耳是最终真值）。
+        pending: List[Tuple[str, "VoiceProfile", str, str]] = []
+        unresolved: List[str] = []
+
         for character_name, config in voice_mapping.items():
             if not isinstance(config, dict):
                 continue
@@ -1115,6 +1140,7 @@ class VoiceManager:
 
             # 🆕 确定TTS模型：用户配置 > 智能推荐 > 默认值
             tts_model = config.get("tts_model")
+            model_is_user_pinned = bool(tts_model)
             if not tts_model and suggest_model_for_character:
                 char_profile = profile_index.get(character_name)
                 tts_model = suggest_model_for_character(
@@ -1134,21 +1160,38 @@ class VoiceManager:
                     character_name, config, tts_model
                 )
                 if delegated_profile is not None:
-                    self.character_voices[character_name] = delegated_profile
-                    self.used_voice_ids.add(
-                        getattr(delegated_profile, "voice_id", voice_id)
-                    )
-                    logger.info(
-                        f"🎛 应用用户音频配置(自定义音色): {character_name} -> {voice_id} "
-                        f"(model={tts_model})"
+                    pending.append(
+                        (
+                            character_name,
+                            delegated_profile,
+                            getattr(delegated_profile, "voice_id", voice_id),
+                            "用户音频配置(自定义音色)",
+                        )
                     )
                     continue
-                # 委派失败则继续走后续解析/降级逻辑
+                # 委派失败不再静默跳过：该角色携带的是用户已选自建/克隆音色，
+                # 回落自动分配等于换声线，按越界收集后统一拒单。
+                unresolved.append(
+                    f"角色 {character_name} 的自定义音色 {voice_id}"
+                    f"（model={tts_model}）委派所属模型解析失败"
+                )
+                continue
 
             resolved = self._resolve_voice_config_for_model(voice_id, tts_model)
 
+            if not resolved and not model_is_user_pinned:
+                # 模型来自智能推荐而非用户指定：推荐档位与该音色归属模型不一致
+                # 属路由误配，回退默认模型再解析一次，命中则按默认模型落配置。
+                fallback = self._resolve_voice_config(voice_id)
+                if fallback:
+                    tts_model = DEFAULT_AUDIOBOOK_TTS_MODEL
+                    resolved = fallback
+
             if not resolved:
-                logger.warning(f"⚠️ 未知的voice_id/model组合: {voice_id} ({tts_model})，跳过角色 {character_name}")
+                unresolved.append(
+                    f"角色 {character_name} 指定的音色 {voice_id}"
+                    f"（model={tts_model}）在目标模型音色空间中不存在"
+                )
                 continue
             resolved_voice_id, preset = resolved
 
@@ -1208,11 +1251,19 @@ class VoiceManager:
                     else:
                         profile.age_group = "elder"
             
+            pending.append((character_name, profile, voice_id, "用户音频配置"))
+
+        if unresolved:
+            raise VoiceMappingResolutionError(
+                "角色音配置解析失败，已拒单而非降级为自动分配：" + "；".join(unresolved)
+            )
+
+        for character_name, profile, voice_id, kind in pending:
             self.character_voices[character_name] = profile
             self.used_voice_ids.add(voice_id)
             logger.info(
-                f"🎛 应用用户音频配置: {character_name} -> {voice_id} "
-                f"(volume={voice_config.get('volume_base')})"
+                f"🎛 应用{kind}: {character_name} -> {voice_id} "
+                f"(volume={profile.volume_base})"
             )
     
     def save_mapping(self, filepath: str):
@@ -1230,10 +1281,17 @@ class VoiceManager:
         
         Args:
             voice_mapping: 从数据库读取的voice_mapping字段（JSON格式）
+
+        Raises:
+            VoiceMappingResolutionError: 任一角色记录的音色解析失败，口径与
+                ``apply_project_voice_mapping`` 一致（整批原子，不静默丢角色）。
         """
         if not voice_mapping:
             return
         
+        pending: List[Tuple[str, "VoiceProfile", str]] = []
+        unresolved: List[str] = []
+
         for character_name, config in voice_mapping.items():
             if not isinstance(config, dict):
                 continue
@@ -1245,6 +1303,10 @@ class VoiceManager:
             tts_model = normalize_audiobook_tts_model(config.get("tts_model") or DEFAULT_AUDIOBOOK_TTS_MODEL)
             resolved = self._resolve_voice_config_for_model(voice_id, tts_model)
             if not resolved:
+                unresolved.append(
+                    f"角色 {character_name} 记录的音色 {voice_id}"
+                    f"（model={tts_model}）在目标模型音色空间中不存在"
+                )
                 continue
             
             resolved_voice_id, preset = resolved
@@ -1280,6 +1342,14 @@ class VoiceManager:
             if config.get("personality"):
                 profile.personality = config["personality"]
             
+            pending.append((character_name, profile, resolved_voice_id))
+
+        if unresolved:
+            raise VoiceMappingResolutionError(
+                "数据库音色映射解析失败，已拒单而非降级为自动分配：" + "；".join(unresolved)
+            )
+
+        for character_name, profile, resolved_voice_id in pending:
             self.character_voices[character_name] = profile
             self.used_voice_ids.add(resolved_voice_id)
         
@@ -1308,7 +1378,7 @@ class VoiceManager:
                 "age_group": age_group if age_group != "unknown" else None,
                 "role_type": getattr(profile, 'role_type', None),
                 "personality": getattr(profile, "personality", None),
-                "tts_model": tts_model if tts_model != "qwen3-tts-instruct-flash" else None,  # 🆕 TTS模型
+                "tts_model": tts_model if tts_model != DEFAULT_AUDIOBOOK_TTS_MODEL else None,  # 🆕 TTS模型
             }
         return mapping
     

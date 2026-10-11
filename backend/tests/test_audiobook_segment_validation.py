@@ -129,7 +129,7 @@ def test_build_script_segments_propagates_tts_model_speed_policy():
                 "voice_params": {"rate": 1.1},
             }
         ],
-        tts_model="qwen3-tts-instruct-flash",
+        tts_model="qwen-audio-3.1-tts-flash",
     )
 
     assert segments
@@ -141,7 +141,7 @@ def test_model_supports_instruct_style_control_helper():
     from app.services.audiobook.tts_model_ids import model_supports_instruct_style_control
 
     assert model_supports_instruct_style_control("seed-tts-2.0-expressive") is True
-    assert model_supports_instruct_style_control("qwen3-tts-instruct-flash") is True
+    assert model_supports_instruct_style_control("qwen-audio-3.1-tts-flash") is True
     assert model_supports_instruct_style_control("minimax-speech-2.8-hd") is False
     assert model_supports_instruct_style_control("") is False
 
@@ -638,7 +638,7 @@ async def test_transform_paragraph_validates_llm_segments():
     class Harness(TransformMixin):
         def __init__(self):
             self.llm_client = DummyLLM()
-            self.tts_model = "qwen3-tts-instruct-flash"
+            self.tts_model = "qwen-audio-3.1-tts-flash"
             self.strategy = None
 
     harness = Harness()
@@ -653,10 +653,10 @@ async def test_transform_paragraph_validates_llm_segments():
     assert segments[0].type == "narration"
     assert segments[0].emotion == "excited"
     assert segments[0].instruct_emotion == "fearful"
-    # qwen3-tts 支持指令风格控制：片段级数值 rate 必须被剔除，语速交给表演指令
+    # qwen-audio-3.1-tts 支持指令风格控制：片段级数值 rate 必须被剔除，语速交给表演指令
     assert "rate" not in segments[0].voice_params
     assert segments[0].voice_params["pause_after"] == 2.0
-    assert harness.llm_client.calls[0]["model"] == "deepseek-v4-flash"
+    assert harness.llm_client.calls[0]["model"] == "deepseek-flash"
     assert TRANSFORM_OUTPUT_TOKEN_MIN <= harness.llm_client.calls[0]["max_tokens"] < 32000
     assert 45 <= harness.llm_client.calls[0]["timeout"] <= 75
     assert harness.llm_client.calls[0]["max_retries"] == 2
@@ -690,7 +690,7 @@ async def test_transform_prompt_requires_dialogue_speaker_attribution():
     class Harness(TransformMixin):
         def __init__(self):
             self.llm_client = CapturingLLM()
-            self.tts_model = "qwen3-tts-instruct-flash"
+            self.tts_model = "qwen-audio-3.1-tts-flash"
             self.strategy = None
 
     harness = Harness()
@@ -816,7 +816,7 @@ async def test_transform_paragraph_falls_back_to_source_text_on_llm_failure():
     class Harness(TransformMixin):
         def __init__(self):
             self.llm_client = BrokenLLM()
-            self.tts_model = "qwen3-tts-instruct-flash"
+            self.tts_model = "qwen-audio-3.1-tts-flash"
             self.strategy = None
 
     harness = Harness()
@@ -856,7 +856,7 @@ async def test_transform_paragraph_retries_smaller_chunks_after_json_parse_failu
     class Harness(TransformMixin):
         def __init__(self):
             self.llm_client = FlakyLLM()
-            self.tts_model = "qwen3-tts-instruct-flash"
+            self.tts_model = "qwen-audio-3.1-tts-flash"
             self.strategy = None
 
     harness = Harness()

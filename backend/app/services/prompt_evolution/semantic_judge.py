@@ -25,7 +25,7 @@ class SemanticJudge:
             # 🔧 评审是 checklist 式清单打分，不依赖深度推理；显式关思考以避免
             #    thinking tokens 吃光 max_tokens 导致 finish_reason=length 截断
             #    JSON（与 meta_optimizer 的同名修复一致）。REVIEW_CHECK 主路由
-            #    deepseek-v4-pro 的 YAML 默认 thinking=enabled，需调用方覆盖。
+            #    deepseek-pro 的 YAML 默认 thinking=enabled，需调用方覆盖。
             #    参数按模型族分发（doubao 系拒绝 reasoning_effort+thinking 同传）。
             response = await self.llm_client.chat(
                 messages=[

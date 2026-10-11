@@ -151,7 +151,7 @@ class PromptOptimizer:
         
         Args:
             prompt: Original prompt from IntentParser
-            model_id: Target model ID (e.g., wan2.7-t2v)
+            model_id: Target model ID (e.g., wan3.0-video)
             modality: Task modality
             style: Style hint
             

@@ -32,13 +32,13 @@ from app.models.model_catalog import ModelCatalogEntry
 
 # 本批次新接入并已通过官方文档人工校验的模型
 DEFAULT_TARGET_MODELS: tuple[str, ...] = (
-    "qwen3.7-plus",
-    "kimi/kimi-k2.6",
-    "glm-5.2",
-    "MiniMax/MiniMax-M3",
-    "step-3.7-flash",
-    "mimo-v2.5-pro",
-    "mimo-v2.5",
+    "qwen-plus",
+    "kimi-preview",
+    "glm",
+    "minimax-m",
+    "step-preview",
+    "mimo-pro",
+    "mimo-flash",
     "doubao-seed-evolving",
     "doubao-seed-character",
 )

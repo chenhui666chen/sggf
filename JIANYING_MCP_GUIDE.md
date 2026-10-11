@@ -227,7 +227,7 @@ JIANYING_BASE_URL=https://api.jianying.com/v1
 # DeepSeek V4 文本模型走官方 API
 DEEPSEEK_API_KEY=your-deepseek-api-key-here
 DEEPSEEK_API_BASE=https://api.deepseek.com
-DEEPSEEK_MODEL=deepseek-v4-pro
+DEEPSEEK_MODEL=deepseek-pro
 
 # 阿里云百炼API（用于 Qwen / Wan / Embedding / TTS 等 DashScope 能力）
 DASHSCOPE_API_KEY=your-dashscope-api-key-here

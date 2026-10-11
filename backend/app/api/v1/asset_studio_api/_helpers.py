@@ -23,11 +23,13 @@ from app.core.security import get_current_user
 from app.models.user import User
 from app.services.audiobook.ai_music import MusicGenerationRequest, MusicStyle, create_music_generator
 from app.services.points_usage_pricing import (
+    AssetStudioVideoPriceMissing,
     PointsBillingPrecheckSnapshot,
     build_points_billing_metadata,
     build_points_billing_precheck,
     build_points_billing_precheck_error_detail,
     build_points_usage_charge_estimate,
+    estimate_asset_studio_basis_yuan,
 )
 from app.services.user_center_points_events import (
     POINTS_BILLING_MODULE_ASSET_STUDIO,
@@ -39,6 +41,7 @@ from app.services.user_center_points_events import (
 from core.model_catalog_runtime import get_model_catalog_runtime_index
 from core.model_resolution import normalize_model_id
 from core.unified_media_runtime import UnifiedMediaResult, media_runtime
+from schemas.model_spec import SMART_DURATION_VALUE
 
 router = APIRouter(prefix="/api/v1/asset-studio", tags=["asset-studio"])
 
@@ -861,6 +864,21 @@ def _parse_optional_int(raw_value: str | None) -> int | None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="seed 必须是整数") from exc
 
 
+def _parse_optional_float(raw_value: object) -> float | None:
+    try:
+        return float(raw_value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _resolve_billed_audio_duration_seconds(*, requested_seconds: int, metadata: dict[str, Any]) -> float:
+    """音效按模型实际产出时长结算；实际时长缺失、非正或超过请求时长时回退请求时长，确保不超过已冻结额度。"""
+    actual_seconds = _parse_optional_float(metadata.get("duration"))
+    if actual_seconds is None or actual_seconds <= 0:
+        return float(requested_seconds)
+    return min(actual_seconds, float(requested_seconds))
+
+
 def _get_runtime_duration_values(model_ids: set[str]) -> tuple[float, ...]:
     runtime_index = get_model_catalog_runtime_index()
     values: list[float] = []
@@ -944,6 +962,7 @@ def _extract_duration_constraints(raw_duration: Any) -> dict[str, Any]:
             "duration_values": duration_values,
             "duration_min": duration_min,
             "duration_max": duration_max,
+            "duration_supports_auto": bool(raw_duration.get("supports_auto", False)),
         }
 
     duration_values = _coerce_float_list(raw_duration)
@@ -952,6 +971,7 @@ def _extract_duration_constraints(raw_duration: Any) -> dict[str, Any]:
             "duration_values": duration_values,
             "duration_min": None,
             "duration_max": None,
+            "duration_supports_auto": False,
         }
 
     scalar = _coerce_float(raw_duration)
@@ -960,12 +980,14 @@ def _extract_duration_constraints(raw_duration: Any) -> dict[str, Any]:
             "duration_values": [scalar],
             "duration_min": None,
             "duration_max": None,
+            "duration_supports_auto": False,
         }
 
     return {
         "duration_values": [],
         "duration_min": None,
         "duration_max": None,
+        "duration_supports_auto": False,
     }
 
 
@@ -982,6 +1004,23 @@ def _get_effective_task_constraints(model_id: str) -> dict[str, Any]:
         else {}
     )
     static_duration_constraints = _extract_duration_constraints(static_constraints.get("duration"))
+    # ConstraintSpec.to_dict 已把 {min,max,default,supports_auto} 区间摊平成
+    # duration=[default] + duration_min/duration_max/duration_supports_auto，区间语义必须从
+    # 顶层字段读回：只看 duration 会把 wan3.0-video 当成"只接受 5 秒"，16~30 秒的合法请求
+    # 会在入口被精确匹配拒掉。
+    static_duration_min = _coerce_float(static_constraints.get("duration_min"))
+    static_duration_max = _coerce_float(static_constraints.get("duration_max"))
+    if static_duration_min is None and static_duration_max is None:
+        static_duration_min = static_duration_constraints.get("duration_min")
+        static_duration_max = static_duration_constraints.get("duration_max")
+    static_supports_auto = bool(
+        static_constraints.get("duration_supports_auto")
+        or static_duration_constraints.get("duration_supports_auto")
+    )
+    static_duration_values = [] if (
+        static_duration_min is not None or static_duration_max is not None or static_supports_auto
+    ) else static_duration_constraints["duration_values"]
+
     return {
         "min_width": _coerce_int(runtime_constraints.get("min_width"))
         if _coerce_int(runtime_constraints.get("min_width")) is not None
@@ -998,15 +1037,37 @@ def _get_effective_task_constraints(model_id: str) -> dict[str, Any]:
         "ratio_values": _coerce_str_list(runtime_constraints.get("ratio_values"))
         or _coerce_str_list(static_constraints.get("ratios")),
         "duration_values": _coerce_float_list(runtime_constraints.get("duration_values"))
-        or static_duration_constraints.get("duration_values")
-        or [],
+        or static_duration_values,
         "duration_min": _coerce_float(runtime_constraints.get("duration_min"))
         if _coerce_float(runtime_constraints.get("duration_min")) is not None
-        else static_duration_constraints.get("duration_min"),
+        else static_duration_min,
         "duration_max": _coerce_float(runtime_constraints.get("duration_max"))
         if _coerce_float(runtime_constraints.get("duration_max")) is not None
-        else static_duration_constraints.get("duration_max"),
+        else static_duration_max,
+        "duration_supports_auto": bool(runtime_constraints.get("duration_supports_auto"))
+        or static_supports_auto,
     }
+
+
+def _resolve_requested_video_model(
+    requested_model_id: str,
+    *,
+    allowed_models: set[str],
+    request_label: str,
+) -> str:
+    """点名的模型必须落在该链路可用集合内，未知名称直接 400，不静默换成默认档。
+
+    静默换档等于按 A 模型的单价冻结、却交付 B 模型的产物；档案缺价与区间不兼容同样
+    只能拒单。历史别名先经 normalize_model_id 归位再判定，所以旧配置仍能原样执行。
+    """
+    normalized = normalize_model_id(str(requested_model_id or "").strip()) or ""
+    if normalized in allowed_models:
+        return normalized
+    options = " / ".join(sorted(allowed_models))
+    raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail=f"{request_label}不支持模型 {requested_model_id}，可选：{options}",
+    )
 
 
 def _matches_dimension_constraints(
@@ -1079,6 +1140,11 @@ def _validate_dimensions_for_models(
     max_heights = [value for value in (_coerce_int(item.get("max_height")) for item in constraint_entries) if value is not None]
 
     detail = f"当前资产工作台无可用模型支持 {normalized_width}x{normalized_height}（{ratio}）的{request_label}尺寸"
+    if len(model_ids) == 1:
+        # 视频三链路按「目标模型自己」的区间判兼容，报错必须点名那个模型，
+        # 否则用户看到的是"无可用模型"，不知道是自己点名的那档不支持该尺寸。
+        only_model_id = next(iter(model_ids))
+        detail = f"模型 {only_model_id} 不支持 {normalized_width}x{normalized_height}（{ratio}）的{request_label}尺寸"
     if ratio_values:
         detail += f"，可用画幅比为 {' / '.join(ratio_values)}"
     if min_widths and max_widths and min_heights and max_heights:
@@ -1092,12 +1158,63 @@ def _validate_dimensions_for_models(
     )
 
 
+def _resolve_video_billing_seconds(model_id: str, duration: float) -> float:
+    """智能时长（-1）由上游决定实际秒数，本地按档案默认档冻结与结算。
+
+    直接传 -1 会让 estimate_asset_studio_basis_yuan 把秒数归零、按 1 秒下限漏收；
+    按区间上限结算又会在模型只产出 5 秒时超扣用户，因此回落到达案默认档。
+    """
+    normalized_duration = float(duration)
+    if normalized_duration != SMART_DURATION_VALUE:
+        return normalized_duration
+
+    info = media_runtime.get_model_info(model_id) or {}
+    constraints = info.get("constraints") if isinstance(info.get("constraints"), dict) else {}
+    tiers = _coerce_float_list(constraints.get("duration"))
+    if tiers:
+        return tiers[0]
+    fallback = _coerce_float(constraints.get("duration_min"))
+    return fallback if fallback is not None else 5.0
+
+
+def _estimate_video_basis_yuan(
+    *,
+    kind: str,
+    mode: str,
+    model_id: str,
+    duration_seconds: float,
+    width: int,
+    height: int,
+) -> float:
+    """视频/动作/编辑按「模型 × 分辨率档 × 输出秒」取价冻结，档案缺价直接 400 拒单。
+
+    旧的单一均价（0.2/0.25/0.3 元每秒）与上游公开价最多差十几倍，冻结额即结算额、
+    事后不复算，缺价时宁可拒单也不能按猜的单价扣用户积分。
+    """
+    try:
+        return estimate_asset_studio_basis_yuan(
+            kind=kind,
+            mode=mode,
+            model_id=model_id,
+            duration_seconds=duration_seconds,
+            output_count=1,
+            width=width,
+            height=height,
+        )
+    except AssetStudioVideoPriceMissing as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
 def _validate_video_duration(model_id: str, duration: float) -> float:
     normalized_duration = float(duration)
     effective_constraints = _get_effective_task_constraints(model_id)
     allowed_durations = tuple(sorted(effective_constraints.get("duration_values") or ()))
     duration_min = _coerce_float(effective_constraints.get("duration_min"))
     duration_max = _coerce_float(effective_constraints.get("duration_max"))
+    supports_auto = bool(effective_constraints.get("duration_supports_auto"))
+
+    if supports_auto and normalized_duration == SMART_DURATION_VALUE:
+        return normalized_duration
 
     if not allowed_durations and duration_min is None and duration_max is None:
         allowed_durations = tuple(sorted(float(value) for value in VIDEO_DURATION_OPTIONS.get(model_id, ())))
@@ -1116,6 +1233,8 @@ def _validate_video_duration(model_id: str, duration: float) -> float:
     if not allowed_text:
         if duration_min is not None and duration_max is not None:
             allowed_text = f"{duration_min:g} - {duration_max:g} 秒"
+            if supports_auto:
+                allowed_text += "（或 -1 智能时长）"
         elif duration_min is not None:
             allowed_text = f"不少于 {duration_min:g} 秒"
         elif duration_max is not None:

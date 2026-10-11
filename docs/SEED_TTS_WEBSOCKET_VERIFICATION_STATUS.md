@@ -1,5 +1,13 @@
 # Seed-TTS 2.0 Expressive WebSocket 批量验证报告
 
+> ⚠️ 2026-10-11 更正：本报告是 2026-06-25 的历史快照，以下四点已被后续事实推翻，请勿当作现状引用。
+> 1. 「**必须**使用 WebSocket，不支持 HTTP API」不成立。HTTP 单向端点 `/api/v3/tts/unidirectional` 真实可出音频：2026-10-10 实测官方头形状 11/11 出音频，带上 `X-Api-App-Key` 时返回 200 但响应体无音频（`docs/TTS_PROMPT_EVIDENCE_20261010.md` §12.2）。
+> 2. 下方两次批量验证 0 成功，是二进制帧协议尚未修好时的记录。2026-10-11 生产 `TTSEngine.synthesize` 链路单次 WS 调用已真实返回 25965 字节 ID3 头 MP3（端到端 1630ms、音频 3240ms），未触发 HTTP 兜底；WS 是合成主路径，HTTP 是无音频兜底。
+> 3. 音色数量：目录 `shared/seed_tts_2_0_voices.json` 当前为 **277 条**，本报告的 99 条是当时快照。
+> 4. 同日还有一次 HTTP 单向端点逐音色批量（`backend/tests/seed_tts_voice_verification_results.json`，7 成功 / 92 失败），失败全是 `200 + text/plain` 无音频。**这份结果已作废**：生成脚本发送了 `X-Api-App-Key`（`scripts/verify_seed_tts_voices.py`，已于 2026-10-11 删除），而 2026-10-10 已实测该头会让单向端点返回 200 但无音频；2026-10-11 音色画像批量用生产链路逐条真实合成，那 92 个 speaker **全部通过**客观闸门（`shared/seed_tts_2_0_voice_profiles.json`，277 条 `objective.passed` 全为 true）。所以那 92 条是脚本侧假失败，不能读成「92 个音色无效」。
+>
+> 现行事实以 `docs/MODEL_INTEGRATION_REFERENCE.md` §11.4 与 `config/models.yaml` 的 `seed-tts-2.0-expressive` 卡片为准。
+
 ## 执行时间
 2026-06-25
 
@@ -142,10 +150,12 @@ await wait_for_event(websocket, MsgType.FullServerResponse, EventType.Connection
 
 ## 相关文件
 
-- 批量验证脚本: `scripts/verify_seed_tts_websocket_v2.py`
-- 调试脚本: `scripts/test_binary_frame.py`
-- 音色配置: `shared/seed_tts_2_0_voices.json`
-- 验证结果: `backend/tests/seed_tts_websocket_verification_results.json`
+- 批量验证脚本：本报告用到的 5 个 2026-06-25 探针（`scripts/verify_seed_tts_websocket{,_standalone,_v2,_v3}.py` 与 HTTP 探针 `scripts/verify_seed_tts_voices.py`）已于 2026-10-11 删除——它们发送被禁的 `X-Api-App-Key`、按当时还没修对的帧协议解析，产出的是假失败；同族调试脚本 `scripts/test_binary_frame.py` 仍保留
+- 现行实现: `backend/app/services/audiobook/tts_engine_pkg/_aliyun_mixin.py` 的 `_call_seed_tts_websocket`（生产主路径），二进制帧编解码在 `scripts/protocols.py`（官方模块，**生产依赖，勿删**）
+- 同期实现记录: `docs/SEED_TTS_WEBSOCKET_IMPLEMENTATION.md`（2026-10-11 从仓库根目录迁入，已挂更正横幅）
+- 音色配置: `shared/seed_tts_2_0_voices.json`（现 277 条）
+- 逐音色真值: `shared/seed_tts_2_0_voice_profiles.json`（2026-10-11 画像批量，277 条客观闸门全通过）
+- 验证结果: `backend/tests/seed_tts_websocket_verification_results.json`（历史快照，0 成功已作废）
 
 ## 附录: 已知的正确交互流程
 

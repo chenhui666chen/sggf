@@ -153,16 +153,18 @@ def test_merge_reuses_long_workbench_segment_as_whole_render_chunk(cleanup_test_
     from app.services.audiobook.background_jobs_shared import (
         merge_workbench_segment_audio_into_checkpoint,
     )
-    from app.services.audiobook.engine_pkg._tts_mixin import QWEN_RENDER_CHUNK_MAX_CHARS
-    from app.services.audiobook.render_plan import build_render_plan
+    from app.services.audiobook.render_plan import (
+        DEFAULT_RENDER_CHUNK_MAX_CHARS,
+        build_render_plan,
+    )
 
     segment = {
         "type": "narration",
-        "text": "长片段。" * (QWEN_RENDER_CHUNK_MAX_CHARS + 20),
+        "text": "长片段。" * (DEFAULT_RENDER_CHUNK_MAX_CHARS + 20),
         "speaker": "旁白",
         "voice_params": {
             "speaker": "voice-a",
-            "tts_model": "qwen3-tts-instruct-flash",
+            "tts_model": "qwen-audio-3.1-tts-flash",
         },
         "audio_render_mode": "whole_segment",
     }
@@ -174,17 +176,17 @@ def test_merge_reuses_long_workbench_segment_as_whole_render_chunk(cleanup_test_
     segment["audio_path"] = asset_ref
     segment["audio_cache_key"] = chapter_segment_assets.compute_segment_audio_cache_key(
         segment,
-        render_chunk_max_chars=QWEN_RENDER_CHUNK_MAX_CHARS,
+        render_chunk_max_chars=DEFAULT_RENDER_CHUNK_MAX_CHARS,
     )
     assert segment["audio_cache_key"] == build_render_plan(
         [SimpleNamespace(**segment)],
-        max_chunk_chars=QWEN_RENDER_CHUNK_MAX_CHARS,
+        max_chunk_chars=DEFAULT_RENDER_CHUNK_MAX_CHARS,
     )[0].cache_key
 
     merged = merge_workbench_segment_audio_into_checkpoint(
         script_segments=[segment],
         resume_checkpoint=None,
-        default_tts_model="qwen3-tts-instruct-flash",
+        default_tts_model="qwen-audio-3.1-tts-flash",
     )
 
     assert merged["cached_audio_paths"][0] == asset_ref

@@ -13,7 +13,8 @@
       "languages": ["中文", "英文"],
       "description": "因部署集群而异，中国集群默认为冰糖，其他集群默认为 Mia。",
       "recommended": ["默认试听", "快速预览"],
-      "default_params": {"volume": 50, "speed": 1.0, "pitch": 50}
+      "default_params": {"volume": 50, "speed": 1.0, "pitch": 50},
+      "preview_text": "人不是慢慢变老的，而是一瞬变老的。"
     },
     {
       "id": "冰糖",
@@ -25,7 +26,8 @@
       "languages": ["中文"],
       "description": "中文女性预置音色。",
       "recommended": ["有声书旁白", "角色对白"],
-      "default_params": {"volume": 50, "speed": 1.0, "pitch": 55}
+      "default_params": {"volume": 50, "speed": 1.0, "pitch": 55},
+      "preview_text": "世界上只有一种真正的英雄主义，那就是在认清生活的真相后依然热爱生活。"
     },
     {
       "id": "茉莉",
@@ -37,7 +39,8 @@
       "languages": ["中文"],
       "description": "中文女性预置音色。",
       "recommended": ["温柔角色", "情感独白"],
-      "default_params": {"volume": 50, "speed": 1.0, "pitch": 54}
+      "default_params": {"volume": 50, "speed": 1.0, "pitch": 54},
+      "preview_text": "我走得很慢，但我从不后退。"
     },
     {
       "id": "苏打",
@@ -49,7 +52,8 @@
       "languages": ["中文"],
       "description": "中文男性预置音色。",
       "recommended": ["男声角色", "清晰旁白"],
-      "default_params": {"volume": 50, "speed": 1.0, "pitch": 46}
+      "default_params": {"volume": 50, "speed": 1.0, "pitch": 46},
+      "preview_text": "生活不能等待别人来安排，要自己去争取和奋斗。"
     },
     {
       "id": "白桦",
@@ -61,7 +65,8 @@
       "languages": ["中文"],
       "description": "中文男性预置音色。",
       "recommended": ["沉稳旁白", "成熟角色"],
-      "default_params": {"volume": 50, "speed": 1.0, "pitch": 44}
+      "default_params": {"volume": 50, "speed": 1.0, "pitch": 44},
+      "preview_text": "人生如逆旅，我亦是行人。"
     },
     {
       "id": "Mia",
@@ -73,7 +78,8 @@
       "languages": ["英文"],
       "description": "英文女性预置音色。",
       "recommended": ["英文旁白", "英文角色对白"],
-      "default_params": {"volume": 50, "speed": 1.0, "pitch": 55}
+      "default_params": {"volume": 50, "speed": 1.0, "pitch": 55},
+      "preview_text": "There is a crack in everything; that's how the light gets in."
     },
     {
       "id": "Chloe",
@@ -85,7 +91,8 @@
       "languages": ["英文"],
       "description": "英文女性预置音色。",
       "recommended": ["英文情绪表达", "明亮角色"],
-      "default_params": {"volume": 50, "speed": 1.0, "pitch": 56}
+      "default_params": {"volume": 50, "speed": 1.0, "pitch": 56},
+      "preview_text": "I would never reach for the moon; I want the moon to come to me."
     },
     {
       "id": "Milo",
@@ -97,7 +104,8 @@
       "languages": ["英文"],
       "description": "英文男性预置音色。",
       "recommended": ["英文男声角色", "英文旁白"],
-      "default_params": {"volume": 50, "speed": 1.0, "pitch": 45}
+      "default_params": {"volume": 50, "speed": 1.0, "pitch": 45},
+      "preview_text": "Only those who are brave and composed can endure the darkness and welcome the light."
     },
     {
       "id": "Dean",
@@ -109,7 +117,8 @@
       "languages": ["英文"],
       "description": "英文男性预置音色。",
       "recommended": ["沉稳英文旁白", "成熟角色"],
-      "default_params": {"volume": 50, "speed": 1.0, "pitch": 44}
+      "default_params": {"volume": 50, "speed": 1.0, "pitch": 44},
+      "preview_text": "To be truly alive is to keep challenging yourself, to keep climbing the perilous peaks of fate."
     }
   ]
 }

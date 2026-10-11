@@ -389,7 +389,7 @@ class PerformanceVoiceConsistencyManager:
             性能指标
         """
         test_dialogue = "这是一个测试对话文本"
-        test_params = {"model": "qwen3-tts", "voice": "Ryan", "voice_style": "natural"}
+        test_params = {"model": "qwen-audio-3.1-tts-flash", "voice": "longsanshu_v3.1", "voice_style": "natural"}
         
         start_time = time.time()
         for _ in range(iterations):

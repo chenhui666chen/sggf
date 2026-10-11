@@ -271,7 +271,7 @@ def test_dispatch_uses_nested_mimo_asset_identity_for_all_prompt_layers(monkeypa
 
 
 def test_dispatch_without_fixed_voice_keeps_generic_routing() -> None:
-    selected = SimpleNamespace(id="qwen3-tts-instruct-flash")
+    selected = SimpleNamespace(id="qwen-audio-3.1-tts-flash")
     routing_result = SimpleNamespace(
         selected_model=selected,
         fallback_models=[SimpleNamespace(id="cosyvoice-v3.5-plus")],
@@ -299,7 +299,7 @@ def test_batch_dispatch_binds_each_fixed_voice_to_its_own_model(monkeypatch) -> 
         model_id: SimpleNamespace(id=model_id)
         for model_id in (
             "seed-tts-2.0-expressive",
-            "qwen3-tts-instruct-flash",
+            "qwen-audio-3.1-tts-flash",
         )
     }
     monkeypatch.setattr(
@@ -314,7 +314,7 @@ def test_batch_dispatch_binds_each_fixed_voice_to_its_own_model(monkeypatch) -> 
     results = client.synthesize_batch(
         texts=["第一句。", "第二句。"],
         voice_ids=["seed-voice", "qwen-voice"],
-        tts_models=["seed-tts-2.0-expressive", "qwen3-tts-instruct-flash"],
+        tts_models=["seed-tts-2.0-expressive", "qwen-audio-3.1-tts-flash"],
         max_concurrent=1,
         instructions="语速缓慢，重读关键词。",
     )
@@ -323,5 +323,5 @@ def test_batch_dispatch_binds_each_fixed_voice_to_its_own_model(monkeypatch) -> 
     assert [
         call["routing_result"].selected_model.id
         for call in client._engine.calls
-    ] == ["seed-tts-2.0-expressive", "qwen3-tts-instruct-flash"]
+    ] == ["seed-tts-2.0-expressive", "qwen-audio-3.1-tts-flash"]
     assert all(call["use_fallback"] is False for call in client._engine.calls)

@@ -37,14 +37,14 @@ def test_autoqc_routes_video_clip_failure_to_edit_when_video_edit_enabled(monkey
         failures=[failure],
         payload={
             "storyboard": [{"shot_id": "shot_001", "desc": "主角推门进入房间"}],
-            "video_edit_config": {"enabled": True, "adapter": "wan2.7-videoedit"},
+            "video_edit_config": {"enabled": True, "adapter": "wan3.0-video"},
         },
     )
 
     assert route is not None
     assert route.target_state == "EDIT"
     assert route.action == "repair_video_clips"
-    assert route.patch["video_edit_config"]["adapter"] == "wan2.7-videoedit"
+    assert route.patch["video_edit_config"]["adapter"] == "wan3.0-video"
     assert route.patch["video_edit_plan"]["target_shot_ids"] == ["shot_001"]
     assert route.patch["video_edit_plan"]["edit_feature"] == "video-remix"
     assert route.patch["video_edit_plan"]["items"][0]["issues"] == ["画面抖动", "主体一致性不足"]
@@ -76,7 +76,7 @@ def test_autoqc_infers_video_extend_for_transition_break_issues(monkeypatch) -> 
         failures=[failure],
         payload={
             "storyboard": [{"shot_id": "shot_002", "desc": "主角转身离开房间"}],
-            "video_edit_config": {"enabled": True, "adapter": "wan2.7-videoedit"},
+            "video_edit_config": {"enabled": True, "adapter": "wan3.0-video"},
         },
     )
 
@@ -110,7 +110,7 @@ def test_autoqc_falls_back_to_video_when_shot_already_attempted_video_edit(monke
     route = _route_from_failures(
         failures=[failure],
         payload={
-            "video_edit_config": {"enabled": True, "adapter": "wan2.7-videoedit"},
+            "video_edit_config": {"enabled": True, "adapter": "wan3.0-video"},
             "video_edit_attempted_shot_ids": ["shot_001"],
         },
     )
@@ -166,12 +166,12 @@ def test_editor_run_applies_video_edit_plan_and_replaces_clip(monkeypatch, tmp_p
                     "head": str(head_path),
                     "meta": {
                         "engine": "wan2.7-i2v",
-                        "adapter": "wan2.7-i2v",
+                        "adapter": "wan3.0-video",
                         "motion_prompt": "主角推门进入房间，镜头平稳推进",
                     },
                 }
             ],
-            "video_edit_config": {"enabled": True, "adapter": "wan2.7-videoedit"},
+            "video_edit_config": {"enabled": True, "adapter": "wan3.0-video"},
             "video_edit_plan": {
                 "source": "autoqc",
                 "reason": "video_clip_quality_below_threshold",
@@ -196,7 +196,7 @@ def test_editor_run_applies_video_edit_plan_and_replaces_clip(monkeypatch, tmp_p
     editor.run(ctx)
 
     assert len(edit_calls) == 1
-    assert edit_calls[0]["model_id"] == "wan2.7-videoedit"
+    assert edit_calls[0]["model_id"] == "wan3.0-video"
     assert edit_calls[0]["edit_feature"] == "video-remix"
     assert edit_calls[0]["reference_images"] == [str(head_path)]
     assert edit_calls[0]["video_path"] == str(clip_path)
@@ -205,7 +205,7 @@ def test_editor_run_applies_video_edit_plan_and_replaces_clip(monkeypatch, tmp_p
     assert edited_clip["path"].endswith("edited_clips\\shot_001.mp4") or edited_clip["path"].endswith("edited_clips/shot_001.mp4")
     assert Path(edited_clip["path"]).exists()
     assert edited_clip["meta"]["edited"] is True
-    assert edited_clip["meta"]["edit_model"] == "wan2.7-videoedit"
+    assert edited_clip["meta"]["edit_model"] == "wan3.0-video"
     assert edited_clip["meta"]["edit_feature"] == "video-remix"
     assert edited_clip["meta"]["edit_feature_reason"] == "temporal_consistency_repair"
     assert edited_clip["meta"]["edited_from_path"] == str(clip_path)

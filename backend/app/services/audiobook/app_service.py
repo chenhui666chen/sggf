@@ -23,6 +23,7 @@ from app.services.audiobook.repository import (
     CharacterRepository,
     ProjectRepository,
 )
+from app.services.audiobook.tts_model_ids import DEFAULT_AUDIOBOOK_TTS_MODEL
 from app.services.audiobook.project_audio_config import (
     build_engine_config_snapshot,
     parse_project_audio_config,
@@ -244,7 +245,7 @@ class AudiobookAppService:
         # 2. 验证章节
 
         # 3. 构建 voice_mapping
-        tts_model = (request.tts_model or "qwen3-tts-instruct-flash").strip()
+        tts_model = (request.tts_model or DEFAULT_AUDIOBOOK_TTS_MODEL).strip()
         voice_mapping_data = self._load_project_voice_mapping(project, tts_model)
         self._apply_request_voice_config(voice_mapping_data, request.voice_config)
         self._auto_assign_voices(

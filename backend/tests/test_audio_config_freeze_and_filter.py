@@ -44,7 +44,7 @@ def _legacy_config() -> dict:
         ],
         "audio_fx": {"enable_sound_effects": True, "bgm_theme": "fantasy"},
         "tts_models": {
-            "qwen3-tts-instruct-flash": {
+            "qwen-audio-3.1-tts-flash": {
                 "characters": [
                     {"character_id": 1, "name": "角色A", "voice_id": "v1_tts"},
                 ]
@@ -215,9 +215,9 @@ class TestResolveFromSnapshotVsRealTime:
         # 构建模拟 project（含 audio_config）
         snapshot = build_engine_config_snapshot(cfg, "legacy_stems")
 
-        snapshot_runtime = resolve_from_snapshot(snapshot, tts_model="qwen3-tts-instruct-flash")
+        snapshot_runtime = resolve_from_snapshot(snapshot, tts_model="qwen-audio-3.1-tts-flash")
         realtime_runtime = resolve_project_audio_runtime_config(
-            _mock_project(cfg), tts_model="qwen3-tts-instruct-flash",
+            _mock_project(cfg), tts_model="qwen-audio-3.1-tts-flash",
         )
 
         assert snapshot_runtime.audio_engine_mode == realtime_runtime.audio_engine_mode
@@ -285,7 +285,7 @@ class TestFallbackWhenNoSnapshot:
         """legacy 配置无快照时，实时解析应正常工作。"""
         cfg = _legacy_config()
         runtime = resolve_project_audio_runtime_config(
-            _mock_project(cfg), tts_model="qwen3-tts-instruct-flash",
+            _mock_project(cfg), tts_model="qwen-audio-3.1-tts-flash",
         )
         assert runtime.audio_engine_mode == "legacy_stems"
         assert len(runtime.voice_mapping) > 0

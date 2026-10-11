@@ -8,6 +8,7 @@ from typing import List, Dict, Any, Optional, Callable
 
 from ._dataclasses import ScriptSegment, ChapterStructure
 from ._llm_review import review_script_segments_with_llm
+from app.services.audiobook.tts_model_ids import DEFAULT_AUDIOBOOK_TTS_MODEL
 from app.services.audiobook.llm_config import is_audiobook_script_review_enabled
 from app.services.audiobook.tts_pause import AudiobookPauseRequested
 from app.services.chapter_adaptation_assets import format_audio_adaptation_brief
@@ -22,11 +23,11 @@ class AudiobookScriptAgentBase:
     基于专业编剧工作流程，将小说文本改编为适合音频化的剧本
     """
     
-    def __init__(self, llm_client=None, tts_model: str = "qwen3-tts-instruct-flash", strategy: Optional[Any] = None):
+    def __init__(self, llm_client=None, tts_model: str = DEFAULT_AUDIOBOOK_TTS_MODEL, strategy: Optional[Any] = None):
         """
         Args:
             llm_client: LLM客户端（必需，支持UnifiedLLMClient或自定义）
-            tts_model: 当前使用的TTS模型（如 qwen3-tts-instruct-flash / cosyvoice-v3.5-plus）
+            tts_model: 当前使用的TTS模型（如 qwen-audio-3.1-tts-flash / cosyvoice-v3.5-plus）
             strategy: AudioDirector的AdaptationStrategy（包含语义完整性约束）
         """
         if llm_client is None:

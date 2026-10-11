@@ -30,6 +30,7 @@ from app.services.audiobook.chapter_segment_assets import (
     persistent_segment_audio_exists,
     segment_audio_signature_status,
 )
+from app.services.audiobook.tts_model_ids import DEFAULT_AUDIOBOOK_TTS_MODEL
 from app.services.audiobook.project_audio_runtime import resolve_project_audio_runtime_config
 from app.services.audiobook.task_support import (
     update_chapter_run_state as _update_chapter_run_state,
@@ -39,7 +40,7 @@ logger = logging.getLogger(__name__)
 
 CHAPTER_REMIX_RUN_TYPE = "chapter_remix"
 _REMIX_CHECKPOINT_RUN_TYPES = ("audio_from_scripts", "full")
-_DEFAULT_REMIX_TTS_MODEL = "qwen3-tts-instruct-flash"
+_DEFAULT_REMIX_TTS_MODEL = DEFAULT_AUDIOBOOK_TTS_MODEL
 
 
 def _parse_chapter_segments(chapter_audio: Any) -> List[Dict[str, Any]]:

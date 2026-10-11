@@ -76,7 +76,7 @@ class TestApplyVoiceOverridesToProjectConfig:
     def _make_project(self, characters: List[Dict[str, Any]]) -> SimpleNamespace:
         config = {
             "tts_models": {
-                "qwen3-tts-instruct-flash": {"characters": characters}
+                "qwen-audio-3.1-tts-flash": {"characters": characters}
             }
         }
         return SimpleNamespace(audio_config=json.dumps(config, ensure_ascii=False))
@@ -88,10 +88,10 @@ class TestApplyVoiceOverridesToProjectConfig:
         ])
         overrides = {"林黛玉": VoiceOverride(voice_id="new_voice_x")}
         _apply_voice_overrides_to_project_config(
-            project, tts_model="qwen3-tts-instruct-flash", voice_overrides=overrides
+            project, tts_model="qwen-audio-3.1-tts-flash", voice_overrides=overrides
         )
         result = json.loads(project.audio_config)
-        chars = result["tts_models"]["qwen3-tts-instruct-flash"]["characters"]
+        chars = result["tts_models"]["qwen-audio-3.1-tts-flash"]["characters"]
         assert chars[0]["voice_id"] == "new_voice_x"
         assert chars[1]["voice_id"] == "old_voice_2"  # 未变
 
@@ -99,10 +99,10 @@ class TestApplyVoiceOverridesToProjectConfig:
         project = self._make_project([{"name": "林黛玉", "voice_id": "v1"}])
         overrides = {"新角色": VoiceOverride(voice_id="v_new")}
         _apply_voice_overrides_to_project_config(
-            project, tts_model="qwen3-tts-instruct-flash", voice_overrides=overrides
+            project, tts_model="qwen-audio-3.1-tts-flash", voice_overrides=overrides
         )
         result = json.loads(project.audio_config)
-        chars = result["tts_models"]["qwen3-tts-instruct-flash"]["characters"]
+        chars = result["tts_models"]["qwen-audio-3.1-tts-flash"]["characters"]
         assert len(chars) == 2
         assert chars[1]["name"] == "新角色"
         assert chars[1]["voice_id"] == "v_new"
@@ -117,10 +117,10 @@ class TestApplyVoiceOverridesToProjectConfig:
             )
         }
         _apply_voice_overrides_to_project_config(
-            project, tts_model="qwen3-tts-instruct-flash", voice_overrides=overrides
+            project, tts_model="qwen-audio-3.1-tts-flash", voice_overrides=overrides
         )
         result = json.loads(project.audio_config)
-        char = result["tts_models"]["qwen3-tts-instruct-flash"]["characters"][0]
+        char = result["tts_models"]["qwen-audio-3.1-tts-flash"]["characters"][0]
         assert char["reference_source"] == "user_private"
         assert char["voice_reference_asset_id"] == "asset_123"
 

@@ -502,7 +502,7 @@ def test_voice_reference_resolver_rejects_other_provider_official_voice() -> Non
                 },
                 "御医": {
                     "voice_id": "Cherry",
-                    "tts_model": "qwen3-tts-instruct-flash",
+                    "tts_model": "qwen-audio-3.1-tts-flash",
                     "voice_description": "中年男性，浑厚、略微沙哑",
                 },
             },
@@ -576,7 +576,7 @@ def test_voice_reference_resolver_uses_existing_preview_url_for_other_tts_model(
         voice_mapping={
             "御医": {
                 "voice_id": "Cherry",
-                "tts_model": "qwen3-tts-instruct-flash",
+                "tts_model": "qwen-audio-3.1-tts-flash",
                 "preview_audio_url": "https://assets.example/tts-preview/qwen-cherry.mp3",
                 "reference_source": "user_private",
                 "voice_description": "中年男性，浑厚、略微沙哑、谦逊",
@@ -615,7 +615,7 @@ def test_voice_reference_resolver_prefers_current_preview_over_legacy_reference(
         voice_mapping={
             "男子1": {
                 "voice_id": "Cherry",
-                "tts_model": "qwen3-tts-instruct-flash",
+                "tts_model": "qwen-audio-3.1-tts-flash",
                 "reference_audio_url": "https://assets.example/legacy-reference.mp3",
                 "preview_audio_url": "https://assets.example/current-preview.mp3",
                 "reference_source": "user_private",

@@ -59,13 +59,13 @@ def _build_autoqc_payload(tmp_path: Path, *, qc_config: dict | None = None) -> d
             {
                 "path": str(clip),
                 "meta": {
-                    "adapter": "wan2.7-i2v",
+                    "adapter": "wan3.0-video",
                     "engine": "wan2.7-i2v",
                 },
             }
         ],
         "video_config": {
-            "adapter": "wan2.7-i2v",
+            "adapter": "wan3.0-video",
             "engine": "wan2.7-i2v",
         },
         "qc_config": dict(qc_config or {}),
@@ -200,10 +200,10 @@ def test_submit_qc_feedback_infers_model_from_video_config(monkeypatch) -> None:
         report,
         {
             "modality": "text_to_video",
-            "video_config": {"adapter": "wan2.7-i2v"},
+            "video_config": {"adapter": "wan3.0-video"},
         },
     )
 
     assert len(calls) == 1
-    assert calls[0]["model_id"] == "wan2.7-i2v"
+    assert calls[0]["model_id"] == "wan3.0-video"
     assert calls[0]["task_type"] == "text_to_video"

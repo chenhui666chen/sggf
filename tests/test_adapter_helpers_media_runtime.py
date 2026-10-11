@@ -16,7 +16,7 @@ def test_generate_video_helper_forwards_model_id_and_extra_kwargs(
             captured.update(kwargs)
             return UnifiedMediaResult(
                 success=True,
-                model_id="wan2.7-i2v",
+                model_id="wan3.0-video",
                 outputs=["https://example.com/clip.mp4"],
                 metadata={"source": "runtime"},
             )
@@ -29,14 +29,14 @@ def test_generate_video_helper_forwards_model_id_and_extra_kwargs(
         width=1280,
         height=720,
         image_path="head.png",
-        model_id="wan2.7-i2v",
+        model_id="wan3.0-video",
         use_fallback=False,
         fps=24,
         motion_bucket_id=127,
     )
 
     assert result.success is True
-    assert result.model_id == "wan2.7-i2v"
+    assert result.model_id == "wan3.0-video"
     assert result.data["video_url"] == "https://example.com/clip.mp4"
     assert captured == {
         "prompt": "camera push-in",
@@ -48,14 +48,14 @@ def test_generate_video_helper_forwards_model_id_and_extra_kwargs(
         "style": None,
         "image_path": "head.png",
         "video_path": None,
-        "model_id": "wan2.7-i2v",
+        "model_id": "wan3.0-video",
         "use_fallback": False,
         "fps": 24,
         "motion_bucket_id": 127,
     }
 
 
-def test_model_supports_capability_normalizes_legacy_alias(
+def test_model_supports_capability_normalizes_format_alias(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from adapters import adapter_helpers
@@ -134,10 +134,10 @@ def test_create_runtime_client_delegates_to_runtime_wrapper_builder(
 
     monkeypatch.setattr(adapter_helpers, "_create_legacy_wrapper", fake_create)
 
-    client = adapter_helpers.create_runtime_client("wan2.6-t2i")
+    client = adapter_helpers.create_runtime_client("qwen-image-3.0")
 
     assert client is sentinel
-    assert captured["name"] == "wan2.6-t2i"
+    assert captured["name"] == "qwen-image-3.0"
 
 
 def test_match_scene_helper_routes_to_unified_edit_image_path(

@@ -48,25 +48,24 @@ print(f"DashScope 实际可用模型总数: {len(dashscope_models)}")
 
 # 已有适配器的模型（从之前的检查得知）
 ADAPTER_MODELS = {
-    "wan2.6-t2i", "wan2.7-t2v", "wan2.6-t2v-fast", "wan2.7-i2v",
-    "wan2.7-r2v", "wan2.7-videoedit", "qwen3-vl-plus",
+    "qwen3-vl-plus",
     "qwen-image-edit-plus", "qwen-image-edit-max",
 }
 
 # 新创建的适配器模型
 NEW_ADAPTER_MODELS = {
-    "qwen-image-2.0", "qwen-image-2.0-pro", "wan2.7-image",
-    "doubao-seedream-4-5", "doubao-seedream-5.0",
-    "doubao-seedance-2-0", "doubao-seedance-2-0-fast", "doubao-seedance-1-5-pro",
-    "doubao-seed-2-0-pro", "doubao-seed-2-0-lite",
+    "qwen-image-3.0", "qwen-image-3.0-pro", "wan2.7-image-pro",
+    "doubao-seedream-5-0", "doubao-seedream-5-0-pro",
+    "doubao-seedance-2-0", "doubao-seedance-2-0-fast",
+    "doubao-seed-2-1-pro", "doubao-seed-2-1-lite",
     "qwen3.5-omni-plus", "qwen3.6-plus",
-    "qwen3-tts-instruct-flash", "cosyvoice-v3.5-plus",
+    "qwen-audio-3.1-tts-flash", "cosyvoice-v3.5-plus",
     "MiniMax/speech-2.8-turbo", "MiniMax/speech-2.8-hd",
     "pixverse-c1-r2v", "pixverse-v6-t2v",
     "vidu-q3-pro-img2video", "vidu-q3-pro-text2video", "vidu-q3-pro-start-end2video",
-    "vidu-timing2audio", "mureka-o1-instrumental",
-    "kling-v3-video-generation", "kling-v3-omni-video-generation",
-    "kling-v3-image-generation", "kling-v3-omni-image-generation",
+    "mureka-o1-instrumental",
+    "kling/kling-v3-video-generation", "kling/kling-v3-omni-video-generation",
+    "kling/kling-v3-image-generation", "kling/kling-v3-omni-image-generation",
 }
 
 all_with_adapter = ADAPTER_MODELS | NEW_ADAPTER_MODELS
@@ -141,7 +140,7 @@ def test_model_api(model_id: str, category: str) -> dict:
             client = openai.OpenAI(api_key=DASHSCOPE_API_KEY, base_url="https://dashscope.aliyuncs.com/compatible-mode/v1")
             resp = client.audio.speech.create(
                 model=model_id,
-                voice="Cherry",
+                voice="longsanshu_v3.1",
                 input="这是一段测试语音。",
             )
             result["success"] = len(resp.content) > 0
@@ -285,7 +284,7 @@ def _detect_category(model_id: str) -> str:
 # Test all fully_connected models + those with adapter but no model
 test_targets = results["fully_connected"] + results["adapter_no_model"]
 
-# Filter out already-working models (wan2.6-t2i etc) and focus on the 27 new ones
+# Filter out already-working models and focus on the 27 new ones
 new_targets = [m for m in test_targets if m in NEW_ADAPTER_MODELS]
 
 print(f"\n{'=' * 80}")

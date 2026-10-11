@@ -113,7 +113,7 @@ describe('audiobook script editor utils', () => {
   it('builds audio generation payloads for one chapter or approved chapters', () => {
     expect(buildGenerateAudioFromScriptPayload({
       chapterId: 8,
-      ttsModel: 'qwen3-tts-instruct-flash',
+      ttsModel: 'qwen-audio-3.1-tts-flash',
       narrationStyle: 'dramatic',
       narrationStylePrompt: '',
       outputFormat: 'mp3',
@@ -122,7 +122,7 @@ describe('audiobook script editor utils', () => {
       },
     })).toEqual({
       chapter_ids: [8],
-      tts_model: 'qwen3-tts-instruct-flash',
+      tts_model: 'qwen-audio-3.1-tts-flash',
       output_format: 'mp3',
       generate_subtitle: true,
       timeline_edits: {
@@ -143,13 +143,13 @@ describe('audiobook script editor utils', () => {
 
     expect(buildGenerateAudioFromScriptPayload({
       chapterId: 9,
-      ttsModel: 'qwen3-tts-instruct-flash',
+      ttsModel: 'qwen-audio-3.1-tts-flash',
       narrationStyle: 'documentary',
       narrationStylePrompt: '这段只应由 custom 使用',
       outputFormat: 'wav',
     })).toEqual({
       chapter_ids: [9],
-      tts_model: 'qwen3-tts-instruct-flash',
+      tts_model: 'qwen-audio-3.1-tts-flash',
       output_format: 'wav',
       generate_subtitle: true,
     })

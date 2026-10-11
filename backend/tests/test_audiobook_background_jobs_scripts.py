@@ -93,7 +93,7 @@ def test_script_stage_applies_project_audio_engine_mode(monkeypatch, caplog):
         background_jobs_scripts._apply_script_stage_project_audio_config(
             engine=engine,
             project=SimpleNamespace(),
-            tts_model="qwen3-tts-instruct-flash",
+            tts_model="qwen-audio-3.1-tts-flash",
             character_profiles=[],
         )
 

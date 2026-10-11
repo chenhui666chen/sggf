@@ -98,7 +98,7 @@ def test_extract_states_parses_and_filters_llm_json(monkeypatch):
             chapter_content="林昭收起密账。",
             project_id=9,
             character_names=["林昭", "苏晚晴"],
-            model="deepseek-v4-pro",
+            model="deepseek-pro",
         )
     )
 
@@ -118,7 +118,7 @@ def test_extract_states_invalid_json_returns_empty(monkeypatch):
             chapter_content="c",
             project_id=9,
             character_names=["林昭"],
-            model="deepseek-v4-pro",
+            model="deepseek-pro",
         )
     )
 
@@ -132,7 +132,7 @@ def test_extract_states_skips_when_no_characters():
             chapter_content="c",
             project_id=9,
             character_names=[],
-            model="deepseek-v4-pro",
+            model="deepseek-pro",
         )
     )
 
@@ -189,7 +189,7 @@ def test_extraction_flow_saves_snapshots(monkeypatch):
                 chapter_number=17,
                 chapter_title="灯下问局",
                 chapter_content="林昭收起密账。",
-                model="deepseek-v4-pro",
+                model="deepseek-pro",
             )
         )
 
@@ -215,7 +215,7 @@ def test_extraction_flow_saves_snapshots(monkeypatch):
                 chapter_number=17,
                 chapter_title="灯下问局",
                 chapter_content="（重生成后的章节内容）",
-                model="deepseek-v4-pro",
+                model="deepseek-pro",
             )
         )
         count = (
@@ -245,7 +245,7 @@ def test_extraction_flow_never_raises_on_llm_failure(monkeypatch):
                 chapter_number=17,
                 chapter_title="t",
                 chapter_content="c",
-                model="deepseek-v4-pro",
+                model="deepseek-pro",
             )
         )
         assert result["saved"] == 0

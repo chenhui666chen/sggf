@@ -35,11 +35,11 @@ def test_catalog_covers_every_supported_model_without_project_context() -> None:
 def test_model_cases_compile_to_their_native_prompt_surfaces() -> None:
     from app.services.audiobook.tts_test_unit import get_tts_test_case
 
-    qwen = get_tts_test_case("qwen3-tts-instruct-flash", "emotion_pause_stress")
+    qwen = get_tts_test_case("qwen-audio-3.1-tts-flash", "emotion_pause_stress")
     cosy = get_tts_test_case("cosyvoice-v3.5-plus", "compact_emotion_cues")
     minimax = get_tts_test_case("minimax-speech-2.8-hd", "basic_prosody")
     mimo = get_tts_test_case("mimo-v2.5-tts", "audio_tag_leak")
-    stepaudio = get_tts_test_case("stepaudio-2.5-tts", "global_and_inline_context")
+    stepaudio = get_tts_test_case("stepaudio-3-tts", "global_and_inline_context")
     seed = get_tts_test_case("seed-tts-2.0-expressive", "query_response_tags")
 
     for case in (qwen, cosy, minimax, mimo, stepaudio, seed):
@@ -76,7 +76,9 @@ def test_model_cases_compile_to_their_native_prompt_surfaces() -> None:
     seed_prompt = seed["provider_prompt_snapshot"]["provider_prompt"]
     assert seed["style_control_mode"] == "doubao_query_response"
     assert seed_prompt["context_texts"]
-    assert seed_prompt["text_prefix"].startswith("[")
+    # 官方 Cot 开标签；方括号前缀会被豆包朗读出口，见 docs/TTS_PROMPT_EVIDENCE_20261010.md §16
+    assert seed_prompt["text_prefix"].startswith('<cot text="')
+    assert seed_prompt["tag_syntax"] == "doubao_cot"
 
 
 def test_custom_voice_variants_are_marked_without_hiding_prompt_compilation() -> None:
@@ -114,7 +116,7 @@ def test_fixed_voice_prompt_preview_rebuilds_snapshot_at_engine_boundary(monkeyp
     response = asyncio.run(
         routes_tts.preview_tts_prompt_test_case(
             request=TTSPromptTestPreviewRequest(
-                model="qwen3-tts-instruct-flash",
+                model="qwen-audio-3.1-tts-flash",
                 case_id="emotion_pause_stress",
                 voice_id="Neil",
             ),
@@ -123,7 +125,7 @@ def test_fixed_voice_prompt_preview_rebuilds_snapshot_at_engine_boundary(monkeyp
     )
 
     snapshot = response.provider_prompt_snapshot
-    assert response.model == "qwen3-tts-instruct-flash"
+    assert response.model == "qwen-audio-3.1-tts-flash"
     assert response.case_id == "emotion_pause_stress"
     assert response.audio_data_base64
     assert captured["text"] == response.text

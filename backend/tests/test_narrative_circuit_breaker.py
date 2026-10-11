@@ -157,7 +157,7 @@ def test_empty_output_wired_at_content_validation_point():
         ROOT_DIR / "app" / "api" / "v1" / "workflow" / "routes_chapter.py"
     )
     source = routes_path.read_text(encoding="utf-8")
-    detection_index = source.find("detect_invalid_chapter_output(chapter_draft, previous_full_text)")
+    detection_index = source.find("evaluate_chapter_output(chapter_draft, previous_full_text)")
     assert detection_index > 0
     signal_index = source.find('event="empty_output"', detection_index)
     assert signal_index > detection_index
@@ -180,7 +180,8 @@ def test_detect_invalid_chapter_output_repeat_and_unique():
     assert "重复" in (detect_invalid_chapter_output(previous, previous) or "")
     unique = "沈砚把证物收回袖中，决定先不惊动任何人。" * 40
     assert detect_invalid_chapter_output(unique, previous) is None
-    assert detect_invalid_chapter_output("短文本", previous) is None
+    # F.6：过短正文不再返回 None（此前短文本被判为可接受，现归为 EmptyOrShortOutput）
+    assert "过短" in (detect_invalid_chapter_output("短文本", previous) or "")
 
 
 def test_build_pause_detail_returns_user_facing_message_and_structure():

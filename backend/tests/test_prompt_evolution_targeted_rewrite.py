@@ -12,10 +12,22 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from app.services.prompt_evolution.evaluator import PromptEvaluator
 from app.services.prompt_evolution.novel_rules import (
+    build_detector_segment_hint,
     build_targeted_rewrite_hint,
     locate_high_risk_segments,
 )
+
+
+@pytest.fixture(autouse=True)
+def _use_plain_rewrite(monkeypatch):
+    """评估器深区注入用例断言的是「单次改写请求」携带定点提示。
+
+    去锚定范式下首轮调用为要点抽取、提示落在重写轮，调用序列语义不同，
+    故此处固定走常规改写路径。
+    """
+    monkeypatch.setattr(PromptEvaluator, "DEANCHOR_ENABLED", False)
 
 
 def _join(*paras):
@@ -104,6 +116,250 @@ class TestBuildTargetedRewriteHint:
         assert "第2段" in hint
         assert "第1段" in hint
         assert "定点" in hint or "优先" in hint
+
+
+class TestBuildDetectorSegmentHint:
+    """真实检测段落标注 → 定点指令（取代正则盲猜的核心改动）。
+
+    与 build_targeted_rewrite_hint 的关键差别：后者输出的是正则猜出来的句式类别
+    标签（"二元对比句式"等），检测器认不认并不确定；这里引用的是检测器实测判为
+    确定AI 的**原文片段**，是真值。
+    """
+
+    def test_no_labels_render_empty(self):
+        assert build_detector_segment_hint([]) == ""
+
+    def test_only_human_and_suspect_render_empty(self):
+        """没有「确定AI」段落时不下发指令——避免对已达标文本做无谓干预。"""
+        labels = [{"label": 0, "text": "人写的段落。"}, {"label": 2, "text": "疑似段落。"}]
+        assert build_detector_segment_hint(labels) == ""
+
+    def test_ai_segment_snippet_quoted(self):
+        labels = [{"label": 1, "text": "他缓缓抬起头，眼中闪过一丝复杂的情绪。", "conf": 0.99}]
+        hint = build_detector_segment_hint(labels)
+        assert "他缓缓抬起头" in hint
+        assert "不要沿用" in hint
+
+    def test_sorted_by_confidence_desc(self):
+        """置信度高的排在前面：最确信是 AI 的写法优先展示。"""
+        labels = [
+            {"label": 1, "text": "低置信片段内容占位。", "conf": 0.51},
+            {"label": 1, "text": "高置信片段内容占位。", "conf": 0.98},
+        ]
+        hint = build_detector_segment_hint(labels)
+        assert hint.index("高置信") < hint.index("低置信")
+
+    def test_max_items_and_truncation(self):
+        labels = [{"label": 1, "text": f"第{i}段" + "字" * 200, "conf": 0.9} for i in range(9)]
+        hint = build_detector_segment_hint(labels, max_items=3, max_chars=20)
+        assert hint.count("「") == 3
+        assert "…" in hint
+
+    def test_suspect_count_reported(self):
+        labels = [
+            {"label": 1, "text": "确定AI的段落内容。", "conf": 0.9},
+            {"label": 2, "text": "疑似A。"}, {"label": 2, "text": "疑似B。"},
+        ]
+        hint = build_detector_segment_hint(labels)
+        assert "疑似AI" in hint and "2" in hint
+
+    def test_missing_text_skipped(self):
+        labels = [{"label": 1, "text": "", "conf": 0.9}]
+        assert build_detector_segment_hint(labels) == ""
+
+
+class TestSampleAiSegmentPersistence:
+    """段落级真值必须能跨运行持久化，否则第二次进化走缓存会退回盲猜。"""
+
+    def test_compacted_on_store(self):
+        from app.services.prompt_evolution.test_samples import TestSample
+
+        s = TestSample(sample_id="p1", genre="都市", text="正文内容。" * 50)
+        s.store_ai_detection(
+            {
+                "ai_score": 100,
+                "segment_labels": [
+                    {"label": 0, "text": "人工段。"},
+                    {"label": 1, "text": "确定AI段。"},
+                    {"label": 2, "text": "疑似段。"},
+                ],
+            },
+            policy_version="v1",
+        )
+        assert s.ai_detection_ai_segments == ["确定AI段。"]
+
+    def test_roundtrip_keeps_segments(self):
+        from app.services.prompt_evolution.test_samples import TestSample
+
+        s = TestSample(sample_id="p2", genre="都市", text="正文内容。" * 50,
+                       ai_detection_ai_segments=["段一。", "段二。"])
+        restored = TestSample.from_dict(s.to_dict())
+        assert restored.ai_detection_ai_segments == ["段一。", "段二。"]
+
+    def test_restored_detection_rebuilds_labels(self):
+        from app.services.prompt_evolution.test_samples import TestSample
+
+        s = TestSample(sample_id="p3", genre="都市", text="正文内容。" * 50,
+                       ai_detection_ai_segments=["被判AI的段。"])
+        s.ai_detection_score = 100
+        s.ai_detection_text_hash = s._detection_text_hash()
+        s.ai_detection_policy_version = "v1"
+        got = s.get_ai_detection("v1")
+        assert got["segment_labels"] == [{"label": 1, "text": "被判AI的段。"}]
+
+
+class TestEvaluatorSegmentHintPriority:
+    """开关打开时优先用真值指令，且不与正则指令叠加（避免指令过长挤占事实约束）。"""
+
+    def _make_evaluator(self):
+        evaluator = PromptEvaluator()
+        evaluator.llm_client = AsyncMock()
+        evaluator.llm_client.chat = AsyncMock(return_value="改写后的正文内容占位，长度足够通过守门。" * 5)
+        evaluator.ai_detector = AsyncMock()
+        evaluator.semantic_judge = AsyncMock()
+        evaluator.semantic_judge.evaluate = AsyncMock(
+            return_value={
+                "available": True, "hard_fail": False,
+                "semantic_fidelity": {"score": 90},
+                "fact_consistency": {"score": 95},
+                "information_completeness": {"score": 85},
+                "readability": {"score": 90},
+                "writing_naturalness": {"score": 85},
+            }
+        )
+        return evaluator
+
+    @pytest.mark.asyncio
+    async def test_real_labels_win_over_regex(self, monkeypatch):
+        monkeypatch.setattr(PromptEvaluator, "SEGMENT_HINT_ENABLED", True)
+        monkeypatch.setattr(PromptEvaluator, "DEANCHOR_ENABLED", False)
+        evaluator = self._make_evaluator()
+        evaluator.ai_detector.detect_ai_content = AsyncMock(
+            side_effect=[
+                {
+                    "success": True, "ai_score": 95, "ai_trace_details": {},
+                    "segment_labels": [
+                        {"label": 1, "text": "检测器实测判为AI的原文片段。", "conf": 0.99},
+                    ],
+                },
+                {"success": True, "ai_score": 70, "ai_trace_details": {}},
+            ]
+        )
+        from app.services.prompt_evolution.test_samples import TestSample
+
+        # 文本同时命中正则预检（"不是…而是…"），用于验证真值指令优先且未叠加
+        sample = TestSample(
+            sample_id="t4", genre="都市",
+            text=_join("这不是恐惧，而是敬畏。", "检测器实测判为AI的原文片段。"),
+        )
+        await evaluator._evaluate_single_sample("系统提示词", sample, 0.8)
+
+        user_msg = evaluator.llm_client.chat.await_args_list[0].kwargs["messages"][1]["content"]
+        assert "检测器实测标注" in user_msg
+        assert "第1段" not in user_msg      # 正则指令未叠加
+
+
+class TestEvaluatorFactBottomLineHint:
+    """常驻事实底线：无定点命中时的兜底约束。
+
+    依据实验16：无指令组质量合格率 25%（事实一致性均值 85），有指令组 75%（均值 90）。
+    差异来自指令中的事实条款，与"定位"无关，故干净样本也该拿到这条约束。
+    """
+
+    def _make_evaluator(self):
+        evaluator = PromptEvaluator()
+        evaluator.llm_client = AsyncMock()
+        evaluator.llm_client.chat = AsyncMock(return_value="改写后的正文内容占位，长度足够通过守门。" * 5)
+        evaluator.ai_detector = AsyncMock()
+        evaluator.semantic_judge = AsyncMock()
+        evaluator.semantic_judge.evaluate = AsyncMock(
+            return_value={
+                "available": True, "hard_fail": False,
+                "semantic_fidelity": {"score": 90},
+                "fact_consistency": {"score": 95},
+                "information_completeness": {"score": 85},
+                "readability": {"score": 90},
+                "writing_naturalness": {"score": 85},
+            }
+        )
+        return evaluator
+
+    @pytest.mark.asyncio
+    async def test_fact_hint_used_when_nothing_targeted(self, monkeypatch):
+        """既无确定AI段落、也未命中正则：下发常驻事实底线，不裸奔。"""
+        monkeypatch.setattr(PromptEvaluator, "SEGMENT_HINT_ENABLED", True)
+        monkeypatch.setattr(PromptEvaluator, "FACT_HINT_ENABLED", True)
+        monkeypatch.setattr(PromptEvaluator, "DEANCHOR_ENABLED", False)
+        evaluator = self._make_evaluator()
+        evaluator.ai_detector.detect_ai_content = AsyncMock(
+            side_effect=[
+                {   # 只有疑似段，没有「确定AI」段 → 真值指令为空
+                    "success": True, "ai_score": 95, "ai_trace_details": {},
+                    "segment_labels": [{"label": 2, "text": "疑似段落。"}],
+                },
+                {"success": True, "ai_score": 70, "ai_trace_details": {}},
+            ]
+        )
+        from app.services.prompt_evolution.test_samples import TestSample
+
+        # 干净文本：不会命中任何正则句式
+        sample = TestSample(
+            sample_id="t5", genre="都市",
+            text=_join("雨下了一整夜，屋檐的水声滴答不断。", "她翻个身，把被子往上拽了拽。"),
+        )
+        await evaluator._evaluate_single_sample("系统提示词", sample, 0.8)
+
+        user_msg = evaluator.llm_client.chat.await_args_list[0].kwargs["messages"][1]["content"]
+        assert "事实底线" in user_msg
+        assert "专有名词" in user_msg
+
+    @pytest.mark.asyncio
+    async def test_no_fact_hint_when_disabled(self, monkeypatch):
+        """开关关闭时不下发，保持原有零污染行为。"""
+        monkeypatch.setattr(PromptEvaluator, "SEGMENT_HINT_ENABLED", True)
+        monkeypatch.setattr(PromptEvaluator, "FACT_HINT_ENABLED", False)
+        monkeypatch.setattr(PromptEvaluator, "DEANCHOR_ENABLED", False)
+        evaluator = self._make_evaluator()
+        evaluator.ai_detector.detect_ai_content = AsyncMock(
+            side_effect=[
+                {"success": True, "ai_score": 95, "ai_trace_details": {},
+                 "segment_labels": [{"label": 2, "text": "疑似段落。"}]},
+                {"success": True, "ai_score": 70, "ai_trace_details": {}},
+            ]
+        )
+        from app.services.prompt_evolution.test_samples import TestSample
+
+        sample = TestSample(sample_id="t6", genre="都市",
+                            text=_join("雨下了一整夜。", "她翻了个身。"))
+        await evaluator._evaluate_single_sample("系统提示词", sample, 0.8)
+
+        user_msg = evaluator.llm_client.chat.await_args_list[0].kwargs["messages"][1]["content"]
+        assert "事实底线" not in user_msg
+
+    @pytest.mark.asyncio
+    async def test_fact_hint_not_stacked_on_targeted_hint(self, monkeypatch):
+        """已有定点指令时不再叠加事实底线——定点指令本身已含该条款，叠加会拉长指令。"""
+        monkeypatch.setattr(PromptEvaluator, "SEGMENT_HINT_ENABLED", True)
+        monkeypatch.setattr(PromptEvaluator, "FACT_HINT_ENABLED", True)
+        monkeypatch.setattr(PromptEvaluator, "DEANCHOR_ENABLED", False)
+        evaluator = self._make_evaluator()
+        evaluator.ai_detector.detect_ai_content = AsyncMock(
+            side_effect=[
+                {"success": True, "ai_score": 95, "ai_trace_details": {},
+                 "segment_labels": [{"label": 1, "text": "实测判为AI的片段。", "conf": 0.99}]},
+                {"success": True, "ai_score": 70, "ai_trace_details": {}},
+            ]
+        )
+        from app.services.prompt_evolution.test_samples import TestSample
+
+        sample = TestSample(sample_id="t7", genre="都市",
+                            text=_join("实测判为AI的片段。", "另一段普通叙述。"))
+        await evaluator._evaluate_single_sample("系统提示词", sample, 0.8)
+
+        user_msg = evaluator.llm_client.chat.await_args_list[0].kwargs["messages"][1]["content"]
+        assert "检测器实测标注" in user_msg
+        # 只允许出现一次事实底线标题
+        assert user_msg.count("【事实底线") <= 1
 
 
 class TestEvaluatorDeepZoneInjection:

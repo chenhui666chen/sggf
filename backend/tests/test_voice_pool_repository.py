@@ -232,7 +232,10 @@ def test_public_voice_pool_route_paginates_and_aggregates_ratings() -> None:
     )
 
     first_page = asyncio.run(
-        routes_voice_pool.discover_public_voice_pool(limit=2, cursor=None, db=db)
+        routes_voice_pool.discover_public_voice_pool(
+            timbre_tags=None, scenario_tags=None, emotion_tags=None,
+            limit=2, cursor=None, db=db,
+        )
     )
 
     assert len(first_page["voices"]) == 2
@@ -240,6 +243,7 @@ def test_public_voice_pool_route_paginates_and_aggregates_ratings() -> None:
     assert first_page["voices"][0]["rating_count"] == 1
     second_page = asyncio.run(
         routes_voice_pool.discover_public_voice_pool(
+            timbre_tags=None, scenario_tags=None, emotion_tags=None,
             limit=2, cursor=first_page["next_cursor"], db=db
         )
     )
@@ -705,3 +709,205 @@ def test_runtime_reference_validation_blocks_withdrawn_public_voice() -> None:
                 }
             },
         )
+
+
+def _publish_tagged_voice(db, display_name: str, **tag_overrides):
+    asset = _authorized_asset(db, sha256=f"tags-{display_name}")
+    publication = create_voice_pool_publication(
+        db,
+        source_asset_id=asset.asset_id,
+        owner_user_id=7,
+        payload=_publication_payload().model_copy(
+            update={"display_name": display_name, **tag_overrides}
+        ),
+    )
+    review_voice_pool_publication(
+        db,
+        publication_id=publication.publication_id,
+        reviewer_user_id=99,
+        approved=True,
+    )
+    return publication
+
+
+def _matched_display_names(db, **filters) -> list[str]:
+    return sorted(
+        item.display_name for item in list_public_voice_pool(db, **filters)
+    )
+
+
+def test_public_voice_pool_tag_filter_matches_any_selected_tag() -> None:
+    db = _build_session()
+    _publish_tagged_voice(
+        db,
+        "husky-warm",
+        timbre_tags=["husky", "warm"],
+        scenario_tags=["audiobook"],
+        emotion_tags=["sad"],
+    )
+    _publish_tagged_voice(
+        db,
+        "clear-calm",
+        timbre_tags=["clear"],
+        scenario_tags=["suspense"],
+        emotion_tags=["calm"],
+    )
+    _publish_tagged_voice(
+        db,
+        "deep-only",
+        timbre_tags=["deep"],
+        scenario_tags=["audiobook"],
+        emotion_tags=["tense"],
+    )
+
+    assert _matched_display_names(db) == ["clear-calm", "deep-only", "husky-warm"]
+    assert _matched_display_names(db, timbre_tags=["warm", "clear"]) == [
+        "clear-calm",
+        "husky-warm",
+    ]
+    assert _matched_display_names(db, timbre_tags=["deep", "husky"]) == [
+        "deep-only",
+        "husky-warm",
+    ]
+    assert _matched_display_names(db, emotion_tags=["calm", "tense"]) == [
+        "clear-calm",
+        "deep-only",
+    ]
+    # 维度之间取交集：同一个音色要同时命中所选音色与场景。
+    assert _matched_display_names(
+        db, timbre_tags=["deep"], scenario_tags=["audiobook"]
+    ) == ["deep-only"]
+    assert _matched_display_names(
+        db, timbre_tags=["deep"], scenario_tags=["suspense"]
+    ) == []
+
+
+def test_public_voice_pool_tag_filter_is_empty_safe() -> None:
+    db = _build_session()
+    _publish_tagged_voice(db, "default-tags")
+
+    assert _matched_display_names(db, timbre_tags=[], scenario_tags=[""]) == [
+        "default-tags"
+    ]
+
+
+def test_public_voice_pool_tag_filter_treats_underscore_literally() -> None:
+    db = _build_session()
+    publication = _publish_tagged_voice(db, "airy-husky", timbre_tags=["airy_husky"])
+    publication.timbre_tags = ["airyXhusky"]
+    db.flush()
+
+    assert _matched_display_names(db, timbre_tags=["airy_husky"]) == []
+
+
+def test_public_pool_route_applies_tag_filters() -> None:
+    db = _build_session()
+    _publish_tagged_voice(db, "route-warm", timbre_tags=["warm"])
+    _publish_tagged_voice(db, "route-clear", timbre_tags=["clear"])
+
+    result = asyncio.run(
+        routes_voice_pool.discover_public_voice_pool(
+            timbre_tags=["warm", "clear"], scenario_tags=None, emotion_tags=None,
+            limit=50, cursor=None, db=db
+        )
+    )
+
+    assert sorted(item["display_name"] for item in result["voices"]) == [
+        "route-clear",
+        "route-warm",
+    ]
+
+    narrowed = asyncio.run(
+        routes_voice_pool.discover_public_voice_pool(
+            timbre_tags=["warm"], scenario_tags=None, emotion_tags=None,
+            limit=50, cursor=None, db=db
+        )
+    )
+
+    assert [item["display_name"] for item in narrowed["voices"]] == ["route-warm"]
+
+
+def test_public_pool_route_rejects_unknown_filter_tag() -> None:
+    db = _build_session()
+
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(
+            routes_voice_pool.discover_public_voice_pool(
+                timbre_tags=["not-a-real-timbre"], scenario_tags=None,
+                emotion_tags=None, db=db
+            )
+        )
+
+    assert exc.value.status_code == 400
+    assert "timbre" in str(exc.value.detail)
+
+
+def test_public_pool_route_rejects_too_many_filter_tags() -> None:
+    db = _build_session()
+
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(
+            routes_voice_pool.discover_public_voice_pool(
+                timbre_tags=None, scenario_tags=None,
+                emotion_tags=["calm", "happy", "sad", "angry", "fearful", "tender"],
+                db=db,
+            )
+        )
+
+    assert exc.value.status_code == 400
+
+
+def _build_voice_pool_client(db):
+    """把音色池路由挂到独立 app 上，用 sqlite 会话覆盖 get_db。"""
+    from fastapi import FastAPI
+    from httpx import ASGITransport, AsyncClient
+
+    from app.api.v1.audiobook_api import router as audiobook_router
+    from app.db.base import get_db
+
+    app = FastAPI()
+    app.include_router(audiobook_router)
+    app.dependency_overrides[get_db] = lambda: db
+
+    def fetch(url: str, params: list[tuple[str, str]]):
+        async def _run():
+            transport = ASGITransport(app=app)
+            async with AsyncClient(transport=transport, base_url="http://testserver") as client:
+                return await client.get(url, params=params)
+
+        return asyncio.run(_run())
+
+    return fetch
+
+
+def test_public_pool_http_query_filters_match_any_tag() -> None:
+    db = _build_session()
+    _publish_tagged_voice(db, "http-warm", timbre_tags=["warm", "husky"])
+    _publish_tagged_voice(db, "http-clear", timbre_tags=["clear"])
+    _publish_tagged_voice(db, "http-deep", timbre_tags=["deep"], emotion_tags=["angry"])
+    db.commit()
+
+    fetch = _build_voice_pool_client(db)
+
+    warm_or_clear = fetch(
+        "/api/v1/audiobook/voice-pool/public",
+        [("timbre_tags", "warm"), ("timbre_tags", "clear")],
+    )
+    assert warm_or_clear.status_code == 200
+    assert sorted(item["display_name"] for item in warm_or_clear.json()["voices"]) == [
+        "http-clear",
+        "http-warm",
+    ]
+
+    cross_dimension = fetch(
+        "/api/v1/audiobook/voice-pool/public",
+        [("timbre_tags", "deep"), ("emotion_tags", "angry")],
+    )
+    assert [item["display_name"] for item in cross_dimension.json()["voices"]] == ["http-deep"]
+
+    rejected = fetch(
+        "/api/v1/audiobook/voice-pool/public",
+        [("timbre_tags", "not-a-real-timbre")],
+    )
+    assert rejected.status_code == 400
+    assert "timbre" in rejected.json()["detail"]

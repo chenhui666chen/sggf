@@ -7,6 +7,7 @@ import { DreamweaverRunResultView, DreamweaverResultTextStageSection, Dreamweave
 import { RunSnapshotSectionStatus, RunSnapshotRefreshButton, RunSnapshotLoadedChip, RunSnapshotErrorAlert, RunSnapshotLoadingBar } from './runSnapshotPreviewPane'
 import { ShotPromptSnapshotList } from './ShotPromptSnapshotList'
 import { MergedVideoPanel, type MergedVideoPanelProps } from './MergedVideoPanel'
+import { DirectorOSResultPanels } from './DirectorOSResultPanels'
 import type { RunSnapshotSectionStatusProps } from './runSnapshotPreviewPane'
 import { buildVideoSummarySectionProps } from './runPagePropsBuilders'
 import type { VideoDiagnostics } from './runPageDiagnosticHelpers'
@@ -172,10 +173,14 @@ export function createRunPageResultRenderer(deps: CreateRunPageResultRendererDep
   const storyboardSummaryText = result?.storyboard ? t('dreamweaverRun.shotCount', { count: result.storyboard.length }) : t('dreamweaverRun.none')
 
   const renderResultStoryboardStageView = () => (
-    <DreamweaverResultStoryboardStageView
-      storyboardSummary={storyboardSummaryText}
-      snapshotSection={renderResultStoryboardSnapshotSection()}
-    />
+    <>
+      <DreamweaverResultStoryboardStageView
+        storyboardSummary={storyboardSummaryText}
+        snapshotSection={renderResultStoryboardSnapshotSection()}
+      />
+      {/* AI Director OS：Shot Contract + State Engine */}
+      <DirectorOSResultPanels result={result} />
+    </>
   )
 
   const renderResultLibraryHintView = () => (
@@ -185,13 +190,17 @@ export function createRunPageResultRenderer(deps: CreateRunPageResultRendererDep
   const auditText = result?.audit ? JSON.stringify(result.audit) : ''
 
   const renderResultAuditStageView = () => (
-    <DreamweaverResultTextStageSection
-      title={t('dreamweaverRun.qualityCheck')}
-      text={auditText}
-      emptyText={t('dreamweaverRun.noAuditInfo')}
-      marginTop={1}
-      marginBottom={0}
-    />
+    <>
+      <DreamweaverResultTextStageSection
+        title={t('dreamweaverRun.qualityCheck')}
+        text={auditText}
+        emptyText={t('dreamweaverRun.noAuditInfo')}
+        marginTop={1}
+        marginBottom={0}
+      />
+      {/* AI Director OS：AM-15 评价 + 修复路由 */}
+      <DirectorOSResultPanels result={result} />
+    </>
   )
 
   const handleSyncEvents = currentRunId ? () => syncDreamweaverEvents(currentRunId) : null

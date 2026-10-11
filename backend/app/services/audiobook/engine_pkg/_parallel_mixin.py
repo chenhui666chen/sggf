@@ -29,7 +29,6 @@ except ImportError:
 # 导入专业Agent
 from ..agents import (
     AudioDirector,
-    VoiceDesigner,
     SoundEffectDesigner,
     MusicComposer,
 )
@@ -168,7 +167,7 @@ class ParallelMixin:
                     logger.info("📖 章节角色分析未提取到新特征")
 
             if characters_in_script:
-                # 🔥 重构：VoiceDesigner 不再设计音色，只检查配置完整性
+                # 🔥 音色由 VoiceManager 统一管理，这里只检查配置完整性
                 if preserve_user_config:
                     # 获取已配置的角色列表
                     configured_characters = set(self.voice_manager.voice_profiles.keys())
@@ -181,7 +180,7 @@ class ParallelMixin:
                     if configured_characters:
                         logger.info(f"   🛡️ 保留用户配置: {len(configured_characters)} 个角色 {list(configured_characters)}")
                     
-                    # 🔥 关键改动：为未配置的角色使用 VoiceManager.assign_voice 而不是 VoiceDesigner
+                    # 🔥 未配置的角色统一走 VoiceManager.assign_voice
                     if characters_to_design:
                         logger.info(f"   🎭 使用VoiceManager自动分配: {len(characters_to_design)} 个角色 {characters_to_design}")
                         for char_name in characters_to_design:

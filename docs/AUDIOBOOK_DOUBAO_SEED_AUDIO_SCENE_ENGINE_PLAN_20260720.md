@@ -14,7 +14,7 @@
 当前有声书链路采用"多模型分轨生成 + 时间线后期混音"：
 
 - 语音：按项目/角色选择的 TTS 模型逐段合成，当前支持 Qwen、CosyVoice、MiniMax、MiMo、StepAudio、Seed-TTS 2.0 等，不是固定使用 Seed-TTS 2.0。
-- 音效：`SoundEffectDesigner` 优先匹配允许来源的素材；缺失素材由 Vidu Timing2Audio 等生成，再注册入库并按时间线叠加。
+- 音效：`SoundEffectDesigner` 优先匹配允许来源的素材；缺失素材由豆包音效生成链（`DoubaoSfxGenerator`）与 Mureka 场景配乐补齐，再注册入库并按时间线叠加。
 - 配乐：`MusicComposer` 通过 Mureka O1 等独立生成 BGM。
 - 合成：`AudioMixer.mix_chapter()` 拼接语音并插入段间停顿，再由 `_apply_sound_effects()` / `_apply_background_music()` 叠加音效和配乐。
 
@@ -123,7 +123,7 @@
 
 - 引擎入口：`AudiobookEngine`（`backend/app/services/audiobook/engine_pkg/__init__.py`），由多个 Mixin 组合。
 - 核心流水线：`GenerationMixin.generate_chapter_audio()`（`engine_pkg/_generation_mixin.py:50`），依次执行策略、剧本改编、并行设计、剧本质量评审、音频提示词审阅、TTS 合成、混音、最终评审、保存和统计。
-- 组件初始化：`AudiobookEngineBase.__init__()`（`engine_pkg/_base.py:62`）实例化 `audio_director`/`script_adapter`/`voice_designer`/`sound_effect_designer`/`music_composer`/`audio_quality_reviewer`/`voice_manager`/`tts_engine`/`audio_mixer`。
+- 组件初始化：`AudiobookEngineBase.__init__()`（`engine_pkg/_base.py:62`）实例化 `audio_director`/`script_adapter`/`sound_effect_designer`/`music_composer`/`audio_quality_reviewer`/`voice_manager`/`tts_engine`/`audio_mixer`（`voice_designer` 已于 2026-10-11 退役删除）。
 - 后台任务：`background_jobs_full.py:generate_audiobook_background()`、`background_jobs_audio.py`（已有剧本生成音频）、`background_jobs_scripts.py`（仅生成剧本）。
 
 ### 4.2 关键数据结构
@@ -615,7 +615,7 @@ MiniMax、StepAudio 和豆包固定音色费用当前只作为模型价格元数
 | `AudiobookScriptAgent` / `ScriptSegment` | 保留 + 小幅增强 | 继续作为剧情、台词、角色、停顿、音效和音乐事实源 |
 | `chapter_cadence` | 保留 + 改映射 | scene 内编译成表演停顿，场景边界交给装配器 |
 | `AudioQualityReviewer` | 保留 | 继续负责生成前的剧本质量；不替代新的音频台词完整性闸门 |
-| `SoundEffectDesigner` / Vidu | 保留 | 仅 `legacy_stems` 与回退场景使用 |
+| `SoundEffectDesigner` / DoubaoSfx | 保留 | 仅 `legacy_stems` 与回退场景使用（Vidu Timing2Audio 已于 2026-10-08 下线删除） |
 | `MusicComposer` / Mureka | 保留 | 仅 `legacy_stems` 与回退场景使用 |
 | 所有现有 TTS 模型 | 保留 | 参考音色来源、纯旁白和失败回退，不限于 Seed-TTS 2.0 |
 | `_apply_sound_effects` / `_apply_background_music` | 保留 | 只用于 `legacy_stems`，禁止对 Seed 完整场景重复叠加 |

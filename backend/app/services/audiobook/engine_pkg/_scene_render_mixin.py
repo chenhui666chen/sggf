@@ -65,6 +65,12 @@ logger = logging.getLogger(__name__)
 # §3.4：场景音频正式 artifact 存储根目录（与 routes_scene_editor 的流式端点一致）
 SCENE_ARTIFACT_ROOT = get_backend_root() / "data" / "scene_audio_artifacts"
 
+# 产物根只允许音频后缀：源文件后缀直接决定 artifact 文件名，历史上测试模块自身
+# 作为 audio_path 流入时被复制成 art_*.{py}，pytest 会在产物根内收集它。
+_SCENE_ARTIFACT_AUDIO_SUFFIXES = frozenset(
+    {".wav", ".mp3", ".m4a", ".m4b", ".aac", ".flac", ".ogg", ".opus"}
+)
+
 # 章节事实键：与 scene_local_context 的构造约定一致（时间/地点/情绪）。
 _CHAPTER_FACT_SOURCE_KEYS = (
     ("time", ("time", "time_of_day", "location_time")),
@@ -1305,6 +1311,7 @@ class SceneRenderMixin:
         content_digest/segment_keys/scene_topology_hash/source_kind；
         manual_review 或无产物场景不登记。复制失败仅记录告警并跳过该
         场景（发布前置校验会因 staged 缺场景而拒绝发布，失败显式化）。
+        非音频后缀的源同样跳过，产物根只允许 ``art_*.{音频后缀}``。
         """
         serialized_segments = [
             self._serialize_scene_segment(segment) for segment in script_segments
@@ -1346,12 +1353,20 @@ class SceneRenderMixin:
                     source_path,
                 )
                 continue
+            if source.suffix.lower() not in _SCENE_ARTIFACT_AUDIO_SUFFIXES:
+                logger.warning(
+                    "Seed Audio artifact source is not an audio file, skip: "
+                    "scene=%s suffix=%s",
+                    scene_id,
+                    source.suffix,
+                )
+                continue
             artifact_id = "art_{}".format(
                 hashlib.sha256(
                     f"{task_id}:{scene_id}".encode("utf-8")
                 ).hexdigest()[:40]
             )
-            extension = source.suffix.lstrip(".").lower() or "mp3"
+            extension = source.suffix.lower().lstrip(".")
             target = SCENE_ARTIFACT_ROOT / f"{artifact_id}.{extension}"
             try:
                 target.parent.mkdir(parents=True, exist_ok=True)

@@ -19,8 +19,10 @@ from app.services.audiobook.background_jobs_shared import (
 from app.services.audiobook.chapter_character_scope import select_chapter_characters
 from app.services.audiobook.job_tracker import handle_pause_checkpoint
 from app.services.audiobook.repository import ChapterAudioRunRepository
+from app.services.audiobook.tts_model_ids import DEFAULT_AUDIOBOOK_TTS_MODEL
 from app.services.audiobook.tts_pause import AudiobookPauseRequested
 from app.services.audiobook.project_audio_runtime import (
+    apply_runtime_voice_mapping,
     apply_scene_audio_runtime_to_engine,
     resolve_project_audio_runtime_config,
 )
@@ -29,6 +31,7 @@ from app.services.audiobook.task_support import (
     serialize_dataclass_to_dict,
     update_chapter_run_state as _update_chapter_run_state,
 )
+from app.services.audiobook.voice_manager import VoiceMappingResolutionError
 
 logger = logging.getLogger(__name__)
 
@@ -136,17 +139,16 @@ def _apply_script_stage_project_audio_config(
         )
 
     if effective_voice_mapping:
-        try:
-            engine.voice_manager.apply_project_voice_mapping(
-                effective_voice_mapping,
-                character_profiles=character_profiles,
-            )
-            logger.info(
-                "🎛 [剧本阶段] 已加载角色音配置: %s 个角色",
-                len(effective_voice_mapping),
-            )
-        except Exception as exc:
-            logger.warning("⚠️ [剧本阶段] 应用角色音配置失败: %s", exc)
+        # 角色音解析失败按失败收口：剧本阶段不吞音色越界，避免把残缺配置带给章节生成
+        apply_runtime_voice_mapping(
+            voice_manager=engine.voice_manager,
+            voice_mapping=effective_voice_mapping,
+            character_profiles=character_profiles,
+        )
+        logger.info(
+            "🎛 [剧本阶段] 已加载角色音配置: %s 个角色",
+            len(effective_voice_mapping),
+        )
 
     if not runtime_config.audio_fx:
         return
@@ -161,7 +163,7 @@ def _apply_script_stage_project_audio_config(
 async def generate_audiobook_scripts_background(
     audiobook_project_id: int,
     chapter_ids: List[int],
-    tts_model: str = "qwen3-tts-instruct-flash",
+    tts_model: str = DEFAULT_AUDIOBOOK_TTS_MODEL,
     force_regenerate: bool = False,
     tracker: Optional[StageTracker] = None,
     celery_task_id: Optional[str] = None,
@@ -213,6 +215,10 @@ async def generate_audiobook_scripts_background(
                 tts_model=tts_model,
                 character_profiles=character_profiles,
             )
+        except VoiceMappingResolutionError:
+            # 角色音越界必须把任务打成失败：其它音频配置异常可以降级继续，
+            # 但静默丢角色会让整本书带着换过的声线"成功"收尾。
+            raise
         except Exception as exc:
             logger.warning("⚠️ [剧本阶段] 加载项目级音频配置失败: %s", exc)
 

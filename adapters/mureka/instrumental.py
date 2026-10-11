@@ -8,7 +8,14 @@ from typing import Any, Dict, List, Optional
 
 from adapters.base import BaseAdapter, AdapterConfig, GenerationResult
 from adapters.registry import register_model
-from adapters._shared import MUREKA_API_KEY, MUREKA_API_URL
+from adapters._shared import (
+    MUREKA_API_URL,
+    MUREKA_FAILED_STATUSES,
+    MUREKA_INSTRUMENTAL_MODEL,
+    MUREKA_INSTRUMENTAL_N,
+    MUREKA_PENDING_STATUSES,
+    require_api_key,
+)
 from schemas.model_spec import ModelSpec
 from schemas.common import ModelStatus
 
@@ -32,9 +39,14 @@ class MurekaO1InstrumentalAdapter(BaseAdapter):
     def generate(self, prompt: str = "", **kwargs) -> GenerationResult:
         start = time.time()
         try:
+            api_key = require_api_key("MUREKA_API_KEY")
             url = f"{MUREKA_API_URL}/v1/instrumental/generate"
-            headers = {"Authorization": f"Bearer {MUREKA_API_KEY}", "Content-Type": "application/json"}
-            payload = {"prompt": prompt or "epic cinematic music", "model": "auto", "duration": 30}
+            headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+            payload = {
+                "prompt": prompt or "epic cinematic music",
+                "model": MUREKA_INSTRUMENTAL_MODEL,
+                "n": MUREKA_INSTRUMENTAL_N,
+            }
             r = requests.post(url, json=payload, headers=headers, timeout=120)
             if r.status_code != 200:
                 return GenerationResult(
@@ -52,14 +64,14 @@ class MurekaO1InstrumentalAdapter(BaseAdapter):
                     success=True, task_id=task_id, model_id=self.spec.id,
                     outputs=[audio_url], latency=time.time() - start,
                 )
-            if task_id and status in ("preparing", "processing", "queued"):
+            if task_id and (status in MUREKA_PENDING_STATUSES or not audio_url):
                 # Poll for result
                 poll_start = time.time()
                 while time.time() - poll_start < 300:
                     time.sleep(5)
                     pr = requests.get(
                         f"{MUREKA_API_URL}/v1/instrumental/query/{task_id}",
-                        headers={"Authorization": f"Bearer {MUREKA_API_KEY}"},
+                        headers={"Authorization": f"Bearer {api_key}"},
                         timeout=30,
                     )
                     if pr.status_code == 200:
@@ -77,16 +89,22 @@ class MurekaO1InstrumentalAdapter(BaseAdapter):
                             return GenerationResult(
                                 success=True, task_id=task_id, model_id=self.spec.id,
                                 outputs=[purl], latency=time.time() - start,
+                                metadata={
+                                    "provider_model": pdata.get("model", ""),
+                                    "duration_ms": (pdata.get("choices") or [{}])[0].get("duration"),
+                                    "watermarked": pdata.get("watermarked"),
+                                },
                             )
-                        if pstatus in ("failed", "error"):
+                        if pstatus in MUREKA_FAILED_STATUSES:
+                            reason = pdata.get("failed_reason") or json.dumps(pdata, ensure_ascii=False)[:200]
                             return GenerationResult(
                                 success=False, task_id=task_id, model_id=self.spec.id,
-                                error=f"Mureka task failed: {json.dumps(pdata, ensure_ascii=False)[:200]}",
+                                error=f"Mureka task {pstatus}: {reason}",
                                 latency=time.time() - start,
                             )
                 return GenerationResult(
                     success=False, task_id=task_id, model_id=self.spec.id,
-                    error=f"Mureka task timed out after 180s",
+                    error="Mureka task timed out after 300s",
                     latency=time.time() - start,
                 )
             return GenerationResult(

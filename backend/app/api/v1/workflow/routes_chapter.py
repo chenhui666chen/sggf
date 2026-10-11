@@ -4,7 +4,7 @@ import asyncio
 import os
 from fastapi import APIRouter, Depends, HTTPException, status, Body, BackgroundTasks
 from sqlalchemy.orm import Session
-from typing import Dict, Any, Optional, Tuple, List, Callable
+from typing import Dict, Any, Optional, Tuple, List, Callable, Awaitable
 from pydantic import BaseModel, ConfigDict
 from datetime import datetime
 import json
@@ -62,6 +62,8 @@ from app.services.free_quota import (
     QuotaServiceUnavailableError,
     get_free_quota_service,
 )
+from app.services.context_observability import ObservationBuilder
+from app.api.v1.workflow.helpers import _get_model_token_limits
 
 logger = logging.getLogger(__name__)
 
@@ -193,21 +195,16 @@ def _describe_iteration_round_rejection(
     )
 
 
-# 章节正文合法收尾字符（句末标点/引号/括号收口）；结尾不在此集合视为疑似截断
-_CHAPTER_ENDING_CHARS = set('。！？…！?~"\'\'』」》）).')
-
-
 def _is_likely_truncated_chapter(text: str) -> bool:
     """启发式检测章节正文是否被截断：以非句末标点收尾（如'离她二十'）视为疑似截断。
 
     仅用于生成后的完整性守卫：命中后静默重试一次，不作为硬失败。
     """
-    if not text or len(text) < 200:
-        return False  # 空稿/极短稿走既有失败路径
-    stripped = text.rstrip()
-    if not stripped:
-        return False
-    return stripped[-1] not in _CHAPTER_ENDING_CHARS
+    from app.services.narrative_circuit_breaker import is_likely_truncated
+
+    # 截断口径（收尾字符集/最小长度）统一由 services 层 is_likely_truncated 定义，
+    # 与 F.6 输出验收 evaluate_chapter_output 共用同一真源，避免两处字符集漂移。
+    return is_likely_truncated(text)
 
 
 # 结构级失败码：命中即视为章内结构断裂（同场复述/整弧重启/原地踏步），改稿无法修复，需重生成
@@ -273,6 +270,459 @@ def _build_next_chapter_review_meta(multi_model_result: Dict[str, Any]) -> Dict[
     }
 
 
+class _SnapshotGuard:
+    """规划/正文主快照的单次落库守卫（① P1-a）。
+
+    以可变持有者替代 `*_main_snapshot_done` bool 局部：bool 局部无法被 helper 回写，
+    分段/单遍/回退等多个失败分支需各自置位、极易遗漏（分段锁定分支曾遗漏 → 异常冒泡到
+    worker 外层 except 二次 finish → 重复 content/failed 主快照）。持有者可被
+    `_finish_main_snapshot` 跨分支统一置位，杜绝遗漏。
+    """
+
+    __slots__ = ("done",)
+
+    def __init__(self) -> None:
+        self.done = False
+
+
+def _finish_main_snapshot(
+    observation: ObservationBuilder, guard: _SnapshotGuard
+) -> None:
+    """落一条主快照并置守卫；已落则跳过，保证同一主请求最多一条 request_kind 快照。"""
+    if guard.done:
+        return
+    observation.finish()
+    guard.done = True
+
+
+def _finish_preflight_failure(
+    observation: ObservationBuilder,
+    error: BaseException,
+    *,
+    prompt_built: bool = False,
+    system_prompt: str = "",
+    user_prompt: str = "",
+    online_llm_calls: int = 0,
+) -> None:
+    """规划/正文预检阶段（builder 创建后、进入 LLM 调用前）失败时补落 failed 主快照（①）。
+
+    上下文装配/prompt 构造失败此前无快照，context-health 会误显示为“没有请求”。
+    与 LLM 调用失败路径口径一致：prompt 未构造记 prompt_request_bytes=-1 哨兵（区别于
+    发送空 prompt 的 0 B）；预检阶段尚未进入任何 LLM 调用，online_llm_calls 默认 0（真实零值，非 -1）；
+    builder 上已写入的 db_read/rag/payload/outline 等部分上下文自然保留。
+    “最多一条主快照”由调用方的 _SnapshotGuard 守卫保证，本函数只负责标记 failed 并 finish。
+    """
+    observation.set_online_llm_calls(online_llm_calls)
+    observation.set_request_status("failed", error_type=type(error).__name__)
+    if prompt_built:
+        observation.set_prompt_request_bytes(
+            system_prompt=system_prompt, user_prompt=user_prompt
+        )
+    else:
+        # 请求未成功构造/发送：-1 哨兵（与 _record_review_observation prompt_built=False 一致）
+        observation.observation.prompt_request_bytes = -1
+    observation.finish()
+
+
+def _record_content_retry_observation(
+    *,
+    project_id: Optional[int],
+    next_chapter_number: int,
+    task_id: str,
+    model: Optional[str],
+    system_prompt: str,
+    user_prompt: str,
+    calls: int,
+    retry_status: str,
+    fallback_to_previous_output: bool,
+    output_status: str,
+    output_reject_reason: str = "",
+    request_status: str = "ok",
+    error_type: str = "",
+    context_payload: Optional[Dict[str, Any]] = None,
+) -> None:
+    """正文流式失败→同步 fallback 后触发的截断重试独立观测（① P1，与 plan_retry 对称）。
+
+    该重试是一次真实 streaming LLM 调用，但主 content 快照已在流式失败处 finish（守卫置位），
+    后续 `if not content_guard.done` 块被跳过 → 重试的 retry_*/最终 output_status/真实调用数
+    无处落库，latest 会停在 fallback/ok 掩盖重试结果。故补一条 request_kind="content_retry" 快照：
+    - request_status：重试调用本身是否成功（未抛异常=ok，抛异常=failed）；
+    - retry_status：succeeded（重试稿完整被采用）/failed（仍截断或抛异常，保留上一版）；
+    - calls：本次重试真实发起的流式尝试数（非 -1）；
+    - output_status：重试后最终正文的验收结果（空/占位/重复/截断 → rejected）。
+    成功路径的重试仍折叠进 content 主快照，不进入本 helper。
+    """
+    resolved_model = model or ""
+    model_ctx, _model_out = (
+        _get_model_token_limits(resolved_model) if resolved_model else (0, 0)
+    )
+    obs = (
+        ObservationBuilder(project_id, next_chapter_number, "content_retry")
+        .set_model(
+            resolved_model,
+            context_limit=model_ctx,
+            safe_input_budget=(
+                _get_safe_input_token_budget(resolved_model) if resolved_model else 0
+            ),
+        )
+        .set_correlation(task_id=task_id)
+        .set_online_llm_calls(calls)
+        .set_request_status(request_status, error_type=error_type)
+        .set_output_status(output_status, reject_reason=output_reject_reason)
+        .set_retry(
+            attempted=True,
+            status=retry_status,
+            fallback_to_previous=fallback_to_previous_output,
+        )
+    )
+    if context_payload is not None:
+        obs.set_context_payload(context_payload)
+    obs.add_section(
+        "request_prompt", user_prompt, source_field="content_retry", layer="L1"
+    ).set_prompt_request_bytes(system_prompt=system_prompt, user_prompt=user_prompt)
+    obs.finish()
+
+
+def _record_final_validation_observation(
+    *,
+    project_id: Optional[int],
+    next_chapter_number: int,
+    task_id: str,
+    output_status: str,
+    output_reject_reason: str = "",
+    fallback_to_previous_output: bool = False,
+    context_payload: Optional[Dict[str, Any]] = None,
+) -> None:
+    """最终保存前统一验收 gate 的独立观测（F.6 第五条路径，第十三轮 P1-2）。
+
+    clean_final_output 清空的终稿、同步 optimize_chapter fallback 的未验收稿会绕过改稿循环验收
+    直奔落库；保存前 gate 拦截并按 final→best→draft 回退。本快照记录该拦截事件（无 LLM 调用，
+    calls=0、prompt_request_bytes=-1 哨兵）：output_status=rejected 表示原始终稿被拒、
+    output_reject_reason 为其稳定拒绝码、fallback_to_previous_output=true 表示已回退到 best/draft
+    有效版本、false 表示三者全无效已终止保存。正常路径（终稿本身有效）不落此快照，避免噪声。
+    """
+    obs = (
+        ObservationBuilder(project_id, next_chapter_number, "final_validation")
+        .set_correlation(task_id=task_id)
+        .set_online_llm_calls(0)
+        .set_request_status("ok")
+        .set_output_status(output_status, reject_reason=output_reject_reason)
+        .set_retry(
+            attempted=False,
+            status="not_needed",
+            fallback_to_previous=fallback_to_previous_output,
+        )
+    )
+    if context_payload is not None:
+        obs.set_context_payload(context_payload)
+    obs.observation.prompt_request_bytes = -1  # 保存前校验非 LLM 请求，无 prompt
+    obs.finish()
+
+
+async def _regenerate_and_review_on_structural_failure(
+    *,
+    regen_call: Callable[[], Awaitable[str]],
+    evaluate: Callable[[str], Any],
+    review_call: Callable[[str], Awaitable[str]],
+    record_regen: Callable[..., None],
+    require_exact_model: bool,
+    current_draft: str,
+    current_review: str,
+    on_draft_adopted: Optional[Callable[[str], Awaitable[None]]] = None,
+    on_review_updated: Optional[Callable[[str], Awaitable[None]]] = None,
+) -> Tuple[str, str, bool]:
+    """结构门控单遍重生成 + 静默复评的异常边界编排（第十四轮 P1/P2 + 第十五轮 P2）。
+
+    此前重生成 LLM 调用、F.6 验收、采用新稿、静默复评同在一个 try 内：复评抛异常会跳到
+    regeneration 的统一 except，把“重生成已成功采用 + 复评失败”误记为 regeneration failed（与真实
+    正文状态相反），且异常分支漏记 fallback_to_previous_output。本 helper 拆分异常边界：
+
+    - 重生成调用/验收一个 try：抛异常 → record_regen(status=failed, retry_status=failed,
+      fallback_to_previous_output=True[P2:保留分段初稿])；require_exact_model 时 raise，否则保留原稿返回。
+    - 重生成调用成功 → 先 record_regen(accepted/rejected + retry_status + fallback=not accepted)，
+      该观测在复评之前落定、不受复评结果影响（P1 核心）。
+    - 采用重生成稿后复评独立 try：复评失败时 review/failed 已由 review_call 内部记录，此处仅按
+      require_exact_model 决定 raise 或保留重生成稿继续，regeneration 观测保持 accepted、不改写为 failed；
+      非锁定复评失败仍回写已采用新稿正文（on_draft_adopted），锁定模型 raise 终止不回写。
+
+    回调注入以便独立单测真实控制流：regen_call/review_call 为 async 调用，evaluate 返回带 .accepted/.code
+    的 verdict，record_regen 落 regeneration 观测（model/prompt/calls 由调用方补齐）。采用副作用拆成两个
+    回调（P2 第十五轮）：on_draft_adopted(new_draft) 回写正文（落库+推送 content 阶段）、on_review_updated(new_review)
+    回写评审（落库+推送 review 阶段）——复评成功两者都触发；复评失败（非锁定）只触发 on_draft_adopted，保证
+    已采用新稿与 project_settings 一致且不把旧失败评审重推为 completed。返回 (chapter_draft, review_report, adopted)。
+    """
+    try:
+        regenerated_draft = await regen_call()
+        verdict = evaluate(regenerated_draft)
+    except Exception as regen_error:
+        # 重生成 LLM 调用/验收本身失败：记 regeneration failed + 回退分段初稿（P2）
+        record_regen(
+            status="failed",
+            error_type=type(regen_error).__name__,
+            output_status="not_checked",
+            output_reject_reason="",
+            retry_attempted=True,
+            retry_status="failed",
+            fallback_to_previous_output=True,
+        )
+        if require_exact_model:
+            logger.error(f"   ❌ 锁定模型单遍重生成失败且禁止回退: {regen_error}")
+            raise
+        logger.warning(f"   ⚠️ 单遍重生成失败，保留分段初稿进入迭代: {regen_error}")
+        return current_draft, current_review, False
+
+    accepted = verdict.accepted
+    reject_code = verdict.code or ""
+    # 重生成调用成功：先落 regeneration accepted/rejected 观测（在复评之前，不受复评结果影响）
+    record_regen(
+        status="ok",
+        error_type="",
+        output_status=("accepted" if accepted else "rejected"),
+        output_reject_reason=reject_code,
+        retry_attempted=True,
+        retry_status=("succeeded" if accepted else "failed"),
+        fallback_to_previous_output=(not accepted),
+    )
+    if not accepted:
+        logger.warning(f"   ⚠️ 单遍重生成验收未过（{reject_code}），保留分段初稿进入迭代")
+        return current_draft, current_review, False
+
+    # 采用重生成稿；静默复评单独异常边界（P1）：复评失败不得把 regeneration 改写成 failed
+    review_succeeded = False
+    review_report = current_review
+    try:
+        review_report = await review_call(regenerated_draft)
+        review_succeeded = True
+    except Exception as review_error:
+        # review/failed 已由 review_call 内部（_run_single_next_chapter_streaming_review）记录；
+        # 锁定模型禁止回退，直接终止（不回写草稿，保持原语义）。
+        if require_exact_model:
+            logger.error(f"   ❌ 锁定模型重生成后复评失败且禁止回退: {review_error}")
+            raise
+        logger.warning(f"   ⚠️ 重生成后静默复评失败，保留重生成稿进入迭代: {review_error}")
+
+    # 非锁定复评失败或复评成功：重生成稿已采用，立即回写正文（P2 第十五轮）——否则运行态
+    # chapter_draft 与 project_settings 草稿不一致；评审仅在复评成功时回写，避免把旧失败评审重推为 completed。
+    if on_draft_adopted is not None:
+        await on_draft_adopted(regenerated_draft)
+    if review_succeeded:
+        if on_review_updated is not None:
+            await on_review_updated(review_report)
+        logger.info(f"   ✅ 结构门控单遍重生成完成（{len(regenerated_draft)}字），复评报告已更新")
+    return regenerated_draft, review_report, True
+
+
+def _record_review_observation(
+    *,
+    project_id: Optional[int],
+    next_chapter_number: int,
+    task_id: str,
+    review_kind: str,
+    review_model: Optional[str],
+    system_prompt: str,
+    user_prompt: str,
+    calls: int,
+    status: str = "ok",
+    error_type: str = "",
+    prompt_built: bool = True,
+    context_payload: Optional[Dict[str, Any]] = None,
+    logical_step_count: Optional[int] = None,
+    output_status: str = "not_checked",
+    output_reject_reason: str = "",
+) -> None:
+    """为章节评审的真实 LLM 调用落一条独立 review 观测快照（调用级精简观测）。
+
+    评审辅助函数为模块级、不持有 DB/RAG/细纲上下文，故只记调用级字段
+    （模型/关联/prompt 字节/真实调用次数/状态），与下游精简观测口径一致。
+    project_id 为空时跳过（无项目上下文的测试调用）；prompt_built=False 记 -1 哨兵，
+    避免把评审 prompt 未在本层构造（如多模型评审内部）误读为发送了空 prompt。
+    logical_step_count 非空时写入逻辑步骤数（如多模型“报告数+主导”），用于
+    真实调用数不可知（online_llm_calls=-1）时表达逻辑规模，不冒充真实调用数。
+    评审不做写前冲突闸门，conflict_status 恒为 not_checked。
+    """
+    if project_id is None:
+        return
+    resolved_model = review_model or ""
+    model_ctx, _model_out = (
+        _get_model_token_limits(resolved_model) if resolved_model else (0, 0)
+    )
+    obs = (
+        ObservationBuilder(project_id, next_chapter_number, review_kind)
+        .set_model(
+            resolved_model,
+            context_limit=model_ctx,
+            safe_input_budget=(
+                _get_safe_input_token_budget(resolved_model) if resolved_model else 0
+            ),
+        )
+        .set_correlation(task_id=task_id)
+        .set_online_llm_calls(calls)
+        .set_conflict_result(status="not_checked")
+        .set_request_status(status, error_type=error_type)
+        .set_output_status(output_status, reject_reason=output_reject_reason)
+    )
+    if context_payload is not None:
+        obs.set_context_payload(context_payload)
+    if logical_step_count is not None:
+        obs.set_logical_step_count(logical_step_count)
+    if prompt_built:
+        obs.add_section(
+            "review_prompt", user_prompt, source_field=review_kind, layer="L1"
+        ).set_prompt_request_bytes(system_prompt=system_prompt, user_prompt=user_prompt)
+    else:
+        obs.observation.prompt_request_bytes = -1
+    obs.finish()
+
+
+async def _run_plan_sync_fallback(
+    *,
+    real_coordinator: Any,
+    fallback_kwargs: Dict[str, Any],
+    default_template: str,
+    project_id: Optional[int],
+    next_chapter_number: int,
+    task_id: str,
+    plan_model: Optional[str],
+) -> str:
+    """规划流式失败后的同步协调器回退，落独立 fallback 快照（P1）。
+
+    回退在协调器内部构造 prompt 且不暴露重试回调，真实调用数与 prompt 字节均不可知，
+    故 online_llm_calls=-1、prompt_built=False（-1 哨兵），区别于 0=未调用。
+    - 有 generate_chapter_plan：成功落 fallback/ok；失败落 fallback/failed（含 error_type）后 raise；
+    - 无协调器/方法：返回 default_template，落 fallback/failed 并标 fallback_mode=default_template（降级不伪装成功）。
+    """
+    if real_coordinator is not None and hasattr(real_coordinator, "generate_chapter_plan"):
+        try:
+            plan = await asyncio.to_thread(
+                real_coordinator.generate_chapter_plan, **fallback_kwargs
+            )
+        except Exception as fe:
+            _record_review_observation(
+                project_id=project_id,
+                next_chapter_number=next_chapter_number,
+                task_id=task_id,
+                review_kind="fallback",
+                review_model=plan_model,
+                system_prompt="",
+                user_prompt="",
+                calls=-1,
+                status="failed",
+                error_type=type(fe).__name__,
+                prompt_built=False,
+                context_payload={"fallback_for": "plan", "fallback_mode": "sync_coordinator"},
+            )
+            raise
+        _record_review_observation(
+            project_id=project_id,
+            next_chapter_number=next_chapter_number,
+            task_id=task_id,
+            review_kind="fallback",
+            review_model=plan_model,
+            system_prompt="",
+            user_prompt="",
+            calls=-1,
+            status="ok",
+            prompt_built=False,
+            context_payload={"fallback_for": "plan", "fallback_mode": "sync_coordinator"},
+        )
+        return plan
+    _record_review_observation(
+        project_id=project_id,
+        next_chapter_number=next_chapter_number,
+        task_id=task_id,
+        review_kind="fallback",
+        review_model=None,
+        system_prompt="",
+        user_prompt="",
+        calls=-1,
+        status="failed",
+        error_type="NoCoordinatorForFallback",
+        prompt_built=False,
+        context_payload={"fallback_for": "plan", "fallback_mode": "default_template"},
+    )
+    return default_template
+
+
+async def _run_content_sync_fallback(
+    *,
+    real_coordinator: Any,
+    fallback_kwargs: Dict[str, Any],
+    default_template: str,
+    project_id: Optional[int],
+    next_chapter_number: int,
+    task_id: str,
+    content_model: Optional[str],
+    previous_full_text: str = "",
+) -> str:
+    """正文流式失败后的同步协调器回退，落独立 fallback 快照（P1）。
+
+    口径同 _run_plan_sync_fallback（-1 哨兵）。差异：正文回退失败或无协调器时
+    返回 default_template 且**不 raise**（业务需继续），但必须记 fallback/failed，
+    绝不把默认模板伪装成 content/ok。
+    """
+    if real_coordinator is not None and hasattr(real_coordinator, "generate_chapter_content"):
+        try:
+            draft = await asyncio.to_thread(
+                real_coordinator.generate_chapter_content, **fallback_kwargs
+            )
+        except Exception as fe:
+            _record_review_observation(
+                project_id=project_id,
+                next_chapter_number=next_chapter_number,
+                task_id=task_id,
+                review_kind="fallback",
+                review_model=content_model,
+                system_prompt="",
+                user_prompt="",
+                calls=-1,
+                status="failed",
+                error_type=type(fe).__name__,
+                prompt_built=False,
+                context_payload={
+                    "fallback_for": "content",
+                    "fallback_mode": "sync_coordinator_failed_default_template",
+                },
+            )
+            return default_template
+        # ②：回退草稿过 F.6 统一输出验收（evaluate_chapter_output）——调用成功(status=ok)不等于
+        # 输出可接受，空/占位/过短/重复/截断草稿记 output_status=rejected + 稳定拒绝码，
+        # 避免 fallback/ok 掩盖最终失败（此前只查空/占位/重复，截断/过短回退稿被误记 accepted）。
+        from app.services.narrative_circuit_breaker import evaluate_chapter_output
+
+        _fb_verdict = evaluate_chapter_output(draft, previous_full_text)
+        _record_review_observation(
+            project_id=project_id,
+            next_chapter_number=next_chapter_number,
+            task_id=task_id,
+            review_kind="fallback",
+            review_model=content_model,
+            system_prompt="",
+            user_prompt="",
+            calls=-1,
+            status="ok",
+            prompt_built=False,
+            output_status=("accepted" if _fb_verdict.accepted else "rejected"),
+            output_reject_reason=_fb_verdict.code,
+            context_payload={"fallback_for": "content", "fallback_mode": "sync_coordinator"},
+        )
+        return draft
+    _record_review_observation(
+        project_id=project_id,
+        next_chapter_number=next_chapter_number,
+        task_id=task_id,
+        review_kind="fallback",
+        review_model=None,
+        system_prompt="",
+        user_prompt="",
+        calls=-1,
+        status="failed",
+        error_type="NoCoordinatorForFallback",
+        prompt_built=False,
+        context_payload={"fallback_for": "content", "fallback_mode": "default_template"},
+    )
+    return default_template
+
+
 async def _run_single_next_chapter_streaming_review(
     *,
     chapter_draft: str,
@@ -287,6 +737,9 @@ async def _run_single_next_chapter_streaming_review(
     review_model: Optional[str] = None,
     max_llm_attempts: int = 3,
     require_exact_model: bool = False,
+    project_id: Optional[int] = None,
+    task_id: str = "",
+    review_kind: str = "review",
 ) -> str:
     from app.services.prompts.review_prompts import GenreAdaptiveReviewPrompts
 
@@ -302,6 +755,12 @@ async def _run_single_next_chapter_streaming_review(
         recent_chapter_assets_summary=recent_chapter_assets_summary,
     )
 
+    review_llm_attempts = 0
+
+    def _count_review_attempt() -> None:
+        nonlocal review_llm_attempts
+        review_llm_attempts += 1
+
     try:
         review_report = await streaming_service.generate_chapter_streaming(
             prompt=review_user_prompt,
@@ -315,10 +774,23 @@ async def _run_single_next_chapter_streaming_review(
             max_retries=max_llm_attempts,
             require_exact_model=require_exact_model,
             disable_thinking=True,
+            on_llm_attempt=_count_review_attempt,
         )
         logger.info(
             f"   ✓ 评审完成（真流式 + {'锁定模型 ' + review_model if review_model else 'review任务路由'}），"
             f"报告长度: {len(review_report)}"
+        )
+        # 阶段 A 观测：评审真实调用成功，落独立 review 快照（调用级精简观测）
+        _record_review_observation(
+            project_id=project_id,
+            next_chapter_number=next_chapter_number,
+            task_id=task_id,
+            review_kind=review_kind,
+            review_model=review_model,
+            system_prompt=review_system_prompt,
+            user_prompt=review_user_prompt,
+            calls=review_llm_attempts,
+            status="ok",
         )
         # 🆕 评分锚点程序化校准：评审模型存在"零问题仍压 7 分"的先验惯性
         # （六维全"无"+零失败码却给 7 分），提示词纪律无法根除，此处兜底对齐锚点
@@ -327,18 +799,68 @@ async def _run_single_next_chapter_streaming_review(
             logger.info("   🎚️ 评审分已按锚点校准（零必改低分/带必改高分修正）")
         return calibrated
     except Exception as e:
+        # 阶段 A 观测：评审真实调用失败也落快照（含已产生的真实尝试次数），
+        # 覆盖锁定模型直接终止、网络错误、内部重试耗尽等失败路径。
+        _record_review_observation(
+            project_id=project_id,
+            next_chapter_number=next_chapter_number,
+            task_id=task_id,
+            review_kind=review_kind,
+            review_model=review_model,
+            system_prompt=review_system_prompt,
+            user_prompt=review_user_prompt,
+            calls=review_llm_attempts,
+            status="failed",
+            error_type=type(e).__name__,
+        )
         # 🆕 锁定模型档位下禁止回退到协调器（回退路径模型不受控），直接终止
         if require_exact_model:
             logger.error(f"   ❌ 锁定模型评审失败且禁止回退: {e}")
             raise
         logger.error(f"   ⚠️ 真流式调用失败，回退到同步调用: {e}")
         if real_coordinator is not None and hasattr(real_coordinator, "review_chapter"):
-            return calibrate_review_score_to_rubric(await asyncio.to_thread(
-                real_coordinator.review_chapter,
-                chapter_draft=chapter_draft,
-                chapter_plan=chapter_plan,
-                plot_outline=plot_outline,
-            ))
+            # 阶段 A 观测：同步回退本身可能再次调用 LLM，但 real_coordinator.review_chapter
+            # 在协调器内部构造 prompt 且不暴露重试回调，真实调用数不可知，用 -1 哨兵
+            # （区别于 0=未调用）；成功/失败各落一条 fallback 快照，修正“仅流式失败快照
+            # 导致健康面板 latest 误显示评审失败、掩盖已回退成功”的盲区。
+            try:
+                fallback_report = calibrate_review_score_to_rubric(await asyncio.to_thread(
+                    real_coordinator.review_chapter,
+                    chapter_draft=chapter_draft,
+                    chapter_plan=chapter_plan,
+                    plot_outline=plot_outline,
+                ))
+            except Exception as fe:
+                _record_review_observation(
+                    project_id=project_id,
+                    next_chapter_number=next_chapter_number,
+                    task_id=task_id,
+                    review_kind="fallback",
+                    review_model=None,
+                    system_prompt="",
+                    user_prompt="",
+                    calls=-1,
+                    status="failed",
+                    error_type=type(fe).__name__,
+                    prompt_built=False,
+                    context_payload={"review_mode": "sync_fallback"},
+                )
+                raise
+            _record_review_observation(
+                project_id=project_id,
+                next_chapter_number=next_chapter_number,
+                task_id=task_id,
+                review_kind="fallback",
+                review_model=None,
+                system_prompt="",
+                user_prompt="",
+                calls=-1,
+                status="ok",
+                prompt_built=False,
+                context_payload={"review_mode": "sync_fallback"},
+            )
+            return fallback_report
+        # 无协调器可用：降级返回默认评审串，未发生任何 LLM 调用，不落 fallback 快照
         return "质量评审：章节符合要求，可以继续优化。"
 
 
@@ -358,6 +880,8 @@ async def _run_next_chapter_quality_review(
     review_model: Optional[str] = None,
     max_llm_attempts: int = 3,
     require_exact_model: bool = False,
+    project_id: Optional[int] = None,
+    task_id: str = "",
 ) -> Tuple[str, Dict[str, Any]]:
     # 🆕 免费档短路：不进多模型评审 gate，直接单模型评审
     multi_model_preset = (
@@ -370,7 +894,12 @@ async def _run_next_chapter_quality_review(
         else None
     )
     review_meta: Dict[str, Any] = {}
+    # 阶段 A 观测（F.5）：区分单模型调用的请求类型——正常初评（免费档/未过 gate）记 review，
+    # 多模型失败（服务异常或产出不足）触发的降级记 fallback，使降级链路在 request_kind=fallback
+    # 下可独立检索，不与正常初评混淆。
+    _review_request_kind = "review"
     if multi_model_preset:
+        service = None
         try:
             cfg = review_feature_gate.get_multi_model_review_config(project_context) or {}
             service = MultiModelReviewService(
@@ -387,8 +916,64 @@ async def _run_next_chapter_quality_review(
             if multi_model_result.get("multi_model") and review_report:
                 await on_review_chunk(review_report, 1)
                 logger.info(f"   ✓ 多模型评审完成，报告长度: {len(review_report)}")
+                # 阶段 A 观测：多模型评审记为一条逻辑 review 请求（不拆成多条模型快照）。
+                # reviewer/chief 各自经 create_task_llm().ainvoke() → ModelHub.call 的重试循环，
+                # 供应商真实请求数（含重试/超时/provider fallback）在本层不可知 → online_llm_calls
+                # 记 -1 哨兵（区别于 0=未调用）；“报告数 + 主导综合”仅为逻辑模型调用步骤数，
+                # 写入 logical_step_count 而非冒充真实调用数；prompt 在服务内部构造，本层未捕获，
+                # 故 prompt_built=False（prompt_request_bytes=-1），并用 context_payload 标明多模型组成。
+                _reviewer_reports = multi_model_result.get("per_model_reports") or []
+                _logical_model_calls = len(_reviewer_reports) + (
+                    1 if multi_model_result.get("chief_model") else 0
+                )
+                _record_review_observation(
+                    project_id=project_id,
+                    next_chapter_number=next_chapter_number,
+                    task_id=task_id,
+                    review_kind="review",
+                    review_model=multi_model_result.get("chief_model"),
+                    system_prompt="",
+                    user_prompt="",
+                    calls=-1,
+                    status="ok",
+                    prompt_built=False,
+                    logical_step_count=_logical_model_calls,
+                    context_payload={
+                        "review_mode": "multi_model",
+                        "preset": multi_model_result.get("preset"),
+                        "chief_model": multi_model_result.get("chief_model"),
+                        "reviewer_models": multi_model_result.get("reviewer_models") or [],
+                        "reviewer_profiles": multi_model_result.get("reviewer_profiles") or [],
+                        "logical_model_calls": _logical_model_calls,
+                    },
+                )
                 return review_report, review_meta
             logger.warning("多模型评审未产出足够结果，回退单模型评审")
+            # 阶段 A 观测：多模型未抛异常但产出不足，此前无快照 → 补一条 review/failed，
+            # 内部可能已发生部分 reviewer 调用但不可知，用 -1 哨兵；标明将回退单模型。
+            _record_review_observation(
+                project_id=project_id,
+                next_chapter_number=next_chapter_number,
+                task_id=task_id,
+                review_kind="review",
+                review_model=multi_model_result.get("chief_model"),
+                system_prompt="",
+                user_prompt="",
+                calls=-1,
+                status="failed",
+                error_type="InsufficientMultiModelResult",
+                prompt_built=False,
+                context_payload={
+                    "review_mode": "multi_model",
+                    "preset": multi_model_result.get("preset"),
+                    "chief_model": multi_model_result.get("chief_model"),
+                    "reviewer_models": multi_model_result.get("reviewer_models") or [],
+                    "reviewer_profiles": multi_model_result.get("reviewer_profiles") or [],
+                    "fallback_required": True,
+                    "fallback_reason": "insufficient_result",
+                },
+            )
+            _review_request_kind = "fallback"
         except Exception as e:
             review_meta = {
                 "multi_model": False,
@@ -396,6 +981,40 @@ async def _run_next_chapter_quality_review(
                 "fallback_reason": str(e),
             }
             logger.exception("多模型评审失败，回退单模型评审")
+            # 阶段 A 观测：多模型服务异常，内部已完成的部分 reviewer 调用不会进入观测，
+            # 补一条 review/failed；真实尝试数不可知用 -1 哨兵（避免 0 被误读为未调用），
+            # context_payload 保存 preset/失败原因/是否回退单模型。
+            _record_review_observation(
+                project_id=project_id,
+                next_chapter_number=next_chapter_number,
+                task_id=task_id,
+                review_kind="review",
+                review_model=getattr(service, "chief_model", None),
+                system_prompt="",
+                user_prompt="",
+                calls=-1,
+                status="failed",
+                error_type=type(e).__name__,
+                prompt_built=False,
+                context_payload={
+                    "review_mode": "multi_model",
+                    "preset": multi_model_preset,
+                    # service 可能已构造成功但 review() 抛错，从实例补齐评审团组成；
+                    # 未构造（构造即抛）时为 None/[]，与其他降级快照口径一致。
+                    "chief_model": getattr(service, "chief_model", None),
+                    "reviewer_models": [
+                        reviewer["model"]
+                        for reviewer in getattr(service, "reviewers", []) or []
+                    ],
+                    "reviewer_profiles": [
+                        reviewer["profile"]
+                        for reviewer in getattr(service, "reviewers", []) or []
+                    ],
+                    "fallback_required": True,
+                    "fallback_reason": str(e),
+                },
+            )
+            _review_request_kind = "fallback"
 
     review_report = await _run_single_next_chapter_streaming_review(
         chapter_draft=chapter_draft,
@@ -410,6 +1029,9 @@ async def _run_next_chapter_quality_review(
         review_model=review_model,
         max_llm_attempts=max_llm_attempts,
         require_exact_model=require_exact_model,
+        project_id=project_id,
+        task_id=task_id,
+        review_kind=_review_request_kind,
     )
     if review_meta:
         review_meta["multi_model"] = False
@@ -417,7 +1039,7 @@ async def _run_next_chapter_quality_review(
 
 
 def _get_chapter_plan_prompt_token_budget(model_name: Optional[str]) -> int:
-    normalized_model = normalize_model_id(model_name) or model_name or "qwen3.7-plus"
+    normalized_model = normalize_model_id(model_name) or model_name or "qwen-plus"
     if normalized_model == "doubao-seed-character":
         try:
             configured_budget = int(os.getenv("DOUBAO_CHAPTER_PLAN_PROMPT_BUDGET", "80000"))
@@ -522,6 +1144,7 @@ def _build_chapter_plan_user_prompt(
     settings_catalog: str = "",
     model_name: Optional[str] = None,
     max_prompt_tokens: Optional[int] = None,
+    observation: Optional[ObservationBuilder] = None,
 ) -> str:
     fallback_sections = {
         "concept": "（暂无故事概念）",
@@ -696,7 +1319,50 @@ def _build_chapter_plan_user_prompt(
     prompt = render(normalized_sections)
     if max_prompt_tokens is None:
         max_prompt_tokens = _get_chapter_plan_prompt_token_budget(model_name)
+
+    # 阶段 A 观测：按 section 记录裁剪前后规模；observation 缺省时零开销
+    section_layers = {
+        "concept": "L3",
+        "current_chapter_outline": "L0",
+        "current_volume_context": "L2",
+        "core_character_anchor_context": "L3",
+        "focus_character_relationship_context": "L1",
+        "planning_character_context": "L1",
+        "epic_framework_context": "L2/L3",
+        "optimized_context_text": "L4",
+        "structured_memory_text": "L3",
+        "previous_chapters_summary": "L3",
+        "recent_chapter_assets_summary": "L1",
+        "previous_ending": "L0",
+        "climax_instruction": "L0",
+        "chapter_plan_guide": "L0",
+        "foreshadow_ledger_text": "L3",
+        "project_quality_memory_text": "L3",
+        "narrative_state_text": "L3",
+        "settings_catalog": "L3",
+    }
+
+    def record_plan_sections(
+        final_sections: Dict[str, str],
+        *,
+        default_trim: str,
+    ) -> None:
+        if observation is None:
+            return
+        for key, raw_value in normalized_sections.items():
+            final_value = final_sections.get(key, raw_value)
+            trim_method = "none" if final_value == raw_value else default_trim
+            observation.add_section(
+                f"plan.{key}",
+                raw_value,
+                source_field=key,
+                layer=section_layers.get(key, "L3"),
+                final_text=final_value,
+                trim_method=trim_method,
+            )
+
     if max_prompt_tokens <= 0 or _estimate_tokens_by_chars(prompt) <= max_prompt_tokens:
+        record_plan_sections(normalized_sections, default_trim="none")
         return prompt
 
     static_sections = normalize_sections({key: "" for key in raw_sections})
@@ -731,6 +1397,7 @@ def _build_chapter_plan_user_prompt(
         prompt = render(guarded_sections)
         cursor += 1
 
+    record_plan_sections(guarded_sections, default_trim="guard_trim")
     return prompt
 
 
@@ -746,6 +1413,8 @@ from app.api.v1.workflow.helpers import (
     _get_safe_input_token_budget,
     _select_previous_chapter_context_strategy,
     _select_text_model_by_input_tokens,
+    build_bounded_summary_navigation,
+    load_chapter_runtime_window,
 )
 from app.api.v1.workflow.story_helpers import *
 from app.api.v1.workflow.story_helpers import _sync_real_coordinator_project_context
@@ -956,26 +1625,27 @@ async def generate_next_chapter(
         plot_outline = settings_context.plot_outline
         logger.info(f"   ✓ 项目设定已加载")
         
-        # 3. 获取已生成章节
-        # 🆕 过滤软删除行：否则已删除章节仍被计入 next_chapter_number 并进入连续性上下文
-        query = text("""
-            SELECT id, chapter_number, title, content, summary
-            FROM chapters
-            WHERE project_id = :project_id
-              AND deleted_at IS NULL
-            ORDER BY chapter_number ASC
-        """)
-        chapters_result = db.execute(query, {"project_id": project_id}).fetchall()
-        existing_chapters = [(r[0], r[1], r[2], r[3], r[4]) for r in chapters_result]
+        # 3. 获取已生成章节（阶段 B WP1：有界窗口读取，替代无 LIMIT 全量查询）
+        # 过滤软删除行；列裁剪 + 范围过滤 + LIMIT，只装载近期窗口，杜绝 O(N) 内存/payload 膨胀
+        chapter_window = load_chapter_runtime_window(db, project_id)
+        # 阶段 A/B 观测：记录有界窗口实际读取的行数与列数（不再随章节总数增长）
+        db_rows_read = chapter_window.db_rows_read
+        db_columns_read = chapter_window.db_columns_read
+        existing_chapters = chapter_window.chapters
 
-        # 计算下一章编号
-        next_chapter_number = len(existing_chapters) + 1
-        logger.info(f"   ✓ 当前已有 {len(existing_chapters)} 章，即将生成第 {next_chapter_number} 章")
+        # 计算下一章编号（阶段 B WP2：MAX(chapter_number)+1，禁止 len()+1）
+        next_chapter_number = chapter_window.next_chapter_number
+        logger.info(
+            f"   ✓ 当前最大章节号 {chapter_window.max_active_chapter_number}"
+            f"（有界窗口读取 {len(existing_chapters)} 行），即将生成第 {next_chapter_number} 章"
+        )
 
-        # 🆕 当所有章节都被删除时（连第一章都不存在），重置工作流章节相关阶段状态与草稿
+        # 🆕 仅当项目“从未存在任何章节”（含软删除历史）时，才重置工作流章节相关阶段状态与草稿
         # 保留 concept/structure 阶段（项目设定与总大纲），仅清空章节草稿与评审/迭代产物
         # 这样前端会从"章节规划"步骤开始重新生成第 1 章
-        if not existing_chapters:
+        # 阶段 B WP2 修正：判据由"无活跃章节"改为"无章节历史"——若章节全部软删除，项目仍有历史，
+        # next_chapter_number=MAX+1（非 1），此时不得按"第1章"重置，避免重置文案/前端提示与实际编号矛盾
+        if not chapter_window.has_chapter_history:
             logger.info(f"   🔄 检测到项目无任何章节，重置章节草稿与阶段状态...")
             WorkflowContextBuilder(db).update_project_settings_fields(
                 project_id,
@@ -990,15 +1660,9 @@ async def generate_next_chapter(
             logger.info(f"   ✅ 已重置章节草稿与阶段状态，将从第1章章节规划开始重新生成")
 
         # 4. 提取前一章结尾（用于衔接）与完整正文（用于重复输出检测）
-        previous_ending = ""
-        previous_chapter_content = ""
-        if existing_chapters:
-            previous_chapter = existing_chapters[-1]
-            if previous_chapter[3]:  # 有内容
-                # 提取最后500个字符
-                content = previous_chapter[3]
-                previous_chapter_content = str(content)
-                previous_ending = content[-500:] if len(content) > 500 else content
+        # 阶段 B WP1：由有界窗口的近期全文查询独立提供，不再依赖全量加载后切片
+        previous_ending = chapter_window.previous_ending
+        previous_chapter_content = chapter_window.previous_chapter_content
         
         # 5. 生成已完成章节摘要，并为内容创作准备结构化的上一章信息
         def summarize_chapters(chapters):
@@ -1010,13 +1674,17 @@ async def generate_next_chapter(
             - 更早章节：使用简要摘要，控制成本
             """
             if not chapters:
-                return "这是第一章，之前没有章节。", [], ""
+                # 首章无历史可查：cache_lookup_status=not_eligible（未触发缓存查询）
+                return "这是第一章，之前没有章节。", [], "", 0, "not_eligible"
 
             # 局部导入，避免潜在的循环依赖
             from app.services.agents.chapter_summarizer import create_chapter_summarizer
 
             summaries = []
             previous_chapters_payload = []
+            summary_cache_hits_count = 0
+            # 是否真的对某章调用过 load_summary_from_db（区分"命中0"与"未查询"）
+            cache_lookup_done = False
 
             summarizer = None
             try:
@@ -1054,16 +1722,21 @@ async def generate_next_chapter(
                 needs_recent_assets = distance_from_end <= recent_asset_count
 
                 if summarizer and (needs_detailed_summary or needs_recent_assets):
+                    cache_lookup_done = True
                     try:
                         cached_summary = summarizer.load_summary_from_db(chapter_id)
                         if isinstance(cached_summary, dict):
                             summary_data = cached_summary
                             summary_text = summary_data.get("core_summary", "").strip() or summary_text
+                            summary_cache_hits_count += 1
                     except Exception as e:
                         logger.warning(f"   ⚠️ 读取第{chapter_num}章缓存摘要失败，将继续使用已有内容: {e}")
 
-                if summarizer and (needs_detailed_summary or needs_recent_assets) and not summary_data:
+                if summarizer and content and (needs_detailed_summary or needs_recent_assets) and not summary_data:
                     # 对详细摘要区和最近连续性资产区补齐结构化摘要
+                    # 阶段 B WP1：仅在窗口携带 content（近期全文区）时才在线补齐；
+                    # 详细摘要区更早章节已不读全文，无缓存时沿用 summary 列，
+                    # 避免用空内容触发在线摘要（规则 fallback 与入库预生成属 WP5）
                     try:
                         summary_data = summarizer.get_or_generate_summary(
                             chapter_id=chapter_id,
@@ -1136,9 +1809,28 @@ async def generate_next_chapter(
                 logger.info(f"      - 最近连续性资产窗口: {min(recent_asset_count, total)}章")
 
             recent_chapter_assets_summary = _build_recent_chapter_assets_summary(previous_chapters_payload)
-            return "\n\n".join(summaries), previous_chapters_payload, recent_chapter_assets_summary
+            # 缓存查询三态：摘要器不可用→unavailable；确实查过→queried；否则无符合条件章节→not_eligible
+            if summarizer is None:
+                cache_lookup_status = "unavailable"
+            elif cache_lookup_done:
+                cache_lookup_status = "queried"
+            else:
+                cache_lookup_status = "not_eligible"
+            return (
+                build_bounded_summary_navigation(summaries),
+                previous_chapters_payload,
+                recent_chapter_assets_summary,
+                summary_cache_hits_count,
+                cache_lookup_status,
+            )
 
-        previous_chapters_summary, previous_chapters_payload, recent_chapter_assets_summary = summarize_chapters(existing_chapters)
+        (
+            previous_chapters_summary,
+            previous_chapters_payload,
+            recent_chapter_assets_summary,
+            summary_cache_hits_count,
+            cache_lookup_status,
+        ) = summarize_chapters(existing_chapters)
 
         # 6. 使用提前生成的任务ID创建任务记录（task_id 已在配额 reservation 中使用）
         logger.info(f"   🎯 创建异步任务: {task_id}")
@@ -1194,6 +1886,8 @@ async def generate_next_chapter(
                 allow_model_fallback=generation_profile.allow_model_fallback,
                 lock_handle=lock_handle,
                 quota_enabled=generation_profile.quota_enabled,
+                db_rows_read=db_rows_read,
+                db_columns_read=db_columns_read,
             )
         )
         mark_generate_next_chapter_task_active(task_id, project_id, aio_task=generation_task)
@@ -1278,6 +1972,8 @@ async def execute_generate_next_chapter_task(
     allow_model_fallback: bool = True,
     lock_handle: Optional[LockHandle] = None,
     quota_enabled: bool = False,
+    db_rows_read: int = 0,
+    db_columns_read: int = 0,
 ):
     """
     后台执行生成下一章任务（真流式版本）
@@ -1427,6 +2123,24 @@ async def execute_generate_next_chapter_task(
             or chapter_generation_context.content_character_context
             or ""
         )
+        # ①：规划观测 builder 提前到上下文优化器/装配/prompt 构造之前创建，使这些阶段失败时
+        # 也能在 worker 外层 except 落一条 plan/failed 主快照（此前 builder 在优化器之后创建，
+        # 优化器/装配/prompt 构造异常会让规划请求在 context-health 面板完全消失）。
+        plan_observation = ObservationBuilder(
+            project_id, next_chapter_number, "plan"
+        ).set_correlation(task_id=task_id)
+        plan_guard = _SnapshotGuard()
+        # ①（P2）：workflow_generation_model 已指定时先写入请求模型与可提前算的预算，使
+        # prepare_context_for_expansion 早期失败的 plan/failed 快照仍带 model_id（否则为空削弱定位）；
+        # 自动选模型时此处无法预知，留待后置 set_model 补齐。
+        if workflow_generation_model:
+            _early_plan_limit, _ = _get_model_token_limits(workflow_generation_model)
+            plan_observation.set_model(
+                workflow_generation_model,
+                context_limit=_early_plan_limit,
+                safe_input_budget=_get_safe_input_token_budget(workflow_generation_model),
+            )
+
         forced_plan_model = normalize_model_id(workflow_generation_model) if workflow_generation_model else None
         forced_plan_ratio = 0.45 if forced_plan_model else None
         plan_context_result = layered_summarizer.prepare_context_for_expansion(
@@ -1587,6 +2301,59 @@ async def execute_generate_next_chapter_task(
             logger.info(
                 f"   📖 设定清单注入：{len(plan_settings_catalog):,}字符"
             )
+        plan_context_limit, _plan_output_limit = _get_model_token_limits(selected_plan_model)
+        # builder 已在优化器前提前创建（①），此处补齐模型/上下文上限/安全预算
+        plan_observation.set_model(
+            selected_plan_model,
+            context_limit=plan_context_limit,
+            safe_input_budget=plan_prompt_budget,
+        )
+        # 在线调用次数改为生成完成后按真实调用（含内部重试/同步回退）写入，见本段末尾 finish()
+        # 复用本请求前序章节查询的读取量
+        plan_observation.set_db_read(rows=db_rows_read, columns=db_columns_read)
+        # 规划阶段未单独做向量检索（上下文由优化器装配），RAG 记 0 为真实零值；
+        # 章节摘要缓存查询状态沿用历史读取阶段的三态结果
+        plan_observation.set_rag(
+            hits=0,
+            summary_cache_hits=summary_cache_hits_count,
+            cache_lookup_performed=(cache_lookup_status == "queried"),
+            cache_lookup_status=cache_lookup_status,
+        )
+        # 规划请求先于写前闸门，冲突尚未校验
+        plan_observation.set_conflict_result(status="not_checked")
+        plan_observation.set_outline_health(
+            outline_status=chapter_generation_context.outline_status,
+            volume_matched=chapter_generation_context.volume_matched,
+        )
+        # 规划请求实际上下文载荷口径
+        plan_observation.set_context_payload({
+            "task_id": task_id,
+            "chapter_number": next_chapter_number,
+            "concept": plan_optimized_context.get('project_concept', concept),
+            "current_chapter_outline": chapter_generation_context.current_chapter_outline,
+            "current_volume_context": chapter_generation_context.current_volume_context,
+            "previous_ending": plan_optimized_context.get('previous_ending', previous_ending),
+            "plot_outline": plan_optimized_context.get('plot_outline', plot_outline),
+            "previous_chapters_summary": plan_optimized_context.get(
+                'previous_chapters_analysis', previous_chapters_summary
+            ),
+            # 补齐实际渲染进规划 prompt 的叙事上下文，与正文口径对称，避免载荷被系统性低估
+            "core_character_anchor_context": chapter_generation_context.core_character_anchor_context,
+            "focus_character_relationship_context": chapter_generation_context.focus_character_relationship_context,
+            "planning_character_context": (
+                chapter_generation_context.planning_character_prompt_context
+                or chapter_generation_context.character_prompt_context
+            ),
+            "epic_framework_context": chapter_generation_context.epic_framework_context,
+            "structured_memory_text": plan_optimized_context.get('structured_memory_text', ''),
+            "recent_chapter_assets_summary": plan_optimized_context.get(
+                'recent_chapter_assets_summary', recent_chapter_assets_summary
+            ),
+            "foreshadow_ledger_text": foreshadow_ledger_text,
+            "project_quality_memory_text": project_quality_memory_text,
+            "narrative_state_text": narrative_state_text,
+            "settings_catalog": plan_settings_catalog,
+        })
         plan_user_prompt = _build_chapter_plan_user_prompt(
             next_chapter_number=next_chapter_number,
             concept=plan_optimized_context.get('project_concept', concept),
@@ -1612,7 +2379,9 @@ async def execute_generate_next_chapter_task(
             settings_catalog=plan_settings_catalog,
             model_name=selected_plan_model,
             max_prompt_tokens=plan_prompt_budget,
+            observation=plan_observation,
         )
+        # finish() 移到规划生成完成后，以写入真实在线调用次数与完整请求字节
         plan_prompt_tokens = _estimate_tokens_by_chars(plan_user_prompt)
         logger.info(
             "      - 最终规划Prompt: %s tokens / 预算 %s tokens",
@@ -1621,6 +2390,12 @@ async def execute_generate_next_chapter_task(
         )
 
         # 🆕 使用真流式 LLM 调用（智能选择模型）
+        plan_llm_attempts = 0
+
+        def _count_plan_attempt() -> None:
+            nonlocal plan_llm_attempts
+            plan_llm_attempts += 1
+
         try:
             chapter_plan = await streaming_service.generate_chapter_streaming(
                 prompt=plan_user_prompt,
@@ -1631,21 +2406,38 @@ async def execute_generate_next_chapter_task(
                 max_retries=max_llm_attempts,
                 require_exact_model=require_exact_model,
                 disable_thinking=True,  # 🆕 规划默认关闭思考模式，避免 reasoning 占用上下文
+                on_llm_attempt=_count_plan_attempt,
             )
             logger.info(f"   ✓ 章节规划已完成（真流式 + {selected_plan_model}），长度: {len(chapter_plan)}")
         except Exception as e:
             # 🆕 锁定模型档位下禁止回退到协调器（回退路径模型不受控），直接终止
             if require_exact_model:
                 logger.error(f"   ❌ 锁定模型章节规划失败且禁止回退: {e}")
+                # 失败兜底观测：先落库已发起尝试数/异常类型/请求字节再抛出，避免失败请求在面板消失
+                plan_observation.set_prompt_request_bytes(
+                    system_prompt=plan_system_prompt, user_prompt=plan_user_prompt
+                )
+                plan_observation.set_online_llm_calls(plan_llm_attempts)
+                plan_observation.set_request_status("failed", error_type=type(e).__name__)
+                _finish_main_snapshot(plan_observation, plan_guard)
                 raise
             logger.error(f"   ⚠️ 真流式调用失败，回退到同步调用: {e}")
-            # 回退到同步调用
-            if hasattr(real_coordinator, 'generate_chapter_plan'):
-                chapter_plan = await asyncio.to_thread(
-                    real_coordinator.generate_chapter_plan,
-                    chapter_number=next_chapter_number,
-                    project_concept=concept,
-                    plot_outline="\n\n".join(
+            # 阶段 A 观测（P1）：流式失败先落 plan/failed 主快照（仅流式真实调用数，不含回退），
+            # 再走同步回退落独立 fallback 快照；此前规划回退未包 try/except，异常会使下方 finish() 被跳过、失败快照丢失。
+            plan_observation.set_prompt_request_bytes(
+                system_prompt=plan_system_prompt, user_prompt=plan_user_prompt
+            )
+            plan_observation.set_online_llm_calls(plan_llm_attempts)
+            plan_observation.set_request_status("failed", error_type=type(e).__name__)
+            _finish_main_snapshot(plan_observation, plan_guard)
+            # 同步回退：独立 fallback 快照，真实调用数/prompt 不可知记 -1；
+            # 回退失败落 fallback/failed 后 raise，无协调器降级默认模板并记 failed。
+            chapter_plan = await _run_plan_sync_fallback(
+                real_coordinator=real_coordinator,
+                fallback_kwargs={
+                    "chapter_number": next_chapter_number,
+                    "project_concept": concept,
+                    "plot_outline": "\n\n".join(
                         part
                         for part in (
                             chapter_generation_context.current_chapter_outline,
@@ -1654,13 +2446,29 @@ async def execute_generate_next_chapter_task(
                         )
                         if part and part.strip()
                     ),
-                    world_setting=world_setting,
-                    characters=chapter_generation_context.character_prompt_context or characters,
-                    previous_chapters_summary=previous_chapters_summary,
-                    previous_ending=previous_ending
-                )
-            else:
-                chapter_plan = f"第{next_chapter_number}章创作规划\n\n根据情节大纲和前序章节，本章将继续推进故事发展..."
+                    "world_setting": world_setting,
+                    "characters": chapter_generation_context.character_prompt_context or characters,
+                    "previous_chapters_summary": previous_chapters_summary,
+                    "previous_ending": previous_ending,
+                },
+                default_template=(
+                    f"第{next_chapter_number}章创作规划\n\n"
+                    "根据情节大纲和前序章节，本章将继续推进故事发展..."
+                ),
+                project_id=project_id,
+                next_chapter_number=next_chapter_number,
+                task_id=task_id,
+                plan_model=selected_plan_model,
+            )
+
+        # 阶段 A 观测：流式成功路径在此落 plan/ok 主快照；
+        # 流式失败路径已在 except 内落 plan/failed（守卫已置位），不重复 finish()。
+        if not plan_guard.done:
+            plan_observation.set_prompt_request_bytes(
+                system_prompt=plan_system_prompt, user_prompt=plan_user_prompt
+            )
+            plan_observation.set_online_llm_calls(plan_llm_attempts)
+            _finish_main_snapshot(plan_observation, plan_guard)
 
         # 🆕 P1：细纲驱动的写前连续性闸门（纯规则校验，验证规划能否在当前叙事状态下执行）
         gate_issues: list = []
@@ -1726,18 +2534,72 @@ async def execute_generate_next_chapter_task(
                         progress=25,
                         message=f"写前闸门发现冲突，重规划中（{gate_round}/{max_gate_replans}）",
                     )
-                    chapter_plan = await streaming_service.generate_chapter_streaming(
-                        prompt=plan_user_prompt + "\n\n" + format_gate_feedback(gate_issues),
-                        system_prompt=plan_system_prompt,
-                        on_chunk=on_plan_chunk,
-                        temperature=0.5,
-                        model=selected_plan_model,
-                        max_retries=max_llm_attempts,
-                        require_exact_model=require_exact_model,
-                        disable_thinking=True,  # 🆕 重规划同样关闭思考模式
-                    )
+                    gate_replan_prompt = plan_user_prompt + "\n\n" + format_gate_feedback(gate_issues)
+                    _gate_attempts_before = plan_llm_attempts
+                    try:
+                        chapter_plan = await streaming_service.generate_chapter_streaming(
+                            prompt=gate_replan_prompt,
+                            system_prompt=plan_system_prompt,
+                            on_chunk=on_plan_chunk,
+                            temperature=0.5,
+                            model=selected_plan_model,
+                            max_retries=max_llm_attempts,
+                            require_exact_model=require_exact_model,
+                            disable_thinking=True,  # 🆕 重规划同样关闭思考模式
+                            on_llm_attempt=_count_plan_attempt,
+                        )
+                    except Exception as gate_replan_error:
+                        # 重规划失败也落 plan_retry failed 快照（本轮已发起真实调用数 + 反馈后 prompt 字节），再原样抛出
+                        (
+                            ObservationBuilder(project_id, next_chapter_number, "plan_retry")
+                            .set_model(
+                                selected_plan_model,
+                                context_limit=plan_context_limit,
+                                safe_input_budget=plan_prompt_budget,
+                            )
+                            .set_correlation(task_id=task_id)
+                            .set_prompt_request_bytes(
+                                system_prompt=plan_system_prompt, user_prompt=gate_replan_prompt
+                            )
+                            .set_db_read(rows=db_rows_read, columns=db_columns_read)
+                            .set_online_llm_calls(plan_llm_attempts - _gate_attempts_before)
+                            .set_conflict_result(
+                                status="blocked",
+                                blocking_count=sum(
+                                    1 for issue in gate_issues if issue.get("severity") == "blocking"
+                                ),
+                            )
+                            .set_request_status("failed", error_type=type(gate_replan_error).__name__)
+                            .finish()
+                        )
+                        raise
                     gate_issues = _run_gate()
-                    if not has_blocking_issues(gate_issues):
+                    _gate_resolved = not has_blocking_issues(gate_issues)
+                    _gate_blocking_after = sum(
+                        1 for issue in gate_issues if issue.get("severity") == "blocking"
+                    )
+                    # 闸门重规划是独立真实请求：单独落 plan_retry 快照
+                    # （追加反馈后的实际 prompt 字节 + 本轮真实调用数 + 闸门复检结果）
+                    (
+                        ObservationBuilder(project_id, next_chapter_number, "plan_retry")
+                        .set_model(
+                            selected_plan_model,
+                            context_limit=plan_context_limit,
+                            safe_input_budget=plan_prompt_budget,
+                        )
+                        .set_correlation(task_id=task_id)
+                        .set_prompt_request_bytes(
+                            system_prompt=plan_system_prompt, user_prompt=gate_replan_prompt
+                        )
+                        .set_db_read(rows=db_rows_read, columns=db_columns_read)
+                        .set_online_llm_calls(plan_llm_attempts - _gate_attempts_before)
+                        .set_conflict_result(
+                            status="passed" if _gate_resolved else "blocked",
+                            blocking_count=_gate_blocking_after,
+                        )
+                        .finish()
+                    )
+                    if _gate_resolved:
                         logger.info(f"   ✓ 写前闸门第{gate_round}轮重规划后通过")
                         break
 
@@ -1890,6 +2752,14 @@ async def execute_generate_next_chapter_task(
         logger.info(f"   📐 匹配章节定位与场景类型...")
 
         # 🆕 开头/结尾方式与节奏指导：统一从 content_creation 单一来源导入（章节定位路由优先，禁止内嵌副本）
+        # ①（P1-b）：正文观测 builder 提前到正文相位起点——早于 get_recommended_styles/get_context_optimizer/
+        # 模型解析/预算计算，使这些早期预检步骤失败时也能在 worker 外层 except 落一条 content/failed 主快照；
+        # 与 plan 相位对称：先只 set_correlation，待模型/预算解析后再 set_model 补齐字段。
+        content_observation = ObservationBuilder(
+            project_id, next_chapter_number, "content"
+        ).set_correlation(task_id=task_id)
+        content_guard = _SnapshotGuard()
+
         from app.services.prompts.stages.content_creation import get_recommended_styles
 
         selected_opening, selected_ending, match_method, position_rhythm_hint = get_recommended_styles(
@@ -1911,6 +2781,14 @@ async def execute_generate_next_chapter_task(
         selected_content_model = workflow_generation_model or context_optimizer.selected_model
         resolved_content_model = resolve_model_for_task(None, selected_content_model) or selected_content_model
         logger.info(f"   🤖 内容创作使用模型: {resolved_content_model} (requested={selected_content_model})")
+        # ①：builder 已在正文相位起点提前创建（P1-b），此处解析出模型/上下文上限/安全预算后补齐 set_model 字段。
+        content_context_limit, _content_output_limit = _get_model_token_limits(selected_content_model)
+        content_safe_budget = _get_safe_input_token_budget(selected_content_model)
+        content_observation.set_model(
+            selected_content_model,
+            context_limit=content_context_limit,
+            safe_input_budget=content_safe_budget,
+        )
         # 🆕 广播步骤2模型
         await ws_manager.send_model_used(
             project_id=project_id,
@@ -2010,6 +2888,74 @@ async def execute_generate_next_chapter_task(
         if gate_warning_section:
             content_user_prompt = f"{content_user_prompt}\n\n{gate_warning_section}"
 
+        # 阶段 A 观测：正文请求完整快照（section 明细/完整 payload/DB/RAG）——
+        # builder 已在 Typed-RAG 前提前创建并 set_model（①），此处仅补 section/payload/db/rag/冲突/细纲
+        # builder 内 section 统计按最终渲染口径（含空值 fallback 文本）
+        for section_stat in builder.last_section_stats:
+            content_observation.add_section_stat(section_stat)
+        # gate warning 在 builder 外部追加，单独计入 section
+        if gate_warning_section:
+            content_observation.add_section(
+                "gate_warning", gate_warning_section, layer="L0"
+            )
+        # 上下文载荷（估算）：历史章节列表 + 实际进入 prompt 的叙事上下文（不含固定系统规则/输出契约）
+        content_observation.set_context_payload({
+            "task_id": task_id,
+            "chapter_number": next_chapter_number,
+            "chapter_plan": chapter_plan,
+            "concept": concept,
+            "world_setting": world_setting,
+            "characters": characters,
+            "plot_outline": plot_outline,
+            "previous_ending": previous_ending,
+            "recent_chapter_assets_summary": recent_chapter_assets_summary,
+            "previous_chapters": previous_chapters_payload,
+            # 补齐实际渲染进 prompt 的叙事上下文，避免载荷被系统性低估
+            "current_chapter_outline": chapter_generation_context.current_chapter_outline,
+            "current_volume_context": chapter_generation_context.current_volume_context,
+            "core_character_anchor_context": chapter_generation_context.core_character_anchor_context,
+            "focus_character_relationship_context": chapter_generation_context.focus_character_relationship_context,
+            "character_runtime_context": merged_character_runtime_context,
+            "epic_framework_context": chapter_generation_context.epic_framework_context,
+            "rag_character_context": rag_character_context,
+            "rag_world_context": rag_world_context,
+            "rag_previous_context": rag_previous_context,
+            "selected_opening": selected_opening,
+            "selected_ending": selected_ending,
+            "position_rhythm_hint": position_rhythm_hint,
+            "project_quality_memory_text": project_quality_memory_text,
+            "gate_warning_section": gate_warning_section,
+        })
+        # 完整请求字节（权威口径）：正文 system+user prompt
+        content_observation.set_prompt_request_bytes(
+            system_prompt=content_system_prompt, user_prompt=content_user_prompt
+        )
+        content_observation.set_db_read(
+            rows=db_rows_read, columns=db_columns_read
+        )
+        content_observation.set_rag(
+            hits=rag_bundle.character_hits
+            + rag_bundle.world_hits
+            + rag_bundle.previous_hits,
+            summary_cache_hits=summary_cache_hits_count,
+            cache_lookup_performed=(cache_lookup_status == "queried"),
+            cache_lookup_status=cache_lookup_status,
+        )
+        # 冲突结果：走到正文说明写前闸门 blocking=0；有 warning 则状态为 warning
+        content_gate_warning_count = sum(
+            1 for issue in gate_issues if issue.get("severity") == "warning"
+        )
+        content_observation.set_conflict_result(
+            status="warning" if content_gate_warning_count else "passed",
+            blocking_count=0,
+            warning_count=content_gate_warning_count,
+        )
+        content_observation.set_outline_health(
+            outline_status=chapter_generation_context.outline_status,
+            volume_matched=chapter_generation_context.volume_matched,
+        )
+        # finish() 移到正文生成完成后，以写入真实在线调用次数（含分段/截断重试/同步回退）
+
         # 📊 输出精简版 prompt 统计
         logger.info(f"   📉 Prompt优化（精简版）：")
         logger.info(f"      - 章节规划: {len(chapter_plan)} 字")
@@ -2026,6 +2972,64 @@ async def execute_generate_next_chapter_task(
         # 事件条目切片保证不了"一段一景"，历史三次跨项目结构事故（同场复述/整弧重启）均源于分段互盲
         chapter_draft = ""
         segments = []
+        content_llm_attempts = 0
+
+        def _count_content_attempt() -> None:
+            nonlocal content_llm_attempts
+            content_llm_attempts += 1
+
+        def _record_segment_observation(
+            seg: Dict[str, Any],
+            seg_user_prompt: str,
+            seg_previous_tail: str,
+            *,
+            calls: int,
+            status: str = "ok",
+            error_type: str = "",
+        ) -> None:
+            """每段一条 segment 观测（成功/失败共用）：section 以 seg prompt 计，保证 remaining_budget 不失真；
+            per-section 裁剪明细只在 content 快照。失败时 payload 仍带段索引/事件数以定位是哪一段。"""
+            (
+                ObservationBuilder(project_id, next_chapter_number, "segment")
+                .set_model(
+                    selected_content_model,
+                    context_limit=content_context_limit,
+                    safe_input_budget=content_safe_budget,
+                )
+                .set_correlation(task_id=task_id)
+                .add_section(
+                    "segment_prompt",
+                    seg_user_prompt,
+                    source_field="build_segment_user_prompt",
+                    layer="L1",
+                )
+                .set_prompt_request_bytes(
+                    system_prompt=content_system_prompt, user_prompt=seg_user_prompt
+                )
+                .set_context_payload({
+                    "segment_index": seg.get("index"),
+                    "segment_event_count": len(seg.get("events", [])),
+                    "previous_segment_tail": seg_previous_tail,
+                })
+                .set_db_read(rows=db_rows_read, columns=db_columns_read)
+                .set_rag(
+                    hits=rag_bundle.character_hits
+                    + rag_bundle.world_hits
+                    + rag_bundle.previous_hits,
+                    summary_cache_hits=summary_cache_hits_count,
+                    cache_lookup_performed=(cache_lookup_status == "queried"),
+                    cache_lookup_status=cache_lookup_status,
+                )
+                .set_outline_health(
+                    outline_status=chapter_generation_context.outline_status,
+                    volume_matched=chapter_generation_context.volume_matched,
+                )
+                .set_online_llm_calls(calls)
+                .set_conflict_result(status="not_checked")
+                .set_request_status(status, error_type=error_type)
+                .finish()
+            )
+
         if getattr(settings, "SCENE_SEGMENTATION_ENABLED", False):
             segments = split_scene_segments(chapter_plan)
         draft_is_segmented = bool(segments)
@@ -2061,15 +3065,36 @@ async def execute_generate_next_chapter_task(
                     )
                     if gate_warning_section:
                         seg_user_prompt = f"{seg_user_prompt}\n\n{gate_warning_section}"
-                    seg_content = await streaming_service.generate_chapter_streaming(
-                        prompt=seg_user_prompt,
-                        system_prompt=content_system_prompt,
-                        on_chunk=on_content_chunk,
-                        temperature=0.7,
-                        model=selected_content_model,  # 🔥 使用智能选择的模型
-                        max_retries=max_llm_attempts,
-                        require_exact_model=require_exact_model,
-                        disable_thinking=True,  # 🆕 正文生成关闭思考模式，避免思考文本混入产出
+                    _seg_attempts_before = content_llm_attempts
+                    try:
+                        seg_content = await streaming_service.generate_chapter_streaming(
+                            prompt=seg_user_prompt,
+                            system_prompt=content_system_prompt,
+                            on_chunk=on_content_chunk,
+                            temperature=0.7,
+                            model=selected_content_model,  # 🔥 使用智能选择的模型
+                            max_retries=max_llm_attempts,
+                            require_exact_model=require_exact_model,
+                            disable_thinking=True,  # 🆕 正文生成关闭思考模式，避免思考文本混入产出
+                            on_llm_attempt=_count_content_attempt,
+                        )
+                    except Exception as seg_call_error:
+                        # 段级失败快照：保留失败段索引/事件数/prompt 字节/已发起尝试数，再交由外层回退或终止
+                        _record_segment_observation(
+                            seg,
+                            seg_user_prompt,
+                            previous_segment_tail,
+                            calls=content_llm_attempts - _seg_attempts_before,
+                            status="failed",
+                            error_type=type(seg_call_error).__name__,
+                        )
+                        raise
+                    # 每段单独记录一条 segment 观测（成功路径）：完整请求字节 + 本段真实调用数 + 共享上下文字段
+                    _record_segment_observation(
+                        seg,
+                        seg_user_prompt,
+                        previous_segment_tail,
+                        calls=content_llm_attempts - _seg_attempts_before,
                     )
                     segment_parts.append(seg_content.strip())
                     previous_segment_tail = extract_segment_tail(seg_content)
@@ -2084,8 +3109,22 @@ async def execute_generate_next_chapter_task(
                 # 🔒 锁定模型档位下失败不可回退（回退路径模型不受控），直接终止
                 if require_exact_model:
                     logger.error(f"   ❌ 锁定模型分段生成失败且禁止回退: {seg_error}")
+                    content_observation.set_online_llm_calls(content_llm_attempts)
+                    content_observation.set_request_status("failed", error_type=type(seg_error).__name__)
+                    _finish_main_snapshot(content_observation, content_guard)
                     raise
                 logger.warning(f"   ⚠️ 分段生成失败，回退单遍生成: {seg_error}")
+
+        # 正文有效性校验所需：上一章全文（流式失败回退与主校验共用，提前计算一次）
+        previous_full_text = ""
+        if previous_chapters_payload:
+            _prev_payload = (
+                previous_chapters_payload[-1]
+                if isinstance(previous_chapters_payload, list)
+                else None
+            )
+            if isinstance(_prev_payload, dict):
+                previous_full_text = str(_prev_payload.get("content") or "")
 
         try:
             if not chapter_draft:  # 分段生成未产出时走单遍生成（含分段失败的回退）
@@ -2098,43 +3137,61 @@ async def execute_generate_next_chapter_task(
                     max_retries=max_llm_attempts,
                     require_exact_model=require_exact_model,
                     disable_thinking=True,  # 🆕 正文生成关闭思考模式，避免思考文本混入产出
+                    on_llm_attempt=_count_content_attempt,
                 )
             logger.info(f"   ✓ 章节初稿已完成（真流式 + {selected_content_model}），字数: {len(chapter_draft)}")
         except Exception as e:
             # 🆕 锁定模型档位下禁止回退到协调器（回退路径模型不受控），直接终止
             if require_exact_model:
                 logger.error(f"   ❌ 锁定模型内容创作失败且禁止回退: {e}")
+                content_observation.set_online_llm_calls(content_llm_attempts)
+                content_observation.set_request_status("failed", error_type=type(e).__name__)
+                _finish_main_snapshot(content_observation, content_guard)
                 raise
             logger.error(f"   ⚠️ 真流式调用失败，回退到同步调用: {e}")
             import traceback
             traceback.print_exc()  # 🔧 打印完整的异常堆栈
-            # 回退到同步调用
-            if hasattr(real_coordinator, 'generate_chapter_content'):
-                try:
-                    chapter_draft = await asyncio.to_thread(
-                        real_coordinator.generate_chapter_content,
-                        chapter_number=next_chapter_number,
-                        chapter_plan=chapter_plan,
-                        world_setting=world_setting,
-                        characters=chapter_generation_context.content_character_context
-                        or chapter_generation_context.character_prompt_context
-                        or characters,
-                        previous_ending=previous_ending,
-                        target_word_count=3000,
-                        previous_chapters=previous_chapters_payload,
-                    )
-                    logger.info(f"   ✓ 使用同步方式生成章节成功，字数: {len(chapter_draft)}")
-                except Exception as sync_error:
-                    logger.error(f"   ❌ 同步调用也失败: {sync_error}")
-                    traceback.print_exc()
-                    chapter_draft = f"第{next_chapter_number}章内容\n\n{chapter_plan}\n\n（此处为生成的章节内容）"
-            else:
-                logger.warning("   ⚠️ 协调器没有 generate_chapter_content 方法，使用默认模板")
-                chapter_draft = f"第{next_chapter_number}章内容\n\n{chapter_plan}\n\n（此处为生成的章节内容）"
+            # 阶段 A 观测（P1）：流式失败先落 content/failed 主快照，再走同步回退落独立 fallback 快照；
+            # 杜绝“流式失败 + 回退失败 + 用默认模板”却被段末 finish() 记成 content/ok。
+            content_observation.set_online_llm_calls(content_llm_attempts)
+            content_observation.set_request_status("failed", error_type=type(e).__name__)
+            _finish_main_snapshot(content_observation, content_guard)
+            # 同步回退：独立 fallback 快照（-1 哨兵）；回退失败/无协调器返回默认模板但记 failed，不 raise（业务需继续）。
+            chapter_draft = await _run_content_sync_fallback(
+                real_coordinator=real_coordinator,
+                fallback_kwargs={
+                    "chapter_number": next_chapter_number,
+                    "chapter_plan": chapter_plan,
+                    "world_setting": world_setting,
+                    "characters": chapter_generation_context.content_character_context
+                    or chapter_generation_context.character_prompt_context
+                    or characters,
+                    "previous_ending": previous_ending,
+                    "target_word_count": 3000,
+                    "previous_chapters": previous_chapters_payload,
+                },
+                default_template=f"第{next_chapter_number}章内容\n\n{chapter_plan}\n\n（此处为生成的章节内容）",
+                project_id=project_id,
+                next_chapter_number=next_chapter_number,
+                task_id=task_id,
+                content_model=selected_content_model,
+                previous_full_text=previous_full_text,
+            )
 
         # 🆕 截断守卫：初稿以非句末标点收尾（如 max_tokens 耗尽/流中断，结尾停在"离她二十"）
         # → 静默重试一次（no-op 回调，避免前端流式文本重复）；仍截断则保留原稿进后续流程
+        content_retry_attempted = False
+        content_retry_status = "not_needed"
+        content_fallback_to_prev = False
+        _content_attempts_before_retry = content_llm_attempts
+        content_retry_call_failed = False
+        content_retry_error_type = ""
+        # 主 content 快照是否已因流式失败提前 finish（fail→fallback 路径）；成功路径此处仍为 False
+        _content_snapshot_prefinished = content_guard.done
+        # P1-1（第十三轮）：evaluate_chapter_output 提前导入，供截断重试成功判定与主验收共用（F.6 唯一真源）
+        from app.services.narrative_circuit_breaker import evaluate_chapter_output
         if _is_likely_truncated_chapter(chapter_draft):
+            content_retry_attempted = True
             logger.warning(
                 f"   ⚠️ 章节初稿疑似截断（结尾 20 字: …{chapter_draft[-20:]}），静默重试一次"
             )
@@ -2152,26 +3209,182 @@ async def execute_generate_next_chapter_task(
                     max_retries=max_llm_attempts,
                     require_exact_model=require_exact_model,
                     disable_thinking=True,
+                    on_llm_attempt=_count_content_attempt,
                 )
-                if retry_draft and not _is_likely_truncated_chapter(retry_draft) and len(retry_draft) > 200:
+                # P1-1（第十三轮）：重试成功条件统一为 F.6 verdict.accepted，不再用“长度+句末”局部判断，
+                # 避免重试稿>200且句末但重复/占位时 retry_status=succeeded 与 output_status=rejected 矛盾。
+                # P2-2：正文主生成无“本章上一份已验收版本”可回退（previous_full_text 是上一章），重试失败
+                # 实际是保留截断稿→后续 verdict 拒绝→熔断终止，故 content_fallback_to_prev 保持 False，
+                # 不再误报“回退上一版”（终止语义由 output_status=rejected + 熔断 raise 表达）。
+                _content_retry_verdict = evaluate_chapter_output(retry_draft, previous_full_text)
+                if _content_retry_verdict.accepted:
                     chapter_draft = retry_draft
+                    content_retry_status = "succeeded"
                     logger.info(f"   ✓ 截断重试成功，初稿字数: {len(chapter_draft)}")
                 else:
-                    logger.warning("   ⚠️ 截断重试仍不完整，保留原初稿进入后续流程")
+                    content_retry_status = "failed"
+                    logger.warning("   ⚠️ 截断重试产出未通过验收，保留原初稿进入后续流程")
             except Exception as retry_error:
+                content_retry_status = "failed"
+                content_retry_call_failed = True
+                content_retry_error_type = type(retry_error).__name__
                 logger.warning(f"   ⚠️ 截断重试失败，保留原初稿进入后续流程: {retry_error}")
 
-        # 🆕 P4：空/无效/高度重复输出检测 → empty_output 熔断信号（立即暂停）并终止任务；
-        # 放在额度确认前，失败时免费档 reservation 仍为 pending 可退还
-        # previous_chapter_content 只在 HTTP 入口准备；后台任务从 payload 还原上一章全文。
-        previous_full_text = ""
-        if previous_chapters_payload:
-            last_payload = previous_chapters_payload[-1] if isinstance(previous_chapters_payload, list) else None
-            if isinstance(last_payload, dict):
-                previous_full_text = str(last_payload.get("content") or "")
-        from app.services.narrative_circuit_breaker import detect_invalid_chapter_output
-        _invalid_output_detail = detect_invalid_chapter_output(chapter_draft, previous_full_text)
-        if _invalid_output_detail:
+        # 🆕 P4 + F.6：正文统一输出验收移到主快照 finish 之前，使 output_status 反映最终验收结果。
+        # evaluate_chapter_output 是 F.6 唯一验收真源：空/占位/过短/重复/截断 → 稳定拒绝码，统一
+        # 主正文/fallback/重生成/改稿四处口径（此前截断稿 detect_invalid 返回 None 被误记 accepted 并保存）。
+        from app.services.narrative_circuit_breaker import evaluate_chapter_output
+        _content_verdict = evaluate_chapter_output(chapter_draft, previous_full_text)
+
+        # 阶段 A 观测：流式成功路径在此落 content 主快照——request_status=ok 表示 LLM 调用成功，
+        # output_status 独立反映产出是否被采用（无效输出 → rejected，调用成功也不误报为已采用）；
+        # 流式失败路径已在 except 内落 content/failed（守卫已置位），不重复 finish()。
+        if not content_guard.done:
+            content_observation.set_online_llm_calls(content_llm_attempts)
+            content_observation.set_retry(
+                attempted=content_retry_attempted,
+                status=content_retry_status,
+                fallback_to_previous=content_fallback_to_prev,
+            )
+            content_observation.set_output_status(
+                "accepted" if _content_verdict.accepted else "rejected",
+                reject_reason=_content_verdict.code,
+            )
+            _finish_main_snapshot(content_observation, content_guard)
+
+        # 阶段 A 观测：正文后续每个真实 LLM 请求（结构重生成/迭代规划/修订/复评）各自独立计数与落库，
+        # 不并入已完成的 content 快照，避免面板"在线 LLM"只代表初始草稿阶段。
+        downstream_llm_attempts = 0
+
+        def _count_downstream_attempt() -> None:
+            nonlocal downstream_llm_attempts
+            downstream_llm_attempts += 1
+
+        def _downstream_context_payload() -> Dict[str, Any]:
+            """下游请求（重生成/迭代规划/改稿/复评）共享的叙事上下文载荷（⑤）。
+
+            与 content/plan 口径一致传实际文本（非长度），使 context_payload_bytes 为真实估算，
+            避免下游精简观测恒为 0 被误读为“空上下文”。按调用时当前值读取（chapter_draft/review_report
+            随重生成/改稿推进更新）；iteration_plan_text 等轮次内变量不在此列（其规模已由 request_prompt section 反映）。
+            """
+            return {
+                "task_id": task_id,
+                "chapter_number": next_chapter_number,
+                "chapter_plan": chapter_plan,
+                "chapter_draft": chapter_draft,
+                "review_report": review_report,
+                "recent_chapter_assets_summary": recent_chapter_assets_summary,
+                "current_chapter_outline": chapter_generation_context.current_chapter_outline,
+                "previous_ending": previous_ending,
+                "rag_character_context": rag_character_context,
+                "rag_world_context": rag_world_context,
+                "rag_previous_context": rag_previous_context,
+            }
+
+        # ①（P1）：流式失败→同步 fallback 后仍可能触发截断重试（真实 LLM 调用）。此时主 content 快照
+        # 已在流式失败处 finish（守卫置位），上面 `if not content_guard.done` 块被跳过，重试的 retry_*/
+        # 最终 output_status/新增真实调用数无处落库，latest 会停在 fallback/ok 掩盖重试结果。故补一条
+        # 独立 content_retry 快照（与 plan_retry 对称）；成功路径重试已折叠进 content 主快照，不重复记。
+        if _content_snapshot_prefinished and content_retry_attempted:
+            _record_content_retry_observation(
+                project_id=project_id,
+                next_chapter_number=next_chapter_number,
+                task_id=task_id,
+                model=selected_content_model,
+                system_prompt=content_system_prompt,
+                user_prompt=content_user_prompt,
+                calls=content_llm_attempts - _content_attempts_before_retry,
+                retry_status=content_retry_status,
+                fallback_to_previous_output=content_fallback_to_prev,
+                output_status="accepted" if _content_verdict.accepted else "rejected",
+                output_reject_reason=_content_verdict.code,
+                request_status="failed" if content_retry_call_failed else "ok",
+                error_type=content_retry_error_type,
+                context_payload=_downstream_context_payload(),
+            )
+
+        def _record_downstream_observation(
+            kind: str,
+            *,
+            model: str,
+            system_prompt: str,
+            user_prompt: str,
+            calls: int,
+            status: str = "ok",
+            error_type: str = "",
+            conflict_status: str = "not_checked",
+            prompt_built: bool = True,
+            output_status: str = "not_checked",
+            output_reject_reason: str = "",
+            retry_attempted: bool = False,
+            retry_status: str = "not_needed",
+            fallback_to_previous_output: bool = False,
+            context_payload: Optional[Dict[str, Any]] = None,
+        ) -> None:
+            """为正文后续的每个真实 LLM 请求落一条独立观测快照（调用级精简观测）。
+
+            与 segment 对齐补共享上下文字段（DB/RAG/缓存/细纲/预算 + 单 request_prompt section）；
+            per-section 裁剪明细仍为 content 专有。prompt_built=False 表示请求在 prompt 构造阶段即失败、
+            未真正发送，prompt_request_bytes 记 -1 哨兵，避免被误读为空 prompt。
+            output_status/retry_* 区分“调用成功”与“结果被采用”（③）；context_payload 非空时写入
+            实际进 prompt 的结构化上下文长度（⑤，避免下游请求 context_payload_bytes 恒为 0 被误读为空上下文）。
+            """
+            resolved_model = model or ""
+            model_ctx, _model_out = (
+                _get_model_token_limits(resolved_model) if resolved_model else (0, 0)
+            )
+            obs = (
+                ObservationBuilder(project_id, next_chapter_number, kind)
+                .set_model(
+                    resolved_model,
+                    context_limit=model_ctx,
+                    safe_input_budget=(
+                        _get_safe_input_token_budget(resolved_model) if resolved_model else 0
+                    ),
+                )
+                .set_correlation(task_id=task_id)
+                .set_db_read(rows=db_rows_read, columns=db_columns_read)
+                .set_rag(
+                    hits=rag_bundle.character_hits
+                    + rag_bundle.world_hits
+                    + rag_bundle.previous_hits,
+                    summary_cache_hits=summary_cache_hits_count,
+                    cache_lookup_performed=(cache_lookup_status == "queried"),
+                    cache_lookup_status=cache_lookup_status,
+                )
+                .set_outline_health(
+                    outline_status=chapter_generation_context.outline_status,
+                    volume_matched=chapter_generation_context.volume_matched,
+                )
+                .set_online_llm_calls(calls)
+                .set_conflict_result(status=conflict_status)
+                .set_request_status(status, error_type=error_type)
+                .set_output_status(output_status, reject_reason=output_reject_reason)
+                .set_retry(
+                    attempted=retry_attempted,
+                    status=retry_status,
+                    fallback_to_previous=fallback_to_previous_output,
+                )
+            )
+            # ⑤：下游请求默认补共享叙事上下文载荷（实际文本），使 context_payload_bytes 为真实估算，
+            # 避免 regeneration/iteration_plan/revision/review 恒为 0 被误读为空上下文；调用点可显式覆盖。
+            obs.set_context_payload(
+                context_payload if context_payload is not None else _downstream_context_payload()
+            )
+            if prompt_built:
+                obs.add_section(
+                    "request_prompt", user_prompt, source_field=kind, layer="L1"
+                ).set_prompt_request_bytes(
+                    system_prompt=system_prompt, user_prompt=user_prompt
+                )
+            else:
+                # 请求未成功构造/发送：-1 哨兵（与 set_context_payload 不可序列化时一致）
+                obs.observation.prompt_request_bytes = -1
+            obs.finish()
+
+        # 🆕 P4 + F.6：验收未过（空/占位/过短/重复/截断）→ empty_output 熔断信号（立即暂停）并终止任务；
+        # 放在额度确认前，失败时免费档 reservation 仍为 pending 可退还。_content_verdict 已在主快照 finish 前算出。
+        if not _content_verdict.accepted:
             try:
                 from app.services.narrative_circuit_breaker import record_generation_signal
 
@@ -2180,7 +3393,7 @@ async def execute_generate_next_chapter_task(
                     empty_output_meta,
                     chapter_number=next_chapter_number,
                     event="empty_output",
-                    detail=_invalid_output_detail,
+                    detail=_content_verdict.detail,
                 )
                 workflow_context_builder.update_project_settings_fields(
                     project_id,
@@ -2189,7 +3402,7 @@ async def execute_generate_next_chapter_task(
             except Exception as breaker_signal_error:
                 logger.warning(f"   ⚠️ 熔断信号记录失败: {breaker_signal_error}")
             raise RuntimeError(
-                f"第{next_chapter_number}章{_invalid_output_detail}，已暂停自动推进，"
+                f"第{next_chapter_number}章{_content_verdict.detail}，已暂停自动推进，"
                 "请在创作流程页确认暂停原因后继续生成"
             )
 
@@ -2315,6 +3528,8 @@ async def execute_generate_next_chapter_task(
             review_model=(workflow_generation_model if require_exact_model else None),
             max_llm_attempts=max_llm_attempts,
             require_exact_model=require_exact_model,
+            project_id=project_id,
+            task_id=task_id,
         )
 
         await ws_manager.send_stream_end(project_id, 'review', len(review_report), f"第{next_chapter_number}章质量评审完成")
@@ -2369,11 +3584,13 @@ async def execute_generate_next_chapter_task(
                     progress=78,
                     message=f"步骤 3/4: 检测到结构复述（{', '.join(sorted(structural_regen_codes))}），单遍重生成中...",
                 )
-                try:
-                    async def _silent_chunk(chunk: str, idx: int):
-                        return
+                async def _silent_chunk(chunk: str, idx: int):
+                    return
 
-                    regenerated_draft = await streaming_service.generate_chapter_streaming(
+                _regen_attempts_before = downstream_llm_attempts
+
+                async def _regen_call() -> str:
+                    return await streaming_service.generate_chapter_streaming(
                         prompt=content_user_prompt,
                         system_prompt=content_system_prompt,
                         on_chunk=_silent_chunk,
@@ -2382,53 +3599,85 @@ async def execute_generate_next_chapter_task(
                         max_retries=max_llm_attempts,
                         require_exact_model=require_exact_model,
                         disable_thinking=True,
+                        on_llm_attempt=_count_downstream_attempt,
                     )
-                    if regenerated_draft and len(regenerated_draft) > 200:
-                        chapter_draft = regenerated_draft
-                        # 单模型静默复评，保证后续迭代基于新稿与新评审
-                        review_report = await _run_single_next_chapter_streaming_review(
-                            chapter_draft=chapter_draft,
-                            chapter_plan=chapter_plan,
-                            plot_outline=plot_outline,
-                            genre=review_project_genre,
-                            next_chapter_number=next_chapter_number,
-                            recent_chapter_assets_summary=recent_chapter_assets_summary,
-                            streaming_service=streaming_service,
-                            on_review_chunk=_silent_chunk,
-                            real_coordinator=real_coordinator,
-                            review_model=(workflow_generation_model if require_exact_model else None),
-                            max_llm_attempts=max_llm_attempts,
-                            require_exact_model=require_exact_model,
-                        )
-                        workflow_context_builder.update_project_settings_fields(
-                            project_id,
-                            chapter_draft=chapter_draft,
-                            review_report=review_report,
-                        )
-                        await ws_manager.send_stage_update(
-                            project_id=project_id,
-                            stage='content',
-                            status='completed',
-                            output=chapter_draft,
-                            progress=50,
-                        )
-                        await ws_manager.send_stage_update(
-                            project_id=project_id,
-                            stage='review',
-                            status='completed',
-                            output=review_report,
-                            progress=75,
-                        )
-                        logger.info(
-                            f"   ✅ 结构门控单遍重生成完成（{len(chapter_draft)}字），复评报告已更新"
-                        )
-                    else:
-                        logger.warning("   ⚠️ 单遍重生成产出为空/过短，保留分段初稿进入迭代")
-                except Exception as regen_error:
-                    if require_exact_model:
-                        logger.error(f"   ❌ 锁定模型单遍重生成失败且禁止回退: {regen_error}")
-                        raise
-                    logger.warning(f"   ⚠️ 单遍重生成失败，保留分段初稿进入迭代: {regen_error}")
+
+                def _record_regen(**kwargs) -> None:
+                    # model/prompt/calls 由本闭包补齐；status/output_status/retry_*/fallback 等语义字段
+                    # 由 helper 依异常边界传入，确保复评失败不把 regeneration 改写为 failed（第十四轮 P1）
+                    _record_downstream_observation(
+                        "regeneration",
+                        model=selected_content_model,
+                        system_prompt=content_system_prompt,
+                        user_prompt=content_user_prompt,
+                        calls=downstream_llm_attempts - _regen_attempts_before,
+                        **kwargs,
+                    )
+
+                async def _regen_review_call(new_draft: str) -> str:
+                    # 单模型静默复评，保证后续迭代基于新稿与新评审；review/failed 由其内部自记
+                    return await _run_single_next_chapter_streaming_review(
+                        chapter_draft=new_draft,
+                        chapter_plan=chapter_plan,
+                        plot_outline=plot_outline,
+                        genre=review_project_genre,
+                        next_chapter_number=next_chapter_number,
+                        recent_chapter_assets_summary=recent_chapter_assets_summary,
+                        streaming_service=streaming_service,
+                        on_review_chunk=_silent_chunk,
+                        real_coordinator=real_coordinator,
+                        review_model=(workflow_generation_model if require_exact_model else None),
+                        max_llm_attempts=max_llm_attempts,
+                        require_exact_model=require_exact_model,
+                        project_id=project_id,
+                        task_id=task_id,
+                    )
+
+                async def _on_regen_draft_adopted(new_draft: str) -> None:
+                    # 采用重生成稿：回写正文 + 推送 content 阶段（复评成功/失败都触发，P2 第十五轮）
+                    workflow_context_builder.update_project_settings_fields(
+                        project_id,
+                        chapter_draft=new_draft,
+                    )
+                    await ws_manager.send_stage_update(
+                        project_id=project_id,
+                        stage='content',
+                        status='completed',
+                        output=new_draft,
+                        progress=50,
+                    )
+
+                async def _on_regen_review_updated(new_review: str) -> None:
+                    # 复评成功才回写评审 + 推送 review 阶段（复评失败保留旧评审，不重推 completed）
+                    workflow_context_builder.update_project_settings_fields(
+                        project_id,
+                        review_report=new_review,
+                    )
+                    await ws_manager.send_stage_update(
+                        project_id=project_id,
+                        stage='review',
+                        status='completed',
+                        output=new_review,
+                        progress=75,
+                    )
+
+                from app.services.narrative_circuit_breaker import evaluate_chapter_output
+                # 第十四轮 P1/P2 + 第十五轮 P2：重生成调用/验收与静默复评拆分异常边界——复评失败不再误记
+                # regeneration failed（accepted 观测在复评前落定），重生成异常分支补 fallback=True（保留分段初稿）；
+                # 采用新稿的正文回写与复评成功后的评审回写拆成两个副作用，复评失败仍回写已采用新稿正文
+                chapter_draft, review_report, _regen_adopted = (
+                    await _regenerate_and_review_on_structural_failure(
+                        regen_call=_regen_call,
+                        evaluate=lambda d: evaluate_chapter_output(d, previous_full_text),
+                        review_call=_regen_review_call,
+                        record_regen=_record_regen,
+                        require_exact_model=require_exact_model,
+                        current_draft=chapter_draft,
+                        current_review=review_report,
+                        on_draft_adopted=_on_regen_draft_adopted,
+                        on_review_updated=_on_regen_review_updated,
+                    )
+                )
 
         await ws_manager.send_task_progress(
             project_id=project_id,
@@ -2524,6 +3773,13 @@ async def execute_generate_next_chapter_task(
         iteration_loop_ran = False
         # 🆕 迭代过程留痕：每轮修订稿与配套复评的汇总，章节保存后写入版本历史/评审表
         iteration_round_records: List[Dict[str, Any]] = []
+
+        # 🆕 F.6 第五条路径 gate（保存前统一验收）依赖 best_version/best_review 在 try 之后仍可见。
+        # 迭代早期异常（选模型 select_model_by_length / 广播 send_model_used 失败）会在下方 3745-3746
+        # 赋值前跳到 except 回退路径，故先以初稿/初评兜底初始化，杜绝保存前 gate 触发 NameError；
+        # try 内部随后会重新赋值为真正的最佳版本，早期异常时 best 即等于初稿（无迭代最佳版可回退）。
+        best_version = chapter_draft
+        best_review = review_report
 
         # 🆕 使用迭代优化（max改稿 + R1打分循环,达到阈值后再输出）
         try:
@@ -2655,6 +3911,8 @@ async def execute_generate_next_chapter_task(
                         }
                     )
                 iteration_plan_text = ""
+                coordination_user_prompt: Optional[str] = None
+                _coord_attempts_before = downstream_llm_attempts
                 try:
                     coordination_user_prompt = build_iteration_coordination_user_prompt(
                         chapter_number=next_chapter_number,
@@ -2672,9 +3930,28 @@ async def execute_generate_next_chapter_task(
                         max_retries=max_llm_attempts,
                         require_exact_model=require_exact_model,
                         disable_thinking=True,
+                        on_llm_attempt=_count_downstream_attempt,
+                    )
+                    _record_downstream_observation(
+                        "iteration_plan",
+                        model=selected_revision_model,
+                        system_prompt=iteration_coordination_system_prompt,
+                        user_prompt=coordination_user_prompt or "",
+                        calls=downstream_llm_attempts - _coord_attempts_before,
                     )
                     logger.info(f"   ✓ 第{round_idx}轮迭代计划生成完成，长度: {len(iteration_plan_text)}")
                 except Exception as coordination_error:
+                    _record_downstream_observation(
+                        "iteration_plan",
+                        model=selected_revision_model,
+                        system_prompt=iteration_coordination_system_prompt,
+                        user_prompt=coordination_user_prompt or "",
+                        calls=downstream_llm_attempts - _coord_attempts_before,
+                        status="failed",
+                        error_type=type(coordination_error).__name__,
+                        # prompt 未构造成功时记 -1 哨兵，区分"未发送"与"发送了空 prompt"
+                        prompt_built=coordination_user_prompt is not None,
+                    )
                     # 🆕 锁定模型档位下模型被重路由等失败不可忽略，直接终止
                     if require_exact_model:
                         logger.error(f"   ❌ 锁定模型迭代计划失败且禁止回退: {coordination_error}")
@@ -2704,21 +3981,40 @@ async def execute_generate_next_chapter_task(
 
                 # 仅在最后一轮向前端流式输出正文；前几轮不推送正文
                 on_chunk_cb = noop_chunk
-                revised_version = await streaming_service.generate_chapter_streaming(
-                    prompt=iteration_user_prompt_round,
-                    system_prompt=iteration_system_prompt,
-                    on_chunk=on_chunk_cb,
-                    temperature=0.7,
-                    model=selected_revision_model,
-                    max_retries=max_llm_attempts,
-                    require_exact_model=require_exact_model,
-                    disable_thinking=True,
-                )
+                _rev_attempts_before = downstream_llm_attempts
+                try:
+                    revised_version = await streaming_service.generate_chapter_streaming(
+                        prompt=iteration_user_prompt_round,
+                        system_prompt=iteration_system_prompt,
+                        on_chunk=on_chunk_cb,
+                        temperature=0.7,
+                        model=selected_revision_model,
+                        max_retries=max_llm_attempts,
+                        require_exact_model=require_exact_model,
+                        disable_thinking=True,
+                        on_llm_attempt=_count_downstream_attempt,
+                    )
+                except Exception as revision_error:
+                    _record_downstream_observation(
+                        "revision",
+                        model=selected_revision_model,
+                        system_prompt=iteration_system_prompt,
+                        user_prompt=iteration_user_prompt_round,
+                        calls=downstream_llm_attempts - _rev_attempts_before,
+                        status="failed",
+                        error_type=type(revision_error).__name__,
+                    )
+                    raise
                 latest_revised_version = revised_version
                 logger.info(f"   ✓ 第{round_idx}轮改稿完成（{selected_revision_model}），字数: {len(revised_version)}")
 
                 # 🆕 截断守卫：改稿以非句末标点收尾 → 静默重试一次；仍截断保留原改稿
+                # ③：追踪截断重试结果并写入 revision 观测，避免“重试异常被吞仍记 ok”
+                rev_retry_attempted = False
+                rev_retry_status = "not_needed"
+                rev_fallback_to_prev = False
                 if _is_likely_truncated_chapter(revised_version):
+                    rev_retry_attempted = True
                     logger.warning(
                         f"   ⚠️ 第{round_idx}轮改稿疑似截断（结尾 20 字: …{revised_version[-20:]}），静默重试一次"
                     )
@@ -2732,15 +4028,50 @@ async def execute_generate_next_chapter_task(
                             max_retries=max_llm_attempts,
                             require_exact_model=require_exact_model,
                             disable_thinking=True,
+                            on_llm_attempt=_count_downstream_attempt,
                         )
-                        if retry_revised and not _is_likely_truncated_chapter(retry_revised) and len(retry_revised) > 200:
+                        # P1-1（第十三轮）：重试成功条件统一为 F.6 verdict.accepted（改稿有 current_version
+                        # 可回退，rev_fallback_to_prev=True 语义准确，与正文主生成路径区分）
+                        _rev_retry_verdict = evaluate_chapter_output(retry_revised, previous_full_text)
+                        if _rev_retry_verdict.accepted:
                             revised_version = retry_revised
                             latest_revised_version = revised_version
+                            rev_retry_status = "succeeded"
                             logger.info(f"   ✓ 截断重试成功，第{round_idx}轮改稿字数: {len(revised_version)}")
                         else:
-                            logger.warning(f"   ⚠️ 第{round_idx}轮改稿截断重试仍不完整，保留原改稿")
+                            rev_retry_status = "failed"
+                            rev_fallback_to_prev = True
+                            logger.warning(f"   ⚠️ 第{round_idx}轮改稿截断重试产出未通过验收，保留原改稿")
                     except Exception as retry_error:
+                        rev_retry_status = "failed"
+                        rev_fallback_to_prev = True
                         logger.warning(f"   ⚠️ 第{round_idx}轮改稿截断重试失败，保留原改稿: {retry_error}")
+
+                # 本轮改稿（含截断重试）后走 F.6 统一输出验收：改稿产出不再无条件 accepted。
+                # 验收未过（截断/过短/空/占位/重复）→ 记 rejected + 稳定拒绝码，并真正回退到本轮输入
+                # current_version（上一份已验收版本），避免截断稿被当成 best/final 保存；改稿路径有上一版
+                # 可回退，故不触发熔断终止（与“新稿熔断”路径区分）。retry_* 仍独立表达截断重试结果。
+                from app.services.narrative_circuit_breaker import evaluate_chapter_output
+                _rev_verdict = evaluate_chapter_output(revised_version, previous_full_text)
+                if not _rev_verdict.accepted:
+                    rev_fallback_to_prev = True
+                    logger.warning(
+                        f"   ⚠️ 第{round_idx}轮改稿验收未过（{_rev_verdict.code}），回退本轮输入版本（{len(current_version)}字）"
+                    )
+                    revised_version = current_version
+                    latest_revised_version = revised_version
+                _record_downstream_observation(
+                    "revision",
+                    model=selected_revision_model,
+                    system_prompt=iteration_system_prompt,
+                    user_prompt=iteration_user_prompt_round,
+                    calls=downstream_llm_attempts - _rev_attempts_before,
+                    output_status=("accepted" if _rev_verdict.accepted else "rejected"),
+                    output_reject_reason=_rev_verdict.code,
+                    retry_attempted=rev_retry_attempted,
+                    retry_status=rev_retry_status,
+                    fallback_to_previous_output=rev_fallback_to_prev,
+                )
 
                 await ws_manager.send_task_progress(
                     project_id=project_id,
@@ -2760,16 +4091,38 @@ async def execute_generate_next_chapter_task(
                     recent_chapter_assets_summary=recent_chapter_assets_summary,
                     previous_version=current_version,
                 )
-                new_review_report = await streaming_service.generate_chapter_streaming(
-                    prompt=review_user_prompt_loop,
+                _review_attempts_before = downstream_llm_attempts
+                _review_obs_model = workflow_generation_model if require_exact_model else ""
+                try:
+                    new_review_report = await streaming_service.generate_chapter_streaming(
+                        prompt=review_user_prompt_loop,
+                        system_prompt=review_system_prompt_loop,
+                        on_chunk=noop_chunk,  # 评分不流式推送正文
+                        temperature=0.3,
+                        model=(workflow_generation_model if require_exact_model else None),
+                        task_type="review",
+                        max_retries=max_llm_attempts,
+                        require_exact_model=require_exact_model,
+                        disable_thinking=True,
+                        on_llm_attempt=_count_downstream_attempt,
+                    )
+                except Exception as review_error:
+                    _record_downstream_observation(
+                        "review",
+                        model=_review_obs_model,
+                        system_prompt=review_system_prompt_loop,
+                        user_prompt=review_user_prompt_loop,
+                        calls=downstream_llm_attempts - _review_attempts_before,
+                        status="failed",
+                        error_type=type(review_error).__name__,
+                    )
+                    raise
+                _record_downstream_observation(
+                    "review",
+                    model=_review_obs_model,
                     system_prompt=review_system_prompt_loop,
-                    on_chunk=noop_chunk,  # 评分不流式推送正文
-                    temperature=0.3,
-                    model=(workflow_generation_model if require_exact_model else None),
-                    task_type="review",
-                    max_retries=max_llm_attempts,
-                    require_exact_model=require_exact_model,
-                    disable_thinking=True,
+                    user_prompt=review_user_prompt_loop,
+                    calls=downstream_llm_attempts - _review_attempts_before,
                 )
                 score = _extract_iteration_review_score(new_review_report)
                 has_unresolved_required_items = _iteration_review_has_unresolved_required_items(new_review_report)
@@ -2938,6 +4291,72 @@ async def execute_generate_next_chapter_task(
             )
 
 
+        # 🆕 F.6 第五条路径闭环（第十三轮 P1-2）：clean_final_output 可能清空终稿、同步 optimize_chapter
+        # fallback 返回未验收稿，二者绕过改稿循环验收直奔落库。保存前统一验收 + 按 final→best→draft 回退，
+        # 全无效则终止保存并熔断，杜绝空/过短/占位/重复/截断稿写入 project_settings 与 chapters。
+        from app.services.narrative_circuit_breaker import (
+            evaluate_chapter_output,
+            resolve_final_version,
+        )
+        _final_resolution = resolve_final_version(
+            final_version, best_version, chapter_draft, previous_full_text,
+        )
+        if _final_resolution.source != "final":
+            _orig_final_verdict = evaluate_chapter_output(final_version, previous_full_text)
+            _final_validation_payload = {
+                "task_id": task_id,
+                "chapter_number": next_chapter_number,
+                "resolution_source": _final_resolution.source,
+                "final_version_chars": len(final_version or ""),
+                "best_version_chars": len(best_version or ""),
+                "chapter_draft_chars": len(chapter_draft or ""),
+            }
+            if _final_resolution.source == "none":
+                # 三者全无效：终止保存 + empty_output 熔断，不落库任何无效稿
+                _record_final_validation_observation(
+                    project_id=project_id,
+                    next_chapter_number=next_chapter_number,
+                    task_id=task_id,
+                    output_status="rejected",
+                    output_reject_reason=_orig_final_verdict.code,
+                    fallback_to_previous_output=False,
+                    context_payload=_final_validation_payload,
+                )
+                try:
+                    from app.services.narrative_circuit_breaker import record_generation_signal
+                    _abort_meta = workflow_context_builder.load_review_meta(project_id) or {}
+                    record_generation_signal(
+                        _abort_meta,
+                        chapter_number=next_chapter_number,
+                        event="empty_output",
+                        detail=_orig_final_verdict.detail or "最终保存前验收失败",
+                    )
+                    workflow_context_builder.update_project_settings_fields(
+                        project_id, review_meta=_abort_meta,
+                    )
+                except Exception as _abort_breaker_error:
+                    logger.warning(f"   ⚠️ 熔断信号记录失败: {_abort_breaker_error}")
+                raise RuntimeError(
+                    f"第{next_chapter_number}章最终稿验收失败（{_orig_final_verdict.code}），"
+                    "且无有效回退版本，已终止保存并暂停自动推进，请在创作流程页确认后重试"
+                )
+            # 回退到 best/draft（改稿循环/主正文已验收版本），并同步配套评审
+            final_version = _final_resolution.version
+            final_review = best_review if _final_resolution.source == "best" else review_report
+            logger.warning(
+                f"   ⚠️ 最终稿验收未过（{_orig_final_verdict.code}），回退到"
+                f"{_final_resolution.source}（{len(final_version)}字），评审同步配套"
+            )
+            _record_final_validation_observation(
+                project_id=project_id,
+                next_chapter_number=next_chapter_number,
+                task_id=task_id,
+                output_status="rejected",
+                output_reject_reason=_orig_final_verdict.code,
+                fallback_to_previous_output=True,
+                context_payload=_final_validation_payload,
+            )
+
         if not skip_iteration_optimization:
             for chunk in _split_stream_text(final_version):
                 next_chunk_index = iteration_chunk_index[0] + 1
@@ -2994,6 +4413,8 @@ async def execute_generate_next_chapter_task(
                     review_model=(workflow_generation_model if require_exact_model else None),
                     max_llm_attempts=max_llm_attempts,
                     require_exact_model=require_exact_model,
+                    project_id=project_id,
+                    task_id=task_id,
                 )
                 if editorial_review and len(editorial_review) > 100:
                     final_review = editorial_review
@@ -3247,6 +4668,30 @@ async def execute_generate_next_chapter_task(
         logger.error(f"❌ 后台任务失败: {task_id}, 错误: {e}")
         import traceback
         traceback.print_exc()
+
+        # ①：规划/正文在 builder 创建后、主快照 finish 前（上下文优化器/装配/prompt 构造/预检阶段）失败时，
+        # 补落 failed 主快照，避免“请求构造失败”在 context-health 面板看起来像“没有请求”。
+        # 单快照由 _SnapshotGuard 守卫保证：已成功 finish 的相位不重复记录；尚未到达的相位 builder 为 None 自然跳过。
+        _plan_obs = locals().get("plan_observation")
+        _plan_guard = locals().get("plan_guard")
+        if _plan_obs is not None and _plan_guard is not None and not _plan_guard.done:
+            _finish_preflight_failure(
+                _plan_obs,
+                e,
+                prompt_built=locals().get("plan_user_prompt") is not None,
+                system_prompt=locals().get("plan_system_prompt") or "",
+                user_prompt=locals().get("plan_user_prompt") or "",
+            )
+        _content_obs = locals().get("content_observation")
+        _content_guard = locals().get("content_guard")
+        if _content_obs is not None and _content_guard is not None and not _content_guard.done:
+            _finish_preflight_failure(
+                _content_obs,
+                e,
+                prompt_built=locals().get("content_user_prompt") is not None,
+                system_prompt=locals().get("content_system_prompt") or "",
+                user_prompt=locals().get("content_user_prompt") or "",
+            )
 
         # 🆕 免费档：正文产出前失败退还额度（reservation 仍为 pending 才退，幂等）
         if quota_enabled and not locals().get("chapter_content_produced", False):

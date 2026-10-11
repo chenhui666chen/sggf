@@ -6,7 +6,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -41,8 +41,10 @@ from app.services.setting_templates import (
 from app.services.setting_auto_merge import SettingAutoMergeService
 from app.services.setting_consistency import SettingConsistencyService
 from app.services.workflow_context_builder import WorkflowContextBuilder
+from app.services.context_observability import collector as observation_collector
 from app.api.v1.settings_api._helpers import (
     _build_item_structure,
+    _cascade_descendant_paths,
     _collect_descendants,
     _delete_setting_vectors,
     _ensure_project_owned,
@@ -143,7 +145,7 @@ async def llm_reclassify_candidate_settings(
     """
     使用LLM对候选集合中规则匹配失败的项进行再分类
 
-    仅处理规则引擎无法归类的候选项，使用 deepseek-v4-flash 模型。
+    仅处理规则引擎无法归类的候选项，使用 deepseek-flash 模型。
     每次最多处理20个候选项。
     """
     _ensure_project_owned(project_id, current_user, db)
@@ -158,7 +160,7 @@ async def llm_reclassify_candidate_settings(
         "reclassified": result.get("reclassified", 0),
         "skipped": result.get("skipped", 0),
         "details": result.get("details", []),
-        "model": result.get("model", "deepseek-v4-flash"),
+        "model": result.get("model", "deepseek-flash"),
     }
 
 
@@ -179,6 +181,44 @@ async def detect_setting_conflicts(
         "duplicate_names": conflicts["duplicate_names"],
         "ability_mismatches": conflicts["ability_mismatches"],
         "relation_conflicts": conflicts["relation_conflicts"],
+    }
+
+
+@router.get("/projects/{project_id}/context-health")
+async def get_project_context_health(
+    project_id: int,
+    limit: int = Query(50, ge=1, le=200, description="返回观测条数，1~200"),
+    chapter_number: Optional[int] = Query(None, description="按章节号过滤观测（可选）"),
+    request_kind: Optional[str] = Query(
+        None, description="按请求类型过滤观测（可选，如 plan/content/content_retry/review/fallback）"
+    ),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """只读：返回项目最近的上下文预算观测快照（阶段 A 观测面）。
+
+    不传过滤时 latest 为项目级全局最新快照；传入 chapter_number/request_kind 时，
+    observations 与 latest 均按该条件返回（collector 已支持该过滤）。
+    注意：暂不支持 task_id 过滤，并发多任务时 latest 可能来自其他任务。
+    """
+    _ensure_project_owned(project_id, current_user, db)
+
+    observations = observation_collector.list_for_project(
+        project_id,
+        limit=limit,
+        chapter_number=chapter_number,
+        request_kind=request_kind,
+    )
+    if chapter_number is not None or request_kind:
+        # 过滤模式：latest 取过滤结果集的最新一条
+        # （collector.latest_for_project 不支持 chapter_number，统一从已排序结果取尾）
+        latest = observations[-1] if observations else None
+    else:
+        latest = observation_collector.latest_for_project(project_id)
+    return {
+        "project_id": project_id,
+        "latest": latest.to_dict() if latest else None,
+        "observations": [item.to_dict() for item in observations],
     }
 
 

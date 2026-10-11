@@ -46,7 +46,10 @@ class AnalysisResult:
     analysis_type: AnalysisType
     content: Dict[str, Any]
     confidence: float
-    chapter_summaries: Optional[List[ChapterSummary]] = None
+    chapter_range: tuple
+    model_used: str
+    token_used: int = 0
+    extra_data: Optional[Dict[str, Any]] = None
 
 class ContentAnalyzerBase:
     def __init__(self, llm_client: Optional[UnifiedLLMClient] = None):

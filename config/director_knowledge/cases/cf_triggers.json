@@ -1,0 +1,184 @@
+{
+  "_type": "cf_triggers",
+  "_count": 16,
+  "purpose": "T3 风险前置：Shot Contract 生成前的结构化预检（先于生成，对齐 10.6 candidate_selection_gate 之前的门位）",
+  "unstructured_note": "其余 87 条 CF 暂无结构化 auto_trigger，走 L1（事后修复直索）与 L3（语义），按治理协议逐步补结构化",
+  "triggers": [
+    {
+      "cf_id": "CF-001",
+      "title": "只有电影滤镜，没有电影语言",
+      "trigger_condition": "Prompt 含 cinematic/8K/电影感 等风格词≥2个 且 无人物目标/机位/光源等叙事变量",
+      "judgment_signals": [
+        "画面仅滤镜特征（黑边/颗粒/浅景深）",
+        "镜头无信息变化",
+        "人物无目标动作"
+      ],
+      "disposition": "打回：先补 Scene Purpose/人物任务/机位动机/光源，风格词降权收尾（T3 前置+T1 修复共用）"
+    },
+    {
+      "cf_id": "CF-002",
+      "title": "24mm只有宽，没有广角透视",
+      "trigger_condition": "Focal≤28mm 且 Camera Distance 未声明近距离或未强调近大远小",
+      "judgment_signals": [
+        "画面仅变宽",
+        "无空间拉伸",
+        "前景不夸张"
+      ],
+      "disposition": "打回：机位距离改近距描述（camera very close to subject）或换长焦+远距组合"
+    },
+    {
+      "cf_id": "CF-004",
+      "title": "摄影机漂浮，没有人体操作感",
+      "trigger_condition": "Movement 含 drone/floating/自由飞行类描述 且 无操作体感词",
+      "judgment_signals": [
+        "运动无惯性",
+        "无人体呼吸感",
+        "速度恒定无起停"
+      ],
+      "disposition": "打回：改为有支点运镜（手持 subtle/稳定器/固定机位+主体动）"
+    },
+    {
+      "cf_id": "CF-005",
+      "title": "每个镜头都在慢推",
+      "trigger_condition": "连续≥3镜 Movement=slow push-in",
+      "judgment_signals": [
+        "全片节奏单调",
+        "推镜无差异化动机"
+      ],
+      "disposition": "打回：仅保留1处有动机推镜，其余改固定机位或差异化运动（叠加预算联动）"
+    },
+    {
+      "cf_id": "CF-009",
+      "title": "光线漂亮但没有来源",
+      "trigger_condition": "Light 字段有氛围/光效描述 但 无光源对象（窗/灯/月/屏）",
+      "judgment_signals": [
+        "光方向不明",
+        "与环境时间不匹配"
+      ],
+      "disposition": "打回：声明动机光源+方向（motivated_lighting 决策链）"
+    },
+    {
+      "cf_id": "CF-014",
+      "title": "运镜复杂但没有叙事价值",
+      "trigger_condition": "Movement≠固定 且 Drama/Shot Motivation 不含信息/心理/空间变化",
+      "judgment_signals": [
+        "运动复杂但画面信息不变",
+        "观众无新收获"
+      ],
+      "disposition": "打回：改固定机位或补三类变化之一为运动动机（DC-035 联动）"
+    },
+    {
+      "cf_id": "CF-019",
+      "title": "情绪强度没有变化曲线",
+      "trigger_condition": "场景≥3镜 且 emotion 字段值全相同",
+      "judgment_signals": [
+        "情绪平直无递进",
+        "无转折设计"
+      ],
+      "disposition": "打回：重设情绪曲线——每镜 emotion 必须有增量或方向变化"
+    },
+    {
+      "cf_id": "CF-021",
+      "title": "同一人物身份漂移",
+      "trigger_condition": "同一角色出现在≥2镜 且 无参考图/角色绑定注入",
+      "judgment_signals": [
+        "脸型/发型/服装跨镜不一致"
+      ],
+      "disposition": "打回：注入 Character Canon 参考图+身份绑定语法（机制：每镜独立重采样无身份记忆）"
+    },
+    {
+      "cf_id": "CF-029",
+      "title": "手与物体交互失败",
+      "trigger_condition": "Action 含持/握/操作物体 且 该镜无 Insert/ECU 景别保障",
+      "judgment_signals": [
+        "手指穿模",
+        "握持形状错误",
+        "物体悬浮"
+      ],
+      "disposition": "打回：关键交互镜改 Insert/ECU（DC-033 联动）或拆解为反应镜"
+    },
+    {
+      "cf_id": "CF-034",
+      "title": "景别随机变化",
+      "trigger_condition": "相邻镜景别跳级≥2（如 LS→ECU）且无 Cut Motivation",
+      "judgment_signals": [
+        "视觉跳跃突兀",
+        "观众空间感迷失"
+      ],
+      "disposition": "打回：按景别变化顺序决策表（2.1.2）重排或补切换动机"
+    },
+    {
+      "cf_id": "CF-046",
+      "title": "镜头没有呼吸节奏",
+      "trigger_condition": "情感场景连续≥3镜 同景别且同时长",
+      "judgment_signals": [
+        "节奏机械无呼吸感"
+      ],
+      "disposition": "打回：景别/时长交替设计（与 EMOTION_STALL_CHECK 联动：本条管节奏维度，彼条管时长情绪增量）"
+    },
+    {
+      "cf_id": "CF-055",
+      "title": "情绪跳跃",
+      "trigger_condition": "相邻镜 emotion 值差≥2级（如 calm→rage）且无过渡镜",
+      "judgment_signals": [
+        "观众情绪跟不上",
+        "表演状态断裂"
+      ],
+      "disposition": "打回：插入过渡镜（反应镜/环境镜）或调整情绪梯度"
+    },
+    {
+      "cf_id": "CF-061",
+      "title": "违反180度轴线",
+      "trigger_condition": "同对话场景相邻镜机位方位跨越180°轴 且无越轴动机声明",
+      "judgment_signals": [
+        "左右关系翻转",
+        "观众方向感混乱"
+      ],
+      "disposition": "打回：机位回同侧，或补越轴动机（骑轴/中性镜过渡）"
+    },
+    {
+      "cf_id": "CF-066",
+      "title": "无动机手持",
+      "trigger_condition": "Movement=handheld 且 POV/视点字段≠主观",
+      "judgment_signals": [
+        "晃动无心理理由",
+        "纪实感与内容错位"
+      ],
+      "disposition": "打回：改固定/稳定运镜，或声明主观视点动机（DC-035 联动）"
+    },
+    {
+      "cf_id": "CF-081",
+      "title": "多模型视觉风格断裂",
+      "trigger_condition": "同场景镜头由≥2个模型生成 且 无风格锚（统一风格预设/参考图）",
+      "judgment_signals": [
+        "色调/质感/运动签名不一致"
+      ],
+      "disposition": "打回：同场景锁定单一模型或注入统一风格锚+首尾帧参考"
+    },
+    {
+      "cf_id": "CF-088",
+      "title": "短剧节奏过慢",
+      "trigger_condition": "镜头时长 > 6s 且 场景类型 ∈ {情感, 抒情, 爱情}",
+      "judgment_signals": {
+        "pass": [
+          "表情演化（如落泪/嘴角变化）",
+          "眼神变化（焦点/朝向转移）",
+          "手部微动作（颤抖/握紧）",
+          "呼吸节奏变化",
+          "环境响应（光/声/雨/人群反应与事件联动）"
+        ],
+        "warn": {
+          "condition": "以上信号全无，仅静止长镜/静态空镜",
+          "flag": "EMOTION_STALL_HIGH_RISK",
+          "note": "微小动作但无情绪增量同样视为伪长镜，需预警"
+        }
+      },
+      "disposition": [
+        "步骤1：先尝试后期裁切 或 插入Reaction镜头/环境响应 修复（复用CF-046 Shot Rhythm Map / CF-035 空镜功能化）",
+        "步骤2：修复无效且导演坚持 → 强制升级 Human Gate 批准（不得由执行Agent自行放行）",
+        "步骤3：Human Gate 批准后 → 记录为生产学习案例（进入 10.7 Production Learning Loop）"
+      ],
+      "source_field": "qc.emotion_stall_check"
+    }
+  ]
+}

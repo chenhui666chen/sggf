@@ -45,7 +45,7 @@ def _legacy_top_level() -> dict:
         ],
         "audio_fx": {"enable_sound_effects": True, "bgm_theme": "fantasy"},
         "tts_models": {
-            "qwen3-tts-instruct-flash": {
+            "qwen-audio-3.1-tts-flash": {
                 "characters": [
                     {"character_id": 1, "name": "角色A", "voice_id": "v1_tts"},
                 ]
@@ -76,7 +76,7 @@ def _seed_config_with_engines() -> dict:
             },
             "legacy_stems": {
                 "tts_models": {
-                    "qwen3-tts-instruct-flash": {
+                    "qwen-audio-3.1-tts-flash": {
                         "characters": [
                             {"character_id": 1, "name": "角色A", "voice_id": "legacy_v1"},
                         ]
@@ -122,7 +122,7 @@ class TestGetEngineBranch:
         """legacy_stems 分支已存在于 engines 时优先返回引擎分支。"""
         config = _seed_config_with_engines()
         branch = get_engine_branch(config, "legacy_stems")
-        assert branch["tts_models"]["qwen3-tts-instruct-flash"]["characters"][0]["voice_id"] == "legacy_v1"
+        assert branch["tts_models"]["qwen-audio-3.1-tts-flash"]["characters"][0]["voice_id"] == "legacy_v1"
 
 
 # ——— set_engine_branch ———
@@ -134,7 +134,7 @@ class TestSetEngineBranch:
         config: dict = {}
         branch_data = {
             "tts_models": {
-                "qwen3-tts-instruct-flash": {
+                "qwen-audio-3.1-tts-flash": {
                     "characters": [{"character_id": 1, "name": "X", "voice_id": "vx"}],
                 }
             },
@@ -143,7 +143,7 @@ class TestSetEngineBranch:
         assert "engines" in config
         assert "legacy_stems" in config["engines"]
         read_back = get_engine_branch(config, "legacy_stems")
-        assert read_back["tts_models"]["qwen3-tts-instruct-flash"]["characters"][0]["voice_id"] == "vx"
+        assert read_back["tts_models"]["qwen-audio-3.1-tts-flash"]["characters"][0]["voice_id"] == "vx"
 
     def test_raises_on_invalid_mode(self):
         """不支持的 engine_mode 抛出 ValueError。"""
@@ -217,13 +217,13 @@ class TestGetCharactersForModel:
         config["engines"] = {
             "legacy_stems": {
                 "tts_models": {
-                    "qwen3-tts-instruct-flash": {
+                    "qwen-audio-3.1-tts-flash": {
                         "characters": [{"character_id": 99, "name": "分支角色", "voice_id": "branch_only"}],
                     }
                 },
             },
         }
-        result = get_characters_for_model(config, "qwen3-tts-instruct-flash", engine_mode="legacy_stems")
+        result = get_characters_for_model(config, "qwen-audio-3.1-tts-flash", engine_mode="legacy_stems")
         assert len(result) == 1
         assert result[0]["character_id"] == 99
 
@@ -231,8 +231,8 @@ class TestGetCharactersForModel:
         """legacy_stems 分支无数据时回退旧顶层。"""
         config = _legacy_top_level()
         config["engines"] = {"legacy_stems": {}}
-        result = get_characters_for_model(config, "qwen3-tts-instruct-flash", engine_mode="legacy_stems")
-        # 应有顶层 tts_models.qwen3-tts-instruct-flash.characters 的数据
+        result = get_characters_for_model(config, "qwen-audio-3.1-tts-flash", engine_mode="legacy_stems")
+        # 应有顶层 tts_models.qwen-audio-3.1-tts-flash.characters 的数据
         assert len(result) >= 1
 
     def test_branch_fallback_to_top_level_characters(self):
@@ -241,7 +241,7 @@ class TestGetCharactersForModel:
         config["engines"] = {"legacy_stems": {}}
         # 完全删除 tts_models 确保回退到顶层 characters
         del config["tts_models"]
-        result = get_characters_for_model(config, "qwen3-tts-instruct-flash", engine_mode="legacy_stems")
+        result = get_characters_for_model(config, "qwen-audio-3.1-tts-flash", engine_mode="legacy_stems")
         # 回退到顶层 characters
         assert len(result) == 2
 
@@ -254,7 +254,7 @@ class TestGetCharactersForModel:
     def test_none_engine_mode_old_behavior(self):
         """engine_mode=None 保持旧行为（从顶层读取）。"""
         config = _legacy_top_level()
-        result = get_characters_for_model(config, "qwen3-tts-instruct-flash", engine_mode=None)
+        result = get_characters_for_model(config, "qwen-audio-3.1-tts-flash", engine_mode=None)
         assert len(result) >= 1
 
     def test_legacy_model_key_fallback(self):
@@ -283,8 +283,8 @@ class TestSetCharactersForModel:
         """写入引擎分支成功，get 读取一致。"""
         config: dict = {}
         chars = [{"character_id": 1, "name": "新角色", "voice_id": "new_v1"}]
-        set_characters_for_model(config, "qwen3-tts-instruct-flash", chars, engine_mode="legacy_stems")
-        result = get_characters_for_model(config, "qwen3-tts-instruct-flash", engine_mode="legacy_stems")
+        set_characters_for_model(config, "qwen-audio-3.1-tts-flash", chars, engine_mode="legacy_stems")
+        result = get_characters_for_model(config, "qwen-audio-3.1-tts-flash", engine_mode="legacy_stems")
         assert len(result) == 1
         assert result[0]["voice_id"] == "new_v1"
 
@@ -292,7 +292,7 @@ class TestSetCharactersForModel:
         """legacy_stems + 默认模型时镜像顶层 characters。"""
         config: dict = {}
         chars = [{"character_id": 1, "name": "兼容角色", "voice_id": "compat_v1"}]
-        set_characters_for_model(config, "qwen3-tts-instruct-flash", chars, engine_mode="legacy_stems")
+        set_characters_for_model(config, "qwen-audio-3.1-tts-flash", chars, engine_mode="legacy_stems")
         assert "characters" in config
         assert config["characters"][0]["voice_id"] == "compat_v1"
 
@@ -308,14 +308,14 @@ class TestSetCharactersForModel:
         """seed_scene 分支不镜像顶层。"""
         config: dict = {}
         chars = [{"character_id": 1, "name": "种子角色", "voice_id": "seed_v1"}]
-        set_characters_for_model(config, "qwen3-tts-instruct-flash", chars, engine_mode="seed_scene")
+        set_characters_for_model(config, "qwen-audio-3.1-tts-flash", chars, engine_mode="seed_scene")
         assert "characters" not in config
 
     def test_none_engine_mode_writes_to_top_level(self):
         """engine_mode=None 写旧顶层。"""
         config: dict = {}
         chars = [{"character_id": 1, "name": "旧顶层", "voice_id": "old_top"}]
-        set_characters_for_model(config, "qwen3-tts-instruct-flash", chars, engine_mode=None)
+        set_characters_for_model(config, "qwen-audio-3.1-tts-flash", chars, engine_mode=None)
         assert "characters" in config
         assert "tts_models" in config
 

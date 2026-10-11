@@ -82,7 +82,7 @@ def test_chapter_cadence_preserves_structural_pause_override_and_exposes_model_g
     plan = build_delivery_plan(
         segment=segment,
         voice_params=segment.voice_params,
-        model="qwen3-tts-instruct-flash",
+        model="qwen-audio-3.1-tts-flash",
         emotion="tense",
     )
     assert plan["timeline_pause_after_ms"] == 1250
@@ -152,7 +152,7 @@ def test_tts_batch_item_keeps_chapter_pause_for_mixing_but_removes_provider_boun
     from app.services.audiobook.engine_pkg._tts_mixin import TTSMixin
 
     class DummyEngine(TTSMixin):
-        tts_model = "qwen3-tts-instruct-flash"
+        tts_model = "qwen-audio-3.1-tts-flash"
 
     segment = _segment(
         "门后没有人。",

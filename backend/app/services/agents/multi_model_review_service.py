@@ -16,6 +16,7 @@ from app.services.agents.intelligent_truncator import smart_truncate_for_context
 from app.services.monitoring import MetricCategory, metrics_collector
 from app.services.prompts.workflow_runtime import build_first_chapter_review_prompts
 from core.langchain_bridge import create_task_llm
+from core.model_resolution import normalize_model_id
 
 
 logger = logging.getLogger(__name__)
@@ -23,39 +24,39 @@ logger = logging.getLogger(__name__)
 
 REVIEWER_PANEL_PRESETS: dict[str, list[dict[str, str]]] = {
     "balanced_3": [
-        {"profile": "general_literary", "model": "qwen3.7-plus"},
-        {"profile": "logic_continuity", "model": "deepseek-v4-pro"},
+        {"profile": "general_literary", "model": "qwen-plus"},
+        {"profile": "logic_continuity", "model": "deepseek-pro"},
         {"profile": "character_emotion", "model": "doubao-seed-character"},
     ],
     "key_chapter_5": [
-        {"profile": "general_literary", "model": "qwen3.7-plus"},
-        {"profile": "logic_continuity", "model": "deepseek-v4-pro"},
+        {"profile": "general_literary", "model": "qwen-plus"},
+        {"profile": "logic_continuity", "model": "deepseek-pro"},
         {"profile": "character_emotion", "model": "doubao-seed-character"},
-        {"profile": "long_context_consistency", "model": "glm-5.2"},
-        {"profile": "rhythm_hook", "model": "step-3.7-flash"},
+        {"profile": "long_context_consistency", "model": "glm"},
+        {"profile": "rhythm_hook", "model": "step-preview"},
     ],
     "deep_7": [
-        {"profile": "general_literary", "model": "qwen3.7-plus"},
+        {"profile": "general_literary", "model": "qwen-plus"},
         {"profile": "character_emotion", "model": "doubao-seed-character"},
-        {"profile": "long_context_consistency", "model": "glm-5.2"},
-        {"profile": "rhythm_hook", "model": "step-3.7-flash"},
-        {"profile": "narrative_flow", "model": "kimi/kimi-k2.6"},
-        {"profile": "contextual_reader", "model": "mimo-v2.5"},
+        {"profile": "long_context_consistency", "model": "glm"},
+        {"profile": "rhythm_hook", "model": "step-preview"},
+        {"profile": "narrative_flow", "model": "kimi-preview"},
+        {"profile": "contextual_reader", "model": "mimo-flash"},
         {"profile": "goal_alignment", "model": "doubao-seed-evolving"},
     ],
 }
 
 MULTI_MODEL_REVIEW_ALLOWED_MODELS = {
-    "qwen3.7-plus",
-    "deepseek-v4-pro",
+    "qwen-plus",
+    "deepseek-pro",
     "doubao-seed-character",
-    "glm-5.2",
-    "step-3.7-flash",
-    "kimi/kimi-k2.6",
-    "mimo-v2.5",
-    "mimo-v2.5-pro",
+    "glm",
+    "step-preview",
+    "kimi-preview",
+    "mimo-flash",
+    "mimo-pro",
     "doubao-seed-evolving",
-    "deepseek-v4-flash",
+    "deepseek-flash",
 }
 
 MODEL_REVIEW_PROMPT_BUDGETS = {
@@ -64,16 +65,17 @@ MODEL_REVIEW_PROMPT_BUDGETS = {
 CHAPTER_PLAN_PROMPT_BUDGET_SETTING = "MULTI_MODEL_REVIEW_CHAPTER_PLAN_PROMPT_BUDGET"
 
 MODEL_REVIEW_GOVERNANCE: dict[str, dict[str, Any]] = {
-    "qwen3.7-plus": {"provider": "alibaba", "reasoning": False},
-    "deepseek-v4-pro": {"provider": "deepseek", "reasoning": True},
-    "deepseek-v4-flash": {"provider": "deepseek", "reasoning": True},
+    "qwen-plus": {"provider": "alibaba", "reasoning": False},
+    "deepseek-pro": {"provider": "deepseek", "reasoning": True},
+    "deepseek-flash": {"provider": "deepseek", "reasoning": True},
     "doubao-seed-character": {"provider": "volcengine", "reasoning": False},
     "doubao-seed-evolving": {"provider": "volcengine", "reasoning": True},
-    "glm-5.2": {"provider": "zhipu", "reasoning": True},
-    "step-3.7-flash": {"provider": "stepfun", "reasoning": False},
-    "kimi/kimi-k2.6": {"provider": "moonshot", "reasoning": False},
-    "mimo-v2.5": {"provider": "xiaomi", "reasoning": False},
-    "mimo-v2.5-pro": {"provider": "xiaomi", "reasoning": True},
+    "glm": {"provider": "zhipu", "reasoning": True},
+    # reasoning=False：本项目以 reasoning_effort=low 调用，与 flash 档位同席，不计入强推理配额
+    "step-preview": {"provider": "stepfun", "reasoning": False},
+    "kimi-preview": {"provider": "moonshot", "reasoning": False},
+    "mimo-flash": {"provider": "xiaomi", "reasoning": False},
+    "mimo-pro": {"provider": "xiaomi", "reasoning": True},
 }
 
 REVIEW_PROFILE_GROUPS = {
@@ -122,11 +124,18 @@ class MultiModelReviewService:
         chief_model = chief_model or getattr(
             settings,
             "MULTI_MODEL_REVIEW_CHIEF_MODEL",
-            "deepseek-v4-pro",
+            "deepseek-pro",
         )
         reviewers = custom_panel or REVIEWER_PANEL_PRESETS.get(preset)
         if not reviewers:
             raise ValueError(f"Unsupported multi-model review preset: {preset}")
+        # 退役/改名 ID 的兼容别名已随数据库历史改写一并删除，这里只剩大小写与拼写形态归一。
+        # 落在白名单外的旧名会直接报错而不是被悄悄换成别的模型。
+        chief_model = normalize_model_id(chief_model) or chief_model
+        reviewers = [
+            {**reviewer, "model": normalize_model_id(reviewer.get("model")) or reviewer.get("model", "")}
+            for reviewer in reviewers
+        ]
         if not getattr(settings, "MULTI_MODEL_REVIEW_ALLOW_CHIEF_REUSE", True):
             reviewers = self._reserve_chief_seat(reviewers, chief_model=chief_model)
         if len(reviewers) not in {3, 5, 7}:
@@ -285,6 +294,12 @@ class MultiModelReviewService:
                 "fallback_required": True,
                 "per_model_reports": per_model_reports,
                 "fallback_reason": f"多模型评审成功数 {success_count} < 2",
+                # 与成功路径统一补齐面板元数据，供上层观测快照的 context_payload 记录
+                # preset/chief/reviewer 组成，避免降级分支的观测缺失评审团信息。
+                "chief_model": self.chief_model,
+                "preset": self.preset,
+                "reviewer_models": [reviewer["model"] for reviewer in self.reviewers],
+                "reviewer_profiles": [reviewer["profile"] for reviewer in self.reviewers],
             }
 
         try:
@@ -355,6 +370,9 @@ class MultiModelReviewService:
             "fallback_reason": reason,
             "chief_model": self.chief_model,
             "preset": self.preset,
+            # 与成功路径统一补齐 reviewer 面板元数据，供上层观测快照记录评审团组成。
+            "reviewer_models": [reviewer["model"] for reviewer in self.reviewers],
+            "reviewer_profiles": [reviewer["profile"] for reviewer in self.reviewers],
         }
 
     async def _review_with_reviewer(

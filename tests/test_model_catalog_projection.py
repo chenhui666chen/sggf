@@ -32,12 +32,12 @@ def _make_stored_entry(model_key: str) -> SimpleNamespace:
 def test_projected_catalog_prefers_latest_config_metadata_and_keeps_verification_state() -> None:
     from app.services.model_catalog_projection import build_projected_model_catalog_entries
 
-    projected = build_projected_model_catalog_entries([_make_stored_entry("wan2.7-t2v")])
+    projected = build_projected_model_catalog_entries([_make_stored_entry("wan3.0-video")])
     by_key = {item["model_key"]: item for item in projected}
 
-    target = by_key["wan2.7-t2v"]
-    assert target["name"] == "Wan 2.7 Text-to-Video"
-    assert target["summary"].startswith("项目当前归档的主力文生视频模型")
+    target = by_key["wan3.0-video"]
+    assert target["name"] == "Wan 3.0 Video"
+    assert target["summary"].startswith("万相 3.0 全能参考视频生成模型")
     assert target["verification_status"] == "verified"
     assert target["verification_scope"] == "manual_review"
     assert target["verification_notes"] == "人工校验已完成"
@@ -52,7 +52,7 @@ def test_projected_catalog_hides_stale_database_only_entries() -> None:
 
     assert "legacy-removed-model" not in projected_keys
     assert len(projected) >= 42
-    assert "qwen3-tts-instruct-flash" in projected_keys
+    assert "qwen-audio-3.1-tts-flash" in projected_keys
     assert "mimo-v2.5-tts" in projected_keys
     assert "mimo-v2.5-tts-voicedesign" in projected_keys
     assert "mimo-v2.5-tts-voiceclone" in projected_keys
@@ -73,11 +73,11 @@ def test_projected_tts_catalog_exposes_model_aware_style_control_specs() -> None
     projected = build_projected_model_catalog_entries([])
     by_key = {item["model_key"]: item for item in projected}
 
-    qwen_style_control = by_key["qwen3-tts-instruct-flash"]["detailed_specs"]["voice_synthesis"]["style_control"]
+    qwen_style_control = by_key["qwen-audio-3.1-tts-flash"]["detailed_specs"]["voice_synthesis"]["style_control"]
     assert qwen_style_control["model_family"] == "qwen"
     assert qwen_style_control["preferred_mode"] == "natural_language"
     assert [mode["id"] for mode in qwen_style_control["modes"]] == ["natural_language"]
-    assert qwen_style_control["control_message_roles"]["natural_language"] == "parameters.instructions"
+    assert qwen_style_control["control_message_roles"]["natural_language"] == "input.instruction"
     assert qwen_style_control["supports_voice_description"] is True
     assert qwen_style_control["supports_audio_tags"] is False
 

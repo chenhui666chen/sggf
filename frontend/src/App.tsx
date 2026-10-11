@@ -58,6 +58,7 @@ const LogsPage = lazy(() => import('@/pages/admin/LogsPage'))
 const SystemPage = lazy(() => import('@/pages/admin/SystemPage'))
 const DatabaseQueryPage = lazy(() => import('@/pages/admin/DatabaseQueryPage'))
 const PromptEvolutionPage = lazy(() => import('@/pages/admin/PromptEvolutionPage'))
+const DirectorOSAdminPage = lazy(() => import('@/pages/admin/DirectorOSAdminPage'))
 
 // 加载中组件
 const LoadingFallback = () => {
@@ -317,6 +318,7 @@ function App() {
                 <Route path="roles" element={<RolesPage />} />
                 <Route path="query" element={<DatabaseQueryPage />} />
                 <Route path="prompt-evolution" element={<PromptEvolutionPage />} />
+                <Route path="director-os" element={<DirectorOSAdminPage />} />
                 <Route path="logs" element={<LogsPage />} />
                 <Route path="system" element={<SystemPage />} />
               </Route>

@@ -65,14 +65,14 @@ def test_request_voice_config_omits_unset_role_level_profiling_and_tuning_fields
             CharacterVoiceConfig(
                 character_name="RuntimeDirectedRole",
                 voice_id="Neil",
-                tts_model="qwen3-tts-instruct-flash",
+                tts_model="qwen-audio-3.1-tts-flash",
             ),
         ],
     )
 
     assert voice_mapping["RuntimeDirectedRole"] == {
         "voice_id": "Neil",
-        "tts_model": "qwen3-tts-instruct-flash",
+        "tts_model": "qwen-audio-3.1-tts-flash",
     }
 
 
@@ -155,7 +155,7 @@ def test_auto_assign_voices_only_assigns_explicitly_scoped_characters(monkeypatc
             assigned_names.append(name)
             return SimpleNamespace(
                 profile=SimpleNamespace(voice_id=f"voice-{name}"),
-                model="qwen3-tts-instruct-flash",
+                model="qwen-audio-3.1-tts-flash",
             )
 
     monkeypatch.setattr(app_service_module, "AutoVoiceAssignmentPool", FakePool)
@@ -179,7 +179,7 @@ def test_auto_assign_voices_only_assigns_explicitly_scoped_characters(monkeypatc
     service._auto_assign_voices(
         3,
         voice_mapping,
-        "qwen3-tts-instruct-flash",
+        "qwen-audio-3.1-tts-flash",
         characters=[scoped_character],
     )
 

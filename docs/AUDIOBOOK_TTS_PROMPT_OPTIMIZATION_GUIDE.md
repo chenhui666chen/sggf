@@ -99,7 +99,7 @@ API generate_audio_from_scripts()
 | ①② LLM 调用 | 章节分析与剧本转化串行执行，无流水线 | [_analysis.py::_analyze_chapter](file:///c:/Users/cuigu/novel_writing_agent/backend/app/services/audiobook/script_adapter_pkg/_analysis.py) 与 [_transform.py::_transform_to_script](file:///c:/Users/cuigu/novel_writing_agent/backend/app/services/audiobook/script_adapter_pkg/_transform.py) 顺序调用 | 在默认两阶段流程下影响降低，但会增加剧本生成等待时间 |
 | ④⑤ 风格控制重复构建 | `build_model_style_control` 在投递计划阶段与合成阶段各调用一次 | [tts_style_control.py::build_model_style_control](file:///c:/Users/cuigu/novel_writing_agent/backend/app/services/audiobook/tts_style_control.py) 被 [_aliyun_mixin.py::_build_qwen_instruction_payload](file:///c:/Users/cuigu/novel_writing_agent/backend/app/services/audiobook/tts_engine_pkg/_aliyun_mixin.py) 等再次触发 | 每段重复构建指令，CPU 与 LLM(optimize) 调用浪费 |
 | ⑦ TTS 合成 | `max_concurrent=2`、`request_delay=0.5s` 硬编码，未按模型 RPS 差异化 | [_base.py#L174-L176](file:///c:/Users/cuigu/novel_writing_agent/backend/app/services/audiobook/tts_engine_pkg/_base.py) | 高 RPS 模型（如 MiniMax）被限速拖慢，低 RPS 模型无保护 |
-| ⑥ 选音冲突检测覆盖窄 | `reconcile_voice_description_with_selected_voice` 的 `_VOICE_AGE_HINTS` 仅覆盖部分音色 | [voice_description_policy.py#L39](file:///c:/Users/cuigu/novel_writing_agent/backend/app/services/audiobook/voice_description_policy.py) | 影响选音提示和新音色设计校验；不再影响固定音色运行时请求 |
+| ⑥ 选音冲突检测覆盖窄 | 已收敛：`reconcile_voice_description_with_selected_voice` 的年龄改取目录 `age_group`，手写 `_VOICE_AGE_HINTS` 表已删除（2026-10-10） | [voice_description_policy.py](file:///c:/Users/cuigu/novel_writing_agent/backend/app/services/audiobook/voice_description_policy.py) | 影响选音提示和新音色设计校验；不再影响固定音色运行时请求 |
 | ② 批次边界 | 850 字固定分批，未按句号/段落语义切分 | [_transform.py](file:///c:/Users/cuigu/novel_writing_agent/backend/app/services/audiobook/script_adapter_pkg/_transform.py) | 跨批次的对白可能被截断，角色连续性受损 |
 | 提示词可观测性 | 审阅阶段缺少最终 provider prompt 快照 | AUDIO_PROMPT_REVIEW 主要返回 `delivery_plan` 与统计指标 | 难以判断不同模型最终收到了什么，也难以做质量回写 |
 
@@ -115,9 +115,9 @@ API generate_audio_from_scripts()
 | **旁白风格旧链路曾影响运行时参数** | 已收口：legacy 字段不再写入 `speed/pitch/instructions`；片段边界统一删除 pitch、身份覆盖，并对指令模型删除 `speed/rate/character_base_speed` | [narration_styles.py](file:///c:/Users/cuigu/novel_writing_agent/backend/app/services/audiobook/narration_styles.py)、[_script_utils_mixin.py::_apply_narration_style_to_voice_params](file:///c:/Users/cuigu/novel_writing_agent/backend/app/services/audiobook/engine_pkg/_script_utils_mixin.py)、[voice_parameter_policy.py](file:///c:/Users/cuigu/novel_writing_agent/backend/app/services/audiobook/voice_parameter_policy.py) | 已解决 |
 | **情感归一化逻辑分散** | CosyVoice 情绪映射硬编码在 TTS 引擎基类，与能力矩阵割裂 | [_base.py#COSYVOICE_V3_PLUS_INSTRUCT_EMOTIONS](file:///c:/Users/cuigu/novel_writing_agent/backend/app/services/audiobook/tts_engine_pkg/_base.py) | 高 |
 | **MiniMax 高级风格控制需显式降级** | MiniMax HD/Turbo 走 `basic` 模式，复杂 `delivery_plan` 会被忽略或只能转为基础参数 | [tts_model_ids.py#L107-L116](file:///c:/Users/cuigu/novel_writing_agent/backend/app/services/audiobook/tts_model_ids.py) `preferred_style_control_mode: "basic"` | 中 |
-| **StepAudio instruction 截断 200 字** | 复杂场景指导被截断后语义残缺 | [_aliyun_mixin.py#L33](file:///c:/Users/cuigu/novel_writing_agent/backend/app/services/audiobook/tts_engine_pkg/_aliyun_mixin.py) `STEPAUDIO_TTS_INSTRUCTION_MAX_CHARS = 200` | 高 |
+| **StepAudio instruction 截断 500 字** | 复杂场景指导被截断后语义残缺 | [_aliyun_mixin.py#L36](file:///c:/Users/cuigu/novel_writing_agent/backend/app/services/audiobook/tts_engine_pkg/_aliyun_mixin.py) `STEPAUDIO_TTS_INSTRUCTION_MAX_CHARS = 500` | 高 |
 | **StepAudio 单段输入 1000 字** | 长段落被迫截断，上下文丢失 | [_aliyun_mixin.py#L32](file:///c:/Users/cuigu/novel_writing_agent/backend/app/services/audiobook/tts_engine_pkg/_aliyun_mixin.py) `STEPAUDIO_TTS_MAX_INPUT_CHARS = 1000` | 中 |
-| **角色区分历史上依赖 pitch/rate 微调** | 已收口：`VoiceDesigner` 不再生成或修改 pitch/数值语速；角色身份差异必须依赖不同音色资产，同 speaker 仅允许当前片段的语义表演差异 | [voice_designer.py](file:///c:/Users/cuigu/novel_writing_agent/backend/app/services/audiobook/agents/voice_designer.py) | 已解决 |
+| **角色区分历史上依赖 pitch/rate 微调** | 已收口并物理退役：承载旧 pitch/数值语速逻辑的 `VoiceDesigner` 已于 2026-10-11 整模块删除；角色身份差异必须依赖不同音色资产，同 speaker 仅允许当前片段的语义表演差异 | [_script_utils_mixin.py::_assign_voices](file:///c:/Users/cuigu/novel_writing_agent/backend/app/services/audiobook/engine_pkg/_script_utils_mixin.py)、[voice_parameter_policy.py](file:///c:/Users/cuigu/novel_writing_agent/backend/app/services/audiobook/voice_parameter_policy.py) | 已解决 |
 | **无提示词质量回写** | 生成结果无提示词有效性反馈，无法闭环优化模板 | 全链路无 `provider_prompt_snapshot → audio_quality` 关联记录 | 中 |
 
 ---
@@ -137,8 +137,8 @@ API generate_audio_from_scripts()
 | mimo-v2.5-tts | mimo | `director` | 导演模式 + 音频标签 + 复合情绪 | 韵律控制 | 微标签 | 预置音色 + 导演指导 |
 | mimo-v2.5-tts-voicedesign | mimo | `voice_design` | 声音描述优先 | 韵律控制 | 微标签 | **文本设计音色** |
 | mimo-v2.5-tts-voiceclone | mimo | `director` | 导演模式 + 音频标签 | 韵律控制 | 微标签 | **音频样本复刻资产** |
-| stepaudio-2.5-tts | stepaudio | `global_context` | 全局语境 + 文中语境括号 | 韵律控制 | **圆括号 inline** | 预置音色 + Zero-shot |
-| seed-tts-2.0-expressive | doubao | `query_response` | Query-Response + 语音标签 | 上下文指令 | 标签 | 预置音色 + 复刻 |
+| stepaudio-3-tts | stepaudio | `global_context` | 全局语境 + 文中语境括号 | 韵律控制 | **圆括号 inline** | 预置音色 + Zero-shot |
+| seed-tts-2.0-expressive | doubao | `query_response` | Query-Response + 语音标签 | 上下文指令 | 标签 | 预置音色（复刻创建未接入） |
 
 ### 4.2 五个关键维度的模型对照
 
@@ -176,7 +176,7 @@ API generate_audio_from_scripts()
 - **qwen**：通过预置 `voice_id` 区分角色；当前片段节奏只通过 instruction 表达，不使用数值 `rate` 伪造角色差异。
 - **minimax**：仅 voice 音色切换。
 
-当前 [voice_designer.py](file:///c:/Users/cuigu/novel_writing_agent/backend/app/services/audiobook/agents/voice_designer.py) 已删除 pitch 生成与差异化逻辑。音色克隆/设计在音色管理窗口完成；正式章节只引用固定 `voice_id`，逐句表演由 `delivery_plan` 和模型编译器决定。
+承载 pitch 生成与角色差异化逻辑的 `voice_designer.py` 已于 2026-10-11 物理删除（生产链路对它零方法调用，音色分配统一由 `VoiceManager.assign_voice` 承担）。音色克隆/设计在音色管理窗口完成；正式章节只引用固定 `voice_id`，逐句表演由 `delivery_plan` 和模型编译器决定。
 
 #### 4.2.5 提示词注入位置
 
@@ -185,7 +185,7 @@ API generate_audio_from_scripts()
 | qwen | `parameters.instructions` | 600 字（`optimize_instructions` 可压缩） |
 | cosyvoice | `parameters.instruction` | 100 字 |
 | mimo | `messages` 的 user/assistant 角色 | 无上限 |
-| stepaudio | `parameters.instruction`（全局） + 文中圆括号 | **全局 200 字** |
+| stepaudio | `parameters.instruction`（全局） + 文中圆括号 | **全局 500 字** |
 | doubao | `additions.context_texts` + `use_tag_parser` | 无上限 |
 | minimax | 无（basic） | — |
 
@@ -202,7 +202,7 @@ API generate_audio_from_scripts()
 | **G1** | 投递计划→提示词映射粗放 | `delivery_plan_instruction_parts` 对所有模型输出相同结构化片段 | 应按模型能力裁剪：basic 模型不输出、instruction 受限模型压缩、标签模型转标签 |
 | **G2** | 情绪表达未按模型枚举归一 | CosyVoice 情绪归一化在引擎基类硬编码，其余模型无 | 应统一到能力矩阵 `supported_emotions` 字段，在风格控制层归一 |
 | **G3** | 停顿策略未模型化 | `pause_profile` 仅记录 dramatic/natural/balanced，不落到模型可用手段 | cosyvoice→pause 参数；stepaudio→圆括号注入；其余→instruction 描述 |
-| **G4** | 音色资产创建与逐句表演混在一起 | 已收口：VoiceDesigner 不再输出 pitch，固定音色链路统一过滤声音身份覆盖 | 音色管理窗口负责 clone/design 资产；生成链路只引用 `voice_id` 并动态生成表演参数 |
+| **G4** | 音色资产创建与逐句表演混在一起 | 已收口：`VoiceDesigner` 已整模块删除（2026-10-11），固定音色链路统一过滤声音身份覆盖 | 音色管理窗口负责 clone/design 资产；生成链路只引用 `voice_id` 并动态生成表演参数 |
 | **G5** | Micro tags 注入位置不分模型 | `_build_mimo_audio_tag_prefix` 与 `_build_doubao_voice_label_prefix` 各自实现 | 应抽象为 `inline_tag_strategy`，按模型决定 prefix/inline/suffix |
 | **G6** | 旁白与角色提示词模板同构 | `_build_common_parts` 对旁白/对白用相同字段 | 旁白应弱化角色身份、强化叙事节奏；对白应强化角色关系与场景张力 |
 | **G7** | 无质量回写 | 生成结果无提示词有效性反馈 | 应记录 per-model prompt→audio 质量评分，反哺模板 |
@@ -308,10 +308,10 @@ API generate_audio_from_scripts()
 角色区分：通过生成 `voice_id` 资产完成；正式章节合成只引用该资产，不把逐句剧情表演写入 voice design prompt
 ```
 
-#### 5.2.7 stepaudio（global_context + inline, instruction≤200）
+#### 5.2.7 stepaudio（global_context + inline, instruction≤500）
 
 ```
-全局 instruction（≤200 字，智能压缩保留 4 要素）：
+全局 instruction（≤500 字，智能压缩保留 4 要素）：
   ① 场景基调：{scene}
   ② 情绪基调：{emotion}
   ③ 节奏：{pace}
@@ -346,7 +346,7 @@ context_texts（Query-Response 对话式）：
 ### 5.3 模板设计原则
 
 1. **能力门控**：所有 parts 构建前先查能力矩阵，basic 模型不构建自然语言 parts（解决 G1）。
-2. **预算感知压缩**：instruction 受限模型（cosyvoice 100 字 / stepaudio 200 字）按优先级保留要素（解决 G1）。
+2. **预算感知压缩**：instruction 受限模型（cosyvoice 100 字 / stepaudio 500 字）按优先级保留要素（解决 G1）。
 3. **情绪统一归一入口**：在风格控制层调用 `normalize_emotion(emotion, model)`，能力矩阵声明 `supported_emotions`（解决 G2）。
 4. **停顿策略显式落地**：投递计划产出 `pause_profile` 后，由 `pause_renderer(model, pause_profile)` 转为模型可用手段（解决 G3）。
 5. **音色资产与表演参数分离**：Voice Design / Voice Clone 只创建或引用音色资产；逐句表现由 `delivery_plan` 决定（解决 G4）。
@@ -421,7 +421,7 @@ def resolve_prompt_strategy(model: str, segment_type: str) -> PromptStrategy:
 | mimo / director | 不归一(支持复合) | 不压缩 | 微标签 | style_tags | 旁白/对白分流 | messages.user |
 | mimo / voice_design(asset_creation) | 不归一 | 不压缩 | 不适用 | 不适用 | 声音设计模板 | 音色管理窗口 messages.user |
 | mimo / director + clone_audio | 不归一 | 不压缩 | 微标签 | style_tags | 旁白/对白分流 | messages.user + audio.voice |
-| stepaudio / global_context | 不归一 | **≤200 智能压缩** | **圆括号 inline** | inline_tags | 旁白/对白分流 | field(instruction)+inline |
+| stepaudio / global_context | 不归一 | **≤500 智能压缩** | **圆括号 inline** | inline_tags | 旁白/对白分流 | field(instruction)+inline |
 | doubao / query_response | 不归一 | 不压缩 | 标签 | voice_label | 旁白/对白分流 | additions.context_texts |
 
 ### 6.5 与现有代码的衔接
@@ -480,7 +480,7 @@ def resolve_prompt_strategy(model: str, segment_type: str) -> PromptStrategy:
 |------|------------|----------|----------------|
 | Qwen3-TTS-Instruct-Flash | `parameters.instructions` 自然语言，可开启 `optimize_instructions` | 情绪目标、停顿策略、重读词、演绎要求、导演指导 | 在正文接近 600 字输入限制时裸字符串截断 |
 | CosyVoice v3.5 Plus | 短 cue `instruction` + `pause_before/after` | `emotion`、`pause`、`重读`、`act` | 大段旁白模板、长声音画像、长导演词 |
-| StepAudio 2.5 TTS | `instruction` 全局语境 + 正文圆括号 inline 语境 | 情绪、停顿、重读、演绎要求；逐句停顿/低语走 `（...）` | 把 `voice_label`、MiMo 标签或长声音画像塞进 200 字预算前部 |
+| StepAudio 3 TTS | `instruction` 全局语境 + 正文圆括号 inline 语境 | 情绪、停顿、重读、演绎要求；逐句停顿/低语走 `（...）` | 把 `voice_label`、MiMo 标签或长声音画像塞进 500 字预算前部 |
 | MiniMax Speech 2.8 | `pace/intensity -> speed/volume` 基础参数降级；协议 pitch 固定为 `0` | `slow/medium/fast -> 0.9/1.0/1.1` 和强度的保守映射 | 原始 speed/rate 复乘、片段 pitch、自然语言 instructions、正文标签 |
 | MiMo V2.5 TTS | director/user message 或 assistant audio tags | 角色、场景、指导；标签模式下的整体风格和微标签 | 把 MiMo 标签污染到 Qwen/StepAudio/Seed 正文 |
 | Seed-TTS 2.0 Expressive | `context_texts` + 可选方括号标签 | 上下文指令、语气、语速、强弱、停顿、显式标签 | 片段 pitch；把 context_texts 当作待朗读正文 |
@@ -920,7 +920,7 @@ npm run type-check
 - Doubao 的标签 fallback 需要保持旧语义：存在 inline 标签时优先只渲染 inline；没有 inline 标签时才把 `style_tags` 与 `delivery_plan.emotion_primary/emotion_mix` 合并为正文标签，避免把审计用 style 标签意外注入已有 inline 标签的正文前缀。
 - `provider_prompt_snapshot` 仍只承载最终可审阅的 provider prompt 表面；`inline_tag_strategy` 放在 `provider_prompt` 下作为审计元数据，不参与 provider payload 复用路径，避免运行时把审计字段当作合成参数。
 - 前端脚本详情面板原先只能通过完整 `voice_params` JSON 查看 provider prompt 快照；本轮增加了专门摘要展示，但保持 JSON 原样输出，避免影响高级调试和脚本保存结构。
-- StepAudio 的 inline 圆括号同时承载停顿、微标签与情绪层次，且受 200 字全局 instruction 预算影响；本轮未纳入 `inline_tag_strategy`，继续保留专用 renderer，避免把停顿语义混入 MiMo/Doubao 的标签抽象。
+- StepAudio 的 inline 圆括号同时承载停顿、微标签与情绪层次，且受 500 字全局 instruction 预算影响；本轮未纳入 `inline_tag_strategy`，继续保留专用 renderer，避免把停顿语义混入 MiMo/Doubao 的标签抽象。
 - 任务阶段 metrics 只读取 `provider_prompt_snapshot.provider_prompt.inline_tag_strategy` 这个审计快照，不反向参与 provider payload 构造；没有快照或快照缺字段时不输出空的 `inline_tag_strategy_*` 字段，避免污染普通任务日志。
 - G7 首轮只做“质量回写骨架”，不自动判定标签解析是否成功或是否出现正文污染；这些字段先以 `manual_review_fields` 占位，避免用不可验证的启发式替代人工听审或后续 ASR/文本比对。
 
@@ -961,7 +961,7 @@ npm run type-check
 | mimo-v2.5-tts | mimo | director | 复合情绪 | 微标签 | 无上限 | messages.user |
 | mimo-v2.5-tts-voicedesign | mimo | voice_design | 声音描述优先 | 微标签 | 无上限 | messages.user |
 | mimo-v2.5-tts-voiceclone | mimo | director + clone_audio | 导演+标签 | 微标签 | 无上限 | messages.user + audio.voice |
-| stepaudio-2.5-tts | stepaudio | global_context（cue 优先） | 全局+inline | **圆括号** | 200 字 | parameters.instruction+inline |
+| stepaudio-3-tts | stepaudio | global_context（cue 优先） | 全局+inline | **圆括号** | 500 字 | parameters.instruction+inline |
 | seed-tts-2.0-expressive | doubao | query_response | Query-Response | 标签 | 无上限 | additions.context_texts |
 
 
@@ -999,7 +999,7 @@ cd frontend && npm run type-check
 | StepAudio inline 停顿渲染独立化 | 已完成 | [tts_prompt_strategy.py](file:///c:/Users/cuigu/novel_writing_agent/backend/app/services/audiobook/tts_prompt_strategy.py) | 新增 `render_stepaudio_inline_prefix`，统一处理显式 `pause_before`、`delivery_plan.pause_profile`、`inline_audio_tags`、`micro_tags` 与 `emotion_mix` 去重 |
 | 旁白/对白/独白模板分流独立化 | 已完成 | [tts_prompt_strategy.py](file:///c:/Users/cuigu/novel_writing_agent/backend/app/services/audiobook/tts_prompt_strategy.py) | 新增 `build_common_prompt_parts`，旁白模板优先输出韵律控制与停顿策略，再输出情绪、场景、角色设定；旧 `_build_common_parts` 保持兼容委托 |
 | 策略层接入风格控制 | 已完成 | [tts_style_control.py](file:///c:/Users/cuigu/novel_writing_agent/backend/app/services/audiobook/tts_style_control.py) | `build_model_style_control` 仍保持既有模型分流，短期通过薄 wrapper 调用策略纯函数，避免无必要的大范围重构 |
-| StepAudio 预算优先级修正 | 已完成 | [tts_prompt_strategy.py](file:///c:/Users/cuigu/novel_writing_agent/backend/app/services/audiobook/tts_prompt_strategy.py)、[tts_style_control.py](file:///c:/Users/cuigu/novel_writing_agent/backend/app/services/audiobook/tts_style_control.py) | `stepaudio` 模型族优先输出情绪、停顿、重读和演绎要求；固定音色请求不再携带 `voice_description`，避免声音身份描述占用 200 字预算或改变基础音色 |
+| StepAudio 预算优先级修正 | 已完成 | [tts_prompt_strategy.py](file:///c:/Users/cuigu/novel_writing_agent/backend/app/services/audiobook/tts_prompt_strategy.py)、[tts_style_control.py](file:///c:/Users/cuigu/novel_writing_agent/backend/app/services/audiobook/tts_style_control.py) | `stepaudio` 模型族优先输出情绪、停顿、重读和演绎要求；固定音色请求不再携带 `voice_description`，避免声音身份描述占用 500 字预算或改变基础音色 |
 | Qwen provider 层二次压缩 | 已完成 | [_aliyun_mixin.py](file:///c:/Users/cuigu/novel_writing_agent/backend/app/services/audiobook/tts_engine_pkg/_aliyun_mixin.py) | 当正文接近 DashScope 输入限制导致 `instructions` 需要缩短时，结构化字段按情绪、停顿、重读、演绎优先重新压缩；纯显式长 `instructions` 保持旧的按预算截断兼容语义 |
 
 验证命令：
@@ -1084,10 +1084,10 @@ python -m pytest "backend/tests/test_audiobook_tts_provider_payloads.py" "backen
 | 提示词策略 | [tts_prompt_strategy.py](file:///c:/Users/cuigu/novel_writing_agent/backend/app/services/audiobook/tts_prompt_strategy.py) | `compact_instruction_parts`、`render_stepaudio_inline_prefix`、`build_common_prompt_parts` |
 | 风格控制 | [tts_style_control.py](file:///c:/Users/cuigu/novel_writing_agent/backend/app/services/audiobook/tts_style_control.py) | `build_model_style_control`、`build_provider_prompt_snapshot`、`normalize_emotion_for_model`、`_build_common_parts` |
 | 固定音色策略 | [voice_identity_policy.py](file:///c:/Users/cuigu/novel_writing_agent/backend/app/services/audiobook/voice_identity_policy.py)、[voice_parameter_policy.py](file:///c:/Users/cuigu/novel_writing_agent/backend/app/services/audiobook/voice_parameter_policy.py) | 身份文本净化、临时沙哑规范化、片段 pitch 删除、`stabilize_instruct_model_speed`、策略版本绑定 |
-| 声音描述融合 | [voice_description_policy.py](file:///c:/Users/cuigu/novel_writing_agent/backend/app/services/audiobook/voice_description_policy.py) | `reconcile_voice_description_with_selected_voice`、`_VOICE_AGE_HINTS` |
-| 音色设计 | [voice_designer.py](file:///c:/Users/cuigu/novel_writing_agent/backend/app/services/audiobook/agents/voice_designer.py) | `VoiceDesigner` |
+| 声音描述融合 | [voice_description_policy.py](file:///c:/Users/cuigu/novel_writing_agent/backend/app/services/audiobook/voice_description_policy.py) | `reconcile_voice_description_with_selected_voice`（年龄取目录 `age_group`，旧 `_VOICE_AGE_HINTS` 表已删除） |
+| 音色分配 | [voice_manager.py](file:///c:/Users/cuigu/novel_writing_agent/backend/app/services/audiobook/voice_manager.py) | `VoiceManager.assign_voice`、`create_voice_manager`（旧的 `VoiceDesigner` 已于 2026-10-11 整模块删除） |
 | 引擎基类 | [_base.py](file:///c:/Users/cuigu/novel_writing_agent/backend/app/services/audiobook/tts_engine_pkg/_base.py) | `COSYVOICE_V3_PLUS_INSTRUCT_EMOTIONS`、`max_concurrent`、`request_delay` |
-| 阿里混入 | [_aliyun_mixin.py](file:///c:/Users/cuigu/novel_writing_agent/backend/app/services/audiobook/tts_engine_pkg/_aliyun_mixin.py) | `STEPAUDIO_TTS_INSTRUCTION_MAX_CHARS=200`、`STEPAUDIO_TTS_MAX_INPUT_CHARS=1000`、`_build_qwen_instruction_payload`、`_build_stepaudio_instruction_payload` |
+| 阿里混入 | [_aliyun_mixin.py](file:///c:/Users/cuigu/novel_writing_agent/backend/app/services/audiobook/tts_engine_pkg/_aliyun_mixin.py) | `STEPAUDIO_TTS_INSTRUCTION_MAX_CHARS=500`、`STEPAUDIO_TTS_MAX_INPUT_CHARS=1000`、`_build_qwen_instruction_payload`、`_build_stepaudio_instruction_payload` |
 | 旁白风格 legacy | [narration_styles.py](file:///c:/Users/cuigu/novel_writing_agent/backend/app/services/audiobook/narration_styles.py) | 历史旁白风格兼容链路，后续应收口而非扩展 |
 | 章节分析 | [_analysis.py](file:///c:/Users/cuigu/novel_writing_agent/backend/app/services/audiobook/script_adapter_pkg/_analysis.py) | `_analyze_chapter`、`_build_analysis_sample(6000)` |
 | 两阶段剧本生成 | [_script_prep_mixin.py](file:///c:/Users/cuigu/novel_writing_agent/backend/app/services/audiobook/engine_pkg/_script_prep_mixin.py) | `prepare_chapter_script` |

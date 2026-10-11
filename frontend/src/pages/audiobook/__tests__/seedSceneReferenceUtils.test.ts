@@ -37,12 +37,12 @@ describe('Seed scene reference assignment', () => {
   it('keeps other providers bound to their preview audio', () => {
     expect(buildSeedSceneReferencePayload({
       slotId: 'femaleLead',
-      model: 'qwen3-tts-instruct-flash',
+      model: 'qwen-audio-3.1-tts-flash',
       voiceId: 'Cherry',
       audioUrl: 'https://audio.example.test/cherry.wav',
     })).toEqual({
       slot_id: 'femaleLead',
-      source_model: 'qwen3-tts-instruct-flash',
+      source_model: 'qwen-audio-3.1-tts-flash',
       source_voice_id: 'Cherry',
       audio_url: 'https://audio.example.test/cherry.wav',
     })

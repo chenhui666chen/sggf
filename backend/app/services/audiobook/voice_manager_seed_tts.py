@@ -125,7 +125,7 @@ class SeedTTSVoiceManager(VoiceManager):
         return self.DEFAULT_NARRATOR_VOICE_ID
 
     def validate_voice(self, voice_id: str) -> bool:
-        # 账号级声音复刻 ID 不会出现在静态系统音色目录中，只能由供应商校验。
+        # 账号级声音复刻 ID 不会出现在静态系统音色目录中，只能由供应商校验；直传是刻意容错，不代表已接入复刻创建。
         return bool(str(voice_id or "").strip())
 
     def get_supported_emotions(self) -> List[str]:
@@ -137,6 +137,7 @@ class SeedTTSVoiceManager(VoiceManager):
             "voices": self.get_voices(),
             "emotions": self.get_supported_emotions(),
             "supports_query_response": True,
-            "supports_voice_clone": True,
+            # 复刻未实现：项目无 seed-icl-2.0 创建与资产链路，开通需 138 元槽位费确认。
+            "supports_voice_clone": False,
             "supports_emotion_mixing": True,
         }

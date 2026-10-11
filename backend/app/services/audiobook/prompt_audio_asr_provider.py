@@ -18,7 +18,7 @@ from app.services.audiobook.prompt_audio_asr_pricing import (
 )
 
 
-DEFAULT_PROMPT_AUDIO_ASR_PROVIDER = "funasr_flash"
+DEFAULT_PROMPT_AUDIO_ASR_PROVIDER = "qwen_audio_asr_flash"
 
 
 @dataclass
@@ -584,7 +584,7 @@ class DoubaoPromptAudioAsrProvider:
                 time.sleep(min(2.0, _remaining_asr_timeout(deadline)))
 
 
-_FUNASR_SEGMENT_PUNCTUATION = frozenset(
+_ASR_FLASH_SEGMENT_PUNCTUATION = frozenset(
     {"。", "！", "？", "；", "，", "、", ".", "!", "?", ";", ","}
 )
 
@@ -601,11 +601,12 @@ def _detect_wav_sample_rate(path: str) -> Optional[int]:
         return None
 
 
-def _funasr_sentence_from_event(event: Any) -> Optional[Dict[str, Any]]:
-    """Extract the sentence object from a fun-asr-flash event.
+def _asr_flash_sentence_from_event(event: Any) -> Optional[Dict[str, Any]]:
+    """Extract the sentence object from an ASR-Flash result event.
 
-    fun-asr-flash 的结构非标准：结果嵌套在 ``output.output.sentence``，
-    同时 ``output.sentence`` 也有一份拷贝，这里优先取内层再回退外层。
+    Qwen-Audio-3.x-ASR-Flash 走 DashScope multimodal-generation 端点，
+    但结果嵌套形态非标准：结果可能在 ``output.output.sentence``，
+    也可能在 ``output.sentence``，这里优先取内层再回退外层。
     """
     if not isinstance(event, dict):
         return None
@@ -619,40 +620,114 @@ def _funasr_sentence_from_event(event: Any) -> Optional[Dict[str, Any]]:
     return sentence if isinstance(sentence, dict) else None
 
 
-def _funasr_collect_sentences(
+def _asr_flash_event_usage(event: Dict[str, Any]) -> Dict[str, Any]:
+    """从事件里取 usage：ASR-Flash 把它放在事件层，部分形态放在 output 层。"""
+    output = event.get("output") if isinstance(event.get("output"), dict) else {}
+    inner = output.get("output") if isinstance(output.get("output"), dict) else output
+    for source in (event, inner):
+        usage = source.get("usage") if isinstance(source, dict) else None
+        if isinstance(usage, dict) and usage:
+            return usage
+    return {}
+
+
+def _asr_flash_request_id(event: Dict[str, Any]) -> str:
+    output = event.get("output") if isinstance(event.get("output"), dict) else {}
+    inner = output.get("output") if isinstance(output.get("output"), dict) else output
+    return str(event.get("request_id") or inner.get("request_id") or "").strip()
+
+
+def _asr_flash_collect_sentences(
     lines: Iterable[Any],
 ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
-    """Parse fun-asr-flash SSE 行，累积所有已完成（sentence_end）的句子。"""
+    """Parse ASR-Flash SSE 行，累积所有已完成（sentence_end）的句子。"""
     sentences: List[Dict[str, Any]] = []
     meta: Dict[str, Any] = {}
     for raw in lines:
-        line = raw.decode("utf-8", "ignore") if isinstance(raw, bytes) else str(raw or "")
-        line = line.strip()
-        if not line.startswith("data:"):
+        payload = _asr_flash_event_from_line(raw)
+        if payload is None:
             continue
-        body = line[len("data:"):].strip()
-        if not body:
-            continue
-        try:
-            event = json.loads(body)
-        except json.JSONDecodeError:
-            continue
-        output = event.get("output") if isinstance(event.get("output"), dict) else {}
-        inner = output.get("output") if isinstance(output.get("output"), dict) else output
-        request_id = event.get("request_id") or inner.get("request_id")
+        request_id = _asr_flash_request_id(payload)
         if request_id:
             meta["request_id"] = request_id
-        for source in (event, inner):
-            usage = source.get("usage") if isinstance(source, dict) else None
-            if isinstance(usage, dict) and usage:
-                meta["usage"] = usage
-        sentence = _funasr_sentence_from_event(event)
+        usage = _asr_flash_event_usage(payload)
+        if usage:
+            meta["usage"] = usage
+        sentence = _asr_flash_sentence_from_event(payload)
         if sentence and sentence.get("sentence_end"):
             sentences.append(sentence)
     return sentences, meta
 
 
-def _funasr_segment_from_words(words: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+def _asr_flash_event_from_line(raw: Any) -> Optional[Dict[str, Any]]:
+    """解析一行响应：只接受 ``data:`` 帧里的 JSON，SSE 的 id/event/注释行直接跳过。"""
+    line = raw.decode("utf-8", "ignore") if isinstance(raw, bytes) else str(raw or "")
+    line = line.strip()
+    if not line.startswith("data:"):
+        return None
+    body = line[len("data:"):].strip()
+    if not body:
+        return None
+    try:
+        event = json.loads(body)
+    except json.JSONDecodeError:
+        return None
+    return event if isinstance(event, dict) else None
+
+
+def _asr_flash_payload_from_lines(lines: Iterable[Any]) -> Optional[Dict[str, Any]]:
+    """把响应行还原成单个结果对象：SSE 取最后一条 ``data``，非流式取整个响应体。"""
+    payload_text: List[str] = []
+    last_event: Optional[Dict[str, Any]] = None
+    for raw in lines:
+        event = _asr_flash_event_from_line(raw)
+        if event is not None:
+            last_event = event
+            continue
+        line = raw.decode("utf-8", "ignore") if isinstance(raw, bytes) else str(raw or "")
+        if line.strip():
+            payload_text.append(line.strip())
+    if last_event is not None:
+        return last_event
+    if not payload_text:
+        return None
+    try:
+        payload = json.loads("\n".join(payload_text))
+    except json.JSONDecodeError:
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _asr_flash_result_from_payload(
+    payload: Dict[str, Any],
+) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+    """非 SSE 形态兜底：短音频一次性返回时按行解析拿不到句子。
+
+    官方契约里 SSE 中间结果只在音频不少于 1 分钟时才分多次返回，短音频可能
+    直接以单条 JSON 响应体返回。此时优先取 ``output.sentence``（带词级时间戳），
+    退化到 ``output.text``（只有累积文本，字幕时间轴降级为空，转写仍可用于保真比对）。
+    """
+    meta: Dict[str, Any] = {}
+    request_id = _asr_flash_request_id(payload)
+    if request_id:
+        meta["request_id"] = request_id
+    usage = _asr_flash_event_usage(payload)
+    if usage:
+        meta["usage"] = usage
+
+    sentence = _asr_flash_sentence_from_event(payload)
+    if sentence and str(sentence.get("text") or "").strip():
+        return [sentence], meta
+
+    output = payload.get("output") if isinstance(payload.get("output"), dict) else {}
+    inner = output.get("output") if isinstance(output.get("output"), dict) else output
+    accumulated = str(inner.get("text") or output.get("text") or payload.get("text") or "").strip()
+    if accumulated:
+        return [{"text": accumulated, "sentence_end": True}], meta
+    return [], meta
+
+
+def _asr_flash_segment_from_words(words: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
     text = "".join(
         f"{str(word.get('text') or '')}{str(word.get('punctuation') or '')}"
         for word in words
@@ -664,9 +739,9 @@ def _funasr_segment_from_words(words: List[Dict[str, Any]]) -> Optional[Dict[str
     return {"text": text, "begin_time": begin, "end_time": end}
 
 
-def _funasr_subtitle_payload(
+def _asr_flash_subtitle_payload(
     sentences: List[Dict[str, Any]],
-    split_punctuation: Iterable[str] = _FUNASR_SEGMENT_PUNCTUATION,
+    split_punctuation: Iterable[str] = _ASR_FLASH_SEGMENT_PUNCTUATION,
 ) -> Dict[str, Any]:
     """把逐字时间戳按标点重切成分段，产出 normalize 可识别的 sentences 列表。"""
     punctuation = frozenset(split_punctuation)
@@ -680,12 +755,12 @@ def _funasr_subtitle_payload(
                     continue
                 current.append(word)
                 if str(word.get("punctuation") or "") in punctuation:
-                    segment = _funasr_segment_from_words(current)
+                    segment = _asr_flash_segment_from_words(current)
                     if segment:
                         segments.append(segment)
                     current = []
             if current:
-                segment = _funasr_segment_from_words(current)
+                segment = _asr_flash_segment_from_words(current)
                 if segment:
                     segments.append(segment)
         else:
@@ -697,8 +772,17 @@ def _funasr_subtitle_payload(
     return {"sentences": segments}
 
 
-class FunAsrFlashPromptAudioAsrProvider:
-    name = "funasr_flash"
+class QwenAudioAsrFlashPromptAudioAsrProvider:
+    """Qwen-Audio-3.1-ASR-Flash：逐字转写 + 词级时间戳，支持本地音频 Base64 直传。
+
+    请求走 DashScope multimodal-generation 端点，响应形态为 ASR-Flash 系列的非标准嵌套；
+    计价按输入/输出 Token 走（usage 里除 ``duration`` 外还返回 ``input_tokens`` /
+    ``output_tokens`` / ``total_tokens``），因此成本闸门用派生等效秒价（见
+    prompt_audio_asr_pricing）。`keep_dialect` 官方默认 false，即方言按普通话转写，
+    正是逐字保真比对需要的形态，故不显式下发该参数。
+    """
+
+    name = "qwen_audio_asr_flash"
     supports_timestamps = True
 
     def __init__(
@@ -719,7 +803,9 @@ class FunAsrFlashPromptAudioAsrProvider:
         ).rstrip("/")
         self.base_url = base
         self.endpoint = f"{base}/api/v1/services/aigc/multimodal-generation/generation"
-        self.model = model or os.getenv("FUNASR_FLASH_ASR_MODEL") or "fun-asr-flash-2026-06-15"
+        self.model = (
+            model or os.getenv("QWEN_AUDIO_ASR_MODEL") or "qwen-audio-3.1-asr-flash"
+        )
         self.timeout_seconds = timeout_seconds
 
     @property
@@ -780,16 +866,31 @@ class FunAsrFlashPromptAudioAsrProvider:
                 response.read()
                 raise PromptAudioAsrProviderError(
                     "asr_provider_request_failed",
-                    f"fun-asr-flash 请求失败: status={response.status_code}",
+                    f"qwen-audio ASR 请求失败: status={response.status_code}",
                 )
-            sentences, meta = _funasr_collect_sentences(response.iter_lines())
+            lines = list(response.iter_lines())
+
+        sentences, meta = _asr_flash_collect_sentences(lines)
+        if not sentences:
+            # SSE 帧里没有已完成的句子时，按一次性 JSON 响应形态再解析一次
+            flash_payload = _asr_flash_payload_from_lines(lines)
+            if flash_payload is not None:
+                fallback_sentences, fallback_meta = _asr_flash_result_from_payload(
+                    flash_payload
+                )
+                sentences = fallback_sentences
+                for key in ("request_id", "usage"):
+                    if key not in meta and key in fallback_meta:
+                        meta[key] = fallback_meta[key]
 
         transcript = "".join(str(item.get("text") or "") for item in sentences).strip()
         if not transcript:
-            raise PromptAudioAsrProviderError("asr_empty_transcript", "fun-asr-flash 未返回转写文本")
+            raise PromptAudioAsrProviderError(
+                "asr_empty_transcript", "qwen-audio ASR 未返回转写文本"
+            )
 
         subtitle_payload = normalize_asr_subtitle_payload(
-            _funasr_subtitle_payload(sentences)
+            _asr_flash_subtitle_payload(sentences)
         )
         metadata: Dict[str, Any] = {"sentence_count": len(sentences)}
         if meta.get("request_id"):
@@ -933,8 +1034,15 @@ def create_prompt_audio_asr_provider(provider: Optional[str] = None) -> Optional
         service = AliyunPromptAudioAsrProvider(timeout_seconds=timeout_seconds)
     elif normalized in {"doubao", "volcengine", "volc", "豆包", "火山"}:
         service = DoubaoPromptAudioAsrProvider(timeout_seconds=timeout_seconds)
-    elif normalized in {"funasr_flash", "fun-asr-flash", "funasr", "fun_asr_flash", "fun-asr"}:
-        service = FunAsrFlashPromptAudioAsrProvider(timeout_seconds=timeout_seconds)
+    elif normalized in {
+        "qwen_audio_asr_flash",
+        "qwen-audio-asr-flash",
+        "qwen_audio_asr",
+        "qwen-audio-asr",
+        "qwen-audio-3.1-asr-flash",
+        "qwen-audio-3.1-asr",
+    }:
+        service = QwenAudioAsrFlashPromptAudioAsrProvider(timeout_seconds=timeout_seconds)
     elif normalized in {"qwen_omni", "qwen-omni", "qwenomni", "qwen3.5-omni", "qwen3.5-omni-flash", "omni"}:
         service = QwenOmniPromptAudioAsrProvider(timeout_seconds=timeout_seconds)
     else:

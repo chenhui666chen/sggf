@@ -724,7 +724,7 @@ class PlanningMixin:
                 normalized_volume_detail_config.get("chapters_count_range")
             )
             model_plan["notes"].append(
-                f"卷级细化会按单次章节规模在 deepseek-v4-pro 与 qwen3.7-plus 之间动态选择，当前预估为 {estimated_volume_model}。"
+                f"卷级细化会按单次章节规模在 deepseek-pro 与 qwen-plus 之间动态选择，当前预估为 {estimated_volume_model}。"
             )
             model_plan["notes"].append(
                 f"长篇框架阶段预计使用 {model_plan['outline_expansion_model']} 生成总卷框架，再进入后续卷级细化。"

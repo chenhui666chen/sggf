@@ -296,6 +296,22 @@ def run_dreamweaver_task(
                 break
             prev_stage = stage_label(ctx.state)
             prev_state = ctx.state.name
+            # STORYBOARD 前：跨板块解析角色参考音频（四轨声音方案 O4，sound_track 决策消费；
+            # 无可用资产时 no-op，对白轨自动降级后期 TTS，不阻断管线）
+            if ctx.state == State.STORYBOARD and "voice_reference_audio" not in ctx.payload:
+                try:
+                    from app.services.dreamweaver.voice_reference_bridge import (
+                        inject_voice_references_for_storyboard,
+                    )
+
+                    inject_voice_references_for_storyboard(
+                        session,
+                        ctx.payload,
+                        run_id=run_id,
+                        owner_user_id=user_id,
+                    )
+                except Exception as e:  # noqa: BLE001
+                    logger.warning("Voice reference bridge failed for run %s: %s", run_id, e)
             ctx = step(ctx)
             next_stage = stage_label(ctx.state)
             if next_stage != prev_stage:

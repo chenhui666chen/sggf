@@ -25,20 +25,22 @@ from app.services.audiobook.tts_model_ids import (
     MIMO_V25_TTS_MODEL,
     MIMO_V25_TTS_VOICE_CLONE_MODEL,
     MIMO_V25_TTS_VOICE_DESIGN_MODEL,
+    QWEN_AUDIO_31_TTS_FLASH_MODEL,
     SEED_TTS_20_EXPRESSIVE_MODEL,
-    STEPAUDIO_25_TTS_MODEL,
+    STEPAUDIO_3_TTS_MODEL,
     SUPPORTED_AUDIOBOOK_TTS_MODELS,
     get_audiobook_tts_model_metadata,
     get_audiobook_tts_runtime_model_id,
     get_audiobook_tts_style_capabilities,
     get_audiobook_tts_model_price_per_10k,
     is_supported_audiobook_tts_model,
+    list_supported_audiobook_tts_models,
     normalize_audiobook_tts_model,
 )
 from app.services.audiobook.narration_styles import get_all_narration_styles
 from app.services.audiobook.tts_engine_pkg import TTSEngine
 from app.services.audiobook.tts_style_control import normalize_emotion_for_model
-from app.services.audiobook.voice_catalog import load_voice_catalog_for_model
+from app.services.audiobook.voice_catalog import _filename_for_model, get_voice_entry, load_voice_catalog_for_model
 from app.services.audiobook.voice_auto_assignment import AutoVoiceAssignmentPool
 from app.services.audiobook.voice_manager_factory import create_voice_manager, get_model_for_voice, list_supported_models
 from app.services.audiobook.voice_manager import VoiceManager
@@ -54,36 +56,42 @@ from app.services.audiobook.voice_manager_stepaudio import StepAudioVoiceManager
 from core.unified_media_runtime import create_tts_engine, get_media_runtime
 from core.model_resolution import normalize_model_id
 
+# 退役线名不再由产品代码持有，只作为“旧写法必须折叠到 3.1 且不得出现在任何注册表”
+# 这一反向断言的事实出现在测试里。
+RETIRED_QWEN3_SPELLING = "qwen3-tts-instruct-flash"
+
 
 @pytest.mark.parametrize(
-    ("model_id", "expected_price", "expected_status"),
+    ("model_id", "expected_price", "expected_status", "expected_basis"),
     [
-        (DEFAULT_AUDIOBOOK_TTS_MODEL, 0.8, "public_postpaid"),
-        ("cosyvoice-v3.5-plus", 1.5, "public_postpaid"),
-        (MINIMAX_SPEECH_28_TURBO_MODEL, 2.0, "public_postpaid"),
-        (MINIMAX_SPEECH_28_HD_MODEL, 3.5, "public_postpaid"),
-        (MIMO_V25_TTS_MODEL, 0.0, "limited_time_free"),
-        (MIMO_V25_TTS_VOICE_DESIGN_MODEL, 0.0, "limited_time_free"),
-        (MIMO_V25_TTS_VOICE_CLONE_MODEL, 0.0, "limited_time_free"),
-        (STEPAUDIO_25_TTS_MODEL, 5.8, "public_postpaid"),
-        (SEED_TTS_20_EXPRESSIVE_MODEL, 3.0, "public_postpaid"),
+        # 默认模型 Qwen-Audio 3.1 按 token 计费，万字价是折算口径，必须与公开刊例价区分标注。
+        (DEFAULT_AUDIOBOOK_TTS_MODEL, 0.4, "public_postpaid", "derived_from_token_price"),
+        ("cosyvoice-v3.5-plus", 1.5, "public_postpaid", "public_list_price"),
+        (MINIMAX_SPEECH_28_TURBO_MODEL, 2.0, "public_postpaid", "public_list_price"),
+        (MINIMAX_SPEECH_28_HD_MODEL, 3.5, "public_postpaid", "public_list_price"),
+        (MIMO_V25_TTS_MODEL, 0.0, "limited_time_free", "public_list_price"),
+        (MIMO_V25_TTS_VOICE_DESIGN_MODEL, 0.0, "limited_time_free", "public_list_price"),
+        (MIMO_V25_TTS_VOICE_CLONE_MODEL, 0.0, "limited_time_free", "public_list_price"),
+        (STEPAUDIO_3_TTS_MODEL, 2.5, "public_postpaid", "public_list_price"),
+        (SEED_TTS_20_EXPRESSIVE_MODEL, 3.0, "public_postpaid", "public_list_price"),
     ],
 )
 def test_audiobook_tts_catalog_uses_public_postpaid_user_prices(
     model_id: str,
     expected_price: float,
     expected_status: str,
+    expected_basis: str,
 ) -> None:
     metadata = get_audiobook_tts_model_metadata(model_id)
 
     assert get_audiobook_tts_model_price_per_10k(model_id) == expected_price
     assert metadata["pricing_status"] == expected_status
-    assert metadata["pricing_basis"] == "public_list_price"
+    assert metadata["pricing_basis"] == expected_basis
 
 
 def test_audiobook_tts_catalog_records_fixed_custom_voice_fees() -> None:
     minimax = get_audiobook_tts_model_metadata(MINIMAX_SPEECH_28_TURBO_MODEL)
-    stepaudio = get_audiobook_tts_model_metadata(STEPAUDIO_25_TTS_MODEL)
+    stepaudio = get_audiobook_tts_model_metadata(STEPAUDIO_3_TTS_MODEL)
     seed_tts = get_audiobook_tts_model_metadata(SEED_TTS_20_EXPRESSIVE_MODEL)
 
     assert minimax["custom_voice_pricing"]["first_formal_use_yuan"] == 9.9
@@ -95,17 +103,120 @@ def test_audiobook_tts_catalog_records_fixed_custom_voice_fees() -> None:
     }
 
 
+def test_seed_tts_voice_clone_is_declared_unsupported_across_sources() -> None:
+    """复刻链路未实现，任何一处重新声明为支持都会让档案与代码再次分叉。"""
+    assert (
+        get_audiobook_tts_style_capabilities(SEED_TTS_20_EXPRESSIVE_MODEL)[
+            "supports_voice_clone"
+        ]
+        is False
+    )
+    assert (
+        get_audiobook_tts_model_metadata(SEED_TTS_20_EXPRESSIVE_MODEL)["capabilities"][
+            "supports_voice_clone"
+        ]
+        is False
+    )
+    assert (
+        create_voice_manager(SEED_TTS_20_EXPRESSIVE_MODEL).get_model_info()["supports_voice_clone"]
+        is False
+    )
+
+
+def test_stepaudio_streaming_is_declared_unsupported_across_sources() -> None:
+    """上游流式未取证、合成链路只发非流式 /audio/speech，两处声明必须同步为不支持。"""
+    assert (
+        get_audiobook_tts_style_capabilities(STEPAUDIO_3_TTS_MODEL)["supports_streaming"] is False
+    )
+    assert (
+        get_audiobook_tts_model_metadata(STEPAUDIO_3_TTS_MODEL)["capabilities"]["supports_streaming"]
+        is False
+    )
+
+
+def _stepaudio_archive_card() -> dict:
+    import yaml
+
+    repo_root = Path(__file__).resolve().parents[2]
+    data = yaml.safe_load((repo_root / "config" / "models.yaml").read_text(encoding="utf-8"))
+    for card in data["models"]:
+        if card.get("id") == STEPAUDIO_3_TTS_MODEL:
+            return card
+    raise AssertionError(f"config/models.yaml 缺少模型 {STEPAUDIO_3_TTS_MODEL}")
+
+
+def _stepaudio_frontend_instruction_budget() -> int:
+    """从前端兜底表里抠出 stepaudio 的 instructionBudget 字面量。"""
+    import re
+
+    repo_root = Path(__file__).resolve().parents[2]
+    source = (
+        repo_root / "frontend" / "src" / "pages" / "audiobook" / "ttsModels.ts"
+    ).read_text(encoding="utf-8")
+    block_start = source.index(f"'{STEPAUDIO_3_TTS_MODEL}': {{")
+    block = source[block_start + len(f"'{STEPAUDIO_3_TTS_MODEL}': {{") :]
+    next_model = re.search(r"\n  '[^']+': \{", block)
+    if next_model:
+        block = block[: next_model.start()]
+    match = re.search(r"instructionBudget: (\d+|null)", block)
+    assert match is not None, "前端兜底表缺少 stepaudio 的 instructionBudget"
+    return int(match.group(1))
+
+
+def test_stepaudio_budget_and_transport_declarations_agree_across_all_fact_sources() -> None:
+    """instruction/输入额度与流式声明共 5 处事实源：档案卡（constraints + contextual_control）、
+    能力矩阵、引擎硬截断、前端兜底表、场景引擎喂 LLM 的表演提示词。只改其中一层就会出现
+    「代码放宽了、档案还写旧值」或反过来的静默漂移，这里一次钉死跨源一致。"""
+    from app.services.audiobook.tts_engine_pkg._aliyun_mixin import (
+        STEPAUDIO_TTS_INSTRUCTION_MAX_CHARS,
+        STEPAUDIO_TTS_MAX_INPUT_CHARS,
+    )
+
+    card = _stepaudio_archive_card()
+    style_capabilities = get_audiobook_tts_style_capabilities(STEPAUDIO_3_TTS_MODEL)
+
+    assert STEPAUDIO_TTS_INSTRUCTION_MAX_CHARS == 500
+    assert card["constraints"]["instruction_max_chars"] == STEPAUDIO_TTS_INSTRUCTION_MAX_CHARS
+    assert (
+        card["detailed_specs"]["voice_synthesis"]["contextual_control"]["global_context"]["max_chars"]
+        == STEPAUDIO_TTS_INSTRUCTION_MAX_CHARS
+    )
+    assert style_capabilities["instruction_budget"] == STEPAUDIO_TTS_INSTRUCTION_MAX_CHARS
+    assert _stepaudio_frontend_instruction_budget() == STEPAUDIO_TTS_INSTRUCTION_MAX_CHARS
+
+    assert card["constraints"]["max_input_chars"] == STEPAUDIO_TTS_MAX_INPUT_CHARS
+
+    assert style_capabilities["supports_streaming"] is False
+    assert any(
+        "supports_streaming 已按未支持声明" in limitation for limitation in card["limitations"]
+    )
+
+    # 第 5 处：场景引擎提示词是散文不是配置字段，按常量名 grep 抓不到，必须单独钉。
+    repo_root = Path(__file__).resolve().parents[2]
+    scene_prompt = (
+        repo_root
+        / "backend"
+        / "app"
+        / "services"
+        / "audiobook"
+        / "script_adapter_pkg"
+        / "_transform.py"
+    ).read_text(encoding="utf-8")
+    assert f"全局语境 instruction 上限 {STEPAUDIO_TTS_INSTRUCTION_MAX_CHARS} 字符" in scene_prompt
+    assert "上限 200 字符" not in scene_prompt
+
+
 @pytest.mark.parametrize(
     ("model_id", "expected_price"),
     [
-        (DEFAULT_AUDIOBOOK_TTS_MODEL, 0.8),
+        (DEFAULT_AUDIOBOOK_TTS_MODEL, 0.4),
         ("cosyvoice-v3.5-plus", 1.5),
         (MINIMAX_SPEECH_28_TURBO_MODEL, 2.0),
         (MINIMAX_SPEECH_28_HD_MODEL, 3.5),
         (MIMO_V25_TTS_MODEL, 0.0),
         (MIMO_V25_TTS_VOICE_DESIGN_MODEL, 0.0),
         (MIMO_V25_TTS_VOICE_CLONE_MODEL, 0.0),
-        (STEPAUDIO_25_TTS_MODEL, 5.8),
+        (STEPAUDIO_3_TTS_MODEL, 2.5),
         (SEED_TTS_20_EXPRESSIVE_MODEL, 3.0),
     ],
 )
@@ -250,9 +361,9 @@ def test_audiobook_tts_model_normalization_keeps_business_model_ids() -> None:
     assert normalize_audiobook_tts_model("mimo-v2.5-tts-voice-design") == MIMO_V25_TTS_VOICE_DESIGN_MODEL
     assert normalize_audiobook_tts_model("mimo-v2.5-tts-voiceclone") == MIMO_V25_TTS_VOICE_CLONE_MODEL
     assert normalize_audiobook_tts_model("mimo-v2.5-tts-voice-clone") == MIMO_V25_TTS_VOICE_CLONE_MODEL
-    assert normalize_audiobook_tts_model("StepAudio-2.5-TTS") == STEPAUDIO_25_TTS_MODEL
-    assert normalize_audiobook_tts_model("stepaudio_2_5_tts") == STEPAUDIO_25_TTS_MODEL
-    assert normalize_audiobook_tts_model("stepfun/stepaudio-2.5-tts") == STEPAUDIO_25_TTS_MODEL
+    assert normalize_audiobook_tts_model("StepAudio-3-TTS") == STEPAUDIO_3_TTS_MODEL
+    assert normalize_audiobook_tts_model("stepaudio_3_tts") == STEPAUDIO_3_TTS_MODEL
+    assert normalize_audiobook_tts_model("stepfun/stepaudio-3-tts") == STEPAUDIO_3_TTS_MODEL
     assert normalize_audiobook_tts_model("seed-tts-2.0-expressive") == SEED_TTS_20_EXPRESSIVE_MODEL
     assert normalize_audiobook_tts_model("doubao/seed-tts-2.0-expressive") == SEED_TTS_20_EXPRESSIVE_MODEL
     assert normalize_audiobook_tts_model("doubao-tts-2.0-expressive") == SEED_TTS_20_EXPRESSIVE_MODEL
@@ -262,7 +373,7 @@ def test_audiobook_tts_model_normalization_keeps_business_model_ids() -> None:
     assert is_supported_audiobook_tts_model("mimo-v2.5-tts") is True
     assert is_supported_audiobook_tts_model("mimo-v2.5-tts-voicedesign") is True
     assert is_supported_audiobook_tts_model("mimo-v2.5-tts-voiceclone") is True
-    assert is_supported_audiobook_tts_model("stepaudio-2.5-tts") is True
+    assert is_supported_audiobook_tts_model("stepaudio-3-tts") is True
     assert is_supported_audiobook_tts_model("seed-tts-2.0-expressive") is True
     assert is_supported_audiobook_tts_model("mimo-v2.5-tts-hd") is False
     assert is_supported_audiobook_tts_model("mimo-v2.5-tts-turbo") is False
@@ -273,7 +384,7 @@ def test_audiobook_tts_model_normalization_keeps_business_model_ids() -> None:
     assert get_audiobook_tts_runtime_model_id(MIMO_V25_TTS_MODEL) == MIMO_V25_TTS_MODEL
     assert get_audiobook_tts_runtime_model_id(MIMO_V25_TTS_VOICE_DESIGN_MODEL) == MIMO_V25_TTS_VOICE_DESIGN_MODEL
     assert get_audiobook_tts_runtime_model_id(MIMO_V25_TTS_VOICE_CLONE_MODEL) == MIMO_V25_TTS_VOICE_CLONE_MODEL
-    assert get_audiobook_tts_runtime_model_id(STEPAUDIO_25_TTS_MODEL) == STEPAUDIO_25_TTS_MODEL
+    assert get_audiobook_tts_runtime_model_id(STEPAUDIO_3_TTS_MODEL) == STEPAUDIO_3_TTS_MODEL
     assert get_audiobook_tts_runtime_model_id(SEED_TTS_20_EXPRESSIVE_MODEL) == SEED_TTS_20_EXPRESSIVE_MODEL
 
 
@@ -284,16 +395,9 @@ def test_audiobook_tts_model_style_capabilities_are_exposed() -> None:
     assert qwen_caps["style_control_modes"] == ["natural_language"]
     assert qwen_caps["supports_voice_description"] is True
     assert qwen_caps["supports_audio_tags"] is False
-    assert qwen_caps["instruction_budget"] == 600
-    assert qwen_caps["supported_emotions"] == [
-        "neutral",
-        "happy",
-        "sad",
-        "angry",
-        "fearful",
-        "surprised",
-        "disgusted",
-    ]
+    assert qwen_caps["instruction_budget"] == 1200
+    # 默认模型（Qwen-Audio 3.1）没有服务端情绪枚举：情绪只进自然语言指令，不做枚举降级。
+    assert not qwen_caps["supported_emotions"]
 
     mimo_caps = get_audiobook_tts_style_capabilities(MIMO_V25_TTS_MODEL)
     assert mimo_caps["model_family"] == "mimo"
@@ -346,7 +450,7 @@ def test_audiobook_tts_model_style_capabilities_are_exposed() -> None:
     assert clone_caps["supports_singing"] is False
     assert clone_caps["control_message_roles"]["voice_clone"] == "audio.voice"
 
-    stepaudio_caps = get_audiobook_tts_style_capabilities(STEPAUDIO_25_TTS_MODEL)
+    stepaudio_caps = get_audiobook_tts_style_capabilities(STEPAUDIO_3_TTS_MODEL)
     assert stepaudio_caps["model_family"] == "stepaudio"
     assert stepaudio_caps["preferred_style_control_mode"] == "global_context"
     assert stepaudio_caps["style_control_modes"] == ["global_context", "inline_context", "natural_language"]
@@ -356,8 +460,8 @@ def test_audiobook_tts_model_style_capabilities_are_exposed() -> None:
     assert stepaudio_caps["supports_micro_tags"] is True
     assert stepaudio_caps["supports_word_level_control"] is True
     assert stepaudio_caps["supports_voice_clone"] is True
-    assert stepaudio_caps["supports_streaming"] is True
-    assert stepaudio_caps["instruction_budget"] == 200
+    assert stepaudio_caps["supports_streaming"] is False
+    assert stepaudio_caps["instruction_budget"] == 500
     assert stepaudio_caps["max_input_chars"] == 1000
     assert stepaudio_caps["control_message_roles"] == {
         "global_context": "parameters.instruction",
@@ -372,7 +476,7 @@ def test_audiobook_tts_model_style_capabilities_are_exposed() -> None:
     assert seed_caps["supports_voice_description"] is True
     assert seed_caps["supports_emotion_mixing"] is True
     assert seed_caps["supports_micro_tags"] is True
-    assert seed_caps["supports_voice_clone"] is True
+    assert seed_caps["supports_voice_clone"] is False
     assert seed_caps["supports_streaming"] is True
     assert seed_caps["control_message_roles"] == {
         "query_response": "additions.context_texts",
@@ -391,6 +495,15 @@ def test_audiobook_tts_model_style_capabilities_are_exposed() -> None:
     unknown_caps = get_audiobook_tts_style_capabilities("unknown-tts")
     assert unknown_caps["model_family"] == "generic"
     assert unknown_caps["preferred_style_control_mode"] == "natural_language"
+
+
+def test_mimo_preset_card_does_not_advertise_unconsumable_streaming() -> None:
+    """supports_streaming 记录的是上游协议能力；面向用户的文案只能写我方真能交付的能力。"""
+    metadata = get_audiobook_tts_model_metadata(MIMO_V25_TTS_MODEL)
+
+    assert metadata["capabilities"]["supports_streaming"] is True
+    assert "低延迟流式" not in metadata["features"]
+    assert "流式" not in metadata["catalog_note"]
 
 
 def test_audiobook_tts_model_metadata_returns_independent_capability_copy() -> None:
@@ -424,15 +537,15 @@ def test_tts_emotion_normalization_uses_model_capability_matrix(monkeypatch) -> 
 def test_stepaudio_emotion_is_not_downgraded_by_generic_aliyun_mapping() -> None:
     """stepaudio/mimo 等模型的情感只进入风格指令文本，不是阿里云 API 枚举，
     不应被硬编码降级表把 fearful/disgusted 降成 tense/angry。"""
-    engine = TTSEngine(model="stepaudio-2.5-tts")
+    engine = TTSEngine(model="stepaudio-3-tts")
 
     assert engine._normalize_emotion("fearful") == "fearful"
     assert engine._normalize_emotion("disgusted") == "disgusted"
 
-    qwen_engine = TTSEngine(model="qwen3-tts-instruct-flash")
-    # qwen 能力矩阵显式声明支持 fearful，不应降级；tense 按矩阵别名归一到 fearful
+    qwen_engine = TTSEngine(model="qwen-audio-3.1-tts-flash")
+    # 3.1 能力矩阵不声明情绪枚举：fearful/tense 一律原样进入自然语言指令，不做枚举降级。
     assert qwen_engine._normalize_emotion("fearful") == "fearful"
-    assert qwen_engine._normalize_emotion("tense") == "fearful"
+    assert qwen_engine._normalize_emotion("tense") == "tense"
 
 
 def test_narrator_speed_is_stable_across_emotions() -> None:
@@ -483,12 +596,12 @@ def test_narrator_speed_is_stable_across_emotions() -> None:
 
 def test_tts_speed_control_capability_separates_semantic_and_basic_models() -> None:
     for model in (
-        "qwen3-tts-instruct-flash",
+        "qwen-audio-3.1-tts-flash",
         "cosyvoice-v3.5-plus",
         "mimo-v2.5-tts",
         "mimo-v2.5-tts-voicedesign",
         "mimo-v2.5-tts-voiceclone",
-        "stepaudio-2.5-tts",
+        "stepaudio-3-tts",
         "seed-tts-2.0-expressive",
     ):
         assert tts_model_ids.model_supports_instruct_style_control(model) is True
@@ -511,10 +624,10 @@ def test_minimax_voice_catalog_accepts_registry_model_id_alias() -> None:
 
 
 def test_stepaudio_voice_catalog_contains_official_contextual_tts_voices() -> None:
-    catalog = load_voice_catalog_for_model(STEPAUDIO_25_TTS_MODEL)
+    catalog = load_voice_catalog_for_model(STEPAUDIO_3_TTS_MODEL)
     voice_ids = {voice["id"] for voice in catalog["voices"]}
 
-    assert catalog["meta"]["model"] == STEPAUDIO_25_TTS_MODEL
+    assert catalog["meta"]["model"] == STEPAUDIO_3_TTS_MODEL
     assert catalog["meta"]["voice_count"] == 36
     assert {
         "vibrant-youth",
@@ -692,10 +805,10 @@ def test_voice_manager_factory_routes_mimo_inline_custom_voice_models() -> None:
 
 
 def test_voice_manager_factory_routes_stepaudio_contextual_tts_model() -> None:
-    manager = create_voice_manager("stepfun/stepaudio-2.5-tts")
+    manager = create_voice_manager("stepfun/stepaudio-3-tts")
 
     assert isinstance(manager, StepAudioVoiceManager)
-    assert manager.model == STEPAUDIO_25_TTS_MODEL
+    assert manager.model == STEPAUDIO_3_TTS_MODEL
     assert manager.get_narrator_voice().tts_speaker_id == "cixingnansheng"
     assert manager.get_model_info()["supports_inline_context"] is True
 
@@ -907,16 +1020,95 @@ def test_supported_tts_models_do_not_advertise_unregistered_qwen_plus() -> None:
 
     assert "qwen3-tts-plus" not in supported
     assert supported == [
-        DEFAULT_AUDIOBOOK_TTS_MODEL,
+        QWEN_AUDIO_31_TTS_FLASH_MODEL,
         "cosyvoice-v3.5-plus",
         MINIMAX_SPEECH_28_HD_MODEL,
         MINIMAX_SPEECH_28_TURBO_MODEL,
         MIMO_V25_TTS_MODEL,
         MIMO_V25_TTS_VOICE_DESIGN_MODEL,
         MIMO_V25_TTS_VOICE_CLONE_MODEL,
-        STEPAUDIO_25_TTS_MODEL,
+        STEPAUDIO_3_TTS_MODEL,
         SEED_TTS_20_EXPRESSIVE_MODEL,
     ]
+
+
+def test_qwen_audio_31_flash_is_registered_with_measured_contract() -> None:
+    assert normalize_audiobook_tts_model("Qwen-Audio-3.1-TTS-Flash") == QWEN_AUDIO_31_TTS_FLASH_MODEL
+    assert normalize_audiobook_tts_model("qwen-audio-3.1-tts") == QWEN_AUDIO_31_TTS_FLASH_MODEL
+    # Next 尚未接入有声书，未知后缀写法必须回退默认模型而不是误路由到 3.1。
+    assert normalize_audiobook_tts_model("qwen-audio-3.1-tts-next") == DEFAULT_AUDIOBOOK_TTS_MODEL
+    assert get_audiobook_tts_runtime_model_id(QWEN_AUDIO_31_TTS_FLASH_MODEL) == QWEN_AUDIO_31_TTS_FLASH_MODEL
+
+    metadata = get_audiobook_tts_model_metadata(QWEN_AUDIO_31_TTS_FLASH_MODEL)
+    assert metadata["price_per_10k"] == 0.4
+    assert metadata["pricing_basis"] == "derived_from_token_price"
+    assert metadata["capabilities"]["has_system_voices"] is True
+
+    capabilities = get_audiobook_tts_style_capabilities(QWEN_AUDIO_31_TTS_FLASH_MODEL)
+    assert capabilities["preferred_style_control_mode"] == "natural_language"
+    assert capabilities["instruction_budget"] == 1200
+    # 未声明 supported_emotions：情感只进入自然语言指令，不做服务端枚举降级。
+    assert not capabilities["supported_emotions"]
+
+
+def test_qwen_audio_31_voice_catalog_is_the_default_voice_source() -> None:
+    voices = load_voice_catalog_for_model(QWEN_AUDIO_31_TTS_FLASH_MODEL)["voices"]
+    assert len(voices) == 68
+    assert all(str(voice["id"]).endswith("_v3.1") for voice in voices)
+    assert load_voice_catalog_for_model(DEFAULT_AUDIOBOOK_TTS_MODEL)["voices"] == voices
+    # 默认模型必须解析到 3.1 音色目录文件，而不是历史 Qwen3 音色表。
+    assert _filename_for_model(DEFAULT_AUDIOBOOK_TTS_MODEL) == "qwen_audio_3_1_tts_voices.json"
+
+
+def test_retired_qwen3_voice_ids_are_rejected_by_the_default_catalog() -> None:
+    # 3.1 与 Qwen3 音色零交集：旧音色名在默认目录查不到，由目录校验显式重置，而不是静默发错音色。
+    assert get_voice_entry("Neil", model=DEFAULT_AUDIOBOOK_TTS_MODEL) is None
+    assert get_voice_entry("Cherry", model=DEFAULT_AUDIOBOOK_TTS_MODEL) is None
+
+
+def test_qwen3_tts_is_retired_from_every_registration_table() -> None:
+    retired = RETIRED_QWEN3_SPELLING
+
+    assert DEFAULT_AUDIOBOOK_TTS_MODEL == QWEN_AUDIO_31_TTS_FLASH_MODEL
+    assert retired not in SUPPORTED_AUDIOBOOK_TTS_MODELS
+    assert retired not in tts_model_ids.SUPPORTED_AUDIOBOOK_TTS_MODEL_ORDER
+    assert retired not in tts_model_ids.AUDIOBOOK_TTS_RUNTIME_MODEL_IDS
+    assert retired not in tts_model_ids.AUDIOBOOK_TTS_STYLE_CAPABILITIES
+    assert retired not in tts_model_ids.AUDIOBOOK_TTS_MODEL_CATALOG
+
+    registered = list_supported_audiobook_tts_models()
+    assert registered.count(QWEN_AUDIO_31_TTS_FLASH_MODEL) == 1
+    assert set(registered) == SUPPORTED_AUDIOBOOK_TTS_MODELS
+    assert retired not in registered
+
+
+def test_retired_qwen3_spellings_fold_to_qwen_audio_31() -> None:
+    # 库内与历史配置仍可能写着 Qwen3 写法：归一必须落到 3.1，不允许静默回退成不可用模型。
+    for spelling in (
+        "qwen3-tts-instruct-flash",
+        "qwen3-tts-flash",
+        "qwen3-tts-plus",
+        "qwen3-tts",
+        "qwen3_tts",
+        "QWEN3-TTS-Instruct-Flash",
+    ):
+        assert normalize_audiobook_tts_model(spelling) == QWEN_AUDIO_31_TTS_FLASH_MODEL
+        assert is_supported_audiobook_tts_model(spelling) is True
+
+    assert get_audiobook_tts_runtime_model_id(RETIRED_QWEN3_SPELLING) == QWEN_AUDIO_31_TTS_FLASH_MODEL
+    # 归一到 3.1 后必须使用 3.1 的万字折算价，不能继续按 Qwen3 的 0.8 元记账。
+    assert get_audiobook_tts_model_price_per_10k(RETIRED_QWEN3_SPELLING) == 0.4
+
+
+def test_default_model_keeps_free_form_emotion_labels() -> None:
+    # 3.1 没有服务端情绪枚举：情绪标签必须原样进入自然语言指令，不做枚举降级。
+    assert normalize_emotion_for_model("压抑克制", DEFAULT_AUDIOBOOK_TTS_MODEL) == "压抑克制"
+    assert normalize_emotion_for_model("tense", DEFAULT_AUDIOBOOK_TTS_MODEL) == "tense"
+
+
+def test_voice_manager_factory_recognizes_qwen_audio_31_voices() -> None:
+    assert get_model_for_voice("longanhuan_v3.1") == QWEN_AUDIO_31_TTS_FLASH_MODEL
+    assert QWEN_AUDIO_31_TTS_FLASH_MODEL in list_supported_models()
 
 
 def test_narration_style_supported_models_are_registered() -> None:
@@ -928,7 +1120,9 @@ def test_tts_engine_normalizes_legacy_model_on_init() -> None:
     engine = TTSEngine(model="qwen3-tts-plus")
 
     assert engine.model == DEFAULT_AUDIOBOOK_TTS_MODEL
-    assert engine._is_qwen_instruct_model() is True
+    # 退役后旧写法不再落到 Qwen3 合成路径，而是走 3.1 的 SpeechSynthesizer 路径。
+    assert engine._is_qwen_audio_31_model() is True
+    assert not hasattr(engine, "_is_qwen_instruct_model")
 
 
 def test_mimo_models_are_registered_for_audiobook_runtime_selection() -> None:
@@ -938,7 +1132,7 @@ def test_mimo_models_are_registered_for_audiobook_runtime_selection() -> None:
         MIMO_V25_TTS_MODEL,
         MIMO_V25_TTS_VOICE_DESIGN_MODEL,
         MIMO_V25_TTS_VOICE_CLONE_MODEL,
-        STEPAUDIO_25_TTS_MODEL,
+        STEPAUDIO_3_TTS_MODEL,
         SEED_TTS_20_EXPRESSIVE_MODEL,
     ):
         spec = runtime.select_model(
@@ -1042,15 +1236,15 @@ def test_tts_models_endpoint_uses_catalog_counts_and_supported_models(monkeypatc
     assert models[MIMO_V25_TTS_VOICE_CLONE_MODEL]["runtime_error"] is None
     assert models[MIMO_V25_TTS_VOICE_CLONE_MODEL]["catalog_status"] == "not_applicable"
     assert models[MIMO_V25_TTS_VOICE_CLONE_MODEL]["voice_count"] == 0
-    assert models[STEPAUDIO_25_TTS_MODEL]["runtime_status"] == "ready"
-    assert models[STEPAUDIO_25_TTS_MODEL]["runtime_model_id"] == STEPAUDIO_25_TTS_MODEL
-    assert models[STEPAUDIO_25_TTS_MODEL]["runtime_error"] is None
-    assert models[STEPAUDIO_25_TTS_MODEL]["catalog_status"] == "ready"
-    assert models[STEPAUDIO_25_TTS_MODEL]["voice_count"] == load_voice_catalog_for_model(
-        STEPAUDIO_25_TTS_MODEL
+    assert models[STEPAUDIO_3_TTS_MODEL]["runtime_status"] == "ready"
+    assert models[STEPAUDIO_3_TTS_MODEL]["runtime_model_id"] == STEPAUDIO_3_TTS_MODEL
+    assert models[STEPAUDIO_3_TTS_MODEL]["runtime_error"] is None
+    assert models[STEPAUDIO_3_TTS_MODEL]["catalog_status"] == "ready"
+    assert models[STEPAUDIO_3_TTS_MODEL]["voice_count"] == load_voice_catalog_for_model(
+        STEPAUDIO_3_TTS_MODEL
     )["meta"]["voice_count"]
-    assert models[STEPAUDIO_25_TTS_MODEL]["price_per_10k"] == 5.8
-    assert "全局语境" in models[STEPAUDIO_25_TTS_MODEL]["features"]
+    assert models[STEPAUDIO_3_TTS_MODEL]["price_per_10k"] == 2.5
+    assert "全局语境" in models[STEPAUDIO_3_TTS_MODEL]["features"]
     assert models[SEED_TTS_20_EXPRESSIVE_MODEL]["runtime_status"] == "ready"
     assert models[SEED_TTS_20_EXPRESSIVE_MODEL]["runtime_model_id"] == SEED_TTS_20_EXPRESSIVE_MODEL
     assert models[SEED_TTS_20_EXPRESSIVE_MODEL]["catalog_status"] == "ready"
@@ -1058,7 +1252,7 @@ def test_tts_models_endpoint_uses_catalog_counts_and_supported_models(monkeypatc
         SEED_TTS_20_EXPRESSIVE_MODEL
     )["meta"]["voice_count"]
     assert "对话式TTS" in models[SEED_TTS_20_EXPRESSIVE_MODEL]["features"]
-    assert f"{models[DEFAULT_AUDIOBOOK_TTS_MODEL]['voice_count']} 个可用音色" in models[
+    assert f"{models[DEFAULT_AUDIOBOOK_TTS_MODEL]['voice_count']} 个" in models[
         DEFAULT_AUDIOBOOK_TTS_MODEL
     ]["description"]
     assert f"{models[MINIMAX_SPEECH_28_HD_MODEL]['voice_count']} 音色" in models[

@@ -1,0 +1,1504 @@
+{
+  "model": "qwen-audio-3.1-tts-flash",
+  "updated_at": "2026-10-10",
+  "source": "https://help.aliyun.com/zh/model-studio/qwen-audio-tts-voice-list (qwen-audio-3.1-tts-flash 全表，2026-10-10 逐条真实调用验证通过)",
+  "voices": [
+    {
+      "id": "longanhuan_v3.1",
+      "speaker": "longanhuan_v3.1",
+      "label": "龙安欢 (longanhuan_v3.1)",
+      "gender": "female",
+      "style": "dialect",
+      "category": "dialect",
+      "languages": [
+        "zh",
+        "ko",
+        "id"
+      ],
+      "description": "官方多语种与方言音色，支持：重庆话、宁波话、韩语、印尼语。",
+      "recommended": [
+        "重庆话",
+        "宁波话",
+        "韩语",
+        "印尼语"
+      ],
+      "preview_text": "当你真的喜欢一个人的时候，就容易说傻话、办蠢事。",
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "longanlingxin_v3.1",
+      "speaker": "longanlingxin_v3.1",
+      "label": "龙安灵心 (longanlingxin_v3.1)",
+      "gender": "female",
+      "style": "dialect",
+      "category": "dialect",
+      "languages": [
+        "zh",
+        "fr",
+        "it"
+      ],
+      "description": "官方多语种与方言音色，支持：云南话、陕西话、上海话、法语、意大利语。",
+      "recommended": [
+        "云南话",
+        "陕西话",
+        "上海话",
+        "法语",
+        "意大利语"
+      ],
+      "preview_text": "当你真的喜欢一个人的时候，就容易说傻话、办蠢事。",
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "longanfengyue_v3.1",
+      "speaker": "longanfengyue_v3.1",
+      "label": "龙安风悦 (longanfengyue_v3.1)",
+      "gender": "female",
+      "style": "dialect",
+      "category": "dialect",
+      "languages": [
+        "zh",
+        "ja",
+        "vi"
+      ],
+      "description": "官方多语种与方言音色，支持：东北话、越南语、日语。",
+      "recommended": [
+        "东北话",
+        "越南语",
+        "日语"
+      ],
+      "preview_text": "当你真的喜欢一个人的时候，就容易说傻话、办蠢事。",
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "xunanchuan_v3.1",
+      "speaker": "xunanchuan_v3.1",
+      "label": "许南川 (xunanchuan_v3.1)",
+      "gender": "male",
+      "style": "dialect",
+      "category": "dialect",
+      "languages": [
+        "zh",
+        "fr",
+        "pt"
+      ],
+      "description": "官方多语种与方言音色，支持：甘肃话、东北话、法语、葡萄牙语。",
+      "recommended": [
+        "甘肃话",
+        "东北话",
+        "法语",
+        "葡萄牙语"
+      ],
+      "preview_text": "当你真的喜欢一个人的时候，就容易说傻话、办蠢事。",
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "yuxiaoyun_v3.1",
+      "speaker": "yuxiaoyun_v3.1",
+      "label": "于小云 (yuxiaoyun_v3.1)",
+      "gender": "female",
+      "style": "energetic",
+      "category": "narrator",
+      "languages": [
+        "zh"
+      ],
+      "description": "官方系统音色，元气、亲切、自然。适用场景：广告营销、广播、客服助手、旁白。",
+      "recommended": [
+        "广告营销",
+        "广播",
+        "客服助手",
+        "旁白"
+      ],
+      "preview_text": "当你真的喜欢一个人的时候，就容易说傻话、办蠢事。",
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "qiaoxiaojiao_v3.1",
+      "speaker": "qiaoxiaojiao_v3.1",
+      "label": "乔小娇 (qiaoxiaojiao_v3.1)",
+      "gender": "female",
+      "style": "cute",
+      "category": "narrator",
+      "languages": [
+        "zh"
+      ],
+      "description": "官方系统音色，俏丽、可爱。适用场景：广告营销、客服助手、有声书。",
+      "recommended": [
+        "广告营销",
+        "客服助手",
+        "有声书"
+      ],
+      "preview_text": "当你真的喜欢一个人的时候，就容易说傻话、办蠢事。",
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "xiaxiaochen_v3.1",
+      "speaker": "xiaxiaochen_v3.1",
+      "label": "夏小晨 (xiaxiaochen_v3.1)",
+      "gender": "female",
+      "style": "energetic",
+      "category": "narrator",
+      "languages": [
+        "zh"
+      ],
+      "description": "官方系统音色，元气、明亮。适用场景：广告营销、有声书。",
+      "recommended": [
+        "广告营销",
+        "有声书"
+      ],
+      "preview_text": "当你真的喜欢一个人的时候，就容易说傻话、办蠢事。",
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "anmingyuan_v3.1",
+      "speaker": "anmingyuan_v3.1",
+      "label": "安明远 (anmingyuan_v3.1)",
+      "gender": "male",
+      "style": "clear",
+      "category": "narrator",
+      "languages": [
+        "zh"
+      ],
+      "description": "官方系统音色，清亮、自然。适用场景：广告营销、有声书、旁白。",
+      "recommended": [
+        "广告营销",
+        "有声书",
+        "旁白"
+      ],
+      "preview_text": "当你真的喜欢一个人的时候，就容易说傻话、办蠢事。",
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "wenhuaiqing_v3.1",
+      "speaker": "wenhuaiqing_v3.1",
+      "label": "温怀清 (wenhuaiqing_v3.1)",
+      "gender": "female",
+      "style": "gentle",
+      "category": "child",
+      "languages": [
+        "zh"
+      ],
+      "description": "官方系统音色，清亮、柔和。适用场景：儿童故事、客服助手、广告营销、新闻播报。",
+      "recommended": [
+        "儿童故事",
+        "客服助手",
+        "广告营销",
+        "新闻播报"
+      ],
+      "preview_text": "当你真的喜欢一个人的时候，就容易说傻话、办蠢事。",
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "anxiaolan_v3.1",
+      "speaker": "anxiaolan_v3.1",
+      "label": "安小岚 (anxiaolan_v3.1)",
+      "gender": "female",
+      "style": "cute",
+      "category": "narrator",
+      "languages": [
+        "zh"
+      ],
+      "description": "官方系统音色，清甜、纯净。适用场景：有声书、客服助手、旁白、新闻播报、广告营销。",
+      "recommended": [
+        "有声书",
+        "客服助手",
+        "旁白",
+        "新闻播报",
+        "广告营销"
+      ],
+      "preview_text": "当你真的喜欢一个人的时候，就容易说傻话、办蠢事。",
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "xieshurou_v3.1",
+      "speaker": "xieshurou_v3.1",
+      "label": "谢舒柔 (xieshurou_v3.1)",
+      "gender": "female",
+      "style": "gentle",
+      "category": "narrator",
+      "languages": [
+        "zh"
+      ],
+      "description": "官方系统音色，柔和、自然、知性。适用场景：有声书、客服助手、旁白。",
+      "recommended": [
+        "有声书",
+        "客服助手",
+        "旁白"
+      ],
+      "preview_text": "当你真的喜欢一个人的时候，就容易说傻话、办蠢事。",
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "baiqinglan_v3.1",
+      "speaker": "baiqinglan_v3.1",
+      "label": "白清岚 (baiqinglan_v3.1)",
+      "gender": "female",
+      "style": "energetic",
+      "category": "assistant",
+      "languages": [
+        "zh"
+      ],
+      "description": "官方系统音色，明亮、清纯。适用场景：语音助手、客服助手。",
+      "recommended": [
+        "语音助手",
+        "客服助手"
+      ],
+      "preview_text": "当你真的喜欢一个人的时候，就容易说傻话、办蠢事。",
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "xuyuyuan_v3.1",
+      "speaker": "xuyuyuan_v3.1",
+      "label": "许玉远 (xuyuyuan_v3.1)",
+      "gender": "female",
+      "style": "elegant",
+      "category": "narrator",
+      "languages": [
+        "zh"
+      ],
+      "description": "官方系统音色，知性、成熟、质感。适用场景：广告营销、新闻播报、旁白、客服助手、有声书。",
+      "recommended": [
+        "广告营销",
+        "新闻播报",
+        "旁白",
+        "客服助手",
+        "有声书"
+      ],
+      "preview_text": "当你真的喜欢一个人的时候，就容易说傻话、办蠢事。",
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "anruorou_v3.1",
+      "speaker": "anruorou_v3.1",
+      "label": "安若柔 (anruorou_v3.1)",
+      "gender": "female",
+      "style": "elegant",
+      "category": "narrator",
+      "languages": [
+        "zh"
+      ],
+      "description": "官方系统音色，气声、知性。适用场景：旁白、语音助手。",
+      "recommended": [
+        "旁白",
+        "语音助手"
+      ],
+      "preview_text": "当你真的喜欢一个人的时候，就容易说傻话、办蠢事。",
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "wenhuaizhi_v3.1",
+      "speaker": "wenhuaizhi_v3.1",
+      "label": "闻怀之 (wenhuaizhi_v3.1)",
+      "gender": "female",
+      "style": "elegant",
+      "category": "narrator",
+      "languages": [
+        "zh"
+      ],
+      "description": "官方系统音色，稳重、成熟。适用场景：有声书、新闻播报、广告营销、客服助手、旁白。",
+      "recommended": [
+        "有声书",
+        "新闻播报",
+        "广告营销",
+        "客服助手",
+        "旁白"
+      ],
+      "preview_text": "当你真的喜欢一个人的时候，就容易说傻话、办蠢事。",
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "xiaoxingzhi_v3.1",
+      "speaker": "xiaoxingzhi_v3.1",
+      "label": "萧行之 (xiaoxingzhi_v3.1)",
+      "gender": "female",
+      "style": "elegant",
+      "category": "narrator",
+      "languages": [
+        "zh"
+      ],
+      "description": "官方系统音色，端庄、贵气。适用场景：新闻播报、有声书、旁白、客服助手。",
+      "recommended": [
+        "新闻播报",
+        "有声书",
+        "旁白",
+        "客服助手"
+      ],
+      "preview_text": "当你真的喜欢一个人的时候，就容易说傻话、办蠢事。",
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "guyunshu_v3.1",
+      "speaker": "guyunshu_v3.1",
+      "label": "顾云舒 (guyunshu_v3.1)",
+      "gender": "female",
+      "style": "elegant",
+      "category": "narrator",
+      "languages": [
+        "zh"
+      ],
+      "description": "官方系统音色，成熟、稳重。适用场景：音乐电台、客服助手、有声书、旁白。",
+      "recommended": [
+        "音乐电台",
+        "客服助手",
+        "有声书",
+        "旁白"
+      ],
+      "preview_text": "当你真的喜欢一个人的时候，就容易说傻话、办蠢事。",
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "huozhuoshi_v3.1",
+      "speaker": "huozhuoshi_v3.1",
+      "label": "霍拙石 (huozhuoshi_v3.1)",
+      "gender": "male",
+      "style": "clear",
+      "category": "narrator",
+      "languages": [
+        "zh"
+      ],
+      "description": "官方系统音色，清亮。适用场景：有声书、广告营销、旁白。",
+      "recommended": [
+        "有声书",
+        "广告营销",
+        "旁白"
+      ],
+      "preview_text": "当你真的喜欢一个人的时候，就容易说傻话、办蠢事。",
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "yeqinghe_v3.1",
+      "speaker": "yeqinghe_v3.1",
+      "label": "叶清禾 (yeqinghe_v3.1)",
+      "gender": "female",
+      "style": "gentle",
+      "category": "narrator",
+      "languages": [
+        "zh"
+      ],
+      "description": "官方系统音色，亲切、温柔。适用场景：有声书、广告营销、旁白、客服助手。",
+      "recommended": [
+        "有声书",
+        "广告营销",
+        "旁白",
+        "客服助手"
+      ],
+      "preview_text": "当你真的喜欢一个人的时候，就容易说傻话、办蠢事。",
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "yunhuanhuan_v3.1",
+      "speaker": "yunhuanhuan_v3.1",
+      "label": "云欢欢 (yunhuanhuan_v3.1)",
+      "gender": "female",
+      "style": "energetic",
+      "category": "narrator",
+      "languages": [
+        "zh"
+      ],
+      "description": "官方系统音色，高亢、热情。适用场景：有声书、旁白、客服助手。",
+      "recommended": [
+        "有声书",
+        "旁白",
+        "客服助手"
+      ],
+      "preview_text": "当你真的喜欢一个人的时候，就容易说傻话、办蠢事。",
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "xuxiaoqiao_v3.1",
+      "speaker": "xuxiaoqiao_v3.1",
+      "label": "徐小俏 (xuxiaoqiao_v3.1)",
+      "gender": "female",
+      "style": "energetic",
+      "category": "narrator",
+      "languages": [
+        "zh"
+      ],
+      "description": "官方系统音色，自然、俏皮。适用场景：有声书、旁白、客服助手。",
+      "recommended": [
+        "有声书",
+        "旁白",
+        "客服助手"
+      ],
+      "preview_text": "当你真的喜欢一个人的时候，就容易说傻话、办蠢事。",
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "baianran_v3.1",
+      "speaker": "baianran_v3.1",
+      "label": "白安然 (baianran_v3.1)",
+      "gender": "female",
+      "style": "magnetic",
+      "category": "narrator",
+      "languages": [
+        "zh"
+      ],
+      "description": "官方系统音色，低沉、浑厚、气声。适用场景：配音讲解、有声书、旁白。",
+      "recommended": [
+        "配音讲解",
+        "有声书",
+        "旁白"
+      ],
+      "preview_text": "当你真的喜欢一个人的时候，就容易说傻话、办蠢事。",
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "xuyanchu_v3.1",
+      "speaker": "xuyanchu_v3.1",
+      "label": "许言初 (xuyanchu_v3.1)",
+      "gender": "female",
+      "style": "elegant",
+      "category": "narrator",
+      "languages": [
+        "zh"
+      ],
+      "description": "官方系统音色，沉稳、磁性。适用场景：新闻播报、有声书。",
+      "recommended": [
+        "新闻播报",
+        "有声书"
+      ],
+      "preview_text": "当你真的喜欢一个人的时候，就容易说傻话、办蠢事。",
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "yezhiqing_v3.1",
+      "speaker": "yezhiqing_v3.1",
+      "label": "叶知晴 (yezhiqing_v3.1)",
+      "gender": "female",
+      "style": "energetic",
+      "category": "child",
+      "languages": [
+        "zh"
+      ],
+      "description": "官方系统音色，轻快、自然。适用场景：儿童故事、客服助手、语音助手。",
+      "recommended": [
+        "儿童故事",
+        "客服助手",
+        "语音助手"
+      ],
+      "preview_text": "当你真的喜欢一个人的时候，就容易说傻话、办蠢事。",
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "andi_v3.1",
+      "speaker": "andi_v3.1",
+      "label": "安迪 (andi_v3.1)",
+      "gender": "male",
+      "style": "accent",
+      "category": "assistant",
+      "languages": [
+        "zh"
+      ],
+      "description": "官方系统音色，ABC 口音。适用场景：语音助手。",
+      "recommended": [
+        "语音助手"
+      ],
+      "preview_text": "当你真的喜欢一个人的时候，就容易说傻话、办蠢事。",
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "anyuqing_v3.1",
+      "speaker": "anyuqing_v3.1",
+      "label": "安语晴 (anyuqing_v3.1)",
+      "gender": "female",
+      "style": "cute",
+      "category": "narrator",
+      "languages": [
+        "zh"
+      ],
+      "description": "官方系统音色，甜妹。适用场景：语音助手、旁白、新闻播报。",
+      "recommended": [
+        "语音助手",
+        "旁白",
+        "新闻播报"
+      ],
+      "preview_text": "当你真的喜欢一个人的时候，就容易说傻话、办蠢事。",
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "Emily_v3.1",
+      "speaker": "Emily_v3.1",
+      "label": "Emily (Emily_v3.1)",
+      "gender": "female",
+      "style": "british",
+      "category": "english",
+      "languages": [
+        "en"
+      ],
+      "description": "官方精品英文音色，英式女声。",
+      "recommended": [
+        "英式女声"
+      ],
+      "preview_text": "When you really like someone, it is easy to say silly things and do foolish things.",
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "Luna_v3.1",
+      "speaker": "Luna_v3.1",
+      "label": "Luna (Luna_v3.1)",
+      "gender": "female",
+      "style": "british",
+      "category": "english",
+      "languages": [
+        "en"
+      ],
+      "description": "官方精品英文音色，英式女声。",
+      "recommended": [
+        "英式女声"
+      ],
+      "preview_text": "When you really like someone, it is easy to say silly things and do foolish things.",
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "Eric_v3.1",
+      "speaker": "Eric_v3.1",
+      "label": "Eric (Eric_v3.1)",
+      "gender": "male",
+      "style": "british",
+      "category": "english",
+      "languages": [
+        "en"
+      ],
+      "description": "官方精品英文音色，英式男声。",
+      "recommended": [
+        "英式男声"
+      ],
+      "preview_text": "When you really like someone, it is easy to say silly things and do foolish things.",
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "Luca_v3.1",
+      "speaker": "Luca_v3.1",
+      "label": "Luca (Luca_v3.1)",
+      "gender": "male",
+      "style": "british",
+      "category": "english",
+      "languages": [
+        "en"
+      ],
+      "description": "官方精品英文音色，英式男声。",
+      "recommended": [
+        "英式男声"
+      ],
+      "preview_text": "When you really like someone, it is easy to say silly things and do foolish things.",
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "Abby_v3.1",
+      "speaker": "Abby_v3.1",
+      "label": "Abby (Abby_v3.1)",
+      "gender": "female",
+      "style": "american",
+      "category": "english",
+      "languages": [
+        "en"
+      ],
+      "description": "官方精品英文音色，美式女声。",
+      "recommended": [
+        "美式女声"
+      ],
+      "preview_text": "When you really like someone, it is easy to say silly things and do foolish things.",
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "Annie_v3.1",
+      "speaker": "Annie_v3.1",
+      "label": "Annie (Annie_v3.1)",
+      "gender": "female",
+      "style": "american",
+      "category": "english",
+      "languages": [
+        "en"
+      ],
+      "description": "官方精品英文音色，美式女声。",
+      "recommended": [
+        "美式女声"
+      ],
+      "preview_text": "When you really like someone, it is easy to say silly things and do foolish things.",
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "Ava_v3.1",
+      "speaker": "Ava_v3.1",
+      "label": "Ava (Ava_v3.1)",
+      "gender": "female",
+      "style": "american",
+      "category": "english",
+      "languages": [
+        "en"
+      ],
+      "description": "官方精品英文音色，美式女声。",
+      "recommended": [
+        "美式女声"
+      ],
+      "preview_text": "When you really like someone, it is easy to say silly things and do foolish things.",
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "Beth_v3.1",
+      "speaker": "Beth_v3.1",
+      "label": "Beth (Beth_v3.1)",
+      "gender": "female",
+      "style": "american",
+      "category": "english",
+      "languages": [
+        "en"
+      ],
+      "description": "官方精品英文音色，美式女声。",
+      "recommended": [
+        "美式女声"
+      ],
+      "preview_text": "When you really like someone, it is easy to say silly things and do foolish things.",
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "Betty_v3.1",
+      "speaker": "Betty_v3.1",
+      "label": "Betty (Betty_v3.1)",
+      "gender": "female",
+      "style": "american",
+      "category": "english",
+      "languages": [
+        "en"
+      ],
+      "description": "官方精品英文音色，美式女声。",
+      "recommended": [
+        "美式女声"
+      ],
+      "preview_text": "When you really like someone, it is easy to say silly things and do foolish things.",
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "Cally_v3.1",
+      "speaker": "Cally_v3.1",
+      "label": "Cally (Cally_v3.1)",
+      "gender": "female",
+      "style": "american",
+      "category": "english",
+      "languages": [
+        "en"
+      ],
+      "description": "官方精品英文音色，美式女声。",
+      "recommended": [
+        "美式女声"
+      ],
+      "preview_text": "When you really like someone, it is easy to say silly things and do foolish things.",
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "Cindy_v3.1",
+      "speaker": "Cindy_v3.1",
+      "label": "Cindy (Cindy_v3.1)",
+      "gender": "female",
+      "style": "american",
+      "category": "english",
+      "languages": [
+        "en"
+      ],
+      "description": "官方精品英文音色，美式女声。",
+      "recommended": [
+        "美式女声"
+      ],
+      "preview_text": "When you really like someone, it is easy to say silly things and do foolish things.",
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "Donna_v3.1",
+      "speaker": "Donna_v3.1",
+      "label": "Donna (Donna_v3.1)",
+      "gender": "female",
+      "style": "american",
+      "category": "english",
+      "languages": [
+        "en"
+      ],
+      "description": "官方精品英文音色，美式女声。",
+      "recommended": [
+        "美式女声"
+      ],
+      "preview_text": "When you really like someone, it is easy to say silly things and do foolish things.",
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "Andy_v3.1",
+      "speaker": "Andy_v3.1",
+      "label": "Andy (Andy_v3.1)",
+      "gender": "male",
+      "style": "american",
+      "category": "english",
+      "languages": [
+        "en"
+      ],
+      "description": "官方精品英文音色，美式男声。",
+      "recommended": [
+        "美式男声"
+      ],
+      "preview_text": "When you really like someone, it is easy to say silly things and do foolish things.",
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "Brian_v3.1",
+      "speaker": "Brian_v3.1",
+      "label": "Brian (Brian_v3.1)",
+      "gender": "male",
+      "style": "american",
+      "category": "english",
+      "languages": [
+        "en"
+      ],
+      "description": "官方精品英文音色，美式男声。",
+      "recommended": [
+        "美式男声"
+      ],
+      "preview_text": "When you really like someone, it is easy to say silly things and do foolish things.",
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "David_v3.1",
+      "speaker": "David_v3.1",
+      "label": "David (David_v3.1)",
+      "gender": "male",
+      "style": "american",
+      "category": "english",
+      "languages": [
+        "en"
+      ],
+      "description": "官方精品英文音色，美式男声。",
+      "recommended": [
+        "美式男声"
+      ],
+      "preview_text": "When you really like someone, it is easy to say silly things and do foolish things.",
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "longanyuanfei_v3.1",
+      "speaker": "longanyuanfei_v3.1",
+      "label": "龙安元妃 (longanyuanfei_v3.1)",
+      "gender": "female",
+      "style": "roleplay",
+      "category": "roleplay",
+      "languages": [
+        "zh"
+      ],
+      "description": "官方系统音色，高傲妃子音。适用场景：社交陪伴。",
+      "recommended": [
+        "社交陪伴"
+      ],
+      "preview_text": "当你真的喜欢一个人的时候，就容易说傻话、办蠢事。",
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "longjielidou_v3.1",
+      "speaker": "longjielidou_v3.1",
+      "label": "龙杰力豆 (longjielidou_v3.1)",
+      "gender": "male",
+      "style": "child",
+      "category": "child",
+      "languages": [
+        "zh"
+      ],
+      "description": "官方系统音色，天真男童音。适用场景：儿童陪伴。",
+      "recommended": [
+        "儿童陪伴"
+      ],
+      "preview_text": "当你真的喜欢一个人的时候，就容易说傻话、办蠢事。",
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "longanlingxi_v3.1",
+      "speaker": "longanlingxi_v3.1",
+      "label": "龙安灵希 (longanlingxi_v3.1)",
+      "gender": "female",
+      "style": "cute",
+      "category": "roleplay",
+      "languages": [
+        "zh"
+      ],
+      "description": "官方系统音色，可爱甜美音。适用场景：社交陪伴（精品中文）。",
+      "recommended": [
+        "社交陪伴（精品中文）"
+      ],
+      "preview_text": "当你真的喜欢一个人的时候，就容易说傻话、办蠢事。",
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "longhuohuo_v3.1",
+      "speaker": "longhuohuo_v3.1",
+      "label": "龙火火 (longhuohuo_v3.1)",
+      "gender": "male",
+      "style": "roleplay",
+      "category": "roleplay",
+      "languages": [
+        "zh"
+      ],
+      "description": "官方系统音色，顽皮少年音。适用场景：角色音。",
+      "recommended": [
+        "角色音"
+      ],
+      "preview_text": "当你真的喜欢一个人的时候，就容易说傻话、办蠢事。",
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "longyingtao_v3.1",
+      "speaker": "longyingtao_v3.1",
+      "label": "龙应桃 (longyingtao_v3.1)",
+      "gender": "female",
+      "style": "gentle",
+      "category": "assistant",
+      "languages": [
+        "zh"
+      ],
+      "description": "官方系统音色，温柔淡定女。适用场景：客服。",
+      "recommended": [
+        "客服"
+      ],
+      "preview_text": "当你真的喜欢一个人的时候，就容易说傻话、办蠢事。",
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "longanya_v3.1",
+      "speaker": "longanya_v3.1",
+      "label": "龙安雅 (longanya_v3.1)",
+      "gender": "female",
+      "style": "elegant",
+      "category": "roleplay",
+      "languages": [
+        "zh"
+      ],
+      "description": "官方系统音色，高雅气质女。适用场景：社交陪伴。",
+      "recommended": [
+        "社交陪伴"
+      ],
+      "preview_text": "当你真的喜欢一个人的时候，就容易说傻话、办蠢事。",
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "longwan_v3.1",
+      "speaker": "longwan_v3.1",
+      "label": "龙婉 (longwan_v3.1)",
+      "gender": "female",
+      "style": "natural",
+      "category": "roleplay",
+      "languages": [
+        "zh"
+      ],
+      "description": "官方系统音色，细腻柔声女。适用场景：社交陪伴。",
+      "recommended": [
+        "社交陪伴"
+      ],
+      "preview_text": "当你真的喜欢一个人的时候，就容易说傻话、办蠢事。",
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "longxing_v3.1",
+      "speaker": "longxing_v3.1",
+      "label": "龙星 (longxing_v3.1)",
+      "gender": "female",
+      "style": "natural",
+      "category": "roleplay",
+      "languages": [
+        "zh"
+      ],
+      "description": "官方系统音色，温婉邻家女。适用场景：社交陪伴。",
+      "recommended": [
+        "社交陪伴"
+      ],
+      "preview_text": "当你真的喜欢一个人的时候，就容易说傻话、办蠢事。",
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "longhua_v3.1",
+      "speaker": "longhua_v3.1",
+      "label": "龙华 (longhua_v3.1)",
+      "gender": "female",
+      "style": "energetic",
+      "category": "roleplay",
+      "languages": [
+        "zh"
+      ],
+      "description": "官方系统音色，元气甜美女。适用场景：社交陪伴。",
+      "recommended": [
+        "社交陪伴"
+      ],
+      "preview_text": "当你真的喜欢一个人的时候，就容易说傻话、办蠢事。",
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "longhan_v3.1",
+      "speaker": "longhan_v3.1",
+      "label": "龙寒 (longhan_v3.1)",
+      "gender": "male",
+      "style": "gentle",
+      "category": "roleplay",
+      "languages": [
+        "zh"
+      ],
+      "description": "官方系统音色，温暖痴情男。适用场景：社交陪伴。",
+      "recommended": [
+        "社交陪伴"
+      ],
+      "preview_text": "当你真的喜欢一个人的时候，就容易说傻话、办蠢事。",
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "longanzhi_v3.1",
+      "speaker": "longanzhi_v3.1",
+      "label": "龙安智 (longanzhi_v3.1)",
+      "gender": "male",
+      "style": "elegant",
+      "category": "roleplay",
+      "languages": [
+        "zh"
+      ],
+      "description": "官方系统音色，睿智轻熟男。适用场景：社交陪伴。",
+      "recommended": [
+        "社交陪伴"
+      ],
+      "preview_text": "当你真的喜欢一个人的时候，就容易说傻话、办蠢事。",
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "longzhe_v3.1",
+      "speaker": "longzhe_v3.1",
+      "label": "龙哲 (longzhe_v3.1)",
+      "gender": "male",
+      "style": "cute",
+      "category": "roleplay",
+      "languages": [
+        "zh"
+      ],
+      "description": "官方系统音色，呆板大暖男。适用场景：社交陪伴。",
+      "recommended": [
+        "社交陪伴"
+      ],
+      "preview_text": "当你真的喜欢一个人的时候，就容易说傻话、办蠢事。",
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "longanyang_v3.1",
+      "speaker": "longanyang_v3.1",
+      "label": "龙安洋 (longanyang_v3.1)",
+      "gender": "male",
+      "style": "energetic",
+      "category": "roleplay",
+      "languages": [
+        "zh"
+      ],
+      "description": "官方系统音色，阳光大男孩。适用场景：社交陪伴（标杆音色）。",
+      "recommended": [
+        "社交陪伴（标杆音色）"
+      ],
+      "preview_text": "当你真的喜欢一个人的时候，就容易说傻话、办蠢事。",
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "libai_v3.1",
+      "speaker": "libai_v3.1",
+      "label": "李白 (libai_v3.1)",
+      "gender": "male",
+      "style": "roleplay",
+      "category": "narrator",
+      "languages": [
+        "zh"
+      ],
+      "description": "官方系统音色，古代诗仙男。适用场景：诗词朗诵。",
+      "recommended": [
+        "诗词朗诵"
+      ],
+      "preview_text": "当你真的喜欢一个人的时候，就容易说傻话、办蠢事。",
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "longling_v3.1",
+      "speaker": "longling_v3.1",
+      "label": "龙铃 (longling_v3.1)",
+      "gender": "female",
+      "style": "cute",
+      "category": "child",
+      "languages": [
+        "zh"
+      ],
+      "description": "官方系统音色，稚气呆板女。适用场景：童声。",
+      "recommended": [
+        "童声"
+      ],
+      "preview_text": "当你真的喜欢一个人的时候，就容易说傻话、办蠢事。",
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "longniuniu_v3.1",
+      "speaker": "longniuniu_v3.1",
+      "label": "龙牛牛 (longniuniu_v3.1)",
+      "gender": "male",
+      "style": "energetic",
+      "category": "narrator",
+      "languages": [
+        "zh"
+      ],
+      "description": "官方系统音色，阳光男童声。适用场景：消费电子-儿童有声书。",
+      "recommended": [
+        "消费电子-儿童有声书"
+      ],
+      "preview_text": "当你真的喜欢一个人的时候，就容易说傻话、办蠢事。",
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "longshanshan_v3.1",
+      "speaker": "longshanshan_v3.1",
+      "label": "龙闪闪 (longshanshan_v3.1)",
+      "gender": "male",
+      "style": "child",
+      "category": "narrator",
+      "languages": [
+        "zh"
+      ],
+      "description": "官方系统音色，戏剧化童声。适用场景：消费电子-儿童有声书。",
+      "recommended": [
+        "消费电子-儿童有声书"
+      ],
+      "preview_text": "当你真的喜欢一个人的时候，就容易说傻话、办蠢事。",
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "longpaopao_v3.1",
+      "speaker": "longpaopao_v3.1",
+      "label": "龙泡泡 (longpaopao_v3.1)",
+      "gender": "female",
+      "style": "cute",
+      "category": "child",
+      "languages": [
+        "zh"
+      ],
+      "description": "官方系统音色，飞天泡泡音。适用场景：消费电子-儿童陪伴。",
+      "recommended": [
+        "消费电子-儿童陪伴"
+      ],
+      "preview_text": "当你真的喜欢一个人的时候，就容易说傻话、办蠢事。",
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "loongstella_v3.1",
+      "speaker": "loongstella_v3.1",
+      "label": "loongstella (loongstella_v3.1)",
+      "gender": "female",
+      "style": "elegant",
+      "category": "broadcast",
+      "languages": [
+        "zh"
+      ],
+      "description": "官方系统音色，飒爽利落女。适用场景：新闻播报。",
+      "recommended": [
+        "新闻播报"
+      ],
+      "preview_text": "当你真的喜欢一个人的时候，就容易说傻话、办蠢事。",
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "longyuan_v3.1",
+      "speaker": "longyuan_v3.1",
+      "label": "龙媛 (longyuan_v3.1)",
+      "gender": "female",
+      "style": "gentle",
+      "category": "narrator",
+      "languages": [
+        "zh"
+      ],
+      "description": "官方系统音色，温暖治愈女。适用场景：有声书。",
+      "recommended": [
+        "有声书"
+      ],
+      "preview_text": "当你真的喜欢一个人的时候，就容易说傻话、办蠢事。",
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "longmiao_v3.1",
+      "speaker": "longmiao_v3.1",
+      "label": "龙妙 (longmiao_v3.1)",
+      "gender": "female",
+      "style": "natural",
+      "category": "narrator",
+      "languages": [
+        "zh"
+      ],
+      "description": "官方系统音色，抑扬顿挫女。适用场景：有声书。",
+      "recommended": [
+        "有声书"
+      ],
+      "preview_text": "当你真的喜欢一个人的时候，就容易说傻话、办蠢事。",
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "longsanshu_v3.1",
+      "speaker": "longsanshu_v3.1",
+      "label": "龙三叔 (longsanshu_v3.1)",
+      "gender": "male",
+      "style": "elegant",
+      "category": "narrator",
+      "languages": [
+        "zh"
+      ],
+      "description": "官方系统音色，沉稳质感男。适用场景：有声书。",
+      "recommended": [
+        "有声书"
+      ],
+      "preview_text": "当你真的喜欢一个人的时候，就容易说傻话、办蠢事。",
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "longanli_v3.1",
+      "speaker": "longanli_v3.1",
+      "label": "龙安莉 (longanli_v3.1)",
+      "gender": "female",
+      "style": "gentle",
+      "category": "assistant",
+      "languages": [
+        "zh"
+      ],
+      "description": "官方系统音色，利落从容女。适用场景：语音助手。",
+      "recommended": [
+        "语音助手"
+      ],
+      "preview_text": "当你真的喜欢一个人的时候，就容易说傻话、办蠢事。",
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "longanwen_v3.1",
+      "speaker": "longanwen_v3.1",
+      "label": "龙安温 (longanwen_v3.1)",
+      "gender": "female",
+      "style": "gentle",
+      "category": "assistant",
+      "languages": [
+        "zh"
+      ],
+      "description": "官方系统音色，优雅知性女。适用场景：语音助手。",
+      "recommended": [
+        "语音助手"
+      ],
+      "preview_text": "当你真的喜欢一个人的时候，就容易说傻话、办蠢事。",
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "longanlang_v3.1",
+      "speaker": "longanlang_v3.1",
+      "label": "龙安朗 (longanlang_v3.1)",
+      "gender": "male",
+      "style": "elegant",
+      "category": "assistant",
+      "languages": [
+        "zh"
+      ],
+      "description": "官方系统音色，清爽利落男。适用场景：语音助手。",
+      "recommended": [
+        "语音助手"
+      ],
+      "preview_text": "当你真的喜欢一个人的时候，就容易说傻话、办蠢事。",
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "longxiaoxia_v3.1",
+      "speaker": "longxiaoxia_v3.1",
+      "label": "龙小夏 (longxiaoxia_v3.1)",
+      "gender": "female",
+      "style": "elegant",
+      "category": "assistant",
+      "languages": [
+        "zh"
+      ],
+      "description": "官方系统音色，沉稳权威女。适用场景：语音助手。",
+      "recommended": [
+        "语音助手"
+      ],
+      "preview_text": "当你真的喜欢一个人的时候，就容易说傻话、办蠢事。",
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    },
+    {
+      "id": "longanchong_v3.1",
+      "speaker": "longanchong_v3.1",
+      "label": "龙安冲 (longanchong_v3.1)",
+      "gender": "male",
+      "style": "energetic",
+      "category": "promo",
+      "languages": [
+        "zh"
+      ],
+      "description": "官方系统音色，激情推销男。适用场景：直播带货。",
+      "recommended": [
+        "直播带货"
+      ],
+      "preview_text": "当你真的喜欢一个人的时候，就容易说傻话、办蠢事。",
+      "default_params": {
+        "volume": 50,
+        "speed": 1.0,
+        "pitch": 50
+      }
+    }
+  ]
+}

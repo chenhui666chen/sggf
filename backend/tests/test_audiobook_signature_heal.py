@@ -31,7 +31,7 @@ _VOLATILE_FIELDS = {
     "timeline_boundary_managed": True,
     "delivery_plan": {"provider": "x"},
     "provider_prompt_snapshot": "snapshot",
-    "resolved_tts_model": "qwen3-tts-instruct-flash",
+    "resolved_tts_model": "qwen-audio-3.1-tts-flash",
     "use_instruct_mode": True,
 }
 
@@ -408,9 +408,12 @@ def test_repair_heals_asset_recipe_injected_signature(
     )
 
 
-def test_infer_chunk_limit_matches_compute_inference():
+def test_infer_chunk_limit_matches_compute_inference(monkeypatch):
     """自愈写入的分块上下文必须与 compute 推断分支使用同一策略。"""
     from app.services.audiobook import chapter_segment_assets as assets
+    from app.services.audiobook.render_plan import DEFAULT_RENDER_CHUNK_MAX_CHARS
+
+    monkeypatch.delenv("AUDIOBOOK_RENDER_CHUNK_MAX_CHARS", raising=False)
 
     plain = _build_segment()
     inferred = assets.infer_segment_render_chunk_max_chars(plain)
@@ -422,13 +425,10 @@ def test_infer_chunk_limit_matches_compute_inference():
         )
     )
 
+    # 3.1 与其余在架模型一样不再有独立小上限：推断口径统一落在默认分块上限
     qwen_segment = _build_segment()
-    qwen_segment["voice_params"]["tts_model"] = "qwen3-tts-instruct-flash"
-    from app.services.audiobook.engine_pkg._tts_mixin import (
-        QWEN_RENDER_CHUNK_MAX_CHARS,
-    )
-
+    qwen_segment["voice_params"]["tts_model"] = "qwen-audio-3.1-tts-flash"
     assert (
         assets.infer_segment_render_chunk_max_chars(qwen_segment)
-        == QWEN_RENDER_CHUNK_MAX_CHARS
+        == DEFAULT_RENDER_CHUNK_MAX_CHARS
     )

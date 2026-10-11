@@ -55,10 +55,10 @@ def main():
     # Step 1: 生成测试图片
     # ============================================================
     print("=" * 80)
-    print("Step 1: 生成测试图片 (qwen-image-2.0)")
+    print("Step 1: 生成测试图片 (qwen-image-3.0)")
     print("=" * 80)
-    success, msg, outputs = test_model("qwen-image-2.0", "a cute orange cat sitting on a windowsill, photorealistic, high quality")
-    print(f"  qwen-image-2.0: [{'PASS' if success else 'FAIL'}] {msg}")
+    success, msg, outputs = test_model("qwen-image-3.0", "a cute orange cat sitting on a windowsill, photorealistic, high quality")
+    print(f"  qwen-image-3.0: [{'PASS' if success else 'FAIL'}] {msg}")
     if success and outputs:
         image_url = outputs[0]
         print(f"  Image URL: {image_url[:100]}...")
@@ -71,10 +71,10 @@ def main():
     # ============================================================
     print()
     print("=" * 80)
-    print("Step 2: 生成测试视频 (wan2.7-t2v)")
+    print("Step 2: 生成测试视频 (wan3.0-video)")
     print("=" * 80)
-    success, msg, outputs = test_model("wan2.7-t2v", "a cute orange cat sitting on a windowsill, gentle movement, cinematic")
-    print(f"  wan2.7-t2v: [{'PASS' if success else 'FAIL'}] {msg}")
+    success, msg, outputs = test_model("wan3.0-video", "a cute orange cat sitting on a windowsill, gentle movement, cinematic")
+    print(f"  wan3.0-video: [{'PASS' if success else 'FAIL'}] {msg}")
     if success and outputs:
         video_url = outputs[0]
         print(f"  Video URL: {video_url[:100]}...")
@@ -90,8 +90,7 @@ def main():
     print("=" * 80)
 
     image_video_models = [
-        ("wan2.7-i2v", "animate this cat, make it blink slowly", {}),
-        ("wan2.7-r2v", "a cat sitting on a windowsill looking outside, gentle movement", {}),
+        ("wan3.0-video", "animate this cat, make it blink slowly", {}),
         ("pixverse-c1-r2v", "a cat on a windowsill, gentle movement", {}),
         ("pixverse-v6-t2v", "a cat on a windowsill, cinematic lighting", {}),
         ("vidu-q3-pro-img2video", "animate this cat, make it move naturally", {}),
@@ -119,7 +118,7 @@ def main():
 
     if video_url:
         video_edit_models = [
-            ("wan2.7-videoedit", "将整个画面转换为温暖的日落风格", {"video_path": video_url}),
+            ("wan3.0-video", "将整个画面转换为温暖的日落风格", {"video_path": video_url}),
         ]
         for model_id, prompt, extra_kwargs in video_edit_models:
             kwargs = {"video_path": video_url, **extra_kwargs}
@@ -140,10 +139,9 @@ def main():
     print("=" * 80)
 
     text_video_models = [
-        ("wan2.6-t2v-fast", "a dog running on the beach, cinematic"),
         ("vidu-q3-pro-text2video", "a bird flying over the ocean at sunset"),
         ("kling/kling-v3-video-generation", "a beautiful sunset over mountains, cinematic"),
-        ("doubao-seedance-1-5-pro", "一只小狗在草地上奔跑"),
+        ("doubao-seedance-2-0", "一只小狗在草地上奔跑"),
     ]
 
     for model_id, prompt in text_video_models:

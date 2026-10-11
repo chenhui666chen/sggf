@@ -159,7 +159,7 @@ def _seed_project(db: Session, tag: str) -> tuple[User, Project]:
             ],
             "audio_fx": {"enable_sound_effects": True, "bgm_theme": "fantasy"},
             "tts_models": {
-                "qwen3-tts-instruct-flash": {
+                "qwen-audio-3.1-tts-flash": {
                     "characters": [
                         {"character_id": 1, "name": "初始角色", "voice_id": "v1_tts"},
                     ]
@@ -188,7 +188,7 @@ class TestGetAudioConfig:
         data["engines"] = {
             "legacy_stems": {
                 "tts_models": {
-                    "qwen3-tts-instruct-flash": {
+                    "qwen-audio-3.1-tts-flash": {
                         "characters": [
                             {"character_id": 1, "name": "分支角色", "voice_id": "branch_v1"},
                         ]
@@ -204,7 +204,7 @@ class TestGetAudioConfig:
         # 替换 current_user override
         app.dependency_overrides[get_current_user] = lambda: user
 
-        response = client.get(f"/api/v1/projects/{project.id}/audio-config?tts_model=qwen3-tts-instruct-flash")
+        response = client.get(f"/api/v1/projects/{project.id}/audio-config?tts_model=qwen-audio-3.1-tts-flash")
         assert response.status_code == 200, response.text
         payload = response.json()
         assert "engines" in payload
@@ -248,7 +248,7 @@ class TestPutAudioConfig:
             {"character_id": 1, "name": "更新角色", "voice_id": "updated_v1", "source": "user"},
         ]
         response = client.put(
-            f"/api/v1/projects/{project.id}/audio-config?tts_model=qwen3-tts-instruct-flash",
+            f"/api/v1/projects/{project.id}/audio-config?tts_model=qwen-audio-3.1-tts-flash",
             json={
                 "characters": new_chars,
                 "audio_fx": {"enable_sound_effects": True, "bgm_theme": "mystery"},
@@ -267,7 +267,7 @@ class TestPutAudioConfig:
         engines = saved.get("engines", {})
         legacy = engines.get("legacy_stems", {})
         tts_models = legacy.get("tts_models", {})
-        flash_chars = tts_models.get("qwen3-tts-instruct-flash", {}).get("characters", [])
+        flash_chars = tts_models.get("qwen-audio-3.1-tts-flash", {}).get("characters", [])
         assert len(flash_chars) == 1
         assert flash_chars[0]["voice_id"] == "updated_v1"
         # audio_fx 写入引擎分支
@@ -283,7 +283,7 @@ class TestPutAudioConfig:
         app.dependency_overrides[get_current_user] = lambda: user
 
         response = client.put(
-            f"/api/v1/projects/{project.id}/audio-config?tts_model=qwen3-tts-instruct-flash",
+            f"/api/v1/projects/{project.id}/audio-config?tts_model=qwen-audio-3.1-tts-flash",
             json={
                 "characters": [],
                 "audio_fx": None,
@@ -323,7 +323,7 @@ class TestPutAudioConfig:
             {"character_id": 1, "name": "镜像角色", "voice_id": "mirror_v1", "source": "user"},
         ]
         response = client.put(
-            f"/api/v1/projects/{project.id}/audio-config?tts_model=qwen3-tts-instruct-flash",
+            f"/api/v1/projects/{project.id}/audio-config?tts_model=qwen-audio-3.1-tts-flash",
             json={
                 "characters": new_chars,
                 "audio_engine_mode": "legacy_stems",
@@ -348,7 +348,7 @@ class TestPutAudioConfig:
         data["engines"] = {
             "legacy_stems": {
                 "tts_models": {
-                    "qwen3-tts-instruct-flash": {
+                    "qwen-audio-3.1-tts-flash": {
                         "characters": [
                             {"character_id": 1, "name": "旧绑定", "voice_id": "legacy_v1"},
                         ]
@@ -362,7 +362,7 @@ class TestPutAudioConfig:
 
         app.dependency_overrides[get_current_user] = lambda: user
         response = client.put(
-            f"/api/v1/projects/{project.id}/audio-config?tts_model=qwen3-tts-instruct-flash",
+            f"/api/v1/projects/{project.id}/audio-config?tts_model=qwen-audio-3.1-tts-flash",
             json={
                 "characters": [],
                 "audio_fx": None,
@@ -370,7 +370,7 @@ class TestPutAudioConfig:
                 "engines": {
                     "seed_scene": {
                         "tts_models": {
-                            "qwen3-tts-instruct-flash": {
+                            "qwen-audio-3.1-tts-flash": {
                                 "characters": [
                                     {"character_id": 2, "name": "新绑定", "voice_id": "seed_v2"},
                                 ]
@@ -394,7 +394,7 @@ class TestPutAudioConfig:
             saved.get("engines", {})
             .get("legacy_stems", {})
             .get("tts_models", {})
-            .get("qwen3-tts-instruct-flash", {})
+            .get("qwen-audio-3.1-tts-flash", {})
             .get("characters", [])
         )
         assert len(legacy_chars) == 1
@@ -404,7 +404,7 @@ class TestPutAudioConfig:
             saved.get("engines", {})
             .get("seed_scene", {})
             .get("tts_models", {})
-            .get("qwen3-tts-instruct-flash", {})
+            .get("qwen-audio-3.1-tts-flash", {})
             .get("characters", [])
         )
         assert len(seed_chars) == 1

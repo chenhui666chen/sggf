@@ -690,6 +690,7 @@ export interface TtsPromptTestProviderPromptSnapshot {
     instructions: string
     messages: Array<{ role: string; content: string }>
     text_prefix: string
+    tag_syntax?: string
     context_texts: string[]
     inline_tag_strategy?: Record<string, unknown>
   }
@@ -1026,6 +1027,11 @@ export interface AssetStudioModelCatalogOption {
   modalities: string[]
   tags: string[]
   duration_options: number[]
+  duration_min?: number | null
+  duration_max?: number | null
+  duration_step?: number | null
+  duration_default?: number | null
+  duration_supports_auto?: boolean
 }
 
 export interface AssetStudioModelCatalogResponse {
@@ -2385,6 +2391,16 @@ class ApiClient {
     return this.client.get(`/api/v1/projects/${projectId}/detect-conflicts`)
   }
 
+  getContextHealth(
+    projectId: number,
+    limit: number = 20,
+    filters?: { chapter_number?: number; request_kind?: string },
+  ) {
+    return this.client.get(`/api/v1/projects/${projectId}/context-health`, {
+      params: { limit, ...filters },
+    })
+  }
+
   getSettingRecommendations(projectId: number, category?: string, limit: number = 10) {
     const params: any = { limit }
     if (category) params.category = category
@@ -2712,6 +2728,9 @@ class ApiClient {
     age_impression?: string
     primary_style?: string
     language?: string
+    timbre_tags?: string[]
+    scenario_tags?: string[]
+    emotion_tags?: string[]
     limit?: number
     cursor?: string
   }) {
@@ -2721,7 +2740,12 @@ class ApiClient {
       next_cursor?: string | null
     }>(
       '/api/v1/audiobook/voice-pool/public',
-      { params },
+      {
+        params,
+        // 多标签筛选是重复查询参数（timbre_tags=clear&timbre_tags=warm，维度内 OR）；
+        // axios 默认给数组加 [] 下标，FastAPI 认不到。
+        paramsSerializer: { indexes: null },
+      },
     )
   }
 

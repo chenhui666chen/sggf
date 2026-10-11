@@ -76,16 +76,16 @@ describe('dreamweaver diagnostics utils', () => {
                 confidence: 0.91,
               },
               routing: {
-                selected_model: 'wan2.7-t2v',
+                selected_model: 'wan3.0-video',
                 fallback_models: ['kling-omni-v1'],
                 candidate_scores: [
-                  { rank: 1, model_id: 'wan2.7-t2v', selected: true },
+                  { rank: 1, model_id: 'wan3.0-video', selected: true },
                   { rank: 2, model_id: 'kling-omni-v1', is_fallback: true },
                 ],
               },
               execution: {
-                resolved_model: 'wan2.7-t2v',
-                attempted_models: ['wan2.7-t2v'],
+                resolved_model: 'wan3.0-video',
+                attempted_models: ['wan3.0-video'],
                 prompt: {
                   prompt_changed: true,
                 },
@@ -114,7 +114,7 @@ describe('dreamweaver diagnostics utils', () => {
       },
     })
     expect(result?.video_provider_trace?.shots).toHaveLength(1)
-    expect(result?.smart_dispatch_trace?.routing?.selected_model).toBe('wan2.7-t2v')
+    expect(result?.smart_dispatch_trace?.routing?.selected_model).toBe('wan3.0-video')
     expect(result?.smart_dispatch_trace?.phases).toHaveLength(2)
   })
 
@@ -173,7 +173,7 @@ describe('dreamweaver diagnostics utils', () => {
       smart_dispatch_trace: {
         stage: 'dry_run',
         routing: {
-          selected_model: 'wan2.7-t2v',
+          selected_model: 'wan3.0-video',
         },
       },
     }
@@ -280,7 +280,7 @@ describe('dreamweaver diagnostics utils', () => {
       smart_dispatch_trace: {
         stage: 'dry_run',
         routing: {
-          selected_model: 'wan2.7-t2v',
+          selected_model: 'wan3.0-video',
         },
       },
     }
@@ -299,7 +299,7 @@ describe('dreamweaver diagnostics utils', () => {
     })
     expect(resolveDreamweaverDiagnosticSmartDispatchTrace(null, snapshotRuntimeConfig)).toMatchObject({
       stage: 'dry_run',
-      routing: { selected_model: 'wan2.7-t2v' },
+      routing: { selected_model: 'wan3.0-video' },
     })
   })
 
@@ -345,17 +345,17 @@ describe('dreamweaver diagnostics utils', () => {
         parse_errors: ['minor_warning'],
       },
       routing: {
-        selected_model: 'wan2.7-t2v',
+        selected_model: 'wan3.0-video',
         fallback_models: ['kling-omni-v1'],
         candidate_scores: [
-          { rank: 1, model_id: 'wan2.7-t2v' },
+          { rank: 1, model_id: 'wan3.0-video' },
           { rank: 2, model_id: 'kling-omni-v1' },
-          { rank: 3, model_id: 'wan2.6-t2v' },
+          { rank: 3, model_id: 'doubao-seedance-2-0' },
         ],
       },
       execution: {
         resolved_model: 'kling-omni-v1',
-        attempted_models: ['wan2.7-t2v', 'kling-omni-v1'],
+        attempted_models: ['wan3.0-video', 'kling-omni-v1'],
         timed_out: false,
         prompt: {
           prompt_changed: true,
@@ -369,7 +369,7 @@ describe('dreamweaver diagnostics utils', () => {
       intentModality: 'text_to_video',
       intentConfidence: 0.93,
       parseErrorCount: 1,
-      selectedModel: 'wan2.7-t2v',
+      selectedModel: 'wan3.0-video',
       resolvedModel: 'kling-omni-v1',
       fallbackCount: 1,
       candidateCount: 3,
@@ -412,7 +412,7 @@ describe('dreamweaver diagnostics utils', () => {
     })
     expect(items[0].label).toContain('林岚')
   })
-  it('readPersistedDreamWeaverRun 鍏煎鏃ц繍琛屽瓨鍌ㄥ墠缂€', () => {
+  it('readPersistedDreamWeaverRun 兼容旧运行存储前缀', () => {
     globalThis.localStorage.setItem(
       'dreamweaver_run_7',
       JSON.stringify({
@@ -458,7 +458,7 @@ describe('dreamweaver diagnostics utils', () => {
     expect(globalThis.localStorage.getItem(dreamweaverRunStorageKey(9))).toContain('current-run')
   })
 
-  it('clearPersistedDreamWeaverRun 鍚屾椂娓呯悊鏂版棫鍓嶇紑', () => {
+  it('clearPersistedDreamWeaverRun 同时清理新旧前缀', () => {
     globalThis.localStorage.setItem(
       dreamweaverRunStorageKey(11),
       JSON.stringify({ project_id: 11, run_id: 'run-11', updated_at: Date.now() }),

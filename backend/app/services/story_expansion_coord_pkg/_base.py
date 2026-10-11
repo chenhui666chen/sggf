@@ -81,8 +81,8 @@ class StoryExpansionCoordinatorBase:
     EPIC_MAX_VOLUMES = 50
     EPIC_DEFAULT_CHAPTERS_PER_VOLUME = 30
     STORY_EXPANSION_MODEL_CANDIDATES = (
-        "qwen3.7-plus",
-        "deepseek-v4-pro",
+        "qwen-plus",
+        "deepseek-pro",
     )
     STORY_EXPANSION_MIN_CONTEXT_TOKENS = 1_000_000
     STORY_EXPANSION_MIN_OUTPUT_TOKENS = 65_536
@@ -344,22 +344,22 @@ class StoryExpansionCoordinatorBase:
 
         deepseek_v4_budget = 384000
         deepseek_v4_timeout = estimate_model_timeout_seconds(
-            "deepseek-v4-pro",
+            "deepseek-pro",
             deepseek_v4_budget,
         )
 
-        # 🚀 协同扩展统一使用 deepseek-v4-pro（384K 超长输出），不再按规模动态切换
+        # 🚀 协同扩展统一使用 deepseek-pro（384K 超长输出），不再按规模动态切换
         logger.debug(
-            f"✅ 协同扩展统一使用 deepseek-v4-pro（规划章节数={self.planned_chapters_max}）"
+            f"✅ 协同扩展统一使用 deepseek-pro（规划章节数={self.planned_chapters_max}）"
         )
         self.planner_llm = create_task_llm(
-            model="deepseek-v4-pro",
+            model="deepseek-pro",
             temperature=0.2,
             max_tokens=deepseek_v4_budget,
             timeout=deepseek_v4_timeout,
         )
         self.writer_llm = create_task_llm(
-            model="deepseek-v4-pro",
+            model="deepseek-pro",
             temperature=0.45,
             max_tokens=deepseek_v4_budget,
             timeout=deepseek_v4_timeout,
@@ -397,7 +397,7 @@ class StoryExpansionCoordinatorBase:
             budget = max(8192, per_chapter_tokens * max(1, int(chapter_count)) + 3072)
             llm = self._build_story_expansion_runtime_llm(
                 (self._story_expansion_runtime_model_plan or {}).get("planner_model")
-                or "deepseek-v4-pro",
+                or "deepseek-pro",
                 role="planner",
                 requested_max_tokens=budget,
                 response_format={"type": "json_object"},
@@ -1002,7 +1002,7 @@ class StoryExpansionCoordinatorBase:
                 )
             else:
                 selected = {
-                    "model_id": "deepseek-v4-pro",
+                    "model_id": "deepseek-pro",
                     "quality_score": self.STORY_EXPANSION_HIGH_RISK_QUALITY_FLOOR,
                     "input_cost": 0.0,
                     "output_cost": 0.0,
@@ -1128,7 +1128,7 @@ class StoryExpansionCoordinatorBase:
         )
         model_output_limit = self._coerce_non_negative_int(
             (selected_spec or {}).get("output_limit"),
-            384000 if model_id == "deepseek-v4-pro" else self.STORY_EXPANSION_MIN_OUTPUT_TOKENS,
+            384000 if model_id == "deepseek-pro" else self.STORY_EXPANSION_MIN_OUTPUT_TOKENS,
         )
         max_tokens = self._coerce_non_negative_int(
             requested_max_tokens,

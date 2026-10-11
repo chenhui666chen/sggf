@@ -28,8 +28,9 @@
 | TTS-09 | 共享音色画像结构化 | 进行中 | P2 | 已为 Qwen3 Instruct-Flash 支持音色补充机器可读画像，并让后端优先读取；仍需扩展其他模型官方音色 |
 | TTS-10 | 能力验证指南与接入参考文档同步 | 进行中 | P2 | 已补充豆包 Seed-TTS 2.0 Expressive 的接入参考与验证关注项；仍需补齐 Qwen3、MiMo、StepAudio 的完整验证矩阵和回写规则 |
 | TTS-11 | 有声小说端到端测试补足 | 进行中 | P1 | 已补充片段模型解析、delivery plan、provider payload 与质量评审相关测试；仍缺前端选择模型到后端契约的端到端覆盖 |
-| TTS-12 | StepAudio 2.5 TTS 正式接入 | 进行中 | P1 | 已完成模型注册、36 个官方音色目录、模型感知风格控制、StepFun 非流式 payload、模型中心卡片、本地 Zero-shot 参考样本资产、前端工作台和回归测试；真实 `STEP_API_KEY` 中文与英文基础试听均已通过，正式收费音色创建与文件上传 `file_id` 接口仍待官方合同确认 |
-| TTS-13 | 豆包 seed-tts-2.0-expressive 正式接入 | 进行中 | P1 | 已完成官方资料核对、模型注册、99 个官方音色目录、模型感知风格控制、Volcengine V3 非流式 payload、语音标签前缀、模型中心卡片、本地回归测试和真实基础试听；仍需验证语音标签、复刻音色资产和双向流式链路 |
+| TTS-12 | StepAudio TTS 正式接入（当前 `stepaudio-3-tts`） | 进行中 | P1 | 已完成模型注册、36 个官方音色目录、模型感知风格控制、StepFun 非流式 payload、模型中心卡片、本地 Zero-shot 参考样本资产（`POST /v1/files` 自动生成 `file_id` + `/audio/voices/preview` 试听，两端点均有真实调用取证）、前端工作台和回归测试；真实 `STEP_API_KEY` 中文与英文基础试听均已通过，2026-10-11 音色画像批量把逐音色可用性收口为 36/36 客观闸门通过；同日把 instruction 上限由自设 200 对齐官方 500，并把未取证且我方不消费的 `supports_streaming` 降为 false。剩余唯一缺口：官方没有给出正式持久音色资产创建接口合同，项目不伪造 voice id（2026-10-09 从 `stepaudio-2.5-tts` 换代并物理退役旧档） |
+| TTS-13 | 豆包 seed-tts-2.0-expressive 正式接入 | 进行中 | P1 | 已完成官方资料核对、模型注册、277 条官方音色目录、模型感知风格控制、WebSocket 双向流式主路径 + HTTP 非流式兜底、语音标签前缀、模型中心卡片、本地回归测试和真实基础试听；逐音色可用性已由 2026-10-11 音色画像批量闭合（277 条客观闸门全通过，2026-06-25 那次 92 失败判为脚本侧假失败）；仍需验证 Cot 标签渲染与逐音色标签稳定性；声音复刻 2026-10-11 裁定不开通，四处能力声明已降级为不支持，138 元槽位费仅作开通门槛台账 |
+| TTS-14 | MiMo TTS 流式声明与传输缺口收口 | 已完成 | P1 | 2026-10-11 裁定：`supports_streaming` 布尔保留（口径=上游协议能力），可见文案删除「低延迟流式」；`stream=true` / `audio.format=pcm16` 在 `_call_mimo_chat_completions_http` 请求发出前抛 `TTSUserInputError`，协议编码器契约不动 |
 
 ## TTS-01 Qwen3-TTS-Instruct-Flash 官方音色与模型卡片收敛
 
@@ -78,7 +79,7 @@
 ### 已完成
 
 - 新增 `voice_description_policy.py`，统一构造包含性别、年龄感、音调、语速、情绪、特点、用途的声音描述。
-- `VoiceDesigner` 已改用统一声音描述构造器，避免继续输出“好听”“普通”等不可执行描述。
+- `VoiceDesigner` 已改用统一声音描述构造器，避免继续输出“好听”“普通”等不可执行描述。（2026-10-11：该模块已物理删除，统一构造器由 `voice_description_policy` 承担）
 - `VoiceManager.VoiceProfile.get_tts_params()` 已在主渲染链路 `voice_params` 中携带 `voice_description`。
 - `tts_style_control.py` 已能把 `voice_description` 合并进 Qwen/CosyVoice 的自然语言 instructions 和 MiMo 导演模式指导字段。
 - 已新增 `backend/tests/test_audiobook_voice_description_policy.py` 覆盖描述维度和主链路参数。
@@ -87,7 +88,7 @@
 
 ### 待办
 
-- 继续完善 `voice_designer.py` 中不同角色类型的声音描述细分：
+- ~~继续完善 `voice_designer.py` 中不同角色类型的声音描述细分~~（2026-10-11 该模块已物理删除，下列维度改由 `voice_description_policy` + 现役音色目录产出）：
   - 性别
   - 年龄感
   - 音调
@@ -106,7 +107,7 @@
 
 ### 关联文件
 
-- `backend/app/services/audiobook/agents/voice_designer.py`
+- `backend/app/services/audiobook/agents/voice_designer.py`（2026-10-11 已删除）
 - `backend/app/services/audiobook/narration_styles.py`
 - `backend/app/services/audiobook/tts_style_control.py`
 - `backend/app/services/audiobook/voice_description_policy.py`
@@ -158,7 +159,7 @@
 
 - `shared/qwen3_tts_voices.json`
 - 后续 MiMo 官方音色表
-- `backend/app/services/audiobook/agents/voice_designer.py`
+- `backend/app/services/audiobook/agents/voice_designer.py`（2026-10-11 已删除）
 - `backend/app/services/audiobook/tts_style_control.py`
 - `backend/app/services/audiobook/voice_description_policy.py`
 - `backend/tests/test_audiobook_voice_description_policy.py`
@@ -322,7 +323,7 @@
 
 - 继续清理 Qwen3、MiMo 相关来源链接与 `TODO: verify from official docs` 占位。
 - 继续为 TTS 模型增加更明确的能力分组，区分“模型官方能力”“用户提供资料”“项目已接入能力”“真实接口已验证能力”。
-- 后续 StepAudio 2.5 TTS 和 `seed-tts-2.0-expressive` 资料补齐后，按同一 `style_control` 结构接入模型中心卡片。
+- 后续 StepAudio TTS 和 `seed-tts-2.0-expressive` 资料补齐后，按同一 `style_control` 结构接入模型中心卡片。
 
 ### 验收标准
 
@@ -515,29 +516,30 @@
 - `backend/tests/test_audiobook_narration_style_routes.py`
 - `frontend/src/pages/audiobook/__tests__/*`
 
-## TTS-12 StepAudio 2.5 TTS 正式接入
+## TTS-12 StepAudio 3 TTS 正式接入
 
 状态：进行中
 
 ### 合并说明
 
-本项作为独立模型接入主题跟踪，不并入 MiMo。StepAudio 2.5 TTS 的官方模型 ID、接口协议、音色目录和风格控制能力需要单独验证，避免把其他 provider 的假设套用到该模型。
+本项作为独立模型接入主题跟踪，不并入 MiMo。StepAudio TTS 的官方模型 ID、接口协议、音色目录和风格控制能力需要单独验证，避免把其他 provider 的假设套用到该模型。
 
 ### 已完成
 
 - 已按官方资料确认并落地基础模型信息：
-  - 官方模型 ID：`stepaudio-2.5-tts`。
+  - 官方模型 ID：`stepaudio-3-tts`（2026-10-09 换代，旧档 `stepaudio-2.5-tts` 已物理删除，不留 alias）。
   - provider 标识：`stepfun`。
   - 非流式合成端点：`POST https://api.stepfun.com/v1/audio/speech`。
   - 复刻试听端点：`POST /v1/audio/voices/preview`。
   - 鉴权方式：`Authorization: Bearer $STEP_API_KEY`，后端兼容 `STEPFUN_API_KEY`。
-  - 单次 `input` 上限 1000 字符，`instruction` 上限 200 字符。
+  - 单次 `input` 上限 1000 字符，`instruction` 上限 500 字符（官方 3-tts 值；2.5 代才是 200）。
   - Global Context 写入 `instruction` 参数；Inline Context 保留在 `input` 文本圆括号中，不转成 MiMo 音频标签。
-- `config/models.yaml` 已新增 StepAudio 2.5 TTS 模型中心卡片，记录官方来源、价格、能力边界、调用方式、36 个官方音色和真实接口验证状态。
-- `shared/stepaudio_2_5_tts_voices.json` 已登记官方最佳实践音色表中的 36 个官方音色，并接入 `voice_catalog.py`。
+- `config/models.yaml` 已新增 StepAudio 3 TTS 模型中心卡片，记录官方来源、价格、能力边界、调用方式、36 个官方音色和真实接口验证状态。
+- `shared/stepaudio_3_tts_voices.json` 已登记官方最佳实践音色表中的 36 个官方音色，并接入 `voice_catalog.py`。
 - `backend/app/services/audiobook/tts_model_ids.py` 已接入模型常量、支持列表、runtime ID、别名归一化、价格、能力矩阵和 `/api/v1/audiobook/tts/models` 元数据。
 - `backend/app/services/audiobook/tts_style_control.py` 已新增 StepAudio 模型识别和 `stepaudio_global_context` 风格控制，避免复用 Qwen/MiMo/CosyVoice 的字段假设。
-- StepAudio 的 `instruction` 已按官方 200 字上限做模型专用优先级：情绪、停顿、重读、演绎要求优先；长声音画像只在能完整放入预算时保留，无法放入时丢弃，避免生成误导性的截断碎片。
+- StepAudio 的 `instruction` 已按 instruction 预算做模型专用优先级（预算原为 200，2026-10-11 按官方 3-tts 上调为 500）：情绪、停顿、重读、演绎要求优先；长声音画像只在能完整放入预算时保留，无法放入时丢弃，避免生成误导性的截断碎片。
+  - 500 这个额度有 **5 处事实源**，改上限必须逐处扫：`_aliyun_mixin.py` 常量、`tts_model_ids.py` `instruction_budget`、`config/models.yaml` 卡片、前端兜底表 `ttsModels.ts`，以及场景引擎喂 LLM 的表演提示词 `script_adapter_pkg/_transform.py`（StepAudio 分支 3 处，由 `tests/test_audiobook_prompt_contracts.py` 钉住）。
 - `backend/app/services/audiobook/tts_engine_pkg/_aliyun_mixin.py` 已接入 StepFun HTTP 调用：
   - 构造 `model`、`voice`、`input`、可选 `instruction`、可选 `response_format`。
   - 支持官方可选参数：`speed`、`volume`、`sample_rate`、`pronunciation_map`、`markdown_filter`、`return_url`、`stream_format`。
@@ -545,16 +547,16 @@
   - 对 `input` 与 `instruction` 做服务商限制内截断。
   - 兼容二进制 `audio/*` 响应和 JSON 中的 base64/URL 音频响应。
   - 不传 `voice_label`。
-  - `response_format` 仅允许 `mp3`、`wav`、`flac`、`opus`、`pcm`，不再向 StepAudio 2.5 TTS 透传 `aac`。
+  - `response_format` 仅允许 `mp3`、`wav`、`flac`、`opus`、`pcm`，不再向 StepAudio TTS 透传 `aac`。
   - 支持通过 `STEPAUDIO_TTS_BASE_URL` 覆盖默认 base URL，便于在 StepFun `.com` / `.ai` 或后续专属网关之间切换验证。
   - 已封装 `POST /v1/audio/voices/preview` 复刻试听接口；当运行时参数包含 `stepaudio_voice_file_id` 时，`stepaudio_clone:{asset_id}` 音色会走 preview，不再误传给 `/audio/speech`。
 - 已新增 `backend/app/services/audiobook/voice_manager_stepaudio.py`，并在 `voice_manager_factory.py` 中路由到 StepAudio 专用 manager。
 - 已新增 StepAudio 本地复刻参考样本资产链路：
   - `backend/app/services/audiobook/stepaudio_voice_assets.py` 将 mp3/wav 样本保存到 `backend/data/stepaudio_voice_assets`，`index.json` 仅保存元数据，不写入 base64。
   - 新增 `GET /api/v1/audiobook/tts/voices/stepaudio/assets`、`POST /api/v1/audiobook/tts/voices/stepaudio/clone-assets/upload`、`DELETE /api/v1/audiobook/tts/voices/stepaudio/assets/{asset_id}`。
-  - `GET /api/v1/audiobook/tts/voices?model=stepaudio-2.5-tts` 会追加 `stepaudio_clone:{asset_id}` 自定义音色预设。
-  - 有 `file_id` 的本地参考样本可按官方 `/audio/voices/preview` 合成；没有 `file_id` 的样本会保留在资产列表，但在角色音色下拉和工作台试听中标记为暂不可用，等待官方文件上传接口补齐。
-- `core/unified_media_runtime.py` 已将 `stepaudio-2.5-tts` 注册到 `synthesize_speech` 可选模型。
+  - `GET /api/v1/audiobook/tts/voices?model=stepaudio-3-tts` 会追加 `stepaudio_clone:{asset_id}` 自定义音色预设。
+  - 有 `file_id` 的本地参考样本走官方 `/audio/voices/preview` 合成；`/clone-assets/upload` 在未手填 `file_id` 且已配置 Step API Key 时会自动调用 `POST /v1/files` 生成 `file_id` 再保存资产（见「本次落地记录：StepAudio Voice Clone 自动生成 file_id」）。只有既无手填 `file_id`、又未配置密钥的样本才保留在资产列表并在角色音色下拉和工作台试听中标记为暂不可用。
+- `core/unified_media_runtime.py` 已将 `stepaudio-3-tts` 注册到 `synthesize_speech` 可选模型。
 - `frontend/src/pages/audiobook/ttsModels.ts` 已新增 StepAudio 前端兜底配置、别名、默认音色、能力字段和 `全局语境` / `文中语境` 标签。
 - `frontend/src/pages/audiobook/StepAudioVoiceCloneWorkbench.tsx` 已新增 StepAudio 参考样本工作台，支持录音转 WAV、上传 mp3/wav、保存本地音色、折叠列表、播放与删除。
 - 有声小说项目配置、角色音色映射、角色级试听和 preview 请求已支持 `stepaudio_voice_asset_id`。
@@ -573,6 +575,8 @@
 
 ### 真实接口验证记录
 
+2026-10-09 换代说明：以下条目是 2.5 代接入期的实测记录，端点、payload 字段和音色名与 `stepaudio-3-tts` 一致；3 代已用真实 key 重跑 36 个官方音色冒烟并确认兼容，旧档已从 `config/models.yaml`、运行时白名单、音色表和前端兜底配置中物理删除，数据库无历史 `stepaudio-2.5-tts` 残留。
+
 - 已将用户提供的 `STEP_API_KEY` 写入本地根目录 `.env`，该文件受 `.gitignore` 保护，不纳入版本提交。
 - `GET https://api.stepfun.com/v1/models` 成功，模型列表包含 `stepaudio-2.5-tts`、`step-tts-mini`、`step-tts-2` 等 TTS/Audio 模型。
 - `POST https://api.stepfun.com/v1/audio/speech` + `stepaudio-2.5-tts` + `cixingnansheng` + 英文文本已通过真实接口验证：
@@ -586,22 +590,27 @@
   - instruction：`语气温柔，语速偏慢`
 - 早前中文请求返回 `no available voice synthensis text` 的根因已确认为 PowerShell here-string 管道导致内联 Python 中文源码被替换成 `?`，不是 StepAudio 2.5 TTS 不支持中文。
 - `https://api.stepfun.ai/v1/audio/speech` 使用当前 key 返回 `invalid_api_key`，说明当前 key 更像 `.com` 平台密钥，不适用于 `.ai` 公共端点。
+- 2026-10-11 流式声明降级：`supports_streaming` 此前在**上游能力未经取证**的情况下写为 `true`（`tts_model_ids.py` 风格能力表 + 目录卡两处），而生产链路 `_call_stepaudio_speech_http` 只发非流式 `POST /v1/audio/speech` 并整包接收，metadata 固定 `transport="http"`；payload 里没有 `stream` 布尔，只有白名单透传 `stream_format ∈ {sse, audio}`，响应侧也没有 SSE/chunked 解析。两处已统一降为 `False`，由 `test_stepaudio_streaming_is_declared_unsupported_across_sources` 钉住一致性。档案卡自己一直写的是“非流式”，本次是**把布尔追平档案**，不是改能力面结论。
+- 2026-10-11 逐音色可用性收口：`backend/app/scripts/tag_voice_profiles.py` 对 36 个官方音色逐个替换 `voice` 走真实 `POST /v1/audio/speech`，**客观闸门 36/36 通过**（时长偏差、静音比、RMS、ASR 逐字相似度全部达标），产物与双模型标签落在 `shared/stepaudio_3_tts_voice_profiles.json`（`profile_status` 36 ready；`review_status` 34 candidate / 2 approved，`needs_review` 主要原因 `single_sample_evidence`，双评分歧集中在 pace 26、energy 24、style 17、pitch_range 16）。这把「36 个官方音色是否都能在 3-tts 端点出声」从推断升级为实测事实。**注意逐条请求日志已在早前产物清理中删除**，复现入口只剩该脚本与 sidecar，档案不声称留有原始响应。
+- 2026-10-11 instruction 预算对齐官方：档案与代码原写 200（实为 `stepaudio-2.5-tts` 上代限制），官方 3-tts 是 500；依据 G3 实测 244 字 instruction 返回 HTTP 200。5 处事实源已全部改为 500（`_aliyun_mixin.py` 常量、`tts_model_ids.py` `instruction_budget`、`config/models.yaml` 四处、前端 `ttsModels.ts` 兜底表、场景引擎提示词 `script_adapter_pkg/_transform.py`），细节与副作用见 `docs/MODEL_INTEGRATION_REFERENCE.md` §11.9 第 1 条。**500 整值本身未做探针**，只证到 244。
 
 ### 待办
 
-- 确认 StepFun 文件上传接口，补齐“上传本地音频后自动生成 `file_id`”的闭环。
 - 继续确认 Zero-shot 自生成音色的正式创建接口、资产 ID 形态、语言支持和计费触发点，避免把 `/audio/voices/preview` 试听接口误当正式收费资产创建接口。
-- 使用真实 `/audio/voices/preview` 对带 `file_id` 的本地参考样本资产做一次端到端验证。
-- 若真实接口返回格式与当前兼容分支不同，回写 `_parse_stepaudio_audio_response()` 与对应测试。
-- 将 StepAudio 的验证步骤同步到 `docs/MODEL_CAPABILITY_VALIDATION_GUIDE_20260422.md` 与 `docs/MODEL_INTEGRATION_REFERENCE.md`。
+- ~~使用真实 `/audio/voices/preview` 对带 `file_id` 的本地参考样本资产做一次端到端验证~~（已完成：2026-06-25 真实调用中 `/v1/files` 成功返回 `file_id`，preview 侧取到 `CER_NOT_PASS` 错误形状与成功响应字段 `sample_audio`，payload 字段映射和 `_parse_stepaudio_audio_response()` 据此校准；见本文「StepAudio Voice Clone 样本文本校验修复」「预试听后确认保存」两节）。仍待的是**浏览器端两阶段流程人工验收**（预试听→确认保存），档案不声称做过 UI 实测。
+- ~~若真实接口返回格式与当前兼容分支不同，回写 `_parse_stepaudio_audio_response()` 与对应测试~~（已完成，`sample_audio` 已纳入解析候选并有测试覆盖）。
+- ~~将 StepAudio 的验证步骤同步到 `docs/MODEL_CAPABILITY_VALIDATION_GUIDE_20260422.md` 与 `docs/MODEL_INTEGRATION_REFERENCE.md`~~（已完成 `MODEL_INTEGRATION_REFERENCE.md` §11.13，2026-10-11 取证收口）。口径更正：`MODEL_CAPABILITY_VALIDATION_GUIDE_20260422.md` 是方法论文档（§7 只挂 CosyVoice 一个案例），逐模型证据统一落在 `MODEL_INTEGRATION_REFERENCE.md`，不再往指南里追加模型专属段落。
+- 供应商侧残留文件对象**无法自动清点**：早前产物清理毁掉了当时上传到 StepFun `/v1/files` 的 `file_id` 清单，本地也没有 `backend/data/stepaudio_voice_assets` 目录（未保存过复刻资产），项目侧没有列出远端文件的接口封装。因此这批对象只能人工在 StepFun 控制台核对删除，不在本项目执行；官方是否提供 `DELETE /v1/files/{id}` 亦未取证。本条按台账保留，不代表待办可自动化。
+- 若将来要做边合成边播：先对 StepFun 流式契约做一次真实取证（`stream_format=sse` 是否真返回增量分片、分片边界与结束标记、`return_url` 与流式是否互斥），再决定把 `supports_streaming` 翻回 `true`；取证前保持 `false`。
+- `/audio/voices/preview`（复刻试听）的 instruction 上限**未单独取证**，当前与 `/audio/speech` 共用 `STEPAUDIO_TTS_INSTRUCTION_MAX_CHARS = 500`；若官方对 preview 另有更严限制，要在 `_build_stepaudio_voice_preview_payload` 单独收口，不要动合成端点的常量。
 
 ### 验收标准
 
-- 模型中心能展示 StepAudio 2.5 TTS 的官方来源、能力边界、音色和调用方式。
+- 模型中心能展示 StepAudio 3 TTS 的官方来源、能力边界、音色和调用方式。
 - 有声小说链路能选择该模型并生成正确 payload。
 - 不使用 Qwen、MiMo、MiniMax 或 CosyVoice 的音色和风格控制假设替代 StepAudio 官方能力。
 - StepAudio 长声音画像、长角色场景或长显式上下文不会挤掉情绪、停顿、重读和演绎要求；逐句停顿/低语继续进入正文圆括号。
-- 模型卡片不再保留中文基础合成的 `pending-runtime-validation`；但在正式收费音色创建和文件上传接口确认前，继续标记或说明 `pending-official-voice-clone-assets`。
+- 模型卡片不再保留中文基础合成的 `pending-runtime-validation`；文件上传与复刻试听已实测，标签只剩 `pending-formal-voice-asset-creation` 一条，用于标记官方未给出合同的正式持久音色资产创建缺口。
 
 ### 本轮验证
 
@@ -638,7 +647,7 @@
 - `backend/app/schemas/audiobook.py`
 - `backend/app/services/audiobook/project_audio_runtime.py`
 - `core/unified_media_runtime.py`
-- `shared/stepaudio_2_5_tts_voices.json`
+- `shared/stepaudio_3_tts_voices.json`
 - `frontend/src/pages/audiobook/ttsModels.ts`
 - `frontend/src/pages/audiobook/StepAudioVoiceCloneWorkbench.tsx`
 - `frontend/src/services/api.ts`
@@ -667,9 +676,10 @@
   - 官方模型 ID：`seed-tts-2.0-expressive`。
   - provider 标识：`volcengine`。
   - 默认 resource id：`seed-tts-2.0`。
-  - 非流式合成端点：`POST https://openspeech.bytedance.com/api/v3/tts/unidirectional`。
-  - 双向流式端点：`wss://openspeech.bytedance.com/api/v3/tts/bidirection`。
-  - 鉴权头：`X-Api-Key`、`X-Api-Resource-Id`，项目内兼容 `X-Api-App-Key`。
+  - 非流式合成端点：`POST https://openspeech.bytedance.com/api/v3/tts/unidirectional`（现为 HTTP 兜底路径）。
+  - 双向流式端点：`wss://openspeech.bytedance.com/api/v3/tts/bidirection`（现为生产主路径）。
+  - 鉴权头：WS 发 `X-Api-Key`、`X-Api-Resource-Id`、`X-Api-Connect-Id`；HTTP 只发 `X-Api-Key`、`X-Api-Resource-Id`。
+    2026-10-10 实测：单向端点带上 `X-Api-App-Key` 会返回 200 但响应体无音频，已移除该头并由测试钉住。
 - 已确认高表现力能力边界：
   - `seed-tts-2.0-expressive` 支持 `context_texts` 语音指令。
   - `seed-tts-2.0-standard` 不支持 `context_texts` 和 `use_tag_parser`。
@@ -677,14 +687,18 @@
   - 语音指令可控制整体情绪、方言、语气、语速和音调。
   - 引用上文能力用于让模型理解并承接语境情绪，引用内容不参与合成。
   - 语音标签支持在句子前用方括号描述表情、心理、肢体动作或局部演绎细节，属于官方抢鲜体验能力。
-  - 语音标签官方示例推荐使用可爱女生、调皮公主、爽朗少年、天才同桌或声音复刻 2.0 模型复刻后的音色；当前系统音色目录已覆盖这些官方推荐音色。
-  - 双向流式 WebSocket 支持 `StartConnection`、`StartSession`、`TaskRequest` 等事件，当前项目只建档能力，未接入实时播放链路。
+  - 语音标签官方示例推荐使用可爱女生、调皮公主、爽朗少年、天才同桌或声音复刻 2.0 模型复刻后的音色；这四个在目录里是 `ICL_uranus_*_tob` 且 `supports_inline_voice_labels: true`。官方 PDF 示例写的 `saturn_zh_female_keainvsheng_tob` 在当前 277 条目录里 0 命中（目录按 `uranus_bigtts` / `ICL_uranus_*_tob` 过滤，`saturn_*` 全族不在其中），但 2026-06-25 批量里 6 个 `saturn_*_tob` 都出了音频，属供应商侧有效 speaker，只是目录不收录、无中文名和标签标记；能出声，但不作为项目默认音色引用。
+  - 双向流式 WebSocket 支持 `StartConnection`、`StartSession`、`TaskRequest` 等事件，2026-10-11 按代码事实纠正：它已经是生产合成的**主调用路径**（`_synthesize_seed_tts` 先调 `_call_seed_tts_websocket`），HTTP 非流式仅在 WS 抛出含 `no audio` 的错误时兜底；档案此前写“只建档、未接入”属反向漂移。
 - 已在 `config/models.yaml` 增加模型卡片，记录 endpoint、resource id、风格控制、音频格式、采样率、限制和待真实验证状态。
 - 已在后端接入模型 ID、能力矩阵、别名归一化、voice catalog、voice manager 和 `UnifiedMediaRuntime` 注册。
-- 已将用户提供的 99 个豆包 Seed-TTS 2.0 官方音色写入 `shared/seed_tts_2_0_voices.json`，保留音色名、推荐场景、语种和真实 `Voice_type`。
+- 已在 `shared/seed_tts_2_0_voices.json` 维护豆包 Seed-TTS 2.0 官方音色目录，当前 **277 条**（本项建档时记录为 99，以文件实际条数为准；`updated_at: 2026-08-02`，`source` 标注为官方 2.0 目录并按 `uranus_bigtts` / `ICL_uranus_*_tob` 过滤），保留音色名、推荐场景、语种和真实 `voice_type`，并带逐音色 `supports_inline_voice_labels` 标记（184 true / 93 false）。
+- **逐音色可用性已由 2026-10-11 音色画像批量闭合**：`backend/app/scripts/tag_voice_profiles.py` 用生产合成链路（`core.unified_media_runtime.synthesize_speech`，Seed-TTS 即 WebSocket 主路径）逐音色真实出音频，再过客观闸门（时长、静音比、RMS、ASR 转写相似度），结果落在 `shared/seed_tts_2_0_voice_profiles.json`：**277 条 `objective.passed` 全为 true**，来源 264 `synthesized` + 13 `local_cache`，时长 2040–14856 ms，转写相似度普遍 1.0。因此 `backend/tests/seed_tts_voice_verification_results.json`（2026-06-25，**7 成功 / 92 失败**，失败全是 `status_code=200` 且 `content-type=text/plain` 的 159/248 字节无音频响应）判为**脚本侧假失败**：其生成脚本 `scripts/verify_seed_tts_voices.py`（已于 2026-10-11 删除）当时发送了 `X-Api-App-Key`，而 2026-10-10 已实测该头会让单向端点 200 无音频；06-25 失败的那 92 个 speaker 本次逐条重新合成**全部通过**，不能读成"92 个音色无效"。当时"失败全为 `*_uranus_bigtts`、成功 6 条全为 `saturn_*_tob`"的家族分布至今没有解释，但已不影响可用性结论。仍未验的只剩标签维度：画像批次用的是无标签纯台词（267 条唯一 `preview_text`，0 条带 `[标签]` 前缀）。
 - 已在 `tts_style_control.py` 中将豆包模型映射为 `doubao_query_response`，把有声小说朗读意图写入 `req_params.additions.context_texts`。
 - 已在 `tts_style_control.py` 和 `TTSEngine` 中接入显式标签模式：`inline_audio_tags` 会合成为 `[标签]正文`，并在 Seed-TTS payload 中设置 `use_tag_parser=true`。
-- 已在 `TTSEngine` 的 Volcengine Seed-TTS 分支接入非流式 HTTP payload 构建、响应解析和合成元数据记录；真实接口已确认 `speaker` 与 `audio_params` 需要位于 `req_params` 内，`additions` 需要是 JSON 字符串。
+- 已在 `TTSEngine` 的 Volcengine Seed-TTS 分支接入 WebSocket 双向流式合成（生产主路径，官方 `protocols.py` 二进制帧，`SEED_TTS_OK_FRAME_CODES` 区分进行中帧与完成帧）和非流式 HTTP payload 构建（无音频兜底）、响应解析和合成元数据记录；真实接口已确认 `speaker` 与 `audio_params` 需要位于 `req_params` 内，`additions` 需要是 JSON 字符串。
+  注意边界：WS 只是**传输协议**是双向流式，`_call_seed_tts_websocket()` 仍把帧累积成完整 `bytes` 才返回，引擎没有边合成边播的通道。
+  2026-10-11 单次真实冒烟（17 字、`zh_female_vv_uranus_bigtts`、生产 `TTSEngine.synthesize`）：WS 一次调用即返回 25965 字节 ID3 头 MP3、端到端 1630ms、音频 3240ms，未触发 HTTP 兜底。
+  本文件早期引用的 2026-06-25 两次「99 音色 WS 批量验证」结果均为 0 成功（`backend/tests/seed_tts_websocket_verification_results*.json`），属协议修复前的历史快照。
 - 已收紧 Seed-TTS 鉴权入口，只接受 `VOLCENGINE_TTS_API_KEY`、`DOUBAO_TTS_API_KEY`、`SEED_TTS_API_KEY`、`VOLCENGINE_SPEECH_API_KEY`、`DOUBAO_SPEECH_API_KEY` 作为 openspeech 专用 `X-Api-Key` 来源，避免误用火山方舟通用 `VOLCENGINE_API_KEY` / `DOUBAO_API_KEY`。
 - 已配置真实 Seed Speech/openspeech 专用 `VOLCENGINE_TTS_API_KEY` 到 `.env.local`，并完成一次非流式基础试听验证。
 - 已在前端 `ttsModels.ts` 增加模型选项、默认旁白、别名、风格控制标签和兜底能力。
@@ -694,13 +708,14 @@
 
 - 使用真实接口分别验证：
   - 引用上文语境承接效果。
-  - `[旁白，语调惊恐]正文` 这类方括号语音标签。
-  - `use_tag_parser=true` 对系统音色和复刻音色的差异。
-- 继续核对控制台后续新增/下线音色，并保持 `shared/seed_tts_2_0_voices.json` 与模型中心音色数量同步。
-- 补充 `seed-icl-2.0` 复刻音色资产接入设计，尤其是付费确认、资产状态机和 `use_tag_parser` 触发条件。
-- 评估是否将双向流式 WebSocket 接入有声小说实时预览或对话式试听链路。
+  - `[旁白，语调惊恐]正文` 这类方括号语音标签：2026-10-10 已实测该前缀**会被朗读出口**，官方 `<cot text=…>` 语法才转写干净，把 `_render_doubao_voice_label_prefix` 改成 Cot 渲染仍是待批准动作（见 `docs/MODEL_INTEGRATION_REFERENCE.md` §11.4.3 与 `docs/TTS_PROMPT_EVIDENCE_20261010.md` §13/§16）。
+  - 逐音色标签稳定性：目录里 184/277 标 `supports_inline_voice_labels: true`、93 为 false，但 `tts_style_control` 不读取该标记，标签注入与音色是否支持无关。要验的是“在不支持标记的音色上拼 `[标签]` 前缀的实际后果”，以及是否应让渲染层按标记降级。可直接复用 `backend/app/scripts/tag_voice_profiles.py` 的逐音色合成 + 客观闸门 + ASR 转写骨架，把无标签纯台词换成带标签台词即可，无需新写探针。
+  - 逐音色可用性已闭合，无需重跑：2026-10-11 音色画像批量 277 条客观闸门全通过。历史探针 `scripts/verify_seed_tts_voices.py` 因仍发送被禁的 `X-Api-App-Key`（会产出假失败）且能力已被画像链路取代，已于 2026-10-11 删除；它产出的 `backend/tests/seed_tts_voice_verification_results.json` 作为历史证据保留。
+- 继续核对控制台后续新增/下线音色，并保持 `shared/seed_tts_2_0_voices.json` 与模型中心音色数量同步（当前 277 条）。
+- **`seed-icl-2.0` 复刻：2026-10-11 裁定不开通**，不实现复刻创建与复刻资产链路，能力声明已在后端两处、voice manager 和前端兜底表统一降级为不支持。若将来开通，需要重新确认：138 元槽位费的付费确认与状态机、`use_tag_parser` 触发条件、以及 resource_id 切换（代码目前固定用 `seed-tts-2.0`，没有按 speaker 切 `seed-icl-2.0` 的分支）。
+- 双向流式：传输层已是 WS 主路径，剩下的真实待办是**边合成边播**——`_call_seed_tts_websocket()` 把帧累积成完整 `bytes` 才返回，前端没有增量播放通道，需要播放器与后端流式接口一起设计。
 - 在浏览器中人工核对 `http://localhost:5173/model-catalog` 的豆包模型卡片展示。
-- 根据语音标签、复刻音色和双向流式验证结果继续回写 `config/models.yaml` 的待验证标签和能力置信度。
+- 根据语音标签验证结果继续回写 `config/models.yaml` 的 `pending-tag-parser-validation` 标签和能力置信度。
 
 ### 验收标准
 
@@ -825,7 +840,7 @@
 ### 后续待办
 
 - 使用真实 MiMo API 做一次端到端试听验证，确认本地 clone 资产展开后的 `audio.voice` 和 design 资产展开后的 `voice_design_prompt` 与官方接口完全匹配。
-- 如后续 StepAudio 2.5 TTS、`seed-tts-2.0-expressive` 也支持类似音色设计/克隆，应优先复用“本地资产 ID + 生成时展开”的模式，避免把大段 base64 写入项目配置。
+- 如后续 StepAudio 3 TTS、`seed-tts-2.0-expressive` 也支持类似音色设计/克隆，应优先复用“本地资产 ID + 生成时展开”的模式，避免把大段 base64 写入项目配置。
 
 ## 本次落地记录：MiMo/CosyVoice 音色工作台交互收口
 
@@ -1115,3 +1130,29 @@
   - 点击“确认保存”后音色进入列表，列表试听按钮可用。
 - 若 StepFun 返回 `CER_NOT_PASS`，以错误中的 `asr_result` 为准修正输入框里的参考音频逐字内容；例如日志中 `asr_result` 为“当你真的喜欢一个人的时候，就喜欢说傻话办蠢事。”时，输入框不能填写“时间会缓和所有的悲伤……感到满足”。
 - 继续确认 StepFun 是否存在“正式创建持久音色资产”的单独接口；若官方接口明确会收费，需要把“确认保存”改成更明确的二次付费确认弹窗。
+
+## TTS-14 MiMo TTS 流式声明与传输缺口收口（2026-10-11）
+
+### 裁定口径
+
+- `supports_streaming: true`（三个 MiMo 档案、`tts_model_ids.py:175` 能力面、`:385` 目录卡）**保留不动**。
+  该布尔表达的是**上游协议能力**，与 `constraints.stream_audio_format: pcm16` /
+  `non_stream_audio_formats: [wav, mp3]` 一起构成「上游支持、我方消费不了」的完整事实。
+  与豆包 `supports_voice_clone` 不同类：后者声称的是我方自己没建的链路，属虚假声明，已降级为 False。
+- 面向用户的是卡片文案而不是布尔：`catalog_note` 会渲染成设置页能力说明
+  （`useAudiobookVoiceCatalog.ts:118/143`、`AudiobookSetupStep.tsx:260`），`features` 进模型中心卡片。
+  预置卡已删除「低延迟流式输出」与 `features` 里的「低延迟流式」。
+
+### 收口落点
+
+- 消费层闸门：`_ensure_mimo_transport_consumable` 在 `_call_mimo_chat_completions_http`
+  组装完载荷、发出请求之前拦 `stream` 真值与 `audio.format=pcm16`，抛 `TTSUserInputError`
+  （接口 400，不重试、不回落、不扣费）。三变体共用同一条 HTTP 消费路径。
+- 协议编码器不动：`_build_mimo_chat_payload` 仍按官方协议忠实组装，`stream→pcm16` 耦合契约继续被
+  `test_audiobook_tts_provider_payloads.py` 钉住；收口只把「上游 400 被吞成空字节」和
+  「SSE 触发 JSON 解析异常且日志记成 aliyun 故障」换成一次可诊断的显式拒绝。
+- 否掉的方案：补裸 PCM 解码 + SSE 解析。当前没有边合成边播通道，属 YAGNI，且解码质量无法验证。
+
+### 验证记录
+
+- `python -m pytest "backend/tests/test_audiobook_tts_model_ids.py" "backend/tests/test_audiobook_tts_provider_payloads.py" -q`：172 passed。

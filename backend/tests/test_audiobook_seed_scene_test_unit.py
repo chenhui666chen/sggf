@@ -422,14 +422,14 @@ def test_seed_scene_preview_service_materializes_references_in_slot_order(tmp_pa
         references=(
             {
                 "slot_id": "male_2",
-                "source_model": "qwen3-tts-instruct-flash",
+                "source_model": "qwen-audio-3.1-tts-flash",
                 "source_voice_id": "Cherry",
                 "audio_data_base64": encoded,
                 "audio_mime_type": "audio/wav",
             },
             {
                 "slot_id": "male_1",
-                "source_model": "qwen3-tts-instruct-flash",
+                "source_model": "qwen-audio-3.1-tts-flash",
                 "source_voice_id": "Vincent",
                 "audio_data_base64": encoded,
                 "audio_mime_type": "audio/wav",
@@ -515,7 +515,7 @@ def test_seed_scene_preview_service_reuses_url_or_shared_voice_preview_cache(
     service.reference_materializer = _FakeReferenceMaterializer()
     base_reference = {
         "slot_id": "narrator",
-        "source_model": "qwen3-tts-instruct-flash",
+        "source_model": "qwen-audio-3.1-tts-flash",
         "source_voice_id": "Vincent",
     }
 
@@ -527,7 +527,7 @@ def test_seed_scene_preview_service_reuses_url_or_shared_voice_preview_cache(
 
     assert captured_configs == [
         {
-            "tts_model": "qwen3-tts-instruct-flash",
+            "tts_model": "qwen-audio-3.1-tts-flash",
             "voice_id": "Vincent",
             **expected_source,
         }
@@ -546,7 +546,7 @@ def test_seed_scene_reference_request_accepts_url_or_shared_cache_identity() -> 
     )
     cache_reference = SeedSceneTestReferenceRequest(
         slot_id="partner",
-        source_model="qwen3-tts-instruct-flash",
+        source_model="qwen-audio-3.1-tts-flash",
         source_voice_id="Vincent",
     )
 
@@ -558,7 +558,7 @@ def test_seed_scene_reference_request_accepts_url_or_shared_cache_identity() -> 
     with pytest.raises(ValidationError, match="只能提供一种"):
         SeedSceneTestReferenceRequest(
             slot_id="partner",
-            source_model="qwen3-tts-instruct-flash",
+            source_model="qwen-audio-3.1-tts-flash",
             source_voice_id="Vincent",
             audio_data_base64="INLINE_AUDIO",
             audio_url="https://cdn.example.test/voice-a.mp3",

@@ -30,18 +30,18 @@ def test_select_previous_chapter_context_strategy_scales_with_chapter_length() -
     short_strategy = _select_previous_chapter_context_strategy(
         short_chapters,
         next_chapter_number=13,
-        preferred_model="qwen3.7-plus",
+        preferred_model="qwen-plus",
     )
     long_strategy = _select_previous_chapter_context_strategy(
         long_chapters,
         next_chapter_number=13,
-        preferred_model="qwen3.7-plus",
+        preferred_model="qwen-plus",
     )
 
     assert short_strategy["recent_full_count"] >= long_strategy["recent_full_count"]
     assert short_strategy["recent_asset_count"] >= short_strategy["recent_full_count"]
     assert long_strategy["detailed_summary_count"] >= 0
-    assert short_strategy["selected_model"] == "qwen3.7-plus"
+    assert short_strategy["selected_model"] == "qwen-plus"
 
 
 def test_build_recent_full_chapter_excerpt_keeps_head_and_tail() -> None:

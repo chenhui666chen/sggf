@@ -90,7 +90,8 @@ def build_dreamweaver_run_preflight(
     if selector_mode != "off" and engine and engine not in _SELECTOR_SUPPORTED_ENGINES:
         level = "error" if provider_mode == "kling_omni" else "warning"
         message = (
-            "当前视频引擎不支持 selector 路由评估，建议先使用 wan2.7-i2v 或 wan_auto。"
+            "当前视频引擎不支持 selector 路由评估，建议先使用 wan_auto"
+            "（wan3.0-video 为 all-in-one 模型，会自动归入 wan_auto 引擎）。"
         )
         if level == "error":
             result.add_error("selector_engine_unsupported", message)

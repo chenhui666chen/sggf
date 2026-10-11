@@ -698,6 +698,10 @@ def build_contract_from_payload(
         runtime_config["script_review"] = payload.get("script_review")
     if isinstance(payload.get("script_requires_review"), bool):
         runtime_config["script_requires_review"] = payload.get("script_requires_review")
+    if isinstance(payload.get("script_document"), dict):
+        runtime_config["script_document"] = payload.get("script_document")
+    if isinstance(payload.get("story_graph"), dict):
+        runtime_config["story_graph"] = payload.get("story_graph")
     if isinstance(payload.get("prompt_review_required"), bool):
         runtime_config["prompt_review_required"] = payload.get("prompt_review_required")
     if isinstance(payload.get("prompt_review"), dict):

@@ -9,6 +9,11 @@ from app.services.prompts.narrative_quality import (
 from app.services.prompts.review_prompts import GENRE_REVIEW_MODULES
 # 注意：统一在模块顶部导入；函数内禁止再就地 import 同名（会遮蔽整个函数作用域）
 from app.services.chapter_structure_guard import extract_plan_hook_tail, extract_writable_plan
+from app.services.context_observability import (
+    SectionStat,
+    TOKEN_CHARS_RATIO,
+    estimate_tokens,
+)
 
 
 def _join_prompt_sections(*sections: str) -> str:
@@ -34,6 +39,8 @@ class ChapterPromptBuilder:
             self.genre,
             DEFAULT_GENRE_MODULE,
         )
+        # 阶段 A 观测：最近一次 build_user_prompt 的各 section 统计，供外层收集器读取
+        self.last_section_stats: List[SectionStat] = []
 
     def build_system_prompt(self) -> str:
         """构建章节创作的 system prompt。"""
@@ -200,6 +207,27 @@ class ChapterPromptBuilder:
             ])
         return risk_sections
 
+    def _make_section_stat(
+        self,
+        section_id: str,
+        text: str,
+        *,
+        layer: str,
+        source_field: str = "",
+    ) -> SectionStat:
+        """构造单个 section 观测项（阶段 A 无裁剪，raw 与 final 一致）。"""
+        content = str(text or "")
+        return SectionStat(
+            section_id=section_id,
+            source_field=source_field or section_id,
+            layer=layer,
+            raw_chars=len(content),
+            raw_tokens=estimate_tokens(content),
+            final_chars=len(content),
+            final_tokens=estimate_tokens(content),
+            trim_method="none",
+        )
+
     def build_user_prompt(
         self,
         next_chapter_number: int,
@@ -346,7 +374,93 @@ class ChapterPromptBuilder:
             f"请开始创作第{next_chapter_number}章内容：",
         ]
 
-        return "\n\n".join(section for section in sections if section and section.strip())
+        final_prompt = "\n\n".join(section for section in sections if section and section.strip())
+
+        # 阶段 A 观测：按最终渲染口径登记动态 section（空值 fallback 文本计入对应 section）
+        stats = [
+            self._make_section_stat("chapter_plan", chapter_plan, layer="L0"),
+            self._make_section_stat(
+                "previous_ending",
+                previous_ending or "（这是第一章，请设计一个能直接起势的开场）",
+                layer="L0",
+            ),
+            self._make_section_stat(
+                "recent_chapter_assets",
+                recent_chapter_assets_summary or "（最近章节没有可用的结构化连续性资产）",
+                layer="L1",
+            ),
+            self._make_section_stat(
+                "current_chapter_outline",
+                current_chapter_outline or "（未提取到当前章节的精确细纲，以章节规划为准）",
+                layer="L0",
+            ),
+            self._make_section_stat(
+                "current_volume_context",
+                current_volume_context or "（无额外卷级上下文）",
+                layer="L2",
+            ),
+            self._make_section_stat(
+                "core_character_anchor",
+                core_character_anchor_context or "（无可用核心角色锚点）",
+                layer="L3",
+            ),
+            self._make_section_stat(
+                "focus_character_relationship",
+                focus_character_relationship_context or "（无可用焦点人物关系摘要）",
+                layer="L1",
+            ),
+            self._make_section_stat(
+                "character_runtime",
+                character_runtime_context or "（无可用人物运行态摘要）",
+                layer="L1",
+            ),
+            self._make_section_stat(
+                "epic_framework",
+                epic_framework_context or "（无额外长篇框架约束）",
+                layer="L2/L3",
+            ),
+            self._make_section_stat(
+                "rag_character",
+                rag_character_context or "（无额外人物细节）",
+                layer="L4",
+            ),
+            self._make_section_stat(
+                "rag_world",
+                rag_world_context or "（无额外设定细节）",
+                layer="L4",
+            ),
+            self._make_section_stat("rag_previous", rag_previous_context, layer="L4"),
+            self._make_section_stat("risk_sections", "\n\n".join(risk_sections), layer="L3"),
+            self._make_section_stat(
+                "opening_ending",
+                f"{selected_opening[0]} {selected_opening[1]} {selected_ending[0]} {selected_ending[1]}",
+                layer="L0",
+            ),
+            self._make_section_stat("hook_tail", hook_tail, layer="L0"),
+            self._make_section_stat(
+                "position_rhythm",
+                position_rhythm_hint or "（无特殊节奏要求，按章节规划自然推进）",
+                layer="L2",
+            ),
+        ]
+        dynamic_tokens = sum(stat.final_tokens for stat in stats)
+        # 差值仅为真正的固定标题/规则文本；空值 fallback 已归入对应 section
+        fixed_tokens = max(0, estimate_tokens(final_prompt) - dynamic_tokens)
+        stats.append(
+            SectionStat(
+                section_id="fixed_rules",
+                source_field="fixed_text",
+                layer="L0",
+                raw_chars=int(fixed_tokens / TOKEN_CHARS_RATIO),
+                raw_tokens=fixed_tokens,
+                final_chars=int(fixed_tokens / TOKEN_CHARS_RATIO),
+                final_tokens=fixed_tokens,
+                trim_method="none",
+            )
+        )
+        self.last_section_stats = stats
+
+        return final_prompt
 
     def build_segment_user_prompt(
         self,

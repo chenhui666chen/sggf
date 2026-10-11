@@ -16,8 +16,10 @@ export interface NarrationStyleOption {
 export const DEFAULT_NARRATION_STYLE: KnownNarrationStyleId = 'professional'
 
 const ALL_NARRATION_TTS_MODELS = TTS_MODELS
+// Qwen 快速档（现 qwen-audio-3.1-tts-flash）只暴露 natural_language 控制，
+// 情绪混排类风格仍按能力面排除；3.1 写法测评（B3）给出实测结论后再评估是否放通。
 const EXPRESSIVE_NARRATION_TTS_MODELS = TTS_MODELS.filter(
-  (model) => model !== 'qwen3-tts-instruct-flash',
+  (model) => model !== 'qwen-audio-3.1-tts-flash',
 )
 
 const KNOWN_NARRATION_STYLE_IDS: readonly KnownNarrationStyleId[] = [

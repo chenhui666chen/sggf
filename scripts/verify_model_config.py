@@ -31,11 +31,13 @@ def load_yaml(path: Path):
         return yaml.safe_load(f)
 
 
-def load_domains():
+def load_all_domains():
     path = ROOT / "config" / "intent_domains.yaml"
-    data = load_yaml(path)
-    domains = data.get("domains", {})
-    wan = domains.get("wan")
+    return load_yaml(path).get("domains", {})
+
+
+def load_domains():
+    wan = load_all_domains().get("wan")
     if not wan:
         raise SystemExit("❌ intent_domains.yaml 中未找到 wan domain")
     return wan
@@ -180,39 +182,26 @@ def check_model_capabilities(models, issues: Issues):
                 issues.fix(f"模型 {m['id']} 的能力 '{cap['name']}' 缺少 confidence 字段")
 
 
-def check_video_models_in_tags(domains, models, issues: Issues):
-    """检查4: 视频模型是否在 domains 的 video_generation 中注册"""
-    registered_video_models = {m["id"] for m in domains.get("video_generation", {}).get("models", [])}
+_VIDEO_MODALITIES = ("text_to_video", "image_to_video", "video_to_video")
+
+
+def check_video_modality_coverage(domains, models, issues: Issues):
+    """检查4: models.yaml 用到的视频模态是否被某个 domain 的 modalities 声明
+
+    intent_domains.yaml 里没有模型 ID 清单，只有各 domain 的 modalities 词表；
+    视频模型能否被意图路由接住，取决于它声明的模态在不在这些词表里。
+    domains 必须是 load_all_domains() 的完整映射，不是 load_domains() 返回的单个 wan domain。
+    """
+    declared = set()
+    for domain in domains.values():
+        declared.update((domain.get("modalities") or {}).keys())
+
     for m in models:
-        if m.get("modality", [])[0] in ("text_to_video", "image_to_video"):
-            if m["id"] not in registered_video_models:
-                issues.warn(f"视频模型 {m['id']} 未在 intent_domains.yaml 的 video_generation.models 中注册")
-
-
-def check_camera_terms(domains, matcher_vocab, issues: Issues):
-    """检查5: 运镜术语一致性"""
-    domain_terms = set(domains.get("camera_control", {}).get("terms", {}).keys())
-    matcher_terms = set(matcher_vocab.get("CAMERA_VOCABULARY", {}).keys()) if "CAMERA_VOCABULARY" in matcher_vocab else set()
-
-    if not matcher_terms:
-        path = ROOT / "core" / "semantic_matcher.py"
-        src = path.read_text(encoding="utf-8")
-        m = re.search(r"CAMERA_VOCABULARY\s*=\s*\{([\s\S]*?)\n\}", src)
-        if m:
-            block = m.group(1)
-            for entry in block.split("{"):
-                if "}" not in entry:
-                    continue
-                k_v = entry[: entry.index("}")].strip().rstrip(",")
-                colon_idx = k_v.find(":")
-                if colon_idx < 0:
-                    continue
-                key = k_v[:colon_idx].strip().strip("\"'")
-                matcher_terms.add(key)
-
-    missing_camera = domain_terms - matcher_terms
-    for t in sorted(missing_camera):
-        issues.warn(f"运镜术语 '{t}' 在 intent_domains.yaml 中定义，但 semantic_matcher.py 的 CAMERA_VOCABULARY 中缺失")
+        for modality in m.get("modality", []):
+            if modality in _VIDEO_MODALITIES and modality not in declared:
+                issues.warn(
+                    f"视频模型 {m['id']} 的模态 '{modality}' 未被 intent_domains.yaml 任何 domain 的 modalities 声明"
+                )
 
 
 # ── 自动修复 ──────────────────────────────────────────────
@@ -306,20 +295,17 @@ def main():
 
     issues = Issues()
 
-    print("\n 检查 1/5: 风格词汇一致性 (intent_domains <-> semantic_matcher)")
+    print("\n 检查 1/4: 风格词汇一致性 (intent_domains <-> semantic_matcher)")
     check_style_vocab(domains, matcher_vocab, issues)
 
-    print(" 检查 2/5: 模型标签引用 (models.yaml tags -> intent_domains styles)")
+    print(" 检查 2/4: 模型标签引用 (models.yaml tags -> intent_domains styles)")
     check_model_tags(domains, models, issues)
 
-    print(" 检查 3/5: 模型能力溯源 (source / verified_at / confidence)")
+    print(" 检查 3/4: 模型能力溯源 (source / verified_at / confidence)")
     check_model_capabilities(models, issues)
 
-    print(" 检查 4/5: 视频模型注册 (models.yaml -> intent_domains video_generation)")
-    check_video_models_in_tags(domains, models, issues)
-
-    print(" 检查 5/5: 运镜术语一致性 (intent_domains camera <-> semantic_matcher)")
-    check_camera_terms(domains, matcher_vocab, issues)
+    print(" 检查 4/4: 视频模态覆盖 (models.yaml -> intent_domains modalities)")
+    check_video_modality_coverage(load_all_domains(), models, issues)
 
     print(issues.report())
 

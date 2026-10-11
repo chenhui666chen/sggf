@@ -27,6 +27,7 @@
 - Compat Level：`backward_compatible`
 - Owner：`user-assets/local-first`
 - Schema：`frontend/src/contracts/userAssetLocalStorage.schema.json`
+- Doc：`docs/contracts/USER_ASSET_LOCAL_STORAGE_METADATA_CONTRACT.md`
 - Generator：`scripts/generate_user_asset_local_storage_contract.py`
 - Frontend generated：`frontend/src/contracts/userAssetLocalStorageContract.generated.ts`
 - Backend generated：`backend/app/schemas/user_asset_local_storage_contract_generated.py`

@@ -79,7 +79,7 @@ describe('storyExpansionResultModel', () => {
             cards_response_mode: 'raw_cards',
             cards_retry_used: true,
             recognized_new_character_count: 1,
-            recognized_new_character_names: ['椤炬櫄'],
+            recognized_new_character_names: ['顾晚'],
           },
         },
       ],
@@ -122,7 +122,7 @@ describe('storyExpansionResultModel', () => {
       cards_response_mode: 'raw_cards',
       cards_retry_used: true,
       recognized_new_character_count: 1,
-      recognized_new_character_names: ['椤炬櫄'],
+      recognized_new_character_names: ['顾晚'],
     })
     expect(view?.outlineOps).toHaveLength(1)
     expect(view?.newCharacters).toEqual(['顾晚'])

@@ -45,7 +45,7 @@ def test_agent_dispatch_reaches_tts_engine_boundary_with_fixed_voice(monkeypatch
     result = client.synthesize(
         text="Keep walking.",
         voice_id="Cherry",
-        tts_model="qwen3-tts-instruct-flash",
+        tts_model="qwen-audio-3.1-tts-flash",
         instructions="Speak slowly and stress walking.",
         pitch=0.7,
         pitch_ratio=0.8,
@@ -59,11 +59,11 @@ def test_agent_dispatch_reaches_tts_engine_boundary_with_fixed_voice(monkeypatch
     assert result.success is True
     assert result.audio_data == b"unit-audio"
     assert captured["text"] == "Keep walking."
-    assert captured["model_id"] == "qwen3-tts-instruct-flash"
+    assert captured["model_id"] == "qwen-audio-3.1-tts-flash"
 
     voice_params = captured["voice_params"]
     assert voice_params["speaker"] == "Cherry"
-    assert voice_params["tts_model"] == "qwen3-tts-instruct-flash"
+    assert voice_params["tts_model"] == "qwen-audio-3.1-tts-flash"
     assert "pitch" not in voice_params
     assert "pitch_ratio" not in voice_params
     assert "speed" not in voice_params

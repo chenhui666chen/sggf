@@ -52,6 +52,9 @@ interface EvolutionStatus {
 interface PromptVersion {
   version_id: string
   iteration: number
+  /** 真实适应度：确定AI段落占比（0-1，越低越好） */
+  avg_ai_ratio?: number
+  /** 诊断项：改写区间恒为 100，无比较价值 */
   avg_ai_score: number
   avg_score_reduction: number
   analysis: string
@@ -78,6 +81,8 @@ interface PromptDetail {
   iteration: number
   prompt_text: string
   avg_ai_score: number
+  /** 真实适应度：确定AI段落占比（0-1，越低越好） */
+  avg_ai_ratio?: number
   avg_score_reduction: number
   analysis: string
   evaluation_results: Array<{
@@ -203,6 +208,8 @@ interface ApprovedPrompt {
   evolution_id: string
   prompt_text: string
   avg_ai_score: number
+  /** 真实适应度：确定AI段落占比（0-1，越低越好） */
+  avg_ai_ratio?: number
   avg_composite_score?: number
   avg_readability?: number
   avg_writing?: number
@@ -222,6 +229,11 @@ interface ModelInfo {
   is_eliminated: boolean
   performance: {
     total_evaluations: number
+    /** 确定AI段落占比（0-1，越低越好）；选型/淘汰主项 */
+    avg_ai_ratio: number | null
+    ai_ratio_stddev: number | null
+    best_ai_ratio: number | null
+    /** 诊断项：改写区间恒为 100，无比较价值 */
     avg_ai_score: number | null
     avg_improvement: number | null
     best_ai_score: number | null
@@ -245,6 +257,8 @@ interface ModelCombination {
   total_success: number
   distinct_sample_count: number
   avg_ai_score: number
+  /** 确定AI段落占比（0-1，越低越好）；排序主项。旧记录可能缺省 */
+  avg_ai_ratio?: number
   avg_fidelity_similarity: number
   composite_score: number
   evaluation_policy_version: string
@@ -309,6 +323,9 @@ export default function PromptEvolutionPage() {
   const [evalResults, setEvalResults] = useState<any>(null)
   const [modelGenre, setModelGenre] = useState('通用')
   const [modelCombinations, setModelCombinations] = useState<ModelCombination[]>([])
+  // 当前评测口径版本由后端下发；不要硬编码版本号——历史上写死 'ai-trace-v2'，
+  // 后端升版后管理页长期把有效记录误判为"已过期"
+  const [currentPolicyVersion, setCurrentPolicyVersion] = useState<string>('')
   const [evaluationMetrics, setEvaluationMetrics] = useState<EvaluationMetrics | null>(null)
   const [backgroundStatus, setBackgroundStatus] = useState<BackgroundOptimizationStatus | null>(null)
 
@@ -353,6 +370,7 @@ export default function PromptEvolutionPage() {
       setModels(modelsRes.data.models || [])
       setModelConfig(configRes.data)
       setModelCombinations(combinationsRes.data.combinations || [])
+      setCurrentPolicyVersion(combinationsRes.data.current_policy_version || '')
       setEvaluationMetrics(metricsRes.data.metrics || null)
       setBackgroundStatus(backgroundRes.data)
     } catch { /* 获取模型数据失败 */ }
@@ -597,6 +615,13 @@ export default function PromptEvolutionPage() {
 
   const getScoreColor = (score: number) => score <= 30 ? 'success.main' : score <= 50 ? 'warning.main' : 'error.main'
 
+  // 🔧 2026-10-08：版本层的真实适应度是 avg_ai_ratio（确定AI段落占比，0-1）。
+  // avg_ai_score 在改写区间恒为 100，只能作为旧记录缺省时的回退显示。
+  const ratioToScore = (ratio: number | undefined, fallbackScore: number) =>
+    ratio != null ? ratio * 100 : fallbackScore
+  const formatRatio = (ratio: number | undefined, fallbackScore: number) =>
+    ratio != null ? `${(ratio * 100).toFixed(1)}%` : fallbackScore.toFixed(1)
+
   return (
     <Box>
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
@@ -829,8 +854,10 @@ export default function PromptEvolutionPage() {
               </TableHead>
               <TableBody>
                 {[...models].sort((a, b) => {
-                  const sa = a.performance?.avg_ai_score ?? 999
-                  const sb = b.performance?.avg_ai_score ?? 999
+                  // 🔧 排序主项为确定AI段落占比（越低越好）。avg_ai_score 在改写区间
+                  // 恒为 100，按它排序等价于按常数排序。
+                  const sa = a.performance?.avg_ai_ratio ?? 999
+                  const sb = b.performance?.avg_ai_ratio ?? 999
                   return sa - sb
                 }).map((m) => (
                   <TableRow key={m.model_id} sx={{
@@ -847,9 +874,9 @@ export default function PromptEvolutionPage() {
                     <TableCell><Chip label={m.provider} size="small" variant="outlined" /></TableCell>
                     <TableCell align="center">{m.performance?.total_evaluations ?? 0}</TableCell>
                     <TableCell align="center">
-                      {m.performance?.avg_ai_score != null ? (
-                        <Typography variant="body2" sx={{ color: getScoreColor(m.performance.avg_ai_score), fontWeight: 'bold' }}>
-                          {m.performance.avg_ai_score.toFixed(1)}
+                      {m.performance?.avg_ai_ratio != null ? (
+                        <Typography variant="body2" sx={{ color: getScoreColor(m.performance.avg_ai_ratio * 100), fontWeight: 'bold' }}>
+                          {(m.performance.avg_ai_ratio * 100).toFixed(1)}%
                         </Typography>
                       ) : '-'}
                     </TableCell>
@@ -861,9 +888,9 @@ export default function PromptEvolutionPage() {
                       ) : '-'}
                     </TableCell>
                     <TableCell align="center">
-                      {m.performance?.best_ai_score != null && m.performance.best_ai_score < 100 ? (
-                        <Typography variant="body2" sx={{ color: getScoreColor(m.performance.best_ai_score) }}>
-                          {m.performance.best_ai_score}
+                      {m.performance?.best_ai_ratio != null && m.performance.best_ai_ratio < 1 ? (
+                        <Typography variant="body2" sx={{ color: getScoreColor(m.performance.best_ai_ratio * 100) }}>
+                          {(m.performance.best_ai_ratio * 100).toFixed(1)}%
                         </Typography>
                       ) : '-'}
                     </TableCell>
@@ -897,7 +924,7 @@ export default function PromptEvolutionPage() {
                 {modelCombinations.slice(0, 20).map((item) => {
                   const qualification = item.is_current
                     ? t('admin.promptEvolution.combo.qualCurrent')
-                    : item.evaluation_policy_version !== 'ai-trace-v2'
+                    : !!currentPolicyVersion && item.evaluation_policy_version !== currentPolicyVersion
                     ? t('admin.promptEvolution.combo.qualExpired')
                     : item.total_success < 3
                       ? t('admin.promptEvolution.combo.qualNoData')
@@ -911,7 +938,8 @@ export default function PromptEvolutionPage() {
                     <TableCell>{item.prompt_version_id}</TableCell>
                     <TableCell>{item.model_name}</TableCell>
                     <TableCell align="right">{item.total_success}/{item.distinct_sample_count}</TableCell>
-                    <TableCell align="right">{item.avg_ai_score.toFixed(1)}</TableCell>
+                    {/* 展示排序主项「确定AI段落占比」（越低越好）；avg_ai_score 在改写区间恒为 100，无信息量 */}
+                    <TableCell align="right">{`${((item.avg_ai_ratio ?? 1) * 100).toFixed(1)}%`}</TableCell>
                     <TableCell align="right">{item.avg_fidelity_similarity.toFixed(1)}%</TableCell>
                     <TableCell align="right">
                       {item.composite_score.toFixed(1)}
@@ -1106,7 +1134,7 @@ export default function PromptEvolutionPage() {
                       return (
                         <TableRow key={v.version_id} sx={{ bgcolor: isApproved ? 'success.light' : 'inherit' }}>
                           <TableCell>#{v.iteration}</TableCell>
-                          <TableCell><Typography sx={{ color: getScoreColor(v.avg_ai_score), fontWeight: 'bold' }}>{v.avg_ai_score.toFixed(1)}</Typography></TableCell>
+                          <TableCell><Typography sx={{ color: getScoreColor(ratioToScore(v.avg_ai_ratio, v.avg_ai_score)), fontWeight: 'bold' }}>{formatRatio(v.avg_ai_ratio, v.avg_ai_score)}</Typography></TableCell>
                           <TableCell>{v.avg_score_reduction.toFixed(1)}</TableCell>
                           <TableCell><Typography variant="caption" sx={{ maxWidth: 200, display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{v.analysis}</Typography></TableCell>
                           <TableCell>
@@ -1145,7 +1173,7 @@ export default function PromptEvolutionPage() {
               <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
                 <Box>
                   <Chip label={t('admin.promptEvolution.prompt.iterBadge', { iteration: selectedPrompt.iteration })} sx={{ mr: 1 }} />
-                  <Chip label={t('admin.promptEvolution.prompt.aiScoreBadge', { score: selectedPrompt.avg_ai_score.toFixed(1) })} color={selectedPrompt.avg_ai_score <= 30 ? 'success' : selectedPrompt.avg_ai_score <= 50 ? 'warning' : 'error'} />
+                  <Chip label={t('admin.promptEvolution.prompt.aiScoreBadge', { score: formatRatio(selectedPrompt.avg_ai_ratio, selectedPrompt.avg_ai_score) })} color={ratioToScore(selectedPrompt.avg_ai_ratio, selectedPrompt.avg_ai_score) <= 30 ? 'success' : ratioToScore(selectedPrompt.avg_ai_ratio, selectedPrompt.avg_ai_score) <= 50 ? 'warning' : 'error'} />
                 </Box>
                 <Button startIcon={<ContentCopyIcon />} onClick={() => copyToClipboard(selectedPrompt.prompt_text)} size="small">{t('admin.common.copy')}</Button>
               </Box>
@@ -1240,7 +1268,7 @@ export default function PromptEvolutionPage() {
                   {approvedPrompts.map((p) => (
                     <TableRow key={p.version_id}>
                       <TableCell><Typography variant="body2" sx={{ fontFamily: 'monospace' }}>{p.version_id?.substring(0, 8)}...</Typography></TableCell>
-                      <TableCell><Typography sx={{ color: getScoreColor(p.avg_ai_score), fontWeight: 'bold' }}>{p.avg_ai_score.toFixed(1)}</Typography></TableCell>
+                      <TableCell><Typography sx={{ color: getScoreColor(ratioToScore(p.avg_ai_ratio, p.avg_ai_score)), fontWeight: 'bold' }}>{formatRatio(p.avg_ai_ratio, p.avg_ai_score)}</Typography></TableCell>
                       <TableCell><Typography variant="caption">{formatDate(p.approved_at)}</Typography></TableCell>
                       <TableCell>
                         <Tooltip title={t('admin.common.view')}><IconButton size="small" onClick={() => handleViewPrompt(p.evolution_id, p.version_id)}><VisibilityIcon fontSize="small" /></IconButton></Tooltip>

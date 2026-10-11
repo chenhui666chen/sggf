@@ -84,6 +84,7 @@ const PromptInspector = ({ snapshot }: { snapshot: TtsPromptTestProviderPromptSn
           <PromptBlock title="instructions" value={snapshot.provider_prompt.instructions} />
           <PromptBlock title="messages" value={snapshot.provider_prompt.messages} />
           <PromptBlock title="text_prefix" value={snapshot.provider_prompt.text_prefix} />
+          <PromptBlock title="tag_syntax" value={snapshot.provider_prompt.tag_syntax ?? ''} />
           <PromptBlock title="context_texts" value={snapshot.provider_prompt.context_texts} />
           <PromptBlock title="inline_tag_strategy" value={snapshot.provider_prompt.inline_tag_strategy ?? {}} />
           <PromptBlock title="delivery_plan" value={snapshot.delivery_plan} />

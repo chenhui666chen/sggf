@@ -105,13 +105,14 @@ def build_default_preview_cache_key(*, model: str, voice_id: str) -> str:
     if not normalized_voice_id:
         raise ValueError("voice_id is required to resolve a preview cache key")
 
-    if normalized_model.startswith("qwen3-tts"):
+    entry = get_voice_entry(normalized_voice_id, model=normalized_model)
+    if entry is None and normalized_model == DEFAULT_AUDIOBOOK_TTS_MODEL:
+        # 目录未命中：兼容历史别名（male_narrator 等）与旧 CosyVoice speaker 写法。
         preset = VoiceManager.PRESET_VOICES.get(normalized_voice_id)
         speaker_id = normalize_speaker_id(
             preset["tts_speaker_id"] if preset else normalized_voice_id
         )
     else:
-        entry = get_voice_entry(normalized_voice_id, model=normalized_model)
         speaker_id = str(entry.get("speaker") if entry else normalized_voice_id)
 
     voice_params = {

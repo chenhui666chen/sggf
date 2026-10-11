@@ -176,12 +176,15 @@ def build_legacy_tts_request(
     pitch: Any = 1.0,
     volume: Any = 1.0,
     emotion: Any = None,
-    default_speaker: str = "Ryan",
+    default_speaker: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Normalize historical TTS call parameters to the unified runtime payload."""
     resolved_voice_style = str(voice_style or "natural")
     resolved_text = str(text or "").strip()
-    resolved_speaker = str(voice_id or speaker or default_speaker or "Ryan").strip() or default_speaker
+    # 不再兜底到已退役模型的音色名（旧默认 "Ryan" 不在任何现役音色目录里，发给上游只会得到一个
+    # 难以定位的无效 voice 报错）：留空由各模型自己的默认声线接管，
+    # 没有默认声线的模型（如 cosyvoice-v3.5-plus 只吃复刻/设计音色）会显式拒单。
+    resolved_speaker = str(voice_id or speaker or default_speaker or "").strip()
     speed_value = _normalize_legacy_tts_scale(rate if rate is not None else speed, default=1.0)
     pitch_value = _normalize_legacy_tts_scale(pitch, default=1.0)
     resolved_emotion = str(emotion or _legacy_voice_style_to_emotion(resolved_voice_style))

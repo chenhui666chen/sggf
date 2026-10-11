@@ -15,8 +15,8 @@ def test_model_limit_comes_from_registry_config():
     model_hub.initialize(config_path)
     summarizer = LayeredSummarizer()
 
-    assert summarizer._get_model_limit("qwen3.7-plus") == 1000000
-    assert summarizer._get_model_limit("qwen-" + "plus") == summarizer.DEFAULT_MODEL_LIMIT
+    assert summarizer._get_model_limit("qwen-plus") == 1000000
+    assert summarizer._get_model_limit("not-in-registry") == summarizer.DEFAULT_MODEL_LIMIT
 
 
 def test_prepare_context_uses_pass_through_when_input_is_small():
@@ -50,7 +50,7 @@ def test_prepare_context_uses_forced_model_budget(monkeypatch):
     def fake_get_model_limit(model_id: str) -> int:
         if model_id == "doubao-seed-character":
             return 1600
-        if model_id == "qwen3.7-plus":
+        if model_id == "qwen-plus":
             return 1000000
         return summarizer.DEFAULT_MODEL_LIMIT
 
@@ -229,12 +229,12 @@ def test_estimate_selected_model_matches_current_capability_tiers():
         assert spec is not None, f"{model_id} 未在统一模型注册中心"
         assert spec.is_available(), f"{model_id} 当前不可用"
 
-    assert LayeredSummarizer.estimate_selected_model("chapter_generation", 20) == "qwen3.7-plus"
-    assert LayeredSummarizer.estimate_selected_model("chapter_generation", 120) == "qwen3.7-plus"
-    assert LayeredSummarizer.estimate_selected_model("chapter_generation", 500) == "qwen3.7-plus"
-    assert LayeredSummarizer.estimate_selected_model("structure_design", 20) == "qwen3.7-plus"
-    assert LayeredSummarizer.estimate_selected_model("outline_expand", 30) == "qwen3.7-plus"
-    assert LayeredSummarizer.estimate_selected_model("character_expand", 180) == "qwen3.7-plus"
+    assert LayeredSummarizer.estimate_selected_model("chapter_generation", 20) == "qwen-plus"
+    assert LayeredSummarizer.estimate_selected_model("chapter_generation", 120) == "qwen-plus"
+    assert LayeredSummarizer.estimate_selected_model("chapter_generation", 500) == "qwen-plus"
+    assert LayeredSummarizer.estimate_selected_model("structure_design", 20) == "qwen-plus"
+    assert LayeredSummarizer.estimate_selected_model("outline_expand", 30) == "qwen-plus"
+    assert LayeredSummarizer.estimate_selected_model("character_expand", 180) == "qwen-plus"
 
 
 def test_summarize_chapter_block_prefers_standardized_outline_fields():

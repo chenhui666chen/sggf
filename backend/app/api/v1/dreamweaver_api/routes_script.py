@@ -110,6 +110,12 @@ def get_run_script(
         "script_generation": script_generation,
         "script_review": script_review,
         "script_requires_review": script_requires_review,
+        "script_document": runtime_cfg.get("script_document")
+        if isinstance(runtime_cfg.get("script_document"), dict)
+        else {},
+        "story_graph": runtime_cfg.get("story_graph")
+        if isinstance(runtime_cfg.get("story_graph"), dict)
+        else {},
     }
 
 
@@ -207,10 +213,10 @@ def approve_safety_audit_failure(
 ):
     safe_run_id = _normalize_run_id(run_id)
     row = _load_run_for_user(db, safe_run_id, current_user.id)
-    _ensure_run_not_running(row, action="瀹夊叏瀹℃牳浜哄伐鏀捐")
+    _ensure_run_not_running(row, action="安全审核人工放行")
 
     if str(row.status or "").strip().lower() != "failed":
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="鍙湁澶辫触鐨?run 鎵嶈兘鎵ц浜哄伐鏀捐")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="只有失败的 run 才能执行人工放行")
 
     contract = copy.deepcopy(row.contract_json) if isinstance(row.contract_json, dict) else {}
     runtime_cfg = copy.deepcopy(contract.get("runtime_config")) if isinstance(contract.get("runtime_config"), dict) else {}
@@ -223,7 +229,7 @@ def approve_safety_audit_failure(
         history_payload=history_payload,
     )
     if safety_context is None:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="褰撳墠 run 涓嶆槸鍙互浜哄伐鏀捐鐨勫畨鍏ㄥ鏍搁樆鏂换鍔?")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="当前 run 不是可以人工放行的安全审核阻断任务")
 
     audit = safety_context["audit"]
     rework_reason = safety_context["rework_reason"]

@@ -15,6 +15,7 @@ import re
 from typing import Optional
 
 from sqlalchemy import func
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.models.project import Chapter
@@ -23,6 +24,25 @@ logger = logging.getLogger("uvicorn.error")
 
 # Chapter.title 为 String(255)，超长内容提取出的标题需要截断后再入库
 MAX_CHAPTER_TITLE_LENGTH = 255
+
+# 自动编号并发冲突时的最大尝试次数（首次 + 重试一次）：
+# 两个请求同时读到相同 MAX 时，loser 回滚重读 MAX 重试即可拿到未占用编号
+AUTO_NUMBER_MAX_ATTEMPTS = 2
+
+
+class ChapterNumberConflictError(Exception):
+    """章节号冲突：显式指定的编号与既有活跃章重复，或自动编号并发重试后仍冲突。
+
+    领域异常，不耦合 HTTP；API 层捕获后映射为 409（对齐项目现有
+    ``RevisionConflictError`` → 409 的约定），避免并发时 IntegrityError 直接传播为 500。
+    """
+
+    def __init__(self, project_id: int, chapter_number: int):
+        self.project_id = project_id
+        self.chapter_number = chapter_number
+        super().__init__(
+            f"章节号冲突：project_id={project_id} chapter_number={chapter_number}"
+        )
 
 
 def count_content_words(content: str) -> int:
@@ -34,14 +54,23 @@ def count_content_words(content: str) -> int:
     return len(re.sub(r"\s", "", content or ""))
 
 
+def peek_max_chapter_number(db: Session, project_id: int) -> Optional[int]:
+    """返回项目当前最大章节号（含软删除行），无任何章节时返回 ``None``。
+
+    含软删除行是刻意的：编号 ``MAX+1`` 永不复用已删号（避免 RAG/快照覆盖错误）。
+    ``None`` 与 ``0`` 语义不同——``None`` 表示“项目从未存在任何章节”，
+    供上层区分“无章节历史”与“有历史但全部软删除”（阶段 B WP2 重置语义）。
+    """
+    return db.query(func.max(Chapter.chapter_number)).filter(
+        Chapter.project_id == project_id
+    ).scalar()
+
+
 def resolve_chapter_number(db: Session, project_id: int, requested: Optional[int] = None) -> int:
     """解析章节号：未指定时取当前项目最大章节号 + 1。"""
     if requested:
         return requested
-    max_chapter_number = db.query(func.max(Chapter.chapter_number)).filter(
-        Chapter.project_id == project_id
-    ).scalar()
-    return (max_chapter_number or 0) + 1
+    return (peek_max_chapter_number(db, project_id) or 0) + 1
 
 
 def resolve_chapter_title(content: str, chapter_number: int, requested: Optional[str] = None) -> str:
@@ -173,21 +202,47 @@ def create_project_chapter(
     chapter_number: Optional[int] = None,
     title: Optional[str] = None,
 ) -> Chapter:
-    """创建一个归属于 ``project_id`` 的章节并完成配套处理。"""
-    resolved_content = content or ""
-    resolved_number = resolve_chapter_number(db, project_id, chapter_number)
-    resolved_title = resolve_chapter_title(resolved_content, resolved_number, title)
+    """创建一个归属于 ``project_id`` 的章节并完成配套处理。
 
-    chapter = Chapter(
-        project_id=project_id,
-        chapter_number=resolved_number,
-        title=resolved_title,
-        content=resolved_content,
-        word_count=count_content_words(resolved_content),
-    )
-    db.add(chapter)
-    db.commit()
-    db.refresh(chapter)
+    阶段 B WP2：部分唯一索引 ``uq_chapters_project_number_active`` 只能阻止重复落库，
+    并发时 loser 会抛 IntegrityError。本函数是该事务唯一写入方（端点仅做过项目归属
+    只读查询），故可安全 ``session.rollback()`` 后重读 MAX 重试（不同于嵌入外层事务时
+    须用 SAVEPOINT）：自动编号冲突重试一次；显式指定重复编号无重试意义，直接抛冲突。
+    """
+    resolved_content = content or ""
+    explicit_number = chapter_number is not None
+    max_attempts = 1 if explicit_number else AUTO_NUMBER_MAX_ATTEMPTS
+
+    chapter: Optional[Chapter] = None
+    for attempt in range(max_attempts):
+        resolved_number = resolve_chapter_number(db, project_id, chapter_number)
+        resolved_title = resolve_chapter_title(resolved_content, resolved_number, title)
+        candidate = Chapter(
+            project_id=project_id,
+            chapter_number=resolved_number,
+            title=resolved_title,
+            content=resolved_content,
+            word_count=count_content_words(resolved_content),
+        )
+        try:
+            db.add(candidate)
+            db.commit()
+            db.refresh(candidate)
+            chapter = candidate
+            break
+        except IntegrityError as exc:
+            db.rollback()
+            if explicit_number:
+                # 显式指定重复编号：无重试意义，转明确冲突（API 层 → 409）
+                raise ChapterNumberConflictError(project_id, resolved_number) from exc
+            logger.warning(
+                f"⚠️ 第{resolved_number}章编号并发冲突，回滚后重读 MAX 重试"
+                f"（第 {attempt + 1}/{max_attempts} 次）"
+            )
+
+    if chapter is None:
+        # 自动编号重试后仍冲突（高并发极端场景）：转明确冲突而非 500
+        raise ChapterNumberConflictError(project_id, resolved_number)
 
     _track_new_chapter_entities(db, chapter)
     _start_chapter_post_save(chapter)

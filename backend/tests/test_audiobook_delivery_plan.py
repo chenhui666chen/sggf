@@ -22,7 +22,7 @@ from app.services.audiobook.tts_style_control import (
 
 def test_tts_batch_item_resolves_segment_model_before_delivery_planning() -> None:
     class DummyEngine(TTSMixin):
-        tts_model = "qwen3-tts-instruct-flash"
+        tts_model = "qwen-audio-3.1-tts-flash"
 
     segment = SimpleNamespace(
         text="她压低声音说，我真的撑不住了。",
@@ -70,7 +70,7 @@ def test_tts_batch_item_resolves_segment_model_before_delivery_planning() -> Non
 
 def test_tts_batch_item_rebuilds_prompt_snapshot_from_current_direction() -> None:
     class DummyEngine(TTSMixin):
-        tts_model = "qwen3-tts-instruct-flash"
+        tts_model = "qwen-audio-3.1-tts-flash"
 
     segment = SimpleNamespace(
         text="The current line.",
@@ -84,7 +84,7 @@ def test_tts_batch_item_rebuilds_prompt_snapshot_from_current_direction() -> Non
         performance_notes="CURRENT_DIRECTION slow and restrained",
         voice_params={
             "speaker": "Cherry",
-            "tts_model": "qwen3-tts-instruct-flash",
+            "tts_model": "qwen-audio-3.1-tts-flash",
             "performance_notes": "STALE_DIRECTION",
             "instructions": "STALE_PROVIDER_INSTRUCTIONS",
             "context_texts": ["STALE_PROVIDER_CONTEXT"],
@@ -92,7 +92,7 @@ def test_tts_batch_item_rebuilds_prompt_snapshot_from_current_direction() -> Non
             "text_prefix": "STALE_PROVIDER_PREFIX",
             "delivery_plan": {"director_guidance": "STALE_DIRECTION"},
             "provider_prompt_snapshot": {
-                "model": "qwen3-tts-instruct-flash",
+                "model": "qwen-audio-3.1-tts-flash",
                 "voice_id": "stale-voice",
                 "provider_prompt": {"instructions": "STALE_PROVIDER_PROMPT"},
             },
@@ -119,7 +119,7 @@ def test_tts_batch_item_rebuilds_prompt_snapshot_from_current_direction() -> Non
 
 def test_model_style_control_consumes_delivery_plan_for_natural_language_models() -> None:
     control = build_model_style_control(
-        "qwen3-tts-instruct-flash",
+        "qwen-audio-3.1-tts-flash",
         {
             "segment_speaker": "岑霜",
             "segment_type": "dialogue",
@@ -155,7 +155,7 @@ def test_model_style_control_consumes_delivery_plan_for_natural_language_models(
 
 def test_narration_template_prioritizes_rhythm_pause_and_stable_narrator_voice() -> None:
     control = build_model_style_control(
-        "qwen3-tts-instruct-flash",
+        "qwen-audio-3.1-tts-flash",
         {
             "segment_speaker": "旁白",
             "segment_type": "narration",
@@ -180,13 +180,13 @@ def test_narration_template_prioritizes_rhythm_pause_and_stable_narrator_voice()
     assert "说话角色：" not in instructions
     rhythm_index = instructions.index("韵律控制：")
     assert rhythm_index < instructions.index("停顿策略：句尾留白")
-    assert instructions.index("停顿策略：句尾留白") < instructions.index("情绪目标：fearful")
-    assert instructions.index("情绪目标：fearful") < instructions.index("角色设定：全知叙述者")
+    assert instructions.index("停顿策略：句尾留白") < instructions.index("情绪目标：tense")
+    assert instructions.index("情绪目标：tense") < instructions.index("角色设定：全知叙述者")
 
 
 def test_dialogue_template_prioritizes_character_emotion_scene_before_rhythm() -> None:
     control = build_model_style_control(
-        "qwen3-tts-instruct-flash",
+        "qwen-audio-3.1-tts-flash",
         {
             "segment_speaker": "岑霜",
             "segment_type": "dialogue",
@@ -208,14 +208,14 @@ def test_dialogue_template_prioritizes_character_emotion_scene_before_rhythm() -
     assert instructions.startswith("音色约束：保持已选音色")
     assert instructions.index("音色约束：") < instructions.index("说话角色：岑霜")
     assert "对白模板：突出角色身份、情绪强度与场景张力" in instructions
-    assert instructions.index("角色设定：百年门阀岑家的现任大当家") < instructions.index("情绪目标：fearful")
-    assert instructions.index("情绪目标：fearful") < instructions.index("场景氛围：祠堂阴影里，她要逼退对方")
+    assert instructions.index("角色设定：百年门阀岑家的现任大当家") < instructions.index("情绪目标：tense")
+    assert instructions.index("情绪目标：tense") < instructions.index("场景氛围：祠堂阴影里，她要逼退对方")
     assert instructions.index("场景氛围：祠堂阴影里，她要逼退对方") < instructions.index("韵律控制：")
 
 
 def test_monologue_template_prioritizes_inner_emotion_and_near_ear_delivery() -> None:
     control = build_model_style_control(
-        "qwen3-tts-instruct-flash",
+        "qwen-audio-3.1-tts-flash",
         {
             "segment_speaker": "岑霜",
             "segment_type": "monologue",
@@ -237,14 +237,14 @@ def test_monologue_template_prioritizes_inner_emotion_and_near_ear_delivery() ->
 
     assert instructions.startswith("音色约束：保持已选音色")
     assert "内心独白模板：贴近心理活动，低强度、近耳感" in instructions
-    assert instructions.index("情绪目标：fearful") < instructions.index("演绎要求：近耳低声，像只对自己承认")
+    assert instructions.index("情绪目标：压抑的恐惧") < instructions.index("演绎要求：近耳低声，像只对自己承认")
     assert instructions.index("演绎要求：近耳低声，像只对自己承认") < instructions.index("角色设定：长期压抑情绪的继承人")
     assert instructions.index("角色设定：长期压抑情绪的继承人") < instructions.index("韵律控制：")
 
 
 def test_model_style_control_normalizes_emotion_with_model_capabilities() -> None:
     qwen_control = build_model_style_control(
-        "qwen3-tts-instruct-flash",
+        "qwen-audio-3.1-tts-flash",
         {
             "segment_speaker": "岑霜",
             "segment_type": "dialogue",
@@ -268,22 +268,23 @@ def test_model_style_control_normalizes_emotion_with_model_capabilities() -> Non
     cosy_instructions = cosy_control.provider_fields["instructions"]
 
     assert qwen_instructions.startswith("音色约束：保持已选音色")
-    assert "情绪目标：fearful" in qwen_instructions
+    assert "情绪目标：tense" in qwen_instructions
     assert cosy_instructions.startswith("原音色不变;仅表演")
     assert "emotion=fearful" in cosy_instructions
     assert "act=压低声音" in cosy_instructions
-    assert "情绪目标：fearful" not in cosy_instructions
+    assert "情绪目标：tense" not in cosy_instructions
 
 
 def test_style_control_compacts_limited_instruction_without_cutting_mid_field() -> None:
+    # 16 条场景 + 16 条演绎要求，确保组装结果超出 500 字预算，触发整字段丢弃而不是句中截断。
     scene_details = "；".join(
-        f"祠堂场景细节{i}要求用冷硬阶级壁垒逼退对方" for i in range(1, 9)
+        f"祠堂场景细节{i}要求用冷硬阶级壁垒逼退对方" for i in range(1, 17)
     )
     performance_details = "；".join(
-        f"第{i}处语速极慢并在真心尾音加轻微气音" for i in range(1, 9)
+        f"第{i}处语速极慢并在真心尾音加轻微气音" for i in range(1, 17)
     )
     control = build_model_style_control(
-        "stepaudio-2.5-tts",
+        "stepaudio-3-tts",
         {
             "segment_speaker": "岑霜",
             "segment_type": "dialogue",
@@ -297,16 +298,16 @@ def test_style_control_compacts_limited_instruction_without_cutting_mid_field() 
 
     instruction = control.provider_fields["instruction"]
 
-    assert len(instruction) <= 200
+    assert len(instruction) <= 500
     assert instruction.startswith("音色约束：保持已选音色")
     assert "说话角色：岑霜" in instruction
     assert "情绪目标：克制的悲伤，不哭腔，轻轻发颤" in instruction
-    assert any("已按 200 字预算压缩" in warning for warning in control.warnings)
+    assert any("已按 500 字预算压缩" in warning for warning in control.warnings)
 
 
 def test_provider_prompt_snapshot_exposes_budget_prompt_and_warnings() -> None:
     control = build_model_style_control(
-        "qwen3-tts-instruct-flash",
+        "qwen-audio-3.1-tts-flash",
         {
             "segment_speaker": "岑霜",
             "segment_type": "dialogue",
@@ -317,8 +318,8 @@ def test_provider_prompt_snapshot_exposes_budget_prompt_and_warnings() -> None:
     )
 
     snapshot = build_provider_prompt_snapshot(
-        model="qwen3-tts-instruct-flash",
-        voice_id="Cherry",
+        model="qwen-audio-3.1-tts-flash",
+        voice_id="longsanshu_v3.1",
         style_control=control,
         delivery_plan={
             "emotion": "紧张又愤怒",
@@ -328,20 +329,21 @@ def test_provider_prompt_snapshot_exposes_budget_prompt_and_warnings() -> None:
         },
     )
 
-    assert snapshot["model"] == "qwen3-tts-instruct-flash"
-    assert snapshot["voice_id"] == "Cherry"
+    assert snapshot["model"] == "qwen-audio-3.1-tts-flash"
+    assert snapshot["voice_id"] == "longsanshu_v3.1"
     assert snapshot["mode"] == "natural_language"
     assert snapshot["provider_prompt"]["instructions"] == control.provider_fields["instructions"]
     assert snapshot["provider_prompt"]["messages"] == []
     assert snapshot["provider_prompt"]["context_texts"] == []
-    assert snapshot["budget"]["limit"] == 600
+    # 3.1 的 instruction 预算是服务商实测放宽后的 1200，不再沿用旧 Qwen-TTS 的 600
+    assert snapshot["budget"]["limit"] == 1200
     assert snapshot["budget"]["used"] == len(control.provider_fields["instructions"])
     assert snapshot["budget"]["truncated"] is False
 
 
 def test_provider_prompt_snapshot_drops_segment_pitch_controls() -> None:
     control = build_model_style_control(
-        "qwen3-tts-instruct-flash",
+        "qwen-audio-3.1-tts-flash",
         {"performance_notes": "语速缓慢，重读关键词。"},
         "neutral",
     )
@@ -357,7 +359,7 @@ def test_provider_prompt_snapshot_drops_segment_pitch_controls() -> None:
     }
 
     snapshot = build_provider_prompt_snapshot(
-        model="qwen3-tts-instruct-flash",
+        model="qwen-audio-3.1-tts-flash",
         voice_id="Cherry",
         style_control=control,
         delivery_plan=delivery_plan,
@@ -435,7 +437,7 @@ def test_provider_prompt_snapshot_exposes_inline_tag_strategy() -> None:
 def test_delivery_plan_uses_model_style_capabilities_for_control_preference() -> None:
     qwen_plan = build_delivery_plan(
         voice_params={
-            "tts_model": "qwen3-tts-instruct-flash",
+            "tts_model": "qwen-audio-3.1-tts-flash",
             "style_control_method": "audio_tags",
             "performance_notes": "低语，句尾留白。",
         },
@@ -545,7 +547,7 @@ def test_build_delivery_plan_keeps_distinct_explicit_director_guidance() -> None
     plan = build_delivery_plan(
         segment=segment,
         voice_params={"instructions": "保持克制，不要喊叫。"},
-        model="qwen3-tts-instruct-flash",
+        model="qwen-audio-3.1-tts-flash",
         emotion="fearful",
     )
 

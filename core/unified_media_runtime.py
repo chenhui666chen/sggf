@@ -8,43 +8,62 @@ from typing import Any, Dict, List, Optional, Sequence, TYPE_CHECKING
 from adapters.base import GenerationResult
 from adapters.registry import ModelRegistry, registry as default_registry
 from core.model_catalog_runtime import get_model_catalog_runtime_index
-from core.model_resolution import normalize_model_id
+from core.model_resolution import normalize_model_id, pick_resolution_label
+from schemas.model_spec import SMART_DURATION_VALUE
 from schemas.task_spec import TaskSpec, TaskSpecBuilder
 
 if TYPE_CHECKING:
-    from schemas.model_spec import ModelSpec
+    from schemas.model_spec import ConstraintSpec, ModelSpec
 
 
 _OPERATION_MODEL_IDS: Dict[str, set[str]] = {
     "generate_image": {
-        "wan2.6-t2i",
-        "kling-v3-image-generation", "kling-v3-omni-image-generation",  # Kling V3 图像生成
-        "qwen-image-2.0", "qwen-image-2.0-pro",  # Qwen Image 2.0 系列
-        "wan2.7-image",  # Wan 2.7 图像生成与编辑
-        "doubao-seedream-4-5", "doubao-seedream-5-0",  # Doubao Seedream 图像生成
+        "qwen-image-3.0", "qwen-image-3.0-pro",  # 千问图像 3.0 系列
+        "wan2.7-image-pro",  # 万相 2.7 image 专业版
+        "kling/kling-v3-image-generation", "kling/kling-v3-omni-image-generation",  # Kling V3 图像生成
+        "doubao-seedream-5-0", "doubao-seedream-5-0-pro",  # Doubao Seedream 图像生成
     },
     "generate_video": {
-        "wan2.7-t2v", "wan2.6-t2v-fast", "wan2.7-i2v", "wan2.7-r2v", "wan2.7-videoedit",
+        "wan3.0-video",  # 万相 3.0 all-in-one（文生/图生/参考生/编辑共用同一 ID）
         "pixverse-c1-r2v", "pixverse-v6-t2v",  # Pixverse 视频生成
         "vidu-q3-pro-img2video", "vidu-q3-pro-text2video", "vidu-q3-pro-start-end2video",  # Vidu 视频生成
-        "kling-v3-video-generation", "kling-v3-omni-video-generation",  # Kling V3 视频生成
-        "doubao-seedance-2-0", "doubao-seedance-2-0-fast", "doubao-seedance-1-5-pro",  # Doubao Seedance 视频生成
+        "kling/kling-v3-video-generation", "kling/kling-v3-omni-video-generation",  # Kling V3 视频生成
+        "doubao-seedance-2-5",  # Doubao Seedance 2.5：全模态参考 + 编辑/延长 + 样片模式
+        "doubao-seedance-2-0", "doubao-seedance-2-0-fast",  # Doubao Seedance 视频生成
     },
     "edit_image": {"qwen-image-edit-plus", "qwen-image-edit-max"},
+    # 视频编辑：档案声明 video_edit、且 adapter 能下发 reference_video 的现役四档
+    "edit_video": {
+        "wan3.0-video",
+        "doubao-seedance-2-5",
+        "doubao-seedance-2-0",
+        "doubao-seedance-2-0-fast",
+    },
     "analyze_image": {"qwen3-vl-plus", "qwen3.5-omni-plus"},  # 视觉理解模型
     "analyze_video": {"qwen3-vl-plus", "qwen3.5-omni-plus"},  # 视觉理解模型
     "synthesize_speech": {
-        "qwen3-tts-instruct-flash",
+        "qwen-audio-3.1-tts-flash",
         "cosyvoice-v3.5-plus",
         "MiniMax/speech-2.8-turbo",  # MiniMax 高质量语音合成
         "MiniMax/speech-2.8-hd",     # MiniMax 旗舰级语音合成
         "mimo-v2.5-tts",
         "mimo-v2.5-tts-voicedesign",
         "mimo-v2.5-tts-voiceclone",
-        "stepaudio-2.5-tts",
+        "stepaudio-3-tts",
         "seed-tts-2.0-expressive",
     },
 }
+
+# 媒体类操作由 adapter 注册表执行，注册表里没有实现就等于不可执行；
+# 语音合成的执行者是 TTSEngine（按供应商直接实现），不查注册表。
+_ADAPTER_EXECUTED_OPERATIONS = frozenset({
+    "generate_image",
+    "generate_video",
+    "edit_image",
+    "edit_video",
+    "analyze_image",
+    "analyze_video",
+})
 
 _STRATEGY_WEIGHTS: Dict[str, Dict[str, float]] = {
     "balanced": {"quality": 0.45, "cost": 0.20, "latency": 0.35},
@@ -678,6 +697,11 @@ class UnifiedMediaRuntime:
             capability_requirements=capability_requirements,
         )
 
+    def _is_model_executable(self, operation: str, model_id: str) -> bool:
+        if operation not in _ADAPTER_EXECUTED_OPERATIONS:
+            return True
+        return self._registry.has_adapter(model_id)
+
     def _rank_candidates(
         self,
         *,
@@ -694,14 +718,24 @@ class UnifiedMediaRuntime:
             spec
             for spec in self._registry.get_all_specs()
             if spec.id in supported_ids
-            and spec.status.value == "active"
+            # deprecated 只表示"不再自动选中"；调用方显式指定的模型（历史项目配置）仍须原样执行，
+            # 否则旧配置会被静默改路由到别的供应商模型上
+            and (spec.status.value == "active" or spec.id == preferred_model)
             and modality in spec.modality
         ]
         routable_specs = [
             spec for spec in specs
             if not runtime_index.get_signal(spec.id).blocked
         ]
-        candidate_pool = routable_specs or specs
+        # 有档案不等于有实现：无实现的条目一旦被排到首位，请求只能在运行期报
+        # adapter_missing。自动路由跳过这类条目；调用方显式点名的仍须保留，
+        # 理由同上（不能被静默换成别的供应商模型）。全池都没有实现时维持原样，
+        # 让 adapter_missing 继续暴露真实原因，而不是变成 no_model_available。
+        executable_specs = [
+            spec for spec in routable_specs
+            if self._is_model_executable(operation, spec.id) or spec.id == preferred_model
+        ]
+        candidate_pool = executable_specs or routable_specs or specs
         candidate_pool = self._select_task_compatible_pool(
             candidate_pool,
             task=task,
@@ -915,7 +949,7 @@ class UnifiedMediaRuntime:
                     int(duration_value) if duration_value.is_integer() else duration_value,
                 )
             if task.width > 0 and task.height > 0:
-                parameters.setdefault("resolution", self._pick_legacy_resolution_label(task.width, task.height))
+                parameters.setdefault("resolution", pick_resolution_label(task.width, task.height))
                 parameters.setdefault("size", f"{task.width}*{task.height}")
             if task.ratio:
                 parameters.setdefault("aspect_ratio", task.ratio)
@@ -927,14 +961,6 @@ class UnifiedMediaRuntime:
                 payload["parameters"] = parameters
 
         return payload
-
-    def _pick_legacy_resolution_label(self, width: int, height: int) -> str:
-        short_edge = min(int(width or 0), int(height or 0))
-        if short_edge <= 480:
-            return "480P"
-        if short_edge <= 720:
-            return "720P"
-        return "1080P"
 
     def _execute_custom_registry_method(
         self,
@@ -1024,7 +1050,7 @@ class UnifiedMediaRuntime:
         runtime_index = runtime_index or get_model_catalog_runtime_index()
         task_constraints = runtime_index.get_task_constraints(spec.id)
         capability_hints = runtime_index.get_capability_hints(spec.id)
-        spec_duration_constraints = self._extract_duration_constraints(spec.constraints.duration)
+        spec_duration_constraints = self._spec_duration_constraints(spec.constraints)
 
         effective_constraints = {
             "duration_values": self._coerce_float_list(task_constraints.get("duration_values"))
@@ -1037,6 +1063,7 @@ class UnifiedMediaRuntime:
                 task_constraints.get("duration_max"),
                 spec_duration_constraints["max"],
             ),
+            "duration_supports_auto": spec_duration_constraints["supports_auto"],
             "ratio_values": self._coerce_str_list(task_constraints.get("ratio_values"))
             or [str(value) for value in spec.constraints.ratios or []],
             "min_width": self._coerce_int(task_constraints.get("min_width"), spec.constraints.min_width),
@@ -1058,7 +1085,10 @@ class UnifiedMediaRuntime:
         duration_values = effective_constraints["duration_values"]
         if task.duration is not None:
             task_duration = float(task.duration)
-            if duration_values:
+            if effective_constraints["duration_supports_auto"] and task_duration == SMART_DURATION_VALUE:
+                # 智能时长交给上游按素材推断，不参与本地下限/上限判定
+                pass
+            elif duration_values:
                 if not any(abs(value - task_duration) < 0.1 for value in duration_values):
                     return False
             else:
@@ -1129,40 +1159,26 @@ class UnifiedMediaRuntime:
         except (TypeError, ValueError):
             return int(default) if default is not None else None
 
-    def _extract_duration_constraints(self, raw_duration: Any) -> Dict[str, Any]:
-        if isinstance(raw_duration, dict):
-            values = self._coerce_float_list(
-                raw_duration.get("supported_values")
-                or raw_duration.get("values")
-                or raw_duration.get("options")
-            )
-            duration_min = self._coerce_float(
-                raw_duration.get("min"),
-                self._coerce_float(raw_duration.get("min_seconds")),
-            )
-            duration_max = self._coerce_float(
-                raw_duration.get("max"),
-                self._coerce_float(raw_duration.get("max_seconds")),
-            )
-            if not values and duration_min is None and duration_max is None:
-                default_value = self._coerce_float(raw_duration.get("default"))
-                if default_value is not None:
-                    values = [default_value]
+    def _spec_duration_constraints(self, constraints: "ConstraintSpec") -> Dict[str, Any]:
+        """把 ConstraintSpec 归一化后的时长语义还原成候选池判定用的三元组。
+
+        dict 形态（{min,max,default,supports_auto}）在 __post_init__ 里已被压成
+        duration=[default] + duration_min/max，若再把 duration 解析一次，区间模型会被
+        当成"只接受默认档"，20 秒这类合法请求在候选池就被误过滤。
+        """
+        if constraints.has_duration_range or constraints.duration_supports_auto:
             return {
-                "values": values,
-                "min": duration_min,
-                "max": duration_max,
+                "values": [],
+                "min": constraints.duration_min,
+                "max": constraints.duration_max,
+                "supports_auto": constraints.duration_supports_auto,
             }
-
-        values = self._coerce_float_list(raw_duration)
-        if values:
-            return {"values": values, "min": None, "max": None}
-
-        scalar = self._coerce_float(raw_duration)
-        if scalar is not None:
-            return {"values": [scalar], "min": None, "max": None}
-
-        return {"values": [], "min": None, "max": None}
+        return {
+            "values": [float(value) for value in constraints.duration or []],
+            "min": None,
+            "max": None,
+            "supports_auto": False,
+        }
 
     def _coerce_float_list(self, values: Any) -> List[float]:
         if not isinstance(values, list):

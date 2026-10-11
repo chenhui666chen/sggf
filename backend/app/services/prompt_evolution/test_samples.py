@@ -51,6 +51,28 @@ class SampleSource(str, Enum):
     AUTO = "auto"         # LLM 自动生成
 
 
+# 段落级真值落库上限：定点指令最多引用 4 条 × 90 字，多存无益只增体积
+_AI_SEG_PERSIST_MAX_ITEMS = 8
+_AI_SEG_PERSIST_MAX_CHARS = 300
+
+
+def _compact_ai_segments(segment_labels: Optional[List[Dict[str, Any]]]) -> List[str]:
+    """从检测结果的段落标注中抽出「被判确定AI」的段原文，做数量与长度裁剪。"""
+    if not segment_labels:
+        return []
+    out: List[str] = []
+    for seg in segment_labels:
+        if not isinstance(seg, dict) or seg.get("label") != 1:
+            continue
+        text = (seg.get("text") or "").strip()
+        if not text:
+            continue
+        out.append(text[:_AI_SEG_PERSIST_MAX_CHARS])
+        if len(out) >= _AI_SEG_PERSIST_MAX_ITEMS:
+            break
+    return out
+
+
 @dataclass
 class TestSample:
     """测试样本"""
@@ -68,6 +90,10 @@ class TestSample:
     ai_detection_text_hash: str = ""
     ai_detection_policy_version: str = ""
     ai_detected_at: str = ""
+    # 🔧 段落级真值（2026-10-08）：仅持久化「被判确定AI」的段原文，
+    # 供定点改写生成真值指令（novel_rules.build_detector_segment_hint）。
+    # 不落供应商原始响应，只存最小可用字段；缺省为空列表以兼容旧数据。
+    ai_detection_ai_segments: List[str] = field(default_factory=list)
 
     def _detection_text_hash(self) -> str:
         from app.services.zhuque_ai_detect import zhuque_ai_detect_service
@@ -83,25 +109,37 @@ class TestSample:
             return None
         if self.ai_detection_text_hash != self._detection_text_hash():
             return None
-        return {
+        result = {
             "success": True,
             "ai_score": self.ai_detection_score,
             "label": self.ai_detection_label,
             "suggestion": self.ai_detection_suggestion,
         }
+        # 还原为段落标注结构，使定点改写即便走持久化缓存也能拿到真值
+        if self.ai_detection_ai_segments:
+            result["segment_labels"] = [
+                {"label": 1, "text": t} for t in self.ai_detection_ai_segments
+            ]
+        return result
 
     def detection_cache_key(self, policy_version: str) -> str:
         """返回不包含原文、可跨样本复用的内容寻址键。"""
         return f"{policy_version}:{self._detection_text_hash()}"
 
     def store_ai_detection(self, result: Dict[str, Any], policy_version: str) -> None:
-        """保存成功检测的最小结构化结果，不持久化供应商原始响应。"""
+        """保存成功检测的最小结构化结果，不持久化供应商原始响应。
+
+        例外：段落级真值（被判确定AI 的段原文）会一并落库，否则第二次进化
+        走持久化缓存时定点改写拿不到真值，只能退回正则盲猜。仅存段文本与
+        label，不存供应商原始响应，且数量与长度均设上限。
+        """
         self.ai_detection_score = int(result.get("ai_score", 0))
         self.ai_detection_label = str(result.get("label", ""))
         self.ai_detection_suggestion = str(result.get("suggestion", ""))
         self.ai_detection_text_hash = self._detection_text_hash()
         self.ai_detection_policy_version = policy_version
         self.ai_detected_at = datetime.now().isoformat()
+        self.ai_detection_ai_segments = _compact_ai_segments(result.get("segment_labels"))
 
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典"""
@@ -120,6 +158,7 @@ class TestSample:
             "ai_detection_text_hash": self.ai_detection_text_hash,
             "ai_detection_policy_version": self.ai_detection_policy_version,
             "ai_detected_at": self.ai_detected_at,
+            "ai_detection_ai_segments": list(self.ai_detection_ai_segments or []),
         }
 
     @classmethod
@@ -140,6 +179,7 @@ class TestSample:
             ai_detection_text_hash=data.get("ai_detection_text_hash", ""),
             ai_detection_policy_version=data.get("ai_detection_policy_version", ""),
             ai_detected_at=data.get("ai_detected_at", ""),
+            ai_detection_ai_segments=list(data.get("ai_detection_ai_segments") or []),
         )
 
 

@@ -14,7 +14,7 @@ from typing import Optional
 from app.core.config import settings
 from app.api.v1.workflow.model_selection import resolve_workflow_generation_model
 
-FREE_TIER_MODEL_ID = "qwen3.7-flash"
+FREE_TIER_MODEL_ID = "qwen-flash"
 
 VALID_GENERATION_TIERS = {"free", "standard"}
 
@@ -22,7 +22,7 @@ VALID_GENERATION_TIERS = {"free", "standard"}
 @dataclass(frozen=True)
 class GenerationProfile:
     tier: str                          # "free" | "standard"
-    model: Optional[str]               # 免费档强制 qwen3.7-flash；标准档为用户所选模型
+    model: Optional[str]               # 免费档强制 qwen-flash；标准档为用户所选模型
     max_iteration_rounds: int          # 免费档 1；标准档沿用 settings 默认
     enable_multi_model_review: bool    # 免费档 False
     max_llm_attempts: int              # 总尝试次数（含首次）

@@ -26,7 +26,7 @@ def test_build_initial_generation_task_detail_adds_script_only_trace_context():
         task_type="script_only",
         audiobook_project_id=34,
         chapter_ids=[56, 78],
-        tts_model="qwen3-tts-instruct-flash",
+        tts_model="qwen-audio-3.1-tts-flash",
         stage="script_adaptation",
         status="running",
         progress=0.0,
@@ -43,7 +43,7 @@ def test_build_initial_generation_task_detail_adds_script_only_trace_context():
         "stage": "script_adaptation",
         "status": "running",
         "progress": 0.0,
-        "tts_model": "qwen3-tts-instruct-flash",
+        "tts_model": "qwen-audio-3.1-tts-flash",
     }
 
 
@@ -121,7 +121,7 @@ def test_build_initial_generation_task_detail_adds_full_trace_context():
         task_type="full",
         audiobook_project_id=202,
         chapter_ids=[303, 404, 505],
-        tts_model="qwen3-tts-instruct-flash",
+        tts_model="qwen-audio-3.1-tts-flash",
         stage="initializing",
         status="running",
         progress=0.0,
@@ -137,7 +137,7 @@ def test_build_initial_generation_task_detail_adds_full_trace_context():
     assert detail["stage"] == "initializing"
     assert detail["status"] == "running"
     assert detail["progress"] == 0.0
-    assert detail["tts_model"] == "qwen3-tts-instruct-flash"
+    assert detail["tts_model"] == "qwen-audio-3.1-tts-flash"
 
 
 def test_full_task_uses_initial_trace_detail():

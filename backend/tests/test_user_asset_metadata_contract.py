@@ -219,6 +219,11 @@ def test_contract_generator_check_flag_detects_drift(tmp_path, monkeypatch):
             cwd=str(REPO_ROOT),
             capture_output=True,
             text=True,
+            # 子进程的 stderr 是 UTF-8 中文；不显式指定编码时父进程按系统区域设置
+            # （简体中文 Windows 为 GBK）解码，会抛 UnicodeDecodeError 并把 stderr 置为 None。
+            encoding="utf-8",
+            errors="replace",
+            env={**os.environ, "PYTHONIOENCODING": "utf-8"},
         )
         assert completed.returncode != 0
         assert "派生产物与 schema 不一致" in completed.stderr

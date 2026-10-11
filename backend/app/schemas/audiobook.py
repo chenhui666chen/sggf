@@ -13,7 +13,7 @@ class AudiobookProjectCreate(BaseModel):
     tts_provider: str = "aliyun"
     enable_cache: bool = True
     voice_config: Optional[List["CharacterVoiceConfig"]] = None
-    tts_model: Optional[str] = "qwen3-tts-instruct-flash"  # TTS 模型（qwen3-tts-instruct-flash / cosyvoice-v3.5-plus）
+    tts_model: Optional[str] = "qwen-audio-3.1-tts-flash"  # TTS 模型（qwen-audio-3.1-tts-flash / cosyvoice-v3.5-plus）
     generation_mode: str = "script_only"  # full: 直接生成音频; script_only: 仅生成剧本+评审
     force_regenerate_script: bool = True  # 是否强制重新生成剧本（覆盖已有剧本）
     narration_style: Optional[str] = "professional"  # 叙事风格: professional/dramatic/relaxing/expressive/custom
@@ -25,7 +25,7 @@ class AudiobookProjectCreate(BaseModel):
 class GenerateAudioFromScriptsRequest(BaseModel):
     """基于已生成剧本的音频生成请求（两阶段流程第2阶段）"""
     chapter_ids: Optional[List[int]] = None
-    tts_model: Optional[str] = "qwen3-tts-instruct-flash"  # TTS 模型（qwen3-tts-instruct-flash / cosyvoice-v3.5-plus）
+    tts_model: Optional[str] = "qwen-audio-3.1-tts-flash"  # TTS 模型（qwen-audio-3.1-tts-flash / cosyvoice-v3.5-plus）
     narration_style: Optional[str] = "professional"  # 叙事风格
     narration_style_prompt: Optional[str] = None  # 自定义叙事风格prompt
     output_format: Optional[str] = "mp3"  # mp3/wav/m4b
@@ -127,7 +127,7 @@ class TTSPreviewRequest(BaseModel):
     volume: int = 50
     speed: Optional[float] = None
     pitch: Optional[int] = None
-    model: Optional[str] = "qwen3-tts-instruct-flash"  # TTS 模型（默认 qwen3-tts-instruct-flash）
+    model: Optional[str] = "qwen-audio-3.1-tts-flash"  # TTS 模型（默认 qwen-audio-3.1-tts-flash）
     voice_type: Optional[str] = None  # 声音类型（majestic/gentle/lively 等）
     instruction: Optional[str] = None
 
@@ -362,7 +362,7 @@ class TTSPreviewWithTimestampsResponse(BaseModel):
 class ScriptSegmentPreviewRequest(BaseModel):
     """剧本片段单段音频试听请求"""
     segment: Dict[str, Any]
-    tts_model: Optional[str] = "qwen3-tts-instruct-flash"
+    tts_model: Optional[str] = "qwen-audio-3.1-tts-flash"
     preview_type: Optional[str] = "voice"  # voice/sfx/bgm/mix
 
 
@@ -510,7 +510,7 @@ class CosyVoiceCloneCreateRequest(BaseModel):
 
 
 class CosyVoiceDesignCreateRequest(BaseModel):
-    """CosyVoice v3.5-plus 澹伴煶璁捐璇锋眰銆?"""
+    """CosyVoice v3.5-plus 声音设计请求。"""
 
     name: str
     voice_prompt: str
@@ -576,7 +576,7 @@ class AudiobookTaskStatus(BaseModel):
 
 
 class ChapterAudioRunResponse(BaseModel):
-    """绔犺妭闊抽杩愯鎬佸搷搴斻€?"""
+    """章节音频运行态响应。"""
 
     id: int
     audiobook_project_id: int

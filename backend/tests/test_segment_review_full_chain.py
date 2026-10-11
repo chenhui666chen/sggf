@@ -173,11 +173,23 @@ def test_frontend_ui_components():
     print("  Found: Handler functions")
     
     # 验证 UI 组件
-    assert "评审标注" in content and "退出标注" in content, "Review mode button not found"
-    assert "审查进度" in content, "Review progress indicator not found"
+    # 文案已 i18n 化：组件通过 t('audiobook.scriptEditor.*') key 引用，中文字面量迁至
+    # zh-CN 资源文件，故分别校验组件的 key 引用与资源文件中的字面文案，保留原测试意图。
+    assert (
+        "audiobook.scriptEditor.enterReview" in content
+        and "audiobook.scriptEditor.exitReview" in content
+    ), "Review mode toggle button (i18n keys) not found"
+    assert "audiobook.scriptEditor.reviewProgress" in content, "Review progress indicator (i18n key) not found"
+    zh_common_path = os.path.join(
+        os.path.dirname(__file__), '..', '..', 'frontend', 'src', 'i18n', 'resources', 'zh-CN', 'common.json'
+    )
+    with open(zh_common_path, 'r', encoding='utf-8') as f:
+        zh_common_content = f.read()
+    assert "评审标注" in zh_common_content and "退出标注" in zh_common_content, "Review mode button text not found in zh-CN resources"
+    assert "审查进度" in zh_common_content, "Review progress text not found in zh-CN resources"
     assert "重新生成" in content, "Regenerate button text not found"
     assert "Rating" in content, "Rating component not found"
-    print("  Found: UI components (review button, progress, regenerate button, rating)")
+    print("  Found: UI components (review button i18n, progress, regenerate button, rating)")
     
     # 验证 props 传递
     assert "onRegenerateSegment=" in content, "onRegenerateSegment prop not passed"

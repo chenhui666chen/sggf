@@ -19,6 +19,7 @@ import {
   InputLabel as MuiInputLabel,
   MenuItem,
   Select as MuiSelect,
+  Slider,
   Stack,
   TextField,
   Typography,
@@ -37,6 +38,16 @@ import { buildAssetStudioCollectedAssetMetadataContract } from '@/contracts/user
 import { buildAssetStudioCollectedSourcePayload } from '@/contracts/userAssetSourcePayloadBuilders'
 import { useAssetStudioModelCatalog } from '@/hooks/useAssetStudioModelCatalog'
 import { modelUsesBasicNumericSpeedControl } from '@/pages/audiobook/ttsModels'
+import {
+  SMART_DURATION_VALUE,
+  buildCatalogDurationOptionsByModel,
+  buildCatalogDurationRangesByModel,
+  getDurationRange,
+  getRuntimeDurationOptions,
+  getSliderDurationValue,
+  resolveDurationSelection,
+} from '@/utils/assetStudioDurationControls'
+import type { DurationOption, DurationRange } from '@/utils/assetStudioDurationControls'
 import { extractLocalAssetStorageMetadata } from '@/utils/localAssetVault'
 import { saveExplicitLocalUserAsset } from '@/utils/userAssetExplicitLocalCollection'
 
@@ -70,11 +81,6 @@ interface ModelOption {
   labelKey?: string
   helper: string
   helperKey?: string
-}
-
-interface DurationOption {
-  value: string
-  label?: string
 }
 
 interface SizeOption {
@@ -122,47 +128,6 @@ function mapCatalogOptionToModelOption(option: AssetStudioModelCatalogOption): M
     label: option.label,
     helper: option.helper,
   }
-}
-
-function mapDurationValuesToOptions(values: number[] | undefined | null): DurationOption[] {
-  if (!Array.isArray(values) || values.length === 0) {
-    return []
-  }
-
-  const normalizedValues = Array.from(
-    new Set(
-      values
-        .map((value) => Number(value))
-        .filter((value) => Number.isFinite(value)),
-    ),
-  ).sort((left, right) => left - right)
-
-  return normalizedValues.map((value) => {
-    const normalized = normalizeDurationValue(value)
-    return {
-      value: normalized,
-    }
-  })
-}
-
-function buildCatalogDurationOptionsByModel(
-  groups: Record<string, AssetStudioModelCatalogOption[]> | undefined,
-): Record<string, DurationOption[]> {
-  if (!groups) {
-    return {}
-  }
-
-  const result: Record<string, DurationOption[]> = {}
-  const groupKeys = ['video_generation', 'video_edit', 'motion'] as const
-  for (const groupKey of groupKeys) {
-    for (const option of groups[groupKey] || []) {
-      const durationOptions = mapDurationValuesToOptions(option.duration_options)
-      if (durationOptions.length > 0) {
-        result[option.model_id] = durationOptions
-      }
-    }
-  }
-  return result
 }
 
 function resolvePreferredModelOption(options: ModelOption[], preferredModelId: string): ModelOption | null {
@@ -244,10 +209,6 @@ interface CatalogRuntimeEntry {
   runtime_capability_hints?: RuntimeCapabilityHints | null
   runtime_task_constraints?: RuntimeTaskConstraints | null
   runtime_routing_signal?: RuntimeRoutingSignal | null
-}
-
-const MODEL_CATALOG_ENTRY_ALIASES: Record<string, string[]> = {
-  'kling/kling-v3-image-generation': ['kling-v3-image-generation'],
 }
 
 const WORKBENCH_INPUT_LABEL_SX: SxProps<Theme> = {
@@ -423,34 +384,25 @@ function Select<T extends string = string>(props: SelectProps<T>) {
 
 const IMAGE_GENERATION_MODEL_OPTIONS: ModelOption[] = [
   {
-    value: 'wan2.6-t2i',
-    label: 'Wan 2.6 T2I',
-    helperKey: 'assetStudio.workbench.helper.wan26T2i',
-    helper: '主力文生图模型，适合正式出图、封面草图和角色概念图。',
+    value: 'qwen-image-3.0',
+    label: 'Qwen Image 3.0',
+    labelKey: 'dreamweaverRun.modelImageQwen30',
+    helperKey: 'assetStudio.workbench.helper.qwenImage30',
+    helper: '项目默认图像模型，4500 Token 长指令、12 国语言小字清晰渲染，0.20 元/张。限流 20 QPM，批量出图需排队。',
   },
   {
-    value: 'qwen-image-2.0',
-    label: 'Qwen Image 2.0',
-    helperKey: 'assetStudio.workbench.helper.qwenImage20',
-    helper: '通义千问高质量文生图，适合日常图像创作。',
+    value: 'qwen-image-3.0-pro',
+    label: 'Qwen Image 3.0 Pro',
+    labelKey: 'dreamweaverRun.modelImageQwen30Pro',
+    helperKey: 'assetStudio.workbench.helper.qwenImage30Pro',
+    helper: '旗舰档，专攻报纸/菜单/分镜等密集图文排版与人像级质感，1K 档 0.27 元/张。限流仅 5 QPM。',
   },
   {
-    value: 'qwen-image-2.0-pro',
-    label: 'Qwen Image 2.0 Pro',
-    helperKey: 'assetStudio.workbench.helper.qwenImage20Pro',
-    helper: '通义千问旗舰级文生图，画质更精细，适合商业级图像。',
-  },
-  {
-    value: 'wan2.7-image',
-    label: 'Wan 2.7 Image',
-    helperKey: 'assetStudio.workbench.helper.wan27Image',
-    helper: '万相最新图像生成模型，支持多种创作功能。',
-  },
-  {
-    value: 'doubao-seedream-4-5',
-    label: 'Doubao Seedream 4.5',
-    helperKey: 'assetStudio.workbench.helper.seedream45',
-    helper: '豆包高质量文生图，适合插画和概念设计。',
+    value: 'wan2.7-image-pro',
+    label: 'Wan 2.7 Image Pro',
+    labelKey: 'dreamweaverRun.modelImageWan27Pro',
+    helperKey: 'assetStudio.workbench.helper.wan27ImagePro',
+    helper: '万相旗舰，支持 4K 文生图、9 图参考一致性、框选局部编辑与组图输出，0.5 元/张。无反向提示词。',
   },
   {
     value: 'doubao-seedream-5-0',
@@ -459,14 +411,20 @@ const IMAGE_GENERATION_MODEL_OPTIONS: ModelOption[] = [
     helper: '豆包最新版本，支持超高分辨率和多种图像创作功能。',
   },
   {
-    value: 'kling-v3-image-generation',
+    value: 'doubao-seedream-5-0-pro',
+    label: 'Doubao Seedream 5.0 Pro',
+    helperKey: 'assetStudio.workbench.helper.seedream50Pro',
+    helper: '豆包旗舰文生图，取代已下线的 Seedream 4.5，画质与指令遵循更强。',
+  },
+  {
+    value: 'kling/kling-v3-image-generation',
     label: 'Kling V3 图像生成',
     labelKey: 'assetStudio.workbench.model.klingV3Image',
     helperKey: 'assetStudio.workbench.helper.klingV3Image',
     helper: '快手可灵 V3 图像生成，高质量人物和场景。',
   },
   {
-    value: 'kling-v3-omni-image-generation',
+    value: 'kling/kling-v3-omni-image-generation',
     label: 'Kling V3 Omni 图像生成',
     labelKey: 'assetStudio.workbench.model.klingV3OmniImage',
     helperKey: 'assetStudio.workbench.helper.klingV3OmniImage',
@@ -491,22 +449,11 @@ const IMAGE_EDIT_MODEL_OPTIONS: ModelOption[] = [
 
 const VIDEO_GENERATION_MODEL_OPTIONS: ModelOption[] = [
   {
-    value: 'wan2.7-t2v',
-    label: 'Wan 2.7 T2V',
-    helperKey: 'assetStudio.workbench.helper.wan27T2v',
-    helper: '质量优先的视频主力模型，支持镜头控制，适合正式生成。',
-  },
-  {
-    value: 'wan2.6-t2v-fast',
-    label: 'Wan 2.6 T2V Fast',
-    helperKey: 'assetStudio.workbench.helper.wan26T2vFast',
-    helper: '快速预览模型，适合 3 秒或 5 秒的早期验证。',
-  },
-  {
-    value: 'wan2.7-i2v',
-    label: 'Wan 2.7 I2V',
-    helperKey: 'assetStudio.workbench.helper.wan27I2v',
-    helper: '首帧驱动模型，适合基于参考图生成更稳定的人物或场景视频。',
+    value: 'wan3.0-video',
+    label: 'Wan 3.0 Video',
+    labelKey: 'dreamweaverRun.modelVideoWan30',
+    helperKey: 'assetStudio.workbench.helper.wan30Video',
+    helper: '项目唯一视频主力（all-in-one）：文生视频、首尾帧、多参考一致性、视频编辑与延长共用同一 ID，取代已弃用的 5 个分档模型。默认 720P，0.6 元/秒。',
   },
   {
     value: 'doubao-seedance-2-0',
@@ -521,20 +468,14 @@ const VIDEO_GENERATION_MODEL_OPTIONS: ModelOption[] = [
     helper: '豆包快速版本，适合原型验证和快速迭代。',
   },
   {
-    value: 'doubao-seedance-1-5-pro',
-    label: 'Doubao Seedance 1.5 Pro',
-    helperKey: 'assetStudio.workbench.helper.seedance15Pro',
-    helper: '豆包上一代专业版本，稳定可靠。',
-  },
-  {
-    value: 'kling-v3-video-generation',
+    value: 'kling/kling-v3-video-generation',
     label: 'Kling V3 视频生成',
     labelKey: 'assetStudio.workbench.model.klingV3Video',
     helperKey: 'assetStudio.workbench.helper.klingV3Video',
     helper: '快手可灵 V3，支持最多7张参考图+首尾帧+多镜头。',
   },
   {
-    value: 'kling-v3-omni-video-generation',
+    value: 'kling/kling-v3-omni-video-generation',
     label: 'Kling V3 Omni 视频生成',
     labelKey: 'assetStudio.workbench.model.klingV3OmniVideo',
     helperKey: 'assetStudio.workbench.helper.klingV3OmniVideo',
@@ -571,33 +512,16 @@ const VIDEO_GENERATION_MODEL_OPTIONS: ModelOption[] = [
 
 const VIDEO_EDIT_MODEL_OPTIONS: ModelOption[] = [
   {
-    value: 'wan2.7-videoedit',
-    label: 'Wan 2.7 VideoEdit',
-    helperKey: 'assetStudio.workbench.helper.wan27VideoEdit',
-    helper: '万相视频编辑模型，支持参考视频输入、多片段融合与风格迁移。',
+    value: 'wan3.0-video',
+    label: 'Wan 3.0 Video',
+    labelKey: 'dreamweaverRun.modelVideoWan30',
+    helperKey: 'assetStudio.workbench.helper.wan30Video',
+    helper: '万相 all-in-one 视频模型，视频编辑与延长共用同一 ID，支持参考视频输入与多片段融合。',
   },
   {
-    value: 'doubao-seedance-2-0',
-    label: 'Doubao Seedance 2.0（编辑）',
-    labelKey: 'assetStudio.workbench.model.seedanceEdit',
-    helperKey: 'assetStudio.workbench.helper.seedanceEdit',
-    helper: '支持视频编辑与延长，电影级质量。',
-  },
-  {
-    value: 'kling-v3-video-generation',
-    label: 'Kling V3（编辑）',
-    labelKey: 'assetStudio.workbench.model.klingEdit',
-    helperKey: 'assetStudio.workbench.helper.klingEdit',
-    helper: '可灵视频编辑与融合，适合高质量视频创作。',
-  },
-]
-
-const MOTION_MODEL_OPTIONS: ModelOption[] = [
-  {
-    value: 'wan2.7-r2v',
-    label: 'Wan 2.7 R2V',
-    helperKey: 'assetStudio.workbench.helper.wan27R2v',
-    helper: '支持最多5个视频参考+多图+首尾帧，动作控制、主体一致性最强。',
+    value: 'doubao-seedance-2-5',
+    label: 'Doubao Seedance 2.5（编辑/延长）',
+    helper: '全模态参考 + 视频编辑与延长，与后端 edit_video 白名单一致。',
   },
   {
     value: 'doubao-seedance-2-0',
@@ -606,93 +530,67 @@ const MOTION_MODEL_OPTIONS: ModelOption[] = [
     helper: '支持最多9张参考图+3个参考视频+首尾帧，多模态控制最强。',
   },
   {
-    value: 'kling-v3-video-generation',
+    value: 'doubao-seedance-2-0-fast',
+    label: 'Doubao Seedance 2.0 Fast',
+    helperKey: 'assetStudio.workbench.helper.seedance20Fast',
+    helper: '豆包快速版本，适合原型验证和快速迭代。',
+  },
+]
+
+// 目录不可用时的兜底动作组，与后端 asset_studio_model_catalog 由 models.yaml modality
+// （image_to_video）派生出的 motion 分组同源；档案只有 text_to_video 的档位不得出现在这里
+const MOTION_MODEL_OPTIONS: ModelOption[] = [
+  {
+    value: 'wan3.0-video',
+    label: 'Wan 3.0 Video',
+    labelKey: 'dreamweaverRun.modelVideoWan30',
+    helperKey: 'assetStudio.workbench.helper.wan30Video',
+    helper: '万相 all-in-one 视频模型，支持多图参考与首尾帧驱动，主体一致性与动作控制最强。',
+  },
+  {
+    value: 'doubao-seedance-2-5',
+    label: 'Doubao Seedance 2.5',
+    helper: '全模态参考 + 首尾帧驱动，动作迁移与主体一致性最强。',
+  },
+  {
+    value: 'doubao-seedance-2-0',
+    label: 'Doubao Seedance 2.0',
+    helperKey: 'assetStudio.workbench.helper.seedance20',
+    helper: '支持最多9张参考图+3个参考视频+首尾帧，多模态控制最强。',
+  },
+  {
+    value: 'doubao-seedance-2-0-fast',
+    label: 'Doubao Seedance 2.0 Fast',
+    helperKey: 'assetStudio.workbench.helper.seedance20Fast',
+    helper: '豆包快速版本，适合原型验证和快速迭代。',
+  },
+  {
+    value: 'kling/kling-v3-video-generation',
     label: 'Kling V3',
     helperKey: 'assetStudio.workbench.helper.klingV3',
     helper: '支持最多7张参考图+首尾帧+多镜头生成。',
   },
   {
-    value: 'kling-v3-omni-video-generation',
+    value: 'kling/kling-v3-omni-video-generation',
     label: 'Kling V3 Omni',
     helperKey: 'assetStudio.workbench.helper.klingV3Omni',
     helper: '可灵全能版，支持多模态输入+首尾帧+多镜头。',
   },
   {
-    value: 'pixverse-v6-t2v',
-    label: 'PixVerse V6',
-    helperKey: 'assetStudio.workbench.helper.pixverseV6',
-    helper: '支持首尾帧+多镜头+特效模板，创意视频首选。',
+    value: 'vidu-q3-pro-img2video',
+    label: 'Vidu Q3 Pro 图生视频',
+    labelKey: 'assetStudio.workbench.model.viduQ3Img',
+    helperKey: 'assetStudio.workbench.helper.viduQ3Img',
+    helper: 'Vidu Q3 Pro 图生视频链路，支持参考图驱动视频生成。',
+  },
+  {
+    value: 'vidu-q3-pro-start-end2video',
+    label: 'Vidu Q3 Pro 首尾帧',
+    labelKey: 'assetStudio.workbench.model.viduQ3StartEnd',
+    helperKey: 'assetStudio.workbench.helper.viduQ3StartEnd',
+    helper: 'Vidu Q3 Pro 首尾帧控制，适合精确控制视频起始和结束画面。',
   },
 ]
-
-const VIDEO_DURATION_OPTIONS_BY_MODEL: Record<string, DurationOption[]> = {
-  'wan2.7-t2v': [
-    { value: '3' },
-    { value: '5' },
-    { value: '10' },
-    { value: '15' },
-  ],
-  'wan2.6-t2v-fast': [
-    { value: '3' },
-    { value: '5' },
-  ],
-  'wan2.7-i2v': [
-    { value: '3' },
-    { value: '5' },
-    { value: '10' },
-  ],
-  'wan2.7-r2v': [
-    { value: '3' },
-    { value: '5' },
-    { value: '10' },
-    { value: '15' },
-  ],
-  'wan2.7-videoedit': [
-    { value: '3' },
-    { value: '5' },
-    { value: '10' },
-  ],
-  'doubao-seedance-2-0': [
-    { value: '5' },
-    { value: '10' },
-    { value: '30' },
-  ],
-  'doubao-seedance-2-0-fast': [
-    { value: '5' },
-    { value: '10' },
-  ],
-  'doubao-seedance-1-5-pro': [
-    { value: '5' },
-    { value: '10' },
-  ],
-  'kling-v3-video-generation': [
-    { value: '3' },
-    { value: '5' },
-    { value: '10' },
-  ],
-  'kling-v3-omni-video-generation': [
-    { value: '3' },
-    { value: '5' },
-    { value: '10' },
-  ],
-  'pixverse-v6-t2v': [
-    { value: '3' },
-    { value: '5' },
-    { value: '10' },
-  ],
-  'vidu-q3-pro-text2video': [
-    { value: '5' },
-    { value: '10' },
-  ],
-  'vidu-q3-pro-img2video': [
-    { value: '5' },
-    { value: '10' },
-  ],
-  'vidu-q3-pro-start-end2video': [
-    { value: '5' },
-    { value: '10' },
-  ],
-}
 
 const CAMERA_CONTROL_OPTIONS: CameraControlOption[] = [
   {
@@ -787,10 +685,11 @@ const AUDIO_MODEL_OPTIONS_BY_TYPE: Record<AudioGenerationType, ModelOption[]> = 
   ],
   'sound-effect': [
     {
-      value: 'vidu-timing2audio',
-      label: 'Vidu Timing2Audio',
-      helperKey: 'assetStudio.workbench.helper.viduTiming2Audio',
-      helper: '可控文生音效，支持通过时间轴控制多个音效事件，适合视频音效和有声小说音效。',
+      value: 'seed-audio-1.0',
+      label: '豆包音频生成模型 1.0',
+      labelKey: 'assetStudio.workbench.model.seedAudio10',
+      helperKey: 'assetStudio.workbench.helper.seedAudioSoundEffect',
+      helper: '音效链路默认模型，按提示词生成短音效与环境音，实际时长由模型决定。',
     },
   ],
   'scene-audio': [
@@ -804,9 +703,9 @@ const AUDIO_MODEL_OPTIONS_BY_TYPE: Record<AudioGenerationType, ModelOption[]> = 
   ],
   speech: [
     {
-      value: 'qwen3-tts-instruct-flash',
-      label: 'Qwen3-TTS Instruct Flash',
-      helperKey: 'assetStudio.workbench.helper.qwen3TtsInstructFlash',
+      value: 'qwen-audio-3.1-tts-flash',
+      label: 'Qwen-Audio 3.1 TTS Flash',
+      helperKey: 'assetStudio.workbench.helper.qwenAudio31TtsFlash',
       helper: '速度快、出稿稳，适合旁白草稿、对白验证和大批量试听。',
     },
     {
@@ -871,21 +770,6 @@ const AUDIO_TEMPO_OPTIONS = [
   { value: 'fast', labelKey: 'assetStudio.workbench.audioTempo.fast' },
 ]
 
-const getFallbackDurationOptions = function(
-  modelId: string,
-  catalogDurationOptionsByModel?: Record<string, DurationOption[]>,
-): DurationOption[] {
-  const catalogOptions = catalogDurationOptionsByModel?.[modelId]
-  if (catalogOptions && catalogOptions.length > 0) {
-    return catalogOptions
-  }
-  return VIDEO_DURATION_OPTIONS_BY_MODEL[modelId] || VIDEO_DURATION_OPTIONS_BY_MODEL['wan2.7-t2v']
-}
-
-function getRecommendedDuration(options: DurationOption[]): string {
-  return options.find((option) => option.value === '5')?.value || options[0]?.value || '5'
-}
-
 function getGreatestCommonDivisor(a: number, b: number): number {
   let left = Math.abs(a)
   let right = Math.abs(b)
@@ -900,34 +784,6 @@ function getGreatestCommonDivisor(a: number, b: number): number {
 function getAspectRatio(width: number, height: number): string {
   const divisor = getGreatestCommonDivisor(width, height)
   return `${Math.round(width / divisor)}:${Math.round(height / divisor)}`
-}
-
-function normalizeDurationValue(value: number): string {
-  return Number.isInteger(value) ? String(Math.trunc(value)) : String(value).replace(/\.0+$/, '').replace(/(\.\d*?[1-9])0+$/, '$1')
-}
-
-function getRuntimeDurationOptions(
-  modelId: string,
-  runtimeTaskConstraints?: RuntimeTaskConstraints | null,
-  catalogDurationOptionsByModel?: Record<string, DurationOption[]>,
-): DurationOption[] {
-  const durationValues = Array.isArray(runtimeTaskConstraints?.duration_values)
-    ? runtimeTaskConstraints.duration_values
-        .map((value) => Number(value))
-        .filter((value) => Number.isFinite(value))
-    : []
-
-  if (!durationValues.length) {
-    return getFallbackDurationOptions(modelId, catalogDurationOptionsByModel)
-  }
-
-  const uniqueSortedValues = Array.from(new Set(durationValues)).sort((left, right) => left - right)
-  return uniqueSortedValues.map((value) => {
-    const normalized = normalizeDurationValue(value)
-    return {
-      value: normalized,
-    }
-  })
 }
 
 function filterSizeOptions(
@@ -959,13 +815,10 @@ function filterSizeOptions(
 }
 
 function getSupportsCameraControl(
-  modelId: string,
   runtimeCapabilityHints?: RuntimeCapabilityHints | null,
 ): boolean {
-  if (typeof runtimeCapabilityHints?.supports_camera_control === 'boolean') {
-    return runtimeCapabilityHints.supports_camera_control
-  }
-  return modelId === 'wan2.7-t2v'
+  // 在售的 wan3.0-video 上游不支持 camera_control，只有运行时能力提示显式给出 true 才放开
+  return runtimeCapabilityHints?.supports_camera_control === true
 }
 
 function getMaxReferenceImages(
@@ -1416,9 +1269,6 @@ function ResultCard({
   const requestedModelId = typeof result?.metadata?.requested_model_id === 'string'
     ? String(result.metadata.requested_model_id).trim()
     : ''
-  const routingMessage = typeof result?.metadata?.routing_message === 'string'
-    ? String(result.metadata.routing_message).trim()
-    : ''
   const hasRequestedModelMismatch = Boolean(
     requestedModelId
     && result?.model_id
@@ -1506,11 +1356,6 @@ function ResultCard({
               <Chip size="small" label={t ? t('assetStudio.workbench.result.requestedModelChip', { value: requestedModelId }) : `请求模型：${requestedModelId}`} sx={{ color: 'white' }} variant="outlined" />
             ) : null}
           </Stack>
-          {routingMessage ? (
-            <Alert severity="info" sx={{ borderRadius: 2 }}>
-              {routingMessage}
-            </Alert>
-          ) : null}
           {result?.metadata?.fallback_reason ? (
             <Alert severity="info" sx={{ borderRadius: 2 }}>
               {String(result.metadata.fallback_reason)}
@@ -1551,6 +1396,94 @@ function ResultCard({
           </Typography>
         </Stack>
       )}
+    </Box>
+  )
+}
+
+function DurationRangeControl({
+  label,
+  value,
+  range,
+  onChange,
+  t,
+}: {
+  label: string
+  value: string
+  range: DurationRange
+  onChange: (value: string) => void
+  t: TFunction
+}) {
+  const smartDuration = range.supportsAuto && value === SMART_DURATION_VALUE
+  const sliderValue = getSliderDurationValue(value, range)
+  const [draftText, setDraftText] = useState(String(sliderValue))
+
+  useEffect(() => {
+    setDraftText(String(sliderValue))
+  }, [sliderValue])
+
+  const commitDraft = function() {
+    onChange(String(getSliderDurationValue(draftText, range)))
+  }
+
+  return (
+    <Box sx={{ minWidth: 232 }}>
+      <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.25 }}>
+        <Typography sx={{ color: 'rgba(255,255,255,0.68)', fontSize: '0.78rem' }}>{label}</Typography>
+        {range.supportsAuto ? (
+          <Button
+            size="small"
+            onClick={() => onChange(smartDuration ? String(range.defaultValue) : SMART_DURATION_VALUE)}
+            sx={{
+              borderRadius: 2,
+              px: 1.25,
+              py: 0.25,
+              fontSize: '0.72rem',
+              fontWeight: 700,
+              backgroundColor: smartDuration ? 'rgba(139,161,255,0.86)' : 'transparent',
+              border: smartDuration ? '1px solid transparent' : '1px solid rgba(255,255,255,0.24)',
+              color: smartDuration ? '#0d1226' : 'rgba(255,255,255,0.82)',
+            }}
+          >
+            {t('assetStudio.workbench.durationSmart')}
+          </Button>
+        ) : null}
+      </Stack>
+      <Slider
+        value={sliderValue}
+        min={range.min}
+        max={range.max}
+        step={range.step}
+        disabled={smartDuration}
+        valueLabelDisplay="auto"
+        getAriaLabel={() => label}
+        onChange={(_event, next) => onChange(String(Array.isArray(next) ? next[0] : next))}
+        sx={{ color: 'rgba(167,186,255,0.85)', mx: 0.5 }}
+      />
+      <Stack direction="row" alignItems="center" spacing={1}>
+        <TextField
+          size="small"
+          type="number"
+          value={draftText}
+          disabled={smartDuration}
+          onChange={(event) => setDraftText(event.target.value)}
+          onBlur={commitDraft}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') {
+              commitDraft()
+            }
+          }}
+          inputProps={{ min: range.min, max: range.max, step: range.step }}
+          sx={{
+            width: 104,
+            '& .MuiOutlinedInput-root': { color: 'white', backgroundColor: 'rgba(255,255,255,0.03)' },
+          }}
+        />
+        <Typography sx={{ color: 'rgba(255,255,255,0.56)', fontSize: '0.76rem' }}>
+          {smartDuration
+            ? t('assetStudio.workbench.durationSmartHint')
+            : t('assetStudio.workbench.durationRangeHint', { min: range.min, max: range.max })}
+        </Typography>
+      </Stack>
     </Box>
   )
 }
@@ -1601,25 +1534,25 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
   const { catalog: assetStudioModelCatalog } = useAssetStudioModelCatalog()
 
   const assetStudioImageGenerationDefaultModelId =
-    assetStudioModelCatalog?.defaults.asset_studio_image_generation || 'wan2.7-image'
+    assetStudioModelCatalog?.defaults.asset_studio_image_generation || 'qwen-image-3.0'
   const assetStudioImageEditDefaultModelId =
     assetStudioModelCatalog?.defaults.asset_studio_image_edit || 'qwen-image-edit-plus'
   const assetStudioVideoGenerationDefaultModelId =
-    assetStudioModelCatalog?.defaults.asset_studio_video_generation || 'wan2.7-t2v'
+    assetStudioModelCatalog?.defaults.asset_studio_video_generation || 'wan3.0-video'
   const assetStudioMotionDefaultModelId =
-    assetStudioModelCatalog?.defaults.asset_studio_motion || 'wan2.7-i2v'
+    assetStudioModelCatalog?.defaults.asset_studio_motion || 'wan3.0-video'
   const assetStudioAudioMusicDefaultModelId =
     assetStudioModelCatalog?.defaults.asset_studio_audio_music || 'mureka-o1-instrumental'
   const assetStudioAudioSoundEffectDefaultModelId =
-    assetStudioModelCatalog?.defaults.asset_studio_audio_sound_effect || 'vidu-timing2audio'
+    assetStudioModelCatalog?.defaults.asset_studio_audio_sound_effect || 'seed-audio-1.0'
   const assetStudioAudioSceneDefaultModelId =
     assetStudioModelCatalog?.defaults.asset_studio_audio_scene || 'seed-audio-1.0'
   const assetStudioAudioSpeechDefaultModelId =
-    assetStudioModelCatalog?.defaults.asset_studio_audio_speech || 'qwen3-tts-instruct-flash'
+    assetStudioModelCatalog?.defaults.asset_studio_audio_speech || 'qwen-audio-3.1-tts-flash'
 
   const [imagePrompt, setImagePrompt] = useState('')
   const [imageNegativePrompt, setImageNegativePrompt] = useState('')
-  const [imageModelId, setImageModelId] = useState('wan2.7-image')
+  const [imageModelId, setImageModelId] = useState('qwen-image-3.0')
   const [imageSize, setImageSize] = useState(IMAGE_SIZE_OPTIONS[0].value)
   const [imageReferenceFiles, setImageReferenceFiles] = useState<File[]>([])
   const [imageLoading, setImageLoading] = useState(false)
@@ -1627,7 +1560,7 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
   const [imageResult, setImageResult] = useState<AssetStudioGenerateResponse | null>(null)
 
   const [videoPrompt, setVideoPrompt] = useState('')
-  const [videoModelId, setVideoModelId] = useState('wan2.7-t2v')
+  const [videoModelId, setVideoModelId] = useState('wan3.0-video')
   const [videoDuration, setVideoDuration] = useState('5')
   const [videoSize, setVideoSize] = useState(VIDEO_SIZE_OPTIONS[1].value)
   const [videoCameraControl, setVideoCameraControl] = useState('')
@@ -1637,7 +1570,7 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
   const [videoResult, setVideoResult] = useState<AssetStudioGenerateResponse | null>(null)
 
   const [motionPrompt, setMotionPrompt] = useState('')
-  const [motionModelId, setMotionModelId] = useState('wan2.7-i2v')
+  const [motionModelId, setMotionModelId] = useState('wan3.0-video')
   const [motionDuration, setMotionDuration] = useState('5')
   const [motionSize, setMotionSize] = useState(VIDEO_SIZE_OPTIONS[1].value)
   const [motionLevel, setMotionLevel] = useState('medium')
@@ -1692,6 +1625,7 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
 
   const imageUsesReferenceMode = imageReferenceFiles.length > 0
   const catalogDurationOptionsByModel = buildCatalogDurationOptionsByModel(assetStudioModelCatalog?.groups)
+  const catalogDurationRangesByModel = buildCatalogDurationRangesByModel(assetStudioModelCatalog?.groups)
   const imageGenerationModelOptions =
     assetStudioModelCatalog?.groups.image_generation?.map(mapCatalogOptionToModelOption) || IMAGE_GENERATION_MODEL_OPTIONS
   const imageEditModelOptions =
@@ -1743,8 +1677,9 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
     selectedVideoCatalogEntry?.runtime_task_constraints,
     catalogDurationOptionsByModel,
   )
+  const videoDurationRange = getDurationRange(videoModelId, catalogDurationRangesByModel)
   const videoSizeOptions = filterSizeOptions(VIDEO_SIZE_OPTIONS, selectedVideoCatalogEntry?.runtime_task_constraints)
-  const videoSupportsCameraControl = getSupportsCameraControl(videoModelId, selectedVideoCatalogEntry?.runtime_capability_hints)
+  const videoSupportsCameraControl = getSupportsCameraControl(selectedVideoCatalogEntry?.runtime_capability_hints)
   const selectedVideoCameraControl = CAMERA_CONTROL_OPTIONS.find((option) => option.value === videoCameraControl) || CAMERA_CONTROL_OPTIONS[0]
   const pendingVideoResult = videoLoading
     ? buildPendingGenerateResponse({
@@ -1774,8 +1709,9 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
     selectedMotionCatalogEntry?.runtime_task_constraints,
     catalogDurationOptionsByModel,
   )
+  const motionDurationRange = getDurationRange(motionModelId, catalogDurationRangesByModel)
   const motionSizeOptions = filterSizeOptions(VIDEO_SIZE_OPTIONS, selectedMotionCatalogEntry?.runtime_task_constraints)
-  const motionSupportsCameraControl = getSupportsCameraControl(motionModelId, selectedMotionCatalogEntry?.runtime_capability_hints)
+  const motionSupportsCameraControl = getSupportsCameraControl(selectedMotionCatalogEntry?.runtime_capability_hints)
   const selectedMotionCameraControl = CAMERA_CONTROL_OPTIONS.find((option) => option.value === motionCameraControl) || CAMERA_CONTROL_OPTIONS[0]
 
   const audioModelOptionsByType: Record<AudioGenerationType, ModelOption[]> = {
@@ -2101,9 +2037,6 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
           }
 
           nextEntries[modelKey] = runtimeEntry
-          for (const aliasKey of MODEL_CATALOG_ENTRY_ALIASES[modelKey] || []) {
-            nextEntries[aliasKey] = runtimeEntry
-          }
         }
         setCatalogRuntimeEntries(nextEntries)
       } catch {
@@ -2310,11 +2243,11 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
   }, [imageSize, imageSizeOptions])
 
   useEffect(() => {
-    const allowedValues = new Set(videoDurationOptions.map((option) => option.value))
-    if (!allowedValues.has(videoDuration)) {
-      setVideoDuration(getRecommendedDuration(videoDurationOptions))
+    const resolvedDuration = resolveDurationSelection(videoDuration, videoDurationRange, videoDurationOptions)
+    if (resolvedDuration !== videoDuration) {
+      setVideoDuration(resolvedDuration)
     }
-  }, [videoDuration, videoDurationOptions])
+  }, [videoDuration, videoDurationRange, videoDurationOptions])
 
   useEffect(() => {
     const allowedValues = new Set(videoSizeOptions.map((option) => option.value))
@@ -2324,11 +2257,11 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
   }, [videoSize, videoSizeOptions])
 
   useEffect(() => {
-    const allowedValues = new Set(motionDurationOptions.map((option) => option.value))
-    if (!allowedValues.has(motionDuration)) {
-      setMotionDuration(getRecommendedDuration(motionDurationOptions))
+    const resolvedDuration = resolveDurationSelection(motionDuration, motionDurationRange, motionDurationOptions)
+    if (resolvedDuration !== motionDuration) {
+      setMotionDuration(resolvedDuration)
     }
-  }, [motionDuration, motionDurationOptions])
+  }, [motionDuration, motionDurationRange, motionDurationOptions])
 
   useEffect(() => {
     const allowedValues = new Set(motionSizeOptions.map((option) => option.value))
@@ -2854,12 +2787,6 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
                     sx={getRoutingStatusChipSx(selectedVideoRoutingSignal)}
                   />
                   <Chip size="small" label={videoUsesReferenceMode ? t('assetStudio.workbench.chip.firstFrameMode') : t('assetStudio.workbench.chip.pureTextMode')} variant="outlined" sx={{ color: 'white' }} />
-                  <Chip
-                    size="small"
-                    label={videoModelId === 'wan2.6-t2v-fast' ? t('assetStudio.workbench.chip.quickPreview') : videoModelId === 'wan2.7-i2v' ? t('assetStudio.workbench.chip.stableSubject') : t('assetStudio.workbench.chip.formalGeneration')}
-                    variant="outlined"
-                    sx={{ color: 'white' }}
-                  />
                 </Stack>
                 {renderRoutingStatusMeta(selectedVideoRoutingSignal, t)}
                 {renderRecommendedModelAction(videoModelId, recommendedVideoModel, catalogRuntimeEntries, () => {
@@ -2944,16 +2871,26 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
                   ))}
                 </Select>
               </FormControl>
-              <FormControl size="small" sx={{ minWidth: 120 }}>
-                <InputLabel sx={{ color: 'rgba(255,255,255,0.68)' }}>{t('assetStudio.workbench.label.duration')}</InputLabel>
-                <Select value={videoDuration} label={t('assetStudio.workbench.label.duration')} onChange={(event) => setVideoDuration(event.target.value)} sx={{ color: 'white' }}>
-                  {videoDurationOptions.map((option) => (
-                    <MenuItem key={option.value} value={option.value}>
-                      {t('assetStudio.workbench.durationSeconds', { count: option.value })}
-                    </MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
+              {videoDurationRange ? (
+                <DurationRangeControl
+                  label={t('assetStudio.workbench.label.duration')}
+                  value={videoDuration}
+                  range={videoDurationRange}
+                  onChange={setVideoDuration}
+                  t={t}
+                />
+              ) : (
+                <FormControl size="small" sx={{ minWidth: 120 }}>
+                  <InputLabel sx={{ color: 'rgba(255,255,255,0.68)' }}>{t('assetStudio.workbench.label.duration')}</InputLabel>
+                  <Select value={videoDuration} label={t('assetStudio.workbench.label.duration')} onChange={(event) => setVideoDuration(event.target.value)} sx={{ color: 'white' }}>
+                    {videoDurationOptions.map((option) => (
+                      <MenuItem key={option.value} value={option.value}>
+                        {t('assetStudio.workbench.durationSeconds', { count: option.value })}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              )}
             </Stack>
             <FooterAction loading={videoLoading} label={t('assetStudio.workbench.action.generate')} onClick={handleGenerateVideo} t={t} />
           </Stack>
@@ -2981,7 +2918,7 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
                     variant="outlined"
                     sx={getRoutingStatusChipSx(selectedMotionRoutingSignal)}
                   />
-                  <Chip size="small" label={motionModelId === 'wan2.7-i2v' ? t('assetStudio.workbench.chip.referenceDriven') : t('assetStudio.workbench.chip.cameraLanguageEnhanced')} variant="outlined" sx={{ color: 'white' }} />
+                  <Chip size="small" label={motionReferenceFile ? t('assetStudio.workbench.chip.referenceDriven') : t('assetStudio.workbench.chip.pureTextMode')} variant="outlined" sx={{ color: 'white' }} />
                   <Chip size="small" label={t('assetStudio.workbench.chip.motionControl')} variant="outlined" sx={{ color: 'white' }} />
                 </Stack>
                 {renderRoutingStatusMeta(selectedMotionRoutingSignal, t)}
@@ -3067,16 +3004,26 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
                   ))}
                 </Select>
               </FormControl>
-              <FormControl size="small" sx={{ minWidth: 120 }}>
-                <InputLabel sx={{ color: 'rgba(255,255,255,0.68)' }}>{t('assetStudio.workbench.label.duration')}</InputLabel>
-                <Select value={motionDuration} label={t('assetStudio.workbench.label.duration')} onChange={(event) => setMotionDuration(event.target.value)} sx={{ color: 'white' }}>
-                  {motionDurationOptions.map((option) => (
-                    <MenuItem key={option.value} value={option.value}>
-                      {t('assetStudio.workbench.durationSeconds', { count: option.value })}
-                    </MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
+              {motionDurationRange ? (
+                <DurationRangeControl
+                  label={t('assetStudio.workbench.label.duration')}
+                  value={motionDuration}
+                  range={motionDurationRange}
+                  onChange={setMotionDuration}
+                  t={t}
+                />
+              ) : (
+                <FormControl size="small" sx={{ minWidth: 120 }}>
+                  <InputLabel sx={{ color: 'rgba(255,255,255,0.68)' }}>{t('assetStudio.workbench.label.duration')}</InputLabel>
+                  <Select value={motionDuration} label={t('assetStudio.workbench.label.duration')} onChange={(event) => setMotionDuration(event.target.value)} sx={{ color: 'white' }}>
+                    {motionDurationOptions.map((option) => (
+                      <MenuItem key={option.value} value={option.value}>
+                        {t('assetStudio.workbench.durationSeconds', { count: option.value })}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              )}
               <FormControl size="small" sx={{ minWidth: 140 }}>
                 <InputLabel sx={{ color: 'rgba(255,255,255,0.68)' }}>{t('assetStudio.workbench.label.motionLevel')}</InputLabel>
                 <Select value={motionLevel} label={t('assetStudio.workbench.label.motionLevel')} onChange={(event) => setMotionLevel(event.target.value)} sx={{ color: 'white' }}>

@@ -1,0 +1,154 @@
+{
+  "_type": "domain",
+  "domain": "director_reasoning",
+  "unit_count": 10,
+  "units": {
+    "shot_motivation": {
+      "content_status": "pending_content",
+      "note": "内容在归档 DOCX/XLSX（v1.2 起只读），待回填 SSOT knowledge_units 后重新派生",
+      "priority_backfill": null
+    },
+    "audience_position": {
+      "content_status": "pending_content",
+      "note": "内容在归档 DOCX/XLSX（v1.2 起只读），待回填 SSOT knowledge_units 后重新派生",
+      "priority_backfill": null
+    },
+    "information_control": {
+      "content_status": "pending_content",
+      "note": "内容在归档 DOCX/XLSX（v1.2 起只读），待回填 SSOT knowledge_units 后重新派生",
+      "priority_backfill": null
+    },
+    "change_type": {
+      "content_status": "pending_content",
+      "note": "内容在归档 DOCX/XLSX（v1.2 起只读），待回填 SSOT knowledge_units 后重新派生",
+      "priority_backfill": null
+    },
+    "delete_test": {
+      "content_status": "pending_content",
+      "note": "内容在归档 DOCX/XLSX（v1.2 起只读），待回填 SSOT knowledge_units 后重新派生",
+      "priority_backfill": null
+    },
+    "dialogue_coverage": {
+      "domain": "director_reasoning",
+      "title": "对白镜头覆盖系统：信息拥有者原则",
+      "principle": "谁说话不一定永远拍谁；镜头关注的是当前叙事信息的拥有者（Information Owner），而不只是说话者（Speaker）。镜头不是记录对白，而是在导演观众应该看什么。",
+      "content": [
+        "五层覆盖：Speaker Shot 说话者镜头；Listener Reaction 听者反应镜头（信息变化发生在听者时切过去）；Relationship Shot 双方关系镜头（距离变化/沉默时用双人镜）；Emotional Turning Point 情绪变化镜头；Information Reveal 信息揭示镜头",
+        "Shot Purpose 纪律：每个分镜必须回答存在原因——传递信息 / 展示反应 / 建立关系 / 强调情绪 / 揭示变化 / 建立空间，六者必居其一",
+        "Prompt 模式：台词重要拍说话者；反应重要拍听者；关系重要拍双人镜。例：『其实我早就知道了』→ 男主中景说完切女主震惊反应",
+        "与 beat 七族联动：信息揭示族 beat 优先 Information Reveal / Listener Reaction；关系状态族优先 Relationship Shot；情绪爆发族优先 Emotional Turning Point"
+      ],
+      "source_project": "AI Director OS V5.0 原生知识",
+      "source": "三件套 DOCX Master 卷八 AM-06 Dialogue Coverage ｜ 对白镜头覆盖系统",
+      "added": "2026-08-16",
+      "source_type": "benchmark",
+      "verification_status": "verified",
+      "trust_weight": 1.0,
+      "depends_on": [
+        "information_control",
+        "shot_motivation"
+      ],
+      "qc_checks": [
+        "对白镜头是否围绕信息拥有者而非机械跟随说话者？",
+        "每个镜头是否都有明确的 Shot Purpose？",
+        "是否落入『谁说话拍谁』的基础错误？"
+      ],
+      "content_backfilled": "2026-10-07",
+      "backfill_origin": "V5.0 基线（DOCX 卷八 AM-06）"
+    },
+    "resonance_design": {
+      "domain": "director_reasoning",
+      "title": "共鸣设计：Click→Watch→Share 三层钩子",
+      "principle": "爆火不是迷信大题材，而是把『大题材』缩成『小瞬间』。把『爆火』拆成三层：Click（为什么停下来）→ Watch（为什么继续看）→ Share（为什么愿意转发）。",
+      "content": [
+        "Click / Stop：第一帧或前三秒让观众停下——视觉异常、情绪悬念、信息缺口（对齐 script_generator_compatibility 的 HOOK 3 秒钩子与语速预算）",
+        "Watch：让观众继续看——信息递进、情绪递进、关系张力（对齐 beat 结构与节奏锚点）",
+        "Share / Shareable Emotion：可转发表达——把情绪表达成观众想替角色/替自己说出的话（对齐 CTA 收尾互动引导）",
+        "小瞬间原则：大题材落到具体可感的人际瞬间，而不是抽象口号",
+        "Prompt 模式：创作层把主题收窄为一个具体瞬间，并为其设计 Stop→Watch→Share 三层钩子",
+        "六大要素映射：情感共鸣（六要素之首）→ 本单元；镜头卡提交前逐镜核对『这镜的情绪目标是否明确』"
+      ],
+      "source_project": "AI Director OS V5.0 原生知识",
+      "source": "三件套 DOCX Master 卷八 AM-10 Resonance Design ｜ 共鸣设计 + 卷四六大要素框架映射",
+      "added": "2026-08-16",
+      "source_type": "benchmark",
+      "verification_status": "verified",
+      "trust_weight": 1.0,
+      "depends_on": [
+        "audience_position"
+      ],
+      "qc_checks": [
+        "开场是否制造了停下看的理由？",
+        "是否有递进的信息/情绪让观众留下？",
+        "是否有可转发的情绪表达？"
+      ],
+      "content_backfilled": "2026-10-07",
+      "backfill_origin": "V5.0 基线（DOCX 卷八 AM-10）"
+    },
+    "cut_technique_library": {
+      "domain": "director_reasoning",
+      "title": "切换技法库：四技法与 Cut Motivation 映射",
+      "principle": "切换技法解决『镜头之间怎么切』——四技法选型必须服务信息供给与情绪目标（衔接 Cut Motivation），不能为炫技而用（删除测试拦截）。",
+      "content": [
+        "四技法：快切——短频快切换，每段保留 0.2-0.5s，打节奏（须遵循硬切落点三规则与时长阈值；过快触发 CF-089）；跳切——同主体、相近景别、相似角度，跳过中间环节，时间省略/信息跳跃（衔接 DC-024 时间跳跃）；平行蒙太奇——各线独立并行，丰富剧情/升华主题；交叉蒙太奇——多线共时且共同指向一个结果，制造紧张/悬念",
+        "Cut Motivation 映射：快切→Rhythm Cut（节奏驱动）；跳切→Information Cut（时间省略/信息跳跃）；平行蒙太奇→Narrative Cut（多线组织/主题升华）；交叉蒙太奇→Narrative Cut + Emotional Cut（紧张与悬念驱动）",
+        "选型决策（DC-032）：多线同一时间发生且共同指向一个结果→交叉蒙太奇；各线独立并行→平行蒙太奇；单线打节奏→快切；单线省略中间环节→跳切",
+        "动作类快切景别选型（DC-033）：动作单元必须 CU/ECU/Insert；每个单元只展示动作因果链的一个关键节点（手腕转动→触物→收回）；特写只演关键物理节点（接触/发力/反应），完整过程由观众心理补偿；每节点配独立音效（触物声/击打声）",
+        "节奏循环锚点（rhythm_cycle_anchor）：每 ~11s 给观众一个换气/记忆锚点（短镜头切节奏 + 长镜头定情绪 + 音乐卡点）；参考锚点非硬规则，按类型系数调整（情感类因情绪增量拉长、悬疑类压缩）"
+      ],
+      "source_project": "AI Director OS V5.0 原生知识",
+      "source": "抖音「时屿」2026-08-17《为什么动作类快切非要用近景和特写镜头？》+ 体系 4.1.2 切换技法库设计",
+      "added": "2026-08-17",
+      "source_type": "creator_tutorial",
+      "verification_status": "pending",
+      "trust_weight": 0.7,
+      "depends_on": [
+        "shot_motivation",
+        "rhythm_cycle_anchor"
+      ],
+      "qc_checks": [
+        "技法选型是否走 DC-032 决策树？",
+        "快切是否遵循硬切落点三规则与时长阈值（CF-089/CF-109）？",
+        "11s 节奏锚点是否按类型系数调整？"
+      ],
+      "content_backfilled": "2026-10-07",
+      "backfill_origin": "DOCX 卷四 4.1.2 切换技法库 + 4.1.2.1 动作类快切景别选型"
+    },
+    "rhythm_cycle_anchor": {
+      "content_status": "pending_content",
+      "note": "内容在归档 DOCX/XLSX（v1.2 起只读），待回填 SSOT knowledge_units 后重新派生",
+      "priority_backfill": null
+    },
+    "transition_library": {
+      "domain": "director_reasoning",
+      "title": "转场技法库：四大类 23 种与边界帧契约",
+      "principle": "转场技法解决『场景之间怎么过渡』（时空双跳变）——本质是边界帧契约：所有转场都是前镜尾帧 × 后镜首帧的连接设计，转场质量由边界两帧的『联系』决定。",
+      "content": [
+        "四大类 23 种：视觉匹配类 9（相似动作/屏幕方向匹配/相似形状/相似构图/相似角度/视线匹配/视点匹配/特写缓冲/想法匹配——让眼睛顺着相似性滑过去）；声音桥接类 7（J cut/L cut/相似声音/重音转场/组合音效/卡点/对白旁白——听觉先行，后期可控）；遮挡后期类 6（遮挡/抠图/撕纸/绿幕/手势等——剪辑层实现，归 Editing Agent）；节奏缓冲类 1（废片快切 3 帧）",
+        "第五种边界处理：章节式直切——字幕卡/黑场/音效重置显式宣告新片段，把『断裂』变成章节信息而非缺陷（与废片快切的区别：缓冲 vs 宣告）",
+        "选型决策（DC-034）：两场景存在视觉相似性→视觉匹配类；需压缩时间/加快叙事→对白旁白或 J/L cut（一句话带走场景）；需情绪延续→相似角度或 L cut；场景差别大无相似性→特写缓冲或遮挡后期类；强调节奏冲击→卡点/重音",
+        "AI 短剧特殊优先级：声音桥接类最可靠（声音层后期可控、不依赖生成模型）＞遮挡后期类（剪辑层实现）＞视觉匹配类（需在两个场景的 Shot Contract 中成对预写共享约束：相似动作 Body Phase/相同构图机位/视线方向一致/屏幕方向惯性，让两次生成共享同一采样条件）",
+        "AI 确定性实现：把前镜尾帧导出为图，作为后镜首帧的条件参考（Kling/Seedance 等 first/last frame conditioning），强制边界帧连续——把『希望模型生成相似性』变成『直接给定相似性』",
+        "修复衔接：场景转换生硬（转场缺失）见 CF-110 repair_model"
+      ],
+      "source_project": "AI Director OS V5.0 原生知识",
+      "source": "抖音「阿七米德」2026-07-19《一口气分享25个转场》+ 2025-09-09《一分钟学会四个转场》（边界帧原理）+ 体系 4.1.3 设计",
+      "added": "2026-08-17",
+      "source_type": "creator_tutorial",
+      "verification_status": "pending",
+      "trust_weight": 0.7,
+      "depends_on": [
+        "cut_technique_library",
+        "screen_space"
+      ],
+      "qc_checks": [
+        "场景转换处是否有转场设计（对照 DC-034 四大类+章节式直切）？",
+        "视觉匹配变量是否在两镜 Shot Contract 中成对声明？",
+        "是否优先声音桥接类（AI 成功率最高）？",
+        "视觉匹配类是否用了首尾帧条件控制强制边界连续？"
+      ],
+      "content_backfilled": "2026-10-07",
+      "backfill_origin": "DOCX 卷四 4.1.3 转场技法库"
+    }
+  }
+}

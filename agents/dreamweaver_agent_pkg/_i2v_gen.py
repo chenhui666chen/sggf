@@ -23,6 +23,7 @@ from pipeline.media_presets import (
     DREAMWEAVER_I2V_ENGINE,
     DREAMWEAVER_I2V_OUTPUT_FPS,
     DREAMWEAVER_T2V_ENGINE,
+    DREAMWEAVER_WAN_MODEL_ID,
     ensure_media_payload,
     is_dreamweaver_generated_video_engine,
     is_dreamweaver_auto_engine,
@@ -31,6 +32,7 @@ from pipeline.media_presets import (
     normalize_dreamweaver_video_duration_s,
     normalize_dreamweaver_video_engine,
     normalize_video_fps,
+    resolve_dreamweaver_video_audio_output,
     resolve_frame_size,
 )
 from pipeline.artifacts_io import download_url_to_path as _download_url_to_path
@@ -56,7 +58,8 @@ def _run_t2v_video_generation(
     regenerate_shot_ids: Optional[set[str]] = None,
     allowed_shot_ids: Optional[set[str]] = None,
 ) -> None:
-    adapter_name = str(video_cfg.get("adapter") or DREAMWEAVER_T2V_ENGINE).strip() or DREAMWEAVER_T2V_ENGINE
+    adapter_name = str(video_cfg.get("adapter") or DREAMWEAVER_WAN_MODEL_ID).strip() or DREAMWEAVER_WAN_MODEL_ID
+    audio_output = resolve_dreamweaver_video_audio_output()
 
     regen_set = regenerate_shot_ids or set()
     existing_clips_by_shot = _index_video_clips_by_shot(ctx.payload.get("video_clips"))
@@ -111,6 +114,7 @@ def _run_t2v_video_generation(
             "duration": float(duration_s),
             "seed": int(seed),
             "model_id": adapter_name,
+            "audio_output": audio_output,
             "use_fallback": False,
             "fps": int(fps),
         }

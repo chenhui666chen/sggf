@@ -46,7 +46,7 @@ class ModelHubChatModel(BaseChatModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     task_type: Optional[str] = None
-    model_name: str = "qwen3.7-plus"
+    model_name: str = "qwen-plus"
     temperature: float = 0.7
     max_tokens: Optional[int] = None
     runtime_options: Dict[str, Any] = Field(default_factory=dict)
@@ -185,7 +185,7 @@ def create_task_llm(
 
     normalized_task_type = normalize_task_type(task_type)
     resolved_model = resolve_model_for_task(normalized_task_type, model)
-    normalized_model = normalize_model_id(resolved_model) or "qwen3.7-plus"
+    normalized_model = normalize_model_id(resolved_model) or "qwen-plus"
 
     return ModelHubChatModel(
         task_type=normalized_task_type,

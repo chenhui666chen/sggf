@@ -9,7 +9,7 @@ import copy
 import logging
 import random
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
+from typing import Any, Callable, Dict, List, Optional, Tuple, TYPE_CHECKING
 
 from core.config import config
 
@@ -48,7 +48,15 @@ class RoutingResult:
 
 class CapabilityFilter:
     """Filter models by hard constraints."""
-    
+
+    def __init__(
+        self,
+        adapter_resolver: Optional[Callable[[str], bool]] = None,
+    ):
+        # 可选硬条件：判定模型 id 是否注册了可执行 adapter。
+        # 为 None 时保持历史行为（只过滤 status 与任务约束）。
+        self._adapter_resolver = adapter_resolver
+
     def filter(
         self,
         task: "TaskSpec",
@@ -56,17 +64,20 @@ class CapabilityFilter:
     ) -> List["ModelSpec"]:
         """Filter models that can handle the task."""
         candidates = []
-        
+
         for model in models:
             if model.status.value != "active":
                 continue
-            
+
             can_handle, reasons = model.can_handle(task)
-            if can_handle:
-                candidates.append(model)
-            elif self._can_workaround(task, model, reasons):
-                candidates.append(model)
-        
+            if not can_handle and not self._can_workaround(task, model, reasons):
+                continue
+
+            if self._adapter_resolver is not None and not self._adapter_resolver(model.id):
+                continue
+
+            candidates.append(model)
+
         return candidates
     
     def _can_workaround(
@@ -255,7 +266,10 @@ class SmartRouter:
     def __init__(self, registry: "ModelRegistry" = None, enable_semantic: bool = True):
         from adapters.registry import registry as default_registry
         self._registry = registry or default_registry
-        self._filter = CapabilityFilter()
+        # 路由候选必须注册了可执行 adapter，避免 yaml 有条目但无实现的死条目被抽成首选
+        self._filter = CapabilityFilter(
+            adapter_resolver=lambda model_id: self._registry.has_adapter(model_id)
+        )
         self._scorer = ModelScorer()
         self._balancer = LoadBalancer()
         self._enable_semantic = enable_semantic

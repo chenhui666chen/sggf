@@ -30,7 +30,7 @@ from app.services.unified_extraction import UnifiedExtractionService
 from app.services.exact_model_guard import ExactModelRequiredError
 from app.services import exact_model_guard as guard_module
 
-FLASH = "qwen3.7-flash"
+FLASH = "qwen-flash"
 
 
 class FakeLLM:
@@ -57,7 +57,7 @@ def test_unified_extraction_uses_explicit_model(monkeypatch):
         return FakeLLM('{"entities": [], "locations": [], "relations": [], "character_relations": []}')
 
     monkeypatch.setattr(unified_module, "create_model_llm", _fake_create_model_llm)
-    monkeypatch.setenv("UNIFIED_EXTRACTION_MODEL", "deepseek-v4-pro")
+    monkeypatch.setenv("UNIFIED_EXTRACTION_MODEL", "deepseek-pro")
 
     result = asyncio.run(UnifiedExtractionService.extract_all_from_chapter(
         chapter_title="t", chapter_content="c", project_id=1, model=FLASH,
@@ -74,19 +74,19 @@ def test_unified_extraction_default_keeps_env_logic(monkeypatch):
         return FakeLLM('{"entities": [], "locations": [], "relations": [], "character_relations": []}')
 
     monkeypatch.setattr(unified_module, "create_model_llm", _fake_create_model_llm)
-    monkeypatch.setenv("UNIFIED_EXTRACTION_MODEL", "deepseek-v4-pro")
+    monkeypatch.setenv("UNIFIED_EXTRACTION_MODEL", "deepseek-pro")
 
     asyncio.run(UnifiedExtractionService.extract_all_from_chapter(
         chapter_title="t", chapter_content="c", project_id=1,
     ))
-    assert captured["model"] == "deepseek-v4-pro"
+    assert captured["model"] == "deepseek-pro"
 
 
 def test_locked_post_processing_model_rejects_catalog_reroute(monkeypatch):
     monkeypatch.setattr(
         guard_module,
         "resolve_model_for_task",
-        lambda task_type, model: "qwen3.7-plus",
+        lambda task_type, model: "qwen-plus",
     )
 
     with pytest.raises(ExactModelRequiredError):

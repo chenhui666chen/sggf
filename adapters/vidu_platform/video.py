@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Optional
 
 from adapters.base import BaseAdapter, AdapterConfig, GenerationResult
 from adapters.registry import register_model
-from adapters._shared import VIDU_API_KEY, _encode_image, _env_int, _poll_vidu_task
+from adapters._shared import DASHSCOPE_BASE, _encode_image, _env_int, _poll_dashscope_task, require_api_key
 from adapters.dashscope.video_t2v import _DashScopeT2VAdapter
 from schemas.model_spec import ModelSpec
 from schemas.common import ModelStatus
@@ -33,9 +33,10 @@ class _ViduVideoAdapter(BaseAdapter):
     def generate(self, prompt: str = "", **kwargs) -> GenerationResult:
         start = time.time()
         try:
+            api_key = require_api_key("DASHSCOPE_API_KEY")
             url = f"{DASHSCOPE_BASE}/api/v1/services/aigc/video-generation/video-synthesis"
             headers = {
-                "Authorization": f"Bearer {DASHSCOPE_API_KEY}",
+                "Authorization": f"Bearer {api_key}",
                 "Content-Type": "application/json",
                 "X-DashScope-Async": "enable",
             }
@@ -72,7 +73,7 @@ class _ViduVideoAdapter(BaseAdapter):
                     latency=time.time() - start,
                 )
 
-            result = _poll_dashscope_task(task_id, DASHSCOPE_API_KEY, timeout=_env_int("VIDEO_TASK_TIMEOUT", 600))
+            result = _poll_dashscope_task(task_id, api_key, timeout=_env_int("VIDEO_TASK_TIMEOUT", 600))
             urls = []
             video_url = result.get("output", {}).get("video_url", "")
             if video_url:

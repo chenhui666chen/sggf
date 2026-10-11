@@ -7,48 +7,51 @@ from app.services.audiobook.cosyvoice_clone_client import COSYVOICE_V35_PLUS_MOD
 from core.model_resolution import normalize_model_id
 
 
-DEFAULT_AUDIOBOOK_TTS_MODEL: Final[str] = "qwen3-tts-instruct-flash"
+QWEN_AUDIO_31_TTS_FLASH_MODEL: Final[str] = "qwen-audio-3.1-tts-flash"
+DEFAULT_AUDIOBOOK_TTS_MODEL: Final[str] = QWEN_AUDIO_31_TTS_FLASH_MODEL
 MINIMAX_SPEECH_28_HD_MODEL: Final[str] = "minimax-speech-2.8-hd"
 MINIMAX_SPEECH_28_TURBO_MODEL: Final[str] = "minimax-speech-2.8-turbo"
 MIMO_V25_TTS_MODEL: Final[str] = "mimo-v2.5-tts"
 MIMO_V25_TTS_VOICE_DESIGN_MODEL: Final[str] = "mimo-v2.5-tts-voicedesign"
 MIMO_V25_TTS_VOICE_CLONE_MODEL: Final[str] = "mimo-v2.5-tts-voiceclone"
-STEPAUDIO_25_TTS_MODEL: Final[str] = "stepaudio-2.5-tts"
+STEPAUDIO_3_TTS_MODEL: Final[str] = "stepaudio-3-tts"
 SEED_TTS_20_EXPRESSIVE_MODEL: Final[str] = "seed-tts-2.0-expressive"
 
 SUPPORTED_AUDIOBOOK_TTS_MODELS: Final[set[str]] = {
-    DEFAULT_AUDIOBOOK_TTS_MODEL,
+    # DEFAULT_AUDIOBOOK_TTS_MODEL 与 QWEN_AUDIO_31_TTS_FLASH_MODEL 是同一个模型，
+    # 注册表只保留一个条目，避免默认模型在列表里出现两次。
+    QWEN_AUDIO_31_TTS_FLASH_MODEL,
     COSYVOICE_V35_PLUS_MODEL_ID,
     MINIMAX_SPEECH_28_HD_MODEL,
     MINIMAX_SPEECH_28_TURBO_MODEL,
     MIMO_V25_TTS_MODEL,
     MIMO_V25_TTS_VOICE_DESIGN_MODEL,
     MIMO_V25_TTS_VOICE_CLONE_MODEL,
-    STEPAUDIO_25_TTS_MODEL,
+    STEPAUDIO_3_TTS_MODEL,
     SEED_TTS_20_EXPRESSIVE_MODEL,
 }
 
 SUPPORTED_AUDIOBOOK_TTS_MODEL_ORDER: Final[tuple[str, ...]] = (
-    DEFAULT_AUDIOBOOK_TTS_MODEL,
+    QWEN_AUDIO_31_TTS_FLASH_MODEL,
     COSYVOICE_V35_PLUS_MODEL_ID,
     MINIMAX_SPEECH_28_HD_MODEL,
     MINIMAX_SPEECH_28_TURBO_MODEL,
     MIMO_V25_TTS_MODEL,
     MIMO_V25_TTS_VOICE_DESIGN_MODEL,
     MIMO_V25_TTS_VOICE_CLONE_MODEL,
-    STEPAUDIO_25_TTS_MODEL,
+    STEPAUDIO_3_TTS_MODEL,
     SEED_TTS_20_EXPRESSIVE_MODEL,
 )
 
 AUDIOBOOK_TTS_RUNTIME_MODEL_IDS: Final[dict[str, str]] = {
-    DEFAULT_AUDIOBOOK_TTS_MODEL: DEFAULT_AUDIOBOOK_TTS_MODEL,
+    QWEN_AUDIO_31_TTS_FLASH_MODEL: QWEN_AUDIO_31_TTS_FLASH_MODEL,
     COSYVOICE_V35_PLUS_MODEL_ID: COSYVOICE_V35_PLUS_MODEL_ID,
     MINIMAX_SPEECH_28_HD_MODEL: "MiniMax/speech-2.8-hd",
     MINIMAX_SPEECH_28_TURBO_MODEL: "MiniMax/speech-2.8-turbo",
     MIMO_V25_TTS_MODEL: MIMO_V25_TTS_MODEL,
     MIMO_V25_TTS_VOICE_DESIGN_MODEL: MIMO_V25_TTS_VOICE_DESIGN_MODEL,
     MIMO_V25_TTS_VOICE_CLONE_MODEL: MIMO_V25_TTS_VOICE_CLONE_MODEL,
-    STEPAUDIO_25_TTS_MODEL: STEPAUDIO_25_TTS_MODEL,
+    STEPAUDIO_3_TTS_MODEL: STEPAUDIO_3_TTS_MODEL,
     SEED_TTS_20_EXPRESSIVE_MODEL: SEED_TTS_20_EXPRESSIVE_MODEL,
 }
 
@@ -116,15 +119,16 @@ MIMO_V25_STYLE_CAPABILITIES: Final[dict[str, Any]] = {
 }
 
 AUDIOBOOK_TTS_STYLE_CAPABILITIES: Final[dict[str, dict[str, Any]]] = {
-    DEFAULT_AUDIOBOOK_TTS_MODEL: {
+    QWEN_AUDIO_31_TTS_FLASH_MODEL: {
         "model_family": "qwen",
         "style_control_modes": ["natural_language"],
         "preferred_style_control_mode": "natural_language",
         "supports_voice_description": True,
-        "instruction_budget": 600,
-        "supported_emotions": _CORE_TTS_EMOTIONS,
-        "emotion_aliases": _CORE_TTS_EMOTION_ALIASES,
-        "control_message_roles": {"natural_language": "parameters.instructions"},
+        # 服务商侧 instruction 实测 4000 字仍返回 200，取 1200 留出安全余量。
+        "instruction_budget": 1200,
+        # 不声明 supported_emotions：3.1 没有服务端情绪枚举，情绪标签只进入自然语言指令，
+        # 强行折叠到枚举会丢表现力（承接自 Qwen3 的历史降级行为不再需要）。
+        "control_message_roles": {"natural_language": "input.instruction"},
     },
     COSYVOICE_V35_PLUS_MODEL_ID: {
         "model_family": "cosyvoice",
@@ -190,7 +194,6 @@ AUDIOBOOK_TTS_STYLE_CAPABILITIES: Final[dict[str, dict[str, Any]]] = {
         "supports_word_level_control": False,
         "supports_singing": False,
         "supports_streaming": False,
-        "voice_design_instruction_mode": "voice_description_first",
         "style_instruction_scope": "merged_into_voice_design_prompt",
         "control_message_roles": {
             "voice_design": "user",
@@ -213,7 +216,7 @@ AUDIOBOOK_TTS_STYLE_CAPABILITIES: Final[dict[str, dict[str, Any]]] = {
             "voice_clone": "audio.voice",
         },
     },
-    STEPAUDIO_25_TTS_MODEL: {
+    STEPAUDIO_3_TTS_MODEL: {
         "model_family": "stepaudio",
         "style_control_modes": ["global_context", "inline_context", "natural_language"],
         "preferred_style_control_mode": "global_context",
@@ -224,13 +227,14 @@ AUDIOBOOK_TTS_STYLE_CAPABILITIES: Final[dict[str, dict[str, Any]]] = {
         "supports_micro_tags": True,
         "supports_word_level_control": True,
         "supports_singing": False,
-        "supports_streaming": True,
+        # 上游流式能力未取证，且我方消费面是缓冲式 HTTP（无 stream 布尔、无 SSE 解析），按未支持声明。
+        "supports_streaming": False,
         "has_system_voices": True,
         "requires_custom_voice": False,
         "supports_voice_clone": True,
         "supports_voice_design": False,
         "supports_voice_tuning": True,
-        "instruction_budget": 200,
+        "instruction_budget": 500,
         "max_input_chars": 1000,
         "control_message_roles": {
             "global_context": "parameters.instruction",
@@ -252,7 +256,8 @@ AUDIOBOOK_TTS_STYLE_CAPABILITIES: Final[dict[str, dict[str, Any]]] = {
         "supports_streaming": True,
         "has_system_voices": True,
         "requires_custom_voice": False,
-        "supports_voice_clone": True,
+        # 官方支持声音复刻 2.0（seed-icl-2.0），但项目无复刻创建与资产链路，且首次正式使用有 138 元槽位费，按未实现声明。
+        "supports_voice_clone": False,
         "supports_voice_design": False,
         "supports_voice_tuning": True,
         "instruction_budget": None,
@@ -265,22 +270,20 @@ AUDIOBOOK_TTS_STYLE_CAPABILITIES: Final[dict[str, dict[str, Any]]] = {
 }
 
 AUDIOBOOK_TTS_MODEL_CATALOG: Final[dict[str, dict[str, Any]]] = {
-    DEFAULT_AUDIOBOOK_TTS_MODEL: {
-        "name": "Qwen3-TTS Instruct Flash",
-        "description": "默认模型，{voice_count} 个可用音色，支持自然语言 instructions",
-        "catalog_note": "覆盖普通话、多语种和方言，适合整本批量生成。",
-        "price_per_10k": 0.8,
+    QWEN_AUDIO_31_TTS_FLASH_MODEL: {
+        "name": "Qwen-Audio 3.1 TTS Flash",
+        "description": "默认模型，{voice_count} 个官方系统音色，支持自然语言 instructions 与长文本输入",
+        "catalog_note": "覆盖普通话、英文、方言、儿童与角色扮演音色；正文与 instruction 上限均高于已退役的 Qwen3-TTS。",
+        "price_per_10k": 0.4,
         "pricing_status": "public_postpaid",
-        "pricing_basis": "public_list_price",
-        "pricing_source": "alibaba_model_studio_public_price_2026-07-22",
-        "custom_voice_pricing": {
-            "creation_yuan": 0.01,
-            "applies_to_current_runtime": False,
-        },
+        # 服务商按 token 计费（输入 1.5 / 输出 12 元每百万 tokens），此处折算为等效万字价。
+        "pricing_basis": "derived_from_token_price",
+        "pricing_source": "alibaba_model_studio_token_price_probe_2026-10-10",
+        "custom_voice_pricing": {"creation_yuan": 0.0},
         "cost_level": "low",
-        "quality_level": "medium_high",
+        "quality_level": "high",
         "priority": 3,
-        "features": ("默认模型", "{voice_count} 音色", "自然语言指令"),
+        "features": ("默认模型", "{voice_count} 音色", "自然语言指令", "长文本输入", "英文与方言音色"),
         "capabilities": {
             "has_system_voices": True,
             "requires_custom_voice": False,
@@ -363,7 +366,7 @@ AUDIOBOOK_TTS_MODEL_CATALOG: Final[dict[str, dict[str, Any]]] = {
     MIMO_V25_TTS_MODEL: {
         "name": "MiMo V2.5 TTS",
         "description": "小米 MiMo 预置音色语音合成模型，{voice_count} 个官方精品音色，支持导演模式、音频标签和唱歌模式",
-        "catalog_note": "仅使用官方预置音色；支持自然语言风格指令、导演模式、音频标签和低延迟流式输出。",
+        "catalog_note": "仅使用官方预置音色；支持自然语言风格指令、导演模式、音频标签与唱歌模式。",
         "price_per_10k": 0.0,
         "pricing_status": "limited_time_free",
         "pricing_basis": "public_list_price",
@@ -372,7 +375,7 @@ AUDIOBOOK_TTS_MODEL_CATALOG: Final[dict[str, dict[str, Any]]] = {
         "cost_level": "free",
         "quality_level": "high",
         "priority": 2,
-        "features": ("{voice_count} 音色", "导演模式", "音频标签", "唱歌模式", "低延迟流式"),
+        "features": ("{voice_count} 音色", "导演模式", "音频标签", "唱歌模式"),
         "capabilities": {
             "has_system_voices": True,
             "requires_custom_voice": False,
@@ -429,29 +432,30 @@ AUDIOBOOK_TTS_MODEL_CATALOG: Final[dict[str, dict[str, Any]]] = {
             "supports_streaming": False,
         },
     },
-    STEPAUDIO_25_TTS_MODEL: {
-        "name": "StepAudio 2.5 TTS",
-        "description": "Contextual TTS，{voice_count} 个可用音色，支持全局语境 instruction、文中语境括号控制与 Zero-shot 音色复刻",
-        "catalog_note": "Global Context 定调整段基调，Inline Context 用圆括号逐句控制情绪、停顿和气息；单次输入 1000 字符，instruction 200 字符。",
-        "price_per_10k": 5.8,
+    STEPAUDIO_3_TTS_MODEL: {
+        "name": "StepAudio 3 TTS",
+        "description": "新一代 Contextual TTS，{voice_count} 个可用音色，支持全局语境 instruction、文中语境括号控制与 Zero-shot 音色复刻，真人级口语表现",
+        "catalog_note": "Global Context 定调整段基调，Inline Context 用圆括号逐句控制情绪、停顿和气息；单次输入 1000 字符，instruction 500 字符。",
+        "price_per_10k": 2.5,
         "pricing_status": "public_postpaid",
         "pricing_basis": "public_list_price",
-        "pricing_source": "stepfun_public_price_2026-07-22",
+        "pricing_source": "stepfun_public_price_2026-10-09",
         "custom_voice_pricing": {
-            "preview_price_per_10k": 5.8,
+            "preview_price_per_10k": 2.5,
             "formal_clone_success_yuan": 9.9,
         },
         "cost_level": "medium",
         "quality_level": "premium",
         "priority": 2,
-        "features": ("Contextual TTS", "全局语境", "文中语境", "Zero-shot 音色复刻", "1000 字符"),
+        "features": ("Contextual TTS", "全局语境", "文中语境", "Zero-shot 音色复刻", "真人级口语"),
         "capabilities": {
             "has_system_voices": True,
             "requires_custom_voice": False,
             "supports_voice_clone": True,
             "supports_voice_design": False,
             "supports_voice_tuning": True,
-            "supports_streaming": True,
+            # 与风格能力表同步降级：上游流式未取证，我方合成链路只发非流式 /audio/speech。
+            "supports_streaming": False,
         },
     },
     SEED_TTS_20_EXPRESSIVE_MODEL: {
@@ -462,6 +466,7 @@ AUDIOBOOK_TTS_MODEL_CATALOG: Final[dict[str, dict[str, Any]]] = {
         "pricing_status": "public_postpaid",
         "pricing_basis": "public_list_price",
         "pricing_source": "volcengine_public_postpaid_2026-07-22",
+        # 仅作开通门槛台账：复刻链路未实现，代码不消费这些键。
         "custom_voice_pricing": {
             "postpaid_slot_first_formal_use_yuan": 138.0,
             "preview_price_per_10k": 3.0,
@@ -474,7 +479,7 @@ AUDIOBOOK_TTS_MODEL_CATALOG: Final[dict[str, dict[str, Any]]] = {
         "capabilities": {
             "has_system_voices": True,
             "requires_custom_voice": False,
-            "supports_voice_clone": True,
+            "supports_voice_clone": False,
             "supports_voice_design": False,
             "supports_voice_tuning": True,
             "supports_streaming": True,
@@ -483,13 +488,12 @@ AUDIOBOOK_TTS_MODEL_CATALOG: Final[dict[str, dict[str, Any]]] = {
 }
 
 _AUDIOBOOK_TTS_MODEL_ALIASES: Final[dict[str, str]] = {
-    "qwen3_tts": DEFAULT_AUDIOBOOK_TTS_MODEL,
-    "qwen3-tts": DEFAULT_AUDIOBOOK_TTS_MODEL,
-    "qwen3-tts-flash": DEFAULT_AUDIOBOOK_TTS_MODEL,
-    "qwen3-tts-instruct": DEFAULT_AUDIOBOOK_TTS_MODEL,
-    "qwen3-tts-instruct-flash": DEFAULT_AUDIOBOOK_TTS_MODEL,
-    # qwen3-tts-plus is not currently registered for audiobook synthesis.
-    "qwen3-tts-plus": DEFAULT_AUDIOBOOK_TTS_MODEL,
+    # Qwen3-TTS 一族的写法不在这里逐条列举，统一由 normalize_audiobook_tts_model
+    # 的前缀分支折叠到 3.1，避免出现第二个事实源。
+    "qwen-audio-3.1-tts": QWEN_AUDIO_31_TTS_FLASH_MODEL,
+    "qwen-audio-3.1-tts-flash": QWEN_AUDIO_31_TTS_FLASH_MODEL,
+    "qwen_audio_3_1_tts_flash": QWEN_AUDIO_31_TTS_FLASH_MODEL,
+    "qwen-audio/3.1-tts-flash": QWEN_AUDIO_31_TTS_FLASH_MODEL,
     "cosyvoice-v3-plus": COSYVOICE_V35_PLUS_MODEL_ID,
     "cosyvoice_v3_plus": COSYVOICE_V35_PLUS_MODEL_ID,
     "cosyvoice-v3.5-plus": COSYVOICE_V35_PLUS_MODEL_ID,
@@ -509,11 +513,11 @@ _AUDIOBOOK_TTS_MODEL_ALIASES: Final[dict[str, str]] = {
     "mimo/v2.5-tts-voiceclone": MIMO_V25_TTS_VOICE_CLONE_MODEL,
     "mimo/v2.5-tts-voice-clone": MIMO_V25_TTS_VOICE_CLONE_MODEL,
     "mimo/v2.5-tts": MIMO_V25_TTS_MODEL,
-    "stepaudio-2.5-tts": STEPAUDIO_25_TTS_MODEL,
-    "stepaudio_2_5_tts": STEPAUDIO_25_TTS_MODEL,
-    "stepaudio25tts": STEPAUDIO_25_TTS_MODEL,
-    "stepfun/stepaudio-2.5-tts": STEPAUDIO_25_TTS_MODEL,
-    "stepfun/stepaudio_2_5_tts": STEPAUDIO_25_TTS_MODEL,
+    "stepaudio-3-tts": STEPAUDIO_3_TTS_MODEL,
+    "stepaudio_3_tts": STEPAUDIO_3_TTS_MODEL,
+    "stepaudio3tts": STEPAUDIO_3_TTS_MODEL,
+    "stepfun/stepaudio-3-tts": STEPAUDIO_3_TTS_MODEL,
+    "stepfun/stepaudio_3_tts": STEPAUDIO_3_TTS_MODEL,
     "seed-tts-2.0-expressive": SEED_TTS_20_EXPRESSIVE_MODEL,
     "seed_tts_2_0_expressive": SEED_TTS_20_EXPRESSIVE_MODEL,
     "doubao/seed-tts-2.0-expressive": SEED_TTS_20_EXPRESSIVE_MODEL,
@@ -547,12 +551,18 @@ def normalize_audiobook_tts_model(model: Any, *, default: str = DEFAULT_AUDIOBOO
         return MINIMAX_SPEECH_28_TURBO_MODEL
     if lowered.startswith("minimax-speech-2.8"):
         return MINIMAX_SPEECH_28_HD_MODEL
-    if lowered.startswith("qwen3-tts"):
-        return DEFAULT_AUDIOBOOK_TTS_MODEL
-    if lowered.startswith("stepfun/stepaudio-2.5-tts") or lowered.startswith("stepaudio-2.5-tts"):
-        return STEPAUDIO_25_TTS_MODEL
-    if lowered.startswith("stepfun/stepaudio_2_5_tts") or lowered.startswith("stepaudio_2_5_tts"):
-        return STEPAUDIO_25_TTS_MODEL
+    if lowered.startswith("qwen-audio-3.1-tts-flash") or lowered.startswith("qwen-audio/3.1-tts-flash"):
+        return QWEN_AUDIO_31_TTS_FLASH_MODEL
+    if lowered.startswith("qwen-audio-3.1-tts") or lowered.startswith("qwen-audio/3.1-tts"):
+        return default
+    if lowered.startswith("qwen3-tts") or lowered.startswith("qwen3_tts"):
+        # Qwen3-TTS 一族已物理退役：历史配置里的任何拼写（含 -flash/-plus/-instruct
+        # 变体与下划线写法）统一折叠到 3.1，不保留注册表里已不存在的模型 ID。
+        return QWEN_AUDIO_31_TTS_FLASH_MODEL
+    if lowered.startswith("stepfun/stepaudio-3-tts") or lowered.startswith("stepaudio-3-tts"):
+        return STEPAUDIO_3_TTS_MODEL
+    if lowered.startswith("stepfun/stepaudio_3_tts") or lowered.startswith("stepaudio_3_tts"):
+        return STEPAUDIO_3_TTS_MODEL
     if (
         lowered.startswith("doubao/seed-tts-2.0-expressive")
         or lowered.startswith("doubao/seed_tts_2_0_expressive")

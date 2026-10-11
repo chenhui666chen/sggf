@@ -23,7 +23,7 @@ async def test_unified_llm_client_routes_official_deepseek_v4_model() -> None:
         new=AsyncMock(
             return_value=LLMResult(
                 success=True,
-                model_id="deepseek-v4-pro",
+                model_id="deepseek-pro",
                 content="ok",
             )
         ),
@@ -31,12 +31,12 @@ async def test_unified_llm_client_routes_official_deepseek_v4_model() -> None:
         content = await client.chat(
             messages=[{"role": "user", "content": "hello"}],
             task_type="content_draft",
-            model="deepseek-v4-pro",
+            model="deepseek-pro",
         )
 
     assert content == "ok"
     assert mocked_call.await_args.kwargs["task_type"] == "chapter"
-    assert mocked_call.await_args.kwargs["model"] == "deepseek-v4-pro"
+    assert mocked_call.await_args.kwargs["model"] == "deepseek-pro"
 
 
 def test_agents_llm_client_forwards_timeout_to_chat() -> None:
@@ -53,7 +53,7 @@ def test_agents_llm_client_forwards_timeout_to_chat() -> None:
         content = chat_completions(
             api_key="test-key",
             base_url="https://example.test/v1",
-            model="qwen3.7-plus",
+            model="qwen-plus",
             messages=[{"role": "user", "content": "hello"}],
             timeout_s=321,
         )
@@ -83,7 +83,7 @@ def test_agents_llm_client_forwards_timeout_to_chat_stream() -> None:
         content = chat_completions(
             api_key="test-key",
             base_url="https://example.test/v1",
-            model="qwen3.7-plus",
+            model="qwen-plus",
             messages=[{"role": "user", "content": "hello"}],
             timeout_s=654,
             on_chunk=_on_chunk,
@@ -101,7 +101,7 @@ def test_agents_llm_client_resolves_deepseek_v4_to_official_api(monkeypatch: pyt
     monkeypatch.delenv("DASHSCOPE_API_BASE", raising=False)
     monkeypatch.setenv("DEEPSEEK_API_KEY", "deepseek-key")
 
-    config = resolve_llm_runtime_config("deepseek-v4-pro")
+    config = resolve_llm_runtime_config("deepseek-pro")
 
     assert config.api_key == "deepseek-key"
     assert config.base_url == "https://api.deepseek.com"
@@ -115,7 +115,7 @@ def test_agents_llm_client_keeps_current_qwen_on_dashscope(monkeypatch: pytest.M
     monkeypatch.setenv("DASHSCOPE_API_KEY", "dashscope-key")
     monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
 
-    config = resolve_llm_runtime_config("qwen3.7-plus")
+    config = resolve_llm_runtime_config("qwen-plus")
 
     assert config.api_key == "dashscope-key"
     assert config.base_url == "https://dashscope.aliyuncs.com/compatible-mode/v1"
@@ -128,7 +128,7 @@ def test_deepseek_v4_pro_uses_thinking_mode_without_temperature() -> None:
     from schemas.unified_model_spec import APIConfig, ModelType, UnifiedModelSpec
 
     spec = UnifiedModelSpec(
-        id="deepseek-v4-pro",
+        id="deepseek-pro",
         name="DeepSeek V4 Pro",
         provider="deepseek",
         model_type=ModelType.LLM,
@@ -154,22 +154,22 @@ def test_deepseek_v4_pro_uses_thinking_mode_without_temperature() -> None:
     assert params["reasoning_effort"] == "high"
 
 
-def test_deepseek_v4_flash_disables_thinking_mode_by_default() -> None:
-    from core.llm_adapters import DeepSeekV4FlashAdapter
+def test_deepseek_flash_disables_thinking_mode_by_default() -> None:
+    from core.llm_adapters import DeepSeekFlashAdapter
     from schemas.unified_model_spec import APIConfig, ModelType, UnifiedModelSpec
 
     spec = UnifiedModelSpec(
-        id="deepseek-v4-flash",
-        name="DeepSeek V4 Flash",
+        id="deepseek-flash",
+        name="DeepSeek Flash",
         provider="deepseek",
         model_type=ModelType.LLM,
         api_config=APIConfig(api_key_env="TEST_API_KEY", base_url="https://api.deepseek.com"),
         default_params={
-            "request_model": "deepseek-v4-flash",
+            "request_model": "deepseek-flash",
             "thinking": {"type": "disabled"},
         },
     )
-    adapter = DeepSeekV4FlashAdapter.__new__(DeepSeekV4FlashAdapter)
+    adapter = DeepSeekFlashAdapter.__new__(DeepSeekFlashAdapter)
     adapter.spec = spec
 
     params = adapter._build_completion_params(
@@ -188,7 +188,7 @@ def test_deepseek_thinking_mode_is_disabled_for_stream_tools_and_json() -> None:
     from schemas.unified_model_spec import APIConfig, ModelType, UnifiedModelSpec
 
     spec = UnifiedModelSpec(
-        id="deepseek-v4-pro",
+        id="deepseek-pro",
         name="DeepSeek V4 Pro",
         provider="deepseek",
         model_type=ModelType.LLM,
@@ -223,7 +223,7 @@ async def test_deepseek_reasoning_content_is_kept_out_of_business_content() -> N
     from schemas.unified_model_spec import APIConfig, ModelType, UnifiedModelSpec
 
     spec = UnifiedModelSpec(
-        id="deepseek-v4-pro",
+        id="deepseek-pro",
         name="DeepSeek V4 Pro",
         provider="deepseek",
         model_type=ModelType.LLM,
@@ -277,7 +277,7 @@ def test_langchain_bridge_routes_through_model_hub() -> None:
         new=AsyncMock(
             return_value=LLMResult(
                 success=True,
-                model_id="qwen3.7-plus",
+                model_id="qwen-plus",
                 content="bridge-ok",
             )
         ),
@@ -291,6 +291,7 @@ def test_langchain_bridge_routes_through_model_hub() -> None:
 def test_create_model_llm_resolves_catalog_guarded_model_at_construction(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    restored_llm_registry: None,
 ) -> None:
     from core.langchain_bridge import create_model_llm
     from core.model_runtime import get_model_base_url
@@ -320,6 +321,8 @@ def test_create_model_llm_resolves_catalog_guarded_model_at_construction(
     )
     monkeypatch.setenv("MODEL_CATALOG_RUNTIME_SNAPSHOT_PATH", str(snapshot_path))
 
+    # UnifiedModelRegistry 是共享单例，这里清空后只塞桩模型，
+    # 由 restored_llm_registry 夹具在用例结束时按生产配置重装
     registry = UnifiedModelRegistry()
     registry.clear()
     model_hub.registry = registry

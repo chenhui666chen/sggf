@@ -6,7 +6,7 @@ import { findTtsModelOption, type TtsModelOption } from './ttsModels'
 type ChipTone = Extract<ChipProps['color'], 'success' | 'warning' | 'info' | 'error' | 'default'>
 
 export const TTS_MODEL_BADGES: Record<string, { labelKey: string; color: ChipTone }> = {
-  'qwen3-tts-instruct-flash': { labelKey: 'audiobook.ttsModelBadges.lowPrice', color: 'success' },
+  'qwen-audio-3.1-tts-flash': { labelKey: 'audiobook.ttsModelBadges.lowPrice', color: 'success' },
   'cosyvoice-v3.5-plus': { labelKey: 'audiobook.ttsModelBadges.highQuality', color: 'warning' },
   'minimax-speech-2.8-hd': { labelKey: 'audiobook.ttsModelBadges.hd', color: 'error' },
   'minimax-speech-2.8-turbo': { labelKey: 'audiobook.ttsModelBadges.lowCost', color: 'info' },

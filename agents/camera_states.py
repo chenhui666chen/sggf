@@ -30,14 +30,69 @@ def _as_str_list(value: Any) -> List[str]:
     return out
 
 
+def _normalize_state_text(value: Any) -> str:
+    return str(value or "").strip()
+
+
+def _apply_transition_contract(states: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """10.1 State Engine 转移契约：End State = Start State + Verified Transitions。
+
+    对轨迹内相邻 state 对校验：prev.end_state == cur.start_state → transition_verified；
+    两边非空但不等 → transition_gap（修复路由与 autoqc state_continuity 检查的输入）。
+    返回 track 级 transition_summary。
+    """
+    verified = 0
+    gaps = 0
+    missing = 0
+    prev: Optional[Dict[str, Any]] = None
+    for state in states:
+        state.pop("transition_verified", None)
+        state.pop("transition_gap", None)
+        if prev is not None:
+            prev_end = _normalize_state_text(prev.get("end_state"))
+            cur_start = _normalize_state_text(state.get("start_state"))
+            if not prev_end or not cur_start:
+                missing += 1
+            elif prev_end == cur_start:
+                state["transition_verified"] = True
+                verified += 1
+            else:
+                state["transition_gap"] = {"prev_end_state": prev_end, "cur_start_state": cur_start}
+                gaps += 1
+        prev = state
+    return {
+        "contract": "end_state = next start_state + verified transitions",
+        "verified": verified,
+        "gaps": gaps,
+        "missing": missing,
+        "total_transitions": max(0, len(states) - 1),
+    }
+
+
+def recalculate_state_transitions(tracks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """修复后重算 State Transition（R2/R3 编辑改动了 state_after 后由修复路由调用）。
+
+    就地更新每条 track 的 states 转移标记与 transition_summary，返回原列表。
+    """
+    if not isinstance(tracks, list):
+        return tracks
+    for track in tracks:
+        if not isinstance(track, dict) or not isinstance(track.get("states"), list):
+            continue
+        track["transition_summary"] = _apply_transition_contract(track["states"])
+    return tracks
+
+
 def build_camera_states(
     storyboard: List[Dict[str, Any]],
     camera_tree: Optional[List[Dict[str, Any]]] = None,
 ) -> List[Dict[str, Any]]:
     """
-    将 storyboard 聚合为“相机轨迹 State”：
+    将 storyboard 聚合为“相机轨迹 State”（10.1 State Engine）：
     - 每个 State 对应一个镜头（shot），按 storyboard 顺序进入相机轨迹；
-    - 可选吸收 camera_tree 的 parent_cam_idx/parent_shot_id，便于后续“首 state 生成场景 + 依赖定位”。
+    - 可选吸收 camera_tree 的 parent_cam_idx/parent_shot_id，便于后续“首 state 生成场景 + 依赖定位”；
+    - 显式 State Engine 契约字段：start_state / end_state + 轨迹级转移校验
+      （transition_verified / transition_gap / transition_summary）。
     """
     if not isinstance(storyboard, list) or not storyboard:
         return []
@@ -136,6 +191,9 @@ def build_camera_states(
             "anchor_source": anchor_source,
             "depends_on_state_ids": depends_on,
             "missing_info": tree_missing_info_by_cam.get(int(cam_idx)),
+            # 10.1 State Engine 显式契约：镜头开始/结束态（End = Start + Verified Transitions）
+            "start_state": _normalize_state_text(shot.get("state_before")),
+            "end_state": _normalize_state_text(shot.get("state_after")),
         }
         scene_id = shot.get("scene_id")
         if isinstance(scene_id, str) and scene_id.strip():
@@ -184,6 +242,7 @@ def build_camera_states(
             "first_state_id": str(states[0]["state_id"]),
             "parent_cam_idx": None,
             "parent_shot_id": None,
+            "transition_summary": _apply_transition_contract(states),
         }
         node = parent_by_cam.get(int(cam_idx))
         if isinstance(node, dict):

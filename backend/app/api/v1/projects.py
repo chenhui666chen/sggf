@@ -24,7 +24,7 @@ from app.schemas.review_config import (
 )
 from app.core.security import get_current_user
 from app.services.workflow_context_builder import WorkflowContextBuilder
-from app.services.chapter_creation import create_project_chapter
+from app.services.chapter_creation import ChapterNumberConflictError, create_project_chapter
 from app.services.audiobook.project_audio_config import (
     get_audio_engine_mode,
     get_audio_fx,
@@ -40,7 +40,10 @@ from app.services.audiobook.project_audio_config import (
     set_characters_for_model,
     set_engine_branch,
 )
-from app.services.audiobook.tts_model_ids import normalize_audiobook_tts_model
+from app.services.audiobook.tts_model_ids import (
+    DEFAULT_AUDIOBOOK_TTS_MODEL,
+    normalize_audiobook_tts_model,
+)
 from app.services.audiobook.chapter_character_scope import select_chapter_characters
 from app.services.audiobook.voice_auto_assignment import AutoVoiceAssignmentPool
 
@@ -151,7 +154,7 @@ def _resolve_character_audio_voice_id(config: CharacterAudioConfig) -> str:
             return f"mimo_clone:{mimo_voice_asset_id}"
 
     stepaudio_voice_asset_id = str(config.stepaudio_voice_asset_id or "").strip()
-    if stepaudio_voice_asset_id and tts_model == "stepaudio-2.5-tts":
+    if stepaudio_voice_asset_id and tts_model == "stepaudio-3-tts":
         return f"stepaudio_clone:{stepaudio_voice_asset_id}"
 
     return voice_id
@@ -489,7 +492,7 @@ async def delete_project(
 @router.get("/{project_id}/audio-config", response_model=ProjectAudioConfig, response_model_exclude_none=True)
 async def get_project_audio_config(
     project_id: int,
-    tts_model: str = Query("qwen3-tts-instruct-flash"),
+    tts_model: str = Query(DEFAULT_AUDIOBOOK_TTS_MODEL),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> ProjectAudioConfig:
@@ -532,7 +535,7 @@ async def get_project_audio_config(
 async def update_project_audio_config(
     project_id: int,
     config: ProjectAudioConfig,
-    tts_model: str = Query("qwen3-tts-instruct-flash"),
+    tts_model: str = Query(DEFAULT_AUDIOBOOK_TTS_MODEL),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> ProjectAudioConfig:
@@ -629,7 +632,7 @@ async def update_project_review_config(
 @router.post("/{project_id}/audio-config/auto-voices", response_model=ProjectAudioConfig)
 async def auto_assign_project_audio_voices(
     project_id: int,
-    tts_model: str = Query("qwen3-tts-instruct-flash"),
+    tts_model: str = Query(DEFAULT_AUDIOBOOK_TTS_MODEL),
     chapter_ids: Optional[List[int]] = Body(default=None),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
@@ -1084,13 +1087,20 @@ async def create_chapter(
         )
     
     # 与 POST /api/v1/chapters/ 共用同一套创建逻辑（编号/标题/字数/追踪/摘要）
-    return create_project_chapter(
-        db,
-        project_id,
-        content=chapter_data.content,
-        chapter_number=chapter_data.chapter_number,
-        title=chapter_data.title,
-    )
+    # 阶段 B WP2：编号并发冲突/显式重复编号转 409，不让 IntegrityError 传播为 500
+    try:
+        return create_project_chapter(
+            db,
+            project_id,
+            content=chapter_data.content,
+            chapter_number=chapter_data.chapter_number,
+            title=chapter_data.title,
+        )
+    except ChapterNumberConflictError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"章节号冲突：第{exc.chapter_number}章已存在或并发创建冲突，请刷新后重试",
+        ) from exc
 
 
 # ===========================

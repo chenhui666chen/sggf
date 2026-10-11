@@ -12,7 +12,7 @@ from typing import Any, Dict, Iterable, List, Optional
 import httpx
 
 from app.services.audiobook.tts_model_ids import (
-    STEPAUDIO_25_TTS_MODEL,
+    STEPAUDIO_3_TTS_MODEL,
     normalize_audiobook_tts_model,
 )
 
@@ -164,7 +164,7 @@ class StepAudioVoiceAssetStore:
             id=asset_id,
             name=clean_name,
             asset_type="clone",
-            model=STEPAUDIO_25_TTS_MODEL,
+            model=STEPAUDIO_3_TTS_MODEL,
             description=str(description or "").strip(),
             sample_text=str(sample_text or "").strip(),
             file_id=str(file_id or "").strip(),
@@ -259,7 +259,7 @@ def list_stepaudio_voice_asset_presets(
     owner_user_id: Optional[int] = None,
 ) -> List[Dict[str, Any]]:
     normalized_model = normalize_audiobook_tts_model(model, default="")
-    if normalized_model != STEPAUDIO_25_TTS_MODEL:
+    if normalized_model != STEPAUDIO_3_TTS_MODEL:
         return []
     return [
         asset.to_voice_preset()

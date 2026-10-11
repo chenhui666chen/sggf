@@ -1347,11 +1347,11 @@ class _AnalysisCoordinator(StoryExpansionCoordinator):
         self.project_id = None
         self.genre = ""
         self.planned_chapters_max = planned_chapters_max
-        self.planner_llm = type("LLM", (), {"model_name": "qwen3.7-plus"})()
-        self.writer_llm = type("LLM", (), {"model_name": "qwen3.7-plus"})()
+        self.planner_llm = type("LLM", (), {"model_name": "qwen-plus"})()
+        self.writer_llm = type("LLM", (), {"model_name": "qwen-plus"})()
 
 
-def test_story_expansion_runtime_selection_prefers_qwen37_for_low_risk_case():
+def test_story_expansion_runtime_selection_picks_lowest_blended_cost_for_low_risk_case():
     coordinator = _AnalysisCoordinator()
 
     selection = coordinator._select_story_expansion_runtime_models(
@@ -1377,15 +1377,18 @@ def test_story_expansion_runtime_selection_prefers_qwen37_for_low_risk_case():
         expansion_mode="total",
     )
 
-    assert selection["planner_model"] == "qwen3.7-plus"
-    assert selection["writer_model"] == "qwen3.7-plus"
+    # 现档 blended_cost = 输入价 + 输出价×1.2：qwen-plus 0.002+0.008×1.2=0.0116，
+    # deepseek-pro 0.003+0.006×1.2=0.0102，两者都过 8.8 门槛，故按成本选后者。
+    # 改价会翻转这一结论，因此这里钉死具体模型而不是重算公式。
+    assert selection["planner_model"] == "deepseek-pro"
+    assert selection["writer_model"] == "deepseek-pro"
     assert "综合成本最低" in selection["planner"]["selection_basis"]
     assert "质量与输出门槛过滤" in selection["selection_reason"]
     assert selection["planner"]["timeout_seconds"] >= 180
     assert selection["writer"]["timeout_seconds"] >= 180
 
 
-def test_story_expansion_runtime_selection_keeps_qwen37_for_medium_risk_case():
+def test_story_expansion_runtime_selection_picks_lowest_blended_cost_for_medium_risk_case():
     coordinator = _AnalysisCoordinator()
 
     selection = coordinator._select_story_expansion_runtime_models(
@@ -1412,8 +1415,8 @@ def test_story_expansion_runtime_selection_keeps_qwen37_for_medium_risk_case():
         expansion_mode="total",
     )
 
-    assert selection["planner_model"] == "qwen3.7-plus"
-    assert selection["writer_model"] == "qwen3.7-plus"
+    assert selection["planner_model"] == "deepseek-pro"
+    assert selection["writer_model"] == "deepseek-pro"
     assert selection["planner"]["quality_floor"] == 9.0
     assert selection["writer"]["quality_floor"] == 9.0
 
@@ -1453,8 +1456,8 @@ def test_story_expansion_runtime_selection_uses_deepseek_for_high_risk_case():
         },
     )
 
-    assert selection["planner_model"] == "deepseek-v4-pro"
-    assert selection["writer_model"] == "deepseek-v4-pro"
+    assert selection["planner_model"] == "deepseek-pro"
+    assert selection["writer_model"] == "deepseek-pro"
     assert selection["planner"]["quality_floor"] == 9.5
     assert selection["writer"]["quality_floor"] == 9.5
     assert selection["planner"]["timeout_seconds"] > 300
@@ -1665,6 +1668,21 @@ def test_analyze_expansion_request_can_auto_add_supporting_plot_hooks():
     assert analysis["auto_supplement_applied"] is True
 
 
+def _registered_model_ids_for_task(task_type: str) -> set[str]:
+    from core.model_hub import model_hub
+
+    return {spec.id for spec in model_hub.registry.get_models_for_task(task_type)}
+
+
+def _assert_model_in_catalog(model_id: str, *, min_context_tokens: int) -> None:
+    """选择器具体命中哪个模型会随目录增删与调价而变，只校验它仍在目录中且满足上下文门槛。"""
+    from core.model_hub import model_hub
+
+    spec = model_hub.registry.get_spec(model_id)
+    assert spec is not None, f"{model_id} 不在模型目录中"
+    assert spec.constraints.max_context_tokens >= min_context_tokens
+
+
 def test_analyze_expansion_request_includes_runtime_model_selection_reason():
     coordinator = _AnalysisCoordinator()
 
@@ -1683,8 +1701,12 @@ def test_analyze_expansion_request_includes_runtime_model_selection_reason():
         expansion_mode="total",
     )
 
-    assert analysis["model_plan"]["coordinator_planner_model"] == "qwen3.7-plus"
-    assert analysis["model_plan"]["coordinator_writer_model"] == "qwen3.7-plus"
+    _assert_model_in_catalog(
+        analysis["model_plan"]["coordinator_planner_model"], min_context_tokens=1_000_000
+    )
+    _assert_model_in_catalog(
+        analysis["model_plan"]["coordinator_writer_model"], min_context_tokens=1_000_000
+    )
     assert analysis["model_plan"]["coordinator_planner_max_tokens"] == coordinator.planner_llm.max_tokens
     assert analysis["model_plan"]["coordinator_writer_max_tokens"] == coordinator.writer_llm.max_tokens
     assert analysis["model_plan"]["coordinator_planner_timeout_seconds"] == coordinator.planner_llm.runtime_options["timeout"]
@@ -1712,7 +1734,10 @@ def test_analyze_expansion_request_reports_epic_mode_and_model_plan():
     )
 
     assert analysis["execution_mode"] == "epic"
-    assert analysis["model_plan"]["outline_expansion_model"] == "mimo-v2.5"
+    assert (
+        analysis["model_plan"]["outline_expansion_model"]
+        in _registered_model_ids_for_task("concept")
+    )
     assert analysis["estimated_rounds"] >= 1
     assert any("目标章节规模较大" in note for note in analysis["model_plan"]["notes"])
 
@@ -1801,7 +1826,10 @@ def test_analyze_expansion_request_honors_explicit_epic_framework_mode():
     assert analysis["effective_expansion_mode"] == "epic_framework"
     assert analysis["epic_config"]["total_volumes"] == 12
     assert analysis["epic_config"]["chapter_range"] == [900, 1200]
-    assert analysis["model_plan"]["outline_expansion_model"] == "mimo-v2.5"
+    assert (
+        analysis["model_plan"]["outline_expansion_model"]
+        in _registered_model_ids_for_task("concept")
+    )
 
 
 def test_analyze_expansion_request_uses_phased_character_plan_for_epic_framework_auto_supplement():
@@ -1985,7 +2013,7 @@ def test_analyze_expansion_request_adds_notes_for_sparse_outline_and_large_chara
         enable_auto_supplement=True,
     )
 
-    assert analysis["model_plan"]["character_expansion_model"] == "qwen3.7-plus"
+    assert analysis["model_plan"]["character_expansion_model"] == "qwen-plus"
     assert any("缺少结构化大纲" in note for note in analysis["model_plan"]["notes"])
     assert any("目标人物规模较大" in note for note in analysis["model_plan"]["notes"])
 

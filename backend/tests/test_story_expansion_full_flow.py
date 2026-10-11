@@ -680,7 +680,7 @@ def test_salvage_truncated_chapter_json():
 def test_character_plot_validator_parse_variants():
     """LLM 对齐验证器解析应容忍模型输出格式变体（冒号/粗体/编号标题/圆点列表）。
 
-    背景：deepseek-v4-pro 实测输出 '**总分** **:** **78分**' 与 '## 1. 冗余人物'，
+    背景：deepseek-pro 实测输出 '**总分** **:** **78分**' 与 '## 1. 冗余人物'，
     旧正则要求 '总分：' 紧邻冒号且标题为纯 '## 冗余人物'，导致 score 丢失为 0、
     sections 漏提取，闸门误判（score=0 < 50 恒触发）。
     """

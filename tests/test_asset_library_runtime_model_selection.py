@@ -12,14 +12,14 @@ def test_resolve_registered_runtime_model_id_prefers_payload_over_env(
     monkeypatch.setattr(
         asset_library,
         "get_model_info",
-        lambda model_id: {"id": model_id} if model_id in {"runtime-image-model", "env-image-model", "wan2.6-t2i"} else None,
+        lambda model_id: {"id": model_id} if model_id in {"runtime-image-model", "env-image-model", "qwen-image-3.0-pro"} else None,
     )
 
     resolved = asset_library._resolve_registered_runtime_model_id(
         {"adapter": "runtime-image-model"},
         key="adapter",
         env_name="DREAMWEAVER_T2I_MODEL",
-        default="wan2.6-t2i",
+        default="qwen-image-3.0-pro",
     )
 
     assert resolved == "runtime-image-model"

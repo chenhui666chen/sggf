@@ -91,7 +91,7 @@ interface TabPanelProps {
   value: number
 }
 
-// ==================== 缁勪欢瀹氫箟 ====================
+// ==================== 组件定义 ====================
 
 function TabPanel(props: TabPanelProps) {
   const { children, value, index, ...other } = props
@@ -245,7 +245,7 @@ export default function KnowledgeBasePage() {
   const [moveItemDialog, setMoveItemDialog] = useState(false)
   const [moveTargetPath, setMoveTargetPath] = useState<string>('')
 
-  // 琛ㄥ崟鏁版嵁
+  // 表单数据
   const [newCollectionName, setNewCollectionName] = useState('')
   const [newCollectionCategory, setNewCollectionCategory] = useState('')
   const [newCollectionDescription, setNewCollectionDescription] = useState('')
@@ -266,7 +266,7 @@ export default function KnowledgeBasePage() {
   // 候选设定合并状态
   const [mergingCandidates, setMergingCandidates] = useState(false)
 
-  // 鎻愮ず娑堟伅
+  // 提示消息
   const [snackbarOpen, setSnackbarOpen] = useState(false)
   const [snackbarMessage, setSnackbarMessage] = useState('')
   const [snackbarSeverity, setSnackbarSeverity] = useState<'success' | 'error'>('success')
@@ -363,7 +363,7 @@ export default function KnowledgeBasePage() {
     }
   }
 
-  // ==================== 鐢熷懡鍛ㄦ湡 ====================
+  // ==================== 生命周期 ====================
 
   useEffect(() => {
     if (!projectId) return
@@ -528,7 +528,7 @@ export default function KnowledgeBasePage() {
     }
   }
 
-  // ==================== 绫诲瀷璁惧畾鐩稿叧鍑芥暟 ====================
+  // ==================== 类型设定相关函数 ====================
 
   const loadSettingCollections = async (): Promise<SettingCollection[]> => {
     if (!projectId) return []
@@ -830,7 +830,7 @@ export default function KnowledgeBasePage() {
         return
       }
 
-      // 鍒犻櫎鍗曚釜鍙跺瓙鑺傜偣
+      // 删除单个叶子节点
       if (!confirm(t('kb.snack.deleteNodeConfirm', { name: itemName }))) return
 
       try {
@@ -995,15 +995,15 @@ export default function KnowledgeBasePage() {
     showSnackbar(t('kb.snack.contentAppended'), 'success')
   }
 
-  // ==================== 澶х翰鎵╁睍鐩稿叧鍑芥暟 ====================
+  // ==================== 大纲扩展相关函数 ====================
 
-  // 鑾峰彇鍘嗗彶
+  // 获取历史
   const getHistory = (type: 'outline'): Array<{timestamp: number, content: string, chapterCount: number}> => {
     const key = `${type}_history`
     return JSON.parse(localStorage.getItem(key) || '[]')
   }
 
-  // ==================== 杈呭姪鍑芥暟 ====================
+  // ==================== 辅助函数 ====================
   const getCategoryDisplayName = (category: string): string => {
     return CATEGORY_NAME_MAP[category] || category
   }
@@ -1083,7 +1083,7 @@ export default function KnowledgeBasePage() {
     }
   }
 
-  // ==================== 娓叉煋 ====================
+  // ==================== 渲染 ====================
 
   return (
     <Container maxWidth="xl" sx={{ py: 4 }}>
@@ -1426,7 +1426,7 @@ export default function KnowledgeBasePage() {
           {/* 左侧：设定集合列表 */}
           <Grid item xs={12} md={4}>
             <Paper elevation={2} sx={{ p: 2, height: '70vh', display: 'flex', flexDirection: 'column' }}>
-              {/* 鎿嶄綔鎸夐挳 */}
+              {/* 操作按钮 */}
               <Box sx={{ display: 'flex', gap: 1, mb: 2 }}>
                 <Button
                   variant="outlined"
@@ -1475,7 +1475,7 @@ export default function KnowledgeBasePage() {
 
               <Divider sx={{ mb: 2 }} />
 
-              {/* 闆嗗悎鍒楄〃 */}
+              {/* 集合列表 */}
               {loadingCollections ? (
                 <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
                   <CircularProgress />
@@ -1650,7 +1650,7 @@ export default function KnowledgeBasePage() {
                         </Box>
                       )}
 
-                      {/* 鍒嗙被涓嬬殑瀹炰緥鍒楄〃 */}
+                      {/* 分类下的实例列表 */}
                       {!selectedItem && selectedCategoryPath && (
                         <List sx={{ flexGrow: 1, overflow: 'auto' }}>
                           {settingItems
@@ -2025,7 +2025,7 @@ export default function KnowledgeBasePage() {
         </DialogTitle>
         <DialogContent>
           <Grid container spacing={2}>
-            {/* 绫诲瀷閫夋嫨 */}
+            {/* 类型选择 */}
             <Grid item xs={12}>
               <Box sx={{ display: 'flex', gap: 1, mb: 1 }}>
                 <Chip
@@ -2354,7 +2354,7 @@ export default function KnowledgeBasePage() {
         </Suspense>
       )}
 
-      {/* 鎻愮ず娑堟伅 */}
+      {/* 提示消息 */}
       <Snackbar
         open={snackbarOpen}
         autoHideDuration={3000}

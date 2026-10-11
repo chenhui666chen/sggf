@@ -11,20 +11,20 @@ DASHSCOPE_API_KEY = os.getenv("DASHSCOPE_API_KEY")
 
 # 关键模型测试用例
 TEST_CASES = [
-    {"id": "qwen-image-2.0", "type": "image", "prompt": "a cute cat, photorealistic"},
-    {"id": "qwen-image-2.0-pro", "type": "image", "prompt": "a beautiful sunset"},
-    {"id": "wan2.7-image", "type": "image", "prompt": "mountains with lake"},
+    {"id": "qwen-image-3.0", "type": "image", "prompt": "a cute cat, photorealistic"},
+    {"id": "qwen-image-3.0-pro", "type": "image", "prompt": "a beautiful sunset"},
+    {"id": "wan2.7-image-pro", "type": "image", "prompt": "mountains with lake"},
     {"id": "qwen3.5-omni-plus", "type": "text", "prompt": "你好，请简短介绍自己。"},
     {"id": "qwen3.6-plus", "type": "text", "prompt": "你好，请简短介绍自己。"},
     {"id": "MiniMax/speech-2.8-turbo", "type": "tts", "prompt": "你好，这是MiniMax语音测试。"},
     {"id": "MiniMax/speech-2.8-hd", "type": "tts", "prompt": "你好，这是MiniMax高清语音测试。"},
     {"id": "cosyvoice-v3.5-plus", "type": "tts", "prompt": "你好，这是CosyVoice测试。"},
-    {"id": "qwen3-tts-instruct-flash", "type": "tts", "prompt": "你好，这是Qwen3 TTS测试。"},
+    {"id": "qwen-audio-3.1-tts-flash", "type": "tts", "prompt": "你好，这是Qwen-Audio 3.1 TTS测试。"},
     # 图像模型（百炼平台）
-    {"id": "doubao-seedream-4-5", "type": "image", "prompt": "a flower garden"},
+    {"id": "doubao-seedream-5-0-pro", "type": "image", "prompt": "a flower garden"},
     {"id": "doubao-seedream-5-0", "type": "image", "prompt": "a flower garden"},
-    {"id": "kling-v3-image-generation", "type": "image", "prompt": "a tree in spring"},
-    {"id": "kling-v3-omni-image-generation", "type": "image", "prompt": "a tree in spring"},
+    {"id": "kling/kling-v3-image-generation", "type": "image", "prompt": "a tree in spring"},
+    {"id": "kling/kling-v3-omni-image-generation", "type": "image", "prompt": "a tree in spring"},
 ]
 
 def test_adapter_api(model_id, test_type, prompt):

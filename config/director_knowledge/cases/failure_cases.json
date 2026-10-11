@@ -1,0 +1,1290 @@
+{
+  "_type": "failure_cases",
+  "_count": 102,
+  "index_note": "L1 直索通道：按 CF id 直接命中；repair_model 优先于 repair（双视角修复）",
+  "cases": [
+    {
+      "id": "CF-001",
+      "title": "只有电影滤镜，没有电影语言",
+      "symptom": "画面有黑边、颗粒、浅景深、蓝橙调，但人物无目标、镜头无信息变化。",
+      "problem": "把“电影感”误解为表面风格集合；真实电影语言来自剧情目的、观看位置、表演与时空连续。",
+      "cause": "模型把cinematic与常见视觉共现绑定，却不知道为什么这样拍。",
+      "repair": "先补Scene Purpose、Character Objective、Camera Motivation、Motivated Light，再决定色彩/颗粒。",
+      "repair_model": "模型按'cinematic→滤镜/颗粒/浅景深'的词义共现先验采样，属风格token驱动而非意图执行。修正：把叙事变量（人物任务/机位/光源/注意力层级）写成可执行内容词并置于Prompt前部，让交叉注意力优先分配内容token；风格词降为低权重收尾，避免其主导采样分布。",
+      "prompt": "避免只写cinematic/8K；改写为具体人物任务、摄影机位置、光源与注意力层级。",
+      "qc": "去掉调色后镜头是否仍有叙事功能？",
+      "auto_trigger": {
+        "trigger_condition": "Prompt 含 cinematic/8K/电影感 等风格词≥2个 且 无人物目标/机位/光源等叙事变量",
+        "judgment_signals": [
+          "画面仅滤镜特征（黑边/颗粒/浅景深）",
+          "镜头无信息变化",
+          "人物无目标动作"
+        ],
+        "disposition": "打回：先补 Scene Purpose/人物任务/机位动机/光源，风格词降权收尾（T3 前置+T1 修复共用）"
+      }
+    },
+    {
+      "id": "CF-002",
+      "title": "24mm只有宽，没有广角透视",
+      "symptom": "写24mm后只得到更宽画面，没有明显近大远小和空间拉伸。",
+      "problem": "广角透视来自更近的摄影机位置，而非焦距标签本身。",
+      "cause": "AI学到24mm的视觉标签，却不会自动完成同景别下机位前移。",
+      "repair": "显式加入近机位、前景放大、背景深度延伸和尺度差。",
+      "repair_model": "焦距标签只改变模型先验中的'宽幅感'，不改变相机位置参数，模型不会自动前移机位。修正：删掉对'24mm'的依赖，改写为空间关系指令（机位贴近主体+前景放大+背景后退），让扩散模型的空间先验直接采到近大远小的透视结构。",
+      "prompt": "24mm wide-angle, camera very close to subject, foreground enlarged, strong near-far scale difference, background receding deeply.",
+      "qc": "检查前景/主体/背景的尺度关系，而不是只看FOV。",
+      "auto_trigger": {
+        "trigger_condition": "Focal≤28mm 且 Camera Distance 未声明近距离或未强调近大远小",
+        "judgment_signals": [
+          "画面仅变宽",
+          "无空间拉伸",
+          "前景不夸张"
+        ],
+        "disposition": "打回：机位距离改近距描述（camera very close to subject）或换长焦+远距组合"
+      }
+    },
+    {
+      "id": "CF-003",
+      "title": "135mm只有虚化，没有长焦压缩",
+      "symptom": "135mm只变成浅景深肖像，背景没有压缩外观。",
+      "problem": "长焦压缩外观来自同景别下摄影机后退，透视差减弱。",
+      "cause": "AI把telephoto与portrait/bokeh强绑定。",
+      "repair": "写明远机位、窄视场、层叠背景视觉靠近。",
+      "repair_model": "telephoto token在训练数据中与portrait/bokeh高频共现，模型默认采样'特写+虚化'而非空间压缩。修正：删除portrait/bokeh等虚化词，改用几何描述（远机位+窄视场+背景层叠视觉压近），迫使模型采样长焦压缩的空间结构。",
+      "prompt": "camera far from subject, narrow field of view, layered background visually compressed toward subject.",
+      "qc": "背景层次是否视觉靠近主体，还是仅仅更糊？"
+    },
+    {
+      "id": "CF-004",
+      "title": "摄影机漂浮，没有人体操作感",
+      "symptom": "运镜像漂浮无人机，无人体惯性。",
+      "problem": "真实摄影机有承载方式、重量和操作限制。",
+      "cause": "模型只有抽象camera move。",
+      "repair": "指定tripod/dolly/gimbal/handheld及其人体或机械约束。",
+      "repair_model": "模型把'camera move'当作抽象运动标签，生成平滑无惯性的漂浮运动。修正：给运镜绑定物理载体与操作者（tripod/dolly/handheld/滑轨），用'承载方式+人体或机械约束'把采样引导进带惯性/抖动的真实运镜分布。",
+      "prompt": "camera mounted on a low dolly / subtle human-operated handheld.",
+      "qc": "真人摄影师能否实际完成该运动？",
+      "auto_trigger": {
+        "trigger_condition": "Movement 含 drone/floating/自由飞行类描述 且 无操作体感词",
+        "judgment_signals": [
+          "运动无惯性",
+          "无人体呼吸感",
+          "速度恒定无起停"
+        ],
+        "disposition": "打回：改为有支点运镜（手持 subtle/稳定器/固定机位+主体动）"
+      }
+    },
+    {
+      "id": "CF-005",
+      "title": "每个镜头都在慢推",
+      "symptom": "几乎所有镜头自动慢推。",
+      "problem": "运镜必须对应信息/心理/空间变化。",
+      "cause": "模型把slow push-in当电影感先验。",
+      "repair": "增加Movement Motivation；无动机则Static。",
+      "repair_model": "slow push-in是训练分布中的高概率'电影感'先验，模型默认优先采样。修正：默认写完全静止（static），仅当存在明确信息/心理变量时才追加'极轻推近'，并用否定式锚定'无动机则完全不移动'覆盖该先验。",
+      "prompt": "camera remains entirely motionless until the character recognizes the clue, then begins a minimal push.",
+      "qc": "停止运动后是否损失叙事功能？",
+      "auto_trigger": {
+        "trigger_condition": "连续≥3镜 Movement=slow push-in",
+        "judgment_signals": [
+          "全片节奏单调",
+          "推镜无差异化动机"
+        ],
+        "disposition": "打回：仅保留1处有动机推镜，其余改固定机位或差异化运动（叠加预算联动）"
+      }
+    },
+    {
+      "id": "CF-006",
+      "title": "人物像AI模特，不像演员",
+      "symptom": "人物漂亮但只是站着演“悲伤”。",
+      "problem": "情绪必须转成可观察行为。",
+      "cause": "模型把sad/angry变成表情模板。",
+      "repair": "给角色具体任务、阻碍和情绪泄露动作。",
+      "repair_model": "情绪形容词在扩散模型中映射为高概率面部表情原型（模板），生成'表演标签快照'而非行为过程。修正：删除情绪形容词，改为具体行为动词序列（折叠衣物→停顿一拍→放下而不哭），驱动模型采样行为时间线而非表情模板。",
+      "prompt": "she folds his shirt, stops, holds it for one beat, then places it away without crying.",
+      "qc": "删掉情绪形容词后，观众还能读出状态吗？"
+    },
+    {
+      "id": "CF-007",
+      "title": "眼神没有目标",
+      "symptom": "眼神随机、看镜头或没有对象。",
+      "problem": "眼神是注意力和信息流。",
+      "cause": "模型重视脸部美观而非Eyeline Target。",
+      "repair": "明确看谁/看什么以及什么时候不看。",
+      "repair_model": "面部美观先验优先于视线关系，模型默认生成'好看但无焦点'的眼神。修正：显式写入Eyeline目标物及其方向，并加'不看X'的负约束，把注意力引导写入采样条件而非依赖模型自觉。",
+      "prompt": "she keeps her eyes on the unopened letter, avoiding the man across the table.",
+      "qc": "眼线是否与空间和对话对象一致？"
+    },
+    {
+      "id": "CF-008",
+      "title": "手部动作没有目的",
+      "symptom": "手一直无意义摸脸、摆动。",
+      "problem": "动作必须服务Objective或泄露情绪。",
+      "cause": "模型用手势增加动态丰富度。",
+      "repair": "指定动作目标与停止条件。",
+      "repair_model": "模型用随机手势补偿'静止被判失败'的运动先验，手部动作为装饰性动态。修正：写手的因果链（伸手→停在触碰前→收回），给动作明确的触发对象与停止条件，让手的运动绑定到叙事目标。",
+      "prompt": "she reaches for the phone, stops before touching it, then withdraws her hand.",
+      "qc": "动作为什么现在发生？"
+    },
+    {
+      "id": "CF-009",
+      "title": "光线漂亮但没有来源",
+      "symptom": "人物有完美蓝橙轮廓光但环境无来源。",
+      "problem": "写实镜头需要可解释光源。",
+      "cause": "模型复制商业摄影共现。",
+      "repair": "建立Light Source Map，指定来源/方向/作用区域。",
+      "repair_model": "蓝橙轮廓光是商业摄影数据中的高频共现，模型默认套用该风格模板。修正：声明每个高亮的世界光源坐标（路灯/窗光）与作用区域，并加'无来源高光不成立'约束，把采样推进物理光照分布。",
+      "prompt": "warm streetlamp behind camera-left provides rim; cool window ambience provides weak fill.",
+      "qc": "每个主要高亮能否追溯到世界光源？",
+      "auto_trigger": {
+        "trigger_condition": "Light 字段有氛围/光效描述 但 无光源对象（窗/灯/月/屏）",
+        "judgment_signals": [
+          "光方向不明",
+          "与环境时间不匹配"
+        ],
+        "disposition": "打回：声明动机光源+方向（motivated_lighting 决策链）"
+      }
+    },
+    {
+      "id": "CF-010",
+      "title": "夜景像白天套蓝色滤镜",
+      "symptom": "夜景只是整体变蓝且曝光像白天。",
+      "problem": "夜景依赖局部光源、暗部和亮度层级。",
+      "cause": "模型把night与蓝色滤镜绑定。",
+      "repair": "限制可见光源、保留深暗区、明确曝光关系。",
+      "repair_model": "模型把'night'编码为色温偏移（蓝色滤镜），而非真实夜景的光照层级。修正：删除night标签依赖，改写为'有限局部光源+深暗区+真实夜景曝光关系'，让模型按明暗结构采样而非整体染色。",
+      "prompt": "limited practical sources, deep shadow areas, localized highlights, realistic night exposure.",
+      "qc": "去掉蓝色后是否仍然像夜景？"
+    },
+    {
+      "id": "CF-011",
+      "title": "景深滥用导致空间死亡",
+      "symptom": "所有背景都糊，空间与悬疑信息消失。",
+      "problem": "景深是信息控制，不是高级感。",
+      "cause": "模型把cinematic和shallow DOF绑定。",
+      "repair": "如果背景有剧情信息，改用中/深景深和多层可读。",
+      "repair_model": "cinematic与shallow DOF强共现，模型默认自动虚化背景。修正：当背景承担叙事信息时，显式写'deep focus/多层背景可读'覆盖该先验，否则模型倾向自动模糊。",
+      "prompt": "deep focus foreground to background, background clue remains readable.",
+      "qc": "背景是否承担叙事？若是，不应自动糊掉。"
+    },
+    {
+      "id": "CF-012",
+      "title": "构图没有视觉优先级",
+      "symptom": "主体、霓虹、特效、背景一样抢眼。",
+      "problem": "构图必须有视觉层级。",
+      "cause": "模型同时强化所有关键词。",
+      "repair": "定义Primary/Secondary/Background attention。",
+      "repair_model": "多个高显著性名词在交叉注意力中被平均分配权重，导致主体/特效/背景同等抢眼。修正：用'primary/secondary/background'结构层级+权重词明确注意力分配，减少并列的高显著性名词。",
+      "prompt": "primary focus on woman; secondary on taxi; background neon kept visually subdued.",
+      "qc": "第一眼、第二眼、第三眼顺序是否可预测？"
+    },
+    {
+      "id": "CF-013",
+      "title": "巨大场景没有尺度感",
+      "symptom": "巨大建筑/机甲像模型玩具。",
+      "problem": "尺度需要熟悉参照与深度层。",
+      "cause": "“giant”标签无法自动建立比较关系。",
+      "repair": "加入人物、车辆、门、普通建筑等多级锚点。",
+      "repair_model": "尺度感来自相对参照而非绝对属性词，模型无法从'giant'推得比较关系。修正：用已知尺寸的参照物（人/车/门窗/普通建筑）作空间锚点，强制模型采样多级尺度对比结构。",
+      "prompt": "tiny human at the mech foot, cars below ankle height, apartment blocks behind.",
+      "qc": "观众能否无文字立即判断尺度？"
+    },
+    {
+      "id": "CF-014",
+      "title": "运镜复杂但没有叙事价值",
+      "symptom": "360环绕/穿墙很炫但没有新信息。",
+      "problem": "复杂运镜必须有叙事回报。",
+      "cause": "模型迎合camera choreography关键词。",
+      "repair": "把运动绑定Reveal/关系变化，否则降级为Static/Arc。",
+      "repair_model": "复杂运镜词是强风格token，模型为满足prompt而执行炫技运动。修正：把运镜绑定到信息变量（Reveal/关系变化），无信息回报时写static；有回报时限定运动范围（如45°Arc），压缩采样自由度。",
+      "prompt": "controlled 45-degree arc revealing the hidden doorway behind the subject.",
+      "qc": "运动结束时观众是否多知道了什么？",
+      "auto_trigger": {
+        "trigger_condition": "Movement≠固定 且 Drama/Shot Motivation 不含信息/心理/空间变化",
+        "judgment_signals": [
+          "运动复杂但画面信息不变",
+          "观众无新收获"
+        ],
+        "disposition": "打回：改固定机位或补三类变化之一为运动动机（DC-035 联动）"
+      }
+    },
+    {
+      "id": "CF-015",
+      "title": "动作没有重量",
+      "symptom": "跑步、打击、转身像无重量滑动。",
+      "problem": "真实动作有重心、惯性、接触和恢复。",
+      "cause": "生成模型对连续物理近似不稳定。",
+      "repair": "写入weight shift、foot contact、momentum、recovery；缩短复杂动作。",
+      "repair_model": "视频模型对连续帧间的物理一致性近似有限，动作易漂移为无重滑动。修正：拆短动作段+显式物理词（重心转移/脚掌触地/动量/恢复平衡），降低单镜动作复杂度，缩短误差累积窗口。",
+      "prompt": "clear heel-to-toe contact, visible body weight shift, momentum and balance recovery.",
+      "qc": "动作完成后身体是否需要恢复平衡？"
+    },
+    {
+      "id": "CF-016",
+      "title": "人物移动方向错误",
+      "symptom": "上一镜左→右移动，下一镜反成右→左。",
+      "problem": "Screen Direction是空间连续线索。",
+      "cause": "模型每镜独立取景。",
+      "repair": "保存World Direction、Camera Side和Screen Direction。",
+      "repair_model": "模型每次生成独立采样，无跨镜记忆，Screen Direction默认随机。修正：在prompt写入'延续screen-left→screen-right'方向约束，并用上一镜末帧作I2V参考锚定起始方向。",
+      "prompt": "continues moving from screen-left toward screen-right.",
+      "qc": "反转是否有剧情/跨轴动机？"
+    },
+    {
+      "id": "CF-017",
+      "title": "雨雪像贴图",
+      "symptom": "雨雪存在但人物不湿、地面不变、声音不匹配。",
+      "problem": "天气必须改变角色与环境状态。",
+      "cause": "模型把天气当粒子层。",
+      "repair": "同步更新湿度、头发、地面、行为与声音。",
+      "repair_model": "天气token被生成为前景粒子覆盖层，不进入物理交互。修正：把天气写成因果状态（衣物浸湿/地面反光/脚印溅水/风动纸张），让模型采样天气与角色/环境的耦合状态而非独立粒子层。",
+      "prompt": "heavy rain progressively soaks coat and hair; puddles and splash react to footsteps.",
+      "qc": "天气是否对世界产生因果影响？"
+    },
+    {
+      "id": "CF-018",
+      "title": "人物进入空间但空间没有回应",
+      "symptom": "角色进房间，空间完全没有回应。",
+      "problem": "人物进入应影响声音、人群、门、空气、注意力。",
+      "cause": "模型把环境视为静态背景。",
+      "repair": "加入低优先级Environmental Microactivity。",
+      "repair_model": "环境被当作静态背景通道生成，不参与动态采样。修正：为环境分配低优先级运动（门/气流/人群声/纸张），并放在时间线的响应位置，让环境进入动态采样而非静态层。",
+      "prompt": "door closes, nearby conversation dips briefly, paper moves in the air draft.",
+      "qc": "环境是否像真实世界而非布景板？"
+    },
+    {
+      "id": "CF-019",
+      "title": "情绪强度没有变化曲线",
+      "symptom": "整段情绪强度恒定。",
+      "problem": "情绪是Trigger→Processing→Response→End State。",
+      "cause": "模型根据一个标签持续表演。",
+      "repair": "建立Emotion Timeline/PIS梯度。",
+      "repair_model": "单一情绪标签在整段生成中恒定驱动表演，无时间变化。修正：用时间分段（0-3s/3-6s/6-10s）逐步递进情绪强度，让模型在不同时间窗口采样不同强度状态，形成情绪曲线。",
+      "prompt": "start restrained, recognition increases tension, final beat releases only slightly.",
+      "qc": "情绪是否有开始/转折/结束？",
+      "auto_trigger": {
+        "trigger_condition": "场景≥3镜 且 emotion 字段值全相同",
+        "judgment_signals": [
+          "情绪平直无递进",
+          "无转折设计"
+        ],
+        "disposition": "打回：重设情绪曲线——每镜 emotion 必须有增量或方向变化"
+      }
+    },
+    {
+      "id": "CF-020",
+      "title": "镜头缺少剪辑意识",
+      "symptom": "单镜漂亮但前后无法构成节奏。",
+      "problem": "镜头设计必须包含剪辑功能。",
+      "cause": "模型只优化当前片段。",
+      "repair": "每镜定义Previous/Next关系与Cut Motivation。",
+      "repair_model": "模型目标函数只优化当前片段质量，无剪辑上下文。修正：在prompt写明镜头入点出点状态与切点落点（如末端停在手的动作上供下一镜接），让当前镜头末端为下一镜预留可接状态。",
+      "prompt": "shot ends on hand stopping, providing a clean reaction cut into the next close-up.",
+      "qc": "镜头是否有明确入点、出点与切换理由？"
+    },
+    {
+      "id": "CF-021",
+      "title": "同一人物身份漂移",
+      "symptom": "脸大致相似但像换演员。",
+      "problem": "身份连续包含脸、身体比例、动作、行为、声音与状态。",
+      "cause": "每镜重新采样角色。",
+      "repair": "使用Character Reference Package + Identity/Behavior State。",
+      "repair_model": "扩散模型每镜独立从噪声采样，无跨镜身份记忆，脸相近只是随机命中。修正：使用角色参考图（Reference）+显式身份绑定语法把采样约束到同一身份流形；纯文字只能降低漂移无法锁定身份。 【骨骼绑定路径 2026-10】高强度动作场景（打斗/舞蹈/大幅运动）的身份漂移，prompt/参考图修复仍不稳时，升级为 3D/2.5D 角色建模 + 自动骨骼绑定（Toonflow 路线）：骨骼锁定身份与比例，运动由骨架驱动，从机制上杜绝变脸。触发条件：同角色 ≥3 镜高动态且 R3 局部编辑 2 轮未过。",
+      "prompt": "same facial structure, hairstyle, body proportion, habitual movement and restrained expression style.",
+      "qc": "连续播放是否像同一演员，而非截图相似度？",
+      "auto_trigger": {
+        "trigger_condition": "同一角色出现在≥2镜 且 无参考图/角色绑定注入",
+        "judgment_signals": [
+          "脸型/发型/服装跨镜不一致"
+        ],
+        "disposition": "打回：注入 Character Canon 参考图+身份绑定语法（机制：每镜独立重采样无身份记忆）"
+      }
+    },
+    {
+      "id": "CF-022",
+      "title": "多人物对白轮流摆拍",
+      "symptom": "两人轮流说话、轮流点头，像采访。",
+      "problem": "对白是目标、听取、打断、回避和权力变化。",
+      "cause": "模型把dialogue简化成两张脸。",
+      "repair": "写Active Listening、Subtext、Reaction Target与Beat。",
+      "repair_model": "模型把对话编码为'说话→听→点头'的对称轮换模板。修正：写非对称交互（听者回避视线/未说完被打断/延迟反应），用行为差异打破轮换模板，让采样进入真实对话分布。",
+      "prompt": "she listens without eye contact; he interrupts before she finishes; reaction is delayed.",
+      "qc": "镜头目标是否由戏剧价值而非说话者决定？"
+    },
+    {
+      "id": "CF-023",
+      "title": "OTS反打空间关系断裂",
+      "symptom": "OTS反打双方视线不相遇。",
+      "problem": "180°轴线与Eyeline必须一致。",
+      "cause": "模型缺少共享空间状态。",
+      "repair": "保存A/B坐标、轴线、Camera Side、Eyeline。",
+      "repair_model": "反打镜头独立采样，模型不共享3D空间状态，视线自然不交汇。修正：用同一轴线+相机侧（Camera Side）约束，或I2V用上一镜画面作参考帧，把空间状态跨镜传递给模型。",
+      "prompt": "maintain the same 180-degree axis; A looks screen-right, B screen-left.",
+      "qc": "两个镜头拼接后视线是否相遇？"
+    },
+    {
+      "id": "CF-024",
+      "title": "人物高度关系漂移",
+      "symptom": "人物身高差跨镜头变化。",
+      "problem": "身体尺度和机位共同决定视觉关系。",
+      "cause": "角色身体被重采样。",
+      "repair": "锁定身高差、摄影高度、距离和参考。",
+      "repair_model": "人物身体比例每次生成被重新采样，相对高度关系漂移。修正：用全身参考图+显式身高差数值（如12cm）约束比例，减少跨镜的身体重采样幅度。",
+      "prompt": "maintain the same 12 cm height difference and eye-line relation.",
+      "qc": "人物身体关系是否稳定？"
+    },
+    {
+      "id": "CF-025",
+      "title": "镜头切换人物瞬移",
+      "symptom": "角色从窗边瞬移到门边。",
+      "problem": "Blocking State需要World Position与Movement Path。",
+      "cause": "每镜独立构图。",
+      "repair": "保存世界坐标；未拍出的移动必须可被剪辑合理省略。",
+      "repair_model": "模型每镜独立构图，起始位置不继承上一镜。修正：用上一镜末帧作I2V首帧参考，并写明延续位置与移动路径（从窗边走向门边），把Blocking状态传给下一镜。",
+      "prompt": "continues from the window position and crosses toward the door before stopping.",
+      "qc": "位置变化是否有可解释转移？"
+    },
+    {
+      "id": "CF-026",
+      "title": "反打光线方向错误",
+      "symptom": "反打后窗光仍固定在画面左侧，世界光向反了。",
+      "problem": "光源属于World Space，不属于Screen Side。",
+      "cause": "模型每镜重新布“漂亮侧光”。",
+      "repair": "保存窗/灯真实位置，Adapter按新机位转换frame-left/right。",
+      "repair_model": "模型每镜优化'漂亮侧光'，不感知光源世界坐标，反打时世界光方向颠倒。修正：声明光源世界位置（西墙窗是唯一日光源），并说明反打后该光源应出现在画面哪一侧，必要时用首帧参考锁定。",
+      "prompt": "the west-wall window remains the only daylight source; on this reverse angle it now appears camera-right.",
+      "qc": "同一光源在不同机位是否几何一致？"
+    },
+    {
+      "id": "CF-027",
+      "title": "受伤状态重置",
+      "symptom": "伤口、血迹、湿度下一镜消失。",
+      "problem": "Physical State具有时间连续性。",
+      "cause": "基础Character Reference覆盖了当前状态。",
+      "repair": "单独保存Injury/Wetness/Fatigue。",
+      "repair_model": "基础角色参考图的高频信息覆盖当前伤势状态，模型优先还原参考模板。修正：用'基础参考+当前状态覆盖层'（伤势文本/伤势参考图）叠加，并把伤势写成当前镜的高权重约束。",
+      "prompt": "same left-eyebrow wound, dried blood remains, movement slightly guarded.",
+      "qc": "身体状态是否符合故事经过时间？"
+    },
+    {
+      "id": "CF-028",
+      "title": "道具连续性错误",
+      "symptom": "戒指/手机左右手或位置随机变化。",
+      "problem": "重要道具需要独立Prop State。",
+      "cause": "模型不把道具当持久实体。",
+      "repair": "记录Owner、Holder、Hand、Position、Open/Closed、Damage。",
+      "repair_model": "道具作为独立对象缺少跨帧/跨镜实体绑定，位置与持握被模型重新猜测。修正：给道具显式状态描述（持握手/方向/开关/朝向），用参考图或首帧锚定，声明其为持久实体。",
+      "prompt": "phone remains in her right hand, screen still on, same case and orientation.",
+      "qc": "道具变化是否有Visible/Implied Transition？"
+    },
+    {
+      "id": "CF-029",
+      "title": "手与物体交互失败",
+      "symptom": "手穿物、手指异常、物件漂浮。",
+      "problem": "Hand-Object interaction是高难物理关系。",
+      "cause": "同时控制手、物、身体、镜头超载。",
+      "repair": "缩短动作，拆成拿起/使用/放下；必要时Insert。",
+      "repair_model": "手物交互是高精度任务，手+物+身体+镜头多变量并行时模型注意力超载易崩。修正：拆成近距离Insert短镜，一次只控制'手+物'，降低镜头与身体变量，提高局部高精度采样成功率。【动作类快切注意】：手物交互常作为快切单元，快切时必须用特写/近景而非全景——原理：①特写可隐藏大部分物理位移过程，掩盖模型动作连贯性缺陷（若用全景快切会暴露穿帮）；②特写符合观众心理补偿机制，观众会自动脑补动作中间环节；③特写弱化轴线跳变带来的违和感（全景快切越轴会让空间混乱）。因此快切动作单元优先用 Insert/ECU/CU，而非 MS/WS。 【骨骼绑定路径 2026-10】手物交互频繁的动作戏（武器/乐器/工具），可在分镜期预绑定骨骼（3D/2.5D 建模 + IK 手部绑定），把手物交互从'生成运气'变为'骨架约束'；适用于关键资产镜头，普通镜头仍走拆镜降载。",
+      "prompt": "close insert: right hand grips the cup handle, lifts it cleanly from the table.",
+      "qc": "接触点、手指数量、物体重力是否合理？",
+      "auto_trigger": {
+        "trigger_condition": "Action 含持/握/操作物体 且 该镜无 Insert/ECU 景别保障",
+        "judgment_signals": [
+          "手指穿模",
+          "握持形状错误",
+          "物体悬浮"
+        ],
+        "disposition": "打回：关键交互镜改 Insert/ECU（DC-033 联动）或拆解为反应镜"
+      }
+    },
+    {
+      "id": "CF-030",
+      "title": "动作缺失真实物理",
+      "symptom": "复杂动作物理断裂。",
+      "problem": "动作需要准备、动量、接触、反应和恢复。",
+      "cause": "模型只按动作名生成外观。",
+      "repair": "拆Action Unit并记录Start/End State。",
+      "repair_model": "动作名token映射为外观状态而非物理过程，模型跳过中间因果。修正：拆Action Unit（准备→接触→反应→恢复）分步描述，让模型采样完整物理链而非首尾拼接。",
+      "prompt": "preparation, clear contact, reaction, recovery with consistent body momentum.",
+      "qc": "动作链是否具备完整因果？"
+    },
+    {
+      "id": "CF-031",
+      "title": "复杂运镜导致空间崩坏",
+      "symptom": "复杂Orbit/穿越导致人物和背景崩坏。",
+      "problem": "复杂相机运动同时提高3D、遮挡、光线一致性要求。",
+      "cause": "控制变量过多。",
+      "repair": "降低Camera Complexity；360°改30-60°Arc。",
+      "repair_model": "长时复杂相机运动要求3D几何/遮挡/光一致性持续成立，模型随时间误差累积崩坏。修正：降低相机复杂度（360°改30-60°Arc）+缩短单镜时长，减少一致性保持窗口。",
+      "prompt": "controlled 45-degree half-arc, no full orbit, preserve architecture.",
+      "qc": "复杂度是否超过叙事收益？"
+    },
+    {
+      "id": "CF-032",
+      "title": "前景遮挡消失",
+      "symptom": "前景物体忽然透明或跳位。",
+      "problem": "遮挡是三维前后关系。",
+      "cause": "模型对长时间Occlusion不稳定。",
+      "repair": "明确前景物处于camera与subject之间；缩短持续遮挡。",
+      "repair_model": "长时间Occlusion要求模型维持不可见物体的三维存在，超出其记忆窗口后前景会消失。修正：缩短遮挡持续时间，或用'前景在camera与主体之间'的显式空间描述+参考帧维持遮挡关系。",
+      "prompt": "soft foreground doorframe remains between camera and subject throughout.",
+      "qc": "遮挡关系是否始终成立？"
+    },
+    {
+      "id": "CF-033",
+      "title": "假Rack Focus",
+      "symptom": "Rack Focus变成全画面糊→清。",
+      "problem": "Rack Focus需要两个明确焦平面目标。",
+      "cause": "模型没收到距离和目标。",
+      "repair": "定义foreground X和background Y及焦点起止。",
+      "repair_model": "模型不执行光学对焦参数，只收到'rack focus'标签，退化为整体模糊变化。修正：给两个焦平面目标及其距离（如0.5m→4m），让模型按深度分层采样焦点转移。",
+      "prompt": "focus begins on key 0.5m from lens, then shifts to woman 4m behind.",
+      "qc": "焦点是否真正从A转移到B？"
+    },
+    {
+      "id": "CF-034",
+      "title": "景别随机变化",
+      "symptom": "CU/MS/WS随机切，没有心理逻辑。",
+      "problem": "景别应服务信息、情绪距离或空间关系。",
+      "cause": "自动Coverage按视觉变化切。",
+      "repair": "为每镜标注Information Need/Emotion Need/Relationship Need。",
+      "repair_model": "无导演意图时模型按视觉显著度自动切换景别，逻辑随机。修正：为每镜写明Information/Emotion/Relationship需求，把景别选择绑定到叙事变量而非视觉变化。",
+      "prompt": "hold medium two-shot until power shift, then cut to restrained close-up.",
+      "qc": "景别变化是否对应剧情变化？",
+      "auto_trigger": {
+        "trigger_condition": "相邻镜景别跳级≥2（如 LS→ECU）且无 Cut Motivation",
+        "judgment_signals": [
+          "视觉跳跃突兀",
+          "观众空间感迷失"
+        ],
+        "disposition": "打回：按景别变化顺序决策表（2.1.2）重排或补切换动机"
+      }
+    },
+    {
+      "id": "CF-035",
+      "title": "漂亮空镜没有叙事作用",
+      "symptom": "漂亮空镜删掉也不影响故事。",
+      "problem": "空镜应承担时间、情绪、信息或空间建立。",
+      "cause": "模型偏爱环境美学。",
+      "repair": "为Establishing/Insert定义具体功能。",
+      "repair_model": "'漂亮空镜'在训练数据中高频，模型高概率生成环境美学。修正：给空镜绑定具体叙事功能（时间流逝/情绪余韵/线索），否则默认删镜；功能化后的空镜才有保留价值。",
+      "prompt": "empty hallway after the argument shows the open door still swinging, marking her exit.",
+      "qc": "剪掉后是否真的损失信息/节奏？"
+    },
+    {
+      "id": "CF-036",
+      "title": "环境没有时间变化",
+      "symptom": "时间突然从白天跳日落，缺少过程。",
+      "problem": "时间连续性由日照、阴影、环境和声音共同构成。",
+      "cause": "模型每镜独立设计“漂亮时间”。",
+      "repair": "保存Scene Time、Sun Direction、Shadow Length、Ambient State。",
+      "repair_model": "每镜独立采样'好看的时间光'，无时间轴连续性。修正：写明Scene Time与上一镜的关系（更晚/影子更长），或用上一镜尾帧作参考锚定光线方向与长度。",
+      "prompt": "late afternoon sun lower than previous shot, shadows lengthened consistently.",
+      "qc": "时间变化是否单向、可解释？"
+    },
+    {
+      "id": "CF-037",
+      "title": "人物进入空间但环境无反应",
+      "symptom": "人物进入房间却没人注意，声场不变。",
+      "problem": "空间是活的系统。",
+      "cause": "背景群体是纹理而非Agent。",
+      "repair": "增加门声、视线、轻微人群调整、风/纸张反应。",
+      "repair_model": "背景人群被生成为纹理层，无独立行为Agent。修正：为背景分配低优先级反应行为（抬眼/停顿/让位），并在时间线响应位置触发，让纹理层获得最小Agent行为。",
+      "prompt": "nearby people briefly glance up, then return to work; door closes behind him.",
+      "qc": "环境是否对人物产生低强度反馈？"
+    },
+    {
+      "id": "CF-038",
+      "title": "群体复制粘贴",
+      "symptom": "人群长相/动作像复制粘贴。",
+      "problem": "群体需要个体速度、目标、服装和注意差异。",
+      "cause": "“crowd”被模型压缩成重复模式。",
+      "repair": "指定behavior diversity和层级。",
+      "repair_model": "crowd token触发高重复性纹理生成，个体差异被模型压缩为重复模式。修正：用'不同年龄/速度/服装/任务'的多属性列表打破重复模式，或分'前景个体+背景人群'两级采样。",
+      "prompt": "crowd with varied ages, walking speeds, clothing and individual tasks.",
+      "qc": "人群是否像社会而不是纹理？"
+    },
+    {
+      "id": "CF-039",
+      "title": "人物没有空间占有感",
+      "symptom": "多人总是排成一排。",
+      "problem": "Blocking应表达关系和空间权力。",
+      "cause": "模型偏安全正面构图。",
+      "repair": "设计前中后层、距离、朝向、谁迫使谁移动。",
+      "repair_model": "正面一字排开构图在训练数据中安全高频，模型默认采用。修正：用前后层/距离/朝向/谁迫使谁移动的空间关系描述，强制采样有深度的舞台调度而非安全正面构图。",
+      "prompt": "father at table head; eldest leans forward; daughter sits farthest away.",
+      "qc": "不听对白能否看出关系结构？"
+    },
+    {
+      "id": "CF-040",
+      "title": "对白声音像录音棚",
+      "symptom": "地下室对白却像干棚录音。",
+      "problem": "声音透视必须匹配房间材质、距离、混响。",
+      "cause": "音频独立于视觉生成。",
+      "repair": "建立Location Sound Profile/Room Tone/Reverb。",
+      "repair_model": "音频与画面分开生成，缺少空间混响耦合，对白像干棚。修正：给音频生成输入显式空间参数（房间材质/混响/距离），或注入Room Tone与空间反射，使声音匹配视觉空间。",
+      "prompt": "close dialogue with short concrete-room reflections and low ventilation hum.",
+      "qc": "闭眼听是否像同一个空间？"
+    },
+    {
+      "id": "CF-041",
+      "title": "声音没有来源",
+      "symptom": "脚步/门声突然出现，来源不明。",
+      "problem": "声音同样需要空间来源与距离。",
+      "cause": "模型把SFX当装饰。",
+      "repair": "建立Sound Source Map并标记off-screen方向。",
+      "repair_model": "SFX token被当作独立装饰音效，无空间定位。修正：把声音写成空间事件（走廊脚步声由远及近/门后方向），让音频模型按声源方向与距离采样。",
+      "prompt": "distant footsteps approach from the hallway behind the closed door.",
+      "qc": "能否指出声音在世界哪里发生？"
+    },
+    {
+      "id": "CF-042",
+      "title": "音乐提前解释情绪",
+      "symptom": "悲伤音乐提前告诉观众该哭。",
+      "problem": "音乐应支持而非替代表演。",
+      "cause": "“sad music”成为情绪标签。",
+      "repair": "延迟音乐、撤音乐或使用反差；先让行为成立。",
+      "repair_model": "音乐token被当作情绪标签直接驱动配乐，模型提前解释情绪。修正：把音乐写成时间事件（行为成立后才进入），用静默/环境声占位延迟音乐触发，让表演先于配乐成立。",
+      "prompt": "no score during the reveal; room tone remains, music enters only after she exits.",
+      "qc": "去掉音乐后剧情是否仍成立？"
+    },
+    {
+      "id": "CF-043",
+      "title": "慢动作只是降速",
+      "symptom": "慢动作只是降速，没有重量/意义。",
+      "problem": "慢动作是时间、动作、声音共同重构。",
+      "cause": "模型把slow motion当播放速度。",
+      "repair": "设计可读动作和声场变化。",
+      "repair_model": "模型把slow motion实现为时间轴降速，未重构动作与声音细节。修正：用'强调时间瞬间+延迟孤立音效'描述慢动作的叙事功能，而非降速指令，让模型采样时间重构而非简单降速。",
+      "prompt": "slow motion emphasizes the moment the glass leaves his hand; impact sound is delayed and isolated.",
+      "qc": "慢动作是否改变观众注意点？"
+    },
+    {
+      "id": "CF-044",
+      "title": "年龄变化不连续",
+      "symptom": "年龄变化只换脸，不换身体/声音。",
+      "problem": "年龄影响姿态、速度、皮肤、声音和习惯。",
+      "cause": "角色老化被简化为脸部纹理。",
+      "repair": "保存Age State与Movement/Voice State。",
+      "repair_model": "年龄token主要影响脸部纹理，身体/声音先验不变，老化被简化为换脸。修正：用多模态年龄描述（姿态/起身速度/能量/声音参数），让模型在身体与声音维度同步采样老化状态。",
+      "prompt": "older posture, slower rise from chair, lower energy, same identity features.",
+      "qc": "年龄变化是否跨模态一致？"
+    },
+    {
+      "id": "CF-045",
+      "title": "过度动画、不会停",
+      "symptom": "人物不停眨眼、摆头、微笑。",
+      "problem": "静止也是表演。",
+      "cause": "模型倾向持续动画。",
+      "repair": "明确hold still/no unnecessary motion/silent beat。",
+      "repair_model": "生成模型有持续运动先验以避免'静止'被判失败，导致过度动画。修正：显式写'hold完全静止一拍/仅呼吸变化'，用静止约束覆盖运动先验，把静默也作为一种有效采样。",
+      "prompt": "holds completely still for one full beat; only breathing changes.",
+      "qc": "该停的时候是否真的停？"
+    },
+    {
+      "id": "CF-046",
+      "title": "镜头没有呼吸节奏",
+      "symptom": "所有镜头时长/速度一致。",
+      "problem": "节奏来自镜头长度、信息密度、停顿和运动变化。",
+      "cause": "生成片段固定时长导致平坦。",
+      "repair": "建立Shot Rhythm Map并允许后期裁切。",
+      "repair_model": "固定时长片段使模型均匀分配变化，节奏平坦。修正：在prompt按时间点规划节奏（反应镜多留2s/决策后立即切），并允许后期裁切重新塑造节奏，让固定时长不再约束节奏。",
+      "prompt": "hold the reaction two seconds longer than dialogue beats; cut immediately after decision.",
+      "qc": "节奏是否有张弛？",
+      "auto_trigger": {
+        "trigger_condition": "情感场景连续≥3镜 同景别且同时长",
+        "judgment_signals": [
+          "节奏机械无呼吸感"
+        ],
+        "disposition": "打回：景别/时长交替设计（与 EMOTION_STALL_CHECK 联动：本条管节奏维度，彼条管时长情绪增量）"
+      }
+    },
+    {
+      "id": "CF-047",
+      "title": "所有人都像主角",
+      "symptom": "配角和主角同样亮、同样近、同样动。",
+      "problem": "视觉层级应对应叙事层级。",
+      "cause": "模型平均强化所有人物。",
+      "repair": "定义Narrative Importance和Attention Priority。",
+      "repair_model": "多人物token在交叉注意力中被平均分配，所有人同等显著。修正：用叙事层级分配注意力权重（主角高对比/配角软化/减少活动），让模型采样有主次的视觉层级。",
+      "prompt": "supporting characters remain softer and less active; protagonist carries primary contrast.",
+      "qc": "观众是否知道看谁？"
+    },
+    {
+      "id": "CF-048",
+      "title": "场景视觉主题碎裂",
+      "symptom": "同一场戏每镜色彩/运动像不同作品。",
+      "problem": "Scene Style Bible需要统一。",
+      "cause": "模型/提示词每镜独立改变美学。",
+      "repair": "锁定Palette、Light Grammar、Lens Family、Movement Style。",
+      "repair_model": "每镜prompt独立，模型采样不同美学先验，风格碎裂。修正：用Global Visual Bible/风格参考图统一每镜美学锚点（Palette/光语法/镜头家族），减少每镜采样自由度。",
+      "prompt": "maintain the same low-key practical lighting and restrained static camera grammar.",
+      "qc": "同一场戏是否像同一个世界？"
+    },
+    {
+      "id": "CF-049",
+      "title": "镜头无法剪辑",
+      "symptom": "单镜好看但前后接不上。",
+      "problem": "生成时需考虑编辑接口。",
+      "cause": "只描述Current Shot。",
+      "repair": "保存Before/After状态与Cut Motivation。",
+      "repair_model": "模型只优化当前镜头内容，无编辑接口概念。修正：写明入点出点状态（上一镜手位→本镜延续→末端视线接口），让镜头边界具备可剪辑性，为剪辑提供接口。",
+      "prompt": "begins on the same hand position as previous shot and ends on a clear eyeline shift for the next cut.",
+      "qc": "是否存在可用的入点/出点？"
+    },
+    {
+      "id": "CF-050",
+      "title": "技术质量高但导演价值低",
+      "symptom": "高清流畅但毫无叙事价值。",
+      "problem": "视觉质量不是导演价值。",
+      "cause": "模型优化视觉指标。",
+      "repair": "强制Shot Motivation与Delete Test。",
+      "repair_model": "模型目标函数偏视觉质量（清晰/流畅），不感知叙事价值。修正：把叙事变量（任务/变化/结果）写成Prompt主体内容，质量词降为低权重收尾，让采样优先满足故事内容。",
+      "prompt": "describe the character task and change, not quality adjectives.",
+      "qc": "删掉这一镜会损失什么？"
+    },
+    {
+      "id": "CF-051",
+      "title": "没有空间地图",
+      "symptom": "连续三镜后观众不知道门窗/人物在哪里。",
+      "problem": "Mental Map需要稳定的世界坐标和轴线。",
+      "cause": "单镜美学优先于空间。",
+      "repair": "建立Scene Spatial Map与关键地标。",
+      "repair_model": "模型优先单镜构图美感，不维持世界坐标。修正：写明关键地标（门北/窗西/桌中）与相机所在轴侧，用I2V参考帧跨镜锚定空间，建立Mental Map。",
+      "prompt": "maintain door north, window west, table center; camera stays on south side of axis.",
+      "qc": "观众能否画出简单平面图？"
+    },
+    {
+      "id": "CF-052",
+      "title": "人物面孔同质化",
+      "symptom": "所有角色年轻、漂亮、同质。",
+      "problem": "可信世界依赖人类差异。",
+      "cause": "训练美学偏好压平个体差异。",
+      "repair": "明确年龄、体态、面部结构、职业差异和自然瑕疵。",
+      "repair_model": "模型被训练数据美学偏好引导向'标准美'，个体差异被压缩。修正：显式写年龄/面部结构/体态/瑕疵的多属性列表，对抗高概率的标准化采样。",
+      "prompt": "mixed ages and facial structures, natural skin texture, varied body types.",
+      "qc": "背景人物是否像真实社会？"
+    },
+    {
+      "id": "CF-053",
+      "title": "服装没有叙事",
+      "symptom": "服装每镜像时装大片而不服务身份。",
+      "problem": "Wardrobe是身份、阶层、职业和状态。",
+      "cause": "模型偏美观。",
+      "repair": "建立Wardrobe DNA与状态变化。",
+      "repair_model": "模型优先'好看时装'先验，忽略服装叙事状态。修正：写Wardrobe DNA+状态（磨损/湿/缺扣/跨镜一致），用参考图锁定服装模板，让服装承载身份信息。",
+      "prompt": "same worn wool coat, slightly damp, one missing button, consistent across shots.",
+      "qc": "服装能否告诉人物处境？"
+    },
+    {
+      "id": "CF-054",
+      "title": "疲劳/能量状态重置",
+      "symptom": "刚奔跑/战斗后下一镜精神满格。",
+      "problem": "能量和疲劳是持续状态。",
+      "cause": "模型重置基础人物。",
+      "repair": "记录Energy/Breathing/Sweat/Posture。",
+      "repair_model": "模型每镜从基础人物先验重新采样，疲劳能量状态不继承。修正：写Energy/呼吸/姿态的延续状态，或用上一镜状态作参考覆盖，让身体记住上一场经历。",
+      "prompt": "breathing remains heavy, shoulders lowered, movement less efficient.",
+      "qc": "身体是否记得上一场经历？"
+    },
+    {
+      "id": "CF-055",
+      "title": "情绪跳跃",
+      "symptom": "平静直接跳崩溃。",
+      "problem": "情绪需要触发、处理和可见反应。",
+      "cause": "标签从calm跳sad。",
+      "repair": "保存Emotion Curve并拆Beat。",
+      "repair_model": "情绪标签随时间切换，模型直接采样新标签的高强度原型，无过渡。修正：用时间分段写情绪渐变（calm→怀疑→确认→克制崩溃），覆盖标签跳变，让模型采样过渡过程。",
+      "prompt": "calm → suspicion → recognition → controlled collapse.",
+      "qc": "是否有可读的过渡？",
+      "auto_trigger": {
+        "trigger_condition": "相邻镜 emotion 值差≥2级（如 calm→rage）且无过渡镜",
+        "judgment_signals": [
+          "观众情绪跟不上",
+          "表演状态断裂"
+        ],
+        "disposition": "打回：插入过渡镜（反应镜/环境镜）或调整情绪梯度"
+      }
+    },
+    {
+      "id": "CF-056",
+      "title": "关系变化没有视觉体现",
+      "symptom": "剧情说关系改变，画面距离/视线完全没变。",
+      "problem": "关系变化应影响Blocking/Look/Touch/Space Control。",
+      "cause": "模型只改表情。",
+      "repair": "同步更新Relationship State与Blocking。",
+      "repair_model": "模型把关系变化编码为表情变化，Blocking/距离/视线不变。修正：同步写空间行为（不再进入个人空间/回避视线），让关系变化驱动空间与视线采样。",
+      "prompt": "after the reveal, he no longer enters her personal space; both avoid eye contact.",
+      "qc": "不听对白能否感到关系变化？"
+    },
+    {
+      "id": "CF-057",
+      "title": "场景进入退出逻辑缺失",
+      "symptom": "人物突然出现在/消失于场景。",
+      "problem": "Entrance/Exit也是叙事行为。",
+      "cause": "模型只生成场景中间态。",
+      "repair": "为重要出入场设计可见或可推断转移。",
+      "repair_model": "模型生成镜头中间的稳定态，出入场事件被省略。修正：把出入场写成显式事件序列（门开→进入→脚步渐远），驱动模型采样完整转移过程而非中间态。",
+      "prompt": "door opens before he enters; exit ends with his footsteps receding.",
+      "qc": "出入是否改变空间和关系？"
+    },
+    {
+      "id": "CF-058",
+      "title": "环境不参与剧情",
+      "symptom": "环境永远不参与剧情。",
+      "problem": "环境可承担压力、反差、信息和节奏。",
+      "cause": "背景被当静态装饰。",
+      "repair": "让光、声、人群、天气产生与事件有关的响应，但避免机械“天气=情绪”。",
+      "repair_model": "背景作为静态装饰层生成，无事件响应。修正：把环境响应写成事件触发（雨随已有风暴增强/消息后对话声消失），绑定因果而非机械'天气=情绪'标签。",
+      "prompt": "rain intensifies only because storm is already present; room conversation dies after the news.",
+      "qc": "环境变化是否有现实/叙事原因？"
+    },
+    {
+      "id": "CF-059",
+      "title": "过度正脸偏好",
+      "symptom": "所有人物都正脸对镜头。",
+      "problem": "侧脸、背影、OTS和遮挡能控制信息和关系。",
+      "cause": "模型偏面部清晰展示。",
+      "repair": "按Viewpoint选择profile/back/OTS。",
+      "repair_model": "模型高概率生成清晰正脸（训练数据偏好面部展示）。修正：显式写profile/back/OTS视角+『不看镜头』，覆盖正脸先验，让视角服务关系。",
+      "prompt": "profile view, attention off-screen, no direct gaze to camera.",
+      "qc": "视角是否服务关系，而非只展示脸？"
+    },
+    {
+      "id": "CF-060",
+      "title": "背影没有身份",
+      "symptom": "背影镜头无法辨认角色。",
+      "problem": "身份还可以由轮廓、服装、步态、发型保持。",
+      "cause": "背影缺少脸部Identity Anchor。",
+      "repair": "锁定Silhouette DNA与Movement DNA。",
+      "repair_model": "身份主要靠脸部编码，背影无脸导致身份失效。修正：用轮廓/服装/步态/发型DNA描述背影身份，或给背影加可识别特征物，让身份不依赖脸部。",
+      "prompt": "same shoulder line, coat silhouette, haircut and slow asymmetrical gait.",
+      "qc": "不露脸时仍能识别人物吗？"
+    },
+    {
+      "id": "CF-061",
+      "title": "违反180度轴线",
+      "symptom": "对白反打跨轴导致左右关系反转。",
+      "problem": "180°轴线维持空间定向，除非主动破坏。",
+      "cause": "模型缺少Camera Side记忆。",
+      "repair": "保存Axis与Camera Side；主动跨轴必须有Motivation。",
+      "repair_model": "模型每镜独立采样无相机侧记忆，跨轴是随机结果。修正：写明Axis与Camera Side并保持，用参考帧锚定左右关系；主动跨轴需显式Motivation。",
+      "prompt": "maintain south side of interaction axis; no axis crossing in this beat.",
+      "qc": "反转是导演决定还是AI错误？",
+      "auto_trigger": {
+        "trigger_condition": "同对话场景相邻镜机位方位跨越180°轴 且无越轴动机声明",
+        "judgment_signals": [
+          "左右关系翻转",
+          "观众方向感混乱"
+        ],
+        "disposition": "打回：机位回同侧，或补越轴动机（骑轴/中性镜过渡）"
+      }
+    },
+    {
+      "id": "CF-062",
+      "title": "镜子反射错误",
+      "symptom": "镜中人物动作/位置不同步。",
+      "problem": "镜面需要严格几何与时间同步。",
+      "cause": "生成模型把镜像当独立图像。",
+      "repair": "降低动作与相机复杂度；必要时拆镜/后期合成。",
+      "repair_model": "模型把镜子当作另一幅独立画面生成，几何/时间不同步。修正：降低动作与相机复杂度，用静态镜+简单构图，或拆镜/后期合成反射，避免高复杂度镜像采样。",
+      "prompt": "static camera, simple mirror composition, synchronized reflection.",
+      "qc": "反射几何、动作、光线是否一致？"
+    },
+    {
+      "id": "CF-063",
+      "title": "玻璃材质物理错误",
+      "symptom": "玻璃要么完全透明要么像墙。",
+      "problem": "玻璃同时有透射、反射、折射和高光。",
+      "cause": "材质由表面外观近似。",
+      "repair": "明确subtle reflection/refraction/transparency与环境光。",
+      "repair_model": "模型按表面外观先验近似材质，玻璃的透明/反射/折射难同时成立。修正：用'微反射+折射+透出主体'的显式描述，必要时降低玻璃面积与复杂度，让材质多维属性被采样。",
+      "prompt": "real glass with subtle reflection and refraction; subject visible through it.",
+      "qc": "材质是否同时具有透明和表面存在感？"
+    },
+    {
+      "id": "CF-064",
+      "title": "水面反射错误",
+      "symptom": "水中倒影方向/波纹不合理。",
+      "problem": "水面反射依赖视角、光向、表面运动。",
+      "cause": "AI没有真正光线追踪。",
+      "repair": "简化构图、明确平静/波纹程度和反射对象。",
+      "repair_model": "模型不执行真实光线追踪，水面反射靠外观先验近似。修正：简化构图+明确波纹程度与反射对象，避免复杂反射面，降低对真实光追的依赖。",
+      "prompt": "calm water with reflection distorted consistently by small ripples.",
+      "qc": "倒影是否遵循世界方向？"
+    },
+    {
+      "id": "CF-065",
+      "title": "烟雾没有空间层次",
+      "symptom": "烟雾像平面蒙版。",
+      "problem": "空气介质应体现深度和光路。",
+      "cause": "“smoke”只生成局部纹理。",
+      "repair": "分foreground/midground/background haze，控制浓度。",
+      "repair_model": "smoke token触发局部纹理生成，无空间分层。修正：分前景/中景/背景浓度描述（前薄/中浓/后柔），让模型采样有深度的体积雾而非平面蒙版。",
+      "prompt": "thin foreground haze, denser midground smoke, distant background softened.",
+      "qc": "烟雾是否增强空间而非遮画面？"
+    },
+    {
+      "id": "CF-066",
+      "title": "无动机手持",
+      "symptom": "所有场景都晃。",
+      "problem": "Handheld是摄影机身体感，不是默认高级感。",
+      "cause": "手持关键词被过度调用。",
+      "repair": "明确Stable vs Handheld的进入时机和强度。",
+      "repair_model": "handheld是高显著运动词，模型默认过度使用。修正：默认锁镜（tripod），仅在剧情起点后启用轻手持，用'锁镜→冲突→手持'的时间描述控制进入时机。",
+      "prompt": "locked tripod until argument breaks, then subtle organic handheld.",
+      "qc": "手持是否有剧情起点？",
+      "auto_trigger": {
+        "trigger_condition": "Movement=handheld 且 POV/视点字段≠主观",
+        "judgment_signals": [
+          "晃动无心理理由",
+          "纪实感与内容错位"
+        ],
+        "disposition": "打回：改固定/稳定运镜，或声明主观视点动机（DC-035 联动）"
+      }
+    },
+    {
+      "id": "CF-067",
+      "title": "摄影机移动无目的",
+      "symptom": "摄影机不断移动却无目的。",
+      "problem": "Move必须绑定Reveal/Follow/Emotional Shift/Spatial Transition。",
+      "cause": "模型追求动态。",
+      "repair": "写Movement Motivation；无变化则锁镜。",
+      "repair_model": "模型有运动先验，无目的时也生成移动。修正：运镜绑定Reveal/Follow/情绪转移/空间转场，无变化则写'lock'，用动机约束覆盖动态先验。",
+      "prompt": "camera pans only to reveal the person entering from the doorway.",
+      "qc": "移动结束后获得了什么？"
+    },
+    {
+      "id": "CF-068",
+      "title": "多镜头表演状态断裂",
+      "symptom": "上一镜愤怒，下一镜突然平静。",
+      "problem": "Performance State必须跨镜继承。",
+      "cause": "模型从Character Base重启。",
+      "repair": "保存Intensity、Breathing、Posture、Eye Behavior。",
+      "repair_model": "模型每镜从基础角色先验重启，前一镜情绪动量丢失。修正：写情绪动量延续（下颌紧/呼吸浅/姿态保持），或I2V用上一镜画面作表演参考，让表演状态跨镜继承。",
+      "prompt": "continues from previous beat, jaw still tight, breathing remains shallow.",
+      "qc": "情绪动量是否保留？"
+    },
+    {
+      "id": "CF-069",
+      "title": "表演过度",
+      "symptom": "惊讶=张嘴、悲伤=泪、愤怒=瞪眼。",
+      "problem": "表演强度与外显程度可以分离。",
+      "cause": "模型对情绪标签使用刻板原型。",
+      "repair": "使用PIS、Restraint、Action Verb。",
+      "repair_model": "情绪标签触发刻板原型（惊=张嘴/悲=泪/怒=瞪眼）。修正：用PIS强度+克制+行为动词（压低声音/攥紧一次）替换情绪标签，让模型采样内外可分离的表演。",
+      "prompt": "restrained anger; voice lowers; no shouting; fingers tighten once.",
+      "qc": "是否留有观众解释空间？"
+    },
+    {
+      "id": "CF-070",
+      "title": "没有潜台词",
+      "symptom": "人物所有内心直接写在脸上。",
+      "problem": "Subtext要求Internal State与External Behavior不同。",
+      "cause": "模型倾向显式情绪。",
+      "repair": "分开Objective、Hidden Emotion、Displayed Behavior。",
+      "repair_model": "模型高概率把内心显式化到脸上，无潜台词。修正：写内隐状态≠外显行为（微笑但回避话题），让模型采样内外不一致的表演。",
+      "prompt": "she smiles politely while avoiding the subject, hiding fear.",
+      "qc": "角色是否在“做事”，而不只是展示情绪？"
+    },
+    {
+      "id": "CF-071",
+      "title": "动作没有因果链",
+      "symptom": "角色突然跑/攻击/拿物，没有触发。",
+      "problem": "动作属于因果链。",
+      "cause": "模型从动作词直接跳结果。",
+      "repair": "写Trigger→Decision→Preparation→Action→Reaction。",
+      "repair_model": "动作词token直接映射结果状态，跳过触发过程。修正：写Trigger→Decision→Preparation→Action→Reaction链，强制模型采样因果过程而非直接结果。【动作类快切注意】：动作链在快切时必须用近景/特写呈现关键节点——原理：①特写/近景只显示因果链的关键物理节点（如手腕转动→触物→收回），掩盖模型无法保持的中间力学过程；②观众心理补偿会自动把关键节点连成完整动作，不感到断裂；③快切单元用特写还可弱化跳轴违和感（全景快切易暴露轴线穿帮）。因此快切动作链优先用 Insert/ECU/CU，每个单元只展示链的一个关键节点。",
+      "prompt": "he hears the latch, decides to run, shifts weight, then accelerates toward the door.",
+      "qc": "动作前是否存在可见/可理解原因？"
+    },
+    {
+      "id": "CF-072",
+      "title": "动作没有准备阶段",
+      "symptom": "挥拳/起跳直接发生，没有前摇。",
+      "problem": "真实动作需要Anticipation和重心准备。",
+      "cause": "模型压缩时间。",
+      "repair": "显式写weight shift、shoulder turn、muscle tension。",
+      "repair_model": "模型在有限帧内压缩动作，省略准备阶段。修正：显式写weight shift/shoulder turn/muscle tension等准备帧，扩展动作前摇时间，让准备进入采样。",
+      "prompt": "brief weight shift and shoulder rotation before the strike.",
+      "qc": "动作是否有物理准备阶段？"
+    },
+    {
+      "id": "CF-073",
+      "title": "战斗没有目标",
+      "symptom": "打斗像无目标动作展示。",
+      "problem": "Combat需要Objective：逃脱、保护、夺取、阻止。",
+      "cause": "“fight”只生成招式。",
+      "repair": "每Beat绑定目标与结果。",
+      "repair_model": "fight token触发招式序列生成，无目标驱动。修正：给战斗绑定Objective（制造空间逃跑/保护某人），让招式服务于目标而非无目的展示。【动作类快切注意】：战斗场景的快切必须用特写/近景而非全景——原理：①特写/近景可掩盖战斗中复杂的身体力学与空间位移连贯性缺陷（全景快切会暴露步伐/重心穿帮）；②观众心理补偿机制会自动把多个关键特写（拳头/闪避/倒地）拼接成完整战斗过程；③特写弱化跳轴违和感（战斗快切易跨轴，全景越轴会让观众迷失）。因此战斗快切优先用 ECU/CU 特写关键节点，而非 WS/MS 全景打斗。",
+      "prompt": "he attacks only to create space to reach the exit, not to defeat the opponent.",
+      "qc": "动作是否改变局势？"
+    },
+    {
+      "id": "CF-074",
+      "title": "人物移动没有路径",
+      "symptom": "人物走来走去，没有目的地。",
+      "problem": "Blocking Movement需要Start/Destination/Obstacle/Motivation。",
+      "cause": "模型为增加动态让人物移动。",
+      "repair": "明确路径和终点。",
+      "repair_model": "模型用随机移动补偿动态先验，人物无目的地走动。修正：写Start/Destination/Obstacle/Motivation路径，让移动绑定任务（窗→桌→拿信→停）。",
+      "prompt": "crosses from the window to the desk to pick up the letter, then stops.",
+      "qc": "移动是否服务任务？"
+    },
+    {
+      "id": "CF-075",
+      "title": "车辆没有重量",
+      "symptom": "汽车漂、刹车无惯性。",
+      "problem": "车辆有质量、加速度、摩擦、悬挂。",
+      "cause": "模型对刚体动力近似不稳定。",
+      "repair": "简化镜头并写mass/friction/body roll/braking distance。",
+      "repair_model": "模型对刚体动力学的帧间近似不稳定，车辆易漂移。修正：简化镜头+写mass/friction/body roll/braking distance物理词，或拆短段降低帧间误差。",
+      "prompt": "heavy vehicle decelerates with visible suspension compression and realistic stopping distance.",
+      "qc": "车辆动作是否符合重量感？"
+    },
+    {
+      "id": "CF-076",
+      "title": "爆炸不影响环境",
+      "symptom": "爆炸很漂亮但人物/尘土/光线不受影响。",
+      "problem": "事件必须改变世界。",
+      "cause": "VFX与主体生成解耦。",
+      "repair": "建立Effect Interaction：光闪、冲击、尘土、人物反应、声音。",
+      "repair_model": "VFX层与主体层分开生成，无交互，爆炸不影响环境。修正：写Effect Interaction链（光闪墙/尘土后至/人物后仰/声音延迟），让效果进入主体与环境的耦合采样。",
+      "prompt": "blast light briefly illuminates walls; dust arrives after shock; characters recoil.",
+      "qc": "效果是否有因果后果？"
+    },
+    {
+      "id": "CF-077",
+      "title": "特效抢过故事",
+      "symptom": "特效抢走人物和剧情。",
+      "problem": "视觉层级应Story > Character > Environment > Effect。",
+      "cause": "模型偏高显著性特效。",
+      "repair": "降低特效覆盖/亮度，保持主体第一落点。",
+      "repair_model": "高显著性特效token被模型强化，抢走主体注意力。修正：降低特效亮度/覆盖+保持主体第一落点，用权重控制注意力分配，让特效停留在外围。",
+      "prompt": "effects remain peripheral and do not obscure the character's face or action.",
+      "qc": "不看特效是否仍能理解剧情？"
+    },
+    {
+      "id": "CF-078",
+      "title": "未来世界只有霓虹没有社会",
+      "symptom": "未来城市只有霓虹，没有社会运行。",
+      "problem": "Worldbuilding需要制度、交通、工作、商业和日常。",
+      "cause": "视觉风格取代世界规则。",
+      "repair": "加入普通生活行为与基础设施逻辑。",
+      "repair_model": "未来风格token（霓虹）优先于世界运行规则被采样。修正：写日常行为/基础设施（工人/交通/招牌/通勤），让世界规则进入采样而非仅视觉风格。",
+      "prompt": "workers, delivery traffic, public signage, transit behavior establish daily life.",
+      "qc": "世界像有人生活还是概念图？"
+    },
+    {
+      "id": "CF-079",
+      "title": "历史场景像主题公园",
+      "symptom": "历史场景服装对，但行为像现代人摆拍。",
+      "problem": "时代感来自生活方式、空间使用、礼仪和物件互动。",
+      "cause": "模型表面历史化。",
+      "repair": "补充时代行为/社会距离/工作方式。",
+      "repair_model": "历史token影响服装/道具外观，不影响行为。修正：写时代行为/礼仪/社会距离/工具使用，让行为进入采样，避免表面历史化。",
+      "prompt": "period-appropriate table manners, posture, tools and social hierarchy.",
+      "qc": "人物是否像那个时代的人？"
+    },
+    {
+      "id": "CF-080",
+      "title": "色彩没有叙事意义",
+      "symptom": "颜色漂亮但与故事变化无关。",
+      "problem": "色彩应绑定角色、关系、主题或信息。",
+      "cause": "Color Grade作为装饰。",
+      "repair": "建立Color Narrative Map与Accent continuity。",
+      "repair_model": "调色token作为装饰层，与叙事无关。修正：把色彩绑定叙事元素（红围巾唯一饱和色/记忆节拍复用），让色彩承载信息并在关键点出现。",
+      "prompt": "red scarf remains the only saturated accent and recurs at key memory beats.",
+      "qc": "颜色变化是否有叙事对应？"
+    },
+    {
+      "id": "CF-081",
+      "title": "多模型视觉风格断裂",
+      "symptom": "多模型镜头风格像不同导演。",
+      "problem": "模型风格不是项目风格。",
+      "cause": "不同模型先验不同。",
+      "repair": "用Global Visual Bible统一Palette、Lens Family、Light Grammar、Motion Grammar。",
+      "repair_model": "不同模型各有风格先验，同prompt产生不同视觉。修正：用Global Visual Bible+风格参考图统一锚点（Palette/光语法/镜头家族/运动语法），减少各模型自由采样空间。",
+      "prompt": "adapter enforces same low-key practical lighting, 35-85mm lens family and restrained movement.",
+      "qc": "跨模型连续播放是否统一？",
+      "auto_trigger": {
+        "trigger_condition": "同场景镜头由≥2个模型生成 且 无风格锚（统一风格预设/参考图）",
+        "judgment_signals": [
+          "色调/质感/运动签名不一致"
+        ],
+        "disposition": "打回：同场景锁定单一模型或注入统一风格锚+首尾帧参考"
+      }
+    },
+    {
+      "id": "CF-082",
+      "title": "跨模型角色身份漂移",
+      "symptom": "换模型后角色像相似但不同的人。",
+      "problem": "跨模型需要统一Character Reference Package。",
+      "cause": "模型Identity encoding不同。",
+      "repair": "使用正脸/侧脸/全身/服装/动作/状态参考，减少只靠文字。",
+      "repair_model": "各模型对身份的编码方式不同，仅文字无法锁定身份。修正：用统一角色参考包（正/侧/全身/服装/状态）跨模型传递，减少对文字身份编码的依赖。 【骨骼绑定路径 2026-10】跨模型传递身份的最强形态是绑定骨骼的 3D/2.5D 角色资产（各模型以渲染图接入），身份由资产锁定而非各模型各自采样；成本高，仅主角+高频出场角色启用。",
+      "prompt": "same reference package and current state used across all model adapters.",
+      "qc": "角色优先于模型特色。"
+    },
+    {
+      "id": "CF-083",
+      "title": "跨模型光线签名漂移",
+      "symptom": "不同模型同场景光线性格不同。",
+      "problem": "Lighting Signature是项目状态。",
+      "cause": "模型有不同默认光偏好。",
+      "repair": "保存真实光源图与对比/色温规则。",
+      "repair_model": "各模型默认光照偏好不同，同场景光线性格漂移。修正：用真实光源图+对比/色温规则锚定，覆盖各模型默认光偏好。",
+      "prompt": "same west-window key and warm table practical; no additional rim lights.",
+      "qc": "光是否像同一个世界？"
+    },
+    {
+      "id": "CF-084",
+      "title": "跨模型运动风格漂移",
+      "symptom": "动作速度/惯性跨模型突变。",
+      "problem": "Motion Style也是角色/项目DNA。",
+      "cause": "各模型运动先验不同。",
+      "repair": "统一Motion Bible：速度、步态、Handheld强度、Camera Acceleration。",
+      "repair_model": "各模型运动先验不同，速度/惯性突变。修正：用Motion Bible统一（速度/步态/手持强度/相机加速度），必要时用动作参考视频锚定运动风格。",
+      "prompt": "same slow gait and restrained camera acceleration across shots.",
+      "qc": "跨模型人物是否像同一个身体？"
+    },
+    {
+      "id": "CF-085",
+      "title": "批量生成没有导演审核节点",
+      "symptom": "批量生成很多镜头但无法剪。",
+      "problem": "自动化必须有Director Review Gates。",
+      "cause": "产量目标替代可用率。",
+      "repair": "脚本/分镜/生成/剪辑各设审核节点。",
+      "repair_model": "流程指标偏向产量，无导演审核节点，批量镜头不可用。修正：在脚本/分镜/生成/剪辑各设审核Gate，这是流程规则而非Prompt可解。",
+      "prompt": "N/A：属于流程规则。",
+      "qc": "衡量有效镜头率而非生成数量。"
+    },
+    {
+      "id": "CF-086",
+      "title": "版本过多导致选择瘫痪",
+      "symptom": "同一镜头50个版本，选择瘫痪。",
+      "problem": "生成前需要Acceptance Criteria。",
+      "cause": "没有评价函数。",
+      "repair": "评分Story、Performance、Continuity、Technical、Risk；达到阈值停止。",
+      "repair_model": "无评价函数导致版本无法收敛，选择瘫痪。修正：用评分（Story/Performance/Continuity/Technical/Risk）作为停止标准，属决策流程。",
+      "prompt": "N/A：属于决策流程。",
+      "qc": "最终选择是否可解释？"
+    },
+    {
+      "id": "CF-087",
+      "title": "只优化单镜不优化整集",
+      "symptom": "每镜都很好，整集却无节奏。",
+      "problem": "Episode是优化单位之一。",
+      "cause": "局部最优累积不等于整体最优。",
+      "repair": "做Episode Level QC：信息曲线、情绪曲线、镜头密度、重复语言。",
+      "repair_model": "每镜局部最优叠加不保证整集最优。修正：做Episode级QC（信息曲线/情绪曲线/镜头密度/重复语言），属流程层评价。",
+      "prompt": "N/A。",
+      "qc": "整集是否存在视觉/节奏重复和信息停滞？"
+    },
+    {
+      "id": "CF-088",
+      "title": "短剧节奏过慢",
+      "symptom": "短剧大量空镜、慢推、景观镜头，剧情拖。",
+      "problem": "镜头时长必须和信息/情绪变化匹配。",
+      "cause": "美学片段堆积。",
+      "repair": "Delete Test与Beat Density审核。",
+      "repair_model": "美学片段（空镜/慢推/景观）在训练分布中高频，模型偏好生成拖慢节奏。修正：用Delete Test与Beat Density审核，并触发EMOTION_STALL_CHECK预警（>6s静态无情绪增量→裁切/Insert/升级Human Gate），属评价层+剪辑层联动。",
+      "prompt": "N/A。",
+      "qc": {
+        "summary": "每5-10秒是否有必要的变化而非机械快节奏？（保留原节奏检查）",
+        "emotion_stall_check": {
+          "rule_id": "EMOTION_STALL_CHECK",
+          "name": "情绪停滞检查（Emotional Stall Detection）",
+          "category": "pacing_warning / high_risk_trigger",
+          "trigger_condition": "镜头时长 > 6s 且 场景类型 ∈ {情感, 抒情, 爱情}",
+          "intent": "防止导演强行拉长镜头但镜内无情绪增量，导致观众注意力衰竭（默认窗口6s被情绪接管的前提是镜内持续递进）",
+          "judgment_signals": {
+            "pass": [
+              "表情演化（如落泪/嘴角变化）",
+              "眼神变化（焦点/朝向转移）",
+              "手部微动作（颤抖/握紧）",
+              "呼吸节奏变化",
+              "环境响应（光/声/雨/人群反应与事件联动）"
+            ],
+            "warn": {
+              "condition": "以上信号全无，仅静止长镜/静态空镜",
+              "flag": "EMOTION_STALL_HIGH_RISK",
+              "note": "微小动作但无情绪增量同样视为伪长镜，需预警"
+            }
+          },
+          "disposition": [
+            "步骤1：先尝试后期裁切 或 插入Reaction镜头/环境响应 修复（复用CF-046 Shot Rhythm Map / CF-035 空镜功能化）",
+            "步骤2：修复无效且导演坚持 → 强制升级 Human Gate 批准（不得由执行Agent自行放行）",
+            "步骤3：Human Gate 批准后 → 记录为生产学习案例（进入 10.7 Production Learning Loop）"
+          ],
+          "decision_source": "情绪顶点优先切换 + 类型系数修正（情感类有效窗口 8-12s，需情绪增量持续支撑）",
+          "priority": "high",
+          "version": "1.0",
+          "verified": "2026-08-17"
+        }
+      }
+    },
+    {
+      "id": "CF-089",
+      "title": "短剧节奏过快",
+      "symptom": "事件/对白/转折连续轰炸，观众来不及处理。",
+      "problem": "Reaction Beat是信息吸收时间。",
+      "cause": "短剧效率被误解为无停顿。",
+      "repair": "在关键变化后保留一拍反应/静默。",
+      "repair_model": "模型把'紧凑'理解为无停顿连拍，事件连续轰炸。修正：在关键变化后保留Reaction Beat/静默，用时间分段控制信息吸收节奏。",
+      "prompt": "N/A。",
+      "qc": "观众是否有时间理解因果和情绪？"
+    },
+    {
+      "id": "CF-090",
+      "title": "缺少声音层导致视觉疲劳",
+      "symptom": "全靠视觉传情，长时间观看疲劳。",
+      "problem": "声音是第二叙事通道。",
+      "cause": "只把音频当后期。",
+      "repair": "在分镜阶段设计Ambience/Foley/Sonic Focus/Motif/Silence。",
+      "repair_model": "音频只在后期添加，未参与前期设计，视觉负担过重。修正：在分镜阶段设计Ambience/Foley/Sonic Focus/Motif/Silence，把声音作为第二叙事通道进入生成。",
+      "prompt": "N/A。",
+      "qc": "闭眼时能否通过声音理解空间与部分事件？"
+    },
+    {
+      "id": "CF-091",
+      "title": "对白没有真实节奏",
+      "symptom": "对白一句一句无停顿，像机器轮流读。",
+      "problem": "真实对话有停顿、打断、重叠、听取。",
+      "cause": "TTS/视频模型按文本顺序执行。",
+      "repair": "写Dialogue Beat、Pause、Overlap和Listening Behavior。",
+      "repair_model": "模型按文本顺序逐句执行，对白无自然停顿/打断。修正：写Dialogue Beat/Pause/Overlap/Listening行为，用标点与行为描述控制TTS节奏。",
+      "prompt": "one-second hesitation, she begins before he finishes, then both fall silent.",
+      "qc": "节奏是否符合人物关系？"
+    },
+    {
+      "id": "CF-092",
+      "title": "环境声音世界错误",
+      "symptom": "豪宅/办公室的环境声像错误地点。",
+      "problem": "Sound World必须匹配Location材料、开放程度与距离。",
+      "cause": "音频风格独立生成。",
+      "repair": "建立Location Sound Profile。",
+      "repair_model": "音频风格独立生成，与地点不匹配。修正：建立Location Sound Profile（材料/开放度/距离）注入音频模型，让声音帮助识别地点。",
+      "prompt": "soft HVAC, distant city through sealed windows, muted footsteps on carpet.",
+      "qc": "声音是否帮助识别地点？"
+    },
+    {
+      "id": "CF-093",
+      "title": "后期无法补救的前期规划错误",
+      "symptom": "角色身份错、空间错、动作逻辑错，后期无法救。",
+      "problem": "基础逻辑错误属于生成规划问题。",
+      "cause": "过度依赖后期修复。",
+      "repair": "把Identity/Space/Causal Errors提升为生成前硬门槛。",
+      "repair_model": "模型前期不感知逻辑错误，后期无法修复。修正：把Identity/Space/Causal错误提升为生成前硬门槛（Hard Gate），在生成前验证逻辑正确性。",
+      "prompt": "N/A。",
+      "qc": "该错误属于可修表现问题还是不可修结构问题？"
+    },
+    {
+      "id": "CF-094",
+      "title": "用单帧等错误指标评价视频",
+      "symptom": "用单帧美图判断视频成功。",
+      "problem": "影片质量是时间体验与连续性。",
+      "cause": "评测偏静帧。",
+      "repair": "评价Story Function、Performance Arc、Continuity、Editability、Audio。",
+      "repair_model": "评测指标偏向静帧质量，忽略时间体验。修正：评价Story/Performance Arc/Continuity/Editability/Audio，属评测层指标。",
+      "prompt": "N/A。",
+      "qc": "完整播放而非截图是否仍成立？"
+    },
+    {
+      "id": "CF-095",
+      "title": "系统没有失败记忆",
+      "symptom": "同类错误不断重复。",
+      "problem": "系统需要Failure Memory。",
+      "cause": "修复没有结构化回写。",
+      "repair": "记录Problem/Cause/Failed Fix/Successful Repair/Model Context。",
+      "repair_model": "修复结果未结构化回写，无法复用。修正：记录Problem/Cause/Failed Fix/Successful Repair/Model Context（含repair_model），入Failure Memory供后续提示。",
+      "prompt": "N/A。",
+      "qc": "下一次相同风险是否自动被提前提示？"
+    },
+    {
+      "id": "CF-096",
+      "title": "没有风险评分",
+      "symptom": "高风险镜头与普通镜头使用同一流程。",
+      "problem": "风险应决定参考资产、拆镜和预算。",
+      "cause": "没有Risk Score。",
+      "repair": "为Character/Motion/Physics/Continuity/Model评分。",
+      "repair_model": "无风险评分导致高风险镜头按普通流程生成，失败面大。修正：为Character/Motion/Physics/Continuity/Model评分，高风险镜头降复杂度+加参考资产+拆镜。",
+      "prompt": "N/A。",
+      "qc": "高风险是否在生成前被识别和降复杂度？"
+    },
+    {
+      "id": "CF-097",
+      "title": "高复杂镜头不拆解",
+      "symptom": "一个Prompt同时要复杂人物、动作、VFX、运镜、天气变换。",
+      "problem": "同时控制变量过多会指数式增加失败面。",
+      "cause": "对单次生成能力期望过高。",
+      "repair": "拆Beat/Shot；一次只让少数变量变化。",
+      "repair_model": "单次生成变量过多，模型采样空间坍缩，失败面指数增大。修正：拆Beat/Shot，一次只让少数变量变化，降低单次生成难度。",
+      "prompt": "split into three shots: action setup, impact, environment consequence.",
+      "qc": "复杂度是否能通过剪辑重构而无需一镜完成？"
+    },
+    {
+      "id": "CF-098",
+      "title": "无限生成没有停止标准",
+      "symptom": "不断继续生成，没有交付点。",
+      "problem": "制作需要Acceptance Criteria和版本冻结。",
+      "cause": "把“也许下次更好”当策略。",
+      "repair": "设Must-pass与Nice-to-have，满足即锁版本。",
+      "repair_model": "无停止标准导致无限采样，把'也许下次更好'当策略。修正：设Must-pass/Nice-to-have阈值，满足即锁版本，属流程规则。",
+      "prompt": "N/A。",
+      "qc": "是否有明确停止条件？"
+    },
+    {
+      "id": "CF-099",
+      "title": "技术成功但艺术失败",
+      "symptom": "画质/流畅都好，但观众无感。",
+      "problem": "技术成功不等于艺术成功。",
+      "cause": "系统目标函数偏视觉。",
+      "repair": "重新审查Shot Motivation、Audience Effect、Character Change。",
+      "repair_model": "系统优化目标偏视觉指标，艺术价值不被优化。修正：重审Shot Motivation/Audience Effect/Character Change，把叙事指标纳入评价函数。",
+      "prompt": "N/A。",
+      "qc": "观众获得什么新信息/感受/关系变化？"
+    },
+    {
+      "id": "CF-100",
+      "title": "把AI当摄影师而不是导演工具",
+      "symptom": "把模型当成会自动做导演选择的摄影师。",
+      "problem": "AI擅长生成可能性，导演系统负责意义、克制、选择和连续。",
+      "cause": "直接从剧情跳Prompt。",
+      "repair": "坚持Story→Reasoning→Specification→Adapter→Generation→QC。",
+      "repair_model": "跳过导演推理直接生成，模型无导演意图，被当作摄影师。修正：坚持Story→Reasoning→Specification→Adapter→Generation→QC链路，先完成导演规格再调用模型。",
+      "prompt": "N/A。",
+      "qc": "是否先完成导演规格再调用模型？"
+    },
+    {
+      "id": "CF-109",
+      "title": "硬切无落点导致拼接生硬",
+      "symptom": "两个镜头直接拼接，画面生硬、节奏混乱。",
+      "problem": "硬切需要落在景别变化/连贯动作/视线引导等可感知落点，否则观众感知到断裂。",
+      "cause": "把硬切理解为'任意两镜直接相接'，忽略了切点位置信息。",
+      "repair": "用 J/L cut、声音桥接、Insert Reaction 镜或动作匹配平滑；或移动切点到三落点之一。",
+      "repair_model": "把硬切当作无约束拼接，切点缺少语义落点，画面生硬。修正：用J/L cut/声音桥接/Insert Reaction/动作匹配，把切点绑定到景别变化/连贯动作/视线引导落点，让剪辑接口携带语义。【动作类快切注意】动作类硬切落点需配合景别策略：若在特写节点（如手腕转动瞬间、拳头触物瞬间）做硬切，可同时获得落点合理性与快切节奏；若在全景/中景上硬切则暴露物理穿帮（步伐/重心不连贯）与轴线混乱。因此快切硬切优先落在特写/近景节点上。",
+      "prompt": "cut on the glance; hard cut on the size change; bridge with sound before the visual cut。",
+      "qc": "切点是否落在景别/动作/视线落点？声音是否先于画面引导？",
+      "source": "抖音「周一的剪辑课堂」2026-08-10 硬切教程",
+      "added": "2026-08-17",
+      "source_type": "creator_tutorial",
+      "verification_status": "pending"
+    },
+    {
+      "id": "CF-110",
+      "title": "场景转换生硬（转场缺失）",
+      "symptom": "两个场景直接拼接，观众感到时空跳变、迷失，需要回看才能理解位置/时间变化。",
+      "problem": "场景转换需要转场设计（视觉匹配/声音桥接/遮挡缓冲），而非任意拼接。镜头间硬切有落点规则（CF-109），场景间转换是另一层问题：时空双跳变。",
+      "cause": "把场景转换当作普通镜头切换处理，缺少转场层设计；AI每镜独立生成，场景间画面特征（光线/构图/色调）无连续性先验。",
+      "repair": "按转场选型决策（DC-034）选择类型：有视觉相似性→视觉匹配类；需压缩时间→对白旁白或J/L cut；需情绪延续→相似角度或L cut；场景差别大→特写缓冲或遮挡后期类。",
+      "repair_model": "AI每镜独立采样，场景间无画面连续性先验，直接拼接必然暴露跳变——转场质量由'前镜尾帧×后镜首帧'的联系决定，而两次独立生成的边界帧天然无联系。修正（按确定性从高到低）：①声音桥接类（J cut提前1s拖入后场景环境声/L cut延续/对白带走/'未见其人先闻其声'=J cut+特写缓冲）——声音层后期可控、不依赖生成模型、成功率最高；②首尾帧条件控制——把前镜尾帧导出为图，作为后镜首帧的条件参考（Kling/Seedance等支持first/last frame conditioning），强制边界帧连续，视觉匹配类转场的确定性实现；③遮挡后期类（抠图/蒙版/黑场白场+音效）在剪辑层制造过渡；④章节式直切（字幕卡/黑场/音效重置）把断裂变成章节信息；⑤文字级共享约束（相似动作Body Phase/相同构图机位/视线方向一致/屏幕方向惯性）写入两个场景的Shot Contract让两次生成共享采样条件，最弱但零成本。",
+      "prompt": "J cut: next scene ambience starts 1s before the cut; L cut: previous scene sound carries 1s into next; scene A ends with him turning head screen-right, scene B opens with matching motion direction screen-right.",
+      "qc": "场景转换处是否有转场设计（对照DC-034四大类）？观众能否跟上时空跳变？声音桥接是否先于/延续画面？视觉匹配变量是否在两镜Shot Contract中成对声明？",
+      "source": "抖音「阿七米德」2026-07-19 25个转场教程",
+      "added": "2026-08-17",
+      "source_type": "creator_tutorial",
+      "verification_status": "pending"
+    }
+  ]
+}

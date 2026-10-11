@@ -34,11 +34,11 @@ def test_extract_generation_config_from_contract_includes_model_and_toggle_field
                 "image_config": {
                     "ratio": "9:16",
                     "resolution": "1080p",
-                    "adapter": "qwen-image-2.0-pro",
+                    "adapter": "qwen-image-3.0-pro",
                     "vlm_adapter": "qwen3-vl-plus",
                 },
                 "video_config": {
-                    "adapter": "wan2.7-i2v",
+                    "adapter": "wan3.0-video",
                 },
                 "qc_config": {
                     "semantic_vlm_adapter": "qwen3-vl-plus",
@@ -49,7 +49,7 @@ def test_extract_generation_config_from_contract_includes_model_and_toggle_field
                     "safety_fail_policy": "block",
                 },
                 "video_edit_config": {
-                    "adapter": "wan2.7-videoedit",
+                    "adapter": "wan3.0-video",
                     "enabled": True,
                 },
             }
@@ -60,10 +60,10 @@ def test_extract_generation_config_from_contract_includes_model_and_toggle_field
         "style_preset": "anime",
         "image_ratio": "9:16",
         "image_resolution": "1080p",
-        "image_model": "qwen-image-2.0-pro",
-        "video_model": "wan2.7-i2v",
+        "image_model": "qwen-image-3.0-pro",
+        "video_model": "wan3.0-video",
         "vision_model": "qwen3-vl-plus",
-        "video_edit_model": "wan2.7-videoedit",
+        "video_edit_model": "wan3.0-video",
         "enable_video_edit": True,
         "enable_vision_review": False,
         "enable_safety_audit": True,
@@ -83,10 +83,10 @@ def test_enforce_locked_generation_config_compatible_detects_model_mismatches() 
         style_preset="cinematic_realistic",
         image_ratio="16:9",
         image_resolution="720p",
-        image_model="qwen-image-2.0-pro",
-        video_model="wan2.7-i2v",
+        image_model="qwen-image-3.0-pro",
+        video_model="wan3.0-video",
         vision_model="qwen3-vl-plus",
-        video_edit_model="wan2.7-videoedit",
+        video_edit_model="wan3.0-video",
         enable_video_edit=True,
         enable_vision_review=False,
         enable_safety_audit=True,
@@ -101,7 +101,7 @@ def test_enforce_locked_generation_config_compatible_detects_model_mismatches() 
             image_ratio="16:9",
             image_resolution="720p",
             image_model="other-image-model",
-            video_model="wan2.7-t2v",
+            video_model="doubao-seedance-2-0",
             vision_model="other-vision-model",
             video_edit_model="other-edit-model",
             enable_video_edit=False,
@@ -113,19 +113,19 @@ def test_enforce_locked_generation_config_compatible_detects_model_mismatches() 
     assert exc_info.value.requested["image_model"] == "other-image-model"
     assert exc_info.value.mismatches == {
         "image_model": {
-            "locked": "qwen-image-2.0-pro",
+            "locked": "qwen-image-3.0-pro",
             "requested": "other-image-model",
         },
         "video_model": {
-            "locked": "wan2.7-i2v",
-            "requested": "wan2.7-t2v",
+            "locked": "wan3.0-video",
+            "requested": "doubao-seedance-2-0",
         },
         "vision_model": {
             "locked": "qwen3-vl-plus",
             "requested": "other-vision-model",
         },
         "video_edit_model": {
-            "locked": "wan2.7-videoedit",
+            "locked": "wan3.0-video",
             "requested": "other-edit-model",
         },
         "enable_video_edit": {
@@ -158,10 +158,10 @@ def test_apply_locked_generation_config_injects_models_and_infers_video_engine()
         style_preset="anime",
         image_ratio="9:16",
         image_resolution="1080p",
-        image_model="qwen-image-2.0-pro",
+        image_model="qwen-image-3.0-pro",
         video_model="doubao-seedance-2-0",
         vision_model="qwen3-vl-plus",
-        video_edit_model="wan2.7-videoedit",
+        video_edit_model="wan3.0-video",
         enable_video_edit=True,
         enable_vision_review=False,
         enable_safety_audit=True,
@@ -183,7 +183,7 @@ def test_apply_locked_generation_config_injects_models_and_infers_video_engine()
     assert target["image_config"] == {
         "ratio": "9:16",
         "resolution": "1080p",
-        "adapter": "qwen-image-2.0-pro",
+        "adapter": "qwen-image-3.0-pro",
         "vlm_adapter": "qwen3-vl-plus",
     }
     assert target["video_config"] == {
@@ -203,7 +203,7 @@ def test_apply_locked_generation_config_injects_models_and_infers_video_engine()
         "safety_fail_policy": "block",
     }
     assert target["video_edit_config"] == {
-        "adapter": "wan2.7-videoedit",
+        "adapter": "wan3.0-video",
         "enabled": True,
     }
 
@@ -220,10 +220,10 @@ def test_locked_generation_config_error_detail_serializes_model_fields() -> None
         style_preset="cinematic_realistic",
         image_ratio="16:9",
         image_resolution="720p",
-        image_model="qwen-image-2.0-pro",
-        video_model="wan2.7-i2v",
+        image_model="qwen-image-3.0-pro",
+        video_model="wan3.0-video",
         vision_model="qwen3-vl-plus",
-        video_edit_model="wan2.7-videoedit",
+        video_edit_model="wan3.0-video",
         enable_video_edit=True,
         enable_vision_review=False,
         enable_safety_audit=True,
@@ -234,7 +234,7 @@ def test_locked_generation_config_error_detail_serializes_model_fields() -> None
         "project generation config locked",
         locked=locked,
         requested={"image_model": "other-image-model"},
-        mismatches={"image_model": {"locked": "qwen-image-2.0-pro", "requested": "other-image-model"}},
+        mismatches={"image_model": {"locked": "qwen-image-3.0-pro", "requested": "other-image-model"}},
     )
 
     detail = dreamweaver._locked_generation_config_error_detail("locked", exc)
@@ -246,10 +246,10 @@ def test_locked_generation_config_error_detail_serializes_model_fields() -> None
             "image_ratio": "16:9",
             "image_resolution": "720p",
             "source_run_id": "dw_run_003",
-            "image_model": "qwen-image-2.0-pro",
-            "video_model": "wan2.7-i2v",
+            "image_model": "qwen-image-3.0-pro",
+            "video_model": "wan3.0-video",
             "vision_model": "qwen3-vl-plus",
-            "video_edit_model": "wan2.7-videoedit",
+            "video_edit_model": "wan3.0-video",
             "enable_video_edit": True,
             "enable_vision_review": False,
             "enable_safety_audit": True,
@@ -258,7 +258,7 @@ def test_locked_generation_config_error_detail_serializes_model_fields() -> None
         "requested": {"image_model": "other-image-model"},
         "mismatches": {
             "image_model": {
-                "locked": "qwen-image-2.0-pro",
+                "locked": "qwen-image-3.0-pro",
                 "requested": "other-image-model",
             }
         },

@@ -10,6 +10,16 @@ import pytest
 from app.services.prompt_evolution.evaluator import PromptEvaluator
 
 
+@pytest.fixture(autouse=True)
+def _use_plain_rewrite(monkeypatch):
+    """本文件测的是「常规改写」链路的空响应重试语义。
+
+    去锚定范式（AI_TRACE_DEANCHOR_ENABLED）会改为多阶段调用、调用次数语义不同，
+    故此处固定走常规路径；去锚定自身的重试由 deanchor_rewrite 覆盖。
+    """
+    monkeypatch.setattr(PromptEvaluator, "DEANCHOR_ENABLED", False)
+
+
 @pytest.mark.asyncio
 async def test_empty_rewrite_is_retried_until_success():
     """首次空响应、第二次正常返回：应重试并拿到有效改写。"""

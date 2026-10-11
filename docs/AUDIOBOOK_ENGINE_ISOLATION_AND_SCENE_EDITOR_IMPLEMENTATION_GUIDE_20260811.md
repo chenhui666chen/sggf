@@ -850,6 +850,7 @@ class SceneAudioArtifact(Base):
     )
 ```
 
+- **落盘约束（2026-10-11 复发事故收口）**：`_build_scene_artifact_entries` 只复制音频后缀的源（`_SCENE_ARTIFACT_AUDIO_SUFFIXES`），非音频源记告警并跳过登记——artifact 文件名后缀直接取自源文件，历史上有测试模块自身被复制成 `art_*.py`，落在数据目录内还会被 pytest 收集、导致 `ROOT_DIR` 推导错位。任务层测试必须用 autouse fixture 把 `_scene_render_mixin.SCENE_ARTIFACT_ROOT` 重定向到 `tmp_path`（`test_audiobook_seed_scene_engine_mixin.py`、`test_audiobook_omni_review_mixin_wiring.py`、`test_audiobook_scene_director_wiring.py` 已加）；守卫与正/反向用例见 `backend/tests/test_scene_artifact_storage_hygiene.py`。
 - **普通播放端点**：`GET /audiobook/scenes/{artifact_id}/stream`（权限校验：批次归属 + 章节从属 + `status = 'active'` 且 `deleted_at IS NULL`；短期 `play_token`，复用 `_create_stream_access_token` 模式）；`SceneEditorDocument` 与场景列表返回 `scene_audio_url`（带 token）。
 - **审计访问端点**：`GET /audiobook/scenes/{artifact_id}/audit-stream`（仅管理员/项目所有者可访问，不限 `deleted_at` 与 `status`，返回完整 artifact 信息包含 `deleted_at`/`status`）。
 - **生命周期（R7 显式状态机，R8 作用域）**：`staged`（渲染完成未发布）→ `active`（发布事务 §2.4 规则 4 g，以 `chapter_audio_id` 为作用域）→ `superseded`（被**同一 chapter_audio 的**新 run 产物替代，同时置 `deleted_at`，物理文件保留 30 天供审计，策略见 §8.3）；staged 与 superseded 均不可经普通端点访问；失败 run 的 artifact 停留在 staged（不激活、不可试听），由 §8 清理策略回收；运行目录按既有任务清理规则删除后试听不受影响。

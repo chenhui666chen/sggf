@@ -5,7 +5,7 @@
 1. 动态评估各部分内容的token消耗
 2. 基于重要性⭐️分级进行智能截断
 3. 对超长内容使用摘要策略
-4. 确保总输入不超过 qwen3.7-plus 的 100万 tokens 限制
+4. 确保总输入不超过 qwen-plus 的 100万 tokens 限制
 """
 from typing import Dict, Any, Optional, Tuple
 import logging
@@ -27,26 +27,26 @@ class ContextOptimizer:
     
     # 各模型的Token限制
     MODEL_LIMITS = {
-        'qwen3.7-plus': 1000000,   # 1M tokens（上下文 100万，输出 65K）
-        'deepseek-v4-pro': 1000000,    # 100万tokens
-        'deepseek-v4-flash': 1000000,  # 100万tokens
+        'qwen-plus': 1000000,   # 1M tokens（上下文 100万，输出 65K）
+        'deepseek-pro': 1000000,    # 100万tokens
+        'deepseek-flash': 1048576,  # 1M tokens（上游实测上限）
     }
     
     # 🆕 智能模型选择策略（根据章节数）
     MODEL_SELECTION_STRATEGY = {
         'chapter_planning': {  # 章节规划阶段
-            'default': 'qwen3.7-plus',  # 默认使用 qwen3.7-plus（质量优先）
+            'default': 'qwen-plus',  # 默认使用 qwen-plus（质量优先）
             'thresholds': [
-                (0, 50, 'qwen3.7-plus', 0.85),     # 0-50章: qwen3.7-plus, 85%使用率
-                (50, 999, 'qwen3.7-plus', 0.70),
+                (0, 50, 'qwen-plus', 0.85),     # 0-50章: qwen-plus, 85%使用率
+                (50, 999, 'qwen-plus', 0.70),
             ]
         },
         'content_creation': {  # 内容创作阶段
-            'default': 'qwen3.7-plus',
+            'default': 'qwen-plus',
             'thresholds': [
-                (0, 20, 'qwen3.7-plus', 0.85),     # 0-20章: qwen3.7-plus, 85%使用率
-                (20, 50, 'qwen3.7-plus', 0.75),
-                (50, 999, 'qwen3.7-plus', 0.65),
+                (0, 20, 'qwen-plus', 0.85),     # 0-20章: qwen-plus, 85%使用率
+                (20, 50, 'qwen-plus', 0.75),
+                (50, 999, 'qwen-plus', 0.65),
             ]
         }
     }
@@ -115,7 +115,7 @@ class ContextOptimizer:
         except Exception as exc:
             logger.debug(f"读取模型上下文限制失败: {exc}")
 
-        return self.MODEL_LIMITS['qwen3.7-plus']
+        return self.MODEL_LIMITS['qwen-plus']
     
     def _get_content_priorities(self) -> dict:
         return {

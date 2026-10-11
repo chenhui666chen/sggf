@@ -21,7 +21,6 @@ import io
 from dataclasses import dataclass
 from enum import Enum
 
-from ..constants import INSTRUCT_SPEAKER_IDS, normalize_speaker_id
 from ..voice_catalog import get_voice_entry
 from app.services.audiobook.voice_identity_policy import VOICE_IDENTITY_POLICY_VERSION
 
@@ -66,13 +65,6 @@ COSYVOICE_V3_PLUS_INSTRUCT_CHOICES = {
 # Windows/Linux 常见网络瞬断 errno（用于判定可重试）。
 _RETRYABLE_NETWORK_ERRNOS = {10053, 10054, 104, 110, 111}
 
-# Qwen3-TTS-Flash：stable 与 snapshot 支持的音色集合不同。
-# 默认优先走 qwen3-tts-instruct-flash，并兼容历史环境变量。
-QWEN3_TTS_INSTRUCT_FLASH_MODEL_ID = (
-    os.getenv("QWEN3_TTS_INSTRUCT_FLASH_MODEL_ID")
-    or os.getenv("QWEN3_TTS_FLASH_MODEL_ID")
-    or "qwen3-tts-instruct-flash"
-)
 
 # 导入监控模块
 try:
@@ -391,9 +383,9 @@ class MinimaxMixin:
         
         return None
     
-    def _is_qwen_model(self) -> bool:
-        """判断当前引擎是否为 Qwen3-TTS 系列模型。"""
-        return str(self.model).startswith("qwen3-tts")
+    def _is_qwen_audio_31_model(self) -> bool:
+        """判断当前引擎是否为 Qwen-Audio 3.1 TTS 系列模型（与 Qwen3-TTS 音色不互通）。"""
+        return str(self.model).strip().lower().startswith("qwen-audio-3.1-tts")
 
     def _is_cosyvoice_v3_plus(self) -> bool:
         """判断当前引擎是否为 CosyVoice 模型（兼容 v3-plus/v3.5-plus 别名）。"""
@@ -424,16 +416,6 @@ class MinimaxMixin:
         if entry is None:
             return is_cosyvoice_v35_plus_voice_id(speaker_id)
         return bool(entry.get("supportsSsml", False))
-
-    def _supports_instruction(self, speaker_id: str) -> bool:
-        from app.services.audiobook.cosyvoice_clone_client import is_cosyvoice_v35_plus_voice_id
-
-        if not self._is_cosyvoice_v3_plus():
-            return speaker_id in INSTRUCT_SPEAKER_IDS
-        entry = get_voice_entry(str(speaker_id or ""), "cosyvoice-v3.5-plus")
-        if entry is None:
-            return is_cosyvoice_v35_plus_voice_id(speaker_id)
-        return bool(entry.get("supportsInstruct", False))
 
     def _escape_ssml_text(self, value: str) -> str:
         text = str(value or "")

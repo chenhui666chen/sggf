@@ -557,7 +557,7 @@ const StepAudioVoiceCloneWorkbench = ({
                         <IconButton
                           size="small"
                           disabled={presetDisabled || Boolean(previewingVoiceId) || isDeleting}
-                          onClick={() => onPreviewCustomVoice(preset, 'stepaudio-2.5-tts')}
+                          onClick={() => onPreviewCustomVoice(preset, 'stepaudio-3-tts')}
                           aria-label={t('audiobook.stepAudioWorkbench.previewAria', { label: preset.label || preset.id })}
                         >
                           {isPreviewing ? <CircularProgress size={18} /> : <PlayArrowIcon fontSize="small" />}

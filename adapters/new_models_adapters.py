@@ -4,7 +4,7 @@ Backward-compatible re-export hub.
 All adapters have been split into per-platform modules:
   - adapters.dashscope.*    (百炼: Wan, Qwen, Kling, PixVerse, MiniMax, CosyVoice)
   - adapters.volcengine.*   (火山方舟: Doubao Seedream, Seedance, Seed)
-  - adapters.vidu_platform.* (Vidu: video, timing2audio)
+  - adapters.vidu_platform.* (Vidu: video)
   - adapters.mureka.*       (Mureka: o1-instrumental)
 
 Import from this module for backward compatibility,

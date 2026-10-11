@@ -143,41 +143,6 @@ class Qwen3VLPlusRuntimeWrapper(_BaseLegacyRuntimeWrapper):
         return self._legacy_simple_result(result)
 
 
-class Wan26T2IRuntimeWrapper(_BaseLegacyRuntimeWrapper):
-    TARGET_MODEL_ID = "wan2.6-t2i"
-
-    def generate(
-        self,
-        prompt: str,
-        negative_prompt: str = "",
-        width: int = 1024,
-        height: int = 576,
-        num_inference_steps: int = 30,
-        guidance_scale: float = 7.5,
-        seed: Optional[int] = None,
-        style: Optional[str] = None,
-        num_outputs: int = 1,
-        **kwargs: Any,
-    ) -> LegacyCompatResult:
-        from adapters.adapter_helpers import generate_image
-
-        result = generate_image(
-            prompt=prompt,
-            negative_prompt=negative_prompt,
-            width=int(width),
-            height=int(height),
-            seed=int(seed) if seed is not None else None,
-            style=style,
-            num_outputs=int(num_outputs),
-            model_id=self.TARGET_MODEL_ID,
-            use_fallback=False,
-            num_inference_steps=int(num_inference_steps),
-            guidance_scale=float(guidance_scale),
-            **kwargs,
-        )
-        return self._legacy_simple_result(result)
-
-
 class _BaseImageEditRuntimeWrapper(_BaseLegacyRuntimeWrapper):
     def generate(
         self,
@@ -265,99 +230,8 @@ class QwenMultiPersonFusionRuntimeWrapper(_BaseImageEditRuntimeWrapper):
         )
 
 
-class Wan27T2VRuntimeWrapper(_BaseLegacyRuntimeWrapper):
-    TARGET_MODEL_ID = "wan2.7-t2v"
-
-    def generate(
-        self,
-        prompt: str,
-        negative_prompt: str = "",
-        width: int = 1024,
-        height: int = 576,
-        duration: float = 3.0,
-        fps: int = 24,
-        num_inference_steps: int = 30,
-        guidance_scale: float = 7.5,
-        seed: Optional[int] = None,
-        style: Optional[str] = None,
-        **kwargs: Any,
-    ) -> LegacyCompatResult:
-        from adapters.adapter_helpers import generate_video
-
-        result = generate_video(
-            prompt=prompt,
-            duration=float(duration),
-            width=int(width),
-            height=int(height),
-            seed=int(seed) if seed is not None else None,
-            style=style,
-            model_id=self.TARGET_MODEL_ID,
-            use_fallback=False,
-            negative_prompt=str(negative_prompt),
-            fps=int(fps),
-            num_inference_steps=int(num_inference_steps),
-            guidance_scale=float(guidance_scale),
-            **kwargs,
-        )
-        return self._legacy_simple_result(result)
-
-
-class Wan27I2VRuntimeWrapper(_BaseLegacyRuntimeWrapper):
-    TARGET_MODEL_ID = "wan2.7-i2v"
-
-    def generate(
-        self,
-        image_path: str,
-        prompt: str = "",
-        duration: float = 3.0,
-        fps: int = 24,
-        motion_bucket_id: int = 127,
-        seed: Optional[int] = None,
-        character_references: Optional[List[Dict[str, Any]]] = None,
-    ) -> LegacyCompatResult:
-        from adapters.adapter_helpers import generate_video
-
-        result = generate_video(
-            prompt=prompt,
-            duration=float(duration),
-            image_path=str(image_path),
-            model_id=self.TARGET_MODEL_ID,
-            use_fallback=False,
-            fps=int(fps),
-            motion_bucket_id=int(motion_bucket_id),
-            seed=int(seed) if seed is not None else None,
-            character_references=character_references,
-        )
-        return self._legacy_simple_result(result)
-
-
-class Wan27R2VRuntimeWrapper(_BaseLegacyRuntimeWrapper):
-    TARGET_MODEL_ID = "wan2.7-r2v"
-
-    def generate(
-        self,
-        reference_video_path: str,
-        prompt: str = "",
-        duration: float = 3.0,
-        fps: int = 24,
-        seed: Optional[int] = None,
-    ) -> LegacyCompatResult:
-        from adapters.adapter_helpers import generate_video
-
-        result = generate_video(
-            prompt=prompt,
-            duration=float(duration),
-            video_path=str(reference_video_path),
-            model_id=self.TARGET_MODEL_ID,
-            use_fallback=False,
-            fps=int(fps),
-            seed=int(seed) if seed is not None else None,
-        )
-        return self._legacy_simple_result(result)
-
-
-class Qwen3TTSRuntimeWrapper(_BaseLegacyRuntimeWrapper):
-    TARGET_MODEL_ID = "qwen3-tts-instruct-flash"
+class QwenAudio31TTSRuntimeWrapper(_BaseLegacyRuntimeWrapper):
+    TARGET_MODEL_ID = "qwen-audio-3.1-tts-flash"
 
     def generate(
         self,
@@ -555,16 +429,12 @@ class MiniMaxSpeech28HDRuntimeWrapper(_BaseLegacyRuntimeWrapper):
 
 
 _RUNTIME_WRAPPER_CLASSES: Dict[str, Type[_BaseLegacyRuntimeWrapper]] = {
-    "wan2.6-t2i": Wan26T2IRuntimeWrapper,
-    "wan2.7-t2v": Wan27T2VRuntimeWrapper,
     "qwen3_vl_plus": Qwen3VLPlusRuntimeWrapper,
-    "qwen3_tts": Qwen3TTSRuntimeWrapper,
+    "qwen_audio_3_1_tts": QwenAudio31TTSRuntimeWrapper,
     "qwen_image_edit_plus": QwenImageEditPlusRuntimeWrapper,
     "qwen_image_edit_max": QwenImageEditMaxRuntimeWrapper,
     "wan_image_edit": WanImageEditRuntimeWrapper,
     "qwen_multiperson_fusion": QwenMultiPersonFusionRuntimeWrapper,
-    "wan2.7-i2v": Wan27I2VRuntimeWrapper,
-    "wan2.7-r2v": Wan27R2VRuntimeWrapper,
     "minimax-speech-2.8-turbo": MiniMaxSpeech28TurboRuntimeWrapper,
     "minimax-speech-2.8-hd": MiniMaxSpeech28HDRuntimeWrapper,
 }

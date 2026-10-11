@@ -193,8 +193,8 @@ class Settings(BaseSettings):
     # DeepSeek 官方 API配置
     DEEPSEEK_API_KEY: str = ""
     DEEPSEEK_API_BASE: str = "https://api.deepseek.com"
-    DEEPSEEK_MODEL: str = "deepseek-v4-pro"
-    MODEL_NAME: str = "deepseek-v4-pro"
+    DEEPSEEK_MODEL: str = "deepseek-pro"
+    MODEL_NAME: str = "deepseek-pro"
     
     # 阿里云百炼 API配置（Qwen / Embedding / TTS / 视频等 DashScope 能力）
     DASHSCOPE_API_KEY: str = "your-dashscope-api-key"
@@ -202,7 +202,7 @@ class Settings(BaseSettings):
 
     # Mureka AI 音乐服务配置
     MUREKA_API_KEY: str = ""
-    MUREKA_API_URL: str = "https://api.mureka.ai"
+    MUREKA_API_URL: str = "https://api.mureka.cn"
 
     # Vidu 音效服务配置（用于可控时序音效生成）
     VIDU_API_KEY: str = ""
@@ -243,7 +243,7 @@ class Settings(BaseSettings):
     TEMPERATURE: float = 0.7
     MAX_CONTEXT_LENGTH: int = 4000
     MULTI_MODEL_REVIEW_DEFAULT_PRESET: str = "balanced_3"
-    MULTI_MODEL_REVIEW_CHIEF_MODEL: str = "deepseek-v4-pro"
+    MULTI_MODEL_REVIEW_CHIEF_MODEL: str = "deepseek-pro"
     MULTI_MODEL_REVIEW_CONCURRENCY: int = 5
     MULTI_MODEL_REVIEW_TIMEOUT_SECONDS: int = 120
     MULTI_MODEL_REVIEW_CHIEF_TIMEOUT_SECONDS: int = 120

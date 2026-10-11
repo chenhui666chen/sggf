@@ -117,9 +117,9 @@ export default function DreamWeaverRunPage() {
   const { catalog: assetStudioModelCatalog } = useAssetStudioModelCatalog()
   const configDialogFullScreen = smDown
   const libraryGridCols = smDown ? 1 : mdDown ? 2 : 3
-  const dreamweaverImageDefaultModelId = assetStudioModelCatalog?.defaults.dreamweaver_image || 'qwen-image-2.0-pro'
-  const dreamweaverVideoDefaultModelId = assetStudioModelCatalog?.defaults.dreamweaver_video || 'wan2.7-t2v'
-  const dreamweaverVideoEditDefaultModelId = assetStudioModelCatalog?.defaults.dreamweaver_video_edit || 'wan2.7-videoedit'
+  const dreamweaverImageDefaultModelId = assetStudioModelCatalog?.defaults.dreamweaver_image || 'qwen-image-3.0-pro'
+  const dreamweaverVideoDefaultModelId = assetStudioModelCatalog?.defaults.dreamweaver_video || 'wan3.0-video'
+  const dreamweaverVideoEditDefaultModelId = assetStudioModelCatalog?.defaults.dreamweaver_video_edit || 'wan3.0-video'
   const dreamweaverVisionDefaultModelId = assetStudioModelCatalog?.defaults.dreamweaver_vision || 'qwen3-vl-plus'
   const [projects, setProjects] = useState<Project[]>([])
   const [chapters, setChapters] = useState<Chapter[]>([])

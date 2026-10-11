@@ -28,6 +28,7 @@ from app.schemas.voice_pool import (
     VoicePoolRatingRequest,
     VoicePoolReviewRequest,
 )
+from app.schemas.voice_tags import normalize_voice_tags
 from app.services.audiobook.voice_pool_repository import (
     create_voice_pool_publication,
     get_voice_pool_rating_summary,
@@ -173,16 +174,39 @@ async def discover_public_voice_pool(
     age_impression: str | None = None,
     primary_style: str | None = None,
     language: str | None = None,
+    timbre_tags: list[str] | None = Query(default=None),
+    scenario_tags: list[str] | None = Query(default=None),
+    emotion_tags: list[str] | None = Query(default=None),
     limit: int = Query(default=50, ge=1, le=100),
     cursor: str | None = Query(default=None, min_length=1),
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
+    try:
+        selected_tags = {
+            dimension: normalize_voice_tags(
+                values,
+                dimension=dimension,
+                writable=False,
+            )
+            for dimension, values in (
+                ("timbre", timbre_tags),
+                ("scenario", scenario_tags),
+                ("emotion", emotion_tags),
+            )
+        }
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+        ) from exc
     publications = list_public_voice_pool(
         db,
         gender_presentation=gender_presentation,
         age_impression=age_impression,
         primary_style=primary_style,
         language=language,
+        timbre_tags=selected_tags["timbre"],
+        scenario_tags=selected_tags["scenario"],
+        emotion_tags=selected_tags["emotion"],
         limit=limit + 1,
         before_publication_id=cursor,
     )

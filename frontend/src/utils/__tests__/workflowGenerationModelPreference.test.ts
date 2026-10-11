@@ -35,30 +35,30 @@ describe('workflowGenerationModelPreference', () => {
   it('prefers a stored valid model over the API default model', () => {
     expect(
       chooseWorkflowGenerationModel({
-        models: [{ id: 'qwen3.7-plus' }, { id: 'deepseek-v4-pro' }],
-        currentModel: 'qwen3.7-plus',
-        storedModel: 'deepseek-v4-pro',
-        defaultModel: 'qwen3.7-plus',
+        models: [{ id: 'qwen-plus' }, { id: 'deepseek-pro' }],
+        currentModel: 'qwen-plus',
+        storedModel: 'deepseek-pro',
+        defaultModel: 'qwen-plus',
       }),
-    ).toBe('deepseek-v4-pro')
+    ).toBe('deepseek-pro')
   })
 
   it('falls back when the stored model is no longer available', () => {
     expect(
       chooseWorkflowGenerationModel({
-        models: [{ id: 'qwen3.7-plus' }, { id: 'mimo-v2.5' }],
-        currentModel: 'qwen3.7-plus',
+        models: [{ id: 'qwen-plus' }, { id: 'mimo-flash' }],
+        currentModel: 'qwen-plus',
         storedModel: 'removed-model',
-        defaultModel: 'mimo-v2.5',
+        defaultModel: 'mimo-flash',
       }),
-    ).toBe('qwen3.7-plus')
+    ).toBe('qwen-plus')
   })
 
   it('persists and reads the selected workflow generation model', () => {
     const storage = createMemoryStorage()
 
-    writeStoredWorkflowGenerationModel('deepseek-v4-pro', storage)
+    writeStoredWorkflowGenerationModel('deepseek-pro', storage)
 
-    expect(readStoredWorkflowGenerationModel(storage)).toBe('deepseek-v4-pro')
+    expect(readStoredWorkflowGenerationModel(storage)).toBe('deepseek-pro')
   })
 })

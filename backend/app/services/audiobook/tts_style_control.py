@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import Any, Dict, List
 
@@ -9,7 +10,7 @@ from app.services.audiobook.tts_model_ids import (
     MIMO_V25_TTS_MODEL,
     MIMO_V25_TTS_VOICE_DESIGN_MODEL,
     SEED_TTS_20_EXPRESSIVE_MODEL,
-    STEPAUDIO_25_TTS_MODEL,
+    STEPAUDIO_3_TTS_MODEL,
     get_audiobook_tts_style_capabilities,
     normalize_audiobook_tts_emotion,
     normalize_audiobook_tts_model,
@@ -47,6 +48,16 @@ from app.services.audiobook.voice_parameter_policy import (
     stabilize_instruct_model_speed,
 )
 
+# 豆包 Seed-TTS 2.0 表现力增强版的官方标签语法：`<cot text=…>正文</cot>`。
+# 方括号前缀 `[a，b]` 不是官方形状，即使 additions 里带 use_tag_parser=true 也会被
+# 朗读出口（台词污染），证据见 docs/TTS_PROMPT_EVIDENCE_20261010.md §16。
+DOUBAO_COT_TAG_SYNTAX = "doubao_cot"
+# 官方限制："单句的 text 字符长度最好小于 64（cot 标签也计算在内）"，且生效范围是单句。
+# 长正文本身就可能吃掉全部预算，因此这里只约束标签正文，保证标签结构不被整段丢弃。
+DOUBAO_COT_TAG_TEXT_LIMIT = 64
+_DOUBAO_COT_FORBIDDEN_CHARS = re.compile(r'["<>]')
+_SENTENCE_BOUNDARY = re.compile(r"(?<=[。！？；!?;\n])")
+
 
 @dataclass(frozen=True)
 class TTSStyleControl:
@@ -56,6 +67,8 @@ class TTSStyleControl:
     provider_fields: Dict[str, Any] = field(default_factory=dict)
     messages: List[Dict[str, str]] = field(default_factory=list)
     text_prefix: str = ""
+    # text_prefix 的包装语法：空值表示"直接前缀拼接"，doubao_cot 表示"逐句闭合标签包裹"。
+    tag_syntax: str = ""
     warnings: List[str] = field(default_factory=list)
     budget: Dict[str, Any] = field(default_factory=dict)
 
@@ -498,17 +511,6 @@ def _build_mimo_audio_tag_prefix(voice_params: Dict[str, Any], emotion: str = "n
     return _render_mimo_audio_tag_prefix(strategy)
 
 
-def _build_doubao_voice_label_prefix(voice_params: Dict[str, Any], emotion: str = "neutral") -> str:
-    strategy = _build_inline_tag_strategy(
-        "doubao",
-        voice_params,
-        emotion,
-        placement="text_prefix",
-        use_tag_parser=True,
-    )
-    return _render_doubao_voice_label_prefix(strategy)
-
-
 def _build_inline_tag_strategy(
     model_family: str,
     voice_params: Dict[str, Any],
@@ -555,8 +557,34 @@ def _render_mimo_audio_tag_prefix(strategy: _InlineTagStrategy) -> str:
 
 
 def _render_doubao_voice_label_prefix(strategy: _InlineTagStrategy) -> str:
+    """Render the doubao official Cot open tag for inline voice labels.
+
+    曾经返回 `[a，b]` 方括号前缀，实测该形状无论是否开启 use_tag_parser 都会被
+    朗读出口（docs/TTS_PROMPT_EVIDENCE_20261010.md §16），因此改为官方 Cot 开标签，
+    由 prepare_text_for_style_control 负责逐句补 `</cot>`。
+    """
     inline_tags = strategy.inline_tags or strategy.style_tags
-    return f"[{'，'.join(inline_tags)}]" if inline_tags else ""
+    tag_text = _fit_doubao_cot_tag_text(inline_tags)
+    return f'<cot text="{tag_text}">' if tag_text else ""
+
+
+def _fit_doubao_cot_tag_text(tags: List[str]) -> str:
+    """按官方 64 字符上限逐个装填标签，装不下的直接丢弃。
+
+    引号与尖括号会破坏 `<cot text="…">` 结构，必须先从标签正文里剔除。
+    """
+    fitted: List[str] = []
+    used = 0
+    for raw_tag in tags:
+        tag = _DOUBAO_COT_FORBIDDEN_CHARS.sub("", _text(raw_tag)).strip()
+        if not tag:
+            continue
+        cost = len(tag) + (1 if fitted else 0)
+        if used + cost > DOUBAO_COT_TAG_TEXT_LIMIT:
+            continue
+        fitted.append(tag)
+        used += cost
+    return "，".join(fitted)
 
 
 def _identity_tag_filter_warning(model_name: str, tags: List[str]) -> str:
@@ -774,7 +802,7 @@ def build_model_style_control(
             warnings=[*identity_warnings, *description_warnings],
         )
 
-    if normalized_model == STEPAUDIO_25_TTS_MODEL or is_stepaudio_style_control_model(normalized_model):
+    if normalized_model == STEPAUDIO_3_TTS_MODEL or is_stepaudio_style_control_model(normalized_model):
         instruction, budget, budget_warnings = _build_common_instruction(
             params,
             emotion,
@@ -848,6 +876,7 @@ def build_model_style_control(
             mode="doubao_query_response",
             provider_fields=provider_fields,
             text_prefix=label_prefix,
+            tag_syntax=DOUBAO_COT_TAG_SYNTAX if label_prefix else "",
             warnings=warnings,
             budget=budget,
         )
@@ -878,9 +907,35 @@ def build_model_style_control(
 def prepare_text_for_style_control(text: str, style_control: TTSStyleControl) -> str:
     prefix = _text(style_control.text_prefix)
     body = str(text or "")
-    if prefix and body.startswith(prefix):
+    if not prefix:
         return body
-    return f"{prefix}{body}" if prefix else body
+    if style_control.tag_syntax == DOUBAO_COT_TAG_SYNTAX:
+        return _wrap_doubao_cot_sentences(prefix, body)
+    if body.startswith(prefix):
+        return body
+    return f"{prefix}{body}"
+
+
+def _wrap_doubao_cot_sentences(open_tag: str, body: str) -> str:
+    """Wrap every sentence in its own Cot tag pair.
+
+    官方说明 cot 的生效范围是单句，跨句共用一个开标签会让后文脱离控制；正文里已经
+    带 cot 标签时原样返回，保证合成前缀拼接幂等。句间空白保持在标签之外，
+    避免改写正文的分段结构。
+    """
+    if not body.strip():
+        return body
+    if "<cot " in body or "</cot>" in body:
+        return body
+    parts: List[str] = []
+    for chunk in _SENTENCE_BOUNDARY.split(body):
+        if not chunk:
+            continue
+        if chunk.strip():
+            parts.append(f"{open_tag}{chunk}</cot>")
+        else:
+            parts.append(chunk)
+    return "".join(parts)
 
 
 def build_provider_prompt_snapshot(
@@ -927,6 +982,7 @@ def build_provider_prompt_snapshot(
         "instructions": instructions,
         "messages": list(style_control.messages or []),
         "text_prefix": _text(style_control.text_prefix),
+        "tag_syntax": _text(style_control.tag_syntax),
         "context_texts": normalized_context_texts,
     }
     if normalized_inline_tag_strategy:

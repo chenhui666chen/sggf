@@ -21,7 +21,7 @@ def test_engine_stores_scene_audio_runtime_config_without_mutating_mapping():
     engine = object.__new__(AudiobookEngineBase)
     voice_mapping = {
         "女主": {
-            "tts_model": "qwen3-tts-instruct-flash",
+            "tts_model": "qwen-audio-3.1-tts-flash",
             "voice_id": "Cherry",
         }
     }
@@ -123,7 +123,7 @@ def test_resolve_project_audio_runtime_config_merges_base_then_project_model_con
         audio_config=json.dumps(
             {
                 "tts_models": {
-                    "qwen3-tts-instruct-flash": {
+                    "qwen-audio-3.1-tts-flash": {
                         "characters": [
                             {"name": "旁白", "voice_id": "new-narrator", "volume": 70},
                             {"name": "", "voice_id": "ignored"},
@@ -138,7 +138,7 @@ def test_resolve_project_audio_runtime_config_merges_base_then_project_model_con
 
     runtime = resolve_project_audio_runtime_config(
         project,
-        tts_model="qwen3-tts-instruct-flash",
+        tts_model="qwen-audio-3.1-tts-flash",
         base_voice_mapping={
             "旁白": {"voice_id": "old-narrator", "volume": 50},
             "旧角色": {"voice_id": "old-role"},
@@ -167,7 +167,7 @@ def test_resolve_project_audio_runtime_config_reads_valid_scene_engine_mode():
 
     runtime = resolve_project_audio_runtime_config(
         project,
-        tts_model="qwen3-tts-instruct-flash",
+        tts_model="qwen-audio-3.1-tts-flash",
     )
 
     assert runtime.audio_engine_mode == "seed_scene"
@@ -184,7 +184,7 @@ def test_resolve_project_audio_runtime_config_rejects_unknown_scene_engine_mode(
 
     runtime = resolve_project_audio_runtime_config(
         project,
-        tts_model="qwen3-tts-instruct-flash",
+        tts_model="qwen-audio-3.1-tts-flash",
     )
 
     assert runtime.audio_engine_mode == "legacy_stems"
@@ -217,7 +217,7 @@ def test_resolve_project_audio_runtime_config_tolerates_empty_or_invalid_config(
     with caplog.at_level("WARNING", logger="app.services.audiobook.project_audio_config"):
         runtime = resolve_project_audio_runtime_config(
             SimpleNamespace(audio_config="{invalid"),
-            tts_model="qwen3-tts-instruct-flash",
+            tts_model="qwen-audio-3.1-tts-flash",
             base_voice_mapping={"保留角色": {"voice_id": "existing"}},
         )
 
@@ -239,10 +239,10 @@ def test_resolve_from_snapshot_restores_voice_mapping_from_flat_branch():
         "engine_branch_config": {
             "seed_audio_model": "seed-audio-1.0-multilingual",
             "providers": {
-                "fallback_tts_model": "qwen3-tts-instruct-flash",
+                "fallback_tts_model": "qwen-audio-3.1-tts-flash",
             },
             "tts_models": {
-                "qwen3-tts-instruct-flash": {
+                "qwen-audio-3.1-tts-flash": {
                     "characters": [
                         {
                             "name": "旁白",
@@ -258,7 +258,7 @@ def test_resolve_from_snapshot_restores_voice_mapping_from_flat_branch():
         },
     }
 
-    runtime = resolve_from_snapshot(snapshot, tts_model="qwen3-tts-instruct-flash")
+    runtime = resolve_from_snapshot(snapshot, tts_model="qwen-audio-3.1-tts-flash")
 
     assert runtime.audio_engine_mode == "seed_scene"
     assert runtime.seed_audio_model == "seed-audio-1.0-multilingual"

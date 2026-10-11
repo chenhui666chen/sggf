@@ -5,7 +5,7 @@ import os
 from core.model_resolution import normalize_model_id
 
 
-DEFAULT_AUDIOBOOK_LLM_MODEL = "deepseek-v4-flash"
+DEFAULT_AUDIOBOOK_LLM_MODEL = "deepseek-flash"
 AUDIOBOOK_LLM_MODEL_ENV = "AUDIOBOOK_LLM_MODEL"
 AUDIOBOOK_ENABLE_SCRIPT_REVIEW_ENV = "AUDIOBOOK_ENABLE_SCRIPT_REVIEW"
 

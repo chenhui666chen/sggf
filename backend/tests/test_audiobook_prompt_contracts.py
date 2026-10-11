@@ -38,7 +38,7 @@ class CapturingLLM:
 class DummyTransform(TransformMixin):
     def __init__(self, llm_client):
         self.llm_client = llm_client
-        self.tts_model = "qwen3-tts-instruct-flash"
+        self.tts_model = "qwen-audio-3.1-tts-flash"
         self.audio_engine_mode = "legacy_stems"
         self.strategy = None
 
@@ -46,18 +46,18 @@ class DummyTransform(TransformMixin):
 class DummyAnalysis(AnalysisMixin):
     def __init__(self, llm_client):
         self.llm_client = llm_client
-        self.tts_model = "qwen3-tts-instruct-flash"
+        self.tts_model = "qwen-audio-3.1-tts-flash"
         self.audio_engine_mode = "legacy_stems"
 
 
 @pytest.mark.parametrize(
     "tts_model",
     (
-        "qwen3-tts-instruct-flash",
+        "qwen-audio-3.1-tts-flash",
         "cosyvoice-v3.5-plus",
         "seed-tts-2.0-expressive",
         "mimo-v2.5-tts",
-        "stepaudio-2.5-tts",
+        "stepaudio-3-tts",
         "unknown-tts-model",
     ),
 )
@@ -95,12 +95,12 @@ async def test_analysis_prompt_keeps_segment_direction_separate_from_voice_ident
 @pytest.mark.parametrize(
     "tts_model",
     (
-        "qwen3-tts-instruct-flash",
+        "qwen-audio-3.1-tts-flash",
         "cosyvoice-v3.5-plus",
         "seed-tts-2.0-expressive",
         "minimax-speech-2.8-hd",
         "mimo-v2.5-tts",
-        "stepaudio-2.5-tts",
+        "stepaudio-3-tts",
         "unknown-tts-model",
     ),
 )
@@ -415,7 +415,7 @@ async def test_transform_prompt_uses_stepaudio_contextual_contract():
         '"emotion":"sad","performance_notes":"轻轻发颤。","sound_effects":[],"music_cue":null}]}'
     )
     transform = DummyTransform(llm)
-    transform.tts_model = "stepaudio-2.5-tts"
+    transform.tts_model = "stepaudio-3-tts"
 
     await transform._transform_paragraph(
         paragraph="旁白克制地悲伤，轻轻发颤。",
@@ -424,12 +424,12 @@ async def test_transform_prompt_uses_stepaudio_contextual_contract():
     )
 
     prompt = llm.messages[0]["content"]
-    assert "当前TTS模型：StepAudio 2.5 TTS" in prompt
+    assert "当前TTS模型：StepAudio 3 TTS" in prompt
     assert "Qwen3-TTS" not in prompt
     # 全局语境 + 文中语境双档控制与字符限制（官方文档核实）。
     assert "Global Context" in prompt
     assert "Inline Context" in prompt
-    assert "200 字符" in prompt
+    assert "500 字符" in prompt
     assert "1000 字符" in prompt
     # 明确禁止输出括号内联指令与 SSML，语境编译由发送层决定。
     assert "不要输出 () 括号内联指令或 SSML" in prompt

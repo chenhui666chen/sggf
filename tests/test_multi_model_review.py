@@ -173,10 +173,10 @@ def test_agent_coordinator_uses_multi_model_review_when_gate_matches() -> None:
     multi_model_result = {
         "review": "multi summary",
         "multi_model": True,
-        "per_model_reports": [{"model_id": "qwen3.7-plus", "status": "success"}],
-        "reviewer_models": ["qwen3.7-plus"],
+        "per_model_reports": [{"model_id": "qwen-plus", "status": "success"}],
+        "reviewer_models": ["qwen-plus"],
         "reviewer_profiles": ["general_literary"],
-        "chief_model": "deepseek-v4-pro",
+        "chief_model": "deepseek-pro",
         "chief_model_reused_as_reviewer": True,
         "preset": "balanced_3",
     }
@@ -192,7 +192,7 @@ def test_agent_coordinator_uses_multi_model_review_when_gate_matches() -> None:
     assert result["multi_model"] is True
     assert result["review_meta"]["preset"] == "balanced_3"
     assert coordinator.project_context["review"] == "multi summary"
-    assert coordinator.project_context["review_meta"]["chief_model"] == "deepseek-v4-pro"
+    assert coordinator.project_context["review_meta"]["chief_model"] == "deepseek-pro"
     assert coordinator.project_context["review_meta"]["chief_model_reused_as_reviewer"] is True
     review_mock.assert_awaited_once()
 
@@ -258,7 +258,7 @@ def test_agent_coordinator_uses_key_chapter_depth_when_first_chapter_scenario_ma
         "per_model_reports": [],
         "reviewer_models": [],
         "reviewer_profiles": [],
-        "chief_model": "deepseek-v4-pro",
+        "chief_model": "deepseek-pro",
         "chief_model_reused_as_reviewer": False,
         "preset": "deep_7",
     }
@@ -307,7 +307,7 @@ def test_agent_coordinator_uses_manual_depth_when_manual_multi_model_review_is_r
         "per_model_reports": [],
         "reviewer_models": [],
         "reviewer_profiles": [],
-        "chief_model": "deepseek-v4-pro",
+        "chief_model": "deepseek-pro",
         "chief_model_reused_as_reviewer": False,
         "preset": "deep_7",
     }
@@ -350,7 +350,7 @@ def test_agent_coordinator_falls_back_to_single_review_when_multi_model_has_too_
         "multi_model": False,
         "fallback_required": True,
         "fallback_reason": "多模型评审成功数 1 < 2",
-        "per_model_reports": [{"model_id": "qwen3.7-plus", "status": "success"}],
+        "per_model_reports": [{"model_id": "qwen-plus", "status": "success"}],
     }
 
     with patch.object(
@@ -384,7 +384,7 @@ def test_agent_coordinator_wrapper_preserves_review_meta_from_real_coordinator()
                 "review_meta": {
                     "multi_model": True,
                     "preset": "key_chapter_5",
-                    "reviewer_models": ["qwen3.7-plus"],
+                    "reviewer_models": ["qwen-plus"],
                 },
             }
 
@@ -434,7 +434,7 @@ def test_next_chapter_review_uses_multi_model_when_auto_scenario_matches() -> No
         "per_model_reports": [],
         "reviewer_models": [],
         "reviewer_profiles": [],
-        "chief_model": "deepseek-v4-pro",
+        "chief_model": "deepseek-pro",
         "preset": "deep_7",
     }
     streaming_service = DummyStreamingService()
@@ -500,7 +500,7 @@ def test_next_chapter_review_falls_back_to_streaming_when_multi_model_is_insuffi
         "multi_model": False,
         "fallback_required": True,
         "fallback_reason": "多模型评审成功数 1 < 2",
-        "per_model_reports": [{"requested_model_id": "qwen3.7-plus", "status": "success"}],
+        "per_model_reports": [{"requested_model_id": "qwen-plus", "status": "success"}],
     }
     streaming_service = DummyStreamingService()
 
@@ -646,7 +646,7 @@ def test_workflow_review_meta_api_returns_persisted_review_meta(monkeypatch) -> 
             return {
                 "multi_model": True,
                 "preset": "deep_7",
-                "reviewer_models": ["qwen3.7-plus", "glm-5.2"],
+                "reviewer_models": ["qwen-plus", "glm"],
             }
 
     dummy_db = DummyDb()
@@ -672,7 +672,7 @@ async def test_multi_model_review_service_balanced_3_success() -> None:
     from app.services.agents.multi_model_review_service import MultiModelReviewService
 
     metrics_collector.reset()
-    service = MultiModelReviewService(preset="balanced_3", chief_model="deepseek-v4-pro")
+    service = MultiModelReviewService(preset="balanced_3", chief_model="deepseek-pro")
 
     with patch.object(
         service,
@@ -684,11 +684,11 @@ async def test_multi_model_review_service_balanced_3_success() -> None:
     assert result["multi_model"] is True
     assert result["review"] == "summary"
     assert result["preset"] == "balanced_3"
-    assert result["chief_model"] == "deepseek-v4-pro"
+    assert result["chief_model"] == "deepseek-pro"
     assert result["chief_model_reused_as_reviewer"] is True
     assert result["reviewer_models"] == [
-        "qwen3.7-plus",
-        "deepseek-v4-pro",
+        "qwen-plus",
+        "deepseek-pro",
         "doubao-seed-character",
     ]
     assert result["reviewer_profiles"] == [
@@ -696,8 +696,8 @@ async def test_multi_model_review_service_balanced_3_success() -> None:
         "logic_continuity",
         "character_emotion",
     ]
-    assert result["per_model_reports"][0]["requested_model_id"] == "qwen3.7-plus"
-    assert result["per_model_reports"][0]["resolved_model_id"] == "qwen3.7-plus"
+    assert result["per_model_reports"][0]["requested_model_id"] == "qwen-plus"
+    assert result["per_model_reports"][0]["resolved_model_id"] == "qwen-plus"
     assert result["per_model_reports"][0]["input_was_clipped"] is False
     labels = {"preset": "balanced_3", "result": "success"}
     assert metrics_collector.get_counter("multi_model_review_trigger_total", labels) == 1.0
@@ -716,10 +716,10 @@ async def test_multi_model_review_service_records_resolved_model_id_from_respons
         async def ainvoke(self, messages):
             return AIMessage(
                 content="rerouted report",
-                additional_kwargs={"resolved_model_id": "deepseek-v4-flash"},
+                additional_kwargs={"resolved_model_id": "deepseek-flash"},
             )
 
-    service = MultiModelReviewService(preset="balanced_3", chief_model="deepseek-v4-pro")
+    service = MultiModelReviewService(preset="balanced_3", chief_model="deepseek-pro")
 
     with patch.object(service_module, "create_task_llm", return_value=FakeLlm()):
         reviewer, system_prompt, user_prompt, input_was_clipped = service._build_reviewer_input(
@@ -735,7 +735,7 @@ async def test_multi_model_review_service_records_resolved_model_id_from_respons
         )
 
     assert report["report"] == "rerouted report"
-    assert report["resolved_model_id"] == "deepseek-v4-flash"
+    assert report["resolved_model_id"] == "deepseek-flash"
 
 
 @pytest.mark.asyncio
@@ -750,7 +750,7 @@ async def test_multi_model_review_service_records_cost_and_usage_from_response_m
             return AIMessage(
                 content="costed report",
                 response_metadata={
-                    "model_id": "qwen3.7-plus",
+                    "model_id": "qwen-plus",
                     "cost": "0.42",
                     "token_usage": {
                         "prompt_tokens": 10,
@@ -760,7 +760,7 @@ async def test_multi_model_review_service_records_cost_and_usage_from_response_m
                 },
             )
 
-    service = MultiModelReviewService(preset="balanced_3", chief_model="deepseek-v4-pro")
+    service = MultiModelReviewService(preset="balanced_3", chief_model="deepseek-pro")
 
     with patch.object(service_module, "create_task_llm", return_value=FakeLlm()):
         reviewer, system_prompt, user_prompt, input_was_clipped = service._build_reviewer_input(
@@ -792,7 +792,7 @@ async def test_multi_model_review_service_records_usage_metadata_attribute() -> 
     class FakeResponse:
         content = "usage report"
         additional_kwargs = {}
-        response_metadata = {"model_id": "qwen3.7-plus"}
+        response_metadata = {"model_id": "qwen-plus"}
         usage_metadata = {
             "input_tokens": 11,
             "output_tokens": 7,
@@ -803,7 +803,7 @@ async def test_multi_model_review_service_records_usage_metadata_attribute() -> 
         async def ainvoke(self, messages):
             return FakeResponse()
 
-    service = MultiModelReviewService(preset="balanced_3", chief_model="deepseek-v4-pro")
+    service = MultiModelReviewService(preset="balanced_3", chief_model="deepseek-pro")
 
     with patch.object(service_module, "create_task_llm", return_value=FakeLlm()):
         reviewer, system_prompt, user_prompt, input_was_clipped = service._build_reviewer_input(
@@ -831,12 +831,12 @@ async def test_multi_model_review_service_records_monetary_cost_metric_from_repo
     from app.services.agents.multi_model_review_service import MultiModelReviewService
 
     metrics_collector.reset()
-    service = MultiModelReviewService(preset="balanced_3", chief_model="deepseek-v4-pro")
+    service = MultiModelReviewService(preset="balanced_3", chief_model="deepseek-pro")
     reports = [
         {
-            "requested_model_id": "qwen3.7-plus",
-            "resolved_model_id": "qwen3.7-plus",
-            "model_id": "qwen3.7-plus",
+            "requested_model_id": "qwen-plus",
+            "resolved_model_id": "qwen-plus",
+            "model_id": "qwen-plus",
             "profile": "general_literary",
             "status": "success",
             "input_was_clipped": False,
@@ -844,9 +844,9 @@ async def test_multi_model_review_service_records_monetary_cost_metric_from_repo
             "cost": 0.2,
         },
         {
-            "requested_model_id": "deepseek-v4-pro",
-            "resolved_model_id": "deepseek-v4-pro",
-            "model_id": "deepseek-v4-pro",
+            "requested_model_id": "deepseek-pro",
+            "resolved_model_id": "deepseek-pro",
+            "model_id": "deepseek-pro",
             "profile": "logic_continuity",
             "status": "success",
             "input_was_clipped": False,
@@ -885,7 +885,7 @@ def test_multi_model_review_service_rejects_custom_panel_model_outside_allowlist
             preset="balanced_3",
             custom_panel=[
                 {"profile": "general_literary", "model": "unknown-model"},
-                {"profile": "logic_continuity", "model": "deepseek-v4-pro"},
+                {"profile": "logic_continuity", "model": "deepseek-pro"},
                 {"profile": "character_emotion", "model": "doubao-seed-character"},
             ],
         )
@@ -898,11 +898,11 @@ def test_multi_model_review_service_rejects_too_many_same_provider_reviewers() -
         MultiModelReviewService(
             preset="key_chapter_5",
             custom_panel=[
-                {"profile": "general_literary", "model": "deepseek-v4-pro"},
-                {"profile": "logic_continuity", "model": "deepseek-v4-flash"},
+                {"profile": "general_literary", "model": "deepseek-pro"},
+                {"profile": "logic_continuity", "model": "deepseek-flash"},
                 {"profile": "character_emotion", "model": "doubao-seed-character"},
-                {"profile": "long_context_consistency", "model": "glm-5.2"},
-                {"profile": "rhythm_hook", "model": "step-3.7-flash"},
+                {"profile": "long_context_consistency", "model": "glm"},
+                {"profile": "rhythm_hook", "model": "step-preview"},
             ],
         )
 
@@ -914,12 +914,12 @@ def test_multi_model_review_service_rejects_too_many_reasoning_reviewers() -> No
         MultiModelReviewService(
             preset="deep_7",
             custom_panel=[
-                {"profile": "general_literary", "model": "qwen3.7-plus"},
-                {"profile": "logic_continuity", "model": "deepseek-v4-pro"},
+                {"profile": "general_literary", "model": "qwen-plus"},
+                {"profile": "logic_continuity", "model": "deepseek-pro"},
                 {"profile": "character_emotion", "model": "doubao-seed-character"},
-                {"profile": "long_context_consistency", "model": "glm-5.2"},
-                {"profile": "rhythm_hook", "model": "step-3.7-flash"},
-                {"profile": "contextual_reader", "model": "mimo-v2.5-pro"},
+                {"profile": "long_context_consistency", "model": "glm"},
+                {"profile": "rhythm_hook", "model": "step-preview"},
+                {"profile": "contextual_reader", "model": "mimo-pro"},
                 {"profile": "goal_alignment", "model": "doubao-seed-evolving"},
             ],
         )
@@ -932,11 +932,11 @@ def test_multi_model_review_service_requires_profile_coverage_for_larger_panels(
         MultiModelReviewService(
             preset="key_chapter_5",
             custom_panel=[
-                {"profile": "general_literary", "model": "qwen3.7-plus"},
-                {"profile": "logic_continuity", "model": "deepseek-v4-pro"},
+                {"profile": "general_literary", "model": "qwen-plus"},
+                {"profile": "logic_continuity", "model": "deepseek-pro"},
                 {"profile": "character_emotion", "model": "doubao-seed-character"},
-                {"profile": "rhythm_hook", "model": "step-3.7-flash"},
-                {"profile": "narrative_flow", "model": "kimi/kimi-k2.6"},
+                {"profile": "rhythm_hook", "model": "step-preview"},
+                {"profile": "narrative_flow", "model": "kimi-preview"},
             ],
         )
 
@@ -944,7 +944,7 @@ def test_multi_model_review_service_requires_profile_coverage_for_larger_panels(
 def test_multi_model_review_service_marks_chief_reuse() -> None:
     from app.services.agents.multi_model_review_service import MultiModelReviewService
 
-    service = MultiModelReviewService(preset="balanced_3", chief_model="deepseek-v4-pro")
+    service = MultiModelReviewService(preset="balanced_3", chief_model="deepseek-pro")
 
     assert service.chief_model_reused_as_reviewer is True
 
@@ -954,7 +954,7 @@ def test_multi_model_review_service_parses_structured_summary_from_final_report(
 
     report = """## 多模型评审汇总报告
 ### 一致意见（交叉印证，高可信）
-- 节奏稳定 [source_models: qwen3.7-plus, glm-5.2]
+- 节奏稳定 [source_models: qwen-plus, glm]
 
 ### 分歧意见（附少数派观点）
 | 维度 | 多数派结论 | 少数派观点 | 主审裁决 |
@@ -962,14 +962,14 @@ def test_multi_model_review_service_parses_structured_summary_from_final_report(
 | 角色 | 可信 | 情绪略跳 | 补一处动作 |
 
 ### 最终修改建议（按优先级排序）
-1. 【建议】补强结尾钩子 [source_models: deepseek-v4-pro]
+1. 【建议】补强结尾钩子 [source_models: deepseek-pro]
 
 ### 结论
 继续修改"""
 
     summary = MultiModelReviewService.parse_structured_summary(report)
 
-    assert summary["source_models"] == ["qwen3.7-plus", "glm-5.2", "deepseek-v4-pro"]
+    assert summary["source_models"] == ["qwen-plus", "glm", "deepseek-pro"]
     assert "节奏稳定" in summary["consensus"][0]
     assert "角色" in summary["divergence"][0]
     assert "补强结尾钩子" in summary["final_suggestions"][0]
@@ -990,7 +990,7 @@ async def test_multi_model_review_service_clips_reviewer_input_by_model_budget()
         }
         return f"report-{reviewer['model']}"
 
-    service = MultiModelReviewService(preset="balanced_3", chief_model="deepseek-v4-pro")
+    service = MultiModelReviewService(preset="balanced_3", chief_model="deepseek-pro")
 
     with patch.object(service_module.settings, "DOUBAO_REVIEW_PROMPT_BUDGET", 1), patch.object(
         service,
@@ -1012,7 +1012,7 @@ async def test_multi_model_review_service_requests_single_model_fallback_when_to
     from app.services.agents.multi_model_review_service import MultiModelReviewService
 
     metrics_collector.reset()
-    service = MultiModelReviewService(preset="balanced_3", chief_model="deepseek-v4-pro")
+    service = MultiModelReviewService(preset="balanced_3", chief_model="deepseek-pro")
 
     with patch.object(
         service,

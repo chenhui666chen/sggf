@@ -103,59 +103,6 @@ def test_legacy_factory_qwen_image_edit_plus_generate_routes_to_registry_task(
     assert result.metadata == {"source": "registry"}
 
 
-def test_factory_wan2_6_t2i_uses_registry_image_generation_path(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from adapters import legacy_runtime_wrappers
-    from adapters.base import GenerationResult as RegistryGenerationResult
-    from adapters.model_adapters import ModelAdapterFactory
-
-    captured: dict[str, object] = {}
-
-    class FakeAdapter:
-        def generate(self, task):
-            captured["task"] = task
-            return RegistryGenerationResult(
-                success=True,
-                task_id=task.task_id,
-                model_id="wan2.6-t2i",
-                outputs=["https://example.com/generated.png"],
-                metadata={"source": "registry"},
-            )
-
-    def fake_get_adapter(model_id: str, config=None):
-        captured["model_id"] = model_id
-        captured["config"] = config
-        return FakeAdapter()
-
-    monkeypatch.setattr(registry, "get_adapter", fake_get_adapter)
-
-    adapter = ModelAdapterFactory().get_adapter("wan2.6-t2i")
-    result = adapter.generate(
-        prompt="hero portrait",
-        negative_prompt="blurry",
-        width=768,
-        height=1024,
-        num_inference_steps=40,
-        guidance_scale=6.5,
-        seed=11,
-    )
-
-    task = captured["task"]
-    assert captured["model_id"] == "wan2.6-t2i"
-    assert task.modality.value == "text_to_image"
-    assert task.prompt == "hero portrait"
-    assert task.negative_prompt == "blurry"
-    assert task.width == 768
-    assert task.height == 1024
-    assert task.seed == 11
-    assert task.extra["num_inference_steps"] == 40
-    assert task.extra["guidance_scale"] == 6.5
-    assert result.success is True
-    assert result.data["image_url"] == "https://example.com/generated.png"
-    assert result.metadata == {"source": "registry"}
-
-
 def test_legacy_factory_wan_image_edit_preserves_old_adapter_shape(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -194,114 +141,6 @@ def test_legacy_factory_wan_image_edit_preserves_old_adapter_shape(
     assert captured["model_id"] == "qwen-image-edit-plus"
     assert task.reference.images == ["base.png"]
     assert result.data["image_url"] == "https://example.com/wan-edit.png"
-
-
-def test_factory_wan2_7_i2v_routes_to_unified_generate_video_helper(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from adapters import adapter_helpers
-    from adapters.model_adapters import ModelAdapterFactory
-
-    captured: dict[str, object] = {}
-
-    def fake_generate_video(**kwargs):
-        captured.update(kwargs)
-        return type(
-            "Result",
-            (),
-            {
-                "success": True,
-                "data": {"video_url": "https://example.com/clip.mp4"},
-                "error": None,
-                "metadata": {"source": "runtime"},
-                "cost": 0.0,
-            },
-        )()
-
-    monkeypatch.setattr(adapter_helpers, "generate_video", fake_generate_video)
-
-    adapter = ModelAdapterFactory().get_adapter("wan2.7-i2v")
-    result = adapter.generate(
-        image_path="head.png",
-        prompt="animate the portrait",
-        duration=5,
-        fps=24,
-        motion_bucket_id=96,
-        seed=7,
-        character_references=[{"name": "hero"}],
-    )
-
-    assert captured == {
-        "prompt": "animate the portrait",
-        "duration": 5.0,
-        "image_path": "head.png",
-        "model_id": "wan2.7-i2v",
-        "use_fallback": False,
-        "fps": 24,
-        "motion_bucket_id": 96,
-        "seed": 7,
-        "character_references": [{"name": "hero"}],
-    }
-    assert result.success is True
-    assert result.data["video_url"] == "https://example.com/clip.mp4"
-    assert result.metadata == {"source": "runtime"}
-
-
-def test_factory_wan2_7_t2v_uses_registry_video_generation_path(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from adapters import legacy_runtime_wrappers
-    from adapters.base import GenerationResult as RegistryGenerationResult
-    from adapters.model_adapters import ModelAdapterFactory
-
-    captured: dict[str, object] = {}
-
-    class FakeAdapter:
-        def generate(self, task):
-            captured["task"] = task
-            return RegistryGenerationResult(
-                success=True,
-                task_id=task.task_id,
-                model_id="wan2.7-t2v",
-                outputs=["https://example.com/generated.mp4"],
-                metadata={"source": "registry"},
-            )
-
-    def fake_get_adapter(model_id: str, config=None):
-        captured["model_id"] = model_id
-        captured["config"] = config
-        return FakeAdapter()
-
-    monkeypatch.setattr(registry, "get_adapter", fake_get_adapter)
-
-    adapter = ModelAdapterFactory().get_adapter("wan2.7-t2v")
-    result = adapter.generate(
-        prompt="storm over the sea",
-        negative_prompt="low quality",
-        width=1280,
-        height=720,
-        duration=5,
-        fps=24,
-        num_inference_steps=28,
-        guidance_scale=7.0,
-        seed=17,
-    )
-
-    task = captured["task"]
-    assert captured["model_id"] == "wan2.7-t2v"
-    assert task.modality.value == "text_to_video"
-    assert task.prompt == "storm over the sea"
-    assert task.negative_prompt == "low quality"
-    assert task.width == 1280
-    assert task.height == 720
-    assert task.duration == 5.0
-    assert task.seed == 17
-    assert task.extra["fps"] == 24
-    assert task.extra["num_inference_steps"] == 28
-    assert task.extra["guidance_scale"] == 7.0
-    assert result.success is True
-    assert result.data["video_url"] == "https://example.com/generated.mp4"
-    assert result.metadata == {"source": "registry"}
 
 
 def test_legacy_factory_qwen_multiperson_fusion_match_scene_uses_registry_edit_path(
@@ -345,54 +184,7 @@ def test_legacy_factory_qwen_multiperson_fusion_match_scene_uses_registry_edit_p
     assert result.data["image_url"] == "https://example.com/fused.png"
 
 
-def test_factory_wan2_7_r2v_routes_to_unified_generate_video_helper(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from adapters import adapter_helpers
-    from adapters.model_adapters import ModelAdapterFactory
-
-    captured: dict[str, object] = {}
-
-    def fake_generate_video(**kwargs):
-        captured.update(kwargs)
-        return type(
-            "Result",
-            (),
-            {
-                "success": True,
-                "data": {"video_url": "https://example.com/r2v.mp4"},
-                "error": None,
-                "metadata": {"source": "runtime"},
-                "cost": 0.0,
-            },
-        )()
-
-    monkeypatch.setattr(adapter_helpers, "generate_video", fake_generate_video)
-
-    adapter = ModelAdapterFactory().get_adapter("wan2.7-r2v")
-    result = adapter.generate(
-        reference_video_path="scene.mp4",
-        prompt="keep the motion style",
-        duration=4,
-        fps=24,
-        seed=9,
-    )
-
-    assert captured == {
-        "prompt": "keep the motion style",
-        "duration": 4.0,
-        "video_path": "scene.mp4",
-        "model_id": "wan2.7-r2v",
-        "use_fallback": False,
-        "fps": 24,
-        "seed": 9,
-    }
-    assert result.success is True
-    assert result.data["video_url"] == "https://example.com/r2v.mp4"
-    assert result.metadata == {"source": "runtime"}
-
-
-def test_legacy_factory_qwen3_tts_generate_uses_sync_helper(
+def test_legacy_factory_qwen_audio_31_tts_generate_uses_sync_helper(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from adapters import adapter_helpers
@@ -416,7 +208,7 @@ def test_legacy_factory_qwen3_tts_generate_uses_sync_helper(
 
     monkeypatch.setattr(adapter_helpers, "synthesize_speech_sync", fake_synthesize_speech_sync)
 
-    adapter = ModelAdapterFactory().get_adapter("qwen3_tts")
+    adapter = ModelAdapterFactory().get_adapter("qwen_audio_3_1_tts")
     result = adapter.generate(
         text="hello",
         voice_style="natural",
@@ -432,18 +224,18 @@ def test_legacy_factory_qwen3_tts_generate_uses_sync_helper(
     assert result.metadata == {"source": "runtime"}
     assert captured["text"] == "hello"
     assert captured["emotion"] == "neutral"
-    assert captured["model_id"] == "qwen3-tts-instruct-flash"
+    assert captured["model_id"] == "qwen-audio-3.1-tts-flash"
     assert captured["voice_params"]["speaker"] == "longxiaochun"
     assert captured["voice_params"]["rate"] == 1.2
     assert captured["voice_params"]["pitch"] == 1.1
     assert captured["voice_params"]["volume"] == 40
 
 
-def test_qwen3_tts_runtime_wrapper_normalizes_legacy_tts_parameters(
+def test_qwen_audio_31_tts_runtime_wrapper_normalizes_legacy_tts_parameters(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from adapters import adapter_helpers
-    from adapters.legacy_runtime_wrappers import Qwen3TTSRuntimeWrapper
+    from adapters.legacy_runtime_wrappers import QwenAudio31TTSRuntimeWrapper
     from adapters.model_adapters import ModelConfig
 
     captured: dict[str, object] = {}
@@ -464,11 +256,11 @@ def test_qwen3_tts_runtime_wrapper_normalizes_legacy_tts_parameters(
 
     monkeypatch.setattr(adapter_helpers, "synthesize_speech_sync", fake_synthesize_speech_sync)
 
-    wrapper = Qwen3TTSRuntimeWrapper(
+    wrapper = QwenAudio31TTSRuntimeWrapper(
         ModelConfig(
             api_key="",
             base_url="",
-            model_name="qwen3_tts",
+            model_name="qwen_audio_3_1_tts",
         )
     )
     result = wrapper.generate(
@@ -485,7 +277,7 @@ def test_qwen3_tts_runtime_wrapper_normalizes_legacy_tts_parameters(
     assert result.data["audio_data"] == "ZmFrZQ=="
     assert captured["text"] == "hello"
     assert captured["emotion"] == "happy"
-    assert captured["model_id"] == "qwen3-tts-instruct-flash"
+    assert captured["model_id"] == "qwen-audio-3.1-tts-flash"
     assert captured["voice_params"]["speaker"] == "longxiaochun"
     assert captured["voice_params"]["rate"] == 1.2
     assert captured["voice_params"]["pitch"] == 1.1
@@ -498,14 +290,13 @@ def test_normalize_model_id_returns_current_multimodal_ids() -> None:
     from adapters.legacy_runtime_wrappers import has_runtime_wrapper
 
     assert normalize_model_id("qwen3_vl_plus") == "qwen3-vl-plus"
-    assert normalize_model_id("qwen3_tts") == "qwen3-tts-instruct-flash"
-    assert normalize_model_id("wan2.6-t2i") == "wan2.6-t2i"
+    # Qwen3-TTS 已物理退役：core 层不再折叠旧 ID，旧写法必须原样返回并暴露成注册失败，
+    # 而不是被静默改写成后继模型（与 test_model_retirement_registry 的同名约束一致）。
+    assert normalize_model_id("qwen3_tts") == "qwen3_tts"
     assert normalize_model_id("kling-v3-image-generation") == "kling/kling-v3-image-generation"
-    assert normalize_model_id("wan2.7-t2v") == "wan2.7-t2v"
-    assert normalize_model_id("wan2.7-i2v") == "wan2.7-i2v"
     assert normalize_model_id("qwen_multiperson_fusion") == "qwen-image-edit-plus"
     assert normalize_model_id("wan_image_edit") == "qwen-image-edit-plus"
-    assert normalize_model_id("MiniMax/MiniMax-M3") == "MiniMax/MiniMax-M3"
-    assert normalize_model_id("minimax-m3") == "MiniMax/MiniMax-M3"
-    assert has_runtime_wrapper("wan2.6-t2i") is True
-    assert has_runtime_wrapper("wan2.7-t2v") is True
+    assert normalize_model_id("minimax-m") == "minimax-m"
+    assert has_runtime_wrapper("qwen_image_edit_plus") is True
+    assert has_runtime_wrapper("qwen_audio_3_1_tts") is True
+    assert has_runtime_wrapper("qwen3_tts") is False

@@ -662,17 +662,39 @@ class OpenAICompatibleAdapter(BaseLLMAdapter):
         if "model" in error_str and ("not found" in error_str or "unavailable" in error_str):
             return "model_unavailable"
 
+        # 请求本身非法（参数越界、取值不在枚举、参数组合被拒）：同 prompt 重试与换模型都无意义。
+        # 必须在 rate_limit 之后判：方舟/百炼的 ServiceUnavailable、capacity limits 也带 400 家族文案。
+        # 只认 4xx + 参数类文案，不带这类文案的 400 仍落 unknown_error，保住真瞬时故障的韧性。
+        status_code = getattr(error, "status_code", None)
+        is_bad_request = status_code == 400 or "error code: 400" in error_str or "<400>" in error_str
+        if is_bad_request and any(
+            marker in error_str
+            for marker in (
+                "invalidparameter",
+                "invalid_parameter",
+                "not valid",
+                "must be one of",
+                "restricted to",
+                "range of",
+                "too large",
+                "does not support",
+                "unsupported",
+                "above maximum value",
+            )
+        ):
+            return "invalid_request"
+
         return "unknown_error"
 
 
 @register_llm_model(
-    model_id="qwen3.7-plus",
+    model_id="qwen-plus",
     name="Qwen3.7 Plus",
     provider="alibaba",
     capabilities=["creative", "reasoning", "long_context", "multimodal", "web_search", "writing", "agent"],
     task_types=["concept", "outline_expand", "volume_outline", "chapter_batch", "long_writing", "multimodal_analysis", "verification"],
     max_context_tokens=1000000,
-    max_output_tokens=65536,
+    max_output_tokens=131072,
     quality_score=9.2,
     avg_latency_seconds=1.6,
     cost_per_1k_input_tokens=0.002,
@@ -683,8 +705,8 @@ class OpenAICompatibleAdapter(BaseLLMAdapter):
     supports_function_call=True,
     supports_vision=True,
     priority=1,
-    fallback_models=["deepseek-v4-flash"],
-    default_params={"temperature": 0.7, "max_tokens": 32768, "enable_thinking": False},
+    fallback_models=["deepseek-flash"],
+    default_params={"request_model": "qwen3.7-plus", "temperature": 0.7, "max_tokens": 32768, "enable_thinking": False},
     tags=["creative", "reasoning", "long_context", "multimodal", "web_search", "chinese", "alibaba", "verification", "agent"],
 )
 class Qwen37PlusAdapter(OpenAICompatibleAdapter):
@@ -694,13 +716,13 @@ class Qwen37PlusAdapter(OpenAICompatibleAdapter):
 
 
 @register_llm_model(
-    model_id="qwen3.7-flash",
+    model_id="qwen-flash",
     name="Qwen3.7 Flash",
     provider="alibaba",
     capabilities=["creative", "reasoning", "long_context", "writing"],
     task_types=["concept", "outline_expand", "volume_outline", "chapter_batch", "long_writing", "summarize", "entity_extract"],
     max_context_tokens=1000000,
-    max_output_tokens=65536,
+    max_output_tokens=131072,
     quality_score=8.5,
     avg_latency_seconds=1.2,
     cost_per_1k_input_tokens=0.0002,
@@ -712,8 +734,8 @@ class Qwen37PlusAdapter(OpenAICompatibleAdapter):
     supports_vision=False,
     supports_thinking_mode=True,
     priority=3,
-    fallback_models=["qwen3.7-plus"],
-    default_params={"temperature": 0.7, "max_tokens": 32768, "enable_thinking": False},
+    fallback_models=["qwen-flash-fallback", "qwen-plus"],
+    default_params={"request_model": "qwen3.7-flash", "temperature": 0.7, "max_tokens": 32768, "enable_thinking": False},
     tags=["creative", "long_context", "fast", "low_cost", "chinese", "alibaba"],
 )
 class Qwen37FlashAdapter(OpenAICompatibleAdapter):
@@ -724,43 +746,85 @@ class Qwen37FlashAdapter(OpenAICompatibleAdapter):
 
 
 @register_llm_model(
-    model_id="kimi/kimi-k2.6",
-    name="Kimi K2.6",
-    provider="moonshot",
-    capabilities=["creative", "reasoning", "long_context", "multimodal", "writing"],
-    task_types=["concept", "outline_expand", "chapter_batch", "long_writing", "multimodal_analysis"],
-    max_context_tokens=131072,
-    max_output_tokens=8192,
-    quality_score=8.9,
-    avg_latency_seconds=2.0,
-    cost_per_1k_input_tokens=0.0065,
-    cost_per_1k_output_tokens=0.027,
+    model_id="qwen-flash-fallback",
+    name="Qwen3.8 Flash",
+    provider="alibaba",
+    capabilities=["creative", "reasoning", "long_context", "writing"],
+    task_types=[],
+    max_context_tokens=1000000,
+    max_output_tokens=131072,
+    quality_score=8.7,
+    avg_latency_seconds=1.4,
+    cost_per_1k_input_tokens=0.0008,
+    cost_per_1k_output_tokens=0.0027,
     api_key_env="DASHSCOPE_API_KEY",
     base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
     default_timeout=180,
     supports_function_call=True,
     supports_vision=True,
     supports_thinking_mode=True,
-    priority=2,
-    fallback_models=["qwen3.7-plus"],
-    default_params={"temperature": 0.7, "max_tokens": 8192, "enable_thinking": False},
-    tags=["creative", "reasoning", "long_context", "multimodal", "chinese", "moonshot", "alibaba"],
+    priority=3,
+    fallback_models=["qwen-plus"],
+    default_params={"request_model": "qwen3.8-flash", "temperature": 0.7, "max_tokens": 32768, "enable_thinking": False},
+    tags=["creative", "long_context", "fast", "fallback_only", "multimodal", "chinese", "alibaba"],
 )
-class KimiK26Adapter(OpenAICompatibleAdapter):
-    """月之暗面 Kimi K2.6 适配器。经阿里云百炼 OpenAI 兼容接口接入，
-    原生支持文本、图像、视频输入与思考模式（enable_thinking）。"""
+class Qwen38FlashFallbackAdapter(OpenAICompatibleAdapter):
+    """阿里云 Qwen3.8 Flash 适配器。刻意不注册任何 task_types，因此不会被自动路由选中，
+    只作为 qwen-flash（3.7-flash）调用失败时的第一顺位回退目标。"""
 
     pass
 
 
 @register_llm_model(
-    model_id="glm-5.2",
-    name="GLM-5.2",
+    model_id="kimi-preview",
+    name="Kimi K2.8 Preview",
+    provider="moonshot",
+    capabilities=["creative", "reasoning", "long_context", "multimodal", "writing"],
+    task_types=["concept", "outline_expand", "chapter_batch", "long_writing", "multimodal_analysis"],
+    max_context_tokens=1048576,
+    max_output_tokens=262144,
+    quality_score=8.9,
+    avg_latency_seconds=4.5,
+    cost_per_1k_input_tokens=0.0065,
+    cost_per_1k_output_tokens=0.027,
+    api_key_env="DASHSCOPE_API_KEY",
+    base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+    # 思考不可关闭（见类文档），长文场景端到端明显慢于 K2.6，180s 不够用。
+    default_timeout=300,
+    supports_function_call=True,
+    supports_vision=True,
+    supports_thinking_mode=True,
+    priority=2,
+    fallback_models=["qwen-plus"],
+    default_params={"request_model": "kimi/kimi-k2.8-preview", "temperature": 0.7, "max_tokens": 16384, "enable_thinking": False},
+    tags=["creative", "reasoning", "long_context", "multimodal", "chinese", "moonshot", "alibaba"],
+)
+class KimiK28PreviewAdapter(OpenAICompatibleAdapter):
+    """月之暗面 Kimi K2.8 Preview 适配器。
+    经阿里云百炼 OpenAI 兼容接口接入，模型名 kimi/kimi-k2.8-preview（无日期快照后缀）。
+    上下文 1048576，单价 6.5/27 元每百万 tokens。
+
+    2026-10-08 实测两条硬约束：
+    - 思考无法关闭。enable_thinking=false、thinking={"type":"disabled"}、两者同发、
+      完全不发 extra_body，四种写法都照样输出 reasoning_content，属家族行为。
+    - max_tokens 给小了会被思考吃光：256 时 finish_reason=length 且 content 全空，
+      故默认预算取 16384。
+    temperature 0.6/0.7/1.0 均通过（裸名 kimi-k3 只认 0.6/1.0，是本项目不选它的原因）。
+    max_output_tokens 取 262144：百炼 console 字段写 1048576 但与上下文同值、疑为误填，
+    且网关对 max_tokens 完全不校验（262145/1048577 都返回 200），无法实测上限，故取保守值。
+    """
+
+    pass
+
+
+@register_llm_model(
+    model_id="glm",
+    name="GLM-5.3",
     provider="zhipu",
     capabilities=["reasoning", "coding", "long_context", "agent", "writing"],
     task_types=["concept", "outline_expand", "chapter_batch", "long_writing", "coding", "agent"],
     max_context_tokens=1000000,
-    max_output_tokens=16384,
+    max_output_tokens=131072,
     quality_score=9.1,
     avg_latency_seconds=2.5,
     cost_per_1k_input_tokens=0.008,
@@ -771,26 +835,27 @@ class KimiK26Adapter(OpenAICompatibleAdapter):
     supports_function_call=True,
     supports_thinking_mode=True,
     priority=2,
-    fallback_models=["qwen3.7-plus"],
-    default_params={"temperature": 0.7, "max_tokens": 16384, "enable_thinking": False},
+    fallback_models=["qwen-plus"],
+    # 强制思考模型：绝不能再传 enable_thinking=False，上游会 400（2026-10-09 实测）
+    default_params={"request_model": "glm-5.3", "temperature": 0.7, "max_tokens": 16384},
     tags=["reasoning", "coding", "long_context", "agent", "chinese", "zhipu", "alibaba", "open_source"],
 )
-class GLM52Adapter(OpenAICompatibleAdapter):
-    """智谱 GLM-5.2 适配器。经阿里云百炼 OpenAI 兼容接口接入，
-    744B MoE 架构，原生支持100万tokens稳定上下文，主打长程推理与代码工程。
-    启用完整上下文需使用 model="glm-5.2[1m]"。"""
+class GLM53Adapter(OpenAICompatibleAdapter):
+    """智谱 GLM-5.3 适配器。经阿里云百炼 OpenAI 兼容接口接入，
+    官方定位复杂工程任务端到端交付与代码/安全漏洞分析，支持 100 万 tokens 上下文与三档深度思考。
+    2026-10-09 由上一版线名原地换代，内部 ID 仍为 glm；上游真名以 YAML 的 request_model 为准。"""
 
     pass
 
 
 @register_llm_model(
-    model_id="MiniMax/MiniMax-M3",
+    model_id="minimax-m",
     name="MiniMax M3",
     provider="minimax",
     capabilities=["multimodal", "coding", "reasoning", "long_context", "agent", "writing", "chinese"],
     task_types=["concept", "outline_expand", "chapter_batch", "long_writing", "coding", "agent", "vision_analysis"],
     max_context_tokens=1000000,
-    max_output_tokens=16384,
+    max_output_tokens=524288,
     quality_score=9.0,
     avg_latency_seconds=2.2,
     cost_per_1k_input_tokens=0.0042,
@@ -802,8 +867,8 @@ class GLM52Adapter(OpenAICompatibleAdapter):
     supports_thinking_mode=True,
     supports_vision=True,
     priority=2,
-    fallback_models=["qwen3.7-plus"],
-    default_params={"temperature": 0.7, "max_tokens": 16384, "thinking": {"type": "disabled"}},
+    fallback_models=["qwen-plus"],
+    default_params={"request_model": "MiniMax/MiniMax-M3", "temperature": 0.7, "max_tokens": 16384, "thinking": {"type": "disabled"}},
     tags=["multimodal", "coding", "reasoning", "long_context", "agent", "chinese", "minimax", "alibaba", "open_source"],
 )
 class MiniMaxM3Adapter(OpenAICompatibleAdapter):
@@ -815,17 +880,17 @@ class MiniMaxM3Adapter(OpenAICompatibleAdapter):
 
 
 @register_llm_model(
-    model_id="step-3.7-flash",
-    name="Step 3.7 Flash",
+    model_id="step-preview",
+    name="Step 5 Preview",
     provider="stepfun",
     capabilities=["multimodal", "reasoning", "agent", "coding", "fast", "long_context", "web_search", "writing", "chinese"],
     task_types=["concept", "outline_expand", "chapter_batch", "long_writing", "coding", "agent", "vision_analysis", "web_search"],
-    max_context_tokens=262144,
-    max_output_tokens=16384,
+    max_context_tokens=1024000,
+    max_output_tokens=65536,
     quality_score=8.8,
-    avg_latency_seconds=1.2,
-    cost_per_1k_input_tokens=0.00135,
-    cost_per_1k_output_tokens=0.0081,
+    avg_latency_seconds=2.0,
+    cost_per_1k_input_tokens=0.007,
+    cost_per_1k_output_tokens=0.02,
     api_key_env="STEP_API_KEY",
     base_url="https://api.stepfun.com/v1",
     default_timeout=300,
@@ -833,24 +898,30 @@ class MiniMaxM3Adapter(OpenAICompatibleAdapter):
     supports_thinking_mode=True,
     supports_vision=True,
     priority=3,
-    fallback_models=["qwen3.7-plus"],
-    default_params={"temperature": 0.7, "max_tokens": 16384, "reasoning_effort": "low"},
-    tags=["multimodal", "reasoning", "agent", "coding", "fast", "long_context", "web_search", "chinese", "stepfun", "open_source"],
+    fallback_models=["qwen-plus"],
+    default_params={"request_model": "step-5-preview", "temperature": 0.7, "max_tokens": 16384, "reasoning_effort": "low"},
+    tags=["multimodal", "reasoning", "agent", "coding", "fast", "long_context", "web_search", "chinese", "stepfun"],
 )
-class Step37FlashAdapter(OpenAICompatibleAdapter):
-    """阶跃星辰 Step 3.7 Flash 适配器。直接调用 StepFun 官方 OpenAI 兼容接口，
-    198B 稀疏 MoE 架构（激活11B），最高生成速度400 tokens/s，
-    原生多模态理解，三档推理强度可调（low/medium/high），思考过程通过 reasoning 字段返回。"""
+class Step5PreviewAdapter(OpenAICompatibleAdapter):
+    """阶跃星辰 Step 5 Preview 适配器。
+    直接调用 StepFun 官方 OpenAI 兼容接口，模型名 step-5-preview（preview 非 GA，无日期快照后缀）。
+    上下文 1024000，最大输出 65536（官方文档确认）。
+    reasoning_effort 三档名称与枚举不变；思考过程除 reasoning 外还会同时返回 reasoning_content。
+
+    官方定价：输入 7、输出 20 元每百万 tokens（缓存命中 0.35）。
+    max_tokens 给小了会被思考吃光：2026-10-08 实测 64 时 content 全空，16384 才正常出正文。
+    官方文档还写明输入支持视频（MP4/QuickTime/Matroska），但本项目未实测，故未声明 supports_video_input。
+    """
 
     pass
 
 
 @register_llm_model(
-    model_id="mimo-v2.5-pro",
-    name="MiMo V2.5 Pro",
+    model_id="mimo-pro",
+    name="MiMo V2.6 Pro",
     provider="xiaomi",
-    capabilities=["reasoning", "agent", "coding", "long_context", "writing", "instruction_following", "chinese"],
-    task_types=["concept", "outline_expand", "chapter_batch", "long_writing", "coding", "agent"],
+    capabilities=["reasoning", "agent", "coding", "long_context", "multimodal", "writing", "instruction_following", "chinese"],
+    task_types=["concept", "outline_expand", "chapter_batch", "long_writing", "coding", "agent", "vision_analysis"],
     max_context_tokens=1000000,
     max_output_tokens=131072,
     quality_score=9.3,
@@ -862,24 +933,24 @@ class Step37FlashAdapter(OpenAICompatibleAdapter):
     default_timeout=600,
     supports_function_call=True,
     supports_thinking_mode=True,
+    supports_vision=True,
     supports_web_search=True,
     priority=1,
-    fallback_models=["qwen3.7-plus"],
-    default_params={"temperature": 0.7, "max_completion_tokens": 16384, "thinking": {"type": "disabled"}},
-    tags=["reasoning", "agent", "coding", "long_context", "instruction_following", "chinese", "xiaomi", "flagship"],
+    fallback_models=["qwen-plus"],
+    default_params={"request_model": "mimo-v2.6-pro", "temperature": 0.7, "max_completion_tokens": 16384, "thinking": {"type": "disabled"}},
+    tags=["reasoning", "agent", "coding", "long_context", "multimodal", "instruction_following", "chinese", "xiaomi", "flagship"],
 )
-class MiMoV25ProAdapter(OpenAICompatibleAdapter):
-    """小米 MiMo V2.5 Pro 适配器。直接调用小米 MiMo 官方 OpenAI 兼容接口，
-    万亿参数旗舰基座模型，原生支持1M tokens上下文与128K输出，
-    主打极致Agent能力（SWE-bench/TAU-bench全面领先）与长程代码开发，
-    可稳定完成近千轮工具调用的长程任务。纯文本输入输出。"""
+class MiMoV26ProAdapter(OpenAICompatibleAdapter):
+    """小米 MiMo V2.6 Pro 适配器。
+    直接调用小米 MiMo 官方 OpenAI 兼容接口，1M 上下文 / 131072 输出，
+    万亿参数旗舰基座，并支持图像输入理解。"""
 
     pass
 
 
 @register_llm_model(
-    model_id="mimo-v2.5",
-    name="MiMo V2.5",
+    model_id="mimo-flash",
+    name="MiMo V2.6 Flash",
     provider="xiaomi",
     capabilities=["multimodal", "reasoning", "agent", "long_context", "web_search", "fast", "writing", "chinese"],
     task_types=["concept", "outline_expand", "chapter_batch", "long_writing", "coding", "agent", "vision_analysis", "audio_analysis", "web_search"],
@@ -899,15 +970,14 @@ class MiMoV25ProAdapter(OpenAICompatibleAdapter):
     supports_audio_input=True,
     supports_web_search=True,
     priority=2,
-    fallback_models=["qwen3.7-plus"],
-    default_params={"temperature": 0.7, "max_completion_tokens": 16384, "thinking": {"type": "disabled"}},
+    fallback_models=["qwen-plus"],
+    default_params={"request_model": "mimo-v2.6-flash", "temperature": 0.7, "max_completion_tokens": 16384, "thinking": {"type": "disabled"}},
     tags=["multimodal", "reasoning", "agent", "long_context", "fast", "web_search", "chinese", "xiaomi"],
 )
-class MiMoV25Adapter(OpenAICompatibleAdapter):
-    """小米 MiMo V2.5 适配器。直接调用小米 MiMo 官方 OpenAI 兼容接口，
-    原生全模态感知模型，支持图像、视频、音频、文本联合理解，
-    原生支持1M tokens上下文与128K输出，具备强大的全模态Agent能力，
-    位于性能与效率的Pareto前沿。仅支持文本输出。"""
+class MiMoV26FlashAdapter(OpenAICompatibleAdapter):
+    """小米 MiMo V2.6 Flash 适配器。
+    直接调用小米 MiMo 官方 OpenAI 兼容接口，保留原生全模态感知，
+    1M 上下文 / 131072 输出。仅支持文本输出。"""
 
     pass
 
@@ -919,18 +989,18 @@ class MiMoV25Adapter(OpenAICompatibleAdapter):
     capabilities=["reasoning", "agent", "coding", "long_context", "writing", "chinese"],
     task_types=["concept", "outline_expand", "chapter_batch", "long_writing", "coding", "agent", "reasoning"],
     max_context_tokens=262144,
-    max_output_tokens=16384,
+    max_output_tokens=262144,
     quality_score=9.3,
     avg_latency_seconds=2.5,
     cost_per_1k_input_tokens=0.006,
     cost_per_1k_output_tokens=0.03,
-    api_key_env="DOUBAO_API_KEY",
+    api_key_env="VOLCENGINE_API_KEY",
     base_url="https://ark.cn-beijing.volces.com/api/v3",
     default_timeout=300,
     supports_function_call=True,
     supports_thinking_mode=True,
     priority=2,
-    fallback_models=["qwen3.7-plus"],
+    fallback_models=["qwen-plus"],
     default_params={"temperature": 0.7, "max_tokens": 16384, "thinking": {"type": "enabled"}},
     tags=["reasoning", "agent", "coding", "long_context", "writing", "chinese", "volcengine", "doubao", "evolving"],
 )
@@ -955,14 +1025,14 @@ class DoubaoSeedEvolvingAdapter(OpenAICompatibleAdapter):
     avg_latency_seconds=1.5,
     cost_per_1k_input_tokens=0.0012,
     cost_per_1k_output_tokens=0.006,
-    api_key_env="DOUBAO_API_KEY",
+    api_key_env="VOLCENGINE_API_KEY",
     base_url="https://ark.cn-beijing.volces.com/api/v3",
     default_timeout=300,
     supports_function_call=True,
     supports_thinking_mode=True,
     supports_vision=True,
     priority=2,
-    fallback_models=["qwen3.7-plus"],
+    fallback_models=["qwen-plus"],
     default_params={"request_model": "doubao-seed-character-260628", "temperature": 0.85, "max_tokens": 8192, "thinking": {"type": "disabled"}},
     tags=["roleplay", "dialogue", "multimodal", "reasoning", "instruction_following", "chinese", "volcengine", "doubao", "character"],
 )
@@ -977,7 +1047,7 @@ class DoubaoSeedCharacterAdapter(OpenAICompatibleAdapter):
 
 
 @register_llm_model(
-    model_id="deepseek-v4-pro",
+    model_id="deepseek-pro",
     name="DeepSeek V4 Pro",
     provider="deepseek",
     capabilities=["reasoning", "logic", "analysis", "planning"],
@@ -994,7 +1064,7 @@ class DoubaoSeedCharacterAdapter(OpenAICompatibleAdapter):
     supports_timeout_param=False,
     supports_max_retries=False,
     priority=1,
-    fallback_models=["qwen3.7-plus"],
+    fallback_models=["qwen-plus"],
     default_params={
         "request_model": "deepseek-v4-pro",
         "thinking": {"type": "enabled"},
@@ -1097,31 +1167,35 @@ class DeepSeekV4ProAdapter(OpenAICompatibleAdapter):
 
 
 @register_llm_model(
-    model_id="deepseek-v4-flash",
-    name="DeepSeek V4 Flash",
+    model_id="deepseek-flash",
+    name="DeepSeek Flash",
     provider="deepseek",
     capabilities=["reasoning", "chat", "fast"],
     task_types=["chat", "rewrite", "fast", "ai_trace", "simple"],
-    max_context_tokens=1000000,
-    max_output_tokens=65536,
+    max_context_tokens=1048576,
+    max_output_tokens=393216,
     quality_score=8.5,
     avg_latency_seconds=2.0,
-    cost_per_1k_input_tokens=0.001,
-    cost_per_1k_output_tokens=0.002,
+    cost_per_1k_input_tokens=0.002,
+    cost_per_1k_output_tokens=0.008,
     api_key_env="DEEPSEEK_API_KEY",
     base_url="https://api.deepseek.com",
     supports_streaming=True,
     supports_timeout_param=True,
     supports_max_retries=True,
     priority=2,
-    fallback_models=["qwen3.7-plus"],
+    fallback_models=["qwen-plus"],
     default_params={
-        "request_model": "deepseek-v4-flash",
+        "request_model": "deepseek-flash",
         "thinking": {"type": "disabled"},
     },
     tags=["reasoning", "fast"],
 )
-class DeepSeekV4FlashAdapter(OpenAICompatibleAdapter):
-    """DeepSeek V4 Flash 适配器 - 轻量快速推理模型"""
+class DeepSeekFlashAdapter(OpenAICompatibleAdapter):
+    """DeepSeek Flash 适配器 - 轻量快速推理模型。
+
+    上下文 1048576 / 最大输出 393216（2026-10-08 真实 API 越界探测确认）。
+    价格按官方忙时档记录，闲时约为一半。只走 DeepSeek 官方渠道，百炼无此型号。
+    """
 
     pass

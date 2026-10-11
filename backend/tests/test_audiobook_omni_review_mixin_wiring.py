@@ -56,6 +56,16 @@ from app.services.audiobook.script_adapter_pkg._dataclasses import (  # noqa: E4
 )
 
 
+@pytest.fixture(autouse=True)
+def isolate_scene_artifact_root(tmp_path, monkeypatch):
+    """任务层测试不得写入正式产物根 ``backend/data/scene_audio_artifacts/``。"""
+    monkeypatch.setattr(
+        scene_render_mixin_module,
+        "SCENE_ARTIFACT_ROOT",
+        tmp_path / "scene_artifacts",
+    )
+
+
 def _plan(scene_id: str, indices: tuple[int, ...]) -> SceneRenderPlan:
     return SceneRenderPlan(
         scene_id=scene_id,
@@ -197,7 +207,7 @@ class FakeTaskTracker:
 
 class FakeTtsEngine:
     def __init__(self) -> None:
-        self.model = "qwen3-tts-instruct-flash"
+        self.model = "qwen-audio-3.1-tts-flash"
         self.estimated_cost_yuan = 0.0
 
     def get_cost_stats(self):

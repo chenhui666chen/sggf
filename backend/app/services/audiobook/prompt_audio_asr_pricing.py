@@ -23,12 +23,18 @@ class PromptAudioAsrBudgetPolicy:
     max_cost_yuan_per_scene: float = 0.2
 
 
+# qwen-audio-3.1-asr-flash 不按音频秒数计价，而是按输入/输出 Token 计价：
+# 0.8 元/百万输入 Token、2.7 元/百万输出 Token（百炼「千问Audio」刊例，2026-10-11 核对）。
+# 官方折算规则：1 秒音频 = 25 Token，不足 1 秒按 25 Token 计。
+# 输出侧按中文朗读实测约 6 Token/秒估算，合计 25×0.8 + 6×2.7 = 36.2 元/百万 Token
+# ≈ 3.62e-5 元/秒；成本闸门保守取 4.0e-5 元/秒，宁可高估也不放过超额调用。
 _PUBLIC_POSTPAID_PRICES = {
-    ("funasr_flash", "fun-asr-flash-2026-06-15"): PromptAudioAsrPricing(
-        provider="funasr_flash",
-        model="fun-asr-flash-2026-06-15",
-        yuan_per_second=0.00022,
-        pricing_source="aliyun_model_studio_public_price_2026-07-24",
+    ("qwen_audio_asr_flash", "qwen-audio-3.1-asr-flash"): PromptAudioAsrPricing(
+        provider="qwen_audio_asr_flash",
+        model="qwen-audio-3.1-asr-flash",
+        yuan_per_second=0.00004,
+        pricing_source="aliyun_model_studio_qwen_audio_asr_token_price_2026-10-11",
+        pricing_basis="derived_from_token_price",
     ),
     ("aliyun", "paraformer-v2"): PromptAudioAsrPricing(
         provider="aliyun",

@@ -3,7 +3,9 @@ from adapters.dashscope.image_async import *
 from adapters.dashscope.chat import *
 from adapters.dashscope.multimodal import *
 from adapters.dashscope.tts import *
+from adapters.dashscope.audio_generation import *
 from adapters.dashscope.video_t2v import *
 from adapters.dashscope.video_i2v import *
+from adapters.dashscope.video_wan3 import *
 from adapters.dashscope.video_kling import *
 from adapters.dashscope.image_edit import *

@@ -71,7 +71,7 @@ def suggest_library_prompt(
             desc_model = pick_model(
                 primary_env="DREAMWEAVER_LIBRARY_DESCRIPTOR_ENRICH_MODEL",
                 fallback_env="DREAMWEAVER_LIBRARY_PROMPT_MODEL",
-                default="qwen3.7-plus",
+                default="qwen-plus",
             )
             desc_timeout_s = int(os.getenv("DREAMWEAVER_LIBRARY_DESCRIPTOR_ENRICH_TIMEOUT", "90") or "90")
 
@@ -135,14 +135,14 @@ def suggest_library_prompt(
             filter_model = pick_model(
                 primary_env="DREAMWEAVER_LIBRARY_ANCHOR_FILTER_MODEL",
                 fallback_env="DREAMWEAVER_LIBRARY_ANCHOR_MODEL",
-                default="qwen3.7-plus",
+                default="qwen-plus",
             )
             filter_timeout_s = int(os.getenv("DREAMWEAVER_LIBRARY_ANCHOR_FILTER_TIMEOUT", "90") or "90")
 
             anchor_model = pick_model(
                 primary_env="DREAMWEAVER_LIBRARY_ANCHOR_MODEL",
                 fallback_env="DREAMWEAVER_LIBRARY_PROMPT_MODEL",
-                default="qwen3.7-plus",
+                default="qwen-plus",
             )
             anchor_timeout_s = int(os.getenv("DREAMWEAVER_LIBRARY_ANCHOR_TIMEOUT", "90") or "90")
 
@@ -253,7 +253,7 @@ def suggest_library_prompt(
         require_llm = env_flag("DREAMWEAVER_LLM_ONLY", default=False) or env_flag("DREAMWEAVER_LIBRARY_PROMPT_REQUIRE_LLM", default=False)
         api_key = (os.getenv("DASHSCOPE_API_KEY") or "").strip()
         base_url = (os.getenv("DASHSCOPE_API_BASE") or "https://dashscope.aliyuncs.com/compatible-mode/v1").strip()
-        model = pick_model(primary_env="DREAMWEAVER_LIBRARY_PROMPT_MODEL", fallback_env="DREAMWEAVER_SCRIPT_MODEL", default="qwen3.7-plus")
+        model = pick_model(primary_env="DREAMWEAVER_LIBRARY_PROMPT_MODEL", fallback_env="DREAMWEAVER_SCRIPT_MODEL", default="qwen-plus")
         timeout_s = int(os.getenv("DREAMWEAVER_LIBRARY_PROMPT_TIMEOUT", "120") or "120")
         if enable_llm and api_key and base_url:
             try:

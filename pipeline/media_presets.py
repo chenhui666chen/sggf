@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from typing import Any, Dict, Optional, Tuple
 
 
@@ -23,16 +24,26 @@ SUPPORTED_FRAME_SIZES: Dict[str, Dict[str, Tuple[int, int]]] = {
 }
 
 DEFAULT_VIDEO_FPS = 24
+# 下面两个常量是 DreamWeaver 的"引擎模式标识"，决定提示词分支与是否走首帧桥接，
+# 不是实际调用的模型 ID；实际模型由 DREAMWEAVER_WAN_MODEL_ID 与 video_config.adapter 决定。
+# 字符串沿用历史模型名是因为它们已被写进项目配置与计费单价表的 key（user_center_task_billing），
+# 改值等于改数据契约，收益为零。
 DREAMWEAVER_I2V_ENGINE = "wan2.7-i2v"
 DREAMWEAVER_T2V_ENGINE = "wan2.7-t2v"
 DREAMWEAVER_AUTO_ENGINE = "wan_auto"
 DREAMWEAVER_SLIDESHOW_ENGINE = "ffmpeg_slideshow"
 
-# Wan 2.7 I2V（图生视频）常见输出规格：
-# - 分辨率：720P / 1080P（由输入首帧与服务侧约束共同决定）
-# - 时长：5s / 10s / 15s
+# 万相线实际调用的模型。wan3.0-video 是 all-in-one，i2v/t2v 两种模式共用同一个模型 ID。
+DREAMWEAVER_WAN_MODEL_ID = "wan3.0-video"
+# all-in-one 模型无法从名字推断 i2v/t2v，统一交给 auto 引擎按是否有首帧关键帧决定
+WAN_ALL_IN_ONE_MODEL_IDS = {DREAMWEAVER_WAN_MODEL_ID}
+
+# 万相视频常见输出规格：
+# - 分辨率：480P / 720P / 1080P（wan3.0 起支持 480P）
+# - 时长：官方支持 [2, 30] 整数秒，与 adapters.dashscope.video_wan3.DURATION_MIN/MAX 同源
 # - 输出：固定 30fps，MP4(H.264)
-DREAMWEAVER_VIDEO_SUPPORTED_DURATIONS_S = (5.0, 10.0, 15.0)
+DREAMWEAVER_VIDEO_DURATION_MIN_S = 2.0
+DREAMWEAVER_VIDEO_DURATION_MAX_S = 30.0
 DREAMWEAVER_I2V_OUTPUT_FPS = 30
 
 
@@ -64,6 +75,9 @@ def normalize_dreamweaver_video_engine(value: Any, *, default: str = "") -> str:
 
 
 def infer_dreamweaver_video_engine_from_model_id(model_id: Any) -> str:
+    if str(model_id or "").strip().lower() in WAN_ALL_IN_ONE_MODEL_IDS:
+        return DREAMWEAVER_AUTO_ENGINE
+
     normalized = normalize_dreamweaver_video_engine(model_id)
     if normalized in {DREAMWEAVER_I2V_ENGINE, DREAMWEAVER_T2V_ENGINE}:
         return normalized
@@ -95,6 +109,27 @@ def is_dreamweaver_generated_video_engine(value: Any) -> bool:
         DREAMWEAVER_T2V_ENGINE,
         DREAMWEAVER_AUTO_ENGINE,
     }
+
+
+def _env_flag(name: str, *, default: bool) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
+def resolve_dreamweaver_video_audio_output() -> bool:
+    """决定 wan3.0-video 的 audio_output（模型是否输出自带音轨）。
+
+    只有「音效交给模型生成」且「不额外合成对白轨」时才需要模型出声：
+    其余情况下 DreamWeaver 会用 AudioSyncManager 整轨替换音频，模型自带声音会被丢弃，
+    置 True 只会白花钱并与自有音效轨冲突。
+    """
+    if _env_flag("DREAMWEAVER_DIALOGUE_AUDIO_EMBED", default=False):
+        return False
+
+    sfx_source = str(os.getenv("DREAMWEAVER_SFX_SOURCE") or "library").strip().lower()
+    return sfx_source in {"model", "video"}
 
 
 def normalize_frame_ratio(ratio: Optional[str], *, default: str = DEFAULT_FRAME_RATIO) -> str:
@@ -147,7 +182,9 @@ def normalize_video_fps(value: Any, *, default: int = DEFAULT_VIDEO_FPS) -> int:
 
 def normalize_dreamweaver_video_duration_s(value: Any, *, default: float = 5.0) -> float:
     """
-    将任意输入时长归一化为 Wan I2V 支持的离散集合（5/10/15 秒）。
+    将任意输入时长归一化为 wan3.0-video 官方支持的 [2, 30] 整数秒。
+
+    - 区间内小数四舍五入（half-up），越界值夹取到边界，非正/非数字回落到 default。
     """
     try:
         duration = float(value)
@@ -157,9 +194,32 @@ def normalize_dreamweaver_video_duration_s(value: Any, *, default: float = 5.0) 
     if duration <= 0:
         duration = float(default)
 
-    candidates = DREAMWEAVER_VIDEO_SUPPORTED_DURATIONS_S
-    picked = min(candidates, key=lambda x: abs(x - duration))
-    return float(picked)
+    seconds = int(duration + 0.5)
+    seconds = int(min(max(seconds, DREAMWEAVER_VIDEO_DURATION_MIN_S), DREAMWEAVER_VIDEO_DURATION_MAX_S))
+    return float(seconds)
+
+
+def _env_duration_bound(name: str, default: float) -> float:
+    raw = os.getenv(name)
+    if raw is None or not str(raw).strip():
+        return float(default)
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return float(default)
+    if value <= 0:
+        return float(default)
+    return float(min(max(value, DREAMWEAVER_VIDEO_DURATION_MIN_S), DREAMWEAVER_VIDEO_DURATION_MAX_S))
+
+
+def dreamweaver_beat_duration_bounds_s() -> Tuple[float, float]:
+    """beat/镜头时长的规划区间：官方 [2, 30] 之内由 env 收窄，越界或非法值回落官方边界。
+
+    提示词文案与分镜 clamp 共用这一处事实源，避免剧本按 2-15s 写 beat、分镜却规划 25s 容器。
+    """
+    low = _env_duration_bound("DREAMWEAVER_STORYBOARD_MIN_SHOT_S", DREAMWEAVER_VIDEO_DURATION_MIN_S)
+    high = _env_duration_bound("DREAMWEAVER_STORYBOARD_MAX_SHOT_S", DREAMWEAVER_VIDEO_DURATION_MAX_S)
+    return (low, high) if low <= high else (high, low)
 
 
 def resolve_frame_size(image_config: Optional[Dict[str, Any]]) -> Tuple[int, int, str]:

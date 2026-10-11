@@ -18,7 +18,7 @@ from backend.app.services.outline_merger import parse_framework_to_volumes
 class _DummySummarizer:
     def prepare_context_for_expansion(self, **kwargs):
         return {
-            "selected_model": "qwen3.7-plus",
+            "selected_model": "qwen-plus",
             "context": "压缩后的上下文",
             "memory_text": "结构化记忆约束",
             "structured_memory": {"story": 1},
@@ -1199,8 +1199,8 @@ def test_expand_volume_detail_backfills_tail_sections_when_model_omits_them(monk
 
 
 def test_estimate_volume_detail_model_always_prefers_deepseek_v4_pro():
-    assert OutlineExpander.estimate_volume_detail_model((60, 100)) == "deepseek-v4-pro"
-    assert OutlineExpander.estimate_volume_detail_model((20, 80)) == "deepseek-v4-pro"
+    assert OutlineExpander.estimate_volume_detail_model((60, 100)) == "deepseek-pro"
+    assert OutlineExpander.estimate_volume_detail_model((20, 80)) == "deepseek-pro"
 
 
 def test_story_should_chunk_volume_detail_when_upper_bound_reaches_80():
@@ -1273,7 +1273,7 @@ def test_outline_expander_initializes_dynamic_timeouts(monkeypatch):
 
     def fake_estimate_timeout(model_id, requested_max_tokens, minimum_timeout=None):
         _ = requested_max_tokens, minimum_timeout
-        return 480 if model_id == "deepseek-v4-pro" else 240
+        return 480 if model_id == "deepseek-pro" else 240
 
     monkeypatch.setattr(base_module, "NovelKnowledgeBase", _DummyKnowledgeBase)
     monkeypatch.setattr(base_module, "NovelMemoryManager", _DummyMemoryManager)
@@ -1294,7 +1294,7 @@ def test_outline_expander_initializes_dynamic_timeouts(monkeypatch):
     assert expander.plot_architect_r1.llm.runtime_options["timeout"] == 480
     assert any(call["task_type"] == "outline_expand" and call["timeout"] == 240 for call in captured_calls)
     assert any(call["task_type"] == "volume_detail_expand" and call["timeout"] == 480 for call in captured_calls)
-    assert any(call["model"] == "deepseek-v4-pro" and call["timeout"] == 480 for call in captured_calls)
+    assert any(call["model"] == "deepseek-pro" and call["timeout"] == 480 for call in captured_calls)
 
 
 def test_expand_volume_detail_uses_chunked_generation_when_volume_is_large(monkeypatch):
@@ -1507,7 +1507,7 @@ def test_expand_volume_detail_uses_r1_chunk_supplement_after_large_volume_range_
 """,
         ]
     )
-    expander.estimate_volume_detail_model = lambda _chapters_count_range: "qwen3.7-plus"
+    expander.estimate_volume_detail_model = lambda _chapters_count_range: "qwen-plus"
 
     monkeypatch.setattr(
         outline_expander_module,

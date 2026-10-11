@@ -134,7 +134,7 @@ describe('audiobook project selection loader', () => {
     const data = await loadAudiobookProjectSelectionData({
       projectId: 13,
       selectedChapterIds: [],
-      ttsModel: 'qwen3-tts-instruct-flash',
+      ttsModel: 'qwen-audio-3.1-tts-flash',
       voicePresets: [],
     })
 
@@ -147,7 +147,7 @@ describe('audiobook project selection loader', () => {
     })
     expect(data.audioEngineMode).toBe('legacy_stems')
     expect(data.characterVoices).toMatchObject([
-      { characterId: 0, voiceId: 'Neil' },
+      { characterId: 0, voiceId: 'longsanshu_v3.1' },
       { characterId: 9, name: 'Lead', voiceId: '' },
     ])
   })
@@ -166,7 +166,7 @@ describe('audiobook project selection loader', () => {
 
     const data = await loadAudiobookProjectSelectionData({
       projectId: 20,
-      ttsModel: 'qwen3-tts-instruct-flash',
+      ttsModel: 'qwen-audio-3.1-tts-flash',
       voicePresets: [],
     })
 
@@ -210,7 +210,7 @@ describe('audiobook project selection loader', () => {
     await expect(loadAudiobookProjectSelectionData({
       projectId: 15,
       selectedChapterIds: [1],
-      ttsModel: 'qwen3-tts-instruct-flash',
+      ttsModel: 'qwen-audio-3.1-tts-flash',
       voicePresets: [],
     })).rejects.toThrow('chapters failed')
 

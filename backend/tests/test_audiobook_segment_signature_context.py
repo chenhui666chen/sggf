@@ -1,6 +1,6 @@
 """片段音频签名验签的分块策略上下文一致性测试。
 
-回归目标：管线用非 Qwen 模型生成片段后（运行时按默认分块上限切块），
+回归目标：管线按默认分块上限生成片段后，
 重新混合整章不得把未修改片段误报为 stale_audio 缺失。
 """
 
@@ -23,7 +23,7 @@ for candidate in (str(ROOT), str(BACKEND_ROOT)):
 TEST_CHAPTER_AUDIO_ID = 98765501
 TEST_RUN_ID = f"signature_context_run_{TEST_CHAPTER_AUDIO_ID}"
 
-# 380 字：默认上限 420 时为单 chunk，Qwen 上限 360 时拆成多 chunk，
+# 400 字：默认上限 420 时为单 chunk，收紧到 200 时拆成多 chunk，
 # 两种分块策略产生不同的片段级合并签名
 _LONG_TEXT = "这是一个用于验证分块策略一致性的测试句子。" * 20
 
@@ -73,13 +73,13 @@ def _build_wav_bytes() -> bytes:
 
 
 def test_remix_does_not_report_legacy_non_qwen_segment_as_stale(cleanup_test_assets):
-    """历史数据：非 Qwen 模型生成的签名（默认分块策略）不得被误判过期。"""
+    """历史数据：按默认分块策略生成的签名不得被误判过期。"""
     from app.services.audiobook import background_jobs_remix as remix
     from app.services.audiobook import chapter_segment_assets
     from app.services.audiobook.render_plan import build_render_plan
 
     segment = _build_long_segment()
-    # 模拟非 Qwen 管线 run 固化：分块上限为 None（默认 420），单 chunk 签名
+    # 模拟默认分块上限的 run 固化：分块上限为 None（默认 420），单 chunk 签名
     runtime_chunks = build_render_plan(
         [SimpleNamespace(**segment)], max_chunk_chars=None
     )
@@ -103,7 +103,7 @@ def test_remix_does_not_report_legacy_non_qwen_segment_as_stale(cleanup_test_ass
 
 
 def test_persist_records_chunk_context_for_non_qwen_run(cleanup_test_assets):
-    """persist 固化非 Qwen run 音频时必须记录生成分块上下文，供验签精确复现。"""
+    """persist 固化 run 音频时必须记录生成分块上下文，供验签精确复现。"""
     from app.services.audiobook import background_jobs_remix as remix
     from app.services.audiobook import chapter_segment_assets
     from app.services.audiobook.render_plan import (
@@ -119,7 +119,7 @@ def test_persist_records_chunk_context_for_non_qwen_run(cleanup_test_assets):
         script_json=json.dumps(segments, ensure_ascii=False),
     )
 
-    # 非 Qwen run 的运行时 render_plan：分块上限 None（默认 420）
+    # 运行时 render_plan：分块上限 None（默认 420）
     runtime_chunks = build_render_plan(
         [SimpleNamespace(**segment) for segment in segments], max_chunk_chars=None
     )
@@ -148,18 +148,22 @@ def test_persist_records_chunk_context_for_non_qwen_run(cleanup_test_assets):
     assert remix.collect_chapter_remix_missing_segments(chapter_audio) == []
 
 
-def test_persist_records_qwen_chunk_context(cleanup_test_assets):
-    """Qwen run 使用更小分块上限，记录的上下文必须与运行时一致。"""
+def test_persist_records_chunk_context_for_multi_chunk_run(cleanup_test_assets, monkeypatch):
+    """多 chunk 的 run 固化音频时，记录的上下文必须与运行时分块一致。
+
+    旧 Qwen-TTS 有 360 字的独立上限，退役后所有在架模型统一按默认策略取上限；
+    这里用 AUDIOBOOK_RENDER_CHUNK_MAX_CHARS 收紧上限来复现"一段拆多块"，
+    验证记录口径跟着运行时解析出的分块上限，而不是跟着模型。
+    """
     from app.services.audiobook import chapter_segment_assets
-    from app.services.audiobook.engine_pkg._tts_mixin import (
-        QWEN_RENDER_CHUNK_MAX_CHARS,
-    )
     from app.services.audiobook.render_plan import (
         build_render_plan,
         render_plan_to_payload,
     )
     from app.services.audiobook.temp_segment_store import save_segment_audio_map
 
+    multi_chunk_limit = 200
+    monkeypatch.setenv("AUDIOBOOK_RENDER_CHUNK_MAX_CHARS", str(multi_chunk_limit))
     segments = [_build_long_segment()]
     chapter_audio = SimpleNamespace(
         id=TEST_CHAPTER_AUDIO_ID,
@@ -168,7 +172,7 @@ def test_persist_records_qwen_chunk_context(cleanup_test_assets):
 
     runtime_chunks = build_render_plan(
         [SimpleNamespace(**segment) for segment in segments],
-        max_chunk_chars=QWEN_RENDER_CHUNK_MAX_CHARS,
+        max_chunk_chars=None,
     )
     assert len(runtime_chunks) > 1
     chunk_audio = _build_wav_bytes()
@@ -183,14 +187,14 @@ def test_persist_records_qwen_chunk_context(cleanup_test_assets):
     persisted = chapter_segment_assets.persist_generated_chapter_segment_audio(
         chapter_audio=chapter_audio,
         result={"temp_segment_cache": temp_cache},
-        tts_model="qwen3-tts-instruct-flash",
+        tts_model="qwen-audio-3.1-tts-flash",
     )
 
     updated_segments = json.loads(chapter_audio.script_json)
     assert set(persisted.keys()) == {0}
     assert (
         updated_segments[0]["audio_render_chunk_max_chars"]
-        == QWEN_RENDER_CHUNK_MAX_CHARS
+        == multi_chunk_limit
     )
     assert chapter_segment_assets.segment_audio_cache_key_is_current(
         updated_segments[0]
@@ -344,20 +348,22 @@ def test_compute_cache_key_accepts_explicit_chunk_limit():
 
 def test_workbench_whole_segment_marker_uses_one_render_chunk_for_long_text():
     """工作台固化的长片段必须按整段缓存签名复用，而不是重新拆 chunk。"""
-    from app.services.audiobook.engine_pkg._tts_mixin import QWEN_RENDER_CHUNK_MAX_CHARS
-    from app.services.audiobook.render_plan import build_render_plan
+    from app.services.audiobook.render_plan import (
+        DEFAULT_RENDER_CHUNK_MAX_CHARS,
+        build_render_plan,
+    )
 
     segment = SimpleNamespace(
         type="narration",
         speaker="旁白",
-        text="长片段。" * (QWEN_RENDER_CHUNK_MAX_CHARS + 20),
-        voice_params={"speaker": "voice-a", "tts_model": "qwen3-tts-instruct-flash"},
+        text="长片段。" * (DEFAULT_RENDER_CHUNK_MAX_CHARS + 20),
+        voice_params={"speaker": "voice-a", "tts_model": "qwen-audio-3.1-tts-flash"},
         audio_render_mode="whole_segment",
     )
 
     chunks = build_render_plan(
         [segment],
-        max_chunk_chars=QWEN_RENDER_CHUNK_MAX_CHARS,
+        max_chunk_chars=DEFAULT_RENDER_CHUNK_MAX_CHARS,
     )
 
     assert len(chunks) == 1

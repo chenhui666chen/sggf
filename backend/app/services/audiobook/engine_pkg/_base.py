@@ -20,6 +20,7 @@ from ..audio_mixer import AudioMixer
 from ..agent_message import MessageBus
 from ..task_tracker import TaskTracker
 from ..tts_delivery_plan import build_delivery_plan, resolve_segment_tts_model
+from ..tts_model_ids import DEFAULT_AUDIOBOOK_TTS_MODEL
 from ..tts_style_control import build_model_style_control, build_provider_prompt_snapshot
 from ..chapter_cadence import apply_chapter_cadence
 from ..voice_identity_policy import (
@@ -43,7 +44,6 @@ except ImportError:
 from ..agents import (
     AudioDirector,
     AudioQualityReviewer,
-    VoiceDesigner,
     SoundEffectDesigner,
     MusicComposer,
 )
@@ -84,7 +84,7 @@ class AudiobookEngineBase:
         enable_cache: bool = True,
         max_concurrent: int = 1,  # 降低并发，避免阿里云限流（从5改为1）
         llm_client=None,  # LLM客户端（用于专业Agent + 智能音色推断）
-        tts_model: str = "qwen3-tts-instruct-flash",  # TTS 模型（qwen3-tts-instruct-flash / cosyvoice-v3.5-plus）
+        tts_model: str = DEFAULT_AUDIOBOOK_TTS_MODEL,  # TTS 模型（qwen-audio-3.1-tts-flash / cosyvoice-v3.5-plus）
         progress_handler: Optional[Callable[[Dict[str, Any]], None]] = None,
     ) -> None:
         # 检查LLM客户端
@@ -101,7 +101,6 @@ class AudiobookEngineBase:
         logger.info("🎬 启用专业LLM驱动的多Agent协作模式")
         self.audio_director = AudioDirector(llm_client=llm_client)
         self.script_adapter = AudiobookScriptAgent(llm_client=llm_client, tts_model=tts_model)
-        self.voice_designer = VoiceDesigner()
         self.sound_effect_designer = SoundEffectDesigner(llm_client=llm_client)
         self.music_composer = MusicComposer()
         self.audio_quality_reviewer = AudioQualityReviewer(llm_client=llm_client)
@@ -117,7 +116,7 @@ class AudiobookEngineBase:
         self.tts_engine = create_tts_engine(
             enable_cache=enable_cache,
             max_concurrent=max_concurrent,
-            model=tts_model  # 支持 qwen3-tts-instruct-flash / cosyvoice-v3.5-plus
+            model=tts_model  # 支持 qwen-audio-3.1-tts-flash / cosyvoice-v3.5-plus
         )
         self.audio_mixer = AudioMixer()
         # 存储最近一次音效时间线（用于混音）

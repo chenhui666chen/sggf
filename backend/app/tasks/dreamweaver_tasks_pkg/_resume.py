@@ -195,6 +195,8 @@ def _resume_payload_from_contract(
                     "script_generation",
                     "script_review",
                     "script_requires_review",
+                    "script_document",
+                    "story_graph",
                     "prompt_review_required",
                     "prompt_review",
                     "storyboard_generation",

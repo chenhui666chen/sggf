@@ -141,7 +141,7 @@ def test_mimo_voice_design_creation_cache_identity_ignores_legacy_numeric_speed(
 
 def test_preview_cache_key_changes_with_voice_identity_policy_version(monkeypatch) -> None:
     cache_key_args = {
-        "model": "qwen3-tts-instruct-flash",
+        "model": "qwen-audio-3.1-tts-flash",
         "voice_id": "Vincent",
         "text": "固定试听文本",
         "voice_params": {
@@ -172,7 +172,7 @@ def test_preview_cache_key_changes_with_voice_identity_policy_version(monkeypatc
 
 def test_preview_cache_fallback_ignores_pitch_for_fixed_voice() -> None:
     common = {
-        "model": "qwen3-tts-instruct-flash",
+        "model": "qwen-audio-3.1-tts-flash",
         "voice_id": "Vincent",
         "text": "固定试听文本",
     }
@@ -185,7 +185,7 @@ def test_preview_cache_fallback_ignores_pitch_for_fixed_voice() -> None:
 
 def test_preview_cache_fallback_ignores_numeric_speed_for_instruction_model() -> None:
     common = {
-        "model": "qwen3-tts-instruct-flash",
+        "model": "qwen-audio-3.1-tts-flash",
         "voice_id": "Vincent",
         "text": "固定试听文本",
     }
@@ -358,7 +358,7 @@ def test_preview_cached_does_not_touch_preview_cache_for_non_preview_paths(monke
 
 
 def test_warmup_preview_cache_key_matches_default_preview_request() -> None:
-    model_name = "qwen3-tts-instruct-flash"
+    model_name = "qwen-audio-3.1-tts-flash"
     voice_id = "Vincent"
 
     request = routes_tts.TTSPreviewRequest(
@@ -401,7 +401,7 @@ def test_warmup_preview_cache_key_matches_default_preview_request() -> None:
 
 
 def test_shared_default_preview_cache_identity_matches_route_and_warmup() -> None:
-    model_name = "qwen3-tts-instruct-flash"
+    model_name = "qwen-audio-3.1-tts-flash"
     voice_id = "Vincent"
     request = routes_tts.TTSPreviewRequest(
         text=routes_tts.DEFAULT_STEPAUDIO_CLONE_PREVIEW_TEXT,
@@ -428,7 +428,7 @@ def test_shared_default_preview_cache_identity_matches_route_and_warmup() -> Non
 
 
 def test_preview_cache_key_is_shared_across_users_for_same_fixed_preview(monkeypatch) -> None:
-    model_name = "qwen3-tts-instruct-flash"
+    model_name = "qwen-audio-3.1-tts-flash"
     voice_id = "Vincent"
     captured_cache_keys: list[str] = []
     original_build_preview_cache_key = routes_tts._build_preview_cache_key
@@ -470,11 +470,11 @@ def test_preview_quote_uses_voice_specific_preview_text(monkeypatch) -> None:
         },
     )
 
-    assert voice_catalog.get_preview_quote_for_voice("stepaudio-2.5-tts", "unit-voice") == "专用试听文本"
+    assert voice_catalog.get_preview_quote_for_voice("stepaudio-3-tts", "unit-voice") == "专用试听文本"
 
 
 def test_stepaudio_blocked_voice_uses_safe_preview_text() -> None:
-    model_name = "stepaudio-2.5-tts"
+    model_name = "stepaudio-3-tts"
     voice_id = "shenchennanyin"
     expected_text = "清晨的风轻轻吹过，故事在耳边慢慢展开。"
 

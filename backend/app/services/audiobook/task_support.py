@@ -29,6 +29,7 @@ from app.services.audiobook.project_audio_config import (
     parse_project_audio_config,
     resolve_engine_mode,
 )
+from app.services.audiobook.tts_model_ids import DEFAULT_AUDIOBOOK_TTS_MODEL
 from app.services.audiobook.repository import AudiobookTaskRepository, ChapterAudioRunRepository
 from app.services.audiobook.scene_engine.scene_billing import SEED_AUDIO_MODEL
 from app.services.audiobook.temp_segment_store import extract_cached_segment_paths, temp_segment_asset_exists
@@ -599,8 +600,8 @@ def _build_resume_input_context(
         )
 
     resolved_tts_model = str(
-        getattr(chapter_run, "tts_model", None) or "qwen3-tts-instruct-flash"
-    ).strip() or "qwen3-tts-instruct-flash"
+        getattr(chapter_run, "tts_model", None) or DEFAULT_AUDIOBOOK_TTS_MODEL
+    ).strip() or DEFAULT_AUDIOBOOK_TTS_MODEL
     resolved_output_format = str(
         getattr(chapter_run, "output_format", None) or "mp3"
     ).strip() or "mp3"

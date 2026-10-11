@@ -265,7 +265,7 @@ async def extract_narrative_state_from_chapter(
         or os.getenv("UNIFIED_EXTRACTION_MODEL")
         or os.getenv("DEEPSEEK_MODEL")
         or os.getenv("MODEL_NAME")
-        or "deepseek-v4-pro"
+        or "deepseek-pro"
     )
     try:
         # 消化属短 JSON 抽取步：默认关闭思考模式，避免 reasoning 占用小上下文预算

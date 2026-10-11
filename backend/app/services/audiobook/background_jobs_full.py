@@ -39,9 +39,11 @@ from app.services.audiobook.chapter_segment_assets import (
 )
 from app.services.audiobook.job_tracker import handle_pause_checkpoint
 from app.services.audiobook.repository import ChapterAudioRunRepository
+from app.services.audiobook.tts_model_ids import DEFAULT_AUDIOBOOK_TTS_MODEL
 from app.services.audiobook.tts_pause import TTSPauseRequested
 from app.services.audiobook.project_audio_config import parse_engine_config_snapshot
 from app.services.audiobook.project_audio_runtime import (
+    apply_runtime_voice_mapping,
     apply_scene_audio_runtime_to_engine,
     resolve_from_snapshot,
     resolve_project_audio_runtime_config,
@@ -51,6 +53,8 @@ from app.services.audiobook.task_support import (
     serialize_dataclass_to_dict,
     update_chapter_run_state as _update_chapter_run_state,
 )
+from app.services.audiobook.voice_manager import VoiceMappingResolutionError
+
 logger = logging.getLogger(__name__)
 
 
@@ -86,20 +90,21 @@ def _apply_project_audio_effects(
             logger.warning("⚠️ 应用项目级音效/BGM 配置失败: %s", exc)
 
     if runtime_config.voice_mapping:
-        try:
-            engine.voice_manager.apply_project_voice_mapping(runtime_config.voice_mapping)
-            logger.info(
-                "🎛 已加载项目级角色音配置: %s 个角色",
-                len(runtime_config.voice_mapping),
-            )
-        except Exception as exc:
-            logger.warning("⚠️ 应用项目级角色音配置失败: %s", exc)
+        # 角色音解析失败按失败收口：不吞异常，避免越界角色静默换成自动分配声线
+        apply_runtime_voice_mapping(
+            voice_manager=engine.voice_manager,
+            voice_mapping=runtime_config.voice_mapping,
+        )
+        logger.info(
+            "🎛 已加载项目级角色音配置: %s 个角色",
+            len(runtime_config.voice_mapping),
+        )
 
 
 async def generate_audiobook_background(
     audiobook_project_id: int,
     chapter_ids: List[int],
-    tts_model: str = "qwen3-tts-instruct-flash",
+    tts_model: str = DEFAULT_AUDIOBOOK_TTS_MODEL,
     tracker: Optional[StageTracker] = None,
     celery_task_id: Optional[str] = None,
 ) -> None:
@@ -137,6 +142,10 @@ async def generate_audiobook_background(
                 project=project,
                 tts_model=tts_model,
             )
+        except VoiceMappingResolutionError:
+            # 角色音越界必须把任务打成失败：音效/快照等其它配置异常可降级继续，
+            # 但静默丢角色会让整本书带着换过的声线"成功"收尾。
+            raise
         except Exception as exc:
             logger.warning("⚠️ 加载项目级音频配置失败: %s", exc)
 

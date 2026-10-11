@@ -1,0 +1,43 @@
+{
+  "recorded_at": "2026-10-07T13:03:57",
+  "mode": "degraded",
+  "novel": {
+    "phase": "0.3_novel_baseline",
+    "source_chars": 100,
+    "extraction_time_ms": 0.0,
+    "failure_codes_detected": 2,
+    "failure_codes": [
+      "HOOK_WEAK",
+      "DIALOG_STIFF"
+    ],
+    "revision_mode": "light",
+    "has_heavy": false,
+    "machine_readable": true,
+    "sample_review_lines": 5,
+    "note": "降级模式：评审样例固定，真实基线需 LLM 在线（Phase 4.2 前置）"
+  },
+  "drama": {
+    "phase": "0.4_drama_baseline",
+    "script_engine": {
+      "time_ms": 1.1,
+      "mode": "fallback_structured",
+      "scenes": 1,
+      "provenance": "read_only_text_source"
+    },
+    "contract_engine": {
+      "time_ms": 2.7,
+      "engine": "director_os_contract_v2",
+      "shots": 3,
+      "total_duration_s": 15.0,
+      "r_pre_marked": 0,
+      "precheck_issues": 0
+    },
+    "repair_router": {
+      "time_ms": 1.1,
+      "r_level": "R3",
+      "cf_hit": "CF-030"
+    },
+    "full_chain_time_ms": 4.9,
+    "note": "降级模式：知识层全链（无生成 API 调用）；真实基线需 LLM + 生图/生视频 API"
+  }
+}

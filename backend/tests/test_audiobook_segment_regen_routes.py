@@ -389,7 +389,7 @@ def test_review_status_logs_invalid_script_and_review_payload(caplog):
         assert "章节审查状态忽略损坏审查 JSON" in caplog.text
 
 
-def test_regenerate_segment_uses_current_qwen_default_voice_when_missing_voice(monkeypatch):
+def test_regenerate_segment_defers_model_default_voice_when_missing_voice(monkeypatch):
     session_factory = build_session_factory()
     synthesize_call = {}
 
@@ -425,16 +425,70 @@ def test_regenerate_segment_uses_current_qwen_default_voice_when_missing_voice(m
         segments = json.loads(context["chapter_audio"].script_json)
 
         assert payload["success"] is True
-        assert synthesize_call["model_id"] == "qwen3-tts-instruct-flash"
-        assert synthesize_call["voice_params"]["speaker"] == "Neil"
+        assert synthesize_call["model_id"] == "qwen-audio-3.1-tts-flash"
+        # 未选音色时接口下发空 speaker：默认音色只能在引擎各模型调用点决定，
+        # 接口层替别的供应商编音色名会跨音色空间错配（历史上硬编码退役声线名导致静默无声）
+        assert synthesize_call["voice_params"]["speaker"] == ""
         assert synthesize_call["voice_params"]["segment_speaker"] == "旁白"
         assert segments[0]["regenerated"] is True
         assert "chapter_segments_persistent_voice" in segments[0]["audio_path"]
         assert segments[0]["audio_path"].endswith(".mp3")
 
 
+@pytest.mark.parametrize(
+    "tts_model",
+    [
+        "qwen-audio-3.1-tts-flash",
+        "stepaudio-3-tts",
+        "seed-tts-2.0-expressive",
+        "mimo-v2.5-tts",
+        "mimo-v2.5-tts-voicedesign",
+        "mimo-v2.5-tts-voiceclone",
+    ],
+)
+def test_segment_regen_voice_id_stays_empty_for_engine_owned_defaults(tts_model):
+    """三级来源全空时接口必须返回空串，把默认音色决定权留给引擎各模型调用点。
+
+    接口层只有 MiniMax 需要显式兜底（引擎空音色会直接拒单），CosyVoice 需要显式 400；
+    其余模型共用一个声线名等于按某家音色空间给别家挑音色。
+    """
+    assert (
+        routes_segment_regen._resolve_segment_regen_voice_id(
+            tts_model=tts_model,
+            requested_voice_id=None,
+            segment_voice_params={},
+            segment={"type": "narration", "speaker": "旁白", "text": "夜风穿过走廊。"},
+        )
+        == ""
+    )
+
+
+def test_segment_regen_voice_id_falls_back_only_for_minimax():
+    assert (
+        routes_segment_regen._resolve_segment_regen_voice_id(
+            tts_model="minimax-speech-2.8-hd",
+            requested_voice_id=None,
+            segment_voice_params={},
+            segment={"type": "narration", "speaker": "旁白", "text": "夜风穿过走廊。"},
+        )
+        == routes_segment_regen.DEFAULT_MINIMAX_SEGMENT_REGEN_VOICE_ID
+    )
+
+
+def test_segment_regen_voice_id_rejects_cosyvoice_without_explicit_voice():
+    with pytest.raises(HTTPException) as exc_info:
+        routes_segment_regen._resolve_segment_regen_voice_id(
+            tts_model="cosyvoice-v3.5-plus",
+            requested_voice_id=None,
+            segment_voice_params={},
+            segment={"type": "narration", "speaker": "旁白", "text": "夜风穿过走廊。"},
+        )
+
+    assert exc_info.value.status_code == 400
+
+
 def test_candidate_payload_uses_project_voice_mapping_before_model_default():
-    request = SegmentRegenerateRequest(tts_model="qwen3-tts-instruct-flash")
+    request = SegmentRegenerateRequest(tts_model="qwen-audio-3.1-tts-flash")
 
     payload = routes_segment_regen._build_segment_synthesis_payload(
         request,
@@ -666,7 +720,7 @@ def test_preview_segment_uses_tts_retry_config(monkeypatch):
                         "text": "Preview segment.",
                         "emotion": "neutral",
                     },
-                    tts_model="qwen3-tts-instruct-flash",
+                    tts_model="qwen-audio-3.1-tts-flash",
                     preview_type="voice",
                 ),
                 owned=build_owned_context(db, context),
@@ -872,7 +926,7 @@ def test_preview_segment_compiles_server_owned_delivery_contract(monkeypatch):
                             "provider_prompt_snapshot": {"mode": "STALE_CLIENT_SNAPSHOT"},
                         },
                     },
-                    tts_model="qwen3-tts-instruct-flash",
+                    tts_model="qwen-audio-3.1-tts-flash",
                     preview_type="voice",
                 ),
                 owned=build_owned_context(db, context),
@@ -887,6 +941,46 @@ def test_preview_segment_compiles_server_owned_delivery_contract(monkeypatch):
         assert "director_guidance" not in compiled_params["delivery_plan"]
         assert compiled_params["delivery_plan"]["style_instruction"] == "slow and painful"
         assert compiled_params["provider_prompt_snapshot"]["mode"] != "STALE_CLIENT_SNAPSHOT"
+
+
+def test_preview_segment_rejects_unresolvable_voice_mapping_with_400(monkeypatch):
+    """试听遇到越界音色：400 带角色与音色名，不是 500，更不是换条声线继续出声。"""
+    from app.services.audiobook.voice_manager import VoiceMappingResolutionError
+
+    session_factory = build_session_factory()
+
+    class ExplodingPreviewService:
+        def __init__(self, **kwargs):
+            raise VoiceMappingResolutionError(
+                "角色音配置解析失败，已拒单而非降级为自动分配："
+                "角色 配角甲 指定的音色 'Neil'（model=qwen-audio-3.1-tts-flash）"
+                "在目标模型音色空间中不存在"
+            )
+
+    monkeypatch.setattr(routes_segment_preview, "SegmentPreviewService", ExplodingPreviewService)
+
+    with session_factory() as db:
+        context = seed_segment_context(db)
+        with pytest.raises(HTTPException) as exc_info:
+            asyncio.run(
+                preview_script_segment_audio(
+                    audiobook_project_id=context["audiobook_project"].id,
+                    chapter_id=context["chapter"].id,
+                    request=ScriptSegmentPreviewRequest(
+                        segment={
+                            "type": "narration",
+                            "speaker": "narrator",
+                            "text": "Preview with a stale voice binding.",
+                        },
+                        tts_model="qwen-audio-3.1-tts-flash",
+                        preview_type="voice",
+                    ),
+                    owned=build_owned_context(db, context),
+                )
+            )
+
+    assert exc_info.value.status_code == 400
+    assert "配角甲" in str(exc_info.value.detail)
 
 
 def test_preview_segment_rehydrates_owned_mimo_design_asset_baseline(monkeypatch):
@@ -1013,7 +1107,7 @@ def test_preview_segment_keeps_explicit_bound_voice_in_compiled_contract(monkeyp
                             "tts_model": "seed-tts-2.0-expressive",
                         },
                     },
-                    tts_model="qwen3-tts-instruct-flash",
+                    tts_model="qwen-audio-3.1-tts-flash",
                     preview_type="voice",
                 ),
                 owned=build_owned_context(db, context),

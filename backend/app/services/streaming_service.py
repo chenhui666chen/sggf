@@ -29,7 +29,7 @@ class StreamingService:
 
     def __init__(self, llm_client: Optional[UnifiedLLMClient] = None):
         self.llm_client = llm_client or get_llm_client(strategy="auto")
-        self.default_model = normalize_model_id(os.getenv("DEEPSEEK_MODEL", "qwen3.7-plus")) or "qwen3.7-plus"
+        self.default_model = normalize_model_id(os.getenv("DEEPSEEK_MODEL", "qwen-plus")) or "qwen-plus"
 
     async def generate_with_streaming(
         self,
@@ -43,6 +43,7 @@ class StreamingService:
         max_retries: int = 3,
         require_exact_model: bool = False,
         disable_thinking: bool = False,
+        on_llm_attempt: Optional[Callable[[], None]] = None,
     ) -> str:
         normalized_task_type = normalize_task_type(task_type)
         explicit_model = normalize_model_id(model)
@@ -82,6 +83,13 @@ class StreamingService:
                     await asyncio.sleep(wait_time)
 
                 logger.info(f"开始流式生成 | 模型: {selected_model} | 尝试: {attempt + 1}/{max_retries}")
+                # 阶段 A 观测：StreamingService 外层每次尝试（含本层重试）发起前累计一次。
+                # 注意：此为“外层尝试数”，不含 ModelHub 单次调用内的 provider/model fallback
+                # 与 adapter/供应商 SDK 自身重试——这些发生在一次 chat_stream 内部、本层不可见，
+                # 故发生 provider fallback 时 online_llm_calls 会少算（已知限制，精确统计须由
+                # ModelHub 逐次回调透传，属独立立项，见实施日志 §4）。
+                if on_llm_attempt is not None:
+                    on_llm_attempt()
                 content = await self.llm_client.chat_stream(
                     messages=messages,
                     on_chunk=relay,
@@ -129,6 +137,7 @@ class StreamingService:
         max_retries: int = 3,
         require_exact_model: bool = False,
         disable_thinking: bool = False,
+        on_llm_attempt: Optional[Callable[[], None]] = None,
     ) -> str:
         messages = [
             {"role": "system", "content": system_prompt},
@@ -144,6 +153,7 @@ class StreamingService:
             max_retries=max_retries,
             require_exact_model=require_exact_model,
             disable_thinking=disable_thinking,
+            on_llm_attempt=on_llm_attempt,
         )
 
 

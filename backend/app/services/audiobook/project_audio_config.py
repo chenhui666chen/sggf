@@ -363,7 +363,7 @@ def build_engine_config_snapshot(config: Dict[str, Any], engine_mode: str) -> Di
         "providers": {
             "seed_provider": "dashscope_seed",
             "asr_provider": "dashscope_asr",
-            "fallback_tts_model": "qwen3-tts-instruct-flash",
+            "fallback_tts_model": DEFAULT_AUDIOBOOK_TTS_MODEL,
             "fallback_tts_provider": "dashscope",
         },
     }

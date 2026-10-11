@@ -28,7 +28,6 @@ except ImportError:
 # 导入专业Agent
 from ..agents import (
     AudioDirector,
-    VoiceDesigner,
     SoundEffectDesigner,
     MusicComposer,
 )

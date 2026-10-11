@@ -252,7 +252,7 @@ const resolveLegacyVoiceAssetReference = (
       : `mimo_clone:${mimoVoiceAssetId}`
   }
   const stepaudioVoiceAssetId = trimOptionalText(voice.stepaudioVoiceAssetId)
-  if (stepaudioVoiceAssetId && effectiveModel === 'stepaudio-2.5-tts') {
+  if (stepaudioVoiceAssetId && effectiveModel === 'stepaudio-3-tts') {
     return `stepaudio_clone:${stepaudioVoiceAssetId}`
   }
   return ''

@@ -155,6 +155,8 @@ class PromptVersionSummary(BaseModel):
     version_id: str
     iteration: int
     avg_ai_score: float
+    # 🔧 2026-10-08 新增：确定AI段落占比（0-1，越低越好），本系统的真实适应度
+    avg_ai_ratio: Optional[float] = None
     avg_score_reduction: float
     analysis: str
     created_at: str
@@ -281,7 +283,15 @@ async def get_evolution_status(current_user: User = Depends(get_current_user)):
         storage.save_evolution_history(history)
         logger.debug(f"⚠️ 任务 {_current_evolution_id} 已中断，更新状态")
 
-    best_score = history.best_versions[0].avg_ai_score if history.best_versions else None
+    # 🔧 2026-10-08：对外「最佳得分」改用确定AI占比换算（0-100 标度）。
+    # 旧值取自恒为 100 的 avg_ai_score，无论优化好坏都显示 100。
+    _top = history.best_versions[0] if history.best_versions else None
+    if _top is None:
+        best_score = None
+    elif _top.avg_ai_ratio is not None:
+        best_score = _top.avg_ai_ratio * 100.0
+    else:
+        best_score = _top.avg_ai_score
 
     return EvolutionStatusResponse(
         is_running=is_running,
@@ -394,6 +404,7 @@ async def get_evolution_detail(
                 version_id=v.version_id,
                 iteration=v.iteration,
                 avg_ai_score=v.avg_ai_score,
+                avg_ai_ratio=v.avg_ai_ratio,
                 avg_score_reduction=v.avg_score_reduction,
                 analysis=v.analysis,
                 created_at=v.created_at
@@ -428,6 +439,7 @@ async def get_prompt_detail(
                 "iteration": v.iteration,
                 "prompt_text": v.prompt_text,
                 "avg_ai_score": v.avg_ai_score,
+                "avg_ai_ratio": v.avg_ai_ratio,
                 "avg_score_reduction": v.avg_score_reduction,
                 "analysis": v.analysis,
                 "evaluation_results": [
@@ -547,6 +559,7 @@ async def get_best_prompts(current_user: User = Depends(get_current_user)):
                 "version_id": v.version_id,
                 "iteration": v.iteration,
                 "avg_ai_score": v.avg_ai_score,
+                "avg_ai_ratio": v.avg_ai_ratio,
                 "prompt_preview": v.prompt_text[:200] + "..." if len(v.prompt_text) > 200 else v.prompt_text,
                 "created_at": v.created_at
             }

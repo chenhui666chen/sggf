@@ -80,10 +80,10 @@ def build_audio_library_user(*, admin: bool = False) -> User:
 
 
 def build_test_client(*, admin: bool = False) -> CompatTestClient:
-    app = FastAPI()
-    app.include_router(audiobook_router)
-    app.dependency_overrides[get_current_user] = lambda: build_audio_library_user(admin=admin)
-    return CompatTestClient(app)
+    # 素材库路由内部用 Depends(get_db)，不覆盖就会直连 .env 里的真实 PostgreSQL：
+    # 测试写入的素材行既跨用例泄漏，也跨进程泄漏，断言结果会变成执行顺序的函数。
+    client, _testing_session_local = build_db_test_client(admin=admin)
+    return client
 
 
 def build_db_test_client(*, admin: bool = False) -> tuple[CompatTestClient, sessionmaker]:
@@ -112,6 +112,21 @@ def build_db_test_client(*, admin: bool = False) -> tuple[CompatTestClient, sess
     app.dependency_overrides[get_db] = override_get_db
     app.dependency_overrides[routes_audio_library.get_db] = override_get_db
     return CompatTestClient(app), testing_session_local
+
+
+def test_audio_library_test_builders_never_bind_the_real_database():
+    """任何路由测试客户端都必须覆盖 get_db，否则用例会直连 .env 里的真实 PostgreSQL。
+
+    此前本文件的每条路由用例都直连开发库：上传用例把素材行写进 audio_library_assets，
+    cleanup / browse 用例随后读到它们，断言结果变成执行顺序的函数，脏行还跨进程留存。
+    """
+    lines = [line.strip() for line in Path(__file__).read_text(encoding="utf-8").splitlines()]
+    constructed = sum(1 for line in lines if line.endswith("= FastAPI()"))
+    db_overridden = sum(1 for line in lines if line.startswith("app.dependency_overrides[get_db] ="))
+    assert constructed == db_overridden > 0, (
+        f"FastAPI 构造点 {constructed} 处与 get_db 覆盖 {db_overridden} 处不配对，"
+        "新建测试客户端请复用 build_db_test_client"
+    )
 
 
 def test_public_sfx_auto_download_route_is_disabled():

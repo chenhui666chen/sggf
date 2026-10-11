@@ -134,12 +134,28 @@ class ModelRegistry:
             if self._builtin_loaded:
                 return
             module_names = [
-                "adapters.wanx_adapter",
-                "adapters.wan26_video_adapter",
-                "adapters.qwen_multimodal_adapter",
                 "adapters.new_models_adapters",
-                "adapters.mimo",
-                "adapters.volcengine",
+                "adapters.mimo.tts",
+                "adapters.volcengine.image",
+                "adapters.volcengine.chat",
+                "adapters.volcengine.video",
+                "adapters.volcengine.tts",
+                "adapters.volcengine.audio_generation",
+                # 下面按叶子模块列出，不能只列包名：reload 一个已在 sys.modules 里的包
+                # 只会重新执行 __init__ 的 import *，子模块体不会重跑，@register_model 也就不会再注册
+                "adapters.dashscope.chat",
+                "adapters.dashscope.image_sync",
+                "adapters.dashscope.image_async",
+                "adapters.dashscope.image_edit",
+                "adapters.dashscope.multimodal",
+                "adapters.dashscope.tts",
+                "adapters.dashscope.audio_generation",
+                "adapters.dashscope.video_t2v",
+                "adapters.dashscope.video_i2v",
+                "adapters.dashscope.video_wan3",
+                "adapters.dashscope.video_kling",
+                "adapters.mureka.instrumental",
+                "adapters.vidu_platform.video",
             ]
             # Keep imports explicit and minimal to avoid implicit side effects.
             for module_name in module_names:
@@ -223,9 +239,14 @@ class ModelRegistry:
         self._ensure_builtin_registration()
         return self._specs.get(model_id)
     
+    def has_adapter(self, model_id: str) -> bool:
+        """模型是否注册了可执行的 adapter 实现（yaml 有条目不代表可执行）。"""
+        self._ensure_builtin_registration()
+        return model_id in self._adapter_classes
+
     def get_adapter(
-        self, 
-        model_id: str, 
+        self,
+        model_id: str,
         config: Optional["AdapterConfig"] = None,
     ) -> Optional["BaseAdapter"]:
         """Get or create adapter instance for a model."""
@@ -441,7 +462,7 @@ _registry = ModelRegistry()
 
 def default_registry() -> "ModelRegistry":
     """Get the global singleton registry."""
-    _ensure_builtin_registration()
+    _registry._ensure_builtin_registration()
     return _registry
 
 

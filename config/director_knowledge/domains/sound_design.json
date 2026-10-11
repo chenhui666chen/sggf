@@ -1,0 +1,27 @@
+{
+  "_type": "domain",
+  "domain": "sound_design",
+  "unit_count": 4,
+  "units": {
+    "emotion_first_music": {
+      "content_status": "pending_content",
+      "note": "内容在归档 DOCX/XLSX（v1.2 起只读），待回填 SSOT knowledge_units 后重新派生",
+      "priority_backfill": null
+    },
+    "music_scene_matching": {
+      "content_status": "pending_content",
+      "note": "内容在归档 DOCX/XLSX（v1.2 起只读），待回填 SSOT knowledge_units 后重新派生",
+      "priority_backfill": null
+    },
+    "sound_design_formula": {
+      "content_status": "pending_content",
+      "note": "内容在归档 DOCX/XLSX（v1.2 起只读），待回填 SSOT knowledge_units 后重新派生",
+      "priority_backfill": null
+    },
+    "sfx_search_method": {
+      "content_status": "pending_content",
+      "note": "内容在归档 DOCX/XLSX（v1.2 起只读），待回填 SSOT knowledge_units 后重新派生",
+      "priority_backfill": null
+    }
+  }
+}

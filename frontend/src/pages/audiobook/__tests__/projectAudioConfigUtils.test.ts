@@ -42,12 +42,12 @@ describe('audiobook project audio config utils', () => {
   })
 
   it('builds narrator voice with model fallback voice', () => {
-    expect(buildBaseNarratorVoice('qwen3-tts-instruct-flash')).toMatchObject({
+    expect(buildBaseNarratorVoice('qwen-audio-3.1-tts-flash')).toMatchObject({
       characterId: 0,
       name: '旁白',
       gender: '中性',
       role: '旁白',
-      voiceId: 'Neil',
+      voiceId: 'longsanshu_v3.1',
       volume: 50,
       speed: 1,
       pitch: 50,
@@ -59,7 +59,7 @@ describe('audiobook project audio config utils', () => {
 
   it('builds character voice settings from saved project config', () => {
     const voices = buildProjectCharacterVoiceSettings({
-      ttsModel: 'qwen3-tts-instruct-flash',
+      ttsModel: 'qwen-audio-3.1-tts-flash',
       characters: [
         { id: 1, name: 'Alice', gender: 'female', role: 'lead' },
         { id: 2, name: 'Bob' },
@@ -110,7 +110,7 @@ describe('audiobook project audio config utils', () => {
         volume: 50,
         speed: 1,
         pitch: 50,
-        ttsModel: 'qwen3-tts-instruct-flash',
+        ttsModel: 'qwen-audio-3.1-tts-flash',
         voiceType: undefined,
         personality: undefined,
         emotionTendency: undefined,
@@ -149,7 +149,7 @@ describe('audiobook project audio config utils', () => {
           character_id: 3,
           name: 'StepHero',
           voice_id: '',
-          tts_model: 'stepaudio-2.5-tts',
+          tts_model: 'stepaudio-3-tts',
           stepaudio_voice_asset_id: 'stepaudio_clone_unit',
         },
       ],
@@ -205,8 +205,8 @@ describe('audiobook project audio config utils', () => {
 
   it('restores saved narrator tts_model for cross-model voice', () => {
     const voices = buildInitialProjectVoiceSettings({
-      ttsModel: 'qwen3-tts-instruct-flash',
-      voicePresets: [{ id: 'Neil' }],
+      ttsModel: 'qwen-audio-3.1-tts-flash',
+      voicePresets: [{ id: 'longsanshu_v3.1' }],
       characters: [],
       projectAudioConfig: {
         characters: [
@@ -233,8 +233,8 @@ describe('audiobook project audio config utils', () => {
 
   it('preserves narrator cross-model tts_model across load-save round trip', () => {
     const voices = buildInitialProjectVoiceSettings({
-      ttsModel: 'qwen3-tts-instruct-flash',
-      voicePresets: [{ id: 'Neil' }],
+      ttsModel: 'qwen-audio-3.1-tts-flash',
+      voicePresets: [{ id: 'longsanshu_v3.1' }],
       characters: [],
       projectAudioConfig: {
         characters: [
@@ -251,8 +251,8 @@ describe('audiobook project audio config utils', () => {
     const payload = buildProjectAudioConfigPayload({
       characterVoices: voices,
       audioFxConfig: createDefaultAudioFxConfig(),
-      ttsModel: 'qwen3-tts-instruct-flash',
-      voicePresets: [{ id: 'Neil' }],
+      ttsModel: 'qwen-audio-3.1-tts-flash',
+      voicePresets: [{ id: 'longsanshu_v3.1' }],
     })
 
     const narrator = payload.characters.find((item) => item.name === '旁白')
@@ -265,7 +265,7 @@ describe('audiobook project audio config utils', () => {
 
   it('applies voice assignments to existing character voice settings', () => {
     expect(applyProjectVoiceAssignments({
-      ttsModel: 'qwen3-tts-instruct-flash',
+      ttsModel: 'qwen-audio-3.1-tts-flash',
       characterVoices: [
         {
           characterId: 1,
@@ -302,7 +302,7 @@ describe('audiobook project audio config utils', () => {
         {
           character_id: 999,
           name: 'Missing',
-          voice_id: 'Neil',
+          voice_id: 'longsanshu_v3.1',
           volume: 60,
         },
       ],
@@ -339,7 +339,7 @@ describe('audiobook project audio config utils', () => {
     const audioFxConfig = createDefaultAudioFxConfig()
 
     expect(buildProjectAudioConfigPayload({
-      ttsModel: 'qwen3-tts-instruct-flash',
+      ttsModel: 'qwen-audio-3.1-tts-flash',
       voicePresets: [],
       audioFxConfig,
       characterVoices: [
@@ -373,8 +373,8 @@ describe('audiobook project audio config utils', () => {
         {
           character_id: 0,
           name: '旁白',
-          voice_id: 'Neil',
-          tts_model: 'qwen3-tts-instruct-flash',
+          voice_id: 'longsanshu_v3.1',
+          tts_model: 'qwen-audio-3.1-tts-flash',
         },
         {
           character_id: 2,
@@ -391,7 +391,7 @@ describe('audiobook project audio config utils', () => {
     const audioFxConfig = createDefaultAudioFxConfig()
 
     expect(buildProjectAudioConfigPayload({
-      ttsModel: 'qwen3-tts-instruct-flash',
+      ttsModel: 'qwen-audio-3.1-tts-flash',
       voicePresets: [],
       audioFxConfig,
       audioEngineMode: 'seed_scene',
@@ -403,7 +403,7 @@ describe('audiobook project audio config utils', () => {
       engines: {
         seed_scene: {
           tts_models: {
-            'qwen3-tts-instruct-flash': {
+            'qwen-audio-3.1-tts-flash': {
               characters: [],
             },
           },
@@ -493,14 +493,14 @@ describe('audiobook project audio config utils', () => {
     const audioFxConfig = createDefaultAudioFxConfig()
 
     expect(buildProjectAudioConfigPayload({
-      ttsModel: 'qwen3-tts-instruct-flash',
+      ttsModel: 'qwen-audio-3.1-tts-flash',
       voicePresets: [],
       audioFxConfig,
       characterVoices: [
         {
           characterId: 16,
           name: 'RuntimeDirectedRole',
-          voiceId: 'Neil',
+          voiceId: 'longsanshu_v3.1',
           volume: 72,
           speed: 1.4,
           pitch: 35,
@@ -512,12 +512,12 @@ describe('audiobook project audio config utils', () => {
     }).characters[0]).toEqual({
       character_id: 16,
       name: 'RuntimeDirectedRole',
-      voice_id: 'Neil',
-      tts_model: 'qwen3-tts-instruct-flash',
+      voice_id: 'longsanshu_v3.1',
+      tts_model: 'qwen-audio-3.1-tts-flash',
     })
 
     expect(buildAudiobookVoiceConfigPayload({
-      ttsModel: 'qwen3-tts-instruct-flash',
+      ttsModel: 'qwen-audio-3.1-tts-flash',
       voicePresets: [],
       characterVoices: [
         {
@@ -535,7 +535,7 @@ describe('audiobook project audio config utils', () => {
     })[0]).toEqual({
       character_name: 'RuntimeGeneratedPromptRole',
       voice_id: 'Cherry',
-      tts_model: 'qwen3-tts-instruct-flash',
+      tts_model: 'qwen-audio-3.1-tts-flash',
     })
   })
 
@@ -566,13 +566,13 @@ describe('audiobook project audio config utils', () => {
 
   it('ignores stale MiMo inline inputs when the effective model no longer uses them', () => {
     expect(buildAudiobookVoiceConfigPayload({
-      ttsModel: 'qwen3-tts-instruct-flash',
+      ttsModel: 'qwen-audio-3.1-tts-flash',
       voicePresets: [],
       characterVoices: [
         {
           characterId: 9,
           name: 'StaleInlineRole',
-          voiceId: 'Neil',
+          voiceId: 'longsanshu_v3.1',
           volume: 50,
           voiceCloneDataUrl: 'data:audio/wav;base64,STALE',
           voiceDesignPrompt: '不应进入非 MiMo inline 模型',
@@ -581,8 +581,8 @@ describe('audiobook project audio config utils', () => {
     })).toEqual([
       {
         character_name: 'StaleInlineRole',
-        voice_id: 'Neil',
-        tts_model: 'qwen3-tts-instruct-flash',
+        voice_id: 'longsanshu_v3.1',
+        tts_model: 'qwen-audio-3.1-tts-flash',
       },
     ])
   })
@@ -640,7 +640,7 @@ describe('audiobook project audio config utils', () => {
     ])
 
     expect(buildAudiobookVoiceConfigPayload({
-      ttsModel: 'stepaudio-2.5-tts',
+      ttsModel: 'stepaudio-3-tts',
       voicePresets: [],
       characterVoices: [
         {
@@ -648,7 +648,7 @@ describe('audiobook project audio config utils', () => {
           name: 'ReusableStepAudioClone',
           voiceId: 'stepaudio_clone:stepaudio_clone_unit',
           volume: 62,
-          ttsModel: 'stepaudio-2.5-tts',
+          ttsModel: 'stepaudio-3-tts',
           stepaudioVoiceAssetId: 'stepaudio_clone_unit',
         },
       ],
@@ -656,7 +656,7 @@ describe('audiobook project audio config utils', () => {
       {
         character_name: 'ReusableStepAudioClone',
         voice_id: 'stepaudio_clone:stepaudio_clone_unit',
-        tts_model: 'stepaudio-2.5-tts',
+        tts_model: 'stepaudio-3-tts',
       },
     ])
   })
@@ -697,7 +697,7 @@ describe('audiobook project audio config utils', () => {
       engines: {
         seed_scene: {
           tts_models: {
-            'qwen3-tts-instruct-flash': {
+            'qwen-audio-3.1-tts-flash': {
               characters: [{ character_id: 5, name: 'BranchHero', voice_id: 'branch-voice' }],
             },
           },
@@ -705,7 +705,7 @@ describe('audiobook project audio config utils', () => {
       },
     }
 
-    expect(resolveBranchSavedCharacters(config, 'seed_scene', 'qwen3-tts-instruct-flash')).toEqual([
+    expect(resolveBranchSavedCharacters(config, 'seed_scene', 'qwen-audio-3.1-tts-flash')).toEqual([
       { character_id: 5, name: 'BranchHero', voice_id: 'branch-voice' },
     ])
   })
@@ -733,23 +733,23 @@ describe('audiobook project audio config utils', () => {
       characters: [{ character_id: 0, name: 'Narrator', voice_id: 'top-level' }],
     }
 
-    expect(resolveBranchSavedCharacters(config, 'legacy_stems', 'qwen3-tts-instruct-flash')).toEqual([
+    expect(resolveBranchSavedCharacters(config, 'legacy_stems', 'qwen-audio-3.1-tts-flash')).toEqual([
       { character_id: 0, name: 'Narrator', voice_id: 'top-level' },
     ])
-    expect(resolveBranchSavedCharacters(config, 'seed_scene', 'qwen3-tts-instruct-flash')).toEqual([])
+    expect(resolveBranchSavedCharacters(config, 'seed_scene', 'qwen-audio-3.1-tts-flash')).toEqual([])
   })
 
   it('reads branch binding in buildInitialProjectVoiceSettings when engineMode given', () => {
     const voices = buildInitialProjectVoiceSettings({
-      ttsModel: 'qwen3-tts-instruct-flash',
-      voicePresets: [{ id: 'Neil' }],
+      ttsModel: 'qwen-audio-3.1-tts-flash',
+      voicePresets: [{ id: 'longsanshu_v3.1' }],
       characters: [{ id: 7, name: 'Hero' }],
       projectAudioConfig: {
         characters: [{ character_id: 0, name: 'Narrator', voice_id: 'top-level-narrator' }],
         engines: {
           seed_scene: {
             tts_models: {
-              'qwen3-tts-instruct-flash': {
+              'qwen-audio-3.1-tts-flash': {
                 characters: [{ character_id: 7, name: 'Hero', voice_id: 'seed-hero-voice' }],
               },
             },
@@ -766,7 +766,7 @@ describe('audiobook project audio config utils', () => {
   it('writes current engine branch into payload engines field', () => {
     const audioFxConfig = createDefaultAudioFxConfig()
     const payload = buildProjectAudioConfigPayload({
-      ttsModel: 'qwen3-tts-instruct-flash',
+      ttsModel: 'qwen-audio-3.1-tts-flash',
       voicePresets: [],
       audioFxConfig,
       audioEngineMode: 'seed_scene',
@@ -776,7 +776,7 @@ describe('audiobook project audio config utils', () => {
           name: 'Hero',
           voiceId: 'seed-hero-voice',
           volume: 50,
-          ttsModel: 'qwen3-tts-instruct-flash',
+          ttsModel: 'qwen-audio-3.1-tts-flash',
         },
       ],
     })
@@ -784,9 +784,9 @@ describe('audiobook project audio config utils', () => {
     expect(payload.engines).toEqual({
       seed_scene: {
         tts_models: {
-          'qwen3-tts-instruct-flash': {
+          'qwen-audio-3.1-tts-flash': {
             characters: [
-              { character_id: 7, name: 'Hero', voice_id: 'seed-hero-voice', tts_model: 'qwen3-tts-instruct-flash' },
+              { character_id: 7, name: 'Hero', voice_id: 'seed-hero-voice', tts_model: 'qwen-audio-3.1-tts-flash' },
             ],
           },
         },

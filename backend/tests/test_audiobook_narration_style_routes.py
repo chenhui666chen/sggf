@@ -68,8 +68,8 @@ def test_narration_styles_route_returns_dynamic_catalog_entries():
     assert set(by_id) >= {"professional", "dramatic", "relaxing", "expressive", "custom"}
     assert by_id["professional"]["name"] == "专业播报"
     assert by_id["custom"]["name"] == "自定义"
-    assert "qwen3-tts-instruct-flash" in by_id["professional"]["supported_models"]
-    assert "qwen3-tts-instruct-flash" not in by_id["dramatic"]["supported_models"]
+    assert "qwen-audio-3.1-tts-flash" in by_id["professional"]["supported_models"]
+    assert "qwen-audio-3.1-tts-flash" not in by_id["dramatic"]["supported_models"]
 
 
 def test_narration_style_lookup_separates_strict_find_from_generation_fallback():

@@ -14,13 +14,11 @@ import asyncio
 import hashlib
 import logging
 import random
-import os
 from typing import Dict, Any, Optional, List, Callable
 import io
 from dataclasses import dataclass
 from enum import Enum
 
-from ..constants import INSTRUCT_SPEAKER_IDS, normalize_speaker_id
 from ..voice_catalog import get_voice_entry
 
 logger = logging.getLogger(__name__)
@@ -64,12 +62,6 @@ COSYVOICE_V3_PLUS_INSTRUCT_CHOICES = {
 # Windows/Linux 常见网络瞬断 errno（用于判定可重试）。
 _RETRYABLE_NETWORK_ERRNOS = {10053, 10054, 104, 110, 111}
 
-# Qwen3-TTS Instruct Flash：优先读取新的 deployment 配置，并兼容历史环境变量。
-QWEN3_TTS_INSTRUCT_FLASH_MODEL_ID = (
-    os.getenv("QWEN3_TTS_INSTRUCT_FLASH_MODEL_ID")
-    or os.getenv("QWEN3_TTS_FLASH_MODEL_ID")
-    or "qwen3-tts-instruct-flash"
-)
 
 # 导入监控模块
 try:
@@ -98,15 +90,6 @@ class TTSUserInputError(ValueError):
     def __init__(self, message: str, *, code: str = "tts_user_input_error") -> None:
         super().__init__(message)
         self.code = code
-
-# 前端显示用模型名 -> DashScope 实际模型 ID
-ALIYUN_MODEL_ALIASES: Dict[str, str] = {
-    # 应用侧统一切到 qwen3-tts-instruct-flash，并兼容历史 qwen3-tts-flash 配置。
-    "qwen3-tts-instruct-flash": QWEN3_TTS_INSTRUCT_FLASH_MODEL_ID,
-    "qwen3-tts-flash": QWEN3_TTS_INSTRUCT_FLASH_MODEL_ID,
-    # 预留高阶版本；若未来官方启用真正的 qwen3-tts-plus，可在此更新
-    "qwen3-tts-plus": "qwen3-tts-plus",
-}
 
 # MiniMax Speech 2.8 模型映射
 MINIMAX_MODEL_ALIASES: Dict[str, str] = {

@@ -245,8 +245,8 @@ def test_scene_renderer_persists_safe_asr_usage_metadata(tmp_path: Path) -> None
     def transcribe(_audio_path: Path) -> dict:
         return {
             "transcript": "第一句 第二句",
-            "provider": "funasr_flash",
-            "model": "fun-asr-flash-2026-06-15",
+            "provider": "qwen_audio_asr_flash",
+            "model": "qwen-audio-3.1-asr-flash",
             "metadata": {
                 "request_id": "asr-request-1",
                 "usage": {"duration": 3},
@@ -263,8 +263,8 @@ def test_scene_renderer_persists_safe_asr_usage_metadata(tmp_path: Path) -> None
     result = service.render(_plan())
 
     assert result.status == "passed"
-    assert result.metadata["asr_provider"] == "funasr_flash"
-    assert result.metadata["asr_model"] == "fun-asr-flash-2026-06-15"
+    assert result.metadata["asr_provider"] == "qwen_audio_asr_flash"
+    assert result.metadata["asr_model"] == "qwen-audio-3.1-asr-flash"
     assert result.metadata["asr_request_id"] == "asr-request-1"
     assert result.metadata["asr_usage"] == {"duration": 3}
     assert "raw_output" not in str(result.metadata)
@@ -636,8 +636,8 @@ def test_scene_renderer_stops_when_per_scene_asr_call_budget_is_exhausted(
     def transcribe(audio_path: Path) -> dict:
         asr_calls.append(audio_path)
         return {
-            "provider": "funasr_flash",
-            "model": "fun-asr-flash-2026-06-15",
+            "provider": "qwen_audio_asr_flash",
+            "model": "qwen-audio-3.1-asr-flash",
             "transcript": "完全错误的转写",
             "metadata": {"usage": {"duration": 3}},
         }
@@ -669,8 +669,8 @@ def test_scene_renderer_aggregates_asr_cost_across_seed_retries(tmp_path: Path) 
 
     def transcribe(_audio_path: Path) -> dict:
         return {
-            "provider": "funasr_flash",
-            "model": "fun-asr-flash-2026-06-15",
+            "provider": "qwen_audio_asr_flash",
+            "model": "qwen-audio-3.1-asr-flash",
             "transcript": "完全错误的转写",
             "metadata": {
                 "request_id": "asr-request",
@@ -678,8 +678,8 @@ def test_scene_renderer_aggregates_asr_cost_across_seed_retries(tmp_path: Path) 
             },
         }
 
-    transcribe.provider_name = "funasr_flash"
-    transcribe.model = "fun-asr-flash-2026-06-15"
+    transcribe.provider_name = "qwen_audio_asr_flash"
+    transcribe.model = "qwen-audio-3.1-asr-flash"
     service = SceneRenderService(
         adapter=adapter,
         output_root=tmp_path,
@@ -693,13 +693,14 @@ def test_scene_renderer_aggregates_asr_cost_across_seed_retries(tmp_path: Path) 
     assert result.status == "legacy_stems"
     assert result.attempts == 2
     assert result.metadata["asr_attempt_count"] == 2
-    assert result.metadata["asr_actual_cost_yuan"] == 0.00132
+    assert result.metadata["asr_actual_cost_yuan"] == 0.00024
     assert [item["status"] for item in result.metadata["asr_attempts"]] == [
         "succeeded",
         "succeeded",
     ]
     assert all(
-        item["pricing_source"] == "aliyun_model_studio_public_price_2026-07-24"
+        item["pricing_source"]
+        == "aliyun_model_studio_qwen_audio_asr_token_price_2026-10-11"
         for item in result.metadata["asr_attempts"]
     )
     assert "raw_output" not in str(result.metadata)
@@ -715,13 +716,13 @@ def test_scene_renderer_enforces_known_asr_cost_budget_before_call(tmp_path: Pat
         asr_calls.append(audio_path)
         return {"transcript": "第一句 第二句"}
 
-    transcribe.provider_name = "funasr_flash"
-    transcribe.model = "fun-asr-flash-2026-06-15"
+    transcribe.provider_name = "qwen_audio_asr_flash"
+    transcribe.model = "qwen-audio-3.1-asr-flash"
     service = SceneRenderService(
         adapter=adapter,
         output_root=tmp_path,
         asr_provider=transcribe,
-        max_asr_cost_yuan_per_scene=0.0001,
+        max_asr_cost_yuan_per_scene=0.00002,
     )
 
     result = service.render(_plan())

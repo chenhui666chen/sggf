@@ -36,14 +36,14 @@ def test_context_optimizer_uses_requested_workflow_model_without_removed_long_co
     late_chapter_optimizer = ContextOptimizer(
         current_chapter=120,
         stage="content_creation",
-        model_name="deepseek-v4-flash",
+        model_name="deepseek-flash",
     )
 
-    assert late_chapter_optimizer.selected_model == "deepseek-v4-flash"
+    assert late_chapter_optimizer.selected_model == "deepseek-flash"
     assert "qwen-" + "long" not in late_chapter_optimizer.MODEL_LIMITS
 
     default_optimizer = get_context_optimizer(current_chapter=120, stage="content_creation")
-    assert default_optimizer.selected_model == "qwen3.7-plus"
+    assert default_optimizer.selected_model == "qwen-plus"
 
 
 def test_workflow_generation_model_validation_lists_llm_models_without_removed_long_context_qwen() -> None:
@@ -57,10 +57,10 @@ def test_workflow_generation_model_validation_lists_llm_models_without_removed_l
     model_ids = {item["id"] for item in models}
     removed_model_id = "qwen-" + "long"
 
-    assert DEFAULT_WORKFLOW_GENERATION_MODEL == "qwen3.7-plus"
-    assert "qwen3.7-plus" in model_ids
-    assert "deepseek-v4-pro" in model_ids
-    assert "MiniMax/MiniMax-M3" in model_ids
+    assert DEFAULT_WORKFLOW_GENERATION_MODEL == "qwen-plus"
+    assert "qwen-plus" in model_ids
+    assert "deepseek-pro" in model_ids
+    assert "minimax-m" in model_ids
     assert removed_model_id not in model_ids
 
     # 成本倍率以目录中最便宜模型为基准动态计算，不硬编码具体价格；
@@ -82,15 +82,15 @@ def test_workflow_generation_model_validation_lists_llm_models_without_removed_l
         assert item["cost_label"].endswith("×")
 
     # 稳定的相对价位关系：pro 贵于同名 flash/轻量档，默认创作模型贵于基准
-    assert by_id["deepseek-v4-pro"]["cost_multiplier"] > by_id["deepseek-v4-flash"]["cost_multiplier"]
-    assert by_id["mimo-v2.5-pro"]["cost_multiplier"] > by_id["mimo-v2.5"]["cost_multiplier"]
-    assert by_id["qwen3.7-plus"]["cost_multiplier"] > by_id[baseline_id]["cost_multiplier"]
-    assert by_id["MiniMax/MiniMax-M3"]["cost_multiplier"] > 1
-    assert by_id["kimi/kimi-k2.6"]["cost_multiplier"] > 1
-    assert by_id["glm-5.2"]["cost_multiplier"] > 1
+    assert by_id["deepseek-pro"]["cost_multiplier"] > by_id["deepseek-flash"]["cost_multiplier"]
+    assert by_id["mimo-pro"]["cost_multiplier"] > by_id["mimo-flash"]["cost_multiplier"]
+    assert by_id["qwen-plus"]["cost_multiplier"] > by_id[baseline_id]["cost_multiplier"]
+    assert by_id["minimax-m"]["cost_multiplier"] > 1
+    assert by_id["kimi-preview"]["cost_multiplier"] > 1
+    assert by_id["glm"]["cost_multiplier"] > 1
 
-    assert resolve_workflow_generation_model("deepseek-v4-pro") == "deepseek-v4-pro"
-    assert resolve_workflow_generation_model("MiniMax/MiniMax-M3") == "MiniMax/MiniMax-M3"
+    assert resolve_workflow_generation_model("deepseek-pro") == "deepseek-pro"
+    assert resolve_workflow_generation_model("minimax-m") == "minimax-m"
 
     with pytest.raises(ValueError):
         resolve_workflow_generation_model(removed_model_id)
@@ -104,16 +104,16 @@ def test_workflow_request_schemas_accept_generation_model_but_story_expansion_re
     start = StartWorkflowRequest(
         project_id=1,
         requirement="write",
-        workflow_generation_model="deepseek-v4-pro",
+        workflow_generation_model="deepseek-pro",
     )
     execute = ExecuteStageRequest(
         project_id=1,
         stage="content",
-        workflow_generation_model="deepseek-v4-flash",
+        workflow_generation_model="deepseek-flash",
     )
 
-    assert start.workflow_generation_model == "deepseek-v4-pro"
-    assert execute.workflow_generation_model == "deepseek-v4-flash"
+    assert start.workflow_generation_model == "deepseek-pro"
+    assert execute.workflow_generation_model == "deepseek-flash"
 
     with pytest.raises(ValidationError):
         ExpandStoryRequest(
@@ -121,7 +121,7 @@ def test_workflow_request_schemas_accept_generation_model_but_story_expansion_re
             current_outline="outline",
             world_setting="world",
             characters="characters",
-            workflow_generation_model="deepseek-v4-pro",
+            workflow_generation_model="deepseek-pro",
         )
 
 
@@ -314,7 +314,7 @@ async def test_generate_next_chapter_failure_updates_generation_history_error_fi
         previous_chapters_summary="summary",
         previous_chapters_payload=[],
         recent_chapter_assets_summary="assets",
-        workflow_generation_model="deepseek-v4-pro",
+        workflow_generation_model="deepseek-pro",
     )
 
     history_updates = [

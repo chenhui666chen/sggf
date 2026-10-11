@@ -5,13 +5,13 @@ from types import SimpleNamespace
 
 import pytest
 
+from agents.painter_pkg import _edit_pipeline, _library, _t2i_pipeline, _utils
+
 
 def test_generate_t2i_with_candidates_accepts_model_id_string(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    from agents import painter
-
     captured: dict[str, object] = {}
 
     def fake_generate_image(**kwargs):
@@ -26,11 +26,11 @@ def test_generate_t2i_with_candidates_accepts_model_id_string(
             },
         )()
 
-    monkeypatch.setattr(painter, "generate_image", fake_generate_image)
-    monkeypatch.setattr(painter, "_sanitize_prompt_for_safety", lambda prompt: (prompt, {"issues": 0}))
-    monkeypatch.setattr(painter, "_env_flag", lambda name, default: False)
+    monkeypatch.setattr(_utils, "generate_image", fake_generate_image)
+    monkeypatch.setattr(_t2i_pipeline, "_sanitize_prompt_for_safety", lambda prompt: (prompt, {"issues": 0}))
+    monkeypatch.setattr(_t2i_pipeline, "_env_flag", lambda name, default: False)
     monkeypatch.setattr(
-        painter,
+        _t2i_pipeline,
         "_write_image_from_generation_result",
         lambda result, out_path: out_path.write_bytes(b"png"),
     )
@@ -38,8 +38,8 @@ def test_generate_t2i_with_candidates_accepts_model_id_string(
     ctx = SimpleNamespace(payload={}, run_id="run-1")
     output_path = tmp_path / "out.png"
 
-    result = painter._generate_t2i_with_candidates(
-        adapter="wan2.6-t2i",
+    result = _t2i_pipeline._generate_t2i_with_candidates(
+        adapter="qwen-image-3.0",
         prompt="hero portrait",
         negative_prompt="blurry",
         width=768,
@@ -66,7 +66,7 @@ def test_generate_t2i_with_candidates_accepts_model_id_string(
         "width": 768,
         "height": 1024,
         "seed": 11,
-        "model_id": "wan2.6-t2i",
+        "model_id": "qwen-image-3.0",
     }
 
 
@@ -90,11 +90,11 @@ def test_generate_t2i_with_parallel_candidates_keeps_model_id_string_path(
             },
         )()
 
-    monkeypatch.setattr(painter, "generate_image", fake_generate_image)
-    monkeypatch.setattr(painter, "_sanitize_prompt_for_safety", lambda prompt: (prompt, {"issues": 0}))
-    monkeypatch.setattr(painter, "_env_flag", lambda name, default: False)
+    monkeypatch.setattr(_utils, "generate_image", fake_generate_image)
+    monkeypatch.setattr(_t2i_pipeline, "_sanitize_prompt_for_safety", lambda prompt: (prompt, {"issues": 0}))
+    monkeypatch.setattr(_t2i_pipeline, "_env_flag", lambda name, default: False)
     monkeypatch.setattr(
-        painter,
+        _t2i_pipeline,
         "_write_image_from_generation_result",
         lambda result, out_path: out_path.write_bytes(str(result.data["image_url"]).encode("utf-8")),
     )
@@ -102,8 +102,8 @@ def test_generate_t2i_with_parallel_candidates_keeps_model_id_string_path(
     ctx = SimpleNamespace(payload={}, run_id="run-1b")
     output_path = tmp_path / "parallel.png"
 
-    result = painter._generate_t2i_with_candidates(
-        adapter="wan2.6-t2i",
+    result = _t2i_pipeline._generate_t2i_with_candidates(
+        adapter="qwen-image-3.0",
         prompt="hero portrait",
         negative_prompt="blurry",
         width=768,
@@ -124,7 +124,7 @@ def test_generate_t2i_with_parallel_candidates_keeps_model_id_string_path(
 
     assert hasattr(painter, "create_runtime_client") is False
     assert len(calls) == 2
-    assert [call["model_id"] for call in calls] == ["wan2.6-t2i", "wan2.6-t2i"]
+    assert [call["model_id"] for call in calls] == ["qwen-image-3.0", "qwen-image-3.0"]
     assert sorted(int(call["seed"]) for call in calls) == [21, 22]
     assert output_path.exists() is True
     assert result["candidate_count"] == 2
@@ -134,15 +134,13 @@ def test_generate_t2i_with_parallel_candidates_keeps_model_id_string_path(
 def test_resolve_runtime_model_id_prefers_runtime_config_over_env(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from agents import painter
-
     monkeypatch.setenv("DREAMWEAVER_T2I_MODEL", "env-image-model")
 
-    resolved = painter._resolve_runtime_model_id(
+    resolved = _utils._resolve_runtime_model_id(
         {"adapter": "runtime-image-model"},
         key="adapter",
         env_name="DREAMWEAVER_T2I_MODEL",
-        default="wan2.6-t2i",
+        default="qwen-image-3.0",
     )
 
     assert resolved == "runtime-image-model"
@@ -151,19 +149,17 @@ def test_resolve_runtime_model_id_prefers_runtime_config_over_env(
 def test_resolve_runtime_model_id_requires_available_when_requested(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from agents import painter
-
     monkeypatch.setenv("DREAMWEAVER_VLM_ADAPTER", "env-vlm-model")
-    monkeypatch.setattr(painter, "_model_client_available", lambda model_id: model_id == "runtime-vlm-model")
+    monkeypatch.setattr(_utils, "_model_client_available", lambda model_id: model_id == "runtime-vlm-model")
 
-    resolved = painter._resolve_runtime_model_id(
+    resolved = _utils._resolve_runtime_model_id(
         {"vlm_adapter": "runtime-vlm-model"},
         key="vlm_adapter",
         env_name="DREAMWEAVER_VLM_ADAPTER",
         default="qwen3_vl_plus",
         require_available=True,
     )
-    missing = painter._resolve_runtime_model_id(
+    missing = _utils._resolve_runtime_model_id(
         {"vlm_adapter": "missing-vlm-model"},
         key="vlm_adapter",
         env_name="DREAMWEAVER_VLM_ADAPTER",
@@ -179,8 +175,6 @@ def test_generate_edit_with_candidates_accepts_model_id_string_and_multi_ref(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    from agents import painter
-
     base_image = tmp_path / "base.png"
     ref_image = tmp_path / "ref.png"
     base_image.write_bytes(b"base")
@@ -200,12 +194,12 @@ def test_generate_edit_with_candidates_accepts_model_id_string_and_multi_ref(
             },
         )()
 
-    monkeypatch.setattr(painter, "edit_image", fake_edit_image)
-    monkeypatch.setattr(painter, "model_supports_capability", lambda model_id, capability: capability == "multi_image")
-    monkeypatch.setattr(painter, "_sanitize_prompt_for_safety", lambda prompt: (prompt, {"issues": 0}))
-    monkeypatch.setattr(painter, "_env_flag", lambda name, default: False)
+    monkeypatch.setattr(_utils, "edit_image", fake_edit_image)
+    monkeypatch.setattr(_utils, "model_supports_capability", lambda model_id, capability: capability == "multi_image")
+    monkeypatch.setattr(_edit_pipeline, "_sanitize_prompt_for_safety", lambda prompt: (prompt, {"issues": 0}))
+    monkeypatch.setattr(_edit_pipeline, "_env_flag", lambda name, default: False)
     monkeypatch.setattr(
-        painter,
+        _edit_pipeline,
         "_write_image_from_generation_result",
         lambda result, out_path: out_path.write_bytes(b"edited"),
     )
@@ -213,7 +207,7 @@ def test_generate_edit_with_candidates_accepts_model_id_string_and_multi_ref(
     ctx = SimpleNamespace(payload={}, run_id="run-2")
     output_path = tmp_path / "edited.png"
 
-    result = painter._generate_edit_with_candidates(
+    result = _edit_pipeline._generate_edit_with_candidates(
         adapter="qwen_image_edit_plus",
         image_path=base_image,
         edit_prompt="add moonlight",
@@ -254,8 +248,6 @@ def test_try_generate_multiperson_fusion_head_uses_match_scene_helper(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    from agents import painter
-
     scene = tmp_path / "scene.png"
     person_a = tmp_path / "a.png"
     person_b = tmp_path / "b.png"
@@ -277,16 +269,16 @@ def test_try_generate_multiperson_fusion_head_uses_match_scene_helper(
             },
         )()
 
-    monkeypatch.setattr(painter, "match_scene_with_model", fake_match_scene_with_model)
-    monkeypatch.setattr(painter, "_model_client_available", lambda model_id: True)
+    monkeypatch.setattr(_library, "match_scene_with_model", fake_match_scene_with_model)
+    monkeypatch.setattr(_library, "_model_client_available", lambda model_id: True)
     monkeypatch.setattr(
-        painter,
+        _library,
         "_write_image_from_generation_result",
         lambda result, out_path: out_path.write_bytes(f"step-{len(calls)}".encode("utf-8")),
     )
 
     output_path = tmp_path / "head.png"
-    fused_path, meta = painter._try_generate_multiperson_fusion_head(
+    fused_path, meta = _library._try_generate_multiperson_fusion_head(
         shot_id="shot-1",
         output_path=output_path,
         head_prompt="hero group shot",

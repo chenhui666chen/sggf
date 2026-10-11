@@ -33,9 +33,9 @@ from ._constants import *
 class StoryHelperMixin:
     @staticmethod
     def estimate_volume_detail_model(chapters_count_range: Tuple[int, int]) -> str:
-        """卷细化统一使用 deepseek-v4-pro，避免超长输出时中途收缩。"""
+        """卷细化统一使用 deepseek-pro，避免超长输出时中途收缩。"""
         _ = chapters_count_range
-        return "deepseek-v4-pro"
+        return "deepseek-pro"
 
     @staticmethod
     def _story_trim_volume_detail_preamble(volume_content: str) -> str:

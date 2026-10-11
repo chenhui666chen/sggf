@@ -371,23 +371,11 @@ def resolve_chapter_render_chunk_max_chars(
 ) -> int:
     """与引擎 ``_build_render_chunks`` 一致的分块决策，返回最终生效的分块上限。
 
-    任一片段声明 Qwen 模型或默认模型为 Qwen 时使用更小分块上限，
-    否则使用默认策略（环境变量或内置默认值）的最终生效值。
+    已退役的 Qwen3 曾有独立的 360 字小上限；当前所有在架模型都走默认策略
+    （环境变量或内置默认值）的最终生效值，因此不再按模型分档。
     """
-    from app.services.audiobook.engine_pkg._tts_mixin import (
-        QWEN_RENDER_CHUNK_MAX_CHARS,
-        _is_qwen_tts_model,
-        _item_tts_model,
-    )
     from app.services.audiobook.render_plan import _resolve_chunk_char_limit
 
-    has_qwen_model = _is_qwen_tts_model(default_tts_model) or any(
-        _is_qwen_tts_model(_item_tts_model(item))
-        for item in list(segments or [])
-        if _item_tts_model(item)
-    )
-    if has_qwen_model:
-        return int(QWEN_RENDER_CHUNK_MAX_CHARS)
     return int(_resolve_chunk_char_limit(None))
 
 
@@ -399,20 +387,10 @@ def _compute_segment_audio_cache_key(
     synchronize_semantics: bool,
     exclude_engine_style_keys: bool = True,
 ) -> str:
-    from app.services.audiobook.engine_pkg._tts_mixin import (
-        QWEN_RENDER_CHUNK_MAX_CHARS,
-        _is_qwen_tts_model,
-    )
-    from app.services.audiobook.tts_delivery_plan import resolve_segment_tts_model
-
     normalized = _normalize_segment_for_render_plan(segment)
-    raw_voice_params = getattr(normalized, "voice_params", None)
-    voice_params = raw_voice_params if isinstance(raw_voice_params, dict) else {}
     if render_chunk_max_chars is _UNSET_CHUNK_LIMIT:
-        resolved_model = resolve_segment_tts_model(voice_params, default_tts_model)
-        max_chunk_chars = (
-            QWEN_RENDER_CHUNK_MAX_CHARS if _is_qwen_tts_model(resolved_model) else None
-        )
+        # 当前在架模型都不再有独立小上限，未显式传入时按默认策略复现签名。
+        max_chunk_chars = None
     else:
         max_chunk_chars = render_chunk_max_chars
     chunks = build_render_plan(
@@ -437,8 +415,7 @@ def compute_segment_audio_cache_key(
     用于判断“片段文本/音色参数已修改、已保存音频过期”。
     与管线 ``build_render_plan`` 使用同一签名算法，保证按签名复用时的一致性。
     显式传入 ``render_chunk_max_chars`` 时按该分块上限复现签名
-    （应使用片段记录的生成上下文），未提供时按片段 TTS 模型推断
-    （Qwen 模型使用更小的分块上限）。
+    （应使用片段记录的生成上下文），未提供时按默认分块策略复现。
     """
     return _compute_segment_audio_cache_key(
         segment,
@@ -655,25 +632,14 @@ def infer_segment_render_chunk_max_chars(
     *,
     default_tts_model: Optional[str] = None,
 ) -> int:
-    """按片段 TTS 模型推断生成分块上限（与 compute 推断分支同策略）。
+    """按当前分块策略推断生成分块上限（与 compute 推断分支同策略）。
 
-    与 ``compute_segment_audio_cache_key`` 未显式传入上限时的推断路径
-    保持一致（同一 resolve_segment_tts_model 回退链），避免自愈重写
-    签名时记录的上下文与验签推断不匹配。
+    与 ``compute_segment_audio_cache_key`` 未显式传入上限时的推断路径保持一致，
+    避免自愈重写签名时记录的上下文与验签推断不匹配。
+    已退役的 Qwen3 独立小上限取消后，所有模型都返回默认策略值。
     """
-    from app.services.audiobook.engine_pkg._tts_mixin import (
-        QWEN_RENDER_CHUNK_MAX_CHARS,
-        _is_qwen_tts_model,
-    )
     from app.services.audiobook.render_plan import _resolve_chunk_char_limit
-    from app.services.audiobook.tts_delivery_plan import resolve_segment_tts_model
 
-    normalized = _normalize_segment_for_render_plan(segment)
-    raw_voice_params = getattr(normalized, "voice_params", None)
-    voice_params = raw_voice_params if isinstance(raw_voice_params, dict) else {}
-    resolved_model = resolve_segment_tts_model(voice_params, default_tts_model)
-    if _is_qwen_tts_model(resolved_model):
-        return int(QWEN_RENDER_CHUNK_MAX_CHARS)
     return int(_resolve_chunk_char_limit(None))
 
 

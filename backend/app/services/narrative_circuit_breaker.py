@@ -29,7 +29,7 @@ P4：可暂停自动推进与熔断
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, Optional
+from typing import Any, Dict, NamedTuple, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +61,18 @@ _PAUSE_REASONS = {
 _REPEAT_MIN_CHARS = 400
 _REPEAT_RATIO_THRESHOLD = 0.92
 _PLACEHOLDER_MARKERS = ("（此处为生成的章节内容）",)
+
+# 章节正文合法收尾字符（句末标点/引号/括号收口）；结尾不在此集合视为疑似截断（F.6 TruncatedOutput）
+_CHAPTER_ENDING_CHARS = set('。！？…！?~"\'\'』」》）).')
+# 正文最小字符数：非空但短于此值视为过短产出（F.6 EmptyOrShortOutput）；与截断启发式下限一致
+_MIN_CHAPTER_CHARS = 200
+
+# F.6 稳定输出拒绝码（output_reject_reason）；前端 OUTPUT_REJECT_REASON_LABELS 已预置对应中文标签
+REASON_EMPTY = "EmptyOutput"
+REASON_PLACEHOLDER = "PlaceholderOutput"
+REASON_SHORT = "EmptyOrShortOutput"
+REASON_REPEAT = "RepeatedOutput"
+REASON_TRUNCATED = "TruncatedOutput"
 
 
 def _default_state() -> Dict[str, Any]:
@@ -235,22 +247,105 @@ def _char_ngram_overlap(left: str, right: str, n: int = 8) -> float:
     return inter / union if union else 0.0
 
 
-def detect_invalid_chapter_output(draft: Any, previous_content: Any = "") -> Optional[str]:
+class ChapterOutputVerdict(NamedTuple):
+    """统一输出验收结果（F.6）：accepted=是否可采用；code=稳定拒绝码（accepted 时为空）；
+    detail=中文详情（供熔断信号/日志复用，accepted 时为空）。"""
+
+    accepted: bool
+    code: str
+    detail: str
+
+
+def is_likely_truncated(text: Any) -> bool:
+    """启发式检测正文是否疑似截断：以非句末标点收尾（如'离她二十'）视为截断（F.6 TruncatedOutput）。
+
+    仅对 >=_MIN_CHAPTER_CHARS 的文本判定；空稿/过短稿走 EmptyOutput/EmptyOrShortOutput，不在此管辖。
+    routes_chapter._is_likely_truncated_chapter 委托本函数，保证截断口径单一真源。
+    """
+    s = str(text or "")
+    if len(s) < _MIN_CHAPTER_CHARS:
+        return False
+    stripped = s.rstrip()
+    if not stripped:
+        return False
+    return stripped[-1] not in _CHAPTER_ENDING_CHARS
+
+
+def evaluate_chapter_output(draft: Any, previous_content: Any = "") -> ChapterOutputVerdict:
+    """统一输出验收纯函数（F.6 唯一真源）：按 空→占位→过短→重复→截断 顺序判定。
+
+    主正文/同步 fallback/content_retry/结构重生成/改稿全部改调本函数，消除此前四处分裂口径
+    （主正文只查空/占位/重复、结构重生成只查 len>200、改稿硬编码 accepted、截断检测只驱动重试
+    不进验收）。返回稳定拒绝码 code 供 output_reject_reason、中文 detail 供熔断信号；accepted 时二者为空。
+    """
     text = str(draft or "").strip()
     if not text:
-        return "正文输出为空"
+        return ChapterOutputVerdict(False, REASON_EMPTY, "正文输出为空")
     if any(marker in text for marker in _PLACEHOLDER_MARKERS):
-        return "正文输出为占位模板"
+        return ChapterOutputVerdict(False, REASON_PLACEHOLDER, "正文输出为占位模板")
+    if len(text) < _MIN_CHAPTER_CHARS:
+        return ChapterOutputVerdict(
+            False, REASON_SHORT, f"正文过短（{len(text)}<{_MIN_CHAPTER_CHARS} 字符）"
+        )
     previous = str(previous_content or "").strip()
-    if len(text) < _REPEAT_MIN_CHARS or len(previous) < _REPEAT_MIN_CHARS:
-        return None
-    left = _normalize_repeat_text(text)
-    right = _normalize_repeat_text(previous)
-    if not left or not right:
-        return None
-    if left == right:
-        return "正文与上一章完全重复"
-    overlap = _char_ngram_overlap(left, right)
-    if overlap >= _REPEAT_RATIO_THRESHOLD:
-        return f"正文与上一章高度重复（overlap={overlap:.2f}）"
-    return None
+    if len(text) >= _REPEAT_MIN_CHARS and len(previous) >= _REPEAT_MIN_CHARS:
+        left = _normalize_repeat_text(text)
+        right = _normalize_repeat_text(previous)
+        if left and right:
+            if left == right:
+                return ChapterOutputVerdict(False, REASON_REPEAT, "正文与上一章完全重复")
+            overlap = _char_ngram_overlap(left, right)
+            if overlap >= _REPEAT_RATIO_THRESHOLD:
+                return ChapterOutputVerdict(
+                    False, REASON_REPEAT, f"正文与上一章高度重复（overlap={overlap:.2f}）"
+                )
+    if is_likely_truncated(text):
+        return ChapterOutputVerdict(
+            False, REASON_TRUNCATED, f"正文疑似截断（结尾…{text[-20:]}）"
+        )
+    return ChapterOutputVerdict(True, "", "")
+
+
+def detect_invalid_chapter_output(draft: Any, previous_content: Any = "") -> Optional[str]:
+    """兼容包装：返回中文拒绝详情或 None（None=可接受）。语义已升级为含过短/截断。
+
+    新代码应直接用 evaluate_chapter_output 取 (accepted, code, detail)；本函数保留供既有熔断信号
+    detail 与历史调用方复用，委托 evaluate_chapter_output 保证验收口径单一真源、不再各路径分裂。
+    """
+    return evaluate_chapter_output(draft, previous_content).detail or None
+
+
+class FinalVersionResolution(NamedTuple):
+    """最终保存前验收 + 回退结果（F.6 第五条路径）：version=采用版本；verdict=该版本验收；
+    source=来源（final/best/draft，或 none=三者全无效须终止保存）。"""
+
+    version: str
+    verdict: ChapterOutputVerdict
+    source: str
+
+
+def resolve_final_version(
+    final_version: Any,
+    best_version: Any,
+    chapter_draft: Any,
+    previous_content: Any = "",
+) -> FinalVersionResolution:
+    """最终保存前统一验收 + 回退优先级（F.6 第五条路径闭环，第十三轮 P1-2）。
+
+    clean_final_output 可能把终稿清空、同步 optimize_chapter fallback 返回未验收稿，二者都绕过
+    改稿循环验收直奔 project_settings.final_version 与 chapters.content 落库。本函数在保存前按
+    final→best→draft 优先级返回首个通过 evaluate_chapter_output 的版本；三者全无效时返回
+    source="none" + 末位候选的 rejected verdict，由调用方终止保存并触发 empty_output 熔断，
+    杜绝空/过短/占位/重复/截断稿落库。best/draft 为改稿循环/主正文已验收版本，作可靠回退兜底。
+    """
+    last_verdict = ChapterOutputVerdict(False, REASON_EMPTY, "正文输出为空")
+    for candidate, source in (
+        (final_version, "final"),
+        (best_version, "best"),
+        (chapter_draft, "draft"),
+    ):
+        verdict = evaluate_chapter_output(candidate, previous_content)
+        last_verdict = verdict
+        if verdict.accepted:
+            return FinalVersionResolution(str(candidate or ""), verdict, source)
+    return FinalVersionResolution(str(chapter_draft or ""), last_verdict, "none")

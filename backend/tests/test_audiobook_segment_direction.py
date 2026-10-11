@@ -110,7 +110,7 @@ async def test_voice_direction_assist_filters_runtime_fields_and_preserves_user_
         cue_type="voice",
         description=description,
         segment={"instruct_scene": "水牢囚禁场景"},
-        tts_model="qwen3-tts-instruct-flash",
+        tts_model="qwen-audio-3.1-tts-flash",
         llm_client=_JsonLLM(),
     )
 

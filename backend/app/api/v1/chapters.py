@@ -11,7 +11,7 @@ from app.models.project import Project, Chapter, ChapterRevision
 from app.schemas.project import ChapterUpdate, ChapterResponse, ChapterCreate, ChapterRevisionResponse
 from app.core.security import get_current_user
 from app.utils.datetime_utils import ensure_utc_datetime, utc_now
-from app.services.chapter_creation import create_project_chapter
+from app.services.chapter_creation import ChapterNumberConflictError, create_project_chapter
 import re
 from io import BytesIO
 from datetime import datetime
@@ -58,13 +58,20 @@ async def create_chapter(
         )
     
     # 与 POST /api/v1/projects/{id}/chapters 共用同一套创建逻辑
-    return create_project_chapter(
-        db,
-        chapter_data.project_id,
-        content=chapter_data.content,
-        chapter_number=chapter_data.chapter_number,
-        title=chapter_data.title,
-    )
+    # 阶段 B WP2：编号并发冲突/显式重复编号转 409，不让 IntegrityError 传播为 500
+    try:
+        return create_project_chapter(
+            db,
+            chapter_data.project_id,
+            content=chapter_data.content,
+            chapter_number=chapter_data.chapter_number,
+            title=chapter_data.title,
+        )
+    except ChapterNumberConflictError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"章节号冲突：第{exc.chapter_number}章已存在或并发创建冲突，请刷新后重试",
+        ) from exc
 
 
 @router.get("/{chapter_id:int}", response_model=ChapterResponse)

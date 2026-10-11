@@ -11,7 +11,7 @@ describe('StepAudio voice asset source wiring', () => {
     const source = readSource('src/pages/audiobook/VoiceCatalogStatusPanel.tsx')
 
     expect(source).toContain('StepAudioVoiceCloneWorkbench')
-    expect(source).toContain("ttsModel === 'stepaudio-2.5-tts'")
+    expect(source).toContain("ttsModel === 'stepaudio-3-tts'")
     expect(source).toContain('STEPAUDIO_VOICE_CLONE_NOTICE')
   })
 

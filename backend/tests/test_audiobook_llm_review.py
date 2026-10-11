@@ -141,7 +141,7 @@ async def test_llm_review_applies_structural_fix_with_flash_model():
     assert result.report["applied"] is True
     assert result.report["coverage_ratio"] == 1.0
     assert result.segments[0].performance_notes == "\u4f4e\u6c89\u5e73\u7a33\u3002"
-    assert llm.calls[0]["model"] == "deepseek-v4-flash"
+    assert llm.calls[0]["model"] == "deepseek-flash"
     assert llm.calls[0]["max_tokens"] <= REVIEW_OUTPUT_TOKEN_MAX
     assert llm.calls[0]["timeout"] <= REVIEW_TIMEOUT_MAX_SECONDS
     assert llm.calls[0]["max_retries"] == 1

@@ -100,19 +100,27 @@ def test_privacy_policy_content_hash_covers_full_text():
     """P2-5.5：privacy_policy 的 content_hash 必须基于政策正文全文，不得退化为短文案。
 
     存证对象 = 用户勾选同意时看到的政策文本（/privacy 展示页与
-    docs/PRIVACY_POLICY.md 的内容）。正文变更须升版本并重新征得同意。
+    docs/PRIVACY_POLICY.md 的内容）。正文变更须升版本并重新征得同意，
+    所以断言锚在「当前生效版本」上，而不是锚死某个版本号。
     """
     from app.services.consent_service import (
         CONSENT_TEXTS,
+        CURRENT_CONSENT_VERSIONS,
         PRIVACY_POLICY_V1_TEXT,
+        PRIVACY_POLICY_V2_TEXT,
         sha256_content_hash,
     )
 
+    policy_texts = {"v1": PRIVACY_POLICY_V1_TEXT, "v2": PRIVACY_POLICY_V2_TEXT}
+    version = CURRENT_CONSENT_VERSIONS["privacy_policy"]
+    assert version in policy_texts, f"生效版本 {version} 缺少对应的正文常量，无法存证"
+
     text = CONSENT_TEXTS["privacy_policy"]
-    assert text == PRIVACY_POLICY_V1_TEXT
+    assert text == policy_texts[version], "存证文本必须就是当前生效版本的正文"
+    assert f"版本：{version}" in text, "正文里的版本标记与 CURRENT_CONSENT_VERSIONS 不一致"
     assert len(text) > 1000, "存证对象必须是政策正文全文，不得退化为短文案"
 
-    # 5.5 大纲七项关键要素 + 定稿信息逐一在正文出现
+    # 大纲七项关键要素 + 定稿信息逐一在正文出现
     for keyword in (
         "收集的个人信息",
         "保存期限",
@@ -122,9 +130,24 @@ def test_privacy_policy_content_hash_covers_full_text():
         "本政策如何更新",
         "371640372@qq.com",
         "南京拾光工坊信息科技有限公司",
-        "2026 年 9 月 2 日",
+        "生效日期",
     ):
         assert keyword in text, f"政策正文缺少关键要素：{keyword}"
 
     # content_hash 可由正文确定性重现（存证可校验）
-    assert sha256_content_hash(text) == sha256_content_hash(PRIVACY_POLICY_V1_TEXT)
+    assert sha256_content_hash(text) == sha256_content_hash(policy_texts[version])
+
+
+def test_privacy_policy_doc_matches_consent_text():
+    """docs/PRIVACY_POLICY.md 必须逐字等于存证正文，否则文档与用户同意的对象再次漂移。
+
+    上一条用例只比常量之间的一致性，抓不到「常量改了、文档没跟着改」。政策是法律
+    文本，同步只允许逐字复制，不允许按语义改写措辞，所以这里做全等断言而不是相似度。
+    """
+    from app.services.consent_service import CONSENT_TEXTS
+
+    doc_path = Path(__file__).resolve().parents[2] / "docs" / "PRIVACY_POLICY.md"
+    doc_text = doc_path.read_text(encoding="utf-8").replace("\r\n", "\n")
+    assert doc_text == CONSENT_TEXTS["privacy_policy"], (
+        "隐私政策文档与存证正文不一致：升版本后须把 consent_service 的当前正文逐字同步到文档"
+    )

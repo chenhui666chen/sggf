@@ -285,8 +285,8 @@ class HighPerformanceVoiceConsistencyManager:
                 continue
             
             tts_params = {
-                "model": "qwen3-tts",
-                "voice": voice_id or "Ryan",
+                "model": "qwen-audio-3.1-tts-flash",
+                "voice": voice_id or "longsanshu_v3.1",
                 "voice_style": voice_style
             }
             

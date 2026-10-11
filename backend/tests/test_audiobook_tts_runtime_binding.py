@@ -102,7 +102,7 @@ def test_runtime_rejects_explicit_model_conflicting_with_voice_profile() -> None
                     "speaker": "zh_male_yuanboxiaoshu_uranus_bigtts",
                     "tts_model": "seed-tts-2.0-expressive",
                 },
-                model_id="qwen3-tts-instruct-flash",
+                model_id="qwen-audio-3.1-tts-flash",
                 enable_cache=False,
             )
         )
@@ -160,7 +160,7 @@ def test_runtime_batch_rejects_model_scoped_voices_from_multiple_models() -> Non
             "text": "第二段。",
             "voice_params": {
                 "speaker": "voice-b",
-                "tts_model": "qwen3-tts-instruct-flash",
+                "tts_model": "qwen-audio-3.1-tts-flash",
             },
         },
     ]
@@ -185,6 +185,6 @@ def test_runtime_batch_rejects_explicit_model_conflicting_with_any_segment() -> 
         asyncio.run(
             runtime.synthesize_speech_batch(
                 segments=segments,
-                model_id="qwen3-tts-instruct-flash",
+                model_id="qwen-audio-3.1-tts-flash",
             )
         )

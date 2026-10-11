@@ -69,6 +69,12 @@ class EvaluationResult:
     original_multi_score: Optional[Dict[str, Any]] = None   # 原始文本多维评分
     rewritten_multi_score: Optional[Dict[str, Any]] = None  # 改写后多维评分
     llm_review: Optional[Dict[str, Any]] = None              # 独立大模型语义质量评审
+    # 🔧 段落三分类占比（0-1），2026-10-08 真实网关实测口径：
+    # ai_score ≈ (ai_ratio + suspect_ratio) × 100，只在出现「人工」段落时才下降，
+    # 对 LLM 改写区间（AI→疑似）恒为 100、无分辨力。故优化目标取 rewritten_ai_ratio。
+    rewritten_ai_ratio: Optional[float] = None       # 改写后被判「确定AI」的段落占比
+    rewritten_suspect_ratio: Optional[float] = None  # 改写后被判「疑似AI」的段落占比
+    rewritten_human_ratio: Optional[float] = None    # 改写后被判「人工」的段落占比
     evaluated_at: str = field(default_factory=lambda: datetime.now().isoformat())
 
 
@@ -77,7 +83,10 @@ class PromptVersion:
     """提示词版本"""
     version_id: str = field(default_factory=lambda: str(uuid.uuid4())[:8])
     prompt_text: str = ""                           # 提示词内容
-    avg_ai_score: float = 100.0                     # 平均AI得分
+    avg_ai_score: float = 100.0                     # 平均AI得分（诊断用；改写区间恒为 100）
+    # 🔧 2026-10-08 新增：改写后被判「确定AI」的段落占比均值（0-1，越低越好）。
+    # avg_ai_score 恒为 100 使 best_versions 排序退化为按插入序，本字段才是真实适应度。
+    avg_ai_ratio: Optional[float] = None
     avg_score_reduction: float = 0.0                # 平均得分下降
     evaluation_results: List[EvaluationResult] = field(default_factory=list)
     iteration: int = 0                              # 迭代次数
@@ -94,7 +103,9 @@ class PromptVersion:
     genre_optimized: bool = False                   # 是否针对特定题材优化
     # 🆕 多模型评估结果
     best_model_id: Optional[str] = None             # 多模型评测中表现最佳的模型ID
-    multi_model_scores: Optional[Dict[str, float]] = None  # 各模型AI分数 {model_id: score}
+    # 🔧 2026-10-08：语义由「各模型AI分数」改为「各模型确定AI段落占比」
+    # {model_id: ratio}（0-1，越低越好）。旧值恒为 100 的常量表，无选型价值。
+    multi_model_scores: Optional[Dict[str, float]] = None
     
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典"""
@@ -102,6 +113,7 @@ class PromptVersion:
             "version_id": self.version_id,
             "prompt_text": self.prompt_text,
             "avg_ai_score": self.avg_ai_score,
+            "avg_ai_ratio": self.avg_ai_ratio,
             "avg_score_reduction": self.avg_score_reduction,
             "evaluation_results": [
                 {
@@ -189,6 +201,7 @@ class PromptVersion:
             version_id=data["version_id"],
             prompt_text=data["prompt_text"],
             avg_ai_score=ai_score,
+            avg_ai_ratio=data.get("avg_ai_ratio"),
             avg_score_reduction=data.get("avg_score_reduction", 0.0),
             evaluation_results=eval_results,
             iteration=data.get("iteration", 0),

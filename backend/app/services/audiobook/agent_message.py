@@ -21,7 +21,6 @@ class AgentType(Enum):
     """Agent类型"""
     AUDIO_DIRECTOR = "audio_director"
     SCRIPT_ADAPTER = "script_adapter"
-    VOICE_DESIGNER = "voice_designer"
     SOUND_DESIGNER = "sound_designer"
     MUSIC_COMPOSER = "music_composer"
     QUALITY_REVIEWER = "quality_reviewer"
@@ -66,7 +65,7 @@ class StrategyMessage(AgentMessage):
 
 @dataclass
 class ScriptMessage(AgentMessage):
-    """剧本消息（ScriptAdapter → VoiceDesigner/SoundDesigner/MusicComposer）"""
+    """剧本消息（ScriptAdapter → SoundDesigner/MusicComposer）"""
     
     @classmethod
     def create(cls, script_data: Dict[str, Any], recipient: AgentType, correlation_id: str):

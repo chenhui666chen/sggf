@@ -18,36 +18,30 @@ from schemas.model_spec import ModelSpec
 # 测试用例
 TEST_CASES = {
     # === 已验证通过的模型（快速验证） ===
-    "qwen-image-2.0": {"type": "image", "prompt": "a red rose"},
-    "qwen-image-2.0-pro": {"type": "image", "prompt": "a sunset"},
-    "wan2.7-image": {"type": "image", "prompt": "mountains"},
+    "qwen-image-3.0": {"type": "image", "prompt": "a red rose"},
+    "qwen-image-3.0-pro": {"type": "image", "prompt": "a sunset"},
+    "wan2.7-image-pro": {"type": "image", "prompt": "mountains"},
     "qwen3.5-omni-plus": {"type": "text", "prompt": "你好"},
     "qwen3.6-plus": {"type": "text", "prompt": "你好"},
     "MiniMax/speech-2.8-turbo": {"type": "tts", "prompt": "你好"},
     "MiniMax/speech-2.8-hd": {"type": "tts", "prompt": "你好"},
     "cosyvoice-v3.5-plus": {"type": "tts", "prompt": "你好"},
-    "qwen3-tts-instruct-flash": {"type": "tts", "prompt": "你好"},
-    "doubao-seedream-4-5": {"type": "image", "prompt": "a flower"},
+    "qwen-audio-3.1-tts-flash": {"type": "tts", "prompt": "你好"},
     "doubao-seedream-5-0": {"type": "image", "prompt": "a cat"},
+    "doubao-seedream-5-0-pro": {"type": "image", "prompt": "a flower garden"},
 
     # === 新增待测试模型 ===
-    "wan2.6-t2i": {"type": "image", "prompt": "a beautiful garden"},
     "kling/kling-v3-image-generation": {"type": "image", "prompt": "a tree in spring"},
     "kling/kling-v3-omni-image-generation": {"type": "image", "prompt": "a dog running"},
     "qwen3-vl-plus": {"type": "text", "prompt": "你好，请简短介绍自己"},
     "qwen-image-edit-plus": {"type": "image", "prompt": "change background to blue sky"},
     "qwen-image-edit-max": {"type": "image", "prompt": "change background to sunset"},
-    "doubao-seed-2-0-pro": {"type": "text", "prompt": "你好"},
-    "doubao-seed-2-0-lite": {"type": "text", "prompt": "你好"},
-    "vidu-timing2audio": {"type": "audio", "prompt": "thunder sound effect"},
+    "doubao-seed-2-1-pro": {"type": "text", "prompt": "你好"},
+    "doubao-seed-2-1-lite": {"type": "text", "prompt": "你好"},
     "mureka-o1-instrumental": {"type": "audio", "prompt": "epic cinematic music"},
 
     # === 视频模型（只提交任务，不等待完成） ===
-    "wan2.7-t2v": {"type": "video", "prompt": "a cat running"},
-    "wan2.6-t2v-fast": {"type": "video", "prompt": "a dog playing"},
-    "wan2.7-i2v": {"type": "video", "prompt": "animate this image"},
-    "wan2.7-r2v": {"type": "video", "prompt": "a bird flying"},
-    "wan2.7-videoedit": {"type": "video", "prompt": "edit video"},
+    "wan3.0-video": {"type": "video", "prompt": "a cat running"},
     "pixverse-c1-r2v": {"type": "video", "prompt": "a landscape"},
     "pixverse-v6-t2v": {"type": "video", "prompt": "a city at night"},
     "vidu-q3-pro-text2video": {"type": "video", "prompt": "a fish swimming"},
@@ -57,15 +51,14 @@ TEST_CASES = {
     "kling/kling-v3-omni-video-generation": {"type": "video", "prompt": "a river flowing"},
     "doubao-seedance-2-0": {"type": "video", "prompt": "a cat walking"},
     "doubao-seedance-2-0-fast": {"type": "video", "prompt": "a dog running"},
-    "doubao-seedance-1-5-pro": {"type": "video", "prompt": "a bird flying"},
 }
 
 VIDEO_MODELS = {
-    "wan2.7-t2v", "wan2.6-t2v-fast", "wan2.7-i2v", "wan2.7-r2v", "wan2.7-videoedit",
+    "wan3.0-video",
     "pixverse-c1-r2v", "pixverse-v6-t2v",
     "vidu-q3-pro-text2video", "vidu-q3-pro-img2video", "vidu-q3-pro-start-end2video",
     "kling/kling-v3-video-generation", "kling/kling-v3-omni-video-generation",
-    "doubao-seedance-2-0", "doubao-seedance-2-0-fast", "doubao-seedance-1-5-pro",
+    "doubao-seedance-2-0", "doubao-seedance-2-0-fast",
 }
 
 
@@ -112,20 +105,20 @@ def main():
     if batch == "quick":
         # 快速测试：已验证通过的模型
         quick_models = [
-            "qwen-image-2.0", "qwen-image-2.0-pro", "wan2.7-image",
+            "qwen-image-3.0", "qwen-image-3.0-pro", "wan2.7-image-pro",
             "qwen3.5-omni-plus", "qwen3.6-plus",
             "MiniMax/speech-2.8-turbo", "MiniMax/speech-2.8-hd",
-            "cosyvoice-v3.5-plus", "qwen3-tts-instruct-flash",
-            "doubao-seedream-4-5", "doubao-seedream-5-0",
+            "cosyvoice-v3.5-plus", "qwen-audio-3.1-tts-flash",
+            "doubao-seedream-5-0", "doubao-seedream-5-0-pro",
         ]
         models_to_test = [(m, TEST_CASES[m]) for m in quick_models if m in TEST_CASES]
     elif batch == "new":
         # 新模型测试
         new_models = [
-            "wan2.6-t2i", "kling/kling-v3-image-generation", "kling/kling-v3-omni-image-generation",
+            "kling/kling-v3-image-generation", "kling/kling-v3-omni-image-generation",
             "qwen3-vl-plus", "qwen-image-edit-plus", "qwen-image-edit-max",
-            "doubao-seed-2-0-pro", "doubao-seed-2-0-lite",
-            "vidu-timing2audio", "mureka-o1-instrumental",
+            "doubao-seed-2-1-pro", "doubao-seed-2-1-lite",
+            "mureka-o1-instrumental",
         ]
         models_to_test = [(m, TEST_CASES[m]) for m in new_models if m in TEST_CASES]
     elif batch == "video":

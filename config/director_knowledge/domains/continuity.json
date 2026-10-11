@@ -1,0 +1,106 @@
+{
+  "_type": "domain",
+  "domain": "continuity",
+  "unit_count": 12,
+  "units": {
+    "world_space": {
+      "domain": "continuity",
+      "title": "世界空间（World Space：场景布局与尺度的显式建模）",
+      "principle": "AI 视频模型无场景空间先验——世界空间必须显式建模并文字化注入（环境布局+机位位置+尺度参照），镜头间空间关系才能一致。",
+      "content": [
+        "空间地图：每个新场景先文字化环境布局（房间结构/门窗位置/家具锚点）+ 摄影机位置与朝向声明，帮助模型建立空间理解——是 location_grounded_planning 地点资产卡的文字形态（Higgsfield《HELL GRIND》95分钟长片工作流）",
+        "先全景后近景：场景镜头序列先放全景建立空间与人物位置关系，再切近景——全景锚定空间，近景角色位置不漂移（位置稳定性策略，与开场建置族 beat 路由呼应）",
+        "参照物锚定尺度：画面加入熟悉参照物（门/椅/桌等日常物体）直观展示人物大小比例——模型无尺度先验，参照物是唯一可靠尺度锚点（场景资产放置明显参照物+明确人物位置关系）"
+      ],
+      "source_project": "Higgsfield《HELL GRIND》（95分钟AI长片）",
+      "source": "大象学长第27集拆解 Higgsfield 长片工作流：空间地图 / 先全景后近景 / 参照物锚定尺度",
+      "added": "2026-10-07",
+      "source_type": "creator_tutorial",
+      "verification_status": "pending",
+      "trust_weight": 0.7,
+      "depends_on": [],
+      "qc_checks": [
+        "每个新场景是否先建立空间地图（环境布局+机位位置文字化）？",
+        "场景首个镜头是否用全景建立空间关系？",
+        "需要尺度感知的画面是否有参照物？"
+      ]
+    },
+    "screen_space": {
+      "content_status": "pending_content",
+      "note": "内容在归档 DOCX/XLSX（v1.2 起只读），待回填 SSOT knowledge_units 后重新派生",
+      "priority_backfill": null
+    },
+    "performance_state": {
+      "content_status": "pending_content",
+      "note": "内容在归档 DOCX/XLSX（v1.2 起只读），待回填 SSOT knowledge_units 后重新派生",
+      "priority_backfill": null
+    },
+    "prop_state": {
+      "content_status": "pending_content",
+      "note": "内容在归档 DOCX/XLSX（v1.2 起只读），待回填 SSOT knowledge_units 后重新派生",
+      "priority_backfill": null
+    },
+    "lighting_state": {
+      "content_status": "pending_content",
+      "note": "内容在归档 DOCX/XLSX（v1.2 起只读），待回填 SSOT knowledge_units 后重新派生",
+      "priority_backfill": null
+    },
+    "audio_state": {
+      "content_status": "pending_content",
+      "note": "内容在归档 DOCX/XLSX（v1.2 起只读），待回填 SSOT knowledge_units 后重新派生",
+      "priority_backfill": null
+    },
+    "causal_continuity": {
+      "content_status": "pending_content",
+      "note": "内容在归档 DOCX/XLSX（v1.2 起只读），待回填 SSOT knowledge_units 后重新派生",
+      "priority_backfill": null
+    },
+    "physical_world_model": {
+      "content_status": "pending_content",
+      "note": "内容在归档 DOCX/XLSX（v1.2 起只读），待回填 SSOT knowledge_units 后重新派生",
+      "priority_backfill": null
+    },
+    "scene_state_system": {
+      "content_status": "pending_content",
+      "note": "内容在归档 DOCX/XLSX（v1.2 起只读），待回填 SSOT knowledge_units 后重新派生",
+      "priority_backfill": null
+    },
+    "emotion_continuity": {
+      "content_status": "pending_content",
+      "note": "内容在归档 DOCX/XLSX（v1.2 起只读），待回填 SSOT knowledge_units 后重新派生",
+      "priority_backfill": null
+    },
+    "six_element_edit_framework": {
+      "content_status": "pending_content",
+      "note": "内容在归档 DOCX/XLSX（v1.2 起只读），待回填 SSOT knowledge_units 后重新派生",
+      "priority_backfill": null
+    },
+    "location_grounded_planning": {
+      "domain": "continuity",
+      "title": "地点锚定规划与多主体感知转场",
+      "principle": "背景一致性靠「地点资产锚定」而非 prompt 复述：每个地点先建独立资产（多角度参考），场景规划绑定地点资产 ID；多主体入画/出画必须显式转场建模（InfinityStory，VBench 背景一致性 88.94 最高分）。",
+      "content": [
+        "地点资产卡：每地点独立资产（多角度+昼夜/光照变体），场景引用地点 ID 而非重新文字描述",
+        "三段绑定：场景 → 地点资产 → 背景参考图；换景 = 换资产引用，杜绝同场景背景漂移",
+        "主体感知转场：角色入画/出画显式建模（进入方向/画面位置/遮挡关系），禁止主体突然消失/出现——作为切换技法库（cut_technique_library）补充条目",
+        "与 world_space/screen_space 联动：地点资产是世界空间的锚点实现，主体转场约束进银幕空间检查",
+        "环绕视频抽帧法（地点资产生产增强，pending 设计推断）：先生成场景 360° 环绕视频（广角慢速——广角建立镜头提供最稳定空间数据），按方位角抽帧（8/12/16 方向）→ 天然几何一致的多角度参考图组。核心优势：帧间空间关系由视频时序天然约束（vs 逐张生成多角度图的空间错位风险）；特定角度帧可直接作各镜头 I2V 首帧（Master Reference 锚定模式）。前提：抽帧前须过回环一致性检查（AM-15 首尾帧比对——普通模型环绕视频存在累积漂移）。边界：环绕视频直接作视频模型参考资产当前不可行——参考机制是运动复刻（motion/camera transfer）而非场景理解，模型无空间检索能力；环绕视频是「生产多角度参考图的机器」而非直接参考资产，待 3D Cache 类能力（Pantheon360，arXiv 2605.25449）产品化后可升级为直接路径。来源：Pantheon360 / Hailuo Director Mode / nat.io World Persistence 2026-10 检索"
+      ],
+      "source_project": "InfinityStory（Adobe，arXiv 2603.03646）",
+      "source": "InfinityStory location-grounded planning（背景一致性）+ character-aware shot transitions（多主体入画/出画转场建模，含 10k 多主体转场数据集）；环绕视频抽帧法：Pantheon360（arXiv 2605.25449）+ Hailuo Director Mode + nat.io World Persistence（2026-10 检索）",
+      "added": "2026-10-07",
+      "source_type": "external_paper",
+      "verification_status": "pending",
+      "trust_weight": 0.7,
+      "depends_on": [
+        "world_space",
+        "screen_space"
+      ],
+      "qc_checks": [
+        "场景是否引用地点资产 ID 而非重复描述？",
+        "角色入画/出画是否有显式转场建模？",
+        "环绕视频抽帧是否先通过回环一致性检查（AM-15 首尾帧比对）？"
+      ]
+    }
+  }
+}

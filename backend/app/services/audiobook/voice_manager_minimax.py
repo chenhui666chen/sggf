@@ -113,13 +113,13 @@ class MiniMaxVoiceManager(VoiceManager):
         )
 
     def get_narrator_voice(self) -> VoiceProfile:
-        """鑾峰彇 MiniMax 鏃佺櫧闊宠壊"""
+        """获取 MiniMax 旁白音色"""
         if "旁白" not in self.character_voices:
             self.character_voices["旁白"] = self._build_profile("旁白", self.DEFAULT_NARRATOR_VOICE_ID)
         return self.character_voices["旁白"]
 
     def get_voice(self, character_name: str) -> Optional[VoiceProfile]:
-        """鑾峰彇瑙掕壊闊宠壊妗ｆ"""
+        """获取角色音色档案"""
         return self.character_voices.get(character_name)
 
     def assign_voice(
@@ -127,7 +127,7 @@ class MiniMaxVoiceManager(VoiceManager):
         character_name: str,
         character_info: Optional[Dict[str, Any]] = None,
     ) -> VoiceProfile:
-        """涓鸿鑹插垎閰?MiniMax 闊宠壊妗ｆ"""
+        """为角色分配 MiniMax 音色档案"""
         voice_id = self.select_voice_for_character(character_name, character_info)
         profile = self._build_profile(character_name, voice_id)
         self.character_voices[character_name] = profile
@@ -139,7 +139,7 @@ class MiniMaxVoiceManager(VoiceManager):
         voice_mapping: Dict[str, Any],
         character_profiles: Optional[List[Dict[str, Any]]] = None,
     ):
-        """搴旂敤椤圭洰绾?MiniMax 闊宠壊鏄犲皠"""
+        """应用项目级 MiniMax 音色映射"""
         del character_profiles
         for character_name, raw_config in (voice_mapping or {}).items():
             if not character_name:

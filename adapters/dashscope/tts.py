@@ -17,7 +17,9 @@ from schemas.task_spec import TaskSpec
 
 class _DashScopeTTSAdapter(BaseAdapter):
     MODEL_ID = ""
-    VOICE_ID = "longxiaochun"
+    # 基类不兜底任何音色：留空时 _normalize_runtime_request 不下发 speaker，
+    # 由上游默认音色接管；具体线名只在各自的子类里声明。
+    VOICE_ID = ""
 
     _DISPATCH_ONLY_FIELDS = {"agent_type", "strategy"}
 
@@ -160,15 +162,15 @@ class MiniMaxSpeechHDAdapter(MiniMaxSpeechTurboAdapter):
         )
 
 
-@register_model("qwen3-tts-instruct-flash")
-class Qwen3TTSInstructFlashAdapter(_DashScopeTTSAdapter):
-    MODEL_ID = "qwen3-tts-instruct-flash"
-    VOICE_ID = "Cherry"
+@register_model("qwen-audio-3.1-tts-flash")
+class QwenAudio31TTSFlashAdapter(_DashScopeTTSAdapter):
+    MODEL_ID = "qwen-audio-3.1-tts-flash"
+    VOICE_ID = "longsanshu_v3.1"
 
     @classmethod
     def get_model_spec(cls) -> ModelSpec:
         return ModelSpec(
-            id="qwen3-tts-instruct-flash", name="Qwen3 TTS Instruct Flash", provider="alibaba", version="v3",
+            id="qwen-audio-3.1-tts-flash", name="Qwen-Audio 3.1 TTS Flash", provider="alibaba", version="v3.1",
             status=ModelStatus.ACTIVE, modality=["text_to_speech"], avg_latency_seconds=3.0,
         )
 

@@ -12,6 +12,7 @@ from enum import Enum
 from core.unified_llm_client import get_llm_client, UnifiedLLMClient
 from core.model_resolution import TaskType
 from ..chapter_splitter import ChapterInfo, ChapterType
+from ._base import AnalysisResult
 
 logger = logging.getLogger(__name__)
 
@@ -41,12 +42,6 @@ class ChapterSummary:
     key_events: List[str]
 
 
-@dataclass
-class AnalysisResult:
-    analysis_type: AnalysisType
-    content: Dict[str, Any]
-    confidence: float
-    chapter_summaries: Optional[List[ChapterSummary]] = None
 
 class SynthesisMixin:
     async def _synthesize_from_summaries(
@@ -274,7 +269,7 @@ class SynthesisMixin:
             content=parsed,
             confidence=0.90,  # 基于全书统计，可信度更高
             chapter_range=(1, len(chapters)),
-            model_used="qwen3.7-plus",
+            model_used="qwen-plus",
         )
     
     async def _synthesize_worldview(
@@ -346,7 +341,7 @@ class SynthesisMixin:
             content=parsed,
             confidence=0.85,
             chapter_range=(1, len(chapters)),
-            model_used="qwen3.7-plus",
+            model_used="qwen-plus",
         )
     
     async def _synthesize_plot(
@@ -443,7 +438,7 @@ class SynthesisMixin:
             content=parsed,
             confidence=0.88,
             chapter_range=(1, len(chapters)),
-            model_used="qwen3.7-plus",
+            model_used="qwen-plus",
         )
     
     async def _synthesize_style(
@@ -498,7 +493,7 @@ class SynthesisMixin:
             content=parsed,
             confidence=0.82,
             chapter_range=(1, len(chapters)),
-            model_used="qwen3.7-plus",
+            model_used="qwen-plus",
         )
 
     async def _synthesize_concepts(
@@ -569,7 +564,7 @@ class SynthesisMixin:
             content=parsed,
             confidence=0.78,
             chapter_range=(1, len(chapters)),
-            model_used="qwen3.7-plus",
+            model_used="qwen-plus",
         )
 
     # ==================== 人物分析 ====================

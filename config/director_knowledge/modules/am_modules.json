@@ -1,0 +1,496 @@
+{
+  "_type": "am_modules",
+  "_count": 17,
+  "schema": [
+    "id",
+    "name",
+    "principle",
+    "layers",
+    "prompt_pattern",
+    "qc_checks"
+  ],
+  "modules": [
+    {
+      "id": "AM-01",
+      "name": "Performance Directing ｜ AI演员系统",
+      "principle": "表情对不上往往不是脸生成坏了，而是缺少情绪过程。AI演员系统把表演从'情绪标签'升级为'可观察行为链'：剧情刺激→角色心理→情绪变化→微表情→眼神→头身动作→对白语气→最终状态。",
+      "layers": {
+        "Character Psychology": "性格、欲望、动机、潜台词（Subtext）。",
+        "Stimulus": "看见什么、听见什么、发生什么——外部刺激必须先于反应。",
+        "Reaction": "感知→理解→微反应→情绪变化；不要只设计Action，要设计Reaction。",
+        "Emotion Arc": "初始状态→刺激→上升/下降→最终状态；一个镜头内情绪随时间变化。",
+        "Facial Acting": "眼神、眉眼、嘴部、微表情。",
+        "Body Acting": "呼吸、姿态、重心、手势、Idle Motion（待机微动作）。",
+        "Motion Arc": "准备（Preparation）→主动作（Action）→余韵（Follow-through）。",
+        "Voice Acting": "语速、停顿、重音、音高、气息、潜台词。",
+        "Continuity": "上一镜状态→下一镜；情绪状态继承。"
+      },
+      "prompt_pattern": "不写'她很紧张'，写可观察证据：'她先看向门口，短暂停顿，嘴唇轻微抿紧，呼吸变浅，眼神迅速移开，右手无意识抓紧衣角；听见脚步声后重新抬眼，但身体保持僵硬。'",
+      "qc_checks": [
+        "是否包含从刺激到反应的完整行为链而非单一表情？",
+        "是否有待机微动作（呼吸/眨眼/视线）而不是静止人偶？",
+        "动作是否具备准备与余韵而非瞬间到位？",
+        "当前镜头的情绪状态是否与上一镜继承？"
+      ]
+    },
+    {
+      "id": "AM-02",
+      "name": "Physical World Model ｜ 物理世界模型",
+      "principle": "穿帮往往不是画错而是规则错。AI必须稳定执行'接触→受力→位移→重力→碰撞→反馈'的因果链；力量感=蓄力→发力→接触→动量传递→受力→惯性延续→环境反馈。",
+      "layers": {
+        "重力": "人/物漂浮下落、重心、重量惯性、急停、加速减速、后续运动。",
+        "接触": "手穿过物体、接触点、抓握、碰撞。",
+        "材质": "铁和布反应一样——重量、硬度、弹性、流动。",
+        "因果": "先出结果后发生动作——动作顺序、受力反馈。",
+        "World Rules": "这个世界允许什么、不允许什么；奇幻≠没有物理，而是现实物理+明确定义的超自然例外。"
+      },
+      "prompt_pattern": "镜头生成指令七段：①世界规则 ②空间规则(Spatial Anchors) ③主体初始状态 ④动作因果链 ⑤物理约束 ⑥摄影机 ⑦结束状态。",
+      "qc_checks": [
+        "接触点是否真实（手是否穿过物体）？",
+        "碰撞后是否有受力反馈与惯性延续？",
+        "材质反应是否符合世界规则？",
+        "是否出现先出结果后发生动作的因果倒置？"
+      ]
+    },
+    {
+      "id": "AM-03",
+      "name": "Scene State System ｜ 场景状态系统",
+      "principle": "站位一致不等于多视角一致。世界坐标不能跟着画面坐标一起变化：单镜头可用画面坐标（左/右/上/下），连续影视必须建立世界坐标（人物相对房间、桌子、门、他人的位置），并由摄影机透视决定画面呈现。",
+      "layers": {
+        "Screen Coordinates": "左、右、上、下、画面中央——适合单镜头控制。",
+        "World Coordinates": "人物相对场景锚点的位置——适合多镜头/多视角连续性。",
+        "Spatial Anchors": "北墙=落地窗、东墙=木门、中央=长桌等稳定空间锚点。",
+        "Group → Zone → Character": "多人调度先分组再定位，而不是逐人定义。",
+        "Scene State 表": "场景、空间锚点、每个人物的世界位置与朝向、场景状态锁定。"
+      },
+      "prompt_pattern": "Scene State 表：场景=会议室；空间锚点=北墙落地窗/东墙木门/中央长桌；A=长桌南侧左端；B=长桌南侧右端；……所有人物身份、服装、位置保持不变。",
+      "qc_checks": [
+        "换机位后人物世界位置是否不变（仅画面位置变化）？",
+        "多人场景是否先分组再定位？",
+        "每个镜头是否复用同一份 Scene State 快照？"
+      ]
+    },
+    {
+      "id": "AM-04",
+      "name": "Prompt Engineering ｜ 提示词工程系统",
+      "principle": "少形容多描述，描述原因而不是描述结果。Prompt不是越长越强；需要维护 Prompt Hygiene（提示词卫生）：删除空泛形容词、删除重复描述、消除冲突指令、保留可观察变量、保持结构层级。",
+      "layers": {
+        "六层Prompt结构": "①世界规则 ②空间/场景 ③主体初始状态 ④动作因果链 ⑤物理约束 ⑥摄影机+结束状态。",
+        "Prompt Density": "有效信息密度——每句都应告诉模型改变什么。",
+        "Prompt Hygiene": "生成前清洗：删除空泛形容词/重复描述/冲突指令。",
+        "三类污染": "空洞污染（审美词无法执行）、重复污染（同义堆叠）、冲突污染（自相矛盾指令）。",
+        "Image Prompt vs Video Prompt": "图片强调静态构成；视频强调状态变化、运动因果与时间线。",
+        "Prompt Conflict Check": "生成前检测冲突指令（如'固定镜头'+‘环绕360度’）。"
+      },
+      "prompt_pattern": "原：'一个电影感女孩，高清8K，唯美高级，梦幻光影，超级细节。' 清洗后：'20岁女孩站在雨后的街道，侧身面对镜头；湿润头发贴近脸颊，路灯暖光从侧后方形成轮廓光，背景车辆虚化，50mm镜头，浅景深。'",
+      "qc_checks": [
+        "是否删除了无法执行的审美形容词？",
+        "是否存在重复/冲突指令？",
+        "每条指令是否对应可观察变量？"
+      ]
+    },
+    {
+      "id": "AM-05",
+      "name": "Camera Choreography ｜ 摄影机编排",
+      "principle": "运镜不是为了让镜头动起来，而是为了改变观众获取信息的方式。所有运镜统一归入 Camera Movement Function（运镜功能）而非运镜名称。",
+      "layers": {
+        "Reveal": "揭示——让观众发现新信息（如绕到正面发现脸上的伤）。",
+        "Emotional Push": "情绪推进——拉近观众与人物（沉默中慢慢推进）。",
+        "Spatial Establish": "空间建立——让观众理解世界（特写拉远发现身处巨大城市）。",
+        "Energy / Impact": "力量——增强动作冲击（战斗快速推进/跟随冲击/突然停顿）。",
+        "Transition": "转场——连接两个空间或时间（天空下降到街道）。",
+        "Beat Map": "一镜到底用动作节点表控制，而不是一句超长Prompt。",
+        "双轨设计": "人物运动与摄影机运动必须双轨设计（Camera Choreography）。"
+      },
+      "prompt_pattern": "运镜至少包含5个变量：动机（为何移动）、起始位置、结束位置、速度曲线、被摄对象状态；并回答'此刻为何需要移动'。",
+      "qc_checks": [
+        "每个运镜是否有叙事功能而非为动而动？",
+        "人物与摄影机运动是否双轨匹配？",
+        "复杂运镜是否使用Beat Map节点控制？"
+      ]
+    },
+    {
+      "id": "AM-06",
+      "name": "Dialogue Coverage ｜ 对白镜头覆盖系统",
+      "principle": "谁说话不一定永远拍谁；镜头关注的是当前叙事信息的拥有者（Information Owner），而不只是说话者（Speaker）。镜头不是记录对白，而是在导演观众应该看什么。",
+      "layers": {
+        "Speaker Shot": "说话者镜头。",
+        "Listener Reaction": "听者反应镜头（信息变化发生在听者时切过去）。",
+        "Relationship Shot": "双方关系镜头（距离变化/沉默时用双人镜）。",
+        "Emotional Turning Point": "情绪变化镜头。",
+        "Information Reveal": "信息揭示镜头。",
+        "Shot Purpose": "每个分镜必须回答存在原因：传递信息/展示反应/建立关系/强调情绪/揭示变化/建立空间。"
+      },
+      "prompt_pattern": "台词重要拍说话者；反应重要拍听者；关系重要拍双人镜。例：'其实我早就知道了'→男主中景说完切女主震惊反应。",
+      "qc_checks": [
+        "对白镜头是否围绕信息拥有者而非机械跟随说话者？",
+        "每个镜头是否都有明确的 Shot Purpose？",
+        "是否落入'谁说话拍谁'的基础错误？"
+      ]
+    },
+    {
+      "id": "AM-07",
+      "name": "Emotion Continuity ｜ 情绪连续性",
+      "principle": "情绪不是标签而是一条轨迹。除单镜头内的 Emotion Arc 外，还必须维护跨镜头的 Emotion State Continuity：上一状态+当前刺激+当前强度→下一状态。",
+      "layers": {
+        "Emotion Arc": "镜头内：初始→刺激→上升/下降→最终。",
+        "Emotion State Continuity": "镜头间：情绪状态继承，禁止'上镜悲伤下镜正常'。",
+        "Internal vs External": "内在情绪与外在表现分开管理；情绪强度≠表情强度。",
+        "Emotional Memory": "角色携带未解决心理事件：事件记忆、心理残留、行为影响、身体影响、关系影响。",
+        "Emotional Owner": "当前情绪信息属于谁，决定镜头焦点。",
+        "Emotion State Sheet": "维护角色的情绪状态表：当前情绪、来源、强度、未解决事件、对其他角色态度。"
+      },
+      "prompt_pattern": "事件：收到离别消息→初始震惊30%→5秒后失落60%→压制（外显平静70%/内心痛苦90%）→最终接受但留下遗憾。",
+      "qc_checks": [
+        "上一镜的情绪状态是否被下一镜继承？",
+        "内在情绪与外在表现是否分离控制？",
+        "角色是否携带未解决心理事件（Emotional Memory）？"
+      ]
+    },
+    {
+      "id": "AM-08",
+      "name": "Voice Asset ｜ 声音表演与声音资产",
+      "principle": "AI说话不自然往往不是文本错，而是韵律（Prosody）没控制好。Voice Acting要从'情绪词'升级为'语音参数'：语速、停顿、重音、音量、音高、气息作为独立变量设计。",
+      "layers": {
+        "语音参数": "语速 Pace（慢/中/快）、停顿 Pause（句前/句中/句后）、重音 Stress、音量 Volume、音高 Pitch、气息 Breath。",
+        "Pace Curve": "语速随时间变化：正常→关键词前减速→重读→停顿→情绪变化后变速。",
+        "Semantic Stress": "先拆语义重心再配音——同一句话不同重音意思完全不同。",
+        "Voice Continuity Profile": "角色的声音资产：音色ID、语速基线、呼吸习惯、Sonic Motif，跨集保持。"
+      },
+      "prompt_pattern": "'你真的决定了吗？'试探=语速稍慢、'真的'轻微加重、句尾微微上扬；绝望=开口前停顿、低音量、'决定'后停顿、句尾下沉。",
+      "qc_checks": [
+        "语速是否随时间变化而非整段恒定？",
+        "是否先确定语义重音再生成语音？",
+        "声音资产是否跨镜头/跨集保持一致？"
+      ]
+    },
+    {
+      "id": "AM-09",
+      "name": "Previsualization & Quality Gate ｜ 预演与质量门",
+      "principle": "把'生成后纠错'变成'生成前决策'：先用低成本分镜预览验证导演决策，再进入高成本视频生成。导演式迭代（Directed Iteration）只修改出问题的变量，而不是盲目抽卡。",
+      "layers": {
+        "Shot Check 六项": "构图（主体在哪里）、景别、站位（人物关系）、空间（锚点）、方向（朝向/视线/运动）、连续性（与前后镜能否接）。",
+        "Directed Iteration": "明确知道哪项有问题，只修改对应变量（Blocking/Shot Size/Spatial Anchor）。",
+        "Sampling Iteration": "不知道哪里有问题只能重抽——应避免。",
+        "三级成本漏斗": "文字验证（最便宜）→图片/Storyboard验证（中等）→视频生成（最贵）。",
+        "Generation Budget": "生成预算：按质量门逐级放行，避免在最终视频上浪费。",
+        "Quality Gate": "每级通过后才进入下一级；PASS→视频生成，REVISE→修改分镜。"
+      },
+      "prompt_pattern": "分镜预览阶段先回答六项检查；只有全部通过才进入 Video Generation。",
+      "qc_checks": [
+        "是否先做低成本预演再进入视频生成？",
+        "迭代是否针对具体变量而非盲抽？",
+        "是否有生成预算与质量门控制？"
+      ]
+    },
+    {
+      "id": "AM-10",
+      "name": "Resonance Design ｜ 共鸣设计",
+      "principle": "爆火不是迷信大题材，而是把'大题材'缩成'小瞬间'。把'爆火'拆成三层：Click（为什么停下来）→Watch（为什么继续看）→Share（为什么愿意转发）。",
+      "layers": {
+        "Click / Stop": "第一帧或前三秒让观众停下：视觉异常、情绪悬念、信息缺口。",
+        "Watch": "让观众继续看：信息递进、情绪递进、关系张力。",
+        "Share / Shareable Emotion": "可转发表达：把情绪表达成观众想替角色/替自己说出的话。",
+        "小瞬间": "大题材落到具体可感的人际瞬间，而不是抽象口号。"
+      },
+      "prompt_pattern": "创作层：把主题收窄为一个具体瞬间，并为其设计 Stop→Watch→Share 三层钩子。",
+      "qc_checks": [
+        "开场是否制造了停下看的理由？",
+        "是否有递进的信息/情绪让观众留下？",
+        "是否有可转发的情绪表达？"
+      ]
+    },
+    {
+      "id": "AM-11",
+      "name": "Lighting Directing ｜ 光影导演系统",
+      "principle": "光影应该跟角色表演同步。控制三层：情绪定调（这场戏的情绪基调）→光源关系（主光/辅光/轮廓光/阴影的真实来源）→氛围介质（空气透视、雾、尘埃、反射）。",
+      "layers": {
+        "情绪定调": "这场戏的情绪基调决定整体光比与色温。",
+        "光源关系": "光源必须有世界坐标与开关逻辑；主光/辅光/阴影/轮廓光。",
+        "氛围介质": "空气透视、雾、尘埃、烟、水面反射。",
+        "Lighting Arc": "光影弧线：光随时间变化，与情绪曲线同步。"
+      },
+      "prompt_pattern": "光影设计跟角色表演同步：主光从哪来、何时开、阴影落点、情绪转折时光比变化。",
+      "qc_checks": [
+        "光源是否有真实世界来源与开关逻辑？",
+        "光影是否与情绪弧线同步变化？",
+        "是否有氛围介质产生空气透视？"
+      ]
+    },
+    {
+      "id": "AM-12",
+      "name": "Character State Consistency ｜ 角色状态一致性",
+      "principle": "角色卡要分'硬约束'和'软属性'，并建立 Single Source of Truth（单一事实源）。一致性不能只看脸，而是四层身份：Visual Identity（视觉）、Styling Identity（造型）、Performance Identity（表演）、Voice Identity（声音）。",
+      "layers": {
+        "Visual Identity": "脸、发型、体型、年龄。",
+        "Styling Identity": "服装、配饰、妆容、穿着方式。",
+        "Performance Identity": "动作习惯、神态、反应模式。",
+        "Voice Identity": "音色、语速基线、口音、呼吸习惯。",
+        "Hard Constraints": "身份、关键伤势、关键道具归属等不可变硬约束。",
+        "Soft Attributes": "发丝细节、非关键皱褶等允许波动的软属性。",
+        "SSOT": "单一事实源：角色卡是唯一权威资产，生产流程全部引用它。"
+      },
+      "prompt_pattern": "角色卡=硬约束（身份/身体/服装/声音ID/行为DNA）+ 软属性（细节/状态），全剧引用同一事实源。",
+      "qc_checks": [
+        "四层身份（视觉/造型/表演/声音）是否都锁定？",
+        "是否存在第二份互相冲突的角色定义？",
+        "是否区分硬约束与软属性？"
+      ]
+    },
+    {
+      "id": "AM-13",
+      "name": "Character Skill System ｜ 角色能力系统",
+      "principle": "AI角色技能容易同质化，因为只有名称没有机制。角色能力 Skill 应包含：技能名称、技能来源、技能机制、视觉表现、战斗作用，把创意经验封装为可复用模块。",
+      "layers": {
+        "技能名称": "唯一标识。",
+        "技能来源": "血脉/师承/科技/契约——决定合理性边界。",
+        "技能机制": "触发条件、消耗、冷却、限制——决定一致性。",
+        "视觉表现": "光效、粒子、动作特征——决定辨识度。",
+        "战斗作用": "对敌效果、战术定位——决定叙事价值。"
+      },
+      "prompt_pattern": "战斗Skill模块：角色战斗设定→动作链设计→力量反馈（攻击/受击/环境反馈）→战斗镜头Skill（第一人称冲击/越肩/慢动作特写/环绕）。",
+      "qc_checks": [
+        "技能是否有明确的机制而非只有名称？",
+        "技能触发与消耗是否一致？",
+        "技能视觉表现是否有辨识度？"
+      ]
+    },
+    {
+      "id": "AM-14",
+      "name": "Asset Generation ｜ 资产生成系统",
+      "principle": "资产图（角色定妆/场景/道具/关键帧）是 I2V 的输入，必须先于视频生成被锁定。资产生成的核心不是'画得好看'而是'画得一致'：编辑而非重roll，PRESERVE 防漂移，版本入 Asset Graph。",
+      "layers": {
+        "资产类型": "Character Reference / Location / Prop / Keyframe / Motion Reference。",
+        "生图公式": "Asset = 身份DNA × 风格/媒介 × 命名区域 × hex色板 × 光源 × 材质 × mood × finish × 限制。",
+        "编辑协议": "PRESERVE 列表（不变项）+ CHANGE 列表（变更项），逐轮迭代生成新版本。",
+        "风格预设": "MEDIUM/色板/线条/构图节奏/AVOID——风格固化跨集复用。",
+        "Anti-patterns": "keyword soup / negation / over-stuffed / named-font chasing / AI-tell。",
+        "Asset Lock": "达标后 LOCK 为 asset_version；变化只影响引用它的 Shot。"
+      },
+      "prompt_pattern": "Asset Brief：主体(Visual DNA+Wardrobe DNA)+风格/媒介+命名区域+hex色板+光源+材质+mood+finish+CONSTRAINTS；迭代时声明'除以下变更外其余保持不变'+PRESERVE 列表。",
+      "qc_checks": [
+        "资产图是否先于视频生成锁定？",
+        "PRESERVE 项在每轮迭代是否不变？",
+        "风格是否跨集一致（无 AI-tell 漂移）？",
+        "资产图是否纳入 Asset Graph 并管理版本？",
+        "LOCK 后普通 Agent 是否无法覆盖？"
+      ]
+    },
+    {
+      "id": "AM-15",
+      "name": "Video Analysis & Evaluation Agent ｜ 视频理解与评价系统",
+      "principle": "全模态感知模型负责'看懂'视频内容（场景/动作/景别/时间轴/音画），体系导演标准负责'判定'好坏（镜头卡12字段+六大要素+景别系统+失败库CF）。感知层输出结构化观测，评价层对照体系标准逐镜打分并归因——弥补通用VLM缺少导演判断标准的短板（ShotBench电影语法准确率<60%）。",
+      "layers": {
+        "感知层": "Qwen3-VL/通义全模态（国产对齐）：镜头切分、景别、机位、主体动作、对话、音效/音乐、秒级时间轴定位、音画同步。",
+        "评价层": "对照6.4镜头卡12字段 + 六大要素 + 景别系统 + 时长阈值 + 切换技法库 + CF失败库，逐镜输出 Pass/Fail/Warning 与归因。｜2026-10 升级（混合主客观评审）：在 MLLM 逐镜评分之外增加客观指标通道——人脸一致性、动作识别/完成度、帧间形变误差、语义一致性；单通道与 MLLM 结论冲突或不过阈值时双通道仲裁，客观否决权限限于物理类指标（身份/形变）。新增跨镜头维度：故事级一致性（跨镜头情节连贯）、动作完成度贯穿评估。依据：AnimeAgent 实证 CLIP 类客观指标对艺术变形不敏感、MLLM 主观分不稳定，混合评审才可靠；AniEval（SIGGRAPH Asia 2025）首个多镜头评价框架四组维度。",
+        "产出层": "结构化视频评价报告：逐镜评分 + 失败命中(CF编号) + 修复建议(R0-R6) + 与脚本/Shot Contract 对比差异。｜2026-10 第三轮升级：产出层新增观众信号通道——persona-conditioned 多观众人格看片反馈（钩子留存预判/情绪曲线/弃剧点定位），与导演标准分双轨输出（冲突时导演优先，persona 分为 Soft Gate）；反馈回流 10.7 audience_persona_feedback 作学习信号源。依据：CHIEF（ICML'26 WS）persona-conditioned MLLM 反馈。"
+      },
+      "prompt_pattern": "感知Prompt：抽取每镜时间戳/景别/机位/主体动作/对话/音效/音乐；评价Prompt：'以此镜[X]对照景别系统判断信息供给是否匹配'+'是否触发EMOTION_STALL或CF-[编号]'；归因Prompt：输出 评分+证据+失败编号+修复建议。",
+      "video_evaluation_report_template": {
+        "purpose": "AM-15 对一段视频（单镜或片段）的结构化输出样例——演示感知层→评价层→产出层的完整报告骨架，供 QC/Review Agent、Repair Agent、Orchestrator 消费。",
+        "sample_segment": "E03-S17｜10s｜3镜｜剧本：丈夫夺走桌上手机，妻子沉默（情感对峙）",
+        "header": {
+          "report_id": "VER-20260817-E03S17-001",
+          "video_id": "shot_asset/e03_s17_cand_v4",
+          "source": "Generation Agent candidate v4 → Editing Agent 粗剪片段",
+          "input_refs": [
+            "Shot Contract S17",
+            "剧本 Beat 4.2",
+            "CF 失败库 v5.0",
+            "6.4 镜头卡（12字段）",
+            "景别系统",
+            "时长阈值 0.3/0.5/6s",
+            "切换技法库"
+          ],
+          "perceived_by": "Qwen3-VL / 通义全模态（感知层）",
+          "evaluated_by": "AM-15 评价层（体系导演标准）",
+          "segment_duration": "10.0s",
+          "shot_count": 3,
+          "source_type": "benchmark",
+          "verification_status": "pending"
+        },
+        "perception_layer": {
+          "shot_segmentation": [
+            {
+              "shot_id": "S1",
+              "time": "0.0-2.8s",
+              "景别": "MS 中景双人",
+              "机位": "静态 Tripod，南侧轴线",
+              "主体动作": "丈夫伸手从桌面抓走手机",
+              "对话": "无台词（画外环境声）",
+              "音效_音乐": "低频 Room Tone，无音乐",
+              "音画同步": "OK"
+            },
+            {
+              "shot_id": "S2",
+              "time": "2.8-6.2s",
+              "景别": "CU 妻子面部特写",
+              "机位": "极轻推进（约 5°）",
+              "主体动作": "妻子视线跟随手机，下颌微紧，呼吸变浅",
+              "对话": "无",
+              "音效_音乐": "静默增强（Controlled Silence）",
+              "音画同步": "OK"
+            },
+            {
+              "shot_id": "S3",
+              "time": "6.2-10.0s",
+              "景别": "ECU 手机屏幕/妻子指尖",
+              "机位": "Static",
+              "主体动作": "妻子指尖轻轻收回，视线移开",
+              "对话": "无",
+              "音效_音乐": "音乐仍缺席，仅环境声",
+              "音画同步": "OK"
+            }
+          ]
+        },
+        "evaluation_layer": {
+          "overall": {
+            "总分": 81,
+            "verdict": "REVIEW（建议进入 Repair Queue 微调后 PASS）",
+            "六大要素覆盖": [
+              "情感共鸣",
+              "时间线",
+              "节奏",
+              "视觉连续性"
+            ],
+            "missing": [
+              "信息梯度可再收紧"
+            ]
+          },
+          "per_shot": [
+            {
+              "shot_id": "S1",
+              "12字段": {
+                "Drama_Shot_Motivation": "PASS-信息揭示（夺机动作）",
+                "Performance": "PASS",
+                "Camera": "PASS",
+                "Composition": "WARNING-手机比例偏小",
+                "Light": "PASS",
+                "Sound": "PASS",
+                "Continuity_In_Out": "PASS"
+              },
+              "景别系统": "MS 信息供给匹配（动作+关系并读）",
+              "时长判定": "2.8s，位于信息镜合理区间",
+              "CF命中": "无",
+              "评分": 88
+            },
+            {
+              "shot_id": "S2",
+              "12字段": {
+                "Drama_Shot_Motivation": "PASS-情绪接力（Reaction）",
+                "Performance": "PASS-有 PIS 梯度（下颌/呼吸）",
+                "Camera": "PASS-轻推有动机",
+                "Composition": "PASS",
+                "Light": "PASS",
+                "Sound": "PASS-静默增强",
+                "Continuity_In_Out": "PASS-与 S1 视线衔接"
+              },
+              "景别系统": "CU 情绪距离匹配（注意力收窄到反应）",
+              "时长判定": "3.4s，情感窗口内且含情绪增量",
+              "CF命中": "无（对照 EMOTION_STALL_CHECK：>6s 才触发，本镜 3.4s 安全）",
+              "评分": 90
+            },
+            {
+              "shot_id": "S3",
+              "12字段": {
+                "Drama_Shot_Motivation": "WARNING-镜头功能略弱（信息量低于 S1/S2）",
+                "Performance": "WARNING-指尖收回仅微动作",
+                "Camera": "PASS-Static",
+                "Composition": "PASS",
+                "Light": "PASS",
+                "Sound": "WARNING-音乐仍缺席可能让尾部显空",
+                "Continuity_In_Out": "PASS"
+              },
+              "景别系统": "ECU 作为收束可，但信息供给低于情绪预期",
+              "时长判定": "3.8s，含微动作；若延长>6s 需触发 EMOTION_STALL_CHECK",
+              "CF命中": [
+                "CF-035 空镜功能化（弱）",
+                "CF-046 呼吸节奏（尾部张力弱）"
+              ],
+              "评分": 72
+            }
+          ],
+          "切换技法": "S1→S2 硬切落在'连贯动作+视线引导'双落点（PASS）；S2→S3 硬切落在'景别变化'（PASS）。未使用跳切/平行/交叉蒙太奇（单线场景，选型正确，对照 DC-032）。"
+        },
+        "output_layer": {
+          "repair_suggestions": [
+            {
+              "shot": "S3",
+              "R等级": "R2 Edit Repair",
+              "repair_director": "尾部补一拍妻子抬眼或引入环境响应（门声），拉回注意力",
+              "repair_model": "在 S3 prompt 增加低优先级环境响应（air draft/声场微变），避免模型生成无信息静态"
+            },
+            {
+              "shot": "S1",
+              "R等级": "R1/局部",
+              "repair_director": "放大手机在构图中的占比",
+              "repair_model": "用'phone as foreground anchor + primary attention'权重词，避免被模型弱化为背景道具"
+            }
+          ],
+          "shot_contract_diff": [
+            {
+              "field": "S3 Shot Purpose",
+              "contract": "信息揭示（屏幕内容）",
+              "actual": "仅指尖收回，屏幕信息未给到",
+              "gap": "导演意图未达成"
+            },
+            {
+              "field": "S2 时长",
+              "contract": "3-4s",
+              "actual": "3.4s",
+              "gap": "无"
+            }
+          ],
+          "script_diff": "与剧本 Beat 4.2 一致（夺机→反应→收束），无剧情偏差。",
+          "feedback_to_learning": "S3 的'信息供给不足'与 CF-035/CF-046 命中已回写 Production_Memory；建议下一次在 Shot Contract 阶段为该类收束镜预写 Reaction 接口（衔接 10.7 Learning Loop）。"
+        }
+      },
+      "qc_checks": [
+        "感知输出是否与人工抽查一致（景别/时间戳）？",
+        "评价是否逐条给出体系依据（编号/字段）而非泛泛而谈？",
+        "命中失败库时是否给出对应 CF 编号与修复方向？",
+        "音画协同维度是否被评估（不止视觉）？",
+        "评价结果是否回流 Production_Memory 供学习循环？",
+        "客观指标通道与 MLLM 主观评分是否都产出且冲突时有仲裁规则？",
+        "跨镜头故事一致性与动作完成度是否被评估（不止单镜）？",
+        "观众 persona 反馈是否与导演标准分双轨输出且冲突时导演优先？"
+      ]
+    },
+    {
+      "id": "AM-16",
+      "name": "Model-Principle Prompt Repair ｜ 模型原理提示词修复系统",
+      "principle": "质检失败后修提示词，不能只从'导演认为该怎么拍'（repair）修正，而要重点依据图片/视频生成模型的生成原理修正输入（repair_model）。失败本质是模型机制性缺陷：标签→先验共现、每镜独立重采样、注意力均分、时间压缩、参考图覆盖当前状态等。修复=针对 cause 指出的机制，从输入侧改写Prompt/参考/约束，让采样进入正确分布。",
+      "layers": {
+        "机制诊断": "对每个 failure_cases，cause 字段描述模型为何失败（先验绑定/重采样/注意力均分/时间压缩/状态覆盖/多变量超载/跨模型漂移等）。",
+        "原理修正": "repair_model 按机制反推输入修正：标签改空间关系词、参考图锚定身份/状态、降低多变量并行、时间分段控制渐变、负约束覆盖高概率先验、跨镜用首帧参考传递状态。",
+        "优先级判定": "cause 描述模型行为（机制型）→ repair_model 为主；cause 描述叙事意图缺失（意图型）→ repair 为主。",
+        "自进化回写": "修复成功率回写 Repair_Learning / Model Principle Repair Memory，同类失败下次直接调用已验证的模型原理修正。"
+      },
+      "prompt_pattern": "机制型失败修正模板：'原失败机制={cause} → 模型原理修正：把{标签}改为{可执行空间/因果描述}，用{参考/约束}锚定，降低{变量}，按{时间分段}控制变化'。",
+      "qc_checks": [
+        "修正是否依据模型生成机制而非仅导演直觉？",
+        "机制型失败是否优先使用 repair_model？",
+        "修复后成功率是否回写 Repair_Learning？",
+        "同一机制性失败是否在下一次被提前拦截？"
+      ]
+    },
+    {
+      "id": "AM-17",
+      "name": "Knowledge Dispatch System ｜ 知识调度系统（需求拉动型）",
+      "principle": "需求拉动（Demand-Pull Only）：知识检索的唯一合法入口是'问题'——失败信号、决策分叉、风险前置信号三者之一；严禁反向入口（因为库里存在某技巧而寻找使用机会）。技巧的价值由叙事目的证明，不由技巧本身的精巧证明；找不到问题就不准用技巧（无触发不检索、无动机不应用、过删除测试才算数）。",
+      "layers": {
+        "触发层（WHEN 什么时候找）": "三类合法触发，缺一不查：T1失败触发（被动·强制）——QC failure_code 或 AM-15 报告 CF 命中→必须检索对应 CF 的 repair/repair_model，无失败则不查；T2分叉触发（主动·决策点）——Agent 面临多选项且后果不同的分叉时查对应 DC 决策树（转场选型→DC-034、切换技法→DC-032、快切景别→DC-033、运镜→DC-035、灯光→DC-036；场景情绪分叉按 t2_beat_routing 七族注入 DC-001~030），限定条件：问题存在才查（'场景间缺乏自然连贯性'才查转场库，不是遇到场景转换就查）；T3风险前置触发（预防·结构化信号）——trigger_condition 机器命中即触发规则化处置（如 EMOTION_STALL_CHECK：镜头>6s 且情感场景）。除三类触发外，Agent 一律执行基础方案，禁止浏览知识库找灵感。",
+        "检索层（HOW 如何找）": "三级检索+适用性验证：L1直接索引——failure_code/rule_id 精确命中（零语义成本，最优先）；L2结构化触发器——trigger_condition 字段机器判定（EMOTION_STALL_CHECK + 15个高频CF的auto_trigger字段，机器可读规则共16条）；L3语义检索——按 l3_index_schema 索引（retrieval_keywords/knowledge_type/applicable_stage/beat_family/source_type/verification_status）匹配 Top-3，排序分=语义相关度×可信度权重（A级1.0/B级0.7/C级0.5，stale再×0.7），治理规则见 10.7 knowledge_governance（有成本，最后用）。适用性验证回路：命中知识后必须核对知识单元的 scene/question 是否匹配当前情境；不匹配→降级为基础方案（宁用朴素方案，不用错技巧）。检索顺序固定 L1→L2→L3，命中即停。",
+        "防炫技层（GUARD 保证为质量而用）": "三件套护栏：①动机门禁（Motivation Gate）——技法应用前必须先写一句 problem_statement（当前叙事/技术问题），写不出问题=禁用该技法；②技法版删除测试（Delete Test for Techniques）——应用后问'假设移除该技法，叙事是否受损？'不受损→回滚技法保留基础方案；③调用审计（Retrieval Audit）——每次调用记录四元组（trigger_type, problem_statement, applied_knowledge_id, delete_test_result）回写 10.7 Learning Loop，统计炫技率（未通过 Delete Test 的调用占比，阈值建议<15%），炫技型'技法×场景类型'组合自动降权。"
+      },
+      "prompt_pattern": "触发判定：'当前是否存在 T1失败信号/T2决策分叉/T3风险前置信号？三者皆无→直接执行基础方案，不检索'；检索：'按 L1失败码→L2触发器→L3语义顺序检索，Top-3，命中后核对 scene/question 与当前情境匹配，不匹配降级基础方案'；动机门禁：'先用一句话写出当前要解决的叙事/技术问题，写不出则禁用该技法'；删除测试：'假设移除该技法，叙事是否受损？否→回滚，记录 delete_test=fail'。",
+      "qc_checks": [
+        "每次知识调用是否有明确触发类型（T1/T2/T3）？无触发类型的调用=违规调用",
+        "problem_statement 是否先于技法声明（动机门禁）？",
+        "删除测试是否执行且通过？未通过的技法是否已回滚？",
+        "炫技率是否低于阈值并按月回写 Learning Loop？高频炫技组合是否已降权？",
+        "检索是否遵循 L1→L2→L3 顺序且命中即停（不做过量语义检索）？"
+      ]
+    }
+  ]
+}

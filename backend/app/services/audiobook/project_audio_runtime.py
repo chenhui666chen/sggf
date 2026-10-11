@@ -172,6 +172,30 @@ def validate_project_voice_references(
             )
 
 
+def apply_runtime_voice_mapping(
+    *,
+    voice_manager: Any,
+    voice_mapping: Dict[str, Dict[str, Any]],
+    character_profiles: Optional[List[Dict[str, Any]]] = None,
+) -> None:
+    """把项目级角色音配置应用到引擎的 voice_manager。
+
+    2026-10-11 收口：共享层不再用 ``try/except Exception → logger.warning`` 包住这次
+    调用。音色解析失败（``VoiceMappingResolutionError``）必须传到任务失败或接口 400，
+    否则越界角色会落到 ``assign_voice()`` 自动分配，用户指定的声线被静默替换而任务仍显示成功。
+    """
+    if not voice_mapping:
+        return
+
+    if character_profiles is None:
+        voice_manager.apply_project_voice_mapping(voice_mapping)
+    else:
+        voice_manager.apply_project_voice_mapping(
+            voice_mapping,
+            character_profiles=character_profiles,
+        )
+
+
 def resolve_project_audio_runtime_config(
     project: Optional[Project],
     *,

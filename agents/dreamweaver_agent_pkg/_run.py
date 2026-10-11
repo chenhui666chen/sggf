@@ -46,6 +46,13 @@ except ImportError:
     _generate_edit_with_candidates = None
 
 def run_video(ctx: Any) -> None:
+    # 视频生成控制与供应商追踪由 backend 侧单一实现，仓库根包不硬依赖 backend，
+    # 按既有惯例在入口内延迟导入（core/unified_media_runtime、agents/character_manager 同型）。
+    from app.services.dreamweaver.video_generation import (
+        build_video_provider_trace,
+        resolve_video_generation_controls,
+    )
+
     ensure_media_payload(ctx.payload)
 
     run_dir = Path("runs") / ctx.run_id

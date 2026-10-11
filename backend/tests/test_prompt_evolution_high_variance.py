@@ -134,7 +134,7 @@ async def test_mimo_high_score_retry_disabled():
     """
     evaluator = _build_retry_evaluator(["高碎片" * 120, "低碎片" * 120])
     result = await evaluator._evaluate_single_sample(
-        "prompt", _make_sample(), 0.8, model_id="mimo-v2.5"
+        "prompt", _make_sample(), 0.8, model_id="mimo-flash"
     )
     assert result.success is True
     assert result.rewritten_ai_score == 95

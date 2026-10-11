@@ -50,3 +50,20 @@ def test_deployed_application_exposes_openapi_json():
     schema = response.json()
     assert SETTINGS_AUTO_MERGE_PATH in schema["paths"]
     assert VOICE_POOL_PUBLIC_PATH in schema["paths"]
+
+
+def test_voice_pool_public_tag_filters_are_query_params():
+    """多标签筛选必须落在 query 上。
+
+    FastAPI 会把没有 Annotated 标记的 list 形参识别成请求体；GET 请求体被静默忽略，
+    筛选参数就成了永远不生效的假开关，只有 spec 层能提前抓到。
+    """
+    app.openapi_schema = None
+    operation = app.openapi()["paths"][VOICE_POOL_PUBLIC_PATH]["get"]
+
+    assert "requestBody" not in operation
+
+    parameters = {item["name"]: item for item in operation["parameters"]}
+    for name in ("timbre_tags", "scenario_tags", "emotion_tags"):
+        assert parameters[name]["in"] == "query"
+        assert parameters[name]["required"] is False

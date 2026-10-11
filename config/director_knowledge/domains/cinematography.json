@@ -1,0 +1,407 @@
+{
+  "_type": "domain",
+  "domain": "cinematography",
+  "unit_count": 16,
+  "units": {
+    "lens_camera_distance_perspective": {
+      "title": "焦距×距离×透视（AI Cinematic Physics + 广角/长焦 Prompt 补偿）",
+      "principle": "焦距本身不直接改变透视；透视由摄影机与主体/空间的相对位置决定。AI 能识别\"24mm/135mm\"标签，但没有真实光学镜头和统一 3D 摄影坐标，必须显式描述 Camera Distance、Perspective Intent、Foreground/Background Relationship。",
+      "content": {
+        "layers": {
+          "L1_物理原理": "保持主体尺寸近似不变时，短焦意味着机位更近→近大远大更明显；长焦意味着机位更远→透视差更弱、背景层视觉上更靠近主体（压缩感）。",
+          "L2_广角Prompt补偿": "不要只写\"24mm wide lens\"。应明确：camera very close to subject；foreground enlarged；strong near-far scale difference；background receding deeply。目标不是强迫模型模拟真实镜头参数，而是补齐它通常不会自动联动的摄影几何特征。",
+          "L3_长焦Prompt补偿": "不要把\"135mm\"简化为浅景深。应明确：camera far from subject；narrow field of view；layered background visually compressed toward the subject；distant observational framing。",
+          "L4_帧编译注入": "Contract 的 lens 字段→帧 prompt 按广角/长焦补偿模板展开，而非只写焦距数字。"
+        },
+        "prompt_pattern": "广角：[焦距] + camera very close to subject + foreground enlarged + strong near-far scale difference；长焦：[焦距] + camera far from subject + narrow FOV + background compressed toward subject",
+        "qc_checks": [
+          "帧 prompt 是否只有焦距数字而无几何补偿描述",
+          "广角是否写了近距离与近大远小",
+          "长焦是否写了远距离与背景压缩"
+        ]
+      },
+      "depends_on": [],
+      "source_type": "benchmark",
+      "verification_status": "verified",
+      "trust_weight": 1.0,
+      "backfill_origin": "DOCX 卷二 2.2-2.4（V5 基线）",
+      "domain": "cinematography"
+    },
+    "movement_motivation": {
+      "title": "运镜动机（Movement Motivation）",
+      "principle": "运镜必须对应信息/心理/空间三类变化之一，无变化需求→固定机位（CF-014 拦截无叙事价值复杂运镜）。",
+      "content": {
+        "layers": {
+          "L1_三类动机": "信息动机（揭示世界/关键物首次亮相）、心理动机（情绪收紧/压迫逼近/不安/孤立/主观化）、空间动机（建置空间/权力关系变化）。",
+          "L2_零动机处理": "无法归入三类的运镜需求→固定机位 locked-off（最被低估的运镜，让表演发力）。",
+          "L3_节拍同步": "运镜与表演节拍同步：push-in 对齐角色\"意识到\"的瞬间，固定机位让微表情发力。"
+        },
+        "qc_checks": [
+          "运镜是否可归入三类动机之一",
+          "无动机运镜是否已改为固定机位",
+          "push-in 是否对齐了表演节拍点"
+        ]
+      },
+      "depends_on": [],
+      "source_type": "benchmark",
+      "verification_status": "verified",
+      "trust_weight": 1.0,
+      "backfill_origin": "DOCX 卷二 2.1.3（V5 基线）",
+      "domain": "cinematography"
+    },
+    "composition_attention": {
+      "title": "构图注意力（视觉动线 Attention Sequence）",
+      "principle": "每镜应定义 Attention Sequence（如 A脸→B视线→C背景线索）。构图不是美学装饰，而是控制观众阅读顺序的工具。",
+      "content": {
+        "layers": {
+          "L1_动线工具": "Leading Lines（引导线）、Diagonal（对角线）、S-Curve（S曲线）、Eyeline Vector（视线向量）、Motion Vector（运动向量）——都是控制阅读顺序的工具。",
+          "L2_景别即信息粒度": "景别不是情绪公式，而是信息供给的粒度调节：景别越近，信息越聚焦主体内心；越远，越偏向环境与语境。",
+          "L3_帧编译注入": "帧 prompt 按动线工具描述构图意图（如 leading lines toward subject / negative space isolating figure），而非只写\"好看\"。"
+        },
+        "prompt_pattern": "构图描述 = 主体位置（三分法/中心）+ 引导线（什么线条把视线导向主体）+ 负空间（主体周围留白方向）+ 前景层次",
+        "qc_checks": [
+          "每镜是否定义了 Attention Sequence",
+          "构图描述是否使用了动线工具词汇",
+          "观众第一眼看到的是否是导演要强调的"
+        ]
+      },
+      "depends_on": [
+        "lens_camera_distance_perspective"
+      ],
+      "source_type": "benchmark",
+      "verification_status": "verified",
+      "trust_weight": 1.0,
+      "backfill_origin": "DOCX 卷二 2.10 视觉动线 + 2.1.1（V5 基线）",
+      "domain": "cinematography"
+    },
+    "motivated_lighting": {
+      "title": "动机光（Motivated Lighting）",
+      "principle": "光源必须有场景内动机（窗外/灯泡/屏幕），无动机的\"氛围光\"打回。光是调色的输入，不是事后滤镜。",
+      "content": {
+        "layers": {
+          "L1_决策链": "灯光按顺序决策：真实/设计光源→方向→光质→光比→填充/负填充→主体分离→色彩关系→动态行为→空气介质。",
+          "L2_动机判定": "光源在场景内可见或可推断（窗外日光/台灯/手机屏幕/霓虹招牌）。无来源的蓝橙边光=无动机→打回。",
+          "L3_服从度": "时间/氛围/方向类文字可控（高）；造型光（侧光/光比）中；精确光位/硬阴影低→必须用参考图实现。",
+          "L4_跨镜状态": "跨镜灯光变化写入 lighting_state 并随 State Transition 重算；灯光跨镜突变无剧情动机=连续性破坏。"
+        },
+        "qc_checks": [
+          "光源是否有场景内动机",
+          "是否沿决策链排布",
+          "精确光位是否已改用参考图",
+          "跨镜 lighting_state 是否连续或有动机"
+        ]
+      },
+      "depends_on": [],
+      "source_type": "benchmark",
+      "verification_status": "verified",
+      "trust_weight": 1.0,
+      "backfill_origin": "DOCX 卷二 2.6 + DC-036 决策链（V5 基线）",
+      "domain": "cinematography"
+    },
+    "subject_separation": {
+      "title": "主体分离（五种分离方式）",
+      "principle": "主体分离至少有五种：亮度分离、轮廓分离、色彩分离、焦点分离、运动分离。Rim Light 只是其中一种，不应成为默认电影感处理。",
+      "content": {
+        "layers": {
+          "L1_五种分离": "亮度分离（主体亮背景暗）、轮廓分离（rim/backlight）、色彩分离（冷暖对比/互补色）、焦点分离（浅景深背景虚化）、运动分离（主体动背景静）。",
+          "L2_选择逻辑": "按场景已有条件选最自然的分离方式——已有大光比→亮度分离；逆光场景→轮廓分离；彩色环境→色彩分离；人像镜头→焦点分离；动作场景→运动分离。",
+          "L3_I2V关键": "主体占比≥30%且与背景清晰分离是 I2V 防漂移硬指标——杂乱背景诱导模型\"再解释\"而非保持（衔接 i2v_frame_quality_protocol）。"
+        },
+        "qc_checks": [
+          "是否只用了 rim light 而忽略其他四种",
+          "分离方式是否与场景条件匹配",
+          "主体背景分离度是否足以支撑 I2V"
+        ]
+      },
+      "depends_on": [
+        "motivated_lighting"
+      ],
+      "source_type": "benchmark",
+      "verification_status": "verified",
+      "trust_weight": 1.0,
+      "backfill_origin": "DOCX 卷二 2.7（V5 基线）",
+      "domain": "cinematography"
+    },
+    "scale_anchor": {
+      "title": "尺度锚点（Scale Anchor）",
+      "principle": "巨大/渺小需要熟悉参照物：人物、车辆、门、普通建筑、道路等。Perceived Scale = Target + Familiar Reference + Depth Layers + Perspective + Atmosphere。",
+      "content": {
+        "layers": {
+          "L1_公式": "感知尺度 = 目标物 + 熟悉参照物 + 深度层次 + 透视 + 空气介质（远景雾化增强巨大感）。",
+          "L2_帧编译": "表现巨大（巨兽/建筑）时帧 prompt 必须包含至少一个熟悉参照物（人物站在巨物脚下）；表现渺小时同理（人物被普通家具放大对比）。"
+        },
+        "qc_checks": [
+          "巨大/渺小场景是否有熟悉参照物",
+          "是否有深度层次与空气介质"
+        ]
+      },
+      "depends_on": [
+        "lens_camera_distance_perspective"
+      ],
+      "source_type": "benchmark",
+      "verification_status": "verified",
+      "trust_weight": 1.0,
+      "backfill_origin": "DOCX 卷二 2.8（V5 基线）",
+      "domain": "cinematography"
+    },
+    "color_anchor": {
+      "title": "色彩锚点（Color Anchor）",
+      "principle": "颜色首先是注意力与识别工具，后续才通过叙事重复获得情绪/象征意义。禁止把\"蓝=悲伤、红=愤怒\"作为硬规则。",
+      "content": {
+        "layers": {
+          "L1_识别优先": "角色识别色/道具识别色/场景识别色——观众靠颜色快速识别\"这是谁/这是什么/这是哪\"。",
+          "L2_情绪不硬编码": "颜色的情绪意义通过叙事重复建立（红色在前 3 集与暴力关联后才成为\"危险信号\"），不是天然规则。",
+          "L3_QC联动": "颜色变化必须有叙事对应（CF-080）；调色不能替代电影语言（CF-001 删除测试）。"
+        },
+        "qc_checks": [
+          "角色/道具是否有稳定识别色",
+          "颜色变化是否有叙事对应",
+          "是否落入蓝=悲伤硬规则"
+        ]
+      },
+      "depends_on": [],
+      "source_type": "benchmark",
+      "verification_status": "verified",
+      "trust_weight": 1.0,
+      "backfill_origin": "DOCX 卷二 2.9（V5 基线）",
+      "domain": "cinematography"
+    },
+    "camera_choreography": {
+      "title": "摄影机编排（Camera Choreography，AM-05）",
+      "principle": "Static 用于审视、等待、让表演承担意义；Push/Pull 必须对应信息或心理距离变化；Pan/Tilt 用于在既有空间中寻找或 Reveal；Truck/Tracking 强调同行与视差；Handheld 是摄影机身体感而非\"地震\"；Orbit/Arc 高风险，优先小角度弧线而非 360°。",
+      "content": {
+        "layers": {
+          "L1_运镜词汇": "Static/Push/Pull/Pan/Tilt/Truck/Tracking/Handheld/Orbit/Arc——每种有明确戏剧用途（见 movement_motivation）。",
+          "L2_风险控制": "Orbit/Arc 模型服从度低且易穿帮→优先小角度弧线；Handheld 必须写 subtle natural shaking 而非剧烈晃动。",
+          "L3_编排": "场景级运镜编排：连续镜头的机位变化构成空间探索节奏（建立→跟随→定格）。"
+        },
+        "qc_checks": [
+          "运镜选型是否匹配戏剧目的",
+          "高风险运镜是否有降级方案",
+          "场景级机位编排是否有节奏"
+        ]
+      },
+      "depends_on": [
+        "movement_motivation"
+      ],
+      "source_type": "benchmark",
+      "verification_status": "verified",
+      "trust_weight": 1.0,
+      "backfill_origin": "DOCX 卷二 2.5 + AM-05（V5 基线）",
+      "domain": "cinematography"
+    },
+    "lighting_directing": {
+      "title": "光影导演（Lighting Directing，AM-11）",
+      "principle": "光的戏剧节拍：真相揭露瞬间可设计光比突变；对峙戏双方明暗分配呼应立场；回忆戏人物面向光源=面向过去。灯光方案与声场匹配（低调光配近场声、平光配环境嗡鸣、窗光配生活质感音效）。",
+      "content": {
+        "layers": {
+          "L1_戏剧节拍": "光比突变对齐表演转折点；立场明暗（正方亮反方暗）；面向光源=面向过去/希望。",
+          "L2_声光匹配": "低调光→近场声（耳语/呼吸）；平光体制化→环境嗡鸣；暖窗光→生活质感音效（风铃/远处电视）。",
+          "L3_执行": "灯光选型走 DC-036 八映射；执行约束走 motivated_lighting 决策链；服从度走 camera_lighting_prompt_lexicon。"
+        },
+        "qc_checks": [
+          "光比变化是否对齐表演节拍",
+          "双方明暗是否呼应立场",
+          "声场是否与光方案匹配"
+        ]
+      },
+      "depends_on": [
+        "motivated_lighting"
+      ],
+      "source_type": "benchmark",
+      "verification_status": "verified",
+      "trust_weight": 1.0,
+      "backfill_origin": "DOCX DC-036 执行段 + AM-11（V5 基线）",
+      "domain": "cinematography"
+    },
+    "shot_size_system": {
+      "domain": "cinematography",
+      "title": "五级景别系统与景别变化顺序",
+      "principle": "景别不是情绪公式，而是信息供给的粒度调节：景别越近，信息越聚焦主体内心；越远，信息越偏向环境与语境。景别 = 镜头中主体在画幅内的占比。",
+      "content": [
+        "五级景别：远景 LS 建立环境/空间规模/氛围；全景 FS 展示主体全貌与活动空间/关系位置；中景 MS 平衡环境与人物（最接近日常观察距离，适合对话与动作）；近景 CU 聚焦表情/心理/潜台词；特写 ECU 强调单一细节/物件/微表情（信息强度最高、语境最弱）",
+        "景别变化顺序八式：P1 叙事流 LS→FS→MS→CU（默认开场：先空间后关系再情感）；P2 反向流 CU→MS→LS（悬念揭示/倒叙开篇/反应优先）；P3 渐进靠近 MS→CU→ECU（情绪升级/对峙白热化）；P4 渐进拉远 ECU→CU→MS→LS（孤独感/悲剧收束/开放式余味）；P5 跳切反差 LS↔ECU（爆点/震惊/硬切落点/梦境切换）；P6 同景别保持 stay on MS/CU（审讯/冷静对峙/纪录感/持续注视）；P7 对称呼应 A-CU→B-CU→A-CU（权力对等/镜像关系/双主角对话）；P8 特写起手 ECU→MS→LS（关键道具亮相/悬念钩子/信息优先于空间）",
+        "决策纪律：P1-P8 是默认参考非硬规则；任何景别变化必须服务信息/情绪距离/空间关系之一（CF-034 拦截无动机机械交替）；每次变化回答『改变了什么信息供给』",
+        "动作类快切联动（DC-033）：动作单元必须 CU/ECU/Insert 而非 WS/MS——特写掩盖物理位移穿帮 + 观众心理补偿被省略的中间动作 + 弱化跳轴；特写只演关键物理节点（接触/发力/反应），完整过程由观众脑补"
+      ],
+      "source_project": "AI Director OS V5.0 原生知识",
+      "source": "三件套 DOCX Master 卷二 2.1.1 五级景别系统 / 2.1.2 景别变化顺序决策表",
+      "added": "2026-08-16",
+      "source_type": "benchmark",
+      "verification_status": "verified",
+      "trust_weight": 1.0,
+      "depends_on": [
+        "lens_camera_distance_perspective"
+      ],
+      "qc_checks": [
+        "每次景别变化是否回答了『改变了什么信息供给』？",
+        "景别顺序是否匹配叙事意图（P1-P8）而非机械交替（CF-034）？",
+        "动作类快切是否用 CU/ECU/Insert（DC-033）？"
+      ],
+      "content_backfilled": "2026-10-07",
+      "backfill_origin": "V5.0 基线（DOCX 卷二 2.1.1/2.1.2）"
+    },
+    "color_grade_thinking": {
+      "title": "调色思维（Color Grade Thinking 五步闭环）",
+      "principle": "调色不是后期套滤镜，而是贯穿前中后期的质感决策链。默认原则服从色彩锚点——颜色首先是注意力与识别工具，禁止\"蓝=悲伤、红=愤怒\"硬规则。",
+      "content": {
+        "layers": {
+          "L1_五步闭环": "①确定调色风格（全片统一情绪基调/风格锚）→②突出主体（明度/饱和度/色温导向主体=色彩分离）→③形成对比（主体与环境/前后景/冷暖对比）→④统一颜色（相邻镜头色温色调统一，防 CF-048 场景视觉主题碎裂）→⑤调整细节与肤色（肤色真实自然，细节服务叙事）。",
+          "L2_与灯光联动": "光方案是调色的输入（衔接 motivated_lighting）——灯光决定画面的明暗结构，调色决定色彩倾向，二者必须同一风格语言。",
+          "L3_帧编译注入": "帧 prompt 注入调色风格描述（如 teal-orange grade / desaturated cold tone / warm nostalgic film tone），保证前后镜头色调连贯。"
+        },
+        "qc_checks": [
+          "颜色变化是否有叙事对应（CF-080）",
+          "相邻镜头色温是否统一",
+          "去掉调色后镜头是否仍有叙事功能（CF-001）",
+          "肤色是否真实自然"
+        ]
+      },
+      "depends_on": [
+        "color_anchor",
+        "motivated_lighting"
+      ],
+      "source_type": "benchmark",
+      "verification_status": "verified",
+      "trust_weight": 1.0,
+      "backfill_origin": "DOCX 卷二 2.9.1（V5 基线）",
+      "domain": "cinematography"
+    },
+    "texture_boost_techniques": {
+      "title": "质感三板斧（Texture Boost）",
+      "principle": "剪辑总显\"平\"时的三道解法，按层叠加：先节奏（时间轴）、再声音（听觉层）、后调色（画面层），逐层叠加质感，避免只靠单一手段。",
+      "content": {
+        "layers": {
+          "L1_第一板_剪辑节奏": "插入快节奏镜头组或快闪镜头改变画面节奏。快闪镜头属于短切，须遵循硬切落点三规则与镜头时长阈值，不能为快而快（CF-046/CF-089）。",
+          "L2_第二板_声音设计": "音效快慢强弱产生听觉节奏。音效强弱变化须有来源与动机（CF-040/CF-041），可服务于情绪曲线。",
+          "L3_第三板_调色思维": "走 color_grade_thinking 五步闭环（见独立单元）。",
+          "L4_帧端质感": "帧 prompt 注入质感词：材质（皮肤毛孔/布料纹理/金属拉丝）、光泽（matte/glossy/satin）、颗粒（film grain/digital clean）——提升\"物质感\"。"
+        },
+        "qc_checks": [
+          "三板斧是否按序使用",
+          "是否只靠单一手段",
+          "帧 prompt 是否有材质/光泽/颗粒描述"
+        ]
+      },
+      "depends_on": [
+        "color_grade_thinking"
+      ],
+      "source_type": "benchmark",
+      "verification_status": "verified",
+      "trust_weight": 1.0,
+      "backfill_origin": "DOCX 卷四 4.1.1（V5 基线）",
+      "domain": "cinematography"
+    },
+    "cinematography_decision_library": {
+      "domain": "cinematography",
+      "title": "摄影决策库总纲：戏剧目的→运镜/灯光映射",
+      "principle": "摄影决策总纲：戏剧目的→技巧映射。运镜八映射（DC-035）与灯光八映射（DC-036）为 dispatch 入口，沿决策链执行；技巧服务于戏剧目的而非炫技。",
+      "content": [
+        "运镜八映射（DC-035）：揭示（世界/关键物首次亮相）→pull-back reveal 缓慢拉远；情绪收紧/压迫→slow push-in；不安/危险潜伏→slow creep 或 unsettled drift；权力关系变化→升/降机位（俯视压低/仰视抬高）；孤立/失落→缓慢拉远+主体占比缩小；主观化/失稳→handheld（subtle natural shaking）；客观旁观/让表演发力→locked-off 固定机位（最被低估的『运镜』）；建置空间→establishing sweep 缓慢横移",
+        "灯光八映射（DC-036）：对峙/内心分裂→侧向硬光（伦勃朗式，主体面向光源45°）；审问/压迫→顶光（眼窝阴影，配俯角机位）；温暖回忆/安全→暖色窗光+柔光（大光源低对比）；秘密/阴谋→低调单源光（大面积黑）；虚伪的和谐/体制化→均匀平光（消除阴影=消除真相层次）；情绪崩塌/真相揭露→光比拉大（fill 减少，阴影吞噬）；夜晚不安→冷色月光/单点实用光源；日常真实→动机窗光（光源在场景内可见或可推断）",
+        "灯光决策链：光源类型（真实/设计）→方向→光质→光比→填充/负填充→主体分离→色彩关系→动态行为",
+        "服从度分界（camera_lighting_prompt_lexicon）：低服从项走参考图；跨镜灯光变化写入 lighting_state 字段并随 State Transition 重算"
+      ],
+      "source_project": "AI Director OS V5.0 原生知识",
+      "source": "三件套 DOCX Master 卷二 2.1.3 运镜选型决策表 / 2.1.4 灯光选型决策表（DC-035/036 配套总纲）",
+      "added": "2026-08-17",
+      "source_type": "benchmark",
+      "verification_status": "verified",
+      "trust_weight": 1.0,
+      "depends_on": [
+        "shot_size_system",
+        "movement_motivation",
+        "motivated_lighting"
+      ],
+      "qc_checks": [
+        "运镜是否对应信息/心理/空间三类变化之一（无变化→固定机位，CF-014）？",
+        "灯光是否有场景内动机（motivated_lighting 总则）？",
+        "本镜是否只有一个主导技巧位？"
+      ],
+      "content_backfilled": "2026-10-07",
+      "backfill_origin": "2026-08-17 摄影决策层集成（DOCX 卷二 2.1.3/2.1.4）"
+    },
+    "camera_lighting_prompt_lexicon": {
+      "domain": "cinematography",
+      "title": "摄影/灯光 Prompt 执行词典（导演语言→模型语言翻译层）",
+      "principle": "导演语言必须翻译为模型可执行语言并标注服从度；低服从项强制走参考图路径，禁止纯文字实现。",
+      "content": [
+        "三档服从度：高——时间/氛围/方向类文字可控；中——造型光（侧光/光比）与运镜速度（需量化词 very slow/slow/quick）；低——crane 升降/大横移、精确光位/硬阴影 → 必须参考图或首尾帧条件控制",
+        "翻译示例：缓慢推近（情绪收紧）→ slow dolly-in, camera gradually pushes toward the subject's face, very steady movement（服从度：中）",
+        "灯光服从度：时间/氛围/方向高；造型光（侧光/光比）中；精确光位/硬阴影低 → 参考图实现",
+        "大幅运镜的景别标注改为起止景别（如 ECU→CU），避免单点标注与运动物理冲突",
+        "执行纪律：Prompt 翻译必须走本词典且服从度达标，否则阶段③预检打回（衔接 technique_interference_check）"
+      ],
+      "source_project": "AI Director OS V5.0 原生知识",
+      "source": "三件套 DOCX Master 卷五 摄影术语翻译层（2026-08-17 集成）",
+      "added": "2026-08-17",
+      "source_type": "benchmark",
+      "verification_status": "verified",
+      "trust_weight": 1.0,
+      "depends_on": [
+        "movement_motivation",
+        "motivated_lighting"
+      ],
+      "qc_checks": [
+        "导演语言是否全部翻译为模型语言并标注服从度？",
+        "低服从项（crane/精确光位）是否强制走参考图路径？",
+        "运镜速度词是否量化（very slow/slow/quick）？"
+      ],
+      "content_backfilled": "2026-10-07",
+      "backfill_origin": "2026-08-17 摄影决策层集成（DOCX 卷五翻译层）"
+    },
+    "technique_interference_check": {
+      "domain": "cinematography",
+      "title": "技巧干涉检查与叠加预算（阶段③预检）",
+      "principle": "生成前拦截优于生成后修复：阶段③预检套件在 Shot Contract 层打回矛盾，不进生成。三类预检：CF 风险前置（T3）+ 光学一致性预检 + 技巧干涉检查。",
+      "content": [
+        "光学一致性预检规则：景别=特写 × 焦距=广角 → 矛盾（广角特写属畸变风格，必须显式声明 distortion intent 才放行）；景别=远景 × 长焦 → 需声明空间压缩意图，否则按矛盾打回",
+        "技巧干涉五类冲突：目的冲突（两技巧争夺同一戏剧目的）/ 节奏冲突（快切 <1s/镜 × 复杂运镜）/ 风格冲突（自然主义灯光 × 强风格化调色）/ 物理冲突（运镜 × 固定景别标注失效）/ 过载冲突（主动技巧 >2/镜）",
+        "叠加预算：每镜主动技巧 ≤2、主导技巧 =1；本镜以运镜为主导时，灯光/剪辑只作支持位",
+        "运镜时长约束：推/拉镜需 ≥3s 才能完成心理量变；快切序列（<1s/镜）禁用复杂运镜",
+        "冲突处理：冲突技巧按优先级删除——主导技巧保留，支持位让路；删除后须复检是否留下『无技巧裸镜』（配合删除测试）"
+      ],
+      "source_project": "AI Director OS V5.0 原生知识",
+      "source": "三件套 DOCX Master 卷五 阶段③预检套件（2026-08-17 集成）+ 卷二 2.1.3 运镜约束",
+      "added": "2026-08-17",
+      "source_type": "benchmark",
+      "verification_status": "verified",
+      "trust_weight": 1.0,
+      "depends_on": [
+        "movement_motivation",
+        "motivated_lighting"
+      ],
+      "qc_checks": [
+        "每镜主动技巧是否 ≤2 且主导技巧 =1？",
+        "快切序列（<1s/镜）是否禁用了复杂运镜？",
+        "特写×广角等光学矛盾是否在 Contract 层打回（未声明 intent 不放行）？"
+      ],
+      "content_backfilled": "2026-10-07",
+      "backfill_origin": "2026-08-17 摄影决策层+阶段③预检套件集成（DOCX 卷五）"
+    },
+    "internal_motion_priority": {
+      "domain": "cinematography",
+      "title": "内运动优先：固定镜头 + 画面内动态",
+      "principle": "低运镜服从度模型的工程解法：固定镜头注入画面内动态优先，微运镜分级注入，动态密度自检——与 DC-035 运镜映射构成「首选运镜 → 服从度不足 → 降级内运动」完整链（AI漫剧Skills v9.0 内运动体系）。",
+      "content": [
+        "降级链：DC-035 选定运镜 → 模型服从度评估（高/中/低，参照模型执行词典）→ 低服从度时降级为固定机位 + 画面内动态",
+        "画面内动态注入：主体动作 / 前景飘动物 / 光影变化 / 景深呼吸——替代镜头运动提供信息增量",
+        "微运镜分级：subtle drift / micro push-in（1-2%/帧）作为固定与常规运镜之间的中间档",
+        "动态密度自检：每镜 ≥1 个画面内动态源；静态镜组按 EMOTION_STALL_CHECK 拦截（对齐 CF-088）"
+      ],
+      "source_project": "AI漫剧Skills（gitee，v9.0.0 内运动体系）",
+      "source": "AI漫剧Skills v9.0：固定镜头注入画面内动态 + 微运镜分级 + 动态密度自检",
+      "added": "2026-10-07",
+      "source_type": "external_opensource",
+      "verification_status": "pending",
+      "trust_weight": 0.6,
+      "depends_on": [
+        "shot_specification"
+      ],
+      "qc_checks": [
+        "低服从度场景是否优先降级内运动而非硬写运镜？",
+        "每镜是否通过动态密度自检？"
+      ]
+    }
+  }
+}

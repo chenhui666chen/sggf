@@ -19,6 +19,7 @@ from app.services.ai_trace_competition import (
     ModelConfigStorage,
     SingleModelResult,
     collect_rejection_reasons,
+    rank_by_ai_ratio,
     rank_by_ai_score,
 )
 
@@ -67,14 +68,48 @@ class TestMinImprovementGate:
         assert ModelConfigStorage.is_eligible_result(make_result(improvement=14))
 
 
-class TestRankByAiScore:
-    def test_rank_by_ai_score_not_hybrid(self):
-        # 恒等映射（AI=99, hybrid 低）必须排在实际降分者（AI=85, hybrid 高）之后
-        identity = make_result(improvement=0, ai_score=99, hybrid=40.0)
-        rewriter = make_result(improvement=14, ai_score=85, hybrid=120.0)
-        ranked = rank_by_ai_score([identity, rewriter])
-        assert [r.ai_score for r in ranked] == [85, 99]
-        assert ranked[0].model_name == rewriter.model_name
+class TestRankByAiRatio:
+    """🔧 2026-10-08：排序主键由 ai_score 改为 ai_ratio。
+
+    旧口径的取证：ai_score ≈ (ai_ratio + suspect_ratio) × 100，在 LLM 改写区间
+    恒为 100，按它排序等价于按常数排序 —— 所以下面刻意让三个结果的 ai_score
+    全部相同，旧口径下三者完全等价、选不出任何差别。
+    """
+
+    def test_ranks_by_ai_ratio_when_ai_score_is_blind(self):
+        blind_a = make_result(improvement=0, ai_score=100, hybrid=40.0)
+        blind_a.ai_ratio = 0.80
+        blind_b = make_result(improvement=14, ai_score=100, hybrid=120.0)
+        blind_b.ai_ratio = 0.10
+        blind_c = make_result(improvement=14, ai_score=100, hybrid=90.0)
+        blind_c.ai_ratio = 0.45
+
+        ranked = rank_by_ai_ratio([blind_a, blind_b, blind_c])
+
+        assert [r.ai_ratio for r in ranked] == [0.10, 0.45, 0.80]
+        assert ranked[0] is blind_b
+        # hybrid_score 不参与排序（旧方案 A 的约束，仍须守住）
+        assert ranked[0].hybrid_score == 120.0
+
+    def test_missing_ai_ratio_counts_as_worst(self):
+        # 检测异常（ai_ratio 缺失）不得因「看起来降得干净」而占便宜
+        unknown = make_result(improvement=14, ai_score=100)
+        known = make_result(improvement=14, ai_score=100)
+        known.ai_ratio = 0.60
+
+        ranked = rank_by_ai_ratio([unknown, known])
+
+        assert ranked[0] is known
+        assert ranked[-1] is unknown
+
+    def test_deprecated_alias_delegates_to_ai_ratio(self):
+        # 兼容别名只为外部脚本导入不失败，语义必须与 rank_by_ai_ratio 一致
+        high = make_result(improvement=10, ai_score=100)
+        high.ai_ratio = 0.30
+        low = make_result(improvement=10, ai_score=100)
+        low.ai_ratio = 0.20
+
+        assert [r.ai_ratio for r in rank_by_ai_score([high, low])] == [0.20, 0.30]
 
 
 class TestRejectionReasons:

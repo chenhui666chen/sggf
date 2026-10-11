@@ -23,7 +23,7 @@ from app.services.audiobook.stepaudio_voice_assets import (
     resolve_stepaudio_voice_asset_tts_params,
 )
 from app.services.audiobook.tts_engine import TTSEngine, TTSUserInputError
-from app.services.audiobook.tts_model_ids import STEPAUDIO_25_TTS_MODEL
+from app.services.audiobook.tts_model_ids import STEPAUDIO_3_TTS_MODEL
 
 
 class CompatTestClient:
@@ -86,10 +86,10 @@ def test_stepaudio_clone_asset_stores_audio_file_without_json_base64(tmp_path, m
 
     index_payload = json.loads((tmp_path / "index.json").read_text(encoding="utf-8"))
     params = resolve_stepaudio_voice_asset_tts_params(asset.id)
-    presets = [item.to_voice_preset() for item in store.list_assets(model=STEPAUDIO_25_TTS_MODEL)]
+    presets = [item.to_voice_preset() for item in store.list_assets(model=STEPAUDIO_3_TTS_MODEL)]
 
     assert asset.asset_type == "clone"
-    assert asset.model == STEPAUDIO_25_TTS_MODEL
+    assert asset.model == STEPAUDIO_3_TTS_MODEL
     assert asset.mime_type == "audio/wav"
     assert (tmp_path / asset.audio_path).read_bytes() == sample_bytes
     assert sample_bytes.decode("latin1") not in json.dumps(index_payload)
@@ -205,7 +205,7 @@ def test_stepaudio_clone_asset_upload_route_saves_file_and_lists_preset(tmp_path
         files={"file": ("sample.mp3", sample_bytes, "audio/mpeg")},
     )
     list_response = client.get(
-        f"/api/v1/audiobook/tts/voices?model={STEPAUDIO_25_TTS_MODEL}",
+        f"/api/v1/audiobook/tts/voices?model={STEPAUDIO_3_TTS_MODEL}",
     )
 
     assert upload_response.status_code == 200
@@ -329,7 +329,7 @@ def test_stepaudio_clone_asset_preview_route_returns_audio_without_saving_asset(
         assert json.loads(index_path.read_text(encoding="utf-8"))["assets"] == []
     assert preview_calls == [
         {
-            "model": STEPAUDIO_25_TTS_MODEL,
+            "model": STEPAUDIO_3_TTS_MODEL,
             "api_key": "unit-step-key",
             "text": "这是一段试听。",
             "file_id": "file-preview",
@@ -399,7 +399,7 @@ def test_stepaudio_preview_route_returns_user_error_for_cer_mismatch(monkeypatch
         json={
             "text": "preview line",
             "voice_id": "stepaudio_clone:stepaudio_clone_unit",
-            "model": STEPAUDIO_25_TTS_MODEL,
+            "model": STEPAUDIO_3_TTS_MODEL,
             "stepaudio_voice_asset_id": "stepaudio_clone_unit",
             "volume": 50,
             "speed": 1.0,
@@ -440,9 +440,9 @@ def test_stepaudio_voice_asset_id_is_preserved_in_project_voice_mapping():
         {
             "voice_id": "stepaudio_clone:stepaudio_clone_saved",
             "stepaudio_voice_asset_id": "stepaudio_clone_saved",
-            "tts_model": STEPAUDIO_25_TTS_MODEL,
+            "tts_model": STEPAUDIO_3_TTS_MODEL,
         },
-        tts_model=STEPAUDIO_25_TTS_MODEL,
+        tts_model=STEPAUDIO_3_TTS_MODEL,
     )
 
     assert mapping_item["voice_id"] == "stepaudio_clone:stepaudio_clone_saved"

@@ -96,7 +96,7 @@ describe('audiobook task session storage utils', () => {
       selectedChapterIds: [2, 1],
       activeStep: 2,
       generating: true,
-      ttsModel: 'qwen3-tts-instruct-flash',
+      ttsModel: 'qwen-audio-3.1-tts-flash',
       updatedAt: '2026-05-02T08:00:00.000Z',
       writerTabId: 'tab-a',
     })
@@ -113,7 +113,7 @@ describe('audiobook task session storage utils', () => {
       selectedChapterIds: [1, 2],
       activeStep: 1,
       generating: true,
-      ttsModel: 'qwen3-tts-instruct-flash',
+      ttsModel: 'qwen-audio-3.1-tts-flash',
       updatedAt: '2026-05-02T08:00:00.000Z',
       writerTabId: 'tab-a',
     })))
@@ -126,7 +126,7 @@ describe('audiobook task session storage utils', () => {
       selectedChapterIds: [1, 2],
       activeStep: 1,
       generating: true,
-      ttsModel: 'qwen3-tts-instruct-flash',
+      ttsModel: 'qwen-audio-3.1-tts-flash',
       updatedAt: '2026-05-02T09:00:00.000Z',
       writerTabId: 'tab-b',
     }))).toBe(false)
@@ -143,7 +143,7 @@ describe('audiobook task session storage utils', () => {
       selectedChapterIds: [1],
       activeStep: 1,
       generating: true,
-      ttsModel: 'qwen3-tts-instruct-flash',
+      ttsModel: 'qwen-audio-3.1-tts-flash',
       updatedAt: '2026-05-02T08:00:00.000Z',
       writerTabId: 'tab-a',
     })
@@ -234,7 +234,7 @@ describe('audiobook task session storage utils', () => {
       hasSelectedChapterIds: true,
       incomingActiveStep: 2,
       incomingGenerating: true,
-      incomingTtsModel: 'qwen3-tts-instruct-flash',
+      incomingTtsModel: 'qwen-audio-3.1-tts-flash',
     })
 
     expect(buildIncomingAudiobookTaskSessionUpdate({

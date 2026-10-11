@@ -85,10 +85,10 @@ class AnalysisMixin:
                 "- 请重点识别情绪变化过程（起始状态 → 转折触发 → 结束状态）、韵律节奏和微表演机会（笑声、哭腔、吸气、喘息等）。\n"
                 "- 分析角色当前情绪、韵律、气息和微表演机会，为后续 performance_notes 提供可执行的导演视角素材。\n"
             )
-        elif normalized_model.startswith("qwen3-tts"):
-            tts_block = "**当前TTS模型：Qwen3-TTS Instruct Flash（默认模式）**\n- 适合：长篇连载 / 日更章节 / 需要低成本但仍要一定表现力的内容\n- 特性：49 音色、稳定性强、成本低，并支持通过自然语言 instructions 控制语气与演绎\n- 限制：当前链路重点是 instructions，不要输出 SSML 语法\n"
+        elif normalized_model == DEFAULT_AUDIOBOOK_TTS_MODEL:
+            tts_block = "**当前TTS模型：Qwen-Audio 3.1 TTS Flash（默认模式）**\n- 适合：长篇连载 / 日更章节 / 需要低成本但仍要表现力的内容\n- 特性：68 个官方系统音色，支持通过自然语言 instructions 控制语气与演绎\n- 限制：当前链路重点是 instructions，不要输出 SSML 语法\n"
             instruct_block = (
-                "**Qwen3 Instruct 提示**\n"
+                "**Qwen-Audio 3.1 Instruct 提示**\n"
                 "- 请把情绪、场景、身份、角色语气尽量结构化写到 instruct_emotion / instruct_scene / instruct_role / instruct_identity 中\n"
                 "- performance_notes 会一并映射到 Qwen instructions，请写成可直接执行的演绎要求\n"
             )

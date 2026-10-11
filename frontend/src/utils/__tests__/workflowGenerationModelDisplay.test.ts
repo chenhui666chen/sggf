@@ -9,7 +9,7 @@ describe('workflowGenerationModelDisplay', () => {
   it('shows the model name with its relative cost label', () => {
     expect(
       formatWorkflowGenerationModelOptionLabel({
-        id: 'MiniMax/MiniMax-M3',
+        id: 'minimax-m',
         name: 'MiniMax M3',
         cost_label: '5.4×',
       }),
@@ -19,17 +19,17 @@ describe('workflowGenerationModelDisplay', () => {
   it('falls back to the model id and unknown cost when metadata is missing', () => {
     expect(
       formatWorkflowGenerationModelOptionLabel({
-        id: 'mimo-v2.5',
+        id: 'mimo-flash',
         name: '',
         cost_label: null,
       }),
-    ).toBe('mimo-v2.5 · 成本未知')
+    ).toBe('mimo-flash · 成本未知')
   })
 
   it('builds a hover summary with feature, speed, and relative cost', () => {
     expect(
       formatWorkflowGenerationModelTooltip({
-        id: 'glm-5.2',
+        id: 'glm',
         name: 'GLM 5.2',
         cost_label: '9.3×',
         relative_cost_basis_label: '按 7:1 输入/输出比估算',

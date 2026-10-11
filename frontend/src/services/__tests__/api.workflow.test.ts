@@ -53,14 +53,14 @@ describe('workflow API client', () => {
     const postMock = vi.spyOn((apiClient as any).client, 'post').mockResolvedValue({ status: 200, data: {} })
 
     await apiClient.generateNextWorkflowChapter(7, {
-      workflowGenerationModel: 'deepseek-v4-pro',
+      workflowGenerationModel: 'deepseek-pro',
       generationTier: 'standard',
     })
 
     expect(postMock).toHaveBeenCalledWith(
       '/api/v1/workflow/7/generate-next-chapter',
       {
-        workflow_generation_model: 'deepseek-v4-pro',
+        workflow_generation_model: 'deepseek-pro',
         generation_tier: 'standard',
       },
       expect.any(Object),

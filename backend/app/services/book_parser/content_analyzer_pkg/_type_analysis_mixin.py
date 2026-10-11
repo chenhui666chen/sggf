@@ -12,6 +12,7 @@ from enum import Enum
 from core.unified_llm_client import get_llm_client, UnifiedLLMClient
 from core.model_resolution import TaskType
 from ..chapter_splitter import ChapterInfo, ChapterType
+from ._base import AnalysisResult
 
 logger = logging.getLogger(__name__)
 
@@ -41,12 +42,6 @@ class ChapterSummary:
     key_events: List[str]
 
 
-@dataclass
-class AnalysisResult:
-    analysis_type: AnalysisType
-    content: Dict[str, Any]
-    confidence: float
-    chapter_summaries: Optional[List[ChapterSummary]] = None
 
 class TypeAnalysisMixin:
     async def analyze_characters(
@@ -176,7 +171,7 @@ class TypeAnalysisMixin:
             content=parsed,
             confidence=0.85,
             chapter_range=(1, len(chapters)),
-            model_used="qwen3.7-plus",
+            model_used="qwen-plus",
         )
     
     # ==================== 世界观分析 ====================
@@ -254,7 +249,7 @@ class TypeAnalysisMixin:
             content=parsed,
             confidence=0.80,
             chapter_range=(1, len(chapters)),
-            model_used="qwen3.7-plus",
+            model_used="qwen-plus",
         )
     
     # ==================== 情节分析 ====================
@@ -354,7 +349,7 @@ class TypeAnalysisMixin:
             content=parsed,
             confidence=0.75,
             chapter_range=(1, len(chapters)),
-            model_used="qwen3.7-plus",
+            model_used="qwen-plus",
         )
     
     # ==================== 写作风格分析 ====================
@@ -422,7 +417,7 @@ class TypeAnalysisMixin:
             content=parsed,
             confidence=0.80,
             chapter_range=(1, len(chapters)),
-            model_used="qwen3.7-plus",
+            model_used="qwen-plus",
         )
 
     async def analyze_concepts(
@@ -488,7 +483,7 @@ class TypeAnalysisMixin:
             content=parsed,
             confidence=0.78,
             chapter_range=(1, len(chapters)),
-            model_used="qwen3.7-plus",
+            model_used="qwen-plus",
         )
 
     # ==================== 辅助方法 ====================

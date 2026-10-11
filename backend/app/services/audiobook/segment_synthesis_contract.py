@@ -89,6 +89,7 @@ DERIVED_VOICE_PARAM_FIELDS = frozenset(
         "control_method",
         "style_instruction",
         "text_prefix",
+        "tag_syntax",
         "timeline_boundary_managed",
         "timeline_pause_after_ms",
         "use_tag_parser",
@@ -118,6 +119,7 @@ PROVIDER_PROMPT_DERIVED_FIELDS = frozenset(
         "style_control_mode",
         "control_method",
         "text_prefix",
+        "tag_syntax",
         "use_tag_parser",
     }
 )

@@ -1181,7 +1181,7 @@ class SfxLibraryDownloader:
         try:
             resolved.relative_to(root)
         except ValueError:
-            logger.warning("鈿狅笍 鏈湴闊虫晥璺緞瓒呭嚭瀵煎叆鐩綍锛屾嫆缁? %s", filename)
+            logger.warning("⚠️ 本地音效路径超出导入目录，拒绝: %s", filename)
             return None
 
         if not resolved.exists() or not resolved.is_file():

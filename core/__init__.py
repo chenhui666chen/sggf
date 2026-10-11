@@ -20,7 +20,6 @@ from .unified_registry import (
 from .llm_adapters import (
     OpenAICompatibleAdapter,
     DeepSeekV4ProAdapter,
-    DeepSeekV4FlashAdapter,
 )
 
 from .model_hub import (
@@ -52,7 +51,6 @@ __all__ = [
     "registry",
     "OpenAICompatibleAdapter",
     "DeepSeekV4ProAdapter",
-    "DeepSeekV4FlashAdapter",
     "ModelHub",
     "model_hub",
     "get_model_hub",

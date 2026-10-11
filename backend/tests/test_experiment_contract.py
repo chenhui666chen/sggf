@@ -100,7 +100,7 @@ def test_bucket_hits_epsilon_boundary():
 
 def test_frozen_model_contract_is_immutable():
     contract = FrozenModelContract.freeze(
-        resolved_model_id="deepseek-v4-pro",
+        resolved_model_id="deepseek-pro",
         model_selection_source="prompt_combination",
         model_config_version="2026-07-29T10:00:00",
         prompt_version_id="v-玄幻-001",
@@ -113,7 +113,7 @@ def test_frozen_model_contract_is_immutable():
 
 def test_provider_parameters_hash_stable_for_same_params():
     kwargs = dict(
-        resolved_model_id="deepseek-v4-pro",
+        resolved_model_id="deepseek-pro",
         model_selection_source="admin_selected",
         model_config_version="v1",
         prompt_version_id="p1",
@@ -127,7 +127,7 @@ def test_provider_parameters_hash_stable_for_same_params():
 
 def test_provider_parameters_hash_changes_with_sampling_params():
     base = dict(
-        resolved_model_id="deepseek-v4-pro",
+        resolved_model_id="deepseek-pro",
         model_selection_source="admin_selected",
         model_config_version="v1",
         prompt_version_id="p1",

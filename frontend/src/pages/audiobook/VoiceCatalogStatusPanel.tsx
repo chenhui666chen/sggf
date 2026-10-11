@@ -90,7 +90,7 @@ const VoiceCatalogStatusPanel = ({
         onChanged={onFetchVoiceCatalog}
       />
     )}
-    {ttsModel === 'stepaudio-2.5-tts' && (
+    {ttsModel === 'stepaudio-3-tts' && (
       <StepAudioVoiceCloneWorkbench
         customVoicePresets={customVoicePresets}
         previewingVoiceId={customVoicePreviewingId}
@@ -108,7 +108,7 @@ const VoiceCatalogStatusPanel = ({
         {t(MIMO_VOICE_DESIGN_NOTICE)}
       </Alert>
     )}
-    {ttsModel === 'stepaudio-2.5-tts' && (
+    {ttsModel === 'stepaudio-3-tts' && (
       <Alert severity="info" sx={{ mb: 1 }}>
         {t(STEPAUDIO_VOICE_CLONE_NOTICE)}
       </Alert>

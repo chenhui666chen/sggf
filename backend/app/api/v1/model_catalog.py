@@ -60,9 +60,16 @@ def _filter_projected_entries(
     provider: str | None,
     verification_status: str | None,
     keyword: str | None = None,
+    include_deprecated: bool = False,
 ) -> list[dict[str, Any]]:
     filtered = entries
 
+    if not include_deprecated:
+        filtered = [
+            entry
+            for entry in filtered
+            if str(entry.get("status") or "active").strip().lower() != "deprecated"
+        ]
     if category:
         filtered = [entry for entry in filtered if entry.get("category") == category]
     if provider:
@@ -94,6 +101,7 @@ async def get_model_catalog_overview(
     category: Optional[str] = Query(default=None),
     provider: Optional[str] = Query(default=None),
     verification_status: Optional[str] = Query(default=None),
+    include_deprecated: bool = Query(default=False, description="是否包含已弃用模型，默认排除"),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -107,6 +115,7 @@ async def get_model_catalog_overview(
         category=category,
         provider=provider,
         verification_status=verification_status,
+        include_deprecated=include_deprecated,
     )
     return _build_overview(entries)
 
@@ -117,6 +126,7 @@ async def list_model_catalog_entries(
     provider: Optional[str] = Query(default=None),
     verification_status: Optional[str] = Query(default=None),
     keyword: Optional[str] = Query(default=None, description="按名称、模型键或摘要模糊过滤"),
+    include_deprecated: bool = Query(default=False, description="是否包含已弃用模型，默认排除"),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -131,6 +141,7 @@ async def list_model_catalog_entries(
         provider=provider,
         verification_status=verification_status,
         keyword=keyword,
+        include_deprecated=include_deprecated,
     )
     return {
         "overview": _build_overview(entries),

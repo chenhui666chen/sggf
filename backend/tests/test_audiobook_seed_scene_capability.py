@@ -45,9 +45,9 @@ class TestCapabilityDescriptionContract:
 
 class TestMainGenerationBlock:
     def test_block_contains_capability_description(self) -> None:
-        block = build_seed_scene_main_generation_block("qwen3-tts-instruct-flash")
+        block = build_seed_scene_main_generation_block("qwen-audio-3.1-tts-flash")
         assert SEED_SCENE_CAPABILITY_DESCRIPTION in block
-        assert "qwen3-tts-instruct-flash" in block
+        assert "qwen-audio-3.1-tts-flash" in block
         assert "试听参考音色和局部回退" in block
 
     def test_block_has_no_hardcoded_primary_model_id(self) -> None:

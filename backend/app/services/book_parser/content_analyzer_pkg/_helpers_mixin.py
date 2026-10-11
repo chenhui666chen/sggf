@@ -12,6 +12,7 @@ from enum import Enum
 from core.unified_llm_client import get_llm_client, UnifiedLLMClient
 from core.model_resolution import TaskType
 from ..chapter_splitter import ChapterInfo, ChapterType
+from ._base import AnalysisResult
 
 logger = logging.getLogger(__name__)
 
@@ -41,12 +42,6 @@ class ChapterSummary:
     key_events: List[str]
 
 
-@dataclass
-class AnalysisResult:
-    analysis_type: AnalysisType
-    content: Dict[str, Any]
-    confidence: float
-    chapter_summaries: Optional[List[ChapterSummary]] = None
 
 class HelpersMixin:
     def _estimate_tokens(self, text: str) -> int:
@@ -298,7 +293,7 @@ class HelpersMixin:
                 content = await asyncio.wait_for(
                     self.llm.chat(
                         messages=messages,
-                        model="qwen3.7-flash",
+                        model="qwen-flash",
                         temperature=0.3,
                         max_tokens=8000,
                         timeout=self.LLM_REQUEST_TIMEOUT_SECONDS,

@@ -4,6 +4,7 @@ import asyncio
 from fastapi import APIRouter, Depends, HTTPException, status, Body, BackgroundTasks
 from sqlalchemy.orm import Session
 from typing import Dict, Any, Optional, Tuple, List
+from dataclasses import dataclass, field
 from pydantic import BaseModel, ConfigDict
 from datetime import datetime
 import json
@@ -35,13 +36,8 @@ def _estimate_tokens_by_chars(text: str) -> int:
     return int(len(text or "") * 1.3)
 
 
-def _get_safe_input_token_budget(
-    model_name: str,
-    *,
-    usage_ratio: float = 0.72,
-    prompt_overhead_tokens: int = 500,
-) -> int:
-    """从统一模型配置读取上下文限制，计算较保守的输入预算。"""
+def _get_model_token_limits(model_name: str) -> tuple[int, int]:
+    """从统一模型配置读取（上下文上限、输出上限）；读取失败回退默认值。"""
     normalized_model = normalize_model_id(model_name) or model_name
     context_limit = 32000
     output_limit = 8192
@@ -55,7 +51,19 @@ def _get_safe_input_token_budget(
             context_limit = int(spec.constraints.max_context_tokens or context_limit)
             output_limit = int(spec.constraints.max_output_tokens or output_limit)
     except Exception as exc:
-        logger.warning("读取模型 %s 配置失败，回退默认预算: %s", normalized_model, exc)
+        logger.warning("读取模型 %s 配置失败，回退默认上限: %s", normalized_model, exc)
+
+    return context_limit, output_limit
+
+
+def _get_safe_input_token_budget(
+    model_name: str,
+    *,
+    usage_ratio: float = 0.72,
+    prompt_overhead_tokens: int = 500,
+) -> int:
+    """从统一模型配置读取上下文限制，计算较保守的输入预算。"""
+    context_limit, output_limit = _get_model_token_limits(model_name)
 
     reserve_output_tokens = max(1200, min(output_limit, max(1200, int(context_limit * 0.25))))
     return max(1500, int(context_limit * usage_ratio) - reserve_output_tokens - prompt_overhead_tokens)
@@ -64,8 +72,8 @@ def _get_safe_input_token_budget(
 def _select_text_model_by_input_tokens(
     total_tokens: int,
     *,
-    primary_model: str = "qwen3.7-plus",
-    fallback_model: str = "qwen3.7-plus",
+    primary_model: str = "qwen-plus",
+    fallback_model: str = "qwen-plus",
 ) -> tuple[str, int]:
     """按统一模型配置选择主模型或长上下文回退模型。"""
     safe_budget = _get_safe_input_token_budget(primary_model)
@@ -86,6 +94,144 @@ def _build_recent_full_chapter_excerpt(content: str, *, max_chars: int = 1200) -
         tail_chars = 80
         head_chars = max(60, max_chars - tail_chars - 5)
     return f"{text[:head_chars].rstrip()}\n...\n{text[-tail_chars:].lstrip()}"
+
+
+# 阶段 B WP1：有界章节运行时窗口常量。
+# NAV_WINDOW 覆盖 recent_full(≤6) + detailed_summary(≤24) + 余量；
+# RECENT_FULL_CAP 覆盖 recent_full_count 上限(6)与 recent_asset_count 上限(8)。
+CHAPTER_NAV_WINDOW = 40
+CHAPTER_RECENT_FULL_CAP = 8
+# 上一章结尾衔接片段长度（与旧逻辑一致，取全文末尾 500 字符）
+_PREVIOUS_ENDING_CHARS = 500
+# 摘要导航串固定字符上限（指南 §5.3：章节摘要导航须有固定数量与固定 token 上限）
+DEFAULT_SUMMARY_NAV_MAX_CHARS = 24000
+
+
+@dataclass(frozen=True)
+class ChapterRuntimeWindow:
+    """生成下一章时的有界章节读取窗口（阶段 B WP1）。
+
+    只承载固定上限的近期章节，杜绝随项目章节数 O(N) 膨胀：
+    - ``chapters``：与导航窗口对齐的 5 元组 ``(id, number, title, content, summary)`` 升序列表，
+      其中 ``content`` 仅最近 ≤ ``CHAPTER_RECENT_FULL_CAP`` 章非空，更早的导航行为空串；
+    - ``previous_ending``/``previous_chapter_content``：上一章结尾与全文（独立有界读取）；
+    - ``next_chapter_number``：``MAX(chapter_number) + 1``（覆盖含软删除的全部行，单调不复用）。
+    - ``has_active_chapters`` / ``has_chapter_history``：分别表示“有未软删章节”与“项目曾存在任何章节（含软删）”；
+      两者区分用于重置语义：仅当 ``has_chapter_history`` 为假（从未有章节，此时 next 必为 1）才按“第1章初始化”重置。
+    """
+
+    next_chapter_number: int
+    max_active_chapter_number: int
+    has_active_chapters: bool
+    has_chapter_history: bool
+    previous_ending: str
+    previous_chapter_content: str
+    chapters: List[Tuple[Any, ...]] = field(default_factory=list)
+    db_rows_read: int = 0
+    db_columns_read: int = 0
+
+
+def load_chapter_runtime_window(db: Session, project_id: int) -> ChapterRuntimeWindow:
+    """以列裁剪 + 范围过滤 + LIMIT 的有界查询装载章节运行时窗口。
+
+    替代旧的无 LIMIT、含 content 的全量章节查询：
+    - 编号查询复用 ``resolve_chapter_number``（``MAX + 1``，含软删除行，禁止 ``len()+1``）；
+    - 导航窗口只取 ``id/chapter_number/title/summary``（不含 content），最多 ``CHAPTER_NAV_WINDOW`` 章；
+    - 近期全文窗口只取最近 ``CHAPTER_RECENT_FULL_CAP`` 章的 content，兼作上一章全文来源。
+    """
+    from app.services.chapter_creation import peek_max_chapter_number
+
+    # MAX 覆盖含软删除的全部行：next=MAX+1（永不复用已删号）；
+    # max 为 None 才代表“项目从未存在章节”，用于区分“无历史”与“有历史但全软删”
+    max_any_chapter_number = peek_max_chapter_number(db, project_id)
+    has_chapter_history = max_any_chapter_number is not None
+    next_chapter_number = (max_any_chapter_number or 0) + 1
+
+    nav_query = text(
+        """
+        SELECT id, chapter_number, title, summary
+        FROM chapters
+        WHERE project_id = :project_id
+          AND deleted_at IS NULL
+        ORDER BY chapter_number DESC
+        LIMIT :limit
+        """
+    )
+    nav_desc = db.execute(
+        nav_query, {"project_id": project_id, "limit": CHAPTER_NAV_WINDOW}
+    ).fetchall()
+    nav_rows = list(reversed(nav_desc))  # 转为 chapter_number 升序
+
+    full_query = text(
+        """
+        SELECT chapter_number, content
+        FROM chapters
+        WHERE project_id = :project_id
+          AND deleted_at IS NULL
+        ORDER BY chapter_number DESC
+        LIMIT :limit
+        """
+    )
+    full_rows = db.execute(
+        full_query, {"project_id": project_id, "limit": CHAPTER_RECENT_FULL_CAP}
+    ).fetchall()
+    content_by_number = {row[0]: (row[1] or "") for row in full_rows}
+
+    # 合并为 5 元组（与旧 existing_chapters 形状一致），content 仅近期窗口非空
+    chapters: List[Tuple[Any, ...]] = [
+        (row[0], row[1], row[2], content_by_number.get(row[1], ""), row[3])
+        for row in nav_rows
+    ]
+
+    previous_ending = ""
+    previous_chapter_content = ""
+    if chapters:
+        prev_content = chapters[-1][3]
+        if prev_content:
+            previous_chapter_content = str(prev_content)
+            previous_ending = (
+                prev_content[-_PREVIOUS_ENDING_CHARS:]
+                if len(prev_content) > _PREVIOUS_ENDING_CHARS
+                else prev_content
+            )
+
+    max_active_chapter_number = int(chapters[-1][1]) if chapters else 0
+    return ChapterRuntimeWindow(
+        next_chapter_number=next_chapter_number,
+        max_active_chapter_number=max_active_chapter_number,
+        has_active_chapters=bool(chapters),
+        has_chapter_history=has_chapter_history,
+        previous_ending=previous_ending,
+        previous_chapter_content=previous_chapter_content,
+        chapters=chapters,
+        db_rows_read=len(nav_rows) + len(full_rows),
+        db_columns_read=4,
+    )
+
+
+def build_bounded_summary_navigation(
+    summaries: List[str],
+    *,
+    max_chars: int = DEFAULT_SUMMARY_NAV_MAX_CHARS,
+) -> str:
+    """把章节摘要拼成有界导航串：超上限时保留最近章节、裁掉最早章节。
+
+    替代旧的 ``"\n\n".join(summaries)`` 全量历史摘要中间串（指南 §5.3 明令禁止）。
+    入参 ``summaries`` 为 chapter_number 升序；从最早章开始丢弃，直至总长不超过 ``max_chars``。
+    """
+    if not summaries:
+        return ""
+    kept = list(summaries)
+    separator = "\n\n"
+    total = sum(len(item) for item in kept) + len(separator) * (len(kept) - 1)
+    while len(kept) > 1 and total > max_chars:
+        dropped = kept.pop(0)
+        total -= len(dropped) + len(separator)
+    joined = separator.join(kept)
+    if len(joined) > max_chars:
+        # 单条即超限：保留末尾（最近内容），截掉开头
+        joined = joined[-max_chars:]
+    return joined
 
 
 def _select_previous_chapter_context_strategy(
@@ -114,7 +260,7 @@ def _select_previous_chapter_context_strategy(
 
             selected_model = LayeredSummarizer.estimate_selected_model("chapter_generation", next_chapter_number)
         except Exception:
-            selected_model = "qwen3.7-plus"
+            selected_model = "qwen-plus"
 
     safe_input_budget = _get_safe_input_token_budget(
         selected_model,

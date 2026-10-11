@@ -21,6 +21,36 @@ from pipeline.style_presets import ensure_style_payload
 _CHARACTER_BACKGROUND_LINE = "Background: solid color, clean frame, no scene elements, no clutter, no text, no extra people."
 _CHARACTER_CONSTRAINT_LINE = "Constraints: no text, no watermark, no logo, no border, no collage."
 _CHARACTER_VIEW_ORDER_DEFAULT = ["front", "bust_front", "side", "bust_three_quarter", "bust_side", "back"]
+
+# 多角度参考拼图（multi_angle_reference_collage，Phase 2.4）：
+# 成本分级——主角全四视图（正/四分之三/侧/背，跨镜与跨模型身份锚定的最强参考形态），
+# 次要角色正面+侧面两视图，背景角色单正面；对齐 CF-082 跨模型身份漂移修复。
+_CHARACTER_VIEW_PLAN_MAIN = ["front", "bust_three_quarter", "side", "back"]
+_CHARACTER_VIEW_PLAN_SECONDARY = ["front", "side"]
+_CHARACTER_VIEW_PLAN_BACKGROUND = ["front"]
+
+
+def _character_views_for(importance: Any, base_views: List[str]) -> List[str]:
+    """按角色重要度返回视图集（多角度参考拼图成本分级）。
+
+    importance=main → 四视图全档；secondary → 两视图；其余 → 单正面；
+    始终保持 base_views（env 显式配置）已含的视图不被裁掉（用户显式配置优先）。
+    """
+    imp = str(importance or "").strip().lower()
+    base = [v for v in (base_views or []) if _is_character_view(v)]
+    if imp == "main":
+        plan = list(_CHARACTER_VIEW_PLAN_MAIN)
+    elif imp in ("secondary", ""):
+        plan = list(_CHARACTER_VIEW_PLAN_SECONDARY)
+    else:
+        plan = list(_CHARACTER_VIEW_PLAN_BACKGROUND)
+    for v in base:
+        if v not in plan:
+            plan.append(v)
+    # 按默认顺序稳定排序，保证产物路径与依赖链稳定
+    order = {name: i for i, name in enumerate(_CHARACTER_VIEW_ORDER_DEFAULT)}
+    plan.sort(key=lambda v: order.get(v, 99))
+    return plan
 _CHARACTER_VIEW_DEPENDENCIES = {
     "bust_front": ["front"],
     "side": ["front", "bust_front"],
@@ -554,10 +584,20 @@ def run(ctx: Any) -> None:
 
     entities = _iter_spec_entities(spec)
     character_views = _parse_character_views_env()
+    # 多角度参考拼图：从角色档案取重要度，按分级出视图（主角四视图/次要两视图/背景单视图）
+    importance_by_name: Dict[str, str] = {}
+    profiles = ctx.payload.get("character_profiles")
+    if isinstance(profiles, list):
+        for p in profiles:
+            if isinstance(p, dict) and p.get("name"):
+                importance_by_name[str(p["name"]).strip()] = str(p.get("importance") or "secondary")
     role_specs: List[Dict[str, Any]] = []
     for entity_type, entity_id, name, descriptor in entities:
         if entity_type == "character":
-            for v in character_views:
+            views_for_char = _character_views_for(
+                importance_by_name.get(str(name).strip(), ""), character_views
+            )
+            for v in views_for_char:
                 role_specs.append(
                     {
                         "entity_type": entity_type,
@@ -638,8 +678,8 @@ def run(ctx: Any) -> None:
         image_cfg,
         key="adapter",
         env_name="DREAMWEAVER_T2I_MODEL",
-        default="wan2.6-t2i",
-    ) or "wan2.6-t2i"
+        default="qwen-image-3.0-pro",
+    ) or "qwen-image-3.0-pro"
     t2i = create_runtime_client(t2i_model_id)
     image_edit_adapter_name = resolve_image_edit_adapter_name(
         image_cfg,

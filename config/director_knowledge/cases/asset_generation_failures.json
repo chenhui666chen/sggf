@@ -1,0 +1,86 @@
+{
+  "_type": "asset_generation_failures",
+  "_count": 8,
+  "cases": [
+    {
+      "id": "CF-101",
+      "title": "参考图脸漂移",
+      "symptom": "同一角色多张定妆图脸型/年龄/五官不一致。",
+      "problem": "角色资产是 I2V 一致性的根基，脸漂移会让整条 I2V 链路失去参考。",
+      "cause": "每次生成都重新描述，没有锁定 Visual Identity + Wardrobe DNA。",
+      "repair": "锁定 Character Reference 模板（Visual DNA+Wardrobe DNA），用 PRESERVE 列表逐轮编辑而非重roll。",
+      "prompt": "Character Reference 模板：正面/侧面/表情各一张，统一光源与色板。",
+      "qc": "PRESERVE 项（脸/发型/体型）在多张定妆图间是否稳定？"
+    },
+    {
+      "id": "CF-102",
+      "title": "迭代漂移",
+      "symptom": "改背景后脸/服装也跟着变了。",
+      "problem": "资产生成的核心是'画得一致'而非'画得好看'，漂移即资产失效。",
+      "cause": "未使用 preserve-list：每次编辑都按新需求整段重写 prompt。",
+      "repair": "声明'除以下变更外其余保持不变'+列出 PRESERVE 项，只改 CHANGE 项。",
+      "prompt": "'保持角色脸、发型、服装、光源方向不变，仅把背景改为……'。",
+      "qc": "CHANGE 项按预期改变、PRESERVE 项保持不变？"
+    },
+    {
+      "id": "CF-103",
+      "title": "风格标签跑偏（AI-tell）",
+      "symptom": "要求写实定妆图，却出现软水彩渐变、过度干净矢量线或光泽3D。",
+      "problem": "模型默认'polished illustration'外观会污染资产风格，导致与成片统一性失败。",
+      "cause": "未在 AVOID 中列出 AI-tell 特征。",
+      "repair": "在 AVOID 写入 AI-tell 特征，偏好扁平色+真实纹理（grain/halftone/print）。",
+      "prompt": "AVOID：soft watercolor gradients, airbrushed bleed, over-clean vector lines, glossy 3D。",
+      "qc": "资产图是否存在 AI 默认美术风格的痕迹？"
+    },
+    {
+      "id": "CF-104",
+      "title": "关键词堆砌",
+      "symptom": "一张资产图塞入大量标签，主体与要素混杂。",
+      "problem": "tag soup 会让模型无法判断优先级，产出画面杂乱。",
+      "cause": "把 prompt 当关键词列表而非美术 brief。",
+      "repair": "改为自然语言 brief：主体+材质+构图+光源+风格。",
+      "prompt": "'一个穿深灰风衣的中年男人站在雨夜街角，侧光，写实摄影风格'。",
+      "qc": "prompt 是否像给人类美术师下 brief 而非关键词列表？"
+    },
+    {
+      "id": "CF-105",
+      "title": "否定词失效",
+      "symptom": "写了'不要出现 XX'，结果 XX 反而出现。",
+      "problem": "T2I 模型普遍倾向忽略否定结构。",
+      "cause": "使用否定句式而非正面目标。",
+      "repair": "改写为正面指令，或使用模型原生 negative prompt（如 FLUX）。",
+      "prompt": "正面目标：'纯色背景、无文字、无徽标'。",
+      "qc": "prompt 是否全部为正面可执行指令？"
+    },
+    {
+      "id": "CF-106",
+      "title": "图内文本渲染错误",
+      "symptom": "资产图内文字拼写/字体/排版错乱。",
+      "problem": "文本是资产（Logo/标题/道具文字）的一部分，错误即穿帮。",
+      "cause": "未把文本加引号并放入 CONSTRAINTS。",
+      "repair": "文本加引号、短、每个字符串渲染一次；用属性描述字体（Gemini/Ideogram/Recraft）。",
+      "prompt": "'MENU' 字样加引号 + CONSTRAINTS：拼写完全一致。",
+      "qc": "图内文本是否拼写正确且只出现一次？"
+    },
+    {
+      "id": "CF-107",
+      "title": "多参考图冲突",
+      "symptom": "两张参考图的元素被硬拼，边缘生硬、比例失调。",
+      "problem": "多参考图合成是角色定妆/场景合成的主力手段，冲突直接报废资产。",
+      "cause": "未按 index+role 引用每张图，未设置 input_fidelity。",
+      "repair": "按 index+role 引用输入图，设 input_fidelity=high，声明每个元素的来源图。",
+      "prompt": "图1 提供角色，图2 提供服装，图3 提供背景，明确各自 role。",
+      "qc": "每个元素是否来自明确指定参考图且融合自然？"
+    },
+    {
+      "id": "CF-108",
+      "title": "资产图与成片光影不统一",
+      "symptom": "定妆图光源方向/色温与实拍镜头冲突。",
+      "problem": "资产图会成为 I2V 的 reference，光影冲突会让视频镜头无法衔接。",
+      "cause": "资产生成时未携带场景光照上下文。",
+      "repair": "资产图统一携带光源方向与色温标记；镜头复用同一光照锚点。",
+      "prompt": "角色参考图与镜头共用同一光源锚点（如左侧窗光 5600K）。",
+      "qc": "资产图与引用它的镜头是否共用一致的光照状态？"
+    }
+  ]
+}

@@ -4,10 +4,13 @@ import json
 import logging
 import math
 import re
+import uuid
+
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
 from core.langchain_bridge import create_task_llm
+from app.services.context_observability import ObservationBuilder
 from app.services.character_parser import (
     _build_ability_and_limit_text,
     _build_mainline_binding_text,
@@ -2202,9 +2205,87 @@ class ExecutionMixin:
             plot_outline=str(result.get("plot_outline") or current_outline or ""),
             world_setting=str(world_setting or ""),
         )
-        return self._apply_alignment_gate(
+        final_result = self._apply_alignment_gate(
             result,
             alignment,
             characters=characters or "",
             world_setting=world_setting or "",
         )
+
+        # 阶段 A 观测：扩写链路输入/输出/关系规模（一次执行一条快照）
+        expansion_chapter = int(target_total_chapters or 0)
+        expansion_model_plan = getattr(self, "_story_expansion_runtime_model_plan", None) or {}
+        expansion_model_id = expansion_model_plan.get("planner_model") or "unknown"
+        # 扩写实际轮次：优先 execution_rounds，回退 rounds，两者都空才计 1
+        execution_rounds_list = final_result.get("execution_rounds") or []
+        fallback_rounds_list = final_result.get("rounds") or []
+        expansion_rounds_count = (
+            len(execution_rounds_list)
+            or len(fallback_rounds_list)
+            or 1
+        )
+        expansion_observation = ObservationBuilder(
+            self.project_id, expansion_chapter, "expansion"
+        ).set_model(expansion_model_id)
+        # 扩写走多调用链路（每轮生成 + 对齐校验 + 闸门重跑），无法可靠统计真实 LLM 调用次数；
+        # 记为“计划轮数”逻辑步骤，不冒充 online_llm_calls
+        expansion_observation.set_logical_step_count(expansion_rounds_count)
+        # 上下文载荷口径（扩写输入与配置）
+        expansion_observation.set_context_payload({
+            "current_outline": current_outline,
+            "characters": characters,
+            "world_setting": world_setting,
+            "target_total_chapters": target_total_chapters,
+            "target_total_characters": target_total_characters,
+            "strategy": strategy,
+            "expansion_mode": expansion_mode,
+            "structural_debt": structural_debt,
+        })
+        expansion_observation.set_correlation(
+            request_id=f"expansion-{self.project_id}-{expansion_chapter}-{uuid.uuid4().hex[:8]}"
+        )
+        expansion_observation.add_section("input.outline", current_outline, layer="L2")
+        expansion_observation.add_section("input.characters", characters, layer="L1")
+        expansion_observation.add_section("input.world_setting", world_setting, layer="L3")
+        expansion_observation.add_section(
+            "output.plot_outline", str(final_result.get("plot_outline") or ""), layer="L2"
+        )
+        expansion_observation.add_section(
+            "output.characters", str(final_result.get("characters") or ""), layer="L1"
+        )
+        relationships_text = str(final_result.get("character_relationships") or "")
+        expansion_observation.add_section(
+            "output.relationships", relationships_text, layer="L1"
+        )
+        # 关系第一层：扩写原始关系行数（同步 items 与图聚合在关系同步动作后另计）
+        relationship_lines = [
+            line for line in relationships_text.splitlines() if line.strip()
+        ]
+        expansion_observation.add_section(
+            "output.relationship_line_count",
+            f"raw_relationship_lines={len(relationship_lines)}; "
+            f"rounds={len(final_result.get('rounds') or [])}; "
+            f"stop_reasons={final_result.get('stop_reasons') or []}",
+            layer="L1",
+        )
+        # 扩写链路未走章节向量检索与摘要缓存查询
+        expansion_observation.set_rag(
+            hits=0, summary_cache_hits=0, cache_lookup_performed=False
+        )
+        # 扩写输入直接来自调用参数，不读取章节 DB（0 为真实零值）
+        expansion_observation.set_db_read(rows=0, columns=0)
+        # 细纲健康针对章节生成链路，对扩写链路不适用
+        expansion_observation.set_outline_health(
+            outline_status="not_applicable", volume_matched=False
+        )
+        # 冲突结果取对齐闸门状态（passed/repaired/deferred/failed_after_retry）
+        expansion_alignment_status = str(
+            final_result.get("alignment_gate_status") or "unknown"
+        )
+        expansion_observation.set_conflict_result(
+            status=expansion_alignment_status,
+            warning_count=1 if expansion_alignment_status in {"deferred", "failed_after_retry"} else 0,
+        )
+        expansion_observation.finish()
+
+        return final_result

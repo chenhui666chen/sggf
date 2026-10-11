@@ -14,13 +14,12 @@ from app.services.audiobook.tts_style_control import (
     is_stepaudio_style_control_model,
     prepare_text_for_style_control,
 )
-from app.services.audiobook.tts_prompt_strategy import compact_instruction_parts
 from app.services.audiobook.tts_model_ids import (
     MIMO_V25_TTS_MODEL,
     MIMO_V25_TTS_VOICE_CLONE_MODEL,
     MIMO_V25_TTS_VOICE_DESIGN_MODEL,
     SEED_TTS_20_EXPRESSIVE_MODEL,
-    STEPAUDIO_25_TTS_MODEL,
+    STEPAUDIO_3_TTS_MODEL,
     normalize_audiobook_tts_model,
 )
 from app.services.audiobook.tts_engine_pkg._constants import TTSUserInputError
@@ -28,11 +27,14 @@ from app.services.audiobook.voice_identity_policy import sanitize_fixed_voice_pe
 
 logger = logging.getLogger(__name__)
 
-QWEN_TTS_MAX_INPUT_CHARS = 600
-QWEN_TTS_INPUT_SAFETY_CHARS = 20
+# Qwen-Audio 3.1 TTS 走独立端点：instruction 与正文同为 input 字段，但预算互相独立
+# （实测正文 10000 字、instruction 4000 字各自仍返回 200）。
+QWEN_AUDIO_31_TTS_ENDPOINT = "https://dashscope.aliyuncs.com/api/v1/services/audio/tts/SpeechSynthesizer"
+QWEN_AUDIO_31_DEFAULT_VOICE = "longsanshu_v3.1"
 STEPAUDIO_TTS_DEFAULT_BASE_URL = "https://api.stepfun.com/v1"
 STEPAUDIO_TTS_MAX_INPUT_CHARS = 1000
-STEPAUDIO_TTS_INSTRUCTION_MAX_CHARS = 200
+# 官方原文：2.5 最大 200 字符，3-tts 最大 500 字符；200 是上一代限制（实测 244 字 instruction 返回 HTTP 200）。
+STEPAUDIO_TTS_INSTRUCTION_MAX_CHARS = 500
 STEPAUDIO_TTS_DEFAULT_VOICE = "cixingnansheng"
 STEPAUDIO_TTS_RESPONSE_FORMATS = {"mp3", "wav", "flac", "opus", "pcm"}
 STEPAUDIO_TTS_SAMPLE_RATES = {8000, 16000, 22050, 24000, 48000}
@@ -42,6 +44,8 @@ SEED_TTS_DEFAULT_RESOURCE_ID = "seed-tts-2.0"
 SEED_TTS_DEFAULT_VOICE = "zh_female_vv_uranus_bigtts"
 SEED_TTS_RESPONSE_FORMATS = {"mp3", "pcm", "ogg_opus", "wav"}
 SEED_TTS_SAMPLE_RATES = {8000, 16000, 22050, 24000, 32000, 44100, 48000}
+# 豆包 NDJSON 帧码：0=进行中（字幕/音频帧），20000000=任务完成；其余都是供应商错误帧。
+SEED_TTS_OK_FRAME_CODES = {"0", "20000000"}
 SEED_TTS_API_KEY_ENV_NAMES = (
     "VOLCENGINE_TTS_API_KEY",
     "DOUBAO_TTS_API_KEY",
@@ -57,81 +61,6 @@ MINIMAX_TTS_RETRY_BACKOFF_SECONDS = (0.0, 1.0, 3.0)
 MINIMAX_TTS_TIMEOUT = {"connect": 10.0, "read": 60.0, "write": 15.0, "pool": 10.0}
 # 可重试的 HTTP 状态码：限流与网关/服务端瞬时错误。
 MINIMAX_TTS_RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 504}
-QWEN_TTS_PRIORITY_INSTRUCTION_PREFIXES = (
-    "音色约束：",
-    "情绪目标：",
-    "停顿策略：",
-    "重读词：",
-    "演绎要求：",
-    "导演指导：",
-    "韵律控制：",
-    "朗读方式：",
-    "情绪层次：",
-    "微表演标签：",
-    "说话角色：",
-    "角色设定：",
-    "场景氛围：",
-    "身份设定：",
-)
-QWEN_TTS_COMPACT_IDENTITY_INSTRUCTION = "保持已选音色身份和基础声线，仅调整表演"
-QWEN_TTS_LOW_PRIORITY_INSTRUCTION_PREFIXES = (
-    "旁白模板：",
-    "对白模板：",
-    "内心独白模板：",
-    "声音描述：",
-    "片段类型：",
-)
-
-
-def _split_qwen_instruction_parts(instructions: str) -> List[str]:
-    parts: List[str] = []
-    for raw_part in str(instructions or "").replace(";", "；").split("；"):
-        part = raw_part.strip()
-        if part:
-            parts.append(part)
-    return parts
-
-
-def _qwen_instruction_priority(part: str) -> int:
-    if part == QWEN_TTS_COMPACT_IDENTITY_INSTRUCTION:
-        return -1
-    for index, prefix in enumerate(QWEN_TTS_PRIORITY_INSTRUCTION_PREFIXES):
-        if part.startswith(prefix):
-            return index
-    if part.startswith(QWEN_TTS_LOW_PRIORITY_INSTRUCTION_PREFIXES):
-        return 100
-    return 50
-
-
-def _refit_qwen_structured_instructions(instructions: str, budget: int) -> str:
-    parts = _split_qwen_instruction_parts(instructions)
-    if len(parts) <= 1:
-        single = str(instructions or "").strip()
-        if single.startswith("音色约束：") and len(single) > budget:
-            return (
-                QWEN_TTS_COMPACT_IDENTITY_INSTRUCTION
-                if len(QWEN_TTS_COMPACT_IDENTITY_INSTRUCTION) <= budget
-                else ""
-            )
-        return single[:budget].strip()
-
-    normalized_parts: List[str] = []
-    for part in parts:
-        if part.startswith("音色约束："):
-            if len(QWEN_TTS_COMPACT_IDENTITY_INSTRUCTION) <= budget:
-                normalized_parts.append(QWEN_TTS_COMPACT_IDENTITY_INSTRUCTION)
-            continue
-        normalized_parts.append(part)
-
-    prioritized_parts = [
-        part
-        for _, part in sorted(
-            enumerate(normalized_parts),
-            key=lambda item: (_qwen_instruction_priority(item[1]), item[0]),
-        )
-    ]
-    fitted, _, _ = compact_instruction_parts(prioritized_parts, budget)
-    return fitted.strip()
 
 
 def _to_bool_flag(value: Any) -> bool:
@@ -216,6 +145,34 @@ def _parse_seed_tts_json_audio_chunks(text: str) -> Optional[bytes]:
     if chunks:
         return b"".join(chunks)
     return None
+
+
+def _diagnose_seed_tts_json_frames(text: str) -> Optional[str]:
+    """整段响应都是 JSON 帧却没有任何音频时，给出可读原因。
+
+    返回 None 表示正文不是纯 JSON 帧（可能是缺少 content-type 的二进制音频），
+    调用方据此才能安全地把原始字节当音频返回。
+    """
+    frames: List[Dict[str, Any]] = []
+    for line in str(text or "").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            item = json.loads(line)
+        except Exception:
+            return None
+        if not isinstance(item, dict):
+            return None
+        frames.append(item)
+    if not frames:
+        return None
+    for item in frames:
+        code = item.get("code")
+        if code is not None and str(code) not in SEED_TTS_OK_FRAME_CODES:
+            message = str(item.get("message") or "").strip()[:200]
+            return f"provider error code={code} message={message}"
+    return f"{len(frames)} JSON frames carried no audio payload"
 
 
 def _extract_stepaudio_error_message(response) -> str:
@@ -433,8 +390,8 @@ class AliyunMixin:
                 raw_speaker_id=raw_speaker_id,
             )
 
-        if self._is_qwen_model():
-            return await self._synthesize_qwen(
+        if self._is_qwen_audio_31_model():
+            return await self._synthesize_qwen_audio_31(
                 text=text,
                 voice_params=voice_params,
                 provider_model=provider_model,
@@ -468,14 +425,6 @@ class AliyunMixin:
         if self._is_seed_tts_model(model):
             return raw_speaker_id or SEED_TTS_DEFAULT_VOICE
 
-        if self._is_qwen_model():
-            from app.services.audiobook.constants import normalize_speaker_id
-            from app.services.audiobook.voice_manager import VoiceManager
-
-            preset = VoiceManager.PRESET_VOICES.get(raw_speaker_id)
-            resolved_speaker = preset["tts_speaker_id"] if preset else raw_speaker_id
-            return normalize_speaker_id(resolved_speaker)
-
         if self._is_minimax_model():
             return raw_speaker_id
 
@@ -486,7 +435,7 @@ class AliyunMixin:
         return is_mimo_style_control_model(model or self.model)
 
     def _is_stepaudio_model(self, model: Optional[str] = None) -> bool:
-        """Return whether the current model is StepAudio 2.5 TTS."""
+        """Return whether the current model is StepAudio 3 TTS."""
         return is_stepaudio_style_control_model(model or self.model)
 
     def _is_seed_tts_model(self, model: Optional[str] = None) -> bool:
@@ -542,7 +491,7 @@ class AliyunMixin:
         api_key: str,
         raw_speaker_id: str,
     ) -> Optional[bytes]:
-        """StepAudio 2.5 TTS synthesis via StepFun HTTP API."""
+        """StepAudio 3 TTS synthesis via StepFun HTTP API."""
         speaker_id = self._normalize_speaker_id(raw_speaker_id, provider_model)
         stepaudio_voice_asset_id = str(voice_params.get("stepaudio_voice_asset_id") or "").strip()
         is_stepaudio_clone_asset = (
@@ -559,7 +508,7 @@ class AliyunMixin:
                 raise ValueError("StepAudio clone reference requires file_id for official voice preview")
 
             logger.info(
-                "调用 StepAudio 2.5 voice preview: model=%s, asset=%s, file_id=%s",
+                "调用 StepAudio 3 voice preview: model=%s, asset=%s, file_id=%s",
                 provider_model,
                 stepaudio_voice_asset_id or speaker_id,
                 stepaudio_voice_file_id,
@@ -576,7 +525,7 @@ class AliyunMixin:
         voice_params["speaker"] = speaker_id
 
         logger.info(
-            "调用 StepAudio 2.5 TTS: model=%s, voice=%s",
+            "调用 StepAudio 3 TTS: model=%s, voice=%s",
             provider_model,
             speaker_id,
         )
@@ -645,7 +594,7 @@ class AliyunMixin:
             voice_params=voice_params,
         )
 
-    async def _synthesize_qwen(
+    async def _synthesize_qwen_audio_31(
         self,
         text: str,
         voice_params: Dict[str, Any],
@@ -653,110 +602,22 @@ class AliyunMixin:
         api_key: str,
         raw_speaker_id: str,
     ) -> Optional[bytes]:
-        """Qwen TTS 合成 - 通过阿里云百炼 API"""
-        from app.services.audiobook.voice_manager import VoiceManager
-
-        logger.info("调用阿里云 Qwen-TTS")
-        speaker_id = self._normalize_speaker_id(raw_speaker_id, provider_model)
-
-        preset = VoiceManager.PRESET_VOICES.get(raw_speaker_id)
-        voice_id = preset["tts_speaker_id"] if preset else raw_speaker_id
-
+        """Qwen-Audio 3.1 TTS 合成 - 音色体系与 Qwen3-TTS 不互通，需原样透传。"""
+        # _normalize_speaker_id 对空 speaker 会提前返回 ""，默认音色只能在模型侧兜底。
+        speaker_id = self._normalize_speaker_id(raw_speaker_id, provider_model) or QWEN_AUDIO_31_DEFAULT_VOICE
         voice_params["speaker"] = speaker_id
         logger.info(
-            "调用阿里云 Qwen-TTS: model=%s, voice=%s",
+            "调用阿里云 Qwen-Audio 3.1 TTS: model=%s, voice=%s",
             provider_model,
             speaker_id,
         )
-        return await self._call_dashscope_qwen_http(
+        return await self._call_dashscope_qwen_audio_http(
             model=provider_model,
             api_key=api_key,
             text=text,
             voice_id=speaker_id,
             voice_params=voice_params,
         )
-
-    def _is_qwen_instruct_model(self, model: Optional[str] = None) -> bool:
-        """判断是否为 Qwen3-TTS Instruct Flash 模型。"""
-        return str(model or self.model).strip().lower() == "qwen3-tts-instruct-flash"
-
-    def _build_qwen_language_type(self, voice_params: Dict[str, Any]) -> str:
-        """Qwen TTS 默认使用 Auto，以保留多语种能力。"""
-        language_type = str(voice_params.get("language_type") or "").strip()
-        return language_type or "Auto"
-
-    def _build_qwen_instruction_payload(self, voice_params: Dict[str, Any]) -> Dict[str, Any]:
-        """根据结构化字段构建 Qwen Instruct 参数。"""
-        if not self._is_qwen_instruct_model():
-            return {}
-
-        snapshot_instruction = _snapshot_instructions(voice_params)
-        if snapshot_instruction:
-            return {
-                "instructions": snapshot_instruction,
-                "optimize_instructions": bool(voice_params.get("optimize_instructions", True)),
-            }
-
-        style_control = build_model_style_control(
-            self.model,
-            voice_params,
-            str(voice_params.get("emotion") or "neutral"),
-        )
-        if not style_control.provider_fields and not voice_params.get("use_instruct_mode"):
-            return {}
-        return dict(style_control.provider_fields)
-
-    def _fit_qwen_instruction_payload_to_limit(
-        self,
-        *,
-        text: str,
-        instruct_payload: Dict[str, Any],
-    ) -> Dict[str, Any]:
-        """将 Qwen Instruct 请求控制在 DashScope 600 字输入限制内。"""
-        if not instruct_payload:
-            return {}
-
-        instructions = str(instruct_payload.get("instructions") or "").strip()
-        if not instructions:
-            return {}
-
-        text_length = len(str(text or ""))
-        if text_length > QWEN_TTS_MAX_INPUT_CHARS:
-            logger.warning(
-                "Qwen TTS 正文超过服务商输入限制: text=%s, max=%s",
-                text_length,
-                QWEN_TTS_MAX_INPUT_CHARS,
-            )
-            return {}
-
-        instruction_budget = QWEN_TTS_MAX_INPUT_CHARS - QWEN_TTS_INPUT_SAFETY_CHARS - text_length
-        if instruction_budget <= 0:
-            logger.warning(
-                "Qwen TTS 正文已无安全 instructions 预算: text=%s, max=%s",
-                text_length,
-                QWEN_TTS_MAX_INPUT_CHARS,
-            )
-            return {}
-
-        if len(instructions) <= instruction_budget:
-            return dict(instruct_payload)
-
-        fitted_payload = dict(instruct_payload)
-        fitted_payload["instructions"] = _refit_qwen_structured_instructions(
-            instructions,
-            instruction_budget,
-        )
-        if not fitted_payload["instructions"]:
-            return {}
-
-        logger.warning(
-            "Qwen TTS instructions 已截断以满足服务商输入限制: text=%s, instructions=%s->%s, max=%s",
-            text_length,
-            len(instructions),
-            len(fitted_payload["instructions"]),
-            QWEN_TTS_MAX_INPUT_CHARS,
-        )
-        return fitted_payload
 
     async def _synthesize_cosyvoice_v3_plus(
         self,
@@ -1217,6 +1078,16 @@ class AliyunMixin:
             payload["stream"] = True
         return payload
 
+    def _ensure_mimo_transport_consumable(self, payload: Dict[str, Any]) -> None:
+        """拦截官方合法但我方解析不了的传输：SSE 流式与无头裸 PCM 会在发请求前显式拒绝。"""
+        audio_format = str((payload.get("audio") or {}).get("format") or "").strip().lower()
+        if not payload.get("stream") and audio_format != "pcm16":
+            return
+        raise TTSUserInputError(
+            "MiMo TTS 无法消费该传输组合：stream=true 返回 SSE、audio.format=pcm16 返回无头裸 PCM，"
+            "当前链路只解析非流式 JSON 的 wav/mp3，请去掉 stream 与 pcm16"
+        )
+
     def _truncate_stepaudio_instruction(self, value: str) -> str:
         return str(value or "").strip()[:STEPAUDIO_TTS_INSTRUCTION_MAX_CHARS].strip()
 
@@ -1268,12 +1139,12 @@ class AliyunMixin:
             prepared_text = f"{snapshot_prefix}{text}" if not str(text or "").startswith(snapshot_prefix) else str(text or "")
         else:
             style_control = self._build_stepaudio_style_control(
-                normalized_model or STEPAUDIO_25_TTS_MODEL,
+                normalized_model or STEPAUDIO_3_TTS_MODEL,
                 voice_params,
             )
             prepared_text = prepare_text_for_style_control(text, style_control)
         payload: Dict[str, Any] = {
-            "model": normalized_model or STEPAUDIO_25_TTS_MODEL,
+            "model": normalized_model or STEPAUDIO_3_TTS_MODEL,
             "voice": str(voice or "").strip() or STEPAUDIO_TTS_DEFAULT_VOICE,
             "input": self._fit_stepaudio_text_to_limit(prepared_text),
         }
@@ -1319,7 +1190,7 @@ class AliyunMixin:
         clean_preview_text = self._fit_stepaudio_text_to_limit(text)
         clean_sample_text = str(sample_text or "").strip()
         payload: Dict[str, Any] = {
-            "model": normalized_model or STEPAUDIO_25_TTS_MODEL,
+            "model": normalized_model or STEPAUDIO_3_TTS_MODEL,
             "file_id": str(file_id or "").strip(),
             "text": clean_sample_text or clean_preview_text,
         }
@@ -1497,6 +1368,9 @@ class AliyunMixin:
             parsed_chunks = _parse_seed_tts_json_audio_chunks(getattr(response, "text", ""))
             if parsed_chunks:
                 return parsed_chunks
+            diagnosis = _diagnose_seed_tts_json_frames(getattr(response, "text", ""))
+            if diagnosis:
+                raise ValueError(f"Seed-TTS response missing audio data ({diagnosis})")
             if response.content:
                 return bytes(response.content)
             raise ValueError("Seed-TTS response missing audio data")
@@ -1738,7 +1612,9 @@ class AliyunMixin:
                 {
                     "provider": "volcengine",
                     "provider_model": model,
-                    "speaker": voice,
+                    # 记录实际下发的 speaker：voice 为空时上游收到的是兜底默认音色，
+                    # 记原始空值会让"这句用的是哪个音色"的事后排查失真。
+                    "speaker": base_request["req_params"]["speaker"],
                     "transport": "websocket_binary_frame",
                     "base_url": ws_url.replace("/api/v3/tts/bidirection", ""),
                     "endpoint": "/api/v3/tts/bidirection",
@@ -1782,10 +1658,6 @@ class AliyunMixin:
 
         endpoint = str(os.getenv("SEED_TTS_HTTP_ENDPOINT") or SEED_TTS_DEFAULT_ENDPOINT).strip()
         clean_resource_id = str(resource_id or SEED_TTS_DEFAULT_RESOURCE_ID).strip()
-        app_key = (
-            str(os.getenv("VOLCENGINE_TTS_APP_KEY") or os.getenv("DOUBAO_TTS_APP_KEY") or "").strip()
-            or api_key
-        )
         payload = self._build_seed_tts_http_payload(
             model=model,
             text=text,
@@ -1796,8 +1668,9 @@ class AliyunMixin:
         async with httpx.AsyncClient(timeout=60.0) as client:
             response = await client.post(
                 endpoint,
+                # 不要加回 X-Api-App-Key：2026-10-10 实测该头会让单向 HTTP 端点返回 200 但响应体没有音频
+                # （官方头形状 11/11 出音频，加上该头 0/4），见 docs/TTS_PROMPT_EVIDENCE_20261010.md §12.2。
                 headers={
-                    "X-Api-App-Key": app_key,
                     "X-Api-Key": api_key,
                     "X-Api-Resource-Id": clean_resource_id,
                     "Content-Type": "application/json",
@@ -1833,7 +1706,7 @@ class AliyunMixin:
         voice: str,
         voice_params: Dict[str, Any],
     ) -> bytes:
-        """Call StepAudio 2.5 TTS via StepFun HTTP API."""
+        """Call StepAudio 3 TTS via StepFun HTTP API."""
         import httpx
 
         base_url = str(os.getenv("STEPAUDIO_TTS_BASE_URL") or STEPAUDIO_TTS_DEFAULT_BASE_URL).rstrip("/")
@@ -1945,6 +1818,7 @@ class AliyunMixin:
             voice=voice,
             voice_params=voice_params,
         )
+        self._ensure_mimo_transport_consumable(payload)
 
         async with httpx.AsyncClient(timeout=60.0) as client:
             response = await client.post(
@@ -2180,7 +2054,21 @@ class AliyunMixin:
 
         return None
 
-    def _build_qwen_http_payload(
+    def _build_qwen_audio_31_instruction(self, voice_params: Dict[str, Any]) -> str:
+        """构建 Qwen-Audio 3.1 的 input.instruction 单字段文本。"""
+        snapshot_instruction = _snapshot_instructions(voice_params)
+        if snapshot_instruction:
+            return snapshot_instruction
+
+        style_control = build_model_style_control(
+            self.model,
+            voice_params,
+            str(voice_params.get("emotion") or "neutral"),
+        )
+        provider_fields = style_control.provider_fields or {}
+        return str(provider_fields.get("instructions") or provider_fields.get("instruction") or "").strip()
+
+    def _build_qwen_audio_31_http_payload(
         self,
         *,
         model: str,
@@ -2188,24 +2076,13 @@ class AliyunMixin:
         voice_id: str,
         voice_params: Dict[str, Any],
     ) -> Dict[str, Any]:
-        language_type = self._build_qwen_language_type(voice_params)
-        payload: Dict[str, Any] = {
-            "model": model,
-            "input": {
-                "text": text,
-                "voice": voice_id,
-                "language_type": language_type,
-            },
-        }
-        instruct_payload = self._fit_qwen_instruction_payload_to_limit(
-            text=text,
-            instruct_payload=self._build_qwen_instruction_payload(voice_params),
-        )
-        if instruct_payload:
-            payload["parameters"] = instruct_payload
-        return payload
+        input_block: Dict[str, Any] = {"text": text, "voice": voice_id}
+        instruction = self._build_qwen_audio_31_instruction(voice_params)
+        if instruction:
+            input_block["instruction"] = instruction
+        return {"model": model, "input": input_block}
 
-    async def _call_dashscope_qwen_http(
+    async def _call_dashscope_qwen_audio_http(
         self,
         model: str,
         api_key: str,
@@ -2213,31 +2090,40 @@ class AliyunMixin:
         voice_id: str,
         voice_params: Dict[str, Any],
     ) -> bytes:
-        """调用 Qwen TTS via DashScope HTTP API - 使用正确的 multimodal-generation 端点"""
+        """调用 Qwen-Audio 3.1 TTS：SpeechSynthesizer 端点，音频以 output.audio.url 返回。"""
+        import base64
+
         import httpx
 
-        # Qwen TTS API 端点（正确）
-        endpoint = "https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation"
-        payload = self._build_qwen_http_payload(
+        payload = self._build_qwen_audio_31_http_payload(
             model=model,
             text=text,
             voice_id=voice_id,
             voice_params=voice_params,
         )
-        language_type = str(payload["input"].get("language_type") or "Auto")
-        instruct_payload = payload.get("parameters") or {}
+        instruction = str(payload["input"].get("instruction") or "")
 
         logger.info(
-            "调用百炼 Qwen HTTP API: model=%s, voice=%s, language_type=%s, instructions=%s",
+            "调用百炼 Qwen-Audio 3.1 HTTP API: model=%s, voice=%s, instruction_chars=%s",
             model,
             voice_id,
-            language_type,
-            bool(instruct_payload.get("instructions")),
+            len(instruction),
         )
 
-        async with httpx.AsyncClient(timeout=60.0) as client:
+        def _record_metadata() -> None:
+            self._set_last_synthesis_metadata(
+                {
+                    "provider": "aliyun",
+                    "provider_model": model,
+                    "speaker": voice_id,
+                    "transport": "http",
+                    "instructions": instruction,
+                }
+            )
+
+        async with httpx.AsyncClient(timeout=120.0) as client:
             response = await client.post(
-                endpoint,
+                QWEN_AUDIO_31_TTS_ENDPOINT,
                 headers={
                     "Authorization": f"Bearer {api_key}",
                     "Content-Type": "application/json",
@@ -2246,68 +2132,35 @@ class AliyunMixin:
             )
 
             if response.status_code != 200:
-                logger.error(f"百炼 Qwen API 失败: status={response.status_code}, body={response.text[:500]}")
-                raise Exception(f"Qwen TTS API error: {response.status_code} - {response.text[:200]}")
+                logger.error(
+                    "百炼 Qwen-Audio 3.1 API 失败: status=%s, body=%s",
+                    response.status_code,
+                    response.text[:500],
+                )
+                raise Exception(
+                    f"Qwen-Audio 3.1 TTS API error: {response.status_code} - {response.text[:200]}"
+                )
 
             data = response.json()
-            logger.info(f"百炼 Qwen 响应: {str(data)[:500]}")
+            audio_info = (data.get("output") or {}).get("audio")
 
-            # Qwen TTS 响应格式（根据阿里云官方文档）：音频直接在 output.audio 字段（base64字符串）
-            if "output" in data and "audio" in data["output"]:
-                audio_info = data["output"]["audio"]
+            if isinstance(audio_info, str) and audio_info:
+                _record_metadata()
+                return base64.b64decode(audio_info)
 
-                # 直接是base64字符串（不是对象）
-                if isinstance(audio_info, str) and audio_info:
-                    import base64
-                    logger.info(f"解析到直接base64音频数据，长度: {len(audio_info)}")
-                    self._set_last_synthesis_metadata(
-                        {
-                            "provider": "aliyun",
-                            "provider_model": model,
-                            "speaker": voice_id,
-                            "transport": "http",
-                            "language_type": language_type,
-                            "instructions": instruct_payload.get("instructions", ""),
-                            "optimize_instructions": bool(instruct_payload.get("optimize_instructions")),
-                        }
+            if isinstance(audio_info, dict):
+                audio_url = audio_info.get("url")
+                if audio_url:
+                    audio_response = await client.get(audio_url)
+                    if audio_response.status_code == 200:
+                        _record_metadata()
+                        return audio_response.content
+                    raise Exception(
+                        f"Qwen-Audio 3.1 音频下载失败: status={audio_response.status_code}"
                     )
-                    return base64.b64decode(audio_info)
+                audio_data = audio_info.get("data")
+                if audio_data:
+                    _record_metadata()
+                    return base64.b64decode(audio_data)
 
-                # 是对象的情况
-                if isinstance(audio_info, dict):
-                    # url 格式
-                    audio_url = audio_info.get("url")
-                    if audio_url:
-                        audio_response = await client.get(audio_url)
-                        if audio_response.status_code == 200:
-                            self._set_last_synthesis_metadata(
-                                {
-                                    "provider": "aliyun",
-                                    "provider_model": model,
-                                    "speaker": voice_id,
-                                    "transport": "http",
-                                    "language_type": language_type,
-                                    "instructions": instruct_payload.get("instructions", ""),
-                                    "optimize_instructions": bool(instruct_payload.get("optimize_instructions")),
-                                }
-                            )
-                            return audio_response.content
-
-                    # data 格式
-                    audio_data = audio_info.get("data")
-                    if audio_data:
-                        import base64
-                        self._set_last_synthesis_metadata(
-                            {
-                                "provider": "aliyun",
-                                "provider_model": model,
-                                "speaker": voice_id,
-                                "transport": "http",
-                                "language_type": language_type,
-                                "instructions": instruct_payload.get("instructions", ""),
-                                "optimize_instructions": bool(instruct_payload.get("optimize_instructions")),
-                            }
-                        )
-                        return base64.b64decode(audio_data)
-
-            raise Exception(f"Qwen API response missing audio data: {str(data)[:200]}")
+            raise Exception(f"Qwen-Audio 3.1 响应缺少音频数据: {str(data)[:200]}")

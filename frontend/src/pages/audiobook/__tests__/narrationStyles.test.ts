@@ -44,7 +44,7 @@ describe('audiobook narrationStyles', () => {
 
     expect(NARRATION_STYLE_OPTIONS.find((style) => style.id === 'professional')?.supported_models).toEqual(TTS_MODELS)
     expect(NARRATION_STYLE_OPTIONS.find((style) => style.id === 'dramatic')?.supported_models).not.toContain(
-      'qwen3-tts-instruct-flash',
+      'qwen-audio-3.1-tts-flash',
     )
   })
 
@@ -54,7 +54,7 @@ describe('audiobook narrationStyles', () => {
         id: 'professional',
         name: '后端专业播报',
         description: '后端描述',
-        supported_models: ['qwen3-tts-instruct-flash', 'unknown-model'],
+        supported_models: ['qwen-audio-3.1-tts-flash', 'unknown-model'],
       },
       {
         id: 'custom',
@@ -79,7 +79,7 @@ describe('audiobook narrationStyles', () => {
     expect(normalized[0]).toMatchObject({
       name: '后端专业播报',
       description: '后端描述',
-      supported_models: ['qwen3-tts-instruct-flash', 'unknown-model'],
+      supported_models: ['qwen-audio-3.1-tts-flash', 'unknown-model'],
     })
     expect(normalized[1]).toMatchObject({
       name: '自定义',

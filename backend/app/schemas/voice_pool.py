@@ -7,58 +7,26 @@ from typing import Literal
 from pydantic import BaseModel, Field, field_validator
 
 
+from app.schemas.voice_tags import (
+    AGE_IMPRESSION_TAGS,
+    EMOTION_TAGS,
+    GENDER_PRESENTATION_TAGS,
+    SCENARIO_TAGS,
+    STYLE_TAGS,
+    TIMBRE_TAGS,
+)
+
 GenderPresentation = Literal["female", "male", "neutral"]
 AgeImpression = Literal["child", "teen", "young_adult", "adult", "mature", "elder"]
 RightsBasis = Literal["self_voice", "licensed_voice", "synthetic_source", "synthetic_design"]
 
-VOICE_POOL_GENDER_OPTIONS = ("female", "male", "neutral")
-VOICE_POOL_AGE_OPTIONS = ("child", "teen", "young_adult", "adult", "mature", "elder")
-VOICE_POOL_STYLE_OPTIONS = (
-    "natural",
-    "gentle",
-    "sweet",
-    "bright",
-    "restrained",
-    "intellectual",
-    "powerful",
-    "cold",
-    "narration",
-    "roleplay",
-)
-VOICE_POOL_TIMBRE_OPTIONS = (
-    "clear",
-    "warm",
-    "bright",
-    "deep",
-    "magnetic",
-    "soft",
-    "powerful",
-    "slightly_husky",
-    "husky",
-    "airy",
-)
-VOICE_POOL_SCENARIO_OPTIONS = (
-    "audiobook",
-    "dialogue",
-    "narration",
-    "suspense",
-    "romance",
-    "historical",
-    "fantasy",
-    "children",
-    "documentary",
-    "commercial",
-)
-VOICE_POOL_EMOTION_OPTIONS = (
-    "calm",
-    "happy",
-    "sad",
-    "angry",
-    "fearful",
-    "tender",
-    "tense",
-    "surprised",
-)
+# 可选值由 app.schemas.voice_tags 单点定义，公共池与音色画像共用同一词表。
+VOICE_POOL_GENDER_OPTIONS = GENDER_PRESENTATION_TAGS
+VOICE_POOL_AGE_OPTIONS = AGE_IMPRESSION_TAGS
+VOICE_POOL_STYLE_OPTIONS = STYLE_TAGS
+VOICE_POOL_TIMBRE_OPTIONS = TIMBRE_TAGS
+VOICE_POOL_SCENARIO_OPTIONS = SCENARIO_TAGS
+VOICE_POOL_EMOTION_OPTIONS = EMOTION_TAGS
 
 
 def _normalize_tags(value: list[str], *, field_name: str, allowed: tuple[str, ...]) -> list[str]:

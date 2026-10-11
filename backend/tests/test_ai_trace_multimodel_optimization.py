@@ -97,7 +97,7 @@ def test_best_prompt_by_genre_prefers_genre_history_before_general_approved(tmp_
 
 def test_challenge_round_counter_is_monotonic_across_evolution_runs(tmp_path):
     storage = ModelConfigStorage(str(tmp_path))
-    storage.save_config({"eliminated_models": {"玄幻": ["qwen3.7-plus"]}})
+    storage.save_config({"eliminated_models": {"玄幻": ["qwen-plus"]}})
 
     for _ in range(4):
         storage.record_regular_evaluation_round("玄幻")
@@ -116,11 +116,11 @@ def test_challenge_round_counter_is_monotonic_across_evolution_runs(tmp_path):
 
 def test_revived_model_starts_new_statistics_with_challenge_result(tmp_path):
     storage = ModelConfigStorage(str(tmp_path))
-    storage.save_config({"eliminated_models": {"玄幻": ["qwen3.7-plus"]}})
+    storage.save_config({"eliminated_models": {"玄幻": ["qwen-plus"]}})
     storage.save_performance(
         {
-            "qwen3.7-plus": ModelPerformanceRecord(
-                model_id="qwen3.7-plus",
+            "qwen-plus": ModelPerformanceRecord(
+                model_id="qwen-plus",
                 model_name="Qwen",
                 provider="alibaba",
                 total_evaluations=8,
@@ -131,32 +131,41 @@ def test_revived_model_starts_new_statistics_with_challenge_result(tmp_path):
         "玄幻",
     )
     challenge = SingleModelResult(
-        model_id="qwen3.7-plus",
+        model_id="qwen-plus",
         model_name="Qwen",
         provider="alibaba",
         reduced_text="文本",
         ai_score=20,
+        ai_ratio=0.20,
         latency_seconds=1.5,
         improvement=40,
     )
     competitors = [
         challenge,
-        SingleModelResult("m1", "M1", "p", "文本", 10, 1, improvement=40),
-        SingleModelResult("m2", "M2", "p", "文本", 30, 1, improvement=20),
-        SingleModelResult("m3", "M3", "p", "文本", 40, 1, improvement=10),
+        SingleModelResult("m1", "M1", "p", "文本", 10, 1, improvement=40, ai_ratio=0.10),
+        SingleModelResult("m2", "M2", "p", "文本", 30, 1, improvement=20, ai_ratio=0.30),
+        SingleModelResult("m3", "M3", "p", "文本", 40, 1, improvement=10, ai_ratio=0.40),
     ]
 
     revived = storage.process_challenge_results("玄幻", [challenge], competitors)
 
-    record = storage.load_performance("玄幻")["qwen3.7-plus"]
-    assert revived == ["qwen3.7-plus"]
+    record = storage.load_performance("玄幻")["qwen-plus"]
+    assert revived == ["qwen-plus"]
     assert record.total_evaluations == 1
     assert record.total_success == 1
     assert record.avg_ai_score == 20
+    # 🔧 复活后的首条记录必须带上选型主项，否则会以默认 1.0 参与下一轮比较
+    assert record.avg_ai_ratio == 0.20
     assert record.avg_improvement == 40
 
 
 def _mature_record(model_id: str, score: float) -> ModelPerformanceRecord:
+    """score 以「百分点」计（0-100），同时映射到选型主项 avg_ai_ratio（0-1）。
+
+    🔧 2026-10-08：淘汰判据主键由 avg_ai_score 改为 avg_ai_ratio，
+    故 avg_ai_ratio 是这里唯一被 evaluate_elimination 读取的字段；
+    avg_ai_score 保留为诊断值（真实改写区间恒为 100，不参与比较）。
+    """
     return ModelPerformanceRecord(
         model_id=model_id,
         model_name=model_id,
@@ -164,6 +173,8 @@ def _mature_record(model_id: str, score: float) -> ModelPerformanceRecord:
         total_evaluations=5,
         total_success=5,
         avg_ai_score=score,
+        avg_ai_ratio=score / 100.0,
+        best_ai_ratio=score / 100.0,
     )
 
 
@@ -171,30 +182,96 @@ def test_elimination_starts_when_two_models_are_mature_and_uses_strict_gap(tmp_p
     storage = ModelConfigStorage(str(tmp_path))
     storage.save_performance(
         {
-            "qwen3.7-plus": _mature_record("qwen3.7-plus", 10),
-            "deepseek-v4-flash": _mature_record("deepseek-v4-flash", 31),
+            "qwen-plus": _mature_record("qwen-plus", 10),
+            "deepseek-flash": _mature_record("deepseek-flash", 31),
         },
         "玄幻",
     )
 
-    assert storage.evaluate_elimination("玄幻") == ["deepseek-v4-flash"]
+    assert storage.evaluate_elimination("玄幻") == ["deepseek-flash"]
 
     boundary_storage = ModelConfigStorage(str(tmp_path / "boundary"))
     boundary_storage.save_performance(
         {
-            "qwen3.7-plus": _mature_record("qwen3.7-plus", 10),
-            "deepseek-v4-flash": _mature_record("deepseek-v4-flash", 30),
+            "qwen-plus": _mature_record("qwen-plus", 10),
+            "deepseek-flash": _mature_record("deepseek-flash", 30),
         },
         "玄幻",
     )
     assert boundary_storage.evaluate_elimination("玄幻") == []
 
 
+class TestAiRatioDrivesSelectionAndElimination:
+    """🔧 2026-10-08：选型与淘汰判据统一到 avg_ai_ratio。
+
+    旧口径取证：avg_ai_score 在 LLM 改写区间恒为 100，于是
+    evaluate_elimination 的 threshold = 100 + 20 = 120，判据
+    `avg_ai_score > 120` 永不成立 —— 性能淘汰从未真正触发过；
+    update_auto_best_model 对恒等值取 min，等价于从字典里按插入序取一个。
+    """
+
+    def test_auto_best_model_follows_ai_ratio_not_ai_score(self, tmp_path):
+        storage = ModelConfigStorage(str(tmp_path))
+        good = _mature_record("doubao-seed-evolving", 100)  # ai_score 均为 100
+        good.avg_ai_ratio = 0.05
+        bad = _mature_record("glm", 100)
+        bad.avg_ai_ratio = 0.90
+        storage.save_performance(
+            {"doubao-seed-evolving": good, "glm": bad}, "玄幻"
+        )
+
+        assert storage.update_auto_best_model("玄幻") == "doubao-seed-evolving"
+
+    def test_elimination_uses_ai_ratio_gap(self, tmp_path):
+        storage = ModelConfigStorage(str(tmp_path))
+        storage.save_performance(
+            {
+                "qwen-plus": _mature_record("qwen-plus", 20),      # 0.20
+                "deepseek-flash": _mature_record("deepseek-flash", 45),  # 0.45 > 0.20+0.20
+            },
+            "玄幻",
+        )
+
+        assert storage.evaluate_elimination("玄幻") == ["deepseek-flash"]
+
+    def test_elimination_boundary_not_exceeded(self, tmp_path):
+        # 恰好等于门槛（20+20=40）不淘汰，守住「超过」而非「达到」
+        storage = ModelConfigStorage(str(tmp_path))
+        storage.save_performance(
+            {
+                "qwen-plus": _mature_record("qwen-plus", 20),
+                "deepseek-flash": _mature_record("deepseek-flash", 40),
+            },
+            "玄幻",
+        )
+
+        assert storage.evaluate_elimination("玄幻") == []
+
+    def test_elimination_dormant_when_all_ai_ratio_default(self, tmp_path):
+        # 全部为默认 avg_ai_ratio=1.0（无检测数据）时不得误淘汰
+        storage = ModelConfigStorage(str(tmp_path))
+        storage.save_performance(
+            {
+                "qwen-plus": ModelPerformanceRecord(
+                    model_id="qwen-plus", model_name="Q", provider="p",
+                    total_evaluations=5, total_success=5,
+                ),
+                "deepseek-flash": ModelPerformanceRecord(
+                    model_id="deepseek-flash", model_name="D", provider="p",
+                    total_evaluations=5, total_success=5,
+                ),
+            },
+            "玄幻",
+        )
+
+        assert storage.evaluate_elimination("玄幻") == []
+
+
 def test_challenge_selects_only_one_eliminated_model(tmp_path):
     storage = ModelConfigStorage(str(tmp_path))
     storage.save_config({
         "eliminated_models": {
-            "玄幻": ["qwen3.7-plus", "deepseek-v4-flash"]
+            "玄幻": ["qwen-plus", "deepseek-flash"]
         }
     })
 
@@ -208,7 +285,7 @@ def test_evolving_model_has_fast_non_thinking_evaluation_policy():
     assert policy["timeout"] == 90
     assert policy["max_tokens"] == 4096
     assert policy["extra_body"] == {"thinking": {"type": "disabled"}}
-    assert service.get_model_evaluation_policy("qwen3.7-plus")["timeout"] == service.SINGLE_MODEL_TIMEOUT
+    assert service.get_model_evaluation_policy("qwen-plus")["timeout"] == service.SINGLE_MODEL_TIMEOUT
 
 
 def test_repeated_model_failures_quarantine_only_that_genre(tmp_path):
@@ -245,22 +322,27 @@ def test_success_clears_model_failure_streak(tmp_path):
 
 def test_challenger_revives_only_when_ranked_in_top_three(tmp_path):
     storage = ModelConfigStorage(str(tmp_path))
-    storage.save_config({"eliminated_models": {"玄幻": ["qwen3.7-plus"]}})
-    third = SingleModelResult("qwen3.7-plus", "Qwen", "p", "文本", 30, 1, improvement=20)
+    storage.save_config({"eliminated_models": {"玄幻": ["qwen-plus"]}})
+    # 🔧 2026-10-08：排位主键由 ai_score 改为 ai_ratio，名次由 ai_ratio 决定
+    third = SingleModelResult(
+        "qwen-plus", "Qwen", "p", "文本", 30, 1, improvement=20, ai_ratio=0.30
+    )
     results = [
-        SingleModelResult("m1", "M1", "p", "文本", 10, 1, improvement=40),
-        SingleModelResult("m2", "M2", "p", "文本", 20, 1, improvement=30),
+        SingleModelResult("m1", "M1", "p", "文本", 10, 1, improvement=40, ai_ratio=0.10),
+        SingleModelResult("m2", "M2", "p", "文本", 20, 1, improvement=30, ai_ratio=0.20),
         third,
-        SingleModelResult("m3", "M3", "p", "文本", 40, 1, improvement=10),
+        SingleModelResult("m3", "M3", "p", "文本", 40, 1, improvement=10, ai_ratio=0.40),
     ]
-    assert storage.process_challenge_results("玄幻", [third], results) == ["qwen3.7-plus"]
+    assert storage.process_challenge_results("玄幻", [third], results) == ["qwen-plus"]
 
-    storage.save_config({"eliminated_models": {"玄幻": ["qwen3.7-plus"]}})
-    fourth = SingleModelResult("qwen3.7-plus", "Qwen", "p", "文本", 35, 1, improvement=15)
+    storage.save_config({"eliminated_models": {"玄幻": ["qwen-plus"]}})
+    fourth = SingleModelResult(
+        "qwen-plus", "Qwen", "p", "文本", 35, 1, improvement=15, ai_ratio=0.35
+    )
     results = [
-        SingleModelResult("m1", "M1", "p", "文本", 10, 1, improvement=40),
-        SingleModelResult("m2", "M2", "p", "文本", 20, 1, improvement=30),
-        SingleModelResult("m3", "M3", "p", "文本", 30, 1, improvement=20),
+        SingleModelResult("m1", "M1", "p", "文本", 10, 1, improvement=40, ai_ratio=0.10),
+        SingleModelResult("m2", "M2", "p", "文本", 20, 1, improvement=30, ai_ratio=0.20),
+        SingleModelResult("m3", "M3", "p", "文本", 30, 1, improvement=20, ai_ratio=0.30),
         fourth,
     ]
     assert storage.process_challenge_results("玄幻", [fourth], results) == []
@@ -282,7 +364,7 @@ def _semantic_review() -> dict:
 async def test_challenge_preserves_semantic_review_for_regular_baseline(tmp_path, monkeypatch):
     storage = ModelConfigStorage(str(tmp_path))
     storage.save_config({
-        "eliminated_models": {"玄幻": ["qwen3.7-plus"]},
+        "eliminated_models": {"玄幻": ["qwen-plus"]},
         "evaluation_rounds_by_genre": {"玄幻": 5},
     })
     service = MultiModelEvaluationService.__new__(MultiModelEvaluationService)
@@ -290,7 +372,7 @@ async def test_challenge_preserves_semantic_review_for_regular_baseline(tmp_path
 
     async def evaluate(*args, **kwargs):
         return SingleModelResult(
-            "qwen3.7-plus", "Qwen", "p", "文本", 35, 1,
+            "qwen-plus", "Qwen", "p", "文本", 35, 1,
             fidelity_similarity=40, semantic_review=_semantic_review(),
         )
 
@@ -310,14 +392,14 @@ async def test_challenge_preserves_semantic_review_for_regular_baseline(tmp_path
     )
 
     assert result["revived"] == []
-    assert storage.get_eliminated_models("玄幻") == ["qwen3.7-plus"]
+    assert storage.get_eliminated_models("玄幻") == ["qwen-plus"]
 
 
 @pytest.mark.asyncio
 async def test_failed_challenge_does_not_consume_challenge_cycle(tmp_path, monkeypatch):
     storage = ModelConfigStorage(str(tmp_path))
     storage.save_config({
-        "eliminated_models": {"玄幻": ["qwen3.7-plus"]},
+        "eliminated_models": {"玄幻": ["qwen-plus"]},
         "evaluation_rounds_by_genre": {"玄幻": 5},
     })
     service = MultiModelEvaluationService.__new__(MultiModelEvaluationService)
@@ -325,7 +407,7 @@ async def test_failed_challenge_does_not_consume_challenge_cycle(tmp_path, monke
 
     async def fail(*args, **kwargs):
         return SingleModelResult(
-            "qwen3.7-plus", "Qwen", "p", "", 100, 1,
+            "qwen-plus", "Qwen", "p", "", 100, 1,
             success=False, error="timeout",
         )
 
@@ -340,19 +422,19 @@ async def test_failed_challenge_does_not_consume_challenge_cycle(tmp_path, monke
 def test_combination_performance_is_isolated_by_genre_prompt_and_model(tmp_path):
     storage = ModelConfigStorage(str(tmp_path))
     fantasy = SingleModelResult(
-        "qwen3.7-plus", "Qwen", "alibaba", "文本", 18, 1.2,
+        "qwen-plus", "Qwen", "alibaba", "文本", 18, 1.2,
         improvement=42, fidelity_similarity=86,
     )
     urban = SingleModelResult(
-        "qwen3.7-plus", "Qwen", "alibaba", "文本", 35, 1.0,
+        "qwen-plus", "Qwen", "alibaba", "文本", 35, 1.0,
         improvement=25, fidelity_similarity=92,
     )
 
     storage.update_combination_performance(fantasy, "玄幻", "prompt-v1", "玄幻提示词")
     storage.update_combination_performance(urban, "都市", "prompt-v1", "都市提示词")
 
-    fantasy_record = storage.load_combination_performance("玄幻")["prompt-v1"]["qwen3.7-plus"]
-    urban_record = storage.load_combination_performance("都市")["prompt-v1"]["qwen3.7-plus"]
+    fantasy_record = storage.load_combination_performance("玄幻")["prompt-v1"]["qwen-plus"]
+    urban_record = storage.load_combination_performance("都市")["prompt-v1"]["qwen-plus"]
     assert isinstance(fantasy_record, CombinationPerformanceRecord)
     assert fantasy_record.avg_ai_score == 18
     assert fantasy_record.avg_fidelity_similarity == 86
@@ -363,11 +445,11 @@ def test_combination_performance_is_isolated_by_genre_prompt_and_model(tmp_path)
 def test_best_combination_excludes_results_below_fidelity_gate(tmp_path):
     storage = ModelConfigStorage(str(tmp_path))
     low_ai_but_unfaithful = SingleModelResult(
-        "qwen3.7-plus", "Qwen", "alibaba", "文本", 5, 1,
+        "qwen-plus", "Qwen", "alibaba", "文本", 5, 1,
         fidelity_similarity=40,
     )
     faithful = SingleModelResult(
-        "deepseek-v4-flash", "DeepSeek", "deepseek", "文本", 20, 1,
+        "deepseek-flash", "DeepSeek", "deepseek", "文本", 20, 1,
         fidelity_similarity=85, improvement=30,
     )
     storage.update_combination_performance(low_ai_but_unfaithful, "玄幻", "bad", "失真提示词")
@@ -377,7 +459,7 @@ def test_best_combination_excludes_results_below_fidelity_gate(tmp_path):
 
     assert best is not None
     assert best.prompt_version_id == "good"
-    assert best.model_id == "deepseek-v4-flash"
+    assert best.model_id == "deepseek-flash"
 
 
 def test_model_result_with_failed_semantic_review_is_not_eligible():
@@ -424,13 +506,13 @@ def test_semantic_review_allows_lower_lexical_fidelity_but_requires_low_risk():
 def test_unfaithful_result_does_not_enter_model_success_statistics(tmp_path):
     storage = ModelConfigStorage(str(tmp_path))
     result = SingleModelResult(
-        "qwen3.7-plus", "Qwen", "alibaba", "文本", 3, 1,
+        "qwen-plus", "Qwen", "alibaba", "文本", 3, 1,
         improvement=50, fidelity_similarity=45,
     )
 
     storage.update_performance(result, "玄幻")
 
-    record = storage.load_performance("玄幻")["qwen3.7-plus"]
+    record = storage.load_performance("玄幻")["qwen-plus"]
     assert record.total_evaluations == 1
     assert record.total_success == 0
     assert record.avg_ai_score == 100
@@ -441,14 +523,14 @@ def test_best_model_for_selected_prompt_never_uses_another_prompt_version(tmp_pa
     for index in range(3):
         storage.update_combination_performance(
             SingleModelResult(
-                "qwen3.7-plus", "Qwen", "alibaba", "文本", 30, 1,
+                "qwen-plus", "Qwen", "alibaba", "文本", 30, 1,
                 fidelity_similarity=90, improvement=30,
             ),
             "玄幻", "approved", "已批准提示词", sample_hash=f"approved-{index}",
         )
         storage.update_combination_performance(
             SingleModelResult(
-                "deepseek-v4-flash", "DeepSeek", "deepseek", "文本", 5, 1,
+                "deepseek-flash", "DeepSeek", "deepseek", "文本", 5, 1,
                 fidelity_similarity=90, improvement=55,
             ),
             "玄幻", "other", "其他提示词", sample_hash=f"other-{index}",
@@ -457,13 +539,13 @@ def test_best_model_for_selected_prompt_never_uses_another_prompt_version(tmp_pa
     best = storage.get_best_model_for_prompt("玄幻", "已批准提示词")
 
     assert best is not None
-    assert best.model_id == "qwen3.7-plus"
+    assert best.model_id == "qwen-plus"
 
 
 def test_repeated_same_sample_does_not_mature_combination(tmp_path):
     storage = ModelConfigStorage(str(tmp_path))
     result = SingleModelResult(
-        "qwen3.7-plus", "Qwen", "alibaba", "文本", 20, 1,
+        "qwen-plus", "Qwen", "alibaba", "文本", 20, 1,
         fidelity_similarity=90, improvement=40,
     )
     for _ in range(5):
@@ -510,25 +592,67 @@ def test_old_approved_prompt_genre_is_backfilled_from_evolution_history(tmp_path
 
 
 def test_combination_tracks_variance_and_penalizes_uncertainty(tmp_path):
+    """方差惩罚跟踪的是「确定AI段落占比」（排序主项）。
+
+    2026-10-08 起排序主项由 avg_ai_score 改为 avg_ai_ratio：
+    ai_score ≈ (确定AI + 疑似AI) × 100 在 LLM 改写区间恒为 100，
+    对 10/30/50 这类取值现实中根本不会出现，用它算方差等于在噪声上做统计。
+    """
     storage = ModelConfigStorage(str(tmp_path))
-    for index, score in enumerate((10, 30, 50)):
+    for index, ratio in enumerate((0.1, 0.3, 0.5)):
         storage.update_combination_performance(
             SingleModelResult(
-                "qwen3.7-plus", "Qwen", "alibaba", "文本", score, 1,
-                fidelity_similarity=90, improvement=60 - score,
+                "qwen-plus", "Qwen", "alibaba", "文本", 100, 1,
+                fidelity_similarity=90, improvement=10, ai_ratio=ratio,
             ),
             "玄幻", "p1", "提示词", sample_hash=f"s{index}",
         )
 
-    record = storage.load_combination_performance("玄幻")["p1"]["qwen3.7-plus"]
-    assert record.ai_score_stddev > 0
+    record = storage.load_combination_performance("玄幻")["p1"]["qwen-plus"]
+    assert record.avg_ai_ratio == pytest.approx(0.3)
+    assert record.ai_ratio_stddev > 0
     assert record.confidence_score > record.composite_score
+
+
+def test_composite_score_is_driven_by_ai_ratio_not_ai_score(tmp_path):
+    """回归防线：排序主项必须是 ai_ratio。
+
+    历史事故：composite_score = avg_ai_score + 保真项，而 avg_ai_score 在改写区间
+    恒为 100，导致 1005 条记录的排序等价于按常数排序，选不出真正有效的模型。
+    """
+    storage = ModelConfigStorage(str(tmp_path))
+    # 两个模型 ai_score 完全相同（现实中的常态），只有 ai_ratio 有区别
+    for model_id, ratio in (("model-good", 0.05), ("model-bad", 0.80)):
+        storage.update_combination_performance(
+            SingleModelResult(
+                model_id, model_id, "p", "文本", 100, 1,
+                fidelity_similarity=90, improvement=10, ai_ratio=ratio,
+            ),
+            "玄幻", "p1", "提示词", sample_hash="s1",
+        )
+
+    records = storage.load_combination_performance("玄幻")["p1"]
+    good, bad = records["model-good"], records["model-bad"]
+    assert good.avg_ai_score == bad.avg_ai_score == 100
+    assert good.composite_score < bad.composite_score
+
+
+def test_missing_ai_ratio_counts_as_worst(tmp_path):
+    """检测未返回 ai_ratio 时按最差 1.0 计，避免检测异常被当成「降得很干净」而占便宜。"""
+    storage = ModelConfigStorage(str(tmp_path))
+    storage.update_combination_performance(
+        SingleModelResult("m1", "M1", "p", "文本", 100, 1,
+                          fidelity_similarity=90, improvement=10, ai_ratio=None),
+        "玄幻", "p1", "提示词", sample_hash="s1",
+    )
+    record = storage.load_combination_performance("玄幻")["p1"]["m1"]
+    assert record.avg_ai_ratio == pytest.approx(1.0)
 
 
 def test_old_evaluation_policy_is_not_used_for_production_routing(tmp_path):
     storage = ModelConfigStorage(str(tmp_path))
     result = SingleModelResult(
-        "qwen3.7-plus", "Qwen", "alibaba", "文本", 10, 1,
+        "qwen-plus", "Qwen", "alibaba", "文本", 10, 1,
         fidelity_similarity=90, improvement=50,
     )
     for index in range(3):
@@ -536,7 +660,7 @@ def test_old_evaluation_policy_is_not_used_for_production_routing(tmp_path):
             result, "玄幻", "p1", "提示词", sample_hash=f"s{index}"
         )
     records = storage.load_combination_performance("玄幻")
-    records["p1"]["qwen3.7-plus"].evaluation_policy_version = "legacy-v1"
+    records["p1"]["qwen-plus"].evaluation_policy_version = "legacy-v1"
     storage.save_combination_performance(records, "玄幻")
 
     assert storage.get_best_model_for_prompt_version("玄幻", "p1") is None
@@ -544,8 +668,8 @@ def test_old_evaluation_policy_is_not_used_for_production_routing(tmp_path):
 
 # 模型池共 9 个；以下测试验证淘汰后至少保留 MIN_ALIVE_MODELS=4 个存活模型
 _POOL = [
-    "qwen3.7-plus", "deepseek-v4-flash", "doubao-seed-character", "kimi/kimi-k2.6",
-    "glm-5.2", "MiniMax/MiniMax-M3", "mimo-v2.5", "doubao-seed-evolving", "step-3.7-flash",
+    "qwen-plus", "deepseek-flash", "doubao-seed-character", "kimi-preview",
+    "glm", "minimax-m", "mimo-flash", "doubao-seed-evolving", "step-preview",
 ]
 
 
@@ -555,14 +679,14 @@ def test_elimination_keeps_at_least_six_alive_models(tmp_path):
     storage.save_config({"eliminated_models": {"玄幻": _POOL[1:3]}})
     storage.save_performance(
         {
-            "qwen3.7-plus": _mature_record("qwen3.7-plus", 10),
-            "mimo-v2.5": _mature_record("mimo-v2.5", 50),
-            "step-3.7-flash": _mature_record("step-3.7-flash", 60),
+            "qwen-plus": _mature_record("qwen-plus", 10),
+            "mimo-flash": _mature_record("mimo-flash", 50),
+            "step-preview": _mature_record("step-preview", 60),
         },
         "玄幻",
     )
 
-    assert storage.evaluate_elimination("玄幻") == ["step-3.7-flash"]
+    assert storage.evaluate_elimination("玄幻") == ["step-preview"]
     assert len(storage.get_active_models("玄幻")) == 6
 
 
@@ -572,8 +696,8 @@ def test_elimination_blocked_when_alive_already_at_floor(tmp_path):
     storage.save_config({"eliminated_models": {"玄幻": _POOL[1:6]}})
     storage.save_performance(
         {
-            "qwen3.7-plus": _mature_record("qwen3.7-plus", 10),
-            "step-3.7-flash": _mature_record("step-3.7-flash", 60),
+            "qwen-plus": _mature_record("qwen-plus", 10),
+            "step-preview": _mature_record("step-preview", 60),
         },
         "玄幻",
     )
@@ -593,12 +717,12 @@ def test_availability_circuit_breaker_respects_alive_floor(tmp_path):
     floor_storage = ModelConfigStorage(str(tmp_path / "floor"))
     floor_storage.save_config({"eliminated_models": {"玄幻": _POOL[1:6]}})
     for _ in range(3):
-        floor_storage.update_availability_status(_failed_result("qwen3.7-plus"), "玄幻")
-    assert "qwen3.7-plus" not in floor_storage.get_eliminated_models("玄幻")
+        floor_storage.update_availability_status(_failed_result("qwen-plus"), "玄幻")
+    assert "qwen-plus" not in floor_storage.get_eliminated_models("玄幻")
 
     # 存活 7 个（高于地板 6）时熔断照常生效
     ok_storage = ModelConfigStorage(str(tmp_path / "ok"))
     ok_storage.save_config({"eliminated_models": {"玄幻": _POOL[1:3]}})
     for _ in range(3):
-        ok_storage.update_availability_status(_failed_result("qwen3.7-plus"), "玄幻")
-    assert "qwen3.7-plus" in ok_storage.get_eliminated_models("玄幻")
+        ok_storage.update_availability_status(_failed_result("qwen-plus"), "玄幻")
+    assert "qwen-plus" in ok_storage.get_eliminated_models("玄幻")

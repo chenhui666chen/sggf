@@ -73,7 +73,7 @@ def test_template_renderer_prioritizes_narration_rhythm_before_character_context
             },
         },
         emotion="neutral",
-        model="qwen3-tts-instruct-flash",
+        model="qwen-audio-3.1-tts-flash",
     )
 
     joined = "；".join(parts)
@@ -82,8 +82,8 @@ def test_template_renderer_prioritizes_narration_rhythm_before_character_context
     assert "说话角色：" not in joined
     assert joined.index("音色约束：") < joined.index("旁白模板：")
     assert joined.index("韵律控制：") < joined.index("停顿策略：句尾留白")
-    assert joined.index("停顿策略：句尾留白") < joined.index("情绪目标：fearful")
-    assert joined.index("情绪目标：fearful") < joined.index("角色设定：全知叙述者")
+    assert joined.index("停顿策略：句尾留白") < joined.index("情绪目标：tense")
+    assert joined.index("情绪目标：tense") < joined.index("角色设定：全知叙述者")
 
 
 def test_cosyvoice_prompt_parts_prioritize_short_performance_cues() -> None:
@@ -135,7 +135,7 @@ def test_stepaudio_prompt_parts_prioritize_global_performance_cues_before_long_c
             },
         },
         emotion="neutral",
-        model="stepaudio-2.5-tts",
+        model="stepaudio-3-tts",
     )
 
     joined = "；".join(parts)
@@ -163,9 +163,9 @@ def test_fixed_voice_prompt_parts_filter_unqualified_hoarseness_and_voice_profil
     }
 
     for model in (
-        "qwen3-tts-instruct-flash",
+        "qwen-audio-3.1-tts-flash",
         "seed-tts-2.0-expressive",
-        "stepaudio-2.5-tts",
+        "stepaudio-3-tts",
         "cosyvoice-v3.5-plus",
     ):
         parts = build_common_prompt_parts(voice_params, model=model)
@@ -214,9 +214,9 @@ def test_fixed_voice_prompt_parts_allow_temporary_hoarseness_only_on_original_vo
     }
 
     for model in (
-        "qwen3-tts-instruct-flash",
+        "qwen-audio-3.1-tts-flash",
         "seed-tts-2.0-expressive",
-        "stepaudio-2.5-tts",
+        "stepaudio-3-tts",
         "cosyvoice-v3.5-plus",
     ):
         parts = build_common_prompt_parts(voice_params, model=model)

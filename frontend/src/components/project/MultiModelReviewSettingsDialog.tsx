@@ -53,7 +53,7 @@ const DEFAULT_CONFIG: MultiModelReviewConfig = {
   manual_depth: 'balanced_3',
   key_chapter_depth: 'key_chapter_5',
   auto_strategy: DEFAULT_AUTO_STRATEGY,
-  chief_model: 'deepseek-v4-pro',
+  chief_model: 'deepseek-pro',
   custom_panel: null,
 }
 

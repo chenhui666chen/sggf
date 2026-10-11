@@ -135,7 +135,7 @@ def test_enqueue_audiobook_task_prepares_task_runs_and_checkpoint_before_dispatc
             audiobook_project_id=context["audiobook_project"].id,
             chapter_ids=[context["chapter"].id],
             job_type="audio_from_scripts",
-            tts_model="qwen3-tts-instruct-flash",
+            tts_model="qwen-audio-3.1-tts-flash",
             output_format="mp3",
             narration_style="professional",
             narration_style_prompt=None,

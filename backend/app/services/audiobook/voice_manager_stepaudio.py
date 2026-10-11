@@ -1,4 +1,4 @@
-"""StepAudio 2.5 TTS voice manager."""
+"""StepAudio 3 TTS voice manager."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from .stepaudio_voice_assets import (
     StepAudioVoiceAssetError,
     merge_stepaudio_voice_asset_tts_params,
 )
-from .tts_model_ids import STEPAUDIO_25_TTS_MODEL, normalize_audiobook_tts_model
+from .tts_model_ids import STEPAUDIO_3_TTS_MODEL, normalize_audiobook_tts_model
 from .voice_catalog import load_voice_catalog_for_model
 from .voice_manager import VoiceManager, VoiceProfile
 
@@ -33,7 +33,7 @@ class StepAudioVoiceManager(VoiceManager):
 
     DEFAULT_NARRATOR_VOICE_ID = "cixingnansheng"
 
-    def __init__(self, model: str = STEPAUDIO_25_TTS_MODEL):
+    def __init__(self, model: str = STEPAUDIO_3_TTS_MODEL):
         super().__init__()
         self.model = normalize_audiobook_tts_model(model)
         self.voice_catalog: Dict[str, Any] = {"voices": [], "voices_by_id": {}}

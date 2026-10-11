@@ -1,0 +1,181 @@
+{
+  "_type": "manifest",
+  "schema_version": "1.0",
+  "guide_version": "v1.5",
+  "generated_at": "2026-10-07T18:17:47+08:00",
+  "source": {
+    "file": "AI_Director_OS_V5_Agent_Training_R6_11_MASTER_CONTENT_INTEGRITY_CHECK.json",
+    "path": "ai_director_os\\AI_Director_OS_V5_Agent_Training_R6_11_MASTER_CONTENT_INTEGRITY_CHECK.json",
+    "version": "AI Director OS V5.0",
+    "sha256": "a3a68f8d9d8bf4198964f4df75b598e99042b54312fa48a72e4422fa416f5613"
+  },
+  "counts": {
+    "director_cases": 37,
+    "failure_cases": 102,
+    "asset_generation_failures": 8,
+    "knowledge_units_total": 94,
+    "knowledge_units_with_content": 54,
+    "knowledge_units_pending_content": 40,
+    "am_modules": 17,
+    "model_router_families": 7,
+    "beat_families": 7,
+    "beat_routed_dc": 30,
+    "technique_dc_unrouted": 7,
+    "structured_triggers": 16
+  },
+  "retrieval_channels": {
+    "L1_failure_code_direct": "cases/failure_cases.json（按 CF id 直索；Phase 2.5 与 autoqc failure_type 建映射）",
+    "L2_structured_trigger": "cases/beat_family_routing.json（T2 分叉）+ cases/cf_triggers.json（T3 预检）",
+    "L3_semantic_fallback": "运行时由宿主 semantic_asset_index / 向量检索实现；索引字段定义见 orchestration.orchestrator_10_5.knowledge_dispatch_orchestration.l3_index_schema"
+  },
+  "content_policy": {
+    "rule": "content_status=pending_content 的单元不进检索池（未登记不进检索池）；本目录产物均为派生文件，禁止手改，改 SSOT 后重跑 split_director_knowledge.py",
+    "pending_units": [
+      "director_reasoning/shot_motivation",
+      "director_reasoning/audience_position",
+      "director_reasoning/information_control",
+      "director_reasoning/change_type",
+      "director_reasoning/delete_test",
+      "director_reasoning/rhythm_cycle_anchor",
+      "character/identity",
+      "character/visual_dna",
+      "character/wardrobe_dna",
+      "character/behavior_dna",
+      "character/performance_dna",
+      "character/voice_dna",
+      "character/state_timeline",
+      "character/performance_directing",
+      "character/voice_asset",
+      "character/character_state_consistency",
+      "continuity/screen_space",
+      "continuity/performance_state",
+      "continuity/prop_state",
+      "continuity/lighting_state",
+      "continuity/audio_state",
+      "continuity/causal_continuity",
+      "continuity/physical_world_model",
+      "continuity/scene_state_system",
+      "continuity/emotion_continuity",
+      "continuity/six_element_edit_framework",
+      "production/shot_specification",
+      "production/model_router",
+      "production/prompt_compiler",
+      "production/qc",
+      "production/repair_or_regenerate",
+      "production/prompt_engineering",
+      "production/previsualization_qc",
+      "production/action_cut_timing",
+      "production/time_segmented_prompt",
+      "production/prompt_translation",
+      "sound_design/emotion_first_music",
+      "sound_design/music_scene_matching",
+      "sound_design/sound_design_formula",
+      "sound_design/sfx_search_method"
+    ],
+    "priority_backfill": {
+      "shot_size_system": "Phase 2.3 五级景别系统（Contract 引擎核心）",
+      "technique_interference_check": "Phase 2.3 T3 预检·技巧干涉预算",
+      "camera_lighting_prompt_lexicon": "Phase 2.3 模型执行词典（高/中/低服从度）",
+      "cinematography_decision_library": "Phase 2.3 摄影决策库（DC-035/036 之外的总纲）",
+      "cut_technique_library": "Phase 2.3 切换技法库（切换选型）",
+      "transition_library": "Phase 2.3 转场库",
+      "dialogue_coverage": "Phase 2.2 对白镜头覆盖（剧本引擎）",
+      "resonance_design": "Phase 2.2 共鸣设计（剧本引擎）"
+    }
+  },
+  "governance": {
+    "note": "knowledge_units 新增单元均带 source_type/verification_status/trust_weight/depends_on；检索池使用方须按 trust_weight 排序、跳过 pending 之外仍需遵循时效检查（180 天/落后模型 2 版本降权 30%）"
+  },
+  "files": [
+    {
+      "path": "domains/director_reasoning.json",
+      "type": "domain",
+      "count": 10,
+      "sha256": "8401879175fe4ecf580364678cf391d4e9aef992d60ebb7c69fdf142438769b1"
+    },
+    {
+      "path": "domains/cinematography.json",
+      "type": "domain",
+      "count": 16,
+      "sha256": "cc08edc99d00819816b5197cba02d0e489f0035a0bad165a11ab612b168080b0"
+    },
+    {
+      "path": "domains/character.json",
+      "type": "domain",
+      "count": 12,
+      "sha256": "b8eac8b51bb9f26f96acc724f188e5b8b13fe166e22e89bed8d17567a7251a6f"
+    },
+    {
+      "path": "domains/continuity.json",
+      "type": "domain",
+      "count": 12,
+      "sha256": "6c67d7a6169b64a3341aceb740ef5f6788eaac03fe1203cf52d90dc70e11c4de"
+    },
+    {
+      "path": "domains/production.json",
+      "type": "domain",
+      "count": 25,
+      "sha256": "c2b3512c647b7f0367e3483bca70bf1b9f8cbafd24d98297fbe8af7346eeed63"
+    },
+    {
+      "path": "domains/image_generation.json",
+      "type": "domain",
+      "count": 15,
+      "sha256": "fd0e2e1627c347528bca17f7a89552f3c7e8812437c6b827d6d6d13f435f041b"
+    },
+    {
+      "path": "domains/sound_design.json",
+      "type": "domain",
+      "count": 4,
+      "sha256": "45697ab7d260ecbf55828c9cc0e11e568e73f600e8ea0fe2eea13628df6d91c6"
+    },
+    {
+      "path": "cases/director_cases.json",
+      "type": "director_cases",
+      "count": 37,
+      "sha256": "ac749f12f1940632a41ec5a950d6d6f4edf34165d7a83d18ff9a21c26edc63b7"
+    },
+    {
+      "path": "cases/failure_cases.json",
+      "type": "failure_cases",
+      "count": 102,
+      "sha256": "5edc6b243e5ff34e2f6b6e6eb6714b06829f3fae4bfd1945c6d25f8457b363d1"
+    },
+    {
+      "path": "cases/asset_generation_failures.json",
+      "type": "asset_generation_failures",
+      "count": 8,
+      "sha256": "718c12ea74d03e7b41e939ce175d03921c2e95dcb8628d0a7055bd8d5965d987"
+    },
+    {
+      "path": "cases/beat_family_routing.json",
+      "type": "beat_family_routing",
+      "count": 7,
+      "sha256": "084a4f3ec8ad88a43a0d662235dc178bd4474fbf183ef02978249fafee74c69f"
+    },
+    {
+      "path": "cases/cf_triggers.json",
+      "type": "cf_triggers",
+      "count": 16,
+      "sha256": "ea1f9a6f6a11866930657551eeddf884317a6341101023882e1afddf60ec3b5c"
+    },
+    {
+      "path": "modules/am_modules.json",
+      "type": "am_modules",
+      "count": 17,
+      "sha256": "be813413bb283459710da0f207961ac6e547cb3bf0cfdb971c9b50c0a5696ef4"
+    },
+    {
+      "path": "modules/model_router.json",
+      "type": "model_router",
+      "count": 7,
+      "sha256": "560fc39f082f9947ecafe6b2d121f4969a5bd0af797b3f91abad5aac35a62213"
+    },
+    {
+      "path": "orchestration.json",
+      "type": "orchestration",
+      "count": null,
+      "sha256": "7ba124db94e7e08ed5ae00b30154cdb00cd02059f5642857a24dfd23af758d2c"
+    }
+  ]
+}

@@ -42,6 +42,7 @@ from app.services.setting_consistency import SettingConsistencyService
 from app.services.workflow_context_builder import WorkflowContextBuilder
 from app.api.v1.settings_api._helpers import (
     _build_item_structure,
+    _cascade_descendant_paths,
     _collect_descendants,
     _delete_setting_vectors,
     _ensure_project_owned,

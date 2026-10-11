@@ -7,14 +7,14 @@ from typing import Any
 
 from app.services.audiobook.tts_delivery_plan import build_delivery_plan
 from app.services.audiobook.tts_model_ids import (
-    DEFAULT_AUDIOBOOK_TTS_MODEL,
     MINIMAX_SPEECH_28_HD_MODEL,
     MINIMAX_SPEECH_28_TURBO_MODEL,
     MIMO_V25_TTS_MODEL,
     MIMO_V25_TTS_VOICE_CLONE_MODEL,
     MIMO_V25_TTS_VOICE_DESIGN_MODEL,
+    QWEN_AUDIO_31_TTS_FLASH_MODEL,
     SEED_TTS_20_EXPRESSIVE_MODEL,
-    STEPAUDIO_25_TTS_MODEL,
+    STEPAUDIO_3_TTS_MODEL,
     get_audiobook_tts_model_metadata,
     list_supported_audiobook_tts_models,
     normalize_audiobook_tts_model,
@@ -28,8 +28,10 @@ from app.services.audiobook.tts_style_control import (
 
 _COMMON_TEXT = "盒盖打开的一瞬间，所有人的呼吸都停住了。里面没有钥匙，只有一枚新鲜的指纹。"
 
+# 注意：DEFAULT_AUDIOBOOK_TTS_MODEL 当前就是 QWEN_AUDIO_31_TTS_FLASH_MODEL，
+# 两者若同时作为键会被 Python 字面量静默覆盖（后写赢），因此默认模型的用例并入同一条目。
 _MODEL_TEST_CASES: dict[str, list[dict[str, Any]]] = {
-    DEFAULT_AUDIOBOOK_TTS_MODEL: [
+    QWEN_AUDIO_31_TTS_FLASH_MODEL: [
         {
             "id": "emotion_pause_stress",
             "name": "情绪、停顿与重读",
@@ -38,6 +40,23 @@ _MODEL_TEST_CASES: dict[str, list[dict[str, Any]]] = {
             "emotion": "surprised",
             "segment_type": "narration",
             "performance_notes": "先压住情绪，在“新鲜的指纹”前短暂停顿，结尾加重但不要喊。",
+            "delivery_plan": {
+                "delivery_mode": "narration",
+                "pace": "slow",
+                "intensity": "medium",
+                "pause_profile": "dramatic",
+                "pause_strategy": "在新鲜的指纹前短停，句尾留白",
+                "stress_words": ["新鲜的指纹"],
+            },
+        },
+        {
+            "id": "wide_instruction_budget",
+            "name": "宽预算自然语言指令",
+            "purpose": "验证 instruction 预算放宽后，情绪、停顿与重读能同时保留而不被截断。",
+            "text": _COMMON_TEXT,
+            "emotion": "surprised",
+            "segment_type": "narration",
+            "performance_notes": "先压住情绪，在“新鲜的指纹”前短暂停顿，结尾加重但不要喊；保留旁白的克制感。",
             "delivery_plan": {
                 "delivery_mode": "narration",
                 "pace": "slow",
@@ -155,7 +174,7 @@ _MODEL_TEST_CASES: dict[str, list[dict[str, Any]]] = {
             },
         }
     ],
-    STEPAUDIO_25_TTS_MODEL: [
+    STEPAUDIO_3_TTS_MODEL: [
         {
             "id": "global_and_inline_context",
             "name": "全局指令与文中提示",

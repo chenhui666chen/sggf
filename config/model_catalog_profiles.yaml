@@ -3,7 +3,7 @@
 # 用于补充模型的项目级 Prompt 模板、路由策略、部署接入与工具识别信息。
 
 profiles:
-  deepseek-v4-pro:
+  deepseek-pro:
     role_summary: 当前模型是项目的严谨推理与复审入口，主要承担逻辑审校、结构检查、世界观约束和高难度判断。
     system_role: 你是严谨的推理审校专家，优先处理复杂规则、结构一致性、逻辑漏洞和多约束决策。
     prompt_patterns:
@@ -18,11 +18,11 @@ profiles:
       - title: 编程工具识别模板
         template: |
           当任务包含 review / quality_review / structure_plot / reasoning 时，
-          优先识别为 deepseek-v4-pro。
+          优先识别为 deepseek-pro。
           注意：当前项目不会向该模型开放 temperature、timeout 和 max_retries 参数。
     router_rules:
       - when: 检测到复杂逻辑审校、世界观约束、人物动机复核或质量复审
-        action: 优先路由到 deepseek-v4-pro
+        action: 优先路由到 deepseek-pro
         reason: 该模型在项目中承担"第二判断层"和高强度复审职责。
     best_practice_tips:
       - 更适合审校与判断，不适合高频流式互动。
@@ -102,8 +102,8 @@ profiles:
       - 朗读方向分析
       - 高性价比
 
-  wan2.6-t2i:
-    role_summary: 当前模型是项目默认的高质量图像生成入口，适合概念图、角色探索和封面草稿。
+  qwen-image-3.0:
+    role_summary: 当前模型是项目 Asset Studio 图像生成的默认入口，千问图像 3.0 标准版，同时支持文生图与图生图。
     prompt_patterns:
       - title: 图像生成模板
         template: |
@@ -111,124 +111,228 @@ profiles:
       - title: 分镜概念图模板
         template: |
           镜头景别 + 角色动作 + 环境氛围 + 画面风格 + 不要出现的元素
+      - title: 图内文字排版模板
+        template: |
+          版面结构 + 逐块文字内容与字号 + 字体风格 + 语言 + 配色 + 禁止项
+      - title: 参考图驱动模板
+        template: |
+          image 参考图（最多 3 张，按顺序）+ 保留要素 + 修改要素 + 目标风格
     router_rules:
-      - when: 检测到高质量文生图、概念图或角色视觉探索
-        action: 优先路由到 wan2.6-t2i
-        reason: 它是项目当前默认高质量图像模型。
+      - when: 检测到日常图像生成、含文字的海报/网页/信息图、或批量出图
+        action: 优先路由到 qwen-image-3.0
+        reason: 它是 Asset Studio 图像生成的默认模型，指令理解与文字渲染是整条图像线的基础档。
     best_practice_tips:
-      - 适合搭配负向提示词约束杂乱元素。
-      - 涉及角色一致性时建议同时提供参考图。
+      - negative_prompt 仅 qwen-image-3.0 系列支持，是本项目唯一能真正用反向提示词的图像线。
+      - prompt_extend 默认开启；prompt_extend_mode=agent 改写更精细但仅文生图可用，图生图传入会 400。
+      - enable_thinking 仅在 prompt_extend=true 时生效，开启提升质量但增加耗时。
+      - 不指定 size 时模型按提示词自动推荐分辨率；显式指定时像素面积须在 512x512 至 2048x2048 之间。
+      - 限流 20 QPM（官方 2 次/6 秒），批量链路必须自行排队。
+      - 图生图最多 3 张参考图，按数组顺序定义图像顺序；输出固定 png。
     tooling_badges:
-      - 高质量文生图
-      - 短剧素材
+      - 默认图像生成
+      - 多语言文字渲染
+      - 图生图
     project_entrypoints:
       - label: 图像生成入口
-        value: media_runtime.generate_image(model_id="wan2.6-t2i", ...)
+        value: media_runtime.generate_image(model_id="qwen-image-3.0", ...)
+      - label: Asset Studio 默认图像模型常量
+        value: backend/app/services/asset_studio_model_catalog.py → _DEFAULT_MODEL_IDS["asset_studio_image_generation"]
 
-  wan2.7-t2v:
-    role_summary: 当前模型是主力视频生成入口，适合短片段镜头、预告视频和受控叙事镜头生成。
+  qwen-image-3.0-pro:
+    role_summary: 当前模型是项目 DreamWeaver 图像的默认入口，千问图像 3.0 旗舰版，专攻复杂版面、高保真细节与多语言小字渲染。
     prompt_patterns:
-      - title: 镜头脚本模板
+      - title: 分镜关键帧模板
+        template: |
+          镜头景别 + 角色外观与服装 + 动作与表情 + 环境氛围 + 光影 + 画面风格 + 禁止项
+      - title: 密集图文版面模板
+        template: |
+          版面分区 + 每区文字内容/字号/字体 + 图中图嵌套结构 + 配色 + 语言 + 禁止项
+      - title: 高保真人像模板
+        template: |
+          人物特征 + 微表情 + 肤质与发丝细节 + 镜头与焦段 + 光线方向 + 参考图
+    router_rules:
+      - when: 检测到 DreamWeaver 关键帧/中帧生成，或需要密集文字排版、图中图、人像级质感
+        action: 优先路由到 qwen-image-3.0-pro
+        reason: 它是 DreamWeaver 图像的默认模型，也是整条图像线里细节与版面能力最强的一档。
+      - when: 成本敏感或需要高并发批量出图
+        action: 改用 qwen-image-3.0
+        reason: 标准版 0.20 元/张且 20 QPM，Pro 仅 5 QPM，是整条线最紧的限流。
+    best_practice_tips:
+      - 限流仅 5 QPM，批量链路必须串行排队，不要与标准版共用并发池。
+      - 2K 档单价 0.52 元/张，接近 1K 档（0.27）的两倍，成本敏感时显式指定 1K。
+      - 密集图文（报纸分镜、菜单、试卷、界面仿真）优先用 Pro 而非标准版。
+      - 同步调用延迟仍大于 1 秒，不适合毫秒级实时预览。
+    tooling_badges:
+      - DreamWeaver 主力
+      - 密集版面
+      - 高保真细节
+    project_entrypoints:
+      - label: DreamWeaver 图像默认模型常量
+        value: backend/app/services/asset_studio_model_catalog.py → _DEFAULT_MODEL_IDS["dreamweaver_image"]
+      - label: 图像生成入口
+        value: media_runtime.generate_image(model_id="qwen-image-3.0-pro", ...)
+
+  wan2.7-image-pro:
+    role_summary: 万相 2.7 image 专业版，旗舰级同步图像模型，支持 4K 文生图、9 图参考编辑、交互式框选与组图输出。
+    prompt_patterns:
+      - title: 高规格文生图模板
+        template: |
+          主体 + 场景 + 构图 + 光影 + 风格 + 质感 + 目标分辨率档位
+      - title: 多参考一致性模板
+        template: |
+          image 参考图（最多 9 张，按顺序）+ 角色/风格约束 + 保留要素 + 修改要素
+      - title: 框选局部编辑模板
+        template: |
+          image 参考图 + bbox_list 框选坐标 + 框内编辑指令 + 框外保留约束
+      - title: 组图输出模板
+        template: |
+          enable_sequential=true + 组图主题 + 每张画面的分镜描述 + 统一风格约束
+    router_rules:
+      - when: 检测到需要 4K 输出、9 图参考一致性、框选局部编辑或组图批量输出
+        action: 优先路由到 wan2.7-image-pro
+        reason: 这些能力只有万相专业版具备，qwen-image-3.0 系列最多 3 张参考图且无框选与组图。
+      - when: 预算敏感的批量生成
+        action: 改用 qwen-image-3.0
+        reason: 本模型 0.5 元/张，是 qwen-image-3.0（0.20 元/张）的 2.5 倍。
+    best_practice_tips:
+      - size 有两种写法且不可混用：档位串 1K/2K/4K（推荐，适配器默认 2K），或宽高像素值。
+      - 4K 仅文生图（无图片输入且非组图）支持；图像编辑与组图生成最高 2K。
+      - 本模型没有 negative_prompt，官方参数表不含该字段；需要反向约束时改用 qwen-image-3.0 系列。
+      - thinking_mode 仅在关闭组图模式且无图片输入时生效。
+      - color_palette 需 3-10 种颜色（推荐 8 种），且仅 enable_sequential=false 时可用。
+      - bbox_list 长度必须与输入图片数一致，无需编辑的图传空列表，单张最多 2 个框。
+      - 提示词上限 5000 字符（非 Token），超长部分会被上游自动截断。
+      - 限流 5 RPS（300 QPM），是整条图像线里最宽松的一档。
+    tooling_badges:
+      - 4K 文生图
+      - 9 图参考
+      - 框选编辑
+      - 组图输出
+    project_entrypoints:
+      - label: 图像生成入口
+        value: media_runtime.generate_image(model_id="wan2.7-image-pro", size="2K", ...)
+      - label: 框选编辑入口
+        value: media_runtime.generate_image(model_id="wan2.7-image-pro", image_path=<url>, bbox_list=[...], ...)
+
+
+
+
+
+  wan3.0-video:
+    role_summary: 当前模型是项目唯一的视频生成主力入口（all-in-one），文生视频、图生视频、多参考图一致性、视频编辑与视频延长共用同一个模型 ID。
+    prompt_patterns:
+      - title: 文生视频模板
         template: |
           主体 + 动作 + 镜头运动 + 场景 + 时长 + 画面风格 + 禁止项
+      - title: 图生视频模板（首帧驱动）
+        template: |
+          first_frame 参考图 + 主体动作 + 镜头运动 + 场景延续 + 时长 + 画面风格 + 禁止项
+      - title: 多参考一致性模板
+        template: |
+          reference_image 组（最多 10 张）+ 角色/风格约束 + 主体动作 + 镜头景别 + 连续性约束
+      - title: 视频编辑与延长模板
+        template: |
+          reference_video 源视频 + 编辑指令 / video_extend=true + 目标风格 + 保留区域 + 修改区域
+      - title: 文档或网页驱动模板
+        template: |
+          file 或 link（二选一）+ 视频主题 + 叙事结构要求 + 画面风格 + 时长
     router_rules:
-      - when: 检测到高质量短视频生成、镜头生成或叙事短片任务
-        action: 优先路由到 wan2.7-t2v
-        reason: 它是项目当前的视频主力模型。
-      - when: 主链路超时或只需要快速预览
-        action: 回退到 wan2.6-t2v-fast
-        reason: 当前项目已经为它配置了速度优先的降级位。
+      - when: 检测到任何视频生成、图生视频、多参考视频、视频编辑或视频延长任务
+        action: 优先路由到 wan3.0-video
+        reason: 它是项目当前唯一的视频主力模型，all-in-one 覆盖文生/图生/参考生/编辑/延长全部场景。
     best_practice_tips:
-      - 生产环境建议默认 5 秒片段，稳定性更高。
-      - 对角色镜头建议补充参考图。
+      - 素材按「图1/视频1/音频1」顺序编号，first_frame/last_frame 与 reference_image/reference_video/reference_audio/file/link 互斥，不能同时传入。
+      - 传入 file 或 link 时适配器会强制 prompt_extend=true，官方要求如此，不要手动关闭。
+      - video_extend（视频延长）必须搭配 reference_video，且适配器会强制 ratio=adaptive。
+      - 参考素材上限：图片 10 张、视频 5 段、音频 5 段、file 与 link 各 1 个且二选一。
+      - 分辨率 480P / 720P / 1080P，默认 720P（0.6 元/秒）；1080P 单价翻倍到 1.2 元/秒，批量出片前先确认档位。
+      - 时长为 [2, 30] 整数秒，默认 5 秒；传 -1 表示由模型智能决定时长。
+      - audio_output 默认 false，产出为静音视频；只有在 DREAMWEAVER_SFX_SOURCE=model/video 时才置 true，避免与 DreamWeaver 自有对白轨与音效轨冲突。
     tooling_badges:
       - 主力视频
-      - 镜头生成
+      - 全能参考
+      - 视频延长
+      - 文档驱动
     project_entrypoints:
-      - label: 视频生成入口
-        value: media_runtime.generate_video(model_id="wan2.7-t2v", duration=5.0, ...)
+      - label: 视频生成入口（文生视频）
+        value: media_runtime.generate_video(model_id="wan3.0-video", duration=5, resolution="720P", ...)
+      - label: 图生视频入口（首帧驱动）
+        value: media_runtime.generate_video(model_id="wan3.0-video", first_frame=<url>, duration=5, ...)
+      - label: 多参考一致性入口
+        value: media_runtime.generate_video(model_id="wan3.0-video", reference_images=[...], duration=5, ...)
+      - label: 视频编辑 / 延长入口
+        value: media_runtime.generate_video(model_id="wan3.0-video", reference_videos=[<url>], video_extend=True, ...)
+      - label: DreamWeaver 实际调用模型常量
+        value: pipeline.media_presets.DREAMWEAVER_WAN_MODEL_ID
 
-  wan2.7-i2v:
-    role_summary: 当前模型是图生视频主力入口，适合基于参考图生成角色动作、场景过渡和主体一致性视频。
+  doubao-seedance-2-5:
+    role_summary: 全模态参考视频生成的旗舰入口，长叙事、基于时间戳的视频编辑与多轮延长，单次最长 30 秒、参考素材最多 50 个，并且是项目里唯一支持样片（draft）两段式出片的模型。
     prompt_patterns:
-      - title: 图生视频模板
+      - title: 文生视频模板
         template: |
-          参考图 + 主体动作 + 镜头运动 + 场景延续 + 时长 + 画面风格 + 禁止项
-      - title: 角色动作模板
+          主体 + 动作 + 镜头运动 + 场景 + 时长 + 画面风格 + 禁止项
+      - title: 全模态参考模板
         template: |
-          角色参考图 + 动作描述 + 表情变化 + 镜头景别 + 连续性约束
-    router_rules:
-      - when: 检测到基于参考图的视频生成、角色动作视频或场景过渡任务
-        action: 优先路由到 wan2.7-i2v
-        reason: 它是项目当前的图生视频主力模型，首帧一致性最高。
-    best_practice_tips:
-      - 首帧参考图是角色与场景基准，保持人物身份、服装、发型一致。
-      - 生产环境建议默认 5 秒片段，稳定性更高。
-    tooling_badges:
-      - 图生视频
-      - 角色动作
-      - 首帧一致
-    project_entrypoints:
-      - label: 图生视频入口
-        value: media_runtime.generate_video(model_id="wan2.7-i2v", duration=5.0, ...)
-
-  wan2.7-r2v:
-    role_summary: 当前模型是参考图视频生成入口，适合基于多参考图生成风格一致的视频片段。
-    prompt_patterns:
-      - title: 参考图视频模板
-        template: |
-          参考图组 + 风格约束 + 主体描述 + 镜头运动 + 时长 + 禁止项
-    router_rules:
-      - when: 检测到多参考图视频生成、风格迁移视频或参考一致性视频任务
-        action: 优先路由到 wan2.7-r2v
-        reason: 它是项目当前的参考图视频模型，支持多参考图输入。
-    best_practice_tips:
-      - 建议提供 1-4 张参考图以增强风格和主体一致性。
-      - 生产环境建议默认 5 秒片段，稳定性更高。
-    tooling_badges:
-      - 参考图视频
-      - 风格迁移
-      - 多参考图
-    project_entrypoints:
-      - label: 参考图视频入口
-        value: media_runtime.generate_video(model_id="wan2.7-r2v", duration=5.0, ...)
-
-  wan2.7-videoedit:
-    role_summary: 当前模型是视频编辑入口，适合对已有视频进行风格修改、内容调整和局部重绘。
-    prompt_patterns:
+          @图像N / @视频N / @音频N 指代素材 + 素材用途说明（构图/运镜/角色/节奏）+ 主体动作 + 成片风格
       - title: 视频编辑模板
         template: |
-          源视频 + 编辑指令 + 目标风格 + 保留区域 + 修改区域 + 禁止项
-      - title: 风格修改模板
+          @video1 + 编辑指令（替换/增删/局部重绘，可带时间戳）+ 需要保留的区域
+      - title: 视频延长模板
         template: |
-          源视频 + 目标风格描述 + 风格强度 + 主体保留约束
+          向后延长 @video1（或续写 @video1 前 5s）+ 新增主体与镜头要求
+      - title: 样片两段式模板
+        template: |
+          Step1 draft=true 出 480p 样片 → 人工确认 → Step2 draft_task=<样片任务ID> 出 1080p 成片
     router_rules:
-      - when: 检测到视频风格修改、内容调整或局部重绘任务
-        action: 优先路由到 wan2.7-videoedit
-        reason: 它是项目当前的视频编辑模型，支持视频到视频的编辑操作。
+      - when: 需要一次参考大量图片/视频/音频，或要做视频编辑、多轮延长
+        action: 路由到 doubao-seedance-2-5
+        reason: 参考上限 50 个、支持时间戳编辑与延长，是项目里能力最全的视频模型。
+      - when: 高价值镜头希望先低价试片再出成片
+        action: 用 doubao-seedance-2-5 的 draft 模式分两步生成
+        reason: 样片按 480p 计费，正式片按 1080p 计费，两步独立计费可显著降低废片成本。
+      - when: 需要 4k 输出
+        action: 改用 doubao-seedance-2-0
+        reason: 4k 属于 Seedance 2.0 系列，2.5 请求 4k 会被上游同步拒绝。
     best_practice_tips:
-      - 编辑指令需要明确具体，避免模糊描述导致不可控修改。
-      - 建议指定保留区域以保护不需要修改的内容。
+      - 时长取值 4-30 秒（或 -1 智能时长），短于 4 秒会被上游拒绝；项目档位为 4/5/10/15/20/30。
+      - 分辨率仅 480p / 720p / 1080p（1080p 为 10bit），默认 720p；4k 请用 Seedance 2.0。
+      - 首帧/首尾帧、视频编辑、视频延长任务的 ratio 必须为 adaptive，适配器会自动改写。
+      - 视频编辑额外要求 duration=-1 且参考视频时长 4-30 秒；适配器在 edit 分支强制改写。
+      - omni_reference_task_type 只能伴随 reference_* 素材传入，文生/首帧场景传入会同步报错。
+      - 样片 Step2 只接受 model / draft_task / resolution=1080p，其余参数由上游自动复用；Draft 任务 ID 有效期 7 天。
+      - 计费按 token：(输入视频时长 + 输出视频时长) × 宽 × 高 × 帧率 / 1024，含输入视频时单价更低。
     tooling_badges:
-      - 视频编辑
-      - 风格修改
-      - 局部重绘
+      - 全模态参考
+      - 时间戳编辑
+      - 多轮延长
+      - 样片模式
     project_entrypoints:
-      - label: 视频编辑入口
-        value: media_runtime.generate_video(model_id="wan2.7-videoedit", duration=5.0, ...)
+      - label: 文生视频入口
+        value: media_runtime.generate_video(model_id="doubao-seedance-2-5", duration=5, resolution="720p", ...)
+      - label: 全模态参考入口
+        value: media_runtime.generate_video(model_id="doubao-seedance-2-5", reference_images=[...], reference_videos=[...], omni_reference_task_type="reference", ...)
+      - label: 视频编辑 / 延长入口
+        value: media_runtime.generate_video(model_id="doubao-seedance-2-5", reference_videos=[<url>], video_edit=True 或 video_extend=True, ...)
+      - label: 样片两步入口
+        value: adapters.volcengine.video.generate(prompt, draft=True) 取 task_id 后再 generate(draft_task=<id>)
 
-  qwen3-tts-instruct-flash:
-    role_summary: 当前模型是项目默认 TTS，适合大规模章节朗读、标准旁白以及需要自然语言 instructions 的低成本语音合成。
+
+
+
+
+  qwen-audio-3.1-tts-flash:
+    role_summary: 当前模型是项目默认 TTS，适合大规模章节朗读、标准旁白以及需要自然语言 instruction 的低成本语音合成。
     prompt_patterns:
       - title: 标准朗读模板
         template: |
-          文本内容 + 音色 / speaker + instructions + 语速 + 停顿要求 + 是否返回时间戳
+          文本内容 + 音色 / voice + instruction + 语速 + 停顿要求 + 是否返回时间戳
     router_rules:
       - when: 检测到标准有声书朗读、批量章节合成或成本敏感语音任务
-        action: 优先路由到 qwen3-tts-instruct-flash
+        action: 优先路由到 qwen-audio-3.1-tts-flash
         reason: 它是项目当前默认有声书 TTS。
     best_practice_tips:
-      - 适合批量合成、标准旁白以及用自然语言 instructions 描述情绪/场景的场景。
+      - 适合批量合成、标准旁白以及用自然语言 instruction 描述情绪/场景的场景。
+      - 音色 ID 一律带 _v3.1 后缀，与旧 Qwen-TTS 音色不互通，换模型必须同时换音色。
       - 如需更强表现力，可升级到 cosyvoice-v3.5-plus，但需要先创建复刻/设计音色。
     tooling_badges:
       - 默认 TTS
@@ -284,44 +388,3 @@ profiles:
       - label: 后端服务入口
         value: app.services.audiobook.ai_music.create_music_generator()
     local_deployment_note: 当前项目通过 Mureka 官方托管接口生成纯音乐，并在后端落盘到资产输出目录；如果未来要做统一运行时封装，建议抽出独立的 generate_audio 能力，而不是继续塞进 TTS 入口。
-
-
-  vidu-timing2audio:
-    role_summary: 可控文生音效模型，支持通过时间轴控制多个音效事件，适合视频音效和有声小说音效生成。
-    system_role: 你是音效时序设计助手，负责根据场景需求规划多个音效事件的时间轴和提示词。
-    prompt_patterns:
-      - title: 单事件音效模板
-        template: |
-          时间区间：[from, to]
-          事件描述：{音效类型}+{场景环境}+{细节特征}
-      - title: 多事件合成模板
-        template: |
-          事件 1: [0.0-3.0 秒] {第一个音效事件}
-          事件 2: [3.0-6.0 秒] {第二个音效事件}
-          事件 3: [5.0-9.5 秒] {第三个音效事件，可与事件 2 重叠}
-    router_rules:
-      - when: 检测到资产工作台的音效生成任务（generation_type=sound-effect）
-        action: 优先路由到 vidu-timing2audio
-        reason: 它支持时序控制，适合视频音效和有声小说音效。
-      - when: 检测到需要多个音效事件合成
-        action: 使用 vidu-timing2audio 的 timing_prompts 功能
-        reason: 支持多个事件重叠，可以创造丰富的音效层次。
-    best_practice_tips:
-      - 每个事件的时间区间要清晰，from 和 to 必须在 [0, duration] 范围内。
-      - 支持事件重叠，可以创建复杂的音效层次。
-      - 提示词要具体描述音效特征和空间位置。
-      - 时长建议 10 秒左右，适合大多数音效场景。
-      - 不支持背景音乐 BGM，请使用 Mureka 生成 BGM。
-    tooling_badges:
-      - 资产音效
-      - 文生音频
-      - 时序控制
-      - 多事件合成
-    project_entrypoints:
-      - label: 资产工作台音效入口
-        value: POST /api/v1/asset-studio/audio (generation_type=sound-effect, model_id="vidu-timing2audio")
-      - label: 后端服务入口
-        value: app.services.audiobook.vidu_timing2audio_generator.ViduTiming2AudioGenerator()
-    local_deployment_note: 当前项目通过 Vidu 官方托管接口生成可控时序音效，支持多个音效事件合成；如果未来需要统一运行时封装，建议抽出独立的 generate_audio 能力。
-
-

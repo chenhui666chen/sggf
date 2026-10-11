@@ -9,7 +9,6 @@ import mimetypes
 import re
 import shutil
 import uuid
-from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
@@ -36,7 +35,6 @@ from app.api.v1.asset_studio_api import router
 from app.api.v1.asset_studio_api._constants import *
 from app.api.v1.asset_studio_api._helpers import *
 from app.api.v1.asset_studio_api._helpers import (
-    _allocate_output_path,
     _build_audio_response,
     _merge_points_billing_metadata,
     _materialize_output_reference,
@@ -44,6 +42,7 @@ from app.api.v1.asset_studio_api._helpers import (
     _raise_for_failed_result,
     _release_asset_studio_billing_safely,
     _reserve_asset_studio_billing,
+    _resolve_billed_audio_duration_seconds,
     _resolve_music_style,
     _save_binary_output,
     _settle_asset_studio_billing,
@@ -402,13 +401,17 @@ async def generate_audio_asset(
             raise
 
     resolved_duration = _validate_audio_duration("sound-effect", duration)
-    from app.services.audiobook.vidu_timing2audio_generator import ViduTiming2AudioGenerator
+
+    resolved_model_id = normalize_model_id(requested_model_id) or requested_model_id
+    if resolved_model_id not in SOUND_EFFECT_AUDIO_MODELS:
+        # 历史配置里可能仍写着已下线的旧音效模型 ID，统一收敛到当前音效默认模型。
+        resolved_model_id = DEFAULT_AUDIO_SOUND_EFFECT_MODEL_ID
 
     mode = "text_to_sound_effect"
     basis_yuan = estimate_asset_studio_basis_yuan(
         kind="audio",
         mode=mode,
-        model_id=requested_model_id,
+        model_id=resolved_model_id,
         duration_seconds=resolved_duration,
         prompt_chars=len(cleaned_prompt),
     )
@@ -420,125 +423,64 @@ async def generate_audio_asset(
             kind="audio",
             mode=mode,
             basis_yuan=basis_yuan,
-            model_id=requested_model_id,
+            model_id=resolved_model_id,
             request_path="/api/v1/asset-studio/audio",
-            summary="资产工作台音效生成已启动，积分已按音频时长冻结。",
+            summary="资产工作台音效生成已启动，积分按请求时长上限冻结。",
             extra_payload={
                 "generation_type": normalized_generation_type,
                 "duration_seconds": resolved_duration,
             },
         )
 
-        requested_vidu = requested_model_id == DEFAULT_AUDIO_SOUND_EFFECT_MODEL_ID
-        vidu_generator = ViduTiming2AudioGenerator() if requested_vidu else None
-        vidu_available = bool(vidu_generator and vidu_generator.api_key)
+        from adapters.registry import registry
 
-        if requested_vidu and vidu_available:
-            vidu_output_path = _allocate_output_path(subdir="audio/sound-effects", suffix=".mp3")
-            timing_prompts = [
-                {
-                    "from": 0.0,
-                    "to": float(resolved_duration),
-                    "prompt": cleaned_prompt
-                }
-            ]
-            vidu_result = await asyncio.to_thread(
-                vidu_generator.generate_and_download,
-                timing_prompts,
-                vidu_output_path,
-                float(resolved_duration),
-                "mp3",
-                120,
-            )
-            if vidu_result.success and vidu_result.local_file_path:
-                output_path = Path(vidu_result.local_file_path)
-                response = _build_audio_response(
-                    mode=mode,
-                    model_id=DEFAULT_AUDIO_SOUND_EFFECT_MODEL_ID,
-                    output_path=output_path,
-                    metadata=_merge_points_billing_metadata(
-                        {
-                            "requested_model_id": requested_model_id,
-                            "resolved_model_id": DEFAULT_AUDIO_SOUND_EFFECT_MODEL_ID,
-                            "generation_type": normalized_generation_type,
-                            "duration_seconds": resolved_duration,
-                            "fallback_used": False,
-                        },
-                        precheck,
-                    ),
-                )
-                _settle_asset_studio_billing(
-                    db=db,
-                    current_user=current_user,
-                    precheck=precheck,
-                    kind="audio",
-                    mode=mode,
-                    basis_yuan=basis_yuan,
-                    model_id=DEFAULT_AUDIO_SOUND_EFFECT_MODEL_ID,
-                    summary="资产工作台音效生成已完成，积分已结算。",
-                    extra_payload={
-                        "generation_type": normalized_generation_type,
-                        "duration_seconds": resolved_duration,
-                        "fallback_used": False,
-                    },
-                )
-                return response
-
-            fallback_reason = vidu_result.error or "Vidu 音效生成失败，已回退到 Mureka 环境音链路。"
-        elif requested_vidu:
-            fallback_reason = "当前未配置 Vidu API Key，已回退到 Mureka 环境音链路。"
-        else:
-            fallback_reason = "音效生成失败"
-
-        music_generator = create_music_generator(enable_cache=True)
-        fallback_prompt = f"短音效或环境音，干净利落，无人声，不过度旋律化：{cleaned_prompt}"
-        music_result = await music_generator.client.generate_music(
-            MusicGenerationRequest(
-                prompt=fallback_prompt,
-                style=MusicStyle.AMBIENT,
-                duration=resolved_duration,
-                tempo=normalized_tempo,
-                mood=normalized_mood,
-            )
+        adapter = registry.get_adapter(resolved_model_id)
+        result = await asyncio.to_thread(
+            adapter.generate,
+            prompt=cleaned_prompt,
+            references=None,
+            audio_config=dict(DEFAULT_AUDIO_CONFIG),
+            watermark={},
         )
-        if not music_result.success:
+        if not result.success or not result.outputs:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail=music_result.error_message or fallback_reason or "音效生成失败",
+                detail=result.error or "音效生成失败",
             )
+        output_path = await asyncio.to_thread(
+            _materialize_output_reference,
+            result.outputs[0],
+            kind="audio",
+            subdir="audio/sound-effects",
+        )
 
-        if music_result.audio_data:
-            output_path = _save_binary_output(music_result.audio_data, subdir="audio/sound-effects", suffix=".mp3")
-        elif music_result.audio_file_path:
-            source_path = PROJECT_ROOT / "backend" / "data" / "audio_library" / music_result.audio_file_path
-            if not source_path.exists():
-                raise HTTPException(
-                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                    detail="音效文件已生成，但本地结果文件不存在",
-                )
-            output_path = _copy_output_file(source_path, subdir="audio/sound-effects")
-        else:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="音效生成成功，但没有可返回的音频结果",
-            )
-
+        result_metadata = dict(result.metadata or {})
+        actual_duration_seconds = result_metadata.get("duration")
+        billed_duration_seconds = _resolve_billed_audio_duration_seconds(
+            requested_seconds=resolved_duration,
+            metadata=result_metadata,
+        )
+        settled_basis_yuan = estimate_asset_studio_basis_yuan(
+            kind="audio",
+            mode=mode,
+            model_id=resolved_model_id,
+            duration_seconds=billed_duration_seconds,
+            prompt_chars=len(cleaned_prompt),
+        )
         response = _build_audio_response(
             mode=mode,
-            model_id=DEFAULT_AUDIO_MUSIC_MODEL_ID,
+            model_id=resolved_model_id,
             output_path=output_path,
             metadata=_merge_points_billing_metadata(
                 {
                     "requested_model_id": requested_model_id,
-                    "resolved_model_id": DEFAULT_AUDIO_MUSIC_MODEL_ID,
+                    "resolved_model_id": resolved_model_id,
                     "generation_type": normalized_generation_type,
                     "duration_seconds": resolved_duration,
-                    "style": MusicStyle.AMBIENT.value,
-                    "mood": normalized_mood,
-                    "tempo": normalized_tempo,
-                    "fallback_used": requested_vidu,
-                    "fallback_reason": fallback_reason or None,
-                    "cached": bool(music_result.cached),
+                    "actual_duration_seconds": actual_duration_seconds,
+                    "format": "mp3",
+                    "sample_rate": 48000,
+                    **result_metadata,
                 },
                 precheck,
             ),
@@ -549,13 +491,14 @@ async def generate_audio_asset(
             precheck=precheck,
             kind="audio",
             mode=mode,
-            basis_yuan=basis_yuan,
-            model_id=DEFAULT_AUDIO_MUSIC_MODEL_ID,
-            summary="资产工作台音效生成已完成，积分已结算。",
+            basis_yuan=settled_basis_yuan,
+            model_id=resolved_model_id,
+            summary="资产工作台音效生成已完成，积分按实际时长结算。",
             extra_payload={
                 "generation_type": normalized_generation_type,
                 "duration_seconds": resolved_duration,
-                "fallback_used": requested_vidu,
+                "billed_duration_seconds": billed_duration_seconds,
+                "actual_duration_seconds": actual_duration_seconds,
             },
         )
         return response

@@ -21,12 +21,6 @@ from app.services.audiobook.voice_manager_cosyvoice_v3_plus import (
 )
 from app.services.audiobook.voice_manager_mimo import MiMoInlineVoiceProfile
 from app.services.audiobook.voice_manager_minimax import MiniMaxVoiceManager
-from app.services.audiobook.agents.voice_designer import (
-    TTSParams as DesignedTTSParams,
-    VoiceCharacteristics,
-    VoiceDesigner,
-    VoiceProfile as DesignedVoiceProfile,
-)
 
 
 def test_voice_profile_does_not_emit_pitch_across_segment_emotions() -> None:
@@ -54,24 +48,6 @@ def test_voice_profile_does_not_emit_pitch_across_segment_emotions() -> None:
         assert "rate" not in params
         assert "character_base_speed" not in params
         assert "voice_description" not in params
-
-
-def test_legacy_voice_designer_does_not_emit_pitch_across_segment_emotions() -> None:
-    designer = VoiceDesigner()
-    designer.voice_profiles["narrator"] = DesignedVoiceProfile(
-        character_name="narrator",
-        voice_characteristics=VoiceCharacteristics(),
-        tts_params=DesignedTTSParams(speaker="fixed-speaker"),
-    )
-
-    neutral = designer.get_tts_params("narrator", "neutral")
-    sad = designer.get_tts_params("narrator", "sad")
-    angry = designer.get_tts_params("narrator", "angry")
-
-    assert neutral is not None and sad is not None and angry is not None
-    assert not hasattr(neutral, "pitch")
-    assert not hasattr(sad, "pitch")
-    assert not hasattr(angry, "pitch")
 
 
 def test_minimax_catalog_default_uses_provider_neutral_pitch() -> None:

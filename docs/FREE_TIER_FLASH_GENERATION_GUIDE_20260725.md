@@ -1,20 +1,26 @@
-# 灵感方舟免费档（qwen3.7-flash）生成方案指导文档
+# 灵感方舟免费档（qwen-flash）生成方案指导文档
 
 > 创建日期：2026-07-25（v2，含第二轮审查修订）
 > 状态：已实施完成（2026-07-25，七步全部落地，第 8 节上线门槛全部验收通过，见第 11 节实施记录）
 > 范围：`POST /api/v1/workflow/{project_id}/generate-next-chapter` 单章生成链路
+>
+> 模型 ID 更新（2026-10-09）：文内模型 ID 一律改写为现役中性内部 ID
+> `qwen-flash` / `deepseek-pro`（内部 ID 不含版本号，升级换代不换 ID）。
+> 发给上游的真名 `qwen3.7-flash` / `deepseek-v4-pro` 由 `config/llm_models.yaml` 的
+> `default_params.request_model` 固定，改动内部 ID 不影响实际调用的模型与第 1 节成本基线的单价口径。
+> 现役常量位置：`backend/app/api/v1/workflow/generation_profile.py` 的 `FREE_TIER_MODEL_ID`。
 
 ## 1. 背景与目标
 
 为灵感方舟提供一个免费生成档位，用于用户免费体验：
 
-- 全链路强制使用 `qwen3.7-flash`（含规划、正文、评审、迭代、后置提取与摘要）
+- 全链路强制使用 `qwen-flash`（含规划、正文、评审、迭代、后置提取与摘要）
 - 迭代优化最多 1 轮（标准档为 2 轮）
 - 禁用多模型评审
 - 每用户每天免费生成 2 章
 - 标准档行为在强制开关未开启时完全不受影响
 
-### 成本基线（qwen3.7-flash：输入 0.2 元/M tokens，输出 0.8 元/M tokens）
+### 成本基线（qwen-flash：输入 0.2 元/M tokens，输出 0.8 元/M tokens）
 
 | 场景 | 单章成本 |
 |---|---|
@@ -40,7 +46,7 @@
 @dataclass(frozen=True)
 class GenerationProfile:
     tier: str                          # "free" | "standard"
-    model: Optional[str]               # 免费档强制 "qwen3.7-flash"；标准档为用户所选模型
+    model: Optional[str]               # 免费档强制 "qwen-flash"；标准档为用户所选模型
     max_iteration_rounds: int          # 免费档 1；标准档沿用 settings 默认 2
     enable_multi_model_review: bool    # 免费档 False
     max_llm_attempts: int              # 总尝试次数（含首次）。免费档 2；标准档 3（现状）
@@ -49,7 +55,7 @@ class GenerationProfile:
 
 FREE_PROFILE = GenerationProfile(
     tier="free",
-    model="qwen3.7-flash",
+    model="qwen-flash",
     max_iteration_rounds=1,
     enable_multi_model_review=False,
     max_llm_attempts=2,
@@ -105,10 +111,10 @@ def resolve_generation_profile(*, current_user, requested_tier, requested_model)
 | 章节规划（L1007-1022） | 已尊重 `workflow_generation_model` | 无需改，profile.model 走同一参数 |
 | 正文创作（L1292-1299） | 已尊重 | 无需改 |
 | 迭代改稿（L1661-1680） | 已尊重 | 无需改 |
-| 初评（L1524 → `_run_single_next_chapter_streaming_review` L158） | 只传 `task_type="review"`，走路由到 deepseek-v4-pro | **调用点补传 `model=profile.model`** |
+| 初评（L1524 → `_run_single_next_chapter_streaming_review` L158） | 只传 `task_type="review"`，走路由到 deepseek-pro | **调用点补传 `model=profile.model`** |
 | 轮内复评（L1834） | 同上 | **调用点补传 `model=profile.model`** |
 | 多模型评审（review_feature_gate） | 由项目级 `review_config` 触发 | **profile.enable_multi_model_review=False 时短路，不进 gate** |
-| 后置统一提取（unified_extraction L65-71） | 走环境变量，默认 deepseek-v4-pro | **透传 `post_processing_model`（见 3.2） |
+| 后置统一提取（unified_extraction L65-71） | 走环境变量，默认 deepseek-pro | **透传 `post_processing_model`（见 3.2） |
 | 后置三段式回退提取 | 三个服务方法均无 model 参数 | **签名加 model 参数并透传** |
 | 后置章节摘要（chapter_summarizer L54 `create_task_llm()`） | 无模型参数，与 UnifiedExtractionService 无关 | **改造 summarizer 构造链传模型** |
 
@@ -141,7 +147,7 @@ def resolve_generation_profile(*, current_user, requested_tier, requested_model)
 
 免费档（`allow_model_fallback=False`）执行以下策略：
 
-1. **端点预检**：创建任务前调用 `resolve_model_request(model="qwen3.7-flash", ...)`，`resolved_model_id != "qwen3.7-flash"` 时直接返回 503（"免费模型暂不可用"），不占额度、不启动任务
+1. **端点预检**：创建任务前调用 `resolve_model_request(model="qwen-flash", ...)`，`resolved_model_id != "qwen-flash"` 时直接返回 503（"免费模型暂不可用"），不占额度、不启动任务
 2. **调用后校验**：链路各 LLM 调用完成后检查结果 metadata 的 `resolved_model_id`（`_attach_resolution_metadata` 已写入，model_hub.py L606-610），发现重路由立即终止后续链路，按额度语义退款并标记任务失败
 3. **绝不降级到更贵模型**：flash 不可用时免费档整体 fail closed，不 fallback
 
@@ -258,7 +264,7 @@ generateNextWorkflowChapter(projectId, { generationTier: 'free', workflowGenerat
 ## 8. 上线门槛（硬性验收条件）
 
 1. 未具备标准档权益的用户（开关开启时），传 `standard` 或省略档位，必须落入免费档并受每天 2 章限制——**伪造 tier 测试必须存在**
-2. 免费档实际解析模型不是 qwen3.7-flash 时 fail closed（503），禁止自动切换到其他模型——**catalog fallback 模拟测试必须存在**
+2. 免费档实际解析模型不是 qwen-flash 时 fail closed（503），禁止自动切换到其他模型——**catalog fallback 模拟测试必须存在**
 3. 同一项目只能有一个生成任务，互斥跨进程、跨实例有效——**跨 worker 并发测试必须存在**
 4. 主链（规划/正文/迭代）、初评、复评、统一提取、三段式回退、摘要**全部**验证实际模型为 flash——含异常回退路径
 5. 用户额度和全局发放量在一个原子操作（Lua）中检查、占用并设置 TTL

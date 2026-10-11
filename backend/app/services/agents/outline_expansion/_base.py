@@ -58,11 +58,11 @@ class OutlineExpanderBase:
         self.character_designer = CharacterDesignerAgent(self.knowledge_base, self.memory_manager)
 
         # 常规协同主 llm 保持现有默认配置；
-        # 卷细化专用 agent 会在下方统一切到 deepseek-v4-pro，
+        # 卷细化专用 agent 会在下方统一切到 deepseek-pro，
         # 避免超长逐章输出时中途收缩成范围摘要或解释性废话。
         outline_expand_max_tokens = 32768
         outline_expand_timeout = estimate_model_timeout_seconds(
-            "qwen3.7-plus",
+            "qwen-plus",
             outline_expand_max_tokens,
         )
         self.llm = create_task_llm(
@@ -72,10 +72,10 @@ class OutlineExpanderBase:
         )
 
         # 以下三个属性保留字段名以兼容既有调用点（_volumedetail / _incrementalexpansion / 测试），
-        # 但均统一切到 deepseek-v4-pro，不再做能力分级。
+        # 但均统一切到 deepseek-pro，不再做能力分级。
         volume_detail_max_tokens = 64000
         volume_detail_timeout = estimate_model_timeout_seconds(
-            "deepseek-v4-pro",
+            "deepseek-pro",
             volume_detail_max_tokens,
         )
         r1_llm = create_task_llm(
@@ -88,14 +88,14 @@ class OutlineExpanderBase:
         plus_max_tokens = volume_detail_max_tokens
         plus_timeout = volume_detail_timeout
         plus_llm = create_task_llm(
-            model="deepseek-v4-pro",
+            model="deepseek-pro",
             max_tokens=plus_max_tokens,
             timeout=plus_timeout,
         )
         self.plot_architect_plus = PlotArchitectAgent(self.knowledge_base, self.memory_manager, llm=plus_llm)
 
         large_volume_llm = create_task_llm(
-            model="deepseek-v4-pro",
+            model="deepseek-pro",
             max_tokens=plus_max_tokens,
             timeout=plus_timeout,
         )
@@ -103,11 +103,11 @@ class OutlineExpanderBase:
 
         # epic 框架两段式生成（全书结构骨架 + 伏笔表/人物生命周期）是协同扩展中
         # 最大的单次 LLM 调用（est_output≈2 万 token），默认 task_type='concept'
-        # 路由到 qwen3.7-flash 曾出现流式卡死 20 分钟后 ReadTimeout（任务89实测），
-        # 统一切到 deepseek-v4-pro 超长输出配置。
+        # 路由到 qwen-flash 曾出现流式卡死 20 分钟后 ReadTimeout（任务89实测），
+        # 统一切到 deepseek-pro 超长输出配置。
         self.creative_director_pro = CreativeDirectorAgent(self.knowledge_base, self.memory_manager, llm=large_volume_llm)
 
-        logger.debug("🚀 卷细化协同统一使用 deepseek-v4-pro 模型（384K 超长输出）")
+        logger.debug("🚀 卷细化协同统一使用 deepseek-pro 模型（384K 超长输出）")
         
         # 🎆 初始化分层摘要器
         self.layered_summarizer = LayeredSummarizer(

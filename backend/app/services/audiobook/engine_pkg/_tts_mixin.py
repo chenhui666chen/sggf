@@ -34,8 +34,6 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
-QWEN_RENDER_CHUNK_MAX_CHARS = 360
-
 
 def aggregate_tts_cost_stats(
     primary_engine: Any,
@@ -176,21 +174,6 @@ def collect_tts_cost_stats(owner: Any) -> Dict[str, Any]:
         getattr(owner, "tts_engine", None),
         getattr(owner, "_tts_engines_by_model", None),
     )
-
-
-def _is_qwen_tts_model(model: Any) -> bool:
-    return normalize_audiobook_tts_model(model, default="").startswith("qwen3-tts")
-
-
-def _item_tts_model(item: Any) -> str:
-    voice_params = getattr(item, "voice_params", None)
-    if isinstance(voice_params, dict):
-        return str(voice_params.get("tts_model") or "").strip()
-    if isinstance(item, dict):
-        raw_params = item.get("voice_params")
-        if isinstance(raw_params, dict):
-            return str(raw_params.get("tts_model") or "").strip()
-    return ""
 
 
 def _item_fixed_voice_id(item: Any) -> str:
@@ -436,15 +419,8 @@ class TTSMixin:
         items = list(script_segments or [])
         if all(isinstance(item, RenderChunk) for item in items):
             return items
-        default_model = getattr(self, "tts_model", None)
-        segment_models = [_item_tts_model(item) for item in items]
-        has_qwen_model = _is_qwen_tts_model(default_model) or any(
-            _is_qwen_tts_model(model)
-            for model in segment_models
-            if model
-        )
-        max_chunk_chars = QWEN_RENDER_CHUNK_MAX_CHARS if has_qwen_model else None
-        return build_render_plan(items, max_chunk_chars=max_chunk_chars)
+        # 已退役的 Qwen3 曾有 360 字独立上限；3.1 正文上限更高，统一走默认切分阈值。
+        return build_render_plan(items)
 
     def _build_tts_batch_item(self, seg) -> Dict[str, Any]:
         original_text = str(getattr(seg, "text", "") or "")

@@ -52,7 +52,7 @@ def test_state_machine_keyframes_stage_writes_smart_dispatch_trace(monkeypatch) 
         payload={
             "quality_mode": "quality",
             "image_config": {
-                "adapter": "wan2.6-t2i",
+                "adapter": "qwen-image-3.0",
                 "image_edit_adapter": "wan_image_edit",
             },
         },
@@ -65,10 +65,10 @@ def test_state_machine_keyframes_stage_writes_smart_dispatch_trace(monkeypatch) 
     assert trace["stage"] == "keyframes"
     assert trace["strategy"] == "quality"
     assert trace["intent"]["modality"] == "text_to_image"
-    assert trace["routing"]["selected_model"] == "wan2.6-t2i"
+    assert trace["routing"]["selected_model"] == "qwen-image-3.0"
     assert trace["routing"]["fallback_models"] == ["wan_image_edit"]
-    assert trace["execution"]["resolved_model"] == "wan2.6-t2i"
-    assert trace["execution"]["attempted_models"] == ["wan2.6-t2i", "wan_image_edit"]
+    assert trace["execution"]["resolved_model"] == "qwen-image-3.0"
+    assert trace["execution"]["attempted_models"] == ["qwen-image-3.0", "wan_image_edit"]
     assert trace["execution"]["prompt"]["prompt_changed"] is True
     assert trace["phases"][0]["stage"] == "keyframes"
 
@@ -100,7 +100,7 @@ def test_state_machine_midframes_stage_writes_smart_dispatch_trace(monkeypatch) 
         payload={
             "quality_mode": "cost",
             "image_config": {
-                "adapter": "wan2.6-t2i",
+                "adapter": "qwen-image-3.0",
                 "image_edit_adapter": "qwen_image_edit",
             },
         },
@@ -147,9 +147,9 @@ def test_state_machine_video_stage_writes_real_provider_trace(monkeypatch) -> No
             {
                 "path": "runs/dw_trace_video_001/shot_001.mp4",
                 "meta": {
-                    "engine": "wan2.7-i2v",
-                    "adapter": "wan2.7-i2v",
-                    "via": "wan2.7-i2v",
+                    "engine": "wan_auto",
+                    "adapter": "wan3.0-video",
+                    "via": "wan3.0-video",
                     "prompt": "cinematic hero turns back to camera",
                 },
             }
@@ -164,7 +164,7 @@ def test_state_machine_video_stage_writes_real_provider_trace(monkeypatch) -> No
         payload={
             "quality_mode": "quality",
             "video_config": {
-                "adapter": "wan2.7-i2v",
+                "adapter": "wan3.0-video",
                 "engine": "wan_auto",
                 "provider_mode": "auto",
                 "selector_mode": "shadow",
@@ -189,11 +189,12 @@ def test_state_machine_video_stage_writes_real_provider_trace(monkeypatch) -> No
 
     assert result.state == state_machine.State.WAITING_VIDEO_CONFIRMATION
     assert trace["stage"] == "video"
-    assert trace["intent"]["modality"] == "image_to_video"
-    assert trace["routing"]["selected_model"] == "wan2.7-i2v"
+    # wan3.0-video 是 all-in-one，引擎归为 wan_auto，无法再推断 i2v/t2v，modality 落到通用值
+    assert trace["intent"]["modality"] == "video_generation"
+    assert trace["routing"]["selected_model"] == "wan3.0-video"
     assert "kling_omni" in trace["routing"]["fallback_models"]
-    assert trace["execution"]["resolved_model"] == "wan2.7-i2v"
-    assert trace["execution"]["attempted_models"] == ["wan2.7-i2v"]
+    assert trace["execution"]["resolved_model"] == "wan3.0-video"
+    assert trace["execution"]["attempted_models"] == ["wan3.0-video"]
     assert trace["execution"]["adapter"]["provider_mode"] == "auto"
     assert trace["execution"]["prompt"]["prompt_changed"] is True
     assert trace["phases"][0]["stage"] == "video"
@@ -210,7 +211,7 @@ def test_state_machine_edit_stage_writes_video_edit_trace(monkeypatch) -> None:
                 "path": "runs/dw_trace_edit_001/shot_001.mp4",
                 "meta": {
                     "edited": True,
-                    "edit_model": "wan2.7-videoedit",
+                    "edit_model": "wan3.0-video",
                     "edit_feature": "video-remix",
                     "edit_feature_reason": "temporal_consistency_repair",
                     "edit_prompt": "repair shaky hero motion and restore subject consistency",
@@ -225,7 +226,7 @@ def test_state_machine_edit_stage_writes_video_edit_trace(monkeypatch) -> None:
             "enabled": True,
             "source": "autoqc",
             "reason": "video_clip_quality_below_threshold",
-            "model_id": "wan2.7-videoedit",
+            "model_id": "wan3.0-video",
             "edit_feature": "auto",
             "default_edit_feature": "style-transfer",
             "requested_count": 1,
@@ -242,7 +243,7 @@ def test_state_machine_edit_stage_writes_video_edit_trace(monkeypatch) -> None:
         state=state_machine.State.EDIT,
         payload={
             "quality_mode": "quality",
-            "video_edit_config": {"enabled": True, "adapter": "wan2.7-videoedit"},
+            "video_edit_config": {"enabled": True, "adapter": "wan3.0-video"},
         },
     )
 
@@ -252,9 +253,9 @@ def test_state_machine_edit_stage_writes_video_edit_trace(monkeypatch) -> None:
     assert result.state == state_machine.State.REVIEW
     assert trace["stage"] == "edit"
     assert trace["intent"]["modality"] == "video_edit"
-    assert trace["routing"]["selected_model"] == "wan2.7-videoedit"
-    assert trace["execution"]["resolved_model"] == "wan2.7-videoedit"
-    assert trace["execution"]["attempted_models"] == ["wan2.7-videoedit"]
+    assert trace["routing"]["selected_model"] == "wan3.0-video"
+    assert trace["execution"]["resolved_model"] == "wan3.0-video"
+    assert trace["execution"]["attempted_models"] == ["wan3.0-video"]
     assert trace["execution"]["adapter"]["status"] == "edited"
     assert trace["execution"]["adapter"]["edited_count"] == 1
     assert trace["execution"]["adapter"]["feature_counts"] == {"video-remix": 1}

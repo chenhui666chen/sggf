@@ -3,7 +3,7 @@
 Semantic Model Matcher - Style/scenario-based model matching using embeddings.
 
 Provides fuzzy matching between user intent (style descriptions, scenario keywords)
-and model capability profiles, enabling "国风" → chinese_ink style → wan2.6-t2i
+and model capability profiles, enabling "国风" → chinese_ink style → qwen-image-3.0
 type semantic routing.
 """
 

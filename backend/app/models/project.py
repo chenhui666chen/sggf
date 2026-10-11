@@ -3,7 +3,7 @@
 """
 from datetime import datetime
 from typing import Optional, List
-from sqlalchemy import String, Text, ForeignKey, DateTime, UniqueConstraint
+from sqlalchemy import String, Text, ForeignKey, DateTime, UniqueConstraint, Index, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 from app.db.base import Base
@@ -81,7 +81,19 @@ class Project(Base):
 class Chapter(Base):
     """章节表"""
     __tablename__ = "chapters"
-    
+    # 阶段 B WP2：活跃章节 (project_id, chapter_number) 唯一，软删除行不参与约束，
+    # 与迁移 add_chapter_project_number_unique_index 的部分唯一索引保持一致。
+    __table_args__ = (
+        Index(
+            "uq_chapters_project_number_active",
+            "project_id",
+            "chapter_number",
+            unique=True,
+            sqlite_where=text("deleted_at IS NULL"),
+            postgresql_where=text("deleted_at IS NULL"),
+        ),
+    )
+
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
     project_id: Mapped[int] = mapped_column(
         ForeignKey("projects.id", ondelete="CASCADE"),  # 添加级联删除

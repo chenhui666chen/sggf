@@ -75,8 +75,8 @@ def run_keyframes(ctx: Any) -> None:
         image_cfg,
         key="adapter",
         env_name="DREAMWEAVER_T2I_MODEL",
-        default="wan2.6-t2i",
-    ) or "wan2.6-t2i"
+        default="qwen-image-3.0-pro",
+    ) or "qwen-image-3.0-pro"
     run_dir = _ensure_run_dir(ctx)
     frame_width, frame_height, frame_ratio = resolve_frame_size(image_cfg)
 
@@ -386,6 +386,11 @@ def run_keyframes(ctx: Any) -> None:
 
             ff_vis_char_ids = _as_str_list(item.get("ff_vis_char_ids"))
             lf_vis_char_ids = _as_str_list(item.get("lf_vis_char_ids"))
+
+            # R-pre 候选择优门位（Phase 2.4）：高价值 beat 双候选，普通镜头沿用基础配置
+            from agents.painter_pkg._r_pre import r_pre_candidate_count
+            shot_candidate_count = r_pre_candidate_count(item, candidate_count)
+            shot_edit_candidates = max(1, min(int(image_edit_candidates), int(shot_candidate_count)))
 
             asset_match = _match_library_assets_for_shot(
                 shot=item,
@@ -958,7 +963,7 @@ def run_keyframes(ctx: Any) -> None:
                                 shot_id=shot_id,
                                 role="head",
                                 output_path=head_path,
-                                candidate_count=image_edit_candidates,
+                                candidate_count=shot_edit_candidates,
                                 parallelism=candidate_parallelism,
                                 selector=head_selector,
                                 vlm_adapter=local_vlm_adapter,
@@ -982,7 +987,7 @@ def run_keyframes(ctx: Any) -> None:
                                 shot_id=shot_id,
                                 role="head",
                                 output_path=head_path,
-                                candidate_count=candidate_count,
+                                candidate_count=shot_candidate_count,
                                 parallelism=candidate_parallelism,
                                 selector=head_selector,
                                 vlm_adapter=local_vlm_adapter,
@@ -1054,7 +1059,7 @@ def run_keyframes(ctx: Any) -> None:
                             shot_id=shot_id,
                             role="head",
                             output_path=head_path,
-                            candidate_count=candidate_count,
+                            candidate_count=shot_candidate_count,
                             parallelism=candidate_parallelism,
                             selector=head_selector,
                             vlm_adapter=local_vlm_adapter,
@@ -1197,7 +1202,7 @@ def run_keyframes(ctx: Any) -> None:
                             shot_id=shot_id,
                             role="tail",
                             output_path=tail_path,
-                            candidate_count=image_edit_candidates,
+                            candidate_count=shot_edit_candidates,
                             parallelism=candidate_parallelism,
                             selector=tail_selector,
                             vlm_adapter=local_vlm_adapter,
@@ -1221,7 +1226,7 @@ def run_keyframes(ctx: Any) -> None:
                             shot_id=shot_id,
                             role="tail",
                             output_path=tail_path,
-                            candidate_count=candidate_count,
+                            candidate_count=shot_candidate_count,
                             parallelism=candidate_parallelism,
                             selector=tail_selector,
                             vlm_adapter=local_vlm_adapter,
@@ -1255,7 +1260,7 @@ def run_keyframes(ctx: Any) -> None:
                         shot_id=shot_id,
                         role="tail",
                         output_path=tail_path,
-                        candidate_count=candidate_count,
+                        candidate_count=shot_candidate_count,
                         parallelism=candidate_parallelism,
                         selector=tail_selector,
                         vlm_adapter=local_vlm_adapter,

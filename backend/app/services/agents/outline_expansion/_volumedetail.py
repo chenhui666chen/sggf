@@ -100,11 +100,11 @@ class VolumeDetailMixin:
         logger.debug(f"📖 【单卷详细扩展】第{target_volume_index}卷，从第{start_chapter_num}章开始，生成{chapters_count_range[0]}-{chapters_count_range[1]}章")
         logger.debug(f"{'='*70}\n")
 
-        # 🚀 统一使用 deepseek-v4-pro（384K 超长输出），不再按章节数切换模型
+        # 🚀 统一使用 deepseek-pro（384K 超长输出），不再按章节数切换模型
         avg_chapters = (chapters_count_range[0] + chapters_count_range[1]) // 2
         estimated_words = avg_chapters * 450  # 每章约450字
         model_name = self.estimate_volume_detail_model(chapters_count_range)
-        selected_architect = self.plot_architect_plus if model_name == "qwen3.7-plus" else self.plot_architect_r1
+        selected_architect = self.plot_architect_plus if model_name == "qwen-plus" else self.plot_architect_r1
         logger.debug(
             "Volume detail runtime model selected | model=%s avg_chapters=%s estimated_words=%s",
             model_name,
@@ -112,7 +112,7 @@ class VolumeDetailMixin:
             estimated_words,
         )
         logger.debug(
-            f"✅ 单卷详细扩展统一使用 deepseek-v4-pro（{avg_chapters}章，约{estimated_words}字，384K 输出）"
+            f"✅ 单卷详细扩展统一使用 deepseek-pro（{avg_chapters}章，约{estimated_words}字，384K 输出）"
         )
 
         # 🛡️ 临时修复：清空历史记忆，避免旧消息导致API错误
@@ -201,14 +201,14 @@ class VolumeDetailMixin:
             global_constraints_section = "\n【🌟 全局约束（必须严格遵循）】\n"
             
             if framework_header:
-                # deepseek-v4-pro 384K 输出下放宽头部截断
+                # deepseek-pro 384K 输出下放宽头部截断
                 header_excerpt = framework_header[:12000] if len(framework_header) > 12000 else framework_header
                 global_constraints_section += f"""\n**1⃣ 整体叙事节奏与境界体系**（本卷必须符合）：
 {header_excerpt}
 """
             
             if framework_footer:
-                # deepseek-v4-pro 384K 输出下放宽尾部截断
+                # deepseek-pro 384K 输出下放宽尾部截断
                 footer_excerpt = framework_footer[:12000] if len(framework_footer) > 12000 else framework_footer
                 global_constraints_section += f"""\n**2️⃣ 伏笔布局与人物周期**（本卷需配合）：
 {footer_excerpt}

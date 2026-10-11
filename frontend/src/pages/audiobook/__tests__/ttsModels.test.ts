@@ -22,14 +22,16 @@ describe('audiobook ttsModels', () => {
   it('normalizes legacy and registry model ids to audiobook model ids', () => {
     expect(normalizeTtsModelValue('qwen3-tts-flash')).toBe(DEFAULT_TTS_MODEL)
     expect(normalizeTtsModelValue('qwen3-tts-plus')).toBe(DEFAULT_TTS_MODEL)
+    expect(normalizeTtsModelValue('Qwen-Audio/3.1-TTS-Flash')).toBe('qwen-audio-3.1-tts-flash')
+    expect(normalizeTtsModelValue('qwen_audio_3_1_tts_flash')).toBe('qwen-audio-3.1-tts-flash')
     expect(normalizeTtsModelValue('cosyvoice-v3-plus')).toBe('cosyvoice-v3.5-plus')
     expect(normalizeTtsModelValue('MiniMax/speech-2.8-hd')).toBe('minimax-speech-2.8-hd')
     expect(normalizeTtsModelValue('MiniMax/speech-2.8-turbo')).toBe('minimax-speech-2.8-turbo')
     expect(normalizeTtsModelValue('MiMo/V2.5-TTS')).toBe('mimo-v2.5-tts')
     expect(normalizeTtsModelValue('mimo-v2.5-tts-voice-design')).toBe('mimo-v2.5-tts-voicedesign')
     expect(normalizeTtsModelValue('mimo-v2.5-tts-voice-clone')).toBe('mimo-v2.5-tts-voiceclone')
-    expect(normalizeTtsModelValue('StepFun/StepAudio-2.5-TTS')).toBe('stepaudio-2.5-tts')
-    expect(normalizeTtsModelValue('stepaudio_2_5_tts')).toBe('stepaudio-2.5-tts')
+    expect(normalizeTtsModelValue('StepFun/StepAudio-3-TTS')).toBe('stepaudio-3-tts')
+    expect(normalizeTtsModelValue('stepaudio_3_tts')).toBe('stepaudio-3-tts')
     expect(normalizeTtsModelValue('Doubao/Seed-TTS-2.0-Expressive')).toBe('seed-tts-2.0-expressive')
     expect(normalizeTtsModelValue('doubao-tts-2.0-expressive')).toBe('seed-tts-2.0-expressive')
     expect(normalizeTtsModelValue('next-provider-model')).toBe('next-provider-model')
@@ -37,13 +39,13 @@ describe('audiobook ttsModels', () => {
   })
 
   it('uses model-specific fallback narrator voices', () => {
-    expect(getFallbackVoiceId('qwen3-tts-instruct-flash')).toBe('Neil')
+    expect(getFallbackVoiceId('qwen-audio-3.1-tts-flash')).toBe('longsanshu_v3.1')
     expect(getFallbackVoiceId('minimax-speech-2.8-hd')).toBe('male-qn-qingse')
     expect(getFallbackVoiceId('minimax-speech-2.8-turbo')).toBe('male-qn-qingse')
     expect(getFallbackVoiceId('mimo-v2.5-tts')).toBe('mimo_default')
     expect(getFallbackVoiceId('mimo-v2.5-tts-voicedesign')).toBe('')
     expect(getFallbackVoiceId('mimo-v2.5-tts-voiceclone')).toBe('')
-    expect(getFallbackVoiceId('stepaudio-2.5-tts')).toBe('cixingnansheng')
+    expect(getFallbackVoiceId('stepaudio-3-tts')).toBe('cixingnansheng')
     expect(getFallbackVoiceId('seed-tts-2.0-expressive')).toBe('zh_female_vv_uranus_bigtts')
     expect(getFallbackVoiceId('cosyvoice-v3.5-plus')).toBe('')
     expect(getFallbackVoiceId('cosyvoice-v3.5-plus', [{ id: 'cosyvoice-v3.5-plus-demo' }])).toBe(
@@ -52,22 +54,24 @@ describe('audiobook ttsModels', () => {
   })
 
   it('normalizes voice ids only for the matching model family', () => {
-    expect(normalizeVoiceId('qwen3-tts-instruct-flash', 'Ryan')).toBe('Neil')
-    expect(normalizeVoiceId('qwen3-tts-instruct-flash', 'male_narrator')).toBe('Neil')
+    expect(normalizeVoiceId('qwen-audio-3.1-tts-flash', 'male_narrator')).toBe('longsanshu_v3.1')
+    expect(normalizeVoiceId('qwen-audio-3.1-tts-flash', 'female_young_gentle')).toBe('yeqinghe_v3.1')
+    // 旧 Qwen3 音色名与 3.1 音色空间不互通，只能由目录校验回落默认值
+    expect(normalizeVoiceId('qwen-audio-3.1-tts-flash', 'Cherry', ['longsanshu_v3.1'])).toBe('')
     expect(normalizeVoiceId('cosyvoice-v3.5-plus', 'longanzhi_v3')).toBe('')
     expect(normalizeVoiceId('minimax-speech-2.8-hd', 'male-qn-qingse')).toBe('male-qn-qingse')
   })
 
   it('creates complete records for all supported tts models', () => {
     expect(createTtsModelRecord((model) => model)).toEqual({
-      'qwen3-tts-instruct-flash': 'qwen3-tts-instruct-flash',
+      'qwen-audio-3.1-tts-flash': 'qwen-audio-3.1-tts-flash',
       'cosyvoice-v3.5-plus': 'cosyvoice-v3.5-plus',
       'minimax-speech-2.8-hd': 'minimax-speech-2.8-hd',
       'minimax-speech-2.8-turbo': 'minimax-speech-2.8-turbo',
       'mimo-v2.5-tts': 'mimo-v2.5-tts',
       'mimo-v2.5-tts-voicedesign': 'mimo-v2.5-tts-voicedesign',
       'mimo-v2.5-tts-voiceclone': 'mimo-v2.5-tts-voiceclone',
-      'stepaudio-2.5-tts': 'stepaudio-2.5-tts',
+      'stepaudio-3-tts': 'stepaudio-3-tts',
       'seed-tts-2.0-expressive': 'seed-tts-2.0-expressive',
     })
     expect(TTS_MODELS).toHaveLength(9)
@@ -180,7 +184,7 @@ describe('audiobook ttsModels', () => {
       supportsVoiceDescription: true,
       supportsAudioTags: false,
     })
-    expect(modelRequiresCustomVoice('qwen3-tts-instruct-flash', normalized)).toBe(false)
+    expect(modelRequiresCustomVoice('qwen-audio-3.1-tts-flash', normalized)).toBe(false)
     expect(modelSupportsCustomVoiceWorkbench('cosyvoice-v3.5-plus', normalized)).toBe(true)
     expect(modelSupportsCustomVoiceWorkbench('mimo-v2.5-tts-voicedesign')).toBe(false)
     expect(modelSupportsCustomVoiceWorkbench('mimo-v2.5-tts-voiceclone')).toBe(false)
@@ -191,13 +195,16 @@ describe('audiobook ttsModels', () => {
   })
 
   it('keeps model-aware style control fallback capabilities', () => {
-    expect(getTtsModelCapabilities('qwen3-tts-instruct-flash')).toMatchObject({
+    expect(getTtsModelCapabilities('qwen-audio-3.1-tts-flash')).toMatchObject({
+      hasSystemVoices: true,
+      requiresCustomVoice: false,
       modelFamily: 'qwen',
       styleControlModes: ['natural_language'],
       preferredStyleControlMode: 'natural_language',
       supportsVoiceDescription: true,
       supportsAudioTags: false,
-      instructionBudget: 600,
+      instructionBudget: 1200,
+      controlMessageRoles: { natural_language: 'input.instruction' },
     })
 
     expect(getTtsModelCapabilities('minimax-speech-2.8-hd')).toMatchObject({
@@ -246,7 +253,7 @@ describe('audiobook ttsModels', () => {
       styleControlModes: ['director', 'audio_tags', 'natural_language'],
     })
 
-    expect(getTtsModelCapabilities('stepaudio-2.5-tts')).toMatchObject({
+    expect(getTtsModelCapabilities('stepaudio-3-tts')).toMatchObject({
       hasSystemVoices: true,
       requiresCustomVoice: false,
       supportsVoiceClone: true,
@@ -258,7 +265,7 @@ describe('audiobook ttsModels', () => {
       supportsEmotionMixing: true,
       supportsMicroTags: true,
       supportsWordLevelControl: true,
-      instructionBudget: 200,
+      instructionBudget: 500,
       controlMessageRoles: {
         global_context: 'parameters.instruction',
         inline_context: 'input.parentheses',
@@ -269,7 +276,7 @@ describe('audiobook ttsModels', () => {
     expect(getTtsModelCapabilities('seed-tts-2.0-expressive')).toMatchObject({
       hasSystemVoices: true,
       requiresCustomVoice: false,
-      supportsVoiceClone: true,
+      supportsVoiceClone: false,
       supportsVoiceDesign: false,
       modelFamily: 'doubao',
       styleControlModes: ['query_response', 'audio_tags', 'natural_language'],
@@ -288,12 +295,12 @@ describe('audiobook ttsModels', () => {
 
   it('separates instruction pace models from basic numeric fallback models', () => {
     for (const model of [
-      'qwen3-tts-instruct-flash',
+      'qwen-audio-3.1-tts-flash',
       'cosyvoice-v3.5-plus',
       'mimo-v2.5-tts',
       'mimo-v2.5-tts-voicedesign',
       'mimo-v2.5-tts-voiceclone',
-      'stepaudio-2.5-tts',
+      'stepaudio-3-tts',
       'seed-tts-2.0-expressive',
     ] as const) {
       expect(modelSupportsInstructStyleControl(model)).toBe(true)
@@ -326,7 +333,7 @@ describe('audiobook ttsModels', () => {
       ],
     })
 
-    expect(getTtsStyleControlLabels('qwen3-tts-instruct-flash')).toEqual(['自然语言指令'])
+    expect(getTtsStyleControlLabels('qwen-audio-3.1-tts-flash')).toEqual(['自然语言指令'])
     expect(getTtsStyleControlLabels('minimax-speech-2.8-hd')).toEqual(['基础参数'])
     expect(getTtsStyleControlLabels('mimo-v2.5-tts', normalized)).toEqual([
       '导演模式',
@@ -337,7 +344,7 @@ describe('audiobook ttsModels', () => {
   })
 
   it('exposes StepAudio contextual style labels', () => {
-    expect(getTtsStyleControlLabels('stepaudio-2.5-tts')).toEqual([
+    expect(getTtsStyleControlLabels('stepaudio-3-tts')).toEqual([
       '全局语境',
       '文中语境',
       '自然语言指令',

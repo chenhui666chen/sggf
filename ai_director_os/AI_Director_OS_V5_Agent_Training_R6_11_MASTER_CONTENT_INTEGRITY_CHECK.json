@@ -29,7 +29,8 @@
       "texture_boost_techniques",
       "cinematography_decision_library",
       "camera_lighting_prompt_lexicon",
-      "technique_interference_check"
+      "technique_interference_check",
+      "internal_motion_priority"
     ],
     "character": [
       "identity",
@@ -41,7 +42,9 @@
       "state_timeline",
       "performance_directing",
       "voice_asset",
-      "character_state_consistency"
+      "character_state_consistency",
+      "closed_action_lexicon",
+      "character_consistency_advanced"
     ],
     "continuity": [
       "world_space",
@@ -54,7 +57,8 @@
       "physical_world_model",
       "scene_state_system",
       "emotion_continuity",
-      "six_element_edit_framework"
+      "six_element_edit_framework",
+      "location_grounded_planning"
     ],
     "production": [
       "shot_specification",
@@ -68,7 +72,20 @@
       "time_segmented_prompt",
       "prompt_translation",
       "edit_chain_degradation_budget",
-      "r3_edit_capability_map"
+      "r3_edit_capability_map",
+      "disney_two_stage_keyframe",
+      "story_graph_ingestion",
+      "skeleton_binding_high_motion",
+      "hybrid_review_protocol",
+      "candidate_selection_before_commit",
+      "script_generator_compatibility",
+      "model_tiered_duration",
+      "sparse_keyframe_cot",
+      "adaptation_resource_protocol",
+      "i2v_frame_quality_protocol",
+      "first_last_frame_consistency",
+      "i2v_action_pose_selection",
+      "video_model_capability_watch"
     ],
     "image_generation": [
       "asset_generation_formula",
@@ -78,7 +95,14 @@
       "preserve_list_protocol",
       "style_presets",
       "image_models",
-      "asset_qc"
+      "asset_qc",
+      "multi_angle_reference_collage",
+      "model_prompt_dialects",
+      "negative_prompt_strategy",
+      "defect_repair_playbook",
+      "upscaling_pipeline",
+      "imperfection_aesthetics",
+      "grid_exploration_workflows"
     ],
     "sound_design": [
       "emotion_first_music",
@@ -134,7 +158,7 @@
       "question": "权力是由摄影机宣布，还是由空间和他人行为证明？",
       "options": "A直接强势登场：低机位/整齐构图/明确人物。B先拍他人反应：交谈停止、有人让路、保安站直。C延迟露脸：声音、脚步、影子、背影后再揭示。",
       "decision": "需要快速建立商业人物标签选A；需要可信权力选B；需要神秘性选C。",
-      "camera": "B可先WS观察空间被改变，再Static MS让人物进入。无需低角度也能建立权力。",
+      "camera": "B可先WS观察空间被改变，再Static MS让人物进入。无需低角度也能建立权力。出场手法补充（拉片佐证《林冲传》，大象学长第25集）：前景遮挡营造空间纵深+神秘感；门框作天然画框与遮挡揭示装置；由静到动的节奏转变完成亮相；环境元素（风沙/风声）参与出场丰富画面质感。",
       "performance": "反派本人动作应慢、稳定、少解释；其他人的Behavior是权力证据。",
       "sound": "房间声逐渐收敛；脚步/衣料声获得权重。",
       "risk": "AI把“反派”模板化成黑衣、邪笑、无来源轮廓光。",
@@ -579,6 +603,23 @@
       "added": "2026-08-17",
       "source_type": "benchmark",
       "verification_status": "pending"
+    },
+    {
+      "id": "DC-037",
+      "title": "动作场景关键帧来源分叉：T2I 直接生成 vs I2V 轨迹选帧（迪士尼两阶段法）",
+      "scene": "分镜/关键帧生成期，冲突动作族 beat（打斗/追逐/舞蹈/高强度交互）需要表现力强的关键帧。分叉点：用 T2I 直接生成静态关键帧（摆拍风险），或先让 I2V 生成连续运动轨迹再从中选取极限帧（EXTREMES）作为关键帧。",
+      "question": "动作戏的关键帧，应该从哪里来？",
+      "options": "①T2I 直接生成：文字描述动作顶点直接出图——快、便宜，但模型缺乏运动先验，易得到'摆拍式'僵直姿势；②I2V 轨迹选帧（迪士尼 Straight Ahead + Pose to Pose 两阶段法）：以角色参考图为首帧让 I2V 生成连续运动轨迹（隐式动态一致性约束），再从轨迹中挑选最具表现力的极限帧作为分镜关键帧——动作真实、多角色交互自然，但多一次视频生成成本；③混合：常规镜走①，冲突动作族高价值镜走②。",
+      "decision": "beat 族路由：冲突动作族 + 多角色接触交互 + 表现力要求高 → 走②两阶段法；情绪/对话/建置类 → 走①。首帧锚定：I2V 首帧必须用角色参考图初始化（视觉 dope-sheet），锁定身份与风格后再释放运动。成本闸门：②的 I2V 轨迹生成纳入候选择优预算（每镜≤2 次轨迹生成，超限需导演 Agent 批准）。",
+      "camera": "轨迹选帧后景别由所选 EXTREMES 帧决定，分镜师在轨迹上标注候选帧区间而非单点；极限帧构图检查沿用镜头卡 12 字段，选帧不达标可回退重生成轨迹（计入编辑链预算）。",
+      "performance": "两阶段法的核心收益在表演：I2V 的链式推理提供隐式运动先验，天然满足'准备-接触-反应-恢复'的完整动作物理链（对齐 CF-030/CF-071/CF-072 修复机制），避免 T2I 只采样首尾状态的跳变。",
+      "sound": "所选极限帧标注动作强度与冲击点，供音效层对齐（动效/呼吸/环境声跟随 EXTREMES 而非匀速铺底）。",
+      "risk": "①I2V 轨迹本身可能运动漂移（CF-084）→ 用 Motion Bible 锚定运动风格；②成本翻倍 → 仅高价值 beat 启用；③选帧依赖 VLM 判断'最具表现力' → 纳入 AM-15 混合评审（客观动作强度指标 + 主观评分仲裁）。",
+      "qc": "是否冲突动作族才启用两阶段法？I2V 首帧是否用了角色参考图锚定？所选 EXTREMES 是否通过动作链完整性检查（准备/接触/反应）？选帧是否在候选择优预算内？",
+      "source": "AnimeAgent（vivo/UESTC，arXiv 2602.20664）：迪士尼 Combination of Straight Ahead and Pose to Pose 工作流的 I2V 化实现",
+      "added": "2026-10-07",
+      "source_type": "external_paper",
+      "verification_status": "pending"
     }
   ],
   "failure_cases": [
@@ -868,7 +909,7 @@
       "problem": "身份连续包含脸、身体比例、动作、行为、声音与状态。",
       "cause": "每镜重新采样角色。",
       "repair": "使用Character Reference Package + Identity/Behavior State。",
-      "repair_model": "扩散模型每镜独立从噪声采样，无跨镜身份记忆，脸相近只是随机命中。修正：使用角色参考图（Reference）+显式身份绑定语法把采样约束到同一身份流形；纯文字只能降低漂移无法锁定身份。",
+      "repair_model": "扩散模型每镜独立从噪声采样，无跨镜身份记忆，脸相近只是随机命中。修正：使用角色参考图（Reference）+显式身份绑定语法把采样约束到同一身份流形；纯文字只能降低漂移无法锁定身份。 【骨骼绑定路径 2026-10】高强度动作场景（打斗/舞蹈/大幅运动）的身份漂移，prompt/参考图修复仍不稳时，升级为 3D/2.5D 角色建模 + 自动骨骼绑定（Toonflow 路线）：骨骼锁定身份与比例，运动由骨架驱动，从机制上杜绝变脸。触发条件：同角色 ≥3 镜高动态且 R3 局部编辑 2 轮未过。",
       "prompt": "same facial structure, hairstyle, body proportion, habitual movement and restrained expression style.",
       "qc": "连续播放是否像同一演员，而非截图相似度？",
       "auto_trigger": {
@@ -963,7 +1004,7 @@
       "problem": "Hand-Object interaction是高难物理关系。",
       "cause": "同时控制手、物、身体、镜头超载。",
       "repair": "缩短动作，拆成拿起/使用/放下；必要时Insert。",
-      "repair_model": "手物交互是高精度任务，手+物+身体+镜头多变量并行时模型注意力超载易崩。修正：拆成近距离Insert短镜，一次只控制'手+物'，降低镜头与身体变量，提高局部高精度采样成功率。【动作类快切注意】：手物交互常作为快切单元，快切时必须用特写/近景而非全景——原理：①特写可隐藏大部分物理位移过程，掩盖模型动作连贯性缺陷（若用全景快切会暴露穿帮）；②特写符合观众心理补偿机制，观众会自动脑补动作中间环节；③特写弱化轴线跳变带来的违和感（全景快切越轴会让空间混乱）。因此快切动作单元优先用 Insert/ECU/CU，而非 MS/WS。",
+      "repair_model": "手物交互是高精度任务，手+物+身体+镜头多变量并行时模型注意力超载易崩。修正：拆成近距离Insert短镜，一次只控制'手+物'，降低镜头与身体变量，提高局部高精度采样成功率。【动作类快切注意】：手物交互常作为快切单元，快切时必须用特写/近景而非全景——原理：①特写可隐藏大部分物理位移过程，掩盖模型动作连贯性缺陷（若用全景快切会暴露穿帮）；②特写符合观众心理补偿机制，观众会自动脑补动作中间环节；③特写弱化轴线跳变带来的违和感（全景快切越轴会让空间混乱）。因此快切动作单元优先用 Insert/ECU/CU，而非 MS/WS。 【骨骼绑定路径 2026-10】手物交互频繁的动作戏（武器/乐器/工具），可在分镜期预绑定骨骼（3D/2.5D 建模 + IK 手部绑定），把手物交互从'生成运气'变为'骨架约束'；适用于关键资产镜头，普通镜头仍走拆镜降载。",
       "prompt": "close insert: right hand grips the cup handle, lifts it cleanly from the table.",
       "qc": "接触点、手指数量、物体重力是否合理？",
       "auto_trigger": {
@@ -1601,7 +1642,7 @@
       "problem": "跨模型需要统一Character Reference Package。",
       "cause": "模型Identity encoding不同。",
       "repair": "使用正脸/侧脸/全身/服装/动作/状态参考，减少只靠文字。",
-      "repair_model": "各模型对身份的编码方式不同，仅文字无法锁定身份。修正：用统一角色参考包（正/侧/全身/服装/状态）跨模型传递，减少对文字身份编码的依赖。",
+      "repair_model": "各模型对身份的编码方式不同，仅文字无法锁定身份。修正：用统一角色参考包（正/侧/全身/服装/状态）跨模型传递，减少对文字身份编码的依赖。 【骨骼绑定路径 2026-10】跨模型传递身份的最强形态是绑定骨骼的 3D/2.5D 角色资产（各模型以渲染图接入），身份由资产锁定而非各模型各自采样；成本高，仅主角+高频出场角色启用。",
       "prompt": "same reference package and current state used across all model adapters.",
       "qc": "角色优先于模型特色。"
     },
@@ -1880,6 +1921,8 @@
       "continuation": "Yes: 单次 30s + 多轮延长至数分钟",
       "multishot": "Yes: 30s 内多镜头有逻辑关联的叙事（铺垫→推进→转折→收尾）",
       "audio": "Native 原生音视频联合生成",
+      "native_audio": true,
+      "voice_reference": true,
       "duration": "30s 单次（多轮延长可达数分钟）",
       "resolution": "最高 4K（480p/720p/1080p/4K 档位）",
       "best": "长叙事、复杂动作、多主体交互、多模态参考、相机规划、音视频联合",
@@ -1902,6 +1945,8 @@
       "continuation": "Yes: 最长 15s 原生，可分段拼接延长至 2 分钟",
       "multishot": "Yes: 智能分镜单次最多 6 镜头自动切换；3.0 Omni 多镜头故事板（每镜头时长/景别/视角/对白）",
       "audio": "Native 多语言/方言/口音原生音频，复杂多角色对话",
+      "native_audio": true,
+      "voice_reference": true,
       "duration": "Up to 15s（4K 档 15s）",
       "resolution": "原生 4K 直出（铂金+会员）；常规 1080p",
       "best": "4K 画质商业交付、角色一致性（主体库跨镜头绑定）、动作物理模拟、分镜叙事、音画同步",
@@ -1924,6 +1969,8 @@
       "continuation": "Yes: 视频延长/续写，智能时长推荐",
       "multishot": "Yes: 单次 30s 一镜到底/多镜头连续剧情",
       "audio": "Native 音画同步（声音质感仍有提升空间）",
+      "native_audio": true,
+      "voice_reference": true,
       "duration": "30s 单次（行业第一梯队）",
       "resolution": "480p/720p/1080p（API 0.3/0.6/1.2 元/秒）",
       "best": "长叙事、文档转视频（doc/xls/ppt/pdf/md/网页，≤100MB/50页）、人像千人千面、全能参考一致性、性价比",
@@ -1946,6 +1993,8 @@
       "continuation": "V6 延长工作流；R1 为连续交互世界（非默认 MP4）",
       "multishot": "C1 分镜转视频 + 多镜头编排；V6 多镜头叙事+原生音频",
       "audio": "C1/V6 原生音视频输出（配音生成稳定性待验证）",
+      "native_audio": true,
+      "voice_reference": false,
       "duration": "C1/V6 up to 15s",
       "resolution": "C1/V6 up to 1080p",
       "best": "V6 多镜头+原生音频单提示词成片、运镜控制、物理交互、多语言文字渲染；C1 电影/动作/分镜；R1 交互式持续世界",
@@ -1968,6 +2017,8 @@
       "continuation": "平台扩展流",
       "multishot": "Yes: 精准切镜/多镜头叙事，单次生成完成复杂转场",
       "audio": "Native 声画同出（对白/音效/BGM 一次生成，中英日多语言）",
+      "native_audio": true,
+      "voice_reference": false,
       "duration": "1–16s（16s 声画同出全球首个）",
       "resolution": "1080p",
       "best": "短剧/漫剧/影视剧对话叙事、多镜头自动切换、参考生一致性、画面文字渲染（中英日）",
@@ -1990,6 +2041,8 @@
       "continuation": "Extend 模式扩展至 ~30s",
       "multishot": "Yes: 单片段内多镜头叙事",
       "audio": "Native 原生立体声（32kHz），11 种语言",
+      "native_audio": true,
+      "voice_reference": true,
       "duration": "4–15s（Extend ~30s）",
       "resolution": "原生 2K / 24fps（H3-Regenerate-2K）；开源 Base 768p",
       "best": "V2V 运动迁移、商业/品牌/产品、多模态编辑、精准文本/品牌呈现、稳定性与提示词遵循",
@@ -2012,6 +2065,8 @@
       "continuation": "未单独确认",
       "multishot": "未在文档中单独确认（智能叙事编排增强）",
       "audio": "Native 音视频联合生成（单一通道），7 语言对口型（英/中/粤/日/韩/德/法）",
+      "native_audio": true,
+      "voice_reference": false,
       "duration": "3–15s",
       "resolution": "720p/1080p，9 种画幅",
       "best": "音视频联合、多语言对口型、参考生多主体、动态表现力（战斗/舞蹈/奔跑）、去油光感",
@@ -2235,7 +2290,35 @@
         "是否区分Accepted、Locked、Stale和Superseded？",
         "是否避免候选生成直接修改Series Canon？",
         "是否可以恢复Last Known Good而无需整集重生成？"
-      ]
+      ],
+      "version_compare_protocol": {
+        "principle": "Version Graph 已有 diff/rollback，补 UI 级并排对比与决策留痕（ArcReel：每次重生都是历史）。",
+        "rules": [
+          "任何重生成都自动存档为版本节点（不覆盖旧版本）",
+          "多版本并排对比视图：同镜多版本关键帧/成片横向对照",
+          "一键回滚 + 回滚理由留痕入 event_log",
+          "对比视图供 Human Gate 审批使用（导演在两版间选择而非重做）"
+        ],
+        "source": "ArcReel 版本管理（一键回滚、多版本并排对比、每次重生存档）",
+        "qc_checks": [
+          "重生是否永不覆盖旧版本？",
+          "Human Gate 审批是否用并排对比而非单版判断？"
+        ]
+      },
+      "reproducibility_addressing": {
+        "principle": "可复现性寻址（Shotkit）：所有产物按 round×shot 寻址（两轮工作互不覆盖），run 记录以内容哈希 pin 全部输入——与确定性渲染共同构成可复现闭环。",
+        "rules": [
+          "产物路径 = output/{run_id}/{round}/{shot}/，round 2 永不覆盖 round 1 的 prompt 与素材",
+          "run.json 记录全部输入的内容哈希：prompt / 参考图 / 模型版本 / 参数 / 知识单元版本",
+          "复现验证：同哈希输入二次生成逐帧对比（对齐渲染可复现率 100% KPI）",
+          "critique 裁决按 round×shot 归档，任何一轮的问题可追溯到当轮输入"
+        ],
+        "source": "Shotkit（Apache 2.0）：round/shot 文件寻址 + 内容哈希 pin 输入 + 版本化审计",
+        "qc_checks": [
+          "重生是否永不覆盖旧 round？",
+          "run 输入是否全部哈希 pin？"
+        ]
+      }
     },
     "10.3_continuity_dependency_minimal_rework": {
       "title": "10.3 Continuity Dependency Graph + Minimal Rework Engine",
@@ -2418,6 +2501,21 @@
           }
         ],
         "fallback_rule": "映射未覆盖的缺陷类型→依次评估 R2 剪辑层→R3 编辑→R4 重生成；判别总纲：编辑改'呈现'，重生成改'采样'——问题出在模型怎么生成的（机制型失败），编辑救不了。"
+      },
+      "exploration_track": {
+        "principle": "R2/R3 修复的试探性生成与主管线双轨分离（DramaClaw Freezone）：探索轨自由试生成不影响 Canon 与版本图，满意结果一键提交回主管线。解决'修复试错污染版本链'与'编辑链衰减预算被迫消耗在试探上'。",
+        "rules": [
+          "探索轨生成不写入 Canon、不占用编辑链预算（预算从提交后算起）",
+          "探索轨素材可自由组合（画布式），提交时走 10.2 版本节点 + 依赖校验",
+          "探索轨开销计入项目预算但单镜上限减半",
+          "提交结果必须重新过 QC 门（探索不豁免质量）"
+        ],
+        "source": "DramaClaw Freezone 无限画布双轨制（主管线 + 画布探索，满意一键推回）",
+        "qc_checks": [
+          "探索轨是否确实不污染版本图？",
+          "提交是否重新过 QC？",
+          "探索开销是否计入项目预算？"
+        ]
       }
     },
     "10.4_episode_production_scheduler": {
@@ -2540,7 +2638,35 @@
         "连续失败会升级策略而不是无限Retry。",
         "Deadline/预算压力只能减少探索，不能绕过Hard Continuity Gate。",
         "Episode Lock前所有Accepted版本和State Commit可追溯。"
-      ]
+      ],
+      "retry_discipline": {
+        "principle": "批量任务的失败处理纪律（ArcReel 异步任务引擎）：逐项返回成败、重试只补失败项——不为已成功素材重复付费。",
+        "rules": [
+          "批量任务逐项记录成功/失败状态",
+          "重试仅对失败项发起，成功项直接复用",
+          "RPM 限速 + 图像/视频独立通道 + lease-based 调度",
+          "断点续传：任务级 checkpoint，恢复不重跑已完成"
+        ],
+        "source": "ArcReel 异步任务引擎（RPM 限速/lease 调度/断点续传/重试只补失败项）",
+        "qc_checks": [
+          "重试是否只补失败项？",
+          "断点续传是否验证过幂等？"
+        ]
+      },
+      "cost_visibility": {
+        "principle": "预算管控三档（指导文档 4.4）之下的资产级成本可见性：每次生成前后可查费用与实际用量（ArcReel）。",
+        "rules": [
+          "逐资产（图/视频/音频）记录模型、token/秒数、费用",
+          "生成前预估价 + 生成后实际扣费对账",
+          "成本随版本节点存档（回滚时知道这版花了多少）",
+          "看板按 beat 族/镜头/模型聚合展示"
+        ],
+        "source": "ArcReel 生成前后费用与实际用量可见",
+        "qc_checks": [
+          "单镜成本是否可追溯？",
+          "预估-实际偏差是否监控（防模型端计费异常）？"
+        ]
+      }
     },
     "10.5_multi_agent_production_orchestrator": {
       "title": "10.5 Multi-Agent Production Orchestrator",
@@ -3043,7 +3169,57 @@
         "每个最终镜头可追溯完整Agent/模型/Reference/QC/Approval链。",
         "Agent冲突有确定优先级；无法规则解决时暂停给人类。",
         "Episode Autopilot可以暂停、保存Checkpoint、人工决策后继续，而不是从头重跑。"
-      ]
+      ],
+      "collaboration_protocols": {
+        "principle": "编排器已有权限/交接/审批（authority_model/handoff_contract），缺 Agent 间的质量协作算法。补两种协议（FilmAgent 实证：多 Agent 协作优于单 Agent o1）。",
+        "debate_judge": "高分歧 DC 分叉（运镜/灯光/景别多方案争执不下）→ 2-3 个方案各自陈述依据（必须引用 DC 案例与 CF 风险）→ 导演 Agent 裁决并记录理由到 event_log。适用：T2 触发且方案得分差 <15%；常规节点直通不辩论。",
+        "critique_correct_verify": "剧本/分镜生成环：Director 初稿 → Screenwriter/Actor 批判（逻辑漏洞/动作可行性）→ 修正 → Verify 门禁。专拦'词典外动作幻觉'（对照 closed_action_lexicon 校验，如 standing suggest 类不存在动作）与跨场景矛盾。",
+        "source": "FilmAgent（HITsz-TMG，arXiv 2501.12909）Debate-Judge 与 Critique-Correct-Verify 协作算法",
+        "qc_checks": [
+          "辩论是否引用知识依据而非直觉？",
+          "Verify 是否对照闭合动作词典校验？",
+          "协作开销是否限制在高分叉节点？"
+        ]
+      },
+      "hierarchical_creative_config": {
+        "principle": "Shot Contract 管镜头级字段，缺场景/集级创意配置的统一下发。因子化创意配置 θ 由编排器持有，注入所有派生层 Agent 的 system prompt，保证编剧/分镜/生图/视频对'同一部片子'有一致理解——防止子 Agent 语义冲突与级联漂移（Co-Director 所称 semantic collisions / cascading failures）。",
+        "factors": "θ = θcs 创意风格（如冷峻悬疑/温暖治愈）× θnm 叙事模式（如单线倒计时/多线交汇）× θaa 美学原型（如高对比霓虹/低饱和尘埃）",
+        "injection": "θ 注入派生层全部 Agent（scripter/storyboarder/painter/dreamweaver）+ AM-15（评价时知悉目标风格）；严禁注入小说创作 agent（产物分层铁律）",
+        "source": "Co-Director（Google，arXiv 2604.24842）分层创意参数化（hierarchical parameterization）",
+        "qc_checks": [
+          "θ 变更是否触发 10.2 影响分析（下游失效范围）？",
+          "所有派生层 Agent 收到的 θ 是否同版本？",
+          "θ 是否未进入小说层 prompt（混注门禁）？"
+        ]
+      },
+      "context_discipline": {
+        "principle": "R5（prompt 膨胀）的系统性对策：主 Agent 只接收精炼摘要，大段原文/中间产物留在对应 Subagent 内处理（ArcReel subagent 架构）；会话复用 + 上下文压缩 + 渲染检查点断点续传（ViMax）。",
+        "rules": [
+          "原文/全量上下文永不进入主编排循环，Subagent 返回 ≤500 token 摘要",
+          "会话（session）跨阶段复用，历史压缩为结构化状态而非全文回放",
+          "渲染任务带检查点，中断后从最近检查点续跑（不重跑已完成步骤）",
+          "单次知识注入 ≤ 对应组（既有 L1/L2/L3 纪律不变）"
+        ],
+        "source": "ArcReel Subagent 上下文隔离 + ViMax context compaction / session reuse / render checkpoints",
+        "qc_checks": [
+          "主编排 Agent 单轮上下文是否 ≤ 阈值？",
+          "断点续传是否避免已完成步骤重复计费？"
+        ]
+      },
+      "stage_completeness_3e": {
+        "principle": "每阶段中间产物完整性协议（MAViS 3E Principle）：Explore（生成多方案）→ Examine（完整性检查）→ Enhance（补全增强）——不完整的中间产物禁止交接到下一阶段，把级联失败拦截在前置环节。",
+        "rules": [
+          "Explore：关键产物（剧本/分镜/资产）先出 2 案对照（与 R-pre 候选择优对齐）",
+          "Examine：按产物 schema 逐字段检查——剧本过闭合动作词典、分镜过镜头卡 12 字段、资产过保真清单",
+          "Enhance：缺口局部补全而非整产物重生成（编辑链预算纪律）",
+          "3E 不过 → 不交接：handoff_contract 增加 3E 门位，交接前必须过 Examine 清单"
+        ],
+        "source": "MAViS（EACL 2026）3E Principle：Explore, Examine, Enhance",
+        "qc_checks": [
+          "每阶段交接是否过 3E 门位？",
+          "Enhance 是否局部补全而非重生成？"
+        ]
+      }
     },
     "10.6_qc_acceptance_system": {
       "module": "10.6 Automated QC Matrix + Shot Acceptance Score + Hard Soft Gate System",
@@ -3110,6 +3286,38 @@
         "model_view": "repair_model（模型原理视角）：从生成机制修正——改用空间关系词代替标签、用参考图锚定身份、降低多变量并行、用时间分段控制情绪渐变等。",
         "priority_rule": "当失败源于'模型机制性缺陷'（cause 指向先验绑定/重采样/注意力均分/时间压缩等）时，以 repair_model 为主、repair 为辅；当失败源于'导演意图缺失'时，以 repair 为主。判定依据：cause 是否描述模型行为而非叙事意图。",
         "flow": "QC Fail → 分类（机制型 vs 意图型）→ 若机制型：查 failure_cases 的 repair_model → 生成模型原理修正后的 Prompt Adapter → 重新生成 → 成功率回写 Repair_Learning。"
+      },
+      "candidate_selection_gate": {
+        "principle": "把'生成→QC 失败→修复'的事后链路前移为'生成多候选→VLM 预评→只扩展高分分支'（AniMaker MCTS-Gen）。在视频生成这个最贵环节之前完成择优，直接压低 R4 整镜重生成率。",
+        "position": "先于 R0：生成前择优（R-pre）；R0-R6 仍管生成后修复，两级互补",
+        "scope": "高价值 beat：情绪爆发族 / 信息揭示族 / 冲突动作族（beat 七族路由判定）；常规镜头单候选",
+        "protocol": [
+          "每镜并行生成 ≤2 候选（图片层沿用 best_image_selector 既有模式，视频层新增）",
+          "VLM 按镜头卡 12 字段预评潜力分，仅高分候选进入视频生成/合成",
+          "低分候选归档备查，回流 CF 命中统计（学习回路燃料）",
+          "预算闸门：候选数 ≤2/镜，超预算需导演 Agent 批准"
+        ],
+        "source": "AniMaker（SIGGRAPH Asia 2025，arXiv 2506.10540）MCTS-Gen 多候选生成与选择",
+        "kpi": "R4 整镜重生成率 ≤30%（既有 KPI）；候选择优命中率（高分候选最终通过 QC 比例）≥70%",
+        "qc_checks": [
+          "高价值 beat 是否默认双候选？",
+          "预评是否在视频生成前完成？",
+          "低分候选是否归档供学习回路？"
+        ]
+      },
+      "machine_readable_critique": {
+        "principle": "QC 裁决双格式（Shotkit critique.json 模式）：人读报告与机读 JSON 并出，机读件直接供修复路由 / prompt 重编译消费——对齐「失败码评审输出结构化 JSON 无散文解析」既有原则，扩展到图像/视频批评层。",
+        "rules": [
+          "每镜 critique 输出 markdown（人读）+ critique.json（机读：verdict / 问题类别 / CF 命中 / 修复方向）",
+          "机读件 schema 对齐 qc_report_fields（20 字段），字段缺失即检查项缺失",
+          "critique.json 直接驱动 R-pre 重编译与 R0-R6 路由（无 LLM 再解析环节）",
+          "闭环纪律：批评 → 重编译 → 再批评，直至 verdict=pass 或预算止损（编辑链衰减预算约束）"
+        ],
+        "source": "Shotkit visual-asset-critic：机器可读裁决驱动 generate → critique → revise → re-critique 闭环",
+        "qc_checks": [
+          "每镜是否双格式输出？",
+          "机读件是否被修复路由直接消费（无再解析）？"
+        ]
       }
     },
     "10.7_production_learning_loop": {
@@ -3157,6 +3365,60 @@
         "staleness_check": "知识关联的模型版本落后当前 Model Router ≥2个主版本，或 added 超180天且内容依赖特定模型行为→标记 stale：L3 排序再乘0.7，并触发复验任务（复验通过刷新 added 与 verification_status）",
         "conflict_arbitration": "两个知识单元结论冲突时优先级：verified > pending；A级 > B级 > C级；同级取 added 更新者；无法仲裁→双方均进复验",
         "l3_integration": "L3 语义检索排序分 = 语义相关度 × trust_weight ×（stale?0.7:1）；source_type 与 verification_status 已列入 l3_index_schema 索引字段"
+      },
+      "creative_config_bandit": {
+        "principle": "Learning Loop 既有机制（修复成功率统计 + experience_preload）是纯利用（exploitation）；MAB 补上探索（exploration）半边：把创意配置形式化为因子化行动空间，在'探索未知有效配置'与'固化已验证配置'之间取得原则性平衡（Co-Director 首个把生成式叙事形式化为全局优化问题的工作）。",
+        "action_space": "θ = (θcs 创意风格, θnm 叙事模式, θaa 美学原型)——场景/集级创意配置，非镜头级（镜头级仍归 Shot Contract）",
+        "protocol": [
+          "编排器按 MAB 策略采样 θ(t)，经 10.5 hierarchical_creative_config 统一注入所有派生层 Agent",
+          "成片由 AM-15 输出因子化奖励 R = (rcs 创意风格分, rnm 叙事模式分, raa 美学原型分)",
+          "R 回传 MAB 更新各臂置信度，迭代 T 轮（T 默认 = 同项目集数）",
+          "收敛后的 Top 配置写入 Production_Memory 并经 experience_preload 固化为默认配置",
+          "与知识治理联动：已验证配置标记 verification_status=verified，未验证保持 pending"
+        ],
+        "source": "Co-Director（Google，arXiv 2604.24842）：MAB 全局优化 + 分层创意参数化 + MLLM Judge 因子化奖励回传",
+        "kpi": "探索轮配置的 AM-15 均分 ≥ 固化配置的 90%（防为探索而探索）；每项目沉淀 ≥1 组 verified 创意配置",
+        "qc_checks": [
+          "θ 是否只注入派生层（禁止进入小说创作 agent）？",
+          "因子化奖励是否由 AM-15 产出而非人工拍脑袋？",
+          "exploitation（preload）与 exploration（bandit）是否并行不互斥？"
+        ]
+      },
+      "trajectory_rlvr": {
+        "principle": "Learning Loop 三级爬坡的第三级：统计回写（现状）→ MAB 创意探索（creative_config_bandit）→ 轨迹级强化学习。Crayotter：制品接地（策略从可观察制品更新而非隐式推理轨迹）+ 三层级联奖励，GRPO 优化。",
+        "artifact_grounding": "所有编辑/修复决策落显式制品（时间线段/工具日志/渲染反馈），失败可定位到镜头段而非整片重跑——对齐调用审计四元组，反思环从制品出发。",
+        "reward_cascade": [
+          "第一层·可验证编辑信号：切点位置/爆音/黑帧/时长偏差等硬指标（ffprobe 系，零成本）",
+          "第二层·LLM-as-judge：AM-15 混合评审多维评分（专业质量）",
+          "第三层·人类偏好校准：导演顾问抽检（占比低但权威最高，覆盖前两层盲区）"
+        ],
+        "protocol": [
+          "训练样本 = 调用审计四元组 + R0-R6 修复轨迹（复用既有落库，不新增采集）",
+          "前置条件：≥500 条修复轨迹样本（Phase 3 实测数据积累后启动，Phase 3 期间不阻塞）",
+          "与 MAB 关系：MAB 优化创意配置（离散选择），RLVR 优化修复/编辑策略（连续轨迹），互不替代",
+          "止损：RLVR 模型表现劣于统计基线时回退统计模式"
+        ],
+        "kpi": "修复一次通过率在 MAB 阶段基础上再提升（60%→75% 目标）；失败定位粒度到镜头段",
+        "source": "Crayotter（开源，2026）：trajectory-level RLVR 三层级联奖励 + environment-grounded reflection，GRPO 优化",
+        "qc_checks": [
+          "奖励三层是否齐备且权重明确？",
+          "训练样本是否复用调用审计而非另起炉灶？",
+          "是否保留统计基线回退开关？"
+        ]
+      },
+      "audience_persona_feedback": {
+        "principle": "learning_loop 链路中 Audience Signal 位的实现方案（此前空缺）：persona-conditioned MLLM 以多观众人格看片给主观批评——自评无法覆盖的盲区（CHIEF，ICML'26 Workshop）。",
+        "protocol": [
+          "persona 集：3-5 个目标观众画像（年龄/性别/内容偏好），来源为目标平台画像",
+          "每集成片由各 persona 独立看片输出：钩子留存预判 / 情绪曲线 / 弃剧点定位",
+          "双轨评分：AM-15 导演标准分管专业质量，persona 分管观众反应；冲突时导演优先（Soft Gate 性质）",
+          "persona 反馈回流 Learning Loop 作观众信号源；可加权进 MAB 因子化奖励"
+        ],
+        "source": "CHIEF（arXiv 2606.18591）：persona-conditioned multimodal LLM 观众反馈 + creator-driven 迭代",
+        "qc_checks": [
+          "persona 集是否对齐目标平台画像？",
+          "persona 分是否只作 Soft Gate（不否决导演决策）？"
+        ]
       }
     },
     "10.8_to_10.12_final_merge_check": {
@@ -4130,8 +4392,8 @@
         "principle": "全模态感知模型负责'看懂'视频内容（场景/动作/景别/时间轴/音画），体系导演标准负责'判定'好坏（镜头卡12字段+六大要素+景别系统+失败库CF）。感知层输出结构化观测，评价层对照体系标准逐镜打分并归因——弥补通用VLM缺少导演判断标准的短板（ShotBench电影语法准确率<60%）。",
         "layers": {
           "感知层": "Qwen3-VL/通义全模态（国产对齐）：镜头切分、景别、机位、主体动作、对话、音效/音乐、秒级时间轴定位、音画同步。",
-          "评价层": "对照6.4镜头卡12字段 + 六大要素 + 景别系统 + 时长阈值 + 切换技法库 + CF失败库，逐镜输出 Pass/Fail/Warning 与归因。",
-          "产出层": "结构化视频评价报告：逐镜评分 + 失败命中(CF编号) + 修复建议(R0-R6) + 与脚本/Shot Contract 对比差异。"
+          "评价层": "对照6.4镜头卡12字段 + 六大要素 + 景别系统 + 时长阈值 + 切换技法库 + CF失败库，逐镜输出 Pass/Fail/Warning 与归因。｜2026-10 升级（混合主客观评审）：在 MLLM 逐镜评分之外增加客观指标通道——人脸一致性、动作识别/完成度、帧间形变误差、语义一致性；单通道与 MLLM 结论冲突或不过阈值时双通道仲裁，客观否决权限限于物理类指标（身份/形变）。新增跨镜头维度：故事级一致性（跨镜头情节连贯）、动作完成度贯穿评估。依据：AnimeAgent 实证 CLIP 类客观指标对艺术变形不敏感、MLLM 主观分不稳定，混合评审才可靠；AniEval（SIGGRAPH Asia 2025）首个多镜头评价框架四组维度。",
+          "产出层": "结构化视频评价报告：逐镜评分 + 失败命中(CF编号) + 修复建议(R0-R6) + 与脚本/Shot Contract 对比差异。｜2026-10 第三轮升级：产出层新增观众信号通道——persona-conditioned 多观众人格看片反馈（钩子留存预判/情绪曲线/弃剧点定位），与导演标准分双轨输出（冲突时导演优先，persona 分为 Soft Gate）；反馈回流 10.7 audience_persona_feedback 作学习信号源。依据：CHIEF（ICML'26 WS）persona-conditioned MLLM 反馈。"
         },
         "prompt_pattern": "感知Prompt：抽取每镜时间戳/景别/机位/主体动作/对话/音效/音乐；评价Prompt：'以此镜[X]对照景别系统判断信息供给是否匹配'+'是否触发EMOTION_STALL或CF-[编号]'；归因Prompt：输出 评分+证据+失败编号+修复建议。",
         "video_evaluation_report_template": {
@@ -4298,7 +4560,10 @@
           "评价是否逐条给出体系依据（编号/字段）而非泛泛而谈？",
           "命中失败库时是否给出对应 CF 编号与修复方向？",
           "音画协同维度是否被评估（不止视觉）？",
-          "评价结果是否回流 Production_Memory 供学习循环？"
+          "评价结果是否回流 Production_Memory 供学习循环？",
+          "客观指标通道与 MLLM 主观评分是否都产出且冲突时有仲裁规则？",
+          "跨镜头故事一致性与动作完成度是否被评估（不止单镜）？",
+          "观众 persona 反馈是否与导演标准分双轨输出且冲突时导演优先？"
         ]
       },
       {
@@ -4567,5 +4832,1294 @@
       "LOCK 后普通 Agent 是否无法覆盖？",
       "多参考图合成是否按角色/角色 role 引用而非硬拼？"
     ]
+  },
+  "knowledge_units": {
+    "status": "2026-10-07 外部对照调研补充板块｜知识单元内容登记处。core_knowledge 各域为单元 id 索引，新增单元的完整内容在本板块定义（实现 JSON SSOT 自包含 + depends_on 依赖追踪）。治理扩展：source_type 新增 external_paper（同行评审证据，初始信任 0.7）/ external_opensource（工程实践证据，初始信任 0.6），升级条件同 B 级（5 次调用 + 删除测试全过 → A 级 1.0）。",
+    "units": {
+      "disney_two_stage_keyframe": {
+        "domain": "production",
+        "title": "迪士尼两阶段关键帧法：I2V 轨迹 → 极限帧选取",
+        "principle": "动作戏关键帧不应由 T2I 直接'摆拍'，而应先让 I2V 生成运动轨迹再从中选取极限帧（迪士尼 Straight Ahead + Pose to Pose 两阶段工作流的生成式实现）。",
+        "content": [
+          "两阶段流程：角色参考图锚定首帧（视觉 dope-sheet）→ I2V 生成连续轨迹 → 选取最具表现力的 EXTREMES 作为关键帧",
+          "适用范围：冲突动作族 / 多角色接触交互 / 表现力要求高的镜头；情绪/对话/建置类仍走 T2I",
+          "与 DC-037 联动：本单元是知识内容，DC-037 是决策入口",
+          "成本纪律：I2V 轨迹纳入候选择优预算（≤2 次/镜），选帧不达标回退重生成计入编辑链预算"
+        ],
+        "source_project": "AnimeAgent（vivo/UESTC，arXiv 2602.20664）",
+        "source": "迪士尼动画原理 Twelve Basic Principles 之 Straight Ahead & Pose to Pose；AnimeAgent I2V 化实证",
+        "added": "2026-10-07",
+        "source_type": "external_paper",
+        "verification_status": "pending",
+        "trust_weight": 0.7,
+        "depends_on": [
+          "shot_specification",
+          "action_cut_timing"
+        ],
+        "qc_checks": [
+          "冲突动作族是否优先启用两阶段法？",
+          "I2V 首帧是否用角色参考图锚定？",
+          "EXTREMES 是否通过动作链完整性检查？"
+        ]
+      },
+      "story_graph_ingestion": {
+        "domain": "production",
+        "title": "Story Graph 摄取：小说 → 可查询故事图",
+        "principle": "剧本生成的输入不应是原文检索片段，而是可查询的故事图（角色-关系-时间线三轴图谱）——scripter 走图查询而非读原文。",
+        "content": [
+          "小说 → 故事图：抽取角色/关系/时间线/事件为图节点与边（DramaClaw 以 Cognee 实现同构）",
+          "scripter 查询图而非读原文：'第 12-14 章两人关系如何演变'直接走图查询",
+          "伏笔账本/实体状态挂载为图属性，与小说层 review_meta 打通（只读）",
+          "图谱随章节冻结同步更新，派生层只读，改编产物不回写"
+        ],
+        "source_project": "DramaClaw（开源短剧工业管线，2026 GitHub Trending）",
+        "source": "DramaClaw Ingest 阶段 Story Graph（Cognee）：角色/关系/时间线可查询图谱",
+        "added": "2026-10-07",
+        "source_type": "external_opensource",
+        "verification_status": "pending",
+        "trust_weight": 0.6,
+        "depends_on": [
+          "world_space",
+          "causal_continuity"
+        ],
+        "qc_checks": [
+          "scripter 是否查询图而非全文检索？",
+          "图谱是否只读且随章节冻结同步？"
+        ]
+      },
+      "skeleton_binding_high_motion": {
+        "domain": "production",
+        "title": "高动态场景骨骼绑定：从 prompt 修复到机制锁定",
+        "principle": "高强度动作场景的身份/手部稳定性从'prompt 修复'升级为'骨骼绑定'（3D/2.5D 建模 + 自动绑骨，运动由骨架驱动），从机制上杜绝变脸与手畸变。",
+        "content": [
+          "触发条件：同角色 ≥3 镜高动态（打斗/舞蹈/大幅运动）且 R3 局部编辑 2 轮未过（对齐 CF-021/CF-029/CF-082）",
+          "实现链：角色 3D/2.5D 建模 → 自动骨骼绑定 → 运动驱动 → 渲染为各模型可用的图像/视频参考",
+          "成本分级：主角+高频角色值得绑定成本；配角走参考图 + 拆镜降载",
+          "与修复路由联动：骨骼绑定作为 repair_model 的机制级升级路径（R3 → 绑定资产而非继续 prompt 修补）"
+        ],
+        "source_project": "Toonflow（开源 AI 短剧工厂，10k+ stars）",
+        "source": "Toonflow 骨骼绑定防脸变形：3D/2.5D 角色建模 + 自动骨架绑定，打斗/舞蹈等高动态场景优势显著",
+        "added": "2026-10-07",
+        "source_type": "external_opensource",
+        "verification_status": "pending",
+        "trust_weight": 0.6,
+        "depends_on": [
+          "visual_dna",
+          "model_router"
+        ],
+        "qc_checks": [
+          "触发条件是否满足才启用（非默认全量绑定）？",
+          "绑定资产是否入 Asset Graph 管理版本？"
+        ]
+      },
+      "closed_action_lexicon": {
+        "domain": "character",
+        "title": "闭合动作词典：从源头拦截动作幻觉",
+        "principle": "动作描述必须来自闭合词典：词典内动作直接用，新动作先注册再使用——从源头拦截'不存在的动作'幻觉（FilmAgent 21 动作空间的泛化）。",
+        "content": [
+          "基础动作词典：站/坐/走/跑/伸手/转身/点头/摇头/拥抱/挥手/跌倒/跃起/后退/鞠躬…按题材扩展（武侠：抱拳/拔剑/翻身…）",
+          "Critique-Correct-Verify 环对照词典校验剧本动作（FilmAgent 实证拦下 standing suggest 类幻觉动作）",
+          "词典条目绑定表演 DNA：每动作附力度/节奏/预备动作描述，与 performance_dna 联动",
+          "动作物理修饰：动作描述多写重量、惯性和重力（重物砸落/惯性摆动/重力加速下坠），模型才能生成符合物理规律的运动——物理修饰词与词典动作绑定，写入 Shot Contract action 字段与 I2V prompt 动作段（Higgsfield 长片工作流，大象学长第27集）",
+          "新动作注册流程：导演确认 → 词典入库 → 附实现要点与已知坑点"
+        ],
+        "source_project": "FilmAgent（HITsz-TMG，arXiv 2501.12909）",
+        "source": "FilmAgent 21 动作封闭集合 + Critique-Correct-Verify 拦截词典外动作幻觉",
+        "added": "2026-10-07",
+        "source_type": "external_paper",
+        "verification_status": "pending",
+        "trust_weight": 0.7,
+        "depends_on": [
+          "performance_dna",
+          "behavior_dna"
+        ],
+        "qc_checks": [
+          "剧本/分镜动作是否全部在词典内或已注册？",
+          "Verify 环是否对照词典校验？"
+        ]
+      },
+      "multi_angle_reference_collage": {
+        "domain": "image_generation",
+        "title": "多角度参考拼图：角色资产四视图标准",
+        "principle": "角色资产标准从单张定妆图升级为多角度参考拼图（正面/四分之三/侧面/背面），服装由剧情驱动合成——两个独立项目（AI168 四视图 / Co-Director 多角度拼图）收敛验证的实践。",
+        "content": [
+          "拼图配方：基础形象 × 剧情驱动服装（Storyline 决定 wardrobe）→ 四视图拼图（正/四分之三/侧/背）",
+          "用途：跨镜/跨模型身份锚定的最强参考形态（对齐 CF-082 跨模型身份漂移修复）",
+          "生成纪律：单张定妆图先行验收，再扩展拼图（避免整图重 roll）；保真清单协议（PRESERVE/CHANGE）沿用",
+          "成本分级：主角全四视图；次要角色正面+侧面两视图"
+        ],
+        "source_project": "AI168漫剧（Apache 2.0）+ Co-Director（Google，arXiv 2604.24842）",
+        "source": "AI168 四视图参考图（正/四分之三/侧/背）；Co-Director Visual Assets：剧情驱动服装合成多角度参考拼图（multi-angle reference collages）",
+        "added": "2026-10-07",
+        "source_type": "external_opensource",
+        "verification_status": "pending",
+        "trust_weight": 0.6,
+        "depends_on": [
+          "visual_dna",
+          "wardrobe_dna",
+          "asset_generation_formula"
+        ],
+        "qc_checks": [
+          "主角资产是否含四视图？",
+          "拼图是否从已验收定妆图扩展而非重 roll？",
+          "服装是否由剧情驱动合成？"
+        ]
+      },
+      "hybrid_review_protocol": {
+        "domain": "production",
+        "title": "混合主客观评审协议",
+        "principle": "评价不可依赖单通道：MLLM 主观分不稳定、CLIP 类客观指标对艺术变形不敏感——混合主客观评审才可靠（AnimeAgent 实证；AniEval 四组评价维度）。",
+        "content": [
+          "客观通道：人脸一致性 / 动作识别与完成度 / 帧间形变误差（Warping Error）/ 语义一致性",
+          "主观通道：AM-15 MLLM 逐镜评分（镜头卡 12 字段 + CF 库依据）",
+          "仲裁规则：双通道结论冲突或单通道不过阈值 → 混合裁决；客观否决权限限于物理类指标（身份/形变）",
+          "跨镜头维度：故事级一致性 + 动作完成度贯穿评估（AniEval：整体质量/文本-视频对齐/视频一致性/动作质量四组）"
+        ],
+        "source_project": "AnimeAgent（arXiv 2602.20664）+ AniMaker（SIGGRAPH Asia 2025，arXiv 2506.10540）",
+        "source": "AnimeAgent 实证 CLIP 对艺术变形不敏感、MLLM 评分不稳定，需混合评审；AniEval 首个多镜头动画评价框架",
+        "added": "2026-10-07",
+        "source_type": "external_paper",
+        "verification_status": "pending",
+        "trust_weight": 0.7,
+        "depends_on": [
+          "qc",
+          "repair_or_regenerate"
+        ],
+        "qc_checks": [
+          "客观与主观通道是否都产出且冲突有仲裁？",
+          "跨镜头故事一致性与动作完成度是否被评估？"
+        ]
+      },
+      "candidate_selection_before_commit": {
+        "domain": "production",
+        "title": "生成前候选择优（R-pre）：把择优前移到最贵环节之前",
+        "principle": "最贵的环节（视频生成）之前完成择优：并行多候选 + VLM 预评 + 只扩展高分分支（AniMaker MCTS-Gen 树搜索式预算控制）——把'生成→QC 失败→修复'的事后链路前移。",
+        "content": [
+          "适用范围：高价值 beat（情绪爆发族/信息揭示族/冲突动作族）双候选；常规镜头单候选",
+          "预评协议：按镜头卡 12 字段打潜力分，仅高分候选进入视频生成/合成",
+          "低分候选归档回流 CF 命中统计（失败样本也是学习回路燃料）",
+          "预算闸门：候选 ≤2/镜，超限需导演 Agent 批准",
+          "图片层沿用拾光工坊 best_image_selector 既有模式，视频层为新增"
+        ],
+        "source_project": "AniMaker（SIGGRAPH Asia 2025，arXiv 2506.10540）",
+        "source": "AniMaker Photography Agent MCTS-Gen：多候选片段生成 + VLM 高潜力选择，预算受控探索",
+        "added": "2026-10-07",
+        "source_type": "external_paper",
+        "verification_status": "pending",
+        "trust_weight": 0.7,
+        "depends_on": [
+          "qc",
+          "repair_or_regenerate",
+          "model_router"
+        ],
+        "qc_checks": [
+          "高价值 beat 是否默认双候选？",
+          "预评是否在视频生成前完成？",
+          "低分候选是否归档供学习回路？"
+        ]
+      },
+      "script_generator_compatibility": {
+        "domain": "production",
+        "title": "剧本-生成器兼容性指南：剧本是生成器输入规格",
+        "principle": "剧本不是文学文本，是生成器的输入规格——按生成模型能力限制约束写法（MAViS Script Writing Guidelines），同时以吸引力结构保证叙事质量（MM-StoryAgent 吸引力导向写作 + 短视频 HOOK/BODY/CTA 结构）。",
+        "content": [
+          "生成器友好约束：动作可见化（写可拍动作而非心理描写）；场景数/角色数受生成能力上限约束；避开生成模型已知弱项（镜子/群演/复杂手物交互）作为关键剧情载体",
+          "吸引力结构：开场 3 秒钩子（HOOK）→ 主体 3-5 拍（BODY）→ 结尾互动引导（CTA）；每集结尾留悬念钩（与小说层伏笔账本对齐）",
+          "台词/旁白时长预算：语速 150wpm 基准，词数 ≈ 时长(s)×2.5；对白镜头时长不足先删词再加秒（TerminalSkills 语速预算公式）",
+          "生成端台词长度约束（2026-10-07 增，video_model_capability_watch O4 配套）：每镜角色对白 ≤2 句——视频模型原生音频 ~2 句内可靠（Vidu Q3 实测：复杂对话 >2 句口型浮漂；Versely：长台词截断/含混风险）；超出拆为相邻 beat 或转旁白（旁白走后期 TTS 轨，无口型约束不受限）",
+          "多阶段写作：梗概 → 节拍 → 台词三段走，每阶段过 3E 完整性检查（Explore/Examine/Enhance，见 10.5 stage_completeness_3e）"
+        ],
+        "source_project": "MAViS（EACL 2026）+ MM-StoryAgent（阿里 X-PLUG）+ TerminalSkills ai-video-generator",
+        "source": "MAViS Script Writing Guidelines（剧本适配生成器能力限制）；MM-StoryAgent Attractiveness-Oriented 多阶段写作；短视频 HOOK(3s)/BODY/CTA 结构与 150wpm 语速预算；台词长度约束：Vidu Q3 官方 risks + Versely native-audio 指南（2026-10-07 检索）",
+        "added": "2026-10-07",
+        "source_type": "external_paper",
+        "verification_status": "pending",
+        "trust_weight": 0.7,
+        "depends_on": [
+          "shot_specification",
+          "prompt_compiler"
+        ],
+        "qc_checks": [
+          "剧本是否避开生成器弱项作为关键载体？",
+          "每集是否有开场钩子与结尾悬念钩？",
+          "对白词数是否按时长预算换算？",
+          "每镜角色对白是否 ≤2 句（生成端口型截断风险）？"
+        ]
+      },
+      "location_grounded_planning": {
+        "domain": "continuity",
+        "title": "地点锚定规划与多主体感知转场",
+        "principle": "背景一致性靠「地点资产锚定」而非 prompt 复述：每个地点先建独立资产（多角度参考），场景规划绑定地点资产 ID；多主体入画/出画必须显式转场建模（InfinityStory，VBench 背景一致性 88.94 最高分）。",
+        "content": [
+          "地点资产卡：每地点独立资产（多角度+昼夜/光照变体），场景引用地点 ID 而非重新文字描述",
+          "三段绑定：场景 → 地点资产 → 背景参考图；换景 = 换资产引用，杜绝同场景背景漂移",
+          "主体感知转场：角色入画/出画显式建模（进入方向/画面位置/遮挡关系），禁止主体突然消失/出现——作为切换技法库（cut_technique_library）补充条目",
+          "与 world_space/screen_space 联动：地点资产是世界空间的锚点实现，主体转场约束进银幕空间检查",
+          "环绕视频抽帧法（地点资产生产增强，pending 设计推断）：先生成场景 360° 环绕视频（广角慢速——广角建立镜头提供最稳定空间数据），按方位角抽帧（8/12/16 方向）→ 天然几何一致的多角度参考图组。核心优势：帧间空间关系由视频时序天然约束（vs 逐张生成多角度图的空间错位风险）；特定角度帧可直接作各镜头 I2V 首帧（Master Reference 锚定模式）。前提：抽帧前须过回环一致性检查（AM-15 首尾帧比对——普通模型环绕视频存在累积漂移）。边界：环绕视频直接作视频模型参考资产当前不可行——参考机制是运动复刻（motion/camera transfer）而非场景理解，模型无空间检索能力；环绕视频是「生产多角度参考图的机器」而非直接参考资产，待 3D Cache 类能力（Pantheon360，arXiv 2605.25449）产品化后可升级为直接路径。来源：Pantheon360 / Hailuo Director Mode / nat.io World Persistence 2026-10 检索"
+        ],
+        "source_project": "InfinityStory（Adobe，arXiv 2603.03646）",
+        "source": "InfinityStory location-grounded planning（背景一致性）+ character-aware shot transitions（多主体入画/出画转场建模，含 10k 多主体转场数据集）；环绕视频抽帧法：Pantheon360（arXiv 2605.25449）+ Hailuo Director Mode + nat.io World Persistence（2026-10 检索）",
+        "added": "2026-10-07",
+        "source_type": "external_paper",
+        "verification_status": "pending",
+        "trust_weight": 0.7,
+        "depends_on": [
+          "world_space",
+          "screen_space"
+        ],
+        "qc_checks": [
+          "场景是否引用地点资产 ID 而非重复描述？",
+          "角色入画/出画是否有显式转场建模？",
+          "环绕视频抽帧是否先通过回环一致性检查（AM-15 首尾帧比对）？"
+        ]
+      },
+      "world_space": {
+        "domain": "continuity",
+        "title": "世界空间（World Space：场景布局与尺度的显式建模）",
+        "principle": "AI 视频模型无场景空间先验——世界空间必须显式建模并文字化注入（环境布局+机位位置+尺度参照），镜头间空间关系才能一致。",
+        "content": [
+          "空间地图：每个新场景先文字化环境布局（房间结构/门窗位置/家具锚点）+ 摄影机位置与朝向声明，帮助模型建立空间理解——是 location_grounded_planning 地点资产卡的文字形态（Higgsfield《HELL GRIND》95分钟长片工作流）",
+          "先全景后近景：场景镜头序列先放全景建立空间与人物位置关系，再切近景——全景锚定空间，近景角色位置不漂移（位置稳定性策略，与开场建置族 beat 路由呼应）",
+          "参照物锚定尺度：画面加入熟悉参照物（门/椅/桌等日常物体）直观展示人物大小比例——模型无尺度先验，参照物是唯一可靠尺度锚点（场景资产放置明显参照物+明确人物位置关系）"
+        ],
+        "source_project": "Higgsfield《HELL GRIND》（95分钟AI长片）",
+        "source": "大象学长第27集拆解 Higgsfield 长片工作流：空间地图 / 先全景后近景 / 参照物锚定尺度",
+        "added": "2026-10-07",
+        "source_type": "creator_tutorial",
+        "verification_status": "pending",
+        "trust_weight": 0.7,
+        "depends_on": [],
+        "qc_checks": [
+          "每个新场景是否先建立空间地图（环境布局+机位位置文字化）？",
+          "场景首个镜头是否用全景建立空间关系？",
+          "需要尺度感知的画面是否有参照物？"
+        ]
+      },
+      "internal_motion_priority": {
+        "domain": "cinematography",
+        "title": "内运动优先：固定镜头 + 画面内动态",
+        "principle": "低运镜服从度模型的工程解法：固定镜头注入画面内动态优先，微运镜分级注入，动态密度自检——与 DC-035 运镜映射构成「首选运镜 → 服从度不足 → 降级内运动」完整链（AI漫剧Skills v9.0 内运动体系）。",
+        "content": [
+          "降级链：DC-035 选定运镜 → 模型服从度评估（高/中/低，参照模型执行词典）→ 低服从度时降级为固定机位 + 画面内动态",
+          "画面内动态注入：主体动作 / 前景飘动物 / 光影变化 / 景深呼吸——替代镜头运动提供信息增量",
+          "微运镜分级：subtle drift / micro push-in（1-2%/帧）作为固定与常规运镜之间的中间档",
+          "动态密度自检：每镜 ≥1 个画面内动态源；静态镜组按 EMOTION_STALL_CHECK 拦截（对齐 CF-088）"
+        ],
+        "source_project": "AI漫剧Skills（gitee，v9.0.0 内运动体系）",
+        "source": "AI漫剧Skills v9.0：固定镜头注入画面内动态 + 微运镜分级 + 动态密度自检",
+        "added": "2026-10-07",
+        "source_type": "external_opensource",
+        "verification_status": "pending",
+        "trust_weight": 0.6,
+        "depends_on": [
+          "shot_specification"
+        ],
+        "qc_checks": [
+          "低服从度场景是否优先降级内运动而非硬写运镜？",
+          "每镜是否通过动态密度自检？"
+        ]
+      },
+      "model_tiered_duration": {
+        "domain": "production",
+        "title": "模型分档时长参数化",
+        "principle": "时长阈值不是全局常量，随模型能力分档参数化：段上限/单镜上限/最短镜随模型版本标定（AI漫剧Skills：段上限 15s/30s、单镜上限 15s/25s 按 Seedance 2.0/2.5 分档）。",
+        "content": [
+          "分档参数表：model_router 每家族挂 duration_tier 字段（段上限/单镜上限/最短镜）",
+          "取值链：全局阈值（0.3/0.5/6s + 类型系数 + 呼吸等待）→ 模型档位 clamp → Shot Contract 终值",
+          "模型入库流程：新模型版本先标定 duration_tier 再放开路由权重",
+          "降级兼容：低档模型自动 clamp 到其档位上限，禁止超限下发 Contract"
+        ],
+        "source_project": "AI漫剧Skills（gitee，v9.0.0 模型分档）",
+        "source": "AI漫剧Skills v9.0：时长体系按模型参数化（段上限 15s/30s，单镜上限 15s/25s，模型选择提问分档）",
+        "added": "2026-10-07",
+        "source_type": "external_opensource",
+        "verification_status": "pending",
+        "trust_weight": 0.6,
+        "depends_on": [
+          "model_router",
+          "shot_specification"
+        ],
+        "qc_checks": [
+          "Shot Contract 时长是否被模型档位 clamp？",
+          "新模型入库是否先标定 duration_tier？"
+        ]
+      },
+      "sparse_keyframe_cot": {
+        "domain": "production",
+        "title": "稀疏关键帧视觉思维链（预演轻量形态）",
+        "principle": "视觉思维链：MLLM 在剧情关键时刻生成稀疏关键帧快照，作为推理中间态引导视频生成（VChain，ACL 2026）——预演从「整段预演」细化为「关键节点快照推理」。",
+        "content": [
+          "触发条件：复杂多步场景（状态转移多/物理因果链长）整段直生成风险高时启用",
+          "流程：Beat 关键节点 → MLLM 生成稀疏关键帧快照 → 快照间状态连续性校验 → 以快照为约束分段生成",
+          "与 AM-09 预演联动：作为预演的轻量形态（单帧成本远低于整段预演），先快照后预演再生成",
+          "与 DC-037 联动：快照法与 I2V 轨迹选帧互补——静态复杂场景用快照，动作场景用轨迹"
+        ],
+        "source_project": "VChain（ACL 2026 Findings）",
+        "source": "VChain chain-of-visual-thought：MLLM 生成稀疏关键帧快照，在关键时刻做推理时视觉状态适配（sparse inference-time adaptation）",
+        "added": "2026-10-07",
+        "source_type": "external_paper",
+        "verification_status": "pending",
+        "trust_weight": 0.7,
+        "depends_on": [
+          "previsualization_qc"
+        ],
+        "qc_checks": [
+          "快照间状态连续性是否校验？",
+          "是否优先于整段预演（成本分层）？"
+        ]
+      },
+      "shot_size_system": {
+        "domain": "cinematography",
+        "title": "五级景别系统与景别变化顺序",
+        "principle": "景别不是情绪公式，而是信息供给的粒度调节：景别越近，信息越聚焦主体内心；越远，信息越偏向环境与语境。景别 = 镜头中主体在画幅内的占比。",
+        "content": [
+          "五级景别：远景 LS 建立环境/空间规模/氛围；全景 FS 展示主体全貌与活动空间/关系位置；中景 MS 平衡环境与人物（最接近日常观察距离，适合对话与动作）；近景 CU 聚焦表情/心理/潜台词；特写 ECU 强调单一细节/物件/微表情（信息强度最高、语境最弱）",
+          "景别变化顺序八式：P1 叙事流 LS→FS→MS→CU（默认开场：先空间后关系再情感）；P2 反向流 CU→MS→LS（悬念揭示/倒叙开篇/反应优先）；P3 渐进靠近 MS→CU→ECU（情绪升级/对峙白热化）；P4 渐进拉远 ECU→CU→MS→LS（孤独感/悲剧收束/开放式余味）；P5 跳切反差 LS↔ECU（爆点/震惊/硬切落点/梦境切换）；P6 同景别保持 stay on MS/CU（审讯/冷静对峙/纪录感/持续注视）；P7 对称呼应 A-CU→B-CU→A-CU（权力对等/镜像关系/双主角对话）；P8 特写起手 ECU→MS→LS（关键道具亮相/悬念钩子/信息优先于空间）",
+          "决策纪律：P1-P8 是默认参考非硬规则；任何景别变化必须服务信息/情绪距离/空间关系之一（CF-034 拦截无动机机械交替）；每次变化回答『改变了什么信息供给』",
+          "动作类快切联动（DC-033）：动作单元必须 CU/ECU/Insert 而非 WS/MS——特写掩盖物理位移穿帮 + 观众心理补偿被省略的中间动作 + 弱化跳轴；特写只演关键物理节点（接触/发力/反应），完整过程由观众脑补"
+        ],
+        "source_project": "AI Director OS V5.0 原生知识",
+        "source": "三件套 DOCX Master 卷二 2.1.1 五级景别系统 / 2.1.2 景别变化顺序决策表",
+        "added": "2026-08-16",
+        "source_type": "benchmark",
+        "verification_status": "verified",
+        "trust_weight": 1.0,
+        "depends_on": [
+          "lens_camera_distance_perspective"
+        ],
+        "qc_checks": [
+          "每次景别变化是否回答了『改变了什么信息供给』？",
+          "景别顺序是否匹配叙事意图（P1-P8）而非机械交替（CF-034）？",
+          "动作类快切是否用 CU/ECU/Insert（DC-033）？"
+        ],
+        "content_backfilled": "2026-10-07",
+        "backfill_origin": "V5.0 基线（DOCX 卷二 2.1.1/2.1.2）"
+      },
+      "technique_interference_check": {
+        "domain": "cinematography",
+        "title": "技巧干涉检查与叠加预算（阶段③预检）",
+        "principle": "生成前拦截优于生成后修复：阶段③预检套件在 Shot Contract 层打回矛盾，不进生成。三类预检：CF 风险前置（T3）+ 光学一致性预检 + 技巧干涉检查。",
+        "content": [
+          "光学一致性预检规则：景别=特写 × 焦距=广角 → 矛盾（广角特写属畸变风格，必须显式声明 distortion intent 才放行）；景别=远景 × 长焦 → 需声明空间压缩意图，否则按矛盾打回",
+          "技巧干涉五类冲突：目的冲突（两技巧争夺同一戏剧目的）/ 节奏冲突（快切 <1s/镜 × 复杂运镜）/ 风格冲突（自然主义灯光 × 强风格化调色）/ 物理冲突（运镜 × 固定景别标注失效）/ 过载冲突（主动技巧 >2/镜）",
+          "叠加预算：每镜主动技巧 ≤2、主导技巧 =1；本镜以运镜为主导时，灯光/剪辑只作支持位",
+          "运镜时长约束：推/拉镜需 ≥3s 才能完成心理量变；快切序列（<1s/镜）禁用复杂运镜",
+          "冲突处理：冲突技巧按优先级删除——主导技巧保留，支持位让路；删除后须复检是否留下『无技巧裸镜』（配合删除测试）"
+        ],
+        "source_project": "AI Director OS V5.0 原生知识",
+        "source": "三件套 DOCX Master 卷五 阶段③预检套件（2026-08-17 集成）+ 卷二 2.1.3 运镜约束",
+        "added": "2026-08-17",
+        "source_type": "benchmark",
+        "verification_status": "verified",
+        "trust_weight": 1.0,
+        "depends_on": [
+          "movement_motivation",
+          "motivated_lighting"
+        ],
+        "qc_checks": [
+          "每镜主动技巧是否 ≤2 且主导技巧 =1？",
+          "快切序列（<1s/镜）是否禁用了复杂运镜？",
+          "特写×广角等光学矛盾是否在 Contract 层打回（未声明 intent 不放行）？"
+        ],
+        "content_backfilled": "2026-10-07",
+        "backfill_origin": "2026-08-17 摄影决策层+阶段③预检套件集成（DOCX 卷五）"
+      },
+      "camera_lighting_prompt_lexicon": {
+        "domain": "cinematography",
+        "title": "摄影/灯光 Prompt 执行词典（导演语言→模型语言翻译层）",
+        "principle": "导演语言必须翻译为模型可执行语言并标注服从度；低服从项强制走参考图路径，禁止纯文字实现。",
+        "content": [
+          "三档服从度：高——时间/氛围/方向类文字可控；中——造型光（侧光/光比）与运镜速度（需量化词 very slow/slow/quick）；低——crane 升降/大横移、精确光位/硬阴影 → 必须参考图或首尾帧条件控制",
+          "翻译示例：缓慢推近（情绪收紧）→ slow dolly-in, camera gradually pushes toward the subject's face, very steady movement（服从度：中）",
+          "灯光服从度：时间/氛围/方向高；造型光（侧光/光比）中；精确光位/硬阴影低 → 参考图实现",
+          "大幅运镜的景别标注改为起止景别（如 ECU→CU），避免单点标注与运动物理冲突",
+          "执行纪律：Prompt 翻译必须走本词典且服从度达标，否则阶段③预检打回（衔接 technique_interference_check）"
+        ],
+        "source_project": "AI Director OS V5.0 原生知识",
+        "source": "三件套 DOCX Master 卷五 摄影术语翻译层（2026-08-17 集成）",
+        "added": "2026-08-17",
+        "source_type": "benchmark",
+        "verification_status": "verified",
+        "trust_weight": 1.0,
+        "depends_on": [
+          "movement_motivation",
+          "motivated_lighting"
+        ],
+        "qc_checks": [
+          "导演语言是否全部翻译为模型语言并标注服从度？",
+          "低服从项（crane/精确光位）是否强制走参考图路径？",
+          "运镜速度词是否量化（very slow/slow/quick）？"
+        ],
+        "content_backfilled": "2026-10-07",
+        "backfill_origin": "2026-08-17 摄影决策层集成（DOCX 卷五翻译层）"
+      },
+      "cinematography_decision_library": {
+        "domain": "cinematography",
+        "title": "摄影决策库总纲：戏剧目的→运镜/灯光映射",
+        "principle": "摄影决策总纲：戏剧目的→技巧映射。运镜八映射（DC-035）与灯光八映射（DC-036）为 dispatch 入口，沿决策链执行；技巧服务于戏剧目的而非炫技。",
+        "content": [
+          "运镜八映射（DC-035）：揭示（世界/关键物首次亮相）→pull-back reveal 缓慢拉远；情绪收紧/压迫→slow push-in；不安/危险潜伏→slow creep 或 unsettled drift；权力关系变化→升/降机位（俯视压低/仰视抬高）；孤立/失落→缓慢拉远+主体占比缩小；主观化/失稳→handheld（subtle natural shaking）；客观旁观/让表演发力→locked-off 固定机位（最被低估的『运镜』）；建置空间→establishing sweep 缓慢横移",
+          "灯光八映射（DC-036）：对峙/内心分裂→侧向硬光（伦勃朗式，主体面向光源45°）；审问/压迫→顶光（眼窝阴影，配俯角机位）；温暖回忆/安全→暖色窗光+柔光（大光源低对比）；秘密/阴谋→低调单源光（大面积黑）；虚伪的和谐/体制化→均匀平光（消除阴影=消除真相层次）；情绪崩塌/真相揭露→光比拉大（fill 减少，阴影吞噬）；夜晚不安→冷色月光/单点实用光源；日常真实→动机窗光（光源在场景内可见或可推断）",
+          "灯光决策链：光源类型（真实/设计）→方向→光质→光比→填充/负填充→主体分离→色彩关系→动态行为",
+          "服从度分界（camera_lighting_prompt_lexicon）：低服从项走参考图；跨镜灯光变化写入 lighting_state 字段并随 State Transition 重算"
+        ],
+        "source_project": "AI Director OS V5.0 原生知识",
+        "source": "三件套 DOCX Master 卷二 2.1.3 运镜选型决策表 / 2.1.4 灯光选型决策表（DC-035/036 配套总纲）",
+        "added": "2026-08-17",
+        "source_type": "benchmark",
+        "verification_status": "verified",
+        "trust_weight": 1.0,
+        "depends_on": [
+          "shot_size_system",
+          "movement_motivation",
+          "motivated_lighting"
+        ],
+        "qc_checks": [
+          "运镜是否对应信息/心理/空间三类变化之一（无变化→固定机位，CF-014）？",
+          "灯光是否有场景内动机（motivated_lighting 总则）？",
+          "本镜是否只有一个主导技巧位？"
+        ],
+        "content_backfilled": "2026-10-07",
+        "backfill_origin": "2026-08-17 摄影决策层集成（DOCX 卷二 2.1.3/2.1.4）"
+      },
+      "cut_technique_library": {
+        "domain": "director_reasoning",
+        "title": "切换技法库：四技法与 Cut Motivation 映射",
+        "principle": "切换技法解决『镜头之间怎么切』——四技法选型必须服务信息供给与情绪目标（衔接 Cut Motivation），不能为炫技而用（删除测试拦截）。",
+        "content": [
+          "四技法：快切——短频快切换，每段保留 0.2-0.5s，打节奏（须遵循硬切落点三规则与时长阈值；过快触发 CF-089）；跳切——同主体、相近景别、相似角度，跳过中间环节，时间省略/信息跳跃（衔接 DC-024 时间跳跃）；平行蒙太奇——各线独立并行，丰富剧情/升华主题；交叉蒙太奇——多线共时且共同指向一个结果，制造紧张/悬念",
+          "Cut Motivation 映射：快切→Rhythm Cut（节奏驱动）；跳切→Information Cut（时间省略/信息跳跃）；平行蒙太奇→Narrative Cut（多线组织/主题升华）；交叉蒙太奇→Narrative Cut + Emotional Cut（紧张与悬念驱动）",
+          "选型决策（DC-032）：多线同一时间发生且共同指向一个结果→交叉蒙太奇；各线独立并行→平行蒙太奇；单线打节奏→快切；单线省略中间环节→跳切",
+          "动作类快切景别选型（DC-033）：动作单元必须 CU/ECU/Insert；每个单元只展示动作因果链的一个关键节点（手腕转动→触物→收回）；特写只演关键物理节点（接触/发力/反应），完整过程由观众心理补偿；每节点配独立音效（触物声/击打声）",
+          "节奏循环锚点（rhythm_cycle_anchor）：每 ~11s 给观众一个换气/记忆锚点（短镜头切节奏 + 长镜头定情绪 + 音乐卡点）；参考锚点非硬规则，按类型系数调整（情感类因情绪增量拉长、悬疑类压缩）"
+        ],
+        "source_project": "AI Director OS V5.0 原生知识",
+        "source": "抖音「时屿」2026-08-17《为什么动作类快切非要用近景和特写镜头？》+ 体系 4.1.2 切换技法库设计",
+        "added": "2026-08-17",
+        "source_type": "creator_tutorial",
+        "verification_status": "pending",
+        "trust_weight": 0.7,
+        "depends_on": [
+          "shot_motivation",
+          "rhythm_cycle_anchor"
+        ],
+        "qc_checks": [
+          "技法选型是否走 DC-032 决策树？",
+          "快切是否遵循硬切落点三规则与时长阈值（CF-089/CF-109）？",
+          "11s 节奏锚点是否按类型系数调整？"
+        ],
+        "content_backfilled": "2026-10-07",
+        "backfill_origin": "DOCX 卷四 4.1.2 切换技法库 + 4.1.2.1 动作类快切景别选型"
+      },
+      "transition_library": {
+        "domain": "director_reasoning",
+        "title": "转场技法库：四大类 23 种与边界帧契约",
+        "principle": "转场技法解决『场景之间怎么过渡』（时空双跳变）——本质是边界帧契约：所有转场都是前镜尾帧 × 后镜首帧的连接设计，转场质量由边界两帧的『联系』决定。",
+        "content": [
+          "四大类 23 种：视觉匹配类 9（相似动作/屏幕方向匹配/相似形状/相似构图/相似角度/视线匹配/视点匹配/特写缓冲/想法匹配——让眼睛顺着相似性滑过去）；声音桥接类 7（J cut/L cut/相似声音/重音转场/组合音效/卡点/对白旁白——听觉先行，后期可控）；遮挡后期类 6（遮挡/抠图/撕纸/绿幕/手势等——剪辑层实现，归 Editing Agent）；节奏缓冲类 1（废片快切 3 帧）",
+          "第五种边界处理：章节式直切——字幕卡/黑场/音效重置显式宣告新片段，把『断裂』变成章节信息而非缺陷（与废片快切的区别：缓冲 vs 宣告）",
+          "选型决策（DC-034）：两场景存在视觉相似性→视觉匹配类；需压缩时间/加快叙事→对白旁白或 J/L cut（一句话带走场景）；需情绪延续→相似角度或 L cut；场景差别大无相似性→特写缓冲或遮挡后期类；强调节奏冲击→卡点/重音",
+          "AI 短剧特殊优先级：声音桥接类最可靠（声音层后期可控、不依赖生成模型）＞遮挡后期类（剪辑层实现）＞视觉匹配类（需在两个场景的 Shot Contract 中成对预写共享约束：相似动作 Body Phase/相同构图机位/视线方向一致/屏幕方向惯性，让两次生成共享同一采样条件）",
+          "AI 确定性实现：把前镜尾帧导出为图，作为后镜首帧的条件参考（Kling/Seedance 等 first/last frame conditioning），强制边界帧连续——把『希望模型生成相似性』变成『直接给定相似性』",
+          "修复衔接：场景转换生硬（转场缺失）见 CF-110 repair_model"
+        ],
+        "source_project": "AI Director OS V5.0 原生知识",
+        "source": "抖音「阿七米德」2026-07-19《一口气分享25个转场》+ 2025-09-09《一分钟学会四个转场》（边界帧原理）+ 体系 4.1.3 设计",
+        "added": "2026-08-17",
+        "source_type": "creator_tutorial",
+        "verification_status": "pending",
+        "trust_weight": 0.7,
+        "depends_on": [
+          "cut_technique_library",
+          "screen_space"
+        ],
+        "qc_checks": [
+          "场景转换处是否有转场设计（对照 DC-034 四大类+章节式直切）？",
+          "视觉匹配变量是否在两镜 Shot Contract 中成对声明？",
+          "是否优先声音桥接类（AI 成功率最高）？",
+          "视觉匹配类是否用了首尾帧条件控制强制边界连续？"
+        ],
+        "content_backfilled": "2026-10-07",
+        "backfill_origin": "DOCX 卷四 4.1.3 转场技法库"
+      },
+      "adaptation_resource_protocol": {
+        "domain": "production",
+        "title": "剧本改编·文本来源与资源复用协议",
+        "principle": "剧本改编的唯一文本源是小说工程的冻结章节；小说工程与旧短剧板块的存量资源按「识别→评估→复用→登记」协议只读复用。复用是派生层的输入供给，不是创作约束——剧本的独立性与艺术完整性优先。",
+        "content": [
+          "文本来源管理：唯一文本源 = 冻结章节（版本快照）。source_chapter_version 贯穿 剧本→分镜→资产 全派生链；改编期间章节升级须显式重基准（rebase）或锁定旧版；provenance 记录每段剧本文本的来源章节与段落区间",
+          "资源识别·小说工程侧（高复用价值）：人物卡（characters 表，五重 DNA 素材）、世界观/设定库、卷章大纲（结构骨架）、伏笔账本（review_meta：钩子/悬念素材）、实体库（角色/场景/道具）、章内场景切分（scene segments）、RAG 向量索引（检索通道）",
+          "资源识别·旧短剧板块侧（代码推翻、产物复用）：定妆图/资产图（asset_library + semantic_asset_index 已索引，直接进新引擎参考图池）、历史 run 的首尾帧/视频产物（contract_json 快照隔离，资产文件可复用）、角色 voice 绑定与音色库",
+          "评估标准（复用准入四关）：对齐性——与冻结章节版本一致、实体名对账；完整性——字段齐全过 3E 检查；时效性——章节修订后资源标记过期、须重验证；合规性——AI 生成标注齐备、内容安全过检",
+          "复用规范：只读单向（小说资源→派生层只读，禁止回写）；混注门禁双向生效（小说资源可只读进派生层；DC/CF/Shot Contract 禁止进小说层）；资产复用走 semantic_asset_index 检索 + ShotSchemaV2 兼容读；复用登记四元组（source_resource_id / source_version / used_in / reuse_mode）入调用审计",
+          "独立性与艺术完整性：复用是输入供给不是创作约束——剧本是独立派生资产，改编模式可选（adaptive 重构节奏 / literal 忠实）；信息供给由 beat 与戏剧目的驱动（script_generator_compatibility），资源不匹配时以艺术判断优先并在剧本 diff 中标记差异；删除测试适用于一切复用资源——对剧本无贡献的资源不进剧本"
+        ],
+        "source_project": "拾光工坊工程治理（用户决策）",
+        "source": "用户需求 2026-10-07（剧本改编的文本来源管理与资源复用策略）+ 宿主工程勘察（F.2 复用清单）",
+        "added": "2026-10-07",
+        "source_type": "benchmark",
+        "verification_status": "verified",
+        "trust_weight": 1.0,
+        "depends_on": [
+          "story_graph_ingestion"
+        ],
+        "qc_checks": [
+          "文本源是否唯一且版本锁定（source_chapter_version 贯穿派生链）？",
+          "每次复用是否登记 provenance 四元组（source_resource_id/source_version/used_in/reuse_mode）？",
+          "旧短剧资产复用是否走兼容校验（ShotSchemaV2 兼容读 + 实体对账）？",
+          "复用是否全程只读（无回写章节/小说层资源）？",
+          "资源与艺术判断冲突时是否标记差异而非机械套用？",
+          "复用资源是否通过删除测试（无贡献不进剧本）？"
+        ]
+      },
+      "dialogue_coverage": {
+        "domain": "director_reasoning",
+        "title": "对白镜头覆盖系统：信息拥有者原则",
+        "principle": "谁说话不一定永远拍谁；镜头关注的是当前叙事信息的拥有者（Information Owner），而不只是说话者（Speaker）。镜头不是记录对白，而是在导演观众应该看什么。",
+        "content": [
+          "五层覆盖：Speaker Shot 说话者镜头；Listener Reaction 听者反应镜头（信息变化发生在听者时切过去）；Relationship Shot 双方关系镜头（距离变化/沉默时用双人镜）；Emotional Turning Point 情绪变化镜头；Information Reveal 信息揭示镜头",
+          "Shot Purpose 纪律：每个分镜必须回答存在原因——传递信息 / 展示反应 / 建立关系 / 强调情绪 / 揭示变化 / 建立空间，六者必居其一",
+          "Prompt 模式：台词重要拍说话者；反应重要拍听者；关系重要拍双人镜。例：『其实我早就知道了』→ 男主中景说完切女主震惊反应",
+          "与 beat 七族联动：信息揭示族 beat 优先 Information Reveal / Listener Reaction；关系状态族优先 Relationship Shot；情绪爆发族优先 Emotional Turning Point"
+        ],
+        "source_project": "AI Director OS V5.0 原生知识",
+        "source": "三件套 DOCX Master 卷八 AM-06 Dialogue Coverage ｜ 对白镜头覆盖系统",
+        "added": "2026-08-16",
+        "source_type": "benchmark",
+        "verification_status": "verified",
+        "trust_weight": 1.0,
+        "depends_on": [
+          "information_control",
+          "shot_motivation"
+        ],
+        "qc_checks": [
+          "对白镜头是否围绕信息拥有者而非机械跟随说话者？",
+          "每个镜头是否都有明确的 Shot Purpose？",
+          "是否落入『谁说话拍谁』的基础错误？"
+        ],
+        "content_backfilled": "2026-10-07",
+        "backfill_origin": "V5.0 基线（DOCX 卷八 AM-06）"
+      },
+      "resonance_design": {
+        "domain": "director_reasoning",
+        "title": "共鸣设计：Click→Watch→Share 三层钩子",
+        "principle": "爆火不是迷信大题材，而是把『大题材』缩成『小瞬间』。把『爆火』拆成三层：Click（为什么停下来）→ Watch（为什么继续看）→ Share（为什么愿意转发）。",
+        "content": [
+          "Click / Stop：第一帧或前三秒让观众停下——视觉异常、情绪悬念、信息缺口（对齐 script_generator_compatibility 的 HOOK 3 秒钩子与语速预算）",
+          "Watch：让观众继续看——信息递进、情绪递进、关系张力（对齐 beat 结构与节奏锚点）",
+          "Share / Shareable Emotion：可转发表达——把情绪表达成观众想替角色/替自己说出的话（对齐 CTA 收尾互动引导）",
+          "小瞬间原则：大题材落到具体可感的人际瞬间，而不是抽象口号",
+          "Prompt 模式：创作层把主题收窄为一个具体瞬间，并为其设计 Stop→Watch→Share 三层钩子",
+          "六大要素映射：情感共鸣（六要素之首）→ 本单元；镜头卡提交前逐镜核对『这镜的情绪目标是否明确』"
+        ],
+        "source_project": "AI Director OS V5.0 原生知识",
+        "source": "三件套 DOCX Master 卷八 AM-10 Resonance Design ｜ 共鸣设计 + 卷四六大要素框架映射",
+        "added": "2026-08-16",
+        "source_type": "benchmark",
+        "verification_status": "verified",
+        "trust_weight": 1.0,
+        "depends_on": [
+          "audience_position"
+        ],
+        "qc_checks": [
+          "开场是否制造了停下看的理由？",
+          "是否有递进的信息/情绪让观众留下？",
+          "是否有可转发的情绪表达？"
+        ],
+        "content_backfilled": "2026-10-07",
+        "backfill_origin": "V5.0 基线（DOCX 卷八 AM-10）"
+      },
+      "lens_camera_distance_perspective": {
+        "title": "焦距×距离×透视（AI Cinematic Physics + 广角/长焦 Prompt 补偿）",
+        "principle": "焦距本身不直接改变透视；透视由摄影机与主体/空间的相对位置决定。AI 能识别\"24mm/135mm\"标签，但没有真实光学镜头和统一 3D 摄影坐标，必须显式描述 Camera Distance、Perspective Intent、Foreground/Background Relationship。",
+        "content": {
+          "layers": {
+            "L1_物理原理": "保持主体尺寸近似不变时，短焦意味着机位更近→近大远大更明显；长焦意味着机位更远→透视差更弱、背景层视觉上更靠近主体（压缩感）。",
+            "L2_广角Prompt补偿": "不要只写\"24mm wide lens\"。应明确：camera very close to subject；foreground enlarged；strong near-far scale difference；background receding deeply。目标不是强迫模型模拟真实镜头参数，而是补齐它通常不会自动联动的摄影几何特征。",
+            "L3_长焦Prompt补偿": "不要把\"135mm\"简化为浅景深。应明确：camera far from subject；narrow field of view；layered background visually compressed toward the subject；distant observational framing。",
+            "L4_帧编译注入": "Contract 的 lens 字段→帧 prompt 按广角/长焦补偿模板展开，而非只写焦距数字。"
+          },
+          "prompt_pattern": "广角：[焦距] + camera very close to subject + foreground enlarged + strong near-far scale difference；长焦：[焦距] + camera far from subject + narrow FOV + background compressed toward subject",
+          "qc_checks": [
+            "帧 prompt 是否只有焦距数字而无几何补偿描述",
+            "广角是否写了近距离与近大远小",
+            "长焦是否写了远距离与背景压缩"
+          ]
+        },
+        "depends_on": [],
+        "source_type": "benchmark",
+        "verification_status": "verified",
+        "trust_weight": 1.0,
+        "backfill_origin": "DOCX 卷二 2.2-2.4（V5 基线）",
+        "domain": "cinematography"
+      },
+      "movement_motivation": {
+        "title": "运镜动机（Movement Motivation）",
+        "principle": "运镜必须对应信息/心理/空间三类变化之一，无变化需求→固定机位（CF-014 拦截无叙事价值复杂运镜）。",
+        "content": {
+          "layers": {
+            "L1_三类动机": "信息动机（揭示世界/关键物首次亮相）、心理动机（情绪收紧/压迫逼近/不安/孤立/主观化）、空间动机（建置空间/权力关系变化）。",
+            "L2_零动机处理": "无法归入三类的运镜需求→固定机位 locked-off（最被低估的运镜，让表演发力）。",
+            "L3_节拍同步": "运镜与表演节拍同步：push-in 对齐角色\"意识到\"的瞬间，固定机位让微表情发力。"
+          },
+          "qc_checks": [
+            "运镜是否可归入三类动机之一",
+            "无动机运镜是否已改为固定机位",
+            "push-in 是否对齐了表演节拍点"
+          ]
+        },
+        "depends_on": [],
+        "source_type": "benchmark",
+        "verification_status": "verified",
+        "trust_weight": 1.0,
+        "backfill_origin": "DOCX 卷二 2.1.3（V5 基线）",
+        "domain": "cinematography"
+      },
+      "composition_attention": {
+        "title": "构图注意力（视觉动线 Attention Sequence）",
+        "principle": "每镜应定义 Attention Sequence（如 A脸→B视线→C背景线索）。构图不是美学装饰，而是控制观众阅读顺序的工具。",
+        "content": {
+          "layers": {
+            "L1_动线工具": "Leading Lines（引导线）、Diagonal（对角线）、S-Curve（S曲线）、Eyeline Vector（视线向量）、Motion Vector（运动向量）——都是控制阅读顺序的工具。",
+            "L2_景别即信息粒度": "景别不是情绪公式，而是信息供给的粒度调节：景别越近，信息越聚焦主体内心；越远，越偏向环境与语境。",
+            "L3_帧编译注入": "帧 prompt 按动线工具描述构图意图（如 leading lines toward subject / negative space isolating figure），而非只写\"好看\"。"
+          },
+          "prompt_pattern": "构图描述 = 主体位置（三分法/中心）+ 引导线（什么线条把视线导向主体）+ 负空间（主体周围留白方向）+ 前景层次",
+          "qc_checks": [
+            "每镜是否定义了 Attention Sequence",
+            "构图描述是否使用了动线工具词汇",
+            "观众第一眼看到的是否是导演要强调的"
+          ]
+        },
+        "depends_on": [
+          "lens_camera_distance_perspective"
+        ],
+        "source_type": "benchmark",
+        "verification_status": "verified",
+        "trust_weight": 1.0,
+        "backfill_origin": "DOCX 卷二 2.10 视觉动线 + 2.1.1（V5 基线）",
+        "domain": "cinematography"
+      },
+      "motivated_lighting": {
+        "title": "动机光（Motivated Lighting）",
+        "principle": "光源必须有场景内动机（窗外/灯泡/屏幕），无动机的\"氛围光\"打回。光是调色的输入，不是事后滤镜。",
+        "content": {
+          "layers": {
+            "L1_决策链": "灯光按顺序决策：真实/设计光源→方向→光质→光比→填充/负填充→主体分离→色彩关系→动态行为→空气介质。",
+            "L2_动机判定": "光源在场景内可见或可推断（窗外日光/台灯/手机屏幕/霓虹招牌）。无来源的蓝橙边光=无动机→打回。",
+            "L3_服从度": "时间/氛围/方向类文字可控（高）；造型光（侧光/光比）中；精确光位/硬阴影低→必须用参考图实现。",
+            "L4_跨镜状态": "跨镜灯光变化写入 lighting_state 并随 State Transition 重算；灯光跨镜突变无剧情动机=连续性破坏。"
+          },
+          "qc_checks": [
+            "光源是否有场景内动机",
+            "是否沿决策链排布",
+            "精确光位是否已改用参考图",
+            "跨镜 lighting_state 是否连续或有动机"
+          ]
+        },
+        "depends_on": [],
+        "source_type": "benchmark",
+        "verification_status": "verified",
+        "trust_weight": 1.0,
+        "backfill_origin": "DOCX 卷二 2.6 + DC-036 决策链（V5 基线）",
+        "domain": "cinematography"
+      },
+      "subject_separation": {
+        "title": "主体分离（五种分离方式）",
+        "principle": "主体分离至少有五种：亮度分离、轮廓分离、色彩分离、焦点分离、运动分离。Rim Light 只是其中一种，不应成为默认电影感处理。",
+        "content": {
+          "layers": {
+            "L1_五种分离": "亮度分离（主体亮背景暗）、轮廓分离（rim/backlight）、色彩分离（冷暖对比/互补色）、焦点分离（浅景深背景虚化）、运动分离（主体动背景静）。",
+            "L2_选择逻辑": "按场景已有条件选最自然的分离方式——已有大光比→亮度分离；逆光场景→轮廓分离；彩色环境→色彩分离；人像镜头→焦点分离；动作场景→运动分离。",
+            "L3_I2V关键": "主体占比≥30%且与背景清晰分离是 I2V 防漂移硬指标——杂乱背景诱导模型\"再解释\"而非保持（衔接 i2v_frame_quality_protocol）。"
+          },
+          "qc_checks": [
+            "是否只用了 rim light 而忽略其他四种",
+            "分离方式是否与场景条件匹配",
+            "主体背景分离度是否足以支撑 I2V"
+          ]
+        },
+        "depends_on": [
+          "motivated_lighting"
+        ],
+        "source_type": "benchmark",
+        "verification_status": "verified",
+        "trust_weight": 1.0,
+        "backfill_origin": "DOCX 卷二 2.7（V5 基线）",
+        "domain": "cinematography"
+      },
+      "scale_anchor": {
+        "title": "尺度锚点（Scale Anchor）",
+        "principle": "巨大/渺小需要熟悉参照物：人物、车辆、门、普通建筑、道路等。Perceived Scale = Target + Familiar Reference + Depth Layers + Perspective + Atmosphere。",
+        "content": {
+          "layers": {
+            "L1_公式": "感知尺度 = 目标物 + 熟悉参照物 + 深度层次 + 透视 + 空气介质（远景雾化增强巨大感）。",
+            "L2_帧编译": "表现巨大（巨兽/建筑）时帧 prompt 必须包含至少一个熟悉参照物（人物站在巨物脚下）；表现渺小时同理（人物被普通家具放大对比）。"
+          },
+          "qc_checks": [
+            "巨大/渺小场景是否有熟悉参照物",
+            "是否有深度层次与空气介质"
+          ]
+        },
+        "depends_on": [
+          "lens_camera_distance_perspective"
+        ],
+        "source_type": "benchmark",
+        "verification_status": "verified",
+        "trust_weight": 1.0,
+        "backfill_origin": "DOCX 卷二 2.8（V5 基线）",
+        "domain": "cinematography"
+      },
+      "color_anchor": {
+        "title": "色彩锚点（Color Anchor）",
+        "principle": "颜色首先是注意力与识别工具，后续才通过叙事重复获得情绪/象征意义。禁止把\"蓝=悲伤、红=愤怒\"作为硬规则。",
+        "content": {
+          "layers": {
+            "L1_识别优先": "角色识别色/道具识别色/场景识别色——观众靠颜色快速识别\"这是谁/这是什么/这是哪\"。",
+            "L2_情绪不硬编码": "颜色的情绪意义通过叙事重复建立（红色在前 3 集与暴力关联后才成为\"危险信号\"），不是天然规则。",
+            "L3_QC联动": "颜色变化必须有叙事对应（CF-080）；调色不能替代电影语言（CF-001 删除测试）。"
+          },
+          "qc_checks": [
+            "角色/道具是否有稳定识别色",
+            "颜色变化是否有叙事对应",
+            "是否落入蓝=悲伤硬规则"
+          ]
+        },
+        "depends_on": [],
+        "source_type": "benchmark",
+        "verification_status": "verified",
+        "trust_weight": 1.0,
+        "backfill_origin": "DOCX 卷二 2.9（V5 基线）",
+        "domain": "cinematography"
+      },
+      "camera_choreography": {
+        "title": "摄影机编排（Camera Choreography，AM-05）",
+        "principle": "Static 用于审视、等待、让表演承担意义；Push/Pull 必须对应信息或心理距离变化；Pan/Tilt 用于在既有空间中寻找或 Reveal；Truck/Tracking 强调同行与视差；Handheld 是摄影机身体感而非\"地震\"；Orbit/Arc 高风险，优先小角度弧线而非 360°。",
+        "content": {
+          "layers": {
+            "L1_运镜词汇": "Static/Push/Pull/Pan/Tilt/Truck/Tracking/Handheld/Orbit/Arc——每种有明确戏剧用途（见 movement_motivation）。",
+            "L2_风险控制": "Orbit/Arc 模型服从度低且易穿帮→优先小角度弧线；Handheld 必须写 subtle natural shaking 而非剧烈晃动。",
+            "L3_编排": "场景级运镜编排：连续镜头的机位变化构成空间探索节奏（建立→跟随→定格）。"
+          },
+          "qc_checks": [
+            "运镜选型是否匹配戏剧目的",
+            "高风险运镜是否有降级方案",
+            "场景级机位编排是否有节奏"
+          ]
+        },
+        "depends_on": [
+          "movement_motivation"
+        ],
+        "source_type": "benchmark",
+        "verification_status": "verified",
+        "trust_weight": 1.0,
+        "backfill_origin": "DOCX 卷二 2.5 + AM-05（V5 基线）",
+        "domain": "cinematography"
+      },
+      "lighting_directing": {
+        "title": "光影导演（Lighting Directing，AM-11）",
+        "principle": "光的戏剧节拍：真相揭露瞬间可设计光比突变；对峙戏双方明暗分配呼应立场；回忆戏人物面向光源=面向过去。灯光方案与声场匹配（低调光配近场声、平光配环境嗡鸣、窗光配生活质感音效）。",
+        "content": {
+          "layers": {
+            "L1_戏剧节拍": "光比突变对齐表演转折点；立场明暗（正方亮反方暗）；面向光源=面向过去/希望。",
+            "L2_声光匹配": "低调光→近场声（耳语/呼吸）；平光体制化→环境嗡鸣；暖窗光→生活质感音效（风铃/远处电视）。",
+            "L3_执行": "灯光选型走 DC-036 八映射；执行约束走 motivated_lighting 决策链；服从度走 camera_lighting_prompt_lexicon。"
+          },
+          "qc_checks": [
+            "光比变化是否对齐表演节拍",
+            "双方明暗是否呼应立场",
+            "声场是否与光方案匹配"
+          ]
+        },
+        "depends_on": [
+          "motivated_lighting"
+        ],
+        "source_type": "benchmark",
+        "verification_status": "verified",
+        "trust_weight": 1.0,
+        "backfill_origin": "DOCX DC-036 执行段 + AM-11（V5 基线）",
+        "domain": "cinematography"
+      },
+      "color_grade_thinking": {
+        "title": "调色思维（Color Grade Thinking 五步闭环）",
+        "principle": "调色不是后期套滤镜，而是贯穿前中后期的质感决策链。默认原则服从色彩锚点——颜色首先是注意力与识别工具，禁止\"蓝=悲伤、红=愤怒\"硬规则。",
+        "content": {
+          "layers": {
+            "L1_五步闭环": "①确定调色风格（全片统一情绪基调/风格锚）→②突出主体（明度/饱和度/色温导向主体=色彩分离）→③形成对比（主体与环境/前后景/冷暖对比）→④统一颜色（相邻镜头色温色调统一，防 CF-048 场景视觉主题碎裂）→⑤调整细节与肤色（肤色真实自然，细节服务叙事）。",
+            "L2_与灯光联动": "光方案是调色的输入（衔接 motivated_lighting）——灯光决定画面的明暗结构，调色决定色彩倾向，二者必须同一风格语言。",
+            "L3_帧编译注入": "帧 prompt 注入调色风格描述（如 teal-orange grade / desaturated cold tone / warm nostalgic film tone），保证前后镜头色调连贯。"
+          },
+          "qc_checks": [
+            "颜色变化是否有叙事对应（CF-080）",
+            "相邻镜头色温是否统一",
+            "去掉调色后镜头是否仍有叙事功能（CF-001）",
+            "肤色是否真实自然"
+          ]
+        },
+        "depends_on": [
+          "color_anchor",
+          "motivated_lighting"
+        ],
+        "source_type": "benchmark",
+        "verification_status": "verified",
+        "trust_weight": 1.0,
+        "backfill_origin": "DOCX 卷二 2.9.1（V5 基线）",
+        "domain": "cinematography"
+      },
+      "texture_boost_techniques": {
+        "title": "质感三板斧（Texture Boost）",
+        "principle": "剪辑总显\"平\"时的三道解法，按层叠加：先节奏（时间轴）、再声音（听觉层）、后调色（画面层），逐层叠加质感，避免只靠单一手段。",
+        "content": {
+          "layers": {
+            "L1_第一板_剪辑节奏": "插入快节奏镜头组或快闪镜头改变画面节奏。快闪镜头属于短切，须遵循硬切落点三规则与镜头时长阈值，不能为快而快（CF-046/CF-089）。",
+            "L2_第二板_声音设计": "音效快慢强弱产生听觉节奏。音效强弱变化须有来源与动机（CF-040/CF-041），可服务于情绪曲线。",
+            "L3_第三板_调色思维": "走 color_grade_thinking 五步闭环（见独立单元）。",
+            "L4_帧端质感": "帧 prompt 注入质感词：材质（皮肤毛孔/布料纹理/金属拉丝）、光泽（matte/glossy/satin）、颗粒（film grain/digital clean）——提升\"物质感\"。"
+          },
+          "qc_checks": [
+            "三板斧是否按序使用",
+            "是否只靠单一手段",
+            "帧 prompt 是否有材质/光泽/颗粒描述"
+          ]
+        },
+        "depends_on": [
+          "color_grade_thinking"
+        ],
+        "source_type": "benchmark",
+        "verification_status": "verified",
+        "trust_weight": 1.0,
+        "backfill_origin": "DOCX 卷四 4.1.1（V5 基线）",
+        "domain": "cinematography"
+      },
+      "i2v_frame_quality_protocol": {
+        "id": "i2v_frame_quality_protocol",
+        "domain": "production",
+        "title": "I2V 帧质量硬指标协议（首尾帧→视频的图片质量门槛）",
+        "principle": "图片是视频的基础：低质量首尾帧直接导致 I2V 漂移/闪烁/幻觉。生成前必须过四项硬检查。",
+        "content": {
+          "layers": {
+            "L1_分辨率": "长边 1536-2048px、无压缩伪影（PNG 或 JPEG 质量 90+）。小图诱发模型幻觉细节——正是漂移起点。I2V 前务必放大到 1536px+（衔接 upscaling_pipeline）。",
+            "L2_主体占比": "主体占比 ≥30% 画面且与背景清晰分离（衔接 subject_separation）。杂乱背景诱导模型\"再解释\"而非保持。",
+            "L3_光照质量": "单一方向光源、高光阴影可读、无死白死黑（衔接 motivated_lighting）。源图光照平/脏会直接变成视频 flicker 和糊运动。",
+            "L4_动作起点": "首帧选动作中间态（mid-stride）给模型运动惯性；或选静态姿势+微动作（呼吸/眨眼）最稳。"
+          },
+          "qc_checks": [
+            "长边是否 ≥1536px",
+            "主体占比是否 ≥30%",
+            "光源是否单一方向且高光阴影可读",
+            "动作起点是中间态还是静止端点"
+          ]
+        },
+        "depends_on": [
+          "subject_separation",
+          "motivated_lighting",
+          "composition_attention"
+        ],
+        "source_type": "external_paper",
+        "verification_status": "pending",
+        "trust_weight": 0.7,
+        "backfill_origin": "Kling 官方 / QuestStudio / aitoolsguidebook 2026-10 调研",
+        "created": "2026-10-07"
+      },
+      "first_last_frame_consistency": {
+        "id": "first_last_frame_consistency",
+        "domain": "production",
+        "title": "首尾帧相似度与过渡平滑度规则",
+        "principle": "I2V 首尾帧两图主题、构图、色调尽量接近——差异过大会触发\"镜头切换\"而非过渡；5 秒内过渡最平滑。",
+        "content": {
+          "layers": {
+            "L1_相似度三要素": "主题（同一主体/同一场景）、构图（机位/景别/主体位置）、色调（色温/光比）——三项接近则过渡平滑。",
+            "L2_时长窗口": "5 秒内过渡最平滑（Kling 官方实测）；超过 5s 的过渡建议拆分为多段 I2V。",
+            "L3_与State_Engine联动": "首尾帧相似度即 State Transition 的 head/tail 帧约束（衔接 transition_library 边界帧契约）——视觉匹配类转场让两帧有相似性，首尾帧条件控制直接给定相似性。"
+          },
+          "qc_checks": [
+            "首尾帧主题/构图/色调是否接近",
+            "过渡时长是否 ≤5s",
+            "是否用首尾帧条件控制直接给定了相似性"
+          ]
+        },
+        "depends_on": [
+          "shot_size_system",
+          "color_grade_thinking",
+          "transition_library"
+        ],
+        "source_type": "external_paper",
+        "verification_status": "pending",
+        "trust_weight": 0.7,
+        "backfill_origin": "Kling 官方 start-end frames 指南 2026-10",
+        "created": "2026-10-07"
+      },
+      "i2v_action_pose_selection": {
+        "id": "i2v_action_pose_selection",
+        "domain": "production",
+        "title": "I2V 动作起点选帧策略",
+        "principle": "动作镜头的首帧选择决定 I2V 运动质量：中间态给运动惯性，静态+微动作最稳。",
+        "content": {
+          "layers": {
+            "L1_中间态": "首帧选动作中间态（mid-stride/挥拳中段/转身半程）——模型从中间态续写有运动惯性，从头启动易生硬。",
+            "L2_静态微动作": "情绪/对话镜头选静态姿势+微动作（呼吸起伏/眨眼/发丝飘动）——最稳定不漂移。",
+            "L3_六段骨架": "I2V prompt 用六段骨架：[SHOT][ACTION][CAMERA][TIMING][KEEP][AVOID]，50-120 词结构化 prompt 可用率提升 2.1 倍。"
+          },
+          "qc_checks": [
+            "动作镜头首帧是否为中间态",
+            "情绪镜头是否为静态+微动作",
+            "I2V prompt 是否遵循六段骨架"
+          ]
+        },
+        "depends_on": [
+          "cut_technique_library",
+          "i2v_frame_quality_protocol"
+        ],
+        "source_type": "external_paper",
+        "verification_status": "pending",
+        "trust_weight": 0.7,
+        "backfill_origin": "ai-coding-flow Kling I2V 模板 2026-10",
+        "created": "2026-10-07"
+      },
+      "model_prompt_dialects": {
+        "id": "model_prompt_dialects",
+        "domain": "image_generation",
+        "title": "模型方言（Model Prompt Dialects）",
+        "principle": "不同图片模型对 prompt 的解析机制不同——同一 prompt 在不同模型上效果差异巨大，必须按模型方言书写。",
+        "content": {
+          "layers": {
+            "L1_Flux系": "T5 编码器——写完整长句（自然语言段落），权重语法 (word:1.3) 无效，靠自然重述强调。主体须在前 10 词内，风格词 ≤2 个。",
+            "L2_Seedream系": "自然语言连贯描述\"主体+动作+环境\"，美学需求追加 style/color/lighting/composition 描述符。编辑类指令用\"动作+对象+属性\"结构（add/remove/replace+目标+特征）。",
+            "L3_SDXL系": "逗号分隔关键词簇（keyword clusters），配负面词。CLIP 编码器——只保留关键词、丢弃否定（no/not/without 反而画出排除对象）。",
+            "L4_通用结构": "主体→动作/姿势→环境→镜头→光照→单一风格修饰符。镜头语言控制构图：焦距定景别（24mm 环境/85mm 人像/135mm 压缩）、浅景深/bokeh、低角度/Dutch tilt。",
+            "L5_反泛词原则": "禁用无信息量风格泛词：「电影感/cinematic」「高级感」「大片感」「氛围感」单独出现时模型无法执行（每个模型对泛词的解读随机且互相冲突）。必须落到具体维度：光（侧逆光轮廓光）、构图（前景遮挡三分法）、虚化（f/1.8 浅景深主体分离）、色彩（teal-orange 低调暖肤色）。泛词只允许作为风格修饰符后缀（≤1个），不允许作为主体描述。来源：大象学长第3集「别再只会输电影感三个字」。",
+            "L6_即梦2.0参考视频移植": "能力观察：即梦 Seedance 2.0 支持根据参考视频一键复刻动作、运镜、转场节奏与创意特效（无需写英文提示词），动作参考还可自己录制，AI 视频门槛大幅降低。对模型路由的意义：高动态/复杂运镜镜头可增加第三执行路径（T2I 关键帧 / I2V 首尾帧 / 参考视频移植三路分叉，扩展 DC-037）；对提示词的意义：参考视频存在时，prompt 中的运镜描述降级为辅助（模型以视频为准），只保留主体/场景/风格描述。登记为 pending 待实测验证。来源：大象学长第1集 2026-02-08；第7集补充（转场节奏/特效可复刻、动作参考可自录）。",
+            "L7_Seedance视频方言": "即梦 Seedance 2.0 视频提示词公式：主角 + 环境 + 动作 + 画面风格 + 节奏，用 @ 语法引入素材（@角色/@场景）。中文语境直写即可，无需英文提示词。参考输入三角色按用途选择：①动作参考——精确操控主角动作，可参考视频或自己录制；②风格参考图——控制整体画面颜色风格；③关键帧参考——I2V 首尾帧。降级规则：参考输入存在时，对应维度的文字描述降级为辅助（模型以参考为准）。方言组装就绪：此公式进入视频方言适配器（Seedance 条目），与 Kling 六段骨架并列。来源：大象学长第7集 2026-02-11。",
+            "L8_NanoBanana系": "编辑类主力模型（Gemini 3 Pro Image / Nano Banana 2）。生成：六因子整句公式——Subject（具体描述）→ Composition/framing（景别构图）→ Action（动作含中间态）→ Setting（场景真实细节）→ Lighting（命名真实布光方案）→ Style/medium，末行独立 Constraints（镜头/画幅/分辨率，如 Shot on 85mm f/1.4. Aspect ratio 16:9. Render in 2K）。无 --parameters、不吃 tag-soup——像创意总监写 brief。编辑：四段结构 subject → instruction（单一改动）→ style → constraints，配冻结短语「keep everything else unchanged / do not change the face」划定不动区域；Keep 与 Change 必须显式分离（对齐保真清单协议 PRESERVE/CHANGE）。参考图上限 14 张（高保真 6 张）。会话式编辑原则：80% 满意就编辑不重生成（对齐 edit_chain_degradation_budget 能修不重生成理念）。来源：sunra.ai Prompt Library / memons.ai Cheat Sheet / movby.ai 2026-10 检索。"
+          },
+          "qc_checks": [
+            "prompt 是否按目标模型方言书写",
+            "正向 prompt 是否含 no/not/without",
+            "主体是否在前 10 词内",
+            "Seedance 视频路径是否用 @素材语法引入角色/场景",
+            "参考输入是否按用途选对角色（动作参考/风格参考图/关键帧参考）"
+          ]
+        },
+        "depends_on": [
+          "camera_lighting_prompt_lexicon"
+        ],
+        "source_type": "external_paper",
+        "verification_status": "pending",
+        "trust_weight": 0.7,
+        "backfill_origin": "BytePlus Seedream 指南 / zsky.ai / Curify AI 2026-10",
+        "created": "2026-10-07",
+        "qc_checks": [
+          "prompt 是否含无后缀泛词（电影感/高级感/大片感裸用）",
+          "即梦2.0 路径是否在参考视频存在时降级了运镜文字描述",
+          "Seedance 提示词是否遵循 主角@环境@动作@风格@节奏 公式"
+        ]
+      },
+      "video_model_capability_watch": {
+        "id": "video_model_capability_watch",
+        "domain": "production",
+        "title": "视频模型能力演进观察（Video Model Capability Watch）",
+        "principle": "视频生成模型能力快速演进（多模态输入/文内分镜/视频延长），架构决策须区分「当前可控路径」与「能力观察项」——观察项登记待实测，不经验证不改架构；例外：生成端声音已凭 2026-10 外部证据升级为既定接入路径（四轨声音方案，Phase 2 增量，见 O4）。",
+        "content": {
+          "observations": {
+            "O1_四模态输入": "即梦 Seedance 2.0 支持图像/视频/音频/文本四种模态输入。音频输入是新增控制通道（项目当前视频管线未使用音频输入）。来源：大象学长第7集。",
+            "O2_文内分镜": "Seedance 2.0 支持文字描述分镜头，单次生成内系统自动切镜头（多镜头一次生成）。与项目单镜头 Contract 确定性架构为两种范式：项目保持单镜头可控路径为默认；切换技法库（cut_technique_library）知识未来可编译为文内分镜提示词。登记为 DC-037 关键帧来源分叉的潜在第四路（单镜头生成 vs 文内多镜头），待实测。",
+            "O3_视频延长": "一键延长已生成视频，可补出前置或后续剧情（解锁隐藏剧情）。对修复路由的意义：R2 Insert（补反应/环境镜头）的候选实现手段——延长现有镜头而非整镜重生成，保留已通过 QC 的画面资产。登记为 repair_router 模型能力候选，待实测。",
+            "O4_生成端声音": "【2026-10-07 证据升级，直接采用（用户决策：原观察同样未经验证，豁免治理试运行流程）】生成端声音已成 2026 业界标配：Veo 3.1 / Kling 3.0（multi-shot 跨镜头声音一致）/ Seedance 2.5（音画联合生成，口型对齐实测 >90%，外部音频 ≤15.2s）均原生支持。音色参考可用：一段 ~15s 参考音频锁定角色声音跨镜一致（Curious Refuge 评为最优工作流；建议多情绪参考片段——悲伤/兴奋各 15s 帮助模型理解音域）；Seedance 2.5 支持单次 50 参考素材（30图+10视频+10音频）与音色参考/多人参考。能力边界：BGM 生成弱且混音差（业界共识后期加）；长台词截断风险（~2 句内可靠）；改台词需整镜重生成（R4 级成本，后期 TTS 仅 R2）；情绪控制粒度为 prompt 级 delivery direction（粗于后期 TTS 逐句情绪指令）。接入策略＝四轨声音方案（Phase 2 增量，不推翻现有合成双通道，AudioSyncManager/lipsync 保留为后期轨与回退路径）：①环境音/动作音效→生成端原生（帧级动作同步为后期不可替代优势；Seedance 2.5 可无损剥离 BGM 只留环境人声）；②人物对白（口型镜头）→生成端音色参考（参考音频源自 audiobook voice_reference_asset 池，两板块在此合流，provenance 登记）；③旁白/画外音（无口型）→后期 TTS 复用 audiobook 逐句情绪控制（业界共识：native audio for moments, TTS for narrators）；④BGM→后期（mureka/音乐库）。配套：model_router 增 native_audio/voice_reference 能力标签，口型敏感镜头（对白重/情绪重）路由至支持模型；台词长度约束（≤2 句/镜）入 script_generator_compatibility；口型特写规避（对白密集镜头用全景双人/过肩/反应镜头）入 Contract T3 预检候选。证据：Versely 工程决策表 / Curious Refuge 三工作流 / Kling 官方指南 / Seedance 2.5 官方（Dreamina·即梦）/ InfoQ 知漫剧实测，2026-10-07 检索。原观察（Seedance 2.0 声音饱满/方言外语/BGM 卡点）被上述证据覆盖。",
+            "O5_参考能力三件套": "一键复刻参考视频的复杂镜头运镜、转场节奏、创意特效，无需英文提示词。细化 DC-037 第三路（参考视频移植）的参考输入角色分类：动作参考（复刻动作，可参考视频或自己录制）、风格参考图（控制整体画面颜色风格）、关键帧参考（I2V 首尾帧）。"
+          },
+          "disposition": "O4 生成端声音已升级为既定接入路径（2026-10-07 用户决策直接采用，原观察未经验证故不适用试运行流程）：四轨声音方案作为 Phase 2 增量接入，不推翻现有合成双通道（AudioSyncManager/lipsync 保留为后期轨与回退路径）。其余观察项（O1 四模态输入 / O2 文内分镜 / O3 视频延长 / O5 参考三件套）仍登记 pending：不影响当前 Contract/生成/合成管线架构；model_router 在真实环境实测后决定是否接入新路径（DC-037 第四路、R2 延长手段）。",
+          "qc_checks": [
+            "O1/O2/O3/O5 观察项是否保持 pending 状态（未经验证不改架构）",
+            "O4 口型敏感镜头（对白重/情绪重）是否路由至支持音色参考的模型",
+            "O4 对白镜头台词是否 ≤2 句（生成端长台词截断风险）",
+            "O4 生成端参考音频是否取自 voice_reference_asset 池并登记 provenance",
+            "DC-037 是否只在参考输入存在时启用第三路",
+            "R2 Insert 是否评估过视频延长替代整镜重生成的成本"
+          ]
+        },
+        "depends_on": [
+          "model_tiered_duration",
+          "cut_technique_library",
+          "model_prompt_dialects"
+        ],
+        "source_type": "creator_tutorial",
+        "verification_status": "pending",
+        "trust_weight": 0.7,
+        "backfill_origin": "大象学长第7集「人人都是AI导演！即梦2.0入门到进阶全攻略」2026-02-11（O1/O2/O3/O5）；O4 证据升级：Versely / Curious Refuge / Kling 官方 / Seedance 2.5 官方（Dreamina·即梦）/ InfoQ 知漫剧实测，2026-10-07 检索",
+        "created": "2026-10-07"
+      },
+      "negative_prompt_strategy": {
+        "id": "negative_prompt_strategy",
+        "domain": "image_generation",
+        "title": "负面提示词策略（分模型）",
+        "principle": "负面提示词不是万能保险——不同模型机制不同，错误使用反而降低质量。",
+        "content": {
+          "layers": {
+            "L1_Flux默认无效": "flow-matching 架构 CFG=1，负面词数学上被丢弃。需 ComfyUI Dynamic Thresholding 提 true CFG 才生效。",
+            "L2_SDXL短负面": "只留 medium lock（cartoon/painting）+ 具体对象（extra fingers, watermark）。勿抄 2022 年 40 行长列表——现代模型上无效甚至反作用。",
+            "L3_MJ的no陷阱": "逐词独立解析，--no modern clothing 会被读作 no modern + no clothing 触发审核警告。应正向写想要的内容。",
+            "L4_流程": "空负面首生成→定位实际缺陷→加最小修复词→停。勿预防性堆砌。"
+          },
+          "qc_checks": [
+            "是否按模型机制配置负面词",
+            "是否预防性堆砌了长负面列表",
+            "Flux 是否误用了负面词"
+          ]
+        },
+        "depends_on": [
+          "model_prompt_dialects"
+        ],
+        "source_type": "external_paper",
+        "verification_status": "pending",
+        "trust_weight": 0.7,
+        "backfill_origin": "Fancies.ai / PromptMake / MJ 官方文档 2026-10",
+        "created": "2026-10-07"
+      },
+      "defect_repair_playbook": {
+        "id": "defect_repair_playbook",
+        "domain": "image_generation",
+        "title": "缺陷修复手册（手/脸/文字/背景）",
+        "principle": "AI 图片常见缺陷有系统性修复配方——局部重绘参数（denoise/遮罩/风格词）决定修复成败。",
+        "content": {
+          "layers": {
+            "L1_手部": "局部重绘，遮罩带 10-15px 羽化，denoise 0.4-0.6（低=保姿势，高=重画），prompt 含 \"five fingers, correct thumb position\" + 原 prompt 的风格词（否则写实手贴进油画）。",
+            "L2_面部": "ADetailer(face_yolov8n) 自动检测修复，denoise 0.3-0.4 起步；高 denoise 换模型时必须加 ControlNet inpaint 防错位。",
+            "L3_文字": "遮罩紧贴无羽化（硬边）、引号引用目标文字、denoise 0.7 全重绘；3 次失败即改用手动排版，勿再耗 AI。",
+            "L4_背景畸变": "生成前清理杂物描述；已有图用 outpainting/背景替换。自动化管线：ComfyUI FaceDetailer（Impact Pack+SAM 精确分割）单次生成同时修脸+手。",
+            "L5_与PRESERVE联动": "所有局部重绘遵循 preserve_list_protocol——明示变什么、保什么（衔接 CF 系列修复案例）。"
+          },
+          "qc_checks": [
+            "denoise 是否在配方范围内",
+            "重绘 prompt 是否含原风格词",
+            "文字修复是否已超 3 次应改手动"
+          ]
+        },
+        "depends_on": [
+          "preserve_list_protocol"
+        ],
+        "source_type": "external_opensource",
+        "verification_status": "pending",
+        "trust_weight": 0.6,
+        "backfill_origin": "FreeVisualTools / ArtificialGuyBR 2026-10",
+        "created": "2026-10-07"
+      },
+      "upscaling_pipeline": {
+        "id": "upscaling_pipeline",
+        "domain": "image_generation",
+        "title": "放大管线（Upscaling Pipeline）",
+        "principle": "I2V 前必须放大到目标分辨率——放大倍数有实用甜点，模型选型按用途分。",
+        "content": {
+          "layers": {
+            "L1_倍数甜点": "2x 全员可靠；4x 是实用甜点；8x 质量分化严重按图评估。I2V 前务必放大到 1536px+ 长边。",
+            "L2_模型选型": "Topaz Photo AI——人脸恢复专训+降噪放大同步，批量管线最稳；Real-ESRGAN——免费快速适合批量；SUPIR（SDXL 扩散先验）——细节最强但需 12GB+ VRAM、慢 10-50 倍，留给 hero 图；Magnific——creativity 低≈传统放大、高=重绘细节，含文字的图慎用（会把字形改乱）。",
+            "L3_接入时机": "R-pre 候选择优后、I2V 生成前——只对最终选定候选放大，不对所有候选放大（成本控制）。",
+            "L4_后处理提质三件套": "放大是后处理家族的一员，同族还有三项生成后增强手段（Nano Banana 编辑指令实现，其他编辑类模型待验证）：①光影重塑——在有光源的场景内重新打光，提升立体感（修复「平光」类质感问题，关联 motivated_lighting：生成时灯光描述服从度低的后补救）；②人物优化——皮肤+毛发细节增强，使人物更真实（imperfection_aesthetics 生成时注入失败的后补救路径）；③超清材质迭代——对已有画面材质迭代提质（texture_boost 的后处理面）。定位：这三件是「提质增强」不是「修错」——修错走 defect_repair_playbook。提示词模板（Nano Banana 编辑方言，sunra.ai 检索）：①Relight this portrait with warm golden-hour light coming from the left, add a gentle rim light on the hair, keep the subject and composition identical, do not change the face；②Lightly retouch this portrait: even the skin tone, reduce shine on the forehead, keep natural skin texture and pores, do not smooth into plastic, leave the eyes and hair untouched（do not smooth into plastic 与 imperfection_aesthetics L1 病理认知直接呼应）；③Apply a muted cinematic color grade, teal shadows and warm highlights, slightly lifted blacks, keep detail in the sky, preserve the subject's natural skin tone。来源：大象学长第9集 + sunra.ai Prompt Library（外部检索补提示词）。",
+            "L5_高低频分离修复法": "传统 AI 放大的系统性问题：增加脏块 + 抹掉细节纹理（模型先验「脑补」替代真实细节）。替代方法论（大象学长第14集，Tapnow 载体可迁移）：①高低频原理——照片分为低频信息（结构/色彩）与高频信息（细节/纹理）；②提示词提取线稿（高频细节载体）；③缩略图（低频）+ 高清线稿（高频）组合重建 → 高清且细节无损。适用场景：模糊/画质受损帧的高清化（I2V 前置修复，i2v_frame_quality_protocol 垃圾进垃圾出）与传统放大效果不佳（细节被抹）时的替代路径；与 L2 的关系——L2 挑放大模型，L5 是绕开传统放大的重建法。模板化复用：一次调通固化为模板，对齐经验预载理念（高成功率配置固化为默认）。"
+          },
+          "qc_checks": [
+            "I2V 前是否放大到 1536px+",
+            "放大模型是否匹配用途（hero/批量）",
+            "含文字图是否避开了 Magnific",
+            "后处理选择是否区分「提质增强」（本单元）与「修错」（defect_repair_playbook）",
+            "模糊/受损帧是否评估过高低频分离法（传统放大抹细节时）"
+          ]
+        },
+        "depends_on": [
+          "i2v_frame_quality_protocol"
+        ],
+        "source_type": "external_opensource",
+        "verification_status": "pending",
+        "trust_weight": 0.6,
+        "backfill_origin": "EgoistAI / botmonster 放大对比实测 2026-10",
+        "created": "2026-10-07"
+      },
+      "grid_exploration_workflows": {
+        "id": "grid_exploration_workflows",
+        "domain": "image_generation",
+        "title": "网格化探索工作流（Grid Exploration：镜头候选网格 + 粗排故事板）",
+        "principle": "单次生成多候选/多镜头网格，以一次请求的成本探索设计空间——网格层做「总览与选择」，精生成层做「执行与放大」，两层分离控成本。",
+        "content": {
+          "grids": {
+            "G1_12宫格构图器": "上传场景截图 + 提示词 → 单次生成 12 张不同景别×机位组合。定位：镜头候选探索——R-pre（candidate_selection_before_commit）的廉价前置：先网格总览候选空间（哪些景别/机位对这场戏有效），再对选定方向做 Contract 精排与精生成。与 upscaling_pipeline L3 成本逻辑一致：网格图用于决策不用于成片，只对最终选定项放大。消耗 shot_size_system 五级景别 + DC-035 运镜映射做网格维度标注。",
+            "G2_25宫格分镜": "一句话/一段剧本 → 单次生成符合逻辑的 25 宫格整片分镜图。定位：粗排故事板（pre-visualization 最前置）——验证叙事流、节奏与镜头序列逻辑，早于逐镜 Contract 精排。与 sparse_keyframe_cot（稀疏关键帧思想）同源：先骨架后细节。产出不直接进成片，作为 Contract 引擎的镜头序列参考输入。"
+          },
+          "layered_pipeline": "粗排故事板（25宫格：验证叙事流）→ 候选镜头探索（12宫格：定景别/机位方向）→ 逐镜 Contract 精排（确定性引擎）→ R-pre 双候选择优 → 精生成 + 放大。网格层与精排层解耦：网格改变的是「选择前的信息量」，不替代 Contract 的确定性控制。",
+          "automation_modes": "对高度自动化管线的必要性分层——G1_12宫格：非必要，可选增强件（R-pre 双候选已闭环；升级为 12 候选自动择优的前提是 AM-15 构图评审可靠，而构图/风格恰是 MLLM 弱项[hybrid_review_protocol]，评审不可靠时选择需人参与，故当前定位为人工介入点/高价值 beat 增强）。G2_25宫格：fail-fast 前置验证层，可全自动——自动生成网格 + AM-15 叙事连贯检查（序列逻辑/因果连续性属结构化判断，机器评审可靠度高），不通过则修镜头序列/剧本，通过才进 Contract 精排，比逐镜生成后返工便宜（此成本假设待实测）。架构哲学不变：知识决定镜头（Contract 先验），网格只补先验不足/先验暴露太晚两种场景。",
+          "model_note": "实测于 Nano Banana（编辑类模型，图内网格布局能力）。其他模型（Seedream/Flux/SDXL）网格能力待验证后进入方言适配器。",
+          "prompt_templates": {
+            "G2_分镜网格": "Create a 3×3 cinematic storyboard grid featuring the same [角色] in [服装] across multiple scenes. Keep character identity consistent across all panels. Use varied shot scales including wide shot, medium shot, and close-up. [风格] aesthetic, soft atmospheric lighting, film-grade composition, continuity-friendly visual design.（nanabanana.video 实测英文模板）中文路径：上传角色参考图 + 提示词要求 N×N 故事板网格 + 逐镜头写清场景/人物动作/画面氛围（toutiao 工作流）。帧数甜点：30-45 秒短片 8-14 帧、一帧一动作、远/中/近/特写交替形成视觉节奏（apiyi 最佳实践，对齐 model_tiered_duration）。",
+            "G2_单帧提取": "从网格的第一行提取第一帧，把图像放大到 4K 清晰度；其余帧换位置描述（第二行中间帧/第三行最后一帧）逐个处理——网格图转单帧素材的衔接指令，产出直接作 I2V 首帧（toutiao 工作流）。",
+            "G1_景别机位网格": "推导模板（按 L8 六因子公式组装，非大象原版，待实测）：Create a grid of 12 shots of [场景/主体] exploring different shot sizes (extreme wide, wide, medium, medium close-up, close-up, extreme close-up) × camera angles (eye-level, low angle, high angle, dutch angle), same character and lighting in every panel, [风格] style. 网格两维对齐 shot_size_system 五级景别与 DC-035 运镜映射做面板标注。"
+          },
+          "qc_checks": [
+            "网格图是否只用于决策（不直接进成片管线）",
+            "是否只对网格选定的候选做精生成与放大",
+            "25宫格粗排是否先于逐镜 Contract 精排",
+            "G1 是否只在高价值 beat / 人工介入点启用（全自动管线非必需）",
+            "G2 叙事连贯检查是否自动化（AM-15 通道）而非依赖人看"
+          ]
+        },
+        "depends_on": [
+          "candidate_selection_before_commit",
+          "sparse_keyframe_cot",
+          "shot_size_system"
+        ],
+        "source_type": "creator_tutorial",
+        "verification_status": "pending",
+        "trust_weight": 0.7,
+        "backfill_origin": "大象学长第9集「Nano Banana 八个高级提示词」2026-03-19（12宫格构图器 + 25宫格分镜两条）",
+        "created": "2026-10-07"
+      },
+      "character_consistency_advanced": {
+        "id": "character_consistency_advanced",
+        "domain": "character",
+        "title": "角色一致性进阶（超越多角度参考图）",
+        "principle": "多角度参考拼图是基础；进阶场景（超 20 张图的角色/跨模型迁移）需要 LoRA/IP-Adapter/InstantID 等技术栈。",
+        "content": {
+          "layers": {
+            "L1_参考图纪律": "不要整张三视图喂入——会混合三角度特征导致畸形。用正面/干净背景/高分辨率的半身单图做锚。",
+            "L2_免训练方案": "IP-Adapter FaceID / InstantID / PuLID 注入面部特征向量，权重 0.8-1.0，实现\"锁脸不锁姿势\"。正交锚定：ControlNet(OpenPose/Depth) 锁姿势构图 + IP-Adapter/LoRA 锁身份，两条轴分开锁定——塞进一个 prompt 会互相干扰。",
+            "L3_LoRA标准配方": "20-50 张图、唯一触发词、1000-3000 步、strength 0.6-1.0。超 20 张图的角色必训 LoRA。",
+            "L4_与四视图联动": "multi_angle_reference_collage 产出的四视图作为 LoRA 训练素材集；单图锚定用于 IP-Adapter/InstantID 输入。",
+            "L5_casting资产包": "视频端变形根因：视频生成时 AI 捕捉不到画面重点、缺少角色特写作为参考→面部漂移。机制精确化（李一帆第53集）：视频模型按景别匹配参考图——远景镜头自动选用参考包中的全身照，全身照面部分辨率不足→远景人脸崩/变脸（近景特写正常）。故参考包须全景别覆盖：全身 + 半身 + 高清面部特写帧（四联角色版形态），远景镜头生成时确保参考包含高清头部帧，并注意参考图生成比例与目标镜头适配。对策：像影视制片管理演员资产一样，为角色生成 casting 照片组（不同角度/表情/景别的定妆照组合），视频生成请求必须携带角色特写参考锚定身份。分工：四视图（multi_angle_reference_collage）服务资产生成与训练，casting 特写组服务视频生成输入。身份锁定指令（每帧必加，补第8集提示词缺口）：Keep the character's facial features exactly the same as the reference image. Maintain identical attire and hairstyle throughout.（保持角色面部特征与参考图完全一致，全程维持相同服装与发型）。参考图复用规则：Nano Banana 系每帧上传角色表作参考（上限 14 张、高保真 6 张），固定 seed 辅助风格一致；80% 满意就编辑不重生成。参考图预算管理：各模型可输入参考图数量有限且不一（Nano Banana 上限 14/高保真 6，其他模型更少），多角色场景预算进一步摊薄（N 角色 × 参考数 + 场景参考 ≤ 模型上限）——故不可全包上传，须按目标镜头景别动态组装参考子集（远景镜头→全身照+高清头部帧；特写镜头→高清特写帧；中景→半身+特写），既省预算又利用景别匹配机制只给「想让它匹配」的参考、避免无关参考干扰。来源：大象学长第8集「AI演员资产管理」+ 李一帆第53集「远景人脸一致性」（景别匹配机制）+ apiyi Nano Banana Pro 分镜最佳实践（外部检索补提示词）。",
+            "L6_纯AI演员策略": "角色基底用 AI 生成虚拟形象（动漫/写实皆可）而非真人照片——规避肖像权/侵权风险，商业短片刚需。纯 AI 演员资产可完整确权、可跨项目复用、可授权运营。与 commercial_hooks 合规记录联动：角色资产登记时标注「纯 AI 生成基底」。来源：大象学长第8集。"
+          },
+          "qc_checks": [
+            "是否把整张三视图直接喂入",
+            "姿势与身份是否正交锁定",
+            "超 20 图角色是否已训 LoRA",
+            "视频生成请求是否携带角色特写参考（casting 组）",
+            "角色基底是否为纯 AI 生成（无真人肖像依赖）",
+            "远景镜头的参考包是否含高清头部帧（防景别匹配到低分辨率全身照）",
+            "参考子集是否按镜头景别动态组装且不超模型参考图上限（多角色场景预算摊薄）"
+          ]
+        },
+        "depends_on": [
+          "multi_angle_reference_collage"
+        ],
+        "source_type": "external_paper",
+        "verification_status": "pending",
+        "trust_weight": 0.7,
+        "backfill_origin": "litmemo / flick.art / aitoolsguidebook 2026-10",
+        "created": "2026-10-07"
+      },
+      "imperfection_aesthetics": {
+        "id": "imperfection_aesthetics",
+        "domain": "image_generation",
+        "title": "瑕疵美学（Imperfection Aesthetics：破除AI油腻感）",
+        "principle": "AI 生成默认追求数学完美——皮肤抹平、阴影提亮、边缘锐利——这正是「AI油腻感」的来源。真实的高级感来自瑕疵，而非算法打造的完美。反向注入瑕疵词汇与物理镜头缺陷，是风格选择而非质量缺陷。",
+        "content": {
+          "layers": {
+            "L1_病理认知": "AI 默认算法追求数学上的完美：皮肤纹理被抹平、阴影被提亮、色彩过度均匀、边缘过度锐利→画面廉价油腻。「一眼假」不是分辨率问题，是「过度完美」问题。",
+            "L2_破坏性词汇": "摄影师才懂的反向词汇，按适用模型标注（方言组装层按模型过滤注入）",
+            "L3_改光策略": "删 soft light（柔光）关键词→换硬光/侧光增强立体感；全局光→局部光照；「闪光灯直闪 direct flash」是真实感大杀器（纪实感/新闻感场景）。",
+            "L4_烂镜头模拟": "模拟物理镜头缺陷增加电影松弛感：色散/色差（chromatic aberration）、边缘红蓝溢出、暗角（vignetting）、动态模糊（motion blur）、镜头漏光（light leaks）。避免过度清晰——带点模糊和畸变才符合电影感。过度使用警告：英雄镜头/产品图禁用，仅纪实/复古/情绪风格启用。",
+            "L5_QC协调": "瑕疵是风格选择不是质量缺陷——asset_qc 不应拦截有动机的 grain/CA/暗角；但无风格动机的意外畸变仍走 defect_repair_playbook 修复。判定标准：Contract 的 style_preset 声明了纪实/复古/胶片风→瑕疵合法；声明了 clean/commercial→瑕疵违规。"
+          },
+          "vocabulary": [
+            {
+              "term_en": "raw photo",
+              "term_zh": "原图模式",
+              "applicable_models": [
+                "all"
+              ],
+              "purpose": "禁用算法美化，保留原始质感"
+            },
+            {
+              "term_en": "skin texture, visible pores",
+              "term_zh": "皮肤纹理/毛孔可见",
+              "applicable_models": [
+                "all"
+              ],
+              "purpose": "对抗皮肤抹平"
+            },
+            {
+              "term_en": "freckles, slight skin unevenness",
+              "term_zh": "雀斑/轻微肤色不均",
+              "applicable_models": [
+                "all"
+              ],
+              "purpose": "打破肤色过度均匀"
+            },
+            {
+              "term_en": "film grain",
+              "term_zh": "胶片颗粒",
+              "applicable_models": [
+                "all"
+              ],
+              "purpose": "数字洁净感→胶片质感"
+            },
+            {
+              "term_en": "hard light from side",
+              "term_zh": "侧向硬光",
+              "applicable_models": [
+                "all"
+              ],
+              "purpose": "替代柔光，增强立体"
+            },
+            {
+              "term_en": "direct flash",
+              "term_zh": "闪光灯直闪",
+              "applicable_models": [
+                "all"
+              ],
+              "purpose": "纪实感大杀器，硬阴影+高对比"
+            },
+            {
+              "term_en": "chromatic aberration at edges",
+              "term_zh": "边缘色散",
+              "applicable_models": [
+                "flux",
+                "sdxl"
+              ],
+              "purpose": "镜头缺陷美，SD 系服从度高"
+            },
+            {
+              "term_en": "soft vignette",
+              "term_zh": "轻度暗角",
+              "applicable_models": [
+                "all"
+              ],
+              "purpose": "视线收束+复古感"
+            },
+            {
+              "term_en": "slight motion blur",
+              "term_zh": "轻微动态模糊",
+              "applicable_models": [
+                "all"
+              ],
+              "purpose": "松弛感，非冻结瞬间"
+            },
+            {
+              "term_en": "light leaks",
+              "term_zh": "镜头漏光",
+              "applicable_models": [
+                "sdxl",
+                "flux"
+              ],
+              "purpose": "胶片时代随机曝光缺陷"
+            }
+          ],
+          "activation_rule": "style_preset ∈ {documentary, film_noir, retro, 90s_film, wong_karwai_style} 时启用 L2+L4；style_preset ∈ {clean_commercial, product, idol_drama} 时禁用 L4、保留 L2 基础词汇",
+          "conflicts_with": "asset_qc（需 L5 协调规则）；defect_repair_playbook（方向相反：那是修意外缺陷，这是故意加风格缺陷——按 Contract style 声明分流）",
+          "source_video": "抖音 大象学长 第5集《邪修！AI图一眼假？三个方法破除AI感》2026-01-20，4.1万赞"
+        },
+        "qc_checks": [
+          "AI油腻感场景（皮肤过平/光过匀）是否注入了破坏性词汇",
+          "soft light 是否应删未删",
+          "烂镜头模拟是否越界到了 clean 风格镜头",
+          "QC 是否误拦了有风格动机的 grain/CA"
+        ],
+        "depends_on": [
+          "texture_boost_techniques",
+          "motivated_lighting"
+        ],
+        "source_type": "creator_tutorial",
+        "verification_status": "pending",
+        "trust_weight": 0.7,
+        "created": "2026-10-07",
+        "backfill_origin": "抖音 大象学长 AI视频系列教学 第5集 2026-10-07 调研"
+      }
+    }
   }
 }

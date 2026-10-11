@@ -1544,7 +1544,7 @@ class MetaOptimizer:
         # 🆕 探索模式使用更高温度
         temperature = 0.9 if exploration_mode else 0.7
         # 🔧 优化任务需要固定模板的长输出而非深度推理；显式关闭思考，覆盖
-        # REVIEW_CHECK 路由到的 deepseek-v4-pro 默认 thinking 开启（其思考
+        # REVIEW_CHECK 路由到的 deepseek-pro 默认 thinking 开启（其思考
         # tokens 会吃掉 max_tokens 预算导致 finish_reason=length、输出为空）。
         # 参数按模型族分发（core.model_resolution.build_thinking_disabled_extra_body）
         response = await self.llm_client.chat(

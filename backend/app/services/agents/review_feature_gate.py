@@ -49,7 +49,7 @@ def get_multi_model_review_config(project_context: dict[str, Any]) -> Optional[d
         mmr["auto_strategy"] = _normalize_auto_strategy(mmr.get("auto_strategy"))
     mmr["chief_model"] = (
         mmr.get("chief_model")
-        or getattr(settings, "MULTI_MODEL_REVIEW_CHIEF_MODEL", "deepseek-v4-pro")
+        or getattr(settings, "MULTI_MODEL_REVIEW_CHIEF_MODEL", "deepseek-pro")
     )
     return mmr
 

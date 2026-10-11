@@ -29,7 +29,7 @@ def test_persisted_character_audio_config_only_keeps_model_and_voice_reference()
         volume=72,
         speed=1.4,
         pitch=35,
-        tts_model="qwen3-tts-instruct-flash",
+        tts_model="qwen-audio-3.1-tts-flash",
         voice_type="cold",
         personality="rational",
         emotion_tendency="negative",
@@ -43,7 +43,7 @@ def test_persisted_character_audio_config_only_keeps_model_and_voice_reference()
         "character_id": 1,
         "name": "RuntimeRole",
         "voice_id": "Neil",
-        "tts_model": "qwen3-tts-instruct-flash",
+        "tts_model": "qwen-audio-3.1-tts-flash",
     }
 
 
@@ -60,7 +60,7 @@ def test_persisted_character_audio_config_hydrates_legacy_asset_ids_as_voice_ref
         character_id=3,
         name="ReusableStepAudioClone",
         voice_id="",
-        tts_model="stepaudio-2.5-tts",
+        tts_model="stepaudio-3-tts",
         stepaudio_voice_asset_id="stepaudio_clone_unit",
     )
 
@@ -74,7 +74,7 @@ def test_persisted_character_audio_config_hydrates_legacy_asset_ids_as_voice_ref
         "character_id": 3,
         "name": "ReusableStepAudioClone",
         "voice_id": "stepaudio_clone:stepaudio_clone_unit",
-        "tts_model": "stepaudio-2.5-tts",
+        "tts_model": "stepaudio-3-tts",
     }
 
 

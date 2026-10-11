@@ -47,9 +47,9 @@ describe('audiobook generation action utils', () => {
       chapterIds,
       voiceConfig: [{
         character_name: '旁白',
-        voice_id: 'Neil',
+        voice_id: 'longsanshu_v3.1',
       }],
-      ttsModel: 'qwen3-tts-instruct-flash',
+      ttsModel: 'qwen-audio-3.1-tts-flash',
       generationMode: 'full',
       narrationStyle: 'dramatic',
       narrationStylePrompt: '',
@@ -63,9 +63,9 @@ describe('audiobook generation action utils', () => {
       enable_cache: true,
       voice_config: [{
         character_name: '旁白',
-        voice_id: 'Neil',
+        voice_id: 'longsanshu_v3.1',
       }],
-      tts_model: 'qwen3-tts-instruct-flash',
+      tts_model: 'qwen-audio-3.1-tts-flash',
       output_format: 'wav',
       generate_subtitle: true,
       generation_mode: 'script_only',

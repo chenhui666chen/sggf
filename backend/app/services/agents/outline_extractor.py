@@ -27,7 +27,7 @@ class OutlineExtractor:
         """
         if llm is None:
             from app.core.config import settings
-            model = getattr(settings, "DEEPSEEK_MODEL", None) or getattr(settings, "MODEL_NAME", "qwen3.7-plus")
+            model = getattr(settings, "DEEPSEEK_MODEL", None) or getattr(settings, "MODEL_NAME", "qwen-plus")
             self.llm = create_model_llm(model=model, temperature=0.3)
         else:
             self.llm = llm

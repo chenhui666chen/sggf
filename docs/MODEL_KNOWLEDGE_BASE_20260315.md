@@ -1,5 +1,6 @@
 ﻿# 模型档案总览
 日期：`2026-03-15`
+最近更新：`2026-10-09`（第 2～6 节按当前注册中心重写为现役内部 ID；带日期的小节保留当时的取证记录）
 
 ## 1. 说明
 
@@ -19,18 +20,23 @@
 
 ## 2. 文本模型
 
-### qwen3.7-plus
+内部 ID 采用不含版本号的中性名，升级换代不换 ID；发给上游的真名由 `config/llm_models.yaml` 的
+`default_params.request_model` 钉死，因此下列"上游线名"与内部 ID 不同属设计使然。
 
+### qwen-plus
+
+- 上游线名：`qwen3.7-plus`
 - 定位：项目中文创作主力模型，对应阿里云通义千问 Plus 系列接入
 - 适用：故事概念生成、章节正文、角色对话、风格保持、结构化 JSON 输出
-- 限制：纯推理审校不如 `deepseek-v4-pro`；超长整书级任务仍需分层摘要策略
+- 限制：纯推理审校不如 `deepseek-pro`；超长整书级任务仍需分层摘要策略
 - 项目备注：当前 `chapter / concept / dialogue` 等任务默认优先路由到该模型
 - 官方资料：
   - https://help.aliyun.com/zh/model-studio/getting-started/models
   - https://help.aliyun.com/zh/model-studio/text-generation
 
-### deepseek-v4-pro
+### deepseek-pro
 
+- 上游线名：`deepseek-v4-pro`
 - 定位：项目高强度推理与审校模型
 - 适用：世界观逻辑、人物动机、结构评审、质量复审、有声剧本逻辑检查
 - 限制：延迟高；当前项目接入层不向其开放 `temperature / timeout / max_retries`
@@ -39,24 +45,30 @@
   - https://api-docs.deepseek.com/zh-cn/
   - https://api-docs.deepseek.com/zh-cn/quick_start/pricing
 
-### deepseek-v4-flash
+### deepseek-flash
 
 - 定位：项目通用对话与快速改写模型
 - 适用：AI 痕迹处理、快速润色、低延迟交互、轻量创作辅助
-- 限制：深度逻辑与多步分析不如 `deepseek-v4-pro`
+- 限制：深度逻辑与多步分析不如 `deepseek-pro`
 - 项目备注：当前 `rewrite / ai_trace / chat` 优先使用该模型
+- 现状（2026-10-09 更新）：上游已把旧线名从官方模型列表移除，请求旧名会被 DeepSeek 静默改写为本模型
+  （响应 `model` 字段可证）。项目内 `deepseek-flash` 是唯一入口（上下文 1048576、最大输出 393216），
+  旧线名既不是注册 ID、也不再出现在 `core/model_resolution.py` 的 `MODEL_ALIASES` 里：
+  传旧名会直接失败并被看见，而不是被悄悄换成另一个模型。
 - 官方资料：
   - https://api-docs.deepseek.com/zh-cn/
   - https://api-docs.deepseek.com/zh-cn/quick_start/pricing
 
 ## 3. 图像与多模态模型
 
-### wan2.6-t2i
+### qwen-image-3.0
 
-- 定位：项目主图像生成模型，统一使用实际调用名 `wan2.6-t2i`
+- 定位：项目主图像生成模型（资产工作台 `asset_studio_image_generation` 默认值）
 - 适用：封面草图、角色概念图、分镜概念图、带参考图的风格生成
 - 限制：多轮一致性仍依赖提示词与参考图
-- 项目备注：项目内统一使用正式调用名称 `wan2.6-t2i`
+- 项目备注：2026-10-08 图像线换代，万相旧 ID `wan2.6-t2i`、`wan2.7-image`、`qwen-image-2.0/-pro` 已注销；
+  DreamWeaver 侧默认用 `qwen-image-3.0-pro`（`_DEFAULT_MODEL_IDS["dreamweaver_image"]`），
+  4K 文生图与 9 张参考图、`bbox_list` 局部编辑走 `wan2.7-image-pro`
 - 官方资料：
   - https://help.aliyun.com/zh/model-studio/text-to-image-v1-api-reference
   - https://help.aliyun.com/zh/model-studio/getting-started/models
@@ -92,44 +104,24 @@
 
 ## 4. 视频模型
 
-### wan2.6-t2v
+### wan3.0-video
 
-- 定位：项目主文本生视频模型
-- 适用：短视频镜头生成、预告片片段、DreamWeaver 镜头生成
-- 限制：延迟高，短时长片段更稳；不直接承担对白音频生成
-- 项目备注：项目默认偏向 5 秒短片以换取更稳定的输出
+- 定位：项目唯一现役视频生成 ID（all-in-one），资产工作台与 DreamWeaver 的视频/视频编辑/运动三档默认值都是它
+- 适用：文生视频、首帧与首尾帧、参考生视频（图 ≤10 / 视频 ≤5 / 音频 ≤5 自由组合）、文件与网页参考生成、视频编辑、视频延长
+- 限制：异步任务，端到端通常数分钟，`task_id` 与结果链接仅 24 小时有效；参考视频/音频总时长 ≤15 秒；1080P 档 1.2 元/秒是 720P（0.6 元/秒）的两倍
+- 项目备注：官方 `audio` 默认 true，本项目默认置 false，避免与 DreamWeaver 自有对白/音效轨冲突
+- 能力缺口（2026-10-08 对照官方 API 逐项核实，已按"接受缺口"记录在 `config/models.yaml` 的 `limitations`）：
+  不提供 `driving_audio`（对白驱动）与 `first_clip`（首段续写）；无反向提示词、运镜控制、动作控制等专项入参。
+  主体一致性由 All-in-One 参考图（≤10 张）部分覆盖，与旧专项线的等价性见 `docs/MODEL_LIFECYCLE_MANAGEMENT_GUIDE_20260731.md` 第 9 节能力等价矩阵
+- 换代说明：2026-10-08 万相视频线收敛为单一现役 ID，`wan2.6-t2v`、`wan2.6-t2v-fast`、`wan2.7-t2v`、
+  `wan2.7-i2v`、`wan2.7-r2v`、`wan2.7-videoedit` 已从注册中心物理删除，且不再出现在
+  `core/model_resolution.py` 的 `MODEL_ALIASES` 里；传旧 ID 会直接失败，不会被改写。
+  注意 `pipeline/media_presets.py` 的 `DREAMWEAVER_T2V_ENGINE` / `DREAMWEAVER_I2V_ENGINE` 是
+  **引擎标识符**而非模型 ID，仍保留 `wan2.7-*` 字符串且有独立计费口径，不属退役范围
 - 官方资料：
+  - https://help.aliyun.com/zh/model-studio/use-video-generation
   - https://help.aliyun.com/zh/model-studio/video-synthesis
-  - https://help.aliyun.com/zh/model-studio/getting-started/models
-
-### wan2.6-t2v-fast
-
-- 定位：主视频模型的速度优先降级路径
-- 适用：预览片段、超时降级、早期分镜验证
-- 限制：画质与稳定性弱于 `wan2.6-t2v`
-- 项目备注：不建议作为最终视频主路径
-- 官方资料：
-  - https://help.aliyun.com/zh/model-studio/video-synthesis
-
-### wan2.6-i2v
-
-- 定位：项目图生视频路径
-- 适用：将关键帧、角色卡或静态分镜动画化
-- 限制：动作控制仍需要较保守的提示结构
-- 项目备注：当前通过项目适配桥接使用，适合单主体短片
-- 官方资料：
   - https://help.aliyun.com/zh/model-studio/image-to-video
-  - https://help.aliyun.com/zh/model-studio/video-synthesis
-
-### wan2.6-r2v
-
-- 定位：项目参考驱动的视频生成路径
-- 适用：保持风格一致、参考图 / 参考视频约束下的视频生成
-- 限制：对参考素材质量要求更高，不适合完全开放式探索
-- 项目备注：更适合“有明确素材基底”的视频生成流程
-- 官方资料：
-  - https://help.aliyun.com/zh/model-studio/video-synthesis
-  - https://help.aliyun.com/zh/model-studio/getting-started/models
 
 ## 5. TTS 与语音模型
 
@@ -185,12 +177,12 @@
 - `SimpleAdapterFactory` 已支持对 runtime wrapper 的懒代理，旧方法如 `chat/analyze_image/match_scene` 在历史 Agent 中也能继续落到新机制
 - 有声书业务中的 TTS 试听接口与 `AudiobookEngine` 初始化已改走统一多模态运行时 / TTS 工厂
 - `config/models.yaml` 继续作为图像 / 视频 / TTS / 多模态模型档案中心，运行时会读取这些档案做模型选择
-- `qwen3-vl-plus`、`qwen-image-edit-plus`、`qwen-image-edit-max`、`wan2.6-t2i`、`wan2.6-t2v`、`wan2.6-i2v`、`wan2.6-r2v` 已具备 registry-backed adapter，可直接由统一运行时通过 registry 获取
-- `wan_t2i/wan26_t2i`、`wan_t2v/wan26_t2v`、`qwen3_tts` 等历史 key 已优先接入 runtime wrapper，不再默认回退到旧 media adapter 链路
+- `qwen3-vl-plus`、`qwen-image-edit-plus`、`qwen-image-edit-max`、`qwen-image-3.0`、`qwen-image-3.0-pro`、`wan2.7-image-pro`、`wan3.0-video` 已具备 registry-backed adapter，可直接由统一运行时通过 registry 获取（2026-10-09 全量清点：媒体注册中心 46 个 spec 全部 `status: active`，无任何 `deprecated` 残留）
+- runtime wrapper 现存入口 key 为 `qwen3_vl_plus`、`qwen3_tts`、`qwen_image_edit_plus`、`qwen_image_edit_max`、`wan_image_edit`、`qwen_multiperson_fusion`、`minimax-speech-2.8-turbo`、`minimax-speech-2.8-hd`；万相旧 T2I/T2V/I2V/R2V wrapper key 已随媒体线退役删除，不再默认回退到旧 media adapter 链路
 
 仍然保留的工程边界：
 
-- 仍有部分历史 Agent 代码直接使用 `adapters/model_adapters.py` 里的 `ModelAdapterFactory`，这些调用点尚未全部迁到新的 registry/runtime facade
+- `ModelAdapterFactory`（`adapters/model_adapters.py:990`、`adapters/legacy_bridge.py:134` 两处同名类）保留但业务侧已无调用点：`agents/*` 现在只通过 `adapters/adapter_helpers.create_runtime_client(...)` 取客户端，`agents/asset_library.py` 是唯一仍直接创建 runtime wrapper 客户端的位置
 - `legacy_bridge` 目前仅保留少量非统一媒体路径的旧式兜底，媒体模型侧的旧 fallback 已基本清空
-- 如果后续继续推进，建议继续把各个 Agent 内部直接 new / get 旧式 `ModelAdapterFactory` 的位置逐步改成调用统一多模态运行时
+- 后续推进方向是把 `ModelAdapterFactory` 这两处同名类一并收口，避免"哪个实现在跑"不可判断
 

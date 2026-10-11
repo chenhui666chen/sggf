@@ -13,7 +13,8 @@
       "languages": [
         "zh"
       ],
-      "description": "青涩青年音色"
+      "description": "青涩青年音色",
+      "preview_text": "人不是慢慢变老的，而是一瞬变老的。"
     },
     {
       "id": "male-qn-jingying",
@@ -25,7 +26,8 @@
       "languages": [
         "zh"
       ],
-      "description": "精英青年音色"
+      "description": "精英青年音色",
+      "preview_text": "世界上只有一种真正的英雄主义，那就是在认清生活的真相后依然热爱生活。"
     },
     {
       "id": "male-qn-badao",
@@ -37,7 +39,8 @@
       "languages": [
         "zh"
       ],
-      "description": "霸道青年音色"
+      "description": "霸道青年音色",
+      "preview_text": "我走得很慢，但我从不后退。"
     },
     {
       "id": "male-qn-daxuesheng",
@@ -49,7 +52,8 @@
       "languages": [
         "zh"
       ],
-      "description": "青年大学生音色"
+      "description": "青年大学生音色",
+      "preview_text": "生活不能等待别人来安排，要自己去争取和奋斗。"
     },
     {
       "id": "female-shaonv",
@@ -61,7 +65,8 @@
       "languages": [
         "zh"
       ],
-      "description": "少女音色"
+      "description": "少女音色",
+      "preview_text": "人生如逆旅，我亦是行人。"
     },
     {
       "id": "female-yujie",
@@ -73,7 +78,8 @@
       "languages": [
         "zh"
       ],
-      "description": "御姐音色"
+      "description": "御姐音色",
+      "preview_text": "万物皆有裂痕，那是光照进来的地方。"
     },
     {
       "id": "female-chengshu",
@@ -85,7 +91,8 @@
       "languages": [
         "zh"
       ],
-      "description": "成熟女性音色"
+      "description": "成熟女性音色",
+      "preview_text": "我当然不会试图摘月，我要月亮奔我而来。"
     },
     {
       "id": "female-tianmei",
@@ -97,7 +104,8 @@
       "languages": [
         "zh"
       ],
-      "description": "甜美女性音色"
+      "description": "甜美女性音色",
+      "preview_text": "只有那些勇敢镇定的人，才能熬过黑暗，迎来光明。"
     },
     {
       "id": "male-qn-qingse-jingpin",
@@ -109,7 +117,8 @@
       "languages": [
         "zh"
       ],
-      "description": "青涩青年音色-beta"
+      "description": "青涩青年音色-beta",
+      "preview_text": "所谓活着的人，就是不断挑战的人，不断攀登命运险峰的人。"
     },
     {
       "id": "male-qn-jingying-jingpin",
@@ -121,7 +130,8 @@
       "languages": [
         "zh"
       ],
-      "description": "精英青年音色-beta"
+      "description": "精英青年音色-beta",
+      "preview_text": "我们终此一生，就是要摆脱他人的期待，找到真正的自己。"
     },
     {
       "id": "male-qn-badao-jingpin",
@@ -133,7 +143,8 @@
       "languages": [
         "zh"
       ],
-      "description": "霸道青年音色-beta"
+      "description": "霸道青年音色-beta",
+      "preview_text": "无论走到哪里，都应该记住，过去都是假的，回忆是一条没有尽头的路。"
     },
     {
       "id": "male-qn-daxuesheng-jingpin",
@@ -145,7 +156,8 @@
       "languages": [
         "zh"
       ],
-      "description": "青年大学生音色-beta"
+      "description": "青年大学生音色-beta",
+      "preview_text": "一个人至少拥有一个梦想，有一个理由去坚强。"
     },
     {
       "id": "female-shaonv-jingpin",
@@ -157,7 +169,8 @@
       "languages": [
         "zh"
       ],
-      "description": "少女音色-beta"
+      "description": "少女音色-beta",
+      "preview_text": "你如果认识从前的我，也许你会原谅现在的我。"
     },
     {
       "id": "female-yujie-jingpin",
@@ -169,7 +182,8 @@
       "languages": [
         "zh"
       ],
-      "description": "御姐音色-beta"
+      "description": "御姐音色-beta",
+      "preview_text": "生命的意义不在于活得长，而在于活得有意义。"
     },
     {
       "id": "female-chengshu-jingpin",
@@ -181,7 +195,8 @@
       "languages": [
         "zh"
       ],
-      "description": "成熟女性音色-beta"
+      "description": "成熟女性音色-beta",
+      "preview_text": "我们生来就是孤独，但孤独并非一无所有。"
     },
     {
       "id": "female-tianmei-jingpin",
@@ -193,7 +208,8 @@
       "languages": [
         "zh"
       ],
-      "description": "甜美女性音色-beta"
+      "description": "甜美女性音色-beta",
+      "preview_text": "于千万人之中遇见你所要遇见的人，于千万年之中，时间的无涯的荒野里，没有早一步，也没有晚一步，刚巧赶上了。"
     },
     {
       "id": "clever_boy",
@@ -205,7 +221,8 @@
       "languages": [
         "zh"
       ],
-      "description": "聪明男童"
+      "description": "聪明男童",
+      "preview_text": "喜欢一个人，会卑微到尘埃里，然后开出花来。"
     },
     {
       "id": "cute_boy",
@@ -217,7 +234,8 @@
       "languages": [
         "zh"
       ],
-      "description": "可爱男童"
+      "description": "可爱男童",
+      "preview_text": "斯人若彩虹，遇上方知有。"
     },
     {
       "id": "lovely_girl",
@@ -229,7 +247,8 @@
       "languages": [
         "zh"
       ],
-      "description": "萌萌女童"
+      "description": "萌萌女童",
+      "preview_text": "我把我整个灵魂都给你，连同它的怪癖，耍小脾气，忽明忽暗，一千八百种坏毛病。它真讨厌，只有一点好，爱你。"
     },
     {
       "id": "cartoon_pig",
@@ -241,7 +260,8 @@
       "languages": [
         "zh"
       ],
-      "description": "卡通猪小琪"
+      "description": "卡通猪小琪",
+      "preview_text": "爱之于我，不是肌肤之亲，不是一蔬一饭，它是一种不死的欲望，是疲惫生活中的英雄梦想。"
     },
     {
       "id": "bingjiao_didi",
@@ -253,7 +273,8 @@
       "languages": [
         "zh"
       ],
-      "description": "病娇弟弟"
+      "description": "病娇弟弟",
+      "preview_text": "如果你爱上了某个星球的一朵花，那么只要在夜晚仰望星空，就会觉得漫天的繁星就像一朵朵盛开的花。"
     },
     {
       "id": "junlang_nanyou",
@@ -265,7 +286,8 @@
       "languages": [
         "zh"
       ],
-      "description": "俊朗男友"
+      "description": "俊朗男友",
+      "preview_text": "我们笑着说再见，却深知再见遥遥无期。"
     },
     {
       "id": "chunzhen_xuedi",
@@ -277,7 +299,8 @@
       "languages": [
         "zh"
       ],
-      "description": "纯真学弟"
+      "description": "纯真学弟",
+      "preview_text": "有些人浅薄，有些人金玉其外败絮其中，但总有一天，你会遇到一个彩虹般绚丽的人。"
     },
     {
       "id": "lengdan_xiongzhang",
@@ -289,7 +312,8 @@
       "languages": [
         "zh"
       ],
-      "description": "冷淡学长"
+      "description": "冷淡学长",
+      "preview_text": "陪伴是最长情的告白，而守护是最沉默的陪伴。"
     },
     {
       "id": "badao_shaoye",
@@ -301,7 +325,8 @@
       "languages": [
         "zh"
       ],
-      "description": "霸道少爷"
+      "description": "霸道少爷",
+      "preview_text": "如果你说你在下午四点来，从三点钟开始，我就开始感觉很快乐。"
     },
     {
       "id": "tianxin_xiaoling",
@@ -313,7 +338,8 @@
       "languages": [
         "zh"
       ],
-      "description": "甜心小玲"
+      "description": "甜心小玲",
+      "preview_text": "我们都在阴沟里，但仍有人仰望星空。"
     },
     {
       "id": "qiaopi_mengmei",
@@ -325,7 +351,8 @@
       "languages": [
         "zh"
       ],
-      "description": "俏皮萌妹"
+      "description": "俏皮萌妹",
+      "preview_text": "我渴望能见你一面，但请你记得，我不会开口要求要见你。这不是骄傲，我知道你对我的感情，就像我知道我对你的感情一样。"
     },
     {
       "id": "wumei_yujie",
@@ -337,7 +364,8 @@
       "languages": [
         "zh"
       ],
-      "description": "妩媚御姐"
+      "description": "妩媚御姐",
+      "preview_text": "人生而自由，却无往不在枷锁之中。"
     },
     {
       "id": "diadia_xuemei",
@@ -349,7 +377,8 @@
       "languages": [
         "zh"
       ],
-      "description": "嗲嗲学妹"
+      "description": "嗲嗲学妹",
+      "preview_text": "我们听过无数的道理，却仍旧过不好这一生。"
     },
     {
       "id": "danya_xuejie",
@@ -361,7 +390,8 @@
       "languages": [
         "zh"
       ],
-      "description": "淡雅学姐"
+      "description": "淡雅学姐",
+      "preview_text": "人类一思考，上帝就发笑。"
     },
     {
       "id": "Chinese (Mandarin)_Reliable_Executive",
@@ -373,7 +403,8 @@
       "languages": [
         "zh"
       ],
-      "description": "沉稳高管"
+      "description": "沉稳高管",
+      "preview_text": "卑鄙是卑鄙者的通行证，高尚是高尚者的墓志铭。"
     },
     {
       "id": "Chinese (Mandarin)_News_Anchor",
@@ -385,7 +416,8 @@
       "languages": [
         "zh"
       ],
-      "description": "新闻女声"
+      "description": "新闻女声",
+      "preview_text": "未经审视的人生是不值得过的。"
     },
     {
       "id": "Chinese (Mandarin)_Mature_Woman",
@@ -397,7 +429,8 @@
       "languages": [
         "zh"
       ],
-      "description": "傲娇御姐"
+      "description": "傲娇御姐",
+      "preview_text": "我偏爱写排比的荒谬，胜于不写排比的荒谬。"
     },
     {
       "id": "Chinese (Mandarin)_Unrestrained_Young_Man",
@@ -409,7 +442,8 @@
       "languages": [
         "zh"
       ],
-      "description": "不羁青年"
+      "description": "不羁青年",
+      "preview_text": "我渴望能见你一面，但请你记得，我不会开口要求要见你。"
     },
     {
       "id": "Arrogant_Miss",
@@ -421,7 +455,8 @@
       "languages": [
         "zh"
       ],
-      "description": "嚣张小姐"
+      "description": "嚣张小姐",
+      "preview_text": "只要你不放弃，整个世界都会为你让路。"
     },
     {
       "id": "Robot_Armor",
@@ -434,7 +469,8 @@
         "zh",
         "en"
       ],
-      "description": "机械战甲"
+      "description": "机械战甲",
+      "preview_text": "人不是向外奔走才是旅行，静静坐着思维也是旅行。"
     },
     {
       "id": "Chinese (Mandarin)_Kind-hearted_Antie",
@@ -446,7 +482,8 @@
       "languages": [
         "zh"
       ],
-      "description": "热心大婶"
+      "description": "热心大婶",
+      "preview_text": "孤独是人生的常态，学会与自己相处，才能与世界相融。"
     },
     {
       "id": "Chinese (Mandarin)_HK_Flight_Attendant",
@@ -459,7 +496,8 @@
         "zh",
         "yue"
       ],
-      "description": "港普空姐"
+      "description": "港普空姐",
+      "preview_text": "我们花了两年学会说话，却要花上六十年来学会闭嘴。"
     },
     {
       "id": "Chinese (Mandarin)_Humorous_Elder",
@@ -471,7 +509,8 @@
       "languages": [
         "zh"
       ],
-      "description": "搞笑大爷"
+      "description": "搞笑大爷",
+      "preview_text": "真正有气质的淑女，从不炫耀她所拥有的一切，她不告诉人她读过什么书，去过什么地方，有多少件衣服，买过什么珠宝，因为她没有自卑感。"
     },
     {
       "id": "Chinese (Mandarin)_Gentleman",
@@ -483,7 +522,8 @@
       "languages": [
         "zh"
       ],
-      "description": "温润男声"
+      "description": "温润男声",
+      "preview_text": "也许每一个男子全都有过这样的两个女人，至少两个。娶了红玫瑰，久而久之，红的变了墙上的一抹蚊子血，白的还是“床前明月光”。"
     },
     {
       "id": "Chinese (Mandarin)_Warm_Bestie",
@@ -495,7 +535,8 @@
       "languages": [
         "zh"
       ],
-      "description": "温暖闺蜜"
+      "description": "温暖闺蜜",
+      "preview_text": "我爱你，不光因为你的样子，还因为和你在一起时，我的样子。"
     },
     {
       "id": "Chinese (Mandarin)_Male_Announcer",
@@ -507,7 +548,8 @@
       "languages": [
         "zh"
       ],
-      "description": "播报男声"
+      "description": "播报男声",
+      "preview_text": "遇见你之前，我没想过结婚；遇见你之后，结婚我没想过别人。"
     },
     {
       "id": "Chinese (Mandarin)_Sweet_Lady",
@@ -519,7 +561,8 @@
       "languages": [
         "zh"
       ],
-      "description": "甜美女声"
+      "description": "甜美女声",
+      "preview_text": "幸福的家庭都是相似的，不幸的家庭各有各的不幸。"
     },
     {
       "id": "Chinese (Mandarin)_Southern_Young_Man",
@@ -531,7 +574,8 @@
       "languages": [
         "zh"
       ],
-      "description": "南方小哥"
+      "description": "南方小哥",
+      "preview_text": "满纸荒唐言，一把辛酸泪。都云作者痴，谁解其中味。"
     },
     {
       "id": "Chinese (Mandarin)_Wise_Women",
@@ -543,7 +587,8 @@
       "languages": [
         "zh"
       ],
-      "description": "阅历姐姐"
+      "description": "阅历姐姐",
+      "preview_text": "这是一个最好的时代，也是一个最坏的时代。"
     },
     {
       "id": "Chinese (Mandarin)_Gentle_Youth",
@@ -555,7 +600,8 @@
       "languages": [
         "zh"
       ],
-      "description": "温润青年"
+      "description": "温润青年",
+      "preview_text": "他人即地狱。"
     },
     {
       "id": "Chinese (Mandarin)_Warm_Girl",
@@ -567,7 +613,8 @@
       "languages": [
         "zh"
       ],
-      "description": "温暖少女"
+      "description": "温暖少女",
+      "preview_text": "人的一切痛苦，本质上都是对自己的无能的愤怒。"
     },
     {
       "id": "Chinese (Mandarin)_Kind-hearted_Elder",
@@ -579,7 +626,8 @@
       "languages": [
         "zh"
       ],
-      "description": "花甲奶奶"
+      "description": "花甲奶奶",
+      "preview_text": "假作真时真亦假，无为有处有还无。"
     },
     {
       "id": "Chinese (Mandarin)_Cute_Spirit",
@@ -591,7 +639,8 @@
       "languages": [
         "zh"
       ],
-      "description": "憨憨萌兽"
+      "description": "憨憨萌兽",
+      "preview_text": "凡是不能杀我的，必使我更强大。"
     },
     {
       "id": "Chinese (Mandarin)_Radio_Host",
@@ -603,7 +652,8 @@
       "languages": [
         "zh"
       ],
-      "description": "电台男主播"
+      "description": "电台男主播",
+      "preview_text": "凡是过往，皆为序章。"
     },
     {
       "id": "Chinese (Mandarin)_Lyrical_Voice",
@@ -615,7 +665,8 @@
       "languages": [
         "zh"
       ],
-      "description": "抒情男声"
+      "description": "抒情男声",
+      "preview_text": "岁月不饶人，我亦未曾饶过岁月。"
     },
     {
       "id": "Chinese (Mandarin)_Straightforward_Boy",
@@ -627,7 +678,8 @@
       "languages": [
         "zh"
       ],
-      "description": "率真弟弟"
+      "description": "率真弟弟",
+      "preview_text": "人生天地之间，若白驹之过隙，忽然而已。"
     },
     {
       "id": "Chinese (Mandarin)_Sincere_Adult",
@@ -639,7 +691,8 @@
       "languages": [
         "zh"
       ],
-      "description": "真诚青年"
+      "description": "真诚青年",
+      "preview_text": "一个人并不是生来要给打败的，你尽可以把他消灭掉，可就是打不败他。"
     },
     {
       "id": "Chinese (Mandarin)_Gentle_Senior",
@@ -651,7 +704,8 @@
       "languages": [
         "zh"
       ],
-      "description": "温柔学姐"
+      "description": "温柔学姐",
+      "preview_text": "世界上没有比时间更慷慨的，也没有比时间更残酷的。"
     },
     {
       "id": "Chinese (Mandarin)_Stubborn_Friend",
@@ -663,7 +717,8 @@
       "languages": [
         "zh"
       ],
-      "description": "嘴硬竹马"
+      "description": "嘴硬竹马",
+      "preview_text": "我思故我在。"
     },
     {
       "id": "Chinese (Mandarin)_Crisp_Girl",
@@ -675,7 +730,8 @@
       "languages": [
         "zh"
       ],
-      "description": "清脆少女"
+      "description": "清脆少女",
+      "preview_text": "梦想还是要有的，万一实现了呢？"
     },
     {
       "id": "Chinese (Mandarin)_Pure-hearted_Boy",
@@ -687,7 +743,8 @@
       "languages": [
         "zh"
       ],
-      "description": "清澈邻家弟弟"
+      "description": "清澈邻家弟弟",
+      "preview_text": "即使明天世界毁灭，我今天依然要种下我的苹果树。"
     },
     {
       "id": "Chinese (Mandarin)_Soft_Girl",
@@ -699,7 +756,8 @@
       "languages": [
         "zh"
       ],
-      "description": "柔和少女"
+      "description": "柔和少女",
+      "preview_text": "真正的勇敢，是明知不可为而为之。"
     },
     {
       "id": "Cantonese_ProfessionalHost（F)",
@@ -711,7 +769,8 @@
       "languages": [
         "yue"
       ],
-      "description": "专业女主持"
+      "description": "专业女主持",
+      "preview_text": "那些打不倒你的，终将使你更强大。"
     },
     {
       "id": "Cantonese_GentleLady",
@@ -723,7 +782,8 @@
       "languages": [
         "yue"
       ],
-      "description": "温柔女声"
+      "description": "温柔女声",
+      "preview_text": "真正的强者，不是没有眼泪的人，而是含着眼泪依然奔跑的人。"
     },
     {
       "id": "Cantonese_ProfessionalHost（M)",
@@ -735,7 +795,8 @@
       "languages": [
         "yue"
       ],
-      "description": "专业男主持"
+      "description": "专业男主持",
+      "preview_text": "人之所以痛苦，在于追求错误的东西。"
     },
     {
       "id": "Cantonese_PlayfulMan",
@@ -747,7 +808,8 @@
       "languages": [
         "yue"
       ],
-      "description": "活泼男声"
+      "description": "活泼男声",
+      "preview_text": "知识就是力量。"
     },
     {
       "id": "Cantonese_CuteGirl",
@@ -759,7 +821,8 @@
       "languages": [
         "yue"
       ],
-      "description": "可爱女孩"
+      "description": "可爱女孩",
+      "preview_text": "爱情是叹息吹起的一阵烟，恋人的眼中有它净化了的火星。"
     },
     {
       "id": "Cantonese_KindWoman",
@@ -771,7 +834,8 @@
       "languages": [
         "yue"
       ],
-      "description": "善良女声"
+      "description": "善良女声",
+      "preview_text": "最好的爱情，不是完美无缺，而是你来了以后，我再也没想过别人。"
     }
   ]
 }

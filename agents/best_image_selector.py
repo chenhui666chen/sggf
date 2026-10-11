@@ -110,6 +110,36 @@ def _extract_score(obj: Any) -> Optional[float]:
     return None
 
 
+_CONTRACT_MARKERS = ("景别（", "运镜：", "光照：", "画面要点：", "状态约束")
+
+
+def _semantic_weights(target_description: str) -> Dict[str, float]:
+    """语义评分权重（镜头卡 12 字段对齐，Phase 2.4）。
+
+    - 基础权重：identity（character_consistency）0.30 / structure（scene_style+transition）0.35 /
+      style+quality 0.25 / description 0.10
+    - Contract 输入（帧 prompt 含 Contract 标记：景别/运镜/光照/画面要点/状态约束）时，
+      description_accuracy 升格为 Contract 命中度 0.25、quality 降为 0.15——
+      择优以「这候选是否命中导演 Contract」为先（10.6 candidate_selection_gate）。
+    """
+    has_contract = any(m in str(target_description or "") for m in _CONTRACT_MARKERS)
+    if has_contract:
+        return {
+            "quality": 0.15,
+            "character_consistency": 0.30,
+            "scene_style_consistency": 0.15,
+            "transition_consistency": 0.15,
+            "description_accuracy": 0.25,
+        }
+    return {
+        "quality": 0.25,
+        "character_consistency": 0.30,
+        "scene_style_consistency": 0.20,
+        "transition_consistency": 0.15,
+        "description_accuracy": 0.10,
+    }
+
+
 def _vlm_select_best_candidate_semantic(
     *,
     vlm_adapter: Any,
@@ -121,13 +151,7 @@ def _vlm_select_best_candidate_semantic(
     if not target_description or not candidate_paths:
         return None
 
-    weights = {
-        "quality": 0.25,
-        "character_consistency": 0.30,
-        "scene_style_consistency": 0.20,
-        "transition_consistency": 0.15,
-        "description_accuracy": 0.10,
-    }
+    weights = _semantic_weights(target_description)
     pass_threshold = _env_float("DREAMWEAVER_DIRECTOR_PASS_THRESHOLD", 0.72)
     min_quality = _env_float("DREAMWEAVER_DIRECTOR_MIN_QUALITY", 0.55)
     min_character = _env_float("DREAMWEAVER_DIRECTOR_MIN_CHARACTER", 0.60)

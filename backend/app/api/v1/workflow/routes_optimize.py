@@ -513,7 +513,7 @@ async def _optimize_chapter_task(
         total_tokens = estimate_tokens(current_content) + estimate_tokens(review_report) + 500
         model_name, max_safe_limit = _select_text_model_by_input_tokens(total_tokens)
         
-        logger.info(f"🤖 使用模型: {model_name} (预计tokens: {total_tokens}, qwen3.7-plus安全预算: {max_safe_limit})")
+        logger.info(f"🤖 使用模型: {model_name} (预计tokens: {total_tokens}, qwen-plus安全预算: {max_safe_limit})")
         
         # 执行改稿（使用较低temperature保持原文结构）
         optimized_content = content_agent.process(

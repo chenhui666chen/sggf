@@ -21,7 +21,7 @@ from app.services.audiobook.tts_model_ids import (
     MINIMAX_SPEECH_28_HD_MODEL,
     MINIMAX_SPEECH_28_TURBO_MODEL,
     SEED_TTS_20_EXPRESSIVE_MODEL,
-    STEPAUDIO_25_TTS_MODEL,
+    STEPAUDIO_3_TTS_MODEL,
     normalize_audiobook_tts_model,
 )
 from app.services.audiobook.script_render_mode import (
@@ -514,9 +514,9 @@ class TransformMixin:
             model_contract_reminders = """- instruct_emotion / instruct_scene / instruct_role / instruct_identity 只记录供应商中立的表演意图
 - performance_notes 必须包含可感知的情绪变化过程、韵律和微表演；发送层会据此构建 context_texts 或受控音频标签
 - 不要输出 style_control_method、style_tags、inline_audio_tags、context_texts、use_tag_parser 等供应商请求字段"""
-        elif normalized_model.startswith("qwen3-tts"):
-            tts_block = """**当前TTS模型：Qwen3-TTS Instruct Flash（默认模式）**\n- 适合：长篇连载 / 日更章节 / 成本敏感但需要一定表现力的内容\n- 特性：49 音色、稳定性强、成本低，并支持通过自然语言 instructions 控制语气与演绎\n- 限制：当前链路重点是 instructions，不要输出 SSML 语法\n"""
-            instruct_block = """**Qwen3 Instruct 提示**\n- 请输出结构化指令字段：instruct_emotion / instruct_scene / instruct_role / instruct_identity\n- performance_notes 会一并映射到 Qwen instructions，请写成可直接执行的演绎说明\n- qwen3-tts-instruct-flash 不依赖 SSML，请直接描述情绪、场景、身份与语气目标\n"""
+        elif normalized_model == DEFAULT_AUDIOBOOK_TTS_MODEL:
+            tts_block = """**当前TTS模型：Qwen-Audio 3.1 TTS Flash（默认模式）**\n- 适合：长篇连载 / 日更章节 / 成本敏感但需要表现力的内容\n- 特性：68 个官方系统音色（含方言、英文、儿童与角色音），支持自然语言 instructions 控制语气与演绎，正文长度与 instruction 预算互相独立\n- 限制：当前链路只走 instructions，不要输出 SSML 语法\n"""
+            instruct_block = """**Qwen-Audio 3.1 Instruct 提示**\n- 请输出结构化指令字段：instruct_emotion / instruct_scene / instruct_role / instruct_identity\n- performance_notes 会一并映射到 3.1 的 instructions，请写成可直接执行的演绎说明\n- 发送层不依赖 SSML，请直接描述情绪、场景、身份与语气目标\n"""
             model_contract_reminders = """- instruct_emotion / instruct_scene / instruct_role / instruct_identity 用于构建 Qwen instructions
 - performance_notes 必须是可直接执行的自然语言演绎说明，不要输出 SSML"""
         elif normalized_model in (
@@ -556,22 +556,22 @@ class TransformMixin:
             model_contract_reminders = """- instruct_* 与 performance_notes 只表达供应商中立的表演意图
 - 不要输出 (风格) 前缀、[音频标签] 或 SSML 等供应商私有语法；标签编译由发送层决定
 - 复合情绪与多粒度控制（段落/句/词/字）可直接用自然语言描述"""
-        elif normalized_model == STEPAUDIO_25_TTS_MODEL:
-            tts_block = """**当前TTS模型：StepAudio 2.5 TTS（阶跃星辰，Contextual TTS）**
+        elif normalized_model == STEPAUDIO_3_TTS_MODEL:
+            tts_block = """**当前TTS模型：StepAudio 3 TTS（阶跃星辰，Contextual TTS）**
 - 适合：需要细腻语境控制、复合意图与零样本音色复刻的精品章节
-- 特性：Global Context（全局语境 instruction，≤200 字符）定整段基调 + Inline Context（文中括号，不朗读）逐句精控情绪/停顿/气息
+- 特性：Global Context（全局语境 instruction，≤500 字符）定整段基调 + Inline Context（文中括号，不朗读）逐句精控情绪/停顿/气息
 - 约束：单次输入 ≤1000 字符；剧本层只描述目标表演，不直接拼接括号内联指令
 """
             instruct_block = """**StepAudio 表演提示**
-- performance_notes 会由发送层编译为全局语境 instruction（≤200 字符）与文中括号内联指令；请写成精炼、可执行的语境描述。
-- 整段基调（情绪、语速、语气）写入 performance_notes；发送层会截断到 200 字符，请优先保留最关键信息。
+- performance_notes 会由发送层编译为全局语境 instruction（≤500 字符）与文中括号内联指令；请写成精炼、可执行的语境描述。
+- 整段基调（情绪、语速、语气）写入 performance_notes；发送层会截断到 500 字符，请优先保留最关键信息。
 - 句内细节（停顿、气息、重音、语气转折）写入 performance_notes，发送层会决定是否编译为文中括号指令。
 - 支持复合意图（如“克制的悲伤，不哭腔，轻轻发颤”），可直接用自然语言描述。
 - 输出保持供应商中立：不要输出 () 括号内联指令、style_control_method 等供应商请求字段。
 """
             model_contract_reminders = """- instruct_* 与 performance_notes 只表达供应商中立的表演意图
 - 不要输出 () 括号内联指令或 SSML 等供应商私有语法；全局/文中语境编译由发送层决定
-- 全局语境 instruction 上限 200 字符，performance_notes 请精炼表达整段基调"""
+- 全局语境 instruction 上限 500 字符，performance_notes 请精炼表达整段基调"""
         else:
             tts_block = f"""**当前TTS模型：{normalized_model}**
 - 使用模型无关的有声书剧本结构，具体供应商参数由发送层转换

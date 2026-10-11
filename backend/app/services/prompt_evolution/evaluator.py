@@ -7,6 +7,7 @@ import asyncio
 import hashlib
 import json
 import logging
+import os
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -25,6 +26,8 @@ from .novel_rules import (
     calculate_multi_dimension_score, MultiDimensionScore,
     _calculate_fidelity_score,  # 🆕 新增：保真度计算函数
     locate_high_risk_segments, build_targeted_rewrite_hint,  # 🔧 统计预检→定点改写
+    build_detector_segment_hint,  # 🔧 真实检测段落标注→定点改写（替代盲猜）
+    FACT_BOTTOM_LINE_HINT,  # 🔧 常驻事实底线（无定点命中时的兜底约束）
 )
 
 logger = logging.getLogger(__name__)
@@ -50,9 +53,20 @@ class PromptEvaluator:
     EVALUATION_CONCURRENCY = 8
     # 🔧 篇幅守门参数：改写长度不得低于原文 MIN_REWRITE_RATIO；
     # 原文≥ GATE_ABSOLUTE_ORIGINAL_THRESHOLD 字时另受 MIN_REWRITTEN_LENGTH 绝对下限约束
+    #
+    # ⚠️ MIN_REWRITTEN_LENGTH 由 600 上调至 1500（2026-10-08 真实网关实测）：
+    #    同一篇人工改写文本按长度截断扫描得 100字→100分、300字→100分、600字→100分、
+    #    1000字→53分、1600字→33分。即 600 字以下检测分完全失真（恒判满分 AI），
+    #    落在失真区的改写会拿到虚假的「零降分」甚至虚假满分，污染进化方向。
+    #    注：此处原注释称「朱雀约300字以下返回0分」与实测相反（实测返回100分），已订正。
     MIN_REWRITE_RATIO = 0.5
-    MIN_REWRITTEN_LENGTH = 600
+    MIN_REWRITTEN_LENGTH = 1500
     GATE_ABSOLUTE_ORIGINAL_THRESHOLD = 1200
+    # 🔧 去锚定重写开关（2026-10-08 实测）：改用「原文→事实要点→重新生成」两阶段范式，
+    # 可把「被判确定AI」的段落占比从 100% 降到约 26%（常规改写只能降到 50% 左右）。
+    # 代价：单次改写的 LLM 调用由 1 次增至 2-3 次，成本与延迟翻倍。
+    # 故默认关闭，由 AI_TRACE_DEANCHOR_ENABLED=true 显式启用，失败自动回退常规改写。
+    DEANCHOR_ENABLED = os.getenv("AI_TRACE_DEANCHOR_ENABLED", "false").strip().lower() == "true"
     # 🔧 改写空响应重试上限：改写模型偶发返回空串（历史题材实测 3/4 样本），
     # 不重试会导致样本硬失败、变体/基线被批量取消资格
     REWRITE_MAX_ATTEMPTS = 3
@@ -70,6 +84,17 @@ class PromptEvaluator:
     # 🔧 深区定点改写阈值：基线≥此分才附定点提示；低分样本无差别全文
     # 改写已有效，附提示反而限制发挥（基准实验：深区对全文改写免疫）
     DEEP_ZONE_HINT_THRESHOLD = 90
+    # 🔧 真实检测段落标注定点改写（2026-10-08）：朱雀逐段返回 label（0人工/1确定AI/2疑似）
+    # 与段原文，这是检测器给出的**真值**；而 locate_high_risk_segments 只是正则猜
+    # 「这段可能像 AI」，检测器认不认并不知道。
+    # 启用后：有确定AI段落时优先用真值指令，无则回退正则预检。
+    # 默认关闭——实验13 已证明往提示词加指令有伤害主指标的风险，
+    # 需先由 A/B 对照实验（见 .workbuddy/memory/2026-10-08.md）确认收益再开。
+    SEGMENT_HINT_ENABLED = os.getenv("AI_TRACE_SEGMENT_HINT_ENABLED", "false").strip().lower() == "true"
+    # 🔧 常驻事实底线（2026-10-08）：无任何定点命中时，仍下发 FACT_BOTTOM_LINE_HINT。
+    # 依据实验16：无指令组质量合格率 25%（事实一致性均值 85），有指令组 75%（均值 90）。
+    # 干净样本不应因"没命中"就裸奔——事实约束是普适要求，不是定点专属。
+    FACT_HINT_ENABLED = os.getenv("AI_TRACE_FACT_HINT_ENABLED", "false").strip().lower() == "true"
 
     def __init__(self):
         self.llm_client = get_llm_client()
@@ -245,13 +270,32 @@ class PromptEvaluator:
             # 🔧 统计预检：深区（基线≥阈值）先定位高风险结构句式再定点改写，
             # 比无差别全文改写有效（humanize_mba 工程闭环实证）；低分样本
             # 零污染，继续走普通全文改写链路
+            # 🔧 定点指令优先级：真实检测段落标注（真值）> 正则统计预检（猜测）
+            # 真值可用时不再叠加正则预检——两者同时下发会显著拉长指令、
+            # 挤占事实约束的注意力预算（实验13 教训）
             targeted_hint = ""
             original_findings: List[Dict[str, Any]] = []
-            if original_result.get("success") and (
+            hint_source = "无"
+            if self.SEGMENT_HINT_ENABLED and original_result.get("success"):
+                targeted_hint = build_detector_segment_hint(
+                    original_result.get("segment_labels") or []
+                )
+                if targeted_hint:
+                    hint_source = "真实段落标注"
+            if not targeted_hint and original_result.get("success") and (
                 original_result.get("ai_score") or 0
             ) >= self.DEEP_ZONE_HINT_THRESHOLD:
                 original_findings = locate_high_risk_segments(sample.text)
                 targeted_hint = build_targeted_rewrite_hint(original_findings)
+                if targeted_hint:
+                    hint_source = "正则预检"
+            # 🔧 兜底：两类定点指令都未命中时下发常驻事实底线。
+            # 定点指令自身已含事实条款，故不叠加，避免指令过长。
+            if not targeted_hint and self.FACT_HINT_ENABLED:
+                targeted_hint = FACT_BOTTOM_LINE_HINT
+                hint_source = "常驻事实底线"
+            if targeted_hint:
+                logger.info(f"   🎯 定点指令来源: {hint_source}")
 
             # 2. 使用提示词改写文本
             logger.debug(f"   ⏳ 正在改写文本...")
@@ -323,6 +367,11 @@ class PromptEvaluator:
             logger.debug(f"   ⏳ 检测改写后文本AI率...")
             rewritten_result = await self.ai_detector.detect_ai_content(rewritten)
             rewritten_trace_detail = None
+            # 🔧 记录段落三分类占比：ai_score 在 LLM 改写区间恒为 100、无分辨力，
+            # 真实进步体现在「确定AI」占比下降、「疑似AI」占比上升
+            rewritten_ai_ratio = rewritten_result.get("ai_ratio")
+            rewritten_suspect_ratio = rewritten_result.get("suspect_ratio")
+            rewritten_human_ratio = rewritten_result.get("human_ratio")
             if rewritten_result.get("success"):
                 rewritten_score = rewritten_result.get("ai_score", 100)
                 # 提取AI痕迹详情
@@ -404,9 +453,10 @@ class PromptEvaluator:
                 rewritten, rewritten_metrics, ai_score=rewritten_score
             )
             # 🆕 计算保真度得分（越低越好，表示改动越小）
-            fidelity_score = _calculate_fidelity_score(sample.text, rewritten)
-            rewritten_multi_score.fidelity_score = fidelity_score
-            rewritten_multi_score.details["fidelity"] = f"相似度{100-fidelity_score:.0f}%"
+            # 字符级相似度：对「句式/用词/语序变化」敏感，会误伤有效的重构式改写
+            char_fidelity = _calculate_fidelity_score(sample.text, rewritten)
+            rewritten_multi_score.fidelity_score = char_fidelity
+            rewritten_multi_score.details["fidelity"] = f"相似度{100-char_fidelity:.0f}%"
 
             llm_review = await self.semantic_judge.evaluate(
                 sample.text, rewritten, sample.genre
@@ -414,6 +464,18 @@ class PromptEvaluator:
             rewritten_multi_score.overall_score = calculate_hybrid_score(
                 rewritten_score, rewritten_multi_score.overall_score, llm_review
             )
+
+            # 🔧 保真口径以「语义保真」为准（2026-10-08 实测 + 口径确认）：
+            # 只要传递相同信息与情感即算保真，不要求句子顺序与用词一致。
+            # 字符级相似度会惩罚彻底重构句式的有效改写——实测「强制逐句重写」
+            # 字符保真仅 63.7（跌破项目 70 门槛会被判不合格），语义保真却达 98。
+            # 故评审可用时一律以语义保真覆盖，字符级仅保留在 details 供诊断。
+            if llm_review.get("available"):
+                sem_fid = float(llm_review["semantic_fidelity"]["score"])
+                rewritten_multi_score.fidelity_score = 100.0 - sem_fid
+                rewritten_multi_score.details["fidelity"] = (
+                    f"语义保真{sem_fid:.0f}（字符相似度{100-char_fidelity:.0f}%）"
+                )
 
             logger.debug(f"   🎯 原文多维评分: {original_multi_score.to_summary()}", flush=True)
             logger.debug(f"   🎯 改写多维评分: {rewritten_multi_score.to_summary()}", flush=True)
@@ -474,6 +536,9 @@ class PromptEvaluator:
                 original_multi_score=original_multi_score.to_dict(),
                 rewritten_multi_score=rewritten_multi_score.to_dict(),
                 llm_review=llm_review,
+                rewritten_ai_ratio=rewritten_ai_ratio,
+                rewritten_suspect_ratio=rewritten_suspect_ratio,
+                rewritten_human_ratio=rewritten_human_ratio,
             )
 
 
@@ -570,6 +635,25 @@ class PromptEvaluator:
             logger.debug(f"📝 预处理: {', '.join(preprocess_logs)}")
 
         # ========== 第2层：LLM改写 ==========
+        # 🔧 可选：去锚定重新生成。常规「照着原文改写」会被原文的 token 分布锚定，
+        # 输出仍落在 LLM 分布内，检测器照判 AI；先压成事实要点再据要点重写可切断锚定。
+        # 实测确定AI占比：常规改写 ~50%，去锚定 ~0-26%。失败一律静默回退常规改写。
+        if self.DEANCHOR_ENABLED:
+            try:
+                from .deanchor_rewrite import DeanchorRewriter
+
+                da_out = await DeanchorRewriter(
+                    model_id=model_id, llm_client=self.llm_client
+                ).rewrite(
+                    preprocessed_text, second_round=True, temperature=temperature,
+                    targeted_hint=targeted_hint,
+                )
+                if da_out and len(da_out.strip()) > len(preprocessed_text) * 0.5:
+                    return postprocess_text(da_out.strip())[0]
+                logger.warning("   ⚠️ 去锚定产出过短，回退常规改写")
+            except Exception as e:
+                logger.warning(f"   ⚠️ 去锚定改写失败，回退常规改写: {type(e).__name__}: {str(e)[:100]}")
+
         user_content = f"请改写以下文本，降低其AI痕迹：\n\n{preprocessed_text}"
         if targeted_hint:
             user_content += "\n" + targeted_hint

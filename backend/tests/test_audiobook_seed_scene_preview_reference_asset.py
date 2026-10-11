@@ -43,7 +43,7 @@ def test_materializer_persists_base64_preview_as_seed_audio_data(tmp_path: Path)
 
     asset = PreviewReferenceMaterializer(output_root=tmp_path).materialize(
         {
-            "tts_model": "qwen3-tts-instruct-flash",
+            "tts_model": "qwen-audio-3.1-tts-flash",
             "voice_id": "voice-a",
             "preview_audio_data": data_url,
         }
@@ -163,7 +163,7 @@ def test_materializer_uses_shared_preview_cache_when_mapping_has_no_inline_previ
     asset = PreviewReferenceMaterializer(
         output_root=tmp_path,
         downloader=downloader,
-    ).materialize({"tts_model": "qwen3-tts-instruct-flash", "voice_id": "voice-c"})
+    ).materialize({"tts_model": "qwen-audio-3.1-tts-flash", "voice_id": "voice-c"})
 
     assert requested_urls == ["https://cdn.example.test/cached.wav"]
     assert asset.source_preview_cache_key == "cache-key-for-preview"

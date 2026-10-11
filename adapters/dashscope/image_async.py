@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Optional
 
 from adapters.base import BaseAdapter, AdapterConfig, GenerationResult
 from adapters.registry import register_model
-from adapters._shared import DASHSCOPE_API_KEY, DASHSCOPE_BASE, _encode_image, _env_int, _poll_dashscope_task
+from adapters._shared import DASHSCOPE_BASE, _encode_image, _env_int, _poll_dashscope_task, require_api_key
 from schemas.model_spec import ModelSpec
 from schemas.common import ModelStatus
 
@@ -31,9 +31,10 @@ class _AsyncImageAdapter(BaseAdapter):
     def generate(self, prompt: str = "", **kwargs) -> GenerationResult:
         start = time.time()
         try:
+            api_key = require_api_key("DASHSCOPE_API_KEY")
             url = f"{DASHSCOPE_BASE}/api/v1/services/aigc/image-generation/generation"
             headers = {
-                "Authorization": f"Bearer {DASHSCOPE_API_KEY}",
+                "Authorization": f"Bearer {api_key}",
                 "Content-Type": "application/json",
                 "X-DashScope-Async": "enable",
             }
@@ -74,7 +75,7 @@ class _AsyncImageAdapter(BaseAdapter):
                     latency=time.time() - start,
                 )
 
-            result = _poll_dashscope_task(task_id, DASHSCOPE_API_KEY, timeout=_env_int("IMAGE_TASK_TIMEOUT", 180))
+            result = _poll_dashscope_task(task_id, api_key, timeout=_env_int("IMAGE_TASK_TIMEOUT", 180))
             # Kling uses choices[].message.content[].image format
             choices = result.get("output", {}).get("choices", [])
             urls = []

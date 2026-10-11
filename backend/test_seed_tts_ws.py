@@ -1,9 +1,13 @@
 #!/usr/bin/env python3
-"""Test Seed-TTS WebSocket connection"""
+"""Test Seed-TTS WebSocket connection
+
+手动探针脚本，只按 `python test_seed_tts_ws.py` 运行；入口函数刻意不叫 test_*，
+否则 pytest 会把它当用例收集，而本仓库未配置异步用例支持，必然判失败。
+"""
 import asyncio
 import os
 
-async def test_websocket():
+async def probe_seed_tts_websocket():
     """Test Seed-TTS WebSocket synthesis"""
     from app.services.audiobook.tts_engine_pkg._aliyun_mixin import AliyunTtsMixin
     
@@ -59,4 +63,4 @@ async def test_websocket():
         traceback.print_exc()
 
 if __name__ == "__main__":
-    asyncio.run(test_websocket())
+    asyncio.run(probe_seed_tts_websocket())

@@ -58,14 +58,14 @@ def test_evaluation_guard_rejects_parallel_and_cooldown_runs():
 def test_model_performance_concurrent_updates_do_not_lose_results(tmp_path):
     storage = ModelConfigStorage(str(tmp_path))
     result = SingleModelResult(
-        "qwen3.7-plus", "Qwen", "alibaba", "文本", 20, 1,
+        "qwen-plus", "Qwen", "alibaba", "文本", 20, 1,
         fidelity_similarity=90, improvement=40,
     )
 
     with ThreadPoolExecutor(max_workers=8) as executor:
         list(executor.map(lambda _: storage.update_performance(result, "玄幻"), range(40)))
 
-    record = storage.load_performance("玄幻")["qwen3.7-plus"]
+    record = storage.load_performance("玄幻")["qwen-plus"]
     assert record.total_evaluations == 40
     assert record.total_success == 40
 

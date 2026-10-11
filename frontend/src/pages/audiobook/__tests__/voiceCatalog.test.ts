@@ -4,15 +4,15 @@ import { normalizeVoiceCatalogPayload } from '../voiceCatalog'
 
 describe('audiobook voiceCatalog', () => {
   it('normalizes voice entries and fills catalog metadata defaults', () => {
-    const catalog = normalizeVoiceCatalogPayload('qwen3-tts-instruct-flash', {
-      model: 'qwen3-tts-instruct-flash',
+    const catalog = normalizeVoiceCatalogPayload('qwen-audio-3.1-tts-flash', {
+      model: 'qwen-audio-3.1-tts-flash',
       updated_at: '2026-04-30',
       source: 'official',
       voices: [
         {
-          id: 'Neil',
-          speaker: 'Neil',
-          label: 'Neil',
+          id: 'longsanshu_v3.1',
+          speaker: 'longsanshu_v3.1',
+          label: 'longsanshu_v3.1',
           supportsInstruct: 'yes' as unknown as boolean,
         },
       ],
@@ -20,15 +20,15 @@ describe('audiobook voiceCatalog', () => {
 
     expect(catalog.voices).toEqual([
       {
-        id: 'Neil',
-        speaker: 'Neil',
-        label: 'Neil',
+        id: 'longsanshu_v3.1',
+        speaker: 'longsanshu_v3.1',
+        label: 'longsanshu_v3.1',
         supportsInstruct: true,
-        sourceModel: 'qwen3-tts-instruct-flash',
+        sourceModel: 'qwen-audio-3.1-tts-flash',
       },
     ])
     expect(catalog.meta).toEqual({
-      model: 'qwen3-tts-instruct-flash',
+      model: 'qwen-audio-3.1-tts-flash',
       updated_at: '2026-04-30',
       source: 'official',
       voice_count: 1,
@@ -93,12 +93,12 @@ describe('audiobook voiceCatalog', () => {
   })
 
   it('keeps an explicit sourceModel provided by the backend', () => {
-    const catalog = normalizeVoiceCatalogPayload('qwen3-tts-instruct-flash', {
+    const catalog = normalizeVoiceCatalogPayload('qwen-audio-3.1-tts-flash', {
       voices: [
         {
-          id: 'Neil',
-          speaker: 'Neil',
-          label: 'Neil',
+          id: 'longsanshu_v3.1',
+          speaker: 'longsanshu_v3.1',
+          label: 'longsanshu_v3.1',
           sourceModel: 'minimax-speech-2.8-hd',
         },
       ],

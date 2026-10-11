@@ -32,7 +32,7 @@ from app.services.audiobook.tts_model_ids import (
     DEFAULT_AUDIOBOOK_TTS_MODEL,
     MINIMAX_SPEECH_28_HD_MODEL,
     MINIMAX_SPEECH_28_TURBO_MODEL,
-    STEPAUDIO_25_TTS_MODEL,
+    STEPAUDIO_3_TTS_MODEL,
     get_audiobook_tts_runtime_model_id,
     get_audiobook_tts_model_metadata,
     normalize_audiobook_tts_model,
@@ -408,16 +408,28 @@ def _resolve_preview_model_name(request: TTSPreviewRequest) -> str:
     return normalize_audiobook_tts_model(request.model or DEFAULT_TTS_MODEL)
 
 
-def _resolve_preview_speaker_id(request: TTSPreviewRequest, model_name: str) -> str:
-    if model_name.startswith("qwen3-tts"):
-        preset = VoiceManager.PRESET_VOICES.get(request.voice_id)
-        return normalize_speaker_id(preset["tts_speaker_id"] if preset else request.voice_id)
+def _resolve_speaker_for_voice_id(voice_id: str, model_name: str) -> str:
+    """按模型把音色 ID 解析为 provider 侧 speaker。
 
-    entry = get_voice_entry(request.voice_id, model=model_name)
-    speaker_id = entry.get("speaker") if entry else request.voice_id
+    音色目录命中时直接用目录 speaker；未命中且模型是当前默认 Qwen 时，
+    兼容历史别名（male_narrator 等）与旧 CosyVoice speaker 写法。
+    """
+    entry = get_voice_entry(voice_id, model=model_name)
+    if (
+        entry is None
+        and normalize_audiobook_tts_model(model_name, default="") == DEFAULT_AUDIOBOOK_TTS_MODEL
+    ):
+        preset = VoiceManager.PRESET_VOICES.get(voice_id)
+        return normalize_speaker_id(preset["tts_speaker_id"] if preset else voice_id)
+
+    speaker_id = str((entry or {}).get("speaker") or voice_id)
     if _is_cosyvoice_v35_model(model_name):
         speaker_id = _validate_cosyvoice_v35_voice_id(speaker_id)
     return speaker_id
+
+
+def _resolve_preview_speaker_id(request: TTSPreviewRequest, model_name: str) -> str:
+    return _resolve_speaker_for_voice_id(request.voice_id, model_name)
 
 
 def _build_preview_voice_params(
@@ -579,14 +591,7 @@ def _build_prompt_test_voice_params(
             detail="请先选择测试音色",
         )
 
-    if model_name.startswith("qwen3-tts"):
-        preset = VoiceManager.PRESET_VOICES.get(voice_id)
-        speaker_id = normalize_speaker_id(preset["tts_speaker_id"] if preset else voice_id)
-    else:
-        entry = get_voice_entry(voice_id, model=model_name)
-        speaker_id = str(entry.get("speaker") if entry else voice_id)
-        if _is_cosyvoice_v35_model(model_name):
-            speaker_id = _validate_cosyvoice_v35_voice_id(speaker_id)
+    speaker_id = _resolve_speaker_for_voice_id(voice_id, model_name)
 
     voice_params = dict(test_case["voice_params"])
     voice_params.update({"speaker": speaker_id, "voice_id": voice_id})
@@ -1743,7 +1748,7 @@ async def preview_stepaudio_voice_clone_asset(
             )
 
         engine = runtime_create_tts_engine(
-            model_id=STEPAUDIO_25_TTS_MODEL,
+            model_id=STEPAUDIO_3_TTS_MODEL,
             strategy="balanced",
             enable_cache=False,
             max_concurrent=1,
@@ -1752,7 +1757,7 @@ async def preview_stepaudio_voice_clone_asset(
         )
         safe_instruction, _ = sanitize_fixed_voice_performance_text(instruction)
         audio_bytes = await engine._call_stepaudio_voice_preview_http(
-            model=STEPAUDIO_25_TTS_MODEL,
+            model=STEPAUDIO_3_TTS_MODEL,
             api_key=stepaudio_api_key,
             text=(str(preview_text or "").strip() or DEFAULT_STEPAUDIO_CLONE_PREVIEW_TEXT),
             file_id=resolved_file_id,

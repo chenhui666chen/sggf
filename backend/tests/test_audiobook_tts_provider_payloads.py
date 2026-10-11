@@ -16,21 +16,20 @@ if str(ROOT_DIR) not in sys.path:
 os.environ.setdefault("DEBUG", "false")
 os.environ.setdefault("DATABASE_URL", "postgresql://test:test@127.0.0.1:5432/test_db")
 
-from app.services.audiobook.tts_engine import TTSEngine
-from app.services.audiobook.engine_pkg._tts_mixin import QWEN_RENDER_CHUNK_MAX_CHARS, TTSMixin
+from app.services.audiobook.tts_engine import TTSEngine, TTSUserInputError
+from app.services.audiobook.engine_pkg._tts_mixin import TTSMixin
+from app.services.audiobook.render_plan import DEFAULT_RENDER_CHUNK_MAX_CHARS
 from app.services.audiobook.tts_engine_pkg._base import redact_tts_voice_params_for_log
 from app.services.audiobook.tts_engine_pkg._aliyun_mixin import (
-    QWEN_TTS_COMPACT_IDENTITY_INSTRUCTION,
-    QWEN_TTS_INPUT_SAFETY_CHARS,
-    QWEN_TTS_MAX_INPUT_CHARS,
     SEED_TTS_API_KEY_ENV_NAMES,
 )
 from app.services.audiobook.tts_model_ids import (
     MIMO_V25_TTS_MODEL,
     MIMO_V25_TTS_VOICE_CLONE_MODEL,
     MIMO_V25_TTS_VOICE_DESIGN_MODEL,
+    QWEN_AUDIO_31_TTS_FLASH_MODEL,
     SEED_TTS_20_EXPRESSIVE_MODEL,
-    STEPAUDIO_25_TTS_MODEL,
+    STEPAUDIO_3_TTS_MODEL,
 )
 from app.services.audiobook.narration_styles import apply_narration_style_to_tts_params
 from app.services.audiobook.tts_style_control import (
@@ -40,15 +39,22 @@ from app.services.audiobook.tts_style_control import (
 from app.services.audiobook.voice_identity_policy import VOICE_IDENTITY_POLICY_VERSION
 
 
-def test_qwen_http_payload_preserves_voice_language_and_instructions() -> None:
-    engine = TTSEngine(model="qwen3-tts-instruct-flash", enable_cache=False, request_delay=0)
+# 退役线名不再由产品代码持有，只作为“历史写法必须折叠到 3.1”的反向断言事实出现在测试里。
+RETIRED_QWEN3_SPELLING = "qwen3-tts-instruct-flash"
 
-    payload = engine._build_qwen_http_payload(
-        model="qwen3-tts-instruct-flash",
+
+def test_qwen_audio_31_http_payload_preserves_voice_and_instruction() -> None:
+    engine = TTSEngine(
+        model=QWEN_AUDIO_31_TTS_FLASH_MODEL,
+        enable_cache=False,
+        request_delay=0,
+    )
+
+    payload = engine._build_qwen_audio_31_http_payload(
+        model=QWEN_AUDIO_31_TTS_FLASH_MODEL,
         text="她压低声音说。",
-        voice_id="Neil",
+        voice_id="longanhuan_v3.1",
         voice_params={
-            "language_type": "Chinese",
             "segment_speaker": "林晚",
             "segment_type": "dialogue",
             "instruct_role": "冷静的调查员",
@@ -57,18 +63,17 @@ def test_qwen_http_payload_preserves_voice_language_and_instructions() -> None:
         },
     )
 
-    assert payload["model"] == "qwen3-tts-instruct-flash"
-    assert payload["input"] == {
-        "text": "她压低声音说。",
-        "voice": "Neil",
-        "language_type": "Chinese",
-    }
-    assert "parameters" in payload
-    assert payload["parameters"]["optimize_instructions"] is True
-    instructions = payload["parameters"]["instructions"]
+    assert payload["model"] == QWEN_AUDIO_31_TTS_FLASH_MODEL
+    # 3.1 只有 input.instruction 单字段：没有 Qwen3 的 parameters 容器，也没有 language_type
+    assert set(payload) == {"model", "input"}
+    assert set(payload["input"]) == {"text", "voice", "instruction"}
+    assert payload["input"]["text"] == "她压低声音说。"
+    assert payload["input"]["voice"] == "longanhuan_v3.1"
+    instructions = payload["input"]["instruction"]
     assert "说话角色：林晚" in instructions
     assert "角色设定：冷静的调查员" in instructions
-    assert "情绪目标：fearful" in instructions
+    # 3.1 无服务端情绪枚举，情绪标签原样写入指令，不折叠进枚举集
+    assert "情绪目标：tense" in instructions
     assert "演绎要求：压低声音，停顿更长" in instructions
 
 
@@ -86,16 +91,19 @@ def test_tts_voice_params_log_redacts_clone_data_urls() -> None:
     assert redacted["nested"]["voice_sample_data_url"] == "<audio data URL: audio/wav, base64 chars=80>"
 
 
-def test_qwen_explicit_instructions_merge_with_structured_prompt() -> None:
-    engine = TTSEngine(model="qwen3-tts-instruct-flash", enable_cache=False, request_delay=0)
+def test_qwen_audio_31_explicit_instructions_merge_with_structured_prompt() -> None:
+    engine = TTSEngine(
+        model=QWEN_AUDIO_31_TTS_FLASH_MODEL,
+        enable_cache=False,
+        request_delay=0,
+    )
 
-    payload = engine._build_qwen_http_payload(
-        model="qwen3-tts-instruct-flash",
+    payload = engine._build_qwen_audio_31_http_payload(
+        model=QWEN_AUDIO_31_TTS_FLASH_MODEL,
         text="旁白文本",
-        voice_id="Cherry",
+        voice_id="longanhuan_v3.1",
         voice_params={
             "instructions": "慢速、温柔、带一点回忆感",
-            "optimize_instructions": False,
             "segment_speaker": "林晚",
             "segment_type": "dialogue",
             "instruct_scene": "雨夜逃亡",
@@ -105,9 +113,7 @@ def test_qwen_explicit_instructions_merge_with_structured_prompt() -> None:
         },
     )
 
-    assert payload["input"]["language_type"] == "Auto"
-    assert payload["parameters"]["optimize_instructions"] is False
-    instructions = payload["parameters"]["instructions"]
+    instructions = payload["input"]["instruction"]
     assert instructions.startswith("音色约束：保持已选音色")
     assert instructions.index("音色约束：") < instructions.index("慢速、温柔、带一点回忆感")
     assert "说话角色：林晚" in instructions
@@ -118,26 +124,30 @@ def test_qwen_explicit_instructions_merge_with_structured_prompt() -> None:
     assert "演绎要求：句尾短暂停顿" in instructions
 
 
-def test_qwen_payload_ignores_legacy_narration_style_runtime_overrides() -> None:
-    engine = TTSEngine(model="qwen3-tts-instruct-flash", enable_cache=False, request_delay=0)
+def test_qwen_audio_31_payload_ignores_legacy_narration_style_runtime_overrides() -> None:
+    engine = TTSEngine(
+        model=QWEN_AUDIO_31_TTS_FLASH_MODEL,
+        enable_cache=False,
+        request_delay=0,
+    )
     voice_params = apply_narration_style_to_tts_params(
         "relaxing",
         {
-            "speaker": "Neil",
+            "speaker": "longanhuan_v3.1",
             "segment_speaker": "旁白",
             "segment_type": "narration",
             "emotion": "neutral",
         },
     )
 
-    payload = engine._build_qwen_http_payload(
-        model="qwen3-tts-instruct-flash",
+    payload = engine._build_qwen_audio_31_http_payload(
+        model=QWEN_AUDIO_31_TTS_FLASH_MODEL,
         text="夜色慢慢落下来。",
-        voice_id="Neil",
+        voice_id="longanhuan_v3.1",
         voice_params=voice_params,
     )
 
-    instructions = payload["parameters"]["instructions"]
+    instructions = payload["input"]["instruction"]
     assert instructions.startswith("音色约束：保持已选音色")
     assert "声音描述：" not in instructions
     assert "片段类型：narration" in instructions
@@ -145,46 +155,38 @@ def test_qwen_payload_ignores_legacy_narration_style_runtime_overrides() -> None
     assert "语速：缓慢" not in instructions
 
 
-def test_qwen_http_payload_truncates_instructions_to_provider_input_limit() -> None:
-    engine = TTSEngine(model="qwen3-tts-instruct-flash", enable_cache=False, request_delay=0)
-    text = "x" * 520
-
-    payload = engine._build_qwen_http_payload(
-        model="qwen3-tts-instruct-flash",
-        text=text,
-        voice_id="Neil",
-        voice_params={
-            "instructions": "y" * 300,
-            "optimize_instructions": False,
-        },
+def test_qwen_audio_31_http_payload_truncates_instruction_to_provider_budget() -> None:
+    engine = TTSEngine(
+        model=QWEN_AUDIO_31_TTS_FLASH_MODEL,
+        enable_cache=False,
+        request_delay=0,
     )
 
-    assert payload["input"]["text"] == text
-    assert "parameters" in payload
-    instructions = payload["parameters"]["instructions"]
-    instruction_budget = QWEN_TTS_MAX_INPUT_CHARS - QWEN_TTS_INPUT_SAFETY_CHARS - len(text)
-    assert len(text) + len(instructions) <= QWEN_TTS_MAX_INPUT_CHARS - QWEN_TTS_INPUT_SAFETY_CHARS
-    assert len(instructions) == instruction_budget
-    assert instructions.startswith(f"{QWEN_TTS_COMPACT_IDENTITY_INSTRUCTION}；")
+    payload = engine._build_qwen_audio_31_http_payload(
+        model=QWEN_AUDIO_31_TTS_FLASH_MODEL,
+        text="x" * 520,
+        voice_id="longanhuan_v3.1",
+        voice_params={"instructions": "y" * 2000},
+    )
+
+    instructions = payload["input"]["instruction"]
+    # 3.1 的 instruction 预算是独立额度（实测 4000 字仍 200），不与正文共享 600 字上限
+    assert len(instructions) <= 1200
+    assert instructions.startswith("音色约束：保持已选音色")
     assert "y" in instructions
     assert instructions.endswith("…")
-    assert payload["parameters"]["optimize_instructions"] is False
 
 
-def test_qwen_http_payload_refits_structured_instruction_by_field_priority() -> None:
-    engine = TTSEngine(model="qwen3-tts-instruct-flash", enable_cache=False, request_delay=0)
-    text = "x" * 500
-
-    payload = engine._build_qwen_http_payload(
-        model="qwen3-tts-instruct-flash",
-        text=text,
-        voice_id="Cherry",
-        voice_params={
+def test_qwen_audio_31_http_payload_refits_structured_instruction_by_field_priority() -> None:
+    control = build_model_style_control(
+        QWEN_AUDIO_31_TTS_FLASH_MODEL,
+        {
+            "speaker": "longanhuan_v3.1",
             "segment_speaker": "旁白",
             "segment_type": "narration",
             "voice_description": "性别：女性，年龄感：青年，音调：中低音，语速：中等，特点：吐字清晰、气息稳定，用途：有声书旁白。" * 4,
             "instruct_role": "全知叙述者",
-            "instruct_scene": "密室揭示关键证据，所有人都屏住呼吸。",
+            "instruct_scene": "密室揭示关键证据，所有人都屏住呼吸。" * 60,
             "instruct_emotion": "surprised",
             "performance_notes": "压低声音，新鲜的指纹前短停，结尾加重但不要喊。",
             "delivery_plan": {
@@ -194,47 +196,70 @@ def test_qwen_http_payload_refits_structured_instruction_by_field_priority() -> 
                 "director_guidance": "新鲜的指纹前短停，结尾保持克制。",
             },
         },
+        "neutral",
     )
 
-    instructions = payload["parameters"]["instructions"]
+    instructions = control.provider_fields["instructions"]
 
-    assert len(text) + len(instructions) <= QWEN_TTS_MAX_INPUT_CHARS - QWEN_TTS_INPUT_SAFETY_CHARS
+    assert len(instructions) <= 1200
     assert "surprised" in instructions
     assert "演绎要求：压低声音" in instructions
     assert "停顿策略：新鲜的指纹前短停" in instructions
     assert "重读词：新鲜的指纹" in instructions
     assert "声音描述：" not in instructions
-    assert "旁白模板：" not in instructions
 
 
-def test_qwen_http_payload_drops_instructions_when_text_uses_budget() -> None:
-    engine = TTSEngine(model="qwen3-tts-instruct-flash", enable_cache=False, request_delay=0)
+def test_qwen_audio_31_http_payload_keeps_instruction_when_text_is_long() -> None:
+    engine = TTSEngine(
+        model=QWEN_AUDIO_31_TTS_FLASH_MODEL,
+        enable_cache=False,
+        request_delay=0,
+    )
 
-    payload = engine._build_qwen_http_payload(
-        model="qwen3-tts-instruct-flash",
-        text="x" * 590,
-        voice_id="Neil",
+    payload = engine._build_qwen_audio_31_http_payload(
+        model=QWEN_AUDIO_31_TTS_FLASH_MODEL,
+        text="x" * 5900,
+        voice_id="longanhuan_v3.1",
         voice_params={"instructions": "y" * 40},
     )
 
-    assert payload["input"]["text"] == "x" * 590
-    assert "parameters" not in payload
+    # Qwen3 的 600 字共享预算会让长正文挤掉指令；3.1 正文上限 10000 字且预算独立
+    assert payload["input"]["text"] == "x" * 5900
+    assert "y" * 40 in payload["input"]["instruction"]
 
 
-def test_qwen_http_payload_treats_provider_prompt_snapshot_as_audit_only() -> None:
-    engine = TTSEngine(model="qwen3-tts-instruct-flash", enable_cache=False, request_delay=0)
+def test_qwen_audio_31_http_payload_folds_retired_qwen3_voice_id() -> None:
+    engine = TTSEngine(
+        model=RETIRED_QWEN3_SPELLING,
+        enable_cache=False,
+        request_delay=0,
+    )
 
-    payload = engine._build_qwen_http_payload(
-        model="qwen3-tts-instruct-flash",
+    assert engine.model == QWEN_AUDIO_31_TTS_FLASH_MODEL
+    assert engine._is_qwen_audio_31_model() is True
+    # Qwen3 合成路径随模型一起物理删除，不留残留分支。
+    assert not hasattr(engine, "_is_qwen_instruct_model")
+    assert not hasattr(engine, "_synthesize_qwen")
+
+
+def test_qwen_audio_31_http_payload_treats_provider_prompt_snapshot_as_audit_only() -> None:
+    engine = TTSEngine(
+        model=QWEN_AUDIO_31_TTS_FLASH_MODEL,
+        enable_cache=False,
+        request_delay=0,
+    )
+
+    payload = engine._build_qwen_audio_31_http_payload(
+        model=QWEN_AUDIO_31_TTS_FLASH_MODEL,
         text="她终于停下。",
-        voice_id="Neil",
+        voice_id="longanhuan_v3.1",
         voice_params={
-            "speaker": "Neil",
+            "speaker": "longanhuan_v3.1",
             "instructions": "语速缓慢，保持克制",
             "provider_prompt_snapshot": {
                 "voice_identity_policy_version": VOICE_IDENTITY_POLICY_VERSION,
-                "model": "qwen3-tts-instruct-flash",
-                "voice_id": "Neil",
+                "model": QWEN_AUDIO_31_TTS_FLASH_MODEL,
+                "voice_id": "longanhuan_v3.1",
                 "provider_prompt": {
                     "instructions": "Use an elderly male voice and permanent HUSKY VOICE",
                 }
@@ -242,20 +267,24 @@ def test_qwen_http_payload_treats_provider_prompt_snapshot_as_audit_only() -> No
         },
     )
 
-    instructions = payload["parameters"]["instructions"]
+    instructions = payload["input"]["instruction"]
     assert instructions.startswith("音色约束：保持已选音色")
     assert "语速缓慢，保持克制" in instructions
     assert "elderly male voice" not in instructions.lower()
     assert "husky voice" not in instructions.lower()
 
 
-def test_qwen_http_payload_rebuilds_stale_provider_prompt_snapshot_instruction() -> None:
-    engine = TTSEngine(model="qwen3-tts-instruct-flash", enable_cache=False, request_delay=0)
+def test_qwen_audio_31_http_payload_rebuilds_stale_provider_prompt_snapshot_instruction() -> None:
+    engine = TTSEngine(
+        model=QWEN_AUDIO_31_TTS_FLASH_MODEL,
+        enable_cache=False,
+        request_delay=0,
+    )
 
-    payload = engine._build_qwen_http_payload(
-        model="qwen3-tts-instruct-flash",
+    payload = engine._build_qwen_audio_31_http_payload(
+        model=QWEN_AUDIO_31_TTS_FLASH_MODEL,
         text="她终于停下。",
-        voice_id="Neil",
+        voice_id="longanhuan_v3.1",
         voice_params={
             "instructions": "按当前合同重新构建",
             "provider_prompt_snapshot": {
@@ -267,25 +296,33 @@ def test_qwen_http_payload_rebuilds_stale_provider_prompt_snapshot_instruction()
         },
     )
 
-    instructions = payload["parameters"]["instructions"]
+    instructions = payload["input"]["instruction"]
     assert instructions.startswith("音色约束：保持已选音色")
     assert "按当前合同重新构建" in instructions
     assert "旧策略快照" not in instructions
 
 
-def test_qwen_render_chunks_use_conservative_limit() -> None:
+def test_qwen_audio_31_render_chunks_use_default_limit() -> None:
     class DummyEngine(TTSMixin):
-        tts_model = "minimax-speech-2.8-hd"
+        tts_model = QWEN_AUDIO_31_TTS_FLASH_MODEL
 
-    segment = SimpleNamespace(
-        text="x" * (QWEN_RENDER_CHUNK_MAX_CHARS + 80),
-        voice_params={"tts_model": "qwen3-tts-instruct-flash"},
+    # Qwen3 时代的 360 字特化分块已随退役退出：3.1 走默认 420 字上限
+    under_old_qwen_cap = SimpleNamespace(
+        text="她压低声音说。" * 55,
+        voice_params={"tts_model": QWEN_AUDIO_31_TTS_FLASH_MODEL},
     )
+    single = DummyEngine()._build_render_chunks([under_old_qwen_cap])
+    assert len(single) == 1
+    assert len(single[0].text) > 360
 
-    chunks = DummyEngine()._build_render_chunks([segment])
+    over_default_cap = SimpleNamespace(
+        text="她压低声音说。" * 63,
+        voice_params={"tts_model": RETIRED_QWEN3_SPELLING},
+    )
+    chunks = DummyEngine()._build_render_chunks([over_default_cap])
 
     assert len(chunks) == 2
-    assert all(len(chunk.text) <= QWEN_RENDER_CHUNK_MAX_CHARS for chunk in chunks)
+    assert all(len(chunk.text) <= DEFAULT_RENDER_CHUNK_MAX_CHARS for chunk in chunks)
 
 
 def test_cosyvoice_websocket_parameters_and_commands_are_stable() -> None:
@@ -607,7 +644,7 @@ def test_model_style_control_adapts_same_context_for_qwen_and_mimo() -> None:
         "performance_notes": "语速极慢，句间留长停顿，在“真心”尾音加入轻微气音。",
     }
 
-    qwen_control = build_model_style_control("qwen3-tts-instruct-flash", voice_params, "neutral")
+    qwen_control = build_model_style_control(QWEN_AUDIO_31_TTS_FLASH_MODEL, voice_params, "neutral")
     mimo_control = build_model_style_control("mimo-v2.5-tts", voice_params, "neutral")
 
     assert qwen_control.mode == "natural_language"
@@ -634,7 +671,7 @@ def test_model_style_control_adapts_same_context_for_qwen_and_mimo() -> None:
 
 def test_stepaudio_style_control_uses_global_context_instruction() -> None:
     control = build_model_style_control(
-        STEPAUDIO_25_TTS_MODEL,
+        STEPAUDIO_3_TTS_MODEL,
         {
             "segment_speaker": "岑霜",
             "segment_type": "dialogue",
@@ -657,7 +694,7 @@ def test_stepaudio_style_control_uses_global_context_instruction() -> None:
 
 def test_stepaudio_style_control_renders_pause_and_micro_tags_as_inline_parentheses() -> None:
     control = build_model_style_control(
-        STEPAUDIO_25_TTS_MODEL,
+        STEPAUDIO_3_TTS_MODEL,
         {
             "segment_speaker": "岑霜",
             "segment_type": "dialogue",
@@ -679,7 +716,7 @@ def test_stepaudio_style_control_renders_pause_and_micro_tags_as_inline_parenthe
 
 def test_stepaudio_style_control_preserves_key_cues_within_instruction_budget() -> None:
     control = build_model_style_control(
-        STEPAUDIO_25_TTS_MODEL,
+        STEPAUDIO_3_TTS_MODEL,
         {
             "segment_speaker": "旁白",
             "segment_type": "narration",
@@ -702,7 +739,7 @@ def test_stepaudio_style_control_preserves_key_cues_within_instruction_budget() 
 
     instruction = control.provider_fields["instruction"]
 
-    assert len(instruction) <= 200
+    assert len(instruction) <= 500
     assert "surprised" in instruction
     assert "演绎要求：压低声音" in instruction
     assert "停顿策略：新鲜的指纹前短停" in instruction
@@ -741,9 +778,9 @@ def test_seed_tts_style_control_uses_query_response_context_texts() -> None:
 @pytest.mark.parametrize(
     ("model", "prompt_field"),
     [
-        ("qwen3-tts-instruct-flash", "instructions"),
+        (QWEN_AUDIO_31_TTS_FLASH_MODEL, "instructions"),
         ("cosyvoice-v3.5-plus", "instructions"),
-        (STEPAUDIO_25_TTS_MODEL, "instruction"),
+        (STEPAUDIO_3_TTS_MODEL, "instruction"),
         (SEED_TTS_20_EXPRESSIVE_MODEL, "context_texts"),
     ],
 )
@@ -782,10 +819,10 @@ def test_fixed_voice_provider_prompts_preserve_identity_during_temporary_texture
 
 def test_fixed_voice_identity_constraint_survives_long_explicit_instruction_budget() -> None:
     control = build_model_style_control(
-        "qwen3-tts-instruct-flash",
+        QWEN_AUDIO_31_TTS_FLASH_MODEL,
         {
-            "speaker": "Neil",
-            "instructions": "用户表演要求" * 120,
+            "speaker": "longanhuan_v3.1",
+            "instructions": "用户表演要求" * 400,
         },
         "neutral",
     )
@@ -793,7 +830,8 @@ def test_fixed_voice_identity_constraint_survives_long_explicit_instruction_budg
     instruction = control.provider_fields["instructions"]
 
     assert instruction.startswith("音色约束：保持已选音色")
-    assert len(instruction) <= 600
+    assert len(instruction) <= 1200
+    assert control.budget["truncated"] is True
 
 
 def test_mimo_director_locks_selected_voice_but_voice_design_remains_unrestricted() -> None:
@@ -840,7 +878,7 @@ def test_mimo_label_control_prefixes_text_without_polluting_other_models() -> No
     }
 
     mimo_control = build_model_style_control("mimo-v2.5-tts", voice_params, "fearful")
-    qwen_control = build_model_style_control("qwen3-tts-instruct-flash", voice_params, "fearful")
+    qwen_control = build_model_style_control(QWEN_AUDIO_31_TTS_FLASH_MODEL, voice_params, "fearful")
 
     assert mimo_control.mode == "mimo_audio_tags"
     assert len(mimo_control.messages) == 1
@@ -926,7 +964,8 @@ def test_inline_tag_strategy_audits_mimo_and_doubao_tag_placement() -> None:
         "use_tag_parser": False,
     }
 
-    assert doubao_control.text_prefix == "[低语，吸气]"
+    assert doubao_control.text_prefix == '<cot text="低语，吸气">'
+    assert doubao_control.tag_syntax == "doubao_cot"
     assert doubao_control.provider_fields["inline_tag_strategy"] == {
         "model_family": "doubao",
         "placement": "text_prefix",
@@ -950,7 +989,8 @@ def test_doubao_inline_tag_strategy_preserves_style_fallback_with_delivery_plan_
         "fearful",
     )
 
-    assert control.text_prefix == "[旁白，fearful，压抑]"
+    assert control.text_prefix == '<cot text="旁白，fearful，压抑">'
+    assert control.tag_syntax == "doubao_cot"
     assert control.provider_fields["inline_tag_strategy"] == {
         "model_family": "doubao",
         "placement": "text_prefix",
@@ -958,6 +998,61 @@ def test_doubao_inline_tag_strategy_preserves_style_fallback_with_delivery_plan_
         "inline_tags": [],
         "use_tag_parser": True,
     }
+
+
+def test_doubao_cot_prefix_wraps_every_sentence_and_stays_idempotent() -> None:
+    control = build_model_style_control(
+        SEED_TTS_20_EXPRESSIVE_MODEL,
+        {
+            "style_control_method": "labels",
+            "inline_audio_tags": ["克制悲伤", "语速偏慢"],
+            "instructions": "压低音量，句尾下沉。",
+        },
+        "sad",
+    )
+
+    wrapped = prepare_text_for_style_control("我没事。我真的没事，你们都不用管我！", control)
+
+    # 官方 cot 生效范围是单句，跨句共用一个开标签会让后文脱离控制，因此逐句成对包裹。
+    assert wrapped == (
+        '<cot text="克制悲伤，语速偏慢">我没事。</cot>'
+        '<cot text="克制悲伤，语速偏慢">我真的没事，你们都不用管我！</cot>'
+    )
+    assert "[" not in wrapped
+    assert prepare_text_for_style_control(wrapped, control) == wrapped
+    assert prepare_text_for_style_control("   ", control) == "   "
+    # 句间空白留在标签之外，正文分段结构不被改写
+    assert prepare_text_for_style_control("我没事。\n我真的没事。", control) == (
+        '<cot text="克制悲伤，语速偏慢">我没事。</cot>\n'
+        '<cot text="克制悲伤，语速偏慢">我真的没事。</cot>'
+    )
+
+
+def test_doubao_cot_tag_text_drops_tags_over_official_budget() -> None:
+    over_budget_tag = "标" * 65
+    control = build_model_style_control(
+        SEED_TTS_20_EXPRESSIVE_MODEL,
+        {
+            "style_control_method": "labels",
+            "inline_audio_tags": [over_budget_tag, '低语"<x>', "吸气"],
+        },
+        "sad",
+    )
+
+    # 超过 64 字符上限的标签直接丢弃；引号与尖括号会破坏 <cot text="…"> 结构，必须剔除。
+    assert control.text_prefix == '<cot text="低语x，吸气">'
+
+
+def test_doubao_style_control_without_explicit_labels_keeps_plain_text() -> None:
+    control = build_model_style_control(
+        SEED_TTS_20_EXPRESSIVE_MODEL,
+        {"instructions": "压低音量，句尾下沉。"},
+        "sad",
+    )
+
+    assert control.text_prefix == ""
+    assert control.tag_syntax == ""
+    assert prepare_text_for_style_control("我没事。", control) == "我没事。"
 
 
 def test_mimo_style_control_recognizes_registered_model_aliases() -> None:
@@ -1030,22 +1125,22 @@ def test_mimo_chat_payload_places_natural_language_control_in_user_message() -> 
 
 
 def test_stepaudio_http_payload_uses_instruction_and_keeps_inline_context() -> None:
-    engine = TTSEngine(model=STEPAUDIO_25_TTS_MODEL, enable_cache=False, request_delay=0)
+    engine = TTSEngine(model=STEPAUDIO_3_TTS_MODEL, enable_cache=False, request_delay=0)
     text = "她停下脚步。（压低声音，克制但发颤）你真的想清楚了吗？"
 
     payload = engine._build_stepaudio_http_payload(
-        model=STEPAUDIO_25_TTS_MODEL,
+        model=STEPAUDIO_3_TTS_MODEL,
         text=text,
         voice="cixingnansheng",
         voice_params={
             "segment_speaker": "岑霜",
             "instruct_emotion": "克制的悲伤，不哭腔，轻轻发颤",
             "performance_notes": "语速偏慢，停顿更长。",
-            "voice_label": "不能传给 StepAudio 2.5 TTS",
+            "voice_label": "不能传给 StepAudio 3 TTS",
         },
     )
 
-    assert payload["model"] == STEPAUDIO_25_TTS_MODEL
+    assert payload["model"] == STEPAUDIO_3_TTS_MODEL
     assert payload["voice"] == "cixingnansheng"
     assert payload["input"] == text
     assert "instruction" in payload
@@ -1055,10 +1150,10 @@ def test_stepaudio_http_payload_uses_instruction_and_keeps_inline_context() -> N
 
 
 def test_stepaudio_http_payload_prefixes_delivery_plan_inline_context() -> None:
-    engine = TTSEngine(model=STEPAUDIO_25_TTS_MODEL, enable_cache=False, request_delay=0)
+    engine = TTSEngine(model=STEPAUDIO_3_TTS_MODEL, enable_cache=False, request_delay=0)
 
     payload = engine._build_stepaudio_http_payload(
-        model=STEPAUDIO_25_TTS_MODEL,
+        model=STEPAUDIO_3_TTS_MODEL,
         text="别回头。",
         voice="cixingnansheng",
         voice_params={
@@ -1227,7 +1322,13 @@ def test_seed_tts_http_payload_supports_official_inline_voice_labels() -> None:
         },
     )
 
-    assert payload["req_params"]["text"].startswith("[旁白，语调惊恐，强调触摸到尸体般触感的恐怖]")
+    # 方括号前缀会被豆包朗读出口（即便带 use_tag_parser=true），官方语法是 <cot text=…> 包裹。
+    # 证据：docs/TTS_PROMPT_EVIDENCE_20261010.md §16（n1 与 d4 时长逐毫秒相同、ASR 均读出标签词）。
+    assert payload["req_params"]["text"] == (
+        '<cot text="旁白，语调惊恐，强调触摸到尸体般触感的恐怖">'
+        "可当他的手触碰到对方的身体时，却感觉一阵冰冷僵硬。</cot>"
+    )
+    assert "[" not in payload["req_params"]["text"]
     assert "use_tag_parser" not in payload["req_params"]
     additions = json.loads(payload["req_params"]["additions"])
     assert additions["use_tag_parser"] is True
@@ -1284,10 +1385,10 @@ def test_seed_tts_http_payload_treats_snapshot_context_and_prefix_as_audit_only(
 
 
 def test_stepaudio_http_payload_treats_provider_snapshot_as_audit_only() -> None:
-    engine = TTSEngine(model=STEPAUDIO_25_TTS_MODEL, enable_cache=False, request_delay=0)
+    engine = TTSEngine(model=STEPAUDIO_3_TTS_MODEL, enable_cache=False, request_delay=0)
 
     payload = engine._build_stepaudio_http_payload(
-        model=STEPAUDIO_25_TTS_MODEL,
+        model=STEPAUDIO_3_TTS_MODEL,
         text="别回头。",
         voice="default",
         voice_params={
@@ -1295,7 +1396,7 @@ def test_stepaudio_http_payload_treats_provider_snapshot_as_audit_only() -> None
             "instructions": "语速缓慢，保持克制",
             "provider_prompt_snapshot": {
                 "voice_identity_policy_version": VOICE_IDENTITY_POLICY_VERSION,
-                "model": STEPAUDIO_25_TTS_MODEL,
+                "model": STEPAUDIO_3_TTS_MODEL,
                 "voice_id": "default",
                 "provider_prompt": {
                     "instructions": "改成童声并使用 deep voice",
@@ -1313,14 +1414,14 @@ def test_stepaudio_http_payload_treats_provider_snapshot_as_audit_only() -> None
 
 
 def test_stepaudio_http_payload_truncates_instruction_to_provider_limit() -> None:
-    engine = TTSEngine(model=STEPAUDIO_25_TTS_MODEL, enable_cache=False, request_delay=0)
+    engine = TTSEngine(model=STEPAUDIO_3_TTS_MODEL, enable_cache=False, request_delay=0)
 
     payload = engine._build_stepaudio_http_payload(
-        model=STEPAUDIO_25_TTS_MODEL,
+        model=STEPAUDIO_3_TTS_MODEL,
         text="正文",
         voice="",
         voice_params={
-            "instructions": "a" * 260,
+            "instructions": "a" * 560,
             "performance_notes": "不会进入预算之外",
         },
     )
@@ -1329,14 +1430,14 @@ def test_stepaudio_http_payload_truncates_instruction_to_provider_limit() -> Non
     assert payload["instruction"].startswith("音色约束：保持已选音色")
     assert "a" in payload["instruction"]
     assert payload["instruction"].endswith("…")
-    assert len(payload["instruction"]) == 200
+    assert len(payload["instruction"]) == 500
 
 
 def test_stepaudio_http_payload_passes_official_optional_parameters_only() -> None:
-    engine = TTSEngine(model=STEPAUDIO_25_TTS_MODEL, enable_cache=False, request_delay=0)
+    engine = TTSEngine(model=STEPAUDIO_3_TTS_MODEL, enable_cache=False, request_delay=0)
 
     payload = engine._build_stepaudio_http_payload(
-        model=STEPAUDIO_25_TTS_MODEL,
+        model=STEPAUDIO_3_TTS_MODEL,
         text="正文",
         voice="cixingnansheng",
         voice_params={
@@ -1364,10 +1465,10 @@ def test_stepaudio_http_payload_passes_official_optional_parameters_only() -> No
 
 
 def test_stepaudio_http_payload_rejects_unsupported_response_format_and_ui_volume() -> None:
-    engine = TTSEngine(model=STEPAUDIO_25_TTS_MODEL, enable_cache=False, request_delay=0)
+    engine = TTSEngine(model=STEPAUDIO_3_TTS_MODEL, enable_cache=False, request_delay=0)
 
     payload = engine._build_stepaudio_http_payload(
-        model=STEPAUDIO_25_TTS_MODEL,
+        model=STEPAUDIO_3_TTS_MODEL,
         text="正文",
         voice="cixingnansheng",
         voice_params={
@@ -1385,7 +1486,7 @@ def test_stepaudio_http_payload_rejects_unsupported_response_format_and_ui_volum
 
 
 def test_stepaudio_http_call_uses_stepfun_speech_endpoint(monkeypatch) -> None:
-    engine = TTSEngine(model=STEPAUDIO_25_TTS_MODEL, enable_cache=False, request_delay=0)
+    engine = TTSEngine(model=STEPAUDIO_3_TTS_MODEL, enable_cache=False, request_delay=0)
     expected_audio = b"fake-mp3"
     captured: dict[str, object] = {}
 
@@ -1418,7 +1519,7 @@ def test_stepaudio_http_call_uses_stepfun_speech_endpoint(monkeypatch) -> None:
 
     result = asyncio.run(
         engine._call_stepaudio_speech_http(
-            model=STEPAUDIO_25_TTS_MODEL,
+            model=STEPAUDIO_3_TTS_MODEL,
             api_key="unit-step-key",
             text="她停下脚步。（压低声音）你真的想清楚了吗？",
             voice="cixingnansheng",
@@ -1432,14 +1533,14 @@ def test_stepaudio_http_call_uses_stepfun_speech_endpoint(monkeypatch) -> None:
         "Authorization": "Bearer unit-step-key",
         "Content-Type": "application/json",
     }
-    assert captured["json"]["model"] == STEPAUDIO_25_TTS_MODEL
+    assert captured["json"]["model"] == STEPAUDIO_3_TTS_MODEL
     assert captured["json"]["voice"] == "cixingnansheng"
     assert captured["json"]["input"] == "她停下脚步。（压低声音）你真的想清楚了吗？"
     instruction = captured["json"]["instruction"]
     assert instruction.startswith("音色约束：保持已选音色")
     assert instruction.endswith("语气克制，语速偏慢")
     assert captured["json"] == {
-        "model": STEPAUDIO_25_TTS_MODEL,
+        "model": STEPAUDIO_3_TTS_MODEL,
         "voice": "cixingnansheng",
         "input": "她停下脚步。（压低声音）你真的想清楚了吗？",
         "instruction": instruction,
@@ -1499,11 +1600,13 @@ def test_seed_tts_http_call_uses_volcengine_v3_endpoint(monkeypatch) -> None:
     assert result == expected_audio
     assert captured["url"] == "https://openspeech.bytedance.com/api/v3/tts/unidirectional"
     assert captured["headers"] == {
-        "X-Api-App-Key": "unit-seed-key",
         "X-Api-Key": "unit-seed-key",
         "X-Api-Resource-Id": "seed-tts-2.0",
         "Content-Type": "application/json",
     }
+    # 2026-10-10 实测：单向 HTTP 端点在请求头带 X-Api-App-Key 时返回 200 但响应体没有音频
+    # （官方头形状 11/11 出音频 vs 加该头 0/4），证据见 docs/TTS_PROMPT_EVIDENCE_20261010.md §12.2。
+    assert "X-Api-App-Key" not in captured["headers"]
     assert "audio_params" not in captured["json"]
     assert captured["json"]["req_params"]["speaker"] == "zh_female_cancan_uranus_bigtts"
     assert captured["json"]["req_params"]["audio_params"]["format"] == "mp3"
@@ -1671,6 +1774,66 @@ def test_seed_tts_parser_decodes_text_plain_json_lines() -> None:
     assert parsed == b"ID3-first-second"
 
 
+def test_seed_tts_parser_rejects_json_frames_without_audio() -> None:
+    """HTTP 兜底通道只回字幕帧时，不能把 JSON 文本当音频返回。"""
+    engine = TTSEngine(model=SEED_TTS_20_EXPRESSIVE_MODEL, enable_cache=False, request_delay=0)
+
+    class FakeResponse:
+        headers = {"content-type": "text/plain; charset=utf-8"}
+        content = (
+            '{"code":0,"message":"","data":null,"sentence":{"text":"所以从一开始，你就在骗我。"}}\n'
+            '{"code":20000000,"message":"OK","data":null}\n'
+        ).encode("utf-8")
+        text = content.decode("utf-8")
+
+        def json(self):
+            raise json.JSONDecodeError("Extra data", self.text, len(self.text) - 1)
+
+    with pytest.raises(ValueError, match="missing audio data"):
+        asyncio.run(engine._parse_seed_tts_audio_response(FakeResponse(), client=None))
+
+
+def test_seed_tts_parser_surfaces_provider_error_code() -> None:
+    """供应商以 200 + 错误帧拒绝请求时，错误码必须冒泡，不能静默产出坏音频。"""
+    engine = TTSEngine(model=SEED_TTS_20_EXPRESSIVE_MODEL, enable_cache=False, request_delay=0)
+    message = "json: cannot unmarshal object into Go struct field TTSReqParams.req_params.additions of type string"
+
+    class FakeResponse:
+        headers = {"content-type": "text/plain; charset=utf-8"}
+        content = (
+            '{"code":0,"message":"","data":null,"sentence":{"text":"你怎么还不走？"}}\n'
+            f'{{"reqid":"","code":55000000,"message":"{message}"}}\n'
+        ).encode("utf-8")
+        text = content.decode("utf-8")
+
+        def json(self):
+            raise json.JSONDecodeError("Extra data", self.text, len(self.text) - 1)
+
+    with pytest.raises(ValueError) as exc_info:
+        asyncio.run(engine._parse_seed_tts_audio_response(FakeResponse(), client=None))
+
+    assert "55000000" in str(exc_info.value)
+    assert "additions" in str(exc_info.value)
+
+
+def test_seed_tts_parser_returns_raw_bytes_for_non_json_binary_body() -> None:
+    """非 JSON 的二进制响应仍按音频返回（HTTP 兜底的合法路径）。"""
+    engine = TTSEngine(model=SEED_TTS_20_EXPRESSIVE_MODEL, enable_cache=False, request_delay=0)
+    payload = b"\xff\xfb\x90\x00binary-mp3-without-content-type"
+
+    class FakeResponse:
+        headers = {"content-type": "application/octet-stream"}
+        content = payload
+        text = payload.decode("latin-1")
+
+        def json(self):
+            raise json.JSONDecodeError("Expecting value", self.text, 0)
+
+    parsed = asyncio.run(engine._parse_seed_tts_audio_response(FakeResponse(), client=None))
+
+    assert parsed == payload
+
+
 def test_seed_tts_synthesis_requires_dedicated_speech_api_key(monkeypatch) -> None:
     engine = TTSEngine(model=SEED_TTS_20_EXPRESSIVE_MODEL, enable_cache=False, request_delay=0)
 
@@ -1695,7 +1858,7 @@ def test_seed_tts_synthesis_requires_dedicated_speech_api_key(monkeypatch) -> No
 
 
 def test_stepaudio_http_call_allows_base_url_override(monkeypatch) -> None:
-    engine = TTSEngine(model=STEPAUDIO_25_TTS_MODEL, enable_cache=False, request_delay=0)
+    engine = TTSEngine(model=STEPAUDIO_3_TTS_MODEL, enable_cache=False, request_delay=0)
     expected_audio = b"fake-mp3"
     captured: dict[str, object] = {}
 
@@ -1726,7 +1889,7 @@ def test_stepaudio_http_call_allows_base_url_override(monkeypatch) -> None:
 
     result = asyncio.run(
         engine._call_stepaudio_speech_http(
-            model=STEPAUDIO_25_TTS_MODEL,
+            model=STEPAUDIO_3_TTS_MODEL,
             api_key="unit-step-key",
             text="StepAudio endpoint override.",
             voice="cixingnansheng",
@@ -1742,7 +1905,7 @@ def test_stepaudio_http_call_allows_base_url_override(monkeypatch) -> None:
 
 
 def test_stepaudio_voice_preview_call_uses_official_preview_endpoint(monkeypatch) -> None:
-    engine = TTSEngine(model=STEPAUDIO_25_TTS_MODEL, enable_cache=False, request_delay=0)
+    engine = TTSEngine(model=STEPAUDIO_3_TTS_MODEL, enable_cache=False, request_delay=0)
     expected_audio = b"fake-preview-mp3"
     captured: dict[str, object] = {}
 
@@ -1772,7 +1935,7 @@ def test_stepaudio_voice_preview_call_uses_official_preview_endpoint(monkeypatch
 
     result = asyncio.run(
         engine._call_stepaudio_voice_preview_http(
-            model=STEPAUDIO_25_TTS_MODEL,
+            model=STEPAUDIO_3_TTS_MODEL,
             api_key="unit-step-key",
             text="智能阶跃，十倍每一个人的可能",
             file_id="file-Ckyl3cV09A",
@@ -1788,7 +1951,7 @@ def test_stepaudio_voice_preview_call_uses_official_preview_endpoint(monkeypatch
         "Content-Type": "application/json",
     }
     assert captured["json"] == {
-        "model": STEPAUDIO_25_TTS_MODEL,
+        "model": STEPAUDIO_3_TTS_MODEL,
         "file_id": "file-Ckyl3cV09A",
         "text": "今天天气不错",
         "sample_text": "智能阶跃，十倍每一个人的可能",
@@ -1801,7 +1964,7 @@ def test_stepaudio_voice_preview_call_uses_official_preview_endpoint(monkeypatch
 
 
 def test_stepaudio_voice_preview_accepts_sample_audio_json_response(monkeypatch) -> None:
-    engine = TTSEngine(model=STEPAUDIO_25_TTS_MODEL, enable_cache=False, request_delay=0)
+    engine = TTSEngine(model=STEPAUDIO_3_TTS_MODEL, enable_cache=False, request_delay=0)
 
     class FakeResponse:
         status_code = 200
@@ -1832,7 +1995,7 @@ def test_stepaudio_voice_preview_accepts_sample_audio_json_response(monkeypatch)
 
     result = asyncio.run(
         engine._call_stepaudio_voice_preview_http(
-            model=STEPAUDIO_25_TTS_MODEL,
+            model=STEPAUDIO_3_TTS_MODEL,
             api_key="unit-step-key",
             text="当你真的喜欢一个人的时候就容易说傻话办蠢事。",
             file_id="file-unit",
@@ -1845,7 +2008,7 @@ def test_stepaudio_voice_preview_accepts_sample_audio_json_response(monkeypatch)
 
 
 def test_stepaudio_voice_preview_cer_error_is_user_actionable(monkeypatch) -> None:
-    engine = TTSEngine(model=STEPAUDIO_25_TTS_MODEL, enable_cache=False, request_delay=0)
+    engine = TTSEngine(model=STEPAUDIO_3_TTS_MODEL, enable_cache=False, request_delay=0)
 
     class FakeResponse:
         status_code = 400
@@ -1885,7 +2048,7 @@ def test_stepaudio_voice_preview_cer_error_is_user_actionable(monkeypatch) -> No
     with pytest.raises(ValueError) as exc_info:
         asyncio.run(
             engine._call_stepaudio_voice_preview_http(
-                model=STEPAUDIO_25_TTS_MODEL,
+                model=STEPAUDIO_3_TTS_MODEL,
                 api_key="unit-step-key",
                 text="preview text",
                 file_id="file-unit",
@@ -1903,7 +2066,7 @@ def test_stepaudio_voice_preview_cer_error_is_user_actionable(monkeypatch) -> No
 
 
 def test_stepaudio_clone_asset_synthesis_uses_voice_preview_when_file_id_exists(monkeypatch) -> None:
-    engine = TTSEngine(model=STEPAUDIO_25_TTS_MODEL, enable_cache=False, request_delay=0)
+    engine = TTSEngine(model=STEPAUDIO_3_TTS_MODEL, enable_cache=False, request_delay=0)
     captured: dict[str, object] = {}
 
     async def fake_preview(**kwargs):
@@ -1926,7 +2089,7 @@ def test_stepaudio_clone_asset_synthesis_uses_voice_preview_when_file_id_exists(
                 "stepaudio_voice_sample_text": "Sample text.",
                 "instructions": "Warm voice, slow pace.",
             },
-            provider_model=STEPAUDIO_25_TTS_MODEL,
+            provider_model=STEPAUDIO_3_TTS_MODEL,
             api_key="unit-step-key",
             raw_speaker_id="stepaudio_clone:stepaudio_clone_unit",
         )
@@ -1937,7 +2100,7 @@ def test_stepaudio_clone_asset_synthesis_uses_voice_preview_when_file_id_exists(
     assert instruction.startswith("音色约束：保持已选音色")
     assert instruction.endswith("Warm voice，slow pace.")
     assert captured["preview"] == {
-        "model": STEPAUDIO_25_TTS_MODEL,
+        "model": STEPAUDIO_3_TTS_MODEL,
         "api_key": "unit-step-key",
         "text": "Preview line.",
         "file_id": "file-unit",
@@ -1947,7 +2110,7 @@ def test_stepaudio_clone_asset_synthesis_uses_voice_preview_when_file_id_exists(
 
 
 def test_stepaudio_clone_asset_synthesis_requires_file_id(monkeypatch) -> None:
-    engine = TTSEngine(model=STEPAUDIO_25_TTS_MODEL, enable_cache=False, request_delay=0)
+    engine = TTSEngine(model=STEPAUDIO_3_TTS_MODEL, enable_cache=False, request_delay=0)
 
     async def fake_preview(**kwargs):
         raise AssertionError("StepAudio clone assets without file_id must fail before preview")
@@ -1966,7 +2129,7 @@ def test_stepaudio_clone_asset_synthesis_requires_file_id(monkeypatch) -> None:
                     "speaker": "stepaudio_clone:stepaudio_clone_unit",
                     "stepaudio_voice_asset_id": "stepaudio_clone_unit",
                 },
-                provider_model=STEPAUDIO_25_TTS_MODEL,
+                provider_model=STEPAUDIO_3_TTS_MODEL,
                 api_key="unit-step-key",
                 raw_speaker_id="stepaudio_clone:stepaudio_clone_unit",
             )
@@ -2231,3 +2394,304 @@ def test_mimo_http_call_uses_xiaomi_chat_completions_endpoint(monkeypatch) -> No
     }
     assert captured["json"]["model"] == MIMO_V25_TTS_MODEL
     assert captured["json"]["audio"] == {"voice": "Chloe", "format": "wav"}
+
+
+# ---------------------------------------------------------------------------
+# 空 speaker 边界：接口层不再替各供应商编音色名（片段重生成下发空串），
+# 因此每家"空值 → 自己的默认音色"必须由各自的载荷组装点兜住并锁死。
+# 一旦某家的兜底被删或改成别家的声线名，上游只会静默返回无声音频。
+# ---------------------------------------------------------------------------
+
+
+def test_stepaudio_payload_falls_back_to_its_own_default_voice_when_speaker_empty() -> None:
+    engine = TTSEngine(model=STEPAUDIO_3_TTS_MODEL, enable_cache=False, request_delay=0)
+
+    payload = engine._build_stepaudio_http_payload(
+        model=STEPAUDIO_3_TTS_MODEL,
+        text="夜风穿过走廊。",
+        voice="",
+        voice_params={},
+    )
+
+    assert payload["voice"] == "cixingnansheng"
+
+
+def test_seed_tts_payload_falls_back_to_its_own_default_speaker_when_empty() -> None:
+    engine = TTSEngine(model=SEED_TTS_20_EXPRESSIVE_MODEL, enable_cache=False, request_delay=0)
+
+    payload = engine._build_seed_tts_http_payload(
+        model=SEED_TTS_20_EXPRESSIVE_MODEL,
+        text="夜风穿过走廊。",
+        voice="",
+        voice_params={},
+    )
+
+    assert payload["req_params"]["speaker"] == "zh_female_vv_uranus_bigtts"
+
+
+def test_mimo_payload_falls_back_to_system_default_voice_when_empty() -> None:
+    engine = TTSEngine(model=MIMO_V25_TTS_MODEL, enable_cache=False, request_delay=0)
+
+    payload = engine._build_mimo_chat_payload(
+        model=MIMO_V25_TTS_MODEL,
+        text="夜风穿过走廊。",
+        voice="",
+        voice_params={},
+    )
+
+    assert payload["audio"]["voice"] == "mimo_default"
+
+
+def test_mimo_voice_clone_payload_does_not_invent_system_voice_when_empty() -> None:
+    """复刻模型在空 speaker 下不得兜成系统音色：兜了等于把系统声线当复刻结果交付。"""
+    engine = TTSEngine(model=MIMO_V25_TTS_VOICE_CLONE_MODEL, enable_cache=False, request_delay=0)
+
+    payload = engine._build_mimo_chat_payload(
+        model=MIMO_V25_TTS_VOICE_CLONE_MODEL,
+        text="夜风穿过走廊。",
+        voice="",
+        voice_params={},
+    )
+
+    assert "voice" not in payload["audio"]
+
+
+def test_qwen_audio_31_synthesis_falls_back_to_default_voice_before_http_call(monkeypatch) -> None:
+    engine = TTSEngine(
+        model=QWEN_AUDIO_31_TTS_FLASH_MODEL,
+        enable_cache=False,
+        request_delay=0,
+    )
+    captured: dict = {}
+
+    async def fake_call(**kwargs):
+        captured.update(kwargs)
+        return b"ID3fake-audio"
+
+    monkeypatch.setattr(engine, "_call_dashscope_qwen_audio_http", fake_call)
+
+    audio_bytes = asyncio.run(
+        engine._synthesize_qwen_audio_31(
+            text="夜风穿过走廊。",
+            voice_params={},
+            provider_model=QWEN_AUDIO_31_TTS_FLASH_MODEL,
+            api_key="sk-fake",
+            raw_speaker_id="",
+        )
+    )
+
+    assert audio_bytes == b"ID3fake-audio"
+    assert captured["voice_id"] == "longsanshu_v3.1"
+    assert captured["voice_params"]["speaker"] == "longsanshu_v3.1"
+
+
+# ---------------------------------------------------------------------------
+# MiMo audio.format 与 stream 的耦合（2026-10-11 真实冒烟取证）：
+# 上游确实接受 wav/mp3/pcm16 与 stream=true，但我方运行时只能消费非流式 wav/mp3——
+# pcm16 是无头裸 PCM，会被输出质量校验判成 undecodable 并连发 3 次重试后返回空音频；
+# stream=true 的响应是 SSE，_call_mimo_chat_completions_http 的 response.json() 直接抛错。
+# 下面锁死"缺省即 wav""越界格式回落"，防止把"上游可用"误当成"我方可用"。
+# ---------------------------------------------------------------------------
+
+
+def test_mimo_payload_defaults_to_non_stream_wav_and_forwards_explicit_mp3() -> None:
+    engine = TTSEngine(model=MIMO_V25_TTS_MODEL, enable_cache=False, request_delay=0)
+
+    default_payload = engine._build_mimo_chat_payload(
+        model=MIMO_V25_TTS_MODEL,
+        text="夜风穿过走廊。",
+        voice="mimo_default",
+        voice_params={},
+    )
+    mp3_payload = engine._build_mimo_chat_payload(
+        model=MIMO_V25_TTS_MODEL,
+        text="夜风穿过走廊。",
+        voice="mimo_default",
+        voice_params={"format": "mp3"},
+    )
+
+    assert default_payload["audio"] == {"voice": "mimo_default", "format": "wav"}
+    assert "stream" not in default_payload
+    assert mp3_payload["audio"] == {"voice": "mimo_default", "format": "mp3"}
+
+
+def test_mimo_payload_couples_stream_to_pcm16_and_falls_back_on_out_of_enum_format() -> None:
+    engine = TTSEngine(model=MIMO_V25_TTS_MODEL, enable_cache=False, request_delay=0)
+
+    stream_payload = engine._build_mimo_chat_payload(
+        model=MIMO_V25_TTS_MODEL,
+        text="夜风穿过走廊。",
+        voice="mimo_default",
+        voice_params={"stream": True},
+    )
+    bogus_payload = engine._build_mimo_chat_payload(
+        model=MIMO_V25_TTS_MODEL,
+        text="夜风穿过走廊。",
+        voice="mimo_default",
+        voice_params={"format": "opus"},
+    )
+    bogus_stream_payload = engine._build_mimo_chat_payload(
+        model=MIMO_V25_TTS_MODEL,
+        text="夜风穿过走廊。",
+        voice="mimo_default",
+        voice_params={"stream": True, "format": "opus"},
+    )
+
+    assert stream_payload["stream"] is True
+    assert stream_payload["audio"]["format"] == "pcm16"
+    assert bogus_payload["audio"]["format"] == "wav"
+    assert "stream" not in bogus_payload
+    assert bogus_stream_payload["audio"]["format"] == "pcm16"
+
+
+# ---------------------------------------------------------------------------
+# 传输消费闸门：载荷组装是忠实的协议编码器（上面的耦合契约即为其钉），
+# 但响应解析只支持非流式 JSON + wav/mp3。因此 stream / pcm16 必须在
+# “发出请求之前”被消费层显式拒绝，否则退化成上游 400 被吞成 b"" 或
+# 非 JSON 解析异常，日志还会把 MiMo 记成 aliyun 故障。
+# ---------------------------------------------------------------------------
+
+
+def _fail_on_request_http_client(monkeypatch) -> dict[str, object]:
+    """构造一个“被调用即记录”的假客户端，用于证明闸门在请求之前生效。"""
+
+    captured: dict[str, object] = {}
+
+    class FakeResponse:
+        status_code = 200
+        text = "{}"
+
+        def json(self):
+            return {}
+
+    class FakeAsyncClient:
+        def __init__(self, **kwargs):
+            captured["client_kwargs"] = kwargs
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+        async def post(self, url, headers, json):
+            captured["url"] = url
+            return FakeResponse()
+
+    monkeypatch.setattr("httpx.AsyncClient", FakeAsyncClient)
+    return captured
+
+
+@pytest.mark.parametrize(
+    "voice_params",
+    [
+        pytest.param({"stream": True}, id="stream_true"),
+        pytest.param({"format": "pcm16"}, id="pcm16_without_stream"),
+    ],
+)
+def test_mimo_http_call_rejects_unconsumable_transport_before_requesting_upstream(
+    monkeypatch,
+    voice_params: dict[str, object],
+) -> None:
+    engine = TTSEngine(model=MIMO_V25_TTS_MODEL, enable_cache=False, request_delay=0)
+    captured = _fail_on_request_http_client(monkeypatch)
+
+    with pytest.raises(TTSUserInputError, match="MiMo"):
+        asyncio.run(
+            engine._call_mimo_chat_completions_http(
+                model=MIMO_V25_TTS_MODEL,
+                api_key="unit-mimo-key",
+                text="测试小米 MiMo。",
+                voice="Chloe",
+                voice_params=dict(voice_params),
+            )
+        )
+
+    assert "url" not in captured
+
+
+def test_mimo_voice_clone_prefers_sample_data_url_over_clone_data_url() -> None:
+    engine = TTSEngine(model=MIMO_V25_TTS_VOICE_CLONE_MODEL, enable_cache=False, request_delay=0)
+
+    payload = engine._build_mimo_chat_payload(
+        model=MIMO_V25_TTS_VOICE_CLONE_MODEL,
+        text="别怕，我就在这里。",
+        voice="",
+        voice_params={
+            "voice_sample_data_url": "data:audio/wav;base64,c3M=",
+            "voice_clone_data_url": "data:audio/mpeg;base64,bXM=",
+        },
+    )
+
+    assert payload["audio"]["voice"] == "data:audio/wav;base64,c3M="
+
+
+def test_mimo_voice_clone_ignores_plain_asset_id_as_sample_data_url() -> None:
+    """复刻样本只认 data:audio/ 前缀：把资产 ID 当样本发给上游会静默降级成别的音色。"""
+    engine = TTSEngine(model=MIMO_V25_TTS_VOICE_CLONE_MODEL, enable_cache=False, request_delay=0)
+
+    payload = engine._build_mimo_chat_payload(
+        model=MIMO_V25_TTS_VOICE_CLONE_MODEL,
+        text="别怕，我就在这里。",
+        voice="mimo_clone:mimo_clone_saved",
+        voice_params={},
+    )
+
+    assert "voice" not in payload["audio"]
+
+
+def test_mimo_voice_design_keeps_assistant_message_when_preview_optimization_disabled() -> None:
+    """台词必须留在 assistant：optimize_text_preview=False 时省略 assistant 会让上游无文本可读。"""
+    engine = TTSEngine(model=MIMO_V25_TTS_VOICE_DESIGN_MODEL, enable_cache=False, request_delay=0)
+
+    payload = engine._build_mimo_chat_payload(
+        model=MIMO_V25_TTS_VOICE_DESIGN_MODEL,
+        text="今晚的风很轻，我们慢慢说。",
+        voice="",
+        voice_params={
+            "voice_design_prompt": "年轻女性，中低音，声音清晰克制，带轻微疲惫感。",
+            "optimize_text_preview": False,
+        },
+    )
+
+    assert payload["messages"] == [
+        {"role": "user", "content": "年轻女性，中低音，声音清晰克制，带轻微疲惫感。"},
+        {"role": "assistant", "content": "今晚的风很轻，我们慢慢说。"},
+    ]
+    assert payload["audio"] == {"format": "wav", "optimize_text_preview": False}
+
+
+def test_mimo_voice_design_omits_preview_flag_when_caller_does_not_set_it() -> None:
+    engine = TTSEngine(model=MIMO_V25_TTS_VOICE_DESIGN_MODEL, enable_cache=False, request_delay=0)
+
+    payload = engine._build_mimo_chat_payload(
+        model=MIMO_V25_TTS_VOICE_DESIGN_MODEL,
+        text="今晚的风很轻，我们慢慢说。",
+        voice="",
+        voice_params={"voice_design_prompt": "年轻女性，中低音，声音清晰克制。"},
+    )
+
+    assert "optimize_text_preview" not in payload["audio"]
+
+
+def test_mimo_audio_parser_accepts_string_and_object_audio_shapes() -> None:
+    engine = TTSEngine(model=MIMO_V25_TTS_MODEL, enable_cache=False, request_delay=0)
+    encoded = base64.b64encode(b"RIFFfake").decode("ascii")
+
+    assert engine._parse_mimo_audio_response(
+        {"choices": [{"message": {"audio": {"data": encoded}}}]}
+    ) == b"RIFFfake"
+    assert engine._parse_mimo_audio_response(
+        {"choices": [{"message": {"audio": encoded}}]}
+    ) == b"RIFFfake"
+
+
+def test_mimo_audio_parser_reports_precise_missing_shapes() -> None:
+    engine = TTSEngine(model=MIMO_V25_TTS_MODEL, enable_cache=False, request_delay=0)
+
+    with pytest.raises(ValueError, match="MiMo response missing choices"):
+        engine._parse_mimo_audio_response({"choices": []})
+    with pytest.raises(ValueError, match="MiMo response missing message"):
+        engine._parse_mimo_audio_response({"choices": ["not-a-dict"]})
+    with pytest.raises(ValueError, match="MiMo response missing audio data"):
+        engine._parse_mimo_audio_response({"choices": [{"message": {}}]})

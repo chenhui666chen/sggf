@@ -59,6 +59,30 @@ def sound_effect_designer_module():
         pytest.skip(f"SoundEffectDesigner 模块加载失败: {e}")
 
 
+def _stub_shared_asset_db_index(monkeypatch, module) -> None:
+    """把素材库的共享数据库索引写入替换成空实现。
+
+    这段入库逻辑用的是模块级 SessionLocal()，不经过 FastAPI 依赖注入，覆盖 get_db
+    对它无效；不打桩就会把测试素材行写进 .env 指向的真实开发库并跨进程留存。
+    需要断言写库行为时用 FakeSession 记录 commit/upsert，而不是复用这个空实现。
+    """
+
+    class _NoopSession:
+        def commit(self):
+            pass
+
+        def rollback(self):
+            pass
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(module, "SessionLocal", _NoopSession, raising=False)
+    monkeypatch.setattr(
+        module, "upsert_audio_library_asset", lambda db, library_type, record: None, raising=False
+    )
+
+
 @pytest.fixture
 def audio_mixer_module():
     """加载 AudioMixer 模块"""
@@ -855,9 +879,13 @@ def test_optimize_effect_density_respects_max_effects_per_minute(sound_effect_de
 def test_generated_environment_category_normalizes_to_environment(
     sound_effect_designer_module,
     tmp_path,
+    monkeypatch,
 ):
     """Generated category paths should not leak into EffectType coercion."""
-    designer = sound_effect_designer_module["SoundEffectDesigner"](
+    SoundEffectDesigner = sound_effect_designer_module["SoundEffectDesigner"]
+    _stub_shared_asset_db_index(monkeypatch, sys.modules[SoundEffectDesigner.__module__])
+
+    designer = SoundEffectDesigner(
         index_path=str(tmp_path / "sound_effects_index.json")
     )
 
@@ -2051,11 +2079,13 @@ def test_audio_mixer_sidechain_imports():
 
 def test_music_index_uses_relative_paths(tmp_path, monkeypatch):
     """V3-15: music_index.json 写入时 file_path 应为相对路径。"""
+    from app.services.audiobook import ai_music as ai_music_module
     from app.services.audiobook.ai_music import MurekaO1Client, MusicGenerationRequest, MusicStyle
 
     cache_dir = tmp_path / "music_cache"
     cache_dir.mkdir()
     monkeypatch.setenv("MUREKA_API_KEY", "test-key")
+    _stub_shared_asset_db_index(monkeypatch, ai_music_module)
 
     client = MurekaO1Client(enable_cache=True, cache_dir=str(cache_dir))
     cache_file = cache_dir / "abc123.mp3"
@@ -2106,6 +2136,7 @@ def test_music_index_attaches_cloud_metadata_for_generated_music(tmp_path, monke
         }
 
     monkeypatch.setattr(ai_music_module, "upload_audio_library_asset", fake_upload_audio_library_asset)
+    _stub_shared_asset_db_index(monkeypatch, ai_music_module)
 
     client = MurekaO1Client(enable_cache=True, cache_dir=str(cache_dir))
     monkeypatch.setattr(
@@ -2580,6 +2611,7 @@ def test_sound_effect_register_writes_quality_metadata(sound_effect_designer_mod
     index_path = audio_library / "sound_effects_index.json"
     monkeypatch.setattr(designer_module, "AUDIO_LIBRARY_DIR", audio_library)
     monkeypatch.setattr(designer_module, "SOUND_EFFECTS_DIR", audio_library / "sound_effects")
+    _stub_shared_asset_db_index(monkeypatch, designer_module)
 
     designer = SoundEffectDesigner(index_path=str(index_path))
     designer.register_new_effect({
@@ -2700,6 +2732,7 @@ def test_sound_effect_register_attaches_cloud_metadata_for_generated_sfx(
     monkeypatch.setattr(designer_module, "AUDIO_LIBRARY_DIR", audio_library)
     monkeypatch.setattr(designer_module, "SOUND_EFFECTS_DIR", audio_library / "sound_effects")
     monkeypatch.setattr(designer_module, "upload_audio_library_asset", fake_upload_audio_library_asset)
+    _stub_shared_asset_db_index(monkeypatch, designer_module)
 
     designer = SoundEffectDesigner(index_path=str(index_path))
     monkeypatch.setattr(

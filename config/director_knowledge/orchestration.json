@@ -1,0 +1,700 @@
+{
+  "_type": "orchestration",
+  "note": "volume10 中 Phase 2.2-2.6 实现所需关键字的摘取视图；完整定义以 SSOT 为准",
+  "state_engine_10_1": {
+    "principle": "连续剧集不是把多个10秒镜头拼起来，而是把每个镜头的结束状态可靠地传递给下一个镜头、下一场、下一集。生成模型负责局部画面；Episode State Engine负责长期记忆、因果和版本。",
+    "transition_rule": "End State = Start State + Verified Transition Events。只有在画面、对白、声音或合理省略中发生/可推断的变化，才允许修改状态。",
+    "state_domains": {
+      "Character Identity State": "脸部结构、年龄、发型、身体比例、轮廓、声音ID、Behavior DNA；属于高稳定字段。",
+      "Physical State": "伤口、血迹、湿度、疲劳、呼吸、污渍、携带物；随剧情累积和恢复。",
+      "Emotional State": "不是单一sad/angry，而是触发、强度、控制程度、外显程度、残余情绪。",
+      "Knowledge State": "角色已经知道/误以为知道/尚不知道的信息。防止角色提前知道秘密。",
+      "Relationship State": "信任、亲密、权力、债务、怀疑、敌意等关系变量及其变化原因。",
+      "Goal State": "当前Objective、阻碍、下一步意图；决定Blocking和表演。",
+      "Wardrobe State": "服装版本、穿着方式、损坏、湿度、配饰、是否脱下/卷袖等。",
+      "Prop State": "Owner、Holder、Hand、World Position、开关/损坏/内容物状态。",
+      "Spatial State": "World Position、朝向、移动路径、门窗/家具地图、交互轴线。",
+      "Camera State": "Camera Side、Screen Direction、景别、机位高度、距离、透视意图；只保存连续性需要的部分。",
+      "Lighting State": "真实光源世界坐标、开关、太阳方向、时间、动态光源。",
+      "Audio State": "Voice状态、环境底声、持续声源、音乐/静默状态、Sonic Motif。",
+      "Story State": "未解决问题、已兑现信息、悬念、承诺、Cliffhanger和因果链。"
+    },
+    "hard_soft": {
+      "Hard Locks": "身份、知识状态、关键伤势、关键道具归属、世界空间、剧情因果。冲突时禁止自动覆盖，必须修镜头或人工批准。",
+      "Soft Locks": "发丝细节、背景路人、非关键皱褶、轻微环境变化。可在不破坏叙事时容忍。",
+      "Creative Variables": "构图细节、局部动作变化、环境微活动等，在不触碰Hard Lock时允许模型探索。"
+    }
+  },
+  "version_graph_10_2": {
+    "version_compare_protocol": {
+      "principle": "Version Graph 已有 diff/rollback，补 UI 级并排对比与决策留痕（ArcReel：每次重生都是历史）。",
+      "rules": [
+        "任何重生成都自动存档为版本节点（不覆盖旧版本）",
+        "多版本并排对比视图：同镜多版本关键帧/成片横向对照",
+        "一键回滚 + 回滚理由留痕入 event_log",
+        "对比视图供 Human Gate 审批使用（导演在两版间选择而非重做）"
+      ],
+      "source": "ArcReel 版本管理（一键回滚、多版本并排对比、每次重生存档）",
+      "qc_checks": [
+        "重生是否永不覆盖旧版本？",
+        "Human Gate 审批是否用并排对比而非单版判断？"
+      ]
+    },
+    "reproducibility_addressing": {
+      "principle": "可复现性寻址（Shotkit）：所有产物按 round×shot 寻址（两轮工作互不覆盖），run 记录以内容哈希 pin 全部输入——与确定性渲染共同构成可复现闭环。",
+      "rules": [
+        "产物路径 = output/{run_id}/{round}/{shot}/，round 2 永不覆盖 round 1 的 prompt 与素材",
+        "run.json 记录全部输入的内容哈希：prompt / 参考图 / 模型版本 / 参数 / 知识单元版本",
+        "复现验证：同哈希输入二次生成逐帧对比（对齐渲染可复现率 100% KPI）",
+        "critique 裁决按 round×shot 归档，任何一轮的问题可追溯到当轮输入"
+      ],
+      "source": "Shotkit（Apache 2.0）：round/shot 文件寻址 + 内容哈希 pin 输入 + 版本化审计",
+      "qc_checks": [
+        "重生是否永不覆盖旧 round？",
+        "run 输入是否全部哈希 pin？"
+      ]
+    }
+  },
+  "rework_10_3": {
+    "edit_chain_degradation_budget": {
+      "principle": "编辑优先（保护已验证资产+成本优势）但非无限编辑：每轮编辑都在累积退化——局部重绘边缘伪影、多次压缩分辨率损失、风格漂移、语义累积偏移。预算制止损，防止'修到面目全非'。",
+      "budget": {
+        "image_asset": "同一资产图编辑≤3轮；每轮必须过 PRESERVE 检查，PRESERVE 项出现任何漂移（脸/服装/光源方向）立即终止编辑链",
+        "video_shot": "同一镜头 R3 局部修复≤2轮；第二轮后 QC 评分仍未过线或出现新缺陷→升级 R4",
+        "escalation_rule": "触发任一条件立即升级 R4 Shot Regenerate（携带 repair_model 修正，避免重蹈覆辙）：①编辑轮次超预算；②本轮修复引入的新缺陷数≥修复掉的原缺陷数；③分辨率/画质可感知下降；④PRESERVE 项漂移"
+      },
+      "degradation_signals": [
+        "局部重绘边缘伪影/接缝",
+        "多轮压缩后细节糊化（发丝/纹理）",
+        "风格漂移（色调/质感偏离 Canon 锚）",
+        "PRESERVE 项漂移",
+        "编辑区域与非编辑区域质感不一致"
+      ],
+      "economics": "编辑链成本曲线：第1轮编辑成本≈重生成的20-30%，第2轮≈60%，第3轮起超过重生成且附带退化债——预算不是教条，是止损线；超预算继续编辑=用更多钱买更差的结果。"
+    },
+    "r3_edit_capability_map": {
+      "principle": "R3 局部修复按'缺陷类型→模型编辑能力'路由，不默认使用原生成模型；编辑能力以 Model Router 的 Video Edit / Image Edit 实测标注为准，模型版本变更时同步更新映射。",
+      "mappings": [
+        {
+          "defect": "时间维度（太长/节奏/切点生硬）",
+          "route": "R2 剪辑层（Editing Agent）",
+          "tools": "Trim/换切点/Insert 反应镜/声音桥接——不占生成编辑预算"
+        },
+        {
+          "defect": "局部画面缺陷（穿模/物体错/局部区域崩坏）",
+          "route": "指令式局部视频编辑",
+          "tools": "Hailuo In-Context Regeneration / Wan 视频内编辑"
+        },
+        {
+          "defect": "时间戳级替换（某秒内容错）",
+          "route": "精准时间戳编辑",
+          "tools": "PixVerse 精准时间戳编辑"
+        },
+        {
+          "defect": "背景/环境替换",
+          "route": "绿幕/参考编辑",
+          "tools": "PixVerse 绿幕与视角编辑 / 图编辑后 I2V 重建"
+        },
+        {
+          "defect": "字幕/画面文字错误",
+          "route": "图编辑层修关键帧或后期覆盖",
+          "tools": "qwen-image 长文本编辑（海报/字卡类）/后期字幕层覆盖"
+        },
+        {
+          "defect": "口型/配音问题",
+          "route": "R3 音频侧（不动画面）",
+          "tools": "重配音+口型同步，音频轨替换"
+        },
+        {
+          "defect": "色彩/调色偏差",
+          "route": "后期调色层（不占生成编辑预算）",
+          "tools": "剪辑层 color grade（color_grade_thinking 五步闭环）"
+        },
+        {
+          "defect": "资产图局部修改（背景/表情/道具）",
+          "route": "图片编辑+PRESERVE/CHANGE 双列表",
+          "tools": "Seedream 5.0 交互式编辑 / Vidu Image 参考编辑 / qwen-image 编辑"
+        },
+        {
+          "defect": "身份漂移/物理崩坏/构图与Contract冲突（机制型/结构性）",
+          "route": "禁止编辑——直接 R4 重生成",
+          "tools": "Model Router 按 Shot Contract 需求重路由 + repair_model 修正输入"
+        }
+      ],
+      "fallback_rule": "映射未覆盖的缺陷类型→依次评估 R2 剪辑层→R3 编辑→R4 重生成；判别总纲：编辑改'呈现'，重生成改'采样'——问题出在模型怎么生成的（机制型失败），编辑救不了。"
+    },
+    "exploration_track": {
+      "principle": "R2/R3 修复的试探性生成与主管线双轨分离（DramaClaw Freezone）：探索轨自由试生成不影响 Canon 与版本图，满意结果一键提交回主管线。解决'修复试错污染版本链'与'编辑链衰减预算被迫消耗在试探上'。",
+      "rules": [
+        "探索轨生成不写入 Canon、不占用编辑链预算（预算从提交后算起）",
+        "探索轨素材可自由组合（画布式），提交时走 10.2 版本节点 + 依赖校验",
+        "探索轨开销计入项目预算但单镜上限减半",
+        "提交结果必须重新过 QC 门（探索不豁免质量）"
+      ],
+      "source": "DramaClaw Freezone 无限画布双轨制（主管线 + 画布探索，满意一键推回）",
+      "qc_checks": [
+        "探索轨是否确实不污染版本图？",
+        "提交是否重新过 QC？",
+        "探索开销是否计入项目预算？"
+      ]
+    },
+    "priority_score": "Repair Priority = Narrative Severity × Dependency Reach × Editorial Usage × Delivery Urgency × Failure Probability ÷ Repair Cost。高叙事严重度但低成本的修复优先；未进入剪辑的候选版本即使技术失败，也不应挤占成片关键路径。"
+  },
+  "scheduler_10_4": {
+    "retry_discipline": {
+      "principle": "批量任务的失败处理纪律（ArcReel 异步任务引擎）：逐项返回成败、重试只补失败项——不为已成功素材重复付费。",
+      "rules": [
+        "批量任务逐项记录成功/失败状态",
+        "重试仅对失败项发起，成功项直接复用",
+        "RPM 限速 + 图像/视频独立通道 + lease-based 调度",
+        "断点续传：任务级 checkpoint，恢复不重跑已完成"
+      ],
+      "source": "ArcReel 异步任务引擎（RPM 限速/lease 调度/断点续传/重试只补失败项）",
+      "qc_checks": [
+        "重试是否只补失败项？",
+        "断点续传是否验证过幂等？"
+      ]
+    },
+    "cost_visibility": {
+      "principle": "预算管控三档（指导文档 4.4）之下的资产级成本可见性：每次生成前后可查费用与实际用量（ArcReel）。",
+      "rules": [
+        "逐资产（图/视频/音频）记录模型、token/秒数、费用",
+        "生成前预估价 + 生成后实际扣费对账",
+        "成本随版本节点存档（回滚时知道这版花了多少）",
+        "看板按 beat 族/镜头/模型聚合展示"
+      ],
+      "source": "ArcReel 生成前后费用与实际用量可见",
+      "qc_checks": [
+        "单镜成本是否可追溯？",
+        "预估-实际偏差是否监控（防模型端计费异常）？"
+      ]
+    },
+    "failure_policy": [
+      "一次失败：按Failure Library分类，优先局部修复/Prompt Adapter调整。",
+      "同类连续两次失败：停止无脑Retry，切换模型/控制方式或拆镜头。",
+      "模型服务不可用：若Fallback满足Hard Requirements则自动路由；否则任务BLOCKED并更新关键路径。",
+      "人工审核超时：高风险镜头不自动放行；低风险技术QC可按规则自动通过。",
+      "预算阈值触发：停止非关键候选扩增，保留Critical Path与R4以上返工。",
+      "截止时间逼近：Scheduler可降低Creative Exploration Budget，但不得降低Hard Continuity Gate。"
+    ]
+  },
+  "orchestrator_10_5": {
+    "collaboration_protocols": {
+      "principle": "编排器已有权限/交接/审批（authority_model/handoff_contract），缺 Agent 间的质量协作算法。补两种协议（FilmAgent 实证：多 Agent 协作优于单 Agent o1）。",
+      "debate_judge": "高分歧 DC 分叉（运镜/灯光/景别多方案争执不下）→ 2-3 个方案各自陈述依据（必须引用 DC 案例与 CF 风险）→ 导演 Agent 裁决并记录理由到 event_log。适用：T2 触发且方案得分差 <15%；常规节点直通不辩论。",
+      "critique_correct_verify": "剧本/分镜生成环：Director 初稿 → Screenwriter/Actor 批判（逻辑漏洞/动作可行性）→ 修正 → Verify 门禁。专拦'词典外动作幻觉'（对照 closed_action_lexicon 校验，如 standing suggest 类不存在动作）与跨场景矛盾。",
+      "source": "FilmAgent（HITsz-TMG，arXiv 2501.12909）Debate-Judge 与 Critique-Correct-Verify 协作算法",
+      "qc_checks": [
+        "辩论是否引用知识依据而非直觉？",
+        "Verify 是否对照闭合动作词典校验？",
+        "协作开销是否限制在高分叉节点？"
+      ]
+    },
+    "hierarchical_creative_config": {
+      "principle": "Shot Contract 管镜头级字段，缺场景/集级创意配置的统一下发。因子化创意配置 θ 由编排器持有，注入所有派生层 Agent 的 system prompt，保证编剧/分镜/生图/视频对'同一部片子'有一致理解——防止子 Agent 语义冲突与级联漂移（Co-Director 所称 semantic collisions / cascading failures）。",
+      "factors": "θ = θcs 创意风格（如冷峻悬疑/温暖治愈）× θnm 叙事模式（如单线倒计时/多线交汇）× θaa 美学原型（如高对比霓虹/低饱和尘埃）",
+      "injection": "θ 注入派生层全部 Agent（scripter/storyboarder/painter/dreamweaver）+ AM-15（评价时知悉目标风格）；严禁注入小说创作 agent（产物分层铁律）",
+      "source": "Co-Director（Google，arXiv 2604.24842）分层创意参数化（hierarchical parameterization）",
+      "qc_checks": [
+        "θ 变更是否触发 10.2 影响分析（下游失效范围）？",
+        "所有派生层 Agent 收到的 θ 是否同版本？",
+        "θ 是否未进入小说层 prompt（混注门禁）？"
+      ]
+    },
+    "context_discipline": {
+      "principle": "R5（prompt 膨胀）的系统性对策：主 Agent 只接收精炼摘要，大段原文/中间产物留在对应 Subagent 内处理（ArcReel subagent 架构）；会话复用 + 上下文压缩 + 渲染检查点断点续传（ViMax）。",
+      "rules": [
+        "原文/全量上下文永不进入主编排循环，Subagent 返回 ≤500 token 摘要",
+        "会话（session）跨阶段复用，历史压缩为结构化状态而非全文回放",
+        "渲染任务带检查点，中断后从最近检查点续跑（不重跑已完成步骤）",
+        "单次知识注入 ≤ 对应组（既有 L1/L2/L3 纪律不变）"
+      ],
+      "source": "ArcReel Subagent 上下文隔离 + ViMax context compaction / session reuse / render checkpoints",
+      "qc_checks": [
+        "主编排 Agent 单轮上下文是否 ≤ 阈值？",
+        "断点续传是否避免已完成步骤重复计费？"
+      ]
+    },
+    "stage_completeness_3e": {
+      "principle": "每阶段中间产物完整性协议（MAViS 3E Principle）：Explore（生成多方案）→ Examine（完整性检查）→ Enhance（补全增强）——不完整的中间产物禁止交接到下一阶段，把级联失败拦截在前置环节。",
+      "rules": [
+        "Explore：关键产物（剧本/分镜/资产）先出 2 案对照（与 R-pre 候选择优对齐）",
+        "Examine：按产物 schema 逐字段检查——剧本过闭合动作词典、分镜过镜头卡 12 字段、资产过保真清单",
+        "Enhance：缺口局部补全而非整产物重生成（编辑链预算纪律）",
+        "3E 不过 → 不交接：handoff_contract 增加 3E 门位，交接前必须过 Examine 清单"
+      ],
+      "source": "MAViS（EACL 2026）3E Principle：Explore, Examine, Enhance",
+      "qc_checks": [
+        "每阶段交接是否过 3E 门位？",
+        "Enhance 是否局部补全而非重生成？"
+      ]
+    },
+    "knowledge_dispatch_orchestration": {
+      "principle": "AM-17 是所有 Agent 访问知识库的唯一调度通道：知识只在'问题出现'时被拉取（需求拉动），永不在'技巧存在'时被推送（供给推动）。Orchestrator 在每个 Agent Handoff 中注入知识调度约束，AM-17 审计所有知识调用的合法性与质量目的。",
+      "trigger_wiring": {
+        "T1失败触发": "QC/Review Agent 输出 failure_code 或 AM-15 报告 CF 命中 → Orchestrator 强制注入对应 CF 案例的 repair/repair_model 到 Repair Agent 的 Handoff Envelope read_set（不可跳过）",
+        "T2分叉触发": "Agent 在决策分叉（转场选型/切换技法/景别选择/蒙太奇选型）→ AM-17 只注入对应 DC 决策树（如 DC-034/DC-032/DC-033），不注入全库；且仅当分叉真实存在（多选项且后果不同）；场景情绪类分叉（beat_type/情绪词命中 t2_beat_routing）→按 beat 族注入对应 DC 组（DC-001~030 全覆盖）",
+        "T3风险前置触发": "结构化 trigger_condition 命中（如镜头>6s且情感场景）→ 直接执行规则化处置（EMOTION_STALL_CHECK 模式），无需 LLM 参与"
+      },
+      "retrieval_enforcement": "L1失败码直接索引→L2结构化触发器→L3语义检索Top-3，命中即停；命中知识必须通过适用性验证（scene/question 匹配当前情境），不匹配降级基础方案；禁止 Agent 主动浏览知识库。",
+      "quality_guard_wiring": {
+        "motivation_gate": "Agent 应用任何技法前，Handoff 回执中必须含 problem_statement；缺失即被 AM-17 驳回",
+        "delete_test": "技法应用后，AM-15 复检时执行技法版删除测试（移除技法叙事是否受损），未通过→Editing Agent 回滚",
+        "retrieval_audit": "AM-17 记录四元组（trigger_type/problem_statement/applied_knowledge_id/delete_test_result）→ 10.7 Learning Loop 统计炫技率（阈值<15%），高频炫技'技法×场景类型'组合降权"
+      },
+      "authority": "AM-17：READ 知识库 + 输出调度建议与审计记录；无 GENERATE/ACCEPT/COMMIT，不生产内容。",
+      "default_policy": "无触发→基础方案。最朴素的正确方案永远优先于精巧的炫技方案。",
+      "t2_beat_routing": {
+        "purpose": "把 DC-001~030 场景情绪决策接入 T2 分叉调度：分镜设计期按 beat 族注入对应 DC 组（不是全库），补齐场景情绪类知识的自动可达性",
+        "routing_key": "剧本 Beat 结构的 beat_type + 情绪内容词（Orchestrator 从 Beat sheet 提取）",
+        "beat_families": [
+          {
+            "family": "信息揭示族",
+            "keywords": [
+              "发现秘密",
+              "真相揭露",
+              "身份暴露",
+              "闪回",
+              "回忆",
+              "偷看",
+              "拆穿"
+            ],
+            "dispatch": [
+              "DC-001",
+              "DC-013",
+              "DC-014"
+            ]
+          },
+          {
+            "family": "情绪爆发族",
+            "keywords": [
+              "哭",
+              "崩溃",
+              "拥抱",
+              "告白",
+              "胜利",
+              "失败",
+              "死亡",
+              "临终",
+              "痛哭"
+            ],
+            "dispatch": [
+              "DC-005",
+              "DC-006",
+              "DC-018",
+              "DC-020",
+              "DC-021"
+            ]
+          },
+          {
+            "family": "关系状态族",
+            "keywords": [
+              "孤独",
+              "疏远",
+              "独处",
+              "冷战",
+              "告别",
+              "离开",
+              "沉默对峙",
+              "分手"
+            ],
+            "dispatch": [
+              "DC-002",
+              "DC-012",
+              "DC-016",
+              "DC-022",
+              "DC-023",
+              "DC-028"
+            ]
+          },
+          {
+            "family": "冲突动作族",
+            "keywords": [
+              "打斗",
+              "追逐",
+              "对战",
+              "觉醒",
+              "超能力",
+              "恐惧",
+              "威胁",
+              "危险"
+            ],
+            "dispatch": [
+              "DC-007",
+              "DC-009",
+              "DC-015",
+              "DC-025",
+              "DC-029"
+            ]
+          },
+          {
+            "family": "开场建置族",
+            "keywords": [
+              "首次出现",
+              "登场",
+              "新环境",
+              "陌生空间",
+              "群像",
+              "怪物",
+              "反派"
+            ],
+            "dispatch": [
+              "DC-004",
+              "DC-008",
+              "DC-011",
+              "DC-026"
+            ]
+          },
+          {
+            "family": "收尾定格族",
+            "keywords": [
+              "结尾",
+              "终镜",
+              "时间跳跃",
+              "多年后",
+              "落幕",
+              "尾声"
+            ],
+            "dispatch": [
+              "DC-010",
+              "DC-024",
+              "DC-030"
+            ]
+          },
+          {
+            "family": "交互细节族",
+            "keywords": [
+              "说谎",
+              "密谋",
+              "开门",
+              "递物",
+              "产品展示",
+              "交易"
+            ],
+            "dispatch": [
+              "DC-003",
+              "DC-017",
+              "DC-019",
+              "DC-027"
+            ]
+          }
+        ],
+        "coverage": "30/30 场景情绪 DC 全部接入（7 族）；新增 DC 时必须登记 beat 族（登记制，防再次出现无路由知识）",
+        "fallback": "beat 不匹配任何族→L3 语义检索兜底；检索无果→基础方案（无触发不检索原则不变）"
+      },
+      "l3_index_schema": {
+        "purpose": "为 L3 语义检索定义统一索引规格；产品化时以关键词倒排或向量化实现",
+        "index_fields": [
+          "retrieval_keywords（域词+症状词+场景类型词）",
+          "knowledge_type（DC/CF/规则/技法库/系统模块）",
+          "applicable_stage（分镜/Contract/Prompt/剪辑/QC/修复）",
+          "beat_family（场景情绪类专用）",
+          "source_type（可信度分级：native/creator_tutorial/external_skill/benchmark）",
+          "verification_status（pending/verified/deprecated，由 Learning Loop 维护）"
+        ],
+        "registration_rule": "每个新知识单元入库时必须登记索引字段（与 beat 族登记制同源）；未登记索引的知识不进 L3 检索池；入库时同步登记 source_type 与 verification_status（默认 pending），治理规则见 10.7 knowledge_governance。"
+      }
+    },
+    "first_generation_knowledge_flow": {
+      "principle": "初次生成时知识不是运行时检索，而是设计期编译：知识在按下生成键之前已被写进 Shot Contract / Prompt / 参考包。生成模型只吃 Prompt + 参考图，不查任何库。T1（失败触发）在初次生成期不存在，知识通过三个入口进入：结构内嵌（模板自带）、T2 分叉（设计期决策）、T3 风险前置（生成前防错）。",
+      "cf_dual_phase": "CF 失败案例是双相知识：生成前（T3/Previsualization QC）＝预防检查项，生成后（T1）＝修复方案。预防成本远低于修复，因此初次生成的知识重心是把失败知识反转成生成前检查。",
+      "stages": [
+        {
+          "stage": "①剧本Beat→分镜设计",
+          "knowledge_entry": "T2 分叉触发（AM-17 按需调度）",
+          "detail": "Director Agent 在决策分叉处只注入对应 DC 决策树：转场选型→DC-034（边界帧特征写入两镜 Continuity In-Out）、切换技法→DC-032、快切景别→DC-033、运镜选型→DC-035（戏剧目的→镜头运动映射）、灯光选型→DC-036（戏剧目的→光方案映射）、情感镜头时长→时长阈值+类型系数。查询结果写进 Shot Contract 字段，不做运行时干预。",
+          "writes_to": "Shot Contract 字段（景别/时长/切换技法/边界帧特征）"
+        },
+        {
+          "stage": "②Shot Contract 编写",
+          "knowledge_entry": "结构内嵌（Schema-Embedded，无检索，常驻生效）",
+          "detail": "镜头卡12字段（Drama/Shot Motivation 为第一字段＝动机门禁在模板层）、五级景别系统、时长阈值——模板自带，每镜必填，每次生成自动生效，不需要 AM-17 检索。",
+          "writes_to": "Shot Contract 模板字段"
+        },
+        {
+          "stage": "③Shot Contract 评审（Previsualization QC）",
+          "knowledge_entry": "T3 风险前置（把失败知识反转成生成前检查）",
+          "detail": "生成前预检套件（详见 previsualization_precheck_suite）：CF 失败库的 qc 字段用作生成前检查项（EMOTION_STALL_CHECK：镜头>6s 且情感场景→生成前要求补情绪增量设计或预警，而不是生成后裁切；跨场景镜对声明边界帧特征→生成时用前镜尾帧做后镜首帧参考）+ 光学一致性预检（景别×焦距×距离×运动四字段交叉校验）+ 技巧干涉检查（叠加冲突/超预算在生成前拦截）。",
+          "writes_to": "Shot Contract 修订 / 预警标记 / 边界帧参考链"
+        },
+        {
+          "stage": "④Prompt 编译",
+          "knowledge_entry": "结构内嵌（Prompt Compiler 规则）",
+          "detail": "golden rules（自然语言优于tag堆砌）、anti-patterns（负面清单）、时间分段 prompt（10s+ 按时间段写）、参考图绑定语法——知识编译进 Prompt 文本本身。",
+          "writes_to": "Generation Prompt"
+        },
+        {
+          "stage": "⑤Model Router 路由 + 参考包注入",
+          "knowledge_entry": "结构内嵌（路由表 + Character Canon）",
+          "detail": "Model Router 按 Shot Contract 需求匹配模型能力标签（动作/表情/时长/一致性）；Character Canon / 身份DNA 编译成参考图包注入——一致性知识在生成前物化为资产。",
+          "writes_to": "模型选择 + 参考图包"
+        },
+        {
+          "stage": "⑥生成→QC",
+          "knowledge_entry": "T1 失败触发（初次生成结束，修复循环开始）",
+          "detail": "QC failure_code / AM-15 CF 命中→检索对应 CF 的 repair/repair_model→重生成。T1 不属于初次生成，属于修复循环；此处标出仅为闭环完整性。",
+          "writes_to": "QC 报告 + 修复版本"
+        }
+      ],
+      "previsualization_precheck_suite": {
+        "principle": "生成前拦截优于生成后修复。阶段③统一执行三类预检：CF 风险前置（已有）、光学一致性预检（新增）、技巧干涉检查（新增）。所有矛盾在 Shot Contract 层打回修订，不进生成。",
+        "optical_consistency_precheck": {
+          "purpose": "生成前拦截 Contract 字段内部的光学矛盾，不再等生成后 optical_reality_check 兜底",
+          "rules": [
+            "景别=特写 × 焦距=广角 → 矛盾（广角特写属畸变风格，必须显式声明 distortion intent 才放行）",
+            "景别=远景 × 长焦 → 需声明空间压缩意图，否则按矛盾打回",
+            "大幅运镜 × 固定景别标注 → 推/拉镜过程景别连续变化，标注失效→改为起止景别标注（如 ECU→CU）",
+            "机位距离 × 运动方向矛盾（写推镜但 Prompt 写 dolly out）→ 打回",
+            "灯光状态字段（lighting_state）跨镜突变无剧情动机 → 打回（连续性域联动）"
+          ],
+          "enforcement": "阶段③扫描 Shot Contract 的 Shot Size / Focal / Camera Distance / Movement / Light 五字段交叉校验，矛盾→打回修订后重审"
+        },
+        "technique_interference_check": {
+          "principle": "单个技巧合法≠叠加合法：防炫技层只管单技巧是否该用，本检查管多个合法技巧叠加后是否互相破坏。每个镜头只能有 1 个主导技巧（该镜头的叙事担当），其余只能作支持位。",
+          "interference_rules": {
+            "目的冲突": "跳切（故意破坏连贯）× 动接动（维持连贯）——同镜组禁用；快切压缩时间 × 平行蒙太奇延展时间——节奏目的相反",
+            "节奏冲突": "复杂运镜（推/拉/横移需≥3s 展开）× 快切（<1s/镜）——运镜无法完成即被切走；音画卡点 × 废片快切（3帧）——卡点需要对齐节拍",
+            "风格冲突": "手持纪实 × 精确画意光造型；自然主义灯光 × 强风格化调色——风格语言打架，全片只能一个主导风格语言",
+            "物理冲突": "大幅度运镜 × 固定景别标注；遮挡转场 × 固定机位长镜（遮挡物入画机制矛盾）",
+            "超载冲突": "主动技巧>2/镜 → Prompt 变量过多 → 模型注意力均分 → 每项半成品（对应已知 CF 多变量超载机制）"
+          },
+          "stacking_budget": {
+            "per_shot_active_techniques_max": 2,
+            "dominant_technique_per_shot": 1,
+            "scene_stylized_techniques_max": 1,
+            "violation_disposition": "超出预算→按叙事优先级舍弃：主导技巧保留，低优先级技巧直接删除（不是弱化）；与动机门禁联动——problem_statement 优先级最高的技巧即主导技巧"
+          },
+          "enforcement": "阶段③扫描 Contract 已声明技巧组合→命中干涉规则或超预算→生成前拦截（改 Contract 或删技巧）；修复期（T1）新增技巧前同样过检——防止修复引入新冲突"
+        },
+        "camera_lighting_prompt_lexicon": {
+          "purpose": "导演语言→模型可执行语言翻译层 + 服从度标注；低服从项强制走参考图路径，禁止纯文字实现",
+          "camera_terms": [
+            {
+              "director": "缓慢推近（情绪收紧）",
+              "model_language": "slow dolly-in, camera gradually pushes toward the subject's face, very steady movement",
+              "compliance": "中（速度需量化词：very slow / slow / quick）"
+            },
+            {
+              "director": "拉远揭示",
+              "model_language": "camera pulls back, revealing the space / key object",
+              "compliance": "中"
+            },
+            {
+              "director": "手持主观",
+              "model_language": "handheld camera, subtle natural shaking, POV perspective",
+              "compliance": "中（幅度过大易晕，subtle 必须写）"
+            },
+            {
+              "director": "固定机位",
+              "model_language": "static camera, locked-off shot",
+              "compliance": "高"
+            },
+            {
+              "director": "升降机位（权力变化）",
+              "model_language": "crane up / crane down",
+              "compliance": "低（易变形，建议首尾帧参考或图生视频）"
+            },
+            {
+              "director": "缓慢横移建置",
+              "model_language": "slow lateral tracking shot, panning across the scene",
+              "compliance": "中"
+            }
+          ],
+          "lighting_terms": [
+            {
+              "director": "暖色窗光回忆",
+              "model_language": "warm golden sunlight streaming through a window, soft shadows, gentle atmosphere",
+              "compliance": "高"
+            },
+            {
+              "director": "侧向硬光对峙（伦勃朗）",
+              "model_language": "dramatic side lighting, strong chiaroscuro, half of the face in shadow",
+              "compliance": "中"
+            },
+            {
+              "director": "顶光审问",
+              "model_language": "harsh overhead lighting, deep shadows under the eyes",
+              "compliance": "低（精确光位不听话→参考图实现）"
+            },
+            {
+              "director": "低调单源（秘密/阴谋）",
+              "model_language": "low-key lighting, single light source, large areas of darkness",
+              "compliance": "中"
+            },
+            {
+              "director": "均匀平光（虚伪和谐）",
+              "model_language": "flat even lighting, no strong shadows",
+              "compliance": "中"
+            },
+            {
+              "director": "冷色夜晚不安",
+              "model_language": "cold blue moonlight, dim ambient light, uneasy atmosphere",
+              "compliance": "高"
+            }
+          ],
+          "compliance_levels": "高=文字可靠，直接写进 Prompt；中=需量化描述辅助（速度/幅度/光源类型）；低=必须用参考图实现，禁止纯文字（写入 Prompt 只作氛围辅助）"
+        }
+      },
+      "experience_preload": "经验前置：Learning Loop 回写的高成功率修复方案（Repair_Learning 中验证过的 repair_model，如某场景类型的首尾帧参考配置）作为默认配置预注入下次初次生成的 Shot Contract——第一次生成就带着历史经验，这是自进化系统在初次生成期的体现。",
+      "qc_checks": [
+        "初次生成前 Shot Contract 是否走完 ①-⑤ 全部知识入口（分叉查询/模板字段/风险前置/Prompt规则/路由参考）？",
+        "分镜设计期的 T2 查询结果是否已写进 Shot Contract 字段（而非留给运行时）？",
+        "Previsualization QC 是否执行了 CF qc 字段的生成前检查（T3）？",
+        "经验前置：上次验证过的高成功率 repair_model 是否已作为默认配置预注入本次 Shot Contract？"
+      ]
+    },
+    "human_gates": {
+      "HG-0 Auto": "L0/L1技术或元数据修复，且不触及Hard State。",
+      "HG-1 Review Batch": "L2/L3但不改变剧情事实，可由导演/连续性人员批量审。",
+      "HG-2 Director Approval": "PIS大幅改变、镜头语法转向、关键动作/表演改变、R5 Mini-sequence rebuild。",
+      "HG-3 Showrunner/Canon Approval": "Knowledge Reveal、Relationship转折、角色目标、关键道具因果、Scene结构变化。",
+      "HG-4 Production Owner Approval": "跨集Canon、角色身份/世界规则、交付后回改、预算/截止时间重大变更。",
+      "rule": "风险等级只能升级不能由执行Agent自行降级；Human Reject必须附reason_code供Repair Agent重新规划。"
+    },
+    "handoff_contract": [
+      "Agent之间不传递无限聊天上下文，而传递结构化Handoff Envelope。",
+      "Envelope至少包含：task_id、from_agent、to_agent、objective、input_version_ids、state_snapshot_id、read_set、allowed_write_set、constraints、open_questions、evidence、expected_output_schema、deadline/priority。",
+      "接收Agent必须确认Input Version仍是当前有效版本；若已STALE则拒绝执行并返回STALE_INPUT。",
+      "输出必须声明changed_fields和confidence；不能偷偷修改未授权字段。",
+      "任何文本解释都只是Evidence/Reasoning Summary，真正执行依据是结构化State与Version ID。"
+    ]
+  },
+  "qc_10_6": {
+    "hard_gates": [
+      "Identity Lock：检测角色身份、脸部、年龄、发型、身体比例、服装和声音连续性。",
+      "Knowledge Continuity：检测角色是否获得了尚未通过剧情事件获得的信息。",
+      "Prop Continuity：检测关键道具所有人、位置、状态和交互因果。",
+      "Spatial Continuity：检测空间位置、轴线、Screen Direction和Blocking。",
+      "Causal Continuity：检测动作是否有前因后果，避免瞬移和无解释状态变化。"
+    ],
+    "soft_dimensions": {
+      "Cinematography": "焦距、机位距离、透视结果、构图、运动动机、光源合理性。",
+      "Performance": "Objective、PIS、情绪曲线、呼吸、眼神、微动作。",
+      "Sound": "Voice、空间距离、环境声、动机声音、音乐/静默。",
+      "Editorial": "入出点、动作接口、Match Cut、J/L Cut和时间线适配。"
+    },
+    "candidate_selection_gate": {
+      "principle": "把'生成→QC 失败→修复'的事后链路前移为'生成多候选→VLM 预评→只扩展高分分支'（AniMaker MCTS-Gen）。在视频生成这个最贵环节之前完成择优，直接压低 R4 整镜重生成率。",
+      "position": "先于 R0：生成前择优（R-pre）；R0-R6 仍管生成后修复，两级互补",
+      "scope": "高价值 beat：情绪爆发族 / 信息揭示族 / 冲突动作族（beat 七族路由判定）；常规镜头单候选",
+      "protocol": [
+        "每镜并行生成 ≤2 候选（图片层沿用 best_image_selector 既有模式，视频层新增）",
+        "VLM 按镜头卡 12 字段预评潜力分，仅高分候选进入视频生成/合成",
+        "低分候选归档备查，回流 CF 命中统计（学习回路燃料）",
+        "预算闸门：候选数 ≤2/镜，超预算需导演 Agent 批准"
+      ],
+      "source": "AniMaker（SIGGRAPH Asia 2025，arXiv 2506.10540）MCTS-Gen 多候选生成与选择",
+      "kpi": "R4 整镜重生成率 ≤30%（既有 KPI）；候选择优命中率（高分候选最终通过 QC 比例）≥70%",
+      "qc_checks": [
+        "高价值 beat 是否默认双候选？",
+        "预评是否在视频生成前完成？",
+        "低分候选是否归档供学习回路？"
+      ]
+    },
+    "machine_readable_critique": {
+      "principle": "QC 裁决双格式（Shotkit critique.json 模式）：人读报告与机读 JSON 并出，机读件直接供修复路由 / prompt 重编译消费——对齐「失败码评审输出结构化 JSON 无散文解析」既有原则，扩展到图像/视频批评层。",
+      "rules": [
+        "每镜 critique 输出 markdown（人读）+ critique.json（机读：verdict / 问题类别 / CF 命中 / 修复方向）",
+        "机读件 schema 对齐 qc_report_fields（20 字段），字段缺失即检查项缺失",
+        "critique.json 直接驱动 R-pre 重编译与 R0-R6 路由（无 LLM 再解析环节）",
+        "闭环纪律：批评 → 重编译 → 再批评，直至 verdict=pass 或预算止损（编辑链衰减预算约束）"
+      ],
+      "source": "Shotkit visual-asset-critic：机器可读裁决驱动 generate → critique → revise → re-critique 闭环",
+      "qc_checks": [
+        "每镜是否双格式输出？",
+        "机读件是否被修复路由直接消费（无再解析）？"
+      ]
+    },
+    "qc_report_fields": [
+      "qc_id",
+      "shot_id",
+      "version_id",
+      "identity_score",
+      "knowledge_score",
+      "prop_score",
+      "spatial_score",
+      "camera_score",
+      "lighting_score",
+      "performance_score",
+      "sound_score",
+      "editing_score",
+      "hard_gate_status",
+      "soft_score",
+      "failure_codes",
+      "repair_class",
+      "qc_agent",
+      "human_review",
+      "accepted_version",
+      "timestamp"
+    ],
+    "failure_codes": [
+      "IDENTITY_DRIFT",
+      "KNOWLEDGE_LEAK",
+      "PROP_TELEPORT",
+      "AXIS_BREAK",
+      "LIGHT_SOURCE_INVALID",
+      "FOCAL_DISTANCE_MISMATCH",
+      "EMOTION_JUMP",
+      "VOICE_DRIFT",
+      "ACTION_CAUSE_BREAK",
+      "CANON_CONFLICT"
+    ],
+    "repair_dual_perspective": {
+      "principle": "质检失败后修提示词时，不能只从'人类导演觉得该怎么拍'修正，而要重点依据图片/视频生成模型的生成原理修正输入：模型为何产生该失败（cause）→ 从采样机制、注意力分配、参考锚定、时间一致性等模型原理侧反推应如何改写Prompt/参考/约束。",
+      "director_view": "repair（导演视角）：从电影语法/叙事意图修正——补Shot Purpose、机位动机、情绪曲线等。",
+      "model_view": "repair_model（模型原理视角）：从生成机制修正——改用空间关系词代替标签、用参考图锚定身份、降低多变量并行、用时间分段控制情绪渐变等。",
+      "priority_rule": "当失败源于'模型机制性缺陷'（cause 指向先验绑定/重采样/注意力均分/时间压缩等）时，以 repair_model 为主、repair 为辅；当失败源于'导演意图缺失'时，以 repair 为主。判定依据：cause 是否描述模型行为而非叙事意图。",
+      "flow": "QC Fail → 分类（机制型 vs 意图型）→ 若机制型：查 failure_cases 的 repair_model → 生成模型原理修正后的 Prompt Adapter → 重新生成 → 成功率回写 Repair_Learning。"
+    }
+  },
+  "learning_loop_10_7": {
+    "creative_config_bandit": {
+      "principle": "Learning Loop 既有机制（修复成功率统计 + experience_preload）是纯利用（exploitation）；MAB 补上探索（exploration）半边：把创意配置形式化为因子化行动空间，在'探索未知有效配置'与'固化已验证配置'之间取得原则性平衡（Co-Director 首个把生成式叙事形式化为全局优化问题的工作）。",
+      "action_space": "θ = (θcs 创意风格, θnm 叙事模式, θaa 美学原型)——场景/集级创意配置，非镜头级（镜头级仍归 Shot Contract）",
+      "protocol": [
+        "编排器按 MAB 策略采样 θ(t)，经 10.5 hierarchical_creative_config 统一注入所有派生层 Agent",
+        "成片由 AM-15 输出因子化奖励 R = (rcs 创意风格分, rnm 叙事模式分, raa 美学原型分)",
+        "R 回传 MAB 更新各臂置信度，迭代 T 轮（T 默认 = 同项目集数）",
+        "收敛后的 Top 配置写入 Production_Memory 并经 experience_preload 固化为默认配置",
+        "与知识治理联动：已验证配置标记 verification_status=verified，未验证保持 pending"
+      ],
+      "source": "Co-Director（Google，arXiv 2604.24842）：MAB 全局优化 + 分层创意参数化 + MLLM Judge 因子化奖励回传",
+      "kpi": "探索轮配置的 AM-15 均分 ≥ 固化配置的 90%（防为探索而探索）；每项目沉淀 ≥1 组 verified 创意配置",
+      "qc_checks": [
+        "θ 是否只注入派生层（禁止进入小说创作 agent）？",
+        "因子化奖励是否由 AM-15 产出而非人工拍脑袋？",
+        "exploitation（preload）与 exploration（bandit）是否并行不互斥？"
+      ]
+    },
+    "audience_persona_feedback": {
+      "principle": "learning_loop 链路中 Audience Signal 位的实现方案（此前空缺）：persona-conditioned MLLM 以多观众人格看片给主观批评——自评无法覆盖的盲区（CHIEF，ICML'26 Workshop）。",
+      "protocol": [
+        "persona 集：3-5 个目标观众画像（年龄/性别/内容偏好），来源为目标平台画像",
+        "每集成片由各 persona 独立看片输出：钩子留存预判 / 情绪曲线 / 弃剧点定位",
+        "双轨评分：AM-15 导演标准分管专业质量，persona 分管观众反应；冲突时导演优先（Soft Gate 性质）",
+        "persona 反馈回流 Learning Loop 作观众信号源；可加权进 MAB 因子化奖励"
+      ],
+      "source": "CHIEF（arXiv 2606.18591）：persona-conditioned multimodal LLM 观众反馈 + creator-driven 迭代",
+      "qc_checks": [
+        "persona 集是否对齐目标平台画像？",
+        "persona 分是否只作 Soft Gate（不否决导演决策）？"
+      ]
+    },
+    "knowledge_governance": {
+      "purpose": "激活 source/added 元数据为知识治理机制：可信度分级影响 L3 检索排序，验证状态由 Learning Loop 维护，时效检查驱动复验，冲突仲裁定优先级——source/added 从死字段变为运行时机制。",
+      "source_taxonomy": "native（体系原生，无 source 字段默认）/ creator_tutorial（创作者教程提炼）/ external_skill（GitHub 等外部技能库）/ benchmark（实测数据）",
+      "trust_ladder": {
+        "A_已验证方法论_weight_1.0": "体系原生方法论与实测 benchmark；无 source 字段的知识默认 A 级",
+        "B_创作者教程_weight_0.7": "creator_tutorial 初始级；升级条件：累计≥5次调用且 delete_test 全部通过→升 A 级（verification_status=verified）",
+        "C_外部未实测_weight_0.5": "external_skill 初始级；升级同 B 级条件，另需至少1次生产环境实测通过"
+      },
+      "verification_lifecycle": "pending（新入库/未验证）→ verified（delete_test 累计通过）→ deprecated（时效未过或冲突仲裁败北）",
+      "staleness_check": "知识关联的模型版本落后当前 Model Router ≥2个主版本，或 added 超180天且内容依赖特定模型行为→标记 stale：L3 排序再乘0.7，并触发复验任务（复验通过刷新 added 与 verification_status）",
+      "conflict_arbitration": "两个知识单元结论冲突时优先级：verified > pending；A级 > B级 > C级；同级取 added 更新者；无法仲裁→双方均进复验",
+      "l3_integration": "L3 语义检索排序分 = 语义相关度 × trust_weight ×（stale?0.7:1）；source_type 与 verification_status 已列入 l3_index_schema 索引字段"
+    },
+    "learning_loop": [
+      "Production Event → QC/Repair/Audience Signal → Pattern Extraction → Human Validation → Memory Update → Future Recommendation"
+    ]
+  }
+}

@@ -85,8 +85,8 @@ def run_midframes(ctx: Any) -> None:
         image_cfg,
         key="adapter",
         env_name="DREAMWEAVER_T2I_MODEL",
-        default="wan2.6-t2i",
-    ) or "wan2.6-t2i"
+        default="qwen-image-3.0-pro",
+    ) or "qwen-image-3.0-pro"
     frame_width, frame_height, frame_ratio = resolve_frame_size(image_cfg)
 
     t2i_candidates = _cfg_int(image_cfg, "t2i_candidates", env_name="DREAMWEAVER_T2I_CANDIDATES", default=1)

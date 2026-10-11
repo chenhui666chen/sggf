@@ -22,17 +22,20 @@ def test_prompt_audio_asr_public_postpaid_prices_use_verified_sources() -> None:
     )
 
     expected = {
-        ("funasr_flash", "fun-asr-flash-2026-06-15"): 0.00022,
-        ("aliyun", "paraformer-v2"): 0.00008,
-        ("doubao", "volc.bigasr.auc"): 2.3 / 3600,
-        ("doubao", "volc.seedasr.auc"): 0.8 / 3600,
+        ("qwen_audio_asr_flash", "qwen-audio-3.1-asr-flash"): (
+            0.00004,
+            "derived_from_token_price",
+        ),
+        ("aliyun", "paraformer-v2"): (0.00008, "public_postpaid"),
+        ("doubao", "volc.bigasr.auc"): (2.3 / 3600, "public_postpaid"),
+        ("doubao", "volc.seedasr.auc"): (0.8 / 3600, "public_postpaid"),
     }
 
-    for identity, expected_rate in expected.items():
+    for identity, (expected_rate, expected_basis) in expected.items():
         pricing = get_prompt_audio_asr_pricing(*identity)
         assert pricing is not None
         assert pricing.yuan_per_second == expected_rate
-        assert pricing.pricing_basis == "public_postpaid"
+        assert pricing.pricing_basis == expected_basis
         assert pricing.pricing_source
         assert estimate_prompt_audio_asr_cost_yuan(
             provider=identity[0],
@@ -49,6 +52,28 @@ def test_prompt_audio_asr_public_postpaid_prices_use_verified_sources() -> None:
         )
         is None
     )
+
+
+def test_qwen_audio_asr_second_price_is_derived_from_token_rates() -> None:
+    """3.1 不按秒计价：秒价必须由官方 Token 折算规则推出，且只能往高估不能低估。
+
+    官方规则（百炼模型价格「千问Audio」，2026-10-11 核对）：1 秒音频 = 25 Token，
+    不足 1 秒按 25 Token 计；刊例 0.8 元/百万输入 Token、2.7 元/百万输出 Token。
+    输出侧按中文朗读实测约 6 Token/秒估算。
+    """
+    from app.services.audiobook.prompt_audio_asr_pricing import (
+        get_prompt_audio_asr_pricing,
+    )
+
+    pricing = get_prompt_audio_asr_pricing(
+        "qwen_audio_asr_flash",
+        "qwen-audio-3.1-asr-flash",
+    )
+
+    assert pricing is not None
+    derived = (25 * 0.8 + 6 * 2.7) / 1_000_000
+    assert pricing.yuan_per_second >= derived
+    assert pricing.yuan_per_second <= round(derived * 1.5, 6)
 
 
 def test_prompt_audio_asr_budget_policy_reads_environment(monkeypatch) -> None:

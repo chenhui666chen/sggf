@@ -12,6 +12,7 @@ from enum import Enum
 from core.unified_llm_client import get_llm_client, UnifiedLLMClient
 from core.model_resolution import TaskType
 from ..chapter_splitter import ChapterInfo, ChapterType
+from ._base import AnalysisResult
 
 logger = logging.getLogger(__name__)
 
@@ -41,14 +42,35 @@ class ChapterSummary:
     key_events: List[str]
 
 
-@dataclass
-class AnalysisResult:
-    analysis_type: AnalysisType
-    content: Dict[str, Any]
-    confidence: float
-    chapter_summaries: Optional[List[ChapterSummary]] = None
 
 class CharInferMixin:
+    # 人物条目唯一保留键集：与提示词 JSON schema（_type_analysis_mixin / _synthesis_mixin）
+    # 及下游 project_bridge 读取键取并集；旧字段（如 role）与模型自造键在此被丢弃。
+    CHARACTER_OUTPUT_KEYS = frozenset({
+        "name",
+        "aliases",
+        "role_position",
+        "description",
+        "story_stance",
+        "faction",
+        "age_gender",
+        "appearance_anchor",
+        "personality_anchor",
+        "background_status",
+        "worldview",
+        "ability_outline",
+        "motivation",
+        "limitation",
+        "growth_direction",
+        "mainline_role",
+        "mainline_clues",
+        "first_appearance_chapter",
+        "appearance_count",
+        "relationship_to_main",
+        "importance_score",
+        "importance_level",
+    })
+
     @classmethod
     def _canonicalize_character_entry(cls, raw_item: Dict[str, Any]) -> Dict[str, Any]:
         """仅保留新语义字段，直接丢弃所有旧字段。"""

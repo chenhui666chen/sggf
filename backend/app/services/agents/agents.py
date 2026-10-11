@@ -276,7 +276,7 @@ class BaseAgent(ABC):
                 getattr(self.llm, 'model_name', None)
                 or getattr(self.llm, 'model', None)
                 or Config.MODEL_NAME
-                or "qwen3.7-plus"
+                or "qwen-plus"
             )
             temp_llm = create_model_llm(model=model_name, temperature=temperature)
             logger.debug(f"🎲 使用自定义 temperature={temperature}")
@@ -305,13 +305,13 @@ class BaseAgent(ABC):
         from .intelligent_truncator import truncate_with_ai_assist
         
         # 💡 智能检测当前模型的tokens限制
-        model_name = getattr(self.llm, 'model_name', None) or getattr(self.llm, 'model', 'qwen3.7-plus')
+        model_name = getattr(self.llm, 'model_name', None) or getattr(self.llm, 'model', 'qwen-plus')
         
         # 模型限制映射 (tokens)
         MODEL_LIMITS = {
-            'qwen3.7-plus': 1000000,    # 1M tokens（上下文 100万，输出 65K）
-            'deepseek-v4-pro': 1000000, # V4 Pro: 1M tokens
-            'deepseek-v4-flash': 1000000, # V4 Flash: 1M tokens
+            'qwen-plus': 1000000,    # 1M tokens（上下文 100万，输出 65K）
+            'deepseek-pro': 1000000, # V4 Pro: 1M tokens
+            'deepseek-flash': 1048576, # Flash: 1M tokens（上游实测上限）
         }
         
         # 默认限制(如果模型未知)

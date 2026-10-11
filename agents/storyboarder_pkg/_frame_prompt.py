@@ -1,224 +1,159 @@
+# -*- coding: utf-8 -*-
+"""Contract 驱动的帧 prompt 编译器（重写自旧拼接式 _frame_prompt）。
+
+与旧版差异（指导文档 F.3）：
+  - 输入是 Shot Contract（12 字段 + 路由元数据），不再是硬编码 profile 模板
+  - 运镜走 camera_lighting_prompt_lexicon 翻译（模型语言 + 服从度量化词），
+    低服从项带 reference_image_required 标记（生成侧走参考图而非文字）
+  - head/tail 差异由 state_transition 驱动（state_before/state_after），
+    不再只差一句 stage_tag
+  - 光学一致性：lens 由景别配套（T3 预检已修正）
+"""
 from __future__ import annotations
 
-import difflib
-import math
-import os
-import re
 from typing import Any, Dict, List, Optional, Tuple
 
-from agents.camera_states import build_camera_states
-from agents.camera_tree import build_camera_tree, build_camera_tree_llm
-from agents.llm_client import chat_completions, env_flag, extract_json_object, pick_model, llm_stream_context
-from pipeline.media_presets import (
-    DREAMWEAVER_AUTO_ENGINE,
-    DREAMWEAVER_I2V_ENGINE,
-    DREAMWEAVER_T2V_ENGINE,
-    ensure_media_payload,
-    is_dreamweaver_auto_engine,
-    is_dreamweaver_i2v_engine,
-    is_dreamweaver_t2v_engine,
-    normalize_dreamweaver_video_duration_s,
-    normalize_dreamweaver_video_engine,
-    normalize_frame_ratio,
-)
-from pipeline.style_presets import ensure_style_payload
+from pipeline.media_presets import normalize_frame_ratio
 
-def _build_frame_prompt(
+from agents.storyboarder_pkg._contract import SHOT_SIZE_ZH
+
+_DEFAULT_STYLE = "写实风格，电影质感，光影真实，高清细节，统一风格"
+
+
+def build_frame_prompt(
     *,
-    visual_desc: str,
-    profile: Dict[str, str],
+    contract: Dict[str, Any],
     stage: str,
     style_preset: str,
     style_prompt: str,
     ratio: str,
     entity_matches: Dict[str, List[Tuple[str, str]]],
-    dynamic: bool,
-    narrative_context: Optional[Dict[str, Any]] = None,
+    scene_meta: Optional[Dict[str, Any]] = None,
 ) -> str:
+    """编译单帧 prompt。stage ∈ {"head", "tail"}。
+
+    entity_matches: {"characters": [(name, desc)...], "scenes": [...], "props": [...]}
+    scene_meta: {"location", "time_of_day", "interior"} 场景上下文
     """
-    stage: head|tail
-    
-    优化说明：
-    - 增加场景细节描述（光照、氛围、背景层次）
-    - 增强动作描述（动作分解、速度感、动态模糊）
-    - 优化构图指导（视觉引导、焦点控制）
-    - 强化风格一致性（色彩倾向、质感细节）
-    - 支持多镜头叙事（根据叙事上下文调整镜头语言）
-    
-    Args:
-        visual_desc: 视觉描述
-        profile: 镜头配置
-        stage: 阶段（head/tail）
-        style_preset: 风格预设
-        style_prompt: 风格提示词
-        ratio: 宽高比
-        entity_matches: 实体匹配结果
-        dynamic: 是否动态
-        narrative_context: 叙事上下文
-    """
-    style = (style_prompt or "").strip() or "写实风格，电影质感，光影真实，高清细节，统一风格"
-    camera = str(profile.get("camera") or "中景")
-    lens = str(profile.get("lens") or "50mm")
-    angle = str(profile.get("angle") or "平视")
-    composition = str(profile.get("composition") or "三分法构图")
-    movement = str(profile.get("movement") or "镜头稳定")
-    
-    narrative_role = profile.get("narrative_role", "normal")
-    emotion_level = profile.get("emotion_level", "medium")
+    style = (style_prompt or "").strip() or _DEFAULT_STYLE
+    scene_meta = scene_meta or {}
 
-    chars_text = _format_entity_items(entity_matches.get("characters") or [], max_desc_len=36)
-    scenes_text = _format_entity_items(entity_matches.get("scenes") or [], max_desc_len=48)
-    props_text = _format_entity_items(entity_matches.get("props") or [], max_desc_len=36)
+    shot_size = contract.get("shot_size", "MS")
+    camera = f"{SHOT_SIZE_ZH.get(shot_size, '中景')}（{contract.get('lens', '50mm')}）"
+    angle = str(contract.get("camera_angle") or "平视")
+    composition = str(contract.get("visual_anchor") or "三分法构图，主体清晰")
+    movement_model = str(contract.get("movement_model_lang") or "").strip()
+    movement = str(contract.get("camera_movement") or "固定机位")
+    lighting = str(contract.get("lighting") or "动机窗光")
 
-    manga_fx = ""
-    if style_preset == "anime" and dynamic:
-        manga_fx = "漫画动效：速度线，动感线，轻微运动模糊（无文字）"
+    # state_transition 驱动的 head/tail 差异（替代旧 stage_tag 单句差异）
+    if stage == "head":
+        state_desc = str(contract.get("state_before") or "").strip()
+        stage_tag = "镜头开始，动作起势，主体清晰，焦点明确"
+    else:
+        state_desc = str(contract.get("state_after") or "").strip()
+        stage_tag = "镜头结束，动作落定，保持风格与构图一致，焦点稳定"
+    if state_desc:
+        stage_tag = f"{stage_tag}，画面状态：{state_desc}"
 
-    stage_tag = "镜头开始，动作起势，主体清晰，焦点明确" if stage != "tail" else "镜头结束，动作延续，保持风格与构图一致，焦点稳定"
+    # 画面内动态（internal_motion_priority：固定机位时的信息增量）
+    internal_motion = ""
+    if contract.get("camera_movement") == "locked-off 固定机位":
+        internal_motion = "画面内动态：主体微动作与光影呼吸"
 
-    lighting_desc = _get_lighting_description(style_preset, dynamic, narrative_context)
-    atmosphere_desc = _get_atmosphere_description(style_preset, narrative_context)
-    texture_desc = _get_texture_description(style_preset)
-    
-    narrative_guidance = _get_narrative_guidance(narrative_role, emotion_level, narrative_context)
+    # 低服从度 → 参考图路径标记（生成侧消费，文字不再强写）
+    reference_note = ""
+    if contract.get("reference_image_required"):
+        reference_note = "（低服从度项以参考图实现为准）"
+
+    chars_text = _format_items(entity_matches.get("characters") or [], 36)
+    scenes_text = _format_items(entity_matches.get("scenes") or [], 48)
+    props_text = _format_items(entity_matches.get("props") or [], 36)
+
+    atmosphere = _atmosphere(scene_meta, contract)
+    action_text = str(contract.get("action") or "").strip()
+
+    # 图片层补强（2026-10-07）：摄影域知识驱动的帧 prompt 增强
+    lens_comp = _lens_compensation(contract.get("lens", "50mm"))  # 焦距×距离×透视补偿
+    separation = _separation_hint(shot_size)  # 主体分离（I2V 防漂移）
+    texture = _texture_hint(style_preset)  # 质感 + 瑕疵美学（按风格启用）
 
     parts = [
         "单格分镜",
         normalize_frame_ratio(ratio),
         style,
-        f"{camera}，{angle}，{lens}",
+        f"{camera}，{angle}",
         composition,
-        f"运镜：{movement}",
-        f"光照：{lighting_desc}",
-        f"氛围：{atmosphere_desc}",
-        f"质感：{texture_desc}",
-        f"画面要点：{visual_desc}",
+        lens_comp,
+        separation,
+        f"运镜：{movement}{reference_note}" if movement else "",
+        f"运镜模型语言：{movement_model}{reference_note}" if movement_model else "",
+        internal_motion,
+        f"光照：{lighting}",
+        f"氛围：{atmosphere}",
+        texture,
+        f"画面要点：{contract.get('visual_anchor') or contract.get('action') or ''}",
+        f"动作：{action_text}" if action_text else "",
         f"角色：{chars_text}" if chars_text else "",
         f"环境：{scenes_text}" if scenes_text else "",
         f"道具：{props_text}" if props_text else "",
-        narrative_guidance,
-        manga_fx,
         stage_tag,
         "无文字，无水印，无logo，无边框，无拼贴",
     ]
     return "，".join([p for p in parts if p])
 
 
-def _get_lighting_description(style_preset: str, dynamic: bool, narrative_context: Optional[Dict[str, Any]] = None) -> str:
-    """根据风格、动态程度和叙事上下文生成光照描述"""
-    base_lighting_map = {
-        "cinematic_realistic": "自然光，柔和漫射，真实阴影，高光层次丰富" if not dynamic else "戏剧性光影，强烈对比，动态阴影，高光突出",
-        "anime": "柔和光照，赛璐璐阴影，边缘光，色彩统一" if not dynamic else "动态光照，速度光效，高对比阴影，强调轮廓",
-        "ink_wash": "自然光，柔和漫射，墨色渐变，留白光影" if not dynamic else "动态笔触，墨色流动，光影变化，意境深远",
-        "cyberpunk": "霓虹灯光，冷色调主光，环境光丰富，高对比" if not dynamic else "动态霓虹，光效流动，强烈对比，科技感光影",
-    }
-    
-    lighting = base_lighting_map.get(style_preset, "自然光照，真实阴影，层次丰富")
-    
-    if narrative_context and isinstance(narrative_context, dict):
-        emotion_intensity = narrative_context.get("emotion_intensity", "medium")
-        scene_type = narrative_context.get("scene_type", "normal")
-        
-        if emotion_intensity == "high":
-            if scene_type == "emotional":
-                lighting = "戏剧性侧光，强烈对比，情感化阴影，高光突出"
-            elif scene_type == "action":
-                lighting = "动态光照，强烈对比，速度光效，高光突出"
-        elif emotion_intensity == "low":
-            lighting = "柔和自然光，均匀漫射，柔和阴影，层次细腻"
-    
-    return lighting
+def _lens_compensation(lens: str) -> str:
+    """焦距×距离×透视补偿（lens_camera_distance_perspective）：AI 无真实镜头，显式写几何特征。"""
+    try:
+        mm = int("".join(ch for ch in str(lens) if ch.isdigit()) or 50)
+    except ValueError:
+        mm = 50
+    if mm <= 28:
+        return "广角透视：camera very close to subject，前景放大，近大远小明显，背景纵深延伸"
+    if mm >= 100:
+        return "长焦压缩：camera far from subject，窄视野，背景层向主体视觉压缩，远距观察式取景"
+    return ""
 
 
-def _get_atmosphere_description(style_preset: str, narrative_context: Optional[Dict[str, Any]] = None) -> str:
-    """根据风格和叙事上下文生成氛围描述"""
-    base_atmosphere_map = {
-        "cinematic_realistic": "电影级氛围，真实感强，情感细腻",
-        "anime": "动画氛围，活力十足，色彩明快",
-        "ink_wash": "古典意境，东方美学，宁静致远",
-        "cyberpunk": "未来感，科技氛围，冷峻神秘",
-    }
-    
-    atmosphere = base_atmosphere_map.get(style_preset, "氛围统一，情感表达清晰")
-    
-    if narrative_context and isinstance(narrative_context, dict):
-        emotion_intensity = narrative_context.get("emotion_intensity", "medium")
-        scene_type = narrative_context.get("scene_type", "normal")
-        
-        if emotion_intensity == "high":
-            if scene_type == "emotional":
-                atmosphere = "情感强烈，氛围紧张，情绪饱满"
-            elif scene_type == "action":
-                atmosphere = "紧张激烈，动感十足，节奏紧凑"
-        elif emotion_intensity == "low":
-            atmosphere = "平静舒缓，氛围温和，节奏舒缓"
-    
-    return atmosphere
+def _separation_hint(shot_size: str) -> str:
+    """主体分离提示（subject_separation + i2v_frame_quality_protocol）：I2V 防漂移硬指标。"""
+    if shot_size in ("CU", "ECU"):
+        return "主体占比≥30%画面，与背景清晰分离，浅景深背景虚化"
+    return "主体与背景清晰分离，避免杂乱背景"
 
 
-def _get_narrative_guidance(narrative_role: str, emotion_level: str, narrative_context: Optional[Dict[str, Any]] = None) -> str:
-    """根据叙事角色和情感强度生成叙事指导"""
-    guidance_map = {
-        "establishing": "建立场景，展现环境，交代空间关系",
-        "action": "动作清晰，动态强烈，节奏紧凑",
-        "emotional": "情感突出，表情细腻，氛围渲染",
-        "dialogue": "对话清晰，人物互动，焦点明确",
-        "power": "气势强大，主体突出，压迫感强",
-        "vulnerable": "主体渺小，环境压迫，脆弱感强",
-        "intensify": "逐渐增强，情绪递进，张力提升",
-        "reveal": "逐步展现，信息释放，视觉冲击",
-    }
-    
-    guidance = guidance_map.get(narrative_role, "")
-    
-    if emotion_level == "high":
-        guidance += "，情感强烈，张力十足"
-    elif emotion_level == "low":
-        guidance += "，情感平和，节奏舒缓"
-    
-    if narrative_context and isinstance(narrative_context, dict):
-        scene_type = narrative_context.get("scene_type", "normal")
-        if scene_type == "dialogue":
-            guidance += "，注重人物表情和眼神交流"
-        elif scene_type == "action":
-            guidance += "，强调动作连贯和速度感"
-        elif scene_type == "emotional":
-            guidance += "，突出情感变化和内心世界"
-    
-    return guidance
+def _texture_hint(style_preset: str = "") -> str:
+    """帧端质感（texture_boost L4 + imperfection_aesthetics）。
 
-
-def _get_texture_description(style_preset: str) -> str:
-    """根据风格生成质感描述"""
-    texture_map = {
-        "cinematic_realistic": "皮肤纹理细腻，材质质感真实，细节丰富",
-        "anime": "线条清晰流畅，色彩纯净，造型精致",
-        "ink_wash": "宣纸质感自然，墨色浓淡相宜，笔触飘逸",
-        "cyberpunk": "金属质感强烈，科技细节丰富，表面光滑",
-    }
-    return texture_map.get(style_preset, "质感统一，细节清晰")
-
-
-def _build_motion_desc(*, visual_desc: str, profile: Dict[str, str], dynamic: bool) -> str:
+    L2 瑕疵基础词汇全风格启用（对抗 AI 油腻感：皮肤抹平/过度完美）；
+    L4 烂镜头模拟仅纪实/复古/胶片风启用（activation_rule）。
     """
-    优化说明：
-    - 增强动作描述的细节和层次
-    - 根据动态程度调整运动强度
-    - 添加速度感和节奏控制
-    - 强调连续性和一致性
-    """
-    snippet = visual_desc[:80]
-    movement = str(profile.get("movement") or "镜头稳定")
-    
-    if dynamic:
-        intensity = "动作明显，节奏紧张，速度感强"
-        motion_detail = "动态模糊适度，主体运动轨迹清晰，背景有自然流动感"
-        continuity = "动作连贯，无跳变，保持人物与风格一致，动态效果自然"
-    else:
-        intensity = "主体有细微动作变化，节奏舒缓平稳"
-        motion_detail = "动态微妙，呼吸感自然，环境有轻微流动"
-        continuity = "画面稳定，连续性好，保持人物与风格一致"
-    
-    return f"{movement}，{intensity}，{motion_detail}，{continuity}。参考画面要点：{snippet}"
+    base = "质感：材质纹理清晰，自然光影层次，真实皮肤与布料质感，raw photo 原图质感，皮肤纹理与毛孔可见，film grain 胶片颗粒"
+    preset = str(style_preset or "").lower()
+    imperfect_styles = ("documentary", "film_noir", "retro", "90s", "wong", "纪实", "复古", "胶片", " noir")
+    if any(s in preset for s in imperfect_styles):
+        base += "，轻度暗角与边缘色散，轻微动态模糊"
+    return base
 
 
+def _format_items(items: List[Tuple[str, str]], max_desc: int) -> str:
+    out = []
+    for name, desc in items[:4]:
+        if desc:
+            out.append(f"{name}（{desc[:max_desc]}）")
+        else:
+            out.append(name)
+    return "；".join(out)
+
+
+def _atmosphere(scene_meta: Dict[str, Any], contract: Dict[str, Any]) -> str:
+    tod = str(scene_meta.get("time_of_day") or "")
+    interior = str(scene_meta.get("interior") or "")
+    emotion = str(contract.get("emotion") or "neutral")
+    base = f"{tod}{'·' + interior if interior else ''}".strip("·")
+    emotion_zh = {
+        "neutral": "平静", "happy": "明快", "sad": "低沉", "angry": "紧绷",
+        "fearful": "不安", "surprised": "骤停", "tense": "紧张", "calm": "温和", "excited": "高扬",
+    }.get(emotion, "")
+    return "，".join(x for x in (base, emotion_zh) if x) or "生活质感"

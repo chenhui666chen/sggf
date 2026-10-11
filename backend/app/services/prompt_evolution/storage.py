@@ -251,6 +251,8 @@ class EvolutionStorage:
             "evolution_id": evolution_id,
             "prompt_text": approved_version.prompt_text,
             "avg_ai_score": approved_version.avg_ai_score,
+            # 🔧 2026-10-08 新增：真实适应度（确定AI段落占比，0-1，越低越好）
+            "avg_ai_ratio": approved_version.avg_ai_ratio,
             # 🔧 新增：保存综合评分字段
             "avg_composite_score": approved_version.avg_composite_score,
             "avg_readability": approved_version.avg_readability,

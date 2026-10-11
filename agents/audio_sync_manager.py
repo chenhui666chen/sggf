@@ -339,7 +339,7 @@ class AudioSyncManager:
         check_cross_batch: bool = True
     ) -> Optional[str]:
         """
-        为对话生成音频（使用Qwen3-TTS）
+        为对话生成音频（使用Qwen-Audio 3.1 TTS）
         
         Args:
             shot_id: 镜头ID
@@ -435,7 +435,9 @@ class AudioSyncManager:
             result = synthesize_speech_sync(
                 text=dialogue,
                 voice_params={
-                    "speaker": tts_voice_id or "Ryan",
+                    # Qwen-Audio 3.1 音色体系与已退役的 Qwen3-TTS 不互通，
+                    # 未指定角色音色时落到 3.1 目录里的默认说书男声。
+                    "speaker": tts_voice_id or "longsanshu_v3.1",
                     "voice_style": resolved_voice_style,
                     "character_id": character_id,
                     "rate": speed,
@@ -444,7 +446,7 @@ class AudioSyncManager:
                     "volume": 50,
                 },
                 emotion="neutral",
-                model_id="qwen3-tts-instruct-flash",
+                model_id="qwen-audio-3.1-tts-flash",
             )
             
             if result.success and result.data:

@@ -68,7 +68,7 @@ async def test_chief_error_requests_single_model_fallback() -> None:
 async def test_too_few_successful_reviewers_requests_fallback() -> None:
     service = MultiModelReviewService(preset="balanced_3")
     reports = [
-        _successful_report("qwen3.7-plus", "general_literary"),
+        _successful_report("qwen-plus", "general_literary"),
         RuntimeError("模型失败"),
         RuntimeError("模型失败"),
     ]
@@ -209,3 +209,44 @@ def test_auto_strategy_selects_opening_and_finale_presets() -> None:
     assert should_trigger_multi_model_review(context, 1) == (True, "key_chapter_5")
     assert should_trigger_multi_model_review(context, 20) == (True, "deep_7")
     assert should_trigger_multi_model_review(context, 2) == (False, None)
+
+
+@pytest.mark.asyncio
+async def test_too_few_successes_fallback_includes_panel_metadata() -> None:
+    """P2-a：成功数<2 的 fallback 返回必须补齐面板元数据，
+    否则外层失败快照 context_payload 的 preset/chief_model/reviewer_models 全为 null/[]，丧失定位能力。"""
+    service = MultiModelReviewService(preset="balanced_3")
+    reports = [
+        _successful_report("qwen-plus", "general_literary"),
+        RuntimeError("模型失败"),
+        RuntimeError("模型失败"),
+    ]
+    with patch.object(service, "_review_with_reviewer", new=AsyncMock(side_effect=reports)):
+        result = await service.review("章节内容")
+
+    assert result["multi_model"] is False
+    assert result["preset"] == "balanced_3"
+    assert result["chief_model"] == service.chief_model
+    assert result["reviewer_models"] == [r["model"] for r in service.reviewers]
+    assert result["reviewer_profiles"] == [r["profile"] for r in service.reviewers]
+
+
+@pytest.mark.asyncio
+async def test_chief_fallback_result_includes_panel_metadata() -> None:
+    """P2-a：主审汇总失败的 _chief_fallback_result 也必须补齐 reviewer_models/reviewer_profiles。"""
+    service = MultiModelReviewService(preset="balanced_3")
+
+    async def successful_reviewer(_semaphore, reviewer, *_args):
+        return _successful_report(reviewer["model"], reviewer["profile"])
+
+    with (
+        patch.object(service, "_review_with_reviewer", side_effect=successful_reviewer),
+        patch.object(service, "_summarize", new=AsyncMock(side_effect=RuntimeError("主审不可用"))),
+    ):
+        result = await service.review("章节内容")
+
+    assert result["multi_model"] is False
+    assert result["preset"] == "balanced_3"
+    assert result["chief_model"] == service.chief_model
+    assert result["reviewer_models"] == [r["model"] for r in service.reviewers]
+    assert result["reviewer_profiles"] == [r["profile"] for r in service.reviewers]

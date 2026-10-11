@@ -3,8 +3,9 @@ from __future__ import annotations
 
 import hashlib
 from datetime import datetime, timezone
+from typing import Sequence
 
-from sqlalchemy import case, func
+from sqlalchemy import Text, case, cast, func, or_
 from sqlalchemy.orm import Session
 
 from app.models.voice_pool_publication import VoicePoolPublication
@@ -114,6 +115,23 @@ def create_voice_pool_publication(
     return publication
 
 
+def _normalize_filter_tags(values: Sequence[str] | None) -> list[str]:
+    return sorted(
+        {str(item or "").strip().lower() for item in (values or ()) if str(item or "").strip()}
+    )
+
+
+def _tags_match_any(column, tags: Sequence[str]):
+    """同一维度的多个选中标签取 OR：命中任一标签即展示。
+
+    标签列是 JSON 数组，跨 SQLite/PostgreSQL 唯一可移植的判定是把列转成文本后
+    做带引号的元素匹配；autoescape 保证枚举里的下划线不被当成 LIKE 通配符。
+    """
+    return or_(
+        *(cast(column, Text).contains(f'"{tag}"', autoescape=True) for tag in tags)
+    )
+
+
 def list_public_voice_pool(
     db: Session,
     *,
@@ -121,6 +139,9 @@ def list_public_voice_pool(
     age_impression: str | None = None,
     primary_style: str | None = None,
     language: str | None = None,
+    timbre_tags: Sequence[str] | None = None,
+    scenario_tags: Sequence[str] | None = None,
+    emotion_tags: Sequence[str] | None = None,
     limit: int | None = None,
     before_publication_id: str | None = None,
 ) -> list[VoicePoolPublication]:
@@ -137,6 +158,14 @@ def list_public_voice_pool(
     for column, value in filters.items():
         if value:
             query = query.filter(column == value)
+    tag_filters = {
+        VoicePoolPublication.timbre_tags: _normalize_filter_tags(timbre_tags),
+        VoicePoolPublication.scenario_tags: _normalize_filter_tags(scenario_tags),
+        VoicePoolPublication.emotion_tags: _normalize_filter_tags(emotion_tags),
+    }
+    for column, tags in tag_filters.items():
+        if tags:
+            query = query.filter(_tags_match_any(column, tags))
     if before_publication_id:
         cursor = (
             db.query(VoicePoolPublication.published_at, VoicePoolPublication.id)

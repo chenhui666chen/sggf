@@ -47,20 +47,20 @@ describe('ReviewMetaPanel', () => {
         reviewMeta={{
           multi_model: true,
           preset: 'deep_7',
-          chief_model: 'deepseek-v4-pro',
+          chief_model: 'deepseek-pro',
           chief_model_reused_as_reviewer: true,
-          reviewer_models: ['qwen3.7-plus', 'glm-5.2'],
+          reviewer_models: ['qwen-plus', 'glm'],
           reviewer_profiles: ['general_literary', 'long_context_consistency'],
           per_model_reports: [
             {
-              requested_model_id: 'deepseek-v4-pro',
-              resolved_model_id: 'deepseek-v4-flash',
+              requested_model_id: 'deepseek-pro',
+              resolved_model_id: 'deepseek-flash',
               profile: 'logic_continuity',
               status: 'success',
             },
           ],
         }}
-        reviewText={'### 一致意见\n- 节奏稳定 [source_models: qwen3.7-plus, glm-5.2]\n### 分歧意见\n无'}
+        reviewText={'### 一致意见\n- 节奏稳定 [source_models: qwen-plus, glm]\n### 分歧意见\n无'}
       />,
     )
 
@@ -68,21 +68,21 @@ describe('ReviewMetaPanel', () => {
 
     expect(text).toContain('多模型评审')
     expect(text).toContain('深度 7 评审')
-    expect(text).toContain('主审 deepseek-v4-pro')
+    expect(text).toContain('主审 deepseek-pro')
     expect(text).toContain('主审参与独立评审')
     expect(text).toContain('一致意见')
     expect(text).toContain('分歧意见')
-    expect(text).toContain('qwen3.7-plus')
-    expect(text).toContain('glm-5.2')
-    expect(text).toContain('deepseek-v4-pro -> deepseek-v4-flash')
+    expect(text).toContain('qwen-plus')
+    expect(text).toContain('glm')
+    expect(text).toContain('deepseek-pro -> deepseek-flash')
     expect(text).toContain('source_models')
   })
 
   it('extracts source_models from bracketed suggestions', () => {
-    expect(extractSourceModels('[source_models: qwen3.7-plus / glm-5.2，deepseek-v4-pro]')).toEqual([
-      'qwen3.7-plus',
-      'glm-5.2',
-      'deepseek-v4-pro',
+    expect(extractSourceModels('[source_models: qwen-plus / glm，deepseek-pro]')).toEqual([
+      'qwen-plus',
+      'glm',
+      'deepseek-pro',
     ])
   })
 

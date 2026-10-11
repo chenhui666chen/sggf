@@ -22,8 +22,8 @@ import io
 from dataclasses import dataclass
 from enum import Enum
 
-from ..constants import INSTRUCT_SPEAKER_IDS, normalize_speaker_id
 from ..tts_model_ids import (
+    DEFAULT_AUDIOBOOK_TTS_MODEL,
     get_audiobook_tts_model_price_per_10k,
     normalize_audiobook_tts_model,
 )
@@ -84,12 +84,6 @@ COSYVOICE_V3_PLUS_INSTRUCT_CHOICES = {
 # Windows/Linux 常见网络瞬断 errno（用于判定可重试）。
 _RETRYABLE_NETWORK_ERRNOS = {10053, 10054, 104, 110, 111}
 
-# Qwen3-TTS Instruct Flash：优先读取新的 deployment 配置，并兼容历史环境变量。
-QWEN3_TTS_INSTRUCT_FLASH_MODEL_ID = (
-    os.getenv("QWEN3_TTS_INSTRUCT_FLASH_MODEL_ID")
-    or os.getenv("QWEN3_TTS_FLASH_MODEL_ID")
-    or "qwen3-tts-instruct-flash"
-)
 
 # 导入监控模块
 try:
@@ -187,7 +181,7 @@ class TTSEngineBase:
         self,
         enable_cache: bool = True,
         max_concurrent: int = 2,  # 提升到2个并发（低于3 RPS限制）
-        model: str = "qwen3-tts-instruct-flash",  # 默认 Qwen Instruct Flash，兼顾成本与指令控制
+        model: str = DEFAULT_AUDIOBOOK_TTS_MODEL,  # 默认 Qwen-Audio 3.1 TTS Flash，兼顾成本与指令控制
         request_delay: float = 0.5,  # 优化为0.5秒（2 RPS，安全范围内）
         primary_provider: TTSProvider = TTSProvider.ALIYUN,  # 主提供商
         fallback_providers: Optional[List[TTSProvider]] = None,  # 备用提供商列表

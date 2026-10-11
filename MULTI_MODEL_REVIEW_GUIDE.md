@@ -14,7 +14,7 @@
 
 - 入口：`backend/app/services/agents/agent_coordinator.py` 的 `_stage_four_quality_review`（[L1234-L1281](backend/app/services/agents/agent_coordinator.py)）
 - Agent：`QualityReviewerAgent`（task_type=`"review"`），阶段5 复评用的 `FinalReviewerAgent` 同样解析到 `review`
-- 模型路由：`config/llm_models.yaml` 中 `review / quality_review / final_review` 全部 priority=1 命中 `deepseek-v4-pro`
+- 模型路由：`config/llm_models.yaml` 中 `review / quality_review / final_review` 全部 priority=1 命中 `deepseek-pro`
 - 多视角通过单一 prompt 内的 6 维度实现（爽点/节奏/钩子/代入感/文笔/内容一致性），按题材做权重差异化
 
 单模型评审存在视角单一、个体幻觉、风格偏好极端等问题。
@@ -62,24 +62,24 @@
 
 | 模型 | 推荐评审角色 | 主要价值 | 使用约束 |
 |---|---|---|---|
-| `qwen3.7-plus` | 综合文学/读者体验评审 | 写作、中文、长上下文、低成本、低延迟均衡 | 默认核心评审官 |
-| `deepseek-v4-pro` | 逻辑结构评审 / 主审裁决 | 推理、逻辑审校、结构裁决最强 | 延迟高，更适合重点评审或主审 |
+| `qwen-plus` | 综合文学/读者体验评审 | 写作、中文、长上下文、低成本、低延迟均衡 | 默认核心评审官 |
+| `deepseek-pro` | 逻辑结构评审 / 主审裁决 | 推理、逻辑审校、结构裁决最强 | 延迟高，更适合重点评审或主审 |
 | `doubao-seed-character` | 角色/对白/情绪评审 | 角色扮演、对话口吻、情感递进突出 | 不单独承担逻辑裁决；128K 输入窗口，必须按模型预算裁剪评审 prompt |
-| `glm-5.2` | 长程一致性评审 | 1M 上下文、推理、结构化输出强 | 适合重点章节补充 |
-| `step-3.7-flash` | 快速读者扫描/节奏评审 | 低延迟，适合检查阅读阻塞、钩子和爽点 | 不作为深度终审 |
-| `kimi/kimi-k2.6` | 叙事流/文气评审 | 中文写作、长文理解、叙事自然度较好 | 深度人工评审启用 |
-| `mimo-v2.5-pro` | 指令遵循/目标达成评审 | 长程规划、指令遵循、复杂裁决强 | 成本未知时不默认开启 |
-| `mimo-v2.5` | 快速长上下文/多模态辅助评审 | 1M 上下文、速度好、全模态 | 与 pro 版同时启用时需去重 |
+| `glm` | 长程一致性评审 | 1M 上下文、推理、结构化输出强 | 适合重点章节补充 |
+| `step-preview` | 快速读者扫描/节奏评审 | 低延迟（`reasoning_effort=low`），适合检查阅读阻塞、钩子和爽点 | 不作为深度终审；定价显著高于原 flash 档 |
+| `kimi-preview` | 叙事流/文气评审 | 中文写作、长文理解、叙事自然度较好；1M 上下文 | 深度人工评审启用；思考不可关闭 |
+| `mimo-pro` | 指令遵循/目标达成评审 | 长程规划、指令遵循、复杂裁决强 | 成本未知时不默认开启 |
+| `mimo-flash` | 快速长上下文/多模态辅助评审 | 1M 上下文、速度好、全模态 | 与 pro 版同时启用时需去重 |
 | `doubao-seed-evolving` | 复杂目标复核/高级复审 | reasoning、agent、中文强 | 成本较高，人工深度评审优先 |
-| `deepseek-v4-flash` | 快速逻辑扫描/低成本补充 | 快、便宜、长上下文 | 可作为 `step-3.7-flash` 的备选 |
+| `deepseek-flash` | 快速逻辑扫描/低成本补充 | 快、便宜、长上下文 | 可作为 `step-preview` 的备选 |
 
 推荐预设：
 
 | 预设 | 独立评审官 | 主审 | 适用场景 |
 |---|---|---|---|
-| `balanced_3` | `qwen3.7-plus`（综合）/ `deepseek-v4-pro`（逻辑）/ `doubao-seed-character`（角色） | `mimo-v2.5-pro` 或 `deepseek-v4-pro` | 用户手动增强评审 |
-| `key_chapter_5` | `balanced_3` + `glm-5.2`（长程一致性）/ `step-3.7-flash`（节奏钩子） | `deepseek-v4-pro` | 第一章、卷首、高潮、完结章 |
-| `deep_7` | `qwen3.7-plus` / `doubao-seed-character` / `glm-5.2` / `step-3.7-flash` / `kimi/kimi-k2.6` / `mimo-v2.5` / `doubao-seed-evolving` | `deepseek-v4-pro` | 人工触发的深度评审 |
+| `balanced_3` | `qwen-plus`（综合）/ `deepseek-pro`（逻辑）/ `doubao-seed-character`（角色） | `mimo-pro` 或 `deepseek-pro` | 用户手动增强评审 |
+| `key_chapter_5` | `balanced_3` + `glm`（长程一致性）/ `step-preview`（节奏钩子） | `deepseek-pro` | 第一章、卷首、高潮、完结章 |
+| `deep_7` | `qwen-plus` / `doubao-seed-character` / `glm` / `step-preview` / `kimi-preview` / `mimo-flash` / `doubao-seed-evolving` | `deepseek-pro` | 人工触发的深度评审 |
 
 数量上限：产品默认最高 7 个独立评审官。9 个及以上只用于内部模型评测，不作为日常用户功能。
 
@@ -105,7 +105,7 @@ MULTI_MODEL_REVIEW_DEFAULT_PRESET: str = "balanced_3"
 # 面向产品功能开放的独立评审官上限；更大数量仅用于内部评测
 MULTI_MODEL_REVIEW_MAX_REVIEWERS: int = 7
 # 主审默认模型。主审尽量不参与独立评审，只做交叉比对与裁决
-MULTI_MODEL_REVIEW_CHIEF_MODEL: str = "deepseek-v4-pro"
+MULTI_MODEL_REVIEW_CHIEF_MODEL: str = "deepseek-pro"
 # 其他非 1M 模型的默认评审正文预算
 MULTI_MODEL_REVIEW_DEFAULT_PROMPT_BUDGET: int = 80_000
 # 章节规划输入预算，避免规划文本挤占章节正文的模型上下文
@@ -152,7 +152,7 @@ class Project(Base):
       "key": "key_chapter_5",
       "finale": "deep_7"
     },
-    "chief_model": "deepseek-v4-pro",
+    "chief_model": "deepseek-pro",
     "custom_panel": null
   }
 }
@@ -168,7 +168,7 @@ class Project(Base):
 | `auto_strategy.key` | 重点章节自动评审强度 | `null` / `balanced_3` / `key_chapter_5` / `deep_7` |
 | `auto_strategy.finale` | 完结章节自动评审强度 | `null` / `balanced_3` / `key_chapter_5` / `deep_7` |
 | `preset` / `auto_scenarios` / `manual_depth` / `key_chapter_depth` | 旧配置兼容字段 | 新 UI 不再暴露 |
-| `chief_model` | 主审模型 | 默认 `deepseek-v4-pro` |
+| `chief_model` | 主审模型 | 默认 `deepseek-pro` |
 | `custom_panel` | 高级用户自定义评审委员会 | `null` 或 profile/model 映射 |
 
 `custom_panel` 仅作为高级扩展，不作为第一版默认 UI。示例：
@@ -176,11 +176,11 @@ class Project(Base):
 ```json
 {
   "reviewers": [
-    {"profile": "general_literary", "model": "qwen3.7-plus"},
-    {"profile": "logic_continuity", "model": "glm-5.2"},
+    {"profile": "general_literary", "model": "qwen-plus"},
+    {"profile": "logic_continuity", "model": "glm"},
     {"profile": "character_emotion", "model": "doubao-seed-character"}
   ],
-  "chief_model": "deepseek-v4-pro"
+  "chief_model": "deepseek-pro"
 }
 ```
 
@@ -329,24 +329,24 @@ MAX_SINGLE_REPORT_TOKENS = 6_000
 
 REVIEWER_PANEL_PRESETS: Dict[str, List[Dict[str, str]]] = {
     "balanced_3": [
-        {"profile": "general_literary", "model": "qwen3.7-plus"},
-        {"profile": "logic_continuity", "model": "deepseek-v4-pro"},
+        {"profile": "general_literary", "model": "qwen-plus"},
+        {"profile": "logic_continuity", "model": "deepseek-pro"},
         {"profile": "character_emotion", "model": "doubao-seed-character"},
     ],
     "key_chapter_5": [
-        {"profile": "general_literary", "model": "qwen3.7-plus"},
-        {"profile": "logic_continuity", "model": "deepseek-v4-pro"},
+        {"profile": "general_literary", "model": "qwen-plus"},
+        {"profile": "logic_continuity", "model": "deepseek-pro"},
         {"profile": "character_emotion", "model": "doubao-seed-character"},
-        {"profile": "long_context_consistency", "model": "glm-5.2"},
-        {"profile": "rhythm_hook", "model": "step-3.7-flash"},
+        {"profile": "long_context_consistency", "model": "glm"},
+        {"profile": "rhythm_hook", "model": "step-preview"},
     ],
     "deep_7": [
-        {"profile": "general_literary", "model": "qwen3.7-plus"},
+        {"profile": "general_literary", "model": "qwen-plus"},
         {"profile": "character_emotion", "model": "doubao-seed-character"},
-        {"profile": "long_context_consistency", "model": "glm-5.2"},
-        {"profile": "rhythm_hook", "model": "step-3.7-flash"},
-        {"profile": "narrative_flow", "model": "kimi/kimi-k2.6"},
-        {"profile": "contextual_reader", "model": "mimo-v2.5"},
+        {"profile": "long_context_consistency", "model": "glm"},
+        {"profile": "rhythm_hook", "model": "step-preview"},
+        {"profile": "narrative_flow", "model": "kimi-preview"},
+        {"profile": "contextual_reader", "model": "mimo-flash"},
         {"profile": "goal_alignment", "model": "doubao-seed-evolving"},
     ],
 }
@@ -761,7 +761,7 @@ class ReviewAutoStrategy(BaseModel):
 class MultiModelReviewConfig(BaseModel):
     enabled: bool = False
     auto_strategy: ReviewAutoStrategy = Field(default_factory=ReviewAutoStrategy)
-    chief_model: str = "deepseek-v4-pro"
+    chief_model: str = "deepseek-pro"
     custom_panel: Optional[Dict[str, Any]] = None
 
 
@@ -790,7 +790,7 @@ class ReviewConfigResponse(BaseModel):
 
 保守做法：
 
-- 保持 `deepseek-v4-pro` 继续作为现有 `review / quality_review / final_review` 默认模型。
+- 保持 `deepseek-pro` 继续作为现有 `review / quality_review / final_review` 默认模型。
 - 新增后端 allowlist，限制多模型评审可选模型，不改变全局 review 路由。
 - 只有当模型选择器或管理后台需要按 `task_type=review` 过滤候选时，再给候选模型补充 `review_candidate` 或专用标签，避免影响原单模型评审路由。
 
@@ -798,16 +798,16 @@ class ReviewConfigResponse(BaseModel):
 
 ```python
 MULTI_MODEL_REVIEW_ALLOWED_MODELS = {
-    "qwen3.7-plus",
-    "deepseek-v4-pro",
+    "qwen-plus",
+    "deepseek-pro",
     "doubao-seed-character",
-    "glm-5.2",
-    "step-3.7-flash",
-    "kimi/kimi-k2.6",
-    "mimo-v2.5",
-    "mimo-v2.5-pro",
+    "glm",
+    "step-preview",
+    "kimi-preview",
+    "mimo-flash",
+    "mimo-pro",
     "doubao-seed-evolving",
-    "deepseek-v4-flash",
+    "deepseek-flash",
 }
 ```
 
@@ -821,7 +821,7 @@ MULTI_MODEL_REVIEW_CONCURRENCY=5
 MULTI_MODEL_REVIEW_TIMEOUT_SECONDS=120
 MULTI_MODEL_REVIEW_DEFAULT_PRESET=balanced_3
 MULTI_MODEL_REVIEW_MAX_REVIEWERS=7
-MULTI_MODEL_REVIEW_CHIEF_MODEL=deepseek-v4-pro
+MULTI_MODEL_REVIEW_CHIEF_MODEL=deepseek-pro
 # 豆包 Seed Character 是 128K 输入窗口；评审正文预算需给 system/profile/输出格式留余量
 DOUBAO_REVIEW_PROMPT_BUDGET=64000
 # 其他非 1M 模型的默认评审正文预算
@@ -885,7 +885,7 @@ from app.services.agents.multi_model_review_service import MultiModelReviewServi
 @pytest.mark.asyncio
 async def test_multi_model_review_balanced_3_success():
     """balanced_3 三个评审官全部成功，主审汇总输出结构化报告"""
-    service = MultiModelReviewService(preset="balanced_3", chief_model="deepseek-v4-pro")
+    service = MultiModelReviewService(preset="balanced_3", chief_model="deepseek-pro")
     with patch.object(service, "_review_with_reviewer", new=AsyncMock(side_effect=[
         "评审报告A：综合评分8分...", "评审报告B：综合评分7分...", "评审报告C：综合评分9分..."
     ])), patch.object(service, "_summarize", new=AsyncMock(return_value="汇总报告")):
@@ -899,7 +899,7 @@ async def test_multi_model_review_balanced_3_success():
 @pytest.mark.asyncio
 async def test_multi_model_review_key_chapter_5_success():
     """key_chapter_5 使用五个独立评审官。"""
-    service = MultiModelReviewService(preset="key_chapter_5", chief_model="deepseek-v4-pro")
+    service = MultiModelReviewService(preset="key_chapter_5", chief_model="deepseek-pro")
     with patch.object(service, "_review_with_reviewer", new=AsyncMock(side_effect=[
         "A", "B", "C", "D", "E"
     ])), patch.object(service, "_summarize", new=AsyncMock(return_value="汇总报告")):
@@ -911,7 +911,7 @@ async def test_multi_model_review_key_chapter_5_success():
 @pytest.mark.asyncio
 async def test_multi_model_review_requires_single_model_fallback_when_all_fail():
     """全部失败时不返回占位报告，而是要求入口层真实回退单模型。"""
-    service = MultiModelReviewService(preset="balanced_3", chief_model="deepseek-v4-pro")
+    service = MultiModelReviewService(preset="balanced_3", chief_model="deepseek-pro")
     with patch.object(service, "_review_with_reviewer", new=AsyncMock(side_effect=Exception("timeout"))):
         result = await service.review("章节内容")
     assert result["multi_model"] is False
@@ -996,7 +996,7 @@ def test_feature_gate_uses_project_toggle():
 | 评审数量 | 3 / 5 / 7 三档 | 保持互补性，控制边际成本 |
 | profile 语义 | 全维度评审 + 重点加权 | 避免把完整评审机械拆分 |
 | 失败处理 | 成功数 <2 回退单模型 | 保证评审不中断 |
-| 主审模型 | 默认 `deepseek-v4-pro`，尽量不参与独立评审 | 已是 reasoning 模型，适合裁决；避免评审与裁决职责混同 |
+| 主审模型 | 默认 `deepseek-pro`，尽量不参与独立评审 | 已是 reasoning 模型，适合裁决；避免评审与裁决职责混同 |
 | 责任追溯 | 每条意见标注 source_models | 解决多 Agent 责任边界模糊 |
 
 ---

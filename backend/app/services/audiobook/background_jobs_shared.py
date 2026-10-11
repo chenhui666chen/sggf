@@ -1020,11 +1020,6 @@ def merge_workbench_segment_audio_into_checkpoint(
         is_persistent_segment_asset_ref,
         persistent_segment_audio_exists,
     )
-    from app.services.audiobook.engine_pkg._tts_mixin import (
-        QWEN_RENDER_CHUNK_MAX_CHARS,
-        _is_qwen_tts_model,
-        _item_tts_model,
-    )
     from app.services.audiobook.render_plan import (
         build_render_plan,
         render_plan_to_payload,
@@ -1039,12 +1034,7 @@ def merge_workbench_segment_audio_into_checkpoint(
     normalized_segments = [
         _normalize_segment_for_render_plan(segment) for segment in raw_segments
     ]
-    segment_models = [_item_tts_model(item) for item in normalized_segments]
-    has_qwen_model = _is_qwen_tts_model(default_tts_model) or any(
-        _is_qwen_tts_model(model) for model in segment_models if model
-    )
-    max_chunk_chars = QWEN_RENDER_CHUNK_MAX_CHARS if has_qwen_model else None
-    render_chunks = build_render_plan(normalized_segments, max_chunk_chars=max_chunk_chars)
+    render_chunks = build_render_plan(normalized_segments)
     if not render_chunks:
         return base_checkpoint
 

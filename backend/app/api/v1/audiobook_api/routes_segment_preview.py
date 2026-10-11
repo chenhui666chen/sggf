@@ -21,6 +21,7 @@ from app.services.audiobook.segment_synthesis_contract import (
     sanitize_segment_override,
 )
 from app.services.audiobook.tts_delivery_plan import resolve_segment_tts_model
+from app.services.audiobook.voice_manager import VoiceMappingResolutionError
 from core.unified_media_runtime import synthesize_speech as runtime_synthesize_speech
 
 from app.api.v1.audiobook_api import router
@@ -78,12 +79,20 @@ async def preview_script_segment_audio(
             tts_model=tts_model,
             base_voice_mapping=audiobook_project.voice_mapping or {},
         )
-    preview_service = SegmentPreviewService(
-        tts_model=tts_model,
-        voice_mapping=runtime_config.voice_mapping,
-        audio_fx=runtime_config.audio_fx,
-        synthesize_speech=runtime_synthesize_speech,
-    )
+    try:
+        preview_service = SegmentPreviewService(
+            tts_model=tts_model,
+            voice_mapping=runtime_config.voice_mapping,
+            audio_fx=runtime_config.audio_fx,
+            synthesize_speech=runtime_synthesize_speech,
+        )
+    except VoiceMappingResolutionError as exc:
+        # 角色音越界是配置错误：按 400 回给用户可改的字符与音色名，
+        # 不返回 500，也不换条声线继续出声（人耳是最终真值）。
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
 
     voice_id = str(
         segment_voice_params.get("speaker")

@@ -67,6 +67,14 @@ export interface RunResult {
   audit?: Record<string, unknown>
   autoqc?: Record<string, unknown>
   qc_warning?: Record<string, unknown>
+  // AI Director OS 新字段（Phase 2/3）
+  shot_contracts?: unknown[]
+  am15_report?: Record<string, unknown> | null
+  script_document?: Record<string, unknown> | null
+  story_graph?: Record<string, unknown> | null
+  stage_handoffs?: unknown[]
+  cost_ledger?: Record<string, unknown> | null
+  synthesis_channels?: Record<string, unknown> | null
   preflight?: DreamweaverRunPreflight | null
   video_provider_trace?: DreamweaverVideoProviderTrace | null
   smart_dispatch_trace?: DreamweaverSmartDispatchTrace | null

@@ -572,7 +572,7 @@ def register_llm_model(
 
     使用示例:
         @register_llm_model(
-            model_id="qwen3.7-plus",
+            model_id="qwen-plus",
             name="Qwen3.7 Plus",
             provider="alibaba",
             capabilities=["creative", "dialogue", "reasoning"],

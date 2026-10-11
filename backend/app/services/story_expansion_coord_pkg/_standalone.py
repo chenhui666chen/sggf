@@ -535,7 +535,7 @@ def normalize_outline_text(text: str, characters_text: str = "") -> str:
         body_lines = [
             base_body_lines[0],
             base_body_lines[1],
-            f"- 鍏抽敭浜嬩欢锛歿key_events_text}",
+            f"- 关键事件：{key_events_text}",
             base_body_lines[2],
             base_body_lines[3],
             base_body_lines[4],

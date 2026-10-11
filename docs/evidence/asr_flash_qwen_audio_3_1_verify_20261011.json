@@ -1,0 +1,170 @@
+{
+  "verified_at": "2026-10-11",
+  "provider": "qwen_audio_asr_flash",
+  "model": "qwen-audio-3.1-asr-flash",
+  "endpoint": "https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation",
+  "audio_source": "backend/data/voice_profile_tagging/audio（音色画像试听缓存，preview_text 取自 shared/*_voice_profiles.json）",
+  "call_count": 3,
+  "findings": {
+    "transcript_similarity": [
+      1.0,
+      1.0,
+      1.0
+    ],
+    "subtitle_segments": [
+      1,
+      1,
+      2
+    ],
+    "last_segment_end_ms_vs_ffprobe_ms": [
+      [
+        1358,
+        1358
+      ],
+      [
+        2040,
+        2040
+      ],
+      [
+        2616,
+        2616
+      ]
+    ],
+    "usage_duration_is_rounded_seconds": [
+      [
+        1.358,
+        1
+      ],
+      [
+        2.04,
+        2
+      ],
+      [
+        2.616,
+        3
+      ]
+    ],
+    "input_tokens": [
+      74,
+      83,
+      90
+    ],
+    "output_tokens": [
+      4,
+      4,
+      9
+    ],
+    "actual_yuan_from_tokens_total": 0.0002435,
+    "derived_estimate_yuan_total": 0.00024056,
+    "estimate_over_actual_total": 0.988,
+    "latency_seconds": [
+      0.773,
+      0.638,
+      0.77
+    ]
+  },
+  "samples": [
+    {
+      "sidecar": "minimax_speech_2_8_voice_profiles.json",
+      "voice_id": "Chinese (Mandarin)_Gentle_Youth",
+      "tts_model": "minimax-speech-2.8-hd",
+      "preview_text": "他人即地狱。",
+      "audio_path": "C:\\Users\\cuigu\\novel_writing_agent\\backend\\data\\voice_profile_tagging\\audio\\803081bc8d2490ef518c3f548f557736b4e1845874fa35438c2423292a0d16c5.mp3",
+      "audio_bytes": 24756,
+      "duration_s": 1.358,
+      "elapsed_s": 0.773,
+      "provider": "qwen_audio_asr_flash",
+      "model": "qwen-audio-3.1-asr-flash",
+      "transcript": "他人即地狱。",
+      "similarity": 1.0,
+      "usage": {
+        "duration": 1,
+        "total_tokens": 78,
+        "output_tokens": 4,
+        "input_tokens": 74
+      },
+      "usage_duration": 1,
+      "input_tokens_per_second": 54.49,
+      "output_tokens_per_second": 2.95,
+      "actual_yuan_from_tokens": 7e-05,
+      "estimate_yuan_from_duration": 5.432e-05,
+      "estimate_over_actual": 0.776,
+      "subtitle_segment_count": 1,
+      "subtitle_first_segment": {
+        "text": "他人即地狱。",
+        "start_ms": 240,
+        "end_ms": 1358
+      },
+      "subtitle_last_end_ms": 1358,
+      "request_id": "b13051ce-ab9f-935e-a3c2-bb1d4769148c"
+    },
+    {
+      "sidecar": "seed_tts_2_0_voice_profiles.json",
+      "voice_id": "zh_male_fanjuanqingnian_uranus_bigtts",
+      "tts_model": "seed-tts-2.0-expressive",
+      "preview_text": "他人即地狱。",
+      "audio_path": "C:\\Users\\cuigu\\novel_writing_agent\\backend\\data\\voice_profile_tagging\\audio\\cae27b592b684a94dcbd5ef4b67e3db5c7856f479cba21dbbd07e0450b1211b9.mp3",
+      "audio_bytes": 16365,
+      "duration_s": 2.04,
+      "elapsed_s": 0.638,
+      "provider": "qwen_audio_asr_flash",
+      "model": "qwen-audio-3.1-asr-flash",
+      "transcript": "他人即地狱。",
+      "similarity": 1.0,
+      "usage": {
+        "duration": 2,
+        "total_tokens": 87,
+        "output_tokens": 4,
+        "input_tokens": 83
+      },
+      "usage_duration": 2,
+      "input_tokens_per_second": 40.69,
+      "output_tokens_per_second": 1.96,
+      "actual_yuan_from_tokens": 7.72e-05,
+      "estimate_yuan_from_duration": 8.16e-05,
+      "estimate_over_actual": 1.057,
+      "subtitle_segment_count": 1,
+      "subtitle_first_segment": {
+        "text": "他人即地狱。",
+        "start_ms": 480,
+        "end_ms": 2040
+      },
+      "subtitle_last_end_ms": 2040,
+      "request_id": "f0d02866-64cf-9edc-81ac-a1b0b1265543"
+    },
+    {
+      "sidecar": "stepaudio_3_tts_voice_profiles.json",
+      "voice_id": "wenjingxuejie",
+      "tts_model": "stepaudio-3-tts",
+      "preview_text": "人类一思考，上帝就发笑。",
+      "audio_path": "C:\\Users\\cuigu\\novel_writing_agent\\backend\\data\\voice_profile_tagging\\audio\\8072d5ee8529adff7a7ab3fa740dc05cdb36045f717cecea2d282b811f1e3157.mp3",
+      "audio_bytes": 43306,
+      "duration_s": 2.616,
+      "elapsed_s": 0.77,
+      "provider": "qwen_audio_asr_flash",
+      "model": "qwen-audio-3.1-asr-flash",
+      "transcript": "人类一思考，上帝就发笑。",
+      "similarity": 1.0,
+      "usage": {
+        "duration": 3,
+        "total_tokens": 99,
+        "output_tokens": 9,
+        "input_tokens": 90
+      },
+      "usage_duration": 3,
+      "input_tokens_per_second": 34.4,
+      "output_tokens_per_second": 3.44,
+      "actual_yuan_from_tokens": 9.63e-05,
+      "estimate_yuan_from_duration": 0.00010464,
+      "estimate_over_actual": 1.087,
+      "subtitle_segment_count": 2,
+      "subtitle_first_segment": {
+        "text": "人类一思考，",
+        "start_ms": 240,
+        "end_ms": 1480
+      },
+      "subtitle_last_end_ms": 2616,
+      "request_id": "ed9c4f37-c886-9e8f-9654-6410bf030384"
+    }
+  ]
+}

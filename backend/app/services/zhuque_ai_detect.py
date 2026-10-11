@@ -90,13 +90,24 @@ class ZhuqueAIDetectService:
             })
 
         # ai_score 对齐项目 0-100 语义：整体疑似 AI 占比（ratio_confidence）× 100
+        #
+        # ⚠️ 实测口径（2026-10-08 真实网关探索）：ai_score ≈ (labels_ratio["1"] + labels_ratio["2"]) × 100
+        #    即 ai_score = 100 − 人工占比。它只在出现「人工」段落时才下降，
+        #    完全不区分「确定AI(1)」与「疑似AI(2)」——而 LLM 改写的真实进步正是 AI→疑似，
+        #    这段进步 ai_score 恒为 100、毫无分辨力。故三分类占比必须作为一等字段暴露，
+        #    优化目标应取 ai_ratio（越低越好），而非 ai_score。
+        labels_ratio = result.get("labels_ratio", {}) or {}
         ratio_confidence = float(result.get("ratio_confidence", 0.0))
         return {
             "success": True,
             "provider": self.PROVIDER,
             "ai_score": round(ratio_confidence * 100),
+            # 三分类段落占比（0-1）：优化目标取 ai_ratio，human_ratio 为终极目标但 LLM 难达
+            "human_ratio": float(labels_ratio.get("0", 0.0)),
+            "ai_ratio": float(labels_ratio.get("1", 0.0)),
+            "suspect_ratio": float(labels_ratio.get("2", 0.0)),
             "softmax_confidence": result.get("softmax_confidence", 0.0),
-            "labels_ratio": result.get("labels_ratio", {}),
+            "labels_ratio": labels_ratio,
             "segment_labels": segment_labels,
             "raw_response": result,
         }

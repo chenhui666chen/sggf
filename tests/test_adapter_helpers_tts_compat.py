@@ -15,7 +15,7 @@ def test_synthesize_speech_sync_returns_base64_audio_and_timestamps(
     captured: dict[str, object] = {}
 
     class FakeEngine:
-        model = "qwen3-tts-instruct-flash"
+        model = "qwen-audio-3.1-tts-flash"
 
         async def synthesize_with_metadata(self, text, voice_params, emotion):
             captured["text"] = text
@@ -39,11 +39,11 @@ def test_synthesize_speech_sync_returns_base64_audio_and_timestamps(
         text="hello",
         voice_params={"speaker": "longxiaochun"},
         emotion="happy",
-        model_id="qwen3_tts",
+        model_id="qwen-audio-3.1-tts-flash",
     )
 
     assert result.success is True
-    assert result.model_id == "qwen3-tts-instruct-flash"
+    assert result.model_id == "qwen-audio-3.1-tts-flash"
     assert result.binary == b"RIFF-demo"
     assert result.data["audio_data"] == base64.b64encode(b"RIFF-demo").decode("utf-8")
     assert result.data["tts_timestamps"] == [{"text": "hello", "start": 0, "end": 120}]
@@ -51,10 +51,10 @@ def test_synthesize_speech_sync_returns_base64_audio_and_timestamps(
     assert captured["text"] == "hello"
     assert captured["voice_params"] == {"speaker": "longxiaochun"}
     assert captured["emotion"] == "happy"
-    assert captured["create_kwargs"] == {"model_id": "qwen3_tts"}
+    assert captured["create_kwargs"] == {"model_id": "qwen-audio-3.1-tts-flash"}
 
 
-def test_simple_adapter_qwen3_tts_maps_legacy_parameters(
+def test_simple_adapter_qwen_audio_31_tts_maps_legacy_parameters(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from adapters import adapter_helpers
@@ -78,7 +78,7 @@ def test_simple_adapter_qwen3_tts_maps_legacy_parameters(
 
     monkeypatch.setattr(adapter_helpers, "synthesize_speech_sync", fake_synthesize_speech_sync)
 
-    adapter = adapter_helpers.SimpleAdapterFactory().get_adapter("qwen3_tts")
+    adapter = adapter_helpers.SimpleAdapterFactory().get_adapter("qwen_audio_3_1_tts")
     result = adapter.generate(
         text="hello",
         voice_style="humorous",
@@ -93,7 +93,7 @@ def test_simple_adapter_qwen3_tts_maps_legacy_parameters(
     assert result.data["audio_data"] == "ZmFrZQ=="
     assert captured["text"] == "hello"
     assert captured["emotion"] == "happy"
-    assert captured["model_id"] == "qwen3_tts"
+    assert captured["model_id"] == "qwen_audio_3_1_tts"
     assert captured["voice_params"]["speaker"] == "longxiaochun"
     assert captured["voice_params"]["character_id"] == "char-1"
     assert captured["voice_params"]["rate"] == 1.2
@@ -102,11 +102,11 @@ def test_simple_adapter_qwen3_tts_maps_legacy_parameters(
     assert captured["voice_params"]["volume"] == 40
 
 
-def test_qwen3_tts_adapter_delegates_to_sync_helper(
+def test_qwen_audio_31_tts_adapter_delegates_to_sync_helper(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from adapters import adapter_helpers
-    from adapters.model_adapters import ModelConfig, Qwen3TTSAdapter
+    from adapters.model_adapters import ModelConfig, QwenAudio31TTSAdapter
 
     captured: dict[str, object] = {}
 
@@ -126,17 +126,17 @@ def test_qwen3_tts_adapter_delegates_to_sync_helper(
                 "metadata": {"source": "runtime"},
                 "cost": 1.25,
                 "message": "",
-                "model_id": "qwen3-tts-instruct-flash",
+                "model_id": "qwen-audio-3.1-tts-flash",
             },
         )()
 
     monkeypatch.setattr(adapter_helpers, "synthesize_speech_sync", fake_synthesize_speech_sync)
 
-    adapter = Qwen3TTSAdapter(
+    adapter = QwenAudio31TTSAdapter(
         ModelConfig(
             api_key="",
             base_url="",
-            model_name="qwen3_tts",
+            model_name="qwen_audio_3_1_tts",
         )
     )
     result = adapter.generate(
@@ -154,11 +154,11 @@ def test_qwen3_tts_adapter_delegates_to_sync_helper(
     assert result.data["tts_timestamps"] == [{"text": "hi", "start": 0, "end": 80}]
     assert result.cost == 1.25
     assert result.metadata["source"] == "runtime"
-    assert result.metadata["model"] == "qwen3-tts-instruct-flash"
+    assert result.metadata["model"] == "qwen-audio-3.1-tts-flash"
     assert captured["text"] == "hi"
     assert captured["emotion"] == "happy"
-    assert captured["model_id"] == "qwen3_tts"
-    assert captured["voice_params"]["speaker"] == "Jennifer"
+    assert captured["model_id"] == "qwen_audio_3_1_tts"
+    assert captured["voice_params"]["speaker"] == "longxiaochun"
     assert captured["voice_params"]["character_id"] == "char-1"
     assert captured["voice_params"]["rate"] == 1.3
     assert captured["voice_params"]["pitch"] == 1.1
@@ -249,7 +249,7 @@ def test_simple_adapter_factory_delegates_qwen_multiperson_match_scene_to_runtim
     assert result.data["image_url"] == "https://example.com/fused.png"
 
 
-def test_legacy_bridge_qwen3_tts_prefers_runtime_wrapper(
+def test_legacy_bridge_qwen_audio_31_tts_prefers_runtime_wrapper(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from adapters import legacy_bridge
@@ -263,8 +263,59 @@ def test_legacy_bridge_qwen3_tts_prefers_runtime_wrapper(
     monkeypatch.setattr(legacy_bridge.ModelAdapterFactory, "_instances", {})
 
     wrapper = legacy_bridge.ModelAdapterFactory.create(
-        "qwen3_tts",
-        model_name="qwen3-tts-instruct-flash",
+        "qwen_audio_3_1_tts",
+        model_name="qwen-audio-3.1-tts-flash",
     )
 
     assert wrapper is fake_wrapper
+
+
+def test_build_legacy_tts_request_keeps_speaker_empty_when_no_voice_provided() -> None:
+    """未指定声线时不要兜底成已退役模型的音色名。
+
+    历史默认 "Ryan" 只存在于 Qwen3-TTS 的音色空间，3.1 目录里没有这条声线：
+    兜底它会把一个必然被上游拒绝的 voice 发出去，报错点还离真正的参数很远。
+    留空才符合现役链路的分工——由各模型自己的默认声线接管，
+    没有默认声线的模型（cosyvoice-v3.5-plus 只接受复刻/设计音色）会显式拒单。
+    """
+    from adapters.adapter_helpers import build_legacy_tts_request
+
+    request = build_legacy_tts_request(text="你好")
+
+    assert request["voice_params"]["speaker"] == ""
+    assert request["text"] == "你好"
+
+
+def test_qwen_audio_31_tts_adapter_without_voice_leaves_default_to_engine(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from adapters import adapter_helpers
+    from adapters.model_adapters import ModelConfig, QwenAudio31TTSAdapter
+
+    captured: dict[str, object] = {}
+
+    def fake_synthesize_speech_sync(**kwargs):
+        captured.update(kwargs)
+        return type(
+            "Result",
+            (),
+            {
+                "success": True,
+                "data": {"audio_data": "ZmFrZQ==", "format": "mp3"},
+                "error": None,
+                "metadata": {},
+                "cost": 0.0,
+                "message": "",
+                "model_id": "qwen-audio-3.1-tts-flash",
+            },
+        )()
+
+    monkeypatch.setattr(adapter_helpers, "synthesize_speech_sync", fake_synthesize_speech_sync)
+
+    adapter = QwenAudio31TTSAdapter(
+        ModelConfig(api_key="", base_url="", model_name="qwen-audio-3.1-tts-flash")
+    )
+    result = adapter.generate(text="你好")
+
+    assert result.success is True
+    assert captured["voice_params"]["speaker"] == ""

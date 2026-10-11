@@ -88,7 +88,7 @@ def run(ctx: Any) -> None:
         "DREAMWEAVER_PLANNER_REQUIRE_LLM", default=False
     )
 
-    model = pick_model(primary_env="DREAMWEAVER_PLANNER_MODEL", fallback_env="DREAMWEAVER_SCRIPT_MODEL", default="qwen3.7-plus")
+    model = pick_model(primary_env="DREAMWEAVER_PLANNER_MODEL", fallback_env="DREAMWEAVER_SCRIPT_MODEL", default="qwen-plus")
     llm_runtime = resolve_llm_runtime_config(model)
     api_key = llm_runtime.api_key
     base_url = llm_runtime.base_url

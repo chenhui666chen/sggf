@@ -1,0 +1,478 @@
+{
+  "_type": "domain",
+  "domain": "image_generation",
+  "unit_count": 15,
+  "units": {
+    "asset_generation_formula": {
+      "content": "Asset Image = 身份DNA(Visual+Wardrobe) × 风格/媒介 × 命名区域构图 × 色板(hex) × 光源 × 材质 × mood × 完成度(finish) × 限制(IP/一致性)",
+      "source_project": "SSOT image_generation 板块"
+    },
+    "six_element_skeleton": {
+      "content": [
+        "subject 主体：谁/什么（带材质、纹理、细节）",
+        "action 动作/姿势",
+        "setting 场景/环境",
+        "composition 构图（命名区域、机位、景别）",
+        "lighting 光源（真实来源、方向、光质）",
+        "style 风格/媒介（写实/水彩/矢量/3D渲染）"
+      ],
+      "source_project": "SSOT image_generation 板块"
+    },
+    "golden_rules": {
+      "content": [
+        "Natural language over tag soup：像给人类美术师下 brief，而不是堆关键词。",
+        "Specificity：用材质、纹理、细节定义主体，而不是'一个女孩'。",
+        "Purpose context：说明用途与观众，帮助模型推断专业灯光、构图与氛围。",
+        "Edit don't re-roll：大部分正确时用对话式修改，而不是重新生成。"
+      ],
+      "source_project": "SSOT image_generation 板块"
+    },
+    "anti_patterns": {
+      "content": [
+        "keyword soup 关键词堆砌：dog, park, sunset, 4k, realistic, cinematic",
+        "negation 否定词：模型倾向忽略'不要XX'，应写正面目标",
+        "over-stuffed 过度塞料：一条 prompt 塞 10 个主体/风格",
+        "named-font chasing 追字体名：无中生有字体名",
+        "AI-tell：软水彩渐变、过度干净矢量线、光泽3D——写入 AVOID 并偏好扁平色+真实纹理"
+      ],
+      "source_project": "SSOT image_generation 板块"
+    },
+    "preserve_list_protocol": {
+      "content": {
+        "principle": "编辑而非重roll：每次迭代列出'保持不变项(PRESERVE)'与'变更项(CHANGE)'，重复不变项，防止脸/服装/风格漂移。",
+        "workflow": [
+          "1. 初始生成参考资产。",
+          "2. 用户反馈→列出 PRESERVE（脸/服装/光源方向）与 CHANGE（背景/表情）。",
+          "3. 新 prompt：明确'除以下变更外其余保持不变'+重复 PRESERVE 项。",
+          "4. 每次编辑生成新版本并纳入 Asset Graph 版本历史。",
+          "5. 达标后 LOCK 为 asset_version，普通 Agent 不能覆盖。"
+        ],
+        "qc": [
+          "PRESERVE 项在结果中是否保持不变？",
+          "CHANGE 项是否按预期改变？",
+          "是否生成新版本而非覆盖旧版？",
+          "是否写入 Asset Graph 并锁定？"
+        ]
+      },
+      "source_project": "SSOT image_generation 板块"
+    },
+    "style_presets": {
+      "content": {
+        "principle": "风格预设=只存风格层（MEDIUM/色板/线条/构图节奏/AVOID），不存主体内容；可保存/复用/分享。",
+        "fields": [
+          "MEDIUM",
+          "BACKGROUND",
+          "PALETTE",
+          "LINE",
+          "FONTS",
+          "MOTIFS",
+          "COMPOSITION",
+          "MOOD",
+          "FINISH",
+          "AVOID",
+          "CONSTRAINTS"
+        ],
+        "asset_role": "作为 Asset Graph 中的 Location/Style 风格资产节点，全剧视觉风格锁定，跨集复用。"
+      },
+      "source_project": "SSOT image_generation 板块"
+    },
+    "image_models": {
+      "content": [
+        {
+          "family": "Seedream（字节/即梦）",
+          "video_family": "Seedance",
+          "version": "5.0 Pro / 5.0 Lite",
+          "verified": "2026-08-17",
+          "confidence": "Official confirmed",
+          "task": "文生图/图生图/交互式编辑/信息图与海报",
+          "best": "交互式精准编辑（点选/圈选/草图/图层分离/换色换材质/多图融合）、复杂信息可视化、原生多语种、人像质感",
+          "params": "图层分离导出透明资产；多图融合；10+ 语言原生",
+          "risks": "编辑任务需显式锁定不变区；复杂指令仍要结构化",
+          "adapter": "Asset Brief + PRESERVE 列表；编辑用 Mark/Region 标注不变区",
+          "editing": "原生编辑：交互式精准编辑（指哪改哪）"
+        },
+        {
+          "family": "可灵图片（快手 Kling Image）",
+          "video_family": "Kling",
+          "version": "3.0 / 3.0 Omni",
+          "verified": "2026-08-17",
+          "confidence": "Official confirmed",
+          "task": "角色定妆/影视分镜/场景设定/组图",
+          "best": "2K/4K 直出、系列组图风格统一、人像写实、自由编辑（多参考图融合、风格转绘、元素增删改）、影视级光影重构",
+          "params": "最多 10 张参考图；2K/4K 输出；组图生成；Image O3 多引用标签(@)",
+          "risks": "组图一致性依赖参考图质量；复杂多主体仍需显式角色锚定",
+          "adapter": "Character Reference 模板 + 多参考图融合；编辑用多参考图融合元素增删改",
+          "editing": "原生编辑：自由编辑（无需切换功能，直接元素增删改）"
+        },
+        {
+          "family": "qwen-image（阿里，最强·最新）",
+          "video_family": "Wan / HappyHorse（阿里体系共用）",
+          "version": "3.0-pro / 3.0",
+          "verified": "2026-08-17",
+          "confidence": "Official confirmed",
+          "task": "复杂布局/长文本海报/写实人像/UI/PPT/插画 + 阿里体系资产生成（含 HappyHorse 图片侧）",
+          "best": "同一 model ID 生成+编辑、负向提示、1~3 参考图融合、复杂布局与小字渲染（10px 级）、多语言字体、2048×2048",
+          "params": "负向提示；最多 6 输出/调用；1~3 输入图融合；2048×2048",
+          "risks": ">2K 或 >9 参考图需求时同家族 wan2.7-image-pro 更高规格（未单列）；Prompt 中文为主",
+          "adapter": "Asset Brief 中文为主；编辑用同一 ID 对话式迭代（天然支持 preserve-list）",
+          "editing": "原生编辑：同一 model ID 生成+编辑（家族含 qwen-image-edit-max/plus）"
+        },
+        {
+          "family": "PixVerse（爱诗科技）",
+          "video_family": "PixVerse",
+          "version": "平台图像能力（gpt-image-2.0 / gemini-3.1-flash）",
+          "verified": "2026-08-17",
+          "confidence": "Platform integration",
+          "task": "作为视频工作流的图像前置（文本/图生视频的参考图）",
+          "best": "与 PixVerse 视频工作流一体；CLI/Agent 集成；宽高比灵活",
+          "params": "分辨率上限 1080p/1440p/2160p",
+          "risks": "图像模型为平台集成（非自研）；编辑能力取决于集成的 gpt-image-2.0（原生编辑）",
+          "adapter": "仅用于 PixVerse 链路内图像前置；资产级定妆图路由到自研国产图片模型",
+          "editing": "继承平台集成模型：gpt-image-2.0 原生编辑；gemini-3.1-flash 编辑一般"
+        },
+        {
+          "family": "Vidu Image（生数科技）",
+          "video_family": "Vidu",
+          "version": "Vidu-Image-q2",
+          "verified": "2026-08-17",
+          "confidence": "Official confirmed",
+          "task": "参考生图/文生图/图片编辑",
+          "best": "0~7 张参考图融合、多主体一致性、中英文字渲染、UI/图表像素级还原、原生图片编辑",
+          "params": "提示词上限 2000 字符；1080p/2K/4K；多宽高比",
+          "risks": "强上下文一致依赖参考图；与 Q3 视频衔接时注意风格统一",
+          "adapter": "参考生图模式（按 index+role 引用）+ PRESERVE 列表；与 Vidu Q3 同生态",
+          "editing": "原生编辑：支持图片编辑"
+        },
+        {
+          "family": "MiniMax image-01（海螺 AI）",
+          "video_family": "MiniMax / Hailuo",
+          "version": "image-01 / image-01 Edição / image-01-live",
+          "verified": "2026-08-17",
+          "confidence": "Official confirmed",
+          "task": "低成本批量参考图/文生图 + 图片编辑",
+          "best": "文本+参考图生成、成本极低（¥0.025/张）、家族含专用编辑模型 image-01 Edição（subject_reference 必填，1~9 变体）、image-01-live 低延迟",
+          "params": "编辑：subject_reference 必填；n=1~9 变体；image-01 / image-01-live",
+          "risks": "高精资产一致性弱于专精人像模型；适合批量/成本敏感场景",
+          "adapter": "批量变体用 image-01；资产编辑用 image-01 Edição（subject_reference + prompt 声明不变区）",
+          "editing": "家族编辑模型：image-01 Edição（专用编辑模型）"
+        }
+      ],
+      "source_project": "SSOT image_generation 板块"
+    },
+    "asset_qc": {
+      "content": [
+        "资产图是否先于视频生成锁定？",
+        "PRESERVE 项在每轮迭代是否不变？",
+        "风格是否跨集一致（无 AI-tell 漂移）？",
+        "资产图是否纳入 Asset Graph 并管理版本？",
+        "LOCK 后普通 Agent 是否无法覆盖？",
+        "多参考图合成是否按角色/角色 role 引用而非硬拼？"
+      ],
+      "source_project": "SSOT image_generation 板块"
+    },
+    "multi_angle_reference_collage": {
+      "domain": "image_generation",
+      "title": "多角度参考拼图：角色资产四视图标准",
+      "principle": "角色资产标准从单张定妆图升级为多角度参考拼图（正面/四分之三/侧面/背面），服装由剧情驱动合成——两个独立项目（AI168 四视图 / Co-Director 多角度拼图）收敛验证的实践。",
+      "content": [
+        "拼图配方：基础形象 × 剧情驱动服装（Storyline 决定 wardrobe）→ 四视图拼图（正/四分之三/侧/背）",
+        "用途：跨镜/跨模型身份锚定的最强参考形态（对齐 CF-082 跨模型身份漂移修复）",
+        "生成纪律：单张定妆图先行验收，再扩展拼图（避免整图重 roll）；保真清单协议（PRESERVE/CHANGE）沿用",
+        "成本分级：主角全四视图；次要角色正面+侧面两视图"
+      ],
+      "source_project": "AI168漫剧（Apache 2.0）+ Co-Director（Google，arXiv 2604.24842）",
+      "source": "AI168 四视图参考图（正/四分之三/侧/背）；Co-Director Visual Assets：剧情驱动服装合成多角度参考拼图（multi-angle reference collages）",
+      "added": "2026-10-07",
+      "source_type": "external_opensource",
+      "verification_status": "pending",
+      "trust_weight": 0.6,
+      "depends_on": [
+        "visual_dna",
+        "wardrobe_dna",
+        "asset_generation_formula"
+      ],
+      "qc_checks": [
+        "主角资产是否含四视图？",
+        "拼图是否从已验收定妆图扩展而非重 roll？",
+        "服装是否由剧情驱动合成？"
+      ]
+    },
+    "model_prompt_dialects": {
+      "id": "model_prompt_dialects",
+      "domain": "image_generation",
+      "title": "模型方言（Model Prompt Dialects）",
+      "principle": "不同图片模型对 prompt 的解析机制不同——同一 prompt 在不同模型上效果差异巨大，必须按模型方言书写。",
+      "content": {
+        "layers": {
+          "L1_Flux系": "T5 编码器——写完整长句（自然语言段落），权重语法 (word:1.3) 无效，靠自然重述强调。主体须在前 10 词内，风格词 ≤2 个。",
+          "L2_Seedream系": "自然语言连贯描述\"主体+动作+环境\"，美学需求追加 style/color/lighting/composition 描述符。编辑类指令用\"动作+对象+属性\"结构（add/remove/replace+目标+特征）。",
+          "L3_SDXL系": "逗号分隔关键词簇（keyword clusters），配负面词。CLIP 编码器——只保留关键词、丢弃否定（no/not/without 反而画出排除对象）。",
+          "L4_通用结构": "主体→动作/姿势→环境→镜头→光照→单一风格修饰符。镜头语言控制构图：焦距定景别（24mm 环境/85mm 人像/135mm 压缩）、浅景深/bokeh、低角度/Dutch tilt。",
+          "L5_反泛词原则": "禁用无信息量风格泛词：「电影感/cinematic」「高级感」「大片感」「氛围感」单独出现时模型无法执行（每个模型对泛词的解读随机且互相冲突）。必须落到具体维度：光（侧逆光轮廓光）、构图（前景遮挡三分法）、虚化（f/1.8 浅景深主体分离）、色彩（teal-orange 低调暖肤色）。泛词只允许作为风格修饰符后缀（≤1个），不允许作为主体描述。来源：大象学长第3集「别再只会输电影感三个字」。",
+          "L6_即梦2.0参考视频移植": "能力观察：即梦 Seedance 2.0 支持根据参考视频一键复刻动作、运镜、转场节奏与创意特效（无需写英文提示词），动作参考还可自己录制，AI 视频门槛大幅降低。对模型路由的意义：高动态/复杂运镜镜头可增加第三执行路径（T2I 关键帧 / I2V 首尾帧 / 参考视频移植三路分叉，扩展 DC-037）；对提示词的意义：参考视频存在时，prompt 中的运镜描述降级为辅助（模型以视频为准），只保留主体/场景/风格描述。登记为 pending 待实测验证。来源：大象学长第1集 2026-02-08；第7集补充（转场节奏/特效可复刻、动作参考可自录）。",
+          "L7_Seedance视频方言": "即梦 Seedance 2.0 视频提示词公式：主角 + 环境 + 动作 + 画面风格 + 节奏，用 @ 语法引入素材（@角色/@场景）。中文语境直写即可，无需英文提示词。参考输入三角色按用途选择：①动作参考——精确操控主角动作，可参考视频或自己录制；②风格参考图——控制整体画面颜色风格；③关键帧参考——I2V 首尾帧。降级规则：参考输入存在时，对应维度的文字描述降级为辅助（模型以参考为准）。方言组装就绪：此公式进入视频方言适配器（Seedance 条目），与 Kling 六段骨架并列。来源：大象学长第7集 2026-02-11。",
+          "L8_NanoBanana系": "编辑类主力模型（Gemini 3 Pro Image / Nano Banana 2）。生成：六因子整句公式——Subject（具体描述）→ Composition/framing（景别构图）→ Action（动作含中间态）→ Setting（场景真实细节）→ Lighting（命名真实布光方案）→ Style/medium，末行独立 Constraints（镜头/画幅/分辨率，如 Shot on 85mm f/1.4. Aspect ratio 16:9. Render in 2K）。无 --parameters、不吃 tag-soup——像创意总监写 brief。编辑：四段结构 subject → instruction（单一改动）→ style → constraints，配冻结短语「keep everything else unchanged / do not change the face」划定不动区域；Keep 与 Change 必须显式分离（对齐保真清单协议 PRESERVE/CHANGE）。参考图上限 14 张（高保真 6 张）。会话式编辑原则：80% 满意就编辑不重生成（对齐 edit_chain_degradation_budget 能修不重生成理念）。来源：sunra.ai Prompt Library / memons.ai Cheat Sheet / movby.ai 2026-10 检索。"
+        },
+        "qc_checks": [
+          "prompt 是否按目标模型方言书写",
+          "正向 prompt 是否含 no/not/without",
+          "主体是否在前 10 词内",
+          "Seedance 视频路径是否用 @素材语法引入角色/场景",
+          "参考输入是否按用途选对角色（动作参考/风格参考图/关键帧参考）"
+        ]
+      },
+      "depends_on": [
+        "camera_lighting_prompt_lexicon"
+      ],
+      "source_type": "external_paper",
+      "verification_status": "pending",
+      "trust_weight": 0.7,
+      "backfill_origin": "BytePlus Seedream 指南 / zsky.ai / Curify AI 2026-10",
+      "created": "2026-10-07",
+      "qc_checks": [
+        "prompt 是否含无后缀泛词（电影感/高级感/大片感裸用）",
+        "即梦2.0 路径是否在参考视频存在时降级了运镜文字描述",
+        "Seedance 提示词是否遵循 主角@环境@动作@风格@节奏 公式"
+      ]
+    },
+    "negative_prompt_strategy": {
+      "id": "negative_prompt_strategy",
+      "domain": "image_generation",
+      "title": "负面提示词策略（分模型）",
+      "principle": "负面提示词不是万能保险——不同模型机制不同，错误使用反而降低质量。",
+      "content": {
+        "layers": {
+          "L1_Flux默认无效": "flow-matching 架构 CFG=1，负面词数学上被丢弃。需 ComfyUI Dynamic Thresholding 提 true CFG 才生效。",
+          "L2_SDXL短负面": "只留 medium lock（cartoon/painting）+ 具体对象（extra fingers, watermark）。勿抄 2022 年 40 行长列表——现代模型上无效甚至反作用。",
+          "L3_MJ的no陷阱": "逐词独立解析，--no modern clothing 会被读作 no modern + no clothing 触发审核警告。应正向写想要的内容。",
+          "L4_流程": "空负面首生成→定位实际缺陷→加最小修复词→停。勿预防性堆砌。"
+        },
+        "qc_checks": [
+          "是否按模型机制配置负面词",
+          "是否预防性堆砌了长负面列表",
+          "Flux 是否误用了负面词"
+        ]
+      },
+      "depends_on": [
+        "model_prompt_dialects"
+      ],
+      "source_type": "external_paper",
+      "verification_status": "pending",
+      "trust_weight": 0.7,
+      "backfill_origin": "Fancies.ai / PromptMake / MJ 官方文档 2026-10",
+      "created": "2026-10-07"
+    },
+    "defect_repair_playbook": {
+      "id": "defect_repair_playbook",
+      "domain": "image_generation",
+      "title": "缺陷修复手册（手/脸/文字/背景）",
+      "principle": "AI 图片常见缺陷有系统性修复配方——局部重绘参数（denoise/遮罩/风格词）决定修复成败。",
+      "content": {
+        "layers": {
+          "L1_手部": "局部重绘，遮罩带 10-15px 羽化，denoise 0.4-0.6（低=保姿势，高=重画），prompt 含 \"five fingers, correct thumb position\" + 原 prompt 的风格词（否则写实手贴进油画）。",
+          "L2_面部": "ADetailer(face_yolov8n) 自动检测修复，denoise 0.3-0.4 起步；高 denoise 换模型时必须加 ControlNet inpaint 防错位。",
+          "L3_文字": "遮罩紧贴无羽化（硬边）、引号引用目标文字、denoise 0.7 全重绘；3 次失败即改用手动排版，勿再耗 AI。",
+          "L4_背景畸变": "生成前清理杂物描述；已有图用 outpainting/背景替换。自动化管线：ComfyUI FaceDetailer（Impact Pack+SAM 精确分割）单次生成同时修脸+手。",
+          "L5_与PRESERVE联动": "所有局部重绘遵循 preserve_list_protocol——明示变什么、保什么（衔接 CF 系列修复案例）。"
+        },
+        "qc_checks": [
+          "denoise 是否在配方范围内",
+          "重绘 prompt 是否含原风格词",
+          "文字修复是否已超 3 次应改手动"
+        ]
+      },
+      "depends_on": [
+        "preserve_list_protocol"
+      ],
+      "source_type": "external_opensource",
+      "verification_status": "pending",
+      "trust_weight": 0.6,
+      "backfill_origin": "FreeVisualTools / ArtificialGuyBR 2026-10",
+      "created": "2026-10-07"
+    },
+    "upscaling_pipeline": {
+      "id": "upscaling_pipeline",
+      "domain": "image_generation",
+      "title": "放大管线（Upscaling Pipeline）",
+      "principle": "I2V 前必须放大到目标分辨率——放大倍数有实用甜点，模型选型按用途分。",
+      "content": {
+        "layers": {
+          "L1_倍数甜点": "2x 全员可靠；4x 是实用甜点；8x 质量分化严重按图评估。I2V 前务必放大到 1536px+ 长边。",
+          "L2_模型选型": "Topaz Photo AI——人脸恢复专训+降噪放大同步，批量管线最稳；Real-ESRGAN——免费快速适合批量；SUPIR（SDXL 扩散先验）——细节最强但需 12GB+ VRAM、慢 10-50 倍，留给 hero 图；Magnific——creativity 低≈传统放大、高=重绘细节，含文字的图慎用（会把字形改乱）。",
+          "L3_接入时机": "R-pre 候选择优后、I2V 生成前——只对最终选定候选放大，不对所有候选放大（成本控制）。",
+          "L4_后处理提质三件套": "放大是后处理家族的一员，同族还有三项生成后增强手段（Nano Banana 编辑指令实现，其他编辑类模型待验证）：①光影重塑——在有光源的场景内重新打光，提升立体感（修复「平光」类质感问题，关联 motivated_lighting：生成时灯光描述服从度低的后补救）；②人物优化——皮肤+毛发细节增强，使人物更真实（imperfection_aesthetics 生成时注入失败的后补救路径）；③超清材质迭代——对已有画面材质迭代提质（texture_boost 的后处理面）。定位：这三件是「提质增强」不是「修错」——修错走 defect_repair_playbook。提示词模板（Nano Banana 编辑方言，sunra.ai 检索）：①Relight this portrait with warm golden-hour light coming from the left, add a gentle rim light on the hair, keep the subject and composition identical, do not change the face；②Lightly retouch this portrait: even the skin tone, reduce shine on the forehead, keep natural skin texture and pores, do not smooth into plastic, leave the eyes and hair untouched（do not smooth into plastic 与 imperfection_aesthetics L1 病理认知直接呼应）；③Apply a muted cinematic color grade, teal shadows and warm highlights, slightly lifted blacks, keep detail in the sky, preserve the subject's natural skin tone。来源：大象学长第9集 + sunra.ai Prompt Library（外部检索补提示词）。",
+          "L5_高低频分离修复法": "传统 AI 放大的系统性问题：增加脏块 + 抹掉细节纹理（模型先验「脑补」替代真实细节）。替代方法论（大象学长第14集，Tapnow 载体可迁移）：①高低频原理——照片分为低频信息（结构/色彩）与高频信息（细节/纹理）；②提示词提取线稿（高频细节载体）；③缩略图（低频）+ 高清线稿（高频）组合重建 → 高清且细节无损。适用场景：模糊/画质受损帧的高清化（I2V 前置修复，i2v_frame_quality_protocol 垃圾进垃圾出）与传统放大效果不佳（细节被抹）时的替代路径；与 L2 的关系——L2 挑放大模型，L5 是绕开传统放大的重建法。模板化复用：一次调通固化为模板，对齐经验预载理念（高成功率配置固化为默认）。"
+        },
+        "qc_checks": [
+          "I2V 前是否放大到 1536px+",
+          "放大模型是否匹配用途（hero/批量）",
+          "含文字图是否避开了 Magnific",
+          "后处理选择是否区分「提质增强」（本单元）与「修错」（defect_repair_playbook）",
+          "模糊/受损帧是否评估过高低频分离法（传统放大抹细节时）"
+        ]
+      },
+      "depends_on": [
+        "i2v_frame_quality_protocol"
+      ],
+      "source_type": "external_opensource",
+      "verification_status": "pending",
+      "trust_weight": 0.6,
+      "backfill_origin": "EgoistAI / botmonster 放大对比实测 2026-10",
+      "created": "2026-10-07"
+    },
+    "imperfection_aesthetics": {
+      "id": "imperfection_aesthetics",
+      "domain": "image_generation",
+      "title": "瑕疵美学（Imperfection Aesthetics：破除AI油腻感）",
+      "principle": "AI 生成默认追求数学完美——皮肤抹平、阴影提亮、边缘锐利——这正是「AI油腻感」的来源。真实的高级感来自瑕疵，而非算法打造的完美。反向注入瑕疵词汇与物理镜头缺陷，是风格选择而非质量缺陷。",
+      "content": {
+        "layers": {
+          "L1_病理认知": "AI 默认算法追求数学上的完美：皮肤纹理被抹平、阴影被提亮、色彩过度均匀、边缘过度锐利→画面廉价油腻。「一眼假」不是分辨率问题，是「过度完美」问题。",
+          "L2_破坏性词汇": "摄影师才懂的反向词汇，按适用模型标注（方言组装层按模型过滤注入）",
+          "L3_改光策略": "删 soft light（柔光）关键词→换硬光/侧光增强立体感；全局光→局部光照；「闪光灯直闪 direct flash」是真实感大杀器（纪实感/新闻感场景）。",
+          "L4_烂镜头模拟": "模拟物理镜头缺陷增加电影松弛感：色散/色差（chromatic aberration）、边缘红蓝溢出、暗角（vignetting）、动态模糊（motion blur）、镜头漏光（light leaks）。避免过度清晰——带点模糊和畸变才符合电影感。过度使用警告：英雄镜头/产品图禁用，仅纪实/复古/情绪风格启用。",
+          "L5_QC协调": "瑕疵是风格选择不是质量缺陷——asset_qc 不应拦截有动机的 grain/CA/暗角；但无风格动机的意外畸变仍走 defect_repair_playbook 修复。判定标准：Contract 的 style_preset 声明了纪实/复古/胶片风→瑕疵合法；声明了 clean/commercial→瑕疵违规。"
+        },
+        "vocabulary": [
+          {
+            "term_en": "raw photo",
+            "term_zh": "原图模式",
+            "applicable_models": [
+              "all"
+            ],
+            "purpose": "禁用算法美化，保留原始质感"
+          },
+          {
+            "term_en": "skin texture, visible pores",
+            "term_zh": "皮肤纹理/毛孔可见",
+            "applicable_models": [
+              "all"
+            ],
+            "purpose": "对抗皮肤抹平"
+          },
+          {
+            "term_en": "freckles, slight skin unevenness",
+            "term_zh": "雀斑/轻微肤色不均",
+            "applicable_models": [
+              "all"
+            ],
+            "purpose": "打破肤色过度均匀"
+          },
+          {
+            "term_en": "film grain",
+            "term_zh": "胶片颗粒",
+            "applicable_models": [
+              "all"
+            ],
+            "purpose": "数字洁净感→胶片质感"
+          },
+          {
+            "term_en": "hard light from side",
+            "term_zh": "侧向硬光",
+            "applicable_models": [
+              "all"
+            ],
+            "purpose": "替代柔光，增强立体"
+          },
+          {
+            "term_en": "direct flash",
+            "term_zh": "闪光灯直闪",
+            "applicable_models": [
+              "all"
+            ],
+            "purpose": "纪实感大杀器，硬阴影+高对比"
+          },
+          {
+            "term_en": "chromatic aberration at edges",
+            "term_zh": "边缘色散",
+            "applicable_models": [
+              "flux",
+              "sdxl"
+            ],
+            "purpose": "镜头缺陷美，SD 系服从度高"
+          },
+          {
+            "term_en": "soft vignette",
+            "term_zh": "轻度暗角",
+            "applicable_models": [
+              "all"
+            ],
+            "purpose": "视线收束+复古感"
+          },
+          {
+            "term_en": "slight motion blur",
+            "term_zh": "轻微动态模糊",
+            "applicable_models": [
+              "all"
+            ],
+            "purpose": "松弛感，非冻结瞬间"
+          },
+          {
+            "term_en": "light leaks",
+            "term_zh": "镜头漏光",
+            "applicable_models": [
+              "sdxl",
+              "flux"
+            ],
+            "purpose": "胶片时代随机曝光缺陷"
+          }
+        ],
+        "activation_rule": "style_preset ∈ {documentary, film_noir, retro, 90s_film, wong_karwai_style} 时启用 L2+L4；style_preset ∈ {clean_commercial, product, idol_drama} 时禁用 L4、保留 L2 基础词汇",
+        "conflicts_with": "asset_qc（需 L5 协调规则）；defect_repair_playbook（方向相反：那是修意外缺陷，这是故意加风格缺陷——按 Contract style 声明分流）",
+        "source_video": "抖音 大象学长 第5集《邪修！AI图一眼假？三个方法破除AI感》2026-01-20，4.1万赞"
+      },
+      "qc_checks": [
+        "AI油腻感场景（皮肤过平/光过匀）是否注入了破坏性词汇",
+        "soft light 是否应删未删",
+        "烂镜头模拟是否越界到了 clean 风格镜头",
+        "QC 是否误拦了有风格动机的 grain/CA"
+      ],
+      "depends_on": [
+        "texture_boost_techniques",
+        "motivated_lighting"
+      ],
+      "source_type": "creator_tutorial",
+      "verification_status": "pending",
+      "trust_weight": 0.7,
+      "created": "2026-10-07",
+      "backfill_origin": "抖音 大象学长 AI视频系列教学 第5集 2026-10-07 调研"
+    },
+    "grid_exploration_workflows": {
+      "id": "grid_exploration_workflows",
+      "domain": "image_generation",
+      "title": "网格化探索工作流（Grid Exploration：镜头候选网格 + 粗排故事板）",
+      "principle": "单次生成多候选/多镜头网格，以一次请求的成本探索设计空间——网格层做「总览与选择」，精生成层做「执行与放大」，两层分离控成本。",
+      "content": {
+        "grids": {
+          "G1_12宫格构图器": "上传场景截图 + 提示词 → 单次生成 12 张不同景别×机位组合。定位：镜头候选探索——R-pre（candidate_selection_before_commit）的廉价前置：先网格总览候选空间（哪些景别/机位对这场戏有效），再对选定方向做 Contract 精排与精生成。与 upscaling_pipeline L3 成本逻辑一致：网格图用于决策不用于成片，只对最终选定项放大。消耗 shot_size_system 五级景别 + DC-035 运镜映射做网格维度标注。",
+          "G2_25宫格分镜": "一句话/一段剧本 → 单次生成符合逻辑的 25 宫格整片分镜图。定位：粗排故事板（pre-visualization 最前置）——验证叙事流、节奏与镜头序列逻辑，早于逐镜 Contract 精排。与 sparse_keyframe_cot（稀疏关键帧思想）同源：先骨架后细节。产出不直接进成片，作为 Contract 引擎的镜头序列参考输入。"
+        },
+        "layered_pipeline": "粗排故事板（25宫格：验证叙事流）→ 候选镜头探索（12宫格：定景别/机位方向）→ 逐镜 Contract 精排（确定性引擎）→ R-pre 双候选择优 → 精生成 + 放大。网格层与精排层解耦：网格改变的是「选择前的信息量」，不替代 Contract 的确定性控制。",
+        "automation_modes": "对高度自动化管线的必要性分层——G1_12宫格：非必要，可选增强件（R-pre 双候选已闭环；升级为 12 候选自动择优的前提是 AM-15 构图评审可靠，而构图/风格恰是 MLLM 弱项[hybrid_review_protocol]，评审不可靠时选择需人参与，故当前定位为人工介入点/高价值 beat 增强）。G2_25宫格：fail-fast 前置验证层，可全自动——自动生成网格 + AM-15 叙事连贯检查（序列逻辑/因果连续性属结构化判断，机器评审可靠度高），不通过则修镜头序列/剧本，通过才进 Contract 精排，比逐镜生成后返工便宜（此成本假设待实测）。架构哲学不变：知识决定镜头（Contract 先验），网格只补先验不足/先验暴露太晚两种场景。",
+        "model_note": "实测于 Nano Banana（编辑类模型，图内网格布局能力）。其他模型（Seedream/Flux/SDXL）网格能力待验证后进入方言适配器。",
+        "prompt_templates": {
+          "G2_分镜网格": "Create a 3×3 cinematic storyboard grid featuring the same [角色] in [服装] across multiple scenes. Keep character identity consistent across all panels. Use varied shot scales including wide shot, medium shot, and close-up. [风格] aesthetic, soft atmospheric lighting, film-grade composition, continuity-friendly visual design.（nanabanana.video 实测英文模板）中文路径：上传角色参考图 + 提示词要求 N×N 故事板网格 + 逐镜头写清场景/人物动作/画面氛围（toutiao 工作流）。帧数甜点：30-45 秒短片 8-14 帧、一帧一动作、远/中/近/特写交替形成视觉节奏（apiyi 最佳实践，对齐 model_tiered_duration）。",
+          "G2_单帧提取": "从网格的第一行提取第一帧，把图像放大到 4K 清晰度；其余帧换位置描述（第二行中间帧/第三行最后一帧）逐个处理——网格图转单帧素材的衔接指令，产出直接作 I2V 首帧（toutiao 工作流）。",
+          "G1_景别机位网格": "推导模板（按 L8 六因子公式组装，非大象原版，待实测）：Create a grid of 12 shots of [场景/主体] exploring different shot sizes (extreme wide, wide, medium, medium close-up, close-up, extreme close-up) × camera angles (eye-level, low angle, high angle, dutch angle), same character and lighting in every panel, [风格] style. 网格两维对齐 shot_size_system 五级景别与 DC-035 运镜映射做面板标注。"
+        },
+        "qc_checks": [
+          "网格图是否只用于决策（不直接进成片管线）",
+          "是否只对网格选定的候选做精生成与放大",
+          "25宫格粗排是否先于逐镜 Contract 精排",
+          "G1 是否只在高价值 beat / 人工介入点启用（全自动管线非必需）",
+          "G2 叙事连贯检查是否自动化（AM-15 通道）而非依赖人看"
+        ]
+      },
+      "depends_on": [
+        "candidate_selection_before_commit",
+        "sparse_keyframe_cot",
+        "shot_size_system"
+      ],
+      "source_type": "creator_tutorial",
+      "verification_status": "pending",
+      "trust_weight": 0.7,
+      "backfill_origin": "大象学长第9集「Nano Banana 八个高级提示词」2026-03-19（12宫格构图器 + 25宫格分镜两条）",
+      "created": "2026-10-07"
+    }
+  }
+}

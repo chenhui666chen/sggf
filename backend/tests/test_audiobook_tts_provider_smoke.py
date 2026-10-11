@@ -54,7 +54,7 @@ def test_qwen_provider_smoke_returns_audio() -> None:
 
     payload = asyncio.run(
         _synthesize_smoke(
-            model="qwen3-tts-instruct-flash",
+            model="qwen-audio-3.1-tts-flash",
             text="这是一段耳畔星河的真实语音合成烟测。",
             voice_params={
                 "speaker": "Neil",
@@ -65,7 +65,7 @@ def test_qwen_provider_smoke_returns_audio() -> None:
     )
 
     assert payload.get("provider") == "aliyun"
-    assert payload.get("provider_model") == "qwen3-tts-instruct-flash"
+    assert payload.get("provider_model") == "qwen-audio-3.1-tts-flash"
     assert payload.get("speaker") == "Neil"
     assert payload.get("transport") == "http"
 

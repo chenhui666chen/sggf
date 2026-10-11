@@ -112,42 +112,51 @@ class PromptEvolutionEngine:
         if self.config.genre_weight_config:
             return self.config.genre_weight_config
 
-        # 预设题材权重（TMS 已于 2026-08-27 全库移除；权重清零依据：
-        # 2026-08-27 格式复验确认 TMS 为格式触发的伪检测器——对段落空格/开头
-        # 空行敏感（真人文本加空行即判 97/Block），格式干净后真人与 AI 均得 0，
-        # 无真阳性能力。全部题材 ai_score 清零，权重转移到
-        # readability/writing/fidelity）
+        # 预设题材权重
+        #
+        # 🔧 2026-10-08 恢复 ai_score 权重（原为 0.0）：
+        # 清零依据是 2026-08-27 认定旧 TMS 为「格式触发的伪检测器」（对段落空格/开头空行
+        # 敏感，格式干净后真人与 AI 均得 0）。但朱雀已接替并经真实网关验证可靠——
+        # 4 份人类基线全部判 0 分 / 100% 人工，AI 原文 100 分，具备真阳性能力。
+        #
+        # 注意：此处 ai_score 维度实际消费的是「被判确定AI 的段落占比 ×100」
+        # （调用侧传入 avg_ai_ratio），不是恒为 100 的 ratio_confidence，
+        # 否则恢复权重毫无意义——实测该值在 LLM 改写区间无分辨力。
+        #
+        # 取值原则：AI 维度 0.30，质量维度合计 0.70。降 AI 率是本板块核心目标，
+        # 但不许压过可读/文笔/保真之和，避免出现「机械切短句」这类
+        # 只改善检测指标却破坏文笔（实测文笔分 55.6，门槛 ≤35）的退化解。
         genre_weights = {
             "玄幻": {
-                "ai_score": 0.0,        # TMS 已移除（格式假象伪检测器），不参与计分
-                "readability": 0.35,   # 可读性权重
-                "writing": 0.35,       # 文笔权重
-                "fidelity": 0.30       # 保真度权重
+                "ai_score": 0.30,      # 被判确定AI 的段落占比（越低越好）
+                "readability": 0.25,   # 可读性权重
+                "writing": 0.25,       # 文笔权重
+                "fidelity": 0.20       # 保真度权重
             },
             "都市": {
-                "ai_score": 0.0,        # TMS 已移除（格式假象伪检测器），不参与计分
-                "readability": 0.40,   # 可读性重要
-                "writing": 0.30,       # 文笔要求适中
-                "fidelity": 0.30       # 保真度
+                "ai_score": 0.30,
+                "readability": 0.25,   # 可读性重要
+                "writing": 0.20,       # 文笔要求适中
+                "fidelity": 0.25       # 保真度
             },
             "言情": {
-                "ai_score": 0.0,        # TMS 已移除（格式假象伪检测器），不参与计分
-                "readability": 0.30,   # 可读性重要
-                "writing": 0.40,       # 言情文最注重文笔
-                "fidelity": 0.30       # 保真度
+                "ai_score": 0.30,
+                "readability": 0.20,   # 可读性
+                "writing": 0.30,       # 言情文最注重文笔
+                "fidelity": 0.20       # 保真度
             },
             "悬疑": {
-                "ai_score": 0.0,        # TMS 已移除（格式假象伪检测器），不参与计分
-                "readability": 0.35,   # 可读性很重要
-                "writing": 0.30,       # 文笔要求适中
-                "fidelity": 0.35       # 保真度重要（逻辑严密）
+                "ai_score": 0.30,
+                "readability": 0.25,   # 可读性很重要
+                "writing": 0.20,       # 文笔要求适中
+                "fidelity": 0.25       # 保真度重要（逻辑严密）
             },
             # 🆕 通用题材（默认权重，适用于多题材混合或未指定题材）
             "通用": {
-                "ai_score": 0.0,        # TMS 已移除（格式假象伪检测器），不参与计分
-                "readability": 0.35,   # 平衡可读性
-                "writing": 0.35,       # 平衡文笔
-                "fidelity": 0.30       # 平衡保真度
+                "ai_score": 0.30,
+                "readability": 0.25,   # 平衡可读性
+                "writing": 0.25,       # 平衡文笔
+                "fidelity": 0.20       # 平衡保真度
             }
         }
 
@@ -501,14 +510,32 @@ class PromptEvolutionEngine:
             )
 
             if result.get("success") and result.get("results"):
-                best = result["results"][0]  # 已按 ai_score 升序排列
-                model_scores = {
+                # 🔧 2026-10-08：排序主键由 ai_score 改为 ai_ratio。
+                # ai_score ≈ (ai_ratio + suspect_ratio) × 100 在 LLM 改写区间恒为 100，
+                # 旧排序等价于常数排序，best 与 model_scores 全是 100 的常量表，
+                # 却被持久化进 PromptVersion.multi_model_scores 当作选型依据。
+                best = result["results"][0]
+                best_ratio = result.get("best_ai_ratio")
+                if best_ratio is None:
+                    best_ratio = best.get("ai_ratio")
+                # 主项：确定AI段落占比 {model_id: ratio}（0-1，越低越好）
+                model_scores = result.get("model_scores") or {
+                    r["model_id"]: (
+                        r.get("ai_ratio") if r.get("ai_ratio") is not None else 1.0
+                    )
+                    for r in result["results"]
+                }
+                # 诊断项：ai_score 恒为 100，仅留作回溯
+                model_ai_scores = result.get("model_ai_scores") or {
                     r["model_id"]: r["ai_score"] for r in result["results"]
                 }
 
+                def _fmt_ratio(value) -> str:
+                    return f"{value:.3f}" if isinstance(value, (int, float)) else "N/A"
+
                 logger.info(
                     f"🔬 多模型评估完成: "
-                    f"最佳={best['model_name']}(AI分数={best['ai_score']}), "
+                    f"最佳={best['model_name']}(确定AI占比={_fmt_ratio(best_ratio)}), "
                     f"{result['total_models_success']}/{result['total_models_tried']}成功, "
                     f"耗时={result['total_time_seconds']:.1f}秒"
                 )
@@ -517,18 +544,20 @@ class PromptEvolutionEngine:
                 for i, r in enumerate(result["results"][:5], 1):
                     logger.debug(
                         f"   #{i} {r['model_name']}: "
-                        f"AI分数={r['ai_score']}, 降低{r['improvement']}分, "
+                        f"确定AI占比={_fmt_ratio(r.get('ai_ratio'))}, "
+                        f"降低{r['improvement']}分, "
                         f"耗时={r['latency_seconds']:.1f}秒"
                     )
 
                 if on_progress:
                     await on_progress(
-                        f"🔬 多模型评估完成: 最佳={best['model_name']}(AI={best['ai_score']})",
+                        f"🔬 多模型评估完成: 最佳={best['model_name']}"
+                        f"(确定AI占比={_fmt_ratio(best_ratio)})",
                         progress_pct + 2,
                         {
                             "multi_model_eval_done": True,
                             "best_model": best["model_name"],
-                            "best_score": best["ai_score"],
+                            "best_score": best_ratio,
                             "model_scores": model_scores,
                         }
                     )
@@ -536,8 +565,10 @@ class PromptEvolutionEngine:
                 return {
                     "best_model_id": best["model_id"],
                     "best_model_name": best["model_name"],
-                    "best_ai_score": best["ai_score"],
+                    "best_ai_ratio": best_ratio,
+                    "best_ai_score": best.get("ai_score"),
                     "model_scores": model_scores,
+                    "model_ai_scores": model_ai_scores,
                     "evaluation_results": result["results"],
                     "total_time": result["total_time_seconds"],
                 }
@@ -589,10 +620,12 @@ class PromptEvolutionEngine:
             )
 
         # === 2. 成功停止（达到理想状态）===
-        # （TMS 已移除（格式假象伪检测器）：低检测分不代表人工化成功——
-        # 早停的 AI 条件永久视为不满足，
-        # 由可读性/文笔/保真三维共同决定是否停机；朱雀校准后按改进清单 C1 恢复）
-        ai_ok = False
+        # 🔧 2026-10-08 恢复 AI 维度判定（原为 TMS 移除后的硬编码 ai_ok = False）：
+        # 旧 TMS 被认定为「格式触发的伪检测器」故清空权重，但朱雀已接替且经真实网关验证
+        # 可靠（4 份人类基线全部判 0 分 / 100% 人工）。此处入参 ai_score 已改为
+        # 「被判确定AI 的段落占比 ×100」（见调用侧 avg_ai_ratio），具备真实分辨力，
+        # 与 early_stop_threshold 同向（越低越好），不再需要永久置否。
+        ai_ok = ai_score <= self.config.early_stop_threshold
         readability_ok = readability_score >= self.config.min_readability_score
         writing_ok = writing_score <= self.config.max_writing_score
         fidelity_ok = fidelity_similarity >= self.config.min_fidelity_similarity
@@ -994,6 +1027,7 @@ class PromptEvolutionEngine:
                     self._summarize_quality_failures(results),
                 )
             current_version.avg_ai_score = avg_score
+            current_version.avg_ai_ratio = self._calc_avg_ai_ratio(results)
             current_version.evaluation_results = results
             current_version.avg_score_reduction = self._calc_avg_reduction(results)
 
@@ -1263,6 +1297,14 @@ class PromptEvolutionEngine:
                     best_prompt, samples, current_temp,
                     model_id=self.rewrite_model_id
                 )
+                # 🔧 真实优化信号：改写后被判「确定AI」的段落占比（0-1，越低越好）。
+                # 实测 ai_score ≈ (ai_ratio + suspect_ratio) × 100，在 LLM 改写区间恒为 100，
+                # 无法感知「AI→疑似」的真实进步；ai_ratio 才能反映它（实测可 100%→0%）。
+                ai_ratios = [
+                    r.rewritten_ai_ratio for r in results
+                    if r.success and r.rewritten_ai_ratio is not None
+                ]
+                avg_ai_ratio = sum(ai_ratios) / len(ai_ratios) if ai_ratios else None
                 full_failure_ratio = self._quality_failure_ratio(results, len(samples))
                 if full_failure_ratio > self.QUALITY_DISQUALIFY_FAILURE_RATIO:
                     logger.warning(
@@ -1277,6 +1319,7 @@ class PromptEvolutionEngine:
                         self._summarize_quality_failures(results),
                     )
                 new_version.avg_ai_score = avg_score
+                new_version.avg_ai_ratio = avg_ai_ratio
                 new_version.evaluation_results = results
                 new_version.avg_score_reduction = self._calc_avg_reduction(results)
 
@@ -1373,7 +1416,9 @@ class PromptEvolutionEngine:
                             )
 
                 # 🆕 多维停止条件检查
-                stop_reason = self._check_stop_conditions(avg_score, avg_readability, avg_writing, avg_fidelity_similarity)
+                # 🔧 传入 ai_ratio×100 作为 AI 维度信号（有分辨力），而非恒为 100 的 ai_score
+                ai_signal = avg_ai_ratio * 100.0 if avg_ai_ratio is not None else avg_score
+                stop_reason = self._check_stop_conditions(ai_signal, avg_readability, avg_writing, avg_fidelity_similarity)
 
                 if stop_reason.should_stop:
                     logger.debug(f"\n   {stop_reason.reason_message}", flush=True)
@@ -1497,22 +1542,37 @@ class PromptEvolutionEngine:
                         best_version.best_model_id = final_mm_result["best_model_id"]
                         best_version.multi_model_scores = final_mm_result["model_scores"]
                         self._save_progress()
+                        _final_ratio = final_mm_result.get("best_ai_ratio")
+                        _final_ratio_text = (
+                            f"{_final_ratio:.3f}"
+                            if isinstance(_final_ratio, (int, float))
+                            else "N/A"
+                        )
                         logger.info(
                             f"🏆 最终多模型排行: 最佳模型={final_mm_result['best_model_name']}"
-                            f"(AI分数={final_mm_result['best_ai_score']})"
+                            f"(确定AI占比={_final_ratio_text})"
                         )
 
             # 保存经验报告
             experience_report = self.meta_optimizer.get_experience_report()
             self._save_experience_report(experience_report)
 
-            best_score = self.history.best_versions[0].avg_ai_score if self.history.best_versions else 100
+            _top_version = self.history.best_versions[0] if self.history.best_versions else None
+            # 🔧 2026-10-08：对外展示的「最佳得分」改用确定AI占比（换算回 0-100 标度）。
+            # 旧值取自恒为 100 的 avg_ai_score，等于无论优化好坏都显示「100 分」。
+            _top_ratio = _top_version.avg_ai_ratio if _top_version else None
+            best_score = (
+                _top_ratio * 100.0
+                if _top_ratio is not None
+                else (_top_version.avg_ai_score if _top_version else 100)
+            )
             await self._notify_progress(
                 on_progress,
-                f"✅ 进化完成！最佳得分: {best_score:.1f}",
+                f"✅ 进化完成！最佳确定AI占比: {best_score:.1f}%",
                 100,
                 {
                     "best_score": best_score,
+                    "best_ai_ratio": _top_ratio,
                     "total_iterations": self.history.current_iteration,
                     "experience_report": experience_report
                 }
@@ -1598,7 +1658,14 @@ class PromptEvolutionEngine:
             return
 
         self.history.best_versions.append(version)
-        self.history.best_versions.sort(key=lambda v: v.avg_ai_score)
+        # 🔧 2026-10-08：排序主键由 avg_ai_score 改为 avg_ai_ratio。
+        # avg_ai_score 在 LLM 改写区间恒为 100，旧排序退化为按插入序，
+        # keep_top_n 截断等于随机丢版本。缺失值按最差 1.0 计。
+        self.history.best_versions.sort(
+            key=lambda v: (
+                v.avg_ai_ratio if v.avg_ai_ratio is not None else 1.0
+            )
+        )
         self.history.best_versions = self.history.best_versions[:self.config.keep_top_n]
 
         # 同时保存到文件
@@ -1624,6 +1691,21 @@ class PromptEvolutionEngine:
         if not valid:
             return 0.0
         return sum(r.score_reduction for r in valid) / len(valid)
+
+    @staticmethod
+    def _calc_avg_ai_ratio(results: List[EvaluationResult]) -> Optional[float]:
+        """改写后被判「确定AI」的段落占比均值（0-1，越小越好）；无有效样本返回 None。
+
+        🔧 2026-10-08：这是提示词版本的真实适应度。avg_ai_score ≈
+        (ai_ratio + suspect_ratio) × 100 在 LLM 改写区间恒为 100，按它排序
+        等于按常数排序，无法区分版本优劣。
+        """
+        ratios = [
+            r.rewritten_ai_ratio
+            for r in results
+            if r.success and r.rewritten_ai_ratio is not None
+        ]
+        return sum(ratios) / len(ratios) if ratios else None
 
     def _save_progress(self) -> None:
         """保存进化进度"""

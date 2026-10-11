@@ -468,110 +468,6 @@ class BaseModelAdapter(ABC):
         pass
 
 
-class Wan26T2IAdapter(BaseModelAdapter):
-    RUNTIME_WRAPPER_NAME = "wan2.6-t2i"
-    """Legacy-compatible WAN T2I adapter."""
-
-    def generate(
-        self,
-        prompt: str,
-        negative_prompt: str = "",
-        width: int = 1024,
-        height: int = 576,
-        num_inference_steps: int = 30,
-        guidance_scale: float = 7.5,
-        seed: Optional[int] = None
-    ) -> GenerationResult:
-        return self._delegate_runtime(
-            "generate",
-            prompt=prompt,
-            negative_prompt=negative_prompt,
-            width=width,
-            height=height,
-            num_inference_steps=num_inference_steps,
-            guidance_scale=guidance_scale,
-            seed=seed,
-        )
-
-
-class Wan27I2VAdapter(BaseModelAdapter):
-    RUNTIME_WRAPPER_NAME = "wan2.7-i2v"
-    """Legacy-compatible WAN I2V adapter."""
-
-    def generate(
-        self,
-        image_path: str,
-        prompt: str = "",
-        duration: float = 3.0,
-        fps: int = 24,
-        motion_bucket_id: int = 127,
-        seed: Optional[int] = None,
-        character_references: Optional[List[Dict[str, Any]]] = None
-    ) -> GenerationResult:
-        return self._delegate_runtime(
-            "generate",
-            image_path=image_path,
-            prompt=prompt,
-            duration=duration,
-            fps=fps,
-            motion_bucket_id=motion_bucket_id,
-            seed=seed,
-            character_references=character_references,
-        )
-
-
-class Wan27T2VAdapter(BaseModelAdapter):
-    RUNTIME_WRAPPER_NAME = "wan2.7-t2v"
-    """Legacy-compatible WAN T2V adapter."""
-
-    def generate(
-        self,
-        prompt: str,
-        negative_prompt: str = "",
-        width: int = 1024,
-        height: int = 576,
-        duration: float = 3.0,
-        fps: int = 24,
-        num_inference_steps: int = 30,
-        guidance_scale: float = 7.5,
-        seed: Optional[int] = None
-    ) -> GenerationResult:
-        return self._delegate_runtime(
-            "generate",
-            prompt=prompt,
-            negative_prompt=negative_prompt,
-            width=width,
-            height=height,
-            duration=duration,
-            fps=fps,
-            num_inference_steps=num_inference_steps,
-            guidance_scale=guidance_scale,
-            seed=seed,
-        )
-
-
-class Wan27R2VAdapter(BaseModelAdapter):
-    RUNTIME_WRAPPER_NAME = "wan2.7-r2v"
-    """Legacy-compatible WAN R2V adapter."""
-
-    def generate(
-        self,
-        reference_video_path: str,
-        prompt: str = "",
-        duration: float = 3.0,
-        fps: int = 24,
-        seed: Optional[int] = None
-    ) -> GenerationResult:
-        return self._delegate_runtime(
-            "generate",
-            reference_video_path=reference_video_path,
-            prompt=prompt,
-            duration=duration,
-            fps=fps,
-            seed=seed,
-        )
-
-
 class QwenImageEditPlusAdapter(BaseModelAdapter):
     RUNTIME_WRAPPER_NAME = "qwen_image_edit_plus"
     """Legacy-compatible Qwen image edit adapter."""
@@ -841,8 +737,8 @@ class Qwen3VLPlusAdapter(BaseModelAdapter):
         )
 
 
-class Qwen3TTSAdapter(BaseModelAdapter):
-    """Qwen3-TTS 适配器 - 文本转语音，用于声音合成。"""
+class QwenAudio31TTSAdapter(BaseModelAdapter):
+    """Qwen-Audio 3.1 TTS 适配器 - 文本转语音，用于声音合成。"""
 
     def generate(
         self,
@@ -1099,24 +995,19 @@ class ModelAdapterFactory:
     _BRIDGE_MODEL_MAP = {
     }
     _ENV_PREFIX_MAP = {
-        "wan2.6-t2i": "WAN_T2I",
-        "wan2.7-i2v": "WAN_I2V",
-        "wan2.7-t2v": "WAN_T2V",
-        "wan2.7-r2v": "WAN_R2V",
-        "wan2.7-videoedit": "WAN_VIDEOEDIT",
         "wan_image_edit": "WAN_IMAGE_EDIT",
         "qwen_image_edit_plus": "QWEN_IMAGE_EDIT",
         "qwen_image_edit_max": "QWEN_IMAGE_EDIT_MAX",
         "qwen_multiperson_fusion": "QWEN_IMAGE_EDIT",
         "qwen3_vl_plus": "QWEN_VL_PLUS",
-        "qwen3_tts": "QWEN3_TTS",
+        "qwen_audio_3_1_tts": "QWEN_AUDIO_31_TTS",
         "jianying": "JIANYING",
     }
     _DEFAULT_MODEL_NAME_BY_ENV = {
         "QWEN_VL_PLUS": "qwen3-vl-plus",
         "QWEN_IMAGE_EDIT": "qwen-image-edit-plus",
         "QWEN_IMAGE_EDIT_MAX": "qwen-image-edit-max-2026-01-16",
-        "QWEN3_TTS": "qwen3-tts-instruct-flash",
+        "QWEN_AUDIO_31_TTS": "qwen-audio-3.1-tts-flash",
     }
 
     def __init__(self) -> None:

@@ -24,7 +24,10 @@ from app.services.prompt_evolution.storage import EvolutionStorage
 from app.services.prompt_evolution.genre_detector import GenreDetector
 from app.services.prompt_evolution.genre import normalize_genre
 from app.core.permissions import require_admin
-from app.services.ai_trace_competition import get_multi_model_service
+from app.services.ai_trace_competition import (
+    EVALUATION_POLICY_VERSION,
+    get_multi_model_service,
+)
 from app.services.ai_trace_storage import get_background_optimization_coordinator
 
 import logging
@@ -431,6 +434,9 @@ class EvaluateModelResult(BaseModel):
     provider: str
     reduced_text: str
     ai_score: int
+    # 🔧 2026-10-08 新增：确定AI段落占比（0-1，越低越好），本接口的排序主项。
+    # ai_score 在 LLM 改写区间恒为 100，仅作诊断。
+    ai_ratio: Optional[float] = None
     latency_seconds: float
     improvement: int
     fidelity_similarity: float = 100.0
@@ -440,6 +446,7 @@ class EvaluateModelsResponse(BaseModel):
     """多模型评测响应"""
     success: bool
     original_ai_score: Optional[int] = None
+    original_ai_ratio: Optional[float] = None
     results: List[EvaluateModelResult] = Field(default_factory=list)
     total_models_tried: int = 0
     total_models_success: int = 0
@@ -541,6 +548,7 @@ async def evaluate_models(
         return EvaluateModelsResponse(
             success=result["success"],
             original_ai_score=result["original_ai_score"],
+            original_ai_ratio=result.get("original_ai_ratio"),
             results=[EvaluateModelResult(**r) for r in result["results"]],
             total_models_tried=result["total_models_tried"],
             total_models_success=result["total_models_success"],
@@ -589,7 +597,14 @@ async def get_model_combinations(
             for record in models.values()
         ]
         combinations.sort(key=lambda item: item["composite_score"])
-        return {"success": True, "genre": target, "combinations": combinations}
+        return {
+            "success": True,
+            "genre": target,
+            "combinations": combinations,
+            # 当前评测口径版本由后端下发，避免前端硬编码版本号
+            # （历史上前端写死 'ai-trace-v2'，后端已升到 v5，管理页长期误判"已过期"）
+            "current_policy_version": EVALUATION_POLICY_VERSION,
+        }
     records = service.config_storage.load_combination_performance(target)
     prompt_selection = EvolutionStorage().get_prompt_selection(target)
     model_config = service.get_model_config(target)
@@ -612,7 +627,12 @@ async def get_model_combinations(
         for record in models.values()
     ]
     combinations.sort(key=lambda item: item["composite_score"])
-    return {"success": True, "genre": target, "combinations": combinations}
+    return {
+        "success": True,
+        "genre": target,
+        "combinations": combinations,
+        "current_policy_version": EVALUATION_POLICY_VERSION,
+    }
 
 
 @router.get("/background-status")

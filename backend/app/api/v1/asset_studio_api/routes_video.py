@@ -24,7 +24,6 @@ from app.core.security import get_current_user
 from app.db.base import get_db
 from app.models.user import User
 from app.services.audiobook.ai_music import MusicGenerationRequest, MusicStyle, create_music_generator
-from app.services.points_usage_pricing import estimate_asset_studio_basis_yuan
 from core.model_catalog_runtime import get_model_catalog_runtime_index
 from core.model_resolution import normalize_model_id
 from core.unified_media_runtime import UnifiedMediaResult, media_runtime
@@ -37,11 +36,14 @@ from app.api.v1.asset_studio_api._constants import *
 from app.api.v1.asset_studio_api._helpers import *
 from app.api.v1.asset_studio_api._helpers import (
     _build_response,
+    _estimate_video_basis_yuan,
     _merge_points_billing_metadata,
     _parse_optional_int,
     _raise_for_failed_result,
     _release_asset_studio_billing_safely,
     _reserve_asset_studio_billing,
+    _resolve_requested_video_model,
+    _resolve_video_billing_seconds,
     _save_upload_file,
     _settle_asset_studio_billing,
     _validate_dimensions_for_models,
@@ -73,21 +75,19 @@ def generate_video_asset(
         if reference_image and reference_image.filename
         else None
     )
-    resolved_model_id = requested_model_id if requested_model_id in VIDEO_MODELS else DEFAULT_VIDEO_GENERATION_MODEL_ID
-    if reference_path and resolved_model_id not in {DEFAULT_MOTION_MODEL_ID}:
-        resolved_model_id = DEFAULT_MOTION_MODEL_ID
-    if resolved_model_id == DEFAULT_MOTION_MODEL_ID and not reference_path:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="wan2.7-i2v 需要上传首帧参考图",
-        )
+    resolved_model_id = _resolve_requested_video_model(
+        requested_model_id,
+        allowed_models=VIDEO_MODELS,
+        request_label="视频生成",
+    )
     resolved_width, resolved_height = _validate_dimensions_for_models(
-        VIDEO_MODELS,
+        {resolved_model_id},
         width,
         height,
         request_label="视频",
     )
-    resolved_duration = _validate_video_duration(resolved_model_id, max(1.0, min(float(duration), 15.0)))
+    resolved_duration = _validate_video_duration(resolved_model_id, float(duration))
+    billing_duration_seconds = _resolve_video_billing_seconds(resolved_model_id, resolved_duration)
     logger.info(
         "Asset Studio video request accepted | model_id=%s | size=%sx%s | duration=%s | has_reference_image=%s",
         resolved_model_id,
@@ -98,13 +98,13 @@ def generate_video_asset(
     )
 
     mode = "image_to_video" if reference_path else "text_to_video"
-    basis_yuan = estimate_asset_studio_basis_yuan(
+    basis_yuan = _estimate_video_basis_yuan(
         kind="video",
         mode=mode,
         model_id=resolved_model_id,
-        duration_seconds=resolved_duration,
-        output_count=1,
-        prompt_chars=len(cleaned_prompt),
+        duration_seconds=billing_duration_seconds,
+        width=resolved_width,
+        height=resolved_height,
     )
     precheck = None
     try:
@@ -142,11 +142,14 @@ def generate_video_asset(
             result.model_id,
             len(result.outputs or []),
         )
-        routing_message = None
-        if requested_model_id != resolved_model_id:
-            routing_message = "检测到参考图输入，已自动切换到图生视频模型。"
-        if str(result.model_id or "") and str(result.model_id or "") != resolved_model_id:
-            routing_message = f"当前请求参数与 {resolved_model_id} 的约束不兼容，已自动改用 {result.model_id}。"
+        executed_model_id = str(result.model_id or "")
+        if executed_model_id and executed_model_id != resolved_model_id:
+            # 入口已按目标模型的档案区间预检，运行时仍改档说明碰到了预检覆盖不到的约束。
+            # 此处绝不交付换档产物：冻结会在 except 里释放，用户不会被按 A 模型计费拿 B 模型。
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"当前请求参数与 {resolved_model_id} 的约束不兼容（运行时候选为 {executed_model_id}），已中止且不计费。",
+            )
         response = _build_response(
             kind="video",
             mode=mode,
@@ -156,8 +159,7 @@ def generate_video_asset(
                     "has_reference_image": bool(reference_path),
                     "requested_model_id": requested_model_id,
                     "resolved_model_id": resolved_model_id,
-                    "executed_model_id": str(result.model_id or ""),
-                    "routing_message": routing_message,
+                    "executed_model_id": executed_model_id,
                 },
                 precheck,
             ),
@@ -215,14 +217,19 @@ def generate_motion_asset(
     requested_model_id = (model_id or "").strip() or DEFAULT_MOTION_MODEL_ID
     seed_value = _parse_optional_int(seed)
     reference_path = _save_upload_file(reference_image, subdir="motion")
-    resolved_model_id = requested_model_id if requested_model_id in MOTION_MODELS else DEFAULT_MOTION_MODEL_ID
+    resolved_model_id = _resolve_requested_video_model(
+        requested_model_id,
+        allowed_models=MOTION_MODELS,
+        request_label="动作控制",
+    )
     resolved_width, resolved_height = _validate_dimensions_for_models(
-        MOTION_MODELS,
+        {resolved_model_id},
         width,
         height,
         request_label="视频",
     )
-    resolved_duration = _validate_video_duration(resolved_model_id, max(1.0, min(float(duration), 15.0)))
+    resolved_duration = _validate_video_duration(resolved_model_id, float(duration))
+    billing_duration_seconds = _resolve_video_billing_seconds(resolved_model_id, resolved_duration)
     logger.info(
         "Asset Studio motion request accepted | model_id=%s | size=%sx%s | duration=%s",
         resolved_model_id,
@@ -232,13 +239,13 @@ def generate_motion_asset(
     )
 
     mode = "image_to_video_motion"
-    basis_yuan = estimate_asset_studio_basis_yuan(
+    basis_yuan = _estimate_video_basis_yuan(
         kind="motion",
         mode=mode,
         model_id=resolved_model_id,
-        duration_seconds=resolved_duration,
-        output_count=1,
-        prompt_chars=len(cleaned_prompt),
+        duration_seconds=billing_duration_seconds,
+        width=resolved_width,
+        height=resolved_height,
     )
     precheck = None
     try:
@@ -276,6 +283,12 @@ def generate_motion_asset(
             result.model_id,
             len(result.outputs or []),
         )
+        executed_model_id = str(result.model_id or "")
+        if executed_model_id and executed_model_id != resolved_model_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"当前请求参数与 {resolved_model_id} 的约束不兼容（运行时候选为 {executed_model_id}），已中止且不计费。",
+            )
         response = _build_response(
             kind="motion",
             mode=mode,
@@ -285,12 +298,7 @@ def generate_motion_asset(
                     "motion_control": motion_control,
                     "requested_model_id": requested_model_id,
                     "resolved_model_id": resolved_model_id,
-                    "executed_model_id": str(result.model_id or ""),
-                    "routing_message": (
-                        f"当前请求参数与 {resolved_model_id} 的约束不兼容，已自动改用 {result.model_id}。"
-                        if str(result.model_id or "") and str(result.model_id or "") != resolved_model_id
-                        else None
-                    ),
+                    "executed_model_id": executed_model_id,
                 },
                 precheck,
             ),

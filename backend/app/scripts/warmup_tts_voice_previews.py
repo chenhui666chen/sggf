@@ -6,7 +6,7 @@
 
 运行方式（在 backend/ 目录下）：
     python -m app.scripts.warmup_tts_voice_previews
-    python -m app.scripts.warmup_tts_voice_previews --models qwen3-tts-instruct-flash --limit-per-model 3
+    python -m app.scripts.warmup_tts_voice_previews --models qwen-audio-3.1-tts-flash --limit-per-model 3
     python -m app.scripts.warmup_tts_voice_previews --dry-run
     python -m app.scripts.warmup_tts_voice_previews --force
 """

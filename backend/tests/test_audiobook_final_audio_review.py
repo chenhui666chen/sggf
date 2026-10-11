@@ -90,10 +90,10 @@ def test_final_audio_review_includes_prompt_audio_quality_feedback_by_model():
         },
         SimpleNamespace(
             voice_params={
-                "resolved_tts_model": "qwen3-tts-instruct-flash",
+                "resolved_tts_model": "qwen-audio-3.1-tts-flash",
                     "provider_prompt_snapshot": {
                         "voice_identity_policy_version": VOICE_IDENTITY_POLICY_VERSION,
-                        "model": "qwen3-tts-instruct-flash",
+                        "model": "qwen-audio-3.1-tts-flash",
                     "provider_prompt": {"instructions": "Read calmly."},
                 },
             }
@@ -137,7 +137,7 @@ def test_final_audio_review_includes_prompt_audio_quality_feedback_by_model():
     }
     assert feedback["by_model"]["seed-tts-2.0-expressive"]["model_family"] == "doubao"
     assert feedback["by_model"]["seed-tts-2.0-expressive"]["use_tag_parser_count"] == 1
-    assert feedback["by_model"]["qwen3-tts-instruct-flash"]["manual_review_segment_indices"] == []
+    assert feedback["by_model"]["qwen-audio-3.1-tts-flash"]["manual_review_segment_indices"] == []
 
 
 def test_final_audio_review_uses_audio_presence_without_segment_bytes():

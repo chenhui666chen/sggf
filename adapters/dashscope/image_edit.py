@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Optional
 
 from adapters.base import BaseAdapter, AdapterConfig, GenerationResult
 from adapters.registry import register_model
-from adapters._shared import DASHSCOPE_API_KEY, DASHSCOPE_BASE, _encode_image
+from adapters._shared import DASHSCOPE_BASE, _encode_image, require_api_key
 from schemas.model_spec import ModelSpec
 from schemas.common import ModelStatus
 
@@ -32,7 +32,7 @@ class _ImageEditAdapter(BaseAdapter):
         start = time.time()
         try:
             url = f"{DASHSCOPE_BASE}/api/v1/services/aigc/multimodal-generation/generation"
-            headers = {"Authorization": f"Bearer {DASHSCOPE_API_KEY}", "Content-Type": "application/json"}
+            headers = {"Authorization": f"Bearer {require_api_key('DASHSCOPE_API_KEY')}", "Content-Type": "application/json"}
             content = [{"text": prompt or "请编辑这张图片"}]
             if kwargs.get("image_path"):
                 img = _encode_image(kwargs["image_path"])
@@ -47,6 +47,9 @@ class _ImageEditAdapter(BaseAdapter):
                 "input": {"messages": [{"role": "user", "content": content}]},
                 "parameters": {"size": kwargs.get("size", "1024*1024"), "n": 1},
             }
+            negative_prompt = str(kwargs.get("negative_prompt") or "").strip()
+            if negative_prompt:
+                payload["parameters"]["negative_prompt"] = negative_prompt
 
             r = requests.post(url, json=payload, headers=headers, timeout=120)
             data = r.json()

@@ -48,7 +48,7 @@ from app.services.audiobook.tts_engine import RetryConfig, TTSEngine  # noqa: E4
 from app.services.audiobook.tts_model_ids import (  # noqa: E402
     MIMO_V25_TTS_MODEL,
     SEED_TTS_20_EXPRESSIVE_MODEL,
-    STEPAUDIO_25_TTS_MODEL,
+    STEPAUDIO_3_TTS_MODEL,
 )
 from app.services.audiobook.tts_style_control import (  # noqa: E402
     build_model_style_control,
@@ -227,7 +227,7 @@ def _p1_cases(*, cosyvoice_voice_id: str, stepaudio_voice_id: str) -> list[Accep
                 id=f"p1_stepaudio_{index:02d}_{item['case_name']}",
                 group="P1 StepAudio pause/template",
                 provider="stepfun",
-                model=STEPAUDIO_25_TTS_MODEL,
+                model=STEPAUDIO_3_TTS_MODEL,
                 speaker=stepaudio_voice_id,
                 voice_description="性别：男性，年龄感：青年，音调：偏低，语速：中速，情绪：克制，特点：沙哑、有磁性，用途：有声书旁白或对白。",
                 **item,

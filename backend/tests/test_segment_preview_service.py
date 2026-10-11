@@ -59,7 +59,7 @@ def install_fake_voice_manager(monkeypatch):
 def test_segment_preview_service_resolves_voice_params(monkeypatch):
     manager = install_fake_voice_manager(monkeypatch)
     service = SegmentPreviewService(
-        tts_model="qwen3-tts-instruct-flash",
+        tts_model="qwen-audio-3.1-tts-flash",
         voice_mapping={"旁白": {"voice_id": "voice-a"}},
         audio_fx={},
     )
@@ -98,7 +98,7 @@ def test_segment_preview_service_resolves_voice_params(monkeypatch):
 def test_segment_preview_service_uses_instruction_pace_and_keeps_emotion_consistent(monkeypatch):
     install_fake_voice_manager(monkeypatch)
     service = SegmentPreviewService(
-        tts_model="qwen3-tts-instruct-flash",
+        tts_model="qwen-audio-3.1-tts-flash",
         voice_mapping={},
         audio_fx={},
     )
@@ -304,7 +304,7 @@ def test_segment_preview_service_generates_voice_preview(monkeypatch):
         return b"RIFFpreview-audio"
 
     service = SegmentPreviewService(
-        tts_model="qwen3-tts-instruct-flash",
+        tts_model="qwen-audio-3.1-tts-flash",
         voice_mapping={},
         audio_fx={},
         synthesize_speech=fake_synthesize_speech,
@@ -324,7 +324,7 @@ def test_segment_preview_service_generates_voice_preview(monkeypatch):
 
     assert result.audio == b"RIFFpreview-audio"
     assert result.media_type == "audio/wav"
-    assert synthesize_call["model_id"] == "qwen3-tts-instruct-flash"
+    assert synthesize_call["model_id"] == "qwen-audio-3.1-tts-flash"
     assert synthesize_call["enable_cache"] is False
     assert synthesize_call["retry_config"].max_retries == 4
     assert synthesize_call["retry_config"].max_delay == 8.0
@@ -333,7 +333,7 @@ def test_segment_preview_service_generates_voice_preview(monkeypatch):
 def test_segment_preview_service_allows_empty_text_for_sfx(monkeypatch):
     install_fake_voice_manager(monkeypatch)
     service = SegmentPreviewService(
-        tts_model="qwen3-tts-instruct-flash",
+        tts_model="qwen-audio-3.1-tts-flash",
         voice_mapping={},
         audio_fx={},
     )
@@ -407,7 +407,7 @@ def test_sfx_preview_raises_when_library_has_no_matching_effect(monkeypatch):
     install_fake_voice_manager(monkeypatch)
     _install_placeholder_designer(monkeypatch)
     service = SegmentPreviewService(
-        tts_model="qwen3-tts-instruct-flash",
+        tts_model="qwen-audio-3.1-tts-flash",
         voice_mapping={},
         audio_fx={},
     )
@@ -442,7 +442,7 @@ def test_sfx_preview_lists_only_missing_effect_names(monkeypatch, tmp_path):
         matched_files={"door": "sound_effects/door.wav"},
     )
     service = SegmentPreviewService(
-        tts_model="qwen3-tts-instruct-flash",
+        tts_model="qwen-audio-3.1-tts-flash",
         voice_mapping={},
         audio_fx={},
         audio_library_dir=audio_library,
@@ -470,7 +470,7 @@ def test_bgm_preview_raises_when_library_has_no_matching_music(monkeypatch, tmp_
     audio_library = tmp_path / "audio_library"
     audio_library.mkdir(parents=True)
     service = SegmentPreviewService(
-        tts_model="qwen3-tts-instruct-flash",
+        tts_model="qwen-audio-3.1-tts-flash",
         voice_mapping={},
         audio_fx={},
         audio_library_dir=audio_library,
@@ -515,7 +515,7 @@ def test_bgm_preview_succeeds_when_style_matches_library(monkeypatch, tmp_path):
         encoding="utf-8",
     )
     service = SegmentPreviewService(
-        tts_model="qwen3-tts-instruct-flash",
+        tts_model="qwen-audio-3.1-tts-flash",
         voice_mapping={},
         audio_fx={},
         audio_library_dir=audio_library,

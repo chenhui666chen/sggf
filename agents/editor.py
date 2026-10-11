@@ -9,7 +9,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from pipeline.artifacts_io import download_url_to_path as _download_url_to_path
 from pipeline.ffmpeg_runner import run_ffmpeg as _run_ffmpeg
-from pipeline.media_presets import resolve_frame_size
+from pipeline.media_presets import DREAMWEAVER_WAN_MODEL_ID, resolve_frame_size
 
 
 def _env_flag(name: str, default: bool) -> bool:
@@ -371,7 +371,7 @@ def _asset_shot_role_from_path(path: str) -> Tuple[Optional[str], Optional[str]]
 def _resolve_video_edit_settings(payload: Dict[str, Any]) -> Tuple[bool, str]:
     cfg = payload.get("video_edit_config") if isinstance(payload.get("video_edit_config"), dict) else {}
     enabled = bool(cfg.get("enabled")) if isinstance(cfg.get("enabled"), bool) else False
-    model_id = str(cfg.get("adapter") or "").strip() or "wan2.7-videoedit"
+    model_id = str(cfg.get("adapter") or "").strip() or DREAMWEAVER_WAN_MODEL_ID
     return enabled, model_id
 
 
@@ -833,9 +833,9 @@ def run(ctx: Any) -> None:
 
         if subtitle_filter:
             cmd.extend(["-vf", subtitle_filter])
-            cmd.extend(["-c:v", "libx264", "-pix_fmt", "yuv420p"])
+            cmd.extend(["-c:v", "libx264", "-crf", "20", "-pix_fmt", "yuv420p"])
         elif reencode_video:
-            cmd.extend(["-c:v", "libx264", "-pix_fmt", "yuv420p"])
+            cmd.extend(["-c:v", "libx264", "-crf", "20", "-pix_fmt", "yuv420p"])
         else:
             cmd.extend(["-c:v", "copy"])
 

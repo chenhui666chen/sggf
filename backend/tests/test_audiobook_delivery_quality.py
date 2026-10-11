@@ -181,7 +181,7 @@ def test_engine_review_segments_prepare_temporary_delivery_plan_before_voice_ass
     from app.services.audiobook.script_adapter_pkg._dataclasses import ScriptSegment
 
     engine = AudiobookEngineBase.__new__(AudiobookEngineBase)
-    engine.tts_model = "qwen3-tts-instruct-flash"
+    engine.tts_model = "qwen-audio-3.1-tts-flash"
     segment = ScriptSegment(
         type="dialogue",
         speaker="岑霜",

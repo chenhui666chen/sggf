@@ -18,7 +18,7 @@ from app.services.audiobook.tts_engine import TTSEngine
 from app.services.audiobook.tts_model_ids import (
     MIMO_V25_TTS_MODEL,
     MIMO_V25_TTS_VOICE_DESIGN_MODEL,
-    STEPAUDIO_25_TTS_MODEL,
+    STEPAUDIO_3_TTS_MODEL,
 )
 from app.services.audiobook.tts_style_control import build_model_style_control
 from app.services.audiobook.segment_direction_service import assist_segment_direction
@@ -285,7 +285,7 @@ def test_fixed_voice_ssml_unwraps_pitch_elements_and_removes_pitch_contours() ->
 
 def test_low_level_fixed_voice_engine_filters_identity_controls_before_provider() -> None:
     engine = TTSEngine(
-        model="qwen3-tts-instruct-flash",
+        model="qwen-audio-3.1-tts-flash",
         enable_cache=False,
         request_delay=0,
     )
@@ -402,7 +402,7 @@ def test_fixed_voice_prompt_does_not_send_voice_profile_back_to_tts() -> None:
 
 def test_fixed_voice_prompt_removes_timbre_replacement_but_keeps_delivery() -> None:
     control = build_model_style_control(
-        "qwen3-tts-instruct-flash",
+        "qwen-audio-3.1-tts-flash",
         {
             "speaker": "Neil",
             "segment_type": "narration",
@@ -433,7 +433,7 @@ def test_fixed_voice_prompt_removes_timbre_replacement_but_keeps_delivery() -> N
 
 def test_fixed_voice_prompt_normalizes_injury_hoarseness_to_original_voice() -> None:
     control = build_model_style_control(
-        "qwen3-tts-instruct-flash",
+        "qwen-audio-3.1-tts-flash",
         {
             "speaker": "Neil",
             "performance_notes": "因重伤而声音沙哑，语速缓慢，声音虚弱。",
@@ -450,7 +450,7 @@ def test_fixed_voice_prompt_normalizes_injury_hoarseness_to_original_voice() -> 
 
 def test_fixed_voice_prompt_links_adjacent_illness_and_hoarseness_clauses() -> None:
     control = build_model_style_control(
-        "qwen3-tts-instruct-flash",
+        "qwen-audio-3.1-tts-flash",
         {
             "speaker": "Neil",
             "performance_notes": "因为感冒，声音沙哑，语速偏慢。",
@@ -466,7 +466,7 @@ def test_fixed_voice_prompt_links_adjacent_illness_and_hoarseness_clauses() -> N
 
 def test_fixed_voice_prompt_filters_english_voice_identity_changes() -> None:
     control = build_model_style_control(
-        "qwen3-tts-instruct-flash",
+        "qwen-audio-3.1-tts-flash",
         {
             "speaker": "Neil",
             "performance_notes": (
@@ -1004,7 +1004,7 @@ def test_seed_audio_tags_drop_identity_transformations_and_keep_temporary_textur
 
 def test_stepaudio_audio_tags_drop_identity_transformations_and_keep_temporary_texture() -> None:
     control = build_model_style_control(
-        STEPAUDIO_25_TTS_MODEL,
+        STEPAUDIO_3_TTS_MODEL,
         {
             "speaker": "default",
             "inline_audio_tags": ["低语", "童声", "因生病轻微沙哑"],
@@ -1055,7 +1055,7 @@ def test_mimo_audio_tag_payload_sends_identity_guard_before_performance() -> Non
 
 def test_explicit_only_temporary_texture_still_gets_original_voice_guard() -> None:
     control = build_model_style_control(
-        "qwen3-tts-instruct-flash",
+        "qwen-audio-3.1-tts-flash",
         {
             "speaker": "Neil",
             "instructions": "因重伤而短暂沙哑，语速缓慢。",
@@ -1070,7 +1070,7 @@ def test_explicit_only_temporary_texture_still_gets_original_voice_guard() -> No
 
 def test_english_temporary_hoarseness_does_not_conflict_with_identity_guard() -> None:
     control = build_model_style_control(
-        "qwen3-tts-instruct-flash",
+        "qwen-audio-3.1-tts-flash",
         {
             "speaker": "Neil",
             "instructions": "Because of an injury, Hoarse but controlled.",
@@ -1085,16 +1085,17 @@ def test_english_temporary_hoarseness_does_not_conflict_with_identity_guard() ->
 
 
 def test_legacy_prompt_snapshot_without_identity_policy_version_is_rebuilt() -> None:
+    """服务商快照只作审计产物，固定音色下发时必须在引擎边界重建指令。"""
     engine = TTSEngine(
-        model="qwen3-tts-instruct-flash",
+        model="qwen-audio-3.1-tts-flash",
         enable_cache=False,
         request_delay=0,
     )
 
-    payload = engine._build_qwen_http_payload(
-        model="qwen3-tts-instruct-flash",
+    payload = engine._build_qwen_audio_31_http_payload(
+        model="qwen-audio-3.1-tts-flash",
         text="别回头。",
-        voice_id="Neil",
+        voice_id="yeqinghe_v3.1",
         voice_params={
             "instructions": "语速缓慢，保持克制。",
             "provider_prompt_snapshot": {
@@ -1103,7 +1104,7 @@ def test_legacy_prompt_snapshot_without_identity_policy_version_is_rebuilt() -> 
         },
     )
 
-    instruction = payload["parameters"]["instructions"]
+    instruction = payload["input"]["instruction"]
     assert "旧快照" not in instruction
     assert instruction.startswith("音色约束：保持已选音色")
     assert "语速缓慢，保持克制" in instruction
@@ -1128,7 +1129,7 @@ def test_current_voice_identity_snapshot_requires_version_model_and_voice() -> N
     )
     assert not is_current_voice_identity_snapshot(
         snapshot,
-        model="qwen3-tts-instruct-flash",
+        model="qwen-audio-3.1-tts-flash",
         voice_id="voice-a",
     )
     assert not is_current_voice_identity_snapshot(
@@ -1159,42 +1160,58 @@ def test_segment_preview_rejects_stale_compiled_prompt_snapshot() -> None:
     assert service._resolve_compiled_voice_params(segment) is None
 
 
-def test_qwen_low_budget_uses_complete_compact_identity_guard() -> None:
+def test_qwen_audio_31_long_text_keeps_complete_identity_guard() -> None:
+    """3.1 的 instruction 预算只计量指令本身，正文长度不再挤压音色身份守卫。
+
+    旧 Qwen-TTS 会按正文长度二次收口并把守卫压成短句；3.1 的 1200 预算不随正文
+    变化，因此长段落也必须下发完整守卫文案，不能出现省略号截断。
+    """
     engine = TTSEngine(
-        model="qwen3-tts-instruct-flash",
+        model="qwen-audio-3.1-tts-flash",
         enable_cache=False,
         request_delay=0,
     )
 
-    payload = engine._build_qwen_http_payload(
-        model="qwen3-tts-instruct-flash",
+    payload = engine._build_qwen_audio_31_http_payload(
+        model="qwen-audio-3.1-tts-flash",
         text="长" * 555,
-        voice_id="Neil",
+        voice_id="yeqinghe_v3.1",
         voice_params={"instructions": "语速缓慢并保持克制。"},
     )
 
-    instruction = payload["parameters"]["instructions"]
-    assert instruction.startswith("保持已选音色身份和基础声线，仅调整表演")
-    assert "音色约束：保持已选音色的说话人身…" not in instruction
+    instruction = payload["input"]["instruction"]
+    assert instruction.startswith("音色约束：保持已选音色")
+    assert "只在原音色基础上调整当前片段表演。" in instruction
+    assert "…" not in instruction
+    assert "语速缓慢并保持克制" in instruction
 
 
-def test_qwen_refit_compacts_identity_guard_to_preserve_performance() -> None:
+def test_qwen_audio_31_budget_overflow_preserves_identity_guard() -> None:
+    """指令超出 1200 预算时，必须截断后段表演说明而不是丢弃身份守卫。"""
     engine = TTSEngine(
-        model="qwen3-tts-instruct-flash",
+        model="qwen-audio-3.1-tts-flash",
         enable_cache=False,
         request_delay=0,
     )
+    long_notes = "。".join(f"第{index}句表演说明，气息收紧一点" for index in range(120))
 
-    payload = engine._build_qwen_http_payload(
-        model="qwen3-tts-instruct-flash",
-        text="长" * 520,
-        voice_id="Neil",
-        voice_params={"instructions": "语速缓慢，重读痛字，句尾拖长。"},
+    payload = engine._build_qwen_audio_31_http_payload(
+        model="qwen-audio-3.1-tts-flash",
+        text="一段正文",
+        voice_id="yeqinghe_v3.1",
+        voice_params={
+            "segment_speaker": "旁白",
+            "segment_type": "narration",
+            "performance_notes": long_notes,
+        },
     )
 
-    instruction = payload["parameters"]["instructions"]
-    assert instruction.startswith("保持已选音色身份和基础声线，仅调整表演")
-    assert "语速缓慢" in instruction
+    instruction = payload["input"]["instruction"]
+    assert len(instruction) <= 1200
+    assert instruction.startswith("音色约束：保持已选音色")
+    assert "只在原音色基础上调整当前片段表演。" in instruction
+    assert "演绎要求：第0句表演说明" in instruction
+    assert instruction.endswith("…")
 
 
 def test_minimax_basic_mode_does_not_derive_pitch_shift_from_performance_prompt() -> None:

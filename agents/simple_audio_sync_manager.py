@@ -75,7 +75,7 @@ class SimpleAudioSyncManager:
         use_cache: bool = True
     ) -> Optional[str]:
         """
-        为对话生成音频（使用Qwen3-TTS）
+        为对话生成音频（走配置的 TTS 引擎）
         
         Args:
             shot_id: 镜头ID
@@ -93,8 +93,8 @@ class SimpleAudioSyncManager:
             return None
         
         tts_params = {
-            "model": "qwen3-tts",
-            "voice": voice_id or "Ryan",
+            "model": "qwen-audio-3.1-tts-flash",
+            "voice": voice_id or "longsanshu_v3.1",
             "voice_style": voice_style
         }
         
@@ -117,7 +117,7 @@ class SimpleAudioSyncManager:
             result = synthesize_speech_sync(
                 text=dialogue,
                 voice_params={
-                    "speaker": voice_id or "Ryan",
+                    "speaker": voice_id or "longsanshu_v3.1",
                     "voice_style": voice_style,
                     "character_id": character_id,
                     "rate": 1.0,
@@ -126,7 +126,7 @@ class SimpleAudioSyncManager:
                     "volume": 50,
                 },
                 emotion="neutral",
-                model_id="qwen3-tts-instruct-flash",
+                model_id="qwen-audio-3.1-tts-flash",
             )
             
             if result.success and result.data:

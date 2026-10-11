@@ -22,6 +22,7 @@ from app.schemas.audiobook import (
 )
 from app.services.audiobook.tts_engine import RetryConfig as TTSRetryConfig
 from app.services.audiobook.tts_model_ids import (
+    DEFAULT_AUDIOBOOK_TTS_MODEL,
     MINIMAX_SPEECH_28_HD_MODEL,
     MINIMAX_SPEECH_28_TURBO_MODEL,
 )
@@ -45,6 +46,7 @@ from app.services.audiobook.segment_asset_ai_generator import (
     generate_segment_sfx_asset,
 )
 from app.services.audiobook.tts_delivery_plan import resolve_segment_tts_model
+from app.services.audiobook.voice_manager import VoiceMappingResolutionError
 from app.services.audiobook.chapter_segment_assets import (
     SERVER_MANAGED_SEGMENT_ASSET_FIELDS,
     collect_segment_asset_refs,
@@ -87,7 +89,12 @@ from app.api.v1.audiobook_api import router
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_SEGMENT_REGEN_VOICE_ID = "Neil"
+# MiniMax 是唯一"空音色会被引擎直接拒单"的现役模型（`_call_dashscope_minimax_http`
+# 抛 TTSUserInputError），所以只有它需要接口侧的显式兜底声线。
+# 其余模型（Qwen-Audio 3.1 / StepAudio / Seed-TTS / MiMo）一律不在此处编音色名：
+# 它们的默认音色只能在引擎各模型载荷组装点定义，接口层重复一份就必然出现
+# "按 A 供应商的音色空间给 B 供应商挑音色"的错配——历史写法硬编码 "Neil" 时，
+# 现役上游把它判为无效 voice 且本地无任何报错，只表现为"这句试听没有声音"。
 DEFAULT_MINIMAX_SEGMENT_REGEN_VOICE_ID = "male-qn-qingse"
 SEGMENT_REGEN_PREVIEW_TYPES = {"voice", "sfx", "bgm", "mix"}
 MAX_SEGMENT_VOICE_RECORDING_BYTES = 100 * 1024 * 1024
@@ -95,7 +102,7 @@ MAX_SEGMENT_VOICE_RECORDING_BYTES = 100 * 1024 * 1024
 # 时间线试听的 checkpoint 来源优先级：最近一次混音产物 > 管线原始生成
 _SEGMENT_TIMELINE_PREVIEW_RUN_TYPES = ("chapter_remix", "audio_from_scripts", "full")
 # 仅用于解析项目 audio_fx，取值不影响音效配置本身
-_SEGMENT_TIMELINE_PREVIEW_TTS_MODEL = "qwen3-tts-instruct-flash"
+_SEGMENT_TIMELINE_PREVIEW_TTS_MODEL = DEFAULT_AUDIOBOOK_TTS_MODEL
 
 
 def _normalize_segment_regeneration_preview_type(value: Optional[str]) -> str:
@@ -234,7 +241,8 @@ def _resolve_segment_regen_voice_id(
             status_code=400,
             detail="cosyvoice-v3.5-plus 片段重生成需要显式选择复刻或设计音色",
         )
-    return DEFAULT_SEGMENT_REGEN_VOICE_ID
+    # 留给引擎：空 speaker 会被各模型载荷组装点兜成自己的默认音色。
+    return ""
 
 
 def _build_segment_synthesis_payload(
@@ -332,7 +340,7 @@ async def _synthesize_segment_audio(
     )
 
     if not audio_bytes:
-        raise HTTPException(status_code=500, detail="TTS 鐢熸垚澶辫触")
+        raise HTTPException(status_code=500, detail="TTS 生成失败")
 
     return {
         **payload,
@@ -468,12 +476,16 @@ async def _generate_segment_regeneration_audio(
     )
     compiled_segment = compiled["segment"]
     tts_model = compiled["tts_model"]
-    preview_service = SegmentPreviewService(
-        tts_model=tts_model,
-        voice_mapping=runtime_config.voice_mapping,
-        audio_fx=runtime_config.audio_fx,
-        synthesize_speech=runtime_synthesize_speech,
-    )
+    try:
+        preview_service = SegmentPreviewService(
+            tts_model=tts_model,
+            voice_mapping=runtime_config.voice_mapping,
+            audio_fx=runtime_config.audio_fx,
+            synthesize_speech=runtime_synthesize_speech,
+        )
+    except VoiceMappingResolutionError as exc:
+        # 角色音越界按 400 回给用户，不静默换声线生成一条"听着不对"的候选
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     result = await preview_service.generate_preview(compiled_segment, preview_type=preview_type)
     return {
         **compiled,

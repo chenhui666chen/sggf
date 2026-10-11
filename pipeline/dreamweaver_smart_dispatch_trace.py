@@ -183,7 +183,7 @@ def _pick_prompt_pair_from_records(records: List[Dict[str, Any]]) -> Tuple[Optio
 
 def _resolve_frame_model_id(*, payload: Dict[str, Any], role: str, via: str, mode: str) -> Optional[str]:
     image_cfg = _as_dict(payload.get("image_config"))
-    t2i_model = _clean_text(image_cfg.get("adapter")) or "wan2.6-t2i"
+    t2i_model = _clean_text(image_cfg.get("adapter")) or "qwen-image-3.0-pro"
     normalized_role = _clean_text(role).lower()
     normalized_via = _clean_text(via).lower()
     normalized_mode = _clean_text(mode).lower()
@@ -241,7 +241,7 @@ def _build_frame_phase_trace(payload: Dict[str, Any], *, stage: str, key: str, d
     attempted_models = _unique_strings(item.get("model_id") for item in records)
     actual_model = _choose_primary_model(item.get("model_id") for item in records)
     image_cfg = _as_dict(payload.get("image_config"))
-    selected_model = actual_model or _trim_or_none(image_cfg.get("adapter")) or "wan2.6-t2i"
+    selected_model = actual_model or _trim_or_none(image_cfg.get("adapter")) or "qwen-image-3.0-pro"
     fallback_models = [item for item in attempted_models if item != selected_model]
     prompt_before, prompt_after = _pick_prompt_pair_from_records(records)
     prompt = _build_prompt_trace(

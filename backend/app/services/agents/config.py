@@ -21,7 +21,7 @@ class Config:
     """System configuration."""
 
     # DeepSeek model routing settings (served through official DeepSeek API)
-    MODEL_NAME = os.getenv("MODEL_NAME", "deepseek-v4-pro")
+    MODEL_NAME = os.getenv("MODEL_NAME", "deepseek-pro")
     DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
     DEEPSEEK_API_BASE = os.getenv("DEEPSEEK_API_BASE", "https://api.deepseek.com")
 
@@ -39,7 +39,7 @@ class Config:
         os.getenv("CHROMA_PERSIST_DIRECTORY", "./chroma_db")
     )
 
-    # Agent闂備焦婢樼粔鍫曟偪?
+    # Agent配置
     MAX_CONTEXT_LENGTH = int(os.getenv("MAX_CONTEXT_LENGTH", "4000"))
     TEMPERATURE = float(os.getenv("TEMPERATURE", "0.7"))
 

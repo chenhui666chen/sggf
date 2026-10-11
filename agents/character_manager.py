@@ -147,7 +147,9 @@ class CharacterManager:
                 pass
 
         if not profile.voice_id:
-            profile.voice_id = preferred_voice_id or "Ryan"
+            # Qwen-Audio 3.1 的音色空间里没有已退役的 Qwen3-TTS 音色名（如 Ryan），
+            # 未命中音色档案时落到 3.1 目录里的默认说书男声，避免把无效声线发给上游。
+            profile.voice_id = preferred_voice_id or "longsanshu_v3.1"
             changed = True
         if not profile.voice_profile_id:
             profile.voice_profile_id = profile.voice_id

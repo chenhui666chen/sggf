@@ -125,6 +125,9 @@ class WorkflowChapterGenerationContext:
     rag_query_text: str = ""
     focus_character_names: List[str] = field(default_factory=list)
     core_character_names: List[str] = field(default_factory=list)
+    # 阶段 A 观测：卷是否命中、细纲状态（available/missing）
+    volume_matched: bool = False
+    outline_status: str = "missing"
 
 
 WORKFLOW_STAGE_FIELD_MAP: dict[str, str] = {
@@ -1355,6 +1358,8 @@ class WorkflowContextBuilder:
             rag_query_text=rag_query_text,
             focus_character_names=focus_character_names,
             core_character_names=core_character_names,
+            volume_matched=bool(volume_data),
+            outline_status="available" if current_chapter_outline else "missing",
         )
 
     def build_typed_rag_context(

@@ -8,9 +8,11 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from .constants import QWEN3_TTS_INSTRUCT_SUPPORTED_VOICES
+from app.schemas.voice_tags import voice_tag_label
+
 from .tts_model_ids import (
     DEFAULT_AUDIOBOOK_TTS_MODEL,
+    QWEN_AUDIO_31_TTS_FLASH_MODEL,
     SEED_TTS_20_EXPRESSIVE_MODEL,
     get_audiobook_tts_model_metadata,
     normalize_audiobook_tts_model,
@@ -19,8 +21,7 @@ from .tts_model_ids import (
 logger = logging.getLogger(__name__)
 
 VOICE_FILENAMES_BY_MODEL = {
-    "qwen3-tts-instruct-flash": "qwen3_tts_voices.json",
-    "qwen3-tts-flash": "qwen3_tts_voices.json",
+    QWEN_AUDIO_31_TTS_FLASH_MODEL: "qwen_audio_3_1_tts_voices.json",
     "cosyvoice-v3.5-plus": "cosyvoice_v3_5_plus_voices.json",
     "cosyvoice-v3-plus": "cosyvoice_v3_5_plus_voices.json",
     "minimax-speech-2.8-hd": "minimax_speech_2_8_voices.json",
@@ -28,14 +29,14 @@ VOICE_FILENAMES_BY_MODEL = {
     # 兼容别名
     "minimax-speech-2.8": "minimax_speech_2_8_voices.json",
     "mimo-v2.5-tts": "mimo_v2_5_tts_voices.json",
-    "stepaudio-2.5-tts": "stepaudio_2_5_tts_voices.json",
+    "stepaudio-3-tts": "stepaudio_3_tts_voices.json",
     SEED_TTS_20_EXPRESSIVE_MODEL: "seed_tts_2_0_voices.json",
 }
 
-VOICE_PROFILE_FILENAMES_BY_MODEL = {
-    "qwen3-tts-instruct-flash": "qwen3_tts_voice_profiles.json",
-    "qwen3-tts-flash": "qwen3_tts_voice_profiles.json",
-}
+# 画像文件按目录文件名派生（<模型目录>_voices.json → <...>_voice_profiles.json）：
+# 共用同一目录的模型（如 minimax hd 与 turbo）自动共用同一份画像，避免第二张映射表跑偏。
+# 画像文件尚未生成时 _read_voice_profiles_for_model 返回空表，音色描述退回按 style/性别
+# 推导的默认画像，不影响合成链路。
 
 
 def _resolve_voice_library_path(filename: str) -> Path:
@@ -56,18 +57,11 @@ def _filename_for_model(model: str) -> str:
     # 兼容别名匹配
     if model.startswith("minimax-speech"):
         return VOICE_FILENAMES_BY_MODEL["minimax-speech-2.8-hd"]
-    if model.startswith("qwen3-tts"):
-        return VOICE_FILENAMES_BY_MODEL["qwen3-tts-instruct-flash"]
-    return VOICE_FILENAMES_BY_MODEL["qwen3-tts-instruct-flash"]
+    return VOICE_FILENAMES_BY_MODEL[DEFAULT_AUDIOBOOK_TTS_MODEL]
 
 
-def _profile_filename_for_model(model: str) -> Optional[str]:
-    model = normalize_audiobook_tts_model(model)
-    if model in VOICE_PROFILE_FILENAMES_BY_MODEL:
-        return VOICE_PROFILE_FILENAMES_BY_MODEL[model]
-    if model.startswith("qwen3-tts"):
-        return VOICE_PROFILE_FILENAMES_BY_MODEL["qwen3-tts-instruct-flash"]
-    return None
+def _profile_filename_for_model(model: str) -> str:
+    return _filename_for_model(model).replace("_voices.json", "_voice_profiles.json")
 
 
 class VoiceCatalogError(RuntimeError):
@@ -98,6 +92,47 @@ def _read_voice_profiles_for_model(model: str) -> Dict[str, Dict[str, Any]]:
     }
 
 
+def _project_profile_tags(profile: Dict[str, Any]) -> Dict[str, Any]:
+    """把受控 code 标签投影成运行时画像字段（年龄感/音调/语速/音色特点）。
+
+    展示名由 app.schemas.voice_tags 单点定义，运行时链路只认中文值；
+    人工已经写死的字段优先，投影只补缺，不覆盖修订结果。
+    """
+    tags = profile.get("tags")
+    if not isinstance(tags, dict):
+        return profile
+
+    projected = dict(profile)
+    single_fields = (
+        ("age_group", "age_impression"),
+        ("pitch", "pitch_range"),
+        ("pace", "pace"),
+    )
+    for field_name, dimension in single_fields:
+        if str(projected.get(field_name) or "").strip():
+            continue
+        codes = tags.get(dimension)
+        if not isinstance(codes, list) or not codes:
+            continue
+        try:
+            projected[field_name] = voice_tag_label(dimension, str(codes[0]))["zh"]
+        except ValueError:
+            continue
+
+    if not projected.get("timbre_traits"):
+        codes = tags.get("timbre")
+        if isinstance(codes, list):
+            traits: List[str] = []
+            for code in codes:
+                try:
+                    traits.append(voice_tag_label("timbre", str(code))["zh"])
+                except ValueError:
+                    continue
+            if traits:
+                projected["timbre_traits"] = traits
+    return projected
+
+
 def _merge_voice_profiles(model: str, voices: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     profiles = _read_voice_profiles_for_model(model)
     if not profiles:
@@ -109,22 +144,9 @@ def _merge_voice_profiles(model: str, voices: List[Dict[str, Any]]) -> List[Dict
         profile = profiles.get(voice_id)
         if profile and not voice.get("voice_profile"):
             voice = dict(voice)
-            voice["voice_profile"] = profile
+            voice["voice_profile"] = _project_profile_tags(profile)
         enriched.append(voice)
     return enriched
-
-
-def _filter_voices_for_model(model: str, voices: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    normalized_model = normalize_audiobook_tts_model(model)
-    if normalized_model.startswith("qwen3-tts"):
-        supported = QWEN3_TTS_INSTRUCT_SUPPORTED_VOICES
-        return [
-            voice
-            for voice in voices
-            if (voice.get("id") or voice.get("speaker")) in supported
-            or voice.get("speaker") in supported
-        ]
-    return list(voices)
 
 
 def _read_catalog_for_model(model: str) -> Dict[str, Any]:
@@ -154,7 +176,7 @@ def _read_catalog_for_model(model: str) -> Dict[str, Any]:
         raise VoiceCatalogError(f"Failed to parse {library_path}: {exc}") from exc
 
     raw_voices: List[Dict[str, Any]] = raw.get("voices") or []
-    voices = _merge_voice_profiles(model, _filter_voices_for_model(model, raw_voices))
+    voices = _merge_voice_profiles(model, raw_voices)
     voices_by_id: Dict[str, Dict[str, Any]] = {voice["id"]: voice for voice in voices if voice.get("id")}
     meta = {
         "model": normalized_model or raw.get("model", DEFAULT_AUDIOBOOK_TTS_MODEL),
@@ -179,21 +201,21 @@ def load_voice_catalog_for_model(model: str) -> Dict[str, Any]:
 
 
 def load_voice_catalog() -> Dict[str, Any]:
-    """Backward-compatible default (Qwen3-TTS Instruct Flash)."""
-    return load_voice_catalog_for_model("qwen3-tts-instruct-flash")
+    """Backward-compatible default (default audiobook TTS model)."""
+    return load_voice_catalog_for_model(DEFAULT_AUDIOBOOK_TTS_MODEL)
 
 
-def list_supported_voices(model: str = "qwen3-tts-instruct-flash") -> List[Dict[str, Any]]:
+def list_supported_voices(model: str = DEFAULT_AUDIOBOOK_TTS_MODEL) -> List[Dict[str, Any]]:
     """Return the raw voice entries from the shared catalog."""
     return list(load_voice_catalog_for_model(model)["voices"])
 
 
-def get_voice_entry(voice_id: str, model: str = "qwen3-tts-instruct-flash") -> Optional[Dict[str, Any]]:
+def get_voice_entry(voice_id: str, model: str = DEFAULT_AUDIOBOOK_TTS_MODEL) -> Optional[Dict[str, Any]]:
     """Get a single voice entry by ID."""
     return load_voice_catalog_for_model(model)["voices_by_id"].get(voice_id)
 
 
-def get_voice_catalog_meta(model: str = "qwen3-tts-instruct-flash") -> Dict[str, Any]:
+def get_voice_catalog_meta(model: str = DEFAULT_AUDIOBOOK_TTS_MODEL) -> Dict[str, Any]:
     """Expose catalog metadata (model, updated_at, source, voice_count)."""
     return dict(load_voice_catalog_for_model(model)["meta"])
 

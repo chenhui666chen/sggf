@@ -521,7 +521,7 @@ def regenerate_asset_library(
         image_cfg.get("adapter"),
         current_meta.get("image_model"),
         current_meta.get("t2i_fallback_model"),
-        fallback="wan2.6-t2i",
+        fallback="qwen-image-3.0-pro",
     )
     image_cfg["adapter"] = resolved_image_model
 

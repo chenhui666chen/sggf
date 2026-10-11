@@ -8,11 +8,12 @@
 1. 配置文件中是否声明了目标模型
 2. 运行时 spec 是否能被加载
 3. adapter 是否已注册且可实例化
+   （两类例外标 NON_ADAPTER：LLM 线在 models.yaml 里的档案镜像、由 TTSEngine 直连的语音模型）
 4. 路由层是否至少能给出本地预览结果
 
 示例：
-    python scripts/check_model_integration.py --chain llm --model-id qwen3.7-plus
-    python scripts/check_model_integration.py --chain media --model-id wan2.6-t2i --strategy quality
+    python scripts/check_model_integration.py --chain llm --model-id qwen-plus
+    python scripts/check_model_integration.py --chain media --model-id wan3.0-video --strategy quality
     python scripts/check_model_integration.py --chain all
 """
 
@@ -45,6 +46,27 @@ SUPPORTED_ROUTABLE_MEDIA_MODALITIES = {
     "image_to_image_edit",
 }
 
+# 注册表没有 adapter 的两种预期情形：语音类模型由 TTSEngine 直连供应商实现，
+# LLM 线在 models.yaml 里只是档案镜像（真实执行者是 core/model_hub）。
+TTS_ENGINE_MODALITIES = {
+    "text_to_audio",
+    "text_to_speech",
+    "voice_clone",
+    "voice_design",
+}
+
+
+def non_adapter_reason(
+    model_id: str,
+    spec: Any,
+    llm_model_ids: list[str],
+) -> Optional[str]:
+    if set(getattr(spec, "modality", []) or []) & TTS_ENGINE_MODALITIES:
+        return "语音类模型由 TTSEngine 直连供应商实现，不查 adapter 注册表"
+    if model_id in llm_model_ids:
+        return "LLM 线在 models.yaml 的档案镜像，执行者是 model_hub"
+    return None
+
 
 @dataclass
 class IntegrationCheckResult:
@@ -55,13 +77,19 @@ class IntegrationCheckResult:
     has_spec: bool = False
     has_adapter: bool = False
     adapter_type: Optional[str] = None
+    non_adapter_reason: Optional[str] = None
     route_preview: Optional[dict[str, Any]] = None
     warnings: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
 
     @property
     def is_passed(self) -> bool:
-        return self.in_config and self.has_spec and self.has_adapter and not self.errors
+        return (
+            self.in_config
+            and self.has_spec
+            and (self.has_adapter or self.non_adapter_reason is not None)
+            and not self.errors
+        )
 
     @property
     def status_label(self) -> str:
@@ -70,7 +98,7 @@ class IntegrationCheckResult:
         if not self.in_config or not self.has_spec:
             return "MISSING"
         if not self.has_adapter:
-            return "SPEC_ONLY"
+            return "NON_ADAPTER" if self.non_adapter_reason else "SPEC_ONLY"
         if self.warnings:
             return "WARN"
         return "OK"
@@ -84,6 +112,7 @@ class IntegrationCheckResult:
             "has_spec": self.has_spec,
             "has_adapter": self.has_adapter,
             "adapter_type": self.adapter_type,
+            "non_adapter_reason": self.non_adapter_reason,
             "route_preview": self.route_preview,
             "warnings": self.warnings,
             "errors": self.errors,
@@ -354,6 +383,7 @@ def collect_media_checks(
     model_ids: list[str],
     *,
     configured_model_ids: list[str],
+    llm_model_ids: list[str],
     registry: Any,
     smart_router: Any,
     config_path: Path,
@@ -386,9 +416,15 @@ def collect_media_checks(
         result.has_adapter = adapter is not None
         result.adapter_type = type(adapter).__name__ if adapter else None
         if result.has_spec and not result.has_adapter and not any("adapter 实例化失败" in item for item in result.errors):
-            result.errors.append("运行时未注册 adapter")
+            # 有 spec 却无 adapter 有两种合法来源（LLM 档案镜像 / TTSEngine 直连语音），
+            # 其余情况仍是真的没接上，保持报错以免掩盖残余缺陷。
+            reason = non_adapter_reason(model_id, spec, llm_model_ids)
+            if reason is None:
+                result.errors.append("运行时未注册 adapter")
+            else:
+                result.non_adapter_reason = reason
 
-        if spec is not None:
+        if spec is not None and result.non_adapter_reason is None:
             try:
                 preview = preview_media_routing(
                     model_id,
@@ -446,6 +482,8 @@ def print_results(results: list[IntegrationCheckResult]) -> None:
             f"adapter={'yes' if result.has_adapter else 'no'} "
             f"adapter_type={adapter_display}"
         )
+        if result.non_adapter_reason:
+            print(f"  non_adapter: {result.non_adapter_reason}")
         print(f"  route={format_route_preview(result)}")
         for warning in result.warnings:
             print(f"  warning: {warning}")
@@ -497,6 +535,7 @@ def run_checks(
         media_results = collect_media_checks(
             select_model_ids(model_id, media_model_ids),
             configured_model_ids=media_model_ids,
+            llm_model_ids=llm_model_ids,
             registry=registry,
             smart_router=smart_router,
             config_path=MEDIA_CONFIG_PATH,

@@ -20,7 +20,7 @@ class IntelligentTruncator:
     """AI辅助智能截断器"""
     
     def __init__(self):
-        # 使用 deepseek-v4-flash 做快速摘要（成本低、速度快、1M tokens 上下文）
+        # 使用 deepseek-flash 做快速摘要（成本低、速度快、1M tokens 上下文）
         self.summarizer_llm = create_task_llm(task_type="summarize")
     
     def intelligent_truncate(
@@ -266,7 +266,7 @@ class IntelligentTruncator:
         
         prompt = prompts.get(content_type, prompts["outline"])
         
-        # 调用 deepseek-v4-flash 快速摘要
+        # 调用 deepseek-flash 快速摘要
         response = self.summarizer_llm.invoke([
             SystemMessage(content="你是专业的内容提取专家，擅长从长文本中提取关键信息。"),
             HumanMessage(content=prompt)

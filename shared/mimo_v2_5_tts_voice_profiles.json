@@ -1,0 +1,1468 @@
+{
+  "schema_version": "voice-profile-sidecar-v1",
+  "tagging_schema_version": "voice-profile-tagging-v1",
+  "taxonomy_version": "voice-tags-v2",
+  "model": "mimo-v2.5-tts",
+  "catalog_filename": "mimo_v2_5_tts_voices.json",
+  "catalog_revision": "2105d98158e8aa87",
+  "generated_by": [
+    "doubao-seed-2-1-lite",
+    "qwen3.8-omni-flash"
+  ],
+  "generated_at": "2026-10-10T19:24:06+00:00",
+  "profile_version": "sha256:32bcf8ee8731c768",
+  "voice_profiles": {
+    "mimo_default": {
+      "source": "auto_tagging",
+      "model": "mimo-v2.5-tts",
+      "voice_id": "mimo_default",
+      "preview_text": "人不是慢慢变老的，而是一瞬变老的。",
+      "audio_sha256": "19ebb7f92c7cc27a2e964bfb720d3c742b9844c2a3168e9b860872abaeb2b098",
+      "schema_version": "voice-profile-tagging-v1",
+      "taxonomy_version": "voice-tags-v2",
+      "primary_scorer": "doubao-seed-2-1-lite",
+      "reference_scorer": "qwen3.8-omni-flash",
+      "profile_status": "ready",
+      "review_status": "candidate",
+      "needs_review": true,
+      "needs_review_reasons": [
+        "single_sample_evidence",
+        "scorer_disagreement:style",
+        "scorer_disagreement:pace",
+        "scorer_disagreement:energy"
+      ],
+      "objective": {
+        "passed": true,
+        "reason": "ok",
+        "audio_source": "synthesized",
+        "duration_ms": 6880,
+        "expected_duration_ms": 3669,
+        "silence_ratio": 0.2097,
+        "rms_dbfs": -23.01,
+        "transcript_similarity": 1.0,
+        "transcript": "人不是慢慢变老的，而是一瞬变老的。"
+      },
+      "tags": {
+        "gender_presentation": [
+          "female"
+        ],
+        "age_impression": [
+          "young_adult"
+        ],
+        "timbre": [
+          "clear",
+          "soft"
+        ],
+        "style": [
+          "narration"
+        ],
+        "pitch_range": [
+          "mid"
+        ],
+        "pace": [
+          "medium"
+        ],
+        "energy": [
+          "medium"
+        ],
+        "articulation": [
+          "clear"
+        ],
+        "temperament": [
+          "approachable"
+        ]
+      },
+      "tag_evidence": {
+        "gender_presentation": {
+          "evidence": "音频为成年女性的听感声线",
+          "confidence": 0.95
+        },
+        "age_impression": {
+          "evidence": "呈现青年女性的听感年龄感",
+          "confidence": 0.9
+        },
+        "timbre": {
+          "evidence": "声音干净清亮，质感柔和",
+          "confidence": 0.9
+        },
+        "style": {
+          "evidence": "采用平静客观的散文式叙述表达",
+          "confidence": 0.9
+        },
+        "pitch_range": {
+          "evidence": "整体音高处于中音区间",
+          "confidence": 0.9
+        },
+        "pace": {
+          "evidence": "语速适中，句间有自然停顿",
+          "confidence": 0.9
+        },
+        "energy": {
+          "evidence": "整体能量平稳适中",
+          "confidence": 0.9
+        },
+        "articulation": {
+          "evidence": "咬字清晰，每个字音都可明确分辨",
+          "confidence": 0.95
+        },
+        "temperament": {
+          "evidence": "听感温和有亲和力，无威严或神秘气质",
+          "confidence": 0.85
+        }
+      },
+      "reference": {
+        "dimensions": {
+          "gender_presentation": {
+            "tags": [
+              "female"
+            ],
+            "evidence": "发声为明显的女性音色，音调与共鸣位置呈女声特征",
+            "confidence": 0.95
+          },
+          "age_impression": {
+            "tags": [
+              "young_adult"
+            ],
+            "evidence": "声音既无儿童的稚嫩也无老年的苍哑，呈现青年女性的清润质感",
+            "confidence": 0.7
+          },
+          "timbre": {
+            "tags": [
+              "clear",
+              "soft",
+              "airy"
+            ],
+            "evidence": "音色干净通透，力度轻柔，起音处带轻微气息感",
+            "confidence": 0.8
+          },
+          "style": {
+            "tags": [
+              "restrained"
+            ],
+            "evidence": "语气平稳内敛，没有夸张起伏，以克制的方式陈述句子",
+            "confidence": 0.75
+          },
+          "pitch_range": {
+            "tags": [
+              "mid"
+            ],
+            "evidence": "整体音高落在中等区间，未刻意拔高或压低",
+            "confidence": 0.8
+          },
+          "pace": {
+            "tags": [
+              "slow"
+            ],
+            "evidence": "字词之间留有明显停顿，如‘人’后、‘而是’后均放缓展开",
+            "confidence": 0.9
+          },
+          "energy": {
+            "tags": [
+              "low"
+            ],
+            "evidence": "音量偏轻，发声不张扬，整体能量较弱",
+            "confidence": 0.85
+          },
+          "articulation": {
+            "tags": [
+              "clear"
+            ],
+            "evidence": "每个字的声韵母都交代完整清楚，没有含混吞字",
+            "confidence": 0.85
+          },
+          "temperament": {
+            "tags": [
+              "approachable",
+              "solemn"
+            ],
+            "evidence": "声线平和亲切，同时带着沉思般的庄重感",
+            "confidence": 0.7
+          }
+        }
+      }
+    },
+    "冰糖": {
+      "source": "auto_tagging",
+      "model": "mimo-v2.5-tts",
+      "voice_id": "冰糖",
+      "preview_text": "世界上只有一种真正的英雄主义，那就是在认清生活的真相后依然热爱生活。",
+      "audio_sha256": "2735deb9c37e2892daff22b8f8694616cfd98381b0e57d1f411540bc017aa42a",
+      "schema_version": "voice-profile-tagging-v1",
+      "taxonomy_version": "voice-tags-v2",
+      "primary_scorer": "doubao-seed-2-1-lite",
+      "reference_scorer": "qwen3.8-omni-flash",
+      "profile_status": "ready",
+      "review_status": "candidate",
+      "needs_review": true,
+      "needs_review_reasons": [
+        "single_sample_evidence",
+        "scorer_disagreement:style"
+      ],
+      "objective": {
+        "passed": true,
+        "reason": "ok",
+        "audio_source": "synthesized",
+        "duration_ms": 8800,
+        "expected_duration_ms": 7532,
+        "silence_ratio": 0.0774,
+        "rms_dbfs": -20.34,
+        "transcript_similarity": 1.0,
+        "transcript": "世界上只有一种真正的英雄主义，那就是在认清生活的真相后依然热爱生活。"
+      },
+      "tags": {
+        "gender_presentation": [
+          "female"
+        ],
+        "age_impression": [
+          "young_adult"
+        ],
+        "timbre": [
+          "clear",
+          "bright"
+        ],
+        "style": [
+          "narration"
+        ],
+        "pitch_range": [
+          "mid"
+        ],
+        "pace": [
+          "medium_slow"
+        ],
+        "energy": [
+          "medium"
+        ],
+        "articulation": [
+          "clear"
+        ],
+        "temperament": [
+          "solemn"
+        ]
+      },
+      "tag_evidence": {
+        "gender_presentation": {
+          "evidence": "听感呈现为成熟女性发声。",
+          "confidence": 0.98
+        },
+        "age_impression": {
+          "evidence": "听感属于青年年龄段。",
+          "confidence": 0.98
+        },
+        "timbre": {
+          "evidence": "声音清亮，音色明亮，无明显沙哑、气声等其他质感。",
+          "confidence": 0.9
+        },
+        "style": {
+          "evidence": "整体为平稳的叙述式演绎。",
+          "confidence": 0.95
+        },
+        "pitch_range": {
+          "evidence": "整体音高处于中音区间。",
+          "confidence": 0.9
+        },
+        "pace": {
+          "evidence": "整体语速偏慢，节奏舒缓。",
+          "confidence": 0.9
+        },
+        "energy": {
+          "evidence": "整体能量适中，无过高或过低表现。",
+          "confidence": 0.85
+        },
+        "articulation": {
+          "evidence": "咬字清晰，每个字都可明确辨识。",
+          "confidence": 0.95
+        },
+        "temperament": {
+          "evidence": "整体听感庄重，无俏皮或神秘等其他气质表现。",
+          "confidence": 0.9
+        }
+      },
+      "reference": {
+        "dimensions": {
+          "gender_presentation": {
+            "tags": [
+              "female"
+            ],
+            "evidence": "声音的音域、共鸣位置和整体质感呈现明显的女性听感。",
+            "confidence": 0.95
+          },
+          "age_impression": {
+            "tags": [
+              "young_adult"
+            ],
+            "evidence": "音色年轻但不稚嫩，带有成年女性稳定的发声状态，没有儿童或老年特征。",
+            "confidence": 0.85
+          },
+          "timbre": {
+            "tags": [
+              "clear",
+              "soft",
+              "warm",
+              "pure"
+            ],
+            "evidence": "声音干净清亮，边缘柔和，带有温暖的底色，没有沙哑、厚重或过强气声。",
+            "confidence": 0.9
+          },
+          "style": {
+            "tags": [
+              "intellectual"
+            ],
+            "evidence": "表达平稳克制，语气带有哲理性朗读的沉思感，清晰而不夸张。",
+            "confidence": 0.8
+          },
+          "pitch_range": {
+            "tags": [
+              "mid"
+            ],
+            "evidence": "整体音高落在中等区间，没有明显的高音拔起或低音下压。",
+            "confidence": 0.85
+          },
+          "pace": {
+            "tags": [
+              "medium_slow"
+            ],
+            "evidence": "语速从容，句内和句间都有自然停顿，整体推进偏慢。",
+            "confidence": 0.9
+          },
+          "energy": {
+            "tags": [
+              "medium"
+            ],
+            "evidence": "音量和气息支撑适中，既不是低语式虚弱，也不是高张力输出。",
+            "confidence": 0.85
+          },
+          "articulation": {
+            "tags": [
+              "clear"
+            ],
+            "evidence": "每个字的声母、韵母和声调都交代得很完整，咬字清楚不含糊。",
+            "confidence": 0.95
+          },
+          "temperament": {
+            "tags": [
+              "approachable",
+              "solemn"
+            ],
+            "evidence": "语气温和亲近，同时对文本内容保持一定的郑重与沉静感。",
+            "confidence": 0.8
+          }
+        }
+      }
+    },
+    "茉莉": {
+      "source": "auto_tagging",
+      "model": "mimo-v2.5-tts",
+      "voice_id": "茉莉",
+      "preview_text": "我走得很慢，但我从不后退。",
+      "audio_sha256": "8340521f360a3a3572389ebd91f86646d8f3bf56be55b16d33bee40ef3bae582",
+      "schema_version": "voice-profile-tagging-v1",
+      "taxonomy_version": "voice-tags-v2",
+      "primary_scorer": "doubao-seed-2-1-lite",
+      "reference_scorer": "qwen3.8-omni-flash",
+      "profile_status": "ready",
+      "review_status": "candidate",
+      "needs_review": true,
+      "needs_review_reasons": [
+        "single_sample_evidence",
+        "scorer_disagreement:style",
+        "scorer_disagreement:pace",
+        "scorer_disagreement:energy"
+      ],
+      "objective": {
+        "passed": true,
+        "reason": "ok",
+        "audio_source": "synthesized",
+        "duration_ms": 4800,
+        "expected_duration_ms": 2760,
+        "silence_ratio": 0.2981,
+        "rms_dbfs": -23.01,
+        "transcript_similarity": 1.0,
+        "transcript": "我走得很慢，但我从不后退。"
+      },
+      "tags": {
+        "gender_presentation": [
+          "female"
+        ],
+        "age_impression": [
+          "young_adult"
+        ],
+        "timbre": [
+          "clear"
+        ],
+        "style": [
+          "natural"
+        ],
+        "pitch_range": [
+          "mid"
+        ],
+        "pace": [
+          "medium"
+        ],
+        "energy": [
+          "medium"
+        ],
+        "articulation": [
+          "clear"
+        ],
+        "temperament": [
+          "authoritative"
+        ]
+      },
+      "tag_evidence": {
+        "gender_presentation": {
+          "evidence": "能听到声音带有女性化的听感特质",
+          "confidence": 0.9
+        },
+        "age_impression": {
+          "evidence": "声音整体呈现出青年阶段的听感",
+          "confidence": 0.85
+        },
+        "timbre": {
+          "evidence": "声音听感清亮通透，质感干净",
+          "confidence": 0.9
+        },
+        "style": {
+          "evidence": "朗读状态松弛自然，无刻意修饰或戏剧化演绎",
+          "confidence": 0.95
+        },
+        "pitch_range": {
+          "evidence": "整体音高处于中等区间，无明显偏高或偏低",
+          "confidence": 0.9
+        },
+        "pace": {
+          "evidence": "整体语速处于常规档位，不快不慢",
+          "confidence": 0.9
+        },
+        "energy": {
+          "evidence": "整体能量处于中等水平，平稳无明显起伏",
+          "confidence": 0.9
+        },
+        "articulation": {
+          "evidence": "每个字的咬字都清晰可辨，没有模糊吞音",
+          "confidence": 0.95
+        },
+        "temperament": {
+          "evidence": "朗读语气沉稳坚定，带有不容置疑的气场",
+          "confidence": 0.8
+        }
+      },
+      "reference": {
+        "dimensions": {
+          "gender_presentation": {
+            "tags": [
+              "female"
+            ],
+            "evidence": "声音呈现明显的女性音色特征，音域偏高，声带振动质感柔和，符合女声听感。",
+            "confidence": 0.92
+          },
+          "age_impression": {
+            "tags": [
+              "young_adult"
+            ],
+            "evidence": "声音具有一定的成熟度但无沧桑感，音质饱满而年轻，没有儿童或老年人的特征。",
+            "confidence": 0.82
+          },
+          "timbre": {
+            "tags": [
+              "clear",
+              "soft",
+              "warm"
+            ],
+            "evidence": "发声干净无杂音，音量轻柔不尖锐，同时带有一定的温暖共鸣感，整体质地柔和通透。",
+            "confidence": 0.85
+          },
+          "style": {
+            "tags": [
+              "restrained"
+            ],
+            "evidence": "语调平稳克制，没有明显的情绪起伏或夸张演绎，以内敛、沉静的方式传递语句中的坚定感。",
+            "confidence": 0.83
+          },
+          "pitch_range": {
+            "tags": [
+              "mid"
+            ],
+            "evidence": "整体音高处于中等区间，既非低沉也非高亢，在女声中属于自然中音位置。",
+            "confidence": 0.8
+          },
+          "pace": {
+            "tags": [
+              "slow"
+            ],
+            "evidence": "每个字之间留有明显间隔，'我走得很慢'和'但我从不后退'均以极缓的节奏逐字展开，语速明显偏慢。",
+            "confidence": 0.9
+          },
+          "energy": {
+            "tags": [
+              "medium_low"
+            ],
+            "evidence": "音量偏轻，气息控制内敛，没有强烈的爆发力或高声压，但并非完全无力，保持了一种安静的支撑感。",
+            "confidence": 0.82
+          },
+          "articulation": {
+            "tags": [
+              "clear"
+            ],
+            "evidence": "每个字的声母韵母发音完整清晰，'慢''退'等字的收音明确，咬字不含糊。",
+            "confidence": 0.88
+          },
+          "temperament": {
+            "tags": [
+              "approachable",
+              "solemn"
+            ],
+            "evidence": "声音柔和亲近，没有攻击性；同时语句节奏沉稳、语气庄重，传达出一种安静的坚定与肃穆感。",
+            "confidence": 0.78
+          }
+        }
+      }
+    },
+    "苏打": {
+      "source": "auto_tagging",
+      "model": "mimo-v2.5-tts",
+      "voice_id": "苏打",
+      "preview_text": "生活不能等待别人来安排，要自己去争取和奋斗。",
+      "audio_sha256": "20e1eae38cda9777fa24aa02c94e8dde7fa7ac37e041520bf8dfb96acd9741f5",
+      "schema_version": "voice-profile-tagging-v1",
+      "taxonomy_version": "voice-tags-v2",
+      "primary_scorer": "doubao-seed-2-1-lite",
+      "reference_scorer": "qwen3.8-omni-flash",
+      "profile_status": "ready",
+      "review_status": "candidate",
+      "needs_review": true,
+      "needs_review_reasons": [
+        "single_sample_evidence",
+        "scorer_disagreement:style",
+        "scorer_disagreement:pitch_range",
+        "scorer_disagreement:energy",
+        "scorer_disagreement:articulation"
+      ],
+      "objective": {
+        "passed": true,
+        "reason": "ok",
+        "audio_source": "synthesized",
+        "duration_ms": 5760,
+        "expected_duration_ms": 4805,
+        "silence_ratio": 0.1,
+        "rms_dbfs": -25.03,
+        "transcript_similarity": 1.0,
+        "transcript": "生活不能等待别人来安排，要自己去争取和奋斗。"
+      },
+      "tags": {
+        "gender_presentation": [
+          "male"
+        ],
+        "age_impression": [
+          "young_adult"
+        ],
+        "timbre": [
+          "magnetic",
+          "rich"
+        ],
+        "style": [
+          "narration"
+        ],
+        "pitch_range": [
+          "mid"
+        ],
+        "pace": [
+          "medium"
+        ],
+        "energy": [
+          "medium"
+        ],
+        "articulation": [
+          "clear"
+        ],
+        "temperament": [
+          "approachable"
+        ]
+      },
+      "tag_evidence": {
+        "gender_presentation": {
+          "evidence": "音频中可听到低沉的男声发声",
+          "confidence": 0.95
+        },
+        "age_impression": {
+          "evidence": "音频中声音的听感为青年阶段的发声质感",
+          "confidence": 0.9
+        },
+        "timbre": {
+          "evidence": "音频中可听到声音带有磁性，且发声浑厚饱满",
+          "confidence": 0.9
+        },
+        "style": {
+          "evidence": "音频中朗读为客观的叙述式表达，无额外演绎情绪",
+          "confidence": 0.9
+        },
+        "pitch_range": {
+          "evidence": "音频中声音的整体音高处于中音区间，无明显偏高或偏低",
+          "confidence": 0.85
+        },
+        "pace": {
+          "evidence": "音频中朗读语速适中，无明显加快或放缓",
+          "confidence": 0.9
+        },
+        "energy": {
+          "evidence": "音频中朗读的能量处于中等水平，无过高或过低的能量表现",
+          "confidence": 0.85
+        },
+        "articulation": {
+          "evidence": "音频中每个字的发音都清晰可辨，没有含糊不清的情况",
+          "confidence": 0.9
+        },
+        "temperament": {
+          "evidence": "音频中朗读的听感亲和，没有距离感",
+          "confidence": 0.8
+        }
+      },
+      "reference": {
+        "dimensions": {
+          "gender_presentation": {
+            "tags": [
+              "male"
+            ],
+            "evidence": "声音具有明显的男性共鸣特征，基频较低，胸腔共振明显",
+            "confidence": 0.92
+          },
+          "age_impression": {
+            "tags": [
+              "young_adult"
+            ],
+            "evidence": "声音饱满且有一定厚度，但尚未出现明显的中年沧桑感或老年松弛感，整体呈现青年的活力与沉稳之间的状态",
+            "confidence": 0.75
+          },
+          "timbre": {
+            "tags": [
+              "clear",
+              "powerful",
+              "magnetic"
+            ],
+            "evidence": "音质干净通透，发声有力且带有磁性的共鸣感，每个音节都饱满扎实",
+            "confidence": 0.85
+          },
+          "style": {
+            "tags": [
+              "powerful"
+            ],
+            "evidence": "语气坚定有力，带有明显的激励和号召感，重音落在'争取''奋斗'等词上，表达充满力量",
+            "confidence": 0.88
+          },
+          "pitch_range": {
+            "tags": [
+              "low_mid"
+            ],
+            "evidence": "整体音高处于中低区域，男声但不极端低沉，在舒适的中低音域内运行",
+            "confidence": 0.85
+          },
+          "pace": {
+            "tags": [
+              "medium"
+            ],
+            "evidence": "语速均匀适中，没有明显的加速或拖沓，每个词之间有自然的节奏感",
+            "confidence": 0.82
+          },
+          "energy": {
+            "tags": [
+              "medium_high"
+            ],
+            "evidence": "发声能量充沛，气息支撑充足，音量稳定偏大，传递出积极向上的劲头",
+            "confidence": 0.85
+          },
+          "articulation": {
+            "tags": [
+              "crisp"
+            ],
+            "evidence": "咬字干脆利落，声母韵母发音到位，'安排''争取'等词的辅音收束清晰不拖泥带水",
+            "confidence": 0.88
+          },
+          "temperament": {
+            "tags": [
+              "authoritative",
+              "solemn"
+            ],
+            "evidence": "语气庄重且有说服力，带有不容置疑的坚定感，像在发表一段正式的人生箴言",
+            "confidence": 0.8
+          }
+        }
+      }
+    },
+    "白桦": {
+      "source": "auto_tagging",
+      "model": "mimo-v2.5-tts",
+      "voice_id": "白桦",
+      "preview_text": "人生如逆旅，我亦是行人。",
+      "audio_sha256": "82ce035e852fb8b3979bcbb50022786d73c97c657e138e2c6855491ee6db11ae",
+      "schema_version": "voice-profile-tagging-v1",
+      "taxonomy_version": "voice-tags-v2",
+      "primary_scorer": "doubao-seed-2-1-lite",
+      "reference_scorer": "qwen3.8-omni-flash",
+      "profile_status": "ready",
+      "review_status": "candidate",
+      "needs_review": true,
+      "needs_review_reasons": [
+        "single_sample_evidence",
+        "scorer_disagreement:age_impression",
+        "scorer_disagreement:style"
+      ],
+      "objective": {
+        "passed": true,
+        "reason": "ok",
+        "audio_source": "synthesized",
+        "duration_ms": 5280,
+        "expected_duration_ms": 2532,
+        "silence_ratio": 0.3703,
+        "rms_dbfs": -24.01,
+        "transcript_similarity": 1.0,
+        "transcript": "人生如逆旅，我亦是行人。"
+      },
+      "tags": {
+        "gender_presentation": [
+          "male"
+        ],
+        "age_impression": [
+          "mature"
+        ],
+        "timbre": [
+          "deep",
+          "rich",
+          "slightly_husky"
+        ],
+        "style": [
+          "narration"
+        ],
+        "pitch_range": [
+          "low"
+        ],
+        "pace": [
+          "slow"
+        ],
+        "energy": [
+          "medium_low"
+        ],
+        "articulation": [
+          "clear"
+        ],
+        "temperament": [
+          "solemn"
+        ]
+      },
+      "tag_evidence": {
+        "gender_presentation": {
+          "evidence": "听感为成年男性的声音，音色沉稳偏低。",
+          "confidence": 0.95
+        },
+        "age_impression": {
+          "evidence": "听感声音呈现出成熟沉稳的状态，符合熟年的听觉印象。",
+          "confidence": 0.8
+        },
+        "timbre": {
+          "evidence": "声音整体低沉浑厚，带有轻微的沙哑质感，听感沉稳扎实。",
+          "confidence": 0.9
+        },
+        "style": {
+          "evidence": "朗读为平实的叙述风格，无夸张演绎，贴合文本的陈述感。",
+          "confidence": 0.85
+        },
+        "pitch_range": {
+          "evidence": "整体音高处于偏低的区间，无明显高音表现。",
+          "confidence": 0.9
+        },
+        "pace": {
+          "evidence": "朗读语速偏慢，句中带有明显停顿，节奏舒缓。",
+          "confidence": 0.9
+        },
+        "energy": {
+          "evidence": "整体能量偏低，声音平稳沉稳，无强烈起伏。",
+          "confidence": 0.85
+        },
+        "articulation": {
+          "evidence": "咬字清晰扎实，每个字的发音都可明确分辨。",
+          "confidence": 0.9
+        },
+        "temperament": {
+          "evidence": "整体气质庄重沉稳，贴合文本的氛围感。",
+          "confidence": 0.85
+        }
+      },
+      "reference": {
+        "dimensions": {
+          "gender_presentation": {
+            "tags": [
+              "male"
+            ],
+            "evidence": "声音基频较低，共鸣位置靠下，呈现明显的男性嗓音特征。",
+            "confidence": 0.95
+          },
+          "age_impression": {
+            "tags": [
+              "adult"
+            ],
+            "evidence": "音色成熟稳重，带有中年男性的厚度与沉淀感，无年轻嗓音的轻浮或老年嗓音的衰颓。",
+            "confidence": 0.85
+          },
+          "timbre": {
+            "tags": [
+              "deep",
+              "magnetic",
+              "rich",
+              "thick"
+            ],
+            "evidence": "声音低沉浑厚，胸腔共鸣明显，质感饱满且具有吸引力。",
+            "confidence": 0.9
+          },
+          "style": {
+            "tags": [
+              "solemn"
+            ],
+            "evidence": "演绎古诗文时语气庄重肃穆，节奏沉稳，带有沉思与感慨的色彩。",
+            "confidence": 0.9
+          },
+          "pitch_range": {
+            "tags": [
+              "low"
+            ],
+            "evidence": "整体音高处于低频区间，发声位置靠下。",
+            "confidence": 0.95
+          },
+          "pace": {
+            "tags": [
+              "slow"
+            ],
+            "evidence": "语速缓慢，字与字、句与句之间留有明显的停顿与呼吸空间。",
+            "confidence": 0.9
+          },
+          "energy": {
+            "tags": [
+              "medium_low"
+            ],
+            "evidence": "音量适中偏弱，气息内敛，不张扬，呈现出一种克制而深沉的能量状态。",
+            "confidence": 0.85
+          },
+          "articulation": {
+            "tags": [
+              "clear"
+            ],
+            "evidence": "咬字归音清晰准确，每个字的声母韵母都交代得很完整。",
+            "confidence": 0.9
+          },
+          "temperament": {
+            "tags": [
+              "solemn"
+            ],
+            "evidence": "气质庄严肃穆，给人以稳重、深沉的印象。",
+            "confidence": 0.9
+          }
+        }
+      }
+    },
+    "Mia": {
+      "source": "auto_tagging",
+      "model": "mimo-v2.5-tts",
+      "voice_id": "Mia",
+      "preview_text": "There is a crack in everything; that's how the light gets in.",
+      "audio_sha256": "bcdc690fb652a8dafcfec93bb568376a170fae1ec5e962dd95b2c762d76d4c2a",
+      "schema_version": "voice-profile-tagging-v1",
+      "taxonomy_version": "voice-tags-v2",
+      "primary_scorer": "doubao-seed-2-1-lite",
+      "reference_scorer": "qwen3.8-omni-flash",
+      "profile_status": "ready",
+      "review_status": "candidate",
+      "needs_review": true,
+      "needs_review_reasons": [
+        "single_sample_evidence",
+        "scorer_disagreement:style",
+        "scorer_disagreement:pace",
+        "scorer_disagreement:energy"
+      ],
+      "objective": {
+        "passed": true,
+        "reason": "ok",
+        "audio_source": "synthesized",
+        "duration_ms": 5120,
+        "expected_duration_ms": 4624,
+        "silence_ratio": 0.2268,
+        "rms_dbfs": -23.35,
+        "transcript_similarity": 1.0,
+        "transcript": "There is a crack in everything. That s how the light gets in."
+      },
+      "tags": {
+        "gender_presentation": [
+          "female"
+        ],
+        "age_impression": [
+          "young_adult"
+        ],
+        "timbre": [
+          "warm",
+          "soft"
+        ],
+        "style": [
+          "natural"
+        ],
+        "pitch_range": [
+          "mid"
+        ],
+        "pace": [
+          "medium"
+        ],
+        "energy": [
+          "medium"
+        ],
+        "articulation": [
+          "clear"
+        ],
+        "temperament": [
+          "approachable"
+        ]
+      },
+      "tag_evidence": {
+        "gender_presentation": {
+          "evidence": "音频为英文朗读，听感是女声，未出现明显背景噪音。",
+          "confidence": 0.95
+        },
+        "age_impression": {
+          "evidence": "声线平稳柔和，整体听感属于青年年龄段，没有明显的幼态或苍老特征。",
+          "confidence": 0.85
+        },
+        "timbre": {
+          "evidence": "听感上音色温暖柔软，没有尖锐或刺耳的特质。",
+          "confidence": 0.9
+        },
+        "style": {
+          "evidence": "朗读语气平实自然，没有刻意的演绎或夸张的情绪表达。",
+          "confidence": 0.9
+        },
+        "pitch_range": {
+          "evidence": "整体音高处于中等区间，没有明显的偏高或偏低。",
+          "confidence": 0.85
+        },
+        "pace": {
+          "evidence": "朗读语速中等，节奏平稳，没有过快或过慢的表现。",
+          "confidence": 0.9
+        },
+        "energy": {
+          "evidence": "整体能量处于中等水平，没有明显的激昂或萎靡感。",
+          "confidence": 0.9
+        },
+        "articulation": {
+          "evidence": "英文词句咬字清晰，每个单词都能被准确辨认。",
+          "confidence": 0.95
+        },
+        "temperament": {
+          "evidence": "整体听感亲和自然，给人易于接近的印象。",
+          "confidence": 0.85
+        }
+      },
+      "reference": {
+        "dimensions": {
+          "gender_presentation": {
+            "tags": [
+              "female"
+            ],
+            "evidence": "声音呈现明显的女性音色特征，音区偏高，声线柔细",
+            "confidence": 0.92
+          },
+          "age_impression": {
+            "tags": [
+              "young_adult"
+            ],
+            "evidence": "声音平滑、无明显成熟或衰老痕迹，带有青年女性的清透质感",
+            "confidence": 0.82
+          },
+          "timbre": {
+            "tags": [
+              "clear",
+              "soft",
+              "airy"
+            ],
+            "evidence": "音质干净通透，发声轻柔，句间可听见轻微气息感，整体如耳语般细腻",
+            "confidence": 0.88
+          },
+          "style": {
+            "tags": [
+              "gentle"
+            ],
+            "evidence": "语调温柔舒缓，无强烈起伏，像在轻声倾诉，带有抚慰性的柔软表达",
+            "confidence": 0.9
+          },
+          "pitch_range": {
+            "tags": [
+              "mid"
+            ],
+            "evidence": "整体音高处于中等区间，未刻意压低或拔高，自然舒适",
+            "confidence": 0.85
+          },
+          "pace": {
+            "tags": [
+              "slow"
+            ],
+            "evidence": "每个词之间留有明显停顿，'crack'与'in everything'之间有呼吸间隙，整体节奏从容缓慢",
+            "confidence": 0.9
+          },
+          "energy": {
+            "tags": [
+              "low"
+            ],
+            "evidence": "音量偏轻，发声力度小，接近私语状态，没有外放的能量感",
+            "confidence": 0.88
+          },
+          "articulation": {
+            "tags": [
+              "clear"
+            ],
+            "evidence": "尽管语速慢、音量轻，每个辅音和元音都交代清楚，'crack''light''gets in'咬字分明",
+            "confidence": 0.87
+          },
+          "temperament": {
+            "tags": [
+              "approachable"
+            ],
+            "evidence": "声音亲密、无距离感，像在对听者耳边低语，给人温暖可亲近的印象",
+            "confidence": 0.8
+          }
+        }
+      }
+    },
+    "Chloe": {
+      "source": "auto_tagging",
+      "model": "mimo-v2.5-tts",
+      "voice_id": "Chloe",
+      "preview_text": "I would never reach for the moon; I want the moon to come to me.",
+      "audio_sha256": "3028cbfdb36b93487ca5802eb22ea7d2531606fd2f5e4f96bd3f6a068b8e621d",
+      "schema_version": "voice-profile-tagging-v1",
+      "taxonomy_version": "voice-tags-v2",
+      "primary_scorer": "doubao-seed-2-1-lite",
+      "reference_scorer": "qwen3.8-omni-flash",
+      "profile_status": "ready",
+      "review_status": "candidate",
+      "needs_review": true,
+      "needs_review_reasons": [
+        "single_sample_evidence",
+        "scorer_disagreement:pitch_range",
+        "scorer_disagreement:pace",
+        "scorer_disagreement:energy",
+        "scorer_disagreement:articulation"
+      ],
+      "objective": {
+        "passed": true,
+        "reason": "ok",
+        "audio_source": "synthesized",
+        "duration_ms": 5280,
+        "expected_duration_ms": 5735,
+        "silence_ratio": 0.2199,
+        "rms_dbfs": -14.42,
+        "transcript_similarity": 1.0,
+        "transcript": "I would never reach for the moon. I want the moon to come to me."
+      },
+      "tags": {
+        "gender_presentation": [
+          "female"
+        ],
+        "age_impression": [
+          "young_adult"
+        ],
+        "timbre": [
+          "warm"
+        ],
+        "style": [
+          "gentle"
+        ],
+        "pitch_range": [
+          "low_mid"
+        ],
+        "pace": [
+          "medium"
+        ],
+        "energy": [
+          "medium_low"
+        ],
+        "articulation": [
+          "soft"
+        ],
+        "temperament": [
+          "approachable"
+        ]
+      },
+      "tag_evidence": {
+        "gender_presentation": {
+          "evidence": "声音的听感为女声。",
+          "confidence": 0.99
+        },
+        "age_impression": {
+          "evidence": "整体听感为青年女性。",
+          "confidence": 0.85
+        },
+        "timbre": {
+          "evidence": "声音听起来温暖柔和。",
+          "confidence": 0.8
+        },
+        "style": {
+          "evidence": "整体听感温柔舒缓。",
+          "confidence": 0.85
+        },
+        "pitch_range": {
+          "evidence": "整体处于中低音区域，偏低沉。",
+          "confidence": 0.85
+        },
+        "pace": {
+          "evidence": "语速适中，没有明显的加快或减慢。",
+          "confidence": 0.9
+        },
+        "energy": {
+          "evidence": "整体能量偏低，状态慵懒放松。",
+          "confidence": 0.85
+        },
+        "articulation": {
+          "evidence": "咬字轻柔，没有力度感。",
+          "confidence": 0.8
+        },
+        "temperament": {
+          "evidence": "整体听感亲和温柔，没有疏离感。",
+          "confidence": 0.8
+        }
+      },
+      "reference": {
+        "dimensions": {
+          "gender_presentation": {
+            "tags": [
+              "female"
+            ],
+            "evidence": "声音呈现明显的女性音色特征，音域偏高，共鸣位置靠前，带有柔和的女声质感",
+            "confidence": 0.92
+          },
+          "age_impression": {
+            "tags": [
+              "young_adult"
+            ],
+            "evidence": "声音具有青年女性的清透感，没有未成年人的稚嫩，也没有中年以上的沉稳厚重",
+            "confidence": 0.82
+          },
+          "timbre": {
+            "tags": [
+              "soft",
+              "clear",
+              "airy"
+            ],
+            "evidence": "发声带有明显的气声成分，音色轻柔通透，每个音节干净不浑浊，整体质地如耳语般柔软",
+            "confidence": 0.88
+          },
+          "style": {
+            "tags": [
+              "gentle"
+            ],
+            "evidence": "整句以极轻的音量缓缓吐出，语气柔和内敛，没有强调或爆发，呈现出一种安静倾诉的温柔感",
+            "confidence": 0.85
+          },
+          "pitch_range": {
+            "tags": [
+              "mid_high"
+            ],
+            "evidence": "基频落在中高音区，句尾'come to me'有轻微上扬但整体未触及极高音，保持在舒适的中上位置",
+            "confidence": 0.83
+          },
+          "pace": {
+            "tags": [
+              "medium_slow"
+            ],
+            "evidence": "两句话之间有明显停顿，每个词之间也留有呼吸间隙，语速偏慢但不拖沓，节奏从容",
+            "confidence": 0.85
+          },
+          "energy": {
+            "tags": [
+              "low"
+            ],
+            "evidence": "音量始终维持在较低水平，没有力度变化或重音冲击，气息支撑轻而浅，整体能量感偏弱",
+            "confidence": 0.88
+          },
+          "articulation": {
+            "tags": [
+              "clear"
+            ],
+            "evidence": "尽管音量轻柔，辅音如'th'、'r'、'm'仍清晰可辨，元音饱满未含糊，咬字完整",
+            "confidence": 0.84
+          },
+          "temperament": {
+            "tags": [
+              "approachable"
+            ],
+            "evidence": "柔和的气声与缓慢的节奏营造出亲近、无攻击性的听感，像在耳边轻声分享心事",
+            "confidence": 0.78
+          }
+        }
+      }
+    },
+    "Milo": {
+      "source": "auto_tagging",
+      "model": "mimo-v2.5-tts",
+      "voice_id": "Milo",
+      "preview_text": "Only those who are brave and composed can endure the darkness and welcome the light.",
+      "audio_sha256": "42aafd0a85adc7131852c9e2deb34c4fba53c62bc804df9e0bfc290faeea939d",
+      "schema_version": "voice-profile-tagging-v1",
+      "taxonomy_version": "voice-tags-v2",
+      "primary_scorer": "doubao-seed-2-1-lite",
+      "reference_scorer": "qwen3.8-omni-flash",
+      "profile_status": "ready",
+      "review_status": "candidate",
+      "needs_review": true,
+      "needs_review_reasons": [
+        "single_sample_evidence",
+        "scorer_disagreement:age_impression",
+        "scorer_disagreement:style",
+        "scorer_disagreement:pitch_range",
+        "scorer_disagreement:pace",
+        "scorer_disagreement:energy"
+      ],
+      "objective": {
+        "passed": true,
+        "reason": "ok",
+        "audio_source": "synthesized",
+        "duration_ms": 7840,
+        "expected_duration_ms": 5555,
+        "silence_ratio": 0.0,
+        "rms_dbfs": -22.37,
+        "transcript_similarity": 1.0,
+        "transcript": "Only those who are brave and composed can endure the darkness and welcome the light."
+      },
+      "tags": {
+        "gender_presentation": [
+          "male"
+        ],
+        "age_impression": [
+          "young_adult"
+        ],
+        "timbre": [
+          "warm",
+          "clear",
+          "magnetic",
+          "soft",
+          "pure"
+        ],
+        "style": [
+          "narration"
+        ],
+        "pitch_range": [
+          "low_mid"
+        ],
+        "pace": [
+          "medium_slow"
+        ],
+        "energy": [
+          "medium"
+        ],
+        "articulation": [
+          "clear"
+        ],
+        "temperament": [
+          "solemn"
+        ]
+      },
+      "tag_evidence": {
+        "gender_presentation": {
+          "evidence": "听感为男声。",
+          "confidence": 0.98
+        },
+        "age_impression": {
+          "evidence": "声音听感为青年。",
+          "confidence": 0.95
+        },
+        "timbre": {
+          "evidence": "声音温暖、清晰、有磁性，听感柔和且干净。",
+          "confidence": 0.9
+        },
+        "style": {
+          "evidence": "朗读风格偏向叙述性表达，无夸张演绎。",
+          "confidence": 0.9
+        },
+        "pitch_range": {
+          "evidence": "整体音高处于中低区间。",
+          "confidence": 0.9
+        },
+        "pace": {
+          "evidence": "语速偏慢，节奏平稳舒缓。",
+          "confidence": 0.9
+        },
+        "energy": {
+          "evidence": "整体能量处于中等水平。",
+          "confidence": 0.9
+        },
+        "articulation": {
+          "evidence": "咬字清晰，发音明确。",
+          "confidence": 0.95
+        },
+        "temperament": {
+          "evidence": "整体听感庄重沉稳。",
+          "confidence": 0.85
+        }
+      },
+      "reference": {
+        "dimensions": {
+          "gender_presentation": {
+            "tags": [
+              "male"
+            ],
+            "evidence": "声音基频较低，胸腔共鸣明显，呈现典型的男性嗓音特征",
+            "confidence": 0.92
+          },
+          "age_impression": {
+            "tags": [
+              "adult"
+            ],
+            "evidence": "声音沉稳饱满，没有青年的轻浮感，也没有老年的颤抖或气息不足，呈现成熟中年男性的质感",
+            "confidence": 0.82
+          },
+          "timbre": {
+            "tags": [
+              "deep",
+              "rich",
+              "warm",
+              "magnetic",
+              "clear"
+            ],
+            "evidence": "音色低沉浑厚，带有温暖的共鸣质感，声音有磁性和吸引力，同时咬字清晰不浑浊",
+            "confidence": 0.88
+          },
+          "style": {
+            "tags": [
+              "solemn"
+            ],
+            "evidence": "语速缓慢庄重，每个词都赋予分量，整体呈现肃穆、仪式感的演绎方式",
+            "confidence": 0.85
+          },
+          "pitch_range": {
+            "tags": [
+              "low"
+            ],
+            "evidence": "整体音高处于较低区间，基频偏低，声音厚重下沉",
+            "confidence": 0.9
+          },
+          "pace": {
+            "tags": [
+              "slow"
+            ],
+            "evidence": "每个单词之间有明显的停顿和间隔，整句朗读耗时较长，节奏非常从容缓慢",
+            "confidence": 0.92
+          },
+          "energy": {
+            "tags": [
+              "medium_low"
+            ],
+            "evidence": "音量适中偏轻，没有爆发力或高声压，但声音有内在支撑，不是虚弱的气声",
+            "confidence": 0.82
+          },
+          "articulation": {
+            "tags": [
+              "clear"
+            ],
+            "evidence": "每个辅音和元音都交代清楚，如'brave''composed''endure'等词的尾音和连读都处理得分明",
+            "confidence": 0.9
+          },
+          "temperament": {
+            "tags": [
+              "authoritative",
+              "solemn"
+            ],
+            "evidence": "声音带有不容置疑的权威感和庄重的仪式感，仿佛在宣告某种真理",
+            "confidence": 0.85
+          }
+        }
+      }
+    },
+    "Dean": {
+      "source": "auto_tagging",
+      "model": "mimo-v2.5-tts",
+      "voice_id": "Dean",
+      "preview_text": "To be truly alive is to keep challenging yourself, to keep climbing the perilous peaks of fate.",
+      "audio_sha256": "e6086177aa7bf12332ad6bd617fe920c1f59ea28a4fff47b98557fc478c120ee",
+      "schema_version": "voice-profile-tagging-v1",
+      "taxonomy_version": "voice-tags-v2",
+      "primary_scorer": "doubao-seed-2-1-lite",
+      "reference_scorer": "qwen3.8-omni-flash",
+      "profile_status": "ready",
+      "review_status": "candidate",
+      "needs_review": true,
+      "needs_review_reasons": [
+        "single_sample_evidence"
+      ],
+      "objective": {
+        "passed": true,
+        "reason": "ok",
+        "audio_source": "synthesized",
+        "duration_ms": 8320,
+        "expected_duration_ms": 6376,
+        "silence_ratio": 0.0,
+        "rms_dbfs": -19.45,
+        "transcript_similarity": 1.0,
+        "transcript": "To be truly alive is to keep challenging yourself, to keep climbing the perilous peaks of fate."
+      },
+      "tags": {
+        "gender_presentation": [
+          "male"
+        ],
+        "age_impression": [
+          "adult"
+        ],
+        "timbre": [
+          "warm",
+          "deep"
+        ],
+        "style": [
+          "narration"
+        ],
+        "pitch_range": [
+          "low_mid"
+        ],
+        "pace": [
+          "medium_slow"
+        ],
+        "energy": [
+          "medium"
+        ],
+        "articulation": [
+          "clear"
+        ],
+        "temperament": [
+          "authoritative"
+        ]
+      },
+      "tag_evidence": {
+        "gender_presentation": {
+          "evidence": "音频中呈现为成年男性的人声听感。",
+          "confidence": 0.95
+        },
+        "age_impression": {
+          "evidence": "声音成熟稳重，听感为中年状态。",
+          "confidence": 0.9
+        },
+        "timbre": {
+          "evidence": "声音呈现出温暖的质感，同时音高偏低，听感低沉。",
+          "confidence": 0.85
+        },
+        "style": {
+          "evidence": "朗读语调平稳，以传递文本内容为主要表现，无夸张演绎。",
+          "confidence": 0.9
+        },
+        "pitch_range": {
+          "evidence": "整体音高处于中低音区间，未出现高音表现。",
+          "confidence": 0.8
+        },
+        "pace": {
+          "evidence": "朗读节奏平稳舒缓，语速略慢于正常交流语速。",
+          "confidence": 0.85
+        },
+        "energy": {
+          "evidence": "整体能量适中，既无激昂外放的表现，也无低沉压抑的听感。",
+          "confidence": 0.85
+        },
+        "articulation": {
+          "evidence": "英文单词咬字清晰，发音标准，无含糊不清的情况。",
+          "confidence": 0.95
+        },
+        "temperament": {
+          "evidence": "听感沉稳有分量，自带威严的气质印象。",
+          "confidence": 0.8
+        }
+      }
+    }
+  }
+}

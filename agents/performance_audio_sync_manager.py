@@ -115,8 +115,8 @@ class PerformanceAudioSyncManager:
             return None
         
         tts_params = {
-            "model": "qwen3-tts",
-            "voice": voice_id or "Ryan",
+            "model": "qwen-audio-3.1-tts-flash",
+            "voice": voice_id or "longsanshu_v3.1",
             "voice_style": voice_style
         }
         
@@ -148,7 +148,7 @@ class PerformanceAudioSyncManager:
             result = synthesize_speech_sync(
                 text=dialogue,
                 voice_params={
-                    "speaker": voice_id or "Ryan",
+                    "speaker": voice_id or "longsanshu_v3.1",
                     "voice_style": voice_style,
                     "character_id": character_id,
                     "rate": 1.0,
@@ -157,7 +157,7 @@ class PerformanceAudioSyncManager:
                     "volume": 50,
                 },
                 emotion="neutral",
-                model_id="qwen3-tts-instruct-flash",
+                model_id="qwen-audio-3.1-tts-flash",
             )
             
             generation_time = time.time() - start_time

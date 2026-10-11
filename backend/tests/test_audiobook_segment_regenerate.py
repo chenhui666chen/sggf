@@ -207,7 +207,7 @@ async def test_regenerate_segment_uses_request_segment_text_and_persists_it(monk
     )
 
     request = SegmentRegenerateRequest(
-        tts_model="qwen3-tts-instruct-flash",
+        tts_model="qwen-audio-3.1-tts-flash",
         voice_id="voice-new",
         segment={
             "type": "narration",
@@ -286,7 +286,7 @@ async def test_create_regeneration_candidate_uses_request_segment_without_persis
     )
 
     request = SegmentRegenerateRequest(
-        tts_model="qwen3-tts-instruct-flash",
+        tts_model="qwen-audio-3.1-tts-flash",
         voice_id="voice-new",
         segment={
             "type": "narration",
@@ -595,7 +595,7 @@ async def test_create_mix_regeneration_candidate_uses_preview_service_without_pe
     monkeypatch.setattr(routes_segment_regen, "runtime_synthesize_speech", fail_if_tts_only_path_is_used)
 
     request = SegmentRegenerateRequest(
-        tts_model="qwen3-tts-instruct-flash",
+        tts_model="qwen-audio-3.1-tts-flash",
         preview_type="mix",
         segment={
             "type": "narration",
@@ -690,7 +690,7 @@ async def test_regenerate_candidate_prefers_segment_bound_tts_model(monkeypatch)
     )
 
     request = SegmentRegenerateRequest(
-        tts_model="qwen3-tts-instruct-flash",
+        tts_model="qwen-audio-3.1-tts-flash",
         segment=None,
     )
 
@@ -990,7 +990,7 @@ async def test_create_candidate_registers_compiled_effective_segment_and_rebuild
         chapter_id=2,
         segment_index=0,
         request=SegmentRegenerateRequest(
-            tts_model="qwen3-tts-instruct-flash",
+            tts_model="qwen-audio-3.1-tts-flash",
             voice_id="voice-new",
             emotion="painful",
             segment={
@@ -1013,7 +1013,7 @@ async def test_create_candidate_registers_compiled_effective_segment_and_rebuild
     assert captured["text"] == "B: generated text"
     assert captured["voice_params"]["delivery_plan"]["text"] == "B: generated text"
     assert captured["voice_params"]["provider_prompt_snapshot"]["mode"] != "CLIENT-INJECTED-SNAPSHOT"
-    assert captured["voice_params"]["resolved_tts_model"] == "qwen3-tts-instruct-flash"
+    assert captured["voice_params"]["resolved_tts_model"] == "qwen-audio-3.1-tts-flash"
 
     contract = registry_calls["register"][0]["candidate_contract"]
     assert contract["effective_segment"]["text"] == "B: generated text"
@@ -1047,7 +1047,7 @@ async def test_apply_candidate_uses_registered_effective_segment_and_ignores_sec
         "text": "B: generated text",
         "speaker": "narrator",
         "performance_notes": "slow",
-        "voice_params": {"speaker": "voice-b", "tts_model": "qwen3-tts-instruct-flash"},
+        "voice_params": {"speaker": "voice-b", "tts_model": "qwen-audio-3.1-tts-flash"},
     }
     chapter_audio = SimpleNamespace(id=27, script_json=json.dumps([base_segment]))
 

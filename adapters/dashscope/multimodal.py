@@ -7,8 +7,8 @@ from typing import Any, Dict, List, Optional
 
 from adapters.base import BaseAdapter, AdapterConfig, GenerationResult
 from adapters.registry import register_model
-from adapters._shared import DASHSCOPE_API_KEY, DASHSCOPE_BASE
-from adapters.dashscope.chat import _DashScopeChatAdapter
+from adapters._shared import DASHSCOPE_BASE
+from adapters.dashscope.chat import _DashScopeChatAdapter, _DashScopeVisionReviewMixin
 from schemas.model_spec import ModelSpec
 from schemas.common import ModelStatus
 
@@ -17,7 +17,7 @@ from schemas.common import ModelStatus
 # ============================================================
 
 @register_model("qwen3-vl-plus")
-class Qwen3VLPlusAdapter(_DashScopeChatAdapter):
+class Qwen3VLPlusAdapter(_DashScopeVisionReviewMixin, _DashScopeChatAdapter):
     MODEL_ID = "qwen3-vl-plus"
 
     @classmethod

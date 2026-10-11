@@ -16,6 +16,7 @@ from app.services.audiobook.audio_library_paths import (
 )
 from app.services.audiobook.audio_mixer import AudioMixer, sfx_loudness_plan
 from app.services.audiobook.duration_estimator import estimate_narration_duration_seconds
+from app.services.audiobook.project_audio_runtime import apply_runtime_voice_mapping
 from app.services.audiobook.segment_synthesis_contract import PROVIDER_PROMPT_DERIVED_FIELDS
 from app.services.audiobook.tts_delivery_plan import resolve_segment_tts_model
 from app.services.audiobook.tts_engine import RetryConfig as TTSRetryConfig
@@ -78,11 +79,11 @@ class SegmentPreviewService:
         self.audio_library_dir = audio_library_dir or get_audio_library_dir()
         self.voice_manager = create_voice_manager(tts_model=tts_model, llm_client=None)
 
-        if voice_mapping:
-            try:
-                self.voice_manager.apply_project_voice_mapping(voice_mapping)
-            except Exception as exc:
-                logger.warning("单段音色映射失败: %s", exc)
+        # 试听同样不吞音色解析失败：静默换声线会让用户拿"听着不对"的音频当作配置生效
+        apply_runtime_voice_mapping(
+            voice_manager=self.voice_manager,
+            voice_mapping=voice_mapping,
+        )
 
     def resolve_voice_params(self, segment: Dict[str, Any]) -> tuple[str, Dict[str, Any]]:
         speaker = str(segment.get("speaker") or "旁白").strip() or "旁白"

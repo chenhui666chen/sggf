@@ -72,26 +72,23 @@ export const IMAGE_RESOLUTIONS_LABELS: Record<string, string> = {
 }
 
 export const IMAGE_MODEL_OPTIONS = [
-  { value: 'wan2.6-t2i', label: 'dreamweaverRun.modelImageWan26T2i' },
-  { value: 'qwen-image-2.0', label: 'Qwen Image 2.0' },
-  { value: 'qwen-image-2.0-pro', label: 'dreamweaverRun.modelImageQwen20Pro' },
-  { value: 'wan2.7-image', label: 'Wan 2.7 Image' },
-  { value: 'doubao-seedream-4-5', label: 'Doubao Seedream 4.5' },
+  { value: 'qwen-image-3.0-pro', label: 'dreamweaverRun.modelImageQwen30Pro' },
+  { value: 'qwen-image-3.0', label: 'dreamweaverRun.modelImageQwen30' },
+  { value: 'wan2.7-image-pro', label: 'dreamweaverRun.modelImageWan27Pro' },
   { value: 'doubao-seedream-5-0', label: 'dreamweaverRun.modelImageDoubaoSeedream50' },
-  { value: 'kling-v3-image-generation', label: 'dreamweaverRun.modelImageKlingV3' },
-  { value: 'kling-v3-omni-image-generation', label: 'dreamweaverRun.modelImageKlingV3Omni' },
+  { value: 'doubao-seedream-5-0-pro', label: 'Doubao Seedream 5.0 Pro' },
+  { value: 'kling/kling-v3-image-generation', label: 'dreamweaverRun.modelImageKlingV3' },
+  { value: 'kling/kling-v3-omni-image-generation', label: 'dreamweaverRun.modelImageKlingV3Omni' },
   { value: 'qwen-image-edit-plus', label: 'dreamweaverRun.modelImageQwenEditPlus' },
 ]
 
 export const VIDEO_MODEL_OPTIONS = [
-  { value: 'wan2.7-t2v', label: 'dreamweaverRun.modelVideoWan27T2v' },
-  { value: 'wan2.6-t2v-fast', label: 'dreamweaverRun.modelVideoWan26T2vFast' },
-  { value: 'wan2.7-i2v', label: 'dreamweaverRun.modelVideoWan27I2v' },
+  { value: 'wan3.0-video', label: 'dreamweaverRun.modelVideoWan30' },
+  { value: 'doubao-seedance-2-5', label: 'Doubao Seedance 2.5' },
   { value: 'doubao-seedance-2-0', label: 'Doubao Seedance 2.0（SOTA）' },
   { value: 'doubao-seedance-2-0-fast', label: 'Doubao Seedance 2.0 Fast' },
-  { value: 'doubao-seedance-1-5-pro', label: 'Doubao Seedance 1.5 Pro' },
-  { value: 'kling-v3-video-generation', label: 'dreamweaverRun.modelVideoKlingV3' },
-  { value: 'kling-v3-omni-video-generation', label: 'dreamweaverRun.modelVideoKlingV3Omni' },
+  { value: 'kling/kling-v3-video-generation', label: 'dreamweaverRun.modelVideoKlingV3' },
+  { value: 'kling/kling-v3-omni-video-generation', label: 'dreamweaverRun.modelVideoKlingV3Omni' },
   { value: 'pixverse-v6-t2v', label: 'PixVerse V6' },
   { value: 'vidu-q3-pro-text2video', label: 'dreamweaverRun.modelVideoViduQ3Text2Video' },
   { value: 'vidu-q3-pro-img2video', label: 'dreamweaverRun.modelVideoViduQ3Img2Video' },
@@ -99,9 +96,10 @@ export const VIDEO_MODEL_OPTIONS = [
 ]
 
 export const VIDEO_EDIT_MODEL_OPTIONS = [
-  { value: 'wan2.7-videoedit', label: 'dreamweaverRun.modelVideoEditWan27' },
+  { value: 'wan3.0-video', label: 'dreamweaverRun.modelVideoWan30' },
+  { value: 'doubao-seedance-2-5', label: 'Doubao Seedance 2.5' },
   { value: 'doubao-seedance-2-0', label: 'Doubao Seedance 2.0' },
-  { value: 'kling-v3-video-generation', label: 'Kling V3' },
+  { value: 'doubao-seedance-2-0-fast', label: 'Doubao Seedance 2.0 Fast' },
 ]
 
 export const VISION_MODEL_OPTIONS = [

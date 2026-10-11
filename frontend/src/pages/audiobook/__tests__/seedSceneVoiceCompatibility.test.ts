@@ -54,7 +54,7 @@ describe('seed_scene 音色白名单兼容性判定', () => {
       id: 'Cherry',
       speaker: 'Cherry',
       label: 'Qwen Cherry',
-      sourceModel: 'qwen3-tts-instruct-flash',
+      sourceModel: 'qwen-audio-3.1-tts-flash',
     })).toBe(false)
   })
 
@@ -72,7 +72,7 @@ describe('markSeedSceneIncompatibleVoicePresets', () => {
   it('为不兼容音色标记 disabled 与提示原因', () => {
     const marked = markSeedSceneIncompatibleVoicePresets([
       seedNativePreset(),
-      { id: 'Cherry', speaker: 'Cherry', label: 'Qwen Cherry', sourceModel: 'qwen3-tts-instruct-flash' },
+      { id: 'Cherry', speaker: 'Cherry', label: 'Qwen Cherry', sourceModel: 'qwen-audio-3.1-tts-flash' },
     ])
     expect(marked[0].disabled).toBeUndefined()
     expect(marked[1].disabled).toBe(true)

@@ -69,7 +69,7 @@ class UnifiedExtractionService:
             os.getenv("UNIFIED_EXTRACTION_MODEL")
             or os.getenv("DEEPSEEK_MODEL")
             or os.getenv("MODEL_NAME")
-            or "deepseek-v4-pro"
+            or "deepseek-pro"
         )
         llm = create_model_llm(model=model, temperature=0.7)
 

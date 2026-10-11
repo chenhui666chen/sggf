@@ -162,9 +162,9 @@ async def execute_stage_with_streaming(
         # 🆕 广播本阶段选用的模型，便于前端调试
         try:
             from app.core.config import settings
-            default_content_model = getattr(settings, "DEFAULT_CONTENT_MODEL", "qwen3.7-plus")
+            default_content_model = getattr(settings, "DEFAULT_CONTENT_MODEL", "qwen-plus")
         except Exception:
-            default_content_model = "qwen3.7-plus"
+            default_content_model = "qwen-plus"
         creative_model = workflow_generation_model or default_content_model
         stage_task_type = None
         stage_model_override = None
@@ -565,15 +565,15 @@ async def execute_stage_with_streaming(
 
                 # 🔥 执行流式 LLM 调用
                 logger.info(f"   🌊 开始流式 LLM 调用...")
-                # 🆕 按阶段选择模型，避免使用默认 deepseek-v4-flash
+                # 🆕 按阶段选择模型，避免使用默认 deepseek-flash
                 stage_model = None
                 stage_task_type = None
                 stage_model_override = None
                 try:
                     from app.core.config import settings
-                    default_content_model = getattr(settings, "DEFAULT_CONTENT_MODEL", "qwen3.7-plus")
+                    default_content_model = getattr(settings, "DEFAULT_CONTENT_MODEL", "qwen-plus")
                 except Exception:
-                    default_content_model = "qwen3.7-plus"
+                    default_content_model = "qwen-plus"
                 creative_model = workflow_generation_model or default_content_model
                 
                 if stage_enum == StageType.CONTENT:

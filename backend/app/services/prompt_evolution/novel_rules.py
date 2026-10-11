@@ -854,6 +854,90 @@ def build_targeted_rewrite_hint(findings: List[Dict[str, Any]]) -> str:
     )
 
 
+# 真实检测段落标注 → 定点指令（2026-10-08）
+#
+# ⚠️ 与 locate_high_risk_segments 的本质差别：
+#   后者是**正则猜**「这段可能像 AI」——输出的是类型标签（"二元对比句式"等），
+#   检测器到底认不认，系统并不知道，属于盲猜。
+#   朱雀接口实测会逐段返回 label（0人工/1确定AI/2疑似）与段原文，
+#   这是**检测器给出的真值**，可直接定位「哪几段被判成了 AI」。
+#
+# 设计约束（据实验13 的教训）：不要把它写成风格指令清单。
+#   exp13 实测：往重写提示词堆"句长要大起大落/多用破折号/加语气词"等风格指令，
+#   人工占比恒为 0.000 且主指标变差（玄幻 AI 占比 0.19→0.55/0.64）——
+#   风格指令会挤占事实约束的注意力预算。
+#   故这里只做两件事：指出被判 AI 的原文片段 + 要求不沿用其写法。不加任何风格建议。
+_SEG_SNIPPET_MAX_CHARS = 90      # 单条片段截断长度（够识别写法，又不喧宾夺主）
+_SEG_SNIPPET_MAX_ITEMS = 4       # 最多列几条（多了等于把原文又喂一遍，且与去锚定冲突）
+
+
+# 常驻事实底线（2026-10-08）：无任何定点命中时也要下发的轻量约束。
+#
+# 依据：实验16 的 A/B 显示「无指令」组质量合格率仅 25%，而有指令组 75%，
+# 事实一致性均值 85 → 90。差异不在"定点"本身，而在事实约束被再次强调
+# （且附加在提示词尾部，比埋在中段的条款更靠近输入文本、更容易被遵循）。
+# 故把这条抽成常量，在没有定点命中时单独下发，避免干净样本质量裸奔。
+FACT_BOTTOM_LINE_HINT = (
+    "\n\n【事实底线（逐项核对，违反即不合格）】\n"
+    "- 所有数字与数量必须原样保留：百分比、金额、年龄、时长、距离、排名、编号；\n"
+    "- 所有专有名词必须原样保留：人名、地名、门派、功法、兵器、丹药、机构、称谓；\n"
+    "- 对白内容不得改写或增删；事件先后与因果关系不得改变；\n"
+    "- 不得新增原文没有的动作、物件、心理或设定。"
+)
+
+
+def build_detector_segment_hint(
+    segment_labels: List[Dict[str, Any]],
+    max_items: int = _SEG_SNIPPET_MAX_ITEMS,
+    max_chars: int = _SEG_SNIPPET_MAX_CHARS,
+) -> str:
+    """用朱雀真实段落级标注生成定点指令；无确定AI段落时返回空串。
+
+    Args:
+        segment_labels: ``zhuque_ai_detect`` 返回的段落标注，
+            每项含 ``label``(0人工/1确定AI/2疑似) 与 ``text``（段原文）。
+        max_items: 最多引用几条片段。
+        max_chars: 单条片段最大字数。
+
+    Returns:
+        定点指令文本；没有 label==1 的段落时返回空串（避免无谓污染提示词）。
+    """
+    if not segment_labels:
+        return ""
+
+    ai_segs = [s for s in segment_labels if s.get("label") == 1]
+    suspect_count = sum(1 for s in segment_labels if s.get("label") == 2)
+    if not ai_segs:
+        return ""
+
+    # 置信度高的排前面：检测器最确信是 AI 的写法优先展示
+    ai_segs.sort(key=lambda s: float(s.get("conf") or 0.0), reverse=True)
+
+    lines = []
+    for i, seg in enumerate(ai_segs[:max_items], start=1):
+        snippet = (seg.get("text") or "").strip().replace("\n", " ")
+        if not snippet:
+            continue
+        if len(snippet) > max_chars:
+            snippet = snippet[:max_chars] + "…"
+        lines.append(f"{i}. 「{snippet}」")
+
+    if not lines:
+        return ""
+
+    tail = ""
+    if suspect_count:
+        tail = f"\n另有 {suspect_count} 段被判为「疑似AI」。"
+    return (
+        "\n\n【检测器实测标注】检测模型逐段判定后，认为下面这些原文片段"
+        "是由 AI 生成的（其余段落未被如此判定）：\n"
+        + "\n".join(lines)
+        + tail
+        + "\n重新写作时不要沿用上述片段的写法；其余内容按常规要求处理，"
+        "不得为了改动而改动，更不得改动其中涉及的事实、数字与专有名词。"
+    )
+
+
 # ============================================================================
 # 八、多维评分系统
 # ============================================================================

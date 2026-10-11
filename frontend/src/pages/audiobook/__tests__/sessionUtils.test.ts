@@ -93,7 +93,7 @@ describe('audiobook active session utils', () => {
       selectedChapterIds: [3, 2],
       activeStep: 1,
       generating: true,
-      ttsModel: 'qwen3-tts-instruct-flash',
+      ttsModel: 'qwen-audio-3.1-tts-flash',
     })
   })
 })

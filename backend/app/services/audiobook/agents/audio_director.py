@@ -36,7 +36,7 @@ class FidelityLevel(str, Enum):
 
 @dataclass
 class AdaptationStrategy:
-    """改编策略（默认适配Qwen3-TTS Flash）"""
+    """改编策略（引擎无关的风格与保真度档位）"""
     style: AdaptationStyle = AdaptationStyle.HYBRID
     fidelity_level: FidelityLevel = FidelityLevel.HIGH
     target_audience: str = "通用听众"
@@ -47,7 +47,6 @@ class AdaptationStrategy:
     max_episode_duration: int = 40  # 每集最大时长（分钟）
     sound_effect_density: str = "medium"  # low/medium/high
     music_density: str = "medium"
-    voice_differentiation: bool = True  # 是否为角色分配不同音色
     
     # TTS高级参数利用
     use_advanced_rate_control: bool = True  # 使用语速控制
@@ -146,7 +145,6 @@ class AudioDirector:
             emphasis=self._determine_emphasis(novel_genre),
             sound_effect_density=sound_density_mapping[style],
             music_density="medium",
-            voice_differentiation=True,
             # 商业版：全面启用 TTS 高级参数
             use_advanced_rate_control=True,
             use_pitch_modulation=False,
@@ -205,16 +203,7 @@ class AudioDirector:
             status="pending"
         ))
         
-        # 2. 角色音色设计
-        if self.current_strategy.voice_differentiation:
-            tasks.append(TaskAssignment(
-                agent_name="VoiceDesigner",
-                task_description="为主要角色分配独立音色并建立固定参数基线；片段表演不得通过 pitch 改造已选音色。",
-                priority=2,
-                status="pending"
-            ))
-        
-        # 3. 音效设计（根据密度）
+        # 2. 音效设计（根据密度）
         if self.current_strategy.sound_effect_density in ["medium", "high"]:
             tasks.append(TaskAssignment(
                 agent_name="SoundEffectDesigner",
@@ -223,7 +212,7 @@ class AudioDirector:
                 status="pending"
             ))
         
-        # 4. 音乐设计
+        # 3. 音乐设计
         if self.current_strategy.music_density in ["medium", "high"]:
             tasks.append(TaskAssignment(
                 agent_name="MusicComposer",
@@ -232,7 +221,7 @@ class AudioDirector:
                 status="pending"
             ))
         
-        # 5. 质量评审（最后）
+        # 4. 质量评审（最后）
         tasks.append(TaskAssignment(
             agent_name="AudioQualityReviewer",
             task_description="评审有声剧本质量和听觉体验",

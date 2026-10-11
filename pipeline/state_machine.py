@@ -342,6 +342,26 @@ def step(ctx: RunContext) -> RunContext:
                 else:
                     qc_result = autoqc.run(ctx.payload)
                 ctx.payload["autoqc"] = qc_result
+                # Phase 2.6 · AM-15 评价接线（双格式报告 + repair_dispatch；失败静默降级不阻断出片）
+                try:
+                    from pipeline.orchestration_kit import run_am15_stage
+
+                    run_am15_stage(ctx.payload)
+                except Exception:  # noqa: BLE001
+                    pass
+                # Phase 2.7 · 合成双通道：通道 A 编码基线校验（merged.mp4）+ 通道 B 剪映草稿导出
+                try:
+                    from pathlib import Path as _P
+
+                    from agents.synthesis_kit import run_synthesis_dual_channel
+
+                    _run_root = _P("backend/runs") if _P("backend/runs").exists() else _P("runs")
+                    run_synthesis_dual_channel(
+                        payload=ctx.payload,
+                        run_dir=_run_root / str(ctx.payload.get("run_id") or "unknown"),
+                    )
+                except Exception:  # noqa: BLE001
+                    pass
                 refresh_dreamweaver_smart_dispatch_trace(ctx.payload, stage=stage_label(ctx.state))
 
                 qc_cfg = ctx.payload.get("qc_config") if isinstance(ctx.payload.get("qc_config"), dict) else {}
@@ -490,7 +510,17 @@ def run_until_done(ctx: RunContext, max_steps: int = DEFAULT_MAX_STEPS) -> RunCo
             State.WAITING_VIDEO_CONFIRMATION,
         ):
             break
+        prev_state = ctx.state
         ctx = step(ctx)
+        # Phase 2.6 · handoff 3E 门位记录（默认 warn 不阻断；DREAMWEAVER_HANDOFF_MODE=block 可阻断）
+        try:
+            from pipeline.orchestration_kit import record_stage_handoff
+
+            record_stage_handoff(ctx.payload, prev_state.name)
+        except RuntimeError:
+            raise
+        except Exception:  # noqa: BLE001 — 门位记录失败不影响主流程
+            pass
     return ctx
 
 

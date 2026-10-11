@@ -14,13 +14,11 @@ import asyncio
 import hashlib
 import logging
 import random
-import os
 from typing import Dict, Any, Optional, List, Callable
 import io
 from dataclasses import dataclass
 from enum import Enum
 
-from ..constants import INSTRUCT_SPEAKER_IDS, normalize_speaker_id
 from ..voice_catalog import get_voice_entry
 
 logger = logging.getLogger(__name__)
@@ -64,12 +62,6 @@ COSYVOICE_V3_PLUS_INSTRUCT_CHOICES = {
 # Windows/Linux 常见网络瞬断 errno（用于判定可重试）。
 _RETRYABLE_NETWORK_ERRNOS = {10053, 10054, 104, 110, 111}
 
-# Qwen3-TTS Instruct Flash：优先读取新的 deployment 配置，并兼容历史环境变量。
-QWEN3_TTS_INSTRUCT_FLASH_MODEL_ID = (
-    os.getenv("QWEN3_TTS_INSTRUCT_FLASH_MODEL_ID")
-    or os.getenv("QWEN3_TTS_FLASH_MODEL_ID")
-    or "qwen3-tts-instruct-flash"
-)
 
 # 导入监控模块
 try:

@@ -23,7 +23,7 @@ from app.services import streaming_service as streaming_module
 from app.services.streaming_service import ModelReroutedError, StreamingService
 from app.api.v1.workflow import routes_chapter
 
-FLASH = "qwen3.7-flash"
+FLASH = "qwen-flash"
 
 
 class FakeLLMClient:
@@ -57,7 +57,7 @@ def test_rerouted_model_raises_when_locked(monkeypatch):
     """锁定档位下模型被 catalog guard 重路由 → 立即抛 ModelReroutedError，不调用 LLM。"""
     client = FakeLLMClient()
     service = _make_service(client)
-    monkeypatch.setattr(streaming_module, "resolve_model_for_task", lambda t, m: "qwen3.7-plus")
+    monkeypatch.setattr(streaming_module, "resolve_model_for_task", lambda t, m: "qwen-plus")
 
     with pytest.raises(ModelReroutedError):
         asyncio.run(service.generate_chapter_streaming(
@@ -86,7 +86,7 @@ def test_rerouted_model_allowed_when_not_locked(monkeypatch):
     """标准档（require_exact_model=False）保持现状：重路由不报错。"""
     client = FakeLLMClient()
     service = _make_service(client)
-    monkeypatch.setattr(streaming_module, "resolve_model_for_task", lambda t, m: "qwen3.7-plus")
+    monkeypatch.setattr(streaming_module, "resolve_model_for_task", lambda t, m: "qwen-plus")
 
     result = asyncio.run(service.generate_chapter_streaming(
         prompt="p", system_prompt="s", on_chunk=_noop_chunk,
@@ -119,7 +119,7 @@ def test_reroute_checked_before_each_attempt(monkeypatch):
     """首次尝试失败后 catalog 状态变化（被重路由）→ 第二次尝试前终止。"""
     client = FakeLLMClient(fail_times=10)
     service = _make_service(client)
-    resolve_results = iter([FLASH, FLASH, "qwen3.7-plus"])
+    resolve_results = iter([FLASH, FLASH, "qwen-plus"])
     monkeypatch.setattr(
         streaming_module, "resolve_model_for_task",
         lambda t, m: next(resolve_results),

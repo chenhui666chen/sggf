@@ -7,15 +7,25 @@
 同形、且该根未被 ``.gitignore`` 覆盖，肉眼盘点与按扩展名清理都发现不了，
 在 2026-08-27、2026-10-11 反复"处理"过两轮才清除。
 
+2026-10-11 定位到复发根因并双层收口：``_scene_render_mixin.SCENE_ARTIFACT_ROOT``
+是模块级常量，任务层测试直接跑 ``_try_generate_seed_scene_chapter`` 就会往真实
+产物根写文件（``.py`` 来自把测试模块当 ``audio_path``，``.wav`` 来自 ``_write_wav``
+夹具）。一是复制侧只接受音频后缀（见本文件最后两条用例），二是三个任务层测试
+文件用 autouse fixture 把产物根重定向到 ``tmp_path``。
+
 覆盖：
 - 检测逻辑对真实事故样本有效（种入同名 ``.py`` 必须被报出）；
 - 合法音频产物不得误报（平铺 ``art_*.wav`` / ``.mp3`` 及分片子目录形式）；
 - 根目录不存在或为空时视为通过（新克隆环境）；
-- 现网真实产物根不得含任何源码文件（``.py`` / ``.pyc``）。
+- 现网真实产物根不得含任何源码文件（``.py`` / ``.pyc``）；
+- 复制侧（``_build_scene_artifact_entries``）只接受音频后缀源文件：
+  非音频源（如测试模块自身）必须跳过复制与登记，合法 ``.wav`` 正常落盘。
 """
 
+import hashlib
 import os
 import sys
+import types
 from pathlib import Path
 
 import pytest
@@ -27,6 +37,12 @@ if str(ROOT_DIR) not in sys.path:
 os.environ.setdefault("DEBUG", "false")
 
 from app.services.audiobook.chapter_output_publish import SCENE_ARTIFACT_ROOT
+from app.services.audiobook.engine_pkg import (  # noqa: E402
+    _scene_render_mixin as scene_render_mixin_module,
+)
+from app.services.audiobook.engine_pkg._scene_render_mixin import (  # noqa: E402
+    SceneRenderMixin,
+)
 
 # 事故样本的真实文件名（commit d7f9353 误提交进产物目录）
 INCIDENT_ARTIFACT_NAME = "art_6798aca87b3fc42b3f93620fc3484c710d3b0101.py"
@@ -91,3 +107,56 @@ def test_real_scene_artifact_root_has_no_source_files():
         f"该目录只允许 art_*.{{音频后缀}} 产物；测试与源码请放 backend/tests/。"
         "注意：源码文件在此会被 pytest 收集，ROOT_DIR 推导也跟着错位。"
     )
+
+
+class _RenderHarness(SceneRenderMixin):
+    """只提供 ``_build_scene_artifact_entries`` 所需能力（全部来自 mixin 自身）。"""
+
+
+def _scene(audio_path: Path) -> types.SimpleNamespace:
+    return types.SimpleNamespace(
+        plan=types.SimpleNamespace(
+            scene_id="scene_0001",
+            source_segment_indices=[0],
+            expected_duration_s=1.2,
+        ),
+        result=types.SimpleNamespace(status="passed", audio_path=audio_path),
+    )
+
+
+def _build_entries(
+    source: Path, artifact_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> list[dict]:
+    monkeypatch.setattr(scene_render_mixin_module, "SCENE_ARTIFACT_ROOT", artifact_root)
+    return _RenderHarness()._build_scene_artifact_entries(
+        scenes=[_scene(source)],
+        fallback_audio_paths={},
+        script_segments=[{"segment_key": "seg_0001"}],
+        checkpoint_updates={},
+        task_id="task-hygiene",
+    )
+
+
+def test_build_entries_refuses_non_audio_source(tmp_path: Path, monkeypatch):
+    source = tmp_path / "not_audio.py"
+    source.write_text("def test_x():\n    pass\n", encoding="utf-8")
+    artifact_root = tmp_path / "artifacts"
+
+    entries = _build_entries(source, artifact_root, monkeypatch)
+
+    assert entries == []
+    assert list(artifact_root.rglob("*")) == []
+
+
+def test_build_entries_copies_legit_audio_source(tmp_path: Path, monkeypatch):
+    source = tmp_path / "scene.wav"
+    source.write_bytes(b"RIFF" + b"\x00" * 20)
+    artifact_root = tmp_path / "artifacts"
+
+    entries = _build_entries(source, artifact_root, monkeypatch)
+
+    artifact_id = "art_{}".format(
+        hashlib.sha256(b"task-hygiene:scene_0001").hexdigest()[:40]
+    )
+    assert [entry["artifact_id"] for entry in entries] == [artifact_id]
+    assert (artifact_root / f"{artifact_id}.wav").read_bytes() == source.read_bytes()

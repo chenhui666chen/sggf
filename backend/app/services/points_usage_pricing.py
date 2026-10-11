@@ -7,6 +7,7 @@ from typing import Any, Mapping, Sequence
 
 from sqlalchemy.orm import Session
 
+from app.services.asset_studio_model_catalog import resolve_video_price_per_second
 from app.services.points_pricing_policy import (
     PointsBusinessSettlementSnapshot,
     build_points_business_settlement_snapshot,
@@ -397,6 +398,16 @@ def estimate_book_analyze_basis_yuan(total_words: int | None, chapter_count: int
     return _round_yuan(amount)
 
 
+_VIDEO_BASIS_KINDS = frozenset({"video", "motion", "video_edit"})
+
+
+class AssetStudioVideoPriceMissing(ValueError):
+    """视频三链路按「模型 × 分辨率档」取不到官方每秒价。
+
+    单一均价（旧 0.2 元/秒）在 30 秒 1080p 下欠收十几倍，缺价必须拒单而不是猜。
+    """
+
+
 def estimate_asset_studio_basis_yuan(
     *,
     kind: str,
@@ -406,6 +417,9 @@ def estimate_asset_studio_basis_yuan(
     output_count: int = 1,
     prompt_chars: int | None = None,
     asset_type: str | None = None,
+    width: int | None = None,
+    height: int | None = None,
+    audio_output: bool = True,
 ) -> float:
     normalized_kind = _safe_text(kind, "").lower()
     normalized_mode = _safe_text(mode, "").lower()
@@ -420,16 +434,18 @@ def estimate_asset_studio_basis_yuan(
         )
         return _round_yuan(unit_price * normalized_output_count)
 
-    if normalized_kind == "video":
-        per_second = _env_float("POINTS_ASSET_STUDIO_VIDEO_PER_SECOND_YUAN", 0.2)
-        return _round_yuan(max(duration, 1.0) * per_second * normalized_output_count)
-
-    if normalized_kind == "motion":
-        per_second = _env_float("POINTS_ASSET_STUDIO_MOTION_PER_SECOND_YUAN", 0.25)
-        return _round_yuan(max(duration, 1.0) * per_second * normalized_output_count)
-
-    if normalized_kind == "video_edit":
-        per_second = _env_float("POINTS_ASSET_STUDIO_VIDEO_EDIT_PER_SECOND_YUAN", 0.3)
+    if normalized_kind in _VIDEO_BASIS_KINDS:
+        per_second = resolve_video_price_per_second(
+            model_id=model_id,
+            width=width,
+            height=height,
+            audio_output=audio_output,
+        )
+        if per_second is None:
+            raise AssetStudioVideoPriceMissing(
+                f"模型 {model_id or '未指定'} 在 {int(width or 0)}x{int(height or 0)} 对应的分辨率档"
+                "缺少官方每秒价目，无法计算冻结额；请先补齐 config/models.yaml 的 pricing_info 后重试。"
+            )
         return _round_yuan(max(duration, 1.0) * per_second * normalized_output_count)
 
     if normalized_kind == "audio":

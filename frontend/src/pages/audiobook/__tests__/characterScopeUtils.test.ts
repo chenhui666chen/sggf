@@ -8,7 +8,7 @@ const characterVoices: CharacterVoiceSetting[] = [
   {
     characterId: 0,
     name: '旁白',
-    voiceId: 'Neil',
+    voiceId: 'longsanshu_v3.1',
     volume: 50,
     speed: 1,
     pitch: 50,

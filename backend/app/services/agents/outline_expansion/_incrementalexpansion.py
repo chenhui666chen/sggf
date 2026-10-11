@@ -1068,7 +1068,7 @@ class IncrementalExpansionMixin:
                             framework_header: Optional[str] = None,
                             framework_footer: Optional[str] = None) -> Dict[str, Any]:
         selected_model = self.estimate_volume_detail_model(chapters_count_range)
-        selected_architect = self.plot_architect_plus if selected_model == "qwen3.7-plus" else self.plot_architect_r1
+        selected_architect = self.plot_architect_plus if selected_model == "qwen-plus" else self.plot_architect_r1
         target_volume_block = self._story_extract_volume_block(framework_content, target_volume_index)
         header_excerpt = self._story_truncate_text(framework_header, limit=1800) if framework_header else ""
         footer_excerpt = self._story_truncate_text(framework_footer, limit=1800) if framework_footer else ""
@@ -1283,7 +1283,7 @@ class IncrementalExpansionMixin:
             start_chapter_num=start_chapter_num,
             chapters_count_range=chapters_count_range,
         )
-        supplement_architect = self.plot_architect_r1 if selected_model == "qwen3.7-plus" else selected_architect
+        supplement_architect = self.plot_architect_r1 if selected_model == "qwen-plus" else selected_architect
         if (
             not self._story_is_valid_volume_detail_chapter_count(actual_chapter_count, chapters_count_range)
             or range_shortcuts

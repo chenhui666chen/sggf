@@ -46,7 +46,7 @@ def _resolve_video_edit_model_from_payload(payload: Dict[str, Any]) -> Optional[
     if not isinstance(enabled, bool) or not enabled:
         return None
 
-    adapter = str(video_edit_cfg.get("adapter") or "").strip() or "wan2.7-videoedit"
+    adapter = str(video_edit_cfg.get("adapter") or "").strip() or "wan3.0-video"
     try:
         if get_model_info(adapter) is None:
             return None

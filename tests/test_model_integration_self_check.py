@@ -62,16 +62,16 @@ class _FakeModel:
 def test_resolve_requested_chains_auto_detects_membership() -> None:
     assert check_model_integration.resolve_requested_chains(
         "all",
-        "qwen3.7-plus",
-        ["qwen3.7-plus"],
-        ["wan2.6-t2i"],
+        "qwen-plus",
+        ["qwen-plus"],
+        ["qwen-image-3.0"],
     ) == ["llm"]
 
     assert check_model_integration.resolve_requested_chains(
         "all",
-        "wan2.6-t2i",
-        ["qwen3.7-plus"],
-        ["wan2.6-t2i"],
+        "qwen-image-3.0",
+        ["qwen-plus"],
+        ["qwen-image-3.0"],
     ) == ["media"]
 
 
@@ -167,6 +167,7 @@ def test_collect_media_checks_returns_candidate_preview() -> None:
     results = check_model_integration.collect_media_checks(
         ["target-media-model"],
         configured_model_ids=["target-media-model"],
+        llm_model_ids=[],
         registry=_FakeRegistry(),
         smart_router=fake_router,
         config_path=check_model_integration.MEDIA_CONFIG_PATH,
@@ -184,3 +185,89 @@ def test_collect_media_checks_returns_candidate_preview() -> None:
     assert result.route_preview["target_in_candidates"] is True
     assert fake_router.calls[0]["strategy"] == "cost"
     assert fake_router.calls[0]["task"].modality.value == "text_to_image"
+
+
+class _ArchiveOnlyRouter:
+    """档案型条目不参与路由预览，路由器不应被调用。"""
+
+
+def test_llm_mirror_in_media_yaml_is_archive_not_failure() -> None:
+    """LLM 线在 models.yaml 里的档案镜像没有媒体 adapter 属预期，不能计成 error。"""
+    spec = _FakeMediaSpec(id="glm", modality=["text_to_text"])
+
+    class _FakeRegistry:
+        def get_spec(self, model_id: str):
+            return spec if model_id == "glm" else None
+
+        def get_adapter(self, model_id: str):
+            return None
+
+    results = check_model_integration.collect_media_checks(
+        ["glm"],
+        configured_model_ids=["glm"],
+        llm_model_ids=["glm"],
+        registry=_FakeRegistry(),
+        smart_router=_ArchiveOnlyRouter(),
+        config_path=check_model_integration.MEDIA_CONFIG_PATH,
+    )
+
+    result = results[0]
+    assert "档案镜像" in (result.non_adapter_reason or "")
+    assert result.has_adapter is False
+    assert result.errors == []
+    assert result.is_passed is True
+    assert result.status_label == "NON_ADAPTER"
+    assert result.route_preview is None
+
+
+def test_tts_engine_model_is_exempt_from_adapter_check() -> None:
+    """语音合成由 TTSEngine 直连实现，注册表没有 adapter 不是故障。"""
+    spec = _FakeMediaSpec(id="stepaudio-3-tts", modality=["text_to_speech"])
+
+    class _FakeRegistry:
+        def get_spec(self, model_id: str):
+            return spec if model_id == "stepaudio-3-tts" else None
+
+        def get_adapter(self, model_id: str):
+            return None
+
+    results = check_model_integration.collect_media_checks(
+        ["stepaudio-3-tts"],
+        configured_model_ids=["stepaudio-3-tts"],
+        llm_model_ids=[],
+        registry=_FakeRegistry(),
+        smart_router=_ArchiveOnlyRouter(),
+        config_path=check_model_integration.MEDIA_CONFIG_PATH,
+    )
+
+    result = results[0]
+    assert "TTSEngine" in (result.non_adapter_reason or "")
+    assert result.errors == []
+    assert result.is_passed is True
+
+
+def test_media_only_spec_without_adapter_still_fails() -> None:
+    """反向断言：不在 LLM 名单里的无 adapter 条目仍是 error，豁免不能吞掉真故障。"""
+    spec = _FakeMediaSpec(id="probe-yaml-only", modality=["text_to_image"])
+
+    class _FakeRegistry:
+        def get_spec(self, model_id: str):
+            return spec if model_id == "probe-yaml-only" else None
+
+        def get_adapter(self, model_id: str):
+            return None
+
+    results = check_model_integration.collect_media_checks(
+        ["probe-yaml-only"],
+        configured_model_ids=["probe-yaml-only"],
+        llm_model_ids=["glm"],
+        registry=_FakeRegistry(),
+        smart_router=_ArchiveOnlyRouter(),
+        config_path=check_model_integration.MEDIA_CONFIG_PATH,
+    )
+
+    result = results[0]
+    assert result.non_adapter_reason is None
+    assert "运行时未注册 adapter" in result.errors
+    assert result.is_passed is False
+

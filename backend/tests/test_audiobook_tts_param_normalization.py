@@ -22,7 +22,7 @@ class DummyScriptUtils(ScriptUtilsMixin):
 
 
 class FakeVoiceProfile:
-    tts_model = "qwen3-tts-instruct-flash"
+    tts_model = "qwen-audio-3.1-tts-flash"
 
     def __init__(self):
         self.requested_emotion = None
@@ -164,7 +164,7 @@ def test_assign_voices_prepares_delivery_plan_with_segment_model_for_review():
     profile = FakeVoiceProfile()
     engine = DummyScriptUtils()
     engine._narration_style_id = ""
-    engine.tts_model = "qwen3-tts-instruct-flash"
+    engine.tts_model = "qwen-audio-3.1-tts-flash"
     engine.voice_manager = FakeVoiceManager(profile)
     segment = ScriptSegment(
         type="dialogue",

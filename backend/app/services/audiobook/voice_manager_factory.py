@@ -20,8 +20,9 @@ from .tts_model_ids import (
     MIMO_V25_TTS_MODEL,
     MIMO_V25_TTS_VOICE_CLONE_MODEL,
     MIMO_V25_TTS_VOICE_DESIGN_MODEL,
+    QWEN_AUDIO_31_TTS_FLASH_MODEL,
     SEED_TTS_20_EXPRESSIVE_MODEL,
-    STEPAUDIO_25_TTS_MODEL,
+    STEPAUDIO_3_TTS_MODEL,
     get_audiobook_tts_model_metadata,
     list_supported_audiobook_tts_models,
     normalize_audiobook_tts_model,
@@ -31,35 +32,23 @@ from .minimax_voice_clone_client import is_minimax_custom_voice_id
 
 # 模型 -> 音色目录文件的映射
 MODEL_VOICE_MAPPING = {
-    "qwen3-tts-instruct-flash": "qwen3-tts-instruct-flash",
-    "qwen3-tts-flash": "qwen3-tts-instruct-flash",
-    "qwen3-tts-plus": "qwen3-tts-instruct-flash",
+    QWEN_AUDIO_31_TTS_FLASH_MODEL: QWEN_AUDIO_31_TTS_FLASH_MODEL,
     COSYVOICE_V35_PLUS_MODEL_ID: COSYVOICE_V35_PLUS_MODEL_ID,
     "cosyvoice-v3-plus": COSYVOICE_V35_PLUS_MODEL_ID,
     "minimax-speech-2.8-hd": "minimax-speech-2.8",
     "minimax-speech-2.8-turbo": "minimax-speech-2.8",
     "minimax-speech-2.8": "minimax-speech-2.8",
     MIMO_V25_TTS_MODEL: "mimo-v2.5-tts",
-    STEPAUDIO_25_TTS_MODEL: STEPAUDIO_25_TTS_MODEL,
+    STEPAUDIO_3_TTS_MODEL: STEPAUDIO_3_TTS_MODEL,
     SEED_TTS_20_EXPRESSIVE_MODEL: SEED_TTS_20_EXPRESSIVE_MODEL,
 }
 
 # 模型成本和优先级配置
 MODEL_CONFIGS = {
-    "qwen3-tts-instruct-flash": {
+    QWEN_AUDIO_31_TTS_FLASH_MODEL: {
         "cost_level": "low",
-        "quality_level": "medium_high",
-        "priority": 3,  # 默认使用
-    },
-    "qwen3-tts-flash": {
-        "cost_level": "low",
-        "quality_level": "medium_high",
-        "priority": 3,
-    },
-    "qwen3-tts-plus": {
-        "cost_level": "medium",
         "quality_level": "high",
-        "priority": 2,
+        "priority": 3,  # 默认使用
     },
     COSYVOICE_V35_PLUS_MODEL_ID: {
         "cost_level": "high",
@@ -91,7 +80,7 @@ MODEL_CONFIGS = {
         "quality_level": "medium_high",
         "priority": 4,
     },
-    STEPAUDIO_25_TTS_MODEL: {
+    STEPAUDIO_3_TTS_MODEL: {
         "cost_level": "medium",
         "quality_level": "premium",
         "priority": 2,
@@ -148,7 +137,7 @@ def get_model_for_voice(voice_id: str, preferred_model: str = None) -> str:
         except Exception:
             continue
     
-    # 默认返回 qwen3-tts-instruct-flash
+    # 未在任何目录命中时，回退到默认 Qwen 模型
     return DEFAULT_AUDIOBOOK_TTS_MODEL
 
 
@@ -285,7 +274,7 @@ def create_voice_manager(tts_model: str, llm_client: Any = None):
         MIMO_V25_TTS_VOICE_CLONE_MODEL,
     }:
         return MiMoVoiceManager(model=tts_model)
-    elif tts_model == STEPAUDIO_25_TTS_MODEL:
+    elif tts_model == STEPAUDIO_3_TTS_MODEL:
         return StepAudioVoiceManager(model=tts_model)
     elif tts_model == SEED_TTS_20_EXPRESSIVE_MODEL:
         return SeedTTSVoiceManager(model=tts_model)

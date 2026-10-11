@@ -2,8 +2,11 @@
 # LLM 模型配置文件
 # 定义项目当前接入的文本大模型能力、约束、路由与档案信息。
 
+# id 是项目内部的中性标识：不含版本号，模型升级换代沿用同一个 id；
+# 真正发给上游的模型名固定写在 default_params.request_model 里。
+
 llm_models:
-  - id: qwen3.7-plus
+  - id: qwen-plus
     name: Qwen3.7 Plus
     provider: alibaba
     model_type: llm
@@ -46,8 +49,8 @@ llm_models:
 
     constraints:
       max_context_tokens: 1000000
-      max_output_tokens: 65536
-      max_thinking_tokens: 81920
+      max_output_tokens: 131072
+      max_thinking_tokens: 262144
       supports_streaming: true
       supports_function_call: true
       supports_vision: true
@@ -85,11 +88,12 @@ llm_models:
         - verification
       priority: 1
       fallback_models:
-        - deepseek-v4-flash
+        - deepseek-flash
       weight: 1.0
       enabled: true
 
     default_params:
+      request_model: qwen3.7-plus
       temperature: 0.7
       max_tokens: 32768
       enable_thinking: false
@@ -110,6 +114,7 @@ llm_models:
       - 用于模型校验时启用内置联网搜索工具
       - 支持 Function Calling 与内置工具（联网搜索、代码执行）
       - 通过 DashScope OpenAI 兼容接口接入，模型名为 qwen3.7-plus
+      - 2026-10-09 越界探测实测（scripts/probe_llm_output_limits.py）：max_tokens 上限 131072、thinking_budget 上限 262144，均由 400 报文原文回显；档案原记 65536/81920 是上一代的取值，已按实测对账
       - 视觉输入支持单张最高1600万像素、最长2小时视频
     best_practice_tips:
       - 联网搜索使用 search_strategy: max 获得更全面结果
@@ -133,7 +138,7 @@ llm_models:
       - verification
       - agent
 
-  - id: qwen3.7-flash
+  - id: qwen-flash
     name: Qwen3.7 Flash
     provider: alibaba
     model_type: llm
@@ -164,8 +169,8 @@ llm_models:
 
     constraints:
       max_context_tokens: 1000000
-      max_output_tokens: 65536
-      max_thinking_tokens: 262144
+      max_output_tokens: 131072
+      max_thinking_tokens: 131072
       supports_streaming: true
       supports_function_call: true
       supports_vision: false
@@ -203,32 +208,35 @@ llm_models:
         - entity_extract
       priority: 3
       fallback_models:
-        - qwen3.7-plus
+        - qwen-flash-fallback
+        - qwen-plus
       weight: 1.0
       enabled: true
 
     default_params:
+      request_model: qwen3.7-flash
       temperature: 0.7
       max_tokens: 32768
       enable_thinking: false
 
-    summary: 阿里云通义千问轻量高速模型，输入0.2元/百万tokens、输出0.8元/百万tokens（约为qwen3.7-plus的十分之一），支持100万tokens上下文与思考模式，适合大批量、低成本的文本生成与辅助任务。
+    summary: 阿里云通义千问轻量高速模型，输入0.2元/百万tokens、输出0.8元/百万tokens（约为qwen-plus的十分之一），支持100万tokens上下文与思考模式，适合大批量、低成本的文本生成与辅助任务。
     recommended_scenarios:
       - 大批量章节初稿与扩写（成本敏感场景）
       - 长文档摘要与信息提取（100万tokens上下文）
       - 高频辅助任务（候选生成、格式转换、清洗）
     limitations:
-      - 生成质量弱于 qwen3.7-plus，复杂创作建议用主力模型
+      - 生成质量弱于 qwen-plus，复杂创作建议用主力模型
       - 视觉输入能力未经项目验证，当前不作为能力承诺
       - 思考模式会消耗额外tokens
     integration_notes:
       - 通过 DashScope OpenAI 兼容接口接入，模型名为 qwen3.7-flash
       - 使用阿里云百炼 API Key（DASHSCOPE_API_KEY）
       - 服务端限流 RPM 30000、TPM 5,000,000
+      - 2026-10-09 越界探测实测：max_tokens 上限 131072、thinking_budget 上限 131072（400 报文回显）；档案原记输出 65536 偏低、思考 262144 偏高，已按实测对齐
       - 计费支持缓存命中折扣（命中0.04元/百万tokens）与 Batch 半价
     best_practice_tips:
       - 成本敏感的批量任务优先选用
-      - 复杂推理任务开启 enable_thinking 或改用 qwen3.7-plus
+      - 复杂推理任务开启 enable_thinking 或改用 qwen-plus
       - 高频调用可利用上下文缓存降低输入成本
     documentation_url: https://help.aliyun.com/zh/model-studio/models
     source_urls:
@@ -243,9 +251,9 @@ llm_models:
       - chinese
       - alibaba
 
-  - id: kimi/kimi-k2.6
-    name: Kimi K2.6
-    provider: moonshot
+  - id: qwen-flash-fallback
+    name: Qwen3.8 Flash
+    provider: alibaba
     model_type: llm
     version: v1
     status: active
@@ -253,33 +261,29 @@ llm_models:
     capabilities:
       - name: creative
         level: native
-        score: 0.92
-        description: 长文本创作与角色扮演能力优秀
+        score: 0.90
+        description: 轻量高速文本生成，同族上一代的继任者，质量略高于 qwen-flash
       - name: reasoning
         level: native
-        score: 0.90
-        description: 支持思考模式（enable_thinking），复杂推理能力强
+        score: 0.87
+        description: 支持思考模式（实测 thinking_budget 上限262144 tokens）
       - name: long_context
         level: native
-        score: 0.92
-        description: 支持超长上下文输入，适合长篇资料理解
-      - name: multimodal
-        level: native
-        score: 0.88
-        description: 原生支持文本、图像、视频输入，单轮可处理多图与视频
+        score: 0.95
+        description: 支持100万tokens上下文，最大输入991,808
       - name: writing
         level: native
-        score: 0.91
-        description: 中文写作与大纲扩展能力出色
+        score: 0.89
+        description: 中文写作流畅，适合初稿生成与批量扩写
       - name: chinese
         level: native
         score: 0.93
-        description: 中文理解与表达能力优秀
+        description: 中文理解与表达能力良好
 
     constraints:
-      max_context_tokens: 131072
-      max_output_tokens: 8192
-      max_thinking_tokens: 16384
+      max_context_tokens: 1000000
+      max_output_tokens: 131072
+      max_thinking_tokens: 262144
       supports_streaming: true
       supports_function_call: true
       supports_vision: true
@@ -298,10 +302,118 @@ llm_models:
       default_max_retries: 3
 
     performance:
+      quality_score: 8.7
+      avg_latency_seconds: 1.4
+      p95_latency_seconds: 3.0
+      tokens_per_second: 140
+      cost_per_1k_input_tokens: 0.0008
+      cost_per_1k_output_tokens: 0.0027
+      currency: CNY
+
+    routing:
+      # 置空即不参与自动路由：该条目只作为 qwen-flash 失败时的第一顺位回退目标
+      task_types: []
+      priority: 3
+      fallback_models:
+        - qwen-plus
+      weight: 1.0
+      enabled: true
+
+    default_params:
+      request_model: qwen3.8-flash
+      temperature: 0.7
+      max_tokens: 32768
+      enable_thinking: false
+
+    summary: 阿里云通义千问 3.8 代轻量模型，输入0.8元/百万tokens、输出2.7元/百万tokens，成本介于 qwen-flash（0.2/0.8）与 qwen-plus（2/8）之间。当前不作为自动路由目标，仅在 qwen-flash 调用失败时顶上。
+    recommended_scenarios:
+      - qwen-flash 调用失败时的同族兜底
+      - 需要比 qwen-flash 更强图文理解的低成本场景
+    limitations:
+      - 单位成本约为 qwen-flash 的4倍，不作为批量任务主力
+      - 未注册任何 task_types，不会被自动路由选中
+      - quality_score、延迟与 tokens/s 为同族估算，未经项目压测
+    integration_notes:
+      - 通过 DashScope OpenAI 兼容接口接入，模型名为 qwen3.8-flash
+      - 使用阿里云百炼 API Key（DASHSCOPE_API_KEY）
+      - 2026-10-09 真实 API 实测：可调用，max_tokens 上限 131072，thinking_budget 上限 262144，支持图像输入
+      - 服务端限流 TPM 5,000,000（官方 qpmInfo：500,000 total_tokens / 6s）
+      - 计费支持缓存命中（0.1元/百万tokens）与 Batch（输入0.4、输出1.35元/百万tokens）
+    best_practice_tips:
+      - 仅作为 qwen-flash 的失败回退，不主动指定
+      - 若长期承担主力流量，应改由 qwen-plus 承接以获得更强质量
+    documentation_url: https://help.aliyun.com/zh/model-studio/models
+    source_urls:
+      - https://help.aliyun.com/zh/model-studio/models
+      - https://help.aliyun.com/zh/model-studio/pricing
+
+    tags:
+      - creative
+      - long_context
+      - fast
+      - fallback_only
+      - multimodal
+      - chinese
+      - alibaba
+
+  - id: kimi-preview
+    name: Kimi K2.8 Preview
+    provider: moonshot
+    model_type: llm
+    version: v1
+    status: active
+
+    capabilities:
+      - name: creative
+        level: native
+        score: 0.92
+        description: 长文本创作与角色扮演能力优秀；官方未公布 K2.8 Preview 基准成绩，能力分为项目沿用值
+      - name: reasoning
+        level: native
+        score: 0.90
+        description: 推理时始终输出 reasoning_content 且无法关闭（2026-10-08 四种关思考写法实测均无效）
+      - name: long_context
+        level: native
+        score: 0.92
+        description: 上下文 1048576 tokens，可整书级一次性输入
+      - name: multimodal
+        level: native
+        score: 0.88
+        description: 百炼能力标记 TG/Reasoning/VU；视频输入未单独实测
+      - name: writing
+        level: native
+        score: 0.91
+        description: 中文写作与大纲扩展能力出色
+      - name: chinese
+        level: native
+        score: 0.93
+        description: 中文理解与表达能力优秀
+
+    constraints:
+      max_context_tokens: 1048576
+      max_output_tokens: 262144
+      supports_streaming: true
+      supports_function_call: true
+      supports_vision: true
+      supports_json_mode: true
+      supports_timeout_param: true
+      supports_max_retries: true
+      supports_temperature: true
+      supports_system_prompt: true
+      supports_multi_turn: true
+      supports_thinking_mode: true
+
+    api_config:
+      api_key_env: DASHSCOPE_API_KEY
+      base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+      default_timeout: 300
+      default_max_retries: 3
+
+    performance:
       quality_score: 8.9
-      avg_latency_seconds: 2.0
-      p95_latency_seconds: 4.0
-      tokens_per_second: 80
+      avg_latency_seconds: 4.5
+      p95_latency_seconds: 7.0
+      tokens_per_second: 88
       cost_per_1k_input_tokens: 0.0065
       cost_per_1k_output_tokens: 0.027
       currency: CNY
@@ -315,37 +427,45 @@ llm_models:
         - multimodal_analysis
       priority: 2
       fallback_models:
-        - qwen3.7-plus
+        - qwen-plus
       weight: 1.0
       enabled: true
 
     default_params:
+      request_model: kimi/kimi-k2.8-preview
       temperature: 0.7
-      max_tokens: 8192
+      max_tokens: 16384
       enable_thinking: false
 
-    summary: 月之暗面 Kimi K2.6 模型，经阿里云百炼平台 OpenAI 兼容接口接入；原生支持文本、图像、视频输入与思考模式，长文本与中文创作能力优秀，是多模态分析与长文写作的备选模型。
+    summary: 月之暗面 Kimi K2.8 Preview，经阿里云百炼 OpenAI 兼容接口接入。上下文 1048576，单价 6.5/27 元每百万 tokens（缓存命中 1.7 元）。仍为 preview 版本，模型名无日期快照后缀。
     recommended_scenarios:
+      - 整书级/多章长文一次性输入，减少分层摘要次数
       - 长篇大纲扩展与章节生成
-      - 多模态内容分析（文本+图像+视频）
-      - 复杂推理任务（开启思考模式）
+      - 多模态内容分析（文本+图像）
       - 中文长文本创作与角色扮演
     limitations:
-      - 输出长度受限（8K tokens），不适合一次性超长输出
-      - 上下文 128K，处理整书级资料时需配合分层摘要
-      - 思考模式会消耗额外 tokens
+      - preview 版本，上游未公布稳定性承诺与转正/下线时间
+      - 思考无法关闭：enable_thinking=false、thinking={"type":"disabled"}、两者同发、不发 extra_body 四种写法都照样输出 reasoning_content（属家族行为）
+      - max_tokens 过小会被思考吃光：2026-10-08 实测 256 时 finish_reason=length 且 content 全空，故默认预算取 16384
+      - max_output_tokens 262144 为保守取值：百炼 console 字段写 1048576 但与上下文同值疑为误填，且网关对 max_tokens 完全不校验（262145/1048577 均返回 200），上限无法实测
+      - 每次调用固定注入约 78 tokens 提示词模板（极简 prompt 实测计 94 tokens）
+      - 官方未公布基准成绩，quality_score 与各能力分为项目沿用值，未做校正
     integration_notes:
-      - 通过 DashScope OpenAI 兼容接口接入，模型名为 kimi/kimi-k2.6
-      - 使用 extra_body={"enable_thinking": true} 开启思考模式
-      - 视觉输入支持 image_url（多图）与 video_url
-      - 思考过程通过 response.choices[0].message.reasoning_content 字段返回
+      - 通过 DashScope OpenAI 兼容接口接入，模型名为 kimi/kimi-k2.8-preview（月之暗面部署路由，非百炼直供裸名）
+      - 2026-10-08 实测 temperature 0.6/0.7/1.0 均通过；对照组 kimi/kimi-nonexistent-9.9 返回 404 model_not_found
+      - 不选 kimi-k3 的原因：k3 单价 20/100 元每百万 tokens（3.08x/3.70x），且裸名 kimi-k3 只接受 temperature 0.6/1.0，本项目默认 0.7 会直接 400
+      - 思考过程通过 response.choices[0].message.reasoning_content 返回；usage 不单独列出 reasoning_tokens
+      - 限流 RPM 500 / TPM 3000000（百炼 model-default 档）
+      - 输出上限 262144 是项目自选的保守值：百炼 console 该字段写 1048576 但与上下文同值疑为误填，且 2026-10-08 越界探测确认网关对 max_tokens 完全不校验（262145/1048577 都返回 200），真实上限无法由实测得出，故不要把它当错值改掉
+      - 支持 function-calling、structured-outputs、prefix-completion、cache
+      - tokens_per_second 88 由 6 次小样本实测均值推得（completion_tokens / 端到端秒数），非官方吞吐指标
     best_practice_tips:
-      - 复杂推理任务开启 enable_thinking
-      - 多图分析时合并到单次请求以减少重复上下文
-      - 长文输出场景建议分段生成并聚合
-    documentation_url: https://help.aliyun.com/zh/model-studio/use-kimi-k2-6
+      - max_tokens 不要低于 16384，否则思考占满预算拿不到正文
+      - 长文任务优先用满 1M 上下文，减少分层摘要带来的信息损耗
+      - 高频短调用要计入约 78 tokens 的固定模板开销
+    documentation_url: https://help.aliyun.com/zh/model-studio/kimi-api-by-moonshot-ai
     source_urls:
-      - https://help.aliyun.com/zh/model-studio/use-kimi-k2-6
+      - https://help.aliyun.com/zh/model-studio/kimi-api-by-moonshot-ai
       - https://help.aliyun.com/zh/model-studio/models
 
     tags:
@@ -357,8 +477,9 @@ llm_models:
       - moonshot
       - alibaba
 
-  - id: glm-5.2
-    name: GLM-5.2
+
+  - id: glm
+    name: GLM-5.3
     provider: zhipu
     model_type: llm
     version: v1
@@ -368,15 +489,15 @@ llm_models:
       - name: reasoning
         level: native
         score: 0.93
-        description: 长程推理能力突出，FrontierSWE 74.4分（开源第一），仅落后 Claude Opus 4.8 不到1个百分点
+        description: 长程推理能力突出，官方定位复杂工程任务端到端交付与深度研究
       - name: coding
         level: native
         score: 0.95
-        description: Terminal-Bench 2.1 81.0分、SWE-bench Pro 62.1分，开源模型第一梯队
+        description: 代码生成与漏洞分析为官方主打场景，处于旗舰梯队
       - name: long_context
         level: native
         score: 0.95
-        description: 稳定支持100万tokens上下文（glm-5.2[1m]），IndexShare稀疏注意力机制保证长文本首尾召回稳定
+        description: 支持100万tokens上下文，最大输入1,048,576，长文本首尾召回稳定
       - name: agent
         level: native
         score: 0.92
@@ -392,7 +513,7 @@ llm_models:
 
     constraints:
       max_context_tokens: 1000000
-      max_output_tokens: 16384
+      max_output_tokens: 131072
       supports_streaming: true
       supports_function_call: true
       supports_json_mode: true
@@ -428,16 +549,16 @@ llm_models:
         - agent
       priority: 2
       fallback_models:
-        - qwen3.7-plus
+        - qwen-plus
       weight: 1.0
       enabled: true
 
     default_params:
+      request_model: glm-5.3
       temperature: 0.7
       max_tokens: 16384
-      enable_thinking: false
 
-    summary: 智谱AI 2026年6月发布的旗舰开源大模型，744B MoE架构（单次激活约40B），原生支持100万tokens稳定上下文，主打长程推理与代码工程能力，Terminal-Bench/SWE-bench Pro/FrontierSWE 等多项基准开源第一，经阿里云百炼平台 OpenAI 兼容接口接入。
+    summary: 智谱AI 旗舰模型，经阿里云百炼平台 OpenAI 兼容接口接入，官方定位复杂工程任务端到端交付、代码生成与安全漏洞分析，支持 100 万 tokens 上下文，思考强度用顶层 reasoning_effort 的 low/high/max 三档控制（本代强制思考，无法彻底关闭）。官方刊例价与换代前持平（输入 8 / 输出 28 元每百万 tokens），本项目于 2026-10-09 原地换代（内部 ID 仍为 glm）。
     recommended_scenarios:
       - 长程代码工程与多文件项目重构
       - 长文档解析与百万级日志分析
@@ -448,21 +569,26 @@ llm_models:
       - 视觉输入能力非主打，不适合图像/视频理解任务
       - 思考模式 Max 档位会消耗较多 tokens
       - 长上下文模式下响应延迟较高
+      - 官方标注深度思考默认启用，不适合低延迟实时对话
     integration_notes:
-      - 通过阿里云百炼 OpenAI 兼容接口接入，模型名为 glm-5.2
-      - 启用完整100万上下文需使用 model="glm-5.2[1m]"，默认为小上下文版本
-      - 使用 extra_body 传递思考模式档位（Non-Thinking/High/Max）
-      - 支持 Function Calling 与结构化 JSON 输出
-      - MIT 开源协议，可商用，支持本地私有化部署
+      - 通过阿里云百炼 OpenAI 兼容接口接入，模型名为 glm-5.3
+      - 2026-10-09 越界探测实测：max_tokens 上限 131072（400 报文回显），档案 max_output_tokens 已按实测对齐；thinking_budget 上游不校验，无法实测，档案不记思考上限
+      - 2026-10-09 实测硬约束：本代为强制思考模型。关思考写法全表都 400 —— `enable_thinking=false` 与 `thinking={"type":"disabled"}` 报 The value of the enable_thinking parameter is restricted to True.；`thinking` 传字符串（如 non_thinking）报 'thinking' must be json_object；`reasoning_effort=none` 报 must be one of low / high / max。不发 extra_body 正常返回并带 reasoning_content
+      - 近似低思考的合法写法是顶层 `reasoning_effort: low`（实测 reasoning_content 长度接近 0），它不是关闭思考
+      - 旧档案写的 `glm-5.2[1m]` 变体名实测 404（本账号不可用），100 万上下文由上游线名 glm-5.3 本体提供，不再承诺变体名
+      - 思考档位走顶层 `reasoning_effort`（只认 low/high/max），本代没有可用的关思考档位
+      - 支持 Function Calling 与结构化 JSON 输出、上下文缓存（命中2元/百万tokens）
+      - 服务端限流：500,000 total_tokens / 6s（官方 qpmInfo，约为 5M tokens/分钟）
     best_practice_tips:
-      - 长文档/全仓库分析使用 glm-5.2[1m] 启用完整上下文
+      - 长文档/全仓库分析直接按 model="glm-5.3" 调用，无需额外变体名
       - 复杂推理任务开启 High 或 Max 思考档位
-      - 简单任务使用基础模式以控制成本和延迟
-      - 高峰时段 Max 模式消耗3倍配额，非高峰2倍
-    documentation_url: https://help.aliyun.com/zh/model-studio/use-glm-5-2
+      - 简单任务用 reasoning_effort: low 近似低思考以控制成本和延迟，但无法彻底关闭思考
+      - 高峰时段 Max 档位配额消耗更高，非高峰更划算，具体倍率以百炼计费页为准
+    documentation_url: https://help.aliyun.com/zh/model-studio/glm
     source_urls:
-      - https://help.aliyun.com/zh/model-studio/use-glm-5-2
+      - https://help.aliyun.com/zh/model-studio/glm
       - https://help.aliyun.com/zh/model-studio/models
+      - https://help.aliyun.com/zh/model-studio/pricing
 
     tags:
       - reasoning
@@ -474,7 +600,7 @@ llm_models:
       - alibaba
       - open_source
 
-  - id: MiniMax/MiniMax-M3
+  - id: minimax-m
     name: MiniMax M3
     provider: minimax
     model_type: llm
@@ -513,7 +639,7 @@ llm_models:
 
     constraints:
       max_context_tokens: 1000000
-      max_output_tokens: 16384
+      max_output_tokens: 524288
       supports_streaming: true
       supports_function_call: true
       supports_json_mode: true
@@ -553,11 +679,12 @@ llm_models:
         - vision_analysis
       priority: 2
       fallback_models:
-        - qwen3.7-plus
+        - qwen-plus
       weight: 1.0
       enabled: true
 
     default_params:
+      request_model: MiniMax/MiniMax-M3
       temperature: 0.7
       max_tokens: 16384
       thinking:
@@ -578,6 +705,7 @@ llm_models:
     integration_notes:
       - 通过阿里云百炼 OpenAI 兼容接口接入，模型名为 MiniMax/MiniMax-M3
       - 使用阿里云百炼 API Key（DASHSCOPE_API_KEY）
+      - 2026-10-09 越界探测实测：上游对 max_tokens 的校验上界是 524288（400 原文：does not support max tokens > 524288），档案原记 16384 实为默认发送值而非上限，已按实测对齐；default_params.max_tokens 仍保持 16384 不变
       - '思考模式通过 extra_body={"thinking": {"type": "adaptive"|"disabled"}} 控制'
       - disabled 为默认值（项目优化：避免思考 token 挤占输出预算导致空响应/截断），复杂任务可按需改回 adaptive
       - disabled 关闭思考，响应更快，适合对话、代码补全等延迟敏感场景
@@ -608,8 +736,8 @@ llm_models:
       - alibaba
       - open_source
 
-  - id: step-3.7-flash
-    name: Step 3.7 Flash
+  - id: step-preview
+    name: Step 5 Preview
     provider: stepfun
     model_type: llm
     version: v1
@@ -619,31 +747,31 @@ llm_models:
       - name: multimodal
         level: native
         score: 0.92
-        description: 原生多模态理解，198B稀疏MoE（196B语言+1.8B视觉编码器），原生理解UI、图表、文档、图片与应用界面，可自主裁剪、放大、重读图像
+        description: 官方文档确认输入支持文本、图片、视频，图片可设 detail 级别 low/high，单次最多 60 张
       - name: reasoning
         level: native
         score: 0.88
-        description: 三档推理强度可调（low/medium/high），思考过程通过 reasoning 字段返回，灵活平衡速度、成本与认知深度
+        description: 推理强度 low/medium/high 三档，Chat Completions API 用 reasoning_effort、Messages API 用 output_config.effort；思考同时通过 reasoning 与 reasoning_content 返回
       - name: agent
         level: native
         score: 0.93
-        description: 面向生产级Agent优化，ClawEval-1.1 67.1分（第一）、Toolathlon 49.5、HLE w. Tool 48.1，长程多轮工作流稳定调用API/浏览器/终端/Office
+        description: 官方定位覆盖多步骤 Agent 任务与工具调用，2026-10-08 实测 Function Calling 正常返回 tool_calls
       - name: coding
         level: native
         score: 0.88
-        description: SWE-Bench PRO 56.3分（第二）、Terminal-Bench 2.1 59.5，可独立追踪多文件代码库并生成功能性补丁
+        description: 官方定位重点覆盖编程与软件工程（问题排查、代码修改、测试编写）；官方未公布基准成绩，能力分为项目沿用值
       - name: fast
         level: native
         score: 0.95
-        description: 激活参数仅11B，最高生成速度400 tokens/s，适合高频、多轮、低等待的Agent应用
+        description: 2026-10-08 实测极小请求端到端 1.6~3.2s；官方未公布 tokens/s
       - name: long_context
         level: native
         score: 0.85
-        description: 支持256K上下文窗口，可一次性解析海量财务报告或多步骤搜索循环
+        description: 上下文 1024000 tokens（GET /v1/models 实测）
       - name: web_search
         level: native
         score: 0.90
-        description: 联网与视觉搜索增强，SimpleVQA(Search) 79.2分（第一）、V*(Python) 95.3，跨文本与图像主动获取并交叉比对多源证据
+        description: 联网搜索能力；官方声明支持，本项目未单独实测
       - name: writing
         level: native
         score: 0.85
@@ -654,8 +782,8 @@ llm_models:
         description: 中文理解与表达能力优秀，国产模型
 
     constraints:
-      max_context_tokens: 262144
-      max_output_tokens: 16384
+      max_context_tokens: 1024000
+      max_output_tokens: 65536
       supports_streaming: true
       supports_function_call: true
       supports_json_mode: true
@@ -676,13 +804,13 @@ llm_models:
 
     performance:
       quality_score: 8.8
-      avg_latency_seconds: 1.2
-      p95_latency_seconds: 3.0
-      tokens_per_second: 400
-      cost_per_1k_input_tokens: 0.00135
-      cost_per_1k_output_tokens: 0.0081
-      currency: USD
-      context_cache_discount: 0.20
+      avg_latency_seconds: 2.0
+      p95_latency_seconds: 5.0
+      tokens_per_second: 40
+      cost_per_1k_input_tokens: 0.007
+      cost_per_1k_output_tokens: 0.02
+      currency: CNY
+      context_cache_discount: 0.05
 
     routing:
       task_types:
@@ -696,50 +824,58 @@ llm_models:
         - web_search
       priority: 3
       fallback_models:
-        - qwen3.7-plus
+        - qwen-plus
       weight: 1.0
       enabled: true
 
     default_params:
+      request_model: step-5-preview
       temperature: 0.7
       max_tokens: 16384
       reasoning_effort: low
 
-    summary: 阶跃星辰2026年6月发布并开源的生产级Agent高效率Flash模型，198B稀疏MoE架构（196B语言+1.8B视觉编码器，激活11B），最高生成速度400 tokens/s，原生多模态理解，三档推理强度可调，ClawEval-1.1/SimpleVQA(Search)等多项Agent与视觉基准第一，直接调用StepFun官方OpenAI兼容接口。
+    summary: 阶跃星辰 Step 5 Preview。上下文 1024000、最大输出 65536，官方定位重点覆盖编程与专业知识工作，原生支持文本/图片/视频输入。官方定价输入 7、输出 20 元每百万 tokens，属高价档。仍为 preview 而非 GA，模型名无日期快照后缀。
     recommended_scenarios:
-      - 高频、多轮、低等待的Agent工作流
-      - 多模态Agent（UI/图表/文档/图片理解与执行）
-      - 长程多轮工具编排（API/浏览器/终端/Office）
-      - 高吞吐Coding Agent与并发编码管道
-      - 联网搜索与视觉搜索增强任务
-      - 一次性解析海量文档（256K上下文）
+      - 需要百万级上下文的整书/多章长文处理
+      - 高频、多轮、低等待的 Agent 工作流
+      - 多模态 Agent（UI/图表/文档/图片/视频理解与执行）
+      - 长程多轮工具编排
+      - 联网搜索增强任务
     limitations:
-      - 上下文窗口256K，低于部分百万级长上下文模型
-      - 复杂推理深度上限低于旗舰模型
-      - 视频输入能力非主打
+      - preview 版本而非 GA，上游未公布稳定性承诺与转正/下线时间
+      - 实测费用波动极大：2026-10-08 同一扩写 prompt 各跑 3 次（reasoning_effort=low），
+        completion_tokens 为 811/836/3828；思考计入 completion_tokens（隐藏占比约 80%），
+        故成本预算应按均值而非中位数留余量
+      - 按前端 7:1 输入输出口径，章节生成下拉里的相对成本标签约 31×
+      - 官方未公布基准成绩与 tokens/s，quality_score 为项目沿用值未做校正；tokens_per_second 40 由 3 次小样本推得，非权威值
+      - max_tokens 过小会被思考吃光：2026-10-08 实测 64 时 content 全空，16384 才正常出正文
+      - 视频输入官方声明支持，但本项目未实测，故未声明 supports_video_input
     integration_notes:
-      - 通过 StepFun 官方 OpenAI 兼容接口调用，模型名为 step-3.7-flash
+      - 通过 StepFun 官方 OpenAI 兼容接口调用，模型名为 step-5-preview（无日期快照后缀）
+      - 2026-10-08 以 GET /v1/models 确认存在（created=1789564127）；对照组 step-nonexistent-9.9 返回 404 model_invalid
       - 使用 StepFun API Key（STEP_API_KEY），非阿里云百炼
       - 中国大陆 base_url: https://api.stepfun.com/v1
-      - 海外 base_url: https://api.stepfun.ai/v1（需与API Key签发平台匹配）
-      - 思考过程通过 delta.reasoning 字段返回（流式）或 message.reasoning 字段返回（非流式）
-      - 三档推理强度可调（low/medium/high），平衡速度、成本与认知深度
-      - 图像通过 content 数组的 image_url 类型传入，支持 base64 与 URL，可设置 detail 参数（high/low）
-      - 支持 Function Calling 与结构化 JSON 输出
-      - 上下文缓存命中按输入 Token 单价的 20% 计费
-      - Apache-2.0 开源协议，可商用
+      - 官方定价（元每百万 tokens）：输入未命中 7、输入命中缓存 0.35、输出 20；推理过程与最终回复的 token 均按输出价计费
+      - 官方文档写明 max_tokens 默认为 INF 不作限制，由模型自动决定
+      - 2026-10-09 越界探测确认上游确实不校验 max_tokens（传 999999 返回 200），因此档案的 65536 无法由实测证实，是项目自选的保守上界而非上游真值
+      - 新增 responses 协议（chat/completions 之外的第二种调用协议），本项目仍走 chat/completions
+      - 思考过程同时通过 message.reasoning 与 message.reasoning_content 返回
+      - reasoning_effort 参数名与 low/medium/high 枚举不变，本项目按 Hard Constraints 固定 low
+      - 直连限流按账户累计充值分档而非按模型：V0(<¥100) 并发5/RPM100/TPM50万 … V4(≥¥10000) 并发130/RPM2600/TPM1300万
+      - 图片输入支持 URL 或 Base64，格式 JPG/JPEG/PNG/WebP/静态 GIF，单次最多 60 张
+      - 视频输入支持 URL/Base64/Files API 的 stepfile:// 引用，单个 MP4 小于 128MB、时长建议小于 5 分钟
+      - 自动路由不会选中本模型：实测 12 类任务的 select_best_model 全部落到其他模型，只有显式点名才会调用
     best_practice_tips:
-      - 高频Agent任务用 low 档位最大化速度
-      - 复杂推理用 high 档位深化认知
-      - 多模态任务利用原生视觉编码器，无需外挂模块
-      - 长程工具编排任务依赖 ClawEval-1.1 67.1 分的高轨迹完整性
-      - 利用上下文缓存降低重复前缀的推理成本
-    documentation_url: https://platform.stepfun.com/docs/zh/guides/models/step-3.7-flash
+      - 高频 Agent 任务用 low 档位最大化速度
+      - 长文任务优先用满 1M 上下文，减少分层摘要次数
+      - max_tokens 不要给得过小，否则思考占满预算拿不到正文
+      - 输入侧重复前缀尽量走提示缓存，命中价仅为未命中价的 5%
+    documentation_url: https://platform.stepfun.com/docs/zh/guides/models/step-5-preview
     source_urls:
-      - https://platform.stepfun.com/docs/zh/guides/models/step-3.7-flash
+      - https://platform.stepfun.com/docs/zh/guides/models/step-5-preview
+      - https://platform.stepfun.com/docs/zh/guides/pricing/details
       - https://platform.stepfun.com/docs/zh/guides/developer/reasoning
       - https://platform.stepfun.com/docs/zh/api-reference/chat/chat-completion-create
-      - https://static.stepfun.com/blog/step-3.7-flash/
 
     tags:
       - multimodal
@@ -751,10 +887,10 @@ llm_models:
       - web_search
       - chinese
       - stepfun
-      - open_source
 
-  - id: mimo-v2.5-pro
-    name: MiMo V2.5 Pro
+
+  - id: mimo-pro
+    name: MiMo V2.6 Pro
     provider: xiaomi
     model_type: llm
     version: v1
@@ -764,19 +900,23 @@ llm_models:
       - name: reasoning
         level: native
         score: 0.94
-        description: 万亿参数旗舰基座，深度思考能力突出，SWE-bench/TAU-bench等主流Agent评测全面领先
+        description: V2.6 旗舰基座，深度思考能力为原生支持
       - name: agent
         level: native
         score: 0.95
-        description: 极致Agent能力，可稳定完成近千轮工具调用的长程任务，4.3小时672次工具调用完成北大编译器工程
+        description: 长程 Agent 能力，可稳定完成近千轮工具调用的长程任务
       - name: coding
         level: native
         score: 0.94
-        description: 长程代码开发能力突出，11.5小时无人工干预产出8192行代码（视频编辑器），芯片EDA全流程1小时完成
+        description: 长程代码开发能力突出
       - name: long_context
         level: native
         score: 0.95
-        description: 原生支持1M tokens上下文，完整处理超长合同、代码库与研究报告，超长执行周期内保持逻辑一致
+        description: 原生支持 1M tokens 上下文与 131072 tokens 输出
+      - name: multimodal
+        level: native
+        score: 0.90
+        description: 支持图像输入理解，项目已实测通过
       - name: writing
         level: native
         score: 0.88
@@ -784,7 +924,7 @@ llm_models:
       - name: instruction_following
         level: native
         score: 0.93
-        description: 模糊指令遵循能力突出，精准捕捉上下文隐含的微妙要求，高强度智能体场景下稳定遵循
+        description: 模糊指令遵循能力突出，高强度智能体场景下稳定遵循
       - name: chinese
         level: native
         score: 0.92
@@ -802,6 +942,7 @@ llm_models:
       supports_system_prompt: true
       supports_multi_turn: true
       supports_thinking_mode: true
+      supports_vision: true
       supports_web_search: true
 
     api_config:
@@ -829,63 +970,64 @@ llm_models:
         - long_writing
         - coding
         - agent
+        - vision_analysis
       priority: 1
       fallback_models:
-        - qwen3.7-plus
+        - qwen-plus
       weight: 1.0
       enabled: true
 
     default_params:
+      request_model: mimo-v2.6-pro
       temperature: 0.7
       max_completion_tokens: 16384
       thinking:
         type: disabled
 
-    summary: 小米2025年12月发布的万亿参数旗舰基座模型，原生支持1M tokens上下文与128K输出，主打极致Agent能力与长程代码开发，SWE-bench/TAU-bench等主流Agent评测全面领先，可稳定完成近千轮工具调用的长程任务，直接调用小米MiMo官方OpenAI兼容接口。
+    summary: 小米 MiMo V2.6 系列旗舰模型。上下文 1M、输出上限 131072，支持图像输入理解，直接调用小米 MiMo 官方 OpenAI 兼容接口。
     recommended_scenarios:
       - 长程Agent工作流（近千轮工具调用）
       - 大型代码库端到端开发与重构
       - 超长合同/研究报告解析（1M上下文）
       - 复杂多步骤智能体任务
-      - 模糊指令遵循的高强度生产场景
-      - 芯片EDA/编译器工程等长程开发
+      - 需要图文联合理解的评审与分析
     limitations:
-      - 纯文本输入输出，不支持图像/视频/音频
-      - 万亿参数模型，长程任务延迟较高
+      - 仅支持文本输出，不支持图像/视频/音频生成
+      - 音频与视频输入接口可识别对应 content part 类型，但项目内尚未完成端到端验证
       - TPM限制10M，高并发需规划配额
     integration_notes:
-      - 通过小米 MiMo 官方 OpenAI 兼容接口调用，模型名为 mimo-v2.5-pro
-      - 使用 MiMo API Key（MIMO_API_KEY）
-      - base_url: https://api.xiaomimimo.com/v1
-      - 接口同时兼容 OpenAI 和 Anthropic 协议
-      - '思考模式通过 extra_body={"thinking": {"type": "disabled"|"enabled"}} 控制'
-      - 支持 Function Calling、流式输出、联网搜索、结构化输出
+      - 通过小米 MiMo 官方 OpenAI 兼容接口调用，模型名为 mimo-v2.6-pro（无日期后缀）
+      - 使用 MiMo API Key（MIMO_API_KEY），base_url 为 https://api.xiaomimimo.com/v1
+      - '思考模式默认开启，必须显式传 extra_body={"thinking": {"type": "disabled"}} 才能拿到正文，否则 content 为空、token 全被 reasoning_content 吃掉'
+      - 思考模式下上游强制 temperature=1.0、top_p=0.95
+      - 思考模式多轮工具调用必须完整回传 reasoning_content，否则上游返回 400
+      - 输出长度用 max_completion_tokens 控制；max_tokens 同样被接受，上限 131072（实测由 400 错误原文回显）
+      - V2.6 系列新增 Batch API（五折），本项目暂未使用
       - 上下文缓存命中按输入 Token 单价的 0.83% 计费
-      - 使用 max_completion_tokens 参数控制输出长度（非 max_tokens）
-      - 支持 Claude Code、Cline 等主流 AI 工具直接配置
     best_practice_tips:
       - 长程Agent任务建议开启思考模式提升一次性完成率
       - 大型代码库分析利用1M上下文一次性输入
-      - 利用上下文缓存降低重复前缀的推理成本（命中率越高节省越显著）
+      - 利用上下文缓存降低重复前缀的推理成本
       - 高并发场景需注意 RPM 100 / TPM 10M 限制
-    documentation_url: https://mimo.mi.com/models/zh-CN/mimo-v2.5-pro
+    documentation_url: https://mimo.mi.com/docs/quick-start/summary/model
     source_urls:
-      - https://mimo.mi.com/models/zh-CN/mimo-v2.5-pro
+      - https://mimo.mi.com/docs/quick-start/summary/model
       - https://mimo.mi.com/docs/price/pay-as-you-go
-      - https://mimo.mi.com/docs/quick-start/first-api-call
+      - https://mimo.mi.com/docs/api/guidance/rate-limit
 
     tags:
       - reasoning
       - agent
       - coding
       - long_context
+      - multimodal
       - instruction_following
       - chinese
       - xiaomi
       - flagship
 
-  - id: mimo-v2.5
-    name: MiMo V2.5
+  - id: mimo-flash
+    name: MiMo V2.6 Flash
     provider: xiaomi
     model_type: llm
     version: v1
@@ -895,7 +1037,7 @@ llm_models:
       - name: multimodal
         level: native
         score: 0.92
-        description: 原生全模态感知模型，支持图像、视频、音频、文本联合理解，实现跨模态精准感知与长程推理
+        description: 原生全模态感知模型，支持图像、视频、音频、文本联合理解
       - name: reasoning
         level: native
         score: 0.88
@@ -903,11 +1045,11 @@ llm_models:
       - name: agent
         level: native
         score: 0.90
-        description: 强大的全模态Agent能力，原生Agent执行能力，日常任务表现比肩mimo-v2.5-pro
+        description: 全模态 Agent 能力，官方称综合能力为同系列最强
       - name: long_context
         level: native
         score: 0.95
-        description: 原生支持1M tokens上下文，支持长视频追踪、长文本分析、长时间画面时序推理
+        description: 原生支持 1M tokens 上下文与 131072 tokens 输出
       - name: web_search
         level: native
         score: 0.85
@@ -915,7 +1057,7 @@ llm_models:
       - name: fast
         level: native
         score: 0.88
-        description: 在保持领先能力的同时实现更优的token效率，位于性能与效率的Pareto前沿
+        description: 在保持领先能力的同时实现更优的token效率
       - name: writing
         level: native
         score: 0.85
@@ -972,51 +1114,49 @@ llm_models:
         - web_search
       priority: 2
       fallback_models:
-        - qwen3.7-plus
+        - qwen-plus
       weight: 1.0
       enabled: true
 
     default_params:
+      request_model: mimo-v2.6-flash
       temperature: 0.7
       max_completion_tokens: 16384
       thinking:
         type: disabled
 
-    summary: 小米2025年12月发布的原生全模态感知模型，支持图像、视频、音频、文本联合理解，原生支持1M tokens上下文与128K输出，具备强大的全模态Agent能力，位于性能与效率的Pareto前沿，直接调用小米MiMo官方OpenAI兼容接口。
+    summary: 小米 MiMo V2.6 系列效率档模型。上下文 1M、输出上限 131072，保留原生全模态感知（图像/视频/音频/文本联合理解），走小米 MiMo 官方 OpenAI 兼容接口。
     recommended_scenarios:
       - 多模态Agent（图像/视频/音频/文本联合理解）
       - 长视频追踪与长时间画面时序推理
-      - 全模态信息获取与交叉验证
       - 长文档与长视频分析（1M上下文）
       - 跨模态搜索与推理任务
-      - 日常Agent任务（比肩pro能力且效率更优）
+      - 高频调用的日常Agent任务
     limitations:
       - 仅支持文本输出，不支持图像/视频/音频生成
-      - 万亿参数级别，多模态输入延迟较高
+      - 多模态输入延迟高于纯文本模型
       - TPM限制10M，高并发需规划配额
     integration_notes:
-      - 通过小米 MiMo 官方 OpenAI 兼容接口调用，模型名为 mimo-v2.5
-      - 使用 MiMo API Key（MIMO_API_KEY），与pro共用
-      - base_url: https://api.xiaomimimo.com/v1
-      - 接口同时兼容 OpenAI 和 Anthropic 协议
-      - '思考模式通过 extra_body={"thinking": {"type": "disabled"|"enabled"}} 控制'
-      - 图像通过 content 数组的 image_url 类型传入（支持URL）
-      - 音频通过 content 数组的 input_audio 类型传入（支持URL）
-      - 视频通过 content 数组的 video_url 类型传入，可设置 fps 与 media_resolution 参数
-      - 支持 Function Calling、流式输出、联网搜索、结构化输出
+      - 通过小米 MiMo 官方 OpenAI 兼容接口调用，模型名为 mimo-v2.6-flash（无日期后缀）
+      - 使用 MiMo API Key（MIMO_API_KEY），与 pro 共用，base_url 为 https://api.xiaomimimo.com/v1
+      - 默认输出上限即 131072，不显式传 max_completion_tokens 时账单可能明显偏大
+      - '思考模式默认开启，必须显式传 extra_body={"thinking": {"type": "disabled"}} 才能拿到正文'
+      - 思考模式下上游强制 temperature=1.0、top_p=0.95
+      - 思考模式多轮工具调用必须完整回传 reasoning_content，否则上游返回 400
+      - 图像通过 content 数组的 image_url 类型传入（项目实测 HTTP 200）
+      - 音频通过 input_audio 类型传入且需填 data 字段，视频通过 video_url 类型传入；两者接口可识别但项目内尚未端到端验证
+      - V2.6 系列新增 Batch API（五折），本项目暂未使用
       - 上下文缓存命中按输入 Token 单价的 2% 计费
-      - 使用 max_completion_tokens 参数控制输出长度（非 max_tokens）
     best_practice_tips:
       - 多模态任务利用原生全模态感知，无需外挂模块
       - 长视频分析可设置 fps 控制采样帧率
       - 利用1M上下文一次性输入长视频与长文档
-      - 利用上下文缓存降低重复前缀的推理成本
-      - 日常Agent任务优先选用v2.5（效率更优），深度Agent任务用pro
-    documentation_url: https://mimo.mi.com/models/zh-CN/mimo-v2.5
+      - 高频调用优先选用本模型，深度长程任务用 pro
+    documentation_url: https://mimo.mi.com/models/zh-CN/mimo-v2.6-flash
     source_urls:
-      - https://mimo.mi.com/models/zh-CN/mimo-v2.5
+      - https://mimo.mi.com/models/zh-CN/mimo-v2.6-flash
       - https://mimo.mi.com/docs/price/pay-as-you-go
-      - https://mimo.mi.com/docs/quick-start/first-api-call
+      - https://mimo.mi.com/docs/api/guidance/rate-limit
 
     tags:
       - multimodal
@@ -1027,6 +1167,8 @@ llm_models:
       - web_search
       - chinese
       - xiaomi
+
+
 
   - id: doubao-seed-evolving
     name: Doubao Seed Evolving
@@ -1063,7 +1205,7 @@ llm_models:
 
     constraints:
       max_context_tokens: 262144
-      max_output_tokens: 16384
+      max_output_tokens: 262144
       supports_streaming: true
       supports_function_call: true
       supports_json_mode: true
@@ -1076,7 +1218,7 @@ llm_models:
       supports_context_cache: true
 
     api_config:
-      api_key_env: DOUBAO_API_KEY
+      api_key_env: VOLCENGINE_API_KEY
       base_url: https://ark.cn-beijing.volces.com/api/v3
       default_timeout: 300
       default_max_retries: 3
@@ -1102,7 +1244,7 @@ llm_models:
         - reasoning
       priority: 2
       fallback_models:
-        - qwen3.7-plus
+        - qwen-plus
       weight: 1.0
       enabled: true
 
@@ -1125,7 +1267,9 @@ llm_models:
       - 上下文窗口256K，低于部分百万级长上下文模型
     integration_notes:
       - 通过火山方舟 OpenAI 兼容接口调用，统一 Model ID 为 doubao-seed-evolving，始终获取最新版本
-      - 使用火山引擎 API Key（DOUBAO_API_KEY），非阿里云百炼
+      - 使用火山方舟通用 Key（VOLCENGINE_API_KEY），非阿里云百炼；2026-10-09 起本线 api_key_env 由历史别名 DOUBAO_API_KEY 统一到 VOLCENGINE_API_KEY，与媒体/有声书链取值口径一致
+      - 2026-10-09 越界探测实测 max_tokens 上限 262144（400 报文回显 expected a value <= 262144），档案原值 16384 偏低 16 倍已修正；thinking_budget 上游不校验（传 999999 被忽略、思考仍产生），故不记思考上限
+      - 2026-10-09 实测关思考写法（非强制思考模型）：thinking 传 type disabled、或顶层 reasoning_effort 传 minimal 都生效（reasoning_tokens=0）；enable_thinking=false 被上游静默忽略（思考照常产生）；thinking 传 type auto 返回 400 Unsupported thinking type
       - base_url: https://ark.cn-beijing.volces.com/api/v3
       - 深度思考模型，思考过程通过 reasoning_content 字段返回
       - 支持 Function Calling 与结构化 JSON 输出
@@ -1135,7 +1279,7 @@ llm_models:
       - 利用统一 Model ID 始终获取最新模型能力，无需手动切换版本
       - 启用透明缓存降低重复前缀的推理成本
       - 复杂工程任务依赖其长程规划与持续修复能力
-      - 对一致性要求极高的批处理任务建议使用固定版本号（如 doubao-seed-2-1-pro-260628）
+      - 对一致性要求极高的批处理任务建议使用固定版本号（如 doubao-seed-2-1-pro-260915）
     documentation_url: https://www.volcengine.com/docs/82379/1399008
     source_urls:
       - https://www.volcengine.com/docs/82379/1399008
@@ -1202,7 +1346,7 @@ llm_models:
       supports_context_cache: true
 
     api_config:
-      api_key_env: DOUBAO_API_KEY
+      api_key_env: VOLCENGINE_API_KEY
       base_url: https://ark.cn-beijing.volces.com/api/v3
       default_timeout: 300
       default_max_retries: 3
@@ -1227,7 +1371,7 @@ llm_models:
         - roleplay
       priority: 2
       fallback_models:
-        - qwen3.7-plus
+        - qwen-plus
       weight: 1.0
       enabled: true
 
@@ -1251,7 +1395,9 @@ llm_models:
       - 多模态仅支持理解输入，不生成图像/视频
     integration_notes:
       - 通过火山方舟 OpenAI 兼容接口调用，统一 Model ID 为 doubao-seed-character，始终获取最新版本
-      - 使用火山引擎 API Key（DOUBAO_API_KEY），非阿里云百炼
+      - 使用火山方舟通用 Key（VOLCENGINE_API_KEY），非阿里云百炼；2026-10-09 起本线 api_key_env 由历史别名 DOUBAO_API_KEY 统一到 VOLCENGINE_API_KEY，与媒体/有声书链取值口径一致
+      - 2026-10-09 越界探测实测 max_tokens 上限 32768（400 报文回显 expected a value <= 32768），与档案一致；thinking_budget 上游不校验，故不记思考上限
+      - 2026-10-09 实测本线默认不产生思考（reasoning_tokens=0），关思考写法（disabled / reasoning_effort minimal）与 enable_thinking=false 均不报错，非强制思考模型
       - base_url: https://ark.cn-beijing.volces.com/api/v3
       - 角色扮演专用模型，支持 Human-like 自然聊天与主动激活对话
       - 支持 thinking 模式与 VLM 多模态理解（视频/图片/表情包）
@@ -1280,7 +1426,7 @@ llm_models:
       - doubao
       - character
 
-  - id: deepseek-v4-pro
+  - id: deepseek-pro
     name: DeepSeek V4 Pro
     provider: deepseek
     model_type: llm
@@ -1349,7 +1495,7 @@ llm_models:
         - volume_detail_expand
       priority: 1
       fallback_models:
-        - qwen3.7-plus
+        - qwen-plus
       enabled: true
 
     default_params:
@@ -1365,7 +1511,7 @@ llm_models:
       - 情节结构检查与质量评审
       - 有声剧本改编中的逻辑约束处理
     limitations:
-      - 响应慢于 deepseek-v4-flash 和 qwen3.7-plus
+      - 响应慢于 deepseek-flash 和 qwen-plus
       - 当前项目接入层不向它开放 temperature、timeout 和 max_retries 参数
       - 不适合作为高频流式交互模型
     integration_notes:
@@ -1387,8 +1533,8 @@ llm_models:
       - logic
       - deepseek
 
-  - id: deepseek-v4-flash
-    name: DeepSeek V4 Flash
+  - id: deepseek-flash
+    name: DeepSeek Flash
     provider: deepseek
     model_type: llm
     version: v1
@@ -1409,8 +1555,8 @@ llm_models:
         description: 极低延迟，适合快速响应场景
 
     constraints:
-      max_context_tokens: 1000000
-      max_output_tokens: 65536
+      max_context_tokens: 1048576
+      max_output_tokens: 393216
       supports_streaming: true
       supports_function_call: true
       supports_timeout_param: true
@@ -1431,8 +1577,8 @@ llm_models:
       avg_latency_seconds: 2.0
       p95_latency_seconds: 5.0
       tokens_per_second: 60
-      cost_per_1k_input_tokens: 0.001
-      cost_per_1k_output_tokens: 0.002
+      cost_per_1k_input_tokens: 0.002
+      cost_per_1k_output_tokens: 0.008
       currency: CNY
 
     routing:
@@ -1444,32 +1590,39 @@ llm_models:
         - simple
       priority: 2
       fallback_models:
-        - qwen3.7-plus
+        - qwen-plus
       enabled: true
 
     default_params:
-      request_model: deepseek-v4-flash
+      request_model: deepseek-flash
       thinking:
         type: disabled
 
-    summary: 项目中的轻量快速推理模型。DeepSeek V4 Flash 定位于高性价比快速推理，适合需要推理能力但对延迟敏感的场景。
+    summary: 项目中的轻量快速推理模型。上下文 1048576、最大输出 393216，走 DeepSeek 官方渠道，适合需要推理能力但对延迟敏感的场景。
     recommended_scenarios:
       - 快速对话和交互
       - AI 痕迹处理
       - 轻量级逻辑分析和推理
       - 需要低延迟的实时交互
     limitations:
-      - 深度推理质量不如 deepseek-v4-pro
+      - 深度推理质量不如 deepseek-pro
       - 长文本生成质量略低于 V4 Pro
+      - 单价按高峰时段记录，空闲时段实际计费约为其一半
     integration_notes:
+      - 上游会把已下架的旧模型名静默改写为 deepseek-flash（响应 model 字段可证），故模型退役不能指望上游兜底，必须同步改本项目配置
+      - 本模型只存在于 DeepSeek 官方渠道（https://api.deepseek.com），百炼上不存在同名型号，切勿改走 DashScope
+      - agents/llm_client.py 的 _is_deepseek_official_model 依赖本 ID 判定走 DeepSeek 官方密钥，改名时必须同步
+      - 上下文 1048576 与最大输出 393216 于 2026-10-08 经真实 API 越界探测确认（400 报文回显上限）
+      - 官方按闲时/忙时分档计费：输入 1/2、缓存命中 0.02/0.04、输出 4/8 元每百万 tokens。项目 YAML 只有单值价格字段，此处按忙时（保守上界）记录
       - 内部 task_type=fast、ai_trace、simple 等优先使用
       - 适合作为统一中心中的"快速推理通道模型"
       - 默认禁用 DeepSeek 官方思考模式，保留低延迟和 temperature 可控性
-      - 与 deepseek-v4-pro 形成质量/速度互补关系
+      - 与 deepseek-pro 形成质量/速度互补关系
     best_practice_tips:
       - 快速响应任务首选
-      - 成本极低，适合作为高频调用模型
+      - 成本较低，适合作为高频调用模型
       - AI 痕迹处理与快速改写推荐使用
+      - 输出上限 393216，长文生成不必再分段规避 65536 旧限制
     documentation_url: https://api-docs.deepseek.com/zh-cn/
     source_urls:
       - https://api-docs.deepseek.com/zh-cn/
@@ -1479,6 +1632,7 @@ llm_models:
       - reasoning
       - fast
       - deepseek
+
 
 audio_models:
   - id: mureka-o1-instrumental
@@ -1498,9 +1652,9 @@ audio_models:
         score: 0.9
         description: 适合做镜头配乐、环境氛围和试听版本
       - name: style_control
-        level: native
+        level: emulated
         score: 0.8
-        description: 支持通过风格、情绪和节奏控制音乐方向
+        description: 风格、情绪、节奏由后端拼进 prompt 下发，上游没有 style / mood / tempo 入参
 
     constraints:
       max_context_tokens: 200
@@ -1523,7 +1677,7 @@ audio_models:
 
     performance:
       quality_score: 8.2
-      avg_latency_seconds: 30.0
+      avg_latency_seconds: 70.0  # 2026-10-11 实测端到端 65.1s / 75.4s，含异步任务轮询
       p95_latency_seconds: 90.0
       tokens_per_second: 0
       cost_per_1k_input_tokens: 0.0
@@ -1540,7 +1694,7 @@ audio_models:
       enabled: true
 
     default_params:
-      duration: 30
+      duration: 30  # 仅资产工作台控件默认值；上游 /v1/instrumental/generate 无 duration 入参，不下发
       style: 氛围
       mood: calm
       tempo: medium
@@ -1553,14 +1707,18 @@ audio_models:
     limitations:
       - 当前主要面向纯音乐和环境氛围，不适合对白和歌词演唱
       - 时长和风格控制需要遵循后端工作台离散参数约束
+      - 上游没有时长入参，实测产出约 185–190 秒完整乐曲，15/30/45/60 秒只用于本地校验与积分冻结，不裁剪产物
+      - 按生成数量计费且 n 缺省为 2，本地固定下发 n=1；实测 n=1 扣 100 额度单位
+      - 账号侧并发上限为 1，同一时刻只允许一个在途任务
     integration_notes:
       - 当前通过 POST /api/v1/asset-studio/audio 统一代理调用
       - 后端落地服务使用 app.services.audiobook.ai_music.create_music_generator
       - 已纳入统一模型注册中心，方便和文本、图像、视频模型一起做统一选型
+      - 请求体 model 固定为 mureka-9.5（adapters/_shared.py:MUREKA_INSTRUMENTAL_MODEL），上游 mureka-o1 实测 400，本地 ID 仅作历史兼容
     best_practice_tips:
       - 同时写明场景、情绪、节奏和主要乐器，结果更稳定
       - 更适合背景音乐和氛围铺底，不适合对白音频
-      - 建议先出 15 到 30 秒试听段，再决定是否继续扩展
+      - 产物是一段完整乐曲（实测约 185–190 秒），需要短配乐时在后端按需截取，不要指望上游按请求时长产出
     documentation_url: https://platform.mureka.cn/docs/
     source_urls:
       - https://platform.mureka.cn/docs/

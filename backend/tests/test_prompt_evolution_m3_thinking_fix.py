@@ -24,7 +24,7 @@ import pytest
 
 from app.services.prompt_evolution.evaluator import PromptEvaluator
 
-M3_MODEL_ID = "MiniMax/MiniMax-M3"
+M3_MODEL_ID = "minimax-m"
 EVOLVING_MODEL_ID = "doubao-seed-evolving"
 
 
@@ -92,7 +92,7 @@ def test_extra_body_passthrough_overrides_default_thinking():
     from schemas.unified_model_spec import APIConfig, ModelType, UnifiedModelSpec
 
     spec = UnifiedModelSpec(
-        id="MiniMax/MiniMax-M3",
+        id="minimax-m",
         name="MiniMax M3",
         provider="minimax",
         model_type=ModelType.LLM,
@@ -160,7 +160,7 @@ def test_empty_content_response_logs_diagnostic(caplog):
     from core.llm_adapters import OpenAICompatibleAdapter
 
     adapter = OpenAICompatibleAdapter.__new__(OpenAICompatibleAdapter)
-    adapter.spec = SimpleNamespace(id="MiniMax/MiniMax-M3")
+    adapter.spec = SimpleNamespace(id="minimax-m")
     message = SimpleNamespace(content="", reasoning_content="思考内容" * 100)
     usage = SimpleNamespace(prompt_tokens=3000, completion_tokens=16384, total_tokens=19384)
 

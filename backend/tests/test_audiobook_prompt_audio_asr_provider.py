@@ -252,9 +252,10 @@ def test_aliyun_asr_provider_downloads_transcription_result(monkeypatch) -> None
     assert captured["follow_redirects"] is True
 
 
-# fun-asr-flash 返回结构非标准：结果嵌套在 output.output.sentence，逐字时间戳带标点。
+# qwen-audio-3.1-asr-flash 的返回结构非标准：结果可能嵌套在 output.output.sentence，
+# 逐字时间戳把标点单列在 words[].punctuation，usage/request_id 也可能出现在事件层或 output 层。
 # 下面用真实响应形态作 fixture，离线验证 SSE 解析与按标点重切分段逻辑。
-_FUNASR_SENTENCE = {
+_ASR_FLASH_SENTENCE = {
     "sentence_id": 1,
     "sentence_end": True,
     "begin_time": 160,
@@ -269,45 +270,66 @@ _FUNASR_SENTENCE = {
     ],
 }
 
+# 3.1 按 Token 计费：usage 除音频时长外还返回输入/输出/总 Token。
+_ASR_FLASH_USAGE = {
+    "duration": 3,
+    "input_tokens": 75,
+    "output_tokens": 18,
+    "total_tokens": 93,
+}
 
-def _funasr_sse_line() -> str:
+
+def _asr_flash_sse_line(
+    sentence: dict[str, object] = _ASR_FLASH_SENTENCE,
+    *,
+    text: str | None = None,
+) -> str:
     import json
 
+    sentence_text = str(sentence.get("text") or "")
+    inner_output: dict[str, object] = (
+        {"sentence": sentence, "text": text or sentence_text}
+        if text is None
+        else {"text": text}
+    )
     event = {
         "output": {
-            "output": {"sentence": _FUNASR_SENTENCE, "text": _FUNASR_SENTENCE["text"]},
-            "sentence": _FUNASR_SENTENCE,
-            "text": _FUNASR_SENTENCE["text"],
+            "output": inner_output,
+            "sentence": sentence if text is None else None,
+            "text": text or sentence_text,
             "request_id": "req-unit",
-            "usage": {"duration": 3},
+            "usage": _ASR_FLASH_USAGE,
         },
-        "usage": {"duration": 3},
+        "usage": _ASR_FLASH_USAGE,
         "request_id": "req-unit",
     }
     return "data:" + json.dumps(event, ensure_ascii=False)
 
 
-def test_funasr_collect_sentences_reads_nested_output() -> None:
+def _asr_flash_stream_lines(*data_lines: str) -> list[str]:
+    return ["id:1", "event:result", ":HTTP_STATUS/200", *data_lines, ""]
+
+
+def test_asr_flash_collect_sentences_reads_nested_output() -> None:
     from app.services.audiobook.prompt_audio_asr_provider import (
-        _funasr_collect_sentences,
+        _asr_flash_collect_sentences,
     )
 
-    lines = ["id:1", "event:result", ":HTTP_STATUS/200", _funasr_sse_line(), ""]
-    sentences, meta = _funasr_collect_sentences(lines)
+    sentences, meta = _asr_flash_collect_sentences(_asr_flash_stream_lines(_asr_flash_sse_line()))
 
     assert len(sentences) == 1
     assert sentences[0]["text"] == "雨停以后，钟声传来。"
     assert meta["request_id"] == "req-unit"
-    assert meta["usage"] == {"duration": 3}
+    assert meta["usage"] == _ASR_FLASH_USAGE
 
 
-def test_funasr_subtitle_payload_splits_words_on_punctuation() -> None:
+def test_asr_flash_subtitle_payload_splits_words_on_punctuation() -> None:
     from app.services.audiobook.prompt_audio_asr_provider import (
-        _funasr_subtitle_payload,
+        _asr_flash_subtitle_payload,
         normalize_asr_subtitle_payload,
     )
 
-    payload = _funasr_subtitle_payload([_FUNASR_SENTENCE])
+    payload = _asr_flash_subtitle_payload([_ASR_FLASH_SENTENCE])
     normalized = normalize_asr_subtitle_payload(payload)
 
     assert normalized == {
@@ -318,50 +340,114 @@ def test_funasr_subtitle_payload_splits_words_on_punctuation() -> None:
     }
 
 
-def test_funasr_flash_provider_transcribes_via_stream(monkeypatch, tmp_path) -> None:
+def test_asr_flash_result_from_payload_accepts_unfinished_sentence() -> None:
+    """词级时间戳只在音频稳定后返回，末帧没有 sentence_end 时仍要拿到结果。"""
+    import json
+
     from app.services.audiobook.prompt_audio_asr_provider import (
-        FunAsrFlashPromptAudioAsrProvider,
+        _asr_flash_payload_from_lines,
+        _asr_flash_result_from_payload,
+    )
+
+    unfinished = dict(_ASR_FLASH_SENTENCE, sentence_end=False)
+    payload = _asr_flash_payload_from_lines(
+        _asr_flash_stream_lines(
+            "data:" + json.dumps({"output": {"sentence": unfinished}}, ensure_ascii=False)
+        )
+    )
+    sentences, meta = _asr_flash_result_from_payload(payload)
+
+    assert sentences == [unfinished]
+    assert meta == {}
+
+
+def test_asr_flash_result_from_payload_falls_back_to_accumulated_text() -> None:
+    """短音频可能只给整段文本、不给句子对象：转写仍要能用，字幕时间轴降级为空。"""
+    import json
+
+    from app.services.audiobook.prompt_audio_asr_provider import (
+        _asr_flash_payload_from_lines,
+        _asr_flash_result_from_payload,
+    )
+
+    payload = _asr_flash_payload_from_lines(
+        _asr_flash_stream_lines(
+            "data:"
+            + json.dumps(
+                {
+                    "output": {"text": "雨停以后，钟声传来。"},
+                    "request_id": "req-unit",
+                    "usage": _ASR_FLASH_USAGE,
+                },
+                ensure_ascii=False,
+            )
+        )
+    )
+    sentences, meta = _asr_flash_result_from_payload(payload)
+
+    assert sentences == [{"text": "雨停以后，钟声传来。", "sentence_end": True}]
+    assert meta["request_id"] == "req-unit"
+    assert meta["usage"] == _ASR_FLASH_USAGE
+
+
+def test_asr_flash_payload_from_lines_reads_non_stream_json_body() -> None:
+    from app.services.audiobook.prompt_audio_asr_provider import (
+        _asr_flash_payload_from_lines,
+    )
+
+    payload = _asr_flash_payload_from_lines(
+        ['{"output": {"text": "钟声。"}, "request_id": "req-body"}']
+    )
+
+    assert payload == {"output": {"text": "钟声。"}, "request_id": "req-body"}
+
+
+class _FakeAsrFlashStream:
+    status_code = 200
+
+    def __init__(self, lines):
+        self._lines = lines
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def iter_lines(self):
+        return iter(self._lines)
+
+    def read(self):
+        return b""
+
+
+def test_qwen_audio_asr_flash_provider_transcribes_via_stream(monkeypatch, tmp_path) -> None:
+    from app.services.audiobook.prompt_audio_asr_provider import (
+        QwenAudioAsrFlashPromptAudioAsrProvider,
     )
 
     audio_file = tmp_path / "chapter.mp3"
     audio_file.write_bytes(b"fake mp3 bytes")
     captured: dict[str, object] = {}
 
-    class FakeStream:
-        status_code = 200
-
-        def __init__(self, lines):
-            self._lines = lines
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *exc):
-            return False
-
-        def iter_lines(self):
-            return iter(self._lines)
-
-        def read(self):
-            return b""
-
     def fake_stream(method, url, *, headers, json, timeout):
         captured["method"] = method
         captured["url"] = url
         captured["headers"] = headers
         captured["json"] = json
-        return FakeStream(["id:1", "event:result", _funasr_sse_line()])
+        return _FakeAsrFlashStream(_asr_flash_stream_lines(_asr_flash_sse_line()))
 
     monkeypatch.setattr("httpx.stream", fake_stream)
 
-    provider = FunAsrFlashPromptAudioAsrProvider(api_key="unit-key")
+    provider = QwenAudioAsrFlashPromptAudioAsrProvider(api_key="unit-key")
     result = provider.transcribe(str(audio_file))
 
-    assert result.provider == "funasr_flash"
-    assert result.model == "fun-asr-flash-2026-06-15"
+    assert result.provider == "qwen_audio_asr_flash"
+    assert result.model == "qwen-audio-3.1-asr-flash"
     assert result.transcript == "雨停以后，钟声传来。"
     assert result.metadata["request_id"] == "req-unit"
-    assert result.metadata["usage"] == {"duration": 3}
+    assert result.metadata["usage"] == _ASR_FLASH_USAGE
+    assert result.metadata["sentence_count"] == 1
     assert result.subtitle_payload == {
         "segments": [
             {"text": "雨停以后，", "start_ms": 160, "end_ms": 1000},
@@ -376,25 +462,99 @@ def test_funasr_flash_provider_transcribes_via_stream(monkeypatch, tmp_path) -> 
     assert captured["json"]["parameters"]["format"] == "mp3"
 
 
-def test_create_prompt_audio_asr_provider_returns_funasr_flash(monkeypatch) -> None:
+def test_qwen_audio_asr_flash_provider_keeps_official_transcription_defaults(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    """逐字保真比对依赖官方默认值：方言转普通话、不做说话人分离，因此都不显式下发。"""
     from app.services.audiobook.prompt_audio_asr_provider import (
-        FunAsrFlashPromptAudioAsrProvider,
+        QwenAudioAsrFlashPromptAudioAsrProvider,
+    )
+
+    audio_file = tmp_path / "chapter.wav"
+    audio_file.write_bytes(b"fake wav bytes")
+    captured: dict[str, object] = {}
+
+    def fake_stream(method, url, *, headers, json, timeout):
+        captured["json"] = json
+        return _FakeAsrFlashStream(_asr_flash_stream_lines(_asr_flash_sse_line()))
+
+    monkeypatch.setattr("httpx.stream", fake_stream)
+
+    QwenAudioAsrFlashPromptAudioAsrProvider(api_key="unit-key").transcribe(str(audio_file))
+
+    parameters = captured["json"]["parameters"]
+    assert "keep_dialect" not in parameters
+    assert "speaker_diarization_enabled" not in parameters
+
+
+def test_qwen_audio_asr_flash_provider_uses_text_fallback_when_sentence_missing(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    from app.services.audiobook.prompt_audio_asr_provider import (
+        QwenAudioAsrFlashPromptAudioAsrProvider,
+    )
+
+    audio_file = tmp_path / "chapter.mp3"
+    audio_file.write_bytes(b"fake mp3 bytes")
+
+    def fake_stream(method, url, *, headers, json, timeout):
+        return _FakeAsrFlashStream(
+            _asr_flash_stream_lines(_asr_flash_sse_line(text="雨停以后，钟声传来。"))
+        )
+
+    monkeypatch.setattr("httpx.stream", fake_stream)
+
+    result = QwenAudioAsrFlashPromptAudioAsrProvider(api_key="unit-key").transcribe(
+        str(audio_file)
+    )
+
+    assert result.transcript == "雨停以后，钟声传来。"
+    assert result.metadata["usage"] == _ASR_FLASH_USAGE
+    # 无词级时间戳时字幕时间轴降级为空，由调用方跳过时间轴校验
+    assert result.subtitle_payload is None
+
+
+def test_qwen_audio_asr_flash_provider_raises_on_empty_transcript(monkeypatch, tmp_path) -> None:
+    from app.services.audiobook.prompt_audio_asr_provider import (
+        PromptAudioAsrProviderError,
+        QwenAudioAsrFlashPromptAudioAsrProvider,
+    )
+
+    audio_file = tmp_path / "chapter.mp3"
+    audio_file.write_bytes(b"fake mp3 bytes")
+
+    def fake_stream(method, url, *, headers, json, timeout):
+        return _FakeAsrFlashStream(_asr_flash_stream_lines("data:{}", ""))
+
+    monkeypatch.setattr("httpx.stream", fake_stream)
+
+    with pytest.raises(PromptAudioAsrProviderError) as error:
+        QwenAudioAsrFlashPromptAudioAsrProvider(api_key="unit-key").transcribe(str(audio_file))
+
+    assert error.value.code == "asr_empty_transcript"
+
+
+def test_create_prompt_audio_asr_provider_returns_qwen_audio_asr_flash(monkeypatch) -> None:
+    from app.services.audiobook.prompt_audio_asr_provider import (
         create_prompt_audio_asr_provider,
+        QwenAudioAsrFlashPromptAudioAsrProvider,
     )
 
     monkeypatch.delenv("DASHSCOPE_ASR_API_KEY", raising=False)
     monkeypatch.setenv("DASHSCOPE_API_KEY", "unit-key")
 
-    provider = create_prompt_audio_asr_provider("fun-asr-flash")
+    provider = create_prompt_audio_asr_provider("qwen-audio-3.1-asr-flash")
 
-    assert isinstance(provider, FunAsrFlashPromptAudioAsrProvider)
+    assert isinstance(provider, QwenAudioAsrFlashPromptAudioAsrProvider)
     assert provider.supports_timestamps is True
 
 
-def test_default_prompt_audio_asr_provider_is_funasr_flash(monkeypatch) -> None:
+def test_default_prompt_audio_asr_provider_is_qwen_audio_asr_flash(monkeypatch) -> None:
     from app.services.audiobook.prompt_audio_asr_provider import (
-        FunAsrFlashPromptAudioAsrProvider,
         create_prompt_audio_asr_provider,
+        QwenAudioAsrFlashPromptAudioAsrProvider,
     )
 
     monkeypatch.delenv("PROMPT_AUDIO_ASR_PROVIDER", raising=False)
@@ -402,8 +562,20 @@ def test_default_prompt_audio_asr_provider_is_funasr_flash(monkeypatch) -> None:
 
     provider = create_prompt_audio_asr_provider()
 
-    assert isinstance(provider, FunAsrFlashPromptAudioAsrProvider)
+    assert isinstance(provider, QwenAudioAsrFlashPromptAudioAsrProvider)
     assert provider.supports_timestamps is True
+
+
+def test_qwen_audio_asr_flash_model_can_be_pinned_by_environment(monkeypatch) -> None:
+    from app.services.audiobook.prompt_audio_asr_provider import (
+        QwenAudioAsrFlashPromptAudioAsrProvider,
+    )
+
+    monkeypatch.setenv("QWEN_AUDIO_ASR_MODEL", "qwen-audio-3.0-asr-flash")
+
+    provider = QwenAudioAsrFlashPromptAudioAsrProvider(api_key="unit-key")
+
+    assert provider.model == "qwen-audio-3.0-asr-flash"
 
 
 def test_doubao_asr_provider_accepts_configured_openspeech_key(monkeypatch) -> None:

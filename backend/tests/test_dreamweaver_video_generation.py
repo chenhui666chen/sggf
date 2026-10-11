@@ -49,16 +49,16 @@ def test_runtime_config_maps_selected_models_into_runtime_blocks() -> None:
     request = dreamweaver.RunRequest(
         project_id=1,
         chapter_ids=[1],
-        image_model="qwen-image-2.0-pro",
-        video_model="wan2.7-i2v",
-        video_edit_model="wan2.7-videoedit",
+        image_model="qwen-image-3.0-pro",
+        video_model="wan3.0-video",
+        video_edit_model="wan3.0-video",
         vision_model="qwen3-vl-plus",
         enable_video_edit=True,
         enable_vision_review=False,
     )
     runtime_config = dreamweaver._build_dreamweaver_runtime_config_from_request(request)
 
-    assert runtime_config["image_config"]["adapter"] == "qwen-image-2.0-pro"
+    assert runtime_config["image_config"]["adapter"] == "qwen-image-3.0-pro"
     assert runtime_config["image_config"]["vlm_adapter"] == "qwen3-vl-plus"
     assert runtime_config["qc_config"]["semantic_vlm_adapter"] == "qwen3-vl-plus"
     assert runtime_config["qc_config"]["state_vlm_adapter"] == "qwen3-vl-plus"
@@ -68,9 +68,10 @@ def test_runtime_config_maps_selected_models_into_runtime_blocks() -> None:
     assert runtime_config["qc_config"]["enable_state_qc"] is False
     assert runtime_config["qc_config"]["enable_camera_continuity_qc"] is False
     assert runtime_config["qc_config"]["enable_video_clip_qc"] is False
-    assert runtime_config["video_config"]["adapter"] == "wan2.7-i2v"
-    assert runtime_config["video_config"]["engine"] == "wan2.7-i2v"
-    assert runtime_config["video_edit_config"]["adapter"] == "wan2.7-videoedit"
+    assert runtime_config["video_config"]["adapter"] == "wan3.0-video"
+    # wan3.0-video 是 all-in-one，无法从模型名推断 i2v/t2v，引擎统一归为 wan_auto
+    assert runtime_config["video_config"]["engine"] == "wan_auto"
+    assert runtime_config["video_edit_config"]["adapter"] == "wan3.0-video"
     assert runtime_config["video_edit_config"]["enabled"] is True
 
 
@@ -111,16 +112,16 @@ def test_resolve_registered_dreamweaver_model_id_prefers_first_registered(monkey
     monkeypatch.setattr(
         dreamweaver,
         "get_model_info",
-        lambda model_id: {"id": model_id} if model_id in {"qwen-image-2.0-pro", "wan2.6-t2i"} else None,
+        lambda model_id: {"id": model_id} if model_id in {"qwen-image-3.0", "qwen-image-3.0-pro"} else None,
     )
 
     resolved = dreamweaver._resolve_registered_dreamweaver_model_id(
         "missing-model",
-        "qwen-image-2.0-pro",
-        fallback="wan2.6-t2i",
+        "qwen-image-3.0",
+        fallback="qwen-image-3.0-pro",
     )
 
-    assert resolved == "qwen-image-2.0-pro"
+    assert resolved == "qwen-image-3.0"
 
 
 def test_resolve_registered_dreamweaver_model_id_falls_back_to_default(monkeypatch) -> None:
@@ -129,16 +130,16 @@ def test_resolve_registered_dreamweaver_model_id_falls_back_to_default(monkeypat
     monkeypatch.setattr(
         dreamweaver,
         "get_model_info",
-        lambda model_id: {"id": model_id} if model_id == "wan2.6-t2i" else None,
+        lambda model_id: {"id": model_id} if model_id == "qwen-image-3.0-pro" else None,
     )
 
     resolved = dreamweaver._resolve_registered_dreamweaver_model_id(
         "missing-model",
         "",
-        fallback="wan2.6-t2i",
+        fallback="qwen-image-3.0-pro",
     )
 
-    assert resolved == "wan2.6-t2i"
+    assert resolved == "qwen-image-3.0-pro"
 
 
 def test_resolve_video_generation_controls_normalizes_legacy_engine_aliases() -> None:
@@ -214,7 +215,9 @@ def test_dreamweaver_run_preflight_uses_canonical_selector_engine_hint() -> None
 
     warnings = [item for item in preflight.warnings() if item.code == "selector_engine_unsupported"]
     assert len(warnings) == 1
-    assert "wan2.7-i2v" in warnings[0].message
+    # 提示必须给出规范引擎名 wan_auto：wan3.0-video 是 all-in-one，归入 auto 引擎，
+    # 旧的 i2v 引擎名随万相视频线合并为 all-in-one 后不再是推荐值
+    assert "wan_auto" in warnings[0].message
     assert "wan_i2v" not in warnings[0].message
 
 
@@ -579,13 +582,13 @@ def test_build_contract_from_payload_persists_preflight_provider_and_dispatch_tr
                     "confidence": 0.94,
                 },
                 "routing": {
-                    "selected_model": "wan2.7-t2v",
+                    "selected_model": "wan3.0-video",
                     "fallback_models": ["kling-omni-v1"],
                     "strategy": "quality",
                 },
                 "execution": {
-                    "resolved_model": "wan2.7-t2v",
-                    "attempted_models": ["wan2.7-t2v"],
+                    "resolved_model": "wan3.0-video",
+                    "attempted_models": ["wan3.0-video"],
                     "timed_out": False,
                 },
             },
@@ -598,4 +601,4 @@ def test_build_contract_from_payload_persists_preflight_provider_and_dispatch_tr
     assert runtime["video_provider_trace"]["provider_mode"] == "auto"
     assert runtime["video_provider_trace"]["shots"][0]["shot_id"] == "shot_001"
     assert runtime["smart_dispatch_trace"]["strategy"] == "quality"
-    assert runtime["smart_dispatch_trace"]["routing"]["selected_model"] == "wan2.7-t2v"
+    assert runtime["smart_dispatch_trace"]["routing"]["selected_model"] == "wan3.0-video"

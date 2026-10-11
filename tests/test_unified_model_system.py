@@ -95,14 +95,14 @@ class TestUnifiedModelSpec:
         routing = RoutingConfig(
             task_types=["chapter", "dialogue"],
             priority=1,
-            fallback_models=["deepseek-v4-flash"],
+            fallback_models=["deepseek-flash"],
             weight=1.0,
             enabled=True
         )
 
         assert "chapter" in routing.task_types
         assert routing.priority == 1
-        assert "deepseek-v4-flash" in routing.fallback_models
+        assert "deepseek-flash" in routing.fallback_models
 
     def test_performance_profile_creation(self):
         """测试性能配置创建"""
@@ -482,7 +482,7 @@ class TestLLMAdapters:
         fake_httpx = types.SimpleNamespace(AsyncClient=FakeAsyncClient, Timeout=FakeTimeout)
 
         spec = UnifiedModelSpec(
-            id="deepseek-v4-pro",
+            id="deepseek-pro",
             name="DeepSeek V4 Pro",
             provider="deepseek",
             model_type=ModelType.LLM,
@@ -502,6 +502,7 @@ class TestLLMAdapters:
                 )
 
         assert result.success is True
+        # 内部 ID 与上游线名已解耦：请求体里必须出现 request_model 而不是 spec.id
         assert captured_request_kwargs["model"] == "deepseek-v4-pro"
         assert "request_model" not in captured_request_kwargs.get("extra_body", {})
 
@@ -656,7 +657,7 @@ class TestLLMAdapters:
         fake_httpx = types.SimpleNamespace(AsyncClient=FakeAsyncClient, Timeout=FakeTimeout)
 
         spec = UnifiedModelSpec(
-            id="deepseek-v4-pro",
+            id="deepseek-pro",
             name="DeepSeek V4 Pro",
             provider="deepseek",
             model_type=ModelType.LLM,
@@ -1449,11 +1450,11 @@ class TestCompatibility:
         assert normalize_task_type("outline") == "outline_expand"
 
     def test_model_alias_normalization(self):
-        """测试模型 ID 归一化不再重写未注册旧别名。"""
+        """测试模型 ID 归一化只重写已登记别名。"""
         from core.model_resolution import normalize_model_id
 
-        assert normalize_model_id("deepseek-v4-pro") == "deepseek-v4-pro"
-        assert normalize_model_id("deepseek-v4-flash") == "deepseek-v4-flash"
+        assert normalize_model_id("deepseek-pro") == "deepseek-pro"
+        assert normalize_model_id("qwen3_vl_plus") == "qwen3-vl-plus"
         assert normalize_model_id("qwen-" + "plus") == "qwen-" + "plus"
 
     def test_deleted_legacy_files_are_removed(self):
@@ -1483,13 +1484,13 @@ class TestYAMLConfiguration:
         registry.clear()
         model_hub.initialize(str(config_path))
 
-        qwen_spec = registry.get_spec("qwen3.7-plus")
+        qwen_spec = registry.get_spec("qwen-plus")
         assert qwen_spec is not None
         assert qwen_spec.provider == "alibaba"
         assert qwen_spec.api_config.api_key_env == "DASHSCOPE_API_KEY"
         assert qwen_spec.api_config.base_url == "https://dashscope.aliyuncs.com/compatible-mode/v1"
 
-        deepseek_spec = registry.get_spec("deepseek-v4-pro")
+        deepseek_spec = registry.get_spec("deepseek-pro")
         assert deepseek_spec is not None
         assert deepseek_spec.provider == "deepseek"
         assert deepseek_spec.api_config.api_key_env == "DEEPSEEK_API_KEY"
@@ -1498,13 +1499,17 @@ class TestYAMLConfiguration:
         assert deepseek_spec.default_params["thinking"] == {"type": "enabled"}
         assert deepseek_spec.default_params["reasoning_effort"] == "high"
 
-        deepseek_flash_spec = registry.get_spec("deepseek-v4-flash")
+        deepseek_flash_spec = registry.get_spec("deepseek-flash")
         assert deepseek_flash_spec is not None
         assert deepseek_flash_spec.provider == "deepseek"
         assert deepseek_flash_spec.api_config.api_key_env == "DEEPSEEK_API_KEY"
         assert deepseek_flash_spec.api_config.base_url == "https://api.deepseek.com"
-        assert deepseek_flash_spec.default_params["request_model"] == "deepseek-v4-flash"
+        assert deepseek_flash_spec.default_params["request_model"] == "deepseek-flash"
         assert deepseek_flash_spec.default_params["thinking"] == {"type": "disabled"}
+        assert deepseek_flash_spec.constraints.max_context_tokens == 1048576
+        assert deepseek_flash_spec.constraints.max_output_tokens == 393216
+
+        assert registry.get_spec("deepseek-v4-" + "flash") is None
 
         assert registry.get_spec("deepseek-" + "chat") is None
 

@@ -14,6 +14,7 @@ class Modality(Enum):
     TEXT_TO_VIDEO = "text_to_video"
     IMAGE_TO_VIDEO = "image_to_video"
     VIDEO_TO_VIDEO = "video_to_video"
+    VIDEO_EDIT = "video_edit"
     IMAGE_TO_IMAGE_EDIT = "image_to_image_edit"
     TEXT_TO_SPEECH = "text_to_speech"
 

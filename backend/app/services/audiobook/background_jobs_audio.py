@@ -38,9 +38,11 @@ from app.services.audiobook.chapter_segment_assets import (
 )
 from app.services.audiobook.job_tracker import handle_pause_checkpoint
 from app.services.audiobook.repository import ChapterAudioRunRepository
+from app.services.audiobook.tts_model_ids import DEFAULT_AUDIOBOOK_TTS_MODEL
 from app.services.audiobook.tts_pause import TTSPauseRequested
 from app.services.audiobook.project_audio_config import parse_engine_config_snapshot
 from app.services.audiobook.project_audio_runtime import (
+    apply_runtime_voice_mapping,
     apply_scene_audio_runtime_to_engine,
     resolve_from_snapshot,
     resolve_project_audio_runtime_config,
@@ -68,7 +70,7 @@ def _apply_project_audio_effects(*, engine, audio_fx: Dict[str, object]) -> None
 async def generate_audiobook_audio_from_scripts_background(
     audiobook_project_id: int,
     chapter_ids: List[int],
-    tts_model: str = "qwen3-tts-instruct-flash",
+    tts_model: str = DEFAULT_AUDIOBOOK_TTS_MODEL,
     timeline_edits_by_chapter: Optional[Dict[int, Dict[str, Dict[str, float]]]] = None,
     tracker: Optional[StageTracker] = None,
     celery_task_id: Optional[str] = None,
@@ -141,12 +143,13 @@ async def generate_audiobook_audio_from_scripts_background(
             runtime_config=runtime_config,
         )
         effective_voice_mapping = runtime_config.voice_mapping
+        # 角色音解析失败按失败收口：不吞异常，避免越界角色静默换成自动分配声线
+        apply_runtime_voice_mapping(
+            voice_manager=engine.voice_manager,
+            voice_mapping=effective_voice_mapping,
+        )
         if effective_voice_mapping:
-            try:
-                engine.voice_manager.apply_project_voice_mapping(effective_voice_mapping)
-                logger.info("🎛 已加载角色音配置: %s 个角色", len(effective_voice_mapping))
-            except Exception as exc:
-                logger.warning("⚠️ 应用角色音配置失败: %s", exc)
+            logger.info("🎛 已加载角色音配置: %s 个角色", len(effective_voice_mapping))
 
         _apply_project_audio_effects(engine=engine, audio_fx=runtime_config.audio_fx)
 

@@ -1,0 +1,116 @@
+{
+  "_type": "domain",
+  "domain": "character",
+  "unit_count": 12,
+  "units": {
+    "identity": {
+      "content_status": "pending_content",
+      "note": "内容在归档 DOCX/XLSX（v1.2 起只读），待回填 SSOT knowledge_units 后重新派生",
+      "priority_backfill": null
+    },
+    "visual_dna": {
+      "content_status": "pending_content",
+      "note": "内容在归档 DOCX/XLSX（v1.2 起只读），待回填 SSOT knowledge_units 后重新派生",
+      "priority_backfill": null
+    },
+    "wardrobe_dna": {
+      "content_status": "pending_content",
+      "note": "内容在归档 DOCX/XLSX（v1.2 起只读），待回填 SSOT knowledge_units 后重新派生",
+      "priority_backfill": null
+    },
+    "behavior_dna": {
+      "content_status": "pending_content",
+      "note": "内容在归档 DOCX/XLSX（v1.2 起只读），待回填 SSOT knowledge_units 后重新派生",
+      "priority_backfill": null
+    },
+    "performance_dna": {
+      "content_status": "pending_content",
+      "note": "内容在归档 DOCX/XLSX（v1.2 起只读），待回填 SSOT knowledge_units 后重新派生",
+      "priority_backfill": null
+    },
+    "voice_dna": {
+      "content_status": "pending_content",
+      "note": "内容在归档 DOCX/XLSX（v1.2 起只读），待回填 SSOT knowledge_units 后重新派生",
+      "priority_backfill": null
+    },
+    "state_timeline": {
+      "content_status": "pending_content",
+      "note": "内容在归档 DOCX/XLSX（v1.2 起只读），待回填 SSOT knowledge_units 后重新派生",
+      "priority_backfill": null
+    },
+    "performance_directing": {
+      "content_status": "pending_content",
+      "note": "内容在归档 DOCX/XLSX（v1.2 起只读），待回填 SSOT knowledge_units 后重新派生",
+      "priority_backfill": null
+    },
+    "voice_asset": {
+      "content_status": "pending_content",
+      "note": "内容在归档 DOCX/XLSX（v1.2 起只读），待回填 SSOT knowledge_units 后重新派生",
+      "priority_backfill": null
+    },
+    "character_state_consistency": {
+      "content_status": "pending_content",
+      "note": "内容在归档 DOCX/XLSX（v1.2 起只读），待回填 SSOT knowledge_units 后重新派生",
+      "priority_backfill": null
+    },
+    "closed_action_lexicon": {
+      "domain": "character",
+      "title": "闭合动作词典：从源头拦截动作幻觉",
+      "principle": "动作描述必须来自闭合词典：词典内动作直接用，新动作先注册再使用——从源头拦截'不存在的动作'幻觉（FilmAgent 21 动作空间的泛化）。",
+      "content": [
+        "基础动作词典：站/坐/走/跑/伸手/转身/点头/摇头/拥抱/挥手/跌倒/跃起/后退/鞠躬…按题材扩展（武侠：抱拳/拔剑/翻身…）",
+        "Critique-Correct-Verify 环对照词典校验剧本动作（FilmAgent 实证拦下 standing suggest 类幻觉动作）",
+        "词典条目绑定表演 DNA：每动作附力度/节奏/预备动作描述，与 performance_dna 联动",
+        "动作物理修饰：动作描述多写重量、惯性和重力（重物砸落/惯性摆动/重力加速下坠），模型才能生成符合物理规律的运动——物理修饰词与词典动作绑定，写入 Shot Contract action 字段与 I2V prompt 动作段（Higgsfield 长片工作流，大象学长第27集）",
+        "新动作注册流程：导演确认 → 词典入库 → 附实现要点与已知坑点"
+      ],
+      "source_project": "FilmAgent（HITsz-TMG，arXiv 2501.12909）",
+      "source": "FilmAgent 21 动作封闭集合 + Critique-Correct-Verify 拦截词典外动作幻觉",
+      "added": "2026-10-07",
+      "source_type": "external_paper",
+      "verification_status": "pending",
+      "trust_weight": 0.7,
+      "depends_on": [
+        "performance_dna",
+        "behavior_dna"
+      ],
+      "qc_checks": [
+        "剧本/分镜动作是否全部在词典内或已注册？",
+        "Verify 环是否对照词典校验？"
+      ]
+    },
+    "character_consistency_advanced": {
+      "id": "character_consistency_advanced",
+      "domain": "character",
+      "title": "角色一致性进阶（超越多角度参考图）",
+      "principle": "多角度参考拼图是基础；进阶场景（超 20 张图的角色/跨模型迁移）需要 LoRA/IP-Adapter/InstantID 等技术栈。",
+      "content": {
+        "layers": {
+          "L1_参考图纪律": "不要整张三视图喂入——会混合三角度特征导致畸形。用正面/干净背景/高分辨率的半身单图做锚。",
+          "L2_免训练方案": "IP-Adapter FaceID / InstantID / PuLID 注入面部特征向量，权重 0.8-1.0，实现\"锁脸不锁姿势\"。正交锚定：ControlNet(OpenPose/Depth) 锁姿势构图 + IP-Adapter/LoRA 锁身份，两条轴分开锁定——塞进一个 prompt 会互相干扰。",
+          "L3_LoRA标准配方": "20-50 张图、唯一触发词、1000-3000 步、strength 0.6-1.0。超 20 张图的角色必训 LoRA。",
+          "L4_与四视图联动": "multi_angle_reference_collage 产出的四视图作为 LoRA 训练素材集；单图锚定用于 IP-Adapter/InstantID 输入。",
+          "L5_casting资产包": "视频端变形根因：视频生成时 AI 捕捉不到画面重点、缺少角色特写作为参考→面部漂移。机制精确化（李一帆第53集）：视频模型按景别匹配参考图——远景镜头自动选用参考包中的全身照，全身照面部分辨率不足→远景人脸崩/变脸（近景特写正常）。故参考包须全景别覆盖：全身 + 半身 + 高清面部特写帧（四联角色版形态），远景镜头生成时确保参考包含高清头部帧，并注意参考图生成比例与目标镜头适配。对策：像影视制片管理演员资产一样，为角色生成 casting 照片组（不同角度/表情/景别的定妆照组合），视频生成请求必须携带角色特写参考锚定身份。分工：四视图（multi_angle_reference_collage）服务资产生成与训练，casting 特写组服务视频生成输入。身份锁定指令（每帧必加，补第8集提示词缺口）：Keep the character's facial features exactly the same as the reference image. Maintain identical attire and hairstyle throughout.（保持角色面部特征与参考图完全一致，全程维持相同服装与发型）。参考图复用规则：Nano Banana 系每帧上传角色表作参考（上限 14 张、高保真 6 张），固定 seed 辅助风格一致；80% 满意就编辑不重生成。参考图预算管理：各模型可输入参考图数量有限且不一（Nano Banana 上限 14/高保真 6，其他模型更少），多角色场景预算进一步摊薄（N 角色 × 参考数 + 场景参考 ≤ 模型上限）——故不可全包上传，须按目标镜头景别动态组装参考子集（远景镜头→全身照+高清头部帧；特写镜头→高清特写帧；中景→半身+特写），既省预算又利用景别匹配机制只给「想让它匹配」的参考、避免无关参考干扰。来源：大象学长第8集「AI演员资产管理」+ 李一帆第53集「远景人脸一致性」（景别匹配机制）+ apiyi Nano Banana Pro 分镜最佳实践（外部检索补提示词）。",
+          "L6_纯AI演员策略": "角色基底用 AI 生成虚拟形象（动漫/写实皆可）而非真人照片——规避肖像权/侵权风险，商业短片刚需。纯 AI 演员资产可完整确权、可跨项目复用、可授权运营。与 commercial_hooks 合规记录联动：角色资产登记时标注「纯 AI 生成基底」。来源：大象学长第8集。"
+        },
+        "qc_checks": [
+          "是否把整张三视图直接喂入",
+          "姿势与身份是否正交锁定",
+          "超 20 图角色是否已训 LoRA",
+          "视频生成请求是否携带角色特写参考（casting 组）",
+          "角色基底是否为纯 AI 生成（无真人肖像依赖）",
+          "远景镜头的参考包是否含高清头部帧（防景别匹配到低分辨率全身照）",
+          "参考子集是否按镜头景别动态组装且不超模型参考图上限（多角色场景预算摊薄）"
+        ]
+      },
+      "depends_on": [
+        "multi_angle_reference_collage"
+      ],
+      "source_type": "external_paper",
+      "verification_status": "pending",
+      "trust_weight": 0.7,
+      "backfill_origin": "litmemo / flick.art / aitoolsguidebook 2026-10",
+      "created": "2026-10-07"
+    }
+  }
+}

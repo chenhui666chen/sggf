@@ -39,7 +39,7 @@ def stub_standard_model(monkeypatch):
     monkeypatch.setattr(
         gp,
         "resolve_workflow_generation_model",
-        lambda model_id: model_id or "qwen3.7-plus",
+        lambda model_id: model_id or "qwen-plus",
     )
 
 
@@ -56,14 +56,14 @@ class TestEnforcementDisabled:
 
     def test_default_tier_falls_to_standard(self, monkeypatch, stub_standard_model):
         monkeypatch.setattr(settings, "FREE_TIER_ENFORCEMENT_ENABLED", False, raising=False)
-        profile = _resolve(_FakeUser(), tier=None, model="deepseek-v4-pro")
+        profile = _resolve(_FakeUser(), tier=None, model="deepseek-pro")
         assert profile.tier == "standard"
-        assert profile.model == "deepseek-v4-pro"
+        assert profile.model == "deepseek-pro"
         assert profile.quota_enabled is False
 
     def test_explicit_free_always_wins(self, monkeypatch, stub_standard_model):
         monkeypatch.setattr(settings, "FREE_TIER_ENFORCEMENT_ENABLED", False, raising=False)
-        profile = _resolve(_FakeUser(), tier="free", model="deepseek-v4-pro")
+        profile = _resolve(_FakeUser(), tier="free", model="deepseek-pro")
         assert profile is FREE_PROFILE
 
 
@@ -78,7 +78,7 @@ class TestEnforcementEnabled:
         )
 
     def test_user_without_role_forced_to_free_even_requesting_standard(self):
-        profile = _resolve(_FakeUser(), tier="standard", model="deepseek-v4-pro")
+        profile = _resolve(_FakeUser(), tier="standard", model="deepseek-pro")
         assert profile is FREE_PROFILE
         assert profile.model == FREE_TIER_MODEL_ID
 
@@ -87,9 +87,9 @@ class TestEnforcementEnabled:
 
     def test_user_with_role_gets_standard(self):
         user = _FakeUser(roles=[_FakeRole("standard_generation")])
-        profile = _resolve(user, tier="standard", model="deepseek-v4-pro")
+        profile = _resolve(user, tier="standard", model="deepseek-pro")
         assert profile.tier == "standard"
-        assert profile.model == "deepseek-v4-pro"
+        assert profile.model == "deepseek-pro"
 
     def test_inactive_role_does_not_grant_access(self):
         user = _FakeUser(roles=[_FakeRole("standard_generation", is_active=False)])
@@ -124,7 +124,7 @@ class TestFreeProfileShape:
     def test_free_profile_fields(self):
         assert FREE_PROFILE == GenerationProfile(
             tier="free",
-            model="qwen3.7-flash",
+            model="qwen-flash",
             max_iteration_rounds=1,
             enable_multi_model_review=False,
             max_llm_attempts=2,

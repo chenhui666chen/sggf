@@ -28,10 +28,10 @@ def test_audiobook_llm_model_default_and_configured_official_id(monkeypatch):
     from app.services.audiobook.llm_config import get_audiobook_llm_model
 
     monkeypatch.delenv("AUDIOBOOK_LLM_MODEL", raising=False)
-    assert get_audiobook_llm_model() == "deepseek-v4-flash"
+    assert get_audiobook_llm_model() == "deepseek-flash"
 
-    monkeypatch.setenv("AUDIOBOOK_LLM_MODEL", "deepseek-v4-flash")
-    assert get_audiobook_llm_model() == "deepseek-v4-flash"
+    monkeypatch.setenv("AUDIOBOOK_LLM_MODEL", "deepseek-flash")
+    assert get_audiobook_llm_model() == "deepseek-flash"
 
 
 def test_audiobook_script_review_env_switch(monkeypatch):
@@ -60,7 +60,7 @@ async def test_call_audiobook_llm_async_uses_flash_model():
     )
 
     assert response == '{"ok": true}'
-    assert llm.calls[0]["model"] == "deepseek-v4-flash"
+    assert llm.calls[0]["model"] == "deepseek-flash"
     assert llm.calls[0]["max_tokens"] == 5
     assert llm.calls[0]["use_cache"] is False
 
@@ -77,7 +77,7 @@ async def test_call_audiobook_llm_sync_inside_running_loop():
     )
 
     assert response == '{"ok": true}'
-    assert llm.calls[0]["model"] == "deepseek-v4-flash"
+    assert llm.calls[0]["model"] == "deepseek-flash"
 
 
 @pytest.mark.asyncio
@@ -111,8 +111,8 @@ async def test_audiobook_llm_health_uses_configured_model():
     health = await check_audiobook_llm_health(llm, timeout_seconds=10)
 
     assert health.ok is True
-    assert health.model == "deepseek-v4-flash"
-    assert llm.calls[0]["model"] == "deepseek-v4-flash"
+    assert health.model == "deepseek-flash"
+    assert llm.calls[0]["model"] == "deepseek-flash"
 
 
 def test_llm_json_parser_handles_fences_comments_and_trailing_commas():
@@ -334,7 +334,7 @@ def test_qwen_language_detection_handles_non_chinese_scripts():
 def test_segment_review_requests_accept_path_segment_index():
     from app.schemas.audiobook import SegmentRegenerateRequest, SegmentReviewRequest
 
-    regenerate_request = SegmentRegenerateRequest(reason="retry", tts_model="qwen3-tts-instruct-flash")
+    regenerate_request = SegmentRegenerateRequest(reason="retry", tts_model="qwen-audio-3.1-tts-flash")
     review_request = SegmentReviewRequest(quality_score=4.0)
 
     assert regenerate_request.segment_index is None
@@ -357,4 +357,4 @@ async def test_voice_manager_chapter_analysis_inside_running_loop_uses_flash_mod
     result = manager.analyze_chapter_characters(segments)
 
     assert result["ZhangSan"]["source"] == "chapter_analysis"
-    assert llm.calls[0]["model"] == "deepseek-v4-flash"
+    assert llm.calls[0]["model"] == "deepseek-flash"

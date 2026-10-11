@@ -124,7 +124,7 @@ describe('audiobook route project session utils', () => {
     })
 
     expect(restored).toMatchObject({
-      restoredTtsModel: 'qwen3-tts-instruct-flash',
+      restoredTtsModel: 'qwen-audio-3.1-tts-flash',
       restoredSelectedChapterIds: [3, 2],
       restoredActiveTasks: [
         { taskId: 'task-a', audiobookProjectId: 10 },

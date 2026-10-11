@@ -56,7 +56,7 @@ def review_vision_asset(
     if resolved_model_id not in VISION_REVIEW_MODELS:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="当前视觉识别入口仅支持 qwen3-vl-plus",
+            detail=f"当前视觉识别入口仅支持 {', '.join(sorted(VISION_REVIEW_MODELS))}",
         )
 
     asset_type = _resolve_review_asset_type(asset_file)

@@ -6,6 +6,8 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, List, Optional
 
+from app.schemas.voice_tags import VOICE_TAG_LABELS
+from app.services.audiobook.tts_model_ids import DEFAULT_AUDIOBOOK_TTS_MODEL
 from app.services.audiobook.voice_catalog import get_voice_entry
 
 
@@ -37,33 +39,6 @@ _STYLE_TRAITS = {
     "warm": ["温暖", "有活力"],
 }
 
-_VOICE_AGE_HINTS = {
-    "Bella": "儿童",
-    "Bunny": "儿童",
-    "Eldric Sage": "老年",
-    "Arthur": "老年",
-    "Vincent": "中年",
-    "Neil": "中年",
-    "Cherry": "青年",
-    "Serena": "青年",
-    "Ethan": "青年",
-    "Chelsie": "青年",
-    "Momo": "青年",
-    "Vivian": "青年",
-    "Moon": "青年",
-    "Maia": "青年",
-    "Kai": "青年",
-    "Nofish": "青年",
-    "Mia": "青年",
-    "Mochi": "儿童",
-    "Bellona": "青年",
-    "Elias": "中年",
-    "Nini": "青年",
-    "Seren": "青年",
-    "Pip": "儿童",
-    "Stella": "青年",
-}
-
 _PITCH_BY_STYLE = {
     "calm": "偏低",
     "clear": "中音",
@@ -77,6 +52,11 @@ _PITCH_BY_STYLE = {
     "soothing": "中低音",
     "warm": "中音",
 }
+
+# 年龄冲突判据直接取标签词表的中文展示名，避免第二张中文年龄表与画像投影漂移。
+_AGE_PROFILE_TOKENS = tuple(
+    dict.fromkeys(label["zh"] for label in VOICE_TAG_LABELS["age_impression"].values())
+)
 
 _VAGUE_TERMS = ("好听", "普通", "高级", "最喜欢")
 _IMITATION_TERMS = ("模仿", "像某", "明星", "演员", "原声")
@@ -195,18 +175,26 @@ def build_quality_voice_description(
     traits: Iterable[Any],
     use_case: Any,
 ) -> str:
-    """Build a compact, multi-dimensional voice description."""
+    """Build a compact, multi-dimensional voice description.
+
+    画像未标注（空值）的维度直接省略整条子句：这段文本会进入 TTS 提示词，
+    写成"未标注"或伪造默认值都会被模型当成音色事实。
+    """
 
     trait_text = "、".join(str(item).strip() for item in traits if str(item or "").strip())
-    return (
-        f"性别：{gender_label(gender)}，"
-        f"年龄感：{str(age_group or '青年').strip()}，"
-        f"音调：{str(pitch or '中音').strip()}，"
-        f"语速：{str(pace or '中速').strip()}，"
-        f"情绪：{str(emotion or '平静').strip()}，"
-        f"特点：{trait_text or '吐字清晰'}，"
-        f"用途：{str(use_case or '有声书角色对白').strip()}"
-    )
+    clauses: List[str] = [f"性别：{gender_label(gender)}"]
+    for label, value in (
+        ("年龄感", age_group),
+        ("音调", pitch),
+        ("语速", pace),
+        ("情绪", emotion),
+        ("特点", trait_text or "吐字清晰"),
+        ("用途", use_case),
+    ):
+        text = str(value or "").strip()
+        if text:
+            clauses.append(f"{label}：{text}")
+    return "，".join(clauses)
 
 
 def _voice_traits(entry: Dict[str, Any]) -> List[str]:
@@ -228,16 +216,19 @@ def _voice_traits(entry: Dict[str, Any]) -> List[str]:
 
 
 def _voice_profile_from_entry(entry: Dict[str, Any]) -> Dict[str, Any]:
-    voice_id = str(entry.get("id") or entry.get("speaker") or "").strip()
     style = str(entry.get("style") or "").strip()
     catalog_profile = entry.get("voice_profile") or {}
     if not isinstance(catalog_profile, dict):
         catalog_profile = {}
     return {
         "gender": str(entry.get("gender") or "neutral").strip().lower(),
-        "age_group": str(catalog_profile.get("age_group") or _VOICE_AGE_HINTS.get(voice_id, "青年")).strip(),
+        # 年龄感与语速只认目录条目自带的 voice_profile 实测值，缺失即空（pending）：
+        # 历史上曾有一张按声线名硬编码的年龄提示表，键全部属于已退役的音色空间，
+        # 对现役目录（含 MiMo 的同名英文预置音）都产出与兜底值相同的结果，故已删除；
+        # 音调仍保留按官方 style 标签的映射，因为那是目录自带事实的推导而非听测结论。
+        "age_group": str(catalog_profile.get("age_group") or "").strip(),
         "pitch": str(catalog_profile.get("pitch") or _PITCH_BY_STYLE.get(style, "中音")).strip(),
-        "pace": str(catalog_profile.get("pace") or "中速").strip(),
+        "pace": str(catalog_profile.get("pace") or "").strip(),
         "traits": _voice_traits(entry),
     }
 
@@ -271,7 +262,7 @@ def reconcile_voice_description_with_selected_voice(
     if not voice:
         return VoiceDescriptionResult(description=sanitized)
 
-    entry: Optional[Dict[str, Any]] = get_voice_entry(voice, str(model or "qwen3-tts-instruct-flash"))
+    entry: Optional[Dict[str, Any]] = get_voice_entry(voice, str(model or DEFAULT_AUDIOBOOK_TTS_MODEL))
     if not entry:
         return VoiceDescriptionResult(description=sanitized)
 
@@ -285,11 +276,13 @@ def reconcile_voice_description_with_selected_voice(
     elif target_gender in {"男性", "女性"} and requested_fields.get("性别") == "中性":
         warnings.append(f"声音描述性别与已选音色 {voice} 不一致，已按音色修正为{target_gender}。")
 
+    # 画像未标注年龄时不判冲突，也不改写用户原文：没有听测证据就没有修正依据。
     target_age = profile["age_group"]
-    for age_token in ("儿童", "青少年", "青年", "中年", "老年"):
-        if age_token != target_age and age_token in sanitized:
-            warnings.append(f"声音描述年龄感与已选音色 {voice} 冲突，已按音色修正为{target_age}。")
-            break
+    if target_age:
+        for age_token in _AGE_PROFILE_TOKENS:
+            if age_token != target_age and age_token in sanitized:
+                warnings.append(f"声音描述年龄感与已选音色 {voice} 冲突，已按音色修正为{target_age}。")
+                break
 
     target_pitch = profile["pitch"]
     requested_pitch = requested_fields.get("音调", "")
@@ -313,7 +306,7 @@ def reconcile_voice_description_with_selected_voice(
 
     description = build_quality_voice_description(
         gender=profile["gender"],
-        age_group=target_age,
+        age_group=target_age or requested_fields.get("年龄感", ""),
         pitch=profile["pitch"],
         pace=requested_fields.get("语速") or profile["pace"],
         emotion=requested_fields.get("情绪") or fallback_emotion,

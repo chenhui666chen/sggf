@@ -6,6 +6,13 @@ import os
 import re
 from typing import Any, Dict, List, Optional, Tuple
 
+from agents.storyboarder_pkg._env_helpers import (
+    _count_script_beats,
+    _count_script_scenes,
+    _count_source_chars,
+    _env_float,
+    _env_int,
+)
 from agents.camera_states import build_camera_states
 from agents.camera_tree import build_camera_tree, build_camera_tree_llm
 from agents.llm_client import chat_completions, env_flag, extract_json_object, pick_model, llm_stream_context
@@ -22,6 +29,10 @@ from pipeline.media_presets import (
     normalize_frame_ratio,
 )
 from pipeline.style_presets import ensure_style_payload
+
+# 容器模式下，单轮 rebalance 每个镜头最多推进 5 秒，避免一次改动过多镜头时长。
+_CONTAINER_REBALANCE_STEP_S = 5.0
+
 
 def _sum_storyboard_duration_s(storyboard: Any) -> float:
     if not isinstance(storyboard, list):
@@ -74,7 +85,6 @@ def _rebalance_storyboard_total_duration(
     if before < low:
         delta = target - before
         if uses_video_containers:
-            steps = [5.0, 10.0, 15.0]
             idxs = sorted(range(len(storyboard)), key=lambda i: _weight(storyboard[i]) if isinstance(storyboard[i], dict) else 0, reverse=True)
             for i in idxs:
                 if delta <= 1e-6:
@@ -86,14 +96,10 @@ def _rebalance_storyboard_total_duration(
                     cur = float(it.get("duration_s") or 0.0)
                 except Exception:  # noqa: BLE001
                     cur = 0.0
-                if cur <= 0.0:
-                    cur = 5.0
-                if cur not in steps:
-                    cur = normalize_dreamweaver_video_duration_s(cur, default=5.0)
-                pos = steps.index(cur) if cur in steps else 0
-                if pos >= len(steps) - 1:
+                cur = normalize_dreamweaver_video_duration_s(cur if cur > 0.0 else min_v, default=min_v)
+                nxt = normalize_dreamweaver_video_duration_s(min(cur + _CONTAINER_REBALANCE_STEP_S, max_v), default=cur)
+                if nxt <= cur:
                     continue
-                nxt = steps[pos + 1]
                 it["duration_s"] = float(nxt)
                 delta -= float(nxt - cur)
                 changed = True
@@ -125,7 +131,7 @@ def _rebalance_storyboard_total_duration(
     if before > high:
         delta = before - target
         if uses_video_containers:
-            # 一致性优先：默认不做“缩短总时长”的回压，避免把 15s 容器又压回 10/5。
+            # 一致性优先：默认不做“缩短总时长”的回压，避免把已规划好的长容器切碎。
             # 若需要成本控制，可显式开启该开关。
             if not env_flag("DREAMWEAVER_WAN_I2V_REBALANCE_ALLOW_SHRINK", default=False):
                 delta = 0.0
@@ -141,7 +147,6 @@ def _rebalance_storyboard_total_duration(
                     "mode": str(engine_label or DREAMWEAVER_I2V_ENGINE),
                     "note": "skip_shrink",
                 }
-            steps = [5.0, 10.0, 15.0]
             idxs = sorted(range(len(storyboard)), key=lambda i: _weight(storyboard[i]) if isinstance(storyboard[i], dict) else 0)
             for i in idxs:
                 if delta <= 1e-6:
@@ -153,14 +158,10 @@ def _rebalance_storyboard_total_duration(
                     cur = float(it.get("duration_s") or 0.0)
                 except Exception:  # noqa: BLE001
                     cur = 0.0
-                if cur <= 0.0:
-                    cur = 5.0
-                if cur not in steps:
-                    cur = normalize_dreamweaver_video_duration_s(cur, default=5.0)
-                pos = steps.index(cur) if cur in steps else 0
-                if pos <= 0:
+                cur = normalize_dreamweaver_video_duration_s(cur if cur > 0.0 else min_v, default=min_v)
+                nxt = normalize_dreamweaver_video_duration_s(max(cur - _CONTAINER_REBALANCE_STEP_S, min_v), default=cur)
+                if nxt >= cur:
                     continue
-                nxt = steps[pos - 1]
                 it["duration_s"] = float(nxt)
                 delta -= float(cur - nxt)
                 changed = True

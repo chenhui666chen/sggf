@@ -7,7 +7,7 @@ from core.model_runtime import ensure_model_hub_initialized
 from schemas.unified_model_spec import ModelType
 
 
-DEFAULT_WORKFLOW_GENERATION_MODEL = "qwen3.7-plus"
+DEFAULT_WORKFLOW_GENERATION_MODEL = "qwen-plus"
 MIN_WORKFLOW_CONTEXT_TOKENS = 120_000
 MIN_WORKFLOW_OUTPUT_TOKENS = 8_000
 # 100+ 章后的完整生成链路更偏输入密集，按约 7:1 代表性口径展示相对成本。

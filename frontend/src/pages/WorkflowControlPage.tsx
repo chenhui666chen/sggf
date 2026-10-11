@@ -28,6 +28,9 @@ import {
   Badge,
   Snackbar,
   Alert as MuiAlert,
+  Accordion,
+  AccordionSummary,
+  AccordionDetails,
   alpha,
 } from '@mui/material'
 import RefreshIcon from '@mui/icons-material/Refresh'
@@ -44,6 +47,7 @@ import AddIcon from '@mui/icons-material/Add'
 import MenuIcon from '@mui/icons-material/Menu'
 import CloseIcon from '@mui/icons-material/Close'
 import TuneIcon from '@mui/icons-material/Tune'
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import { RootState, AppDispatch, store } from '@/store/store'
 import {
   startWorkflow,
@@ -69,6 +73,7 @@ import StageInfoPanel from '@/components/workflow/StageInfoPanel'
 import OutputPreviewPanel from '@/components/workflow/OutputPreviewPanel'
 import AgentStatusIndicator from '@/components/workflow/AgentStatusIndicator'
 import IterationDegradedAlert from '@/components/workflow/IterationDegradedAlert'
+import ContextHealthPanel from '@/components/ContextHealthPanel'
 import MultiModelReviewSettingsDialog from '@/components/project/MultiModelReviewSettingsDialog'
 import { workflowWebSocket } from '@/services/websocket'
 import { apiClient, extractApiErrorMessage } from '@/services/api'  // ✅ 添加apiClient导入
@@ -151,7 +156,7 @@ export default function WorkflowControlPage() {
   // 创作需求已在创建项目时填写（落在 project.description），此处只用于打开弹窗时预填一次
   const requirementPrefilledRef = useRef(false)
   const [workflowGenerationModel, setWorkflowGenerationModel] = useState(
-    () => readStoredWorkflowGenerationModel() || 'qwen3.7-plus'
+    () => readStoredWorkflowGenerationModel() || 'qwen-plus'
   )
   const [workflowGenerationModels, setWorkflowGenerationModels] = useState<WorkflowGenerationModel[]>([])
   const [workflowGenerationModelsLoading, setWorkflowGenerationModelsLoading] = useState(false)
@@ -174,7 +179,7 @@ export default function WorkflowControlPage() {
       .then((response) => {
         if (!active || response.status < 200 || response.status >= 300) return
         const models = response.data.models || []
-        const defaultModel = response.data.default_model || 'qwen3.7-plus'
+        const defaultModel = response.data.default_model || 'qwen-plus'
         const storedModel = readStoredWorkflowGenerationModel()
         setWorkflowGenerationModels(models)
         setWorkflowGenerationModel((current) => chooseWorkflowGenerationModel({
@@ -187,7 +192,7 @@ export default function WorkflowControlPage() {
       .catch(() => {
         if (!active) return
         setWorkflowGenerationModels([])
-        setWorkflowGenerationModel(readStoredWorkflowGenerationModel() || 'qwen3.7-plus')
+        setWorkflowGenerationModel(readStoredWorkflowGenerationModel() || 'qwen-plus')
       })
       .finally(() => {
         if (active) {
@@ -1836,7 +1841,7 @@ export default function WorkflowControlPage() {
     handleGenerateNextChapter()
   }
 
-  // 🆕 免费生成下一章（服务端强制 qwen3.7-flash，每日限额）
+  // 🆕 免费生成下一章（服务端强制 qwen-flash，每日限额）
   const handleContinueNextChapterFree = () => {
     setShowContentWarningDialog(false)
     handleGenerateNextChapter('free')
@@ -2486,7 +2491,7 @@ export default function WorkflowControlPage() {
   }
 
   // 生成下一章（方案3：独立的章节生成工作流）
-  // 🆕 tier='free' 时走免费档（服务端强制 qwen3.7-flash，每日限额）
+  // 🆕 tier='free' 时走免费档（服务端强制 qwen-flash，每日限额）
   const handleGenerateNextChapter = async (
     tier: 'free' | 'standard' = 'standard',
     resumeAfterConfirmation = false,
@@ -3110,6 +3115,20 @@ export default function WorkflowControlPage() {
             reviewMeta={reviewMeta}
           />
 
+          {/* 上下文健康观测（阶段 A，可折叠，默认收起） */}
+          {projectId ? (
+            <Accordion sx={{ mt: 2 }} disableGutters>
+              <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                <Typography variant="subtitle2" fontWeight={600}>
+                  上下文健康（预算 / payload / RAG 观测）
+                </Typography>
+              </AccordionSummary>
+              <AccordionDetails sx={{ pt: 0 }}>
+                <ContextHealthPanel projectId={Number(projectId)} />
+              </AccordionDetails>
+            </Accordion>
+          ) : null}
+
           {/* 控制按钮 - 在文本区域正下方居中 */}
           <Box
             sx={{
@@ -3318,7 +3337,7 @@ export default function WorkflowControlPage() {
               </Button>
             )}
 
-            {/* 🆕 免费生成入口：服务端强制 qwen3.7-flash，每日限额 */}
+            {/* 🆕 免费生成入口：服务端强制 qwen-flash，每日限额 */}
             {existingChaptersCount > 0 && (
               <Button
                 variant="outlined"

@@ -3,20 +3,26 @@
 """
 from typing import Dict, Any, Optional
 
+from app.services.audiobook.tts_model_ids import (
+    COSYVOICE_V35_PLUS_MODEL_ID,
+    MINIMAX_SPEECH_28_HD_MODEL,
+    MINIMAX_SPEECH_28_TURBO_MODEL,
+    QWEN_AUDIO_31_TTS_FLASH_MODEL,
+)
 from app.services.audiobook.voice_description_policy import build_quality_voice_description
 
 
 ALL_NARRATION_TTS_MODELS = (
-    "qwen3-tts-instruct-flash",
-    "cosyvoice-v3.5-plus",
-    "minimax-speech-2.8-hd",
-    "minimax-speech-2.8-turbo",
+    QWEN_AUDIO_31_TTS_FLASH_MODEL,
+    COSYVOICE_V35_PLUS_MODEL_ID,
+    MINIMAX_SPEECH_28_HD_MODEL,
+    MINIMAX_SPEECH_28_TURBO_MODEL,
 )
 
 EXPRESSIVE_NARRATION_TTS_MODELS = (
-    "cosyvoice-v3.5-plus",
-    "minimax-speech-2.8-hd",
-    "minimax-speech-2.8-turbo",
+    COSYVOICE_V35_PLUS_MODEL_ID,
+    MINIMAX_SPEECH_28_HD_MODEL,
+    MINIMAX_SPEECH_28_TURBO_MODEL,
 )
 
 

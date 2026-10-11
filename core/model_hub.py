@@ -30,6 +30,17 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# 永久错误：重试与换模型都改变不了结果，命中即停止，不把"点名模型没被调用"掩盖成成功。
+# - client_not_initialized：api_key_env 指向的变量没配置（core/llm_adapters.py 里唯一置位点），纯配置缺失
+# - invalid_request：400 且报文是参数越界/枚举不符/参数组合被拒
+# unknown_error 不在此列：它是 _map_error_code 的兜底，真瞬时故障也会落这里，必须保留韧性。
+_PERMANENT_ERROR_CODES = frozenset({
+    "auth_error",
+    "model_not_found",
+    "client_not_initialized",
+    "invalid_request",
+})
+
 
 class ModelHub:
     """
@@ -272,7 +283,7 @@ class ModelHub:
 
                 last_result = result
 
-                if result.error_code in ["auth_error", "model_not_found"]:
+                if result.error_code in _PERMANENT_ERROR_CODES:
                     break
                 if result.error_code == "content_safety":
                     break  # 同 prompt 重试无意义，由下方内容安全回退链路处理
@@ -322,7 +333,7 @@ class ModelHub:
                     await asyncio.sleep(wait_time)
 
         # 内容安全回退链路：换用不同安全策略的模型重试
-        _CONTENT_SAFETY_FALLBACK_CHAIN = ["deepseek-v4-pro", "qwen3.7-plus"]
+        _CONTENT_SAFETY_FALLBACK_CHAIN = ["deepseek-pro", "qwen-plus"]
         if last_result and last_result.error_code == "content_safety":
             tried = set(attempted)
             strip_kwargs = {k: v for k, v in kwargs.items() if k != "max_retries"}
@@ -366,6 +377,14 @@ class ModelHub:
                 error="调用失败（已禁用回退）",
                 error_code="call_failed"
             )
+
+        # 永久错误直接返回失败：换模型只会把"点名的模型根本没被调用"伪装成别家模型的成功结果
+        # （缺 Key 与非法参数曾在这里静默回退并返回 success=True）
+        if last_result and last_result.error_code in _PERMANENT_ERROR_CODES:
+            logger.error(
+                f"❌ 模型 {model_id} 永久错误，不重试不回退 | code={last_result.error_code}"
+            )
+            return last_result
 
         fallback_id = self._select_fallback_model(spec, attempted)
         if fallback_id:
@@ -660,7 +679,7 @@ class ModelHub:
 
     def _get_default_model(self) -> Optional[str]:
         """获取默认模型"""
-        default_models = ["qwen3.7-plus", "deepseek-v4-flash"]
+        default_models = ["qwen-plus", "deepseek-flash"]
         for model_id in default_models:
             if self.registry._is_available(model_id):
                 return model_id

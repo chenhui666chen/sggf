@@ -2184,7 +2184,7 @@ async def download_sfx_to_library(
 
 @router.post(
     "/audio-library/assets/{library_type}/{asset_id}/delete",
-    summary="绠＄悊鍛樺垹闄ゅ崟涓煶棰戠礌鏉?",
+    summary="管理员删除单个音频素材",
 )
 async def delete_audio_library_asset(
     library_type: str,
@@ -2197,7 +2197,7 @@ async def delete_audio_library_asset(
     if not request.dry_run and not request.confirm:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="鎵ц瀹為檯绱犳潗鍒犻櫎蹇呴』浼犲叆 dry_run=false 涓?confirm=true",
+            detail="执行实际素材删除必须传入 dry_run=false 且 confirm=true",
         )
 
     normalized_type = str(library_type or "").strip().lower()
@@ -2269,7 +2269,7 @@ async def delete_audio_library_asset(
         except OSError as exc:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"鍒犻櫎鏈湴绱犳潗澶辫触: {exc}",
+                detail=f"删除本地素材失败: {exc}",
             ) from exc
 
     if request.delete_cloud_object and object_key and not skip_cloud_delete:
