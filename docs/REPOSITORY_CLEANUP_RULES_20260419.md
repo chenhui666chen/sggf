@@ -261,6 +261,7 @@ JSON/YAML 格式，也应按生成产物规则判断，不得仅凭扩展名默�
 - `.pytest-tmp-*/`
 - `backend/data/seed_scene_tests/`
 - `backend/data/audiobook_scene_runs/`
+- `backend/data/scene_audio_artifacts/`（场景渲染 artifact 存储根，目录内只允许 `art_*.{音频后缀}` 产物；物理清理由 `scripts/cleanup_expired_artifacts.py` 按 30 天保留期执行，不得按扩展名批量删除）
 - `backend/data/audio_library/music_cache/`
 - `backend/data/prompt_evolution/`（仅当确认是测试临时目录时处理；不得清理其中的运行历史）
 - `backend/backend/data/asset_studio_outputs/`
