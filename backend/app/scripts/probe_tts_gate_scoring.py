@@ -18,9 +18,11 @@
 - `--mode anchored`：把本轮下达的表演要求一起交给评分模型。已证实会让 qwen3.8 把指令复述成听感，
   只用于复现该偏差，不作为结论来源。
 
-用法（backend/ 下）：
-    python -m app.scripts.probe_tts_gate_scoring                      # 盲评干跑，只列将发送的 prompt
-    python -m app.scripts.probe_tts_gate_scoring --confirm-paid       # 真实盲评
+用法（backend/ 下，待评清单与产物路径都由 `--probe-dir` 决定，默认 B3 批次）：
+    python -m app.scripts.probe_tts_gate_scoring                                  # 盲评干跑，只列将发送的 prompt
+    python -m app.scripts.probe_tts_gate_scoring --confirm-paid                   # 真实盲评
+    python -m app.scripts.probe_tts_gate_scoring --probe-dir backend/data/tts_debug/b3_qwen31_writing_r2 --confirm-paid
+    python -m app.scripts.probe_tts_gate_scoring --key q4_qwen31_baseline,q1_qwen31_director --confirm-paid  # 审计锚
     python -m app.scripts.probe_tts_gate_scoring --mode anchored --confirm-paid
 """
 
@@ -32,7 +34,7 @@ import os
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 
 def _bootstrap_environment() -> tuple[Path, Path]:
@@ -58,19 +60,32 @@ from app.services.audiobook.scene_quality.audio_score_contract import (  # noqa:
 )
 from app.services.audiobook.scene_quality.omni_audio_scorer import score_audio  # noqa: E402
 
-PROBE_DIR = PROJECT_ROOT / "backend/data/tts_debug/gate_probe_g1_g7"
+PROBE_DIR = PROJECT_ROOT / "backend/data/tts_debug/b3_qwen31_writing"
 MANIFEST = PROBE_DIR / "manifest.json"
 OUT_JSON = PROBE_DIR / "scores.json"
 OUT_SHEET = PROBE_DIR / "listening_sheet.md"
 OUT_JSON_BLIND = PROBE_DIR / "scores_blind.json"
 OUT_SHEET_BLIND = PROBE_DIR / "blind_sheet.md"
 
+
+def _apply_paths(probe_dir: Path, manifest_path: Optional[Path] = None) -> None:
+    """评分结果与听辨表一律落在批次目录内，`--tag r2` 这类多轮目录天然隔离。"""
+    global PROBE_DIR, MANIFEST, OUT_JSON, OUT_SHEET, OUT_JSON_BLIND, OUT_SHEET_BLIND
+    PROBE_DIR = probe_dir
+    MANIFEST = manifest_path or (probe_dir / "manifest.json")
+    OUT_JSON = probe_dir / "scores.json"
+    OUT_SHEET = probe_dir / "listening_sheet.md"
+    OUT_JSON_BLIND = probe_dir / "scores_blind.json"
+    OUT_SHEET_BLIND = probe_dir / "blind_sheet.md"
+
+
 # 情绪/表演维度采信方，与可验证维度采信方；分工的唯一事实源是 audio_score_contract。
 EMOTION_SCORER = EMOTION_AUTHORITY_MODEL
 VERIFIABLE_SCORER = VERIFIABLE_AUTHORITY_MODEL
 SCORERS = (EMOTION_SCORER, VERIFIABLE_SCORER)
 
-# 用户已作出的人耳裁定，作为盲评结论的对照真值。
+# 用户已作出的人耳裁定，作为盲评结论的对照真值。历史批次目录已丢失，
+# 这三条是 G1–G7 仅存的真值锚，重跑同 key 音频时仍用于对照评分器漂移。
 HUMAN_RULING = {
     "g1b_qwen3_sad": "语气无低落感、句尾没下沉，等于没实现",
     "g4b_seed_context": "整体轻快平淡，没实现",
@@ -83,24 +98,51 @@ class Target:
     key: str
     line: str
     asked: str
+    gate: str = ""
+    channel: str = ""
+    duration_ms: Optional[int] = None
 
 
-# 只送需要"耳朵判断"的门槛对；纯客观已判定的（时长/转写）不进评分。
-TARGETS: List[Target] = [
-    Target("g1a_qwen3_none", "我没事。我真的没事，你们都不用管我。", "未下达任何表演指令，按台词字面自然朗读即可。"),
-    Target("g1b_qwen3_sad", "我没事。我真的没事，你们都不用管我。", "极其克制压抑的悲伤，语速偏慢，句尾下沉，几乎不带哭腔。"),
-    Target("g1c_qwen3_happy", "我没事。我真的没事，你们都不用管我。", "明快雀跃，语速偏快，句尾上扬，带着笑意。"),
-    Target("g2a_minimax_calm", "好吧，既然你都这么说了，那就是我多管闲事了。", "emotion=calm：平静、不带情绪的陈述。"),
-    Target("g2b_minimax_sad", "好吧，既然你都这么说了，那就是我多管闲事了。", "emotion=sad：低落、委屈、有失落感。"),
-    Target("g4a_seed_plain", "所以从一开始，你就在骗我。", "无指令基线：按台词字面自然朗读。"),
-    Target("g4b_seed_context", "所以从一开始，你就在骗我。", "她压着怒气，声音很低，一字一句地说（低音量、克制怒火、逐字清晰）。"),
-    Target("g5d_seed_plain_control", "你怎么还不走？", "无标签基线：按台词字面自然朗读。"),
-    Target("g5b_seed_cot", "你怎么还不走？", "Cot 标签指定焦急难耐：应表现为着急、语速偏快、气息变短。"),
-    Target("g6a_mimo_angry", "你到底想怎么样？", "愤怒：外放的火气，重音强，语气冲。"),
-    Target("g6b_mimo_suppressed", "你到底想怎么样？", "压抑的愤怒：怒火被压住，音量不高、咬字紧、句尾收住。"),
-    Target("g7a_audio_instruction", "我真的没事，你们都不用管我。", "悲伤克制，语速偏慢，句尾下沉。"),
-    Target("g7b_audio_tags", "我真的没事，你们都不用管我。", "指令为悲伤克制，但正文带 [excited] 标签；请判断标签是否带来可听的兴奋/明亮变化。"),
-]
+def _targets_from_manifest(
+    line_override: str = "", wanted: Optional[set] = None
+) -> List[Target]:
+    """待评清单来自批次 manifest：只送真正出了音频、且能确定逐字台词的条目。
+
+    `spoken_text` 由探测脚本写入（正文带标签的写法必须显式给干净台词，
+    否则 fidelity 会把标签当成漏字）。旧批次缺该字段时用 `--line` 补，
+    补不上就报错，不猜。
+    """
+    if not MANIFEST.exists():
+        raise SystemExit(f"manifest 不存在：{MANIFEST}（先用 probe_tts_capability_gates 跑批次）")
+    targets: List[Target] = []
+    all_keys: set = set()
+    for row in json.loads(MANIFEST.read_text(encoding="utf-8")):
+        key = str(row.get("key") or "")
+        if not key:
+            continue
+        all_keys.add(key)
+        if wanted and key not in wanted:
+            continue
+        line = str(row.get("spoken_text") or line_override or "").strip()
+        if not line:
+            raise SystemExit(f"{key} 缺 spoken_text，且未传 --line：无法确定逐字台词")
+        targets.append(
+            Target(
+                key=key,
+                line=line,
+                asked=str(row.get("question") or ""),
+                gate=str(row.get("gate") or ""),
+                channel=str(row.get("channel") or ""),
+                duration_ms=row.get("duration_ms"),
+            )
+        )
+    if wanted:
+        unknown = sorted(wanted - all_keys)
+        if unknown:
+            raise SystemExit(f"--key 不在本批次 manifest 里：{unknown}")
+    if not targets:
+        raise SystemExit(f"manifest 里没有可评条目：{MANIFEST}")
+    return targets
 
 
 def _rubric_prompt(line: str, asked: str) -> str:
@@ -152,6 +194,14 @@ def _blind_prompt(line: str) -> str:
     )
 
 
+def _repo_rel(path: Path) -> str:
+    """relative_to 对仓库外路径会抛 ValueError，降级为绝对路径而不是中断评分。"""
+    try:
+        return path.relative_to(PROJECT_ROOT).as_posix()
+    except ValueError:
+        return path.as_posix()
+
+
 def _audio_for(key: str) -> Path:
     hits = sorted(PROBE_DIR.glob(f"{key}.*"))
     wav = [p for p in hits if p.suffix in {".wav", ".mp3"}]
@@ -183,40 +233,63 @@ def main() -> int:
         help="blind＝不给评分模型看表演要求（默认，也是唯一可作为结论的模式）；"
         "anchored＝把要求一起交出去，仅用于复现 qwen3.8 的指令回声偏差",
     )
+    parser.add_argument(
+        "--probe-dir",
+        default="",
+        help="批次目录（内有 manifest.json 与该批音频）；相对路径按仓库根解析，"
+        "默认 backend/data/tts_debug/b3_qwen31_writing",
+    )
+    parser.add_argument("--manifest", default="", help="manifest 路径覆盖，默认 <probe-dir>/manifest.json")
+    parser.add_argument(
+        "--line",
+        default="",
+        help="逐字台词覆盖：仅用于 manifest 里没有 spoken_text 的旧批次（整批同一台词时才可用）",
+    )
+    parser.add_argument(
+        "--key", default="", help="只评这些 key（逗号分隔），用于按审计锚协议抽 1–2 条送评"
+    )
     args = parser.parse_args()
+
+    probe_dir = Path(args.probe_dir) if args.probe_dir else PROBE_DIR
+    if not probe_dir.is_absolute():
+        probe_dir = PROJECT_ROOT / probe_dir
+    _apply_paths(probe_dir, Path(args.manifest) if args.manifest else None)
 
     blind = args.mode == "blind"
     out_json = OUT_JSON_BLIND if blind else OUT_JSON
     out_sheet = OUT_SHEET_BLIND if blind else OUT_SHEET
 
+    targets = _targets_from_manifest(args.line, {k.strip() for k in args.key.split(",") if k.strip()} or None)
+
     keys = _api_keys()
     rows = _manifest_rows()
 
+    print(f"批次目录: {_repo_rel(probe_dir)}")
     print(f"模式: {'盲评（不透露表演要求）' if blind else '锚定（含表演要求）'}")
     print(f"采信分工: 情绪/表演维度 → {EMOTION_SCORER}；fidelity/contamination → {VERIFIABLE_SCORER}")
-    print(f"待评音频 {len(TARGETS)} 条 × {len(SCORERS)} 个评分模型 = {len(TARGETS) * len(SCORERS)} 次调用")
+    print(f"待评音频 {len(targets)} 条 × {len(SCORERS)} 个评分模型 = {len(targets) * len(SCORERS)} 次调用")
     for model in SCORERS:
         print(f"  {model} key: {'ok' if keys.get(model) else 'missing'}")
 
     if not args.confirm_paid:
-        for t in TARGETS:
+        for t in targets:
             prompt = _blind_prompt(t.line) if blind else _rubric_prompt(t.line, t.asked)
             print(f"\n[{t.key}] {_audio_for(t.key).name}\n{prompt[:200]}...")
         return 0
 
     results: List[Dict[str, Any]] = []
-    for t in TARGETS:
+    for t in targets:
         path = _audio_for(t.key)
         prompt = _blind_prompt(t.line) if blind else _rubric_prompt(t.line, t.asked)
         entry: Dict[str, Any] = {
             "key": t.key,
-            "gate": (rows.get(t.key) or {}).get("gate"),
-            "channel": (rows.get(t.key) or {}).get("channel"),
+            "gate": t.gate or (rows.get(t.key) or {}).get("gate"),
+            "channel": t.channel or (rows.get(t.key) or {}).get("channel"),
             "line": t.line,
             "asked": t.asked,
             "mode": args.mode,
-            "audio_file": path.relative_to(PROJECT_ROOT).as_posix(),
-            "duration_ms": (rows.get(t.key) or {}).get("duration_ms"),
+            "audio_file": _repo_rel(path),
+            "duration_ms": t.duration_ms if t.duration_ms is not None else (rows.get(t.key) or {}).get("duration_ms"),
             "authority": {name: tts_dimension_authority(name) for name in TTS_DIMENSIONS},
             "scorers": {},
         }
@@ -268,7 +341,7 @@ def _other_scorer(model: str) -> str:
 def _write_sheet(results: List[Dict[str, Any]], rows: Dict[str, Dict[str, Any]]) -> None:
     dims = ("emotion_match", "prosody_pause", "fidelity", "contamination", "overall_naturalness")
     lines = [
-        "# G1–G7 门槛听辨表（锚定模式；仅用于复现指令回声偏差，不作为结论来源）",
+        f"# {PROBE_DIR.name} 听辨表（锚定模式；仅用于复现指令回声偏差，不作为结论来源）",
         "",
         f"采信分工：情绪/表演维度 → {EMOTION_SCORER}；fidelity/contamination → {VERIFIABLE_SCORER}。",
         "本模式把表演要求一起交给了评分模型，已证实 qwen3.8 会据此编造听感，故\"采信\"列在锚定模式下不可信。",
@@ -312,7 +385,7 @@ def _write_blind_sheet(results: List[Dict[str, Any]], rows: Dict[str, Dict[str, 
         return (scorers.get(model) or {}).get("dimensions") or {}
 
     lines = [
-        f"# G1–G7 门槛盲评对照表（评分模型看不到表演要求；情绪维度采信 {EMOTION_SCORER}）",
+        f"# {PROBE_DIR.name} 盲评对照表（评分模型看不到表演要求；情绪维度采信 {EMOTION_SCORER}）",
         "",
         "盲评目的：检验主评此前的正向证据是否只是把提示词里的指令复述成听感。",
         "判定方式：比较\"盲评听到的情绪\"与\"当初下达的指令\"，并对照人耳裁定；两列分数不同不代表音频变了。",

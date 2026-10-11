@@ -13,7 +13,7 @@
 | 模型 | 官方风格控制通道 | 情绪控制形态 | 我方代码现状 | 最大空白 |
 |---|---|---|---|---|
 | qwen3-tts-instruct-flash | 自然语言 `instructions`（≤1600 Token，中英）+ `optimize_instructions` 开关 | 无枚举，纯自然语言 | 只发自然语言，预算自设 600；**未用 `optimize_instructions`** | 官方上限是我方的 2.7 倍；重写开关闲置 |
-| qwen-audio-3.1-tts-flash | `input.instruction`（官方未标长度上限）＋ **正文内 `[excited]` 类标签**（可与 instruction 叠加） | 任意指令（系统音色与复刻音色均可） | 只用 instruction，预算保守 1200；**情感标签完全未用** | 双通道叠加未试；SSML `<break>`/`<phoneme>` 未用 |
+| qwen-audio-3.1-tts-flash | `input.instruction`（官方未标长度上限）＋ **正文内 `[excited]`/`[sad]` 类标签**（官方给了词表与示例，**未保证可与 instruction 叠加**） | 任意指令（系统音色与复刻音色均可） | 只用 instruction，预算保守 1200；**情感标签完全未用** | 双通道叠加未试（B3 q8）；SSML `<break>`/`<phoneme>` 未用 |
 | cosyvoice-v3.5-plus | WS `parameters.instruction` / HTTP `input.instruction`，**≤100 加权字符（汉字算 2）**，超限报 428 | 任意指令（复刻音色） | 计量口径已正确（汉字 2 单位） | 只能写约 55 个汉字 → 提示词必须极简，这是设计约束而非 bug |
 | minimax-speech-2.8-hd / turbo | `voice_setting.emotion` 枚举 7 档（2.8 不支持 `whisper`）＋括号语气词 `(laughs)`＋`pronunciation_dict`＋`language_boost`＋`voice_modify`＋`timbre_weights`；MiniMax 官方另有 `<#x#>` 定时停顿（**百炼页未列出**） | 枚举 + 括号标签，**无自然语言 prompt** | 只发 `speed/vol`，`pitch` 写死 0，**`emotion` 从不传** | 整条情绪通道闲置；`<#x#>` 能否透传未验证 |
 | mimo-v2.5-tts（基座） | 台词必须放 `assistant`，风格放 `user`（官方明文）；句首风格标签 `(风格)`／全角／方括号均可，句中任意位置可插标签；官方支持**复合情绪**与段落→句→词→字粒度指令 | 自然语言 + 标签，支持自定义风格、唱歌 | director（`角色/场景/指导` 三段）+ audio_tags 前缀 | 复合情绪与字粒度重音未按官方口径写；唱歌未用 |
@@ -48,10 +48,14 @@
 ## 2. qwen-audio-3.1-tts-flash
 
 - **字段**：非实时 HTTP `input.instruction`（string，可选），官方原文「设置指令，用于控制方言、情感或角色等合成效果」；SDK/WS 走 `SpeechSynthesizer(..., instruction=...)`。**官方未标 instruction 长度上限**（"最大输入长度：—"），我们的 1200 是本地保守值（`tts_model_ids.py:139`）。
-- **情绪**：官方指令控制章节列 `qwen-audio-3.1-tts-flash、qwen-audio-3.0-tts-plus、qwen-audio-3.0-tts-flash`，「系统音色和声音复刻音色：均可输入任意指令」。**另有第二条通道**：「情感与富语言标签」直接写进 `text`，仅这三档模型支持，可与 instruction 叠加。官方示例原文：
+- **情绪**：官方指令控制章节列 `qwen-audio-3.1-tts-flash、qwen-audio-3.0-tts-plus、qwen-audio-3.0-tts-flash`，「系统音色和声音复刻音色：均可输入任意指令」。**另有第二条通道**：「情感与富语言标签」直接写进 `text`，仅这三档模型支持。**「可与 instruction 叠加」是我方早先的转述，官方该章节并未给出叠加保证（2026-10-11 复核原文）**，故叠加效果列为 B3 q8 的实测项。官方示例原文：
   ```text
   [excited]今天的天气真不错！[laughing]我们一起出去玩吧！
   ```
+- **标签词表（2026-10-11 从官方《非实时语音合成》用户指南取全；本地 `bailian-docs-llm-wiki` 镜像只到「细粒度标签控制能力」这句话，未收录词表本身）**：
+  - 控制类 23 个：`[sad]` `[amazed]` `[deep and loud shouting]` `[trembling]` `[angry]` `[excited]` `[sarcastic]` `[curious]` `[like dracula]` `[bored]` `[tired]` `[scornful]` `[shouting]` `[asmr]` `[panicked]` `[mischievously]` `[empathetic]` `[whispers]` `[reluctantly]` `[crying]` `[serious]` `[very slowly]` `[very fast]`
+  - 富语言类 7 个：`[gasp]` `[sighing]` `[clears throat]` `[giggles]` `[laughing]` `[cough]` `[snorts]`
+  - 官方作用域原文：控制类作用于标签之后的文本，「直到遇到下一个控制类标签或句子被自动切分」；富语言类在当前位置插入拟声效果、不干扰前后文风格。止于句界还是整段官方未明说 → B3 的 q7/q8 **逐句下标签**，两种解释下都覆盖全文。
 - **韵律**：`volume` 0–100（默认 50）、`rate` 0.5–2.0（SDK 名 `speech_rate`）、`pitch` 0.5–2.0、`seed` 0–65535、`language_hints`（16 值，仅首个生效）。`enable_ssml=true` 时本模型在 SSML 支持清单内：`<break time="2s"/>`（s∈[1,10]、ms∈[50,10000]，连续累加上限 10 秒）、`<phoneme alphabet="py" ph="dian3 dang4 hang2">典当行</phoneme>`、`<sub alias="网络协议标准">W3C</sub>`；非 SSML 兜底 `hot_fix`：`{"pronunciation":[{"天气":"tian1 qi4"}],"replace":[{"今天":"金天"}]}`。`<#>` 未找到官方依据。方言走指令，例 `请用河南话表达`。
 - **缺口**：**未找到** qwen-audio-3.1-tts-flash 带 instruction 的官方逐字示例（samples 均为无 instruction 调用）。
 - **实测（G7，2026-10-10）**：`[excited]` 写在 `input.text` 中**不会被朗读出口**（ASR 转写干净，4560 ms vs 纯 instruction 4320 ms）；但本轮把它和"悲伤克制"指令对立下达，无法据此判断标签是否改变表演——**该条测试设计失效，需按官方示例同向重做**。
@@ -211,7 +215,7 @@
 | 模型 | B1（最低风险） | B2（官方特性） | B3（叠加） |
 |---|---|---|---|
 | qwen3-tts-instruct-flash | ✅ **已测（§12.1 B2，因原 ID 404 改在 `qwen3-tts-flash` 上跑）**：三段式/动机式/关键词式时长全部落在噪声带内，`optimize_instructions` 亦无时长信号 | ✅ 已测：`optimize_instructions=True` 不改变产出 | 未测 |
-| qwen-audio-3.1-tts-flash | instruction 场景化 | instruction ＋ 正文 `[excited]/[laughing]` | instruction ＋ SSML `<break time>` 控停顿 |
+| qwen-audio-3.1-tts-flash | instruction 场景化 | instruction ＋ 正文 `[excited]/[laughing]` → **已排入 `--batch qwen31_writing` 的 q7/q8**（改用同向的 `[sad]` 逐句下达，见 §19） | instruction ＋ SSML `<break time>` 控停顿（仍未排） |
 | cosyvoice-v3.5-plus | ≤55 汉字的"关键词式"指令（`克制悲伤，语速偏慢，句尾下沉`） | 官方声音描述维度句式 | 短指令 ＋ 标点停顿（SSML 需复刻音色＋北京地域） |
 | minimax-2.8 | `emotion` 枚举按情绪映射 | `emotion` ＋ 括号语气词 `(sighs)(breath)` | `emotion` ＋ `pronunciation_dict` ＋ `speed` |
 | mimo 基座 | ✅ **已测（§11 B1）**：三段式最省力地被采纳，关键词式≈基线 | ✅ 部分已测：正文圆括号标签 3/3 不发音（b1e）；复合情绪／句中细粒度标签待测 | 字级重音指令 |
@@ -369,7 +373,7 @@
 ## 15. 仍待用户拍板的事项（汇总）
 
 - **B2 的 15 条音频尚无人耳听辨**（§12.4 第 1 项）——这是"哪种写法更好听"的唯一真值来源。**2026-10-11 状态变更**：原听辨表 `backend/data/tts_debug/b2_paid_writing/listening_sheet.md` 与音频已随产物清理删除，本项从"去听"变成"**先重生成再听**"（`--batch b2_paid`，45 次合成 ≈0.2 元 ＋ 15 次 ASR，需批准）；未重生成前，§12.1 的 B2 结论只能停在客观层。
-- **`_render_doubao_voice_label_prefix`（`tts_style_control.py:557`）改成官方 `<cot text=…>` 包裹**：§16 已确证现行 `[a，b]` 前缀在生产形状下仍被朗读，Cot 是实测干净的替代语法。属生产改动（可 TDD 落地），待批准。
+- **`_render_doubao_voice_label_prefix`（`tts_style_control.py`）改成官方 `<cot text=…>` 包裹**：§16 已确证 `[a，b]` 前缀在生产形状下仍被朗读，Cot 是实测干净的替代语法。**2026-10-11 复核：改动已在工作区落地**（渲染 `<cot text="…">`、逐句补 `</cot>`、按官方 64 字符上限逐标签装填并剔除引号尖括号、`tag_syntax="doubao_cot"`、`use_tag_parser` 改由前缀是否存在驱动），`tests/test_audiobook_tts_provider_payloads.py` 有对应断言，该文件＋评分契约文件 **124 passed**；**但尚未提交**（`git show HEAD:` 里 `<cot` 命中 0 处），所以本项从"待批准"变成"**待用户决定是否提交**"。详见 §19。
 - **`qwen3-tts-instruct-flash` 404 后生产默认怎么切**：用户新提议"是否全面切到 `qwen-audio-3.1-tts-flash`（音色更多、价格更便宜）"，调研进行中；注意 §12.1 A 组显示 `qwen3-tts-flash` 对情绪指令无时长响应。
 - **§11.9 列出的 `[字段]` 项**（stepaudio 三个能力位、minimax `basic`、qwen3 budget 600、mimo `voice_design_instruction_mode`）。其中 **stepaudio instruction 预算 200→500 已于 2026-10-11 落地**，落点与实测副作用见 `docs/MODEL_INTEGRATION_REFERENCE.md` §11.9 第 1 条。
 - （可选）再发 2 次 n1 把供应商抖动钉死，≈0.01 元。
@@ -419,7 +423,7 @@
 - **`use_tag_parser=true` 并不能让方括号前缀免于被朗读。** n1 与 d4 的时长**精确到毫秒相同（6024 = 6024）**，ASR 逐字一致 → parser 对这个形状不起"剥离标签"的作用，"漏读是因为没开 parser"这个假设被否证。
 - **音色混杂变量已排除**：同一个 speaker 下 Cot 语法 3 轮全部干净、时长与基线同量级（g5b/g5c 也是 1464 ms，对照 g5d 1632 ms），说明该音色**会解析标签、只是不认 `[a，b]` 这种前缀**。
 - 因此 §13.1 里撤回的"生产成品级标签污染"**恢复为实测结论**，但范围要按代码事实限定清楚：只有 `style_control_method ∈ {audio_tags, tags, label, labels, voice_labels}` 的片段会走 `[a，b]` 前缀（`tts_style_control.py:815-827`），且 `:843` 是"只要前缀存在就 `use_tag_parser=true`"。不是全量章节，是显式标签模式的片段。
-- **生产代码里没有任何 `<cot text=…>` 渲染路径**（`tts_style_control.py` 全文 grep 无 `<cot`），所以修复动作是把 `_render_doubao_voice_label_prefix`（`:557`）改成官方 Cot 包裹——已被 6 次实测证明"解析、不发音、能改变时长"。属生产改动，**待批准**。
+- **生产代码里没有任何 `<cot text=…>` 渲染路径**（`tts_style_control.py` 全文 grep 无 `<cot`），所以修复动作是把 `_render_doubao_voice_label_prefix` 改成官方 Cot 包裹——已被 6 次实测证明"解析、不发音、能改变时长"。属生产改动，**待批准**。**2026-10-11 复核：本条前半句已失效**，Cot 渲染路径已在工作区落地并通过测试（未提交），状态以 §15 对应条与 §19 为准；本节保留原措辞只作为当晚取证时点的事实。
 - 样本量坦白：n1/n2 各 1 次，供应商抖动未测；但 d4 同形状已 3 轮复现、且 n1 与 d4 时长逐毫秒相同，可信度高。若要把抖动也钉死，再发 2 次 n1 即可（≈0.01 元）。
 - 成本：豆包 WS 2 次（刊例推算 ≈0.01 元，非账单实扣）＋ ASR 2 次（qwen3-asr-flash）。证据：`backend/data/tts_debug/seed_tag_parser_shape/`（2 条 mp3 + manifest + 2 份 `asr_*.txt`；manifest 里所有鉴权头已被掩码成 `***`）。**2026-10-11 复核：该目录已随产物清理删除，"n1 与 d4 逐毫秒相同（6024 = 6024）"按一次性观测快照读取，不可再复核；要复核需 `--batch seed_tag_parser` 重发 2 次（≈0.01 元）。**
 
@@ -430,6 +434,16 @@
 
 遗留：`prompt_audio_asr_provider.py:485` 的 ASR 通道仍发 `X-Api-App-Key`——那是另一个端点（Volcengine ASR），本轮没有实测证据说明它有害，**未动**。
 
+## 19. 2026-10-11 交接复核：B3 扩条、评分层参数化、豆包 Cot 状态
+
+- **证据现状**：`backend/data/tts_debug/` 只剩 2026-06-25 的 4 个 `seed_tts_99_voice_validation_*.json`（版本库跟踪文件），§9.3/§12.3/§16 的"批次目录已删除"与磁盘一致。
+- **3.1 生产形状复核**（按 §13.3 的规矩，先读生产 builder 再谈探针）：`_aliyun_mixin.py:2071-2083` 只发 `{"model","input":{text,voice,instruction?}}`，请求头仅 `Authorization` / `Content-Type`，3.1 正文不经 `prepare_text_for_style_control`；B3 干跑的 8 条 payload 与之一字一致。音色 `yeqinghe_v3.1` 即生产别名 `female_young_gentle`（`voice_manager.py:78`）。
+- **B3 从 6 写法扩到 8**：新增 q7（仅正文 `[sad]`，逐句）与 q8（三段式 instruction ＋ `[sad]`）。原因是原 q5/q6 用的是全角圆括号舞台提示（MiMo/stepaudio 的写法），只能回答"3.1 会不会把圆括号念出来"；3.1 官方文档化的正文通道是**半角方括号标签**，而"标签是否改变表演"这条 G7 失效测试必须同向重做，`[excited]` 与悲伤指令对立下达答不了这个问题。完整词表与官方作用域原文见 §2。
+- **叠加口径降级**：官方《非实时语音合成》用户指南给了标签词表与逐句示例，但**没有给出"可与 instruction 叠加"的保证**；§0/§2 原先的转述已改为"官方未保证、由 q8 实测"。本地 `bailian-docs-llm-wiki` 镜像只到 HTTP API 原文的 `instruction` 一句和模型页"细粒度标签控制能力"这句话，词表本身不在镜像里。
+- **评分层阻断已解（零付费）**：`probe_tts_gate_scoring.py` 的 `PROBE_DIR/MANIFEST/OUT_*` 改由 `--probe-dir` / `--manifest` 决定（相对路径按仓库根解析，默认 B3 目录），待评清单逐行读自 manifest，`--key` 可只抽审计锚、`--line` 只用于给缺字段的旧批次补台词。探测脚本相应新增可选 `spoken_text` 字段并写进 manifest：**正文带标签的写法必须显式给出干净台词**，否则 fidelity 会把标签当成漏字。g1–g7 的 13 条硬编码 TARGETS 已删（该批音频永久丢失，§9.3），`HUMAN_RULING` 三条人耳真值锚保留用于侦测评分器漂移。
+- **豆包 Cot**：状态见 §15 与 §16 的 2026-10-11 更正——工作区已落地、`tests/test_audiobook_tts_provider_payloads.py` 等 **124 passed**、**尚未提交**。
+- **B3 成本重算**（刊例/派生推算，不等于账单实扣；3.1 的 0.4 元/万字是 `derived_from_token_price`，带宽 0.285–0.42，`config/models.yaml:549-555`）：8 写法 × 3 轮 = **24 次合成 ≈0.07–0.15 元 ＋ 24 次 ASR ≈0.02–0.04 元**；若再按评审层协议送双模型盲评，8 条 × 2 个模型 ≈0.08–0.1 元/轮。
+
 ---
 
-_创建：2026-10-10；同日完成 G1–G7 门槛批次并回写 §0/§1/§2/§4/§5/§6/§7/§8/§9/§10，同日完成 **§11 B1 MiMo 写法批次（免费，3 轮 18 条）**、**§12 B2 付费写法批次（3 轮 45 条）＋ 豆包单向 HTTP 定性（15 次）**、**§13 生产形状自我更正 → §16 判定实验（污染确证）**、**§14 探针密钥泄漏 → §17 已修**。§8 的文档部分已回写进 `MODEL_INTEGRATION_REFERENCE.md` §11.9/§11.10。本文件为取证与实验设计输入；档案字段上调、情绪参数透传、`_render_doubao_voice_label_prefix` 改 Cot 语法等生产改动仍须另行批准，真实付费调用逐批单独确认。_
+_创建：2026-10-10；同日完成 G1–G7 门槛批次并回写 §0/§1/§2/§4/§5/§6/§7/§8/§9/§10，同日完成 **§11 B1 MiMo 写法批次（免费，3 轮 18 条）**、**§12 B2 付费写法批次（3 轮 45 条）＋ 豆包单向 HTTP 定性（15 次）**、**§13 生产形状自我更正 → §16 判定实验（污染确证）**、**§14 探针密钥泄漏 → §17 已修**。§8 的文档部分已回写进 `MODEL_INTEGRATION_REFERENCE.md` §11.9/§11.10。本文件为取证与实验设计输入；档案字段上调、情绪参数透传等生产改动仍须另行批准，真实付费调用逐批单独确认。**2026-10-11：交接复核、B3 扩到 8 写法、评分层参数化与豆包 Cot 落地状态记录在 §19。**_

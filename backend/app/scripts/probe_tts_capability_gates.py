@@ -127,6 +127,9 @@ class GateCall:
     headers: Callable[[], Dict[str, str]]
     ext: str = "mp3"
     transport: str = "http"
+    # 该条应被逐字朗读的台词（不含标签/舞台提示）。评分脚本用它做 fidelity 对照，
+    # 因为 payload 里的 text 可能带正文标签，不能直接当台词用。
+    spoken_text: str = ""
     seed_spec: Dict[str, Any] = field(default_factory=dict)
     audio: Optional[bytes] = None
     status: Optional[int] = None
@@ -778,6 +781,12 @@ B2_TEXT_COT = (
 # B3 换用与生产别名 female_young_gentle 一致的年轻女声，贴合 B1/B2 台词里的"妹妹"角色。
 B3_VOICE = "yeqinghe_v3.1"
 
+# 官方「情感与富语言标签」控制类取值（qwen-audio-3.1-tts-flash 在支持清单内）。
+# 官方原文：控制类标签作用于其后文本，"直到遇到下一个控制类标签或句子被自动切分"，
+# 作用域止于句界还是整段未明说，故逐句下标签，两种解释下都能覆盖全文。
+B3_TAG_SAD = "[sad]"
+B3_TEXT_SAD_TAGGED = (B3_TAG_SAD + B2_TEXT.replace("。", "。" + B3_TAG_SAD)).removesuffix(B3_TAG_SAD)
+
 SEED_OFFICIAL_SPEAKER = "zh_female_vv_uranus_bigtts"
 SEED_UNIDIRECTIONAL_ENDPOINT = "https://openspeech.bytedance.com/api/v3/tts/unidirectional"
 
@@ -1065,9 +1074,12 @@ def build_b2_calls() -> List[GateCall]:
 def build_b3_calls() -> List[GateCall]:
     """B3：qwen-audio-3.1-tts-flash 最佳提示词写法测评。
 
-    与 B1/B2 逐字同台词、批次内同音色（yeqinghe_v3.1），只改变 instruction 写法，
-    因此可与 B2 存档的 stepaudio/豆包 结果横向对照。q5/q6 额外验证 3.1 会不会
-    把正文里的圆括号舞台提示读出来（豆包 §16 的方括号教训需要在 3.1 上重测）。
+    与 B1/B2 逐字同台词、批次内同音色（yeqinghe_v3.1），只改变提示词形状，
+    因此可与 B2 存档的 stepaudio/豆包 结果横向对照。q5/q6 验证 3.1 会不会
+    把正文里的圆括号舞台提示读出来（豆包 §16 的方括号教训需要在 3.1 上重测）；
+    q7/q8 走官方文档化的正文通道（半角方括号控制类标签）：q7 测标签单独能否
+    改变表演（G7 同向重做，G7 当时把 [excited] 与悲伤指令对立下、设计失效），
+    q8 测 instruction＋标签叠加——官方只说两者是独立参数，未保证可叠加。
     多轮由 `--tag r2`/`--tag r3` 生成独立目录，不改本函数。
     """
     specs = [
@@ -1078,8 +1090,20 @@ def build_b3_calls() -> List[GateCall]:
         ("q5_qwen31_tags_only", "仅正文圆括号舞台提示，无 instruction", B2_TEXT_STEP_TAGGED, None),
         (
             "q6_qwen31_director_plus_tags",
-            "三段式 instruction＋正文圆括号舞台提示（G7 叠加）",
+            "三段式 instruction＋正文圆括号舞台提示",
             B2_TEXT_STEP_TAGGED,
+            B2_DIRECTOR,
+        ),
+        (
+            "q7_qwen31_sad_tag_only",
+            "仅正文官方 [sad] 控制类标签，无 instruction（G7 同向重做）",
+            B3_TEXT_SAD_TAGGED,
+            None,
+        ),
+        (
+            "q8_qwen31_director_plus_sad_tag",
+            "三段式 instruction＋正文官方 [sad] 标签叠加（官方未保证可叠加）",
+            B3_TEXT_SAD_TAGGED,
             B2_DIRECTOR,
         ),
     ]
@@ -1097,6 +1121,7 @@ def build_b3_calls() -> List[GateCall]:
                 endpoint=QWEN_AUDIO_31_TTS_ENDPOINT,
                 headers=_dashscope_headers,
                 ext="wav",
+                spoken_text=B2_TEXT,
             )
         )
     return calls
@@ -1231,6 +1256,8 @@ def main() -> int:
             "response_meta": call.response_meta,
             "error": call.error,
         }
+        if call.spoken_text:
+            entry["spoken_text"] = call.spoken_text
         if call.audio:
             path = OUTPUT_DIR / f"{call.key}.{call.ext}"
             path.write_bytes(call.audio)
