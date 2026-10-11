@@ -1,0 +1,33 @@
+# 换行策略：全仓统一 LF
+# 文本文件入库时归一为 LF，检出时同样保持 LF（core.autocrlf 在 Windows 上会被本文件覆盖）。
+* text=auto eol=lf
+
+# cmd.exe 对纯 LF 批处理的 goto / 多行续行解析不稳定，这两类必须保留 CRLF。
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# 二进制资产：禁止行尾转换，也避免被当成文本 diff。
+*.png -text
+*.jpg -text
+*.jpeg -text
+*.gif -text
+*.ico -text
+*.webp -text
+*.pdf -text
+*.mp3 -text
+*.wav -text
+*.flac -text
+*.m4a -text
+*.mp4 -text
+*.woff -text
+*.woff2 -text
+*.ttf -text
+*.otf -text
+*.xlsx -text
+*.docx -text
+*.zip -text
+*.gz -text
+*.pyc -text
+*.db -text
+*.sqlite -text
+*.sqlite3 -text
