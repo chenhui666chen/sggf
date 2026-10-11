@@ -206,3 +206,11 @@ celerybeat-schedule
 celerybeat-schedule-sdb
 celerybeat-schedule-shm
 celerybeat-schedule-wal
+
+# Local rollback backups (kept on disk, regenerated per review round)
+backend/data/voice_profile_tagging/backup_pre_review_*/
+ai_director_os/*.backup_*.md
+ai_director_os/*.backup_*.json
+
+# Local agent private memory, not project source
+.workbuddy/
