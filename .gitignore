@@ -161,6 +161,7 @@ backend/data/audio_library/music_cache/
 backend/data/prompt_evolution/
 backend/backend/data/asset_studio_outputs/
 data/prompt_evolution/
+backend/data/tts_debug/
 
 # Misc
 .turbo/
