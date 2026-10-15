@@ -21,8 +21,13 @@ from app.db.base import Base
 config = context.config
 
 # 从环境变量读取数据库 URL
-if settings.DATABASE_URL:
-    config.set_main_option("sqlalchemy.url", settings.DATABASE_URL)
+database_url = settings.DATABASE_URL
+if database_url:
+    if database_url.startswith("postgresql+psycopg://"):
+        database_url = "postgresql+psycopg2://" + database_url.removeprefix("postgresql+psycopg://")
+    elif database_url.startswith("postgresql://"):
+        database_url = "postgresql+psycopg2://" + database_url.removeprefix("postgresql://")
+    config.set_main_option("sqlalchemy.url", database_url)
 
 # Interpret the config file for Python logging.
 # This line sets up loggers basically.
