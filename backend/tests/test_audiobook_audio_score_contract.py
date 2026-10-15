@@ -84,28 +84,28 @@ def test_non_json_and_unknown_scope_are_rejected() -> None:
         parse_audio_score(json.dumps(_payload()), kind="tts", scope="invalid")
 
 
-def test_four_scorers_keep_errors_out_of_score_statistics() -> None:
-    assert len(SCORER_MODELS) == 4
+def test_two_scorers_keep_errors_out_of_score_statistics() -> None:
+    assert len(SCORER_MODELS) == 2
     valid = json.dumps(_payload(), ensure_ascii=False)
     results = parse_scoring_batch(
-        {SCORER_MODELS[0]: valid, SCORER_MODELS[1]: "not-json", SCORER_MODELS[2]: valid},
+        {SCORER_MODELS[0]: valid, SCORER_MODELS[1]: "not-json"},
         kind="tts", scope="sequence",
     )
     assert results[SCORER_MODELS[0]].status == "reviewed"
     assert results[SCORER_MODELS[0]].score is not None
     assert results[SCORER_MODELS[1]].status == "recorded_error"
     assert results[SCORER_MODELS[1]].score is None
-    assert results[SCORER_MODELS[2]].status == "reviewed"
-    assert results[SCORER_MODELS[3]].status == "recorded_error"
-    assert results[SCORER_MODELS[3]].error_kind == "missing_response"
+    missing = parse_scoring_batch({SCORER_MODELS[0]: valid}, kind="tts", scope="sequence")
+    assert missing[SCORER_MODELS[1]].status == "recorded_error"
+    assert missing[SCORER_MODELS[1]].error_kind == "missing_response"
 
 
-def test_four_scorer_batch_rejects_unknown_models() -> None:
+def test_two_scorer_batch_rejects_unknown_models() -> None:
     with pytest.raises(ValueError, match="unknown"):
         parse_scoring_batch({"made-up-model": "{}"}, kind="tts")
 
 
-def test_offline_scorer_sends_audio_and_parses_four_provider_responses(tmp_path) -> None:
+def test_offline_scorer_sends_audio_and_parses_both_provider_responses(tmp_path) -> None:
     audio = tmp_path / "sample.wav"
     audio.write_bytes(b"RIFF fixture")
     requests = []
@@ -139,9 +139,9 @@ def test_offline_scorer_sends_audio_and_parses_four_provider_responses(tmp_path)
     with httpx.Client(transport=httpx.MockTransport(handle)) as client:
         outcomes = [score_audio(audio_path=audio, prompt="请评分", model=model, kind="tts",
                                 api_key="test-key", client=client) for model in SCORER_MODELS]
-    assert len(requests) == 4
+    assert len(requests) == 2
     assert all(outcome.status == "reviewed" for outcome in outcomes)
-    assert [outcome.usage["total_tokens"] for outcome in outcomes] == [12, 12, 12, 21]
+    assert [outcome.usage["total_tokens"] for outcome in outcomes] == [12, 21]
 
 
 def test_offline_scorer_isolates_provider_and_schema_errors(tmp_path) -> None:
@@ -154,7 +154,7 @@ def test_offline_scorer_isolates_provider_and_schema_errors(tmp_path) -> None:
         return httpx.Response(200, content=b'data: {"choices":[{"delta":{"content":"not-json"}}]}\n\ndata: [DONE]\n\n')
     with httpx.Client(transport=httpx.MockTransport(handle)) as client:
         schema = score_audio(audio_path=audio, prompt="评审", model=SCORER_MODELS[0], kind="tts", api_key="test-key", client=client)
-        provider = score_audio(audio_path=audio, prompt="评审", model=SCORER_MODELS[3], kind="tts", api_key="test-key", client=client)
+        provider = score_audio(audio_path=audio, prompt="评审", model=SCORER_MODELS[1], kind="tts", api_key="test-key", client=client)
     assert (schema.status, schema.error_kind, schema.score) == ("recorded_error", "schema_invalid", None)
     assert (provider.status, provider.error_kind, provider.score) == ("recorded_error", "provider_error", None)
 

@@ -4987,7 +4987,7 @@
         "speakerId": "按角色出现顺序填写；留空时由模型根据角色描述生成声音。"
       },
       "dataHint": {
-        "imageReferenceLimit": "当前运行时模型约束允许最多 {{count}} 张参考图，超出部分会自动截断。",
+        "imageReferenceLimit": "当前模型最多支持 {{count}} 张参考图；超过上限时请减少图片后再生成。",
         "footerNote": "当前工作台为直连资产生成区，优先调用轻量 API，不走项目章节或长流程状态机。",
         "modeHintMusic": "配乐模式会把风格、情绪和节奏一并传给后端音频服务。",
         "modeHintSoundEffect": "音效模式使用豆包 Seed Audio 1.0 按提示词生成短音效，实际时长由模型决定，积分按实际时长结算。",
@@ -5050,6 +5050,7 @@
       },
       "error": {
         "imagePromptRequired": "请先填写图片提示词",
+        "imageReferenceLimit": "当前模型最多支持 {{count}} 张参考图，请移除多余图片后再生成",
         "imageGenerateFailed": "图片生成失败",
         "videoPromptRequired": "请先填写视频提示词",
         "videoGenerateFailed": "视频生成失败",
@@ -6300,8 +6301,10 @@
   "modelVideoViduQ3Text2Video": "Vidu Q3 Pro 文生视频",
   "modelVideoViduQ3Img2Video": "Vidu Q3 Pro 图生视频",
   "modelVideoViduQ3StartEnd2Video": "Vidu Q3 Pro 首尾帧",
-  "modelVisionQwen3VlPlus": "Qwen3-VL-Plus（视觉理解）",
-  "modelVisionQwen35OmniPlus": "Qwen3.5 Omni Plus（全能）",
+  "modelVisionQwenPlus": "Qwen3.7 Plus（视觉评审）",
+  "modelVisionQwen38OmniFlash": "Qwen3.8 Omni Flash（全能轻量）",
+  "modelVisionDoubaoSeed21Lite": "Doubao Seed 2.1 Lite（视觉评审）",
+  "modelVisionDoubaoSeed21Pro": "Doubao Seed 2.1 Pro（视觉评审）",
   "safetyPolicyWarn": "告警放行",
   "safetyPolicyBlock": "严格拦截",
   "characterViewFront": "正面",

@@ -7,7 +7,7 @@ from typing import Any, Mapping, Sequence
 
 from sqlalchemy.orm import Session
 
-from app.services.asset_studio_model_catalog import resolve_video_price_per_second
+from app.services.asset_studio_model_catalog import get_models_index, resolve_video_price_per_second
 from app.services.points_pricing_policy import (
     PointsBusinessSettlementSnapshot,
     build_points_business_settlement_snapshot,
@@ -401,6 +401,10 @@ def estimate_book_analyze_basis_yuan(total_words: int | None, chapter_count: int
 _VIDEO_BASIS_KINDS = frozenset({"video", "motion", "video_edit"})
 
 
+class AssetStudioImagePriceMissing(ValueError):
+    pass
+
+
 class AssetStudioVideoPriceMissing(ValueError):
     """视频三链路按「模型 × 分辨率档」取不到官方每秒价。
 
@@ -415,6 +419,7 @@ def estimate_asset_studio_basis_yuan(
     model_id: str | None = None,
     duration_seconds: float | int | None = None,
     output_count: int = 1,
+    input_count: int = 0,
     prompt_chars: int | None = None,
     asset_type: str | None = None,
     width: int | None = None,
@@ -427,6 +432,16 @@ def estimate_asset_studio_basis_yuan(
     duration = max(_to_non_negative_float(duration_seconds, 0.0), 0.0)
 
     if normalized_kind == "image":
+        if normalized_mode == "reference_edit" and model_id == "qwen-image-3.0":
+            record = get_models_index().get(model_id) or {}
+            pricing_info = record.get("pricing_info") or {}
+            tiers = pricing_info.get("tiers") or []
+            prices = {str(tier.get("component")): tier.get("price_per_image") for tier in tiers if isinstance(tier, dict)}
+            input_price = prices.get("图片输入（1K/2K 同价）")
+            output_price = prices.get("图片输出（1K/2K 同价）")
+            if not isinstance(input_price, (int, float)) or not isinstance(output_price, (int, float)):
+                raise AssetStudioImagePriceMissing(f"模型 {model_id} 缺少图片输入/输出价目")
+            return _round_yuan(max(input_count, 1) * input_price + normalized_output_count * output_price)
         unit_price = (
             _env_float("POINTS_ASSET_STUDIO_IMAGE_EDIT_YUAN", 0.12)
             if normalized_mode == "reference_edit"

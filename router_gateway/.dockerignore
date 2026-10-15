@@ -1,0 +1,17 @@
+# Python 缓存
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# 测试不进生产镜像（CI 用源码目录运行）
+tests/
+
+# 构建元文件（requirements.txt 需保留在 context 中供分层 COPY）
+Dockerfile
+.dockerignore
+
+# 本地探测产物与日志
+*.log
+*.mp4
+*.jpg
+*.png

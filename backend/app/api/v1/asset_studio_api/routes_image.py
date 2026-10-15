@@ -23,7 +23,7 @@ from app.core.security import get_current_user
 from app.db.base import get_db
 from app.models.user import User
 from app.services.audiobook.ai_music import MusicGenerationRequest, MusicStyle, create_music_generator
-from app.services.points_usage_pricing import estimate_asset_studio_basis_yuan
+from app.services.points_usage_pricing import AssetStudioImagePriceMissing, estimate_asset_studio_basis_yuan
 from core.model_catalog_runtime import get_model_catalog_runtime_index
 from core.model_resolution import normalize_model_id
 from core.unified_media_runtime import UnifiedMediaResult, media_runtime
@@ -72,22 +72,27 @@ def generate_image_asset(
     seed_value = _parse_optional_int(seed)
 
     if saved_reference_paths:
-        resolved_width, resolved_height = _validate_dimensions_for_models(
-            IMAGE_EDIT_MODELS,
-            width,
-            height,
-            request_label="图片",
-        )
         normalized_model_id = normalize_model_id(model_id) or ""
-        resolved_model_id = normalized_model_id if normalized_model_id in IMAGE_EDIT_MODELS else DEFAULT_IMAGE_EDIT_MODEL_ID
-        mode = "reference_edit"
-        basis_yuan = estimate_asset_studio_basis_yuan(
-            kind="image",
-            mode=mode,
-            model_id=resolved_model_id,
-            output_count=1,
-            prompt_chars=len(cleaned_prompt),
+        if normalized_model_id not in IMAGE_EDIT_MODELS:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"模型 {model_id} 不支持图片编辑")
+        if normalized_model_id == "qwen-image-3.0" and len(saved_reference_paths) > 3:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Qwen Image 3.0 最多支持 3 张输入图片")
+        resolved_model_id = normalized_model_id
+        resolved_width, resolved_height = _validate_dimensions_for_models(
+            {resolved_model_id}, width, height, request_label="图片",
         )
+        mode = "reference_edit"
+        try:
+            basis_yuan = estimate_asset_studio_basis_yuan(
+                kind="image",
+                mode=mode,
+                model_id=resolved_model_id,
+                input_count=len(saved_reference_paths),
+                output_count=1,
+                prompt_chars=len(cleaned_prompt),
+            )
+        except AssetStudioImagePriceMissing as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
         precheck = None
         try:
             precheck = _reserve_asset_studio_billing(

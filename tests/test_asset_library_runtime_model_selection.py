@@ -34,14 +34,14 @@ def test_resolve_registered_runtime_model_id_skips_unregistered_payload_model(
     monkeypatch.setattr(
         asset_library,
         "get_model_info",
-        lambda model_id: {"id": model_id} if model_id in {"env-vlm-model", "qwen3_vl_plus"} else None,
+        lambda model_id: {"id": model_id} if model_id in {"env-vlm-model", "qwen3.8-omni-flash"} else None,
     )
 
     resolved = asset_library._resolve_registered_runtime_model_id(
         {"vlm_adapter": "missing-vlm-model"},
         key="vlm_adapter",
         env_name="DREAMWEAVER_VLM_ADAPTER",
-        default="qwen3_vl_plus",
+        default="qwen3.8-omni-flash",
     )
 
     assert resolved == "env-vlm-model"

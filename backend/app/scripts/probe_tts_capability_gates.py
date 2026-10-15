@@ -787,6 +787,64 @@ B3_VOICE = "yeqinghe_v3.1"
 B3_TAG_SAD = "[sad]"
 B3_TEXT_SAD_TAGGED = (B3_TAG_SAD + B2_TEXT.replace("。", "。" + B3_TAG_SAD)).removesuffix(B3_TAG_SAD)
 
+# B4：qwen-audio-3.1-tts-flash 官方「情感与富语言标签」取值全量扫描。
+# 官方词表 23 个控制类 + 7 个富语言类，B3 只实测过 [sad]（人耳裁定 1.62× 冠军）。
+# 本批次扫其余取值：逐字同 B2/B3 台词、同音色 yeqinghe_v3.1、同参数、不传 instruction，
+# 只换标签本身，因此每条与 q4 念稿基线（1.00×）直接可比。
+B4_OUTPUT_DIR = PROJECT_ROOT / "backend/data/tts_debug/b4_qwen31_tag_scan"
+
+# 控制类（官方说明逐字抄录，用于 question/试听页，不进出站 payload）。
+# 带空格的多词取值（deep and loud shouting / like dracula / very slowly / very fast）
+# 是最可能被朗读出口的一族，圆括号被朗读的前车之鉴见 §20.2①。
+B4_CONTROL_SPECS = (
+    ("amazed", "惊叹"),
+    ("deep and loud shouting", "深沉大声呐喊"),
+    ("trembling", "颤抖"),
+    ("angry", "愤怒"),
+    ("excited", "兴奋"),
+    ("sarcastic", "讽刺"),
+    ("curious", "好奇"),
+    ("like dracula", "德古拉风格（低沉、阴森）"),
+    ("bored", "无聊"),
+    ("tired", "疲惫"),
+    ("scornful", "轻蔑"),
+    ("shouting", "大喊"),
+    ("asmr", "ASMR 轻柔耳语"),
+    ("panicked", "恐慌"),
+    ("mischievously", "调皮"),
+    ("empathetic", "共情"),
+    ("whispers", "耳语"),
+    ("reluctantly", "不情愿"),
+    ("crying", "哭泣"),
+    ("serious", "严肃"),
+    ("very slowly", "非常缓慢地说话"),
+    ("very fast", "非常快速地说话"),
+)
+
+# 富语言类：官方语义是"在文本当前位置插入拟声"，属事件而非作用域。
+B4_PARA_SPECS = (
+    ("gasp", "倒吸一口气"),
+    ("sighing", "叹息"),
+    ("clears throat", "清嗓"),
+    ("giggles", "咯咯笑"),
+    ("laughing", "大笑"),
+    ("cough", "咳嗽"),
+    ("snorts", "哼声、嗤笑"),
+)
+
+
+def _b4_control_text(tag: str) -> str:
+    """控制类沿用 B3 q7 的逐句形状：每句句首一枚标签，末尾多余的一枚剔除。"""
+    token = f"[{tag}]"
+    return (token + B2_TEXT.replace("。", f"。{token}")).removesuffix(token)
+
+
+def _b4_para_text(tag: str) -> str:
+    """富语言类只在第一个句界后插一枚（逐句会连发三次，无法判读事件是否发生在下标处）。"""
+    head, _, tail = B2_TEXT.partition("。")
+    return f"{head}。[{tag}]{tail}"
+
+
 SEED_OFFICIAL_SPEAKER = "zh_female_vv_uranus_bigtts"
 SEED_UNIDIRECTIONAL_ENDPOINT = "https://openspeech.bytedance.com/api/v3/tts/unidirectional"
 
@@ -1127,6 +1185,58 @@ def build_b3_calls() -> List[GateCall]:
     return calls
 
 
+def build_b4_tag_scan_calls() -> List[GateCall]:
+    """B4：3.1 官方标签取值全量扫描（22 控制类 + 7 富语言类 + 1 作用域对照）。
+
+    判据分两族，不可混用：
+    - 控制类期望"字数不变、发声量变化"，时长相对 q4 基线的倍数是采纳信号
+      （非对称：放大＝采纳的充分证据，无放大≠未采纳，见 §11/§22.1）；
+      `[very fast]` 期望反向缩短，缩短同样是无歧义的采纳证据。
+    - 富语言类期望"额外非语言发声"，因此 ASR 转写里既不能出现标签文字、
+      也不应出现凭空多出的汉字；时长增量属预期而非污染。
+    x01 只把 [sad] 从逐句改成段首一枚，与已存档的 q7 直接对照，用来闭合
+    官方那句"作用其后所有文本，直到遇到下一个控制类标签"在短句上是否成立
+    ——若成立，生产装配每个片段只需写一枚标签。
+    3.1 在该音色＋短句形状下三轮逐字节相同（§20.2④，极差 1.000），故本批次
+    只跑一轮；若某条 ASR 与时长互相矛盾再按 --tag 复跑。
+    """
+    specs: List[tuple[str, str, str]] = []
+    for index, (tag, meaning) in enumerate(B4_CONTROL_SPECS, start=1):
+        specs.append(
+            (f"t{index:02d}_{tag.replace(' ', '_')}", f"控制类 [{tag}]（{meaning}）逐句、无 instruction", _b4_control_text(tag))
+        )
+    for index, (tag, meaning) in enumerate(B4_PARA_SPECS, start=1):
+        specs.append(
+            (f"p{index:02d}_{tag.replace(' ', '_')}", f"富语言类 [{tag}]（{meaning}）句界一枚、无 instruction", _b4_para_text(tag))
+        )
+    specs.append(
+        (
+            "x01_sad_lead_only",
+            "控制类 [sad] 仅段首一枚（与 q7 逐句对照，闭合官方作用域口径）",
+            f"{B3_TAG_SAD}{B2_TEXT}",
+        )
+    )
+
+    calls: List[GateCall] = []
+    for key, label, text in specs:
+        calls.append(
+            GateCall(
+                key=key,
+                gate="B4",
+                channel=QWEN_AUDIO_31_TTS_FLASH_MODEL,
+                question=label,
+                build=lambda text=text: _qwen_audio_payload_voice(
+                    text=text, instruction=None, voice_id=B3_VOICE
+                ),
+                endpoint=QWEN_AUDIO_31_TTS_ENDPOINT,
+                headers=_dashscope_headers,
+                ext="wav",
+                spoken_text=B2_TEXT,
+            )
+        )
+    return calls
+
+
 def build_seed_tag_parser_calls() -> List[GateCall]:
     """§13.2：复刻生产真实出站形状，判定方括号前缀在开了 use_tag_parser 后是否仍被朗读。
 
@@ -1181,10 +1291,11 @@ def main() -> int:
     )
     parser.add_argument(
         "--batch",
-        choices=("g1_g7", "b1_mimo", "b2_paid", "qwen31_writing", "seed_http", "seed_bisect", "seed_tag_parser"),
+        choices=("g1_g7", "b1_mimo", "b2_paid", "qwen31_writing", "qwen31_tag_scan", "seed_http", "seed_bisect", "seed_tag_parser"),
         default="g1_g7",
         help="g1_g7=能力门槛批次（付费）；b1_mimo=MiMo 提示词写法批次（限时免费）；"
         "b2_paid=付费模型写法批次；qwen31_writing=Qwen-Audio 3.1 最佳提示词写法批次；"
+        "qwen31_tag_scan=Qwen-Audio 3.1 官方标签取值全量扫描；"
         "seed_http=豆包单向 HTTP 形状定性探测；seed_bisect=定位致因字段；"
         "seed_tag_parser=复刻生产形状判定 [标签] 前缀是否仍被朗读（§13.2）",
     )
@@ -1204,6 +1315,9 @@ def main() -> int:
     elif args.batch == "qwen31_writing":
         OUTPUT_DIR = B3_OUTPUT_DIR
         calls = build_b3_calls()
+    elif args.batch == "qwen31_tag_scan":
+        OUTPUT_DIR = B4_OUTPUT_DIR
+        calls = build_b4_tag_scan_calls()
     elif args.batch == "seed_http":
         OUTPUT_DIR = HTTP_PROBE_OUTPUT_DIR
         calls = build_seed_http_probe_calls()

@@ -79,7 +79,7 @@ def test_runtime_config_enable_vision_review_seeds_child_qc_defaults() -> None:
         project_id=1,
         chapter_ids=[1],
         quality_mode="cost",
-        vision_model="qwen3-vl-plus",
+        vision_model="qwen3.8-omni-flash",
         enable_vision_review=True,
     )
     runtime_config = dreamweaver._build_dreamweaver_runtime_config_from_request(request)
@@ -98,7 +98,7 @@ def test_runtime_config_enable_vision_review_seeds_child_qc_defaults() -> None:
     assert qc_config["video_clip_threshold"] == 6.5
     assert qc_config["video_clip_sample_rate"] == 0.35
     assert qc_config["video_clip_max_checks"] == 6
-    assert qc_config["video_clip_vlm_adapter"] == "qwen3-vl-plus"
+    assert qc_config["video_clip_vlm_adapter"] == "qwen3.8-omni-flash"
 
 
 def test_autoqc_master_switch_false_skips_video_clip_review(monkeypatch, tmp_path: Path) -> None:
@@ -120,7 +120,7 @@ def test_autoqc_master_switch_false_skips_video_clip_review(monkeypatch, tmp_pat
         qc_config={
             "enable_vision_review": False,
             "enable_video_clip_qc": True,
-            "video_clip_vlm_adapter": "qwen3-vl-plus",
+            "video_clip_vlm_adapter": "qwen3.8-omni-flash",
         },
     )
     result = autoqc.run(payload)
@@ -158,7 +158,7 @@ def test_autoqc_video_clip_review_failure_routes_back_to_video(monkeypatch, tmp_
             "enable_state_qc": False,
             "enable_camera_continuity_qc": False,
             "enable_video_clip_qc": True,
-            "video_clip_vlm_adapter": "qwen3-vl-plus",
+            "video_clip_vlm_adapter": "qwen3.8-omni-flash",
             "video_clip_threshold": 7.0,
             "video_clip_sample_rate": 1.0,
             "video_clip_max_checks": 4,

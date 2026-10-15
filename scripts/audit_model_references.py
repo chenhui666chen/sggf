@@ -71,6 +71,8 @@ ALLOWED_LAYER_PREFIXES = (
     # 同一理由：折叠行为与"旧 ID 不在任何注册表"的断言必须写出旧 ID 本身
     "backend/tests/test_audiobook_tts_model_ids.py",
     "backend/tests/test_audiobook_tts_provider_payloads.py",
+    # 前端同源守卫同样要靠"点名旧 ID 的反向断言"锁住页面不自持档位表
+    "frontend/src/components/home/__tests__/assetStudioVisionModelSource.test.ts",
     # 本脚本 docstring 用旧 ID 举例说明词边界检索的必要性
     "scripts/audit_model_references.py",
     # 一次性 ID 改写工具同样必须逐个点名旧 ID，它是改写口径的事实源
@@ -81,6 +83,11 @@ ALLOWED_LAYER_PREFIXES = (
     ".agent/optimization-guide-ai-trace-multimodel.md",
     # 付费探针的原始台账（manifest/评分/听评表），同样是取证事实不可改写
     "backend/data/tts_debug/",
+    # 供应商价格调研的当日快照：内容是从旧 models.yaml / .env.example 原样粘贴的取证材料，
+    # 改写等于篡改当时的报价证据，因此整份按记录放行
+    "调研API价格_2026-10-11_18-49.md",
+    # 自动合成的仓库知识页，描述的是历史模型名，不驱动任何运行逻辑
+    ".qoder/repowiki/",
 )
 
 # 无法归入下列层的文件统一记为该层名
@@ -121,6 +128,23 @@ def _layer_of(rel_path: str) -> str:
     return parts[0]
 
 
+def _git_ls_files(*extra_flags: str) -> str:
+    """取 git 清单，且保证中文/非 ASCII 路径可用。
+
+    git 默认 core.quotepath=true，会把非 ASCII 路径转义成 `\350\220\275` 形式；Windows 下
+    `text=True` 又按本地 GBK 解码，两个后果叠加：中文命名的文件（架构知识库、带日期的
+    调研记录）确实出现在清单里，却因拼不出真实路径而被 _read 静默当成"无内容"跳过，
+    门禁对这些文件永远绿灯。因此显式关闭转义，并按 UTF-8 解码原始字节。
+    """
+    result = subprocess.run(
+        ["git", "-c", "core.quotepath=false", "ls-files", *extra_flags],
+        cwd=str(PROJECT_ROOT),
+        capture_output=True,
+        check=True,
+    )
+    return result.stdout.decode("utf-8", errors="replace")
+
+
 def tracked_text_files() -> List[str]:
     """确定扫描范围：受版本管理的文本文件 + 未跟踪但未被忽略的文本文件。
 
@@ -129,20 +153,8 @@ def tracked_text_files() -> List[str]:
     并显式并入存在的 env 文件。
     """
     try:
-        tracked = subprocess.run(
-            ["git", "ls-files"],
-            cwd=str(PROJECT_ROOT),
-            capture_output=True,
-            text=True,
-            check=True,
-        ).stdout
-        untracked = subprocess.run(
-            ["git", "ls-files", "--others", "--exclude-standard"],
-            cwd=str(PROJECT_ROOT),
-            capture_output=True,
-            text=True,
-            check=True,
-        ).stdout
+        tracked = _git_ls_files()
+        untracked = _git_ls_files("--others", "--exclude-standard")
     except (OSError, subprocess.CalledProcessError) as exc:
         raise SystemExit(f"无法取得 git 文件清单，请在仓库根目录运行：{exc}") from exc
 

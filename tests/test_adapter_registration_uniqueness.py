@@ -40,7 +40,6 @@ _DECORATOR_RE = re.compile(r"""@register_model\(\s*["']([^"']+)["']""")
 DASHSCOPE_OWNED = {
     "qwen-image-edit-plus": "adapters.dashscope.image_edit",
     "qwen-image-edit-max": "adapters.dashscope.image_edit",
-    "qwen3-vl-plus": "adapters.dashscope.multimodal",
 }
 
 LEGACY_MODULES = {

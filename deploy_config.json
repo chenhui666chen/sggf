@@ -70,6 +70,22 @@
       ],
       "exclude": []
     },
+    "router_gateway": {
+      "include": [
+        "router_gateway/**/*.py",
+        "router_gateway/**/*.yaml",
+        "router_gateway/**/*.yml",
+        "router_gateway/**/*.json",
+        "router_gateway/Dockerfile",
+        "router_gateway/requirements.txt"
+      ],
+      "exclude": [
+        "router_gateway/**/__pycache__/**",
+        "router_gateway/**/*.pyc",
+        "router_gateway/tests/**",
+        "router_gateway/.pytest_cache/**"
+      ]
+    },
     "shared": {
       "include": [
         "shared/**/*.py",

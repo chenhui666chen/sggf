@@ -281,7 +281,7 @@ def test_state_machine_review_stage_writes_safety_model_trace(monkeypatch) -> No
                 "blocked": True,
                 "warn_only": False,
                 "fail_policy": "block",
-                "model_id": "qwen3-vl-plus",
+                "model_id": "qwen3.8-omni-flash",
                 "analysis_type": "safety",
                 "summary": "unsafe video",
                 "issues": ["unsafe video"],
@@ -312,8 +312,8 @@ def test_state_machine_review_stage_writes_safety_model_trace(monkeypatch) -> No
     assert autoqc_calls == []
     assert trace["stage"] == "review"
     assert trace["intent"]["modality"] == "video_analysis"
-    assert trace["routing"]["selected_model"] == "qwen3-vl-plus"
-    assert trace["execution"]["resolved_model"] == "qwen3-vl-plus"
-    assert trace["execution"]["attempted_models"] == ["qwen3-vl-plus"]
+    assert trace["routing"]["selected_model"] == "qwen3.8-omni-flash"
+    assert trace["execution"]["resolved_model"] == "qwen3.8-omni-flash"
+    assert trace["execution"]["attempted_models"] == ["qwen3.8-omni-flash"]
     assert trace["execution"]["adapter"]["blocked"] is True
     assert trace["phases"][0]["stage"] == "review"

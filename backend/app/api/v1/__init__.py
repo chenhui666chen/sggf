@@ -23,6 +23,7 @@ __all__ = [
     "asset_studio",
     "user_assets",
     "user_center",
+    "video_api",
 ]
 
 

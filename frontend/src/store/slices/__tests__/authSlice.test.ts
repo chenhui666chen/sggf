@@ -102,4 +102,35 @@ describe('authSlice persisted state', () => {
     const loginRejected = { type: login.rejected.type, payload: '用户名或密码错误' }
     expect(authReducer(undefined, loginRejected).error).toBe('用户名或密码错误')
   })
+
+  it('会话恢复未落定前 sessionStatus 为 checking，落定后一律 ready', async () => {
+    const { default: authReducer, getCurrentUser } = await import('../authSlice')
+
+    const initial = authReducer(undefined, { type: '@@test/init' })
+    expect(initial.sessionStatus).toBe('checking')
+    // 初始 isAuthenticated 恒为 false（令牌只在 httpOnly cookie 里），
+    // 这正是硬刷新保护页被误判成未登录的源头
+    expect(initial.isAuthenticated).toBe(false)
+
+    const pending = authReducer(initial, { type: getCurrentUser.pending.type })
+    expect(pending.sessionStatus).toBe('checking')
+
+    const restored = authReducer(pending, {
+      type: getCurrentUser.fulfilled.type,
+      payload: {
+        id: 3,
+        username: '晨辉',
+        email: 'writer@example.com',
+        is_active: true,
+        created_at: '2026-08-28T00:00:00Z',
+        updated_at: '2026-08-28T00:00:00Z',
+      },
+    })
+    expect(restored.sessionStatus).toBe('ready')
+    expect(restored.isAuthenticated).toBe(true)
+
+    const rejected = authReducer(pending, { type: getCurrentUser.rejected.type, payload: 'Not authenticated' })
+    expect(rejected.sessionStatus).toBe('ready')
+    expect(rejected.isAuthenticated).toBe(false)
+  })
 })

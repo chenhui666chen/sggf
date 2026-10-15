@@ -708,13 +708,10 @@ def run(ctx: Any) -> None:
             image_cfg,
             key="vlm_adapter",
             env_name="DREAMWEAVER_VLM_ADAPTER",
-            default="qwen3_vl_plus",
+            default="qwen3.8-omni-flash",
         )
         if vlm_model_id:
-            try:
-                vlm_adapter = create_runtime_client(vlm_model_id)
-            except Exception:  # noqa: BLE001
-                vlm_adapter = None
+            vlm_adapter = vlm_model_id
     vlm_criteria = [
         s.strip()
         for s in os.getenv("DREAMWEAVER_VLM_CRITERIA", "clarity,composition,lighting,color,style").split(",")
@@ -917,11 +914,6 @@ def run(ctx: Any) -> None:
         local_image_edit = image_edit_adapter
         if asset_parallelism > 1:
             local_t2i = create_runtime_client(t2i_model_id)
-            if selector in {"vlm", "semantic"} and vlm_model_id:
-                try:
-                    local_vlm = create_runtime_client(vlm_model_id)
-                except Exception:  # noqa: BLE001
-                    local_vlm = None
             try:
                 local_image_edit = create_runtime_client(image_edit_adapter_name)
             except Exception:  # noqa: BLE001

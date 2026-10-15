@@ -1,4 +1,4 @@
-"""
+﻿"""
 数据库基类配置
 """
 import os
@@ -45,7 +45,7 @@ if is_sqlite:
 elif is_postgresql:
     # PostgreSQL使用QueuePool连接池
     engine = create_engine(
-        settings.DATABASE_URL,
+        settings.DATABASE_URL.replace("postgresql://", "postgresql+psycopg2://", 1),
         echo=settings.SQLALCHEMY_ECHO,
         poolclass=QueuePool,
         pool_size=settings.DB_POOL_SIZE,

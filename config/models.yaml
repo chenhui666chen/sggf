@@ -205,64 +205,6 @@ models:
   - 3d_render
   - animation
   - storyboard
-- id: qwen3-vl-plus
-  name: Qwen3-VL-Plus
-  provider: alibaba
-  version: v1
-  status: active
-  modality:
-  - multimodal_chat
-  - image_understanding
-  - video_understanding
-  capabilities:
-  - name: image_understanding
-    support_level: native
-    description: 支持图像分析与多模态推理
-    source: 'TODO: verify from official docs'
-    verified_at: '2026-04-17'
-    confidence: medium
-  - name: video_understanding
-    support_level: native
-    description: 支持通过 OpenAI 兼容消息格式处理视频理解任务
-    source: 'TODO: verify from official docs'
-    verified_at: '2026-04-17'
-    confidence: medium
-  - name: json_output
-    support_level: native
-    description: 支持结构化响应输出
-    source: 'TODO: verify from official docs'
-    verified_at: '2026-04-17'
-    confidence: medium
-  constraints:
-    max_batch_size: 1
-    max_prompt_length: 10000
-  quality_metrics:
-    overall_score: 8.2
-    prompt_adherence: 0.8
-  avg_latency_seconds: 8.0
-  summary: 用于图像与视频分析的多模态理解模型。Qwen-VL 官方文档将其描述为兼容 OpenAI 接口的视觉理解模型，适合图像理解、视频理解与多模态对话。
-  recommended_scenarios:
-  - 图像质量审查
-  - 视频内容检查
-  - 多模态提示词解析
-  - 视觉素材质检
-  limitations:
-  - 它是分析模型，不负责内容生成
-  - 大体积二进制素材在调用前仍建议预处理
-  integration_notes:
-  - 项目适配器已暴露 chat、analyze_image 和 analyze_video 三类入口
-  - 适合用于生成素材周边的审查与护栏工作流
-  documentation_url: https://help.aliyun.com/zh/model-studio/qwen-vl-compatible-with-openai
-  source_urls:
-  - https://help.aliyun.com/zh/model-studio/vision/
-  - https://help.aliyun.com/zh/model-studio/models
-  tags:
-  - vision
-  - multimodal
-  - alibaba
-  - concept_art
-  - portrait
-  - product
 - id: qwen-image-edit-plus
   name: Qwen-Image-Edit-Plus
   provider: alibaba
@@ -3676,7 +3618,7 @@ audio =\
   - 不支持 JSON mode，输出需显式约束 + 健壮 JSON 解析兜底
   integration_notes:
   - 通过阿里云百炼平台 API 调用
-  - 与 qwen3.5-omni-plus 共享同一 API endpoint 和鉴权
+  - 与百炼 compatible-mode 下的其它 omni 档共享同一 API endpoint 和鉴权
   - 音频理解提示词需明确要求输出逐字转写 + 表演特征描述
   - 计费通过阿里云百炼平台
   - 价格以百炼平台实时价格为准
@@ -3711,113 +3653,125 @@ audio =\
   - qwen
   - alibaba
   - cost_effective
-- id: qwen3.5-omni-plus
-  name: Qwen3.5 Omni Plus
+- id: qwen3.8-omni-flash
+  name: Qwen3.8 Omni Flash
   provider: alibaba
-  version: 3.5 Omni Plus
+  version: 3.8 Omni Flash
   status: active
   modality:
   - text_to_text
-  - text_to_image
-  - image_to_text
-  - video_to_text
+  - multimodal_chat
   - image_understanding
   - video_understanding
   capabilities:
-  - name: text_understanding
+  - name: image_understanding
     support_level: native
-    description: 深度文本理解
-    source: 'TODO: verify from official docs'
-    verified_at: '2026-04-17'
-    confidence: medium
-  - name: image_analysis
+    description: 官方 request_modality 含 Image；单图 URL 方式 ≤20MB、最多 2048 张，Base64 方式编码后
+      <10MB、最多 250 张，宽高均需 >10 像素且宽高比 ≤200:1
+    source: https://help.aliyun.com/zh/model-studio/qwen-omni
+    verified_at: '2026-10-12'
+    confidence: high
+  - name: video_understanding
     support_level: native
-    description: 图像分析
-    source: 'TODO: verify from official docs'
-    verified_at: '2026-04-17'
-    confidence: medium
-  - name: video_analysis
-    support_level: native
-    description: 视频分析
-    source: 'TODO: verify from official docs'
-    verified_at: '2026-04-17'
-    confidence: medium
+    description: 官方 request_modality 含 Video；视频文件最长 2 小时、URL ≤2GB、Base64 编码后 <10MB、
+      单次最多 64 个文件，图像列表方式抽帧 2~2048 张，支持 fps
+    source: https://help.aliyun.com/zh/model-studio/qwen-omni
+    verified_at: '2026-10-12'
+    confidence: high
   - name: audio_understanding
     support_level: native
-    description: 音频理解（转写、语气、情绪、韵律描述），用于有声书片段提示录音转写（pending-runtime-validation）
-    source: https://help.aliyun.com/zh/model-studio/qwen3-5-omni-plus
-    verified_at: '2026-08-02'
-    confidence: medium
-  - name: multi_modal_reasoning
-    support_level: native
-    description: 多模态推理
-    source: 'TODO: verify from official docs'
-    verified_at: '2026-04-17'
-    confidence: medium
+    description: 官方 request_modality 含 Audio，音频输入最长 3 小时、支持 113 种语言与方言；已被有声书 TTS
+      评分层用作可验证维度（fidelity/contamination）权威评委
+    source: https://help.aliyun.com/zh/model-studio/qwen-omni
+    verified_at: '2026-10-12'
+    confidence: high
   - name: text_generation
     support_level: native
-    description: 文本生成
-    source: 'TODO: verify from official docs'
-    verified_at: '2026-04-17'
-    confidence: medium
+    description: 输出模态固定为文本（modalities 只能是 ["text"]），不做语音/图像/视频生成
+    source: https://help.aliyun.com/zh/model-studio/qwen-omni
+    verified_at: '2026-10-12'
+    confidence: high
+  - name: structured_output
+    support_level: native
+    description: 官方 features 含 structured-outputs、function-calling、cache、prefix-completion、
+      web-search
+    source: https://help.aliyun.com/zh/model-studio/qwen-omni
+    verified_at: '2026-10-12'
+    confidence: high
+  - name: reasoning
+    support_level: native
+    description: 默认开启深度思考，reasoning_effort 默认 xhigh；Chat Completions 顶层 reasoning_effort 可传
+      none/minimal/low/medium/high/xhigh/max，none 即关闭思考，且 reasoning_effort 与 thinking_budget
+      不能同时设置
+    source: https://help.aliyun.com/zh/model-studio/qwen-omni
+    verified_at: '2026-10-12'
+    confidence: high
   constraints:
-    max_prompt_length: 32000
-    max_output_length: 8000
-    context_window: 32000
+    context_window: 1000000
+    max_input_tokens: 991808
+    max_output_length: 131072
+    image_min_pixels: 24576
+    image_max_pixels: 1310720
+    image_max_pixels_high_resolution: 16777216
+    video_frame_min_pixels: 65536
+    video_frame_max_pixels: 655360
+    video_total_pixels: 184549376
   quality_metrics:
-    overall_score: 9.4
-    reasoning: 0.94
-    understanding: 0.95
-    generation: 0.93
-    multi_modal: 0.94
-  avg_latency_seconds: 5.0
-  summary: Qwen3.5 Omni Plus 多模态大模型，通义千问旗舰级多模态理解与生成模型，适合复杂的多模态任务。
+    overall_score: 0.0
+    reasoning: 0.0
+    understanding: 0.0
+    generation: 0.0
+    multi_modal: 0.0
+  avg_latency_seconds: 6.5
+  summary: Qwen3.8 Omni Flash 全模态理解档，图/音/视频输入纯文本输出，百万上下文，关思考后素材评审 4~7 秒返回。
   recommended_scenarios:
-  - 多模态内容分析
-  - 复杂推理任务
-  - 图像视频理解
-  - 智能助手
+  - 素材质量评审（图片/视频）
+  - 长音视频内容与纪要分析
+  - 音频保真与污染类客观评分
+  - 多模态组合输入的内容理解
   limitations:
-  - 成本较高
-  - 需要清晰的输入
+  - 仅输出文本，不能生成语音、图像或视频
+  - 默认开启思考，交互场景必须显式 reasoning_effort=none，否则延迟与成本约 3~4 倍
+  - 情绪/表演类维度会复述提示词编造听感证据，不作采信方（见 docs/TTS_PROMPT_EVIDENCE_20261010.md §9.1）
   integration_notes:
-  - 通过阿里云百炼平台 API 调用
-  - 使用阿里云百炼 API Key
-  - 支持多模态输入输出
-  - 计费通过阿里云百炼平台
-  - 价格以百炼平台实时价格为准
-  documentation_url: https://help.aliyun.com/zh/model-studio/qwen3.5-omni-plus-api-reference
+  - 百炼 compatible-mode 调用，DASHSCOPE_API_KEY
+  - 关思考写法与本家族 Qwen3.7/3.5 不同：本档不吃顶层 enable_thinking，用 OpenAI 标准参数
+    reasoning_effort="none"（Python SDK 顶层直传，不放 extra_body）
+  - 2026-08 起已被有声书评分层用于 fidelity/contamination 维度，输入走 input_audio；视觉评审实测流式与非流式都可用，
+    我方评审链路走非流式
+  - 官方 QPM 限额为 200000 total_tokens / 6 秒
+  documentation_url: https://help.aliyun.com/zh/model-studio/qwen-omni
   source_urls:
-  - https://help.aliyun.com/zh/model-studio/qwen3.5-omni-plus-api-reference
+  - https://help.aliyun.com/zh/model-studio/qwen-omni
   - https://help.aliyun.com/zh/model-studio/models
   - https://help.aliyun.com/zh/model-studio/pricing
   pricing_info:
-    unit: 每千 tokens
+    unit: 每百万 tokens
     currency: CNY
-    last_updated: 2025-04
-    source: 阿里云百炼官方价格文档
+    input_price: 0.8
+    output_price: 2.7
+    cached_input_price: 0.1
+    last_updated: 2026-10-12
+    source: 百炼模型市场 listFoundationModels（qwen3.8-omni-flash，omni_input_token / omni_output_token /
+      omni_input_token_cache）
     pricing_url: https://help.aliyun.com/zh/model-studio/pricing
     note: ⚠️ 重要：价格可能调整，请以阿里云百炼平台实时价格为准。
     verification_required: true
     verification_source: https://help.aliyun.com/zh/model-studio/pricing
   api_config:
-    base_url: https://dashscope.aliyuncs.com/api/v1
-    endpoint: /api/v1/services/aigc/multimodal-generation/generation
-    auth_type: alibaba_cloud_dashscope
+    base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+    endpoint: /chat/completions
     api_key_env: DASHSCOPE_API_KEY
-    pricing_endpoint: https://help.aliyun.com/zh/model-studio/pricing
-    pricing_verification:
-      enabled: true
-      source_type: official_website
-      cache_hours: 24
+    auth_type: openai_compatible
   tags:
   - multi_modal
   - text_to_text
-  - image_to_text
-  - video_to_text
+  - image_understanding
+  - video_understanding
+  - audio_understanding
+  - omni
   - qwen
   - alibaba
-  - flagship
 - id: qwen-plus
   name: Qwen3.7 Plus
   provider: alibaba
@@ -4755,6 +4709,8 @@ audio =\
   modality:
   - text_generation
   - chat
+  - image_understanding
+  - video_understanding
   capabilities:
   - name: chat_completion
     support_level: native
@@ -4886,6 +4842,8 @@ audio =\
   modality:
   - text_generation
   - chat
+  - image_understanding
+  - video_understanding
   capabilities:
   - name: chat_completion
     support_level: native

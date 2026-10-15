@@ -1454,7 +1454,7 @@ class TestCompatibility:
         from core.model_resolution import normalize_model_id
 
         assert normalize_model_id("deepseek-pro") == "deepseek-pro"
-        assert normalize_model_id("qwen3_vl_plus") == "qwen3-vl-plus"
+        assert normalize_model_id("cosyvoice-v3-plus") == "cosyvoice-v3.5-plus"
         assert normalize_model_id("qwen-" + "plus") == "qwen-" + "plus"
 
     def test_deleted_legacy_files_are_removed(self):

@@ -37,8 +37,7 @@ _GROUP_MODEL_IDS: dict[str, tuple[str, ...]] = {
         "kling/kling-v3-omni-image-generation",
     ),
     "image_edit": (
-        "qwen-image-edit-plus",
-        "qwen-image-edit-max",
+        "qwen-image-3.0",
     ),
     "video_generation": _VIDEO_UNIVERSE_MODEL_IDS,
     "audio_music": (
@@ -57,9 +56,15 @@ _GROUP_MODEL_IDS: dict[str, tuple[str, ...]] = {
         "minimax-speech-2.8-hd",
         "minimax-speech-2.8-turbo",
     ),
+    # 与运行时 _OPERATION_MODEL_IDS["analyze_image"/"analyze_video"] 逐字相等，
+    # 由 tests/test_media_runtime_executability_guard.py 钉成常驻判据。
+    # 2026-10-12 旧视觉两档退出产品入口：本表是"页面上可选"的唯一事实源，
+    # 过渡期多出的那档 QC 存量已随短剧默认档迁移一并从运行时白名单摘除。
     "vision_review": (
-        "qwen3-vl-plus",
-        "qwen3.5-omni-plus",
+        "qwen-plus",
+        "qwen3.8-omni-flash",
+        "doubao-seed-2-1-lite",
+        "doubao-seed-2-1-pro",
     ),
     "dreamweaver_image": (
         "qwen-image-3.0-pro",
@@ -73,14 +78,16 @@ _GROUP_MODEL_IDS: dict[str, tuple[str, ...]] = {
     ),
     "dreamweaver_video": _VIDEO_UNIVERSE_MODEL_IDS,
     "dreamweaver_vision": (
-        "qwen3-vl-plus",
-        "qwen3.5-omni-plus",
+        "qwen-plus",
+        "qwen3.8-omni-flash",
+        "doubao-seed-2-1-lite",
+        "doubao-seed-2-1-pro",
     ),
 }
 
 _DEFAULT_MODEL_IDS: dict[str, str] = {
     "asset_studio_image_generation": "qwen-image-3.0",
-    "asset_studio_image_edit": "qwen-image-edit-plus",
+    "asset_studio_image_edit": "qwen-image-3.0",
     "asset_studio_video_generation": "wan3.0-video",
     "asset_studio_video_edit": "wan3.0-video",
     "asset_studio_motion": "wan3.0-video",
@@ -88,11 +95,15 @@ _DEFAULT_MODEL_IDS: dict[str, str] = {
     "asset_studio_audio_sound_effect": "seed-audio-1.0",
     "asset_studio_audio_scene": "seed-audio-1.0",
     "asset_studio_audio_speech": "qwen-audio-3.1-tts-flash",
-    "asset_studio_vision_review": "qwen3-vl-plus",
+    # 工作台视觉评审只走 analyze_image/analyze_video，按 2026-10-12 三档测评取最严最便宜的 3.8；
+    # dreamweaver_vision 的选中档会被 seed 成短剧 QC 的子档并同时喂给 chat_messages，
+    # 而 omni 档在 compatible-mode 下的非流式 chat 从未验证过，故短剧默认取标准 chat 档 qwen-plus，
+    # QC 后继（qwen3.8-omni-flash）要到 Slice B 冒烟通过后才切换。
+    "asset_studio_vision_review": "qwen3.8-omni-flash",
     "dreamweaver_image": "qwen-image-3.0-pro",
     "dreamweaver_video": "wan3.0-video",
     "dreamweaver_video_edit": "wan3.0-video",
-    "dreamweaver_vision": "qwen3-vl-plus",
+    "dreamweaver_vision": "qwen-plus",
 }
 
 _AUDIO_DURATION_OPTIONS: dict[str, tuple[int, ...]] = {

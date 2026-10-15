@@ -55,6 +55,8 @@ class Settings(BaseSettings):
 
     # Redis配置
     REDIS_URL: str = "redis://localhost:6379/0"
+    VIDEO_GATEWAY_INTERNAL_URL: str = ""
+    VIDEO_GATEWAY_INTERNAL_TOKEN: str = ""
 
     # 邮件发送配置
     SMTP_HOST: str = ""

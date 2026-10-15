@@ -668,75 +668,6 @@ class QwenMultiPersonFusionAdapter(BaseModelAdapter):
         )
 
 
-class Qwen3VLPlusAdapter(BaseModelAdapter):
-    RUNTIME_WRAPPER_NAME = "qwen3_vl_plus"
-    """Legacy-compatible Qwen3 VL adapter."""
-
-    def generate(self, **kwargs) -> GenerationResult:  # noqa: ANN003
-        if "messages" in kwargs:
-            return self.chat(
-                messages=kwargs.get("messages"),
-                temperature=kwargs.get("temperature", 0.2),
-                max_tokens=kwargs.get("max_tokens"),
-                response_format=kwargs.get("response_format"),
-            )
-        if "image_path" in kwargs:
-            return self.analyze_image(
-                image_path=str(kwargs.get("image_path") or ""),
-                analysis_type=str(kwargs.get("analysis_type") or "quality"),
-                criteria=kwargs.get("criteria"),
-            )
-        if "video_path" in kwargs:
-            return self.analyze_video(
-                video_path=str(kwargs.get("video_path") or ""),
-                analysis_type=str(kwargs.get("analysis_type") or "quality"),
-                criteria=kwargs.get("criteria"),
-            )
-        return GenerationResult(success=False, data=None, error="Unsupported operation for Qwen3VLPlusAdapter")
-
-    def chat(
-        self,
-        *,
-        messages: Any,
-        temperature: float = 0.2,
-        max_tokens: Optional[int] = None,
-        response_format: Optional[Dict[str, Any]] = None,
-    ) -> GenerationResult:
-        return self._delegate_runtime(
-            "chat",
-            messages=messages,
-            temperature=temperature,
-            max_tokens=max_tokens,
-            response_format=response_format,
-        )
-
-    def analyze_image(
-        self,
-        image_path: str,
-        analysis_type: str = "quality",
-        criteria: Optional[List[str]] = None
-    ) -> GenerationResult:
-        return self._delegate_runtime(
-            "analyze_image",
-            image_path=image_path,
-            analysis_type=analysis_type,
-            criteria=criteria,
-        )
-
-    def analyze_video(
-        self,
-        video_path: str,
-        analysis_type: str = "quality",
-        criteria: Optional[List[str]] = None
-    ) -> GenerationResult:
-        return self._delegate_runtime(
-            "analyze_video",
-            video_path=video_path,
-            analysis_type=analysis_type,
-            criteria=criteria,
-        )
-
-
 class QwenAudio31TTSAdapter(BaseModelAdapter):
     """Qwen-Audio 3.1 TTS 适配器 - 文本转语音，用于声音合成。"""
 
@@ -999,12 +930,10 @@ class ModelAdapterFactory:
         "qwen_image_edit_plus": "QWEN_IMAGE_EDIT",
         "qwen_image_edit_max": "QWEN_IMAGE_EDIT_MAX",
         "qwen_multiperson_fusion": "QWEN_IMAGE_EDIT",
-        "qwen3_vl_plus": "QWEN_VL_PLUS",
         "qwen_audio_3_1_tts": "QWEN_AUDIO_31_TTS",
         "jianying": "JIANYING",
     }
     _DEFAULT_MODEL_NAME_BY_ENV = {
-        "QWEN_VL_PLUS": "qwen3-vl-plus",
         "QWEN_IMAGE_EDIT": "qwen-image-edit-plus",
         "QWEN_IMAGE_EDIT_MAX": "qwen-image-edit-max-2026-01-16",
         "QWEN_AUDIO_31_TTS": "qwen-audio-3.1-tts-flash",

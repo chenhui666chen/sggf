@@ -37,11 +37,19 @@ class _SyncImageAdapter(BaseAdapter):
         try:
             url = f"{DASHSCOPE_BASE}/api/v1/services/aigc/multimodal-generation/generation"
             headers = {"Authorization": f"Bearer {require_api_key('DASHSCOPE_API_KEY')}", "Content-Type": "application/json"}
-            content = [{"text": prompt}]
-            if kwargs.get("image_path"):
-                img = _encode_image(kwargs["image_path"])
-                if img:
-                    content.insert(0, {"image": img})
+            content = []
+            image_paths = kwargs.get("image_paths") or ([kwargs["image_path"]] if kwargs.get("image_path") else [])
+            if self.MODEL_ID.startswith("qwen-image-3.0"):
+                if len(image_paths) > 3:
+                    raise ValueError("Qwen Image 3.0 最多支持 3 张输入图片")
+            else:
+                image_paths = image_paths[:1]
+            for image_path in image_paths:
+                img = _encode_image(image_path)
+                if not img:
+                    raise ValueError("图片编码失败")
+                content.append({"image": img})
+            content.append({"text": prompt})
 
             payload = {
                 "model": self.MODEL_ID,

@@ -77,7 +77,7 @@ def test_auditor_blocks_on_unsafe_video_when_policy_is_block(monkeypatch, tmp_pa
             merged_video,
             qc_config={
                 "enable_safety_audit": True,
-                "safety_vlm_adapter": "qwen3-vl-plus",
+                "safety_vlm_adapter": "qwen3.8-omni-flash",
                 "safety_fail_policy": "block",
             },
         )

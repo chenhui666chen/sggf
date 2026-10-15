@@ -1277,6 +1277,65 @@ export interface AdminSystemHealth {
   timestamp: string
 }
 
+export interface VideoApiApplication {
+  id: number
+  name: string
+  status: 'pending' | 'active' | 'suspended' | 'revoked'
+  plan_code: string
+  rate_limit_per_second: number
+  burst_capacity: number
+  max_active_jobs: number
+  max_parallel_attempts: number
+  lifetime_task_limit: number
+  api_key_prefix: string
+  daily_budget?: string | number | null
+  monthly_budget?: string | number | null
+  created_at: string
+  updated_at: string
+  api_key?: string | null
+}
+
+export interface VideoApiApplicationListResponse {
+  items: VideoApiApplication[]
+}
+
+export interface VideoGatewayMetrics {
+  quality: { completed?: number; failed?: number; running?: number; pending?: number; skipped?: number; sampled_review_count?: number }
+  window_hours: number
+  route_event_count: number
+  success_rate: number
+  p50_latency_seconds: number
+  p95_latency_seconds: number
+  active_jobs: number
+  total_cost: string | number | null
+  unknown_cost_attempts: number
+  pending_jobs: number
+  sampled_event_count: number
+  providers: Array<{ provider: string; configured: boolean }>
+  routes: Array<{
+    route_id: string
+    samples: number
+    success_rate: number | null
+    p50_latency_seconds: number | null
+    p95_latency_seconds: number | null
+    total_cost: string | number | null
+    quality_samples?: number
+    quality_pass_rate?: number | null
+    quality_average_score?: number | null
+    provider?: string
+    quality_group?: string
+    enabled?: boolean
+    configured?: boolean
+  }>
+  clients: Array<{
+    client_id: string
+    total_jobs: number
+    active_jobs: number
+    succeeded_jobs: number
+    failed_jobs: number
+  }>
+}
+
 export interface AdminPointsRuleConfig {
   reusable_asset_reward: number
   deliverable_asset_reward: number
@@ -3370,6 +3429,47 @@ class ApiClient {
 
   getUserCenterPointsOverview() {
     return this.client.get<UserCenterPointsOverviewResponse>('/api/v1/user-center/points-overview')
+  }
+
+  listVideoApiApplications() {
+    return this.client.get<VideoApiApplicationListResponse>('/api/v1/video-api/applications')
+  }
+
+  createVideoApiApplication(payload: { name: string; plan_code: string }) {
+    return this.client.post<VideoApiApplication>('/api/v1/video-api/applications', payload)
+  }
+
+  rotateVideoApiApplicationKey(applicationId: number) {
+    return this.client.post<VideoApiApplication>(`/api/v1/video-api/applications/${applicationId}/rotate-key`)
+  }
+
+  revokeVideoApiApplication(applicationId: number) {
+    return this.client.post<VideoApiApplication>(`/api/v1/video-api/applications/${applicationId}/revoke`)
+  }
+
+  listAdminVideoApiApplications() {
+    return this.client.get<VideoApiApplicationListResponse>('/api/v1/video-api/admin/applications')
+  }
+
+  updateAdminVideoApiApplicationStatus(applicationId: number, status: 'active' | 'suspended' | 'revoked') {
+    return this.client.post<VideoApiApplication>(`/api/v1/video-api/admin/applications/${applicationId}/status`, { status })
+  }
+
+  updateAdminVideoApiApplicationQuota(applicationId: number, payload: {
+    rate_limit_per_second?: number
+    burst_capacity?: number
+    max_active_jobs?: number
+    max_parallel_attempts?: number
+    daily_budget?: number
+    monthly_budget?: number
+  }) {
+    return this.client.patch<VideoApiApplication>(`/api/v1/video-api/admin/applications/${applicationId}/quota`, payload)
+  }
+
+  getAdminVideoGatewayMetrics(windowHours = 24) {
+    return this.client.get<VideoGatewayMetrics>('/api/v1/video-api/admin/metrics', {
+      params: { window_hours: windowHours },
+    })
   }
 
   getAdminSystemHealth() {

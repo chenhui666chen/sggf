@@ -54,7 +54,6 @@ TASK_TYPE_ALIASES = {
 # 退役与改名产生的旧 ID 别名已于 2026-10-09 随数据库历史改写一并删除：
 # 调用方拿到旧 ID 应当直接失败并被发现，而不是被静默改写成一个它没选过的模型。
 MODEL_ALIASES = {
-    "qwen3_vl_plus": "qwen3-vl-plus",
     "cosyvoice-v3-plus": "cosyvoice-v3.5-plus",
     "cosyvoice_v3_plus": "cosyvoice-v3.5-plus",
     "qwen_image_edit_plus": "qwen-image-edit-plus",

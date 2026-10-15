@@ -1,3 +1,24 @@
+# gateway-api / gateway-worker 共享环境：所有凭证从宿主 shell 环境透传，
+# 未设置时为空（对应供应商不装配/不转存），绝不把 token 写入仓库
+x-gateway-environment: &gateway-environment
+  APP_ENV: ${APP_ENV:-production}
+  ROUTER_GATEWAY_DATABASE_URL: postgresql://novel_user:NovelPostgres0t649OyRUaI@postgres:5432/router_gateway
+  ROUTER_GATEWAY_ERCHUN_TOKEN: ${ROUTER_GATEWAY_ERCHUN_TOKEN:-}
+  ROUTER_GATEWAY_AUTODL_TOKEN: ${ROUTER_GATEWAY_AUTODL_TOKEN:-}
+  ROUTER_GATEWAY_SUANLIAI_TOKEN: ${ROUTER_GATEWAY_SUANLIAI_TOKEN:-}
+  ROUTER_GATEWAY_GRSAI_TOKEN: ${ROUTER_GATEWAY_GRSAI_TOKEN:-}
+  ROUTER_GATEWAY_SANBAO_TOKEN: ${ROUTER_GATEWAY_SANBAO_TOKEN:-}
+  ROUTER_GATEWAY_DECISION_BASE_URL: ${ROUTER_GATEWAY_DECISION_BASE_URL:-}
+  DASHSCOPE_API_KEY: ${DASHSCOPE_API_KEY:-}
+  ROUTER_GATEWAY_OSS_BUCKET: ${ROUTER_GATEWAY_OSS_BUCKET:-}
+  ROUTER_GATEWAY_OSS_ENDPOINT: ${ROUTER_GATEWAY_OSS_ENDPOINT:-}
+  ROUTER_GATEWAY_OSS_ACCESS_KEY_ID: ${ROUTER_GATEWAY_OSS_ACCESS_KEY_ID:-}
+  ROUTER_GATEWAY_OSS_ACCESS_KEY_SECRET: ${ROUTER_GATEWAY_OSS_ACCESS_KEY_SECRET:-}
+  ROUTER_GATEWAY_OSS_PUBLIC_HOST: ${ROUTER_GATEWAY_OSS_PUBLIC_HOST:-}
+  ROUTER_GATEWAY_MAX_ATTEMPTS: ${ROUTER_GATEWAY_MAX_ATTEMPTS:-3}
+  ROUTER_GATEWAY_REDIS_URL: redis://:NovelRedis2024!@redis:6379/1
+  ROUTER_GATEWAY_INTERNAL_TOKEN: ${ROUTER_GATEWAY_INTERNAL_TOKEN:-}
+
 services:
   # PostgreSQL数据库
   postgres:
@@ -77,6 +98,9 @@ services:
       DATABASE_URL: postgresql://novel_user:NovelPostgres0t649OyRUaI@postgres:5432/novel_db
       # Redis配置（带密码）
       REDIS_URL: redis://:NovelRedis2024!@redis:6379/0
+      VIDEO_GATEWAY_INTERNAL_URL: http://gateway-api:8088
+      VIDEO_GATEWAY_INTERNAL_TOKEN: ${ROUTER_GATEWAY_INTERNAL_TOKEN:-}
+      APP_ENV: ${APP_ENV:-production}
       # JWT密钥（生产环境必须修改）
       JWT_SECRET: d268d958af7fcfc8c17910bb3abcbf8d26bdda0e94b8b21b4d73dbd529e3e433
       # Seed Audio 1.0 单次请求最长读取等待；超时后测试单元不自动重试
@@ -112,6 +136,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      gateway-api:
+        condition: service_healthy
     volumes:
       - ./backend:/app
       - ./shared:/app/shared
@@ -135,6 +161,98 @@ services:
           memory: 1G
     restart: unless-stopped
     command: uvicorn app.main:application --host 0.0.0.0 --port 8000 --workers 2
+
+  # 视频网关 API（router_gateway，独立镜像，与业务 backend 物理隔离）
+  gateway-api:
+    build:
+      context: ./router_gateway
+      dockerfile: Dockerfile
+    image: novel_gateway:latest
+    container_name: novel_gateway_api
+    command: ["python", "-m", "router_gateway.api"]
+    environment:
+      <<: *gateway-environment
+      APP_ENV: ${APP_ENV:-production}
+      ROUTER_GATEWAY_HTTP_HOST: "0.0.0.0"
+      ROUTER_GATEWAY_HTTP_PORT: "8088"
+    ports:
+      # 仅绑回环：公网经 nginx 443 反代（上线阶段配置），不对宿主外暴露
+      - "127.0.0.1:8088:8088"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"from urllib.request import urlopen; response = urlopen('http://127.0.0.1:8088/health', timeout=3); raise SystemExit(0 if response.status == 200 and response.read() == b'gateway healthy' else 1)\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.1'
+          memory: 128M
+    restart: unless-stopped
+    networks:
+      default: {}
+      gateway_edge:
+        ipv4_address: 172.30.0.10
+
+  # 视频网关轮询 worker（同镜像、同库；DB 状态驱动，无端口，可水平扩多实例）
+  gateway-worker:
+    build:
+      context: ./router_gateway
+      dockerfile: Dockerfile
+    image: novel_gateway:latest
+    command: ["python", "-m", "router_gateway.worker"]
+    environment:
+      <<: *gateway-environment
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.1'
+          memory: 128M
+    restart: unless-stopped
+    networks:
+      - default
+
+  gateway-quality-worker:
+    build:
+      context: ./router_gateway
+      dockerfile: Dockerfile
+    image: novel_gateway:latest
+    profiles: ["video-quality"]
+    command: ["python", "-m", "router_gateway.quality_worker"]
+    environment:
+      <<: *gateway-environment
+      ROUTER_GATEWAY_QUALITY_BASE_URL: ${ROUTER_GATEWAY_QUALITY_BASE_URL:-https://dashscope.aliyuncs.com/compatible-mode}
+      ROUTER_GATEWAY_QUALITY_MODEL: ${ROUTER_GATEWAY_QUALITY_MODEL:-qwen3.8-omni-flash}
+      ROUTER_GATEWAY_QUALITY_TIMEOUT: ${ROUTER_GATEWAY_QUALITY_TIMEOUT:-45}
+      ROUTER_GATEWAY_QUALITY_SAMPLE_EVERY: ${ROUTER_GATEWAY_QUALITY_SAMPLE_EVERY:-10}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+    restart: unless-stopped
+    networks:
+      - default
 
   # React前端
   frontend:
@@ -174,7 +292,12 @@ services:
     depends_on:
       - backend
       - frontend
+      # upstream gateway_api 启动时即需 Docker DNS 可解析，确保容器先创建
+      - gateway-api
     restart: unless-stopped
+    networks:
+      - default
+      - gateway_edge
 
 volumes:
   postgres_data:
@@ -183,3 +306,9 @@ volumes:
 networks:
   default:
     name: novel_network
+  gateway_edge:
+    name: novel_gateway_edge
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.30.0.0/24

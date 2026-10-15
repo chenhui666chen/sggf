@@ -2,7 +2,7 @@
 
 - 文档日期：2026-10-09
 - 关联任务：#14 资产工作台参数控件按可灵交互模式改造
-- 文档性质：**调研与设计文档，实施进行中**。§2 的现状取证写作时间是 2026-10-09 上午，此后 §1 的决策已按切片逐批落地；**已落地范围、仍欠差集与验证口径统一见 §10**，§2/§3 里与本节冲突的描述以 §10 为准。所有结论均有 `文件:行号` 或实测证据；标注「待实测」的条目在实施前必须补证据。
+- 文档性质：**历史调研 + 实施台账 + 待实施设计**。§2–§9 保留 2026-10-09 原始方案，不能直接作为当前接口契约或验收清单；§10 为落地台账，台账与代码冲突时以代码及测试为准。§11 为按当前候选、官方资料可核对范围与实际调用链重订的能力/组件方案。历史行号仅对应写作时快照，实施前应重新定位；标注「待实测」的能力不能直接上线。
 - 参考基准：可灵（Kling）滑杆式时长、百炼/Bailian「智能时长」模式位、即梦（Dreamina）生成页工具栏与浮层（2026-10-09 浏览器实测，见附录 A）。
 
 ---
@@ -194,6 +194,15 @@ duration_values = [float(value) for value in (constraints.get("duration") or [])
 - `doubao-seedance-2-0` / `2-0-fast` 的 `modality` 已补 `video_edit`，与官方能力矩阵「编辑视频」「延长视频」均为 ✓ 对齐（2026-10-09 核对教程），并进入 `video_edit` / `dreamweaver_video_edit` 分组与 `_OPERATION_MODEL_IDS["edit_video"]` 白名单（Slice 6）。**2.0 不接收 2.5 独有的 `omni_reference_task_type`**，编辑时长仍按 4–15 整数校验；两档编辑链路尚未付费冒烟。
 - `kling/kling-v3-video-generation` 曾同时挂着「档案只声明 `text_to_video`」和「被放进 `motion` 组」两个矛盾事实。裁定依据是官方文档：该档支持图生视频-基于首帧与首尾帧，`adapters/dashscope/video_kling.py:19-107` 也在 `image_path` 存在时下发 `media type=first_frame` → **档案 `modality` 补 `image_to_video`（含 `capabilities` 条目与官方来源、`verified_at: 2026-10-09`、`confidence: high`）**，UI 侧由派生自然获得入口。它没有编辑能力，`video_edit` 判据不成立，**已从 `video_edit` 组移除**。同期补上了此前完全缺失的 `_OPERATION_MODEL_IDS["edit_video"]` 键——缺这个键时 `/video-edit` 的候选集恒空，任何模型都只能在路由期报 does not support。**同一入口还有第二层缺口**：`edit_video()` 传入的 modality 字符串 `video_edit` 当时并不是 `schemas/common.py` 里 `Modality` 枚举的成员，`TaskSpecBuilder.with_modality()` 在路由之前就抛 `ValueError: 'video_edit' is not a valid Modality`，即白名单补齐后 `/video-edit` 仍然全挂；现已补 `Modality.VIDEO_EDIT` 枚举成员，并由 `tests/test_media_runtime_executability_guard.py::TestEditVideoOperationIsConfigured` 端到端锁定「路由可达 + 源视频落到 adapter 调用参数」。
 - 视觉识别两档（`qwen3-vl-plus`、`qwen3.5-omni-plus`）曾只有档案与 `_OPERATION_MODEL_IDS["analyze_*"]` 白名单，adapter 上没有 `analyze_image` / `analyze_video` 方法，而运行时这两个 operation 走 `_execute_custom_registry_method`（要求方法存在）→ `/vision-review` 必然 `adapter_missing`。**已修复**：`adapters/dashscope/chat.py` 以 `_DashScopeVisionReviewMixin` 实现真正的百炼 compatible-mode 多模态评审并混入这两档（纯文本档位 `qwen3.6-plus` 不混入，由反向断言钉住），`config/models.yaml` 里 `qwen3.5-omni-plus` 补声明 `image_understanding` / `video_understanding`，入口 gate 的 400 文案原先硬写「仅支持 qwen3-vl-plus」与实际集合 `VISION_REVIEW_MODELS` 不符，已改为按集合动态生成。
+- 视觉识别档位换代（2026-10-12）：上面那套实现把「评审结构」和「百炼客户端」绑死在一个 mixin 里，档案里早已声明视觉理解能力的 `qwen-plus`（Qwen3.7 Plus）与豆包 Seed 2.1 两档因此一直停在档案层——页面自持两档名单，白名单也只有两档，能力面比上游实际可交付的窄。现已把执行层抽到 `adapters/_shared_vision_review.py::VisionReviewMixin`（素材编码、评审提示词、JSON 解析、`analyze_image`/`analyze_video` 全部供应商中立），各家子类只出两个钩子：`_vision_client()` 决定 base_url 与密钥，`_vision_disable_thinking_kwargs()` 决定关思考的载荷写法（百炼顶层 `enable_thinking: False`、方舟 `extra_body={"thinking": {"type": "disabled"}}`）。新增档位 = 混入 + 白名单 + catalog 分组 + 档案 `modality` 四处同步，实现在同一处，不再有可能漂移的第二份评审逻辑。真实调用验收（同一 3.4KB 图 / 2s 视频 / 生产评审提示词，思考关闭，走 `media_runtime` 全链路）：qwen3-vl-plus 图 8.9s 视频 6.2s、qwen3.5-omni-plus 5.5s/3.8s、qwen-plus 8.0s/7.4s、doubao-seed-2-1-lite 7.1s/6.0s、doubao-seed-2-1-pro 15.9s/12.5s，十次调用全部 success 且响应可解析为评审 JSON。**关思考是新接入档位的硬前提**：豆包两档开思考实测 39.8s/40.8s、输出 1900+ tokens，关闭后 9.4s/15.7s、输出 363/398 tokens，延迟与成本都差 4~5 倍。三层一致性由 `tests/test_vision_review_multi_provider.py` 钉住（含 `vision_review` 分组 ≡ `analyze_image`/`analyze_video` 白名单 的逐字对齐判据），执行层由 `tests/test_media_runtime_executability_guard.py::TestVisionAnalysisIsExecutable` 钉住。`qwen3-vl-plus` 的物理退役（节点 2）与 `qwen3.5-omni-plus` 是否继续留在视觉下拉，仍待单独裁定，本轮只增不删（该裁定已于同一天做出并执行，见下方"产品入口退役收口"条）。计价不受影响：`vision_review` 是统一定价（图 0.04 元/条、视频 0.12 元/条），加档位只改我方成本。
+- 视觉评审三档效果测评（2026-10-12，`qwen3-vl-plus` / `qwen3.5-omni-plus` / `qwen3.8-omni-flash`）：素材用视频路由审计线留下的 11 条真实产物 + 本地 ffmpeg 造的 5 条可控退化锚点（`boxblur` 模糊、`eq` 偏暗、后 4 秒 `tpad` clone 冻结、纯黑、320p 放大回 720p）+ 6 条抽帧图片，每条先用 ffprobe + OpenCV 算客观真值（拉普拉斯方差、平均亮度、帧间运动量、冻结帧比例），21 素材 × 3 档 = 63 次真实调用全部 success。**检出率三档打平（6/8），但判词质量差一个档次**：只有 3.8 的扣分理由逐条抽帧复核为真（广告牌画面突变成艺伎脸谱、蝴蝶从窗外跳到猫头顶、出租车行驶中变形），另两档对同一素材给 8.5~9.8 的无差别好评；3.8 打分均值 7.46 / 区分度 std 3.21 三档最高（更严但不乱扣分：11 条真实素材无一条维度掉到 5 分以下），中位延迟 8.7s、P95 10.2s（vl-plus 11.4s / 13.1s），单条成本 0.0031 元 ≈ vl-plus 的 44%、omni-plus 的 9%。测评总花费 0.98 元。**证据层级**：本轮的一次性脚本（素材拼装、评审调用、统计）与逐条原始响应放在 `%TEMP%\vision_eval`，2026-10-12 收口时已删除，仓库内不落文件。上面的数字是一次性观测快照，不可逐条复核；复现方式是按同一方法论重跑（11 条真实素材取自视频路由审计线留在 `%TEMP%\router_*\videos\` 的产物，属临时目录、随系统清理会消失；5 条锚点用 ffmpeg `boxblur` / `eq` / `trim+tpad` / `lavfi` 现场重建），21×3 真实调用刊例成本约 1 元。
+- 同轮暴露并修掉的判据缺陷（与选模无关）：三档都把整段偏暗素材（实测平均亮度 33.5）的 `lighting` 评到 9.8，把后 4 秒完全冻结素材的 `smoothness` 评到 8.5——只给维度名时模型按"看着顺眼"打分。修法是 `adapters/_shared_vision_review.py::VISION_CRITERION_RUBRICS` 把逐维度扣分下限写进 `build_vision_review_prompt`，并要求 comment 必须写画面里看到的具体证据。复测：偏暗锚点 lighting 9.8→6.0（vl-plus）/ 6.5~7.8（omni-plus），冻结锚点 smoothness 8.5→6.0（vl-plus）/ 4.0~4.5（另两档）。**口径顺序敏感，别照字面改**：把"冻结必须扣分"写在前面会把慢镜头误判成冻结（omni-plus 4.0），把"低运动量不扣分"写在前面真冻结又漏检（两档 9.0~10.0）；现口径两条并列，只有 3.8 在这一版下同时判对（慢镜头 9.0 / 真冻结 2.0）。维度名、执行层默认维度、扣分约束三源一致由 `tests/test_vision_review_multi_provider.py` 钉住。
+- 视觉评审的两个负结果（省成本，别重复试）：① 提高抽帧率救不了冻结漏检——`video_url` part 的 `fps` 兄弟字段（官方默认 2.0、范围 0.1~10，五档都接受不报错）实测 vl-plus 在 2/4/8fps 下 smoothness 恒为 8.5，视频 token 却从 3062 涨到 12248，4 倍成本换 0 改善，因此**没有**接入 `fps` 参数；② `response_format={"type":"json_object"}` 能保证 JSON 合法，但 3.8 延迟从 6~9s 涨到 22~33s（3~4 倍），未采纳。3.8 遗留缺陷：约 7%（3/42）调用输出不可解析（`finish_reason=stop`、正文看起来完整，疑为字符串内裸换行），另两档 0 次，命中时页面降级为纯文本展示；是否给 `parse_vision_review_content` 加容错重试待裁定。
+- `qwen3.8-omni-flash` 接线（2026-10-12）：进入 `core/unified_media_runtime.py` 的 `analyze_image` / `analyze_video` 白名单与 `vision_review` catalog 分组（视觉识别现为六档），关思考写法是第三家——OpenAI 标准顶层 `reasoning_effort="none"`（百炼 `enable_thinking` 不适用于本档，混用会静默保留 xhigh 思考：实测开思考 22.3s/12.4s、多吃 1655/651 reasoning tokens，关闭后 6.4s/4.3s）。入口默认档仍是 `qwen3-vl-plus`，`DEFAULT_VISION_REVIEW_MODEL_ID` 本轮未动。
+- 视觉识别产品入口退役收口（2026-10-12，紧接上两条裁定执行）：三档测评的结论是"检出率打平、判词质量差一个档次"，`qwen3.5-omni-plus` 没有任何维度胜出、单条成本却是 3.8 的约 11 倍，`qwen3-vl-plus` 只剩"能用"。经用户裁定按两片执行，**本片（Slice A）只摘产品入口**：`vision_review` 与 `dreamweaver_vision` 两个分组收敛为四档（`qwen-plus`、`qwen3.8-omni-flash`、`doubao-seed-2-1-lite`、`doubao-seed-2-1-pro`），默认档改为 `asset_studio_vision_review=qwen3.8-omni-flash`、`dreamweaver_vision=qwen-plus`，`_constants.DEFAULT_VISION_REVIEW_MODEL_ID` 兜底、前端 `VISION_MODEL_OPTIONS` 与 i18n label、短剧配置的两处兜底同步跟进。`qwen3.5-omni-plus` 走完整物理退役：档案卡 + `@register_model` 装饰器 + `analyze_*` 白名单三处删净，登记进 `RETIRED_MEDIA_MODELS`（承接 `qwen3.8-omni-flash`），库内旧 ID 用 `scripts/rewrite_legacy_model_ids.py` 预览复核为零命中。
+  **Slice B 已完成（2026-10-12 同日）**：短剧 QC 线后继档按裁定取 `qwen3.8-omni-flash`，`pipeline/autoqc_pkg/` 六个模块各自的 `DEFAULT_SEMANTIC_VLM_ADAPTER` / `DEFAULT_STATE_QC_VLM_ADAPTER` / `DEFAULT_VIDEO_CLIP_QC_VLM_ADAPTER` 常量副本与 `.env`、`.env.example` 的 `DREAMWEAVER_SEMANTIC_VLM_ADAPTER`、`DREAMWEAVER_STATE_QC_VLM_ADAPTER` 同批改（只改一边必漂移；解析顺序是 项目配置 → ENV → 代码默认，见 `_qc_config.py:156/206`）。旧档随后逐层删净：`adapters/dashscope/multimodal.py` 整文件 + 注册表自动导入项 + `adapters/dashscope/__init__.py` 星号导入、legacy 适配器类与其 runtime wrapper 及表键、`core/model_resolution.py` 别名、`config/models.yaml` 档案卡、`config/model_catalog_profiles.yaml` 画像段（含指向该档的 `router_rules`）、`_OPERATION_MODEL_IDS["analyze_*"]` 过渡项、`QWEN_VL_PLUS_*` 三行 env。消费侧同时从"传适配器对象"改为"传模型 ID 字符串"（`agents/asset_library.py`），兼容层才能整块删除而不留残骸。库内存量用 `scripts/rewrite_legacy_model_ids.py` 复核零命中；上条降级为 ⊆ 的判据**已恢复为分组 ≡ 白名单逐字相等**（`tests/test_vision_review_multi_provider.py::test_vision_catalog_group_equals_allowlist`）。退役门禁 `scripts/audit_model_references.py --all-retired --expect-zero` 归零。
+  本片新增两层教训：④ **兼容层是退役的第五层事实源，且漏改零报错**——旧 ID 还活在 `legacy_runtime_wrappers._RUNTIME_WRAPPER_CLASSES`（表键下划线形态）、`model_adapters.ModelAdapterFactory._ENV_PREFIX_MAP/_DEFAULT_MODEL_NAME_BY_ENV`、`MODEL_ALIASES` 里，这些表全是"查不到返回 None"的软失败，`_run_helpers.py:26-56` 会把 QC 开关静默置 False，症状是 QC 永久关闭且无报错，比拒单难发现得多；⑤ **env 扫描有口径盲区**——`audit_model_references.py` 的 `ENV_MODEL_KEY_RE` 只认含 `MODEL` 的键，`*_VLM_ADAPTER` 不在内，门禁归零证明不了 env 已收口，本批靠手工盘点。
+  摘档位前必须逐条确认的三条隐藏事实源（本轮实测得出，任一条漏掉都是静默故障）：① `_OPERATION_MODEL_IDS["analyze_*"]` 被短剧 QC 与工作台视觉评审**共用**（`pipeline/autoqc_pkg/_utils.py` 经 `adapters.adapter_helpers` 直连 media_runtime）；② 短剧的 `vision_model` 还会被喂给 `chat_messages`（`pipeline/autoqc_pkg/_semantic_match.py:76`，非流式 + `json_object`）——Slice B 已核实这条**对任何模型 ID 都是死路**：注册表里的对话适配器只有 `generate`、没有 `chat`，退役前的 vl-plus 同样（它继承 `_DashScopeChatAdapter`），所以该路径从来没通过，`dreamweaver_vision` 分组默认档因此仍是标准 chat 档 `qwen-plus`；③ 引用审计工具在 Windows 下按 git 默认 `core.quotepath=true` 取清单，中文命名文件"在清单里却读不出"，本轮修了解析并补了常驻判据（详见 `docs/MODEL_INTEGRATION_REFERENCE.md` §10.28）。
 - `pixverse-v6-t2v` `capabilities` 有 `motion_control/camera_control`（批量模板挂的，来源 `TODO: verify`），`modality` 只有 `text_to_video`，官方 t2v 端点也不接收参考图 → **派生后自动离开 `motion` 组**，capability 声明保留但未参与成员判定。这条是「靠 capability 标签判成员」的典型反例：判据必须用 `modality`。
 - `kling/kling-v3-omni-video-generation` 官方另有视频编辑能力（`media type=base`），但档案未声明 `video_edit`、adapter 未下发参考视频 → 派生结果把它挡在编辑组外。要放它进编辑组，需先补 adapter 与付费冒烟，再改档案声明，顺序不可颠倒。
 
@@ -209,8 +218,8 @@ duration_values = [float(value) for value in (constraints.get("duration") or [])
 | 音效生成 | 短音效 | `sound_effect_generation` | seed-audio-1.0（默认，首位）、qwen-audio-3.1-tts-next（2026-10-10 已并入） |
 | 音效生成 | 场景音频 | `multi_speaker_dialogue` | seed-audio-1.0（next **不并入**：场景链路提交 `references=[{"speaker":…}]` 音色 ID，next 只认 `audio_url`/`audio_data`，必 400） |
 | 音效生成 | 语音合成 | `text_to_speech` | qwen3-tts-instruct-flash、cosyvoice-v3.5-plus、minimax-speech-2.8-hd、-turbo |
-| 视觉识别 | 图片理解 | `image_understanding` | qwen3-vl-plus、qwen3.5-omni-plus |
-| 视觉识别 | 视频理解 | `video_understanding` | qwen3-vl-plus、qwen3.5-omni-plus |
+| 视觉识别 | 图片理解 | `image_understanding` | qwen-plus（Qwen3.7 Plus）、qwen3.8-omni-flash、doubao-seed-2-1-lite、doubao-seed-2-1-pro（2026-10-12 换代与三档测评后收敛为四档，真实调用实测见 §3.3；`qwen3-vl-plus` 仅剩短剧 QC 存量档、不在产品入口，`qwen3.5-omni-plus` 已物理退役） |
+| 视觉识别 | 视频理解 | `video_understanding` | 同上，六档图片/视频两条入口均已真实调用验收 |
 
 说明：**已裁定（2026-10-09）—— TTS 放「音效生成」下的小分类**，不新开第 6 个大类。理由与音效同属音频产物、`generation_type` 语义已按此运作一致；大类数量保持用户清单的五个。
 
@@ -361,7 +370,7 @@ Seedance 三档（`2-5` / `2-0` / `2-0-fast`）**没有**按本表早期建议�
 
 - 与 slider **同级但互斥**的一组 chip：`手动 (N 秒)` / `智能时长`。选中「智能时长」时 slider 区置灰、提交 `duration=-1`。
 - 仅当 `duration_range.supports_auto == true` 出现；`false` 时连 chip 都不渲染（不留禁用态）。
-- 文案与语义要讲清成本后果：「由模型自行决定时长，实际计费按产出秒数结算」。
+- 历史目标文案：「由模型自行决定时长，实际计费按产出秒数结算」。**当前实现并不满足**：`_helpers.py:_resolve_video_billing_seconds` 对 `-1` 按档案默认秒数冻结和结算，既不按真实产出秒数补扣，也不按区间上限冻结；启用该文案前须先解决 §11 的自动时长成本闸门。
 
 ### 7.3 强制自动（编辑 / 延长 / 样片第二步）
 
@@ -462,6 +471,8 @@ Seedance 三档（`2-5` / `2-0` / `2-0-fast`）**没有**按本表早期建议�
 | R1 A1 | kling-v3 / kling-v3-omni / vidu 三档 / pixverse-v6-t2v 六档 `pricing_info` 换成百炼公开目录真价目（逐秒刊例 + 无声档 + 上游计费尺寸清单），并把取价判据写进 note | `config/models.yaml`（`pricing_info` 起始：pixverse `:2169`、vidu img/text/start-end `:2290/:2404/:2520`、kling-v3/omni `:2648/:2772`），取数命令 `bl model list --model <id> --output json` | `backend/tests/test_asset_studio_video_tiered_pricing.py`（`TestTierPriceLookup` 逐档取价 + `test_tier_names_are_ladder_labels_and_unique` 档名合法唯一） |
 | R1 A2 | basis 分档取价：视频/动作/编辑三档改为「模型 × 短边分辨率档 × 输出秒」，取不到价抛 `AssetStudioVideoPriceMissing` 由入口映射 400；三条单一均价 env（`POINTS_ASSET_STUDIO_{VIDEO,MOTION,VIDEO_EDIT}_PER_SECOND_YUAN`）与对应分支物理删除；seedance 三档用官方 5 秒示例价 ÷5 反推每秒价放进新键 `pricing_info.per_second_estimate`（`tiers` 与 `unit: 每百万 token` 不动）；短边档位判定从 `UnifiedMediaRuntime` 私有方法提升为 `core.model_resolution.pick_resolution_label`，运行时下发 `parameters["resolution"]` 与取价共用同一函数 | `core/model_resolution.py:165`、`backend/app/services/asset_studio_model_catalog.py:349`（`resolve_video_price_per_second`）、`backend/app/services/points_usage_pricing.py:411`、`backend/app/api/v1/asset_studio_api/_helpers.py:1154`（`_estimate_video_basis_yuan`）+ 三个入口调用点 | `backend/tests/test_asset_studio_video_tiered_pricing.py`（61 例：`TestTierPriceLookup` / `TestBasisUsesTieredPrice` / `TestFreezeCoversUpstreamCost` / `TestFlatPriceIsGoneFromSource`） |
 
+上述 R1 A2 的「已落地」只指确定秒数的取价代码，不意味着智能时长或参考视频的冻结额已覆盖实际成本；未闭环项见 §10.3 第 8/10 项及 §11.3。
+
 派生结果与旧手写白名单的差异（必须显式记录，否则下次会当成回归）：
 
 - **motion = 视频宇宙 ∩ `modality ∋ image_to_video` = 8 档**：wan3.0-video、seedance-2-5、2-0、2-0-fast、kling-v3、kling-v3-omni、vidu-img2video、vidu-start-end2video。相对旧表**移出** `pixverse-v6-t2v`（档案只有 `text_to_video`，旧白名单是手工塞入的），**移入** `2-0-fast` 与 vidu 两档。
@@ -482,11 +493,11 @@ A2 落地后暴露的三条口径事实（不是缺陷，但下次改动画会�
 | §6 项 | 状态 | 说明 |
 |---|---|---|
 | 1 YAML ↔ 适配器对拍 | **部分** | wan3.0 已由 `test_duration_range_matches_wan3_adapter` 钉住；seedance 三档 YAML `[4,15]`/`[4,30]` 与 `SeedanceProfile.duration_min/max` **刻意不对拍**（上游官方区间与可下单档位口径不同，见 §4.2 表后说明），不要补成等值断言 |
-| 2 `mode` 与前端可见档位一致 | **未落地** | §4.1 的 `mode/step` 字段没有写入 YAML；区间/档位由 `duration` 写 dict 还是 list 区分，manifest 侧 `duration_min` 与 `duration_options` 天然互斥，由 `test_asset_studio_manifest_exposes_duration_range_metadata` 双向钉住 |
+| 2 `mode` 与前端可见档位一致 | **未按原方案落地** | YAML 仍以 dict/list 区分区间/档位、step 由 catalog 默认 1；区间 manifest **同时**发 `duration_min/max` 与逐秒展开的非空 `duration_options`，供旧消费者使用（`asset_studio_model_catalog.py:219-245`）。§6 原「二者互斥」断言与现状相反，不能照抄 |
 | 3 API 不再静默钳制 | **已落地** | `TestRangeModelFollowsOfficialBounds`（区间模型逐秒放通 + 越界 400 + 文案含区间）、`TestTierModelKeepsExactMatch`（档位模型精确匹配、拒绝智能时长） |
-| 4 塌档位回归守卫 | **已落地** | `tests/test_constraint_duration_range.py::test_dict_duration_specs_report_their_upstream_range`（dict 形态不再塌成 `duration==[default]`） |
+| 4 塌档位回归守卫 | **部分，不满足原 §6 断言** | `schemas/model_spec.py:43-51` 仍将 dict 默认值写为 `duration==[default]`；`tests/test_constraint_duration_range.py:54-65` 明确锁定此行为。`supports_duration()` 能看区间，但只读 `duration` 列表的消费方仍有退化风险；若要实现 §6 原断言，须改代码和既有测试，不能标为已完成 |
 | 5 `_build_constraints_summary` 字典形态 | **未落地** | 属通道 B 复活范围（R4），见 §10.3 第 3 项 |
-| 6 小分类成员表快照 | **被更强形式替代** | 未做静态快照断言，改为 `_derive_video_group` 派生 + 正向逐档 assert + 反向排除断言（纯文生档不得在 motion、无运行时编辑支持的档不得在 video_edit）。新增模型时不需要维护快照 |
+| 6 小分类成员表快照 | **仅视频部分派生，目标未完成** | `_derive_video_group` 只覆盖 motion / video_edit / dreamweaver_video_edit 的候选成员并有正反向断言；图片、音频、视觉仍是静态组，任务级 `subcategories` 尚未进入 manifest。现有测试不能证明「每个小分类」正确，更不能证明候选均可执行（Vidu 双帧仍缺双图入口） |
 | 7 前端 fallback 表只减不增 | **未落地** | `VIDEO_DURATION_OPTIONS_BY_MODEL`、`VIDEO_DURATION_RANGES_BY_MODEL` 仍在充当 catalog 不可用时的离线镜像，本轮还给 pixverse 新增了区间条目。已用 `assetStudioDurationControlSource.test.ts`（「不再在工作台内维护会过期的时长兜底表」）禁止出现**第三份**，但删除这两张表要等通道 B 与 manifest 全量就绪 |
 
 ### 10.3 仍欠差集（每项都应是独立切片，需再裁定后动手）
@@ -498,7 +509,7 @@ A2 落地后暴露的三条口径事实（不是缺陷，但下次改动画会�
 5. **kling-v3-omni 官方视频编辑能力**（`media type=base`）在档案、适配器、运行时三层均未接通；接通后 `video_edit` 派生组会自动多一档，无需改代码。
 6. **§9 P1 余下**：`AssetStudioParamBar.tsx`、三处时长 `Select` 与尺寸 `Select` 替换、i18n 成对补齐（R7）、`@testing-library` 交互测试（R6）。
 7. **§9 P2/P3 全部未动**：五分类 IA、小分类选择器、Seedance 2.5 样片模式、首尾帧/全能参考/音频驱动 API 面、`count`。
-8. ~~R1 成本闸门未落地~~ **已落地（2026-10-09，取数与代码位置见 §10.1 的 R1 A1/A2 两行）**：视频三档改为「模型 × 短边分辨率档 × 输出秒」取价，缺价 400 拒单，单一均价 env 与硬编码分支已物理删除。
+8. ~~R1 成本闸门未落地~~ **确定输出秒数的分档取价已落地，成本闭环未完成**（取数与代码位置见 §10.1 R1 A1/A2）：视频三档按「模型 × 短边分辨率档 × 传入输出秒」冻结并结算，缺价 400；但 `duration=-1` 用档案默认秒数计费（`_helpers.py:1161-1177`），参考视频的输入秒数未纳入 `/video-edit` 估算（`routes_video_edit.py:98-115`）。这两类不能声称由 R1 保证成本覆盖。
 9. **分辨率按模型裁剪（展示层，承接第 1、2 项）**：入口侧 2026-10-11 已改为按目标模型判（`_validate_dimensions_for_models({resolved_model_id}, …)`，见参考文档 §10.27），「该档档案认不下的画幅比/尺寸」（现例：Vidu 系只认 16:9 / 9:16 / 1:1，传 `1440x1080`）已在入口 400 并点名模型；仍要等到取价层才 400 的是「档案认得下尺寸、但该档没有单价」（`2-0-fast` + 1920x1080）。前端 `filterSizeOptions` 依赖尚未复活的通道 B `runtime_task_constraints`，所以这两类非法组合在下拉里仍可选。通道 B 复活后应把档案 `constraints.resolutions` 变成前端可见的裁剪依据，拒单理由也才说得清是「该模型不出这个档」。
 10. **带参考视频的任务仍有欠收口**：`/video-edit` 传参考视频，而 seedance 的每秒估算价取的是官方「不含输入视频」示例——token 公式会把输入秒计入用量，实扣可高于冻结额。另 §2.8 引用的「2.5 1080p 含视频 20.12~78.25 元/5 秒」在 `docs/MODEL_INTEGRATION_REFERENCE.md:731-737` 的官方表里查不到对应读数，落地这条闸门（按输入秒加计）前必须先复核该数字。
 
@@ -511,6 +522,66 @@ A2 落地后暴露的三条口径事实（不是缺陷，但下次改动画会�
 - wan3.0：20–30 秒长视频、智能时长 `duration=-1`。
 
 冒烟失败时的处置口径见 §8 R3：**收紧 `config/models.yaml` 档案值，不加代码兜底**。
+
+---
+
+## 11. 当前候选模型的能力复核与组件设计（本次代码快照）
+
+本节只设计实现，不表示已修改业务代码或完成付费冒烟。候选范围取 `backend/app/services/asset_studio_model_catalog.py:16-96` 的资产工作台组，不把 DreamWeaver 专用组、别名或官方尚未接入的变体自动加入。证据级别：**A**＝百炼官方 API 原文在本地知识库的镜像（目录 `C:/Users/cuigu/.qoder-cn/skills/bailian-docs-llm-wiki/raw/`）；**B**＝官方模型市场结构化记录或仓库保存的官方链接/历史实测，未实时在线验证；**C**＝仅本地 YAML 或适配器声明。A/B 仍需按部署地域、开通状态和实际响应验证；火山与 Mureka 官网本轮未取得可核验正文，不能把 C 升格为官方真值。以下引用的 `raw/...` 和 `models/groups/...` 相对于该知识库根目录。
+
+### 11.1 视频：按任务签名分组，不按营销能力词开放
+
+| 当前候选 | 官方可核对能力与边界 | 工作台现状 / 拟开放任务 | 证据 |
+|---|---|---|---|
+| `wan3.0-video` | 文生、首帧、首尾帧、参考生、编辑/延长；无输入视频时输出 2–30 秒，含视频时输入总秒数＋输出秒数≤30；参考图≤10、视频≤5 段且合计≤15 秒、音频≤5 段且合计≤15 秒；首尾帧不能混参考素材 | `/video` 只收一张 `reference_image`；文生/首帧可继续使用，双帧/多参考/编辑/延长须逐任务接线和实测 | A：`raw/model-api-reference/video-generation-api/wan-api-reference/wan3-video-generation-api-reference.md`；`routes_video.py:53-64` |
+| `doubao-seedance-2-5` | 仓库记录 4–30 秒、480p/720p/1080p、图/视频/音频多参考、编辑/延长及 Draft 两步；官方正文本轮未读到，具体任务互斥与输入限额仍待复核 | 当前 catalog 为 4/5/10/15/20/30 离散档，不按适配器范围强改 slider；2.5 编辑在 adapter 内强制自动，不代表入口允许显式 `-1`；Draft 不开放空壳 | B/C：`config/models.yaml`、`adapters/volcengine/video.py:244-260`；官方链接见档案 |
+| `doubao-seedance-2-0` / `-2-0-fast` | 仓库记录 4–15 秒，Fast 只到 720p；编辑完整 API 及自动时长未独立获官方确认 | 保留离散档；编辑虽已接入候选，但未付费冒烟；2.0 编辑 adapter 拒绝 `-1`，不能显示全局「锁定自动」 | B/C：`config/models.yaml`、`adapters/volcengine/video.py:244-260`、§10.4 |
+| `kling/kling-v3-video-generation` / `-omni-video-generation` | 两者文生/首帧/首尾帧，3–15 秒；仅 Omni 另有参考生与编辑；720p/1080p/4K，比例 16:9/9:16/1:1。Omni 纯图参考图＋主体≤7，混视频时≤4 且视频仅一段 | 普通版不得因「Kling」品牌共性进入编辑/多参考；Omni 的多参考和编辑须适配器、运行时、端点全部贯通后才显示 | A：`raw/model-api-reference/video-generation-api/kling-api-reference/kling-video-generation-api-reference.md` |
+| `pixverse-v6-t2v` | 当前候选仅是文生视频型号，1–15 秒；PixVerse 另有 it2v/kf2v/r2v 等不同型号，不能把它们的能力并到 `t2v` | 只进文生；不得因档案批量模板中的 motion_control 标签进图生/动作；其他型号未加入候选 | A：`raw/model-api-reference/video-generation-api/pixverse-api-reference/`；`asset_studio_model_catalog.py:139-158` |
+| `vidu-q3-pro-text2video` / `-img2video` / `-start-end2video` | 依次是文生、恰好一张首帧、恰好两张有序首尾帧；均 1–16 秒；双帧图像像素比须 0.8–1.25 | 前两型按任务接线；双帧型当前单图入口无法完整执行，不能因它在 motion 候选组就显示可生成 | A：`raw/model-api-reference/video-generation-api/vidu-api-reference/vidu-{text-to-video,image-to-video,keyframe-to-video}-api-reference.md`；`routes_video.py:53-64` |
+
+**「动作控制」不是图生视频的同义词。** 当前 `motion` 组是视频候选中 `modality ∋ image_to_video` 的派生集合（`asset_studio_model_catalog.py:139-157`），`/motion` 只收单图与通用 `motion_control`；小分类必须拆成「首帧图生」与「厂商动作控制」，后者仅在对应适配器确实解释动作参数、且完成模型级调用验证后显示。Vidu 首尾帧型号不得通过单图 motion 入口假装可执行。`/video-edit` 的 UI `style-transfer/video-extend/video-remix` 与适配器读取的 `video_edit/video_extend` 尚需逐项映射，不能直接把三个按钮当成已接通编辑能力（`routes_video_edit.py:50-75`、`adapters/volcengine/video.py:236-260`）。
+
+### 11.2 图片、音频与视觉：以实际输入槽位为边界
+
+| 当前候选 | 官方可核对能力 / 待核实项 | 当前链路与目标组件 | 证据 |
+|---|---|---|---|
+| `qwen-image-3.0` / `-pro` | 文生、图生/编辑；官方输入 1–3 张，输出 1–6 张 | `/image` 有图即切换到**已退役** `image_edit` 模型组，**不能**把生成组选中的 Qwen 3.0 解释为已执行其图生/编辑能力；迁移替代路线见 §11.4 | A：`raw/model-api-reference/image-generation/qwen-image-api-reference/qwen-image-generation-and-editing-api-reference.md`；`routes_image.py:67-118` |
+| `wan2.7-image-pro` | 文生、多参考、组图、编辑；输入最多 9 张；仅无图普通文生支持 4K，编辑/组图至 2K | UI 按文生/参考/组图区分尺寸及 `n`，不可共用 4K 选项；先修图片入口有图即换组及多图传递 | A：`raw/model-api-reference/image-generation/wan-image-api-reference/wan-image-generation-and-editing-api-reference.md` |
+| `doubao-seedream-5-0` / `-pro` | 本轮官网仅返回脚本外壳；档案图生/编辑能力及尺寸、参考数仍待逐型号官方 API 正文确认 | 先保留可执行的文生与既有尺寸实测；多图/局部编辑不得仅凭 YAML `capabilities` 开放 | B/C：`config/models.yaml`、`adapters/volcengine/image.py`、`docs/MODEL_INTEGRATION_REFERENCE.md` |
+| `kling/kling-v3-image-generation` / `-omni-image-generation` | 普通版参考输入仅 1 张，Omni 参考图＋主体合计≤10，可输出组图；两者控件不能共享「10 图」提示 | 当前有图请求会转入 Qwen 编辑组；接线前仅展示工作台实际可执行的文生，组图/多参考待接 | A：`raw/model-api-reference/image-generation/kling-image-api-reference/kling-image-generation-api-reference.md`；`routes_image.py:108-118` |
+| `qwen-image-edit-plus` / `-max` | **用户已确认完全下线退役，禁止继续作为可售模型及默认值。** 百炼市场记录均标推理下线时间 2026-10-10 00:00:00；旧 API 文档只用于历史迁移对照 | 现有 `image_edit` 组及默认仍引用 plus/max，`routes_image.py` 有图即静默回退 plus，是必须尽快阻断的故障链；确认替代链路可用前不可仅换默认 ID 放行 | A/B：`models/groups/qwen-image-edit.json`、`qwen-image-edit-max.json` 的 `offlineInfo`；`asset_studio_model_catalog.py:39-42,81-84`、`routes_image.py:74-117` |
+| `mureka-o1-instrumental` | 历史调用显示上游固定 `mureka-9.5`、无 duration 请求字段；产物可长于本地 15/30/45/60 档，本轮官方正文未复核 | 音乐控件取消「保证生成 N 秒」的表达，显示模型决定时长；冻结/结算依据真实扣费契约明确之前不能只删时长入参 | B：`adapters/mureka/instrumental.py`、`docs/MODEL_INTEGRATION_REFERENCE.md` |
+| `seed-audio-1.0` | 仓库记载文本生成音效/场景音频、最多 3 条音频参考；未从官方正文确认限额，adapter 不接收时长 | 音效与场景展示模型决定时长，场景 `speaker_ids` 不等同上传参考音频；补实际时长计费验收 | B/C：`adapters/volcengine/audio_generation.py`、`routes_audio.py:92-134,403-469` |
+| `qwen-audio-3.1-tts-next` | 官方独立统一音频生成端点，可输入文本及最多 3 条参考音频（各≤30 秒/10MB），生成音效、对话等；不是 Flash 的换音色开关 | 仅在「短音效」保留当前已接路径；播客/参考音频槽位需新增端点参数、adapter 映射和校验；不套用 Flash `voice_id` | A：`raw/model-api-reference/audio-api-references/audio-generation-api.md`；`asset_studio_model_catalog.py:47-50` |
+| `qwen-audio-3.1-tts-flash` / `cosyvoice-v3.5-plus` / `minimax-speech-2.8-hd` / `-turbo` | TTS 按文本与音色 ID 合成，不是按目标秒数；CosyVoice 的参考音频克隆属于先建音色的资产流程；MiniMax 两档文本 <10000 字符，最多 4 音色混合且不支持 `whisper` 情绪 | 语音合成小分类显示文本、合法音色、当前确实透传的语速/情绪等参数；多音色混合、实时上传参考音频与流式播放均需独立链路，不以官方支持直接出控件 | A：`raw/_short/qwen-audio-tts-http-api-6a5232db21a53ba2.md`、`raw/_short/minimax-synchronous-speech-synthesis-api-bbe4c9f0093c0534.md`；B：`models/groups/cosyvoice.json`；`routes_audio.py:289-340` |
+| `qwen3-vl-plus` / `qwen3.5-omni-plus`（**2026-10-12 已退出产品入口**：前者仅剩短剧 QC 存量档、待 Slice B 迁移，后者物理退役，承接 `qwen3.8-omni-flash`；现役四档见 §3.3） | 输入单图/视频可做理解与评审，输出文本；VL 不理解视频里的音频；Omni 的模型市场与指南视频时长口径不同，不能用统一上限 | 当前 `/vision-review` 接单文件并使用质量评审提示词，展示「图片评审/视频评审」而非未实现的通用问答、音轨评审或超长视频；Omni 上限待按具体接口验证 | A：`raw/model-user-guide/model-experience/vision-model/vision.md`、`raw/model-user-guide/model-experience/omni-modal/qwen-omni.md`；`routes_vision.py:47-107` |
+
+### 11.3 前后端组件契约与落地门槛
+
+1. **小分类使用任务签名，不直接复用 `capabilities[].name`。** 服务端由「明确型号 × 任务」白名单派生 `subcategories`：`text_to_video`（提示词）、`first_frame_video`（一图）、`first_last_frame_video`（有序两图）、`reference_video`（按模型限定图/视频/音频）、`video_edit`（源视频）、`motion_control`（专用动作输入）、`text_to_image`、`reference_image_edit`、`image_series`、`music`、`sound_effect`、`scene_audio`、`text_to_speech`、`image_review`、`video_review`。一个模型可入多个已贯通任务；**可见列表只发已贯通任务**，官方支持但缺 route/adapter 的任务仅在文档记录，不做可点击空壳。
+2. **统一 manifest 是可用性与控件源，先保证 A 可独立支撑页面。** 后端 `asset_studio_model_catalog._build_option` 输出每个任务的 `status`（`available`/`needs_upstream_verification`/`integration_pending`）、输入 schema（必填/可选、素材类型、有序性、每类数量/总数/总秒数/体积、互斥条件）、输出 schema（比例、尺寸/分辨率、数量、时长 `discrete|range|model_decided|not_applicable`、auto 限定）、计费预览能力。前端以 manifest 渲染 `TaskInputSlots`、`DurationControl`、`ResolutionControl`、`ReferenceLimits`、`CostPreview`；对区间当前 `duration_options` 为逐秒兼容镜像、`duration_min/max` 才是 slider 真值，禁止以「options 非空」覆盖 range。离线 fallback 不应暴露未经实时校验的多素材、超长或高价任务。
+3. **通道职责须先收敛，本文推荐 A 管参数、B 管运行态信号。** §5.5/§8 R4 原案要求 B 管运行时约束＋信号，与本节建议冲突；实施前须由用户重新裁定该职责变更，不能同时照两版做。推荐在 A 的 YAML manifest 补齐时长、尺寸、参考上限和任务可执行白名单；B 的 `model_catalog_projection.py` 仅提供 DB 验证状态、近期失败、路由可用性，不复制时长与尺寸真值。前端单点合并：A 有效且 B 缺失时仍按 A 渲染；B 只降级可用性/排序并说明原因，不用旧快照覆盖 A。若继续保留 B 的 `constraints_summary`，则同步修 `_build_constraints_summary` 的 dict 分支并测试刷新；不得将它回写为工作台参数源。
+4. **多素材要做完整传递而非只加上传按钮。** `/video` 增有序 `first_frame/last_frame` 及按任务区分的 `reference_images/videos/audios`；`/image` 保留用户选中的模型与任务，避免「有图即切 Qwen 编辑组」。请求边界校验 MIME、体积、图像几何、视频秒数、素材互斥和任务专属上限；runtime 传保序结构至 adapter，不让 `image_path` 与 `image_paths` 重复编码首图；对外错误说明型号和具体限制。`/motion` 不用作首尾帧通用入口，`/video-edit` 逐一映射任务字段，Draft 必须两次冻结结算并处理任务 ID 有效期。
+5. **成本与自动时长先设硬门槛。** 确定时长且不含输入视频的价格分档已在 `points_usage_pricing.py:437-449`；`-1` 当前按档案默认秒数结算（`_helpers.py:1161-1177`），参考视频未计输入秒（`routes_video_edit.py:98-115`）。在拿到实际输出秒数、上游计量及可执行的补结算/封顶口径前，不承诺「按真实秒数收费」，也不扩展自动时长/含视频任务的可售范围；请求前的估价、冻结、失败释放及实际结算必须由同一任务 schema 驱动。不能用「缺价 400」代替对输入 token、模型决策时长和分辨率的成本测试。
+6. **分期验收按可执行能力，而非 UI 截图。** 第一阶段修 §10.2 两处错误台账、建立「型号 × 任务 × 官方证据 × route × runtime × adapter × 计费」矩阵及测试，并将已确认退役的旧 Qwen 编辑档从可售路径移出（细节见 §11.4）；第二阶段只为完整贯通的单素材任务出五类/小分类与差异化控件；第三阶段逐模型接双帧/多参考/编辑/组图/Draft、逐个付费冒烟。每个任务覆盖正常参数、边界、互斥、缺价拒单、付费失败释放与「用户所选型号不被静默改写」；官方资料不能取得正文或实测失败的任务保留 `integration_pending`，不得因档案标签自动放行。
+
+### 11.4 旧 Qwen 图片编辑退役后的替代路线（本轮用户确认）
+
+**阻断现状：** `qwen-image-edit-plus`、`qwen-image-edit-max` 已完全退役，不再视作「待确认是否停服」。`config/models.yaml` 仍标 `active`；`asset_studio_model_catalog.py:39-42,81-84` 把两档作为图片编辑全集并默认 plus；`routes_image.py:74-117` 上传图片后只允许旧编辑组，其他已选模型会静默切成 plus；`core/unified_media_runtime.py:34` 的 `edit_image` 白名单也只有两档。此状态下参考图提交不能保证成功，也不保证执行用户所选型号。**不能仅修改前端下拉或替换默认 ID**；迁移获批准前不要把未贯通的新编辑模型伪装成可用。
+
+| 现役图片型号 | 官方可用编辑形态 | 迁移定位和接通条件 |
+|---|---|---|
+| `qwen-image-3.0` | 1–3 张图的图生/指令编辑；输出 1–6 张 | 推荐普通编辑默认候选；复用其现有 `generate_image` adapter，但须核实编辑任务的 API 载荷、接 `edit_image` 或明确统一操作语义、正确传全部图，不能只凭 `image_to_image` 标签入白名单 |
+| `qwen-image-3.0-pro` | 同系列图生/编辑能力 | 推荐用户可选高质量档；输入/输出与计价单独按该档验证，不能用普通档报价 |
+| `wan2.7-image-pro` | 0–9 张图、编辑/多参考/组图、区域框选 `bbox_list`；编辑与组图最高 2K | 推荐多图/区域编辑档；需独立校验素材顺序、区域坐标与 `n`，且按任务裁剪 4K，否则无图文生能力会误传给编辑态 |
+| `kling/kling-v3-image-generation` | 单张参考图任务；不等于 Omni 的多图编辑 | 条件备选：先补档案任务声明，核对异步 adapter 的素材 URL 与回调，再做单图冒烟 |
+| `kling/kling-v3-omni-image-generation` | 多图参考、组图，参考图＋主体合计≤10 | 条件备选：当前 adapter 只读首图，上传图片编码为 data URL 而官方要求 HTTP(S) URL；需先接素材托管及异步组包，再按官方任务语义确认是否称「编辑」 |
+| `doubao-seedream-5-0` / `-pro` | 档案写有图生/编辑，官网规格正文本轮无法核实 | 暂列待核实，不仅凭 YAML 标签承诺多图、局部编辑或具体上限；先取得官方 API 原文与模型级调用证据 |
+
+证据：百炼原文 `raw/model-api-reference/image-generation/qwen-image-api-reference/qwen-image-generation-and-editing-api-reference.md`、`raw/model-api-reference/image-generation/wan-image-api-reference/wan-image-generation-and-editing-api-reference.md`、`raw/model-api-reference/image-generation/kling-image-api-reference/kling-image-generation-api-reference.md`；本地编辑选择 `backend/app/api/v1/asset_studio_api/routes_image.py:74-117`，适配器 `adapters/dashscope/image_sync.py:35-55,77-114`、`adapters/dashscope/image_async.py:31-53,106-127`、`adapters/volcengine/image.py:54-73`。视频的 `reference_images`、视觉理解的图片输入均不产出静态编辑图，不能拿来充当图片编辑替代。
+
+**前后端组件与验收顺序：**先让 manifest 不再发退役档作为可售项，并移除失效默认与静默切模；在新操作尚未贯通前，参考图入口应明确拒绝而不是回退旧型号。接着逐档接 `ImageTaskSelector`（文生/单图编辑/多图参考/区域编辑/组图）、`ImageReferenceSlots`（1–3、0–9 或 Omni 专属上限）、模型专属尺寸/数量控件与可见报价；后端把用户所选任务与型号从 route 原样传至 runtime/adapter，完成 MIME、大小、数量、URL/异步素材要求及输出尺寸校验。`core/unified_media_runtime.py:19-35` 的生成/编辑白名单和 `image_to_image_edit` 路由语义需与新档对齐；`adapters/dashscope/image_sync.py` 等不能只取首张图。当前 `points_usage_pricing.py:429-435` 的参考编辑按固定环境价、不分型号和输出数量，迁移前须有模型级价档、缺价拒单、冻结/结算对拍，并测试「上传图不会静默切型号」「退役档不可选不可路由」「多图全数进载荷」及失败释放。官方能力确认不代表此时已可售。
 
 ---
 

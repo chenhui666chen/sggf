@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
 import AddPhotoAlternateOutlinedIcon from '@mui/icons-material/AddPhotoAlternateOutlined'
 import AutoFixHighOutlinedIcon from '@mui/icons-material/AutoFixHighOutlined'
@@ -13,11 +13,8 @@ import {
   Chip,
   CircularProgress,
   FormControl,
-  InputLabel,
   MenuItem,
-  Select,
   Stack,
-  TextField,
   Typography,
 } from '@mui/material'
 
@@ -27,71 +24,41 @@ import {
 } from '@/services/api'
 
 import type {
+  AssetStudioModelCatalogOption,
   AssetStudioVisionCriterionScore,
   AssetStudioVisionReviewResponse,
 } from '@/services/api'
-import type { SxProps, Theme } from '@mui/material'
+import { useAssetStudioModelCatalog } from '@/hooks/useAssetStudioModelCatalog'
 import { useTranslation } from 'react-i18next'
 
-// 视觉理解模型列表
-const VISION_MODELS = [
-  { id: 'qwen3-vl-plus', name: 'Qwen3-VL-Plus', description: '专用视觉理解模型' },
-  { id: 'qwen3.5-omni-plus', name: 'Qwen3.5 Omni Plus', description: '多模态大模型' },
-]
+import {
+  FormHelperText,
+  InputLabel,
+  Select,
+  TextField,
+  WORKBENCH_COMPACT_CARD_SX,
+  WORKBENCH_FIELD_COLORS,
+  WORKBENCH_HINT_SX,
+  WORKBENCH_INNER_CARD_SX,
+  WORKBENCH_NEUTRAL_CHIP_SX,
+  WORKBENCH_SUBTLE_ACTION_BUTTON_SX,
+} from './assetStudioFieldStyles'
 
-const DEFAULT_VISION_MODEL_ID = 'qwen3-vl-plus'
-
-// 模型选择器样式
-const VISION_SELECT_SX: SxProps<Theme> = {
-  color: 'white',
-  '& .MuiOutlinedInput-notchedOutline': {
-    borderColor: 'rgba(255,255,255,0.18)',
-  },
-  '&:hover .MuiOutlinedInput-notchedOutline': {
-    borderColor: 'rgba(139,161,255,0.68)',
-  },
-  '&.Mui-focused .MuiOutlinedInput-notchedOutline': {
-    borderColor: 'rgba(139,161,255,0.88)',
-  },
-  '& .MuiSvgIcon-root': {
-    color: 'rgba(255,255,255,0.76)',
-  },
+interface VisionModelOption {
+  value: string
+  label: string
+  helper: string
 }
 
-const VISION_MENU_PAPER_SX: SxProps<Theme> = {
-  mt: 1,
-  color: 'white',
-  borderRadius: 2.5,
-  border: '1px solid rgba(255,255,255,0.12)',
-  background: 'linear-gradient(180deg, rgba(53,58,92,0.94) 0%, rgba(18,21,33,0.96) 100%)',
-  boxShadow: '0 20px 40px rgba(8,10,18,0.42)',
-  backdropFilter: 'blur(18px)',
-  '& .MuiMenuItem-root': {
-    minHeight: 48,
-    color: 'rgba(255,255,255,0.92)',
-    transition: 'background-color 0.18s ease, color 0.18s ease',
-  },
-  '& .MuiMenuItem-root:hover': {
-    backgroundColor: 'rgba(255,255,255,0.08)',
-  },
-  '& .MuiMenuItem-root.Mui-selected': {
-    backgroundColor: 'rgba(126,146,255,0.22)',
-  },
-  '& .MuiMenuItem-root.Mui-selected:hover': {
-    backgroundColor: 'rgba(126,146,255,0.28)',
-  },
+function mapCatalogOptionToVisionModelOption(option: AssetStudioModelCatalogOption): VisionModelOption {
+  return { value: option.model_id, label: option.label, helper: option.helper }
 }
 
-const VISION_MENU_PROPS = {
-  PaperProps: {
-    elevation: 0,
-    sx: VISION_MENU_PAPER_SX,
-  },
-  MenuListProps: {
-    sx: {
-      py: 0.5,
-    },
-  },
+// Select 默认整块回显选中 MenuItem 的 children，这里每项是"名称+定位说明"两行，
+// 关闭态会把说明一并带进来并撑高控件，所以只回显模型名。
+function resolveVisionModelLabel(options: VisionModelOption[], value: unknown): ReactNode {
+  const modelId = String(value ?? '')
+  return options.find((option) => option.value === modelId)?.label ?? modelId
 }
 
 export interface AssetStudioVisionReusePayload {
@@ -229,15 +196,7 @@ function PreviewCard({
 }) {
   const { t } = useTranslation()
   return (
-    <Box
-      sx={{
-        borderRadius: 3,
-        p: 2,
-        minHeight: 240,
-        border: '1px solid rgba(255,255,255,0.1)',
-        backgroundColor: 'rgba(255,255,255,0.04)',
-      }}
-    >
+    <Box sx={{ ...WORKBENCH_INNER_CARD_SX, minHeight: 240 }}>
       <Typography sx={{ color: 'white', fontSize: '0.92rem', fontWeight: 700, mb: 1.2 }}>
         {t('assetStudio.vision.preview.title')}
       </Typography>
@@ -274,10 +233,10 @@ function PreviewCard({
               icon={assetType === 'video' ? <MovieFilterOutlinedIcon /> : <VisibilityOutlinedIcon />}
               label={assetType === 'video' ? t('assetStudio.vision.preview.videoBadge') : t('assetStudio.vision.preview.imageBadge')}
               variant="outlined"
-              sx={{ color: 'white' }}
+              sx={WORKBENCH_NEUTRAL_CHIP_SX}
             />
             {file ? (
-              <Chip size="small" label={file.name} variant="outlined" sx={{ color: 'white', maxWidth: '100%' }} />
+              <Chip size="small" label={file.name} variant="outlined" sx={{ ...WORKBENCH_NEUTRAL_CHIP_SX, maxWidth: '100%' }} />
             ) : null}
           </Stack>
         </Stack>
@@ -334,14 +293,7 @@ function SectionList({
   icon: ReactNode
 }) {
   return (
-    <Box
-      sx={{
-        borderRadius: 2.5,
-        p: 1.5,
-        border: '1px solid rgba(255,255,255,0.08)',
-        backgroundColor: 'rgba(255,255,255,0.03)',
-      }}
-    >
+    <Box sx={WORKBENCH_COMPACT_CARD_SX}>
       <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1 }}>
         <Box sx={{ display: 'flex', alignItems: 'center', color: 'rgba(255,255,255,0.82)' }}>
           {icon}
@@ -395,15 +347,7 @@ function ResultPanel({
   )
 
   return (
-    <Box
-      sx={{
-        borderRadius: 3,
-        p: 2,
-        minHeight: 340,
-        border: '1px solid rgba(255,255,255,0.1)',
-        backgroundColor: 'rgba(255,255,255,0.04)',
-      }}
-    >
+    <Box sx={{ ...WORKBENCH_INNER_CARD_SX, minHeight: 340 }}>
       <Typography sx={{ color: 'white', fontSize: '0.92rem', fontWeight: 700, mb: 1.2 }}>
         {t('assetStudio.vision.result.title')}
       </Typography>
@@ -426,9 +370,9 @@ function ResultPanel({
               size="small"
               label={result.asset_type === 'video' ? t('assetStudio.vision.result.videoAsset') : t('assetStudio.vision.result.imageAsset')}
               variant="outlined"
-              sx={{ color: 'white' }}
+              sx={WORKBENCH_NEUTRAL_CHIP_SX}
             />
-            <Chip size="small" label={result.model_id} variant="outlined" sx={{ color: 'white' }} />
+            <Chip size="small" label={result.model_id} variant="outlined" sx={WORKBENCH_NEUTRAL_CHIP_SX} />
             <Chip
               size="small"
               label={
@@ -516,7 +460,7 @@ function ResultPanel({
                   size="small"
                   startIcon={<ContentCopyOutlinedIcon />}
                   onClick={() => onCopyPrompt(result.revised_prompt)}
-                  sx={{ color: 'white', borderColor: 'rgba(255,255,255,0.2)' }}
+                  sx={WORKBENCH_SUBTLE_ACTION_BUTTON_SX}
                 >
                   {copyFeedback || t('assetStudio.vision.result.copyPrompt')}
                 </Button>
@@ -531,7 +475,7 @@ function ResultPanel({
                     })
                   }
                   disabled={!onUseResult}
-                  sx={{ color: 'white', borderColor: 'rgba(255,255,255,0.2)' }}
+                  sx={WORKBENCH_SUBTLE_ACTION_BUTTON_SX}
                 >
                   {t('assetStudio.vision.result.useImagePrompt')}
                 </Button>
@@ -546,7 +490,7 @@ function ResultPanel({
                     })
                   }
                   disabled={!onUseResult}
-                  sx={{ color: 'white', borderColor: 'rgba(255,255,255,0.2)' }}
+                  sx={WORKBENCH_SUBTLE_ACTION_BUTTON_SX}
                 >
                   {t('assetStudio.vision.result.useVideoPrompt')}
                 </Button>
@@ -563,7 +507,7 @@ function ResultPanel({
                       })
                     }
                     disabled={!onUseResult}
-                    sx={{ color: 'white', borderColor: 'rgba(255,255,255,0.2)' }}
+                    sx={WORKBENCH_SUBTLE_ACTION_BUTTON_SX}
                   >
                     {t('assetStudio.vision.result.referenceImage')}
                   </Button>
@@ -581,7 +525,7 @@ function ResultPanel({
                       })
                     }
                     disabled={!onUseResult}
-                    sx={{ color: 'white', borderColor: 'rgba(255,255,255,0.2)' }}
+                    sx={WORKBENCH_SUBTLE_ACTION_BUTTON_SX}
                   >
                     {t('assetStudio.vision.result.referenceVideo')}
                   </Button>
@@ -589,7 +533,7 @@ function ResultPanel({
               </Stack>
             </Stack>
             {result.asset_type === 'video' ? (
-              <Typography sx={{ mb: 1, color: 'rgba(255,255,255,0.58)', fontSize: '0.8rem', lineHeight: 1.7 }}>
+              <Typography sx={{ ...WORKBENCH_HINT_SX, mb: 1 }}>
                 {t('assetStudio.vision.result.videoNoReferenceHint')}
               </Typography>
             ) : null}
@@ -599,12 +543,6 @@ function ResultPanel({
               minRows={5}
               value={result.revised_prompt}
               InputProps={{ readOnly: true }}
-              sx={{
-                '& .MuiOutlinedInput-root': {
-                  color: 'white',
-                  backgroundColor: 'rgba(8,11,14,0.45)',
-                },
-              }}
             />
           </Box>
         </Stack>
@@ -623,16 +561,26 @@ export default function AssetStudioVisionReviewPanel({
   onUseResult,
 }: AssetStudioVisionReviewPanelProps) {
   const { t } = useTranslation()
+  const { catalog, loading: catalogLoading, error: catalogError } = useAssetStudioModelCatalog()
   const [assetFile, setAssetFile] = useState<File | null>(null)
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const [originalPrompt, setOriginalPrompt] = useState('')
-  const [selectedModel, setSelectedModel] = useState<string>(DEFAULT_VISION_MODEL_ID)
+  const [selectedModel, setSelectedModel] = useState<string>('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [result, setResult] = useState<AssetStudioVisionReviewResponse | null>(null)
   const [copyFeedback, setCopyFeedback] = useState<string | null>(null)
 
   const assetType = resolvePreviewAssetType(assetFile)
+  // 档位名单与默认值都来自后端统一模型清单，页面不再自持档位表
+  const visionModelOptions = useMemo(
+    () => catalog?.groups.vision_review?.map(mapCatalogOptionToVisionModelOption) ?? [],
+    [catalog],
+  )
+  const visionModelId = selectedModel
+    || catalog?.defaults.asset_studio_vision_review
+    || visionModelOptions[0]?.value
+    || ''
 
   useEffect(() => {
     if (!assetFile) {
@@ -680,7 +628,9 @@ export default function AssetStudioVisionReviewPanel({
     try {
       const formData = new FormData()
       formData.append('asset_file', assetFile)
-      formData.append('model_id', selectedModel)
+      if (visionModelId) {
+        formData.append('model_id', visionModelId)
+      }
       if (originalPrompt.trim()) {
         formData.append('original_prompt', originalPrompt.trim())
       }
@@ -698,48 +648,44 @@ export default function AssetStudioVisionReviewPanel({
     <Box sx={{ p: { xs: 1.5, sm: 2.5 } }}>
       <Box sx={{ display: 'grid', gap: 2, gridTemplateColumns: { xs: '1fr', xl: '1.02fr 0.98fr' } }}>
         <Stack spacing={2}>
-          <Box
-            sx={{
-              p: 2,
-              borderRadius: 3,
-              border: '1px solid rgba(255,255,255,0.1)',
-              backgroundColor: 'rgba(255,255,255,0.03)',
-            }}
-          >
+          <Box sx={WORKBENCH_INNER_CARD_SX}>
             <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} flexWrap="wrap" useFlexGap>
-              <Chip size="small" label={t('assetStudio.vision.panel.badgeType')} sx={{ color: 'white' }} variant="outlined" />
-              <Chip size="small" label={t('assetStudio.vision.panel.badgeAnalyze')} sx={{ color: 'white' }} variant="outlined" />
-              <Chip size="small" label={t('assetStudio.vision.panel.badgeOutput')} sx={{ color: 'white' }} variant="outlined" />
+              <Chip size="small" label={t('assetStudio.vision.panel.badgeType')} sx={WORKBENCH_NEUTRAL_CHIP_SX} variant="outlined" />
+              <Chip size="small" label={t('assetStudio.vision.panel.badgeAnalyze')} sx={WORKBENCH_NEUTRAL_CHIP_SX} variant="outlined" />
+              <Chip size="small" label={t('assetStudio.vision.panel.badgeOutput')} sx={WORKBENCH_NEUTRAL_CHIP_SX} variant="outlined" />
             </Stack>
             <Typography sx={{ mt: 1.25, color: 'rgba(255,255,255,0.68)', fontSize: '0.84rem', lineHeight: 1.8 }}>
               {t('assetStudio.vision.panel.modelHint')}
             </Typography>
             
-            <FormControl fullWidth sx={{ mt: 1.5 }}>
-              <InputLabel id="vision-model-select-label" sx={{ color: 'rgba(255,255,255,0.62)' }}>
+            <FormControl fullWidth size="small" variant="outlined" sx={{ mt: 1.5 }}>
+              <InputLabel id="vision-model-select-label">
                 {t('assetStudio.vision.panel.modelLabel')}
               </InputLabel>
               <Select
                 labelId="vision-model-select-label"
-                value={selectedModel}
+                value={visionModelId}
                 label={t('assetStudio.vision.panel.modelLabel')}
+                disabled={catalogLoading || visionModelOptions.length === 0}
                 onChange={(event) => setSelectedModel(event.target.value)}
-                sx={VISION_SELECT_SX}
-                MenuProps={VISION_MENU_PROPS}
+                renderValue={(value) => resolveVisionModelLabel(visionModelOptions, value)}
               >
-                {VISION_MODELS.map((model) => (
-                  <MenuItem key={model.id} value={model.id}>
+                {visionModelOptions.map((model) => (
+                  <MenuItem key={model.value} value={model.value}>
                     <Stack spacing={0.5}>
                       <Typography sx={{ fontSize: '0.95rem', fontWeight: 600 }}>
-                        {model.name}
+                        {model.label}
                       </Typography>
-                      <Typography sx={{ fontSize: '0.8rem', color: 'rgba(255,255,255,0.62)', lineHeight: 1.4 }}>
-                        {model.description}
+                      <Typography sx={{ fontSize: '0.8rem', color: WORKBENCH_FIELD_COLORS.helper, lineHeight: 1.4 }}>
+                        {model.helper}
                       </Typography>
                     </Stack>
                   </MenuItem>
                 ))}
               </Select>
+              {catalogError && !catalogLoading && (
+                <FormHelperText error>{catalogError}</FormHelperText>
+              )}
             </FormControl>
           </Box>
 
@@ -752,8 +698,6 @@ export default function AssetStudioVisionReviewPanel({
             value={originalPrompt}
             onChange={(event) => setOriginalPrompt(event.target.value)}
             placeholder={t('assetStudio.vision.panel.originalPromptPlaceholder')}
-            InputLabelProps={{ sx: { color: 'rgba(255,255,255,0.62)' } }}
-            sx={{ '& .MuiOutlinedInput-root': { color: 'white', backgroundColor: 'rgba(255,255,255,0.03)' } }}
           />
 
           <Alert severity="info" sx={{ borderRadius: 2.5 }}>
@@ -783,7 +727,7 @@ export default function AssetStudioVisionReviewPanel({
         spacing={1.5}
         sx={{ mt: 2 }}
       >
-        <Typography sx={{ color: 'rgba(255,255,255,0.58)', fontSize: '0.84rem', lineHeight: 1.7 }}>
+        <Typography sx={WORKBENCH_HINT_SX}>
           {t('assetStudio.vision.panel.footerHint')}
         </Typography>
         <Button

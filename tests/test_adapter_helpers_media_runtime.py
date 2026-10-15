@@ -95,7 +95,7 @@ def test_chat_messages_calls_registry_adapter_directly(
             return RegistryGenerationResult(
                 success=True,
                 task_id="chat-test",
-                model_id="qwen3-vl-plus",
+                model_id="qwen-plus",
                 metadata={"result_data": {"content": '{"ok": true}'}, "source": "registry"},
             )
 
@@ -106,11 +106,11 @@ def test_chat_messages_calls_registry_adapter_directly(
         temperature=0.1,
         max_tokens=256,
         response_format={"type": "json_object"},
-        model_id="qwen3_vl_plus",
+        model_id="qwen-plus",
     )
 
     assert result.success is True
-    assert result.model_id == "qwen3-vl-plus"
+    assert result.model_id == "qwen-plus"
     assert result.metadata["source"] == "registry"
     assert captured["kwargs"] == {
         "messages": [{"role": "user", "content": "hello"}],

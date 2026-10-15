@@ -30,6 +30,7 @@ from .billing_usage_ledger import BillingUsageLedger, LedgerReconciliationAudit
 from .canonical_migration_progress import AudiobookCanonicalMigrationProgress
 from .dreamweaver import DreamweaverProject, DreamweaverEpisode, DreamweaverShot, DreamweaverAsset, DreamweaverRunEvent
 from .model_catalog import ModelCatalogEntry, ModelCatalogSource
+from .video_api import VideoApiApplication
 from .user_asset_record import UserAssetRecord
 from .generation_feedback import GenerationFeedback
 from .audio_library_asset import AudioLibraryAsset
@@ -92,6 +93,7 @@ __all__ = [
     "DreamweaverRunEvent",
     "ModelCatalogEntry",
     "ModelCatalogSource",
+    "VideoApiApplication",
     "UserAssetRecord",
     "GenerationFeedback",
     "AudioLibraryAsset",

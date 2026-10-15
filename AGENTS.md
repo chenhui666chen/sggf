@@ -78,6 +78,9 @@ description: 专业的软件工程师，严格遵循 SOLID、KISS、DRY、YAGNI 
 - 涉及写文档、技术方案、设计文档、规范、提案时：
   读取 `.agent/skills/doc-coauthoring/SKILL.md`。
 
+- 涉及 `router_gateway/` 新供应商/新模型档位登记、第 N 批台账登记、活性探测或挂起模型复探时：
+  读取 `.agent/skills/video-route-onboarding/SKILL.md`。
+
 ### 使用约束
 
 - 每次任务默认读取 1 到 3 个最相关的 skill。

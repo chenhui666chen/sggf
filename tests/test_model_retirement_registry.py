@@ -50,6 +50,12 @@ RETIRED_MEDIA_MODELS = {
     # 2026-10-10 换代：上游 multimodal-generation 端点返回 404 Model not exist，
     # 有声书 TTS 全链路改指 qwen-audio-3.1-tts-flash（音色空间换成 _v3.1，不互通）
     "qwen3-tts-instruct-flash": "qwen-audio-3.1-tts-flash",
+    # 2026-10-12 视觉评审换代：三档盲评实测后 omni-plus 成本最高、无维度胜出，
+    # 与轻量的 qwen3.8-omni-flash 能力重复，产品入口与运行时白名单一并摘除
+    "qwen3.5-omni-plus": "qwen3.8-omni-flash",
+    # 2026-10-12 短剧 QC 线迁到 qwen3.8-omni-flash 后物理退役：它曾是本项目唯一的统一
+    # 多模态理解入口，adapter 模块、legacy 适配器、runtime 包装器与两份档案卡同批删除
+    "qwen3-vl-plus": "qwen3.8-omni-flash",
 }
 
 RETIRED_LLM_MODELS = {
@@ -95,6 +101,9 @@ LEGACY_ALIAS_KEYS = (
     {mid.lower() for mid in set(RETIRED_MEDIA_MODELS) | LEGACY_LLM_IDS}
     # MiniMax M3 的历史短横线写法
     | {"minimax-m3"}
+    # 短剧 QC 线曾把退役档以下划线形态写进 .env 的 *_VLM_ADAPTER 与分支配置，
+    # 归一别名跟着退役 ID 一起删，留任何一条都等于给它续命
+    | {"qwen3_vl_plus"}
 )
 
 REGISTER_DECORATOR_RE = re.compile(
@@ -144,8 +153,56 @@ class TestMediaRetirement:
         assert retired not in _yaml_ids(MODELS_YAML, "models")
 
     @pytest.mark.parametrize("retired", sorted(RETIRED_MEDIA_MODELS))
+    def test_absent_from_media_runtime_allowlist(self, retired):
+        """自动路由白名单是第三处事实源：档案和 adapter 都删了、白名单还留着，
+        运行期就变成 adapter_missing 响亮失败，比选不到更糟。"""
+        from core.unified_media_runtime import _OPERATION_MODEL_IDS
+
+        for operation, model_ids in _OPERATION_MODEL_IDS.items():
+            assert retired not in set(model_ids), f"{operation} 白名单仍保留已退役 {retired}"
+
+    @pytest.mark.parametrize("retired", sorted(RETIRED_MEDIA_MODELS))
+    def test_absent_from_asset_studio_groups(self, retired):
+        """资产工作台的分组是产品入口：档案删了、卡片删了但分组还列着，
+        页面就会把用户选中的档位发给后端换 400，属于最容易被漏的一层。"""
+        from app.services.asset_studio_model_catalog import get_asset_studio_model_sets
+
+        hit = [name for name, ids in get_asset_studio_model_sets().items() if retired in set(ids)]
+        assert hit == [], f"{retired} 仍出现在产品分组 {hit}"
+
+    def test_no_asset_studio_default_is_retired(self):
+        """默认档指向已删除的模型比分组里多留一档更糟：没做选择的请求会直接失败。"""
+        from app.services.asset_studio_model_catalog import _DEFAULT_MODEL_IDS
+
+        hit = [key for key, mid in _DEFAULT_MODEL_IDS.items() if mid in RETIRED_MEDIA_MODELS]
+        assert hit == [], f"工作台默认档仍指向退役模型: {sorted(hit)}"
+
+    @pytest.mark.parametrize("retired", sorted(RETIRED_MEDIA_MODELS))
     def test_absent_from_catalog_cards(self, catalog_keys, retired):
         assert retired not in catalog_keys
+
+    @pytest.mark.parametrize("retired", sorted(RETIRED_MEDIA_MODELS))
+    def test_absent_from_legacy_compatibility_tables(self, retired):
+        """兼容层是档案/注册中心/白名单之外的第四处事实源。
+
+        `create_runtime_wrapper` 未命中时返回 None 而不是报错，`_resolve_runtime_model_id`
+        又会在拿不到档案时把 QC 开关静默置 False：包装器表或工厂 env 映射里残留旧 ID，
+        退役就退成了"档案没了、对象还能建出来"，而调用方看不到任何异常。
+        """
+        from adapters.legacy_runtime_wrappers import (
+            _RUNTIME_WRAPPER_ALIASES,
+            _RUNTIME_WRAPPER_CLASSES,
+        )
+        from adapters.model_adapters import ModelAdapterFactory
+
+        forms = {retired.lower(), retired.lower().replace("-", "_"), retired.lower().replace(".", "_")}
+        wrapper_keys = {key.lower() for key in _RUNTIME_WRAPPER_CLASSES} | {
+            key.lower() for key in _RUNTIME_WRAPPER_ALIASES
+        }
+        assert forms & wrapper_keys == set(), f"{retired} 仍有 runtime 包装器条目: {sorted(forms & wrapper_keys)}"
+        factory_keys = {key.lower() for key in ModelAdapterFactory._ENV_PREFIX_MAP}
+        assert forms & factory_keys == set(), f"{retired} 仍在工厂 env 映射里: {sorted(forms & factory_keys)}"
+        assert retired not in set(ModelAdapterFactory._DEFAULT_MODEL_NAME_BY_ENV.values())
 
     @pytest.mark.parametrize(("retired", "successor"), sorted(RETIRED_MEDIA_MODELS.items()))
     def test_successor_is_registered_and_active(self, media_registry, retired, successor):
@@ -366,6 +423,14 @@ class TestReferenceAuditGate:
             # 记录性文件
             ("tests/test_model_retirement_registry.py", 'RETIRED_MEDIA_MODELS = {"wan2.7-i2v": "wan3.0-video"}', "wan2.7-i2v"),
             ("docs/MODEL_INTEGRATION_REFERENCE.md", "换代台账：wan2.7-r2v 已物理删除", "wan2.7-r2v"),
+            # 反向断言必须写出旧 ID 本身，否则"不许复活"无从断言
+            (
+                "frontend/src/components/home/__tests__/assetStudioVisionModelSource.test.ts",
+                "expect(source).not.toContain('qwen3.5-omni-plus')",
+                "qwen3.5-omni-plus",
+            ),
+            # 当日报价调研快照：内容是从旧配置原样粘贴的取证材料
+            ("调研API价格_2026-10-11_18-49.md", "- id: wan2.7-r2v", "wan2.7-r2v"),
         ],
     )
     def test_legitimate_kept_references_are_not_counted(self, path, line, model_id):
@@ -402,6 +467,31 @@ class TestReferenceAuditGate:
         ids = auditor.retired_ledger_ids()
         assert ids
         assert set(ids) >= (set(RETIRED_MEDIA_MODELS) | set(RETIRED_LLM_MODELS) | set(RENAMED_LLM_MODELS))
+
+    def test_every_scanned_path_resolves_to_a_readable_file(self):
+        """清单里的每个路径都必须真能读到内容，否则门禁对读不到的文件静默绿灯。
+
+        git 默认 `core.quotepath=true` 会把非 ASCII 路径转义成 `\350\220\275`，Windows 下
+        `text=True` 又按本地编码解码，两者叠加后中文命名的文档"出现在清单里、却拼不出文件"，
+        `_read` 返回 None 就等于这些文件从未被审计过。
+        """
+        auditor = self._load_auditor()
+        files = auditor.tracked_text_files()
+        assert files
+
+        unreadable = [rel for rel in files if not (ROOT_DIR / rel).is_file()]
+        # 物理退役会真删文件：索引还跟踪、工作区已不在，这类路径按定义没有可扫内容。
+        # 不放行就变成"每退役一次门禁假红一次"。git 的删除判定用内部文件名 stat，
+        # 不受输出转义影响，因此"存在但名字被转义"的文件不会被误归到这里。
+        deleted = {
+            line.strip().strip('"')
+            for line in (auditor._git_ls_files("-d") or "").splitlines()
+            if line.strip()
+        }
+        assert sorted(set(unreadable) - deleted) == []
+        assert any(any(ord(ch) > 127 for ch in rel) for rel in files), (
+            "扫描范围应覆盖非 ASCII 命名文件；一条都没有说明本用例的保护对象已消失"
+        )
 
 
 class TestEnvModelValueScan:

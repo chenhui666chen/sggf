@@ -78,7 +78,7 @@ class TestFieldCoverage:
             ("audio_window_end_ms", 37000),
             ("omni_expectation_contract_hash", "expect-h-2"),
             ("voice_binding_summary_hash", "binding-h-2"),
-            ("omni_model_id", "qwen3.5-omni-plus"),
+            ("omni_model_id", "qwen3.8-omni-flash"),
             ("omni_prompt_hash", "prompt-h-2"),
             ("omni_schema_hash", "schema-h-2"),
             ("audio_preprocessing_hash", "pre-h-2"),

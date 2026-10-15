@@ -6,15 +6,13 @@ import {
   Alert, Box, Card, CardContent, CardHeader, Chip, Collapse, Divider,
   Grid, IconButton, Paper, Tab, Tabs, Tooltip, Typography,
 } from '@mui/material'
-import {
-  ExpandMore as ExpandMoreIcon,
-  Movie as MovieIcon,
-  RateReview as RateReviewIcon,
-  Schema as SchemaIcon,
-  Speed as SpeedIcon,
-  Timeline as TimelineIcon,
-  Warning as WarningIcon,
-} from '@mui/icons-material'
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
+import MovieIcon from '@mui/icons-material/Movie'
+import RateReviewIcon from '@mui/icons-material/RateReview'
+import SchemaIcon from '@mui/icons-material/Schema'
+import SpeedIcon from '@mui/icons-material/Speed'
+import TimelineIcon from '@mui/icons-material/Timeline'
+import WarningIcon from '@mui/icons-material/Warning'
 
 import type {
   Am15Report, ShotContract, ScriptDocument, StateEngineTrack,
@@ -38,7 +36,7 @@ export function ShotContractCard({ contract }: { contract: ShotContract }) {
             <Typography variant="body2" fontWeight={600}>
               {contract.shot_id}
             </Typography>
-            <Chip label={contract.shot_size} size="small" sx={{ bgcolor: sizeColor, color: '#fff', height: 20 }} />
+            <Chip label={contract.shot_size} size="small" sx={{ bgcolor: sizeColor, color: '#fff' /* sg-color-fixed：景别数据色固定深底，配白字保证双主题可读 */, height: 20 }} />
             {contract.r_pre_eligible && (
               <Tooltip title="R-pre 候选择优（高价值 beat 双候选）">
                 <Chip label="R-pre" size="small" color="success" sx={{ height: 20 }} />
@@ -295,7 +293,7 @@ export function RepairKnowledgePanel({ knowledge }: { knowledge: RepairKnowledge
         title={
           <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
             <Typography variant="subtitle2">修复路由</Typography>
-            <Chip label={knowledge.r_level} size="small" sx={{ bgcolor: rColor, color: '#fff', height: 20 }} />
+            <Chip label={knowledge.r_level} size="small" sx={{ bgcolor: rColor, color: '#fff' /* sg-color-fixed：风险等级数据色固定深底，配白字保证双主题可读 */, height: 20 }} />
             {knowledge.edit_budget?.triggered && (
               <Chip label="止损触发→R4" size="small" color="error" sx={{ height: 20 }} />
             )}

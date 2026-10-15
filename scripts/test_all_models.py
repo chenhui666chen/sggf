@@ -21,7 +21,7 @@ TEST_CASES = {
     "qwen-image-3.0": {"type": "image", "prompt": "a red rose"},
     "qwen-image-3.0-pro": {"type": "image", "prompt": "a sunset"},
     "wan2.7-image-pro": {"type": "image", "prompt": "mountains"},
-    "qwen3.5-omni-plus": {"type": "text", "prompt": "你好"},
+    "qwen3.5-omni-flash": {"type": "text", "prompt": "你好"},
     "qwen3.6-plus": {"type": "text", "prompt": "你好"},
     "MiniMax/speech-2.8-turbo": {"type": "tts", "prompt": "你好"},
     "MiniMax/speech-2.8-hd": {"type": "tts", "prompt": "你好"},
@@ -33,7 +33,7 @@ TEST_CASES = {
     # === 新增待测试模型 ===
     "kling/kling-v3-image-generation": {"type": "image", "prompt": "a tree in spring"},
     "kling/kling-v3-omni-image-generation": {"type": "image", "prompt": "a dog running"},
-    "qwen3-vl-plus": {"type": "text", "prompt": "你好，请简短介绍自己"},
+    "qwen3.8-omni-flash": {"type": "text", "prompt": "你好，请简短介绍自己"},
     "qwen-image-edit-plus": {"type": "image", "prompt": "change background to blue sky"},
     "qwen-image-edit-max": {"type": "image", "prompt": "change background to sunset"},
     "doubao-seed-2-1-pro": {"type": "text", "prompt": "你好"},
@@ -106,7 +106,7 @@ def main():
         # 快速测试：已验证通过的模型
         quick_models = [
             "qwen-image-3.0", "qwen-image-3.0-pro", "wan2.7-image-pro",
-            "qwen3.5-omni-plus", "qwen3.6-plus",
+            "qwen3.5-omni-flash", "qwen3.6-plus",
             "MiniMax/speech-2.8-turbo", "MiniMax/speech-2.8-hd",
             "cosyvoice-v3.5-plus", "qwen-audio-3.1-tts-flash",
             "doubao-seedream-5-0", "doubao-seedream-5-0-pro",
@@ -116,7 +116,7 @@ def main():
         # 新模型测试
         new_models = [
             "kling/kling-v3-image-generation", "kling/kling-v3-omni-image-generation",
-            "qwen3-vl-plus", "qwen-image-edit-plus", "qwen-image-edit-max",
+            "qwen3.8-omni-flash", "qwen-image-edit-plus", "qwen-image-edit-max",
             "doubao-seed-2-1-pro", "doubao-seed-2-1-lite",
             "mureka-o1-instrumental",
         ]

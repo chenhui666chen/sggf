@@ -26,7 +26,7 @@ from fastapi.responses import JSONResponse
 from app.core.config import settings
 from app.db.base import Base, engine
 from app.db.schema_compat import ensure_runtime_schema_compatibility
-from app.api.v1 import auth, projects, chapters, reviews, workflow, settings as settings_api, knowledge, memories, ai_assist, statistics, characters, ai_detect, prompt_evolution, ai_trace, book_parser, audiobook, monitoring, script_review, dreamweaver, model_catalog, asset_studio, user_assets, user_center, smart_dispatch, feedback, agent_prompts, user_rights
+from app.api.v1 import auth, projects, chapters, reviews, workflow, settings as settings_api, knowledge, memories, ai_assist, statistics, characters, ai_detect, prompt_evolution, ai_trace, book_parser, audiobook, monitoring, script_review, dreamweaver, model_catalog, asset_studio, user_assets, user_center, smart_dispatch, feedback, agent_prompts, user_rights, video_api
 from app.api.v1.admin import router as admin_router
 import socketio
 
@@ -117,6 +117,7 @@ from app.models import (
     BookSource, BookChapter, BookAnalysis,
     AudiobookProject, ChapterAudio,
     ModelCatalogEntry, ModelCatalogSource,  # 模型档案中心
+    VideoApiApplication,
     UserAssetRecord,  # 用户资产记录
 )
 
@@ -136,6 +137,11 @@ async def lifespan(app: FastAPI):
             )
         if settings.DEBUG:
             raise RuntimeError(f"{settings.APP_ENV} 环境 DEBUG 必须为 False")
+        if not str(settings.VIDEO_GATEWAY_INTERNAL_URL or "").strip() or not str(
+            settings.VIDEO_GATEWAY_INTERNAL_TOKEN or "").strip():
+            raise RuntimeError(
+                f"{settings.APP_ENV} 环境必须配置 VIDEO_GATEWAY_INTERNAL_URL 与 VIDEO_GATEWAY_INTERNAL_TOKEN"
+            )
         # openid 加密存储（P2-4.1）：缺一把密钥都会让 OAuth 链路在运行时 fail-closed 503，
         # 启动即拦截，避免上线后才发现第三方登录不可用
         if not str(settings.OPENID_LOOKUP_KEY or "").strip() or not str(
@@ -266,6 +272,7 @@ app.include_router(model_catalog.router)  # 模型档案中心 API
 app.include_router(asset_studio.router)  # 首页资产工作台 API
 app.include_router(user_assets.router)  # 用户资产记录 API
 app.include_router(user_center.router)  # 用户中心汇总与权益 API
+app.include_router(video_api.router)  # 视频 API 应用管理
 app.include_router(smart_dispatch.router)  # 智能调度 API
 app.include_router(feedback.router)  # 生成反馈闭环 API
 app.include_router(user_rights.router)  # 用户数据权利 API（P2-4.3）

@@ -4,6 +4,16 @@ import { fileURLToPath } from 'node:url'
 
 const source = readFileSync(fileURLToPath(new URL('../AssetStudioWorkbench.tsx', import.meta.url)), 'utf8')
 
+describe('Asset Studio image editing contract', () => {
+  it('retired image editors are not available and extra images are rejected rather than truncated', () => {
+    expect(source).not.toContain("value: 'qwen-image-edit-plus'")
+    expect(source).not.toContain("value: 'qwen-image-edit-max'")
+    expect(source).toContain("imageReferenceFiles.length > imageReferenceLimit")
+    expect(source).not.toContain('Array.from(files).slice(0, imageReferenceLimit)')
+    expect(source).toContain("t('assetStudio.workbench.error.imageReferenceLimit'")
+  })
+})
+
 describe('Asset Studio duration control source contract', () => {
   it('区间模型走滑块 + 数字输入 + 智能时长，档位模型保留下拉', () => {
     expect(source).toContain("from '@/utils/assetStudioDurationControls'")

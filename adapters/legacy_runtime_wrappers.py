@@ -64,85 +64,6 @@ class _BaseLegacyRuntimeWrapper:
         )
 
 
-class Qwen3VLPlusRuntimeWrapper(_BaseLegacyRuntimeWrapper):
-    TARGET_MODEL_ID = "qwen3-vl-plus"
-
-    def generate(self, **kwargs: Any) -> LegacyCompatResult:
-        if "messages" in kwargs:
-            return self.chat(
-                messages=kwargs.get("messages"),
-                temperature=float(kwargs.get("temperature", 0.2) or 0.2),
-                max_tokens=kwargs.get("max_tokens"),
-                response_format=kwargs.get("response_format"),
-            )
-        if "image_path" in kwargs:
-            return self.analyze_image(
-                image_path=str(kwargs.get("image_path") or ""),
-                analysis_type=str(kwargs.get("analysis_type") or "quality"),
-                criteria=kwargs.get("criteria"),
-            )
-        if "video_path" in kwargs:
-            return self.analyze_video(
-                video_path=str(kwargs.get("video_path") or ""),
-                analysis_type=str(kwargs.get("analysis_type") or "quality"),
-                criteria=kwargs.get("criteria"),
-            )
-        return LegacyCompatResult(success=False, data=None, error="Unsupported operation for qwen3_vl_plus")
-
-    def chat(
-        self,
-        *,
-        messages: Any,
-        temperature: float = 0.2,
-        max_tokens: Optional[int] = None,
-        response_format: Optional[Dict[str, Any]] = None,
-    ) -> LegacyCompatResult:
-        from adapters.adapter_helpers import chat_messages
-
-        result = chat_messages(
-            messages=messages,
-            temperature=temperature,
-            max_tokens=max_tokens,
-            response_format=response_format,
-            model_id=self.TARGET_MODEL_ID,
-        )
-        return self._legacy_simple_result(result, default_data={"content": ""})
-
-    def analyze_image(
-        self,
-        *,
-        image_path: str,
-        analysis_type: str = "quality",
-        criteria: Optional[List[str]] = None,
-    ) -> LegacyCompatResult:
-        from adapters.adapter_helpers import analyze_image
-
-        result = analyze_image(
-            image_path=image_path,
-            analysis_type=analysis_type,
-            criteria=criteria,
-            model_id=self.TARGET_MODEL_ID,
-        )
-        return self._legacy_simple_result(result)
-
-    def analyze_video(
-        self,
-        *,
-        video_path: str,
-        analysis_type: str = "quality",
-        criteria: Optional[List[str]] = None,
-    ) -> LegacyCompatResult:
-        from adapters.adapter_helpers import analyze_video
-
-        result = analyze_video(
-            video_path=video_path,
-            analysis_type=analysis_type,
-            criteria=criteria,
-            model_id=self.TARGET_MODEL_ID,
-        )
-        return self._legacy_simple_result(result)
-
-
 class _BaseImageEditRuntimeWrapper(_BaseLegacyRuntimeWrapper):
     def generate(
         self,
@@ -429,7 +350,6 @@ class MiniMaxSpeech28HDRuntimeWrapper(_BaseLegacyRuntimeWrapper):
 
 
 _RUNTIME_WRAPPER_CLASSES: Dict[str, Type[_BaseLegacyRuntimeWrapper]] = {
-    "qwen3_vl_plus": Qwen3VLPlusRuntimeWrapper,
     "qwen_audio_3_1_tts": QwenAudio31TTSRuntimeWrapper,
     "qwen_image_edit_plus": QwenImageEditPlusRuntimeWrapper,
     "qwen_image_edit_max": QwenImageEditMaxRuntimeWrapper,

@@ -103,8 +103,10 @@ export const VIDEO_EDIT_MODEL_OPTIONS = [
 ]
 
 export const VISION_MODEL_OPTIONS = [
-  { value: 'qwen3-vl-plus', label: 'dreamweaverRun.modelVisionQwen3VlPlus' },
-  { value: 'qwen3.5-omni-plus', label: 'dreamweaverRun.modelVisionQwen35OmniPlus' },
+  { value: 'qwen-plus', label: 'dreamweaverRun.modelVisionQwenPlus' },
+  { value: 'qwen3.8-omni-flash', label: 'dreamweaverRun.modelVisionQwen38OmniFlash' },
+  { value: 'doubao-seed-2-1-lite', label: 'dreamweaverRun.modelVisionDoubaoSeed21Lite' },
+  { value: 'doubao-seed-2-1-pro', label: 'dreamweaverRun.modelVisionDoubaoSeed21Pro' },
 ]
 
 export const SAFETY_FAIL_POLICY_OPTIONS = [

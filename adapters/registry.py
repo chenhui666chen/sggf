@@ -147,7 +147,6 @@ class ModelRegistry:
                 "adapters.dashscope.image_sync",
                 "adapters.dashscope.image_async",
                 "adapters.dashscope.image_edit",
-                "adapters.dashscope.multimodal",
                 "adapters.dashscope.tts",
                 "adapters.dashscope.audio_generation",
                 "adapters.dashscope.video_t2v",

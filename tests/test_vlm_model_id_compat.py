@@ -23,7 +23,7 @@ def test_vlm_chat_json_accepts_model_id_string(
     monkeypatch.setattr("adapters.adapter_helpers.chat_messages", fake_chat_messages)
 
     obj = vlm_utils.vlm_chat_json(
-        vlm_adapter="qwen3_vl_plus",
+        vlm_adapter="qwen3.8-omni-flash",
         messages=[{"role": "user", "content": "hello"}],
         temperature=0.3,
         max_tokens=256,
@@ -35,7 +35,7 @@ def test_vlm_chat_json_accepts_model_id_string(
         "temperature": 0.3,
         "max_tokens": 256,
         "response_format": {"type": "json_object"},
-        "model_id": "qwen3_vl_plus",
+        "model_id": "qwen3.8-omni-flash",
     }
 
 
@@ -69,7 +69,7 @@ def test_best_image_selector_accepts_model_id_string_for_vlm_analysis(
     result = select_best_candidate(
         candidate_paths=[img_a, img_b],
         selector="vlm",
-        vlm_adapter="qwen3_vl_plus",
+        vlm_adapter="qwen3.8-omni-flash",
         vlm_criteria=["quality"],
     )
 
@@ -80,12 +80,12 @@ def test_best_image_selector_accepts_model_id_string_for_vlm_analysis(
             "image_path": str(img_a),
             "analysis_type": "quality",
             "criteria": ["quality"],
-            "model_id": "qwen3_vl_plus",
+            "model_id": "qwen3.8-omni-flash",
         },
         {
             "image_path": str(img_b),
             "analysis_type": "quality",
             "criteria": ["quality"],
-            "model_id": "qwen3_vl_plus",
+            "model_id": "qwen3.8-omni-flash",
         },
     ]

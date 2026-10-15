@@ -31,7 +31,7 @@ _OPERATION_MODEL_IDS: Dict[str, set[str]] = {
         "doubao-seedance-2-5",  # Doubao Seedance 2.5：全模态参考 + 编辑/延长 + 样片模式
         "doubao-seedance-2-0", "doubao-seedance-2-0-fast",  # Doubao Seedance 视频生成
     },
-    "edit_image": {"qwen-image-edit-plus", "qwen-image-edit-max"},
+    "edit_image": {"qwen-image-edit-plus", "qwen-image-edit-max", "qwen-image-3.0"},
     # 视频编辑：档案声明 video_edit、且 adapter 能下发 reference_video 的现役四档
     "edit_video": {
         "wan3.0-video",
@@ -39,8 +39,21 @@ _OPERATION_MODEL_IDS: Dict[str, set[str]] = {
         "doubao-seedance-2-0",
         "doubao-seedance-2-0-fast",
     },
-    "analyze_image": {"qwen3-vl-plus", "qwen3.5-omni-plus"},  # 视觉理解模型
-    "analyze_video": {"qwen3-vl-plus", "qwen3.5-omni-plus"},  # 视觉理解模型
+    # 视觉理解模型：档案声明 image/video_understanding 且 adapter 混入 VisionReviewMixin 才可入列。
+    # 本表要与资产工作台 vision_review 分组逐字相等：过渡期保留的旧 QC 存量档已于 2026-10-12
+    # 随短剧 QC 默认档迁移摘除，同批用 scripts/rewrite_legacy_model_ids.py 复核库内存量，零命中。
+    "analyze_image": {
+        "qwen-plus",
+        "qwen3.8-omni-flash",
+        "doubao-seed-2-1-lite",
+        "doubao-seed-2-1-pro",
+    },
+    "analyze_video": {
+        "qwen-plus",
+        "qwen3.8-omni-flash",
+        "doubao-seed-2-1-lite",
+        "doubao-seed-2-1-pro",
+    },
     "synthesize_speech": {
         "qwen-audio-3.1-tts-flash",
         "cosyvoice-v3.5-plus",
@@ -395,10 +408,11 @@ class UnifiedMediaRuntime:
         image_paths = [image_path]
         if reference_images:
             image_paths.extend(reference_images)
+        modality = "image_to_image" if normalize_model_id(model_id) == "qwen-image-3.0" else "image_to_image_edit"
 
         builder = (
             TaskSpecBuilder()
-            .with_modality("image_to_image_edit")
+            .with_modality(modality)
             .with_prompt(edit_prompt)
             .with_references(images=image_paths)
         )
@@ -412,7 +426,7 @@ class UnifiedMediaRuntime:
 
         return self._execute_registry_operation(
             operation="edit_image",
-            modality="image_to_image_edit",
+            modality=modality,
             task=builder.build(),
             preferred_model=model_id,
             strategy=strategy,

@@ -26,12 +26,6 @@ api_key = os.getenv("VOLCENGINE_TTS_API_KEY") or os.getenv("DOUBAO_TTS_API_KEY")
 resource_id = os.getenv("VOLCENGINE_TTS_RESOURCE_ID", "seed-tts-2.0")
 session_id = str(uuid.uuid4())
 
-print(f"WebSocket URL: {ws_url}")
-print(f"API Key: {api_key[:20] if api_key else 'NOT SET'}...")
-print(f"Resource ID: {resource_id}")
-print(f"Session ID: {session_id}")
-print("=" * 80)
-
 # Event types (from official docs)
 class Event(IntEnum):
     NONE = 0
@@ -302,22 +296,32 @@ def on_error(ws, error):
 def on_close(ws, close_status_code, close_msg):
     print(f"\n[CLOSE] Status: {close_status_code}, Message: {close_msg}")
 
-print("\nStarting WebSocket connection with BINARY FRAMES...")
-ws = websocket.WebSocketApp(
-    ws_url,
-    header={
-        "X-Api-Key": api_key,
-        "X-Api-Resource-Id": resource_id,
-    },
-    on_open=on_open,
-    on_message=on_message,
-    on_error=on_error,
-    on_close=on_close,
-)
 
-ws.run_forever(ping_timeout=10, ping_interval=30)
+# Top-level code would run on `import`, and pytest collects this file by name, so the
+# live session stays behind a guard: importing it must not spend a real TTS call.
+if __name__ == "__main__":
+    print(f"WebSocket URL: {ws_url}")
+    print(f"API Key: {'configured' if api_key else 'NOT SET'}")
+    print(f"Resource ID: {resource_id}")
+    print(f"Session ID: {session_id}")
+    print("=" * 80)
 
-print("\n" + "=" * 80)
-print(f"Total events received: {len(events)}")
-print(f"Total audio chunks: {len(audio_chunks)}")
-print(f"Error state: {error_state}")
+    print("\nStarting WebSocket connection with BINARY FRAMES...")
+    ws = websocket.WebSocketApp(
+        ws_url,
+        header={
+            "X-Api-Key": api_key,
+            "X-Api-Resource-Id": resource_id,
+        },
+        on_open=on_open,
+        on_message=on_message,
+        on_error=on_error,
+        on_close=on_close,
+    )
+
+    ws.run_forever(ping_timeout=10, ping_interval=30)
+
+    print("\n" + "=" * 80)
+    print(f"Total events received: {len(events)}")
+    print(f"Total audio chunks: {len(audio_chunks)}")
+    print(f"Error state: {error_state}")

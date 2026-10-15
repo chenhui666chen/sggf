@@ -63,6 +63,8 @@ const THEME_DIR = 'theme'
  *   home/ModelUseEntryStrip.tsx / home/modelEntryData.ts：资产生成工作台家族，整页紫渐变
  *   （#667eea→#764ba2）或墨底专业工作台梯度（rgba(16,18,22,0.98)）+ 白叠色 + 品牌蓝渐变的
  *   自包含常暗设计（tab 身份色/生成状态色是模块数据色）；画布不随主题反相。
+ * - home/assetStudioFieldStyles.tsx：上面这个家族的字段样式单一事实源（控件表面/卡片底/
+ *   菜单/包装组件），白叠色必须逐态钉死，否则浅色主题 token 会漏进常暗画布。
  * - AudiobookDashboardPage.tsx：耳畔星河有声项目库，整页墨灰渐变（#6b7280→#374151）+ 蓝渐变
  *   品牌 bar + 白叠玻璃/黑胶唱片视觉 + 体裁数据卡（深底浅字数据对）的自包含常暗沉浸库，
  *   白字跟随画布而非主题；删除确认 Dialog 内的红色为危险操作语义色，固定双模可读。
@@ -70,6 +72,10 @@ const THEME_DIR = 'theme'
  *   封面调色板（深底浅字数据对 + 四段渐变）是书卡封面美术数据，渲在浅色页面上也刻意保持
  *   深色封面（同 audiobook 黑胶卡），不随主题反相；卡片渲染区的光影/金字美术层在宿主
  *   DashboardPage 内以 sg-color-fixed 行内豁免。
+ * - utils/directorOSAccessors.ts：AI Director OS 的景别身份色（LS/FS/MS/CU/ECU）与修复风险
+ *   等级色（R0–R6）。七档风险与五档景别是分类数据编码，不是语义色（同 bookVizData 的题材
+ *   标签色），语义 palette 既装不下七档也不该把"景别"解释成危险程度；色值由取值域固定，
+ *   深浅主题下都保持同一映射，否则同一镜号在两个主题下会被读成不同景别。
  */
 const FILE_ALLOWLIST = new Set<string>([
   'src/pages/audiobook/audiobookTheme.ts',
@@ -85,10 +91,12 @@ const FILE_ALLOWLIST = new Set<string>([
   'src/pages/AssetStudioPage.tsx',
   'src/components/home/AssetStudioWorkbench.tsx',
   'src/components/home/AssetStudioVisionReviewPanel.tsx',
+  'src/components/home/assetStudioFieldStyles.tsx',
   'src/components/home/ModelUseEntryStrip.tsx',
   'src/components/home/modelEntryData.ts',
   'src/pages/AudiobookDashboardPage.tsx',
   'src/pages/dashboard/bookVizData.ts',
+  'src/utils/directorOSAccessors.ts',
 ])
 
 /** 行内豁免标记：品牌色 / 数据色等刻意固定的颜色，在该行注明来源即可跳过。 */

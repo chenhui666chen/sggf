@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>视频模型 API 价格全量横评（2026-10-15）</title>
+<style>
+  :root{--bg:#f6f7f9;--card:#fff;--ink:#1f2329;--sub:#646a73;--line:#e5e6eb;--brand:#2b5cff;--h3:#e8503c;--wan:#1a9e6e;--sd:#7c4dff;--off:#0b7285;--other:#8a6d00;}
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:"Segoe UI","Microsoft YaHei",system-ui,sans-serif;background:var(--bg);color:var(--ink);padding:28px 20px 60px;line-height:1.55}
+  .wrap{max-width:1620px;margin:0 auto}
+  h1{font-size:24px;margin-bottom:6px}
+  .meta{color:var(--sub);font-size:13px;margin-bottom:18px}
+  .note{background:#fff8e6;border:1px solid #ffe2a8;border-radius:8px;padding:12px 16px;font-size:13px;margin-bottom:14px}
+  .note b{color:#a86a00}
+  .legend{background:#eef3ff;border:1px solid #cdd9ff;border-radius:8px;padding:10px 16px;font-size:12.5px;margin-bottom:22px}
+  .legend .k{display:inline-block;margin-right:14px;white-space:nowrap}
+  .filters{display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap}
+  .filters button{border:1px solid var(--line);background:#fff;border-radius:18px;padding:6px 16px;font-size:13px;cursor:pointer}
+  .filters button.active{background:var(--brand);color:#fff;border-color:var(--brand)}
+  section{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px 20px 24px;margin-bottom:26px;overflow-x:auto}
+  h2{font-size:18px;margin-bottom:4px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  h2 .dot{width:10px;height:10px;border-radius:50%;display:inline-block}
+  h2 .sub{font-size:12px;font-weight:400;color:var(--sub)}
+  table{border-collapse:collapse;width:100%;font-size:12.5px;margin-top:12px;min-width:1240px}
+  th,td{border:1px solid var(--line);padding:7px 9px;text-align:left;vertical-align:top}
+  th{background:#f2f4f8;font-weight:600;white-space:nowrap}
+  tr:nth-child(even) td{background:#fafbfc}
+  .src{font-weight:600;white-space:nowrap}
+  .price{font-variant-numeric:tabular-nums;white-space:nowrap}
+  .cheap{color:#c22525;font-weight:700}
+  .bad{color:#c22525}
+  .tag{display:inline-block;font-size:11px;border-radius:4px;padding:1px 6px;margin:1px 2px 1px 0;background:#eef3ff;color:#2b5cff;white-space:nowrap}
+  .tag.warn{background:#fff0e6;color:#d4690f}
+  .tag.grey{background:#f0f0f0;color:#666}
+  .tag.on{background:#e6f7ed;color:#1a7f4b}
+  .tag.dep{background:#fdeaea;color:#c22525}
+  .tag.up{background:#f3eaff;color:#6a3fc0}
+  .tag.mkt{background:#e6f2ff;color:#0b62c4}
+  .small{color:var(--sub);font-size:11.5px}
+  .group-row td{background:#eef1f6!important;font-weight:700}
+  .off-row td{background:#eaf6f8!important}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>视频模型 API 价格全量横评（MiniMax H3 · Wan3.0 · Seedance 2.5 + 官方 + 衍生同厂）</h1>
+<div class="meta">整理时间：2026-10-15｜来源：十站登录后模型广场 / API 文档 / 公开取价接口实测 + MiniMax·阿里云百炼·火山官方定价页直读 + grsai 积分换算复核｜货币：人民币元；贰春 1 点=¥1；三宝 10 积分=¥1；grsai ¥1=10000~20000 积分（随充值档）；其余直接元计价</div>
+<div class="note">
+<b>官方刊例锚点（折扣基准，实时直读官方页）：</b><br>
+① <b>MiniMax-H3</b>（platform.minimax.cn）：768P ¥0.50/秒、2K ¥0.80/秒；H3-Max 480P ¥0.33 / 768P ¥0.50；参考视频按「输入秒×成片分辨率单价」另计，图 5 张内免费·超出 ¥0.20/张、音频免费；国际站 768P $0.08 / 2K $0.13 每秒。<br>
+② <b>Wan3.0</b>（阿里云百炼，计费=输入视频秒+输出视频秒）：wan3.0-video 原价 480P ¥0.30 / 720P ¥0.60 / 1080P ¥1.20 每秒（官方限时 7 折=0.21/0.42/0.84）；wan3.0-video-prime 0.45/0.90/1.80。<br>
+③ <b>Seedance-2.5</b>（火山方舟，按 token：(输入秒+输出秒)×宽×高×帧率/1024）：480p/720p 不含视频输入 ¥70·含视频 ¥42 每百万 token；1080p ¥77·¥46（限时 72 折）；折算秒价约 480p ¥0.672 / 720p ¥1.512 / 1080p ¥3.742。<br>
+<b>四类口径陷阱：</b>①<b>自部署开源</b>（AutoDL ComfyUI 工作流 / zhiqiapi H3 超低价）≠官方 API 转售，画质稳定不同级；②<b>满赠顶档乐观价</b>（grsai 展示 ¥0.05/0.07/0.15 按 ¥1=20000 顶档，最低档真实 ×2=0.10/0.14/0.30）；③<b>"官方直连"=加价转售</b>（灵客 H3 官直 0.891、wan 官直 0.5346 ≈真官方 1.78 倍）；④<b>价格低≠可用</b>，货源分销/聚合，过脸策略·售后·成功率各异。
+</div>
+<div class="legend">
+  <span class="k"><b>通道性质</b>：</span>
+  <span class="k"><span class="tag dep">自部署</span>社区开源工作流</span>
+  <span class="k"><span class="tag mkt">官方转售</span>≈官方刊例</span>
+  <span class="k"><span class="tag up">加价转售</span>高于官方</span>
+  <span class="k"><span class="tag warn">聚合特价</span>分销渠道</span>
+  <span class="k">｜<b>台账</b>：</span>
+  <span class="k"><span class="tag on">已入 routes.yaml</span></span>
+  <span class="k"><span class="tag grey">未登记</span></span>
+</div>
+<div class="filters">
+<button class="active" onclick="show('all',this)">全部</button>
+<button onclick="show('official',this)">官方刊例</button>
+<button onclick="show('h3',this)">MiniMax H3</button>
+<button onclick="show('wan',this)">Wan3.0-Video</button>
+<button onclick="show('sd',this)">Seedance 2.5</button>
+<button onclick="show('other',this)">衍生·同厂其他</button>
+</div>
+
+<!-- ============ 官方刊例 ============ -->
+<section data-cat="official">
+<h2><span class="dot" style="background:var(--off)"></span>官方刊例价（三家原厂直读，折扣基准）<span class="sub">MiniMax / 阿里云百炼 / 火山方舟</span></h2>
+<table>
+<thead><tr><th>来源（官网）</th><th>模型名称（Model ID）</th><th>能力：时长 / 输入模态 / 分辨率</th><th>计价方式与价格</th><th>计费口径 / 备注</th></tr></thead>
+<tbody>
+<tr class="group-row"><td colspan="5">MiniMax 开放平台（platform.minimax.cn）—— 视频生成</td></tr>
+<tr class="off-row"><td class="src" rowspan="6">MiniMax<br>官方</td><td>MiniMax-H3</td><td>768P / 2K；图 5 张内免费·超出，音频免费，可传参考视频</td><td class="price">768P ¥0.50/秒｜2K ¥0.80/秒</td><td>按输出秒；参考视频按输入秒×成片分辨率单价另计（2K 0.80 / 768P 0.50）</td></tr>
+<tr class="off-row"><td>MiniMax-H3（输入素材）</td><td>图 / 音频 / 视频</td><td class="price">图超出 ¥0.20/张｜音频免费｜视频 768P 0.50·2K 0.80 /秒</td><td>—</td></tr>
+<tr class="off-row"><td>MiniMax-H3-Max</td><td>480P / 768P；图 2 张内免费·超出</td><td class="price">480P ¥0.33/秒｜768P ¥0.50/秒</td><td>参考视频 480P 0.37 / 768P 0.97 /秒；图超出 ¥0.50/张</td></tr>
+<tr class="off-row"><td>MiniMax-H3-Regeneration</td><td>768P → 2K 视频再生成（超分）</td><td class="price">¥0.30/秒</td><td>按再生成输出秒；图 5 张内免费超出 ¥0.15/张；参考视频 ¥0.30/秒</td></tr>
+<tr class="off-row"><td>MiniMax-H3-Context-IR</td><td>上下文/检索（token）</td><td class="price">输入 ¥5.80 / 输出 ¥23.00 每百万 token</td><td>按 token</td></tr>
+<tr class="off-row"><td>MiniMax（国际站）</td><td>H3 美元刊例</td><td class="price">768P $0.08/秒｜2K $0.13/秒</td><td>与国内人民币价不一致，折扣一律以国内 ¥0.50/¥0.80 为基准</td></tr>
+
+<tr class="group-row"><td colspan="5">阿里云百炼（help.aliyun.com/model-studio）—— 视频生成（输入不计费·输出按秒；万相3.0 输入+输出均计费）</td></tr>
+<tr class="off-row"><td class="src" rowspan="4">阿里云<br>官方</td><td>wan3.0-video（标准）</td><td>480P / 720P / 1080P；文生·图生·参考视频</td><td class="price">原价 480P ¥0.30 / 720P ¥0.60 / 1080P ¥1.20 每秒<br>限时 7 折 ¥0.21 / 0.42 / 0.84</td><td>计费时长=输入视频秒+输出视频秒；免费额度 30 秒</td></tr>
+<tr class="off-row"><td>wan3.0-video-prime（优速）</td><td>480P / 720P / 1080P</td><td class="price">¥0.45 / 0.90 / 1.80 每秒</td><td>同上</td></tr>
+<tr class="off-row"><td>happyhorse-1.1-t2v / i2v / r2v</td><td>文生·图生·参考生视频；480P / 720P / 1080P</td><td class="price">¥0.45 / 0.90 / 1.20 每秒</td><td>仅输出计费；华北2有 10 秒免费额度</td></tr>
+<tr class="off-row"><td>happyhorse-1.0-t2v / i2v / r2v / video-edit</td><td>720P / 1080P（video-edit 输入+输出均计费）</td><td class="price">¥0.90 / 1.60 每秒</td><td>—</td></tr>
+
+<tr class="group-row"><td colspan="5">火山方舟 —— Seedance-2.5（按 token）</td></tr>
+<tr class="off-row"><td class="src">火山<br>官方</td><td>doubao-seedance-2.5</td><td>480p / 720p / 1080p；最多 30 图 + 10 视 + 10 音</td><td class="price">480/720p：不含视 ¥70 · 含视 ¥42 / 百万 token<br>1080p：¥77 · ¥46（限时 72 折）<br>折算约 0.672 / 1.512 / 3.742 元/秒</td><td>token=(输入秒+输出秒)×宽×高×帧率/1024；四源收敛</td></tr>
+</tbody>
+</table>
+</section>
+
+<!-- ============ H3 ============ -->
+<section data-cat="h3">
+<h2><span class="dot" style="background:var(--h3)"></span>MiniMax H3 全平台在售模型<span class="sub">7 家有售：AutoDL / 算力AI / 灵客 / 三宝 / Grsai / simplefuture / 志奇（贰春已下架、huoai2·newtoken 无）</span></h2>
+<table>
+<thead><tr><th>来源（官网）</th><th>模型名称（API ID）</th><th>能力：时长 / 输入模态与数量 / 分辨率</th><th>计价方式与价格（元/秒，高峰价）</th><th>性质 / 相对官方（768P ¥0.50）/ 台账</th></tr></thead>
+<tbody>
+<tr class="group-row"><td colspan="5">AutoDL.Art —— ComfyUI 工作流 API（共 15 个 H3 工作流；高峰 08–24 时 / 空闲 00–08 时；公告 2026-10-16 起每档 +¥0.01/秒；下表为涨价前现价）</td></tr>
+<tr><td class="src" rowspan="5">AutoDL<br>autodl.art<br>（ComfyUI）</td><td>minimax_h3_z0901（文生·高质量创意直出）</td><td>1–15 秒；纯文生；480p / 768p / 1088p / 1440p(2K)</td><td class="price">480p 0.040 / 768p 0.070 / 1088p 0.070 / 1440p 0.080<br><span class="small">闲时 0.030 / 0.050 / 0.050 / 0.060</span></td><td><span class="tag dep">自部署</span><span class="tag on">已入台账</span>768p 1.4 折；近7天 z0901 高频</td></tr>
+<tr><td>minimax_h3_z0902（六图生·多图一致性）</td><td>1–15 秒；6 参考图+提示词；480p / 768p / 1080p / 2k</td><td class="price">同 z0901（0.040/0.070/0.070/0.080）<br><span class="small">闲时 0.030/0.050/0.050/0.060</span></td><td><span class="tag dep">自部署</span><span class="tag on">已入台账</span><b>2026-10-15 订正：原误登记 0.40/0.70（10x），实为文生同价</b></td></tr>
+<tr><td>minimax_h3_z0903（六图三音·音画融合）</td><td>1–15 秒；6 图 + 3 音频；480p / 768p / 1080p / 2k</td><td class="price">同 z0901（0.040/0.070/0.070/0.080）</td><td><span class="tag dep">自部署</span><span class="tag on">已入台账</span><b>订正：原误登记 10x；音频为叙事混轨非对口型</b></td></tr>
+<tr><td>minimax_h3_zm_u24（升级画质）/ zm_u08（高速版）</td><td>1–15 秒；多图+多音频（≤9图3音）；480p / 768p</td><td class="price">480p 0.030 / 768p 0.040<br><span class="small">闲时 0.020 / 0.030</span></td><td><span class="tag dep">自部署</span><span class="tag on">zm_u24已入</span><b class="cheap">全站最低 0.6–0.8 折</b>；u24 近7天 20 万+ 用量</td></tr>
+<tr><td>minimax_h3_b99_001 / b99_002 / b99_003_12s<br>image_audio_to_video / lightx2v 系（no_pic·v5·ia_v2 等）</td><td>b99：文生·首尾帧·9图，736p，12–15 秒；<br>light/ia：文生·图生·对口型，480p/768p（部分 1080p），≤15 秒，9 图 3 音</td><td class="price">b99 系 736p 0.050（闲 0.030）<br>light/ia 系 480p 0.030 / 768p 0.040 / 1080p 0.090~0.100<br><span class="small">lightx2v 属加速变体（对外接口 minimax-h3-light）</span></td><td><span class="tag dep">自部署</span><span class="tag on">b99_002/lightx2v/zm 已入</span><b>b99_002 订正：原 0.50 误（10x），实 0.05</b></td></tr>
+
+<tr class="group-row"><td colspan="5">AutoDL.Art —— 大模型市场（官方 API 转售通道；价格高一个数量级，画质可对标官方）</td></tr>
+<tr><td class="src">AutoDL<br>大模型市场</td><td>MiniMax-H3（官方 API 转售）</td><td>768P / 2K；音频免费·图 5 张内免费·视频同价</td><td class="price">768P ¥0.450/秒（原 ¥0.500，会员 9 折）<br>2K ¥0.720/秒（原 ¥0.800）<br><span class="small">图超出 ¥0.180/张（原 0.200）</span></td><td><span class="tag mkt">官方转售</span><span class="tag grey">未登记</span>原价=官方刊例 1:1；<b>是"成本≈官方"的真实通道反证</b></td></tr>
+
+<tr class="group-row"><td colspan="5">Grsai（grsai.ai）—— 积分制（¥1=10000~20000 积分，随充值档）；视频模型仅 2 个</td></tr>
+<tr><td class="src">Grsai<br>grsai.ai</td><td>minimax-h3</td><td>1–15 秒（1080p 仅 10 秒）；文生·参考图+音频；480p / 768p / 1080p；失败返还</td><td class="price">积分/秒（固定）：480p 1000 · 768p 1400 · 1080p 3000<br>展示价（顶档 ¥1=20000）：¥0.05 / 0.07 / 0.15<br><b class="cheap">真实成本（最低档 ¥1=10000）：¥0.10 / 0.14 / 0.30</b></td><td><span class="tag warn">聚合</span><span class="tag on">已入台账(按真实扣费)</span>台账价 0.10/0.14/0.30；展示 0.07 为满赠乐观价×2</td></tr>
+
+<tr class="group-row"><td colspan="5">志奇引擎（zhiqiapi.com）—— 标"比官方便宜48%"</td></tr>
+<tr><td class="src">志奇<br>zhiqiapi.com</td><td>H3（MiniMax）</td><td>4–15 秒；9 图 + 3 音频；仅 720p；比例 9:16/16:9/4:3/3:4/1:1</td><td class="price">按秒 <b class="cheap">¥0.0544/秒</b></td><td><span class="tag dep">自部署通道</span><span class="tag grey">未登记</span>约 1.1 折，全场最低；超低价=开源自部署，非官方 API</td></tr>
+
+<tr class="group-row"><td colspan="5">simplefuture 至简未来（simplefuture.zone）—— 元计价</td></tr>
+<tr><td class="src" rowspan="2">至简未来<br>simplefuture.zone</td><td>zj-MiniMax-H3</td><td>768P</td><td class="price">按秒 ¥0.10/秒</td><td><span class="tag warn">聚合</span><span class="tag grey">未登记</span>约 2 折</td></tr>
+<tr><td>lec-minimax-h3-768p</td><td>1–15 秒；9 图 + 3 音频；768p；16:9 / 9:16（需在画布手填 768p）</td><td class="price">按次 <b class="cheap">¥1.5/条</b></td><td><span class="tag warn">聚合</span><span class="tag grey">未登记</span>lightx2v 曾实测同源挂演示片，建议小额验片</td></tr>
+
+<tr class="group-row"><td colspan="5">三宝影像工坊（sanbaobeauty.com）—— 10 积分=¥1，H3 全部 2K 按次</td></tr>
+<tr><td class="src" rowspan="3">三宝<br>sanbaobeauty.com</td><td>hailuo_h3_2k（Hailuo-H3-2K）</td><td>4–15 秒；9 图 + 3 音频（素材≤15）；2K；6 比例；能过真人</td><td class="price">20 积分/次 = <b class="cheap">¥2.0/条</b></td><td><span class="tag warn">聚合</span><span class="tag on">已入台账</span>实测真 2K 2560×1440/24fps；实测仅 1–2 图（9图3音虚标）</td></tr>
+<tr><td>hailuo_h3_2k_line2（线路2）</td><td>4–15 秒；9图3音（素材≤12）；2K</td><td class="price">23 积分/次 = ¥2.3/条</td><td><span class="tag warn">聚合</span><span class="tag grey">未登记</span></td></tr>
+<tr><td>hailuo_h3_2k_line3（线路3·SD平替）</td><td>10–15 秒；仅 1–6 张图，不支持视频/音频；2K</td><td class="price">15 积分/次 = <b class="cheap">¥1.5/条</b></td><td><span class="tag warn">聚合</span><span class="tag grey">未登记</span>全平台 2K H3 最低单价（仅图参考）</td></tr>
+
+<tr class="group-row"><td colspan="5">灵客 / 聚合引擎（lingkeai.ai = cn.lk666.ai）—— 8 条线路按秒，下单即扣清；线路最多</td></tr>
+<tr><td class="src" rowspan="2">灵客<br>lingkeai.ai</td><td>MiniMax H3（minimax-h3，全形态一体）<br>DMC / MT / XM / TX / 官方直连 / MC特价 / RQ2 / zaishengcheng</td><td>4–15 秒；图+视频+音频（图首 5 张免费·超出 ¥0.098–0.3564/张）；768P / 2K（部分线路 1080P/4K）；参考视频按时长另计（同档秒价）</td><td class="price">· DMC-default(仅768P) <b class="cheap">0.1069</b>（100%成功）<br>· MT-default 768P 0.1764 / 2K 0.294<br>· MC-H3特价 768P 0.1426 / 1080P 0.2674 / 2K 0.2852 / 4K 0.3387<br>· RQ2限时特价 768P 0.0855起（分时段 0.0321–0.1069）<br>· XM 768P 0.6683 / 2K 1.0693｜TX 768P 0.8019 / 2K 1.283<br>· <span class="bad">官方直连 768P 0.891 / 2K 1.4256（=官方1.78×加价）</span><br>· zaishengcheng 768P→2K超分 MT 0.1176→官直 0.4811</td><td><span class="tag warn">聚合</span><span class="tag up">官方直连=加价</span><span class="tag grey">未登记</span>RQ/RQ2 临时拥挤</td></tr>
+<tr><td>MiniMax H3 Max（minimax-h3-max）</td><td>极速档；480P / 768P；仅 1 条官方直连线路</td><td class="price">480P ¥0.5881/秒｜768P ¥0.891/秒（98.6%成功）</td><td><span class="tag up">加价</span><span class="tag grey">未登记</span>官方 H3-Max 刊例 480P 0.33 / 768P 0.50，此价加价</td></tr>
+
+<tr class="group-row"><td colspan="5">算力AI（suanliai.top）—— H3 约 40 档，下表列代表价（另有大量同价重名渠道）</td></tr>
+<tr><td class="src">算力AI<br>suanliai.top</td><td>minimax_h3(8图3音) / 特价903 / 高质933 / 00007 / 官转 / 特价官方 / 稳定pro / 933b</td><td>多为 4–15 秒；8–9 图 + 3 音频；480P/720P(768p)/1080P/2K/4K 视档位；部分按条</td><td class="price">按秒代表：<br>· minimax_h3(8图3音) <b class="cheap">0.065</b>｜特价903 480P0.045/768P0.055<br>· 高质933 768P0.085/1080P0.18/2K0.26｜00007 480P0.08/768P0.15/1080P0.20<br>· 官转 720P0.18/1080P0.20/2K0.28｜特价官方 1080P0.23/2K0.25<br>· <span class="tag on">已入</span>933 768P0.085｜tejia 0.09｜pro 0.11｜933b 0.12<br>按次：768p ¥0.7–1.15/条、2K ¥1.15–1.55/条；hailuo-h3-2k 不排队 ¥3.3/条</td><td><span class="tag warn">聚合</span><span class="tag on">部分已入台账</span>历史 lightx2v_no_pic/z0901 曾挂演示片，10-14 复验已恢复</td></tr>
+</tbody>
+</table>
+</section>
+
+<!-- ============ WAN3 ============ -->
+<section data-cat="wan">
+<h2><span class="dot" style="background:var(--wan)"></span>Wan3.0-Video 全平台在售模型<span class="sub">5 家有售：灵客 / 贰春 / 志奇 / 三宝 / 算力AI（Grsai·huoai2·newtoken·simplefuture 无）｜官方 video 原价 0.30/0.60/1.20</span></h2>
+<table>
+<thead><tr><th>来源（官网）</th><th>模型名称（API ID）</th><th>能力：时长 / 输入模态与数量 / 分辨率</th><th>计价方式与价格（元/秒）</th><th>性质 / 相对官方 / 台账</th></tr></thead>
+<tbody>
+<tr><td class="src">贰春科技<br>erchun.youkou.cc</td><td>wan3.0 官方渠道（model=9，阿里云 Wan3.0 标准全能参考）</td><td>2–30 秒；图/视频/音频参考（单次≤15 秒）；文生·首帧·首尾帧；480P / 720P / 1080P</td><td class="price">480P <b class="cheap">0.158</b>｜720P 0.40｜1080P 0.80（点/秒，1点=¥1）</td><td><span class="tag mkt">官方转售</span><span class="tag on">已入台账</span>页标"官方5折"，实际 5.3 / 6.7 / 6.7 折；已付费实测</td></tr>
+<tr><td class="src" rowspan="2">志奇<br>zhiqiapi.com</td><td>wan3.0-yuanlian（源链版）</td><td>2–30 秒；10 图 + 5 音频 + 5 视频；480p/720p/1080p；返回官方源链</td><td class="price">480p <b class="cheap">0.165056</b>｜720p 0.330113｜1080p 0.659871</td><td><span class="tag warn">聚合</span><span class="tag grey">未登记</span>约 5.5 折（全场最低）；曾因上游涨价下架后补货</td></tr>
+<tr><td>wan3.0-video（无视频参考版）</td><td>2–30 秒；10 图 + 5 音频，0 视频；480p/720p/1080p</td><td class="price">480p 0.361349｜720p 0.723054｜1080p 1.4461</td><td><span class="tag up">加价</span><span class="tag grey">未登记</span>约官方 1.2 倍，无价格优势</td></tr>
+<tr><td class="src">灵客<br>cn.lk666.ai</td><td>万相3.0（wan3.0）文生/参考生/首尾帧/全能参考 5 入口同价 + 全能参考(quannengcankao)</td><td>2–30 秒；图/视频/音频/文档/网页参考（全能档成片+参考≤30秒）；480P–1080P；标准/高速双版本</td><td class="price">标准 480P <span class="bad">0.5346</span> / 720P 1.0692 / 1080P 2.1384<br>高速 480P 0.8019 / 720P 1.6038 / 1080P 3.2076</td><td><span class="tag up">加价转售</span><span class="tag grey">未登记</span>标准≈官方 1.78×、高速≈2.67×</td></tr>
+<tr><td class="src" rowspan="2">三宝<br>sanbaobeauty.com</td><td>wan3.0（wan_3_0）</td><td>4–30 秒；10 图 + 5 视频 + 5 音频；480p/720p/1080p（480p 缺货）；过真人</td><td class="price">480p ¥0.23｜720p <b class="cheap">0.30</b>｜1080p 0.37（积分/10）</td><td><span class="tag warn">聚合</span><span class="tag grey">未登记</span>720p 5 折、1080p 约 3.1 折（全平台 1080P 最低）</td></tr>
+<tr><td>wan30_720p_real（过真人）／wan_3_0_once_480p（按次）</td><td>720P 过真人：4–15 秒 10图5视5音；480P 按次：5–30 秒 10图5音</td><td class="price">720P ¥0.25/秒｜480P 33 积分 = ¥3.3/条</td><td><span class="tag warn">聚合</span><span class="tag on">once_480p已入</span>720P 约 4.2 折</td></tr>
+<tr><td class="src">算力AI<br>suanliai.top</td><td>00007 wan3-video / wan3-prime；高质官转 wan3.0-video；00005 wan3；官方直连 wan3.0；00004 按条（共 47 档）</td><td>2–30 秒（部分 3–15）；10 图 + 5 视 + 5 音；480P/720P/1080P</td><td class="price">· <span class="tag on">已入</span>007 wan3-video 480P0.25/720P0.30/1080P0.36｜wan3-prime 0.29/0.38/0.42<br>· 高质官转 0.23/0.30/0.38｜标准 wan3.0-video 0.35×3｜1080 不卡脸 0.42<br>· prime高速 0.45×3｜00005(15-30s) 720P0.25/1080P0.40｜官方直连 720P0.5/1080P0.8<br>按次：004 无参考30秒 <b class="cheap">¥2.95/条</b>（折0.098/秒）｜满血1080P ¥1.35｜满血10-5-5 ¥3.5</td><td><span class="tag warn">聚合</span><span class="tag on">多条已入台账</span>720P 主流约 5 折、1080P 3–3.5 折；007 视频参考实测可用，任意数量视频参考曾 CF524</td></tr>
+</tbody>
+</table>
+</section>
+
+<!-- ============ SD2.5 ============ -->
+<section data-cat="sd">
+<h2><span class="dot" style="background:var(--sd)"></span>Seedance 2.5 全平台在售模型<span class="sub">8 家有售：huoai2 / 贰春 / 灵客 / 算力AI / 三宝 / newtoken / simplefuture / 志奇（Grsai 无、AutoDL 无 API 直售）｜官方折算 0.672/1.512/3.742</span></h2>
+<table>
+<thead><tr><th>来源（官网）</th><th>模型名称（API ID）</th><th>能力：时长 / 输入模态与数量 / 分辨率</th><th>计价方式与价格</th><th>性质 / 相对官方 / 台账</th></tr></thead>
+<tbody>
+<tr class="group-row"><td colspan="5">huoai2（video.huoai2.cn）—— 全部 720P 按条，无按秒</td></tr>
+<tr><td class="src" rowspan="3">huoai2<br>video.huoai2.cn</td><td>foke:seedance25-30-images</td><td>4–30 秒；30 图，0 视 0 音；720P</td><td class="price"><b class="cheap">¥2.5/条</b></td><td><span class="tag warn">聚合</span><span class="tag grey">未登记</span>历史两次 HTTP500，标不稳定</td></tr>
+<tr><td>foke:seedance25-long-term</td><td>固定 30 秒；30 图 + 10 视 + 10 音；720P</td><td class="price">¥4.5/条</td><td><span class="tag warn">聚合</span><span class="tag grey">未登记</span>已付费实测成功（长期稳定，不保售后）</td></tr>
+<tr><td>foke:seedance25-real-person ／ downstream-1</td><td>real-person：15/30 秒 9 图 可过真人；downstream-1：4–30 秒 30图10视10音</td><td class="price">real-person ¥4.9/条｜downstream-1 <b class="cheap">¥1/条</b></td><td><span class="tag warn">聚合</span><span class="tag grey">未登记</span>downstream-1 新档零实证，建议小额验片</td></tr>
+
+<tr class="group-row"><td colspan="5">贰春（erchun.youkou.cc）—— 三类共 12 条子渠道，1 点=¥1</td></tr>
+<tr><td class="src" rowspan="3">贰春<br>erchun.youkou.cc</td><td>sd2.5 官方按秒（model=95，seedance-2-5）</td><td>4–30 秒；30 图 + 10 视 + 10 音；480p/720p/1080p</td><td class="price">无参/含参：480p 0.8 / 0.45+0.45｜720p 1.57 / 1+1｜1080p 3.81 / 2.33+2.33</td><td><span class="tag mkt">官方直连</span><span class="tag grey">未登记</span>约火山官方刊例 121%，无折扣</td></tr>
+<tr><td>sd2.5 特价按秒（model=116，渠道×多）</td><td>4–30 秒；10–30 图、部分 10视10音；页面固定 720P</td><td class="price"><b class="cheap">¥0.1083–0.84</b>：挡脸0.1083(10图)｜测试0.125｜特殊渠道0.15(30-10-10)｜渠道特价0.22起(85.7%)</td><td><span class="tag warn">聚合</span><span class="tag grey">未登记</span>非官方渠道聚合，"质量随价、不支持售后"</td></tr>
+<tr><td>sd2.5 特价按条（model=29）＋ erchun-mobile-sd25</td><td>30 秒为主；30图10视10音 或 10图；720P/480P</td><td class="price">按条 ¥1.2–12：自动挡脸1.2｜测试1.5｜特惠2.7｜冲量5｜运营商480p6/720p12｜特价版6.8<br><span class="tag on">已入</span>erchun-mobile-sd25 按秒 480p0.22/720p0.46/1080p0.84｜carrier-480 ¥6/条·carrier-720 ¥12/条</td><td><span class="tag warn">聚合</span><span class="tag on">mobile/carrier已入</span>mobile 中文 prompt 变问号缺陷已恢复(task81220)</td></tr>
+
+<tr class="group-row"><td colspan="5">simplefuture（simplefuture.zone）—— 多为按次</td></tr>
+<tr><td class="src">至简未来<br>simplefuture.zone</td><td>lec-vg-seedance-2-5-wd ／ 特价线路三 ／ 智能路由 ／ 特惠满参720p ／ 主推快速</td><td>wd：4–30 秒 30图10视10音 原生过脸 720p；线路三：30 秒卡脸；满参：固定30秒5比例</td><td class="price">wd <b class="cheap">¥0.99/次</b>（描述按秒、账单按次）｜线路三 ¥1.88/条(19.75%成功)｜智能路由 ¥3/次(动态1–8)｜满参720p ¥3.9/条(52.46%)｜主推快速 ¥4.9/条</td><td><span class="tag warn">聚合</span><span class="tag grey">未登记</span>低价档成功率/耗时偏差大；任何数量视频参考均 CF524，仅纯图/图+音可用</td></tr>
+
+<tr class="group-row"><td colspan="5">NewTokenClub（newtoken.club）—— token / 秒计费（OpenAI 兼容），全部自标官方折扣；无 H3/wan</td></tr>
+<tr><td class="src" rowspan="2">NewToken<br>newtoken.club</td><td>doubao-seedance-2-5-260628</td><td>4–30 秒；30 图 + 10 视 + 10 音；满血；豆包官方 API</td><td class="price">按 token：基础 <b class="cheap">¥35/百万</b>（输入输出同价）｜分组 0.5x¥35·0.55x¥38.5·0.6x¥42·0.62x¥43.4·0.79x¥55.3·0.89x¥62.3</td><td><span class="tag mkt">官方原价×倍率</span><span class="tag grey">未登记</span>基础价¥70/M=官方原价，倍率=折扣；自标最低 5.8 折，96.58% 成功</td></tr>
+<tr><td>sd2.5-720p-official（即梦OpenAI）／ video-ultra2.5-720p</td><td>4–30 秒；30图10视10音（ultra 为30图10音）；720P；不传参考视频按秒、传则转 token</td><td class="price">720P 基础 ¥1.5/秒→分组 0.5x<b class="cheap">¥0.75</b>·0.55x0.825·0.6x0.9·0.62x0.93（延迟 233ms）</td><td><span class="tag mkt">官方原价×倍率</span><span class="tag grey">未登记</span>自标 5.8 折反推官方 ¥1.29（实为¥1.5，5 折）；ultra 成功率仅 16.67% 慎用</td></tr>
+
+<tr class="group-row"><td colspan="5">志奇（zhiqiapi.com）—— 参考视频"无限制"同价</td></tr>
+<tr><td class="src">志奇<br>zhiqiapi.com</td><td>seedance-2.5</td><td>5–30 秒；30 图 + 10 视 + 10 音；480p/720p/1080p；不卡脸；5 种比例</td><td class="price">480p 0.450089｜720p <b class="cheap">0.750385</b>｜1080p 1.4003（参考视频不另加价）</td><td><span class="tag warn">聚合</span><span class="tag grey">未登记</span>约官方 6.7 / 5.0 / 3.7 折（1080p 折扣最深）</td></tr>
+
+<tr class="group-row"><td colspan="5">灵客（cn.lk666.ai）—— 10 个 SD2.5 入口（按秒 / token 两套）</td></tr>
+<tr><td class="src" rowspan="2">灵客<br>cn.lk666.ai</td><td>SD2.5 满血版 按秒 + 文生/参考生/首尾帧/全能参考（5 个按秒入口）</td><td>4–30 秒；最多 30图+10视+10音（可仅传音频）；480p/720p/1080p；全形态·免人像认证·有声无水印</td><td class="price">按秒 3 线路（MC-S 60–84%成功）：<br>· MC-S 480p <b class="cheap">0.8019</b>/720p0.891/1080p2.3166（带参考视频整单×1.5）<br>· ZQ 480p0.8554/720p1.4078/1080p2.6196<br>· 官方特惠 480p0.6058(维护)/720p1.4612/1080p3.742（全能含视频另收参考费0.7663/1.7029）</td><td><span class="tag mkt">官方特惠≈官方</span><span class="tag grey">未登记</span>官方特惠 720P 约反推刊例 1.13×</td></tr>
+<tr><td>SD2.5 满血版 token 版（5 线路）</td><td>同上；官方特惠支持联网搜索；BR-official 限 9图3视3音</td><td class="price">每百万 token（不含/含视频）：<br>· 官方特惠 480/720 ¥59.8752/35.9252，1080 ¥61.7464/36.8886<br>· KL-CN 103.5/62.1（1080 113.9/68）｜XH 113.4/68.0｜TA 123.8/74.3｜BR-official-100 131.0/78.6</td><td><span class="tag warn">聚合</span><span class="tag grey">未登记</span>token 按实消耗多退少补；官方特惠即接近火山原价</td></tr>
+
+<tr class="group-row"><td colspan="5">三宝（sanbaobeauty.com）—— 12 个 SD2.5 档，10 积分=¥1</td></tr>
+<tr><td class="src">三宝<br>sanbaobeauty.com</td><td>按秒 6 档（官转过真人/限时720P/线路5/限时1/限时4/线路7）＋ 按次 6 档（30图特价/720P/900/9图30秒/dola/30图/线路4）</td><td>按秒：4–30 秒 30图(+10视10音视档) 480p/720p 6比例；按次：多为 720P 固定 5/10/30 秒</td><td class="price">按秒：限时线路4 <b class="cheap">480p0.43/720p0.60</b>(30图10音)｜线路5 0.46/0.80(30-10-10)｜限时1 0.50/0.80｜线路7 0.51/0.83｜限时720P 0.55(30-10-10)｜官转过真人 0.72/1.44(30图10音不支持视频参考)<br>按次：dola ¥2.0｜<span class="tag on">已入</span>30图特价 ¥3.6｜9图30秒 ¥3.0(仅存3h)｜30图 ¥4.0｜900 ¥5.5｜满血720P ¥6.0｜线路4 ¥7.5</td><td><span class="tag warn">聚合</span><span class="tag on">30img特价已入</span>官转过真人 ≈官方 1.07×；sd25_30img_special 已付费实证 36 积分/次</td></tr>
+
+<tr class="group-row"><td colspan="5">算力AI（suanliai.top）—— SD2.5 约 100 档（按秒~40 + 按条~60），下表为各系列代表价</td></tr>
+<tr><td class="src">算力AI<br>suanliai.top</td><td>sd2.5 全系列（00002–00007 / 高质 / 官方 / 官转 / 全能 / 满血 / 特价 / SV-VIP）</td><td>4–30 秒；9 图 或 30 图；视频/音频 0–10；480P/720P/1080P，VIP 含 2K/4K</td><td class="price">按秒：<span class="tag on">已入</span>00007满血全参 480P<b class="cheap">0.32</b>/720P0.55(100%)｜002过真人480p0.55/720P0.85｜003官转720P0.65｜高质720P0.36–0.55｜官转稳定480p0.55/720p1.10/1080p0.63–0.95｜官方直连480p0.72/720P0.95/1080P2.40｜SV-VIP720P0.92/1080P2.35/2K5.6/4K6(含参考720p1.95/1080p3.55)<br><span class="tag on">已入</span>ch3-720p 0.85｜guanzhuan-720p 1.10｜guanzhuan-1080p 0.63<br>按次(720P)：30图1.8–2.35｜900/9图1.45–2.0｜30-10-10 3.85–6.5｜Pro全参480P5.85/720P8.85｜<span class="tag on">已入</span>004-30图 ¥1.8(standby)</td><td><span class="tag warn">聚合</span><span class="tag on">多条已入台账</span>004 系列曾 503 繁忙/自动退款；档位多且同价重名，下单须核对完整档名</td></tr>
+</tbody>
+</table>
+</section>
+
+<!-- ============ 衍生·同厂其他 ============ -->
+<section data-cat="other">
+<h2><span class="dot" style="background:var(--other)"></span>衍生 / 同厂其他模型（调研中一并发现，非三系列主线）<span class="sub">供扩展选型参考</span></h2>
+<table>
+<thead><tr><th>来源（官网）</th><th>模型名称（Model ID）</th><th>能力</th><th>计价与价格</th><th>性质 / 备注 / 台账</th></tr></thead>
+<tbody>
+<tr class="group-row"><td colspan="5">阿里云官方 —— 万相 2.x 文生视频 & HappyHorse（除快乐马1.1 i2v 外均未登记）</td></tr>
+<tr><td class="src">阿里云<br>官方</td><td>wan2.7-t2v / wan2.6-t2v / wan2.5-t2v-preview</td><td>文生视频；720P / 1080P（2.5 含 480P）</td><td class="price">wan2.7/2.6：720P ¥0.60 / 1080P ¥1.00 每秒<br>wan2.5-preview：480P 0.30 / 720P 0.60 / 1080P 1.00</td><td><span class="tag grey">未登记</span>50 秒免费额度</td></tr>
+<tr><td class="src">阿里云<br>官方</td><td>wan2.2-t2v-plus / wanx2.1-t2v-turbo / wanx2.1-t2v-plus</td><td>文生视频；480P / 720P / 1080P</td><td class="price">wan2.2-plus：480P ¥0.14 / 1080P ¥0.70｜wanx2.1-turbo：480P·720P ¥0.24｜wanx2.1-plus：720P ¥0.70</td><td><span class="tag grey">未登记</span>turbo 200 秒免费额度，低价文生</td></tr>
+<tr><td class="src">贰春 / AutoDL<br>市场</td><td>happyhorse-1.1-r2v（快乐马1.1）</td><td>参考生视频；480P；3–15 秒</td><td class="price">贰春 ¥1.45/条（实测扣费，较横评期 1.00 涨价）</td><td><span class="tag mkt">官方转售</span><span class="tag on">已入台账</span>erchun-happyhorse-1-1；单图 i2v 付费实证 task82115</td></tr>
+<tr class="group-row"><td colspan="5">MiniMax 官方 —— 上一代 Hailuo 视频（未登记）</td></tr>
+<tr><td class="src">MiniMax<br>官方</td><td>MiniMax-Hailuo-2.3-Fast / 2.3 / 02</td><td>文生·图生视频；512P / 768P / 1080P；6–10 秒</td><td class="price">2.3-Fast：768P10s ¥2.25 / 1080P6s ¥2.31｜2.3 & 02：768P6s ¥2.00 / 768P10s ¥4.00 / 1080P6s ¥3.50｜02：512P6s ¥0.60</td><td><span class="tag grey">未登记</span>按条计价的上一代 Hailuo，非 H3</td></tr>
+<tr class="group-row"><td colspan="5">Seedance 2.0 / fast / mini（同厂上一代，供备份）</td></tr>
+<tr><td class="src">志奇 / newtoken / autodl市场</td><td>seedance-2.0 / 2.0-fast-offical / 2.0-mini-offical</td><td>5–15 秒（fast 4–15）；9 图 3 视 3 音；480p / 720p</td><td class="price">志奇 2.0：480p ¥0.250247 / 720p ¥0.450089｜fast官方：480p 0.44472(不含视)·0.528768(含)/720p 0.9604·1.1408<br>newtoken sd2.0：720P ¥0.5 / fast 0.4 / mini 0.25，1080P ¥1.24<br>autodl 市场：标准=官方刊例1:1、fast 会员6折、mini 会员5折</td><td><span class="tag warn">聚合</span><span class="tag grey">未登记</span>AutoDL 市场无 seedance-2.5，仅到 2.0</td></tr>
+<tr class="group-row"><td colspan="5">其他厂视频模型（非三系列，调研中遇到）</td></tr>
+<tr><td class="src">Grsai</td><td>agnes-video-2.5</td><td>文生·首尾帧·参考图·音频；720p / 1080p / 2k；≤12 秒</td><td class="price">720p ¥0.10 / 1080p ¥0.17 / 2k ¥0.23 每秒</td><td><span class="tag grey">未登记</span>未标厂商，非三系列目标模型</td></tr>
+<tr><td class="src">AutoDL / 贰春</td><td>视频超分（放大）</td><td>720P / 1080P / 2K / 4K 超分</td><td class="price">贰春：720P ¥0.02 / 1080P ¥0.035 / 2K ¥0.07 / 4K ¥0.13 每秒</td><td><span class="tag warn">聚合</span><span class="tag grey">未登记</span>后处理超分，非生成模型</td></tr>
+</tbody>
+</table>
+</section>
+
+<!-- ============ 选型速览 ============ -->
+<section>
+<h2>选型速览（同能力口径下最低价 / 成本天花板，仅供参考）</h2>
+<table style="min-width:960px">
+<thead><tr><th>模型 / 口径</th><th>最低平台与档位</th><th>价格</th><th>注意 / 台账状态</th></tr></thead>
+<tbody>
+<tr><td>H3 · 768P(720P) 按秒</td><td>AutoDL zm_u24/zm_u08（空闲时段）</td><td class="price cheap">¥0.020/秒</td><td>自部署；10-16 后 ¥0.030；grsai ¥0.05(顶档)、志奇 ¥0.0544 全天候</td></tr>
+<tr><td>H3 · 官方 API 画质档</td><td>AutoDL 大模型市场（会员）</td><td class="price">¥0.45/秒（768P）</td><td><span class="tag grey">未登记</span>成本≈官方刊例，可对标画质；建议按 SOP 实证后补录</td></tr>
+<tr><td>H3 · 2K 按次</td><td>三宝 hailuo_h3_2k_line3</td><td class="price cheap">¥1.5/条（10–15秒，仅图）</td><td>9图3音全参选三宝 line1 ¥2.0（<span class="tag on">已入</span>）</td></tr>
+<tr><td>H3 · 2K 按秒</td><td>灵客 MC-H3 特价</td><td class="price cheap">¥0.2852/秒</td><td>该线路不支持首帧/首尾帧</td></tr>
+<tr><td>Wan3.0 · 1080P 按秒</td><td>三宝 wan_3_0</td><td class="price cheap">¥0.37/秒</td><td>480P 缺货；720P ¥0.30（<span class="tag grey">未登记</span>）</td></tr>
+<tr><td>Wan3.0 · 480P 按秒</td><td>贰春官方 5 折渠道</td><td class="price cheap">¥0.158/秒</td><td><span class="tag on">已入</span>志奇源链版 ¥0.165 接近且返官方源链（未登记）</td></tr>
+<tr><td>Wan3.0 · 30 秒按条</td><td>算力AI 00004 wan3.0-video（无视频参考）</td><td class="price cheap">¥2.95/30秒</td><td><span class="tag on">已入</span>折 ¥0.098/秒，仅纯图/图+音口径</td></tr>
+<tr><td>SD2.5 · 30图 30 秒按条</td><td>huoai2 downstream-1</td><td class="price cheap">¥1/条</td><td><span class="tag grey">未登记</span>新档零实证；已验证最低为 simplefuture 线路三 ¥1.88（成功率仅 20%）</td></tr>
+<tr><td>SD2.5 · 720P 按秒（稳定）</td><td>算力 00007 满血全参 / 三宝限时线路4</td><td class="price cheap">¥0.55 / ¥0.60</td><td>newtoken 官方即梦 ¥0.75（标 5.8 折、延迟最优，<span class="tag grey">未登记</span>）</td></tr>
+<tr><td>SD2.5 · 1080P 按秒</td><td>算力官转稳定 sd2.5-1080p</td><td class="price cheap">¥0.63/秒</td><td><span class="tag on">已入</span>guanzhuan-1080；要免卡脸选志奇 ¥1.40（参考视频不限价，未登记）</td></tr>
+</tbody>
+</table>
+<p class="small" style="margin-top:14px">数据来源：各平台登录后模型广场 / API 文档 / 公开取价接口实时读取（AutoDL 读自 /api/v1/comfyui/workflows；三宝 /api/public/openapi-models；灵客 moxingguangchang 公开 JSON；志奇 / 算力公开价目）＋ MiniMax·阿里云百炼·火山官方定价页直读。价格随时变动，下单前以页面实时价为准；"已入 routes.yaml" 表示已按付费实证登记进本网关台账（共 37 条路线），"未登记" 表示本轮调研发现但尚未付费实证入册。</p>
+</section>
+</div>
+<script>
+function show(cat,btn){
+  document.querySelectorAll('.filters button').forEach(function(b){b.classList.remove('active')});
+  btn.classList.add('active');
+  document.querySelectorAll('section[data-cat]').forEach(function(s){
+    s.style.display=(cat==='all'||s.dataset.cat===cat)?'':'none';
+  });
+}
+</script>
+</body>
+</html>

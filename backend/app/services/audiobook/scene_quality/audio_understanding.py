@@ -18,6 +18,8 @@ from .audio_score_contract import SCORER_MODELS
 
 _QWEN_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions"
 _DOUBAO_URL = "https://ark.cn-beijing.volces.com/api/v3/chat/completions"
+# 豆包分支一律发这个线名：往 SCORER_MODELS 加第二档豆包（如 doubao-seed-2-1-pro）时必须先改成
+# 逐档映射，否则请求仍打到 lite，而台账按新档记——评分结果与上游模型不一致不会有任何报错。
 _DOUBAO_MODEL = "doubao-seed-2-1-lite-260915"
 _MIME = {"wav": "audio/wav", "mp3": "audio/mpeg"}
 _MAX_AUDIO_BYTES = 7_000_000

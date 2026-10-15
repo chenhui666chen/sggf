@@ -15,8 +15,9 @@
   - `cosyvoice-v3-plus` / `cosyvoice_v3_plus`：音色资产数据保持原样，归一别名长期保留。
   - `wan2.6-t2v-fast`：悬空别名，归一目标 `wan2.6-t2v` 任何注册中心都不存在，
     改写只会把一个不存在的 ID 换成另一个不存在的 ID。
-  - 拼写变体别名（`qwen3_vl_plus`、`qwen3_tts`、`qwen_image_edit_*` 等）：属媒体线格式归一，
-    库中无命中，且改写无收益。
+  - 拼写变体别名（`qwen3_tts`、`qwen_image_edit_*` 等）：属媒体线格式归一，
+    库中无命中，且改写无收益。`qwen3_vl_plus` 是例外——它同时是 .env 与短剧分支配置里
+    存过的退役档，2026-10-12 起随 `qwen3-vl-plus` 一并改写。
   - `wan2.7-i2v` / `wan2.7-t2v` / `wan_auto`：DreamWeaver 引擎标识符，不是模型 ID，
     其迁移由 wan2.7→wan3.0 媒体线单独负责。
 
@@ -71,6 +72,12 @@ ID_REWRITES: Tuple[Tuple[str, str], ...] = (
     ("kimi-k2.6", "kimi-preview"),
     ("mimo-v2.5", "mimo-flash"),
     ("stepaudio-2.5-tts", "stepaudio-3-tts"),
+    # 2026-10-12 视觉评审产品入口退役：短剧配置里存过该档，删档案后它已不可执行
+    ("qwen3.5-omni-plus", "qwen3.8-omni-flash"),
+    # 2026-10-12 短剧 QC 线迁完后物理退役：短剧分支配置与 engine_branch_config 快照里
+    # 两种写法都存过（下划线形态来自 .env 的 *_VLM_ADAPTER 取值）
+    ("qwen3-vl-plus", "qwen3.8-omni-flash"),
+    ("qwen3_vl_plus", "qwen3.8-omni-flash"),
 )
 
 # `[` 计入右边界，`glm-5.2[1m]` 是上游 1M 上下文线名，改写成 `glm[1m]` 没有意义

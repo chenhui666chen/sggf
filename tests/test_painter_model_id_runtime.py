@@ -156,14 +156,14 @@ def test_resolve_runtime_model_id_requires_available_when_requested(
         {"vlm_adapter": "runtime-vlm-model"},
         key="vlm_adapter",
         env_name="DREAMWEAVER_VLM_ADAPTER",
-        default="qwen3_vl_plus",
+        default="qwen3.8-omni-flash",
         require_available=True,
     )
     missing = _utils._resolve_runtime_model_id(
         {"vlm_adapter": "missing-vlm-model"},
         key="vlm_adapter",
         env_name="DREAMWEAVER_VLM_ADAPTER",
-        default="qwen3_vl_plus",
+        default="qwen3.8-omni-flash",
         require_available=True,
     )
 

@@ -8,12 +8,30 @@ from typing import Any, Dict, List, Optional
 from adapters.base import BaseAdapter, AdapterConfig, GenerationResult
 from adapters.registry import register_model
 from adapters._shared import VOLCENGINE_BASE, require_api_key
+from adapters._shared_vision_review import VisionReviewMixin
 from schemas.model_spec import ModelSpec
 from schemas.common import ModelStatus
 
 # ============================================================
 # 5. 文本对话 - 火山方舟OpenAI兼容接口 (Doubao Seed)
 # ============================================================
+
+
+class _VolcengineVisionReviewMixin(VisionReviewMixin):
+    """方舟侧视觉评审档位：请求结构与执行层见 adapters/_shared_vision_review。"""
+
+    def _vision_client(self):
+        import openai
+
+        return openai.OpenAI(
+            api_key=require_api_key("VOLCENGINE_API_KEY"),
+            base_url=f"{VOLCENGINE_BASE}",
+        )
+
+    def _vision_disable_thinking_kwargs(self):
+        # 方舟用嵌套的 thinking.type 关闭思考，与百炼的顶层 enable_thinking 写法不同
+        return {"extra_body": {"thinking": {"type": "disabled"}}}
+
 
 class _VolcengineChatAdapter(BaseAdapter):
     MODEL_ID = ""
@@ -58,7 +76,7 @@ class _VolcengineChatAdapter(BaseAdapter):
 
 
 @register_model("doubao-seed-2-1-pro")
-class DoubaoSeed21ProAdapter(_VolcengineChatAdapter):
+class DoubaoSeed21ProAdapter(_VolcengineVisionReviewMixin, _VolcengineChatAdapter):
     MODEL_ID = "doubao-seed-2-1-pro-260915"
     DISABLE_THINKING = True
 
@@ -66,12 +84,14 @@ class DoubaoSeed21ProAdapter(_VolcengineChatAdapter):
     def get_model_spec(cls) -> ModelSpec:
         return ModelSpec(
             id="doubao-seed-2-1-pro", name="Doubao Seed 2.1 Pro", provider="doubao", version="v2.1",
-            status=ModelStatus.ACTIVE, modality=["text_generation", "chat"], avg_latency_seconds=5.0,
+            status=ModelStatus.ACTIVE,
+            modality=["text_generation", "chat", "image_understanding", "video_understanding"],
+            avg_latency_seconds=5.0,
         )
 
 
 @register_model("doubao-seed-2-1-lite")
-class DoubaoSeed21LiteAdapter(_VolcengineChatAdapter):
+class DoubaoSeed21LiteAdapter(_VolcengineVisionReviewMixin, _VolcengineChatAdapter):
     MODEL_ID = "doubao-seed-2-1-lite-260915"
     DISABLE_THINKING = True
 
@@ -79,5 +99,7 @@ class DoubaoSeed21LiteAdapter(_VolcengineChatAdapter):
     def get_model_spec(cls) -> ModelSpec:
         return ModelSpec(
             id="doubao-seed-2-1-lite", name="Doubao Seed 2.1 Lite", provider="doubao", version="v2.1",
-            status=ModelStatus.ACTIVE, modality=["text_generation", "chat"], avg_latency_seconds=3.0,
+            status=ModelStatus.ACTIVE,
+            modality=["text_generation", "chat", "image_understanding", "video_understanding"],
+            avg_latency_seconds=3.0,
         )

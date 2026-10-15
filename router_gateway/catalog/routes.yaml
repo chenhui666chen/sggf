@@ -1,0 +1,586 @@
+# 视频生成路线目录（实测台账）
+#
+# 组装原则（见 docs/VIDEO_API_SMART_ROUTING_GUIDE.md）：
+# - quality_group 即对外模型接口：同一个底层模型只暴露一个接口，分辨率/时长/比例为硬条件；
+# - 能力、价格相近的路线优先跨提供商混组，降低同源故障概率；
+# - 每次请求只从同时满足全部硬条件的路线中按期望成本排序选择；
+# - 金额单位为元；按秒价格以高峰价登记（AutoDL 闲时价见 note，当前报价器不支持分时）。
+#
+# 交付层事实（2026-10-12 真实云验收）：
+# - 算力AI 成片 307 跳转 media.suanliai.cc，Cloudflare 浏览器签名校验（1010），
+#   非浏览器 UA 一律 403，下游下载必须覆盖浏览器 UA；
+# - AutoDL 成片 CDN 签名直链任意 UA 可下载；Grsai 成片永久 URL 任意 UA 可下载。
+#
+# 素材模式（2026-10-13 起六类）：text / first_last_frame / multi_image /
+# video_reference / image_audio_lipsync（仅"1图1音无视频"对口型）/
+# mixed_multimodal（图/视/音任意混合叙事，wan3 多参实证）。
+#
+# 最后更新：2026-10-15（AutoDL 图生/首尾帧 10x 价格订正：z0902/z0903 图生与 b99_002 首尾帧原按
+#   "图生独立单价"误登记为 0.40/0.70/0.70/0.80 与 0.50，经浏览器复探 autodl.art + 两份第三方横评互证，
+#   AutoDL 计费与工作流无关（同族文生=图生同价），实为 z0901 同值 0.04/0.07/0.07/0.08 与 b99 系 0.05，
+#   系漏除 10 倍；已订正 3 条路线 pricing 与 note 闲时价，不影响路线计数与文生路线选路快照。
+#   grsai-h3 实测扣费 0.10/0.14/0.30 与台账一致（grsai 模型页展示 0.05/0.07/0.15 为 ¥999 顶档满赠
+#   乐观价·¥1=20000 积分，非基础价，不作成本基准）。
+#   上一批 2026-10-14（W8 快乐马1.1 付费接线：新增 erchun-happyhorse-1-1 单图 i2v 路线
+#   task 82115，480P/5s settled/47s，848x480/24fps/AAC，W7 紫牌强采纳，实扣 1.45 credits
+#   （较横评期 1.00 涨价）；requires_image 仅 multi_image，720/1080p 与其余比例未实测不开放。
+#   同批 Grsai minimax-h3 单图 i2v 付费单 11-9576 卡 running/15% 53 分钟挂起，判失败不开放，
+#   grsai-h3 维持 text-only，note 留证待日后复探。
+#   文生通道恢复复测：erchun-mobile-sd25 中文 prompt 变问号缺陷
+#   已恢复（task 81220，480p 5s 中文"你好"纸牌强相关，实测 854x480/30fps/含AAC）；
+#   autodl-z0901-h3 文生 prompt 节点恢复（task 103b73a6，480p 5s/203s，中文纸牌要素全中，
+#   实测 864x480/24fps/5.17s）；autodl-lightx2v-h3 no_pic 固定演示片故障亦恢复
+#   （task 25e11795，480p 5s 中文"你好"纸牌强相关；排队约16min+渲染117s，单次排队偏长暂不标 standby）。
+#   W7 纯参考视频实证：erchun-wan3 纯 video_reference（1视无图无音，task 81578，
+#   8s无音轨几何运动参考片，480p 5s/854x480/30fps settled/278s，红块横移+蓝块振动轨迹复现）
+#   与图+视频组合（task 81610，W7 紫牌图片元素+红块横移双采纳，settled/288s）付费通过；
+#   两单均无音频输入但成片默认带 AAC 音轨。
+#   W7 算力补测：suanliai 7 条 wan3 路线纯 video_reference（1视无图无音，共用 8s 无音轨
+#   几何运动参考片，5s/16:9）7/7 付费 completed 且红块横移+蓝块振动轨迹目鉴复现；
+#   6 条 480p 成片 854x480/30fps/5.04s/含默认AAC，渲染 151-393s；wan3-1080 成片
+#   1920x1080/30fps/含AAC，渲染 1424s。成本语义：6 条 480p 档视频参考按
+#   「输出时长+参考片时长」同单价计费（5s输出+8s参考=13s），wan3-1080 仅按输出时长计费；
+#   7 单实扣 ¥25.63 与报价分毫不差。
+#   第6批补充：autodl-zm-u24-h3-i2v 经 Z2/Z3 音频槽付费实证
+#   （880Hz高频采纳/220Hz低频丢弃=选择性融合引导，非透传复刻）开放 mixed_multimodal，
+#   max_audios=3，对口型复刻场景禁用。
+#   第6批：autodl-zm-u24-h3-i2v 登记——zealman「升级画质」多图封装，
+#   Z1 付费对抗实证 prompt 遵循力强（仅开 multi_image，音频槽待实测）。
+#   2026-10-13 台账维护：erchun-mobile-sd25 解除禁用，等待上游 prompt 通道恢复后付费复验；
+#   erchun-xuan-sd25-720 整条删除——model id 已被平台下架，继任 erchun-xuan2-sd25-720。
+#   第5批：seedance-2.5 补算力官转 1080p 纯文生跨源；
+#   引入 standby 兜底标记（排序沉底但保留在切换链），004/sd2.5 30图排队43分钟档首标；
+#   004/h3 8图3音连续繁忙仍挂起。第4批：wan3.0 组 11 条；seedance-2.5 补 2 条 30 图 i2v；
+#   minimax-h3 补三宝 2K 与 AutoDL z0902/z0903/b99_002 图生；
+#   minimax-h3-light 补 AutoDL 9 图 15 秒图生；z0901 补 1080p 实证）
+
+routes:
+  # ===================== Seedance 2.5（对外接口：seedance-2.5）=====================
+
+  - route_id: erchun-mobile-sd25
+    provider: erchun
+    upstream_model: mdl_fe3805fbe97f7d42ddacbef1b847940c  # 移动渠道特价（按秒）
+    quality_group: seedance-2.5
+    billing: per_second
+    duration: {min_seconds: 5, max_seconds: 30}
+    resolutions: [480p, 720p, 1080p]
+    aspect_ratios: ["16:9"]
+    input_modes: [text]
+    pricing: {480p: "0.22", 720p: "0.46", 1080p: "0.84"}
+    enabled: true  # 2026-10-14 付费复验通过（task 81220）：中文 prompt 不再变问号、内容强相关，缺陷确认恢复
+    note: "实测5s/30s(720p实扣2.30/13.80)；价表+扣费流水双重验证；平台官方成功率89%；目录默认1080P必须显式传resolution；2026-10-14恢复复验task81220：480p5s中文'红色机械猫月球举你好纸牌'强相关(实测854x480/30fps/含AAC)，中文变问号缺陷已修复"
+
+  - route_id: erchun-carrier-sd25-480
+    provider: erchun
+    upstream_model: mdl_ae5a7309a9c2588d239f9f691f6052da  # 运营商480p（按条）
+    quality_group: seedance-2.5
+    billing: per_use
+    duration: {min_seconds: 2, max_seconds: 30}
+    resolutions: [480p]
+    aspect_ratios: ["16:9"]
+    input_modes: [text]
+    pricing: "6"
+    note: "2-30s同价；平台官方成功率88%；长时长低价档兜底"
+
+  - route_id: erchun-carrier-sd25-720
+    provider: erchun
+    upstream_model: mdl_dd4822afda0ff3fc3b31ba71a93b5250  # 运营商720p（按条）
+    quality_group: seedance-2.5
+    billing: per_use
+    duration: {min_seconds: 2, max_seconds: 30}
+    resolutions: [720p]
+    aspect_ratios: ["16:9"]
+    input_modes: [text]
+    pricing: "12"
+    note: "2-30s同价；平台官方成功率69.4%；30s实测耗时约929s"
+
+  - route_id: suanliai-007-sd25-480
+    provider: suanliai
+    upstream_model: "007系列/sd2.5(满血全参/480P)"
+    quality_group: seedance-2.5
+    billing: per_second
+    duration: {min_seconds: 4, max_seconds: 30}
+    resolutions: [480p]
+    aspect_ratios: ["16:9"]
+    input_modes: [text]
+    pricing: {480p: "0.32"}
+    note: "实测5s扣费1.60，输出854x480；提交字段用 seconds；时长范围依同系列标注仅实测5s"
+
+  - route_id: suanliai-007-sd25-720
+    provider: suanliai
+    upstream_model: "007系列/sd2.5(满血全参/720P)"
+    quality_group: seedance-2.5
+    billing: per_second
+    duration: {min_seconds: 4, max_seconds: 30}
+    resolutions: [720p]
+    aspect_ratios: ["16:9"]
+    input_modes: [text]
+    pricing: {720p: "0.40"}
+    note: "实测5s扣费2.00，输出1280x720；提交字段用 seconds；与贰春xuan价格相近跨源互备；时长仅实测5s"
+
+  - route_id: suanliai-ch3-sd25-720
+    provider: suanliai
+    upstream_model: "sd2.5-720p-ch3(30-10-10不卡脸/4-30秒无限并发)"
+    quality_group: seedance-2.5
+    billing: per_second
+    duration: {min_seconds: 4, max_seconds: 30}
+    resolutions: [720p]
+    aspect_ratios: ["16:9"]
+    input_modes: [text]
+    pricing: {720p: "0.85"}
+    note: "首批实测1次失败已退款(4.25)，观察中；提交字段用 seconds"
+
+  - route_id: suanliai-guanzhuan-sd25-720
+    provider: suanliai
+    upstream_model: "官转稳定-sd2.5-720p(30-10-10/4-30秒卡真人无限并发速度极快)"
+    quality_group: seedance-2.5
+    billing: per_second
+    duration: {min_seconds: 4, max_seconds: 30}
+    resolutions: [720p]
+    aspect_ratios: ["16:9"]
+    input_modes: [text]
+    pricing: {720p: "1.10"}
+    note: "实测5s扣费5.50，输出1280x720；提交字段用 seconds；高价位兜底"
+
+  - route_id: suanliai-guanzhuan-sd25-1080
+    provider: suanliai
+    upstream_model: "官转稳定-sd2.5-1080p(30-10-10/4-30秒卡真人无限并发速度极快)"
+    quality_group: seedance-2.5
+    billing: per_second
+    duration: {min_seconds: 4, max_seconds: 30}
+    resolutions: [1080p]
+    aspect_ratios: ["16:9"]
+    input_modes: [text]
+    pricing: {1080p: "0.63"}
+    duration_field: seconds
+    note: "第5批V1实证1080p 5s纯文生成片1920x1080/24fps/5.06s/有声；此前两次400为上游瞬时秒拒(9999活性探测返回403报价拦截证明渠道在线非参数问题)；seedance-2.5首个1080p跨源；名称声明30图10视10音多参槽位均未实证不开放；提交字段用seconds；4-30s范围仅5s实测"
+
+  - route_id: sanbao-sd25-30img-720
+    provider: sanbao
+    upstream_model: sd25_30img_special
+    quality_group: seedance-2.5
+    billing: per_use
+    duration: {min_seconds: 5, max_seconds: 30}  # 上游仅接受 5/10/30 秒枚举
+    resolutions: [720p]
+    aspect_ratios: ["16:9", "9:16", "1:1", "4:3", "3:4", "21:9"]
+    input_modes: [multi_image]
+    pricing: "3.6"
+    max_images: 30
+    max_total_assets: 30
+    asset_access: public_url
+    note: "30图0视0音；T7实测30图5s成片1280x720/24fps速度快；外链图片可直接提交；上游时长仅5/10/30三档"
+
+  - route_id: suanliai-004-sd25-30img
+    provider: suanliai
+    upstream_model: "004系列/sd2.5(30图4-30秒480P/720P)"
+    quality_group: seedance-2.5
+    billing: per_use
+    duration: {min_seconds: 4, max_seconds: 30}
+    resolutions: [480p, 720p]
+    aspect_ratios: ["16:9"]
+    input_modes: [multi_image]
+    pricing: "1.8"
+    max_images: 30
+    asset_access: review_then_ref
+    duration_field: seconds
+    standby: true
+    note: "30图0视0音；V3实测30图720p 5s成片1280x720/24fps¥1.8/条；排队约43分钟，standby=true排序沉底为真兜底（快档全不可用时才取）；提交字段用 seconds；480p档未实测"
+
+  # ===================== MiniMax H3 满血（对外接口：minimax-h3）=====================
+
+  - route_id: autodl-z0901-h3
+    provider: autodl
+    upstream_model: minimax_h3_z0901  # H3文生视频（高质量创意直出，一次采样）
+    quality_group: minimax-h3
+    billing: per_second
+    duration: {min_seconds: 1, max_seconds: 15}
+    resolutions: [480p, 768p, 1080p]  # 上游枚举：480p/768p/1088p/1440p，1088p对外归1080p档
+    aspect_ratios: ["16:9", "9:16"]  # 实测工作流仅横/竖两档，无1:1
+    input_modes: [text]
+    pricing: {480p: "0.04", 768p: "0.07", 1080p: "0.07"}
+    note: "高峰价；闲时00:00-08:00为0.03/0.05/0.05；480p横档实测成功(864x480,推理约170s)，1080p档V6实测成功(1920x1088/24fps/5.17s有声)，768p(1376x768)档未实测；分辨率提交中文枚举如'480p横'；裸token鉴权无Bearer；2026-10-14文生恢复复验task103b73a6：480p横5s中文prompt(月球红色生物举'你好'纸牌)要素全中、无固定演示片，prompt节点故障确认修复(864x480/24fps/5.17s含AAC,推理203s)"
+
+  - route_id: autodl-b99-h3-768
+    provider: autodl
+    upstream_model: minimax_h3_b99_001
+    quality_group: minimax-h3
+    billing: per_second
+    duration: {min_seconds: 1, max_seconds: 15}
+    resolutions: [768p]  # 上游仅736p(1280x736)，归入768p能力档
+    aspect_ratios: ["16:9", "9:16", "1:1"]
+    input_modes: [text]
+    pricing: {768p: "0.05"}
+    note: "高峰价闲时0.03；实测成功但实际输出1280x736低于标准768p；推理约318s；中文枚举'736p横'"
+
+  - route_id: suanliai-933-h3-768
+    provider: suanliai
+    upstream_model: "高质量稳定系列h3(933/4-15秒/768P)"
+    quality_group: minimax-h3
+    billing: per_second
+    duration: {min_seconds: 4, max_seconds: 15}
+    resolutions: [768p]
+    aspect_ratios: ["16:9"]
+    input_modes: [text]
+    pricing: {768p: "0.085"}
+    note: "实测5s扣费0.425，输出1376x768；提交字段用 duration（非seconds）"
+
+  - route_id: suanliai-tejia-h3-768
+    provider: suanliai
+    upstream_model: "特价/minimax_h3-768p"
+    quality_group: minimax-h3
+    billing: per_second
+    duration: {min_seconds: 4, max_seconds: 15}
+    resolutions: [768p]
+    aspect_ratios: ["16:9"]
+    input_modes: [text]
+    pricing: {768p: "0.09"}
+    note: "实测5s扣费0.45，输出1376x768；提交字段用 duration；时长依同系列标注仅实测5s"
+
+  - route_id: suanliai-pro-h3-768
+    provider: suanliai
+    upstream_model: "稳定minimax-h3-pro-768p(930不排队不卡脸)"
+    quality_group: minimax-h3
+    billing: per_second
+    duration: {min_seconds: 4, max_seconds: 15}
+    resolutions: [768p]
+    aspect_ratios: ["16:9"]
+    input_modes: [text]
+    pricing: {768p: "0.11"}
+    note: "实测5s扣费0.55；警告：未传比例时上游默认出竖屏(768x1376)，适配器必须显式传横屏参数；提交字段用 duration"
+
+  - route_id: suanliai-933b-h3-768
+    provider: suanliai
+    upstream_model: "minimax_h3-768p(4-15秒9-3-3)"
+    quality_group: minimax-h3
+    billing: per_second
+    duration: {min_seconds: 4, max_seconds: 15}
+    resolutions: [768p]
+    aspect_ratios: ["16:9"]
+    input_modes: [text]
+    pricing: {768p: "0.12"}
+    note: "实测5s扣费0.60，输出1376x768；提交字段用 duration"
+
+  - route_id: grsai-h3
+    provider: grsai
+    upstream_model: minimax-h3
+    quality_group: minimax-h3
+    billing: per_second
+    duration: {min_seconds: 1, max_seconds: 15}
+    resolutions: [480p, 768p]
+    aspect_ratios: ["16:9", "9:16"]
+    input_modes: [text]
+    pricing: {480p: "0.10", 768p: "0.14"}
+    note: "实测480p扣费0.50(864x480,123s)/768p扣费0.70(1344x768,190s)；aspectRatio必填portrait/landscape；replyType=async；成片URL永久有效；W8(2026-10-14)图生付费单11-9576e926：带OSS公网参考图提交minimax-h3/landscape/480p/5s同步200受理，但轮询53分钟卡running/15%无进展（正常t2v仅123-190s），按超时挂起判失败、不开放multi_image；适配器image(public_url单图)透传已TDD就绪待复探；同步层不校验duration/未知字段（9999被受理后上游异步failed），Grsai无取消/余额接口，本单是否实际扣费需后台核对"
+
+  - route_id: grsai-h3-1080
+    provider: grsai
+    upstream_model: minimax-h3
+    quality_group: minimax-h3
+    billing: per_second
+    duration: {min_seconds: 1, max_seconds: 10}  # 1080p上游最多10秒
+    resolutions: [1080p]
+    aspect_ratios: ["16:9", "9:16"]
+    input_modes: [text]
+    pricing: {1080p: "0.30"}
+    note: "实测5s扣费1.50，输出1920x1056为真1080p；与grsai-h3因1080p时长上限不同拆为两条路线"
+
+  - route_id: sanbao-h3-2k
+    provider: sanbao
+    upstream_model: hailuo_h3_2k
+    quality_group: minimax-h3
+    billing: per_use
+    duration: {min_seconds: 4, max_seconds: 15}
+    resolutions: [2k]  # 实测真2K：2560x1440/24fps
+    aspect_ratios: ["16:9", "9:16", "1:1", "4:3", "3:4", "21:9"]
+    input_modes: [multi_image]
+    pricing: "2"
+    max_images: 2  # 元数据标称9图3音属虚标：9图3单被400拒，仅1-2图实测成功
+    max_total_assets: 2
+    asset_access: provider_upload  # 必须 /uploads/raw 原生上传换 host_url，外链被拒
+    note: "S1c/S1e实测1图/2图成片2560x1440/24fps/aac约300-517s¥2/条；适配器护栏强制host_url+reference:all；音频槽未实测不开放"
+
+  - route_id: autodl-z0902-h3-i2v
+    provider: autodl
+    upstream_model: minimax_h3_z0902  # H3六图生视频
+    quality_group: minimax-h3
+    billing: per_second
+    duration: {min_seconds: 1, max_seconds: 15}
+    resolutions: [480p, 768p, 1080p, 2k]  # 上游枚举480p/768p/1088p/1440p
+    aspect_ratios: ["16:9", "9:16"]
+    input_modes: [multi_image, mixed_multimodal]
+    pricing: {480p: "0.04", 768p: "0.07", 1080p: "0.07", 2k: "0.08"}
+    max_images: 6
+    asset_access: public_url
+    note: "【价格订正2026-10-15】AutoDL计费与工作流无关,图生=文生同价(复探autodl.art与双份横评互证),原误登记0.40/0.70为10x；高峰价0.04/0.07/0.07/0.08；闲时0.03/0.05/0.05/0.06；D1实测480p横5s 6图成片864x480/24fps；仅480p横实测，其余档依工作流枚举未实证；素材为公网URL直传ref_image_0..5"
+
+  - route_id: autodl-z0903-h3-av
+    provider: autodl
+    upstream_model: minimax_h3_z0903  # H3六图三音频画融合
+    quality_group: minimax-h3
+    billing: per_second
+    duration: {min_seconds: 1, max_seconds: 15}
+    resolutions: [480p, 768p, 1080p, 2k]
+    aspect_ratios: ["16:9", "9:16"]
+    input_modes: [mixed_multimodal]
+    pricing: {480p: "0.04", 768p: "0.07", 1080p: "0.07", 2k: "0.08"}
+    max_images: 6
+    max_audios: 3
+    asset_access: public_url
+    note: "【价格订正2026-10-15】AutoDL计费与工作流无关,图生三音=文生同价,原误登记0.40/0.70为10x；高峰价0.04/0.07/0.07/0.08；闲时0.03/0.05/0.05/0.06；D2实测480p横5s 6图3音成片有声；音频为叙事混轨非对口型；仅480p横实测；ref_image_0..5+ref_audio_0..2"
+
+  - route_id: autodl-b99-002-h3-firstlast
+    provider: autodl
+    upstream_model: minimax_h3_b99_002  # H3首尾帧生成视频
+    quality_group: minimax-h3
+    billing: per_second
+    duration: {min_seconds: 1, max_seconds: 15}
+    resolutions: [768p]  # 上游仅736p枚举，归入768p能力档
+    aspect_ratios: ["16:9", "9:16", "1:1"]
+    input_modes: [first_last_frame]
+    pricing: {768p: "0.05"}
+    max_images: 2
+    asset_access: public_url
+    note: "【价格订正2026-10-15】首尾帧与文生同价(计费与工作流无关),b99_001已为0.05,本档原误登记0.50为10x；高峰价闲时0.03；D3实测横屏5s成片1280x736/24fps（实际高度低于标准768p）；提交字段first_frame/last_frame，中文枚举'736p横'"
+
+  # ===================== MiniMax H3 LightX2V 加速版（对外接口：minimax-h3-light）=====================
+
+  - route_id: autodl-lightx2v-h3
+    provider: autodl
+    upstream_model: minimax_h3_lightx2v_no_pic
+    quality_group: minimax-h3-light
+    billing: per_second
+    duration: {min_seconds: 1, max_seconds: 15}
+    resolutions: [480p, 768p]
+    aspect_ratios: ["16:9", "9:16", "1:1"]
+    input_modes: [text]
+    pricing: {480p: "0.03", 768p: "0.04"}
+    note: "LightX2V加速变体（非满血H3）独立质量组；高峰价闲时0.02/0.03；480p横档实测成功推理约87-100s，768p档未实测；当前唯一供应商暂无跨源备份；2026-10-14文生恢复复验task25e11795：480p横5s中文prompt(红色机甲猫月球举'你好'纸牌)强相关，固定演示片故障已修复(864x480/24fps/5.17s含AAC)；当日排队约16min+渲染117s，单次排队偏长未超20min阈值暂不标standby"
+
+  - route_id: autodl-lightx2v-v5-15s-h3-i2v
+    provider: autodl
+    upstream_model: minimax_h3_lightx2v_v5_15s  # H3多图生视频15秒（9图）
+    quality_group: minimax-h3-light
+    billing: per_second
+    duration: {min_seconds: 1, max_seconds: 15}
+    resolutions: [480p, 768p]
+    aspect_ratios: ["16:9", "9:16", "1:1"]
+    input_modes: [multi_image, mixed_multimodal]
+    pricing: {480p: "0.03", 768p: "0.04"}
+    max_images: 9
+    asset_access: public_url
+    note: "高峰价闲时0.02/0.03；D4实测480p横5s 9图成片864x480/24fps仅约99s；无1080p档（10s版工作流另有1080p但未实测）；ref_image_0..8公网URL直传"
+
+  - route_id: autodl-zm-u24-h3-i2v
+    provider: autodl
+    upstream_model: minimax_h3_zm_u24  # H3多图多音频生视频(升级画质)，zealman，平台7日19.7w用量最热封装
+    quality_group: minimax-h3-light
+    billing: per_second
+    duration: {min_seconds: 1, max_seconds: 15}
+    resolutions: [480p, 768p]
+    aspect_ratios: ["16:9", "9:16", "1:1"]
+    input_modes: [multi_image, mixed_multimodal]
+    pricing: {480p: "0.03", 768p: "0.04"}
+    max_images: 9
+    max_audios: 3
+    asset_access: public_url
+    note: "高峰价闲时0.02/0.03；Z1对抗实证task797cf1af(2026-10-14)480p横5s 1图0音成片864x480/24fps/5.17s，无音频输入成片仍带环境音轨；强冲突中文prompt红塔金龙烟花三元素全中且参考雪山全程保留，prompt遵循力强；Z2 taskfce4854d-16c6/Z3 taskf5958025-6ef9 音频槽实证(同图同prompt各1音5s约0.15元)：音频为选择性融合引导而非透传复刻——880Hz高频参考音被采纳并在片头0~0.75s高纯度重现(谐波为零+doubao-seed-2.1-lite盲听交叉验证)，220Hz低频未保留，之后均转为生成音效；故开放mixed_multimodal供图音混合叙事，对口型/配音复刻场景禁用(走image_audio_lipsync档)；仅480p横与单图实证，768p/竖屏/1:1/多图未实测；ref_image_0..8+ref_audio_0..2公网URL直传(3音满槽为平台明文档)"
+
+  # ===================== Wan 3.0（对外接口：wan3.0；2026-10-13 第4批）=====================
+
+  - route_id: erchun-wan3
+    provider: erchun
+    upstream_model: mdl_ec286eb1bc618249d65b87bc79366417  # 阿里云 Wan 3.0
+    quality_group: wan3.0
+    billing: per_second
+    duration: {min_seconds: 2, max_seconds: 30}
+    resolutions: [480p, 720p, 1080p]
+    aspect_ratios: ["16:9", "9:16", "1:1", "4:3", "3:4", "adaptive"]
+    input_modes: [text, multi_image, video_reference, mixed_multimodal]
+    pricing: {480p: "0.158", 720p: "0.40", 1080p: "0.80"}
+    max_images: 10
+    max_videos: 5
+    max_audios: 5
+    max_total_assets: 20
+    asset_access: provider_upload
+    note: "J2c实测480p 5s t2v settled；J14实测10图3视3音480p成片854x480/30fps/5.04s有声settled；槽位边界实测图10视5音5(11/6/6被422拒)，mix总20依目录；参考视频/音频限15s；720p/1080p及非16:9比例未实测；素材仅收media_id；目录默认1080P必须显式传resolution；W7(2026-10-14)纯video_reference付费实证task81578：1视无图无音480p5s/854x480/30fps/settled/278s，8s无音轨参考片红块横移+蓝块振动轨迹复现；图+视频组合task81610：W7紫牌图片元素+红块横移双采纳settled/288s；两单无音频输入成片仍默认带AAC音轨"
+
+  - route_id: erchun-happyhorse-1-1
+    provider: erchun
+    upstream_model: mdl_fd1c501eb8bd8436cf9e427b9eddc61e  # 快乐马1.1 happyhorse-1.1-r2v
+    quality_group: happyhorse-1.1
+    billing: per_use
+    duration: {min_seconds: 3, max_seconds: 15}  # 时长枚举3-15依v1目录，仅5s实测
+    resolutions: [480p]
+    aspect_ratios: ["16:9"]
+    input_modes: [multi_image]
+    pricing: "1.45"
+    max_images: 9  # v1目录声明参考图上限9，仅1图实测，未做边界探测
+    asset_access: provider_upload
+    note: "W8(2026-10-14)单图i2v付费实证task82115：v2上传W7紫牌换media_id→v1提交480P/16:9/5s，settled/47s，成片848x480/24fps/5.16s/h264+默认AAC，紫底黄W7白字纸牌强采纳（重绘为圆角卡片）推近+摇摆符合prompt，实扣1.45credits（较J11/J13横评期1.00已涨价，以本次为准）；requires_image=true不开放text，无视频/音频/mix槽；720p/1080p价格未实测不开放；v1目录另列8种比例未实测不开放；素材仅收media_id"
+
+  - route_id: suanliai-007-wan3-video
+    provider: suanliai
+    upstream_model: "007系列/wan3-video(文生图生视频/10-5-5/2-30秒)"
+    quality_group: wan3.0
+    billing: per_second
+    duration: {min_seconds: 2, max_seconds: 30}
+    resolutions: [480p, 720p, 1080p]
+    aspect_ratios: ["16:9"]
+    input_modes: [text, multi_image, video_reference, mixed_multimodal]
+    pricing: {480p: "0.25", 720p: "0.30", 1080p: "0.36"}
+    max_images: 10
+    max_videos: 5
+    max_audios: 5
+    asset_access: review_then_ref
+    duration_field: duration
+    note: "T1实测480p 5s t2v✅；T3实测480p 30s t2v✅¥7.5；i2v槽位10图5视5音依工作流名称未实证；720p/1080p未实测；提交字段用duration；W7纯视频✅task_MOoY（480p 5s纯1视，854x480/30fps/completed/287s，红蓝块轨迹目鉴复现，无音频输入成片带AAC；该档参考片按时长同单价另计，5s+8s参考实扣¥3.25）"
+
+  - route_id: suanliai-007-wan3-prime
+    provider: suanliai
+    upstream_model: "007系列/wan3-prime(文生图生视频/10-5-5/2-30秒)"
+    quality_group: wan3.0
+    billing: per_second
+    duration: {min_seconds: 2, max_seconds: 30}
+    resolutions: [480p, 720p, 1080p]
+    aspect_ratios: ["16:9"]
+    input_modes: [text, multi_image, video_reference, mixed_multimodal]
+    pricing: {480p: "0.29", 720p: "0.38", 1080p: "0.42"}
+    max_images: 10
+    max_videos: 5
+    max_audios: 5
+    asset_access: review_then_ref
+    duration_field: duration
+    note: "T2实测480p 5s t2v✅；i2v槽位依工作流名称10图5视5音未实证；720p/1080p未实测；提交字段用duration；W7纯视频✅task_mn5Z（480p 5s纯1视，854x480/30fps/completed/183s，红蓝块轨迹目鉴复现，节奏略快t4红块移出右缘，无音频输入成片带AAC；参考片按时长同单价另计，5s+8s实扣¥3.77）"
+
+  - route_id: suanliai-wan3-std
+    provider: suanliai
+    upstream_model: "wan3.0-video标准版(输出+视频参考-480p/720p/1080p)"
+    quality_group: wan3.0
+    billing: per_second
+    duration: {min_seconds: 2, max_seconds: 30}  # 时长仅5s实测，范围依同插件wan3工作流
+    resolutions: [480p, 720p, 1080p]
+    aspect_ratios: ["16:9"]
+    input_modes: [text, multi_image, video_reference, mixed_multimodal]
+    pricing: {480p: "0.35", 720p: "0.35", 1080p: "0.35"}
+    max_images: 10
+    max_videos: 5
+    max_audios: 5
+    asset_access: review_then_ref
+    duration_field: duration
+    note: "三档同价；V4实测1080p 5s t2v成片1920x1080/30fps/有声35.7MB✅；J5实测480p 10图3视3音5s✅；提交字段用duration；W7纯视频✅task_kWBU（480p 5s纯1视，854x480/30fps/completed/393s，红蓝块轨迹目鉴复现，无音频输入成片带AAC；参考片按时长同单价另计，5s+8s实扣¥4.55）"
+
+  - route_id: suanliai-wan3-1080
+    provider: suanliai
+    upstream_model: "wan3.0-1080p(10-5-5不卡脸无限并发)"
+    quality_group: wan3.0
+    billing: per_second
+    duration: {min_seconds: 2, max_seconds: 30}  # 时长仅5s实测，范围依同插件wan3工作流
+    resolutions: [1080p]
+    aspect_ratios: ["16:9"]
+    input_modes: [multi_image, video_reference, mixed_multimodal]
+    pricing: {1080p: "0.42"}
+    max_images: 10
+    max_videos: 5
+    max_audios: 5
+    asset_access: review_then_ref
+    duration_field: duration
+    note: "V5实测10图1080p 5s成片1920x1080/30fps/有声✅¥2.10渲染约18分钟；纯文生未实测故不开放text；视/音槽依名称10-5-5未实证；提交字段用duration；W7纯视频✅task_N7nn（1080p 5s纯1视，1920x1080/30fps/5.04s/completed/1424s约24分钟，红蓝块轨迹目鉴复现，无音频输入成片带AAC；该档仅按输出时长计费参考片不另计，实扣¥2.10）"
+
+  - route_id: suanliai-wan3-guanzhuan
+    provider: suanliai
+    upstream_model: "高质量稳定系列wan3.0-video(官转原生过人脸多参生视频)"
+    quality_group: wan3.0
+    billing: per_second
+    duration: {min_seconds: 2, max_seconds: 30}  # 时长仅5s实测，范围依同插件wan3工作流
+    resolutions: [480p, 720p, 1080p]
+    aspect_ratios: ["16:9"]
+    input_modes: [multi_image, video_reference, mixed_multimodal]
+    pricing: {480p: "0.23", 720p: "0.30", 1080p: "0.38"}
+    max_images: 10
+    max_videos: 5
+    max_audios: 8
+    asset_access: review_then_ref
+    duration_field: duration
+    note: "J3实测480p 10图3视3音5s✅约804s；边界探测图10(11拒)/视5(6拒)/音8段受理(上界未探到)；纯文生未实测不开放text；720p/1080p未实测；提交字段用duration；W7纯视频✅task_8exh（480p 5s纯1视，854x480/30fps/completed/294s，红蓝块轨迹目鉴复现，无音频输入成片带AAC；参考片按时长同单价另计，5s+8s实扣¥2.99）"
+
+  - route_id: suanliai-wan3-guanzhuan-prime
+    provider: suanliai
+    upstream_model: "高质量稳定系列wan3.0-video-prime(官转原生过人脸多参生视频)"
+    quality_group: wan3.0
+    billing: per_second
+    duration: {min_seconds: 2, max_seconds: 30}  # 时长仅5s实测，范围依同插件wan3工作流
+    resolutions: [480p, 720p, 1080p]
+    aspect_ratios: ["16:9"]
+    input_modes: [multi_image, video_reference, mixed_multimodal]
+    pricing: {480p: "0.24", 720p: "0.33", 1080p: "0.38"}
+    max_images: 10
+    max_videos: 5
+    max_audios: 5
+    asset_access: review_then_ref
+    duration_field: duration
+    note: "J4实测480p 10图3视3音5s✅；槽位上限依同插件wan3Media边界(图10视5音5)；纯文生未实测不开放text；720p/1080p未实测；提交字段用duration；W7纯视频✅task_Xt0F（480p 5s纯1视，854x480/30fps/completed/158s，红蓝块轨迹目鉴复现，无音频输入成片带AAC；参考片按时长同单价另计，5s+8s实扣¥3.12）"
+
+  - route_id: suanliai-wan3-prime-fast
+    provider: suanliai
+    upstream_model: "wan3.0-video-prime高速版(输出+视频参考-480p/720p/1080p)"
+    quality_group: wan3.0
+    billing: per_second
+    duration: {min_seconds: 2, max_seconds: 30}  # 时长仅5s实测，范围依同插件wan3工作流
+    resolutions: [480p, 720p, 1080p]
+    aspect_ratios: ["16:9"]
+    input_modes: [multi_image, video_reference, mixed_multimodal]
+    pricing: {480p: "0.45", 720p: "0.45", 1080p: "0.45"}
+    max_images: 10
+    max_videos: 5
+    max_audios: 5
+    asset_access: review_then_ref
+    duration_field: duration
+    note: "三档同价；J6实测480p 10图3视3音5s✅；槽位上限依同插件wan3Media边界；纯文生未实测不开放text；720p/1080p未实测；提交字段用duration；W7纯视频✅task_0FVG（480p 5s纯1视，854x480/30fps/completed/151s，红蓝块轨迹目鉴复现，无音频输入成片带AAC；参考片按时长同单价另计，5s+8s实扣¥5.85）"
+
+  - route_id: suanliai-004-wan3-tiao
+    provider: suanliai
+    upstream_model: "004系列/wan3.0-video"
+    quality_group: wan3.0
+    billing: per_use
+    duration: {min_seconds: 5, max_seconds: 30}  # 30s实测，短时长未实测
+    resolutions: [480p]
+    aspect_ratios: ["16:9"]
+    input_modes: [multi_image, mixed_multimodal]
+    pricing: "2.95"
+    max_images: 10
+    max_audios: 5
+    asset_access: review_then_ref
+    duration_field: duration
+    note: "5-30s同价¥2.95/条；J9实证参考视频被上游400拒故不开放视频槽；J9b实测10图5音30s成片854x480/30fps✅；纯图组合未单独实测；提交字段用duration"
+
+  - route_id: suanliai-004-wan3-vedio-tiao
+    provider: suanliai
+    upstream_model: "004系列/wan3.0-vedio(优质10图5音/5-30秒/480P)"  # 上游拼写即 vedio
+    quality_group: wan3.0
+    billing: per_use
+    duration: {min_seconds: 5, max_seconds: 30}
+    resolutions: [480p]
+    aspect_ratios: ["16:9"]
+    input_modes: [multi_image, mixed_multimodal]
+    pricing: "3.2"
+    max_images: 10
+    max_audios: 5
+    asset_access: review_then_ref
+    duration_field: duration
+    note: "5-30s同价¥3.2/条；J10实测10图5音30s成片✅；无参考视频槽；纯图组合未单独实测；提交字段用duration"
+
+  - route_id: sanbao-wan3-once-480
+    provider: sanbao
+    upstream_model: wan_3_0_once_480p
+    quality_group: wan3.0
+    billing: per_use
+    duration: {min_seconds: 5, max_seconds: 30}
+    resolutions: [480p]
+    aspect_ratios: ["16:9", "9:16", "1:1", "3:4", "4:3", "21:9"]
+    input_modes: [multi_image, mixed_multimodal]
+    pricing: "3.3"
+    max_images: 10
+    max_audios: 5
+    max_total_assets: 15
+    asset_access: public_url
+    note: "33积分=¥3.3/条5-30s同价；S3实测10图5音30s成片854x480/30fps✅约894s；边界实测图11拒/音6拒；无参考视频槽；图片音频走外链直传(reference不带all)；非16:9比例未实测"

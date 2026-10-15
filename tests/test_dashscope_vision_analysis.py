@@ -34,30 +34,38 @@ _PNG_BYTES = base64.b64decode(
 
 
 class _FakeCompletions:
-    def __init__(self, recorder: dict, content: str) -> None:
+    def __init__(self, recorder: dict, content: str, finish_reason: str = "stop") -> None:
         self._recorder = recorder
         self._content = content
+        self._finish_reason = finish_reason
 
     def create(self, **kwargs):
         self._recorder.update(kwargs)
         return types.SimpleNamespace(
-            choices=[types.SimpleNamespace(message=types.SimpleNamespace(content=self._content))],
+            choices=[
+                types.SimpleNamespace(
+                    message=types.SimpleNamespace(content=self._content),
+                    finish_reason=self._finish_reason,
+                )
+            ],
             usage=None,
         )
 
 
 class _FakeChat:
-    def __init__(self, recorder: dict, content: str) -> None:
-        self.completions = _FakeCompletions(recorder, content)
+    def __init__(self, recorder: dict, content: str, finish_reason: str = "stop") -> None:
+        self.completions = _FakeCompletions(recorder, content, finish_reason)
 
 
-def _install_fake_openai(monkeypatch, recorder: dict, content: str) -> None:
+def _install_fake_openai(
+    monkeypatch, recorder: dict, content: str, finish_reason: str = "stop"
+) -> None:
     created: dict = {}
 
     class FakeOpenAI:
         def __init__(self, **kwargs):
             created.update(kwargs)
-            self.chat = _FakeChat(recorder, content)
+            self.chat = _FakeChat(recorder, content, finish_reason)
 
     recorder["__client__"] = created
     monkeypatch.setitem(sys.modules, "openai", types.SimpleNamespace(OpenAI=FakeOpenAI))
@@ -86,7 +94,7 @@ def test_analyze_image_builds_multimodal_content_and_returns_scores(tmp_path, mo
     _install_fake_openai(monkeypatch, recorder, _ANALYSIS_JSON)
     monkeypatch.setenv("DASHSCOPE_API_KEY", "test-key")
 
-    result = _vision_adapter("qwen3-vl-plus").analyze_image(
+    result = _vision_adapter("qwen3.8-omni-flash").analyze_image(
         image_path=str(image_path),
         analysis_type="quality",
         criteria=["clarity", "composition"],
@@ -108,7 +116,7 @@ def test_analyze_image_passes_remote_url_without_reencoding(monkeypatch) -> None
     _install_fake_openai(monkeypatch, recorder, _ANALYSIS_JSON)
     monkeypatch.setenv("DASHSCOPE_API_KEY", "test-key")
 
-    result = _vision_adapter("qwen3-vl-plus").analyze_image(
+    result = _vision_adapter("qwen3.8-omni-flash").analyze_image(
         image_path="https://cdn.example.com/a.png",
         analysis_type="quality",
         criteria=["clarity"],
@@ -127,7 +135,7 @@ def test_analyze_video_uses_video_part_and_longer_timeout(tmp_path, monkeypatch)
     _install_fake_openai(monkeypatch, recorder, _ANALYSIS_JSON)
     monkeypatch.setenv("DASHSCOPE_API_KEY", "test-key")
 
-    result = _vision_adapter("qwen3-vl-plus").analyze_video(
+    result = _vision_adapter("qwen3.8-omni-flash").analyze_video(
         video_path=str(video_path),
         analysis_type="quality",
         criteria=["smoothness"],
@@ -148,7 +156,7 @@ def test_non_json_response_falls_back_to_content_text(monkeypatch) -> None:
     _install_fake_openai(monkeypatch, recorder, "画面清晰但构图一般。")
     monkeypatch.setenv("DASHSCOPE_API_KEY", "test-key")
 
-    result = _vision_adapter("qwen3-vl-plus").analyze_image(
+    result = _vision_adapter("qwen3.8-omni-flash").analyze_image(
         image_path="https://cdn.example.com/a.png",
         analysis_type="quality",
         criteria=["clarity"],
@@ -177,7 +185,7 @@ def test_api_error_is_reported_not_swallowed(monkeypatch) -> None:
     monkeypatch.setitem(sys.modules, "openai", types.SimpleNamespace(OpenAI=FakeOpenAI))
     monkeypatch.setenv("DASHSCOPE_API_KEY", "test-key")
 
-    result = _vision_adapter("qwen3-vl-plus").analyze_image(
+    result = _vision_adapter("qwen3.8-omni-flash").analyze_image(
         image_path="https://cdn.example.com/a.png",
         analysis_type="quality",
         criteria=["clarity"],
@@ -187,18 +195,6 @@ def test_api_error_is_reported_not_swallowed(monkeypatch) -> None:
     assert "upstream 429" in (result.error or "")
 
 
-def test_omni_plus_is_also_executable_for_vision_review(monkeypatch) -> None:
-    """视觉评审下拉里同时提供 qwen3.5-omni-plus，它必须与 qwen3-vl-plus 一样可执行，
-    否则目录、白名单、执行层又会回到本次要消灭的不一致状态。"""
-    adapter = _vision_adapter("qwen3.5-omni-plus")
-    assert callable(getattr(adapter, "analyze_image", None))
-    assert callable(getattr(adapter, "analyze_video", None))
-
-    spec = registry.get_spec("qwen3.5-omni-plus")
-    assert "image_understanding" in (spec.modality or [])
-    assert "video_understanding" in (spec.modality or [])
-
-
 def test_text_only_adapter_does_not_expose_vision_methods() -> None:
     """反向断言：视觉能力只挂在视觉档位上，纯文本对话 adapter 不应被顺手带出方法，
     否则白名单与能力面会重新失去约束。"""
@@ -206,3 +202,52 @@ def test_text_only_adapter_does_not_expose_vision_methods() -> None:
 
     assert not hasattr(adapter, "analyze_image")
     assert not hasattr(adapter, "analyze_video")
+
+
+def test_literal_newline_inside_string_value_is_still_parsed(monkeypatch) -> None:
+    """评审正文里的裸换行（未被转义）不应把整条结果降级成纯文本。
+
+    2026-10-12 三档测评实测：`qwen3.8-omni-flash` 约 7%（3/42）输出 `finish_reason=stop`、
+    正文看起来完整却解析失败，页面因此退化为纯文本展示。严格模式先失败、
+    再放宽控制字符是这条路径上唯一无损的兜底。
+    """
+    broken = '{"scores": {"clarity": {"score": 6, "comment": "边缘略软\n主体尚可"}}, "summary": "可用"}'
+    recorder: dict = {}
+    _install_fake_openai(monkeypatch, recorder, broken, finish_reason="stop")
+    monkeypatch.setenv("DASHSCOPE_API_KEY", "test-key")
+
+    result = _vision_adapter("qwen3.8-omni-flash").analyze_image(
+        image_path="https://cdn.example.com/a.png",
+        analysis_type="quality",
+        criteria=["clarity"],
+    )
+
+    assert result.success is True
+    assert result.metadata["result_data"]["scores"]["clarity"]["score"] == 6
+    assert result.metadata["vision_parse_failed"] is False
+
+
+def test_unparseable_response_is_flagged_with_finish_reason(monkeypatch) -> None:
+    """降级必须可归因：截断（length）与非法转义（stop）在 metadata 里要能分开，
+    否则线上只能看到"成功但纯文本"，无法判断该加 max_tokens 还是该修解析。"""
+    recorder: dict = {}
+    _install_fake_openai(
+        monkeypatch,
+        recorder,
+        '{"scores": {"clarity": {"score": 6, "comm',
+        finish_reason="length",
+    )
+    monkeypatch.setenv("DASHSCOPE_API_KEY", "test-key")
+
+    result = _vision_adapter("qwen3.8-omni-flash").analyze_image(
+        image_path="https://cdn.example.com/a.png",
+        analysis_type="quality",
+        criteria=["clarity"],
+    )
+
+    assert result.success is True
+    assert result.metadata["result_data"] == {
+        "content": '{"scores": {"clarity": {"score": 6, "comm'
+    }
+    assert result.metadata["vision_parse_failed"] is True
+    assert result.metadata["finish_reason"] == "length"

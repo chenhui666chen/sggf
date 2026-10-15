@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Optional
 
 from adapters.adapter_helpers import analyze_video, get_model_info
 
-DEFAULT_SAFETY_VLM_ADAPTER = "qwen3-vl-plus"
+DEFAULT_SAFETY_VLM_ADAPTER = "qwen3.8-omni-flash"
 DEFAULT_SAFETY_FAIL_POLICY = "warn"
 SAFETY_ANALYSIS_TYPES = ("safety", "quality")
 SAFETY_CRITERIA = ["violence", "sexual", "hate", "self_harm", "illegal", "harassment"]

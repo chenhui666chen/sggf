@@ -275,14 +275,14 @@ python -m backend.app.scripts.bootstrap_model_catalog_cards --prune-stale
 | `adapters/dashscope/image_sync.py` | 百炼同步图片 | `qwen-image-3.0`、`qwen-image-3.0-pro`、`wan2.7-image-pro` |
 | `adapters/dashscope/image_async.py` | 百炼异步图片 | `kling/kling-v3-image-generation`、`kling/kling-v3-omni-image-generation` |
 | `adapters/dashscope/image_edit.py` | 百炼图片编辑 | `qwen-image-edit-plus`、`qwen-image-edit-max` |
-| `adapters/dashscope/chat.py` | 百炼对话 | `qwen3.5-omni-plus`、`qwen3.6-plus` |
-| `adapters/dashscope/multimodal.py` | 百炼视觉分析 | `qwen3-vl-plus` |
+| `adapters/dashscope/chat.py` | 百炼对话 | `qwen3.6-plus`、`qwen3.5-omni-flash`、`qwen-plus`（视觉评审）、`qwen3.8-omni-flash`（视觉评审，关思考走 `reasoning_effort`） |
+| `adapters/_shared_vision_review.py` | 视觉评审执行层（供应商中立，图片/视频质量评审） | 由 `adapters/dashscope/chat.py` 与 `adapters/volcengine/chat.py` 的 mixin 共用；`adapters/dashscope/multimodal.py` 已随视觉线退役整文件删除，评审实现只剩这一处 |
 | `adapters/dashscope/tts.py` | 百炼 TTS | `MiniMax/speech-2.8-turbo`、`MiniMax/speech-2.8-hd`、`qwen3-tts-instruct-flash`、`cosyvoice-v3.5-plus` |
 | `adapters/dashscope/video_wan3.py` | 万相 3.0 全能参考视频 | `wan3.0-video` |
 | `adapters/dashscope/video_i2v.py` | PixVerse 视频 | `pixverse-c1-r2v`、`pixverse-v6-t2v` |
 | `adapters/dashscope/video_kling.py` | Kling 视频 | `kling/kling-v3-video-generation`、`kling/kling-v3-omni-video-generation` |
 | `adapters/volcengine/image.py` | 火山方舟图片 | `doubao-seedream-5-0-pro`、`doubao-seedream-5-0` |
-| `adapters/volcengine/chat.py` | 火山方舟对话 | `doubao-seed-2-1-pro`、`doubao-seed-2-1-lite` |
+| `adapters/volcengine/chat.py` | 火山方舟对话与视觉评审（`_VolcengineVisionReviewMixin`） | `doubao-seed-2-1-pro`、`doubao-seed-2-1-lite` |
 | `adapters/volcengine/video.py` | 火山方舟 Seedance 视频（`SeedanceProfile` 数据驱动三档差异） | `doubao-seedance-2-5`、`doubao-seedance-2-0`、`doubao-seedance-2-0-fast` |
 | `adapters/volcengine/tts.py` / `audio_generation.py` | 火山方舟 TTS 与音效生成 | `seed-tts-2.0-expressive`、`seed-audio-1.0`、`seed-audio-1.0-multilingual` |
 | `adapters/mimo/tts.py` | 小米 MiMo TTS | `mimo-v2.5-tts`、`mimo-v2.5-tts-voicedesign`、`mimo-v2.5-tts-voiceclone` |
@@ -558,6 +558,10 @@ rg -n "@register_model\(" adapters -B1 -A2
 
 | `fun-asr-flash-2026-06-15` | `qwen-audio-3.1-asr-flash` | 2026-10-11 有声书客观层/字幕 ASR 换代。该链路**只有 HTTP 契约**，旧线名不出现在两份 YAML 与注册中心里，故单列进 `RETIRED_AUDIOBOOK_ASR_MODELS`；provider 键 `funasr_flash` 及全部别名整段删除，传旧键直接 `asr_provider_unsupported`。计价口径同时从"按秒后付费"换成"按 Token 派生等效秒价"，见 §11.11 |
 
+| `qwen3.5-omni-plus` | `qwen3.8-omni-flash` | 2026-10-12 视觉评审三档盲评实测：检出率打平、判词质量差一个档次，本档无维度胜出且单条成本约为 3.8 的 11 倍；档案卡、`@register_model`、`analyze_*` 白名单四处物理删除，音频评分组合同批从四档收成两档。存量项目配置已由改写脚本预览复核为零命中 |
+
+| `qwen3-vl-plus` | `qwen3.8-omni-flash` | 2026-10-12 视觉线物理退役第二片（Slice B，短剧 QC 线）。除 Slice A 已删的产品入口外，本批再删：`adapters/dashscope/multimodal.py` 整文件与注册表项、`adapters/dashscope/__init__.py` 星号导入、legacy 适配器类 `Qwen3VLPlusAdapter`、`legacy_runtime_wrappers.Qwen3VLPlusRuntimeWrapper` 与其表键、`core/model_resolution.py` 别名、`config/models.yaml` 档案卡、`config/model_catalog_profiles.yaml` 画像段（含指向本档的 `router_rules`）、`analyze_*` 白名单过渡项、`QWEN_VL_PLUS_*` 三行 env。消费侧同时改为传**模型 ID 字符串**而非适配器对象，兼容层删除才不留残骸。库内存量经改写脚本复核零命中 |
+
 删除旧 ID 与别名时同步改写的位置（不留审计副本，2026-10-09 已执行）：
 
 - `config/models.yaml` / `config/llm_models.yaml` 条目、`core/model_resolution.py` 别名、适配器与 `@register*` 装饰器
@@ -679,13 +683,11 @@ python -c "from adapters.registry import default_registry as d; s=d().get_all_sp
 | `qwen-image-edit-plus` | 百炼 | 9s |
 | `qwen-image-edit-max` | 百炼 | 26s |
 
-### 对话 / 多模态 (5)
+### 对话 / 多模态 (3)
 
 | 注册 ID | 平台 | 典型延迟 |
 | --- | --- | --- |
-| `qwen3.5-omni-plus` | 百炼 | 1.5s |
 | `qwen-plus`（上游线名 `qwen3.7-plus`） | 百炼 | 1.6s |
-| `qwen3-vl-plus` | 百炼 | 3.5s |
 | `doubao-seed-2-1-pro` | 火山方舟 | 3s |
 | `doubao-seed-2-1-lite` | 火山方舟 | 1.5s |
 
@@ -1313,6 +1315,46 @@ python -m pytest tests/test_llm_output_limit_fact_table.py -q
 
 同轮的另一处收敛（短剧分镜侧）：`agents/storyboarder_pkg/_run.py` 容器模式的镜头上下界不再写死 5~15，改为调用 `pipeline.media_presets.dreamweaver_beat_duration_bounds_s()`——与剧本阶段 beat 区间**同一个派生函数**，env 只能在官方 [2, 30] 内收窄。此前剧本按 2-30s 写 beat、分镜把 20 秒的容器压回 15 秒，是同一份档案的第二处事实源；`preferred_shot_s` 仍是 15 秒（那是规划偏好，不是钳制），幻灯片模式保留 3~10 秒（ffmpeg 不受视频引擎区间约束）。
 
+### 10.28 「视觉评审的实现天然只属于百炼」
+
+不是。2026-10-12 之前，`analyze_image` / `analyze_video` 写在 `adapters/dashscope/chat.py` 的 `_DashScopeVisionReviewMixin` 里，客户端构造（base_url + `DASHSCOPE_API_KEY`）与评审结构（素材编码、提示词、JSON 解析）绑死在同一个类上，于是档案里早已声明视觉理解能力的 `qwen-plus`（Qwen3.7 Plus）和豆包 Seed 2.1 两档接不进来——白名单、catalog 分组和页面名单就一起冻结在了两档。
+
+现在的形状：执行层在 `adapters/_shared_vision_review.py::VisionReviewMixin`，供应商子类只实现 `_vision_client()` 与 `_vision_disable_thinking_kwargs()` 两个钩子。关思考的载荷写法目前已知三种，互不通用：百炼 Qwen3.7/3.6/3.5/VL 用顶层 `extra_body={"enable_thinking": False}`，方舟用 `extra_body={"thinking": {"type": "disabled"}}`，Qwen3.8 Omni Flash 只认 OpenAI 标准顶层参数 `reasoning_effort="none"`（`enable_thinking` 不在它的适用清单里，混用会静默保留默认 xhigh 思考）。接一档新视觉模型要同步四处，缺一处就是不同的坏法：
+
+| 落点 | 缺了会怎样 | 常驻判据 |
+| --- | --- | --- |
+| adapter 混入 `VisionReviewMixin` 并 `@register_model` | 运行期 `adapter_missing`（"有档案不等于有实现"） | `tests/test_media_runtime_executability_guard.py::TestVisionAnalysisIsExecutable` |
+| `config/models.yaml` 的 `modality` 补 `image_understanding` / `video_understanding` | 显式点名也在路由期 `does not support`（`_rank_candidates` 按 modality 过滤） | 同上 |
+| `core/unified_media_runtime.py` 的 `analyze_image` / `analyze_video` 白名单 | 候选集里没有它，页面选了也走不到 | `tests/test_vision_review_multi_provider.py` |
+| `backend/app/services/asset_studio_model_catalog.py` 的 `vision_review` 分组 | 入口 gate 400；分组还必须落在白名单之内，否则前端可见、后端拒单 | 同上（分组 ⊆ 白名单判据） |
+
+关思考是新档位的硬前提，不是优化项：豆包 Seed 2.1 两档开思考实测 39.8s/40.8s、输出 1900+ tokens，关闭后 9.4s/15.7s、363/398 tokens；Qwen3.7 Plus 开思考 40.1s、关闭 11.1s；Qwen3.8 Omni Flash 生产评审提示词下开思考 22.3s（图）/12.4s（视频）、多吃 1655/651 reasoning tokens，`reasoning_effort="none"` 后 6.4s/4.3s。思考链与正文共用 `max_tokens` 预算，评审提示词的 JSON 稍有长度就会被吃成空 content，表现为"成功但空结果"而不是报错。
+
+评审判据必须自带扣分下限，否则模型按"看着顺眼"打分。2026-10-12 用 21 条素材（11 条真实产物 + 5 条本地可控退化锚点 + 6 条抽帧图片，每条先用 ffprobe/OpenCV 算客观真值）对三档做 63 次真实调用，测出三档共同的失效模式：整段偏暗（实测平均亮度 33.5）的 `lighting` 一律 9.8，后 4 秒完全冻结的 `smoothness` 给到 8.5。修法是 `VISION_CRITERION_RUBRICS` 把逐维度扣分下限写进 `build_vision_review_prompt`，并要求 comment 给出画面证据。**这条约束的措辞顺序敏感**：把"冻结必须扣分"写在前面会把慢镜头误判成冻结，把"低运动量不扣分"写在前面真冻结又漏检，两条并列后仍只有部分档位能同时判对，改判据文案必须用锚点复测，不能只读一遍就发。
+
+两个已经花真钱排除掉的"看起来该做"的优化：① 抽帧率不是冻结漏检的原因——`video_url` part 上的 `fps` 兄弟字段（官方默认 2.0、范围 0.1~10，百炼与方舟五档都接受不报错）实测 2/4/8fps 下判分恒定 8.5，视频 token 却从 3062 涨到 12248，因此执行层**没有**接入 `fps`；② `response_format={"type":"json_object"}` 能让 JSON 100% 可解析，但 Qwen3.8 Omni Flash 延迟从 6~9s 涨到 22~33s，未采纳。该档遗留约 7%（3/42）输出不可解析（`finish_reason=stop`、正文看起来完整，疑为字符串内裸换行），另两档 0 次，命中时页面降级为纯文本展示。
+
+**这 7% 的收口方式（2026-10-12，不花钱的那条路）**：`parse_vision_review_content` 先按严格模式解析，失败后以 `strict=False` 重试一次——只放宽"字符串里的裸控制字符"这一项，其余语法错误仍判失败，不做猜测式修补。同时把 `finish_reason` 与 `vision_parse_failed` 写进 metadata：降级必须能归因，`length` 指向预算被思考链或长正文吃光（该加 `VISION_MAX_TOKENS`），`stop` 指向正文本身非法（该修解析），缺这两个字段时线上只看到"成功但纯文本"，下一次还得再花真钱复现。**据此判定不动 `VISION_MAX_TOKENS=1200`**：三次失败实测都是 `finish_reason=stop` 且正文看起来完整，截断假设被现有证据否定，在没有新证据前放宽预算只会重复付费思考 token。加重试同样被否：评审是交互调用，自动重试等于按失败率翻倍付费，而失败已经可降级展示。
+
+**产品入口退役（2026-10-12 收口）**：三档测评的结论是"检出率打平、判词质量差一个档次"，`qwen3.5-omni-plus` 无任何维度胜出却是 3.8 的约 11 倍单条成本，`qwen3-vl-plus` 同样只剩"能用"。视觉线产品入口因此收敛为四档（`qwen-plus`、`qwen3.8-omni-flash`、`doubao-seed-2-1-lite`、`doubao-seed-2-1-pro`），`vision_review` 与 `dreamweaver_vision` 两个分组同源，默认档分别取 `qwen3.8-omni-flash`（工作台只走 analyze_*）与 `qwen-plus`（短剧）。`qwen3.5-omni-plus` 已按物理退役处理：档案卡、`@register_model` 装饰器、`analyze_image`/`analyze_video` 白名单四处全删，登记进 `RETIRED_MEDIA_MODELS`（承接 `qwen3.8-omni-flash`）。
+
+这片改动暴露出**不在常规盘点视野里的隐藏事实源**，摘档位前必须逐条确认（第 1~3 条来自 Slice A，第 4~7 条由 Slice B 补出）：
+
+1. **运行时白名单被短剧 QC 线共用**。`pipeline/autoqc_pkg/_utils.py` 经 `adapters.adapter_helpers.analyze_*` 直连 `media_runtime`，所以从 `_OPERATION_MODEL_IDS` 摘掉一档，等于同时摘掉 QC 线；而存量项目配置里存过旧档位名，先摘会让已保存项目直接拒单。因此本片只把 `qwen3-vl-plus` 从产品入口摘掉、在白名单留作过渡项，分组判据相应从"逐字相等"降为"⊆"。Slice B 迁完后**已恢复逐字相等**（`tests/test_vision_review_multi_provider.py::test_vision_catalog_group_equals_allowlist`）。
+2. **短剧的 `vision_model` 会同时喂给 `chat_messages`**（`pipeline/autoqc_pkg/_semantic_match.py:76` 以 `model_id=vlm_adapter` 发非流式 chat 并要 `json_object`）。omni 档在 compatible-mode 下的非流式 chat 从未验证过，把 3.8 直接设成短剧默认档等于引入未验证路径——这是"默认档取 `qwen-plus` 而非效果更好的 3.8"的唯一原因。**Slice B 已把这条顾虑作废掉**：注册表里的对话适配器只有 `generate`、没有 `chat`，退役前的 vl-plus 也一样（它继承 `_DashScopeChatAdapter`），所以 `chat_messages` 对任何模型 ID 都是死路，语义匹配从来就没通过；`dreamweaver_vision` 分组默认档因此保持 `qwen-plus` 不动，QC 线的 `semantic/state/clip` 三个适配器默认档按裁定指到 `qwen3.8-omni-flash`（走的是 `analyze_*` 白名单那条真跑通的路）。
+3. **评审采信方与"哪些模型在评"是两件事**。`audio_understanding.py` 硬写 `_DOUBAO_MODEL = "doubao-seed-2-1-lite-260915"`，往 `SCORER_MODELS` 里加第二档豆包会"挂 pro 名跑 lite"；档案层也只有 4 档声明 `audio_understanding`（豆包 pro 不在内）。同日按盲评结论把 `SCORER_MODELS` 收成两档（只留两个采信方）：横评集是"评估评分器本身"的实验产物，不是生产采信组合，多出的档位每段音频都重复付费却不产出任何被采信维度。
+
+**物理退役第二片（Slice B，2026-10-12 收口）**：短剧 QC 线迁到 `qwen3.8-omni-flash`（`pipeline/autoqc_pkg/_utils.py` 等六处 `DEFAULT_*_VLM_ADAPTER` 常量副本 + `DREAMWEAVER_SEMANTIC_VLM_ADAPTER` / `DREAMWEAVER_STATE_QC_VLM_ADAPTER` 两行 env 同批改，只改一边就会漂移），视觉档位从 QC 线彻底消失。这一片补出第四条、也是最容易漏的事实源层级：
+
+4. **兼容层是退役的第五层事实源，且漏改后零报错**。除档案卡 / `@register_model` / `analyze_*` 白名单 / catalog 分组外，旧 ID 还活在 `adapters/legacy_runtime_wrappers.py::_RUNTIME_WRAPPER_CLASSES`（表键是**下划线形态**，不是点分形态）、`adapters/model_adapters.py::ModelAdapterFactory._ENV_PREFIX_MAP` 与 `_DEFAULT_MODEL_NAME_BY_ENV`、`core/model_resolution.py::MODEL_ALIASES`。这些表全部是**查不到就返回 None**的软失败：`create_runtime_wrapper` 未命中返回 None，`_resolve_runtime_model_id(require_available=True)` 返回 None，`_run_helpers.py:26-56` 用 `get_model_info` 守卫把 QC 开关静默置 False，`vlm_chat_json` 对 None 直接早退。所以"退役没退干净"的症状不是拒单，而是 **QC 永久关闭且无任何报错**——比拒单难发现得多。
+5. **门禁的 env 扫描按键名语义过滤，`*_VLM_ADAPTER` 是口径盲区**。`scripts/audit_model_references.py` 的 `ENV_MODEL_KEY_RE` 只认含 `MODEL` 的环境变量键，短剧这两个适配器键不在其中，`--all-retired --expect-zero` 归零也证明不了 env 已收口；本批靠手工盘点改掉取值，口径扩展未做（扩了会让其它退役 ID 的基线一起变动）。
+6. **消费侧传"模型 ID 字符串"还是"适配器对象"决定兼容层能不能删干净**。`agents/vlm_utils.py::vlm_chat_json` 与 `agents/best_image_selector.py::select_best_candidate` 两种形态都支持：字符串分支走 `adapter_helpers`，对象分支走 `create_runtime_client`。把 `asset_library` 的并行分支改成传字符串后，`create_runtime_client` 对该档的调用整体消失，legacy wrapper 才能整块删除而不留向后兼容残骸。
+7. **注册中心自动导入清单的 try/except 在 for 循环内部**（`adapters/registry.py:161-164`）：删模块文件不删列表项只会静默丢该模块；但 `adapters/dashscope/__init__.py` 的 `from ... import *` 指向已删模块时是整个包 ImportError。两处必须同批改。
+
+同批核实的一条既有坏链路（与退役无关，已单独立项）：`adapter_helpers.chat_messages` 要求注册适配器有 `chat` 方法，而百炼/方舟的对话适配器只有 `generate`——四个现役视觉档与退役前的 vl-plus 全都 `hasattr(adapter, "chat") == False`，`chat_messages` 对任何模型 ID 都直接走 `from_error`。短剧语义匹配 `_semantic_match.py:76` 因此本来就是死路，**不是本片把可用路径改坏的**，但把 QC 默认档指到 3.8 也不等于把它修活。
+
+同轮修复门禁自身一个静默盲区：`scripts/audit_model_references.py` 用 `git ls-files` 取清单，git 默认 `core.quotepath=true` 会把非 ASCII 路径转义、Windows 下 `text=True` 又按本地编码解码，两者叠加后**396 个中文命名文件在清单里却读不出内容**，等于从未被审计（暴露出 99 条真实残留）。现按 `-c core.quotepath=false` + UTF-8 解码取清单，并由 `test_every_scanned_path_resolves_to_a_readable_file` 钉住"清单里每个路径都必须是真实文件"。
+
 ## 11. TTS 模型接入经验总结（2026-04-20）
 
 本文档记录了 MiniMax、Qwen 与 CosyVoice TTS 接入百炼平台时的实际调试经验。
@@ -1855,8 +1897,9 @@ qwen3.8-omni-flash 在**情绪/表演维度上会编造证据**：盲评（提�
 
 - **模型意见一致 ≠ 真值**；人耳裁定永远是最终真值，评审链固定为：客观层（ffprobe 时长 + ASR 逐字 + HTTP 状态）→ 盲评描述 → 人耳裁定。
 - `parse_audio_score` 的 `kind` 参数区分 `tts` / `audiogen` 两套完整 rubric，**audiogen 维度没有 TTS 采信方**，调用 `tts_dimension_authority` 直接 `ValueError`，不做默认回落。
+- **打分组合已收成两档（2026-10-12）**：`SCORER_MODELS` 原为四档，是 2026-10-10"同时评估评分器本身"的实验横评集，不是生产采信组合。采信分工只需要 `qwen3.8-omni-flash` + `doubao-seed-2-1-lite` 两个权威，多出的档位每段音频都按 12 元/百万 token 的音频输入价重复付费却不产出任何被采信维度，因此与视觉线退役同批删除。两个坑记在这里：① `audio_understanding.py` 硬写 `_DOUBAO_MODEL = "doubao-seed-2-1-lite-260915"`，往评分器里加第二档豆包会"挂 pro 名跑 lite"，必须先改成逐档线名映射；② 档案层只有 4 档声明 `audio_understanding`，`doubao-seed-2-1-pro` 不在内且从未评过音频。`qwen3.5-omni-flash` 仍是有声书场景语义评审的默认档（`qwen_omni_reviewer`），它不参与打分，收档不影响它。
 - 探针脚本 `probe_tts_gate_scoring.py` 默认 `--mode blind`，输出表按"采信方 / 采信分 / 参照方"排版，锚定表头明确标注"不作为结论来源"。
-- 回归：`python -m pytest backend/tests/test_audiobook_audio_score_contract.py -q`（21 passed）。
+- 回归：`python -m pytest backend/tests/test_audiobook_audio_score_contract.py -q`。
 
 ### 11.11 Qwen-Audio-3.1-ASR-Flash 接入与 Fun-ASR-Flash 退役（2026-10-11）
 

@@ -19,6 +19,7 @@
 | 编写 / 修改 Dockerfile、compose、镜像构建相关 | `.agent/skills/docker-expert/SKILL.md` |
 | 部署、发布、环境切换、SSL / 反向代理 | `.agent/skills/deployment-procedures/SKILL.md` |
 | 撰写或修订项目文档（README、指南、注释） | `.agent/skills/doc-coauthoring/SKILL.md` |
+| 视频网关新供应商/新档位登记、模型活性探测与付费实证复探（`router_gateway/` 台账） | `.agent/skills/video-route-onboarding/SKILL.md` |
 
 ### 执行要求
 

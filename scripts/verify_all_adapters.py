@@ -14,7 +14,7 @@ TEST_CASES = [
     {"id": "qwen-image-3.0", "type": "image", "prompt": "a cute cat, photorealistic"},
     {"id": "qwen-image-3.0-pro", "type": "image", "prompt": "a beautiful sunset"},
     {"id": "wan2.7-image-pro", "type": "image", "prompt": "mountains with lake"},
-    {"id": "qwen3.5-omni-plus", "type": "text", "prompt": "你好，请简短介绍自己。"},
+    {"id": "qwen3.5-omni-flash", "type": "text", "prompt": "你好，请简短介绍自己。"},
     {"id": "qwen3.6-plus", "type": "text", "prompt": "你好，请简短介绍自己。"},
     {"id": "MiniMax/speech-2.8-turbo", "type": "tts", "prompt": "你好，这是MiniMax语音测试。"},
     {"id": "MiniMax/speech-2.8-hd", "type": "tts", "prompt": "你好，这是MiniMax高清语音测试。"},

@@ -25,7 +25,7 @@ def test_build_model_catalog_card_payloads_covers_current_integrated_models() ->
     assert by_key["mimo-v2.5-tts-voiceclone"]["category"] == "audio"
     assert "mimo-v2.5-tts-hd" not in by_key
     assert "mimo-v2.5-tts-turbo" not in by_key
-    assert by_key["qwen3-vl-plus"]["category"] == "multimodal"
+    assert by_key["qwen3.8-omni-flash"]["category"] == "multimodal"
     assert by_key["qwen-plus"]["config_source"] == "merged"
     assert by_key["wan3.0-video"]["name"] == "Wan 3.0 Video"
     assert by_key["wan3.0-video"]["summary"].startswith("万相 3.0 全能参考视频生成模型")

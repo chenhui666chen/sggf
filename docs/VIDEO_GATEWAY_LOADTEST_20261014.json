@@ -1,0 +1,311 @@
+{
+  "mode": "isolated_postgres_redis_http",
+  "supplier_requests": 0,
+  "environment": {
+    "python": "3.13.7",
+    "platform": "Windows-11-10.0.26200-SP0",
+    "redis_client": "6.4.0",
+    "httpx": "0.28.1",
+    "uvicorn": "0.37.0",
+    "api_instances": 2,
+    "api_processes": 1,
+    "db_pool_size": 20,
+    "db_max_overflow": 80,
+    "simulated_provider_latency_ms": 50,
+    "simulated_task_seconds": 1,
+    "nginx_included": false
+  },
+  "config": {
+    "requests": 400,
+    "concurrency": 64,
+    "rate": 10000,
+    "burst": 10000,
+    "active_limit": 100,
+    "output": "docs/VIDEO_GATEWAY_LOADTEST_20261014.json"
+  },
+  "phases": {
+    "active_limit": {
+      "requests": 400,
+      "status_counts": {
+        "202": 100,
+        "429": 300
+      },
+      "error_counts": {
+        "client_concurrency_limit_exceeded": 300
+      },
+      "requests_per_second": 55.5,
+      "p50_ms": 877,
+      "p95_ms": 2455,
+      "p99_ms": 2933,
+      "successful_requests_per_second": 13.88,
+      "success_p95_ms": 2693,
+      "concurrency": 64
+    },
+    "query_while_full": {
+      "requests": 800,
+      "status_counts": {
+        "200": 800
+      },
+      "error_counts": {},
+      "requests_per_second": 93.87,
+      "p50_ms": 484,
+      "p95_ms": 1710,
+      "p99_ms": 2797,
+      "successful_requests_per_second": 93.87,
+      "success_p95_ms": 1710,
+      "concurrency": 64
+    },
+    "query_concurrency_8": {
+      "requests": 400,
+      "status_counts": {
+        "200": 400
+      },
+      "error_counts": {},
+      "requests_per_second": 138.64,
+      "p50_ms": 55,
+      "p95_ms": 73,
+      "p99_ms": 80,
+      "successful_requests_per_second": 138.64,
+      "success_p95_ms": 73,
+      "concurrency": 8
+    },
+    "query_concurrency_16": {
+      "requests": 400,
+      "status_counts": {
+        "200": 400
+      },
+      "error_counts": {},
+      "requests_per_second": 125.75,
+      "p50_ms": 110,
+      "p95_ms": 205,
+      "p99_ms": 301,
+      "successful_requests_per_second": 125.75,
+      "success_p95_ms": 205,
+      "concurrency": 16
+    },
+    "query_concurrency_32": {
+      "requests": 400,
+      "status_counts": {
+        "200": 400
+      },
+      "error_counts": {},
+      "requests_per_second": 106.58,
+      "p50_ms": 228,
+      "p95_ms": 639,
+      "p99_ms": 913,
+      "successful_requests_per_second": 106.58,
+      "success_p95_ms": 639,
+      "concurrency": 32
+    },
+    "query_concurrency_64": {
+      "requests": 400,
+      "status_counts": {
+        "200": 400
+      },
+      "error_counts": {},
+      "requests_per_second": 79.85,
+      "p50_ms": 532,
+      "p95_ms": 1967,
+      "p99_ms": 2490,
+      "successful_requests_per_second": 79.85,
+      "success_p95_ms": 1967,
+      "concurrency": 64
+    },
+    "query_concurrency_128": {
+      "requests": 400,
+      "status_counts": {
+        "0": 1,
+        "200": 399
+      },
+      "error_counts": {
+        "RemoteProtocolError": 1
+      },
+      "requests_per_second": 61.09,
+      "p50_ms": 1119,
+      "p95_ms": 5130,
+      "p99_ms": 5484,
+      "successful_requests_per_second": 60.94,
+      "success_p95_ms": 5137,
+      "concurrency": 128
+    },
+    "shared_rate_limit": {
+      "requests": 100,
+      "status_counts": {
+        "202": 5,
+        "429": 95
+      },
+      "error_counts": {
+        "client_rate_limit_exceeded": 95
+      },
+      "requests_per_second": 138.87,
+      "p50_ms": 304,
+      "p95_ms": 403,
+      "p99_ms": 430,
+      "successful_requests_per_second": 6.94,
+      "success_p95_ms": 433,
+      "concurrency": 64
+    },
+    "concurrent_idempotency": {
+      "requests": 32,
+      "status_counts": {
+        "202": 32
+      },
+      "error_counts": {},
+      "requests_per_second": 80.17,
+      "p50_ms": 370,
+      "p95_ms": 390,
+      "p99_ms": 394,
+      "successful_requests_per_second": 80.17,
+      "success_p95_ms": 390,
+      "concurrency": 64
+    },
+    "worker_1": {
+      "workers": 1,
+      "elapsed_seconds": 10.041,
+      "status_counts": {
+        "succeeded": 100
+      },
+      "polls": 100,
+      "errors": []
+    },
+    "worker_4_seed": {
+      "requests": 100,
+      "status_counts": {
+        "202": 100
+      },
+      "error_counts": {},
+      "requests_per_second": 35.23,
+      "p50_ms": 1562,
+      "p95_ms": 2550,
+      "p99_ms": 2562,
+      "successful_requests_per_second": 35.23,
+      "success_p95_ms": 2550,
+      "concurrency": 64
+    },
+    "worker_4": {
+      "workers": 4,
+      "elapsed_seconds": 3.436,
+      "status_counts": {
+        "succeeded": 100
+      },
+      "polls": 106,
+      "errors": []
+    },
+    "mixed_seed": {
+      "requests": 100,
+      "status_counts": {
+        "202": 100
+      },
+      "error_counts": {},
+      "requests_per_second": 36.47,
+      "p50_ms": 1556,
+      "p95_ms": 2263,
+      "p99_ms": 2451,
+      "successful_requests_per_second": 36.47,
+      "success_p95_ms": 2263,
+      "concurrency": 64
+    },
+    "query_with_workers": {
+      "requests": 800,
+      "status_counts": {
+        "200": 800
+      },
+      "error_counts": {},
+      "requests_per_second": 90.86,
+      "p50_ms": 264,
+      "p95_ms": 864,
+      "p99_ms": 1306,
+      "successful_requests_per_second": 90.86,
+      "success_p95_ms": 864,
+      "concurrency": 32
+    },
+    "worker_with_queries": {
+      "workers": 4,
+      "elapsed_seconds": 4.607,
+      "status_counts": {
+        "succeeded": 100
+      },
+      "polls": 101,
+      "errors": []
+    },
+    "simulated_failure_seed": {
+      "requests": 10,
+      "status_counts": {
+        "202": 10
+      },
+      "error_counts": {},
+      "requests_per_second": 37.98,
+      "p50_ms": 244,
+      "p95_ms": 261,
+      "p99_ms": 261,
+      "successful_requests_per_second": 37.98,
+      "success_p95_ms": 261,
+      "concurrency": 64
+    },
+    "simulated_failure_drain": {
+      "workers": 2,
+      "elapsed_seconds": 1.626,
+      "status_counts": {
+        "failed": 10
+      },
+      "polls": 28,
+      "errors": []
+    },
+    "outage_seed": {
+      "requests": 10,
+      "status_counts": {
+        "202": 10
+      },
+      "error_counts": {},
+      "requests_per_second": 36.19,
+      "p50_ms": 255,
+      "p95_ms": 273,
+      "p99_ms": 273,
+      "successful_requests_per_second": 36.19,
+      "success_p95_ms": 273,
+      "concurrency": 64
+    },
+    "outage_recovery": {
+      "workers": 2,
+      "elapsed_seconds": 1.046,
+      "status_counts": {
+        "succeeded": 10
+      },
+      "polls": 10,
+      "errors": []
+    },
+    "redis_unavailable": {
+      "requests": 20,
+      "status_counts": {
+        "503": 20
+      },
+      "error_counts": {
+        "rate_limiter_unavailable": 20
+      },
+      "requests_per_second": 4.88,
+      "p50_ms": 2039,
+      "p95_ms": 2061,
+      "p99_ms": 2062,
+      "successful_requests_per_second": 0.0,
+      "success_p95_ms": 0
+    }
+  },
+  "checks": {
+    "active_limit_not_exceeded": true,
+    "active_jobs_created": 100,
+    "idempotency": {
+      "jobs": 1,
+      "attempts": 1,
+      "submit_calls": 1
+    },
+    "outage_preserves_running_jobs": true,
+    "redis_fail_closed": true
+  },
+  "provider_submit_calls": 326,
+  "finished_at": "2026-10-14T04:23:20.377119+00:00",
+  "failures": [
+    "unexpected_http_error_query_concurrency_128"
+  ],
+  "passed": false,
+  "http_requests": 4372
+}

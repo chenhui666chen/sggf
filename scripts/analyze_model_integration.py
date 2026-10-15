@@ -48,7 +48,7 @@ print(f"DashScope 实际可用模型总数: {len(dashscope_models)}")
 
 # 已有适配器的模型（从之前的检查得知）
 ADAPTER_MODELS = {
-    "qwen3-vl-plus",
+    "qwen3.8-omni-flash",
     "qwen-image-edit-plus", "qwen-image-edit-max",
 }
 
@@ -58,7 +58,7 @@ NEW_ADAPTER_MODELS = {
     "doubao-seedream-5-0", "doubao-seedream-5-0-pro",
     "doubao-seedance-2-0", "doubao-seedance-2-0-fast",
     "doubao-seed-2-1-pro", "doubao-seed-2-1-lite",
-    "qwen3.5-omni-plus", "qwen3.6-plus",
+    "qwen3.5-omni-flash", "qwen3.6-plus",
     "qwen-audio-3.1-tts-flash", "cosyvoice-v3.5-plus",
     "MiniMax/speech-2.8-turbo", "MiniMax/speech-2.8-hd",
     "pixverse-c1-r2v", "pixverse-v6-t2v",

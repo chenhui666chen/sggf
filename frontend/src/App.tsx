@@ -59,6 +59,7 @@ const SystemPage = lazy(() => import('@/pages/admin/SystemPage'))
 const DatabaseQueryPage = lazy(() => import('@/pages/admin/DatabaseQueryPage'))
 const PromptEvolutionPage = lazy(() => import('@/pages/admin/PromptEvolutionPage'))
 const DirectorOSAdminPage = lazy(() => import('@/pages/admin/DirectorOSAdminPage'))
+const VideoGatewayPage = lazy(() => import('@/pages/admin/VideoGatewayPage'))
 
 // 加载中组件
 const LoadingFallback = () => {
@@ -321,6 +322,7 @@ function App() {
                 <Route path="director-os" element={<DirectorOSAdminPage />} />
                 <Route path="logs" element={<LogsPage />} />
                 <Route path="system" element={<SystemPage />} />
+                <Route path="video-gateway" element={<AdminProtectedRoute requiredRole="super_admin"><VideoGatewayPage /></AdminProtectedRoute>} />
               </Route>
 
               {/* 默认跳转到创作模块入口页 */}

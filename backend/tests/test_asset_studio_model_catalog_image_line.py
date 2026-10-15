@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import pytest
 
+from app.services.points_usage_pricing import AssetStudioImagePriceMissing, estimate_asset_studio_basis_yuan
 from adapters.registry import registry
 from core.model_resolution import normalize_model_id
 from core.unified_media_runtime import _OPERATION_MODEL_IDS
@@ -45,7 +46,138 @@ GROUP_RUNTIME_OPERATIONS = {
 }
 
 
+class TestImageEditPrice:
+    def test_new_editor_uses_model_price_for_input_and_output(self):
+        assert estimate_asset_studio_basis_yuan(
+            kind="image", mode="reference_edit", model_id="qwen-image-3.0",
+            input_count=2, output_count=1,
+        ) == pytest.approx(0.22)
+
+    @pytest.mark.parametrize("records", [
+        {"qwen-image-3.0": {"pricing_info": {"tiers": []}}},
+        {},
+    ])
+    def test_new_editor_rejects_unknown_price(self, monkeypatch, records):
+        from app.services import points_usage_pricing
+
+        monkeypatch.setattr(points_usage_pricing, "get_models_index", lambda: records)
+        with pytest.raises(AssetStudioImagePriceMissing):
+            estimate_asset_studio_basis_yuan(
+                kind="image", mode="reference_edit", model_id="qwen-image-3.0", input_count=1,
+            )
+
+
 class TestImageLineDefaults:
+    def test_qwen_image_3_0_is_selectable_for_image_edit(self):
+        assert _DEFAULT_MODEL_IDS["asset_studio_image_edit"] == "qwen-image-3.0"
+        assert "qwen-image-3.0" in _GROUP_MODEL_IDS["image_edit"]
+        assert "qwen-image-3.0" in _OPERATION_MODEL_IDS["edit_image"]
+
+    @pytest.mark.parametrize("retired_id", ["qwen-image-edit-plus", "qwen-image-edit-max"])
+    def test_retired_editors_are_not_in_asset_studio(self, retired_id):
+        assert retired_id not in _GROUP_MODEL_IDS["image_edit"]
+        assert retired_id not in {option["model_id"] for option in get_asset_studio_model_manifest()["groups"]["image_edit"]}
+
+    def test_image_route_preserves_selected_editor_and_prices_before_reservation(self, monkeypatch):
+        import importlib
+        from types import SimpleNamespace
+        from core.unified_media_runtime import UnifiedMediaResult
+
+        route = importlib.import_module("app.api.v1.asset_studio_api.routes_image")
+        calls = []
+        monkeypatch.setattr(route, "_save_upload_file", lambda upload, subdir: "reference.png")
+        monkeypatch.setattr(route, "_validate_dimensions_for_models", lambda ids, w, h, request_label: (w, h))
+        monkeypatch.setattr(route, "_reserve_asset_studio_billing", lambda **kwargs: calls.append(("reserve", kwargs["model_id"], kwargs["basis_yuan"])) or object())
+        monkeypatch.setattr(route, "_settle_asset_studio_billing", lambda **kwargs: None)
+        monkeypatch.setattr(route, "_build_response", lambda **kwargs: kwargs["result"])
+        monkeypatch.setattr(route, "_merge_points_billing_metadata", lambda data, precheck: data)
+        monkeypatch.setattr(route.media_runtime, "edit_image", lambda **kwargs: calls.append(("edit", kwargs["model_id"])) or UnifiedMediaResult(
+            success=True, model_id=kwargs["model_id"], outputs=["edited.png"]
+        ))
+
+        result = route.generate_image_asset(
+            prompt="change background", model_id="qwen-image-3.0", width=1024, height=1024,
+            seed=None, strength=0.72, reference_images=[SimpleNamespace(filename="test.png")],
+            current_user=object(), db=object(),
+        )
+        assert result.success
+        assert calls == [("reserve", "qwen-image-3.0", 0.20), ("edit", "qwen-image-3.0")]
+
+    @pytest.mark.parametrize("retired_id", ["qwen-image-edit-plus", "qwen-image-edit-max"])
+    def test_image_route_rejects_retired_editor_before_reservation(self, monkeypatch, retired_id):
+        import importlib
+        from types import SimpleNamespace
+        from fastapi import HTTPException
+
+        route = importlib.import_module("app.api.v1.asset_studio_api.routes_image")
+        monkeypatch.setattr(route, "_save_upload_file", lambda upload, subdir: "reference.png")
+        monkeypatch.setattr(route, "_reserve_asset_studio_billing", lambda **kwargs: pytest.fail("must not reserve"))
+        with pytest.raises(HTTPException) as exc:
+            route.generate_image_asset(
+                prompt="change background", model_id=retired_id, seed=None,
+                width=1024, height=1024, reference_images=[SimpleNamespace(filename="test.png")],
+                current_user=object(), db=object(),
+            )
+        assert exc.value.status_code == 400
+
+    def test_image_route_rejects_unavailable_editor_before_reservation(self, monkeypatch):
+        import importlib
+        from types import SimpleNamespace
+        from fastapi import HTTPException
+
+        route = importlib.import_module("app.api.v1.asset_studio_api.routes_image")
+        monkeypatch.setattr(route, "_save_upload_file", lambda upload, subdir: "reference.png")
+        monkeypatch.setattr(route, "_reserve_asset_studio_billing", lambda **kwargs: pytest.fail("must not reserve"))
+        with pytest.raises(HTTPException) as exc:
+            route.generate_image_asset(
+                prompt="change background", model_id="not-an-editor", seed=None,
+                reference_images=[SimpleNamespace(filename="test.png")],
+                current_user=object(), db=object(),
+            )
+        assert exc.value.status_code == 400
+
+    def test_qwen_image_3_0_edit_rejects_four_images(self, monkeypatch):
+        from core.unified_media_runtime import media_runtime
+        import adapters.dashscope.image_sync as image_sync
+
+        monkeypatch.setattr(image_sync, "require_api_key", lambda name: "test-key")
+        result = media_runtime.edit_image(
+            image_path="first", reference_images=["second", "third", "fourth"],
+            edit_prompt="change background", width=1024, height=1024,
+            model_id="qwen-image-3.0", use_fallback=False,
+        )
+        assert not result.success
+        assert "最多支持 3 张" in result.error
+
+    def test_qwen_image_3_0_edit_routes_without_fallback(self, monkeypatch):
+        from core.unified_media_runtime import media_runtime
+        import adapters.dashscope.image_sync as image_sync
+
+        sent = {}
+
+        class Response:
+            def json(self):
+                return {"output": {"choices": [{"message": {"content": [{"image": "https://example.com/edited.png"}]}}]}}
+
+        def fake_post(url, json, headers, timeout):
+            sent.update(json)
+            return Response()
+
+        monkeypatch.setattr(image_sync.requests, "post", fake_post)
+        monkeypatch.setattr(image_sync, "require_api_key", lambda name: "test-key")
+        monkeypatch.setattr(image_sync, "_encode_image", lambda path: f"data:image/png;base64,{path}")
+        result = media_runtime.edit_image(
+            image_path="first", reference_images=["second"], edit_prompt="change background",
+            width=1024, height=1024, model_id="qwen-image-3.0", use_fallback=False,
+        )
+        assert result.success, result.error
+        assert result.model_id == "qwen-image-3.0"
+        assert sent["model"] == "qwen-image-3.0"
+        assert sent["input"]["messages"][0]["content"][:2] == [
+            {"image": "data:image/png;base64,first"},
+            {"image": "data:image/png;base64,second"},
+        ]
+
     def test_asset_studio_default_is_qwen_image_3_0(self):
         """用户明确决定：asset_studio_image_generation 的默认值改为 qwen-image-3.0，
         而不是万相线的 wan2.7-image-pro。"""

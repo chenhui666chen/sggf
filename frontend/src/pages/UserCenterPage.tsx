@@ -32,6 +32,7 @@ import LogoutIcon from '@mui/icons-material/Logout'
 import MovieIcon from '@mui/icons-material/Movie'
 import RefreshIcon from '@mui/icons-material/Refresh'
 import SaveIcon from '@mui/icons-material/Save'
+import ContentCopyIcon from '@mui/icons-material/ContentCopy'
 import SecurityOutlinedIcon from '@mui/icons-material/SecurityOutlined'
 import { useFormats } from '@/i18n'
 import { useTranslation } from 'react-i18next'
@@ -44,6 +45,7 @@ import {
   apiClient,
   extractApiErrorMessage,
   type UserCenterPointsOverviewResponse,
+  type VideoApiApplication,
 } from '@/services/api'
 import { useUserCenterAssetConnectedOverviewRowsFromInput } from '@/hooks/useUserCenterAssetConnectedOverviewRowsFromInput'
 import { useUserCenterOverviewTabMetrics } from '@/hooks/useUserCenterOverviewTabMetrics'
@@ -79,7 +81,7 @@ interface DreamweaverRunSummary {
   updated_at?: string | null
 }
 
-type UserCenterTab = 'overview' | 'creation' | 'assets' | 'points' | 'records' | 'security'
+type UserCenterTab = 'overview' | 'creation' | 'assets' | 'points' | 'records' | 'security' | 'video-api'
 
 type FeedbackState = {
   type: 'success' | 'error'
@@ -98,6 +100,7 @@ const tabs: Array<{ value: UserCenterTab; label: string }> = [
   { value: 'points', label: 'userCenter.tabs.points' },
   { value: 'records', label: 'userCenter.tabs.records' },
   { value: 'security', label: 'userCenter.tabs.security' },
+  { value: 'video-api', label: '视频 API' },
 ]
 
 const USER_CENTER_TAB_VALUES = new Set<UserCenterTab>(tabs.map((tab) => tab.value))
@@ -232,6 +235,11 @@ export default function UserCenterPage() {
   const [deletedChapters, setDeletedChapters] = useState<DeletedChapterRecord[]>([])
   const [deletedAudiobookProjects, setDeletedAudiobookProjects] = useState<DeletedAudiobookProject[]>([])
   const [pointsOverview, setPointsOverview] = useState<UserCenterPointsOverviewResponse | null>(null)
+  const [videoApplications, setVideoApplications] = useState<VideoApiApplication[]>([])
+  const [videoApplicationName, setVideoApplicationName] = useState('')
+  const [videoApplicationPlan, setVideoApplicationPlan] = useState('standard')
+  const [videoApiKey, setVideoApiKey] = useState<string | null>(null)
+  const [videoApplicationBusy, setVideoApplicationBusy] = useState(false)
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -291,11 +299,12 @@ export default function UserCenterPage() {
     setError(null)
 
     try {
-      const [projectsRes, deletedChaptersRes, deletedAudiobookRes, pointsOverviewRes] = await Promise.all([
+      const [projectsRes, deletedChaptersRes, deletedAudiobookRes, pointsOverviewRes, videoApplicationsRes] = await Promise.all([
         apiClient.getProjects(),
         apiClient.getDeletedChapters(0),
         apiClient.listDeletedProjects(),
         apiClient.getUserCenterPointsOverview(),
+        apiClient.listVideoApiApplications().catch(() => ({ data: { items: [] as VideoApiApplication[] } })),
       ])
 
       const nextProjects = Array.isArray(projectsRes.data) ? (projectsRes.data as ProjectRecord[]) : []
@@ -313,6 +322,7 @@ export default function UserCenterPage() {
       setDeletedChapters(nextDeletedChapters)
       setDeletedAudiobookProjects(nextDeletedAudiobookProjects)
       setPointsOverview((pointsOverviewRes.data || null) as UserCenterPointsOverviewResponse | null)
+      setVideoApplications(videoApplicationsRes.data.items || [])
 
       const details = await Promise.all(
         nextProjects.map(async (project) => {
@@ -530,6 +540,98 @@ export default function UserCenterPage() {
       setRestoringKey(null)
     }
   }
+
+  const handleCreateVideoApplication = async () => {
+    if (!videoApplicationName.trim()) return
+    setVideoApplicationBusy(true)
+    try {
+      const response = await apiClient.createVideoApiApplication({
+        name: videoApplicationName.trim(), plan_code: videoApplicationPlan,
+      })
+      setVideoApplications((items) => [response.data, ...items])
+      setVideoApiKey(response.data.api_key || null)
+      setVideoApplicationName('')
+      setFeedback({ type: 'success', text: '申请已提交，等待超级管理员审核。请保存完整 API Key，批准后可调用。' })
+    } catch (createError) {
+      setFeedback({ type: 'error', text: await extractApiErrorMessage(createError, '创建 API 应用失败') })
+    } finally {
+      setVideoApplicationBusy(false)
+    }
+  }
+
+  const handleRotateVideoApplicationKey = async (applicationId: number) => {
+    setVideoApplicationBusy(true)
+    try {
+      const response = await apiClient.rotateVideoApiApplicationKey(applicationId)
+      setVideoApplications((items) => items.map((item) => item.id === applicationId ? response.data : item))
+      setVideoApiKey(response.data.api_key || null)
+      setFeedback({ type: 'success', text: 'API Key 已轮换，旧 Key 已失效。请立即保存新 Key。' })
+    } catch (rotateError) {
+      setFeedback({ type: 'error', text: await extractApiErrorMessage(rotateError, '轮换 API Key 失败') })
+    } finally {
+      setVideoApplicationBusy(false)
+    }
+  }
+
+  const handleRevokeVideoApplication = async (applicationId: number) => {
+    setVideoApplicationBusy(true)
+    try {
+      const response = await apiClient.revokeVideoApiApplication(applicationId)
+      setVideoApplications((items) => items.map((item) => item.id === applicationId ? response.data : item))
+    } catch (revokeError) {
+      setFeedback({ type: 'error', text: await extractApiErrorMessage(revokeError, '吊销 API 应用失败') })
+    } finally {
+      setVideoApplicationBusy(false)
+    }
+  }
+
+  const videoApiContent = (
+    <Stack spacing={3}>
+      <Box>
+        <Typography variant="h5" sx={{ fontWeight: 800 }}>视频 API 应用</Typography>
+        <Typography color="text.secondary" sx={{ mt: 0.5 }}>
+          为自己的平台申请独立 API Key；审核批准后启用。配额按应用隔离，完整 Key 只在创建或轮换后显示一次。
+        </Typography>
+      </Box>
+      <Card variant="outlined">
+        <CardContent>
+          <Stack direction={{ xs: 'column', md: 'row' }} spacing={2} alignItems={{ md: 'center' }}>
+            <TextField label="应用名称" value={videoApplicationName} onChange={(event) => setVideoApplicationName(event.target.value)} fullWidth />
+            <TextField select label="套餐" value={videoApplicationPlan} onChange={(event) => setVideoApplicationPlan(event.target.value)} SelectProps={{ native: true }} sx={{ minWidth: 180 }}>
+              <option value="standard">标准：1 请求/秒，5 个活动任务</option>
+              <option value="professional">专业：5 请求/秒，20 个活动任务</option>
+              <option value="enterprise">企业：20 请求/秒，100 个活动任务</option>
+            </TextField>
+            <Button variant="contained" onClick={() => void handleCreateVideoApplication()} disabled={videoApplicationBusy || !videoApplicationName.trim()}>提交申请</Button>
+          </Stack>
+        </CardContent>
+      </Card>
+      {videoApiKey ? (
+        <Alert severity="warning" action={<Button size="small" startIcon={<ContentCopyIcon />} onClick={() => void navigator.clipboard?.writeText(videoApiKey)}>复制</Button>}>
+          <Typography variant="body2">请立即保存完整 API Key：</Typography>
+          <Typography component="code" sx={{ wordBreak: 'break-all' }}>{videoApiKey}</Typography>
+        </Alert>
+      ) : null}
+      {videoApplications.map((item) => (
+        <Card key={item.id} variant="outlined">
+          <CardContent>
+            <Stack direction={{ xs: 'column', md: 'row' }} spacing={2} justifyContent="space-between" alignItems={{ md: 'center' }}>
+              <Box>
+                <Typography variant="h6">{item.name}</Typography>
+                <Typography variant="body2" color="text.secondary">Key 前缀：{item.api_key_prefix} · {item.plan_code} · {item.rate_limit_per_second} 请求/秒 · {item.max_active_jobs} 个活动任务 · 累计任务额度 {item.lifetime_task_limit}</Typography>
+                <Chip size="small" sx={{ mt: 1 }} label={item.status} color={item.status === 'active' ? 'success' : item.status === 'suspended' ? 'warning' : 'default'} />
+              </Box>
+              <Stack direction="row" spacing={1}>
+                <Button size="small" variant="outlined" onClick={() => void handleRotateVideoApplicationKey(item.id)} disabled={videoApplicationBusy || item.status === 'revoked'}>轮换 Key</Button>
+                <Button size="small" color="error" variant="outlined" onClick={() => void handleRevokeVideoApplication(item.id)} disabled={videoApplicationBusy || item.status === 'revoked'}>吊销</Button>
+              </Stack>
+            </Stack>
+          </CardContent>
+        </Card>
+      ))}
+      {videoApplications.length === 0 ? <Alert severity="info">还没有 API 应用。提交申请并经超级管理员批准后，即可接入视频网关。</Alert> : null}
+    </Stack>
+  )
 
   // P2-4.6：改密/设密共用同一前端校验（与后端 password_policy 同规则）；密码强度错误文案走 i18n passwordPolicy.message，其余文案归 P3
   const validateNewPassword = (): boolean => {
@@ -1981,6 +2083,7 @@ export default function UserCenterPage() {
             {!loading && activeTab === 'points' ? (pointsOverview ? enhancedPointsContent : pointsContent) : null}
             {!loading && activeTab === 'records' ? recordsContent : null}
             {!loading && activeTab === 'security' ? securityContent : null}
+            {!loading && activeTab === 'video-api' ? videoApiContent : null}
           </Box>
         </Paper>
       </Container>

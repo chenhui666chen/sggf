@@ -40,7 +40,8 @@ def test_replacement_char_is_reported_with_line_number():
 
 
 def test_double_decoded_signature_is_reported():
-    raw = "旁白\n锟斤拷烫烫烫\n".encode("utf-8")
+    # 同样必须用 \u 转义：本测试文件也在门禁扫描范围内，写字面字符会被自己拦下。
+    raw = "旁白\n\u951f\u65a4\u62f7\u70eb\u70eb\u70eb\n".encode("utf-8")
     issues = scan_bytes("damaged.md", raw)
     assert [i.kind for i in issues] == [KIND_MOJIBAKE_SIGNATURE]
     assert issues[0].line == 2

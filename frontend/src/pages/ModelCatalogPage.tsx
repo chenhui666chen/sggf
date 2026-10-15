@@ -1746,7 +1746,7 @@ export default function ModelCatalogPage() {
   return (
     <Box sx={{ minHeight: '100vh', backgroundColor: 'background.default', py: 3 }}>
       <Container maxWidth="xl">
-        <Stack direction="row" spacing={2} alignItems="center" sx={{ mb: 3 }}>
+        <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} alignItems={{ xs: 'flex-start', sm: 'center' }} sx={{ mb: 3 }}>
           <Button
             variant="outlined"
             startIcon={<ArrowBackIcon />}
@@ -1757,6 +1757,7 @@ export default function ModelCatalogPage() {
           <Typography variant="h4" sx={{ fontWeight: 800, color: 'text.primary' }}>
             {t('modelCatalog.page.title')}
           </Typography>
+          <Button variant="contained" onClick={() => navigate('/user-center?tab=video-api')}>视频 API 申请与管理</Button>
         </Stack>
 
         {error && (

@@ -52,7 +52,7 @@ const DEFAULTS = {
   imageModel: 'qwen-image-3.0-pro',
   videoModel: 'wan3.0-video',
   videoEditModel: 'wan3.0-video',
-  visionModel: 'qwen3-vl-plus',
+  visionModel: 'qwen-plus',
   enableVideoEdit: true,
   enableVisionReview: true,
   enableSafetyAudit: false,

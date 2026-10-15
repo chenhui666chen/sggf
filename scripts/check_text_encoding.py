@@ -56,7 +56,8 @@ TEXT_EXTENSIONS = frozenset(
 REPLACEMENT_CHAR = "\ufffd"
 
 # UTF-8 替换符在 GBK 环境下再被解码一次的固定产物，出现即证明发生过二次转码。
-MOJIBAKE_SIGNATURES = ("锟斤拷",)
+# 必须写成 \u 转义：本文件自身在门禁扫描范围内，写字面字符会自扫命中并让门禁恒红。
+MOJIBAKE_SIGNATURES = ("\u951f\u65a4\u62f7",)
 
 KIND_INVALID_UTF8 = "invalid_utf8"
 KIND_REPLACEMENT_CHAR = "replacement_char"

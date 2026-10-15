@@ -157,7 +157,7 @@ def run_midframes(ctx: Any) -> None:
             image_cfg,
             key="vlm_adapter",
             env_name="DREAMWEAVER_VLM_ADAPTER",
-            default="qwen3_vl_plus",
+            default="qwen3.8-omni-flash",
             require_available=True,
         )
     vlm_criteria = [

@@ -101,6 +101,23 @@ class TestNegativePromptForwarding:
 
 
 class TestExistingBehaviourPreserved:
+    def test_qwen_3_edit_uses_selected_model_and_all_reference_images(self, captured, monkeypatch) -> None:
+        import adapters.dashscope.image_sync as image_sync
+
+        monkeypatch.setattr(image_sync, "_encode_image", lambda path: f"data:image/png;base64,{path}")
+        adapter = default_registry().get_adapter("qwen-image-3.0")
+        result = adapter.generate(
+            prompt="换背景", image_path="first", image_paths=["first", "second"], size="1024*1024"
+        )
+
+        assert result.success, result.error
+        assert captured["payload"]["model"] == "qwen-image-3.0"
+        assert captured["payload"]["input"]["messages"][0]["content"] == [
+            {"image": "data:image/png;base64,first"},
+            {"image": "data:image/png;base64,second"},
+            {"text": "换背景"},
+        ]
+
     def test_size_and_prompt_still_sent(self, captured) -> None:
         adapter = default_registry().get_adapter("qwen-image-3.0")
         adapter.generate(prompt="一只猫", size="1280*720", negative_prompt=NEGATIVE)

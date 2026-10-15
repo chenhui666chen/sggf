@@ -32,6 +32,10 @@ interface AuthSuccessPayload {
   user: User
 }
 
+// checking：启动恢复未落定，保护页既不该放行也不该重定向
+// ready：/me 已返回（成功恢复或确认匿名），可以按 isAuthenticated 判定
+export type SessionStatus = 'checking' | 'ready'
+
 interface RegisterPayload {
   username: string
   email: string
@@ -56,6 +60,9 @@ interface AuthState {
   isLoading: boolean
   error: string | null
   isAuthenticated: boolean
+  // P2-4.5：会话由 httpOnly cookie 承载，isAuthenticated 只能靠启动时的 getCurrentUser 恢复。
+  // 保护页必须等这次恢复落定再判定，否则硬刷新会把已登录用户弹到登录页。
+  sessionStatus: SessionStatus
   // P1-3.2：OAuth 首次登录返回注册票据时暂存（不落持久存储），等待用户确认建号；不置登录态
   pendingRegistrationTicket: string | null
 }
@@ -127,6 +134,7 @@ const initialState: AuthState = {
   isLoading: false,
   error: null,
   isAuthenticated: persistedAuth.isAuthenticated,
+  sessionStatus: 'checking',
   pendingRegistrationTicket: null,
 }
 
@@ -321,6 +329,7 @@ const authSlice = createSlice({
         state.isLoading = false
         state.user = action.payload
         state.isAuthenticated = true
+        state.sessionStatus = 'ready'
         persistUser(action.payload)
       })
       // 会话恢复是后台动作，其 401（匿名访问公共页的必然结果）不写入 error：
@@ -330,6 +339,7 @@ const authSlice = createSlice({
         state.isLoading = false
         state.user = null
         state.isAuthenticated = false
+        state.sessionStatus = 'ready'
         clearPersistedAuth()
       })
       .addCase(alipayLogin.pending, (state) => {

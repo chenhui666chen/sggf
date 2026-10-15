@@ -165,51 +165,6 @@ def test_qwen_audio_31_tts_adapter_delegates_to_sync_helper(
     assert captured["voice_params"]["volume"] == 40
 
 
-def test_simple_adapter_factory_delegates_qwen3_vl_plus_chat_to_runtime_wrapper(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from adapters import adapter_helpers, legacy_runtime_wrappers
-    from adapters.base import GenerationResult as RegistryGenerationResult
-
-    captured: dict[str, object] = {}
-
-    class FakeAdapter:
-        def chat(self, **kwargs):
-            captured["kwargs"] = kwargs
-            return RegistryGenerationResult(
-                success=True,
-                task_id="legacy",
-                model_id="qwen3-vl-plus",
-                metadata={
-                    "source": "registry",
-                    "result_data": {"content": '{"ok": true}'},
-                },
-            )
-
-    monkeypatch.setattr(
-        registry,
-        "get_adapter",
-        lambda model_id, config=None: FakeAdapter(),
-    )
-
-    adapter = adapter_helpers.SimpleAdapterFactory().get_adapter("qwen3_vl_plus")
-    result = adapter.chat(
-        messages=[{"role": "user", "content": "hello"}],
-        temperature=0.3,
-        max_tokens=128,
-    )
-
-    assert result.success is True
-    assert result.data == {"content": '{"ok": true}'}
-    assert result.metadata == {"source": "registry"}
-    assert captured["kwargs"] == {
-        "messages": [{"role": "user", "content": "hello"}],
-        "temperature": 0.3,
-        "max_tokens": 128,
-        "response_format": None,
-    }
-
-
 def test_simple_adapter_factory_delegates_qwen_multiperson_match_scene_to_runtime_wrapper(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -39,6 +39,7 @@ const buildMenuItems = (t: TFunction) => [
   { text: 'AI Director OS', icon: <ScienceIcon />, path: '/admin/director-os' },
   { text: t('admin.layout.menu.logs'), icon: <HistoryIcon />, path: '/admin/logs' },
   { text: t('admin.layout.menu.system'), icon: <SettingsIcon />, path: '/admin/system', superAdminOnly: true },
+  { text: '视频网关', icon: <StorageIcon />, path: '/admin/video-gateway', superAdminOnly: true },
 ]
 
 export default function AdminLayout() {

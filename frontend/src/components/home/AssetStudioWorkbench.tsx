@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import type { ChangeEvent } from 'react'
+import type { ChangeEvent, ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { TFunction } from 'i18next'
 import AddPhotoAlternateOutlinedIcon from '@mui/icons-material/AddPhotoAlternateOutlined'
@@ -15,16 +15,12 @@ import {
   DialogContent,
   DialogTitle,
   FormControl,
-  FormHelperText,
-  InputLabel as MuiInputLabel,
   MenuItem,
-  Select as MuiSelect,
   Slider,
   Stack,
-  TextField,
   Typography,
 } from '@mui/material'
-import type { InputLabelProps, SelectProps, SxProps, Theme } from '@mui/material'
+import type { Theme } from '@mui/material'
 import type { SystemStyleObject } from '@mui/system'
 
 import {
@@ -51,6 +47,28 @@ import type { DurationOption, DurationRange } from '@/utils/assetStudioDurationC
 import { extractLocalAssetStorageMetadata } from '@/utils/localAssetVault'
 import { saveExplicitLocalUserAsset } from '@/utils/userAssetExplicitLocalCollection'
 
+import {
+  FormHelperText,
+  InputLabel,
+  MODEL_SELECT_DIVIDER_VALUE,
+  Select,
+  TextField,
+  WORKBENCH_COMPACT_CARD_SX,
+  WORKBENCH_DIALOG_ACTIONS_SX,
+  WORKBENCH_DIALOG_BACKDROP_SX,
+  WORKBENCH_DIALOG_CONTENT_SX,
+  WORKBENCH_DIALOG_FIELD_SX,
+  WORKBENCH_DIALOG_INFO_ALERT_SX,
+  WORKBENCH_DIALOG_PAPER_SX,
+  WORKBENCH_DIALOG_TITLE_SX,
+  WORKBENCH_FIELD_COLORS,
+  WORKBENCH_HINT_SX,
+  WORKBENCH_INNER_CARD_SX,
+  WORKBENCH_MENU_DIVIDER_ITEM_SX,
+  WORKBENCH_NEUTRAL_CHIP_SX,
+  WORKBENCH_PARAM_CONTROL_SX,
+  WORKBENCH_SUBTLE_ACTION_BUTTON_SX,
+} from './assetStudioFieldStyles'
 import AssetStudioVisionReviewPanel from './AssetStudioVisionReviewPanel'
 import type { AssetStudioVisionReusePayload } from './AssetStudioVisionReviewPanel'
 import type { AssetStudioTabId, ModelUseEntry } from './modelEntryData'
@@ -211,177 +229,6 @@ interface CatalogRuntimeEntry {
   runtime_routing_signal?: RuntimeRoutingSignal | null
 }
 
-const WORKBENCH_INPUT_LABEL_SX: SxProps<Theme> = {
-  color: 'rgba(255,255,255,0.68)',
-  '&.Mui-focused': {
-    color: 'rgba(214,224,255,0.92)',
-  },
-  '&.MuiFormLabel-filled': {
-    color: 'rgba(255,255,255,0.72)',
-  },
-}
-
-const WORKBENCH_SELECT_SX: SxProps<Theme> = {
-  color: 'white',
-  borderRadius: 2.5,
-  backgroundColor: 'rgba(255,255,255,0.045)',
-  backdropFilter: 'blur(10px)',
-  '& .MuiOutlinedInput-notchedOutline': {
-    borderColor: 'rgba(255,255,255,0.12)',
-  },
-  '&:hover .MuiOutlinedInput-notchedOutline': {
-    borderColor: 'rgba(167,186,255,0.3)',
-  },
-  '&.Mui-focused .MuiOutlinedInput-notchedOutline': {
-    borderColor: 'rgba(139,161,255,0.68)',
-  },
-  '& .MuiSvgIcon-root': {
-    color: 'rgba(255,255,255,0.76)',
-  },
-}
-
-const WORKBENCH_MENU_PAPER_SX: SxProps<Theme> = {
-  mt: 1,
-  color: 'white',
-  borderRadius: 2.5,
-  border: '1px solid rgba(255,255,255,0.12)',
-  background: 'linear-gradient(180deg, rgba(53,58,92,0.94) 0%, rgba(18,21,33,0.96) 100%)',
-  boxShadow: '0 20px 40px rgba(8,10,18,0.42)',
-  backdropFilter: 'blur(18px)',
-  '& .MuiMenuItem-root': {
-    minHeight: 40,
-    color: 'rgba(255,255,255,0.92)',
-    transition: 'background-color 0.18s ease, color 0.18s ease',
-  },
-  '& .MuiMenuItem-root:hover': {
-    backgroundColor: 'rgba(255,255,255,0.08)',
-  },
-  '& .MuiMenuItem-root.Mui-selected': {
-    backgroundColor: 'rgba(126,146,255,0.22)',
-  },
-  '& .MuiMenuItem-root.Mui-selected:hover': {
-    backgroundColor: 'rgba(126,146,255,0.28)',
-  },
-}
-
-const WORKBENCH_MENU_PROPS: SelectProps<string>['MenuProps'] = {
-  PaperProps: {
-    elevation: 0,
-    sx: WORKBENCH_MENU_PAPER_SX,
-  },
-  MenuListProps: {
-    sx: {
-      py: 0.5,
-    },
-  },
-}
-
-const WORKBENCH_DIALOG_PAPER_SX: SxProps<Theme> = {
-  color: 'white',
-  borderRadius: 4,
-  border: '1px solid rgba(255,255,255,0.12)',
-  background: 'linear-gradient(180deg, rgba(26,30,46,0.98) 0%, rgba(12,15,24,0.98) 100%)',
-  boxShadow: '0 28px 80px rgba(2,6,16,0.52)',
-  backdropFilter: 'blur(18px)',
-}
-
-const WORKBENCH_DIALOG_BACKDROP_SX: SxProps<Theme> = {
-  backgroundColor: 'rgba(5,8,16,0.76)',
-  backdropFilter: 'blur(10px)',
-}
-
-const WORKBENCH_DIALOG_TITLE_SX: SxProps<Theme> = {
-  px: 3,
-  py: 2.25,
-  color: 'white',
-  fontSize: '1.85rem',
-  fontWeight: 700,
-  borderBottom: '1px solid rgba(255,255,255,0.08)',
-}
-
-const WORKBENCH_DIALOG_CONTENT_SX: SxProps<Theme> = {
-  px: 3,
-  py: 2.5,
-  borderColor: 'rgba(255,255,255,0.08)',
-}
-
-const WORKBENCH_DIALOG_ACTIONS_SX: SxProps<Theme> = {
-  px: 3,
-  py: 2,
-  gap: 1,
-  borderTop: '1px solid rgba(255,255,255,0.08)',
-}
-
-const WORKBENCH_DIALOG_INFO_ALERT_SX: SxProps<Theme> = {
-  borderRadius: 2.5,
-  color: 'rgba(224,236,255,0.96)',
-  backgroundColor: 'rgba(74,115,255,0.14)',
-  border: '1px solid rgba(121,149,255,0.24)',
-  '& .MuiAlert-icon': {
-    color: '#9db4ff',
-  },
-}
-
-const WORKBENCH_DIALOG_FIELD_SX: SxProps<Theme> = {
-  '& .MuiInputLabel-root': {
-    color: 'rgba(255,255,255,0.66)',
-  },
-  '& .MuiInputLabel-root.Mui-focused': {
-    color: 'rgba(214,224,255,0.92)',
-  },
-  '& .MuiOutlinedInput-root': {
-    color: 'white',
-    borderRadius: 2.5,
-    backgroundColor: 'rgba(255,255,255,0.045)',
-    '& fieldset': {
-      borderColor: 'rgba(255,255,255,0.14)',
-    },
-    '&:hover fieldset': {
-      borderColor: 'rgba(167,186,255,0.3)',
-    },
-    '&.Mui-focused fieldset': {
-      borderColor: 'rgba(139,161,255,0.68)',
-    },
-  },
-}
-
-const WORKBENCH_SUBTLE_ACTION_BUTTON_SX: SxProps<Theme> = {
-  minHeight: 38,
-  px: 1.25,
-  color: 'rgba(235,241,255,0.92)',
-  borderColor: 'rgba(255,255,255,0.12)',
-  backgroundColor: 'rgba(255,255,255,0.03)',
-  whiteSpace: 'nowrap',
-  '&:hover': {
-    borderColor: 'rgba(138,158,255,0.36)',
-    backgroundColor: 'rgba(138,158,255,0.08)',
-  },
-  '&.Mui-disabled': {
-    color: 'rgba(255,255,255,0.28)',
-    borderColor: 'rgba(255,255,255,0.08)',
-    backgroundColor: 'rgba(255,255,255,0.02)',
-  },
-}
-
-function mergeSx(base: SxProps<Theme>, sx?: SxProps<Theme>): SxProps<Theme> {
-  if (!sx) {
-    return base
-  }
-
-  const merged = Array.isArray(sx) ? [base, ...sx] : [base, sx]
-  return merged as SxProps<Theme>
-}
-
-function InputLabel(props: InputLabelProps) {
-  return <MuiInputLabel {...props} sx={mergeSx(WORKBENCH_INPUT_LABEL_SX, props.sx)} />
-}
-
-function Select<T extends string = string>(props: SelectProps<T>) {
-  const { sx, ...restProps } = props
-
-  return <MuiSelect {...restProps} MenuProps={WORKBENCH_MENU_PROPS} sx={mergeSx(WORKBENCH_SELECT_SX, sx)} />
-}
-
 const IMAGE_GENERATION_MODEL_OPTIONS: ModelOption[] = [
   {
     value: 'qwen-image-3.0',
@@ -434,16 +281,9 @@ const IMAGE_GENERATION_MODEL_OPTIONS: ModelOption[] = [
 
 const IMAGE_EDIT_MODEL_OPTIONS: ModelOption[] = [
   {
-    value: 'qwen-image-edit-plus',
-    label: 'Qwen Image Edit Plus',
-    helperKey: 'assetStudio.workbench.helper.qwenImageEditPlus',
-    helper: '参考图编辑主力，适合根据指令做稳定修改。',
-  },
-  {
-    value: 'qwen-image-edit-max',
-    label: 'Qwen Image Edit Max',
-    helperKey: 'assetStudio.workbench.helper.qwenImageEditMax',
-    helper: '质量更高，适合精修、复杂改图和最终素材处理。',
+    value: 'qwen-image-3.0',
+    label: 'Qwen Image 3.0',
+    helper: '支持参考图编辑，最多输入 3 张图片。',
   },
 ]
 
@@ -1018,6 +858,13 @@ function getRoutingStatusChipSx(signal?: RuntimeRoutingSignal | null): SystemSty
   }
 }
 
+function getModelOptionLabel(option: { label: string; labelKey?: string } | undefined, t?: TFunction): string {
+  if (!option) {
+    return ''
+  }
+  return option.labelKey ? t?.(option.labelKey) || option.label : option.label
+}
+
 function renderModelOptionMenuItem(option: ModelOption, signal?: RuntimeRoutingSignal | null, t?: TFunction) {
   return (
     <MenuItem key={option.value} value={option.value}>
@@ -1040,7 +887,7 @@ function renderModelOptionMenuItem(option: ModelOption, signal?: RuntimeRoutingS
             whiteSpace: 'nowrap',
           }}
         >
-          {option.labelKey ? t?.(option.labelKey) : option.label}
+          {getModelOptionLabel(option, t)}
         </Typography>
         <Chip
           size="small"
@@ -1072,7 +919,7 @@ function renderRoutingStatusMeta(signal?: RuntimeRoutingSignal | null, t?: TFunc
   return (
     <Stack spacing={1} sx={{ mt: 1.25 }}>
       {helper ? (
-        <Typography sx={{ color: 'rgba(255,255,255,0.58)', fontSize: '0.82rem', lineHeight: 1.7 }}>
+        <Typography sx={WORKBENCH_HINT_SX}>
           {helper}
         </Typography>
       ) : null}
@@ -1148,6 +995,78 @@ function renderRecommendedModelAction(
         {t ? t('assetStudio.workbench.routing.switchRecommended') : '改用推荐模型'}
       </Button>
     </Stack>
+  )
+}
+
+/**
+ * 四个生成页共用的模型选择器。
+ *
+ * MUI 的 Select 默认把选中 MenuItem 的 children 原样回显到关闭态，模型选项里带
+ * 状态 Chip 时会把 Chip 也带进去，既重复下方 chip 行的信息，又把控件高度从
+ * size="small" 的基线上撑高，所以这里用 renderValue 只回显模型名。
+ */
+function ModelSelect({
+  label,
+  value,
+  options,
+  helper,
+  runtimeEntries,
+  neutralChips = [],
+  onChange,
+  t,
+}: {
+  label: string
+  value: string
+  options: Array<{ value: string; label: string; labelKey?: string; helperKey?: string; helper?: string }>
+  helper?: string
+  runtimeEntries: Record<string, CatalogRuntimeEntry>
+  neutralChips?: string[]
+  onChange: (value: string) => void
+  t?: TFunction
+}) {
+  const routingSignal = runtimeEntries[value]?.runtime_routing_signal
+  const selectedOption = options.find((option) => option.value === value)
+
+  return (
+    <>
+      <FormControl fullWidth size="small" variant="outlined">
+        <InputLabel>{label}</InputLabel>
+        <Select
+          value={value}
+          label={label}
+          onChange={(event) => onChange(event.target.value)}
+          renderValue={() => getModelOptionLabel(selectedOption, t)}
+        >
+          {options.map((option) => (
+            option.value === MODEL_SELECT_DIVIDER_VALUE ? (
+              <MenuItem key={option.value} value={option.value} disabled sx={WORKBENCH_MENU_DIVIDER_ITEM_SX}>
+                {option.label}
+              </MenuItem>
+            ) : (
+              renderModelOptionMenuItem(
+                option as ModelOption,
+                runtimeEntries[option.value]?.runtime_routing_signal,
+                t,
+              )
+            )
+          ))}
+        </Select>
+        {helper ? <FormHelperText>{helper}</FormHelperText> : null}
+      </FormControl>
+      <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap sx={{ mt: 1.25 }}>
+        {/* 校验状态无条件展示：没有信号就是"未校验"，这是选型信息，不能被省掉。 */}
+        <Chip
+          size="small"
+          variant="outlined"
+          label={getRoutingStatusLabel(routingSignal, t)}
+          sx={getRoutingStatusChipSx(routingSignal)}
+        />
+        {neutralChips.map((chipLabel) => (
+          <Chip key={chipLabel} size="small" variant="outlined" label={chipLabel} sx={WORKBENCH_NEUTRAL_CHIP_SX} />
+        ))}
+      </Stack>
+      {renderRoutingStatusMeta(routingSignal, t)}
+    </>
   )
 }
 
@@ -1293,10 +1212,10 @@ function ResultCard({
           {result ? (
             <>
               <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap justifyContent="center">
-                <Chip size="small" label={t ? t('assetStudio.workbench.result.modeChip', { value: result.mode || 'unknown' }) : `模式：${result.mode || 'unknown'}`} sx={{ color: 'white' }} variant="outlined" />
-                <Chip size="small" label={t ? t('assetStudio.workbench.result.modelChip', { value: result.model_id || 'unknown' }) : `模型：${result.model_id || 'unknown'}`} sx={{ color: 'white' }} variant="outlined" />
+                <Chip size="small" label={t ? t('assetStudio.workbench.result.modeChip', { value: result.mode || 'unknown' }) : `模式：${result.mode || 'unknown'}`} sx={WORKBENCH_NEUTRAL_CHIP_SX} variant="outlined" />
+                <Chip size="small" label={t ? t('assetStudio.workbench.result.modelChip', { value: result.model_id || 'unknown' }) : `模型：${result.model_id || 'unknown'}`} sx={WORKBENCH_NEUTRAL_CHIP_SX} variant="outlined" />
                 {hasRequestedModelMismatch ? (
-                  <Chip size="small" label={t ? t('assetStudio.workbench.result.requestedModelChip', { value: requestedModelId }) : `请求模型：${requestedModelId}`} sx={{ color: 'white' }} variant="outlined" />
+                  <Chip size="small" label={t ? t('assetStudio.workbench.result.requestedModelChip', { value: requestedModelId }) : `请求模型：${requestedModelId}`} sx={WORKBENCH_NEUTRAL_CHIP_SX} variant="outlined" />
                 ) : null}
               </Stack>
               {typeof result.metadata?.prompt_preview === 'string' && result.metadata.prompt_preview ? (
@@ -1350,10 +1269,10 @@ function ResultCard({
             )}
           </Box>
           <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-            <Chip size="small" label={t ? t('assetStudio.workbench.result.modeChip', { value: result?.mode || 'unknown' }) : `模式：${result?.mode || 'unknown'}`} sx={{ color: 'white' }} variant="outlined" />
-            <Chip size="small" label={t ? t('assetStudio.workbench.result.modelChip', { value: result?.model_id || 'unknown' }) : `模型：${result?.model_id || 'unknown'}`} sx={{ color: 'white' }} variant="outlined" />
+            <Chip size="small" label={t ? t('assetStudio.workbench.result.modeChip', { value: result?.mode || 'unknown' }) : `模式：${result?.mode || 'unknown'}`} sx={WORKBENCH_NEUTRAL_CHIP_SX} variant="outlined" />
+            <Chip size="small" label={t ? t('assetStudio.workbench.result.modelChip', { value: result?.model_id || 'unknown' }) : `模型：${result?.model_id || 'unknown'}`} sx={WORKBENCH_NEUTRAL_CHIP_SX} variant="outlined" />
             {hasRequestedModelMismatch ? (
-              <Chip size="small" label={t ? t('assetStudio.workbench.result.requestedModelChip', { value: requestedModelId }) : `请求模型：${requestedModelId}`} sx={{ color: 'white' }} variant="outlined" />
+              <Chip size="small" label={t ? t('assetStudio.workbench.result.requestedModelChip', { value: requestedModelId }) : `请求模型：${requestedModelId}`} sx={WORKBENCH_NEUTRAL_CHIP_SX} variant="outlined" />
             ) : null}
           </Stack>
           {result?.metadata?.fallback_reason ? (
@@ -1428,7 +1347,7 @@ function DurationRangeControl({
   return (
     <Box sx={{ minWidth: 232 }}>
       <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.25 }}>
-        <Typography sx={{ color: 'rgba(255,255,255,0.68)', fontSize: '0.78rem' }}>{label}</Typography>
+        <Typography sx={{ color: WORKBENCH_FIELD_COLORS.label, fontSize: '0.78rem' }}>{label}</Typography>
         {range.supportsAuto ? (
           <Button
             size="small"
@@ -1473,12 +1392,9 @@ function DurationRangeControl({
             }
           }}
           inputProps={{ min: range.min, max: range.max, step: range.step }}
-          sx={{
-            width: 104,
-            '& .MuiOutlinedInput-root': { color: 'white', backgroundColor: 'rgba(255,255,255,0.03)' },
-          }}
+          sx={{ width: 104 }}
         />
-        <Typography sx={{ color: 'rgba(255,255,255,0.56)', fontSize: '0.76rem' }}>
+        <Typography sx={WORKBENCH_HINT_SX}>
           {smartDuration
             ? t('assetStudio.workbench.durationSmartHint')
             : t('assetStudio.workbench.durationRangeHint', { min: range.min, max: range.max })}
@@ -1526,6 +1442,37 @@ function FooterAction({
   )
 }
 
+function ParamBar({
+  loading,
+  label,
+  onGenerate,
+  disabled,
+  children,
+  t,
+}: {
+  loading: boolean
+  label: string
+  onGenerate: () => void
+  disabled?: boolean
+  children?: ReactNode
+  t?: TFunction
+}) {
+  return (
+    <Stack
+      direction={{ xs: 'column', md: 'row' }}
+      spacing={1.5}
+      justifyContent="space-between"
+      alignItems={{ xs: 'stretch', md: 'flex-end' }}
+      sx={{ mt: 2 }}
+    >
+      <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.25} alignItems={{ xs: 'stretch', sm: 'flex-end' }} useFlexGap flexWrap="wrap">
+        {children}
+      </Stack>
+      <FooterAction loading={loading} label={label} onClick={onGenerate} disabled={disabled} t={t} />
+    </Stack>
+  )
+}
+
 export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTabChange }: AssetStudioWorkbenchProps) {
   const { t } = useTranslation()
   const activeEntry = entries.find((entry) => entry.id === activeTabId) || entries[0]
@@ -1536,7 +1483,7 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
   const assetStudioImageGenerationDefaultModelId =
     assetStudioModelCatalog?.defaults.asset_studio_image_generation || 'qwen-image-3.0'
   const assetStudioImageEditDefaultModelId =
-    assetStudioModelCatalog?.defaults.asset_studio_image_edit || 'qwen-image-edit-plus'
+    assetStudioModelCatalog?.defaults.asset_studio_image_edit || 'qwen-image-3.0'
   const assetStudioVideoGenerationDefaultModelId =
     assetStudioModelCatalog?.defaults.asset_studio_video_generation || 'wan3.0-video'
   const assetStudioMotionDefaultModelId =
@@ -1555,6 +1502,7 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
   const [imageModelId, setImageModelId] = useState('qwen-image-3.0')
   const [imageSize, setImageSize] = useState(IMAGE_SIZE_OPTIONS[0].value)
   const [imageReferenceFiles, setImageReferenceFiles] = useState<File[]>([])
+  const [imageReferenceError, setImageReferenceError] = useState<string | null>(null)
   const [imageLoading, setImageLoading] = useState(false)
   const [imageError, setImageError] = useState<string | null>(null)
   const [imageResult, setImageResult] = useState<AssetStudioGenerateResponse | null>(null)
@@ -1630,11 +1578,14 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
     assetStudioModelCatalog?.groups.image_generation?.map(mapCatalogOptionToModelOption) || IMAGE_GENERATION_MODEL_OPTIONS
   const imageEditModelOptions =
     assetStudioModelCatalog?.groups.image_edit?.map(mapCatalogOptionToModelOption) || IMAGE_EDIT_MODEL_OPTIONS
+  const imageOnlyEditModelOptions = imageEditModelOptions.filter(
+    (option) => !imageGenerationModelOptions.some((generationOption) => generationOption.value === option.value),
+  )
   const imageModelOptions =
-    imageEditModelOptions.length > 0
-      ? [...imageGenerationModelOptions, { value: '---divider---' as const, label: t('assetStudio.workbench.model.imageEditDivider') }, ...imageEditModelOptions]
+    imageOnlyEditModelOptions.length > 0
+      ? [...imageGenerationModelOptions, { value: MODEL_SELECT_DIVIDER_VALUE, label: t('assetStudio.workbench.model.imageEditDivider') }, ...imageOnlyEditModelOptions]
       : imageGenerationModelOptions
-  const imageRealModelOptions = imageModelOptions.filter((opt): opt is ModelOption => opt.value !== '---divider---')
+  const imageRealModelOptions = imageModelOptions.filter((opt): opt is ModelOption => opt.value !== MODEL_SELECT_DIVIDER_VALUE)
   const sortedImageModelOptions = sortModelOptionsByRoutingSignal(imageRealModelOptions, catalogRuntimeEntries)
   const recommendedImageModel = sortedImageModelOptions[0] || imageRealModelOptions[0] || null
   const preferredImageGenerationModel = resolvePreferredModelOption(
@@ -1644,9 +1595,10 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
   const preferredImageEditModel = resolvePreferredModelOption(imageEditModelOptions, assetStudioImageEditDefaultModelId)
   const imageEditModelIds = new Set(imageEditModelOptions.map((option) => option.value))
   const selectedImageCatalogEntry = catalogRuntimeEntries[imageModelId]
-  const selectedImageRoutingSignal = selectedImageCatalogEntry?.runtime_routing_signal
   const imageSizeOptions = filterSizeOptions(IMAGE_SIZE_OPTIONS, selectedImageCatalogEntry?.runtime_task_constraints)
-  const imageReferenceLimit = getMaxReferenceImages(selectedImageCatalogEntry?.runtime_capability_hints, 4)
+  const imageReferenceLimit = imageModelId === 'qwen-image-3.0'
+    ? 3
+    : getMaxReferenceImages(selectedImageCatalogEntry?.runtime_capability_hints, 4)
   const selectedImageModel = sortedImageModelOptions.find((option) => option.value === imageModelId) || sortedImageModelOptions[0]
 
   const videoUsesReferenceMode = Boolean(videoReferenceFile)
@@ -1656,9 +1608,9 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
     assetStudioModelCatalog?.groups.video_edit?.map(mapCatalogOptionToModelOption) || VIDEO_EDIT_MODEL_OPTIONS
   const videoModelOptions =
     videoEditModelOptions.length > 0
-      ? [...videoGenerationModelOptions, { value: '---divider---' as const, label: t('assetStudio.workbench.model.videoEditDivider') }, ...videoEditModelOptions]
+      ? [...videoGenerationModelOptions, { value: MODEL_SELECT_DIVIDER_VALUE, label: t('assetStudio.workbench.model.videoEditDivider') }, ...videoEditModelOptions]
       : videoGenerationModelOptions
-  const videoRealModelOptions = videoModelOptions.filter((opt): opt is ModelOption => opt.value !== '---divider---')
+  const videoRealModelOptions = videoModelOptions.filter((opt): opt is ModelOption => opt.value !== MODEL_SELECT_DIVIDER_VALUE)
   const sortedVideoModelOptions = sortModelOptionsByRoutingSignal(videoRealModelOptions, catalogRuntimeEntries)
   const recommendedVideoModel = sortedVideoModelOptions[0] || videoRealModelOptions[0] || null
   const preferredVideoGenerationModel = resolvePreferredModelOption(
@@ -1670,7 +1622,6 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
     assetStudioMotionDefaultModelId,
   )
   const selectedVideoCatalogEntry = catalogRuntimeEntries[videoModelId]
-  const selectedVideoRoutingSignal = selectedVideoCatalogEntry?.runtime_routing_signal
   const selectedVideoModel = sortedVideoModelOptions.find((option) => option.value === videoModelId) || sortedVideoModelOptions[0]
   const videoDurationOptions = getRuntimeDurationOptions(
     videoModelId,
@@ -1702,7 +1653,6 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
   const recommendedMotionModel = sortedMotionModelOptions[0] || motionModelOptions[0] || null
   const preferredMotionModel = resolvePreferredModelOption(motionModelOptions, assetStudioMotionDefaultModelId)
   const selectedMotionCatalogEntry = catalogRuntimeEntries[motionModelId]
-  const selectedMotionRoutingSignal = selectedMotionCatalogEntry?.runtime_routing_signal
   const selectedMotionModel = sortedMotionModelOptions.find((option) => option.value === motionModelId) || sortedMotionModelOptions[0]
   const motionDurationOptions = getRuntimeDurationOptions(
     motionModelId,
@@ -2154,7 +2104,8 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
       setImageModelId(preferredImageEditModel?.value || assetStudioImageEditDefaultModelId)
       return
     }
-    if (!imageUsesReferenceMode && imageEditModelIds.has(imageModelId)) {
+    if (!imageUsesReferenceMode && imageEditModelIds.has(imageModelId)
+      && !imageGenerationModelOptions.some((option) => option.value === imageModelId)) {
       setImageModelId(preferredImageGenerationModel?.value || assetStudioImageGenerationDefaultModelId)
     }
   }, [
@@ -2162,6 +2113,7 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
     assetStudioImageEditDefaultModelId,
     assetStudioImageGenerationDefaultModelId,
     imageEditModelIds,
+    imageGenerationModelOptions,
     imageModelId,
     imageUsesReferenceMode,
     preferredImageEditModel,
@@ -2231,9 +2183,11 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
 
   useEffect(() => {
     if (imageReferenceFiles.length > imageReferenceLimit) {
-      setImageReferenceFiles((prev) => prev.slice(0, imageReferenceLimit))
+      setImageReferenceError(t('assetStudio.workbench.error.imageReferenceLimit', { count: imageReferenceLimit }))
+    } else {
+      setImageReferenceError(null)
     }
-  }, [imageReferenceFiles, imageReferenceLimit])
+  }, [imageReferenceFiles, imageReferenceLimit, t])
 
   useEffect(() => {
     const allowedValues = new Set(imageSizeOptions.map((option) => option.value))
@@ -2388,6 +2342,10 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
   const handleGenerateImage = async () => {
     if (!imagePrompt.trim()) {
       setImageError(t('assetStudio.workbench.error.imagePromptRequired'))
+      return
+    }
+    if (imageReferenceFiles.length > imageReferenceLimit) {
+      setImageError(t('assetStudio.workbench.error.imageReferenceLimit', { count: imageReferenceLimit }))
       return
     }
 
@@ -2620,40 +2578,21 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
         <Box sx={{ p: { xs: 1.5, sm: 2.5 } }}>
           <Box sx={{ display: 'grid', gap: 2, gridTemplateColumns: { xs: '1fr', xl: '1.1fr 0.9fr' } }}>
             <Stack spacing={2}>
-              <Box sx={{ p: 2, borderRadius: 3, border: '1px solid rgba(255,255,255,0.1)', backgroundColor: 'rgba(255,255,255,0.03)' }}>
-                <FormControl fullWidth size="small">
-                  <InputLabel sx={{ color: 'rgba(255,255,255,0.68)' }}>{t('assetStudio.workbench.label.imageModel')}</InputLabel>
-                  <Select value={imageModelId} label={t('assetStudio.workbench.label.imageModel')} onChange={(event) => setImageModelId(event.target.value)} sx={{ color: 'white' }}>
-                    {imageModelOptions.map((option) =>
-                      option.value === '---divider---' ? (
-                        <MenuItem key={option.value} value={option.value} disabled sx={{ color: 'rgba(255,255,255,0.3)', fontWeight: 600, textAlign: 'center' }}>
-                          {option.label}
-                        </MenuItem>
-                      ) : (
-                        renderModelOptionMenuItem(option as ModelOption, catalogRuntimeEntries[option.value]?.runtime_routing_signal, t)
-                      )
-                    )}
-                  </Select>
-                  <FormHelperText sx={{ color: 'rgba(255,255,255,0.6)', mx: 0, mt: 1 }}>
-                    {renderOptionHelperText(selectedImageModel, t)}
-                  </FormHelperText>
-                </FormControl>
-                <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap sx={{ mt: 1.25, display: audioGenerationType === 'speech' ? 'none' : 'flex' }}>
-                  <Chip
-                    size="small"
-                    label={getRoutingStatusLabel(selectedImageRoutingSignal, t)}
-                    variant="outlined"
-                    sx={getRoutingStatusChipSx(selectedImageRoutingSignal)}
-                  />
-                  <Chip size="small" label={imageUsesReferenceMode ? t('assetStudio.workbench.chip.referenceEditMode') : t('assetStudio.workbench.chip.purePromptMode')} variant="outlined" sx={{ color: 'white' }} />
-                  <Chip
-                    size="small"
-                    label={imageModelId === 'qwen-image-edit-max' ? t('assetStudio.workbench.chip.qualityFirst') : t('assetStudio.workbench.chip.recommendedMain')}
-                    variant="outlined"
-                    sx={{ color: 'white' }}
-                  />
-                </Stack>
-                {renderRoutingStatusMeta(selectedImageRoutingSignal, t)}
+              <Box sx={WORKBENCH_INNER_CARD_SX}>
+                <ModelSelect
+                  label={t('assetStudio.workbench.label.imageModel')}
+                  value={imageModelId}
+                  options={imageModelOptions}
+                  helper={renderOptionHelperText(selectedImageModel, t)}
+                  runtimeEntries={catalogRuntimeEntries}
+                  neutralChips={[
+                    imageUsesReferenceMode
+                      ? t('assetStudio.workbench.chip.referenceEditMode')
+                      : t('assetStudio.workbench.chip.purePromptMode'),
+                  ]}
+                  onChange={setImageModelId}
+                  t={t}
+                />
                 {renderRecommendedModelAction(imageModelId, recommendedImageModel, catalogRuntimeEntries, () => {
                   if (recommendedImageModel?.value) {
                     setImageModelId(recommendedImageModel.value)
@@ -2668,35 +2607,13 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
                 accept="image/*"
                 fileCount={imageReferenceFiles.length}
                 fileLabel={t('assetStudio.workbench.upload.imageReferenceSelected', { count: imageReferenceFiles.length })}
-                onChange={(files) => setImageReferenceFiles(files ? Array.from(files).slice(0, imageReferenceLimit) : [])}
+                onChange={(files) => setImageReferenceFiles(files ? Array.from(files) : [])}
                 t={t}
               />
-              <Typography sx={{ color: 'rgba(255,255,255,0.58)', fontSize: '0.82rem', lineHeight: 1.7 }}>
+              {imageReferenceError ? <Alert severity="warning">{imageReferenceError}</Alert> : null}
+              <Typography sx={WORKBENCH_HINT_SX}>
                 {t('assetStudio.workbench.dataHint.imageReferenceLimit', { count: imageReferenceLimit })}
               </Typography>
-
-              {audioGenerationType === 'speech' ? (
-                <Alert severity={audioModelId === 'cosyvoice-v3.5-plus' && sortedAudioVoicePresets.length === 0 ? 'warning' : 'info'} sx={{ borderRadius: 3 }}>
-                  {audioModelId === 'cosyvoice-v3.5-plus'
-                    ? sortedAudioVoicePresets.length > 0
-                      ? t('assetStudio.workbench.alert.cosyVoiceReady')
-                      : t('assetStudio.workbench.alert.cosyVoiceNoSystem')
-                    : t('assetStudio.workbench.alert.unifiedTts')}
-                </Alert>
-              ) : null}
-
-              {audioGenerationType === 'speech' ? (
-                <TextField
-                  multiline
-                  minRows={8}
-                  label={t('assetStudio.workbench.label.voiceText')}
-                  value={audioPrompt}
-                  onChange={(event) => setAudioPrompt(event.target.value)}
-                  placeholder={t('assetStudio.workbench.placeholder.voiceText')}
-                  InputLabelProps={{ sx: { color: 'rgba(255,255,255,0.62)' } }}
-                  sx={{ '& .MuiOutlinedInput-root': { color: 'white', backgroundColor: 'rgba(255,255,255,0.03)' } }}
-                />
-              ) : null}
 
               <TextField
                 multiline
@@ -2705,8 +2622,6 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
                 value={imagePrompt}
                 onChange={(event) => setImagePrompt(event.target.value)}
                 placeholder={t('assetStudio.workbench.placeholder.imagePrompt')}
-                InputLabelProps={{ sx: { color: 'rgba(255,255,255,0.62)' } }}
-                sx={{ display: audioGenerationType === 'speech' ? 'none' : 'block', '& .MuiOutlinedInput-root': { color: 'white', backgroundColor: 'rgba(255,255,255,0.03)' } }}
               />
 
               <TextField
@@ -2716,8 +2631,6 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
                 value={imageNegativePrompt}
                 onChange={(event) => setImageNegativePrompt(event.target.value)}
                 placeholder={t('assetStudio.workbench.placeholder.imageNegativePrompt')}
-                InputLabelProps={{ sx: { color: 'rgba(255,255,255,0.62)' } }}
-                sx={{ '& .MuiOutlinedInput-root': { color: 'white', backgroundColor: 'rgba(255,255,255,0.03)' } }}
               />
             </Stack>
 
@@ -2741,19 +2654,23 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
             />
           </Box>
 
-          <Stack direction={{ xs: 'column', md: 'row' }} justifyContent="space-between" alignItems={{ xs: 'stretch', md: 'center' }} spacing={1.5} sx={{ mt: 2 }}>
-              <FormControl size="small" sx={{ minWidth: 180 }}>
-                <InputLabel sx={{ color: 'rgba(255,255,255,0.68)' }}>{t('assetStudio.workbench.label.size')}</InputLabel>
-                <Select value={imageSize} label={t('assetStudio.workbench.label.size')} onChange={(event) => setImageSize(event.target.value)} sx={{ color: 'white' }}>
-                  {imageSizeOptions.map((option) => (
-                    <MenuItem key={option.value} value={option.value}>
-                      {t(option.labelKey)}
-                    </MenuItem>
-                  ))}
+          <ParamBar
+            loading={imageLoading}
+            label={t('assetStudio.workbench.action.generate')}
+            onGenerate={handleGenerateImage}
+            t={t}
+          >
+            <FormControl size="small" variant="outlined" sx={WORKBENCH_PARAM_CONTROL_SX}>
+              <InputLabel>{t('assetStudio.workbench.label.size')}</InputLabel>
+              <Select value={imageSize} label={t('assetStudio.workbench.label.size')} onChange={(event) => setImageSize(event.target.value)}>
+                {imageSizeOptions.map((option) => (
+                  <MenuItem key={option.value} value={option.value}>
+                    {t(option.labelKey)}
+                  </MenuItem>
+                ))}
               </Select>
             </FormControl>
-            <FooterAction loading={imageLoading} label={t('assetStudio.workbench.action.generate')} onClick={handleGenerateImage} t={t} />
-          </Stack>
+          </ParamBar>
         </Box>
       ) : null}
 
@@ -2761,34 +2678,21 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
         <Box sx={{ p: { xs: 1.5, sm: 2.5 } }}>
           <Box sx={{ display: 'grid', gap: 2, gridTemplateColumns: { xs: '1fr', xl: '1.1fr 0.9fr' } }}>
             <Stack spacing={2}>
-              <Box sx={{ p: 2, borderRadius: 3, border: '1px solid rgba(255,255,255,0.1)', backgroundColor: 'rgba(255,255,255,0.03)' }}>
-                <FormControl fullWidth size="small">
-                  <InputLabel sx={{ color: 'rgba(255,255,255,0.68)' }}>{t('assetStudio.workbench.label.videoModel')}</InputLabel>
-                  <Select value={videoModelId} label={t('assetStudio.workbench.label.videoModel')} onChange={(event) => setVideoModelId(event.target.value)} sx={{ color: 'white' }}>
-                    {videoModelOptions.map((option) =>
-                      option.value === '---divider---' ? (
-                        <MenuItem key={option.value} value={option.value} disabled sx={{ color: 'rgba(255,255,255,0.3)', fontWeight: 600, textAlign: 'center' }}>
-                          {option.label}
-                        </MenuItem>
-                      ) : (
-                        renderModelOptionMenuItem(option as ModelOption, catalogRuntimeEntries[option.value]?.runtime_routing_signal, t)
-                      )
-                    )}
-                  </Select>
-                  <FormHelperText sx={{ color: 'rgba(255,255,255,0.6)', mx: 0, mt: 1 }}>
-                    {renderOptionHelperText(selectedVideoModel, t)}
-                  </FormHelperText>
-                </FormControl>
-                <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap sx={{ mt: 1.25 }}>
-                  <Chip
-                    size="small"
-                    label={getRoutingStatusLabel(selectedVideoRoutingSignal, t)}
-                    variant="outlined"
-                    sx={getRoutingStatusChipSx(selectedVideoRoutingSignal)}
-                  />
-                  <Chip size="small" label={videoUsesReferenceMode ? t('assetStudio.workbench.chip.firstFrameMode') : t('assetStudio.workbench.chip.pureTextMode')} variant="outlined" sx={{ color: 'white' }} />
-                </Stack>
-                {renderRoutingStatusMeta(selectedVideoRoutingSignal, t)}
+              <Box sx={WORKBENCH_INNER_CARD_SX}>
+                <ModelSelect
+                  label={t('assetStudio.workbench.label.videoModel')}
+                  value={videoModelId}
+                  options={videoModelOptions}
+                  helper={renderOptionHelperText(selectedVideoModel, t)}
+                  runtimeEntries={catalogRuntimeEntries}
+                  neutralChips={[
+                    videoUsesReferenceMode
+                      ? t('assetStudio.workbench.chip.firstFrameMode')
+                      : t('assetStudio.workbench.chip.pureTextMode'),
+                  ]}
+                  onChange={setVideoModelId}
+                  t={t}
+                />
                 {renderRecommendedModelAction(videoModelId, recommendedVideoModel, catalogRuntimeEntries, () => {
                   if (recommendedVideoModel?.value) {
                     setVideoModelId(recommendedVideoModel.value)
@@ -2813,26 +2717,22 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
                 value={videoPrompt}
                 onChange={(event) => setVideoPrompt(event.target.value)}
                 placeholder={t('assetStudio.workbench.placeholder.videoPrompt')}
-                InputLabelProps={{ sx: { color: 'rgba(255,255,255,0.62)' } }}
-                sx={{ '& .MuiOutlinedInput-root': { color: 'white', backgroundColor: 'rgba(255,255,255,0.03)' } }}
               />
 
               {videoSupportsCameraControl ? (
-                <FormControl size="small" fullWidth>
-                  <InputLabel sx={{ color: 'rgba(255,255,255,0.68)' }}>{t('assetStudio.workbench.label.cameraControl')}</InputLabel>
-                  <Select value={videoCameraControl} label={t('assetStudio.workbench.label.cameraControl')} onChange={(event) => setVideoCameraControl(event.target.value)} sx={{ color: 'white' }}>
+                <FormControl size="small" fullWidth variant="outlined">
+                  <InputLabel>{t('assetStudio.workbench.label.cameraControl')}</InputLabel>
+                  <Select value={videoCameraControl} label={t('assetStudio.workbench.label.cameraControl')} onChange={(event) => setVideoCameraControl(event.target.value)}>
                     {CAMERA_CONTROL_OPTIONS.map((option) => (
                       <MenuItem key={option.value || 'auto'} value={option.value}>
-                        {option.labelKey ? t(option.labelKey) : option.label}
+                        {getModelOptionLabel(option, t)}
                       </MenuItem>
                     ))}
                   </Select>
-                  <FormHelperText sx={{ color: 'rgba(255,255,255,0.6)', mx: 0, mt: 1 }}>
-                    {renderOptionHelperText(selectedVideoCameraControl, t)}
-                  </FormHelperText>
+                  <FormHelperText>{renderOptionHelperText(selectedVideoCameraControl, t)}</FormHelperText>
                 </FormControl>
               ) : (
-                <Typography sx={{ color: 'rgba(255,255,255,0.58)', fontSize: '0.82rem', lineHeight: 1.7 }}>
+                <Typography sx={WORKBENCH_HINT_SX}>
                   {t('assetStudio.workbench.dataHint.cameraNotExposedVideo')}
                 </Typography>
               )}
@@ -2859,41 +2759,43 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
             />
           </Box>
 
-          <Stack direction={{ xs: 'column', md: 'row' }} justifyContent="space-between" alignItems={{ xs: 'stretch', md: 'center' }} spacing={1.5} sx={{ mt: 2 }}>
-            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5}>
-              <FormControl size="small" sx={{ minWidth: 180 }}>
-                <InputLabel sx={{ color: 'rgba(255,255,255,0.68)' }}>{t('assetStudio.workbench.label.size')}</InputLabel>
-                <Select value={videoSize} label={t('assetStudio.workbench.label.size')} onChange={(event) => setVideoSize(event.target.value)} sx={{ color: 'white' }}>
-                  {videoSizeOptions.map((option) => (
+          <ParamBar
+            loading={videoLoading}
+            label={t('assetStudio.workbench.action.generate')}
+            onGenerate={handleGenerateVideo}
+            t={t}
+          >
+            <FormControl size="small" variant="outlined" sx={WORKBENCH_PARAM_CONTROL_SX}>
+              <InputLabel>{t('assetStudio.workbench.label.size')}</InputLabel>
+              <Select value={videoSize} label={t('assetStudio.workbench.label.size')} onChange={(event) => setVideoSize(event.target.value)}>
+                {videoSizeOptions.map((option) => (
+                  <MenuItem key={option.value} value={option.value}>
+                    {t(option.labelKey)}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+            {videoDurationRange ? (
+              <DurationRangeControl
+                label={t('assetStudio.workbench.label.duration')}
+                value={videoDuration}
+                range={videoDurationRange}
+                onChange={setVideoDuration}
+                t={t}
+              />
+            ) : (
+              <FormControl size="small" variant="outlined" sx={WORKBENCH_PARAM_CONTROL_SX}>
+                <InputLabel>{t('assetStudio.workbench.label.duration')}</InputLabel>
+                <Select value={videoDuration} label={t('assetStudio.workbench.label.duration')} onChange={(event) => setVideoDuration(event.target.value)}>
+                  {videoDurationOptions.map((option) => (
                     <MenuItem key={option.value} value={option.value}>
-                      {t(option.labelKey)}
+                      {t('assetStudio.workbench.durationSeconds', { count: option.value })}
                     </MenuItem>
                   ))}
                 </Select>
               </FormControl>
-              {videoDurationRange ? (
-                <DurationRangeControl
-                  label={t('assetStudio.workbench.label.duration')}
-                  value={videoDuration}
-                  range={videoDurationRange}
-                  onChange={setVideoDuration}
-                  t={t}
-                />
-              ) : (
-                <FormControl size="small" sx={{ minWidth: 120 }}>
-                  <InputLabel sx={{ color: 'rgba(255,255,255,0.68)' }}>{t('assetStudio.workbench.label.duration')}</InputLabel>
-                  <Select value={videoDuration} label={t('assetStudio.workbench.label.duration')} onChange={(event) => setVideoDuration(event.target.value)} sx={{ color: 'white' }}>
-                    {videoDurationOptions.map((option) => (
-                      <MenuItem key={option.value} value={option.value}>
-                        {t('assetStudio.workbench.durationSeconds', { count: option.value })}
-                      </MenuItem>
-                    ))}
-                  </Select>
-                </FormControl>
-              )}
-            </Stack>
-            <FooterAction loading={videoLoading} label={t('assetStudio.workbench.action.generate')} onClick={handleGenerateVideo} t={t} />
-          </Stack>
+            )}
+          </ParamBar>
         </Box>
       ) : null}
 
@@ -2901,27 +2803,22 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
         <Box sx={{ p: { xs: 1.5, sm: 2.5 } }}>
           <Box sx={{ display: 'grid', gap: 2, gridTemplateColumns: { xs: '1fr', xl: '1.1fr 0.9fr' } }}>
             <Stack spacing={2}>
-              <Box sx={{ p: 2, borderRadius: 3, border: '1px solid rgba(255,255,255,0.1)', backgroundColor: 'rgba(255,255,255,0.03)' }}>
-                <FormControl fullWidth size="small">
-                  <InputLabel sx={{ color: 'rgba(255,255,255,0.68)' }}>{t('assetStudio.workbench.label.motionModel')}</InputLabel>
-                  <Select value={motionModelId} label={t('assetStudio.workbench.label.motionModel')} onChange={(event) => setMotionModelId(event.target.value)} sx={{ color: 'white' }}>
-                    {sortedMotionModelOptions.map((option) => renderModelOptionMenuItem(option, catalogRuntimeEntries[option.value]?.runtime_routing_signal, t))}
-                  </Select>
-                  <FormHelperText sx={{ color: 'rgba(255,255,255,0.6)', mx: 0, mt: 1 }}>
-                    {renderOptionHelperText(selectedMotionModel, t)}
-                  </FormHelperText>
-                </FormControl>
-                <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap sx={{ mt: 1.25 }}>
-                  <Chip
-                    size="small"
-                    label={getRoutingStatusLabel(selectedMotionRoutingSignal, t)}
-                    variant="outlined"
-                    sx={getRoutingStatusChipSx(selectedMotionRoutingSignal)}
-                  />
-                  <Chip size="small" label={motionReferenceFile ? t('assetStudio.workbench.chip.referenceDriven') : t('assetStudio.workbench.chip.pureTextMode')} variant="outlined" sx={{ color: 'white' }} />
-                  <Chip size="small" label={t('assetStudio.workbench.chip.motionControl')} variant="outlined" sx={{ color: 'white' }} />
-                </Stack>
-                {renderRoutingStatusMeta(selectedMotionRoutingSignal, t)}
+              <Box sx={WORKBENCH_INNER_CARD_SX}>
+                <ModelSelect
+                  label={t('assetStudio.workbench.label.motionModel')}
+                  value={motionModelId}
+                  options={sortedMotionModelOptions}
+                  helper={renderOptionHelperText(selectedMotionModel, t)}
+                  runtimeEntries={catalogRuntimeEntries}
+                  neutralChips={[
+                    motionReferenceFile
+                      ? t('assetStudio.workbench.chip.referenceDriven')
+                      : t('assetStudio.workbench.chip.pureTextMode'),
+                    t('assetStudio.workbench.chip.motionControl'),
+                  ]}
+                  onChange={setMotionModelId}
+                  t={t}
+                />
                 {renderRecommendedModelAction(motionModelId, recommendedMotionModel, catalogRuntimeEntries, () => {
                   if (recommendedMotionModel?.value) {
                     setMotionModelId(recommendedMotionModel.value)
@@ -2946,26 +2843,22 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
                 value={motionPrompt}
                 onChange={(event) => setMotionPrompt(event.target.value)}
                 placeholder={t('assetStudio.workbench.placeholder.motionPrompt')}
-                InputLabelProps={{ sx: { color: 'rgba(255,255,255,0.62)' } }}
-                sx={{ '& .MuiOutlinedInput-root': { color: 'white', backgroundColor: 'rgba(255,255,255,0.03)' } }}
               />
 
               {motionSupportsCameraControl ? (
-                <FormControl size="small" fullWidth>
-                  <InputLabel sx={{ color: 'rgba(255,255,255,0.68)' }}>{t('assetStudio.workbench.label.cameraControl')}</InputLabel>
-                  <Select value={motionCameraControl} label={t('assetStudio.workbench.label.cameraControl')} onChange={(event) => setMotionCameraControl(event.target.value)} sx={{ color: 'white' }}>
+                <FormControl size="small" fullWidth variant="outlined">
+                  <InputLabel>{t('assetStudio.workbench.label.cameraControl')}</InputLabel>
+                  <Select value={motionCameraControl} label={t('assetStudio.workbench.label.cameraControl')} onChange={(event) => setMotionCameraControl(event.target.value)}>
                     {CAMERA_CONTROL_OPTIONS.map((option) => (
                       <MenuItem key={option.value || 'auto'} value={option.value}>
-                        {option.labelKey ? t(option.labelKey) : option.label}
+                        {getModelOptionLabel(option, t)}
                       </MenuItem>
                     ))}
                   </Select>
-                  <FormHelperText sx={{ color: 'rgba(255,255,255,0.6)', mx: 0, mt: 1 }}>
-                    {renderOptionHelperText(selectedMotionCameraControl, t)}
-                  </FormHelperText>
+                  <FormHelperText>{renderOptionHelperText(selectedMotionCameraControl, t)}</FormHelperText>
                 </FormControl>
               ) : (
-                <Typography sx={{ color: 'rgba(255,255,255,0.58)', fontSize: '0.82rem', lineHeight: 1.7 }}>
+                <Typography sx={WORKBENCH_HINT_SX}>
                   {t('assetStudio.workbench.dataHint.cameraNotExposedMotion')}
                 </Typography>
               )}
@@ -2992,52 +2885,54 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
             />
           </Box>
 
-          <Stack direction={{ xs: 'column', md: 'row' }} justifyContent="space-between" alignItems={{ xs: 'stretch', md: 'center' }} spacing={1.5} sx={{ mt: 2 }}>
-            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5}>
-              <FormControl size="small" sx={{ minWidth: 180 }}>
-                <InputLabel sx={{ color: 'rgba(255,255,255,0.68)' }}>{t('assetStudio.workbench.label.size')}</InputLabel>
-                <Select value={motionSize} label={t('assetStudio.workbench.label.size')} onChange={(event) => setMotionSize(event.target.value)} sx={{ color: 'white' }}>
-                  {motionSizeOptions.map((option) => (
+          <ParamBar
+            loading={motionLoading}
+            label={t('assetStudio.workbench.action.generate')}
+            onGenerate={handleGenerateMotion}
+            t={t}
+          >
+            <FormControl size="small" variant="outlined" sx={WORKBENCH_PARAM_CONTROL_SX}>
+              <InputLabel>{t('assetStudio.workbench.label.size')}</InputLabel>
+              <Select value={motionSize} label={t('assetStudio.workbench.label.size')} onChange={(event) => setMotionSize(event.target.value)}>
+                {motionSizeOptions.map((option) => (
+                  <MenuItem key={option.value} value={option.value}>
+                    {t(option.labelKey)}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+            {motionDurationRange ? (
+              <DurationRangeControl
+                label={t('assetStudio.workbench.label.duration')}
+                value={motionDuration}
+                range={motionDurationRange}
+                onChange={setMotionDuration}
+                t={t}
+              />
+            ) : (
+              <FormControl size="small" variant="outlined" sx={WORKBENCH_PARAM_CONTROL_SX}>
+                <InputLabel>{t('assetStudio.workbench.label.duration')}</InputLabel>
+                <Select value={motionDuration} label={t('assetStudio.workbench.label.duration')} onChange={(event) => setMotionDuration(event.target.value)}>
+                  {motionDurationOptions.map((option) => (
                     <MenuItem key={option.value} value={option.value}>
-                      {t(option.labelKey)}
+                      {t('assetStudio.workbench.durationSeconds', { count: option.value })}
                     </MenuItem>
                   ))}
                 </Select>
               </FormControl>
-              {motionDurationRange ? (
-                <DurationRangeControl
-                  label={t('assetStudio.workbench.label.duration')}
-                  value={motionDuration}
-                  range={motionDurationRange}
-                  onChange={setMotionDuration}
-                  t={t}
-                />
-              ) : (
-                <FormControl size="small" sx={{ minWidth: 120 }}>
-                  <InputLabel sx={{ color: 'rgba(255,255,255,0.68)' }}>{t('assetStudio.workbench.label.duration')}</InputLabel>
-                  <Select value={motionDuration} label={t('assetStudio.workbench.label.duration')} onChange={(event) => setMotionDuration(event.target.value)} sx={{ color: 'white' }}>
-                    {motionDurationOptions.map((option) => (
-                      <MenuItem key={option.value} value={option.value}>
-                        {t('assetStudio.workbench.durationSeconds', { count: option.value })}
-                      </MenuItem>
-                    ))}
-                  </Select>
-                </FormControl>
-              )}
-              <FormControl size="small" sx={{ minWidth: 140 }}>
-                <InputLabel sx={{ color: 'rgba(255,255,255,0.68)' }}>{t('assetStudio.workbench.label.motionLevel')}</InputLabel>
-                <Select value={motionLevel} label={t('assetStudio.workbench.label.motionLevel')} onChange={(event) => setMotionLevel(event.target.value)} sx={{ color: 'white' }}>
-                  <MenuItem value="low">{t('assetStudio.workbench.chip.motionLow')}</MenuItem>
-                  <MenuItem value="medium">{t('assetStudio.workbench.chip.motionMedium')}</MenuItem>
-                  <MenuItem value="high">{t('assetStudio.workbench.chip.motionHigh')}</MenuItem>
-                </Select>
-                <FormHelperText sx={{ color: 'rgba(255,255,255,0.6)', mx: 0, mt: 1 }}>
-                  {t(MOTION_LEVEL_HELPER_KEYS[motionLevel] || MOTION_LEVEL_HELPER_KEYS.medium)}
-                </FormHelperText>
-              </FormControl>
-            </Stack>
-            <FooterAction loading={motionLoading} label={t('assetStudio.workbench.action.generate')} onClick={handleGenerateMotion} t={t} />
-          </Stack>
+            )}
+            <FormControl size="small" variant="outlined" sx={WORKBENCH_PARAM_CONTROL_SX}>
+              <InputLabel>{t('assetStudio.workbench.label.motionLevel')}</InputLabel>
+              <Select value={motionLevel} label={t('assetStudio.workbench.label.motionLevel')} onChange={(event) => setMotionLevel(event.target.value)}>
+                <MenuItem value="low">{t('assetStudio.workbench.chip.motionLow')}</MenuItem>
+                <MenuItem value="medium">{t('assetStudio.workbench.chip.motionMedium')}</MenuItem>
+                <MenuItem value="high">{t('assetStudio.workbench.chip.motionHigh')}</MenuItem>
+              </Select>
+              <FormHelperText>
+                {t(MOTION_LEVEL_HELPER_KEYS[motionLevel] || MOTION_LEVEL_HELPER_KEYS.medium)}
+              </FormHelperText>
+            </FormControl>
+          </ParamBar>
         </Box>
       ) : null}
 
@@ -3046,14 +2941,13 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
           <Box sx={{ display: 'grid', gap: 2, gridTemplateColumns: { xs: '1fr', xl: '1.1fr 0.9fr' } }}>
             <Stack spacing={2}>
               <Box sx={{ display: 'grid', gap: 2, gridTemplateColumns: { xs: '1fr', md: 'repeat(2, minmax(0, 1fr))' } }}>
-              <Box sx={{ p: 2, borderRadius: 3, border: '1px solid rgba(255,255,255,0.1)', backgroundColor: 'rgba(255,255,255,0.03)' }}>
-                <FormControl fullWidth size="small">
-                  <InputLabel sx={{ color: 'rgba(255,255,255,0.68)' }}>{t('assetStudio.workbench.label.generationType')}</InputLabel>
+              <Box sx={WORKBENCH_INNER_CARD_SX}>
+                <FormControl fullWidth size="small" variant="outlined">
+                  <InputLabel>{t('assetStudio.workbench.label.generationType')}</InputLabel>
                   <Select
                     value={audioGenerationType}
                     label={t('assetStudio.workbench.label.generationType')}
                     onChange={(event) => setAudioGenerationType(event.target.value as AudioGenerationType)}
-                    sx={{ color: 'white' }}
                   >
                     {AUDIO_GENERATION_TYPE_OPTIONS.map((option) => (
                       <MenuItem key={option.value} value={option.value}>
@@ -3061,26 +2955,22 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
                       </MenuItem>
                     ))}
                   </Select>
-                  <FormHelperText sx={{ color: 'rgba(255,255,255,0.6)', mx: 0, mt: 1 }}>
+                  <FormHelperText>
                     {renderOptionHelperText(selectedAudioGenerationType, t)}
                   </FormHelperText>
                 </FormControl>
               </Box>
 
-              <Box sx={{ p: 2, borderRadius: 3, border: '1px solid rgba(255,255,255,0.1)', backgroundColor: 'rgba(255,255,255,0.03)' }}>
-                <FormControl fullWidth size="small">
-                  <InputLabel sx={{ color: 'rgba(255,255,255,0.68)' }}>{t('assetStudio.workbench.label.audioModel')}</InputLabel>
-                  <Select value={audioModelId} label={t('assetStudio.workbench.label.audioModel')} onChange={(event) => setAudioModelId(event.target.value)} sx={{ color: 'white' }}>
-                    {audioModelOptions.map((option) => (
-                      <MenuItem key={option.value} value={option.value}>
-                        {option.labelKey ? t(option.labelKey) : option.label}
-                      </MenuItem>
-                    ))}
-                  </Select>
-                  <FormHelperText sx={{ color: 'rgba(255,255,255,0.6)', mx: 0, mt: 1 }}>
-                    {renderOptionHelperText(selectedAudioModel, t)}
-                  </FormHelperText>
-                </FormControl>
+              <Box sx={WORKBENCH_INNER_CARD_SX}>
+                <ModelSelect
+                  label={t('assetStudio.workbench.label.audioModel')}
+                  value={audioModelId}
+                  options={audioModelOptions}
+                  helper={renderOptionHelperText(selectedAudioModel, t)}
+                  runtimeEntries={catalogRuntimeEntries}
+                  onChange={setAudioModelId}
+                  t={t}
+                />
               </Box>
 
               </Box>
@@ -3123,8 +3013,6 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
                       ? t('assetStudio.workbench.placeholder.sceneAudioPrompt')
                       : t('assetStudio.workbench.placeholder.soundEffectPrompt')
                 }
-                InputLabelProps={{ sx: { color: 'rgba(255,255,255,0.62)' } }}
-                sx={{ '& .MuiOutlinedInput-root': { color: 'white', backgroundColor: 'rgba(255,255,255,0.03)' } }}
               />
 
               {audioGenerationType === 'scene-audio' ? (
@@ -3136,22 +3024,18 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
                   onChange={(event) => setAudioSpeakerIds(event.target.value)}
                   placeholder={t('assetStudio.workbench.placeholder.speakerId')}
                   helperText={t('assetStudio.workbench.helperText.speakerId')}
-                  InputLabelProps={{ sx: { color: 'rgba(255,255,255,0.62)' } }}
-                  FormHelperTextProps={{ sx: { color: 'rgba(255,255,255,0.56)', mx: 0 } }}
-                  sx={{ '& .MuiOutlinedInput-root': { color: 'white', backgroundColor: 'rgba(255,255,255,0.03)' } }}
                 />
               ) : null}
 
               {audioGenerationType === 'speech' ? (
                 <Stack spacing={1.5}>
                   <Box sx={{ display: 'grid', gap: 1.5, gridTemplateColumns: { xs: '1fr', md: isCosyVoiceSpeechMode ? 'repeat(2, minmax(0, 1fr))' : '1fr' } }}>
-                    <FormControl size="small" fullWidth>
-                      <InputLabel sx={{ color: 'rgba(255,255,255,0.68)' }}>{t('assetStudio.workbench.label.voice')}</InputLabel>
+                    <FormControl size="small" fullWidth variant="outlined">
+                      <InputLabel>{t('assetStudio.workbench.label.voice')}</InputLabel>
                       <Select
                         value={audioVoiceId}
                         label={t('assetStudio.workbench.label.voice')}
                         onChange={(event) => setAudioVoiceId(event.target.value)}
-                        sx={{ color: 'white' }}
                         disabled={audioVoiceLoading || sortedAudioVoicePresets.length === 0}
                       >
                         {audioVoiceLoading ? (
@@ -3170,14 +3054,14 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
                           </MenuItem>
                         ))}
                       </Select>
-                      <FormHelperText sx={{ color: 'rgba(255,255,255,0.6)', mx: 0, mt: 1 }}>
+                      <FormHelperText>
                         {sortedAudioVoicePresets.find((voice) => voice.id === audioVoiceId)?.description
                           || (audioModelId === 'cosyvoice-v3.5-plus' ? t('assetStudio.workbench.voice.cosyOnlyHint') : t('assetStudio.workbench.voice.pickOneHint'))}
                       </FormHelperText>
                     </FormControl>
 
                     {isCosyVoiceSpeechMode ? (
-                      <Box sx={{ p: 1.5, borderRadius: 3, border: '1px solid rgba(255,255,255,0.1)', backgroundColor: 'rgba(255,255,255,0.03)' }}>
+                      <Box sx={WORKBENCH_COMPACT_CARD_SX}>
                         <Box sx={{ display: 'grid', gap: 1, gridTemplateColumns: 'repeat(3, minmax(0, 1fr))' }}>
                           <Button
                             variant="outlined"
@@ -3231,8 +3115,6 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
                     value={audioInstruction}
                     onChange={(event) => setAudioInstruction(event.target.value)}
                     placeholder={t('assetStudio.workbench.placeholder.instruction')}
-                    InputLabelProps={{ sx: { color: 'rgba(255,255,255,0.62)' } }}
-                    sx={{ '& .MuiOutlinedInput-root': { color: 'white', backgroundColor: 'rgba(255,255,255,0.03)' } }}
                   />
 
                   <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5}>
@@ -3243,8 +3125,6 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
                         label={t('assetStudio.workbench.label.speechRate')}
                         value={audioRate}
                         onChange={(event) => setAudioRate(event.target.value)}
-                        InputLabelProps={{ sx: { color: 'rgba(255,255,255,0.62)' } }}
-                        sx={{ '& .MuiOutlinedInput-root': { color: 'white', backgroundColor: 'rgba(255,255,255,0.03)' } }}
                       />
                     ) : null}
                     <TextField
@@ -3253,17 +3133,15 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
                       label={t('assetStudio.workbench.label.volume')}
                       value={audioVolume}
                       onChange={(event) => setAudioVolume(event.target.value)}
-                      InputLabelProps={{ sx: { color: 'rgba(255,255,255,0.62)' } }}
-                      sx={{ '& .MuiOutlinedInput-root': { color: 'white', backgroundColor: 'rgba(255,255,255,0.03)' } }}
                     />
                   </Stack>
                 </Stack>
               ) : null}
 
               <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5} sx={{ display: audioGenerationType === 'speech' || audioGenerationType === 'scene-audio' ? 'none' : 'flex' }}>
-                <FormControl size="small" fullWidth>
-                  <InputLabel sx={{ color: 'rgba(255,255,255,0.68)' }}>{t('assetStudio.workbench.label.duration')}</InputLabel>
-                  <Select value={audioDuration} label={t('assetStudio.workbench.label.duration')} onChange={(event) => setAudioDuration(event.target.value)} sx={{ color: 'white' }}>
+                <FormControl size="small" fullWidth variant="outlined">
+                  <InputLabel>{t('assetStudio.workbench.label.duration')}</InputLabel>
+                  <Select value={audioDuration} label={t('assetStudio.workbench.label.duration')} onChange={(event) => setAudioDuration(event.target.value)}>
                     {audioDurationOptions.map((option) => (
                       <MenuItem key={option.value} value={option.value}>
                         {t('assetStudio.workbench.durationSeconds', { count: option.value })}
@@ -3272,9 +3150,9 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
                   </Select>
                 </FormControl>
 
-                <FormControl size="small" fullWidth>
-                  <InputLabel sx={{ color: 'rgba(255,255,255,0.68)' }}>{t('assetStudio.workbench.label.mood')}</InputLabel>
-                  <Select value={audioMood} label={t('assetStudio.workbench.label.mood')} onChange={(event) => setAudioMood(event.target.value)} sx={{ color: 'white' }}>
+                <FormControl size="small" fullWidth variant="outlined">
+                  <InputLabel>{t('assetStudio.workbench.label.mood')}</InputLabel>
+                  <Select value={audioMood} label={t('assetStudio.workbench.label.mood')} onChange={(event) => setAudioMood(event.target.value)}>
                     {AUDIO_MOOD_OPTIONS.map((option) => (
                       <MenuItem key={option.value} value={option.value}>
                         {t(option.labelKey)}
@@ -3283,9 +3161,9 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
                   </Select>
                 </FormControl>
 
-                <FormControl size="small" fullWidth>
-                  <InputLabel sx={{ color: 'rgba(255,255,255,0.68)' }}>{t('assetStudio.workbench.label.tempo')}</InputLabel>
-                  <Select value={audioTempo} label={t('assetStudio.workbench.label.tempo')} onChange={(event) => setAudioTempo(event.target.value)} sx={{ color: 'white' }}>
+                <FormControl size="small" fullWidth variant="outlined">
+                  <InputLabel>{t('assetStudio.workbench.label.tempo')}</InputLabel>
+                  <Select value={audioTempo} label={t('assetStudio.workbench.label.tempo')} onChange={(event) => setAudioTempo(event.target.value)}>
                     {AUDIO_TEMPO_OPTIONS.map((option) => (
                       <MenuItem key={option.value} value={option.value}>
                         {t(option.labelKey)}
@@ -3296,9 +3174,9 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
               </Stack>
 
               {audioGenerationType === 'music' ? (
-                <FormControl size="small" fullWidth>
-                  <InputLabel sx={{ color: 'rgba(255,255,255,0.68)' }}>{t('assetStudio.workbench.label.style')}</InputLabel>
-                  <Select value={audioStyle} label={t('assetStudio.workbench.label.style')} onChange={(event) => setAudioStyle(event.target.value)} sx={{ color: 'white' }}>
+                <FormControl size="small" fullWidth variant="outlined">
+                  <InputLabel>{t('assetStudio.workbench.label.style')}</InputLabel>
+                  <Select value={audioStyle} label={t('assetStudio.workbench.label.style')} onChange={(event) => setAudioStyle(event.target.value)}>
                     {AUDIO_STYLE_OPTIONS.map((option) => (
                       <MenuItem key={option.value} value={option.value}>
                         {t(option.labelKey)}
@@ -3337,8 +3215,13 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
             />
           </Box>
 
-          <Stack direction={{ xs: 'column', md: 'row' }} justifyContent="space-between" alignItems={{ xs: 'stretch', md: 'center' }} spacing={1.5} sx={{ mt: 2 }}>
-            <Typography sx={{ color: 'rgba(255,255,255,0.58)', fontSize: '0.84rem', lineHeight: 1.7 }}>
+          <ParamBar
+            loading={audioLoading}
+            label={t('assetStudio.workbench.action.generateAudio')}
+            onGenerate={handleGenerateAudio}
+            t={t}
+          >
+            <Typography sx={WORKBENCH_HINT_SX}>
               {audioGenerationType === 'music'
                 ? t('assetStudio.workbench.dataHint.modeHintMusic')
                 : audioGenerationType === 'sound-effect'
@@ -3347,8 +3230,7 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
                 ? t('assetStudio.workbench.dataHint.modeHintSceneAudio')
                 : t('assetStudio.workbench.dataHint.modeHintSpeech')}
             </Typography>
-            <FooterAction loading={audioLoading} label={t('assetStudio.workbench.action.generateAudio')} onClick={handleGenerateAudio} t={t} />
-          </Stack>
+          </ParamBar>
         </Box>
       ) : null}
 
@@ -3459,7 +3341,7 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
             <Alert severity="info" sx={WORKBENCH_DIALOG_INFO_ALERT_SX}>
               {t('assetStudio.workbench.voice.recordAlert')}
             </Alert>
-            <Box sx={{ p: 2, borderRadius: 3, border: '1px solid rgba(255,255,255,0.1)', backgroundColor: 'rgba(255,255,255,0.03)' }}>
+            <Box sx={WORKBENCH_INNER_CARD_SX}>
               <Typography sx={{ color: 'white', fontSize: '0.95rem', lineHeight: 1.8 }}>
                 {t('assetStudio.workbench.voice.recordSample')}
               </Typography>

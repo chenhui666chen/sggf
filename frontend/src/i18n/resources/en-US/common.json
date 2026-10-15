@@ -368,7 +368,8 @@
       "assets": "My Assets",
       "points": "Points & Benefits",
       "records": "Records & Trash",
-      "security": "Account & Security"
+      "security": "Account & Security",
+      "videoApi": "Video API"
     },
     "status": {
       "expired": "Expired",
@@ -4987,7 +4988,7 @@
         "speakerId": "Fill in by role appearance order; leave blank to let the model derive voices from role descriptions."
       },
       "dataHint": {
-        "imageReferenceLimit": "The current runtime allows at most {{count}} reference images; extra ones will be truncated automatically.",
+        "imageReferenceLimit": "This model supports up to {{count}} reference images. Remove extra images before generating.",
         "footerNote": "This workbench directly calls lightweight asset generation APIs and bypasses project chapters or long-running workflows.",
         "modeHintMusic": "Music mode passes style, mood and tempo to the backend audio service.",
         "modeHintSoundEffect": "Sound effect mode uses Doubao Seed Audio 1.0 to generate short effects from the prompt; the model decides the actual duration and points are settled on that actual duration.",
@@ -5050,6 +5051,7 @@
       },
       "error": {
         "imagePromptRequired": "Please enter an image prompt first",
+        "imageReferenceLimit": "This model supports at most {{count}} reference images. Remove extra images before generating.",
         "imageGenerateFailed": "Image generation failed",
         "videoPromptRequired": "Please enter a video prompt first",
         "videoGenerateFailed": "Video generation failed",
@@ -6300,8 +6302,10 @@
   "modelVideoViduQ3Text2Video": "Vidu Q3 Pro text-to-video",
   "modelVideoViduQ3Img2Video": "Vidu Q3 Pro image-to-video",
   "modelVideoViduQ3StartEnd2Video": "Vidu Q3 Pro start-end frames",
-  "modelVisionQwen3VlPlus": "Qwen3-VL-Plus (vision understanding)",
-  "modelVisionQwen35OmniPlus": "Qwen3.5 Omni Plus (all-round)",
+  "modelVisionQwenPlus": "Qwen3.7 Plus (vision review)",
+  "modelVisionQwen38OmniFlash": "Qwen3.8 Omni Flash (omni lightweight)",
+  "modelVisionDoubaoSeed21Lite": "Doubao Seed 2.1 Lite (vision review)",
+  "modelVisionDoubaoSeed21Pro": "Doubao Seed 2.1 Pro (vision review)",
   "safetyPolicyWarn": "Warn and allow",
   "safetyPolicyBlock": "Strictly block",
   "characterViewFront": "Front",

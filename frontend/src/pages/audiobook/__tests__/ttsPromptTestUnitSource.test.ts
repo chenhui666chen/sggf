@@ -77,7 +77,11 @@ describe('independent TTS prompt test unit source contract', () => {
   it('routes local review requests to the IPv4 backend listener', () => {
     const viteSource = readSource('../../../../vite.config.ts')
 
-    expect(viteSource).toContain("const LOCAL_BACKEND_TARGET = 'http://127.0.0.1:8000'")
+    // 允许 VITE_DEV_BACKEND_TARGET 覆盖（连本机以外/其他端口的后端时要能改），
+    // 但兜底值必须是 IPv4 字面量：写成 localhost 会被解析到 IPv6，代理直接 504。
+    expect(viteSource).toContain(
+      "const LOCAL_BACKEND_TARGET = process.env.VITE_DEV_BACKEND_TARGET || 'http://127.0.0.1:8000'",
+    )
     expect(viteSource).toContain('target: LOCAL_BACKEND_TARGET')
     expect(viteSource).not.toContain("const LOCAL_BACKEND_TARGET = 'http://localhost:8000'")
   })

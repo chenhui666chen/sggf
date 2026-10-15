@@ -15,9 +15,12 @@ AUDIOGEN_DIMENSIONS = (
     "prompt_adherence", "sound_event", "speaker_separation",
     "mix_balance", "duration_fit", "overall_quality",
 )
+# 2026-10-12 收口：2026-10-10 的四档集合是"同时评估评分器本身"的实验横评集，不是采信组合。
+# 采信分工（见下方两个 AUTHORITY 与 tts_dimension_authority）只需要这两档，多出来的档位每条
+# 音频都按 12 元/百万 token 的音频输入价重复付费，却不产出任何被采信的维度。
+# qwen3.5-omni-flash 仍是有声书场景语义评审的默认档（qwen_omni_reviewer），但它不参与打分。
 SCORER_MODELS = (
-    "qwen3.5-omni-flash", "qwen3.8-omni-flash",
-    "qwen3.5-omni-plus", "doubao-seed-2-1-lite",
+    "qwen3.8-omni-flash", "doubao-seed-2-1-lite",
 )
 
 # 采信分工（2026-10-10 G1–G7 盲评复测裁定，见 docs/TTS_PROMPT_EVIDENCE_20261010.md §9.1）：

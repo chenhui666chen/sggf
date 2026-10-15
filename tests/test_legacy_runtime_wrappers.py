@@ -5,54 +5,6 @@ import pytest
 from adapters.registry import registry
 
 
-def test_legacy_factory_qwen3_vl_plus_chat_uses_registry_wrapper(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from adapters import legacy_runtime_wrappers
-    from adapters.base import GenerationResult as RegistryGenerationResult
-    from adapters.model_adapters import ModelAdapterFactory
-
-    captured: dict[str, object] = {}
-
-    class FakeAdapter:
-        def chat(self, **kwargs):
-            captured["kwargs"] = kwargs
-            return RegistryGenerationResult(
-                success=True,
-                task_id="legacy",
-                model_id="qwen3-vl-plus",
-                metadata={
-                    "source": "registry",
-                    "result_data": {"content": '{"ok": true}'},
-                },
-            )
-
-    def fake_get_adapter(model_id: str, config=None):
-        captured["model_id"] = model_id
-        captured["config"] = config
-        return FakeAdapter()
-
-    monkeypatch.setattr(registry, "get_adapter", fake_get_adapter)
-
-    adapter = ModelAdapterFactory().get_adapter("qwen3_vl_plus")
-    result = adapter.chat(
-        messages=[{"role": "user", "content": "hello"}],
-        temperature=0.3,
-        max_tokens=128,
-    )
-
-    assert captured["model_id"] == "qwen3-vl-plus"
-    assert result.success is True
-    assert result.data == {"content": '{"ok": true}'}
-    assert result.metadata == {"source": "registry"}
-    assert captured["kwargs"] == {
-        "messages": [{"role": "user", "content": "hello"}],
-        "temperature": 0.3,
-        "max_tokens": 128,
-        "response_format": None,
-    }
-
-
 def test_legacy_factory_qwen_image_edit_plus_generate_routes_to_registry_task(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -289,7 +241,6 @@ def test_normalize_model_id_returns_current_multimodal_ids() -> None:
 
     from adapters.legacy_runtime_wrappers import has_runtime_wrapper
 
-    assert normalize_model_id("qwen3_vl_plus") == "qwen3-vl-plus"
     # Qwen3-TTS 已物理退役：core 层不再折叠旧 ID，旧写法必须原样返回并暴露成注册失败，
     # 而不是被静默改写成后继模型（与 test_model_retirement_registry 的同名约束一致）。
     assert normalize_model_id("qwen3_tts") == "qwen3_tts"

@@ -7,12 +7,10 @@ import {
   Grid, LinearProgress, Paper, Table, TableBody, TableCell,
   TableContainer, TableHead, TableRow, Typography,
 } from '@mui/material'
-import {
-  Assessment as AssessmentIcon,
-  Build as BuildIcon,
-  Security as SecurityIcon,
-  Storage as StorageIcon,
-} from '@mui/icons-material'
+import AssessmentIcon from '@mui/icons-material/Assessment'
+import BuildIcon from '@mui/icons-material/Build'
+import SecurityIcon from '@mui/icons-material/Security'
+import StorageIcon from '@mui/icons-material/Storage'
 
 import type {
   KnowledgeGovernanceSummary, RepairStats, AuditStats, BudgetStatus,

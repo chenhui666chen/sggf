@@ -52,17 +52,17 @@ def test_runtime_config_maps_selected_models_into_runtime_blocks() -> None:
         image_model="qwen-image-3.0-pro",
         video_model="wan3.0-video",
         video_edit_model="wan3.0-video",
-        vision_model="qwen3-vl-plus",
+        vision_model="qwen3.8-omni-flash",
         enable_video_edit=True,
         enable_vision_review=False,
     )
     runtime_config = dreamweaver._build_dreamweaver_runtime_config_from_request(request)
 
     assert runtime_config["image_config"]["adapter"] == "qwen-image-3.0-pro"
-    assert runtime_config["image_config"]["vlm_adapter"] == "qwen3-vl-plus"
-    assert runtime_config["qc_config"]["semantic_vlm_adapter"] == "qwen3-vl-plus"
-    assert runtime_config["qc_config"]["state_vlm_adapter"] == "qwen3-vl-plus"
-    assert runtime_config["qc_config"]["video_clip_vlm_adapter"] == "qwen3-vl-plus"
+    assert runtime_config["image_config"]["vlm_adapter"] == "qwen3.8-omni-flash"
+    assert runtime_config["qc_config"]["semantic_vlm_adapter"] == "qwen3.8-omni-flash"
+    assert runtime_config["qc_config"]["state_vlm_adapter"] == "qwen3.8-omni-flash"
+    assert runtime_config["qc_config"]["video_clip_vlm_adapter"] == "qwen3.8-omni-flash"
     assert runtime_config["qc_config"]["enable_vision_review"] is False
     assert runtime_config["qc_config"]["enable_semantic_qc"] is False
     assert runtime_config["qc_config"]["enable_state_qc"] is False
@@ -81,13 +81,13 @@ def test_runtime_config_maps_safety_audit_settings_into_qc_config() -> None:
     request = dreamweaver.RunRequest(
         project_id=1,
         chapter_ids=[1],
-        vision_model="qwen3-vl-plus",
+        vision_model="qwen3.8-omni-flash",
         enable_safety_audit=True,
         safety_fail_policy="block",
     )
     runtime_config = dreamweaver._build_dreamweaver_runtime_config_from_request(request)
 
-    assert runtime_config["image_config"]["vlm_adapter"] == "qwen3-vl-plus"
+    assert runtime_config["image_config"]["vlm_adapter"] == "qwen3.8-omni-flash"
     assert runtime_config["qc_config"]["enable_safety_audit"] is True
     assert runtime_config["qc_config"]["safety_fail_policy"] == "block"
 

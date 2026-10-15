@@ -484,7 +484,7 @@ def chat_messages(
     from adapters.registry import registry
     from core.model_resolution import normalize_model_id
 
-    normalized = normalize_model_id(model_id or "qwen3-vl-plus") or "qwen3-vl-plus"
+    normalized = normalize_model_id(model_id or "qwen3.8-omni-flash") or "qwen3.8-omni-flash"
 
     try:
         adapter = registry.get_adapter(normalized)

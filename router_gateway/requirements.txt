@@ -1,0 +1,9 @@
+# router_gateway 独立运行依赖（与 backend 业务栈版本对齐；网关不依赖 backend 包）
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+# 2.1 起 PostgreSQL 默认 DBAPI 切换为 psycopg3；当前验证线为 2.0.x + psycopg2
+sqlalchemy>=2.0.23,<2.1
+psycopg2-binary==2.9.9
+pydantic>=2.5.0
+PyYAML==6.0.3
+redis==5.0.1
