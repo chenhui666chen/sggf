@@ -592,6 +592,9 @@ export default function UserCenterPage() {
         <Typography color="text.secondary" sx={{ mt: 0.5 }}>
           为自己的平台申请独立 API Key；审核批准后启用。配额按应用隔离，完整 Key 只在创建或轮换后显示一次。
         </Typography>
+        <Button component="a" href="/docs/video-gateway-api.md" target="_blank" rel="noopener noreferrer" sx={{ mt: 1.5 }}>
+          打开视频 API 接入文档
+        </Button>
       </Box>
       <Card variant="outlined">
         <CardContent>
