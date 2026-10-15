@@ -126,6 +126,18 @@ def _as_float(env, key: str, default: float) -> float:
     return float(raw) if raw else default
 
 
+def _as_bool(env, key: str, default: bool) -> bool:
+    raw = env.get(key)
+    if raw is None or str(raw).strip() == "":
+        return default
+    value = str(raw).strip().lower()
+    if value in {"1", "true", "yes", "on"}:
+        return True
+    if value in {"0", "false", "no", "off"}:
+        return False
+    raise RuntimeError(f"{key} must be a boolean")
+
+
 def build_gateway(*, env=None, localappdata: Optional[str] = None,
                   catalog_path: Optional[Path] = None) -> Gateway:
     env = os.environ if env is None else env
@@ -166,7 +178,8 @@ def build_gateway(*, env=None, localappdata: Optional[str] = None,
         intent_confidence_threshold=_as_float(env, "ROUTER_GATEWAY_INTENT_CONFIDENCE", 0.6),
         content_risk_scorer=decision,
         content_risk_threshold=_as_float(env, "ROUTER_GATEWAY_CONTENT_RISK_THRESHOLD", 0.9),
-        content_risk_fail_closed=app_env in {"production", "staging"},
+        content_risk_fail_closed=_as_bool(
+            env, "ROUTER_GATEWAY_CONTENT_RISK_FAIL_CLOSED", app_env in {"production", "staging"}),
         max_attempts=int(env.get("ROUTER_GATEWAY_MAX_ATTEMPTS", "3")),
         asset_registrar=asset_registrar,
         deliverer=deliverer)
