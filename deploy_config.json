@@ -89,6 +89,7 @@
     "shared": {
       "include": [
         "shared/**/*.py",
+        "shared/**/*.json",
         "core/**/*.py",
         "schemas/**/*.py",
         "config/**/*.json",
