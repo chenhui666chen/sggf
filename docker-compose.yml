@@ -199,9 +199,8 @@ services:
           memory: 128M
     restart: unless-stopped
     networks:
-      default: {}
-      gateway_edge:
-        ipv4_address: 172.30.0.10
+      - default
+      - gateway_edge
 
   # 视频网关轮询 worker（同镜像、同库；DB 状态驱动，无端口，可水平扩多实例）
   gateway-worker:
@@ -308,7 +307,4 @@ networks:
     name: novel_network
   gateway_edge:
     name: novel_gateway_edge
-    driver: bridge
-    ipam:
-      config:
-        - subnet: 172.30.0.0/24
+    external: true
