@@ -62,6 +62,12 @@ docker-compose rm -f
 echo [3/5] 构建Docker镜像...
 docker-compose build
 
+:: 清理本次构建产生的悬空镜像与构建缓存，防止历史残留逐次累积占满磁盘
+:: 仅删悬空(dangling)镜像，保留所有已 tag 镜像；构建缓存限额保留 10GB
+echo      清理悬空镜像与构建缓存...
+docker image prune -f
+docker builder prune -f --keep-storage 10GB
+
 :: 启动服务
 echo [4/5] 启动所有服务...
 docker-compose up -d

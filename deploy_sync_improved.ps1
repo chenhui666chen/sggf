@@ -990,6 +990,17 @@ if ($SkipBuild) {
     }
 
     Write-Host "  Services rebuilt and restarted" -ForegroundColor Green
+
+    # Prune dangling images and build cache produced by this --build to stop historical residue from filling the data disk.
+    # Dangling-only: all tagged images are kept for rollback; build cache is capped at 10GB to speed up later builds.
+    # Prune failure is treated as non-fatal and does not abort an already successful deployment.
+    $pruneCommand = "docker image prune -f; docker builder prune -f --keep-storage 10GB"
+    $pruneResult = Invoke-RemoteCommand -HostUser $ServerUser -HostIP $ServerIP -Command $pruneCommand -ConnectTimeout $TimeoutSeconds
+    if ($pruneResult.ExitCode -eq 0) {
+        Write-Host "  Dangling images and build cache pruned" -ForegroundColor Green
+    } else {
+        Write-Host "  Prune skipped (non-fatal): $($pruneResult.Output)" -ForegroundColor Yellow
+    }
 }
 
 Write-Host ""
