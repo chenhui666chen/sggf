@@ -73,11 +73,20 @@ def test_worker租约避免两个实例同时领取同一批任务(repo):
     assert second == []
 
 
-def test_worker释放租约后其他实例可以领取(repo):
+def test_worker常规释放保留退避_其他实例本tick不重复领取(repo):
     job = repo.create_job("k1", None, _spec())
 
     assert repo.claim_active_job_ids(worker_id="worker-a", lease_seconds=60) == [job.id]
     repo.release_job_claim(job.id, worker_id="worker-a")
+    # 常规 tick 释放：next_poll_at 退避保留，防止轮询风暴
+    assert repo.claim_active_job_ids(worker_id="worker-b", lease_seconds=60) == []
+
+
+def test_worker让位handover后其他实例可以立即领取(repo):
+    job = repo.create_job("k1", None, _spec())
+
+    assert repo.claim_active_job_ids(worker_id="worker-a", lease_seconds=60) == [job.id]
+    repo.handover_job_claim(job.id, worker_id="worker-a")
     assert repo.claim_active_job_ids(worker_id="worker-b", lease_seconds=60) == [job.id]
 
 

@@ -24,8 +24,10 @@ from typing import Optional
 from .adapters.autodl import AutoDLAdapter
 from .adapters.erchun import ErchunAdapter
 from .adapters.grsai import GrsaiAdapter
+from .adapters.lingke import LingkeAnmiaoAdapter, LingkeMediaAdapter
 from .adapters.sanbao import SanbaoAdapter
 from .adapters.suanliai import SuanliaiAdapter
+from .adapters.zhiqi import ZhiqiAdapter
 from .assets import (
     ProviderAssetRegistrar,
     ProviderEndpoint,
@@ -46,6 +48,12 @@ PROVIDERS = {
     "suanliai": (SuanliaiAdapter, "https://suanliai.top"),
     "grsai": (GrsaiAdapter, "https://grsaiapi.com"),
     "sanbao": (SanbaoAdapter, "https://sanbaobeauty.com"),
+    # 灵客（聚合引擎AIGC）：线路由密钥决定，DMC/MT 走 media 协议、
+    # SD2.5 按秒 MC-S 走火山 anmiao 协议；凭证 lingke_{dmc,mt,sd}_token.txt
+    "lingke_dmc": (LingkeMediaAdapter, "https://api.lk888.ai"),
+    "lingke_mt": (LingkeMediaAdapter, "https://api.lk888.ai"),
+    "lingke_sd": (LingkeAnmiaoAdapter, "https://api.lk888.ai"),
+    "zhiqi": (ZhiqiAdapter, "https://zhiqiapi.com"),
 }
 
 # 需要供应商侧素材登记的供应商（public_url 直传的 autodl/grsai 不在此列）

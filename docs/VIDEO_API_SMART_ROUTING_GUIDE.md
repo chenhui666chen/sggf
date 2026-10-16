@@ -12,7 +12,7 @@
 
 已定边界：
 
-- **成功成片转存自有 OSS 后交付**（W4 已落地）：成片先转存 `sggf-router-video` 桶（华东2上海/标准存储/同城冗余/公共读），经 `https://video.sggf.net/...` 返回永久公共读直链；网关不代理视频字节，也不把上游临时签名地址暴露给下游。
+- **成功成片转存自有 OSS 后交付**（W4 已落地）：成片先转存 `sggf-router-video` 桶（华东2上海/标准存储/同城冗余/公共读），经 `https://video.sggf.net/...` 返回公共读直链（**2026-10-16 起桶生命周期保留 2 天、到期自动删除**，对外口径见接入文档 FAQ）；网关不代理视频字节，也不把上游临时签名地址暴露给下游。
 - 不是聊天透传；视频是异步任务模型（提交 202 → 轮询 → 成片 URL）。
 - 绝不为提高成功率而丢弃/降级用户素材、缩短时长、降低分辨率（硬条件 AND 语义）。
 - 二次封装转售授权需在商业试运行前逐家取得书面依据。
@@ -115,9 +115,9 @@
 - 成功状态但无成片链接 → 按失败处理（驱动切换链）。
 - 不支持的分辨率/比例组合在**发请求前**本地拦截（不花钱）。
 
-## 6. 能力目录现状（routes.yaml，36 条，2026-10-14）
+## 6. 能力目录现状（routes.yaml，44 条，2026-10-16）
 
-4 个对外模型组：`seedance-2.5`（10 条：贰春 3 + 算力AI 6 + 三宝 1）、`minimax-h3`（12 条：AutoDL 5 + 算力AI 4 + Grsai 2 + 三宝 1）、`minimax-h3-light`（3 条：均为 AutoDL，无跨源备份）、`wan3.0`（11 条：贰春 1 + 算力AI 9 + 三宝 1，2026-10-13 第 4 批起登记）。
+4 个对外模型组：`seedance-2.5`（12 条：贰春 3 + 算力AI 6 + 三宝 1 + 灵客 1 + 志奇 1）、`minimax-h3`（16 条：AutoDL 5 + 算力AI 4 + Grsai 2 + 三宝 1 + 灵客 3 + 志奇 1）、`minimax-h3-light`（3 条：均为 AutoDL，无跨源备份）、`wan3.0`（13 条：贰春 1 + 算力AI 9 + 三宝 2 + 志奇 1）。快乐马 1.1（happyhorse-1.1）已于 2026-10-16 按用户决策整体下线，不再对外提供接口，也不再寻找该货源。
 
 每条路线字段：`route_id / provider / upstream_model / quality_group / billing(per_second|per_use) / duration{min_seconds,max_seconds} / resolutions[] / aspect_ratios[] / input_modes[] / max_images / max_videos / max_audios / pricing / enabled / note`。
 
@@ -165,7 +165,7 @@
 
 **对外 API 只收公网 HTTP(S) URL，网关不经手调用方素材的文件字节**（见接入文档 §6.3）。需要供应商侧素材凭证的路线（贰春/算力/三宝）在提交前由 `assets/provider_assets.py` 的统一 `RegisteredAsset` 登记层把公网 URL 换成供应商句柄：贰春 `POST /v2/media/uploads` multipart 换 `med_xxx`（24h 有效）、三宝裸二进制上传换 `host_url`、算力批量 review 后换引用；autodl/grsai 直接吃公网 URL。
 
-**成片转存（W4）**：成功成片由 `assets/delivery.py` 下载转存到独立桶 `sggf-router-video`（env `ROUTER_GATEWAY_OSS_BUCKET` + `ROUTER_GATEWAY_OSS_PUBLIC_HOST=https://video.sggf.net`），转存期间任务保持 running、失败由后续轮询补偿；video.sggf.net 返回永久公共读直链，上游临时地址不对外暴露；已是自有域名（桶默认域/video.sggf.net）的地址不重复转存。
+**成片转存（W4）**：成功成片由 `assets/delivery.py` 下载转存到独立桶 `sggf-router-video`（env `ROUTER_GATEWAY_OSS_BUCKET` + `ROUTER_GATEWAY_OSS_PUBLIC_HOST=https://video.sggf.net`），转存期间任务保持 running、失败由后续轮询补偿；video.sggf.net 返回公共读直链（2026-10-16 起桶生命周期规则 `expire-api-data-2d`：对象创建后保留 2 天自动删除），上游临时地址不对外暴露；已是自有域名（桶默认域/video.sggf.net）的地址不重复转存。
 
 以下为 g-asset 本地素材换链组件（`AssetStore`）的历史探针事实，组件仍保留、当前 API 主链路不走字节上传：
 
@@ -320,13 +320,13 @@ H3 聚合常态 1-3 折，比 sd2.5（2-5 折）更极端；AutoDL 闲时（00:0
 已测：五家文生 44 条早期真实任务 + 3 条端到端云验收（2026-10-12）；图生/多模态第 1–6 批付费实证（D1–D4、J3–J14、S1/S3、T1–T7、V1–V6、Z1–Z3 等，见 routes.yaml 各 note 与 I2V 横评交接文档）；W5 本机真实 E2E（含 worker 重启零重复派发）、W6 容器化公网验收（有效 key 真实付费全链路 job 149195bf，成片转存 OSS 永久地址）；本地模拟容量测试 4372 请求（2026-10-14，报告 `VIDEO_GATEWAY_LOADTEST_20261014.md`，非生产容量验收）；适配器契约单测全部用录制真实响应驱动；编排器（内存假仓储 + 纯策略 + 真实 PG）；素材 OSS 签名固化向量与真实云 2 例。
 
 **未测（不得声称支持）**：
-1. ~~全部图生/首尾帧/多图~~（已有充分付费实证）；~~纯 video_reference 组合~~（**W7 已补：贰春 wan3 纯视频 task 81578 + 图+视频 task 81610；算力 7 条 wan3 路线纯视频 7/7 付费 completed 轨迹复现，2026-10-14**）；~~贰春快乐马付费实证~~（**W8 已补：快乐马 1.1 单图 i2v task 82115，480P/5s settled/47s，紫牌强采纳，实扣 ¥1.45，2026-10-14**）；**仍未测：image_audio_lipsync（台账零路线）；Grsai 图生（W8 单图付费单卡 running/15% 53 分钟挂起判失败，grsai-h3 维持 text-only，无成功实证，适配器透传已就绪待复探）**；
+1. ~~全部图生/首尾帧/多图~~（已有充分付费实证）；~~纯 video_reference 组合~~（**W7 已补：贰春 wan3 纯视频 task 81578 + 图+视频 task 81610；算力 7 条 wan3 路线纯视频 7/7 付费 completed 轨迹复现，2026-10-14**）；~~贰春快乐马付费实证~~（**W8 已补：快乐马 1.1 单图 i2v task 82115，480P/5s settled/47s，紫牌强采纳，实扣 ¥1.45，2026-10-14；该路线 2026-10-16 按用户决策整条移除，质量组不再对外提供接口，不列为未测项**）；**仍未测：image_audio_lipsync（台账零路线）；Grsai 图生（W8 单图付费单卡 running/15% 53 分钟挂起判失败，grsai-h3 维持 text-only，无成功实证，适配器透传已就绪待复探）**；
 2. 竖屏与 1:1、4:3、3:4、21:9 真实出片（枚举来自工作流详情 API，绝大多数成片为 16:9）；
 3. 时长边界（多数档位仅 5s；30s 仅有 wan3 按次档与 sd25 按条档实证；z 系 1s、AutoDL 15s 上界等例外）；
 4. 429/5xx 真实限流、violation、取消（仅 HTTP 契约固化与本地模拟压测）；
 5. 真实跨平台故障切换/对冲演练（目前只在假适配器+真实 PG 上验证）；
 6. AutoDL 闲时价（需 00:00-08:00）；
-7. ~~贰春图生~~（v2 素材上传与 wan3/移动 sd25 多路线已实证）；~~贰春快乐马 1.1 付费实证~~（W8 已闭环并登记 erchun-happyhorse-1-1：v2 上传换 media_id → v1 提交，480P/5s/¥1.45 按条，单图强采纳；720/1080p 与其余 8 种比例未实测不开放）；
+7. ~~贰春图生~~（v2 素材上传与 wan3/移动 sd25 多路线已实证）；~~贰春快乐马 1.1 付费实证~~（W8 曾闭环登记 erchun-happyhorse-1-1：v2 上传换 media_id → v1 提交，480P/5s/¥1.45 按条，单图强采纳；**2026-10-16 按用户决策整条移除，快乐马不再寻找也不再对外提供接口**）；
 8. ~~decision-model-preview 真云回放/接入~~（2026-10-13 已接入生产，2 图歧义分类准确率 100% 达标；风险评分 fail-open）；
 9. ~~HTTP API/worker 真实起服联调~~（W5/W6 已做真实 uvicorn + worker E2E 与公网验收；多实例 worker 生产并发演练、staging 同版本容量验证仍未做）。
 

@@ -113,13 +113,39 @@ def test_H3外链图拒绝必须原生上传():
     assert t.calls == []
 
 
-def test_任何模型参考视频直接拒绝():
+def test_非wan3按秒档参考视频仍然拒绝():
+    # 旧实证：sd/h3 系列路线参考视频被安全拦截/测量失败，护栏收窄后这些档仍拒绝；
+    # 仅 wan_3_0 按秒档经 B1 付费实证（2026-10-15 task_mv9gvhkj）开放视频槽。
     a, t = _adapter(responses=[])
     with pytest.raises(SanbaoError):
         a.submit(_req(model="sd2_9img_seconds_720p_real",
                       assets=[_img("https://b/1.jpg"),
                               AssetRef("video", "https://b/v.mp4",
                                        "host_url")],
+                      resolution="720p"))
+    assert t.calls == []
+
+
+def test_wan3按秒接受参考视频_videos对象数组带tag():
+    # B1 付费实证 task_mv9gvhkj_36a67a：720p/5s/1图1视(3s) succeeded，
+    # 红块横移+蓝块位移轨迹目鉴复现，1280x720/30fps，输入视频不另收费，
+    # 但渲染约 1273s（慢档，routes.yaml 标 standby）。
+    a, t = _adapter()
+    assets = (AssetRef("image", "https://video.sggf.net/card01.jpg", "public_url"),
+              AssetRef("video", "https://video.sggf.net/short1.mp4", "public_url"))
+    a.submit(_req(model="wan_3_0", assets=assets, resolution="720p"))
+    body = t.calls[0]["body"]
+    assert body["images"] == ["https://video.sggf.net/card01.jpg"]
+    assert body["videos"] == [
+        {"tag": "视频1", "url": "https://video.sggf.net/short1.mp4"}]
+    assert "reference" not in body
+
+
+def test_wan3按秒视频素材必须公网URL():
+    a, t = _adapter(responses=[])
+    with pytest.raises(SanbaoError):
+        a.submit(_req(model="wan_3_0",
+                      assets=[AssetRef("video", "https://b/v.mp4", "host_url")],
                       resolution="720p"))
     assert t.calls == []
 

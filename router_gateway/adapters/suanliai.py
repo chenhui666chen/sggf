@@ -62,6 +62,7 @@ class SuanliaiAdapter:
             for field, refs in grouped.items():
                 if refs:
                     body[field] = refs
+        if req.reference_assets or "wan3" in req.model.lower():
             body["resolution"] = req.resolution.lower()
         return body
 

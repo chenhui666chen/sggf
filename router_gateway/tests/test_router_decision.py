@@ -183,14 +183,15 @@ def test_无候选返回None并可区分失败语义():
     assert decide([_route()], _req(duration_seconds=60), {}) is None
 
 
-def test_台账37条全部可解析且既有文生路线保留文生模式():
+def test_台账44条全部可解析且既有文生路线保留文生模式():
     routes = load_catalog()
-    assert len(routes) == 37
+    assert len(routes) == 44
     # 第4批新增的 i2v 路线可不含 text；既有 16 条文生路线必须全部保留 text 模式
     # 2026-10-13：erchun-xuan-sd25-720 随 model id 下架整条删除；erchun-mobile-sd25 解除禁用
     # 2026-10-14：第6批新增 autodl-zm-u24-h3-i2v（multi_image 图生）；
     #   Z2/Z3 音频槽付费实证（880Hz采纳/220Hz丢弃=选择性融合）后开放 mixed_multimodal
-    # 2026-10-14 W8：新增 erchun-happyhorse-1-1（快乐马1.1 单图 i2v，仅 multi_image）
+    # 2026-10-16：erchun-happyhorse-1-1 按用户决策整条移除（快乐马不再对外提供接口，台账45→44）
+    # 2026-10-15 B1：新增 sanbao-wan3-ps（wan_3_0 按秒，文生/多图/图+视频实证，standby）
     legacy_t2v = {
         "erchun-mobile-sd25",
         "erchun-carrier-sd25-480", "erchun-carrier-sd25-720",

@@ -106,6 +106,16 @@ def _i2v_req(model=WAN3, assets=(), resolution="480p", duration_field=None):
                          duration_field=duration_field)
 
 
+def test_wan3纯文生720p显式传分辨率():
+    model = "007系列/wan3-video(文生图生视频/10-5-5/2-30秒)"
+    t = FakeTransport([(200, {"id": "t_w3_text", "status": "queued"})])
+    a = SuanliaiAdapter("https://x", "tok", transport=t)
+    a.submit(_req(model, resolution="720p"))
+    assert t.calls[0]["body"] == {
+        "model": model, "prompt": "航拍雪山", "duration": 5,
+        "aspect_ratio": "16:9", "resolution": "720p"}
+
+
 def test_wan3图生提交用duration且素材为字符串数组与小写分辨率():
     t = FakeTransport([(200, {"id": "t_w3", "status": "queued"})])
     a = SuanliaiAdapter("https://x", "tok", transport=t)

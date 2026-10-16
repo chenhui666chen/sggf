@@ -30,6 +30,8 @@ from .base import (AdapterError, NormalizedResult, RETRIABLE_HTTP_STATUS,
 _BROWSER_UA = "Mozilla/5.0 Chrome/139.0.0.0"
 
 _H3_PREFIX = "hailuo_h3"
+# wan_3_0 按秒档：B1 付费实证（2026-10-15）是三宝唯一接受参考视频的路线
+_WAN3_PER_SECOND = "wan_3_0"
 # 已实证不可接线的模型：僵尸档 / 满血不稳定档（见交接文档 §8）
 _BLACKLISTED_MODELS = frozenset({"sd2_0_mini_933", "sd2_5_once_720p_2"})
 # 注：素材总数上限（如 sd2 档 12、wan3 按次档实证 15）按模型而异，
@@ -112,10 +114,19 @@ class SanbaoAdapter:
                 f"三宝模型 {req.model} 在黑名单（僵尸档/不稳定档），禁止提交",
                 retriable=False)
         assets = req.reference_assets
-        if any(a.kind == "video" for a in assets):
-            # 实证：参考视频链路全平台不可用（安全拦截 / could not be measured）
+        videos = [a for a in assets if a.kind == "video"]
+        if videos and req.model != _WAN3_PER_SECOND:
+            # 实证：sd/h3 系列路线参考视频被安全拦截 / could not be measured
             raise SanbaoError(
-                "三宝任何路线均不接受参考视频输入", retriable=False)
+                f"三宝该路线（{req.model}）不接受参考视频输入；"
+                "当前仅 wan_3_0 按秒档支持", retriable=False)
+        if videos and req.model == _WAN3_PER_SECOND:
+            # B1 付费实证 task_mv9gvhkj（2026-10-15）：wan_3_0 按秒吃 https
+            # 外链直传；host_url 上传端点仅服务 image/audio，视频必须公网 URL
+            if any(a.ref_type != "public_url" for a in videos):
+                raise SanbaoError(
+                    "三宝 wan_3_0 参考视频仅接受公网 https URL",
+                    retriable=False)
         if req.model.startswith(_H3_PREFIX):
             images = [a for a in assets if a.kind == "image"]
             if not 1 <= len(images) <= 2:
@@ -139,12 +150,19 @@ class SanbaoAdapter:
         }
         images = [a.ref for a in req.reference_assets if a.kind == "image"]
         audios = [a for a in req.reference_assets if a.kind == "audio"]
+        videos = [a for a in req.reference_assets if a.kind == "video"]
         if images:
             body["images"] = images
         if audios:
             body["audios"] = [
                 {"tag": f"音频{i + 1}", "url": a.ref}
                 for i, a in enumerate(audios)]
+        if videos:
+            # 文档：素材数组支持字符串或 {tag,url} 对象；带 tag 便于
+            # prompt 中用 @视频N 引用（B1 实证即对象写法成功）
+            body["videos"] = [
+                {"tag": f"视频{i + 1}", "url": a.ref}
+                for i, a in enumerate(videos)]
         if req.model.startswith(_H3_PREFIX):
             # 实证：H3 必须显式 reference=all 才会融合原生上传图
             body["reference"] = "all"

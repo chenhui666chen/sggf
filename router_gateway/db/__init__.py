@@ -453,10 +453,24 @@ class JobRepository:
             return affected == 1
 
     def release_job_claim(self, job_id: str, *, worker_id: str) -> None:
-        """仅允许租约持有者释放自己的任务。"""
+        """轮询tick结束时释放租约，但保留 next_poll_at 退避。
+
+        claim 时把 next_poll_at 推到 now+poll_interval；常规轮询释放必须保留
+        它，否则下一tick立刻重领同一批任务造成轮询风暴（见
+        test_polling_due_time_prevents_oldest_jobs_starving_new_jobs）。
+        """
         with self._sf() as s:
             (s.query(Job).filter_by(id=job_id, claimed_by=worker_id)
-             .update({Job.claimed_by: None, Job.claim_until: None}, synchronize_session=False))
+             .update({Job.claimed_by: None, Job.claim_until: None},
+                     synchronize_session=False))
+            s.commit()
+
+    def handover_job_claim(self, job_id: str, *, worker_id: str) -> None:
+        """实例让位/停机时移交：释放租约并清空轮询退避，让其他实例立即接管。"""
+        with self._sf() as s:
+            (s.query(Job).filter_by(id=job_id, claimed_by=worker_id)
+             .update({Job.claimed_by: None, Job.claim_until: None,
+                      Job.next_poll_at: None}, synchronize_session=False))
             s.commit()
 
     def renew_job_claim(self, job_id: str, *, worker_id: str,
