@@ -497,14 +497,51 @@ class EvolutionStorage:
         return self._approved_prompts_store.read()
 
     def _history_to_dict(self, history: EvolutionHistory) -> Dict:
-        """将历史对象转换为字典"""
+        """将历史对象转换为字典
+
+        🔧 2026-10-17(P33) `best_versions` 去重：改为存引用而非完整副本。
+
+        取证（13 轮真实存档 15.98 MB）：
+            all_versions  8.17 MB (51%)
+            best_versions 5.24 MB (33%)  ← 与 all_versions 完全重复
+            其他2.58 MB (16%)
+            best ⊆ all 的轮次：**13/13**
+
+        写入 `best_version_ids` 作为引用；`best_versions` 只保留**摘要**
+        （id / 迭代 / 关键指标 / 提示词），不重复 `evaluation_results`
+        里的改写全文与段落标注。
+
+        读时按 id 从 `all_versions` 还原（见 `_dict_to_history`），
+        存量存档（完整副本形态）继续可读 —— **无需数据迁移**。
+        """
+        all_by_id = {v.version_id: v for v in (history.all_versions or [])}
+        best_ids: List[str] = []
+        best_summaries: List[Dict] = []
+        for v in history.best_versions or []:
+            best_ids.append(v.version_id)
+            #🔧 只有当 all_versions 里有同一对象时才敢去重；
+            # 否则保留完整副本，避免「引用指向不存在的版本」导致数据丢失。
+            if v.version_id in all_by_id:
+                best_summaries.append({
+                    "version_id": v.version_id,
+                    "iteration": v.iteration,
+                    "avg_ai_ratio": v.avg_ai_ratio,
+                    "avg_composite_score": v.avg_composite_score,
+                    "prompt_text": v.prompt_text,
+                })
+            else:
+                best_summaries.append(v.to_dict())
         return {
             "evolution_id": history.evolution_id,
             "target_score": history.target_score,
             "max_iterations": history.max_iterations,
             "current_iteration": history.current_iteration,
             "status": history.status,
-            "best_versions": [v.to_dict() for v in history.best_versions],
+            # 🔧 P33：引用列表（读时据此从 all_versions 还原完整对象）
+            "best_version_ids": best_ids,
+            # 🔧 P33：摘要列表（保持 dict 里有此键 —— storage.py 的历史过滤
+            #     依赖 `h.get("best_versions")`，若整个键消失会导致列表凭空少轮次）
+            "best_versions": best_summaries,
             "all_versions": [v.to_dict() for v in history.all_versions],
             "approval_status": history.approval_status.value,
             "approved_version_id": history.approved_version_id,
@@ -512,24 +549,89 @@ class EvolutionStorage:
             "completed_at": history.completed_at,
             "error_message": history.error_message,
             "genre": history.genre,
+            # 🔧 2026-10-17(P31) 停止原因落盘
+            "stop_reason": history.stop_reason,
+            "stop_type": history.stop_type,
+            "score_history": list(history.score_history or []),
         }
 
     def _dict_to_history(self, data: Dict) -> EvolutionHistory:
-        """从字典创建历史对象"""
+        """从字典创建历史对象
+
+        🔧 2026-10-17(P33) `best_versions` 去重的读取端：
+        1. 优先按 `best_version_ids` 从 `all_versions` 取**完整对象**
+           （共享同一实例 ⇒ 读出来的best 版本与 all 版本内容天然一致）
+        2. 引用指向缺失（P33 之前的存档没有该键，或悬空）时，
+           回落到 `best_versions` 里的完整副本 —— 存量 13 轮靠这条继续可读
+        """
+        all_versions = [
+            PromptVersion.from_dict(v) for v in data.get("all_versions", [])
+        ]
+        all_by_id = {v.version_id: v for v in all_versions}
+
+        ids = data.get("best_version_ids")
+        if isinstance(ids, list):
+            # 🔧 引用形态：按 id 还原，悬空引用跳过（不静默造出空版本）
+            best_versions = [
+                all_by_id[vid] for vid in ids if vid in all_by_id
+            ]
+            # 引用的部分悬空 ⇒ 用摘要兜底补齐尾部，保证不丢已选中的版本
+            if len(best_versions) < len(ids):
+                got = {v.version_id for v in best_versions}
+                for item in (data.get("best_versions") or []):
+                    vid = item.get("version_id") if isinstance(item, dict) else None
+                    if vid and vid not in got and vid not in all_by_id:
+                        best_versions.append(PromptVersion.from_dict(item))
+            return EvolutionHistory(
+                evolution_id=data["evolution_id"],
+                target_score=data.get("target_score", 30),
+                max_iterations=data.get("max_iterations", 10),
+                current_iteration=data.get("current_iteration", 0),
+                status=data.get("status", "running"),
+                best_versions=best_versions,
+                all_versions=all_versions,
+                approval_status=ApprovalStatus(
+                    data.get("approval_status", "pending")),
+                approved_version_id=data.get("approved_version_id"),
+                started_at=data.get("started_at", ""),
+                completed_at=data.get("completed_at"),
+                error_message=data.get("error_message"),
+                genre=data.get("genre"),
+                stop_reason=data.get("stop_reason"),
+                stop_type=data.get("stop_type"),
+                score_history=(
+                    list(data.get("score_history") or [])
+                    if isinstance(data.get("score_history") or [], list)
+                    else []
+                ),
+            )
+
+        # 🔧 存量形态：完整副本，原样解析
         return EvolutionHistory(
             evolution_id=data["evolution_id"],
             target_score=data.get("target_score", 30),
             max_iterations=data.get("max_iterations", 10),
             current_iteration=data.get("current_iteration", 0),
             status=data.get("status", "running"),
-            best_versions=[PromptVersion.from_dict(v) for v in data.get("best_versions", [])],
-            all_versions=[PromptVersion.from_dict(v) for v in data.get("all_versions", [])],
+            best_versions=[
+                PromptVersion.from_dict(v)
+                for v in data.get("best_versions", [])
+            ],
+            all_versions=all_versions,
             approval_status=ApprovalStatus(data.get("approval_status", "pending")),
             approved_version_id=data.get("approved_version_id"),
             started_at=data.get("started_at", ""),
             completed_at=data.get("completed_at"),
             error_message=data.get("error_message"),
             genre=data.get("genre"),
+            # 🔧 2026-10-17(P31)：用 .get + 默认值，真实旧存档（13 轮）缺这些键
+            stop_reason=data.get("stop_reason"),
+            stop_type=data.get("stop_type"),
+            score_history=(
+                list(data.get("score_history") or [])
+                if isinstance(data.get("score_history") or [], list)
+                else []
+            ),
         )
 
     def mark_stale_running_as_interrupted(self, stale_minutes: int = 30) -> int:

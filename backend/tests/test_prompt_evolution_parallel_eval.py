@@ -29,7 +29,17 @@ def _build_evaluator(rewrite_side_effect):
     evaluator.ai_detector.detect_ai_content = AsyncMock(side_effect=detect_by_content)
     evaluator.semantic_judge = AsyncMock()
     evaluator.semantic_judge.evaluate = AsyncMock(return_value={
-        "available": False, "hard_fail": False, "hard_fail_reasons": [], "error": "mock",
+        # 🔧 2026-10-16：评审不可用的样本不再算成功（未测量≠合格），
+        # 故这些聚焦长度/并发的用例改用一份**有效且通过**的评审，
+        # 避免把评审失效混进被测逻辑里。
+        "available": True, "hard_fail": False, "hard_fail_reasons": [],
+        "semantic_fidelity": {"score": 90},
+        "fact_consistency": {"score": 95},
+        "information_completeness": {"score": 85},
+        "readability": {"score": 90},
+        "writing_naturalness": {"score": 85},
+        "genre_consistency": {"score": 88},
+        "over_rewrite_risk": "low", "over_rewrite_reason": "", "confidence": 0.9,
     })
     return evaluator
 

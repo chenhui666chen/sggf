@@ -33,6 +33,31 @@ from .novel_rules import (
 logger = logging.getLogger(__name__)
 
 
+def _segments_to_problematic(segment_labels) -> List[Dict[str, Any]]:
+    """朱雀段落标注 → AITraceDetail.problematic_segments。
+
+    只保留被判「确定AI」（label=1）的段落。label=2（疑似）是改写的真实进步
+    （AI→疑似），把它算作「问题片段」会把优化器引向继续猛攻已经改善的段落。
+
+    保留段原文作为 context：优化器要看到检测器判定的具体形态，
+    只给位置区间无法归纳句式模式。
+    """
+    out: List[Dict[str, Any]] = []
+    for seg in segment_labels or []:
+        if seg.get("label") != 1:
+            continue
+        out.append({
+            "keyword": "确定AI段落",
+            "context": seg.get("text", ""),
+            "position": {
+                "start": seg.get("start", 0),
+                "end": seg.get("end", 0),
+            },
+            "conf": seg.get("conf"),
+        })
+    return out
+
+
 class _CachedDetectorProxy:
     """代理检测器：detect_ai_content 走评估器的样本级缓存
 
@@ -70,14 +95,17 @@ class PromptEvaluator:
     # 🔧 改写空响应重试上限：改写模型偶发返回空串（历史题材实测 3/4 样本），
     # 不重试会导致样本硬失败、变体/基线被批量取消资格
     REWRITE_MAX_ATTEMPTS = 3
-    # 🔧 高方差模型高分重试：step 系历史 0 分率 22-43%（赌徒分布，单次抽样
-    # 期望分 ~54-70；0 分记录 30/32 保真合格，是真实大幅重写非崩坏）。
-    # 检测分仍高时再改写一次取低分，使命中概率接近翻倍（40%→64%）。
-    # mimo 系存在 64/98 波动（无 step 的稳定 0 分能力），重试可将 98 拉低，
-    # 收益虽低于 step 但成本可控，一并纳入（2026-08-23 实测扩展）
-    HIGH_SCORE_RETRY_THRESHOLD = 70
-    HIGH_SCORE_RETRY_MAX = 0  # TMS 移除后停用（详见 _eval_one_sample 注释）
-    HIGH_SCORE_RETRY_MODEL_PREFIXES = ("step", "mimo")
+    # 🔧 2026-10-17(P26)：删除「高方差模型高分重试」的三个常量与配套重试循环
+    # （原 TMS 时代遗留，约 20 行）。原注释说「保留代码结构备后续接入朱雀等
+    # 正向检测器时重新启用」—— 该前提**早已成立**（朱雀即当前检测器），
+    # 但当时未验证判据是否可用就留下了结构：
+    #   重试循环的择优判据是 `alt_score < rewritten_score`，用的是 ai_score。
+    #   P20 实测（75 次真实检测）证明 ai_score 把确定AI(1) 与疑似AI(2) 合并
+    #   计数，对 LLM 改写最典型的「AI→疑似」进步**毫无分辨力**
+    #   （ratio_confidence >= 0.999 为 0/75）。
+    # 启用它会选出错误的「更优版本」，故删除而非启用。
+    # 若将来确需多版本择优，判据必须换成 ai_ratio（确定AI占比）。
+    #
     # 🔧 StepFun 阶梯限速：API 并发上限 5（429 实测），评估并发 8 全为
     # step 时（如武侠题材进化）会触发限流；模型级信号量压到 4 留 buffer
     MODEL_MAX_CONCURRENCY = {"step": 4}
@@ -142,6 +170,21 @@ class PromptEvaluator:
         cached = self._original_detect_cache.get(cache_key)
         if cached is not None:
             return cached.get("ai_score")
+        return None
+
+    def get_cached_original_ai_ratio(self, text: str) -> Optional[float]:
+        """🔧 2026-10-17：查询样本原文的缓存「确定AI段落占比」（0-1）。
+
+        与 `get_cached_original_score` 同源（同一份 `_original_detect_cache` 条目），
+        单独开接口是因为两者量纲不同、消费者也不同：
+        score 是 0-100 的历史口径且在改写区间恒为 100（无分辨力），
+        ratio 才是多模型竞争准入守门（`MIN_REQUIRED_AI_RATIO_REDUCTION`）的唯一依据。
+        """
+        prepared_text = zhuque_ai_detect_service.prepare_text(text)
+        cache_key = hashlib.md5(prepared_text.encode("utf-8")).hexdigest()
+        cached = self._original_detect_cache.get(cache_key)
+        if cached is not None:
+            return cached.get("ai_ratio")
         return None
     
     async def evaluate_prompt(
@@ -264,7 +307,9 @@ class PromptEvaluator:
                     rewritten_ai_score=None,
                     score_reduction=0,
                     success=False,
-                    error="原始样本AI率为0，已排除"
+                    error="原始样本AI率为0，已排除",
+                    # 🔧 2026-10-16 失败语义：样本自身不适用，未进入改写与检测
+                    failure_kind="sample_excluded",
                 )
 
             # 🔧 统计预检：深区（基线≥阈值）先定位高风险结构句式再定点改写，
@@ -289,11 +334,29 @@ class PromptEvaluator:
                 targeted_hint = build_targeted_rewrite_hint(original_findings)
                 if targeted_hint:
                     hint_source = "正则预检"
-            # 🔧 兜底：两类定点指令都未命中时下发常驻事实底线。
-            # 定点指令自身已含事实条款，故不叠加，避免指令过长。
-            if not targeted_hint and self.FACT_HINT_ENABLED:
-                targeted_hint = FACT_BOTTOM_LINE_HINT
-                hint_source = "常驻事实底线"
+            # 🔧 2026-10-16 事实底线改为**恒定叠加**，不再受定点指令影响。
+            #
+            # 原写法 `if not targeted_hint and FACT_HINT_ENABLED` 的前提是
+            # 「定点指令自身已含事实条款」。该前提已证伪：
+            # - build_detector_segment_hint 收尾只有一句笼统的
+            #   「不得为了改动而改动，更不得改动其中涉及的事实、数字与专有名词」
+            # - FACT_BOTTOM_LINE_HINT 是 5 条逐项可执行核对（数字原样/专名原样/
+            #   对白不改不增删/因果不改变/禁止新增原文没有的动作物件心理设定）
+            # 两者不是等价替代：前者是提醒，后者是核对清单。
+            #
+            # 代价是每条指令多约 120 字。实测85337c99 的 8/8 样本全部走段落
+            # 标注路径 → 全部未收到事实底线 → 事实一致 <90 失格 5 次，
+            # 为该轮首要失格原因。这 120 字换回主因维度，代价可接受。
+            #
+            # 顺序刻意保持「先定位、后约束」：先告诉模型改哪里，再约束怎么改，
+            # 注意力分配上更自然（实验13 教训：两条指令同时无差别下发会互相挤占）。
+            if self.FACT_HINT_ENABLED:
+                targeted_hint = (targeted_hint + FACT_BOTTOM_LINE_HINT
+                                 if targeted_hint else FACT_BOTTOM_LINE_HINT)
+                hint_source = (
+                    f"{hint_source}+常驻事实底线" if hint_source != "无"
+                    else "常驻事实底线"
+                )
             if targeted_hint:
                 logger.info(f"   🎯 定点指令来源: {hint_source}")
 
@@ -314,7 +377,9 @@ class PromptEvaluator:
                     rewritten_ai_score=None,
                     score_reduction=0,
                     success=False,
-                    error="改写结果过短或为空"
+                    error="改写结果过短或为空",
+                    # 🔧 2026-10-16 失败语义：无改写文本，未进入检测
+                    failure_kind="rewrite_empty",
                 )
 
             # 🔧 篇幅守门：改写不得低于原文 MIN_REWRITE_RATIO；长样本另设绝对下限，
@@ -346,17 +411,21 @@ class PromptEvaluator:
                 )
 
             original_trace_detail = None
+            # 🔧 2026-10-16 检测失败标记（初始化在此，后续 else 分支置True）
+            detect_failed = False
             if original_result.get("success"):
                 original_score = original_result.get("ai_score", 100)
-                # 提取AI痕迹详情
-                trace_data = original_result.get("ai_trace_details", {})
-                if trace_data:
+                # 🔧 2026-10-16 修正字段名：朱雀返回的是 segment_labels，
+                # 原先读 ai_trace_details（朱雀从无此键）→ 恒为空，
+                # 段落级真值从未进入评估结果，定点改写与进化归因都退化为正则盲猜。
+                original_problematic = _segments_to_problematic(
+                    original_result.get("segment_labels")
+                )
+                if original_problematic:
                     original_trace_detail = AITraceDetail(
-                        hit_keywords=trace_data.get("hit_keywords", []),
-                        hit_positions=trace_data.get("hit_positions", []),
-                        detection_method=trace_data.get("detection_method", ""),
-                        label_scores=trace_data.get("label_scores", {}),
-                        problematic_segments=trace_data.get("problematic_segments", [])
+                        detection_method="朱雀段落标注",
+                        label_scores=original_result.get("labels_ratio", {}) or {},
+                        problematic_segments=original_problematic
                     )
             else:
                 original_score = 100
@@ -365,71 +434,48 @@ class PromptEvaluator:
 
             # 3. 检测改写后文本的AI率
             logger.debug(f"   ⏳ 检测改写后文本AI率...")
-            rewritten_result = await self.ai_detector.detect_ai_content(rewritten)
+            rewritten_result = await self.ai_detector.detect_ai_content(
+                zhuque_ai_detect_service.prepare_text(rewritten)
+            )
             rewritten_trace_detail = None
             # 🔧 记录段落三分类占比：ai_score 在 LLM 改写区间恒为 100、无分辨力，
             # 真实进步体现在「确定AI」占比下降、「疑似AI」占比上升
             rewritten_ai_ratio = rewritten_result.get("ai_ratio")
             rewritten_suspect_ratio = rewritten_result.get("suspect_ratio")
             rewritten_human_ratio = rewritten_result.get("human_ratio")
+            # 🔧 2026-10-16 段落级真值落盘（label 0人工/1确定AI/2疑似，含段文本）。
+            # 占比只给数字，优化器无法反推「判了哪几段」，系统性句式模式无从归纳。
+            rewritten_segments = [
+                {
+                    "text": seg.get("text", ""),
+                    "label": seg.get("label"),
+                    "conf": seg.get("conf"),
+                    "start": seg.get("start"),
+                    "end": seg.get("end"),
+                }
+                for seg in (rewritten_result.get("segment_labels") or [])
+            ]
             if rewritten_result.get("success"):
                 rewritten_score = rewritten_result.get("ai_score", 100)
-                # 提取AI痕迹详情
-                trace_data = rewritten_result.get("ai_trace_details", {})
-                if trace_data:
+                # 🔧 同上：改读 segment_labels
+                rewritten_problematic = _segments_to_problematic(
+                    rewritten_result.get("segment_labels")
+                )
+                if rewritten_problematic:
                     rewritten_trace_detail = AITraceDetail(
-                        hit_keywords=trace_data.get("hit_keywords", []),
-                        hit_positions=trace_data.get("hit_positions", []),
-                        detection_method=trace_data.get("detection_method", ""),
-                        label_scores=trace_data.get("label_scores", {}),
-                        problematic_segments=trace_data.get("problematic_segments", [])
+                        detection_method="朱雀段落标注",
+                        label_scores=rewritten_result.get("labels_ratio", {}) or {},
+                        problematic_segments=rewritten_problematic
                     )
-                    # 输出发现的问题
-                    if trace_data.get("hit_keywords"):
-                        logger.debug(f"   🔍 发现AI痕迹关键词: {trace_data['hit_keywords']}")
-                    if trace_data.get("detection_method"):
-                        logger.debug(f"   🔍 检测方法: {trace_data['detection_method']}")
             else:
                 rewritten_score = 100
+                # 🔧 2026-10-16：记录「检测已尝试但失败」，供失败语义与统计口径使用。
+                # 该路径 rewritten_ai_ratio 为 None，属真实缺失（未测到），
+                # 与「评审失格但已测到 ratio」性质不同，必须能被区分。
+                detect_failed = True
                 logger.debug(f"   ⚠️ 改写文本检测失败: {rewritten_result.get('error', '未知错误')}")
             logger.debug(f"   📊 改写后AI得分: {rewritten_score}")
 
-            # 🔧 高方差模型高分重试（TMS 移除后停用）：
-            # TMS 为格式触发的伪检测器（2026-08-27 格式复验：对段落空格/开头空行敏感，
-            # 格式干净后真人与 AI 均得 0），"检测分高→重改取低分"无意义。
-            # HIGH_SCORE_RETRY_MAX 已置 0，保留代码结构备后续接入朱雀等正向
-            # 检测器时重新启用。
-            if (
-                model_id
-                and model_id.startswith(self.HIGH_SCORE_RETRY_MODEL_PREFIXES)
-                and self.HIGH_SCORE_RETRY_MAX > 0
-                and rewritten_score > self.HIGH_SCORE_RETRY_THRESHOLD
-            ):
-                for retry_no in range(1, self.HIGH_SCORE_RETRY_MAX + 1):
-                    logger.info(
-                        "   🎲 高方差模型高分重试（第%d次）: 当前AI分 %d > %d",
-                        retry_no, rewritten_score, self.HIGH_SCORE_RETRY_THRESHOLD,
-                    )
-                    alt_text = await self._rewrite_text(
-                        prompt, sample.text, temperature,
-                        model_id=model_id, targeted_hint=targeted_hint,
-                    )
-                    if not alt_text or len(alt_text.strip()) < 50:
-                        break
-                    if len(alt_text.strip()) < min_rewrite_len:
-                        logger.debug("   ⏭️ 重试产物未过篇幅守门，放弃")
-                        break
-                    alt_result = await self.ai_detector.detect_ai_content(alt_text)
-                    if not alt_result.get("success"):
-                        break
-                    alt_score = alt_result.get("ai_score", 100)
-                    logger.debug(f"   🎲 重试产物AI分: {alt_score}（原 {rewritten_score}）")
-                    if alt_score < rewritten_score:
-                        rewritten = alt_text
-                        rewritten_result = alt_result
-                        rewritten_score = alt_score
-                    if rewritten_score <= self.HIGH_SCORE_RETRY_THRESHOLD:
-                        break
 
             # 4. 计算得分下降
             score_reduction = original_score - rewritten_score
@@ -497,8 +543,36 @@ class PromptEvaluator:
 
             evaluation_success = not llm_review.get("hard_fail", False)
             evaluation_error = None
+            # 🔧 2026-10-16 失败语义：走到这里说明检测已成功、ratio 有值，
+            # 仅因语义评审硬门槛判失败。这与「检测失败」性质完全不同——
+            # 其 ratio 是真实测量值，统计口径必须计入（见 engine._calc_avg_ai_ratio）。
+            evaluation_failure_kind = None if evaluation_success else "review_hard_fail"
             if not evaluation_success:
                 evaluation_error = "；".join(llm_review.get("hard_fail_reasons", []))
+
+            # 🔧 2026-10-16 评审不可用必须判失败（实测 85337c99：
+            # semantic_fidelity不是对象 → _unavailable() → hard_fail=False
+            # → 原逻辑算「成功」）。评审不可用意味着质量维度**未测量**，
+            # 而未测量不等于合格；放任通过会同时污染成功率、
+            # _quality_failure_ratio 与上层统计口径。
+            # 注意与 detect_failed 的区别：此处检测已成功，ratio 是实测值，
+            # 只是质量结论缺失 —— 该ratio 仍应计入客观统计。
+            if not llm_review.get("available"):
+                evaluation_success = False
+                evaluation_failure_kind = "review_unavailable"
+                evaluation_error = f"语义评审不可用: {llm_review.get('error', '未知原因')}"
+                logger.warning(
+                    f"   ⚠️ 样本 {sample.sample_id} 语义评审不可用"
+                    f"（{llm_review.get('error', '未知原因')}），判为不可用样本"
+                )
+            elif detect_failed:
+                # 🔧 检测失败优先于成功：ratio=None 时该样本对适应度毫无信息量，
+                # 若仍标success=True，会造成「质量门槛算它通过、ratio 统计却缺它」
+                # 的口径错配——评估看起来完整，实际关键指标缺样本。
+                evaluation_success = False
+                evaluation_failure_kind = "detect_failed"
+                evaluation_error = f"朱雀检测失败: {rewritten_result.get('error', '未知错误')}"
+                logger.warning(f"   ⚠️ 样本 {sample.sample_id} 检测失败，判为不可用样本")
 
             result = EvaluationResult(
                 sample_id=sample.sample_id,
@@ -539,6 +613,9 @@ class PromptEvaluator:
                 rewritten_ai_ratio=rewritten_ai_ratio,
                 rewritten_suspect_ratio=rewritten_suspect_ratio,
                 rewritten_human_ratio=rewritten_human_ratio,
+                # 🔧 2026-10-16 段落真值落盘，供提示词进化做特征归因
+                rewritten_segments=rewritten_segments,
+                failure_kind=evaluation_failure_kind,
             )
 
 
@@ -559,7 +636,9 @@ class PromptEvaluator:
                 rewritten_ai_score=None,
                 score_reduction=0,
                 success=False,
-                error=str(e)
+                error=str(e),
+                # 🔧 2026-10-16 失败语义：未预期异常，ratio 无值属真实缺失
+                failure_kind="exception",
             )
 
 
@@ -615,7 +694,9 @@ class PromptEvaluator:
                 rewritten_ai_score=None,
                 score_reduction=0,
                 success=False,
-                error=str(e)
+                error=str(e),
+                # 🔧 2026-10-16 失败语义：未预期异常，ratio 无值属真实缺失
+                failure_kind="exception",
             )
 
     async def _rewrite_text(self, prompt: str, original_text: str, temperature: float, model_id: Optional[str] = None, targeted_hint: str = "") -> str:

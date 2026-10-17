@@ -1,11 +1,14 @@
-fastapi==0.104.1
+# P37：与 requirements.txt 保持已验证可用的同一组合
+# （fastapi 0.111.0 → starlette 0.37.2，该版本起 TestClient 才适配 httpx 0.28）
+fastapi==0.111.0
+starlette==0.37.2
 uvicorn==0.24.0
 sqlalchemy==2.0.23
 pydantic==2.5.0
 pydantic-settings==2.1.0
-python-multipart==0.0.6
+python-multipart==0.0.32
 python-dotenv==1.0.0
-httpx==0.25.2
+httpx>=0.25.2,<0.29
 ebooklib>=0.18
 beautifulsoup4>=4.12.3
 pypdf==6.14.2

@@ -51,11 +51,21 @@ class ReduceRequest(BaseModel):
 
 
 class ReduceResponse(BaseModel):
-    """降低AI浓度响应"""
+    """降低AI浓度响应
+
+    🔧 2026-10-17 检测失败语义（P22）：
+    `original_ai_score` / `new_ai_score` / `improvement` 为 **None** 表示
+    朱雀检测失败、分数**不可知**（unknown），与「检测成功且分数为 0」是
+    两件不同的事。`success` 只表示改写本身是否产出文本，
+    检测是否成功由 `detection_status` 表达。
+    """
     success: bool
     reduced_text: Optional[str] = None
     original_ai_score: Optional[int] = None
     new_ai_score: Optional[int] = None
+    # 🔧 原 label 恒为 "Unknown"（朱雀顶层返回无 label 键，label 只存在于
+    # segment_labels 的段内）。保留字段以兼容既有前端契约，但值改为如实反映
+    # 检测状态而非占位词；新客户端请用 detection_status。
     label: Optional[str] = None
     improvement: Optional[int] = None
     model_used: Optional[str] = None  # 使用的模型名称
@@ -63,6 +73,10 @@ class ReduceResponse(BaseModel):
     prompt_version_id: Optional[str] = None
     selection_source: Optional[str] = None
     returned_variant: Optional[str] = None  # returnable 择优返回的变体（champion/challenger），未评估为 None
+    # 🔧 2026-10-17："ok"=两侧检测均成功；"detect_failed"=检测失败、
+    # 分数不可知（improvement 为 None）。取值与 prompt_evolution 侧的
+    # failure_kind="detect_failed" 保持同一套受控词。
+    detection_status: Optional[str] = None
     error: Optional[str] = None
 
 
@@ -114,6 +128,13 @@ async def reduce_ai_trace(
     start_time = time.time()
 
     try:
+        # 🔧 2026-10-17（P22）：检测失败语义。原实现把原文检测失败兜底为魔数 50
+        # （无任何依据），改写后检测失败兜底为 original_score ⇒ improvement 恒 0，
+        # 但响应仍 success=True —— 检测失败被伪装成「检测成功但没效果」。
+        # 现在失败时分数留None，由 detection_status 如实表达。
+        detection_status = "ok"
+        detection_error: Optional[str] = None
+
         # 1. 检测原始AI分数
         if request.original_ai_score is not None:
             original_score = request.original_ai_score
@@ -121,12 +142,20 @@ async def reduce_ai_trace(
         else:
             step1_start = time.time()
             original_detect_result = await zhuque_ai_detect_service.detect_ai_content(text)
-            original_score = (
-                original_detect_result.get("ai_score", 50)
-                if original_detect_result.get("success")
-                else 50
-            )
-            logger.info(f"  原始检测完成: {original_score}分, 耗时={time.time() - step1_start:.2f}秒")
+            if original_detect_result.get("success"):
+                original_score = original_detect_result.get("ai_score")
+                logger.info(
+                    f"  原始检测完成: {original_score}分, "
+                    f"耗时={time.time() - step1_start:.2f}秒"
+                )
+            else:
+                # 不再兜底 50 —— 分数不可知就是不可知
+                original_score = None
+                detection_status = "detect_failed"
+                detection_error = (
+                    f"原文检测失败: {original_detect_result.get('error', '未知错误')}"
+                )
+                logger.warning(f"  ⚠️ {detection_error}")
 
         # 2. 获取优化后的提示词
         meta_optimizer = MetaOptimizer()
@@ -204,20 +233,40 @@ async def reduce_ai_trace(
         # 4. 检测改写后AI分数
         step3_start = time.time()
         new_result = await zhuque_ai_detect_service.detect_ai_content(reduced_text)
-        new_score = (
-            new_result.get("ai_score", original_score)
-            if new_result.get("success")
-            else original_score
-        )
-        logger.info(f"  改写后检测: {new_score}分, 耗时={time.time() - step3_start:.2f}秒")
+        if new_result.get("success"):
+            new_score = new_result.get("ai_score")
+            logger.info(f"  改写后检测: {new_score}分, 耗时={time.time() - step3_start:.2f}秒")
+        else:
+            # 🔧 不再兜底为 original_score：那会让 improvement 恒 0，
+            # 与「真的没效果」在数据上完全无法区分（P20 实测 63/72 次「下降 0」
+            # 里两者混在一起，正是本条要解决的问题）。
+            new_score = None
+            detection_status = "detect_failed"
+            detection_error = (
+                f"改写后检测失败: {new_result.get('error', '未知错误')}"
+            )
+            logger.warning(f"  ⚠️ {detection_error}")
 
-        improvement = original_score - new_score
+        # 🔧 improvement 仅在两侧分数都可知时才有意义；任一不可知则为 None，
+        # 而不是 0（0 表示「检测成功且确无降幅」，是另一件事）。
+        improvement = (
+            original_score - new_score
+            if original_score is not None and new_score is not None
+            else None
+        )
         total_time = time.time() - start_time
 
-        logger.info(
-            f"AI痕迹降低完成: {original_score} → {new_score} "
-            f"(降低{improvement}分), 总耗时={total_time:.2f}秒, 模型={model_name or '默认'}"
-        )
+        if improvement is None:
+            logger.info(
+                f"AI痕迹降低完成（分数不可知）: 原文={original_score} → 改写后={new_score}, "
+                f"总耗时={total_time:.2f}秒, 模型={model_name or '默认'}"
+            )
+        else:
+            logger.info(
+                f"AI痕迹降低完成: {original_score} → {new_score} "
+                f"(降低{improvement}分), 总耗时={total_time:.2f}秒, "
+                f"模型={model_name or '默认'}"
+            )
 
         prompt_version_id = selection["version_id"] if selection else f"initial-{detected_genre}"
 
@@ -322,13 +371,16 @@ async def reduce_ai_trace(
             reduced_text=reduced_text,
             original_ai_score=original_score,
             new_ai_score=new_score,
-            label=new_result.get("label", "Unknown"),
+            # 🔧 不再是恒定占位词：如实反映检测状态
+            label=detection_status,
             improvement=improvement,
             model_used=model_name or "默认路由",
             genre_detected=detected_genre,
             prompt_version_id=prompt_version_id,
             selection_source=selection_source,
             returned_variant=returned_variant,
+            detection_status=detection_status,
+            error=detection_error,
         )
 
     except Exception as e:

@@ -113,6 +113,13 @@ class SingleModelResult:
     # 在 LLM 改写区间恒为 100，完全不区分「确定AI」与「疑似AI」这两种天差地别的结果，
     # 而 LLM 改写的真实进步恰恰就是 AI→疑似。仅用 ai_score 排序等于按常数排序。
     ai_ratio: Optional[float] = None
+    # 🔧 2026-10-17：原文（改写前）的确定AI段落占比，用于准入守门。
+    # 为什么需要它：MIN_REQUIRED_IMPROVEMENT 守的是「改写是否真的有效」，
+    # 而 improvement = original_score - ai_score 在 LLM 改写区间恒为 0
+    # （实测 2026-10-17 01:04，9 个模型全部「降低0分」⇒ 多模型竞争 0/9 成功，
+    #  且触发「上一次 0/N 成功 ⇒ 跳过本次评测」，改写模型选优永久失效）。
+    # 原文 ai_ratio 在 :1271 附近已被采集，只是从未传入本结果对象。
+    original_ai_ratio: Optional[float] = None
 
 
 @dataclass
@@ -184,10 +191,27 @@ def rank_by_ai_score(results: List[SingleModelResult]) -> List[SingleModelResult
 def collect_rejection_reasons(
     result: SingleModelResult, min_improvement: int
 ) -> List[str]:
-    """逐项推导未入选竞争的原因，供诊断日志使用（与 is_eligible_result 同步）。"""
+    """逐项推导未入选竞争的原因，供诊断日志使用（与 is_eligible_result 同步）。
+
+    🔧 2026-10-17：准入门从 improvement 改为确定AI占比降幅后，诊断措辞同步更新。
+    旧措辞「降幅0分低于门槛3分」在 LLM 改写区间恒成立，会把**检测口径问题**
+    误报成**模型质量问题**（实测 9 个模型全部命中该条，
+    使真实选优失效的原因在日志里完全不可见）。
+    `min_improvement` 参数保留是为了兼容既有调用签名，不再参与准入门判定。
+    """
     reasons: List[str] = []
-    if result.improvement < min_improvement:
-        reasons.append(f"降幅{result.improvement}分低于门槛{min_improvement}分")
+    if not ModelConfigStorage._has_real_ratio_reduction(result):
+        if result.ai_ratio is None:
+            reasons.append("改写后确定AI占比缺失（检测失败），无法判断是否真的降下来")
+        elif result.original_ai_ratio is None:
+            reasons.append("原文确定AI占比缺失，无法判断是否真的降下来")
+        else:
+            drop = result.original_ai_ratio - result.ai_ratio
+            reasons.append(
+                f"确定AI占比仅从{result.original_ai_ratio:.3f}降到{result.ai_ratio:.3f}"
+                f"（降{drop:.3f}，不足门槛"
+                f"{ModelConfigStorage.MIN_REQUIRED_AI_RATIO_REDUCTION}）"
+            )
     review = result.semantic_review or {}
     if not review.get("available"):
         if result.fidelity_similarity < ModelConfigStorage.FALLBACK_FIDELITY_SIMILARITY:
@@ -201,12 +225,16 @@ def collect_rejection_reasons(
         if risk != "low":
             reasons.append(f"过度改写风险={risk}")
         confidence = review.get("confidence") or 0
-        if confidence < 0.6:
+        if confidence < SemanticJudge.MIN_CONFIDENCE:
             reasons.append(f"评审置信度低({confidence})")
+        # 🔧 2026-10-17(P23) 门槛收敛：此处原先是裸字面量(80/90/75)，与下方
+        # `is_eligible_result` 的准入门各写一份。两者必须同源 —— 否则会出现
+        # 「诊断报某原因、但其实合格」的自相矛盾输出。
+        # 唯一来源是 SemanticJudge 类常量（2026-10-16/17 立，理由见其注释）。
         for label, key, threshold in (
-            ("语义保真", "semantic_fidelity", 80),
-            ("事实一致", "fact_consistency", 90),
-            ("信息完整", "information_completeness", 75),
+            ("语义保真", "semantic_fidelity", SemanticJudge.MIN_SEMANTIC_FIDELITY),
+            ("事实一致", "fact_consistency", SemanticJudge.MIN_FACT_CONSISTENCY),
+            ("信息完整", "information_completeness", SemanticJudge.MIN_INFORMATION_COMPLETENESS),
         ):
             score = (review.get(key) or {}).get("score", 0)
             if score < threshold:
@@ -346,13 +374,76 @@ class ModelConfigStorage:
     # 成功列表、不计历史表现（零降幅恒等映射曾当选最佳并抑制进化，
     # 2026-08-19 玄幻轮取证）
     MIN_REQUIRED_IMPROVEMENT = 3
+    # 🔧 2026-10-17：准入守门改用「确定AI占比」的绝对降幅（0-1 尺度）。
+    #
+    # 为什么废弃 MIN_REQUIRED_IMPROVEMENT 作为准入门：
+    # improvement = original_score - ai_score。ai_score 把「确定AI」与「疑似AI」
+    # 合并计数，LLM 改写的典型效果（AI→疑似）不会让它下降，于是 improvement
+    # 对改写效果**不敏感**（实测 2026-10-17 01:04~01:05，9 个模型全部
+    # 「AI分数=100, 降低0分」⇒ `多模型评估完成: 0/9 成功`）。由于存在
+    # 「上一次多模型评测 0/N 成功 ⇒ 跳过本次评测」的逻辑，
+    # 一旦 0/9 就会持续跳过，改写模型选优永久失效。
+    #
+    # 为什么不能简单删掉这道门：该门 2026-08-19 是为防「零降幅恒等映射
+    # 当选最佳并抑制进化」而加的，删掉等于让原样返回的模型重新当选最佳。
+    # 因此换成等价守门：原文确定AI占比必须比改写后高出 MIN_REQUIRED_AI_RATIO_REDUCTION
+    # 以上，否则视为「没实际降下来」，零降幅恒等映射仍被排除。
+    #
+    # 取值 0.05 的依据：真实档期跨版本 ratio 跨度实测 0.169
+    # （如 0.4024 → 0.3053），单轮改写的典型改善在 0.05~0.15 量级；
+    # 0.05 明显高于朱雀噪声级（重复检测同文本波动约 0.01），
+    # 又不会把真实有效的小幅改善挡在门外。
+    MIN_REQUIRED_AI_RATIO_REDUCTION = 0.05
+
+    @classmethod
+    def _has_real_ratio_reduction(cls, result: SingleModelResult) -> bool:
+        """准入守门：改写后确定AI占比必须比原文有实质下降。
+
+        口径选择（与 rank_by_ai_ratio 一致）：
+        - ai_ratio 缺失（检测失败）⇒ 不通过。「测不出」不能当成「很干净」，
+          否则检测异常的模型会挤掉真实有效的模型。
+        - 原文 ai_ratio 缺失 ⇒ 不通过。无法判断是否有改善，
+          此时放行等于重新引入 2026-08-19 的恒等映射病。
+        """
+        if result.ai_ratio is None or result.original_ai_ratio is None:
+            return False
+        return (
+            result.original_ai_ratio - result.ai_ratio
+            >= cls.MIN_REQUIRED_AI_RATIO_REDUCTION
+        )
+
+    @staticmethod
+    def describe_ratio_reduction(result: SingleModelResult) -> str:
+        """🔧 2026-10-17：产出有分辨力的改写效果描述（0-1 ratio 口径）。
+
+        为什么不用 improvement：它是 `original_score - ai_score`。ai_score 合并了
+        「确定AI」与「疑似AI」两类计数，对「AI→疑似」这种最典型的改写进步
+        **不敏感**（实测 P18：7 个模型全部「降低0分」，而同期 ratio 从
+        0.530 到 1.000 差异巨大）。用 improvement 描述效果等于对所有模型
+        输出同一句话 —— 既零信息量，又会让人误以为「这些模型都没效果」。
+
+        实测同一轮里 Doubao Seed Evolving 是 0.720→0.530（真实有效），
+        DeepSeek Flash 是 1.000→1.000（恒等映射），必须一眼可区分。
+
+        ratio 缺失时明说「不可用」，绝不编造降幅 ——
+        「测不出」与「没降下来」是相反的结论。
+        """
+        if result.ai_ratio is None:
+            return "确定AI占比不可用（改写后检测失败）"
+        if result.original_ai_ratio is None:
+            return f"确定AI占比={result.ai_ratio:.3f}（原文占比缺失，无法判断降幅）"
+        drop = result.original_ai_ratio - result.ai_ratio
+        return (
+            f"确定AI占比 {result.original_ai_ratio:.3f}→{result.ai_ratio:.3f}"
+            f"（降{drop:.3f}）"
+        )
 
     @classmethod
     def is_eligible_result(cls, result: SingleModelResult) -> bool:
-        """只有完整成功、达到降幅门槛且满足保真门槛的结果才能参与竞争统计。"""
+        """只有完整成功、确定AI占比有实质下降且满足保真门槛的结果才能参与竞争统计。"""
         if not result.success:
             return False
-        if result.improvement < cls.MIN_REQUIRED_IMPROVEMENT:
+        if not cls._has_real_ratio_reduction(result):
             return False
         review = result.semantic_review or {}
         if not review.get("available"):
@@ -360,10 +451,15 @@ class ModelConfigStorage:
         return (
             not review.get("hard_fail")
             and review.get("over_rewrite_risk") == "low"
-            and review.get("confidence", 0) >= 0.6
-            and review.get("semantic_fidelity", {}).get("score", 0) >= 80
-            and review.get("fact_consistency", {}).get("score", 0) >= 90
-            and review.get("information_completeness", {}).get("score", 0) >= 75
+            # 🔧 2026-10-17(P23)：门槛收敛为引用 SemanticJudge 类常量，
+            # 与 collect_rejection_reasons 的诊断措辞同源（原先两处各写一份）。
+            and review.get("confidence", 0) >= SemanticJudge.MIN_CONFIDENCE
+            and (review.get("semantic_fidelity") or {}).get("score", 0)
+                >= SemanticJudge.MIN_SEMANTIC_FIDELITY
+            and (review.get("fact_consistency") or {}).get("score", 0)
+                >= SemanticJudge.MIN_FACT_CONSISTENCY
+            and (review.get("information_completeness") or {}).get("score", 0)
+                >= SemanticJudge.MIN_INFORMATION_COMPLETENESS
             and result.fidelity_similarity >= cls.MIN_FIDELITY_SIMILARITY
         )
 
@@ -612,6 +708,15 @@ class ModelConfigStorage:
                 rec.best_ai_ratio = min(
                     rec.best_ai_ratio if n > 1 else float(ratio), ratio
                 )
+                # ⚠️ avg_improvement 的分辨力问题（2026-10-17 取证修正）。
+                # 它**并非数学上恒为 0** —— ai_score = ratio_confidence × 100，
+                # 只要改写结果里出现人工段落（label=0），它就会下降。
+                # 但它分辨不出 LLM 改写的真实进步：ai_score 把「确定AI(1)」与
+                # 「疑似AI(2)」合并计数，而改写的典型效果正是 AI→疑似，
+                # 这一步 ratio_confidence 不变 ⇒ improvement 仍为 0。
+                # P18 实测印证：多数模型 1.000→1.000（降0.000），原文带人工
+                # 段落的样本（如 Kimi 0.910）也只因口径合并而不体现降幅。
+                # 故排序与准入一律用 avg_ai_ratio，**不要把本字段当主要指标**。
                 rec.avg_improvement = rec.avg_improvement * (n - 1) / n + result.improvement / n
                 rec.avg_latency = rec.avg_latency * (n - 1) / n + result.latency_seconds / n
                 rec.best_ai_score = min(rec.best_ai_score, result.ai_score)
@@ -710,6 +815,9 @@ class ModelConfigStorage:
                 record.avg_ai_ratio = ratio_prev + (ratio - ratio_prev) / n
                 record.ai_ratio_m2 += (ratio - ratio_prev) * (ratio - record.avg_ai_ratio)
                 record.ai_ratio_stddev = (record.ai_ratio_m2 / (n - 1)) ** 0.5 if n > 1 else 0.0
+                # ⚠️ 同 update_performance 的口径说明：avg_improvement 不是恒 0，
+                # 但把确定AI与疑似AI合并计数，分辨不出 AI→疑似 这类真实进步，
+                # 故仅作历史存档保留，不参与排序与准入。
                 record.avg_improvement = record.avg_improvement * (n - 1) / n + result.improvement / n
                 record.avg_fidelity_similarity = record.avg_fidelity_similarity * (n - 1) / n + result.fidelity_similarity / n
                 record.avg_latency = record.avg_latency * (n - 1) / n + result.latency_seconds / n
@@ -1158,8 +1266,12 @@ class MultiModelEvaluationService:
                     "avg_ai_ratio": round(perf.avg_ai_ratio, 4) if perf else None,
                     "ai_ratio_stddev": round(perf.ai_ratio_stddev, 4) if perf else None,
                     "best_ai_ratio": round(perf.best_ai_ratio, 4) if perf else None,
-                    # 诊断项：改写区间恒为 100，不可用于选型
+                    # avg_ai_score = ratio_confidence × 100（确定AI+疑似AI 合并计数）。
+                    # 不是恒 100：出现人工段落即下降。但它分辨不出 AI→疑似，
+                    # 故不可用于选型；avg_ai_ratio 才是当前主项。
                     "avg_ai_score": round(perf.avg_ai_score, 1) if perf else None,
+                    # 同上：口径合并导致对真实改写进步不敏感，
+                    # 人工占比上来后才会有可观的非零值。
                     "avg_improvement": round(perf.avg_improvement, 1) if perf else None,
                     "best_ai_score": perf.best_ai_score if perf else None,
                     "avg_latency": round(perf.avg_latency, 2) if perf else None,
@@ -1289,7 +1401,10 @@ class MultiModelEvaluationService:
 
         # 并发评估所有模型
         tasks = [
-            self._evaluate_single_model(m, prompt, text, temperature, orig_score, normalize_genre(genre))
+            self._evaluate_single_model(
+                m, prompt, text, temperature, orig_score,
+                normalize_genre(genre), original_ai_ratio=orig_ratio,
+            )
             for m in participate
         ]
         results: List[SingleModelResult] = await asyncio.gather(*tasks)
@@ -1377,8 +1492,9 @@ class MultiModelEvaluationService:
             fact = (review.get("fact_consistency") or {}).get("score")
             comp = (review.get("information_completeness") or {}).get("score")
             logger.info(
-                f"  最佳: {best.model_name} (AI分数={best.ai_score}, "
-                f"降低{best.improvement}分, 耗时={best.latency_seconds:.1f}秒, "
+                f"  最佳: {best.model_name} "
+                f"({ModelConfigStorage.describe_ratio_reduction(best)}, "
+                f"耗时={best.latency_seconds:.1f}秒, "
                 f"hybrid={best.hybrid_score:.2f}, "
                 f"评审 保真={fid}/事实={fact}/完整={comp}, "
                 f"文本相似度={best.fidelity_similarity:.1f})"
@@ -1422,6 +1538,10 @@ class MultiModelEvaluationService:
                     "reduced_text": r.reduced_text,
                     "ai_score": r.ai_score,
                     "ai_ratio": r.ai_ratio,
+                    # 🔧 2026-10-17：baseline 会原样传给 run_challenge_round 重建，
+                    # 漏掉原文 ratio 会让 baseline 在准入门全盘不合格，
+                    # 挑战者自动进入前三而复活。
+                    "original_ai_ratio": r.original_ai_ratio,
                     "latency_seconds": round(r.latency_seconds, 2),
                     "improvement": r.improvement,
                     "fidelity_similarity": round(r.fidelity_similarity, 2),
@@ -1448,8 +1568,14 @@ class MultiModelEvaluationService:
         temperature: float,
         original_score: int,
         genre: str,
+        original_ai_ratio: Optional[float] = None,
     ) -> SingleModelResult:
-        """单个模型的改写+检测流程"""
+        """单个模型的改写+检测流程
+
+        🔧 2026-10-17：新增 `original_ai_ratio`，写入结果对象供准入门使用。
+        此前原文 ratio 虽在调用方算好（`orig_ratio`），却从未传进来，
+        导致 `is_eligible_result` 只能用恒零的 improvement 守门。
+        """
         start = time.time()
 
         try:
@@ -1524,12 +1650,7 @@ class MultiModelEvaluationService:
             latency = time.time() - start
             improvement = original_score - ai_score
 
-            logger.info(
-                f"  [{model_info.name}] AI分数={ai_score}, "
-                f"降低{improvement}分, 耗时={latency:.1f}秒"
-            )
-
-            return SingleModelResult(
+            result = SingleModelResult(
                 model_id=model_info.model_id,
                 model_name=model_info.name,
                 provider=model_info.provider,
@@ -1542,7 +1663,20 @@ class MultiModelEvaluationService:
                 semantic_review=semantic_review,
                 hybrid_score=hybrid_score,
                 ai_ratio=ai_ratio,
+                original_ai_ratio=original_ai_ratio,
             )
+
+            # 🔧 2026-10-17：日志改打 ratio 口径。`降低N分` 对改写效果不敏感
+            # （ai_score 合并确定AI与疑似AI，AI→疑似不降分；实测 7 个模型
+            # 全部输出「降低0分」，而同期 ratio 差异很大）—— 旧措辞既零
+            # 信息量又误导读者。
+            # improvement 字段保留（历史存档依赖），仅不再用于描述效果。
+            logger.info(
+                f"  [{model_info.name}] "
+                f"{ModelConfigStorage.describe_ratio_reduction(result)}, "
+                f"耗时={latency:.1f}秒"
+            )
+            return result
 
         except asyncio.TimeoutError:
             latency = time.time() - start
@@ -1581,6 +1715,7 @@ class MultiModelEvaluationService:
         current_iteration: int = 0,
         baseline_results: Optional[List[Dict[str, Any]]] = None,
         prompt_version_id: Optional[str] = None,
+        original_ai_ratio: Optional[float] = None,
     ) -> Optional[Dict[str, Any]]:
         """
         运行挑战赛：从淘汰池中选模型与活跃模型同场竞技。
@@ -1611,15 +1746,28 @@ class MultiModelEvaluationService:
         challenger_models = [_MODEL_INFO_MAP[m] for m in candidates if m in _MODEL_INFO_MAP]
 
         # 检测原始AI分数
-        if original_ai_score is not None:
+        # 🔧 2026-10-17：与常规轮次对齐，一并取原文 ratio 供准入门使用。
+        if original_ai_score is not None and original_ai_ratio is not None:
             orig_score = original_ai_score
+            orig_ratio = original_ai_ratio
+        elif original_ai_score is not None:
+            orig_score = original_ai_score
+            orig_ratio = original_ai_ratio
         else:
             detect_result = await zhuque_ai_detect_service.detect_ai_content(text)
             orig_score = detect_result.get("ai_score", 50) if detect_result.get("success") else 50
+            orig_ratio = (
+                original_ai_ratio
+                if original_ai_ratio is not None
+                else detect_result.get("ai_ratio")
+            )
 
         # 常规轮次已经评估过活跃模型，挑战赛只产生挑战者的额外成本。
         tasks = [
-            self._evaluate_single_model(m, prompt, text, temperature, orig_score, normalize_genre(genre))
+            self._evaluate_single_model(
+                m, prompt, text, temperature, orig_score,
+                normalize_genre(genre), original_ai_ratio=orig_ratio,
+            )
             for m in challenger_models
         ]
         challenge_results: List[SingleModelResult] = await asyncio.gather(*tasks)
@@ -1637,6 +1785,12 @@ class MultiModelEvaluationService:
                 fidelity_similarity=item.get("fidelity_similarity", 100.0),
                 semantic_review=item.get("semantic_review"),
                 hybrid_score=item.get("hybrid_score", 100.0),
+                # 🔧 2026-10-17：重建 baseline 时必须带上 ratio 两个字段。
+                # 缺失时 baseline 会被准入门全盘判为不合格，
+                # 挑战者便自动「进入前三」而复活 —— 复活名额将由缺字段决定，
+                # 而非真实表现（实测会让本用例复活名单从 [] 变成 ['qwen-plus']）。
+                ai_ratio=item.get("ai_ratio"),
+                original_ai_ratio=item.get("original_ai_ratio", orig_ratio),
             )
             for item in (baseline_results or [])
         ]

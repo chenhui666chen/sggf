@@ -1,9 +1,17 @@
 # FastAPI and Web Framework
-fastapi==0.104.1
+# P37：fastapi 0.104.1 会把 starlette 钉在 <0.28，而 starlette <0.37.2 的
+# TestClient 仍向 httpx.Client 传 app= 参数。httpx 0.28 已移除该参数
+# ⇒ 组合下 TestClient 完全不可用（曾导致 24 个测试 ERROR）。
+# 0.111.0 是锁定 starlette 0.37.2 的最小 fastapi 版本（上游修复点）。
+fastapi==0.111.0
+# 必须显式声明：starlette 是本次故障的直接当事方，
+# 不能只依赖 fastapi 的传递约束，否则解析结果失控
+starlette==0.37.2
 uvicorn[standard]==0.24.0
 python-socketio==5.10.0
 python-engineio==4.8.0
-python-multipart==0.0.6
+# 随 fastapi 0.111.0 一并升到 0.0.32（原 0.0.6 与新 starlette 不匹配）
+python-multipart==0.0.32
 cors==1.0.1
 
 # Database
@@ -50,7 +58,10 @@ redis==5.0.1
 celery==5.3.4
 
 # HTTP Client
-httpx>=0.25.2
+# P37：必须设上限。chromadb>=0.27.0 等间接依赖会把它拉到最新版本，
+# 而 starlette <0.37.2 与 httpx>=0.28 不兼容（TestClient 传 app= 参数被拒）。
+# 加上限可保证重建 venv 后仍落在已验证可用的组合上。
+httpx>=0.25.2,<0.29
 
 # System Monitoring
 psutil>=7.1.3

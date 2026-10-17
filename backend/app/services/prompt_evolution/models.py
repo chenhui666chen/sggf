@@ -75,6 +75,16 @@ class EvaluationResult:
     rewritten_ai_ratio: Optional[float] = None       # 改写后被判「确定AI」的段落占比
     rewritten_suspect_ratio: Optional[float] = None  # 改写后被判「疑似AI」的段落占比
     rewritten_human_ratio: Optional[float] = None    # 改写后被判「人工」的段落占比
+    # 🔧 2026-10-16 段落级真值（[{text,label,conf,start}]，label 0人工/1确定AI/2疑似）。
+    # 原先只有三档占比，检测器「到底判了哪几段」这一信息完全丢失，
+    # 优化器无法从占比数字反推系统性句式模式（见 meta_optimizer._build_segment_insight）。
+    # 只存最小字段，不落供应商原始响应。
+    rewritten_segments: List[Dict[str, Any]] = field(default_factory=list)
+    # 🔧 2026-10-16 失败语义（受控词表，见 engine.FAILURE_KINDS）。原先只有
+    # error 自由文本，事后无法区分「检测失败」与「未检测」，也无法判断失败的
+    # 失败样本是否仍持有实测 ratio——而这直接影响适应度口径是否偏乐观。
+    # None 表示成功或未标注。
+    failure_kind: Optional[str] = None
     evaluated_at: str = field(default_factory=lambda: datetime.now().isoformat())
 
 
@@ -126,6 +136,18 @@ class PromptVersion:
                     "rewritten_text_length": len(r.rewritten_text),
                     "original_ai_score": r.original_ai_score,
                     "rewritten_ai_score": r.rewritten_ai_score,
+                    # 🔧 2026-10-16 补齐段落三分类占比：原先三个字段都未序列化，
+                    # 落盘后 ratio 全丢（运行期有值、读档变 None），
+                    # 使重启后的续跑退化为无信号。avg_ai_ratio 在版本层，
+                    # 但逐样本 ratio 是 A/B 选优与失败归因的唯一明细来源。
+                    "rewritten_ai_ratio": r.rewritten_ai_ratio,
+                    "rewritten_suspect_ratio": r.rewritten_suspect_ratio,
+                    "rewritten_human_ratio": r.rewritten_human_ratio,
+                    # 🔧 2026-10-16 段落级真值：不序列化则重启后段落特征
+                    # 归因彻底失效（占比还在，但「判了哪几段」的信息消失）。
+                    "rewritten_segments": r.rewritten_segments,
+                    # 🔧 2026-10-16 失败语义（.get 兼容旧存档缺字段）
+                    "failure_kind": r.failure_kind,
                     "score_reduction": r.score_reduction,
                     "success": r.success,
                     "error": r.error,
@@ -183,6 +205,13 @@ class PromptVersion:
                 original_multi_score=r.get("original_multi_score"),
                 rewritten_multi_score=r.get("rewritten_multi_score"),
                 llm_review=r.get("llm_review"),
+                # 🔧 2026-10-16：读回段落三分类占比（.get 兼容旧存档缺字段）
+                rewritten_ai_ratio=r.get("rewritten_ai_ratio"),
+                rewritten_suspect_ratio=r.get("rewritten_suspect_ratio"),
+                rewritten_human_ratio=r.get("rewritten_human_ratio"),
+                # 🔧 2026-10-16：读回段落真值（.get 兼容旧存档缺字段）
+                rewritten_segments=r.get("rewritten_segments") or [],
+                failure_kind=r.get("failure_kind"),
                 evaluated_at=r.get("evaluated_at", "")
             )
             for r in data.get("evaluation_results", [])
@@ -239,6 +268,20 @@ class EvolutionHistory:
     error_message: Optional[str] = None
     genre: Optional[str] = None                         # 本次进化固定题材
 
+    # 🔧 2026-10-17(P31) 停止原因落盘。
+    # 取证（真实 10 轮存档）：86cff7f7(max=6,实际3)、8260b160(max=5,实际3)、
+    # 13aa3353(max=4,实际1) 三轮 status=completed 但迭代数远小于上限，
+    # 而 error_message 全为 None —— 无法区分「跑满」与「收敛/震荡/崩坏提前退出」。
+    # 根因：StopReason 只经 _notify_progress 发给前端，从不写回 history；
+    # score_history（收敛/震荡判定的唯一数据源）同样只在内存里，进程退出即丢。
+    # 后果：离线分析无法回答「这轮为什么停」，收敛是优化信号，丢了无法判断
+    # 系统在进步还是原地打转。
+    # 三者均可选且有默认值 —— 旧存档（缺这些键）必须能正常反序列化。
+    stop_reason: Optional[str] = None                  # 人可读的停止原因原文
+    stop_type: Optional[str] = None                     # 机器可读：见 StopReason.reason_type
+    # 🔧 用 element(default_factory=list) 替代 mutability 写法，兼容性一致
+    score_history: List[float] = field(default_factory=list)  # 每轮确定AI占比×100，用于离线复核收敛
+
 
 @dataclass
 class EvolutionConfig:
@@ -268,7 +311,25 @@ class EvolutionConfig:
     ab_test_interval: int = 2             # A/B测试间隔（每N轮进行一次）
     ab_test_sample_count: int = 8         # A/B测试使用的样本数（与 samples_per_iteration 对齐：A/B 是进化方向判定的核心，样本数不足时二值分布方差会淹没信号）
     ab_test_variant_count: int = 3        # A/B测试变体数量（2→3）
-    ab_test_min_diff: float = 3.0         # A/B测试最小显著差异（分数差超过此值才判定胜出）
+    # 🔧 2026-10-16 由 3.0 下调至 0.15，配合 `_ab_rank_score` 改帕累托分层。
+    #
+    # 取证（真实 8 版本存档回放，非构造样本）：
+    # 分层后 score = 失格数(层号) + ratio(0~1) + 人感成本项(<=0.13) + 方差罚分(0/0.5)，
+    # 实测 score 区间 1.4574 ~ 4.9295（跨度 3.47）。但这个跨度**几乎全部
+    # 来自层号（质量层差）**，层内 ratio 的真实最大差只有 0.53：
+    #     L1: 253cd2e3 0.4024 / 8f85098d 0.3053  -> 层内差 0.4256
+    #     L3: 5df0af76 0.2540 / 53a36ee1 0.4038 / e1d4192a 0.3120 -> 层内差 0.5318
+    #     L4: 8f937f18 0.4097 / 31c84958 0.3507  -> 层内差 0.4143
+    # 即 3.0 > 层内最大差 0.53 ⇒ **层内 ratio 差异永远判不出显著**，
+    # 阈值实际退化成「质量层差门槛」，违背「ratio 是优化目标」的定位。
+    #
+    # 真实 A/B 场景也要求更低的阈值：主体是同父版本的改造方向，质量通常接近，
+    # 真实轮次原始 4 失格 vs 变体 2 失格（层差 2.0）叠加 ratio 0.42->0.25（0.17）
+    # 的总diff 约 2.17，仍 < 3.0 —— 判不出显著。
+    #
+    # 取 0.15：略低于实测跨版本 ratio 跨度 0.169，使真实整轮收益可判显著；
+    # 同时远高于噪声级差异（ratio 差 0.01 远低于此），不会把改写随机性当成果。
+    ab_test_min_diff: float = 0.15       # A/B最小显著差异（按帕累托分层后的 score 尺度）
 
     # 🔧 探索模式配置
     exploration_mode_threshold: int = 5   # 连续多少次无明显改善后进入探索模式
@@ -276,7 +337,10 @@ class EvolutionConfig:
     
     # 🆕 题材定制化配置
     genre: Optional[str] = None           # 目标题材（玄幻/都市/言情/悬疑等）
-    genre_weight_config: Optional[Dict[str, float]] = None  # 题材权重配置 {"ai_score": 0.4, "readability": 0.3, "writing": 0.2, "fidelity": 0.1}
+    # 🔧 2026-10-16 移除 genre_weight_config：题材权重仅被 _calculate_composite_score
+    # 读取，而该函数全仓零调用点 → 权重从未参与任何评分。保留字段会让人误以为
+    # 「AI 维度占 30% 权重」已生效。综合分现由 evaluator 的 rewritten_multi_score
+    # 直接给出，A/B 选优主项为朱雀确定AI段落占比（见 engine._ab_rank_score）。
     
     # 🆕 多模型评估配置
     multi_model_eval_interval: int = 3    # 多模型评估间隔（每N轮触发一次，0=仅结束时）
@@ -293,7 +357,14 @@ class EvolutionConfig:
 class StopReason:
     """停止原因"""
     should_stop: bool = False           # 是否应该停止
-    reason_type: str = ""               # 停止类型: success/protection/convergence/oscillation/max_iter
+    # 停止类型: success/protection/convergence/oscillation/max_iter
+    # 🔧 2026-10-17(P31)：另有两个在引擎里直接写入 history.stop_type、
+    # 不经过本类的取值 —— initial_abort（初始评估即全失格，engine.py:1176 附近）
+    # 与 exception（进化过程抛异常）。全量取值共 7 种：
+    #   success / protection / convergence / oscillation / max_iter
+    #   / initial_abort / exception
+    # 机器可读白名单见 tests/test_stop_reason_persistence.py::EXPECTED。
+    reason_type: str = ""               # 停止类型
     reason_message: str = ""            # 停止原因描述
     should_rollback: bool = False       # 是否需要回滚到之前版本
     rollback_reason: str = ""           # 回滚原因

@@ -46,13 +46,148 @@ def _locked(path: Path) -> Iterator[None]:
                     msvcrt.locking(lock_file.fileno(), msvcrt.LK_UNLCK, 1)
 
 
+# 🔧 2026-10-17(P32) 备份清理的时间节流记录。
+# 键为被清理的主文件路径（同一文件在进程内共享节流状态），
+# 使「进程启动时清理一次」在多次 __init__ 调用下也只真正执行一次。
+_LAST_PRUNE_TIME: Dict[Path, float] = {}
+
+
 class AtomicJsonStore:
-    """带进程锁、原子替换和上一版本备份的 JSON 存储。"""
+    """带进程锁、原子替换和上一版本备份的 JSON 存储。
+
+    🔧 2026-10-17(P28) 备份保留策略：
+    实测 `data/prompt_evolution/evolution_history.json` 已达 8.10 MB，
+    其 `.bak` 同样8.10 MB（`_write_unlocked` 写入前整体 copy，故等大）。
+
+    注意：`.bak` 保留的是**上一版**而非历史版本链，回退读取也只用这一份
+    （见 `read`）—— 所以单份 `.bak` 已经足够，多份历史备份对崩溃恢复
+    **毫无价值**，只会让目录无界增长。
+    故引入轮转：把超出 `BACKUP_KEEP` 份的旧备份轮转为带序号的历史文件，
+    并对历史备份设总量上限 `BACKUP_HISTORY_MAX_BYTES`。
+
+    **崩溃恢复能力不受影响**：`BACKUP_KEEP >= 1` 保证永远至少有一份
+    可回退的 `.bak`；超限的历史备份仅是回退链上的更老版本，
+    删除不影响「主文件损坏→读上一版」这条路径。
+    """
+
+    #: 必须 >= 1 —— 归零等于取消崩溃恢复能力（守卫 test_json_store_backup_rotation）
+    BACKUP_KEEP = 1
+    #: 历史备份总量上限（字节）。超出后从最老的开始删。
+    BACKUP_HISTORY_MAX_BYTES = 32 * 1024 * 1024
+
+    # 🔧 2026-10-17(P32) 清理移出写路径。事故取证见下方 _prune_backups 文档串。
+    #: 单次清理最多删除几个文件 —— 避免一次撞穿环境的批量删除保护阈值
+    PRUNE_MAX_DELETE = 3
+    #: 两次清理之间的最小间隔（秒）—— 跨进程/多次初始化都受此节流
+    PRUNE_INTERVAL = 600.0
 
     def __init__(self, path: Path, root_type: type = dict):
         self.path = Path(path)
         self.backup_path = self.path.with_suffix(self.path.suffix + ".bak")
         self.root_type = root_type
+        # 🔧 2026-10-17(P32) 清理移到这里：进程启动时做一次，绝不在写路径上做。
+        # 该调用自身带时间节流（PRUNE_INTERVAL）与删除上限（PRUNE_MAX_DELETE），
+        # 因此多次 __init__ 也只低频、少量地删除，不会撞环境的批量删除保护。
+        try:
+            self._prune_backups()
+        except Exception:  # noqa: BLE001 —— 清理绝不能影响初始化
+            pass
+
+    def _history_pattern(self) -> str:
+        return f"{self.path.name}.bak.*"
+
+    def _is_own_rotated_backup(self, path: Path) -> bool:
+        """严格判定某个文件是否为本类**自己**创建的轮转备份。
+
+        🔧 P32：白名单式校验。宁可漏删也不误删 ——
+        清理逻辑一旦误伤用户数据，代价远高于多留几个备份文件。
+
+        仅接受 `{name}.bak.<数字>.<数字>` 这一个形态，
+        其余任何文件（哪怕 glob 命中 `.bak.*`）一律不碰。
+        """
+        prefix = f"{self.path.name}.bak."
+        if not path.name.startswith(prefix):
+            return False
+        parts = path.name[len(prefix):].split(".")
+        if len(parts) != 2:
+            return False
+        ts, pid = parts
+        return ts.isdigit() and pid.isdigit()
+
+    def _prune_backups(self) -> None:
+        """轮转历史备份：超出份数或总量的从最老开始删。
+
+        🔧 2026-10-17(P32) 本方法**禁止**在写路径上调用。
+
+        ## 事故取证
+
+        P28 把本方法挂到写路径（每次写入都调用），配合「每次写入都新建一个
+        `.bak.<ts>.<pid>`」，一轮进化写几十次 ⇒ 几十个轮转文件 + 几十次删除。
+        实测撞上环境的批量删除保护：
+
+            [safe-delete][SAFE_DELETE_BULK_CONFIRM_REQUIRED]
+              {"count":50,"threshold":50,"scope":"turn","targetCount":1}
+
+        之后后端事件循环被完全阻塞：`/docs` 15 秒无响应、状态接口超时、
+        进化队列被判定需要停止。⚠️ 注意 `targetCount:1` ——
+        保护机制数的是**本轮累计删除次数**而非单次批量，
+        所以「每次只删一个文件」照样撞线。
+
+        ## 现在的约束
+
+        1. 只在 `__init__` 时调用（进程启动一次），不挂写路径
+        2. `PRUNE_INTERVAL` 时间节流 —— 跨进程也不高频
+        3. `PRUNE_MAX_DELETE` 硬上限 —— 单次最多删几个
+        4. 白名单式形态校验 —— 只删自己命名的文件，`.bak` 本体绝不碰
+
+        注意与 `_locked` 的关系：现在只在 `__init__` 调用，不持锁
+        （`__init__` 时文件尚不存在，无并发写风险）。
+        清理失败不得阻断任何操作 —— 本方法吞掉所有异常。
+        """
+        now = time.time()
+        last = _LAST_PRUNE_TIME.get(self.path)
+        if last is not None and (now - last) < self.PRUNE_INTERVAL:
+            return
+        _LAST_PRUNE_TIME[self.path] = now
+
+        try:
+            history = sorted(
+                (
+                    p for p in self.path.parent.glob(self._history_pattern())
+                    # 🔧 P32 白名单：只考虑自己创建的形态，glob 误伤一律排除
+                    if self._is_own_rotated_backup(p)
+                ),
+                key=lambda p: p.stat().st_mtime,
+            )
+        except (FileNotFoundError, OSError):
+            return
+
+        total = 0
+        try:
+            for item in history:
+                total += item.stat().st_size
+        except OSError:
+            return
+
+        deleted = 0
+        for index, item in enumerate(history):
+            remaining_count = len(history) - index
+            if (remaining_count <= self.BACKUP_KEEP
+                    and total <= self.BACKUP_HISTORY_MAX_BYTES):
+                break
+            # 🔧 P32 删除数量硬上限 —— 避免一次撞穿保护阈值
+            if deleted >= self.PRUNE_MAX_DELETE:
+                logger.debug(
+                    "备份清理达单次上限 %d 个，其余留待下次",
+                    self.PRUNE_MAX_DELETE,
+                )
+                break
+            try:
+                total -= item.stat().st_size
+                item.unlink()
+                deleted += 1
+            except OSError:
+                pass
 
     def _read_path(self, path: Path) -> Any:
         with open(path, "r", encoding="utf-8") as file:
@@ -86,6 +221,19 @@ class AtomicJsonStore:
         if self.path.exists():
             try:
                 self._read_path(self.path)
+                # 🔧 2026-10-17(P32) 写路径不再为每次写入新建轮转备份。
+                #
+                # 原P28 实现在此做两件危险的事：
+                #   ① 把现有 .bak 改名成 `.bak.<ts>.<pid>`（每次写入一个新文件）
+                #   ② 调用 _prune_backups()（每次写入都删文件）
+                # 一轮进化写几十次 ⇒ 几十个备份 + 几十次删除，
+                # 实测撞上环境批量删除保护（count:50），后端事件循环被完全阻塞：
+                # `/docs` 15 秒无响应、状态接口超时、进化队列被判定停止。
+                #
+                # 改为**就地覆盖单份 .bak**：崩溃恢复能力完全不变
+                # （「主文件损坏→回退读上一版」这条路不受影响），
+                # 而写路径不再产生任何文件与删除操作。
+                # 历史遗留备份的清理由 __init__ 低频完成（见 _prune_backups）。
                 shutil.copy2(self.path, self.backup_path)
             except (json.JSONDecodeError, OSError, ValueError):
                 pass

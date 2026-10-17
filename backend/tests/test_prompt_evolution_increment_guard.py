@@ -69,7 +69,15 @@ class TestEvolutionBoundaryClauses:
 
 
 class TestBestVersionFidelityGate:
-    """门槛加固：含硬失败或语义保真<90样本的版本不得入选最佳列表。"""
+    """门槛加固：含硬失败或语义保真低于 judge 正式门槛（80）的版本不得入选最佳列表。
+
+    🔧 2026-10-16 语义修正：原判据为 `semantic_fidelity < 90`，但90 这个数字
+    无出处——semantic_judge 的正式门槛是 80，而真实轮次 86cff7f7 实测
+    语义保真 mean 仅 87.9~90.8。`<90` 恰好切在分布中位数上，在真实数据上
+    几乎恒真，使该门完全失效：连 96 分的高分版本都会被误杀（见
+    test_clean_version_accepted 同名用例曾长期通过是因为引擎另有旁路）。
+    现改为引用judge 的正式门槛，保持与质量硬门槛同源。
+    """
 
     def _make_engine(self, tmp_path):
         from app.services.prompt_evolution.engine import PromptEvolutionEngine
@@ -96,12 +104,23 @@ class TestBestVersionFidelityGate:
         assert engine.history.best_versions == []
 
     def test_low_semantic_fidelity_version_rejected(self, tmp_path):
+        """79分 < judge 正式门槛 80 → 失格，必须拦下。"""
         engine = self._make_engine(tmp_path)
         version = self._make_version(
-            {"hard_fail": False, "semantic_fidelity": {"score": 85.0, "reason": "偏离意境"}}
+            {"hard_fail": False, "semantic_fidelity": {"score": 79.0, "reason": "严重偏离意境"}}
         )
         engine._update_best_versions(version)
         assert engine.history.best_versions == []
+
+    def test_measured_fidelity_score_accepted(self, tmp_path):
+        """85分是真实轮次的实测均值水平 —— 低于旧的 90 却高于正式门槛 80，
+        修正后应被接受。这条用例锁住「不得回退到 <90 判据」。"""
+        engine = self._make_engine(tmp_path)
+        version = self._make_version(
+            {"hard_fail": False, "semantic_fidelity": {"score": 85.0, "reason": "轻微偏离"}}
+        )
+        engine._update_best_versions(version)
+        assert len(engine.history.best_versions) == 1
 
     def test_clean_version_accepted(self, tmp_path):
         engine = self._make_engine(tmp_path)

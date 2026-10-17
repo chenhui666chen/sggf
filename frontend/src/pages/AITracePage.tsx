@@ -188,7 +188,10 @@ export default function AITracePage() {
         if (!detectResult && response.data.original_ai_score !== undefined) {
           setDetectResult({
             score: response.data.original_ai_score,
-            label: 'Unknown',
+            // 🔧 2026-10-17 (P22)：原先硬编码 'Unknown'。检测状态现由
+            // detection_status 表达（'ok' / 'detect_failed'），label 已改为
+            // 如实反映该状态而非占位词。
+            label: response.data.detection_status || response.data.label,
             suggestion: 'Pass',
             text: inputText,
           })

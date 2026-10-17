@@ -112,8 +112,17 @@ class TestBestVersionSuccessRatioGate:
         assert len(engine.history.best_versions) == 1
 
     def test_min_success_ratio_constant_exists(self):
+        """成功率门槛须为 0.60。
+
+        🔧 2026-10-16 由 0.75 下调，依据真实进化轮次 86cff7f7 取证：
+        该轮 ratio 单调下降 0.473→0.409→0.362（进化确有成效，降 23%），
+        但三个版本成功率分别 50%/50%/62%，全部低于 0.75 → best_versions 全空，
+        进化成果无法传承。0.60 让实测最优形态（62%）能入选，
+        令 ratio 改善沿传承链累积；「无降分效果」的坍塔形态改由
+        ratio 上限门（0.85）与全通过质量要求直接拦住。
+        """
         from app.services.prompt_evolution.engine import PromptEvolutionEngine
-        assert PromptEvolutionEngine.BEST_VERSION_MIN_SUCCESS_RATIO == 0.75
+        assert PromptEvolutionEngine.BEST_VERSION_MIN_SUCCESS_RATIO == 0.60
 
 
 if __name__ == "__main__":

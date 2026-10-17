@@ -1242,6 +1242,16 @@ llm_models:
         - coding
         - agent
         - reasoning
+        # P36：作为 review（语义评审）任务的备选模型。
+        # 选型依据是**真实评测数据**而非 capabilities.score：
+        #   真实 14 次调用成功率 100%、语义评审覆盖 14/14、
+        #   准入通过 7 次（全场最高）、平均确定AI占比 0.5877（全场最低），
+        #   且 model_config.json 的 auto_best_by_genre 已把它评为玄幻题材最优。
+        # 刻意未选能力分更高（0.94）但**零真实样本**的 mimo-pro ——
+        #   能力分是配置声明值；glm 声明 0.93 却真实成功率 0%，已证伪该口径。
+        # provider=volcengine 与主模型 deepseek 不同源，一个账户欠费不会同时打掉两个。
+        - review
+        - quality_review
       priority: 2
       fallback_models:
         - qwen-plus
@@ -1494,6 +1504,16 @@ llm_models:
         - audiobook_script
         - volume_detail_expand
       priority: 1
+      # P36 兜底链现状（务必读注释再改）：
+      #   第 1 层 = review候选池里的其他模型（doubao-seed-evolving，provider 不同源）
+      #   第 2 层 = 本fallback_models（qwen-plus，但它并不支持 review，
+      #           所以只在「本模型整体不可用」时兜，而不是 review 任务专属兜底）
+      # ⚠️ 已知缺陷（未修）：core/unified_registry.py::_select_best 的 fallback
+      #   只在「候选池全部 _is_available 为 false」时才触发；而余额不足
+      #   （insufficient_quota / HTTP 402）时配置仍 active、熔断器未打开
+      #   ⇒ _is_available 仍为 true ⇒ 第 1 层兜底不会被自动触发。
+      #   即便候选池已有 2 个模型，DeepSeek 欠费时仍会一直选它。
+      #   根治需让余额类错误识别并驱动 record_failure 打开熔断。
       fallback_models:
         - qwen-plus
       enabled: true

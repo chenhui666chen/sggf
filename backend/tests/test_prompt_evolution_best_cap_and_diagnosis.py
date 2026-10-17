@@ -72,18 +72,38 @@ class TestBestVersionScoreCap:
 
 
 class TestBestListScoreCleanliness:
-    """数据清洁度：best 双源头不得残留 avg_ai_score>80 的高分版本。"""
+    """数据清洁度：best 双源头不得残留「无降分效果」的版本。
 
-    def test_best_prompts_file_no_high_score(self):
+    🔧 2026-10-16 判据修正（avg_ai_score → avg_ai_ratio）：
+    原断言是「best 列表不得有 `avg_ai_score > 80`」，它守护的是 TMS 时代的
+    分数门槛，而 TMS 已移除、该门槛也一并删除（引擎现址1745 行用的是
+    `BEST_VERSION_MAX_AI_RATIO`，作用对象是 `avg_ai_ratio`）。
+
+    该断言长期「通过」的原因是 **best_versions 一直为空**（空列表恒真），
+    准入门槛修好后（P8 失格占比校准）首次落入真实版本，才暴露出它守护的是
+    一条早已不存在的规则 —— 且与同文件上方的
+    `test_high_score_version_no_longer_rejected_by_tms`（断言 97 分应被接受）
+    直接矛盾。
+
+    改用 `avg_ai_ratio`：它才是现行准入与排序的真实指标，也是唯一有分辨力的
+    信号（`avg_ai_score` 在 LLM 改写区间恒为 100）。
+    """
+
+    _HIGH_RATIO = 0.85  # 与 PromptEvolutionEngine.BEST_VERSION_MAX_AI_RATIO 一致
+
+    def test_best_prompts_file_no_high_ratio(self):
         path = DATA_DIR / "best_prompts.json"
         if not path.exists():
             return
         items = json.load(open(path, encoding="utf-8"))
-        bad = [x.get("version_id") for x in items
-               if (x.get("avg_ai_score") or 0) > 80]
-        assert bad == [], f"best_prompts.json 残留高分版本: {bad}"
+        bad = [
+            x.get("version_id") for x in items
+            if x.get("avg_ai_ratio") is not None
+            and x["avg_ai_ratio"] > self._HIGH_RATIO
+        ]
+        assert bad == [], f"best_prompts.json 残留高确定AI占比版本: {bad}"
 
-    def test_history_best_versions_no_high_score(self):
+    def test_history_best_versions_no_high_ratio(self):
         path = DATA_DIR / "evolution_history.json"
         if not path.exists():
             return
@@ -93,9 +113,10 @@ class TestBestListScoreCleanliness:
             (b.get("evolution_id", "?")[:8], v.get("version_id"))
             for b in batches
             for v in (b.get("best_versions") or [])
-            if (v.get("avg_ai_score") or 0) > 80
+            if v.get("avg_ai_ratio") is not None
+            and v["avg_ai_ratio"] > self._HIGH_RATIO
         ]
-        assert bad == [], f"evolution_history 残留高分 best_versions: {bad}"
+        assert bad == [], f"evolution_history 残留高确定AI占比 best_versions: {bad}"
 
 
 class TestSafetyRejectionDiagnosis:

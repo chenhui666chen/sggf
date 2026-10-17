@@ -52,11 +52,27 @@ class TestCalcAvgAiRatio:
         )
         assert avg == pytest.approx(0.2)
 
-    def test_failed_samples_excluded(self):
+    def test_failed_samples_included_when_ratio_measured(self):
+        """🔧 2026-10-16 口径修正：质量失格样本的实测 ratio 必须计入均值。
+
+        旧断言为「失败样本一律排除」（[_result(0.2), _result(0.9, success=False)]
+        → 0.2），那会让最差样本不算数：失败越多，均值反而越好看。
+        实测上一轮迭代2 的 0.4695 就是在 2/4 失败下算出的，
+        把那两个失败样本计入只会更差——这才是真实检测均值。
+        """
         from app.services.prompt_evolution.engine import PromptEvolutionEngine
 
         avg = PromptEvolutionEngine._calc_avg_ai_ratio(
             [_result(0.2), _result(0.9, success=False)]
+        )
+        assert avg == pytest.approx(0.55)
+
+    def test_failed_samples_without_ratio_still_excluded(self):
+        """检测未跑通的失败样本无 ratio，必须排除而非当 0（那是「最干净」的假象）。"""
+        from app.services.prompt_evolution.engine import PromptEvolutionEngine
+
+        avg = PromptEvolutionEngine._calc_avg_ai_ratio(
+            [_result(0.2), _result(None, success=False)]
         )
         assert avg == pytest.approx(0.2)
 
@@ -149,7 +165,10 @@ class TestEvaluateAcrossModelsEndToEnd:
 
         ratios = self.RATIOS
 
-        async def fake_single(self, model_info, prompt, text, temperature, orig_score, genre):
+        # 🔧 2026-10-17：生产签名新增 original_ai_ratio（准入守门改用确定AI
+        # 占比降幅后必须把原文 ratio 传进每个模型结果），桩函数签名须同步。
+        async def fake_single(self, model_info, prompt, text, temperature,
+                              orig_score, genre, original_ai_ratio=None):
             return comp.SingleModelResult(
                 model_id=model_info.model_id,
                 model_name=model_info.name,
@@ -170,6 +189,7 @@ class TestEvaluateAcrossModelsEndToEnd:
                     "information_completeness": {"score": 90},
                 },
                 ai_ratio=ratios[model_info.model_id],
+                original_ai_ratio=original_ai_ratio,
             )
 
         monkeypatch.setattr(comp, "zhuque_ai_detect_service", _FakeDetector())

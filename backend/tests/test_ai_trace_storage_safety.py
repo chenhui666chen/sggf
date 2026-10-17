@@ -57,9 +57,12 @@ def test_evaluation_guard_rejects_parallel_and_cooldown_runs():
 
 def test_model_performance_concurrent_updates_do_not_lose_results(tmp_path):
     storage = ModelConfigStorage(str(tmp_path))
+    # 🔧 2026-10-17：准入门改用确定AI占比降幅后，本用例测的是并发写不丢记录，
+    # 必须提供真实 ratio 量级（原文 0.80 → 改写 0.30）让准入前提成立。
     result = SingleModelResult(
         "qwen-plus", "Qwen", "alibaba", "文本", 20, 1,
         fidelity_similarity=90, improvement=40,
+        ai_ratio=0.30, original_ai_ratio=0.80,
     )
 
     with ThreadPoolExecutor(max_workers=8) as executor:

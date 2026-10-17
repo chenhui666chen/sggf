@@ -139,12 +139,16 @@ def test_revived_model_starts_new_statistics_with_challenge_result(tmp_path):
         ai_ratio=0.20,
         latency_seconds=1.5,
         improvement=40,
+        original_ai_ratio=0.70,
     )
     competitors = [
         challenge,
-        SingleModelResult("m1", "M1", "p", "文本", 10, 1, improvement=40, ai_ratio=0.10),
-        SingleModelResult("m2", "M2", "p", "文本", 30, 1, improvement=20, ai_ratio=0.30),
-        SingleModelResult("m3", "M3", "p", "文本", 40, 1, improvement=10, ai_ratio=0.40),
+        SingleModelResult("m1", "M1", "p", "文本", 10, 1, improvement=40, ai_ratio=0.10,
+                          original_ai_ratio=0.60),
+        SingleModelResult("m2", "M2", "p", "文本", 30, 1, improvement=20, ai_ratio=0.30,
+                          original_ai_ratio=0.80),
+        SingleModelResult("m3", "M3", "p", "文本", 40, 1, improvement=10, ai_ratio=0.40,
+                          original_ai_ratio=0.90),
     ]
 
     revived = storage.process_challenge_results("玄幻", [challenge], competitors)
@@ -312,7 +316,7 @@ def test_success_clears_model_failure_streak(tmp_path):
     )
     success = SingleModelResult(
         "doubao-seed-evolving", "Doubao", "volcengine", "文本", 20, 10,
-        success=True,
+        success=True, ai_ratio=0.30, original_ai_ratio=0.80,
     )
     storage.update_availability_status(failed, "玄幻")
     storage.update_availability_status(success, "玄幻")
@@ -325,24 +329,32 @@ def test_challenger_revives_only_when_ranked_in_top_three(tmp_path):
     storage.save_config({"eliminated_models": {"玄幻": ["qwen-plus"]}})
     # 🔧 2026-10-08：排位主键由 ai_score 改为 ai_ratio，名次由 ai_ratio 决定
     third = SingleModelResult(
-        "qwen-plus", "Qwen", "p", "文本", 30, 1, improvement=20, ai_ratio=0.30
+        "qwen-plus", "Qwen", "p", "文本", 30, 1, improvement=20, ai_ratio=0.30,
+        original_ai_ratio=0.80,
     )
     results = [
-        SingleModelResult("m1", "M1", "p", "文本", 10, 1, improvement=40, ai_ratio=0.10),
-        SingleModelResult("m2", "M2", "p", "文本", 20, 1, improvement=30, ai_ratio=0.20),
+        SingleModelResult("m1", "M1", "p", "文本", 10, 1, improvement=40, ai_ratio=0.10,
+                          original_ai_ratio=0.60),
+        SingleModelResult("m2", "M2", "p", "文本", 20, 1, improvement=30, ai_ratio=0.20,
+                          original_ai_ratio=0.70),
         third,
-        SingleModelResult("m3", "M3", "p", "文本", 40, 1, improvement=10, ai_ratio=0.40),
+        SingleModelResult("m3", "M3", "p", "文本", 40, 1, improvement=10, ai_ratio=0.40,
+                          original_ai_ratio=0.90),
     ]
     assert storage.process_challenge_results("玄幻", [third], results) == ["qwen-plus"]
 
     storage.save_config({"eliminated_models": {"玄幻": ["qwen-plus"]}})
     fourth = SingleModelResult(
-        "qwen-plus", "Qwen", "p", "文本", 35, 1, improvement=15, ai_ratio=0.35
+        "qwen-plus", "Qwen", "p", "文本", 35, 1, improvement=15, ai_ratio=0.35,
+        original_ai_ratio=0.85,
     )
     results = [
-        SingleModelResult("m1", "M1", "p", "文本", 10, 1, improvement=40, ai_ratio=0.10),
-        SingleModelResult("m2", "M2", "p", "文本", 20, 1, improvement=30, ai_ratio=0.20),
-        SingleModelResult("m3", "M3", "p", "文本", 30, 1, improvement=20, ai_ratio=0.30),
+        SingleModelResult("m1", "M1", "p", "文本", 10, 1, improvement=40, ai_ratio=0.10,
+                          original_ai_ratio=0.60),
+        SingleModelResult("m2", "M2", "p", "文本", 20, 1, improvement=30, ai_ratio=0.20,
+                          original_ai_ratio=0.70),
+        SingleModelResult("m3", "M3", "p", "文本", 30, 1, improvement=20, ai_ratio=0.30,
+                          original_ai_ratio=0.80),
         fourth,
     ]
     assert storage.process_challenge_results("玄幻", [fourth], results) == []
@@ -374,16 +386,24 @@ async def test_challenge_preserves_semantic_review_for_regular_baseline(tmp_path
         return SingleModelResult(
             "qwen-plus", "Qwen", "p", "文本", 35, 1,
             fidelity_similarity=40, semantic_review=_semantic_review(),
+            ai_ratio=0.30, original_ai_ratio=0.80,
         )
 
     monkeypatch.setattr(service, "_evaluate_single_model", evaluate)
+    # 🔧 2026-10-17：准入守门改用确定AI占比降幅后，baseline 字典也必须带
+    # ai_ratio / original_ai_ratio —— 否则 baseline 会被判不合格，
+    # 挑战者自动「进入前三」而复活，本用例要守的语义（挑战者不该复活）就失真了。
+    # 取真实量级：baseline 三个模型 ratio 0.30/0.20/0.10，原文均为 0.80。
     baseline = [
         {
             "model_id": f"m{index}", "model_name": f"M{index}", "provider": "p",
             "ai_score": score, "latency_seconds": 1, "fidelity_similarity": 40,
             "semantic_review": _semantic_review(), "hybrid_score": score,
+            "ai_ratio": ratio, "original_ai_ratio": 0.80,
         }
-        for index, score in enumerate((10, 20, 30), start=1)
+        for index, (score, ratio) in enumerate(
+            zip((10, 20, 30), (0.30, 0.20, 0.10)), start=1
+        )
     ]
 
     result = await service.run_challenge_round(
@@ -424,10 +444,12 @@ def test_combination_performance_is_isolated_by_genre_prompt_and_model(tmp_path)
     fantasy = SingleModelResult(
         "qwen-plus", "Qwen", "alibaba", "文本", 18, 1.2,
         improvement=42, fidelity_similarity=86,
+        ai_ratio=0.30, original_ai_ratio=0.80,
     )
     urban = SingleModelResult(
         "qwen-plus", "Qwen", "alibaba", "文本", 35, 1.0,
         improvement=25, fidelity_similarity=92,
+        ai_ratio=0.30, original_ai_ratio=0.80,
     )
 
     storage.update_combination_performance(fantasy, "玄幻", "prompt-v1", "玄幻提示词")
@@ -447,10 +469,12 @@ def test_best_combination_excludes_results_below_fidelity_gate(tmp_path):
     low_ai_but_unfaithful = SingleModelResult(
         "qwen-plus", "Qwen", "alibaba", "文本", 5, 1,
         fidelity_similarity=40,
+        ai_ratio=0.05, original_ai_ratio=0.80,
     )
     faithful = SingleModelResult(
         "deepseek-flash", "DeepSeek", "deepseek", "文本", 20, 1,
         fidelity_similarity=85, improvement=30,
+        ai_ratio=0.30, original_ai_ratio=0.80,
     )
     storage.update_combination_performance(low_ai_but_unfaithful, "玄幻", "bad", "失真提示词")
     storage.update_combination_performance(faithful, "玄幻", "good", "保真提示词")
@@ -466,6 +490,7 @@ def test_model_result_with_failed_semantic_review_is_not_eligible():
     result = SingleModelResult(
         "m1", "M1", "p", "文本", 0, 1,
         fidelity_similarity=95,
+        ai_ratio=0.30, original_ai_ratio=0.80,
         semantic_review={"available": True, "hard_fail": True},
     )
 
@@ -485,16 +510,19 @@ def test_semantic_review_allows_lower_lexical_fidelity_but_requires_low_risk():
     accepted = SingleModelResult(
         "m1", "M1", "p", "文本", 0, 1,
         fidelity_similarity=33, improvement=50,
+        ai_ratio=0.30, original_ai_ratio=0.80,
         semantic_review=review,
     )
     medium_risk = SingleModelResult(
         "m2", "M2", "p", "文本", 0, 1,
         fidelity_similarity=45, improvement=50,
+        ai_ratio=0.30, original_ai_ratio=0.80,
         semantic_review={**review, "over_rewrite_risk": "medium"},
     )
     no_review = SingleModelResult(
         "m3", "M3", "p", "文本", 0, 1,
         fidelity_similarity=45, improvement=50,
+        ai_ratio=0.30, original_ai_ratio=0.80,
         semantic_review={"available": False},
     )
 
@@ -508,6 +536,7 @@ def test_unfaithful_result_does_not_enter_model_success_statistics(tmp_path):
     result = SingleModelResult(
         "qwen-plus", "Qwen", "alibaba", "文本", 3, 1,
         improvement=50, fidelity_similarity=45,
+        ai_ratio=0.30, original_ai_ratio=0.80,
     )
 
     storage.update_performance(result, "玄幻")
@@ -525,6 +554,7 @@ def test_best_model_for_selected_prompt_never_uses_another_prompt_version(tmp_pa
             SingleModelResult(
                 "qwen-plus", "Qwen", "alibaba", "文本", 30, 1,
                 fidelity_similarity=90, improvement=30,
+                ai_ratio=0.30, original_ai_ratio=0.80,
             ),
             "玄幻", "approved", "已批准提示词", sample_hash=f"approved-{index}",
         )
@@ -532,6 +562,7 @@ def test_best_model_for_selected_prompt_never_uses_another_prompt_version(tmp_pa
             SingleModelResult(
                 "deepseek-flash", "DeepSeek", "deepseek", "文本", 5, 1,
                 fidelity_similarity=90, improvement=55,
+                ai_ratio=0.05, original_ai_ratio=0.80,
             ),
             "玄幻", "other", "其他提示词", sample_hash=f"other-{index}",
         )
@@ -547,6 +578,7 @@ def test_repeated_same_sample_does_not_mature_combination(tmp_path):
     result = SingleModelResult(
         "qwen-plus", "Qwen", "alibaba", "文本", 20, 1,
         fidelity_similarity=90, improvement=40,
+        ai_ratio=0.30, original_ai_ratio=0.80,
     )
     for _ in range(5):
         storage.update_combination_performance(
@@ -604,6 +636,7 @@ def test_combination_tracks_variance_and_penalizes_uncertainty(tmp_path):
             SingleModelResult(
                 "qwen-plus", "Qwen", "alibaba", "文本", 100, 1,
                 fidelity_similarity=90, improvement=10, ai_ratio=ratio,
+                original_ai_ratio=min(1.0, ratio + 0.5),
             ),
             "玄幻", "p1", "提示词", sample_hash=f"s{index}",
         )
@@ -627,6 +660,7 @@ def test_composite_score_is_driven_by_ai_ratio_not_ai_score(tmp_path):
             SingleModelResult(
                 model_id, model_id, "p", "文本", 100, 1,
                 fidelity_similarity=90, improvement=10, ai_ratio=ratio,
+                original_ai_ratio=min(1.0, ratio + 0.5),
             ),
             "玄幻", "p1", "提示词", sample_hash="s1",
         )
@@ -642,7 +676,8 @@ def test_missing_ai_ratio_counts_as_worst(tmp_path):
     storage = ModelConfigStorage(str(tmp_path))
     storage.update_combination_performance(
         SingleModelResult("m1", "M1", "p", "文本", 100, 1,
-                          fidelity_similarity=90, improvement=10, ai_ratio=None),
+                          fidelity_similarity=90, improvement=10, ai_ratio=None,
+                          original_ai_ratio=0.80),
         "玄幻", "p1", "提示词", sample_hash="s1",
     )
     record = storage.load_combination_performance("玄幻")["p1"]["m1"]
@@ -654,6 +689,7 @@ def test_old_evaluation_policy_is_not_used_for_production_routing(tmp_path):
     result = SingleModelResult(
         "qwen-plus", "Qwen", "alibaba", "文本", 10, 1,
         fidelity_similarity=90, improvement=50,
+        ai_ratio=0.30, original_ai_ratio=0.80,
     )
     for index in range(3):
         storage.update_combination_performance(

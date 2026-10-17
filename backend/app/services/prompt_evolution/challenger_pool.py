@@ -15,11 +15,15 @@ from typing import Iterable, Optional, Sequence
 
 from .meta_optimizer import MetaOptimizer
 from .novel_rules import ALL_FORBIDDEN_WORDS
+from .semantic_judge import SemanticJudge
 
 # 七项准入门槛阈值（§3.2 ①②③）
-GATE_MIN_FIDELITY = 80.0
-GATE_MIN_FACT = 90.0
-GATE_MIN_COMPLETENESS = 75.0
+# 🔧 2026-10-17(P23)：原为裸字面量 80/90/75，与 meta_optimizer.QUALITY_GATES、
+# ai_trace_competition 准入门各写一份。本文件 docstring 自称把三处合格判断
+# 收敛为单一聚合函数，但阈值本身并未收敛 —— 现统一引用 SemanticJudge。
+GATE_MIN_FIDELITY = SemanticJudge.MIN_SEMANTIC_FIDELITY
+GATE_MIN_FACT = SemanticJudge.MIN_FACT_CONSISTENCY
+GATE_MIN_COMPLETENESS = SemanticJudge.MIN_INFORMATION_COMPLETENESS
 
 # strategy_desc → strategy_family 关键词映射（首个命中即归类，§3.1 分层统计分组键）
 _STRATEGY_FAMILY_KEYWORDS: tuple[tuple[str, tuple[str, ...]], ...] = (

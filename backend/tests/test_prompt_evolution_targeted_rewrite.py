@@ -337,8 +337,18 @@ class TestEvaluatorFactBottomLineHint:
         assert "事实底线" not in user_msg
 
     @pytest.mark.asyncio
-    async def test_fact_hint_not_stacked_on_targeted_hint(self, monkeypatch):
-        """已有定点指令时不再叠加事实底线——定点指令本身已含该条款，叠加会拉长指令。"""
+    async def test_fact_hint_not_duplicated_on_targeted_hint(self, monkeypatch):
+        """叠加事实底线时不得重复下发（冗余会挤占改写模型的注意力）。
+
+        🔧 2026-10-16 语义变更：本测试原名 test_fact_hint_not_stacked_on_targeted_hint，
+        前提是「定点指令自身已含事实条款，故不叠加」。该前提已证伪——
+        段落标注指令只有一句笼统的「不得改动事实、数字与专有名词」，
+        而事实底线是 5 条逐项核对，强度差约 5 倍，不构成等价替代。
+        实测 85337c99 的 8/8 样本走段落标注路径 → 全部漏收事实底线
+        → 事实一致<90 失格 5 次，为该轮首要失格原因。
+        故改为恒定叠加；本测试保留的意图是「不重复下发」，断言不变。
+        叠加行为的正向验证见 test_prompt_evolution_fact_line_always.py。
+        """
         monkeypatch.setattr(PromptEvaluator, "SEGMENT_HINT_ENABLED", True)
         monkeypatch.setattr(PromptEvaluator, "FACT_HINT_ENABLED", True)
         monkeypatch.setattr(PromptEvaluator, "DEANCHOR_ENABLED", False)

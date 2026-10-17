@@ -31,12 +31,41 @@ class ZhuqueAIDetectService:
 
     PROVIDER = "zhuque-text"
     CLASSIFY_PATH = "/v1/providers/zhuque-text/classify"
+
+    # 🔧 429 退避参数（2026-10-16 依真实轮次 86cff7f7 取证调整）。
+    # 原实现 RATE_LIMIT_BACKOFF_SECONDS=1.0 且**只重试 1 次**，实测 A/B 阶段
+    # （20:18:40→20:39，21 分钟）内朱雀 429 告警 23 次。每次限流仅等1 秒就再试，
+    # 限流窗口根本没关闭，重试必然再撞 429，最终 success=False。
+    # 而检测失败会让该样本 rewritten_ai_ratio 缺失 → 上层判 detect_failed，
+    # 即「限流」直接转化为「进化数据缺口」（P5 中 detect_failed 的真实来源）。
+    # 改为：多次重试 + 指数退避（上限封顶，避免无界等待）。
     RATE_LIMIT_BACKOFF_SECONDS = 1.0
+    RATE_LIMIT_BACKOFF_FACTOR = 2.0
+    RATE_LIMIT_MAX_BACKOFF_SECONDS = 8.0
+    RATE_LIMIT_MAX_ATTEMPTS = 4          # 首次调用 + 3 次重试
+
+    # 🔧 检测侧独立并发闸门（2026-10-16）。
+    # A/B 阶段 4 个候选 × 8 样本 = 32 个检测请求会同时打向朱雀，
+    # 而 MODEL_MAX_CONCURRENCY={"step": 4} 只约束改写模型（LLM 网关），
+    # 检测走的是另一个网关，此前完全没有闸门，实测触发大量 429。
+    # 取 6：既能并行摊薄耗时，又明显低于触发 429 的水位。
+    DETECTION_MAX_CONCURRENCY = 6
 
     def __init__(self):
         self.gateway_url = getattr(settings, "ZHUQUE_GATEWAY_URL", "")
         self.api_key = getattr(settings, "ZHUQUE_API_KEY", "")
         self.is_merge = getattr(settings, "ZHUQUE_IS_MERGE", False)
+        # 事件循环内惰性创建信号量：构造期可能早于 loop 建立
+        self._detect_semaphore: Optional[asyncio.Semaphore] = None
+        # 退避睡眠的可注入点：测试需观测退避时长序列，但直接 patch
+        # `asyncio.sleep` 会连测试自身的模拟请求延迟一起吞掉（全局模块属性）。
+        self._sleep = asyncio.sleep
+
+    def _get_detect_semaphore(self) -> asyncio.Semaphore:
+        """取检测并发闸门（惰性创建，避免跨事件循环复用旧信号量）。"""
+        if self._detect_semaphore is None:
+            self._detect_semaphore = asyncio.Semaphore(self.DETECTION_MAX_CONCURRENCY)
+        return self._detect_semaphore
 
     @property
     def classify_url(self) -> str:
@@ -152,22 +181,40 @@ class ZhuqueAIDetectService:
         payload = self._build_payload(text)
         headers = self._build_headers()
 
+        # 🔧 检测并发闸门：把并发压在阈值内，从源头减少 429。
+        # 闸门只包裹请求本身，退避期间不占用（否则限流时会雪上加霜）。
+        # 外层 try 覆盖信号量与解析阶段的意外异常；限流已在内层循环单独处理。
         try:
-            try:
-                result = await self._post_json(self.classify_url, headers, payload)
-            except RateLimitedError:
-                logger.warning(f"朱雀网关限流，{self.RATE_LIMIT_BACKOFF_SECONDS} 秒后重试一次")
-                await asyncio.sleep(self.RATE_LIMIT_BACKOFF_SECONDS)
-                result = await self._post_json(self.classify_url, headers, payload)
-            return self._parse_response(result, text)
-        except RateLimitedError as e:
-            logger.warning(f"朱雀网关限流重试后仍失败: {e}")
-            return {
-                "success": False,
-                "error": str(e),
-                "ai_score": None,
-                "rate_limited": True,
-            }
+            async with self._get_detect_semaphore():
+                backoff = self.RATE_LIMIT_BACKOFF_SECONDS
+                last_error: Optional[str] = None
+                for attempt in range(1, self.RATE_LIMIT_MAX_ATTEMPTS + 1):
+                    try:
+                        result = await self._post_json(self.classify_url, headers, payload)
+                        return self._parse_response(result, text)
+                    except RateLimitedError as e:
+                        last_error = str(e)
+                        if attempt >= self.RATE_LIMIT_MAX_ATTEMPTS:
+                            logger.warning(
+                                f"朱雀网关限流重试{attempt - 1} 次后仍失败: {e}"
+                            )
+                            break
+                        logger.warning(
+                            f"朱雀网关限流（{e}），{backoff:.1f} 秒后重试"
+                            f"（第 {attempt}/{self.RATE_LIMIT_MAX_ATTEMPTS - 1} 次）"
+                        )
+                        await self._sleep(backoff)
+                        # 指数退避：恒定 1 秒穿不过限流窗口
+                        backoff = min(
+                            backoff * self.RATE_LIMIT_BACKOFF_FACTOR,
+                            self.RATE_LIMIT_MAX_BACKOFF_SECONDS,
+                        )
+                return {
+                    "success": False,
+                    "error": last_error or "朱雀网关限流",
+                    "ai_score": None,
+                    "rate_limited": True,
+                }
         except Exception as e:
             import traceback
             error_msg = str(e) or repr(e) or "未知错误"

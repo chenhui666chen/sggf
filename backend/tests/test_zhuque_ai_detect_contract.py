@@ -178,6 +178,11 @@ def _patch_post(service, responses):
     return calls
 
 
+async def _no_sleep(_seconds):
+    """退避睡眠替身：让限流重试用例不真的等待（真实退避为 1→2→4 秒）。"""
+    return None
+
+
 def test_detect_ai_content_posts_to_classify_url_with_bearer():
     service = make_service()
     calls = _patch_post(service, [DOC_EXAMPLE_RESPONSE])
@@ -203,7 +208,9 @@ def test_detect_ai_content_missing_credentials_returns_failure():
 
 
 def test_detect_ai_content_retries_once_on_http_429():
+    """首次 429、重试成功 → 仍应成功（用最小重试次数验证通路）。"""
     service = make_service()
+    service._sleep = _no_sleep
     from app.services.zhuque_ai_detect import RateLimitedError
     calls = _patch_post(service, [RateLimitedError("429"), DOC_EXAMPLE_RESPONSE])
 
@@ -214,15 +221,47 @@ def test_detect_ai_content_retries_once_on_http_429():
 
 
 def test_detect_ai_content_exhausted_rate_limit_marks_rate_limited():
+    """重试耗尽后必须标记 rate_limited=True。
+
+    🔧 2026-10-16 语义修正：原实现只重试 1 次，故准备 2 次响应即耗尽。
+    真实轮次 86cff7f7 取证显示 A/B 阶段 429 告警 23 次，恒定 1 秒退避 +
+    单次重试穿不过限流窗口，检测失败直接转化为 ratio 缺失（detect_failed）。
+    现改为最多 4 次尝试（指数退避 1→2→4秒），故本用例按新上限准备响应。
+    """
     service = make_service()
+    service._sleep = _no_sleep
     from app.services.zhuque_ai_detect import RateLimitedError
-    calls = _patch_post(service, [RateLimitedError("429"), RateLimitedError("429")])
+    attempts = ZhuqueAIDetectService.RATE_LIMIT_MAX_ATTEMPTS
+    calls = _patch_post(service, [RateLimitedError("429")] * attempts)
 
     result = asyncio.run(service.detect_ai_content("hello world"))
 
     assert result["success"] is False
-    assert result["rate_limited"] is True
-    assert len(calls) == 2
+    assert result["rate_limited"] is True, (
+        "限流耗尽必须标记 rate_limited=True：否则上层无法区分限流与检测故障，"
+        "归因会再次失准"
+    )
+    assert len(calls) == attempts
+
+
+def test_detect_ai_content_rate_limit_backoff_is_increasing():
+    """退避必须递增（恒定 1 秒穿不过限流窗口）。"""
+    service = make_service()
+    from app.services.zhuque_ai_detect import RateLimitedError
+    attempts = ZhuqueAIDetectService.RATE_LIMIT_MAX_ATTEMPTS
+    _patch_post(service, [RateLimitedError("429")] * attempts)
+
+    slept: list = []
+
+    async def _record(seconds):
+        slept.append(seconds)
+
+    service._sleep = _record
+    asyncio.run(service.detect_ai_content("hello world"))
+
+    assert len(slept) == attempts - 1
+    assert slept == sorted(slept), f"退避未递增: {slept}"
+    assert slept[-1] > slept[0], f"退避未增长: {slept}"
 
 
 def test_detect_ai_content_network_error_returns_failure_dict():

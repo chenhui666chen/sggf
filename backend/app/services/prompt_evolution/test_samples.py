@@ -11,6 +11,7 @@ from datetime import datetime
 import hashlib
 import json
 import uuid
+import asyncio
 import logging
 from pathlib import Path
 
@@ -24,6 +25,12 @@ HOLDOUT_RATIO = 0.3
 # 且用户端真实使用场景为约3000字章节改写；低于该长度的样本会被跳过
 # 并从池中清除，避免短文本虚假信号污染进化排名
 MIN_SAMPLE_TEXT_LENGTH = 2500
+
+# 🔧 样本生成并发上限（2026-10-16）。与 evaluator.MODEL_MAX_CONCURRENCY["step"]
+# 取同一数值：StepFun 阶梯模型限速并发上限 5，留一层余量压到 4。
+# 样本生成与评估若各跑各的信号量，总并发会叠加突破上游限流阈值，
+# 因此两处口径必须一致。
+GENERATION_CONCURRENCY = 4
 
 
 def is_holdout_sample_id(sample_id: str) -> bool:
@@ -520,6 +527,18 @@ async def generate_samples_via_llm(
     """
     使用 LLM 自动生成测试样本
 
+    🔧 2026-10-16 并发化：原实现是双层串行 for 循环逐个 await，
+    实测每样本约 36 秒，8 样本近 5 分钟。而同链路的评估阶段
+    （`evaluator._evaluate_samples_concurrently`）本就有 8 路并发 + 信号量限流，
+    两者效率极不对称。现改为「每题材一个 task + 题材内 gather + 全局信号量」。
+
+    保持不变的关键语义：
+    - sample_id 唯一（uuid4，与并发无关）
+    - created_at 整批共享（批次语义，不随并发各自取时间）
+    - 单样本失败被隔离，不中断整批（gather + return_exceptions=True）
+    - 长度门槛 MIN_SAMPLE_TEXT_LENGTH 依旧生效
+    - 结果按「题材声明顺序 × 题材内序号」稳定排列，不随完成先后抖动
+
     Args:
         genres: 要生成的题材列表（None=全部7种）
         count_per_genre: 每种题材生成的样本数
@@ -532,14 +551,28 @@ async def generate_samples_via_llm(
     llm = get_llm_client()
     target_genres = genres or list(_GENRE_GENERATION_PROMPTS.keys())
     generated: List[TestSample] = []
+    # 批次时间戳：整批共享，避免并发下各样本 created_at 漂移
     now = datetime.now().isoformat()
 
-    for genre in target_genres:
-        prompt = _GENRE_GENERATION_PROMPTS.get(genre)
-        if not prompt:
+    # 待生成任务清单：(题材声明序号, 题材, 题材内序号)
+    tasks_meta: List[tuple] = []
+    for genre_index, genre in enumerate(target_genres):
+        if genre not in _GENRE_GENERATION_PROMPTS:
             continue
-
         for i in range(count_per_genre):
+            tasks_meta.append((genre_index, genre, i + 1))
+
+    if not tasks_meta:
+        logger.info("无可用题材提示模板，未生成任何样本")
+        return generated
+
+    # 🔧 并发上限：StepFun 阶梯模型限速并发上限 5，留余量压到 4，
+    # 与 evaluator 的 MODEL_MAX_CONCURRENCY["step"] 保持同一口径。
+    sem = asyncio.Semaphore(GENERATION_CONCURRENCY)
+
+    async def _gen_one(genre: str, ordinal: int) -> Optional[TestSample]:
+        prompt = _GENRE_GENERATION_PROMPTS[genre]
+        async with sem:
             try:
                 messages = [
                     {"role": "system", "content": "你是一位网络小说作家，擅长各种题材的创作。请直接输出小说正文内容，不要加标题、解释或格式标记。"},
@@ -553,23 +586,50 @@ async def generate_samples_via_llm(
 
                 if result and len(result.strip()) >= MIN_SAMPLE_TEXT_LENGTH:
                     sample_id = f"auto_{genre}_{uuid.uuid4().hex[:8]}"
-                    generated.append(TestSample(
+                    logger.info(
+                        f"自动生成样本: {sample_id} ({genre}, {len(result.strip())}字)"
+                    )
+                    return TestSample(
                         sample_id=sample_id,
                         text=result.strip(),
                         genre=genre,
                         description=f"自动生成 - {genre}小说片段",
                         source=SampleSource.AUTO,
                         created_at=now,
-                    ))
-                    logger.info(f"自动生成样本: {sample_id} ({genre}, {len(result.strip())}字)")
-                else:
-                    logger.warning(
-                        f"自动生成样本长度不足 {MIN_SAMPLE_TEXT_LENGTH} 字或为空: {genre} #{i+1}"
                     )
+                logger.warning(
+                    f"自动生成样本长度不足 {MIN_SAMPLE_TEXT_LENGTH} 字或为空: "
+                    f"{genre} #{ordinal}"
+                )
+                return None
             except Exception as e:
-                logger.error(f"自动生成样本失败: {genre} #{i+1}: {e}")
+                # 单样本失败只记录不抛出：并发下任何一个 task 抛异常都会
+                # 让整个 gather 崩溃，把已完成的样本一并丢弃。
+                logger.error(f"自动生成样本失败: {genre} #{ordinal}: {e}")
+                return None
 
-    logger.info(f"自动生成完成: {len(generated)}/{len(target_genres) * count_per_genre} 个样本")
+    results = await asyncio.gather(
+        *[_gen_one(genre, ordinal) for _, genre, ordinal in tasks_meta],
+        return_exceptions=True,
+    )
+
+    # 按 (题材声明序号, 题材内序号) 稳定排序：gather 保持输入顺序，
+    # 但此处仍显式排序，使返回顺序不依赖并发调度细节。
+    produced: List[tuple] = []
+    for (genre_index, genre, ordinal), item in zip(tasks_meta, results):
+        if isinstance(item, BaseException):
+            # 理论上 _gen_one 已吞掉所有异常，这里是最后一道防线
+            logger.error(f"自动生成样本异常: {genre} #{ordinal}: {item}")
+            continue
+        if item is not None:
+            produced.append((genre_index, ordinal, item))
+
+    produced.sort(key=lambda x: (x[0], x[1]))
+    generated.extend(item for _, _, item in produced)
+
+    logger.info(
+        f"自动生成完成: {len(generated)}/{len(tasks_meta)} 个样本"
+    )
     return generated
 
 

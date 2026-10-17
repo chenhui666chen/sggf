@@ -44,7 +44,12 @@ def test_preset_experiences_stay_within_detector_features_and_fidelity_boundary(
         assert required_direction in combined
 
 
-def make_result(*, reduction=30, success=True, semantic=95, fact=95, complete=95, risk="low"):
+def make_result(*, reduction=30, success=True, semantic=95, fact=95, complete=95, risk="low",
+                ai_ratio=None):
+    # 🔧 2026-10-16：ai_ratio 默认由 reduction 推导（reduction=30 → ratio 0.3），
+    # 与 A/B 排名主项一致；显式传 ai_ratio=None 可构造「检测链路失效」场景。
+    if ai_ratio is None:
+        ai_ratio = (99 - reduction) / 100.0
     return EvaluationResult(
         sample_id="sample", original_text="原文", rewritten_text="改写",
         original_ai_score=99, rewritten_ai_score=99 - reduction,
@@ -57,6 +62,7 @@ def make_result(*, reduction=30, success=True, semantic=95, fact=95, complete=95
             "over_rewrite_risk": risk,
             "hard_fail": False,
         },
+        rewritten_ai_ratio=ai_ratio,
     )
 
 
@@ -228,24 +234,34 @@ def test_ab_candidate_requires_every_planned_sample_to_pass_quality():
 
 
 def test_ab_rank_penalizes_minority_hard_failures_but_disqualifies_majority():
-    passed = make_result()  # 语义评审全部95/低过度改写 → 人感成本 = 2.0
+    passed = make_result()  # ratio 0.69；无 writing_naturalness → 人感成本按缺省 100 计入
     failed = make_result(success=False)
     failed.error = "事实一致性低于90"
 
-    # 全部通过：排名分取成功样本"人感成本"中位数（2.0），而非 TMS 均值 30.0 或中位数 69
-    assert PromptEvolutionEngine._ab_rank_score(30.0, [passed] * 4, 4) == 2.0
-    # 少数（1/4）硬失败：保留资格但按比例加罚分（中位数 2.0 + 1/4*60）
+    # 🔧 2026-10-16 排名公式 = 失格数(层号) + ratio 中位数 + 人感成本中位数×0.01
+    # （P15 改为帕累托分层：质量从加权项变为分层键）
+    def expected(ratio_median: float, failed_count: int = 0) -> float:
+        return failed_count + ratio_median + PromptEvolutionEngine._median_human_cost(
+            [passed] * 4
+        ) * PromptEvolutionEngine.HUMAN_COST_TIEBREAK_WEIGHT
+
+    # 全部通过：层号 0 + ratio 中位数 + 人感成本并列项
+    full_pass = PromptEvolutionEngine._ab_rank_score(30.0, [passed] * 4, 4)
+    assert full_pass == pytest.approx(expected(0.69))
+    # 少数（1/4）硬失败：保留资格但落入层号 1（layer 优先于 ratio）
     minority_score = PromptEvolutionEngine._ab_rank_score(
         30.0, [passed, passed, passed, failed], 4
     )
-    assert 2.0 < minority_score <= 100.0
-    assert minority_score == pytest.approx(17.0)
-    # 多数（3/4）硬失败：取消资格
+    assert minority_score == pytest.approx(expected(0.69, failed_count=1))
+    assert minority_score <= 100.0
+    # 🔧 分层语义：少数失格者必须排在全通过者之后（质量准入，不折价）
+    assert minority_score > full_pass
+    # 多数（3/4）硬失败：取消资格（>100 即失格）
     assert PromptEvolutionEngine._ab_rank_score(
         30.0, [passed, failed, failed, failed], 4
-    ) == 101.0
+    ) > 100.0
     # 样本缺失按失败计：缺 3 个即多数失败
-    assert PromptEvolutionEngine._ab_rank_score(30.0, [passed], 4) == 101.0
+    assert PromptEvolutionEngine._ab_rank_score(30.0, [passed], 4) > 100.0
 
 
 def test_quality_failure_summary_collects_hard_fail_reasons():

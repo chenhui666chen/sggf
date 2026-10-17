@@ -33,12 +33,18 @@ logger = logging.getLogger(__name__)
 # 永久错误：重试与换模型都改变不了结果，命中即停止，不把"点名模型没被调用"掩盖成成功。
 # - client_not_initialized：api_key_env 指向的变量没配置（core/llm_adapters.py 里唯一置位点），纯配置缺失
 # - invalid_request：400 且报文是参数越界/枚举不符/参数组合被拒
+# - insufficient_quota：账户余额不足（HTTP 402）。P36 实测：DeepSeek 欠费时
+#   一次批次产生 123 次 insufficient_quota，同一 prompt 重试多少次都不会成功 ——
+#   属于"重试改变不了结果"的典型，留在重试循环里只会白白烧掉 max_retries 轮。
+#   同时它会继续走到下方 record_failure 计入熔断（阈值 5），
+#   使 _is_available 转false ⇒ review 候选池自动切到备选模型（doubao-seed-evolving）。
 # unknown_error 不在此列：它是 _map_error_code 的兜底，真瞬时故障也会落这里，必须保留韧性。
 _PERMANENT_ERROR_CODES = frozenset({
     "auth_error",
     "model_not_found",
     "client_not_initialized",
     "invalid_request",
+    "insufficient_quota",
 })
 
 
@@ -283,7 +289,19 @@ class ModelHub:
 
                 last_result = result
 
+                # 🔧 P36：熔断记账必须早于任何 break。
+                # 原实现把 record_failure 放在重试分支之后，于是走 break 的
+                # 永久错误（auth_error / invalid_request / insufficient_quota）
+                # 永远不会计入熔断 ⇒_is_available 恒为 true ⇒
+                # unified_registry._select_best 的 fallback 分支永远进不去。
+                # 这正是「已配fallback_models 却从不生效」的直接原因。
+                self.registry.record_failure(model_id, result.error_code or "unknown")
+
                 if result.error_code in _PERMANENT_ERROR_CODES:
+                    logger.warning(
+                        "永久错误，停止重试并计入熔断 | model=%s error=%s",
+                        model_id, result.error_code,
+                    )
                     break
                 if result.error_code == "content_safety":
                     break  # 同 prompt 重试无意义，由下方内容安全回退链路处理
@@ -314,8 +332,6 @@ class ModelHub:
                                 previous_timeout,
                                 next_timeout,
                             )
-
-                self.registry.record_failure(model_id, result.error_code or "unknown")
 
             except Exception as e:
                 logger.error(f"❌ 调用异常: {e}")

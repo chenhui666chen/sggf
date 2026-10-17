@@ -180,8 +180,42 @@ META_OPTIMIZER_PROMPT = """你是一个提示词优化专家。你的任务是�
 
 【测试结果概览】
 - 平均AI检测得分: {avg_score}/100 (目标: ≤{target_score})
+- 🔧 确定AI段落占比: {ai_ratio_pct}%  ← 这是真实优化目标，越低越好。
+  上面的「平均AI检测得分」在 LLM 改写区间恒为 100（把 AI 段落改判「疑似」不会让它下降），
+  只有本项能反映改写带来的真实进步，请以本项为准做归因。
 - 成功样本: {success_count}/{total_count}
 - 平均降分幅度: {avg_reduction}分
+
+═══════════════════════════════════════
+【质量短板分析】
+═══════════════════════════════════════
+{quality_gap_analysis}
+
+**质量短板如何使用**（关键）：
+- 若上面标出了「主要瓶颈」，本轮改进**必须**针对该维度做针对性加固——
+  在提示词中新增或强化对应的信息锁定类指令，而不是继续只调降AI率的语言手法。
+- 若出现了「擦线样本」，说明它们本轮达标、下轮很可能因边界值被拒。
+  必须针对这些样本的共同短板加严指令（如专名/数字/因果/否定关系的逐项核对），
+  否则同样的擦线现象会在下一轮重复出现。
+- 「低于门槛 N/M 样本」是失格比例的直接证据：N 越大，说明当前提示词在
+  质量侧越不可靠，此时继续加大改写力度会让失格率进一步上升。
+- 严禁用「降低降AI率力度」来掩盖质量短板——那是用不可用的版本换分数。
+
+═══════════════════════════════════════
+【段落级检测真值特征】
+═══════════════════════════════════════
+{segment_insight}
+
+**段落真值如何使用**（关键）：
+- 上面是**检测器逐段落给出的真实判定**（不是评审模型的猜测），
+  「确定AI段落」的形态就是当前提示词改写后仍被认成AI的具体证据。
+- 必须按**跨样本复现的系统性模式**归因（如整体句长偏整齐、高频相同开头/结尾），
+  不得把单个段落的现象当作通用策略。
+- 高频开头/结尾与段长分布是指令改写方向的最可靠依据：
+  若某模式在多个被判定为AI的段落里反复出现，应在提示词中抽象出
+  「消除该模式」的约束，而不是列举具体词表做一对一替换。
+- 段落样例仅供理解形态，**严禁**把它们当固定语境示例写进新提示词。
+- 若本轮无段落被判定为确定AI，不要强行编造段落层面的策略。
 
 ═══════════════════════════════════════
 【成功样本分析】- 降分效果好的案例
@@ -892,6 +926,13 @@ E类：句法明显机械 → 根据上下文自然调整，不以"复杂化"为
 让人物说他此刻会说的话，让动作只完成它实际完成的事，让事实之间自己产生意义；旁白不到必须解释的时候，不替它们解释。"""
 
 
+def _ratio_pct(ratio: Optional[float]) -> str:
+    """0-1 段落占比转百分比文本；缺失返回 N/A（不伪造 0）。"""
+    if ratio is None:
+        return "N/A"
+    return f"{ratio * 100:.1f}"
+
+
 def build_candidate_challengers(genre: Optional[str] = None) -> List[Tuple[str, str]]:
     """确定性候选挑战者变体：[(提示词, 描述), ...]。
 
@@ -1011,10 +1052,220 @@ class MetaOptimizer:
         if review.get("over_rewrite_risk") != "low":
             return False
         return (
-            review.get("semantic_fidelity", {}).get("score", 0) >= 80
-            and review.get("fact_consistency", {}).get("score", 0) >= 90
-            and review.get("information_completeness", {}).get("score", 0) >= 75
+            # 🔧 2026-10-17(P23)：改引用 QUALITY_GATES，不再用裸字面量。
+            # 本函数决定哪些样本能沉淀为「成功经验」，与版本准入、
+            # 竞争准入门是同一套质量判据，必须同源。
+            review.get("semantic_fidelity", {}).get("score", 0)
+                >= MetaOptimizer.QUALITY_GATES["semantic_fidelity"]
+            and review.get("fact_consistency", {}).get("score", 0)
+                >= MetaOptimizer.QUALITY_GATES["fact_consistency"]
+            and review.get("information_completeness", {}).get("score", 0)
+                >= MetaOptimizer.QUALITY_GATES["information_completeness"]
         )
+
+    # 🔧 2026-10-16：质量硬门槛（与 semantic_judge._normalize 的 hard_fail 判定同源）。
+    # 抽成常量是避免短板分析与准入判定两处漂移——门槛若只写在一处，
+    # 优化器会拿到与实际准入不一致的差值，给出错误的强化方向。
+    QUALITY_GATES = {
+        "semantic_fidelity": 80.0,
+        "fact_consistency": 90.0,
+        "information_completeness": 75.0,
+    }
+    QUALITY_GATE_LABELS = {
+        "semantic_fidelity": "语义保真",
+        "fact_consistency": "事实一致",
+        "information_completeness": "信息完整",
+    }
+    # 🔧 擦线带：达标但距门槛不足该值视为高风险。
+    # 依据 2026-10-16 实测：事实分大量落在 88~96，门槛 <90 严格卡边界，
+    # ratio 最优的一轮因事实=90 被拒。此类样本「本轮过关、下轮易失格」，
+    # 必须在归因里显式提示，否则优化器只会看到「成功」而无意加固。
+    QUALITY_NEAR_THRESHOLD_MARGIN = 3.0
+
+    # 🔧 段落特征统计的取样上限：单轮样本 × 每样本段落数可能很多，
+    # 全量塞进提示词会挤占 max_tokens 预算（末尾 IMPROVED_PROMPT 段易被截断）。
+    SEGMENT_INSIGHT_MAX_AI_SEGMENTS = 60
+    SEGMENT_INSIGHT_TOP_N = 8
+
+    @classmethod
+    def _build_segment_insight(cls, samples: List[EvaluationResult]) -> str:
+        """聚合朱雀段落级真值，输出被判定为「确定AI」的段落系统性特征。
+
+        🔧 2026-10-16：回应「是否该分析样本特征帮助改写提示词」——
+        应当分析，且这是唯一可得的**检测器真值**（不是LLM猜测）。
+        朱雀逐段返回 label，改写层已用它生成定点指令，但进化层从未消费：
+        优化器只拿到 ratio 这个数字，无法知道被判AI的段落长什么样，
+        只能继续盲调。聚合后给出句长分布 + 高频开头/结尾词 + 位置分布，
+        让优化器归纳的是跨样本复现的**系统性模式**，而不是单段个例。
+
+        label=2（疑似）不计入：那是改写的真实进步方向，统计进来会让
+        优化器误以为「疑似段落也是需要攻克的缺陷」。
+        """
+        all_segs = []
+        for r in samples:
+            for seg in (r.rewritten_segments or []):
+                if isinstance(seg, dict):
+                    all_segs.append(seg)
+
+        if not all_segs:
+            return "N/A（无段落级标注，本轮无法做段落特征归因）"
+
+        ai_segs = [s for s in all_segs if s.get("label") == 1]
+        if not ai_segs:
+            return (
+                f"共 {len(all_segs)} 段落，无一段被判「确定AI」——"
+                "本轮降分已不依赖段落级突破，无需再从段落特征找抓手"
+            )
+
+        ai_segs = ai_segs[: cls.SEGMENT_INSIGHT_MAX_AI_SEGMENTS]
+        lengths = [len(str(s.get("text", ""))) for s in ai_segs]
+
+        # 开头/结尾高频字：检测器匹配的是句式统计特征而非词表，
+        # 高频开头/结尾是最容易跨样本复现的模式信号。
+        opens = [str(s.get("text", "")).lstrip()[:2] for s in ai_segs]
+        closes = [str(s.get("text", "")).rstrip()[-2:] for s in ai_segs]
+        open_top = cls._top_items(opens, cls.SEGMENT_INSIGHT_TOP_N)
+        close_top = cls._top_items(closes, cls.SEGMENT_INSIGHT_TOP_N)
+
+        lines = [
+            f"本轮共 {len(all_segs)} 段落，其中 {len(ai_segs)} 段被判「确定AI」"
+            f"（占 {len(ai_segs) / len(all_segs) * 100:.0f}%，按检测器真值统计）",
+            f"├─ 确定AI 段落平均长度: {sum(lengths) / len(lengths):.0f} 字"
+            f"（最短 {min(lengths)}，最长 {max(lengths)}）",
+        ]
+        if open_top:
+            lines.append(f"├─ 高频开头: {'、'.join(open_top)}")
+        if close_top:
+            lines.append(f"├─ 高频结尾: {'、'.join(close_top)}")
+
+        # 样例：给出 3 段原文供优化器看形态（抽象描述手法，不给固定语境示例）
+        samples_show = [str(s.get("text", ""))[:60] for s in ai_segs[:3]]
+        if samples_show:
+            lines.append("├─ 确定AI 段落样例（仅示意形态，禁止作为固定语境示例套用）:")
+            for i, t in enumerate(samples_show, 1):
+                if t:
+                    lines.append(f"│   {i}. {t}")
+
+        return "\n".join(lines)
+
+    @staticmethod
+    def _top_items(items: List[str], top_n: int) -> List[str]:
+        """按出现次数降序取前 N 个（并列按首次出现序，保持稳定可复现）。"""
+        counts: Dict[str, int] = {}
+        first_seen: Dict[str, int] = {}
+        for idx, item in enumerate(items):
+            if not item:
+                continue
+            counts[item] = counts.get(item, 0) + 1
+            first_seen.setdefault(item, idx)
+        ranked = sorted(counts.items(), key=lambda kv: (-kv[1], first_seen[kv[0]]))
+        # 只出现 1 次的短片段无统计意义，噪声大于信号
+        return [f"{k}({v}次)" for k, v in ranked[:top_n] if v >= 2]
+
+    @classmethod
+    def _build_quality_gap_analysis(cls, samples: List[EvaluationResult]) -> str:
+        """聚合全量样本的质量维度短板，指出主要瓶颈。
+
+        🔧 2026-10-16：必须覆盖**全量**样本而非仅失败样本。
+        原先反馈只有两条通路——成功样本给降分与 ratio、失败样本给错误原因，
+        于是「成功但质量擦线」这个形态（事实=90 被门槛拒绝）在任何区块都不可见，
+        优化器无从得知全军覆没的真实原因，只能继续按 ratio 方向盲改。
+
+        与均值的区别：单看均值会被擦线样本掩盖（本轮 3 个 95 + 1 个 82，
+        均值 91.75 看似达标，实际已有 25% 失格），故同时给出低于门槛的样本数。
+        """
+        reviewed = [
+            r for r in samples
+            if (r.llm_review or {}).get("available")
+        ]
+        if not reviewed:
+            return "N/A（本轮无有效语义评审数据，无法定位质量短板）"
+
+        lines = []
+        # 瓶颈排序键：(风险样本占比, 负向均值缺口)。风险占比优先——
+        # 2026-10-16 实测存档中事实一致均值 92.5 已过门槛 90，却有 3/4 样本
+        # 落在 90~92 擦线区，正是这些值导致整个版本被门槛拒绝；
+        # 只看均值会报「无短板」，优化器继续盲改。
+        best_rank = (-1.0, -1.0)
+        bottleneck_key = None
+        bottleneck_detail: Dict[str, float] = {}
+        near_threshold: List[str] = []
+
+        total = len(reviewed)
+        for key, gate in cls.QUALITY_GATES.items():
+            scores = [
+                float((r.llm_review or {}).get(key, {}).get("score", 0))
+                for r in reviewed
+            ]
+            # 低于门槛 = 已失格；擦线 = 达标但余量不足。两者都是风险样本。
+            below = sum(1 for s in scores if s < gate)
+            near = sum(
+                1 for s in scores
+                if gate <= s < gate + cls.QUALITY_NEAR_THRESHOLD_MARGIN
+            )
+            mean = sum(scores) / total
+            label = cls.QUALITY_GATE_LABELS[key]
+
+            risk_ratio = (below + near) / total
+            # 归一化到「占门槛百分比」做跨维度可比：三个门槛量纲不同，
+            # 直接比较分值差会让 75 分门槛的信息完整天然显得最差。
+            gap_pct = (gate - mean) / gate * 100.0
+
+            lines.append(
+                f"├─ {label}: 均值 {mean:.1f} / 门槛 {gate:.0f}"
+                f"（差 {mean - gate:+.1f}），低于门槛 {below}/{total} 样本"
+                + (f"，擦线 {near}/{total}" if near else "")
+            )
+
+            # 排序键用「风险占比」为主、负向缺口为辅；无风险样本不参与争夺瓶颈
+            if below + near > 0:
+                rank = (risk_ratio, -gap_pct)
+                if rank > best_rank:
+                    best_rank = rank
+                    bottleneck_key = key
+                    bottleneck_detail = {
+                        "below": below, "near": near, "total": total,
+                        "gap_pct": gap_pct,
+                    }
+
+            # 擦线样本点名：成功样本也要提示，便于优化器针对性加固
+            for r, s in zip(reviewed, scores):
+                if gate <= s < gate + cls.QUALITY_NEAR_THRESHOLD_MARGIN:
+                    near_threshold.append(
+                        f"{r.sample_id}({label}{s:.0f}，距门槛仅 {s - gate:+.0f})"
+                    )
+
+        if bottleneck_key is None:
+            header = "质量维度全部达标且无擦线样本，本轮无质量短板"
+        else:
+            b_label = cls.QUALITY_GATE_LABELS[bottleneck_key]
+            b_below = int(bottleneck_detail["below"])
+            b_near = int(bottleneck_detail["near"])
+            b_total = int(bottleneck_detail["total"])
+            if b_below > 0:
+                cause = (
+                    f"{b_below}/{b_total} 样本已失格，均值低于门槛 "
+                    f"{abs(float(bottleneck_detail['gap_pct'])):.1f}%"
+                )
+            else:
+                cause = (
+                    f"均值虽已过门槛，但 {b_near}/{b_total} 样本处于擦线区"
+                    f"（本轮侥幸过关、下轮极易被拒）"
+                )
+            header = (
+                f"⚠️ 主要瓶颈：{b_label}（{cause}）——"
+                f"本轮改进应优先针对该维度做针对性加固，其余维度维持现状即可"
+            )
+
+        near_line = ""
+        if near_threshold:
+            near_line = (
+                "\n├─ 擦线样本（达标但距门槛不足 "
+                f"{cls.QUALITY_NEAR_THRESHOLD_MARGIN:.0f} 分，下轮易失格）："
+                + "、".join(near_threshold[:8])
+            )
+
+        return "\n".join([header, *lines, near_line]).rstrip()
 
     # 🔧 固定语境整句改写示例检测（“原句”→“改句”）：示例语境固定，改写模型
     # 遇到语境不同的真实样本时机械套用会导致否定反转等事实篡改
@@ -1025,7 +1276,33 @@ class MetaOptimizer:
     # 🔧 指令式示例检测（如“像一片枯叶”）：带引号且≥4字的示例素材同样会被
     # 改写模型机械套用；短词禁用表（引号内<4字，如“深邃”）不受影响
     _INSTRUCTION_EXAMPLE_PATTERN = re.compile(
+        # 形态A：引导词在引号之前——「例如“夜色浓稠如墨”」
         r"(?:如|例如|示例)[^\n]{0,20}[“\"][^“”\"]{4,40}[”\"]"
+        # 形态B：引导/引用动词在引号之前、指示词在引号之后——
+        #        「采用“夜色浓稠如墨”这类表达」「写成“他忽然明白”那样」
+        #🔧 2026-10-16 补充：实测经验池里此类形态多于形态A，原正则整类漏检
+        r"|(?:采用|使用|写成|改为|换成|改成)[^\n]{0,12}[“\"][^“”\"]{4,40}[”\"]"
+        r"[^\n]{0,6}(?:这类|这种|那样|这样的|那类)"
+    )
+    # 🔧 括号内对照式示例（2026-10-16 c9ccd818 取证补充）。
+    # 上述两条正则各有上下文前提（替换动词 / 引导词），而经验池里最常见的
+    # 污染形态是**括号对照**——不带那些前提，两条都不匹配：
+    #   （“风声不断，刮过乱石”vs“夜色浓稠如墨”）
+    #   （“体内灵力按法门一遍遍运转”替代“功法特有灵力波动”）
+    # 实测 3 份经验报告里 6 条污染策略全是这个形态；单条送检时
+    # `_prompt_safety_reason` 全部放行（整版提示词才因拼接后偶然命中被拦），
+    # 这正是写入侧能长期积累污染的机制性原因。
+    # 下界取 4 字与 `_INSTRUCTION_EXAMPLE_PATTERN` 对齐；不匹配裸引号，
+    # 以免误伤「保持语域的“书面感”」这类正常用法。
+    # 连接符按实测语料枚举（vs / 替代 / 对比 / 或 / 而非 / 换为 …），
+    # 漏一个连接符就会让该形态整条漏检，故宁多勿缺。
+    _PAREN_CONTRAST_EXAMPLE_PATTERN = re.compile(
+        r"[（(][^（）()\n]{0,12}[“\"][^“”\"]{4,40}[”\"]"
+        r"\s*(?:vs|VS|Versus|替代|替换为|改写为|改为|变为|对比|而非|而不是|或|→|->|＝|=|／|/|与|和)?\s*"
+        r"[“\"][^“”\"]{4,40}[”\"][^（）()\n]{0,12}[）)]"
+        # 单侧对照形态：括号内只有一个长引号也算固定语境示例——
+        # （“风声不断，刮过乱石”）同样会被改写模型机械套用（2026-10-16 实测漏检）
+        r"|[（(][^（）()\n]{0,12}[“\"][^“”\"]{4,60}[”\"][^（）()\n]{0,12}[）)]"
     )
     # 🔧 否定语境标记：词表项/示例命中若出现在这些标记之后，属于
     # 禁止性条款或禁用词表（“不得改变人物姓名”“禁止使用“仿佛””），
@@ -1091,12 +1368,38 @@ class MetaOptimizer:
             # 命中前缀含否定标记时属于禁用词表（禁止使用"..."），豁免
             if MetaOptimizer._hit_in_positive_context(prompt, m.start()):
                 return f"含指令式示例「{m.group(0)[:40]}」"
+        # 🔧 括号对照式示例：同样豁免否定语境（"不要写成（A"vs"B"）"属禁用清单）
+        m = MetaOptimizer._PAREN_CONTRAST_EXAMPLE_PATTERN.search(prompt)
+        if m and MetaOptimizer._hit_in_positive_context(prompt, m.start()):
+            return f"含括号对照式示例「{m.group(0)[:40]}」"
         return None
 
     @staticmethod
     def _validate_prompt_safety(prompt: str) -> bool:
         """阻止元优化器把内容破坏包装成降低 AI 率策略。"""
         return MetaOptimizer._prompt_safety_reason(prompt) is None
+
+    @staticmethod
+    def _is_storable_strategy(text: str) -> bool:
+        """经验池入库校验：非空 且 通过提示词安全校验。
+
+        🔧 2026-10-16 新增（真实轮次 c9ccd818 取证）：
+        消费侧 `build_seeded_strategies_block` 逐条过 `_prompt_safety_reason`，
+        但**写入侧从不校验** —— 两条写入路径都直接 append：
+          · `_parse_response` 解析 LLM 输出的 EFFECTIVE/INEFFECTIVE/INSIGHT 段
+          · `_load_experience` 加载历史经验报告的四个字段
+        于是 LLM 输出或历史报告里一旦出现带固定语境示例 / 授权增量的策略，
+        就会永久污染经验池并在每一轮被重新注入新提示词
+        （2026-08-07 批次 db1cdd3e 取证的同一形态：带毒条款进入传承链）。
+
+        实测 3 份经验报告里有 6 条带示例策略，正是 c9ccd818 被安全门拦下的原因。
+
+        校验必须复用 `_prompt_safety_reason` 这一唯一实现：若写入侧另写一套
+        简化版（如只查关键词），会与消费侧判据漂移，污染照样能穿透。
+        """
+        if not text or not text.strip():
+            return False
+        return MetaOptimizer._prompt_safety_reason(text) is None
 
     @staticmethod
     def _validate_strategy_safety(strategy: str) -> bool:
@@ -1293,7 +1596,11 @@ class MetaOptimizer:
         for report in reversed(sorted_reports):
             for insight in report.get("strategic_insights", []):
                 insight = (insight or "").strip()
-                if insight and insight not in self.experience.strategic_insights:
+                # 🔧 2026-10-16 入库校验：与 _load_experience 同理，
+                # 存量报告可能已含带毒条款（写入侧历史漏检）。
+                if not MetaOptimizer._is_storable_strategy(insight):
+                    continue
+                if insight not in self.experience.strategic_insights:
                     self.experience.strategic_insights.append(insight)
                     loaded += 1
         self.experience.strategic_insights = self.experience.strategic_insights[-5:]
@@ -1420,27 +1727,33 @@ class MetaOptimizer:
                 logger.info(f"📊 加载历史阈值配置")
 
         for report in sorted_reports:
+            # 🔧 2026-10-16 入库校验：存量报告可能已含带毒条款（写入侧历史漏检），
+            # 读取侧必须拦住，否则污染会被重新注入每一轮新提示词。
+            # 逐条过 _is_storable_strategy，拒绝计入 loaded_count 以免日志失真。
+            def _safe(items) -> List[str]:
+                return [i for i in (items or []) if MetaOptimizer._is_storable_strategy(i)]
+
             # 加载有效策略（去重）
-            for strategy in report.get("effective_strategies", []):
-                if strategy and strategy not in self.experience.effective_strategies:
+            for strategy in _safe(report.get("effective_strategies")):
+                if strategy not in self.experience.effective_strategies:
                     self.experience.effective_strategies.append(strategy)
                     loaded_count += 1
 
             # 加载无效策略（去重）
-            for strategy in report.get("ineffective_strategies", []):
-                if strategy and strategy not in self.experience.ineffective_strategies:
+            for strategy in _safe(report.get("ineffective_strategies")):
+                if strategy not in self.experience.ineffective_strategies:
                     self.experience.ineffective_strategies.append(strategy)
                     loaded_count += 1
 
             # 加载禁止模式（去重）
-            for pattern in report.get("forbidden_patterns", []):
-                if pattern and pattern not in self.experience.forbidden_patterns:
+            for pattern in _safe(report.get("forbidden_patterns")):
+                if pattern not in self.experience.forbidden_patterns:
                     self.experience.forbidden_patterns.append(pattern)
                     loaded_count += 1
 
             # 加载最佳实践（去重）
-            for practice in report.get("best_practices", []):
-                if practice and practice not in self.experience.best_practices:
+            for practice in _safe(report.get("best_practices")):
+                if practice not in self.experience.best_practices:
                     self.experience.best_practices.append(practice)
                     loaded_count += 1
 
@@ -1501,14 +1814,40 @@ class MetaOptimizer:
         valid_results = [r for r in results if r.success]
         avg_reduction = sum(r.score_reduction for r in valid_results) / len(valid_results) if valid_results else 0
 
+        # 🔧 2026-10-16：AI 维度信号改用「确定AI段落占比」。
+        # avg_ai_score 在 LLM 改写区间恒为 100，对归因毫无帮助；
+        # ratio 缺失（检测链路失效）时如实标注 N/A，不伪造 0。
+        valid_ratios = [
+            r.rewritten_ai_ratio
+            for r in results
+            if r.success and r.rewritten_ai_ratio is not None
+        ]
+        ai_ratio_text = (
+            f"{sum(valid_ratios) / len(valid_ratios) * 100:.1f}"
+            if valid_ratios
+            else "N/A（检测链路无有效数据）"
+        )
+
+        # 🔧 2026-10-16：质量短板按全量样本聚合。原先反馈只覆盖失败样本，
+        # 「成功但质量擦线」形态不可见，导致 ratio 最优的一轮被事实门槛
+        # 拒绝后无人归因（实测 best_versions 全轮为空）。
+        quality_gap_analysis = self._build_quality_gap_analysis(results)
+
+        # 🔧 2026-10-16：段落级真值特征（朱雀逐段 label）。段落信息原先只用于
+        # 改写层定点指令，进化层从未消费，优化器只知道 ratio 数字。
+        segment_insight = self._build_segment_insight(results)
+
         # 构建优化请求
         optimization_prompt = META_OPTIMIZER_PROMPT.format(
             current_prompt=current_version.prompt_text,
             avg_score=f"{current_version.avg_ai_score:.1f}",
             target_score=target_score,
             avg_reduction=f"{avg_reduction:.1f}",
+            ai_ratio_pct=ai_ratio_text,
             success_count=len(success_samples),
             total_count=len(results),
+            quality_gap_analysis=quality_gap_analysis,
+            segment_insight=segment_insight,
             success_analysis=success_analysis,
             failure_analysis=failure_analysis,
             trend_analysis=trend_analysis,
@@ -1839,17 +2178,56 @@ class MetaOptimizer:
             # 构建AI痕迹对比信息
             trace_comparison = self._build_trace_comparison(r)
 
+            # 🔧 2026-10-16：显式给出改写后的确定AI段落占比，
+            # 原先只给 rewritten_ai_score（改写区间恒 100），
+            # LLM 无法判断改写是否真的降低了AI判定。
+            ratio_line = (
+                f"│ 改写后确定AI段落占比: {_ratio_pct(r.rewritten_ai_ratio)}%"
+                if r.rewritten_ai_ratio is not None
+                else "│ 改写后确定AI段落占比: N/A（检测数据缺失）"
+            )
+
+            # 🔧 2026-10-16：成功样本同样展示质量分与距门槛差值。
+            # 「降分成功但事实擦线」是本轮真实故障形态，只给降分幅度会让
+            # 优化器误以为该版本可放心继承。
+            quality_line = self._build_sample_quality_line(r)
+
             lines.append(f"""
 【成功样本{i}】降分: {r.score_reduction}分 ({r.original_ai_score}→{r.rewritten_ai_score})
+{ratio_line}
+{quality_line}
 ┌─ 原文特征 ─────────────────────────────
 │ {r.original_text[:200]}...
 ├─ 改写后 ───────────────────────────────
 │ {r.rewritten_text[:200]}...
 {trace_comparison}
-└─ 成功点分析：请识别改写中哪些手法有效降低了AI痕迹
+└─ 成功点分析：请识别改写中哪些手法有效降低了「确定AI段落占比」
 """)
 
         return "\n".join(lines)
+
+    @classmethod
+    def _build_sample_quality_line(cls, result: EvaluationResult) -> str:
+        """单样本质量分 + 距门槛差值；无评审时如实标注。"""
+        review = result.llm_review or {}
+        if not review.get("available"):
+            return "├─ 质量维度: N/A（无语义评审数据）"
+
+        parts = []
+        for key, gate in cls.QUALITY_GATES.items():
+            score = review.get(key, {}).get("score")
+            if score is None:
+                continue
+            gap = float(score) - gate
+            mark = "" if gap >= 3.0 else (" ←擦线" if gap >= 0 else " ✗失格")
+            parts.append(
+                f"{cls.QUALITY_GATE_LABELS[key]} {float(score):.0f}"
+                f"(门槛{gate:.0f}, {gap:+.0f}){mark}"
+            )
+        if not parts:
+            return "├─ 质量维度: N/A（评审未返回分项）"
+        risk = review.get("over_rewrite_risk", "-")
+        return f"├─ 质量维度: {'，'.join(parts)}；过度改写风险: {risk}"
 
     def _build_failure_analysis(self, samples: List[EvaluationResult]) -> str:
         """构建失败样本分析"""
@@ -1885,12 +2263,18 @@ class MetaOptimizer:
                 # 🆕 构建量化指标对比
                 metrics_info = self._build_metrics_info(r)
 
+                # 🔧 2026-10-16：效果差样本同样给出质量分。
+                # 原先此分支只有痕迹与指标，样本可能「质量已被判失格」
+                # 这一关键归因完全缺席。
+                quality_line = self._build_sample_quality_line(r)
+
                 lines.append(f"""
 【效果差样本{i}】降分仅: {r.score_reduction}分 ({r.original_ai_score}→{r.rewritten_ai_score})
 ┌─ 原文 ─────────────────────────────────
 │ {r.original_text[:200]}...
 ├─ 改写后 ───────────────────────────────
 │ {r.rewritten_text[:200]}...
+{quality_line}
 {trace_detail}
 {metrics_info}
 └─ 问题诊断：改写后仍保留了哪些AI痕迹？提示词的哪条指令没被执行？
@@ -1954,11 +2338,37 @@ class MetaOptimizer:
             else:
                 lines.append(f"├─ ✅ 改写后无明显AI痕迹关键词")
 
+        # 🔧 2026-10-16：朱雀仍判定为确定AI 的段落（原「✅无痕迹」只看关键词表，
+        # 关键词表恒空——朱雀不返回关键词，该结论此前等于无条件报喜）。
+        ai_segments = [
+            s for s in (result.rewritten_segments or [])
+            if isinstance(s, dict) and s.get("label") == 1
+        ]
+        if ai_segments:
+            lines.append(
+                f"├─ 朱雀判定: 仍有 {len(ai_segments)} 段被判确定AI"
+                f"（最高置信度 {max(float(s.get('conf') or 0) for s in ai_segments):.2f}）"
+            )
+            first = str(ai_segments[0].get("text", ""))[:80]
+            if first:
+                lines.append(f"│   首段: {first}")
+
         return "\n".join(lines) if lines else ""
 
     def _build_trace_detail(self, result: EvaluationResult) -> str:
         """构建AI痕迹详情（失败样本用）"""
         lines = []
+
+        # 🔧 2026-10-16：段落真值优先。朱雀逐段返回 label 是唯一可得的检测器真值，
+        # 原先读错的 ai_trace_details 恒为空，这里只能打出「无法获取详情」。
+        ai_segments = [
+            s for s in (result.rewritten_segments or [])
+            if isinstance(s, dict) and s.get("label") == 1
+        ]
+        if ai_segments:
+            lines.append(f"├─ 📍 朱雀判定为确定AI的段落（{len(ai_segments)}段）:")
+            for seg in ai_segments[:3]:
+                lines.append(f"│   • {str(seg.get('text', ''))[:80]}")
 
         if result.rewritten_trace_detail:
             trace = result.rewritten_trace_detail
@@ -2192,6 +2602,11 @@ class MetaOptimizer:
         if effective_match:
             strategies = [s.strip() for s in effective_match.group(1).strip().split('\n') if s.strip()]
             for s in strategies:
+                # 🔧 2026-10-16 入库校验：LLM 输出不可信，可能产出带固定语境示例
+                # 或授权增量条款的策略。写入前拦住，否则永久污染经验池。
+                if not MetaOptimizer._is_storable_strategy(s):
+                    logger.warning(f"丢弃含风险条款的有效策略: {s[:60]}")
+                    continue
                 if s not in self.experience.effective_strategies:
                     self.experience.effective_strategies.append(s)
 
@@ -2203,6 +2618,8 @@ class MetaOptimizer:
         if ineffective_match:
             strategies = [s.strip() for s in ineffective_match.group(1).strip().split('\n') if s.strip()]
             for s in strategies:
+                if not MetaOptimizer._is_storable_strategy(s):
+                    continue
                 if s not in self.experience.ineffective_strategies:
                     self.experience.ineffective_strategies.append(s)
 
@@ -2214,6 +2631,9 @@ class MetaOptimizer:
         if forbidden_match:
             patterns = [p.strip() for p in forbidden_match.group(1).strip().split('\n') if p.strip()]
             for p in patterns:
+                # 禁止模式同样会被拼进提示词的禁用清单，带示例会误导改写
+                if not MetaOptimizer._is_storable_strategy(p):
+                    continue
                 if p not in self.experience.forbidden_patterns:
                     self.experience.forbidden_patterns.append(p)
 
@@ -2234,6 +2654,9 @@ class MetaOptimizer:
             for insight in insights[:2]:  # 每轮最多采纳2条
                 # 过滤模板占位符残留
                 if insight.startswith('[') or len(insight) < 8:
+                    continue
+                # 🔧 2026-10-16 入库校验：洞察是高阶方向，同样会被注入提示词
+                if not MetaOptimizer._is_storable_strategy(insight):
                     continue
                 if insight not in self.experience.strategic_insights:
                     self.experience.strategic_insights.append(insight)
@@ -2257,7 +2680,11 @@ class MetaOptimizer:
 
         # 记录本次分析作为经验
         if analysis and len(analysis) > 20:
-            self.experience.best_practices.append(f"迭代分析: {analysis[:100]}...")
+            # 🔧 2026-10-16 入库校验：分析文本会进 best_practices 并被后续轮次注入，
+            # LLM 输出不可信，可能夹带固定语境示例。
+            entry = f"迭代分析: {analysis[:100]}..."
+            if MetaOptimizer._is_storable_strategy(entry):
+                self.experience.best_practices.append(entry)
             # 🆕 保存到历史分析列表（用于强制差异化）
             self.previous_analyses.append(analysis)
             # 只保留最近5次分析
